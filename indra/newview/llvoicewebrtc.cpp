@@ -2903,7 +2903,12 @@ static llwebrtc::LLWebRTCPeerConnectionInterface::InitOptions getConnectionOptio
         {
             servers.mUrls = regionp->getStunServers();
         }
-        options.mServers.push_back(servers);
+        // WolfViewer: never push an EMPTY ICE server list. Newer libwebrtc (7.2.4+)
+        // rejects it ("Empty uri, SYNTAX_ERROR"), which fails CreatePeerConnection and
+        // kills WebRTC voice. An empty list just means no STUN; ICE still succeeds via
+        // the server candidates the voice service returns in its SDP answer.
+        if (!servers.mUrls.empty())
+            options.mServers.push_back(servers);
         return options;
     }
 #endif

@@ -1,5 +1,15 @@
 <llsd>
     <map>
+    <key>grid.wolfterritories.org:8002</key>
+    <map>
+      <key>LastModified</key><date>2026-08-27T12:00:00Z</date>
+      <key>grid_login_id</key><string>wolfterritories</string>
+      <key>gridname</key><string>Wolf Territories Grid</string>
+      <key>gridnick</key><string>WolfTerritories</string>
+      <key>loginuri</key><array><string>http://grid.wolfterritories.org:8002/</string></array>
+      <key>login_identifier_types</key><array><string>agent</string><string>account</string></array>
+    </map>
+
         <key>localhost:9000</key>
         <map>
         <key>LastModified</key>

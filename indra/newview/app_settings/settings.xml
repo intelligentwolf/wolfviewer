@@ -3723,7 +3723,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string></string>
+      <string>grid.wolfterritories.org:8002</string>
       <key>Backup</key>
       <integer>0</integer>
     </map>

@@ -1,0 +1,87 @@
+name: WolfViewer
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: ["wolfviewer"]
+    tags: ["v*"]
+
+env:
+  VIEWER_CHANNEL: "WolfViewer-Release"
+  AUTOBUILD_CONFIG: "ReleaseOS"     # OpenSim edition, open codecs (no FMOD/KDU/secrets)
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            name: linux64
+          - os: windows-2022
+            name: windows64
+          - os: macos-13
+            name: macos64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - name: Free disk space (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL || true
+          df -h
+
+      - name: Linux build packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-dev libglu1-mesa-dev libpulse-dev \
+            build-essential python3-pip git libssl-dev libxinerama-dev libxrandr-dev \
+            libfontconfig-dev libfreetype6-dev gcc-11 g++-11 cmake nsis
+          echo "CC=gcc-11" >> $GITHUB_ENV
+          echo "CXX=g++-11" >> $GITHUB_ENV
+
+      - name: NSIS (Windows)
+        if: runner.os == 'Windows'
+        run: choco install nsis -y
+
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+
+      - name: Install autobuild
+        run: pip install -r requirements.txt
+
+      - name: Build variables
+        run: git clone --depth 1 https://github.com/FirestormViewer/fs-build-variables.git ../fs-build-variables
+
+      - name: Autobuild env
+        shell: bash
+        run: |
+          echo "AUTOBUILD_VARIABLES_FILE=$(cd ../fs-build-variables && pwd)/variables" >> $GITHUB_ENV
+          echo "AUTOBUILD_VSVER=170" >> $GITHUB_ENV
+
+      - name: Configure
+        shell: bash
+        run: autobuild configure -A 64 -c "$AUTOBUILD_CONFIG" -- -DVIEWER_CHANNEL="$VIEWER_CHANNEL" -DLL_TESTS:BOOL=FALSE
+
+      - name: Build
+        shell: bash
+        run: autobuild build -A 64 -c "$AUTOBUILD_CONFIG" --no-configure
+
+      - name: Package
+        shell: bash
+        run: autobuild package -A 64 --results-file result.txt || true
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WolfViewer-${{ matrix.name }}
+          path: |
+            build-*/newview/*Setup*.exe
+            build-*/newview/*.dmg
+            build-*/newview/*.tar.*
+            build-*/newview/*.bz2
+            result.txt
+          if-no-files-found: warn

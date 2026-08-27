@@ -72,16 +72,24 @@ jobs:
 
       - name: Package
         shell: bash
-        run: autobuild package -A 64 --results-file result.txt || true
+        run: autobuild package -A 64 -c "$AUTOBUILD_CONFIG" --results-file result.txt || true
+
+      - name: Collect installers
+        shell: bash
+        run: |
+          mkdir -p dist
+          echo "--- searching workspace for installers ---"
+          find . -type f \( \
+            -iname '*Setup*.exe' -o -iname 'WolfViewer*.exe' -o -iname 'Phoenix*.exe' -o \
+            -iname '*.dmg' -o -iname '*.tar.zst' -o -iname '*.tar.bz2' -o -iname '*.tar.xz' -o \
+            -iname '*.pkg' -o -iname 'result.txt' \) \
+            -not -path '*/.git/*' -print 2>/dev/null | tee /tmp/found.txt
+          while IFS= read -r f; do [ -n "$f" ] && cp -v "$f" dist/ 2>/dev/null || true; done < /tmp/found.txt
+          echo "--- dist contents ---"; ls -la dist || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: WolfViewer-${{ matrix.name }}
-          path: |
-            build-*/newview/*Setup*.exe
-            build-*/newview/*.dmg
-            build-*/newview/*.tar.*
-            build-*/newview/*.bz2
-            result.txt
+          path: dist/**
           if-no-files-found: warn

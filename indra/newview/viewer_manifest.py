@@ -1514,7 +1514,17 @@ class Darwin_x86_64_Manifest(ViewerManifest):
                         self.path(libfile)
 
             with self.prefix(dst="MacOS"):
-                executable = self.dst_path_of(CHANNEL_VENDOR_BASE)
+                # The bundle executable is named after the CMake product, which is
+                # "Firestorm" (CMakeLists.txt:2811 set(product "Firestorm") /
+                # MACOSX_EXECUTABLE_NAME "Firestorm" / OUTPUT_NAME "${product}"), NOT the
+                # channel vendor base. Stock Firestorm has CHANNEL_VENDOR_BASE == "Firestorm"
+                # so this happened to match; the WolfViewer rebrand made it strip
+                # Contents/MacOS/WolfViewer, which does not exist -> "strip: can't open file"
+                # and the whole macOS package step failed. The .app is renamed to the
+                # WolfViewer name later (self.app_name(), see the DMG loop below); the inner
+                # executable stays "Firestorm", exactly as Linux ships firestorm-bin. Match
+                # the literal used at the top of construct() (executable = dst_path_of("Firestorm")).
+                executable = self.dst_path_of("Firestorm")
                 if self.args.get('bugsplat'):
                     # According to Apple Technical Note TN2206:
                     # https://developer.apple.com/library/archive/technotes/tn2206/_index.html#//apple_ref/doc/uid/DTS40007919-CH1-TNTAG207

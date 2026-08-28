@@ -64,7 +64,7 @@ jobs:
 
       - name: Configure
         shell: bash
-        run: autobuild configure -A 64 -c "$AUTOBUILD_CONFIG" -- -DVIEWER_CHANNEL="$VIEWER_CHANNEL" -DLL_TESTS:BOOL=FALSE -DOPENSIM:BOOL=ON -DHAVOK_TPV:BOOL=OFF
+        run: autobuild configure -A 64 -c "$AUTOBUILD_CONFIG" -- -DVIEWER_CHANNEL="$VIEWER_CHANNEL" -DLL_TESTS:BOOL=FALSE -DOPENSIM:BOOL=ON -DHAVOK_TPV:BOOL=OFF -DSINGLEGRID:BOOL=ON -DSINGLEGRID_URI:STRING=http://grid.wolfterritories.org:8002
 
       - name: Build
         shell: bash

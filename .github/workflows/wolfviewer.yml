@@ -20,7 +20,7 @@ jobs:
             name: linux64
           - os: windows-2022
             name: windows64
-          - os: macos-13
+          - os: macos-15
             name: macos64
     runs-on: ${{ matrix.os }}
     steps:

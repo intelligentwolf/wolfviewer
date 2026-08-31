@@ -33,8 +33,8 @@
         top="16"
         width="434"
         wrap="true">
-For the latest information about Firestorm, visit 
-https://www.firestormviewer.org
+For the latest information about WolfViewer and the Wolf Territories Grid, visit
+https://www.wolf-grid.com
       </text>
       <text_editor
         parse_urls="true"
@@ -71,10 +71,9 @@ https://www.firestormviewer.org
         top="16"
         width="489"
         wrap="true">
-Firestorm would not be possible without the decision from Linden Lab to make their Second Life viewer source code available.
+WolfViewer is built on Firestorm, which would not be possible without the decision from Linden Lab to make their viewer source code available.
 
-Second Life is brought to you by the Lindens, 
-with open source contributions from:
+With open source contributions from:
       </text>
       <text_editor
        enabled="false"
@@ -124,7 +123,7 @@ Dummy Name replaced at run time
                  top="0"
                  width="450"
                  wrap="true">
-Firestorm is a community development project to improve the SecondLife(tm) Viewer experience. We package contributions from various community developers along with code from Linden Lab and ourselves to bring you a quality, feature-rich viewer experience backed up by a large volunteer support team. Firestorm is brought to you by The Phoenix Firestorm Project, Inc., a non-profit organization.
+Firestorm is a community development project to improve the viewer experience. We package contributions from various community developers along with code from Linden Lab and ourselves to bring you a quality, feature-rich viewer experience backed up by a large volunteer support team. Firestorm is brought to you by The Phoenix Firestorm Project, Inc., a non-profit organization.
 
 The Firestorm Development Team:
                 </text>
@@ -201,7 +200,7 @@ Afrika Burton, Albatroz Hird, Alexru Resident, alison Seesaw, AnaLucia Loon, Ang
                  top_pad="8"
                  width="450"
                  wrap="true">
-Firestorm includes Starlight, modified for Firestorm. It is provided by residents for residents, with the intention of providing an alternative, brighter, and hopefully easier to use interface. For further details see &lt;nolink&gt;https://wiki.secondlife.com/wiki/Viewer_Skins/Starlight&lt;/nolink&gt;.
+Firestorm includes Starlight, modified for Firestorm. It is provided by residents for residents, with the intention of providing an alternative, brighter, and hopefully easier to use interface.
 
 UI Artists and Designers:
                 </text>
@@ -262,8 +261,6 @@ SSLeay Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)
 xxHash Copyright (C) 2012-2020 Yann Collet.
 zlib Copyright (C) 1995-2012 Jean-loup Gailly and Mark Adler.
 Some icons by Joseph Wain / glyphish.com
-
-Second Life Viewer uses Havok (TM) Physics. (c)Copyright 1999-2010 Havok.com Inc. (and its Licensors). All Rights Reserved. See www.havok.com for details.
 
 This software contains source code provided by NVIDIA Corporation.
 

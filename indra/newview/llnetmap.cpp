@@ -2260,30 +2260,19 @@ void LLNetMap::createParcelImage()
 
 bool LLNetMap::handleMouseDown(S32 x, S32 y, MASK mask)
 {
-    // <FS:WolfViewer> 3D mode: any unmodified left-drag orbits the camera, the way
-    // WolfStorm's minimap canvas does (minimap.js:321-329 onOrbitStart). The slop
-    // test in handleHover keeps ordinary clicks from counting as orbits.
-    static LLCachedControl<bool> s_map3d(gSavedSettings, "FSNetMap3D");
-    if (s_map3d)
-    {
-        gFocusMgr.setMouseCapture(this);
-        mStartPan     = mCurPan;
-        mMouseDown.mX = x;
-        mMouseDown.mY = y;
-        return true;
-    }
-    // </FS:WolfViewer>
-
-    // <FS:Ansariel> FIRE-32339: Mini map can't be dragged anymore
-    if (!(mask & MASK_SHIFT)) return false;
-
-    // Start panning
+    // <FS:WolfViewer> Capture any unmodified left-drag in BOTH map modes: in 3D it
+    // orbits the camera the way WolfStorm's minimap canvas does (minimap.js:321-329
+    // onOrbitStart), in 2D it pans the map. Upstream Firestorm gates the 2D pan on
+    // SHIFT (<FS:Ansariel> FIRE-32339), which left plain drags dead in 2D while 3D
+    // orbited on them ("i cant move the minimap in wolfviewer if it's not in 3d").
+    // handleHover picks orbit vs pan by FSNetMap3D; its slop test keeps ordinary
+    // clicks from counting as drags, and SHIFT+drag still pans exactly as before.
     gFocusMgr.setMouseCapture(this);
-
     mStartPan     = mCurPan;
     mMouseDown.mX = x;
     mMouseDown.mY = y;
     return true;
+    // </FS:WolfViewer>
 }
 
 bool LLNetMap::handleMouseUp(S32 x, S32 y, MASK mask)

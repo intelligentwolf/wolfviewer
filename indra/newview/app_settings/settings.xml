@@ -15921,13 +15921,13 @@ Change of this parameter will affect the layout of buttons in notification toast
     <key>TranslationService</key>
     <map>
       <key>Comment</key>
-      <string>Translation API to use. (google|azure)</string>
+      <string>Translation API to use. (libre|google|azure|deepl)</string>
       <key>Persist</key>
       <integer>1</integer>
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>azure</string>
+      <string>libre</string>
     </map>
     <key>GoogleTranslateAPIKey</key>
     <map>
@@ -15961,6 +15961,50 @@ Change of this parameter will affect the layout of buttons in notification toast
         <string>LLSD</string>
         <key>Value</key>
         <string></string>
+    </map>
+    <key>WolfTranslateBaseURL</key>
+    <map>
+      <key>Comment</key>
+      <string>Base URL of the LibreTranslate service used by the libre TranslationService (WolfStorm chat_translator.js:21-22 endpoints /translate and /languages)</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>String</string>
+      <key>Value</key>
+      <string>https://wolf-grid.com:8080</string>
+    </map>
+    <key>WolfTranslateOutgoing</key>
+    <map>
+      <key>Comment</key>
+      <string>Translate outgoing chat and IMs into WolfTranslateTheirLang before sending (WolfStorm chat_translator.js outgoingActive)</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>Boolean</string>
+      <key>Value</key>
+      <integer>0</integer>
+    </map>
+    <key>WolfTranslateTheirLang</key>
+    <map>
+      <key>Comment</key>
+      <string>Language outgoing chat is translated into; empty disables outgoing translation</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>String</string>
+      <key>Value</key>
+      <string></string>
+    </map>
+    <key>WolfTranslateShowOriginal</key>
+    <map>
+      <key>Comment</key>
+      <string>Append the original text in brackets after an outgoing translation (WolfStorm chat_translator.js:184-186)</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>Boolean</string>
+      <key>Value</key>
+      <integer>1</integer>
     </map>
     <key>TutorialURL</key>
     <map>
@@ -23617,6 +23661,17 @@ Change of this parameter will affect the layout of buttons in notification toast
     <string>Boolean</string>
     <key>Value</key>
     <integer>0</integer>
+  </map>
+  <key>FSNetMap3D</key>
+  <map>
+    <key>Comment</key>
+    <string>Draw the mini-map as a 3D terrain relief view of the current region (WolfStorm Terrain3DView port); off restores the classic 2D map.</string>
+    <key>Persist</key>
+    <integer>1</integer>
+    <key>Type</key>
+    <string>Boolean</string>
+    <key>Value</key>
+    <integer>1</integer>
   </map>
   <key>DisableCameraJoystickCenterReset</key>
   <map>

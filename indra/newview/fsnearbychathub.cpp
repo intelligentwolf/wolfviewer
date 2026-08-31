@@ -40,6 +40,7 @@
 #include "llcommandhandler.h"
 #include "llgesturemgr.h"
 #include "lllineeditor.h"
+#include "lltranslate.h"        // <FS:WolfViewer> outgoing chat translation
 #include "llviewercontrol.h"
 #include "llviewerinput.h"
 #include "llviewerstats.h"
@@ -412,6 +413,48 @@ void FSNearbyChat::sendChatFromViewer(const LLWString& wtext, const LLWString& o
 {
     std::string utf8_out_text = wstring_to_utf8str(out_text);
     std::string utf8_text = wstring_to_utf8str(wtext);
+
+    // <FS:WolfViewer> Outgoing chat translation, ported from WolfStorm
+    // (chat_translator.js prepareOutgoing / floater_communicator.js sendMessage).
+    // Only spoken public chat is translated: never a script channel, and never the
+    // CHAT_TYPE_START/STOP typing signals that also flow through here.
+    if (channel == 0
+        && (type == CHAT_TYPE_WHISPER || type == CHAT_TYPE_NORMAL || type == CHAT_TYPE_SHOUT)
+        && LLTranslate::isOutgoingTranslationActive()
+        && LLTranslate::worthTranslating(utf8_out_text))
+    {
+        const std::string from_lang = LLTranslate::getTranslateLanguage();
+        const std::string to_lang = LLTranslate::getOutgoingLanguage();
+        LLTranslate::instance().logCharsSent(utf8_out_text.size());
+        // The send happens INSIDE the callbacks, after the translation returns —
+        // never build output before a delay and send it later.
+        LLTranslate::translateMessage(from_lang, to_lang, utf8_out_text,
+            [utf8_out_text, type, animate, channel](std::string translation, std::string detected_lang)
+            {
+                std::string combined = LLTranslate::combineWithOriginal(
+                    LLTranslate::removeNoTranslateTags(translation), utf8_out_text);
+                FSNearbyChat::sendChatFromViewerFinal(combined, combined, type, animate, channel);
+            },
+            [utf8_out_text, type, animate, channel](int status, std::string err_msg)
+            {
+                // Translator unreachable — send the original rather than losing the line.
+                LL_WARNS("FSNearbyChatHub") << "Outgoing translation failed (" << status
+                    << "): " << err_msg << " — sending untranslated" << LL_ENDL;
+                FSNearbyChat::sendChatFromViewerFinal(utf8_out_text, utf8_out_text, type, animate, channel);
+            });
+        return;
+    }
+    // </FS:WolfViewer>
+
+    sendChatFromViewerFinal(utf8_text, utf8_out_text, type, animate, channel);
+}
+
+// <FS:WolfViewer> Body of sendChatFromViewer above, unchanged apart from taking the
+// already-converted UTF-8 strings so the translation callbacks can re-enter it.
+void FSNearbyChat::sendChatFromViewerFinal(const std::string& utf8_text_in, const std::string& utf8_out_text_in, EChatType type, bool animate, S32 channel)
+{
+    std::string utf8_out_text = utf8_out_text_in;
+    std::string utf8_text = utf8_text_in;
 
     utf8_text = utf8str_trim(utf8_text);
     if (!utf8_text.empty())

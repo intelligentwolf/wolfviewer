@@ -324,6 +324,16 @@
          parameter="far" />
     </menu_item_check>
   </menu>
+  <!-- WolfViewer: 3D terrain view toggle (WolfStorm Terrain3DView port) -->
+  <menu_item_check
+   label="3D Terrain View"
+   name="3D Terrain View">
+    <menu_item_check.on_click
+     function="ToggleControl"
+     parameter="FSNetMap3D" />
+    <menu_item_check.on_check
+     control="FSNetMap3D" />
+  </menu_item_check>
   <menu
    label="Show"
    name="Minimap Show">

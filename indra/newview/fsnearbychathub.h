@@ -56,6 +56,10 @@ public:
     void sendChatFromViewer(const std::string& utf8text, EChatType type, bool animate);
     void sendChatFromViewer(const LLWString& wtext, EChatType type, bool animate);
     static void sendChatFromViewer(const LLWString& wtext, const LLWString& out_text, EChatType type, bool animate, S32 channel);
+    // <FS:WolfViewer> The pre-translation body of sendChatFromViewer above; called
+    // directly by the outgoing-translation callbacks once the final text is known.
+    static void sendChatFromViewerFinal(const std::string& utf8_text_in, const std::string& utf8_out_text, EChatType type, bool animate, S32 channel);
+    // </FS:WolfViewer>
 
     void setFocusedInputEditor(FSNearbyChatControl* inputEditor, bool focus);
 

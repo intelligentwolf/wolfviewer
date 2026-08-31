@@ -308,6 +308,28 @@
                left_pad="0"
                width="10"/>
             </layout_panel>
+            <!-- WolfViewer: chat translation button, WolfStorm globe-button parity -->
+            <layout_panel
+              auto_resize="false"
+              user_resize="false"
+              name="translate_button_layout_panel"
+              width="30">
+              <button
+               follows="right|bottom"
+               bottom="-1"
+               height="24"
+               width="27"
+               image_hover_unselected="Toolbar_Middle_Over"
+               image_selected="Toolbar_Middle_Selected"
+               image_unselected="Toolbar_Middle_Off"
+               image_overlay="TabIcon_Translate_Off"
+               is_toggle="true"
+               label=""
+               left="0"
+               name="translate_btn"
+               tool_tip="Chat translation settings"
+              />
+            </layout_panel>
             <layout_panel
               visibility_control="FSShowChatChannel"
               auto_resize="false"

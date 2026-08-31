@@ -2265,6 +2265,43 @@ void LLIMModel::sendMessage(const std::string& utf8_text,
                      const LLUUID& other_participant_id,
                      EInstantMessage dialog)
 {
+    // <FS:WolfViewer> Outgoing IM translation, ported from WolfStorm
+    // (chat_translator.js prepareOutgoing). Only person-to-person and group/ad-hoc
+    // chat lines are translated — every other dialog value is a control message.
+    if ((dialog == IM_NOTHING_SPECIAL || dialog == IM_SESSION_SEND)
+        && LLTranslate::isOutgoingTranslationActive()
+        && LLTranslate::worthTranslating(utf8_text))
+    {
+        const std::string from_lang = LLTranslate::getTranslateLanguage();
+        const std::string to_lang = LLTranslate::getOutgoingLanguage();
+        LLTranslate::instance().logCharsSent(utf8_text.size());
+        // The send (and its local echo) runs INSIDE the callbacks, after the
+        // translation returns.
+        LLTranslate::translateMessage(from_lang, to_lang, utf8_text,
+            [utf8_text, im_session_id, other_participant_id, dialog](std::string translation, std::string detected_lang)
+            {
+                std::string combined = LLTranslate::combineWithOriginal(
+                    LLTranslate::removeNoTranslateTags(translation), utf8_text);
+                LLIMModel::sendMessageInternal(combined, im_session_id, other_participant_id, dialog);
+            },
+            [utf8_text, im_session_id, other_participant_id, dialog](int status, std::string err_msg)
+            {
+                // Translator unreachable — send the original rather than losing the line.
+                LL_WARNS("Messaging") << "Outgoing IM translation failed (" << status
+                    << "): " << err_msg << " — sending untranslated" << LL_ENDL;
+                LLIMModel::sendMessageInternal(utf8_text, im_session_id, other_participant_id, dialog);
+            });
+        return;
+    }
+    sendMessageInternal(utf8_text, im_session_id, other_participant_id, dialog);
+}
+
+// <FS:WolfViewer> Body of sendMessage above, unchanged.
+void LLIMModel::sendMessageInternal(const std::string& utf8_text,
+                     const LLUUID& im_session_id,
+                     const LLUUID& other_participant_id,
+                     EInstantMessage dialog)
+{
     //<FS:TS> FIRE-787: break up too long chat lines into multiple messages
     size_t split = MAX_MSG_BUF_SIZE - 1;
     size_t pos = 0;

@@ -69,6 +69,11 @@ private:
 
     LLCheckBoxCtrl* mMachineTranslationCB;
     LLComboBox* mLanguageCombo;
+    // <FS:WolfViewer> outgoing translation controls (WolfStorm parity)
+    LLCheckBoxCtrl* mOutgoingCB;
+    LLComboBox* mTheirLanguageCombo;
+    LLCheckBoxCtrl* mShowOriginalCB;
+    // </FS:WolfViewer>
     LLComboBox* mAzureAPIEndpointEditor;
     LLLineEditor* mAzureAPIKeyEditor;
     LLLineEditor* mAzureAPIRegionEditor;

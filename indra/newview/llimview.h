@@ -345,6 +345,11 @@ public:
     static void sendTypingState(LLUUID session_id, LLUUID other_participant_id, bool typing);
     static void sendMessage(const std::string& utf8_text, const LLUUID& im_session_id,
                                 const LLUUID& other_participant_id, EInstantMessage dialog);
+    // <FS:WolfViewer> The pre-translation body of sendMessage; called by the
+    // outgoing-translation callbacks once the final text is known.
+    static void sendMessageInternal(const std::string& utf8_text, const LLUUID& im_session_id,
+                                const LLUUID& other_participant_id, EInstantMessage dialog);
+    // </FS:WolfViewer>
 
     // Adds people from speakers list (people with whom you are currently speaking) to the Recent People List
     static void addSpeakersToRecent(const LLUUID& im_session_id);

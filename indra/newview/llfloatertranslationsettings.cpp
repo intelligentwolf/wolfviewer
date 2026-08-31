@@ -48,6 +48,11 @@
 LLFloaterTranslationSettings::LLFloaterTranslationSettings(const LLSD& key)
 :   LLFloater(key)
 ,   mMachineTranslationCB(NULL)
+// <FS:WolfViewer> outgoing translation controls
+,   mOutgoingCB(NULL)
+,   mTheirLanguageCombo(NULL)
+,   mShowOriginalCB(NULL)
+// </FS:WolfViewer>
 ,   mAzureKeyVerified(false)
 ,   mGoogleKeyVerified(false)
 ,   mDeepLKeyVerified(false)
@@ -59,6 +64,14 @@ bool LLFloaterTranslationSettings::postBuild()
 {
     mMachineTranslationCB = getChild<LLCheckBoxCtrl>("translate_chat_checkbox");
     mLanguageCombo = getChild<LLComboBox>("translate_language_combo");
+    // <FS:WolfViewer> outgoing translation controls (WolfStorm
+    // floater_communicator.js _buildTranslatePanel parity)
+    mOutgoingCB = getChild<LLCheckBoxCtrl>("wolf_translate_outgoing_checkbox");
+    mTheirLanguageCombo = getChild<LLComboBox>("wolf_their_language_combo");
+    mShowOriginalCB = getChild<LLCheckBoxCtrl>("wolf_show_original_checkbox");
+    mOutgoingCB->setCommitCallback(boost::bind(&LLFloaterTranslationSettings::updateControlsEnabledState, this));
+    mTheirLanguageCombo->setCommitCallback(boost::bind(&LLFloaterTranslationSettings::updateControlsEnabledState, this));
+    // </FS:WolfViewer>
     mTranslationServiceRadioGroup = getChild<LLRadioGroup>("translation_service_rg");
     mAzureAPIEndpointEditor = getChild<LLComboBox>("azure_api_endpoint_combo");
     mAzureAPIKeyEditor = getChild<LLLineEditor>("azure_api_key");
@@ -118,6 +131,12 @@ void LLFloaterTranslationSettings::onOpen(const LLSD& key)
     mMachineTranslationCB->setValue(gSavedSettings.getBOOL("TranslateChat"));
     mLanguageCombo->setSelectedByValue(gSavedSettings.getString("TranslateLanguage"), true);
     mTranslationServiceRadioGroup->setSelectedByValue(gSavedSettings.getString("TranslationService"), true);
+    // <FS:WolfViewer> outgoing translation settings
+    mOutgoingCB->setValue(gSavedSettings.getBOOL("WolfTranslateOutgoing"));
+    std::string their_lang = gSavedSettings.getString("WolfTranslateTheirLang");
+    mTheirLanguageCombo->setSelectedByValue(their_lang.empty() ? std::string("none") : their_lang, true);
+    mShowOriginalCB->setValue(gSavedSettings.getBOOL("WolfTranslateShowOriginal"));
+    // </FS:WolfViewer>
 
     LLSD azure_key = gSavedSettings.getLLSD("AzureTranslateAPIKey");
     if (azure_key.isMap() && !azure_key["id"].asString().empty())
@@ -262,9 +281,18 @@ void LLFloaterTranslationSettings::updateControlsEnabledState()
     bool azure_selected = service == "azure";
     bool google_selected = service == "google";
     bool deepl_selected = service == "deepl";
+    bool libre_selected = service == "libre";   // <FS:WolfViewer> keyless service
 
     mTranslationServiceRadioGroup->setEnabled(on);
     mLanguageCombo->setEnabled(on);
+
+    // <FS:WolfViewer> Outgoing translation controls. Outgoing needs a concrete
+    // target language (chat_translator.js:77-78 — cannot translate INTO "auto").
+    mTheirLanguageCombo->setEnabled(on);
+    std::string their_lang = mTheirLanguageCombo->getSelectedValue().asString();
+    mOutgoingCB->setEnabled(on && their_lang != "none");
+    mShowOriginalCB->setEnabled(on);
+    // </FS:WolfViewer>
 
     // MS Azure
     getChild<LLTextBox>("azure_api_endoint_label")->setEnabled(on);
@@ -296,7 +324,8 @@ void LLFloaterTranslationSettings::updateControlsEnabledState()
     bool service_verified =
         (azure_selected && mAzureKeyVerified)
         || (google_selected && mGoogleKeyVerified)
-        || (deepl_selected && mDeepLKeyVerified);
+        || (deepl_selected && mDeepLKeyVerified)
+        || libre_selected;  // <FS:WolfViewer> no key to verify
     gSavedPerAccountSettings.setBOOL("TranslatingEnabled", service_verified);
 
     mOKBtn->setEnabled(!on || service_verified);
@@ -407,11 +436,13 @@ void LLFloaterTranslationSettings::onClose(bool app_quitting)
     bool azure_selected = service == "azure";
     bool google_selected = service == "google";
     bool deepl_selected = service == "deepl";
+    bool libre_selected = service == "libre";   // <FS:WolfViewer>
 
     bool service_verified =
         (azure_selected && mAzureKeyVerified)
         || (google_selected && mGoogleKeyVerified)
-        || (deepl_selected && mDeepLKeyVerified);
+        || (deepl_selected && mDeepLKeyVerified)
+        || libre_selected;  // <FS:WolfViewer> no key to verify
     gSavedPerAccountSettings.setBOOL("TranslatingEnabled", service_verified);
 }
 void LLFloaterTranslationSettings::onBtnOK()
@@ -419,6 +450,17 @@ void LLFloaterTranslationSettings::onBtnOK()
     gSavedSettings.setBOOL("TranslateChat", mMachineTranslationCB->getValue().asBoolean());
     gSavedSettings.setString("TranslateLanguage", mLanguageCombo->getSelectedValue().asString());
     gSavedSettings.setString("TranslationService", getSelectedService());
+    // <FS:WolfViewer> outgoing translation settings ("none" stores as empty = off)
+    std::string their_lang = mTheirLanguageCombo->getSelectedValue().asString();
+    if (their_lang == "none")
+    {
+        their_lang.clear();
+    }
+    gSavedSettings.setString("WolfTranslateTheirLang", their_lang);
+    gSavedSettings.setBOOL("WolfTranslateOutgoing",
+        mOutgoingCB->getValue().asBoolean() && !their_lang.empty());
+    gSavedSettings.setBOOL("WolfTranslateShowOriginal", mShowOriginalCB->getValue().asBoolean());
+    // </FS:WolfViewer>
     gSavedSettings.setLLSD("AzureTranslateAPIKey", getEnteredAzureKey());
     gSavedSettings.setString("GoogleTranslateAPIKey", getEnteredGoogleKey());
     gSavedSettings.setLLSD("DeepLTranslateAPIKey", getEnteredDeepLKey());

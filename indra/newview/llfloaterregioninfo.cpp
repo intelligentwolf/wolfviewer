@@ -814,6 +814,16 @@ void LLPanelRegionInfo::onChangeChildCtrl(LLUICtrl* ctrl)
 // Enables the "set" button if it is not already enabled
 void LLPanelRegionInfo::onChangeAnything()
 {
+    // <FS:WolfViewer> Never arm Apply for someone the sim will refuse anyway.
+    // Rights test is the region's own: llviewerregion.cpp canManageEstate() =
+    // gAgent.isGodlike() || isEstateManager() || gAgent.getID() == getOwner(),
+    // the same predicate refreshFromRegion() uses to enable these controls.
+    LLViewerRegion* region = gAgent.getRegion();
+    if (!region || !region->canManageEstate())
+    {
+        return;
+    }
+    // </FS:WolfViewer>
     enableButton("apply_btn");
     refresh();
 }
@@ -825,6 +835,13 @@ void LLPanelRegionInfo::onChangeText(LLLineEditor* caller, void* user_data)
     LLPanelRegionInfo* panel = dynamic_cast<LLPanelRegionInfo*>(caller->getParent());
     if(panel)
     {
+        // <FS:WolfViewer> Same rights gate as onChangeAnything() above.
+        LLViewerRegion* region = gAgent.getRegion();
+        if (!region || !region->canManageEstate())
+        {
+            return;
+        }
+        // </FS:WolfViewer>
         panel->enableButton("apply_btn");
         panel->refresh();
     }
@@ -911,7 +928,16 @@ void LLPanelRegionInfo::initAndSetTexCtrl(LLTextureCtrl*& ctrl, const std::strin
 {
     ctrl = findChild<LLTextureCtrl>(name);
     if (ctrl)
+    {
         ctrl->setOnSelectCallback([this](LLUICtrl* ctrl, const LLSD& param){ onChangeAnything(); });
+        // <FS:WolfViewer> The select callback only fires for the picker's Select
+        // button (TEXTURE_SELECT); replacing a texture via drag-and-drop or an
+        // immediate picker selection goes through onCommit() instead
+        // (lltexturectrl.cpp handleDragAndDrop/onFloaterCommit), leaving the
+        // Apply button disabled. Wire commit to onChangeAnything() as well.
+        ctrl->setCommitCallback(boost::bind(&LLPanelRegionInfo::onChangeAnything, this));
+        // </FS:WolfViewer>
+    }
 }
 
 template<typename CTRL>

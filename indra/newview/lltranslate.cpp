@@ -1103,6 +1103,241 @@ LLSD LLDeepLTranslationHandler::verifyAndSuspend(LLCoreHttpUtil::HttpCoroutineAd
 }
 
 //=========================================================================
+// <FS:WolfViewer> LibreTranslate handler — the Wolf Territories self-hosted
+// translator, no API key required. Wire format ported from WolfStorm:
+// Source: wolfstorm/js/chat/chat_translator.js:21-22 — endpoints are
+//   POST <base>/translate and GET <base>/languages
+// Source: chat_translator.js:129 — request body {"q":text,"source":from|"auto","target":to}
+// Source: chat_translator.js:16-17 (citing libretranslate app.py:866-869) — reply is
+//   {"translatedText":..., "detectedLanguage":{"confidence":..,"language":..}},
+//   errors are {"error": "..."} with a non-200 HTTP status (app.py:422-428).
+class LLLibreTranslationHandler : public LLTranslationAPIHandler
+{
+    LOG_CLASS(LLLibreTranslationHandler);
+
+public:
+    std::string getTranslateURL(
+        const std::string &from_lang,
+        const std::string &to_lang,
+        const std::string &text) const override;
+    std::string getKeyVerificationURL(
+        const LLSD &key) const override;
+    bool checkVerificationResponse(
+        const LLSD &response,
+        int status) const override;
+    bool parseResponse(
+        const LLSD& http_response,
+        int& status,
+        const std::string& body,
+        std::string& translation,
+        std::string& detected_lang,
+        std::string& err_msg) const override;
+    bool isConfigured() const override;
+
+    LLTranslate::EService getCurrentService() override { return LLTranslate::EService::SERVICE_LIBRE; }
+
+    void verifyKey(const LLSD &key, LLTranslate::KeyVerificationResult_fn fnc) override;
+
+    void initHttpHeader(LLCore::HttpHeaders::ptr_t headers, const std::string& user_agent) const override;
+    void initHttpHeader(LLCore::HttpHeaders::ptr_t headers, const std::string& user_agent, const LLSD &key) const override;
+    LLSD sendMessageAndSuspend(LLCoreHttpUtil::HttpCoroutineAdapter::ptr_t adapter,
+        LLCore::HttpRequest::ptr_t request,
+        LLCore::HttpOptions::ptr_t options,
+        LLCore::HttpHeaders::ptr_t headers,
+        const std::string & url,
+        const std::string & msg,
+        const std::string& from_lang,
+        const std::string& to_lang) const override;
+
+    LLSD verifyAndSuspend(LLCoreHttpUtil::HttpCoroutineAdapter::ptr_t adapter,
+        LLCore::HttpRequest::ptr_t request,
+        LLCore::HttpOptions::ptr_t options,
+        LLCore::HttpHeaders::ptr_t headers,
+        const std::string & url) const override;
+
+private:
+    static std::string getBaseURL();
+};
+
+// static
+std::string LLLibreTranslationHandler::getBaseURL()
+{
+    // Source: chat_translator.js:21 — 'https://' + location.hostname + ':8080'; the
+    // native viewer has no page host, so the grid's translator host is the default
+    // and the setting lets another LibreTranslate instance be pointed at instead.
+    static LLCachedControl<std::string> base_url(gSavedSettings, "WolfTranslateBaseURL");
+    std::string url = base_url;
+    while (!url.empty() && url.back() == '/')
+    {
+        url.pop_back();
+    }
+    return url;
+}
+
+// virtual
+std::string LLLibreTranslationHandler::getTranslateURL(
+    const std::string &from_lang,
+    const std::string &to_lang,
+    const std::string &text) const
+{
+    std::string base = getBaseURL();
+    if (base.empty())
+    {
+        return base;
+    }
+    // Source: chat_translator.js:21 — TRANSLATE_URL is <base>/translate
+    return base + "/translate";
+}
+
+// virtual
+std::string LLLibreTranslationHandler::getKeyVerificationURL(
+    const LLSD& key) const
+{
+    std::string base = getBaseURL();
+    if (base.empty())
+    {
+        return base;
+    }
+    // Source: chat_translator.js:22 — LANGUAGES_URL is <base>/languages; a 200 from
+    // it proves the sidecar is reachable, which is all "verification" means here.
+    return base + "/languages";
+}
+
+// virtual
+bool LLLibreTranslationHandler::checkVerificationResponse(
+    const LLSD &response,
+    int status) const
+{
+    return status == HTTP_OK;
+}
+
+// virtual
+bool LLLibreTranslationHandler::parseResponse(
+    const LLSD& http_response,
+    int& status,
+    const std::string& body,
+    std::string& translation,
+    std::string& detected_lang,
+    std::string& err_msg) const
+{
+    // Source: chat_translator.js:17 — errors are {error} with an HTTP status.
+    const std::string& text = !body.empty() ? body : http_response["error_body"].asStringRef();
+
+    boost::system::error_code ec;
+    boost::json::value root = boost::json::parse(text, ec);
+    if (ec.failed())
+    {
+        err_msg = ec.what();
+        return false;
+    }
+
+    if (status != HTTP_OK)
+    {
+        auto error_ptr = root.find_pointer("/error", ec);
+        if (error_ptr)
+        {
+            auto error_val = boost::json::try_value_to<std::string>(*error_ptr);
+            if (error_val)
+            {
+                err_msg = error_val.value();
+            }
+        }
+        return false;
+    }
+
+    // Source: chat_translator.js:133 — translatedText is required; anything else
+    // is treated as a failed translation.
+    auto translated_text = root.find_pointer("/translatedText", ec);
+    if (!translated_text)
+    {
+        return false;
+    }
+    auto text_val = boost::json::try_value_to<std::string>(*translated_text);
+    if (!text_val)
+    {
+        LL_WARNS() << "Failed to parse translation " << text_val.error() << LL_ENDL;
+        return false;
+    }
+    translation = text_val.value();
+
+    // Source: chat_translator.js:136-138 — detectedLanguage is {confidence, language}
+    // when the source was "auto", absent otherwise.
+    auto language = root.find_pointer("/detectedLanguage/language", ec);
+    if (language)
+    {
+        auto lang_val = boost::json::try_value_to<std::string>(*language);
+        detected_lang = lang_val ? lang_val.value() : "";
+    }
+
+    return true;
+}
+
+// virtual
+bool LLLibreTranslationHandler::isConfigured() const
+{
+    return !getBaseURL().empty();
+}
+
+/*virtual*/
+void LLLibreTranslationHandler::verifyKey(const LLSD &key, LLTranslate::KeyVerificationResult_fn fnc)
+{
+    LLCoros::instance().launch("Libre /Verify", boost::bind(&LLTranslationAPIHandler::verifyKeyCoro,
+        this, LLTranslate::SERVICE_LIBRE, key, fnc));
+}
+
+/*virtual*/
+void LLLibreTranslationHandler::initHttpHeader(LLCore::HttpHeaders::ptr_t headers, const std::string& user_agent) const
+{
+    // Source: chat_translator.js:128 — the request is JSON.
+    headers->append(HTTP_OUT_HEADER_CONTENT_TYPE, HTTP_CONTENT_JSON);
+    headers->append(HTTP_OUT_HEADER_USER_AGENT, user_agent);
+}
+
+/*virtual*/
+void LLLibreTranslationHandler::initHttpHeader(
+    LLCore::HttpHeaders::ptr_t headers,
+    const std::string& user_agent,
+    const LLSD &key) const
+{
+    // No API key exists for this service.
+    initHttpHeader(headers, user_agent);
+}
+
+LLSD LLLibreTranslationHandler::sendMessageAndSuspend(LLCoreHttpUtil::HttpCoroutineAdapter::ptr_t adapter,
+    LLCore::HttpRequest::ptr_t request,
+    LLCore::HttpOptions::ptr_t options,
+    LLCore::HttpHeaders::ptr_t headers,
+    const std::string & url,
+    const std::string & msg,
+    const std::string& from_lang,
+    const std::string& to_lang) const
+{
+    // Source: chat_translator.js:129 — {q, source ('auto' when unknown), target}.
+    // boost::json handles the string escaping.
+    boost::json::object req;
+    req["q"] = msg;
+    req["source"] = from_lang.empty() ? "auto" : from_lang;
+    req["target"] = to_lang;
+
+    LLCore::BufferArray::ptr_t rawbody(new LLCore::BufferArray);
+    LLCore::BufferArrayStream outs(rawbody.get());
+    outs << boost::json::serialize(req);
+
+    return adapter->postRawAndSuspend(request, url, rawbody, options, headers);
+}
+
+LLSD LLLibreTranslationHandler::verifyAndSuspend(LLCoreHttpUtil::HttpCoroutineAdapter::ptr_t adapter,
+    LLCore::HttpRequest::ptr_t request,
+    LLCore::HttpOptions::ptr_t options,
+    LLCore::HttpHeaders::ptr_t headers,
+    const std::string & url)  const
+{
+    // GET /languages — 200 means the translator answers (chat_translator.js:85-87).
+    return adapter->getAndSuspend(request, url, options, headers);
+}
+// </FS:WolfViewer>
+
+//=========================================================================
 LLTranslate::LLTranslate():
     mCharsSeen(0),
     mCharsSent(0),
@@ -1263,7 +1498,9 @@ LLSD LLTranslate::asLLSD() const
 // static
 LLTranslationAPIHandler& LLTranslate::getPreferredHandler()
 {
-    EService service = SERVICE_AZURE;
+    // <FS:WolfViewer> The keyless LibreTranslate service is WolfViewer's default
+    // (settings.xml TranslationService = "libre"), so it is the fallback too.
+    EService service = SERVICE_LIBRE;
 
     std::string service_str = gSavedSettings.getString("TranslationService");
     if (service_str == "google")
@@ -1278,6 +1515,12 @@ LLTranslationAPIHandler& LLTranslate::getPreferredHandler()
     {
         service = SERVICE_DEEPL;
     }
+    // <FS:WolfViewer>
+    if (service_str == "libre")
+    {
+        service = SERVICE_LIBRE;
+    }
+    // </FS:WolfViewer>
 
     return getHandler(service);
 }
@@ -1288,6 +1531,7 @@ LLTranslationAPIHandler& LLTranslate::getHandler(EService service)
     static LLGoogleTranslationHandler google;
     static LLAzureTranslationHandler azure;
     static LLDeepLTranslationHandler deepl;
+    static LLLibreTranslationHandler libre;    // <FS:WolfViewer>
 
     switch (service)
     {
@@ -1297,7 +1541,104 @@ LLTranslationAPIHandler& LLTranslate::getHandler(EService service)
             return google;
         case SERVICE_DEEPL:
             return deepl;
+        // <FS:WolfViewer>
+        case SERVICE_LIBRE:
+            return libre;
+        // </FS:WolfViewer>
     }
 
     return azure;
 }
+
+// <FS:WolfViewer> Outgoing chat translation, ported from WolfStorm.
+
+// static
+bool LLTranslate::isOutgoingTranslationActive()
+{
+    // Source: chat_translator.js:75-79 outgoingActive() — enabled AND outgoing opted
+    // in AND a concrete target language that differs from the user's own language.
+    static LLCachedControl<bool> translate_chat(gSavedSettings, "TranslateChat");
+    static LLCachedControl<bool> outgoing(gSavedSettings, "WolfTranslateOutgoing");
+    if (!translate_chat || !outgoing)
+    {
+        return false;
+    }
+    std::string their_lang = getOutgoingLanguage();
+    return !their_lang.empty()
+        && their_lang != getTranslateLanguage()
+        && isTranslationConfigured();
+}
+
+// static
+std::string LLTranslate::getOutgoingLanguage()
+{
+    return gSavedSettings.getString("WolfTranslateTheirLang");
+}
+
+// static
+std::string LLTranslate::combineWithOriginal(const std::string& translation, const std::string& original)
+{
+    // Source: chat_translator.js:181-186 prepareOutgoing — an unchanged or empty
+    // translation sends the original; otherwise "translation (original)" when the
+    // show-original preference is on. The WolfStorm 1023-byte wire budget is not
+    // enforced here because both send paths already split long messages
+    // (llimview.cpp / fsnearbychathub.cpp FIRE-787 splitters, MAX_MSG_BUF_SIZE
+    // = 1024, lldbstrings.h:77).
+    std::string trimmed = translation;
+    LLStringUtil::trim(trimmed);
+    std::string orig_trimmed = original;
+    LLStringUtil::trim(orig_trimmed);
+    if (trimmed.empty() || trimmed == orig_trimmed)
+    {
+        return original;
+    }
+    static LLCachedControl<bool> show_original(gSavedSettings, "WolfTranslateShowOriginal");
+    if (show_original)
+    {
+        return trimmed + " (" + orig_trimmed + ")";
+    }
+    return trimmed;
+}
+
+// static
+bool LLTranslate::worthTranslating(const std::string& mesg)
+{
+    // Source: chat_translator.js:100-106 worthTranslating — strip URLs (the JS
+    // /https?:\/\/\S+/g pattern: scheme up to the next whitespace), then require
+    // at least two letters in what is left.
+    static const LLWString HTTP_PREFIX = utf8str_to_wstring("http://");
+    static const LLWString HTTPS_PREFIX = utf8str_to_wstring("https://");
+
+    LLWString wtext = utf8str_to_wstring(mesg);
+    const size_t len = wtext.size();
+    S32 letters = 0;
+    size_t i = 0;
+    while (i < len)
+    {
+        if (wtext.compare(i, HTTP_PREFIX.size(), HTTP_PREFIX) == 0
+            || wtext.compare(i, HTTPS_PREFIX.size(), HTTPS_PREFIX) == 0)
+        {
+            while (i < len && !LLStringOps::isSpace(wtext[i]))
+            {
+                ++i;
+            }
+            continue;
+        }
+        const llwchar c = wtext[i++];
+        // DECLARED DEVIATION from the JS \p{L} test: the viewer runs in the "C"
+        // locale, where iswalpha() answers only for ASCII, so counting on it would
+        // silently reject Cyrillic/CJK/Arabic chat. Instead every non-ASCII code
+        // point counts as a letter. Over-inclusive for symbol-only lines — those
+        // cost one translate request that the unchanged-translation guard in
+        // combineWithOriginal() absorbs — and never under-inclusive for real text.
+        if (c >= 0x80 || LLStringOps::isAlpha((char)c))
+        {
+            if (++letters >= 2)
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+// </FS:WolfViewer>

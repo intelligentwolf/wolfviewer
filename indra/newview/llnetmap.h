@@ -147,6 +147,12 @@ private:
 
     static bool     outsideSlop(S32 x, S32 y, S32 start_x, S32 start_y, S32 slop);
 
+    // <FS:WolfViewer> 3D terrain minimap — port of WolfStorm's Terrain3DView
+    // (wolfstorm/js/world/terrain3d_view.js) and its Minimap host (minimap.js).
+    void            draw3D();
+    bool            pick3D(S32 x, S32 y, LLVector3d& pos_global);
+    // </FS:WolfViewer>
+
 //  bool            mUpdateNow;
 // [SL:KB] - Patch: World-MinimapOverlay | Checked: 2012-06-20 (Catznip-3.3)
     bool            mUpdateObjectImage;

@@ -32,6 +32,7 @@
 // Library includes (should move below)
 #include "indra_constants.h"
 #include "llavatarnamecache.h"
+#include "llfontgl.h"   // <FS:WolfViewer> 3D minimap header label
 #include "llmath.h"
 #include "llfloaterreg.h"
 #include "fsfloateravataralign.h" // <FS:Chanayane> Compass floater
@@ -116,6 +117,151 @@ const S32 CIRCLE_STEPS = 100;
 
 LLNetMap::avatar_marks_map_t LLNetMap::sAvatarMarksMap; // <FS:Ansariel>
 F32 LLNetMap::sScale; // <FS:Ansariel> Synchronizing netmaps throughout instances
+
+// <FS:WolfViewer> ─── 3D terrain minimap state ─────────────────────────────────
+// Port of WolfStorm's Terrain3DView (wolfstorm/js/world/terrain3d_view.js) and its
+// Minimap host (wolfstorm/js/ui/minimap.js). State is file-static so every LLNetMap
+// instance shares one camera and one terrain sample, the same way sScale keeps the
+// 2D zoom in sync across instances.
+namespace
+{
+    // Source: terrain3d_view.js:33-38 — sampling grid and camera limits.
+    constexpr S32 FS3D_GRID = 64;
+    constexpr S32 FS3D_GRID_VAR = 96;          // terrain3d_view.js:202 — regions > 512m
+    constexpr F32 FS3D_MIN_PITCH = 0.12f;
+    constexpr F32 FS3D_MAX_PITCH = 1.45f;
+    constexpr F32 FS3D_MIN_DIST = 1.2f;
+    constexpr F32 FS3D_MAX_DIST = 6.0f;
+
+    // Source: minimap.js:85 — this.cam = { yaw: -0.65, pitch: 0.72, dist: 2.1 }
+    F32 sCamYaw3D = -0.65f;
+    F32 sCamPitch3D = 0.72f;
+    F32 sCamDist3D = 2.1f;
+
+    // The current region's terrain sample (terrain3d_view.js _buildFromHeights). The
+    // C++ viewer has the live heightfield in LLSurface, so WolfStorm's DB fetch and
+    // patch-completeness gate are unnecessary — the surface is sampled directly and
+    // refreshed every few seconds so terraforming shows up.
+    std::vector<F32> sHeights3D;
+    S32 sGrid3D = 0;
+    F32 sSize3D = 256.f;
+    F32 sMinH3D = 0.f;
+    F32 sMaxH3D = 0.f;
+    F32 sWater3D = 0.f;
+    U64 sRegionHandle3D = 0;
+    LLFrameTimer sSampleTimer3D;
+
+    // One projected quad of the last frame, kept for picking (terrain3d_view.js:497-500).
+    struct FS3DQuad
+    {
+        F32 xs[4];
+        F32 ys[4];
+        F32 depth;
+        F32 wx, wy;        // region-local centre of the cell
+        bool water;
+        LLColor4U color;
+    };
+    // Sorted back-to-front after building; pick() walks it in reverse (front first).
+    std::vector<FS3DQuad> sQuads3D;
+
+    // Per-frame camera constants — terrain3d_view.js:339-368 _camera().
+    struct FS3DCamera
+    {
+        F32 cx, cy, baseZ, span, vScale;
+        F32 cosYaw, sinYaw, cosPitch, sinPitch;
+        F32 dist, focal, halfW, halfH;
+    };
+
+    // Source: terrain3d_view.js:322-336 project() — rotate by yaw about the world up
+    // axis (+Z), tilt by pitch, one perspective divide. GL UI y grows UP, so the JS
+    // 'halfH - z2 * f' becomes 'halfH + z2 * f'.
+    inline void fs3dProject(F32 x, F32 y, F32 z, const FS3DCamera& c, F32& out_x, F32& out_y, F32& out_depth)
+    {
+        F32 u = (x - c.cx) / c.span;
+        F32 v = (y - c.cy) / c.span;
+        F32 w = (z - c.baseZ) / c.span * c.vScale;
+        F32 x1 = u * c.cosYaw + v * c.sinYaw;
+        F32 y1 = -u * c.sinYaw + v * c.cosYaw;
+        F32 y2 = y1 * c.cosPitch - w * c.sinPitch;
+        F32 z2 = y1 * c.sinPitch + w * c.cosPitch;
+        F32 depth = y2 + c.dist;
+        F32 f = c.focal / llmax(depth, 0.05f);
+        out_x = c.halfW + x1 * f;
+        out_y = c.halfH + z2 * f;
+        out_depth = depth;
+    }
+
+    // Source: terrain3d_view.js:277-295 _smooth — separable [1,2,1]/4 tent pass, so
+    // coarse sampling of the surface reads as landscape instead of a staircase.
+    void fs3dSmooth(std::vector<F32>& h, S32 n)
+    {
+        std::vector<F32> tmp((size_t)n * (size_t)n);
+        for (S32 j = 0; j < n; ++j)
+        {
+            for (S32 i = 0; i < n; ++i)
+            {
+                F32 a = h[j * n + llmax(0, i - 1)];
+                F32 b = h[j * n + i];
+                F32 c = h[j * n + llmin(n - 1, i + 1)];
+                tmp[j * n + i] = (a + 2.f * b + c) / 4.f;
+            }
+        }
+        for (S32 i = 0; i < n; ++i)
+        {
+            for (S32 j = 0; j < n; ++j)
+            {
+                F32 a = tmp[llmax(0, j - 1) * n + i];
+                F32 b = tmp[j * n + i];
+                F32 c = tmp[llmin(n - 1, j + 1) * n + i];
+                h[j * n + i] = (a + 2.f * b + c) / 4.f;
+            }
+        }
+    }
+
+    // Source: terrain3d_view.js:302-313 _heightColour — WolfStorm's height ramp (its
+    // fallback when no map-tile colours are loaded; the ramp is used exclusively here).
+    void fs3dHeightColour(F32 height, F32& r, F32& g, F32& b)
+    {
+        if (height < 20.f)      { r = 0.f;   g = 100.f; b = 200.f; }
+        else if (height < 25.f) { r = 210.f; g = 180.f; b = 140.f; }
+        else if (height < 40.f) { r = 74.f;  g = 163.f; b = 93.f;  }
+        else if (height < 60.f) { r = 50.f;  g = 120.f; b = 60.f;  }
+        else
+        {
+            F32 t = llmin((height - 60.f) / 40.f, 1.f);
+            r = 120.f + t * 60.f;
+            g = 100.f + t * 40.f;
+            b = 80.f + t * 40.f;
+        }
+    }
+
+    // Source: terrain3d_view.js:605-614 pointInQuad — ray-crossing containment test.
+    bool fs3dPointInQuad(F32 x, F32 y, const F32* xs, const F32* ys)
+    {
+        bool inside = false;
+        for (S32 i = 0, j = 3; i < 4; j = i++)
+        {
+            if (((ys[i] > y) != (ys[j] > y))
+                && (x < (xs[j] - xs[i]) * (y - ys[i]) / (ys[j] - ys[i]) + xs[i]))
+            {
+                inside = !inside;
+            }
+        }
+        return inside;
+    }
+
+    // One filled quad as two triangles (LLRender has no QUADS mode).
+    inline void fs3dQuadVerts(const F32* xs, const F32* ys)
+    {
+        gGL.vertex2f(xs[0], ys[0]);
+        gGL.vertex2f(xs[1], ys[1]);
+        gGL.vertex2f(xs[2], ys[2]);
+        gGL.vertex2f(xs[0], ys[0]);
+        gGL.vertex2f(xs[2], ys[2]);
+        gGL.vertex2f(xs[3], ys[3]);
+    }
+}
+// </FS:WolfViewer>
 
 LLNetMap::LLNetMap (const Params & p)
 :   LLUICtrl (p),
@@ -329,6 +475,16 @@ void LLNetMap::draw()
         return;
     }
     // <FS:Ansariel> Aurora Sim
+
+    // <FS:WolfViewer> 3D terrain minimap (WolfStorm Terrain3DView port)
+    static LLCachedControl<bool> s_map3d(gSavedSettings, "FSNetMap3D");
+    if (s_map3d)
+    {
+        draw3D();
+        LLUICtrl::draw();
+        return;
+    }
+    // </FS:WolfViewer>
 
     static LLUIColor map_avatar_color = LLUIColorTable::instance().getColor("MapAvatarColor", LLColor4::white);
     static LLUIColor map_track_color = LLUIColorTable::instance().getColor("MapTrackColor", LLColor4::white);
@@ -917,6 +1073,448 @@ void LLNetMap::draw()
     LLUICtrl::draw();
 }
 
+// <FS:WolfViewer> ─── The 3D minimap ──────────────────────────────────────────
+// Source: terrain3d_view.js:382-559 render() + _drawCoreOverlays(), and
+// minimap.js:444-509 _drawAvatarOverlays(), drawn with gGL instead of a canvas.
+void LLNetMap::draw3D()
+{
+    LLViewerRegion* regionp = gAgent.getRegion();
+
+    gGL.pushMatrix();
+    gGL.pushUIMatrix();
+
+    LLVector3 offset = gGL.getUITranslation();
+    LLVector3 ui_scale = gGL.getUIScale();
+    gGL.loadIdentity();
+    gGL.loadUIIdentity();
+    gGL.scalef(ui_scale.mV[0], ui_scale.mV[1], ui_scale.mV[2]);
+    gGL.translatef(offset.mV[0], offset.mV[1], offset.mV[2]);
+
+    const F32 W = (F32)getRect().getWidth();
+    const F32 H = (F32)getRect().getHeight();
+
+    {
+        LLLocalClipRect clip(getLocalRect());
+        gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
+        gGL.matrixMode(LLRender::MM_MODELVIEW);
+
+        // Sky gradient so "up" is unambiguous the moment the view tilts.
+        // Source: terrain3d_view.js:388-394 — #0b1c33 top, #17324f at 55% from the
+        // top, #0a1622 bottom; drawn as two vertically-graded bands.
+        {
+            const F32 mid_y = H * 0.45f;   // JS stop 0.55 measured from the top
+            gGL.begin(LLRender::TRIANGLES);
+            // lower band: bottom #0a1622 -> mid #17324f
+            gGL.color4ub(10, 22, 34, 255);  gGL.vertex2f(0.f, 0.f);
+            gGL.color4ub(10, 22, 34, 255);  gGL.vertex2f(W, 0.f);
+            gGL.color4ub(23, 50, 79, 255);  gGL.vertex2f(W, mid_y);
+            gGL.color4ub(10, 22, 34, 255);  gGL.vertex2f(0.f, 0.f);
+            gGL.color4ub(23, 50, 79, 255);  gGL.vertex2f(W, mid_y);
+            gGL.color4ub(23, 50, 79, 255);  gGL.vertex2f(0.f, mid_y);
+            // upper band: mid #17324f -> top #0b1c33
+            gGL.color4ub(23, 50, 79, 255);  gGL.vertex2f(0.f, mid_y);
+            gGL.color4ub(23, 50, 79, 255);  gGL.vertex2f(W, mid_y);
+            gGL.color4ub(11, 28, 51, 255);  gGL.vertex2f(W, H);
+            gGL.color4ub(23, 50, 79, 255);  gGL.vertex2f(0.f, mid_y);
+            gGL.color4ub(11, 28, 51, 255);  gGL.vertex2f(W, H);
+            gGL.color4ub(11, 28, 51, 255);  gGL.vertex2f(0.f, H);
+            gGL.end();
+        }
+
+        if (!regionp)
+        {
+            sQuads3D.clear();
+            gGL.popMatrix();
+            gGL.popUIMatrix();
+            return;
+        }
+
+        // ── terrain sample ── (terrain3d_view.js _buildFromHeights; heights come
+        // straight from the live LLSurface instead of WolfStorm's DB fetch, refreshed
+        // every few seconds so terraforming shows up)
+        if (regionp->getHandle() != sRegionHandle3D || sGrid3D == 0
+            || sSampleTimer3D.getElapsedTimeF32() > 5.f)
+        {
+            // DECLARED DEVIATION from terrain3d_view.js:341/405 (separate sizeX/sizeY):
+            // the viewer models a region's extent as ONE scalar (llviewerregion.h
+            // mWidth), so this port is square-only — matching every OpenSim var
+            // region this viewer can represent.
+            const F32 size = regionp->getWidth();
+            const S32 G = (size > 512.f) ? FS3D_GRID_VAR : FS3D_GRID;
+            const S32 n = G + 1;
+            const F32 step = size / (F32)G;
+            LLSurface& land = regionp->getLand();
+            sHeights3D.assign((size_t)n * (size_t)n, 0.f);
+            for (S32 j = 0; j < n; ++j)
+            {
+                for (S32 i = 0; i < n; ++i)
+                {
+                    // resolveHeightRegion answers 0..mMetersPerEdge inclusive and
+                    // returns 0 outside (llsurface.cpp:936-939).
+                    sHeights3D[j * n + i] = land.resolveHeightRegion((F32)i * step, (F32)j * step);
+                }
+            }
+            fs3dSmooth(sHeights3D, n);
+            F32 min_h = F32_MAX, max_h = -F32_MAX;
+            for (F32 v : sHeights3D)
+            {
+                min_h = llmin(min_h, v);
+                max_h = llmax(max_h, v);
+            }
+            sWater3D = regionp->getWaterHeight();
+            if (!(min_h < max_h))   // terrain3d_view.js:183 — degenerate flat sample
+            {
+                min_h = sWater3D;
+                max_h = sWater3D + 1.f;
+            }
+            sGrid3D = G;
+            sSize3D = size;
+            sMinH3D = min_h;
+            sMaxH3D = max_h;
+            sRegionHandle3D = regionp->getHandle();
+            sSampleTimer3D.reset();
+        }
+
+        // ── camera ── "Camera at top": the view turns with the main camera unless the
+        // user is orbiting by hand. Source: minimap.js:414-420 — yaw = -cameraYaw,
+        // where the 2D map's rotation is atan2(at.x, at.y) (draw() above).
+        static LLUICachedControl<bool> rotate_map("MiniMapRotate", true);
+        if (rotate_map && !mPanning)
+        {
+            sCamYaw3D = -atan2f(LLViewerCamera::getInstance()->getAtAxis().mV[VX],
+                                LLViewerCamera::getInstance()->getAtAxis().mV[VY]);
+        }
+
+        // Source: terrain3d_view.js:339-368 _camera() — TRUE SCALE with a readability
+        // band: flat land (< 8% of the span) is lifted, extreme relief capped at 30%.
+        FS3DCamera cam;
+        cam.cx = sSize3D / 2.f;
+        cam.cy = sSize3D / 2.f;
+        cam.baseZ = llmin(sMinH3D, sWater3D);
+        cam.span = sSize3D;
+        const F32 relief = llmax(1e-6f, sMaxH3D - sMinH3D);
+        F32 units_per_metre = 1.f / cam.span;
+        const F32 frac = relief / cam.span;
+        if (frac > 0.30f)                       units_per_metre = 0.30f / relief;
+        else if (frac < 0.08f && relief > 2.f)  units_per_metre = 0.08f / relief;
+        cam.vScale = units_per_metre * cam.span;
+        cam.cosYaw = cosf(sCamYaw3D);
+        cam.sinYaw = sinf(sCamYaw3D);
+        cam.cosPitch = cosf(sCamPitch3D);
+        cam.sinPitch = sinf(sCamPitch3D);
+        cam.dist = sCamDist3D;
+        cam.focal = llmin(W, H) * 0.9f;
+        cam.halfW = W / 2.f;
+        cam.halfH = H / 2.f;
+
+        // ── project every vertex once ── (terrain3d_view.js:412-420)
+        const S32 G = sGrid3D;
+        const S32 n = G + 1;
+        const F32 step = sSize3D / (F32)G;
+        static std::vector<F32> px, py, pd;
+        px.resize((size_t)n * n);
+        py.resize((size_t)n * n);
+        pd.resize((size_t)n * n);
+        for (S32 j = 0; j < n; ++j)
+        {
+            for (S32 i = 0; i < n; ++i)
+            {
+                const S32 k = j * n + i;
+                fs3dProject((F32)i * step, (F32)j * step, sHeights3D[k], cam, px[k], py[k], pd[k]);
+            }
+        }
+
+        // ── build the quads ── (terrain3d_view.js:422-481; light from the north-west
+        // and above, the shaded-relief convention)
+        const F32 LX = -0.55f, LY = 0.55f, LZ = 0.63f;
+        // While ORBITING, render every 2nd sample as double-size cells so the drag
+        // stays fluid (terrain3d_view.js:408-410; G is 64 or 96, both divisible by 2).
+        const S32 S = (mPanning && G > 48) ? 2 : 1;
+        sQuads3D.clear();
+        sQuads3D.reserve((size_t)G * G * 5 / 4);
+        for (S32 j = 0; j < G; j += S)
+        {
+            for (S32 i = 0; i < G; i += S)
+            {
+                const S32 a = j * n + i;
+                const S32 b = a + S;
+                const S32 c2 = a + S * n;
+                const S32 d = c2 + S;
+                const F32 za = sHeights3D[a], zb = sHeights3D[b];
+                const F32 zc = sHeights3D[c2], zd = sHeights3D[d];
+
+                // Face normal from the cell diagonals, heights exaggerated by the
+                // drawn vScale so shading matches what the eye sees (js:433-441).
+                const F32 E = cam.vScale;
+                const F32 nx = (za + zc - zb - zd) * step * E;
+                const F32 ny = (za + zb - zc - zd) * step * E;
+                const F32 nz = 2.f * step * step;
+                const F32 len = sqrtf(nx * nx + ny * ny + nz * nz);
+                const F32 lambert = llmax(0.18f, (nx * LX + ny * LY + nz * LZ) / (len > 0.f ? len : 1.f));
+                const F32 shade = 0.45f + 0.55f * lambert;
+
+                F32 r, g, bl;
+                fs3dHeightColour((za + zb + zc + zd) / 4.f, r, g, bl);
+
+                FS3DQuad q;
+                q.depth = (pd[a] + pd[b] + pd[c2] + pd[d]) / 4.f;
+                q.xs[0] = px[a]; q.ys[0] = py[a];
+                q.xs[1] = px[b]; q.ys[1] = py[b];
+                q.xs[2] = px[d]; q.ys[2] = py[d];
+                q.xs[3] = px[c2]; q.ys[3] = py[c2];
+                q.color = LLColor4U((U8)ll_round(r * shade), (U8)ll_round(g * shade), (U8)ll_round(bl * shade), 255);
+                q.wx = ((F32)i + (F32)S * 0.5f) * step;
+                q.wy = ((F32)j + (F32)S * 0.5f) * step;
+                q.water = false;
+                sQuads3D.push_back(q);
+
+                // Water surface over any cell whose land dips below it (js:465-479).
+                if (za < sWater3D || zb < sWater3D || zc < sWater3D || zd < sWater3D)
+                {
+                    FS3DQuad wq;
+                    F32 dep[4];
+                    fs3dProject((F32)i * step, (F32)j * step, sWater3D, cam, wq.xs[0], wq.ys[0], dep[0]);
+                    fs3dProject((F32)(i + S) * step, (F32)j * step, sWater3D, cam, wq.xs[1], wq.ys[1], dep[1]);
+                    fs3dProject((F32)(i + S) * step, (F32)(j + S) * step, sWater3D, cam, wq.xs[2], wq.ys[2], dep[2]);
+                    fs3dProject((F32)i * step, (F32)(j + S) * step, sWater3D, cam, wq.xs[3], wq.ys[3], dep[3]);
+                    wq.depth = (dep[0] + dep[1] + dep[2] + dep[3]) / 4.f - 0.0005f;
+                    wq.color = LLColor4U(28, 86, 140, 184);   // rgba(28,86,140,0.72), js:475
+                    wq.wx = ((F32)i + (F32)S * 0.5f) * step;
+                    wq.wy = ((F32)j + (F32)S * 0.5f) * step;
+                    wq.water = true;
+                    sQuads3D.push_back(wq);
+                }
+            }
+        }
+
+        // Far cells first (painter's algorithm, js:485).
+        std::sort(sQuads3D.begin(), sQuads3D.end(),
+                  [](const FS3DQuad& p, const FS3DQuad& q) { return p.depth > q.depth; });
+
+        gGL.begin(LLRender::TRIANGLES);
+        for (const FS3DQuad& q : sQuads3D)
+        {
+            gGL.color4ubv(q.color.mV);
+            fs3dQuadVerts(q.xs, q.ys);
+        }
+        gGL.end();
+
+        // ── region outline at the terrain base ── (terrain3d_view.js:517-530)
+        {
+            F32 ox[4], oy[4], od;
+            fs3dProject(0.f, 0.f, sMinH3D, cam, ox[0], oy[0], od);
+            fs3dProject(sSize3D, 0.f, sMinH3D, cam, ox[1], oy[1], od);
+            fs3dProject(sSize3D, sSize3D, sMinH3D, cam, ox[2], oy[2], od);
+            fs3dProject(0.f, sSize3D, sMinH3D, cam, ox[3], oy[3], od);
+            gGL.color4f(253.f / 255.f, 216.f / 255.f, 53.f / 255.f, 0.85f);
+            gGL.begin(LLRender::LINE_LOOP);
+            gGL.vertex2f(ox[0], oy[0]);
+            gGL.vertex2f(ox[1], oy[1]);
+            gGL.vertex2f(ox[2], oy[2]);
+            gGL.vertex2f(ox[3], oy[3]);
+            gGL.end();
+        }
+
+        // ── avatar dots ── (minimap.js:444-509: dot at z+2 with a faint stem to the
+        // ground and a dark rim; unknown coarse height floats at the water plane).
+        // The cursor bookkeeping mirrors the 2D path (draw() lines above) so tooltips
+        // and the right-click avatar menu keep working in 3D.
+        S32 local_mouse_x, local_mouse_y;
+        LLUI::getInstance()->getMousePositionLocal(this, &local_mouse_x, &local_mouse_y);
+        const bool local_mouse = pointInView(local_mouse_x, local_mouse_y);
+        mClosestAgentToCursor.setNull();
+        mClosestAgentsToCursor.clear();
+        F32 closest_dist_squared = F32_MAX;
+        static LLCachedControl<F32> fsMinimapPickScale(gSavedSettings, "FSMinimapPickScale");
+        const F32 min_pick_dist_squared = (mDotRadius * fsMinimapPickScale) * (mDotRadius * fsMinimapPickScale);
+        static LLUIColor map_avatar_color = LLUIColorTable::instance().getColor("MapAvatarColor", LLColor4::white);
+        static LLUIColor map_track_color = LLUIColorTable::instance().getColor("MapTrackColor", LLColor4::white);
+
+        uuid_vec_t avatar_ids;
+        std::vector<LLVector3d> positions;
+        LLWorld::getInstance()->getAvatars(&avatar_ids, &positions, gAgentCamera.getCameraPositionGlobal());
+
+        for (U32 i = 0; i < avatar_ids.size(); i++)
+        {
+            const LLUUID& uuid = avatar_ids.at(i);
+            if (uuid == gAgent.getID()) continue;   // self is drawn below
+
+            LLVector3 pos_region = regionp->getPosRegionFromGlobal(positions[i]);
+            if (pos_region.mV[VX] < 0.f || pos_region.mV[VX] > sSize3D
+                || pos_region.mV[VY] < 0.f || pos_region.mV[VY] > sSize3D)
+            {
+                continue;   // the 3D view frames only the current region
+            }
+            F32 z = pos_region.mV[VZ];
+            if (positions[i].mdV[VZ] == AVATAR_UNKNOWN_Z_OFFSET || !llfinite(z))
+            {
+                z = sWater3D;   // minimap.js:460-463 — no dots underground
+            }
+
+            F32 dot_x, dot_y, dot_d, foot_x, foot_y, foot_d;
+            fs3dProject(pos_region.mV[VX], pos_region.mV[VY], z + 2.f, cam, dot_x, dot_y, dot_d);
+            fs3dProject(pos_region.mV[VX], pos_region.mV[VY], sMinH3D, cam, foot_x, foot_y, foot_d);
+
+            LLColor4 color = getAvatarColor(uuid);
+// [RLVa:KB] - same name gate as the 2D avatar pass above
+            if (!RlvActions::canShowName(RlvActions::SNC_DEFAULT, uuid))
+            {
+                color = map_avatar_color.get();
+            }
+// [/RLVa:KB]
+
+            // Faint stem tying the dot to its spot on the ground (minimap.js:487-492).
+            gGL.color4f(color.mV[VRED], color.mV[VGREEN], color.mV[VBLUE], 0.4f);
+            gGL.begin(LLRender::LINES);
+            gGL.vertex2f(foot_x, foot_y);
+            gGL.vertex2f(dot_x, dot_y);
+            gGL.end();
+
+            gGL.color4fv(color.mV);
+            gl_circle_2d(dot_x, dot_y, mDotRadius, 16, true);
+            gGL.color4f(0.f, 0.f, 0.f, 0.85f);
+            gl_circle_2d(dot_x, dot_y, mDotRadius, 16, false);
+
+            // A marked avatar gets a ring as well as the colour (minimap.js:506-509).
+            if (hasAvatarMarkColor(uuid))
+            {
+                gGL.color4fv(color.mV);
+                gl_circle_2d(dot_x, dot_y, mDotRadius + 3.f, 16, false);
+            }
+
+            if (local_mouse)
+            {
+                F32 dist_to_cursor_squared = dist_vec_squared(LLVector2(dot_x, dot_y),
+                                                LLVector2((F32)local_mouse_x, (F32)local_mouse_y));
+                if (dist_to_cursor_squared < min_pick_dist_squared)
+                {
+                    if (dist_to_cursor_squared < closest_dist_squared)
+                    {
+                        closest_dist_squared = dist_to_cursor_squared;
+                        mClosestAgentToCursor = uuid;
+                        mClosestAgentPosition = positions[i];
+                    }
+                    mClosestAgentsToCursor.push_back(uuid);
+                }
+            }
+        }
+
+        // ── the tracked location, as a plain dot ── (the 2D drawTracking arrows are a
+        // screen-edge concept; the 3D view always frames the whole region)
+        {
+            LLVector3d tracked_global;
+            bool have_tracked = false;
+            if (gAgent.getAutoPilot())
+            {
+                tracked_global = gAgent.getAutoPilotTargetGlobal();
+                have_tracked = true;
+            }
+            else
+            {
+                LLTracker::ETrackingStatus tracking_status = LLTracker::getTrackingStatus();
+                if (LLTracker::TRACKING_AVATAR == tracking_status)
+                {
+                    tracked_global = LLAvatarTracker::instance().getGlobalPos();
+                    have_tracked = true;
+                }
+                else if (LLTracker::TRACKING_LANDMARK == tracking_status
+                         || LLTracker::TRACKING_LOCATION == tracking_status)
+                {
+                    tracked_global = LLTracker::getTrackedPositionGlobal();
+                    have_tracked = true;
+                }
+            }
+            if (have_tracked)
+            {
+                LLVector3 pos_region = regionp->getPosRegionFromGlobal(tracked_global);
+                if (pos_region.mV[VX] >= 0.f && pos_region.mV[VX] <= sSize3D
+                    && pos_region.mV[VY] >= 0.f && pos_region.mV[VY] <= sSize3D)
+                {
+                    F32 tx, ty, td;
+                    fs3dProject(pos_region.mV[VX], pos_region.mV[VY], pos_region.mV[VZ] + 2.f, cam, tx, ty, td);
+                    gGL.color4fv(map_track_color.get().mV);
+                    gl_circle_2d(tx, ty, mDotRadius, 16, true);
+                    gGL.color4f(0.f, 0.f, 0.f, 0.85f);
+                    gl_circle_2d(tx, ty, mDotRadius, 16, false);
+                }
+            }
+        }
+
+        // ── "you are here", at the agent's real height ── (terrain3d_view.js:533-551)
+        {
+            LLVector3 self_region = regionp->getPosRegionFromGlobal(gAgent.getPositionGlobal());
+            F32 sx, sy, sd, fx, fy, fd;
+            fs3dProject(self_region.mV[VX], self_region.mV[VY], self_region.mV[VZ] + 2.f, cam, sx, sy, sd);
+            fs3dProject(self_region.mV[VX], self_region.mV[VY], sMinH3D, cam, fx, fy, fd);
+
+            gGL.color4f(1.f, 221.f / 255.f, 0.f, 0.55f);
+            gGL.begin(LLRender::LINES);
+            gGL.vertex2f(fx, fy);
+            gGL.vertex2f(sx, sy);
+            gGL.end();
+
+            gGL.color4f(1.f, 221.f / 255.f, 0.f, 1.f);      // #ffdd00
+            gl_circle_2d(sx, sy, 5.f, 16, true);
+            gGL.color4f(0.f, 0.f, 0.f, 1.f);
+            gl_circle_2d(sx, sy, 5.f, 16, false);
+
+            // Self is pickable for the tooltip too (llnetmap.cpp 2D pass).
+            if (local_mouse)
+            {
+                F32 dist_to_cursor_squared = dist_vec_squared(LLVector2(sx, sy),
+                                                LLVector2((F32)local_mouse_x, (F32)local_mouse_y));
+                if (dist_to_cursor_squared < min_pick_dist_squared
+                    && dist_to_cursor_squared < closest_dist_squared)
+                {
+                    mClosestAgentToCursor = gAgent.getID();
+                    mClosestAgentPosition = gAgent.getPositionGlobal();
+                }
+            }
+        }
+
+        // ── header label ── (terrain3d_view.js:553-555)
+        {
+            // "Name · WxHm · min–maxm" — U+00B7 middle dot, U+00D7 multiplication
+            // sign, U+2013 en dash, exactly as terrain3d_view.js:554 composes it.
+            std::string label = llformat("%s \xC2\xB7 %d\xC3\x97%dm \xC2\xB7 %d\xE2\x80\x93%dm",
+                regionp->getName().c_str(), (S32)sSize3D, (S32)sSize3D,
+                (S32)ll_round(sMinH3D), (S32)ll_round(sMaxH3D));
+            LLFontGL::getFontSansSerifSmall()->renderUTF8(label, 0,
+                6.f, H - 6.f,
+                LLColor4::white,
+                LLFontGL::LEFT, LLFontGL::TOP, LLFontGL::BOLD, LLFontGL::DROP_SHADOW);
+        }
+    }
+
+    gGL.popMatrix();
+    gGL.popUIMatrix();
+}
+
+// Which region point is under the cursor: walk the last frame's quads front-to-back
+// and take the first LAND quad containing it — the visible one.
+// Source: terrain3d_view.js:591-602 pick().
+bool LLNetMap::pick3D(S32 x, S32 y, LLVector3d& pos_global)
+{
+    LLViewerRegion* regionp = gAgent.getRegion();
+    if (!regionp || sQuads3D.empty() || regionp->getHandle() != sRegionHandle3D)
+    {
+        return false;
+    }
+    // sQuads3D is sorted back-to-front for drawing; reverse order is front first.
+    for (auto it = sQuads3D.rbegin(); it != sQuads3D.rend(); ++it)
+    {
+        if (it->water) continue;   // aim at the land, not the sea surface (js:598)
+        if (fs3dPointInQuad((F32)x, (F32)y, it->xs, it->ys))
+        {
+            F32 z = regionp->getLand().resolveHeightRegion(it->wx, it->wy);
+            pos_global = regionp->getPosGlobalFromRegion(LLVector3(it->wx, it->wy, z));
+            return true;
+        }
+    }
+    return false;
+}
+// </FS:WolfViewer>
+
 void LLNetMap::reshape(S32 width, S32 height, bool called_from_parent)
 {
     LLUICtrl::reshape(width, height, called_from_parent);
@@ -1060,6 +1658,22 @@ void LLNetMap::updateAboutLandPopupButton()
 
 LLVector3d LLNetMap::viewPosToGlobal( S32 x, S32 y )
 {
+    // <FS:WolfViewer> 3D mode: the position under the cursor is the picked terrain
+    // point (used by the right-click menu and the location tooltip). Off the
+    // terrain — the sky — there is no sensible position; answer with the agent's
+    // own, which every caller can safely act on.
+    static LLCachedControl<bool> s_map3d(gSavedSettings, "FSNetMap3D");
+    if (s_map3d)
+    {
+        LLVector3d picked_global;
+        if (pick3D(x, y, picked_global))
+        {
+            return picked_global;
+        }
+        return gAgent.getPositionGlobal();
+    }
+    // </FS:WolfViewer>
+
     x -= ll_round(getRect().getWidth() / 2 + mCurPan.mV[VX]);
     y -= ll_round(getRect().getHeight() / 2 + mCurPan.mV[VY]);
 
@@ -1088,6 +1702,16 @@ LLVector3d LLNetMap::viewPosToGlobal( S32 x, S32 y )
 
 bool LLNetMap::handleScrollWheel(S32 x, S32 y, S32 clicks)
 {
+    // <FS:WolfViewer> 3D mode: the wheel dollies the camera.
+    // Source: minimap.js:309-317 onWheel — ×1.12 per notch away, ÷1.12 towards.
+    static LLCachedControl<bool> s_map3d(gSavedSettings, "FSNetMap3D");
+    if (s_map3d)
+    {
+        sCamDist3D = llclamp(sCamDist3D * powf(1.12f, (F32)clicks), FS3D_MIN_DIST, FS3D_MAX_DIST);
+        return true;
+    }
+    // </FS:WolfViewer>
+
     // note that clicks are reversed from what you'd think: i.e. > 0  means zoom out, < 0 means zoom in
     F32 new_scale = mScale * (F32)pow(MAP_SCALE_ZOOM_FACTOR, -clicks);
     F32 old_scale = mScale;
@@ -1636,6 +2260,20 @@ void LLNetMap::createParcelImage()
 
 bool LLNetMap::handleMouseDown(S32 x, S32 y, MASK mask)
 {
+    // <FS:WolfViewer> 3D mode: any unmodified left-drag orbits the camera, the way
+    // WolfStorm's minimap canvas does (minimap.js:321-329 onOrbitStart). The slop
+    // test in handleHover keeps ordinary clicks from counting as orbits.
+    static LLCachedControl<bool> s_map3d(gSavedSettings, "FSNetMap3D");
+    if (s_map3d)
+    {
+        gFocusMgr.setMouseCapture(this);
+        mStartPan     = mCurPan;
+        mMouseDown.mX = x;
+        mMouseDown.mY = y;
+        return true;
+    }
+    // </FS:WolfViewer>
+
     // <FS:Ansariel> FIRE-32339: Mini map can't be dragged anymore
     if (!(mask & MASK_SHIFT)) return false;
 
@@ -1828,6 +2466,22 @@ bool LLNetMap::handleClick(S32 x, S32 y, MASK mask)
 
 bool LLNetMap::handleDoubleClick(S32 x, S32 y, MASK mask)
 {
+    // <FS:WolfViewer> 3D mode: act on the terrain point under the cursor — the same
+    // pick-a-spot-on-the-hillside behaviour as WolfStorm (minimap.js:389-407
+    // onDoubleClick); performDoubleClickAction applies the user's configured
+    // double-click action (teleport / world map / nothing) exactly as in 2D.
+    static LLCachedControl<bool> s_map3d(gSavedSettings, "FSNetMap3D");
+    if (s_map3d)
+    {
+        LLVector3d picked_global;
+        if (pick3D(x, y, picked_global))
+        {
+            performDoubleClickAction(picked_global);
+        }
+        return true;   // a double-click on the sky does nothing
+    }
+    // </FS:WolfViewer>
+
     LLVector3d pos_global = viewPosToGlobal(x, y);
 
     // <FS:Ansariel> Synchronize double click handling throughout instances
@@ -1894,6 +2548,35 @@ bool LLNetMap::outsideSlop( S32 x, S32 y, S32 start_x, S32 start_y, S32 slop )
 
 bool LLNetMap::handleHover( S32 x, S32 y, MASK mask )
 {
+    // <FS:WolfViewer> 3D mode: dragging orbits the camera instead of panning.
+    // Source: minimap.js:331-357 onOrbitMove — yaw -= dx*0.008, pitch += dy*0.006
+    // (their dy grows downward; the viewer's mouse DY grows upward, so the sign
+    // flips), and orbiting by hand takes the yaw away from the camera-follow
+    // (minimap.js:340-342 sets rotationEnabled = false).
+    static LLCachedControl<bool> s_map3d(gSavedSettings, "FSNetMap3D");
+    if (s_map3d && hasMouseCapture())
+    {
+        if (mPanning || outsideSlop(x, y, mMouseDown.mX, mMouseDown.mY, MOUSE_DRAG_SLOP))
+        {
+            if (!mPanning)
+            {
+                mPanning = true;
+                gViewerWindow->hideCursor();
+                gSavedSettings.setBOOL("MiniMapRotate", false);
+            }
+
+            F32 dx = (F32)gViewerWindow->getCurrentMouseDX();
+            F32 dy = (F32)gViewerWindow->getCurrentMouseDY();
+            sCamYaw3D -= dx * 0.008f;
+            sCamPitch3D = llclamp(sCamPitch3D - dy * 0.006f, FS3D_MIN_PITCH, FS3D_MAX_PITCH);
+
+            gViewerWindow->moveCursorToCenter();
+        }
+        gViewerWindow->setCursor(UI_CURSOR_CROSS);
+        return true;
+    }
+    // </FS:WolfViewer>
+
     if (hasMouseCapture())
     {
         if (mPanning || outsideSlop(x, y, mMouseDown.mX, mMouseDown.mY, MOUSE_DRAG_SLOP))
@@ -1929,8 +2612,28 @@ bool LLNetMap::handleHover( S32 x, S32 y, MASK mask )
     return true;
 }
 
+// <FS:WolfViewer> The menu's named zoom levels as 3D camera distances.
+// Source: minimap.js:66-73 DIST_LEVELS — the 3D replacement for getScaleForName.
+static F32 fs3dGetDistForName(const std::string& level)
+{
+    if (level == "very close") return 1.35f;
+    if (level == "close")      return 1.7f;
+    if (level == "medium")     return 2.1f;
+    if (level == "far")        return 3.4f;
+    return 0.0f;
+}
+// </FS:WolfViewer>
+
 bool LLNetMap::isZoomChecked(const LLSD &userdata)
 {
+    // <FS:WolfViewer> 3D mode zooms by camera distance, not map scale.
+    static LLCachedControl<bool> s_map3d(gSavedSettings, "FSNetMap3D");
+    if (s_map3d)
+    {
+        return fs3dGetDistForName(userdata.asString()) == sCamDist3D;
+    }
+    // </FS:WolfViewer>
+
     std::string level = userdata.asString();
     F32         scale = getScaleForName(level);
     return scale == mScale;
@@ -1938,6 +2641,19 @@ bool LLNetMap::isZoomChecked(const LLSD &userdata)
 
 void LLNetMap::setZoom(const LLSD &userdata)
 {
+    // <FS:WolfViewer> 3D mode zooms by camera distance, not map scale.
+    static LLCachedControl<bool> s_map3d(gSavedSettings, "FSNetMap3D");
+    if (s_map3d)
+    {
+        F32 dist = fs3dGetDistForName(userdata.asString());
+        if (dist != 0.0f)
+        {
+            sCamDist3D = dist;
+        }
+        return;
+    }
+    // </FS:WolfViewer>
+
     std::string level = userdata.asString();
     F32         scale = getScaleForName(level);
     if (scale != 0.0f)

@@ -57,6 +57,7 @@ public :
         SERVICE_AZURE,
         SERVICE_GOOGLE,
         SERVICE_DEEPL,
+        SERVICE_LIBRE,  // <FS:WolfViewer> self-hosted LibreTranslate, no API key
     } EService;
 
     typedef std::function<void(EService, bool, S32)> KeyVerificationResult_fn;
@@ -93,6 +94,18 @@ public :
 
     static std::string addNoTranslateTags(std::string mesg);
     static std::string removeNoTranslateTags(std::string mesg);
+
+    // <FS:WolfViewer> Outgoing chat translation, ported from WolfStorm
+    // (wolfstorm/js/chat/chat_translator.js outgoingActive/prepareOutgoing).
+    /** True when outgoing chat should be machine-translated before sending. */
+    static bool isOutgoingTranslationActive();
+    /** The language outgoing chat is translated into (WolfTranslateTheirLang). */
+    static std::string getOutgoingLanguage();
+    /** "translation (original)" when WolfTranslateShowOriginal is set, else the translation. */
+    static std::string combineWithOriginal(const std::string& translation, const std::string& original);
+    /** False for text with fewer than two letters once URLs are ignored — nothing to translate. */
+    static bool worthTranslating(const std::string& mesg);
+    // </FS:WolfViewer>
 
     void logCharsSeen(size_t count);
     void logCharsSent(size_t count);

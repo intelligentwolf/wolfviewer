@@ -206,6 +206,22 @@ bool FSFloaterNearbyChat::postBuild()
     getChild<LLButton>("chat_history_btn")->setCommitCallback(boost::bind(&FSFloaterNearbyChat::onHistoryButtonClicked, this));
     getChild<LLButton>("chat_search_btn")->setCommitCallback(boost::bind(&FSFloaterNearbyChat::onSearchButtonClicked, this));
 
+    // <FS:WolfViewer> Chat translation button — WolfStorm's globe button on the chat
+    // bar (floater_communicator.js:340-363): opens the translation settings, and its
+    // pressed state mirrors whether translation is on.
+    LLButton* translate_btn = getChild<LLButton>("translate_btn");
+    translate_btn->setClickedCallback([translate_btn](LLUICtrl*, const LLSD&)
+    {
+        LLFloaterReg::toggleInstanceOrBringToFront("prefs_translation");
+        // A toggle button flips itself on click; its pressed state belongs to the
+        // TranslateChat setting, so put it back until that setting really changes.
+        translate_btn->setToggleState(gSavedSettings.getBOOL("TranslateChat"));
+    });
+    translate_btn->setToggleState(gSavedSettings.getBOOL("TranslateChat"));
+    gSavedSettings.getControl("TranslateChat")->getSignal()->connect(
+        boost::bind(&FSFloaterNearbyChat::updateTranslateBtnState, this, _2));
+    // </FS:WolfViewer>
+
     // chat type selector and send chat button
     mChatTypeCombo = getChild<LLComboBox>("chat_type");
     mChatTypeCombo->selectByValue("say");
@@ -229,6 +245,18 @@ bool FSFloaterNearbyChat::postBuild()
 
     return LLFloater::postBuild();
 }
+
+// <FS:WolfViewer> Keep the chat bar's globe button pressed while translation is on,
+// the way WolfStorm tints its globe button (floater_communicator.js:836).
+void FSFloaterNearbyChat::updateTranslateBtnState(const LLSD& data)
+{
+    LLButton* translate_btn = findChild<LLButton>("translate_btn");
+    if (translate_btn)
+    {
+        translate_btn->setToggleState(data.asBoolean());
+    }
+}
+// </FS:WolfViewer>
 
 void FSFloaterNearbyChat::updateRlvRestrictions(ERlvBehaviour behavior)
 {

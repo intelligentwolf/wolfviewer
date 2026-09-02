@@ -1411,4 +1411,9 @@
   <color
     name="MentionFlashBgColor"
     value="1 1 0 0.5" />
+
+	<!-- Login screen backdrop. Was a literal on the login panels; named so skins can reach it. -->
+	<color
+	 name="FSLoginBackgroundColor"
+	 value="0.16 0.16 0.16 1" />
 </colors>

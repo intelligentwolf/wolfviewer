@@ -6,7 +6,7 @@
   name="panel_login"
   focus_root="true"
   background_visible="true"
-  bg_opaque_color="0.16 0.16 0.16 1"
+  bg_opaque_color="FSLoginBackgroundColor"
   background_opaque="true"
   width="1024">
   <panel.string

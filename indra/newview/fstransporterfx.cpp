@@ -122,6 +122,26 @@ void FSTransporterFX::stop()
  * The last good rectangle is KEPT when projection fails, which is what stops the beam jumping
  * to a default the moment the region tears the avatar down mid-teleport.
  */
+/**
+ * Is the point in front of the camera? The ONLY condition that makes a projection meaningless
+ * -- glm::project mirrors a point behind the eye to a nonsense position on screen.
+ *
+ * projectPosAgentToScreen tests exactly this (llviewercamera.cpp:435) but folds the answer
+ * into a return value that ALSO reports whether the point landed inside the world view rect
+ * (`return in_front && valid`, llviewercamera.cpp:519). Those two things need opposite
+ * handling here, so the test is repeated rather than inferred from that bool.
+ */
+static bool fs_in_front(const LLViewerCamera& cam, const LLVector3& pos)
+{
+    LLVector3 dir = pos - cam.getOrigin();
+    if (dir.magVecSquared() <= 0.f)
+    {
+        return false;
+    }
+    dir.normVec();
+    return (dir * cam.getAtAxis()) > 0.f;
+}
+
 void FSTransporterFX::updateRect()
 {
     if (!isAgentAvatarValid())
@@ -130,35 +150,42 @@ void FSTransporterFX::updateRect()
         return;
     }
 
-    const LLVector3 base = gAgentAvatarp->getRenderPosition();
-    LLCoordGL feet, head;
-    LLViewerCamera& cam = LLViewerCamera::instance();
+    // -0.9m to +1.1m about the drawable ROOT, which on an avatar is mid-body, not the feet
+    // (llvoavatar.cpp:1454). Matches the web viewer's transporter_fx.js _avatarRect.
+    const LLVector3 base     = gAgentAvatarp->getRenderPosition();
+    const LLVector3 feet_pos = base + LLVector3(0.f, 0.f, -0.9f);
+    const LLVector3 head_pos = base + LLVector3(0.f, 0.f,  1.1f);
 
-    // clamp=false: a clamped projection silently reports an off-screen avatar as being at the
-    // screen edge, which would plant the beam in the corner. projectPosAgentToScreen returns
-    // `in_front && valid` in that mode (llviewercamera.cpp:519), i.e. false whenever the
-    // avatar is behind the camera OR outside the world view rect.
-    if (!cam.projectPosAgentToScreen(base + LLVector3(0.f, 0.f, -0.9f), feet, false) ||
-        !cam.projectPosAgentToScreen(base + LLVector3(0.f, 0.f,  1.1f), head, false))
+    LLViewerCamera& cam = LLViewerCamera::instance();
+    if (!fs_in_front(cam, feet_pos) || !fs_in_front(cam, head_pos))
     {
         useFallbackRect();
         return;
     }
 
+    // THE RETURN VALUE IS DELIBERATELY IGNORED.
+    //
+    // [FIX 2026-09-02, "the teleport effect seems to start from half way up his body, however
+    // if i cam out and teleport its in the right place".] With clamp=false the function still
+    // writes the true projected coordinates to out_point and only THEN decides what to return
+    // (llviewercamera.cpp:498-519) -- and what it returns is false as soon as the point falls
+    // outside the world view rect. Cammed in close the avatar's feet project below the
+    // viewport, so this reported "failure" for a perfectly good projection and the beam was
+    // dumped at the centre-screen fallback: exactly half way up a close-up avatar. Being
+    // off-screen is not a reason to reject a position; being behind the camera is, and that is
+    // checked above.
+    LLCoordGL feet, head;
+    cam.projectPosAgentToScreen(feet_pos, feet, false);
+    cam.projectPosAgentToScreen(head_pos, head, false);
+
     const LLVector2& scale = gViewerWindow->getDisplayScale();
-    const F32 fx = (F32)feet.mX * scale.mV[VX];
-    const F32 fy = (F32)feet.mY * scale.mV[VY];
-    const F32 hy = (F32)head.mY * scale.mV[VY];
+    const F32 fx    = (F32)feet.mX * scale.mV[VX];
+    const F32 fy    = (F32)feet.mY * scale.mV[VY];
+    const F32 hy    = (F32)head.mY * scale.mV[VY];
     const F32 win_h = (F32)gViewerWindow->getWindowHeightRaw();
+    const F32 h     = fabsf(hy - fy);
 
-    const F32 h = fabsf(hy - fy);
-
-    // Reject rather than clamp. A 2m span that projects to more than the window height means
-    // the camera is inside the avatar — mouselook, or the moment mid-teleport when the two
-    // coincide. CLAMPING such a projection is what turns the beam into a full-screen white
-    // wash: half_w is derived from the height, so a clamped-huge height gives a column wider
-    // and taller than the screen. The old code clamped at 1.2x the window and did exactly that.
-    if (!llfinite(fx) || !llfinite(fy) || h < 4.f || h > win_h)
+    if (!llfinite(fx) || !llfinite(fy) || !llfinite(h) || h < 4.f)
     {
         useFallbackRect();
         return;
@@ -166,7 +193,11 @@ void FSTransporterFX::updateRect()
 
     mCentreX  = fx;
     mCentreY  = (fy + hy) * 0.5f;
-    mHeight   = h;
+    // CLAMP the size, keep the POSITION. A 2m span taller than the window just means the
+    // avatar fills the screen, which is a correct thing to draw around -- only the position
+    // could ever be wrong, and it is not. The bound stops a camera sitting inside the avatar
+    // from producing a spread of millions of pixels.
+    mHeight   = llmin(h, win_h * 3.f);
     mUIScale  = llmax(0.5f, scale.mV[VY]);
     mHaveRect = true;
 }

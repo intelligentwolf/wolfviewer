@@ -191,5 +191,21 @@
       </array>
     </map>
 
+    <map>
+      <key>name</key>
+      <string>WolfGlass</string>
+      <key>folder</key>
+      <string>wolfglass</string>
+      <key>themes</key>
+      <array>
+        <map>
+          <key>name</key>
+          <string>Dark Green</string>
+          <key>folder</key>
+          <string/>
+        </map>
+      </array>
+    </map>
+
   </array>
 </llsd>

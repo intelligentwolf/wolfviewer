@@ -28,6 +28,8 @@
 
 #include "llviewerdisplay.h"
 
+#include "fstransporterfx.h"   // WolfViewer teleport beam
+
 #include "fsyspath.h"
 #include "hexdump.h"
 #include "llagent.h"
@@ -663,12 +665,35 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
     // Display start screen if we're teleporting, and skip render
     //
 
+    // <WolfViewer> Transporter teleport effect. Replaces the opaque teleport screen with a
+    // beam of light around the avatar, matching the WolfStorm web viewer.
+    //
+    // update_tp_display's `minimized` argument is exactly the lever needed: it still drives
+    // the teleport state machine — which must keep running, or "the sim does not get the
+    // messages signaling the agent's arrival" (see the comment on the minimized call
+    // earlier in this file) — while NOT showing the progress panel. So the world keeps
+    // rendering and the beam is drawn over it in render_ui_2d.
+    static bool s_fs_was_teleporting = false;
+    const bool fs_fx_on = gSavedSettings.getBOOL("WolfViewerTransporterFX");
+    if (!gTeleportDisplay && s_fs_was_teleporting)
+    {
+        // Arrival edge: the teleport screen has just been dismissed, so condense the beam
+        // and fade it out over the region that has appeared.
+        s_fs_was_teleporting = false;
+        FSTransporterFX::instance().finish();
+    }
     if (gTeleportDisplay)
     {
         LL_PROFILE_ZONE_NAMED_CATEGORY_DISPLAY("Teleport Display");
         LLAppViewer::instance()->pingMainloopTimeout("Display:Teleport");
+        if (fs_fx_on && !s_fs_was_teleporting)
+        {
+            s_fs_was_teleporting = true;
+            FSTransporterFX::instance().start();
+        }
         // Note: false = not minimized, do update the TP screen. HB
-        update_tp_display(false);
+        // WolfViewer: true while the beam is running, so the panel stays hidden.
+        update_tp_display(fs_fx_on && FSTransporterFX::instance().isActive());
     }
     else if(LLAppViewer::instance()->logoutRequestSent())
     {
@@ -1893,6 +1918,17 @@ void render_ui_2d()
 
     //  Menu overlays, HUD, etc
     gViewerWindow->setup2DRender();
+
+    // <WolfViewer> The teleport beam: after the world, before the rest of the 2D UI, so it
+    // lies over the region but under menus and floaters. A no-op unless a teleport is running.
+    //
+    // MUST be after setup2DRender(). [FIX 2026-09-02] It was called at the top of this
+    // function, before that call — so it drew its screen-pixel coordinates through whatever
+    // PERSPECTIVE matrix the world render had left bound, which smeared the beam across the
+    // viewport as a flat sheet. setup2DRender() is what installs the pixel ortho
+    // (llviewerwindow.cpp:6845 -> gl_state_for_2d), and the glPolygonMode above is what
+    // guarantees the quads are filled rather than wireframed.
+    FSTransporterFX::instance().render();
 
     // <FS:Ansariel> Factor out instance() call
     //F32 zoom_factor = LLViewerCamera::getInstance()->getZoomFactor();

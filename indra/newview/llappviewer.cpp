@@ -71,6 +71,7 @@
 #include "lltrace.h"
 #include "lltracethreadrecorder.h"
 #include "llviewerwindow.h"
+#include "fswolfwater.h" // <FS:WolfViewer> wolfwater prim surfaces
 #include "llviewerdisplay.h"
 #include "llviewermedia.h"
 #include "llviewerparcelaskplay.h"
@@ -6124,6 +6125,12 @@ void LLAppViewer::idle()
     }
 
     LLWorld::getInstance()->updateParticles();
+
+    // <FS:WolfViewer> Prims described "wolfwater" get a real water surface. Runs here, in
+    // the world-update phase, because it creates and moves LLVOWater objects and must do
+    // so before the frame is drawn. Rate-limits itself to a sweep every 1.5s.
+    FSWolfWater::instance().idle();
+    // </FS:WolfViewer>
 
     if (gAgentPilot.isPlaying() && gAgentPilot.getOverrideCamera())
     {

@@ -19340,6 +19340,72 @@ Change of this parameter will affect the layout of buttons in notification toast
 			<key>Value</key>
 			<integer>0</integer>
 		</map>
+		<key>WolfViewerWolfWaterPrims</key>
+		<map>
+			<key>Comment</key>
+			<string>Draw a real water surface on any prim whose description contains "wolfwater". Costs one throttled ObjectPropertiesFamily request per nearby prim, because a prim's description is not carried in ObjectUpdate.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>1</integer>
+		</map>
+		<key>WolfViewerWaterWaveHeight</key>
+		<map>
+			<key>Comment</key>
+			<string>Height in metres of the rolling swell displaced into the water surface. 0 gives the stock flat water plane (normal-map shading only). Region water only; the stretch-to-horizon planes are always flat.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>F32</string>
+			<key>Value</key>
+			<real>0.22</real>
+		</map>
+		<key>WolfViewerWaterWaveScale</key>
+		<map>
+			<key>Comment</key>
+			<string>Wave frequency of the water swell: 1 divided by the base wavelength in metres. The dominant wave train is twice the base wavelength, so 0.1 gives a roughly 20m swell. Lower is longer and slower.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>F32</string>
+			<key>Value</key>
+			<real>0.1</real>
+		</map>
+		<key>WolfViewerWaterWaveSpeed</key>
+		<map>
+			<key>Comment</key>
+			<string>Multiplier on the water swell's physical phase speed. 1.0 is the deep-water speed sqrt(g/k) for each wavelength; raise it for a faster, choppier sea.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>F32</string>
+			<key>Value</key>
+			<real>1.0</real>
+		</map>
+		<key>WolfViewerWaterWaveFadeStart</key>
+		<map>
+			<key>Comment</key>
+			<string>Distance in metres from the camera at which the water swell begins fading back to a flat plane. Keeps distant water from aliasing.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>F32</string>
+			<key>Value</key>
+			<real>320.0</real>
+		</map>
+		<key>WolfViewerWaterWaveFadeEnd</key>
+		<map>
+			<key>Comment</key>
+			<string>Distance in metres from the camera at which the water swell has faded to nothing. Must be greater than WolfViewerWaterWaveFadeStart.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>F32</string>
+			<key>Value</key>
+			<real>1024.0</real>
+		</map>
 		<key>WolfViewerTransporterFX</key>
 		<map>
 			<key>Comment</key>

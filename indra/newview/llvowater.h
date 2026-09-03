@@ -73,9 +73,28 @@ public:
     void setIsEdgePatch(const bool edge_patch);
     bool getIsEdgePatch() const { return mIsEdgePatch; }
 
+    // <FS:WolfViewer> A BOUNDED water surface — one fitted to a prim described "wolfwater"
+    // (fswolfwater.cpp) rather than the region's own water plane.
+    //
+    // The value is the depth of water the surface represents, in metres, taken from the
+    // prim's own Z extent; 0 means "this is region water". The water shader needs BOTH
+    // facts and they come as one number because they are one question:
+    //
+    //   - Region water gets its colour almost entirely from the refraction buffer plus
+    //     reflections, and its BODY from the water fog applied to submerged geometry. Behind
+    //     a pool prim nothing has been fogged, so without a depth to absorb over, a pool is
+    //     very nearly invisible.
+    //   - The shoreline breaking foam keys on the gap between the surface and whatever is
+    //     behind it. For a thin pool prim that gap is a few centimetres everywhere, so every
+    //     fragment reads as maximally shoaling and the whole pool turns to whitewater.
+    void setBoundedWaterDepth(F32 depth_m) { mBoundedWaterDepth = depth_m; }
+    F32  getBoundedWaterDepth() const { return mBoundedWaterDepth; }
+    // </FS:WolfViewer>
+
 protected:
     bool mIsEdgePatch;
     S32  mRenderType;
+    F32  mBoundedWaterDepth = 0.f;  // <FS:WolfViewer>
 };
 
 class LLVOVoidWater : public LLVOWater

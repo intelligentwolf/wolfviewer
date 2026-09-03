@@ -1561,6 +1561,14 @@ void LLShaderMgr::initAttribsAndUniforms()
     mReservedUniforms.push_back("frame_rect");
     // </FS:Beq>
 
+    // <FS:WolfViewer> Gerstner swell — must stay in the same order as the enum tail.
+    mReservedUniforms.push_back("waveAmplitude");
+    mReservedUniforms.push_back("waveFrequency");
+    mReservedUniforms.push_back("waveSpeed");
+    mReservedUniforms.push_back("waveFade");
+    mReservedUniforms.push_back("boundedWaterDepth");
+    // </FS:WolfViewer>
+
     llassert(mReservedUniforms.size() == END_RESERVED_UNIFORMS);
 
     std::set<std::string> dupe_check;

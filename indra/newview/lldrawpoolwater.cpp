@@ -267,6 +267,26 @@ void LLDrawPoolWater::renderPostDeferred(S32 pass)
     shader->uniform1f(LLShaderMgr::WATER_FRESNEL_OFFSET, pwater->getFresnelOffset());
     shader->uniform1f(LLShaderMgr::WATER_BLUR_MULTIPLIER, fmaxf(0, pwater->getBlurMultiplier()) * 2);
 
+    // <FS:WolfViewer> Gerstner swell (waterV.glsl). Stock water has no wave geometry at
+    // all, so there is no environment setting to read these from — they are viewer
+    // settings, not EEP. The swell DIRECTION is not here: waterV.glsl takes it from the
+    // region's own EEP waveDir1, already uploaded above.
+    //
+    // waveAmplitude is uploaded per FACE rather than here, in pushWaterPlanes, because it
+    // has to be zero for the stretch-to-horizon void-water planes, which are a separate
+    // object drawn in this same pass. The rest are constant for the whole pass.
+    static LLCachedControl<F32> wave_scale(gSavedSettings, "WolfViewerWaterWaveScale", 0.1f);
+    static LLCachedControl<F32> wave_speed(gSavedSettings, "WolfViewerWaterWaveSpeed", 1.f);
+    static LLCachedControl<F32> wave_fade_start(gSavedSettings, "WolfViewerWaterWaveFadeStart", 320.f);
+    static LLCachedControl<F32> wave_fade_end(gSavedSettings, "WolfViewerWaterWaveFadeEnd", 1024.f);
+    shader->uniform1f(LLShaderMgr::WATER_WAVE_FREQUENCY, llmax(0.001f, (F32)wave_scale));
+    shader->uniform1f(LLShaderMgr::WATER_WAVE_SPEED, (F32)wave_speed);
+    // End must exceed start or the smoothstep in the shader is degenerate.
+    F32 fade_start = llmax(0.f, (F32)wave_fade_start);
+    F32 fade_end   = llmax(fade_start + 1.f, (F32)wave_fade_end);
+    shader->uniform2f(LLShaderMgr::WATER_WAVE_FADE, fade_start, fade_end);
+    // </FS:WolfViewer>
+
     static LLStaticHashedString s_exposure("exposure");
     static LLStaticHashedString tonemap_mix("tonemap_mix");
     static LLStaticHashedString tonemap_type("tonemap_type");
@@ -321,10 +341,35 @@ void LLDrawPoolWater::renderPostDeferred(S32 pass)
 
 void LLDrawPoolWater::pushWaterPlanes(int pass)
 {
+    // <FS:WolfViewer> Swell amplitude, per face.
+    //
+    // Region water and the stretch-to-horizon VOID water are drawn together in this one
+    // loop (see Geenz's note at the call site), but only region water carries a lattice
+    // fine enough to hold a wave: LLVOWater::updateGeometry leaves edge patches at the
+    // stock ~32m step, where displacing a vertex produces a torn horizon rather than a
+    // swell. Uploading amplitude here rather than once per pass is what lets the two share
+    // a shader — the edge planes simply get zero and take the shader's flat path.
+    static LLCachedControl<F32> wave_height(gSavedSettings, "WolfViewerWaterWaveHeight", 0.22f);
+    LLGLSLShader* cur_shader = LLGLSLShader::sCurBoundShaderPtr;
+    const F32 amplitude = llclamp((F32)wave_height, 0.f, 5.f);
+    // </FS:WolfViewer>
+
     LLVOWater* water = nullptr;
     for (LLFace* const& face : mDrawFace)
     {
         water = static_cast<LLVOWater*>(face->getViewerObject());
+
+        // <FS:WolfViewer>
+        if (cur_shader)
+        {
+            cur_shader->uniform1f(LLShaderMgr::WATER_WAVE_AMPLITUDE,
+                                  water->getIsEdgePatch() ? 0.f : amplitude);
+            // 0 for the region's own water, the prim's Z extent for a wolfwater surface.
+            // See LLVOWater::setBoundedWaterDepth for what the shader does with it.
+            cur_shader->uniform1f(LLShaderMgr::WATER_BOUNDED_DEPTH,
+                                  water->getBoundedWaterDepth());
+        }
+        // </FS:WolfViewer>
 
         face->renderIndexed();
 

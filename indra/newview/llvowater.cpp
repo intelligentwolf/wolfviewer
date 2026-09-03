@@ -132,21 +132,89 @@ bool LLVOWater::updateGeometry(LLDrawable *drawable)
     LLStrider<U16> indicesp;
     U16 index_offset;
 
-
     // A quad is 4 vertices and 6 indices (making 2 triangles)
     static const unsigned int vertices_per_quad = 4;
     static const unsigned int indices_per_quad = 6;
 
-    S32 size_x = LLPipeline::sRenderTransparentWater ? 8 : 1;
-    S32 size_y = LLPipeline::sRenderTransparentWater ? 8 : 1;
-
     const LLVector3& scale = getScale();
-    size_x *= (S32)llmin(llround(scale.mV[0] / 256.f), 8);
-    size_y *= (S32)llmin(llround(scale.mV[1] / 256.f), 8);
+
+    // <FS:WolfViewer> WAVE GEOMETRY.
+    //
+    // THE PROBLEM THIS SOLVES. Stock water is 8x8 quads for a 256m region, i.e. a vertex
+    // every 32 metres, and waterV.glsl displaces none of them — every "wave" in the stock
+    // viewer is normal-map shading on a dead-flat plane. That is what reads as plastic.
+    // Simply adding Gerstner displacement to this lattice would change nothing visible:
+    // Nyquist needs at least two vertices per wavelength, so a 32m step cannot express any
+    // swell shorter than 64m, and every wave we care about (a ~20m dominant swell, ~3m
+    // chop) would collapse back to a flat plane.
+    //
+    // So the geometry has to come first. Vertices are placed on a fixed WORLD-SPACE step
+    // rather than a fixed count, so a region's water is tessellated to the waves rather
+    // than to the region's size.
+    //
+    // TWO CONSTRAINTS SET THE NUMBERS:
+    //   - The index stride here is U16 (LLStrider<U16> above), so a face cannot address
+    //     more than 65536 vertices. (MAX_STEPS+1)^2 = 255^2 = 65025 stays under it with
+    //     room to spare.
+    //   - Stock builds four SEPARATE vertices per quad. At this density that would quadruple
+    //     the buffer for nothing, so the lattice below SHARES vertices between neighbouring
+    //     quads: (n+1)^2 vertices instead of 4*n^2. It is also what keeps the surface
+    //     watertight once the vertices start moving — duplicated vertices displaced by the
+    //     same wave still agree, but only because they are computed from world position;
+    //     sharing removes the question.
+    //
+    // A 256m region gets the full 2m step (128 quads a side, 16641 vertices). Larger
+    // regions hold the step until the cap and then degrade: 512m -> 2.02m, 1024m -> 4.03m,
+    // 2048m -> 8.06m. DECLARED LIMIT: at 2048m the step is coarse enough to soften the
+    // dominant swell, which is the honest trade against a 4x vertex budget on a region
+    // whose water is mostly beyond the draw distance anyway.
+    //
+    // EDGE (void) water is deliberately left at the stock tessellation. Those planes are
+    // the 2048m stretch-to-horizon quads built by LLWorld::updateWaterObjects, where a
+    // real step would cost tens of megabytes to displace water that is kilometres away;
+    // the vertex shader fades wave amplitude out with distance long before it reaches them.
+    static const F32 TARGET_STEP_M = 2.f;
+    static const S32 MAX_STEPS = 254;
+
+    S32 size_x;
+    S32 size_y;
+    bool shared_lattice = false;
+
+    if (!LLPipeline::sRenderTransparentWater)
+    {
+        // Opaque legacy water: one quad, as stock. renderOpaqueLegacyWater() does not run
+        // the wave shader at all, so tessellating it would buy nothing.
+        size_x = 1;
+        size_y = 1;
+    }
+    else if (mIsEdgePatch)
+    {
+        size_x = 8 * (S32)llmin(llround(scale.mV[0] / 256.f), 8);
+        size_y = 8 * (S32)llmin(llround(scale.mV[1] / 256.f), 8);
+    }
+    else
+    {
+        size_x = llclamp((S32)llround(scale.mV[0] / TARGET_STEP_M), 1, MAX_STEPS);
+        size_y = llclamp((S32)llround(scale.mV[1] / TARGET_STEP_M), 1, MAX_STEPS);
+        shared_lattice = true;
+    }
+
+    // llround can return 0 for a degenerate scale; a zero-quad face would allocate nothing
+    // and then be strided into below.
+    size_x = llmax(size_x, 1);
+    size_y = llmax(size_y, 1);
 
     const S32 num_quads = size_x * size_y;
-    face->setSize(vertices_per_quad * num_quads,
-                  indices_per_quad * num_quads);
+    if (shared_lattice)
+    {
+        face->setSize((size_x + 1) * (size_y + 1), indices_per_quad * num_quads);
+    }
+    else
+    {
+        face->setSize(vertices_per_quad * num_quads,
+                      indices_per_quad * num_quads);
+    }
+    // </FS:WolfViewer>
 
     LLVertexBuffer* buff = face->getVertexBuffer();
     if (!buff ||
@@ -184,6 +252,76 @@ bool LLVOWater::updateGeometry(LLDrawable *drawable)
 
     F32 size_inv_x = 1.f / size_x;
     F32 size_inv_y = 1.f / size_y;
+
+    // <FS:WolfViewer> Shared-vertex lattice for wave-bearing water — see the note above
+    // updateGeometry's face->setSize. (size_x+1) x (size_y+1) vertices, each used by up to
+    // four quads, laid out row-major so a vertex index is (j * (size_x+1) + i).
+    if (shared_lattice)
+    {
+        // Built about the object's CENTRE rather than its corner, so an oriented surface
+        // is one rotation of the offset. Region water is never rotated and takes the
+        // identity path, which reduces to exactly the corner-plus-step arithmetic the
+        // stock loop below uses.
+        //
+        // Rotation is here for wolfwater prims (fswolfwater.cpp): a prim described
+        // "wolfwater" gets one of these fitted to it, and a builder is entitled to tilt it
+        // into a sloping stream. The vertex normal is rotated with the surface, and
+        // waterV.glsl reads that attribute rather than assuming +Z, so a tilted surface
+        // shades and displaces along its own up vector.
+        const LLVector3    center = getPositionAgent();
+        const LLVector3    half   = getScale() * 0.5f;
+        const LLQuaternion rot    = getRotation();
+        const bool         rotated = (rot != LLQuaternion());
+        const LLVector3    surface_normal = rotated ? (normal * rot) : normal;
+        const S32          row = size_x + 1;
+
+        for (y = 0; y <= size_y; y++)
+        {
+            for (x = 0; x <= size_x; x++)
+            {
+                LLVector3 off(x * step_x - half.mV[VX],
+                              y * step_y - half.mV[VY],
+                              -half.mV[VZ]);
+                if (rotated)
+                {
+                    off = off * rot;
+                }
+                *verticesp++  = center + off;
+                *normalsp++   = surface_normal;
+                *texCoordsp++ = LLVector2(x * size_inv_x, y * size_inv_y);
+            }
+        }
+
+        for (y = 0; y < size_y; y++)
+        {
+            for (x = 0; x < size_x; x++)
+            {
+                const U16 i0 = (U16)(index_offset + y * row + x);
+                const U16 i1 = (U16)(i0 + 1);
+                const U16 i2 = (U16)(i0 + row);
+                const U16 i3 = (U16)(i2 + 1);
+
+                // Both triangles wind counter-clockwise seen from +Z, matching the stock
+                // quad below: there (BL-TL)x(TR-TL) points +Z, here (BR-BL)x(TL-BL) and
+                // (TR-BR)x(TL-BR) both point +Z. The water surface must face up, or it
+                // culls away when you are standing on the shore looking at it.
+                *indicesp++ = i0;
+                *indicesp++ = i1;
+                *indicesp++ = i2;
+
+                *indicesp++ = i1;
+                *indicesp++ = i3;
+                *indicesp++ = i2;
+            }
+        }
+
+        buff->unmapBuffer();
+
+        mDrawable->movePartition();
+        LLPipeline::sCompiles++;
+        return true;
+    }
+    // </FS:WolfViewer>
 
     for (y = 0; y < size_y; y++)
     {

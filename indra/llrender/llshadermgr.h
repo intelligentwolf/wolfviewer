@@ -359,6 +359,15 @@ public:
         SNAPSHOT_BORDER_THICKNESS,          // "border_thickness"
         SNAPSHOT_FRAME_RECT,                // "frame_rect"
         // </FS:Beq>
+
+        // <FS:WolfViewer> Gerstner swell in class1/environment/waterV.glsl. Stock water has
+        // no wave geometry at all, so these have no stock counterpart to reuse.
+        WATER_WAVE_AMPLITUDE,               // "waveAmplitude"
+        WATER_WAVE_FREQUENCY,               // "waveFrequency"
+        WATER_WAVE_SPEED,                   // "waveSpeed"
+        WATER_WAVE_FADE,                    // "waveFade"
+        WATER_BOUNDED_DEPTH,                // "boundedWaterDepth"
+        // </FS:WolfViewer>
         END_RESERVED_UNIFORMS
     } eGLSLReservedUniforms;
     // clang-format on

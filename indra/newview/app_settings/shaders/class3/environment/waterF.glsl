@@ -99,6 +99,25 @@ uniform float kd;
 uniform vec3 normScale;
 uniform float fresnelScale;
 uniform float fresnelOffset;
+// <FS:WolfViewer> Swell height, the same value the vertex stage displaced by — the foam
+// below has to know how big a crest IS before it can tell one from a trough. waveDir1 is
+// the region's EEP wave direction; it is uploaded to the program, so declaring it here
+// simply reads the same uniform waterV.glsl does, and the shoreline sets keep the tempo
+// the region asked for.
+uniform float waveAmplitude;
+uniform vec2 waveDir1;
+// The same wave clock waterV.glsl runs on (LLDrawPoolWater uploads WATER_TIME once for the
+// whole program), so the shoreline sets keep step with the swell geometry.
+uniform float time;
+// 0 for the region's own water; for a wolfwater prim surface, the depth of water the prim
+// represents (its Z extent). See LLVOWater::setBoundedWaterDepth.
+uniform float boundedWaterDepth;
+// The EEP water fog, uploaded for every water shader by LLSettingsVOWater::applySpecial.
+// Region water never needs these here because its body comes from fog applied to submerged
+// geometry; a bounded surface has to colour itself.
+uniform vec3  waterFogColorLinear;
+uniform float waterFogDensity;
+// </FS:WolfViewer>
 
 //bigWave is (refCoord.w, view.w);
 in vec4 refCoord;
@@ -108,6 +127,11 @@ in vec3 vary_position;
 in vec3 vary_normal;
 in vec3 vary_tangent;
 in vec3 vary_light_dir;
+// <FS:WolfViewer> Analytic slope and crest height of the Gerstner swell the vertex stage
+// displaced. See waterV.glsl.
+in vec2 vary_wave_slope;
+in float vary_wave_height;
+// </FS:WolfViewer>
 
 vec3 BlendNormal(vec3 bump1, vec3 bump2)
 {
@@ -209,6 +233,21 @@ void main()
 
     vec3 wavef = (wave1 + wave2 * 0.4 + wave3 * 0.6) * 0.5;
 
+    // <FS:WolfViewer> Tilt the shading normal with the swell the vertex stage actually
+    // built. Without this the geometry rolls but the LIGHT does not: a surface z = h(x,y)
+    // has normal proportional to (-dh/dx, -dh/dy, 1), so a displaced crest that is still
+    // shaded as though it were flat catches the sun in the wrong place and reads as a
+    // painted stripe rather than a wave. wavef is tangent-space here (vT = +X, vB =
+    // cross(vN,vT) = +Y, vN = +Z, all from waterV.glsl), so the slope goes straight into
+    // its xy with no basis change.
+    //
+    // The 2.5 gain is carried over from WolfStorm's water (Water.js), where it was tuned
+    // against this same formula: the raw slope of a gentle swell is around 0.05, which is
+    // an order of magnitude below the normal-map detail it has to compete with, and at
+    // unity gain the swell simply does not register in the lighting.
+    wavef.xy += -vary_wave_slope * 2.5;
+    // </FS:WolfViewer>
+
     vec3 df3 = vec3(0);
     vec2 df2 = vec2(0);
 
@@ -257,6 +296,13 @@ void main()
 
     vec3 sunlit_linear = sunlit;
     float fade = 1;
+    // <FS:WolfViewer> How deep the water is at this fragment, in metres along the view ray.
+    // Set from the refraction depth buffer inside the TRANSPARENT_WATER block below, which
+    // already unprojects it for the shoreline fade; left effectively infinite when there is
+    // no depth to read (opaque water), which switches the shoreline foam off rather than
+    // making it up.
+    float wolf_water_depth = 1e6;
+    // </FS:WolfViewer>
 #ifdef TRANSPARENT_WATER
     float depth = texture(depthMap, distort).r;
 
@@ -278,6 +324,15 @@ void main()
     {
         distort2 = distort;
     }
+
+    // <FS:WolfViewer> refPos is the geometry seen THROUGH the water, unprojected from the
+    // refraction pass's depth buffer; pos is the water surface. Both are eye-space, so the
+    // difference is how much water the view ray crosses before it hits the bottom. That is
+    // a true depth — it reads the actual seabed, riverbed or pool floor, including prims —
+    // and it costs nothing, because the two positions are already computed above for the
+    // refraction blend.
+    wolf_water_depth = max(0.0, pos.z - refPos.z);
+    // </FS:WolfViewer>
 
     vec4 fb = texture(screenTex, distort2);
 
@@ -341,6 +396,92 @@ void main()
     fade *= 60;
     fade = min(1, fade);
     color = mix(fb.rgb, color, fade);
+
+    // <FS:WolfViewer> Open-water foam lace on the swell crests.
+    //
+    // Ported from WolfStorm's water (Water.js, "ambient open-water foam lace"). Real sea
+    // is not a clean surface: it carries thin lacy streaks of aerated water that gather on
+    // the tops of the swell and thin out in the troughs. Without them a displaced surface
+    // still reads as coloured jelly, because nothing on it tells you which way is up
+    // except the lighting.
+    //
+    // The streaks come from thresholding two normal-map taps that have already been
+    // sampled (no extra texture fetch), and they are concentrated by vary_wave_height —
+    // the actual Gerstner crest height at this fragment — so the foam sits on the
+    // geometry rather than floating over it. Everything scales with waveAmplitude, so
+    // calm water stays clean and setting the swell to 0 removes this with it.
+    //
+    // Scaled by the scene light. An earlier version of this in WolfStorm used a constant
+    // colour and the foam GLOWED white under a night sky.
+    // <FS:WolfViewer> Give a BOUNDED surface a body of its own.
+    //
+    // Firestorm's water takes nearly all its colour from the refraction buffer and its
+    // reflections; what makes the region ocean look like water rather than glass is the
+    // water fog applied to the geometry BENEATH it. Nothing behind a pool prim has been
+    // fogged, so without this a pool is very nearly invisible — which is exactly what a
+    // transparent prim underneath one shows.
+    //
+    // Beer-Lambert absorption toward the region's EEP water fog colour over the prim's own
+    // thickness, so a deep prim gives deep water and a shallow one gives a wash. The lower
+    // clamp is a deliberate choice, not physics: a builder marking a paper-thin panel as
+    // wolfwater still means "this is water", and 0.22 is the least tint that still reads as
+    // such. The upper clamp keeps a very deep prim from going fully opaque.
+    if (boundedWaterDepth > 0.0)
+    {
+        float absorb = 1.0 - exp(-waterFogDensity * boundedWaterDepth);
+        color = mix(color, waterFogColorLinear, clamp(absorb, 0.22, 0.85));
+    }
+    // </FS:WolfViewer>
+
+    // <FS:WolfViewer> Shoreline foam — sets breaking on the shallows.
+    //
+    // Real water goes white where it shoals, and it does it in TRAVELLING BANDS, not as a
+    // static rim: as a wave runs into shallow water it slows, the crests bunch up behind
+    // it, and it breaks. The phase term below is WolfStorm's (Water.js shore waves):
+    // sqrt(depth) is the shallow-water celerity relation, so adding it to the clock makes
+    // crests bunch and slow exactly where the water gets thin, and the sets roll beachward
+    // on their own.
+    //
+    // The depth is the real one measured off the refraction buffer above, so this follows
+    // a hand-built riverbed or the lip of a wolfwater pool as readily as it follows terrain.
+    //
+    // DECLARED LIMIT vs WolfStorm: the foam is a fragment effect only. WolfStorm also LIFTS
+    // the breaker geometry as it shoals, which needs the depth in the VERTEX stage — a
+    // screen-space depth buffer cannot be read there, so that would need a baked terrain
+    // heightfield and is not done here. The bands read correctly; they do not stand up.
+    // A BOUNDED surface has no shoreline to break on. wolf_water_depth measures the gap to
+    // whatever is behind the surface, and for a pool prim that gap is a few centimetres
+    // everywhere — so this block, written for a beach, read the whole pool as maximally
+    // shoaling and turned it to whitewater. Region water only.
+    if (boundedWaterDepth <= 0.0 && waveAmplitude > 0.001 && wolf_water_depth < 8.0)
+    {
+        float shoal = 1.0 - smoothstep(0.4, 5.0, wolf_water_depth);
+        // Tempo follows the region's EEP wave direction magnitude, as the swell does.
+        float speedScale = clamp(length(waveDir1) * 0.885, 0.4, 2.0);
+        float phase = time * 4.5 * speedScale + sqrt(max(wolf_water_depth, 0.0)) * 8.0
+                    + (wave3.x + wave3.y) * 0.45;
+        float crest = smoothstep(0.30, 0.95, sin(phase)) * shoal;
+        // 0.85 was far too strong — every shallow patch went solidly white rather than
+        // reading as a band of surf. Foam is a highlight on the water, not a replacement
+        // for it.
+        float breakFoam = clamp(crest * 0.45, 0.0, 0.45);
+        float breakLight = clamp(dot(sunlit_linear + amblit, vec3(0.3333)), 0.08, 1.0);
+        color = mix(color, vec3(0.95, 0.97, 0.99) * breakLight, breakFoam);
+    }
+    // </FS:WolfViewer>
+
+    if (waveAmplitude > 0.001)
+    {
+        float lace = smoothstep(0.5, 0.9, abs(wave1.x + wave2.y));
+        float crestF = clamp(vary_wave_height / (waveAmplitude * 1.2 + 0.001), 0.0, 1.0);
+        float ambFoam = lace * (0.05 + 0.30 * crestF)
+                      * clamp(waveAmplitude * 5.0, 0.0, 1.0)
+                      // Open sea carries whitecaps; a garden pond does not.
+                      * (boundedWaterDepth > 0.0 ? 0.3 : 1.0);
+        float ambLight = clamp(dot(sunlit_linear + amblit, vec3(0.3333)), 0.08, 1.0);
+        color = mix(color, vec3(0.90, 0.94, 0.97) * ambLight, ambFoam);
+    }
+    // </FS:WolfViewer>
 
     float spec = min(max(max(punctual.r, punctual.g), punctual.b), 0);
 

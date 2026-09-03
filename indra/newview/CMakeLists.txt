@@ -184,6 +184,7 @@ set(viewer_SOURCE_FILES
     fsslurlcommand.cpp
     fstransporterfx.cpp
     fsvirtualtrackpad.cpp
+    fswolfwater.cpp
     fsworldmapmessage.cpp
     lggbeamcolormapfloater.cpp
     lggbeammapfloater.cpp
@@ -1048,6 +1049,7 @@ set(viewer_HEADER_FILES
     fsslurlcommand.h
     fstransporterfx.h
     fsvirtualtrackpad.h
+    fswolfwater.h
     fsworldmapmessage.h
     lggbeamcolormapfloater.h
     lggbeammapfloater.h

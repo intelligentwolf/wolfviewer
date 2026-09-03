@@ -1,0 +1,65 @@
+# Announce a published release in the grid Discord, WITH the release notes.
+#
+# Why an Action instead of the plain GitHub -> Discord webhook: Discord's
+# /github endpoint renders a release as a single line ("New release published:
+# <tag>") and discards the body entirely -- GitHub does send it (verified: a
+# 1414-character body delivered, one line displayed). Worse, the link it posts
+# points at the repository, which is private, so it 404s for every grid member.
+#
+# This posts the actual notes as an embed, and links to where users can GET the
+# thing rather than to source they cannot read.
+name: Announce release on Discord
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag of an existing release to announce"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  announce:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post release notes to Discord
+        env:
+          WEBHOOK:  ${{ secrets.DISCORD_RELEASES_WEBHOOK }}
+          GH_TOKEN: ${{ github.token }}
+          REPO:     ${{ github.repository }}
+          TAG:      ${{ github.event.release.tag_name || inputs.tag }}
+          GET_IT:   "https://wolf-grid.com/viewers.php"
+          WHO:      "WolfViewer"
+        run: |
+          set -euo pipefail
+          if [ -z "${WEBHOOK:-}" ]; then
+            echo "::error::DISCORD_RELEASES_WEBHOOK secret is not set on this repository"
+            exit 1
+          fi
+          rel=$(gh api "repos/$REPO/releases/tags/$TAG")
+          title=$(printf '%s' "$rel" | jq -r '.name // .tag_name')
+          body=$(printf '%s' "$rel"  | jq -r '.body // ""')
+          # Discord caps an embed description at 4096 characters.
+          if [ "${#body}" -gt 3800 ]; then
+            body="$(printf '%s' "$body" | head -c 3800)"$'\n\n…'
+          fi
+          jq -n --arg t "$title" --arg d "$body" --arg u "$GET_IT" --arg tag "$TAG" --arg who "$WHO" '{
+            username: ($who + " Releases"),
+            embeds: [{
+              title: $t,
+              description: $d,
+              url: $u,
+              color: 8702998,
+              footer: { text: ($tag + " · " + $u) }
+            }]
+          }' > payload.json
+          code=$(curl -sS -o resp.txt -w '%{http_code}' \
+                   -H 'Content-Type: application/json' \
+                   -X POST -d @payload.json "$WEBHOOK")
+          echo "Discord responded: $code"
+          [ -s resp.txt ] && cat resp.txt || true
+          case "$code" in 200|204) ;; *) echo "::error::Discord rejected the post"; exit 1;; esac

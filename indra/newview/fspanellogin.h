@@ -116,6 +116,12 @@ private:
 
 private:
     boost::signals2::connection mGridListChangedCallbackConnection;
+    // <FS:WolfViewer> Separate from the connection above, which the "user typed an unknown
+    // grid" flow in onSelectServer() owns and disconnects. This one lives for the panel's
+    // lifetime and only refreshes the saved-username list.
+    boost::signals2::connection mUserComboGridConnection;
+    void onGridListChangedForUserCombo();
+    // </FS:WolfViewer>
 
     void updateLoginButtons();
 

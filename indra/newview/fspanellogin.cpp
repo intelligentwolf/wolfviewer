@@ -188,7 +188,8 @@ FSPanelLogin::FSPanelLogin(const LLRect &rect,
     mLocationLength(0),
     mShowFavorites(false),
     mInitialized(false),
-    mGridListChangedCallbackConnection()
+    mGridListChangedCallbackConnection(),
+    mUserComboGridConnection()          // <FS:WolfViewer>
 {
     setBackgroundVisible(false);
     setBackgroundOpaque(true);
@@ -229,6 +230,17 @@ FSPanelLogin::FSPanelLogin(const LLRect &rect,
 
     LLComboBox* favorites_combo = getChild<LLComboBox>("start_location_combo");
     updateLocationSelectorsVisibility(); // separate so that it can be called from preferences
+
+    // <FS:WolfViewer> The call above populates the saved-username combo, but a saved credential
+    // is only listed once its grid has a label, and on a SINGLEGRID build the grid is not in
+    // mGridList yet: initSystemGrids() adds only the "LoadingData" placeholder
+    // (fsgridhandler.cpp:206-209), so setGridChoice() falls through to addGrid(..., FETCH)
+    // (fsgridhandler.cpp:1017-1031) and the real entry -- with its label -- arrives only when
+    // that get_grid_info response fires mGridListChangedSignal (fsgridhandler.cpp:812-815).
+    // Repopulate then, or the list stays empty for the whole session.
+    mUserComboGridConnection = LLGridManager::getInstance()->addGridListChangedCallback(
+        boost::bind(&FSPanelLogin::onGridListChangedForUserCombo, this));
+    // </FS:WolfViewer>
     favorites_combo->setFocusLostCallback(boost::bind(&FSPanelLogin::onLocationSLURL, this));
 
     LLComboBox* server_choice_combo = getChild<LLComboBox>("server_combo");
@@ -407,6 +419,13 @@ FSPanelLogin::~FSPanelLogin()
         mGridListChangedCallbackConnection.disconnect();
     }
 
+    // <FS:WolfViewer>
+    if (mUserComboGridConnection.connected())
+    {
+        mUserComboGridConnection.disconnect();
+    }
+    // </FS:WolfViewer>
+
     FSPanelLogin::sInstance = NULL;
 
     // Controls having keyboard focus by default
@@ -575,6 +594,14 @@ void FSPanelLogin::setFields(LLPointer<LLCredential> credential, bool from_start
         sInstance->mPasswordLength = filler.length();
         sInstance->updateLoginButtons();
         remember = true;
+
+        // <FS:WolfViewer> The field now holds the filler, not something the user typed, so
+        // getFields() must fall back to the stored authenticator rather than hash this text.
+        // LLLineEditor::setText() does not fire mKeystrokeCallback, so a later real keystroke
+        // still sets the flag through onPassKey(). The from_startup block below deliberately
+        // sets it again when it restores sPassword.
+        sInstance->mPasswordModified = false;
+        // </FS:WolfViewer>
 
         // We run into this case, if a user tries to login with a newly entered password
         // and the login fails with some error (except wrong credentials). In that case,
@@ -1313,6 +1340,23 @@ std::string canonicalize_username(const std::string& name)
     return first + ' ' + last;
 }
 
+// <FS:WolfViewer> The grid list gained an entry (usually the get_grid_info response for our
+// own grid), so a saved credential that had no grid label a moment ago can be listed now.
+// Only the username combo is touched -- the rest of the panel is left exactly as the user
+// left it, and addUsersToCombo() re-selects the current credential itself.
+void FSPanelLogin::onGridListChangedForUserCombo()
+{
+    // addUsersToCombo() calls removeall() before it rebuilds, which would take a half-typed
+    // username with it. The grid info can land a second or two after the login screen appears,
+    // so that window is real. Same guard updateServer() uses before it overwrites the fields.
+    if (areCredentialFieldsDirty())
+    {
+        return;
+    }
+    addUsersToCombo(gSavedSettings.getBOOL("ForceShowGrid"));
+}
+// </FS:WolfViewer>
+
 void FSPanelLogin::addUsersToCombo(bool show_server)
 {
     LLComboBox* combo = getChild<LLComboBox>("username_combo");
@@ -1357,11 +1401,27 @@ void FSPanelLogin::addUsersToCombo(bool show_server)
                 add_grid = true;
             }
 #ifdef OPENSIM
-            else if (!grid_label.empty() && show_server)
+            // <FS:WolfViewer> show_server decides whether the grid label is appended to the
+            // displayed name, not whether the credential is listed at all -- same shape as the
+            // Second Life branch above. Gating add_grid on it left this combo empty on SINGLEGRID
+            // builds, because llappviewer.cpp:3193 only forces ForceShowGrid true under
+            // "#if OPENSIM && !SINGLEGRID". An empty combo makes selectByValue() fail in
+            // setFields(), which sets mPasswordModified and makes getFields() hash the
+            // "Enter a password" filler instead of the saved authenticator.
+            //else if (!grid_label.empty() && show_server)
+            //{
+            //    name.append(" @ " + grid_label);
+            //    add_grid = true;
+            //}
+            else if (!grid_label.empty())
             {
-                name.append(" @ " + grid_label);
+                if (show_server)
+                {
+                    name.append(" @ " + grid_label);
+                }
                 add_grid = true;
             }
+            // </FS:WolfViewer>
 #else  // OPENSIM
             else if (SECOND_LIFE_BETA_LABEL == grid_label && show_server)
             {

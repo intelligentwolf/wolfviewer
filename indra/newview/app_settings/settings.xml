@@ -142,6 +142,12 @@
     <key>Value</key>
     <integer>0</integer>
   </map>
+  <!-- <FS:WolfViewer> Off by default. GridListDownloadURL is Firestorm's own
+       http://phoenixviewer.com/app/fsdata/grids.xml, fetched over PLAIN HTTP and merged
+       straight into the login grid list (gate llstartup.cpp:1015, fetch 1031-1032), so anyone able to tamper
+       with that response could inject a grid whose loginuri collects credentials. Users add
+       the grids they want through the grid manager instead. Do not switch this back on
+       without an https URL that has actually been verified to serve this file. -->
   <key>GridListDownload</key>
   <map>
     <key>Comment</key>
@@ -151,8 +157,9 @@
     <key>Type</key>
     <string>Boolean</string>
     <key>Value</key>
-    <integer>1</integer>
+    <integer>0</integer>
   </map>
+  <!-- </FS:WolfViewer> -->
   <key>GridListDownloadURL</key>
   <map>
     <key>Comment</key>

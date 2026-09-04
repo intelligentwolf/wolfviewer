@@ -32,11 +32,21 @@ const std::string SECOND_LIFE_MAIN_LABEL = "Second Life";
 const std::string SECOND_LIFE_BETA_LABEL = "Second Life Beta";
 
 // @TODO this really should be private, but is used in llslurl
+// <FS:WolfViewer> Wolf Territories stays the main grid on multi-grid OpenSim builds too.
+// MAINGRID is the fallback when no grid is selected (fsgridhandler.cpp:301-303) and when a
+// SLURL names no grid (fsslurl.cpp:270 -- llslurl.cpp is commented out of OpenSim builds at
+// newview/CMakeLists.txt:726, so fsslurl is the live one). Dropping SINGLEGRID used
+// to hand those paths util.agni.lindenlab.com, a grid that is not even in our grids.xml.
+// The value is the grids.xml <name> key, because that is what mGridList is keyed on
+// (fsgridhandler.cpp:310) and what CurrentGrid defaults to in settings.xml.
 #if defined(OPENSIM) && defined(SINGLEGRID)
 const std::string MAINGRID = SINGLEGRID_URI;
+#elif defined(OPENSIM)
+const std::string MAINGRID = "grid.wolfterritories.org:8002";
 #else
 const std::string MAINGRID = "util.agni.lindenlab.com";
 #endif
+// </FS:WolfViewer>
 
 // <FS:AW optional opensim support>
 #ifdef OPENSIM

@@ -11,12 +11,12 @@ env:
   # hyphen, NOT a space: the channel feeds app_name() and the installer/tar
   # filenames (fs_viewer_manifest.py:132), and viewer_manifest.py warns
   # whitespace there "break[s] a lot of things in the old FS installer logic".
-  VIEWER_CHANNEL: "WolfViewer-Release-w5"
+  VIEWER_CHANNEL: "WolfViewer-Release-w6"
   AUTOBUILD_CONFIG: "ReleaseOS"     # OpenSim edition, open codecs (no FMOD/KDU/secrets)
   # BuildVersion.cmake:14 reads ENV{revision} for the 4th version field (must be
   # numeric — viewerRes.rc:145 FILEVERSION). Pin to the wolf revision number so the
   # viewer reports 7.2.4.1 instead of a meaningless git commit count.
-  revision: "5"
+  revision: "6"
 
 jobs:
   build:

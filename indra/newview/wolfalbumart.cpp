@@ -26,10 +26,13 @@
 //   {"resultCount":1,"results":[{"artistName":..,"trackName":..,"collectionName":..,
 //     "artworkUrl100":"https://is1-ssl.mzstatic.com/image/thumb/.../100x100bb.jpg", ..}]}
 // and {"resultCount":0,"results":[]} for no match. The artwork URL's trailing size
-// segment can be rewritten (100x100 -> 300x300 returned 200 image/jpeg).
+// segment can be rewritten; 256x256, 512x512 and 1024x1024 all returned 200 image/jpeg at
+// exactly those dimensions. The size MUST be a power of two: LLViewerTexture::preCreateTexture
+// rejects anything else via LLImageGL::checkSize ("!size_ok, setting as missing") — a 300x300
+// cover was silently marked missing and never drawn. 256 is plenty for the 96px panel.
 static const std::string ITUNES_SEARCH_URL = "https://itunes.apple.com/search?media=music&entity=song&limit=1&term=";
 static const std::string ITUNES_ART_SIZE_IN = "100x100";
-static const std::string ITUNES_ART_SIZE_OUT = "300x300";
+static const std::string ITUNES_ART_SIZE_OUT = "256x256";
 
 WolfAlbumArt::~WolfAlbumArt()
 {

@@ -2062,6 +2062,8 @@ LLUUID LLGLSLShader::hash()
     {
         hash_obj.update(shdr_pair.first);
         hash_obj.update(&shdr_pair.second, sizeof(GLenum));
+        // <WolfViewer> and the file's bytes, so an edited shader never hits a stale cached program
+        LLShaderMgr::instance()->hashShaderFileContents(hash_obj, shdr_pair.first, mShaderLevel);
     }
     for (const auto& define_pair : mDefines)
     {

@@ -132,6 +132,65 @@ bool LLVOWater::updateGeometry(LLDrawable *drawable)
     LLStrider<U16> indicesp;
     U16 index_offset;
 
+    // <WolfViewer> Terrain-conforming mesh: the owner built the surface, this only uploads
+    // it. See LLVOWater::ConformingMesh. Region-space vertices become agent-space here, at
+    // upload time, because that is what a region crossing invalidates: LLDrawable::shiftPos
+    // marks every static water drawable for rebuild, and this runs again with the new origin.
+    if (mMesh)
+    {
+        const ConformingMesh& m = *mMesh;
+        if (m.mVerts.empty() || m.mIndices.empty() || m.mVerts.size() > 65535)
+        {
+            return true;
+        }
+        face->setSize((S32)m.mVerts.size(), (S32)m.mIndices.size());
+        LLVertexBuffer* mbuff = face->getVertexBuffer();
+        if (!mbuff ||
+            mbuff->getNumIndices() != face->getIndicesCount() ||
+            mbuff->getNumVerts() != face->getGeomCount() ||
+            face->getIndicesStart() != 0 ||
+            face->getGeomIndex() != 0)
+        {
+            mbuff = new LLVertexBuffer(LLDrawPoolWater::VERTEX_DATA_MASK);
+            if (!mbuff->allocateBuffer(face->getGeomCount(), face->getIndicesCount()))
+            {
+                LL_WARNS() << "Failed to allocate Vertex Buffer on conforming water update to "
+                    << face->getGeomCount() << " vertices and "
+                    << face->getIndicesCount() << " indices" << LL_ENDL;
+            }
+            face->setIndicesIndex(0);
+            face->setGeomIndex(0);
+            face->setVertexBuffer(mbuff);
+        }
+        index_offset = face->getGeometry(verticesp, normalsp, texCoordsp, indicesp);
+        LLStrider<LLVector2> lodp;
+        const bool has_lod = m.mLodLift.size() == m.mVerts.size()
+                          && mbuff->getTexCoord1Strider(lodp, face->getGeomIndex(), face->getGeomCount());
+
+        const LLVector3 origin = mRegionp->getOriginAgent();
+        face->mCenterAgent = origin + (m.mMin + m.mMax) * 0.5f;
+        face->mCenterLocal = face->mCenterAgent;
+        for (size_t i = 0; i < m.mVerts.size(); ++i)
+        {
+            *verticesp++  = origin + m.mVerts[i];
+            *normalsp++   = m.mNormals[i];
+            *texCoordsp++ = m.mUVs[i];
+            if (has_lod)
+            {
+                *lodp++ = m.mLodLift[i];
+            }
+        }
+        for (U16 idx : m.mIndices)
+        {
+            *indicesp++ = (U16)(index_offset + idx);
+        }
+        mbuff->unmapBuffer();
+        mDrawable->movePartition();
+        LLPipeline::sCompiles++;
+        return true;
+    }
+    // </WolfViewer>
+
     // A quad is 4 vertices and 6 indices (making 2 triangles)
     static const unsigned int vertices_per_quad = 4;
     static const unsigned int indices_per_quad = 6;
@@ -387,8 +446,43 @@ void LLVOWater::setIsEdgePatch(const bool edge_patch)
     mIsEdgePatch = edge_patch;
 }
 
+// <WolfViewer>
+void LLVOWater::setConformingMesh(std::shared_ptr<const ConformingMesh> mesh, F32 flow_mps)
+{
+    mMesh = std::move(mesh);
+    mStreamFlow = mMesh ? llmax(flow_mps, 0.f) : 0.f;
+    if (mMesh)
+    {
+        // Keep position/scale describing the mesh's box: the constructor set the region's
+        // width, and anything that reasons from the object rather than the drawable (the
+        // partition's initial placement, updateSpatialExtents below) reads these.
+        setPositionRegion((mMesh->mMin + mMesh->mMax) * 0.5f);
+        setScale(mMesh->mMax - mMesh->mMin);
+    }
+    if (mDrawable.notNull())
+    {
+        gPipeline.markRebuild(mDrawable, LLDrawable::REBUILD_ALL);
+    }
+}
+// </WolfViewer>
+
 void LLVOWater::updateSpatialExtents(LLVector4a &newMin, LLVector4a& newMax)
 {
+    // <WolfViewer> a conforming mesh's box is its vertices' box, not the plane's scale
+    if (mMesh)
+    {
+        const LLVector3 origin = mRegionp->getOriginAgent();
+        // A little slack so a fragment on the edge is never culled by its own bounds.
+        const LLVector3 pad(0.1f, 0.1f, 0.1f);
+        newMin.load3((origin + mMesh->mMin - pad).mV);
+        newMax.load3((origin + mMesh->mMax + pad).mV);
+        LLVector4a mid;
+        mid.setAdd(newMin, newMax);
+        mid.mul(0.5f);
+        mDrawable->setPositionGroup(mid);
+        return;
+    }
+    // </WolfViewer>
     LLVector4a pos;
     pos.load3(getPositionAgent().mV);
     LLVector4a scale;

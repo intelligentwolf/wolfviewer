@@ -72,6 +72,7 @@
 #include "lltracethreadrecorder.h"
 #include "llviewerwindow.h"
 #include "fswolfwater.h" // <FS:WolfViewer> wolfwater prim surfaces
+#include "wolfnaturalwater.h" // <WolfViewer> streams and pools from the heightmap
 #include "llviewerdisplay.h"
 #include "llviewermedia.h"
 #include "llviewerparcelaskplay.h"
@@ -6131,6 +6132,9 @@ void LLAppViewer::idle()
     // so before the frame is drawn. Rate-limits itself to a sweep every 1.5s.
     FSWolfWater::instance().idle();
     // </FS:WolfViewer>
+    // <WolfViewer> natural water (LLVOWater planes from the heightmap); same phase, same reason.
+    WolfNaturalWater::instance().idle();
+    // </WolfViewer>
 
     if (gAgentPilot.isPlaying() && gAgentPilot.getOverrideCamera())
     {

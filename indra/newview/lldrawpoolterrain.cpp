@@ -281,6 +281,41 @@ void LLDrawPoolTerrain::renderFullShaderTextures()
     shader->uniform4fv(LLShaderMgr::OBJECT_PLANE_S, 1, tp0.mV);
     shader->uniform4fv(LLShaderMgr::OBJECT_PLANE_T, 1, tp1.mV);
 
+    // <WolfViewer 2026-09-05> Terrain look uniforms for terrainF.glsl: master switch, snow line
+    // (region metres, 0 = off) and the region origin mod 1024 m so the boundary/tint noise runs
+    // continuously across region borders without feeding a huge global coordinate to the hash.
+    {
+        static LLCachedControl<bool> wolf_terrain_look(gSavedSettings, "WolfTerrainLook", false);
+        static LLCachedControl<F32> wolf_terrain_snow_line(gSavedSettings, "WolfTerrainSnowLine", 0.f);
+        static LLStaticHashedString s_wolf_look("wolf_terrain_look");
+        static LLStaticHashedString s_wolf_snow("wolf_terrain_snow_line");
+        static LLStaticHashedString s_wolf_noise_offset("wolf_noise_offset");
+        shader->uniform1f(s_wolf_look, wolf_terrain_look ? 1.f : 0.f);
+        shader->uniform1f(s_wolf_snow, llmax(0.f, (F32)wolf_terrain_snow_line));
+        shader->uniform2f(s_wolf_noise_offset,
+                          (F32)fmod(region_origin_global.mdV[VX], 1024.0),
+                          (F32)fmod(region_origin_global.mdV[VY], 1024.0));
+        // The estate's own height -> layer mapping, so the shader can build the composition
+        // per pixel and bend it by slope and hollows (LLVLComposition::generateHeights does
+        // it per composition texel from height alone — see terrainF.glsl). Corner order is
+        // the one generateHeights hands to bilinear(): SW, SE, NW, NE.
+        static LLStaticHashedString s_wolf_comp_start("wolf_comp_start");
+        static LLStaticHashedString s_wolf_comp_range("wolf_comp_range");
+        static LLStaticHashedString s_wolf_region_width("wolf_region_width");
+        shader->uniform4f(s_wolf_comp_start,
+                          compp->getStartHeight(LLVLComposition::SOUTHWEST),
+                          compp->getStartHeight(LLVLComposition::SOUTHEAST),
+                          compp->getStartHeight(LLVLComposition::NORTHWEST),
+                          compp->getStartHeight(LLVLComposition::NORTHEAST));
+        shader->uniform4f(s_wolf_comp_range,
+                          compp->getHeightRange(LLVLComposition::SOUTHWEST),
+                          compp->getHeightRange(LLVLComposition::SOUTHEAST),
+                          compp->getHeightRange(LLVLComposition::NORTHWEST),
+                          compp->getHeightRange(LLVLComposition::NORTHEAST));
+        shader->uniform1f(s_wolf_region_width, regionp->getWidth());
+    }
+    // </WolfViewer>
+
     LLSettingsWater::ptr_t pwater = LLEnvironment::instance().getCurrentWater();
 
     //

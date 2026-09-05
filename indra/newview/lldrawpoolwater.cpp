@@ -42,6 +42,8 @@
 #include "llviewertexturelist.h"
 #include "llviewerregion.h"
 #include "llvowater.h"
+#include "llvosurfacepatch.h"   // <WolfViewer> sLODFactor
+#include "llsurface.h"
 #include "llworld.h"
 #include "pipeline.h"
 #include "llviewershadermgr.h"
@@ -362,8 +364,30 @@ void LLDrawPoolWater::pushWaterPlanes(int pass)
         // <FS:WolfViewer>
         if (cur_shader)
         {
-            cur_shader->uniform1f(LLShaderMgr::WATER_WAVE_AMPLITUDE,
-                                  water->getIsEdgePatch() ? 0.f : amplitude);
+            // <WolfViewer> a waterfall sheet has no swell: its motion is the fall itself.
+            // Neither has a STREAM (a terrain-conforming mesh, LLVOWater::setConformingMesh):
+            // ocean swell on a four-metre brook is wrong, and its motion is the flow, which
+            // the shader scrolls along the ribbon from wolfStream (surface speed, m/s).
+            const bool no_swell = water->getIsEdgePatch() || water->getWaterfall() > 0.f
+                               || water->getStreamFlow() > 0.f;
+            cur_shader->uniform1f(LLShaderMgr::WATER_WAVE_AMPLITUDE, no_swell ? 0.f : amplitude);
+            static LLStaticHashedString s_wolf_waterfall("wolfWaterfall");
+            cur_shader->uniform1f(s_wolf_waterfall, water->getWaterfall());
+            static LLStaticHashedString s_wolf_stream("wolfStream");
+            cur_shader->uniform1f(s_wolf_stream, water->getStreamFlow());
+            // Terrain-LOD lift for conforming meshes (LLVOWater::ConformingMesh::mLodLift):
+            // the same stride-per-distance the terrain uses, LLSurfacePatch::updateVisibility
+            // (DEFAULT_DELTA_ANGLE 0.15 / metres per grid) over updateCameraDistanceRegion's
+            // LOD factor. 0 = no lift (region water, or terrain LOD off).
+            static LLStaticHashedString s_wolf_lod("wolfTerrainLod");
+            F32 lod = 0.f;
+            if (water->hasConformingMesh() && LLPipeline::sDynamicLOD && water->getRegion())
+            {
+                lod = (0.15f / water->getRegion()->getLand().getMetersPerGrid())
+                    / llmax(LLVOSurfacePatch::sLODFactor, 0.1f);
+            }
+            cur_shader->uniform1f(s_wolf_lod, lod);
+            // </WolfViewer>
             // 0 for the region's own water, the prim's Z extent for a wolfwater surface.
             // See LLVOWater::setBoundedWaterDepth for what the shader does with it.
             cur_shader->uniform1f(LLShaderMgr::WATER_BOUNDED_DEPTH,

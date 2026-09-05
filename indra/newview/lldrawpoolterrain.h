@@ -37,6 +37,7 @@ public:
     {
         VERTEX_DATA_MASK = LLVertexBuffer::MAP_VERTEX |
                     LLVertexBuffer::MAP_NORMAL |
+                    LLVertexBuffer::MAP_COLOR | // <WolfViewer> heightmap AO (LLSurfacePatch::ambientOcclusion)
                     LLVertexBuffer::MAP_TANGENT | // Only PBR terrain uses this currently
                     LLVertexBuffer::MAP_TEXCOORD0 | // Ownership overlay
                     LLVertexBuffer::MAP_TEXCOORD1

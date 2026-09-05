@@ -37,6 +37,14 @@ out vec3 pos;
 out vec3 vary_normal;
 out vec4 vary_texcoord0;
 out vec4 vary_texcoord1;
+// <WolfViewer 2026-09-05> terrain look (terrainF.glsl): heightmap AO from the vertex colour
+// (LLVOSurfacePatch writes LLSurfacePatch::ambientOcclusion into .r), the region-space up
+// component of the normal for the slope rule, and the region-relative position for the
+// snow line (z) and the boundary/tint noise (xy).
+out float vary_ao;
+out float vary_up;
+out vec3 vary_region_pos;
+out vec3 vary_region_normal;   // for the triplanar blend on steep faces
 
 uniform vec4 object_plane_s;
 uniform vec4 object_plane_t;
@@ -65,6 +73,12 @@ void main()
     pos = (modelview_matrix*pre_pos).xyz;
 
     vary_normal = normalize(normal_matrix * normal);
+    // <WolfViewer> position and normal are region-relative here (LLSurfacePatch::eval), so
+    // normal.z is the world-up component and position.z the terrain height in metres.
+    vary_ao = diffuse_color.r;
+    vary_up = normal.z;
+    vary_region_pos = position;
+    vary_region_normal = normal;
 
     // Transform and pass tex coords
     vary_texcoord0.xy = texgen_object(vec4(position, 1.0), texture_matrix0, object_plane_s, object_plane_t);

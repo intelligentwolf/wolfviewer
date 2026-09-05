@@ -247,6 +247,7 @@ void LLVOSurfacePatch::getTerrainGeometry(LLStrider<LLVector3> &verticesp,
                                               LLStrider<LLVector3> &normalsp,
                                               LLStrider<LLVector2> &texCoords0p,
                                               LLStrider<LLVector2> &texCoords1p,
+                                              LLStrider<LLColor4U> &colorsp,
                                               LLStrider<U16> &indicesp)
 {
     LLFace* facep = mDrawable->getFace(0);
@@ -262,6 +263,7 @@ void LLVOSurfacePatch::getTerrainGeometry(LLStrider<LLVector3> &verticesp,
                     normalsp,
                     texCoords0p,
                     texCoords1p,
+                    colorsp,
                     indicesp,
                     index_offset);
     updateNorthGeometry(facep,
@@ -269,6 +271,7 @@ void LLVOSurfacePatch::getTerrainGeometry(LLStrider<LLVector3> &verticesp,
                         normalsp,
                         texCoords0p,
                         texCoords1p,
+                        colorsp,
                         indicesp,
                         index_offset);
     updateEastGeometry(facep,
@@ -276,6 +279,7 @@ void LLVOSurfacePatch::getTerrainGeometry(LLStrider<LLVector3> &verticesp,
                         normalsp,
                         texCoords0p,
                         texCoords1p,
+                        colorsp,
                         indicesp,
                         index_offset);
 }
@@ -285,6 +289,7 @@ void LLVOSurfacePatch::updateMainGeometry(LLFace *facep,
                                         LLStrider<LLVector3> &normalsp,
                                         LLStrider<LLVector2> &texCoords0p,
                                         LLStrider<LLVector2> &texCoords1p,
+                                        LLStrider<LLColor4U> &colorsp,
                                         LLStrider<U16> &indicesp,
                                         U32 &index_offset)
 {
@@ -323,6 +328,7 @@ void LLVOSurfacePatch::updateMainGeometry(LLFace *facep,
                 x = i * render_stride;
                 y = j * render_stride;
                 mPatchp->eval(x, y, render_stride, verticesp.get(), normalsp.get(), texCoords0p.get(), texCoords1p.get());
+                { const U8 ao = (U8)llclamp(ll_round(mPatchp->ambientOcclusion(x, y) * 255.f), 0, 255); *colorsp = LLColor4U(ao, ao, ao, 255); colorsp++; }   // <WolfViewer> heightmap AO
                 verticesp++;
                 normalsp++;
                 texCoords0p++;
@@ -389,6 +395,7 @@ void LLVOSurfacePatch::updateNorthGeometry(LLFace *facep,
                                         LLStrider<LLVector3> &normalsp,
                                         LLStrider<LLVector2> &texCoords0p,
                                         LLStrider<LLVector2> &texCoords1p,
+                                        LLStrider<LLColor4U> &colorsp,
                                         LLStrider<U16> &indicesp,
                                         U32 &index_offset)
 {
@@ -422,6 +429,7 @@ void LLVOSurfacePatch::updateNorthGeometry(LLFace *facep,
             y = 16 - render_stride;
 
             mPatchp->eval(x, y, render_stride, verticesp.get(), normalsp.get(), texCoords0p.get(), texCoords1p.get());
+                { const U8 ao = (U8)llclamp(ll_round(mPatchp->ambientOcclusion(x, y) * 255.f), 0, 255); *colorsp = LLColor4U(ao, ao, ao, 255); colorsp++; }   // <WolfViewer> heightmap AO
             verticesp++;
             normalsp++;
             texCoords0p++;
@@ -434,6 +442,7 @@ void LLVOSurfacePatch::updateNorthGeometry(LLFace *facep,
             x = i * render_stride;
             y = 16;
             mPatchp->eval(x, y, render_stride, verticesp.get(), normalsp.get(), texCoords0p.get(), texCoords1p.get());
+                { const U8 ao = (U8)llclamp(ll_round(mPatchp->ambientOcclusion(x, y) * 255.f), 0, 255); *colorsp = LLColor4U(ao, ao, ao, 255); colorsp++; }   // <WolfViewer> heightmap AO
             verticesp++;
             normalsp++;
             texCoords0p++;
@@ -470,6 +479,7 @@ void LLVOSurfacePatch::updateNorthGeometry(LLFace *facep,
             y = 16 - render_stride;
 
             mPatchp->eval(x, y, render_stride, verticesp.get(), normalsp.get(), texCoords0p.get(), texCoords1p.get());
+                { const U8 ao = (U8)llclamp(ll_round(mPatchp->ambientOcclusion(x, y) * 255.f), 0, 255); *colorsp = LLColor4U(ao, ao, ao, 255); colorsp++; }   // <WolfViewer> heightmap AO
             verticesp++;
             normalsp++;
             texCoords0p++;
@@ -483,6 +493,7 @@ void LLVOSurfacePatch::updateNorthGeometry(LLFace *facep,
             y = 16;
 
             mPatchp->eval(x, y, render_stride, verticesp.get(), normalsp.get(), texCoords0p.get(), texCoords1p.get());
+                { const U8 ao = (U8)llclamp(ll_round(mPatchp->ambientOcclusion(x, y) * 255.f), 0, 255); *colorsp = LLColor4U(ao, ao, ao, 255); colorsp++; }   // <WolfViewer> heightmap AO
             verticesp++;
             normalsp++;
             texCoords0p++;
@@ -526,6 +537,7 @@ void LLVOSurfacePatch::updateNorthGeometry(LLFace *facep,
             y = 16 - render_stride;
 
             mPatchp->eval(x, y, render_stride, verticesp.get(), normalsp.get(), texCoords0p.get(), texCoords1p.get());
+                { const U8 ao = (U8)llclamp(ll_round(mPatchp->ambientOcclusion(x, y) * 255.f), 0, 255); *colorsp = LLColor4U(ao, ao, ao, 255); colorsp++; }   // <WolfViewer> heightmap AO
             verticesp++;
             normalsp++;
             texCoords0p++;
@@ -539,6 +551,7 @@ void LLVOSurfacePatch::updateNorthGeometry(LLFace *facep,
             y = 16;
 
             mPatchp->eval(x, y, render_stride, verticesp.get(), normalsp.get(), texCoords0p.get(), texCoords1p.get());
+                { const U8 ao = (U8)llclamp(ll_round(mPatchp->ambientOcclusion(x, y) * 255.f), 0, 255); *colorsp = LLColor4U(ao, ao, ao, 255); colorsp++; }   // <WolfViewer> heightmap AO
             verticesp++;
             normalsp++;
             texCoords0p++;
@@ -579,6 +592,7 @@ void LLVOSurfacePatch::updateEastGeometry(LLFace *facep,
                                           LLStrider<LLVector3> &normalsp,
                                           LLStrider<LLVector2> &texCoords0p,
                                           LLStrider<LLVector2> &texCoords1p,
+                                          LLStrider<LLColor4U> &colorsp,
                                           LLStrider<U16> &indicesp,
                                           U32 &index_offset)
 {
@@ -607,6 +621,7 @@ void LLVOSurfacePatch::updateEastGeometry(LLFace *facep,
             y = i * render_stride;
 
             mPatchp->eval(x, y, render_stride, verticesp.get(), normalsp.get(), texCoords0p.get(), texCoords1p.get());
+                { const U8 ao = (U8)llclamp(ll_round(mPatchp->ambientOcclusion(x, y) * 255.f), 0, 255); *colorsp = LLColor4U(ao, ao, ao, 255); colorsp++; }   // <WolfViewer> heightmap AO
             verticesp++;
             normalsp++;
             texCoords0p++;
@@ -619,6 +634,7 @@ void LLVOSurfacePatch::updateEastGeometry(LLFace *facep,
             x = 16;
             y = i * render_stride;
             mPatchp->eval(x, y, render_stride, verticesp.get(), normalsp.get(), texCoords0p.get(), texCoords1p.get());
+                { const U8 ao = (U8)llclamp(ll_round(mPatchp->ambientOcclusion(x, y) * 255.f), 0, 255); *colorsp = LLColor4U(ao, ao, ao, 255); colorsp++; }   // <WolfViewer> heightmap AO
             verticesp++;
             normalsp++;
             texCoords0p++;
@@ -655,6 +671,7 @@ void LLVOSurfacePatch::updateEastGeometry(LLFace *facep,
             y = i * render_stride;
 
             mPatchp->eval(x, y, render_stride, verticesp.get(), normalsp.get(), texCoords0p.get(), texCoords1p.get());
+                { const U8 ao = (U8)llclamp(ll_round(mPatchp->ambientOcclusion(x, y) * 255.f), 0, 255); *colorsp = LLColor4U(ao, ao, ao, 255); colorsp++; }   // <WolfViewer> heightmap AO
             verticesp++;
             normalsp++;
             texCoords0p++;
@@ -667,6 +684,7 @@ void LLVOSurfacePatch::updateEastGeometry(LLFace *facep,
             y = i * render_stride;
 
             mPatchp->eval(x, y, render_stride, verticesp.get(), normalsp.get(), texCoords0p.get(), texCoords1p.get());
+                { const U8 ao = (U8)llclamp(ll_round(mPatchp->ambientOcclusion(x, y) * 255.f), 0, 255); *colorsp = LLColor4U(ao, ao, ao, 255); colorsp++; }   // <WolfViewer> heightmap AO
             verticesp++;
             normalsp++;
             texCoords0p++;
@@ -709,6 +727,7 @@ void LLVOSurfacePatch::updateEastGeometry(LLFace *facep,
             y = i * east_stride;
 
             mPatchp->eval(x, y, render_stride, verticesp.get(), normalsp.get(), texCoords0p.get(), texCoords1p.get());
+                { const U8 ao = (U8)llclamp(ll_round(mPatchp->ambientOcclusion(x, y) * 255.f), 0, 255); *colorsp = LLColor4U(ao, ao, ao, 255); colorsp++; }   // <WolfViewer> heightmap AO
             verticesp++;
             normalsp++;
             texCoords0p++;
@@ -721,6 +740,7 @@ void LLVOSurfacePatch::updateEastGeometry(LLFace *facep,
             y = i * east_stride;
 
             mPatchp->eval(x, y, render_stride, verticesp.get(), normalsp.get(), texCoords0p.get(), texCoords1p.get());
+                { const U8 ao = (U8)llclamp(ll_round(mPatchp->ambientOcclusion(x, y) * 255.f), 0, 255); *colorsp = LLColor4U(ao, ao, ao, 255); colorsp++; }   // <WolfViewer> heightmap AO
             verticesp++;
             normalsp++;
             texCoords0p++;
@@ -1044,6 +1064,7 @@ void LLTerrainPartition::getGeometry(LLSpatialGroup* group)
     LLStrider<LLVector4a> tangents_start;
     LLStrider<LLVector2> texcoords0_start; // ownership overlay
     LLStrider<LLVector2> texcoords2_start;
+    LLStrider<LLColor4U> colors_start;   // <WolfViewer> heightmap AO
     LLStrider<U16> indices_start;
 
     llassert_always(buffer->getVertexStrider(vertices_start));
@@ -1051,6 +1072,7 @@ void LLTerrainPartition::getGeometry(LLSpatialGroup* group)
     llassert_always(buffer->getTangentStrider(tangents_start));
     llassert_always(buffer->getTexCoord0Strider(texcoords0_start));
     llassert_always(buffer->getTexCoord1Strider(texcoords2_start));
+    llassert_always(buffer->getColorStrider(colors_start));   // <WolfViewer>
     llassert_always(buffer->getIndexStrider(indices_start));
 
     U32 indices_index = 0;
@@ -1061,6 +1083,7 @@ void LLTerrainPartition::getGeometry(LLSpatialGroup* group)
         LLStrider<LLVector3> normals = normals_start;
         LLStrider<LLVector2> texcoords0 = texcoords0_start;
         LLStrider<LLVector2> texcoords2 = texcoords2_start;
+        LLStrider<LLColor4U> colors = colors_start;   // <WolfViewer>
         LLStrider<U16> indices = indices_start;
 
         for (std::vector<LLFace*>::iterator i = mFaceList.begin(); i != mFaceList.end(); ++i)
@@ -1072,7 +1095,7 @@ void LLTerrainPartition::getGeometry(LLSpatialGroup* group)
             facep->setVertexBuffer(buffer);
 
             LLVOSurfacePatch* patchp = (LLVOSurfacePatch*) facep->getViewerObject();
-            patchp->getTerrainGeometry(vertices, normals, texcoords0, texcoords2, indices);
+            patchp->getTerrainGeometry(vertices, normals, texcoords0, texcoords2, colors, indices);
 
             indices_index += facep->getIndicesCount();
             index_offset += facep->getGeomCount();

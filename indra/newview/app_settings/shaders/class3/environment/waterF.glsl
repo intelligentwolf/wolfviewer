@@ -131,6 +131,16 @@ in vec3 vary_light_dir;
 // displaced. See waterV.glsl.
 in vec2 vary_wave_slope;
 in float vary_wave_height;
+// <WolfViewer> Waterfall sheets (wolfnaturalwater.cpp, LLVOWater::setWaterfall). Per plane:
+// 1 = draw this surface as falling water — normals from the bump maps racing DOWN the face
+// (scrolled by world height) and a foam-white body — instead of as a still surface.
+uniform float wolfWaterfall;
+in vec3 vary_world_pos;
+// Per-fragment falling-water amount, 0..1 — max(wolfWaterfall, slope of a stream mesh),
+// interpolated from the vertex stage so a ribbon blends into and out of a fall.
+in float vary_fall;
+uniform float wolfStream;
+// </WolfViewer>
 // </FS:WolfViewer>
 
 vec3 BlendNormal(vec3 bump1, vec3 bump2)
@@ -246,6 +256,25 @@ void main()
     // an order of magnitude below the normal-map detail it has to compete with, and at
     // unity gain the swell simply does not register in the lighting.
     wavef.xy += -vary_wave_slope * 2.5;
+    // <WolfViewer> waterfall: replace the still-water ripples with a fast downward flow.
+    // u runs across the sheet, v is the world height PLUS time: a feature of the map sits
+    // where z*k + time*c is constant, so as time grows its z FALLS. (With the time term
+    // subtracted the foam climbed the face — "waterfalls are going up hill", 2026-09-05.)
+    // Blended by vary_fall rather than switched, so a stream mesh runs level, breaks
+    // into whitewater over a ledge and calms again without a seam.
+    if (vary_fall > 0.005)
+    {
+        vec2 fuv1 = vec2((vary_world_pos.x + vary_world_pos.y) * 0.35, vary_world_pos.z * 0.6 + time * 3.0);
+        vec2 fuv2 = vec2((vary_world_pos.x - vary_world_pos.y) * 0.8,  vary_world_pos.z * 1.4 + time * 4.5);
+        vec3 f1 = texture(bumpMap, fuv1).xyz * 2.0 - 1.0;
+        vec3 f2 = texture(bumpMap2, fuv2).xyz * 2.0 - 1.0;
+        vec3 fallN = normalize(vec3((f1.xy + f2.xy * 0.5) * 1.5, 1.0));
+        wavef = normalize(mix(wavef, fallN, vary_fall));
+        wave1 = normalize(mix(wave1, fallN, vary_fall));
+        wave2 = normalize(mix(wave2, fallN, vary_fall));
+        wave3 = normalize(mix(wave3, fallN, vary_fall));
+    }
+    // </WolfViewer>
     // </FS:WolfViewer>
 
     vec3 df3 = vec3(0);
@@ -431,6 +460,18 @@ void main()
         float absorb = 1.0 - exp(-waterFogDensity * boundedWaterDepth);
         color = mix(color, waterFogColorLinear, clamp(absorb, 0.22, 0.85));
     }
+    // <WolfViewer> waterfall body: aerated water is mostly white, in streaks that fall with
+    // the flow (the same bump maps read as a brightness field, scrolled by world height).
+    if (vary_fall > 0.005)
+    {
+        // z PLUS time, so the streaks fall (see the normal block above for the sign).
+        float streak = texture(bumpMap, vec2((vary_world_pos.x - vary_world_pos.y) * 0.9, vary_world_pos.z * 0.25 + time * 2.2)).r;
+        float streak2 = texture(bumpMap2, vec2((vary_world_pos.x + vary_world_pos.y) * 1.7, vary_world_pos.z * 0.7 + time * 3.6)).g;
+        float foam = clamp(0.35 + 0.45 * streak + 0.25 * streak2, 0.0, 0.92) * vary_fall;
+        float fallLight = clamp(dot(sunlit_linear + amblit, vec3(0.3333)), 0.08, 1.0);
+        color = mix(color, vec3(0.93, 0.96, 0.99) * fallLight, foam);
+    }
+    // </WolfViewer>
     // </FS:WolfViewer>
 
     // <FS:WolfViewer> Shoreline foam — sets breaking on the shallows.

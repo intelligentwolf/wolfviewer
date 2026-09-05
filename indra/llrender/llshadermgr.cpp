@@ -459,6 +459,38 @@ void LLShaderMgr::dumpObjectLog(GLuint ret, bool warns, const std::string& filen
     }
  }
 
+// <WolfViewer 2026-09-05> The program binary cache (loadCachedProgramBinary) is keyed by
+// LLGLSLShader::hash(), which upstream builds from the shader file NAMES, defines, features and
+// GL strings — never the file contents. A rebuilt viewer with the same version number and an
+// edited .glsl therefore kept loading yesterday's program from the cache ("Loaded cached binary
+// for shader: Deferred Terrain Shader" while terrainF.glsl on disk had changed). Hashing the
+// bytes of every file the program is built from makes the key follow the source.
+void LLShaderMgr::hashShaderFileContents(HBXXH128& hash_obj, const std::string& filename, S32 shader_level)
+{
+    for (S32 gpu_class = shader_level; gpu_class > 0; gpu_class--)
+    {   // same search as loadShaderFile(): current gpu class down to class 1
+        std::stringstream fname;
+        fname << getShaderDirPrefix();
+        fname << gpu_class << gDirUtilp->getDirDelimiter() << filename;
+        const std::string open_file_name = fname.str();
+        LLFILE* file = LLFile::fopen(open_file_name, "rb");
+        if (!file)
+        {
+            continue;
+        }
+        hash_obj.update(open_file_name);
+        U8 buf[4096];
+        size_t n;
+        while ((n = fread(buf, 1, sizeof(buf), file)) > 0)
+        {
+            hash_obj.update(buf, n);
+        }
+        fclose(file);
+        return;
+    }
+}
+// </WolfViewer>
+
 GLuint LLShaderMgr::loadShaderFile(const std::string& filename, S32 & shader_level, GLenum type, std::map<std::string, std::string>* defines, S32 texture_index_channels)
 {
 

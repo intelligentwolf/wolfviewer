@@ -59,6 +59,7 @@ public:
                                 LLStrider<LLVector3> &normalsp,
                                 LLStrider<LLVector2> &texCoords0p,
                                 LLStrider<LLVector2> &texCoords1p,
+                                LLStrider<LLColor4U> &colorsp,  // <WolfViewer> heightmap AO in .r
                                 LLStrider<U16> &indicesp);
 
     /*virtual*/ void updateTextures();
@@ -112,6 +113,7 @@ protected:
                        LLStrider<LLVector3> &normalsp,
                        LLStrider<LLVector2> &texCoords0p,
                        LLStrider<LLVector2> &texCoords1p,
+                       LLStrider<LLColor4U> &colorsp,
                        LLStrider<U16> &indicesp,
                        U32 &index_offset);
     void updateNorthGeometry(LLFace *facep,
@@ -119,6 +121,7 @@ protected:
                        LLStrider<LLVector3> &normalsp,
                        LLStrider<LLVector2> &texCoords0p,
                        LLStrider<LLVector2> &texCoords1p,
+                       LLStrider<LLColor4U> &colorsp,
                        LLStrider<U16> &indicesp,
                        U32 &index_offset);
     void updateEastGeometry(LLFace *facep,
@@ -126,6 +129,7 @@ protected:
                        LLStrider<LLVector3> &normalsp,
                        LLStrider<LLVector2> &texCoords0p,
                        LLStrider<LLVector2> &texCoords1p,
+                       LLStrider<LLColor4U> &colorsp,
                        LLStrider<U16> &indicesp,
                        U32 &index_offset);
 };

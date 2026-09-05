@@ -1632,6 +1632,46 @@ If you do not understand the distinction then leave this control alone."
          tool_tip="Determines scale of terrain textures - lower is more compressed (requires viewer restart)"
          top_pad="1"
          width="405" />
+        <!-- WolfViewer: terrain look (terrainF.glsl) -->
+        <check_box
+         control_name="WolfTerrainLook"
+         follows="left|top"
+         height="16"
+         label="Enhanced terrain"
+         layout="topleft"
+         left="10"
+         name="WolfTerrainLook"
+         tool_tip="Shades the region's own terrain textures: less tiling at a distance and darker creases and valleys. The texture layers stay exactly as the estate set them. Uncheck for the stock Firestorm blend."
+         top_pad="4"
+         width="150" />
+        <check_box
+         control_name="WolfTerrainWater"
+         follows="left|top"
+         height="16"
+         label="Natural water (streams, pools)"
+         layout="topleft"
+         left_pad="10"
+         name="WolfTerrainWater"
+         tool_tip="Draws streams along the land's drainage lines and pools in its basins, worked out from the terrain heights. Viewer-side only; the land itself is never changed."
+         top_delta="0"
+         width="240" />
+        <slider
+         control_name="WolfTerrainSnowLine"
+         decimal_digits="0"
+         follows="left|top"
+         height="16"
+         increment="5"
+         initial_value="0"
+         label="Snow line height (0 = off)"
+         label_width="300"
+         layout="topleft"
+         left="10"
+         max_val="400"
+         min_val="0"
+         name="WolfTerrainSnowLine"
+         tool_tip="Gentle ground above this height (metres) is whitened as snow. 0 turns it off."
+         top_pad="1"
+         width="405" />
         <!-- Sharpening Settings -->
         <slider
          control_name="RenderCASSharpness"
@@ -1760,7 +1800,7 @@ If you do not understand the distinction then leave this control alone."
         layout="topleft"
         left="10"
         name="UseDoF"
-        top_pad="25"
+        top_pad="5"
         width="256">
          <check_box.commit_callback
         function="Pref.RenderOptionUpdate" />

@@ -115,6 +115,8 @@ public:
     // Per-triangle normals for flat edges
     void calcNormalFlat(LLVector3& normal_out, const U32 x, const U32 y, const U32 index /* 0 or 1 */);
 
+    // <WolfViewer 2026-09-05> heightmap ambient occlusion at a patch grid point, 0..1 (1 = open)
+    F32 ambientOcclusion(const U32 x, const U32 y) const;
     void eval(const U32 x, const U32 y, const U32 stride,
                 LLVector3 *vertex, LLVector3 *normal, LLVector2* tex0, LLVector2 *tex1) const;
 

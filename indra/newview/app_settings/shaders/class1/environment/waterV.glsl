@@ -34,6 +34,14 @@ in vec3 position;
 // has to come from the geometry. Region water writes (0,0,1) into every one of these, so
 // reading the attribute changes nothing for it.
 in vec3 normal;
+// <WolfViewer> Ribbon coordinates of a terrain-conforming STREAM mesh (LLVOWater::
+// ConformingMesh): x = metres along the flow, y = metres across. Read only when
+// wolfStream > 0; region water's texcoords are 0..1 fractions and are never used here.
+in vec2 texcoord0;
+// Terrain-LOD lift (LLVOWater::ConformingMesh::mLodLift): metres the terrain as drawn at
+// render stride 4 (x) and 16 (y) rises above this vertex. Read only when wolfTerrainLod > 0.
+in vec2 texcoord1;
+// </WolfViewer>
 // </FS:WolfViewer>
 
 
@@ -58,6 +66,14 @@ uniform float waveAmplitude;
 uniform float waveFrequency;
 uniform float waveSpeed;
 uniform vec2 waveFade;
+// <WolfViewer> wolfStream: surface speed of a stream mesh in m/s, 0 for everything else.
+// wolfWaterfall: 1 = the whole plane is a waterfall sheet (legacy per-plane flag).
+uniform float wolfStream;
+uniform float wolfWaterfall;
+// Terrain stride per metre of distance (LLSurfacePatch::updateVisibility's
+// DEFAULT_DELTA_ANGLE / metresPerGrid, over the LOD factor); 0 = no lift.
+uniform float wolfTerrainLod;
+// </WolfViewer>
 // </FS:WolfViewer>
 
 out vec4 refCoord;
@@ -74,6 +90,14 @@ out vec2 vary_fragcoord;
 // painted stripes. Height feeds the crest highlight / foam.
 out vec2 vary_wave_slope;
 out float vary_wave_height;
+// <WolfViewer> Agent-space vertex position: a waterfall sheet (waterF.glsl wolfWaterfall)
+// scrolls its foam by world HEIGHT, i.e. down the fall, whatever way the sheet faces.
+out vec3 vary_world_pos;
+// How much of this vertex is FALLING water, 0..1. For a stream mesh it comes from the
+// surface's own slope, so one ribbon runs level, tips over a ledge into a fall and
+// levels out again, all in one draw; the fragment stage blends the waterfall look by it.
+out float vary_fall;
+// </WolfViewer>
 // </FS:WolfViewer>
 
 float wave(vec2 v, float t, float f, vec2 d, float s)
@@ -195,6 +219,27 @@ void main()
     vec2 wave_slope = vec2(0.0);
     float wave_h = 0.0;
 
+    // <WolfViewer> Ride the terrain that is actually drawn. The terrain picks a render
+    // stride from its patch's distance (trunc(distance * stride_per_metre), floored to a
+    // power of two, at most 16 modelled here); a coarse stride spans across a gully ABOVE
+    // the fine heights this water was fitted to. The vertex's own distance is never less
+    // than its patch's, so the stride found here is never smaller than the one drawn —
+    // water may sit a little high at distance, it is never buried. Stride 4 and 16 are
+    // baked; stride 1 IS the fine surface the water was fitted to (lift 0), 2 follows
+    // the parabolic growth of a chord above a curve, (s*s - 1) / 15 being 0 at 1 and 1
+    // at 4; 8 sits between the two baked values.
+    if (wolfTerrainLod > 0.0)
+    {
+        float lod_dist = length(position.xyz - eyeVec);
+        float stride = floor(lod_dist * wolfTerrainLod);
+        stride = clamp(exp2(floor(log2(max(stride, 1.0)))), 1.0, 16.0);
+        float lift = (stride <= 4.0)
+            ? texcoord1.x * (stride * stride - 1.0) / 15.0
+            : mix(texcoord1.x, texcoord1.y, log2(stride / 4.0) / 2.0);
+        wave_pos.z += lift;
+    }
+    // </WolfViewer>
+
     if (waveAmplitude > 0.001)
     {
         vec2 wxy = position.xy;
@@ -254,12 +299,25 @@ void main()
     vary_wave_slope = wave_slope;
     vary_wave_height = wave_h;
 
+    // <WolfViewer> Falling water from the geometry. rise/run of the surface at this
+    // vertex; steeper than about 1:3 (17 degrees) starts to break white, past 0.8 (39
+    // degrees) it is a sheet. Keep in step with WolfNaturalWater::FALL_START / FALL_FULL.
+    float fall = wolfWaterfall;
+    if (wolfStream > 0.0)
+    {
+        float rise_run = length(surf_n.xy) / max(abs(surf_n.z), 0.02);
+        fall = max(fall, smoothstep(0.3, 0.8, rise_run));
+    }
+    vary_fall = fall;
+    // </WolfViewer>
+
     //transform vertex
     vec4 pos = vec4(wave_pos, 1.0);
     // </FS:WolfViewer>
     mat4 modelViewProj = modelview_projection_matrix;
 
     vary_position = (modelview_matrix * pos).xyz;
+    vary_world_pos = position.xyz;   // <WolfViewer> undisplaced, for the waterfall flow
     vary_light_dir = normal_matrix * lightDir;
     // <FS:WolfViewer> Surface basis from the geometry rather than a hardcoded +Z/+X, so a
     // tilted wolfwater surface shades as the sloping plane it is. For region water the
@@ -305,10 +363,28 @@ void main()
     calcAtmospherics(pos.xyz);
 
     //pass wave parameters to pixel shader
-    vec2 bigWave =  (v.xy) * vec2(0.04,0.04)  + waveDir1 * time * 0.055;
+    vec2 bigWave;
+    // <WolfViewer> A stream's ripples run DOWNSTREAM, not in the region's EEP wave
+    // direction: the maps are addressed by the ribbon's own coordinates and slid along
+    // the flow at the stream's surface speed. The coarse layer runs a little faster than
+    // the fine ones, which is what stops it reading as one printed conveyor belt, and a
+    // slow lateral sway does the rest.
+    if (wolfStream > 0.0)
+    {
+        vec2 suv = vec2(texcoord0.x - time * wolfStream,
+                        texcoord0.y + 0.35 * sin(texcoord0.x * 0.7 + time * 1.3));
+        bigWave       = suv * vec2(0.04, 0.08);
+        littleWave.xy = suv * vec2(0.45, 0.9);
+        littleWave.zw = suv * vec2(0.1, 0.2) + vec2(-time * wolfStream * 0.05, 0.0);
+    }
+    else
+    {
+    bigWave =  (v.xy) * vec2(0.04,0.04)  + waveDir1 * time * 0.055;
     //get two normal map (detail map) texture coordinates
     littleWave.xy = (v.xy) * vec2(0.45, 0.9)   + waveDir2 * time * 0.13;
     littleWave.zw = (v.xy) * vec2(0.1, 0.2) + waveDir1 * time * 0.1;
+    }
+    // </WolfViewer>
     view.w = bigWave.y;
     refCoord.w = bigWave.x;
 

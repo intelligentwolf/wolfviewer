@@ -225,6 +225,60 @@ LLVector2 LLSurfacePatch::getTexCoords(const U32 x, const U32 y) const
 }
 
 
+// <WolfViewer 2026-09-05> Terrain look: ambient occlusion from the heightmap.
+//
+// A grid point that lies below the average height of the ring around it sits in a crease,
+// gully or valley floor and is darkened; a ridge or open slope stays at 1. Two ring radii
+// (metres): 2 m catches creases and cut banks, 6 m catches valleys. The weights are darkness
+// per metre "buried" and the sum is capped so a deep pit never goes black. Written into the
+// terrain vertex colour (LLVOSurfacePatch::updateMainGeometry and friends) and read by
+// terrainF.glsl as vary_ao. The SAME constants live in WolfStorm's
+// terrain_texture_worker.js (aoAt) so both viewers shade the same ground the same way.
+F32 LLSurfacePatch::ambientOcclusion(const U32 x, const U32 y) const
+{
+    if (!mSurfacep)
+    {
+        return 1.f;
+    }
+    const S32 grids = mSurfacep->getGridsPerEdge();
+    const F32 mpg = mSurfacep->getMetersPerGrid();
+    if (grids < 2 || mpg <= 0.f)
+    {
+        return 1.f;
+    }
+    // Surface grid index of this patch point — the same origin arithmetic eval() uses for
+    // getCompositionXY(), with the metres-per-grid division made explicit.
+    const S32 gx = llfloor(mOriginRegion.mV[0] / mpg) + (S32)x;
+    const S32 gy = llfloor(mOriginRegion.mV[1] / mpg) + (S32)y;
+    const F32 h = mSurfacep->getZ(llclamp(gx, 0, grids - 1), llclamp(gy, 0, grids - 1));
+
+    static const F32 RING[8][2] = { { 1.f, 0.f }, { 0.7071f, 0.7071f }, { 0.f, 1.f }, { -0.7071f, 0.7071f },
+                                    { -1.f, 0.f }, { -0.7071f, -0.7071f }, { 0.f, -1.f }, { 0.7071f, -0.7071f } };
+    static const F32 RADIUS_M[2] = { 2.f, 6.f };
+    static const F32 WEIGHT[2] = { 0.18f, 0.06f };   // gentler after Paul's snowy-mountain comparison
+    static const F32 MAX_DARK = 0.32f;
+
+    F32 dark = 0.f;
+    for (S32 ri = 0; ri < 2; ++ri)
+    {
+        const F32 r = RADIUS_M[ri] / mpg;
+        F32 sum = 0.f;
+        for (S32 k = 0; k < 8; ++k)
+        {
+            const S32 sx = llclamp(ll_round((F32)gx + RING[k][0] * r), 0, grids - 1);
+            const S32 sy = llclamp(ll_round((F32)gy + RING[k][1] * r), 0, grids - 1);
+            sum += mSurfacep->getZ(sx, sy);
+        }
+        const F32 buried = sum * 0.125f - h;
+        if (buried > 0.f)
+        {
+            dark += buried * WEIGHT[ri];
+        }
+    }
+    return 1.f - llmin(dark, MAX_DARK);
+}
+// </WolfViewer>
+
 void LLSurfacePatch::eval(const U32 x, const U32 y, const U32 stride, LLVector3 *vertex, LLVector3 *normal,
                           LLVector2* tex0, LLVector2 *tex1) const
 {

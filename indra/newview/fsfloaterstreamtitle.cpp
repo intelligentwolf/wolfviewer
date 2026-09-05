@@ -33,12 +33,18 @@
 #include "llaudioengine.h"
 #include "llbutton.h"
 #include "llfloaterreg.h"
+#include "llpanel.h"
+#include "llrender2dutils.h"
 #include "lltextbox.h"
 #include "llviewercontrol.h"
+#include "wolfalbumart.h"
 
 static constexpr size_t MAX_HISTORY_ENTRIES{ 10 };
 static constexpr F32 SCROLL_STEP_DELAY{ 0.25f };
 static constexpr F32 SCROLL_END_DELAY{ 4.f };
+// <WolfViewer> the cover panel is 96px square under the title; showing it adds this much height
+static constexpr S32 ART_EXTRA_HEIGHT{ 102 };
+// </WolfViewer>
 
 FSStreamTitleManager::~FSStreamTitleManager()
 {
@@ -172,12 +178,22 @@ FSFloaterStreamTitle::~FSFloaterStreamTitle()
     {
         mUpdateConnection.disconnect();
     }
+    if (mArtConnection.connected())
+    {
+        mArtConnection.disconnect();
+    }
 }
 
 bool FSFloaterStreamTitle::postBuild()
 {
     mTitletext = findChild<LLTextBox>("streamtitle");
     mHistoryBtn = findChild<LLButton>("btn_history");
+    // <WolfViewer> album cover
+    mArtPanel = findChild<LLPanel>("album_art");
+    mBaseMinHeight = getMinHeight();
+    mArtConnection = WolfAlbumArt::instance().setUpdateCallback([this]() { updateArt(); });
+    updateArt();
+    // </WolfViewer>
 
     FSStreamTitleManager& instance = FSStreamTitleManager::instance();
     mUpdateConnection = instance.setUpdateCallback([this](std::string_view streamtitle) { updateStreamTitle(streamtitle); });
@@ -246,6 +262,57 @@ void FSFloaterStreamTitle::reshape(S32 width, S32 height, bool called_from_paren
     LLFloater::reshape(width, height, called_from_parent);
     checkTitleWidth();
 }
+
+// <WolfViewer> album cover ---------------------------------------------------------------
+void FSFloaterStreamTitle::updateArt() noexcept
+{
+    WolfAlbumArt& art = WolfAlbumArt::instance();
+    bool show = art.isEnabled() && art.getArtTexture().notNull();
+    if (mArtPanel)
+    {
+        mArtPanel->setToolTip(art.getArtLabel());
+    }
+    setArtShown(show);
+}
+
+// Grow the floater downwards to make room for the cover, and shrink it back when the
+// cover goes (setting off, stream stopped, no match). Resizing keeps the top-left corner
+// where the user put it; a user-resized floater keeps its extra height.
+void FSFloaterStreamTitle::setArtShown(bool show) noexcept
+{
+    if (!mArtPanel || show == mArtShown)
+    {
+        return;
+    }
+    mArtShown = show;
+    mArtPanel->setVisible(show);
+    S32 min_height = mBaseMinHeight + (show ? ART_EXTRA_HEIGHT : 0);
+    setResizeLimits(getMinWidth(), min_height);
+    LLRect rect = getRect();
+    S32 height = rect.getHeight() + (show ? ART_EXTRA_HEIGHT : -ART_EXTRA_HEIGHT);
+    rect.mBottom = rect.mTop - llmax(height, min_height);
+    setShape(rect);
+}
+
+void FSFloaterStreamTitle::draw()
+{
+    LLFloater::draw();
+    if (!mArtShown || !mArtPanel || !mArtPanel->getVisible())
+    {
+        return;
+    }
+    LLPointer<LLViewerFetchedTexture> tex = WolfAlbumArt::instance().getArtTexture();
+    if (tex.isNull() || !tex->hasGLTexture())
+    {
+        return;              // still downloading: the panel background shows as a placeholder
+    }
+    // Same alpha rule as LLTextureCtrl::draw so the cover fades with the floater.
+    const F32 alpha = getTransparencyType() == TT_ACTIVE ? 1.0f : getCurrentTransparency();
+    const LLRect& r = mArtPanel->getRect();
+    tex->addTextureStats((F32)(r.getWidth() * r.getHeight()));
+    gl_draw_scaled_image(r.mLeft, r.mBottom, r.getWidth(), r.getHeight(), tex, UI_VERTEX_COLOR % alpha);
+}
+// </WolfViewer> --------------------------------------------------------------------------
 
 void FSFloaterStreamTitle::checkTitleWidth() noexcept
 {

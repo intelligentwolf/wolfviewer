@@ -34,4 +34,19 @@
 		label="History"
 		right="-5"
 		/>
+	<!-- WolfViewer: album cover, drawn by FSFloaterStreamTitle::draw() into this panel's
+	     rect; shown only when WolfStreamAlbumArt is on and a cover was found -->
+	<panel
+		top="27"
+		left="10"
+		follows="left|top"
+		height="96"
+		width="96"
+		layout="topleft"
+		name="album_art"
+		visible="false"
+		background_visible="true"
+		bg_alpha_color="0 0 0 0.4"
+		bg_opaque_color="0 0 0 0.4"
+		/>
 </floater>

@@ -911,6 +911,7 @@ set(viewer_SOURCE_FILES
     sanitycheck.cpp
     streamtitledisplay.cpp
     utilitybar.cpp
+    wolfalbumart.cpp
     NACLantispam.cpp
     NACLfloaterexploresounds.cpp
     )
@@ -1773,6 +1774,7 @@ set(viewer_HEADER_FILES
     sanitycheck.h
     streamtitledisplay.h
     utilitybar.h
+    wolfalbumart.h
     VertexCache.h
     VorbisFramework.h
     NACLantispam.h

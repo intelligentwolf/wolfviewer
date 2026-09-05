@@ -1195,6 +1195,17 @@
          min_val="1"
          name="StreamMetadataAnnounceChannel"
          width="90" />
+        <!-- WolfViewer: opt-in online album cover lookup (WolfAlbumArt) -->
+        <check_box
+         top_pad="6"
+         left="46"
+         control_name="WolfStreamAlbumArt"
+         name="WolfStreamAlbumArt"
+         label="Show album covers in the Stream Title window (looks the song up on iTunes)"
+         tool_tip="Sends the title of each song on the music stream to Apple's iTunes Search to fetch its cover. Off by default for privacy."
+         layout="topleft"
+         height="18"
+         width="470" />
 
     </panel>
 

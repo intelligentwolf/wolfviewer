@@ -261,6 +261,7 @@
 #include "NACLantispam.h"
 #include "omnifilterengine.h"       // <FS:Zi> Omnifilter support
 #include "streamtitledisplay.h"
+#include "wolfalbumart.h"
 #include "tea.h"
 
 //
@@ -4270,6 +4271,7 @@ void LLStartUp::multimediaInit()
     // Also initialise the stream titles.
     StreamTitleDisplay::instance();
     FSStreamTitleManager::instance();
+    WolfAlbumArt::instance();   // <WolfViewer> album covers for the stream title floater
 }
 
 void LLStartUp::fontInit()

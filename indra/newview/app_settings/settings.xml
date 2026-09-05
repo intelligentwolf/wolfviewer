@@ -417,6 +417,17 @@
     <key>Value</key>
     <integer>2</integer>
   </map>
+  <key>WolfStreamAlbumArt</key>
+  <map>
+    <key>Comment</key>
+    <string>Look up the album cover of the song playing on the music stream online (iTunes Search) and show it in the Stream Title floater. Sends the song title to Apple.</string>
+    <key>Persist</key>
+    <integer>1</integer>
+    <key>Type</key>
+    <string>Boolean</string>
+    <key>Value</key>
+    <integer>0</integer>
+  </map>
   <key>StreamMetadataAnnounceToChat</key>
   <map>
     <key>Comment</key>

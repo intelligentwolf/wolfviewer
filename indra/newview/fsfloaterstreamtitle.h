@@ -35,6 +35,7 @@
 #include "streamtitledisplay.h"
 
 class LLButton;
+class LLPanel;
 class LLTextBox;
 class FSScrollListCtrl;
 
@@ -102,12 +103,21 @@ public:
     ~FSFloaterStreamTitle() override;
 
     bool postBuild() override;
+    void draw() override;
     void reshape(S32 width, S32 height, bool called_from_parent = true) override;
 
 private:
     bool tick() override;
 
     void updateStreamTitle(std::string_view streamtitle) noexcept;
+    // <WolfViewer> album cover (WolfAlbumArt) shown under the title
+    void updateArt() noexcept;
+    void setArtShown(bool show) noexcept;
+    LLPanel* mArtPanel{ nullptr };
+    boost::signals2::connection mArtConnection{};
+    bool mArtShown{ false };
+    S32 mBaseMinHeight{ 0 };
+    // </WolfViewer>
     void toggleHistory() noexcept;
     void closeHistory() noexcept;
     void checkTitleWidth() noexcept;

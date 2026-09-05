@@ -166,6 +166,7 @@ void WolfAlbumArt::lookupCoro(std::string term, U32 seq)
     {
         label += (label.empty() ? "" : " \xE2\x80\x94 ") + album;   // em dash, UTF-8
     }
+    LL_INFOS("WolfAlbumArt") << "Cover for '" << term << "': " << label << " " << art_url << LL_ENDL;
     setArt(art_url, label);
 }
 

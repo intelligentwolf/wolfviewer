@@ -302,14 +302,20 @@ void FSFloaterStreamTitle::draw()
         return;
     }
     LLPointer<LLViewerFetchedTexture> tex = WolfAlbumArt::instance().getArtTexture();
-    if (tex.isNull() || !tex->hasGLTexture())
+    if (tex.isNull())
+    {
+        return;
+    }
+    const LLRect& r = mArtPanel->getRect();
+    // A fetched texture is only downloaded while something asks for it EVERY frame
+    // (LLTextureCtrl::draw does the same before drawing) — so ask first, draw once it is here.
+    tex->addTextureStats((F32)(r.getWidth() * r.getHeight()));
+    if (!tex->hasGLTexture())
     {
         return;              // still downloading: the panel background shows as a placeholder
     }
     // Same alpha rule as LLTextureCtrl::draw so the cover fades with the floater.
     const F32 alpha = getTransparencyType() == TT_ACTIVE ? 1.0f : getCurrentTransparency();
-    const LLRect& r = mArtPanel->getRect();
-    tex->addTextureStats((F32)(r.getWidth() * r.getHeight()));
     gl_draw_scaled_image(r.mLeft, r.mBottom, r.getWidth(), r.getHeight(), tex, UI_VERTEX_COLOR % alpha);
 }
 // </WolfViewer> --------------------------------------------------------------------------

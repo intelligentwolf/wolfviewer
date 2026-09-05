@@ -37,6 +37,8 @@ LL_GST_SYM( true, gst_message_parse_tag, void, GstMessage *, GstTagList **)
 LL_GST_SYM( true, gst_tag_list_foreach, void, const GstTagList *, GstTagForeachFunc, gpointer)
 LL_GST_SYM( true, gst_tag_list_get_tag_size, guint, const GstTagList *, const gchar *)
 LL_GST_SYM( true, gst_tag_list_get_value_index, const GValue *, const GstTagList *, const gchar *, guint)
+// <WolfViewer 2026-09-05> stream titles (GST_MESSAGE_TAG) — optional so an old libgstreamer still loads
+LL_GST_SYM(false, gst_tag_list_get_string, gboolean, const GstTagList *, const gchar *, gchar **)
 
 LL_GST_SYM( true, gst_caps_new_simple, GstCaps*, const char *, const char*, ... )
 

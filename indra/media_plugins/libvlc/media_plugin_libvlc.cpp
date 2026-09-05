@@ -67,6 +67,11 @@ private:
     void setVolume(const F64 volume);
     void setVolumeVLC();
     void updateTitle(const char* title);
+    // <WolfViewer> Stream metadata (ICY "now playing") for the FMOD-less build — see updateStreamMetadata()
+    void updateStreamMetadata();
+    std::string mLastMetaTitle;
+    std::string mLastMetaArtist;
+    // </WolfViewer>
 
     static void* lock(void* data, void** p_pixels);
     static void unlock(void* data, void* id, void* const* raw_pixels);
@@ -248,6 +253,7 @@ void MediaPluginLibVLC::eventCallbacks(const libvlc_event_t* event, void* ptr)
         parent->mVlcStatus = STATUS_PLAYING;
         parent->setVolumeVLC();
         parent->setDurationDirty();
+        parent->updateStreamMetadata();   // <WolfViewer> metadata the stream carried at open
         break;
 
     case libvlc_MediaPlayerPaused:
@@ -294,6 +300,16 @@ void MediaPluginLibVLC::eventCallbacks(const libvlc_event_t* event, void* ptr)
         }
     }
     break;
+    // <WolfViewer 2026-09-05> Song titles for the OpenSim (no-FMOD) build.
+    // libvlc_MediaMetaChanged is raised on the MEDIA's event manager when an ICY
+    // StreamTitle arrives (libvlc_meta_NowPlaying); MediaPlayerTitleChanged above is the
+    // DVD-chapter sense of "title" and never fires for a radio stream. Playing re-reads
+    // whatever metadata the stream already carried when it opened (call added to the
+    // existing libvlc_MediaPlayerPlaying case above).
+    case libvlc_MediaMetaChanged:
+        parent->updateStreamMetadata();
+        break;
+    // </WolfViewer>
     }
 }
 
@@ -348,6 +364,16 @@ void MediaPluginLibVLC::playMedia()
         libvlc_event_attach(em, libvlc_MediaPlayerLengthChanged, eventCallbacks, this);
         libvlc_event_attach(em, libvlc_MediaPlayerTitleChanged, eventCallbacks, this);
     }
+    // <WolfViewer 2026-09-05> Metadata events live on the media, not the player.
+    // (mLibVLCMedia is null-checked above.) Reset the last-sent pair before the first event can fire.
+    mLastMetaTitle.clear();
+    mLastMetaArtist.clear();
+    libvlc_event_manager_t* mem = libvlc_media_event_manager(mLibVLCMedia);
+    if (mem)
+    {
+        libvlc_event_attach(mem, libvlc_MediaMetaChanged, eventCallbacks, this);
+    }
+    // </WolfViewer>
 
     libvlc_video_set_callbacks(mLibVLCMediaPlayer, lock, unlock, display, &mLibVLCCallbackContext);
     libvlc_video_set_format(mLibVLCMediaPlayer, "RV32", mWidth, mHeight, mWidth * mDepth);
@@ -409,6 +435,61 @@ void MediaPluginLibVLC::updateTitle(const char* title)
     message.setValue("name", title);
     sendMessage(message);
 }
+
+// <WolfViewer 2026-09-05> Report the stream's current song to the viewer.
+//
+// The viewer side already exists: llpluginclassmedia.cpp stores "ndMediadata_change"
+// {title, artist} (the message the old gstreamer010 plugin sent, <FS:ND>), and
+// LLStreamingAudio_MediaPlugins::updateMetadata() polls getTitle()/getArtist() and raises
+// the same ARTIST/TITLE LLSD that llstreamingaudio_fmodstudio.cpp builds from FMOD's ICY
+// tags — so StreamTitleDisplay (Preferences > Sound & Media > stream metadata) shows it
+// without change. What was missing was any sender in the libVLC plugin, which is the
+// audio plugin on every platform of the OpenSim build (no FMOD).
+//
+// Mapping mirrors FMOD: the ICY "now playing" string is the TITLE (Shoutcast/Icecast send
+// "Artist - Song" in one StreamTitle field, and FMOD files that whole string under TITLE);
+// libvlc_meta_Artist fills ARTIST when the stream sends it separately; libvlc_meta_Title
+// (the station name) is the TITLE fallback only when there is no now-playing text at all.
+void MediaPluginLibVLC::updateStreamMetadata()
+{
+    if (!mLibVLCMedia)
+    {
+        return;
+    }
+    std::string title, artist;
+    char* now_playing = libvlc_media_get_meta(mLibVLCMedia, libvlc_meta_NowPlaying);
+    if (now_playing)
+    {
+        title = now_playing;
+        libvlc_free(now_playing);
+    }
+    char* meta_artist = libvlc_media_get_meta(mLibVLCMedia, libvlc_meta_Artist);
+    if (meta_artist)
+    {
+        artist = meta_artist;
+        libvlc_free(meta_artist);
+    }
+    if (title.empty())
+    {
+        char* meta_title = libvlc_media_get_meta(mLibVLCMedia, libvlc_meta_Title);
+        if (meta_title)
+        {
+            title = meta_title;
+            libvlc_free(meta_title);
+        }
+    }
+    if (title == mLastMetaTitle && artist == mLastMetaArtist)
+    {
+        return;     // the viewer polls this every tick — only send changes
+    }
+    mLastMetaTitle = title;
+    mLastMetaArtist = artist;
+    LLPluginMessage message(LLPLUGIN_MESSAGE_CLASS_MEDIA, "ndMediadata_change");
+    message.setValue("title", title);
+    message.setValue("artist", artist);
+    sendMessage(message);
+}
+// </WolfViewer>
 
 void MediaPluginLibVLC::setVolumeVLC()
 {

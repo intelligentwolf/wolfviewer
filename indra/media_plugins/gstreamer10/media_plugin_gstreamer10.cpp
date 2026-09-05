@@ -83,6 +83,11 @@ private:
     bool stop();
     bool play(double rate);
     bool getTimePos(double &sec_out);
+    // <WolfViewer> Stream metadata (ICY "now playing") for the Linux build — see updateStreamMetadata()
+    void updateStreamMetadata(GstTagList* tags);
+    std::string mLastMetaTitle;
+    std::string mLastMetaArtist;
+    // </WolfViewer>
 
     double MIN_LOOP_SEC = 1.0F;
     U32 INTERNAL_TEXTURE_SIZE = 1024;
@@ -233,6 +238,22 @@ gboolean MediaPluginGStreamer10::processGSTEvents(GstBus *bus, GstMessage *messa
 
             break;
         }
+        // <WolfViewer 2026-09-05> Song titles on Linux. souphttpsrc (iradio-mode, playbin's
+        // default for http) turns each ICY StreamTitle into a GST_MESSAGE_TAG carrying
+        // GST_TAG_TITLE; nothing in this plugin ever read it, so the viewer's stream-title
+        // display (fed by "ndMediadata_change", llpluginclassmedia.cpp) stayed empty.
+        case GST_MESSAGE_TAG:
+        {
+            GstTagList *tags = NULL;
+            llgst_message_parse_tag(message, &tags);
+            if (tags)
+            {
+                updateStreamMetadata(tags);
+                llgst_mini_object_unref(GST_MINI_OBJECT_CAST(tags));   // gst_tag_list_unref() is a static inline over this
+            }
+            break;
+        }
+        // </WolfViewer>
         case GST_MESSAGE_EOS:
             /* end-of-stream */
             if (mIsLooping)
@@ -292,6 +313,10 @@ bool MediaPluginGStreamer10::navigateTo ( const std::string urlIn )
     setStatus(STATUS_LOADING);
 
     mSeekWanted = false;
+    // <WolfViewer> a new stream starts with no title; the next tag message re-sends
+    mLastMetaTitle.clear();
+    mLastMetaArtist.clear();
+    // </WolfViewer>
 
     if (NULL == mPump ||  NULL == mPlaybin)
     {
@@ -437,6 +462,47 @@ bool MediaPluginGStreamer10::pause()
     }
     return false;
 }
+
+// <WolfViewer 2026-09-05> Report the stream's current song to the viewer.
+//
+// Same message and mapping as the libVLC plugin's updateStreamMetadata() (Windows/macOS):
+// the viewer stores "ndMediadata_change" {title, artist} (llpluginclassmedia.cpp),
+// LLStreamingAudio_MediaPlugins::updateMetadata() polls it, and StreamTitleDisplay shows it.
+// A tag message carries only the tags that changed, so a field is updated only when the
+// list actually has it; ICY streams send "Artist - Song" as one title and rarely an artist.
+void MediaPluginGStreamer10::updateStreamMetadata(GstTagList* tags)
+{
+    if (!tags || !llgst_tag_list_get_string)
+    {
+        return;
+    }
+    std::string title = mLastMetaTitle;
+    std::string artist = mLastMetaArtist;
+    gchar *str = NULL;
+    if (llgst_tag_list_get_string(tags, GST_TAG_TITLE, &str) && str)
+    {
+        title = str;
+        llg_free(str);
+        str = NULL;
+    }
+    if (llgst_tag_list_get_string(tags, GST_TAG_ARTIST, &str) && str)
+    {
+        artist = str;
+        llg_free(str);
+        str = NULL;
+    }
+    if (title == mLastMetaTitle && artist == mLastMetaArtist)
+    {
+        return;     // the viewer polls this every tick — only send changes
+    }
+    mLastMetaTitle = title;
+    mLastMetaArtist = artist;
+    LLPluginMessage message(LLPLUGIN_MESSAGE_CLASS_MEDIA, "ndMediadata_change");
+    message.setValue("title", title);
+    message.setValue("artist", artist);
+    sendMessage(message);
+}
+// </WolfViewer>
 
 bool MediaPluginGStreamer10::stop()
 {

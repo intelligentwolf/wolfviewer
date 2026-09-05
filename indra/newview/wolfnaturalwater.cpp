@@ -80,7 +80,7 @@ U64 WolfNaturalWater::terrainStamp(LLViewerRegion* regionp)
 
 void WolfNaturalWater::idle()
 {
-    static LLCachedControl<bool> enabled(gSavedSettings, "WolfTerrainWater", false);
+    static LLCachedControl<bool> enabled(gSavedSettings, "WolfTerrainWater", true);
     static LLCachedControl<F32> catchment(gSavedSettings, "WolfTerrainWaterCatchment", 5000.f);
     if (!enabled)
     {

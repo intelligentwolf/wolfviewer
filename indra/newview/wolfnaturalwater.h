@@ -35,7 +35,7 @@ class LLViewerRegion;
 //     the river it feeds.
 // Purely rendered: the sim's heightmap is never touched. The analysis runs on the General
 // work queue and the objects are (re)created on the main thread whenever the terrain changes.
-// Setting WolfTerrainWater (own switch, independent of WolfTerrainLook).
+// Setting WolfTerrainWater (own switch, independent of WolfTerrainLook; on by default since w9).
 class WolfNaturalWater : public LLSingleton<WolfNaturalWater>
 {
     LLSINGLETON(WolfNaturalWater);

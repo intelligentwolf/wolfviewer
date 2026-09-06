@@ -368,16 +368,19 @@ void LLJoystick::wolfDrawAnalog()
     // dead-zone ring (decorative; the real threshold is WOLF_DEAD_ZONE of the travel)
     gGL.color4fv(ring.get().mV);
     gl_circle_2d(cx, cy, travel * WOLF_DEAD_ZONE, 32, false);
-    // knob: highlight disc with a shaded inner disc offset toward the lower right, the
-    // cheapest reading of the CSS radial gradient "circle at 35% 30%"
+    // knob: a CONCENTRIC button — shaded fill, bright rim, faint inner ring. The first cut
+    // offset the shading disc and added a centre dot to fake the CSS radial gradient, and
+    // Paul's verdict was "the top of the joysticks look like eyes" (2026-09-06): an offset
+    // disc inside a disc is an iris. Concentric reads as a button.
     const F32 kx = cx + mWolfNX * travel;
     const F32 ky = cy + mWolfNY * travel;
-    gGL.color4fv(knob.get().mV);
-    gl_circle_2d(kx, ky, kr, 48, true);
     gGL.color4fv(knob_shade.get().mV);
-    gl_circle_2d(kx + kr * 0.12f, ky - kr * 0.14f, kr * 0.78f, 48, true);
+    gl_circle_2d(kx, ky, kr, 48, true);
+    gGL.color4fv(knob.get().mV);
+    gl_circle_2d(kx, ky, kr, 48, false);
+    gl_circle_2d(kx, ky, kr - 1.f, 48, false);
     gGL.color4fv(dot.get().mV);
-    gl_circle_2d(kx, ky, llmax(2.f, kr * 0.16f), 16, true);
+    gl_circle_2d(kx, ky, kr * 0.55f, 32, false);
 }
 // </WolfViewer> ---------------------------------------------------------------------------
 

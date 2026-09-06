@@ -113,6 +113,14 @@ LLGLSLShader        gObjectAlphaMaskNoColorProgram;
 
 //environment shaders
 LLGLSLShader        gWaterProgram;
+// <WolfViewer 2026-09-06>
+LLGLSLShader        gWolfFFTTimeProgram;
+LLGLSLShader        gWolfFFTButterflyProgram;
+LLGLSLShader        gWolfFFTFinalProgram;
+LLGLSLShader        gWolfWakeDecayProgram;
+LLGLSLShader        gWolfWakeStampProgram;
+LLGLSLShader        gWolfGodRaysProgram;
+// </WolfViewer>
 LLGLSLShader        gUnderWaterProgram;
 
 //interface shaders
@@ -931,6 +939,13 @@ bool LLViewerShaderMgr::loadShadersWater()
     {
         gWaterProgram.unload();
         gUnderWaterProgram.unload();
+        // <WolfViewer 2026-09-06>
+        gWolfFFTTimeProgram.unload();
+        gWolfFFTButterflyProgram.unload();
+        gWolfFFTFinalProgram.unload();
+        gWolfWakeDecayProgram.unload();
+        gWolfWakeStampProgram.unload();
+        // </WolfViewer>
         return true;
     }
 
@@ -984,6 +999,32 @@ bool LLViewerShaderMgr::loadShadersWater()
         success = gUnderWaterProgram.createShader();
         llassert(success);
     }
+
+    // <WolfViewer 2026-09-06> Spectral ocean and wake passes: plain full-screen fragment
+    // programs over LLRenderTargets (wolfoceanfft.cpp / wolfwakefield.cpp). No atmospherics,
+    // no permutations; class1 only.
+    struct WolfPassDef { LLGLSLShader* mShader; const char* mName; const char* mVert; const char* mFrag; };
+    const WolfPassDef wolf_passes[] = {
+        { &gWolfFFTTimeProgram,      "Wolf FFT Time Shader",      "environment/wolffftV.glsl",       "environment/wolffftTimeF.glsl" },
+        { &gWolfFFTButterflyProgram, "Wolf FFT Butterfly Shader", "environment/wolffftV.glsl",       "environment/wolffftButterflyF.glsl" },
+        { &gWolfFFTFinalProgram,     "Wolf FFT Final Shader",     "environment/wolffftV.glsl",       "environment/wolffftFinalF.glsl" },
+        { &gWolfWakeDecayProgram,    "Wolf Wake Decay Shader",    "environment/wolffftV.glsl",       "environment/wolfwakeDecayF.glsl" },
+        { &gWolfWakeStampProgram,    "Wolf Wake Stamp Shader",    "environment/wolfwakeStampV.glsl", "environment/wolfwakeStampF.glsl" },
+    };
+    for (const WolfPassDef& def : wolf_passes)
+    {
+        if (!success) break;
+        LLGLSLShader& sh = *def.mShader;
+        sh.mName = def.mName;
+        sh.mShaderFiles.clear();
+        sh.mShaderFiles.push_back(make_pair(def.mVert, GL_VERTEX_SHADER));
+        sh.mShaderFiles.push_back(make_pair(def.mFrag, GL_FRAGMENT_SHADER));
+        sh.clearPermutations();
+        sh.mShaderLevel = mShaderLevel[SHADER_WATER];
+        success = sh.createShader();
+        llassert(success);
+    }
+    // </WolfViewer>
 
     /// Keep track of water shader levels
     if (gWaterProgram.mShaderLevel != mShaderLevel[SHADER_WATER]
@@ -2490,6 +2531,20 @@ bool LLViewerShaderMgr::loadShadersDeferred()
         success = gDeferredPostGammaCorrectProgram.createShader();
         llassert(success);
     }
+
+    // <WolfViewer 2026-09-06> underwater sunlight shafts, additive over the tonemapped frame.
+    if (success)
+    {
+        gWolfGodRaysProgram.mName = "Wolf God Rays Post Process";
+        gWolfGodRaysProgram.mShaderFiles.clear();
+        gWolfGodRaysProgram.clearPermutations();
+        gWolfGodRaysProgram.mShaderFiles.push_back(make_pair("deferred/postDeferredNoTCV.glsl", GL_VERTEX_SHADER));
+        gWolfGodRaysProgram.mShaderFiles.push_back(make_pair("deferred/wolfGodRaysF.glsl", GL_FRAGMENT_SHADER));
+        gWolfGodRaysProgram.mShaderLevel = mShaderLevel[SHADER_DEFERRED];
+        success = gWolfGodRaysProgram.createShader();
+        llassert(success);
+    }
+    // </WolfViewer>
 
     if (success)
     {

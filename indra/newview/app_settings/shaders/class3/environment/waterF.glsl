@@ -118,6 +118,30 @@ uniform float boundedWaterDepth;
 uniform vec3  waterFogColorLinear;
 uniform float waterFogDensity;
 // </FS:WolfViewer>
+// <WolfViewer 2026-09-06> The rest of WolfStorm's water, ported (Water.js fragment stage
+// — same names, same numbers, keep in step). See waterV.glsl for what each field is.
+uniform float waveFrequency;
+uniform float waveSpeed;
+uniform float stormChaos;
+uniform vec3  eyeVec;
+uniform sampler2D wolfDepthField;
+uniform vec2  wolfRegionOrigin;
+uniform vec2  depthRegionSize;
+uniform float depthWaterLevel;
+uniform float depthReady;
+uniform float shoreWavesEnabled;
+uniform float fftReady;
+uniform sampler2D fftDisp0;
+uniform sampler2D fftDisp1;
+uniform sampler2D fftDeriv0;
+uniform sampler2D fftDeriv1;
+uniform vec2  fftTile;
+uniform vec2  fftFade;
+uniform sampler2D wakeSampler;
+uniform vec2  wakeRegionSize;
+uniform float wakeReady;
+uniform float wakeStrength;
+// </WolfViewer>
 
 //bigWave is (refCoord.w, view.w);
 in vec4 refCoord;
@@ -140,6 +164,12 @@ in vec3 vary_world_pos;
 // interpolated from the vertex stage so a ribbon blends into and out of a fall.
 in float vary_fall;
 uniform float wolfStream;
+// </WolfViewer>
+// <WolfViewer 2026-09-06> from waterV.glsl: shore phase + shoal, wake foam, the swell's
+// local amplitude / wavelength jitter / exposure scale.
+in vec2 vShore;
+in float vWake;
+in vec4 vSwell;
 // </WolfViewer>
 // </FS:WolfViewer>
 
@@ -214,6 +244,55 @@ void calculateFresnelFactors(out vec3 df3, out vec2 df2, vec3 viewVec, vec3 wave
     ));
 }
 
+// <WolfViewer 2026-09-06> Jacobian of the Gerstner swell — Tessendorf's whitecap
+// criterion ("Whitecap Phenomenology for Ocean Surface Simulation"): a surface point
+// x' = x + D(x) folds where J = (1 + dDx/dx)(1 + dDy/dy) - (dDx/dy)^2 drops toward 0.
+// For one train x' = x + Q A d cos(f), f = k(d.p - c t): dDx/dx = -Q A k d.x^2 sin f,
+// dDy/dy = -Q A k d.y^2 sin f, dDx/dy = -Q A k d.x d.y sin f. Same three trains, same
+// arguments, as waterV.glsl's w1..w3. Q is normalised by (k A numWaves) there, which makes
+// J independent of the HEIGHT; real breaking is not (it starts near a steepness A k of
+// 0.05), so the fold fraction is scaled by the dominant train's true steepness.
+// Source: wolfstorm/js/libs/Water.js swellFoldFraction / swellWhitecap.
+float swellFoldFraction(vec2 p, float t)
+{
+    float baseWl = 1.0 / (waveFrequency + 0.001);
+    vec2 d1 = normalize(waveDir1);
+    vec2 d2 = vec2(d1.x * 0.819 - d1.y * 0.574, d1.x * 0.574 + d1.y * 0.819);
+    vec2 d3 = vec2(d1.x * 0.5 + d1.y * 0.866, -d1.x * 0.866 + d1.y * 0.5);
+    float A = vSwell.x;
+    float jit = vSwell.y;
+    float dxx = 0.0, dyy = 0.0, dxy = 0.0;
+    vec3 wl = vec3(baseWl * 2.0 * jit, baseWl * 1.5 * jit, baseWl * 1.2);
+    vec3 amp = vec3(A * 0.4, A * 0.3, A * 0.25);
+    vec3 st = vec3(0.65, 0.55, 0.5);
+    vec2 dirs[3] = vec2[3](d1, d2, d3);
+    for (int i = 0; i < 3; ++i)
+    {
+        float k = 6.28318 / wl[i];
+        float c = sqrt(9.8 / k);
+        float f = k * (dot(dirs[i], p) - c * t * waveSpeed);
+        float Q = st[i] / (k * amp[i] * 8.0 + 0.001);
+        float sn = Q * amp[i] * k * sin(f);
+        dxx -= dirs[i].x * dirs[i].x * sn;
+        dyy -= dirs[i].y * dirs[i].y * sn;
+        dxy -= dirs[i].x * dirs[i].y * sn;
+    }
+    float J = (1.0 + dxx) * (1.0 + dyy) - dxy * dxy;
+    // Q A k summed over the trains is (0.65 + 0.55 + 0.5) / 8 = 0.2125: normalise 1 - J.
+    return clamp((1.0 - J) / 0.2125, 0.0, 1.0);
+}
+
+float swellWhitecap(vec2 p, float t)
+{
+    float baseWl = 1.0 / (waveFrequency + 0.001);
+    float k1 = 6.28318 / (baseWl * 2.0 * vSwell.y);
+    float steep = vSwell.x * 0.4 * k1;
+    float gain = smoothstep(0.02, 0.06, steep);
+    // Only the very tip of the crest breaks — a band in the fold fraction.
+    return smoothstep(0.78, 0.97, swellFoldFraction(p, t)) * gain;
+}
+// </WolfViewer>
+
 void main()
 {
     mirrorClip(vary_position);
@@ -273,6 +352,93 @@ void main()
         wave1 = normalize(mix(wave1, fallN, vary_fall));
         wave2 = normalize(mix(wave2, fallN, vary_fall));
         wave3 = normalize(mix(wave3, fallN, vary_fall));
+    }
+    // </WolfViewer>
+    // <WolfViewer 2026-09-06> The shore-reactive wave field (Water.js [SHORE 2026-08-15]):
+    // the baked depth field bends the surface detail toward the beach — crest lines follow
+    // iso-depth contours and travel shoreward — with the phase and shoal factor from the
+    // vertex stage, the single source of truth that also lifts the breaker geometry, so
+    // the foam below sits on the geometric crests. The fragment adds only a noise wobble.
+    vec2 regionXY = vary_world_pos.xy - wolfRegionOrigin;
+    float shoal = 0.0;
+    float shoreCrest = 0.0;
+    float shoreCos = 0.0;
+    vec2 shoreDir = vec2(0.0);
+    float shoreGain = clamp(waveAmplitude * 6.67, 0.25, 1.6);
+    float fieldDepth = 1e6;
+    if (depthReady > 0.5 && boundedWaterDepth <= 0.0)
+    {
+        vec2 sduv = regionXY / depthRegionSize;
+        if (sduv.x >= 0.0 && sduv.x <= 1.0 && sduv.y >= 0.0 && sduv.y <= 1.0)
+        {
+            vec4 dtex = texture(wolfDepthField, sduv);
+            fieldDepth = max(depthWaterLevel - dtex.r, 0.0);
+            if (shoreWavesEnabled > 0.5)
+            {
+                float conf = length(dtex.gb);
+                if (conf > 0.02)
+                {
+                    shoreDir = dtex.gb / conf;
+                    shoal = vShore.y;
+                    if (shoal > 0.01)
+                    {
+                        float phase = vShore.x + (wave3.x + wave3.y) * (0.45 + stormChaos * 0.4);
+                        float crest = sin(phase);
+                        shoreCos = cos(phase);
+                        shoreCrest = smoothstep(0.30, 0.95, crest) * shoal;
+                    }
+                }
+            }
+        }
+    }
+
+    // Tilt with the wind-sea cascades' slopes (Water.js FFT block): the normals persist
+    // to 2.5x the displacement fade — at range the eye reads the lighting of the chop,
+    // not its height — and the derivative textures are mipmapped so far water averages
+    // toward flat. The cascades' accumulated whitecap channel is picked up here too.
+    float fftFoam = 0.0;
+    bool cascades = fftReady > 0.5 && boundedWaterDepth <= 0.0 && wolfStream <= 0.0 && wolfWaterfall <= 0.0;
+    if (cascades)
+    {
+        float fdist = length(eyeVec.xy - vary_world_pos.xy);
+        float n0f = 1.0 - smoothstep(fftFade.x, fftFade.x * 2.5, fdist);
+        float n1f = 1.0 - smoothstep(fftFade.y, fftFade.y * 2.5, fdist);
+        vec2 uv0 = vary_world_pos.xy / fftTile.x;
+        vec2 uv1 = vary_world_pos.xy / fftTile.y;
+        vec4 dv0 = texture(fftDeriv0, uv0);
+        vec4 dv1 = texture(fftDeriv1, uv1);
+        wavef.xy += -(dv0.xy * n0f + dv1.xy * n1f) * 2.5 * vSwell.z;
+        float fm0 = texture(fftDisp0, uv0).a * n0f;
+        float fm1 = texture(fftDisp1, uv1).a * n1f;
+        fftFoam = max(fm0, fm1 * 0.6) * vSwell.z;
+    }
+
+    // Re-aim the surface detail toward the beach in shallow water: an extra detail tap
+    // scrolled along -shoreDir plus a rhythmic crest tilt, so each passing wave catches
+    // the sun like a real approaching swell. The tap is UNCONDITIONAL (a mipmapped
+    // sample inside a non-uniform branch has undefined derivatives); in deep water the
+    // mix weight is simply 0.
+    vec2 shoreUV = vary_world_pos.xy * 0.22 - shoreDir * time * 0.45;
+    vec3 waveShore = texture(bumpMap, shoreUV).xyz * 2.0 - 1.0;
+    wavef = mix(wavef, waveShore, shoal * 0.5);
+    wavef.xy += shoreDir * shoreCos * shoal * min(0.4 * shoreGain, 0.55);
+
+    // Tilt with the wake's own slope (Water.js [WAKE 2026-08-21]) so the wash catches sun
+    // and reflection instead of reading as a flat white smear.
+    if (wakeReady > 0.5 && wakeStrength > 0.0)
+    {
+        vec2 wkuv = regionXY / wakeRegionSize;
+        if (wkuv.x >= 0.0 && wkuv.x <= 1.0 && wkuv.y >= 0.0 && wkuv.y <= 1.0)
+        {
+            float wkTexel = 1.0 / 512.0;
+            vec4 tL = texture(wakeSampler, wkuv - vec2(wkTexel, 0.0));
+            vec4 tR = texture(wakeSampler, wkuv + vec2(wkTexel, 0.0));
+            vec4 tD = texture(wakeSampler, wkuv - vec2(0.0, wkTexel));
+            vec4 tU = texture(wakeSampler, wkuv + vec2(0.0, wkTexel));
+            float cL = tL.g - tL.b, cR = tR.g - tR.b;
+            float cD = tD.g - tD.b, cU = tU.g - tU.b;
+            wavef.xy += vec2(cL - cR, cD - cU) * 28.0 * wakeStrength;
+        }
     }
     // </WolfViewer>
     // </FS:WolfViewer>
@@ -412,6 +578,27 @@ void main()
     vec3 color = vec3(0);
     color = mix(fb.rgb, radiance, min(1, df2.x)) + punctual.rgb;
 
+    // <WolfViewer 2026-09-06> Light through the crests (Water.js [SSS 2026-09-06]): a
+    // crest is a thin sheet of water with the sun behind it, so it glows the translucent
+    // green-cyan of the water body where a flat surface would only reflect (Atlas GDC
+    // 2019, GodotOceanWaves). View direction against the sun direction bent by the
+    // surface normal, raised to a power for the lobe, times how high on the crest the
+    // fragment is; tied to the EEP fog colour, scaled by the attenuated sunlight so it
+    // cannot glow at night, suppressed where fresnel says the surface is a mirror.
+    if (boundedWaterDepth <= 0.0 && waveAmplitude > 0.001)
+    {
+        vec3 toEye = -viewVec;
+        vec3 sunE = normalize(vary_light_dir);
+        float crestH = clamp(vary_wave_height / (waveAmplitude * 1.2 + 0.001), 0.0, 1.0);
+        vec3 sunToEye = normalize(-sunE + norm * 0.35);
+        float lobe = pow(max(0.0, dot(toEye, sunToEye)), 3.0);
+        float thin = crestH * crestH;
+        float sss = lobe * thin * (1.0 - clamp(df2.x, 0.0, 1.0)) * clamp(waveAmplitude * 2.5, 0.0, 1.0);
+        vec3 sssColor = waterFogColorLinear * 3.0 + vec3(0.02, 0.10, 0.06);
+        color += sssColor * sunlit_linear * atten * sss * 0.8;
+    }
+    // </WolfViewer>
+
     float water_haze_scale = 4;
 
     if (classic_mode > 0)
@@ -494,6 +681,37 @@ void main()
     // whatever is behind the surface, and for a pool prim that gap is a few centimetres
     // everywhere — so this block, written for a beach, read the whole pool as maximally
     // shoaling and turned it to whitewater. Region water only.
+    // <WolfViewer 2026-09-06> With the region's depth field baked, the shore is WolfStorm's
+    // (Water.js [SHORE] / [SWASH 2026-08-21]): a Beer-Lambert shallow tint, a swash line
+    // that advances up the beach on each crest and drains back on the trough (a cosine
+    // synced to the same approaching-wave phase as the breakers, Cyanilux's shoreline
+    // breakdown), ragged by the shore ripple tap, breaking foam brightest on the crests,
+    // and faint caustic veins in the shallows. The per-fragment depth is the refraction
+    // buffer's where there is one (it reads prims and riverbeds too), the field's otherwise.
+    float wDepth = min(wolf_water_depth, fieldDepth);
+    if (depthReady > 0.5 && boundedWaterDepth <= 0.0 && wDepth < 1e5)
+    {
+        float shallowF = exp(-waterFogDensity * 0.35 * wDepth);
+        float depthLight = clamp(dot(sunlit_linear + amblit, vec3(0.3333)), 0.08, 1.0);
+        vec3 shallowTint = color * 1.25 + vec3(0.03, 0.14, 0.12) * depthLight;
+        color = mix(color, shallowTint, shallowF * 0.25 * (1.0 - clamp(df2.x, 0.0, 1.0) * 0.5));
+        float clump = clamp((waveShore.x + waveShore.y) * 0.7 + 0.5, 0.0, 1.0);
+        float swash = shoreCos * 0.5 + 0.5;
+        float bandW = 0.34 + 1.15 * swash;
+        float band = 1.0 - clamp(wDepth / bandW, 0.0, 1.0);
+        band = clamp(band + (clump - 0.5) * 0.30 * shoal, 0.0, 1.0);
+        float fNoise = 0.55 + 0.45 * ((wave2.z + 1.0) * 0.5);
+        float shoreFoam = pow(band, 1.5) * fNoise * (0.78 + 0.34 * swash);
+        float breakFoam = shoreCrest * shoreCrest * (0.30 + 0.70 * clump) * shoreGain;
+        float foamAmt = max(shoreFoam, breakFoam * 0.85);
+        vec3 foamCol = vec3(0.93, 0.96, 0.98) * depthLight;
+        float foamMix = clamp(foamAmt, 0.0, 0.85);
+        color = mix(color, foamCol, foamMix);
+        float veins = pow(smoothstep(0.35, 0.85, abs(wave2.x + wave3.y)), 2.0);
+        color += vec3(0.10, 0.14, 0.13) * veins * shallowF * depthLight;
+    }
+    else
+    // </WolfViewer>
     if (boundedWaterDepth <= 0.0 && waveAmplitude > 0.001 && wolf_water_depth < 8.0)
     {
         float shoal = 1.0 - smoothstep(0.4, 5.0, wolf_water_depth);
@@ -510,6 +728,36 @@ void main()
         color = mix(color, vec3(0.95, 0.97, 0.99) * breakLight, breakFoam);
     }
     // </FS:WolfViewer>
+
+    // <WolfViewer 2026-09-06> Breaking crests with MEMORY (Water.js [WHITECAPS]): the fold
+    // at this world position now and 0.9 / 1.8 / 2.7 s ago, decaying — foam lingers
+    // behind the crest that made it, so a sea reads as streaked rather than dotted; no
+    // buffer, no readback. Combined by max with the cascades' accumulated foam. Gated
+    // into patches by the slow big-scale tap: a whitecap is a streak here and there along
+    // a crest, never the whole crest.
+    if (boundedWaterDepth <= 0.0 && waveAmplitude > 0.001)
+    {
+        vec2 wp = vary_world_pos.xy;
+        float cap = swellWhitecap(wp, time);
+        cap = max(cap, swellWhitecap(wp, time - 0.9) * 0.62);
+        cap = max(cap, swellWhitecap(wp, time - 1.8) * 0.38);
+        cap = max(cap, swellWhitecap(wp, time - 2.7) * 0.22);
+        float patch = smoothstep(0.35, 0.75, wave1.x * 0.5 + 0.5 + wave3.y * 0.2);
+        cap = max(cap * patch, fftFoam);
+        float ragged = 0.55 + 0.45 * clamp((wave2.x + wave3.y) * 0.8 + 0.5, 0.0, 1.0);
+        float capMix = clamp(cap * ragged * 0.85, 0.0, 0.7);
+        float capLight = clamp(dot(sunlit_linear + amblit, vec3(0.3333)), 0.08, 1.0);
+        color = mix(color, vec3(0.93, 0.96, 0.98) * capLight, capMix);
+    }
+    // Boat wash (Water.js [WAKE]): churned water is full of air, so it scatters rather
+    // than reflects — brighter and denser than the swell's foam.
+    if (vWake > 0.003)
+    {
+        float wash = clamp(pow(vWake, 0.7) * 0.80, 0.0, 0.70);
+        float washLight = clamp(dot(sunlit_linear + amblit, vec3(0.3333)), 0.08, 1.0);
+        color = mix(color, vec3(0.95, 0.97, 0.99) * washLight, wash);
+    }
+    // </WolfViewer>
 
     if (waveAmplitude > 0.001)
     {

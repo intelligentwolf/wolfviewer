@@ -74,6 +74,42 @@ uniform float wolfWaterfall;
 // DEFAULT_DELTA_ANGLE / metresPerGrid, over the LOD factor); 0 = no lift.
 uniform float wolfTerrainLod;
 // </WolfViewer>
+// <WolfViewer 2026-09-06> The rest of WolfStorm's wave field, ported (Water.js vertex
+// stage — same names, same numbers, keep in step):
+//   stormChaos / maxWaveHeight — the sea state's chaos term and the crest backstop
+//     (lldrawpoolwater.cpp, from wolfseastate.h);
+//   wolfDepthField / wolfExposureField — the region's baked terrain depth (RGBA32F: R =
+//     height, GB = beachward direction x confidence, A = smoothed height) and open-water
+//     exposure (R32F over a 3x span), REGION space, from wolfwaterfield.cpp; the vertex
+//     positions are AGENT space, so wolfRegionOrigin converts. Exposure calms the swell
+//     toward every shore (0.15x) and lets it roll offshore (1.3x); the depth field lifts
+//     shoaling breakers on the actual beach;
+//   fftDisp0/1 — the spectral wind-sea cascades' displacement (wolfoceanfft.cpp), tiling
+//     agent XY every fftTile metres, faded out by fftFade metres from the camera;
+//   wakeSampler — the boat wash field (wolfwakefield.cpp): R foam, G lift, B dip.
+uniform float stormChaos;
+uniform float maxWaveHeight;
+uniform sampler2D wolfDepthField;
+uniform sampler2D wolfExposureField;
+uniform vec2 wolfRegionOrigin;
+uniform vec2 depthRegionSize;
+uniform float depthWaterLevel;
+uniform float depthReady;
+uniform vec2 exposureOrigin;
+uniform vec2 exposureSize;
+uniform float exposureReady;
+uniform float shoreWavesEnabled;
+uniform float fftReady;
+uniform sampler2D fftDisp0;
+uniform sampler2D fftDisp1;
+uniform vec2 fftTile;
+uniform vec2 fftFade;
+uniform sampler2D wakeSampler;
+uniform vec2 wakeRegionSize;
+uniform float wakeReady;
+uniform float wakeStrength;
+uniform float boundedWaterDepth;
+// </WolfViewer>
 // </FS:WolfViewer>
 
 out vec4 refCoord;
@@ -97,6 +133,14 @@ out vec3 vary_world_pos;
 // surface's own slope, so one ribbon runs level, tips over a ledge into a fall and
 // levels out again, all in one draw; the fragment stage blends the waterfall look by it.
 out float vary_fall;
+// </WolfViewer>
+// <WolfViewer 2026-09-06> vShore = (shore wave phase, shoal factor) — the single source of
+// truth the fragment's swash and breaker foam follow; vWake = the wake field's foam here;
+// vSwell = (localAmp, wavelengthJitter, swellScale, 0) so the fragment can re-evaluate
+// the three dominant trains at PAST times for the whitecap memory.
+out vec2 vShore;
+out float vWake;
+out vec4 vSwell;
 // </WolfViewer>
 // </FS:WolfViewer>
 
@@ -240,14 +284,43 @@ void main()
     }
     // </WolfViewer>
 
+    // <WolfViewer 2026-09-06> Region-space position for the baked fields, and the
+    // open-water exposure at this vertex: open sea rolls at 1.3x, water hugging any shore
+    // or river bank calms to 0.15x (Water.js: "waves bigger out to sea, much smaller at
+    // the shore, and rivers should not have waves"). Outside the baked span, or before
+    // the first bake, water counts as open sea; a 2% band inside the span edge blends to
+    // that so nothing pops as the camera moves.
+    vec2 regionXY = position.xy - wolfRegionOrigin;
+    float swellExpo = 1.0;
+    if (exposureReady > 0.5)
+    {
+        vec2 xuv = (regionXY - exposureOrigin) / exposureSize;
+        if (xuv.x >= 0.0 && xuv.x <= 1.0 && xuv.y >= 0.0 && xuv.y <= 1.0)
+        {
+            vec2 xf = smoothstep(vec2(0.0), vec2(0.02), xuv)
+                    * (vec2(1.0) - smoothstep(vec2(0.98), vec2(1.0), xuv));
+            swellExpo = mix(1.0, texture(wolfExposureField, xuv).r, xf.x * xf.y);
+        }
+    }
+    float swellScale = mix(0.15, 1.3, swellExpo);
+    // With the spectral cascades on, the short Gerstner trains (4-6) and the fbm chop are
+    // the same wavelengths the spectrum supplies with far more variety: they fade out as
+    // the cascades come in rather than doubling up. Bounded / stream surfaces never get
+    // the cascades, so they keep the full Gerstner field.
+    bool cascades = fftReady > 0.5 && boundedWaterDepth <= 0.0 && wolfStream <= 0.0 && wolfWaterfall <= 0.0;
+    float chopKeep = cascades ? 0.0 : 1.0;
+    vSwell = vec4(0.0, 1.0, swellScale, 0.0);
+    vShore = vec2(0.0);
+    vWake = 0.0;
+    // </WolfViewer>
+
     if (waveAmplitude > 0.001)
     {
         vec2 wxy = position.xy;
 
-        // Fade displacement out with distance. Two jobs: it keeps far water from
-        // shimmering into aliasing, and it flattens the stretch-to-horizon void-water
-        // planes, which are still tessellated at the stock 32m step (see LLVOWater::
-        // updateGeometry) and cannot express a wave at all.
+        // Fade displacement out with distance: it keeps far water from shimmering into
+        // aliasing. The void planes carry a distance-graded lattice now (LLVOWater::
+        // updateGeometry), so the swell reaches toward the horizon before it fades.
         float wave_dist = length(wxy - eyeVec.xy);
         float fade = 1.0 - smoothstep(waveFade.x, waveFade.y, wave_dist);
 
@@ -255,16 +328,21 @@ void main()
         {
             const float numWaves = 8.0;
 
-            // Per-patch variation, so the sea is not one repeating corrugation.
+            // Per-patch variation, so the sea is not one repeating corrugation; the chaos
+            // term (sea state above the default) adds a third octave and roughens it.
+            // Source: Water.js vertex stage — same numbers.
             float noiseScale = 0.008;
             float timeVary = time * 0.02;
             float noise1 = snoise(wxy * noiseScale + timeVary);
-            float noise2 = snoise(wxy * noiseScale * 0.3 + timeVary * 0.5);
-            float localVariation = 0.5 + 0.3 * noise1 + 0.15 * noise2;
-            float localAmp = waveAmplitude * localVariation * fade;
+            float noise2 = snoise(wxy * noiseScale * 0.3 + timeVary * 0.5) * stormChaos;
+            float noise3 = snoise(wxy * noiseScale * 4.0 + timeVary * 2.0) * stormChaos * 0.5;
+            float localVariation = 0.5 + 0.3 * noise1 + 0.15 * noise2 + 0.1 * noise3;
+            localVariation = mix(localVariation, localVariation * (0.6 + 0.8 * abs(noise1)), stormChaos);
+            float localAmp = waveAmplitude * localVariation * fade * swellScale;
 
             float baseWavelength = 1.0 / (waveFrequency + 0.001);
-            float wavelengthJitter = 1.0 + 0.15 * snoise(wxy * 0.001 + time * 0.01);
+            float wavelengthJitter = 1.0 + stormChaos * 0.3 * snoise(wxy * 0.001 + time * 0.01);
+            vSwell.xy = vec2(localAmp, wavelengthJitter);
 
             // Primary swell direction is the region's own EEP wave direction, so a region
             // that sets its water rolling one way gets its geometry rolling that way too.
@@ -275,26 +353,119 @@ void main()
                              dir1.x * 0.574 + dir1.y * 0.819);
             vec2 dir3 = vec2(dir1.x * 0.5 + dir1.y * 0.866,
                             -dir1.x * 0.866 + dir1.y * 0.5);
+            vec2 dir5 = vec2(-dir1.x * 0.5 - dir1.y * 0.866,
+                              dir1.x * 0.866 - dir1.y * 0.5);
 
             vec3 w1 = gerstnerWave(wxy, baseWavelength * 2.0 * wavelengthJitter, localAmp * 0.40, dir1, 0.65, numWaves);
             vec3 w2 = gerstnerWave(wxy, baseWavelength * 1.5 * wavelengthJitter, localAmp * 0.30, dir2, 0.55, numWaves);
             vec3 w3 = gerstnerWave(wxy, baseWavelength * 1.2,                    localAmp * 0.25, dir3, 0.50, numWaves);
-            vec3 w4 = gerstnerWave(wxy, baseWavelength * 0.8,                    localAmp * 0.15, -dir1 * 0.7 + dir2 * 0.3, 0.45, numWaves);
-            vec3 w5 = gerstnerWave(wxy, baseWavelength * 0.5,                    localAmp * 0.15, -dir3, 0.35, numWaves);
-            vec3 w6 = gerstnerWave(wxy, baseWavelength * 0.3,                    localAmp * 0.08, dir3 * 0.6 - dir2 * 0.4, 0.25, numWaves);
+            float oppositeAmp = localAmp * (0.15 + stormChaos * 0.15) * chopKeep;
+            vec3 w4 = gerstnerWave(wxy, baseWavelength * 0.8,                    oppositeAmp, -dir1 * 0.7 + dir2 * 0.3, 0.45, numWaves);
+            vec3 w5 = gerstnerWave(wxy, baseWavelength * 0.5,                    localAmp * 0.15 * chopKeep, dir5, 0.35, numWaves);
+            float chopAmp = localAmp * (0.08 + stormChaos * 0.12) * chopKeep;
+            vec3 w6 = gerstnerWave(wxy, baseWavelength * 0.3,                    chopAmp, dir3 * 0.6 - dir2 * 0.4, 0.25, numWaves);
+            vec3 w7 = vec3(0.0);
+            vec3 w8 = vec3(0.0);
+            if (stormChaos > 0.1)
+            {
+                float randAngle1 = snoise(wxy * 0.002) * 3.14159;
+                w7 = gerstnerWave(wxy, baseWavelength * 0.7, localAmp * 0.12 * stormChaos, vec2(cos(randAngle1), sin(randAngle1)), 0.3, numWaves);
+                float randAngle2 = snoise(wxy * 0.003 + 100.0) * 3.14159;
+                w8 = gerstnerWave(wxy, baseWavelength * 0.4, localAmp * 0.1 * stormChaos, vec2(cos(randAngle2), sin(randAngle2)), 0.25, numWaves);
+            }
 
-            vec3 total = w1 + w2 + w3 + w4 + w5 + w6;
-            total.z += fbm(wxy * 0.02, time) * localAmp * 0.1;
+            vec3 total = w1 + w2 + w3 + w4 + w5 + w6 + w7 + w8;
+            total.z += fbm(wxy * 0.02, time) * localAmp * (0.1 + stormChaos * 0.1) * chopKeep;
 
             // Slopes of the three dominant trains, same arguments as their waves above.
             wave_slope = gerstnerSlope(wxy, baseWavelength * 2.0 * wavelengthJitter, localAmp * 0.40, dir1)
                        + gerstnerSlope(wxy, baseWavelength * 1.5 * wavelengthJitter, localAmp * 0.30, dir2)
                        + gerstnerSlope(wxy, baseWavelength * 1.2,                    localAmp * 0.25, dir3);
 
+            // Backstop, not the height (2.5x the amplitude from lldrawpoolwater.cpp).
+            if (maxWaveHeight > 0.0)
+            {
+                total.z = clamp(total.z, -maxWaveHeight, maxWaveHeight);
+            }
+
             wave_pos += total.x * surf_t + total.y * surf_b + total.z * surf_n;
             wave_h = total.z;
         }
     }
+
+    // <WolfViewer 2026-09-06> Wind-sea displacement from the spectral cascades, on top of
+    // the swell. Keyed on agent XY like the swell, so neighbouring regions' water joins up;
+    // scaled by the exposure like the swell; faded per cascade — displacing far vertices
+    // by a 12 m chop is aliasing, the fragment keeps the NORMALS out much further.
+    // Source: Water.js vertex stage FFT block.
+    if (cascades)
+    {
+        float fdist = length(position.xy - eyeVec.xy);
+        float f0 = 1.0 - smoothstep(fftFade.x * 0.5, fftFade.x, fdist);
+        float f1 = 1.0 - smoothstep(fftFade.y * 0.5, fftFade.y, fdist);
+        vec3 dd = vec3(0.0);
+        if (f0 > 0.001) dd += texture(fftDisp0, position.xy / fftTile.x).xyz * f0;
+        if (f1 > 0.001) dd += texture(fftDisp1, position.xy / fftTile.y).xyz * f1;
+        dd *= swellScale;
+        wave_pos += dd.x * surf_t + dd.y * surf_b + dd.z * surf_n;
+        wave_h += dd.z;
+    }
+
+    // GEOMETRIC shore breakers (Water.js [SWELL 2026-08-15]): the baked depth field's
+    // smoothed height gives a stable phase, sin(w t + 8 sqrt(d)) travels beachward with
+    // shallow-water celerity so crests slow and bunch as the water shallows, and
+    // sharpened crests rise as they shoal. Faded out over a band INSIDE the region edge
+    // so camera motion can never pop a vertex across a hard boundary (the [FLASH FIX
+    // 2026-08-21] lesson). Fed by the exposure ~45 m seaward: a real coast keeps its
+    // set, a river bank (no fetch anywhere) drops to 0.35x.
+    if (depthReady > 0.5 && shoreWavesEnabled > 0.5 && boundedWaterDepth <= 0.0)
+    {
+        vec2 sduv = regionXY / depthRegionSize;
+        if (sduv.x >= 0.0 && sduv.x <= 1.0 && sduv.y >= 0.0 && sduv.y <= 1.0)
+        {
+            vec2 ef = smoothstep(vec2(0.0), vec2(0.04), sduv)
+                    * (vec2(1.0) - smoothstep(vec2(0.96), vec2(1.0), sduv));
+            float edgeFade = ef.x * ef.y;
+            vec4 dtex = texture(wolfDepthField, sduv);
+            float conf = length(dtex.gb);
+            if (conf > 0.02)
+            {
+                float smoothDepth = max(depthWaterLevel - dtex.a, 0.0);
+                float shoal = (1.0 - smoothstep(0.5, 8.0, smoothDepth)) * min(conf * 1.5, 1.0) * edgeFade;
+                if (shoal > 0.01)
+                {
+                    float speedScale = clamp(length(waveDir1) * 0.885, 0.4, 2.0);
+                    float phase = time * 4.5 * speedScale + sqrt(smoothDepth) * 8.0;
+                    vShore = vec2(phase, shoal);
+                    float feed = 1.0;
+                    if (exposureReady > 0.5)
+                    {
+                        vec2 fuv = (regionXY - dtex.gb * (45.0 / conf) - exposureOrigin) / exposureSize;
+                        feed = texture(wolfExposureField, clamp(fuv, 0.0, 1.0)).r;
+                    }
+                    float bAmp = min(0.10 + waveAmplitude * 0.9, 0.5) * shoal * (0.35 + 0.65 * sqrt(feed));
+                    float br = sin(phase);
+                    float lift = (br + 0.35 * br * br) * bAmp;
+                    wave_pos += surf_n * lift;
+                    wave_h += lift;
+                }
+            }
+        }
+    }
+
+    // Boat wash displacement (Water.js [WAKE 2026-08-21]): the Kelvin arms lift the
+    // surface and the churn astern depresses it (G lift, B dip, differenced at read).
+    if (wakeReady > 0.5 && wakeStrength > 0.0)
+    {
+        vec2 wkuv = regionXY / wakeRegionSize;
+        if (wkuv.x >= 0.0 && wkuv.x <= 1.0 && wkuv.y >= 0.0 && wkuv.y <= 1.0)
+        {
+            vec4 wk = texture(wakeSampler, wkuv);
+            vWake = wk.r * wakeStrength;
+            wave_pos += surf_n * ((wk.g - wk.b) * 1.7 * wakeStrength);
+        }
+    }
+    // </WolfViewer>
 
     vary_wave_slope = wave_slope;
     vary_wave_height = wave_h;

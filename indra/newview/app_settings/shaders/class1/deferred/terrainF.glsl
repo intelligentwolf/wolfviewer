@@ -79,6 +79,45 @@ in float vary_up;
 in vec3 vary_region_pos;
 in vec3 vary_region_normal;
 uniform float wolf_terrain_look;
+// <WolfViewer 2026-09-06> Sunlight caustics on submerged ground, focused through the
+// spectral ocean's actual wave field (lldrawpoolterrain.cpp wolf_bind_caustics; the
+// slope textures are wolfoceanfft.cpp's attachment 1: xy = dz/dx, dz/dy). A ray of sun
+// reaching a submerged point came through the surface where the refracted sun direction
+// hits it; the light there is focused by the surface curvature — a trough converges the
+// rays below it, a crest spreads them — the footprint of a bundle of rays scaling by about
+// 1 - d c lap (c ~ 0.25 for the water/air bend), so the irradiance is its inverse.
+// Beer-Lambert over the depth with the EEP fog density.
+// Source: wolfstorm/js/world/terrain/terrain_manager.js _installSplatShader caustics block.
+uniform sampler2D wolfCausticTex0;
+uniform sampler2D wolfCausticTex1;
+uniform vec2  wolf_caustic_tile;
+uniform float wolf_caustic_on;
+uniform vec3  wolf_caustic_sun;
+uniform float wolf_caustic_strength;
+uniform float wolf_caustic_fog;
+uniform float wolf_water_level;
+uniform vec2  wolf_caustic_origin;   // region origin in agent space: the cascades tile agent XY
+float wolfWaveLaplacian(sampler2D t, vec2 uv, float texel)
+{
+    float hxx = texture(t, uv + vec2(texel, 0.0)).x - texture(t, uv - vec2(texel, 0.0)).x;
+    float hyy = texture(t, uv + vec2(0.0, texel)).y - texture(t, uv - vec2(0.0, texel)).y;
+    return (hxx + hyy) / (2.0 * texel);
+}
+float wolfCaustic(vec3 region_pos)
+{
+    if (wolf_caustic_on < 0.5 || region_pos.z >= wolf_water_level)
+    {
+        return 0.0;
+    }
+    float cdepth = wolf_water_level - region_pos.z;
+    vec3 sd = normalize(wolf_caustic_sun);
+    vec2 hit = region_pos.xy + wolf_caustic_origin + sd.xy / max(sd.z, 0.2) * cdepth * 0.75;
+    float lap = wolfWaveLaplacian(wolfCausticTex1, hit / wolf_caustic_tile.y, 1.0 / 128.0) / wolf_caustic_tile.y
+              + 0.35 * wolfWaveLaplacian(wolfCausticTex0, hit / wolf_caustic_tile.x, 1.0 / 128.0) / wolf_caustic_tile.x;
+    float focus = 1.0 / max(abs(1.0 - cdepth * 0.25 * lap), 0.12);
+    return clamp((focus - 1.0) * 2.0, 0.0, 3.0) * exp(-wolf_caustic_fog * 0.12 * cdepth) * wolf_caustic_strength;
+}
+// </WolfViewer>
 // The same uniform terrainV.glsl feeds texgen_object with: .x is the detail scale
 // (LLDrawPoolTerrain::sDetailScale), which the side projections reuse.
 uniform vec4 object_plane_s;
@@ -245,6 +284,10 @@ void main()
             outColor.rgb = mix(outColor.rgb, vec3(0.92, 0.94, 0.98), snowW);
         }
     }
+
+    // <WolfViewer 2026-09-06> caustics on the sea bed
+    outColor.rgb *= 1.0 + wolfCaustic(vary_region_pos);
+    // </WolfViewer>
 
     outColor.a = 0.0; // yes, downstream atmospherics
 

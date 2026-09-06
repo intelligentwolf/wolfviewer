@@ -1600,6 +1600,21 @@ void LLShaderMgr::initAttribsAndUniforms()
     mReservedUniforms.push_back("waveFade");
     mReservedUniforms.push_back("boundedWaterDepth");
     // </FS:WolfViewer>
+    // <WolfViewer 2026-09-06> — must stay in the same order as the enum tail.
+    mReservedUniforms.push_back("uH0");
+    mReservedUniforms.push_back("uIn0");
+    mReservedUniforms.push_back("uIn1");
+    mReservedUniforms.push_back("uPrev");
+    mReservedUniforms.push_back("fftDisp0");
+    mReservedUniforms.push_back("fftDisp1");
+    mReservedUniforms.push_back("fftDeriv0");
+    mReservedUniforms.push_back("fftDeriv1");
+    mReservedUniforms.push_back("wakeSampler");
+    mReservedUniforms.push_back("wolfDepthField");
+    mReservedUniforms.push_back("wolfExposureField");
+    mReservedUniforms.push_back("wolfCausticTex0");
+    mReservedUniforms.push_back("wolfCausticTex1");
+    // </WolfViewer>
 
     llassert(mReservedUniforms.size() == END_RESERVED_UNIFORMS);
 

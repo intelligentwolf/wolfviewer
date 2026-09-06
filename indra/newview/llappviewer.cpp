@@ -73,6 +73,7 @@
 #include "llviewerwindow.h"
 #include "fswolfwater.h" // <FS:WolfViewer> wolfwater prim surfaces
 #include "wolfnaturalwater.h" // <WolfViewer> streams and pools from the heightmap
+#include "wolfwaterfield.h" // <WolfViewer> water depth / exposure fields for the water shader
 #include "llviewerdisplay.h"
 #include "llviewermedia.h"
 #include "llviewerparcelaskplay.h"
@@ -6134,6 +6135,9 @@ void LLAppViewer::idle()
     // </FS:WolfViewer>
     // <WolfViewer> natural water (LLVOWater planes from the heightmap); same phase, same reason.
     WolfNaturalWater::instance().idle();
+    // Depth + exposure fields the water shader samples (shore calming, breakers, swash);
+    // bakes at most one region per 2 s check.
+    WolfWaterField::instance().idle();
     // </WolfViewer>
 
     if (gAgentPilot.isPlaying() && gAgentPilot.getOverrideCamera())

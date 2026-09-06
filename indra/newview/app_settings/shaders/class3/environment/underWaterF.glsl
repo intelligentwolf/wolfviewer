@@ -53,6 +53,7 @@ in vec4 refCoord;
 in vec4 littleWave;
 in vec4 view;
 in vec3 vary_position;
+in vec3 vary_normal;   // <WolfViewer 2026-09-06> the surface's up, eye space (waterV.glsl)
 
 vec4 applyWaterFogViewLinearNoClip(vec3 pos, vec4 color);
 void mirrorClip(vec3 position);
@@ -80,6 +81,31 @@ void main()
 #else
     vec4 fb = vec4(waterFogColorLinear, 0.0);
 #endif
+
+    // <WolfViewer 2026-09-06> SNELL'S WINDOW. From under water the world above is visible
+    // only inside a cone of about 97 degrees (twice the critical angle, asin(1/1.333) =
+    // 48.6 deg); outside it the surface is a mirror of the water body — total internal
+    // reflection, the dark disc-with-a-bright-window every diver knows. The refraction
+    // buffer already holds the world seen through the surface; it is kept inside the
+    // window, mixed toward the body by the below-surface Fresnel (Schlick, R0 = 0.02 for
+    // 1.333 -> 1.0), replaced by the body outside it, with a soft edge over a few
+    // hundredths of sin(i) and a bright rim where rays graze the surface. The water fog
+    // below then takes over with distance, as before.
+    // Source: wolfstorm/js/libs/Water.js eyeBelow block.
+    {
+        vec3 up = normalize(vary_normal);
+        vec3 toSurf = normalize(vary_position);
+        float cosI = clamp(dot(toSurf, up), 0.0, 1.0);
+        float sinI = sqrt(max(0.0, 1.0 - cosI * cosI));
+        float window = 1.0 - smoothstep(0.72, 0.78, sinI);
+        const float R0 = 0.02;
+        float fres = R0 + (1.0 - R0) * pow(1.0 - cosI, 5.0);
+        vec4 body = vec4(waterFogColorLinear * 0.85, fb.a);
+        float rim = window * (1.0 - smoothstep(0.02, 0.18, cosI)) * 0.6;
+        fb = mix(mix(fb, body, fres), body, 1.0 - window);
+        fb.rgb += specular * rim * 0.25;
+    }
+    // </WolfViewer>
 
     fb = applyWaterFogViewLinearNoClip(vary_position, fb);
 

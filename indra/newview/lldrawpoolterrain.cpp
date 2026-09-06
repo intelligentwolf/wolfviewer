@@ -58,6 +58,53 @@ S32 LLDrawPoolTerrain::sPBRDetailMode = 0;
 F32 LLDrawPoolTerrain::sDetailScale = DETAIL_SCALE;
 F32 LLDrawPoolTerrain::sPBRDetailScale = DETAIL_SCALE;
 static LLGLSLShader* sShader = NULL;
+
+// <WolfViewer 2026-09-06> Sunlight caustics on the sea bed from the spectral ocean
+// (wolfoceanfft.cpp): the chop cascade's slope texture, the sun, the water fog and level.
+// Source: wolfstorm/js/world/terrain/terrain_manager.js _pushCausticUniforms().
+#include "llenvironment.h"
+#include "wolfoceanfft.h"
+extern bool gCubeSnapshot;   // Source: lldrawpoolwater.cpp:56 — the same extern the water pool uses
+static void wolf_bind_caustics(LLGLSLShader* shader, LLViewerRegion* regionp)
+{
+    static LLCachedControl<bool> caustics_on(gSavedSettings, "WolfViewerWaterCaustics", true);
+    static LLStaticHashedString s_on("wolf_caustic_on");
+    static LLStaticHashedString s_sun("wolf_caustic_sun");
+    static LLStaticHashedString s_strength("wolf_caustic_strength");
+    static LLStaticHashedString s_fog("wolf_caustic_fog");
+    static LLStaticHashedString s_tile("wolf_caustic_tile");
+    static LLStaticHashedString s_level("wolf_water_level");
+    static LLStaticHashedString s_origin("wolf_caustic_origin");
+    WolfOceanFFT& fft = WolfOceanFFT::instance();
+    LLRenderTarget* t0 = fft.finalTarget(0);
+    LLRenderTarget* t1 = fft.finalTarget(1);
+    LLEnvironment& env = LLEnvironment::instance();
+    LLSettingsWater::ptr_t pwater = env.getCurrentWater();
+    F32 strength = 0.f;
+    LLVector3 light = env.getLightDirection();
+    light.normalize();
+    if (caustics_on && t0 && t1 && pwater && env.getIsSunUp() && !gCubeSnapshot)
+    {
+        // Sunlight only; the same dawn ramp the water uses.
+        strength = llclamp((light.mV[VZ] - 0.02f) / 0.23f, 0.f, 1.f) * 0.9f;
+    }
+    if (strength <= 0.f)
+    {
+        shader->uniform1f(s_on, 0.f);
+        return;
+    }
+    shader->bindTexture(LLShaderMgr::WOLF_CAUSTIC_TEX0, t0, false, LLTexUnit::TFO_TRILINEAR, 1);
+    shader->bindTexture(LLShaderMgr::WOLF_CAUSTIC_TEX1, t1, false, LLTexUnit::TFO_TRILINEAR, 1);
+    const LLVector3 origin = regionp->getOriginAgent();
+    shader->uniform1f(s_on, 1.f);
+    shader->uniform3f(s_sun, light.mV[VX], light.mV[VY], llmax(light.mV[VZ], 0.05f));
+    shader->uniform1f(s_strength, strength);
+    shader->uniform1f(s_fog, llmax(0.05f, pwater->getWaterFogDensity()));
+    shader->uniform2f(s_tile, fft.getTile(0), fft.getTile(1));
+    shader->uniform1f(s_level, regionp->getWaterHeight());
+    shader->uniform2f(s_origin, origin.mV[VX], origin.mV[VY]);
+}
+// </WolfViewer>
 static LLTrace::BlockTimerStatHandle FTM_SHADOW_TERRAIN("Terrain Shadow");
 
 
@@ -314,6 +361,7 @@ void LLDrawPoolTerrain::renderFullShaderTextures()
                           compp->getHeightRange(LLVLComposition::NORTHEAST));
         shader->uniform1f(s_wolf_region_width, regionp->getWidth());
     }
+    wolf_bind_caustics(shader, regionp);   // <WolfViewer 2026-09-06>
     // </WolfViewer>
 
     LLSettingsWater::ptr_t pwater = LLEnvironment::instance().getCurrentWater();
@@ -565,6 +613,7 @@ void LLDrawPoolTerrain::renderFullShaderPBR(bool use_local_materials)
         gGL.getTexUnit(paint_map)->setTextureAddressMode(LLTexUnit::TAM_CLAMP);
 
         shader->uniform1f(LLShaderMgr::REGION_SCALE, regionp->getWidth());
+        wolf_bind_caustics(shader, regionp);   // <WolfViewer 2026-09-06>
     }
 
     //

@@ -1655,6 +1655,29 @@ If you do not understand the distinction then leave this control alone."
          tool_tip="Draws streams along the land's drainage lines and pools in its basins, worked out from the terrain heights. Viewer-side only; the land itself is never changed."
          top_delta="0"
          width="240" />
+        <!-- WolfViewer 2026-09-06: the water (lldrawpoolwater.cpp / wolfoceanfft.cpp) -->
+        <check_box
+         control_name="WolfViewerWaterSeaStateFromRegion"
+         follows="left|top"
+         height="16"
+         label="Sea state from the region"
+         layout="topleft"
+         left="10"
+         name="WolfViewerWaterSeaStateFromRegion"
+         tool_tip="Swell height, wavelength, direction and the wind of the wind sea follow the region's own environment water settings (a region with fast, strong ripples gets a rougher sea). Uncheck to pin the swell height in Debug Settings (WolfViewerWaterWaveHeight)."
+         top_pad="4"
+         width="150" />
+        <check_box
+         control_name="WolfViewerWaterFFT"
+         follows="left|top"
+         height="16"
+         label="Spectral wind sea (FFT)"
+         layout="topleft"
+         left_pad="10"
+         name="WolfViewerWaterFFT"
+         tool_tip="Wind waves and chop from an ocean-wave spectrum (JONSWAP) on top of the swell, with whitecaps where the surface folds and sunlight caustics on the sea bed. Sixteen small GPU passes a frame."
+         top_delta="0"
+         width="150" />
         <slider
          control_name="WolfTerrainSnowLine"
          decimal_digits="0"

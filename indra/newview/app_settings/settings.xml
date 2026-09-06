@@ -19416,7 +19416,7 @@ Change of this parameter will affect the layout of buttons in notification toast
 		<key>WolfViewerWaterWaveHeight</key>
 		<map>
 			<key>Comment</key>
-			<string>Height in metres of the rolling swell displaced into the water surface. 0 gives the stock flat water plane (normal-map shading only). Region water only; the stretch-to-horizon planes are always flat.</string>
+			<string>Height in metres of the rolling swell displaced into the water surface, used only when WolfViewerWaterSeaStateFromRegion is off. 0 gives the stock flat water plane (normal-map shading only).</string>
 			<key>Persist</key>
 			<integer>1</integer>
 			<key>Type</key>
@@ -19460,13 +19460,90 @@ Change of this parameter will affect the layout of buttons in notification toast
 		<key>WolfViewerWaterWaveFadeEnd</key>
 		<map>
 			<key>Comment</key>
-			<string>Distance in metres from the camera at which the water swell has faded to nothing. Must be greater than WolfViewerWaterWaveFadeStart.</string>
+			<string>Distance in metres from the camera at which the water swell has faded to nothing. Must be greater than WolfViewerWaterWaveFadeStart. Void water beyond the region border swells too (distance-graded lattice), so this reaches toward the horizon.</string>
 			<key>Persist</key>
 			<integer>1</integer>
 			<key>Type</key>
 			<string>F32</string>
 			<key>Value</key>
-			<real>1024.0</real>
+			<real>1500.0</real>
+		</map>
+		<key>WolfViewerWaterSeaStateFromRegion</key>
+		<map>
+			<key>Comment</key>
+			<string>Derive the wave field (swell height, wavelength, chaos, direction and the wind of the spectral wind sea) from the region's own environment water settings: wave1_direction's speed and normal_scale's strength relative to the Firestorm defaults, which map to the 0.22 m / 20 m sea this viewer has always shown. Off = use WolfViewerWaterWaveHeight / WolfViewerWaterWaveScale as fixed values.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>1</integer>
+		</map>
+		<key>WolfViewerWaterFFT</key>
+		<map>
+			<key>Comment</key>
+			<string>Spectral wind sea: wind waves and chop from a JONSWAP ocean-wave spectrum (two inverse-FFT cascades, 96 m and 12 m tiles) on top of the swell, with whitecaps where the surface folds. Needs float render targets; falls back to the swell alone without them.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>1</integer>
+		</map>
+		<key>WolfViewerWaterShoreField</key>
+		<map>
+			<key>Comment</key>
+			<string>Bake the region's terrain into a depth field and an open-water exposure field for the water: the swell calms toward shores and dies in rivers, breakers rise as they shoal, the swash line pulses up the beach, the shallows tint. Re-baked when the land changes and every 20 s.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>1</integer>
+		</map>
+		<key>WolfViewerWaterWake</key>
+		<map>
+			<key>Comment</key>
+			<string>Boat wash: moving hulls stamp a wake (propeller wash, Kelvin V, bow churn) into a world-locked field the water surface samples for foam and displacement.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>1</integer>
+		</map>
+		<key>WolfViewerWaterWakeStrength</key>
+		<map>
+			<key>Comment</key>
+			<string>How strong the boat wash reads, 0 to 0.25. The water's wakeStrength uniform; scales foam, lift and the normal tilt together.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>F32</string>
+			<key>Value</key>
+			<real>0.05</real>
+		</map>
+		<key>WolfViewerWaterGodRays</key>
+		<map>
+			<key>Comment</key>
+			<string>Sunlight shafts while the camera is under water, drawn over the frame in screen space; break up with the spectral ocean's chop when it is running.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>1</integer>
+		</map>
+		<key>WolfViewerWaterCaustics</key>
+		<map>
+			<key>Comment</key>
+			<string>Sunlight caustics on the sea bed, focused through the spectral ocean's actual wave field. Off without the spectral wind sea.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>1</integer>
 		</map>
 		<key>WolfViewerTransporterFX</key>
 		<map>

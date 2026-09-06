@@ -49,6 +49,7 @@ in vec2 texcoord1;
 
 out vec3 vary_position;
 out vec3 vary_normal;
+out vec3 vary_region_pos;   // <WolfViewer 2026-09-06> region-space position, for the caustics
 #if TERRAIN_PLANAR_TEXTURE_SAMPLE_COUNT == 3
 out vec3 vary_vertex_normal; // Used by pbrterrainUtilF.glsl
 #endif
@@ -83,6 +84,7 @@ void main()
     //transform vertex
     gl_Position = modelview_projection_matrix * vec4(position.xyz, 1.0);
     vary_position = (modelview_matrix*vec4(position.xyz, 1.0)).xyz;
+    vary_region_pos = position.xyz;   // <WolfViewer 2026-09-06>
 
     vec3 n = normal_matrix * normal;
 #if TERRAIN_PLANAR_TEXTURE_SAMPLE_COUNT == 3

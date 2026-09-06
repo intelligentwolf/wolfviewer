@@ -7925,6 +7925,115 @@ void LLPipeline::gammaCorrect(LLRenderTarget* src, LLRenderTarget* dst)
     dst->flush();
 }
 
+// <WolfViewer 2026-09-06> Underwater sunlight shafts ("god rays"). DECLARED ADDITION:
+// Firestorm's underwater view is fog only. Screen-space crepuscular rays drawn ADDITIVELY
+// over the tonemapped frame (deferred/wolfGodRaysF.glsl): the sun's screen position comes
+// from the camera basis, the strength from the sun's elevation and the camera's depth
+// below the surface under the EEP fog density, and the chop cascade of the spectral ocean
+// breaks the beams up where it is running. Source: wolfstorm/js/rendering/underwater_rays.js.
+#include "wolfoceanfft.h"
+void LLPipeline::wolfGodRays(LLRenderTarget* dst)
+{
+    static LLCachedControl<bool> rays_on(gSavedSettings, "WolfViewerWaterGodRays", true);
+    if (!rays_on || gCubeSnapshot || !dst || !gWolfGodRaysProgram.isComplete())
+    {
+        return;
+    }
+    LLViewerCamera* cam = LLViewerCamera::getInstance();
+    if (!cam->cameraUnderWater())
+    {
+        return;
+    }
+    LLEnvironment& env = LLEnvironment::instance();
+    LLSettingsWater::ptr_t pwater = env.getCurrentWater();
+    LLSettingsSky::ptr_t psky = env.getCurrentSky();
+    if (!pwater || !psky || !env.getIsSunUp())
+    {
+        return;
+    }
+    LLVector3 light = env.getLightDirection();
+    light.normalize();
+    const F32 sun_z = light.mV[VZ];
+    if (sun_z <= 0.02f)
+    {
+        return;
+    }
+    // Sun on screen from the camera basis: LLCoordFrame at/left/up, LLCamera's vertical
+    // FOV and aspect (llcoordframe.h:108-110, llcamera.h:161-163).
+    const F32 fwd = light * cam->getAtAxis();
+    if (fwd <= 0.01f)
+    {
+        return;   // behind the camera
+    }
+    const F32 sx = -(light * cam->getLeftAxis()) / fwd;
+    const F32 sy = (light * cam->getUpAxis()) / fwd;
+    const F32 tan_half = tanf(cam->getView() * 0.5f);
+    const F32 ux = (sx / (tan_half * cam->getAspect())) * 0.5f + 0.5f;
+    const F32 uy = (sy / tan_half) * 0.5f + 0.5f;
+    if (ux < -0.6f || ux > 1.6f || uy < -0.6f || uy > 1.6f)
+    {
+        return;
+    }
+    F32 water_height = env.getWaterHeight();
+    if (LLViewerRegion* region = LLWorld::getInstance()->getRegionFromPosAgent(cam->getOrigin()))
+    {
+        water_height = region->getWaterHeight();
+    }
+    const F32 depth = llmax(0.f, water_height - cam->getOrigin().mV[VZ]);
+    const F32 fog = llmax(0.05f, pwater->getWaterFogDensity());
+    const F32 elev = llmin(1.f, (sun_z - 0.02f) / 0.23f);
+    const F32 strength = 0.55f * elev * expf(-fog * 0.12f * depth);
+    if (strength < 0.005f)
+    {
+        return;
+    }
+    const LLColor3 sc = psky->getSunlightColor();
+    const LLColor3 fc = pwater->getWaterFogColor();
+
+    LL_PROFILE_GPU_ZONE("wolf god rays");
+    static LLStaticHashedString s_uSun("uSun");
+    static LLStaticHashedString s_uStrength("uStrength");
+    static LLStaticHashedString s_uTime("uTime");
+    static LLStaticHashedString s_uAspect("uAspect");
+    static LLStaticHashedString s_uColor("uColor");
+    static LLStaticHashedString s_uCausticOn("uCausticOn");
+    static LLStaticHashedString s_uCamXY("uCamXY");
+    static LLStaticHashedString s_uCausticTile("uCausticTile");
+
+    dst->bindTarget();
+    {
+        LLGLEnable blend(GL_BLEND);
+        gGL.blendFunc(LLRender::BF_ONE, LLRender::BF_ONE);
+        LLGLDepthTest depth_test(GL_FALSE, GL_FALSE);
+        LLGLSLShader& sh = gWolfGodRaysProgram;
+        sh.bind();
+        sh.uniform2f(s_uSun, ux, uy);
+        sh.uniform1f(s_uStrength, strength);
+        sh.uniform1f(s_uTime, gFrameTimeSeconds);
+        sh.uniform1f(s_uAspect, (F32)dst->getWidth() / llmax((F32)dst->getHeight(), 1.f));
+        sh.uniform3f(s_uColor, sc.mV[0] * 0.55f + fc.mV[0] * 1.2f, sc.mV[1] * 0.6f + fc.mV[1] * 1.2f, sc.mV[2] * 0.65f + fc.mV[2] * 1.2f);
+        WolfOceanFFT& fft = WolfOceanFFT::instance();
+        LLRenderTarget* t1 = fft.finalTarget(1);
+        if (t1 && fft.isReady())
+        {
+            sh.bindTexture(LLShaderMgr::WOLF_CAUSTIC_TEX1, t1, false, LLTexUnit::TFO_TRILINEAR, 1);
+            sh.uniform1f(s_uCausticOn, 1.f);
+        }
+        else
+        {
+            sh.uniform1f(s_uCausticOn, 0.f);
+        }
+        sh.uniform2f(s_uCamXY, cam->getOrigin().mV[VX], cam->getOrigin().mV[VY]);
+        sh.uniform1f(s_uCausticTile, fft.getTile(1));
+        mScreenTriangleVB->setBuffer();
+        mScreenTriangleVB->drawArrays(LLRender::TRIANGLES, 0, 3);
+        sh.unbind();
+        gGL.setSceneBlendType(LLRender::BT_ALPHA);
+    }
+    dst->flush();
+}
+// </WolfViewer>
+
 void LLPipeline::copyScreenSpaceReflections(LLRenderTarget* src, LLRenderTarget* dst)
 {
 
@@ -8939,6 +9048,10 @@ void LLPipeline::renderFinalize()
     }
 
     LLVertexBuffer::unbind();
+
+    // <WolfViewer 2026-09-06> sunlight shafts over the tonemapped frame while submerged.
+    wolfGodRays(&mPostPingMap);
+    // </WolfViewer>
 
     generateGlow(&mPostPingMap);
 

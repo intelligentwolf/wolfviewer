@@ -368,6 +368,24 @@ public:
         WATER_WAVE_FADE,                    // "waveFade"
         WATER_BOUNDED_DEPTH,                // "boundedWaterDepth"
         // </FS:WolfViewer>
+        // <WolfViewer 2026-09-06> Water fields, spectral ocean, wake and caustics. Samplers
+        // are reserved so a render-target ATTACHMENT can be chosen when binding
+        // (LLGLSLShader::bindTexture(S32, LLRenderTarget*, ..., index)); the by-name
+        // overload cannot pick an attachment. Same order as the string table.
+        WOLF_FFT_H0,                        // "uH0"
+        WOLF_FFT_IN0,                       // "uIn0"
+        WOLF_FFT_IN1,                       // "uIn1"
+        WOLF_FFT_PREV,                      // "uPrev"
+        WOLF_FFT_DISP0,                     // "fftDisp0"
+        WOLF_FFT_DISP1,                     // "fftDisp1"
+        WOLF_FFT_DERIV0,                    // "fftDeriv0"
+        WOLF_FFT_DERIV1,                    // "fftDeriv1"
+        WOLF_WAKE_SAMPLER,                  // "wakeSampler"
+        WOLF_DEPTH_FIELD,                   // "wolfDepthField"
+        WOLF_EXPOSURE_FIELD,                // "wolfExposureField"
+        WOLF_CAUSTIC_TEX0,                  // "wolfCausticTex0"
+        WOLF_CAUSTIC_TEX1,                  // "wolfCausticTex1"
+        // </WolfViewer>
         END_RESERVED_UNIFORMS
     } eGLSLReservedUniforms;
     // clang-format on

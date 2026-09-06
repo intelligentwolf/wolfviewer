@@ -49,6 +49,69 @@ template<class T> inline T LERP(T a, T b, F32 factor)
     return a + (b - a) * factor;
 }
 
+// <WolfViewer 2026-09-06> Lattice lines for one axis of a VOID (edge) water plane, as
+// offsets from the plane's centre in [-half, half]: from the point nearest the FOCUS (the
+// agent region's centre, given as an offset from this plane's centre) outward, with a step
+// of 4% of the distance to the focus, 2 m near and 128 m far. That is the radial grid
+// WolfStorm's sea uses (terrain_manager.js _buildRadialWaterGeometry: rings growing
+// exponentially from the camera to a 5 km horizon), laid on the axis-aligned planes
+// LLWorld::updateWaterObjects builds — so the swell no longer stops dead at the region
+// border. Capped so (n+1)^2 stays under the U16 index ceiling.
+static void wolf_graded_axis(F32 half, F32 focus_off, std::vector<F32>& out)
+{
+    const F32 lo = -half, hi = half;
+    const F32 f = llclamp(focus_off, lo, hi);
+    std::vector<F32> right, left;
+    F32 x = f;
+    while (x < hi - 0.01f && right.size() < 200)
+    {
+        const F32 step = llclamp(fabsf(x - focus_off) * 0.04f, 2.f, 128.f);
+        x = llmin(x + step, hi);
+        right.push_back(x);
+    }
+    if (right.empty() || right.back() < hi - 0.01f)
+    {
+        right.push_back(hi);
+    }
+    x = f;
+    while (x > lo + 0.01f && left.size() < 200)
+    {
+        const F32 step = llclamp(fabsf(x - focus_off) * 0.04f, 2.f, 128.f);
+        x = llmax(x - step, lo);
+        left.push_back(x);
+    }
+    if (left.empty() || left.back() > lo + 0.01f)
+    {
+        left.push_back(lo);
+    }
+    std::vector<F32> all;
+    all.reserve(left.size() + right.size() + 1);
+    for (auto it = left.rbegin(); it != left.rend(); ++it) all.push_back(*it);
+    all.push_back(f);
+    all.insert(all.end(), right.begin(), right.end());
+    // Drop coincident neighbours (the focus can sit on an edge), then decimate to the cap.
+    out.clear();
+    for (F32 v : all)
+    {
+        if (out.empty() || v - out.back() > 0.01f)
+        {
+            out.push_back(v);
+        }
+    }
+    while (out.size() > 255)
+    {
+        std::vector<F32> d;
+        for (size_t i = 0; i < out.size(); i += 2) d.push_back(out[i]);
+        if (d.back() < out.back()) d.push_back(out.back());
+        out.swap(d);
+    }
+    if (out.size() < 2)
+    {
+        out.assign({ lo, hi });
+    }
+}
+// </WolfViewer>
+
 LLVOWater::LLVOWater(const LLUUID &id,
                      const LLPCode pcode,
                      LLViewerRegion *regionp) :
@@ -238,6 +301,8 @@ bool LLVOWater::updateGeometry(LLDrawable *drawable)
     S32 size_x;
     S32 size_y;
     bool shared_lattice = false;
+    // <WolfViewer 2026-09-06> per-axis lattice line offsets for the graded void planes
+    std::vector<F32> xs, ys;
 
     if (!LLPipeline::sRenderTransparentWater)
     {
@@ -248,8 +313,23 @@ bool LLVOWater::updateGeometry(LLDrawable *drawable)
     }
     else if (mIsEdgePatch)
     {
-        size_x = 8 * (S32)llmin(llround(scale.mV[0] / 256.f), 8);
-        size_y = 8 * (S32)llmin(llround(scale.mV[1] / 256.f), 8);
+        // <WolfViewer 2026-09-06> The stock 32 m step could not hold a wave, so void water
+        // was flat and the sea ended at the region border. A distance-graded lattice about
+        // the agent region's centre is fine where the swell is and coarse at the horizon.
+        const LLVector3 center = getPositionAgent();
+        const LLVector3 half = getScale() * 0.5f;
+        LLVector3 focus = center;
+        if (mRegionp)
+        {
+            const F32 w = mRegionp->getWidth();
+            focus = mRegionp->getOriginAgent() + LLVector3(w * 0.5f, w * 0.5f, 0.f);
+        }
+        wolf_graded_axis(half.mV[VX], focus.mV[VX] - center.mV[VX], xs);
+        wolf_graded_axis(half.mV[VY], focus.mV[VY] - center.mV[VY], ys);
+        size_x = (S32)xs.size() - 1;
+        size_y = (S32)ys.size() - 1;
+        shared_lattice = true;
+        // </WolfViewer>
     }
     else
     {
@@ -338,8 +418,9 @@ bool LLVOWater::updateGeometry(LLDrawable *drawable)
         {
             for (x = 0; x <= size_x; x++)
             {
-                LLVector3 off(x * step_x - half.mV[VX],
-                              y * step_y - half.mV[VY],
+                // <WolfViewer 2026-09-06> graded void planes carry their own line offsets
+                LLVector3 off(xs.empty() ? x * step_x - half.mV[VX] : xs[x],
+                              ys.empty() ? y * step_y - half.mV[VY] : ys[y],
                               -half.mV[VZ]);
                 if (rotated)
                 {

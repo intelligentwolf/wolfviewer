@@ -142,6 +142,38 @@ uniform vec3[4] emissiveColors;
 uniform vec4 minimum_alphas; // PBR alphaMode: MASK, See: mAlphaCutoff, setAlphaCutoff()
 
 in vec3 vary_position;
+in vec3 vary_region_pos;   // <WolfViewer 2026-09-06>
+// <WolfViewer 2026-09-06> caustics — see terrainF.glsl for the derivation; same function.
+uniform sampler2D wolfCausticTex0;
+uniform sampler2D wolfCausticTex1;
+uniform vec2  wolf_caustic_tile;
+uniform float wolf_caustic_on;
+uniform vec3  wolf_caustic_sun;
+uniform float wolf_caustic_strength;
+uniform float wolf_caustic_fog;
+uniform float wolf_water_level;
+uniform vec2  wolf_caustic_origin;   // region origin in agent space: the cascades tile agent XY
+float wolfWaveLaplacian(sampler2D t, vec2 uv, float texel)
+{
+    float hxx = texture(t, uv + vec2(texel, 0.0)).x - texture(t, uv - vec2(texel, 0.0)).x;
+    float hyy = texture(t, uv + vec2(0.0, texel)).y - texture(t, uv - vec2(0.0, texel)).y;
+    return (hxx + hyy) / (2.0 * texel);
+}
+float wolfCaustic(vec3 region_pos)
+{
+    if (wolf_caustic_on < 0.5 || region_pos.z >= wolf_water_level)
+    {
+        return 0.0;
+    }
+    float cdepth = wolf_water_level - region_pos.z;
+    vec3 sd = normalize(wolf_caustic_sun);
+    vec2 hit = region_pos.xy + wolf_caustic_origin + sd.xy / max(sd.z, 0.2) * cdepth * 0.75;
+    float lap = wolfWaveLaplacian(wolfCausticTex1, hit / wolf_caustic_tile.y, 1.0 / 128.0) / wolf_caustic_tile.y
+              + 0.35 * wolfWaveLaplacian(wolfCausticTex0, hit / wolf_caustic_tile.x, 1.0 / 128.0) / wolf_caustic_tile.x;
+    float focus = 1.0 / max(abs(1.0 - cdepth * 0.25 * lap), 0.12);
+    return clamp((focus - 1.0) * 2.0, 0.0, 3.0) * exp(-wolf_caustic_fog * 0.12 * cdepth) * wolf_caustic_strength;
+}
+// </WolfViewer>
 in vec3 vary_normal;
 #if (TERRAIN_PBR_DETAIL >= TERRAIN_PBR_DETAIL_NORMAL)
 in vec3 vary_tangents[4];
@@ -428,7 +460,7 @@ void main()
 // Matte plastic potato terrain
 #define mix_orm vec3(1.0, 1.0, 0.0)
 #endif
-    frag_data[0] = max(vec4(pbr_mix.col.xyz, 0.0), vec4(0));                                                   // Diffuse
+    frag_data[0] = max(vec4(pbr_mix.col.xyz * (1.0 + wolfCaustic(vary_region_pos)), 0.0), vec4(0));   // Diffuse (+ <WolfViewer> caustics)
     frag_data[1] = max(vec4(mix_orm.rgb, base_color_factor_alpha), vec4(0));                                    // PBR linear packed Occlusion, Roughness, Metal.
     frag_data[2] = encodeNormal(tnorm, 0, GBUFFER_FLAG_HAS_PBR); // normal, flags
 

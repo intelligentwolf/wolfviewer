@@ -193,6 +193,15 @@ extern LLGLSLShader     gObjectAlphaMaskNoColorProgram;
 //environment shaders
 extern LLGLSLShader         gWaterProgram;
 extern LLGLSLShader         gUnderWaterProgram;
+// <WolfViewer 2026-09-06> spectral ocean (wolfoceanfft.cpp), wake field (wolfwakefield.cpp),
+// underwater sunlight shafts (pipeline.cpp wolfGodRays).
+extern LLGLSLShader         gWolfFFTTimeProgram;
+extern LLGLSLShader         gWolfFFTButterflyProgram;
+extern LLGLSLShader         gWolfFFTFinalProgram;
+extern LLGLSLShader         gWolfWakeDecayProgram;
+extern LLGLSLShader         gWolfWakeStampProgram;
+extern LLGLSLShader         gWolfGodRaysProgram;
+// </WolfViewer>
 extern LLGLSLShader         gGlowProgram;
 extern LLGLSLShader         gGlowExtractProgram;
 

@@ -50,6 +50,14 @@
 #include "llenvironment.h"
 #include "llsettingssky.h"
 #include "llsettingswater.h"
+// <WolfViewer 2026-09-06>
+#include "llappviewer.h"        // gFrameIntervalSeconds
+#include "llheroprobemanager.h"
+#include "llsurface.h"
+#include "wolfoceanfft.h"
+#include "wolfwakefield.h"
+#include "wolfwaterfield.h"
+// </WolfViewer>
 
 bool LLDrawPoolWater::sSkipScreenCopy = false;
 bool LLDrawPoolWater::sNeedsReflectionUpdate = true;
@@ -195,6 +203,44 @@ void LLDrawPoolWater::renderPostDeferred(S32 pass)
     F32           phase_time = (F32) LLFrameTimer::getElapsedSeconds() * 0.5f;
     LLGLSLShader *shader     = nullptr;
 
+    // <WolfViewer 2026-09-06> THE SEA STATE — from the region's EEP water (wolfseastate.h:
+    // wave1_direction's speed and normal_scale's strength, relative to the Firestorm
+    // defaults) unless the user pinned a manual height. Then the two off-screen systems
+    // that feed this frame's water, run BEFORE the water shader binds because they bind
+    // shaders and targets of their own: the spectral cascades (wolfoceanfft.cpp) and the
+    // wake field (wolfwakefield.cpp). Never inside a cube snapshot or the mirror pass —
+    // those re-enter this function within one frame and would advance the sea twice.
+    // Source: wolfstorm/js/world/terrain/terrain_manager.js applySeaState() / update().
+    {
+        static LLCachedControl<bool> sea_from_region(gSavedSettings, "WolfViewerWaterSeaStateFromRegion", true);
+        static LLCachedControl<bool> fft_on(gSavedSettings, "WolfViewerWaterFFT", true);
+        static LLCachedControl<bool> wake_on(gSavedSettings, "WolfViewerWaterWake", true);
+        static LLCachedControl<F32> manual_height(gSavedSettings, "WolfViewerWaterWaveHeight", 0.22f);
+        static LLCachedControl<F32> wave_speed_setting(gSavedSettings, "WolfViewerWaterWaveSpeed", 1.f);
+        if (sea_from_region)
+        {
+            mSeaState = WolfSeaState::fromWater(pwater);
+        }
+        else
+        {
+            mSeaState = WolfSeaState::fromIndex(WolfSeaState::indexForAmplitude(manual_height), pwater->getWave1Dir());
+            mSeaState.mAmplitude = llclamp((F32)manual_height, 0.f, 5.f);
+        }
+        if (!gCubeSnapshot && !gPipeline.mHeroProbeManager.isMirrorPass() && LLPipeline::sRenderTransparentWater)
+        {
+            if (fft_on)
+            {
+                WolfOceanFFT::instance().setSeaState(mSeaState);
+                WolfOceanFFT::instance().update(phase_time * (F32)wave_speed_setting);
+            }
+            if (wake_on)
+            {
+                WolfWakeField::instance().update(gFrameIntervalSeconds);
+            }
+        }
+    }
+    // </WolfViewer>
+
     // One pass, one of two shaders.  Void water and region water share state.
     // There isn't a good reason anymore to really have void water run in a separate pass.
     // It also just introduced a bunch of weird state consistency stuff that we really don't need.
@@ -281,13 +327,62 @@ void LLDrawPoolWater::renderPostDeferred(S32 pass)
     static LLCachedControl<F32> wave_speed(gSavedSettings, "WolfViewerWaterWaveSpeed", 1.f);
     static LLCachedControl<F32> wave_fade_start(gSavedSettings, "WolfViewerWaterWaveFadeStart", 320.f);
     static LLCachedControl<F32> wave_fade_end(gSavedSettings, "WolfViewerWaterWaveFadeEnd", 1024.f);
-    shader->uniform1f(LLShaderMgr::WATER_WAVE_FREQUENCY, llmax(0.001f, (F32)wave_scale));
+    // <WolfViewer 2026-09-06> wavelength from the sea state when the region drives it.
+    static LLCachedControl<bool> sea_from_region2(gSavedSettings, "WolfViewerWaterSeaStateFromRegion", true);
+    shader->uniform1f(LLShaderMgr::WATER_WAVE_FREQUENCY, sea_from_region2 ? mSeaState.mFrequency : llmax(0.001f, (F32)wave_scale));
+    // </WolfViewer>
     shader->uniform1f(LLShaderMgr::WATER_WAVE_SPEED, (F32)wave_speed);
     // End must exceed start or the smoothstep in the shader is degenerate.
     F32 fade_start = llmax(0.f, (F32)wave_fade_start);
     F32 fade_end   = llmax(fade_start + 1.f, (F32)wave_fade_end);
     shader->uniform2f(LLShaderMgr::WATER_WAVE_FADE, fade_start, fade_end);
     // </FS:WolfViewer>
+
+    // <WolfViewer 2026-09-06> Chaos and the crest backstop (Water.js stormChaos /
+    // maxWaveHeight — 2.5x the amplitude: the six trains sum to ~1.5x, == amplitude
+    // shears the tops off), the spectral cascades, the wake field, the shore switch.
+    // Source: wolfstorm/js/world/sea_state.js applyToUniforms, ocean_fft.js _push,
+    // wake_field.js _pushUniforms.
+    {
+        static LLStaticHashedString s_storm_chaos("stormChaos");
+        static LLStaticHashedString s_max_wave_height("maxWaveHeight");
+        static LLStaticHashedString s_fft_ready("fftReady");
+        static LLStaticHashedString s_fft_tile("fftTile");
+        static LLStaticHashedString s_fft_fade("fftFade");
+        static LLStaticHashedString s_wake_strength("wakeStrength");
+        static LLStaticHashedString s_wake_region_size("wakeRegionSize");
+        static LLStaticHashedString s_shore_on("shoreWavesEnabled");
+        static LLCachedControl<bool> shore_on(gSavedSettings, "WolfViewerWaterShoreField", true);
+        static LLCachedControl<F32> wake_strength(gSavedSettings, "WolfViewerWaterWakeStrength", 0.05f);
+        static LLCachedControl<F32> manual_height2(gSavedSettings, "WolfViewerWaterWaveHeight", 0.22f);
+        const F32 amp = sea_from_region2 ? mSeaState.mAmplitude : llclamp((F32)manual_height2, 0.f, 5.f);
+        shader->uniform1f(s_storm_chaos, mSeaState.mChaos);
+        shader->uniform1f(s_max_wave_height, amp * 2.5f);
+        shader->uniform1f(s_shore_on, shore_on ? 1.f : 0.f);
+        WolfOceanFFT& fft = WolfOceanFFT::instance();
+        if (fft.isReady())
+        {
+            shader->bindTexture(LLShaderMgr::WOLF_FFT_DISP0, fft.finalTarget(0), false, LLTexUnit::TFO_TRILINEAR, 0);
+            shader->bindTexture(LLShaderMgr::WOLF_FFT_DERIV0, fft.finalTarget(0), false, LLTexUnit::TFO_TRILINEAR, 1);
+            shader->bindTexture(LLShaderMgr::WOLF_FFT_DISP1, fft.finalTarget(1), false, LLTexUnit::TFO_TRILINEAR, 0);
+            shader->bindTexture(LLShaderMgr::WOLF_FFT_DERIV1, fft.finalTarget(1), false, LLTexUnit::TFO_TRILINEAR, 1);
+            shader->uniform2f(s_fft_tile, fft.getTile(0), fft.getTile(1));
+            shader->uniform2f(s_fft_fade, fft.getFade(0), fft.getFade(1));
+            shader->uniform1f(s_fft_ready, 1.f);
+        }
+        else
+        {
+            shader->uniform1f(s_fft_ready, 0.f);
+        }
+        WolfWakeField& wake = WolfWakeField::instance();
+        if (wake.isReady())
+        {
+            shader->bindTexture(LLShaderMgr::WOLF_WAKE_SAMPLER, wake.texture(), false, LLTexUnit::TFO_BILINEAR, 0);
+            shader->uniform2f(s_wake_region_size, wake.getRegionSizeX(), wake.getRegionSizeY());
+        }
+        shader->uniform1f(s_wake_strength, llclamp((F32)wake_strength, 0.f, WolfWakeField::MAX_STRENGTH));
+    }
+    // </WolfViewer>
 
     static LLStaticHashedString s_exposure("exposure");
     static LLStaticHashedString tonemap_mix("tonemap_mix");
@@ -353,7 +448,18 @@ void LLDrawPoolWater::pushWaterPlanes(int pass)
     // a shader — the edge planes simply get zero and take the shader's flat path.
     static LLCachedControl<F32> wave_height(gSavedSettings, "WolfViewerWaterWaveHeight", 0.22f);
     LLGLSLShader* cur_shader = LLGLSLShader::sCurBoundShaderPtr;
-    const F32 amplitude = llclamp((F32)wave_height, 0.f, 5.f);
+    // <WolfViewer 2026-09-06> the region's own sea state unless a manual height is pinned.
+    static LLCachedControl<bool> sea_from_region(gSavedSettings, "WolfViewerWaterSeaStateFromRegion", true);
+    const F32 amplitude = sea_from_region ? mSeaState.mAmplitude : llclamp((F32)wave_height, 0.f, 5.f);
+    static LLStaticHashedString s_depth_ready("depthReady");
+    static LLStaticHashedString s_region_origin("wolfRegionOrigin");
+    static LLStaticHashedString s_depth_region_size("depthRegionSize");
+    static LLStaticHashedString s_depth_water_level("depthWaterLevel");
+    static LLStaticHashedString s_expo_origin("exposureOrigin");
+    static LLStaticHashedString s_expo_size("exposureSize");
+    static LLStaticHashedString s_expo_ready("exposureReady");
+    static LLStaticHashedString s_wake_ready("wakeReady");
+    // </WolfViewer>
     // </FS:WolfViewer>
 
     LLVOWater* water = nullptr;
@@ -368,9 +474,43 @@ void LLDrawPoolWater::pushWaterPlanes(int pass)
             // Neither has a STREAM (a terrain-conforming mesh, LLVOWater::setConformingMesh):
             // ocean swell on a four-metre brook is wrong, and its motion is the flow, which
             // the shader scrolls along the ribbon from wolfStream (surface speed, m/s).
-            const bool no_swell = water->getIsEdgePatch() || water->getWaterfall() > 0.f
-                               || water->getStreamFlow() > 0.f;
+            // <WolfViewer 2026-09-06> Edge (void) water swells too now: LLVOWater tessellates
+            // it on a distance-graded lattice, so the sea no longer goes flat at the border.
+            const bool no_swell = water->getWaterfall() > 0.f || water->getStreamFlow() > 0.f;
             cur_shader->uniform1f(LLShaderMgr::WATER_WAVE_AMPLITUDE, no_swell ? 0.f : amplitude);
+
+            // The depth + exposure fields and the wake belong to a region's OWN water plane
+            // (LLSurface::getWaterObj): hole and edge water reuse the agent region's object
+            // pointer but lie elsewhere, and bounded / stream surfaces have their own rules.
+            // Source: wolfstorm terrain_manager.js — fields are per region water mesh.
+            LLViewerRegion* rgn = water->getRegion();
+            const bool own_plane = rgn && !water->getIsEdgePatch() && water->getBoundedWaterDepth() <= 0.f
+                                && !water->hasConformingMesh() && water->getWaterfall() <= 0.f
+                                && rgn->getLand().getWaterObj() == water;
+            const WolfWaterField::Field* fld = own_plane ? WolfWaterField::instance().get(rgn) : nullptr;
+            if (fld)
+            {
+                S32 ch = cur_shader->enableTexture(LLShaderMgr::WOLF_DEPTH_FIELD);
+                if (ch > -1) gGL.getTexUnit(ch)->bindManual(LLTexUnit::TT_TEXTURE, fld->mDepthTex);
+                ch = cur_shader->enableTexture(LLShaderMgr::WOLF_EXPOSURE_FIELD);
+                if (ch > -1) gGL.getTexUnit(ch)->bindManual(LLTexUnit::TT_TEXTURE, fld->mExpoTex);
+                const LLVector3 origin = rgn->getOriginAgent();
+                cur_shader->uniform2f(s_region_origin, origin.mV[VX], origin.mV[VY]);
+                cur_shader->uniform2f(s_depth_region_size, fld->mSizeX, fld->mSizeY);
+                cur_shader->uniform1f(s_depth_water_level, fld->mWaterLevel);
+                cur_shader->uniform2f(s_expo_origin, fld->mExpoX0, fld->mExpoY0);
+                cur_shader->uniform2f(s_expo_size, fld->mExpoSX, fld->mExpoSY);
+                cur_shader->uniform1f(s_depth_ready, 1.f);
+                cur_shader->uniform1f(s_expo_ready, 1.f);
+            }
+            else
+            {
+                cur_shader->uniform1f(s_depth_ready, 0.f);
+                cur_shader->uniform1f(s_expo_ready, 0.f);
+            }
+            const bool wake_here = own_plane && rgn == gAgent.getRegion() && WolfWakeField::instance().isReady();
+            cur_shader->uniform1f(s_wake_ready, wake_here ? 1.f : 0.f);
+            // </WolfViewer>
             static LLStaticHashedString s_wolf_waterfall("wolfWaterfall");
             cur_shader->uniform1f(s_wolf_waterfall, water->getWaterfall());
             static LLStaticHashedString s_wolf_stream("wolfStream");

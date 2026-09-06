@@ -135,6 +135,10 @@ public:
 
     inline S32 getNumObjects() { return (S32) mObjects.size(); }
     inline S32 getNumActiveObjects() { return (S32) mActiveObjects.size(); }
+    // <WolfViewer 2026-09-06> the moving set, for the wake field (wolfwakefield.cpp) — never a
+    // full object scan.
+    const std::vector<LLPointer<LLViewerObject> >& getActiveObjects() const { return mActiveObjects; }
+    // </WolfViewer>
 
     void addToMap(LLViewerObject *objectp);
     void removeFromMap(LLViewerObject *objectp);

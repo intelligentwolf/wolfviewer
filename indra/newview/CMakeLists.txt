@@ -913,6 +913,9 @@ set(viewer_SOURCE_FILES
     utilitybar.cpp
     wolfalbumart.cpp
     wolfnaturalwater.cpp
+    wolfoceanfft.cpp
+    wolfwakefield.cpp
+    wolfwaterfield.cpp
     NACLantispam.cpp
     NACLfloaterexploresounds.cpp
     )
@@ -1777,6 +1780,10 @@ set(viewer_HEADER_FILES
     utilitybar.h
     wolfalbumart.h
     wolfnaturalwater.h
+    wolfoceanfft.h
+    wolfseastate.h
+    wolfwakefield.h
+    wolfwaterfield.h
     VertexCache.h
     VorbisFramework.h
     NACLantispam.h

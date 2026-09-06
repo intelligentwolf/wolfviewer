@@ -158,6 +158,7 @@ public:
     void tonemap(LLRenderTarget* src, LLRenderTarget* dst, bool gamma_correct);
     void gammaCorrect(LLRenderTarget* src, LLRenderTarget* dst);
     void generateGlow(LLRenderTarget* src);
+    void wolfGodRays(LLRenderTarget* dst);   // <WolfViewer 2026-09-06> underwater sunlight shafts
     void applyCAS(LLRenderTarget* src, LLRenderTarget* dst);
     void applyFXAA(LLRenderTarget* src, LLRenderTarget* dst);
     void generateSMAABuffers(LLRenderTarget* src);

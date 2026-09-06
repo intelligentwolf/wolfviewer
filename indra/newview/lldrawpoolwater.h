@@ -28,6 +28,7 @@
 #define LL_LLDRAWPOOLWATER_H
 
 #include "lldrawpool.h"
+#include "wolfseastate.h"   // <WolfViewer 2026-09-06>
 
 
 class LLFace;
@@ -85,6 +86,11 @@ protected:
 
     bool mRenderWaterMipNormal;
     // </FS:Zi>
+    // <WolfViewer 2026-09-06> the wave field this frame draws with (wolfseastate.h), set in
+    // renderPostDeferred from the region's EEP water (or the manual settings) and read per
+    // face by pushWaterPlanes.
+    WolfSeaState mSeaState;
+    // </WolfViewer>
 };
 
 void cgErrorCallback();

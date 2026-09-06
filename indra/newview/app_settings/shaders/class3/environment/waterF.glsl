@@ -742,8 +742,9 @@ void main()
         cap = max(cap, swellWhitecap(wp, time - 0.9) * 0.62);
         cap = max(cap, swellWhitecap(wp, time - 1.8) * 0.38);
         cap = max(cap, swellWhitecap(wp, time - 2.7) * 0.22);
-        float patch = smoothstep(0.35, 0.75, wave1.x * 0.5 + 0.5 + wave3.y * 0.2);
-        cap = max(cap * patch, fftFoam);
+        // (`patch` is a reserved GLSL keyword — NVIDIA rejects it, 2026-09-06 magenta water)
+        float capPatch = smoothstep(0.35, 0.75, wave1.x * 0.5 + 0.5 + wave3.y * 0.2);
+        cap = max(cap * capPatch, fftFoam);
         float ragged = 0.55 + 0.45 * clamp((wave2.x + wave3.y) * 0.8 + 0.5, 0.0, 1.0);
         float capMix = clamp(cap * ragged * 0.85, 0.0, 0.7);
         float capLight = clamp(dot(sunlit_linear + amblit, vec3(0.3333)), 0.08, 1.0);

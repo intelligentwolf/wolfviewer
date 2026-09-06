@@ -686,9 +686,12 @@ void main()
     // that advances up the beach on each crest and drains back on the trough (a cosine
     // synced to the same approaching-wave phase as the breakers, Cyanilux's shoreline
     // breakdown), ragged by the shore ripple tap, breaking foam brightest on the crests,
-    // and faint caustic veins in the shallows. The per-fragment depth is the refraction
-    // buffer's where there is one (it reads prims and riverbeds too), the field's otherwise.
-    float wDepth = min(wolf_water_depth, fieldDepth);
+    // and faint caustic veins in the shallows. The depth is the baked TERRAIN field's, not
+    // the refraction buffer's: that buffer measures the gap to whatever is behind the surface,
+    // so a dock post, a hull or an avatar standing in the water got a white foam rim, and its
+    // quantisation in the shallows drew a striped moire (2026-09-06 screenshot). The terrain
+    // field is smooth and knows only the land — the same source WolfStorm's swash uses.
+    float wDepth = fieldDepth;
     if (depthReady > 0.5 && boundedWaterDepth <= 0.0 && wDepth < 1e5)
     {
         float shallowF = exp(-waterFogDensity * 0.35 * wDepth);

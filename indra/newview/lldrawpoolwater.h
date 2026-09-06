@@ -78,6 +78,12 @@ public:
 
     void pushWaterPlanes(int pass);
 
+    // <WolfViewer> The sea state this pool last drew with — the boat rocker
+    // (wolfboatrock.cpp) samples the same swell on the CPU so hulls ride the surface that
+    // is actually on screen.
+    const WolfSeaState& getSeaState() const { return mSeaState; }
+    // </WolfViewer>
+
 protected:
     void renderOpaqueLegacyWater();
 

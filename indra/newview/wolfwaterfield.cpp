@@ -62,6 +62,53 @@ void WolfWaterField::releaseField(Field& f)
         f.mExpoTex = 0;
     }
     f.mReady = false;
+    f.mDepth.clear();
+    f.mExpo.clear();
+}
+
+// Source: terrain_manager.js _swellExposureAt(x, y):
+//   const u = (x - e.x0) / e.sx, v = (y - e.y0) / e.sy;
+//   if (u < 0 || u > 1 || v < 0 || v > 1) return 1.0;
+//   i = clamp(round(u * (res - 1))), j = clamp(round(v * (res - 1))); return data[j * res + i]
+F32 WolfWaterField::exposureAt(const Field& f, F32 rx, F32 ry)
+{
+    if (!f.mReady || f.mExpo.size() != (size_t)ERES * ERES)
+    {
+        return 1.f;
+    }
+    const F32 u = (rx - f.mExpoX0) / f.mExpoSX;
+    const F32 v = (ry - f.mExpoY0) / f.mExpoSY;
+    if (u < 0.f || u > 1.f || v < 0.f || v > 1.f)
+    {
+        return 1.f;
+    }
+    const S32 i = llclamp((S32)ll_round(u * (ERES - 1)), 0, ERES - 1);
+    const S32 j = llclamp((S32)ll_round(v * (ERES - 1)), 0, ERES - 1);
+    return f.mExpo[(size_t)j * ERES + i];
+}
+
+// Source: terrain_manager.js _waveSampleCPU() — the shore-breaker depth read:
+//   if (x >= 0 && y >= 0 && x <= rs.x && y <= rs.y) {
+//     ti = clamp(round(x * (RES - 1) / rs.x)), tj = clamp(round(y * (RES - 1) / rs.y));
+//     o4 = (tj * RES + ti) * 4; g = data[o4 + 1], b = data[o4 + 2], a = data[o4 + 3] ... }
+bool WolfWaterField::depthAt(const Field& f, F32 rx, F32 ry, F32 out[4])
+{
+    if (!f.mReady || f.mDepth.size() != (size_t)RES * RES * 4)
+    {
+        return false;
+    }
+    if (rx < 0.f || ry < 0.f || rx > f.mSizeX || ry > f.mSizeY)
+    {
+        return false;
+    }
+    const S32 ti = llclamp((S32)ll_round(rx * (RES - 1) / f.mSizeX), 0, RES - 1);
+    const S32 tj = llclamp((S32)ll_round(ry * (RES - 1) / f.mSizeY), 0, RES - 1);
+    const F32* t = &f.mDepth[((size_t)tj * RES + ti) * 4];
+    out[0] = t[0];
+    out[1] = t[1];
+    out[2] = t[2];
+    out[3] = t[3];
+    return true;
 }
 
 const WolfWaterField::Field* WolfWaterField::get(const LLViewerRegion* regionp) const
@@ -411,5 +458,8 @@ void WolfWaterField::bake(LLViewerRegion* regionp, Field& f)
     f.mExpoSX = esx;
     f.mExpoSY = esy;
     f.mBakedAt = LLFrameTimer::getElapsedSeconds();
+    // Keep both bakes on the CPU for wolfboatrock.cpp's wave sampler.
+    f.mDepth = mDepthData;
+    f.mExpo = mExpoData;
     f.mReady = true;
 }

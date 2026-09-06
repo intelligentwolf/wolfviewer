@@ -20,6 +20,8 @@
 #include <map>
 #include <vector>
 
+#include "llmath.h"
+
 class LLViewerRegion;
 
 // Source: wolfstorm/js/world/terrain/terrain_manager.js _bakeWaterDepthTexture() and
@@ -54,6 +56,11 @@ public:
         U64 mStamp = 0;
         F64 mBakedAt = 0.0;
         bool mReady = false;
+        // CPU copies of the two bakes, for the boat rocker's wave sampler (wolfboatrock.cpp
+        // mirrors the vertex stage on the CPU and needs the same fields). RES*RES*4 and
+        // ERES*ERES floats — 1.3 MB per region.
+        std::vector<F32> mDepth;    // RGBA per texel, row-major, y outer
+        std::vector<F32> mExpo;     // R per texel
     };
 
     static constexpr S32 RES = 256;
@@ -67,6 +74,19 @@ public:
     void reset();
     /** The field for a region, or nullptr before its first bake. */
     const Field* get(const LLViewerRegion* regionp) const;
+
+    /**
+     * Open-water exposure at region-relative (rx, ry) metres: the nearest texel of the
+     * exposure bake, 1.0 (open sea) outside its span.
+     * Source: wolfstorm terrain_manager.js _swellExposureAt().
+     */
+    static F32 exposureAt(const Field& f, F32 rx, F32 ry);
+    /**
+     * The depth bake's nearest texel at region-relative (rx, ry): out[0] height, out[1..2]
+     * beachward unit direction x confidence, out[3] box-smoothed height. False outside the
+     * region. Source: terrain_manager.js _waveSampleCPU() depth-texture read.
+     */
+    static bool depthAt(const Field& f, F32 rx, F32 ry, F32 out[4]);
 
 private:
     void bake(LLViewerRegion* regionp, Field& f);

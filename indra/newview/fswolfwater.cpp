@@ -30,7 +30,6 @@
 #include <set>
 
 #include "llagent.h"
-#include "llselectmgr.h"
 #include "llviewercamera.h"
 #include "llviewercontrol.h"
 #include "llviewerobject.h"
@@ -38,6 +37,7 @@
 #include "llviewerregion.h"
 #include "llvowater.h"
 #include "pipeline.h"
+#include "wolfobjectprops.h"
 
 const std::string FSWolfWater::KEYWORD("wolfwater");
 
@@ -46,29 +46,8 @@ namespace
     // How often the object list is swept for wolfwater prims and for descriptions worth
     // asking about.
     const F64 SWEEP_INTERVAL_SECS = 1.5;
-    // Requests per sweep. 48 per 1.5s is about 32/s of a Medium-frequency packet — the same
-    // order the hover tooltip already produces when a user sweeps the mouse across a
-    // crowded scene, and it is bounded: an object is asked once and then not again for two
-    // minutes, so this is a burst on arrival, not a sustained rate.
-    //
-    // 24 was too slow to be usable. Roots are drained before linkset children, but a busy
-    // region still holds several hundred root prims, and at 16/s a wolfwater prim sitting
-    // behind them was not asked about for the better part of a minute — long enough to look
-    // like the feature simply did not work.
-    const S32 REQUEST_BUDGET = 48;
-    // How long to wait for a reply before the single retry.
-    const F64 RETRY_SECS = 30.0;
-    // Attempts before giving up on an object entirely.
-    const S32 MAX_TRIES = 2;
-    // How stale a known description must be before spare budget may re-ask.
-    const F64 REFRESH_SECS = 120.0;
     // Surfaces allowed at once. Past this a region is not a build, it is a griefing.
     const size_t MAX_SURFACES = 32;
-
-    // Priority classes for the request queue, best first.
-    const S32 PRIORITY_ROOT    = 0;
-    const S32 PRIORITY_CHILD   = 1;
-    const S32 PRIORITY_REFRESH = 2;
 
     // A prim's scale has to move by more than this before its surface is re-fitted, so a
     // terse update that re-sends an unchanged transform does not rebuild geometry.
@@ -150,27 +129,6 @@ bool FSWolfWater::matches(const std::string& description)
     return lower.find(KEYWORD) != std::string::npos;
 }
 
-void FSWolfWater::noteDescription(const LLUUID& object_id, const std::string& description)
-{
-    if (object_id.isNull())
-    {
-        return;
-    }
-    // Stored even when empty. An empty description is the answer to "does this prim still
-    // say wolfwater", and storing it is what lets the next sweep take the water away.
-    const bool was_match = matches(mDescriptions.count(object_id) ? mDescriptions[object_id]
-                                                                 : std::string());
-    mDescriptions[object_id] = description;
-    const bool is_match = matches(description);
-    if (is_match != was_match)
-    {
-        LL_INFOS("WolfWater") << "prim " << object_id << " description "
-                              << (is_match ? "now matches" : "no longer matches")
-                              << " \"" << KEYWORD << "\": \"" << description << "\""
-                              << LL_ENDL;
-    }
-}
-
 void FSWolfWater::reset()
 {
     for (auto& entry : mSurfaces)
@@ -181,12 +139,6 @@ void FSWolfWater::reset()
         }
     }
     mSurfaces.clear();
-    // Descriptions and the ask log go too: the object list is rebuilt from scratch across a
-    // teleport, so every pending request refers to something that no longer exists, and a
-    // description held from the old region is a claim about a prim we can no longer see.
-    mDescriptions.clear();
-    mAsked.clear();
-    mCandidates.clear();
     mNextSweep = 0.0;
     // NOT mRegionHandle: idle() sets that immediately after calling this, and clearing it
     // here would make an explicit reset() look like a region change on the next tick.
@@ -224,7 +176,6 @@ void FSWolfWater::idle()
     mNextSweep = now + SWEEP_INTERVAL_SECS;
 
     sweep();
-    requestPending();
 }
 
 void FSWolfWater::sweep()
@@ -237,14 +188,14 @@ void FSWolfWater::sweep()
     static LLCachedControl<F32> draw_distance(gSavedSettings, "RenderFarClip", 128.f);
     const F32 range_sq = (F32)draw_distance * (F32)draw_distance;
 
-    mCandidates.clear();
-
     S32 n_scanned = 0, n_in_range = 0, n_known = 0, n_matched = 0;
 
     // Which prims still want water this tick. Anything holding a surface that is not in
     // here has been derezzed, has left the draw distance, or has had the keyword taken out
     // of its description.
     std::set<LLUUID> still_wanted;
+
+    WolfObjectProps& props = WolfObjectProps::instance();
 
     const S32 count = gObjectList.getNumObjects();
     for (S32 i = 0; i < count; ++i)
@@ -274,35 +225,19 @@ void FSWolfWater::sweep()
         }
         ++n_in_range;
 
+        // Declare interest unconditionally. want() decides for itself whether this prim is
+        // already answered and fresh, in flight, or given up on, and only queues the rest.
+        // Source: wolfwater.js sweep — harvester.want(obj) for every prim in range.
+        props.want(objectp);
+
         const LLUUID& id = objectp->getID();
-        auto desc_it = mDescriptions.find(id);
-        const bool known = (desc_it != mDescriptions.end());
+        const WolfObjectProps::Props* known = props.get(id);
         if (known)
         {
             ++n_known;
         }
 
-        // Queue a request. A known description is only re-asked once it is stale, and even
-        // then it sorts behind everything that has never been asked at all, so a refresh
-        // can only ever consume budget that nothing new wanted.
-        auto ask_it = mAsked.find(id);
-        if (known)
-        {
-            if (ask_it == mAsked.end() || (now - ask_it->second.mSentAt) >= REFRESH_SECS)
-            {
-                mCandidates.push_back({ id, dist_sq, PRIORITY_REFRESH });
-            }
-        }
-        else if (ask_it == mAsked.end() || ask_it->second.mTries < MAX_TRIES)
-        {
-            if (ask_it == mAsked.end() || (now - ask_it->second.mSentAt) >= RETRY_SECS)
-            {
-                mCandidates.push_back({ id, dist_sq,
-                                        objectp->isRoot() ? PRIORITY_ROOT : PRIORITY_CHILD });
-            }
-        }
-
-        if (known && matches(desc_it->second))
+        if (known && matches(known->mDescription))
         {
             ++n_matched;
             still_wanted.insert(id);
@@ -332,58 +267,10 @@ void FSWolfWater::sweep()
         mNextStatsLog = now + STATS_INTERVAL_SECS;
         LL_INFOS("WolfWater") << "sweep: " << n_scanned << " prims, " << n_in_range
                               << " within " << (F32)draw_distance << "m draw distance, "
-                              << n_known << " descriptions known ("
-                              << mDescriptions.size() << " total), "
+                              << n_known << " descriptions known, "
                               << n_matched << " matching \"" << KEYWORD << "\", "
-                              << mSurfaces.size() << " water surface(s); "
-                              << mLastRequestCount << " request(s) sent last tick, "
-                              << mCandidates.size() << " queued" << LL_ENDL;
+                              << mSurfaces.size() << " water surface(s)" << LL_ENDL;
     }
-}
-
-void FSWolfWater::requestPending()
-{
-    mLastRequestCount = 0;
-    if (mCandidates.empty())
-    {
-        return;
-    }
-
-    // Roots before children before refreshes, and nearest first inside each class, so the
-    // budget goes to what the user is looking at.
-    std::sort(mCandidates.begin(), mCandidates.end(),
-              [](const Candidate& a, const Candidate& b)
-              {
-                  if (a.mPriority != b.mPriority)
-                  {
-                      return a.mPriority < b.mPriority;
-                  }
-                  return a.mDistSq < b.mDistSq;
-              });
-
-    const F64 now = LLFrameTimer::getElapsedSeconds();
-    const S32 budget = llmin((S32)mCandidates.size(), REQUEST_BUDGET);
-    for (S32 i = 0; i < budget; ++i)
-    {
-        const Candidate& c = mCandidates[i];
-        LLViewerObject* objectp = gObjectList.findObject(c.mId);
-        if (!objectp || objectp->isDead())
-        {
-            continue;
-        }
-
-        Ask& ask = mAsked[c.mId];
-        ask.mSentAt = now;
-        // A refresh restarts the attempt count: the object demonstrably exists and
-        // demonstrably answers, so the give-up counter from its first fetch is spent
-        // history rather than evidence.
-        ask.mTries = (c.mPriority == PRIORITY_REFRESH) ? 1 : (ask.mTries + 1);
-
-        LLSelectMgr::getInstance()->requestObjectPropertiesFamily(objectp);
-        ++mLastRequestCount;
-    }
-
-    mCandidates.clear();
 }
 
 void FSWolfWater::ensureSurface(LLViewerObject* objectp)
@@ -503,4 +390,7 @@ void FSWolfWater::destroySurface(const LLUUID& object_id)
         gObjectList.killObject(it->second.mWater);
     }
     mSurfaces.erase(it);
+    // The keyword was taken out, the prim left the draw distance or was derezzed. Logged so
+    // water going away is as observable as water arriving (ensureSurface logs the create).
+    LL_INFOS("WolfWater") << "water surface removed from prim " << object_id << LL_ENDL;
 }

@@ -46,24 +46,15 @@ class LLVOWater;
  * both viewers.
  *
  * ── FINDING THE PRIMS ────────────────────────────────────────────────────────────────
- * A prim's description is NOT in ObjectUpdate. The message template is explicit
- * (message_template.msg ObjectUpdate): the ObjectData block carries Text, NameValue,
- * MediaURL, ExtraParams and TextureEntry, and neither Name nor Description. The only two
- * messages that carry it are ObjectProperties (Medium 9, sent on select — and selecting
- * freezes the object's physics sim-side, so it cannot be used as a bulk query) and
- * ObjectPropertiesFamily (Medium 10), whose request takes ONE ObjectID per packet.
- *
- * So descriptions have to be asked for, one prim at a time. Stock Firestorm only ever
- * asks about the object under the cursor or in a selection (LLSelectMgr::
- * requestObjectPropertiesFamily), and keeps the answer in a select node rather than on the
- * object — which is why this class carries its own throttled sweep and its own description
- * store rather than reading one off LLViewerObject.
- *
- * The sweep is nearest-first and capped per tick, so the budget goes to what the user is
- * actually looking at, and root prims are drained before linkset children (most prims in a
- * region are children; a water surface almost never is). Once a description is known it is
- * only re-asked after REFRESH_SECS, and only with budget that no first-time request wanted
- * — so a description edited by someone else still propagates, at no extra packet cost.
+ * A prim's description is NOT in ObjectUpdate, and the only two messages that carry it
+ * take one ObjectID per request — see wolfobjectprops.h for the whole story. This class
+ * declares interest in every volume prim inside the draw distance through
+ * WolfObjectProps::want() (nearest first, roots before linkset children, throttled,
+ * refreshed only with idle budget) and reads the answer back with WolfObjectProps::get().
+ * It sends nothing itself. Source: wolfstorm/js/world/wolfwater.js, which was rerouted
+ * through the shared harvester (object_props_harvester.js) on 2026-09-03 for the same
+ * reason WolfViewer is: the boat rocker wants the same strings for the same prims, and two
+ * private "already asked" maps meant the same prim was asked twice.
  *
  * ── WHAT GETS DRAWN ──────────────────────────────────────────────────────────────────
  * An LLVOWater, sized to the prim's X/Y footprint and placed at the top of its bounding
@@ -88,15 +79,7 @@ public:
     /** Called every frame from LLAppViewer::idle(). Rate-limits itself. */
     void idle();
 
-    /**
-     * Record a description the sim just sent. Called from LLSelectMgr's ObjectProperties
-     * and ObjectPropertiesFamily handlers, which are the only two places one arrives.
-     * An EMPTY description is recorded as emphatically as a non-empty one — that is how
-     * water gets switched back off when a builder clears the keyword.
-     */
-    void noteDescription(const LLUUID& object_id, const std::string& description);
-
-    /** Drop every surface and every pending request. Called on teleport. */
+    /** Drop every surface. Called on a region change. */
     void reset();
 
     /** Does this description ask for water? */
@@ -104,7 +87,6 @@ public:
 
 private:
     void sweep();
-    void requestPending();
     /** Create or re-fit the surface for one prim. */
     void ensureSurface(LLViewerObject* objectp);
     void destroySurface(const LLUUID& object_id);
@@ -118,38 +100,17 @@ private:
 
     /** object id -> its live water plane. */
     std::map<LLUUID, Surface> mSurfaces;
-    /** object id -> the description the sim last gave us. */
-    std::map<LLUUID, std::string> mDescriptions;
-
-    struct Ask
-    {
-        F64 mSentAt = 0.0;
-        S32 mTries  = 0;
-    };
-    /** object id -> when we last asked, and how many times running. */
-    std::map<LLUUID, Ask> mAsked;
-
-    /** Candidates gathered by this tick's sweep, sorted before they are sent. */
-    struct Candidate
-    {
-        LLUUID  mId;
-        F32     mDistSq;
-        S32     mPriority;      // 0 root, 1 child, 2 refresh
-    };
-    std::vector<Candidate> mCandidates;
-
     F64 mNextSweep = 0.0;
-    /** Diagnostics: when the next sweep summary is due, and what the last tick sent. */
+    /** Diagnostics: when the next sweep summary is due. */
     F64 mNextStatsLog = 0.0;
-    S32 mLastRequestCount = 0;
 
     /**
      * The region handle the surface set belongs to. This class invalidates ITSELF on a
      * region change rather than waiting to be told about a teleport: localIds and the
-     * object list are both rebuilt across the hop, so every description held from the old
-     * region is a claim about a prim that can no longer be seen, and a surface parented to
-     * a dead object is a dangling plane over the new region. Owning the invalidation here
-     * means there is no teleport path that can forget to call it.
+     * object list are both rebuilt across the hop, so a surface parented to an object from
+     * the old region is a dangling plane over the new one. Owning the invalidation here
+     * means there is no teleport path that can forget to call it. (The descriptions
+     * themselves live in WolfObjectProps, which invalidates itself the same way.)
      */
     U64 mRegionHandle = 0;
 };

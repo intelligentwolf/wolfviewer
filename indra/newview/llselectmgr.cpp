@@ -29,7 +29,7 @@
 // file include
 #define LLSELECTMGR_CPP
 #include "llselectmgr.h"
-#include "fswolfwater.h" // <FS:WolfViewer> wolfwater prim surfaces
+#include "wolfobjectprops.h" // <WolfViewer> the shared name/description store
 #include "llmaterialmgr.h"
 
 // library includes
@@ -6226,7 +6226,7 @@ void LLSelectMgr::processObjectProperties(LLMessageSystem* msg, void** user_data
         // <FS:WolfViewer> See the note in processObjectPropertiesFamily. This is the path
         // that makes a BUILDER's own edit take effect at once: editing a prim selects it,
         // and a select brings this message down unasked.
-        FSWolfWater::instance().noteDescription(id, desc);
+        WolfObjectProps::instance().note(id, name, desc);
         // </FS:WolfViewer>
 
         std::string touch_name;
@@ -6441,12 +6441,13 @@ void LLSelectMgr::processObjectPropertiesFamily(LLMessageSystem* msg, void** use
     std::string desc;
     msg->getStringFast(_PREHASH_ObjectData, _PREHASH_Description, desc);
 
-    // <FS:WolfViewer> This is one of only two messages that carry a prim's description
-    // (the other is ObjectProperties below), and stock keeps it in a select node rather
-    // than anywhere the rest of the viewer can see it. FSWolfWater turns "wolfwater" in a
-    // description into a real water surface, so it needs every one that arrives —
-    // including the ones it asked for itself.
-    FSWolfWater::instance().noteDescription(id, desc);
+    // <FS:WolfViewer> This is one of only two messages that carry a prim's name and
+    // description (the other is ObjectProperties above), and stock keeps them in a select
+    // node rather than anywhere the rest of the viewer can see them. WolfObjectProps is
+    // the shared store both FSWolfWater ("wolfwater" in a description = a real water
+    // surface) and WolfBoatRock (is this floating thing named a boat?) read, so it needs
+    // every one that arrives — including the ones it asked for itself.
+    WolfObjectProps::instance().note(id, name, desc);
     // </FS:WolfViewer>
 
     // the reporter widget askes the server for info about picked objects

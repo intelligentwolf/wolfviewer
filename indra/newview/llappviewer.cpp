@@ -74,6 +74,8 @@
 #include "fswolfwater.h" // <FS:WolfViewer> wolfwater prim surfaces
 #include "wolfnaturalwater.h" // <WolfViewer> streams and pools from the heightmap
 #include "wolfwaterfield.h" // <WolfViewer> water depth / exposure fields for the water shader
+#include "wolfboatrock.h" // <WolfViewer> client-side buoyancy for boats
+#include "wolfobjectprops.h" // <WolfViewer> shared object name/description harvester
 #include "llviewerdisplay.h"
 #include "llviewermedia.h"
 #include "llviewerparcelaskplay.h"
@@ -6121,6 +6123,11 @@ void LLAppViewer::idle()
     // Here, particles are updated and drawables are moved.
     //
 
+    // <WolfViewer> Boats ride the water. Runs BEFORE gPipeline.updateMove() because it marks
+    // the rocking hulls' drawables moved for this frame, and after gObjectList.update()
+    // above so a sailing hull's interpolated position is the base it rides on.
+    WolfBoatRock::instance().idle();
+    // </WolfViewer>
     {
         LL_PROFILE_ZONE_NAMED_CATEGORY_APP("world update"); //LL_RECORD_BLOCK_TIME(FTM_WORLD_UPDATE);
         gPipeline.updateMove();
@@ -6138,6 +6145,9 @@ void LLAppViewer::idle()
     // Depth + exposure fields the water shader samples (shore calming, breakers, swash);
     // bakes at most one region per 2 s check.
     WolfWaterField::instance().idle();
+    // The shared name/description harvester drains AFTER its consumers (FSWolfWater above,
+    // WolfBoatRock before updateMove) have declared this frame's interest.
+    WolfObjectProps::instance().idle();
     // </WolfViewer>
 
     if (gAgentPilot.isPlaying() && gAgentPilot.getOverrideCamera())

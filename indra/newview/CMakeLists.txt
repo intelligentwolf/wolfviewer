@@ -912,7 +912,9 @@ set(viewer_SOURCE_FILES
     streamtitledisplay.cpp
     utilitybar.cpp
     wolfalbumart.cpp
+    wolfboatrock.cpp
     wolfnaturalwater.cpp
+    wolfobjectprops.cpp
     wolfoceanfft.cpp
     wolfwakefield.cpp
     wolfwaterfield.cpp
@@ -1779,7 +1781,9 @@ set(viewer_HEADER_FILES
     streamtitledisplay.h
     utilitybar.h
     wolfalbumart.h
+    wolfboatrock.h
     wolfnaturalwater.h
+    wolfobjectprops.h
     wolfoceanfft.h
     wolfseastate.h
     wolfwakefield.h

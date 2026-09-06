@@ -54,6 +54,7 @@
 #include "llvocache.h"
 #include "llcontrolavatar.h"
 #include "lldrawpoolavatar.h"
+#include "wolfboatrock.h" // <WolfViewer> boat rock offset in updateXform
 
 // <FS:ND> Tentatively ignoring mismatched new/delete from the MemTrackableNonVirtual. I think according to the docs
 // they are properly matched
@@ -621,7 +622,7 @@ F32 LLDrawable::updateXform(bool undamped)
     bool damped = !undamped;
 
     // Position
-    const LLVector3 old_pos(mXform.getPosition());
+    LLVector3 old_pos(mXform.getPosition());
     LLVector3 target_pos;
     if (mXform.isRoot())
     {
@@ -635,8 +636,23 @@ F32 LLDrawable::updateXform(bool undamped)
     }
 
     // Rotation
-    const LLQuaternion old_rot(mXform.getRotation());
+    LLQuaternion old_rot(mXform.getRotation());
     LLQuaternion target_rot = mVObjp->getRotation();
+
+    // <WolfViewer> Boat rock (wolfboatrock.cpp). The rendered transform of a rocking hull
+    // is the object's authoritative transform plus a bob and a tilt, re-derived here every
+    // frame and never accumulated into the object itself — the viewer-object position and
+    // rotation stay exactly what the sim said, so nothing that reads them (interpolation,
+    // ObjectUpdate comparison, selection, the sim itself) ever sees the rock. Source:
+    // wolfstorm terrain_manager.js updateFloaters(), which writes obj.group from
+    // obj._lastPos/_lastRot the same way. The offset applied LAST frame is taken back out
+    // of old_pos/old_rot first, so the damping below compares base with base rather than
+    // feeding the previous bob into this frame's interpolation.
+    if (mXform.isRoot())
+    {
+        WolfBoatRock::instance().removeApplied(mVObjp, old_pos, old_rot);
+    }
+    // </WolfViewer>
     //scaling
     LLVector3 target_scale = mVObjp->getScale();
     LLVector3 old_scale = mCurrentScale;
@@ -724,6 +740,13 @@ F32 LLDrawable::updateXform(bool undamped)
     {
         movePartition();
     }
+
+    // <WolfViewer> Boat rock: this frame's bob and tilt on top of the (damped) base.
+    if (mXform.isRoot())
+    {
+        WolfBoatRock::instance().apply(mVObjp, target_pos, target_rot);
+    }
+    // </WolfViewer>
 
     // Update
     mXform.setPosition(target_pos);

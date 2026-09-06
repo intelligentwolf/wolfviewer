@@ -1678,6 +1678,18 @@ If you do not understand the distinction then leave this control alone."
          tool_tip="Wind waves and chop from an ocean-wave spectrum (JONSWAP) on top of the swell, with whitecaps where the surface folds and sunlight caustics on the sea bed. Sixteen small GPU passes a frame."
          top_delta="0"
          width="150" />
+        <!-- WolfViewer: boat rock (wolfboatrock.cpp) -->
+        <check_box
+         control_name="WolfViewerBoatRock"
+         follows="left|top"
+         height="16"
+         label="Boats rock on the water"
+         layout="topleft"
+         left="10"
+         name="WolfViewerBoatRock"
+         tool_tip="Boats sitting in the water bob and tilt with the swell and the shore breakers, viewer-side only. Physical or crewed hulls rock fully; a parked hull has to be named or described as a boat, and nothing named dock ever rocks."
+         top_pad="4"
+         width="300" />
         <slider
          control_name="WolfTerrainSnowLine"
          decimal_digits="0"

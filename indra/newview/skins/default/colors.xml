@@ -1,6 +1,19 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes" ?>
 <colors>
 
+    <!-- WolfViewer 2026-09-06: analogue joystick sticks (lljoystickbutton.cpp wolfDrawAnalog).
+         The glass look of WolfStorm's css/camera_controls.css and css/touch_controls.css:
+         rgba(20,26,38,.42) base, rgba(160,200,255,.45) border, knob (235,245,255) shading to
+         (120,165,220). -->
+    <color name="WolfJoystickBase"         value="0.078 0.102 0.149 0.42" />
+    <color name="WolfJoystickBaseActive"   value="0.118 0.173 0.267 0.58" />
+    <color name="WolfJoystickBorder"       value="0.627 0.784 1 0.45" />
+    <color name="WolfJoystickBorderActive" value="0.745 0.882 1 0.75" />
+    <color name="WolfJoystickRing"         value="0.784 0.882 1 0.35" />
+    <color name="WolfJoystickKnob"         value="0.922 0.961 1 0.98" />
+    <color name="WolfJoystickKnobShade"    value="0.471 0.647 0.863 0.95" />
+    <color name="WolfJoystickDot"          value="0.078 0.102 0.149 0.7" />
+
 	<!--  Colors in this scheme  -->
 	<!-- 
    var. 1 = #8F5B3F = rgb(143,91,63) 0.56 0.36 0.25

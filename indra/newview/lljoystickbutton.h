@@ -54,9 +54,15 @@ public:
     :   public LLInitParam::Block<Params, LLButton::Params>
     {
         Optional<EJoystickQuadrant, QuadrantNames> quadrant;
+        // <WolfViewer 2026-09-06> ANALOGUE thumb stick (WolfStorm's js/ui/camera_controls.js
+        // and js/input/touch_controls.js): a knob that follows the pointer inside a ring,
+        // a 0.25 dead zone, and a rate that scales with how far the stick is pushed. Off
+        // by default so every stock XUI joystick is untouched.
+        Optional<bool> wolf_analog;
 
         Params()
-        :   quadrant("quadrant", JQ_ORIGIN)
+        :   quadrant("quadrant", JQ_ORIGIN),
+            wolf_analog("wolf_analog", false)
         {
             changeDefault(label, "");
         }
@@ -90,10 +96,31 @@ public:
     static EJoystickQuadrant selectQuadrant(LLXMLNodePtr node);
 
 
-protected:
-    virtual void    updateSlop();                   // recompute slop margins
+    // <WolfViewer 2026-09-06> analogue stick state and drawing (see the .cpp header note)
+    bool            isWolfAnalog() const { return mWolfAnalog; }
+    /** Deflection past the dead zone, remapped to -1..1 per axis (camera_controls.js _axis). */
+    static F32      wolfAxis(F32 v);
+    /** A press that never left the centre dot was released (camera_controls.js onUp). */
+    virtual void    onWolfCentreTap() {}
+    void            wolfDrawAnalog();
+    // </WolfViewer>
 
 protected:
+    virtual void    updateSlop();                   // recompute slop margins
+    // <WolfViewer 2026-09-06>
+    F32             wolfRadius() const;             // travel of the knob's centre, pixels
+    F32             wolfKnobRadius() const;
+    void            wolfUpdateStick(S32 x, S32 y);
+    // </WolfViewer>
+
+protected:
+    // <WolfViewer 2026-09-06>
+    bool                mWolfAnalog;
+    bool                mWolfActive;                // pointer captured on the stick
+    bool                mWolfCentred;               // never left the dead zone since the press
+    F32                 mWolfNX;                    // knob offset / travel, +right
+    F32                 mWolfNY;                    // knob offset / travel, +UP (LLView y grows up)
+    // </WolfViewer>
     EJoystickQuadrant   mInitialQuadrant;           // mousedown = click in this quadrant
     LLCoordGL           mInitialOffset;             // pretend mouse started here
     LLCoordGL           mLastMouse;                 // where was mouse on last hover event
@@ -115,6 +142,7 @@ public:
     struct Params : public LLJoystick::Params {};
     LLJoystickAgentTurn(const Params& p) : LLJoystick(p) {}
     virtual void    onHeldDown();
+    virtual void    draw();   // <WolfViewer 2026-09-06> analogue stick drawing
 };
 
 
@@ -155,6 +183,7 @@ public:
     virtual void    onHeldDown();
     virtual void    resetJoystickCamera();
     virtual void    draw();
+    virtual void    onWolfCentreTap() { resetJoystickCamera(); }   // <WolfViewer 2026-09-06>
 
 protected:
     F32             getOrbitRate();

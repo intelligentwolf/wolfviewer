@@ -101,21 +101,32 @@ bool LLFloaterMove::postBuild()
     mForwardButton = getChild<LLJoystickAgentTurn>("forward btn");
     mForwardButton->setHeldDownDelay(MOVE_BUTTON_DELAY);
 
-    mBackwardButton = getChild<LLJoystickAgentTurn>("backward btn");
-    mBackwardButton->setHeldDownDelay(MOVE_BUTTON_DELAY);
+    // <WolfViewer 2026-09-06> floater_moveview.xml is now ONE analogue stick ("forward btn",
+    // wolf_analog) plus the up/down/mode buttons — the walk-back / slide / turn buttons are
+    // gone, so everything below that touched them is optional. Source: WolfStorm
+    // js/input/touch_controls.js (one stick: up/down walk, left/right turn).
+    mBackwardButton = findChild<LLJoystickAgentTurn>("backward btn");
+    if (mBackwardButton) mBackwardButton->setHeldDownDelay(MOVE_BUTTON_DELAY);
 
-    mSlideLeftButton = getChild<LLJoystickAgentSlide>("move left btn");
-    mSlideLeftButton->setHeldDownDelay(MOVE_BUTTON_DELAY);
+    mSlideLeftButton = findChild<LLJoystickAgentSlide>("move left btn");
+    if (mSlideLeftButton) mSlideLeftButton->setHeldDownDelay(MOVE_BUTTON_DELAY);
 
-    mSlideRightButton = getChild<LLJoystickAgentSlide>("move right btn");
-    mSlideRightButton->setHeldDownDelay(MOVE_BUTTON_DELAY);
+    mSlideRightButton = findChild<LLJoystickAgentSlide>("move right btn");
+    if (mSlideRightButton) mSlideRightButton->setHeldDownDelay(MOVE_BUTTON_DELAY);
 
-    mTurnLeftButton = getChild<LLButton>("turn left btn");
-    mTurnLeftButton->setHeldDownDelay(MOVE_BUTTON_DELAY);
-    mTurnLeftButton->setHeldDownCallback(boost::bind(&LLFloaterMove::turnLeft, this));
-    mTurnRightButton = getChild<LLButton>("turn right btn");
-    mTurnRightButton->setHeldDownDelay(MOVE_BUTTON_DELAY);
-    mTurnRightButton->setHeldDownCallback(boost::bind(&LLFloaterMove::turnRight, this));
+    mTurnLeftButton = findChild<LLButton>("turn left btn");
+    if (mTurnLeftButton)
+    {
+        mTurnLeftButton->setHeldDownDelay(MOVE_BUTTON_DELAY);
+        mTurnLeftButton->setHeldDownCallback(boost::bind(&LLFloaterMove::turnLeft, this));
+    }
+    mTurnRightButton = findChild<LLButton>("turn right btn");
+    if (mTurnRightButton)
+    {
+        mTurnRightButton->setHeldDownDelay(MOVE_BUTTON_DELAY);
+        mTurnRightButton->setHeldDownCallback(boost::bind(&LLFloaterMove::turnRight, this));
+    }
+    // </WolfViewer>
 
     mMoveUpButton = getChild<LLButton>("move up btn");
     mMoveUpButton->setHeldDownDelay(MOVE_BUTTON_DELAY);
@@ -265,6 +276,7 @@ void LLFloaterMove::setSittingMode(bool bSitting)
 // protected
 void LLFloaterMove::turnLeft()
 {
+    if (!mTurnLeftButton) return;   // <WolfViewer 2026-09-06> optional
     F32 time = mTurnLeftButton->getHeldDownTime();
     gAgent.moveYaw( getYawRate( time ) );
 }
@@ -272,6 +284,7 @@ void LLFloaterMove::turnLeft()
 // protected
 void LLFloaterMove::turnRight()
 {
+    if (!mTurnRightButton) return;   // <WolfViewer 2026-09-06> optional
     F32 time = mTurnRightButton->getHeldDownTime();
     gAgent.moveYaw( -getYawRate( time ) );
 }
@@ -374,27 +387,27 @@ void LLFloaterMove::initModeTooltips()
 {
     control_tooltip_map_t walkTipMap;
     walkTipMap.insert(std::make_pair(mForwardButton, getString("walk_forward_tooltip")));
-    walkTipMap.insert(std::make_pair(mBackwardButton, getString("walk_back_tooltip")));
-    walkTipMap.insert(std::make_pair(mSlideLeftButton, getString("walk_left_tooltip")));
-    walkTipMap.insert(std::make_pair(mSlideRightButton, getString("walk_right_tooltip")));
+    if (mBackwardButton) walkTipMap.insert(std::make_pair(mBackwardButton, getString("walk_back_tooltip")));
+    if (mSlideLeftButton) walkTipMap.insert(std::make_pair(mSlideLeftButton, getString("walk_left_tooltip")));
+    if (mSlideRightButton) walkTipMap.insert(std::make_pair(mSlideRightButton, getString("walk_right_tooltip")));
     walkTipMap.insert(std::make_pair(mMoveUpButton, getString("jump_tooltip")));
     walkTipMap.insert(std::make_pair(mMoveDownButton, getString("crouch_tooltip")));
     mModeControlTooltipsMap[MM_WALK] = walkTipMap;
 
     control_tooltip_map_t runTipMap;
     runTipMap.insert(std::make_pair(mForwardButton, getString("run_forward_tooltip")));
-    runTipMap.insert(std::make_pair(mBackwardButton, getString("run_back_tooltip")));
-    runTipMap.insert(std::make_pair(mSlideLeftButton, getString("run_left_tooltip")));
-    runTipMap.insert(std::make_pair(mSlideRightButton, getString("run_right_tooltip")));
+    if (mBackwardButton) runTipMap.insert(std::make_pair(mBackwardButton, getString("run_back_tooltip")));
+    if (mSlideLeftButton) runTipMap.insert(std::make_pair(mSlideLeftButton, getString("run_left_tooltip")));
+    if (mSlideRightButton) runTipMap.insert(std::make_pair(mSlideRightButton, getString("run_right_tooltip")));
     runTipMap.insert(std::make_pair(mMoveUpButton, getString("jump_tooltip")));
     runTipMap.insert(std::make_pair(mMoveDownButton, getString("crouch_tooltip")));
     mModeControlTooltipsMap[MM_RUN] = runTipMap;
 
     control_tooltip_map_t flyTipMap;
     flyTipMap.insert(std::make_pair(mForwardButton, getString("fly_forward_tooltip")));
-    flyTipMap.insert(std::make_pair(mBackwardButton, getString("fly_back_tooltip")));
-    flyTipMap.insert(std::make_pair(mSlideLeftButton, getString("fly_left_tooltip")));
-    flyTipMap.insert(std::make_pair(mSlideRightButton, getString("fly_right_tooltip")));
+    if (mBackwardButton) flyTipMap.insert(std::make_pair(mBackwardButton, getString("fly_back_tooltip")));
+    if (mSlideLeftButton) flyTipMap.insert(std::make_pair(mSlideLeftButton, getString("fly_left_tooltip")));
+    if (mSlideRightButton) flyTipMap.insert(std::make_pair(mSlideRightButton, getString("fly_right_tooltip")));
     flyTipMap.insert(std::make_pair(mMoveUpButton, getString("fly_up_tooltip")));
     flyTipMap.insert(std::make_pair(mMoveDownButton, getString("fly_down_tooltip")));
     mModeControlTooltipsMap[MM_FLY] = flyTipMap;

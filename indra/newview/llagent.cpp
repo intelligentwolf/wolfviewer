@@ -2453,14 +2453,17 @@ void LLAgent::propagate(const F32 dt)
     LLFloaterMove *floater_move = LLFloaterReg::findTypedInstance<LLFloaterMove>("moveview");
     if (floater_move)
     {
-        floater_move->mForwardButton   ->setToggleState( gAgentCamera.getAtKey() > 0 || gAgentCamera.getWalkKey() > 0 );
-        floater_move->mBackwardButton  ->setToggleState( gAgentCamera.getAtKey() < 0 || gAgentCamera.getWalkKey() < 0 );
-        floater_move->mTurnLeftButton  ->setToggleState( gAgentCamera.getYawKey() > 0.f );
-        floater_move->mTurnRightButton ->setToggleState( gAgentCamera.getYawKey() < 0.f );
-        floater_move->mSlideLeftButton  ->setToggleState( gAgentCamera.getLeftKey() > 0.f );
-        floater_move->mSlideRightButton ->setToggleState( gAgentCamera.getLeftKey() < 0.f );
-        floater_move->mMoveUpButton    ->setToggleState( gAgentCamera.getUpKey() > 0 );
-        floater_move->mMoveDownButton  ->setToggleState( gAgentCamera.getUpKey() < 0 );
+        // <WolfViewer 2026-09-06> the move floater is one analogue stick now (llmoveview.cpp
+        // postBuild): the back / turn / slide buttons may not exist.
+        if (floater_move->mForwardButton)    floater_move->mForwardButton   ->setToggleState( gAgentCamera.getAtKey() > 0 || gAgentCamera.getWalkKey() > 0 );
+        if (floater_move->mBackwardButton)   floater_move->mBackwardButton  ->setToggleState( gAgentCamera.getAtKey() < 0 || gAgentCamera.getWalkKey() < 0 );
+        if (floater_move->mTurnLeftButton)   floater_move->mTurnLeftButton  ->setToggleState( gAgentCamera.getYawKey() > 0.f );
+        if (floater_move->mTurnRightButton)  floater_move->mTurnRightButton ->setToggleState( gAgentCamera.getYawKey() < 0.f );
+        if (floater_move->mSlideLeftButton)  floater_move->mSlideLeftButton  ->setToggleState( gAgentCamera.getLeftKey() > 0.f );
+        if (floater_move->mSlideRightButton) floater_move->mSlideRightButton ->setToggleState( gAgentCamera.getLeftKey() < 0.f );
+        if (floater_move->mMoveUpButton)     floater_move->mMoveUpButton    ->setToggleState( gAgentCamera.getUpKey() > 0 );
+        if (floater_move->mMoveDownButton)   floater_move->mMoveDownButton  ->setToggleState( gAgentCamera.getUpKey() < 0 );
+        // </WolfViewer>
     }
 
     // handle rotation based on keyboard levels

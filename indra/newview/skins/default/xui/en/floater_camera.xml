@@ -4,7 +4,7 @@
     header_height="0"
     bg_opaque_image="Window_NoTitle_Foreground"
     bg_alpha_image="Window_NoTitle_Foreground"
-    right="-460"
+    right="-206"
     bottom="-50"
     can_dock="false"
     can_minimize="false"
@@ -12,8 +12,8 @@
     can_close="false"
     chrome="true"
     follows="bottom"
-    height="135"
-    min_height="120"
+    height="180"
+    min_height="165"
     layout="topleft"
     name="camera_floater"
     title="Camera Controls"
@@ -22,8 +22,8 @@
     save_visibility="true"
     show_title="false"
     single_instance="true"
-    width="170"
-    min_width="155">
+    width="244"
+    min_width="230">
   <floater.string name="rotate_tooltip">
         Rotate Camera Around Focus
   </floater.string>
@@ -43,13 +43,13 @@
       layout="topleft"
       left="2"
       name="buttons_panel"
-      width="140"
+      width="240"
       top_pad="-5">
     <panel_camera_item
         name="front_view"
         tool_tip="Front View"
-        width="18"
-        left="2">
+        width="30"
+        left="4">
       <panel_camera_item.mousedown_callback
           function="CameraPresets.ChangeView"
           parameter="Front View" />
@@ -59,8 +59,8 @@
     <panel_camera_item
         name="group_view"
         tool_tip="Side View"
-        width="18"
-        left_pad="2">
+        width="30"
+        left_pad="4">
       <panel_camera_item.mousedown_callback
           function="CameraPresets.ChangeView"
           parameter="Side View" />
@@ -70,8 +70,8 @@
     <panel_camera_item
         name="rear_view"
         tool_tip="Rear View"
-        width="18"
-        left_pad="2">
+        width="30"
+        left_pad="4">
       <panel_camera_item.mousedown_callback
           function="CameraPresets.ChangeView"
           parameter="Rear View" />
@@ -81,8 +81,8 @@
     <panel_camera_item
         name="tpp_view"
         tool_tip="TPP View"
-        width="18"
-        left_pad="2">
+        width="30"
+        left_pad="4">
       <panel_camera_item.mousedown_callback
           function="CameraPresets.ChangeView"
           parameter="TPP View" />
@@ -92,8 +92,8 @@
     <panel_camera_item
         name="object_view"
         tool_tip="Object View"
-        width="18"
-        left_pad="2">
+        width="30"
+        left_pad="4">
       <panel_camera_item.mousedown_callback
           function="CameraPresets.ChangeView"
           parameter="object_view" />
@@ -103,8 +103,8 @@
     <panel_camera_item
         name="mouselook_view"
         tool_tip="Mouselook View"
-        width="18"
-        left_pad="2">
+        width="30"
+        left_pad="4">
       <panel_camera_item.mousedown_callback
           function="CameraPresets.ChangeView"
           parameter="mouselook_view" />
@@ -114,8 +114,8 @@
     <panel_camera_item
         name="reset_view"
         tool_tip="Reset view"
-        width="18"
-        left_pad="2">
+        width="30"
+        left_pad="4">
       <panel_camera_item.mousedown_callback
           function="CameraPresets.ChangeView"
           parameter="reset_view" />
@@ -123,11 +123,15 @@
       <panel_camera_item.selected_picture image_name="Refresh_Over" />
     </panel_camera_item>
   </panel>
+  <!-- WolfViewer 2026-09-06: the two camera sticks are ANALOGUE (lljoystickbutton.cpp
+       wolf_analog) and drawn by the widget — the knob follows the pointer inside a ring, a
+       0.25 dead zone, rate proportional to the push, tap the centre to reset. Layout follows
+       WolfStorm's js/ui/camera_controls.js: orbit stick | zoom column | track stick. -->
   <panel
       border="false"
-      width="160"
+      width="234"
       class="camera_zoom_panel"
-      height="60"
+      height="96"
       layout="topleft"
       left="5"
       mouse_opaque="false"
@@ -136,23 +140,22 @@
     <layout_stack
         top="0"
         enabled="true"
-        height="60"
+        height="96"
         left="0"
         mouse_opaque="true"
         name="camera_view_layout_stack"
         orientation="horizontal"
         follows="all">
-
       <layout_panel
           name="camera_rotate_layout_panel"
           user_resize="false"
-          height="80"
-          width="80">
-
+          height="96"
+          width="96">
         <joystick_rotate
+            wolf_analog="true"
             follows="all"
-            height="80"
-            width="80"
+            height="96"
+            width="96"
             image_selected="Cam_Rotate_In"
             image_unselected="Cam_Rotate_Out"
             layout="topleft"
@@ -163,7 +166,7 @@
             scale_image="true"
             sound_flags="3"
             visible="true"
-            tool_tip="Orbit camera around focus"
+            tool_tip="Orbit camera around focus: push to swing the camera, tap the centre to reset"
             held_down_delay.seconds="0.0"
             top="0" />
 <!-- <FS:Chanayane> Camera roll (from Alchemy) -->
@@ -174,7 +177,7 @@
             image_selected="VirtualTrackball_Rotate_Left_Active"
             image_unselected="VirtualTrackball_Rotate_Left"
             layout="topleft"
-            top_delta="68"
+            top_delta="84"
             left_delta="0"
             name="roll_left"
             tool_tip="Roll camera Left">
@@ -189,7 +192,7 @@
             image_unselected="VirtualTrackball_Rotate_Right"
             layout="topleft"
             top_delta="0"
-            left_delta="68"
+            left_delta="84"
             name="roll_right"
             tool_tip="Roll camera Right">
             <commit_callback function="Camera.roll_right" />
@@ -197,13 +200,12 @@
         </button>
 <!-- </FS:Chanayane> -->
       </layout_panel>
-
       <layout_panel
           name="camera_zoom_layout_panel"
           auto_resize="false"
           user_resize="false"
-          height="70"
-          width="16">
+          height="96"
+          width="26">
         <button
             follows="top|left"
             height="16"
@@ -211,23 +213,24 @@
             image_selected="AddItem_Press"
             image_unselected="AddItem_Off"
             layout="topleft"
-            left_delta="-2"
+            left="5"
             name="zoom_plus_btn"
             scale_image="false"
             width="16"
-            top="0">
+            top="4"
+            tool_tip="Zoom camera towards focus">
           <commit_callback function="Zoom.plus" />
           <mouse_held_callback function="Zoom.plus" />
         </button>
         <slider_bar
-            height="48"
+            height="52"
             layout="topleft"
             name="zoom_slider"
             orientation="vertical"
             follows="top|left|bottom"
             tool_tip="Zoom camera toward focus"
-            top_delta="13"
-            left_delta="1"
+            top_pad="2"
+            left="5"
             min_val="0"
             max_val="1"
             width="16">
@@ -242,33 +245,33 @@
             layout="topleft"
             name="zoom_minus_btn"
             scale_image="true"
-            top_delta="44"
-            left_delta="0"
-            width="16">
+            top_pad="2"
+            left="5"
+            width="16"
+            tool_tip="Zoom camera away from focus">
           <commit_callback function="Zoom.minus" />
           <mouse_held_callback function="Zoom.minus" />
         </button>
       </layout_panel>
-
       <layout_panel
           name="panel_track"
           user_resize="false"
-          height="80"
-          width="80">
-
+          height="96"
+          width="96">
         <joystick_track
+            wolf_analog="true"
             follows="all"
-            height="80"
-            width="80"
+            height="96"
+            width="96"
             image_selected="Cam_Tracking_In"
             image_unselected="Cam_Tracking_Out"
             layout="topleft"
-            left_delta="-2"
+            left="0"
             name="cam_track_stick"
             quadrant="left"
             scale_image="true"
             sound_flags="3"
-            tool_tip="Move camera up and down, left and right"
+            tool_tip="Move camera up and down, left and right: push to slide it, tap the centre to reset"
             top="0" />
       </layout_panel>
     </layout_stack>
@@ -289,7 +292,7 @@
         layout="topleft"
         left_delta="5"
         name="camera_position_btn"
-        width="133">
+        width="207">
         <button.commit_callback
           function="Floater.Show"
           parameter="prefs_view_advanced" />
@@ -313,7 +316,7 @@
         mouse_opaque="true"
         name="preset_combo"
         top_pad="0"
-        width="133">
+        width="207">
       <combo_list mouse_wheel_opaque="true" />
       <combo_box.item
           label="Use preset"

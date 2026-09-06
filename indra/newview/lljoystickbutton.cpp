@@ -56,6 +56,30 @@ static LLDefaultChildRegistry::Register<LLJoystickQuaternion> r6("joystick_quat"
 const F32 NUDGE_TIME = 0.25f;       // in seconds
 const F32 ORBIT_NUDGE_RATE = 0.05f; // fraction of normal speed
 
+// <WolfViewer 2026-09-06> ANALOGUE THUMB STICKS.
+//
+// Paul, 2026-09-06: "the move and camera controls in wolfstorm are wonderful ... wolfstorm
+// has lovely joysticks". Ported from WolfStorm's js/ui/camera_controls.js (orbit / track
+// sticks + zoom) and js/input/touch_controls.js (movement stick), which in turn cite this
+// file: the stock widget is a quadrant hit-test that fires a fixed rate, with no analogue
+// value to scale by. Here, with wolf_analog="true":
+//   - the knob follows the pointer, clamped to a ring (camera_controls.js _updateStick);
+//   - deflection inside a 0.25 dead zone does nothing (a thumb resting a few pixels off
+//     centre must not drift the camera forever — camera_controls.js DEAD_ZONE), and past
+//     it is remapped to 0..1 per axis (_axis);
+//   - the rate is that axis value times Firestorm's own nudge ramp (getOrbitRate /
+//     LLFloaterMove::getYawRate) — at full deflection exactly the stock rate, below it
+//     proportionally gentler. LLAgentCamera's key setters already take a magnitude
+//     (llagentcamera.h:420 setOrbitLeftKey(F32 mag)), so the camera code is untouched;
+//   - a press that never leaves the dead zone is a centre tap: the camera sticks reset
+//     (camera_controls.js onUp -> _resetStick; stock: pointInCenterDot on the press);
+//   - the widget draws itself: glass base disc, border, dead-zone ring, knob with a
+//     centre dot (css/camera_controls.css / css/touch_controls.css colours, in colors.xml
+//     as WolfJoystick*).
+static const F32 WOLF_DEAD_ZONE = 0.25f;     // camera_controls.js:66, touch_controls.js:49
+static const F32 WOLF_KNOB_FRACTION = 0.40f; // knob diameter / stick diameter (54 / 132 px)
+// </WolfViewer>
+
 //const S32 CENTER_DOT_RADIUS = 7;  // <FS:Beq/> FIRE-30414 Camera control arrows not clickable
 
 //
@@ -73,6 +97,11 @@ void QuadrantNames::declareValues()
 
 LLJoystick::LLJoystick(const LLJoystick::Params& p)
 :   LLButton(p),
+    mWolfAnalog(p.wolf_analog),   // <WolfViewer 2026-09-06>
+    mWolfActive(false),
+    mWolfCentred(false),
+    mWolfNX(0.f),
+    mWolfNY(0.f),
     mInitialOffset(0, 0),
     mLastMouse(0, 0),
     mFirstMouse(0, 0),
@@ -202,6 +231,15 @@ bool LLJoystick::handleMouseDown(S32 x, S32 y, MASK mask)
         mLastMouse.set(x, y);
         mFirstMouse.set(x, y);
         mMouseDownTimer.reset();
+        // <WolfViewer 2026-09-06> Source: camera_controls.js onDown — the knob jumps to the
+        // pointer at once and the press starts out "centred" until it leaves the dead zone.
+        if (mWolfAnalog)
+        {
+            mWolfActive = true;
+            mWolfCentred = true;
+            wolfUpdateStick(x, y);
+        }
+        // </WolfViewer>
         handles = LLButton::handleMouseDown(x, y, mask);
     }
 
@@ -218,6 +256,20 @@ bool LLJoystick::handleMouseUp(S32 x, S32 y, MASK mask)
         mLastMouse.set(x, y);
         mHeldDown = false;
         onMouseUp();
+        // <WolfViewer 2026-09-06> Source: camera_controls.js onUp — knob snaps back; a press
+        // that never left the centre is a reset, not a drag.
+        if (mWolfAnalog)
+        {
+            const bool was_centred = mWolfCentred;
+            mWolfActive = false;
+            mWolfNX = 0.f;
+            mWolfNY = 0.f;
+            if (was_centred)
+            {
+                onWolfCentreTap();
+            }
+        }
+        // </WolfViewer>
     }
 
     return LLButton::handleMouseUp(x, y, mask);
@@ -229,10 +281,106 @@ bool LLJoystick::handleHover(S32 x, S32 y, MASK mask)
     if( hasMouseCapture() )
     {
         mLastMouse.set(x, y);
+        if (mWolfAnalog)   // <WolfViewer 2026-09-06>
+        {
+            wolfUpdateStick(x, y);
+        }
     }
 
     return LLButton::handleHover(x, y, mask);
 }
+
+// <WolfViewer 2026-09-06> ---------------------------------------------------------------
+// Source: camera_controls.js _stickRadius — travel from the LIVE sizes, never hard-coded.
+F32 LLJoystick::wolfKnobRadius() const
+{
+    const F32 d = (F32)llmin(getRect().getWidth(), getRect().getHeight());
+    return d * WOLF_KNOB_FRACTION * 0.5f;
+}
+
+F32 LLJoystick::wolfRadius() const
+{
+    const F32 d = (F32)llmin(getRect().getWidth(), getRect().getHeight());
+    return llmax(12.f, (d - d * WOLF_KNOB_FRACTION) * 0.5f);
+}
+
+// Source: camera_controls.js _updateStick — clamp the knob to the ring so it reads as a
+// stick, normalise to -1..1. LLView's y grows UPWARD, so +ny is screen-up here (the JS
+// negates its screen-down y at the point of use; the axis mapping is the same).
+void LLJoystick::wolfUpdateStick(S32 x, S32 y)
+{
+    const F32 cx = getRect().getWidth() * 0.5f;
+    const F32 cy = getRect().getHeight() * 0.5f;
+    const F32 radius = wolfRadius();
+    F32 dx = (F32)x - cx;
+    F32 dy = (F32)y - cy;
+    const F32 len = sqrtf(dx * dx + dy * dy);
+    if (len > radius)
+    {
+        const F32 k = radius / len;
+        dx *= k;
+        dy *= k;
+    }
+    mWolfNX = dx / radius;
+    mWolfNY = dy / radius;
+    if (sqrtf(mWolfNX * mWolfNX + mWolfNY * mWolfNY) > WOLF_DEAD_ZONE)
+    {
+        mWolfCentred = false;
+    }
+}
+
+// Source: camera_controls.js _axis
+F32 LLJoystick::wolfAxis(F32 v)
+{
+    const F32 dead = WOLF_DEAD_ZONE;
+    if (v > dead) return llmin(1.f, (v - dead) / (1.f - dead));
+    if (v < -dead) return llmax(-1.f, (v + dead) / (1.f - dead));
+    return 0.f;
+}
+
+// Source: css/camera_controls.css .cam-stick / .cam-stick-ring / .cam-stick-dot /
+// .cam-stick-knob and css/touch_controls.css — the same glass look, drawn with primitives
+// (XUI has no blur; colour, border and the knob gradient's two tones are what carry it).
+void LLJoystick::wolfDrawAnalog()
+{
+    static LLUIColor base        = LLUIColorTable::instance().getColor("WolfJoystickBase",         LLColor4(0.078f, 0.102f, 0.149f, 0.42f));
+    static LLUIColor base_active = LLUIColorTable::instance().getColor("WolfJoystickBaseActive",   LLColor4(0.118f, 0.173f, 0.267f, 0.58f));
+    static LLUIColor border      = LLUIColorTable::instance().getColor("WolfJoystickBorder",       LLColor4(0.627f, 0.784f, 1.f,    0.45f));
+    static LLUIColor border_act  = LLUIColorTable::instance().getColor("WolfJoystickBorderActive", LLColor4(0.745f, 0.882f, 1.f,    0.75f));
+    static LLUIColor ring        = LLUIColorTable::instance().getColor("WolfJoystickRing",         LLColor4(0.784f, 0.882f, 1.f,    0.35f));
+    static LLUIColor knob        = LLUIColorTable::instance().getColor("WolfJoystickKnob",         LLColor4(0.922f, 0.961f, 1.f,    0.98f));
+    static LLUIColor knob_shade  = LLUIColorTable::instance().getColor("WolfJoystickKnobShade",    LLColor4(0.471f, 0.647f, 0.863f, 0.95f));
+    static LLUIColor dot         = LLUIColorTable::instance().getColor("WolfJoystickDot",          LLColor4(0.078f, 0.102f, 0.149f, 0.70f));
+
+    LLGLSUIDefault gls_ui;
+    gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
+    const F32 cx = getRect().getWidth() * 0.5f;
+    const F32 cy = getRect().getHeight() * 0.5f;
+    const F32 R = llmin(getRect().getWidth(), getRect().getHeight()) * 0.5f;
+    const F32 travel = wolfRadius();
+    const F32 kr = wolfKnobRadius();
+
+    // base disc + border
+    gGL.color4fv((mWolfActive ? base_active : base).get().mV);
+    gl_circle_2d(cx, cy, R - 1.f, 64, true);
+    gGL.color4fv((mWolfActive ? border_act : border).get().mV);
+    gl_circle_2d(cx, cy, R - 1.f, 64, false);
+    // dead-zone ring (decorative; the real threshold is WOLF_DEAD_ZONE of the travel)
+    gGL.color4fv(ring.get().mV);
+    gl_circle_2d(cx, cy, travel * WOLF_DEAD_ZONE, 32, false);
+    // knob: highlight disc with a shaded inner disc offset toward the lower right, the
+    // cheapest reading of the CSS radial gradient "circle at 35% 30%"
+    const F32 kx = cx + mWolfNX * travel;
+    const F32 ky = cy + mWolfNY * travel;
+    gGL.color4fv(knob.get().mV);
+    gl_circle_2d(kx, ky, kr, 48, true);
+    gGL.color4fv(knob_shade.get().mV);
+    gl_circle_2d(kx + kr * 0.12f, ky - kr * 0.14f, kr * 0.78f, 48, true);
+    gGL.color4fv(dot.get().mV);
+    gl_circle_2d(kx, ky, llmax(2.f, kr * 0.16f), 16, true);
+}
+// </WolfViewer> ---------------------------------------------------------------------------
+
 
 F32 LLJoystick::getElapsedHeldDownTime()
 {
@@ -322,6 +470,29 @@ void LLJoystickAgentTurn::onHeldDown()
     F32 time = getElapsedHeldDownTime();
     updateSlop();
 
+    // <WolfViewer 2026-09-06> Source: touch_controls.js _updateStick — up/down walk, left/right
+    // turn — with the yaw analogue like the stock stick's m = dx/|dy| below, but from the
+    // knob's own deflection, and the stock nudge for a tap.
+    if (mWolfAnalog)
+    {
+        const F32 ax = wolfAxis(mWolfNX);
+        const F32 ay = wolfAxis(mWolfNY);
+        if (ax != 0.f)
+        {
+            gAgent.moveYaw(-LLFloaterMove::getYawRate(time) * ax);
+        }
+        if (ay > 0.f)
+        {
+            if (time < NUDGE_TIME) gAgent.moveAtNudge(1); else gAgent.moveAt(1);
+        }
+        else if (ay < 0.f)
+        {
+            if (time < NUDGE_TIME) gAgent.moveAtNudge(-1); else gAgent.moveAt(-1);
+        }
+        return;
+    }
+    // </WolfViewer>
+
     //LL_INFOS() << "move forward/backward (and/or turn)" << LL_ENDL;
 
     S32 dx = mLastMouse.mX - mFirstMouse.mX + mInitialOffset.mX;
@@ -376,6 +547,18 @@ void LLJoystickAgentTurn::onHeldDown()
         }
     }
 }
+
+// <WolfViewer 2026-09-06>
+void LLJoystickAgentTurn::draw()
+{
+    if (mWolfAnalog)
+    {
+        wolfDrawAnalog();
+        return;
+    }
+    LLJoystick::draw();
+}
+// </WolfViewer>
 
 //-------------------------------------------------------------------------------
 // LLJoystickAgentSlide
@@ -481,6 +664,17 @@ bool LLJoystickCameraRotate::handleMouseDown(S32 x, S32 y, MASK mask)
     gAgent.setMovementLocked(true);
     updateSlop();
 
+    // <WolfViewer 2026-09-06> analogue: no quadrant, no initial offset — the knob is the input.
+    if (mWolfAnalog)
+    {
+        mInitialOffset.mX = 0;
+        mInitialOffset.mY = 0;
+        mInitialQuadrant = JQ_ORIGIN;
+        mInCenter = false;
+        return LLJoystick::handleMouseDown(x, y, mask);
+    }
+    // </WolfViewer>
+
     // Set initial offset based on initial click location
     S32 horiz_center = getRect().getWidth() / 2;
     S32 vert_center = getRect().getHeight() / 2;
@@ -555,6 +749,21 @@ void LLJoystickCameraRotate::onHeldDown()
 {
     updateSlop();
 
+    // <WolfViewer 2026-09-06> Source: camera_controls.js _tick (orbit): push RIGHT ->
+    // setOrbitLeftKey, push UP -> setOrbitUpKey, scaled by the deflection and the nudge ramp.
+    if (mWolfAnalog)
+    {
+        const F32 rate = getOrbitRate();
+        const F32 ax = wolfAxis(mWolfNX);
+        const F32 ay = wolfAxis(mWolfNY);
+        if (ax > 0.f)      { gAgentCamera.unlockView(); gAgentCamera.setOrbitLeftKey(ax * rate); }
+        else if (ax < 0.f) { gAgentCamera.unlockView(); gAgentCamera.setOrbitRightKey(-ax * rate); }
+        if (ay > 0.f)      { gAgentCamera.unlockView(); gAgentCamera.setOrbitUpKey(ay * rate); }
+        else if (ay < 0.f) { gAgentCamera.unlockView(); gAgentCamera.setOrbitDownKey(-ay * rate); }
+        return;
+    }
+    // </WolfViewer>
+
     S32 dx = mLastMouse.mX - mFirstMouse.mX + mInitialOffset.mX;
     S32 dy = mLastMouse.mY - mFirstMouse.mY + mInitialOffset.mY;
 
@@ -621,6 +830,13 @@ void LLJoystickCameraRotate::setToggleState( bool left, bool top, bool right, bo
 
 void LLJoystickCameraRotate::draw()
 {
+    // <WolfViewer 2026-09-06>
+    if (mWolfAnalog)
+    {
+        wolfDrawAnalog();
+        return;
+    }
+    // </WolfViewer>
     LLGLSUIDefault gls_ui;
 
   getImageUnselected()->draw( getLocalRect() );
@@ -728,6 +944,21 @@ LLJoystickCameraTrack::LLJoystickCameraTrack(const LLJoystickCameraTrack::Params
 void LLJoystickCameraTrack::onHeldDown()
 {
     updateSlop();
+
+    // <WolfViewer 2026-09-06> Source: camera_controls.js _tick (track): push RIGHT ->
+    // setPanRightKey, push UP -> setPanUpKey, scaled by the deflection and the nudge ramp.
+    if (mWolfAnalog)
+    {
+        const F32 rate = getOrbitRate();
+        const F32 ax = wolfAxis(mWolfNX);
+        const F32 ay = wolfAxis(mWolfNY);
+        if (ax > 0.f)      { gAgentCamera.unlockView(); gAgentCamera.setPanRightKey(ax * rate); }
+        else if (ax < 0.f) { gAgentCamera.unlockView(); gAgentCamera.setPanLeftKey(-ax * rate); }
+        if (ay > 0.f)      { gAgentCamera.unlockView(); gAgentCamera.setPanUpKey(ay * rate); }
+        else if (ay < 0.f) { gAgentCamera.unlockView(); gAgentCamera.setPanDownKey(-ay * rate); }
+        return;
+    }
+    // </WolfViewer>
 
     S32 dx = mLastMouse.mX - mFirstMouse.mX + mInitialOffset.mX;
     S32 dy = mLastMouse.mY - mFirstMouse.mY + mInitialOffset.mY;

@@ -183,7 +183,7 @@ class WolfPanelLandWaves : public LLPanel
 public:
     WolfPanelLandWaves(LLParcelSelectionHandle& parcel);
     bool postBuild() override;
-    void refresh();
+    void refresh() override;   // LLPanel::refresh (clang -Winconsistent-missing-override is an error on the mac CI)
     /** Polls the grid's answers (a fetch landing, a save finishing) — LLFloaterLand::refresh
      *  only runs on parcel changes, which left Save greyed and "Saving…" up after a save. */
     void draw() override;

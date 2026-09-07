@@ -761,9 +761,10 @@ void WolfPanelLandWaves::rebuild()
     mPainter->setLayout(w, h, wz.zonesFor(*r), locked);
     mPainter->setEnabled(true);
     const LLSD& p = r->mParams;
-    mSurfHeight->setValue(p.has("surfHeight") ? p["surfHeight"].asReal() : 3.0);
-    mSetInterval->setValue(p.has("setInterval") ? p["setInterval"].asReal() : 90.0);
-    mCalmRipple->setValue(p.has("calmRipple") ? p["calmRipple"].asReal() * 100.0 : 3.0);
+    // explicit F32: LLSliderCtrl::setValue(F32) and MSVC's C4244 is an error on the CI
+    mSurfHeight->setValue((F32)(p.has("surfHeight") ? p["surfHeight"].asReal() : 3.0));
+    mSetInterval->setValue((F32)(p.has("setInterval") ? p["setInterval"].asReal() : 90.0));
+    mCalmRipple->setValue((F32)(p.has("calmRipple") ? p["calmRipple"].asReal() * 100.0 : 3.0));
     mEnabled->set(r->mEnabled);
     mSurfHeight->setEnabled(all);
     mSetInterval->setEnabled(all);

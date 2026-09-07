@@ -27,6 +27,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "llfloatertoybox.h"
+#include "wolfgrid.h" // <WolfViewer> Wolf Territories-only commands
 
 #include "llbutton.h"
 #include "llcommandmanager.h"
@@ -77,6 +78,13 @@ bool LLFloaterToybox::postBuild()
     {
         LLCommand * command = cmdMgr.getCommand(i);
 
+        // <WolfViewer 2026-09-07> the Wolf Territories-only commands (app_settings/commands.xml
+        // wolf_*) do not exist on any other grid: not offered here, not on a toolbar.
+        if (command->name().rfind("wolf_", 0) == 0 && !WolfGrid::isWolfTerritories())
+        {
+            continue;
+        }
+        // </WolfViewer>
         if (command->availableInToybox())
         {
             alphabetized_commands.push_back(command);

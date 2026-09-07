@@ -402,7 +402,32 @@ bool LLToolBarView::loadToolbars(bool force_default)
     // three Wolf Territories buttons (app_settings/commands.xml wolf_*) are added ONCE to the
     // bottom toolbar of an existing layout — on Wolf Territories only, where they work — and
     // remembered, so a user who removes them is not handed them again every login.
-    if (mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM] && WolfGrid::isWolfTerritories()
+    if (!WolfGrid::isWolfTerritories())
+    {
+        // Not Wolf Territories: the buttons are taken off every toolbar for this session (the
+        // layout is not saved here, so they come back on the next Wolf Territories login —
+        // the flag is cleared so that login re-adds them even if a save on this grid dropped
+        // them from the per-account file).
+        bool removed = false;
+        for (const char* name : { "wolf_sharescreen", "wolf_readaloud", "wolf_dictate" })
+        {
+            const LLCommandId id(name);
+            for (S32 i = LLToolBarEnums::TOOLBAR_FIRST; i <= LLToolBarEnums::TOOLBAR_LAST; i++)
+            {
+                if (mToolbars[i] && mToolbars[i]->hasCommand(id))
+                {
+                    mToolbars[i]->removeCommand(id);
+                    removed = true;
+                }
+            }
+        }
+        if (removed)
+        {
+            gSavedSettings.setBOOL("WolfViewerToolbarButtonsAdded", false);
+            LL_INFOS() << "WolfViewer: not on Wolf Territories, the Wolf Territories buttons are hidden" << LL_ENDL;
+        }
+    }
+    else if (mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM]
         && !gSavedSettings.getBOOL("WolfViewerToolbarButtonsAdded"))
     {
         bool added = false;

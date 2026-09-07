@@ -612,7 +612,10 @@ bool WolfWavePainter::handleMouseUp(S32 x, S32 y, MASK mask)
 // WolfPanelLandWaves — About Land > Waves
 // ═══════════════════════════════════════════════════════════════════════════════════════
 
-WolfPanelLandWaves::WolfPanelLandWaves(LLParcelSelectionHandle& parcel) : LLPanel(), mParcel(parcel) {}
+// The parcel handle is what the other About Land panels take; this one reads the parcel through
+// LLViewerParcelMgr at paint time, so it is accepted for the shared factory and not stored
+// (clang's -Wunused-private-field is an error on the mac CI).
+WolfPanelLandWaves::WolfPanelLandWaves(LLParcelSelectionHandle& /*parcel*/) : LLPanel() {}
 
 bool WolfPanelLandWaves::postBuild()
 {

@@ -199,7 +199,6 @@ private:
     LLSD paramsFromControls() const;
     void setStatus(const std::string& msg, bool error);
 
-    LLParcelSelectionHandle& mParcel;
     WolfWavePainter* mPainter = nullptr;
     LLTextBox*       mStatus = nullptr;
     LLTextBox*       mNote = nullptr;

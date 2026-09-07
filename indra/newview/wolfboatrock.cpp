@@ -39,6 +39,7 @@
 #include "wolfobjectprops.h"
 #include "wolfseastate.h"
 #include "wolfwaterfield.h"
+#include "wolfwavezones.h"   // [WAVES 2026-09-07]
 
 // Source: wolfstorm/js/world/terrain/terrain_manager.js [ROCK 2026-08-15].
 
@@ -621,7 +622,10 @@ WolfBoatRock::Sample WolfBoatRock::sampleWave(const LLViewerObject* objectp, F32
     // exposure 0-0.23 -> scale ~0.15-0.4 -> peak bob 7-25 MILLIMETRES. Moored boats visibly
     // sway from harbour slop even on water that reads calm, so the ROCKER keeps >= 0.7 of
     // the base wave field while the drawn surface still flattens toward shore and rivers.
-    const F32 swell_scale = llmax(0.15f + 1.15f * exposure_at(rx, ry), 0.7f);
+    // [WAVES 2026-09-07] ...times the painted zone, exactly as the vertex stage
+    // (waterV.glsl zoneEnergy): a boat in a surf cell rides the bigger swell.
+    const F32 zone_mul = 0.1f + 1.5f * (field ? WolfWaterField::zoneAt(*field, rx, ry) : WolfWaveZones::OPEN_ENERGY);
+    const F32 swell_scale = llmax(0.15f + 1.15f * exposure_at(rx, ry), 0.7f) * zone_mul;
 
     if (amp > 0.01f)
     {
@@ -701,6 +705,85 @@ WolfBoatRock::Sample WolfBoatRock::sampleWave(const LLViewerObject* objectp, F32
                              * llmin(4.f / llmax(sqrtf(smooth_depth), 0.5f), 4.f) * 0.5f;
                 out.mSx += (g / conf) * sl;
                 out.mSy += (b / conf) * sl;
+            }
+        }
+    }
+
+    // [SURF 2026-09-07] The SURF TRAIN (waterV.glsl [SURF rev2]; terrain_manager.js
+    // _surfSampleCPU, same numbers): the crest-referenced profile's height and slope, so a
+    // boat in a surf cell rides the wall the water draws. Horizontal push omitted.
+    F32 surf_h = 0.f, surf_set = 90.f, surf_len = 36.f;
+    if (LLDrawPool* poolp = gPipeline.findPool(LLDrawPool::POOL_WATER))
+    {
+        LLDrawPoolWater* wp = static_cast<LLDrawPoolWater*>(poolp);
+        surf_h = wp->getSurfHeight();
+        surf_set = wp->getSurfSetInterval();
+        surf_len = wp->getSurfLength();
+    }
+    if (field && shore_on && surf_h > 0.01f && field->mZoneTex)
+    {
+        auto smoothstep01 = [](F32 e0, F32 e1, F32 x)
+        {
+            const F32 u = llclamp((x - e0) / (e1 - e0), 0.f, 1.f);
+            return u * u * (3.f - 2.f * u);
+        };
+        const F32 surf_zone = smoothstep01(0.62f, 0.95f, WolfWaterField::zoneAt(*field, rx, ry));   // surf cells only (waterV.glsl surfZone)
+        if (surf_zone > 0.001f)
+        {
+            const F32 dW = field->mExpoSX / 32.f, dH = field->mExpoSY / 32.f;
+            const F32 dist = WolfWaterField::distanceAt(*field, rx, ry);
+            const F32 gx = WolfWaterField::distanceAt(*field, rx + dW, ry) - WolfWaterField::distanceAt(*field, rx - dW, ry);
+            const F32 gy = WolfWaterField::distanceAt(*field, rx, ry + dH) - WolfWaterField::distanceAt(*field, rx, ry - dH);
+            const F32 gl = sqrtf(gx * gx + gy * gy);
+            const bool have_land = dist < 3000.f && gl > 1.f;
+            F32 dx, dy, coord;
+            if (have_land) { dx = -gx / gl; dy = -gy / gl; coord = -dist; }
+            else
+            {
+                const F32 cx = field->mSizeX * 0.5f - rx + 0.001f, cy = field->mSizeY * 0.5f - ry;
+                F32 cl = sqrtf(cx * cx + cy * cy); if (cl <= 0.f) cl = 1.f;
+                dx = cx / cl; dy = cy / cl; coord = rx * dx + ry * dy;
+            }
+            // depth: the smoothed height, continuing past the border and easing to 30 m
+            F32 h = 30.f;
+            F32 dt4[4];
+            const F32 qx = llclamp(rx, 0.f, field->mSizeX), qy = llclamp(ry, 0.f, field->mSizeY);
+            if (WolfWaterField::depthAt(*field, qx, qy, dt4))
+            {
+                const F32 over = llmax(llmax(-rx, rx - field->mSizeX), llmax(-ry, ry - field->mSizeY), 0.f);
+                const F32 outside = smoothstep01(0.f, 64.f, over);
+                const F32 h_in = llmax(field->mWaterLevel - dt4[3], 0.f);
+                h = h_in + (30.f - h_in) * outside;
+            }
+            const F32 g9 = 9.81f;
+            const F32 lambda = llmax(surf_len, 12.f * surf_h);
+            const F32 k = 6.2831853f / llmax(lambda, 8.f);
+            const F32 tk = tanhf(k * llmax(h, 0.05f));
+            const F32 omega = sqrtf(g9 * k * tk);
+            const F32 set_ph = 6.2831853f * (t / llmax(surf_set, 10.f)) - coord * (0.22f / lambda);
+            const F32 set_env = 0.30f + 0.70f * smoothstep01(0.15f, 1.f, 0.5f + 0.5f * sinf(set_ph));
+            const F32 crest_var = 0.85f + 0.15f * sinf((rx * -dy + ry * dx) * (1.1f / lambda) + t * 0.1f);
+            const F32 ksh = llclamp(1.f / sqrtf(llmax(tk, 0.05f)), 1.f, 1.8f);
+            F32 crest_h = llmin(surf_h * surf_zone * set_env * ksh * crest_var, surf_h * 1.15f);
+            const F32 h_max = 0.78f * (h + 0.8f * surf_h);
+            const F32 break_f = smoothstep01(0.7f, 1.15f, crest_h / llmax(h_max, 0.01f));
+            crest_h = llmin(crest_h, h_max);
+            crest_h *= smoothstep01(0.2f, 0.6f + 0.5f * surf_h, h);
+            if (crest_h > 0.01f)
+            {
+                const F32 kl = k / sqrtf(llmax(tk, 0.05f));
+                const F32 ph = kl * coord - omega * t;
+                const F32 ph2 = ph + (0.30f + 0.45f * break_f) * sinf(ph);
+                const F32 sn = sinf(ph2), cs = cosf(ph2);
+                const F32 up = 0.5f + 0.5f * sn;
+                const F32 upk = powf(up, 1.6f + 1.2f * break_f);   // [SURF rev3] peaked crest
+                const F32 prof = -0.25f + 1.25f * upk + 0.25f * break_f * upk * upk;
+                const F32 tip = upk * upk * upk;
+                const F32 lip = 0.55f * break_f * tip;
+                out.mZ += crest_h * (prof - 0.35f * lip);
+                const F32 sl2 = crest_h * 0.6f * kl * cs * (0.3f + 0.7f * upk);
+                out.mSx += dx * sl2;
+                out.mSy += dy * sl2;
             }
         }
     }

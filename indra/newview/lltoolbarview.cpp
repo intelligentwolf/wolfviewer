@@ -29,6 +29,7 @@
 
 #include "lltoolbarview.h"
 #include "wolfgrid.h" // <WolfViewer> Wolf Territories-only toolbar buttons
+#include "wolftoolbargroups.h" // <WolfViewer> toolbar group buttons
 
 #include "llappviewer.h"
 #include "llbutton.h"
@@ -430,27 +431,76 @@ bool LLToolBarView::loadToolbars(bool force_default)
     else if (mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM]
         && !gSavedSettings.getBOOL("WolfViewerToolbarButtonsAdded"))
     {
-        bool added = false;
-        for (const char* name : { "wolf_sharescreen", "wolf_readaloud", "wolf_dictate" })
+        // <WolfViewer 2026-09-07> The three buttons now live inside the Voice GROUP
+        // (wolftoolbargroups.cpp group_voice), so what is ensured once is the group.
+        const LLCommandId id("group_voice");
+        bool present = false;
+        for (S32 i = LLToolBarEnums::TOOLBAR_FIRST; i <= LLToolBarEnums::TOOLBAR_LAST; i++)
         {
-            const LLCommandId id(name);
-            bool present = false;
-            for (S32 i = LLToolBarEnums::TOOLBAR_FIRST; i <= LLToolBarEnums::TOOLBAR_LAST; i++)
+            if (mToolbars[i] && mToolbars[i]->hasCommand(id))
             {
-                if (mToolbars[i] && mToolbars[i]->hasCommand(id))
-                {
-                    present = true;
-                }
-            }
-            if (!present && addCommandInternal(id, mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM]))
-            {
-                added = true;
+                present = true;
             }
         }
         gSavedSettings.setBOOL("WolfViewerToolbarButtonsAdded", true);
-        if (added)
+        if (!present && addCommandInternal(id, mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM]))
         {
-            LL_INFOS() << "WolfViewer: added the Wolf Territories buttons to the bottom toolbar" << LL_ENDL;
+            LL_INFOS() << "WolfViewer: added the Voice group to the bottom toolbar" << LL_ENDL;
+        }
+    }
+    // </WolfViewer>
+
+    // <WolfViewer 2026-09-07> The Welcome Island guidebook button (commands.xml howto) is
+    // gone from this viewer: taken off every toolbar of any layout, every load. Not a
+    // one-time flag — it must never come back, whatever an old layout file says.
+    {
+        const LLCommandId howto("howto");
+        for (S32 i = LLToolBarEnums::TOOLBAR_FIRST; i <= LLToolBarEnums::TOOLBAR_LAST; i++)
+        {
+            if (mToolbars[i] && mToolbars[i]->hasCommand(howto))
+            {
+                mToolbars[i]->removeCommand(howto);
+                LL_INFOS() << "WolfViewer: removed the guidebook button from a toolbar" << LL_ENDL;
+            }
+        }
+    }
+    // </WolfViewer>
+
+    // <WolfViewer 2026-09-07> GROUP the bottom toolbar of a saved layout, once. A per-account
+    // layout never sees the new default (skins/*/toolbars.xml), so the flat row of buttons
+    // is converted here: for each group whose members are on the bottom bar, the members
+    // are taken off and the group button put where the first of them stood. Chat and Speak
+    // are not members and stay. Remembered in WolfViewerToolbarGrouped, so a user who takes
+    // a group apart again in the toybox is not regrouped every login. Only the bottom bar:
+    // a button the user moved to a side bar was placed there on purpose.
+    if (mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM]
+        && !gSavedSettings.getBOOL("WolfViewerToolbarGrouped"))
+    {
+        LLToolBar* bottom = mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM];
+        S32 grouped = 0;
+        for (const WolfToolbarGroups::Group& g : WolfToolbarGroups::groups())
+        {
+            int rank = LLToolBar::RANK_NONE;
+            for (const char* member : g.mMembers)
+            {
+                const LLCommandId member_id(member);
+                if (!bottom->hasCommand(member_id)) continue;
+                int r = bottom->removeCommand(member_id);
+                if (rank == LLToolBar::RANK_NONE || (r != LLToolBar::RANK_NONE && r < rank)) rank = r;
+            }
+            if (rank == LLToolBar::RANK_NONE) continue;   // none of this group's members were on the bar
+            const LLCommandId group_id(g.mName);
+            if (!bottom->hasCommand(group_id))
+            {
+                bottom->addCommand(group_id, rank);
+            }
+            grouped++;
+        }
+        gSavedSettings.setBOOL("WolfViewerToolbarGrouped", true);
+        if (grouped)
+        {
+            LL_INFOS() << "WolfViewer: grouped the bottom toolbar (" << grouped << " groups)" << LL_ENDL;
+            saveToolbars();
         }
     }
     // </WolfViewer>

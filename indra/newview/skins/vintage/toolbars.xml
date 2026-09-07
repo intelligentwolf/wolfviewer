@@ -8,34 +8,16 @@
      button_alignment="center"
      button_display_mode="text_only"
      button_layout_style="fill">
-        <command
-         name="howto"/>
-        <command
-         name="chat" />
-        <command
-         name="fly" />
-        <command
-         name="people" />
-        <command
-         name="snapshot" />
-        <!-- WolfViewer 2026-09-06: Wolf Territories-only (greyed elsewhere) -->
-        <command
-                 name="wolf_sharescreen" />
-        <command
-                 name="wolf_readaloud" />
-        <command
-                 name="wolf_dictate" />
-        <command
-         name="build" />
-        <command
-         name="search" />
-        <command
-         name="minimap" />
-        <command
-         name="map" />
-        <command
-         name="inventory" />
-    </bottom_toolbar>
+     <!-- WolfViewer 2026-09-07: Chat and Speak stay; everything else lives in five GROUP
+          buttons (wolftoolbargroups.cpp), each a popup of the commands for one purpose. -->
+     <command name="chat"/>
+     <command name="speak"/>
+     <command name="group_voice"/>
+     <command name="group_move"/>
+     <command name="group_world"/>
+     <command name="group_me"/>
+     <command name="group_display"/>
+   </bottom_toolbar>
     <left_toolbar
      button_alignment="center"
      button_display_mode="icons_only"

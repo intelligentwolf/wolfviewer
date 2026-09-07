@@ -26,6 +26,7 @@
 #include "llviewercontrol.h"
 #include "llviewerregion.h"
 #include "llworld.h"
+#include "wolfwavezones.h"   // [WAVES 2026-09-07]
 
 #include <cmath>
 #include <cstring>
@@ -61,6 +62,11 @@ void WolfWaterField::releaseField(Field& f)
         LLImageGL::deleteTextures(1, &f.mExpoTex);
         f.mExpoTex = 0;
     }
+    if (f.mZoneTex)
+    {
+        LLImageGL::deleteTextures(1, &f.mZoneTex);
+        f.mZoneTex = 0;
+    }
     f.mReady = false;
     f.mDepth.clear();
     f.mExpo.clear();
@@ -72,7 +78,7 @@ void WolfWaterField::releaseField(Field& f)
 //   i = clamp(round(u * (res - 1))), j = clamp(round(v * (res - 1))); return data[j * res + i]
 F32 WolfWaterField::exposureAt(const Field& f, F32 rx, F32 ry)
 {
-    if (!f.mReady || f.mExpo.size() != (size_t)ERES * ERES)
+    if (!f.mReady || f.mExpo.size() != (size_t)ERES * ERES * 2)
     {
         return 1.f;
     }
@@ -84,13 +90,58 @@ F32 WolfWaterField::exposureAt(const Field& f, F32 rx, F32 ry)
     }
     const S32 i = llclamp((S32)ll_round(u * (ERES - 1)), 0, ERES - 1);
     const S32 j = llclamp((S32)ll_round(v * (ERES - 1)), 0, ERES - 1);
-    return f.mExpo[(size_t)j * ERES + i];
+    return f.mExpo[((size_t)j * ERES + i) * 2];   // [SURF 2026-09-07] RG: R = exposure
 }
 
 // Source: terrain_manager.js _waveSampleCPU() — the shore-breaker depth read:
 //   if (x >= 0 && y >= 0 && x <= rs.x && y <= rs.y) {
 //     ti = clamp(round(x * (RES - 1) / rs.x)), tj = clamp(round(y * (RES - 1) / rs.y));
 //     o4 = (tj * RES + ti) * 4; g = data[o4 + 1], b = data[o4 + 2], a = data[o4 + 3] ... }
+// [WAVES 2026-09-07] Source: wave_zones.js zoneAt().
+F32 WolfWaterField::zoneAt(const Field& f, F32 rx, F32 ry)
+{
+    if (!f.mReady || f.mZoneW <= 0 || f.mZone.size() != (size_t)f.mZoneW * f.mZoneH)
+    {
+        return WolfWaveZones::OPEN_ENERGY;
+    }
+    const F32 u = (rx - f.mZoneX0) / f.mZoneSX;
+    const F32 v = (ry - f.mZoneY0) / f.mZoneSY;
+    if (u < 0.f || u > 1.f || v < 0.f || v > 1.f)
+    {
+        return WolfWaveZones::OPEN_ENERGY;
+    }
+    const S32 i = llclamp((S32)(u * f.mZoneW), 0, f.mZoneW - 1);
+    const S32 j = llclamp((S32)(v * f.mZoneH), 0, f.mZoneH - 1);
+    return f.mZone[(size_t)j * f.mZoneW + i];
+}
+
+F32 WolfWaterField::distanceAt(const Field& f, F32 rx, F32 ry)
+{
+    if (!f.mReady || f.mExpo.size() != (size_t)ERES * ERES * 2) return 4000.f;
+    const F32 u = (rx - f.mExpoX0) / f.mExpoSX, v = (ry - f.mExpoY0) / f.mExpoSY;
+    if (u < 0.f || u > 1.f || v < 0.f || v > 1.f) return 4000.f;
+    const F32 fx = u * (ERES - 1), fy = v * (ERES - 1);
+    const S32 i0 = llmin(ERES - 2, (S32)fx), j0 = llmin(ERES - 2, (S32)fy);
+    const F32 tx = fx - i0, ty = fy - j0;
+    auto d = [&](S32 i, S32 j) { return f.mExpo[((size_t)j * ERES + i) * 2 + 1]; };
+    return (d(i0, j0) * (1 - tx) + d(i0 + 1, j0) * tx) * (1 - ty) + (d(i0, j0 + 1) * (1 - tx) + d(i0 + 1, j0 + 1) * tx) * ty;
+}
+
+void WolfWaterField::invalidate()
+{
+    // One region is baked per check (idle), so every field is marked stale and they follow
+    // one another, the agent's own first — exactly the order idle() already walks.
+    for (auto& kv : mFields)
+    {
+        kv.second.mStamp = 0;
+    }
+    // At once, not at the next 2 s check: an editor preview must show as it is painted.
+    mNextCheck = 0.0;
+    LL_INFOS("WolfWaterField") << "invalidated " << mFields.size() << " field(s)" << LL_ENDL;
+    mRebakeAll = false;
+    mNextCheck = 0.0;
+}
+
 bool WolfWaterField::depthAt(const Field& f, F32 rx, F32 ry, F32 out[4])
 {
     if (!f.mReady || f.mDepth.size() != (size_t)RES * RES * 4)
@@ -157,6 +208,8 @@ void WolfWaterField::idle()
         }
         return;
     }
+    // [WAVES 2026-09-07] The zone layouts are fetched from here: same cadence, same owner.
+    WolfWaveZones::instance().idle();
     const F64 now = LLFrameTimer::getElapsedSeconds();
     if (now < mNextCheck)
     {
@@ -232,6 +285,7 @@ void WolfWaterField::idle()
     if (pick)
     {
         bake(pick, mFields[pick->getHandle()]);
+        LL_INFOS("WolfWaterField") << "baked " << pick->getName() << LL_ENDL;
     }
 }
 
@@ -442,13 +496,41 @@ void WolfWaterField::bake(LLViewerRegion* regionp, Field& f)
             mDist[row + i] = d;
         }
     }
-    mExpoData.assign((size_t)E * E, 1.f);
+    // [SURF 2026-09-07] RG32F: R = exposure (every existing reader unchanged), G = the
+    // chamfer DISTANCE TO LAND in metres (capped at 4000) — the surf train's coordinate.
+    // Source: terrain_manager.js _bakeSwellExposure.
+    mExpoData.assign((size_t)E * E * 2, 1.f);
     for (S32 k = 0; k < E * E; ++k)
     {
         const F32 t = llclamp((mDist[k] - 6.f) / 144.f, 0.f, 1.f);   // 6 m .. 150 m
-        mExpoData[k] = t * t * (3.f - 2.f * t);
+        mExpoData[(size_t)k * 2] = t * t * (3.f - 2.f * t);
+        mExpoData[(size_t)k * 2 + 1] = llmin(mDist[k], 4000.f);
     }
-    upload(f.mExpoTex, E, E, GL_R32F, GL_RED, mExpoData.data());
+    upload(f.mExpoTex, E, E, GL_RG32F, GL_RG, mExpoData.data());
+
+    // [WAVES 2026-09-07] The painted wave zones over the same span, one texel per 16 m cell.
+    // Source: wolfstorm wave_zones.js bake().
+    {
+        const S32 zw = llmax(1, (S32)ll_round(esx / WolfWaveZones::CELL_M));
+        const S32 zh = llmax(1, (S32)ll_round(esy / WolfWaveZones::CELL_M));
+        WolfWaveZones::instance().fill(regionp, ex0, ey0, esx, esy, zw, zh, mZoneData);
+        upload(f.mZoneTex, zw, zh, GL_R32F, GL_RED, mZoneData.data());
+        f.mZoneW = zw;
+        f.mZoneH = zh;
+        f.mZoneX0 = ex0;
+        f.mZoneY0 = ey0;
+        f.mZoneSX = esx;
+        f.mZoneSY = esy;
+        f.mZone = mZoneData;
+        // [WAVES 2026-09-07] editor confirmation (WolfPanelLandWaves::draw): count this bake
+        if (regionp == gAgent.getRegion())
+        {
+            U32 n = 0;
+            for (F32 v : mZoneData) if (v > 0.9f) ++n;
+            mLastSurfTexels = n;
+        }
+        ++mBakes;
+    }
 
     f.mSizeX = sx;
     f.mSizeY = sy;

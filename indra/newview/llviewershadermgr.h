@@ -200,6 +200,7 @@ extern LLGLSLShader         gWolfFFTButterflyProgram;
 extern LLGLSLShader         gWolfFFTFinalProgram;
 extern LLGLSLShader         gWolfWakeDecayProgram;
 extern LLGLSLShader         gWolfWakeStampProgram;
+extern LLGLSLShader         gWolfSurfCurlProgram;   // [SURF 2026-09-07 phase 2] wolfsurfcurl.cpp
 extern LLGLSLShader         gWolfGodRaysProgram;
 // </WolfViewer>
 extern LLGLSLShader         gGlowProgram;

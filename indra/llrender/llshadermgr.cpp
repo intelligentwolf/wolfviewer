@@ -1612,6 +1612,7 @@ void LLShaderMgr::initAttribsAndUniforms()
     mReservedUniforms.push_back("wakeSampler");
     mReservedUniforms.push_back("wolfDepthField");
     mReservedUniforms.push_back("wolfExposureField");
+    mReservedUniforms.push_back("wolfZoneField");   // [WAVES 2026-09-07] wolfwavezones.cpp
     mReservedUniforms.push_back("wolfCausticTex0");
     mReservedUniforms.push_back("wolfCausticTex1");
     // </WolfViewer>

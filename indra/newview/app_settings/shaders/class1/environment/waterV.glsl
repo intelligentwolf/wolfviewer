@@ -99,6 +99,21 @@ uniform vec2 exposureOrigin;
 uniform vec2 exposureSize;
 uniform float exposureReady;
 uniform float shoreWavesEnabled;
+// [WAVES 2026-09-07] Per-region wave ZONE energy over the same 3x span (wolfwavezones.cpp
+// fill: surf 1, open 0.55, calm 0.15, off 0), from About Land > Waves of this region and its
+// neighbours. Source: wolfstorm Water.js zoneSampler.
+uniform sampler2D wolfZoneField;
+uniform vec2 zoneOrigin;
+uniform vec2 zoneSize;
+uniform float zoneReady;
+// [SURF 2026-09-07] The surf train (WAVES_PLAN §2, Water.js): wave HEIGHT offshore (m),
+// the set cadence (s), the wavelength (m), a tempo scale. From About Land > Waves.
+uniform float surfHeight;
+uniform float surfSetInterval;
+uniform float surfLength;
+uniform float surfSpeed;
+uniform float calmRipple;   // [WAVES 2026-09-07] the calm cells' ripple, metres (lldrawpoolwater.cpp)
+out vec4 vSurf;   // [SURF rev3] x crest (peak only), y breaking, z amplitude used (0 = no surf), w wash behind the crest
 uniform float fftReady;
 uniform sampler2D fftDisp0;
 uniform sampler2D fftDisp1;
@@ -303,6 +318,26 @@ void main()
         }
     }
     float swellScale = mix(0.15, 1.3, swellExpo);
+    // [WAVES 2026-09-07] The zone painted for this water (phase 0 of the waves plan): surf
+    // cells roll 1.6x, open 0.93x, calm 0.33x, off 0.1x; same 2% edge band as the exposure
+    // fetch. Phase 1 replaces this scalar with the shoaling / breaking / dissipation chain.
+    float zoneEnergy = 0.55;
+    if (zoneReady > 0.5)
+    {
+        vec2 zuv = (regionXY - zoneOrigin) / zoneSize;
+        if (zuv.x >= 0.0 && zuv.x <= 1.0 && zuv.y >= 0.0 && zuv.y <= 1.0)
+        {
+            vec2 zf = smoothstep(vec2(0.0), vec2(0.02), zuv)
+                    * (vec2(1.0) - smoothstep(vec2(0.98), vec2(1.0), zuv));
+            zoneEnergy = mix(0.55, texture(wolfZoneField, zuv).r, zf.x * zf.y);
+            // Calm (0.15) and off (0) cells damp the ordinary swell; surf cells keep it at
+            // 1x — their big waves are the SURF TRAIN below, not a louder swell.
+            // The floor is the designer's "calm ripple" (About Land > Waves, metres) as a
+            // fraction of the swell — 0 = glass, 0.1 m on a 0.22 m sea = 0.45x. Water.js same.
+            float calmFloor = clamp(calmRipple / max(waveAmplitude, 0.02), 0.0, 1.0);
+            swellScale *= mix(calmFloor, 1.0, min(zoneEnergy / 0.55, 1.0));
+        }
+    }
     // With the spectral cascades on, the short Gerstner trains (4-6) and the fbm chop are
     // the same wavelengths the spectrum supplies with far more variety: they fade out as
     // the cascades come in rather than doubling up. Bounded / stream surfaces never get
@@ -449,6 +484,93 @@ void main()
                     wave_pos += surf_n * lift;
                     wave_h += lift;
                 }
+            }
+        }
+    }
+
+    // ============================================================
+    // [SURF 2026-09-07] THE SURF TRAIN — Water.js vertex stage, same math, keep in step.
+    // A long wave rolling toward the land through the SURF cells painted in About Land >
+    // Waves: finite-depth dispersion, crests bunching in the shallows, shoaling growth, the
+    // McCowan limit H <= 0.78 h where the crest narrows and leans forward and the fragment
+    // lays foam on it, and a dissipation ramp to ZERO height by the waterline.
+    // ============================================================
+    vSurf = vec4(0.0);
+    if (surfHeight > 0.01 && zoneReady > 0.5 && shoreWavesEnabled > 0.5 && boundedWaterDepth <= 0.0 && exposureReady > 0.5)
+    {
+        // Surf ONLY where a designer painted it (Paul 09-07: "surf is a special thing"). Water.js same.
+        float surfZone = smoothstep(0.62, 0.95, zoneEnergy);
+        vec2 euv = (regionXY - exposureOrigin) / exposureSize;
+        if (surfZone > 0.01 && euv.x >= 0.0 && euv.x <= 1.0 && euv.y >= 0.0 && euv.y <= 1.0)
+        {
+            // [SURF 2026-09-07 rev2] Water.js, same math: the wave's coordinate is the baked
+            // DISTANCE TO LAND (exposure G) — crests are iso-distance contours that wrap the
+            // coast; direction = down the distance gradient taken 1/32 of the span wide.
+            vec2 dW = vec2(1.0 / 32.0);
+            float dist = texture(wolfExposureField, euv).g;
+            float dxp = texture(wolfExposureField, clamp(euv + vec2(dW.x, 0.0), 0.0, 1.0)).g;
+            float dxm = texture(wolfExposureField, clamp(euv - vec2(dW.x, 0.0), 0.0, 1.0)).g;
+            float dyp = texture(wolfExposureField, clamp(euv + vec2(0.0, dW.y), 0.0, 1.0)).g;
+            float dym = texture(wolfExposureField, clamp(euv - vec2(0.0, dW.y), 0.0, 1.0)).g;
+            vec2 grad = vec2(dxp - dxm, dyp - dym);
+            float gl = length(grad);
+            bool haveLand = dist < 3000.0 && gl > 1.0;
+            vec2 dir = haveLand ? -grad / gl : normalize(vec2(depthRegionSize.x * 0.5, depthRegionSize.y * 0.5) - regionXY + vec2(0.001, 0.0));
+            float coord = haveLand ? -dist : dot(regionXY, dir);
+            float h = 30.0;
+            if (depthReady > 0.5)
+            {
+                // Past the region border the depth CONTINUES from the border texel and eases
+                // to deep water over 64 m (the void planes share these fields now): a hard
+                // switch to 30 m at the edge changed the shoaling and tore the crest.
+                vec2 sduv = regionXY / depthRegionSize;
+                vec2 over = max(max(-sduv, sduv - 1.0), 0.0) * depthRegionSize;
+                float outside = smoothstep(0.0, 64.0, max(over.x, over.y));
+                vec4 dt = texture(wolfDepthField, clamp(sduv, 0.0, 1.0));
+                h = mix(max(depthWaterLevel - dt.a, 0.0), 30.0, outside);
+            }
+            const float g = 9.81;
+            float lambda = max(surfLength, 12.0 * surfHeight);
+            float k = 6.2831853 / max(lambda, 8.0);
+            float kh = k * max(h, 0.05);
+            float tk = tanh(kh);
+            float omega = sqrt(g * k * tk);
+            vec2 across = vec2(-dir.y, dir.x);
+            float setPh = 6.2831853 * (time * surfSpeed / max(surfSetInterval, 10.0)) - coord * (0.22 / lambda);
+            float setEnv = 0.30 + 0.70 * smoothstep(0.15, 1.0, 0.5 + 0.5 * sin(setPh));
+            float crestVar = 0.85 + 0.15 * sin(dot(regionXY, across) * (1.1 / lambda) + time * 0.1);
+            float ksh = clamp(inversesqrt(max(tk, 0.05)), 1.0, 1.8);
+            float crestH = min(surfHeight * surfZone * setEnv * ksh * crestVar, surfHeight * 1.15);
+            float hEff = h + 0.8 * surfHeight;
+            float Hmax = 0.78 * hEff;
+            float breakF = smoothstep(0.7, 1.15, crestH / max(Hmax, 0.01));
+            crestH = min(crestH, Hmax);
+            crestH *= smoothstep(0.2, 0.6 + 0.5 * surfHeight, h);
+            if (crestH > 0.01)
+            {
+                float kl = k * inversesqrt(max(tk, 0.05));
+                float ph = kl * coord - omega * time * surfSpeed;
+                float ph2 = ph + (0.30 + 0.45 * breakF) * sin(ph);
+                float sn = sin(ph2), cs = cos(ph2);
+                float up = 0.5 + 0.5 * sn;
+                // [SURF rev3, Paul 09-07 "looks weird": 20 m crests were 240 m plateaus with
+                // cliff faces] A shoaling wave is CNOIDAL: a narrow peaked crest and a long flat
+                // trough. upk peaks the crest (exponent 1.6 -> 2.8 as it breaks) and every
+                // forward term is weighted by it, so only the top leans and throws — a concave
+                // face, not a wall. Water.js same.
+                float upk = pow(up, 1.6 + 1.2 * breakF);
+                float prof = mix(-0.25, 1.0, upk) + 0.25 * breakF * upk * upk;
+                float tip = upk * upk * upk;
+                float lip = 0.55 * breakF * tip;   // the crest tip thrown past fold-over: the barrel
+                float Q = mix(0.35, 0.9, breakF);
+                float horiz = crestH * (0.5 * Q * cs * upk + 0.35 * breakF * upk * upk + lip);
+                float lift = crestH * (prof - 0.35 * lip);
+                wave_pos += surf_t * (dir.x * horiz) + surf_b * (dir.y * horiz) + surf_n * lift;
+                wave_h += crestH * prof;
+                wave_slope += dir * (crestH * 0.6 * kl * cs * (0.3 + 0.7 * upk));
+                // wash = the churn a broken crest leaves BEHIND it (its back slope, cs > 0)
+                float wash = breakF * smoothstep(0.3, 1.0, cs) * smoothstep(0.1, 0.5, up);
+                vSurf = vec4(smoothstep(0.3, 1.0, upk), breakF, crestH, wash);   // peak only
             }
         }
     }

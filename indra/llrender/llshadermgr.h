@@ -383,6 +383,7 @@ public:
         WOLF_WAKE_SAMPLER,                  // "wakeSampler"
         WOLF_DEPTH_FIELD,                   // "wolfDepthField"
         WOLF_EXPOSURE_FIELD,                // "wolfExposureField"
+        WOLF_ZONE_FIELD,                    // "wolfZoneField" [WAVES 2026-09-07]
         WOLF_CAUSTIC_TEX0,                  // "wolfCausticTex0"
         WOLF_CAUSTIC_TEX1,                  // "wolfCausticTex1"
         // </WolfViewer>

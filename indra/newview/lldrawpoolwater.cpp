@@ -57,6 +57,8 @@
 #include "wolfoceanfft.h"
 #include "wolfwakefield.h"
 #include "wolfwaterfield.h"
+#include "wolfwavezones.h"   // [SURF 2026-09-07]
+#include "wolfsurfcurl.h"    // [SURF 2026-09-07 phase 2]
 // </WolfViewer>
 
 bool LLDrawPoolWater::sSkipScreenCopy = false;
@@ -359,6 +361,36 @@ void LLDrawPoolWater::renderPostDeferred(S32 pass)
         shader->uniform1f(s_storm_chaos, mSeaState.mChaos);
         shader->uniform1f(s_max_wave_height, amp * 2.5f);
         shader->uniform1f(s_shore_on, shore_on ? 1.f : 0.f);
+        // [SURF 2026-09-07] The surf train's parameters (wolfwavezones.cpp): the current
+        // region's saved ones, else the defaults (1.5 m waves, a set every 90 s); no region on
+        // the grid = 0 = no surf train (other grids keep the ordinary waves). Source:
+        // wolfstorm wave_zones.js bake().
+        {
+            static LLStaticHashedString s_surf_height("surfHeight");
+            static LLStaticHashedString s_surf_set("surfSetInterval");
+            static LLStaticHashedString s_surf_len("surfLength");
+            static LLStaticHashedString s_surf_speed("surfSpeed");
+            static LLStaticHashedString s_calm_ripple("calmRipple");
+            const WolfWaveZones::Region* wr = WolfWaveZones::instance().current();
+            F32 surf_h = 0.f, surf_set = 90.f, surf_len = 36.f, calm = 0.03f;
+            if (wr)
+            {
+                // The saved parameters, or the ones being previewed in About Land > Waves.
+                const LLSD& p = WolfWaveZones::instance().params();
+                surf_h = llclamp(p.has("surfHeight") ? (F32)p["surfHeight"].asReal() : 3.f, 0.2f, 20.f);   // Paul 09-07: up to 20 m
+                surf_set = llclamp(p.has("setInterval") ? (F32)p["setInterval"].asReal() : 90.f, 30.f, 600.f);
+                surf_len = llclamp(p.has("surfLength") ? (F32)p["surfLength"].asReal() : 36.f, 12.f, 400.f);
+                calm = llclamp(p.has("calmRipple") ? (F32)p["calmRipple"].asReal() : 0.03f, 0.f, 0.1f);
+            }
+            shader->uniform1f(s_surf_height, surf_h);
+            shader->uniform1f(s_surf_set, surf_set);
+            shader->uniform1f(s_surf_len, surf_len);
+            shader->uniform1f(s_surf_speed, 1.f);
+            shader->uniform1f(s_calm_ripple, calm);
+            mSurfHeight = surf_h;
+            mSurfSetInterval = surf_set;
+            mSurfLength = surf_len;
+        }
         WolfOceanFFT& fft = WolfOceanFFT::instance();
         if (fft.isReady())
         {
@@ -433,6 +465,21 @@ void LLDrawPoolWater::renderPostDeferred(S32 pass)
     // clean up
     gPipeline.unbindDeferredShader(*shader);
 
+    // <WolfViewer 2026-09-07> [SURF phase 2] THE BARREL: the curl ribbons along the break
+    // line, a separate mesh with its own program (wolfsurfcurl.cpp), drawn over the sea it
+    // rides. Not inside a cube snapshot or the mirror pass (the sea's own rule, above), not
+    // under water, not for a zero surf height (other grids).
+    {
+        static LLCachedControl<bool> curl_on(gSavedSettings, "WolfViewerWaterSurfCurl", true);
+        if (curl_on && !underwater && !gCubeSnapshot && !gPipeline.mHeroProbeManager.isMirrorPass()
+            && LLPipeline::sRenderTransparentWater && mSurfHeight > 0.01f)
+        {
+            WolfSurfCurl::instance().render(mSurfHeight, mSurfSetInterval, mSurfLength, phase_time,
+                                            light_dir, light_diffuse, pwater, mWaterNormp[0]);
+        }
+    }
+    // </WolfViewer>
+
     gGL.setColorMask(true, false);
 }
 
@@ -458,6 +505,10 @@ void LLDrawPoolWater::pushWaterPlanes(int pass)
     static LLStaticHashedString s_expo_origin("exposureOrigin");
     static LLStaticHashedString s_expo_size("exposureSize");
     static LLStaticHashedString s_expo_ready("exposureReady");
+    // [WAVES 2026-09-07] the painted wave zones (wolfwavezones.cpp), baked with the fields.
+    static LLStaticHashedString s_zone_origin("zoneOrigin");
+    static LLStaticHashedString s_zone_size("zoneSize");
+    static LLStaticHashedString s_zone_ready("zoneReady");
     static LLStaticHashedString s_wake_ready("wakeReady");
     // </WolfViewer>
     // </FS:WolfViewer>
@@ -487,7 +538,14 @@ void LLDrawPoolWater::pushWaterPlanes(int pass)
             const bool own_plane = rgn && !water->getIsEdgePatch() && water->getBoundedWaterDepth() <= 0.f
                                 && !water->hasConformingMesh() && water->getWaterfall() <= 0.f
                                 && rgn->getLand().getWaterObj() == water;
-            const WolfWaterField::Field* fld = own_plane ? WolfWaterField::instance().get(rgn) : nullptr;
+            // <WolfViewer 2026-09-07> [SURF] The void (edge) and hole water planes around the
+            // agent's region carry its region pointer (llworld.cpp updateWaterObjects) and lie
+            // in its 3x-span fields, so they get the SAME fields: a surf train that rears up
+            // 8 m at the region's edge met flat void water there — a tear along the border.
+            const bool span_plane = !own_plane && rgn && rgn == gAgent.getRegion()
+                                 && water->getBoundedWaterDepth() <= 0.f && !water->hasConformingMesh()
+                                 && water->getWaterfall() <= 0.f && water->getStreamFlow() <= 0.f;
+            const WolfWaterField::Field* fld = (own_plane || span_plane) ? WolfWaterField::instance().get(rgn) : nullptr;
             if (fld)
             {
                 S32 ch = cur_shader->enableTexture(LLShaderMgr::WOLF_DEPTH_FIELD);
@@ -502,11 +560,18 @@ void LLDrawPoolWater::pushWaterPlanes(int pass)
                 cur_shader->uniform2f(s_expo_size, fld->mExpoSX, fld->mExpoSY);
                 cur_shader->uniform1f(s_depth_ready, 1.f);
                 cur_shader->uniform1f(s_expo_ready, 1.f);
+                // [WAVES 2026-09-07] zone energy, same span as the exposure field.
+                ch = cur_shader->enableTexture(LLShaderMgr::WOLF_ZONE_FIELD);
+                if (ch > -1 && fld->mZoneTex) gGL.getTexUnit(ch)->bindManual(LLTexUnit::TT_TEXTURE, fld->mZoneTex);
+                cur_shader->uniform2f(s_zone_origin, fld->mZoneX0, fld->mZoneY0);
+                cur_shader->uniform2f(s_zone_size, fld->mZoneSX, fld->mZoneSY);
+                cur_shader->uniform1f(s_zone_ready, fld->mZoneTex ? 1.f : 0.f);
             }
             else
             {
                 cur_shader->uniform1f(s_depth_ready, 0.f);
                 cur_shader->uniform1f(s_expo_ready, 0.f);
+                cur_shader->uniform1f(s_zone_ready, 0.f);
             }
             const bool wake_here = own_plane && rgn == gAgent.getRegion() && WolfWakeField::instance().isReady();
             cur_shader->uniform1f(s_wake_ready, wake_here ? 1.f : 0.f);

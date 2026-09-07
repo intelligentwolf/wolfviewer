@@ -30,6 +30,8 @@
 #include <time.h>
 
 #include "llfloaterland.h"
+#include "wolfgrid.h"        // <WolfViewer 2026-09-07>
+#include "wolfwavezones.h"   // <WolfViewer 2026-09-07>
 
 #include "llavatarnamecache.h"
 #include "llfocusmgr.h"
@@ -330,6 +332,7 @@ LLFloaterLand::LLFloaterLand(const LLSD& seed)
     mFactoryMap["land_access_panel"] =  LLCallbackMap(createPanelLandAccess, this);
     mFactoryMap["land_experiences_panel"] = LLCallbackMap(createPanelLandExperiences, this);
     mFactoryMap["land_environment_panel"] = LLCallbackMap(createPanelLandEnvironment, this);
+    mFactoryMap["land_waves_panel"] = LLCallbackMap(createPanelLandWaves, this);   // <WolfViewer 2026-09-07>
 
     sObserver = new LLParcelSelectionObserver();
     LLViewerParcelMgr::getInstance()->addObserver( sObserver );
@@ -342,6 +345,15 @@ bool LLFloaterLand::postBuild()
     LLTabContainer* tab = getChild<LLTabContainer>("landtab");
 
     mTabLand = (LLTabContainer*) tab;
+
+    // <WolfViewer 2026-09-07> The Waves tab is a Wolf Territories feature (its layouts live on
+    // the grid): on any other grid the tab is taken out and the automatic waves apply.
+    if (tab && mPanelWaves && !WolfGrid::isWolfTerritories())
+    {
+        tab->removeTabPanel(mPanelWaves);
+        mPanelWaves = nullptr;
+    }
+    // </WolfViewer>
 
     if (tab)
     {
@@ -372,6 +384,7 @@ void LLFloaterLand::refresh()
     mPanelCovenant->refresh();
     mPanelExperiences->refresh();
     mPanelEnvironment->refresh();
+    if (mPanelWaves) mPanelWaves->refresh();   // <WolfViewer 2026-09-07>
 }
 
 
@@ -384,6 +397,15 @@ void* LLFloaterLand::createPanelLandGeneral(void* data)
 }
 
 // static
+// <WolfViewer 2026-09-07>
+void* LLFloaterLand::createPanelLandWaves(void* data)
+{
+    LLFloaterLand* self = (LLFloaterLand*)data;
+    self->mPanelWaves = new WolfPanelLandWaves(self->mParcel);
+    return self->mPanelWaves;
+}
+// </WolfViewer>
+
 void* LLFloaterLand::createPanelLandCovenant(void* data)
 {
     LLFloaterLand* self = (LLFloaterLand*)data;

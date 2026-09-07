@@ -170,6 +170,7 @@ uniform float wolfStream;
 in vec2 vShore;
 in float vWake;
 in vec4 vSwell;
+in vec4 vSurf;   // [SURF rev3] crest (peak only), breaking, amplitude, wash
 // </WolfViewer>
 // </FS:WolfViewer>
 
@@ -731,6 +732,25 @@ void main()
         color = mix(color, vec3(0.95, 0.97, 0.99) * breakLight, breakFoam);
     }
     // </FS:WolfViewer>
+
+    // [SURF 2026-09-07] Whitewater on the surf train (waterV.glsl vSurf; Water.js fragment,
+    // same rule): a little on every crest top, a breaking lip and trailing wash where the
+    // wave has hit the 0.78 h limit.
+    if (vSurf.z > 0.005)
+    {
+        float sc = vSurf.x, sb = vSurf.y, sw = vSurf.w;
+        float sNoise = 0.7 + 0.3 * ((wave2.z + 1.0) * 0.5);
+        float sNoise2 = 0.6 + 0.4 * clamp((wave1.x + wave3.y) * 0.7 + 0.5, 0.0, 1.0);
+        // (Paul 09-07: more whitewater, never full-bright, NOT a sheet over the whole crest
+        // band) the PEAK of every surf wave carries some, a breaking wave is white from the
+        // lip down, and the churn it leaves behind it (vSurf.w) is patchy wash. Water.js same.
+        float crestFoam = sc * (0.5 + 0.5 * sb) * sNoise;
+        float face = smoothstep(0.3, 1.0, sc) * sb;
+        float wash = sw * 0.35 * sNoise2 * sNoise2;
+        float sf = clamp(max(max(crestFoam, face), wash), 0.0, 0.85);
+        float surfLight = clamp(dot(sunlit_linear + amblit, vec3(0.3333)), 0.08, 1.0);
+        color = mix(color, vec3(0.90, 0.94, 0.97) * surfLight, sf);
+    }
 
     // <WolfViewer 2026-09-06> Breaking crests with MEMORY (Water.js [WHITECAPS]): the fold
     // at this world position now and 0.9 / 1.8 / 2.7 s ago, decaying — foam lingers

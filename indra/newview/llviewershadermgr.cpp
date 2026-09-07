@@ -119,6 +119,7 @@ LLGLSLShader        gWolfFFTButterflyProgram;
 LLGLSLShader        gWolfFFTFinalProgram;
 LLGLSLShader        gWolfWakeDecayProgram;
 LLGLSLShader        gWolfWakeStampProgram;
+LLGLSLShader        gWolfSurfCurlProgram;
 LLGLSLShader        gWolfGodRaysProgram;
 // </WolfViewer>
 LLGLSLShader        gUnderWaterProgram;
@@ -945,6 +946,7 @@ bool LLViewerShaderMgr::loadShadersWater()
         gWolfFFTFinalProgram.unload();
         gWolfWakeDecayProgram.unload();
         gWolfWakeStampProgram.unload();
+        gWolfSurfCurlProgram.unload();
         // </WolfViewer>
         return true;
     }
@@ -1010,6 +1012,8 @@ bool LLViewerShaderMgr::loadShadersWater()
         { &gWolfFFTFinalProgram,     "Wolf FFT Final Shader",     "environment/wolffftV.glsl",       "environment/wolffftFinalF.glsl" },
         { &gWolfWakeDecayProgram,    "Wolf Wake Decay Shader",    "environment/wolffftV.glsl",       "environment/wolfwakeDecayF.glsl" },
         { &gWolfWakeStampProgram,    "Wolf Wake Stamp Shader",    "environment/wolfwakeStampV.glsl", "environment/wolfwakeStampF.glsl" },
+        // [SURF 2026-09-07 phase 2] the barrel ribbons, drawn in the scene (wolfsurfcurl.cpp)
+        { &gWolfSurfCurlProgram,     "Wolf Surf Curl Shader",     "environment/wolfsurfcurlV.glsl",  "environment/wolfsurfcurlF.glsl" },
     };
     for (const WolfPassDef& def : wolf_passes)
     {

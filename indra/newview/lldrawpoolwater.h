@@ -82,6 +82,10 @@ public:
     // (wolfboatrock.cpp) samples the same swell on the CPU so hulls ride the surface that
     // is actually on screen.
     const WolfSeaState& getSeaState() const { return mSeaState; }
+    // [SURF 2026-09-07] this frame's surf train parameters (the boat rocker mirrors them)
+    F32 getSurfHeight() const { return mSurfHeight; }
+    F32 getSurfSetInterval() const { return mSurfSetInterval; }
+    F32 getSurfLength() const { return mSurfLength; }
     // </WolfViewer>
 
 protected:
@@ -96,6 +100,10 @@ protected:
     // renderPostDeferred from the region's EEP water (or the manual settings) and read per
     // face by pushWaterPlanes.
     WolfSeaState mSeaState;
+    // [SURF 2026-09-07 phase 2] this frame's surf parameters, for the curl (wolfsurfcurl.cpp)
+    F32 mSurfHeight = 0.f;
+    F32 mSurfSetInterval = 90.f;
+    F32 mSurfLength = 36.f;
     // </WolfViewer>
 };
 

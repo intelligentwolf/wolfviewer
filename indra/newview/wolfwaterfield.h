@@ -61,6 +61,17 @@ public:
         // ERES*ERES floats — 1.3 MB per region.
         std::vector<F32> mDepth;    // RGBA per texel, row-major, y outer
         std::vector<F32> mExpo;     // R per texel
+        // [WAVES 2026-09-07] The painted wave zones (wolfwavezones.cpp fill) over the SAME
+        // span as the exposure bake, one texel per 16 m cell: surf 1, open 0.55, calm 0.15,
+        // off 0. Sampled by waterV.glsl as wolfZoneField; the CPU copy feeds zoneAt().
+        U32 mZoneTex = 0;
+        S32 mZoneW = 0;
+        S32 mZoneH = 0;
+        F32 mZoneX0 = -256.f;
+        F32 mZoneY0 = -256.f;
+        F32 mZoneSX = 768.f;
+        F32 mZoneSY = 768.f;
+        std::vector<F32> mZone;
     };
 
     static constexpr S32 RES = 256;
@@ -72,6 +83,9 @@ public:
     void idle();
     /** Drop every field (shutdown, GL reset). */
     void reset();
+    /** [WAVES 2026-09-07] How many bakes have run, and the surf texel count of the agent region's last one (editor confirmation). */
+    U32 bakeCount() const { return mBakes; }
+    U32 lastSurfTexels() const { return mLastSurfTexels; }
     /** The field for a region, or nullptr before its first bake. */
     const Field* get(const LLViewerRegion* regionp) const;
 
@@ -87,6 +101,12 @@ public:
      * region. Source: terrain_manager.js _waveSampleCPU() depth-texture read.
      */
     static bool depthAt(const Field& f, F32 rx, F32 ry, F32 out[4]);
+    /** [WAVES 2026-09-07] Zone energy at region-relative (rx, ry): nearest texel, 0.55 outside. */
+    static F32 zoneAt(const Field& f, F32 rx, F32 ry);
+    /** [SURF 2026-09-07] Distance to land (exposure bake G), bilinear; 4000 outside the span. */
+    static F32 distanceAt(const Field& f, F32 rx, F32 ry);
+    /** [WAVES 2026-09-07] Bake every field again at the next check (a layout arrived / was saved / is previewed). */
+    void invalidate();
 
 private:
     void bake(LLViewerRegion* regionp, Field& f);
@@ -100,7 +120,10 @@ private:
     std::map<U64, Field> mFields;
     F64 mNextCheck = 0.0;
     // Scratch, reused across bakes.
-    std::vector<F32> mH, mTmp, mSm, mDist, mDepthData, mExpoData;
+    std::vector<F32> mH, mTmp, mSm, mDist, mDepthData, mExpoData, mZoneData;
+    bool mRebakeAll = false;   // [WAVES 2026-09-07] set by invalidate()
+    U32 mBakes = 0;
+    U32 mLastSurfTexels = 0;
 };
 
 #endif // WOLF_WATERFIELD_H

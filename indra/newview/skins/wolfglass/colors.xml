@@ -60,6 +60,17 @@
 	<color
 	 name="DkGray"
 	 value="0.0588 0.0902 0.1647 1" />
+	<!-- WolfViewer 2026-09-06: backing behind the favourites bar (panel_navigation_bar.xml) -->
+	<color
+	 name="WolfFavoritesBarBg"
+	 value="0.0588 0.0902 0.1647 0.72" />
+	<!-- WolfViewer 2026-09-07: glass toolbar (widgets/toolbar.xml, panel_toolbar_view.xml) -->
+	<color
+	 name="WolfGlassBar"
+	 value="0.04 0.22 0.11 0.68" />
+	<color
+	 name="WolfGlassButton"
+	 value="0.22 0.55 0.30 0.70" />
 	<color
 	 name="DkGray_66"
 	 value="0.0588 0.0902 0.1647 .66" />

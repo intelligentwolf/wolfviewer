@@ -19413,6 +19413,50 @@ Change of this parameter will affect the layout of buttons in notification toast
 			<key>Value</key>
 			<integer>1</integer>
 		</map>
+		<key>WolfViewerToolbarButtonsAdded</key>
+		<map>
+			<key>Comment</key>
+			<string>Set once the Wolf Territories toolbar buttons (Share screen, Read aloud, Dictate) have been added to this account's saved toolbar layout, so removing them sticks.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfViewerSpeechReadAloud</key>
+		<map>
+			<key>Comment</key>
+			<string>Read nearby chat and instant messages aloud as they arrive (Wolf Territories only; the voice is synthesised on the grid's own server). Toggled from the Comm menu or the Read aloud toolbar button.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfViewerSpeechReadIMs</key>
+		<map>
+			<key>Comment</key>
+			<string>When reading aloud, also read incoming instant messages.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>1</integer>
+		</map>
+		<key>WolfViewerSpeechReadGroups</key>
+		<map>
+			<key>Comment</key>
+			<string>When reading aloud, also read group chat.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
 		<key>WolfViewerWolfWaterPrims</key>
 		<map>
 			<key>Comment</key>

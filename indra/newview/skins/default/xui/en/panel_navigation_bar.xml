@@ -212,12 +212,18 @@
 <!-- Navigation Bar visibility panel -->
 
 <!-- Favorites Bar visibility panel -->
+<!-- WolfViewer 2026-09-06: a dark translucent backing so the landmark names read over the
+     world (the wolfglass skin's panels are transparent; the bar sat straight on the scene). -->
 <layout_panel
  mouse_opaque="false"
  height="15"
  layout="topleft"
  name="favorites_bar_visibility_panel"
  visibility_control="FSInternalShowNavbarFavoritesPanel"
+ background_visible="true"
+ background_opaque="false"
+ bg_alpha_color="WolfFavoritesBarBg"
+ bg_opaque_color="WolfFavoritesBarBg"
  auto_resize="false">
 
   <favorites_bar

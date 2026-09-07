@@ -31,6 +31,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "fsfloaternearbychat.h"
+#include "wolfspeech.h" // <WolfViewer> read chat aloud
 
 #include "chatbar_as_cmdline.h"
 #include "fschathistory.h"
@@ -338,6 +339,9 @@ void FSFloaterNearbyChat::addMessage(const LLChat& chat,bool archive,const LLSD 
         {
             mMessageArchive.erase(mMessageArchive.begin());
         }
+        // <WolfViewer 2026-09-06> read aloud — live lines only, never a history replay.
+        WolfSpeech::instance().onNearbyChat(chat);
+        // </WolfViewer>
     }
 
     if (args["do_not_log"].asBoolean() || chat.mMuted)

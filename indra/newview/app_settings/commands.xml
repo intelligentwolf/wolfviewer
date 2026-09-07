@@ -277,6 +277,36 @@
            is_running_parameters="speak"
            checkbox_control="PushToTalkToggle"
            />
+  <!-- WolfViewer 2026-09-06: Wolf Territories-only commands (wolfspeech.cpp, wolfscreenshare.cpp).
+       Greyed on any other grid (is_enabled_function WolfGrid.IsWolfTerritories); the Comm menu
+       items with the same functions are hidden there. -->
+  <command name="wolf_dictate"
+           available_in_toybox="true"
+           icon="Command_WolfDictate_Icon"
+           label_ref="Command_WolfDictate_Label"
+           tooltip_ref="Command_WolfDictate_Tooltip"
+           execute_function="WolfSpeech.ToggleDictation"
+           is_enabled_function="WolfGrid.IsWolfTerritories"
+           is_running_function="WolfSpeech.IsDictating"
+           />
+  <command name="wolf_readaloud"
+           available_in_toybox="true"
+           icon="Command_WolfReadAloud_Icon"
+           label_ref="Command_WolfReadAloud_Label"
+           tooltip_ref="Command_WolfReadAloud_Tooltip"
+           execute_function="WolfSpeech.ToggleReadAloud"
+           is_enabled_function="WolfGrid.IsWolfTerritories"
+           is_running_function="WolfSpeech.IsReadingAloud"
+           />
+  <command name="wolf_sharescreen"
+           available_in_toybox="true"
+           icon="Command_WolfShareScreen_Icon"
+           label_ref="Command_WolfShareScreen_Label"
+           tooltip_ref="Command_WolfShareScreen_Tooltip"
+           execute_function="WolfScreenShare.Toggle"
+           is_enabled_function="WolfGrid.IsWolfTerritories"
+           is_running_function="WolfScreenShare.IsSharing"
+           />
   <command name="RFO"
          available_in_toybox="true"
          icon="Command_RFO_Icon"

@@ -28,6 +28,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "lltoolbarview.h"
+#include "wolfgrid.h" // <WolfViewer> Wolf Territories-only toolbar buttons
 
 #include "llappviewer.h"
 #include "llbutton.h"
@@ -397,6 +398,37 @@ bool LLToolBarView::loadToolbars(bool force_default)
         }
     }
 
+    // <WolfViewer 2026-09-06> A saved per-account layout never sees a new default, so the
+    // three Wolf Territories buttons (app_settings/commands.xml wolf_*) are added ONCE to the
+    // bottom toolbar of an existing layout — on Wolf Territories only, where they work — and
+    // remembered, so a user who removes them is not handed them again every login.
+    if (mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM] && WolfGrid::isWolfTerritories()
+        && !gSavedSettings.getBOOL("WolfViewerToolbarButtonsAdded"))
+    {
+        bool added = false;
+        for (const char* name : { "wolf_sharescreen", "wolf_readaloud", "wolf_dictate" })
+        {
+            const LLCommandId id(name);
+            bool present = false;
+            for (S32 i = LLToolBarEnums::TOOLBAR_FIRST; i <= LLToolBarEnums::TOOLBAR_LAST; i++)
+            {
+                if (mToolbars[i] && mToolbars[i]->hasCommand(id))
+                {
+                    present = true;
+                }
+            }
+            if (!present && addCommandInternal(id, mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM]))
+            {
+                added = true;
+            }
+        }
+        gSavedSettings.setBOOL("WolfViewerToolbarButtonsAdded", true);
+        if (added)
+        {
+            LL_INFOS() << "WolfViewer: added the Wolf Territories buttons to the bottom toolbar" << LL_ENDL;
+        }
+    }
+    // </WolfViewer>
     mToolbarsLoaded = true;
     return true;
 }

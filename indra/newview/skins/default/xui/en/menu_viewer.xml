@@ -711,6 +711,42 @@
      name="Communicate"
      tear_off="true"
      visible="true">
+        <!-- WolfViewer 2026-09-06: Wolf Territories-only features (wolfspeech.cpp,
+             wolfscreenshare.cpp). Hidden on every other grid: WolfGrid.IsWolfTerritories. -->
+        <menu_item_check
+         label="Dictate into nearby chat"
+         name="WolfDictate">
+          <menu_item_check.on_check
+           function="WolfSpeech.IsDictating" />
+          <menu_item_check.on_click
+           function="WolfSpeech.ToggleDictation" />
+          <menu_item_check.on_visible
+           function="WolfGrid.IsWolfTerritories" />
+        </menu_item_check>
+        <menu_item_check
+         label="Read chat aloud"
+         name="WolfReadAloud">
+          <menu_item_check.on_check
+           function="WolfSpeech.IsReadingAloud" />
+          <menu_item_check.on_click
+           function="WolfSpeech.ToggleReadAloud" />
+          <menu_item_check.on_visible
+           function="WolfGrid.IsWolfTerritories" />
+        </menu_item_check>
+        <menu_item_check
+         label="Share screen on selected face"
+         name="WolfShareScreen">
+          <menu_item_check.on_check
+           function="WolfScreenShare.IsSharing" />
+          <menu_item_check.on_click
+           function="WolfScreenShare.Toggle" />
+          <menu_item_check.on_visible
+           function="WolfGrid.IsWolfTerritories" />
+        </menu_item_check>
+        <menu_item_separator>
+          <menu_item_separator.on_visible
+           function="WolfGrid.IsWolfTerritories" />
+        </menu_item_separator>
      
         <menu
          create_jump_keys="true"

@@ -32,6 +32,11 @@
 #endif
 
 #include "llviewermenu.h"
+// <WolfViewer 2026-09-06> Wolf Territories-only features
+#include "wolfgrid.h"
+#include "wolfspeech.h"
+#include "wolfscreenshare.h"
+// </WolfViewer>
 
 // linden library includes
 #include "llavatarnamecache.h"  // IDEVO (I Are Not Men!)
@@ -561,6 +566,14 @@ void check_merchant_status(bool force)
    if (gSLMMenuUpdater)
        gSLMMenuUpdater->checkMerchantStatus(force);
 }
+
+// <WolfViewer 2026-09-06> menu / toolbar glue for wolfspeech.cpp and wolfscreenshare.cpp
+static void wolf_toggle_dictation()    { WolfSpeech::instance().toggleDictation(); }
+static bool wolf_is_dictating()        { return WolfSpeech::instance().isDictating(); }
+static void wolf_toggle_read_aloud()   { WolfSpeech::instance().toggleReadAloud(); }
+static void wolf_toggle_screen_share() { WolfScreenShare::instance().toggle(); }
+static bool wolf_is_sharing_screen()   { return WolfScreenShare::instance().isSharing(); }
+// </WolfViewer>
 
 void init_menus()
 {
@@ -12706,6 +12719,17 @@ void initialize_menus()
     commit.add("Agent.toggleFlying", boost::bind(&LLAgent::toggleFlying));
     enable.add("Agent.enableFlyLand", boost::bind(&enable_fly_land));
     enable.add("Agent.enableFlying", boost::bind(&LLAgent::enableFlying)); // <FS:Ansariel> Keep this
+    // <WolfViewer 2026-09-06> Wolf Territories-only features: dictation, read aloud, screen
+    // share (wolfspeech.cpp, wolfscreenshare.cpp). Their menu items are hidden and their
+    // toolbar buttons greyed on any other grid (WolfGrid.IsWolfTerritories, wolfgrid.h).
+    enable.add("WolfGrid.IsWolfTerritories", boost::bind(&WolfGrid::isWolfTerritories));
+    commit.add("WolfSpeech.ToggleDictation", boost::bind(&wolf_toggle_dictation));
+    enable.add("WolfSpeech.IsDictating", boost::bind(&wolf_is_dictating));
+    commit.add("WolfSpeech.ToggleReadAloud", boost::bind(&wolf_toggle_read_aloud));
+    enable.add("WolfSpeech.IsReadingAloud", boost::bind(&WolfSpeech::isReadingAloud));
+    commit.add("WolfScreenShare.Toggle", boost::bind(&wolf_toggle_screen_share));
+    enable.add("WolfScreenShare.IsSharing", boost::bind(&wolf_is_sharing_screen));
+    // </WolfViewer>
     commit.add("Agent.PressMicrophone", boost::bind(&LLAgent::pressMicrophone, _2));
     commit.add("Agent.ReleaseMicrophone", boost::bind(&LLAgent::releaseMicrophone, _2));
     commit.add("Agent.ToggleMicrophone", boost::bind(&LLAgent::toggleMicrophone, _2));

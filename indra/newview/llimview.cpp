@@ -27,6 +27,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "llimview.h"
+#include "wolfspeech.h" // <WolfViewer> read IMs aloud
 
 #include "llavatarnamecache.h"  // IDEVO
 #include "llavataractions.h"
@@ -1980,6 +1981,13 @@ void LLIMModel::processAddingMessage(const LLUUID& session_id, const std::string
     LLIMSession* session = addMessageSilently(session_id, from, from_id, utf8_text, log2file, is_region_msg, time_stamp, is_announcement);
     if (!session)
        return;
+
+    // <WolfViewer 2026-09-06> read aloud (wolfspeech.cpp decides IM / group by session type).
+    if (!is_announcement)
+    {
+        WolfSpeech::instance().onInstantMessage(session_id, from, from_id, utf8_text);
+    }
+    // </WolfViewer>
 
     //good place to add some1 to recent list
     //other places may be called from message history.

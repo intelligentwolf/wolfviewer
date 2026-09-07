@@ -22,6 +22,13 @@
          name="view" />
         <command
          name="snapshot" />
+        <!-- WolfViewer 2026-09-06: Wolf Territories-only (greyed elsewhere) -->
+        <command
+                 name="wolf_sharescreen" />
+        <command
+                 name="wolf_readaloud" />
+        <command
+                 name="wolf_dictate" />
         <command
          name="people" />
         <command

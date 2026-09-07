@@ -76,6 +76,8 @@
 #include "wolfwaterfield.h" // <WolfViewer> water depth / exposure fields for the water shader
 #include "wolfboatrock.h" // <WolfViewer> client-side buoyancy for boats
 #include "wolfobjectprops.h" // <WolfViewer> shared object name/description harvester
+#include "wolfspeech.h" // <WolfViewer> dictation + read aloud (Wolf Territories only)
+#include "wolfscreenshare.h" // <WolfViewer> share focus/zoom follow-up
 #include "llviewerdisplay.h"
 #include "llviewermedia.h"
 #include "llviewerparcelaskplay.h"
@@ -6148,6 +6150,10 @@ void LLAppViewer::idle()
     // The shared name/description harvester drains AFTER its consumers (FSWolfWater above,
     // WolfBoatRock before updateMove) have declared this frame's interest.
     WolfObjectProps::instance().idle();
+    // Dictation capture polling and the read-aloud queue (wolfspeech.cpp).
+    WolfSpeech::instance().idle();
+    // Focus + zoom the shared face once its media exists (wolfscreenshare.cpp).
+    WolfScreenShare::instance().idle();
     // </WolfViewer>
 
     if (gAgentPilot.isPlaying() && gAgentPilot.getOverrideCamera())

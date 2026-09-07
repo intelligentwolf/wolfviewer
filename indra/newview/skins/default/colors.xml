@@ -95,6 +95,10 @@
 	<color
 	 name="DkGray"
 	 value="0.125 0.125 0.125 1" />
+	<!-- WolfViewer 2026-09-06: backing behind the favourites bar (panel_navigation_bar.xml) -->
+	<color
+	 name="WolfFavoritesBarBg"
+	 value="0.0 0.0 0.0 0.6" />
 	<color
 	 name="DkGray_66"
 	 value="0.125 0.125 0.125 .66" />

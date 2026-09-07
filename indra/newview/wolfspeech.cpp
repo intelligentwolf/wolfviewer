@@ -64,6 +64,11 @@ namespace
         options->setTimeout(40);   // whisper's own budget is 30 s (main.rs STT_TIMEOUT_SECS)
         LLCore::HttpHeaders::ptr_t headers = std::make_shared<LLCore::HttpHeaders>();
         headers->append(HTTP_OUT_HEADER_CONTENT_TYPE, content_type);
+        // [SPEECH-AUTH 2026-09-07] The proxy serves Wolf Territories sessions only: it checks
+        // this pair against the grid's presence service (rust_proxy speech_authorise), which
+        // is what makes the grid gate real rather than a courtesy in public source.
+        headers->append("X-Wolf-Agent", gAgentID.asString());
+        headers->append("X-Wolf-Session", gAgentSessionID.asString());
         LLCore::BufferArray::ptr_t raw(new LLCore::BufferArray());   // intrusive pointer (fsprimfeedconnect.cpp:72)
         raw->append(body.data(), body.size());
 

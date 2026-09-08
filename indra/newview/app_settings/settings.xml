@@ -131,6 +131,11 @@
     <key>Value</key>
     <integer>1</integer>
   </map>
+  <!-- <FS:WolfViewer 2026-09-08> On by default. Paul: "we dont need that nearby chat thing
+       ... they can click the conversation button". The bottom bar is the two-row toolbar and
+       nothing else; Enter still opens the chat bar (llviewerinput.cpp:704), which is why this
+       is the autohide setting rather than deleting the bar, and Preferences turns it back on
+       permanently. -->
   <key>AutohideChatBar</key>
   <map>
     <key>Comment</key>
@@ -140,7 +145,7 @@
     <key>Type</key>
     <string>Boolean</string>
     <key>Value</key>
-    <integer>0</integer>
+    <integer>1</integer>
   </map>
   <!-- <FS:WolfViewer> Off by default. GridListDownloadURL is Firestorm's own
        http://phoenixviewer.com/app/fsdata/grids.xml, fetched over PLAIN HTTP and merged
@@ -19412,17 +19417,6 @@ Change of this parameter will affect the layout of buttons in notification toast
 			<string>Boolean</string>
 			<key>Value</key>
 			<integer>1</integer>
-		</map>
-		<key>WolfViewerToolbarGrouped</key>
-		<map>
-			<key>Comment</key>
-			<string>Set once this account's saved toolbar layout has been converted to the WolfViewer group buttons (Voice, Move, World, Me, Display), so ungrouping it again by hand sticks.</string>
-			<key>Persist</key>
-			<integer>1</integer>
-			<key>Type</key>
-			<string>Boolean</string>
-			<key>Value</key>
-			<integer>0</integer>
 		</map>
 		<key>WolfViewerToolbarButtonsAdded</key>
 		<map>

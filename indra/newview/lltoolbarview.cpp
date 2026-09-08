@@ -29,8 +29,8 @@
 
 #include "lltoolbarview.h"
 #include "wolfgrid.h" // <WolfViewer> Wolf Territories-only toolbar buttons
-#include "wolftoolbargroups.h" // <WolfViewer> toolbar group buttons
 
+#include "llapp.h"
 #include "llappviewer.h"
 #include "llbutton.h"
 #include "llclipboard.h"
@@ -431,21 +431,29 @@ bool LLToolBarView::loadToolbars(bool force_default)
     else if (mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM]
         && !gSavedSettings.getBOOL("WolfViewerToolbarButtonsAdded"))
     {
-        // <WolfViewer 2026-09-07> The three buttons now live inside the Voice GROUP
-        // (wolftoolbargroups.cpp group_voice), so what is ensured once is the group.
-        const LLCommandId id("group_voice");
-        bool present = false;
-        for (S32 i = LLToolBarEnums::TOOLBAR_FIRST; i <= LLToolBarEnums::TOOLBAR_LAST; i++)
+        // <WolfViewer 2026-09-08> The Voice GROUP is gone (see the ungrouping below), so this
+        // is back to ensuring the three buttons themselves, as it was before 2026-09-07.
+        bool added = false;
+        for (const char* name : { "wolf_sharescreen", "wolf_readaloud", "wolf_dictate" })
         {
-            if (mToolbars[i] && mToolbars[i]->hasCommand(id))
+            const LLCommandId id(name);
+            bool present = false;
+            for (S32 i = LLToolBarEnums::TOOLBAR_FIRST; i <= LLToolBarEnums::TOOLBAR_LAST; i++)
             {
-                present = true;
+                if (mToolbars[i] && mToolbars[i]->hasCommand(id))
+                {
+                    present = true;
+                }
+            }
+            if (!present && addCommandInternal(id, mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM]))
+            {
+                added = true;
             }
         }
         gSavedSettings.setBOOL("WolfViewerToolbarButtonsAdded", true);
-        if (!present && addCommandInternal(id, mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM]))
+        if (added)
         {
-            LL_INFOS() << "WolfViewer: added the Voice group to the bottom toolbar" << LL_ENDL;
+            LL_INFOS() << "WolfViewer: added the Wolf Territories buttons to the bottom toolbar" << LL_ENDL;
         }
     }
     // </WolfViewer>
@@ -466,42 +474,67 @@ bool LLToolBarView::loadToolbars(bool force_default)
     }
     // </WolfViewer>
 
-    // <WolfViewer 2026-09-07> GROUP the bottom toolbar of a saved layout, once. A per-account
-    // layout never sees the new default (skins/*/toolbars.xml), so the flat row of buttons
-    // is converted here: for each group whose members are on the bottom bar, the members
-    // are taken off and the group button put where the first of them stood. Chat and Speak
-    // are not members and stay. Remembered in WolfViewerToolbarGrouped, so a user who takes
-    // a group apart again in the toybox is not regrouped every login. Only the bottom bar:
-    // a button the user moved to a side bar was placed there on purpose.
+    // <WolfViewer 2026-09-08> Bring a SAVED bottom toolbar up to the two-row bar, once.
+    //
+    // A per-account layout overrides the skin default completely — not only the command list
+    // but `button_display_mode` and `button_layout_style` with it (loadToolbars, :356-372) —
+    // and both of those are wrong for this bar. `icons_only` has no captions, and `fill`
+    // never wraps at all (lltoolbar.cpp), so a saved layout comes up as one squeezed line of
+    // unlabelled icons no matter how the skin is written.
+    //
+    // AND THE GROUP BUTTONS ARE ALREADY GONE BY NOW. loadToolbars drops a command it cannot
+    // find as it parses (addCommandInternal, :222), so a w15 layout has lost group_voice and
+    // its four siblings before any of this runs — the log of the first build read
+    //   "Error adding command 'group_voice' to bottom toolbar"  x5
+    // and left Chat and Speak alone on the bar. There is therefore nothing to "ungroup": what
+    // is detectable is a bottom bar too short to be an arrangement anyone made, and that is
+    // what is repaired here, with the same list the skins ship.
+    //
+    // The flag is PER-ACCOUNT because the toolbar layout is: a global one would migrate
+    // whichever account logged in first and silently skip the rest. This block, and
+    // WolfViewerToolbarRows with it, exists only for layouts saved before this release.
     if (mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM]
-        && !gSavedSettings.getBOOL("WolfViewerToolbarGrouped"))
+        && !gSavedPerAccountSettings.getBOOL("WolfViewerToolbarRows"))
     {
+        // The same list, and the same order, as skins/*/toolbars.xml. Two rows of nine.
+        static const std::vector<const char*> sDefaultBottom = {
+            "chat", "speak", "voice", "wolf_dictate", "wolf_readaloud", "wolf_sharescreen",
+            "appearance", "inventory", "animationoverride",
+            "move", "view", "people", "search", "map", "minimap", "snapshot",
+            "quickprefs", "preferences"
+        };
+        // Under this many, the bar is not something a user arranged — it is what is left when
+        // the group commands stop existing. A genuinely customised bar is longer and is left
+        // to its own order.
+        static const size_t MIN_ARRANGED = 6;
+
         LLToolBar* bottom = mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM];
-        S32 grouped = 0;
-        for (const WolfToolbarGroups::Group& g : WolfToolbarGroups::groups())
+
+        bottom->setButtonType(LLToolBarEnums::BTNTYPE_ICONS_WITH_TEXT);
+        bottom->setLayoutStyle(LLToolBarEnums::LAYOUT_STYLE_NONE);
+        bottom->setAlignment(LLToolBarEnums::ALIGN_CENTER);
+
+        if (bottom->getCommandsList().size() < MIN_ARRANGED)
         {
-            int rank = LLToolBar::RANK_NONE;
-            for (const char* member : g.mMembers)
+            // RANK_NONE appends, so whatever survived keeps its place and the rest arrive in
+            // the order above. hasCommand here is the VIEW's, not the bar's: a command parked
+            // on a side bar must not gain a second button on the bottom one — a command lives
+            // on exactly one toolbar (LLToolBarView::hasCommand, :138), and the toybox
+            // assumes it.
+            for (const char* name : sDefaultBottom)
             {
-                const LLCommandId member_id(member);
-                if (!bottom->hasCommand(member_id)) continue;
-                int r = bottom->removeCommand(member_id);
-                if (rank == LLToolBar::RANK_NONE || (r != LLToolBar::RANK_NONE && r < rank)) rank = r;
+                const LLCommandId id(name);
+                if (hasCommand(id) != LLToolBarEnums::TOOLBAR_NONE) continue;
+                bottom->addCommand(id, LLToolBar::RANK_NONE);
             }
-            if (rank == LLToolBar::RANK_NONE) continue;   // none of this group's members were on the bar
-            const LLCommandId group_id(g.mName);
-            if (!bottom->hasCommand(group_id))
-            {
-                bottom->addCommand(group_id, rank);
-            }
-            grouped++;
         }
-        gSavedSettings.setBOOL("WolfViewerToolbarGrouped", true);
-        if (grouped)
-        {
-            LL_INFOS() << "WolfViewer: grouped the bottom toolbar (" << grouped << " groups)" << LL_ENDL;
-            saveToolbars();
-        }
+
+        gSavedPerAccountSettings.setBOOL("WolfViewerToolbarRows", true);
+        // Saved unconditionally: the display mode and layout style above changed even when
+        // the command list did not.
+        saveToolbars();
+        LL_INFOS() << "WolfViewer: bottom toolbar brought up to the two-row bar ("
+                   << bottom->getCommandsList().size() << " buttons)" << LL_ENDL;
     }
     // </WolfViewer>
     mToolbarsLoaded = true;
@@ -735,6 +768,73 @@ void LLToolBarView::onToolBarButtonRemoved(LLView* button)
     }
     // </FS:Ansariel>
 }
+
+// <WolfViewer 2026-09-08> The strip to the LEFT of the bottom toolbar holds two unrelated
+// things — the nearby chat bar and the Stand / Stop Flying buttons — stacked in
+// chat_bar_stand_fly_container_panel. It is a fixed-size panel in a horizontal layout stack,
+// so it keeps its width whether or not anything in it is showing; on an account that had
+// dragged the divider that was 400px (layout_size_chat_bar_stack, saved per account because
+// the stack is save_sizes="true"). With AutohideChatBar on that left an empty 400px gap and
+// the toolbar centred on what was left of the screen rather than on the screen.
+//
+// So the width follows the content. Zero when there is nothing to show — LLLayoutStack takes
+// a panel to its target dim, so the toolbar then has the full width and centres on it.
+//
+// It cannot simply be hidden instead: Stand / Stop Flying is parented into this strip
+// (llviewerwindow.cpp:2506) and FS:Zi disabled its repositioning —
+// LLPanelStandStopFlying::updatePosition (llmoveview.cpp:793) is an empty function — so the
+// strip is the only place it can be drawn, and it has to be given room when it appears.
+void LLToolBarView::refreshChatStripWidth()
+{
+    // isExiting() as well as the null check, because the two are not equivalent during
+    // teardown: LLViewerWindow::shutdownViews does `delete mRootView` FIRST and only then
+    // sets gToolBarView = NULL (llviewerwindow.cpp:2626-2637), so there is a window where
+    // this pointer is dangling rather than null. Destroying the root view destroys
+    // LLFloaterMove, whose destructor calls setVisible(false) to detach the Stand / Stop
+    // Flying panel (llmoveview.cpp:84) — which lands here. Reading a freed toolbar view
+    // would be a crash on quit for everyone.
+    if (LLApp::isExiting() || !gToolBarView) return;
+
+    LLLayoutPanel* strip = dynamic_cast<LLLayoutPanel*>(
+        gToolBarView->findChildView("chat_bar_stand_fly_container_panel", true));
+    if (!strip) return;
+
+    // state_management_buttons_container is 158 wide and laid out at right="-10"
+    // (panel_toolbar_view.xml).
+    static const S32 STAND_FLY_WIDTH = 168;
+    // What the chat bar opens at. Not remembered across a hide: the divider is still
+    // user-draggable while the bar is up, and a remembered width is one more piece of state
+    // for no behaviour anyone asked for.
+    static const S32 CHAT_BAR_WIDTH = 400;
+
+    // NEVER LLPanelStandStopFlying::getInstance() FROM HERE. That accessor is
+    //     static LLPanelStandStopFlying* panel = getStandStopFlyingPanel();
+    // (llmoveview.cpp:571) — a function-local static with a dynamic initialiser, so the
+    // compiler guards it with __cxa_guard_acquire. getStandStopFlyingPanel() calls
+    // panel->setVisible(false) while building, setVisible calls this function, and calling
+    // getInstance() again here re-enters that guard ON THE SAME THREAD while it is still
+    // held: libstdc++ blocks, and the viewer hangs for ever in initWorldUI — "Initializing
+    // world" on screen, no error anywhere. Look the panel up in the view tree instead. It is
+    // not parented until after getInstance() returns (llviewerwindow.cpp:2509), so during
+    // construction this simply finds nothing, which is the right answer: it is not visible.
+    const LLView* ssf = gToolBarView->findChildView("panel_stand_stop_flying", true);
+
+    S32 want = 0;
+    if (gSavedSettings.getBOOL("MainChatbarVisible"))
+    {
+        want = CHAT_BAR_WIDTH;
+    }
+    else if (ssf && ssf->getVisible())
+    {
+        want = STAND_FLY_WIDTH;
+    }
+
+    if (strip->getTargetDim() != want)
+    {
+        strip->setTargetDim(want);
+    }
+}
+// </WolfViewer>
 
 void LLToolBarView::draw()
 {

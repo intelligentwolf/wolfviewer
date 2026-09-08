@@ -64,10 +64,16 @@
 	<color
 	 name="WolfFavoritesBarBg"
 	 value="0.0588 0.0902 0.1647 0.72" />
-	<!-- WolfViewer 2026-09-07: glass toolbar (widgets/toolbar.xml, panel_toolbar_view.xml) -->
+	<!-- WolfViewer 2026-09-07: glass toolbar (widgets/toolbar.xml, panel_toolbar_view.xml)
+	     2026-09-08: the card green from wolf-grid.com, sampled off the site rather than
+	     guessed — rgb(16, 26, 10) = #101A0A, /255 = 0.0627 0.1020 0.0392. Alpha is 1, not
+	     the old 0.68: this is drawn as a tint over Rounded_Rect.png, which is pure white
+	     (llpanel.cpp:216 draws the image with this colour), so the alpha IS how much of the
+	     world shows through, and anything under 1 lightens the bar away from the colour
+	     asked for. -->
 	<color
 	 name="WolfGlassBar"
-	 value="0.04 0.22 0.11 0.68" />
+	 value="0.0627 0.1020 0.0392 1" />
 	<color
 	 name="WolfGlassButton"
 	 value="0.22 0.55 0.30 0.70" />
@@ -1147,9 +1153,11 @@
      name="NotecardCursorColor"
      reference="TextCursorColor" />
 
-	<!-- Login backdrop - slate-900 #0f172a, matching the wolf-grid.com site -->
+	<!-- Login backdrop. WolfViewer 2026-09-08: the wolf-grid.com card green, the same as
+	     WolfGlassBar above, so the login screen and the bar you land on are one colour.
+	     rgb(16, 26, 10) = #101A0A. -->
 	<color
 	 name="FSLoginBackgroundColor"
-	 value="0.0588 0.0902 0.1647 1" />
+	 value="0.0627 0.1020 0.0392 1" />
 </colors>
 

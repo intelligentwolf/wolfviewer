@@ -262,6 +262,14 @@ public:
 
         Optional<S32>                           max_rows;       // <FS:Ansariel> FIRE-5137: Fix fixed size button layout
 
+        // <WolfViewer 2026-09-08> Lay the bar out in exactly this many rows, splitting the
+        // buttons evenly by COUNT. Unlike max_rows — which only shrinks button widths in
+        // EQUALIZE layout once they no longer fit on one line — this wraps whether or not
+        // they would have fitted, so a wide window still gets two rows. 0 = off (stock
+        // behaviour: one row until it runs out of width).
+        Optional<S32>                           rows;
+        // </WolfViewer>
+
         Params();
     };
 
@@ -349,6 +357,7 @@ private:
                                     mMinGirth;
     // <FS:Ansariel> FIRE-5137: Fix fixed size button layout
     const S32                       mMaxRows;
+    const S32                       mRows;      // <WolfViewer> exact row count, 0 = off
 
     // drag and drop state
     tool_startdrag_callback_t       mStartDragItemCallback;

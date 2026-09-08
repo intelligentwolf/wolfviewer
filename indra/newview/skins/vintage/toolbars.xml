@@ -6,17 +6,36 @@
      button_layout_style="none" />
     <bottom_toolbar
      button_alignment="center"
-     button_display_mode="text_only"
-     button_layout_style="fill">
-     <!-- WolfViewer 2026-09-07: Chat and Speak stay; everything else lives in five GROUP
-          buttons (wolftoolbargroups.cpp), each a popup of the commands for one purpose. -->
+     button_display_mode="icons_with_text"
+     button_layout_style="none">
+     <!-- WolfViewer 2026-09-08: TWO ROWS, macOS style. Replaces the 2026-09-07 group popups —
+          Paul: "I don't like the button menus ... its hard to find anything". Nothing is
+          behind a press: every command is on the bar, split evenly across two rows by
+          toolbar_bottom's rows="2" (panel_toolbar_view.xml). ORDER IS THE LAYOUT — the split
+          is by count, so the first nine below are row one and the rest are row two. Keep it
+          at an even number, and keep each row one purpose.
+          button_layout_style must NOT be "fill": fill never wraps (lltoolbar.cpp), so the
+          bar would collapse back to one squeezed line. -->
+     <!-- row one — talking, and you -->
      <command name="chat"/>
      <command name="speak"/>
-     <command name="group_voice"/>
-     <command name="group_move"/>
-     <command name="group_world"/>
-     <command name="group_me"/>
-     <command name="group_display"/>
+     <command name="voice"/>
+     <command name="wolf_dictate"/>
+     <command name="wolf_readaloud"/>
+     <command name="wolf_sharescreen"/>
+     <command name="appearance"/>
+     <command name="inventory"/>
+     <command name="animationoverride"/>
+     <!-- row two — getting about, and looking at things -->
+     <command name="move"/>
+     <command name="view"/>
+     <command name="people"/>
+     <command name="search"/>
+     <command name="map"/>
+     <command name="minimap"/>
+     <command name="snapshot"/>
+     <command name="quickprefs"/>
+     <command name="preferences"/>
    </bottom_toolbar>
     <left_toolbar
      button_alignment="center"

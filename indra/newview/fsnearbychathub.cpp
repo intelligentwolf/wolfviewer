@@ -40,6 +40,7 @@
 #include "llcommandhandler.h"
 #include "llgesturemgr.h"
 #include "lllineeditor.h"
+#include "lltoolbarview.h"    // <WolfViewer> refreshChatStripWidth
 #include "lltranslate.h"        // <FS:WolfViewer> outgoing chat translation
 #include "llviewercontrol.h"
 #include "llviewerinput.h"
@@ -337,6 +338,12 @@ void FSNearbyChat::showDefaultChatBar(bool visible, const char* text) const
     mDefaultChatBar->getParent()->setVisible(visible);
     mDefaultChatBar->setVisible(visible);
     mDefaultChatBar->setFocus(visible);
+
+    // <WolfViewer 2026-09-08> The strip this bar lives in is sized to whatever it has to
+    // show; hiding the bar alone would leave its width behind and push the bottom toolbar off
+    // centre. One owner: LLToolBarView::refreshChatStripWidth.
+    LLToolBarView::refreshChatStripWidth();
+    // </WolfViewer>
 
     // <FS:KC> Fix for bad edge snapping
     if (visible)

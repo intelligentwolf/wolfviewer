@@ -74,6 +74,11 @@ private:
     static constexpr S32 MIN_POOL_CELLS = 12;
     // A drainage chain shorter than this (cells) is a stub, not a stream: dropped.
     static constexpr S32 MIN_CHAIN_CELLS = 8;
+    // [2026-09-08, Tromsø: "the pond the user created and those weird streams appeared"] a chain
+    // must FALL — a pool's overflow on a flat lawn was drawn as a stream over ground with no
+    // grade. Source: natural_water_worker.js MIN_CHAIN_DROP_M / MIN_CHAIN_GRADE (same numbers).
+    static constexpr F32 MIN_CHAIN_DROP_M = 0.3f;
+    static constexpr F32 MIN_CHAIN_GRADE = 0.005f;
     // Streams: water stands this far above the channel bed (the lowest ground around the
     // centreline), so the ground hides the ribbon everywhere except inside the channel.
     static constexpr F32 STREAM_FILL_M = 0.12f;

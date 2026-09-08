@@ -667,6 +667,12 @@ void LLPanelStandStopFlying::setVisible(bool visible)
     // also change own visibility to avoid displaying the panel in mouselook (broken when EXT-2504 was implemented).
     // See EXT-4718.
     LLPanel::setVisible(visible);
+
+    // <WolfViewer 2026-09-08> These buttons share the strip left of the bottom toolbar with
+    // the nearby chat bar, and that strip is sized to whatever it has to show so the toolbar
+    // can centre on the screen. Tell it we came or went.
+    LLToolBarView::refreshChatStripWidth();
+    // </WolfViewer>
 }
 
 bool LLPanelStandStopFlying::handleToolTip(S32 x, S32 y, MASK mask)

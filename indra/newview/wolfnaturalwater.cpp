@@ -680,8 +680,21 @@ void WolfNaturalWater::compute(Result& out, std::vector<F32> z, std::vector<U8> 
         }
         if ((S32)ch.mCells.size() >= MIN_CHAIN_CELLS)
         {
-            ch.mAcc = acc[ch.mCells[ch.mCells.size() - (has_end ? 2 : 1)]];
-            chains.push_back(std::move(ch));
+            // the fall from the head to the last stream cell, along the chain's own length
+            const S32 last_stream = (S32)ch.mCells.size() - (has_end ? 2 : 1);
+            F32 length = 0.f;
+            for (S32 j = 1; j <= last_stream; ++j)
+            {
+                const S32 a = ch.mCells[j - 1], b = ch.mCells[j];
+                const S32 dx = (b % n) - (a % n), dy = (b / n) - (a / n);
+                length += ((dx && dy) ? 1.41421356f : 1.f) * mpg;
+            }
+            const F32 drop = z[ch.mCells[0]] - z[ch.mCells[last_stream]];
+            if (drop >= MIN_CHAIN_DROP_M && length > 0.f && drop / length >= MIN_CHAIN_GRADE)
+            {
+                ch.mAcc = acc[ch.mCells[last_stream]];
+                chains.push_back(std::move(ch));
+            }
         }
     }
     std::sort(chains.begin(), chains.end(), [](const Chain& a, const Chain& b) { return a.mAcc > b.mAcc; });

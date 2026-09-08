@@ -105,6 +105,13 @@ public:
     LLView* getBottomChatStack() const { return mBottomChatStack; }
     // </FS:Ansariel>
 
+    // <WolfViewer 2026-09-08> Size the strip left of the bottom toolbar to whatever it
+    // currently has to show — the chat bar, the Stand / Stop Flying buttons, or nothing —
+    // so the two-row toolbar is centred on the SCREEN and not on the space left over.
+    // Call after anything that changes either of those. See lltoolbarview.cpp.
+    static void refreshChatStripWidth();
+    // </WolfViewer>
+
     // <FS:Ansariel> Added to determine if toolbar gets hidden when empty
     void setHideBottomOnEmpty(bool hideBottomOnEmpty) { mHideBottomOnEmpty = hideBottomOnEmpty; }
 

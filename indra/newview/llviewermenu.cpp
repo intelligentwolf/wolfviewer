@@ -36,7 +36,6 @@
 #include "wolfgrid.h"
 #include "wolfspeech.h"
 #include "wolfscreenshare.h"
-#include "wolftoolbargroups.h"
 // </WolfViewer>
 
 // linden library includes
@@ -12730,13 +12729,6 @@ void initialize_menus()
     enable.add("WolfSpeech.IsReadingAloud", boost::bind(&WolfSpeech::isReadingAloud));
     commit.add("WolfScreenShare.Toggle", boost::bind(&wolf_toggle_screen_share));
     enable.add("WolfScreenShare.IsSharing", boost::bind(&wolf_is_sharing_screen));
-    // <WolfViewer 2026-09-07> Toolbar group buttons (wolftoolbargroups.cpp): the group
-    // command's own callbacks, and the three every generated menu item binds by name.
-    commit.add("WolfToolbarGroups.Open", boost::bind(&WolfToolbarGroups::open, _1, _2));
-    enable.add("WolfToolbarGroups.IsRunning", boost::bind(&WolfToolbarGroups::isRunning, _1, _2));
-    commit.add("WolfToolbarGroups.Run", boost::bind(&WolfToolbarGroups::runMember, _1, _2));
-    enable.add("WolfToolbarGroups.MemberRunning", boost::bind(&WolfToolbarGroups::memberRunning, _1, _2));
-    enable.add("WolfToolbarGroups.MemberEnabled", boost::bind(&WolfToolbarGroups::memberEnabled, _1, _2));
     // </WolfViewer>
     commit.add("Agent.PressMicrophone", boost::bind(&LLAgent::pressMicrophone, _2));
     commit.add("Agent.ReleaseMicrophone", boost::bind(&LLAgent::releaseMicrophone, _2));

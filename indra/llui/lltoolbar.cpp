@@ -115,8 +115,9 @@ LLToolBar::Params::Params()
     button("button"),
     layout_style("layout_style",LLToolBarEnums::LAYOUT_STYLE_NONE),
     alignment("alignment",LLToolBarEnums::ALIGN_CENTER),
-    max_rows("max_rows", 0)
+    max_rows("max_rows", 0),
     // </FS:Zi>
+    rows("rows", 0)     // <WolfViewer 2026-09-08> exact row count
 {}
 
 LLToolBar::LLToolBar(const LLToolBar::Params& p)
@@ -151,8 +152,9 @@ LLToolBar::LLToolBar(const LLToolBar::Params& p)
     mCenterPanel(nullptr),
     mLayoutStyle(p.layout_style),
     mAlignment(p.alignment),
-    mMaxRows(p.max_rows)
+    mMaxRows(p.max_rows),
     // </FS:Zi>
+    mRows(p.rows)       // <WolfViewer 2026-09-08> exact row count
 {
     mButtonParams[LLToolBarEnums::BTNTYPE_ICONS_WITH_TEXT] = p.button_icon_and_text;
     mButtonParams[LLToolBarEnums::BTNTYPE_ICONS_ONLY] = p.button_icon;
@@ -798,6 +800,18 @@ void LLToolBar::updateLayoutAsNeeded()
     }
     // </FS:Zi>
 
+    // <WolfViewer 2026-09-08> Exact row count. Splitting by COUNT rather than by width is
+    // what makes the number of rows predictable: a width budget of total/rows is a greedy
+    // bin-pack, and greedy overflows into an extra row whenever the items do not divide
+    // evenly (three 5s into a budget of 8 gives three rows, not two). Buttons keep their
+    // natural widths, so a row is only as wide as what is on it.
+    S32 buttons_per_row = 0;
+    if (mRows > 1 && orientation == LLLayoutStack::HORIZONTAL && !mButtons.empty())
+    {
+        buttons_per_row = llceil((F32)mButtons.size() / (F32)mRows);
+    }
+    // </WolfViewer>
+
     for (LLToolBarButton* button : mButtons)
     {
         // <FS:Zi> Add equalized and fill layout options
@@ -842,9 +856,17 @@ void LLToolBar::updateLayoutAsNeeded()
                             : button_clamped_width;
 
         // wrap if needed
+        // <WolfViewer 2026-09-08> ...or because this row already holds its share of the
+        // buttons. A row that is still too wide for the window wraps again on the width
+        // test below it, which gives more rows than asked for — the right failure: better
+        // a third row than buttons off the edge of the screen.
+        const bool row_is_full = (buttons_per_row > 0)
+                                 && ((S32)buttons_in_row.size() >= buttons_per_row);
+        // </WolfViewer>
         if (mWrap
             && mLayoutStyle != LAYOUT_STYLE_FILL        // <FS:Zi> Don't wrap in fill layout mode
-            && row_running_length + button_length > max_length  // out of room...
+            && (row_is_full                                     // <WolfViewer> row's share is placed...
+                || row_running_length + button_length > max_length) // ...or out of room...
             && cur_start != row_pad_start)                      // ...and not first button in row
         {
             if (orientation == LLLayoutStack::VERTICAL)

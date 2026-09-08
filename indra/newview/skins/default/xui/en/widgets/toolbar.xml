@@ -12,22 +12,41 @@
                 background_visible="true"
                 bg_opaque_image_overlay="MouseGray"
                 background_opaque="true"/>
-  <button_icon_and_text imgoverlay_label_space="7"
+  <!-- WolfViewer 2026-09-08: the macOS-toolbar item — glyph stacked OVER its caption, and no
+       slab around it until the pointer arrives. No new drawing code was needed: LLButton
+       already offsets the overlay by (image_bottom_pad - image_top_pad) from the button's
+       centre (llbutton.cpp:995) and the caption by pad_bottom from the same centre
+       (llbutton.cpp:1074), so centring both horizontally and pulling them apart vertically
+       stacks them. For the 42px button: centre is 21, so image_bottom_pad 6 puts the glyph's
+       centre at 27 (it spans 15..39) and pad_bottom -13 puts the caption's centre at 8 (it
+       spans 2..14).
+       image_unselected="Blank" is what makes it borderless; hover then has nothing to glow,
+       so image_hover_unselected brings the slab back under the pointer — a toolbar item must
+       still answer the mouse.
+       button_width.max is 132 rather than 110 because "Animation override" is the longest
+       caption on the bar and ellipsised to "Animation overrid..." at 110. The width is a
+       RANGE and auto_resize sizes each button to its own caption, so only that one grows. -->
+  <button_icon_and_text imgoverlay_label_space="0"
                         label_color_selected="White"
-                        halign="left"
+                        halign="center"
+                        image_overlay_alignment="center"
+                        image_unselected="Blank"
+                        image_hover_unselected="PushButton_Off"
                         image_pressed="PushButton_Press"
                         image_pressed_selected="PushButton_Selected_Press"
                         image_selected="PushButton_Selected_Press"
                         image_disabled_selected="PushButton_Selected_Disabled"
                         image_disabled="PushButton_Disabled"
-                        button_width.min="70"
-                        button_width.max="140"
-                        desired_height="24"
-                        pad_left="10" 
-                        pad_right="10"
+                        button_width.min="62"
+                        button_width.max="132"
+                        desired_height="42"
+                        image_bottom_pad="6"
+                        image_top_pad="0"
+                        pad_bottom="-13"
+                        pad_left="6"
+                        pad_right="6"
                         follows="left|top"
                         chrome="true"
-                        image_overlay_alignment="left"
                         use_ellipses="true"
                         auto_resize="true"
                         button_flash_count="99999"

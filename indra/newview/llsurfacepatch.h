@@ -141,6 +141,9 @@ public:
     S32 getRenderLevel() const;
 
     void setSurface(LLSurface *surfacep);
+    // <FS:Wolf/> Create this patch's viewer object if it has none yet. Returns false if one
+    // could not be made. See the note on setSurface.
+    bool ensureVObj();
     void setDataZ(F32 *data_z)                  { mDataZ = data_z; }
     void setDataNorm(LLVector3 *data_norm)      { mDataNorm = data_norm; }
     F32 *getDataZ() const                       { return mDataZ; }

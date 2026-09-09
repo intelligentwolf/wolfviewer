@@ -257,7 +257,20 @@ void display_update_camera()
     }
 // </FS:CR> Aurora sim
     LLViewerCamera::getInstance()->setFar(final_far);
-    LLVOAvatar::sRenderDistance = llclamp(final_far, 16.f, 256.f);
+    // <FS:Wolf> Avatar draw distance was pinned to 256 m no matter how far you could see.
+    //
+    // sRenderDistance is what pipeline.cpp:3452 culls avatars against, so on a large varregion
+    // the land and the objects drew out to the full draw distance while every avatar past 256 m
+    // simply vanished. It is now a setting, still clamped to the draw distance so avatars can
+    // never be asked to draw beyond what is rendered at all. The default is 256, which makes
+    // this line behave exactly as it always did.
+    //
+    // Note this also widens the "nearby avatars" set the autotune uses (llworld.cpp:1911,
+    // llvoavatar.cpp:12316 and :12348) — correctly so, since those avatars now really are being
+    // drawn and really do cost frame time.
+    static LLCachedControl<F32> avatar_draw_distance(gSavedSettings, "RenderAvatarDrawDistance", 256.f);
+    LLVOAvatar::sRenderDistance = llclamp(final_far, 16.f, llmax(16.f, (F32)avatar_draw_distance));
+    // </FS:Wolf>
     gViewerWindow->setup3DRender();
 
     if (!gCubeSnapshot)

@@ -103,10 +103,12 @@ LLSurface::LLSurface(U32 type, LLViewerRegion *regionp) :
 
 LLSurface::~LLSurface()
 {
-    delete [] mSurfaceZ;
+    // <FS:Wolf/> calloc'd in create(), so free() — not delete[].
+    free(mSurfaceZ);
     mSurfaceZ = nullptr;
 
-    delete [] mNorm;
+    free(mNorm);
+    mNorm = nullptr;
 
     mGridsPerEdge = 0;
     mGridsPerPatchEdge = 0;
@@ -117,7 +119,13 @@ LLSurface::~LLSurface()
     LLDrawPoolTerrain *poolp = (LLDrawPoolTerrain*) gPipeline.findPool(LLDrawPool::POOL_TERRAIN, mSTexturep);
     if (!poolp)
     {
-        LL_WARNS() << "No pool for terrain on destruction!" << LL_ENDL;
+        // <FS:Wolf/> Only a fault if we ever had one. The pool is created by the first
+        // LLVOSurfacePatch (llvosurfacepatch.cpp:105) and those are built on demand, so a
+        // surface the camera never reached has no pool and never had one.
+        if (mBuiltPatchObject)
+        {
+            LL_WARNS() << "No pool for terrain on destruction!" << LL_ENDL;
+        }
     }
     else if (poolp->mReferences.empty())
     {
@@ -180,17 +188,34 @@ void LLSurface::create(const S32 grids_per_edge,
     //
     // Initialize data arrays for surface
     ///
-    mSurfaceZ = new F32[number_of_grids];
-    mNorm = new LLVector3[number_of_grids];
-
-    // Reset the surface to be a flat square grid
-    for(S32 i=0; i < number_of_grids; i++)
+    // <FS:Wolf> Reserve the surface, do not COMMIT it.
+    //
+    // These two arrays are 16 bytes per square metre of region: 1 MB for a standard 256 m
+    // region, but 10.5 GB for a 25600 m varregion. The allocation itself was never the problem
+    // — a block that large comes from mmap and its pages cost nothing until touched. The problem
+    // was that we touched every one of them: `new LLVector3[n]` runs LLVector3's constructor,
+    // which calls clear(), and the loop below wrote both arrays end to end. Between them they
+    // faulted in all 10.5 GB before a single terrain packet had arrived.
+    //
+    // calloc hands back the same mmap'd, already-zero pages without walking them, so the
+    // resident cost is now proportional to the terrain actually visited, not to the region's
+    // area. A patch that is never approached costs nothing.
+    //
+    // The one behavioural difference is the normal default: it was (0,0,1), it is now (0,0,0).
+    // That is only ever read through LLSurfacePatch::mDataNorm, and only for a patch that has
+    // received data — such a patch is marked dirty, and LLSurface::idleUpdate runs
+    // updateNormals() over it, which rewrites every normal in the patch from the heights before
+    // anything draws it. LLSurface::resolveNormalGlobal does not read these at all; it
+    // differentiates the heights (:1109-1130).
+    mSurfaceZ = (F32*)calloc((size_t)number_of_grids, sizeof(F32));
+    mNorm = (LLVector3*)calloc((size_t)number_of_grids, sizeof(LLVector3));
+    if (!mSurfaceZ || !mNorm)
     {
-        // Surface is flat and zero
-        // Normals all point up
-        mSurfaceZ[i] = 0.0f;
-        mNorm[i].setVec(0.f, 0.f, 1.f);
+        LL_ERRS() << "Could not reserve terrain for a " << (S32)width << " m region ("
+                  << (((U64)number_of_grids * (sizeof(F32) + sizeof(LLVector3))) >> 20)
+                  << " MB)" << LL_ENDL;
     }
+    // </FS:Wolf>
 
 
     mVisiblePatchCount = 0;
@@ -766,18 +791,84 @@ void LLSurface::updatePatchVisibilities(LLAgent &agent)
 
     LLSurfacePatch *patchp;
 
-    mVisiblePatchCount = 0;
-    for (S32 i=0; i<mNumberOfPatches; i++)
-    {
-        patchp = mPatchList + i;
+    // <FS:Wolf> Only scan the patches that could possibly be visible.
+    //
+    // This walked EVERY patch in the region every frame. A standard region has 256 of them, so
+    // it never mattered; Wolf Territories' 25600 m "Dire Wolf" has 1600 x 1600 = 2,560,000, and
+    // a frustum test plus LOD maths on all of them, every frame, is what made that region hang.
+    //
+    // A patch beyond the camera's far plane cannot be drawn, so the scan is bounded to the patch
+    // index box the far clip reaches, plus one patch of slack. Two passes: the box we scanned
+    // last frame (so anything that has just fallen out of range is told it is invisible) and the
+    // box we want now. Both are bounded, so a teleport across the region costs two small scans
+    // rather than one enormous one.
+    //
+    // Small regions keep the original whole-region loop, byte for byte, so nothing that works
+    // today can regress.
+    const S32 BOUNDED_SCAN_MIN_PATCHES = 4096;   // i.e. regions above 1024 m
 
-        patchp->updateVisibility();
-        if (patchp->getVisible())
+    if (mNumberOfPatches < BOUNDED_SCAN_MIN_PATCHES)
+    {
+        mVisiblePatchCount = 0;
+        for (S32 i=0; i<mNumberOfPatches; i++)
         {
-            mVisiblePatchCount++;
-            patchp->updateCameraDistanceRegion(pos_region);
+            patchp = mPatchList + i;
+
+            patchp->updateVisibility();
+            if (patchp->getVisible())
+            {
+                mVisiblePatchCount++;
+                patchp->updateCameraDistanceRegion(pos_region);
+            }
+        }
+        return;
+    }
+
+    const F32 patch_meters = mMetersPerGrid * (F32)mGridsPerPatchEdge;
+    const F32 reach = LLViewerCamera::getInstance()->getFar() + patch_meters;
+    const S32 last = mPatchesPerEdge - 1;
+
+    const S32 min_i = llclamp((S32)floorf((pos_region.mV[VX] - reach) / patch_meters), 0, last);
+    const S32 max_i = llclamp((S32)ceilf ((pos_region.mV[VX] + reach) / patch_meters), 0, last);
+    const S32 min_j = llclamp((S32)floorf((pos_region.mV[VY] - reach) / patch_meters), 0, last);
+    const S32 max_j = llclamp((S32)ceilf ((pos_region.mV[VY] + reach) / patch_meters), 0, last);
+
+    // Pass 1: whatever we scanned last frame and are about to stop scanning. updateVisibility
+    // will find it out of frustum or out of range and clear its visible flag.
+    if (mLastScanMinI >= 0)
+    {
+        for (S32 j = mLastScanMinJ; j <= mLastScanMaxJ; j++)
+        {
+            for (S32 i = mLastScanMinI; i <= mLastScanMaxI; i++)
+            {
+                if (i >= min_i && i <= max_i && j >= min_j && j <= max_j)
+                {
+                    continue;   // still in range; pass 2 handles it
+                }
+                (mPatchList + (j * mPatchesPerEdge + i))->updateVisibility();
+            }
         }
     }
+
+    // Pass 2: the patches in range now. This is the only pass that counts.
+    mVisiblePatchCount = 0;
+    for (S32 j = min_j; j <= max_j; j++)
+    {
+        for (S32 i = min_i; i <= max_i; i++)
+        {
+            patchp = mPatchList + (j * mPatchesPerEdge + i);
+            patchp->updateVisibility();
+            if (patchp->getVisible())
+            {
+                mVisiblePatchCount++;
+                patchp->updateCameraDistanceRegion(pos_region);
+            }
+        }
+    }
+
+    mLastScanMinI = min_i; mLastScanMaxI = max_i;
+    mLastScanMinJ = min_j; mLastScanMaxJ = max_j;
+    // </FS:Wolf>
 }
 
 template<bool PBR>
@@ -838,7 +929,20 @@ void LLSurface::decompressDCTPatch(LLBitPack &bitpack, LLGroupHeader *gopp, bool
     LLSurfacePatch *patchp;
 
     init_patch_decompressor(gopp->patch_size);
-    gopp->stride = mGridsPerEdge;
+
+    // <FS:Wolf> A coarse grid still receives full-resolution patches.
+    //
+    // A large varregion is given fewer grid points per patch than the wire sends samples, to
+    // keep terrain memory bounded (llviewerregion.cpp chooseTerrainGridResolution). The
+    // decompressor writes patch_size x patch_size values at whatever stride it is handed, so on
+    // a coarse grid it must NOT be pointed straight at the surface: it would overrun the patch
+    // into its neighbours. Decompress into a scratch block at full resolution instead and take
+    // every step-th sample. The step is always a whole number because the resolution is only
+    // ever halved.
+    const S32 wire_samples = gopp->patch_size;
+    const bool downsample = (mGridsPerPatchEdge < wire_samples);
+    gopp->stride = downsample ? wire_samples : mGridsPerEdge;
+    // </FS:Wolf>
     set_group_of_patch_header(gopp);
 
     while (1)
@@ -885,7 +989,27 @@ void LLSurface::decompressDCTPatch(LLBitPack &bitpack, LLGroupHeader *gopp, bool
 
 
         decode_patch(bitpack, patch);
-        decompress_patch(patchp->getDataZ(), patch, &ph);
+        // <FS:Wolf> see the note above set_group_of_patch_header
+        if (downsample)
+        {
+            F32 scratch[LARGE_PATCH_SIZE * LARGE_PATCH_SIZE];
+            decompress_patch(scratch, patch, &ph);
+
+            const S32 step = wire_samples / mGridsPerPatchEdge;
+            F32* dst = patchp->getDataZ();
+            for (S32 jj = 0; jj < mGridsPerPatchEdge; jj++)
+            {
+                for (S32 ii = 0; ii < mGridsPerPatchEdge; ii++)
+                {
+                    dst[ii + jj * mGridsPerEdge] = scratch[ii * step + jj * step * wire_samples];
+                }
+            }
+        }
+        else
+        {
+            decompress_patch(patchp->getDataZ(), patch, &ph);
+        }
+        // </FS:Wolf>
 
         // Update edges for neighbors.  Need to guarantee that this gets done before we generate vertical stats.
         patchp->updateNorthEdge();

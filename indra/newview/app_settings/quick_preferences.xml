@@ -6,7 +6,7 @@
      increment="8"
      integer="1"
      label="Draw Distance"
-     max="1024"
+     max="4096"
      min="32"
      translation_id="QP Draw Distance" />
     <entries

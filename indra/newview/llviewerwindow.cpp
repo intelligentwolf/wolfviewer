@@ -6861,8 +6861,26 @@ void LLViewerWindow::setup2DViewport(S32 x_offset, S32 y_offset)
 
 void LLViewerWindow::setup3DRender()
 {
+    // <FS:Wolf> The projection's far plane has to follow the draw distance.
+    //
+    // This passed the constant MAX_FAR_CLIP*2 = 1024 m (llcamera.h:44 MAX_FAR_CLIP = 512.f, the
+    // historical maximum draw distance, doubled for headroom). The camera's own far IS set from
+    // RenderFarClip every frame (llviewerdisplay.cpp:259 setFar(final_far)) and culling honours
+    // it, so raising the draw distance past 1024 used to cull nothing while the projection
+    // matrix clipped everything beyond 1024 m away regardless — the far slider simply stopped
+    // having any visible effect.
+    //
+    // The old constant is kept as a FLOOR, so at any draw distance up to 512 m the far plane is
+    // exactly what it always was and nothing changes. Above that it tracks the camera with the
+    // same 512 m of headroom, which is what the doubling amounted to at the old maximum. The
+    // margin is added rather than multiplied deliberately: a 4096 m draw distance would
+    // otherwise put the far plane at 8192 m and spend depth-buffer precision on empty space.
+    LLViewerCamera* camera = LLViewerCamera::getInstance();
+    const F32 far_plane = llmax(MAX_FAR_CLIP * 2.f, camera->getFar() + MAX_FAR_CLIP);
+
     // setup perspective camera
-    LLViewerCamera::getInstance()->setPerspective(NOT_FOR_SELECTION, mWorldViewRectRaw.mLeft, mWorldViewRectRaw.mBottom,  mWorldViewRectRaw.getWidth(), mWorldViewRectRaw.getHeight(), false, LLViewerCamera::getInstance()->getNear(), MAX_FAR_CLIP*2.f);
+    camera->setPerspective(NOT_FOR_SELECTION, mWorldViewRectRaw.mLeft, mWorldViewRectRaw.mBottom,  mWorldViewRectRaw.getWidth(), mWorldViewRectRaw.getHeight(), false, camera->getNear(), far_plane);
+    // </FS:Wolf>
     setup3DViewport();
 }
 

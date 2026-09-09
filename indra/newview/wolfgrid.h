@@ -58,6 +58,10 @@ namespace WolfGrid
     // would be wrong, on any other grid. Every caller checks isWolfTerritories() first.
     const char* const MESH_API_BASE = PROXY_API_BASE;
 
+    // The grid's Patreon, shown on the login screen. Same link WolfStorm uses
+    // (wolfstorm/index.php:564).
+    const char* const PATREON_URL = "https://www.patreon.com/15362110/join";
+
     // Screen sharing: the token endpoint (wolfstorm js/voice/screen_share.js TOKEN_URL, host
     // SHARE_HOST = 'wolfstorm.app') and the publisher page (wolfstorm/publish.php).
     const char* const SHARE_TOKEN_URL = "https://wolfstorm.app/php/screen_token.php";

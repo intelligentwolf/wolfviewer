@@ -2730,7 +2730,7 @@
 				 left_pad="0"
 				 decimal_digits="0"
 				 follows="top|left"
-				 max_val="1024"
+				 max_val="4096"
 				 min_val="32"
 				 width="53"
 				 increment="8"/>

@@ -178,6 +178,10 @@ private:
 
     // Array of grid data, mGridsPerEdge * mGridsPerEdge
     F32 *mSurfaceZ;
+    // <FS:Wolf/> The patch index box updatePatchVisibilities scanned last frame, so patches that
+    // have just fallen out of range can be told they are no longer visible without rescanning
+    // the whole region. -1 means "nothing scanned yet".
+    S32 mLastScanMinI = -1, mLastScanMaxI = -1, mLastScanMinJ = -1, mLastScanMaxJ = -1;
 
     // Array of grid normals, mGridsPerEdge * mGridsPerEdge
     LLVector3 *mNorm;
@@ -200,6 +204,11 @@ private:
     LLPatchVertexArray mPVArray;
 
     bool        mHasZData;              // We've received any patch data for this surface.
+    // <FS:Wolf/> Has any patch on this surface built its viewer object? Patch objects are made
+    // on demand (LLSurfacePatch::ensureVObj) and the first one is what creates the terrain draw
+    // pool, so a surface nobody ever looked at legitimately has no pool at destruction. Without
+    // this the destructor warns about that every time.
+    bool        mBuiltPatchObject = false;
     F32         mMinZ;                  // min z for this region (during the session)
     F32         mMaxZ;                  // max z for this region (during the session)
 

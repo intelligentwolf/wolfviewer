@@ -427,6 +427,11 @@ void LLWorldMapView::draw()
     gGL.color4fv(mBackgroundColor.mV);
     gl_rect_2d(0, height, width, 0);
 
+    // <FS:Wolf/> Everything from here to the matching pop is the MAP, and it tilts. The
+    // background above stays flat so the panel is still filled corner to corner, and the
+    // floater's own controls (drawn later by LLView::draw) are never touched.
+    const bool tilted = pushTiltProjection();
+
     // Draw the image tiles
 // <FS:CR> Aurora Sim
 #ifdef OPENSIM
@@ -720,6 +725,12 @@ void LLWorldMapView::draw()
         }
     }
 
+
+    // <FS:Wolf/> back to the flat UI projection before anything else is drawn
+    if (tilted)
+    {
+        popTiltProjection();
+    }
 
     // turn off the scissor
     LLGLDisable no_scissor(GL_SCISSOR_TEST);
@@ -1198,12 +1209,156 @@ void LLWorldMapView::drawTracking(const LLVector3d& pos_global, const LLColor4& 
 }
 
 // If you change this, then you need to change LLTracker::getTrackedPositionGlobal() as well
+
+// <FS:Wolf> Map tilt.
+//
+// The map is normally drawn straight into the UI's orthographic projection, one map pixel to one
+// screen pixel. To tilt it we swap in a perspective camera sitting one view-height above the map
+// plane, with a field of view chosen so that AT ZERO TILT the plane still lands exactly 1:1 on
+// the same pixels. Everything the map draws keeps emitting the same untilted pixel coordinates;
+// the GPU tilts them. That matters for the region tiles in particular: they are textured quads,
+// and only a real projection keeps their texturing perspective-correct.
+//
+// Deliberately ONLY the tilt. No compass rotation, no terrain height, no 3D anything else.
+
+// static
+F32 LLWorldMapView::getTiltDegrees()
+{
+    static LLCachedControl<F32> tilt(gSavedSettings, "MapTiltDegrees", 0.f);
+    // 60 is where the far edge of a tilted plane starts to stretch into uselessness.
+    return llclamp((F32)tilt, 0.f, 60.f);
+}
+
+namespace
+{
+    // Camera distance above the plane, in map pixels. One view height gives a natural-looking
+    // amount of perspective; larger is flatter, smaller exaggerates.
+    F32 tiltCameraDistance(F32 view_height)
+    {
+        return llmax(view_height, 1.f);
+    }
+}
+
+bool LLWorldMapView::pushTiltProjection()
+{
+    const F32 degrees = getTiltDegrees();
+    if (degrees <= 0.f)
+    {
+        return false;
+    }
+
+    const LLRect& rect = getRect();
+    const F32 w = (F32)rect.getWidth();
+    const F32 h = (F32)rect.getHeight();
+    if (w <= 0.f || h <= 0.f)
+    {
+        return false;
+    }
+
+    const F32 dist = tiltCameraDistance(h);
+    const F32 near_z = dist * 0.05f;
+    const F32 far_z  = dist * 20.f;
+    // A frustum whose near plane is the view rect scaled by near/dist puts the z=0 plane exactly
+    // on the pixels it occupied before, so tilt 0 is a no-op and tilt is a pure addition.
+    const F32 nr = (w * 0.5f) * (near_z / dist);
+    const F32 nt = (h * 0.5f) * (near_z / dist);
+
+    const F32 proj[16] = {
+        near_z / nr, 0.f,         0.f,                                    0.f,
+        0.f,         near_z / nt, 0.f,                                    0.f,
+        0.f,         0.f,        -(far_z + near_z) / (far_z - near_z),   -1.f,
+        0.f,         0.f,        -(2.f * far_z * near_z) / (far_z - near_z), 0.f
+    };
+
+    gGL.matrixMode(LLRender::MM_PROJECTION);
+    gGL.pushMatrix();
+    gGL.loadMatrix(proj);
+
+    gGL.matrixMode(LLRender::MM_MODELVIEW);
+    gGL.pushMatrix();
+    gGL.loadIdentity();
+    // Camera sits above the plane looking down -Z...
+    gGL.translatef(0.f, 0.f, -dist);
+    // ...the plane leans away from the viewer about the screen's horizontal axis...
+    gGL.rotatef(-degrees, 1.f, 0.f, 0.f);
+    // ...and the map's own origin is the view's bottom-left, so bring its centre to the axis.
+    gGL.translatef(-(w * 0.5f), -(h * 0.5f), 0.f);
+
+    return true;
+}
+
+void LLWorldMapView::popTiltProjection()
+{
+    gGL.matrixMode(LLRender::MM_MODELVIEW);
+    gGL.popMatrix();
+    gGL.matrixMode(LLRender::MM_PROJECTION);
+    gGL.popMatrix();
+    gGL.matrixMode(LLRender::MM_MODELVIEW);
+}
+
+void LLWorldMapView::untiltViewPos(F32& x, F32& y) const
+{
+    const F32 degrees = getTiltDegrees();
+    if (degrees <= 0.f)
+    {
+        return;
+    }
+    const LLRect& rect = getRect();
+    const F32 w = (F32)rect.getWidth();
+    const F32 h = (F32)rect.getHeight();
+    if (w <= 0.f || h <= 0.f)
+    {
+        return;
+    }
+
+    const F32 dist  = tiltCameraDistance(h);
+    const F32 theta = degrees * DEG_TO_RAD;
+    const F32 ct    = cosf(theta);
+    const F32 st    = sinf(theta);
+
+    // Undo the projection: a screen point is a ray from the camera; find where it meets the
+    // tilted plane, then express that hit in the plane's own (untilted) coordinates.
+    //
+    // Forward, for a plane point (u, v) measured from the map centre, exactly as the matrices
+    // in pushTiltProjection compose (modelview = T(0,0,-dist) * Rx(-theta) * T(-w/2,-h/2,0)):
+    //     eye      = (u, v*ct, -v*st - dist)
+    //     depth    = dist + v*st          (so +v, the top of the map, is FURTHER away)
+    //     screen   = (u, v*ct) * dist / depth        [+ centre]
+    // Inverting the y row for v:
+    //     sy = v*ct*dist / (dist + v*st)
+    //     v  = sy*dist / (ct*dist - sy*st)
+    const F32 sx = x - (w * 0.5f);
+    const F32 sy = y - (h * 0.5f);
+
+    const F32 denom = ct * dist - sy * st;
+    if (fabsf(denom) < 1e-4f)
+    {
+        return;   // looking along the plane; no sane answer, leave the point alone
+    }
+    const F32 v = sy * dist / denom;
+    const F32 depth = dist + v * st;
+    if (depth <= 1e-4f)
+    {
+        return;   // behind the camera
+    }
+    const F32 u = sx * depth / dist;
+
+    x = u + (w * 0.5f);
+    y = v + (h * 0.5f);
+}
+// </FS:Wolf>
+
 LLVector3d LLWorldMapView::viewPosToGlobal( S32 x, S32 y )
 {
-    x -= llfloor((getRect().getWidth() / 2 + mPanX));
-    y -= llfloor((getRect().getHeight() / 2 + mPanY));
+    // <FS:Wolf/> Undo the tilt first, so a click lands where the user aimed. No-op at tilt 0.
+    F32 fx = (F32)x;
+    F32 fy = (F32)y;
+    untiltViewPos(fx, fy);
 
-    LLVector3 pos_local( (F32)x, (F32)y, 0.f );
+    F32 local_x = fx - (F32)llfloor((getRect().getWidth() / 2 + mPanX));
+    F32 local_y = fy - (F32)llfloor((getRect().getHeight() / 2 + mPanY));
+
+    LLVector3 pos_local( local_x, local_y, 0.f );
 
     pos_local *= ( REGION_WIDTH_METERS / mMapScale );
 

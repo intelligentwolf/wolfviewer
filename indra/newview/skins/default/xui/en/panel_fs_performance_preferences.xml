@@ -276,7 +276,7 @@ Faster
     slider_label.halign="right"
     layout="topleft"
     min_val="32"
-    max_val="1024"
+    max_val="4096"
     name="draw_distance"
     left_pad="5"
     width="310" />

@@ -621,6 +621,8 @@ void LLViewerRegionImpl::requestSimulatorFeatureCoro(std::string url, U64 region
 
 }
 
+
+
 LLViewerRegion::LLViewerRegion(const U64 &handle,
                                const LLHost &host,
                                const U32 grids_per_region_edge,
@@ -682,20 +684,44 @@ LLViewerRegion::LLViewerRegion(const U64 &handle,
 
     mImpl->mLandp = new LLSurface('l', NULL);
 
+    // <FS:Wolf> REVERTED: do not coarsen the terrain grid.
+    //
+    // Reducing grid points per patch looked like a cheap way to bound terrain memory, and it did
+    // cut the height/normal/compositor arrays from 12.5 GB to 195 MB at 25600 m. It was still
+    // wrong, on three counts, and it is left here only as a record of why not to try it again:
+    //
+    //  1. IT BREAKS TERRAIN RENDERING. LLPatchVertexArray::create builds the render-level and
+    //     render-stride tables from patch_width (llpatchvertexarray.cpp:86-99), so 2 grids per
+    //     patch yields tables covering strides 1..2 — while LLSurfacePatch::updateVisibility
+    //     asks for up to 2*grids_per_patch_edge (llsurfacepatch.cpp:1231), reading
+    //     mRenderLevelp[4] out of bounds. The result is no terrain geometry at all.
+    //  2. It bounds the wrong thing. The arrays are ~195 MB of a ~16 GB total; the real cost is
+    //     one LLSurfacePatch + LLVOSurfacePatch + LLDrawable per patch, about 4 GB, and those
+    //     scale with the PATCH count, which this deliberately held fixed.
+    //  3. Halving far enough reaches 1 grid per patch, where the unsigned
+    //     `grids_per_patch_edge - 2` in llsurfacepatch.cpp wraps and writes wild.
+    //
+    // The real fix is a sparse, paged surface: allocate a patch's grid block and its viewer
+    // object on demand and release them when the patch is far away. Until that exists, use the
+    // stock resolution so the terrain at least draws.
+    const U32 terrain_grids_per_edge = grids_per_region_edge;
+    const U32 terrain_grids_per_patch = grids_per_patch_edge;
+    // </FS:Wolf>
+
     // Create the composition layer for the surface
     mImpl->mCompositionp =
         new LLVLComposition(mImpl->mLandp,
-                            grids_per_region_edge,
+                            terrain_grids_per_edge,
 // <FS:CR> Aurora Sim
                             //region_width_meters / grids_per_region_edge);
-                            mWidth / grids_per_region_edge);
+                            mWidth / terrain_grids_per_edge);
 // </FS:CR> Aurora Sim
     mImpl->mCompositionp->setSurface(mImpl->mLandp);
 
     // Create the surfaces
     mImpl->mLandp->setRegion(this);
-    mImpl->mLandp->create(grids_per_region_edge,
-                    grids_per_patch_edge,
+    mImpl->mLandp->create(terrain_grids_per_edge,   // <FS:Wolf/> stock resolution; see the note above
+                    terrain_grids_per_patch,
                     mImpl->mOriginGlobal,
                     mWidth);
 

@@ -1057,6 +1057,53 @@ LLVector3 LLWorld::resolveLandNormalGlobal(const LLVector3d &pos_global)
 }
 
 
+// <FS:Wolf> Is any of this region's land inside the frustum?
+//
+// Both loops in updateVisibilities used to ask the TERRAIN spatial partition's octree for its
+// bounds. That only ever worked because every patch built its LLVOSurfacePatch as the region was
+// constructed, so the octree covered the whole region from the first frame. Patch objects are
+// now created on demand (LLSurfacePatch::ensureVObj), which leaves that octree EMPTY until one
+// exists — and an empty octree root is a 1 m half-extent cube at the AGENT-SPACE ORIGIN
+// (llvieweroctree.cpp:1309-1313 splats centre 0 and size 1).
+//
+// That is a deadlock, and it is what made terrain disappear: the region is only marked visible
+// if the camera is looking at that one cube at the south-west corner of agent space, so
+// updatePatchVisibilities never runs, so no patch ever gets an object, so the octree stays
+// empty. Every arriving terrain packet then logs "No viewer object for this surface patch!"
+// and nothing is ever built. Whether it happened at all came down to which way the camera
+// faced at login, which is why one region looked fine and the next had no ground.
+//
+// The region's own footprint is what this test actually wants. It does not depend on how much
+// of the region has been built yet, it is the same box the octree used to converge on, and it
+// is a handful of arithmetic rather than an octree walk.
+static bool regionLandInFrustum(LLViewerRegion* regionp)
+{
+    const LLSurface& land = regionp->getLand();
+
+    F32 min_z = land.getMinZ();
+    F32 max_z = land.getMaxZ();
+    if (!land.hasZData() || max_z < min_z)
+    {
+        // Heights have not arrived yet. Span the whole legal build range rather than guess, so
+        // a region can never be culled before it has had the chance to say where its ground is.
+        min_z = 0.f;
+        max_z = LLWorld::getInstance()->getRegionMaxHeight();
+    }
+
+    const LLVector3 origin = regionp->getOriginAgent();
+    const F32 half_edge = regionp->getWidth() * 0.5f;
+
+    const LLVector4a center(origin.mV[VX] + half_edge,
+                            origin.mV[VY] + half_edge,
+                            origin.mV[VZ] + 0.5f * (min_z + max_z));
+    const LLVector4a half_extents(half_edge,
+                                  half_edge,
+                                  llmax(0.5f * (max_z - min_z), 1.f));
+
+    return LLViewerCamera::getInstance()->AABBInFrustum(center, half_extents);
+}
+// </FS:Wolf>
+
 void LLWorld::updateVisibilities()
 {
     F32 cur_far_clip = LLViewerCamera::getInstance()->getFar();
@@ -1068,16 +1115,11 @@ void LLWorld::updateVisibilities()
         region_list_t::iterator curiter = iter++;
         LLViewerRegion* regionp = *curiter;
 
-        LLSpatialPartition* part = regionp->getSpatialPartition(LLViewerRegion::PARTITION_TERRAIN);
-        if (part)
+        // <FS:Wolf/> was the terrain octree's bounds; see regionLandInFrustum above
+        if (regionLandInFrustum(regionp))
         {
-            LLSpatialGroup* group = (LLSpatialGroup*) part->mOctree->getListener(0);
-            const LLVector4a* bounds = group->getBounds();
-            if (LLViewerCamera::getInstance()->AABBInFrustum(bounds[0], bounds[1]))
-            {
-                mCulledRegionList.erase(curiter);
-                mVisibleRegionList.push_back(regionp);
-            }
+            mCulledRegionList.erase(curiter);
+            mVisibleRegionList.push_back(regionp);
         }
     }
 
@@ -1092,21 +1134,16 @@ void LLWorld::updateVisibilities()
             continue;
         }
 
-        LLSpatialPartition* part = regionp->getSpatialPartition(LLViewerRegion::PARTITION_TERRAIN);
-        if (part)
+        // <FS:Wolf/> was the terrain octree's bounds; see regionLandInFrustum above
+        if (regionLandInFrustum(regionp))
         {
-            LLSpatialGroup* group = (LLSpatialGroup*) part->mOctree->getListener(0);
-            const LLVector4a* bounds = group->getBounds();
-            if (LLViewerCamera::getInstance()->AABBInFrustum(bounds[0], bounds[1]))
-            {
-                regionp->calculateCameraDistance();
-                regionp->getLand().updatePatchVisibilities(gAgent);
-            }
-            else
-            {
-                mVisibleRegionList.erase(curiter);
-                mCulledRegionList.push_back(regionp);
-            }
+            regionp->calculateCameraDistance();
+            regionp->getLand().updatePatchVisibilities(gAgent);
+        }
+        else
+        {
+            mVisibleRegionList.erase(curiter);
+            mCulledRegionList.push_back(regionp);
         }
     }
 

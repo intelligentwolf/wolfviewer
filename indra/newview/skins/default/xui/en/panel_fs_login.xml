@@ -223,7 +223,7 @@
         name="links_login_panel"
         layout="topleft"
         width="290"
-        height="80">
+        height="100">
       <text
           follows="left|bottom"
           font="SansSerifSmall"
@@ -244,6 +244,17 @@
           top="26"
           width="280">
         Forgot your username or password?
+      </text>
+      <!-- <FS:Wolf/> The grid's Patreon, same link as WolfStorm's login page. -->
+      <text
+          follows="left|bottom"
+          font="SansSerifSmall"
+          text_color="PatreonLinkColor"
+          height="16"
+          name="patreon_text"
+          top="42"
+          width="280">
+        Support us on Patreon
       </text>
       <button
           follows="left|bottom"
@@ -330,7 +341,7 @@
           name="mode_combo"
           width="110">
            <combo_box.item
-            label="Firestorm"
+            label="WolfViewer"
             name="Firestorm"
             value="settings_firestorm.xml" />
            <combo_box.item

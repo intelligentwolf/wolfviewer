@@ -7479,6 +7479,17 @@
       <key>Value</key>
       <integer>1</integer>
     </map>
+    <key>MapTiltDegrees</key>
+    <map>
+      <key>Comment</key>
+      <string>Tilt of the world map, in degrees. 0 is the flat overhead view; higher leans the map away from you like a 3D map. Clamped to 60.</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>F32</string>
+      <key>Value</key>
+      <real>0.0</real>
+    </map>
     <key>MapShowLandForSale</key>
     <map>
       <key>Comment</key>
@@ -12251,6 +12262,17 @@ Change of this parameter will affect the layout of buttons in notification toast
       <string>U32</string>
       <key>Value</key>
       <integer>0</integer>
+    </map>
+    <key>RenderAvatarDrawDistance</key>
+    <map>
+      <key>Comment</key>
+      <string>How far away other avatars are still drawn, in metres. Never exceeds the draw distance. 256 is the historical fixed value; raise it to see people across a large varregion, at the cost of drawing far more avatars.</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>F32</string>
+      <key>Value</key>
+      <real>256.0</real>
     </map>
     <key>RenderFarClip</key>
     <map>

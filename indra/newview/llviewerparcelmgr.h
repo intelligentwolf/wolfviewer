@@ -103,6 +103,8 @@ public:
     S32 getSelectedArea() const;
 
     void resetSegments(U8* segments);
+    // <FS:Wolf/> (Re)size every buffer that is indexed by mParcelsPerEdge.
+    void allocateParcelBuffers(S32 parcels_per_edge);
 
     // write a rectangle's worth of line segments into the highlight array
     void writeHighlightSegments(F32 west, F32 south, F32 east, F32 north);
@@ -374,6 +376,10 @@ private:
     // WEST_MASK = draw west edge
     // SOUTH_MASK = draw south edge
     S32                         mParcelsPerEdge;
+    // <FS:Wolf/> How many parcels per edge the buffers below were actually sized for. They used
+    // to be allocated once for an assumed 8192 m maximum while mParcelsPerEdge tracked the real
+    // region, so a larger varregion overran every one of them. See allocateParcelBuffers.
+    S32                         mParcelBufferParcelsPerEdge = 0;
     U8*                         mHighlightSegments;
     U8*                         mAgentParcelOverlay;
 

@@ -45,9 +45,9 @@
     width="386"/>
    <panel
     follows="right|bottom"
-    height="20"
+    height="40"
 	left="195"
-    min_height="20"
+    min_height="40"
     bottom="487"
     width="185"
 	background_visible="false"
@@ -74,6 +74,34 @@
      name="zoom slider"
      show_text="false"
      width="150" />
+    <!-- <FS:Wolf/> Map tilt. 0 is the flat overhead view; the slider leans the map away from
+         you, the way a 3D map does. Bound straight to the setting, so no code is needed. -->
+    <text
+     type="string"
+     length="1"
+     follows="left|bottom"
+     height="16"
+     layout="topleft"
+     left="19"
+     name="tilt_label"
+     top_pad="4"
+     width="24">
+      Tilt
+    </text>
+    <slider
+     control_name="MapTiltDegrees"
+     follows="right|bottom"
+     height="16"
+     increment="1"
+     initial_value="0"
+     layout="topleft"
+     left_pad="4"
+     max_val="60"
+     min_val="0"
+     name="tilt slider"
+     show_text="false"
+     tool_tip="Tilt the map, like a 3D map. 0 is flat overhead."
+     width="130" />
     </panel>
    </layout_panel>
 
@@ -654,7 +682,7 @@
         initial_value="128"
         layout="topleft"
         left_pad="4"
-        max_val="8191"
+        max_val="65535"
         min_val="0"
         name="teleport_coordinate_x"
         width="44" >
@@ -669,7 +697,7 @@
         initial_value="128"
         layout="topleft"
         left_pad="4"
-        max_val="8191"
+        max_val="65535"
         min_val="0"
         name="teleport_coordinate_y"
 		width="44">

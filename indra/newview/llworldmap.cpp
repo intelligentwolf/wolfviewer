@@ -459,7 +459,8 @@ bool LLWorldMap::insertRegion(U32 x_world, U32 y_world, U16 x_size, U16 y_size, 
     if (accesscode == 255)
     {
         // Checks if the track point is in it and invalidates it if it is
-        if (LLWorldMap::getInstance()->isTrackingInRectangle( x_world, y_world, x_world + REGION_WIDTH_UNITS, y_world + REGION_WIDTH_UNITS))
+        // <FS:Wolf/> x_size/y_size, not REGION_WIDTH_UNITS — see the note on the second call below.
+        if (LLWorldMap::getInstance()->isTrackingInRectangle( x_world, y_world, x_world + x_size, y_world + y_size))
         {
             LLWorldMap::getInstance()->setTrackingInvalid();
         }
@@ -487,7 +488,16 @@ bool LLWorldMap::insertRegion(U32 x_world, U32 y_world, U16 x_size, U16 y_size, 
 // </FS:CR> Aurora Sim
 
         // Handle the location tracking (for teleport, UI feedback and info display)
-        if (LLWorldMap::getInstance()->isTrackingInRectangle( x_world, y_world, x_world + REGION_WIDTH_UNITS, y_world + REGION_WIDTH_UNITS))
+        //
+        // <FS:Wolf> The tracked point has to be tested against the region's REAL size.
+        //
+        // This asked whether the point fell in a 256 x 256 box at the region's south-west
+        // corner, while x_size/y_size — the region's actual extent, already a parameter — sat
+        // unused two lines above. On a varregion, clicking anywhere past the first 256 m failed
+        // the test, so setTrackingValid() was never reached and the world map sat on
+        // "Loading..." for ever. On Wolf Territories' 25600 m region that is 99.99% of it.
+        if (LLWorldMap::getInstance()->isTrackingInRectangle( x_world, y_world, x_world + x_size, y_world + y_size))
+        // </FS:Wolf>
         {
             if (siminfo->isDown())
             {

@@ -205,6 +205,22 @@ private:
 
     void setScale(F32 scale, bool snap = true);
 
+    // <FS:Wolf> Google-Maps-style tilt of the map plane.
+    //
+    // A perspective camera is placed one view-height above the map and the plane is rotated
+    // about the screen's horizontal axis. At 0 degrees the projection reproduces the flat
+    // ortho view EXACTLY, 1:1, so the map is unchanged unless the user asks for a tilt.
+    // The GPU does the projection, which is what keeps the region tiles perspective-correct;
+    // untiltViewPos does the same maths backwards so clicking still lands where you aimed.
+    /** Current tilt in degrees, 0 when the feature is off. */
+    static F32 getTiltDegrees();
+    /** Set up the tilted projection. Returns false if the tilt is zero and nothing was pushed. */
+    bool pushTiltProjection();
+    void popTiltProjection();
+    /** Screen point -> the point on the untilted map plane it corresponds to. */
+    void untiltViewPos(F32& x, F32& y) const;
+    // </FS:Wolf>
+
     static F32 scaleFromZoom(F32 zoom);
     static F32 zoomFromScale(F32 scale);
 

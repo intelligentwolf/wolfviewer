@@ -36,7 +36,7 @@
     layout="topleft"
     left="30"
     min_val="64"
-    max_val="512"
+    max_val="4096"
     name="DrawDistance"
     top_delta="16"
     width="330">
@@ -53,6 +53,37 @@
     width="20">
      m
   </text> 
+  <!-- <FS:Wolf/> Avatar draw distance. Was fixed at 256 m; never exceeds the draw distance above. -->
+  <slider
+    control_name="RenderAvatarDrawDistance"
+    decimal_digits="0"
+    follows="left|top"
+    height="16"
+    increment="8"
+    initial_value="256"
+    label="Avatar draw distance:"
+    label_width="185"
+    layout="topleft"
+    left="30"
+    min_val="16"
+    max_val="4096"
+    name="AvatarDrawDistance"
+    tool_tip="How far away other avatars are still drawn. Never more than the draw distance above."
+    top_delta="16"
+    width="330">
+    </slider>
+  <text
+    type="string"
+    length="1"
+    follows="left|top"
+    height="16"
+    layout="topleft"
+    name="AvatarDrawDistanceMeterText"
+    top_delta="0"
+    left_delta="330"
+    width="20">
+     m
+  </text>
   <slider
     control_name="RenderMaxPartCount"
     decimal_digits="0"

@@ -351,7 +351,7 @@
       <combo_box.drop_down_button
         font="SansSerifLarge"/>
       <combo_box.item
-        label="Firestorm"
+        label="WolfViewer"
         name="Firestorm"
         value="settings_firestorm.xml" />
       <combo_box.item
@@ -410,6 +410,18 @@
       top_pad="5"
       width="140">
         Forgot password?
+    </text>
+    <!-- <FS:Wolf/> The grid's Patreon, same link as WolfStorm's login page. -->
+    <text
+      follows="left|top|right"
+      font="SansSerifMedium"
+      text_color="PatreonLinkColor"
+      left_delta="0"
+      height="16"
+      name="patreon_text"
+      top_pad="5"
+      width="140">
+        Support us on Patreon
     </text>
   </layout_panel>
   <layout_panel

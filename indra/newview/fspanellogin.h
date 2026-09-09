@@ -103,6 +103,7 @@ private:
     static void onClickConnect(void*);
     static void onClickNewAccount(void*);
     static void onClickVersion(void*);
+    static void onClickPatreon(void*);   // <FS:Wolf/>
     static void onClickForgotPassword(void*);
     static void onClickHelp(void*);
     static void onPassKey(LLLineEditor* caller, void* user_data);

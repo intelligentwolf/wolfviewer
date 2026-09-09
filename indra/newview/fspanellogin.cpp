@@ -64,6 +64,7 @@
 #include "llviewerwindow.h"         // to link into child list
 #include "lluictrlfactory.h"
 #include "llweb.h"
+#include "wolfgrid.h" // <FS:Wolf/> PATREON_URL
 #include "llmediactrl.h"
 #include "llrootview.h"
 
@@ -323,6 +324,13 @@ FSPanelLogin::FSPanelLogin(const LLRect &rect,
 
     LLTextBox* forgot_password_text = getChild<LLTextBox>("forgot_password_text");
     forgot_password_text->setClickedCallback(onClickForgotPassword, NULL);
+
+    // <FS:Wolf/> findChild, not getChild: both login panels carry it, but a third-party skin
+    // supplying its own panel_fs_login.xml would not, and a missing link must not break login.
+    if (LLTextBox* patreon_text = findChild<LLTextBox>("patreon_text"))
+    {
+        patreon_text->setClickedCallback(onClickPatreon, NULL);
+    }
 
     loadLoginPage();
 
@@ -1114,6 +1122,16 @@ void FSPanelLogin::onClickVersion(void*)
 {
     LLFloaterReg::showInstance("sl_about");
 }
+
+// <FS:Wolf> The grid's Patreon. Deliberately loadURLExternal, not Internal: this is a payment
+// site, and it belongs in the user's own browser where they can see the address bar and their
+// own saved logins, not in an embedded view inside the viewer.
+//static
+void FSPanelLogin::onClickPatreon(void*)
+{
+    LLWeb::loadURLExternal(WolfGrid::PATREON_URL);
+}
+// </FS:Wolf>
 
 //static
 void FSPanelLogin::onClickForgotPassword(void*)

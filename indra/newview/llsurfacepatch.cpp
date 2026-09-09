@@ -98,10 +98,11 @@ void LLSurfacePatch::dirty()
     {
         mVObjp->dirtyGeom();
     }
-    else
-    {
-        LL_WARNS("Terrain") << "No viewer object for this surface patch!" << LL_ENDL;
-    }
+    // <FS:Wolf/> A patch with no viewer object is now the NORMAL state for terrain the camera
+    // has not reached yet — objects are built on demand by ensureVObj(). It used to be a real
+    // fault worth a warning, and while it was one this logged 42,890 lines in thirty seconds of
+    // one login. There is nothing to do here: ensureVObj re-dirties the patch when it builds
+    // the object, so the geometry this call would have marked is rebuilt then.
 
     mDirtyZStats = true;
     mHeightsGenerated = false;
@@ -114,19 +115,52 @@ void LLSurfacePatch::dirty()
 }
 
 
+// <FS:Wolf> A patch's viewer object is created when the patch is first needed, not up front.
+//
+// This used to build an LLVOSurfacePatch and its LLDrawable for EVERY patch as the region was
+// constructed. That is 1080 + 304 bytes each: nothing for a standard region's 256 patches, but
+// 2,560,000 patches on a 25600 m varregion, so about 4 GB allocated synchronously before the
+// avatar had even rezzed — and a UUID generated and an object-list and octree insert for each.
+//
+// Nothing forced that to be eager: every use of mVObjp in this file was already null-guarded,
+// and updateVisibility simply returned early without one. So the object is now made by
+// ensureVObj(), which updateVisibility calls for the patches the bounded scan actually reaches,
+// and the cost becomes proportional to where the user goes rather than to the region's area.
 void LLSurfacePatch::setSurface(LLSurface *surfacep)
 {
     mSurfacep = surfacep;
-    if (mVObjp == (LLVOSurfacePatch *)NULL)
-    {
-        llassert(mSurfacep->mType == 'l');
-
-        mVObjp = (LLVOSurfacePatch *)gObjectList.createObjectViewer(LLViewerObject::LL_VO_SURFACE_PATCH, mSurfacep->getRegion());
-        mVObjp->setPatch(this);
-        mVObjp->setPositionRegion(mCenterRegion);
-        gPipeline.createObject(mVObjp);
-    }
+    llassert(mSurfacep->mType == 'l');
 }
+
+bool LLSurfacePatch::ensureVObj()
+{
+    if (mVObjp.notNull())
+    {
+        return true;
+    }
+    if (!mSurfacep || !mSurfacep->getRegion())
+    {
+        return false;
+    }
+
+    mVObjp = (LLVOSurfacePatch *)gObjectList.createObjectViewer(LLViewerObject::LL_VO_SURFACE_PATCH, mSurfacep->getRegion());
+    if (mVObjp.isNull())
+    {
+        return false;
+    }
+    mVObjp->setPatch(this);
+    mVObjp->setPositionRegion(mCenterRegion);
+    gPipeline.createObject(mVObjp);
+    mSurfacep->mBuiltPatchObject = true;
+
+    // This patch may already be holding terrain data that updateTexture declined to build while
+    // there was nothing to build it into. Put it back on the dirty list so it gets made now.
+    mSTexUpdate = true;
+    dirty();
+
+    return true;
+}
+// </FS:Wolf>
 
 void LLSurfacePatch::disconnectNeighbor(LLSurface *surfacep)
 {
@@ -1032,6 +1066,15 @@ bool LLSurfacePatch::updateTexture()
 {
     if (mSTexUpdate)        //  Update texture as needed
     {
+        // <FS:Wolf/> No viewer object means this patch is out of range and has nothing to build
+        // into. Report "done" so it LEAVES the dirty list — returning false here would pin it
+        // there for ever, and LLSurface::idleUpdate walks that whole set every frame running
+        // updateNormals and updateVerticalStats unconditionally. ensureVObj re-dirties the patch
+        // when it finally comes into view, so nothing is lost.
+        if (mVObjp.isNull())
+        {
+            return true;
+        }
         F32 meters_per_grid = getSurface()->getMetersPerGrid();
         F32 grids_per_patch_edge = (F32)getSurface()->getGridsPerPatchEdge();
 
@@ -1191,7 +1234,8 @@ void LLSurfacePatch::connectNeighbor(LLSurfacePatch *neighbor_patchp, const U32 
 
 void LLSurfacePatch::updateVisibility()
 {
-    if (mVObjp.isNull())
+    // <FS:Wolf/> This is the moment a patch is genuinely needed, so build its object here.
+    if (!ensureVObj())
     {
         return;
     }

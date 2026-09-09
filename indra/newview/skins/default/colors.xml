@@ -32,6 +32,10 @@
   <color
 	 name="AccentColor"
 	 value="0.75 0.92 0.49 1.0" />
+	<!-- <FS:Wolf/> Patreon brand coral #f96854, matching WolfStorm's login link (index.php:565). -->
+	<color
+	 name="PatreonLinkColor"
+	 value="0.976 0.408 0.329 1.0" />
 	<color
 	 name="EmphasisColor"
 	 value="0.56 0.36 0.25 1.0" />

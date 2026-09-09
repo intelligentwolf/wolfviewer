@@ -146,39 +146,31 @@ LLViewerParcelMgr::LLViewerParcelMgr()
     mHoverParcel = new LLParcel();
     mCollisionParcel = new LLParcel();
 
-// <FS:CR> Aurora Sim
-    // Max region size on Aurora-Sim, 8192, just creating larger buffers, it will still work on Second Life and Opensim
-    F32 region_size = 8192.f;
-
-    mParcelsPerEdge = S32(  region_size / PARCEL_GRID_STEP_METERS );
-    //mParcelsPerEdge = S32(    REGION_WIDTH_METERS / PARCEL_GRID_STEP_METERS );
-// </FS:CR> Aurora Sim
-    mHighlightSegments = new U8[(mParcelsPerEdge+1)*(mParcelsPerEdge+1)];
-    resetSegments(mHighlightSegments);
-
-// [SL:KB] - Patch: World-MinimapOverlay | Checked: 2012-06-20 (Catznip-3.3)
-    mCollisionBitmap = new U8[getCollisionBitmapSize()];
-    memset(mCollisionBitmap, 0, getCollisionBitmapSize());
-// [/SL:KB]
-
-    mCollisionSegments = new U8[(mParcelsPerEdge+1)*(mParcelsPerEdge+1)];
-    resetSegments(mCollisionSegments);
+// <FS:Wolf> Size the parcel buffers for the region we are actually in, not for a guess.
+//
+// This used to allocate once for an assumed 8192 m maximum ("Max region size on Aurora-Sim")
+// and then let init() move mParcelsPerEdge to the real region's value WITHOUT reallocating.
+// Every buffer below is indexed by mParcelsPerEdge, so any region bigger than that assumption
+// overran all of them. On Wolf Territories' 25600 m "Dire Wolf" the agent parcel overlay needs
+// 6400 x 6400 = 40,960,000 bytes and had 2048 x 2048 = 4,194,304, so
+// LLViewerParcelMgr::writeAgentParcelFromBitmap wrote 35 MB past the end of the heap block the
+// moment the first ParcelProperties arrived. That corrupted the heap and the viewer died in an
+// unrelated thread, which is why the crash looked like a WebRTC fault.
+//
+// allocateParcelBuffers grows them on demand instead. 2048 is kept as the starting size so the
+// common case still allocates exactly once, at exactly the size it always did.
+    mHighlightSegments = NULL;
+    mCollisionBitmap = NULL;
+    mCollisionSegments = NULL;
+    mAgentParcelOverlay = NULL;
+    allocateParcelBuffers(S32(8192.f / PARCEL_GRID_STEP_METERS));
+// </FS:Wolf>
 
     // JC: Resolved a merge conflict here, eliminated
     // mBlockedImage->setAddressMode(LLTexUnit::TAM_WRAP);
     // because it is done in llviewertexturelist.cpp
     mBlockedImage = LLViewerTextureManager::getFetchedTextureFromFile("world/NoEntryLines.png", FTT_LOCAL_FILE, true, LLGLTexture::BOOST_UI);
     mPassImage = LLViewerTextureManager::getFetchedTextureFromFile("world/NoEntryPassLines.png", FTT_LOCAL_FILE, true, LLGLTexture::BOOST_UI);
-
-    S32 overlay_size = mParcelsPerEdge * mParcelsPerEdge / PARCEL_OVERLAY_CHUNKS;
-    sPackedOverlay = new U8[overlay_size];
-
-    mAgentParcelOverlay = new U8[mParcelsPerEdge * mParcelsPerEdge];
-    S32 i;
-    for (i = 0; i < mParcelsPerEdge * mParcelsPerEdge; i++)
-    {
-        mAgentParcelOverlay[i] = 0;
-    }
 
 // <FS:CR> Aurora Sim
     mParcelsPerEdge = S32(  REGION_WIDTH_METERS / PARCEL_GRID_STEP_METERS );
@@ -190,8 +182,70 @@ LLViewerParcelMgr::LLViewerParcelMgr()
 // <FS:CR> Aurora Sim
 void LLViewerParcelMgr::init(F32 region_size)
 {
-    mParcelsPerEdge = S32(  region_size / PARCEL_GRID_STEP_METERS );
+    // <FS:Wolf/> Grow the buffers FIRST. Setting mParcelsPerEdge alone, as this used to do, left
+    // every parcel buffer sized for the previous region — see allocateParcelBuffers.
+    const S32 parcels_per_edge = S32( region_size / PARCEL_GRID_STEP_METERS );
+    allocateParcelBuffers(parcels_per_edge);
+    mParcelsPerEdge = parcels_per_edge;
 }
+
+// <FS:Wolf> (Re)size every buffer indexed by mParcelsPerEdge, growing only.
+//
+// NOTE this sets mParcelsPerEdge as part of its job: resetSegments() and getCollisionBitmapSize()
+// both read it to work out how much to touch, so it has to be correct while they run. Callers set
+// their own final value afterwards.
+void LLViewerParcelMgr::allocateParcelBuffers(S32 parcels_per_edge)
+{
+    if (parcels_per_edge <= mParcelBufferParcelsPerEdge)
+    {
+        return;   // what we already hold is big enough; never shrink, region crossings are common
+    }
+
+    mParcelsPerEdge = parcels_per_edge;
+
+    const S32 segment_count = (parcels_per_edge + 1) * (parcels_per_edge + 1);
+    const S32 overlay_count = parcels_per_edge * parcels_per_edge;
+
+    // Allocate everything BEFORE freeing anything. A throw part way through a
+    // delete-then-new sequence would leave freed pointers in the members for the destructor to
+    // free a second time; unique_ptr means a failure here leaves the old buffers untouched.
+    std::unique_ptr<U8[]> highlight(new U8[segment_count]);
+    std::unique_ptr<U8[]> collision_segments(new U8[segment_count]);
+    std::unique_ptr<U8[]> collision_bitmap(new U8[getCollisionBitmapSize()]);
+    std::unique_ptr<U8[]> packed_overlay(new U8[overlay_count / PARCEL_OVERLAY_CHUNKS]);
+    std::unique_ptr<U8[]> agent_overlay(new U8[overlay_count]);
+
+    delete[] mHighlightSegments;
+    mHighlightSegments = highlight.release();
+    resetSegments(mHighlightSegments);
+
+    delete[] mCollisionSegments;
+    mCollisionSegments = collision_segments.release();
+    resetSegments(mCollisionSegments);
+
+// [SL:KB] - Patch: World-MinimapOverlay | Checked: 2012-06-20 (Catznip-3.3)
+    delete[] mCollisionBitmap;
+    mCollisionBitmap = collision_bitmap.release();
+    memset(mCollisionBitmap, 0, getCollisionBitmapSize());
+// [/SL:KB]
+
+    delete[] sPackedOverlay;
+    sPackedOverlay = packed_overlay.release();
+
+    delete[] mAgentParcelOverlay;
+    mAgentParcelOverlay = agent_overlay.release();
+    memset(mAgentParcelOverlay, 0, overlay_count);
+
+    mParcelBufferParcelsPerEdge = parcels_per_edge;
+
+    LL_INFOS() << "Parcel buffers sized for " << parcels_per_edge << " parcels per edge ("
+               << (parcels_per_edge * PARCEL_GRID_STEP_METERS) << " m region), "
+               << (((size_t)segment_count * 2 + (size_t)overlay_count
+                    + (size_t)overlay_count / PARCEL_OVERLAY_CHUNKS
+                    + getCollisionBitmapSize()) >> 20)
+               << " MB" << LL_ENDL;
+}
+// </FS:Wolf>
 // </FS:CR> Aurora Sim
 
 LLViewerParcelMgr::~LLViewerParcelMgr()

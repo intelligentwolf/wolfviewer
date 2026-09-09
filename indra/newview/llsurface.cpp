@@ -1027,13 +1027,20 @@ void LLSurface::decompressDCTPatch(LLBitPack &bitpack, LLGroupHeader *gopp, bool
     //
     // A large varregion is given fewer grid points per patch than the wire sends samples, to
     // keep terrain memory bounded (llviewerregion.cpp chooseTerrainGridResolution). The
-    // decompressor writes patch_size x patch_size values at whatever stride it is handed, so on
-    // a coarse grid it must NOT be pointed straight at the surface: it would overrun the patch
-    // into its neighbours. Decompress into a scratch block at full resolution instead and take
-    // every step-th sample. The step is always a whole number because the resolution is only
-    // ever halved.
+    // decompressor writes patch_size x patch_size values at whatever stride it is handed, so if
+    // the grid is coarser than the wire it must NOT be pointed straight at the surface: it would
+    // overrun the patch into its neighbours. Decompress into a scratch block at full resolution
+    // instead and take every step-th sample.
+    //
+    // patch_size arrives off the wire, so this is a bounds guard and not just a resolution
+    // convenience: a sim sending a larger patch_size than this surface has grid points per patch
+    // would otherwise write past the end of the patch.
+    //
+    // grids_per_patch is taken into an S32 because mGridsPerPatchEdge is unsigned and everything
+    // it is compared and divided against here is signed; MSVC makes that mismatch a hard error.
     const S32 wire_samples = gopp->patch_size;
-    const bool downsample = (mGridsPerPatchEdge < wire_samples);
+    const S32 grids_per_patch = (S32)mGridsPerPatchEdge;
+    const bool downsample = (grids_per_patch < wire_samples);
     gopp->stride = downsample ? wire_samples : mGridsPerEdge;
     // </FS:Wolf>
     set_group_of_patch_header(gopp);
@@ -1088,13 +1095,14 @@ void LLSurface::decompressDCTPatch(LLBitPack &bitpack, LLGroupHeader *gopp, bool
             F32 scratch[LARGE_PATCH_SIZE * LARGE_PATCH_SIZE];
             decompress_patch(scratch, patch, &ph);
 
-            const S32 step = wire_samples / mGridsPerPatchEdge;
+            const S32 step = (grids_per_patch > 0) ? (wire_samples / grids_per_patch) : 1;
+            const S32 surface_stride = (S32)mGridsPerEdge;
             F32* dst = patchp->getDataZ();
-            for (S32 jj = 0; jj < mGridsPerPatchEdge; jj++)
+            for (S32 jj = 0; jj < grids_per_patch; jj++)
             {
-                for (S32 ii = 0; ii < mGridsPerPatchEdge; ii++)
+                for (S32 ii = 0; ii < grids_per_patch; ii++)
                 {
-                    dst[ii + jj * mGridsPerEdge] = scratch[ii * step + jj * step * wire_samples];
+                    dst[ii + jj * surface_stride] = scratch[ii * step + jj * step * wire_samples];
                 }
             }
         }

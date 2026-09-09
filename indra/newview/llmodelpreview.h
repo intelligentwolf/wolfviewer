@@ -251,6 +251,8 @@ private:
     LLPointer<LLModel> mDefaultPhysicsShapeP{nullptr};
 
     S32 mNumOfFetchingTextures;
+    // <FS:Wolf/> "waiting for textures" has been said once for this wait; see updateStatusMessages.
+    bool mReportedTexturesNotReady = false;
     bool mTexturesNeedScaling;
 
     typedef enum

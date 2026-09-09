@@ -99,7 +99,12 @@ public:
         FFLOAD_HDRI = 17,
 
         // Firestorm additions
-        FFLOAD_IMPORT = 50
+        FFLOAD_IMPORT = 50,
+
+        // WolfViewer: the formats WolfMeshUpload reads (wolfmeshupload.h). Deliberately not
+        // FFLOAD_MODEL, which offers .dae — a format the Wolf uploader cannot build a .llmesh
+        // from — and does not offer .obj, which it can.
+        FFLOAD_WOLF_MODEL = 51
     };
 
     enum ESaveFilter
@@ -213,7 +218,10 @@ private:
     {
      eSaveFile, eOpenFile, eOpenMultiple
     };
-    bool openFileDialog( int32_t filter, bool blocking, EType aType );
+    // <FS:Wolf/> proposed_name is the filename a Save dialog should start with. It was being
+    // dropped on the floor by getSaveFile; the native chooser can actually use it.
+    bool openFileDialog( int32_t filter, bool blocking, EType aType,
+                         const std::string& proposed_name = std::string() );
 #endif
 
     std::vector<std::string> mFiles;

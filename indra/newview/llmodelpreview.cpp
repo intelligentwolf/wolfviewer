@@ -3469,14 +3469,38 @@ void LLModelPreview::updateStatusMessages()
     if (mModelNoErrors)
     {
         LLMutexLock lock(this);
-        if (mModelLoader)
+        // <FS:Wolf> The texture-readiness gate has to run whether or not the loader is alive.
+        //
+        // This test used to sit inside `if (mModelLoader)`. mModelLoader is set to NULL at the
+        // end of loadModelCallback (:1583), which runs when the GEOMETRY has finished loading -
+        // while the textures are still being fetched asynchronously and mNumOfFetchingTextures
+        // is still counting down in textureLoadedCallback (:5231-5234). By the time the user can
+        // press Upload the loader is therefore always gone and the gate never ran, so a model
+        // whose textures had not arrived uploaded with empty texture assets and blank faces
+        // (llmeshrepository.cpp:2938 hasSavedRawImage() false -> a zero-byte texture_list entry).
+        // The mutex is still held because this function reads model state, not because of the
+        // loader.
+        if (!areTexturesReady() && mFMP->childGetValue("upload_textures").asBoolean())
         {
-            if (!areTexturesReady() && mFMP->childGetValue("upload_textures").asBoolean())
+            // Some textures are still loading, prevent upload until they are done
+            mModelNoErrors = false;
+            if (!mReportedTexturesNotReady)
             {
-                // Some textures are still loading, prevent upload until they are done
-                mModelNoErrors = false;
+                // Say why the button went grey. Once per wait, because updateStatusMessages runs
+                // on every refresh and the log tab is not a place to spam.
+                mReportedTexturesNotReady = true;
+                std::ostringstream out;
+                out << "Waiting for " << mNumOfFetchingTextures
+                    << " texture(s) to finish loading before the model can be uploaded.";
+                LL_INFOS() << out.str() << LL_ENDL;
+                LLFloaterModelPreview::addStringToLog(out, false);
             }
         }
+        else
+        {
+            mReportedTexturesNotReady = false;
+        }
+        // </FS:Wolf>
     }
 
     // <FS:Beq> Improve the error checking the TO DO here is no longer applicable but not an FS comment so edited to stop it being picked up

@@ -9978,6 +9978,20 @@ Select residents to share with.
 
 See Firestorm.log for details
   </notification>
+
+  <!-- <FS:Wolf> Raised when the model uploader is about to send a texture with no data in it,
+       which used to happen silently and produced a model whose faces were blank. -->
+  <notification
+    name="MeshUploadTexturesNotReady"
+    icon="alert.tga"
+    type="alert">
+[LABEL] was not uploaded: [COUNT] of its textures had not finished loading, so they would have uploaded empty.
+
+Not ready: [TEXTURES]
+
+Wait for the textures to finish loading and press Upload again, or clear "Include textures" to upload the model without them.
+  </notification>
+  <!-- </FS:Wolf> -->
    
   <notification
     name="MeshUploadPermError"

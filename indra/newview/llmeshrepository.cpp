@@ -2701,6 +2701,7 @@ LLMeshUploadThread::LLMeshUploadThread(LLMeshUploadThread::instance_list_t& data
     mMutex = new LLMutex();
     mPendingUploads = 0;
     mFinished = false;
+    mTextureDataMissing = false;   // <FS:Wolf/>
     mOrigin = gAgent.getPositionAgent();
     mHost = gAgent.getRegionHost();
 
@@ -2955,6 +2956,42 @@ void LLMeshUploadThread::packModelIntance(
             {
                 texture_index[texture] = texture_num;
                 std::string str = texture_str.str();
+                // <FS:Wolf> An empty texture here is a failure, not a texture.
+                //
+                // Both guards above fail silently: hasSavedRawImage() is false while a texture
+                // is still fetching or after its saved raw image has been dropped
+                // (llviewertexture.cpp:2505 destroySavedRawImage, reached from
+                // LLLoadedCallbackEntry::cleanUpCallbackList when the preview is torn down), and
+                // convertToUploadFile can return null or an invalid buffer. Either way this used
+                // to register a ZERO-BYTE entry in texture_list that the faces below then point
+                // at with face_entry["image"], so the upload "succeeded" and every face came back
+                // blank. Record it; doWholeModelUpload refuses to send the model.
+                //
+                // include_textures is false for the fee request (:3249), where an empty entry is
+                // expected and correct - it is only counting them - so this only applies to the
+                // real upload (:3195).
+                if (include_textures && str.empty())
+                {
+                    mTextureDataMissing = true;
+                    std::string missing = material.mDiffuseMapFilename;
+                    if (missing.empty())
+                    {
+                        missing = material.mDiffuseMapLabel;
+                    }
+                    if (missing.empty())
+                    {
+                        missing = "(unnamed texture)";
+                    }
+                    if (std::find(mMissingTextureNames.begin(), mMissingTextureNames.end(), missing)
+                        == mMissingTextureNames.end())
+                    {
+                        mMissingTextureNames.push_back(missing);
+                    }
+                    LL_WARNS(LOG_MESH) << "Texture has no data to upload: " << missing
+                                       << " (hasSavedRawImage " << (S32)texture->hasSavedRawImage() << ")"
+                                       << LL_ENDL;
+                }
+                // </FS:Wolf>
                 res["texture_list"][texture_num] = LLSD::Binary(str.begin(), str.end());
                 // store indexes for error handling;
                 texture_list_dest.push_back(material.mDiffuseMapFilename);
@@ -3176,6 +3213,18 @@ void LLMeshUploadThread::generateHulls()
     }
 }
 
+// <FS:Wolf> Raise the "textures not ready" alert on the main thread, and put the same text in
+// the uploader's own log tab so it is still readable after the alert is dismissed.
+static void notify_mesh_textures_not_ready(LLSD args)
+{
+    LLNotificationsUtil::add("MeshUploadTexturesNotReady", args);
+    std::ostringstream out;
+    out << "Upload cancelled: " << args["COUNT"].asString()
+        << " texture(s) had not finished loading (" << args["TEXTURES"].asString() << ").";
+    LLFloaterModelPreview::addStringToLog(out, true);
+}
+// </FS:Wolf>
+
 void LLMeshUploadThread::doWholeModelUpload()
 {
     LL_DEBUGS(LOG_MESH) << "Starting model upload.  Instances:  " << mInstance.size() << LL_ENDL;
@@ -3184,6 +3233,10 @@ void LLMeshUploadThread::doWholeModelUpload()
     {
         LL_WARNS(LOG_MESH) << "Missing mesh upload capability, unable to upload, fee request failed."
                            << LL_ENDL;
+        // <FS:Wolf> Without this the thread is never reaped: LLMeshRepository::update only
+        // deletes an upload thread once finished() is true (the reap loop, :4695-4706).
+        mFinished = true;
+        // </FS:Wolf>
     }
     else
     {
@@ -3192,7 +3245,44 @@ void LLMeshUploadThread::doWholeModelUpload()
 
         mModelData = LLSD::emptyMap();
         mTextureFiles.clear();
+        mTextureDataMissing = false;          // <FS:Wolf/>
+        mMissingTextureNames.clear();         // <FS:Wolf/>
         wholeModelToLLSD(mModelData, mTextureFiles, true);
+
+        // <FS:Wolf> Refuse to upload a model whose textures serialised to nothing.
+        //
+        // wholeModelToLLSD sets this when a face's texture produced zero bytes - it was still
+        // fetching, or its saved raw image had been dropped. Sending it anyway costs the user
+        // the full upload fee for a model with blank faces, and nothing downstream notices:
+        // mTextureFiles is only ever read by log_upload_error (:3315 and friends), i.e. after
+        // the SERVER rejects something, and the server has no way to know a texture is blank.
+        if (mTextureDataMissing)
+        {
+            std::string names;
+            for (U32 i = 0; i < mMissingTextureNames.size(); ++i)
+            {
+                names += (i ? ", " : "") + gDirUtilp->getBaseFileName(mMissingTextureNames[i]);
+            }
+            LL_WARNS(LOG_MESH) << "Refusing to upload \"" << mModelData["name"].asString()
+                               << "\": " << mMissingTextureNames.size()
+                               << " texture(s) had no data: " << names << LL_ENDL;
+
+            LLSD args;
+            args["LABEL"] = mModelData["name"].asString();
+            args["COUNT"] = llformat("%u", (U32)mMissingTextureNames.size());
+            args["TEXTURES"] = names;
+            doOnIdleOneTime(boost::bind(notify_mesh_textures_not_ready, args));
+
+            LLWholeModelUploadObserver* observer(mUploadObserverHandle.get());
+            if (observer)
+            {
+                doOnIdleOneTime(boost::bind(&LLWholeModelUploadObserver::onModelUploadFailure, observer));
+            }
+            mFinished = true;
+            return;
+        }
+        // </FS:Wolf>
+
         LLSD body = mModelData["asset_resources"];
 
         dump_llsd_to_file(body, make_dump_name("whole_model_body_", dump_num));

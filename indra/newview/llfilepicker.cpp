@@ -48,6 +48,14 @@
 
 #if LL_LINUX
 #include "llhttpconstants.h"    // file picker uses some of thes constants on Linux
+// <FS:Wolf/> for the native file chooser: GDBus for the desktop portal, and fork/exec for the
+// external dialog helpers used when there is no portal.
+#include <algorithm>
+#include <cerrno>
+#include <fcntl.h>
+#include <gio/gio.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #endif
 
 //
@@ -67,6 +75,8 @@ LLFilePicker LLFilePicker::sInstance;
 #define RAW_FILTER L"RAW files (*.raw)\0*.raw\0"
 #define MODEL_FILTER L"Model files (*.dae, *.gltf, *.glb)\0*.dae;*.gltf;*.glb\0"
 #define MATERIAL_FILTER L"GLTF Files (*.gltf; *.glb)\0*.gltf;*.glb\0"
+// WolfViewer: the formats WolfMeshUpload reads (wolfmeshupload.h).
+#define WOLF_MODEL_FILTER L"Model files (*.obj, *.gltf, *.glb)\0*.obj;*.gltf;*.glb\0"
 #define HDRI_FILTER L"HDRI Files (*.exr)\0*.exr\0"
 #define MATERIAL_TEXTURES_FILTER L"GLTF Import (*.gltf; *.glb; *.tga; *.bmp; *.jpg; *.jpeg; *.png)\0*.gltf;*.glb;*.tga;*.bmp;*.jpg;*.jpeg;*.png\0"
 #define SCRIPT_FILTER L"Script files (*.lsl)\0*.lsl\0"
@@ -239,6 +249,10 @@ bool LLFilePicker::setupFilter(ELoadFilter filter)
         mOFN.lpstrFilter = MODEL_FILTER \
             COLLADA_FILTER \
             MATERIAL_FILTER \
+            L"\0";
+        break;
+    case FFLOAD_WOLF_MODEL:
+        mOFN.lpstrFilter = WOLF_MODEL_FILTER \
             L"\0";
         break;
     case FFLOAD_MATERIAL:
@@ -734,6 +748,11 @@ std::unique_ptr<std::vector<std::string>> LLFilePicker::navOpenFilterProc(ELoadF
             break;
         case FFLOAD_HDRI:
             allowedv->push_back("exr");
+            break;
+        case FFLOAD_WOLF_MODEL:
+            allowedv->push_back("obj");
+            allowedv->push_back("gltf");
+            allowedv->push_back("glb");
             break;
         case FFLOAD_MODEL:
             allowedv->push_back("gltf");
@@ -1791,7 +1810,7 @@ bool LLFilePicker::getSaveFileModeless(ESaveFilter filter,
 
 bool LLFilePicker::getSaveFile( ESaveFilter filter, const std::string& filename, bool blocking )
 {
-    return openFileDialog( filter, blocking, eSaveFile );
+    return openFileDialog( filter, blocking, eSaveFile, filename );   // <FS:Wolf/> was discarding filename
 }
 
 bool LLFilePicker::getOpenFile( ELoadFilter filter, bool blocking )
@@ -1804,7 +1823,522 @@ bool LLFilePicker::getMultipleOpenFiles( ELoadFilter filter, bool blocking)
     return openFileDialog( filter, blocking, eOpenMultiple );
 }
 
-bool LLFilePicker::openFileDialog( int32_t filter, bool blocking, EType aType )
+
+// <FS:Wolf> A NATIVE file chooser on Linux.
+//
+// FLTK's own chooser is a Motif-era X11 widget: no places sidebar, no thumbnails, no search, no
+// recent files, and it looks nothing like the rest of the desktop. On a modern session there is
+// a much better answer already running — xdg-desktop-portal — and `zenity --file-selection`
+// drives exactly that dialog, so the viewer gets the same file chooser as every other app on the
+// machine, including under Wayland where FLTK falls back to XWayland.
+//
+// It also sidesteps a filter bug. FLTK patterns use brace alternation ("*.{obj,gltf,glb}") and
+// the string handed to it is "Label \tPattern", which FLTK rewrites again into "Label (Pattern)"
+// before its own chooser parses it. zenity takes the extensions as a plain list, so there is no
+// pattern syntax to get wrong and no empty file list.
+//
+// Falls through to the FLTK path when no helper is installed, so a box without zenity or kdialog
+// behaves exactly as before.
+namespace
+{
+    /** The extensions out of one of the FLTK patterns used below: "*.wav" or "*.{a,b,c}". */
+    std::vector<std::string> extensionsFromFltkPattern(const std::string& pattern)
+    {
+        std::vector<std::string> out;
+        const size_t dot = pattern.find('.');
+        if (dot == std::string::npos)
+        {
+            return out;
+        }
+        std::string body = pattern.substr(dot + 1);
+        if (!body.empty() && body.front() == '{')
+        {
+            const size_t close = body.find('}');
+            if (close == std::string::npos)
+            {
+                return out;
+            }
+            body = body.substr(1, close - 1);
+            size_t start = 0;
+            while (start <= body.size())
+            {
+                const size_t comma = body.find(',', start);
+                const std::string one = body.substr(start, comma == std::string::npos ? std::string::npos : comma - start);
+                if (!one.empty())
+                {
+                    out.push_back(one);
+                }
+                if (comma == std::string::npos)
+                {
+                    break;
+                }
+                start = comma + 1;
+            }
+        }
+        else if (!body.empty())
+        {
+            out.push_back(body);
+        }
+        return out;
+    }
+
+    /** Run argv, collect stdout. Returns false if the program could not be started. */
+    bool runAndCapture(const std::vector<std::string>& args, std::string& out)
+    {
+        int fds[2];
+        if (pipe(fds) != 0)
+        {
+            return false;
+        }
+        // execvp needs a NULL-terminated char* array, and it must not be built from a shell
+        // string: titles and filenames are user data and would be an injection hole.
+        std::vector<char*> argv;
+        argv.reserve(args.size() + 1);
+        for (const std::string& a : args)
+        {
+            argv.push_back(const_cast<char*>(a.c_str()));
+        }
+        argv.push_back(NULL);
+
+        const pid_t pid = fork();
+        if (pid < 0)
+        {
+            close(fds[0]);
+            close(fds[1]);
+            return false;
+        }
+        if (pid == 0)
+        {
+            close(fds[0]);
+            dup2(fds[1], STDOUT_FILENO);
+            close(fds[1]);
+            // Keep the child quiet; a helper's warnings are not the viewer's log.
+            const int devnull = open("/dev/null", O_WRONLY);
+            if (devnull >= 0)
+            {
+                dup2(devnull, STDERR_FILENO);
+                close(devnull);
+            }
+            // execv, not execvp: this child was forked from a multithreaded process, where only
+            // async-signal-safe calls are legal before exec, and a PATH search is not one of
+            // them. The caller has already resolved an absolute path.
+            execv(argv[0], argv.data());
+            _exit(127);   // only reached if exec failed
+        }
+
+        close(fds[1]);
+        out.clear();
+        char buf[4096];
+        ssize_t n;
+        while ((n = read(fds[0], buf, sizeof(buf))) > 0)
+        {
+            out.append(buf, (size_t)n);
+        }
+        close(fds[0]);
+
+        int status = 0;
+        while (waitpid(pid, &status, 0) < 0 && errno == EINTR)
+        {
+            // interrupted, keep waiting
+        }
+        // 127 is our own "exec failed" marker: the helper is not installed, so the caller should
+        // fall back rather than treat it as the user cancelling.
+        if (WIFEXITED(status) && WEXITSTATUS(status) == 127)
+        {
+            return false;
+        }
+        return true;
+    }
+
+
+    /**
+     * The freedesktop desktop-portal file chooser, over D-Bus.
+     *
+     * This is the one that works everywhere: xdg-desktop-portal is the standard every modern
+     * desktop implements (GNOME, KDE, XFCE, Cinnamon, MATE, and the wlroots compositors), and
+     * talking to it needs NO external program — GIO is already linked into this viewer
+     * (indra/newview/CMakeLists.txt:2711 GIO_LIBRARIES) and statically at that, so it cannot go
+     * missing on a user's machine the way zenity can.
+     *
+     * Protocol: org.freedesktop.portal.FileChooser on /org/freedesktop/portal/desktop.
+     * OpenFile/SaveFile return a Request object path immediately and the real answer arrives
+     * later as org.freedesktop.portal.Request::Response. The handle_token option lets us work
+     * out that path in advance and subscribe BEFORE calling, which closes the race where the
+     * portal answers faster than we can subscribe.
+     *
+     * @return false if there is no portal to talk to, so the caller falls back.
+     */
+    bool portalFileDialog(const std::string& title,
+                          const std::string& filter_label,
+                          const std::vector<std::string>& extensions,
+                          bool save, bool multiple,
+                          const std::string& proposed_name,
+                          std::vector<std::string>& files)
+    {
+        files.clear();
+
+        gchar* address = g_dbus_address_get_for_bus_sync(G_BUS_TYPE_SESSION, NULL, NULL);
+        if (!address)
+        {
+            return false;   // no session bus at all
+        }
+
+        // A private connection bound to OUR main context, because this runs on the file-picker
+        // thread and the shared g_bus_get_sync() connection dispatches on whichever context was
+        // thread-default when it was first created.
+        GMainContext* ctx = g_main_context_new();
+        g_main_context_push_thread_default(ctx);
+
+        GError* err = NULL;
+        GDBusConnection* bus = g_dbus_connection_new_for_address_sync(
+            address,
+            (GDBusConnectionFlags)(G_DBUS_CONNECTION_FLAGS_AUTHENTICATION_CLIENT
+                                   | G_DBUS_CONNECTION_FLAGS_MESSAGE_BUS_CONNECTION),
+            NULL, NULL, &err);
+        g_free(address);
+        if (!bus)
+        {
+            if (err) { LL_DEBUGS() << "portal: no session bus: " << err->message << LL_ENDL; g_error_free(err); }
+            g_main_context_pop_thread_default(ctx);
+            g_main_context_unref(ctx);
+            return false;
+        }
+
+        // The Request path the portal will use:
+        //   /org/freedesktop/portal/desktop/request/<our unique name>/<token>
+        // with the unique name's leading ':' dropped and its '.' turned into '_'.
+        static int s_token_seq = 0;
+        const std::string token = llformat("wolfviewer%d_%d", (int)getpid(), ++s_token_seq);
+        std::string sender = g_dbus_connection_get_unique_name(bus) ? g_dbus_connection_get_unique_name(bus) : "";
+        if (!sender.empty() && sender[0] == ':')
+        {
+            sender.erase(0, 1);
+        }
+        std::replace(sender.begin(), sender.end(), '.', '_');
+        const std::string request_path =
+            "/org/freedesktop/portal/desktop/request/" + sender + "/" + token;
+
+        struct Ctx
+        {
+            GMainLoop*                loop = NULL;
+            std::vector<std::string>* out = NULL;
+            bool                      answered = false;
+        } cbctx;
+        cbctx.out = &files;
+        cbctx.loop = g_main_loop_new(ctx, FALSE);
+
+        auto on_response = [](GDBusConnection*, const gchar*, const gchar*, const gchar*,
+                              const gchar*, GVariant* params, gpointer user_data)
+        {
+            Ctx* c = static_cast<Ctx*>(user_data);
+            guint32 response = 1;
+            GVariant* results = NULL;
+            g_variant_get(params, "(u@a{sv})", &response, &results);
+            if (response == 0 && results)   // 0 == the user chose something
+            {
+                GVariant* uris = g_variant_lookup_value(results, "uris", G_VARIANT_TYPE_STRING_ARRAY);
+                if (uris)
+                {
+                    gsize n = 0;
+                    const gchar** arr = g_variant_get_strv(uris, &n);
+                    for (gsize i = 0; i < n; ++i)
+                    {
+                        gchar* path = g_filename_from_uri(arr[i], NULL, NULL);
+                        if (path)
+                        {
+                            c->out->push_back(path);
+                            g_free(path);
+                        }
+                    }
+                    g_free(arr);
+                    g_variant_unref(uris);
+                }
+            }
+            if (results)
+            {
+                g_variant_unref(results);
+            }
+            c->answered = true;
+            g_main_loop_quit(c->loop);
+        };
+
+        const guint sub = g_dbus_connection_signal_subscribe(
+            bus, "org.freedesktop.portal.Desktop", "org.freedesktop.portal.Request",
+            "Response", request_path.c_str(), NULL, G_DBUS_SIGNAL_FLAGS_NONE,
+            on_response, &cbctx, NULL);
+
+        // options a{sv}
+        GVariantBuilder opts;
+        g_variant_builder_init(&opts, G_VARIANT_TYPE_VARDICT);
+        g_variant_builder_add(&opts, "{sv}", "handle_token", g_variant_new_string(token.c_str()));
+        if (!save && multiple)
+        {
+            g_variant_builder_add(&opts, "{sv}", "multiple", g_variant_new_boolean(TRUE));
+        }
+        if (save && !proposed_name.empty())
+        {
+            g_variant_builder_add(&opts, "{sv}", "current_name",
+                                  g_variant_new_string(gDirUtilp->getBaseFileName(proposed_name).c_str()));
+        }
+        if (!extensions.empty())
+        {
+            // filters: a(sa(us)), where 0 selects a glob pattern. Globs are case sensitive here
+            // too, so offer both cases rather than hiding someone's CUBE.OBJ.
+            GVariantBuilder filters;
+            g_variant_builder_init(&filters, G_VARIANT_TYPE("a(sa(us))"));
+
+            GVariantBuilder pats;
+            g_variant_builder_init(&pats, G_VARIANT_TYPE("a(us)"));
+            for (const std::string& e : extensions)
+            {
+                std::string lower = e, upper = e;
+                LLStringUtil::toLower(lower);
+                LLStringUtil::toUpper(upper);
+                g_variant_builder_add(&pats, "(us)", 0u, ("*." + lower).c_str());
+                if (upper != lower)
+                {
+                    g_variant_builder_add(&pats, "(us)", 0u, ("*." + upper).c_str());
+                }
+            }
+            g_variant_builder_add(&filters, "(sa(us))", filter_label.c_str(), &pats);
+
+            GVariantBuilder allpats;
+            g_variant_builder_init(&allpats, G_VARIANT_TYPE("a(us)"));
+            g_variant_builder_add(&allpats, "(us)", 0u, "*");
+            g_variant_builder_add(&filters, "(sa(us))",
+                                  LLTrans::getString("all_files").c_str(), &allpats);
+
+            g_variant_builder_add(&opts, "{sv}", "filters", g_variant_builder_end(&filters));
+        }
+
+        GVariant* reply = g_dbus_connection_call_sync(
+            bus, "org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop",
+            "org.freedesktop.portal.FileChooser", save ? "SaveFile" : "OpenFile",
+            g_variant_new("(ssa{sv})", "", title.c_str(), &opts),
+            G_VARIANT_TYPE("(o)"), G_DBUS_CALL_FLAGS_NONE, 10000 /* ms to ACCEPT the call */,
+            NULL, &err);
+
+        bool ok = false;
+        if (!reply)
+        {
+            // No portal, or it does not implement FileChooser. Fall back quietly.
+            if (err) { LL_DEBUGS() << "portal FileChooser unavailable: " << err->message << LL_ENDL; g_error_free(err); }
+        }
+        else
+        {
+            // The portal may hand back a different path than we predicted (older versions
+            // ignored handle_token). Re-subscribe on the real one if so.
+            const gchar* actual = NULL;
+            g_variant_get(reply, "(&o)", &actual);
+            guint sub2 = 0;
+            if (actual && request_path != actual)
+            {
+                sub2 = g_dbus_connection_signal_subscribe(
+                    bus, "org.freedesktop.portal.Desktop", "org.freedesktop.portal.Request",
+                    "Response", actual, NULL, G_DBUS_SIGNAL_FLAGS_NONE,
+                    on_response, &cbctx, NULL);
+            }
+            g_variant_unref(reply);
+
+            // Wait for the user. There is deliberately no short timeout — a file chooser stays
+            // open until it is answered, and this is the picker thread, not the frame loop — but
+            // the loop must not be able to wedge forever if the portal dies mid-dialog, so watch
+            // for the bus closing and cap the wait.
+            const gulong closed_id = g_signal_connect(bus, "closed", G_CALLBACK(+[]
+                (GDBusConnection*, gboolean, GError*, gpointer ud)
+                {
+                    g_main_loop_quit(static_cast<Ctx*>(ud)->loop);
+                }), &cbctx);
+
+            GSource* guard = g_timeout_source_new_seconds(3600);
+            g_source_set_callback(guard, +[](gpointer ud) -> gboolean
+                {
+                    LL_WARNS() << "portal file dialog gave no answer in an hour; giving up." << LL_ENDL;
+                    g_main_loop_quit(static_cast<Ctx*>(ud)->loop);
+                    return G_SOURCE_REMOVE;
+                }, &cbctx, NULL);
+            g_source_attach(guard, ctx);
+
+            g_main_loop_run(cbctx.loop);
+            ok = cbctx.answered;
+
+            g_source_destroy(guard);
+            g_source_unref(guard);
+            g_signal_handler_disconnect(bus, closed_id);
+
+            if (sub2)
+            {
+                g_dbus_connection_signal_unsubscribe(bus, sub2);
+            }
+        }
+
+        g_dbus_connection_signal_unsubscribe(bus, sub);
+        g_main_loop_unref(cbctx.loop);
+        g_dbus_connection_close_sync(bus, NULL, NULL);
+        g_object_unref(bus);
+        g_main_context_pop_thread_default(ctx);
+        g_main_context_unref(ctx);
+        return ok;
+    }
+
+    /**
+     * Show the desktop's own file chooser. Returns false when no helper is available, in which
+     * case the caller must fall back; returns true with an empty `files` when the user cancelled.
+     */
+    bool nativeFileDialog(const std::string& title,
+                          const std::string& filter_label,
+                          const std::vector<std::string>& extensions,
+                          bool save, bool multiple,
+                          const std::string& proposed_name,
+                          std::vector<std::string>& files)
+    {
+        files.clear();
+
+        // The portal FIRST: it needs no external program, so it cannot be missing from a user's
+        // install the way zenity can, and it is the same dialog the rest of the desktop uses.
+        if (portalFileDialog(title, filter_label, extensions, save, multiple, proposed_name, files))
+        {
+            return true;
+        }
+
+        // No portal (an older or very minimal desktop). Fall back to whichever dialog helper is
+        // installed; these are the ones shipped by the major desktops.
+        auto findHelper = [](const char* name) -> std::string
+        {
+            const char* dirs[] = { "/usr/bin/", "/bin/", "/usr/local/bin/" };
+            for (const char* d : dirs)
+            {
+                const std::string full = std::string(d) + name;
+                if (gDirUtilp->fileExists(full))
+                {
+                    return full;
+                }
+            }
+            return std::string();
+        };
+        // zenity, then its drop-in clones: qarma is the Qt port, matedialog MATE's fork, and
+        // yad a superset. All four accept --file-selection and --file-filter identically.
+        std::string zenity_path = findHelper("zenity");
+        if (zenity_path.empty()) zenity_path = findHelper("qarma");
+        if (zenity_path.empty()) zenity_path = findHelper("matedialog");
+        if (zenity_path.empty()) zenity_path = findHelper("yad");
+        if (zenity_path.empty())
+        {
+            // kdialog for a Plasma box with no zenity.
+            const std::string kdialog_path = findHelper("kdialog");
+            if (!kdialog_path.empty())
+            {
+                std::vector<std::string> args;
+                args.push_back(kdialog_path);
+                args.push_back("--title");
+                args.push_back(title);
+                std::string spec;
+                for (const std::string& e : extensions)
+                {
+                    spec += (spec.empty() ? "" : " ") + std::string("*.") + e;
+                }
+                if (spec.empty())
+                {
+                    spec = "*";
+                }
+                spec += "|" + filter_label;
+                if (save)
+                {
+                    args.push_back("--getsavefilename");
+                    args.push_back(proposed_name.empty() ? std::string(".") : proposed_name);
+                }
+                else
+                {
+                    args.push_back(multiple ? "--getopenfilename" : "--getopenfilename");
+                    args.push_back(".");
+                    if (multiple)
+                    {
+                        args.push_back("--multiple");
+                        args.push_back("--separate-output");
+                    }
+                }
+                args.push_back(spec);
+                std::string out;
+                if (!runAndCapture(args, out))
+                {
+                    return false;
+                }
+                std::istringstream lines(out);
+                std::string line;
+                while (std::getline(lines, line))
+                {
+                    LLStringUtil::trim(line);
+                    if (!line.empty())
+                    {
+                        files.push_back(line);
+                    }
+                }
+                return true;
+            }
+            return false;
+        }
+
+        std::vector<std::string> args;
+        args.push_back(zenity_path);
+        args.push_back("--file-selection");
+        args.push_back("--title=" + title);
+        if (save)
+        {
+            args.push_back("--save");
+            // --confirm-overwrite is deprecated and a no-op in current zenity; the portal dialog
+            // asks about overwriting on its own.
+            if (!proposed_name.empty())
+            {
+                args.push_back("--filename=" + proposed_name);
+            }
+        }
+        else if (multiple)
+        {
+            args.push_back("--multiple");
+            args.push_back("--separator=\n");
+        }
+        if (!extensions.empty())
+        {
+            // "Name | *.a *.b". GTK patterns are case sensitive, so offer both cases rather than
+            // hiding someone's CUBE.OBJ.
+            std::string spec = filter_label + " |";
+            for (const std::string& e : extensions)
+            {
+                std::string lower = e, upper = e;
+                LLStringUtil::toLower(lower);
+                LLStringUtil::toUpper(upper);
+                spec += " *." + lower;
+                if (upper != lower)
+                {
+                    spec += " *." + upper;
+                }
+            }
+            args.push_back("--file-filter=" + spec);
+        }
+        args.push_back("--file-filter=All files | *");
+
+        std::string out;
+        if (!runAndCapture(args, out))
+        {
+            return false;
+        }
+        std::istringstream lines(out);
+        std::string line;
+        while (std::getline(lines, line))
+        {
+            LLStringUtil::trim(line);
+            if (!line.empty())
+            {
+                files.push_back(line);
+            }
+        }
+        return true;
+    }
+}
+// </FS:Wolf>
+
+bool LLFilePicker::openFileDialog( int32_t filter, bool blocking, EType aType,
+                                   const std::string& proposed_name )
 {
     if ( check_local_file_access_enabled() == false )
         return false;
@@ -1822,6 +2356,10 @@ bool LLFilePicker::openFileDialog( int32_t filter, bool blocking, EType aType )
 
     std::string file_dialog_title;
     std::string file_dialog_filter;
+    // <FS:Wolf/> The same information the FLTK filter carries, kept apart so the native dialog
+    // never has to parse "Label \tPattern" back out again.
+    std::string native_filter_label;
+    std::string native_pattern;
 
     if (aType == EType::eSaveFile)
     {
@@ -1915,6 +2453,8 @@ bool LLFilePicker::openFileDialog( int32_t filter, bool blocking, EType aType )
 
         // can't say I like this combining of verb+type, it might not work too well in all languages -Zi
         file_dialog_title = LLTrans::getString("save_file_verb") + " " + LLTrans::getString(file_type);
+        native_filter_label = LLTrans::getString(file_type);   // <FS:Wolf/> before it is fused with the pattern
+        native_pattern = file_dialog_filter;                   // <FS:Wolf/>
         file_dialog_filter = LLTrans::getString(file_type) + " \t" + file_dialog_filter;
     }
     else
@@ -1952,6 +2492,10 @@ bool LLFilePicker::openFileDialog( int32_t filter, bool blocking, EType aType )
             case FFLOAD_MODEL:
                 file_type = "model_files";
                 file_dialog_filter = "*.{dae,gltf,glb}";
+                break;
+            case FFLOAD_WOLF_MODEL:
+                file_type = "wolf_model_files";
+                file_dialog_filter = "*.{obj,gltf,glb}";
                 break;
             case FFLOAD_COLLADA:
                 file_type = "collada_files";
@@ -2005,6 +2549,11 @@ bool LLFilePicker::openFileDialog( int32_t filter, bool blocking, EType aType )
 #endif
         }
 
+        // <FS:Wolf/> Capture the pattern before the branch below fuses it into "Label \tPattern"
+        // for the single-file case only. The native dialog wants the two apart either way.
+        native_filter_label = LLTrans::getString(file_type);
+        native_pattern = file_dialog_filter;
+
         if (aType == EType::eOpenMultiple)
         {
             file_dialog_title = LLTrans::getString("load_files");
@@ -2017,11 +2566,37 @@ bool LLFilePicker::openFileDialog( int32_t filter, bool blocking, EType aType )
         }
     }
 
+    // <FS:Wolf> Try the desktop's own chooser first; FLTK is the fallback for a box without one.
+    {
+        std::vector<std::string> picked;
+        if (nativeFileDialog(file_dialog_title,
+                             native_filter_label.empty() ? std::string("Supported files") : native_filter_label,
+                             extensionsFromFltkPattern(native_pattern),
+                             aType == EType::eSaveFile,
+                             aType == EType::eOpenMultiple,
+                             aType == EType::eSaveFile ? proposed_name : std::string(),
+                             picked))
+        {
+            gViewerWindow->getWindow()->afterDialog();
+            mFiles = picked;
+            return !mFiles.empty();
+        }
+        LL_DEBUGS() << "No native file chooser found (zenity/kdialog); using the FLTK one." << LL_ENDL;
+    }
+    // </FS:Wolf>
+
     flDlg.title(file_dialog_title.c_str());
     flDlg.type(flType);
 
     if (!file_dialog_filter.empty())
     {
+        // <FS:Wolf/> Always offer "All Files" as a second entry. FLTK's own chooser applies the
+        // first filter on open, and if a pattern does not behave as expected the user is left
+        // staring at an empty directory with no way out. FLTK separates entries with \n.
+        if (aType != EType::eSaveFile)
+        {
+            file_dialog_filter += "\n" + LLTrans::getString("all_files") + " \t*";
+        }
         flDlg.filter(file_dialog_filter.c_str());
     }
 

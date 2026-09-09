@@ -105,6 +105,7 @@
 #include "llfloatermediasettings.h"
 #include "llfloatermemleak.h"
 #include "llfloatermodelpreview.h"
+#include "wolffloatermeshupload.h" // <FS:Wolf/>
 #include "llfloatermyscripts.h"
 #include "llfloatermyenvironment.h"
 #include "llfloaternamedesc.h"
@@ -291,6 +292,7 @@ public:
                 "upload_anim_anim",
                 "upload_image",
                 "upload_model",
+                "wolf_mesh_upload", // <FS:Wolf/> same reason as upload_model: an in-world link must not pop an uploader
                 "upload_script",
                 "upload_sound",
                 "bulk_upload",
@@ -343,6 +345,7 @@ public:
                 "upload_anim_anim",
                 "upload_image",
                 "upload_model",
+                "wolf_mesh_upload", // <FS:Wolf/> same reason as upload_model: an in-world link must not pop an uploader
                 "upload_script",
                 "upload_sound",
                 "bulk_upload",
@@ -625,6 +628,12 @@ void LLViewerFloaterReg::registerFloaters()
     LLFloaterReg::add("upload_anim_anim", "floater_animation_anim_preview.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<LLFloaterAnimPreview>, "upload");
     LLFloaterReg::add("upload_image", "floater_image_preview.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<LLFloaterImagePreview>, "upload");
     LLFloaterReg::add("upload_model", "floater_model_preview.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<LLFloaterModelPreview>, "upload");
+    // <FS:Wolf> The Wolf Territories model uploader. Registered unconditionally because the
+    // grid can change within a session and LLFloaterReg is built once at startup; it is only
+    // ever OPENED on Wolf Territories (LLFloaterModelPreview::showModelPreview) and refuses to
+    // upload anywhere else (WolfFloaterMeshUpload::onUpload -> WolfMeshUpload::isAvailable).
+    LLFloaterReg::add("wolf_mesh_upload", "floater_wolf_mesh_upload.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterMeshUpload>, "upload");
+    // </FS:Wolf>
     LLFloaterReg::add("upload_script", "floater_script_preview.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<LLFloaterScriptPreview>, "upload");
     LLFloaterReg::add("upload_sound", "floater_sound_preview.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<LLFloaterSoundPreview>, "upload");
 

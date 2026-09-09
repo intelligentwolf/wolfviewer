@@ -19429,6 +19429,17 @@ Change of this parameter will affect the layout of buttons in notification toast
 			<key>Value</key>
 			<integer>0</integer>
 		</map>
+		<key>WolfMeshUploadIncludeTextures</key>
+		<map>
+			<key>Comment</key>
+			<string>Upload a model's textures alongside it in the Wolf Territories model uploader. Each distinct texture becomes its own inventory item at the usual texture upload cost.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>1</integer>
+		</map>
 		<key>WolfViewerSpeechReadAloud</key>
 		<map>
 			<key>Comment</key>

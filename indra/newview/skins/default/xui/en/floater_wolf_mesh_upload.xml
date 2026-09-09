@@ -1,0 +1,190 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<!--
+ WolfViewer — Wolf Territories Grid model uploader.
+ Source: wolfstorm/js/ui/floaters/floater_mesh_upload.js buildContent() — the same fields, the
+ same wording and the same order as the web viewer's uploader, so a user who has used one
+ recognises the other.
+-->
+<floater
+ legacy_header_height="18"
+ can_close="true"
+ can_minimize="true"
+ can_resize="false"
+ height="382"
+ layout="topleft"
+ name="wolf_mesh_upload"
+ help_topic="wolf_mesh_upload"
+ save_rect="true"
+ single_instance="true"
+ title="Upload Model"
+ width="480">
+
+  <text
+   type="string"
+   length="1"
+   follows="left|top"
+   height="28"
+   layout="topleft"
+   left="12"
+   name="blurb"
+   top="24"
+   width="456"
+   word_wrap="true">
+    Upload a model straight to your inventory - no LODs or physics setup. It becomes a rezzable mesh object.
+  </text>
+
+  <button
+   follows="left|top"
+   height="22"
+   label="Choose file..."
+   layout="topleft"
+   left="12"
+   name="browse_btn"
+   top_pad="4"
+   width="110" />
+
+  <text
+   type="string"
+   length="1"
+   follows="left|top"
+   height="18"
+   layout="topleft"
+   left_pad="8"
+   name="file_name"
+   text_color="LtGray_50"
+   top_delta="3"
+   width="338">
+    No file chosen
+  </text>
+
+  <text
+   type="string"
+   length="1"
+   follows="left|top"
+   height="26"
+   layout="topleft"
+   left="12"
+   name="formats"
+   text_color="LtGray_50"
+   top_pad="6"
+   width="456"
+   word_wrap="true">
+    OBJ, glTF and GLB. Textures and .mtl files are read from the same folder as the model. For COLLADA (.dae) use Old Upload.
+  </text>
+
+  <text
+   type="string"
+   length="1"
+   follows="left|top"
+   height="16"
+   layout="topleft"
+   left="12"
+   name="name_label"
+   top_pad="6"
+   width="90">
+    Name:
+  </text>
+
+  <line_editor
+   follows="left|top"
+   height="22"
+   layout="topleft"
+   left_pad="4"
+   max_length_bytes="63"
+   name="name_edit"
+   top_delta="-3"
+   width="358" />
+
+  <text
+   type="string"
+   length="1"
+   follows="left|top"
+   height="16"
+   layout="topleft"
+   left="12"
+   name="desc_label"
+   top_pad="8"
+   width="90">
+    Description:
+  </text>
+
+  <line_editor
+   follows="left|top"
+   height="22"
+   layout="topleft"
+   left_pad="4"
+   max_length_bytes="127"
+   name="desc_edit"
+   top_delta="-3"
+   width="358" />
+
+  <check_box
+   control_name="WolfMeshUploadIncludeTextures"
+   follows="left|top"
+   height="16"
+   initial_value="true"
+   label="Include textures (each texture is uploaded as its own inventory item, at the usual upload cost)"
+   layout="topleft"
+   left="12"
+   name="include_textures"
+   top_pad="10"
+   width="456" />
+
+  <text
+   type="string"
+   length="1"
+   follows="left|top"
+   height="58"
+   layout="topleft"
+   left="12"
+   name="info"
+   text_color="LtGray_50"
+   top_pad="8"
+   width="456"
+   word_wrap="true" />
+
+  <text
+   type="string"
+   length="1"
+   follows="left|top"
+   height="30"
+   layout="topleft"
+   left="12"
+   name="status"
+   top_pad="2"
+   width="456"
+   word_wrap="true" />
+
+  <button
+   follows="left|top"
+   height="23"
+   label="Upload"
+   layout="topleft"
+   left="12"
+   name="upload_btn"
+   tool_tip="Upload the model straight to your inventory."
+   top_pad="6"
+   width="100" />
+
+  <button
+   follows="left|top"
+   height="23"
+   label="Old Upload"
+   layout="topleft"
+   left_pad="6"
+   name="old_upload_btn"
+   tool_tip="Open Firestorm's model uploader instead - LODs, physics, rigging and COLLADA (.dae)."
+   top_delta="0"
+   width="100" />
+
+  <button
+   follows="left|top"
+   height="23"
+   label="Cancel"
+   layout="topleft"
+   left_pad="140"
+   name="cancel_btn"
+   top_delta="0"
+   width="100" />
+
+</floater>

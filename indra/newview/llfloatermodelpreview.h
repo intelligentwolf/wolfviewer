@@ -74,7 +74,15 @@ public:
 
     void initModelPreview();
     void setUploadDestination(const LLUUID& dest_folder) { mDestinationFolderId = dest_folder; }
+    // <FS:Wolf> The Wolf Territories model uploader takes this entry point over on that grid.
+    // showModelPreview() is the single chokepoint every "Upload Model" route funnels through
+    // (menu_viewer.xml "Upload Model", menu_inventory_add.xml, menu_gallery_inventory.xml via
+    // llinventoryfunctions.cpp:4228, and LLFileUploadModel in llviewermenufile.cpp:955/:967),
+    // so diverting it there covers all of them. showClassicModelPreview() is the original body,
+    // unchanged, and is what the Wolf floater's "Old Upload" button calls.
     static void showModelPreview(const LLUUID& dest_folder = LLUUID::null);
+    static void showClassicModelPreview(const LLUUID& dest_folder = LLUUID::null);
+    // </FS:Wolf>
 
     bool handleMouseDown(S32 x, S32 y, MASK mask);
     bool handleMouseUp(S32 x, S32 y, MASK mask);

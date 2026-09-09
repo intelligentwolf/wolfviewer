@@ -915,6 +915,8 @@ set(viewer_SOURCE_FILES
     wolfboatrock.cpp
     wolfnaturalwater.cpp
     wolfobjectprops.cpp
+    wolffloatermeshupload.cpp
+    wolfmeshupload.cpp
     wolfscreenshare.cpp
     wolfspeech.cpp
     wolfoceanfft.cpp
@@ -1789,6 +1791,8 @@ set(viewer_HEADER_FILES
     wolfnaturalwater.h
     wolfgrid.h
     wolfobjectprops.h
+    wolffloatermeshupload.h
+    wolfmeshupload.h
     wolfscreenshare.h
     wolfspeech.h
     wolfoceanfft.h

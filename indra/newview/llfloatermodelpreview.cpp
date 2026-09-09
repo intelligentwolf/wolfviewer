@@ -30,6 +30,7 @@
 #include "llmodelpreview.h"
 
 #include "llfloatermodelpreview.h"
+#include "wolfgrid.h" // <FS:Wolf/> model upload routing
 
 #include "llfilepicker.h"
 #include "llimagebmp.h"
@@ -422,8 +423,36 @@ void LLFloaterModelPreview::initModelPreview()
     mModelPreview->setModelUpdatedCallback(boost::bind(&LLFloaterModelPreview::modelUpdated, this, _1));
 }
 
+// <FS:Wolf> On Wolf Territories, "Upload Model" opens the Wolf uploader instead.
+//
+// Every route to the model uploader funnels through showModelPreview (menu_viewer.xml
+// "Upload Model" -> File.UploadModel -> LLFileUploadModel at llviewermenufile.cpp:955 and :967;
+// menu_inventory_add.xml; menu_gallery_inventory.xml -> llinventoryfunctions.cpp:4228), so this
+// is the one place the choice has to be made.
+//
+// GRID GATE. WolfMeshUpload posts to a proxy endpoint that writes assets and inventory straight
+// into Wolf Territories' own ROBUST services, with the grid hard-coded
+// (rust_proxy/src/main.rs:1638 GRID_ROBUST_BASE). On any other grid it would be meaningless, so
+// the diversion is conditional on WolfGrid::isWolfTerritories() and every other grid gets
+// Firestorm's uploader exactly as before, with no new code in its path.
 //static
 void LLFloaterModelPreview::showModelPreview(const LLUUID& dest_folder)
+{
+    if (WolfGrid::isWolfTerritories())
+    {
+        LLSD key;
+        if (dest_folder.notNull())
+        {
+            key["dest_folder"] = dest_folder;
+        }
+        LLFloaterReg::showInstance("wolf_mesh_upload", key);
+        return;
+    }
+    showClassicModelPreview(dest_folder);
+}
+
+//static
+void LLFloaterModelPreview::showClassicModelPreview(const LLUUID& dest_folder)
 {
     LLFloaterModelPreview* fmp = (LLFloaterModelPreview*)LLFloaterReg::getInstance("upload_model");
     if (fmp && !fmp->isModelLoading())
@@ -432,6 +461,7 @@ void LLFloaterModelPreview::showModelPreview(const LLUUID& dest_folder)
         fmp->loadHighLodModel();
     }
 }
+// </FS:Wolf>
 
 void LLFloaterModelPreview::onUploadOptionChecked(LLUICtrl* ctrl)
 {

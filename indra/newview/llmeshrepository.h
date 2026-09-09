@@ -730,6 +730,16 @@ public:
     LLVector3       mOrigin;
     bool            mFinished;
     bool            mUploadTextures;
+    // <FS:Wolf> Textures that serialised to zero bytes.
+    //
+    // wholeModelToLLSD used to register a texture in "texture_list" whether or not it had any
+    // data, so a model whose textures had not finished fetching uploaded with empty texture
+    // assets and blank faces, reporting success. These record that so doWholeModelUpload can
+    // refuse to send it. Written on the upload thread inside wholeModelToLLSD and read straight
+    // afterwards by its only caller, on the same thread.
+    bool                     mTextureDataMissing;
+    std::vector<std::string> mMissingTextureNames;
+    // </FS:Wolf>
     bool            mUploadSkin;
     bool            mUploadJoints;
     bool            mLockScaleIfJointPosition;

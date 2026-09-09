@@ -42,10 +42,21 @@ namespace WolfGrid
         return gm->getGrid().find("wolfterritories.org") != std::string::npos;
     }
 
-    // The WolfStorm Rust proxy's HTTP API: POST /stt (wolfstorm js/ui/speech_to_text.js STT_URL)
-    // and POST /tts (js/ui/text_to_speech.js TTS_URL), both on port 8080 of the host serving the
-    // viewer; the primary host is wolfstorm.app (the same box runs the whisper and piper engines).
-    const char* const SPEECH_API_BASE = "https://wolfstorm.app:8080";
+    // The WolfStorm Rust proxy's HTTP API, on port 8080 of the host serving the viewer; the
+    // primary host is wolfstorm.app (rust_proxy/src/main.rs:46-92 binds 8080 with TLS, and the
+    // same box runs the whisper and piper engines).
+    const char* const PROXY_API_BASE = "https://wolfstorm.app:8080";
+
+    // Speech: POST /stt (wolfstorm js/ui/speech_to_text.js STT_URL) and POST /tts
+    // (js/ui/text_to_speech.js TTS_URL).
+    const char* const SPEECH_API_BASE = PROXY_API_BASE;
+
+    // Model upload: POST /upload_mesh (wolfstorm js/ui/floaters/floater_mesh_upload.js PROXY;
+    // handler rust_proxy/src/main.rs:1993 handle_upload_mesh). That endpoint writes the mesh
+    // asset, the object asset and the inventory item straight into Wolf Territories' own ROBUST
+    // services — GRID_ROBUST_BASE is hard-coded at main.rs:1638 — so it is meaningless, and
+    // would be wrong, on any other grid. Every caller checks isWolfTerritories() first.
+    const char* const MESH_API_BASE = PROXY_API_BASE;
 
     // Screen sharing: the token endpoint (wolfstorm js/voice/screen_share.js TOKEN_URL, host
     // SHARE_HOST = 'wolfstorm.app') and the publisher page (wolfstorm/publish.php).

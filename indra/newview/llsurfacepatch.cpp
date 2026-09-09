@@ -152,9 +152,15 @@ bool LLSurfacePatch::ensureVObj()
     mVObjp->setPositionRegion(mCenterRegion);
     gPipeline.createObject(mVObjp);
     mSurfacep->mBuiltPatchObject = true;
+    mSurfacep->mDiagObjectsBuilt++;
 
     // This patch may already be holding terrain data that updateTexture declined to build while
-    // there was nothing to build it into. Put it back on the dirty list so it gets made now.
+    // there was nothing to build it into, and updateNormals will have skipped it for the same
+    // reason. Invalidate the normals and put it back on the dirty list so both are done now.
+    for (S32 n = 0; n < 9; n++)
+    {
+        mNormalsInvalid[n] = true;
+    }
     mSTexUpdate = true;
     dirty();
 
@@ -773,6 +779,27 @@ void LLSurfacePatch::updateNormals()
     {
         return;
     }
+
+    // <FS:Wolf> A patch with no viewer object is not drawn, and normals are read by nothing but
+    // the renderer — LLSurfacePatch::eval() (:329), which already returns early without an
+    // object. LLSurface::resolveNormalGlobal differentiates the heights instead and never looks
+    // at them.
+    //
+    // Computing them anyway is what quietly undid the whole point of reserving the surface
+    // lazily. This writes about 289 normals per patch, and over a 25,600 m region's 2.56 M
+    // patches that touches every page of BOTH the height and the normal array: 10.5 GB made
+    // resident for geometry that does not exist. Measured on Dire Wolf at 18.5 GB with 20 GB of
+    // swap in use, which is why nothing near the avatar ever got built — the viewer was
+    // thrashing, not stuck.
+    //
+    // ensureVObj() invalidates the normals again when it builds the object, so a patch gets
+    // them the moment it can actually be drawn.
+    if (mVObjp.isNull())
+    {
+        mSurfacep->mDiagNormalsSkipped++;
+        return;
+    }
+    // </FS:Wolf>
     U32 grids_per_patch_edge = mSurfacep->getGridsPerPatchEdge();
     U32 grids_per_edge = mSurfacep->getGridsPerEdge();
 
@@ -1073,6 +1100,7 @@ bool LLSurfacePatch::updateTexture()
         // when it finally comes into view, so nothing is lost.
         if (mVObjp.isNull())
         {
+            getSurface()->mDiagTexNoVObj++;   // <FS:Wolf/>
             return true;
         }
         F32 meters_per_grid = getSurface()->getMetersPerGrid();
@@ -1098,6 +1126,7 @@ bool LLSurfacePatch::updateTexture()
                 }
                 else
                 {
+                    getSurface()->mDiagTexWaitHeights++;   // <FS:Wolf/>
                     return false;
                 }
             }
@@ -1108,9 +1137,18 @@ bool LLSurfacePatch::updateTexture()
                 {
                     mVObjp->dirtyGeom();
                     gPipeline.markGLRebuild(mVObjp);
+                    getSurface()->mDiagTexBuilt++;   // <FS:Wolf/>
                     return !mSTexUpdate;
                 }
             }
+            else
+            {
+                getSurface()->mDiagTexWaitComposition++;   // <FS:Wolf/>
+            }
+        }
+        else
+        {
+            getSurface()->mDiagTexWaitNeighbors++;   // <FS:Wolf/>
         }
         return false;
     }

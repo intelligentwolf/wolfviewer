@@ -69,6 +69,7 @@ void LLVLManager::addLayerData(LLVLData *vl_datap, const S32Bytes mesg_size)
 // </FS:CR> Aurora Sim
     {
         mLandBits += mesg_size;
+        mLandPacketsReceived++;   // <FS:Wolf/>
     }
 // <FS:CR> Aurora Sim
     //else if (WIND_LAYER_CODE == vl_datap->mType)
@@ -113,11 +114,13 @@ void LLVLManager::unpackData(const S32 num_packets)
         decode_patch_group_header(bit_pack, &goph);
         if (LAND_LAYER_CODE == datap->mType)
         {
+            mLandPacketsUnpacked++;   // <FS:Wolf/>
             datap->mRegionp->getLand().decompressDCTPatch(bit_pack, &goph, false);
         }
 // <FS:CR> Aurora Sim
         else if (AURORA_LAND_LAYER_CODE == datap->mType)
         {
+            mLandPacketsUnpacked++;   // <FS:Wolf/>
             datap->mRegionp->getLand().decompressDCTPatch(bit_pack, &goph, true);
         }
         //else if (WIND_LAYER_CODE == datap->mType)

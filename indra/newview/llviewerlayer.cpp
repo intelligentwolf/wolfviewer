@@ -35,17 +35,33 @@ LLViewerLayer::LLViewerLayer(const S32 width, const F32 scale)
     mWidth = width;
     mScale = scale;
     mScaleInv = 1.f/scale;
-    mDatap = new F32[width*width];
 
-    for (S32 i = 0; i < width*width; i++)
+    // <FS:Wolf> Reserve the layer, do not COMMIT it. Same reasoning as LLSurface::create.
+    //
+    // This is 4 bytes per square metre of region: 256 KB for a standard region, but 2.6 GB for
+    // a 25,600 m varregion — and the loop below wrote every one of those bytes at region
+    // construction, before a single terrain packet had arrived. That is resident memory for
+    // ground the user may never go near, and on a machine with 30 GB it was enough on its own
+    // to push the viewer into swap, where it froze for seconds at a time and took minutes to
+    // shut down.
+    //
+    // calloc returns the same already-zero mmap pages without walking them, so the cost becomes
+    // proportional to the terrain actually generated. generateHeights() writes only the texels
+    // of the patch it is given, so pages are faulted in as ground is composited, and the value
+    // read back from an untouched page is 0.f exactly as the loop used to leave it.
+    const size_t count = (size_t)width * (size_t)width;
+    mDatap = (F32*)calloc(count, sizeof(F32));
+    if (!mDatap)
     {
-        *(mDatap + i) = 0.f;
+        LL_ERRS() << "Could not reserve a " << width << " x " << width
+                  << " viewer layer (" << ((count * sizeof(F32)) >> 20) << " MB)" << LL_ENDL;
     }
+    // </FS:Wolf>
 }
 
 LLViewerLayer::~LLViewerLayer()
 {
-    delete[] mDatap;
+    free(mDatap);   // <FS:Wolf/> calloc'd above, so free() — not delete[].
     mDatap = NULL;
 }
 

@@ -209,6 +209,36 @@ private:
     // pool, so a surface nobody ever looked at legitimately has no pool at destruction. Without
     // this the destructor warns about that every time.
     bool        mBuiltPatchObject = false;
+
+public:
+    // <FS:Wolf> Terrain diagnostics for very large varregions.
+    //
+    // A 25,600 m region is 1600 x 1600 = 2.56 M patches and the sim streams them one patch at a
+    // time. When no terrain appears there are only a handful of possible reasons, and guessing
+    // between them costs a test flight each time. These name the one that is actually happening.
+    // Every counter is O(1) per event and the report is rate limited, so this is cheap enough to
+    // leave in a shipping build; it only says anything on a region big enough to have a problem.
+    void noteTerrainDataArrived(const LLVector3& patch_center_region);
+    void reportTerrainDiagnostics();
+
+    S32 mDiagPatchesWithData = 0;     // patches that have received terrain from the sim
+    S32 mDiagObjectsBuilt = 0;        // ensureVObj() successes
+    S32 mDiagTexNoVObj = 0;           // updateTexture: no viewer object, nothing to build into
+    S32 mDiagTexWaitNeighbors = 0;    // updateTexture: a neighbour has no terrain data yet
+    S32 mDiagTexWaitHeights = 0;      // updateTexture: generateHeights() not ready
+    S32 mDiagTexWaitComposition = 0;  // updateTexture: generateComposition() not ready
+    S32 mDiagTexBuilt = 0;            // updateTexture: geometry marked for rebuild
+    S32 mDiagNormalsSkipped = 0;      // updateNormals: skipped, patch has no viewer object
+    S32 mDiagDirtyListSize = 0;       // patches waiting in the dirty list at the last report
+    bool mDiagScanRan = false;        // has updatePatchVisibilities run even once on this surface?
+private:
+    // Where the sim is sending, relative to the camera, since the last report. This is the
+    // number that separates "the viewer is not drawing it" from "the sim has not sent it here".
+    F32 mDiagNearestDataM = -1.f;
+    F32 mDiagFarthestDataM = -1.f;
+    S32 mDiagArrivedSinceReport = 0;
+    LLTimer mDiagTimer;
+    // </FS:Wolf>
     F32         mMinZ;                  // min z for this region (during the session)
     F32         mMaxZ;                  // max z for this region (during the session)
 

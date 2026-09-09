@@ -43,6 +43,7 @@
 #include "llvowater.h"
 #include "pipeline.h"
 #include "llviewerregion.h"
+#include "llvlmanager.h"   // <FS:Wolf/> land packet counters for the terrain report
 #include "lldrawpoolterrain.h"
 #include "llworldmipmap.h"
 
@@ -163,6 +164,23 @@ void LLSurface::create(const S32 grids_per_edge,
     mPatchesPerEdge = (mGridsPerEdge - 1) / mGridsPerPatchEdge;
     mNumberOfPatches = mPatchesPerEdge * mPatchesPerEdge;
     mMetersPerGrid = width / ((F32)(mGridsPerEdge - 1));
+
+    // <FS:Wolf/> The comment above this function still says the arguments are powers of two.
+    // They are not any more — Wolf Territories' 25,600 m region is 100 standard regions, and
+    // 25600 is not a power of two — and the Aurora patches made the pieces that cared cope:
+    // LLPatchVertexArray::create rounds its (unused) surface width up, and sTextureSize rounds
+    // and clamps. The assumption that DOES still bite is divisibility: if the grid does not
+    // divide exactly into patches the last row and column of the region are simply never
+    // covered by any patch, silently. Say so rather than render a region with a missing edge.
+    if (((mGridsPerEdge - 1) % mGridsPerPatchEdge) != 0)
+    {
+        LL_WARNS("Terrain") << "Region is " << (S32)width << " m with " << (mGridsPerEdge - 1)
+                            << " grids per edge, which does not divide by "
+                            << mGridsPerPatchEdge << " grids per patch: "
+                            << ((mGridsPerEdge - 1) % mGridsPerPatchEdge)
+                            << " grids along each edge will have no patch covering them."
+                            << LL_ENDL;
+    }
     mMetersPerEdge = mMetersPerGrid * (mGridsPerEdge - 1);
 // <FS:CR> Aurora Sim
     sTextureSize = (S32)width;
@@ -780,6 +798,73 @@ void LLSurface::moveZ(const S32 x, const S32 y, const F32 delta)
 }
 
 
+// <FS:Wolf> Terrain diagnostics. See the note on the counters in llsurface.h.
+void LLSurface::noteTerrainDataArrived(const LLVector3& patch_center_region)
+{
+    mDiagPatchesWithData++;
+    mDiagArrivedSinceReport++;
+
+    if (!mRegionp)
+    {
+        return;
+    }
+    const LLVector3 cam = mRegionp->getPosRegionFromGlobal(gAgentCamera.getCameraPositionGlobal());
+    const F32 dist = (patch_center_region - cam).magVec();
+
+    if (mDiagNearestDataM < 0.f || dist < mDiagNearestDataM)
+    {
+        mDiagNearestDataM = dist;
+    }
+    if (dist > mDiagFarthestDataM)
+    {
+        mDiagFarthestDataM = dist;
+    }
+}
+
+void LLSurface::reportTerrainDiagnostics()
+{
+    // Only worth saying anything on a region large enough for the streaming order to matter.
+    // A standard region finishes before you could read the first line.
+    const S32 DIAG_MIN_PATCHES = 4096;
+    const F32 REPORT_SECONDS = 10.f;
+    if (mNumberOfPatches < DIAG_MIN_PATCHES || !mDiagTimer.checkExpirationAndReset(REPORT_SECONDS))
+    {
+        return;
+    }
+
+    LL_INFOS("Terrain") << "terrain " << (mRegionp ? mRegionp->getName() : std::string("?"))
+                        << " " << (S32)(mMetersPerGrid * (F32)(mGridsPerEdge - 1)) << "m"
+                        << " land_pkts rx " << gVLManager.mLandPacketsReceived
+                        << " unpacked " << gVLManager.mLandPacketsUnpacked
+                        << " patches " << mNumberOfPatches
+                        << " with_data " << mDiagPatchesWithData
+                        << " (" << mDiagArrivedSinceReport << " new, nearest "
+                        << (mDiagNearestDataM < 0.f ? -1 : (S32)mDiagNearestDataM) << "m farthest "
+                        << (S32)mDiagFarthestDataM << "m)"
+                        << " objects " << mDiagObjectsBuilt
+                        << " visible " << (mDiagScanRan ? std::to_string(mVisiblePatchCount)
+                                                            : std::string("not-scanned"))
+                        << " dirty " << mDiagDirtyListSize
+                        << " normals_skipped " << mDiagNormalsSkipped
+                        << " | tex built " << mDiagTexBuilt
+                        << " no_object " << mDiagTexNoVObj
+                        << " wait_neighbours " << mDiagTexWaitNeighbors
+                        << " wait_heights " << mDiagTexWaitHeights
+                        << " wait_composition " << mDiagTexWaitComposition
+                        << LL_ENDL;
+
+    mDiagArrivedSinceReport = 0;
+    mDiagNearestDataM = -1.f;
+    mDiagFarthestDataM = -1.f;
+    mDiagTexNoVObj = 0;
+    mDiagTexWaitNeighbors = 0;
+    mDiagTexWaitHeights = 0;
+    mDiagTexWaitComposition = 0;
+    mDiagTexBuilt = 0;
+    mDiagNormalsSkipped = 0;
+}
+// </FS:Wolf>
+
 void LLSurface::updatePatchVisibilities(LLAgent &agent)
 {
     if (gShiftFrame)
@@ -806,6 +891,8 @@ void LLSurface::updatePatchVisibilities(LLAgent &agent)
     // Small regions keep the original whole-region loop, byte for byte, so nothing that works
     // today can regress.
     const S32 BOUNDED_SCAN_MIN_PATCHES = 4096;   // i.e. regions above 1024 m
+
+    mDiagScanRan = true;   // <FS:Wolf/>
 
     if (mNumberOfPatches < BOUNDED_SCAN_MIN_PATCHES)
     {
@@ -913,6 +1000,12 @@ bool LLSurface::idleUpdate(F32 max_update_time)
 
     // some patches changed, update region reflection probes
     mRegionp->updateReflectionProbes(did_update);
+
+    // <FS:Wolf/> Reported from here, not from updatePatchVisibilities: idleUpdate runs for every
+    // region every frame whether or not its land is visible, so a region that draws nothing at
+    // all still says why.
+    mDiagDirtyListSize = (S32)mDirtyPatchList.size();
+    reportTerrainDiagnostics();
 
     return did_update;
 }
@@ -1030,7 +1123,12 @@ void LLSurface::decompressDCTPatch(LLBitPack &bitpack, LLGroupHeader *gopp, bool
 
         // Dirty patch statistics, and flag that the patch has data.
         patchp->dirtyZ();
+        const bool was_new = !patchp->getHasReceivedData();   // <FS:Wolf/>
         patchp->setHasReceivedData();
+        if (was_new)                                          // <FS:Wolf/>
+        {
+            noteTerrainDataArrived(patchp->getCenterRegion());
+        }
     }
 }
 

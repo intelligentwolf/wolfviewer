@@ -52,6 +52,12 @@ public:
     void resetBitCounts();
 
     void cleanupData(LLViewerRegion *regionp);
+
+    // <FS:Wolf/> How many LAND layer packets the network handed us, and how many reached the
+    // decompressor. This is the line between "the sim never sent it" and "we received it and
+    // threw it away"; without it a region showing no terrain cannot say which.
+    S32 mLandPacketsReceived = 0;
+    S32 mLandPacketsUnpacked = 0;
 protected:
 
     std::vector<LLVLData *> mPacketData;

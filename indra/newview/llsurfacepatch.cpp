@@ -143,6 +143,25 @@ bool LLSurfacePatch::ensureVObj()
         return false;
     }
 
+    // <FS:Wolf> A patch the sim has sent nothing for has nothing to draw.
+    //
+    // updateVisibility reaches every patch inside the draw distance, so on a 25,600 m region
+    // that built an object for a quarter of a million patches that held no terrain at all —
+    // measured at 439,521 objects against 14,797 patches with data, about thirty empty objects
+    // for every real one. At roughly 1.4 KB each (LLVOSurfacePatch plus its LLDrawable) that is
+    // hundreds of megabytes, and worse, every one of them sat in the dirty list being walked
+    // by LLSurface::idleUpdate on every single frame.
+    //
+    // Waiting for data costs nothing: the patch is re-examined by updateVisibility on the very
+    // next frame, so it gets its object as soon as terrain for it arrives. The visible change
+    // is that ground the sim has not sent yet now draws as nothing rather than as a flat plane
+    // at zero, which is the more honest of the two.
+    if (!mHasReceivedData)
+    {
+        return false;
+    }
+    // </FS:Wolf>
+
     mVObjp = (LLVOSurfacePatch *)gObjectList.createObjectViewer(LLViewerObject::LL_VO_SURFACE_PATCH, mSurfacep->getRegion());
     if (mVObjp.isNull())
     {

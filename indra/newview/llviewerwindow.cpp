@@ -1032,12 +1032,10 @@ public:
             }
         }
 
-        // <FS:ND> Report amount of failed texture buffer allocations if any.
-        if (LLImageBase::getAllocationErrors())
-        {
-            addText(xpos, ypos, llformat("# textures discarded due to insufficient memory %ld", LLImageBase::getAllocationErrors()));
-        }
-        // </FS:ND>
+        // <WolfViewer> Firestorm's <FS:ND> "# textures discarded due to insufficient memory"
+        // overlay used to be drawn here, ungated, whenever LLImageBase::getAllocationErrors()
+        // was non-zero. The counter never resets, so one failed image allocation left the line
+        // on screen for the rest of the session. The counter itself is kept in LLImageBase.
     }
 
     void draw()

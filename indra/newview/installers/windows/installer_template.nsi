@@ -307,7 +307,7 @@ Function CheckCPUFlagsAVX2
     IntCmp $1 1 OK_AVX2
     ; AVX2 not supported
     ; Replace %DLURL% in the language string with the URL
-    ${WordReplace} "$(MissingAVX2)" "%DLURL%" "${DL_URL}-legacy-cpus" "+*" $3
+    ${WordReplace} "$(MissingAVX2)" "%DLURL%" "${DL_URL}" "+*" $3
     MessageBox MB_OK "$3"
     
     MessageBox MB_YESNO $(AVX2OverrideConfirmation) IDNO NoInstall
@@ -320,7 +320,7 @@ Function CheckCPUFlagsAVX2
     Return
 
   NoInstall:
-    ${OpenURL} "${DL_URL}-legacy-cpus"
+    ${OpenURL} "${DL_URL}"
     Quit
 
   OK_AVX2:
@@ -411,12 +411,15 @@ after_instdir:
 
 Call CheckCPUFlags							# Make sure we have SSE2 support
 
-# If we are an AVX2 build we want to abort if no AVX2 support on this CPU.
-# <FS:Wolf> WolfViewer ships ONE Windows build, so the Firestorm prompt that offered the
-# "AVX2 optimized version" (CheckCPUFlagsAVX2_Prompt) is gone: it sent every user with a
-# modern CPU to firestormviewer.org for a build we do not make.
+# Two checks here, if we are an AVX2 build we want to abort if no AVX2 support on this CPU.
+# If we are not an AVX2 build but the CPU can support it then we want to prompt them to download the AVX2 version
+# but also allow them to override.
+# <FS:Wolf> DL_URL is the other WolfViewer Windows installer on wolf-grid.com (viewer_manifest.py
+# dl_url_from_channel), so both prompts lead to our own downloads, never to firestormviewer.org.
 ${If} ${ISAVX2} == 1
   Call CheckCPUFlagsAVX2
+${Else}
+  Call CheckCPUFlagsAVX2_Prompt
 ${EndIf}
 
 Call CheckWindowsVersion					# Don't install On unsupported systems

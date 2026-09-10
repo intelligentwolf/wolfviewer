@@ -946,8 +946,14 @@ class Windows_x86_64_Manifest(ViewerManifest):
         return result
         # </FS:Ansariel>
     def dl_url_from_channel(self):
-        # <FS:Wolf> Every installer link points at WolfViewer's own downloads page.
-        return 'https://wolf-grid.com/viewers.php'
+        # <FS:Wolf> DL_URL is the installer the CPU check sends the user to: the plain
+        # build offers the AVX2 installer to an AVX2-capable CPU, and the AVX2 build sends
+        # a CPU without AVX2 to the plain installer. Both live on wolf-grid.com, never on
+        # firestormviewer.org. Names are the canonical ones viewers.php serves.
+        base = 'https://wolf-grid.com/downloads/wolfviewer/'
+        if self.fs_is_avx2():
+            return base + 'WolfViewer-7.2.4-windows64-OpenSim-Setup.exe'
+        return base + 'WolfViewer-7.2.4-windows64-AVX2-OpenSim-Setup.exe'
         if self.channel_type() == 'release':
             return 'https://www.firestormviewer.org/choose-your-platform'
         elif self.channel_type() == 'beta':

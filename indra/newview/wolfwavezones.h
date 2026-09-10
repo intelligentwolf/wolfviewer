@@ -42,9 +42,11 @@ class LLTextBox;
 // small waves (m) / calm (c) / off (x). The layout is set by whoever may edit the land and
 // stored on the grid (wolfstorm.app php/waves.php, table robust.waves).
 // [2026-09-10, Paul] "there should be NO waves inside the region only at the outside of it ...
-// only do waves if someone has drawn the waves with the wave editor": a region with no stored
-// layout — and every region on another grid — is FLAT (every cell off). The sea beyond the
-// region edges stays open water; surf painted along an edge still rolls in from far out.
+// only do waves if someone has drawn the waves with the wave editor", then "put the waves back
+// round the region automatically if there are no user defined settings": a region with no
+// stored layout — and every region on another grid — is FLAT inside with OPEN waves on the
+// outer SURF_BAND_M where that edge water faces the open sea (defaultZones). The sea beyond
+// the region edges stays open water; surf painted along an edge still rolls in from far out.
 // The renderer sees one "zone energy" texture (surf 1, open 0.55, small 0.35, calm 0.15,
 // off 0) over the same 3x-region span as the exposure field, baked into WolfWaterField::Field
 // beside it from this region's layout AND its neighbours'; waterV.glsl turns it into a swell

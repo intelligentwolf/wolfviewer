@@ -283,15 +283,45 @@ std::string WolfWaveZones::zonesFor(const Region& r) const
     return defaultZones(r);
 }
 
-// Source: wave_zones.js defaultZones — every cell OFF. [2026-09-10, Paul] "there should be NO
-// waves inside the region ... if someone makes a lake in a region then it doesn't have waves
-// unless they define it ... only do waves if someone has drawn the waves with the wave
-// editor." (Until 09-10 this was calm/open from the exposure field, which put waves on every
-// dug lake — Jimmy Olsen's WolfFest screenshots.) The sea outside the region is not a cell of
-// any layout and stays open (fill()).
+// Source: wave_zones.js defaultZones — OPEN waves round the region (the outer SURF_BAND_M of
+// cells where the exposure field says that water faces the open sea; a lake dug at the edge,
+// with land between it and the void, reads as sheltered and stays flat) and every inner cell
+// OFF. [2026-09-10, Paul] "NO waves inside the region only at the outside of it ... a lake in
+// a region doesn't have waves unless they define it", then "put the waves back round the
+// region automatically if there are no user defined settings". (Until 09-10 the whole interior
+// was calm/open from the exposure field, which put waves on every dug lake — Jimmy Olsen's
+// WolfFest screenshots.) The exposure field is the agent region's (it spans the neighbours),
+// so a neighbour's cells are offset into it.
 std::string WolfWaveZones::defaultZones(const Region& r) const
 {
-    return std::string((size_t)r.w() * r.h(), 'x');
+    const S32 w = r.w(), h = r.h();
+    const F32 cell = (F32)r.mCell;
+    const F32 band = llmax(SURF_BAND_M, cell);
+    std::string out;
+    out.reserve((size_t)w * h);
+    LLViewerRegion* rgn = gAgent.getRegion();
+    const WolfWaterField::Field* fld = rgn ? WolfWaterField::instance().get(rgn) : nullptr;
+    F32 ox = 0.f, oy = 0.f;
+    if (rgn && r.mHandle != rgn->getHandle())
+    {
+        S32 ax, ay, bx, by;
+        handle_xy(r.mHandle, ax, ay);
+        handle_xy(rgn->getHandle(), bx, by);
+        ox = (F32)(ax - bx);
+        oy = (F32)(ay - by);
+    }
+    for (S32 cy = 0; cy < h; ++cy)
+    {
+        for (S32 cx = 0; cx < w; ++cx)
+        {
+            const F32 mx = (cx + 0.5f) * cell, my = (cy + 0.5f) * cell;
+            const bool edge = mx < band || my < band || mx > (F32)r.mSizeX - band || my > (F32)r.mSizeY - band;
+            if (!edge) { out += 'x'; continue; }
+            const F32 e = fld ? WolfWaterField::exposureAt(*fld, ox + mx, oy + my) : 1.f;
+            out += (e >= 0.3f) ? 'o' : 'x';
+        }
+    }
+    return out;
 }
 
 void WolfWaveZones::fill(LLViewerRegion* regionp, F32 x0, F32 y0, F32 sx, F32 sy, S32 w, S32 h, std::vector<F32>& out) const
@@ -969,7 +999,7 @@ void WolfPanelLandWaves::onParamChanged()
     WolfWaveZones& wz = WolfWaveZones::instance();
     if (!wz.current() || !mPainter) return;
     wz.previewParams(paramsFromControls());
-    // Off = the automatic layout (flat everywhere): preview that, so the switch is visible at once.
+    // Off = the automatic layout (waves round the edge, flat inside): preview that, so the switch is visible at once.
     wz.preview(mEnabled->get() ? mPainter->zones() : wz.defaultZones(*wz.current()));
     armBakeConfirm();
 }

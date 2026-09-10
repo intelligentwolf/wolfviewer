@@ -83,7 +83,7 @@ public:
     void reset();
 
     /** Does this description ask for water? */
-    static bool matches(const std::string& description);
+    static bool matches(const std::string& description_lower);
 
 private:
     void sweep();

@@ -182,6 +182,8 @@ with the same filename but different name
   <texture name="Command_Speak_Icon"        file_name="toolbar_icons/speak.png"        preload="true" />
   <!-- WolfViewer 2026-09-06: Wolf Territories-only commands -->
   <texture name="Command_WolfDictate_Icon"     file_name="toolbar_icons/wolf_dictate.png"     preload="true" />
+  <texture name="Command_WolfRain_Icon"        file_name="toolbar_icons/wolf_rain.png"        preload="true" />
+  <texture name="Command_WolfSnow_Icon"        file_name="toolbar_icons/wolf_snow.png"        preload="true" />
   <texture name="Command_WolfReadAloud_Icon"   file_name="toolbar_icons/wolf_readaloud.png"   preload="true" />
   <texture name="Command_WolfShareScreen_Icon" file_name="toolbar_icons/wolf_sharescreen.png" preload="true" />
   <!-- FS:Beq FIRE-20977 -->

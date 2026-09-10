@@ -36,6 +36,7 @@
 #include "wolfgrid.h"
 #include "wolfspeech.h"
 #include "wolfscreenshare.h"
+#include "wolfweather.h"  // <WolfViewer> World > Weather
 // </WolfViewer>
 
 // linden library includes
@@ -573,6 +574,121 @@ static bool wolf_is_dictating()        { return WolfSpeech::instance().isDictati
 static void wolf_toggle_read_aloud()   { WolfSpeech::instance().toggleReadAloud(); }
 static void wolf_toggle_screen_share() { WolfScreenShare::instance().toggle(); }
 static bool wolf_is_sharing_screen()   { return WolfScreenShare::instance().isSharing(); }
+
+// <WolfViewer 2026-09-10> The EEP toolbar button (commands.xml wolf_eep). Paul: "an icon to
+// the toolbar for turning on and off EEP default ON, if you turn it off it switches to
+// midday". "On" = no fixed sky of our own on ENV_LOCAL, so the region / parcel environment
+// shows — the same test LLWorldEnableEnvSettings makes for its "region" item. Off = the fixed
+// Midday sky, exactly as World > Environment > Midday sets it (LLWorldEnvSettings "noon",
+// including the OpenSim legacy-windlight path when the grid has no extended environment);
+// on again = LLWorldEnvSettings "region" (clear ENV_LOCAL, instant transition, reflection
+// maps reset). RLV's @setenv restriction is honoured like the menu's.
+// <WolfViewer 2026-09-10> World > Weather. The parameter is "rain" or "snow".
+static WolfWeather::Mode wolf_weather_mode(const std::string& s)
+{
+    return s == "rain" ? WolfWeather::Mode::RAIN : s == "snow" ? WolfWeather::Mode::SNOW : WolfWeather::Mode::NONE;
+}
+class WolfWeatherToggle : public view_listener_t
+{
+    bool handleEvent(const LLSD& userdata)
+    {
+        if (WolfWeather::instance().forced())
+        {
+            LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE", "The weather here is set by this parcel."));
+            return true;
+        }
+        WolfWeather::instance().toggle(wolf_weather_mode(userdata.asString()));
+        return true;
+    }
+};
+class WolfWeatherIsOn : public view_listener_t
+{
+    bool handleEvent(const LLSD& userdata)
+    {
+        return WolfWeather::instance().isOn(wolf_weather_mode(userdata.asString()));
+    }
+};
+// Parameter "rain3" / "snow1": the mode and its level 1..4.
+static void wolf_weather_split(const std::string& s, WolfWeather::Mode& mode, S32& level)
+{
+    mode = wolf_weather_mode(s.substr(0, 4));
+    level = (s.size() > 4 && s[4] >= '1' && s[4] <= '4') ? s[4] - '0' : 2;
+}
+class WolfWeatherSetLevel : public view_listener_t
+{
+    bool handleEvent(const LLSD& userdata)
+    {
+        if (WolfWeather::instance().forced())
+        {
+            LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE", "The weather here is set by this parcel."));
+            return true;
+        }
+        WolfWeather::Mode mode; S32 level;
+        wolf_weather_split(userdata.asString(), mode, level);
+        WolfWeather::instance().setLevel(mode, level);
+        return true;
+    }
+};
+class WolfWeatherIsLevel : public view_listener_t
+{
+    bool handleEvent(const LLSD& userdata)
+    {
+        WolfWeather::Mode mode; S32 level;
+        wolf_weather_split(userdata.asString(), mode, level);
+        return WolfWeather::instance().isLevel(mode, level);
+    }
+};
+static void wolf_weather_clear()
+{
+    if (WolfWeather::instance().forced())
+    {
+        LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE", "The weather here is set by this parcel."));
+        return;
+    }
+    WolfWeather::instance().clear();
+}
+
+static bool wolf_is_eep()
+{
+    return !LLEnvironment::instance().getEnvironmentFixedSky(LLEnvironment::ENV_LOCAL);
+}
+static void wolf_toggle_eep()
+{
+    if (!RlvActions::canChangeEnvironment())
+        return;
+    if (wolf_is_eep())
+    {
+        // Source: LLWorldEnvSettings::handleEvent "noon" (below), both branches.
+#ifdef OPENSIM
+        if (LLGridManager::getInstance()->isInOpenSim() && !LLEnvironment::instance().isExtendedEnvironmentEnabled())
+        {
+            LLSD messages;
+            LLSettingsSky::ptr_t legacysky = LLEnvironment::createSkyFromLegacyPreset(
+                gDirUtilp->getExpandedFilename(LL_PATH_APP_SETTINGS, "windlight", "skies", "Midday.xml"), messages);
+            if (legacysky)
+            {
+                LLEnvironment::instance().setEnvironment(LLEnvironment::ENV_LOCAL, legacysky);
+                LLEnvironment::instance().setSelectedEnvironment(LLEnvironment::ENV_LOCAL);
+                LLEnvironment::instance().updateEnvironment(LLEnvironment::TRANSITION_FAST, true);
+            }
+            else
+            {
+                LL_WARNS() << "Legacy windlight conversion failed for Midday, existing env unchanged." << LL_ENDL;
+            }
+            return;
+        }
+#endif
+        LLEnvironment::instance().setManualEnvironment(LLEnvironment::ENV_LOCAL, LLEnvironment::KNOWN_SKY_MIDDAY);
+        LLEnvironment::instance().setSelectedEnvironment(LLEnvironment::ENV_LOCAL);
+    }
+    else
+    {
+        // Source: LLWorldEnvSettings::handleEvent "region".
+        gPipeline.mReflectionMapManager.reset();
+        LLEnvironment::instance().clearEnvironment(LLEnvironment::ENV_LOCAL);
+        LLEnvironment::instance().setSelectedEnvironment(LLEnvironment::ENV_LOCAL, LLEnvironment::TRANSITION_INSTANT);
+    }
+}
 // </WolfViewer>
 
 void init_menus()
@@ -12727,6 +12843,15 @@ void initialize_menus()
     enable.add("WolfSpeech.IsDictating", boost::bind(&wolf_is_dictating));
     commit.add("WolfSpeech.ToggleReadAloud", boost::bind(&wolf_toggle_read_aloud));
     enable.add("WolfSpeech.IsReadingAloud", boost::bind(&WolfSpeech::isReadingAloud));
+    // <WolfViewer 2026-09-10> the EEP toolbar button (every grid)
+    commit.add("WolfEnv.ToggleEEP", boost::bind(&wolf_toggle_eep));
+    enable.add("WolfEnv.IsEEP", boost::bind(&wolf_is_eep));
+    // <WolfViewer 2026-09-10> World > Weather (wolfweather.cpp): rain / snow / clear
+    view_listener_t::addMenu(new WolfWeatherToggle(), "WolfWeather.Toggle");
+    view_listener_t::addMenu(new WolfWeatherIsOn(), "WolfWeather.IsOn");
+    view_listener_t::addMenu(new WolfWeatherSetLevel(), "WolfWeather.SetLevel");
+    view_listener_t::addMenu(new WolfWeatherIsLevel(), "WolfWeather.IsLevel");
+    commit.add("WolfWeather.Clear", boost::bind(&wolf_weather_clear));
     commit.add("WolfScreenShare.Toggle", boost::bind(&wolf_toggle_screen_share));
     enable.add("WolfScreenShare.IsSharing", boost::bind(&wolf_is_sharing_screen));
     // </WolfViewer>

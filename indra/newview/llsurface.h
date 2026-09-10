@@ -203,7 +203,9 @@ private:
 
     LLPatchVertexArray mPVArray;
 
-    bool        mHasZData;              // We've received any patch data for this surface.
+    bool        mHasZData;
+
+    S32  mWolfBadHeightWarnings = 0;   // <WolfViewer 2026-09-10> non-finite wire heights reported so far              // We've received any patch data for this surface.
     // <FS:Wolf/> Has any patch on this surface built its viewer object? Patch objects are made
     // on demand (LLSurfacePatch::ensureVObj) and the first one is what creates the terrain draw
     // pool, so a surface nobody ever looked at legitimately has no pool at destruction. Without

@@ -36,6 +36,12 @@
      <command name="snapshot"/>
      <command name="quickprefs"/>
      <command name="preferences"/>
+     <command name="wolf_eep"/>
+     <command name="wolf_rain"/>
+     <command name="wolf_snow"/>
+     <!-- WolfViewer 2026-09-10: 22nd command so the two rows split 11 / 11 (Paul: "both rows
+          are equal on wolfviewer and wolfstorm"); WolfStorm has the same Gestures button. -->
+     <command name="gestures"/>
    </bottom_toolbar>
     <left_toolbar
      button_alignment="center"

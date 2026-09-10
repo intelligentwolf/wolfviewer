@@ -271,11 +271,41 @@ void WolfWaterField::idle()
         {
             continue;
         }
+        // [2026-09-10] Three guards from Paul's Dire Wolf teleport (25,600 m: "the region
+        // freezes for about 20 seconds" ... "the waves are not right and flickering really
+        // badly"). The log showed "baked Dire Wolf" every 2 s from arrival on:
+        //  1. A region wider than MAX_FIELD_REGION_M gets NO field. RES x RES texels over
+        //     25,600 m are 100 m of ground each — no beach can be read from that, and the
+        //     shader's fallback with no field (open sea, no breakers, no swash) is stable.
+        //  2. No bake until the terrain has height data (LLSurface::hasZData): before that
+        //     every patch reads 0, the field is fiction, and it changes on every packet.
+        //  3. At most one bake per MIN_REBAKE_SECS per region however often the terrain
+        //     stamp changes: patches stream in for a minute and the sea must not re-shape
+        //     itself on every one of them.
+        if (regionp->getWidth() > MAX_FIELD_REGION_M)
+        {
+            auto it = mFields.find(regionp->getHandle());
+            if (it != mFields.end() && it->second.mReady)
+            {
+                releaseField(it->second);
+                mFields.erase(it);
+            }
+            if (mNoFieldLogged.insert(regionp->getHandle()).second)
+            {
+                LL_INFOS("WolfWaterField") << "no shore field for " << regionp->getName() << " (" << regionp->getWidth()
+                                           << " m > " << MAX_FIELD_REGION_M << " m): open sea, no breakers" << LL_ENDL;
+            }
+            continue;
+        }
+        if (!regionp->getLand().hasZData())
+        {
+            continue;
+        }
         Field& f = mFields[regionp->getHandle()];
         const U64 stamp = terrainStamp(regionp);
         const bool stale = !f.mReady || f.mStamp != stamp || (now - f.mBakedAt) > REBAKE_SECS
                         || f.mWaterLevel != regionp->getWaterHeight();
-        if (stale)
+        if (stale && (!f.mReady || now - f.mBakedAt >= MIN_REBAKE_SECS))
         {
             pick = regionp;
             f.mStamp = stamp;
@@ -284,8 +314,10 @@ void WolfWaterField::idle()
     }
     if (pick)
     {
+        const F64 t0 = LLFrameTimer::getElapsedSeconds();
         bake(pick, mFields[pick->getHandle()]);
-        LL_INFOS("WolfWaterField") << "baked " << pick->getName() << LL_ENDL;
+        LL_INFOS("WolfWaterField") << "baked " << pick->getName() << " in "
+                                   << (S32)((LLFrameTimer::getElapsedSeconds() - t0) * 1000.0) << " ms" << LL_ENDL;
     }
 }
 

@@ -521,6 +521,9 @@ void LLDrawPoolWater::pushWaterPlanes(int pass)
     for (LLFace* const& face : mDrawFace)
     {
         water = static_cast<LLVOWater*>(face->getViewerObject());
+        // <WolfViewer 2026-09-10> re-tessellate a plane about the camera once it has moved
+        // (LLVOWater::wolfFollowCamera; idleUpdate never runs for water).
+        water->wolfFollowCamera();
 
         // <FS:WolfViewer>
         if (cur_shader)

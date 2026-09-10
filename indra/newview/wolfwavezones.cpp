@@ -283,45 +283,131 @@ std::string WolfWaveZones::zonesFor(const Region& r) const
     return defaultZones(r);
 }
 
-// Source: wave_zones.js defaultZones — OPEN waves round the region (the outer SURF_BAND_M of
-// cells where the exposure field says that water faces the open sea; a lake dug at the edge,
-// with land between it and the void, reads as sheltered and stays flat) and every inner cell
-// OFF. [2026-09-10, Paul] "NO waves inside the region only at the outside of it ... a lake in
-// a region doesn't have waves unless they define it", then "put the waves back round the
-// region automatically if there are no user defined settings". (Until 09-10 the whole interior
-// was calm/open from the exposure field, which put waves on every dug lake — Jimmy Olsen's
-// WolfFest screenshots.) The exposure field is the agent region's (it spans the neighbours),
-// so a neighbour's cells are offset into it.
+// Source: wave_zones.js defaultZones — the automatic layout. A cell is SEA ('o': full swell,
+// wind sea, breakers, swash) when its water connects, through water, to the region edge AND
+// open water (exposure >= 0.5) lies within COAST_REACH_M of it; every other water cell is
+// ENCLOSED ('m': small waves, smallScale of the open sea, same direction, no breakers and no
+// swash foam — waterV.glsl shoreGate): a dug lake, a pond, a river or a narrow inlet. Land
+// cells take the class of the water they touch (sea wins), so the blur in fill() cannot dim
+// the sea at its own shoreline and the breakers still roll in.
+//
+// Connectivity, NOT the exposure alone: exposure is distance to the nearest land, so it is
+// below 0.3 for ALL water within ~56 m of any shore — which classed the whole near-shore band
+// of an open coast as enclosed and, with the foam gate, removed the breakers that live there
+// (Paul 09-10: "still no waves rolling into the shore"). The flood fill starts from every
+// water cell on the region border (the void and the neighbours are sea) and walks through
+// water cells; heights are the region's own drawn surface (LLSurface::resolveHeightRegion,
+// five samples per cell, any below the water level = water). A region whose terrain is not
+// loaded (a neighbour not yet in LLWorld) falls back to the exposure rule.
+// [2026-09-10, Paul] "a lake in a region doesn't have waves unless they define it" (the white
+// foamy lake in Jimmy Olsen's screenshot), "the water is flat and boring" (first cut: all
+// off), "water enclosed by land also needs character and direction" (second cut: flat lakes).
 std::string WolfWaveZones::defaultZones(const Region& r) const
 {
+    static constexpr F32 COAST_REACH_M = 96.f;
+    static constexpr F32 OPEN_EXPOSURE = 0.5f;
     const S32 w = r.w(), h = r.h();
     const F32 cell = (F32)r.mCell;
-    const F32 band = llmax(SURF_BAND_M, cell);
-    std::string out;
-    out.reserve((size_t)w * h);
-    LLViewerRegion* rgn = gAgent.getRegion();
-    const WolfWaterField::Field* fld = rgn ? WolfWaterField::instance().get(rgn) : nullptr;
+    LLViewerRegion* agent_rgn = gAgent.getRegion();
+    const WolfWaterField::Field* fld = agent_rgn ? WolfWaterField::instance().get(agent_rgn) : nullptr;
     F32 ox = 0.f, oy = 0.f;
-    if (rgn && r.mHandle != rgn->getHandle())
+    if (agent_rgn && r.mHandle != agent_rgn->getHandle())
     {
         S32 ax, ay, bx, by;
         handle_xy(r.mHandle, ax, ay);
-        handle_xy(rgn->getHandle(), bx, by);
+        handle_xy(agent_rgn->getHandle(), bx, by);
         ox = (F32)(ax - bx);
         oy = (F32)(ay - by);
     }
+    std::vector<F32> expo((size_t)w * h, 1.f);
+    for (S32 cy = 0; cy < h; ++cy)
+        for (S32 cx = 0; cx < w; ++cx)
+            expo[(size_t)cy * w + cx] = fld ? WolfWaterField::exposureAt(*fld, ox + (cx + 0.5f) * cell, oy + (cy + 0.5f) * cell) : 1.f;
+
+    LLViewerRegion* rgn = LLWorld::getInstance()->getRegionFromHandle(r.mHandle);
+    std::string out((size_t)w * h, 'o');
+    if (!rgn)
+    {
+        // No terrain for this region: the exposure rule alone.
+        for (size_t k = 0; k < out.size(); ++k) out[k] = expo[k] >= 0.3f ? 'o' : 'm';
+        return out;
+    }
+    const LLSurface& land = rgn->getLand();
+    const F32 wl = rgn->getWaterHeight();
+    std::vector<U8> water((size_t)w * h, 0);
     for (S32 cy = 0; cy < h; ++cy)
     {
         for (S32 cx = 0; cx < w; ++cx)
         {
-            const F32 mx = (cx + 0.5f) * cell, my = (cy + 0.5f) * cell;
-            const bool edge = mx < band || my < band || mx > (F32)r.mSizeX - band || my > (F32)r.mSizeY - band;
-            if (!edge) { out += 'x'; continue; }
-            const F32 e = fld ? WolfWaterField::exposureAt(*fld, ox + mx, oy + my) : 1.f;
-            out += (e >= 0.3f) ? 'o' : 'x';
+            const F32 mx = (cx + 0.5f) * cell, my = (cy + 0.5f) * cell, q = cell * 0.25f;
+            const F32 sx[5] = { mx, mx - q, mx + q, mx - q, mx + q };
+            const F32 sy[5] = { my, my - q, my - q, my + q, my + q };
+            for (S32 i = 0; i < 5; ++i)
+            {
+                if (land.resolveHeightRegion(sx[i], sy[i]) < wl - 0.05f) { water[(size_t)cy * w + cx] = 1; break; }
+            }
         }
     }
-    return out;
+    // Flood fill from the border: sea is what the void can reach through water.
+    std::vector<U8> sea((size_t)w * h, 0);
+    std::vector<S32> stack;
+    auto seed = [&](S32 cx, S32 cy) { const size_t k = (size_t)cy * w + cx; if (water[k] && !sea[k]) { sea[k] = 1; stack.push_back((S32)k); } };
+    for (S32 cx = 0; cx < w; ++cx) { seed(cx, 0); seed(cx, h - 1); }
+    for (S32 cy = 0; cy < h; ++cy) { seed(0, cy); seed(w - 1, cy); }
+    while (!stack.empty())
+    {
+        const S32 k = stack.back(); stack.pop_back();
+        const S32 cx = k % w, cy = k / w;
+        if (cx > 0)     seed(cx - 1, cy);
+        if (cx < w - 1) seed(cx + 1, cy);
+        if (cy > 0)     seed(cx, cy - 1);
+        if (cy < h - 1) seed(cx, cy + 1);
+    }
+    // Sea cells with open water within reach are 'o'; every other water cell is 'm'.
+    const S32 reach = llmax(1, (S32)ceilf(COAST_REACH_M / cell));
+    for (S32 cy = 0; cy < h; ++cy)
+    {
+        for (S32 cx = 0; cx < w; ++cx)
+        {
+            const size_t k = (size_t)cy * w + cx;
+            if (!water[k]) continue;
+            bool open = false;
+            if (sea[k])
+            {
+                for (S32 dy = -reach; dy <= reach && !open; ++dy)
+                    for (S32 dx = -reach; dx <= reach; ++dx)
+                    {
+                        const S32 nx = cx + dx, ny = cy + dy;
+                        if (nx < 0 || ny < 0 || nx >= w || ny >= h) { open = true; break; }   // past the border: the void sea
+                        if (sea[(size_t)ny * w + nx] && expo[(size_t)ny * w + nx] >= OPEN_EXPOSURE) { open = true; break; }
+                    }
+            }
+            out[k] = open ? 'o' : 'm';
+        }
+    }
+    // Land cells: the class of the water they touch, sea winning; inland land stays 'o'
+    // (nothing is drawn there, and it must not dim a neighbouring sea cell in the blur).
+    std::string land_out(out);
+    for (S32 cy = 0; cy < h; ++cy)
+    {
+        for (S32 cx = 0; cx < w; ++cx)
+        {
+            const size_t k = (size_t)cy * w + cx;
+            if (water[k]) continue;
+            bool near_sea = false, near_enclosed = false;
+            for (S32 dy = -1; dy <= 1; ++dy)
+                for (S32 dx = -1; dx <= 1; ++dx)
+                {
+                    const S32 nx = cx + dx, ny = cy + dy;
+                    if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+                    const size_t j = (size_t)ny * w + nx;
+                    if (!water[j]) continue;
+                    if (out[j] == 'o') near_sea = true; else near_enclosed = true;
+                }
+            land_out[k] = (near_sea || !near_enclosed) ? 'o' : 'm';
+        }
+    }
+    return land_out;
 }
 
 void WolfWaveZones::fill(LLViewerRegion* regionp, F32 x0, F32 y0, F32 sx, F32 sy, S32 w, S32 h, std::vector<F32>& out) const
@@ -999,7 +1085,7 @@ void WolfPanelLandWaves::onParamChanged()
     WolfWaveZones& wz = WolfWaveZones::instance();
     if (!wz.current() || !mPainter) return;
     wz.previewParams(paramsFromControls());
-    // Off = the automatic layout (waves round the edge, flat inside): preview that, so the switch is visible at once.
+    // Off = the automatic layout (open sea full waves, enclosed water small waves): preview that, so the switch is visible at once.
     wz.preview(mEnabled->get() ? mPainter->zones() : wz.defaultZones(*wz.current()));
     armBakeConfirm();
 }
@@ -1022,14 +1108,18 @@ void WolfPanelLandWaves::onRevert()
     refresh();
 }
 
+// [2026-09-10] "Reset to automatic" switches the saved layout OFF (the "Use this layout" box)
+// rather than copying the automatic cells into the painter: a copy saved as a layout froze the
+// automatic rule of that moment for good (Paul's WT Atlantic 131 kept a flat first-cut default
+// as its saved layout — "its flat and boring, i set the water back to automatic"). With the
+// box off the grid stores enabled=0 and every viewer computes the automatic layout live. The
+// painted cells are kept, so ticking the box again brings them back.
 void WolfPanelLandWaves::onDefault()
 {
     WolfWaveZones& wz = WolfWaveZones::instance();
     const WolfWaveZones::Region* r = wz.current();
-    if (!r || !mPainter) return;
-    std::vector<bool> none((size_t)r->w() * r->h(), false);
-    mPainter->setLayout(r->w(), r->h(), wz.defaultZones(*r), none);
-    wz.preview(mPainter->zones());
+    if (!r || !mPainter || !mEnabled) return;
+    mEnabled->set(false);
+    onParamChanged();   // previews the automatic layout at once (enabled off -> defaultZones)
     setStatus(getString("str_default_loaded"), false);
-    armBakeConfirm();
 }

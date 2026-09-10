@@ -18,6 +18,7 @@
 
 #include "llsingleton.h"
 #include <map>
+#include <set>
 #include <vector>
 
 #include "llmath.h"
@@ -78,6 +79,8 @@ public:
     static constexpr S32 ERES = 256;
     static constexpr F32 CHECK_INTERVAL_SECS = 2.f;
     static constexpr F32 REBAKE_SECS = 20.f;     // neighbours stream in over a minute
+    static constexpr F32 MIN_REBAKE_SECS = 8.f;  // [2026-09-10] never re-shape the sea faster than this per region
+    static constexpr F32 MAX_FIELD_REGION_M = 4096.f;   // [2026-09-10] no shore field above this: RES texels would be > 16 m
 
     /** Every frame from LLAppViewer::idle(); bakes at most one region per check. */
     void idle();
@@ -107,6 +110,7 @@ public:
     static F32 distanceAt(const Field& f, F32 rx, F32 ry);
     /** [WAVES 2026-09-07] Bake every field again at the next check (a layout arrived / was saved / is previewed). */
     void invalidate();
+    std::set<U64> mNoFieldLogged;   // [2026-09-10] regions told once that they get no field
 
 private:
     void bake(LLViewerRegion* regionp, Field& f);

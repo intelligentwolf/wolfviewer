@@ -27,6 +27,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "llvowater.h"
+#include "llframetimer.h"   // <WolfViewer> camera-graded lattice
 
 #include "llviewercontrol.h"
 
@@ -156,6 +157,54 @@ void LLVOWater::updateTextures()
 // Never gets called
 void  LLVOWater::idleUpdate(LLAgent &agent, const F64 &time)
 {
+}
+
+// <WolfViewer 2026-09-10> THE CAMERA-GRADED LATTICE. Paul: "on wolfviewer make the waves more
+// realistic there's a bit weird". The region plane was tessellated at a fixed world step that
+// grew with the region: 2 m on a 256 m region, 4 m at 1024 m, 8 m at 2048 m, 16 m at 4096 m.
+// Nyquist needs two vertices per wavelength and the wind-sea cascade is 12 m, so on the
+// 1024 m Atlantic regions the chop had three vertices per wave and aliased into jagged,
+// stepping shapes, and on bigger regions the swell itself collapsed toward a plane. WolfStorm
+// has never had this: its sea is a radial mesh that FOLLOWS THE CAMERA, dense beside the eye
+// and coarse at the horizon (terrain_manager.js _buildRadialWaterGeometry), which is also
+// what the published real-time oceans do — a view-dependent grid with continuous LOD under
+// the FFT surface (Tessendorf 2001; GodotOceanWaves; Ubisoft La Forge 2024).
+//
+// Every wave-bearing plane, region and void alike, is now graded about the CAMERA with
+// wolf_graded_axis (2 m beside the eye, 4 % of the distance further out, 128 m at most) and
+// re-tessellated when the camera has moved more than WOLF_REANCHOR_M from the focus it was
+// built for, at most every WOLF_REANCHOR_SECS. Vertices move under a continuous surface
+// function (the shader keys every wave on world position), so a rebuild changes the sampling,
+// never the sea. idleUpdate never runs for water, so this is called from the draw pool.
+namespace
+{
+    constexpr F32 WOLF_REANCHOR_M = 12.f;
+    constexpr F64 WOLF_REANCHOR_SECS = 0.4;
+}
+void LLVOWater::wolfFollowCamera()
+{
+    if (mMesh || !LLPipeline::sRenderTransparentWater || mDrawable.isNull()) return;
+    const F64 now = LLFrameTimer::getElapsedSeconds();
+    if (mWolfLatticeValid && now - mWolfLatticeBuiltAt < WOLF_REANCHOR_SECS) return;
+    const LLVector3 cam = LLViewerCamera::getInstance()->getOrigin();
+    if (mWolfLatticeValid)
+    {
+        // A plane far from the camera has its focus clamped to its nearest edge and a lattice
+        // that barely changes for a small move, so its threshold grows with that distance:
+        // 12 m for the plane under the eye, 10 % of the range for the ones at the horizon.
+        // With ~17 planes of up to 65k vertices each, that keeps a flight from rebuilding the
+        // whole sea every half second.
+        const LLVector3 center = getPositionAgent();
+        const LLVector3 half = getScale() * 0.5f;
+        const F32 dx = llmax(0.f, fabsf(cam.mV[VX] - center.mV[VX]) - half.mV[VX]);
+        const F32 dy = llmax(0.f, fabsf(cam.mV[VY] - center.mV[VY]) - half.mV[VY]);
+        const F32 range = sqrtf(dx * dx + dy * dy);
+        const F32 threshold = llmax(WOLF_REANCHOR_M, range * 0.1f);
+        if ((cam - mWolfLatticeFocus).lengthSquared() < threshold * threshold) return;
+    }
+    // One shared-vertex buffer under 65k vertices: cheap enough to rebuild as a whole.
+    gPipeline.markRebuild(mDrawable, LLDrawable::REBUILD_ALL);
+    mWolfLatticeBuiltAt = now;
 }
 
 LLDrawable *LLVOWater::createDrawable(LLPipeline *pipeline)
@@ -311,31 +360,28 @@ bool LLVOWater::updateGeometry(LLDrawable *drawable)
         size_x = 1;
         size_y = 1;
     }
-    else if (mIsEdgePatch)
+    else
     {
-        // <WolfViewer 2026-09-06> The stock 32 m step could not hold a wave, so void water
-        // was flat and the sea ended at the region border. A distance-graded lattice about
-        // the agent region's centre is fine where the swell is and coarse at the horizon.
+        // <WolfViewer 2026-09-10> EVERY wave-bearing plane — region and void — is graded about
+        // the CAMERA (see wolfFollowCamera above): 2 m beside the eye, 4 % of the distance
+        // further out, 128 m at most, decimated under the U16 ceiling. The fixed
+        // TARGET_STEP_M lattice (2 m on a 256 m region, 16 m on a 4096 m one) aliased the
+        // 12 m wind-sea cascade on any region above 512 m. The void planes were already
+        // graded, about the agent region's centre; the camera is the better focus for them
+        // too — it is where the eye is.
         const LLVector3 center = getPositionAgent();
         const LLVector3 half = getScale() * 0.5f;
-        LLVector3 focus = center;
-        if (mRegionp)
-        {
-            const F32 w = mRegionp->getWidth();
-            focus = mRegionp->getOriginAgent() + LLVector3(w * 0.5f, w * 0.5f, 0.f);
-        }
+        const LLVector3 focus = LLViewerCamera::getInstance()->getOrigin();
         wolf_graded_axis(half.mV[VX], focus.mV[VX] - center.mV[VX], xs);
         wolf_graded_axis(half.mV[VY], focus.mV[VY] - center.mV[VY], ys);
         size_x = (S32)xs.size() - 1;
         size_y = (S32)ys.size() - 1;
         shared_lattice = true;
+        mWolfLatticeFocus = focus;
+        mWolfLatticeBuiltAt = LLFrameTimer::getElapsedSeconds();
+        mWolfLatticeValid = true;
+        (void)TARGET_STEP_M; (void)MAX_STEPS;
         // </WolfViewer>
-    }
-    else
-    {
-        size_x = llclamp((S32)llround(scale.mV[0] / TARGET_STEP_M), 1, MAX_STEPS);
-        size_y = llclamp((S32)llround(scale.mV[1] / TARGET_STEP_M), 1, MAX_STEPS);
-        shared_lattice = true;
     }
 
     // llround can return 0 for a degenerate scale; a zero-quad face would allocate nothing

@@ -75,6 +75,10 @@ public:
 
     void setIsEdgePatch(const bool edge_patch);
     bool getIsEdgePatch() const { return mIsEdgePatch; }
+    // <WolfViewer 2026-09-10> Camera-graded water lattice: called every frame the plane is
+    // drawn (lldrawpoolwater.cpp); re-tessellates about the camera once it has moved far
+    // enough from the lattice's last focus. See updateGeometry for why.
+    void wolfFollowCamera();
 
     // <FS:WolfViewer> A BOUNDED water surface — one fitted to a prim described "wolfwater"
     // (fswolfwater.cpp) rather than the region's own water plane.
@@ -141,6 +145,9 @@ public:
 
 protected:
     bool mIsEdgePatch;
+    LLVector3 mWolfLatticeFocus;       // <WolfViewer 2026-09-10> agent-space camera the lattice was graded about
+    F64       mWolfLatticeBuiltAt = 0.0;
+    bool      mWolfLatticeValid = false;
     S32  mRenderType;
     F32  mBoundedWaterDepth = 0.f;  // <FS:WolfViewer>
     F32  mWaterfall = 0.f;          // <WolfViewer>

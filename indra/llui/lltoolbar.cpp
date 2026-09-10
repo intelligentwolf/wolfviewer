@@ -810,6 +810,9 @@ void LLToolBar::updateLayoutAsNeeded()
     {
         buttons_per_row = llceil((F32)mButtons.size() / (F32)mRows);
     }
+    // [2026-09-10] Every row placed, for the spread below (Paul: "there's a big space
+    // underneath camera controls ... make it spread out so it looks right").
+    std::vector<std::vector<LLToolBarButton*> > wolf_rows;
     // </WolfViewer>
 
     for (LLToolBarButton* button : mButtons)
@@ -876,6 +879,7 @@ void LLToolBar::updateLayoutAsNeeded()
 
             // make buttons in current row all same girth
             resizeButtonsInRow(buttons_in_row, max_row_girth);
+            if (buttons_per_row > 0) wolf_rows.push_back(buttons_in_row);   // <WolfViewer 2026-09-10>
             buttons_in_row.clear();
 
             max_row_length = llmax(max_row_length, row_running_length);
@@ -918,6 +922,44 @@ void LLToolBar::updateLayoutAsNeeded()
         resizeButtonsInRow(buttons_in_row, max_row_girth);
     }
     // </FS:Zi>
+    // <WolfViewer 2026-09-10> SPREAD THE ROWS. Buttons are sized to their captions, so a row of
+    // short captions ("Map", "Snow") ends well before a row of long ones ("Animation
+    // overrider", "Camera controls") and the bar has a gap under its right end. Every row is
+    // now stretched to the widest one: the shortfall is shared equally across the row's
+    // buttons (the remainder to the last), each button widened and the ones after it slid
+    // along. Captions are centred, so wider buttons simply get more air around them.
+    if (buttons_per_row > 0 && orientation == LLLayoutStack::HORIZONTAL)
+    {
+        if (!buttons_in_row.empty()) wolf_rows.push_back(buttons_in_row);
+        S32 widest = 0;
+        for (const auto& row : wolf_rows)
+        {
+            if (row.empty()) continue;
+            widest = llmax(widest, row.back()->getRect().mRight - row.front()->getRect().mLeft);
+        }
+        for (const auto& row : wolf_rows)
+        {
+            if (row.empty()) continue;
+            const S32 length = row.back()->getRect().mRight - row.front()->getRect().mLeft;
+            const S32 extra = widest - length;
+            if (extra <= 0) continue;
+            const S32 n = (S32)row.size();
+            const S32 each = extra / n;
+            S32 remainder = extra - each * n;
+            S32 slide = 0;
+            for (LLToolBarButton* b : row)
+            {
+                const S32 grow = each + (remainder > 0 ? 1 : 0);
+                if (remainder > 0) --remainder;
+                LLRect r = b->getRect();
+                r.translate(slide, 0);
+                r.mRight += grow;
+                b->setShape(r);
+                slide += grow;
+            }
+        }
+    }
+    // </WolfViewer>
 
     // grow and optionally shift toolbar to accommodate buttons
     if (orientation == LLLayoutStack::HORIZONTAL)

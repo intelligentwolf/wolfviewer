@@ -2198,6 +2198,21 @@ LLVector3d LLAgentCamera::calcCameraPositionTargetGlobal(bool *hit_limit)
     // If not constrained, permit going 1000m below 0, use case: retrieving objects
     F32 camera_min_off_ground = getCameraMinOffGround(); // checks isDisableCameraConstraints
     F32 camera_land_height = LLWorld::getInstance()->resolveLandHeightGlobal(camera_position_global);
+    // <WolfViewer 2026-09-10> A non-finite land height must never become the camera's floor:
+    // "camera_z < +inf" is true and the camera would be set to infinity (LLCoordFrame
+    // "Non Finite mOrigin"). Treat it as sea level and say where it came from, rate-limited.
+    if (!llfinite(camera_land_height))
+    {
+        static F64 s_last_warn = 0.0;
+        const F64 now = LLFrameTimer::getElapsedSeconds();
+        if (now - s_last_warn > 10.0)
+        {
+            s_last_warn = now;
+            LL_WARNS("Camera") << "non-finite land height under the camera at " << camera_position_global << ", using 0" << LL_ENDL;
+        }
+        camera_land_height = 0.f;
+    }
+    // </WolfViewer>
     F32 minZ = camera_land_height + camera_min_off_ground;
     if (camera_position_global.mdV[VZ] < minZ)
     {

@@ -1404,6 +1404,123 @@
         </menu_item_check>
         <menu_item_separator/>-->
 
+      <!-- WolfViewer 2026-09-10: World > Weather (wolfweather.cpp). Rain and snow the user
+           turns on and off; a parcel whose prims say "wolfrain" / "wolfsnow" overrides it. -->
+      <menu
+         create_jump_keys="true"
+         label="Weather"
+         name="WolfWeather"
+         tear_off="true">
+        <menu_item_check
+         label="Rain"
+         name="WolfWeatherRain">
+          <menu_item_check.on_check
+           function="WolfWeather.IsOn"
+           parameter="rain" />
+          <menu_item_check.on_click
+           function="WolfWeather.Toggle"
+           parameter="rain" />
+        </menu_item_check>
+        <menu_item_check
+         label="Snow"
+         name="WolfWeatherSnow">
+          <menu_item_check.on_check
+           function="WolfWeather.IsOn"
+           parameter="snow" />
+          <menu_item_check.on_click
+           function="WolfWeather.Toggle"
+           parameter="snow" />
+        </menu_item_check>
+        <menu_item_separator />
+        <menu_item_call
+         label="Clear Weather"
+         name="WolfWeatherClear">
+          <menu_item_call.on_click
+           function="WolfWeather.Clear" />
+        </menu_item_call>
+        <menu_item_separator />
+        <menu_item_check
+         label="Rain: Light"
+         name="WolfWeatherRain1">
+          <menu_item_check.on_check
+           function="WolfWeather.IsLevel"
+           parameter="rain1" />
+          <menu_item_check.on_click
+           function="WolfWeather.SetLevel"
+           parameter="rain1" />
+        </menu_item_check>
+        <menu_item_check
+         label="Rain: Moderate"
+         name="WolfWeatherRain2">
+          <menu_item_check.on_check
+           function="WolfWeather.IsLevel"
+           parameter="rain2" />
+          <menu_item_check.on_click
+           function="WolfWeather.SetLevel"
+           parameter="rain2" />
+        </menu_item_check>
+        <menu_item_check
+         label="Rain: Heavy"
+         name="WolfWeatherRain3">
+          <menu_item_check.on_check
+           function="WolfWeather.IsLevel"
+           parameter="rain3" />
+          <menu_item_check.on_click
+           function="WolfWeather.SetLevel"
+           parameter="rain3" />
+        </menu_item_check>
+        <menu_item_check
+         label="Rain: Torrential"
+         name="WolfWeatherRain4">
+          <menu_item_check.on_check
+           function="WolfWeather.IsLevel"
+           parameter="rain4" />
+          <menu_item_check.on_click
+           function="WolfWeather.SetLevel"
+           parameter="rain4" />
+        </menu_item_check>
+        <menu_item_separator />
+        <menu_item_check
+         label="Snow: Light"
+         name="WolfWeatherSnow1">
+          <menu_item_check.on_check
+           function="WolfWeather.IsLevel"
+           parameter="snow1" />
+          <menu_item_check.on_click
+           function="WolfWeather.SetLevel"
+           parameter="snow1" />
+        </menu_item_check>
+        <menu_item_check
+         label="Snow: Moderate"
+         name="WolfWeatherSnow2">
+          <menu_item_check.on_check
+           function="WolfWeather.IsLevel"
+           parameter="snow2" />
+          <menu_item_check.on_click
+           function="WolfWeather.SetLevel"
+           parameter="snow2" />
+        </menu_item_check>
+        <menu_item_check
+         label="Snow: Heavy"
+         name="WolfWeatherSnow3">
+          <menu_item_check.on_check
+           function="WolfWeather.IsLevel"
+           parameter="snow3" />
+          <menu_item_check.on_click
+           function="WolfWeather.SetLevel"
+           parameter="snow3" />
+        </menu_item_check>
+        <menu_item_check
+         label="Snow: Blizzard"
+         name="WolfWeatherSnow4">
+          <menu_item_check.on_check
+           function="WolfWeather.IsLevel"
+           parameter="snow4" />
+          <menu_item_check.on_click
+           function="WolfWeather.SetLevel"
+           parameter="snow4" />
+        </menu_item_check>
+      </menu>
       <menu
          create_jump_keys="true"
          label="Environment"

@@ -705,8 +705,8 @@ void main()
         float band = 1.0 - clamp(wDepth / bandW, 0.0, 1.0);
         band = clamp(band + (clump - 0.5) * 0.30 * shoal, 0.0, 1.0);
         float fNoise = 0.55 + 0.45 * ((wave2.z + 1.0) * 0.5);
-        // [WAVES 2026-09-10] ... only where the painted zone has waves at all (vSwell.w =
-        // zoneScale, 0 in an off cell): a flat lake has no swash line. Water.js same.
+        // [WAVES 2026-09-10] ... on the open sea and the surf only (vSwell.w = shoreGate, 0 in
+        // off / calm / small cells): an enclosed lake never goes white. Water.js same.
         float shoreFoam = pow(band, 1.5) * fNoise * (0.78 + 0.34 * swash) * vSwell.w;
         float breakFoam = shoreCrest * shoreCrest * (0.30 + 0.70 * clump) * shoreGain;
         float foamAmt = max(shoreFoam, breakFoam * 0.85);

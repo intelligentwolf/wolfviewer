@@ -31,6 +31,7 @@
 
 // viewer includes
 #include "llagent.h"
+#include "llversioninfo.h"   // <WolfViewer> version in the status bar
 #include "llagentcamera.h"
 #include "llbutton.h"
 #include "llcommandhandler.h"
@@ -301,6 +302,18 @@ bool LLStatusBar::postBuild()
     //    boost::bind(&LLStatusBar::onClickShop, this));
 
     mBoxBalance = getChild<LLTextBox>("balance");
+    // <WolfViewer 2026-09-10> the build in the top bar: "w18 7.2.4.18" (channel's release tag
+    // after the "WolfViewer-Release-" prefix, then the full version). Paul: "put the version in
+    // the bar at the top of the software".
+    if (LLTextBox* version_text = findChild<LLTextBox>("wolf_version_text"))
+    {
+        // Paul 09-10: "just put the w number like w20, we will be ignoring the firestorm version".
+        std::string channel = LLVersionInfo::instance().getChannel();
+        const std::string prefix("WolfViewer-Release-");
+        if (channel.compare(0, prefix.size(), prefix) == 0) channel = channel.substr(prefix.size());
+        version_text->setText(channel);
+    }
+    // </WolfViewer>
     mBoxBalance->setClickedCallback(&LLStatusBar::onClickRefreshBalance, this);
     //mBoxBalance->setDoubleClickCallback([this](LLUICtrl*, S32 x, S32 y, MASK mask) { onClickToggleBalance(); }); // <FS:Ansariel> Prefer custom FS balance hiding method
 

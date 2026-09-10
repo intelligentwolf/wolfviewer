@@ -90,6 +90,11 @@ public:
     {
         std::string mName;
         std::string mDescription;
+        // Lower-cased once when the answer arrives. FSWolfWater::sweep and WolfWeather::sweep
+        // keyword-test every known prim in range on every pass; lower-casing there cost a
+        // string copy per prim per pass (heaptrack 2026-09-10: 835k temporary allocations in
+        // one 11-minute session, all from those two loops).
+        std::string mDescriptionLower;
         F64         mReceivedAt = 0.0;
     };
 

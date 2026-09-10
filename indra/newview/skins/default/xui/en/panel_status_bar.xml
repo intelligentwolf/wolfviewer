@@ -209,6 +209,34 @@
         L$ [AMT]
     </panel.string>
 
+	<!-- WolfViewer 2026-09-10 (Paul: "put the version in the bar at the top of the software"):
+	     the build, e.g. "w18 7.2.4.18", set by LLStatusBar::postBuild from LLVersionInfo. Sits
+	     just left of the menu search box; both hang from the right edge. -->
+	<panel
+	 height="18"
+	 left="-600"
+	 top="0"
+	 width="115"
+	 follows="right|top"
+	 name="wolf_version_bg"
+	 background_opaque="true"
+	 background_visible="true"
+	 bg_opaque_color="MouseGray">
+		<text
+		 type="string"
+		 font="SansSerif"
+		 text_color="TimeTextColor"
+		 follows="right|top"
+		 halign="center"
+		 height="16"
+		 layout="topleft"
+		 left="2"
+		 top="3"
+		 width="111"
+		 name="wolf_version_text"
+		 tool_tip="WolfViewer build">
+		</text>
+	</panel>
 	<panel
 	 height="18"
 	 left="-481"

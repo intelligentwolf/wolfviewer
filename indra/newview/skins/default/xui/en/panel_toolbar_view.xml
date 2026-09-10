@@ -295,6 +295,27 @@
 	            image_name="Caret_Bottom_Icon"
 	            name="caret" />
     </toolbar>
+    <!-- WolfViewer 2026-09-10 (Paul: "have a hide/show function"): a small arrow at the bar's
+         bottom-right corner. Down = hide; the toolbar goes and this panel shrinks to a strip
+         that keeps the (now up) arrow; up = show. Remembered in WolfViewerBottomToolbarHidden.
+         lltoolbarview.cpp toggleBottomToolbar. -->
+    <button layout="topleft"
+            name="wolf_toolbar_toggle"
+            width="14"
+            height="14"
+            right="-2"
+            top="74"
+            follows="right|bottom"
+            is_toggle="true"
+            image_unselected="Arrow_Down"
+            image_selected="Arrow_Up"
+            image_pressed="Arrow_Down"
+            image_pressed_selected="Arrow_Up"
+            image_hover_unselected="Arrow_Down"
+            image_hover_selected="Arrow_Up"
+            tab_stop="false"
+            chrome="true"
+            tool_tip="Hide or show the toolbar" />
 
   </layout_panel>
   <!-- The toolbar itself -->

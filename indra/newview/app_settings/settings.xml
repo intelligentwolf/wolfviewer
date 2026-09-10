@@ -13291,7 +13291,7 @@ Change of this parameter will affect the layout of buttons in notification toast
       <key>Type</key>
       <string>Boolean</string>
       <key>Value</key>
-      <integer>0</integer>
+      <integer>1</integer>
     </map>
     <key>WolfTerrainWater</key>
     <map>
@@ -19439,6 +19439,50 @@ Change of this parameter will affect the layout of buttons in notification toast
 			<string>Boolean</string>
 			<key>Value</key>
 			<integer>1</integer>
+		</map>
+		<key>WolfViewerBottomToolbarHidden</key>
+		<map>
+			<key>Comment</key>
+			<string>The bottom toolbar is hidden (the arrow at its right end); the panel shrinks to a strip with the arrow.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfViewerGesturesButtonAdded</key>
+		<map>
+			<key>Comment</key>
+			<string>Set once the Gestures toolbar button has been added to this account's saved toolbar layout (22nd command, so the two rows split evenly), so removing it sticks.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfViewerWeatherButtonsAdded</key>
+		<map>
+			<key>Comment</key>
+			<string>Set once the Rain and Snow toolbar buttons have been added to this account's saved toolbar layout, so removing them sticks.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfViewerEepButtonAdded</key>
+		<map>
+			<key>Comment</key>
+			<string>Set once the EEP on/off toolbar button has been added to this account's saved toolbar layout, so removing it sticks.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
 		</map>
 		<key>WolfViewerToolbarButtonsAdded</key>
 		<map>

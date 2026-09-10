@@ -2343,18 +2343,18 @@ Only large parcels can be listed in search.
           name="land_waves_panel">
             <panel.string name="str_note_all">You can set every cell of [REGION] and its wave settings ([W] x [H] cells of [CELL] m, [STATE]).</panel.string>
             <panel.string name="str_note_parcel">You can set the cells on land you own in [REGION]; other cells are locked ([W] x [H] cells of [CELL] m, [STATE]).</panel.string>
-            <panel.string name="str_off_grid">This region is not on the Wolf Territories grid, so it uses the automatic wave layout (waves round the edge, flat inside).</panel.string>
+            <panel.string name="str_off_grid">This region is not on the Wolf Territories grid, so it uses the automatic wave layout (open sea has waves, enclosed water has small waves).</panel.string>
             <panel.string name="str_newer_on_grid">The layout changed on the grid while you were painting — Save puts your painting on top of it.</panel.string>
             <panel.string name="str_fetching">Asking the grid for this region's wave layout…</panel.string>
             <panel.string name="str_stored">saved layout</panel.string>
-            <panel.string name="str_automatic">automatic layout: waves round the edge, flat inside; nothing saved yet</panel.string>
+            <panel.string name="str_automatic">automatic layout: open sea has waves, enclosed water has small waves; nothing saved yet</panel.string>
             <panel.string name="str_locked_cell">That cell is on land you do not own — it stays as it is.</panel.string>
             <panel.string name="str_saving">Saving…</panel.string>
             <panel.string name="str_saved">Saved — everyone in the region now sees this layout.</panel.string>
             <panel.string name="str_save_failed">Could not save:</panel.string>
-            <panel.string name="str_default_loaded">Automatic layout loaded (waves round the edge, flat inside) — Save to keep it.</panel.string>
+            <panel.string name="str_default_loaded">Automatic layout on (open sea has waves, enclosed water has small waves); your painted cells are kept but not used — Save to keep it.</panel.string>
             <text follows="left|top" height="30" layout="topleft" left="10" top="8" width="470" word_wrap="true" name="waves_help">
-A region starts with open waves round its edge and flat water inside: paint where you want waves. Surf is the big rolling surf, Open is ordinary sea, Small is a gentle sea at a fraction of the open-sea height, Calm is river and pond ripple, Off is flat. The sea beyond the region edge is always open water.
+A region starts with waves on its open sea and small waves wherever land closes in (lakes, rivers, harbours); paint to change that. Surf is the big rolling surf, Open is ordinary sea, Small is a gentle sea at a fraction of the open-sea height, Calm is river and pond ripple, Off is flat. The sea beyond the region edge is always open water.
             </text>
             <text follows="left|top" height="28" layout="topleft" left="10" top_pad="2" width="470" word_wrap="true" name="waves_note" text_color="0.79 0.64 0.15 1">
             </text>

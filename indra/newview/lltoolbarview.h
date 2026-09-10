@@ -110,6 +110,9 @@ public:
     // so the two-row toolbar is centred on the SCREEN and not on the space left over.
     // Call after anything that changes either of those. See lltoolbarview.cpp.
     static void refreshChatStripWidth();
+    // <WolfViewer 2026-09-10> the arrow at the bottom bar's right end (panel_toolbar_view.xml)
+    void toggleBottomToolbar();
+    void applyBottomToolbarHidden(bool hidden);
     // </WolfViewer>
 
     // <FS:Ansariel> Added to determine if toolbar gets hidden when empty
@@ -138,6 +141,7 @@ private:
     LLInventoryObject*  mDragItem;
     bool                mShowToolbars;
     LLView*             mBottomToolbarPanel;
+    LLButton*           mWolfToolbarToggle = nullptr;   // <WolfViewer 2026-09-10>
 
     // <FS:Ansariel> Member variables needed for console chat bottom offset
     LLView*             mBottomChatStack;

@@ -48,6 +48,8 @@ void WolfObjectProps::note(const LLUUID& object_id, const std::string& name, con
     Props& p = mProps[object_id];
     p.mName = name;
     p.mDescription = description;
+    p.mDescriptionLower = description;
+    LLStringUtil::toLower(p.mDescriptionLower);
     p.mReceivedAt = LLFrameTimer::getElapsedSeconds();
 }
 

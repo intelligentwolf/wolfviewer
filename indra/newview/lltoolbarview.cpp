@@ -28,6 +28,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "lltoolbarview.h"
+#include "lllayoutstack.h"
 #include "wolfgrid.h" // <WolfViewer> Wolf Territories-only toolbar buttons
 
 #include "llapp.h"
@@ -120,6 +121,21 @@ bool LLToolBarView::postBuild()
     mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM]->getCenterLayoutPanel()->setLocationId(LLToolBarEnums::TOOLBAR_BOTTOM);
 
     mBottomToolbarPanel = getChild<LLView>("bottom_toolbar_panel");
+    // <WolfViewer 2026-09-10> the bottom bar's width is set every frame in draw() (screen
+    // centring); it must stop following its panel's right edge or the parent's reshape would
+    // stretch it back.
+    if (mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM])
+    {
+        mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM]->setFollows(FOLLOWS_LEFT | FOLLOWS_BOTTOM);
+    }
+    // <WolfViewer 2026-09-10> hide / show arrow for the bottom bar (Paul)
+    mWolfToolbarToggle = findChild<LLButton>("wolf_toolbar_toggle");
+    if (mWolfToolbarToggle)
+    {
+        mWolfToolbarToggle->setCommitCallback(boost::bind(&LLToolBarView::toggleBottomToolbar, this));
+        applyBottomToolbarHidden(gSavedSettings.getBOOL("WolfViewerBottomToolbarHidden"));
+    }
+    // </WolfViewer>
 
     for (int i = LLToolBarEnums::TOOLBAR_FIRST; i <= LLToolBarEnums::TOOLBAR_LAST; i++)
     {
@@ -458,6 +474,49 @@ bool LLToolBarView::loadToolbars(bool force_default)
     }
     // </WolfViewer>
 
+    // <WolfViewer 2026-09-10> The EEP on/off button (commands.xml wolf_eep) is added ONCE to
+    // the bottom toolbar of an existing saved layout on every grid — a saved per-account layout
+    // never sees a new skin default — and remembered (WolfViewerEepButtonAdded), so a user who
+    // removes it is not handed it again every login. Same shape as the Wolf Territories
+    // buttons above, without the grid test.
+    if (mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM] && !gSavedSettings.getBOOL("WolfViewerEepButtonAdded"))
+    {
+        const LLCommandId eep("wolf_eep");
+        if (hasCommand(eep) == LLToolBarEnums::TOOLBAR_NONE
+            && addCommandInternal(eep, mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM]))
+        {
+            LL_INFOS() << "WolfViewer: added the EEP button to the bottom toolbar" << LL_ENDL;
+        }
+        gSavedSettings.setBOOL("WolfViewerEepButtonAdded", true);
+    }
+    // <WolfViewer 2026-09-10> ...and the Rain / Snow buttons beside it, the same way, once.
+    if (mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM] && !gSavedSettings.getBOOL("WolfViewerWeatherButtonsAdded"))
+    {
+        for (const char* name : { "wolf_rain", "wolf_snow" })
+        {
+            const LLCommandId id(name);
+            if (hasCommand(id) == LLToolBarEnums::TOOLBAR_NONE
+                && addCommandInternal(id, mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM]))
+            {
+                LL_INFOS() << "WolfViewer: added the " << name << " button to the bottom toolbar" << LL_ENDL;
+            }
+        }
+        gSavedSettings.setBOOL("WolfViewerWeatherButtonsAdded", true);
+    }
+    // <WolfViewer 2026-09-10> ...and Gestures, once, so a saved 21-command bar becomes 22 and
+    // splits 11 / 11 (Paul: "the buttons need reordering so that both rows are equal").
+    if (mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM] && !gSavedSettings.getBOOL("WolfViewerGesturesButtonAdded"))
+    {
+        const LLCommandId id("gestures");
+        if (hasCommand(id) == LLToolBarEnums::TOOLBAR_NONE
+            && addCommandInternal(id, mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM]))
+        {
+            LL_INFOS() << "WolfViewer: added the Gestures button to the bottom toolbar" << LL_ENDL;
+        }
+        gSavedSettings.setBOOL("WolfViewerGesturesButtonAdded", true);
+    }
+    // </WolfViewer>
+
     // <WolfViewer 2026-09-07> The Welcome Island guidebook button (commands.xml howto) is
     // gone from this viewer: taken off every toolbar of any layout, every load. Not a
     // one-time flag — it must never come back, whatever an old layout file says.
@@ -501,7 +560,7 @@ bool LLToolBarView::loadToolbars(bool force_default)
             "chat", "speak", "voice", "wolf_dictate", "wolf_readaloud", "wolf_sharescreen",
             "appearance", "inventory", "animationoverride",
             "move", "view", "people", "search", "map", "minimap", "snapshot",
-            "quickprefs", "preferences"
+            "quickprefs", "preferences", "wolf_eep", "wolf_rain", "wolf_snow", "gestures"
         };
         // Under this many, the bar is not something a user arranged — it is what is left when
         // the group commands stop existing. A genuinely customised bar is longer and is left
@@ -836,16 +895,82 @@ void LLToolBarView::refreshChatStripWidth()
 }
 // </WolfViewer>
 
+// <WolfViewer 2026-09-10> Hide / show the bottom bar. Hidden: the toolbar is invisible and
+// bottom_toolbar_panel shrinks to a strip just tall enough for the arrow (setTargetDim is how
+// refreshChatStripWidth above resizes a layout panel; the stack relayouts itself). The chat
+// bar, which shares this panel, goes with it — press the arrow again to have both back.
+void LLToolBarView::applyBottomToolbarHidden(bool hidden)
+{
+    static const S32 SHOWN_DIM = 90;    // panel_toolbar_view.xml bottom_toolbar_panel height
+    static const S32 HIDDEN_DIM = 16;   // the arrow plus a pixel
+    if (mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM])
+    {
+        mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM]->setVisible(!hidden);
+    }
+    if (LLLayoutPanel* panel = dynamic_cast<LLLayoutPanel*>(mBottomToolbarPanel))
+    {
+        panel->setTargetDim(hidden ? HIDDEN_DIM : SHOWN_DIM);
+    }
+    if (mWolfToolbarToggle)
+    {
+        mWolfToolbarToggle->setToggleState(hidden);
+        mWolfToolbarToggle->setToolTip(hidden ? std::string("Show the toolbar") : std::string("Hide the toolbar"));
+    }
+}
+
+void LLToolBarView::toggleBottomToolbar()
+{
+    const bool hidden = !gSavedSettings.getBOOL("WolfViewerBottomToolbarHidden");
+    gSavedSettings.setBOOL("WolfViewerBottomToolbarHidden", hidden);
+    applyBottomToolbarHidden(hidden);
+}
+// </WolfViewer>
+
 void LLToolBarView::draw()
 {
     LLRect toolbar_rects[LLToolBarEnums::TOOLBAR_COUNT];
 
-    for (S32 i = LLToolBarEnums::TOOLBAR_FIRST; i <= LLToolBarEnums::TOOLBAR_LAST; i++)
+    // <WolfViewer 2026-09-10> CENTRE THE BOTTOM BAR ON THE SCREEN, not on its panel. The
+    // toolbar's panel starts to the RIGHT of the chat strip (400 px with the chat bar up,
+    // 168 px while Stand / Stop Flying shows — refreshChatStripWidth), and LLToolBar centres
+    // its buttons within its own width, so with the strip up the buttons sat half a strip
+    // right of screen centre (Paul: "the toolbar is not in the middle of the screen"). The
+    // toolbar is made as much narrower than its panel as the strip is wide, so its centre IS
+    // the screen's centre; if the buttons would not fit in that, it takes the whole panel.
+    // The hide/show arrow (panel_toolbar_view.xml) keeps the panel's far right, which the
+    // narrowed toolbar now leaves clear.
+    static LLCachedControl<bool> bottom_hidden(gSavedSettings, "WolfViewerBottomToolbarHidden", false);
+    if (mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM] && !bottom_hidden)
+    {
+        LLToolBar* bar = mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM];
+        LLView* parent = bar->getParent();
+        const LLView* strip = findChildView("chat_bar_stand_fly_container_panel", true);
+        const S32 strip_w = (strip && strip->getVisible()) ? strip->getRect().getWidth() : 0;
+        const S32 panel_w = parent ? parent->getRect().getWidth() : bar->getRect().getWidth();
+        S32 want = panel_w - strip_w - 18;   // 18: the hide/show arrow's corner
+        // The buttons' own width (the centred button panel) is the floor.
+        const LLView* buttons = bar->findChildView("button_panel", true);
+        const S32 need = buttons ? buttons->getRect().getWidth() + 8 : 0;
+        if (want < need) want = panel_w;
+        if (want > 0 && bar->getRect().getWidth() != want)
+        {
+            bar->reshape(want, bar->getRect().getHeight());
+        }
+    }
+    // </WolfViewer>
+
+for (S32 i = LLToolBarEnums::TOOLBAR_FIRST; i <= LLToolBarEnums::TOOLBAR_LAST; i++)
     {
         if (mToolbars[i])
         {
             LLView::EOrientation orientation = LLToolBarEnums::getOrientation(mToolbars[i]->getSideType());
 
+            // <WolfViewer 2026-09-10> a hidden bottom bar must not push its collapsed panel back to 87 px
+            if (i == LLToolBarEnums::TOOLBAR_BOTTOM && bottom_hidden)
+            {
+                mToolbars[i]->localRectToOtherView(mToolbars[i]->getLocalRect(), &toolbar_rects[i], this);
+                continue;
+            }
             if (orientation == LLLayoutStack::HORIZONTAL)
             {
                 mToolbars[i]->getParent()->reshape(mToolbars[i]->getParent()->getRect().getWidth(), mToolbars[i]->getRect().getHeight());

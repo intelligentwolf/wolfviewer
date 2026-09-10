@@ -1111,6 +1111,33 @@ void LLSurface::decompressDCTPatch(LLBitPack &bitpack, LLGroupHeader *gopp, bool
             decompress_patch(patchp->getDataZ(), patch, &ph);
         }
         // </FS:Wolf>
+        // <WolfViewer 2026-09-10> A height off the wire that is not a number is not terrain.
+        // The camera floor is LLWorld::resolveLandHeightGlobal (llagentcamera.cpp ~2200): one
+        // +inf height under the camera lifts it to infinity — the "Non Finite mOrigin" warnings
+        // in Paul's Dire Wolf sessions. Replace any non-finite sample with the water level and
+        // say so, a few times per region, naming the patch, so a bad sim patch is visible.
+        {
+            F32* dst = patchp->getDataZ();
+            const S32 stride = (S32)mGridsPerEdge;
+            S32 bad = 0;
+            const F32 fill = mRegionp ? mRegionp->getWaterHeight() : 0.f;
+            for (S32 jj = 0; jj < grids_per_patch; jj++)
+            {
+                for (S32 ii = 0; ii < grids_per_patch; ii++)
+                {
+                    F32& z = dst[ii + jj * stride];
+                    if (!llfinite(z)) { z = fill; ++bad; }
+                }
+            }
+            if (bad && mWolfBadHeightWarnings < 5)
+            {
+                ++mWolfBadHeightWarnings;
+                LL_WARNS("Terrain") << "terrain " << (mRegionp ? mRegionp->getName() : std::string("?")) << " patch " << i << "," << j
+                                    << ": " << bad << " non-finite height(s) from the sim (dc_offset " << ph.dc_offset << " range " << (S32)ph.range
+                                    << " quant_wbits " << (S32)ph.quant_wbits << "), replaced with the water level" << LL_ENDL;
+            }
+        }
+        // </WolfViewer>
 
         // Update edges for neighbors.  Need to guarantee that this gets done before we generate vertical stats.
         patchp->updateNorthEdge();

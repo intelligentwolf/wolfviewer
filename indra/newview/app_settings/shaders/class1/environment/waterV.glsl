@@ -330,6 +330,7 @@ void main()
     // 1x; the surf cells' big waves are the SURF TRAIN below, not a louder swell.
     float zoneEnergy = 0.55;
     float zoneScale = 1.0;
+    float shoreGate = 1.0;
     if (zoneReady > 0.5)
     {
         vec2 zuv = (regionXY - zoneOrigin) / zoneSize;
@@ -345,6 +346,10 @@ void main()
             else if (zoneEnergy < 0.55) zoneScale = mix(small, 1.0, (zoneEnergy - 0.35) / 0.20);
             else                        zoneScale = 1.0;
             swellScale *= zoneScale;
+            // Shore breakers and the swash foam belong to the open sea and the surf: an
+            // enclosed lake or river (small / calm cells) has waves with direction but never
+            // goes white (Paul 09-10). 0 at small (0.35), 1 at open (0.55).
+            shoreGate = smoothstep(0.35, 0.55, zoneEnergy);
         }
     }
     // With the spectral cascades on, the short Gerstner trains (4-6) and the fbm chop are
@@ -353,9 +358,8 @@ void main()
     // the cascades, so they keep the full Gerstner field.
     bool cascades = fftReady > 0.5 && boundedWaterDepth <= 0.0 && wolfStream <= 0.0 && wolfWaterfall <= 0.0;
     float chopKeep = cascades ? 0.0 : 1.0;
-    // .w = zoneScale: the fragment gates the swash line with it (an off cell has no waves
-    // to run up the beach).
-    vSwell = vec4(0.0, 1.0, swellScale, zoneScale);
+    // .w = shoreGate: the fragment gates the swash line with it (open sea and surf only).
+    vSwell = vec4(0.0, 1.0, swellScale, shoreGate);
     vShore = vec2(0.0);
     vWake = 0.0;
     // </WolfViewer>
@@ -477,8 +481,8 @@ void main()
             if (conf > 0.02)
             {
                 float smoothDepth = max(depthWaterLevel - dtex.a, 0.0);
-                // [WAVES 2026-09-10] ... times the painted zone: no swell, no breakers.
-                float shoal = (1.0 - smoothstep(0.5, 8.0, smoothDepth)) * min(conf * 1.5, 1.0) * edgeFade * zoneScale;
+                // [WAVES 2026-09-10] ... times the shore gate: breakers on the open sea and the surf only.
+                float shoal = (1.0 - smoothstep(0.5, 8.0, smoothDepth)) * min(conf * 1.5, 1.0) * edgeFade * shoreGate;
                 if (shoal > 0.01)
                 {
                     float speedScale = clamp(length(waveDir1) * 0.885, 0.4, 2.0);

@@ -111,17 +111,44 @@ void WolfNaturalWater::idle()
 
     // Snapshot the heights; the analysis must not touch the live surface off the main thread.
     const LLSurface& land = regionp->getLand();
-    const S32 grids = land.getGridsPerEdge();
-    if (grids < 4)
+    const S32 grids_full = land.getGridsPerEdge();
+    if (grids_full < 4)
     {
         return;
     }
-    std::vector<F32> z((size_t)grids * grids);
-    for (S32 k = 0; k < grids * grids; ++k)
+    // [2026-09-10] Nothing to analyse until the sim has sent land: on a fresh region every
+    // height is 0 and the flood fill runs on fiction (Dire Wolf logged "0 pools, 0 streams"
+    // for a region whose patches had not arrived).
+    if (!land.hasZData())
     {
-        z[k] = land.getZ(k);
+        return;
     }
-    const F32 mpg = land.getMetersPerGrid();
+    // [2026-09-10] THE MEMORY BOMB. Every array below is one entry per grid point, and Dire
+    // Wolf (25,600 m) has 655 million of them: z alone is 2.6 GB, `filled` (F64) 5.2 GB,
+    // downstream / order / acc / width / slope / fallw 2.6 GB each — tens of gigabytes, which
+    // is what pushed Paul's machine 34 GB into swap and hung the viewer (10:23 memory dump:
+    // 700 MB free). The analysis now runs on a DECIMATED grid of at most MAX_ANALYSIS_GRIDS
+    // points an edge: every step-th height, metres-per-grid scaled to match, so a 25,600 m
+    // region is analysed at 25 m (about 1 M points, ~60 MB of arrays) and everything up to
+    // 1024 m is untouched. rasterizeBuilt and compute take (grids, mpg) and never assumed 1 m.
+    const S32 step = llmax(1, (grids_full - 1 + MAX_ANALYSIS_GRIDS - 1) / MAX_ANALYSIS_GRIDS);
+    const S32 grids = (grids_full - 1) / step + 1;
+    std::vector<F32> z((size_t)grids * grids);
+    for (S32 y = 0; y < grids; ++y)
+    {
+        const S32 sy = llmin(y * step, grids_full - 1);
+        for (S32 x = 0; x < grids; ++x)
+        {
+            const S32 sx = llmin(x * step, grids_full - 1);
+            z[(size_t)x + (size_t)y * grids] = land.getZ(sx + sy * grids_full);
+        }
+    }
+    const F32 mpg = land.getMetersPerGrid() * (F32)step;
+    if (step > 1 && mLoggedDecimation.insert(regionp->getHandle()).second)
+    {
+        LL_INFOS("WolfNaturalWater") << "Natural water on " << regionp->getName() << " (" << regionp->getWidth() << " m): analysing "
+                                     << grids << "x" << grids << " points at " << mpg << " m (every " << step << "th grid point)" << LL_ENDL;
+    }
 
     // Prims arrive long after the terrain does, so the built mask is part of the stamp:
     // a road rezzing across a stream takes the stream away on the next check.

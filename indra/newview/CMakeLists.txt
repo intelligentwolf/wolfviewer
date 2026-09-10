@@ -918,6 +918,7 @@ set(viewer_SOURCE_FILES
     wolffloatermeshupload.cpp
     wolfmeshupload.cpp
     wolfscreenshare.cpp
+    wolfweather.cpp
     wolfspeech.cpp
     wolfoceanfft.cpp
     wolfwakefield.cpp
@@ -1794,6 +1795,7 @@ set(viewer_HEADER_FILES
     wolffloatermeshupload.h
     wolfmeshupload.h
     wolfscreenshare.h
+    wolfweather.h
     wolfspeech.h
     wolfoceanfft.h
     wolfseastate.h

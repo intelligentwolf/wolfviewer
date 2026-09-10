@@ -117,16 +117,15 @@ FSWolfWater::~FSWolfWater()
 }
 
 // static
-bool FSWolfWater::matches(const std::string& description)
+// Takes the store's already lower-cased description (WolfObjectProps::Props::mDescriptionLower),
+// so the per-prim-per-sweep copy and transform this used to do are gone.
+bool FSWolfWater::matches(const std::string& description_lower)
 {
-    if (description.empty())
+    if (description_lower.empty())
     {
         return false;
     }
-    std::string lower(description);
-    std::transform(lower.begin(), lower.end(), lower.begin(),
-                   [](unsigned char c) { return (char)std::tolower(c); });
-    return lower.find(KEYWORD) != std::string::npos;
+    return description_lower.find(KEYWORD) != std::string::npos;
 }
 
 void FSWolfWater::reset()
@@ -237,7 +236,7 @@ void FSWolfWater::sweep()
             ++n_known;
         }
 
-        if (known && matches(known->mDescription))
+        if (known && matches(known->mDescriptionLower))
         {
             ++n_matched;
             still_wanted.insert(id);

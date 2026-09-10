@@ -2750,6 +2750,9 @@ name="Command_360_Capture_Label">360° Snapshot</string>
   <string name="Command_WolfDictate_Label">Dictate</string>
   <string name="Command_WolfReadAloud_Label">Read</string>
   <string name="Command_WolfShareScreen_Label">Share</string>
+  <string name="Command_WolfEep_Label">EEP</string>
+  <string name="Command_WolfRain_Label">Rain</string>
+  <string name="Command_WolfSnow_Label">Snow</string>
   <string name="Command_View_Label">Camera controls</string>
 <!-- Ansariel: Renamed for FS (FIRE-5019)
   <string name="Command_Voice_Label">Voice settings</string>-->
@@ -2827,6 +2830,9 @@ name="Command_360_Capture_Label">360° Snapshot</string>
   <!-- WolfViewer 2026-09-06 -->
   <string name="Command_WolfDictate_Tooltip">Dictate into the nearby chat bar — speak while it has focus, a pause sends the line. Wolf Territories only; recognised on the grid's own server.</string>
   <string name="Command_WolfReadAloud_Tooltip">Read nearby chat and IMs aloud as they arrive. Wolf Territories only; the voice comes from the grid's own server.</string>
+  <string name="Command_WolfRain_Tooltip">Rain on or off, for you. A parcel whose objects say "wolfrain" in their description rains for everyone in it.</string>
+  <string name="Command_WolfSnow_Tooltip">Snow on or off, for you. A parcel whose objects say "wolfsnow" in their description snows for everyone in it.</string>
+  <string name="Command_WolfEep_Tooltip">Region environment (EEP) on or off. Lit: the region's own sky, sun and water. Off: a fixed Midday sky until you press it again.</string>
   <string name="Command_WolfShareScreen_Tooltip">Share your screen onto the selected prim face (Build > Select Face first). Wolf Territories only; your browser opens to choose what to share.</string>
   <string name="Command_View_Tooltip">Changing camera angle</string>
   <string name="Command_Voice_Tooltip">Volume controls for calls and people near you in world</string>

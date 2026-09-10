@@ -282,6 +282,40 @@
   <!-- WolfViewer 2026-09-06: Wolf Territories-only commands (wolfspeech.cpp, wolfscreenshare.cpp).
        Greyed on any other grid (is_enabled_function WolfGrid.IsWolfTerritories); the Comm menu
        items with the same functions are hidden there. -->
+  <!-- WolfViewer 2026-09-10 (Paul: "add an icon to the toolbar for turning on and off EEP,
+       default ON, if you turn it off it switches to midday"). Lit while the region's shared
+       environment is in use; pressing it while lit sets the fixed Midday sky, pressing it
+       again clears the local override and the region's EEP comes back. Every grid. -->
+  <command name="wolf_eep"
+           available_in_toybox="true"
+           icon="Command_Environments_Icon"
+           label_ref="Command_WolfEep_Label"
+           tooltip_ref="Command_WolfEep_Tooltip"
+           execute_function="WolfEnv.ToggleEEP"
+           is_running_function="WolfEnv.IsEEP"
+           />
+  <!-- WolfViewer 2026-09-10 (Paul: "add a snow and rain toggle button next to EEP"). Your own
+       weather; a wolfrain / wolfsnow prim in the parcel overrides it (wolfweather.cpp). -->
+  <command name="wolf_rain"
+           available_in_toybox="true"
+           icon="Command_WolfRain_Icon"
+           label_ref="Command_WolfRain_Label"
+           tooltip_ref="Command_WolfRain_Tooltip"
+           execute_function="WolfWeather.Toggle"
+           execute_parameters="rain"
+           is_running_function="WolfWeather.IsOn"
+           is_running_parameters="rain"
+           />
+  <command name="wolf_snow"
+           available_in_toybox="true"
+           icon="Command_WolfSnow_Icon"
+           label_ref="Command_WolfSnow_Label"
+           tooltip_ref="Command_WolfSnow_Tooltip"
+           execute_function="WolfWeather.Toggle"
+           execute_parameters="snow"
+           is_running_function="WolfWeather.IsOn"
+           is_running_parameters="snow"
+           />
   <command name="wolf_dictate"
            available_in_toybox="true"
            icon="Command_WolfDictate_Icon"

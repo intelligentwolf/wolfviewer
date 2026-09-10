@@ -19,6 +19,7 @@
 #include "v3math.h"
 #include "llvowater.h"
 #include <memory>
+#include <set>
 #include <vector>
 
 class LLViewerRegion;
@@ -65,6 +66,9 @@ public:
 
 private:
     static constexpr F32 CHECK_INTERVAL_SECS = 2.f;
+    // [2026-09-10] Grid points an edge the analysis will handle; bigger regions are decimated
+    // (see idle()). 1025 points = a 1024 m region at 1 m, ~1 M cells, ~60 MB of working arrays.
+    static constexpr S32 MAX_ANALYSIS_GRIDS = 1024;
     static constexpr S32 MAX_POOLS = 64;
     static constexpr S32 MAX_STREAMS = 200;
     static constexpr S32 MAX_STREAM_VERTS = 800000;   // across all streams, ~26 MB of buffer
@@ -151,6 +155,7 @@ private:
     U64  mAppliedStamp{ 0 };
     bool mBusy{ false };
     F64  mNextCheck{ 0.0 };
+    std::set<U64> mLoggedDecimation;   // <WolfViewer 2026-09-10> regions told once about the coarse grid
     std::vector<LLPointer<LLVOWater>> mSurfaces;
 };
 

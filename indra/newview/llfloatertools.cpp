@@ -64,6 +64,7 @@
 #include "lltabcontainer.h"
 #include "lltextbox.h"
 #include "lltoolbrush.h"
+#include "wolfgrid.h"   // [TERRAIN PAINT 2026-09-10]
 #include "lltoolcomp.h"
 #include "lltooldraganddrop.h"
 #include "lltoolface.h"
@@ -368,6 +369,15 @@ bool    LLFloaterTools::postBuild()
     mStatusText["grab"] = getString("status_grab");
     mStatusText["place"] = getString("status_place");
     mStatusText["selectland"] = getString("status_selectland");
+    mStatusText["paintland"] = getString("status_paintland");   // [TERRAIN PAINT 2026-09-10]
+
+    // [TERRAIN PAINT 2026-09-10] The Paint tab is a Wolf Territories feature (the service knows
+    // only the grid's regions): off the grid the tab does not exist (llfloaterland.cpp does the
+    // same with the Waves tab).
+    if (mTab && !WolfGrid::isWolfTerritories())
+    {
+        if (LLPanel* paint = mTab->getPanelByName("wolf_terrain_paint_panel")) mTab->removeTabPanel(paint);
+    }
 
     sShowObjectCost = gSavedSettings.getBOOL("ShowObjectRenderingCost");
 

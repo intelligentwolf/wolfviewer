@@ -64,6 +64,7 @@ static LLGLSLShader* sShader = NULL;
 // Source: wolfstorm/js/world/terrain/terrain_manager.js _pushCausticUniforms().
 #include "llenvironment.h"
 #include "wolfoceanfft.h"
+#include "wolfterrainpaint.h"   // [TERRAIN PAINT 2026-09-10]
 extern bool gCubeSnapshot;   // Source: lldrawpoolwater.cpp:56 — the same extern the water pool uses
 static void wolf_bind_caustics(LLGLSLShader* shader, LLViewerRegion* regionp)
 {
@@ -362,6 +363,7 @@ void LLDrawPoolTerrain::renderFullShaderTextures()
         shader->uniform1f(s_wolf_region_width, regionp->getWidth());
     }
     wolf_bind_caustics(shader, regionp);   // <WolfViewer 2026-09-06>
+    WolfTerrainPaint::instance().bind(shader, regionp);   // [TERRAIN PAINT 2026-09-10] painted roads/tracks
     // </WolfViewer>
 
     LLSettingsWater::ptr_t pwater = LLEnvironment::instance().getCurrentWater();
@@ -399,6 +401,7 @@ void LLDrawPoolTerrain::renderFullShaderTextures()
     // GL_BLEND disabled by default
     drawLoop();
 
+    WolfTerrainPaint::instance().unbind(sShader);   // [TERRAIN PAINT 2026-09-10]
     // Disable multitexture
     sShader->disableTexture(LLViewerShaderMgr::TERRAIN_ALPHARAMP);
     sShader->disableTexture(LLViewerShaderMgr::TERRAIN_DETAIL0);
@@ -615,6 +618,9 @@ void LLDrawPoolTerrain::renderFullShaderPBR(bool use_local_materials)
         shader->uniform1f(LLShaderMgr::REGION_SCALE, regionp->getWidth());
         wolf_bind_caustics(shader, regionp);   // <WolfViewer 2026-09-06>
     }
+    // [TERRAIN PAINT 2026-09-10] For BOTH paint types: bind() also resets wolf_paint_on when
+    // this region has nothing, so a value left by the previous region cannot leak.
+    WolfTerrainPaint::instance().bind(shader, regionp);
 
     //
     // GLTF uniforms
@@ -660,6 +666,8 @@ void LLDrawPoolTerrain::renderFullShaderPBR(bool use_local_materials)
 
     // GL_BLEND disabled by default
     drawLoop();
+
+    WolfTerrainPaint::instance().unbind(sShader);   // [TERRAIN PAINT 2026-09-10]
 
     // Disable multitexture
 

@@ -924,6 +924,7 @@ set(viewer_SOURCE_FILES
     wolfwakefield.cpp
     wolfwaterfield.cpp
     wolfwavezones.cpp
+    wolfterrainpaint.cpp
     wolfsurfcurl.cpp
     NACLantispam.cpp
     NACLfloaterexploresounds.cpp
@@ -1802,6 +1803,7 @@ set(viewer_HEADER_FILES
     wolfwakefield.h
     wolfwaterfield.h
     wolfwavezones.h
+    wolfterrainpaint.h
     wolfsurfcurl.h
     VertexCache.h
     VorbisFramework.h

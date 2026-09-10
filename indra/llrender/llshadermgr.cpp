@@ -1615,6 +1615,11 @@ void LLShaderMgr::initAttribsAndUniforms()
     mReservedUniforms.push_back("wolfZoneField");   // [WAVES 2026-09-07] wolfwavezones.cpp
     mReservedUniforms.push_back("wolfCausticTex0");
     mReservedUniforms.push_back("wolfCausticTex1");
+    mReservedUniforms.push_back("wolfPaintMap");    // [TERRAIN PAINT 2026-09-10] wolfterrainpaint.cpp
+    mReservedUniforms.push_back("wolfPaintTex0");
+    mReservedUniforms.push_back("wolfPaintTex1");
+    mReservedUniforms.push_back("wolfPaintTex2");
+    mReservedUniforms.push_back("wolfPaintTex3");
     // </WolfViewer>
 
     llassert(mReservedUniforms.size() == END_RESERVED_UNIFORMS);

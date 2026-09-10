@@ -40,6 +40,7 @@
 #include "llmarketplacefunctions.h"
 #include "llselectmgr.h"
 #include "lltoolbrush.h"
+#include "wolfterrainpaint.h"   // [TERRAIN PAINT 2026-09-10]
 #include "lltoolcomp.h"
 #include "lltooldraganddrop.h"
 #include "lltoolface.h"
@@ -121,6 +122,7 @@ void LLToolMgr::initTools()
     gBasicToolset->addTool( LLToolCompTranslate::getInstance() );
     gBasicToolset->addTool( LLToolCompCreate::getInstance() );
     gBasicToolset->addTool( LLToolBrushLand::getInstance() );
+    gBasicToolset->addTool( WolfToolTerrainPaint::getInstance() );   // [TERRAIN PAINT 2026-09-10] Build > Paint brush
     gMouselookToolset->addTool( LLToolCompGun::getInstance() );
     gBasicToolset->addTool( LLToolCompInspect::getInstance() );
     gFaceEditToolset->addTool( LLToolCamera::getInstance() );

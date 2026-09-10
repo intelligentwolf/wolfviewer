@@ -386,6 +386,11 @@ public:
         WOLF_ZONE_FIELD,                    // "wolfZoneField" [WAVES 2026-09-07]
         WOLF_CAUSTIC_TEX0,                  // "wolfCausticTex0"
         WOLF_CAUSTIC_TEX1,                  // "wolfCausticTex1"
+        WOLF_PAINT_MAP,                     // "wolfPaintMap"  [TERRAIN PAINT 2026-09-10] wolfterrainpaint.cpp
+        WOLF_PAINT_TEX0,                    // "wolfPaintTex0"
+        WOLF_PAINT_TEX1,                    // "wolfPaintTex1"
+        WOLF_PAINT_TEX2,                    // "wolfPaintTex2"
+        WOLF_PAINT_TEX3,                    // "wolfPaintTex3"
         // </WolfViewer>
         END_RESERVED_UNIFORMS
     } eGLSLReservedUniforms;

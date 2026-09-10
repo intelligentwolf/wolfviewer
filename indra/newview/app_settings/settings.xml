@@ -13282,6 +13282,50 @@ Change of this parameter will affect the layout of buttons in notification toast
       <key>Value</key>
       <real>12.0</real>
     </map>
+    <key>WolfTerrainPaintWaterLevel</key>
+    <map>
+      <key>Comment</key>
+      <string>Build > Paint: metres above the ground a drawn water surface sits.</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>F32</string>
+      <key>Value</key>
+      <real>0.3</real>
+    </map>
+    <key>WolfTerrainPaintWaterDepth</key>
+    <map>
+      <key>Comment</key>
+      <string>Build > Paint: depth in metres of drawn water (colour and fog, like a wolfwater prim's thickness).</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>F32</string>
+      <key>Value</key>
+      <real>1.0</real>
+    </map>
+    <key>WolfTerrainPaintBrushWidth</key>
+    <map>
+      <key>Comment</key>
+      <string>Build > Paint: width of the ground-paint brush in metres.</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>F32</string>
+      <key>Value</key>
+      <real>4.0</real>
+    </map>
+    <key>WolfTerrainPaintBrushTransparency</key>
+    <map>
+      <key>Comment</key>
+      <string>Build > Paint: transparency of a new ground-paint stroke, percent (0 = solid).</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>F32</string>
+      <key>Value</key>
+      <real>0.0</real>
+    </map>
     <key>WolfTerrainLook</key>
     <map>
       <key>Comment</key>

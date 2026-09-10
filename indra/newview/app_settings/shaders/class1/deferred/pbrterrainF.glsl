@@ -174,6 +174,68 @@ float wolfCaustic(vec3 region_pos)
     return clamp((focus - 1.0) * 2.0, 0.0, 3.0) * exp(-wolf_caustic_fog * 0.12 * cdepth) * wolf_caustic_strength;
 }
 // </WolfViewer>
+
+// <WolfViewer 2026-09-10> Painted roads and tracks (wolfterrainpaint.cpp; Build > Paint). The
+// paint map (RGBA16F) holds per texel: R,G = a slot-coded radius (0.25 + 0.2·slot) times
+// (cos, sin) of the along-phase of the nearest stroke, B = metres across the band from its
+// left edge / tile, A = coverage. The slot is read from the NEAREST texel (a bilinear blend of
+// two radii would decode as a third texture along a seam); the angle, the across coordinate
+// and the coverage are bilinear. A slot in "road" mode samples its palette texture at
+// (across, along) — square tiles following the stroke; a slot in "world" mode at the region
+// position / tile, phased by the region's global origin like the ground textures. LLImageRaw
+// is bottom-up so v = 0 is the image bottom and the along-phase is sampled directly (WolfStorm
+// samples 1 - along: its textures are top-down). Derivatives for textureGrad are taken in
+// uniform control flow (dFdx in a divergent branch is undefined). Source:
+// wolfstorm/js/world/terrain/terrain_manager.js wsTerrainPaint — keep them in step.
+uniform sampler2D wolfPaintMap;
+uniform sampler2D wolfPaintTex0;
+uniform sampler2D wolfPaintTex1;
+uniform sampler2D wolfPaintTex2;
+uniform sampler2D wolfPaintTex3;
+uniform float wolf_paint_on;
+uniform vec2  wolf_paint_size;
+uniform vec4  wolf_paint_mode;   // per slot: 0 follow the stroke, 1 world grid
+uniform vec4  wolf_paint_tile;   // per slot: metres per repeat (world grid)
+uniform vec4  wolf_paint_offx;   // per slot: region origin mod tile (metres)
+uniform vec4  wolf_paint_offy;
+vec4 wolfPaintSample(int slot, vec2 uv, vec2 ddx, vec2 ddy)
+{
+    if (slot == 0) return textureGrad(wolfPaintTex0, uv, ddx, ddy);
+    if (slot == 1) return textureGrad(wolfPaintTex1, uv, ddx, ddy);
+    if (slot == 2) return textureGrad(wolfPaintTex2, uv, ddx, ddy);
+    return textureGrad(wolfPaintTex3, uv, ddx, ddy);
+}
+float wolfPaintSlotValue(vec4 v, int slot) { return slot == 0 ? v.x : (slot == 1 ? v.y : (slot == 2 ? v.z : v.w)); }
+vec3 wolfTerrainPaint(vec3 ground, vec2 region_xy)
+{
+    if (wolf_paint_on < 0.5) return ground;
+    vec2 puv = region_xy / wolf_paint_size;
+    if (puv.x < 0.0 || puv.y < 0.0 || puv.x > 1.0 || puv.y > 1.0) return ground;
+    vec4 pm = texture(wolfPaintMap, puv);
+    vec2 cs = pm.rg;
+    vec2 dcx = dFdx(cs), dcy = dFdy(cs);
+    float dbx = dFdx(pm.b), dby = dFdy(pm.b);
+    vec2 dwx = dFdx(region_xy), dwy = dFdy(region_xy);
+    float cov = pm.a;
+    if (cov < 0.004) return ground;
+    vec2 psz = vec2(textureSize(wolfPaintMap, 0));
+    vec2 nrg = texelFetch(wolfPaintMap, ivec2(clamp(puv * psz, vec2(0.0), psz - 1.0)), 0).rg;
+    int slot = int(clamp(floor((length(nrg) - 0.15) / 0.2), 0.0, 3.0));
+    float r2 = max(dot(cs, cs), 1e-4);
+    float along = fract(atan(cs.y, cs.x) / 6.2831853 + 1.0);
+    vec2 uvRoad = vec2(pm.b, along);
+    vec2 ddxRoad = vec2(dbx, (cs.x * dcx.y - cs.y * dcx.x) / r2 / 6.2831853);
+    vec2 ddyRoad = vec2(dby, (cs.x * dcy.y - cs.y * dcy.x) / r2 / 6.2831853);
+    float tile = max(wolfPaintSlotValue(wolf_paint_tile, slot), 0.01);
+    vec2 uvWorld = (region_xy + vec2(wolfPaintSlotValue(wolf_paint_offx, slot), wolfPaintSlotValue(wolf_paint_offy, slot))) / tile;
+    vec2 ddxWorld = dwx / tile, ddyWorld = dwy / tile;
+    bool world = wolfPaintSlotValue(wolf_paint_mode, slot) > 0.5;
+    vec4 c = wolfPaintSample(slot, world ? uvWorld : uvRoad, world ? ddxWorld : ddxRoad, world ? ddyWorld : ddyRoad);
+    // The texture's own alpha is respected on top of the stroke's opacity in the coverage.
+    return mix(ground, c.rgb, cov * c.a);
+}
+// </WolfViewer>
+
 in vec3 vary_normal;
 #if (TERRAIN_PBR_DETAIL >= TERRAIN_PBR_DETAIL_NORMAL)
 in vec3 vary_tangents[4];
@@ -460,7 +522,7 @@ void main()
 // Matte plastic potato terrain
 #define mix_orm vec3(1.0, 1.0, 0.0)
 #endif
-    frag_data[0] = max(vec4(pbr_mix.col.xyz * (1.0 + wolfCaustic(vary_region_pos)), 0.0), vec4(0));   // Diffuse (+ <WolfViewer> caustics)
+    frag_data[0] = max(vec4(wolfTerrainPaint(pbr_mix.col.xyz, vary_region_pos.xy) * (1.0 + wolfCaustic(vary_region_pos)), 0.0), vec4(0));   // Diffuse (+ <WolfViewer> painted roads, caustics)
     frag_data[1] = max(vec4(mix_orm.rgb, base_color_factor_alpha), vec4(0));                                    // PBR linear packed Occlusion, Roughness, Metal.
     frag_data[2] = encodeNormal(tnorm, 0, GBUFFER_FLAG_HAS_PBR); // normal, flags
 

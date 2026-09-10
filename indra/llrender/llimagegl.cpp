@@ -1043,6 +1043,7 @@ U32 type_width_from_pixtype(U32 pixtype)
         break;
     case GL_UNSIGNED_SHORT:
     case GL_SHORT:
+    case GL_HALF_FLOAT:   // <WolfViewer 2026-09-10> the terrain paint map is RGBA16F (wolfterrainpaint.cpp upload)
         type_width = 2;
         break;
     case GL_UNSIGNED_INT:

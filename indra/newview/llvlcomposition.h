@@ -50,6 +50,7 @@ class LLTerrainMaterials : public LLModifyRegion
 {
 public:
     friend class LLDrawPoolTerrain;
+    friend class WolfTerrainPaint;   // [TERRAIN PAINT 2026-09-10] waits for the detail textures before drawing paint
 
     LLTerrainMaterials() {}
     virtual ~LLTerrainMaterials();

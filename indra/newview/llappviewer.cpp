@@ -72,6 +72,7 @@
 #include "lltracethreadrecorder.h"
 #include "llviewerwindow.h"
 #include "fswolfwater.h" // <FS:WolfViewer> wolfwater prim surfaces
+#include "wolfterrainpaint.h"   // [TERRAIN PAINT 2026-09-10]
 #include "wolfnaturalwater.h" // <WolfViewer> streams and pools from the heightmap
 #include "wolfwaterfield.h" // <WolfViewer> water depth / exposure fields for the water shader
 #include "wolfboatrock.h" // <WolfViewer> client-side buoyancy for boats
@@ -6142,6 +6143,12 @@ void LLAppViewer::idle()
     // the world-update phase, because it creates and moves LLVOWater objects and must do
     // so before the frame is drawn. Rate-limits itself to a sweep every 1.5s.
     FSWolfWater::instance().idle();
+    // [TERRAIN PAINT 2026-09-10] Painted roads and drawn water: fetch, bake a slice, and
+    // create/kill the water planes. HERE, not in a draw pool's prerender(): creating or
+    // killing a viewer object inside the render pass left a freed spatial group in the
+    // frame's cull result and crashed in LLOcclusionCullingGroup::checkOcclusion (Paul
+    // 09-10, "i drew water and it crashed wolfviewer" — core dump read with gdb).
+    WolfTerrainPaint::instance().idle();
     // </FS:WolfViewer>
     // <WolfViewer> natural water (LLVOWater planes from the heightmap); same phase, same reason.
     WolfNaturalWater::instance().idle();

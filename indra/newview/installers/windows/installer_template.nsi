@@ -411,13 +411,12 @@ after_instdir:
 
 Call CheckCPUFlags							# Make sure we have SSE2 support
 
-# Two checks here, if we are an AVX2 build we want to abort if no AVX2 support on this CPU.
-# If we are not an AVX2 build but the CPU can support it then we want to prompt them to download the AVX2 version
-# but also allow them to override.
+# If we are an AVX2 build we want to abort if no AVX2 support on this CPU.
+# <FS:Wolf> WolfViewer ships ONE Windows build, so the Firestorm prompt that offered the
+# "AVX2 optimized version" (CheckCPUFlagsAVX2_Prompt) is gone: it sent every user with a
+# modern CPU to firestormviewer.org for a build we do not make.
 ${If} ${ISAVX2} == 1
   Call CheckCPUFlagsAVX2
-${Else}
-  Call CheckCPUFlagsAVX2_Prompt
 ${EndIf}
 
 Call CheckWindowsVersion					# Don't install On unsupported systems

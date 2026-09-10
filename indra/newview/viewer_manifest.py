@@ -946,6 +946,8 @@ class Windows_x86_64_Manifest(ViewerManifest):
         return result
         # </FS:Ansariel>
     def dl_url_from_channel(self):
+        # <FS:Wolf> Every installer link points at WolfViewer's own downloads page.
+        return 'https://wolf-grid.com/viewers.php'
         if self.channel_type() == 'release':
             return 'https://www.firestormviewer.org/choose-your-platform'
         elif self.channel_type() == 'beta':

@@ -439,10 +439,30 @@ void WolfNaturalWater::compute(Result& out, std::vector<F32> z, std::vector<U8> 
                 ++out.mBuiltBasins;
                 continue;
             }
-            if ((S32)p.mCells.size() >= MIN_POOL_CELLS && p.mDepth >= MIN_POOL_DEPTH_M)
+            if ((S32)p.mCells.size() < MIN_POOL_CELLS || p.mDepth < MIN_POOL_DEPTH_M) continue;
+            // [2026-09-10] Bank steepness: over every pool cell that touches land (a neighbour
+            // outside this pool), the steepest rise of the ground from the water level to that
+            // neighbour, averaged. Flat ground rises slowly everywhere -> no pool ("auto
+            // generated lakes should not appear on flat ground ever"). Worker same.
+            F32 rim_sum = 0.f;
+            S32 rim_n = 0;
+            for (S32 k : p.mCells)
             {
-                pools.push_back(std::move(p));
+                const S32 cx = k % n, cy = k / n;
+                F32 best = -1.f;
+                for (S32 d = 0; d < 8; ++d)
+                {
+                    const S32 nx = cx + DX8[d], ny = cy + DY8[d];
+                    if (nx < 0 || ny < 0 || nx >= n || ny >= n) continue;
+                    const S32 j = nx + ny * n;
+                    if (lake[j] && fabs((F32)(filled[j] - p.mLevel)) <= 0.01f) continue;   // still this pool
+                    const F32 dist = ((DX8[d] && DY8[d]) ? 1.41421356f : 1.f) * mpg;
+                    best = llmax(best, (z[j] - p.mLevel) / dist);
+                }
+                if (best >= 0.f) { rim_sum += best; ++rim_n; }
             }
+            if (rim_n == 0 || rim_sum / (F32)rim_n < MIN_POOL_RIM_GRADE) continue;
+            pools.push_back(std::move(p));
         }
     }
     // Dilate the blocked mask (prim footprints + built hollows); see BUILT_DILATE_CELLS.
@@ -587,9 +607,23 @@ void WolfNaturalWater::compute(Result& out, std::vector<F32> z, std::vector<U8> 
     //
     //    Terrain grid point k = x + y*n sits at (x*mpg, y*mpg) (LLSurface::resolveHeightRegion
     //    floors x/mpg to find it), so stations go on the grid points, not on cell centres.
+    // [2026-09-10] Only where the ground is steeper than 40 degrees toward the downhill cell
+    // (STEEP_MIN_GRADE). The grade is measured on the RAW ground (z), not the filled surface:
+    // a filled dip is flat by construction. Worker same.
+    std::vector<F32> grade(total, 0.f);
+    for (S32 k = 0; k < total; ++k)
+    {
+        const S32 dn = downstream[k];
+        if (dn < 0) continue;
+        const S32 cx = k % n, cy = k / n;
+        const S32 dx = dn % n - cx, dy = dn / n - cy;
+        const F32 run = ((dx && dy) ? 1.41421356f : 1.f) * mpg;
+        grade[k] = llmax(0.f, z[k] - z[dn]) / run;
+    }
     auto is_stream = [&](S32 k)
     {
         return !pooled[k] && !blocked[k] && z[k] > sea + 0.05f
+            && grade[k] >= STEEP_MIN_GRADE
             && (acc[k] >= catchment_m2 || (fed[k] && acc[k] >= catchment_m2 * 0.25f));
     };
     auto smoothstep = [](F32 a, F32 b, F32 x)
@@ -630,14 +664,7 @@ void WolfNaturalWater::compute(Result& out, std::vector<F32> z, std::vector<U8> 
     for (S32 k = 0; k < total; ++k)
     {
         if (!is_stream(k)) continue;
-        const S32 cx = k % n, cy = k / n;
-        const S32 dn = downstream[k];
-        if (dn >= 0)
-        {
-            const S32 dx = dn % n - cx, dy = dn / n - cy;
-            const F32 run = ((dx && dy) ? 1.41421356f : 1.f) * mpg;
-            slope[k] = llmax(0.f, z[k] - z[dn]) / run;
-        }
+        slope[k] = grade[k];
         fallw[k] = smoothstep(FALL_START, FALL_FULL, slope[k]);
         // A river reads wider than a brook; a fall is narrower than the stream feeding it,
         // because its edges are in the open rather than hidden in a channel.
@@ -922,7 +949,7 @@ void WolfNaturalWater::apply(std::shared_ptr<Result> result)
     }
     mSurfaces.clear();
     size_t verts = 0;
-    auto create = [&](const Surface& sf)
+    auto create = [&](const Surface& sf, bool still)
     {
         LLVOWater* waterp = (LLVOWater*)gObjectList.createObjectViewer(LLViewerObject::LL_VO_WATER, regionp);
         if (!waterp)
@@ -934,14 +961,19 @@ void WolfNaturalWater::apply(std::shared_ptr<Result> result)
         // position and scale to the mesh's own box.
         waterp->setConformingMesh(sf.mMesh, sf.mFlow);
         waterp->setBoundedWaterDepth(llmax(sf.mDepth, 0.05f));
+        // [2026-09-10, Paul] "if someone makes a lake in a region then it doesn't have waves
+        // unless they define it": an automatic pool is FLAT (lldrawpoolwater.cpp no_swell).
+        // Waves inside a region exist only where About Land > Waves painted them, and that
+        // applies to the region water; a lake the terrain analysis found gets none.
+        waterp->setStillWater(still);
         waterp->mbCanSelect = false;
         gPipeline.createObject(waterp);
         mSurfaces.push_back(waterp);
         verts += sf.mMesh->mVerts.size();
         return true;
     };
-    for (const Surface& sf : result->mPools)   { if (!create(sf)) break; }
-    for (const Surface& sf : result->mStreams) { if (!create(sf)) break; }
+    for (const Surface& sf : result->mPools)   { if (!create(sf, true)) break; }
+    for (const Surface& sf : result->mStreams) { if (!create(sf, false)) break; }
     mAppliedStamp = result->mTerrainStamp;
     LL_INFOS("WolfNaturalWater") << "Natural water: " << result->mPools.size() << " pools, "
         << result->mBuiltBasins << " built hollows skipped, "

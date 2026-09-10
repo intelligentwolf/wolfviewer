@@ -2341,24 +2341,26 @@ Only large parcels can be listed in search.
           top="0"
           help_topic="land_waves_tab"
           name="land_waves_panel">
-            <panel.string name="str_note_all">You can set every cell of [REGION] and its wave settings ([W] x [H] cells of 16 m, [STATE]).</panel.string>
-            <panel.string name="str_note_parcel">You can set the cells on land you own in [REGION]; other cells are locked ([W] x [H] cells of 16 m, [STATE]).</panel.string>
-            <panel.string name="str_off_grid">This region is not on the Wolf Territories grid, so it uses the automatic wave layout.</panel.string>
+            <panel.string name="str_note_all">You can set every cell of [REGION] and its wave settings ([W] x [H] cells of [CELL] m, [STATE]).</panel.string>
+            <panel.string name="str_note_parcel">You can set the cells on land you own in [REGION]; other cells are locked ([W] x [H] cells of [CELL] m, [STATE]).</panel.string>
+            <panel.string name="str_off_grid">This region is not on the Wolf Territories grid, so its water is flat inside the region.</panel.string>
+            <panel.string name="str_newer_on_grid">The layout changed on the grid while you were painting — Save puts your painting on top of it.</panel.string>
             <panel.string name="str_fetching">Asking the grid for this region's wave layout…</panel.string>
             <panel.string name="str_stored">saved layout</panel.string>
-            <panel.string name="str_automatic">automatic layout, nothing saved yet</panel.string>
+            <panel.string name="str_automatic">nothing saved yet — flat everywhere</panel.string>
             <panel.string name="str_locked_cell">That cell is on land you do not own — it stays as it is.</panel.string>
             <panel.string name="str_saving">Saving…</panel.string>
             <panel.string name="str_saved">Saved — everyone in the region now sees this layout.</panel.string>
             <panel.string name="str_save_failed">Could not save:</panel.string>
-            <panel.string name="str_default_loaded">Automatic layout loaded — Save to keep it.</panel.string>
+            <panel.string name="str_default_loaded">Every cell set to Off (flat) — Save to keep it.</panel.string>
             <text follows="left|top" height="30" layout="topleft" left="10" top="8" width="470" word_wrap="true" name="waves_help">
-Paint where the waves go. Surf is the big rolling surf (only where you paint it), Open is ordinary sea, Calm is gentle river and pond water, Off is flat. Waves always die to flat at the shore.
+Every region starts flat: paint where you want waves. Surf is the big rolling surf, Open is ordinary sea, Small is a gentle sea at a fraction of the open-sea height, Calm is river and pond ripple, Off is flat. The sea beyond the region edge is always open water.
             </text>
             <text follows="left|top" height="28" layout="topleft" left="10" top_pad="2" width="470" word_wrap="true" name="waves_note" text_color="0.79 0.64 0.15 1">
             </text>
             <button follows="left|top" height="20" layout="topleft" left="10" top_pad="4" width="60" name="waves_brush_s" label="Surf" is_toggle="true" />
             <button follows="left|top" height="20" layout="topleft" left_pad="4" width="60" name="waves_brush_o" label="Open" is_toggle="true" />
+            <button follows="left|top" height="20" layout="topleft" left_pad="4" width="60" name="waves_brush_m" label="Small" is_toggle="true" />
             <button follows="left|top" height="20" layout="topleft" left_pad="4" width="60" name="waves_brush_c" label="Calm" is_toggle="true" />
             <button follows="left|top" height="20" layout="topleft" left_pad="4" width="60" name="waves_brush_x" label="Off" is_toggle="true" />
             <wolf_wave_painter follows="left|top" height="224" width="224" layout="topleft" left="10" top_pad="6" name="waves_painter" />
@@ -2368,12 +2370,14 @@ Paint where the waves go. Surf is the big rolling surf (only where you paint it)
             <slider follows="left|top" height="16" layout="topleft" left="244" top_pad="2" width="230" name="waves_set_interval" min_val="30" max_val="600" increment="10" initial_value="90" decimal_digits="0" show_text="true" />
             <text follows="left|top" height="14" layout="topleft" left="244" top_pad="8" width="230" name="waves_calm_ripple_lbl">Calm ripple (cm)</text>
             <slider follows="left|top" height="16" layout="topleft" left="244" top_pad="2" width="230" name="waves_calm_ripple" min_val="0" max_val="10" increment="0.5" initial_value="3" decimal_digits="1" show_text="true" />
-            <check_box follows="left|top" height="16" layout="topleft" left="244" top_pad="10" width="230" name="waves_enabled" label="Use this layout (off = automatic)" initial_value="true" />
+            <text follows="left|top" height="14" layout="topleft" left="244" top_pad="8" width="230" name="waves_small_scale_lbl">Small waves (% of open sea)</text>
+            <slider follows="left|top" height="16" layout="topleft" left="244" top_pad="2" width="230" name="waves_small_scale" min_val="5" max_val="80" increment="5" initial_value="30" decimal_digits="0" show_text="true" />
+            <check_box follows="left|top" height="16" layout="topleft" left="244" top_pad="10" width="230" name="waves_enabled" label="Use this layout (off = flat everywhere)" initial_value="true" />
             <text follows="left|top" height="28" layout="topleft" left="10" top="318" width="470" word_wrap="true" name="waves_status">
             </text>
             <button follows="left|top" height="22" layout="topleft" left="10" top_pad="4" width="80" name="waves_save" label="Save" />
             <button follows="left|top" height="22" layout="topleft" left_pad="6" width="80" name="waves_revert" label="Revert" />
-            <button follows="left|top" height="22" layout="topleft" left_pad="6" width="140" name="waves_default" label="Reset to automatic" />
+            <button follows="left|top" height="22" layout="topleft" left_pad="6" width="140" name="waves_default" label="Reset to flat" />
        </panel>
     </tab_container>
 </floater>

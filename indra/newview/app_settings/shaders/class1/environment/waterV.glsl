@@ -113,6 +113,7 @@ uniform float surfSetInterval;
 uniform float surfLength;
 uniform float surfSpeed;
 uniform float calmRipple;   // [WAVES 2026-09-07] the calm cells' ripple, metres (lldrawpoolwater.cpp)
+uniform float smallScale;   // [WAVES 2026-09-10] the small-wave cells' swell, fraction of the open sea (lldrawpoolwater.cpp)
 out vec4 vSurf;   // [SURF rev3] x crest (peak only), y breaking, z amplitude used (0 = no surf), w wash behind the crest
 uniform float fftReady;
 uniform sampler2D fftDisp0;
@@ -318,10 +319,17 @@ void main()
         }
     }
     float swellScale = mix(0.15, 1.3, swellExpo);
-    // [WAVES 2026-09-07] The zone painted for this water (phase 0 of the waves plan): surf
-    // cells roll 1.6x, open 0.93x, calm 0.33x, off 0.1x; same 2% edge band as the exposure
-    // fetch. Phase 1 replaces this scalar with the shoaling / breaking / dissipation chain.
+    // [WAVES 2026-09-07] The zone painted for this water (About Land > Waves,
+    // wolfwavezones.cpp); same 2% edge band as the exposure fetch.
+    // [WAVES 2026-09-10] zoneScale is the ONE mapping from the painted energy to a swell
+    // scale — WolfWaveZones::zoneScale (the boat rocker) and WolfStorm Water.js /
+    // wave_zones.js carry the same numbers, keep them in step. Off (0) -> 0: FLAT, no swell,
+    // no chop, no breakers, no swash (Paul: "NO waves inside the region" unless painted —
+    // every region defaults to off). Calm (0.15) -> the designer's calm ripple as a fraction
+    // of the swell. Small (0.35) -> smallScale of the open sea. Open (0.55) and surf (1) ->
+    // 1x; the surf cells' big waves are the SURF TRAIN below, not a louder swell.
     float zoneEnergy = 0.55;
+    float zoneScale = 1.0;
     if (zoneReady > 0.5)
     {
         vec2 zuv = (regionXY - zoneOrigin) / zoneSize;
@@ -330,12 +338,13 @@ void main()
             vec2 zf = smoothstep(vec2(0.0), vec2(0.02), zuv)
                     * (vec2(1.0) - smoothstep(vec2(0.98), vec2(1.0), zuv));
             zoneEnergy = mix(0.55, texture(wolfZoneField, zuv).r, zf.x * zf.y);
-            // Calm (0.15) and off (0) cells damp the ordinary swell; surf cells keep it at
-            // 1x — their big waves are the SURF TRAIN below, not a louder swell.
-            // The floor is the designer's "calm ripple" (About Land > Waves, metres) as a
-            // fraction of the swell — 0 = glass, 0.1 m on a 0.22 m sea = 0.45x. Water.js same.
             float calmFloor = clamp(calmRipple / max(waveAmplitude, 0.02), 0.0, 1.0);
-            swellScale *= mix(calmFloor, 1.0, min(zoneEnergy / 0.55, 1.0));
+            float small = clamp(smallScale, calmFloor, 1.0);
+            if (zoneEnergy < 0.15)      zoneScale = calmFloor * max(zoneEnergy, 0.0) / 0.15;
+            else if (zoneEnergy < 0.35) zoneScale = mix(calmFloor, small, (zoneEnergy - 0.15) / 0.20);
+            else if (zoneEnergy < 0.55) zoneScale = mix(small, 1.0, (zoneEnergy - 0.35) / 0.20);
+            else                        zoneScale = 1.0;
+            swellScale *= zoneScale;
         }
     }
     // With the spectral cascades on, the short Gerstner trains (4-6) and the fbm chop are
@@ -344,7 +353,9 @@ void main()
     // the cascades, so they keep the full Gerstner field.
     bool cascades = fftReady > 0.5 && boundedWaterDepth <= 0.0 && wolfStream <= 0.0 && wolfWaterfall <= 0.0;
     float chopKeep = cascades ? 0.0 : 1.0;
-    vSwell = vec4(0.0, 1.0, swellScale, 0.0);
+    // .w = zoneScale: the fragment gates the swash line with it (an off cell has no waves
+    // to run up the beach).
+    vSwell = vec4(0.0, 1.0, swellScale, zoneScale);
     vShore = vec2(0.0);
     vWake = 0.0;
     // </WolfViewer>
@@ -466,7 +477,8 @@ void main()
             if (conf > 0.02)
             {
                 float smoothDepth = max(depthWaterLevel - dtex.a, 0.0);
-                float shoal = (1.0 - smoothstep(0.5, 8.0, smoothDepth)) * min(conf * 1.5, 1.0) * edgeFade;
+                // [WAVES 2026-09-10] ... times the painted zone: no swell, no breakers.
+                float shoal = (1.0 - smoothstep(0.5, 8.0, smoothDepth)) * min(conf * 1.5, 1.0) * edgeFade * zoneScale;
                 if (shoal > 0.01)
                 {
                     float speedScale = clamp(length(waveDir1) * 0.885, 0.4, 2.0);

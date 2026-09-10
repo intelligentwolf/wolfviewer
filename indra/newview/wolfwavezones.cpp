@@ -35,8 +35,11 @@
 #include "lltextbox.h"
 #include "lluictrlfactory.h"
 #include "llparcel.h"            // PARCEL_GRID_STEP_METERS
+#include "llimage.h"
+#include "llsurface.h"
 #include "llviewerparceloverlay.h"
 #include "llviewerregion.h"
+#include "llviewertexture.h"
 #include "llworld.h"
 #include "wolfgrid.h"
 #include "wolfwaterfield.h"
@@ -54,6 +57,7 @@ namespace
         switch (z)
         {
             case 's': return 1.0f;
+            case 'm': return 0.35f;   // [2026-09-10] small waves
             case 'c': return 0.15f;
             case 'x': return 0.0f;
             default:  return WolfWaveZones::OPEN_ENERGY;
@@ -88,6 +92,46 @@ namespace
 }
 
 F32 WolfWaveZones::energyOf(char z) { return energy_of(z); }
+
+// Source: php/waves.php waves_cell() — the same rule, so a payload without `cell` still agrees.
+S32 WolfWaveZones::cellFor(S32 sizeX, S32 sizeY)
+{
+    S32 cell = CELL_M;
+    const S32 edge = llmax(llmax(sizeX, sizeY), 256);
+    while (edge / cell > MAX_CELLS_EDGE) cell *= 2;
+    return cell;
+}
+
+S32 WolfWaveZones::texelM(LLViewerRegion* regionp, F32 span_m) const
+{
+    S32 cell = CELL_M;
+    if (regionp)
+    {
+        auto it = mByHandle.find(regionp->getHandle());
+        cell = it != mByHandle.end() ? it->second.mCell : cellFor((S32)regionp->getWidth(), (S32)regionp->getWidth());
+    }
+    while (span_m / (F32)cell > 768.f) cell *= 2;
+    return cell;
+}
+
+// Source: wolfstorm wave_zones.js WaveZones.zoneScale — same numbers, keep in step.
+F32 WolfWaveZones::zoneScale(F32 e, F32 amplitude, F32 calm_ripple, F32 small_scale)
+{
+    const F32 a = llmax(amplitude, 0.02f);
+    const F32 calm_floor = llclamp(calm_ripple / a, 0.f, 1.f);
+    const F32 small = llclamp(small_scale, calm_floor, 1.f);
+    if (e <= 0.f) return 0.f;
+    if (e < 0.15f) return calm_floor * (e / 0.15f);
+    if (e < 0.35f) return calm_floor + (small - calm_floor) * ((e - 0.15f) / 0.20f);
+    if (e < 0.55f) return small + (1.f - small) * ((e - 0.35f) / 0.20f);
+    return 1.f;
+}
+
+F64 WolfWaveZones::lastFetchAgeSecs() const
+{
+    // explicit F64: getElapsedSeconds() is an LLUnitImplicit and the ternary needs one type
+    return mLastFetchAt > 0.0 ? (F64)LLFrameTimer::getElapsedSeconds() - mLastFetchAt : 1e9;
+}
 
 WolfWaveZones::WolfWaveZones() {}
 WolfWaveZones::~WolfWaveZones() {}
@@ -196,6 +240,9 @@ void WolfWaveZones::fetchCoro(std::vector<U64> handles)
         rec.mHandle = std::strtoull(r["handle"].asString().c_str(), nullptr, 10);
         rec.mSizeX = llmax(256, r["sizeX"].asInteger());
         rec.mSizeY = llmax(256, r["sizeY"].asInteger());
+        // [2026-09-10] the service's cell for this region (php/waves.php waves_cell); its own
+        // rule if an older service omits it.
+        rec.mCell = r.has("cell") ? llmax(CELL_M, r["cell"].asInteger()) : cellFor(rec.mSizeX, rec.mSizeY);
         rec.mVersion = r["version"].asInteger();
         rec.mEnabled = r["enabled"].asBoolean();
         if (r["layout"].isMap())
@@ -207,6 +254,7 @@ void WolfWaveZones::fetchCoro(std::vector<U64> handles)
         if (rec.mHandle) mByHandle[rec.mHandle] = rec;
     }
     mLastError.clear();
+    mLastFetchAt = LLFrameTimer::getElapsedSeconds();
     LL_INFOS("WolfWaveZones") << "layouts for " << mByHandle.size() << " regions" << LL_ENDL;
     // The water bakes the zone span with its fields: make it do so again now.
     WolfWaterField::instance().invalidate();
@@ -235,38 +283,15 @@ std::string WolfWaveZones::zonesFor(const Region& r) const
     return defaultZones(r);
 }
 
-// Source: wave_zones.js defaultZones — surf in the outer SURF_BAND_M where the water is open,
-// calm where land is close on all sides (exposure < 0.3), open elsewhere. The exposure field
-// is the agent region's (it spans the neighbours), so a neighbour's cells are offset into it.
+// Source: wave_zones.js defaultZones — every cell OFF. [2026-09-10, Paul] "there should be NO
+// waves inside the region ... if someone makes a lake in a region then it doesn't have waves
+// unless they define it ... only do waves if someone has drawn the waves with the wave
+// editor." (Until 09-10 this was calm/open from the exposure field, which put waves on every
+// dug lake — Jimmy Olsen's WolfFest screenshots.) The sea outside the region is not a cell of
+// any layout and stays open (fill()).
 std::string WolfWaveZones::defaultZones(const Region& r) const
 {
-    const S32 w = r.w(), h = r.h();
-    std::string out;
-    out.reserve((size_t)w * h);
-    LLViewerRegion* rgn = gAgent.getRegion();
-    const WolfWaterField::Field* fld = rgn ? WolfWaterField::instance().get(rgn) : nullptr;
-    F32 ox = 0.f, oy = 0.f;
-    if (rgn && r.mHandle != rgn->getHandle())
-    {
-        S32 ax, ay, bx, by;
-        handle_xy(r.mHandle, ax, ay);
-        handle_xy(rgn->getHandle(), bx, by);
-        ox = (F32)(ax - bx);
-        oy = (F32)(ay - by);
-    }
-    for (S32 cy = 0; cy < h; ++cy)
-    {
-        for (S32 cx = 0; cx < w; ++cx)
-        {
-            const F32 mx = (cx + 0.5f) * CELL_M, my = (cy + 0.5f) * CELL_M;
-            const F32 e = fld ? WolfWaterField::exposureAt(*fld, ox + mx, oy + my) : 1.f;
-            // [Paul 09-07] The automatic layout has NO surf: "surf is a special thing" a designer
-            // paints. Calm where land closes in (rivers, harbours), open elsewhere. wave_zones.js same.
-            if (e < 0.3f) out += 'c';
-            else out += 'o';
-        }
-    }
-    return out;
+    return std::string((size_t)r.w() * r.h(), 'x');
 }
 
 void WolfWaveZones::fill(LLViewerRegion* regionp, F32 x0, F32 y0, F32 sx, F32 sy, S32 w, S32 h, std::vector<F32>& out) const
@@ -275,14 +300,14 @@ void WolfWaveZones::fill(LLViewerRegion* regionp, F32 x0, F32 y0, F32 sx, F32 sy
     if (!regionp || mByHandle.empty()) return;
     S32 bx, by;
     handle_xy(regionp->getHandle(), bx, by);
-    struct Span { F32 x, y, sx, sy; S32 w; std::string zones; };
+    struct Span { F32 x, y, sx, sy; S32 w; S32 cell; std::string zones; };
     std::vector<Span> spans;
     for (const auto& kv : mByHandle)
     {
         const Region& r = kv.second;
         S32 ax, ay;
         handle_xy(r.mHandle, ax, ay);
-        spans.push_back({ (F32)(ax - bx), (F32)(ay - by), (F32)r.mSizeX, (F32)r.mSizeY, r.w(), zonesFor(r) });
+        spans.push_back({ (F32)(ax - bx), (F32)(ay - by), (F32)r.mSizeX, (F32)r.mSizeY, r.w(), r.mCell, zonesFor(r) });
     }
     const F32 tx = sx / w, ty = sy / h;
     const F32 rw = regionp->getWidth(), rh = regionp->getWidth();
@@ -305,22 +330,25 @@ void WolfWaveZones::fill(LLViewerRegion* regionp, F32 x0, F32 y0, F32 sx, F32 sy
             for (const Span& s : spans)
             {
                 if (px < s.x || py < s.y || px >= s.x + s.sx || py >= s.y + s.sy) continue;
-                const S32 cx = (S32)((px - s.x) / CELL_M), cy = (S32)((py - s.y) / CELL_M);
+                const S32 cx = (S32)((px - s.x) / s.cell), cy = (S32)((py - s.y) / s.cell);
                 const size_t k = (size_t)cy * s.w + cx;
                 out[(size_t)j * w + i] = k < s.zones.size() ? energy_of(s.zones[k]) : OPEN_ENERGY;
                 covered = true;
                 break;
             }
-            // [SURF 2026-09-07] Space no region covers (the void sea round the region) carries
-            // on from this region's nearest edge cell, so surf painted along the edge rolls in
-            // from far out instead of fading over the last texel before the border (Paul:
-            // "waves from the edge of the region"; wave_zones.js bake does the same).
+            // Space no region covers (the void sea round the region) is OPEN water (Paul
+            // 09-10: waves "only at the outside" of a region) — except beyond a SURF edge cell,
+            // which it continues so the surf painted along the edge rolls in from far out
+            // instead of fading over the last texel before the border ([SURF 2026-09-07],
+            // Paul: "waves from the edge of the region"). Off / calm / small edge cells do NOT
+            // reach out: the 48 m blur below is the ramp from the open sea outside to the
+            // painted cell inside. wave_zones.js bake() same.
             if (!covered && mine)
             {
                 const F32 qx = llclamp(px, 0.f, rw - 0.5f), qy = llclamp(py, 0.f, rh - 0.5f);
-                const S32 cx = (S32)(qx / CELL_M), cy = (S32)(qy / CELL_M);
+                const S32 cx = (S32)(qx / mine->cell), cy = (S32)(qy / mine->cell);
                 const size_t k = (size_t)cy * mine->w + cx;
-                if (k < mine->zones.size()) out[(size_t)j * w + i] = energy_of(mine->zones[k]);
+                if (k < mine->zones.size() && mine->zones[k] == 's') out[(size_t)j * w + i] = energy_of('s');
             }
         }
     }
@@ -368,15 +396,17 @@ bool WolfWaveZones::cellEditable(S32 cx, S32 cy) const
     LLViewerRegion* rgn = gAgent.getRegion();
     LLViewerParcelOverlay* overlay = rgn ? rgn->getParcelOverlay() : nullptr;
     if (!overlay) return false;
-    // Every 4 m parcel tile under the 16 m cell must be the agent's own
+    // Every 4 m parcel tile under the cell must be the agent's own
     // (llviewerparceloverlay.cpp isOwnedSelf: PARCEL_SELF at that tile).
-    const S32 per = CELL_M / (S32)PARCEL_GRID_STEP_METERS;
+    const Region* cur = current();
+    const S32 cell = cur ? cur->mCell : CELL_M;
+    const S32 per = cell / (S32)PARCEL_GRID_STEP_METERS;
     for (S32 ty = 0; ty < per; ++ty)
     {
         for (S32 tx = 0; tx < per; ++tx)
         {
-            const LLVector3 pos((F32)(cx * CELL_M + tx * (S32)PARCEL_GRID_STEP_METERS) + 2.f,
-                                (F32)(cy * CELL_M + ty * (S32)PARCEL_GRID_STEP_METERS) + 2.f, 0.f);
+            const LLVector3 pos((F32)(cx * cell + tx * (S32)PARCEL_GRID_STEP_METERS) + 2.f,
+                                (F32)(cy * cell + ty * (S32)PARCEL_GRID_STEP_METERS) + 2.f, 0.f);
             if (!overlay->isOwnedSelf(pos)) return false;
         }
     }
@@ -430,13 +460,13 @@ void WolfWaveZones::save(const std::string& zones, const LLSD& params, bool enab
     const S32 version = r->mVersion;
     LLCoros::instance().launch("WolfWaveZones save", [uuid, zones, params, enabled, version]()
     {
-        WolfWaveZones::instance().saveCoro(uuid, zones, params, enabled, version);
+        WolfWaveZones::instance().saveCoro(uuid, zones, params, enabled, version, false);
     });
 }
 
 // Source: wolfspeech.cpp postRaw — the agent and session ids the service verifies against
 // the grid's presence service; no secret is carried by this (public) viewer.
-void WolfWaveZones::saveCoro(std::string region_uuid, std::string zones, LLSD params, bool enabled, S32 version)
+void WolfWaveZones::saveCoro(std::string region_uuid, std::string zones, LLSD params, bool enabled, S32 version, bool retried)
 {
     LLSD body;
     body["region"] = region_uuid;
@@ -464,6 +494,23 @@ void WolfWaveZones::saveCoro(std::string region_uuid, std::string zones, LLSD pa
     if (result.has(LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS_RAW))
     {
         reply = json_to_llsd(result[LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS_RAW].asBinary());
+    }
+    // [2026-09-10] 409 = the service holds a newer version than the one this viewer fetched
+    // (a save from WolfStorm or another editor since; Jimmy Olsen at WolfFest: "cant save;
+    // change settings from wave ... Conflict", even as a god). Fetch the current record and
+    // put THIS edit on top of it, once — the same rule as wave_zones.js save(). The layout the
+    // user painted is kept; only the version number is refreshed.
+    if (!retried && status.isHttpStatus() && status.getType() == 409)
+    {
+        LL_INFOS("WolfWaveZones") << "save: version conflict, refetching and retrying once" << LL_ENDL;
+        mFetching = true;
+        fetchCoro(neighbourHandles());
+        const Region* r = current();
+        if (r && r->mUuid == region_uuid)
+        {
+            saveCoro(region_uuid, zones, params, enabled, r->mVersion, true);
+            return;
+        }
     }
     mSaving = false;
     if (!status || !reply.isMap() || !reply["success"].asBoolean())
@@ -516,45 +563,142 @@ void WolfWavePainter::setLayout(S32 w, S32 h, const std::string& zones, const st
     mDirty = false;
 }
 
-S32 WolfWavePainter::cellPx() const
+// Fractional: a 16-cell region in a 224 px box gets 14 px cells, a 256-cell one 0.875 px —
+// the same box, scaled to fit (Paul: "on massive regions scale the drawing down").
+F32 WolfWavePainter::cellPx() const
 {
-    return llmax(1, llmin(getRect().getWidth() / mW, getRect().getHeight() / mH));
+    return llmax(0.5f, llmin((F32)getRect().getWidth() / (F32)mW, (F32)getRect().getHeight() / (F32)mH));
 }
 
 bool WolfWavePainter::cellAt(S32 x, S32 y, S32& cx, S32& cy) const
 {
-    const S32 px = cellPx();
-    cx = x / px;
-    cy = y / px;   // local y is bottom-up: row 0 (the region's south edge) is at the bottom
+    const F32 px = cellPx();
+    cx = (S32)floorf((F32)x / px);
+    cy = (S32)floorf((F32)y / px);   // local y is bottom-up: row 0 (the region's south edge) is at the bottom
     return cx >= 0 && cy >= 0 && cx < mW && cy < mH;
+}
+
+// The region's terrain under the grid (Paul: "the terrain drawn on it so the user can see
+// where they are drawing"): water blue by depth, land sand -> grass -> earth -> rock -> snow by
+// height above the water, hill-shaded from the north-west. Heights are the drawn surface,
+// LLSurface::resolveHeightRegion (0 where a patch has not arrived yet, which reads as deep
+// water); rebuilt every 5 s while the tab is up, since terraforming changes them. Same ramp as
+// wolfstorm land_waves_tab.js terrainUnderlay(). Row 0 of the raw image is the region's south
+// edge, which gl_draw_scaled_image's default uv rect puts at the bottom.
+void WolfWavePainter::refreshTerrain()
+{
+    LLViewerRegion* rgn = gAgent.getRegion();
+    if (!rgn) return;
+    const F64 now = LLFrameTimer::getElapsedSeconds();
+    if (mTerrainTex.notNull() && mTerrainHandle == rgn->getHandle() && now - mTerrainBuiltAt < 5.0) return;
+    const S32 N = llclamp(mW * 4, 64, 512);
+    if (mTerrainRaw.isNull() || mTerrainN != N)
+    {
+        mTerrainRaw = new LLImageRaw((U16)N, (U16)N, 3);
+        mTerrainN = N;
+        mTerrainTex = nullptr;
+    }
+    const F32 width = rgn->getWidth();
+    const F32 wh = rgn->getWaterHeight();
+    const LLSurface& land = rgn->getLand();
+    std::vector<F32> hgt((size_t)N * N);
+    for (S32 j = 0; j < N; ++j)
+    {
+        const F32 my = ((F32)j + 0.5f) / (F32)N * width;
+        for (S32 i = 0; i < N; ++i)
+        {
+            const F32 mx = ((F32)i + 0.5f) / (F32)N * width;
+            hgt[(size_t)j * N + i] = land.resolveHeightRegion(mx, my);
+        }
+    }
+    U8* d = mTerrainRaw->getData();
+    const F32 m_per_px = width / (F32)N;
+    auto lerp3 = [](const F32* a, const F32* b, F32 t, F32* o) { for (S32 c = 0; c < 3; ++c) o[c] = a[c] + (b[c] - a[c]) * t; };
+    static const F32 SHALLOW[3] = { 70, 150, 195 }, DEEP[3] = { 12, 34, 88 };
+    static const F32 SAND[3] = { 196, 180, 124 }, GRASS[3] = { 92, 142, 72 }, EARTH[3] = { 122, 100, 70 };
+    static const F32 ROCK[3] = { 142, 142, 146 }, SNOW[3] = { 232, 232, 238 };
+    for (S32 j = 0; j < N; ++j)
+    {
+        for (S32 i = 0; i < N; ++i)
+        {
+            const size_t k = (size_t)j * N + i;
+            const F32 h = hgt[k];
+            F32 rgb[3];
+            if (h < wh)
+            {
+                lerp3(SHALLOW, DEEP, llclamp((wh - h) / 12.f, 0.f, 1.f), rgb);
+            }
+            else
+            {
+                const F32 a = h - wh;
+                if (a < 2.f)       lerp3(SAND, GRASS, a / 2.f, rgb);
+                else if (a < 30.f) lerp3(GRASS, EARTH, (a - 2.f) / 28.f, rgb);
+                else if (a < 80.f) lerp3(EARTH, ROCK, (a - 30.f) / 50.f, rgb);
+                else               lerp3(ROCK, SNOW, llclamp((a - 80.f) / 60.f, 0.f, 1.f), rgb);
+                const F32 he = hgt[(size_t)j * N + llmin(i + 1, N - 1)], hw = hgt[(size_t)j * N + llmax(i - 1, 0)];
+                const F32 hn = hgt[(size_t)llmin(j + 1, N - 1) * N + i], hs = hgt[(size_t)llmax(j - 1, 0) * N + i];
+                const F32 gx = (he - hw) / (2.f * m_per_px), gy = (hn - hs) / (2.f * m_per_px);
+                const F32 shade = llclamp(0.82f + 0.35f * (-gx * 0.7f + gy * 0.7f) / sqrtf(1.f + gx * gx + gy * gy) + 0.18f, 0.f, 1.f);
+                for (F32& c : rgb) c *= shade;
+            }
+            d[k * 3] = (U8)llclamp((S32)rgb[0], 0, 255);
+            d[k * 3 + 1] = (U8)llclamp((S32)rgb[1], 0, 255);
+            d[k * 3 + 2] = (U8)llclamp((S32)rgb[2], 0, 255);
+        }
+    }
+    // Source: llnetmap.cpp createObjectImage / setSubImage — a local texture from a raw image,
+    // re-uploaded in place on later rebuilds.
+    if (mTerrainTex.isNull())
+    {
+        mTerrainTex = LLViewerTextureManager::getLocalTexture(mTerrainRaw.get(), false);
+    }
+    else
+    {
+        mTerrainTex->setSubImage(mTerrainRaw, 0, 0, N, N);
+    }
+    mTerrainHandle = rgn->getHandle();
+    mTerrainBuiltAt = now;
 }
 
 void WolfWavePainter::draw()
 {
-    const S32 px = cellPx();
+    const F32 px = cellPx();
+    const S32 gw = ll_round(mW * px), gh = ll_round(mH * px);
     gl_rect_2d(0, getRect().getHeight(), getRect().getWidth(), 0, LLColor4(0.04f, 0.06f, 0.12f, 1.f));
+    refreshTerrain();
+    if (mTerrainTex.notNull())
+    {
+        gl_draw_scaled_image(0, 0, gw, gh, mTerrainTex);
+    }
     for (S32 cy = 0; cy < mH; ++cy)
     {
         for (S32 cx = 0; cx < mW; ++cx)
         {
             const size_t k = (size_t)cy * mW + cx;
+            // Tints over the terrain; an OFF cell has none, the terrain shows through.
+            // Source: land_waves_tab.js COLOURS.
+            bool tint = true;
             LLColor4 c;
             switch (mZones[k])
             {
-                case 's': c = LLColor4(0.31f, 0.64f, 1.0f, 1.f); break;
-                case 'c': c = LLColor4(0.44f, 0.76f, 0.64f, 1.f); break;
-                case 'x': c = LLColor4(0.27f, 0.27f, 0.33f, 1.f); break;
-                default:  c = LLColor4(0.17f, 0.44f, 0.71f, 1.f); break;
+                case 's': c = LLColor4(0.31f, 0.64f, 1.0f, 0.72f); break;
+                case 'o': c = LLColor4(0.17f, 0.44f, 0.71f, 0.66f); break;
+                case 'm': c = LLColor4(0.51f, 0.77f, 0.93f, 0.58f); break;
+                case 'c': c = LLColor4(0.44f, 0.76f, 0.64f, 0.55f); break;
+                default:  tint = false; break;
             }
-            const S32 left = cx * px, bottom = cy * px;
-            gl_rect_2d(left, bottom + px, left + px, bottom, c);
+            // Snapped edges shared with the neighbours: no seams at fractional cell sizes.
+            const S32 left = ll_round(cx * px), right = ll_round((cx + 1) * px);
+            const S32 bottom = ll_round(cy * px), top = ll_round((cy + 1) * px);
+            if (right <= left || top <= bottom) continue;
+            if (tint) gl_rect_2d(left, top, right, bottom, c);
             if (mLocked[k])
             {
-                gl_rect_2d(left, bottom + px, left + px, bottom, LLColor4(0.f, 0.f, 0.f, 0.45f));
+                gl_rect_2d(left, top, right, bottom, LLColor4(0.f, 0.f, 0.f, 0.45f));
             }
-            if (px >= 8)
+            if (px >= 8.f)
             {
-                gl_rect_2d(left, bottom + px, left + px, bottom, LLColor4(1.f, 1.f, 1.f, 0.08f), false);
+                gl_rect_2d(left, top, right, bottom, LLColor4(1.f, 1.f, 1.f, 0.08f), false);
             }
         }
     }
@@ -625,15 +769,18 @@ bool WolfPanelLandWaves::postBuild()
     mSurfHeight  = getChild<LLSliderCtrl>("waves_surf_height");
     mSetInterval = getChild<LLSliderCtrl>("waves_set_interval");
     mCalmRipple  = getChild<LLSliderCtrl>("waves_calm_ripple");
+    mSmallScale  = getChild<LLSliderCtrl>("waves_small_scale");
     mEnabled     = getChild<LLCheckBoxCtrl>("waves_enabled");
     mSave        = getChild<LLButton>("waves_save");
     mBrushS      = getChild<LLButton>("waves_brush_s");
     mBrushO      = getChild<LLButton>("waves_brush_o");
+    mBrushM      = getChild<LLButton>("waves_brush_m");
     mBrushC      = getChild<LLButton>("waves_brush_c");
     mBrushX      = getChild<LLButton>("waves_brush_x");
 
     mBrushS->setCommitCallback(boost::bind(&WolfPanelLandWaves::onBrush, this, 's'));
     mBrushO->setCommitCallback(boost::bind(&WolfPanelLandWaves::onBrush, this, 'o'));
+    mBrushM->setCommitCallback(boost::bind(&WolfPanelLandWaves::onBrush, this, 'm'));
     mBrushC->setCommitCallback(boost::bind(&WolfPanelLandWaves::onBrush, this, 'c'));
     mBrushX->setCommitCallback(boost::bind(&WolfPanelLandWaves::onBrush, this, 'x'));
     mSave->setCommitCallback(boost::bind(&WolfPanelLandWaves::onSave, this));
@@ -642,6 +789,7 @@ bool WolfPanelLandWaves::postBuild()
     mSurfHeight->setCommitCallback(boost::bind(&WolfPanelLandWaves::onParamChanged, this));
     mSetInterval->setCommitCallback(boost::bind(&WolfPanelLandWaves::onParamChanged, this));
     mCalmRipple->setCommitCallback(boost::bind(&WolfPanelLandWaves::onParamChanged, this));
+    mSmallScale->setCommitCallback(boost::bind(&WolfPanelLandWaves::onParamChanged, this));
     mEnabled->setCommitCallback(boost::bind(&WolfPanelLandWaves::onParamChanged, this));
 
     mPainter->setPaintCallback([this]() { WolfWaveZones::instance().preview(mPainter->zones()); armBakeConfirm(); });
@@ -655,6 +803,7 @@ void WolfPanelLandWaves::onBrush(char z)
     if (mPainter) mPainter->setBrush(z);
     mBrushS->setToggleState(z == 's');
     mBrushO->setToggleState(z == 'o');
+    mBrushM->setToggleState(z == 'm');
     mBrushC->setToggleState(z == 'c');
     mBrushX->setToggleState(z == 'x');
 }
@@ -737,10 +886,28 @@ void WolfPanelLandWaves::refresh()
         if (!wz.fetching() && wz.fetchedFor() != handle) wz.refresh();
         return;
     }
-    // Only rebuild the working copy when the region or its stored version changed, so a
-    // refresh while painting does not throw the edits away.
-    if (handle != mShownHandle || r->mVersion != mShownVersion || (mPainter && !mPainter->dirty() && mPainter->zones().size() != (size_t)(r->w() * r->h())))
+    // [2026-09-10] First look at this region in the tab: if the record is more than ten
+    // seconds old, ask the grid again, so the version the Save carries is current (a save
+    // from WolfStorm or another editor since the login would otherwise make the first save a
+    // 409, which saveCoro now retries once anyway). The half-second poll rebuilds when the
+    // fresh record lands.
+    if (handle != mShownHandle && !wz.fetching() && wz.lastFetchAgeSecs() > 10.0)
     {
+        wz.refresh();
+    }
+    // Only rebuild the working copy when the region or its stored version changed — and never
+    // over an edit in progress: a newer version arriving while the user paints is noted, and
+    // the Save puts the painted layout on top of it (saveCoro's 409 retry).
+    const bool changed = handle != mShownHandle || r->mVersion != mShownVersion
+        || (mPainter && !mPainter->dirty() && mPainter->zones().size() != (size_t)(r->w() * r->h()));
+    if (changed)
+    {
+        if (mPainter && mPainter->dirty() && handle == mShownHandle)
+        {
+            setStatus(getString("str_newer_on_grid"), false);
+            mShownVersion = r->mVersion;
+            return;
+        }
         rebuild();
         mShownHandle = handle;
         mShownVersion = r->mVersion;
@@ -768,16 +935,19 @@ void WolfPanelLandWaves::rebuild()
     mSurfHeight->setValue((F32)(p.has("surfHeight") ? p["surfHeight"].asReal() : 3.0));
     mSetInterval->setValue((F32)(p.has("setInterval") ? p["setInterval"].asReal() : 90.0));
     mCalmRipple->setValue((F32)(p.has("calmRipple") ? p["calmRipple"].asReal() * 100.0 : 3.0));
+    mSmallScale->setValue((F32)(p.has("smallScale") ? p["smallScale"].asReal() * 100.0 : WolfWaveZones::SMALL_SCALE_DEFAULT * 100.0));
     mEnabled->set(r->mEnabled);
     mSurfHeight->setEnabled(all);
     mSetInterval->setEnabled(all);
     mCalmRipple->setEnabled(all);
+    mSmallScale->setEnabled(all);
     mEnabled->setEnabled(all);
     getChild<LLButton>("waves_default")->setEnabled(all);
     LLStringUtil::format_map_t args;
     args["[REGION]"] = r->mName;
     args["[W]"] = std::to_string(w);
     args["[H]"] = std::to_string(h);
+    args["[CELL]"] = std::to_string(r->mCell);
     args["[STATE]"] = r->mStored ? getString("str_stored") : getString("str_automatic");
     mNote->setText(getString(all ? "str_note_all" : "str_note_parcel", args));
     setStatus("", false);
@@ -789,6 +959,7 @@ LLSD WolfPanelLandWaves::paramsFromControls() const
     p["surfHeight"] = mSurfHeight->getValueF32();
     p["setInterval"] = (S32)mSetInterval->getValueF32();
     p["calmRipple"] = mCalmRipple->getValueF32() / 100.f;
+    p["smallScale"] = mSmallScale->getValueF32() / 100.f;   // [2026-09-10] slider in percent of the open sea
     return p;
 }
 
@@ -798,7 +969,7 @@ void WolfPanelLandWaves::onParamChanged()
     WolfWaveZones& wz = WolfWaveZones::instance();
     if (!wz.current() || !mPainter) return;
     wz.previewParams(paramsFromControls());
-    // Off = the automatic layout: preview that, so the switch is visible at once.
+    // Off = the automatic layout (flat everywhere): preview that, so the switch is visible at once.
     wz.preview(mEnabled->get() ? mPainter->zones() : wz.defaultZones(*wz.current()));
     armBakeConfirm();
 }

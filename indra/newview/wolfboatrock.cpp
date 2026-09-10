@@ -622,9 +622,18 @@ WolfBoatRock::Sample WolfBoatRock::sampleWave(const LLViewerObject* objectp, F32
     // exposure 0-0.23 -> scale ~0.15-0.4 -> peak bob 7-25 MILLIMETRES. Moored boats visibly
     // sway from harbour slop even on water that reads calm, so the ROCKER keeps >= 0.7 of
     // the base wave field while the drawn surface still flattens toward shore and rivers.
-    // [WAVES 2026-09-07] ...times the painted zone, exactly as the vertex stage
-    // (waterV.glsl zoneEnergy): a boat in a surf cell rides the bigger swell.
-    const F32 zone_mul = 0.1f + 1.5f * (field ? WolfWaterField::zoneAt(*field, rx, ry) : WolfWaveZones::OPEN_ENERGY);
+    // [WAVES 2026-09-10] ...times the painted zone's swell scale, exactly as the vertex stage
+    // (waterV.glsl zoneScale — WolfWaveZones::zoneScale is the one mapping): a boat on an OFF
+    // cell sits still (the default everywhere inside a region now), on a small-wave cell it
+    // rides smallScale of the open sea, on open / surf cells the full swell.
+    F32 zone_mul = 1.f;
+    {
+        const LLSD& zp = WolfWaveZones::instance().params();
+        const F32 calm = llclamp(zp.has("calmRipple") ? (F32)zp["calmRipple"].asReal() : 0.03f, 0.f, 0.1f);
+        const F32 small = llclamp(zp.has("smallScale") ? (F32)zp["smallScale"].asReal() : WolfWaveZones::SMALL_SCALE_DEFAULT, 0.05f, 0.8f);
+        const F32 energy = field ? WolfWaterField::zoneAt(*field, rx, ry) : WolfWaveZones::OPEN_ENERGY;
+        zone_mul = WolfWaveZones::zoneScale(energy, amp, calm, small);
+    }
     const F32 swell_scale = llmax(0.15f + 1.15f * exposure_at(rx, ry), 0.7f) * zone_mul;
 
     if (amp > 0.01f)

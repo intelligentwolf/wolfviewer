@@ -371,8 +371,9 @@ void LLDrawPoolWater::renderPostDeferred(S32 pass)
             static LLStaticHashedString s_surf_len("surfLength");
             static LLStaticHashedString s_surf_speed("surfSpeed");
             static LLStaticHashedString s_calm_ripple("calmRipple");
+            static LLStaticHashedString s_small_scale("smallScale");   // [WAVES 2026-09-10]
             const WolfWaveZones::Region* wr = WolfWaveZones::instance().current();
-            F32 surf_h = 0.f, surf_set = 90.f, surf_len = 36.f, calm = 0.03f;
+            F32 surf_h = 0.f, surf_set = 90.f, surf_len = 36.f, calm = 0.03f, small = WolfWaveZones::SMALL_SCALE_DEFAULT;
             if (wr)
             {
                 // The saved parameters, or the ones being previewed in About Land > Waves.
@@ -381,12 +382,15 @@ void LLDrawPoolWater::renderPostDeferred(S32 pass)
                 surf_set = llclamp(p.has("setInterval") ? (F32)p["setInterval"].asReal() : 90.f, 30.f, 600.f);
                 surf_len = llclamp(p.has("surfLength") ? (F32)p["surfLength"].asReal() : 36.f, 12.f, 400.f);
                 calm = llclamp(p.has("calmRipple") ? (F32)p["calmRipple"].asReal() : 0.03f, 0.f, 0.1f);
+                // [WAVES 2026-09-10] the small-wave cells' swell as a fraction of the open sea (php/waves.php clamp)
+                small = llclamp(p.has("smallScale") ? (F32)p["smallScale"].asReal() : WolfWaveZones::SMALL_SCALE_DEFAULT, 0.05f, 0.8f);
             }
             shader->uniform1f(s_surf_height, surf_h);
             shader->uniform1f(s_surf_set, surf_set);
             shader->uniform1f(s_surf_len, surf_len);
             shader->uniform1f(s_surf_speed, 1.f);
             shader->uniform1f(s_calm_ripple, calm);
+            shader->uniform1f(s_small_scale, small);
             mSurfHeight = surf_h;
             mSurfSetInterval = surf_set;
             mSurfLength = surf_len;
@@ -527,7 +531,9 @@ void LLDrawPoolWater::pushWaterPlanes(int pass)
             // the shader scrolls along the ribbon from wolfStream (surface speed, m/s).
             // <WolfViewer 2026-09-06> Edge (void) water swells too now: LLVOWater tessellates
             // it on a distance-graded lattice, so the sea no longer goes flat at the border.
-            const bool no_swell = water->getWaterfall() > 0.f || water->getStreamFlow() > 0.f;
+            // <WolfViewer 2026-09-10> ...nor a STILL pool the terrain analysis found: waves inside
+            // a region exist only where About Land > Waves painted them (wolfnaturalwater.cpp).
+            const bool no_swell = water->getWaterfall() > 0.f || water->getStreamFlow() > 0.f || water->getStillWater();
             cur_shader->uniform1f(LLShaderMgr::WATER_WAVE_AMPLITUDE, no_swell ? 0.f : amplitude);
 
             // The depth + exposure fields and the wake belong to a region's OWN water plane

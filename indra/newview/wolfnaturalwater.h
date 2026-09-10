@@ -70,10 +70,17 @@ private:
     static constexpr S32 MAX_STREAM_VERTS = 800000;   // across all streams, ~26 MB of buffer
     // (0.25 m / 4 cells drew every dip on a mountain as a dark spot, 2026-09-05: a pool is
     // now at least a room-sized, knee-deep hollow.)
-    static constexpr F32 MIN_POOL_DEPTH_M = 0.4f;
+    // [2026-09-10] Paul: "auto generated lakes should not appear on flat ground ever". A pool
+    // needs a real basin: a metre of water at its deepest AND banks that rise at least 25 %
+    // (14 degrees) on average where the water meets the land. A 0.5 m dip across a lawn, or a
+    // wide saucer that deepens over 100 m, fails both; a bulldozed lake passes both.
+    // natural_water_worker.js same numbers.
+    static constexpr F32 MIN_POOL_DEPTH_M = 1.0f;
+    static constexpr F32 MIN_POOL_RIM_GRADE = 0.25f;
     static constexpr S32 MIN_POOL_CELLS = 12;
     // A drainage chain shorter than this (cells) is a stub, not a stream: dropped.
-    static constexpr S32 MIN_CHAIN_CELLS = 8;
+    // [2026-09-10] A fall can be short: four cells of 40-degree face is a fall worth drawing.
+    static constexpr S32 MIN_CHAIN_CELLS = 4;
     // [2026-09-08, Tromsø: "the pond the user created and those weird streams appeared"] a chain
     // must FALL — a pool's overflow on a flat lawn was drawn as a stream over ground with no
     // grade. Source: natural_water_worker.js MIN_CHAIN_DROP_M / MIN_CHAIN_GRADE (same numbers).
@@ -89,8 +96,13 @@ private:
     // keep these in step with its smoothstep(0.3, 0.8, rise_run). (0.18/0.45 turned every
     // mountain gully into one white sheet, 2026-09-05 screenshot: 0.3 = 17 degrees is where
     // white water starts, 0.8 = 39 degrees is a fall.)
-    static constexpr F32 FALL_START = 0.3f;
-    static constexpr F32 FALL_FULL = 0.8f;
+    // [2026-09-10] Paul: streams / falls "should only appear over 40 degrees in angle". A cell
+    // is a stream cell only when its ground drops at least tan(40deg) = 0.839 per metre toward
+    // its downhill neighbour (STEEP_MIN_GRADE), and everything drawn is a fall: the fall blend
+    // runs 40 -> 45 degrees. Flat brooks are no longer drawn at all. Worker same.
+    static constexpr F32 STEEP_MIN_GRADE = 0.8391f;   // tan(40 deg)
+    static constexpr F32 FALL_START = 0.8391f;
+    static constexpr F32 FALL_FULL = 1.0f;            // tan(45 deg)
     static constexpr F32 WATERFALL_LIFT_M = 0.08f;
     // Ribbon tessellation: vertices across the channel, and stations per terrain cell along
     // it (2 = a station every half cell, so the plan bends and the bed profile are followed

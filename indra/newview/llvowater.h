@@ -96,6 +96,11 @@ public:
     // shader draws it foam-white with the flow racing down the face instead of as a pool.
     void setWaterfall(F32 on) { mWaterfall = on; }
     F32  getWaterfall() const { return mWaterfall; }
+    // <WolfViewer 2026-09-10> Still water: no swell at all. Set on the pools the terrain
+    // analysis finds (wolfnaturalwater.cpp) — Paul: "if someone makes a lake in a region then
+    // it doesn't have waves unless they define it". lldrawpoolwater.cpp sends amplitude 0.
+    void setStillWater(bool still) { mStillWater = still; }
+    bool getStillWater() const { return mStillWater; }
 
     // <WolfViewer> A TERRAIN-CONFORMING water surface (wolfnaturalwater.cpp streams).
     //
@@ -139,6 +144,7 @@ protected:
     S32  mRenderType;
     F32  mBoundedWaterDepth = 0.f;  // <FS:WolfViewer>
     F32  mWaterfall = 0.f;          // <WolfViewer>
+    bool mStillWater = false;       // <WolfViewer 2026-09-10> natural pools: flat
     std::shared_ptr<const ConformingMesh> mMesh;   // <WolfViewer> null = lattice from scale
     F32  mStreamFlow = 0.f;                        // <WolfViewer>
 };

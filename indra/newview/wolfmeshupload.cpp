@@ -809,13 +809,26 @@ bool Model::loadGltf(const std::string& path, std::string& error)
                        std::string* /*warn*/, int /*req_width*/, int /*req_height*/,
                        const unsigned char* bytes, int size, void* /*user*/) -> bool
         {
-            if (bytes && size > 0)
+            // [FIX 2026-09-11 — CRASH ON A CORRUPT GLB] Only copy here for uri / data-uri images.
+            //
+            // For an image that lives in a bufferView, tinygltf computes the pointer it hands us
+            // as `&buffer.data[bufferView.byteOffset]` with `bufferView.byteLength` as the size
+            // (tiny_gltf.h:6463-6466) after checking ONLY that the bufferView and buffer INDICES
+            // exist (:6432-6455). ParseBufferView (:4654) stores byteOffset/byteLength straight
+            // from the JSON and never compares them with the buffer's size, so a truncated or
+            // corrupt GLB puts that pointer past the end of the heap block and the assign() below
+            // read out of bounds — a segfault the parse's try/catch cannot see. The bufferView
+            // copy is made AFTER the load instead, with a bounds check, from the same buffers.
+            //
+            // ParseImage sets image->bufferView before this callback can run (tiny_gltf.h:4364)
+            // and leaves it -1 for uri images, whose bytes arrive in tinygltf's own correctly
+            // sized vector (DecodeDataURI / LoadExternalFile) — those stay safe to copy here.
+            if (image && image->bufferView < 0 && bytes && size > 0)
             {
                 image_bytes[image_idx].assign(bytes, bytes + size);
             }
             // Nothing is decoded, so leave the pixel fields as tinygltf initialised them.
             // Returning true keeps a model whose images we do not need from failing to load.
-            (void)image;
             return true;
         },
         NULL);
@@ -832,6 +845,41 @@ bool Model::loadGltf(const std::string& path, std::string& error)
     {
         error = err.empty() ? std::string("That glTF file could not be read.") : ("glTF parse failed: " + err);
         return false;
+    }
+
+    // Embedded (bufferView) images, copied with the bounds check tinygltf does not perform —
+    // see the image loader above. Source: tiny_gltf.h:6456-6466 is the read this replaces;
+    // an out-of-range view is reported like any other texture that cannot be uploaded
+    // (mTextureErrors is what the consumer below already surfaces to the user).
+    for (size_t i = 0; i < model.images.size(); ++i)
+    {
+        const tinygltf::Image& img = model.images[i];
+        if (img.bufferView < 0)
+        {
+            continue;
+        }
+        if ((size_t)img.bufferView >= model.bufferViews.size())
+        {
+            mTextureErrors.push_back(llformat("image %d (bufferView %d does not exist)", (S32)i, img.bufferView));
+            continue;
+        }
+        const tinygltf::BufferView& bv = model.bufferViews[(size_t)img.bufferView];
+        if (bv.buffer < 0 || (size_t)bv.buffer >= model.buffers.size())
+        {
+            mTextureErrors.push_back(llformat("image %d (buffer %d does not exist)", (S32)i, bv.buffer));
+            continue;
+        }
+        const std::vector<unsigned char>& data = model.buffers[(size_t)bv.buffer].data;
+        // Overflow-safe: compare the length against what remains after the offset.
+        if (bv.byteLength == 0 || bv.byteOffset > data.size() || bv.byteLength > data.size() - bv.byteOffset)
+        {
+            LL_WARNS("WolfMeshUpload") << "glTF image " << i << " bufferView " << img.bufferView
+                                       << " is out of range: offset " << bv.byteOffset << " length " << bv.byteLength
+                                       << " in a buffer of " << data.size() << " bytes" << LL_ENDL;
+            mTextureErrors.push_back(llformat("image %d (embedded data is out of range, the file is truncated or corrupt)", (S32)i));
+            continue;
+        }
+        image_bytes[(S32)i].assign(data.begin() + bv.byteOffset, data.begin() + bv.byteOffset + bv.byteLength);
     }
 
     // Draco and meshopt are extensions tinygltf does not decompress; a model needing one loads

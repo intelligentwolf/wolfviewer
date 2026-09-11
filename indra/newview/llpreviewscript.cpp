@@ -947,6 +947,37 @@ void LLScriptEdCore::updateIndicators(bool compiling, bool success)
 // prompt and allow the user to prompt for a particular script and it will build or edit the one
 // it has." The prompt is a text-input notification; the work happens on the proxy (wolfai.cpp).
 
+/**
+ * [AI 2026-09-11] Say what is happening in the bar the user already watches for script feedback.
+ *
+ * Paul: "it needs some kind of text to tell the user what is going on." A request takes seconds
+ * and the only sign of life was a disabled button, which reads as a hang. The loading spinner in
+ * the button bar is started too, so there is movement as well as words.
+ */
+void LLScriptEdCore::setWolfAIStatus(const std::string& text, bool busy)
+{
+    if (mErrorList)
+    {
+        mErrorList->deleteAllItems();
+        if (!text.empty())
+        {
+            LLSD row;
+            row["columns"][0]["value"] = text;
+            row["columns"][0]["font"] = "SANSSERIF_SMALL";
+            mErrorList->addElement(row);
+        }
+    }
+    if (LLLoadingIndicator* spin = findChild<LLLoadingIndicator>("progress_indicator"))
+    {
+        spin->setVisible(busy);
+        if (busy) spin->start(); else spin->stop();
+    }
+    if (LLButton* btn = findChild<LLButton>("wolf_ai_btn"))
+    {
+        btn->setLabel(busy ? std::string("…") : std::string("AI"));
+    }
+}
+
 void LLScriptEdCore::refreshWolfAIButton()
 {
     LLView* btn = findChild<LLView>("wolf_ai_btn");
@@ -1007,6 +1038,9 @@ bool LLScriptEdCore::onWolfAIPrompt(const LLSD& notification, const LLSD& respon
     const std::string existing = mEditor ? mEditor->getText() : std::string();
     LLView* btn = findChild<LLView>("wolf_ai_btn");
     if (btn) btn->setEnabled(false);
+    setWolfAIStatus(existing.find_first_not_of(" \t\r\n") != std::string::npos
+                    ? "Asking the AI to edit this script — this takes a few seconds…"
+                    : "Asking the AI to write this script — this takes a few seconds…", true);
 
     // The callback captures `this`. LLScriptEdCore lives as long as its preview floater, and a
     // closed floater is destroyed, so the handle guard is what makes a late reply safe.
@@ -1025,6 +1059,10 @@ void LLScriptEdCore::onWolfAIResult(bool ok, const std::string& script_or_error)
 {
     LLView* btn = findChild<LLView>("wolf_ai_btn");
     if (btn) btn->setEnabled(true);
+    setWolfAIStatus(ok
+        ? "The AI wrote this script. READ IT before you press Save — generated code can call a "
+          "function that does not exist, and the compiler will tell you when you save."
+        : "The AI could not do that.", false);
 
     if (!ok)
     {

@@ -60,7 +60,8 @@ public:
         // the tools and their credits are what limit them.
         S32         mBalance      = 0;
         S32         mScriptCost   = 1;
-        S32         mMeshMin      = 40;
+        S32         mMeshMin      = 40;   // headroom needed to START a model
+        S32         mMeshTypical  = 30;   // what the user is TOLD it costs
         F64         mPencePerCredit = 0.0;
         std::string mBuyUrl;
     };

@@ -369,7 +369,18 @@ bool    LLFloaterTools::postBuild()
     mStatusText["grab"] = getString("status_grab");
     mStatusText["place"] = getString("status_place");
     mStatusText["selectland"] = getString("status_selectland");
-    mStatusText["paintland"] = getString("status_paintland");   // [TERRAIN PAINT 2026-09-10]
+    // [FIX 2026-09-11 — CRASH REPORT] Guarded, because getString() on a MISSING string calls
+    // LL_ERRS when QAMode is on (llpanel.cpp:608-611), and LL_ERRS is fatal. A resident with a
+    // stale skins folder — a new binary over an old install — and QAMode left on from some
+    // earlier session got "Failed to find string status_paintland in panel toolbox floater" and
+    // a crash on startup, rather than a status line that was merely blank.
+    //
+    // A STATUS LINE MUST NEVER BE ABLE TO KILL THE VIEWER. hasString is the non-fatal test
+    // (llpanel.h:172); the fallback is the same wording the XML carries, so a mismatched skin
+    // degrades to correct text rather than to a dead viewer.
+    mStatusText["paintland"] = hasString("status_paintland")
+        ? getString("status_paintland")
+        : std::string("Drag on the ground to paint");
 
     // [FLOATER SPLIT 2026-09-11] The Paint and AI tabs used to be removed here when off-grid.
     // They are their own floaters now (Build > Paint the Ground / Create a Model with AI), and

@@ -204,6 +204,7 @@ void WolfAI::availCoro()
         a.mBalance       = reply["balance"].asInteger();
         a.mScriptCost    = reply.has("script_cost") ? reply["script_cost"].asInteger() : 1;
         a.mMeshMin       = reply.has("mesh_min_balance") ? reply["mesh_min_balance"].asInteger() : 40;
+        a.mMeshTypical   = reply.has("mesh_typical_cost") ? reply["mesh_typical_cost"].asInteger() : 30;
         a.mPencePerCredit = reply["pence_per_credit"].asReal();
         a.mBuyUrl        = reply["buy_url"].asString();
     }
@@ -481,12 +482,10 @@ void WolfPanelAI::refresh()
     {
         LLStringUtil::format_map_t args;
         args["[MODEL]"] = a.mMeshModel.length() ? a.mMeshModel : std::string("AI");
-        args["[NEED]"]  = llformat("%d", a.mMeshMin);
-        // Paul: "nice to put the price on the form." The rate comes from the store's own price
-        // list, so the figure shown is one the store would honour.
-        args["[APPROX]"] = a.mPencePerCredit > 0.0
-            ? llformat(" (about £%.2f)", (a.mMeshMin * a.mPencePerCredit) / 100.0)
-            : std::string();
+        // [2026-09-11] Paul: "don't tell the user that its 80p a model — just say its about 30
+        // credits for a model." Quoted in CREDITS only; no money figure, not least because what
+        // someone paid per credit depends on the pack they bought.
+        args["[NEED]"] = llformat("%d", a.mMeshTypical);
         note = getString("str_ready", args);
         usable = true;
     }
@@ -504,6 +503,7 @@ void WolfPanelAI::refresh()
     {
         LLStringUtil::format_map_t sargs;
         sargs["[NEED]"]    = llformat("%d", a.mMeshMin);
+        sargs["[COST]"]    = llformat("%d", a.mMeshTypical);
         sargs["[BALANCE]"] = llformat("%d", a.mBalance);
         setStatus(getString("str_low_credits", sargs), true);
     }

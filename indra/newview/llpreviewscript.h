@@ -227,6 +227,7 @@ protected:
     bool            onWolfAIPrompt(const LLSD& notification, const LLSD& response);
     void            onWolfAIResult(bool ok, const std::string& script_or_error);
     void            refreshWolfAIButton();
+    void            setWolfAIStatus(const std::string& text, bool busy);
 
 private:
     std::string     mSampleText;

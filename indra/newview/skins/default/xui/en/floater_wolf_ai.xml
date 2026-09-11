@@ -30,10 +30,10 @@
     <panel.string name="str_not_configured">The AI tools are not configured on this server.</panel.string>
     <panel.string name="str_not_wolf">The AI tools are a Wolf Territories feature.</panel.string>
 <panel.string name="str_credits">Wolf Credits: [BALANCE]</panel.string>
-<panel.string name="str_low_credits">A model needs about [NEED] credits and you have [BALANCE]. Use Buy credits to top up.</panel.string>
+<panel.string name="str_low_credits">A model costs about [COST] credits, and you need [NEED] to start one. You have [BALANCE]. Use Buy credits to top up.</panel.string>
 <panel.string name="str_updating">Asking the grid for your credit balance…</panel.string>
     <panel.string name="str_no_mesh_provider">Model generation is not configured on this server yet. The script editor's AI button is available.</panel.string>
-    <panel.string name="str_ready">Describe an object. It is built with [MODEL], then uploaded to your Objects folder like any model upload. A model costs about [NEED] credits[APPROX] — you are charged what it actually costs. Building takes a few minutes; you can close this floater and it carries on.</panel.string>
+    <panel.string name="str_ready">Describe an object. It is built with [MODEL], then uploaded to your Objects folder like any model upload. A model costs about [NEED] credits — you are charged what it actually costs. Building takes a few minutes; you can close this floater and it carries on.</panel.string>
     <panel.string name="str_need_prompt">Say what the model should be.</panel.string>
     <panel.string name="str_starting">Asking the AI to build it…</panel.string>
     <!-- [AI CREDITS 2026-09-11] Balance, the Update button Paul asked for, and the way to buy more. -->

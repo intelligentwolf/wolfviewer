@@ -72,7 +72,8 @@
 #include "lltracethreadrecorder.h"
 #include "llviewerwindow.h"
 #include "fswolfwater.h" // <FS:WolfViewer> wolfwater prim surfaces
-#include "wolfterrainpaint.h"   // [TERRAIN PAINT 2026-09-10]
+#include "wolfterrainpaint.h"
+#include "wolfai.h"   // [AI CREDITS 2026-09-11] availability + balance   // [TERRAIN PAINT 2026-09-10]
 #include "wolfnaturalwater.h" // <WolfViewer> streams and pools from the heightmap
 #include "wolfwaterfield.h" // <WolfViewer> water depth / exposure fields for the water shader
 #include "wolfboatrock.h" // <WolfViewer> client-side buoyancy for boats
@@ -6161,6 +6162,15 @@ void LLAppViewer::idle()
     // frame's cull result and crashed in LLOcclusionCullingGroup::checkOcclusion (Paul
     // 09-10, "i drew water and it crashed wolfviewer" — core dump read with gdb).
     WolfTerrainPaint::instance().idle();
+    // [AI CREDITS 2026-09-11] Ask the service what this account may do and what it holds.
+    //
+    // WHY HERE. The Build > Create a Model with AI menu item is gated on WolfAI::meshReady(),
+    // which reads the cached answer — and nothing else fetched it at startup. The only callers
+    // were the script editor's draw and the AI panel itself, and the panel can only be opened
+    // from the very menu item that was waiting on the answer. So on a fresh session the item
+    // stayed hidden until the user happened to open a script. refresh() caches for two minutes
+    // and returns immediately when not logged in, so this costs a bool test per frame.
+    WolfAI::instance().refresh();
     // </FS:WolfViewer>
     // <WolfViewer> natural water (LLVOWater planes from the heightmap); same phase, same reason.
     WolfNaturalWater::instance().idle();

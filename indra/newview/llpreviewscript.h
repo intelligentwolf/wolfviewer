@@ -220,6 +220,14 @@ protected:
     bool            mLive;
     bool            mCompiling; // <FS:Kadah> Compile indicators
 
+    // [AI 2026-09-11] Write or edit this script with AI. The button is hidden unless the
+    // grid reports this account above the level the service requires (WolfAI). Nothing is
+    // saved or compiled: the generated source lands in the editor for the user to read.
+    void            onBtnWolfAI();
+    bool            onWolfAIPrompt(const LLSD& notification, const LLSD& response);
+    void            onWolfAIResult(bool ok, const std::string& script_or_error);
+    void            refreshWolfAIButton();
+
 private:
     std::string     mSampleText;
     std::string     mScriptName;

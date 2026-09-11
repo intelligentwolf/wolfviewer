@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [FLOATER SPLIT 2026-09-11] AI model creation, moved out of the build floater's AI tab. A generation runs for minutes, and as a tab it vanished the moment the user switched tools. Panel class unchanged (wolf_panel_ai, wolfai.cpp). Wolf Territories administrators only. -->
+<floater
+ can_close="true"
+ can_minimize="true"
+ can_resize="true"
+ height="470"
+ min_height="320"
+ min_width="300"
+ layout="topleft"
+ name="wolf_ai"
+ save_rect="true"
+ single_instance="true"
+ title="Create a Model with AI"
+ width="430">
+<!-- The panel itself. Class wolf_panel_ai = WolfPanelAI in wolfai.cpp. -->
+<panel
+ border="false"
+ follows="all"
+ label="AI"
+ layout="topleft"
+ mouse_opaque="false"
+ help_topic="toolbox_ai_tab"
+ name="wolf_ai_panel"
+ class="wolf_panel_ai"
+ left="0"
+ top="0"
+ width="295"
+ height="410">
+    <panel.string name="str_not_configured">The AI tools are not configured on this server.</panel.string>
+    <panel.string name="str_not_wolf">The AI tools are a Wolf Territories feature.</panel.string>
+<panel.string name="str_credits">Wolf Credits: [BALANCE]</panel.string>
+<panel.string name="str_low_credits">A model needs about [NEED] credits and you have [BALANCE]. Use Buy credits to top up.</panel.string>
+<panel.string name="str_updating">Asking the grid for your credit balance…</panel.string>
+    <panel.string name="str_no_mesh_provider">Model generation is not configured on this server yet. The script editor's AI button is available.</panel.string>
+    <panel.string name="str_ready">Describe an object. It is built with [MODEL], then uploaded to your Objects folder like any model upload. A model costs about [NEED] credits[APPROX] — you are charged what it actually costs. Building takes a few minutes; you can close this floater and it carries on.</panel.string>
+    <panel.string name="str_need_prompt">Say what the model should be.</panel.string>
+    <panel.string name="str_starting">Asking the AI to build it…</panel.string>
+    <!-- [AI CREDITS 2026-09-11] Balance, the Update button Paul asked for, and the way to buy more. -->
+<text follows="left|top" layout="topleft" left="8" top="4" width="150" height="16" font="SansSerifSmall" name="ai_credits">Wolf Credits: —</text>
+<button follows="left|top" layout="topleft" left_pad="2" top_delta="-3" width="70" height="20" name="ai_update" label="Update" tool_tip="Re-read your Wolf Credit balance" />
+<button follows="left|top" layout="topleft" left_pad="4" top_delta="0" width="90" height="20" name="ai_buy" label="Buy credits" tool_tip="Open the Wolf Credits store" />
+<text follows="left|top" layout="topleft" left="8" top="30" width="280" height="72" word_wrap="true" font="SansSerifSmall" name="ai_note">AI model</text>
+    <text follows="left|top" layout="topleft" left="8" top="106" width="280" height="16" font="SansSerifSmall" name="ai_prompt_lbl">What should it be?</text>
+    <text_editor follows="left|top" layout="topleft" left="8" top="124" width="280" height="86" name="ai_prompt" word_wrap="true" max_length="4000" tool_tip="A weathered wooden barrel with iron bands, about a metre tall" />
+    <text follows="left|top" layout="topleft" left="8" top="216" width="120" height="16" font="SansSerifSmall" name="ai_name_lbl">Name in inventory</text>
+    <line_editor follows="left|top" layout="topleft" left="8" top="234" width="280" height="22" name="ai_name" max_length_chars="63" tool_tip="What the object is called in your Objects folder" />
+    <button follows="left|top" layout="topleft" left="8" top="264" width="90" height="22" name="ai_build" label="Build it" />
+    <text follows="left|top" layout="topleft" left="8" top="294" width="280" height="120" word_wrap="true" font="SansSerifSmall" name="ai_status"></text>
+</panel>
+</floater>

@@ -27,6 +27,7 @@
 
 #include "llviewerprecompiledheaders.h"
 #include "llscripteditor.h"
+#include "wolflslcomplete.h"   // [AUTOCOMPLETE 2026-09-11]
 
 #include "llsyntaxid.h"
 #include "lllocalcliprect.h"
@@ -325,8 +326,34 @@ void LLScriptEditor::startOfLine()
 // </FS>
 
 // <FS:Ansariel> Show keyword help on F1
+// [AUTOCOMPLETE 2026-09-11] See the declaration in llscripteditor.h for why this lives here:
+// LLTextEditor's range editing is protected, and setText on a long script would discard the undo
+// history and the scroll position.
+void LLScriptEditor::wolfReplaceRange(S32 start, S32 len, const std::string& text)
+{
+    const S32 doc_len = (S32)getWText().length();
+    if (start < 0 || len < 0 || start + len > doc_len) return;
+
+    // Select exactly the range, delete it, then insert — ONE undo step, and the caret lands
+    // after the inserted text, which is where typing it would have left it.
+    setCursorPos(start);
+    startSelection();
+    setCursorPos(start + len);
+    endSelection();
+    deleteSelection(false);
+    insertText(text);
+}
+
 bool LLScriptEditor::handleKeyHere(KEY key, MASK mask)
 {
+    // [AUTOCOMPLETE 2026-09-11] While the completion popup is open it owns Up/Down/Enter/Tab/Esc,
+    // so they drive the list instead of moving the caret or inserting a newline. It returns
+    // false whenever it is closed, which is the normal case.
+    if (WolfLSLComplete::instance().handleKey(this, key, mask))
+    {
+        return true;
+    }
+
     if (key == KEY_F1 && mask == MASK_NONE)
     {
         if (LLScriptEdCore* parent = getParentByType<LLScriptEdCore>(); parent != nullptr)

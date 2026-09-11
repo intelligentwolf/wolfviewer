@@ -57,6 +57,17 @@ public:
     LLKeywords::keyword_iterator_t keywordsBegin()  { return mKeywords.begin(); }
     LLKeywords::keyword_iterator_t keywordsEnd()    { return mKeywords.end(); }
 
+    /**
+     * [AUTOCOMPLETE 2026-09-11] Replace the characters [start, start+len) with `text`.
+     *
+     * Exists because LLTextEditor's range editing — deleteSelection, removeChar, removeWord — is
+     * all PROTECTED (lltexteditor.h:239 onwards), so WolfLSLComplete cannot reach it, and the
+     * public alternative is setText on the whole document, which on a thousand-line script would
+     * throw away the undo history and the scroll position. A subclass can reach them, so the
+     * one-line replacement lives here.
+     */
+    void    wolfReplaceRange(S32 start, S32 len, const std::string& text);
+
     // <FS:Ansariel> FIRE-20818: User-selectable font and size for script editor
     //static std::string getScriptFontSize();
     //LLFontGL* getScriptFont();

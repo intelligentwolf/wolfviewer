@@ -6627,6 +6627,31 @@ Are you sure you want to quit?
      yestext="Quit"/>
   </notification>
 
+  <!-- [AI 2026-09-11] The script editor's AI button asks for the request here. A text-input
+       notification (the SaveOutfitAs shape) rather than a new floater: one line of intent is
+       all this needs, and the editor already carries the script itself.
+       DELIBERATELY not added to the prevalidate list in lltoastalertpanel.cpp:307 — that forces
+       ASCII, and a description of what a script should do may contain anything. -->
+  <notification
+   icon="alertmodal.tga"
+   name="WolfAIScriptPrompt"
+   type="alertmodal">
+[PROMPT]
+    <tag>confirm</tag>
+    <form name="form">
+      <input name="message" type="text" default="true" width="380"/>
+      <button
+       default="true"
+       index="0"
+       name="OK"
+       text="Ask the AI"/>
+      <button
+       index="1"
+       name="Cancel"
+       text="Cancel"/>
+    </form>
+  </notification>
+
   <!-- [WolfViewer 2026-09-11] Raised by LLAppViewer::userQuit instead of ConfirmQuit when
        WolfTerrainPaint::hasUnsavedPaint: the ground-paint working copy lives in memory only.
        Not ignorable on purpose — losing paint is not something to click through once and forget. -->

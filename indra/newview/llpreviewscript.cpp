@@ -83,6 +83,8 @@
 #include "lluictrlfactory.h"
 #include "lltrans.h"
 #include "llviewercontrol.h"
+#include "wolfai.h"   // [AI 2026-09-11] the script editor's AI button
+#include "wolflslcomplete.h"   // [AUTOCOMPLETE 2026-09-11]
 #include "llappviewer.h"
 #include "llfloatergotoline.h"
 #include "llexperiencecache.h"
@@ -620,6 +622,21 @@ bool LLScriptEdCore::postBuild()
     childSetAction("Edit_btn", boost::bind(&LLScriptEdCore::openInExternalEditor, this));
     childSetAction("edit_btn_2", boost::bind(&LLScriptEdCore::openInExternalEditor, this)); // <FS:Zi> support extra edit button
 
+    // [AI 2026-09-11] The AI button. Asked of the service rather than assumed, and hidden
+    // until it answers yes — see refreshWolfAIButton.
+    childSetAction("wolf_ai_btn", boost::bind(&LLScriptEdCore::onBtnWolfAI, this));
+    refreshWolfAIButton();
+
+    // [AUTOCOMPLETE 2026-09-11] Offer LSL names as the user types. The editor's own keyword
+    // list is the word source, so there is no second table to keep in step.
+    if (mEditor)
+    {
+        mEditor->setKeystrokeCallback([](LLTextEditor* ed)
+        {
+            WolfLSLComplete::instance().update(dynamic_cast<LLScriptEditor*>(ed));
+        });
+    }
+
     initMenu();
     initButtonBar();    // <FS:CR> Advanced Script Editor
 
@@ -925,6 +942,125 @@ void LLScriptEdCore::updateIndicators(bool compiling, bool success)
 //</FS:Kadah>
 
 //static
+// ── AI assist ───────────────────────────────────────────────────────────────────────────────
+// [AI 2026-09-11] Paul: "in the script editor it will have an AI button that will pop up a
+// prompt and allow the user to prompt for a particular script and it will build or edit the one
+// it has." The prompt is a text-input notification; the work happens on the proxy (wolfai.cpp).
+
+void LLScriptEdCore::refreshWolfAIButton()
+{
+    LLView* btn = findChild<LLView>("wolf_ai_btn");
+    if (!btn) return;
+    // Ask (or re-use a recent answer); the button appears when the reply arrives, which is
+    // why draw() calls this every frame rather than relying on postBuild alone.
+    WolfAI::instance().refresh();
+    btn->setVisible(WolfAI::instance().scriptReady());
+}
+
+void LLScriptEdCore::onBtnWolfAI()
+{
+    if (!WolfAI::instance().scriptReady())
+    {
+        // The level can drop between the button appearing and being pressed.
+        LLNotificationsUtil::add("GenericAlertOK",
+            LLSD().with("MESSAGE", "The AI tools are limited to grid administrators."));
+        refreshWolfAIButton();
+        return;
+    }
+    if (!mEditor || !mEditor->getEnabled())
+    {
+        LLNotificationsUtil::add("GenericAlertOK",
+            LLSD().with("MESSAGE", "This script is read-only, so the AI has nowhere to write."));
+        return;
+    }
+    if (mEditor->getText().length() > (size_t)WolfAI::MAX_SCRIPT_CHARS)
+    {
+        LLNotificationsUtil::add("GenericAlertOK",
+            LLSD().with("MESSAGE", "This script is too long to send to the AI."));
+        return;
+    }
+
+    const bool has_code = mEditor
+        && mEditor->getText().find_first_not_of(" \t\r\n") != std::string::npos;
+    // [AI CREDITS 2026-09-11] Paul: "nice to put the price on the form." Both figures come from
+    // the service, so what is quoted is what will be charged.
+    const WolfAI::Avail& av = WolfAI::instance().avail();
+    const std::string price = llformat("Costs %d Wolf Credit%s — you have %d.",
+                                       av.mScriptCost, av.mScriptCost == 1 ? "" : "s", av.mBalance);
+    LLSD args;
+    args["PROMPT"] = (has_code
+        ? std::string("What should change in this script? The whole script is sent and comes back rewritten.")
+        : std::string("What should the script do?")) + "\n\n" + price;
+    LLNotificationsUtil::add("WolfAIScriptPrompt", args, LLSD(),
+        boost::bind(&LLScriptEdCore::onWolfAIPrompt, this, _1, _2));
+}
+
+bool LLScriptEdCore::onWolfAIPrompt(const LLSD& notification, const LLSD& response)
+{
+    // Source: llpaneloutfitsinventory.cpp:221 onSaveCommit — option 0 is OK, the typed text is
+    // response["message"].
+    if (LLNotificationsUtil::getSelectedOption(notification, response) != 0) return false;
+    std::string prompt = response["message"].asString();
+    LLStringUtil::trim(prompt);
+    if (prompt.empty()) return false;
+
+    const std::string existing = mEditor ? mEditor->getText() : std::string();
+    LLView* btn = findChild<LLView>("wolf_ai_btn");
+    if (btn) btn->setEnabled(false);
+
+    // The callback captures `this`. LLScriptEdCore lives as long as its preview floater, and a
+    // closed floater is destroyed, so the handle guard is what makes a late reply safe.
+    LLHandle<LLPanel> handle = getHandle();
+    WolfAI::instance().requestScript(prompt, existing,
+        [handle](bool ok, const std::string& result)
+        {
+            LLScriptEdCore* self = dynamic_cast<LLScriptEdCore*>(handle.get());
+            if (!self) return;   // the editor was closed while the AI was thinking
+            self->onWolfAIResult(ok, result);
+        });
+    return false;
+}
+
+void LLScriptEdCore::onWolfAIResult(bool ok, const std::string& script_or_error)
+{
+    LLView* btn = findChild<LLView>("wolf_ai_btn");
+    if (btn) btn->setEnabled(true);
+
+    if (!ok)
+    {
+        // [AI CREDITS 2026-09-11] Running out of credits is not a fault, it is something the
+        // resident can fix, so it gets the shop address rather than an error shaped like a bug.
+        std::string msg = script_or_error;
+        if (msg.find("credit") != std::string::npos)
+        {
+            const std::string url = WolfAI::instance().avail().mBuyUrl;
+            if (!url.empty()) msg += "\n\nBuy more credits: " + url;
+        }
+        // The service writes its errors for a user to read; show its wording.
+        LLNotificationsUtil::add("GenericAlertOK",
+            LLSD().with("MESSAGE", "The AI could not do that: " + msg));
+        // The balance may be the reason; re-read it so the next prompt quotes the truth.
+        WolfAI::instance().refreshNow();
+        return;
+    }
+    if (!mEditor) return;
+
+    // DELIBERATELY NOT SAVED OR COMPILED. Generated code can be wrong, and Firestorm's editor
+    // never compiles without an explicit Save either; the user reads it and presses Save.
+    mEditor->setText(script_or_error);
+    // NOT makePristine(): the text now differs from what the region holds, and the unsaved
+    // changes warning on close depends on the editor knowing that.
+    // Mark it changed so Save is offered, the same way an edit would.
+    if (mSaveBtn) mSaveBtn->setEnabled(true);
+    if (mSaveBtn2) mSaveBtn2->setEnabled(true);
+    mEnableSave = true;
+    // The charge has landed; re-read so the next prompt shows what is actually left.
+    WolfAI::instance().refreshNow();
+    LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE",
+        "The AI has written the script into the editor. Read it, then press Save to compile it. "
+        "Nothing has been sent to the region yet."));
+}
+
 void LLScriptEdCore::onBtnPrefs(void* userdata)
 {
     LLFloaterReg::showInstance("script_colors");
@@ -1182,6 +1318,12 @@ void LLScriptEdCore::draw()
     //mSaveBtn->setEnabled(script_changed && !mScriptRemoved);
     updateButtonBar();
 // </FS:CR>
+
+    // [AI 2026-09-11] The account level comes from the grid ASYNCHRONOUSLY, so at postBuild
+    // the answer is usually not in yet and the button would stay hidden until the editor was
+    // reopened. Re-checked here; WolfAI::refresh caches for two minutes, so this costs a bool
+    // read per frame and one request per two minutes.
+    refreshWolfAIButton();
 
     if( mEditor->hasFocus() )
     {

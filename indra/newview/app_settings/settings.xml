@@ -13304,6 +13304,17 @@ Change of this parameter will affect the layout of buttons in notification toast
       <key>Value</key>
       <real>1.0</real>
     </map>
+    <key>WolfLSLAutoComplete</key>
+    <map>
+      <key>Comment</key>
+      <string>Script editor: offer LSL function, event and constant names as you type.</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>Boolean</string>
+      <key>Value</key>
+      <integer>1</integer>
+    </map>
     <key>WolfTerrainPaintBrushWidth</key>
     <map>
       <key>Comment</key>

@@ -1916,6 +1916,30 @@
             <menu_item_check.on_enable
              function="Build.EnabledOrActive" />
        </menu_item_check>
+       <!-- [FLOATER SPLIT 2026-09-11] Paul: "under build there is a new menu item for each
+            rather than cluttering up the build floater." Both were tabs in the build floater.
+            BOTH ARE WOLF TERRITORIES ONLY (WolfGrid.IsWolfTerritories, the same gate the
+            dictation and screen-share items use); the AI one additionally needs an account the
+            service will serve, which is WolfAI.CanUse. Hiding a menu item is courtesy — the
+            proxy and the paint service check on every call. -->
+       <menu_item_call
+        label="Paint the Ground..."
+        name="WolfTerrainPaint">
+         <menu_item_call.on_click
+          function="Floater.Show"
+          parameter="wolf_terrain_paint" />
+         <menu_item_call.on_visible
+          function="WolfGrid.IsWolfTerritories" />
+       </menu_item_call>
+       <menu_item_call
+        label="Create a Model with AI..."
+        name="WolfAIModel">
+         <menu_item_call.on_click
+          function="Floater.Show"
+          parameter="wolf_ai" />
+         <menu_item_call.on_visible
+          function="WolfAI.CanUse" />
+       </menu_item_call>
        <menu
           create_jump_keys="true"
           label="Select Build Tool"

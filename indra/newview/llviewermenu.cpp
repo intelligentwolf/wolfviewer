@@ -34,6 +34,7 @@
 #include "llviewermenu.h"
 // <WolfViewer 2026-09-06> Wolf Territories-only features
 #include "wolfgrid.h"
+#include "wolfai.h"   // [FLOATER SPLIT 2026-09-11] WolfAI.CanUse
 #include "wolfspeech.h"
 #include "wolfscreenshare.h"
 #include "wolfweather.h"  // <WolfViewer> World > Weather
@@ -12839,6 +12840,19 @@ void initialize_menus()
     // share (wolfspeech.cpp, wolfscreenshare.cpp). Their menu items are hidden and their
     // toolbar buttons greyed on any other grid (WolfGrid.IsWolfTerritories, wolfgrid.h).
     enable.add("WolfGrid.IsWolfTerritories", boost::bind(&WolfGrid::isWolfTerritories));
+    // [FLOATER SPLIT 2026-09-11] Build > Create a Model with AI is hidden unless this account
+    // may actually use it: Wolf Territories AND the service says so (WolfAI reads the account
+    // level from the grid). The service re-checks on every call, so this only decides whether
+    // the menu entry is worth showing.
+    enable.add("WolfAI.CanUse", [](LLUICtrl*, const LLSD&) -> bool
+    {
+        if (!WolfGrid::isWolfTerritories()) return false;
+        // Kick a fetch if the answer is stale. Cached for two minutes, so drawing the menu does
+        // not mean a request; this is what makes the item appear without the user having to
+        // find some other piece of AI UI first.
+        WolfAI::instance().refresh();
+        return WolfAI::instance().meshReady();
+    });
     commit.add("WolfSpeech.ToggleDictation", boost::bind(&wolf_toggle_dictation));
     enable.add("WolfSpeech.IsDictating", boost::bind(&wolf_is_dictating));
     commit.add("WolfSpeech.ToggleReadAloud", boost::bind(&wolf_toggle_read_aloud));

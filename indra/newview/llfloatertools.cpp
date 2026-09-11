@@ -371,13 +371,10 @@ bool    LLFloaterTools::postBuild()
     mStatusText["selectland"] = getString("status_selectland");
     mStatusText["paintland"] = getString("status_paintland");   // [TERRAIN PAINT 2026-09-10]
 
-    // [TERRAIN PAINT 2026-09-10] The Paint tab is a Wolf Territories feature (the service knows
-    // only the grid's regions): off the grid the tab does not exist (llfloaterland.cpp does the
-    // same with the Waves tab).
-    if (mTab && !WolfGrid::isWolfTerritories())
-    {
-        if (LLPanel* paint = mTab->getPanelByName("wolf_terrain_paint_panel")) mTab->removeTabPanel(paint);
-    }
+    // [FLOATER SPLIT 2026-09-11] The Paint and AI tabs used to be removed here when off-grid.
+    // They are their own floaters now (Build > Paint the Ground / Create a Model with AI), and
+    // their MENU entries carry the gate instead — menu_viewer.xml WolfGrid.IsWolfTerritories
+    // and WolfAI.CanUse.
 
     sShowObjectCost = gSavedSettings.getBOOL("ShowObjectRenderingCost");
 

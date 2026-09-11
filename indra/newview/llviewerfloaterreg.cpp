@@ -105,7 +105,8 @@
 #include "llfloatermediasettings.h"
 #include "llfloatermemleak.h"
 #include "llfloatermodelpreview.h"
-#include "wolffloatermeshupload.h" // <FS:Wolf/>
+#include "wolffloatermeshupload.h"
+#include "wolflslcomplete.h" // <FS:Wolf/>
 #include "llfloatermyscripts.h"
 #include "llfloatermyenvironment.h"
 #include "llfloaternamedesc.h"
@@ -633,6 +634,13 @@ void LLViewerFloaterReg::registerFloaters()
     // ever OPENED on Wolf Territories (LLFloaterModelPreview::showModelPreview) and refuses to
     // upload anywhere else (WolfFloaterMeshUpload::onUpload -> WolfMeshUpload::isAvailable).
     LLFloaterReg::add("wolf_mesh_upload", "floater_wolf_mesh_upload.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterMeshUpload>, "upload");
+    // [FLOATER SPLIT 2026-09-11] Ground painting and AI model creation, each its own window
+    // instead of a tab in the build floater. No custom floater class: the panel inside does all
+    // the work, so the generic host is enough (the pattern at :581).
+    LLFloaterReg::add("wolf_terrain_paint", "floater_wolf_terrain_paint.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<LLFloater>);
+    LLFloaterReg::add("wolf_ai", "floater_wolf_ai.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<LLFloater>);
+    // [AUTOCOMPLETE 2026-09-11] The LSL completion popup, driven by WolfLSLComplete.
+    LLFloaterReg::add("wolf_lsl_complete", "floater_wolf_lsl_complete.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterLSLComplete>);
     // </FS:Wolf>
     LLFloaterReg::add("upload_script", "floater_script_preview.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<LLFloaterScriptPreview>, "upload");
     LLFloaterReg::add("upload_sound", "floater_sound_preview.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<LLFloaterSoundPreview>, "upload");

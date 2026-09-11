@@ -311,6 +311,21 @@
              name="prefs_btn"
              left_pad="14"
              width="18" />
+            <!-- [AI 2026-09-11] Write or edit this script with AI. Hidden unless the grid's
+                 account service reports this account above the level the service requires
+                 (WolfAI::scriptReady, set from GET /ai_available); the service re-checks on
+                 every call, so showing the button can never grant access. A LABEL rather than
+                 an icon: a new icon would mean shipping art for three platforms. -->
+            <button
+             follows="left|top"
+             height="18"
+             tool_tip="Write or edit this script with AI"
+             label="AI"
+             layout="topleft"
+             name="wolf_ai_btn"
+             left_pad="14"
+             visible="false"
+             width="26" />
             
             <loading_indicator
              top="2"

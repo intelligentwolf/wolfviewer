@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [AUTOCOMPLETE 2026-09-11] The LSL autocomplete popup, driven by WolfLSLComplete.
+     Chrome-less and un-focusable-looking on purpose: the editor keeps the keyboard and this is
+     a list to glance at, exactly as floater_chat_mention_picker.xml is for @names. -->
+<floater
+    name="wolf_lsl_complete"
+    title=""
+    single_instance="true"
+    can_minimize="false"
+    can_close="false"
+    can_tear_off="false"
+    can_resize="true"
+    auto_close="true"
+    save_rect="false"
+    header_height="0"
+    layout="topleft"
+    chrome="true"
+    min_width="220"
+    min_height="90"
+    height="150"
+    width="300">
+    <scroll_list
+     name="lsl_complete_list"
+     follows="all"
+     layout="topleft"
+     left="1"
+     top="1"
+     height="148"
+     width="298"
+     draw_heading="false"
+     draw_stripes="true"
+     multi_select="false"
+     column_padding="4"
+     tool_tip="Up and down to choose, Enter or Tab to insert, Esc to close">
+        <scroll_list.columns
+         name="name"
+         label="Name"
+         relative_width="0.72" />
+        <scroll_list.columns
+         name="kind"
+         label="Kind"
+         relative_width="0.28" />
+    </scroll_list>
+</floater>

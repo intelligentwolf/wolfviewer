@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [FLOATER SPLIT 2026-09-11] Ground painting, moved out of the build floater's Paint tab. The panel class is unchanged (wolf_panel_terrain_paint, wolfterrainpaint.cpp), so only its host moved. Wolf Territories only: the menu item is hidden elsewhere. -->
+<floater
+ can_close="true"
+ can_minimize="true"
+ can_resize="true"
+ height="560"
+ min_height="320"
+ min_width="300"
+ layout="topleft"
+ name="wolf_terrain_paint"
+ save_rect="true"
+ single_instance="true"
+ title="Paint the Ground"
+ width="430">
+<!-- The panel itself. Class wolf_panel_terrain_paint = WolfPanelTerrainPaint in
+     wolfterrainpaint.cpp; the brush is WolfToolTerrainPaint. -->
+<panel
+ border="false"
+ follows="all"
+ label="Paint"
+ layout="topleft"
+ mouse_opaque="false"
+ help_topic="toolbox_paint_tab"
+ name="wolf_terrain_paint_panel"
+ class="wolf_panel_terrain_paint"
+ left="0"
+ top="0"
+ width="295"
+ height="410">
+    <panel.string name="str_note_all">You hold [REGION]: paint anywhere ([STATE]). The brush lays straight segments and only turns a corner when you do. With Grid on (the default) a texture tiles like the ground textures; with it off it lays square tiles of Tile metres that follow your stroke (a road strip fits a brush as wide as its tile). Water follows the ground you draw over.</panel.string>
+    <panel.string name="str_note_parcel">You can paint on your own parcels in [REGION] ([STATE]); the brush stops at land that is not yours. The texture runs along your stroke.</panel.string>
+    <panel.string name="str_note_no_overlay">Parcel ownership is not known yet — the brush refuses until it is ([REGION], [STATE]).</panel.string>
+    <panel.string name="str_off_grid">Ground painting is a Wolf Territories feature; this region is not on the grid.</panel.string>
+    <panel.string name="str_fetching">Asking the grid for this region's ground paint…</panel.string>
+    <panel.string name="str_saving">Saving…</panel.string>
+    <panel.string name="str_saved">Saved — everyone in the region now sees this paint.</panel.string>
+    <panel.string name="str_save_failed">Could not save:</panel.string>
+    <panel.string name="str_arm">Paint on the ground</panel.string>
+    <panel.string name="str_stop">Stop painting</panel.string>
+    <panel.string name="str_armed">Drag on the ground to paint. Esc or "Stop painting" to finish.</panel.string>
+    <text follows="left|top" layout="topleft" left="8" top="4" width="280" height="40" word_wrap="true" font="SansSerifSmall" name="paint_note">Ground paint</text>
+    <button follows="left|top" layout="topleft" left="8" top="54" width="40" height="20" name="paint_use_0" label="1" is_toggle="true" tool_tip="Paint with texture 1" />
+    <texture_picker follows="left|top" layout="topleft" left_pad="4" top_delta="-8" width="36" height="36" name="paint_tex_0" allow_no_texture="true" can_apply_immediately="false" tool_tip="Texture 1: click to choose from your inventory" />
+    <text follows="left|top" layout="topleft" left_pad="8" top_delta="10" width="26" height="16" name="paint_tile_lbl_0">Tile</text>
+    <spinner follows="left|top" layout="topleft" left_pad="2" top_delta="-2" width="60" height="20" name="paint_scale_0" min_val="0.5" max_val="64" increment="0.5" initial_value="4" decimal_digits="1" tool_tip="Metres one repeat of the texture covers (along and across the stroke, or on the world grid)" />
+    <text follows="left|top" layout="topleft" left_pad="2" top_delta="2" width="12" height="16" name="paint_m_lbl_0">m</text>
+    <button follows="left|top" layout="topleft" left_pad="4" top_delta="-2" width="36" height="20" name="paint_mode_0" label="Grid" is_toggle="true" tool_tip="Off: square tiles that follow your stroke (a strip texture fits a brush as wide as its tile). On: tiles on the world grid like the ground textures." />
+    <button follows="left|top" layout="topleft" left_pad="4" width="22" height="20" name="paint_clear_0" label="x" tool_tip="Empty this texture slot" />
+    <button follows="left|top" layout="topleft" left="8" top="92" width="40" height="20" name="paint_use_1" label="2" is_toggle="true" tool_tip="Paint with texture 2" />
+    <texture_picker follows="left|top" layout="topleft" left_pad="4" top_delta="-8" width="36" height="36" name="paint_tex_1" allow_no_texture="true" can_apply_immediately="false" tool_tip="Texture 2: click to choose from your inventory" />
+    <text follows="left|top" layout="topleft" left_pad="8" top_delta="10" width="26" height="16" name="paint_tile_lbl_1">Tile</text>
+    <spinner follows="left|top" layout="topleft" left_pad="2" top_delta="-2" width="60" height="20" name="paint_scale_1" min_val="0.5" max_val="64" increment="0.5" initial_value="4" decimal_digits="1" tool_tip="Metres one repeat of the texture covers (along and across the stroke, or on the world grid)" />
+    <text follows="left|top" layout="topleft" left_pad="2" top_delta="2" width="12" height="16" name="paint_m_lbl_1">m</text>
+    <button follows="left|top" layout="topleft" left_pad="4" top_delta="-2" width="36" height="20" name="paint_mode_1" label="Grid" is_toggle="true" tool_tip="Off: square tiles that follow your stroke (a strip texture fits a brush as wide as its tile). On: tiles on the world grid like the ground textures." />
+    <button follows="left|top" layout="topleft" left_pad="4" width="22" height="20" name="paint_clear_1" label="x" tool_tip="Empty this texture slot" />
+    <button follows="left|top" layout="topleft" left="8" top="130" width="40" height="20" name="paint_use_2" label="3" is_toggle="true" tool_tip="Paint with texture 3" />
+    <texture_picker follows="left|top" layout="topleft" left_pad="4" top_delta="-8" width="36" height="36" name="paint_tex_2" allow_no_texture="true" can_apply_immediately="false" tool_tip="Texture 3: click to choose from your inventory" />
+    <text follows="left|top" layout="topleft" left_pad="8" top_delta="10" width="26" height="16" name="paint_tile_lbl_2">Tile</text>
+    <spinner follows="left|top" layout="topleft" left_pad="2" top_delta="-2" width="60" height="20" name="paint_scale_2" min_val="0.5" max_val="64" increment="0.5" initial_value="4" decimal_digits="1" tool_tip="Metres one repeat of the texture covers (along and across the stroke, or on the world grid)" />
+    <text follows="left|top" layout="topleft" left_pad="2" top_delta="2" width="12" height="16" name="paint_m_lbl_2">m</text>
+    <button follows="left|top" layout="topleft" left_pad="4" top_delta="-2" width="36" height="20" name="paint_mode_2" label="Grid" is_toggle="true" tool_tip="Off: square tiles that follow your stroke (a strip texture fits a brush as wide as its tile). On: tiles on the world grid like the ground textures." />
+    <button follows="left|top" layout="topleft" left_pad="4" width="22" height="20" name="paint_clear_2" label="x" tool_tip="Empty this texture slot" />
+    <button follows="left|top" layout="topleft" left="8" top="168" width="40" height="20" name="paint_use_3" label="4" is_toggle="true" tool_tip="Paint with texture 4" />
+    <texture_picker follows="left|top" layout="topleft" left_pad="4" top_delta="-8" width="36" height="36" name="paint_tex_3" allow_no_texture="true" can_apply_immediately="false" tool_tip="Texture 4: click to choose from your inventory" />
+    <text follows="left|top" layout="topleft" left_pad="8" top_delta="10" width="26" height="16" name="paint_tile_lbl_3">Tile</text>
+    <spinner follows="left|top" layout="topleft" left_pad="2" top_delta="-2" width="60" height="20" name="paint_scale_3" min_val="0.5" max_val="64" increment="0.5" initial_value="4" decimal_digits="1" tool_tip="Metres one repeat of the texture covers (along and across the stroke, or on the world grid)" />
+    <text follows="left|top" layout="topleft" left_pad="2" top_delta="2" width="12" height="16" name="paint_m_lbl_3">m</text>
+    <button follows="left|top" layout="topleft" left_pad="4" top_delta="-2" width="36" height="20" name="paint_mode_3" label="Grid" is_toggle="true" tool_tip="Off: square tiles that follow your stroke (a strip texture fits a brush as wide as its tile). On: tiles on the world grid like the ground textures." />
+    <button follows="left|top" layout="topleft" left_pad="4" width="22" height="20" name="paint_clear_3" label="x" tool_tip="Empty this texture slot" />
+    <button follows="left|top" layout="topleft" left="8" top="200" width="66" height="20" name="paint_use_water" label="Water" is_toggle="true" tool_tip="Draw water: a surface the width of the brush that follows the ground you drag over" />
+    <text follows="left|top" layout="topleft" left_pad="6" top_delta="2" width="34" height="16" name="paint_water_level_lbl">Level</text>
+    <spinner follows="left|top" layout="topleft" left_pad="2" top_delta="-2" width="60" height="20" name="paint_water_level" min_val="0" max_val="10" increment="0.1" initial_value="0.3" decimal_digits="1" tool_tip="Metres above the ground the water surface sits" />
+    <text follows="left|top" layout="topleft" left_pad="6" top_delta="2" width="36" height="16" name="paint_water_depth_lbl">Depth</text>
+    <spinner follows="left|top" layout="topleft" left_pad="2" top_delta="-2" width="60" height="20" name="paint_water_depth" min_val="0.05" max_val="20" increment="0.1" initial_value="1" decimal_digits="1" tool_tip="Depth of the water in metres (colour and fog)" />
+    <text follows="left|top" layout="topleft" left="8" top="240" width="130" height="14" name="paint_width_lbl">Width (m)</text>
+    <slider follows="left|top" layout="topleft" left="8" top_pad="1" width="280" height="16" name="paint_width" min_val="0.25" max_val="32" increment="0.25" initial_value="4" decimal_digits="2" show_text="true" tool_tip="Width of the brush in metres" />
+    <text follows="left|top" layout="topleft" left="8" top_pad="4" width="200" height="14" name="paint_transparency_lbl">Transparency (%, 0 = solid)</text>
+    <slider follows="left|top" layout="topleft" left="8" top_pad="1" width="280" height="16" name="paint_transparency" min_val="0" max_val="90" increment="5" initial_value="0" decimal_digits="0" show_text="true" tool_tip="How see-through a new stroke is" />
+    <check_box follows="left|top" layout="topleft" left="8" top_pad="6" width="70" height="16" name="paint_erase" label="Erase" tool_tip="Drag to remove paint (and any water it crosses) instead of adding it" />
+    <button follows="left|top" layout="topleft" left="84" top_delta="-3" width="130" height="22" name="paint_arm" label="Paint on the ground" is_toggle="true" />
+    <text follows="left|top" layout="topleft" left_pad="6" top_delta="4" width="70" height="16" name="paint_count"></text>
+    <text follows="left|top" layout="topleft" left="8" top="336" width="280" height="24" word_wrap="true" font="SansSerifSmall" name="paint_status"></text>
+    <check_box follows="left|top" layout="topleft" left="8" top="362" width="280" height="16" name="paint_enabled" label="Use this paint (off = plain ground)" initial_value="true" />
+    <button follows="left|top" layout="topleft" left="8" top="382" width="60" height="22" name="paint_undo" label="Undo" />
+    <button follows="left|top" layout="topleft" left_pad="4" width="66" height="22" name="paint_clear" label="Clear all" />
+    <button follows="left|top" layout="topleft" left_pad="4" width="60" height="22" name="paint_revert" label="Revert" />
+    <button follows="left|top" layout="topleft" left_pad="4" width="60" height="22" name="paint_save" label="Save" />
+</panel>
+</floater>

@@ -1668,6 +1668,10 @@ void WolfPanelTerrainPaint::setStatus(const std::string& msg, bool error)
 
 void WolfPanelTerrainPaint::draw()
 {
+    // [2026-09-11] Once, on the first draw rather than in postBuild: the panel is only
+    // guaranteed to be inside its floater by the time it is being drawn, and the guard needs the
+    // parent to do its work. See WolfGrid::fitFloaterToContents for what this prevents.
+    if (!mFitted) { mFitted = true; WolfGrid::fitFloaterToContents(this); }
     const F64 now = LLFrameTimer::getElapsedSeconds();
     if (now >= mNextPoll)
     {

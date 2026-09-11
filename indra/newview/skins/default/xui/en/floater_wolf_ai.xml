@@ -1,12 +1,18 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes" ?>
 <!-- [FLOATER SPLIT 2026-09-11] AI model creation, moved out of the build floater's AI tab. A generation runs for minutes, and as a tab it vanished the moment the user switched tools. Panel class unchanged (wolf_panel_ai, wolfai.cpp). Wolf Territories administrators only. -->
+<!-- [2026-09-11] min_height was 320, well under what this floater's own contents need.
+     The panel follows the floater, so dragging the window small CLIPPED everything past the new
+     bottom edge: the prompt and name fields still worked and "Build it" (y 264-286) fell outside
+     and silently stopped taking mouse clicks while still looking perfectly normal. Reported as
+     "the button does nothing"; no amount of enabled-state or callback checking would have found
+     it. Content runs to y=414, so the minimum is that plus the header and a margin. -->
 <floater
  can_close="true"
  can_minimize="true"
  can_resize="true"
  height="470"
- min_height="320"
- min_width="300"
+ min_height="460"
+ min_width="320"
  layout="topleft"
  name="wolf_ai"
  save_rect="true"
@@ -26,7 +32,7 @@
  left="0"
  top="0"
  width="295"
- height="410">
+ height="420">
     <panel.string name="str_not_configured">The AI tools are not configured on this server.</panel.string>
     <panel.string name="str_not_wolf">The AI tools are a Wolf Territories feature.</panel.string>
 <panel.string name="str_credits">Wolf Credits: [BALANCE]</panel.string>

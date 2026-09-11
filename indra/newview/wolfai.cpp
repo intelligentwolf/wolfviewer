@@ -203,8 +203,10 @@ void WolfAI::availCoro()
         // and what the resident holds without a second round trip.
         a.mBalance       = reply["balance"].asInteger();
         a.mScriptCost    = reply.has("script_cost") ? reply["script_cost"].asInteger() : 1;
-        a.mMeshMin       = reply.has("mesh_min_balance") ? reply["mesh_min_balance"].asInteger() : 40;
-        a.mMeshTypical   = reply.has("mesh_typical_cost") ? reply["mesh_typical_cost"].asInteger() : 30;
+        a.mMeshMin       = reply.has("mesh_min_balance") ? reply["mesh_min_balance"].asInteger() : 45;
+        // Source: rust_proxy/src/main.rs AI_MESH_TYPICAL_COST. The fallback tracks that constant
+        // so a failed /ai_available never quotes a model as cheaper than it is.
+        a.mMeshTypical   = reply.has("mesh_typical_cost") ? reply["mesh_typical_cost"].asInteger() : 35;
         a.mPencePerCredit = reply["pence_per_credit"].asReal();
         a.mBuyUrl        = reply["buy_url"].asString();
     }
@@ -453,6 +455,23 @@ bool WolfPanelAI::postBuild()
     if (mPrompt) mPrompt->setMaxTextLength(WolfAI::MAX_PROMPT_CHARS);
     refresh();
     return true;
+}
+
+void WolfPanelAI::draw()
+{
+    // [2026-09-11] Once, on the first draw rather than in postBuild: the panel is only
+    // guaranteed to be inside its floater by the time it is being drawn, and the guard needs the
+    // parent to do its work. See WolfGrid::fitFloaterToContents for what this prevents.
+    if (!mFitted) { mFitted = true; WolfGrid::fitFloaterToContents(this); }
+    // Source: the enabled state is decided in refresh() below. See wolfai.h for why once at
+    // postBuild was not enough. One second is far below anything a user perceives and far above
+    // the frame rate, so the work is negligible.
+    if (mRefreshTimer.getElapsedTimeF32() > 1.f)
+    {
+        mRefreshTimer.reset();
+        refresh();
+    }
+    LLPanel::draw();
 }
 
 void WolfPanelAI::refresh()

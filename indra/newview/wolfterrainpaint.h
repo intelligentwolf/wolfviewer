@@ -335,6 +335,7 @@ public:
     WolfPanelTerrainPaint();
     bool postBuild() override;
     void draw() override;
+    bool mFitted = false;   // see draw() / WolfGrid::fitFloaterToContents
     void refresh() override;
 
 private:

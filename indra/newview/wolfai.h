@@ -34,6 +34,7 @@
 #define WOLF_AI_H
 
 #include "llpanel.h"      // WolfPanelAI (the Build > AI tab) derives from LLPanel
+#include "llframetimer.h" // WolfPanelAI::mRefreshTimer, see draw()
 #include "llsingleton.h"
 #include "lluuid.h"
 #include <functional>
@@ -60,8 +61,8 @@ public:
         // the tools and their credits are what limit them.
         S32         mBalance      = 0;
         S32         mScriptCost   = 1;
-        S32         mMeshMin      = 40;   // headroom needed to START a model
-        S32         mMeshTypical  = 30;   // what the user is TOLD it costs
+        S32         mMeshMin      = 45;   // headroom needed to START a model
+        S32         mMeshTypical  = 35;   // what the user is TOLD it costs
         F64         mPencePerCredit = 0.0;
         std::string mBuyUrl;
     };
@@ -124,6 +125,21 @@ public:
     bool postBuild() override;
     void refresh() override;
 
+    // <WolfViewer 2026-09-11> refresh() owns the Build button's enabled state, and it was called
+    // in exactly two places: postBuild, and the end of a generation. postBuild runs ONCE, when
+    // the floater is first constructed — every later open reuses the same panel. So if the panel
+    // was first built before /ai_available had answered (WolfAI::refresh returns early while
+    // gAgentID is still null), `usable` was false, the button was disabled, and NOTHING ever
+    // re-evaluated it for the rest of the session.
+    //
+    // Paul hit exactly that: open the floater, fill it in, and the button will not take a click.
+    // It looked like a rights problem and was not — the panel simply never asked again.
+    //
+    // Redrawing is the one thing guaranteed to happen while the floater is visible, so the state
+    // is re-evaluated here. Throttled because draw() runs every frame; WolfAI::refresh() is
+    // itself cached (AVAIL_CACHE_SECS) so this costs a few comparisons, not a round trip.
+    void draw() override;
+
 private:
     void onBuild();
     void onUpdateCredits();
@@ -138,6 +154,8 @@ private:
     class LLTextBox*    mCredits = nullptr;
     class LLButton*     mUpdate  = nullptr;
     class LLButton*     mBuy     = nullptr;
+    LLFrameTimer        mRefreshTimer;   // see draw()
+    bool                mFitted = false;  // see draw() / WolfGrid::fitFloaterToContents
 };
 
 #endif // WOLF_AI_H

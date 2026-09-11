@@ -1,11 +1,17 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes" ?>
 <!-- [FLOATER SPLIT 2026-09-11] Ground painting, moved out of the build floater's Paint tab. The panel class is unchanged (wolf_panel_terrain_paint, wolfterrainpaint.cpp), so only its host moved. Wolf Territories only: the menu item is hidden elsewhere. -->
+<!-- [2026-09-11] min_height was 320 while this floater's contents run to y=404. Dragging it
+     smaller CLIPPED the controls past the new bottom edge, and LLUI draws children against the
+     SCREEN (llview.cpp:1310) but hit-tests them against their PARENT (llview.cpp:799-806) - so
+     the buttons stayed perfectly visible and silently stopped taking clicks. Same fault as
+     floater_wolf_ai.xml, found the same day; both floaters were split out of the build floater
+     on 09-11 and inherited a minimum far below what they need. -->
 <floater
  can_close="true"
  can_minimize="true"
  can_resize="true"
  height="560"
- min_height="320"
+ min_height="450"
  min_width="300"
  layout="topleft"
  name="wolf_terrain_paint"

@@ -403,6 +403,13 @@ public:
 
     bool attachShaderFeatures(LLGLSLShader * shader);
     void dumpObjectLog(GLuint ret, bool warns = true, const std::string& filename = "");
+
+    // <WolfViewer 2026-09-11> The compiler's own words, kept so a crash can SHOW them.
+    // dumpObjectLog is the single funnel every compile and link failure passes through
+    // (llshadermgr.cpp:937/1001/1027 all call it), so capturing there catches every case.
+    // Without this a shader failure reaches the user as a bare "ASSERT (mProgramObject != 0)"
+    // and the only way to learn WHICH shader and WHY is a log file most users cannot fetch.
+    static std::string getLastShaderErrors();
     void dumpShaderSource(U32 shader_code_count, GLchar** shader_code_text);
     bool    linkProgramObject(GLuint obj, bool suppress_errors = false);
     bool    validateProgramObject(GLuint obj);

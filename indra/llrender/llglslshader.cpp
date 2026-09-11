@@ -1050,7 +1050,37 @@ void LLGLSLShader::bind()
 {
     LL_PROFILE_ZONE_SCOPED_CATEGORY_SHADER;
 
-    llassert_always(mProgramObject != 0);
+    // <WolfViewer 2026-09-11> A zero program means the shader did not compile or link, and
+    // upstream's bare llassert_always reported only "ASSERT (mProgramObject != 0)" — which names
+    // neither the shader nor the reason. A resident on a Mac hit exactly that at startup and we
+    // had no way to tell which of eleven custom shaders had failed, or whether the cause was a
+    // syntax difference (macOS compiles at #version 400, not 420 — llshadermgr.cpp:560-580) or a
+    // resource limit. Neither is guessable from the outside, and both are in the viewer's hands.
+    //
+    // This is still fatal — a null program cannot be bound — but it now reports everything needed
+    // to diagnose it from a SCREENSHOT of the crash dialog, because that is all many users can
+    // supply. Ordered most useful first: the dialog truncates.
+    if (mProgramObject == 0)
+    {
+        std::string files;
+        for (const auto& f : mShaderFiles)
+        {
+            if (!files.empty()) { files += ", "; }
+            files += f.first;
+        }
+        LL_ERRS("ShaderLoading")
+            << "Shader \"" << mName << "\" failed to build."
+            << "\nGPU: " << gGLManager.mGLRenderer << " (" << gGLManager.mGLVendorShort << ")"
+            << (gGLManager.mIsApple ? " [Apple GPU]" : "")
+            << "\nGL: " << gGLManager.mGLVersionString
+            << " | GLSL " << gGLManager.mGLSLVersionMajor << "." << gGLManager.mGLSLVersionMinor
+            // GL_MAX_TEXTURE_IMAGE_UNITS (llgl.cpp:1290) — the per-fragment-stage sampler limit,
+            // the one a heavily textured shader actually runs out of.
+            << "\nMax texture image units: " << gGLManager.mNumTextureImageUnits
+            << "\nFiles: " << files
+            << "\nShader errors:\n" << LLShaderMgr::getLastShaderErrors()
+            << LL_ENDL;
+    }
 
     gGL.flush();
 

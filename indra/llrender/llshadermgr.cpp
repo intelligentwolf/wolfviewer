@@ -442,6 +442,9 @@ void LLShaderMgr::dumpShaderSource(U32 shader_code_count, GLchar** shader_code_t
     LL_CONT << LL_ENDL;
 }
 
+// <WolfViewer 2026-09-11> See LLShaderMgr::getLastShaderErrors.
+static std::string sLastShaderErrors;
+
 void LLShaderMgr::dumpObjectLog(GLuint ret, bool warns, const std::string& filename)
 {
     std::string log;
@@ -456,8 +459,24 @@ void LLShaderMgr::dumpObjectLog(GLuint ret, bool warns, const std::string& filen
     {
         LL_SHADER_LOADING_WARNS() << "Shader loading from " << fname << LL_ENDL;
         LL_SHADER_LOADING_WARNS() << "\n" << log << LL_ENDL;
+
+        // <WolfViewer 2026-09-11> Keep failures (warns == true) for the crash message. Bounded
+        // on both sides: one entry cannot flood the buffer and the buffer cannot grow without
+        // limit, because this sits on the shader-loading path and runs for every program.
+        if (warns)
+        {
+            std::string entry = fname + ": " + log;
+            if (entry.size() > 700) { entry.resize(700); }
+            sLastShaderErrors = entry + "\n" + sLastShaderErrors;
+            if (sLastShaderErrors.size() > 2400) { sLastShaderErrors.resize(2400); }
+        }
     }
  }
+
+std::string LLShaderMgr::getLastShaderErrors()
+{
+    return sLastShaderErrors;
+}
 
 // <WolfViewer 2026-09-05> The program binary cache (loadCachedProgramBinary) is keyed by
 // LLGLSLShader::hash(), which upstream builds from the shader file NAMES, defines, features and

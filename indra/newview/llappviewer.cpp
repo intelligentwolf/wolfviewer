@@ -5041,6 +5041,18 @@ void LLAppViewer::userQuit()
     }
     else
     {
+        // [WolfViewer 2026-09-11] Unsaved ground paint dies with the session — WolfTerrainPaint
+        // keeps the working copy in memory only (wolfterrainpaint.cpp hasUnsavedPaint). Ask
+        // about that instead of the plain quit confirmation; "Quit" in either goes through
+        // finish_quit. Source: this function's own ConfirmQuit flow above.
+        std::string paint_region;
+        if (WolfTerrainPaint::instance().hasUnsavedPaint(paint_region))
+        {
+            LLSD args;
+            args["REGION"] = paint_region;
+            LLNotificationsUtil::add("WolfConfirmQuitUnsavedPaint", args, LLSD(), finish_quit);
+            return;
+        }
         LLNotificationsUtil::add("ConfirmQuit");
     }
 }

@@ -175,6 +175,8 @@ public:
     bool  strokeInProgress() const { return mLiveStroke; }
     /** True while the agent region's paint map is still being baked (a stroke cannot start yet). */
     bool  agentLayerBaking() const;
+    /** True when the working copy has changes no save has taken; names the region for the quit prompt. */
+    bool  hasUnsavedPaint(std::string& region_name) const;
     /** Why the last endStroke() returned null on a rights refusal (cleared when read). */
     std::string takeRefusal() { std::string m = mLastRefusal; mLastRefusal.clear(); return m; }
     /** Save the working copy; the result arrives through saving()/lastError() and a notification. */

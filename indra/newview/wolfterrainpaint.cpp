@@ -749,16 +749,21 @@ bool WolfTerrainPaint::rasterSegment(Layer& L, F32 x0, F32 y0, F32 x1, F32 y1, F
 
 /**
  * Source: terrain_paint.js _composite — coverage feathers over the outer 12% of the half-width
- * (at least one map pixel); a later stroke covers an earlier one where its coverage is at least
- * the old one's; an erase stroke scales the old coverage down. Texel: R,G = cos,sin of the
- * along-phase (2π · along / tile), B = (slot + across)/4, A = coverage.
- */
-/**
- * Source: terrain_paint.js _composite — coverage feathers over the outer 12% of the half-width
- * (at least one map pixel); a later stroke covers an earlier one where its coverage is at least
- * the old one's; an erase stroke scales the old coverage down. Texel (RGBA16F): R,G =
- * (0.25 + 0.2·slot)·(cos φ, sin φ), φ = 2π·along/tile (0 for a world-grid slot); B = metres
- * across from the left edge of travel / tile (0 for a world-grid slot); A = coverage.
+ * (at least one map pixel). WHO OWNS A TEXEL: a later stroke takes every texel inside its body
+ * (geometric coverage f >= 0.5, everything but the outer half of the feather) whatever was
+ * there; in its soft edge (f < 0.5) it takes a texel only where its blended coverage
+ * c = f × opacity is at least the old one's, so a feathered edge does not nibble into solid
+ * paint. An erase stroke scales the old coverage down by c.
+ *
+ * [FIX 2026-09-11] The test used to be `c + 1/255 < old_cov → keep old` everywhere, with c
+ * INCLUDING opacity, so a 70% road could never be laid over 100% grass — every road texel lost
+ * to the grass, live and on reload ("only the grass and a tiny piece of road"). Opacity is how
+ * much ground shows through the paint, not a claim on the texel: the brush decides ownership,
+ * opacity only the blend. terrain_paint.js _composite is the same rule; keep them in step.
+ *
+ * Texel (RGBA16F): R,G = (0.25 + 0.2·slot)·(cos φ, sin φ), φ = 2π·along/tile (0 for a
+ * world-grid slot); B = metres across from the left edge of travel / tile (0 for a world-grid
+ * slot); A = coverage.
  */
 void WolfTerrainPaint::composite(Layer& L, const Box& bb, const Stroke& s, const std::vector<U16>& src, std::vector<U16>& dst)
 {
@@ -778,12 +783,13 @@ void WolfTerrainPaint::composite(Layer& L, const Box& bb, const Stroke& s, const
         {
             const size_t p = (size_t)j * W + i, di = p * 4;
             const F32 dist = L.mSDist[p];
-            F32 c = 0.f;
+            F32 f = 0.f;                        // geometric coverage: 1 in the body, feathered at the edge
             if (dist <= R)
             {
-                c = llmin((R - dist) / fe, 1.f);
-                c = c * c * (3.f - 2.f * c) * o;
+                f = llmin((R - dist) / fe, 1.f);
+                f = f * f * (3.f - 2.f * f);    // smoothstep
             }
+            const F32 c = f * o;                // blended coverage — what the shader mixes with
             if (c <= 0.002f)
             {
                 if (!same) { dst[di] = src[di]; dst[di + 1] = src[di + 1]; dst[di + 2] = src[di + 2]; dst[di + 3] = src[di + 3]; }
@@ -796,7 +802,8 @@ void WolfTerrainPaint::composite(Layer& L, const Box& bb, const Stroke& s, const
                 dst[di + 3] = f32_to_f16(old_cov * (1.f - c));
                 continue;
             }
-            if (c + 1.f / 255.f < old_cov)
+            // Body: ours. Soft edge: ours only where it is at least as opaque as what is there.
+            if (f < 0.5f && c + 1.f / 255.f < old_cov)
             {
                 if (!same) { dst[di] = src[di]; dst[di + 1] = src[di + 1]; dst[di + 2] = src[di + 2]; dst[di + 3] = src[di + 3]; }
                 continue;
@@ -1155,6 +1162,19 @@ bool WolfTerrainPaint::agentLayerBaking() const
     if (!rgn) return false;
     auto it = mLayers.find(rgn->getHandle());
     return it != mLayers.end() && it->second.mBaking;
+}
+
+// [FIX 2026-09-11] The working copy lives only in memory: a quit with strokes not yet saved
+// loses them silently (Paul: painted a road over the grass, logged back in, "only the grass and
+// a tiny piece of road" — the record on the service had never received the road).
+// LLAppViewer::userQuit asks before the ordinary quit confirmation. Same guard as
+// terrain_paint.js beforeunload in WolfStorm. mDirty: endStroke/editChanged; a drag in
+// progress counts too.
+bool WolfTerrainPaint::hasUnsavedPaint(std::string& region_name) const
+{
+    if (!mEdit || !(mEdit->mDirty || mLiveStroke)) return false;
+    region_name = mEdit->mName;
+    return true;
 }
 
 /**

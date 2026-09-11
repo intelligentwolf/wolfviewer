@@ -6627,6 +6627,23 @@ Are you sure you want to quit?
      yestext="Quit"/>
   </notification>
 
+  <!-- [WolfViewer 2026-09-11] Raised by LLAppViewer::userQuit instead of ConfirmQuit when
+       WolfTerrainPaint::hasUnsavedPaint: the ground-paint working copy lives in memory only.
+       Not ignorable on purpose — losing paint is not something to click through once and forget. -->
+  <notification
+   icon="alertmodal.tga"
+   name="WolfConfirmQuitUnsavedPaint"
+   type="alertmodal">
+You have unsaved ground paint on [REGION]. Quitting now loses it.
+
+Press Save in the Build floater's Paint tab to keep it.
+    <tag>confirm</tag>
+    <usetemplate
+     name="okcancelbuttons"
+     notext="Do not Quit"
+     yestext="Quit and lose the paint"/>
+  </notification>
+
   <notification
    icon="alertmodal.tga"
    name="ConfirmRestoreToybox"

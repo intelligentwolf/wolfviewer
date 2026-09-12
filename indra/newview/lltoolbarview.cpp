@@ -489,20 +489,11 @@ bool LLToolBarView::loadToolbars(bool force_default)
         }
         gSavedSettings.setBOOL("WolfViewerEepButtonAdded", true);
     }
-    // <WolfViewer 2026-09-10> ...and the Rain / Snow buttons beside it, the same way, once.
-    if (mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM] && !gSavedSettings.getBOOL("WolfViewerWeatherButtonsAdded"))
-    {
-        for (const char* name : { "wolf_rain", "wolf_snow" })
-        {
-            const LLCommandId id(name);
-            if (hasCommand(id) == LLToolBarEnums::TOOLBAR_NONE
-                && addCommandInternal(id, mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM]))
-            {
-                LL_INFOS() << "WolfViewer: added the " << name << " button to the bottom toolbar" << LL_ENDL;
-            }
-        }
-        gSavedSettings.setBOOL("WolfViewerWeatherButtonsAdded", true);
-    }
+    // <WolfViewer 2026-09-12> The Rain / Snow migration that used to sit here is GONE. It named
+    // wolf_rain and wolf_snow, which w27 replaced with the single wolf_weather button, so on a
+    // fresh profile it asked the command manager for two commands that no longer exist and
+    // logged a warning for each. The Weather button is migrated near the end of this function
+    // instead, per-account and in the right position.
     // <WolfViewer 2026-09-10> ...and Gestures, once, so a saved 21-command bar becomes 22 and
     // splits 11 / 11 (Paul: "the buttons need reordering so that both rows are equal").
     if (mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM] && !gSavedSettings.getBOOL("WolfViewerGesturesButtonAdded"))
@@ -560,7 +551,9 @@ bool LLToolBarView::loadToolbars(bool force_default)
             "chat", "speak", "voice", "wolf_dictate", "wolf_readaloud", "wolf_sharescreen",
             "appearance", "inventory", "animationoverride",
             "move", "view", "people", "search", "map", "minimap", "snapshot",
-            "quickprefs", "preferences", "wolf_eep", "wolf_rain", "wolf_snow", "gestures"
+            // wolf_rain and wolf_snow were replaced by the single wolf_weather button in w27;
+            // naming them here would ask loadToolbars for commands that no longer exist.
+            "quickprefs", "preferences", "wolf_eep", "wolf_weather", "gestures"
         };
         // Under this many, the bar is not something a user arranged — it is what is left when
         // the group commands stop existing. A genuinely customised bar is longer and is left
@@ -596,6 +589,61 @@ bool LLToolBarView::loadToolbars(bool force_default)
                    << bottom->getCommandsList().size() << " buttons)" << LL_ENDL;
     }
     // </WolfViewer>
+
+    // <WolfViewer 2026-09-12> Put the Weather button on a toolbar saved before w27, once.
+    //
+    // w27 replaced the Rain and Snow buttons with ONE Weather button (Paul: "a weather on off
+    // button rather than the snow rain buttons"). Changing skins/*/toolbars.xml covers a fresh
+    // install and nothing else: a per-account layout overrides the skin default completely, so
+    // an existing user keeps their saved list.
+    //
+    // And they have ALREADY LOST the old pair by the time this runs. loadToolbars drops a
+    // command it cannot find as it parses (addCommandInternal, :222), so wolf_rain and
+    // wolf_snow vanished from the saved file the first time w27 started — leaving a bar with no
+    // weather control at all and no way to get one back except resetting the toolbars and
+    // losing every other customisation. That is the bug this repairs.
+    //
+    // Placed immediately after wolf_eep, where Rain used to sit, so the bar looks like it did.
+    // Per-account, like WolfViewerToolbarRows above and for the same reason: the layout is
+    // per-account, and a global flag would migrate whoever logged in first and skip the rest.
+    if (mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM]
+        && !gSavedPerAccountSettings.getBOOL("WolfViewerWeatherButton"))
+    {
+        const LLCommandId weather("wolf_weather");
+        // hasCommand here is the VIEW's: a command lives on exactly one toolbar, so if the user
+        // has already put Weather on a side bar it must not gain a second button here.
+        if (hasCommand(weather) == LLToolBarEnums::TOOLBAR_NONE)
+        {
+            LLToolBar* bottom = mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM];
+            // Find where Rain used to be: just after the EEP button.
+            // LLCommandId carries only a UUID (llcommandmanager.h:67) — the name is hashed into
+            // it by the constructor — so the EEP button is found by comparing ids, not strings.
+            const LLCommandId eepId("wolf_eep");
+            int rank = LLToolBar::RANK_NONE;          // RANK_NONE appends
+            int i = 0;
+            for (const LLCommandId& cmd : bottom->getCommandsList())
+            {
+                if (cmd.uuid() == eepId.uuid()) { rank = i + 1; break; }
+                ++i;
+            }
+            // Through the command manager, like addCommandInternal (:230), so a command that
+            // has gone missing warns instead of quietly producing nothing.
+            if (LLCommandManager::instance().getCommand(weather))
+            {
+                bottom->addCommand(weather, rank);
+                LL_INFOS() << "WolfViewer: added the Weather button to the saved bottom toolbar"
+                           << " at rank " << rank << LL_ENDL;
+            }
+            else
+            {
+                LL_WARNS() << "WolfViewer: wolf_weather is not a known command" << LL_ENDL;
+            }
+        }
+        gSavedPerAccountSettings.setBOOL("WolfViewerWeatherButton", true);
+        saveToolbars();
+    }
+    // </WolfViewer>
+
     mToolbarsLoaded = true;
     return true;
 }

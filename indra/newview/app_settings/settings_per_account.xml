@@ -422,6 +422,17 @@
         <key>Value</key>
             <integer>0</integer>
         </map>
+    <key>WolfViewerWeatherButton</key>
+    <map>
+      <key>Comment</key>
+      <string>Whether the single Weather button has been added to this account's saved bottom toolbar. w27 replaced the Rain and Snow buttons with it, and a saved per-account layout overrides the skin default, so an existing layout has to be migrated once or it ends up with no weather control at all.</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>Boolean</string>
+      <key>Value</key>
+      <integer>0</integer>
+    </map>
     <key>WolfViewerToolbarRows</key>
         <map>
         <key>Comment</key>

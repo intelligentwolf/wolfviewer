@@ -28,6 +28,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include <boost/lexical_cast.hpp>
+#include <algorithm>
 
 #include "llfeaturemanager.h"
 #include "llviewershadermgr.h"
@@ -174,6 +175,7 @@ static const ShaderFallbackStep sShaderFallbackSteps[] =
 };
 
 std::vector<std::string> LLViewerShaderMgr::sGraphicsFallbacks;
+bool LLViewerShaderMgr::sWolfWaterFull = true;
 
 // The next step that would actually change something. Steps whose setting is already off are
 // skipped -- turning off a feature the user never had on tells us nothing and would burn a rung
@@ -1172,6 +1174,34 @@ bool LLViewerShaderMgr::loadShadersWater()
         {
             gWaterProgram.addPermutation("HAS_SUN_SHADOW", "1");
         }
+        // <WolfViewer 2026-09-12> Our wind-sea cascades, boat wash and baked shore fields add six
+        // samplers to the water fragment stage. Counted from the preprocessed sources: waterF.glsl
+        // declares 5 of Firestorm's own, and the objects attached for its features add 4
+        // (reflectionProbeF), 3 more distinct (deferredUtil), 1 (tonemapUtilF) and 6 shadow maps
+        // when sun shadows are on -- 13 or 19 before ours, 19 or 25 with. An Apple GPU reports 16
+        // (llgl.cpp:1290), so the Water Shader failed to link on every Mac -- reported by Apple's
+        // linker as "No definition of calcAtmospherics", which is a cascade, not the cause -- and
+        // the viewer died in bind(). Spend within the measured budget, like the terrain clamp.
+        {
+            const S32 before_ours = 13 + (use_sun_shadow ? 6 : 0);
+            const S32 units = gGLManager.mNumTextureImageUnits;
+            sWolfWaterFull = units <= 0 || units >= before_ours + 6;
+            if (sWolfWaterFull)
+            {
+                gWaterProgram.addPermutation("WOLF_WATER_FULL", "1");
+            }
+            else
+            {
+                LL_WARNS("ShaderLoading") << "Water: advanced water needs " << before_ours + 6
+                                          << " texture image units, this GPU has " << units
+                                          << " -- compiling Firestorm's water instead" << LL_ENDL;
+                const std::string lost = "advanced water (waves, wakes and shore depth)";
+                if (std::find(sGraphicsFallbacks.begin(), sGraphicsFallbacks.end(), lost) == sGraphicsFallbacks.end())
+                {
+                    sGraphicsFallbacks.push_back(lost);
+                }
+            }
+        }
 
         gWaterProgram.mShaderGroup = LLGLSLShader::SG_WATER;
         gWaterProgram.mShaderLevel = mShaderLevel[SHADER_WATER];
@@ -1191,6 +1221,10 @@ bool LLViewerShaderMgr::loadShadersWater()
         gUnderWaterProgram.mShaderLevel = mShaderLevel[SHADER_WATER];
         gUnderWaterProgram.mShaderGroup = LLGLSLShader::SG_WATER;
         gUnderWaterProgram.clearPermutations();
+        if (sWolfWaterFull)   // shares waterV.glsl with the surface: displacement must match
+        {
+            gUnderWaterProgram.addPermutation("WOLF_WATER_FULL", "1");
+        }
         if (LLPipeline::sRenderTransparentWater)
         {
             gUnderWaterProgram.addPermutation("TRANSPARENT_WATER", "1");

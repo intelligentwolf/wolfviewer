@@ -149,6 +149,8 @@ private:
 
     // <WolfViewer 2026-09-12> see getGraphicsFallbacks()
     static std::vector<std::string> sGraphicsFallbacks;
+    // <WolfViewer 2026-09-12> whether the water programs got WOLF_WATER_FULL (loadShadersWater)
+    static bool sWolfWaterFull;
 
 }; //LLViewerShaderMgr
 

@@ -23,6 +23,45 @@
  * $/LicenseInfo$
  */
 
+// [2026-09-12] WOLF_WATER_FULL: our wind-sea cascades, boat wash and baked shore/exposure/zone
+// fields are 6 extra texture units in this stage. An Apple GPU has 16 for the whole fragment
+// stage and the water program already spends 13 (19 with sun shadows) before any of ours, so the
+// Water Shader would not link on Macs ("No definition of calcAtmospherics" is Apple's linker
+// giving up) and every Mac crashed at startup. llviewershadermgr.cpp defines WOLF_WATER_FULL
+// only when the measured unit count affords it; otherwise the samplers are compiled out, their
+// *Ready gates are constant 0 so every dependent branch is dead, and the water is Firestorm's.
+#ifdef WOLF_WATER_FULL
+uniform sampler2D wolfDepthField;
+uniform sampler2D wolfExposureField;
+uniform sampler2D wolfZoneField;
+uniform sampler2D fftDisp0;
+uniform sampler2D fftDisp1;
+uniform sampler2D wakeSampler;
+uniform float depthReady;
+uniform float fftReady;
+uniform float wakeReady;
+uniform float exposureReady;
+uniform float zoneReady;
+#define WOLF_TEX_WOLF_DEPTH_FIELD(uv) texture(wolfDepthField, uv)
+#define WOLF_TEX_WOLF_EXPOSURE_FIELD(uv) texture(wolfExposureField, uv)
+#define WOLF_TEX_WOLF_ZONE_FIELD(uv) texture(wolfZoneField, uv)
+#define WOLF_TEX_FFT_DISP_0(uv) texture(fftDisp0, uv)
+#define WOLF_TEX_FFT_DISP_1(uv) texture(fftDisp1, uv)
+#define WOLF_TEX_WAKE_SAMPLER(uv) texture(wakeSampler, uv)
+#else
+#define WOLF_TEX_WOLF_DEPTH_FIELD(uv) vec4(0.0)
+#define WOLF_TEX_WOLF_EXPOSURE_FIELD(uv) vec4(0.0)
+#define WOLF_TEX_WOLF_ZONE_FIELD(uv) vec4(0.0)
+#define WOLF_TEX_FFT_DISP_0(uv) vec4(0.0)
+#define WOLF_TEX_FFT_DISP_1(uv) vec4(0.0)
+#define WOLF_TEX_WAKE_SAMPLER(uv) vec4(0.0)
+#define depthReady 0.0
+#define fftReady 0.0
+#define wakeReady 0.0
+#define exposureReady 0.0
+#define zoneReady 0.0
+#endif
+
 uniform mat4 modelview_matrix;
 uniform mat3 normal_matrix;
 uniform mat4 modelview_projection_matrix;
@@ -89,23 +128,17 @@ uniform float wolfTerrainLod;
 //   wakeSampler — the boat wash field (wolfwakefield.cpp): R foam, G lift, B dip.
 uniform float stormChaos;
 uniform float maxWaveHeight;
-uniform sampler2D wolfDepthField;
-uniform sampler2D wolfExposureField;
 uniform vec2 wolfRegionOrigin;
 uniform vec2 depthRegionSize;
 uniform float depthWaterLevel;
-uniform float depthReady;
 uniform vec2 exposureOrigin;
 uniform vec2 exposureSize;
-uniform float exposureReady;
 uniform float shoreWavesEnabled;
 // [WAVES 2026-09-07] Per-region wave ZONE energy over the same 3x span (wolfwavezones.cpp
 // fill: surf 1, open 0.55, calm 0.15, off 0), from About Land > Waves of this region and its
 // neighbours. Source: wolfstorm Water.js zoneSampler.
-uniform sampler2D wolfZoneField;
 uniform vec2 zoneOrigin;
 uniform vec2 zoneSize;
-uniform float zoneReady;
 // [SURF 2026-09-07] The surf train (WAVES_PLAN §2, Water.js): wave HEIGHT offshore (m),
 // the set cadence (s), the wavelength (m), a tempo scale. From About Land > Waves.
 uniform float surfHeight;
@@ -115,14 +148,9 @@ uniform float surfSpeed;
 uniform float calmRipple;   // [WAVES 2026-09-07] the calm cells' ripple, metres (lldrawpoolwater.cpp)
 uniform float smallScale;   // [WAVES 2026-09-10] the small-wave cells' swell, fraction of the open sea (lldrawpoolwater.cpp)
 out vec4 vSurf;   // [SURF rev3] x crest (peak only), y breaking, z amplitude used (0 = no surf), w wash behind the crest
-uniform float fftReady;
-uniform sampler2D fftDisp0;
-uniform sampler2D fftDisp1;
 uniform vec2 fftTile;
 uniform vec2 fftFade;
-uniform sampler2D wakeSampler;
 uniform vec2 wakeRegionSize;
-uniform float wakeReady;
 uniform float wakeStrength;
 uniform float boundedWaterDepth;
 // </WolfViewer>
@@ -315,7 +343,7 @@ void main()
         {
             vec2 xf = smoothstep(vec2(0.0), vec2(0.02), xuv)
                     * (vec2(1.0) - smoothstep(vec2(0.98), vec2(1.0), xuv));
-            swellExpo = mix(1.0, texture(wolfExposureField, xuv).r, xf.x * xf.y);
+            swellExpo = mix(1.0, WOLF_TEX_WOLF_EXPOSURE_FIELD( xuv).r, xf.x * xf.y);
         }
     }
     float swellScale = mix(0.15, 1.3, swellExpo);
@@ -338,7 +366,7 @@ void main()
         {
             vec2 zf = smoothstep(vec2(0.0), vec2(0.02), zuv)
                     * (vec2(1.0) - smoothstep(vec2(0.98), vec2(1.0), zuv));
-            zoneEnergy = mix(0.55, texture(wolfZoneField, zuv).r, zf.x * zf.y);
+            zoneEnergy = mix(0.55, WOLF_TEX_WOLF_ZONE_FIELD( zuv).r, zf.x * zf.y);
             float calmFloor = clamp(calmRipple / max(waveAmplitude, 0.02), 0.0, 1.0);
             float small = clamp(smallScale, calmFloor, 1.0);
             if (zoneEnergy < 0.15)      zoneScale = calmFloor * max(zoneEnergy, 0.0) / 0.15;
@@ -454,8 +482,8 @@ void main()
         float f0 = 1.0 - smoothstep(fftFade.x * 0.5, fftFade.x, fdist);
         float f1 = 1.0 - smoothstep(fftFade.y * 0.5, fftFade.y, fdist);
         vec3 dd = vec3(0.0);
-        if (f0 > 0.001) dd += texture(fftDisp0, position.xy / fftTile.x).xyz * f0;
-        if (f1 > 0.001) dd += texture(fftDisp1, position.xy / fftTile.y).xyz * f1;
+        if (f0 > 0.001) dd += WOLF_TEX_FFT_DISP_0( position.xy / fftTile.x).xyz * f0;
+        if (f1 > 0.001) dd += WOLF_TEX_FFT_DISP_1( position.xy / fftTile.y).xyz * f1;
         dd *= swellScale;
         wave_pos += dd.x * surf_t + dd.y * surf_b + dd.z * surf_n;
         wave_h += dd.z;
@@ -476,7 +504,7 @@ void main()
             vec2 ef = smoothstep(vec2(0.0), vec2(0.04), sduv)
                     * (vec2(1.0) - smoothstep(vec2(0.96), vec2(1.0), sduv));
             float edgeFade = ef.x * ef.y;
-            vec4 dtex = texture(wolfDepthField, sduv);
+            vec4 dtex = WOLF_TEX_WOLF_DEPTH_FIELD( sduv);
             float conf = length(dtex.gb);
             if (conf > 0.02)
             {
@@ -492,7 +520,7 @@ void main()
                     if (exposureReady > 0.5)
                     {
                         vec2 fuv = (regionXY - dtex.gb * (45.0 / conf) - exposureOrigin) / exposureSize;
-                        feed = texture(wolfExposureField, clamp(fuv, 0.0, 1.0)).r;
+                        feed = WOLF_TEX_WOLF_EXPOSURE_FIELD( clamp(fuv, 0.0, 1.0)).r;
                     }
                     float bAmp = min(0.10 + waveAmplitude * 0.9, 0.5) * shoal * (0.35 + 0.65 * sqrt(feed));
                     float br = sin(phase);
@@ -523,11 +551,11 @@ void main()
             // DISTANCE TO LAND (exposure G) — crests are iso-distance contours that wrap the
             // coast; direction = down the distance gradient taken 1/32 of the span wide.
             vec2 dW = vec2(1.0 / 32.0);
-            float dist = texture(wolfExposureField, euv).g;
-            float dxp = texture(wolfExposureField, clamp(euv + vec2(dW.x, 0.0), 0.0, 1.0)).g;
-            float dxm = texture(wolfExposureField, clamp(euv - vec2(dW.x, 0.0), 0.0, 1.0)).g;
-            float dyp = texture(wolfExposureField, clamp(euv + vec2(0.0, dW.y), 0.0, 1.0)).g;
-            float dym = texture(wolfExposureField, clamp(euv - vec2(0.0, dW.y), 0.0, 1.0)).g;
+            float dist = WOLF_TEX_WOLF_EXPOSURE_FIELD( euv).g;
+            float dxp = WOLF_TEX_WOLF_EXPOSURE_FIELD( clamp(euv + vec2(dW.x, 0.0), 0.0, 1.0)).g;
+            float dxm = WOLF_TEX_WOLF_EXPOSURE_FIELD( clamp(euv - vec2(dW.x, 0.0), 0.0, 1.0)).g;
+            float dyp = WOLF_TEX_WOLF_EXPOSURE_FIELD( clamp(euv + vec2(0.0, dW.y), 0.0, 1.0)).g;
+            float dym = WOLF_TEX_WOLF_EXPOSURE_FIELD( clamp(euv - vec2(0.0, dW.y), 0.0, 1.0)).g;
             vec2 grad = vec2(dxp - dxm, dyp - dym);
             float gl = length(grad);
             bool haveLand = dist < 3000.0 && gl > 1.0;
@@ -542,7 +570,7 @@ void main()
                 vec2 sduv = regionXY / depthRegionSize;
                 vec2 over = max(max(-sduv, sduv - 1.0), 0.0) * depthRegionSize;
                 float outside = smoothstep(0.0, 64.0, max(over.x, over.y));
-                vec4 dt = texture(wolfDepthField, clamp(sduv, 0.0, 1.0));
+                vec4 dt = WOLF_TEX_WOLF_DEPTH_FIELD( clamp(sduv, 0.0, 1.0));
                 h = mix(max(depthWaterLevel - dt.a, 0.0), 30.0, outside);
             }
             const float g = 9.81;
@@ -598,7 +626,7 @@ void main()
         vec2 wkuv = regionXY / wakeRegionSize;
         if (wkuv.x >= 0.0 && wkuv.x <= 1.0 && wkuv.y >= 0.0 && wkuv.y <= 1.0)
         {
-            vec4 wk = texture(wakeSampler, wkuv);
+            vec4 wk = WOLF_TEX_WAKE_SAMPLER( wkuv);
             vWake = wk.r * wakeStrength;
             wave_pos += surf_n * ((wk.g - wk.b) * 1.7 * wakeStrength);
         }

@@ -23,6 +23,41 @@
  * $/LicenseInfo$
  */
 
+// [2026-09-12] WOLF_WATER_FULL: our wind-sea cascades, boat wash and baked shore/exposure/zone
+// fields are 6 extra texture units in this stage. An Apple GPU has 16 for the whole fragment
+// stage and the water program already spends 13 (19 with sun shadows) before any of ours, so the
+// Water Shader would not link on Macs ("No definition of calcAtmospherics" is Apple's linker
+// giving up) and every Mac crashed at startup. llviewershadermgr.cpp defines WOLF_WATER_FULL
+// only when the measured unit count affords it; otherwise the samplers are compiled out, their
+// *Ready gates are constant 0 so every dependent branch is dead, and the water is Firestorm's.
+#ifdef WOLF_WATER_FULL
+uniform sampler2D wolfDepthField;
+uniform sampler2D fftDisp0;
+uniform sampler2D fftDisp1;
+uniform sampler2D fftDeriv0;
+uniform sampler2D fftDeriv1;
+uniform sampler2D wakeSampler;
+uniform float depthReady;
+uniform float fftReady;
+uniform float wakeReady;
+#define WOLF_TEX_WOLF_DEPTH_FIELD(uv) texture(wolfDepthField, uv)
+#define WOLF_TEX_FFT_DISP_0(uv) texture(fftDisp0, uv)
+#define WOLF_TEX_FFT_DISP_1(uv) texture(fftDisp1, uv)
+#define WOLF_TEX_FFT_DERIV_0(uv) texture(fftDeriv0, uv)
+#define WOLF_TEX_FFT_DERIV_1(uv) texture(fftDeriv1, uv)
+#define WOLF_TEX_WAKE_SAMPLER(uv) texture(wakeSampler, uv)
+#else
+#define WOLF_TEX_WOLF_DEPTH_FIELD(uv) vec4(0.0)
+#define WOLF_TEX_FFT_DISP_0(uv) vec4(0.0)
+#define WOLF_TEX_FFT_DISP_1(uv) vec4(0.0)
+#define WOLF_TEX_FFT_DERIV_0(uv) vec4(0.0)
+#define WOLF_TEX_FFT_DERIV_1(uv) vec4(0.0)
+#define WOLF_TEX_WAKE_SAMPLER(uv) vec4(0.0)
+#define depthReady 0.0
+#define fftReady 0.0
+#define wakeReady 0.0
+#endif
+
 // class3/environment/waterF.glsl
 
 #define WATER_MINIMAL 1
@@ -124,22 +159,13 @@ uniform float waveFrequency;
 uniform float waveSpeed;
 uniform float stormChaos;
 uniform vec3  eyeVec;
-uniform sampler2D wolfDepthField;
 uniform vec2  wolfRegionOrigin;
 uniform vec2  depthRegionSize;
 uniform float depthWaterLevel;
-uniform float depthReady;
 uniform float shoreWavesEnabled;
-uniform float fftReady;
-uniform sampler2D fftDisp0;
-uniform sampler2D fftDisp1;
-uniform sampler2D fftDeriv0;
-uniform sampler2D fftDeriv1;
 uniform vec2  fftTile;
 uniform vec2  fftFade;
-uniform sampler2D wakeSampler;
 uniform vec2  wakeRegionSize;
-uniform float wakeReady;
 uniform float wakeStrength;
 // </WolfViewer>
 
@@ -372,7 +398,7 @@ void main()
         vec2 sduv = regionXY / depthRegionSize;
         if (sduv.x >= 0.0 && sduv.x <= 1.0 && sduv.y >= 0.0 && sduv.y <= 1.0)
         {
-            vec4 dtex = texture(wolfDepthField, sduv);
+            vec4 dtex = WOLF_TEX_WOLF_DEPTH_FIELD( sduv);
             fieldDepth = max(depthWaterLevel - dtex.r, 0.0);
             if (shoreWavesEnabled > 0.5)
             {
@@ -406,11 +432,11 @@ void main()
         float n1f = 1.0 - smoothstep(fftFade.y, fftFade.y * 2.5, fdist);
         vec2 uv0 = vary_world_pos.xy / fftTile.x;
         vec2 uv1 = vary_world_pos.xy / fftTile.y;
-        vec4 dv0 = texture(fftDeriv0, uv0);
-        vec4 dv1 = texture(fftDeriv1, uv1);
+        vec4 dv0 = WOLF_TEX_FFT_DERIV_0( uv0);
+        vec4 dv1 = WOLF_TEX_FFT_DERIV_1( uv1);
         wavef.xy += -(dv0.xy * n0f + dv1.xy * n1f) * 2.5 * vSwell.z;
-        float fm0 = texture(fftDisp0, uv0).a * n0f;
-        float fm1 = texture(fftDisp1, uv1).a * n1f;
+        float fm0 = WOLF_TEX_FFT_DISP_0( uv0).a * n0f;
+        float fm1 = WOLF_TEX_FFT_DISP_1( uv1).a * n1f;
         fftFoam = max(fm0, fm1 * 0.6) * vSwell.z;
     }
 
@@ -432,10 +458,10 @@ void main()
         if (wkuv.x >= 0.0 && wkuv.x <= 1.0 && wkuv.y >= 0.0 && wkuv.y <= 1.0)
         {
             float wkTexel = 1.0 / 512.0;
-            vec4 tL = texture(wakeSampler, wkuv - vec2(wkTexel, 0.0));
-            vec4 tR = texture(wakeSampler, wkuv + vec2(wkTexel, 0.0));
-            vec4 tD = texture(wakeSampler, wkuv - vec2(0.0, wkTexel));
-            vec4 tU = texture(wakeSampler, wkuv + vec2(0.0, wkTexel));
+            vec4 tL = WOLF_TEX_WAKE_SAMPLER( wkuv - vec2(wkTexel, 0.0));
+            vec4 tR = WOLF_TEX_WAKE_SAMPLER( wkuv + vec2(wkTexel, 0.0));
+            vec4 tD = WOLF_TEX_WAKE_SAMPLER( wkuv - vec2(0.0, wkTexel));
+            vec4 tU = WOLF_TEX_WAKE_SAMPLER( wkuv + vec2(0.0, wkTexel));
             float cL = tL.g - tL.b, cR = tR.g - tR.b;
             float cD = tD.g - tD.b, cU = tU.g - tU.b;
             wavef.xy += vec2(cL - cR, cD - cU) * 28.0 * wakeStrength;

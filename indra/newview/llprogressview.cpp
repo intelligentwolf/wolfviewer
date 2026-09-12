@@ -526,14 +526,15 @@ void LLProgressView::initLogos()
     texture_start_x += icon_width + default_pad;
 #endif //LL_HAVOK
 
-    // 108x41
-    icon_width = 74;
-    icon_height = default_height;
-    loadLogo(temp_str + "vivox_logo.png",
-        image_codec,
-        LLRect(texture_start_x, texture_start_y + icon_height, texture_start_x + icon_width, texture_start_y),
-        default_clip,
-        default_clip);
+    // <WolfViewer 2026-09-12> The Vivox logo used to be drawn here, and the label beside it read
+    // "[APP_NAME] uses". We do not use Vivox: voice on Wolf Territories is WolfVoice, our own
+    // spatial WebRTC backend. The attribution was untrue, and it was the only logo on that line
+    // once FMOD and Havok are compiled out (ReleaseOS), so the label now carries the whole
+    // sentence — "[APP_NAME] uses WolfVoice" — rather than trailing off into an empty row.
+    // No logo is drawn in its place: there is no WolfVoice artwork, and inventing some would be
+    // worse than saying it plainly.
+    (void)icon_width;
+    (void)icon_height;
 }
 
 void LLProgressView::initStartTexture(S32 location_id, bool is_in_production)

@@ -177,6 +177,23 @@
     halign="center">
     Password help
   </text>
+  <!-- <WolfViewer 2026-09-12> The build, on the login screen. Asking someone which version they
+       are running and being told "the latest one I downloaded" is not an answer anyone can act
+       on — three releases went out on 2026-09-11 alone, and a resident reported a crash from a
+       build two releases old believing it was current. Set from LLVersionInfo in
+       llpanellogin.cpp, so it cannot disagree with the binary. -->
+  <text
+    follows="left|top"
+    font="SansSerifSmall"
+    text_color="LtGray_50"
+    height="14"
+    name="viewer_version_text"
+    left="778"
+    bottom_delta="-16"
+    width="120"
+    halign="center"
+    tool_tip="The version of WolfViewer you are running. Quote this when reporting a problem.">
+  </text>
   </layout_panel>
   <layout_panel
       height="172"

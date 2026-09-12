@@ -313,6 +313,18 @@ LLPanelLogin::LLPanelLogin(const LLRect &rect,
     LLTextBox* forgot_password_text = getChild<LLTextBox>("forgot_password_text");
     forgot_password_text->setClickedCallback(onClickForgotPassword, NULL);
 
+    // <WolfViewer 2026-09-12> Show the build on the login screen. "The latest one I downloaded"
+    // is not a version anyone can act on: three releases went out on 2026-09-11, and a crash was
+    // reported from a build two of them old in the belief it was current. The channel carries
+    // the wN (VIEWER_CHANNEL is "WolfViewer-Release-wN"), so the tail of it is the useful part.
+    if (LLTextBox* version_text = findChild<LLTextBox>("viewer_version_text"))
+    {
+        const size_t dash = channel.rfind('-');
+        const std::string revision = (dash != std::string::npos && dash + 1 < channel.size())
+                                     ? channel.substr(dash + 1) : std::string();
+        version_text->setText(revision.empty() ? version : revision + "  " + version);
+    }
+
     LLTextBox* sign_up_text = getChild<LLTextBox>("sign_up_text");
     sign_up_text->setClickedCallback(onClickSignUp, NULL);
 

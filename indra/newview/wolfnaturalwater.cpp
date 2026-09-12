@@ -747,6 +747,59 @@ void WolfNaturalWater::compute(Result& out, std::vector<F32> z, std::vector<U8> 
             if (drop >= MIN_CHAIN_DROP_M && length > 0.f && drop / length >= MIN_CHAIN_GRADE)
             {
                 ch.mAcc = acc[ch.mCells[last_stream]];
+                // [2026-09-11] A FALL MUST START AT THE WATER THAT FEEDS IT. is_stream needs
+                // 40 degrees (STEEP_MIN_GRADE) and a lake's lip is never that steep — the ground
+                // rolls over gradually and only reaches 40 partway down the face. So the ribbon
+                // began below the lip with a bare gap above it, and the water appeared to start
+                // out of nothing halfway down a hillside (Jimmy Olsen, w25).
+                //
+                // Walk up from the head through the gentler cells to the pool's edge and put
+                // those stations in front. Done AFTER the acceptance test above on purpose: the
+                // lead-in is gentle by definition, and including it in `length` would drag the
+                // chain's average grade below MIN_CHAIN_GRADE and reject falls that are real.
+                //
+                // Only kept when it actually REACHES a pool, so this cannot bring back the gentle
+                // streams the 40-degree gate was added to remove: a head that wanders uphill into
+                // ordinary terrain is discarded.
+                if (fed[head] && !pooled[head])
+                {
+                    // A lake lip is a few cells; beyond that we are not joining anything.
+                    constexpr S32 LEAD_MAX_CELLS = 24;
+                    std::vector<S32> lead;
+                    S32 u = head;
+                    for (S32 hop = 0; hop < LEAD_MAX_CELLS; ++hop)
+                    {
+                        // The upstream neighbour carrying the most water: the main channel, not
+                        // whichever cell the scan happens to reach first.
+                        S32 up = -1;
+                        F32 best = -1.f;
+                        const S32 ux = u % n, uy = u / n;
+                        for (S32 dy = -1; dy <= 1; ++dy)
+                        {
+                            for (S32 dx = -1; dx <= 1; ++dx)
+                            {
+                                if (!dx && !dy) continue;
+                                const S32 nx = ux + dx, ny = uy + dy;
+                                if (nx < 0 || ny < 0 || nx >= n || ny >= n) continue;
+                                const S32 c2 = nx + ny * n;
+                                if (downstream[c2] != u || blocked[c2]) continue;
+                                if (!pooled[c2] && (used[c2] || is_stream(c2))) continue;
+                                if (acc[c2] > best) { best = acc[c2]; up = c2; }
+                            }
+                        }
+                        if (up < 0) break;
+                        lead.push_back(up);
+                        if (pooled[up]) break;      // the lip: stop with it included
+                        u = up;
+                    }
+                    if (!lead.empty() && pooled[lead.back()])
+                    {
+                        for (S32 c2 : lead) used[c2] = 1;
+                        std::reverse(lead.begin(), lead.end());
+                        lead.insert(lead.end(), ch.mCells.begin(), ch.mCells.end());
+                        ch.mCells.swap(lead);
+                    }
+                }
                 chains.push_back(std::move(ch));
             }
         }
@@ -760,11 +813,25 @@ void WolfNaturalWater::compute(Result& out, std::vector<F32> z, std::vector<U8> 
         const S32 nc = (S32)ch.mCells.size();
 
         // Per-cell width / fall / slope, the terminal cell borrowing its predecessor's.
+        // [2026-09-11] The lead-in from a lake and the terminal cell are both NOT streams, so
+        // width/fallw/slope are zero there — a zero-width ribbon is invisible. Each borrows from
+        // the nearest real stream station instead of only the terminal one doing so.
+        S32 first_s = -1, last_s = -1;
+        for (S32 i = 0; i < nc; ++i)
+        {
+            if (is_stream(ch.mCells[i])) { if (first_s < 0) first_s = i; last_s = i; }
+        }
         std::vector<F32> wd(nc), fl(nc), sl(nc);
         for (S32 i = 0; i < nc; ++i)
         {
-            const S32 k = ch.mCells[i];
-            const S32 src = (i == nc - 1 && !is_stream(k)) ? ch.mCells[i - 1] : k;
+            S32 si = i;
+            if (!is_stream(ch.mCells[i]))
+            {
+                if (first_s >= 0 && i < first_s)     si = first_s;
+                else if (last_s >= 0 && i > last_s)  si = last_s;
+                else if (i > 0)                      si = i - 1;
+            }
+            const S32 src = ch.mCells[llclamp(si, 0, nc - 1)];
             wd[i] = width[src];
             fl[i] = fallw[src];
             sl[i] = slope[src];

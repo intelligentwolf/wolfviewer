@@ -593,13 +593,38 @@ class WolfWeatherToggle : public view_listener_t
 {
     bool handleEvent(const LLSD& userdata)
     {
-        if (WolfWeather::instance().forced())
+        // [WEATHER 2026-09-12] A parcel prim OR the region setting can outrank the menu, and
+        // the user is told which — "nothing happened" is the worst possible answer to a click.
+        const std::string by = WolfWeather::instance().overriddenBy();
+        if (!by.empty())
         {
-            LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE", "The weather here is set by this parcel."));
+            LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE",
+                by == "parcel" ? "The weather here is set by this parcel."
+                               : "The weather here is set for the whole region."));
             return true;
         }
         WolfWeather::instance().toggle(wolf_weather_mode(userdata.asString()));
         return true;
+    }
+};
+/**
+ * [WEATHER 2026-09-12] The Weather switch — the toolbar's one Weather button and the menu's
+ * tick. Not a weather chooser: an opt-out from weather altogether, the way declining the shared
+ * environment is an opt-out from the region's sky.
+ */
+class WolfWeatherToggleEnabled : public view_listener_t
+{
+    bool handleEvent(const LLSD&)
+    {
+        WolfWeather::instance().toggleEnabled();
+        return true;
+    }
+};
+class WolfWeatherIsEnabled : public view_listener_t
+{
+    bool handleEvent(const LLSD&)
+    {
+        return WolfWeather::enabled();
     }
 };
 class WolfWeatherIsOn : public view_listener_t
@@ -619,9 +644,14 @@ class WolfWeatherSetLevel : public view_listener_t
 {
     bool handleEvent(const LLSD& userdata)
     {
-        if (WolfWeather::instance().forced())
+        // [WEATHER 2026-09-12] A parcel prim OR the region setting can outrank the menu, and
+        // the user is told which — "nothing happened" is the worst possible answer to a click.
+        const std::string by = WolfWeather::instance().overriddenBy();
+        if (!by.empty())
         {
-            LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE", "The weather here is set by this parcel."));
+            LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE",
+                by == "parcel" ? "The weather here is set by this parcel."
+                               : "The weather here is set for the whole region."));
             return true;
         }
         WolfWeather::Mode mode; S32 level;
@@ -641,9 +671,12 @@ class WolfWeatherIsLevel : public view_listener_t
 };
 static void wolf_weather_clear()
 {
-    if (WolfWeather::instance().forced())
+    const std::string by = WolfWeather::instance().overriddenBy();
+    if (!by.empty())
     {
-        LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE", "The weather here is set by this parcel."));
+        LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE",
+            by == "parcel" ? "The weather here is set by this parcel."
+                           : "The weather here is set for the whole region."));
         return;
     }
     WolfWeather::instance().clear();
@@ -12863,6 +12896,8 @@ void initialize_menus()
     // <WolfViewer 2026-09-10> World > Weather (wolfweather.cpp): rain / snow / clear
     view_listener_t::addMenu(new WolfWeatherToggle(), "WolfWeather.Toggle");
     view_listener_t::addMenu(new WolfWeatherIsOn(), "WolfWeather.IsOn");
+    view_listener_t::addMenu(new WolfWeatherToggleEnabled(), "WolfWeather.ToggleEnabled");   // <WolfViewer 2026-09-12>
+    view_listener_t::addMenu(new WolfWeatherIsEnabled(), "WolfWeather.IsEnabled");           // <WolfViewer 2026-09-12>
     view_listener_t::addMenu(new WolfWeatherSetLevel(), "WolfWeather.SetLevel");
     view_listener_t::addMenu(new WolfWeatherIsLevel(), "WolfWeather.IsLevel");
     commit.add("WolfWeather.Clear", boost::bind(&wolf_weather_clear));

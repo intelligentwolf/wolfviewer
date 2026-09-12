@@ -913,6 +913,7 @@ set(viewer_SOURCE_FILES
     utilitybar.cpp
     wolfalbumart.cpp
     wolfboatrock.cpp
+    wolfupdate.cpp
     wolfnaturalwater.cpp
     wolfobjectprops.cpp
     wolffloatermeshupload.cpp
@@ -923,7 +924,10 @@ set(viewer_SOURCE_FILES
     wolfoceanfft.cpp
     wolfwakefield.cpp
     wolfwaterfield.cpp
+    wolfregionweather.cpp
     wolfwavezones.cpp
+    wolfweatherprofile.cpp
+    wolfweathersound.cpp
     wolfai.cpp
     wolflslcomplete.cpp
     wolfterrainpaint.cpp
@@ -1792,6 +1796,7 @@ set(viewer_HEADER_FILES
     utilitybar.h
     wolfalbumart.h
     wolfboatrock.h
+    wolfupdate.h
     wolfnaturalwater.h
     wolfgrid.h
     wolfobjectprops.h
@@ -1804,7 +1809,10 @@ set(viewer_HEADER_FILES
     wolfseastate.h
     wolfwakefield.h
     wolfwaterfield.h
+    wolfregionweather.h
     wolfwavezones.h
+    wolfweatherprofile.h
+    wolfweathersound.h
     wolfai.h
     wolflslcomplete.h
     wolfterrainpaint.h

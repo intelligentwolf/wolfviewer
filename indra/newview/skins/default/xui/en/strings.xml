@@ -2753,6 +2753,9 @@ name="Command_360_Capture_Label">360° Snapshot</string>
   <string name="Command_WolfEep_Label">EEP</string>
   <string name="Command_WolfRain_Label">Rain</string>
   <string name="Command_WolfSnow_Label">Snow</string>
+  <!-- WolfViewer 2026-09-12: one Weather button in place of the Rain and Snow pair. -->
+  <string name="Command_WolfWeather_Label">Weather</string>
+  <string name="Command_WolfWeather_Tooltip">Show or hide the weather — the region's, the parcel's, or your own</string>
   <string name="Command_View_Label">Camera controls</string>
 <!-- Ansariel: Renamed for FS (FIRE-5019)
   <string name="Command_Voice_Label">Voice settings</string>-->

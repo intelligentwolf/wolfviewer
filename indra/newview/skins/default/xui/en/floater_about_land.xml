@@ -2379,5 +2379,164 @@ A region starts with waves on its open sea and small waves wherever land closes 
             <button follows="left|top" height="22" layout="topleft" left_pad="6" width="80" name="waves_revert" label="Revert" />
             <button follows="left|top" height="22" layout="topleft" left_pad="6" width="140" name="waves_default" label="Reset to automatic" />
        </panel>
+       <!-- WolfViewer 2026-09-12: About Land > Weather (wolfregionweather.cpp
+            WolfPanelLandWeather). The region's weather, stored on the grid (grid.weather) and
+            seen by everyone in the region. Wolf Territories only: llfloaterland.cpp removes
+            this tab on any other grid. The same panel as the web viewer's
+            wolfstorm/js/ui/floaters/land_weather_tab.js, control for control. -->
+       <panel
+          border="true"
+          follows="all"
+          label="Weather"
+          layout="topleft"
+          left="0"
+          top="0"
+          help_topic="land_weather_tab"
+          name="land_weather_panel">
+            <panel.string name="str_off_grid">This region is not on the Wolf Territories grid, so it has no region weather.</panel.string>
+            <panel.string name="str_fetching">Asking the grid for this region's weather…</panel.string>
+            <panel.string name="str_region">Region: [REGION] — currently [STATE]</panel.string>
+            <panel.string name="str_unset">not set; residents choose their own</panel.string>
+            <panel.string name="str_state">[KIND], [LEVEL]</panel.string>
+            <panel.string name="str_state_off">[KIND], [LEVEL] (not applied)</panel.string>
+            <panel.string name="str_state_clear">clear</panel.string>
+            <panel.string name="str_read_only">You do not hold this region, so its weather is read-only here.</panel.string>
+            <panel.string name="str_parcel_override">A prim on this parcel is forcing its own weather, which overrides the region setting. Region weather still applies everywhere else.</panel.string>
+            <panel.string name="str_saving">Saving…</panel.string>
+            <panel.string name="str_saved">Saved — everyone in the region sees it now.</panel.string>
+            <panel.string name="str_save_failed">Could not save:</panel.string>
+            <panel.string name="str_preset_loaded">Preset loaded — Apply to save it for the region.</panel.string>
+            <panel.string name="str_reset">Back to the default look and sound.</panel.string>
+            <panel.string name="str_no_notecards">No notecards in your inventory to read a preset from.</panel.string>
+            <panel.string name="str_bad_notecard">That notecard does not contain a weather preset.</panel.string>
+            <panel.string name="str_particles">Particle Effects ([KIND])</panel.string>
+            <panel.string name="str_clear_note">Nothing falls while the weather type is Clear. These settings are kept and come back the moment it is set to Rain or Snow.</panel.string>
+
+            <text follows="left|top" height="14" layout="topleft" left="10" top="6" width="470"
+                  name="weather_region_line" text_color="EmphasisColor">Region:</text>
+
+            <!-- ── left column ──────────────────────────────────────────────────────────── -->
+            <text follows="left|top" height="14" layout="topleft" left="10" top="24" width="235"
+                  name="weather_hdr_general" text_color="LabelSelectedColor">General Weather Control</text>
+            <combo_box follows="left|top" height="20" layout="topleft" left="10" top_pad="4" width="145"
+                       name="weather_preset" tool_tip="A complete ready-made weather setting">
+                <combo_box.item label="Choose a preset…"  value="" />
+                <combo_box.item label="Clear Skies"       value="clear" />
+                <combo_box.item label="Light Drizzle"     value="drizzle" />
+                <combo_box.item label="Steady Rain"       value="steady" />
+                <combo_box.item label="Heavy Rain"        value="downpour" />
+                <combo_box.item label="Thunderstorm"      value="thunderstorm" />
+                <combo_box.item label="Light Snow"        value="lightsnow" />
+                <combo_box.item label="Snowfall"          value="snowfall" />
+                <combo_box.item label="Blizzard"          value="blizzard" />
+            </combo_box>
+            <button follows="left|top" height="20" layout="topleft" left_pad="4" top_delta="0" width="86"
+                    name="weather_preset_apply" label="Apply Preset" />
+            <button follows="left|top" height="20" layout="topleft" left="10" top_pad="4" width="235"
+                    name="weather_inv_preset" label="Use Inventory Preset"
+                    tool_tip="Read a saved weather profile from a notecard in your inventory" />
+
+            <text follows="left|top" height="14" layout="topleft" left="10" top="92" width="235"
+                  name="weather_hdr_global" text_color="LabelSelectedColor">Global Controls</text>
+            <text follows="left|top" height="16" layout="topleft" left="10" top_pad="6" width="110"
+                  name="weather_kind_lbl">Current Weather Type</text>
+            <combo_box follows="left|top" height="20" layout="topleft" left_pad="4" top_delta="-2" width="121"
+                       name="weather_kind">
+                <combo_box.item label="Clear" value="clear" />
+                <combo_box.item label="Rain"  value="rain" />
+                <combo_box.item label="Snow"  value="snow" />
+            </combo_box>
+            <check_box follows="left|top" height="16" layout="topleft" left="10" top_pad="6" width="235"
+                       name="weather_enabled" label="Apply Global Weather"
+                       tool_tip="Off hands the weather back to each resident's own Weather menu" />
+
+            <text follows="left|top" height="14" layout="topleft" left="10" top="156" width="235"
+                  name="weather_hdr_dynamics" text_color="LabelSelectedColor">Weather Dynamics and Sound</text>
+            <text follows="left|top" height="14" layout="topleft" left="10" top_pad="4" width="235"
+                  name="weather_sub_dynamics">Dynamics</text>
+            <slider follows="left|top" height="16" layout="topleft" left="10" top_pad="2" width="235"
+                    name="weather_brightness" label="Precipitation Brightness"
+                    min_val="0" max_val="200" increment="1" initial_value="75" decimal_digits="0"
+                    show_text="true" label_width="128" text_width="34" />
+            <text follows="left|top" height="16" layout="topleft" left="10" top_pad="6" width="128"
+                  name="weather_tint_lbl">Precipitation Color</text>
+            <color_swatch can_apply_immediately="true" border.border_thickness="0"
+                          follows="left|top" height="18" layout="topleft" left_pad="4" top_delta="-1"
+                          width="40" name="weather_tint" tool_tip="Click to open the colour picker" />
+            <slider follows="left|top" height="16" layout="topleft" left="10" top_pad="4" width="235"
+                    name="weather_tint_amount" label="Colour strength"
+                    min_val="0" max_val="100" increment="1" initial_value="100" decimal_digits="0"
+                    show_text="true" label_width="128" text_width="34" />
+            <slider follows="left|top" height="16" layout="topleft" left="10" top_pad="6" width="235"
+                    name="weather_move" label="Weather Movement Speed"
+                    min_val="0" max_val="300" increment="5" initial_value="60" decimal_digits="0"
+                    show_text="true" label_width="128" text_width="34"
+                    tool_tip="Hundredths of a metre per second of sideways drift — 60 is 0.60" />
+
+            <text follows="left|top" height="14" layout="topleft" left="10" top="274" width="235"
+                  name="weather_sub_sound">Sound</text>
+            <check_box follows="left|top" height="16" layout="topleft" left="10" top_pad="2" width="235"
+                       name="weather_sound" label="Enable/Disable Sound" />
+            <slider follows="left|top" height="16" layout="topleft" left="10" top_pad="4" width="235"
+                    name="weather_volume" label="Sound Volume"
+                    min_val="0" max_val="100" increment="1" initial_value="60" decimal_digits="0"
+                    show_text="true" label_width="128" text_width="34" />
+
+            <!-- ── right column ─────────────────────────────────────────────────────────── -->
+            <text follows="left|top" height="14" layout="topleft" left="252" top="24" width="228"
+                  name="weather_hdr_particles" text_color="LabelSelectedColor">Particle Effects (Rain)</text>
+            <radio_group follows="left|top" height="78" layout="topleft" left="252" top_pad="4" width="228"
+                         name="weather_level">
+                <radio_item top_pad="2" layout="topleft" name="level4" value="4" label="Torrential — Maximum density" />
+                <radio_item top_pad="2" layout="topleft" name="level3" value="3" label="Heavy Rain — High density" />
+                <radio_item top_pad="2" layout="topleft" name="level2" value="2" label="Medium Rain — Medium density" />
+                <radio_item top_pad="2" layout="topleft" name="level1" value="1" label="Light Drizzle — Low density" />
+            </radio_group>
+            <slider follows="left|top" height="16" layout="topleft" left="252" top="126" width="228"
+                    name="weather_density" label="Particle density"
+                    min_val="10" max_val="300" increment="5" initial_value="100" decimal_digits="0"
+                    show_text="true" label_width="120" text_width="34" />
+            <slider follows="left|top" height="16" layout="topleft" left="252" top_pad="6" width="228"
+                    name="weather_velocity" label="Velocity"
+                    min_val="10" max_val="300" increment="5" initial_value="100" decimal_digits="0"
+                    show_text="true" label_width="120" text_width="34" />
+            <slider follows="left|top" height="16" layout="topleft" left="252" top_pad="6" width="228"
+                    name="weather_size" label="Size"
+                    min_val="10" max_val="400" increment="5" initial_value="100" decimal_digits="0"
+                    show_text="true" label_width="120" text_width="34" />
+
+            <text follows="left|top" height="14" layout="topleft" left="252" top="186" width="228"
+                  name="weather_hdr_sound_presets" text_color="LabelSelectedColor">Sound Presets</text>
+            <combo_box follows="left|top" height="20" layout="topleft" left="252" top_pad="4" width="228"
+                       name="weather_ambience" tool_tip="The bed the weather sits on">
+                <combo_box.item label="No ambience"   value="none" />
+                <combo_box.item label="Thunderstorms" value="thunder" />
+                <combo_box.item label="Steady Rain"   value="steady" />
+                <combo_box.item label="Wind"          value="wind" />
+                <combo_box.item label="Distant Storm" value="distant" />
+            </combo_box>
+            <combo_box follows="left|top" height="20" layout="topleft" left="252" top_pad="4" width="228"
+                       name="weather_near" tool_tip="What the precipitation sounds like where you are standing">
+                <combo_box.item label="Silent"       value="none" />
+                <combo_box.item label="Soft Patter"  value="soft" />
+                <combo_box.item label="Heavy Patter" value="heavy" />
+                <combo_box.item label="On Leaves"    value="leaves" />
+                <combo_box.item label="On Water"     value="water" />
+            </combo_box>
+            <button follows="left|top" height="20" layout="topleft" left="252" top_pad="6" width="90"
+                    name="weather_reset" label="Reset"
+                    tool_tip="Back to the default look and sound, keeping the weather type" />
+
+            <!-- ── footer ───────────────────────────────────────────────────────────────── -->
+            <text follows="left|top" height="28" layout="topleft" left="10" top="330" width="470"
+                  word_wrap="true" name="weather_status" text_color="0.79 0.64 0.15 1">
+            </text>
+            <button follows="left|top" height="22" layout="topleft" left="10" top_pad="4" width="80"
+                    name="weather_apply" label="Apply" />
+            <!-- top_delta="0" keeps Revert BESIDE Apply. Without it a left_pad button takes
+                 the previous widget's BOTTOM as its top and drops off the panel. -->
+            <button follows="left|top" height="22" layout="topleft" left_pad="6" top_delta="0" width="80"
+                    name="weather_revert" label="Revert" />
+       </panel>
     </tab_container>
 </floater>

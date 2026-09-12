@@ -30,9 +30,12 @@
 #include "llviewertexture.h"
 #include "llvoavatar.h"        // LLViewerPartSource holds an LLPointer<LLVOAvatar>: the destructor needs the complete type
 #include "wolfobjectprops.h"
+#include "wolfregionweather.h"
+#include "wolfweathersound.h"
 
 const std::string WolfWeather::KEYWORD_RAIN("wolfrain");
 const std::string WolfWeather::KEYWORD_SNOW("wolfsnow");
+const std::string WolfWeather::KEYWORD_CLEAR("wolfclear");
 
 namespace
 {
@@ -136,9 +139,23 @@ F32 WolfWeatherPartSource::landingZ(const LLVector3& cam, F32 x, F32 y, F32 half
     return mLandingZ[cy * LANDING_N + cx];
 }
 
+/**
+ * [WEATHER 2026-09-12] The wind the weather leans on, in metres/second, from the profile's
+ * movement speed (hundredths). The direction turns slowly — about a full turn every two
+ * minutes — so rain does not fall in one fixed diagonal for the whole session.
+ * Source: wolfstorm environment_manager.js _weatherWind().
+ */
+LLVector3 WolfWeatherPartSource::wind() const
+{
+    const F32 mps = (F32)mProfile.mMoveSpeed / 100.f;
+    const F32 a = mAge * 0.05f;
+    return LLVector3(cosf(a) * mps, sinf(a) * mps, 0.f);
+}
+
 void WolfWeatherPartSource::update(const F32 dt)
 {
     if (mMode == NONE) return;
+    mAge += dt;
     if (!mImagep)
     {
         mImagep = LLViewerFetchedTexture::sDefaultParticleImagep;
@@ -146,7 +163,11 @@ void WolfWeatherPartSource::update(const F32 dt)
     const LLVector3 cam = LLViewerCamera::getInstance()->getOrigin();
     mPosAgent = cam;
     updateLanding(cam, mMode == RAIN ? RAIN_BOX_XY_M : SNOW_BOX_XY_M, mMode == RAIN ? RAIN_TOP_M : SNOW_TOP_M);
-    const F32 rate = (mMode == RAIN) ? RAIN_RATE_BY_LEVEL[mLevel] : SNOW_RATE_BY_LEVEL[mLevel];
+    // The level's rate at the profile's density. The viewer's own particle cap
+    // (RenderMaxPartCount) is still the ceiling — shouldAddPart() below refuses when it is near
+    // — so a 300% blizzard sheds particles rather than the rest of the scene doing so.
+    const F32 base_rate = (mMode == RAIN) ? RAIN_RATE_BY_LEVEL[mLevel] : SNOW_RATE_BY_LEVEL[mLevel];
+    const F32 rate = base_rate * ((F32)mProfile.mDensity / 100.f);
     mCarry += rate * llmin(dt, 0.1f);
     S32 n = (S32)mCarry;
     mCarry -= (F32)n;
@@ -169,50 +190,71 @@ void WolfWeatherPartSource::emit(const LLVector3& cam)
     part->mEndGlow = 0.f;
     part->mGlow = LLColor4U(0, 0, 0, 0);
     part->mLastUpdateTime = 0.f;
+    const F32 size_k = (F32)mProfile.mSize / 100.f;
+    const F32 vel_k = (F32)mProfile.mVelocity / 100.f;
+    // The profile's colour: the kind's neutral colour moved towards the chosen tint, scaled by
+    // brightness. WolfWeatherProfile::drawColor is the one place that arithmetic lives, so the
+    // tab's swatch and the falling rain cannot drift apart.
+    const LLColor4 draw = mProfile.drawColor();
+    const LLVector3 w = wind();
     if (mMode == RAIN)
     {
         part->mPosAgent = cam + LLVector3(ll_frand(2.f * RAIN_BOX_XY_M) - RAIN_BOX_XY_M,
                                           ll_frand(2.f * RAIN_BOX_XY_M) - RAIN_BOX_XY_M,
                                           RAIN_BOTTOM_M + ll_frand(RAIN_TOP_M - RAIN_BOTTOM_M));
-        // Nothing spawns under a roof; a drop above one lives exactly long enough to reach it.
+        // THE GOLDEN RULE (Paul: "rain and snow must never go into houses"). Nothing spawns
+        // under a roof; a drop above one lives exactly long enough to REACH it and no longer.
         const F32 land = landingZ(cam, part->mPosAgent.mV[VX], part->mPosAgent.mV[VY], RAIN_BOX_XY_M);
         if (part->mPosAgent.mV[VZ] <= land) { delete part; return; }
-        // A near-vertical fall with a little lean, every drop at its own speed.
-        const F32 speed = RAIN_SPEED_BY_LEVEL[mLevel] * (0.85f + ll_frand(0.3f));
-        part->mVelocity = LLVector3(ll_frand(1.6f) - 0.8f, ll_frand(1.6f) - 0.8f, -speed);
+        // A near-vertical fall leaning on the wind, every drop at its own speed.
+        const F32 speed = RAIN_SPEED_BY_LEVEL[mLevel] * vel_k * (0.85f + ll_frand(0.3f));
+        part->mVelocity = LLVector3(w.mV[VX] + ll_frand(1.6f) - 0.8f,
+                                    w.mV[VY] + ll_frand(1.6f) - 0.8f,
+                                    -speed);
         part->mAccel = LLVector3::zero;
         part->mMaxAge = llmin(RAIN_AGE_S, (part->mPosAgent.mV[VZ] - land) / speed);
         // A streak, not a dot: oriented along the velocity. 7 cm wide — the first cut's 2.5 cm
         // was below a pixel at any distance and the rain was invisible (Paul: "snowing worked
-        // ... raining did not"; snow is 9 cm).
-        part->mScale.set(0.07f, 0.8f);
+        // ... raining did not"; snow is 9 cm). Size scales both, so heavier rain is fatter as
+        // well as longer.
+        part->mScale.set(0.07f * size_k, 0.8f * size_k);
         part->mStartScale = part->mScale;
         part->mEndScale = part->mScale;
-        part->mStartColor = LLColor4(0.82f, 0.9f, 1.0f, 0.65f);
-        part->mEndColor = LLColor4(0.82f, 0.9f, 1.0f, 0.5f);
+        part->mStartColor = LLColor4(draw.mV[VRED], draw.mV[VGREEN], draw.mV[VBLUE], 0.65f);
+        part->mEndColor = LLColor4(draw.mV[VRED], draw.mV[VGREEN], draw.mV[VBLUE], 0.5f);
         part->mColor = part->mStartColor;
-        part->mFlags = LLViewerPart::LL_PART_INTERP_COLOR_MASK | LLViewerPart::LL_PART_FOLLOW_VELOCITY_MASK | LLViewerPart::LL_PART_EMISSIVE_MASK;
+        // [2026-09-12] NOT emissive. LL_PART_EMISSIVE_MASK means "instead of being lit"
+        // (llpartdata.h:115), so rain glowed its own colour at midnight and under cover, which
+        // reads as falling light rather than water. Lit, it takes the sky and the region's own
+        // lighting like everything else does.
+        part->mFlags = LLViewerPart::LL_PART_INTERP_COLOR_MASK | LLViewerPart::LL_PART_FOLLOW_VELOCITY_MASK;
     }
     else
     {
         part->mPosAgent = cam + LLVector3(ll_frand(2.f * SNOW_BOX_XY_M) - SNOW_BOX_XY_M,
                                           ll_frand(2.f * SNOW_BOX_XY_M) - SNOW_BOX_XY_M,
                                           SNOW_BOTTOM_M + ll_frand(SNOW_TOP_M - SNOW_BOTTOM_M));
+        // THE GOLDEN RULE again: no flake is born below the roof above it, and none outlives
+        // the fall to its own landing height.
         const F32 land = landingZ(cam, part->mPosAgent.mV[VX], part->mPosAgent.mV[VY], SNOW_BOX_XY_M);
         if (part->mPosAgent.mV[VZ] <= land) { delete part; return; }
-        // Slow, each flake its own speed and a sideways drift; the wind mask lets the region
-        // wind push it as well.
-        const F32 speed = SNOW_SPEED_BY_LEVEL[mLevel] * (0.6f + ll_frand(0.8f));
-        part->mVelocity = LLVector3(ll_frand(1.0f) - 0.5f, ll_frand(1.0f) - 0.5f, -speed);
+        // Slow, each flake its own speed and a sideways drift on the profile's wind; the
+        // LL_PART_WIND_MASK below lets the region wind push it as well.
+        const F32 speed = SNOW_SPEED_BY_LEVEL[mLevel] * vel_k * (0.6f + ll_frand(0.8f));
+        part->mVelocity = LLVector3(w.mV[VX] + ll_frand(1.0f) - 0.5f,
+                                    w.mV[VY] + ll_frand(1.0f) - 0.5f,
+                                    -speed);
         part->mAccel = LLVector3::zero;
         part->mMaxAge = llmin(SNOW_AGE_S, (part->mPosAgent.mV[VZ] - land) / speed);
-        part->mScale.set(0.09f, 0.09f);
+        part->mScale.set(0.09f * size_k, 0.09f * size_k);
         part->mStartScale = part->mScale;
         part->mEndScale = part->mScale;
-        part->mStartColor = LLColor4(1.f, 1.f, 1.f, 0.95f);
-        part->mEndColor = LLColor4(1.f, 1.f, 1.f, 0.85f);
+        part->mStartColor = LLColor4(draw.mV[VRED], draw.mV[VGREEN], draw.mV[VBLUE], 0.95f);
+        part->mEndColor = LLColor4(draw.mV[VRED], draw.mV[VGREEN], draw.mV[VBLUE], 0.85f);
         part->mColor = part->mStartColor;
-        part->mFlags = LLViewerPart::LL_PART_INTERP_COLOR_MASK | LLViewerPart::LL_PART_WIND_MASK | LLViewerPart::LL_PART_EMISSIVE_MASK;
+        // [2026-09-12] NOT emissive, for the same reason as the rain above: snow that lights
+        // itself is glowing white confetti at night instead of snow.
+        part->mFlags = LLViewerPart::LL_PART_INTERP_COLOR_MASK | LLViewerPart::LL_PART_WIND_MASK;
     }
     part->mParameter = 0.f;
     LLViewerPartSim::getInstance()->addPart(part);
@@ -245,11 +287,105 @@ void WolfWeather::clear()
     apply();
 }
 
-// One source for the session, made when first needed; setDead() when nothing falls so the
-// simulation drops it, and a fresh one when the weather comes back.
+/**
+ * THE ONE PLACE THAT DECIDES WHAT THE SKY DOES. [WEATHER 2026-09-12]
+ *
+ * Most specific first:
+ *   0. an unsaved edit in About Land > Weather (setPreview) — not weather, the EDITOR showing
+ *      its own author what they are about to save, and seen by nobody else
+ *   1. a parcel prim's description (wolfrain / wolfsnow) — a script beats everything real
+ *   2. the REGION setting from About Land > Weather (wolfregionweather.cpp)
+ *   3. the resident's own Weather menu choice
+ *
+ * A region row of kind "clear" is a deliberate "no weather here" and outranks the menu; a
+ * region with NO ROW at all has no opinion and the menu still applies. Those are different
+ * things, and conflating them would make "turn the rain off for everyone" impossible.
+ *
+ * THE REGION'S LOOK is the house style even when the region is not forcing the weather:
+ * brightness, colour, movement speed, density/velocity/size and the sound layers are the estate
+ * owner's art direction for this place, and a resident who turns their own rain on in it should
+ * get that rain. Only WHETHER it rains and HOW HARD come from the precedence above.
+ *
+ * One particle source for the session, made when first needed; setDead() when nothing falls so
+ * the simulation drops it, and a fresh one when the weather comes back.
+ */
+// static
+bool WolfWeather::enabled()
+{
+    static LLCachedControl<bool> on(gSavedSettings, "WolfWeatherEnabled", true);
+    return on;
+}
+
+void WolfWeather::toggleEnabled()
+{
+    gSavedSettings.setBOOL("WolfWeatherEnabled", !enabled());
+    apply();
+}
+
 void WolfWeather::apply()
 {
-    const Mode want = effective();
+    // THE SWITCH FIRST. Off is off: no region weather, no parcel weather, no menu choice, and
+    // no preview — see WolfWeather::enabled().
+    if (!enabled())
+    {
+        mActive = WolfWeatherProfile();
+        mActiveSource = "off";
+        if (mSource.notNull())
+        {
+            mSource->setMode(WolfWeatherPartSource::NONE);
+            mSource->setDead();
+            mSource = nullptr;
+        }
+        WolfWeatherSound::instance().apply(mActive);
+        return;
+    }
+
+    WolfRegionWeather& rw = WolfRegionWeather::instance();
+    const bool on_grid = rw.onGrid();
+    WolfWeatherProfile prof = on_grid ? rw.stored() : WolfWeatherProfile();
+
+    if (mHavePreview)
+    {
+        prof = mPreview;
+        mActiveSource = "preview";
+    }
+    else
+    {
+        WolfWeatherProfile region;
+        const bool region_forces = rw.forcedProfile(region);
+        if (mForcedFound)
+        {
+            // A parcel prim's description carries the WHOLE profile, so its look and sound come
+            // with it rather than being taken from the region underneath.
+            prof = mForcedProfile;
+            mActiveSource = "parcel";
+        }
+        else if (region_forces)
+        {
+            prof.mKind  = region.mKind;
+            prof.mLevel = region.mLevel;
+            mActiveSource = "region";
+        }
+        else
+        {
+            prof.mKind  = (mUser == Mode::RAIN) ? WolfWeatherProfile::RAIN
+                        : (mUser == Mode::SNOW) ? WolfWeatherProfile::SNOW
+                                                : WolfWeatherProfile::CLEAR;
+            prof.mLevel = (mUser == Mode::RAIN) ? mUserRainLevel : mUserSnowLevel;
+            mActiveSource = "menu";
+        }
+        prof.mEnabled = true;
+        // A region tint is chosen for ONE kind. Falling back to the other kind's neutral colour
+        // stops a snow tint turning a resident's rain white, and vice versa.
+        if (!on_grid || rw.stored().mKind != prof.mKind)
+        {
+            prof.mTint = WolfWeatherProfile::neutralColor(prof.mKind);
+        }
+    }
+    prof.clampAll();
+    mActive = prof;
+
+    const Mode want = modeOf(prof.mKind);
     if (want == Mode::NONE)
     {
         if (mSource.notNull())
@@ -258,6 +394,7 @@ void WolfWeather::apply()
             mSource->setDead();
             mSource = nullptr;
         }
+        WolfWeatherSound::instance().apply(prof);
         return;
     }
     if (mSource.isNull() || mSource->isDead())
@@ -266,7 +403,29 @@ void WolfWeather::apply()
         LLViewerPartSim::getInstance()->addPartSource(mSource);
     }
     mSource->setMode(want);
-    mSource->setLevel(effectiveLevel());
+    mSource->setLevel(prof.mLevel);
+    mSource->setProfile(prof);
+    WolfWeatherSound::instance().apply(prof);
+}
+
+std::string WolfWeather::overriddenBy() const
+{
+    if (mForcedFound) return "parcel";
+    WolfWeatherProfile ignored;
+    if (WolfRegionWeather::instance().forcedProfile(ignored)) return "region";
+    return std::string();
+}
+
+void WolfWeather::onRegionWeatherChanged()
+{
+    apply();
+}
+
+void WolfWeather::setPreview(const WolfWeatherProfile* p)
+{
+    mHavePreview = (p != nullptr);
+    if (p) mPreview = *p;
+    apply();
 }
 
 void WolfWeather::idle()
@@ -277,6 +436,9 @@ void WolfWeather::idle()
         mNextSweep = now + SWEEP_INTERVAL_SECS;
         sweep();
     }
+    // [WEATHER 2026-09-12] The region's own answer, and the sound that goes with the sky.
+    WolfRegionWeather::instance().idle();
+    WolfWeatherSound::instance().idle();
 }
 
 // Source: fswolfwater.cpp sweep — every prim in draw distance is handed to the harvester,
@@ -291,18 +453,17 @@ void WolfWeather::sweep()
     WolfObjectProps& props = WolfObjectProps::instance();
     LLViewerParcelMgr* parcels = LLViewerParcelMgr::getInstance();
 
-    bool rain = false, snow = false;
-    S32 rain_level = 0, snow_level = 0;
+    // [WEATHER 2026-09-12] A prim in the parcel now carries a WHOLE profile, not just a level:
+    //   wolfrain3 bright=60 col=#8fb4e6 move=180 dens=170 amb=thunder near=heavy vol=85
+    // The strongest keyword in the parcel wins (clear over rain over snow — see
+    // WolfWeatherProfile::fromDescription), and at equal kind the higher level wins, so a
+    // builder can put a heavier prim in a corner without fighting the others.
+    bool found = false;
+    WolfWeatherProfile parcel_profile;
     S32 n_in_range = 0, n_known = 0;
-    // "wolfrain3" -> 3; "wolfrain" alone -> 2 (moderate). The strongest keyword in the parcel wins.
-    auto level_after = [](const std::string& lower, const std::string& keyword) -> S32
+    auto rank = [](WolfWeatherProfile::Kind k) -> S32
     {
-        const size_t at = lower.find(keyword);
-        if (at == std::string::npos) return 0;
-        size_t i = at + keyword.size();
-        while (i < lower.size() && lower[i] == ' ') ++i;
-        if (i < lower.size() && lower[i] >= '1' && lower[i] <= '4') return lower[i] - '0';
-        return 2;
+        return k == WolfWeatherProfile::CLEAR ? 3 : (k == WolfWeatherProfile::RAIN ? 2 : 1);
     };
     const S32 count = gObjectList.getNumObjects();
     for (S32 i = 0; i < count; ++i)
@@ -317,19 +478,33 @@ void WolfWeather::sweep()
         const WolfObjectProps::Props* known = props.get(objectp->getID());
         if (!known) continue;
         ++n_known;
-        const bool wants_rain = matches(known->mDescriptionLower, KEYWORD_RAIN);
-        const bool wants_snow = matches(known->mDescriptionLower, KEYWORD_SNOW);
-        if (!wants_rain && !wants_snow) continue;
+        if (!matches(known->mDescriptionLower, KEYWORD_RAIN)
+            && !matches(known->mDescriptionLower, KEYWORD_SNOW)
+            && !matches(known->mDescriptionLower, KEYWORD_CLEAR)) continue;
         if (!parcels->inAgentParcel(objectp->getPositionGlobal())) continue;
-        if (wants_rain) { rain = true; rain_level = llmax(rain_level, level_after(known->mDescriptionLower, KEYWORD_RAIN)); }
-        if (wants_snow) { snow = true; snow_level = llmax(snow_level, level_after(known->mDescriptionLower, KEYWORD_SNOW)); }
+        WolfWeatherProfile candidate;
+        if (!candidate.fromDescription(known->mDescriptionLower)) continue;
+        if (!found
+            || rank(candidate.mKind) > rank(parcel_profile.mKind)
+            || (candidate.mKind == parcel_profile.mKind && candidate.mLevel > parcel_profile.mLevel))
+        {
+            parcel_profile = candidate;
+        }
+        found = true;
     }
-    const Mode want = rain ? Mode::RAIN : (snow ? Mode::SNOW : Mode::NONE);
-    const S32 want_level = want == Mode::RAIN ? rain_level : (want == Mode::SNOW ? snow_level : 2);
-    if (want != mForced || want_level != mForcedLevel)
+    const Mode want = found ? modeOf(parcel_profile.mKind) : Mode::NONE;
+    const S32 want_level = found ? parcel_profile.mLevel : 2;
+    // A parcel prim's own look/sound settings travel with it, so re-applying on ANY change —
+    // not just kind and level — is what makes "dens=200" in a description do anything.
+    const bool changed = (want != mForced) || (want_level != mForcedLevel)
+                       || (found && !(parcel_profile == mForcedProfile))
+                       || (!found && mForcedFound);
+    if (changed)
     {
         mForced = want;
         mForcedLevel = want_level;
+        mForcedProfile = parcel_profile;
+        mForcedFound = found;
         LL_INFOS("WolfWeather") << "parcel weather: " << (want == Mode::RAIN ? "rain" : want == Mode::SNOW ? "snow" : "none")
                                 << " (user choice " << (mUser == Mode::RAIN ? "rain" : mUser == Mode::SNOW ? "snow" : "none") << ")" << LL_ENDL;
         apply();

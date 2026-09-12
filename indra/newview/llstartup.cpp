@@ -262,6 +262,7 @@
 #include "omnifilterengine.h"       // <FS:Zi> Omnifilter support
 #include "streamtitledisplay.h"
 #include "wolfalbumart.h"
+#include "wolfupdate.h"
 #include "tea.h"
 
 //
@@ -3361,6 +3362,11 @@ bool idle_startup()
 
         LLStartUp::setStartupState( STATE_STARTED );
         do_startup_frame();
+
+        // [UPDATE CHECK 2026-09-12] Once per run, and only now: the network is up, the user is
+        // in-world, and a dialog here is seen rather than lost behind the login screen. It never
+        // downloads anything — it offers the download page and the user decides.
+        WolfUpdate::checkOnce();
 
         // <FS:Ansariel> Draw Distance stepping; originally based on SpeedRez by Henri Beauchamp, licensed under LGPL
         if (gSavedSettings.getBOOL("FSRenderFarClipStepping"))

@@ -31,7 +31,8 @@
 
 #include "llfloaterland.h"
 #include "wolfgrid.h"        // <WolfViewer 2026-09-07>
-#include "wolfwavezones.h"   // <WolfViewer 2026-09-07>
+#include "wolfwavezones.h"
+#include "wolfregionweather.h"   // <WolfViewer 2026-09-12> About Land > Weather   // <WolfViewer 2026-09-07>
 
 #include "llavatarnamecache.h"
 #include "llfocusmgr.h"
@@ -333,6 +334,7 @@ LLFloaterLand::LLFloaterLand(const LLSD& seed)
     mFactoryMap["land_experiences_panel"] = LLCallbackMap(createPanelLandExperiences, this);
     mFactoryMap["land_environment_panel"] = LLCallbackMap(createPanelLandEnvironment, this);
     mFactoryMap["land_waves_panel"] = LLCallbackMap(createPanelLandWaves, this);   // <WolfViewer 2026-09-07>
+    mFactoryMap["land_weather_panel"] = LLCallbackMap(createPanelLandWeather, this);   // <WolfViewer 2026-09-12>
 
     sObserver = new LLParcelSelectionObserver();
     LLViewerParcelMgr::getInstance()->addObserver( sObserver );
@@ -352,6 +354,14 @@ bool LLFloaterLand::postBuild()
     {
         tab->removeTabPanel(mPanelWaves);
         mPanelWaves = nullptr;
+    }
+    // </WolfViewer>
+    // <WolfViewer 2026-09-12> Same for Weather: the region's weather lives in grid.weather, so
+    // on any other grid the tab goes and only the resident's own Weather menu applies.
+    if (tab && mPanelWeather && !WolfGrid::isWolfTerritories())
+    {
+        tab->removeTabPanel(mPanelWeather);
+        mPanelWeather = nullptr;
     }
     // </WolfViewer>
 
@@ -404,6 +414,15 @@ void* LLFloaterLand::createPanelLandWaves(void* data)
     self->mPanelWaves = new WolfPanelLandWaves(self->mParcel);
     return self->mPanelWaves;
 }
+
+// <WolfViewer 2026-09-12> About Land > Weather (wolfregionweather.cpp).
+void* LLFloaterLand::createPanelLandWeather(void* data)
+{
+    LLFloaterLand* self = (LLFloaterLand*)data;
+    self->mPanelWeather = new WolfPanelLandWeather(self->mParcel);
+    return self->mPanelWeather;
+}
+// </WolfViewer>
 // </WolfViewer>
 
 void* LLFloaterLand::createPanelLandCovenant(void* data)

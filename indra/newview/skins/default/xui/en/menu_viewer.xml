@@ -1412,6 +1412,15 @@
          name="WolfWeather"
          tear_off="true">
         <menu_item_check
+         label="Weather"
+         name="WolfWeatherEnabled">
+          <on_check
+           function="WolfWeather.IsEnabled" />
+          <on_click
+           function="WolfWeather.ToggleEnabled" />
+        </menu_item_check>
+        <menu_item_separator/>
+        <menu_item_check
          label="Rain"
          name="WolfWeatherRain">
           <menu_item_check.on_check

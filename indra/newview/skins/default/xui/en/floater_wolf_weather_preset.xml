@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<!-- WolfViewer 2026-09-12: "Use Inventory Preset" in About Land > Weather.
+     A weather preset is a NOTECARD whose text is a weather profile — the same JSON the web
+     viewer reads (wolfstorm/js/ui/floaters/land_weather_tab.js). A notecard rather than a new
+     asset type because it is the one thing a resident can already make, send, sell and copy.
+     Built directly by wolfregionweather.cpp (buildFromFile), so it needs no floater registry
+     entry. -->
+<floater
+ can_close="true"
+ can_minimize="false"
+ can_resize="true"
+ height="300"
+ min_height="200"
+ min_width="240"
+ layout="topleft"
+ name="floater_wolf_weather_preset"
+ help_topic="wolf_weather_preset"
+ save_rect="true"
+ title="Weather preset notecard"
+ width="300">
+    <floater.string name="str_none">You have no notecards to read a preset from.</floater.string>
+    <floater.string name="str_loading">Reading [NAME]…</floater.string>
+    <floater.string name="str_failed">That notecard does not contain a weather preset.</floater.string>
+    <floater.string name="str_no_perm">You do not have permission to read that notecard.</floater.string>
+
+    <text follows="left|top|right" height="26" layout="topleft" left="10" top="8" width="280"
+          word_wrap="true" name="preset_help">Pick a notecard holding a saved weather profile.</text>
+    <scroll_list follows="all" height="196" layout="topleft" left="10" top_pad="4" width="280"
+                 name="preset_list" draw_heading="false" multi_select="false" search_column="0">
+        <scroll_list.columns name="name" label="Notecard" relative_width="1.0" />
+    </scroll_list>
+    <text follows="left|bottom|right" height="16" layout="topleft" left="10" top_pad="4" width="280"
+          name="preset_status" text_color="0.79 0.64 0.15 1"></text>
+    <button follows="left|bottom" height="22" layout="topleft" left="10" top_pad="4" width="80"
+            name="preset_load" label="Load" />
+    <button follows="left|bottom" height="22" layout="topleft" left_pad="6" width="80"
+            name="preset_cancel" label="Cancel" />
+</floater>

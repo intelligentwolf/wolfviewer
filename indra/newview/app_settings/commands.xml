@@ -294,27 +294,18 @@
            execute_function="WolfEnv.ToggleEEP"
            is_running_function="WolfEnv.IsEEP"
            />
-  <!-- WolfViewer 2026-09-10 (Paul: "add a snow and rain toggle button next to EEP"). Your own
-       weather; a wolfrain / wolfsnow prim in the parcel overrides it (wolfweather.cpp). -->
-  <command name="wolf_rain"
+  <!-- WolfViewer 2026-09-12 (Paul: "allow the user to have a weather on off button rather than
+       the snow rain buttons ... so the user can turn off the region weather like how they turn
+       on and off the environment"). ONE button: the weather this region, parcel or you have
+       chosen, shown or not shown. It replaced separate Rain and Snow toggles, which asked the
+       resident to pick the weather at a time when the region sets it for everybody. -->
+  <command name="wolf_weather"
            available_in_toybox="true"
            icon="Command_WolfRain_Icon"
-           label_ref="Command_WolfRain_Label"
-           tooltip_ref="Command_WolfRain_Tooltip"
-           execute_function="WolfWeather.Toggle"
-           execute_parameters="rain"
-           is_running_function="WolfWeather.IsOn"
-           is_running_parameters="rain"
-           />
-  <command name="wolf_snow"
-           available_in_toybox="true"
-           icon="Command_WolfSnow_Icon"
-           label_ref="Command_WolfSnow_Label"
-           tooltip_ref="Command_WolfSnow_Tooltip"
-           execute_function="WolfWeather.Toggle"
-           execute_parameters="snow"
-           is_running_function="WolfWeather.IsOn"
-           is_running_parameters="snow"
+           label_ref="Command_WolfWeather_Label"
+           tooltip_ref="Command_WolfWeather_Tooltip"
+           execute_function="WolfWeather.ToggleEnabled"
+           is_running_function="WolfWeather.IsEnabled"
            />
   <command name="wolf_dictate"
            available_in_toybox="true"

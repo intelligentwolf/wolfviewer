@@ -12,14 +12,14 @@
   <!-- Step 1: which generator. Nothing else on the screen, so neither choice can be missed. -->
   <panel name="ai_step_choose" follows="all" layout="topleft" left="0" top="0" width="660" height="500" border="false">
    <text follows="left|top" layout="topleft" left="8" top="16" width="644" height="20" font="SansSerifLarge" name="ai_choose_title">What would you like to make?</text>
+<button follows="left|right|top" layout="topleft" left="8" top="52" width="644" height="34" name="ai_choose_small" label="1. Small model" />
+   <text follows="left|right|top" layout="topleft" left="16" top="92" width="628" height="36" word_wrap="true" name="ai_choose_small_note">A single textured object — furniture, a statue, a prop. Describe it, it is built, and it arrives in your Objects folder.</text>
      <!-- [2026-09-12] "2. Large project" withdrawn for now (Paul: remove the second option from
        wolfstorm and wolfviewer): four large builds failed on compiler rules at the grid's cost.
        The step panels and code stay; the button is hidden until the compiler corrects instead
        of rejects. Mirrors WolfStorm build_ai_tab.js. -->
-<button visible="false" follows="left|right|top" layout="topleft" left="8" top="52" width="644" height="34" name="ai_choose_small" label="1. Small model" />
-   <text follows="left|right|top" layout="topleft" left="16" top="92" width="628" height="36" word_wrap="true" name="ai_choose_small_note">A single textured object — furniture, a statue, a prop. Describe it, it is built, and it arrives in your Objects folder.</text>
-   <button follows="left|right|top" layout="topleft" left="8" top="140" width="644" height="34" name="ai_choose_large" label="2. Large project" />
-   <text follows="left|right|top" layout="topleft" left="16" top="180" width="628" height="36" word_wrap="true" name="ai_choose_large_note">A building or a settlement, with structural interiors. Designed in stages; you can close this window and it is delivered to your Objects folder when it is ready.</text>
+   <button visible="false" follows="left|right|top" layout="topleft" left="8" top="140" width="644" height="34" name="ai_choose_large" label="2. Large project" />
+   <text visible="false" follows="left|right|top" layout="topleft" left="16" top="180" width="628" height="36" word_wrap="true" name="ai_choose_large_note">A building or a settlement, with structural interiors. Designed in stages; you can close this window and it is delivered to your Objects folder when it is ready.</text>
   </panel>
 
   <!-- Step 2: the form for the chosen generator. -->

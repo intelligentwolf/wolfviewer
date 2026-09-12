@@ -106,4 +106,8 @@ jobs:
         with:
           name: WolfViewer-${{ matrix.name }}
           path: dist/**
-          if-no-files-found: warn
+          # [2026-09-12] error, NOT warn. With "warn" a build that produced no installer still
+          # went GREEN and simply uploaded nothing — which is how the Windows AVX2 download was
+          # absent from the website from w21 until somebody happened to notice. A platform that
+          # builds nothing is a failed release, and it should look like one.
+          if-no-files-found: error

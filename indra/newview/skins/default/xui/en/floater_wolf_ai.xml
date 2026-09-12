@@ -1,57 +1,92 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes" ?>
-<!-- [FLOATER SPLIT 2026-09-11] AI model creation, moved out of the build floater's AI tab. A generation runs for minutes, and as a tab it vanished the moment the user switched tools. Panel class unchanged (wolf_panel_ai, wolfai.cpp). Wolf Territories administrators only. -->
-<!-- [2026-09-11] min_height was 320, well under what this floater's own contents need.
-     The panel follows the floater, so dragging the window small CLIPPED everything past the new
-     bottom edge: the prompt and name fields still worked and "Build it" (y 264-286) fell outside
-     and silently stopped taking mouse clicks while still looking perfectly normal. Reported as
-     "the button does nothing"; no amount of enabled-state or callback checking would have found
-     it. Content runs to y=414, so the minimum is that plus the header and a margin. -->
-<floater
- can_close="true"
- can_minimize="true"
- can_resize="true"
- height="470"
- min_height="460"
- min_width="320"
- layout="topleft"
- name="wolf_ai"
- save_rect="true"
- single_instance="true"
- title="Create a Model with AI"
- width="430">
-<!-- The panel itself. Class wolf_panel_ai = WolfPanelAI in wolfai.cpp. -->
-<panel
- border="false"
- follows="all"
- label="AI"
- layout="topleft"
- mouse_opaque="false"
- help_topic="toolbox_ai_tab"
- name="wolf_ai_panel"
- class="wolf_panel_ai"
- left="0"
- top="0"
- width="295"
- height="420">
-    <panel.string name="str_not_configured">The AI tools are not configured on this server.</panel.string>
-    <panel.string name="str_not_wolf">The AI tools are a Wolf Territories feature.</panel.string>
-<panel.string name="str_credits">Wolf Credits: [BALANCE]</panel.string>
-<panel.string name="str_low_credits">A model costs about [COST] credits, and you need [NEED] to start one. You have [BALANCE]. Use Buy credits to top up.</panel.string>
-<panel.string name="str_updating">Asking the grid for your credit balance…</panel.string>
-    <panel.string name="str_no_mesh_provider">Model generation is not configured on this server yet. The script editor's AI button is available.</panel.string>
-    <panel.string name="str_ready">Describe an object. It is built with [MODEL], then uploaded to your Objects folder like any model upload. A model costs about [NEED] credits — you are charged what it actually costs. Building takes a few minutes; you can close this floater and it carries on.</panel.string>
-    <panel.string name="str_need_prompt">Say what the model should be.</panel.string>
-    <panel.string name="str_starting">Asking the AI to build it…</panel.string>
-    <!-- [AI CREDITS 2026-09-11] Balance, the Update button Paul asked for, and the way to buy more. -->
-<text follows="left|top" layout="topleft" left="8" top="4" width="150" height="16" font="SansSerifSmall" name="ai_credits">Wolf Credits: —</text>
-<button follows="left|top" layout="topleft" left_pad="2" top_delta="-3" width="70" height="20" name="ai_update" label="Update" tool_tip="Re-read your Wolf Credit balance" />
-<button follows="left|top" layout="topleft" left_pad="4" top_delta="0" width="90" height="20" name="ai_buy" label="Buy credits" tool_tip="Open the Wolf Credits store" />
-<text follows="left|top" layout="topleft" left="8" top="30" width="280" height="72" word_wrap="true" font="SansSerifSmall" name="ai_note">AI model</text>
-    <text follows="left|top" layout="topleft" left="8" top="106" width="280" height="16" font="SansSerifSmall" name="ai_prompt_lbl">What should it be?</text>
-    <text_editor follows="left|top" layout="topleft" left="8" top="124" width="280" height="86" name="ai_prompt" word_wrap="true" max_length="4000" tool_tip="A weathered wooden barrel with iron bands, about a metre tall" />
-    <text follows="left|top" layout="topleft" left="8" top="216" width="120" height="16" font="SansSerifSmall" name="ai_name_lbl">Name in inventory</text>
-    <line_editor follows="left|top" layout="topleft" left="8" top="234" width="280" height="22" name="ai_name" max_length_chars="63" tool_tip="What the object is called in your Objects folder" />
-    <button follows="left|top" layout="topleft" left="8" top="264" width="90" height="22" name="ai_build" label="Build it" />
-    <text follows="left|top" layout="topleft" left="8" top="294" width="280" height="120" word_wrap="true" font="SansSerifSmall" name="ai_status"></text>
-</panel>
+<!-- [2026-09-12] The AI wizard, matching WolfStorm's (wolfstorm js/ui/floaters/build_ai_tab.js):
+     choose -> form -> (large: confirm the charge) -> a status-only screen while it runs.
+     Four sibling step panels, one visible at a time (WolfPanelAI::setStep); every rect is static.
+     The previous version put the body in a scroll_container declared right="0" bottom="0":
+     under layout="topleft" a NON-negative right/bottom is measured from the parent's LEFT/BOTTOM
+     edge (llview.cpp:2549-2560), so that viewport was built with zero width and zero height and
+     the whole body was invisible. Offsets from the far edge must be negative (right="-8"). -->
+<floater can_close="true" can_minimize="true" can_resize="true" height="580" min_height="580" min_width="660" layout="topleft" name="wolf_ai" save_rect="true" single_instance="true" title="Create with AI" width="660">
+ <panel border="false" follows="all" layout="topleft" name="wolf_ai_panel" class="wolf_panel_ai" left="0" top="20" width="660" height="560">
+
+  <!-- Step 1: which generator. Nothing else on the screen, so neither choice can be missed. -->
+  <panel name="ai_step_choose" follows="all" layout="topleft" left="0" top="0" width="660" height="500" border="false">
+   <text follows="left|top" layout="topleft" left="8" top="16" width="644" height="20" font="SansSerifLarge" name="ai_choose_title">What would you like to make?</text>
+     <!-- [2026-09-12] "2. Large project" withdrawn for now (Paul: remove the second option from
+       wolfstorm and wolfviewer): four large builds failed on compiler rules at the grid's cost.
+       The step panels and code stay; the button is hidden until the compiler corrects instead
+       of rejects. Mirrors WolfStorm build_ai_tab.js. -->
+<button visible="false" follows="left|right|top" layout="topleft" left="8" top="52" width="644" height="34" name="ai_choose_small" label="1. Small model" />
+   <text follows="left|right|top" layout="topleft" left="16" top="92" width="628" height="36" word_wrap="true" name="ai_choose_small_note">A single textured object — furniture, a statue, a prop. Describe it, it is built, and it arrives in your Objects folder.</text>
+   <button follows="left|right|top" layout="topleft" left="8" top="140" width="644" height="34" name="ai_choose_large" label="2. Large project" />
+   <text follows="left|right|top" layout="topleft" left="16" top="180" width="628" height="36" word_wrap="true" name="ai_choose_large_note">A building or a settlement, with structural interiors. Designed in stages; you can close this window and it is delivered to your Objects folder when it is ready.</text>
+  </panel>
+
+  <!-- Step 2: the form for the chosen generator. -->
+  <panel name="ai_step_form" follows="all" layout="topleft" left="0" top="0" width="660" height="500" border="false" visible="false">
+   <button follows="left|top" layout="topleft" left="8" top="8" width="120" height="20" name="ai_back" label="← Start again" />
+   <text follows="left|top" layout="topleft" left="140" top="10" width="196" height="16" name="ai_credits">Wolf Credits: unavailable</text>
+   <button follows="left|top" layout="topleft" left="344" top="8" width="80" height="20" name="ai_update" label="Update" />
+   <button follows="left|top" layout="topleft" left="432" top="8" width="100" height="20" name="ai_buy" label="Buy credits" />
+   <text follows="left|top" layout="topleft" left="8" top="40" width="200" height="16" name="ai_mode_lbl">Project size</text>
+   <combo_box follows="left|top" layout="topleft" left="8" top="58" width="280" height="22" name="ai_mode">
+    <combo_box.item label="Building" value="structure" />
+    <combo_box.item label="Settlement" value="settlement" />
+    <combo_box.item label="Small model" value="mesh" />
+   </combo_box>
+   <text follows="left|right|top" layout="topleft" left="8" top="88" width="644" height="48" word_wrap="true" parse_urls="false" name="ai_note" />
+   <text follows="left|top" layout="topleft" left="8" top="142" width="300" height="16" name="ai_prompt_lbl">Describe what you want</text>
+   <text_editor follows="left|right|top" layout="topleft" left="8" top="160" width="644" height="140" word_wrap="true" parse_urls="false" max_length="4000" name="ai_prompt" />
+   <text follows="left|top" layout="topleft" left="8" top="306" width="300" height="16" name="ai_name_lbl">Name in inventory</text>
+   <line_editor follows="left|top" layout="topleft" left="8" top="324" width="400" height="22" max_length_chars="63" name="ai_name" />
+   <button follows="left|right|top" layout="topleft" left="8" top="356" width="644" height="24" name="ai_build" label="Build" />
+   <text follows="left|top" layout="topleft" left="8" top="392" width="300" height="16" name="ai_saved_title">Saved buildings</text>
+   <button follows="left|top" layout="topleft" left="560" top="390" width="92" height="20" name="ai_jobs_reload" label="Reload" />
+   <scroll_list follows="left|right|top" layout="topleft" left="8" top="412" width="644" height="84" name="ai_jobs" multi_select="false" draw_heading="true">
+    <scroll_list.columns name="name" label="Build" relative_width="0.6" />
+    <scroll_list.columns name="state" label="State" relative_width="0.4" />
+   </scroll_list>
+  </panel>
+
+  <!-- Step 3 (large only): the charge, stated plainly, before any money is spent. -->
+  <panel name="ai_step_confirm" follows="all" layout="topleft" left="0" top="0" width="660" height="500" border="false" visible="false">
+   <text follows="left|top" layout="topleft" left="8" top="16" width="644" height="20" font="SansSerifLarge" name="ai_confirm_title">Before your building is started</text>
+   <text follows="left|right|top" layout="topleft" left="8" top="44" width="644" height="190" word_wrap="true" parse_urls="false" name="ai_confirm_text" />
+   <button follows="left|right|top" layout="topleft" left="8" top="244" width="644" height="28" name="ai_confirm_start" label="Start the building" />
+   <text follows="left|right|top" layout="topleft" left="16" top="278" width="628" height="32" word_wrap="true" name="ai_confirm_note">I understand the charge and that it is taken automatically when it is ready.</text>
+   <button follows="left|top" layout="topleft" left="8" top="318" width="320" height="24" name="ai_confirm_back" label="Go back and change the description" />
+  </panel>
+
+  <!-- Step 4: the status, on its own. The job lives on the grid (or on WolfAI for a small
+       model), so closing the window is safe and reopening comes back here. -->
+  <panel name="ai_step_working" follows="all" layout="topleft" left="0" top="0" width="660" height="500" border="false" visible="false">
+   <text follows="left|right|top" layout="topleft" left="8" top="12" width="644" height="20" font="SansSerifLarge" name="ai_working_title" />
+   <text follows="left|right|top" layout="topleft" left="8" top="36" width="644" height="32" word_wrap="true" parse_urls="false" name="ai_status" />
+   <text follows="left|right|top" layout="topleft" left="8" top="72" width="644" height="40" word_wrap="true" name="ai_working_note" />
+   <scroll_container follows="left|right|top|bottom" layout="topleft" left="8" top="116" width="644" height="296" name="ai_scroll" opaque="false">
+    <panel name="ai_scroll_content" layout="topleft" left="0" top="0" width="626" height="700" border="false">
+     <text follows="left|top" layout="topleft" left="4" top="4" width="610" height="16" word_wrap="true" parse_urls="false" name="ai_job_name" />
+     <text follows="left|top" layout="topleft" left="4" top="24" width="610" height="32" word_wrap="true" parse_urls="false" name="ai_job_status" />
+     <text follows="left|top" layout="topleft" left="4" top="60" width="610" height="16" word_wrap="true" parse_urls="false" name="ai_job_cost" />
+     <panel follows="left|top" layout="topleft" left="4" top="80" width="610" height="210" name="ai_preview" border="false" />
+     <panel follows="left|top" layout="topleft" left="4" top="294" width="610" height="22" name="ai_view_controls" border="false">
+      <button follows="left|top" layout="topleft" left="0" top="0" width="56" height="22" name="ai_view_prev" label="Prev" />
+      <button follows="left|top" layout="topleft" left="64" top="0" width="56" height="22" name="ai_view_next" label="Next" />
+      <text follows="left|top" layout="topleft" left="128" top="3" width="300" height="18" name="ai_view_label" />
+     </panel>
+     <text_editor follows="left|top" layout="topleft" left="4" top="320" width="610" height="130" word_wrap="true" parse_urls="false" read_only="true" allow_scroll="true" name="ai_job_result" />
+     <text follows="left|top" layout="topleft" left="4" top="454" width="610" height="16" word_wrap="true" parse_urls="false" name="ai_grounding_note" />
+     <!-- Safe LLMediaCtrl subclass is created here with trusted_content=false in postBuild. -->
+     <panel follows="left|top" layout="topleft" left="4" top="474" width="610" height="110" name="ai_grounding" visible="false" border="false" />
+     <text_editor follows="left|top" layout="topleft" left="4" top="588" width="610" height="106" word_wrap="true" parse_urls="false" read_only="true" allow_scroll="true" name="ai_sources" />
+    </panel>
+   </scroll_container>
+   <button follows="left|bottom" layout="topleft" left="8" top="420" width="160" height="24" name="ai_collect" label="Collect" visible="false" />
+   <button follows="left|bottom" layout="topleft" left="176" top="420" width="260" height="24" name="ai_resume" label="Resume" visible="false" />
+   <button follows="right|bottom" layout="topleft" left="484" top="420" width="168" height="24" name="ai_working_done" label="Start another" />
+  </panel>
+
+  <!-- Shared: every step reports failures here. -->
+  <text_editor follows="left|right|bottom" layout="topleft" left="8" top="504" width="644" height="52" name="ai_error" word_wrap="true" parse_urls="false" read_only="true" allow_scroll="true" bg_readonly_color="1 0.945 0.949 1" text_readonly_color="0.533 0.075 0.216 1" />
+ </panel>
 </floater>

@@ -531,6 +531,7 @@ bool WolfWaveZones::cellEditable(S32 cx, S32 cy) const
 
 void WolfWaveZones::preview(const std::string& zones)
 {
+    if (!WolfGrid::isWolfTerritories()) { notify("These tools are only available on Wolf Territories Grid."); return; }
     LLViewerRegion* rgn = gAgent.getRegion();
     if (!rgn) return;
     mPreview[rgn->getHandle()] = zones;
@@ -543,6 +544,7 @@ void WolfWaveZones::preview(const std::string& zones)
 
 void WolfWaveZones::previewParams(const LLSD& params)
 {
+    if (!WolfGrid::isWolfTerritories()) { notify("These tools are only available on Wolf Territories Grid."); return; }
     // Uniforms, read every frame by lldrawpoolwater.cpp through params(): no rebake needed.
     mPreviewParams = params;
 }
@@ -568,6 +570,8 @@ void WolfWaveZones::clearPreview()
 
 void WolfWaveZones::save(const std::string& zones, const LLSD& params, bool enabled)
 {
+    // Source: WolfGrid login identity; the server separately verifies the captured request.
+    if (!WolfGrid::isWolfTerritories()) { notify("These tools are only available on Wolf Territories Grid."); return; }
     const Region* r = current();
     if (!r) { notify("This region is not on the Wolf Territories grid."); return; }
     if (mSaving) return;
@@ -916,6 +920,7 @@ bool WolfPanelLandWaves::postBuild()
 
 void WolfPanelLandWaves::onBrush(char z)
 {
+    if (!WolfGrid::isWolfTerritories()) { setStatus("These tools are only available on Wolf Territories Grid.", true); return; }
     if (mPainter) mPainter->setBrush(z);
     mBrushS->setToggleState(z == 's');
     mBrushO->setToggleState(z == 'o');
@@ -941,6 +946,7 @@ void WolfPanelLandWaves::armBakeConfirm()
 
 void WolfPanelLandWaves::draw()
 {
+    if (!WolfGrid::isWolfTerritories()) { refresh(); LLPanel::draw(); return; }
     const F64 now = LLFrameTimer::getElapsedSeconds();
     if (mBakeWaitUntil > 0.0)
     {
@@ -977,6 +983,14 @@ void WolfPanelLandWaves::draw()
 
 void WolfPanelLandWaves::refresh()
 {
+    if (!WolfGrid::isWolfTerritories())
+    {
+        setStatus("These tools are only available on Wolf Territories Grid.", true);
+        if (mNote) mNote->setText(std::string("These tools are only available on Wolf Territories Grid."));
+        if (mSave) mSave->setEnabled(false);
+        if (mPainter) mPainter->setEnabled(false);
+        return;
+    }
     if (gDisconnected) return;
     WolfWaveZones& wz = WolfWaveZones::instance();
     const WolfWaveZones::Region* r = wz.current();
@@ -1081,6 +1095,7 @@ LLSD WolfPanelLandWaves::paramsFromControls() const
 
 void WolfPanelLandWaves::onParamChanged()
 {
+    if (!WolfGrid::isWolfTerritories()) { setStatus("These tools are only available on Wolf Territories Grid.", true); return; }
     // Live in the water until Save or Revert, like the brush (WolfStorm land_waves_tab.js).
     WolfWaveZones& wz = WolfWaveZones::instance();
     if (!wz.current() || !mPainter) return;
@@ -1092,6 +1107,7 @@ void WolfPanelLandWaves::onParamChanged()
 
 void WolfPanelLandWaves::onSave()
 {
+    if (!WolfGrid::isWolfTerritories()) { setStatus("These tools are only available on Wolf Territories Grid.", true); return; }
     if (!mPainter) return;
     WolfWaveZones& wz = WolfWaveZones::instance();
     setStatus(getString("str_saving"), false);
@@ -1116,6 +1132,7 @@ void WolfPanelLandWaves::onRevert()
 // painted cells are kept, so ticking the box again brings them back.
 void WolfPanelLandWaves::onDefault()
 {
+    if (!WolfGrid::isWolfTerritories()) { setStatus("These tools are only available on Wolf Territories Grid.", true); return; }
     WolfWaveZones& wz = WolfWaveZones::instance();
     const WolfWaveZones::Region* r = wz.current();
     if (!r || !mPainter || !mEnabled) return;

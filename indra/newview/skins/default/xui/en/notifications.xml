@@ -2575,6 +2575,24 @@ Viewer ran out of memory while opening file. File might be too big.
   <tag>fail</tag>
   </notification>
 
+  <!-- <WolfViewer 2026-09-12> Shown once, when login completes, then gone (notifytip: expires
+       after NotificationTipToastLifeTime). Replaces the "wN" label in the top bar, which sat on
+       top of the parcel name. Paul: "Welcome to WolfViewer version name ignore the number". -->
+  <notification
+   icon="notifytip.tga"
+   name="WolfWelcome"
+   log_to_chat="false"
+   type="notifytip">
+Welcome to WolfViewer [NAME]
+  </notification>
+  <notification
+   icon="notifytip.tga"
+   name="WolfWelcomeUnnamed"
+   log_to_chat="false"
+   type="notifytip">
+Welcome to WolfViewer
+  </notification>
+
   <notification
    icon="notifytip.tga"
    name="LandmarkCreated"

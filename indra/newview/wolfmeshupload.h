@@ -136,6 +136,9 @@ namespace WolfMeshUpload
          *  what the menu route wants; the inventory gallery's "Upload > Model" passes the
          *  folder it was opened from (llinventoryfunctions.cpp:4228) and that must be honoured. */
         LLUUID      mFolderId;
+        // Source: wolfai.cpp meshCoro captures the initiating login; manual uploads retain defaults.
+        bool        mSessionBound = false;
+        LLUUID      mAgentId, mSessionId;
     };
 
     /** Progress line for the floater. Always called on the main thread. */

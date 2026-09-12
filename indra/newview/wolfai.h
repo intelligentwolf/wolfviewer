@@ -1,161 +1,163 @@
 /**
  * @file wolfai.h
- * @brief AI assist — write/edit an LSL script, and generate a textured model into inventory.
- *
- * [AI 2026-09-11] Paul: "we're going to AI enable the viewer and browser … in the script editor
- * it will have an AI button … in the build menu there will be an AI option … it will generate
- * 3d models with textures … only admin users with a userlevel of above 230 will have access."
- *
- * WHERE THE WORK HAPPENS. Nothing here talks to an AI provider. The proxy holds the keys and
- * does the calling (rust_proxy/src/main.rs, the AI assist section); this is a thin client over
- * five routes on WolfGrid::PROXY_API_BASE:
- *   GET  /ai_available        may this account use the tools, and which are configured
- *   POST /ai_script           write or edit one LSL script (answers in seconds)
- *   POST /ai_mesh             start a model generation, answers a job id
- *   GET  /ai_mesh_status?job= progress
- *   GET  /ai_mesh_result?job= the model file's bytes
- * A generation runs for MINUTES, which is why it is a job plus a poll rather than one request.
- *
- * NOTHING HERE IS A SECURITY BOUNDARY. scriptReady()/meshReady() decide only whether to draw a
- * button. The proxy re-verifies the session and reads the account level from the grid on every
- * route, so a forged "yes" here buys a button that answers 403.
- *
- * THE MODEL REACHES INVENTORY THROUGH THE EXISTING UPLOADER. The bytes are written to a temp
- * file and handed to WolfMeshUpload, which already does Y-up to SL Z-up, the glTF V flip,
- * per-prim normalisation, >8 materials into a linkset, >65535 verts split, the texture uploads
- * and the TextureEntry. A second copy of that here would drift from the tested one.
- *
+ * @brief Authenticated AI scripts, small models, and durable architectural builds.
  * $LicenseInfo:firstyear=2026&license=viewerlgpl$
  * WolfViewer — Wolf Territories Grid. Modified by IntelligentWolf Ltd, 2026.
  * $/LicenseInfo$
  */
-
 #ifndef WOLF_AI_H
 #define WOLF_AI_H
-
-#include "llpanel.h"      // WolfPanelAI (the Build > AI tab) derives from LLPanel
-#include "llframetimer.h" // WolfPanelAI::mRefreshTimer, see draw()
+#include "llpanel.h"
+#include "llframetimer.h"
 #include "llsingleton.h"
 #include "lluuid.h"
 #include <functional>
+#include <map>
+#include <set>
 #include <string>
+#include <vector>
 
 class WolfAI : public LLSingleton<WolfAI>
 {
     LLSINGLETON(WolfAI);
-
 public:
-    /** What /ai_available said. `mScript` and `mMesh` are separate because the two tools run on
-     *  different providers and a server can hold one key and not the other. */
+    // Source: main.rs ai_identify; never replace credentials after suspension.
+    struct Session
+    {
+        LLUUID agent, session;
+        static Session capture();
+        bool current() const;
+        bool operator==(const Session& rhs) const { return agent == rhs.agent && session == rhs.session; }
+    };
+    // Source: build_jobs.rs Quote and build_service.rs public_job.
+    struct BuildQuote
+    {
+        S32 maxCredits = 0, maxComponents = 0, maxExtent = 0;
+        bool valid = false;
+    };
+    struct BuildJob
+    {
+        LLUUID id, item;
+        std::string name, state, detail;
+        S32 completed = 0, total = 0, cost = 0, previews = 0;
+        bool paid = false;
+        BuildQuote quote;
+        LLSD data;
+        bool active() const;
+        bool collectable() const;
+        bool resumable() const;
+    };
     struct Avail
     {
-        bool        mAsked      = false;   // have we ever had an answer
-        bool        mEnabled    = false;   // any provider configured
-        bool        mAllowed    = false;   // this account's level is high enough
-        bool        mScript     = false;   // allowed AND the script provider is configured
-        bool        mMesh       = false;   // allowed AND the mesh provider is configured
-        std::string mScriptModel;
-        std::string mMeshModel;
-        // [AI CREDITS 2026-09-11] What the resident has and what it costs. The balance is the
-        // control now — the account-level gate is gone, so any verified grid resident may use
-        // the tools and their credits are what limit them.
-        S32         mBalance      = 0;
-        S32         mScriptCost   = 1;
-        S32         mMeshMin      = 45;   // headroom needed to START a model
-        S32         mMeshTypical  = 35;   // what the user is TOLD it costs
-        F64         mPencePerCredit = 0.0;
-        std::string mBuyUrl;
+        bool mAsked = false, mEnabled = false, mAllowed = false;
+        bool mScript = false, mMesh = false, mBuild = false, mBalanceKnown = false;
+        std::string mScriptModel, mMeshModel, mBuyUrl, mError;
+        S32 mBalance = 0, mScriptCost = 0, mMeshMin = 0, mMeshTypical = 0;
+        F64 mPencePerCredit = 0.;
+        BuildQuote mStructure, mSettlement;
     };
-
     const Avail& avail() const { return mAvail; }
     bool scriptReady() const { return mAvail.mScript; }
     bool meshReady() const { return mAvail.mMesh; }
-
-    /** Ask the proxy, unless a recent answer is already held. Safe to call on every UI refresh. */
+    bool buildReady() const { return mAvail.mBuild; }
     void refresh(bool force = false);
-    /** The panel's Update button: forget the cached answer and ask again right now. */
     void refreshNow() { refresh(true); }
-
-    /** ok = true with the script source, or false with a message written to be shown. */
-    typedef std::function<void(bool ok, const std::string& script_or_error)> script_fn;
-    /** Write (`existing` empty) or edit one LSL script. Returns at once; the callback runs on
-     *  the main thread exactly once. */
+    void syncSession();
+    typedef std::function<void(bool, const std::string&)> script_fn;
+    typedef std::function<void(const std::string&, bool)> progress_fn;
+    typedef std::function<void(bool, const std::string&, const LLUUID&)> done_fn;
     void requestScript(const std::string& prompt, const std::string& existing, script_fn done);
-
-    /** Progress line while a model is generated and uploaded. */
-    typedef std::function<void(const std::string& status, bool is_error)> progress_fn;
-    /** Final outcome of a generation, exactly once, on the main thread. */
-    typedef std::function<void(bool ok, const std::string& message, const LLUUID& item_id)> done_fn;
-    /** Generate a model and put it in inventory under `inv_name`. */
-    void generateModel(const std::string& prompt, const std::string& inv_name,
-                       progress_fn progress, done_fn done);
-
-    /** True while a generation started by this viewer is still running. */
+    void generateModel(const std::string& prompt, const std::string& inv_name, progress_fn progress, done_fn done);
     bool generating() const { return mGenerating; }
-
-    /** Caps the service also enforces; mirrored so the UI can stop a hopeless request early. */
     static const S32 MAX_PROMPT_CHARS = 4000;
     static const S32 MAX_SCRIPT_CHARS = 64000;
 
+    typedef std::function<void(bool, const std::string&)> build_fn;
+    typedef std::function<void(bool, const LLSD::Binary&, const std::string&)> bytes_fn;
+    void listBuilds(build_fn done, std::function<bool()> valid = {});
+    void getBuild(const LLUUID& id, build_fn done, std::function<bool()> valid = {});
+    void startBuild(const std::string& prompt, const std::string& size, S32 maximum, build_fn done);
+    void resumeBuild(const BuildJob& job, build_fn done);
+    void collectBuild(const BuildJob& job, build_fn done);
+    void getBuildPreview(const LLUUID& id, S32 view, bytes_fn done);
+    void getBuildGrounding(const LLUUID& id, bytes_fn done);
+    const std::map<LLUUID, BuildJob>& jobs() const { return mJobs; }
+    const BuildJob* job(const LLUUID& id) const;
+    bool pending(const std::string& key) const { return mTasks.count(key) != 0; }
+    U64 revision() const { return mRevision; }
+    void error(const std::string& key, const std::string& message);
+    std::string errors() const;
+    // Task/result state survives panel close and is reset only by a different login session.
+    std::string mDraft, mDraftName, mDraftMode = "structure", mMeshStatus;
+    LLUUID mSelected, mMeshItem, mLastStarted;
 private:
-    static void availCoro();
-    static void scriptCoro(std::string prompt, std::string existing, script_fn done);
-    static void meshCoro(std::string prompt, std::string inv_name, progress_fn progress, done_fn done);
-
+    static void availCoro(Session auth);
+    static void scriptCoro(Session auth, std::string prompt, std::string existing, script_fn done);
+    static void meshCoro(Session auth, std::string prompt, std::string inv_name, progress_fn progress, done_fn done);
+    static bool parseBuildJob(const LLSD& data, BuildJob& job, std::string& error);
+    void mergeJob(const BuildJob& job);
+    void buildRequest(const std::string& path, LLSD body, const std::string& task, build_fn done);
+    void privateBytes(const std::string& path, const std::string& mime, bytes_fn done);
+    Session mSession;
     Avail mAvail;
-    bool  mFetching   = false;
-    bool  mGenerating = false;
-    F64   mNextRefresh = 0.0;
+    bool mFetching = false, mGenerating = false;
+    F64 mNextRefresh = 0.;
+    U64 mMutation = 0, mRevision = 0;
+    std::map<LLUUID, BuildJob> mJobs;
+    std::set<std::string> mTasks;
+    std::map<std::string, std::string> mErrors;
 };
 
-/**
- * Build floater > AI (floater_tools.xml wolf_ai_panel).
- *
- * Paul: "in the build menu there will be an AI option that you click, it will generate 3d models
- * with textures … then it will upload it to the persons inventory." The panel is a description
- * box, a name, a button and a status line; the generation and the upload are WolfAI's.
- *
- * Modelled on WolfPanelTerrainPaint (wolfterrainpaint.h:332) and registered the same way, with
- * an LLPanelInjector, so the tab is XUI like every other tool tab.
- */
 class WolfPanelAI : public LLPanel
 {
 public:
     WolfPanelAI();
     bool postBuild() override;
     void refresh() override;
-
-    // <WolfViewer 2026-09-11> refresh() owns the Build button's enabled state, and it was called
-    // in exactly two places: postBuild, and the end of a generation. postBuild runs ONCE, when
-    // the floater is first constructed — every later open reuses the same panel. So if the panel
-    // was first built before /ai_available had answered (WolfAI::refresh returns early while
-    // gAgentID is still null), `usable` was false, the button was disabled, and NOTHING ever
-    // re-evaluated it for the rest of the session.
-    //
-    // Paul hit exactly that: open the floater, fill it in, and the button will not take a click.
-    // It looked like a rights problem and was not — the panel simply never asked again.
-    //
-    // Redrawing is the one thing guaranteed to happen while the floater is visible, so the state
-    // is re-evaluated here. Throttled because draw() runs every frame; WolfAI::refresh() is
-    // itself cached (AVAIL_CACHE_SECS) so this costs a few comparisons, not a round trip.
     void draw() override;
-
+    void onVisibilityChange(bool visible) override;
 private:
+    // [2026-09-12] The wizard, matching WolfStorm: choose -> form -> (large) confirm -> working.
+    enum class Step { Choose, Form, Confirm, Working };
+    void setStep(Step step);
+    void onChoose(const std::string& mode);
+    void onBack();
+    void onConfirmStart();
+    void onWorkingDone();
+    void autoCollect(const WolfAI::BuildJob& job);
     void onBuild();
     void onUpdateCredits();
     void onBuyCredits();
-    void setStatus(const std::string& msg, bool error);
-
-    class LLTextEditor* mPrompt  = nullptr;
-    class LLLineEditor* mName    = nullptr;
-    class LLButton*     mBuild   = nullptr;
-    class LLTextBox*    mNote    = nullptr;
-    class LLTextBox*    mStatus  = nullptr;
-    class LLTextBox*    mCredits = nullptr;
-    class LLButton*     mUpdate  = nullptr;
-    class LLButton*     mBuy     = nullptr;
-    LLFrameTimer        mRefreshTimer;   // see draw()
-    bool                mFitted = false;  // see draw() / WolfGrid::fitFloaterToContents
+    void onMode();
+    void onSelect();
+    void onReload();
+    void onResume();
+    void onCollect();
+    void onView(S32 direction);
+    void renderJobs();
+    void loadPresentation();
+    void invalidateReads();
+    void saveDraft();
+    void setStatus(const std::string& message, bool error);
+    bool accepts(const WolfAI::Session& auth, U64 generation) const;
+    class LLTextEditor *mPrompt = nullptr, *mError = nullptr, *mResult = nullptr, *mSources = nullptr;
+    class LLLineEditor* mName = nullptr;
+    class LLButton *mBuild = nullptr, *mCollect = nullptr, *mResume = nullptr;
+    class LLTextBox *mNote = nullptr, *mStatus = nullptr, *mCredits = nullptr;
+    class LLComboBox* mMode = nullptr;
+    class LLScrollListCtrl* mJobs = nullptr;
+    LLPanel *mStepChoose = nullptr, *mStepForm = nullptr, *mStepConfirm = nullptr, *mStepWorking = nullptr;
+    class LLTextBox *mConfirmText = nullptr, *mWorkingTitle = nullptr, *mWorkingNote = nullptr;
+    Step mStep = Step::Choose;
+    std::set<LLUUID> mAutoCollected;   // jobs this panel has already tried to collect on its own
+    class WolfAIPreview* mPreview = nullptr;
+    class WolfAIGrounding* mGrounding = nullptr;
+    WolfAI::Session mSession;
+    LLFrameTimer mRefreshTimer;
+    U64 mReadGeneration = 0, mPresentationGeneration = 0, mShownRevision = ~U64(0);
+    bool mListPending = false, mPollPending = false, mNeedList = true, mBuilt = false;
+    F64 mNextPoll = 0.;
+    LLUUID mPresentationJob;
+    S32 mView = 0, mPresentationCount = -1;
 };
-
-#endif // WOLF_AI_H
+#endif

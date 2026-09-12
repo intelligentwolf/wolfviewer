@@ -83,7 +83,8 @@
 #include "lluictrlfactory.h"
 #include "lltrans.h"
 #include "llviewercontrol.h"
-#include "wolfai.h"   // [AI 2026-09-11] the script editor's AI button
+#include "wolfai.h"
+#include "wolfgrid.h"   // [AI 2026-09-11] the script editor's AI button
 #include "wolflslcomplete.h"   // [AUTOCOMPLETE 2026-09-11]
 #include "llappviewer.h"
 #include "llfloatergotoline.h"
@@ -985,16 +986,22 @@ void LLScriptEdCore::refreshWolfAIButton()
     // Ask (or re-use a recent answer); the button appears when the reply arrives, which is
     // why draw() calls this every frame rather than relying on postBuild alone.
     WolfAI::instance().refresh();
-    btn->setVisible(WolfAI::instance().scriptReady());
+    btn->setVisible(true);
 }
 
 void LLScriptEdCore::onBtnWolfAI()
 {
+    // Source: WolfGrid login identity; WolfAI also binds all HTTP work to this session.
+    if (!WolfGrid::isWolfTerritories())
+    {
+        LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE", "These tools are only available on Wolf Territories Grid."));
+        return;
+    }
     if (!WolfAI::instance().scriptReady())
     {
         // The level can drop between the button appearing and being pressed.
         LLNotificationsUtil::add("GenericAlertOK",
-            LLSD().with("MESSAGE", "The AI tools are limited to grid administrators."));
+            LLSD().with("MESSAGE", "AI script generation is currently unavailable. Please retry shortly."));
         refreshWolfAIButton();
         return;
     }
@@ -1028,6 +1035,12 @@ void LLScriptEdCore::onBtnWolfAI()
 
 bool LLScriptEdCore::onWolfAIPrompt(const LLSD& notification, const LLSD& response)
 {
+    // Source: WolfGrid login identity; WolfAI also binds all HTTP work to this session.
+    if (!WolfGrid::isWolfTerritories())
+    {
+        LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE", "These tools are only available on Wolf Territories Grid."));
+        return false;
+    }
     // Source: llpaneloutfitsinventory.cpp:221 onSaveCommit — option 0 is OK, the typed text is
     // response["message"].
     if (LLNotificationsUtil::getSelectedOption(notification, response) != 0) return false;
@@ -1045,11 +1058,12 @@ bool LLScriptEdCore::onWolfAIPrompt(const LLSD& notification, const LLSD& respon
     // The callback captures `this`. LLScriptEdCore lives as long as its preview floater, and a
     // closed floater is destroyed, so the handle guard is what makes a late reply safe.
     LLHandle<LLPanel> handle = getHandle();
+    const auto auth = WolfAI::Session::capture();
     WolfAI::instance().requestScript(prompt, existing,
-        [handle](bool ok, const std::string& result)
+        [handle, auth](bool ok, const std::string& result)
         {
             LLScriptEdCore* self = dynamic_cast<LLScriptEdCore*>(handle.get());
-            if (!self) return;   // the editor was closed while the AI was thinking
+            if (!self || !auth.current()) return;   // Closed editor or a different login.
             self->onWolfAIResult(ok, result);
         });
     return false;

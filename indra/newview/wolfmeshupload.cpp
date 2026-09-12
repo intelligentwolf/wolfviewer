@@ -54,6 +54,9 @@
 #include "llviewerassetupload.h"
 #include "llviewerinventory.h"
 #include "llviewerregion.h"
+#include "llstatusbar.h"
+#include "llnotificationsutil.h"
+#include "llviewercontrol.h"
 #include "wolfgrid.h"
 
 // Source: wolfstorm/js/ui/floaters/floater_mesh_upload.js. Every number, every conversion and
@@ -1702,6 +1705,13 @@ namespace
      *  Source: rust_proxy/src/main.rs:1640-1694 — MeshSubmeshIn, MeshPrimIn, UploadMeshRequest.
      *  Field names are the Rust field names verbatim; unknown fields are ignored by serde, and
      *  fields with #[serde(default)] must be omitted rather than sent as null. */
+    // Source: llagentdata.h globals; checked at every AI suspension-to-write boundary below.
+    bool uploadSessionCurrent(const WolfMeshUpload::Options& options)
+    {
+        return !options.mSessionBound || (options.mAgentId.notNull() && options.mSessionId.notNull()
+            && options.mAgentId == gAgentID && options.mSessionId == gAgentSessionID);
+    }
+
     std::string buildRequestBody(const WolfMeshUpload::Model& model,
                                  const WolfMeshUpload::Options& options,
                                  const LLUUID& folder_id,
@@ -1711,7 +1721,7 @@ namespace
         o << '{';
         o << "\"name\":" << jsonString(options.mName);
         o << ",\"description\":" << jsonString(options.mDescription);
-        o << ",\"agent_id\":" << jsonString(gAgentID.asString());
+        o << ",\"agent_id\":" << jsonString((options.mSessionBound ? options.mAgentId : gAgentID).asString());
         o << ",\"folder_id\":" << jsonString(folder_id.asString());
         o << ",\"scale\":";
         appendVec3(o, model.overallScale());
@@ -1793,7 +1803,7 @@ namespace
 
     /** Inside a coroutine: POST a JSON body, return the HTTP status and the raw reply.
      *  Source: wolfspeech.cpp:52-86 postRaw — the established WolfViewer proxy POST. */
-    S32 postJson(const std::string& url, const std::string& body, LLSD::Binary& reply, std::string& error)
+    S32 postJson(const std::string& url, const std::string& body, LLSD::Binary& reply, std::string& error, const WolfMeshUpload::Options& options)
     {
         LLCoreHttpUtil::HttpCoroutineAdapter::ptr_t adapter =
             std::make_shared<LLCoreHttpUtil::HttpCoroutineAdapter>("WolfMeshUpload", LLCore::HttpRequest::DEFAULT_POLICY_ID);
@@ -1807,8 +1817,8 @@ namespace
         // /upload_mesh does not check these today (only /stt and /tts call speech_authorise,
         // main.rs:3768, :3830), but every Wolf proxy call sends the pair so the endpoint can be
         // gated later without a viewer release.
-        headers->append("X-Wolf-Agent", gAgentID.asString());
-        headers->append("X-Wolf-Session", gAgentSessionID.asString());
+        headers->append("X-Wolf-Agent", (options.mSessionBound ? options.mAgentId : gAgentID).asString());
+        headers->append("X-Wolf-Session", (options.mSessionBound ? options.mSessionId : gAgentSessionID).asString());
 
         LLCore::BufferArray::ptr_t raw(new LLCore::BufferArray());
         raw->append(body.data(), body.size());
@@ -1867,9 +1877,83 @@ namespace
         return true;
     }
 
+    // Source: llviewerassetupload.cpp:896-1046 AssetInventoryUploadCoproc; AI uses the same
+    // prepare/body/file/finish operations directly, with login checks after every suspension.
+    // The AI panel owns visible errors/progress, so this path never opens a generic upload
+    // dialog or signals an unrelated snapshot floater. Manual uploads retain the original queue.
+    LLUUID uploadAITexture(const std::string& cap, const LLResourceUploadInfo::ptr_t& info,
+                           const WolfMeshUpload::Options& options, std::string& error)
+    {
+        auto current = [&]()
+        {
+            if (uploadSessionCurrent(options)) return true;
+            error = "Your session changed. Reopen the AI window.";
+            return false;
+        };
+        if (!current()) return LLUUID::null;
+        LLSD result = info->prepareUpload();
+        if (result.has("error"))
+        {
+            error = "The generated texture could not be prepared for upload.";
+            info->failedUpload(result, error); return LLUUID::null;
+        }
+        auto adapter = std::make_shared<LLCoreHttpUtil::HttpCoroutineAdapter>("WolfAI texture", LLCore::HttpRequest::DEFAULT_POLICY_ID);
+        auto request = std::make_shared<LLCore::HttpRequest>();
+        auto httpOptions = std::make_shared<LLCore::HttpOptions>();
+        // Source: llviewerassetupload.cpp:65 LL_ASSET_UPLOAD_TIMEOUT_SEC.
+        httpOptions->setTimeout(60);
+        if (!current()) return LLUUID::null;
+        result = adapter->postAndSuspend(request, cap, info->generatePostBody(), httpOptions);
+        if (!current()) return LLUUID::null;
+        auto status = LLCoreHttpUtil::HttpCoroutineAdapter::getStatusFromLLSD(result[LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS]);
+        if (!status || result.has("error"))
+        {
+            error = "The region could not accept a generated texture. Retry from the AI window.";
+            info->failedUpload(result, error); return LLUUID::null;
+        }
+        const std::string uploader = result["uploader"].asString();
+        if (!uploader.empty() && info->getAssetId().notNull())
+        {
+            if (!current()) return LLUUID::null;
+            result = adapter->postFileAndSuspend(request, uploader, info->getAssetId(), info->getAssetType(), httpOptions);
+            if (!current()) return LLUUID::null;
+            status = LLCoreHttpUtil::HttpCoroutineAdapter::getStatusFromLLSD(result[LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS]);
+            if (!status || result["state"].asString() != "complete")
+            {
+                error = "A generated texture upload failed. The model was not uploaded.";
+                info->failedUpload(result, error); return LLUUID::null;
+            }
+            if (!result.has("success")) result["success"] = true;
+            const S32 price = result["upload_price"].asInteger();
+            if (price > 0)
+            {
+                LLStatusBar::sendMoneyBalanceRequest();
+                if (gSavedSettings.getBOOL("FSShowUploadPaymentToast"))
+                    LLNotificationsUtil::add("UploadPayment", LLSD().with("AMOUNT", llformat("%d", price)));
+            }
+        }
+        // Source: original no-uploader branch still calls finishUpload, which applies returned
+        // server inventory data. Only an actual new_asset lets this AI model continue.
+        if (!current()) return LLUUID::null;
+        if (result["new_asset"].asUUID().isNull() || result["new_inventory_item"].asUUID().isNull())
+        {
+            error = "The region did not confirm the generated texture upload.";
+            info->failedUpload(result, error); return LLUUID::null;
+        }
+        info->finishUpload(result);
+        return result["new_asset"].asUUID();
+    }
+
     void uploadCoro(WolfMeshUpload::model_ptr_t model, WolfMeshUpload::Options options,
                     WolfMeshUpload::progress_fn progress, WolfMeshUpload::done_fn done)
     {
+        auto sessionOk = [&]()
+        {
+            if (uploadSessionCurrent(options)) return true;
+            done(false, "Your session changed. Reopen the AI window.", LLUUID::null);
+            return false;
+        };
+        if (!sessionOk()) return;
         // NOTE: temp files written for embedded textures are owned by the WolfTextureUpload that
         // reads them and are deleted in its destructor — see the note on its constructor. This
         // coroutine must not delete them, because it can give up (timeout) while an upload is
@@ -1918,6 +2002,7 @@ namespace
             U32 n = 0;
             for (const WolfMeshUpload::Submesh* face : distinct)
             {
+                if (!sessionOk()) return;
                 ++n;
                 progress(llformat("Uploading texture %u/%u…", n, (U32)distinct.size()), false);
 
@@ -1948,9 +2033,16 @@ namespace
                     file_path, tex_name,
                     LLAgentBenefitsMgr::current().getTextureUploadCost(),
                     promise, owned_temp);
-                LLViewerAssetUpload::EnqueueInventoryUpload(cap, info);
-
                 LLUUID asset_id;
+                std::string ai_texture_error;
+                if (options.mSessionBound)
+                {
+                    asset_id = uploadAITexture(cap, info, options, ai_texture_error);
+                    if (!sessionOk()) return;
+                }
+                else
+                {
+                LLViewerAssetUpload::EnqueueInventoryUpload(cap, info);
                 try
                 {
                     if (future.wait_for(std::chrono::seconds(300)) != boost::fibers::future_status::ready)
@@ -1972,6 +2064,7 @@ namespace
                     LL_WARNS("WolfMeshUpload") << "texture upload abandoned: " << e.what() << LL_ENDL;
                     asset_id.setNull();
                 }
+                }
 
                 if (asset_id.isNull())
                 {
@@ -1982,7 +2075,7 @@ namespace
                     // already succeeded are in inventory AND have been charged for. There is no
                     // way to un-upload them, so say so plainly instead of letting the user
                     // discover it on their balance.
-                    std::string msg = "A texture failed to upload, so the model was not uploaded either.";
+                    std::string msg = ai_texture_error.empty() ? "A texture failed to upload, so the model was not uploaded either." : ai_texture_error;
                     if (n > 1)
                     {
                         msg += llformat(" The %u texture(s) that uploaded before it are in your "
@@ -1995,6 +2088,7 @@ namespace
             }
         }
 
+        if (!sessionOk()) return;
         progress("Uploading model…", false);
         const std::string body = buildRequestBody(*model, options, folder_id, uuid_by_key);
         LL_INFOS("WolfMeshUpload") << "POST /upload_mesh, " << body.size() << " bytes, "
@@ -2002,7 +2096,8 @@ namespace
 
         LLSD::Binary reply;
         std::string transport_error;
-        const S32 status = postJson(uploadMeshUrl(), body, reply, transport_error);
+        const S32 status = postJson(uploadMeshUrl(), body, reply, transport_error, options);
+        if (!sessionOk()) return;
 
         // The proxy answers HTTP 200 for a rejected upload too and puts the reason in the body
         // (main.rs:3915), so the body is read first whatever the status was; only a transport

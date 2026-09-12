@@ -240,6 +240,7 @@ void WolfRegionWeather::applyToWeather()
 
 void WolfRegionWeather::save(const WolfWeatherProfile& profile)
 {
+    if (!WolfGrid::isWolfTerritories()) { mLastError = "These tools are only available on Wolf Territories Grid."; ++mGeneration; return; }
     if (mSaving) return;
     const std::string id = currentRegionId();
     if (id.empty()) return;
@@ -375,7 +376,7 @@ bool WolfPanelLandWeather::postBuild()
 bool WolfPanelLandWeather::canEdit() const
 {
     LLViewerRegion* region = gAgent.getRegion();
-    return region && region->canManageEstate();
+    return WolfGrid::isWolfTerritories() && region && region->canManageEstate();
 }
 
 void WolfPanelLandWeather::setStatus(const std::string& msg, bool error)
@@ -465,6 +466,7 @@ void WolfPanelLandWeather::writeControls()
 
 void WolfPanelLandWeather::updatePreview()
 {
+    if (!WolfGrid::isWolfTerritories()) { setStatus("These tools are only available on Wolf Territories Grid.", true); return; }
     WolfWeatherProfile p = mEdit;
     // A preview is always ON, whatever the "Apply Global Weather" box says: the box decides
     // what OTHER people get, and previewing nothing would make the slider look broken.
@@ -474,6 +476,7 @@ void WolfPanelLandWeather::updatePreview()
 
 void WolfPanelLandWeather::onControlChanged()
 {
+    if (!WolfGrid::isWolfTerritories()) { setStatus("These tools are only available on Wolf Territories Grid.", true); return; }
     if (mWriting) return;
     readControls();
     updatePreview();
@@ -482,6 +485,7 @@ void WolfPanelLandWeather::onControlChanged()
 
 void WolfPanelLandWeather::onKindChanged()
 {
+    if (!WolfGrid::isWolfTerritories()) { setStatus("These tools are only available on Wolf Territories Grid.", true); return; }
     if (mWriting) return;
     const WolfWeatherProfile::Kind was = mEdit.mKind;
     readControls();
@@ -497,6 +501,7 @@ void WolfPanelLandWeather::onKindChanged()
 
 void WolfPanelLandWeather::onApplyPreset()
 {
+    if (!WolfGrid::isWolfTerritories()) { setStatus("These tools are only available on Wolf Territories Grid.", true); return; }
     const std::string id = mPreset->getValue().asString();
     if (id.empty()) return;
     mEdit = WolfWeatherProfile::applyPreset(mEdit, id);
@@ -507,6 +512,7 @@ void WolfPanelLandWeather::onApplyPreset()
 
 void WolfPanelLandWeather::onReset()
 {
+    if (!WolfGrid::isWolfTerritories()) { setStatus("These tools are only available on Wolf Territories Grid.", true); return; }
     // Reset is the DEFAULTS, keeping what falls; Revert is what puts the grid's row back. Two
     // buttons that did the same thing would be worse than useless.
     WolfWeatherProfile fresh;
@@ -522,6 +528,7 @@ void WolfPanelLandWeather::onReset()
 
 void WolfPanelLandWeather::onApply()
 {
+    if (!WolfGrid::isWolfTerritories()) { setStatus("These tools are only available on Wolf Territories Grid.", true); return; }
     readControls();
     WolfRegionWeather::instance().save(mEdit);
     mShownGeneration = WolfRegionWeather::instance().generation();
@@ -547,6 +554,7 @@ void WolfPanelLandWeather::refresh()
 
 void WolfPanelLandWeather::draw()
 {
+    if (!WolfGrid::isWolfTerritories()) { setStatus("These tools are only available on Wolf Territories Grid.", true); LLPanel::draw(); return; }
     WolfRegionWeather& rw = WolfRegionWeather::instance();
     if (rw.generation() != mShownGeneration)
     {
@@ -798,9 +806,11 @@ private:
 
 void WolfPanelLandWeather::onInventoryPreset()
 {
+    if (!WolfGrid::isWolfTerritories()) { setStatus("These tools are only available on Wolf Territories Grid.", true); return; }
     WolfWeatherPresetPicker::open(this,
         [this](const WolfWeatherProfile& p)
         {
+            if (!WolfGrid::isWolfTerritories()) { setStatus("These tools are only available on Wolf Territories Grid.", true); return; }
             mEdit = p;
             mEdit.clampAll();
             writeControls();

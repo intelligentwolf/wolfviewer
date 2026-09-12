@@ -3363,6 +3363,28 @@ bool idle_startup()
         LLStartUp::setStartupState( STATE_STARTED );
         do_startup_frame();
 
+        // <WolfViewer 2026-09-12> "Welcome to WolfViewer <release name>", once, as a tip toast
+        // that fades by itself (llnotificationtiphandler.cpp lifetime_secs). This replaces the
+        // "wN" label that lived in the top bar and covered the parcel name (Jimmy Olsen, w28).
+        // The name only -- Paul: "ignore the number". A local or untagged build has no name.
+        {
+            static bool welcomed = false;
+            if (!welcomed)
+            {
+                welcomed = true;
+                const std::string release_name = LLVersionInfo::instance().getReleaseName();
+                if (release_name.empty())
+                {
+                    LLNotificationsUtil::add("WolfWelcomeUnnamed");
+                }
+                else
+                {
+                    LLNotificationsUtil::add("WolfWelcome", LLSD().with("NAME", release_name));
+                }
+            }
+        }
+        // </WolfViewer>
+
         // [UPDATE CHECK 2026-09-12] Once per run, and only now: the network is up, the user is
         // in-world, and a dialog here is seen rather than lost behind the login screen. It never
         // downloads anything — it offers the download page and the user decides.

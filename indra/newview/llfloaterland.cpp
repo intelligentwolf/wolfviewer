@@ -348,23 +348,8 @@ bool LLFloaterLand::postBuild()
 
     mTabLand = (LLTabContainer*) tab;
 
-    // <WolfViewer 2026-09-07> The Waves tab is a Wolf Territories feature (its layouts live on
-    // the grid): on any other grid the tab is taken out and the automatic waves apply.
-    if (tab && mPanelWaves && !WolfGrid::isWolfTerritories())
-    {
-        tab->removeTabPanel(mPanelWaves);
-        mPanelWaves = nullptr;
-    }
-    // </WolfViewer>
-    // <WolfViewer 2026-09-12> Same for Weather: the region's weather lives in grid.weather, so
-    // on any other grid the tab goes and only the resident's own Weather menu applies.
-    if (tab && mPanelWeather && !WolfGrid::isWolfTerritories())
-    {
-        tab->removeTabPanel(mPanelWeather);
-        mPanelWeather = nullptr;
-    }
-    // </WolfViewer>
-
+    // Source: WolfPanelLandWaves/Weather show a visible grid restriction on their tabs.
+    // Keep the tabs reachable so residents can read why these controls are unavailable.
     if (tab)
     {
         tab->selectTab(sLastTab);

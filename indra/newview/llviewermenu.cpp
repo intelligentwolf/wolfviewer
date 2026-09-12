@@ -589,10 +589,19 @@ static WolfWeather::Mode wolf_weather_mode(const std::string& s)
 {
     return s == "rain" ? WolfWeather::Mode::RAIN : s == "snow" ? WolfWeather::Mode::SNOW : WolfWeather::Mode::NONE;
 }
+// Source: WolfGrid::isWolfTerritories identifies this viewer login; private server routes
+// independently verify the agent/session. Denied clicks must remain visible to the resident.
+static bool wolf_grid_tools_allowed()
+{
+    if (WolfGrid::isWolfTerritories()) return true;
+    LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE", "These tools are only available on Wolf Territories Grid."));
+    return false;
+}
 class WolfWeatherToggle : public view_listener_t
 {
     bool handleEvent(const LLSD& userdata)
     {
+        if (!wolf_grid_tools_allowed()) return true;
         // [WEATHER 2026-09-12] A parcel prim OR the region setting can outrank the menu, and
         // the user is told which — "nothing happened" is the worst possible answer to a click.
         const std::string by = WolfWeather::instance().overriddenBy();
@@ -616,6 +625,7 @@ class WolfWeatherToggleEnabled : public view_listener_t
 {
     bool handleEvent(const LLSD&)
     {
+        if (!wolf_grid_tools_allowed()) return true;
         WolfWeather::instance().toggleEnabled();
         return true;
     }
@@ -644,6 +654,7 @@ class WolfWeatherSetLevel : public view_listener_t
 {
     bool handleEvent(const LLSD& userdata)
     {
+        if (!wolf_grid_tools_allowed()) return true;
         // [WEATHER 2026-09-12] A parcel prim OR the region setting can outrank the menu, and
         // the user is told which — "nothing happened" is the worst possible answer to a click.
         const std::string by = WolfWeather::instance().overriddenBy();
@@ -671,6 +682,7 @@ class WolfWeatherIsLevel : public view_listener_t
 };
 static void wolf_weather_clear()
 {
+    if (!wolf_grid_tools_allowed()) return;
     const std::string by = WolfWeather::instance().overriddenBy();
     if (!by.empty())
     {
@@ -12879,12 +12891,9 @@ void initialize_menus()
     // the menu entry is worth showing.
     enable.add("WolfAI.CanUse", [](LLUICtrl*, const LLSD&) -> bool
     {
-        if (!WolfGrid::isWolfTerritories()) return false;
-        // Kick a fetch if the answer is stale. Cached for two minutes, so drawing the menu does
-        // not mean a request; this is what makes the item appear without the user having to
-        // find some other piece of AI UI first.
-        WolfAI::instance().refresh();
-        return WolfAI::instance().meshReady();
+        // Source: build_http.rs keeps owned results accessible during provider/credit outages.
+        // Opening off-grid shows the explicit restriction in WolfPanelAI; it sends no request.
+        return true;
     });
     commit.add("WolfSpeech.ToggleDictation", boost::bind(&wolf_toggle_dictation));
     enable.add("WolfSpeech.IsDictating", boost::bind(&wolf_is_dictating));

@@ -2921,64 +2921,46 @@
             function="ToggleUIHints"/>
         </menu_item_check>
         
+        <!-- <WolfViewer 2026-09-12> F1 was Firestorm's wiki. This is WolfViewer, so F1 reaches
+             help for this viewer and this grid. -->
         <menu_item_call
-         label="Firestorm Wiki"
+         label="Wolf Territories Help"
          name="Firestorm Wiki"
 	     shortcut="F1">
              <menu_item_call.on_click
              function="PromptShowURL"
-             name="script_library_url"
-             parameter="WebLaunchExternalTarget,https://wiki.firestormviewer.org" />
+             name="wolf_help_url"
+             parameter="WebLaunchExternalTarget,https://www.wolf-grid.com/blog/faq.php" />
         </menu_item_call>
         
+        <!-- <WolfViewer 2026-09-12> "Troubleshooting" is gone rather than repointed. It went to
+             Firestorm's own troubleshooting wiki; we have no equivalent page, and aiming it at
+             the FAQ made it an exact duplicate of the item above it. Discord is the honest
+             answer for a problem, and it is the next line. -->
         <menu_item_call
-         label="Troubleshooting"
-         name="Troubleshooting">
-            <menu_item_call.on_click
-             function="PromptShowURL"
-             name="wiki_troubleshooting_url"
-             parameter="WebLaunchExternalTarget,https://wiki.firestormviewer.org/firestorm_troubleshooting" />
-        </menu_item_call>
-	   
-        <menu_item_call
-         label="Join Firestorm Support Group"
+         label="Get Support on Discord"
          name="firestorm_support_group">
             <menu_item_call.on_click
-             function="Advanced.WebBrowserTest"
-             parameter="https://wiki.firestormviewer.org/firestorm_support_groups_join" />
-            <menu_item_call.on_visible
-             function="GridCheck"
-             parameter="secondlife" />
+             function="PromptShowURL"
+             name="wolf_support_url"
+             parameter="WebLaunchExternalTarget,https://discord.gg/S3wj882aQH" />
         </menu_item_call>
 
+        <!-- <WolfViewer 2026-09-12> Firestorm's Classes Schedule and Events Calendar are gone:
+             they are another project's timetable and another project's shared calendar, and
+             neither is anything we run. Our events are in the Wolf Grid menu.
+
+             The Guidebook went with them. It is the Second Life new-user guidebook floater,
+             about a world this viewer does not connect to by default — its toolbar button was
+             already removed (lltoolbarview.cpp), so this was the last way to open it. -->
         <menu_item_call
-         label="Firestorm Classes Schedule"
-         name="Firestorm Classes Schedule">
+         label="Events"
+         name="Wolf Events Calendar">
              <menu_item_call.on_click
              function="PromptShowURL"
-             name="wiki_classes_url"
-             parameter="WebLaunchExternalTarget,https://wiki.firestormviewer.org/firestorm_classes" />
+             name="wolf_events_help_url"
+             parameter="WebLaunchExternalTarget,https://www.wolf-grid.com/index.php?f=eve" />
         </menu_item_call>
-
-        <menu_item_call
-         label="Firestorm Events Calendar"
-         name="Firestorm Events Calendar">
-             <menu_item_call.on_click
-             function="PromptShowURL"
-             name="events_calendar_url"
-             parameter="WebLaunchExternalTarget,https://teamup.com/ksxdajnbw9mvw7cbwz" />
-        </menu_item_call>
-
-        <menu_item_check
-         label="Guidebook"
-         name="How To">
-            <menu_item_check.on_click
-             function="Help.ToggleHowTo"
-             parameter="" />
-            <menu_item_check.on_check
-             function="Floater.Visible"
-             parameter="guidebook" />
-        </menu_item_check>
 
 <!--       <menu_item_call
          label="Second Life Help"

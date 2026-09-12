@@ -169,6 +169,23 @@ std::string LLVersionInfo::getChannelAndVersionFS() const
 }
 //</FS:TS>
 
+std::string LLVersionInfo::getReleaseName() const
+{
+    // Same macro-to-string dance as the channel above, and the same stray-quote trim: the define
+    // arrives unquoted from the CMake command line and LL_TO_STRING adds its own.
+#if defined(LL_VIEWER_RELEASE_NAME)
+    std::string name(LL_TO_STRING(LL_VIEWER_RELEASE_NAME));
+    if (LLStringUtil::startsWith(name, "\"") && name.size() > 2)
+    {
+        name = name.substr(1, name.size() - 2);
+    }
+    LLStringUtil::trim(name);
+    return name;
+#else
+    return std::string();
+#endif
+}
+
 std::string LLVersionInfo::getChannel() const
 {
     return mWorkingChannelName;

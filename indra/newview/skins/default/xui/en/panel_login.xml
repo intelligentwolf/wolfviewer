@@ -188,11 +188,11 @@
     text_color="LtGray_50"
     height="14"
     name="viewer_version_text"
-    left="778"
+    left="748"
     bottom_delta="-16"
-    width="120"
+    width="180"
     halign="center"
-    tool_tip="The version of WolfViewer you are running. Quote this when reporting a problem.">
+    tool_tip="Which release of WolfViewer you are running. Quote this name when reporting a problem.">
   </text>
   </layout_panel>
   <layout_panel

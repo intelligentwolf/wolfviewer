@@ -57,7 +57,17 @@ if (NOT DEFINED VIEWER_SHORT_VERSION) # will be true in indra/, false in indra/n
     endif ()
     # </FS:PP>
 
+    # <WolfViewer 2026-09-12> The release name, e.g. "Howling Hati". Empty in a local build,
+    # which is correct: an untagged working copy is not a named release and should not claim one.
+    if (DEFINED ENV{release_name})
+        set(VIEWER_RELEASE_NAME $ENV{release_name})
+        message(STATUS "Release name: ${VIEWER_RELEASE_NAME}")
+    else ()
+        set(VIEWER_RELEASE_NAME "")
+    endif ()
+
     set(VIEWER_CHANNEL_VERSION_DEFINES
+        "LL_VIEWER_RELEASE_NAME=${VIEWER_RELEASE_NAME}"
         "LL_VIEWER_CHANNEL=${VIEWER_CHANNEL}"
         "LL_VIEWER_VERSION_MAJOR=${VIEWER_VERSION_MAJOR}"
         "LL_VIEWER_VERSION_MINOR=${VIEWER_VERSION_MINOR}"

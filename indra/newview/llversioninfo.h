@@ -88,6 +88,11 @@ public:
     /// return the channel name, e.g. "Second Life"
     std::string getChannel() const;
 
+    /// <WolfViewer 2026-09-12> The release NAME, e.g. "Howling Hati" — what residents are shown
+    /// and asked to quote. Empty in a local or untagged build, which is the honest answer: such
+    /// a build is not a named release. Callers must handle empty rather than assume a name.
+    std::string getReleaseName() const;
+
     /// return the CMake build type
     std::string getBuildConfig() const;
 

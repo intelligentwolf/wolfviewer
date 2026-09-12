@@ -48,6 +48,9 @@
 
 #include "lljoint.h"
 #include "llskinningutil.h"
+// <WolfViewer 2026-09-12> telling the user why their graphics were turned down
+#include "llnotificationsutil.h"
+#include "llcallbacklist.h"
 
 static LLStaticHashedString sTexture0("texture0");
 static LLStaticHashedString sTexture1("texture1");
@@ -75,6 +78,155 @@ S32 clamp_terrain_mapping(S32 mapping)
     if (mapping == 2) { mapping = 1; }
     return mapping;
 }
+
+// <WolfViewer 2026-09-12>
+// How many texture image units deferred/pbrterrainF.glsl declares at a given detail level.
+// Counted from the shader source, not estimated -- every term below is one #if block in the file:
+//   alpha_ramp                                                                            1
+//   detail_[0..3]_base_color                                                              4
+//   detail_[0..3]_metallic_roughness   #if TERRAIN_PBR_DETAIL >= METALLIC_ROUGHNESS (-3)  4
+//   detail_[0..3]_normal               #if TERRAIN_PBR_DETAIL >= NORMAL (-2)              4
+//   detail_[0..3]_emissive             #if TERRAIN_PBR_DETAIL >= EMISSIVE (0)             4
+//   wolfCausticTex[01]                 WolfViewer 2026-09-06 caustics                     2
+//   wolfPaintMap, wolfPaintTex[0..3]   WolfViewer 2026-09-10 painted roads                5
+// Occlusion (-1) shares detail_N_metallic_roughness, so -1 and -2 cost the same.
+// KEEP IN STEP WITH pbrterrainF.glsl -- adding a sampler there without adding it here puts the
+// count back out of touch with the hardware.
+static S32 terrain_sampler_count(S32 detail)
+{
+    S32 n = 1 + 4;                                              // alpha_ramp + base colour
+    if (detail >= TERRAIN_PBR_DETAIL_METALLIC_ROUGHNESS) { n += 4; }
+    if (detail >= TERRAIN_PBR_DETAIL_NORMAL)             { n += 4; }
+    if (detail >= TERRAIN_PBR_DETAIL_EMISSIVE)           { n += 4; }
+    return n + 7;                                               // WolfViewer caustics + paint
+}
+
+// Lower the PBR terrain detail level until the fragment shader fits the GPU's sampler budget.
+//
+// Nothing upstream checks this: RenderTerrainPBRDetail comes from featuretable_*.txt, which is a
+// hand-written guess per GPU class and cannot know how many samplers the shader actually
+// declares. Our fork added seven (caustics and painted roads), which pushed the shader past the
+// 16 texture image units an Apple GPU reports -- GL_MAX_TEXTURE_IMAGE_UNITS is 32 on desktop
+// NVIDIA and AMD, so it linked everywhere we tested and failed only on Macs, where the link error
+// was "No definition of get_terrain_mix_weights in fragment shader". That aborted
+// loadShadersDeferred() partway, leaving later programs never created, and the first bind() of
+// one of those crashed the viewer at startup with a message about an unrelated shader.
+//
+// So: ask the driver what it has, and spend within it. This is deliberately driven by the real
+// limit rather than by a platform test, because the limit is what matters and a GPU we have never
+// seen may report anything.
+//
+// Pure and silent on purpose: LLDrawPoolTerrain::prerender() calls this every frame, so it must
+// not log. loadBasicShaders() reports the outcome once, where it is worth reading.
+S32 clamp_terrain_detail_to_texture_units(S32 detail)
+{
+    detail = llclamp(detail, TERRAIN_PBR_DETAIL_MIN, TERRAIN_PBR_DETAIL_MAX);
+
+    const S32 budget = gGLManager.mNumTextureImageUnits;
+    if (budget <= 0)
+    {
+        // Not queried yet (no GL context). Leave the setting alone rather than invent a limit.
+        return detail;
+    }
+
+    while (detail > TERRAIN_PBR_DETAIL_MIN && terrain_sampler_count(detail) > budget)
+    {
+        detail--;
+    }
+
+    return detail;
+}
+// </WolfViewer>
+
+// <WolfViewer 2026-09-12> GETTING THE VIEWER RUNNING BEATS LOOKING RIGHT.
+//
+// A shader that will not build is not rare on weak or old hardware -- it runs out of texture
+// image units, varyings or uniform components -- and until now the shipping viewer handled it by
+// doing nothing at all. loadShadersDeferred() returned false into `llassert(loaded)`, which
+// compiles to NOTHING in release (llerror.h:101; we do not define RELEASE_SHOW_ASSERT), so the
+// viewer carried on with half its programs missing and died later inside bind() on a program that
+// was never created -- naming a shader that had nothing to do with it.
+//
+// Instead: switch one expensive feature off, load everything again, and keep going until it
+// builds. The order below spends the cheapest thing first. Mirrors and screen-space reflections
+// are extras almost nobody will miss; shadows are a real loss but they are also the single
+// biggest consumer (shadowUtil.glsl alone declares six shadow maps); terrain detail is last
+// because losing it makes the ground look flat everywhere.
+//
+// The settings are persisted deliberately. A viewer that starts, and keeps starting, is the point
+// -- and the user is told exactly what was given up and where to put it back, because a viewer
+// that silently looks worse than it should is a support case nobody can solve.
+struct ShaderFallbackStep
+{
+    const char* setting;    // graphics setting to switch off
+    bool        is_s32;     // true = S32 control, false = Boolean control (see settings.xml)
+    S32         value;      // what to set it to
+    const char* lost;       // what the user loses, in their words
+};
+
+static const ShaderFallbackStep sShaderFallbackSteps[] =
+{
+    { "RenderMirrors",                false, 0,                       "mirrors" },
+    { "RenderScreenSpaceReflections", false, 0,                       "screen-space reflections" },
+    { "RenderReflectionsEnabled",     false, 0,                       "reflection probes" },
+    { "RenderShadowDetail",           true,  0,                       "shadows" },
+    { "RenderTerrainPBRDetail",       true,  TERRAIN_PBR_DETAIL_MIN,  "detailed terrain textures" },
+};
+
+std::vector<std::string> LLViewerShaderMgr::sGraphicsFallbacks;
+
+// The next step that would actually change something. Steps whose setting is already off are
+// skipped -- turning off a feature the user never had on tells us nothing and would burn a rung
+// of the ladder for free.
+static const ShaderFallbackStep* next_shader_fallback_step()
+{
+    for (const ShaderFallbackStep& step : sShaderFallbackSteps)
+    {
+        const S32 current = step.is_s32 ? gSavedSettings.getS32(step.setting)
+                                        : (gSavedSettings.getBOOL(step.setting) ? 1 : 0);
+        if (current != step.value)
+        {
+            return &step;
+        }
+    }
+    return NULL;
+}
+
+static void apply_shader_fallback_step(const ShaderFallbackStep& step)
+{
+    if (step.is_s32)
+    {
+        gSavedSettings.setS32(step.setting, step.value);
+    }
+    else
+    {
+        gSavedSettings.setBOOL(step.setting, step.value != 0);
+    }
+}
+
+// Told at idle, not from inside setShaders(): the first shader load happens during startup, before
+// there is a UI to put a notification in front of.
+static void notify_graphics_degraded()
+{
+    const std::vector<std::string>& lost = LLViewerShaderMgr::getGraphicsFallbacks();
+    if (lost.empty())
+    {
+        return;
+    }
+
+    std::string list;
+    for (const std::string& item : lost)
+    {
+        if (!list.empty()) { list += ", "; }
+        list += item;
+    }
+
+    LLSD args;
+    args["FEATURES"] = list;
+    args["GPU"] = gGLManager.mGLRenderer;
+    LLNotificationsUtil::add("WolfGraphicsDegraded", args);
+}
+// </WolfViewer>
 
 //utility shaders
 LLGLSLShader    gOcclusionProgram;
@@ -534,6 +686,105 @@ S32 LLViewerShaderMgr::getShaderLevel(S32 type)
 //============================================================================
 // Shader Management
 
+// <WolfViewer 2026-09-12> The whole shader load, at whatever the graphics settings currently say.
+// Returns the name of the group that would not build, or an empty string if everything did.
+// Split out of setShaders() so it can simply be run again with one feature switched off.
+std::string LLViewerShaderMgr::loadAllShaders()
+{
+    S32 light_class = 3;
+    S32 interface_class = 2;
+    S32 env_class = 2;
+    S32 obj_class = 2;
+    S32 effect_class = 2;
+    S32 wl_class = 2;
+    S32 water_class = 3;
+    S32 deferred_class = 3;
+
+    // Trigger a full rebuild of the fallback skybox / cubemap if we've toggled windlight shaders
+    if (!wl_class || (mShaderLevel[SHADER_WINDLIGHT] != wl_class && gSky.mVOSkyp.notNull()))
+    {
+        gSky.mVOSkyp->forceSkyUpdate();
+    }
+
+    // Load lighting shaders
+    mShaderLevel[SHADER_LIGHTING] = light_class;
+    mShaderLevel[SHADER_INTERFACE] = interface_class;
+    mShaderLevel[SHADER_ENVIRONMENT] = env_class;
+    mShaderLevel[SHADER_WATER] = water_class;
+    mShaderLevel[SHADER_OBJECT] = obj_class;
+    mShaderLevel[SHADER_EFFECT] = effect_class;
+    mShaderLevel[SHADER_WINDLIGHT] = wl_class;
+    mShaderLevel[SHADER_DEFERRED] = deferred_class;
+
+    const std::string basic_failure = loadBasicShaders();
+    if (!basic_failure.empty())
+    {
+        // <WolfViewer 2026-09-12> Was fatal here. It is the caller's job now: it may be able to
+        // switch a feature off and get this to build. Re-run at debug level first so the log has
+        // the compiler's own words either way.
+        LL_WARNS("Shader") << "Failed loading basic shaders.  Retrying with increased log level..." << LL_ENDL;
+        LLError::ELevel lvl = LLError::getDefaultLevel();
+        LLError::setDefaultLevel(LLError::LEVEL_DEBUG);
+        loadBasicShaders();
+        LLError::setDefaultLevel(lvl);
+        return basic_failure;
+    }
+    LL_INFOS("Shader") << "Loaded basic shaders." << LL_ENDL;
+
+    gPipeline.mShadersLoaded = true;
+
+    // Each group in turn; the first one that will not build is the answer. Upstream chained these
+    // through a `loaded` flag and an llassert, which in a release build meant a failure simply
+    // fell through to the next group and on out of the function.
+    if (!loadShadersWater())
+    {
+        LL_WARNS() << "Failed to load water shaders." << LL_ENDL;
+        return "water";
+    }
+    LL_INFOS() << "Loaded water shaders." << LL_ENDL;
+
+    if (!loadShadersEffects())
+    {
+        LL_WARNS() << "Failed to load effects shaders." << LL_ENDL;
+        return "effects";
+    }
+    LL_INFOS() << "Loaded effects shaders." << LL_ENDL;
+
+    if (!loadShadersInterface())
+    {
+        LL_WARNS() << "Failed to load interface shaders." << LL_ENDL;
+        return "interface";
+    }
+    LL_INFOS() << "Loaded interface shaders." << LL_ENDL;
+
+    // Load max avatar shaders to set the max level
+    mShaderLevel[SHADER_AVATAR] = 3;
+    mMaxAvatarShaderLevel = 3;
+
+    if (!loadShadersObject())
+    { //hardware skinning not possible, neither is deferred rendering
+        LL_WARNS() << "Failed to load object shaders." << LL_ENDL;
+        return "object";
+    }
+
+    //hardware skinning is enabled and rigged attachment shaders loaded correctly
+    mShaderLevel[SHADER_AVATAR] = 1;   // cloth is a class3 shader; the actual level is 1
+
+    if (!loadShadersAvatar())
+    {
+        LL_WARNS() << "Failed to load avatar shaders." << LL_ENDL;
+        return "avatar";
+    }
+
+    if (!loadShadersDeferred())
+    {
+        LL_WARNS() << "Failed to load deferred shaders." << LL_ENDL;
+        return "deferred";
+    }
+
+    return std::string();
+}
+
 void LLViewerShaderMgr::setShaders()
 {
     LL_PROFILE_ZONE_SCOPED;
@@ -617,119 +868,54 @@ void LLViewerShaderMgr::setShaders()
     llassert((gGLManager.mGLSLVersionMajor > 1 || gGLManager.mGLSLVersionMinor >= 10));
 
 
-    S32 light_class = 3;
-    S32 interface_class = 2;
-    S32 env_class = 2;
-    S32 obj_class = 2;
-    S32 effect_class = 2;
-    S32 wl_class = 2;
-    S32 water_class = 3;
-    S32 deferred_class = 3;
-
-    // Trigger a full rebuild of the fallback skybox / cubemap if we've toggled windlight shaders
-    if (!wl_class || (mShaderLevel[SHADER_WINDLIGHT] != wl_class && gSky.mVOSkyp.notNull()))
+    // <WolfViewer 2026-09-12> Keep turning features off until the shaders build. See the fallback
+    // ladder above for why, and for what order things are given up in.
+    sGraphicsFallbacks.clear();
+    std::string failed = loadAllShaders();
+    while (!failed.empty())
     {
-        gSky.mVOSkyp->forceSkyUpdate();
+        const ShaderFallbackStep* step = next_shader_fallback_step();
+        if (!step)
+        {
+            break;  // nothing optional left to switch off
+        }
+
+        LL_WARNS("ShaderLoading") << "Shader group \"" << failed << "\" would not build on this "
+                                  << "GPU; switching off " << step->lost << " and trying again"
+                                  << LL_ENDL;
+
+        apply_shader_fallback_step(*step);
+        sGraphicsFallbacks.push_back(step->lost);
+
+        // Start from clean ground: the defines baked into every shader object have changed.
+        unloadShaders();
+        mShaderList.clear();
+        mVertexShaderObjects.clear();
+        mFragmentShaderObjects.clear();
+
+        failed = loadAllShaders();
     }
 
-    // Load lighting shaders
-    mShaderLevel[SHADER_LIGHTING] = light_class;
-    mShaderLevel[SHADER_INTERFACE] = interface_class;
-    mShaderLevel[SHADER_ENVIRONMENT] = env_class;
-    mShaderLevel[SHADER_WATER] = water_class;
-    mShaderLevel[SHADER_OBJECT] = obj_class;
-    mShaderLevel[SHADER_EFFECT] = effect_class;
-    mShaderLevel[SHADER_WINDLIGHT] = wl_class;
-    mShaderLevel[SHADER_DEFERRED] = deferred_class;
-
-    std::string shader_name = loadBasicShaders();
-    if (shader_name.empty())
+    if (!failed.empty())
     {
-        LL_INFOS("Shader") << "Loaded basic shaders." << LL_ENDL;
-    }
-    else
-    {
-        // "ShaderLoading" and "Shader" need to be logged
-        LL_WARNS("Shader") << "Failed loading basic shaders.  Retrying with increased log level..." << LL_ENDL;
-
-        LLError::ELevel lvl = LLError::getDefaultLevel();
-        LLError::setDefaultLevel(LLError::LEVEL_DEBUG);
-        loadBasicShaders();
-        LLError::setDefaultLevel(lvl);
+        // Out of things to give up. Still fatal -- but it now names the shader that actually
+        // failed and the hardware it failed on, which is what a bug report needs.
         gGLManager.printGLInfoString();
-        LL_ERRS() << "Unable to load basic shader " << shader_name << ", verify graphics driver installed and current." << LL_ENDL;
-        reentrance = false; // For hygiene only, re-try probably helps nothing
+        LL_ERRS() << "Unable to load " << failed << " shaders with every optional graphics feature "
+                  << "already switched off. GPU: " << gGLManager.mGLRenderer
+                  << " | GL " << gGLManager.mGLVersionString
+                  << " | GLSL " << gGLManager.mGLSLVersionMajor << "." << gGLManager.mGLSLVersionMinor
+                  << " | max texture image units " << gGLManager.mNumTextureImageUnits
+                  << ". Verify the graphics driver is installed and current."
+                  << "\nShader errors:\n" << LLShaderMgr::getLastShaderErrors() << LL_ENDL;
+        reentrance = false;
         return;
     }
 
-    gPipeline.mShadersLoaded = true;
-
-    bool loaded = loadShadersWater();
-
-    if (loaded)
+    if (!sGraphicsFallbacks.empty())
     {
-        LL_INFOS() << "Loaded water shaders." << LL_ENDL;
+        doOnIdleOneTime(notify_graphics_degraded);
     }
-    else
-    {
-        LL_WARNS() << "Failed to load water shaders." << LL_ENDL;
-        llassert(loaded);
-    }
-
-    if (loaded)
-    {
-        loaded = loadShadersEffects();
-        if (loaded)
-        {
-            LL_INFOS() << "Loaded effects shaders." << LL_ENDL;
-        }
-        else
-        {
-            LL_WARNS() << "Failed to load effects shaders." << LL_ENDL;
-            llassert(loaded);
-        }
-    }
-
-    if (loaded)
-    {
-        loaded = loadShadersInterface();
-        if (loaded)
-        {
-            LL_INFOS() << "Loaded interface shaders." << LL_ENDL;
-        }
-        else
-        {
-            LL_WARNS() << "Failed to load interface shaders." << LL_ENDL;
-            llassert(loaded);
-        }
-    }
-
-    if (loaded)
-    {
-        // Load max avatar shaders to set the max level
-        mShaderLevel[SHADER_AVATAR] = 3;
-        mMaxAvatarShaderLevel = 3;
-
-        if (loadShadersObject())
-        { //hardware skinning is enabled and rigged attachment shaders loaded correctly
-            // cloth is a class3 shader
-            S32 avatar_class = 1;
-
-            // Set the actual level
-            mShaderLevel[SHADER_AVATAR] = avatar_class;
-
-            loaded = loadShadersAvatar();
-            llassert(loaded);
-        }
-        else
-        { //hardware skinning not possible, neither is deferred rendering
-            llassert(false); // SHOULD NOT BE POSSIBLE
-        }
-    }
-
-    llassert(loaded);
-    loaded = loaded && loadShadersDeferred();
-    llassert(loaded);
 
     if (!LLAppViewer::instance()->isSecondInstance())
     {
@@ -862,8 +1048,19 @@ std::string LLViewerShaderMgr::loadBasicShaders()
         attribs["TERRAIN_PLANAR_TEXTURE_SAMPLE_COUNT"] = llformat("%d", mapping);
         const F32 triplanar_factor = gSavedSettings.getF32("RenderTerrainPBRTriplanarBlendFactor");
         attribs["TERRAIN_TRIPLANAR_BLEND_FACTOR"] = llformat("%.2f", triplanar_factor);
-        S32 detail = gSavedSettings.getS32("RenderTerrainPBRDetail");
-        detail = llclamp(detail, TERRAIN_PBR_DETAIL_MIN, TERRAIN_PBR_DETAIL_MAX);
+        const S32 requested_detail = llclamp(gSavedSettings.getS32("RenderTerrainPBRDetail"),
+                                             TERRAIN_PBR_DETAIL_MIN, TERRAIN_PBR_DETAIL_MAX);
+        const S32 detail = clamp_terrain_detail_to_texture_units(requested_detail);
+        // <WolfViewer 2026-09-12> Said once per shader load, not per frame. If a Mac user reports
+        // flat-looking ground, this line is the reason and it names the numbers behind it.
+        if (detail != requested_detail)
+        {
+            LL_WARNS("ShaderLoading") << "PBR terrain detail lowered from " << requested_detail
+                                      << " to " << detail << ": the shader needs "
+                                      << terrain_sampler_count(requested_detail)
+                                      << " texture image units and this GPU has "
+                                      << gGLManager.mNumTextureImageUnits << LL_ENDL;
+        }
         attribs["TERRAIN_PBR_DETAIL"] = llformat("%d", detail);
     }
 
@@ -1590,8 +1787,8 @@ bool LLViewerShaderMgr::loadShadersDeferred()
 
     if (success)
     {
-        S32 detail = gSavedSettings.getS32("RenderTerrainPBRDetail");
-        detail = llclamp(detail, TERRAIN_PBR_DETAIL_MIN, TERRAIN_PBR_DETAIL_MAX);
+        const S32 detail = clamp_terrain_detail_to_texture_units(
+            gSavedSettings.getS32("RenderTerrainPBRDetail"));
         const S32 mapping = clamp_terrain_mapping(gSavedSettings.getS32("RenderTerrainPBRPlanarSampleCount"));
         for (U32 paint_type = 0; paint_type < TERRAIN_PAINT_TYPE_COUNT; ++paint_type)
         {

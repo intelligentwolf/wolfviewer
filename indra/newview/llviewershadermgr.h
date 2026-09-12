@@ -68,6 +68,17 @@ public:
     std::vector<S32> mShaderLevel;
     S32 mMaxAvatarShaderLevel;
 
+    // <WolfViewer 2026-09-12> Load every shader group once, at the graphics settings currently in
+    // force. Returns an empty string on success, otherwise the name of the group or file that
+    // failed -- setShaders() uses that to decide whether to turn a feature off and try again.
+    std::string loadAllShaders();
+
+    // What setShaders() had to switch off to get the viewer running on this GPU, in the order it
+    // switched them off ("shadows", "reflection probes", ...). Empty when nothing was given up.
+    // The user is told: a viewer that quietly looks worse than it should is a support case
+    // nobody can solve.
+    static const std::vector<std::string>& getGraphicsFallbacks() { return sGraphicsFallbacks; }
+
     enum EShaderClass
     {
         SHADER_LIGHTING,
@@ -135,6 +146,9 @@ public:
 private:
     // the list of shaders we need to propagate parameters to.
     std::vector<LLGLSLShader *> mShaderList;
+
+    // <WolfViewer 2026-09-12> see getGraphicsFallbacks()
+    static std::vector<std::string> sGraphicsFallbacks;
 
 }; //LLViewerShaderMgr
 
@@ -341,4 +355,11 @@ enum TerrainPaintType : U32
     TERRAIN_PAINT_TYPE_COUNT                = 2,
 };
 extern LLGLSLShader         gDeferredPBRTerrainProgram[TERRAIN_PAINT_TYPE_COUNT];
+
+// <WolfViewer 2026-09-12> The PBR terrain detail level actually in use: RenderTerrainPBRDetail
+// lowered, if necessary, to a level whose fragment shader fits this GPU's texture image units.
+// Every reader of RenderTerrainPBRDetail must go through this -- the shader is compiled from it
+// and LLDrawPoolTerrain binds textures from it, and if those two disagree the pool binds a
+// texture the shader has no sampler for. See llviewershadermgr.cpp.
+S32 clamp_terrain_detail_to_texture_units(S32 detail);
 #endif

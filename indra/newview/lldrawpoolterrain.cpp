@@ -124,7 +124,8 @@ LLDrawPoolTerrain::LLDrawPoolTerrain(LLViewerTexture *texturep) :
     static LLCachedControl<S32> RenderTerrainPBRDetail(gSavedSettings, "RenderTerrainPBRDetail");
     sDetailScale = 1.f/RenderTerrainScale;
     sPBRDetailScale = 1.f/RenderTerrainPBRScale;
-    sPBRDetailMode = RenderTerrainPBRDetail();
+    // <WolfViewer 2026-09-12> must match the level the shader was compiled at
+    sPBRDetailMode = clamp_terrain_detail_to_texture_units(RenderTerrainPBRDetail());
     // </FS:PP>
     mAlphaRampImagep = LLViewerTextureManager::getFetchedTexture(IMG_ALPHA_GRAD);
 
@@ -166,7 +167,8 @@ U32 LLDrawPoolTerrain::getVertexDataMask()
 void LLDrawPoolTerrain::prerender()
 {
     static LLCachedControl<S32> render_terrain_pbr_detail(gSavedSettings, "RenderTerrainPBRDetail");
-    sPBRDetailMode = render_terrain_pbr_detail;
+    // <WolfViewer 2026-09-12> must match the level the shader was compiled at
+    sPBRDetailMode = clamp_terrain_detail_to_texture_units(render_terrain_pbr_detail);
 }
 
 void LLDrawPoolTerrain::boostTerrainDetailTextures()

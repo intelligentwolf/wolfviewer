@@ -1933,6 +1933,30 @@ Visit [_URL] for more information?
   <tag>fail</tag>
   </notification>
 
+  <!-- <WolfViewer 2026-09-12> Shown when setShaders() had to switch graphics features off to get
+       the viewer to start at all. It names what was given up and where to put it back: the
+       viewer running and looking plainer is fine, the viewer quietly looking worse than it
+       should with nobody able to say why is not. -->
+  <notification
+   icon="alertmodal.tga"
+   name="WolfGraphicsDegraded"
+   type="alertmodal">
+WolfViewer could not build all of its graphics shaders on your hardware, so it switched some features off to start:
+
+    [FEATURES]
+
+Everything else works normally. Your graphics card was detected as:
+
+    [GPU]
+
+You can try turning these back on in Preferences &gt; Graphics. If WolfViewer then fails to start, it will simply switch them off again.
+    <tag>fail</tag>
+    <usetemplate
+     ignoretext="Graphics features were switched off so the viewer could start"
+     name="okignore"
+     yestext="OK"/>
+  </notification>
+
   <notification
    icon="alertmodal.tga"
    name="OldGPUDriver"

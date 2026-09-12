@@ -2732,11 +2732,13 @@
         </menu_item_call>        
     </menu>
     
-    <!-- Content Menu -->
+    <!-- Wolf Grid menu.
+         <WolfViewer 2026-09-12> Was "Content", and was mostly Second Life and Firestorm
+         destinations. The name= is left alone: it is the internal id other XUI refers to. -->
     
     <menu
     	create_jump_keys="true"
-    	label="Content"
+    	label="Wolf Grid"
     	name="Content"
     	tear_off="true"
         visible="true">
@@ -2779,12 +2781,17 @@
              parameter="secondlife"/>
        </menu_item_call>
     	<menu_item_call
-             label="Script Library"
+             label="SL Script Library"
              name="Script Library">
              <menu_item_call.on_click
              function="PromptShowURL"
              name="script_library_url"
              parameter="WebLaunchExternalTarget,https://wiki.secondlife.com/wiki/LSL_Library" />
+            <!-- Hidden off Second Life: our own scripting reference is the LSL Guide below,
+                 and it lists what THIS grid implements rather than what SL does. -->
+            <menu_item_call.on_visible
+             function="GridCheck"
+             parameter="secondlife"/>
        </menu_item_call>
     	<menu_item_call
              label="SL Community (blogs, forums, news)"
@@ -2793,56 +2800,99 @@
              function="PromptShowURL"
              name="community_pages_url"
              parameter="WebLaunchExternalTarget,https://community.secondlife.com" />
+            <menu_item_call.on_visible
+             function="GridCheck"
+             parameter="secondlife"/>
+       </menu_item_call>
+       <menu_item_separator/>
+    	<!-- <WolfViewer 2026-09-12> This was Firestorm's own blog, Primfeed, Flickr, Twitter and
+    	     Plurk. This is WolfViewer, so these go to OUR places instead of advertising another
+    	     project's social accounts to our residents. Every URL here is one the grid actually
+    	     serves — f=osv not f=viewers, f=lsl for the scripting reference. -->
+    	<menu_item_call
+             label="Wolf Territories Website"
+             name="Wolf Website">
+             <menu_item_call.on_click
+             function="PromptShowURL"
+             name="wolf_website_url"
+             parameter="WebLaunchExternalTarget,https://www.wolf-grid.com" />
+       </menu_item_call>
+    	<menu_item_call
+             label="Blog &amp; FAQ"
+             name="Wolf Blog">
+             <menu_item_call.on_click
+             function="PromptShowURL"
+             name="wolf_blog_url"
+             parameter="WebLaunchExternalTarget,https://www.wolf-grid.com/blog/" />
+       </menu_item_call>
+    	<menu_item_call
+             label="LSL Guide"
+             name="Wolf LSL Guide">
+             <menu_item_call.on_click
+             function="PromptShowURL"
+             name="wolf_lsl_url"
+             parameter="WebLaunchExternalTarget,https://www.wolf-grid.com/index.php?f=lsl" />
        </menu_item_call>
        <menu_item_separator/>
     	<menu_item_call
-             label="Firestorm Blog"
-             name="Firestorm Blog">
+             label="World Map"
+             name="Wolf World Map">
              <menu_item_call.on_click
              function="PromptShowURL"
-             name="firestorm_blog_url"
-             parameter="WebLaunchExternalTarget,https://www.firestormviewer.org/" />
+             name="wolf_map_url"
+             parameter="WebLaunchExternalTarget,https://www.wolf-grid.com/index.php?f=map" />
        </menu_item_call>
     	<menu_item_call
-             label="Firestorm Primfeed"
-             name="Firestorm Primfeed">
+             label="Destination Guide"
+             name="Wolf Destinations">
              <menu_item_call.on_click
              function="PromptShowURL"
-             name="firestorm_primfeed_url"
-             parameter="WebLaunchExternalTarget,https://www.primfeed.com/firestorm-viewer" />
+             name="wolf_destinations_url"
+             parameter="WebLaunchExternalTarget,https://www.wolf-grid.com/index.php?f=de" />
        </menu_item_call>
     	<menu_item_call
-             label="Firestorm Flickr"
-             name="Firestorm Flickr">
+             label="Events"
+             name="Wolf Events">
              <menu_item_call.on_click
              function="PromptShowURL"
-             name="firestorm_flickr_url"
-             parameter="WebLaunchExternalTarget,http://www.flickr.com/groups/firestormviewer/pool/" />
+             name="wolf_events_url"
+             parameter="WebLaunchExternalTarget,https://www.wolf-grid.com/index.php?f=eve" />
        </menu_item_call>
     	<menu_item_call
-             label="Firestorm YouTube"
-             name="Firestorm YouTube">
+             label="Marketplace"
+             name="Wolf Marketplace">
              <menu_item_call.on_click
              function="PromptShowURL"
-             name="firestorm_youtube_url"
-             parameter="WebLaunchExternalTarget,http://www.youtube.com/user/PhoenixViewerSL" />
+             name="wolf_marketplace_url"
+             parameter="WebLaunchExternalTarget,https://www.wolf-grid.com/index.php?f=mp" />
+       </menu_item_call>
+       <menu_item_separator/>
+    	<menu_item_call
+             label="Discord"
+             name="Wolf Discord">
+             <menu_item_call.on_click
+             function="PromptShowURL"
+             name="wolf_discord_url"
+             parameter="WebLaunchExternalTarget,https://discord.gg/S3wj882aQH" />
        </menu_item_call>
     	<menu_item_call
-             label="Firestorm Twitter"
-             name="Firestorm Twitter">
+             label="YouTube"
+             name="Wolf YouTube">
              <menu_item_call.on_click
              function="PromptShowURL"
-             name="firestorm_twitter_url"
-             parameter="WebLaunchExternalTarget,https://twitter.com/phoenixviewersl" />
+             name="wolf_youtube_url"
+             parameter="WebLaunchExternalTarget,https://www.youtube.com/@wolfterritoriesgrid" />
        </menu_item_call>
+       <menu_item_separator/>
     	<menu_item_call
-             label="Firestorm Plurk"
-             name="Firestorm Plurk">
+             label="Get a Viewer"
+             name="Wolf Downloads">
              <menu_item_call.on_click
              function="PromptShowURL"
-             name="firestorm_plurk_url"
-             parameter="WebLaunchExternalTarget,http://www.plurk.com/ThePhoenixViewerProject" />
+             name="wolf_downloads_url"
+             parameter="WebLaunchExternalTarget,https://www.wolf-grid.com/index.php?f=osv" />
        </menu_item_call>
+    	<!-- </WolfViewer> -->
        <menu_item_separator/>
        <menu_item_call
              label="Message of the day"

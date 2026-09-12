@@ -41,7 +41,10 @@ namespace
     // Where a person actually gets it. NOT the GitHub release page: the website serves the four
     // installers (viewers.php reads them from /downloads/wolfviewer/) and is the page everything
     // else — Discord, the login screen — already points at.
-    const char* const DOWNLOAD_PAGE_URL = "https://www.wolf-grid.com/index.php?f=viewers";
+    // f=osv, NOT f=viewers. index.php has no "viewers" case (it routes "osv" to viewers.php),
+    // so f=viewers renders the site's default page — HTTP 200, and not one download link on it.
+    // Someone who answered "yes, open the download page" got a page with nothing to download.
+    const char* const DOWNLOAD_PAGE_URL = "https://www.wolf-grid.com/index.php?f=osv";
 
     /// The setting that turns the check off entirely.
     const char* const CHECK_SETTING = "WolfViewerCheckForUpdates";

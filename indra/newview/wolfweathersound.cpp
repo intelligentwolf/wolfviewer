@@ -69,7 +69,10 @@ namespace
         { "distant",  "f0ae0a15-728f-4dd6-b6e0-c0cc8a41e0e2",  0.60f,   0.f,  550.f, 0.35f },
         { nullptr,    nullptr,                                 0.f,     0.f,    0.f, 0.f   },
     };
-    const WolfWeatherSound::Voice NEAR[] = {
+    // NOT "NEAR": <windef.h> defines NEAR (and FAR) as legacy near/far pointer keywords, so on
+    // MSVC "Voice NEAR[]" preprocesses to "Voice []" and is then parsed as a structured binding
+    // declaration (error C3694). It built fine on Linux and macOS and broke only on Windows.
+    const WolfWeatherSound::Voice NEAR_LAYERS[] = {
         { "soft",     "e09ec915-87aa-46fc-aaa3-36ee9ce6b9ce",  1.40f, 1800.f,    0.f, 0.30f },
         { "heavy",    "89a39f6f-e713-4baa-a49d-491bedc7e4fc",  1.80f, 1200.f,    0.f, 0.50f },
         { "leaves",   "1cca6560-7abc-40c2-803b-67ed63f7e6ab",  2.20f, 2200.f, 4600.f, 0.35f },
@@ -110,7 +113,7 @@ const WolfWeatherSound::Voice* WolfWeatherSound::ambience(const std::string& id)
 // static
 const WolfWeatherSound::Voice* WolfWeatherSound::nearLayer(const std::string& id)
 {
-    return findVoice(NEAR, id);
+    return findVoice(NEAR_LAYERS, id);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════

@@ -17,6 +17,11 @@
 
 #include "wolfweatherprofile.h"
 
+// strtol / tolower. The Linux precompiled header happens to pull these in; relying on that is
+// how a file builds on one platform and not another.
+#include <cctype>
+#include <cstdlib>
+
 #include "llstring.h"
 
 namespace

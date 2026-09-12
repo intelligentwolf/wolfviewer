@@ -17,6 +17,8 @@
 
 #include "wolfweather.h"
 
+#include <cmath>           // cosf / sinf for the wind direction
+
 #include "llagent.h"
 #include "llframetimer.h"
 #include "llvector4a.h"

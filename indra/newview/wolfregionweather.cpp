@@ -17,6 +17,8 @@
 
 #include "wolfregionweather.h"
 
+#include <memory>          // std::unique_ptr, for the asset callback's handle
+
 #include <boost/json.hpp>
 
 #include "llagent.h"

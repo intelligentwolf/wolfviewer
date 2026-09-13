@@ -195,9 +195,23 @@ void ALC_APIENTRY LLAudioEngine_OpenAL::onDeviceEvent(ALCenum eventType, ALCenum
     }
 }
 
+void LLAudioEngine_OpenAL::setDeviceWatchEnabled(bool enabled)
+{
+    if (mWatchEnabled != enabled)
+    {
+        LL_INFOS() << "OpenAL device watch " << (enabled ? "enabled" : "disabled") << " by preference" << LL_ENDL;
+    }
+    mWatchEnabled = enabled;
+    if (!enabled)
+    {
+        mDeviceChanged.store(false);
+        mDisconnectedReads = 0;
+    }
+}
+
 void LLAudioEngine_OpenAL::watchDevice()
 {
-    if (!mReopenDeviceSOFT)
+    if (!mReopenDeviceSOFT || !mWatchEnabled)
     {
         return;
     }
@@ -231,8 +245,24 @@ void LLAudioEngine_OpenAL::watchDevice()
             // fine) must not turn this into a reopen every two seconds — each WASAPI reopen can
             // stall the main thread, and enough stalls in a row cost the circuit. The event
             // path above is unaffected: a real default-device change still reopens at once.
-            mDisconnectedReads = connected ? 0 : (mDisconnectedReads + 1);
-            if (mDisconnectedReads >= 2 && now >= mReopenNotBefore && now >= mNextPollReopen)
+            if (connected)
+            {
+                mDisconnectedReads = 0;
+                mPollGaveUp = false;
+            }
+            else
+            {
+                ++mDisconnectedReads;
+            }
+            // And if a poll-driven reopen did NOT bring ALC_CONNECTED back, the flag is not
+            // telling the truth for this backend: stop reopening on its say-so altogether
+            // (until it reads connected again). The event path is still live.
+            if (mNextPollReopen > 0.0 && !connected && mDisconnectedReads == 1 && !mPollGaveUp && now < mNextPollReopen)
+            {
+                mPollGaveUp = true;
+                LL_WARNS() << "OpenAL: the device still reads disconnected after a reopen — ignoring ALC_CONNECTED from now on" << LL_ENDL;
+            }
+            if (mDisconnectedReads >= 2 && !mPollGaveUp && now >= mReopenNotBefore && now >= mNextPollReopen)
             {
                 mNextPollReopen = now + 60.0;
                 mDisconnectedReads = 0;

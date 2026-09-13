@@ -139,7 +139,11 @@ std::string LLVoiceClientStatusObserver::status2string(LLVoiceClientStatusObserv
 // Life proper nothing changes.
 static bool wolf_vivox_allowed()
 {
-    return LLGridManager::getInstance()->isInSecondLife();
+    if (LLGridManager::getInstance()->isInSecondLife()) return true;
+    // Paul 09-13: "in the voice tab allow the user to choose vivox or webrtc there but default
+    // to webrtc". Preferences > Sound & Media > Voice > "Voice system".
+    static LLCachedControl<std::string> backend(gSavedSettings, "WolfVoiceBackend", "webrtc");
+    return std::string(backend) == VIVOX_VOICE_SERVER_TYPE;
 }
 
 LLVoiceModuleInterface *getVoiceModule(const std::string &voice_server_type)
@@ -267,6 +271,21 @@ static void simulator_features_received_callback(const LLUUID& region_id)
             LLVoiceClient::getInstance()->handleSimulatorFeaturesReceived(simulatorFeatures);
         }
     }
+}
+
+// <WolfViewer 2026-09-13> The "Voice system" preference changed. Stop the client that is no
+// longer chosen, re-pick the spatial module for this region under the new rule (the same path a
+// region change takes), and enable what is chosen now — so the switch works without a relog.
+void LLVoiceClient::applyWolfVoiceBackend()
+{
+    if (!wolf_vivox_allowed() && LLVivoxVoiceClient::instanceExists())
+    {
+        // The only place off SL that may still touch the Vivox client: to stop it.
+        LLVivoxVoiceClient::getInstance()->setVoiceEnabled(false);
+    }
+    onRegionChanged();
+    setVoiceEnabled(voiceEnabled(true));
+    LL_INFOS("Voice") << "voice system is now " << (wolf_vivox_allowed() ? "vivox" : "webrtc") << LL_ENDL;
 }
 
 void LLVoiceClient::onRegionChanged()

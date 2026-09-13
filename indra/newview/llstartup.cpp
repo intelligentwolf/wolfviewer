@@ -1151,6 +1151,8 @@ bool idle_startup()
 
                     // <FS:Ansariel> Output device selection
                     gAudiop->setDevice(LLUUID(gSavedSettings.getString("FSOutputDeviceUUID")));
+                    // <WolfViewer 2026-09-13> follow the default output device across hot-plugs, unless switched off
+                    gAudiop->setDeviceWatchEnabled(gSavedSettings.getBOOL("WolfViewerAudioDeviceWatch"));
 
                     gAudiop->setMuted(true);
                 }

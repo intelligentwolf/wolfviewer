@@ -198,6 +198,8 @@ public:
     typedef std::map<LLUUID, std::string> output_device_map_t;
     virtual output_device_map_t getDevices();
     virtual void setDevice(const LLUUID& device_uuid) { };
+    /** <WolfViewer 2026-09-13> Follow the default output device across hot-plugs (OpenAL only). */
+    virtual void setDeviceWatchEnabled(bool enabled) { };
 
     typedef boost::signals2::signal<void(output_device_map_t output_device_map)> output_device_list_changed_callback_t;
     boost::signals2::connection setOutputDeviceListChangedCallback(const output_device_list_changed_callback_t::slot_type& cb)

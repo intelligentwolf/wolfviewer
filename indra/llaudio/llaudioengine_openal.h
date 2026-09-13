@@ -49,7 +49,8 @@ class LLAudioEngine_OpenAL : public LLAudioEngine
 
         virtual void shutdown();
         // <WolfViewer 2026-09-13> Every frame: base idle, then the output-device watch below.
-        virtual void idle();   // "virtual", not "override": clang -Winconsistent-missing-override (-Werror on macOS) wants the whole class one way
+        virtual void idle();
+        void setDeviceWatchEnabled(bool enabled) override;   // "virtual", not "override": clang -Winconsistent-missing-override (-Werror on macOS) wants the whole class one way
 
         void setInternalGain(F32 gain);
 
@@ -99,6 +100,8 @@ class LLAudioEngine_OpenAL : public LLAudioEngine
         F64                       mReopenNotBefore = 0.0;
         S32                       mReopenFailures = 0;
         S32                       mDisconnectedReads = 0;   // consecutive ALC_CONNECTED == 0 polls
+        bool                      mPollGaveUp = false;      // a poll reopen did not restore ALC_CONNECTED
+        bool                      mWatchEnabled = true;     // the WolfViewerAudioDeviceWatch setting
         F64                       mNextPollReopen = 0.0;    // the poll may reopen once a minute at most
 
         typedef F32 WIND_SAMPLE_T;

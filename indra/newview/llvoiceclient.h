@@ -519,6 +519,8 @@ public:
                         const LLUUID &agentID);
 
     void onRegionChanged();
+    /** <WolfViewer 2026-09-13> The WolfVoiceBackend preference changed: switch live. */
+    void applyWolfVoiceBackend();
 
     static void addObserver(LLVoiceClientStatusObserver* observer);
     static void removeObserver(LLVoiceClientStatusObserver* observer);

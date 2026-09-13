@@ -146,6 +146,8 @@ bool WolfLightning::storming(bool& distant) const
 {
     distant = false;
     if (!WolfWeather::enabled()) return false;
+    static LLCachedControl<bool> lightning_on(gSavedSettings, "WolfViewerLightning", true);
+    if (!lightning_on) return false;   // the switch: thunder still rolls (the sound engine's own), nothing is drawn
     const WolfWeatherProfile& p = WolfWeather::instance().activeProfile();
     if (p.mKind != WolfWeatherProfile::RAIN) return false;
     if (p.mSoundPreset == "distant") { distant = true; return true; }

@@ -667,6 +667,26 @@ bool handleHighResSnapshotChanged(const LLSD& newvalue)
     return true;
 }
 
+// <WolfViewer 2026-09-13> Preferences > Sound & Media > Voice > "Voice system"
+static bool handleWolfVoiceBackendChanged(const LLSD& newvalue)
+{
+    if (LLVoiceClient::instanceExists())
+    {
+        LLVoiceClient::getInstance()->applyWolfVoiceBackend();
+    }
+    return true;
+}
+
+// <WolfViewer 2026-09-13> the output-device watch kill switch (llaudioengine_openal.cpp)
+static bool handleWolfAudioDeviceWatchChanged(const LLSD& newvalue)
+{
+    if (gAudiop)
+    {
+        gAudiop->setDeviceWatchEnabled(newvalue.asBoolean());
+    }
+    return true;
+}
+
 bool handleVoiceClientPrefsChanged(const LLSD& newvalue)
 {
     if (LLVoiceClient::instanceExists())
@@ -1432,6 +1452,8 @@ void settings_setup_listeners()
     setting_setup_signal_listener(gSavedSettings, "RenderHideGroupTitle", handleHideGroupTitleChanged);
     setting_setup_signal_listener(gSavedSettings, "HighResSnapshot", handleHighResSnapshotChanged);
     setting_setup_signal_listener(gSavedSettings, "EnableVoiceChat", handleVoiceClientPrefsChanged);
+    setting_setup_signal_listener(gSavedSettings, "WolfVoiceBackend", handleWolfVoiceBackendChanged);          // <WolfViewer 2026-09-13>
+    setting_setup_signal_listener(gSavedSettings, "WolfViewerAudioDeviceWatch", handleWolfAudioDeviceWatchChanged);   // <WolfViewer 2026-09-13>
     setting_setup_signal_listener(gSavedSettings, "PTTCurrentlyEnabled", handleVoiceClientPrefsChanged);
     setting_setup_signal_listener(gSavedSettings, "PushToTalkButton", handleVoiceClientPrefsChanged);
     setting_setup_signal_listener(gSavedSettings, "PushToTalkToggle", handleVoiceClientPrefsChanged);

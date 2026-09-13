@@ -348,7 +348,12 @@ void WolfFloaterMeshUpload::onUpload()
 void WolfFloaterMeshUpload::onOldUpload()
 {
     // Firestorm's own uploader, unchanged. showClassicModelPreview is the original body of
-    // showModelPreview, which now routes here on Wolf Territories.
-    LLFloaterModelPreview::showClassicModelPreview();
+    // showModelPreview, which now routes here on Wolf Territories. The destination folder the
+    // gallery handed us (onOpen) goes with it, as showModelPreview(dest_id) would have passed it.
+    //
+    // This floater must NOT share the "upload" registry group with "upload_model"
+    // (llviewerfloaterreg.cpp): LLFloaterReg::getInstance resolves by group, and would hand back
+    // this floater under the wrong type while it is still open.
+    LLFloaterModelPreview::showClassicModelPreview(mDestFolderId);
     closeFloater();
 }

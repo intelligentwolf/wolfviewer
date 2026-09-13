@@ -633,7 +633,17 @@ void LLViewerFloaterReg::registerFloaters()
     // grid can change within a session and LLFloaterReg is built once at startup; it is only
     // ever OPENED on Wolf Territories (LLFloaterModelPreview::showModelPreview) and refuses to
     // upload anywhere else (WolfFloaterMeshUpload::onUpload -> WolfMeshUpload::isAvailable).
-    LLFloaterReg::add("wolf_mesh_upload", "floater_wolf_mesh_upload.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterMeshUpload>, "upload");
+    //
+    // NOT in the "upload" group. LLFloaterReg::findInstance (llfloaterreg.cpp) resolves a name
+    // to its GROUP and returns the first live instance in that group whose key matches; it
+    // never compares instance names. With this floater in "upload", getInstance("upload_model")
+    // while it was open returned THIS floater cast to LLFloaterModelPreview, and the "Old
+    // Upload" button (showClassicModelPreview -> loadHighLodModel) wrote through a null
+    // mModelPreview and crashed the viewer (core dump 2026-09-13: the object at the crash had
+    // WolfFloaterMeshUpload's vtable and LLFloaterModelPreview::sInstance was null). Every other
+    // "upload" floater opened from here would have gone the same way. An empty group name makes
+    // the floater its own group (LLFloaterReg::add), so lookups by any other name never see it.
+    LLFloaterReg::add("wolf_mesh_upload", "floater_wolf_mesh_upload.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterMeshUpload>);
     // [FLOATER SPLIT 2026-09-11] Ground painting and AI model creation, each its own window
     // instead of a tab in the build floater. No custom floater class: the panel inside does all
     // the work, so the generic host is enough (the pattern at :581).

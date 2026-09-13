@@ -122,8 +122,33 @@ std::string LLVoiceClientStatusObserver::status2string(LLVoiceClientStatusObserv
     return result;
 }
 
+// <WolfViewer 2026-09-13> WEBRTC ONLY off Second Life.
+//
+// Stock Firestorm drives BOTH voice clients: setVoiceEnabled() starts the Vivox coroutine on
+// every platform at login, which launches SLVoice, provisions against whatever the region's
+// ProvisionVoiceAccountRequest answers (on our WebRTC regions: nothing Vivox-shaped), falls back
+// to the built-in "bhr.vivox.com" and then shows "We are unable to connect to the voice server
+// www.bhr.vivox.com" (llvoicevivox.cpp establishVoiceConnection -> NoVoiceConnect). Linux users
+// never saw it only because SLVoice fails to launch there; on macOS it launches and the dialog
+// appears on every login (btylondon, 09-13). And an empty or missing VoiceServerType in
+// SimulatorFeatures selected the Vivox MODULE, which on this grid means no voice at all.
+//
+// Wolf Territories has no Vivox. Paul: "we dont use vivox so we need to fix it so it JUST uses
+// webrtc". So off Second Life (llviewernetwork.h isInSecondLife) the Vivox client is never
+// selected, never started and never driven; everything routes to LLWebRTCVoiceClient. On Second
+// Life proper nothing changes.
+static bool wolf_vivox_allowed()
+{
+    return LLGridManager::getInstance()->isInSecondLife();
+}
+
 LLVoiceModuleInterface *getVoiceModule(const std::string &voice_server_type)
 {
+    if (!wolf_vivox_allowed())
+    {
+        // Whatever the region says — "webrtc", "vivox", nothing — the answer is WebRTC.
+        return (LLVoiceModuleInterface *) LLWebRTCVoiceClient::getInstance();
+    }
     if (voice_server_type == VIVOX_VOICE_SERVER_TYPE || voice_server_type.empty())
     {
         return (LLVoiceModuleInterface *) LLVivoxVoiceClient::getInstance();
@@ -185,13 +210,24 @@ void LLVoiceClient::userAuthorized(const std::string& user_id, const LLUUID &age
     }
     mRegionChangedCallbackSlot = gAgent.addRegionChangedCallback(boost::bind(&LLVoiceClient::onRegionChanged, this));
     LLWebRTCVoiceClient::getInstance()->userAuthorized(user_id, agentID);
-    LLVivoxVoiceClient::getInstance()->userAuthorized(user_id, agentID);
+    if (wolf_vivox_allowed())   // <WolfViewer 2026-09-13>
+    {
+        LLVivoxVoiceClient::getInstance()->userAuthorized(user_id, agentID);
+    }
 }
 
 void LLVoiceClient::handleSimulatorFeaturesReceived(const LLSD &simulatorFeatures)
 {
     std::string voiceServerType = simulatorFeatures["VoiceServerType"].asString();
-    if (voiceServerType.empty())
+    if (!wolf_vivox_allowed())
+    {
+        // <WolfViewer 2026-09-13> Off Second Life the only voice is WebRTC, whatever the region
+        // reports. Resolving it HERE matters: the compare below turns the channels off when the
+        // module's own type differs from this string, and the stock "vivox" default would have
+        // done exactly that to the WebRTC module.
+        voiceServerType = WEBRTC_VOICE_SERVER_TYPE;
+    }
+    else if (voiceServerType.empty())
     {
         voiceServerType = VIVOX_VOICE_SERVER_TYPE;
     }
@@ -206,7 +242,7 @@ void LLVoiceClient::handleSimulatorFeaturesReceived(const LLSD &simulatorFeature
             mSpatialVoiceModule->processChannels(false);
         }
     }
-    setSpatialVoiceModule(simulatorFeatures["VoiceServerType"].asString());
+    setSpatialVoiceModule(voiceServerType);   // <WolfViewer 2026-09-13> the resolved type, not the raw string
 
     // if we should be in spatial voice, switch to it and set the creds
     if (mSpatialVoiceModule && !mNonSpatialVoiceModule)
@@ -348,7 +384,7 @@ void LLVoiceClient::updateSettings()
     updateMicMuteLogic();
 
     LLWebRTCVoiceClient::getInstance()->updateSettings();
-    LLVivoxVoiceClient::getInstance()->updateSettings();
+    if (wolf_vivox_allowed()) LLVivoxVoiceClient::getInstance()->updateSettings();   // <WolfViewer 2026-09-13>
 }
 
 //--------------------------------------------------
@@ -357,13 +393,13 @@ void LLVoiceClient::updateSettings()
 void LLVoiceClient::tuningStart()
 {
     LLWebRTCVoiceClient::getInstance()->tuningStart();
-    LLVivoxVoiceClient::getInstance()->tuningStart();
+    if (wolf_vivox_allowed()) LLVivoxVoiceClient::getInstance()->tuningStart();   // <WolfViewer 2026-09-13>
 }
 
 void LLVoiceClient::tuningStop()
 {
     LLWebRTCVoiceClient::getInstance()->tuningStop();
-    LLVivoxVoiceClient::getInstance()->tuningStop();
+    if (wolf_vivox_allowed()) LLVivoxVoiceClient::getInstance()->tuningStop();   // <WolfViewer 2026-09-13>
 }
 
 bool LLVoiceClient::inTuningMode()
@@ -406,13 +442,13 @@ void LLVoiceClient::refreshDeviceLists(bool clearCurrentList)
 
 void LLVoiceClient::setCaptureDevice(const std::string& name)
 {
-    LLVivoxVoiceClient::getInstance()->setCaptureDevice(name);
+    if (wolf_vivox_allowed()) LLVivoxVoiceClient::getInstance()->setCaptureDevice(name);   // <WolfViewer 2026-09-13>
     LLWebRTCVoiceClient::getInstance()->setCaptureDevice(name);
 }
 
 void LLVoiceClient::setRenderDevice(const std::string& name)
 {
-    LLVivoxVoiceClient::getInstance()->setRenderDevice(name);
+    if (wolf_vivox_allowed()) LLVivoxVoiceClient::getInstance()->setRenderDevice(name);   // <WolfViewer 2026-09-13>
     LLWebRTCVoiceClient::getInstance()->setRenderDevice(name);
 }
 
@@ -581,13 +617,13 @@ LLVoiceP2POutgoingCallInterface *LLVoiceClient::getOutgoingCallInterface(const L
 void LLVoiceClient::setVoiceVolume(F32 volume)
 {
     LLWebRTCVoiceClient::getInstance()->setVoiceVolume(volume);
-    LLVivoxVoiceClient::getInstance()->setVoiceVolume(volume);
+    if (wolf_vivox_allowed()) LLVivoxVoiceClient::getInstance()->setVoiceVolume(volume);   // <WolfViewer 2026-09-13>
 }
 
 void LLVoiceClient::setMicGain(F32 gain)
 {
     LLWebRTCVoiceClient::getInstance()->setMicGain(gain);
-    LLVivoxVoiceClient::getInstance()->setMicGain(gain);
+    if (wolf_vivox_allowed()) LLVivoxVoiceClient::getInstance()->setMicGain(gain);   // <WolfViewer 2026-09-13>
 }
 
 
@@ -645,7 +681,9 @@ void LLVoiceClient::setVoiceEnabled(bool enabled)
     {
         LLWebRTCVoiceClient::getInstance()->setVoiceEnabled(enabled);
     }
-    if (LLVivoxVoiceClient::instanceExists())
+    // <WolfViewer 2026-09-13> This is the call that STARTED the Vivox coroutine (SLVoice, the
+    // provisioning, the dead bhr.vivox.com connector and its dialog) on every login. Not off SL.
+    if (wolf_vivox_allowed() && LLVivoxVoiceClient::instanceExists())
     {
         LLVivoxVoiceClient::getInstance()->setVoiceEnabled(enabled);
     }
@@ -677,7 +715,7 @@ void LLVoiceClient::updateMicMuteLogic()
         new_mic_mute = true;
     }
     LLWebRTCVoiceClient::getInstance()->setMuteMic(new_mic_mute);
-    LLVivoxVoiceClient::getInstance()->setMuteMic(new_mic_mute);
+    if (wolf_vivox_allowed()) LLVivoxVoiceClient::getInstance()->setMuteMic(new_mic_mute);   // <WolfViewer 2026-09-13>
 }
 
 void LLVoiceClient::setMuteMic(bool muted)
@@ -813,6 +851,7 @@ bool LLVoiceClient::getIsModeratorMuted(const LLUUID& id)
 
 F32 LLVoiceClient::getCurrentPower(const LLUUID& id)
 {
+    if (!wolf_vivox_allowed()) return LLWebRTCVoiceClient::getInstance()->getCurrentPower(id);   // <WolfViewer 2026-09-13>
     return std::fmax(LLVivoxVoiceClient::getInstance()->getCurrentPower(id),
                      LLWebRTCVoiceClient::getInstance()->getCurrentPower(id));
 }
@@ -826,13 +865,14 @@ bool LLVoiceClient::getOnMuteList(const LLUUID& id)
 
 F32 LLVoiceClient::getUserVolume(const LLUUID& id)
 {
+    if (!wolf_vivox_allowed()) return LLWebRTCVoiceClient::getInstance()->getUserVolume(id);   // <WolfViewer 2026-09-13>
     return std::fmax(LLVivoxVoiceClient::getInstance()->getUserVolume(id), LLWebRTCVoiceClient::getInstance()->getUserVolume(id));
 }
 
 void LLVoiceClient::setUserVolume(const LLUUID& id, F32 volume)
 {
     LLWebRTCVoiceClient::getInstance()->setUserVolume(id, volume);
-    LLVivoxVoiceClient::getInstance()->setUserVolume(id, volume);
+    if (wolf_vivox_allowed()) LLVivoxVoiceClient::getInstance()->setUserVolume(id, volume);   // <WolfViewer 2026-09-13>
     // <FS:Ansariel> Add callback for user volume change
     sUserVolumeUpdateSignal(id);
 }
@@ -988,7 +1028,11 @@ class LLViewerRequiredVoiceVersion : public LLHTTPNode
 
         LLVoiceModuleInterface *voiceModule = NULL;
 
-        if (voice_server_type == "vivox" || voice_server_type.empty())
+        if (!wolf_vivox_allowed())
+        {
+            voiceModule = (LLVoiceModuleInterface *) LLWebRTCVoiceClient::getInstance();   // <WolfViewer 2026-09-13>
+        }
+        else if (voice_server_type == "vivox" || voice_server_type.empty())
         {
             voiceModule = (LLVoiceModuleInterface *) LLVivoxVoiceClient::getInstance();
         }

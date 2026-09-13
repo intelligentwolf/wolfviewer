@@ -225,8 +225,17 @@ void LLAudioEngine_OpenAL::watchDevice()
             // Source: alext.h:160 ALC_CONNECTED — 0 once the device has gone away.
             ALCint connected = 1;
             alcGetIntegerv(device, ALC_CONNECTED, 1, &connected);
-            if (!connected && now >= mReopenNotBefore)
+            // [2026-09-13] TWO consecutive "not connected" reads, and never more than one
+            // poll-driven reopen a minute. A backend that mis-reports the flag (reported the
+            // day w30 shipped: a Windows 10 user dropped from a busy region within minutes, w29
+            // fine) must not turn this into a reopen every two seconds — each WASAPI reopen can
+            // stall the main thread, and enough stalls in a row cost the circuit. The event
+            // path above is unaffected: a real default-device change still reopens at once.
+            mDisconnectedReads = connected ? 0 : (mDisconnectedReads + 1);
+            if (mDisconnectedReads >= 2 && now >= mReopenNotBefore && now >= mNextPollReopen)
             {
+                mNextPollReopen = now + 60.0;
+                mDisconnectedReads = 0;
                 reopenDevice("device disconnected");
             }
         }

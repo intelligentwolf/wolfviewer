@@ -98,6 +98,8 @@ class LLAudioEngine_OpenAL : public LLAudioEngine
         F64                       mNextDeviceCheck = 0.0;
         F64                       mReopenNotBefore = 0.0;
         S32                       mReopenFailures = 0;
+        S32                       mDisconnectedReads = 0;   // consecutive ALC_CONNECTED == 0 polls
+        F64                       mNextPollReopen = 0.0;    // the poll may reopen once a minute at most
 
         typedef F32 WIND_SAMPLE_T;
         LLWindGen<WIND_SAMPLE_T> *mWindGen;

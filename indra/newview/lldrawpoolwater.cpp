@@ -536,7 +536,17 @@ void LLDrawPoolWater::pushWaterPlanes(int pass)
             // it on a distance-graded lattice, so the sea no longer goes flat at the border.
             // <WolfViewer 2026-09-10> ...nor a STILL pool the terrain analysis found: waves inside
             // a region exist only where About Land > Waves painted them (wolfnaturalwater.cpp).
-            const bool no_swell = water->getWaterfall() > 0.f || water->getStreamFlow() > 0.f || water->getStillWater();
+            // <WolfViewer 2026-09-13> ...nor when the LITE water program is running (an Apple GPU:
+            // 16 fragment texture units, our fields compiled out — llviewershadermgr.cpp
+            // sWolfWaterFull). The Gerstner swell in waterV.glsl is NOT behind WOLF_WATER_FULL, and
+            // with the exposure and zone fields gone every vertex counted as open sea at the
+            // maximum 1.3x scale — full swell against every shore and in every harbour, and the
+            // fragment's whitecaps, foam lace and crest glow all keyed off that amplitude with
+            // nothing to calm them (arabian sands' white glittering sea, "the water flashes" on
+            // an M4, 09-13). Amplitude 0 is, by the shader's own contract, stock Firestorm water:
+            // no displacement, and every one of those effects is gated on waveAmplitude > 0.001.
+            const bool no_swell = water->getWaterfall() > 0.f || water->getStreamFlow() > 0.f || water->getStillWater()
+                               || !LLViewerShaderMgr::sWolfWaterFull;
             cur_shader->uniform1f(LLShaderMgr::WATER_WAVE_AMPLITUDE, no_swell ? 0.f : amplitude);
 
             // The depth + exposure fields and the wake belong to a region's OWN water plane

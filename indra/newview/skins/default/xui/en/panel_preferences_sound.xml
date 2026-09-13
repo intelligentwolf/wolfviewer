@@ -1268,10 +1268,10 @@
          layout="topleft"
          left_pad="5"
          name="wolf_voice_backend"
-         tool_tip="WebRTC is Wolf Territories' voice. Vivox only works on a grid that runs a Vivox service."
+         tool_tip="WolfVoice is Wolf Territories' own WebRTC voice. Vivox only works on a grid that runs a Vivox service."
          width="150">
             <combo_box.item
-             label="WebRTC (Wolf Territories)"
+             label="WebRTC (WolfVoice)"
              name="webrtc"
              value="webrtc" />
             <combo_box.item

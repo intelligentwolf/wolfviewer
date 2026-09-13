@@ -66,6 +66,12 @@ public:
     /** The roof test grid: LANDING_N x LANDING_N cells over the weather box round the camera. */
     static constexpr S32 LANDING_N = 12;
     static constexpr S32 LANDING_RAYS_PER_FRAME = 6;
+    /**
+     * [LIGHTNING 2026-09-13] Is there a roof over the camera? The landing grid's own answer for
+     * the camera's cell: a surface above the camera means indoors. Used by WolfLightning so no
+     * bolt is ever drawn inside a room (Paul: "NO WEATHER CAN ENTER A BUILDING").
+     */
+    bool cameraUnderRoof() const;
 
 private:
     void emit(const LLVector3& camera_pos);
@@ -152,6 +158,8 @@ public:
     }
     /** Every frame from LLAppViewer::idle(): the parcel sweep and the emitter's mode. */
     void idle();
+    /** [LIGHTNING 2026-09-13] The emitter's roof test at the camera; false when nothing falls. */
+    bool cameraUnderRoof() const { return mSource.notNull() && !mSource->isDead() && mSource->cameraUnderRoof(); }
 
 private:
     Mode effective() const { return mForced != Mode::NONE ? mForced : mUser; }

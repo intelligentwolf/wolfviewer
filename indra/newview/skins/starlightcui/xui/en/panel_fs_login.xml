@@ -7,7 +7,7 @@
     name="panel_login"
     focus_root="true" 
     background_visible="true"
-    bg_opaque_color="0.16 0.16 0.16 1"
+    bg_opaque_color="FSLoginBackgroundColor"
     background_opaque="true"
     width="1024">
   <panel.string
@@ -210,7 +210,7 @@ tool_tip="The account name you chose when you registered, like bobsmith420 or St
         name="links_login_panel"
         layout="topleft"
         width="290"
-        height="80">
+        height="100">
       <text
           follows="left|bottom"
           font="SansSerifSmall"
@@ -231,6 +231,17 @@ tool_tip="The account name you chose when you registered, like bobsmith420 or St
           top="26"
           width="280">
         Forgot your username or password?
+      </text>
+      <!-- <FS:Wolf/> The grid's Patreon, same link as WolfStorm's login page. [SKIN PORT 2026-09-13] -->
+      <text
+          follows="left|bottom"
+          font="SansSerifSmall"
+          text_color="PatreonLinkColor"
+          height="16"
+          name="patreon_text"
+          top="42"
+          width="280">
+        Support us on Patreon
       </text>
       <button
           follows="left|bottom"
@@ -293,7 +304,7 @@ tool_tip="The account name you chose when you registered, like bobsmith420 or St
           name="mode_combo"
           width="110">
            <combo_box.item
-            label="Firestorm"
+            label="WolfViewer"
             name="Firestorm"
             value="settings_firestorm.xml" />
            <combo_box.item

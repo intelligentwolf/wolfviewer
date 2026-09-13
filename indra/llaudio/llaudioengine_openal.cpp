@@ -27,6 +27,7 @@
 
 #include "linden_common.h"
 #include "lldir.h"
+#include "llframetimer.h"   // <WolfViewer 2026-09-13> device watch clock
 
 #include "llaudioengine_openal.h"
 #include "lllistener_openal.h"
@@ -87,8 +88,187 @@ bool LLAudioEngine_OpenAL::init(void* userdata, const std::string &app_title)
                            ALC_DEFAULT_DEVICE_SPECIFIER))
         << LL_ENDL;
 
+    initDeviceWatch(device);   // <WolfViewer 2026-09-13>
+
     return true;
 }
+
+// <WolfViewer 2026-09-13> ─── output-device hot-plug ─────────────────────────────────────────
+// See the note on these members in llaudioengine_openal.h.
+
+void LLAudioEngine_OpenAL::initDeviceWatch(ALCdevice* device)
+{
+    if (!device)
+    {
+        return;
+    }
+    // Source: alc.h:242 alcIsExtensionPresent, alc.h:247 alcGetProcAddress. The names are the
+    // ones the shipped library advertises (strings libopenal.so.1.24.2: ALC_SOFT_reopen_device,
+    // ALC_SOFT_system_events, ALC_EXT_disconnect).
+    if (alcIsExtensionPresent(device, "ALC_SOFT_reopen_device"))
+    {
+        mReopenDeviceSOFT = (LPALCREOPENDEVICESOFT)alcGetProcAddress(device, "alcReopenDeviceSOFT");
+    }
+    mHasDisconnectExt = alcIsExtensionPresent(device, "ALC_EXT_disconnect") == ALC_TRUE;
+    if (alcIsExtensionPresent(device, "ALC_SOFT_system_events"))
+    {
+        mEventControlSOFT     = (LPALCEVENTCONTROLSOFT)alcGetProcAddress(device, "alcEventControlSOFT");
+        mEventCallbackSOFT    = (LPALCEVENTCALLBACKSOFT)alcGetProcAddress(device, "alcEventCallbackSOFT");
+        mEventIsSupportedSOFT = (LPALCEVENTISSUPPORTEDSOFT)alcGetProcAddress(device, "alcEventIsSupportedSOFT");
+    }
+    LL_INFOS() << "OpenAL device watch: reopen=" << (mReopenDeviceSOFT ? "yes" : "no")
+               << " events=" << (mEventControlSOFT && mEventCallbackSOFT ? "yes" : "no")
+               << " disconnect=" << (mHasDisconnectExt ? "yes" : "no") << LL_ENDL;
+    if (!mReopenDeviceSOFT)
+    {
+        // Without the reopen entry point a lost device can only be logged about. Watch off.
+        return;
+    }
+    if (mEventControlSOFT && mEventCallbackSOFT)
+    {
+        // Source: alext.h:727 the default-device event; alext.h:739-740 the two calls.
+        // ONLY the default-device change is asked for. This engine always opens the DEFAULT
+        // device (alutInit(NULL, NULL)), and both directions of a hot-plug move the default —
+        // headset out: the system falls back to the speakers; headset in: it comes back — so
+        // that one event is the whole story. DEVICE_ADDED / DEVICE_REMOVED would also fire for
+        // devices that are not ours and re-open the output for nothing, a click for no reason.
+        // alcEventIsSupportedSOFT (alext.h:738) says whether this backend can raise it; if it
+        // cannot, the ALC_CONNECTED poll in watchDevice() is what remains.
+        std::vector<ALCenum> events;
+        const ALCenum wanted[] = { ALC_EVENT_TYPE_DEFAULT_DEVICE_CHANGED_SOFT };
+        for (ALCenum ev : wanted)
+        {
+            if (!mEventIsSupportedSOFT
+                || mEventIsSupportedSOFT(ev, ALC_PLAYBACK_DEVICE_SOFT) == ALC_EVENT_SUPPORTED_SOFT)
+            {
+                events.push_back(ev);
+            }
+        }
+        if (!events.empty())
+        {
+            mEventCallbackSOFT(&LLAudioEngine_OpenAL::onDeviceEvent, this);
+            if (mEventControlSOFT((ALCsizei)events.size(), events.data(), ALC_TRUE) == ALC_TRUE)
+            {
+                mEventsArmed = true;
+            }
+            else
+            {
+                mEventCallbackSOFT(nullptr, nullptr);
+            }
+        }
+        LL_INFOS() << "OpenAL device watch: " << events.size() << " event type(s) "
+                   << (mEventsArmed ? "armed" : "refused") << LL_ENDL;
+    }
+    mNextDeviceCheck = LLFrameTimer::getElapsedSeconds() + 2.0;
+}
+
+void LLAudioEngine_OpenAL::shutdownDeviceWatch()
+{
+    if (mEventsArmed && mEventControlSOFT && mEventCallbackSOFT)
+    {
+        const ALCenum all[] = { ALC_EVENT_TYPE_DEFAULT_DEVICE_CHANGED_SOFT };
+        mEventControlSOFT(1, all, ALC_FALSE);
+        mEventCallbackSOFT(nullptr, nullptr);
+    }
+    mEventsArmed = false;
+    mReopenDeviceSOFT = nullptr;
+    mEventControlSOFT = nullptr;
+    mEventCallbackSOFT = nullptr;
+    mEventIsSupportedSOFT = nullptr;
+}
+
+// static — runs on OpenAL's thread (alext.h:732 ALCEVENTPROCTYPESOFT). No engine calls here.
+void ALC_APIENTRY LLAudioEngine_OpenAL::onDeviceEvent(ALCenum eventType, ALCenum deviceType, ALCdevice* /*device*/,
+                                                       ALCsizei /*length*/, const ALCchar* /*message*/, void* userParam) ALC_API_NOEXCEPT17
+{
+    if (deviceType != ALC_PLAYBACK_DEVICE_SOFT)
+    {
+        return;
+    }
+    if (eventType == ALC_EVENT_TYPE_DEFAULT_DEVICE_CHANGED_SOFT)
+    {
+        LLAudioEngine_OpenAL* self = static_cast<LLAudioEngine_OpenAL*>(userParam);
+        if (self)
+        {
+            self->mDeviceChanged.store(true);
+        }
+    }
+}
+
+void LLAudioEngine_OpenAL::watchDevice()
+{
+    if (!mReopenDeviceSOFT)
+    {
+        return;
+    }
+    const F64 now = LLFrameTimer::getElapsedSeconds();
+    if (mDeviceChanged.exchange(false))
+    {
+        // The default device changed. Re-opening on the default covers both directions:
+        // headset out (follow the system to the speakers) and headset back in (follow it
+        // back). A burst of events collapses into one reopen.
+        if (now >= mReopenNotBefore)
+        {
+            reopenDevice("device event");
+        }
+        else
+        {
+            mDeviceChanged.store(true);   // keep it pending until the back-off expires
+        }
+    }
+    if (mHasDisconnectExt && now >= mNextDeviceCheck)
+    {
+        mNextDeviceCheck = now + 2.0;
+        ALCdevice* device = alcGetContextsDevice(alcGetCurrentContext());
+        if (device)
+        {
+            // Source: alext.h:160 ALC_CONNECTED — 0 once the device has gone away.
+            ALCint connected = 1;
+            alcGetIntegerv(device, ALC_CONNECTED, 1, &connected);
+            if (!connected && now >= mReopenNotBefore)
+            {
+                reopenDevice("device disconnected");
+            }
+        }
+    }
+}
+
+void LLAudioEngine_OpenAL::reopenDevice(const char* why)
+{
+    ALCdevice* device = alcGetContextsDevice(alcGetCurrentContext());
+    if (!device || !mReopenDeviceSOFT)
+    {
+        return;
+    }
+    // Source: alext.h:573 LPALCREOPENDEVICESOFT(device, deviceName, attribs): NULL name = the
+    // default device, NULL attribs = keep the context's current attributes.
+    const ALCboolean ok = mReopenDeviceSOFT(device, nullptr, nullptr);
+    if (ok == ALC_TRUE)
+    {
+        mReopenFailures = 0;
+        mReopenNotBefore = LLFrameTimer::getElapsedSeconds() + 1.0;
+        LL_INFOS() << "OpenAL: re-opened the default output device (" << why << "): "
+                   << ll_safe_string(alcGetString(device, ALC_ALL_DEVICES_SPECIFIER)) << LL_ENDL;
+    }
+    else
+    {
+        // The default device may itself be mid-change (nothing to open yet). Back off and let
+        // the next event or poll try again; never spin on a failing open.
+        ++mReopenFailures;
+        mReopenNotBefore = LLFrameTimer::getElapsedSeconds() + llmin(30.0, 2.0 * mReopenFailures);
+        const ALCenum err = alcGetError(device);
+        LL_WARNS() << "OpenAL: could not re-open the output device (" << why << "), ALC error 0x"
+                   << std::hex << err << std::dec << LL_ENDL;
+    }
+}
+
+// virtual
+void LLAudioEngine_OpenAL::idle()
+{
+    LLAudioEngine::idle();
+    watchDevice();
+}
+// </WolfViewer 2026-09-13>
 
 // virtual
 std::string LLAudioEngine_OpenAL::getDriverName(bool verbose)
@@ -133,6 +313,7 @@ void LLAudioEngine_OpenAL::allocateListener()
 void LLAudioEngine_OpenAL::shutdown()
 {
     LL_INFOS() << "About to LLAudioEngine::shutdown()" << LL_ENDL;
+    shutdownDeviceWatch();   // <WolfViewer 2026-09-13> no callback may fire into a dead engine
     LLAudioEngine::shutdown();
 
     // If a subsequent error occurs while there is still an error recorded

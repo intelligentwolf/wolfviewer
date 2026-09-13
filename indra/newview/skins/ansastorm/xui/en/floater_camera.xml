@@ -60,6 +60,7 @@
             top="0"
             width="220">
            <joystick_rotate
+              wolf_analog="true"
               follows="top|left"
               height="78"
               layout="topleft"
@@ -145,6 +146,7 @@
                 function="Zoom.minus" />
            </button>
          <joystick_track
+         wolf_analog="true"
          follows="top|left"
          height="78"
          image_selected="Cam_Tracking_In"

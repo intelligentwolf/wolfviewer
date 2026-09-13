@@ -32,8 +32,8 @@
 namespace
 {
     /// The gap between cracks, in seconds — irregular, and rarer for a distant storm.
-    constexpr F64 THUNDER_MIN_SECS = 9.0,  THUNDER_SPAN_SECS = 22.0;
-    constexpr F64 DISTANT_MIN_SECS = 22.0, DISTANT_SPAN_SECS = 40.0;
+    // [LIGHTNING 2026-09-13] The strike cadence moved to wolflightning.h (THUNDER_*/DISTANT_*):
+    // the bolt is scheduled there and the clap follows it.
 
     std::string soundPath(const char* uuid_str)
     {
@@ -331,12 +331,7 @@ void WolfWeatherSound::apply(const WolfWeatherProfile& profile)
         setLoopGain(mNearSource, vol * nr->mGain * intensity);
     }
 
-    if (!mPlaying)
-    {
-        mPlaying = true;
-        // Do not crack the instant the rain starts: that reads as a bug, not a storm.
-        mNextThunder = LLFrameTimer::getElapsedSeconds() + THUNDER_MIN_SECS;
-    }
+    mPlaying = true;
 }
 
 void WolfWeatherSound::stop()
@@ -371,19 +366,14 @@ void WolfWeatherSound::idle()
     {
         apply(mProfile);
     }
-    maybeThunder();
 }
 
-void WolfWeatherSound::maybeThunder()
+// [LIGHTNING 2026-09-13] Called by WolfLightning when the sound of a strike arrives. The gate
+// is the one apply() used before playing anything: the weather sound must be on.
+void WolfWeatherSound::crack(bool distant)
 {
-    const bool storm    = (mProfile.mSoundPreset == "thunder");
-    const bool distant  = (mProfile.mSoundPreset == "distant");
-    if (!storm && !distant) return;
-    const F64 now = LLFrameTimer::getElapsedSeconds();
-    if (now < mNextThunder) return;
-    mNextThunder = now + (distant ? DISTANT_MIN_SECS : THUNDER_MIN_SECS)
-                       + ll_frand((F32)(distant ? DISTANT_SPAN_SECS : THUNDER_SPAN_SECS));
-
+    if (!mPlaying || !gAudiop) return;
+    if (mProfile.mSoundPreset != "thunder" && mProfile.mSoundPreset != "distant") return;
     const Voice& v = distant ? CRACK_FAR : CRACK_NEAR;
     if (!ensureSound(v)) return;
     const F32 gain = llclamp((F32)mProfile.mVolume / 100.f * v.mGain, 0.f, 1.f);

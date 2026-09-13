@@ -64,6 +64,11 @@
      name="status_selectland">
         Click and drag to select land
     </floater.string>
+    <!-- [SKIN PORT 2026-09-13] llfloatertools.cpp:381 mStatusText["paintland"], as skins/default. -->
+    <floater.string
+     name="status_paintland">
+        Drag on the ground to paint (Esc to stop)
+    </floater.string>
     <floater.string
      name="status_selectcount">
         [OBJ_COUNT] objects selected, land impact [LAND_IMPACT]

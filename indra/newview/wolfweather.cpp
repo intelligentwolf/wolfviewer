@@ -34,6 +34,7 @@
 #include "wolfobjectprops.h"
 #include "wolfregionweather.h"
 #include "wolfweathersound.h"
+#include "wolflightning.h"      // [LIGHTNING 2026-09-13]
 
 const std::string WolfWeather::KEYWORD_RAIN("wolfrain");
 const std::string WolfWeather::KEYWORD_SNOW("wolfsnow");
@@ -102,10 +103,26 @@ void WolfWeatherPartSource::updateLanding(const LLVector3& cam, F32 half_xy, F32
         mLandingInit = true;
     }
     const F32 cell = (2.f * half_xy) / (F32)LANDING_N;
-    for (S32 r = 0; r < LANDING_RAYS_PER_FRAME; ++r)
+    // [2026-09-13] THE CAMERA'S OWN CELL IS RE-RAYED EVERY FRAME, before the round-robin and in
+    // addition to it. The round-robin refreshes 6 of 144 cells a frame, so a full sweep is 24
+    // frames — walk through a door and the rain kept falling on you until the grid caught up,
+    // because your cell still held the height it had outdoors. Whatever is above your head is
+    // now never more than one frame stale, and stepping under a roof stops the weather on you
+    // at once. Source: wolfstorm environment_manager.js _updateLanding (cameraCell), the web
+    // viewer's own fix, ported for parity (Paul: "NO WEATHER CAN ENTER A BUILDING").
+    const S32 camera_cell = (LANDING_N / 2) * LANDING_N + (LANDING_N / 2);
+    for (S32 r = -1; r < LANDING_RAYS_PER_FRAME; ++r)
     {
-        const S32 k = mLandingNext;
-        mLandingNext = (mLandingNext + 1) % (LANDING_N * LANDING_N);
+        S32 k;
+        if (r < 0)
+        {
+            k = camera_cell;
+        }
+        else
+        {
+            k = mLandingNext;
+            mLandingNext = (mLandingNext + 1) % (LANDING_N * LANDING_N);
+        }
         const S32 cx = k % LANDING_N, cy = k / LANDING_N;
         const F32 wx = cam.mV[VX] - half_xy + ((F32)cx + 0.5f) * cell;
         const F32 wy = cam.mV[VY] - half_xy + ((F32)cy + 0.5f) * cell;
@@ -139,6 +156,17 @@ F32 WolfWeatherPartSource::landingZ(const LLVector3& cam, F32 x, F32 y, F32 half
     const S32 cy = (S32)floorf((y - (cam.mV[VY] - half_xy)) / cell);
     if (cx < 0 || cy < 0 || cx >= LANDING_N || cy >= LANDING_N) return -1e9f;
     return mLandingZ[cy * LANDING_N + cx];
+}
+
+// [LIGHTNING 2026-09-13] The camera's cell is re-rayed every frame (updateLanding above), so
+// this is at most one frame stale. The ray starts above the weather box and stops at the first
+// surface; a landing height ABOVE the camera can only be a roof (or a bridge, a deck) over it.
+bool WolfWeatherPartSource::cameraUnderRoof() const
+{
+    if (!mLandingInit) return false;
+    const LLVector3 cam = LLViewerCamera::getInstance()->getOrigin();
+    const S32 camera_cell = (LANDING_N / 2) * LANDING_N + (LANDING_N / 2);
+    return mLandingZ[camera_cell] > cam.mV[VZ];
 }
 
 /**
@@ -441,6 +469,8 @@ void WolfWeather::idle()
     // [WEATHER 2026-09-12] The region's own answer, and the sound that goes with the sky.
     WolfRegionWeather::instance().idle();
     WolfWeatherSound::instance().idle();
+    // [LIGHTNING 2026-09-13] Forks during a thunderstorm; the thunder is timed from them.
+    WolfLightning::instance().idle();
 }
 
 // Source: fswolfwater.cpp sweep — every prim in draw distance is handed to the harvester,

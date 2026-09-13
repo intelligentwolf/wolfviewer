@@ -315,6 +315,21 @@
              name="prefs_btn"
              left_pad="14"
              width="18" />
+            <!-- [AI 2026-09-13] Same button as skins/default/xui/en/panel_script_ed.xml. A skin's
+                 own XUI file REPLACES the default one (lldir.h findSkinnedFilenames,
+                 CURRENT_SKIN: "the existence of filename in the specified skin completely
+                 supercedes any filename in the default skin"), so Vintage users had no AI
+                 button at all. Shown by LLScriptEdCore::refreshWolfAIButton. -->
+            <button
+             follows="left|top"
+             height="18"
+             tool_tip="Write or edit this script with AI"
+             label="AI"
+             layout="topleft"
+             name="wolf_ai_btn"
+             left_pad="14"
+             visible="false"
+             width="26" />
             
             <loading_indicator
              top="2"

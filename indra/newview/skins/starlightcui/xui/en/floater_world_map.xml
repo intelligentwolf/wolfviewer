@@ -655,7 +655,7 @@
         initial_value="128"
         layout="topleft"
         left_pad="4"
-        max_val="8191"
+        max_val="65535"
         min_val="0"
         name="teleport_coordinate_x"
         width="44" >
@@ -670,7 +670,7 @@
         initial_value="128"
         layout="topleft"
         left_pad="4"
-        max_val="8191"
+        max_val="65535"
         min_val="0"
         name="teleport_coordinate_y"
 		width="44">

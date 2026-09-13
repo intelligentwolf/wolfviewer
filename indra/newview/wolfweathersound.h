@@ -51,8 +51,15 @@ class WolfWeatherSound : public LLSingleton<WolfWeatherSound>
 public:
     /** The one entry point: wolfweather.cpp calls it after every precedence decision. */
     void apply(const WolfWeatherProfile& profile);
-    /** Every frame: keeps the loops on the listener and schedules the thunder. */
+    /** Every frame: keeps the loops on the listener. */
     void idle();
+    /**
+     * [LIGHTNING 2026-09-13] One thunder clap, now. WolfLightning calls this when the sound of a
+     * strike reaches the listener (bolt first, clap distance/340 m/s later); the scheduling
+     * that used to live here (maybeThunder) moved there so the bolt and the clap are one event.
+     * Does nothing while the weather sound is off, so a silent storm still forks silently.
+     */
+    void crack(bool distant);
     /** Silence, and let the sources go. */
     void stop();
 
@@ -91,7 +98,6 @@ private:
     void   setLoopGain(const LLUUID& source_id, F32 gain);
     void   stopLoop(LLUUID& source_id);
 
-    void   maybeThunder();
 
     WolfWeatherProfile mProfile;
     bool   mPlaying = false;
@@ -99,7 +105,6 @@ private:
     LLUUID mNearSource;
     std::string mAmbId;         ///< which voice each source is currently playing
     std::string mNearId;
-    F64    mNextThunder = 0.0;
 };
 
 #endif // WOLF_WEATHER_SOUND_H

@@ -33,6 +33,8 @@
 #include "llaudioengine.h"
 #include "lllistener_openal.h"
 #include "llwindgen.h"
+#include <atomic>   // <WolfViewer 2026-09-13> the device-change flag set from OpenAL's thread
+#include <vector>
 
 class LLAudioEngine_OpenAL : public LLAudioEngine
 {
@@ -46,6 +48,8 @@ class LLAudioEngine_OpenAL : public LLAudioEngine
         virtual void allocateListener();
 
         virtual void shutdown();
+        // <WolfViewer 2026-09-13> Every frame: base idle, then the output-device watch below.
+        void idle() override;
 
         void setInternalGain(F32 gain);
 
@@ -57,6 +61,44 @@ class LLAudioEngine_OpenAL : public LLAudioEngine
         /*virtual*/ void updateWind(LLVector3 direction, F32 camera_altitude);
 
     private:
+        // <WolfViewer 2026-09-13> AUDIO DEVICE HOT-PLUG (Owl Eyes, 09-13: "if sound had been
+        // broken (plugout/plugin headset) the sound is not restored ... needs a relog").
+        //
+        // alutInit() opens the DEFAULT playback device once (alutInit -> alcOpenDevice(NULL)) and
+        // nothing ever revisits that choice. When the headset the device was opened on is pulled,
+        // the device's backend stream is gone; when it comes back, OpenAL is still bound to the
+        // dead stream (or to whatever the system fell back to), so the viewer stays mute until it
+        // is restarted.
+        //
+        // The shipped OpenAL Soft (autobuild.xml openal 1.24.2-r1, all three platforms) carries
+        // two extensions that address exactly this, both in packages/include/AL/alext.h:
+        //   ALC_SOFT_system_events  (alext.h:723) — a callback when the default playback device
+        //                            changes or a device is added / removed;
+        //   ALC_SOFT_reopen_device  (alext.h:571) — alcReopenDeviceSOFT(device, NULL, NULL)
+        //                            re-opens the CURRENT default device on the same ALCdevice,
+        //                            keeping the context, sources and buffers.
+        // Plus ALC_EXT_disconnect (alext.h:158): ALC_CONNECTED reads 0 once the device is gone —
+        // the fallback for a backend that raises no events.
+        //
+        // The event callback runs on OpenAL's own thread: it only raises the flag. The reopen
+        // happens in idle(), on the main thread, like every other call into the engine.
+        void   initDeviceWatch(ALCdevice* device);
+        void   shutdownDeviceWatch();
+        void   watchDevice();
+        void   reopenDevice(const char* why);
+        static void ALC_APIENTRY onDeviceEvent(ALCenum eventType, ALCenum deviceType, ALCdevice* device,
+                                               ALCsizei length, const ALCchar* message, void* userParam) ALC_API_NOEXCEPT17;
+        LPALCREOPENDEVICESOFT     mReopenDeviceSOFT = nullptr;
+        LPALCEVENTCONTROLSOFT     mEventControlSOFT = nullptr;
+        LPALCEVENTCALLBACKSOFT    mEventCallbackSOFT = nullptr;
+        LPALCEVENTISSUPPORTEDSOFT mEventIsSupportedSOFT = nullptr;
+        bool                      mHasDisconnectExt = false;
+        bool                      mEventsArmed = false;
+        std::atomic<bool>         mDeviceChanged{false};
+        F64                       mNextDeviceCheck = 0.0;
+        F64                       mReopenNotBefore = 0.0;
+        S32                       mReopenFailures = 0;
+
         typedef F32 WIND_SAMPLE_T;
         LLWindGen<WIND_SAMPLE_T> *mWindGen;
         F32 *mWindBuf;

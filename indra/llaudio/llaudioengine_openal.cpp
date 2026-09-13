@@ -279,13 +279,20 @@ void LLAudioEngine_OpenAL::reopenDevice(const char* why)
     {
         return;
     }
+    if (++mReopens > REOPEN_MAX)
+    {
+        LL_WARNS() << "OpenAL: " << REOPEN_MAX << " output-device reopens this session (" << why
+                   << ") — switching the device watch off; restart the viewer to follow the device again" << LL_ENDL;
+        setDeviceWatchEnabled(false);
+        return;
+    }
     // Source: alext.h:573 LPALCREOPENDEVICESOFT(device, deviceName, attribs): NULL name = the
     // default device, NULL attribs = keep the context's current attributes.
     const ALCboolean ok = mReopenDeviceSOFT(device, nullptr, nullptr);
     if (ok == ALC_TRUE)
     {
         mReopenFailures = 0;
-        mReopenNotBefore = LLFrameTimer::getElapsedSeconds() + 1.0;
+        mReopenNotBefore = LLFrameTimer::getElapsedSeconds() + REOPEN_GAP_SECS;
         LL_INFOS() << "OpenAL: re-opened the default output device (" << why << "): "
                    << ll_safe_string(alcGetString(device, ALC_ALL_DEVICES_SPECIFIER)) << LL_ENDL;
     }
@@ -294,7 +301,7 @@ void LLAudioEngine_OpenAL::reopenDevice(const char* why)
         // The default device may itself be mid-change (nothing to open yet). Back off and let
         // the next event or poll try again; never spin on a failing open.
         ++mReopenFailures;
-        mReopenNotBefore = LLFrameTimer::getElapsedSeconds() + llmin(30.0, 2.0 * mReopenFailures);
+        mReopenNotBefore = LLFrameTimer::getElapsedSeconds() + llmax(REOPEN_GAP_SECS, llmin(30.0, 2.0 * mReopenFailures));
         const ALCenum err = alcGetError(device);
         LL_WARNS() << "OpenAL: could not re-open the output device (" << why << "), ALC error 0x"
                    << std::hex << err << std::dec << LL_ENDL;

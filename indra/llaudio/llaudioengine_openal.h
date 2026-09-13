@@ -102,6 +102,14 @@ class LLAudioEngine_OpenAL : public LLAudioEngine
         S32                       mDisconnectedReads = 0;   // consecutive ALC_CONNECTED == 0 polls
         bool                      mPollGaveUp = false;      // a poll reopen did not restore ALC_CONNECTED
         bool                      mWatchEnabled = true;     // the WolfViewerAudioDeviceWatch setting
+        S32                       mReopens = 0;             // reopens this session, event or poll
+        // THE SAFETY VALVE. w30 shipped with the poll alone and a Windows 10 machine whose backend
+        // read "disconnected" permanently died after ~10 minutes: ~300 WASAPI reopens at one every
+        // 2 s, each creating a COM client, a mixer thread and handles. No driver behaviour may turn
+        // this watch into a loop again: at most REOPEN_MAX reopens a session, never two within
+        // REOPEN_GAP_SECS, and past the cap the watch switches itself off and says so.
+        static constexpr S32 REOPEN_MAX = 20;
+        static constexpr F64 REOPEN_GAP_SECS = 5.0;
         F64                       mNextPollReopen = 0.0;    // the poll may reopen once a minute at most
 
         typedef F32 WIND_SAMPLE_T;

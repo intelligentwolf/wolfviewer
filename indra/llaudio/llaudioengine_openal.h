@@ -49,7 +49,7 @@ class LLAudioEngine_OpenAL : public LLAudioEngine
 
         virtual void shutdown();
         // <WolfViewer 2026-09-13> Every frame: base idle, then the output-device watch below.
-        void idle() override;
+        virtual void idle();   // "virtual", not "override": clang -Winconsistent-missing-override (-Werror on macOS) wants the whole class one way
 
         void setInternalGain(F32 gain);
 

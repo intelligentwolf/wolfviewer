@@ -546,7 +546,7 @@ void LLDrawPoolWater::pushWaterPlanes(int pass)
             // an M4, 09-13). Amplitude 0 is, by the shader's own contract, stock Firestorm water:
             // no displacement, and every one of those effects is gated on waveAmplitude > 0.001.
             const bool no_swell = water->getWaterfall() > 0.f || water->getStreamFlow() > 0.f || water->getStillWater()
-                               || !LLViewerShaderMgr::sWolfWaterFull;
+                               || !LLViewerShaderMgr::wolfWaterFull();
             cur_shader->uniform1f(LLShaderMgr::WATER_WAVE_AMPLITUDE, no_swell ? 0.f : amplitude);
 
             // The depth + exposure fields and the wake belong to a region's OWN water plane

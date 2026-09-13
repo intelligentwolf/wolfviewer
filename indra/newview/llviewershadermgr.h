@@ -151,6 +151,10 @@ private:
     static std::vector<std::string> sGraphicsFallbacks;
     // <WolfViewer 2026-09-12> whether the water programs got WOLF_WATER_FULL (loadShadersWater)
     static bool sWolfWaterFull;
+public:
+    /** <WolfViewer 2026-09-13> Is the FULL water program (our fields) linked, or the lite one? */
+    static bool wolfWaterFull() { return sWolfWaterFull; }
+private:
 
 }; //LLViewerShaderMgr
 

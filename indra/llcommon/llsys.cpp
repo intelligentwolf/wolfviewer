@@ -888,7 +888,24 @@ void LLMemoryInfo::getAvailableMemoryKB(U32Kilobytes& avail_mem_kb)
     // (could also run 'free', but easier to read a file than run a program)
     LLSD statsMap(loadStatsMap());
 
-    avail_mem_kb = (U32Kilobytes)statsMap["MemFree"].asInteger();
+    // <WolfViewer 2026-09-14> MemAvailable, not MemFree. MemFree is what the kernel has not
+    // handed to anyone, and on a Linux box that has been up for a while it is always small
+    // because the page cache takes the rest; MemAvailable (kernel 3.14+) is what a new
+    // allocation can actually get, cache reclaim included. This value feeds
+    // LLViewerTexture::isSystemMemoryLow (RenderMinFreeMainMemoryThreshold, 512 MB) and the
+    // emergency texture downrez: read from a real log, a 32 GB machine with 3.5 GB
+    // MemAvailable showed MemFree 210 MB and the viewer declared "Low system memory" and
+    // degraded every off-screen texture. Windows already reads the true available figure
+    // ("Avail Physical KB" above); this brings Linux into line. A kernel without the field
+    // falls back to the old reading.
+    if (statsMap.has("MemAvailable"))
+    {
+        avail_mem_kb = (U32Kilobytes)statsMap["MemAvailable"].asInteger();
+    }
+    else
+    {
+        avail_mem_kb = (U32Kilobytes)statsMap["MemFree"].asInteger();
+    }
 #else
     //do not know how to collect available memory info for other systems.
     //leave it blank here for now.

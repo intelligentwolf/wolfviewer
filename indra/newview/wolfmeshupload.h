@@ -51,8 +51,14 @@ namespace WolfMeshUpload
     /** Source: llmodel.h:43 `#define MAX_MODEL_FACES 8` — submeshes per mesh PRIM, not per model.
      *  Materials past this become extra linked prims (see Model::finalise). */
     constexpr U32 MAX_SUBMESHES = 8;
-    /** Source: rust_proxy/src/main.rs:1749 encode_submesh — the .llmesh TriangleList is u16-indexed. */
-    constexpr U32 MAX_VERTS = 65535;
+    /** Source: rust_proxy/src/main.rs encode_submesh — the .llmesh TriangleList is u16-indexed,
+     *  so the hard ceiling is 65,535. The limit is 65,532 because of the RENDERER, not the format:
+     *  llface.cpp LLFace::setSize rounds a face's vertex count up to a block of 4 and stores it
+     *  in a U16 (llface.h:293 mGeomCount), so 65,533..65,535 become 65,536 = 0 and the face is
+     *  silently never drawn. Stock Firestorm still has that wrap (WolfViewer works around it, but
+     *  every other Firestorm-family viewer on the grid does not), so an upload must never make
+     *  such a face. Same constant in floater_mesh_upload.js and the proxy's encode_submesh. */
+    constexpr U32 MAX_VERTS = 65532;
     /** Source: rust_proxy/src/main.rs:2011-2015 — the proxy's own bound on linkset size. */
     constexpr U32 MAX_PRIMS = 32;
 

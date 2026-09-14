@@ -412,10 +412,36 @@ void LLFace::setDrawable(LLDrawable *drawable)
 
 void LLFace::setSize(S32 num_vertices, S32 num_indices, bool align)
 {
+    const S32 requested = num_vertices;
     if (align)
     {
         //allocate vertices in blocks of 4 for alignment
         num_vertices = (num_vertices + 0x3) & ~0x3;
+    }
+
+    // <WolfViewer 2026-09-14> mGeomCount is a U16 (llface.h:293). A face of 65,533..65,535
+    // vertices is legal in a mesh asset (u16 TriangleList; llvolume.cpp unpackVolumeFaces reads
+    // pos.size()/6 of them) and decodes fine, but the alignment above rounds it to 65,536, which
+    // stored in a U16 is 0: hasGeometry() then reports false and LLVolumeGeometryManager::
+    // rebuildGeom drops the face without a word. That is why a Meshy tree split into faces of
+    // exactly 65,535 vertices was selectable yet invisible in this viewer while WolfStorm drew
+    // it. Keep the exact count instead; the room the block loops in getGeometryVolume need
+    // (colours write ceil(n/4)*4, texcoords ceil(n/2)*2) comes from the buffer allocation in
+    // LLVolumeGeometryManager::genDrawInfo, which rounds the BUFFER up, not the face.
+    if (num_vertices > 0xFFFF)
+    {
+        if (requested <= 0xFFFF)
+        {
+            // 65,533..65,535: only the rounding overflowed; the count itself fits.
+            num_vertices = requested;
+        }
+        else
+        {
+            LL_WARNS_ONCE("RenderMesh") << "Face with " << requested << " vertices exceeds the 16-bit"
+                                        << " vertex range and cannot be drawn; dropped." << LL_ENDL;
+            num_vertices = 0;
+            num_indices = 0;
+        }
     }
 
     if (mGeomCount != num_vertices ||

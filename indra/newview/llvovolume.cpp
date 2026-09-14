@@ -6809,10 +6809,17 @@ U32 LLVolumeGeometryManager::genDrawInfo(LLSpatialGroup* group, U32 mask, LLFace
         {
             LL_PROFILE_ZONE_NAMED_CATEGORY_VOLUME("genDrawInfo - allocate");
             buffer = new LLVertexBuffer(mask);
-            if(!buffer->allocateBuffer(geom_count, index_count))
+            // <WolfViewer 2026-09-14> Round the buffer up to a block of 4 vertices. Face counts
+            // are normally already 4-aligned by LLFace::setSize, so this is a no-op; the one
+            // exception is a face of 65,533..65,535 vertices, which setSize keeps exact because
+            // the aligned 65,536 does not fit its U16 (see the note there). getGeometryVolume
+            // writes colours in blocks of 4 and texcoords in blocks of 2 past such a count, so
+            // the slack has to be in the buffer. Draw ranges still use the face's own count.
+            const U32 alloc_verts = (geom_count + 0x3) & ~0x3;
+            if(!buffer->allocateBuffer(alloc_verts, index_count))
             {
                 LL_WARNS() << "Failed to allocate group Vertex Buffer to "
-                    << geom_count << " vertices and "
+                    << alloc_verts << " vertices and "
                     << index_count << " indices" << LL_ENDL;
                 buffer = NULL;
             }

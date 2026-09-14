@@ -28,6 +28,7 @@
 #include "llvoicevivox.h"
 #include "llvoicewebrtc.h"
 #include "llviewernetwork.h"
+#include "wolfgrid.h"   // <WolfViewer 2026-09-14> WolfGrid::isWolfTerritories() for the voice backend rule
 #include "llviewercontrol.h"
 #include "llcommandhandler.h"
 #include "lldir.h"
@@ -134,16 +135,30 @@ std::string LLVoiceClientStatusObserver::status2string(LLVoiceClientStatusObserv
 // SimulatorFeatures selected the Vivox MODULE, which on this grid means no voice at all.
 //
 // Wolf Territories has no Vivox. Paul: "we dont use vivox so we need to fix it so it JUST uses
-// webrtc". So off Second Life (llviewernetwork.h isInSecondLife) the Vivox client is never
-// selected, never started and never driven; everything routes to LLWebRTCVoiceClient. On Second
-// Life proper nothing changes.
+// webrtc". So on Wolf Territories the Vivox client is never selected, never started and never
+// driven; everything routes to LLWebRTCVoiceClient. On Second Life proper nothing changes.
+//
+// <WolfViewer 2026-09-14> ...and on any OTHER grid nothing changes either. Forcing WebRTC there
+// broke plain text IMs (Paul, 09-14: "it stopped instant message working on another grid because
+// are defaulting to webrtc"): LLWebRTCVoiceClient::getOutgoingCallInterface() returns nullptr
+// (llvoicewebrtc.h), so LLIMSession (llimview.cpp, mP2PAsAdhocCall) routes every P2P TEXT IM
+// through the ChatSessionRequest cap and waits 30 s for a ChatterBoxSessionStartReply that a
+// grid without a WebRTC voice module never sends. Wolf Territories serves that cap; other grids
+// running Vivox or no voice at all do not. Off Wolf Territories the stock rule applies: the
+// region's SimulatorFeatures VoiceServerType picks the module, and an empty one means Vivox
+// (getVoiceModule below) — Vivox first, exactly as stock Firestorm.
 static bool wolf_vivox_allowed()
 {
     if (LLGridManager::getInstance()->isInSecondLife()) return true;
     // Paul 09-13: "in the voice tab allow the user to choose vivox or webrtc there but default
-    // to webrtc". Preferences > Sound & Media > Voice > "Voice system".
-    static LLCachedControl<std::string> backend(gSavedSettings, "WolfVoiceBackend", "webrtc");
-    return std::string(backend) == VIVOX_VOICE_SERVER_TYPE;
+    // to webrtc". Preferences > Sound & Media > Voice > "Voice system". "auto" (the default) is
+    // WebRTC on Wolf Territories and the stock Vivox-first rule everywhere else; "webrtc" and
+    // "vivox" are explicit overrides that hold on every grid.
+    static LLCachedControl<std::string> backend(gSavedSettings, "WolfVoiceBackend", "auto");
+    const std::string choice(backend);
+    if (choice == VIVOX_VOICE_SERVER_TYPE) return true;
+    if (choice == WEBRTC_VOICE_SERVER_TYPE) return false;
+    return !WolfGrid::isWolfTerritories();
 }
 
 LLVoiceModuleInterface *getVoiceModule(const std::string &voice_server_type)

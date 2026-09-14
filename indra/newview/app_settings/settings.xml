@@ -19487,13 +19487,13 @@ Change of this parameter will affect the layout of buttons in notification toast
 		<key>WolfVoiceBackend</key>
 		<map>
 			<key>Comment</key>
-			<string>Which voice system to use off Second Life: "webrtc" (Wolf Territories' voice, the default) or "vivox". Wolf Territories has no Vivox service, so "vivox" only makes sense on a grid that still runs one. Changing it takes effect at once.</string>
+			<string>Which voice system to use off Second Life: "auto" (the default: WebRTC on Wolf Territories, the region's choice with Vivox first on any other grid), "webrtc" or "vivox". Wolf Territories has no Vivox service; forcing "webrtc" on a grid without a WebRTC voice module breaks text IMs. Changing it takes effect at once.</string>
 			<key>Persist</key>
 			<integer>1</integer>
 			<key>Type</key>
 			<string>String</string>
 			<key>Value</key>
-			<string>webrtc</string>
+			<string>auto</string>
 		</map>
 		<key>WolfViewerAudioDeviceWatch</key>
 		<map>

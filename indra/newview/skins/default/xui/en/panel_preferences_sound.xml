@@ -1248,7 +1248,9 @@
         </button>
         <!-- <WolfViewer 2026-09-13> Which voice system. Wolf Territories runs WebRTC only; the
              Vivox choice is for a grid that still has one (Paul: "allow the user to choose vivox
-             or webrtc there but default to webrtc"). Bound to WolfVoiceBackend; switching is live. -->
+             or webrtc there but default to webrtc"). Bound to WolfVoiceBackend; switching is live.
+             <WolfViewer 2026-09-14> "Automatic" (default) = WebRTC on Wolf Territories, stock
+             region-decides/Vivox-first elsewhere — forcing WebRTC on another grid broke text IMs. -->
         <text
          enabled_control="EnableVoiceChat"
          follows="left|top"
@@ -1268,8 +1270,12 @@
          layout="topleft"
          left_pad="5"
          name="wolf_voice_backend"
-         tool_tip="WolfVoice is Wolf Territories' own WebRTC voice. Vivox only works on a grid that runs a Vivox service."
+         tool_tip="Automatic uses WolfVoice (WebRTC) on Wolf Territories and lets the region choose, Vivox first, on any other grid. Forcing WebRTC on a grid without WebRTC voice breaks instant messages."
          width="150">
+            <combo_box.item
+             label="Automatic"
+             name="auto"
+             value="auto" />
             <combo_box.item
              label="WebRTC (WolfVoice)"
              name="webrtc"

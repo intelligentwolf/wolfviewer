@@ -3756,7 +3756,22 @@ void set_startup_status(const F32 frac, const std::string& string, const std::st
     gViewerWindow->setProgressPercent(frac*100);
     gViewerWindow->setProgressString(string);
 
-    gViewerWindow->setProgressMessage(msg);
+    // <WolfViewer 2026-09-14> The message here is the grid's login MOTD ("Welcome to Wolf
+    // Territories Grid", gAgent.mMOTD from the login response). Paul: the loading screen should
+    // say which release this is, right there. Only the login screen comes through this function
+    // (teleports set the progress message directly from update_tp_display), and a build with no
+    // release name -- a local or untagged one -- adds nothing rather than claiming a release.
+    // message_text word-wraps and LLProgressView::setMessage grows the panel for a second line.
+    std::string shown = msg;
+    if (!shown.empty())
+    {
+        const std::string release_name = LLVersionInfo::instance().getReleaseName();
+        if (!release_name.empty())
+        {
+            shown += "\n" + LLTrans::getString("WolfLoadingRelease", LLSD().with("NAME", release_name));
+        }
+    }
+    gViewerWindow->setProgressMessage(shown);
 }
 
 bool login_alert_status(const LLSD& notification, const LLSD& response)

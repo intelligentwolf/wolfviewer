@@ -7,6 +7,10 @@
 
 	<!-- Default Args - these arguments will be replaced in all strings -->
 	<string name="SECOND_LIFE">[CURRENT_GRID]</string>
+	<!-- <WolfViewer 2026-09-14> Second line under the grid's welcome message on the loading screen
+	     (llstartup.cpp set_startup_status). Paul: "when its loading and saying Welcome to Wolf
+	     Territories grid - it should say the release there". [NAME] is the release name. -->
+	<string name="WolfLoadingRelease">WolfViewer release [NAME]</string>
 	<string name="APP_NAME">WolfViewer</string>
 	<string name="CAPITALIZED_APP_NAME">WOLFVIEWER</string>
 	<string name="SECOND_LIFE_GRID">Second Life Grid</string>

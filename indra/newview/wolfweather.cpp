@@ -374,23 +374,34 @@ void WolfWeather::apply()
     const bool on_grid = rw.onGrid();
     WolfWeatherProfile prof = on_grid ? rw.stored() : WolfWeatherProfile();
 
-    if (mHavePreview)
+    const WolfWeatherProfile* preview = mPreviews.active();
+    WolfWeatherProfile parcel;
+    WolfWeatherProfile region;
+    const bool parcel_forces = rw.parcelForcedProfile(parcel);
+    const WolfWeatherSource selected = wolfWeatherSource(preview != nullptr, mForcedFound,
+                                                         parcel_forces, rw.forcedProfile(region));
+    if (selected == WolfWeatherSource::PREVIEW)
     {
-        prof = mPreview;
+        prof = *preview;
         mActiveSource = "preview";
     }
     else
     {
-        WolfWeatherProfile region;
-        const bool region_forces = rw.forcedProfile(region);
-        if (mForcedFound)
+        if (selected == WolfWeatherSource::PRIM)
         {
             // A parcel prim's description carries the WHOLE profile, so its look and sound come
             // with it rather than being taken from the region underneath.
             prof = mForcedProfile;
             mActiveSource = "parcel";
         }
-        else if (region_forces)
+        else if (selected == WolfWeatherSource::PARCEL)
+        {
+            // Source: php/weather.php parcel_payload(): `applies` already combines the estate
+            // switch, row existence and enabled. Explicit clear is still a forcing profile.
+            prof = parcel;
+            mActiveSource = "parcel";
+        }
+        else if (selected == WolfWeatherSource::REGION)
         {
             prof.mKind  = region.mKind;
             prof.mLevel = region.mLevel;
@@ -405,9 +416,11 @@ void WolfWeather::apply()
             mActiveSource = "menu";
         }
         prof.mEnabled = true;
-        // A region tint is chosen for ONE kind. Falling back to the other kind's neutral colour
-        // stops a snow tint turning a resident's rain white, and vice versa.
-        if (!on_grid || rw.stored().mKind != prof.mKind)
+        // Source: parcel-weather-work/plan.md whole-profile precedence. Prim and parcel profiles
+        // carry their own art direction. Only region/menu fallback borrows region art direction,
+        // so only those sources normalize a tint chosen for another precipitation kind.
+        if (wolfWeatherUsesRegionArtDirection(selected)
+            && (!on_grid || rw.stored().mKind != prof.mKind))
         {
             prof.mTint = WolfWeatherProfile::neutralColor(prof.mKind);
         }
@@ -442,6 +455,7 @@ std::string WolfWeather::overriddenBy() const
 {
     if (mForcedFound) return "parcel";
     WolfWeatherProfile ignored;
+    if (WolfRegionWeather::instance().parcelForcedProfile(ignored)) return "parcel";
     if (WolfRegionWeather::instance().forcedProfile(ignored)) return "region";
     return std::string();
 }
@@ -451,10 +465,17 @@ void WolfWeather::onRegionWeatherChanged()
     apply();
 }
 
-void WolfWeather::setPreview(const WolfWeatherProfile* p)
+WolfWeather::preview_owner_t WolfWeather::acquirePreviewOwner()
 {
-    mHavePreview = (p != nullptr);
-    if (p) mPreview = *p;
+    return ++mNextPreviewOwner;
+}
+
+void WolfWeather::setPreview(preview_owner_t owner, const WolfWeatherProfile* p)
+{
+    // Source: parcel-weather-work/plan.md: simultaneous Region and About Land editors own
+    // independent previews; closing one must leave the other's active preview intact.
+    if (p) mPreviews.set(owner, *p);
+    else   mPreviews.clear(owner);
     apply();
 }
 

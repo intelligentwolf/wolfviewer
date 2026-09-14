@@ -71,6 +71,8 @@ class LLPanelExperiences;
 class LLPanelRegionExperiences;
 class LLPanelEstateAccess;
 class LLPanelRegionEnvironment;
+class WolfPanelRegionWeather;
+class WolfPanelLandWaves;
 
 class LLEventTimer;
 
@@ -130,6 +132,8 @@ protected:
     typedef std::vector<LLPanelRegionInfo*> info_panels_t;
     info_panels_t mInfoPanels;
     LLPanelRegionEnvironment *mEnvironmentPanel;
+    WolfPanelRegionWeather *mWeatherPanel = nullptr;
+    WolfPanelLandWaves *mWavesPanel = nullptr;
     //static S32 sRequestSerial;    // serial # of last EstateOwnerRequest
     static LLUUID sRequestInvoice;
 

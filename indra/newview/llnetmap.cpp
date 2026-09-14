@@ -54,6 +54,7 @@
 #include "llfloatersidepanelcontainer.h"
 // [/SL:KB]
 #include "llcallingcard.h" // LLAvatarTracker
+#include "llfloater.h"   // <FS:WolfViewer> getHeaderHeight() — the grab strip exists only on a headerless floater
 #include "llfloaterland.h"
 #include "llfloaterworldmap.h"
 #include "llparcel.h"
@@ -453,6 +454,63 @@ void LLNetMap::setScale( F32 scale )
 
 ///////////////////////////////////////////////////////////////////////////////////
 
+// <FS:WolfViewer 2026-09-14> ─── The grab strip ────────────────────────────────
+// The minimap floater has no title bar, so before w2 it was moved by dragging the map itself
+// (LLFloater gives a headerless floater's drag handle the whole rect — llfloater.cpp:414). w2
+// gave every plain drag to the map and the floater became unmovable. Rather than put the pan
+// and the orbit back behind SHIFT, the floater gets a handle of its own: a thin bar across the
+// top of the map that this panel declines every mouse event on, so the drag handle behind it
+// sees them. Paul 09-14: "give minimap a thin drag strip of its own".
+static const S32 WOLF_DRAG_STRIP_HEIGHT = 12;
+
+S32 LLNetMap::wolfDragStripHeight() const
+{
+    // Only where there is nothing else to grab. The same panel is embedded in panel_people and
+    // panel_fs_radar, whose floaters have ordinary title bars (and whose drag handles do NOT
+    // cover this panel), so there the strip would take map away and give nothing back.
+    const LLFloater* floater = getParentByType<LLFloater>();
+    if (!floater || floater->getHeaderHeight() != 0)
+    {
+        return 0;
+    }
+    // A minimap can be resized down to 64x64 (floater_map.xml:11-12 min_height/min_width), and a
+    // fixed 12 px would be a fifth of it. Never take more than an eighth of the height.
+    return llmin(WOLF_DRAG_STRIP_HEIGHT, getRect().getHeight() / 8);
+}
+
+bool LLNetMap::wolfInDragStrip(S32 y) const
+{
+    const S32 strip = wolfDragStripHeight();
+    // Local coordinates have their origin at the BOTTOM left, so the top strip is the high end.
+    return (strip > 0) && (y >= getRect().getHeight() - strip);
+}
+
+void LLNetMap::drawWolfDragStrip()
+{
+    const S32 strip = wolfDragStripHeight();
+    if (strip <= 0)
+    {
+        return;
+    }
+
+    const S32 width  = getRect().getWidth();
+    const S32 height = getRect().getHeight();
+
+    // Light enough to read as chrome over both a dark map and a bright one, with a dark hairline
+    // under it so the boundary is unambiguous — the strip has to look like it is NOT the map.
+    gl_rect_2d(LLRect(0, height, width, height - strip), LLColor4(1.f, 1.f, 1.f, 0.14f));
+    gl_rect_2d(LLRect(0, height - strip, width, height - strip - 1), LLColor4(0.f, 0.f, 0.f, 0.45f));
+
+    // Two short rules in the middle: the grip every window grab bar wears.
+    const S32 grip_half = llmax(6, llmin(24, width / 6));
+    const S32 cx = width / 2;
+    const S32 cy = height - (strip / 2);
+    const LLColor4 grip(1.f, 1.f, 1.f, 0.55f);
+    gl_rect_2d(LLRect(cx - grip_half, cy + 2, cx + grip_half, cy + 1), grip);
+    gl_rect_2d(LLRect(cx - grip_half, cy - 1, cx + grip_half, cy - 2), grip);
+}
+// </FS:WolfViewer>
+
 void LLNetMap::draw()
 {
     if (!LLWorld::instanceExists())
@@ -481,6 +539,7 @@ void LLNetMap::draw()
     if (s_map3d)
     {
         draw3D();
+        drawWolfDragStrip();   // <FS:WolfViewer> over the map, in both modes
         LLUICtrl::draw();
         return;
     }
@@ -1070,6 +1129,8 @@ void LLNetMap::draw()
     gGL.popMatrix();
     gGL.popUIMatrix();
 
+    drawWolfDragStrip();   // <FS:WolfViewer> over the map, in both modes
+
     LLUICtrl::draw();
 }
 
@@ -1479,8 +1540,10 @@ void LLNetMap::draw3D()
             std::string label = llformat("%s \xC2\xB7 %d\xC3\x97%dm \xC2\xB7 %d\xE2\x80\x93%dm",
                 regionp->getName().c_str(), (S32)sSize3D, (S32)sSize3D,
                 (S32)ll_round(sMinH3D), (S32)ll_round(sMaxH3D));
+            // <FS:WolfViewer 2026-09-14> Start below the grab strip, which is drawn AFTER this
+            // and would otherwise lie across the label. 0 when there is no strip.
             LLFontGL::getFontSansSerifSmall()->renderUTF8(label, 0,
-                6.f, H - 6.f,
+                6.f, H - 6.f - (F32)wolfDragStripHeight(),
                 LLColor4::white,
                 LLFontGL::LEFT, LLFontGL::TOP, LLFontGL::BOLD, LLFontGL::DROP_SHADOW);
         }
@@ -1736,6 +1799,19 @@ bool LLNetMap::handleToolTip(S32 x, S32 y, MASK mask)
     if (gDisconnected)
     {
         return false;
+    }
+
+    // <FS:WolfViewer 2026-09-14> The grab strip says what it is for. Without this the strip is
+    // a bare bar with no title on it, and the only way to learn it moves the window is to try.
+    if (wolfInDragStrip(y))
+    {
+        LLRect sticky_rect(0, getRect().getHeight(), getRect().getWidth(),
+                           getRect().getHeight() - wolfDragStripHeight());
+        localRectToScreen(sticky_rect, &sticky_rect);
+        LLToolTipMgr::instance().show(LLToolTip::Params()
+            .message(LLTrans::getString("WolfMinimapDragStrip"))
+            .sticky_rect(sticky_rect));
+        return true;
     }
 
     // If the cursor is near an avatar on the minimap, a mini-inspector will be
@@ -2260,13 +2336,28 @@ void LLNetMap::createParcelImage()
 
 bool LLNetMap::handleMouseDown(S32 x, S32 y, MASK mask)
 {
-    // <FS:WolfViewer> Capture any unmodified left-drag in BOTH map modes: in 3D it
-    // orbits the camera the way WolfStorm's minimap canvas does (minimap.js:321-329
-    // onOrbitStart), in 2D it pans the map. Upstream Firestorm gates the 2D pan on
-    // SHIFT (<FS:Ansariel> FIRE-32339), which left plain drags dead in 2D while 3D
-    // orbited on them ("i cant move the minimap in wolfviewer if it's not in 3d").
-    // handleHover picks orbit vs pan by FSNetMap3D; its slop test keeps ordinary
-    // clicks from counting as drags, and SHIFT+drag still pans exactly as before.
+    // <FS:WolfViewer 2026-09-14> The grab strip along the top moves the FLOATER; everything
+    // below it belongs to the map. Declining the event here is what moves the floater: the
+    // minimap has no title bar (floater_map.xml:8 header_height="0", :14 title=""), so
+    // LLFloater gives its drag handle the whole rect (llfloater.cpp:414 getLocalRect()) and
+    // that handle sits behind this panel, seeing only what this panel does not take.
+    //
+    // w2 (8d186b2324) took every plain drag for the map, which left nothing to grab:
+    // "you used to be able to drag it to move, now you cant, all you can do is stretch, and
+    // move the image inside it" (Maranda Knight, 09-14). The strip gives the floater its own
+    // handle back WITHOUT putting the pan and the orbit behind SHIFT again (Paul 09-14:
+    // "give minimap a thin drag strip of its own"). </FS:WolfViewer>
+    if (wolfInDragStrip(y))
+    {
+        return false;
+    }
+
+    // <FS:WolfViewer> Any unmodified left-drag below the strip works the map: in 3D it orbits
+    // the camera the way WolfStorm's minimap canvas does (minimap.js:321-329 onOrbitStart), in
+    // 2D it pans. Upstream gates the 2D pan on SHIFT (<FS:Ansariel> FIRE-32339) because that is
+    // how IT keeps the floater movable; the strip does that job here instead. handleHover picks
+    // orbit vs pan by FSNetMap3D, and its slop test keeps ordinary clicks from counting as
+    // drags. SHIFT+drag still pans exactly as before.
     gFocusMgr.setMouseCapture(this);
     mStartPan     = mCurPan;
     mMouseDown.mX = x;
@@ -2455,6 +2546,13 @@ bool LLNetMap::handleClick(S32 x, S32 y, MASK mask)
 
 bool LLNetMap::handleDoubleClick(S32 x, S32 y, MASK mask)
 {
+    // <FS:WolfViewer 2026-09-14> The grab strip is window chrome: a double-click there must not
+    // teleport, any more than a double-click on a title bar would.
+    if (wolfInDragStrip(y))
+    {
+        return false;
+    }
+
     // <FS:WolfViewer> 3D mode: act on the terrain point under the cursor — the same
     // pick-a-spot-on-the-hillside behaviour as WolfStorm (minimap.js:389-407
     // onDoubleClick); performDoubleClickAction applies the user's configured
@@ -2537,6 +2635,16 @@ bool LLNetMap::outsideSlop( S32 x, S32 y, S32 start_x, S32 start_y, S32 slop )
 
 bool LLNetMap::handleHover( S32 x, S32 y, MASK mask )
 {
+    // <FS:WolfViewer 2026-09-14> Over the grab strip the cursor says "this moves the window",
+    // not "this works the map" — the strip is the one part of the panel the map does not own.
+    // Only when nothing is captured: a drag that started on the map keeps its own cursor even
+    // when the pointer wanders up into the strip.
+    if (!hasMouseCapture() && wolfInDragStrip(y))
+    {
+        gViewerWindow->setCursor(UI_CURSOR_ARROW);
+        return true;
+    }
+
     // <FS:WolfViewer> 3D mode: dragging orbits the camera instead of panning.
     // Source: minimap.js:331-357 onOrbitMove — yaw -= dx*0.008, pitch += dy*0.006
     // (their dy grows downward; the viewer's mouse DY grows upward, so the sign

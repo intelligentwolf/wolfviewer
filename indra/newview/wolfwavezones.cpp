@@ -133,8 +133,17 @@ F64 WolfWaveZones::lastFetchAgeSecs() const
     return mLastFetchAt > 0.0 ? (F64)LLFrameTimer::getElapsedSeconds() - mLastFetchAt : 1e9;
 }
 
-WolfWaveZones::WolfWaveZones() {}
-WolfWaveZones::~WolfWaveZones() {}
+WolfWaveZones::WolfWaveZones()
+{
+    // Source: LLAgent::setRegion emits on each transition, including leaving and returning
+    // to the same UUID while an older request is suspended.
+    mRegionChangedConnection = gAgent.addRegionChangedCallback([this]() { ++mFetchGeneration; });
+}
+
+WolfWaveZones::~WolfWaveZones()
+{
+    if (mRegionChangedConnection.connected()) mRegionChangedConnection.disconnect();
+}
 
 // ── fetch ──────────────────────────────────────────────────────────────────────────────
 
@@ -180,15 +189,21 @@ void WolfWaveZones::idle()
 void WolfWaveZones::refresh()
 {
     if (mFetching) return;
+    const LLViewerRegion* region = gAgent.getRegion();
+    if (!region) return;
     std::vector<U64> handles = neighbourHandles();
     if (handles.empty()) return;
     mFetching = true;
     mNextRefresh = LLFrameTimer::getElapsedSeconds() + REFRESH_SECS;
-    LLCoros::instance().launch("WolfWaveZones fetch", [handles]() { WolfWaveZones::instance().fetchCoro(handles); });
+    const U64 requested_handle = region->getHandle();
+    const U64 generation = mFetchGeneration;
+    LLCoros::instance().launch("WolfWaveZones fetch", [handles, requested_handle, generation]() {
+        WolfWaveZones::instance().fetchCoro(handles, requested_handle, generation);
+    });
 }
 
 // Source: wolfspeech.cpp postRaw for the adapter shape; llcorehttputil.h getRawAndSuspend.
-void WolfWaveZones::fetchCoro(std::vector<U64> handles)
+void WolfWaveZones::fetchCoro(std::vector<U64> handles, U64 requested_handle, U64 generation)
 {
     std::string url = std::string(API_URL) + "?handles=";
     for (size_t i = 0; i < handles.size(); ++i)
@@ -208,12 +223,16 @@ void WolfWaveZones::fetchCoro(std::vector<U64> handles)
     LLSD httpResults = result[LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS];
     LLCore::HttpStatus status = LLCoreHttpUtil::HttpCoroutineAdapter::getStatusFromLLSD(httpResults);
     mFetching = false;
-    // Whatever the answer, this region has been asked about: idle() retries on the
-    // REFRESH_SECS clock, never every frame.
+    // The attempted region is the request's target, not the avatar's location on completion.
+    // Reject an invalidated visit before it replaces destination records or errors.
+    const LLViewerRegion* region_now = gAgent.getRegion();
+    if (generation != mFetchGeneration || !region_now || region_now->getHandle() != requested_handle)
     {
-        LLViewerRegion* rgn_now = gAgent.getRegion();
-        mFetchedForHandle = rgn_now ? rgn_now->getHandle() : 0;
+        mFetchedForHandle = 0;
+        return;
     }
+    // Failed current-target reads remain throttled on REFRESH_SECS, never every frame.
+    mFetchedForHandle = requested_handle;
     if (!status)
     {
         mLastError = status.toString();
@@ -231,6 +250,7 @@ void WolfWaveZones::fetchCoro(std::vector<U64> handles)
         LL_WARNS("WolfWaveZones") << "fetch: unexpected reply" << LL_ENDL;
         return;
     }
+    const auto previous = std::move(mByHandle);
     mByHandle.clear();
     for (const LLSD& r : llsd::inArray(reply["regions"]))
     {
@@ -251,7 +271,12 @@ void WolfWaveZones::fetchCoro(std::vector<U64> handles)
             rec.mZones = r["layout"]["zones"].asString();
             rec.mParams = r["layout"]["params"];
         }
-        if (rec.mHandle) mByHandle[rec.mHandle] = rec;
+        if (rec.mHandle)
+        {
+            // A GET started before a successful POST must not roll the accepted row back.
+            const auto old = previous.find(rec.mHandle);
+            mByHandle[rec.mHandle] = old != previous.end() && old->second.mVersion > rec.mVersion ? old->second : rec;
+        }
     }
     mLastError.clear();
     mLastFetchAt = LLFrameTimer::getElapsedSeconds();
@@ -534,6 +559,7 @@ void WolfWaveZones::preview(const std::string& zones)
     if (!WolfGrid::isWolfTerritories()) { notify("These tools are only available on Wolf Territories Grid."); return; }
     LLViewerRegion* rgn = gAgent.getRegion();
     if (!rgn) return;
+    ++mPreviewRevision;
     mPreview[rgn->getHandle()] = zones;
     const Region* r = current();
     LL_INFOS("WolfWaveZones") << "preview set for handle " << rgn->getHandle() << ": " << zones.size()
@@ -546,19 +572,26 @@ void WolfWaveZones::previewParams(const LLSD& params)
 {
     if (!WolfGrid::isWolfTerritories()) { notify("These tools are only available on Wolf Territories Grid."); return; }
     // Uniforms, read every frame by lldrawpoolwater.cpp through params(): no rebake needed.
+    LLViewerRegion* region = gAgent.getRegion();
+    if (!region) return;
+    ++mPreviewRevision;
+    mPreviewParamsFor = region->getHandle();
     mPreviewParams = params;
 }
 
 const LLSD& WolfWaveZones::params() const
 {
     static const LLSD none;
-    if (mPreviewParams.isMap()) return mPreviewParams;
+    LLViewerRegion* region = gAgent.getRegion();
+    if (region && region->getHandle() == mPreviewParamsFor && mPreviewParams.isMap()) return mPreviewParams;
     const Region* r = current();
     return r ? r->mParams : none;
 }
 
 void WolfWaveZones::clearPreview()
 {
+    ++mPreviewRevision;
+    mPreviewParamsFor = 0;
     mPreviewParams = LLSD();
     if (mPreview.empty()) return;
     mPreview.clear();
@@ -568,31 +601,39 @@ void WolfWaveZones::clearPreview()
 
 // ── save ───────────────────────────────────────────────────────────────────────────────
 
-void WolfWaveZones::save(const std::string& zones, const LLSD& params, bool enabled)
+bool WolfWaveZones::save(const SaveTarget& target, const std::string& zones, const LLSD& params, bool enabled)
 {
     // Source: WolfGrid login identity; the server separately verifies the captured request.
-    if (!WolfGrid::isWolfTerritories()) { notify("These tools are only available on Wolf Territories Grid."); return; }
+    if (!WolfGrid::isWolfTerritories()) { mLastSaveError = "These tools are only available on Wolf Territories Grid."; notify(mLastSaveError); return false; }
     const Region* r = current();
-    if (!r) { notify("This region is not on the Wolf Territories grid."); return; }
-    if (mSaving) return;
-    mSaving = true;
-    const std::string uuid = r->mUuid;
-    const S32 version = r->mVersion;
-    LLCoros::instance().launch("WolfWaveZones save", [uuid, zones, params, enabled, version]()
+    if (!r || r->mUuid != target.mUuid || r->mHandle != target.mHandle)
     {
-        WolfWaveZones::instance().saveCoro(uuid, zones, params, enabled, version, false);
+        mLastSaveError = "The region changed. Reopen Waves before saving.";
+        notify(mLastSaveError);
+        return false;
+    }
+    if (mSaving) { mLastSaveError = "A wave layout is already saving."; return false; }
+    mSaving = true;
+    mLastSaveError.clear();
+    const U64 preview_revision = mPreviewRevision;
+    // Source: php/waves.php region/version checks and browser WaveZones.save: preserve the
+    // editor's version across polling and its region across coroutine suspension/retry.
+    LLCoros::instance().launch("WolfWaveZones save", [target, zones, params, enabled, preview_revision]()
+    {
+        WolfWaveZones::instance().saveCoro(target, zones, params, enabled, preview_revision, false);
     });
+    return true;
 }
 
 // Source: wolfspeech.cpp postRaw — the agent and session ids the service verifies against
 // the grid's presence service; no secret is carried by this (public) viewer.
-void WolfWaveZones::saveCoro(std::string region_uuid, std::string zones, LLSD params, bool enabled, S32 version, bool retried)
+void WolfWaveZones::saveCoro(SaveTarget target, std::string zones, LLSD params, bool enabled, U64 preview_revision, bool retried)
 {
     LLSD body;
-    body["region"] = region_uuid;
+    body["region"] = target.mUuid;
     body["layout"] = LLSD().with("zones", zones).with("params", params);
     body["enabled"] = enabled;
-    body["version"] = version;
+    body["version"] = target.mVersion;
     const std::string text = boost::json::serialize(LlsdToJson(body));
 
     LLCoreHttpUtil::HttpCoroutineAdapter::ptr_t adapter =
@@ -623,13 +664,25 @@ void WolfWaveZones::saveCoro(std::string region_uuid, std::string zones, LLSD pa
     if (!retried && status.isHttpStatus() && status.getType() == 409)
     {
         LL_INFOS("WolfWaveZones") << "save: version conflict, refetching and retrying once" << LL_ENDL;
-        mFetching = true;
-        fetchCoro(neighbourHandles());
-        const Region* r = current();
-        if (r && r->mUuid == region_uuid)
+        // Source: php/waves.php:162-167 accepts an exact UUID read. A conflict reload must
+        // not publish current-region state or substitute the destination after movement.
+        LLSD reload = adapter->getRawAndSuspend(request, std::string(API_URL) + "?region=" + target.mUuid, options, headers);
+        const LLCore::HttpStatus reload_status = LLCoreHttpUtil::HttpCoroutineAdapter::getStatusFromLLSD(
+            reload[LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS]);
+        LLSD fresh;
+        if (reload.has(LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS_RAW))
+            fresh = json_to_llsd(reload[LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS_RAW].asBinary());
+        if (reload_status && fresh["success"].asBoolean() && fresh["regions"].isArray()
+            && fresh["regions"].size() == 1)
         {
-            saveCoro(region_uuid, zones, params, enabled, r->mVersion, true);
-            return;
+            const LLSD& row = fresh["regions"][0];
+            if (row["region"].asString() == target.mUuid
+                && std::strtoull(row["handle"].asString().c_str(), nullptr, 10) == target.mHandle)
+            {
+                target.mVersion = row["version"].asInteger();
+                saveCoro(target, zones, params, enabled, preview_revision, true);
+                return;
+            }
         }
     }
     mSaving = false;
@@ -642,13 +695,23 @@ void WolfWaveZones::saveCoro(std::string region_uuid, std::string zones, LLSD pa
             msg += " (" + std::to_string(reply["refusedCount"].asInteger()) + " cells refused)";
         }
         mLastError = msg;
+        mLastSaveError = msg;
         notify("Could not save the wave layout: " + msg);
         return;
     }
-    mLastError.clear();
     const LLSD& r = reply["region"];
-    auto it = mByHandle.find(std::strtoull(r["handle"].asString().c_str(), nullptr, 10));
-    if (it != mByHandle.end())
+    if (r["region"].asString() != target.mUuid
+        || std::strtoull(r["handle"].asString().c_str(), nullptr, 10) != target.mHandle)
+    {
+        mLastSaveError = "The grid returned a different region for the wave save.";
+        notify(mLastSaveError);
+        return;
+    }
+    mLastError.clear();
+    mLastSaveError.clear();
+    mLastSavedVersion = r["version"].asInteger();
+    auto it = mByHandle.find(target.mHandle);
+    if (it != mByHandle.end() && it->second.mVersion <= mLastSavedVersion)
     {
         Region& rec = it->second;
         rec.mVersion = r["version"].asInteger();
@@ -659,9 +722,14 @@ void WolfWaveZones::saveCoro(std::string region_uuid, std::string zones, LLSD pa
             rec.mZones = r["layout"]["zones"].asString();
             rec.mParams = r["layout"]["params"];
         }
-        mPreview.erase(rec.mHandle);
     }
-    mPreviewParams = LLSD();
+    // Source: browser WaveZones.save previewRevision guard. Newer edits, hiding, Revert,
+    // and crossings all change this revision; a late result cannot remove their previews.
+    if (mPreviewRevision == preview_revision)
+    {
+        mPreview.erase(target.mHandle);
+        if (mPreviewParamsFor == target.mHandle) { mPreviewParams = LLSD(); mPreviewParamsFor = 0; }
+    }
     WolfWaterField::instance().invalidate();
     notify("Wave layout saved for " + r["name"].asString() + " — everyone in the region now sees it.");
 }
@@ -873,16 +941,60 @@ bool WolfWavePainter::handleMouseUp(S32 x, S32 y, MASK mask)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════
-// WolfPanelLandWaves — About Land > Waves
+// WolfPanelLandWaves — Region / Estate > Waves
 // ═══════════════════════════════════════════════════════════════════════════════════════
 
-// The parcel handle is what the other About Land panels take; this one reads the parcel through
-// LLViewerParcelMgr at paint time, so it is accepted for the shared factory and not stored
-// (clang's -Wunused-private-field is an error on the mac CI).
-WolfPanelLandWaves::WolfPanelLandWaves(LLParcelSelectionHandle& /*parcel*/) : LLPanel() {}
+// Source: llfloaterregioninfo.cpp:244-321. Region panels are constructed directly and build a
+// standalone XUI file; wave permissions still consult the occupied parcel at paint time.
+WolfPanelLandWaves::WolfPanelLandWaves() : LLPanel() {}
+
+WolfPanelLandWaves::~WolfPanelLandWaves()
+{
+    if (mRegionChangedConnection.connected()) mRegionChangedConnection.disconnect();
+    WolfWaveZones::instance().clearPreview();
+}
+
+bool WolfPanelLandWaves::targetCurrent() const
+{
+    const LLViewerRegion* region = gAgent.getRegion();
+    const WolfWaveZones::Region* row = WolfWaveZones::instance().current();
+    return region && row && mTarget.mHandle == region->getHandle() && mTarget.mUuid == row->mUuid;
+}
+
+void WolfPanelLandWaves::invalidateTarget()
+{
+    const bool discarded = mDirty;
+    WolfWaveZones::instance().clearPreview();
+    mTarget = WolfWaveZones::SaveTarget();
+    mDirty = false;
+    ++mEditRevision;
+    mWasSaving = false;
+    mShownHandle = 0;
+    mShownVersion = -1;
+    mNextPoll = 0.0;
+    mBakeWaitUntil = 0.0;
+    if (mPainter) { mPainter->clearDirty(); mPainter->setEnabled(false); }
+    if (mSave) mSave->setEnabled(false);
+    if (discarded) setStatus("You moved to another region. The unsaved wave preview was discarded.", true);
+}
+
+void WolfPanelLandWaves::onVisibilityChange(bool visible)
+{
+    // Source: LLView::onVisibilityChange propagates ancestor visibility separately from the
+    // child's own visible bit. Hiding the owner must end its world preview immediately.
+    if (!visible) { WolfWaveZones::instance().clearPreview(); mBakeWaitUntil = 0.0; }
+    else if (mPainter)
+    {
+        if (!targetCurrent()) { invalidateTarget(); refresh(); }
+        else if (mDirty) previewEdit();
+    }
+    LLPanel::onVisibilityChange(visible);
+}
 
 bool WolfPanelLandWaves::postBuild()
 {
+    // Source: LLAgent::setRegion region callback: invalidate even across A->B->A while hidden.
+    mRegionChangedConnection = gAgent.addRegionChangedCallback([this]() { invalidateTarget(); });
     mPainter     = getChild<WolfWavePainter>("waves_painter");
     mStatus      = getChild<LLTextBox>("waves_status");
     mNote        = getChild<LLTextBox>("waves_note");
@@ -912,7 +1024,7 @@ bool WolfPanelLandWaves::postBuild()
     mSmallScale->setCommitCallback(boost::bind(&WolfPanelLandWaves::onParamChanged, this));
     mEnabled->setCommitCallback(boost::bind(&WolfPanelLandWaves::onParamChanged, this));
 
-    mPainter->setPaintCallback([this]() { WolfWaveZones::instance().preview(mPainter->zones()); armBakeConfirm(); });
+    mPainter->setPaintCallback([this]() { onParamChanged(); });
     mPainter->setRefusedCallback([this]() { setStatus(getString("str_locked_cell"), true); });
     onBrush('s');
     return true;
@@ -931,6 +1043,7 @@ void WolfPanelLandWaves::onBrush(char z)
 
 void WolfPanelLandWaves::setStatus(const std::string& msg, bool error)
 {
+    mStatusError = error;
     if (!mStatus) return;
     mStatus->setText(msg);
     mStatus->setColor(error ? LLColor4(1.f, 0.54f, 0.54f, 1.f) : LLColor4(0.75f, 0.78f, 0.85f, 1.f));
@@ -947,8 +1060,9 @@ void WolfPanelLandWaves::armBakeConfirm()
 void WolfPanelLandWaves::draw()
 {
     if (!WolfGrid::isWolfTerritories()) { refresh(); LLPanel::draw(); return; }
+    if (mTarget.mHandle && !targetCurrent()) { invalidateTarget(); refresh(); }
     const F64 now = LLFrameTimer::getElapsedSeconds();
-    if (mBakeWaitUntil > 0.0)
+    if (mBakeWaitUntil > 0.0 && !mStatusError && !mWasSaving)
     {
         WolfWaterField& wf = WolfWaterField::instance();
         if (wf.bakeCount() > mBakeMark)
@@ -983,6 +1097,7 @@ void WolfPanelLandWaves::draw()
 
 void WolfPanelLandWaves::refresh()
 {
+    if (mTarget.mHandle && !targetCurrent()) invalidateTarget();
     if (!WolfGrid::isWolfTerritories())
     {
         setStatus("These tools are only available on Wolf Territories Grid.", true);
@@ -1000,8 +1115,19 @@ void WolfPanelLandWaves::refresh()
     if (mWasSaving && !wz.saving())
     {
         mWasSaving = false;
-        if (wz.lastError().empty()) { setStatus(getString("str_saved"), false); mShownVersion = -1; }
-        else setStatus(getString("str_save_failed") + " " + wz.lastError(), true);
+        if (wz.lastSaveError().empty())
+        {
+            mTarget.mVersion = wz.lastSavedVersion();
+            if (mEditRevision == mSubmittedRevision)
+            {
+                mDirty = false;
+                if (mPainter) mPainter->clearDirty();
+                mShownVersion = -1;
+                setStatus(getString("str_saved"), false);
+            }
+            else setStatus("Saved the submitted layout. You have newer unsaved changes.", false);
+        }
+        else setStatus(getString("str_save_failed") + " " + wz.lastSaveError(), true);
     }
     if (mSave) mSave->setEnabled(r != nullptr && !wz.saving());
     if (!r)
@@ -1032,9 +1158,9 @@ void WolfPanelLandWaves::refresh()
         || (mPainter && !mPainter->dirty() && mPainter->zones().size() != (size_t)(r->w() * r->h()));
     if (changed)
     {
-        if (mPainter && mPainter->dirty() && handle == mShownHandle)
+        if (mDirty && handle == mShownHandle)
         {
-            setStatus(getString("str_newer_on_grid"), false);
+            if (!mStatusError && !mWasSaving) setStatus(getString("str_newer_on_grid"), false);
             mShownVersion = r->mVersion;
             return;
         }
@@ -1050,6 +1176,9 @@ void WolfPanelLandWaves::rebuild()
     const WolfWaveZones::Region* r = wz.current();
     if (!r || !mPainter) return;
     const S32 w = r->w(), h = r->h();
+    mWriting = true;
+    mTarget = { r->mUuid, r->mHandle, r->mVersion };
+    mDirty = false;
     const bool all = wz.canEditAll();
     std::vector<bool> locked((size_t)w * h, false);
     if (!all)
@@ -1080,7 +1209,7 @@ void WolfPanelLandWaves::rebuild()
     args["[CELL]"] = std::to_string(r->mCell);
     args["[STATE]"] = r->mStored ? getString("str_stored") : getString("str_automatic");
     mNote->setText(getString(all ? "str_note_all" : "str_note_parcel", args));
-    setStatus("", false);
+    mWriting = false;
 }
 
 LLSD WolfPanelLandWaves::paramsFromControls() const
@@ -1095,10 +1224,22 @@ LLSD WolfPanelLandWaves::paramsFromControls() const
 
 void WolfPanelLandWaves::onParamChanged()
 {
+    if (mWriting) return;
     if (!WolfGrid::isWolfTerritories()) { setStatus("These tools are only available on Wolf Territories Grid.", true); return; }
+    if (!targetCurrent()) { invalidateTarget(); refresh(); return; }
     // Live in the water until Save or Revert, like the brush (WolfStorm land_waves_tab.js).
     WolfWaveZones& wz = WolfWaveZones::instance();
     if (!wz.current() || !mPainter) return;
+    mDirty = true;
+    ++mEditRevision;
+    setStatus("", false);
+    previewEdit();
+}
+
+void WolfPanelLandWaves::previewEdit()
+{
+    if (!targetCurrent() || !isInVisibleChain()) return;
+    WolfWaveZones& wz = WolfWaveZones::instance();
     wz.previewParams(paramsFromControls());
     // Off = the automatic layout (open sea full waves, enclosed water small waves): preview that, so the switch is visible at once.
     wz.preview(mEnabled->get() ? mPainter->zones() : wz.defaultZones(*wz.current()));
@@ -1109,16 +1250,23 @@ void WolfPanelLandWaves::onSave()
 {
     if (!WolfGrid::isWolfTerritories()) { setStatus("These tools are only available on Wolf Territories Grid.", true); return; }
     if (!mPainter) return;
+    if (!targetCurrent()) { invalidateTarget(); refresh(); setStatus("The region changed. Review this region's layout before saving.", true); return; }
+    if (mWasSaving) return;
     WolfWaveZones& wz = WolfWaveZones::instance();
-    setStatus(getString("str_saving"), false);
-    mWasSaving = true;
-    mSave->setEnabled(false);
-    wz.save(mPainter->zones(), paramsFromControls(), mEnabled->get());
+    mSubmittedRevision = mEditRevision;
+    mWasSaving = wz.save(mTarget, mPainter->zones(), paramsFromControls(), mEnabled->get());
+    mSave->setEnabled(!mWasSaving);
+    setStatus(mWasSaving ? getString("str_saving") : getString("str_save_failed") + " " + wz.lastSaveError(), !mWasSaving);
 }
 
 void WolfPanelLandWaves::onRevert()
 {
     WolfWaveZones::instance().clearPreview();
+    ++mEditRevision;
+    mDirty = false;
+    mWasSaving = false;
+    mBakeWaitUntil = 0.0;
+    setStatus("", false);
     if (mPainter) mPainter->clearDirty();
     mShownVersion = -1;
     refresh();
@@ -1133,6 +1281,7 @@ void WolfPanelLandWaves::onRevert()
 void WolfPanelLandWaves::onDefault()
 {
     if (!WolfGrid::isWolfTerritories()) { setStatus("These tools are only available on Wolf Territories Grid.", true); return; }
+    if (!targetCurrent()) { invalidateTarget(); refresh(); return; }
     WolfWaveZones& wz = WolfWaveZones::instance();
     const WolfWaveZones::Region* r = wz.current();
     if (!r || !mPainter || !mEnabled) return;

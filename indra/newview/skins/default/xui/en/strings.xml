@@ -11,6 +11,10 @@
 	     (llstartup.cpp set_startup_status). Paul: "when its loading and saying Welcome to Wolf
 	     Territories grid - it should say the release there". [NAME] is the release name. -->
 	<string name="WolfLoadingRelease">WolfViewer release [NAME]</string>
+	<!-- <WolfViewer 2026-09-14> Tooltip on the minimap's grab strip (llnetmap.cpp handleToolTip).
+	     The minimap has no title bar, so the strip is the only thing that moves the window; a
+	     bare bar with no label would have to be discovered by accident. -->
+	<string name="WolfMinimapDragStrip">Drag to move the minimap</string>
 	<string name="APP_NAME">WolfViewer</string>
 	<string name="CAPITALIZED_APP_NAME">WOLFVIEWER</string>
 	<string name="SECOND_LIFE_GRID">Second Life Grid</string>

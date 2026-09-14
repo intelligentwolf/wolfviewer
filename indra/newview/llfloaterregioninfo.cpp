@@ -89,6 +89,8 @@
 #include "llviewerstats.h"
 #include "llviewertexteditor.h"
 #include "llviewerwindow.h"
+#include "wolfregionweather.h"
+#include "wolfwavezones.h"
 #include "lltrans.h"
 #include "llagentui.h"
 #include "llmeshrepository.h"
@@ -302,6 +304,16 @@ bool LLFloaterRegionInfo::postBuild()
     mEnvironmentPanel->buildFromFile("panel_region_environment.xml");
 //  mEnvironmentPanel->configureForRegion();
     mTab->addTabPanel(mEnvironmentPanel);
+
+    // Source: llfloaterregioninfo.cpp:301-304 Environment panel construction and
+    // parcel-weather-work/plan.md: region weather and waves live in Region / Estate.
+    mWeatherPanel = new WolfPanelRegionWeather;
+    mWeatherPanel->buildFromFile("panel_weather_controls.xml");
+    mTab->addTabPanel(mWeatherPanel);
+
+    mWavesPanel = new WolfPanelLandWaves;
+    mWavesPanel->buildFromFile("panel_region_waves.xml");
+    mTab->addTabPanel(mWavesPanel);
 
     panel = new LLPanelRegionDebugInfo;
     mInfoPanels.push_back(panel);
@@ -762,6 +774,8 @@ void LLFloaterRegionInfo::refresh()
         (*iter)->refresh();
     }
     mEnvironmentPanel->refresh();
+    if (mWeatherPanel) mWeatherPanel->refresh();
+    if (mWavesPanel) mWavesPanel->refresh();
 }
 
 void LLFloaterRegionInfo::enableTopButtons()

@@ -23,6 +23,7 @@
 #include "llsingleton.h"
 #include "llviewerpartsource.h"
 #include "wolfweatherprofile.h"
+#include "wolfweatherstate.h"
 
 // Source: wolfstorm/js/world/wolfweather.js + environment_manager.js rain/snow (2026-09-10).
 //
@@ -132,7 +133,9 @@ public:
      * outranks everything, including a parcel prim, because it is not weather — it is the
      * editor showing the owner what they are about to save. Pass nullptr to put the rule back.
      */
-    void setPreview(const WolfWeatherProfile* p);
+    using preview_owner_t = WolfWeatherPreviewRegistry<WolfWeatherProfile>::owner_t;
+    preview_owner_t acquirePreviewOwner();
+    void setPreview(preview_owner_t owner, const WolfWeatherProfile* p);
     /** What is actually falling, and which rule chose it ("parcel" / "region" / "menu"). */
     const WolfWeatherProfile& activeProfile() const { return mActive; }
     const std::string& activeSource() const { return mActiveSource; }
@@ -169,8 +172,8 @@ private:
 
     WolfWeatherProfile mActive;          ///< what is falling right now, whole
     std::string        mActiveSource;    ///< "preview" / "parcel" / "region" / "menu"
-    bool               mHavePreview = false;
-    WolfWeatherProfile mPreview;
+    WolfWeatherPreviewRegistry<WolfWeatherProfile> mPreviews;
+    preview_owner_t mNextPreviewOwner = 0;
 
     Mode mUser = Mode::NONE;
     S32  mUserRainLevel = 2;

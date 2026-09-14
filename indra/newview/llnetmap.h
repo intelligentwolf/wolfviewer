@@ -74,6 +74,14 @@ public:
     static const F32 MAP_SCALE_MAX;
 
     /*virtual*/ void    draw();
+
+    // <FS:WolfViewer 2026-09-14> The grab strip across the top of a title-bar-less minimap: the
+    // one part of the panel that belongs to the floater, so the floater can still be moved now
+    // that a plain drag pans (2D) or orbits (3D). 0 when this panel is not in such a floater.
+    S32                 wolfDragStripHeight() const;
+    bool                wolfInDragStrip(S32 y) const;
+    void                drawWolfDragStrip();
+    // </FS:WolfViewer>
     /*virtual*/ bool    handleScrollWheel(S32 x, S32 y, S32 clicks);
     /*virtual*/ bool    handleMouseDown(S32 x, S32 y, MASK mask);
     /*virtual*/ bool    handleMouseUp(S32 x, S32 y, MASK mask);

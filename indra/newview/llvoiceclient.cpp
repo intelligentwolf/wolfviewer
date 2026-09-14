@@ -29,6 +29,7 @@
 #include "llvoicewebrtc.h"
 #include "llviewernetwork.h"
 #include "wolfgrid.h"   // <WolfViewer 2026-09-14> WolfGrid::isWolfTerritories() for the voice backend rule
+#include "llviewerregion.h"   // <WolfViewer 2026-09-14> the region's own VoiceServerType decides "auto"
 #include "llviewercontrol.h"
 #include "llcommandhandler.h"
 #include "lldir.h"
@@ -144,28 +145,75 @@ std::string LLVoiceClientStatusObserver::status2string(LLVoiceClientStatusObserv
 // (llvoicewebrtc.h), so LLIMSession (llimview.cpp, mP2PAsAdhocCall) routes every P2P TEXT IM
 // through the ChatSessionRequest cap and waits 30 s for a ChatterBoxSessionStartReply that a
 // grid without a WebRTC voice module never sends. Wolf Territories serves that cap; other grids
-// running Vivox or no voice at all do not. Off Wolf Territories the stock rule applies: the
-// region's SimulatorFeatures VoiceServerType picks the module, and an empty one means Vivox
-// (getVoiceModule below) — Vivox first, exactly as stock Firestorm.
-static bool wolf_vivox_allowed()
+// running Vivox or no voice at all do not. Away from Wolf Territories' own regions the stock
+// rule applies: the region's SimulatorFeatures VoiceServerType picks the module, and an empty
+// one means Vivox (getVoiceModule below) - Vivox first, exactly as stock Firestorm.
+//
+// The test is the REGION, not the grid we logged into, because of hypergrid: a teleport out to
+// another grid leaves LLGridManager still naming Wolf Territories while we stand on a region
+// that may run no voice at all. That is the case Paul reported on 09-14 - logged into Wolf,
+// teleported to a grid running no voice, IMs arrived but none could be sent.
+//
+// <WolfViewer 2026-09-14> What the region we are STANDING IN says its voice server is. Returns
+// false when no region has reported yet - at login, and in the gap during a teleport - and
+// leaves `type` untouched in that case.
+static bool wolf_region_voice_server_type(std::string& type)
+{
+    LLViewerRegion* region = gAgent.getRegion();
+    if (!region || !region->simulatorFeaturesReceived())
+    {
+        return false;
+    }
+    LLSD features;
+    region->getSimulatorFeatures(features);
+    type = features["VoiceServerType"].asString();
+    return true;
+}
+
+// The policy, with the evidence passed in. `region_type` is the raw string the region advertised;
+// `region_known` says whether we have heard from a region at all yet.
+static bool wolf_vivox_allowed(const std::string& region_type, bool region_known)
 {
     if (LLGridManager::getInstance()->isInSecondLife()) return true;
     // Paul 09-13: "in the voice tab allow the user to choose vivox or webrtc there but default
-    // to webrtc". Preferences > Sound & Media > Voice > "Voice system". "auto" (the default) is
-    // WebRTC on Wolf Territories and the stock Vivox-first rule everywhere else; "webrtc" and
-    // "vivox" are explicit overrides that hold on every grid.
+    // to webrtc". Preferences > Sound & Media > Voice > "Voice system". "webrtc" and "vivox" are
+    // explicit overrides that hold on every grid; "auto" is the default.
     static LLCachedControl<std::string> backend(gSavedSettings, "WolfVoiceBackend", "auto");
     const std::string choice(backend);
     if (choice == VIVOX_VOICE_SERVER_TYPE) return true;
     if (choice == WEBRTC_VOICE_SERVER_TYPE) return false;
+
+    // "auto" follows the REGION, not the grid we logged into. A hypergrid teleport leaves us
+    // standing on another grid's region while LLGridManager still names Wolf Territories, and
+    // that grid may run no voice module at all. Forcing WebRTC there breaks plain TEXT IM:
+    // LLWebRTCVoiceClient::getOutgoingCallInterface() returns nullptr (llvoicewebrtc.h:170), so
+    // LLIMSession sets mP2PAsAdhocCall (llimview.cpp:920) and the send waits on a
+    // ChatSessionRequest round trip the region cannot answer. Wolf Territories' regions advertise
+    // "webrtc" themselves (WebRtcVoiceRegionModule.cs:151), so following the region keeps WebRTC
+    // here and gives every other grid the stock Vivox-first rule.
+    if (region_known)
+    {
+        return region_type != WEBRTC_VOICE_SERVER_TYPE;
+    }
+    // Nothing has reported yet. Before the first SimulatorFeatures arrive the grid we logged into
+    // is the only evidence there is, and it is the right answer at login: on Wolf that keeps the
+    // Vivox daemon from being launched at all (the 09-13 Mac "no voice" fix).
     return !WolfGrid::isWolfTerritories();
+}
+
+static bool wolf_vivox_allowed()
+{
+    std::string region_type;
+    const bool region_known = wolf_region_voice_server_type(region_type);
+    return wolf_vivox_allowed(region_type, region_known);
 }
 
 LLVoiceModuleInterface *getVoiceModule(const std::string &voice_server_type)
 {
     if (!wolf_vivox_allowed())
     {
-        // Whatever the region says — "webrtc", "vivox", nothing — the answer is WebRTC.
+        // Either this region advertised WebRTC, or the resident forced it. Whatever the type
+        // string says — "webrtc", "vivox", nothing — the answer is WebRTC.
         return (LLVoiceModuleInterface *) LLWebRTCVoiceClient::getInstance();
     }
     if (voice_server_type == VIVOX_VOICE_SERVER_TYPE || voice_server_type.empty())
@@ -229,16 +277,18 @@ void LLVoiceClient::userAuthorized(const std::string& user_id, const LLUUID &age
     }
     mRegionChangedCallbackSlot = gAgent.addRegionChangedCallback(boost::bind(&LLVoiceClient::onRegionChanged, this));
     LLWebRTCVoiceClient::getInstance()->userAuthorized(user_id, agentID);
-    if (wolf_vivox_allowed())   // <WolfViewer 2026-09-13>
-    {
-        LLVivoxVoiceClient::getInstance()->userAuthorized(user_id, agentID);
-    }
+    // Source: llvoicevivox.cpp:641-649 userAuthorized only initializes identity; it does not
+    // launch voice. setLoginInfo():668 requires this account name after a later backend switch.
+    LLVivoxVoiceClient::getInstance()->userAuthorized(user_id, agentID);
 }
 
 void LLVoiceClient::handleSimulatorFeaturesReceived(const LLSD &simulatorFeatures)
 {
     std::string voiceServerType = simulatorFeatures["VoiceServerType"].asString();
-    if (!wolf_vivox_allowed())
+    // <WolfViewer 2026-09-14> Judge on THESE features, not on whatever gAgent's region reports
+    // right now: this call can arrive for one region while the agent is already on the next.
+    const bool vivox_allowed = wolf_vivox_allowed(voiceServerType, true);
+    if (!vivox_allowed)
     {
         // <WolfViewer 2026-09-13> Off Second Life the only voice is WebRTC, whatever the region
         // reports. Resolving it HERE matters: the compare below turns the channels off when the
@@ -262,6 +312,24 @@ void LLVoiceClient::handleSimulatorFeaturesReceived(const LLSD &simulatorFeature
         }
     }
     setSpatialVoiceModule(voiceServerType);   // <WolfViewer 2026-09-13> the resolved type, not the raw string
+
+    // <WolfViewer 2026-09-14> Stock Firestorm runs BOTH voice clients from login, so whichever
+    // one becomes the spatial module is already enabled. Our backend gate starts only the one the
+    // rule allows, and a hypergrid teleport can change which one that is - so the gate is applied
+    // again here, for the region we have just arrived in. Both setVoiceEnabled implementations
+    // ignore a call that does not change their state (llvoicevivox.cpp:5675, llvoicewebrtc.cpp:1736),
+    // so a region change that changes nothing costs nothing.
+    if (!vivox_allowed)
+    {
+        if (LLVivoxVoiceClient::instanceExists())
+        {
+            LLVivoxVoiceClient::getInstance()->setVoiceEnabled(false);
+        }
+    }
+    else
+    {
+        setVoiceEnabled(voiceEnabled(true));
+    }
 
     // if we should be in spatial voice, switch to it and set the creds
     if (mSpatialVoiceModule && !mNonSpatialVoiceModule)

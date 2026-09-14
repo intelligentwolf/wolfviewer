@@ -1,6 +1,6 @@
 /**
  * @file wolfregionweather.h
- * @brief WolfViewer: the region's weather — About Land > Weather.
+ * @brief WolfViewer: region and occupied-parcel weather state and editors.
  *
  * $LicenseInfo:firstyear=2026&license=viewerlgpl$
  * WolfViewer — Wolf Territories Grid
@@ -22,6 +22,7 @@
 #include "llsingleton.h"
 #include "llviewerparcelmgr.h"
 #include "wolfweatherprofile.h"
+#include "wolfweatherstate.h"
 
 #include <string>
 
@@ -34,8 +35,22 @@ class LLSliderCtrl;
 class LLFloater;
 class LLTextBox;
 
+// Source: weather.php:383-505 and grid_rights.php:298-337. A draft belongs to the exact server
+// row revision and, for parcels, the accepted point that resolved its stable UUID.
+struct WolfWeatherSaveTarget
+{
+    std::string mEditorTarget;
+    std::string mRegionId;
+    std::string mParcelId;
+    S32 mVersion = 0;
+    F32 mX = 0.f;
+    F32 mY = 0.f;
+    WolfWeatherAsyncGate::generation_t mVisitGeneration = 0;
+};
+
 /**
- * The region's weather, stored on the grid (php/weather.php, table robust.wolf_weather).
+ * The region and occupied parcel weather, stored by php/weather.php in grid.weather and
+ * grid.weather_parcel.
  *
  * Weather already had two sources and neither was the region: a resident's own Weather menu, and
  * a scripted prim forcing it on its parcel through "wolfrain"/"wolfsnow" in the description.
@@ -44,8 +59,9 @@ class LLTextBox;
  *
  * PRECEDENCE, most specific first, applied in wolfweather.cpp:
  *   1. a parcel prim's description  — a script beats everything
- *   2. THIS region setting
- *   3. the resident's own Weather menu choice
+ *   2. THIS parcel's stored setting
+ *   3. THIS region setting
+ *   4. the resident's own Weather menu choice
  *
  * A region with NO ROW has kind "" — which is NOT the same as "clear". Empty means nobody has
  * set this region's weather and the resident's own choice still applies; "clear" means the owner
@@ -57,6 +73,7 @@ class LLTextBox;
 class WolfRegionWeather : public LLSingleton<WolfRegionWeather>
 {
     LLSINGLETON(WolfRegionWeather);
+    ~WolfRegionWeather();
 
 public:
     /** Ask the grid about the region the agent is in. Cheap and idempotent; throttled inside. */
@@ -77,14 +94,33 @@ public:
 
     /** True when the region is IMPOSING weather; then `out` is what it imposes. */
     bool forcedProfile(WolfWeatherProfile& out) const;
+    /** Source: weather.php parcel_payload(): applies is authoritative, including explicit clear. */
+    bool parcelForcedProfile(WolfWeatherProfile& out) const;
 
     S32 version() const { return mVersion; }
     const std::string& regionName() const { return mRegionName; }
     /** "" when the region has no row's worth of opinion about what falls. */
     const std::string& kind() const { return mKind; }
+    bool allowParcel() const { return mAllowParcel; }
+
+    bool haveParcel() const { return mHaveParcel; }
+    const WolfWeatherProfile& parcelStored() const { return mParcelProfile; }
+    const std::string& parcelKind() const { return mParcelKind; }
+    const std::string& parcelName() const { return mParcelName; }
+    const std::string& parcelId() const { return mParcelId; }
+    bool parcelGroupOwned() const { return mParcelGroupOwned; }
+    bool parcelApplies() const { return mParcelApplies; }
+    std::string regionTarget() const;
+    std::string parcelTarget() const;
+    WolfWeatherSaveTarget regionSaveTarget() const;
+    WolfWeatherSaveTarget parcelSaveTarget() const;
 
     /** Save. The grid checks the caller holds the region; this is the courtesy copy. */
-    void save(const WolfWeatherProfile& profile);
+    U64 saveRegion(const WolfWeatherProfile& profile, bool allow_parcel,
+                   const WolfWeatherSaveTarget& captured_target);
+    U64 saveParcel(const WolfWeatherProfile& profile, const WolfWeatherSaveTarget& captured_target);
+    const WolfWeatherSaveResult& regionSaveResult() const { return mRegionSaveResult; }
+    const WolfWeatherSaveResult& parcelSaveResult() const { return mParcelSaveResult; }
 
     /**
      * The region pushed a change at us (a script called wolfSetRegionWeather). Takes the row as
@@ -93,7 +129,6 @@ public:
      */
     void applyPush(const LLSD& row);
 
-    bool saving() const { return mSaving; }
     const std::string& lastError() const { return mLastError; }
     /** Bumped whenever the answer changes, so a panel can notice without polling fields. */
     S32 generation() const { return mGeneration; }
@@ -101,21 +136,61 @@ public:
     static const char* API_URL;
 
 private:
-    static void fetchCoro(std::string region_id);
-    static void saveCoro(std::string body);
+    static void fetchCoro(std::string region_id, bool include_parcel, F32 x, F32 y,
+                          WolfWeatherAsyncGate::generation_t region_generation,
+                          WolfWeatherAsyncGate::generation_t parcel_generation, U64 fetch_serial);
+    static void saveCoro(std::string body, std::string scope, std::string region_id,
+                         std::string parcel_id, WolfWeatherAsyncGate::generation_t target_generation,
+                         U64 save_serial);
     void applyToWeather();
+    void onRegionChanged();
+    void onParcelChanged();
+    void invalidateParcel();
+    void finishFetch();
+    void recomputeParcelApplies();
 
     bool               mHaveRow = false;
     WolfWeatherProfile mProfile;
     std::string        mKind;         // "" = no opinion; NOT the same as "clear"
+    bool               mAllowParcel = true;
     S32                mVersion = 0;
     std::string        mRegionName;
     std::string        mFetchedFor;   // region uuid already asked about
-    bool               mFetching = false;
-    bool               mSaving = false;
+    std::string        mAttemptedFor; // target whose retry clock is already running
+    S32                mFetchesInFlight = 0;
+    bool               mFetchPending = false;
+    bool               mFetchPendingForce = false;
+    bool               mAwaitingParcel = true;
+    bool               mSavingRegion = false;
+    bool               mSavingParcel = false;
     std::string        mLastError;
     S32                mGeneration = 0;
     F32                mNextPoll = 0.f;
+    bool               mHaveParcel = false;
+    WolfWeatherProfile mParcelProfile;
+    std::string        mParcelKind;
+    std::string        mParcelName;
+    std::string        mParcelId;
+    bool               mParcelGroupOwned = false;
+    bool               mParcelApplies = false;
+    S32                mParcelVersion = 0;
+    F32                mParcelX = 0.f;
+    F32                mParcelY = 0.f;
+    WolfWeatherAsyncGate mRegionGate;
+    WolfWeatherAsyncGate mParcelGate;
+    U64                mNextFetchSerial = 0;
+    U64                mAcceptedFetchSerial = 0;
+    U64                mRegionSaveSerial = 0;
+    U64                mParcelSaveSerial = 0;
+    WolfWeatherSaveResult mRegionSaveResult;
+    WolfWeatherSaveResult mParcelSaveResult;
+    boost::signals2::connection mRegionChangedConnection;
+    boost::signals2::connection mParcelChangedConnection;
+
+public:
+    bool fetching() const { return mFetchesInFlight > 0; }
+    bool savingRegion() const { return mSavingRegion; }
+    bool savingParcel() const { return mSavingParcel; }
 };
 
 /**
@@ -139,15 +214,18 @@ private:
  *
  * Source: wolfwavezones.h WolfPanelLandWaves for the About Land panel shape.
  */
-class WolfPanelLandWeather : public LLPanel
+class WolfPanelWeather : public LLPanel
 {
 public:
-    WolfPanelLandWeather(LLParcelSelectionHandle& parcel);
-    ~WolfPanelLandWeather();
+    enum Scope { REGION, PARCEL };
+    explicit WolfPanelWeather(Scope scope);
+    ~WolfPanelWeather();
     bool postBuild() override;
     void refresh() override;
     /** The grid's answers land asynchronously; LLFloaterLand::refresh only runs on parcel changes. */
     void draw() override;
+    void onVisibilityChange(bool visible) override;
+    void clearPreview();
 
 private:
     void onApplyPreset();
@@ -164,15 +242,40 @@ private:
     void setStatus(const std::string& msg, bool error);
     /** Region-level rights — the same rule php/weather.php enforces. A courtesy, not the check. */
     bool canEdit() const;
+    std::string currentTarget() const;
+    WolfWeatherSaveTarget currentSaveTarget() const;
+    const WolfWeatherProfile& currentStored() const;
+    bool currentAllowParcel() const;
+    bool dirty() const;
+    void adoptTarget(bool announce_discard);
+    void cancelPresetLoad();
+    void markEdited();
 
     WolfWeatherProfile mEdit;      ///< the working copy, edited until Apply or Revert
     WolfWeatherProfile mStored;    ///< the grid's row, to know whether anything is unsaved
     S32  mShownGeneration = -1;
     bool mWriting = false;         ///< writeControls() is setting values: ignore the commits
+    Scope mScope;
+    std::string mTarget;
+    WolfWeatherSaveTarget mSaveTarget;
+    bool mEditAllowParcel = true;
+    bool mStoredAllowParcel = true;
+    WolfWeatherEditGate mEditGate;
+    U64 mEditRevision = 0;
+    U64 mSubmittedEditRevision = 0;
+    U64 mSubmittedSaveSerial = 0;
+    WolfWeatherProfile mSubmittedProfile;
+    bool mSubmittedAllowParcel = true;
+    bool mSavePending = false;
+    U64 mPreviewOwner = 0;
+    boost::signals2::connection mPanelRegionChangedConnection;
+    boost::signals2::connection mPanelParcelChangedConnection;
 
     LLComboBox*        mPreset = nullptr;
     LLComboBox*        mKind = nullptr;
     LLCheckBoxCtrl*    mEnabled = nullptr;
+    LLCheckBoxCtrl*    mUseRegion = nullptr;
+    LLCheckBoxCtrl*    mAllowParcel = nullptr;
     LLRadioGroup*      mLadder = nullptr;
     LLSliderCtrl*      mBrightness = nullptr;
     LLColorSwatchCtrl* mTint = nullptr;
@@ -191,6 +294,18 @@ private:
     LLTextBox*         mParticlesTitle = nullptr;
     /** The notecard picker, one at a time; a handle so a closed window is not a dangling one. */
     LLHandle<LLFloater> mPickerHandle;
+};
+
+class WolfPanelRegionWeather final : public WolfPanelWeather
+{
+public:
+    WolfPanelRegionWeather() : WolfPanelWeather(REGION) {}
+};
+
+class WolfPanelLandWeather final : public WolfPanelWeather
+{
+public:
+    explicit WolfPanelLandWeather(LLParcelSelectionHandle&) : WolfPanelWeather(PARCEL) {}
 };
 
 #endif // WOLF_REGION_WEATHER_H

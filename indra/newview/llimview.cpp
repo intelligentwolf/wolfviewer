@@ -2557,11 +2557,25 @@ bool LLIMModel::sendStartSession(
     else if (p2p_as_adhoc_call && ((dialog == IM_SESSION_P2P_INVITE) || (dialog == IM_NOTHING_SPECIAL)))
     {
         LLViewerRegion *region = gAgent.getRegion();
-        if (region)
+        // <WolfViewer 2026-09-14> Only wait if there is something to wait FOR. This branch exists
+        // because the voice module has no P2P call interface, and it asks the region to open the
+        // session over the ChatSessionRequest capability. A region that does not offer that
+        // capability - no voice module, or one older than 2026-02-14, which is when
+        // os-webrtc-janus first served it - can never answer, so the stock code returned true,
+        // armed LLSessionTimeoutTimer for 30 s and then showed "session initialization is timed
+        // out". Worse, everything typed meanwhile sits in FSFloaterIM::mQueuedMsgsForInit
+        // (fsfloaterim.cpp:628) and is only ever flushed by sessionInitReplyReceived
+        // (fsfloaterim.cpp:1541), so those messages were discarded for good. The IM itself never
+        // needed the handshake: it goes out as a UDP ImprovedInstantMessage. So say "nothing to
+        // wait for" and let the caller mark the session initialised at once.
+        const std::string url = region ? region->getCapability("ChatSessionRequest") : std::string();
+        if (url.empty())
         {
-            std::string url = region->getCapability("ChatSessionRequest");
-            LLCoros::instance().launch("startP2PVoiceCoro", boost::bind(&startP2PVoiceCoro, url, temp_session_id, gAgent.getID(), other_participant_id));
+            LL_INFOS("LLIMModel") << "no ChatSessionRequest capability here; starting session "
+                                  << temp_session_id << " without the voice handshake" << LL_ENDL;
+            return false;
         }
+        LLCoros::instance().launch("startP2PVoiceCoro", boost::bind(&startP2PVoiceCoro, url, temp_session_id, gAgent.getID(), other_participant_id));
         return true;
     }
     return false;
@@ -2620,6 +2634,19 @@ LLIMMgr::showSessionStartError(
     const LLUUID session_id)
 {
     if (!hasSession(session_id)) return;
+
+    // Source: deliverMessage() sends one-to-one text through UDP; the voice handshake is
+    // optional. Centralize fallback here for timeout, HTTP rejection and negative session
+    // replies. Group/conference sessions still require server initialization.
+    LLIMModel::LLIMSession* session = LLIMModel::getInstance()->findIMSession(session_id);
+    if (session && IM_NOTHING_SPECIAL == session->mType)
+    {
+        if (!session->mSessionInitialized)
+        {
+            LLIMModel::getInstance()->processSessionInitializedReply(session_id, session_id);
+        }
+        return;
+    }
 
     LLSD args;
     args["REASON"] = LLTrans::getString(error_string);

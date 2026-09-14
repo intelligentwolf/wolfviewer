@@ -31,7 +31,6 @@
 
 #include "llfloaterland.h"
 #include "wolfgrid.h"        // <WolfViewer 2026-09-07>
-#include "wolfwavezones.h"
 #include "wolfregionweather.h"   // <WolfViewer 2026-09-12> About Land > Weather   // <WolfViewer 2026-09-07>
 
 #include "llavatarnamecache.h"
@@ -333,7 +332,6 @@ LLFloaterLand::LLFloaterLand(const LLSD& seed)
     mFactoryMap["land_access_panel"] =  LLCallbackMap(createPanelLandAccess, this);
     mFactoryMap["land_experiences_panel"] = LLCallbackMap(createPanelLandExperiences, this);
     mFactoryMap["land_environment_panel"] = LLCallbackMap(createPanelLandEnvironment, this);
-    mFactoryMap["land_waves_panel"] = LLCallbackMap(createPanelLandWaves, this);   // <WolfViewer 2026-09-07>
     mFactoryMap["land_weather_panel"] = LLCallbackMap(createPanelLandWeather, this);   // <WolfViewer 2026-09-12>
 
     sObserver = new LLParcelSelectionObserver();
@@ -379,7 +377,7 @@ void LLFloaterLand::refresh()
     mPanelCovenant->refresh();
     mPanelExperiences->refresh();
     mPanelEnvironment->refresh();
-    if (mPanelWaves) mPanelWaves->refresh();   // <WolfViewer 2026-09-07>
+    if (mPanelWeather) mPanelWeather->refresh();
 }
 
 
@@ -391,15 +389,6 @@ void* LLFloaterLand::createPanelLandGeneral(void* data)
     return self->mPanelGeneral;
 }
 
-// static
-// <WolfViewer 2026-09-07>
-void* LLFloaterLand::createPanelLandWaves(void* data)
-{
-    LLFloaterLand* self = (LLFloaterLand*)data;
-    self->mPanelWaves = new WolfPanelLandWaves(self->mParcel);
-    return self->mPanelWaves;
-}
-
 // <WolfViewer 2026-09-12> About Land > Weather (wolfregionweather.cpp).
 void* LLFloaterLand::createPanelLandWeather(void* data)
 {
@@ -407,7 +396,6 @@ void* LLFloaterLand::createPanelLandWeather(void* data)
     self->mPanelWeather = new WolfPanelLandWeather(self->mParcel);
     return self->mPanelWeather;
 }
-// </WolfViewer>
 // </WolfViewer>
 
 void* LLFloaterLand::createPanelLandCovenant(void* data)

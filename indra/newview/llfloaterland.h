@@ -70,7 +70,6 @@ class LLPanelLandCovenant;
 class LLParcel;
 class LLPanelLandExperiences;
 class LLPanelLandEnvironment;
-class WolfPanelLandWaves;   // <WolfViewer 2026-09-07> About Land > Waves (wolfwavezones.h)
 class WolfPanelLandWeather; // <WolfViewer 2026-09-12> About Land > Weather (wolfregionweather.h)
 
 class LLFloaterLand
@@ -109,7 +108,6 @@ protected:
     static void* createPanelLandAccess(void* data);
     static void* createPanelLandExperiences(void* data);
     static void* createPanelLandEnvironment(void* data);
-    static void* createPanelLandWaves(void* data);   // <WolfViewer 2026-09-07>
     static void* createPanelLandWeather(void* data);   // <WolfViewer 2026-09-12>
     static void* createPanelLandBan(void* data);
 
@@ -128,7 +126,6 @@ protected:
     LLPanelLandCovenant*    mPanelCovenant;
     LLPanelLandExperiences* mPanelExperiences;
     LLPanelLandEnvironment *mPanelEnvironment;
-    WolfPanelLandWaves     *mPanelWaves = nullptr;   // <WolfViewer 2026-09-07>
     WolfPanelLandWeather   *mPanelWeather = nullptr;   // <WolfViewer 2026-09-12>
 
     LLSafeHandle<LLParcelSelection> mParcel;

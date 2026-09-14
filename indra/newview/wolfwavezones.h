@@ -89,6 +89,14 @@ public:
         S32 h() const { return llmax(1, mSizeY / mCell); }
     };
 
+    // Source: php/waves.php POST region/version; retained when the editor adopts a row.
+    struct SaveTarget
+    {
+        std::string mUuid;
+        U64 mHandle = 0;
+        S32 mVersion = 0;
+    };
+
     /** The service's rule: 16 m, doubled until the region is at most MAX_CELLS_EDGE cells an edge. */
     static S32 cellFor(S32 sizeX, S32 sizeY);
     /**
@@ -146,27 +154,35 @@ public:
     /** Seconds since the last fetch answered (a large number before the first). */
     F64 lastFetchAgeSecs() const;
     /** Save; the reply arrives through the notification system and a refresh. */
-    void save(const std::string& zones, const LLSD& params, bool enabled);
+    bool save(const SaveTarget& target, const std::string& zones, const LLSD& params, bool enabled);
     bool saving() const { return mSaving; }
     const std::string& lastError() const { return mLastError; }
+    const std::string& lastSaveError() const { return mLastSaveError; }
+    S32 lastSavedVersion() const { return mLastSavedVersion; }
 
     static const char* API_URL;
 
 private:
-    void fetchCoro(std::vector<U64> handles);
-    void saveCoro(std::string region_uuid, std::string zones, LLSD params, bool enabled, S32 version, bool retried);
+    void fetchCoro(std::vector<U64> handles, U64 requested_handle, U64 generation);
+    void saveCoro(SaveTarget target, std::string zones, LLSD params, bool enabled, U64 preview_revision, bool retried);
     std::vector<U64> neighbourHandles() const;
     static F32 energyOf(char z);
 
     std::map<U64, Region> mByHandle;
     std::map<U64, std::string> mPreview;   // handle -> zones being edited
     LLSD mPreviewParams;                   // slider values being edited (undefined = none)
+    U64 mPreviewParamsFor = 0;
+    U64 mPreviewRevision = 0;
     U64  mFetchedForHandle = 0;
     F64  mNextRefresh = 0.0;
     F64  mLastFetchAt = 0.0;
     bool mFetching = false;
     bool mSaving = false;
     std::string mLastError;
+    std::string mLastSaveError;
+    S32 mLastSavedVersion = 0;
+    U64 mFetchGeneration = 0;
+    boost::signals2::connection mRegionChangedConnection;
 };
 
 /**
@@ -225,16 +241,18 @@ private:
     std::function<void()> mOnPaint, mOnRefused;
 };
 
-/** About Land > Waves. Source: llfloaterland.cpp LLPanelLandCovenant for the panel shape. */
+/** Region / Estate > Waves. Source: llfloaterregioninfo.cpp programmatic region-panel shape. */
 class WolfPanelLandWaves : public LLPanel
 {
 public:
-    WolfPanelLandWaves(LLParcelSelectionHandle& parcel);
+    WolfPanelLandWaves();
+    ~WolfPanelLandWaves() override;
     bool postBuild() override;
     void refresh() override;   // LLPanel::refresh (clang -Winconsistent-missing-override is an error on the mac CI)
     /** Polls the grid's answers (a fetch landing, a save finishing) — LLFloaterLand::refresh
      *  only runs on parcel changes, which left Save greyed and "Saving…" up after a save. */
     void draw() override;
+    void onVisibilityChange(bool visible) override;
 
 private:
     void rebuild();
@@ -243,9 +261,12 @@ private:
     void onRevert();
     void onDefault();
     void onParamChanged();
+    void previewEdit();
     void armBakeConfirm();
     LLSD paramsFromControls() const;
     void setStatus(const std::string& msg, bool error);
+    bool targetCurrent() const;
+    void invalidateTarget();
 
     WolfWavePainter* mPainter = nullptr;
     LLTextBox*       mStatus = nullptr;
@@ -264,6 +285,13 @@ private:
     S32              mShownVersion = -1;
     U64              mShownHandle = 0;
     bool             mWasSaving = false;
+    bool             mDirty = false;
+    bool             mWriting = false;
+    bool             mStatusError = false;
+    U64              mEditRevision = 0;
+    U64              mSubmittedRevision = 0;
+    WolfWaveZones::SaveTarget mTarget;
+    boost::signals2::connection mRegionChangedConnection;
     bool             mShownFetching = false;
     F64              mNextPoll = 0.0;
     U32              mBakeMark = 0;        // bake count when the last preview was requested

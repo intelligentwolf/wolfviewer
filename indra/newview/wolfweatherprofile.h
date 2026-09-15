@@ -45,10 +45,10 @@ struct WolfWeatherProfile
     S32         mBrightness  = 75;      ///< 0..200 %, scales the precipitation's lit colour
     LLColor4    mTint        = LLColor4(0.667f, 0.800f, 1.f, 1.f);   ///< #aaccff
     S32         mTintAmount  = 100;     ///< 0..100 %, how far to the tint from the kind's neutral
-    S32         mMoveSpeed   = 60;      ///< 0..300 hundredths of a m/s of lateral drift
-    S32         mDensity     = 100;     ///< 10..300 % of the level's particle count
-    S32         mVelocity    = 100;     ///< 10..300 % of the level's fall speed
-    S32         mSize        = 100;     ///< 10..400 % of the particle's own width
+    S32         mMoveSpeed   = 60;      ///< 0..1000 hundredths of a m/s of lateral drift
+    S32         mDensity     = 100;     ///< 10..1000 % of the level's particle count
+    S32         mVelocity    = 100;     ///< 10..1000 % of the level's fall speed
+    S32         mSize        = 100;     ///< 10..1000 % of the particle's own width
 
     bool        mSound       = true;
     S32         mVolume      = 60;      ///< 0..100 %
@@ -58,12 +58,12 @@ struct WolfWeatherProfile
     // ── ranges, shared by the clamp and the XUI sliders ─────────────────────────────────────
     static constexpr S32 BRIGHTNESS_MIN = 0,  BRIGHTNESS_MAX = 200;
     static constexpr S32 TINT_MIN       = 0,  TINT_MAX       = 100;
-    static constexpr S32 MOVE_MIN       = 0,  MOVE_MAX       = 300;
-    static constexpr S32 DENSITY_MIN    = 10, DENSITY_MAX    = 300;
-    static constexpr S32 VELOCITY_MIN   = 10, VELOCITY_MAX   = 300;
+    static constexpr S32 MOVE_MIN       = 0,  MOVE_MAX       = 1000;
+    static constexpr S32 DENSITY_MIN    = 10, DENSITY_MAX    = 1000;
+    static constexpr S32 VELOCITY_MIN   = 10, VELOCITY_MAX   = 1000;
     // NOT SIZE_MIN / SIZE_MAX: <stdint.h> defines SIZE_MAX, so those names expand to a
     // numeric constant here and the declaration does not compile.
-    static constexpr S32 PSIZE_MIN      = 10, PSIZE_MAX      = 400;
+    static constexpr S32 PSIZE_MIN      = 10, PSIZE_MAX      = 1000;
     static constexpr S32 VOLUME_MIN     = 0,  VOLUME_MAX     = 100;
 
     /** Force every field into range. Called after anything that came from outside this process. */

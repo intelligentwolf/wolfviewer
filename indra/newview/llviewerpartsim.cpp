@@ -54,7 +54,7 @@ F32 LLViewerPartSim::sParticleAdaptiveRate = 0.0625f;
 F32 LLViewerPartSim::sParticleBurstRate = 0.5f;
 
 //static
-const S32 LLViewerPartSim::MAX_PART_COUNT = 8192;
+const S32 LLViewerPartSim::MAX_PART_COUNT = LL_MAX_PARTICLE_COUNT;
 const F32 LLViewerPartSim::PART_THROTTLE_THRESHOLD = 0.9f;
 const F32 LLViewerPartSim::PART_ADAPT_RATE_MULT = 2.0f;
 
@@ -543,7 +543,7 @@ void LLViewerPartSim::checkParticleCount(U32 size)
 
 LLViewerPartSim::LLViewerPartSim()
 {
-    sMaxParticleCount = llmin(gSavedSettings.getS32("RenderMaxPartCount"), LL_MAX_PARTICLE_COUNT);
+    setMaxPartCount(gSavedSettings.getS32("RenderMaxPartCount"));
     static U32 id_seed = 0;
     mID = ++id_seed;
 }
@@ -557,7 +557,7 @@ void LLViewerPartSim::enable(bool enabled)
     }
     else if(enabled && sMaxParticleCount < 1)
     {
-        sMaxParticleCount = llmin(gSavedSettings.getS32("RenderMaxPartCount"), LL_MAX_PARTICLE_COUNT);
+        setMaxPartCount(gSavedSettings.getS32("RenderMaxPartCount"));
     }
 
     return;
@@ -583,7 +583,7 @@ void LLViewerPartSim::destroyClass()
 //static
 bool LLViewerPartSim::shouldAddPart()
 {
-    if (sParticleCount >= MAX_PART_COUNT)
+    if (sMaxParticleCount <= 0 || sParticleCount >= MAX_PART_COUNT)
     {
         return false;
     }

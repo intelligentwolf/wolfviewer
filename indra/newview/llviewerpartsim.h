@@ -37,7 +37,9 @@ class LLViewerPart;
 class LLViewerRegion;
 class LLVOPartGroup;
 
-#define LL_MAX_PARTICLE_COUNT 8192
+// Source: llvopartgroup.cpp LLParticlePartition::rebuildGeom — four vertices per
+// particle indexed by U16. This budget fits even when every particle shares one buffer.
+#define LL_MAX_PARTICLE_COUNT 16384
 
 typedef void (*LLVPCallback)(LLViewerPart &part, const F32 dt);
 
@@ -155,7 +157,7 @@ public:
     static bool shouldAddPart(); // Just decides whether this particle should be added or not (for particle count capping)
     F32 maxRate() // Return maximum particle generation rate
     {
-        if (sParticleCount >= MAX_PART_COUNT)
+        if (sMaxParticleCount <= 0 || sParticleCount >= MAX_PART_COUNT)
         {
             return 1.f;
         }
@@ -178,7 +180,7 @@ public:
     friend class LLViewerPartGroup;
 
     bool aboveParticleLimit() const { return sParticleCount > sMaxParticleCount; }
-    static void setMaxPartCount(const S32 max_parts)    { sMaxParticleCount = max_parts; }
+    static void setMaxPartCount(const S32 max_parts)    { sMaxParticleCount = llclamp(max_parts, 0, LL_MAX_PARTICLE_COUNT); }
     static S32  getMaxPartCount()                       { return sMaxParticleCount; }
 
     // <FS:Beq> FIRE-34600 - bugsplat AVX2 particle count mismatch

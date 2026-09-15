@@ -60,7 +60,7 @@ public:
      * and the profile's density / velocity / size are percentages OF THEM, so "Heavy Rain at
      * 130% density" is one thing rather than a fifth level with its own table.
      */
-    void setProfile(const WolfWeatherProfile& p) { mProfile = p; }
+    void setProfile(const WolfWeatherProfile& p) { mProfile = p; mProfile.clampAll(); }
     const WolfWeatherProfile& profile() const { return mProfile; }
     void update(const F32 dt) override;
 

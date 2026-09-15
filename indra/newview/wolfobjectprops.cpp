@@ -110,18 +110,31 @@ void WolfObjectProps::reset()
     mAsked.clear();
     mWants.clear();
     mNextDrain = 0.0;
-    for (auto it = mProps.begin(); it != mProps.end();)
+    pruneDeadObjects();
+}
+
+void WolfObjectProps::pruneDeadObjects()
+{
+    // Keep live answers and exhausted retry histories. Clearing either would trigger
+    // fresh network requests for objects we already know or have stopped asking.
+    const auto prune = [](auto& entries)
     {
-        LLViewerObject* objectp = gObjectList.findObject(it->first);
-        if (!objectp || objectp->isDead())
+        for (auto it = entries.begin(); it != entries.end();)
         {
-            it = mProps.erase(it);
+            LLViewerObject* objectp = gObjectList.findObject(it->first);
+            if (!objectp || objectp->isDead())
+            {
+                it = entries.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
         }
-        else
-        {
-            ++it;
-        }
-    }
+    };
+    prune(mProps);
+    prune(mAsked);
+    prune(mWants);
 }
 
 void WolfObjectProps::idle()
@@ -143,6 +156,7 @@ void WolfObjectProps::idle()
         return;
     }
     mNextDrain = now + SWEEP_INTERVAL_SECS;
+    pruneDeadObjects();
     drain();
 
     // One line every STATS_INTERVAL_SECS, so "the name never arrived" can be told apart

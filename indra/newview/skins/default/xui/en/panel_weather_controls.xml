@@ -71,7 +71,7 @@
           label="Colour strength" min_val="0" max_val="100" increment="1" initial_value="100"
           decimal_digits="0" show_text="true" label_width="128" text_width="34" />
   <slider follows="left|top" height="16" left="10" top_pad="6" width="235" name="weather_move"
-          label="Weather Movement Speed" min_val="0" max_val="300" increment="5" initial_value="60"
+          label="Weather Movement Speed" min_val="0" max_val="1000" increment="5" initial_value="60"
           decimal_digits="0" show_text="true" label_width="128" text_width="34" />
   <check_box follows="left|top" height="16" left="10" top_pad="10" width="235"
              name="weather_sound" label="Enable/Disable Sound" />
@@ -88,13 +88,13 @@
     <radio_item top_pad="2" name="level1" value="1" label="Light Drizzle — Low density" />
   </radio_group>
   <slider follows="left|top" height="16" left="252" top="126" width="218" name="weather_density"
-          label="Particle density" min_val="10" max_val="300" increment="5" initial_value="100"
+          label="Particle density" min_val="10" max_val="1000" increment="5" initial_value="100"
           decimal_digits="0" show_text="true" label_width="112" text_width="34" />
   <slider follows="left|top" height="16" left="252" top_pad="6" width="218" name="weather_velocity"
-          label="Velocity" min_val="10" max_val="300" increment="5" initial_value="100"
+          label="Velocity" min_val="10" max_val="1000" increment="5" initial_value="100"
           decimal_digits="0" show_text="true" label_width="112" text_width="34" />
   <slider follows="left|top" height="16" left="252" top_pad="6" width="218" name="weather_size"
-          label="Size" min_val="10" max_val="400" increment="5" initial_value="100"
+          label="Size" min_val="10" max_val="1000" increment="5" initial_value="100"
           decimal_digits="0" show_text="true" label_width="112" text_width="34" />
   <text follows="left|top" height="14" left="252" top="186" width="218"
         name="weather_hdr_sound_presets" text_color="LabelSelectedColor">Sound Presets</text>

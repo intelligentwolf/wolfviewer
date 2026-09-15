@@ -15,7 +15,7 @@
      increment="256"
      integer="1"
      label="Max Particles"
-     max="8192"
+     max="16384"
      min="0"
      translation_id="QP Max Particles" />
     <entries

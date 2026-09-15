@@ -286,7 +286,7 @@ WolfWeatherProfile WolfWeatherProfile::applyPreset(const WolfWeatherProfile& bas
     else if (id == "thunderstorm") set(RAIN, 4,  55, "#8fb4e6", 100, 180, 170, 140, 120, true, 85, "thunder", "heavy");
     else if (id == "lightsnow")    set(SNOW, 1,  90, "#ffffff", 100,  50,  90,  80, 100, true, 30, "wind",    "none");
     else if (id == "snowfall")     set(SNOW, 2,  95, "#ffffff", 100,  70, 110, 100, 110, true, 40, "wind",    "none");
-    else if (id == "blizzard")     set(SNOW, 4, 100, "#eef4ff", 100, 260, 180, 160, 120, true, 80, "wind",    "none");
+    else if (id == "blizzard")     set(SNOW, 4, 100, "#eef4ff", 100, 600, 300, 160, 120, true, 80, "wind",    "none");
     else return base;
 
     p.clampAll();

@@ -2915,7 +2915,7 @@
 				 layout="topleft"
 				 left_pad="0"
 				 min_val="0"
-				 max_val="8192"
+				 max_val="16384"
 				 top_delta="-2"
 				 width="127"/>
 				<spinner
@@ -2926,7 +2926,7 @@
 				 left_pad="0"
 				 decimal_digits="0"
 				 follows="top|left"
-				 max_val="10000"
+				 max_val="16384"
 				 min_val="0"
 				 width="53"
 				 increment="1"/>

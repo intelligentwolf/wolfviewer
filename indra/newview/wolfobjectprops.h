@@ -78,7 +78,8 @@ class LLViewerObject;
 // kept while its object still exists: UUIDs are global, a description does not change
 // because the agent crossed a border, and a hull sailing across one must not stop rocking
 // for want of a name it already has. Answers for objects that are gone (a teleport
-// rebuilds the object list) are pruned at the same time, which bounds the store.
+// rebuilds the object list) are pruned then and on each request sweep, so repeated
+// rez/derez within a single region cannot grow the store indefinitely.
 class WolfObjectProps : public LLSingleton<WolfObjectProps>
 {
     LLSINGLETON(WolfObjectProps);
@@ -142,6 +143,7 @@ public:
 
 private:
     void drain();
+    void pruneDeadObjects();
 
     // Priority classes for the request queue, best first.
     static constexpr S32 PRIORITY_ROOT    = 0;

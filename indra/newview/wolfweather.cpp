@@ -43,13 +43,13 @@ const std::string WolfWeather::KEYWORD_CLEAR("wolfclear");
 namespace
 {
     // Source: wolfstorm environment_manager.js createRainSystem / createSnowSystem — the same
-    // shapes, scaled to what the viewer's particle cap (RenderMaxPartCount, default 4096)
-    // can carry: a few hundred rain streaks or snow flakes alive at once round the camera.
+    // shapes, scaled to what the viewer's particle cap (RenderMaxPartCount, default 16384)
+    // can carry: precipitation alive around the camera shares the scene's particle budget.
     // Four levels (Paul: "create 4 levels of rain and 4 levels of snow"): spawn rate per
     // second and fall speed, index 1..4 = light, moderate (default), heavy, torrential / blizzard.
     constexpr F32 RAIN_RATE_BY_LEVEL[5]  = { 0.f, 220.f, 500.f, 900.f, 1500.f };
     constexpr F32 RAIN_SPEED_BY_LEVEL[5] = { 0.f, 11.f, 14.f, 17.f, 20.f };
-    constexpr F32 SNOW_RATE_BY_LEVEL[5]  = { 0.f, 70.f, 160.f, 320.f, 560.f };
+    constexpr F32 SNOW_RATE_BY_LEVEL[5]  = { 0.f, 70.f, 160.f, 320.f, 2240.f };
     constexpr F32 SNOW_SPEED_BY_LEVEL[5] = { 0.f, 1.1f, 1.6f, 2.1f, 3.0f };
     constexpr F32 RAIN_RATE_PER_S   = 700.f;   // (kept for reference; the tables above are used)
     constexpr F32 RAIN_BOX_XY_M     = 28.f;    // half-width of the box round the camera
@@ -195,14 +195,14 @@ void WolfWeatherPartSource::update(const F32 dt)
     updateLanding(cam, mMode == RAIN ? RAIN_BOX_XY_M : SNOW_BOX_XY_M, mMode == RAIN ? RAIN_TOP_M : SNOW_TOP_M);
     // The level's rate at the profile's density. The viewer's own particle cap
     // (RenderMaxPartCount) is still the ceiling — shouldAddPart() below refuses when it is near
-    // — so a 300% blizzard sheds particles rather than the rest of the scene doing so.
+    // — so extreme weather still respects the resident's chosen rendering budget.
     const F32 base_rate = (mMode == RAIN) ? RAIN_RATE_BY_LEVEL[mLevel] : SNOW_RATE_BY_LEVEL[mLevel];
     const F32 rate = base_rate * ((F32)mProfile.mDensity / 100.f);
-    mCarry += rate * llmin(dt, 0.1f);
+    mCarry += rate * llclamp(dt, 0.f, 0.1f);
     S32 n = (S32)mCarry;
     mCarry -= (F32)n;
-    // Never more than a frame's fair share when the cap is near (shouldAddPart is probabilistic).
-    n = llmin(n, 120);
+    // The clamped profile and time step bound work to at most 2240 attempts.
+    // A fixed 120-per-frame cap made the same dense profile thinner at lower FPS.
     for (S32 i = 0; i < n; ++i)
     {
         if (!LLViewerPartSim::getInstance()->shouldAddPart()) break;

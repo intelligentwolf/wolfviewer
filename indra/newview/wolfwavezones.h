@@ -33,6 +33,7 @@ class LLButton;
 class LLCheckBoxCtrl;
 class LLSliderCtrl;
 class LLTextBox;
+class WolfToolWavePaint;
 
 // Source: wolfstorm/js/world/wave_zones.js (2026-09-07) — the same layout, the same API, the
 // same default rule, the same texture. WAVES_PLAN_2026-09-07.md §3-5.
@@ -209,6 +210,8 @@ public:
     char brush() const { return mBrush; }
     bool dirty() const { return mDirty; }
     void clearDirty() { mDirty = false; }
+    /** World brush writes the same draft as the map, with one preview per stroke segment. */
+    bool paintCell(S32 cx, S32 cy);
     /** Called after each painted cell (the panel previews live). */
     void setPaintCallback(const std::function<void()>& cb) { mOnPaint = cb; }
     /** Called when the brush hit a locked cell (once per stroke). */
@@ -255,6 +258,10 @@ public:
     void onVisibilityChange(bool visible) override;
 
 private:
+    friend class WolfToolWavePaint;
+    void toggleWorldBrush();
+    void stopWorldBrush();
+    bool paintWorld(F32 ax, F32 ay, F32 bx, F32 by);
     void rebuild();
     void onBrush(char z);
     void onSave();
@@ -269,6 +276,9 @@ private:
     void invalidateTarget();
 
     WolfWavePainter* mPainter = nullptr;
+    LLPointer<WolfToolWavePaint> mWorldTool;
+    LLButton*       mWorldPaint = nullptr;
+    LLSliderCtrl*   mBrushDiameter = nullptr;
     LLTextBox*       mStatus = nullptr;
     LLTextBox*       mNote = nullptr;
     LLSliderCtrl*    mSurfHeight = nullptr;

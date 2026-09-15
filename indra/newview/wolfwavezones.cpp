@@ -15,12 +15,14 @@
 
 #include "llviewerprecompiledheaders.h"
 #include <algorithm>
+#include <cmath>
 
 #include "wolfwavezones.h"
 
 #include <boost/json.hpp>
 
 #include "llagent.h"
+#include "llagentcamera.h"
 #include "llbutton.h"
 #include "llcheckboxctrl.h"
 #include "llcorehttputil.h"
@@ -31,8 +33,13 @@
 #include "llnotificationsutil.h"
 #include "llrender2dutils.h"
 #include "llsdjson.h"
+#include "llselectmgr.h"
 #include "llsliderctrl.h"
 #include "lltextbox.h"
+#include "lltool.h"
+#include "lltoolmgr.h"
+#include "llviewerwindow.h"
+#include "llviewershadermgr.h"
 #include "lluictrlfactory.h"
 #include "llparcel.h"            // PARCEL_GRID_STEP_METERS
 #include "llimage.h"
@@ -43,6 +50,7 @@
 #include "llworld.h"
 #include "wolfgrid.h"
 #include "wolfwaterfield.h"
+#include "wolfwavebrush.h"
 
 // Source: wolfstorm/js/world/wave_zones.js API — one host owns the data for every viewer.
 const char* WolfWaveZones::API_URL = "https://wolfstorm.app/php/waves.php";
@@ -893,6 +901,16 @@ void WolfWavePainter::draw()
     LLUICtrl::draw();
 }
 
+bool WolfWavePainter::paintCell(S32 cx, S32 cy)
+{
+    if (!getEnabled() || cx < 0 || cy < 0 || cx >= mW || cy >= mH) return false;
+    const size_t k = (size_t)cy * mW + cx;
+    if (k >= mZones.size() || mZones[k] == mBrush) return false;
+    mZones[k] = mBrush;
+    mDirty = true;
+    return true;
+}
+
 void WolfWavePainter::paint(S32 x, S32 y)
 {
     S32 cx, cy;
@@ -903,10 +921,7 @@ void WolfWavePainter::paint(S32 x, S32 y)
         if (!mRefusedThisStroke && mOnRefused) { mRefusedThisStroke = true; mOnRefused(); }
         return;
     }
-    if (mZones[k] == mBrush) return;
-    mZones[k] = mBrush;
-    mDirty = true;
-    if (mOnPaint) mOnPaint();
+    if (paintCell(cx, cy) && mOnPaint) mOnPaint();
 }
 
 bool WolfWavePainter::handleMouseDown(S32 x, S32 y, MASK mask)
@@ -944,12 +959,143 @@ bool WolfWavePainter::handleMouseUp(S32 x, S32 y, MASK mask)
 // WolfPanelLandWaves — Region / Estate > Waves
 // ═══════════════════════════════════════════════════════════════════════════════════════
 
+// Source: WolfToolTerrainPaint's capture/render lifecycle and LLToolPipette's transient tool.
+// This tool owns no draft: both the map and the world edit the panel's versioned working copy.
+class WolfToolWavePaint : public LLTool
+{
+public:
+    explicit WolfToolWavePaint(WolfPanelLandWaves& panel) : LLTool("WavePaint"), mPanel(panel) {}
+    bool active() const { return mActive; }
+    bool isAlwaysRendered() override { return true; }
+    void handleSelect() override
+    {
+        mActive = true;
+        if (mPanel.mWorldPaint) mPanel.mWorldPaint->setToggleState(true);
+    }
+    void handleDeselect() override
+    {
+        mActive = false;
+        mHover = false;
+        mPrevious = false;
+        if (hasMouseCapture()) setMouseCapture(false);
+        if (mPanel.mWorldPaint) mPanel.mWorldPaint->setToggleState(false);
+    }
+    void onMouseCaptureLost() override { mPrevious = false; }
+    bool handleKey(KEY key, MASK mask) override
+    {
+        if (key != KEY_ESCAPE) return LLTool::handleKey(key, mask);
+        mPanel.stopWorldBrush();
+        mPanel.setStatus("Water brush stopped. Save to keep your changes.", false);
+        return true;
+    }
+    bool handleMouseDown(S32 x, S32 y, MASK mask) override
+    {
+        mPrevious = false;
+        setMouseCapture(true);
+        dab(x, y);
+        return true;
+    }
+    bool handleMouseUp(S32 x, S32 y, MASK mask) override
+    {
+        if (hasMouseCapture()) { dab(x, y); setMouseCapture(false); }
+        mPrevious = false;
+        return true;
+    }
+    bool handleDoubleClick(S32 x, S32 y, MASK mask) override { return handleMouseDown(x, y, mask); }
+    bool handleRightMouseDown(S32 x, S32 y, MASK mask) override
+    {
+        mPanel.stopWorldBrush();
+        mPanel.setStatus("Water brush stopped. Save to keep your changes.", false);
+        return true;
+    }
+    bool handleHover(S32 x, S32 y, MASK mask) override
+    {
+        mMouseX = x; mMouseY = y;
+        mHover = true;
+        gViewerWindow->setCursor(UI_CURSOR_TOOLLAND);
+        if (hasMouseCapture()) dab(x, y);
+        return true;
+    }
+    void render() override
+    {
+        if (!mActive || !mHover) return;
+        mHover = false;
+        LLVector3 hit;
+        if (!waterHit(mMouseX, mMouseY, hit)) return;
+        const auto* row = WolfWaveZones::instance().current();
+        LLViewerRegion* region = gAgent.getRegion();
+        if (!row || !region) return;
+        const F32 radius = mPanel.mBrushDiameter->getValueF32() * row->mCell * 0.5f;
+        // Source: WolfToolTerrainPaint::render, 48-segment brush ring. Flush before restoring
+        // the shader: the About Land crash was geometry flushed after its shader was unbound.
+        LLGLSLShader* previous = LLGLSLShader::sCurBoundShaderPtr;
+        gDebugProgram.bind();
+        gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
+        LLGLDepthTest depth(GL_FALSE, GL_FALSE);
+        gGL.color4f(0.31f, 0.64f, 1.f, 1.f);
+        gGL.begin(LLRender::LINES);
+        for (S32 k = 0; k < 48; ++k)
+            for (S32 end = 0; end < 2; ++end)
+            {
+                const F32 angle = (F32)(k + end) / 48.f * F_TWO_PI;
+                const LLVector3 point = region->getPosAgentFromRegion(LLVector3(
+                    hit.mV[VX] + radius * cosf(angle), hit.mV[VY] + radius * sinf(angle), hit.mV[VZ]));
+                gGL.vertex3fv(point.mV);
+            }
+        gGL.end();
+        gGL.flush();
+        if (previous) previous->bind(); else LLGLSLShader::unbind();
+    }
+private:
+    bool waterHit(S32 x, S32 y, LLVector3& hit) const
+    {
+        if (!mActive || gDisconnected || !mPanel.isInVisibleChain() || !mPanel.targetCurrent() ||
+            !mPanel.mEnabled->get()) return false;
+        LLViewerRegion* region = gAgent.getRegion();
+        const auto* row = WolfWaveZones::instance().current();
+        if (!region || !row) return false;
+        // Source: LLViewerWindow::mousePointOnPlaneGlobal. Reject its parallel-ray fallback;
+        // sky clicks must not produce an approximate point on the sea.
+        if (fabsf(gViewerWindow->mouseDirectionGlobal(x, y).mV[VZ]) < 0.00001f) return false;
+        LLVector3d point;
+        if (!gViewerWindow->mousePointOnPlaneGlobal(point, x, y,
+            region->getPosGlobalFromRegion(LLVector3(0.f, 0.f, region->getWaterHeight())), LLVector3::z_axis)) return false;
+        hit = region->getPosRegionFromGlobal(point);
+        if (!std::isfinite(hit.mV[VX]) || !std::isfinite(hit.mV[VY]) ||
+            hit.mV[VX] < 0.f || hit.mV[VY] < 0.f || hit.mV[VX] >= row->mSizeX || hit.mV[VY] >= row->mSizeY ||
+            region->getLand().resolveHeightRegion(hit.mV[VX], hit.mV[VY]) >= region->getWaterHeight()) return false;
+        LLVector3d terrain;
+        const LLVector3d camera = gAgentCamera.getCameraPositionGlobal();
+        if (gViewerWindow->mousePointOnLandGlobal(x, y, &terrain) &&
+            (terrain - camera).lengthSquared() < (point - camera).lengthSquared()) return false;
+        return true;
+    }
+    void dab(S32 x, S32 y)
+    {
+        LLVector3 hit;
+        if (!waterHit(x, y, hit))
+        {
+            mPrevious = false;
+            mPanel.setStatus("Point at water in this region to paint.", true);
+            return;
+        }
+        const F32 px = hit.mV[VX], py = hit.mV[VY];
+        mPanel.paintWorld(mPrevious ? mLastX : px, mPrevious ? mLastY : py, px, py);
+        mLastX = px; mLastY = py; mPrevious = true;
+    }
+    WolfPanelLandWaves& mPanel;
+    bool mActive = false, mPrevious = false, mHover = false;
+    S32 mMouseX = 0, mMouseY = 0;
+    F32 mLastX = 0.f, mLastY = 0.f;
+};
+
 // Source: llfloaterregioninfo.cpp:244-321. Region panels are constructed directly and build a
 // standalone XUI file; wave permissions still consult the occupied parcel at paint time.
 WolfPanelLandWaves::WolfPanelLandWaves() : LLPanel() {}
 
 WolfPanelLandWaves::~WolfPanelLandWaves()
 {
+    stopWorldBrush();
     if (mRegionChangedConnection.connected()) mRegionChangedConnection.disconnect();
     WolfWaveZones::instance().clearPreview();
 }
@@ -963,6 +1109,7 @@ bool WolfPanelLandWaves::targetCurrent() const
 
 void WolfPanelLandWaves::invalidateTarget()
 {
+    stopWorldBrush();
     const bool discarded = mDirty;
     WolfWaveZones::instance().clearPreview();
     mTarget = WolfWaveZones::SaveTarget();
@@ -982,7 +1129,7 @@ void WolfPanelLandWaves::onVisibilityChange(bool visible)
 {
     // Source: LLView::onVisibilityChange propagates ancestor visibility separately from the
     // child's own visible bit. Hiding the owner must end its world preview immediately.
-    if (!visible) { WolfWaveZones::instance().clearPreview(); mBakeWaitUntil = 0.0; }
+    if (!visible) { stopWorldBrush(); WolfWaveZones::instance().clearPreview(); mBakeWaitUntil = 0.0; }
     else if (mPainter)
     {
         if (!targetCurrent()) { invalidateTarget(); refresh(); }
@@ -996,6 +1143,10 @@ bool WolfPanelLandWaves::postBuild()
     // Source: LLAgent::setRegion region callback: invalidate even across A->B->A while hidden.
     mRegionChangedConnection = gAgent.addRegionChangedCallback([this]() { invalidateTarget(); });
     mPainter     = getChild<WolfWavePainter>("waves_painter");
+    mWorldPaint  = getChild<LLButton>("waves_world_paint");
+    mBrushDiameter = getChild<LLSliderCtrl>("waves_brush_diameter");
+    mWorldTool = new WolfToolWavePaint(*this);
+    mWorldPaint->setCommitCallback(boost::bind(&WolfPanelLandWaves::toggleWorldBrush, this));
     mStatus      = getChild<LLTextBox>("waves_status");
     mNote        = getChild<LLTextBox>("waves_note");
     mSurfHeight  = getChild<LLSliderCtrl>("waves_surf_height");
@@ -1030,6 +1181,57 @@ bool WolfPanelLandWaves::postBuild()
     return true;
 }
 
+void WolfPanelLandWaves::toggleWorldBrush()
+{
+    if (mWorldTool->active()) { stopWorldBrush(); setStatus("Water brush stopped. Save to keep your changes.", false); return; }
+    if (gDisconnected || !WolfGrid::isWolfTerritories() || !targetCurrent())
+    {
+        mWorldPaint->setToggleState(false);
+        setStatus("The region's wave layout is not ready. Wait for it to load before painting.", true);
+        return;
+    }
+    if (!mEnabled->get())
+    {
+        mWorldPaint->setToggleState(false);
+        setStatus("Tick Use this layout before painting on the water.", true);
+        return;
+    }
+    // Source: LLViewerWindow::renderSelections uses a HUD projection while HUDs are
+    // selected. Water painting starts in world space and has no object selection.
+    LLSelectMgr::getInstance()->deselectAll();
+    LLToolMgr::getInstance()->setTransientTool(mWorldTool);
+    mWorldPaint->setToggleState(true);
+    setStatus("Drag on water to paint. Press Esc or Paint on water to stop; Save to keep changes.", false);
+}
+
+void WolfPanelLandWaves::stopWorldBrush()
+{
+    if (!mWorldTool) return;
+    if (mWorldTool->hasMouseCapture()) mWorldTool->setMouseCapture(false);
+    if (LLToolMgr::instanceExists() && LLToolMgr::getInstance()->getCurrentTool() == mWorldTool.get())
+        LLToolMgr::getInstance()->clearTransientTool();
+    mWorldTool->handleDeselect();
+}
+
+bool WolfPanelLandWaves::paintWorld(F32 ax, F32 ay, F32 bx, F32 by)
+{
+    if (gDisconnected || !targetCurrent() || !isInVisibleChain() || !mEnabled->get()) return false;
+    WolfWaveZones& wz = WolfWaveZones::instance();
+    const auto* row = wz.current();
+    LLViewerRegion* region = gAgent.getRegion();
+    bool changed = false, refused = false;
+    WolfWaveBrush::visit(row->w(), row->h(), row->mCell, (S32)mBrushDiameter->getValueF32(), ax, ay, bx, by,
+        [&](S32 cx, S32 cy)
+        {
+            if (!wz.cellEditable(cx, cy)) { refused = true; return; }
+            if (region->getLand().resolveHeightRegion((cx + 0.5f) * row->mCell, (cy + 0.5f) * row->mCell) >= region->getWaterHeight()) return;
+            changed = mPainter->paintCell(cx, cy) || changed;
+        });
+    if (changed) onParamChanged();
+    if (refused) setStatus(getString("str_locked_cell"), true);
+    return changed;
+}
+
 void WolfPanelLandWaves::onBrush(char z)
 {
     if (!WolfGrid::isWolfTerritories()) { setStatus("These tools are only available on Wolf Territories Grid.", true); return; }
@@ -1059,6 +1261,7 @@ void WolfPanelLandWaves::armBakeConfirm()
 
 void WolfPanelLandWaves::draw()
 {
+    if (gDisconnected) stopWorldBrush();
     if (!WolfGrid::isWolfTerritories()) { refresh(); LLPanel::draw(); return; }
     if (mTarget.mHandle && !targetCurrent()) { invalidateTarget(); refresh(); }
     const F64 now = LLFrameTimer::getElapsedSeconds();
@@ -1227,6 +1430,7 @@ void WolfPanelLandWaves::onParamChanged()
     if (mWriting) return;
     if (!WolfGrid::isWolfTerritories()) { setStatus("These tools are only available on Wolf Territories Grid.", true); return; }
     if (!targetCurrent()) { invalidateTarget(); refresh(); return; }
+    if (!mEnabled->get()) stopWorldBrush();
     // Live in the water until Save or Revert, like the brush (WolfStorm land_waves_tab.js).
     WolfWaveZones& wz = WolfWaveZones::instance();
     if (!wz.current() || !mPainter) return;
@@ -1261,6 +1465,7 @@ void WolfPanelLandWaves::onSave()
 
 void WolfPanelLandWaves::onRevert()
 {
+    stopWorldBrush();
     WolfWaveZones::instance().clearPreview();
     ++mEditRevision;
     mDirty = false;

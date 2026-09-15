@@ -342,6 +342,16 @@ bool LLFloaterLand::postBuild()
 {
     setVisibleCallback(boost::bind(&LLFloaterLand::onVisibilityChanged, this, _2));
 
+    // Keep a single wave draft: the Region Details editor owns its preview and world brush.
+    // Source: llfloaterregioninfo.cpp builds panel_region_waves in region_panels.
+    getChild<LLButton>("land_open_wave_painter")->setCommitCallback([](LLUICtrl*, const LLSD&) {
+        LLFloater* region = LLFloaterReg::showInstance("region_info");
+        if (!region || !region->getChild<LLTabContainer>("region_panels")->selectTabByName("panel_region_waves"))
+        {
+            LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE", "The wave painter could not be opened."));
+        }
+    });
+
     LLTabContainer* tab = getChild<LLTabContainer>("landtab");
 
     mTabLand = (LLTabContainer*) tab;

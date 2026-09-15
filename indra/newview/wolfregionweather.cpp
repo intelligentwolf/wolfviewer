@@ -512,9 +512,11 @@ U64 WolfRegionWeather::saveParcel(const WolfWeatherProfile& profile,
     if (!WolfGrid::isWolfTerritories()) { mLastError = "These tools are only available on Wolf Territories Grid."; ++mGeneration; return 0; }
     if (mSavingParcel) { mLastError = "A parcel weather change is already saving."; ++mGeneration; return 0; }
     const std::string id = currentRegionId();
-    if (!mHaveParcel || captured_target.mEditorTarget != parcelTarget()
-        || captured_target.mRegionId != id || captured_target.mParcelId != mParcelId
-        || !mParcelGate.accepts(captured_target.mVisitGeneration))
+    // Source: llviewerparcelmgr.cpp:1860-1894 updates the agent-parcel record and emits
+    // changeParcels() after the simulator sends the same parcel bitmap. That notification
+    // advances the visit gate even when the parcel UUID is unchanged. The UUID/region pair
+    // identifies the saved row; the POST version check still rejects a genuinely newer edit.
+    if (!mHaveParcel || captured_target.mRegionId != id || captured_target.mParcelId != mParcelId)
     {
         mLastError = "The occupied parcel changed before this edit could be saved.";
         ++mGeneration;

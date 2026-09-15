@@ -2342,5 +2342,14 @@ Only large parcels can be listed in search.
           name="land_weather_panel"
           filename="panel_weather_controls.xml">
        </panel>
+       <panel border="true" follows="all" label="Water" layout="topleft"
+          left="0" top="0" height="386" width="480" name="land_water_panel">
+          <text layout="topleft" follows="left|top" left="10" top="12"
+             height="48" width="460" word_wrap="true" name="land_water_help">
+Paint waves directly on the water or on the wave map. Open the wave painter to choose Surf, Open, Small, Calm or Off and save your changes.
+          </text>
+          <button layout="topleft" follows="left|top" left="10" top_pad="10"
+             height="24" width="180" name="land_open_wave_painter" label="Open wave painter" />
+       </panel>
     </tab_container>
 </floater>

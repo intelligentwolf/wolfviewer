@@ -1021,7 +1021,8 @@ void WolfPanelWeather::onRevert()
 void WolfPanelWeather::refresh()
 {
     WolfRegionWeather::instance().refresh(false);
-    draw();
+    // onOpen(), focus and parcel callbacks can refresh outside the UI render pass.
+    // Let draw() consume the new generation when the renderer has bound its shader.
 }
 
 void WolfPanelWeather::draw()

@@ -140,7 +140,7 @@ void WolfNaturalWater::idle()
         for (S32 x = 0; x < grids; ++x)
         {
             const S32 sx = llmin(x * step, grids_full - 1);
-            z[(size_t)x + (size_t)y * grids] = land.getZ(sx + sy * grids_full);
+            z[(size_t)x + (size_t)y * grids] = land.getZ(sx, sy);
         }
     }
     const F32 mpg = land.getMetersPerGrid() * (F32)step;

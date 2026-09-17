@@ -43,6 +43,7 @@
 #include "llviewercontrol.h"
 #include "llsurface.h"
 #include "llviewerregion.h"
+#include "llparceloverlaygrid.h"
 #include "llviewercamera.h"
 #include "llviewertexturelist.h"
 #include "llselectmgr.h"
@@ -69,9 +70,6 @@ LLViewerParcelOverlay::update_signal_t* LLViewerParcelOverlay::mUpdateSignal = N
 LLViewerParcelOverlay::LLViewerParcelOverlay(LLViewerRegion* region, F32 region_width_meters)
 :   mRegion(region),
     mParcelGridsPerEdge(S32(region_width_meters / PARCEL_GRID_STEP_METERS)),
-// <FS:CR> Aurora Sim
-    mRegionSize(S32(region_width_meters)),
-// </FS:CR> Aurora Sim
     mDirty(false),
     mTimeSinceLastUpdate(),
     mOverlayTextureIdx(-1)
@@ -90,7 +88,10 @@ LLViewerParcelOverlay::LLViewerParcelOverlay(LLViewerRegion* region, F32 region_
     // Create a texture to hold color information.
     // 4 components
     // Use mipmaps = false, clamped, NEAREST filter, for sharp edges
-    mImageRaw = new LLImageRaw(mParcelGridsPerEdge, mParcelGridsPerEdge, OVERLAY_IMG_COMPONENTS);
+    // Source: llimage.h defines MAX_IMAGE_SIZE; ownership() continues to use the
+    // full parcel grid. Only the normalized display texture is downsampled.
+    const S32 texture_edge = parcelOverlayTextureEdge(mParcelGridsPerEdge, MAX_IMAGE_SIZE);
+    mImageRaw = new LLImageRaw(texture_edge, texture_edge, OVERLAY_IMG_COMPONENTS);
     mTexture = LLViewerTextureManager::getLocalTexture(mImageRaw.get(), false);
     mTexture->setAddressMode(LLTexUnit::TAM_CLAMP);
     mTexture->setFilteringOption(LLTexUnit::TFO_POINT);
@@ -100,12 +101,11 @@ LLViewerParcelOverlay::LLViewerParcelOverlay(LLViewerRegion* region, F32 region_
     //
     // Create the base texture.
     U8* raw = mImageRaw->getData();
-    const S32 COUNT = mParcelGridsPerEdge * mParcelGridsPerEdge * OVERLAY_IMG_COMPONENTS;
+    const S32 COUNT = texture_edge * texture_edge * OVERLAY_IMG_COMPONENTS;
     for (S32 i = 0; i < COUNT; i++)
     {
         raw[i] = 0;
     }
-    //mTexture->setSubImage(mImageRaw, 0, 0, mParcelGridsPerEdge, mParcelGridsPerEdge);
 
     // Create storage for ownership information from simulator
     // and initialize it.
@@ -357,14 +357,17 @@ void LLViewerParcelOverlay::updateOverlayTexture()
 
     // Create the base texture.
     U8* raw = mImageRaw->getData();
-    const S32 COUNT = mParcelGridsPerEdge * mParcelGridsPerEdge;
-    S32 max = mOverlayTextureIdx + mParcelGridsPerEdge;
+    const S32 texture_edge = mImageRaw->getWidth();
+    const S32 COUNT = texture_edge * texture_edge;
+    S32 max = mOverlayTextureIdx + texture_edge;
     if (max > COUNT) max = COUNT;
     S32 pixel_index = mOverlayTextureIdx * OVERLAY_IMG_COMPONENTS;
     S32 i;
     for (i = mOverlayTextureIdx; i < max; i++)
     {
-        U8 ownership = mOwnership[i];
+        const S32 row = parcelOverlaySourceCell(i / texture_edge, mParcelGridsPerEdge, texture_edge);
+        const S32 column = parcelOverlaySourceCell(i % texture_edge, mParcelGridsPerEdge, texture_edge);
+        U8 ownership = mOwnership[row * mParcelGridsPerEdge + column];
 
         U8 r,g,b,a;
 
@@ -430,7 +433,7 @@ void LLViewerParcelOverlay::updateOverlayTexture()
         {
             mTexture->createGLTexture(0, mImageRaw);
         }
-        mTexture->setSubImage(mImageRaw, 0, 0, mParcelGridsPerEdge, mParcelGridsPerEdge);
+        mTexture->setSubImage(mImageRaw, 0, 0, texture_edge, texture_edge);
         mOverlayTextureIdx = -1;
     }
     else
@@ -441,16 +444,15 @@ void LLViewerParcelOverlay::updateOverlayTexture()
 
 void LLViewerParcelOverlay::uncompressLandOverlay(S32 chunk, U8* packed_overlay)
 {
-    // Unpack the message data into the ownership array
-    S32 size = mParcelGridsPerEdge * mParcelGridsPerEdge;
-
-// <FS:CR> Aurora Sim
-    //S32 chunk_size = size / PARCEL_OVERLAY_CHUNKS;
-    S32 mParcelOverLayChunks = mRegionSize * mRegionSize / (128 * 128);
-    S32 chunk_size = size / mParcelOverLayChunks;
-// <FS:CR> Aurora Sim
-
-    memcpy(mOwnership + chunk*chunk_size, packed_overlay, chunk_size);      /*Flawfinder: ignore*/
+    // Source: processParcelOverlay validates a fixed 1024-byte packet. Derive
+    // offsets from that payload, never from region_width squared in a signed int.
+    if (!parcelOverlayChunkFits(chunk, mParcelGridsPerEdge))
+    {
+        LL_WARNS() << "Parcel overlay sequence outside region: " << chunk << LL_ENDL;
+        return;
+    }
+    const size_t offset = static_cast<size_t>(chunk) * PARCEL_OVERLAY_PAYLOAD_BYTES;
+    memcpy(mOwnership + offset, packed_overlay, PARCEL_OVERLAY_PAYLOAD_BYTES);
 
     // Force property lines and overlay texture to update
     setDirty();

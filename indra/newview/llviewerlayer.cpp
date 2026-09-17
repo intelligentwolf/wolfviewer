@@ -25,6 +25,7 @@
  */
 
 #include "llviewerprecompiledheaders.h"
+#include "llterraingridoffset.h"
 
 #include "llviewerlayer.h"
 #include "llerror.h"
@@ -72,7 +73,7 @@ F32 LLViewerLayer::getValue(const S32 x, const S32 y) const
 //  llassert(y >= 0);
 //  llassert(y < mWidth);
 
-    return *(mDatap + x + y*mWidth);
+    return *(mDatap + terrainGridOffset(x, y, mWidth));
 }
 
 F32 LLViewerLayer::getValueScaled(const F32 x, const F32 y) const
@@ -100,8 +101,8 @@ F32 LLViewerLayer::getValueScaled(const F32 x, const F32 y) const
     y2 = llmax(0, y2);
 
     // Take weighted average of all four points (bilinear interpolation)
-    S32 row1 = y1 * mWidth;
-    S32 row2 = y2 * mWidth;
+    const std::ptrdiff_t row1 = terrainGridOffset(0, y1, mWidth);
+    const std::ptrdiff_t row2 = terrainGridOffset(0, y2, mWidth);
 
     // Access in squential order in memory, and don't use immediately.
     F32 row1_left  = mDatap[ row1 + x1 ];

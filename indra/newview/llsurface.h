@@ -27,6 +27,7 @@
 #ifndef LL_LLSURFACE_H
 #define LL_LLSURFACE_H
 
+#include "llterraingridoffset.h"
 #include "v3math.h"
 #include "v3dmath.h"
 
@@ -83,8 +84,8 @@ public:
     virtual void decompressDCTPatch(LLBitPack &bitpack, LLGroupHeader *gopp, bool b_large_patch);
     virtual void updatePatchVisibilities(LLAgent &agent);
 
-    inline F32 getZ(const U32 k) const              { return mSurfaceZ[k]; }
-    inline F32 getZ(const S32 i, const S32 j) const { return mSurfaceZ[i + j*mGridsPerEdge]; }
+    inline F32 getZ(const size_t k) const              { return mSurfaceZ[k]; }
+    inline F32 getZ(const S32 i, const S32 j) const { return mSurfaceZ[terrainGridOffset(i, j, mGridsPerEdge)]; }
 
     LLVector3 getOriginAgent() const;
     const LLVector3d &getOriginGlobal() const;

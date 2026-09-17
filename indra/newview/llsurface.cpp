@@ -25,6 +25,7 @@
  */
 
 #include "llviewerprecompiledheaders.h"
+#include "llterraingridoffset.h"
 
 #include "llsurface.h"
 
@@ -200,7 +201,7 @@ void LLSurface::create(const S32 grids_per_edge,
 
     mPVArray.create(mGridsPerEdge, mGridsPerPatchEdge, LLWorld::getInstance()->getRegionScale());
 
-    S32 number_of_grids = mGridsPerEdge * mGridsPerEdge;
+    const size_t number_of_grids = static_cast<size_t>(terrainGridOffset(0, mGridsPerEdge, mGridsPerEdge));
 
     /////////////////////////////////////
     //
@@ -794,7 +795,7 @@ void LLSurface::moveZ(const S32 x, const S32 y, const F32 delta)
     llassert(y >= 0);
     llassert(x < mGridsPerEdge);
     llassert(y < mGridsPerEdge);
-    mSurfaceZ[x + y*mGridsPerEdge] += delta;
+    mSurfaceZ[terrainGridOffset(x, y, mGridsPerEdge)] += delta;
 }
 
 
@@ -1274,11 +1275,12 @@ LLVector3 LLSurface::resolveNormalGlobal(const LLVector3d& pos_global) const
         pos_global.mdV[VY] >= mOriginGlobal.mdV[VY]  &&
         pos_global.mdV[VY] < mOriginGlobal.mdV[VY] + mMetersPerEdge)
     {
-        U32 i, j, k;
+        U32 i, j;
+        std::ptrdiff_t k;
         F32 dx, dy;
         i = (U32) ((pos_global.mdV[VX] - mOriginGlobal.mdV[VX]) * oometerspergrid);
         j = (U32) ((pos_global.mdV[VY] - mOriginGlobal.mdV[VY]) * oometerspergrid );
-        k = i + j*mGridsPerEdge;
+        k = terrainGridOffset(i, j, mGridsPerEdge);
 
         // Figure out if v is in first or second triangle of the square
         // and calculate the slopes accordingly
@@ -1443,7 +1445,7 @@ void LLSurface::createPatchData()
             patchp->mHasReceivedData = false;
             patchp->mSTexUpdate = true;
 
-            S32 data_offset = i * mGridsPerPatchEdge + j * mGridsPerPatchEdge * mGridsPerEdge;
+            const std::ptrdiff_t data_offset = terrainGridOffset(i * mGridsPerPatchEdge, j * mGridsPerPatchEdge, mGridsPerEdge);
 
             patchp->setDataZ(mSurfaceZ + data_offset);
             patchp->setDataNorm(mNorm + data_offset);

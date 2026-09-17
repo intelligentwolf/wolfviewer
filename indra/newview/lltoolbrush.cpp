@@ -226,7 +226,7 @@ void LLToolBrushLand::modifyLandInSelectionGlobal()
         U32 grids = center_region->getLand().mGridsPerEdge;
         S32 i = llclamp( (S32)pos_region.mV[VX], 0, (S32)grids );
         S32 j = llclamp( (S32)pos_region.mV[VY], 0, (S32)grids );
-        mStartingZ = center_region->getLand().getZ(i+j*grids);
+        mStartingZ = center_region->getLand().getZ(i, j);
     }
     else
     {
@@ -390,7 +390,7 @@ bool LLToolBrushLand::handleMouseDown(S32 x, S32 y, MASK mask)
         U32 grids = regionp->getLand().mGridsPerEdge;
         S32 i = llclamp( (S32)pos_region.mV[VX], 0, (S32)grids );
         S32 j = llclamp( (S32)pos_region.mV[VY], 0, (S32)grids );
-        mStartingZ = regionp->getLand().getZ(i+j*grids);
+        mStartingZ = regionp->getLand().getZ(i, j);
         mMouseX = x;
         mMouseY = y;
         gIdleCallbacks.addFunction( &LLToolBrushLand::onIdle, (void*)this );
@@ -547,7 +547,7 @@ void LLToolBrushLand::renderOverlay(LLSurface& land, const LLVector3& pos_region
             const F32
                 wx = pos_world.mV[VX] + di,
                 wy = pos_world.mV[VY] + dj,
-                wz = land.getZ((i+di)+(j+dj)*land.mGridsPerEdge),
+                wz = land.getZ(i + di, j + dj),
                 norm_dist = sqrt((float)di*di + dj*dj) / half_edge,
                 force_scale = sqrt(2.f) - norm_dist, // 1 at center, 0 at corner
                 wz2 = wz + .2f + (.2f + force/100.f) * force_scale, // top vertex

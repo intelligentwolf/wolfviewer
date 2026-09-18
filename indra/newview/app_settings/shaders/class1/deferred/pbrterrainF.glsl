@@ -214,7 +214,7 @@ vec3 wolfSnowCover(vec3 ground, vec3 region_pos, float up)
     float open = (suv.x < 0.0 || suv.y < 0.0 || suv.x > 1.0 || suv.y > 1.0) ? 1.0 : texture(wolfShelterMap, suv).r;
     float cn = wolfCoverNoise(region_pos.xy * 0.23);
     float csteep = 1.0 - clamp(up, 0.0, 1.0);
-    float cover = smoothstep(0.0, 1.0, wolf_snow_cover * 1.3 - cn * 0.6)
+    float cover = smoothstep(0.0, 1.0, wolf_snow_cover * 1.7 - cn * 0.5)
                   * (1.0 - smoothstep(0.30, 0.55, csteep))
                   * smoothstep(wolf_water_level - 0.2, wolf_water_level + 0.4, region_pos.z) * open;
     return mix(ground, vec3(0.92, 0.94, 0.98), cover);

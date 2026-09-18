@@ -569,8 +569,8 @@ void WolfWeather::idle()
 // Source: wolfstorm environment_manager.js SNOW_COVER_SECS / SNOW_MELT_SECS / snowCoverStep.
 F32 WolfWeather::snowCoverStep(F32 cover, bool snowing, S32 level, F32 dt)
 {
-    static const F32 COVER_SECS[5] = { 0.f, 900.f, 600.f, 360.f, 240.f };   // light .. blizzard
-    static const F32 MELT_SECS = 600.f;
+    static const F32 COVER_SECS[5] = { 0.f, 480.f, 300.f, 200.f, 120.f };   // light .. blizzard (2026-09-18 eve: faster, Paul could not see it)
+    static const F32 MELT_SECS = 480.f;
     if (snowing) return llmin(1.f, cover + dt / COVER_SECS[llclamp(level, 1, 4)]);
     return llmax(0.f, cover - dt / MELT_SECS);
 }
@@ -586,8 +586,19 @@ void WolfWeather::updateSnowCover(F64 now)
     const F32 dt = mCoverLast > 0.0 ? (F32)llclamp(now - mCoverLast, 0.0, 0.5) : 0.f;
     mCoverLast = now;
     const bool snowing = mActive.mKind == WolfWeatherProfile::SNOW && mSource.notNull() && !mSource->isDead();
+    const F32 before = mSnowCover;
     mSnowCover = snowCoverStep(mSnowCover, snowing, mActive.mLevel, dt);
     if (mSnowCover > 0.f && gAgent.getRegion()) updateShelter();
+    // One line at each tenth: the cover is building (or melting) and how much of the roof grid
+    // is sheltered — the two things that cannot be seen from outside.
+    if ((S32)(mSnowCover * 10.f) != (S32)(before * 10.f))
+    {
+        S32 sheltered = 0;
+        for (U8 v : mShelterData) if (v == 0) ++sheltered;
+        LL_INFOS("WolfWeather") << "snow cover " << (S32)(mSnowCover * 100.f) << "% (" << (snowing ? "snowing" : "melting")
+                                << " level " << mActive.mLevel << "), " << sheltered << " of " << mShelterData.size()
+                                << " roof cells sheltered" << LL_ENDL;
+    }
 }
 
 // Source: WolfWeatherPartSource::updateLanding (the precipitation's roof test) and

@@ -159,6 +159,7 @@ public:
     void gammaCorrect(LLRenderTarget* src, LLRenderTarget* dst);
     void generateGlow(LLRenderTarget* src);
     void wolfGodRays(LLRenderTarget* dst);   // <WolfViewer 2026-09-06> underwater sunlight shafts
+    bool wolfPhotoFilter(LLRenderTarget* src, LLRenderTarget* dst);   // <WolfViewer 2026-09-18> World > Photo Effects
     void applyCAS(LLRenderTarget* src, LLRenderTarget* dst);
     void applyFXAA(LLRenderTarget* src, LLRenderTarget* dst);
     void generateSMAABuffers(LLRenderTarget* src);

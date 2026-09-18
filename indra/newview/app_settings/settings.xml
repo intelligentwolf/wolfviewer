@@ -19792,6 +19792,28 @@ Change of this parameter will affect the layout of buttons in notification toast
 			<key>Value</key>
 			<real>0.05</real>
 		</map>
+		<key>WolfViewerPhotoFilter</key>
+		<map>
+			<key>Comment</key>
+			<string>World &gt; Photo Effects: a colour grade over the world view, for you only. 0 off, 1 Sepia, 2 Black and White, 3 Noir, 4 Vintage, 5 Warm, 6 Cool, 7 Faded, 8 Vivid.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfViewerPhotoFilterStrength</key>
+		<map>
+			<key>Comment</key>
+			<string>World &gt; Photo Effects: how much of the chosen look is mixed over the ungraded view, 0.0 to 1.0.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>F32</string>
+			<key>Value</key>
+			<real>1.0</real>
+		</map>
 		<key>WolfViewerWaterGodRays</key>
 		<map>
 			<key>Comment</key>

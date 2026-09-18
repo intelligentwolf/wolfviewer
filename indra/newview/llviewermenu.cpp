@@ -680,6 +680,41 @@ class WolfWeatherIsLevel : public view_listener_t
         return WolfWeather::instance().isLevel(mode, level);
     }
 };
+// <WolfViewer 2026-09-18> World > Photo Effects (pipeline.cpp wolfPhotoFilter). Every grid, and
+// not behind wolf_grid_tools_allowed(): it is a local look, it asks nothing of the grid. The
+// menu parameter is the setting's value — a WolfViewerPhotoFilter mode, or a strength in percent.
+class WolfPhotoSetFilter : public view_listener_t
+{
+    bool handleEvent(const LLSD& userdata)
+    {
+        gSavedSettings.setS32("WolfViewerPhotoFilter", llclamp((S32)userdata.asInteger(), 0, 8));
+        return true;
+    }
+};
+class WolfPhotoIsFilter : public view_listener_t
+{
+    bool handleEvent(const LLSD& userdata)
+    {
+        return gSavedSettings.getS32("WolfViewerPhotoFilter") == (S32)userdata.asInteger();
+    }
+};
+class WolfPhotoSetStrength : public view_listener_t
+{
+    bool handleEvent(const LLSD& userdata)
+    {
+        gSavedSettings.setF32("WolfViewerPhotoFilterStrength", llclamp((F32)userdata.asInteger() / 100.f, 0.f, 1.f));
+        return true;
+    }
+};
+class WolfPhotoIsStrength : public view_listener_t
+{
+    bool handleEvent(const LLSD& userdata)
+    {
+        // Compared in whole percent: the setting is a float and 0.75f is not exactly 75 / 100.
+        return ll_round(gSavedSettings.getF32("WolfViewerPhotoFilterStrength") * 100.f) == (S32)userdata.asInteger();
+    }
+};
+// </WolfViewer>
 static void wolf_weather_clear()
 {
     if (!wolf_grid_tools_allowed()) return;
@@ -12910,6 +12945,11 @@ void initialize_menus()
     view_listener_t::addMenu(new WolfWeatherSetLevel(), "WolfWeather.SetLevel");
     view_listener_t::addMenu(new WolfWeatherIsLevel(), "WolfWeather.IsLevel");
     commit.add("WolfWeather.Clear", boost::bind(&wolf_weather_clear));
+    // <WolfViewer 2026-09-18> World > Photo Effects
+    view_listener_t::addMenu(new WolfPhotoSetFilter(), "WolfPhoto.SetFilter");
+    view_listener_t::addMenu(new WolfPhotoIsFilter(), "WolfPhoto.IsFilter");
+    view_listener_t::addMenu(new WolfPhotoSetStrength(), "WolfPhoto.SetStrength");
+    view_listener_t::addMenu(new WolfPhotoIsStrength(), "WolfPhoto.IsStrength");
     commit.add("WolfScreenShare.Toggle", boost::bind(&wolf_toggle_screen_share));
     enable.add("WolfScreenShare.IsSharing", boost::bind(&wolf_is_sharing_screen));
     // </WolfViewer>

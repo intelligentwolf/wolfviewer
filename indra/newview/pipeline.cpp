@@ -8581,6 +8581,55 @@ bool LLPipeline::renderVignette(LLRenderTarget* src, LLRenderTarget* dst)
 }
 // </FS:Beq>
 
+// <WolfViewer 2026-09-18> World > Photo Effects (Sepia, Black & White, Noir, ...). DECLARED
+// ADDITION: Firestorm has no such pass. A colour grade over the finished, display-referred
+// frame (post/wolfPhotoFilterF.glsl), shaped exactly like renderVignette above and run right
+// after it in renderFinalize — so it lands in snapshots, and the UI, drawn later, is left
+// alone. WolfViewerPhotoFilter picks the look (0 = off), WolfViewerPhotoFilterStrength mixes
+// it with the ungraded frame. Source: wolfstorm/js/rendering/photo_filter.js (the grade) and
+// render_manager.js _renderWorldScaled (the pass).
+bool LLPipeline::wolfPhotoFilter(LLRenderTarget* src, LLRenderTarget* dst)
+{
+    static LLCachedControl<S32> filter_mode(gSavedSettings, "WolfViewerPhotoFilter", 0);
+    static LLCachedControl<F32> filter_strength(gSavedSettings, "WolfViewerPhotoFilterStrength", 1.f);
+    const S32 mode = filter_mode;
+    // 1..8 are the looks wolfPhotoGrade() knows; anything else in the setting means off.
+    if (mode < 1 || mode > 8 || !gWolfPhotoFilterProgram.isComplete())
+    {
+        return false;
+    }
+    LL_PROFILE_GPU_ZONE("WolfPhotoFilter");
+    static LLStaticHashedString s_uMode("uMode");
+    static LLStaticHashedString s_uStrength("uStrength");
+
+    LLGLSLShader* shader = &gWolfPhotoFilterProgram;
+    shader->bind();
+
+    S32 channel = shader->enableTexture(LLShaderMgr::DEFERRED_DIFFUSE, src->getUsage());
+    if (channel < 0)
+    {
+        // No frame to grade. renderVignette LL_ERRS here; a cosmetic look steps aside instead,
+        // BEFORE dst is bound, so the caller keeps presenting src untouched.
+        shader->unbind();
+        LL_WARNS_ONCE("WolfPhotoFilter") << "diffuseRect sampler missing; photo filter skipped" << LL_ENDL;
+        return false;
+    }
+    dst->bindTarget();
+    src->bindTexture(0, channel, LLTexUnit::TFO_POINT);
+    shader->uniform1i(s_uMode, mode);
+    shader->uniform1f(s_uStrength, llclamp((F32)filter_strength, 0.f, 1.f));
+
+    mScreenTriangleVB->setBuffer();
+    mScreenTriangleVB->drawArrays(LLRender::TRIANGLES, 0, 3);
+    stop_glerror();
+
+    shader->disableTexture(LLShaderMgr::DEFERRED_DIFFUSE, src->getUsage());
+    shader->unbind();
+    dst->flush();
+    return true;
+}
+// </WolfViewer>
+
 // <FS:Beq> Render Snapshot frame oerlay
 bool LLPipeline::renderSnapshotFrame(LLRenderTarget* src, LLRenderTarget* dst)
 {
@@ -9106,6 +9155,13 @@ void LLPipeline::renderFinalize()
         std::swap(auxActiveBuffer, auxTargetBuffer);
     };
     // </FS:Beq>
+    // <WolfViewer 2026-09-18> World > Photo Effects: after the vignette so that is graded
+    // with the frame, before the snapshot frame guide so the guide's lines are not.
+    if (wolfPhotoFilter(auxActiveBuffer, auxTargetBuffer))
+    {
+        std::swap(auxActiveBuffer, auxTargetBuffer);
+    }
+    // </WolfViewer>
     // <FS:Beq> new shader for snapshot frame helper
     if (renderSnapshotFrame(auxActiveBuffer, auxTargetBuffer))
     {

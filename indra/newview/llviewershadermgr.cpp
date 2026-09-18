@@ -300,6 +300,7 @@ LLGLSLShader            gGlowExtractProgram;
 LLGLSLShader            gPostScreenSpaceReflectionProgram;
 LLGLSLShader            gPostVignetteProgram;   // <FS:CR> Import Vignette from Exodus
 LLGLSLShader            gPostSnapshotFrameProgram;   // <FS:Beq/> Add Snapshot frame guide
+LLGLSLShader            gWolfPhotoFilterProgram;     // <WolfViewer 2026-09-18/> World > Photo Effects
 
 // Deferred rendering shaders
 LLGLSLShader            gDeferredImpostorProgram;
@@ -1298,6 +1299,7 @@ bool LLViewerShaderMgr::loadShadersEffects()
         gGlowExtractProgram.unload();
         gPostVignetteProgram.unload();  // <FS:Ansariel> Import Vignette from Exodus
         gPostSnapshotFrameProgram.unload();  // <FS:Beq/> Add Snapshot framing shader
+        gWolfPhotoFilterProgram.unload();    // <WolfViewer 2026-09-18/> World > Photo Effects
         return true;
     }
 
@@ -1360,6 +1362,24 @@ bool LLViewerShaderMgr::loadShadersEffects()
         success = gPostSnapshotFrameProgram.createShader();
     }
 // </FS:Beq>
+    // <WolfViewer 2026-09-18> World > Photo Effects colour grade. Same vertex stage and shader
+    // level as the vignette above, which it follows in LLPipeline::renderFinalize. Its result
+    // is deliberately NOT folded into `success`: a cosmetic look that fails to compile on some
+    // driver must cost the user that look, not the glow and vignette chain — the pass checks
+    // isComplete() and steps aside.
+    if (success)
+    {
+        gWolfPhotoFilterProgram.mName = "Wolf Photo Filter Post";
+        gWolfPhotoFilterProgram.mShaderFiles.clear();
+        gWolfPhotoFilterProgram.mShaderFiles.push_back(make_pair("post/exoPostBaseV.glsl", GL_VERTEX_SHADER));
+        gWolfPhotoFilterProgram.mShaderFiles.push_back(make_pair("post/wolfPhotoFilterF.glsl", GL_FRAGMENT_SHADER));
+        gWolfPhotoFilterProgram.mShaderLevel = mShaderLevel[SHADER_EFFECT];
+        if (!gWolfPhotoFilterProgram.createShader())
+        {
+            LL_WARNS("ShaderLoading") << "Wolf Photo Filter shader failed to load; World > Photo Effects will have no effect" << LL_ENDL;
+        }
+    }
+    // </WolfViewer>
 
     return success;
 

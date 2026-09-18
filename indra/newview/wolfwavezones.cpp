@@ -479,9 +479,24 @@ void WolfWaveZones::fill(LLViewerRegion* regionp, F32 x0, F32 y0, F32 sx, F32 sy
             for (const Span& s : spans)
             {
                 if (px < s.x || py < s.y || px >= s.x + s.sx || py >= s.y + s.sy) continue;
-                const S32 cx = (S32)((px - s.x) / s.cell), cy = (S32)((py - s.y) / s.cell);
-                const size_t k = (size_t)cy * s.w + cx;
-                out[(size_t)j * w + i] = k < s.zones.size() ? energy_of(s.zones[k]) : OPEN_ENERGY;
+                // <WolfViewer 2026-09-18> A texel wider than the cell (texelM doubles the cell
+                // until the 3x3 span fits 768 texels: 256 m on a 200x200 region, 64 m cells)
+                // used to read ONE cell at its centre, so a one-cell surf stroke was sampled
+                // away and "literally nothing happens" when painting. Read every cell under
+                // the texel and keep the highest energy: a painted surf cell shows through.
+                // (A single OFF cell inside open sea is lost at that scale; surf is what a
+                // designer paints on a coast.) wave_zones.js bake() same.
+                const S32 per = llmax(1, (S32)ceilf(tx / (F32)s.cell));
+                const S32 cx0 = (S32)((px - s.x - tx * 0.5f) / s.cell), cy0 = (S32)((py - s.y - ty * 0.5f) / s.cell);
+                const S32 sh = (S32)(s.sy / s.cell);
+                F32 best = -1.f;
+                for (S32 cy = llmax(0, cy0); cy < llmin(sh, cy0 + per); ++cy)
+                    for (S32 cx = llmax(0, cx0); cx < llmin(s.w, cx0 + per); ++cx)
+                    {
+                        const size_t k = (size_t)cy * s.w + cx;
+                        best = llmax(best, k < s.zones.size() ? energy_of(s.zones[k]) : OPEN_ENERGY);
+                    }
+                out[(size_t)j * w + i] = best < 0.f ? OPEN_ENERGY : best;
                 covered = true;
                 break;
             }
@@ -905,8 +920,16 @@ void WolfWavePainter::draw()
                 default:  tint = false; break;
             }
             // Snapped edges shared with the neighbours: no seams at fractional cell sizes.
-            const S32 left = ll_round(cx * px), right = ll_round((cx + 1) * px);
-            const S32 bottom = ll_round(cy * px), top = ll_round((cy + 1) * px);
+            S32 left = ll_round(cx * px), right = ll_round((cx + 1) * px);
+            S32 bottom = ll_round(cy * px), top = ll_round((cy + 1) * px);
+            // <WolfViewer 2026-09-18> below 1 px a cell can round to nothing; a PAINTED cell
+            // (anything but the default open sea) still gets its pixel, or a one-cell stroke on
+            // a huge region is invisible in the box.
+            if (mZones[k] != 'o' && tint)
+            {
+                if (right <= left) right = left + 1;
+                if (top <= bottom) top = bottom + 1;
+            }
             if (right <= left || top <= bottom) continue;
             if (tint) gl_rect_2d(left, top, right, bottom, c);
             if (mLocked[k])

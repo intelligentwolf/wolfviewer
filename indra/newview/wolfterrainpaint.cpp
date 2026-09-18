@@ -44,6 +44,7 @@
 #include "lltoolcomp.h"
 #include "lltoolmgr.h"
 #include "lluictrlfactory.h"
+#include "llviewercamera.h"
 #include "llviewercontrol.h"
 #include "llviewerparceloverlay.h"
 #include "llviewerregion.h"
@@ -456,6 +457,79 @@ WolfTerrainPaint::Layer& WolfTerrainPaint::layerFor(LLViewerRegion* regionp)
     return L;
 }
 
+// Source: terrain_paint.js TerrainPaint.cameraIn — the camera in the region's own metres.
+bool WolfTerrainPaint::cameraIn(LLViewerRegion* regionp, F32& cx, F32& cy)
+{
+    if (!regionp) return false;
+    const LLVector3 c = LLViewerCamera::getInstance()->getOrigin() - regionp->getOriginAgent();
+    if (!c.isFinite()) return false;
+    cx = c.mV[VX]; cy = c.mV[VY];
+    return true;
+}
+
+// Source: terrain_paint.js windowOriginFor — snapped to an eighth of the window so a recentre
+// lands on stable texel positions, and held inside the region.
+void WolfTerrainPaint::windowOriginFor(const Layer& L, F32 cx, F32 cy, F32& ox, F32& oy)
+{
+    const F32 gx = L.mWinW / 8.f, gy = L.mWinH / 8.f;
+    ox = llclamp(roundf((cx - L.mWinW * 0.5f) / gx) * gx, 0.f, (F32)L.mSizeX - L.mWinW);
+    oy = llclamp(roundf((cy - L.mWinH * 0.5f) / gy) * gy, 0.f, (F32)L.mSizeY - L.mWinH);
+}
+
+// Source: terrain_paint.js recentre — the camera may roam the inner half before the window
+// moves, so a recentre is rare and never oscillates. True = moved, re-bake.
+bool WolfTerrainPaint::recentre(Layer& L, F32 cx, F32 cy)
+{
+    if (!L.mWindowed || L.mMap.empty()) return false;
+    const F32 mx = L.mWinX + L.mWinW * 0.5f, my = L.mWinY + L.mWinH * 0.5f;
+    if (fabsf(cx - mx) <= L.mWinW * 0.25f && fabsf(cy - my) <= L.mWinH * 0.25f) return false;
+    F32 ox, oy;
+    windowOriginFor(L, cx, cy, ox, oy);
+    if (ox == L.mWinX && oy == L.mWinY) return false;   // pinned against the region edge
+    L.mWinX = ox; L.mWinY = oy;
+    return true;
+}
+
+// Source: terrain_paint.js _fadeWindowEdge — coverage eased to nothing over the outer
+// WINDOW_FADE_PX texels, but NOT on a side that is the region's own edge, where a road has to
+// meet the neighbour's at full strength. Once per bake; the shader needs no extra uniform.
+void WolfTerrainPaint::fadeWindowEdge(Layer& L)
+{
+    if (!L.mWindowed) return;
+    const S32 W = L.mW, H = L.mH, F = WINDOW_FADE_PX;
+    const bool west = L.mWinX > 0.f, south = L.mWinY > 0.f;
+    const bool east = L.mWinX + L.mWinW < (F32)L.mSizeX, north = L.mWinY + L.mWinH < (F32)L.mSizeY;
+    auto ease = [F](S32 d) { const F32 t = (F32)d / (F32)F; return t * t * (3.f - 2.f * t); };
+    for (S32 j = 0; j < H; ++j)
+    {
+        F32 fy = 1.f;
+        if (south && j < F) fy = ease(j);
+        if (north && H - 1 - j < F) fy = llmin(fy, ease(H - 1 - j));
+        const bool in_band_y = fy < 1.f;
+        for (S32 i = 0; i < W; ++i)
+        {
+            // Only the border band is touched: skip the interior of interior rows in one step.
+            if (!in_band_y && i == F && W > 2 * F) { i = W - F - 1; continue; }
+            F32 f = fy;
+            if (west && i < F) f = llmin(f, ease(i));
+            if (east && W - 1 - i < F) f = llmin(f, ease(W - 1 - i));
+            if (f >= 1.f) continue;
+            U16& a = L.mMap[((size_t)j * W + i) * 4 + 3];
+            if (a != 0) a = f32_to_f16(f16_to_f32(a) * f);
+        }
+    }
+    L.mDirtyGL = true;
+}
+
+/**
+ * Source: terrain_paint.js TerrainPaintLayer.dims + ensureBuffers.
+ * <WolfViewer 2026-09-18> One map over the whole region stops working long before a region stops
+ * growing: halving px/m to fit 2048 px gives 1 px/m at 2048 m and 1/32 px/m at 51200 m (Wolf
+ * Nation), where a 10 m road is a third of a texel - saved, and invisible. Below
+ * MAP_MIN_PX_PER_M the map instead becomes a WINDOW at MAP_WINDOW_PX_PER_M that follows the
+ * camera (idle -> recentre) and is re-baked from the strokes when the camera nears its edge. A
+ * region that fits keeps the whole-region map exactly as before.
+ */
 void WolfTerrainPaint::ensureBuffers(Layer& L, LLViewerRegion* regionp)
 {
     const S32 sx = (S32)regionp->getWidth(), sy = (S32)regionp->getWidth();
@@ -463,10 +537,22 @@ void WolfTerrainPaint::ensureBuffers(Layer& L, LLViewerRegion* regionp)
     const S32 max_side = is_main ? MAP_MAX_PX : MAP_MAX_PX_NEIGHBOUR;
     F32 ppm = MAP_PX_PER_M;
     while ((F32)llmax(sx, sy) * ppm > (F32)max_side) ppm *= 0.5f;
-    const S32 w = llmax(1, ll_round(sx * ppm)), h = llmax(1, ll_round(sy * ppm));
+    const bool windowed = ppm < MAP_MIN_PX_PER_M;
+    F32 win_w = (F32)sx, win_h = (F32)sy;
+    if (windowed)
+    {
+        ppm = MAP_WINDOW_PX_PER_M;
+        win_w = llmin((F32)sx, (F32)max_side / ppm);
+        win_h = llmin((F32)sy, (F32)max_side / ppm);
+    }
+    const S32 w = llmax(1, ll_round(win_w * ppm)), h = llmax(1, ll_round(win_h * ppm));
     if (!L.mMap.empty() && L.mW == w && L.mH == h && L.mSizeX == sx && L.mSizeY == sy) return;
     if (L.mTex) { LLImageGL::deleteTextures(1, &L.mTex); L.mTex = 0; }
     L.mW = w; L.mH = h; L.mPpm = ppm; L.mSizeX = sx; L.mSizeY = sy;
+    L.mWindowed = windowed; L.mWinW = win_w; L.mWinH = win_h;
+    L.mWinX = 0.f; L.mWinY = 0.f;
+    F32 cx, cy;
+    if (windowed && cameraIn(regionp, cx, cy)) windowOriginFor(L, cx, cy, L.mWinX, L.mWinY);
     L.mMap.assign((size_t)w * h * 4, 0);
     L.mSDist.clear(); L.mSAlong.clear(); L.mSLat.clear();
     L.mSBoxSet = false;
@@ -661,6 +747,7 @@ void WolfTerrainPaint::bakeSlice(Layer& L, F64 budget_secs)
     {
         L.mBaking = false;
         L.mPending.clear();
+        fadeWindowEdge(L);   // <WolfViewer 2026-09-18/> Source: terrain_paint.js rebake
         ++mBakes;
         if (L.mHandle != (gAgent.getRegion() ? gAgent.getRegion()->getHandle() : 0))
         {
@@ -677,7 +764,7 @@ WolfTerrainPaint::Box WolfTerrainPaint::bbox(const Layer& L, const F32* pts, siz
     F32 minX = 1e30f, minY = 1e30f, maxX = -1e30f, maxY = -1e30f;
     for (size_t k = 0; k + 1 < n; k += 2)
     {
-        const F32 x = pts[k] * L.mPpm, y = pts[k + 1] * L.mPpm;
+        const F32 x = (pts[k] - L.mWinX) * L.mPpm, y = (pts[k + 1] - L.mWinY) * L.mPpm;
         minX = llmin(minX, x); maxX = llmax(maxX, x);
         minY = llmin(minY, y); maxY = llmax(maxY, y);
     }
@@ -716,11 +803,11 @@ bool WolfTerrainPaint::rasterSegment(Layer& L, F32 x0, F32 y0, F32 x1, F32 y1, F
     const F32 R = w * 0.5f;
     for (S32 j = out.y0; j < out.y1; ++j)
     {
-        const F32 py = ((F32)j + 0.5f) / ppm;
+        const F32 py = ((F32)j + 0.5f) / ppm + L.mWinY;
         const F32 ry = py - y0;
         for (S32 i = out.x0; i < out.x1; ++i)
         {
-            const F32 px = ((F32)i + 0.5f) / ppm;
+            const F32 px = ((F32)i + 0.5f) / ppm + L.mWinX;
             const F32 rx = px - x0;
             F32 t = 0.f, nx = rx, ny = ry, lateral;
             if (len2 > 1e-9f)
@@ -888,6 +975,7 @@ void WolfTerrainPaint::bind(LLGLSLShader* shader, LLViewerRegion* regionp)
 {
     static LLStaticHashedString s_on("wolf_paint_on");
     static LLStaticHashedString s_size("wolf_paint_size");
+    static LLStaticHashedString s_origin("wolf_paint_origin");
     if (!shader || !regionp) return;
     auto it = mLayers.find(regionp->getHandle());
     Layer* L = it == mLayers.end() ? nullptr : &it->second;
@@ -910,7 +998,11 @@ void WolfTerrainPaint::bind(LLGLSLShader* shader, LLViewerRegion* regionp)
         gGL.getTexUnit(u)->setTextureAddressMode(LLTexUnit::TAM_WRAP);
     }
     shader->uniform1f(s_on, 1.f);
-    shader->uniform2f(s_size, regionp->getWidth(), regionp->getWidth());
+    // <WolfViewer 2026-09-18> Source: terrain_manager.js _refreshPaintUniforms — the map covers
+    // the layer's WINDOW, which is the whole region (origin 0,0) unless the region is too big
+    // for one map. World-grid slots tile from region_xy itself here, so they need no correction.
+    shader->uniform2f(s_origin, L->mWinX, L->mWinY);
+    shader->uniform2f(s_size, L->mWinW, L->mWinH);
     // World-grid slots: tile size and the region-origin phase of each tile so the texture
     // continues across a region border (lldrawpoolterrain.cpp:262-263, as the detail offset).
     static LLStaticHashedString s_mode("wolf_paint_mode");
@@ -947,6 +1039,8 @@ void WolfTerrainPaint::idle()
     if (!agent_rgn) return;
     const F64 now = LLFrameTimer::getElapsedSeconds();
     if (agent_rgn->getHandle() != mFetchedForHandle || now >= mNextRefresh) refresh();
+    const bool check_windows = now >= mNextWindowCheck;
+    if (check_windows) mNextWindowCheck = now + WINDOW_CHECK_SECS;
 
     // Every region in the world with a record gets a layer. The paint MAP rebakes (a slice per
     // frame) only when a texture stroke or a tile changed (texSig); the water planes rebuild
@@ -969,6 +1063,14 @@ void WolfTerrainPaint::idle()
         Layer& L = layerFor(rgn);
         L.mKey = key;
         const std::string sig = texSig(key, textures, *strokes);
+        // <WolfViewer 2026-09-18> Source: terrain_paint.js TerrainPaint.tick — keep a windowed
+        // map under the camera; looked at twice a second, never while a brush drag is writing
+        // into it. Same strokes, new window: clearing the signature forces the re-bake below.
+        F32 cam_x, cam_y;
+        if (check_windows && L.mWindowed && !L.mLive && cameraIn(rgn, cam_x, cam_y) && recentre(L, cam_x, cam_y))
+        {
+            L.mTexSig.clear();
+        }
         if (L.mTexSig != sig)
         {
             L.mTexSig = sig;

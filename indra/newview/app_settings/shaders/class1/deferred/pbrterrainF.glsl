@@ -193,7 +193,9 @@ uniform sampler2D wolfPaintTex1;
 uniform sampler2D wolfPaintTex2;
 uniform sampler2D wolfPaintTex3;
 uniform float wolf_paint_on;
-uniform vec2  wolf_paint_size;
+uniform vec2  wolf_paint_size;     // metres the paint map covers ...
+uniform vec2  wolf_paint_origin;   // ... starting here, region metres: (0,0) unless the region is
+                                   // too big for one map and the map is a camera-following window
 uniform vec4  wolf_paint_mode;   // per slot: 0 follow the stroke, 1 world grid
 uniform vec4  wolf_paint_tile;   // per slot: metres per repeat (world grid)
 uniform vec4  wolf_paint_offx;   // per slot: region origin mod tile (metres)
@@ -209,7 +211,7 @@ float wolfPaintSlotValue(vec4 v, int slot) { return slot == 0 ? v.x : (slot == 1
 vec3 wolfTerrainPaint(vec3 ground, vec2 region_xy)
 {
     if (wolf_paint_on < 0.5) return ground;
-    vec2 puv = region_xy / wolf_paint_size;
+    vec2 puv = (region_xy - wolf_paint_origin) / wolf_paint_size;
     if (puv.x < 0.0 || puv.y < 0.0 || puv.x > 1.0 || puv.y > 1.0) return ground;
     vec4 pm = texture(wolfPaintMap, puv);
     vec2 cs = pm.rg;

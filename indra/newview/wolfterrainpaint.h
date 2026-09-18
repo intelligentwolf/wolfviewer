@@ -75,6 +75,13 @@ public:
     static constexpr F32 MAP_PX_PER_M = 4.f;
     static constexpr S32 MAP_MAX_PX = 2048;
     static constexpr S32 MAP_MAX_PX_NEIGHBOUR = 1024;
+    // <WolfViewer 2026-09-18> Source: terrain_paint.js MAP_MIN_PX_PER_M / MAP_WINDOW_PX_PER_M /
+    // WINDOW_FADE_PX / WINDOW_CHECK_MS. Below 1 px/m a whole-region map cannot hold a track, so
+    // the map becomes a camera-following window at 2 px/m (ensureBuffers).
+    static constexpr F32 MAP_MIN_PX_PER_M = 1.f;
+    static constexpr F32 MAP_WINDOW_PX_PER_M = 2.f;
+    static constexpr S32 WINDOW_FADE_PX = 48;
+    static constexpr F64 WINDOW_CHECK_SECS = 0.5;
     static constexpr F32 MIN_WIDTH = 0.25f;
     static constexpr F32 MAX_WIDTH = 64.f;
     static constexpr F32 MIN_SCALE = 0.5f;
@@ -194,6 +201,11 @@ private:
         S32  mW = 0, mH = 0;
         F32  mPpm = 0.f;
         S32  mSizeX = 0, mSizeY = 0;
+        // <WolfViewer 2026-09-18> Source: terrain_paint.js TerrainPaintLayer windowed/winX/winY/
+        // winW/winH — the part of the region the map covers, region metres; the whole region
+        // unless mWindowed.
+        bool mWindowed = false;
+        F32  mWinX = 0.f, mWinY = 0.f, mWinW = 0.f, mWinH = 0.f;
         // RGBA16F: R,G = (0.25 + 0.2·slot) · (cos φ, sin φ), φ = 2π·along/tile (0 for a world-grid
         // slot); B = metres across the band from its left edge / tile; A = coverage. Half floats.
         std::vector<U16> mMap;
@@ -240,6 +252,13 @@ private:
     bool layoutFor(U64 handle, const Slot*& textures, const std::vector<Stroke>*& strokes, std::string& key) const;
     Layer& layerFor(LLViewerRegion* regionp);
     void ensureBuffers(Layer& L, LLViewerRegion* regionp);
+    // <WolfViewer 2026-09-18> Source: terrain_paint.js windowOriginFor / recentre /
+    // _fadeWindowEdge / TerrainPaint.cameraIn.
+    static void windowOriginFor(const Layer& L, F32 cx, F32 cy, F32& ox, F32& oy);
+    static bool recentre(Layer& L, F32 cx, F32 cy);
+    static void fadeWindowEdge(Layer& L);
+    static bool cameraIn(LLViewerRegion* regionp, F32& cx, F32& cy);
+    F64  mNextWindowCheck = 0.0;
     void ensureScratch(Layer& L);
     void clearScratch(Layer& L);
     void releaseLayer(Layer& L);

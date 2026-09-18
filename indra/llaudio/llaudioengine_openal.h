@@ -34,6 +34,8 @@
 #include "lllistener_openal.h"
 #include "llwindgen.h"
 #include <atomic>   // <WolfViewer 2026-09-13> the device-change flag set from OpenAL's thread
+#include <map>      // <WolfViewer 2026-09-18> the output-device list
+#include <string>
 #include <vector>
 
 class LLAudioEngine_OpenAL : public LLAudioEngine
@@ -51,6 +53,18 @@ class LLAudioEngine_OpenAL : public LLAudioEngine
         // <WolfViewer 2026-09-13> Every frame: base idle, then the output-device watch below.
         virtual void idle();
         virtual void setDeviceWatchEnabled(bool enabled);   // "virtual", not "override": clang -Winconsistent-missing-override (-Werror on macOS) wants the whole class one way
+        // <WolfViewer 2026-09-18> OUTPUT DEVICE SELECTION (Benny Moonstone, via Paul: "missing ... the
+        // selecting of the sound output like it was in the preferences in the original FS").
+        // Firestorm's Preferences > Sound & Media picker (FSOutputDeviceUUID, FSPanelPreferenceSounds,
+        // LLAudioEngine::setDevice / getDevices / OnOutputDeviceListChanged) only had an FMOD
+        // implementation, and WolfViewer ships OpenAL on every platform, so the panel said
+        // "unavailable". OpenAL Soft enumerates playback devices (ALC_ENUMERATE_ALL_EXT,
+        // alc.h ALC_ALL_DEVICES_SPECIFIER) and alcReopenDeviceSOFT can open a NAMED device on the
+        // live context - the same call the hot-plug watch below uses with NULL for the default.
+        // A device's UUID is generated from its name (LLUUID::generate = a hash), so the saved
+        // setting picks the same device next session; the null UUID is "the system default".
+        virtual output_device_map_t getDevices();
+        virtual void setDevice(const LLUUID& device_uuid);
 
         void setInternalGain(F32 gain);
 
@@ -87,6 +101,15 @@ class LLAudioEngine_OpenAL : public LLAudioEngine
         void   shutdownDeviceWatch();
         void   watchDevice();
         void   reopenDevice(const char* why);
+        // <WolfViewer 2026-09-18> device selection (see setDevice above)
+        bool   enumerateDevices(bool announce);      // rebuild mDeviceNames; true when the list changed
+        const char* selectedDeviceName() const;      // NULL = the default device
+        std::map<LLUUID, std::string> mDeviceNames;  // uuid (hash of the name) -> ALC device name
+        std::string               mDeviceListSig;    // the last enumeration, as one string
+        LLUUID                    mSelectedDevice;   // FSOutputDeviceUUID; null = default
+        std::string               mSelectedDeviceName;
+        bool                      mSelectedDeviceOpen = false;   // the context is on the chosen device (not a fallback)
+        F64                       mNextListCheck = 0.0;
         static void ALC_APIENTRY onDeviceEvent(ALCenum eventType, ALCenum deviceType, ALCdevice* device,
                                                ALCsizei length, const ALCchar* message, void* userParam) ALC_API_NOEXCEPT17;
         LPALCREOPENDEVICESOFT     mReopenDeviceSOFT = nullptr;

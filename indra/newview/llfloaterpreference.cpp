@@ -6412,7 +6412,8 @@ bool FSPanelPreferenceSounds::postBuild()
     mMoapInteractionFriendObjects    = getChild<LLCheckBoxCtrl>("media_first_click_friend");
     mMoapInteractionLandownerObjects = getChild<LLCheckBoxCtrl>("media_first_click_land");
 
-#if LL_FMODSTUDIO
+// <WolfViewer 2026-09-18/> also OpenAL, which now implements getDevices/setDevice (llaudioengine_openal.cpp)
+#if LL_FMODSTUDIO || LL_OPENAL
     if (gAudiop && mOutputDevicePanel && mOutputDeviceComboBox)
     {
         gSavedSettings.getControl("FSOutputDeviceUUID")->getSignal()->connect(boost::bind(&FSPanelPreferenceSounds::onOutputDeviceChanged, this, _2));

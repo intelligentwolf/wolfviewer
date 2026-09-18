@@ -28,6 +28,7 @@
 #include "linden_common.h"
 #include "lldir.h"
 #include "llframetimer.h"   // <WolfViewer 2026-09-13> device watch clock
+#include <cstring>          // <WolfViewer 2026-09-18> strlen over the NUL-separated device list
 
 #include "llaudioengine_openal.h"
 #include "lllistener_openal.h"
@@ -89,9 +90,102 @@ bool LLAudioEngine_OpenAL::init(void* userdata, const std::string &app_title)
         << LL_ENDL;
 
     initDeviceWatch(device);   // <WolfViewer 2026-09-13>
+    enumerateDevices(false);   // <WolfViewer 2026-09-18> the Preferences picker's list; setDevice() follows from llstartup
 
     return true;
 }
+
+// <WolfViewer 2026-09-18> ─── output-device selection ─────────────────────────────────────────
+// See the note on getDevices/setDevice in llaudioengine_openal.h.
+
+bool LLAudioEngine_OpenAL::enumerateDevices(bool announce)
+{
+    // Source: alc.h ALC_ENUMERATE_ALL_EXT - alcGetString(NULL, ALC_ALL_DEVICES_SPECIFIER) is a
+    // list of NUL-terminated names ended by an empty name (double NUL). ALC_DEVICE_SPECIFIER is
+    // the older, shorter list for a library without the extension.
+    const bool all = alcIsExtensionPresent(nullptr, "ALC_ENUMERATE_ALL_EXT") == ALC_TRUE;
+    const ALCchar* list = alcGetString(nullptr, all ? ALC_ALL_DEVICES_SPECIFIER : ALC_DEVICE_SPECIFIER);
+    std::string sig;
+    std::map<LLUUID, std::string> names;
+    for (const ALCchar* p = list; p && *p; p += strlen(p) + 1)
+    {
+        const std::string name(p);
+        LLUUID id;
+        id.generate("wolfviewer-openal-output:" + name);
+        names[id] = name;
+        sig += name;
+        sig += '\n';
+    }
+    const bool changed = sig != mDeviceListSig;
+    mDeviceListSig = sig;
+    mDeviceNames.swap(names);
+    if (changed)
+    {
+        LL_INFOS() << "OpenAL: " << mDeviceNames.size() << " playback device(s)" << (all ? "" : " (ALC_ENUMERATE_ALL_EXT absent)") << LL_ENDL;
+        for (const auto& kv : mDeviceNames) LL_INFOS() << "OpenAL:   '" << kv.second << "' " << kv.first << LL_ENDL;
+        if (announce) OnOutputDeviceListChanged(mDeviceNames);
+    }
+    return changed;
+}
+
+const char* LLAudioEngine_OpenAL::selectedDeviceName() const
+{
+    if (mSelectedDevice.isNull() || mSelectedDeviceName.empty()) return nullptr;
+    // A chosen device that is not plugged in right now: open the default instead, and come
+    // back to it when the list shows it again (watchDevice).
+    for (const auto& kv : mDeviceNames) if (kv.second == mSelectedDeviceName) return mSelectedDeviceName.c_str();
+    return nullptr;
+}
+
+// virtual
+LLAudioEngine::output_device_map_t LLAudioEngine_OpenAL::getDevices()
+{
+    enumerateDevices(false);
+    return mDeviceNames;
+}
+
+// virtual
+void LLAudioEngine_OpenAL::setDevice(const LLUUID& device_uuid)
+{
+    mSelectedDevice = device_uuid;
+    enumerateDevices(false);
+    auto it = mDeviceNames.find(device_uuid);
+    mSelectedDeviceName = it != mDeviceNames.end() ? it->second : std::string();
+    if (!device_uuid.isNull() && mSelectedDeviceName.empty())
+    {
+        LL_WARNS() << "OpenAL: the chosen output device " << device_uuid << " is not present; using the default until it is" << LL_ENDL;
+    }
+    ALCdevice* device = alcGetContextsDevice(alcGetCurrentContext());
+    if (!device || !mReopenDeviceSOFT)
+    {
+        // Before init, or no reopen extension: nothing to switch. (alutInit opened the default.)
+        return;
+    }
+    const char* want = selectedDeviceName();
+    // Already on it? alcGetString(device, ALC_ALL_DEVICES_SPECIFIER) names the OPEN device.
+    const std::string open = ll_safe_string(alcGetString(device, ALC_ALL_DEVICES_SPECIFIER));
+    if (want ? open == want : mSelectedDeviceName.empty() && !mSelectedDeviceOpen)
+    {
+        mSelectedDeviceOpen = want != nullptr;
+        return;
+    }
+    // Source: alext.h:573 LPALCREOPENDEVICESOFT(device, deviceName, attribs) - a name opens THAT
+    // device on the live context, keeping sources and buffers; NULL is the default.
+    if (mReopenDeviceSOFT(device, want, nullptr) == ALC_TRUE)
+    {
+        mSelectedDeviceOpen = want != nullptr;
+        LL_INFOS() << "OpenAL: output device is now '" << ll_safe_string(alcGetString(device, ALC_ALL_DEVICES_SPECIFIER))
+                   << "' (" << (want ? "chosen" : "default") << ")" << LL_ENDL;
+    }
+    else
+    {
+        const ALCenum err = alcGetError(device);
+        LL_WARNS() << "OpenAL: could not open '" << (want ? want : "(default)") << "', ALC error 0x" << std::hex << err << std::dec
+                   << (want ? " - staying on the current device" : "") << LL_ENDL;
+        mSelectedDeviceOpen = false;
+    }
+}
+// </WolfViewer>
 
 // <WolfViewer 2026-09-13> ─── output-device hot-plug ─────────────────────────────────────────
 // See the note on these members in llaudioengine_openal.h.
@@ -216,6 +310,19 @@ void LLAudioEngine_OpenAL::watchDevice()
         return;
     }
     const F64 now = LLFrameTimer::getElapsedSeconds();
+    // <WolfViewer 2026-09-18> The device LIST, for the Preferences picker: re-read every few
+    // seconds (one alcGetString; no device is opened) and announced when it changes. And if the
+    // chosen device has just come back while we are on the default, go back to it - the
+    // default-device event below does not fire for a device that was never the default.
+    if (now >= mNextListCheck)
+    {
+        mNextListCheck = now + 3.0;
+        if (enumerateDevices(true) && !mSelectedDeviceOpen && selectedDeviceName() && now >= mReopenNotBefore)
+        {
+            reopenDevice("chosen device is back");
+        }
+    }
+    // </WolfViewer>
     if (mDeviceChanged.exchange(false))
     {
         // The default device changed. Re-opening on the default covers both directions:
@@ -288,12 +395,16 @@ void LLAudioEngine_OpenAL::reopenDevice(const char* why)
     }
     // Source: alext.h:573 LPALCREOPENDEVICESOFT(device, deviceName, attribs): NULL name = the
     // default device, NULL attribs = keep the context's current attributes.
-    const ALCboolean ok = mReopenDeviceSOFT(device, nullptr, nullptr);
+    // <WolfViewer 2026-09-18/> a CHOSEN device (setDevice) is reopened by name; the default only
+    // when none is chosen or the chosen one is not plugged in.
+    const char* want = selectedDeviceName();
+    const ALCboolean ok = mReopenDeviceSOFT(device, want, nullptr);
     if (ok == ALC_TRUE)
     {
         mReopenFailures = 0;
+        mSelectedDeviceOpen = want != nullptr;
         mReopenNotBefore = LLFrameTimer::getElapsedSeconds() + REOPEN_GAP_SECS;
-        LL_INFOS() << "OpenAL: re-opened the default output device (" << why << "): "
+        LL_INFOS() << "OpenAL: re-opened the " << (want ? "chosen" : "default") << " output device (" << why << "): "
                    << ll_safe_string(alcGetString(device, ALC_ALL_DEVICES_SPECIFIER)) << LL_ENDL;
     }
     else

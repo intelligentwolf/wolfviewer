@@ -19,7 +19,7 @@ template <typename Visitor>
 void visit(int w, int h, int cell, int diameter, double ax, double ay,
            double bx, double by, Visitor visitor)
 {
-    if (w < 1 || h < 1 || w > 256 || h > 256 || cell < 1 ||
+    if (w < 1 || h < 1 || w > 1024 || h > 1024 || cell < 1 ||   // 1024: WolfWaveZones::MAX_CELLS_EDGE
         diameter < MIN_DIAMETER || diameter > MAX_DIAMETER ||
         !std::isfinite(ax) || !std::isfinite(ay) || !std::isfinite(bx) || !std::isfinite(by) ||
         ax < 0 || ay < 0 || bx < 0 || by < 0 ||

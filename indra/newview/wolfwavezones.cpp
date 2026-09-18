@@ -533,6 +533,23 @@ F32 WolfWaveZones::energyAt(F32 rx, F32 ry) const
 
 // ── rights (courtesy copy of the service's rule) ──────────────────────────────────────
 
+// <WolfViewer 2026-09-18> Source: wave_zones.js cellHasWater. A cell is water if ANY of five
+// points in it is under the water - the centre and the four quarter points. A centre-only test
+// refused every shoreline cell on a 256 m grid, which is exactly where surf is painted.
+bool WolfWaveZones::cellHasWater(LLViewerRegion* regionp, S32 cx, S32 cy, S32 cell)
+{
+    if (!regionp) return false;
+    const F32 wl = regionp->getWaterHeight();
+    const LLSurface& land = regionp->getLand();
+    static const F32 pts[5][2] = { { 0.5f, 0.5f }, { 0.25f, 0.25f }, { 0.75f, 0.25f }, { 0.25f, 0.75f }, { 0.75f, 0.75f } };
+    for (const auto& f : pts)
+    {
+        if (land.resolveHeightRegion((cx + f[0]) * cell, (cy + f[1]) * cell) < wl) return true;
+    }
+    return false;
+}
+// </WolfViewer>
+
 bool WolfWaveZones::canEditAll() const
 {
     // Source: llviewerregion.cpp canManageEstate — godlike || estate manager || region owner.
@@ -763,7 +780,9 @@ void WolfWavePainter::setLayout(S32 w, S32 h, const std::string& zones, const st
 // the same box, scaled to fit (Paul: "on massive regions scale the drawing down").
 F32 WolfWavePainter::cellPx() const
 {
-    return llmax(0.5f, llmin((F32)getRect().getWidth() / (F32)mW, (F32)getRect().getHeight() / (F32)mH));
+    // <WolfViewer 2026-09-18/> floor 0.5 -> 0.25 so an 800-cell region still fits the box whole;
+    // at that size it is an overview, and the in-world brush is the tool.
+    return llmax(0.25f, llmin((F32)getRect().getWidth() / (F32)mW, (F32)getRect().getHeight() / (F32)mH));
 }
 
 bool WolfWavePainter::cellAt(S32 x, S32 y, S32& cx, S32& cy) const
@@ -1224,7 +1243,7 @@ bool WolfPanelLandWaves::paintWorld(F32 ax, F32 ay, F32 bx, F32 by)
         [&](S32 cx, S32 cy)
         {
             if (!wz.cellEditable(cx, cy)) { refused = true; return; }
-            if (region->getLand().resolveHeightRegion((cx + 0.5f) * row->mCell, (cy + 0.5f) * row->mCell) >= region->getWaterHeight()) return;
+            if (!WolfWaveZones::cellHasWater(region, cx, cy, row->mCell)) return;   // <WolfViewer 2026-09-18/> five points, not the centre
             changed = mPainter->paintCell(cx, cy) || changed;
         });
     if (changed) onParamChanged();

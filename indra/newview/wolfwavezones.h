@@ -67,7 +67,9 @@ class WolfWaveZones : public LLSingleton<WolfWaveZones>
 public:
     /** The base cell; a region's real cell is Region::mCell (php/waves.php waves_cell). */
     static constexpr S32 CELL_M = 16;
-    static constexpr S32 MAX_CELLS_EDGE = 256;
+    static constexpr S32 MAX_CELLS_EDGE = 1024;   // <WolfViewer 2026-09-18/> was 256; php/waves.php + wave_zones.js same
+    /** Source: wave_zones.js cellHasWater — any of five points (centre + quarter points) under the water. */
+    static bool cellHasWater(LLViewerRegion* regionp, S32 cx, S32 cy, S32 cell);
     static constexpr F32 SURF_BAND_M = 48.f;
     static constexpr F32 REFRESH_SECS = 120.f;
     /** Default of the small-wave cells' swell as a fraction of the open sea (params smallScale). */

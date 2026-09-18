@@ -2039,6 +2039,20 @@ bool LLTextureFetchWorker::doWork(S32 param)
                     //return false;
                     return doWork(param);
                 }
+                // <WolfViewer 2026-09-18> A map tile that would not decode was most likely read
+                // while the map service was still writing it (see callbackDecoded). It is not in
+                // the cache, so the branch above never applies; fetch it again, twice at most,
+                // then give up and leave the tile blank rather than loop on a genuinely bad file.
+                else if (mFTType == FTT_MAP_TILE && mRetryAttempt < 2)
+                {
+                    LL_INFOS(LOG_TXT) << "Refetching map tile after failed decode (attempt " << (mRetryAttempt + 1) << "): " << mUrl << LL_ENDL;
+                    llassert_always(mDecodeHandle == 0);
+                    mFormattedImage = NULL;
+                    ++mRetryAttempt;
+                    setState(INIT);
+                    return doWork(param);
+                }
+                // </WolfViewer>
                 else
                 {
                     LL_DEBUGS(LOG_TXT) << "Failed to Decode image " << mID << " after " << mRetryAttempt << " retries" << LL_ENDL;
@@ -2610,6 +2624,23 @@ void LLTextureFetchWorker::callbackDecoded(bool success, const std::string &erro
     llassert_always(mFormattedImage.notNull());
 
     mDecodeHandle = 0;
+    // <WolfViewer 2026-09-18> A map tile whose JPEG decode reported an error is NOT a picture.
+    // LLImageJPEG::decode returns "done" on a libjpeg error and leaves the raw image allocated
+    // and part-written, so a truncated tile used to be drawn: real picture at the top, garbage
+    // below, for the rest of the session. Seen on Wolf Nation (200x200) while its map pass was
+    // still writing tiles. Treat it as a failed decode; DECODE_IMAGE_UPDATE below refetches it.
+    // Map tiles only: they are plain JPEGs fetched whole and never cached, so a refetch is the
+    // whole remedy. Other JPEG users (uploads, local bitmaps) keep their existing behaviour.
+    // ("No Error" is what LLImage::getLastThreadError returns when nothing was recorded, and
+    // the decoder resets the record at the start of every decode - so an actual message means
+    // THIS decode set one. Testing for "non-empty" here threw away every good tile: 11,000
+    // discards with reason "No Error" in one session, and a map that never filled in.)
+    if (success && mFTType == FTT_MAP_TILE && !error_message.empty() && error_message != "No Error")
+    {
+        LL_INFOS(LOG_TXT) << "Map tile decode failed (" << error_message << "), discarding: " << mUrl << LL_ENDL;
+        success = false;
+    }
+    // </WolfViewer>
     if (success)
     {
         llassert_always(raw);

@@ -32,7 +32,7 @@
 #include "llexception.h"
 
 #if !LL_ARM64
-jmp_buf LLImageJPEG::sSetjmpBuffer ;
+thread_local jmp_buf LLImageJPEG::sSetjmpBuffer ;   // <WolfViewer 2026-09-18/> per thread - see llimagejpeg.h
 #endif
 LLImageJPEG::LLImageJPEG(S32 quality)
 :   LLImageFormatted(IMG_CODEC_JPEG),

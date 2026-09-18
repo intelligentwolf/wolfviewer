@@ -79,7 +79,16 @@ protected:
     S32             mEncodeQuality;     // on a scale from 1 to 100
 private:
 #if !LL_ARM64
-    static jmp_buf  sSetjmpBuffer;      // To allow the library to abort.
+    // <WolfViewer 2026-09-18> thread_local. This was ONE buffer for the whole process, but JPEGs
+    // decode on several image-decode threads at once: thread B's setjmp() overwrote the context
+    // thread A was relying on, so when A's decode failed, errorExit() longjmp'd into B's stack
+    // frame. glibc's __longjmp_chk catches exactly that ("longjmp causes uninitialized stack
+    // frame") and abort()s - SIGABRT, the viewer gone. Seen on Wolf Nation (200x200): opening the
+    // world map decodes hundreds of map tiles concurrently and ONE truncated tile ("LLImageJPEG
+    // decode failed: Empty input file", the last log line both times) killed the viewer.
+    // errorExit() runs on the thread that called decode()/encode(), so per-thread is exactly
+    // the scope the buffer needs. Upstream Firestorm has the same single buffer.
+    static thread_local jmp_buf  sSetjmpBuffer;      // To allow the library to abort.
 #endif
 };
 

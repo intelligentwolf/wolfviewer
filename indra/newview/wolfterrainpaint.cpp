@@ -499,7 +499,9 @@ void WolfTerrainPaint::fadeWindowEdge(Layer& L)
     const S32 W = L.mW, H = L.mH, F = WINDOW_FADE_PX;
     const bool west = L.mWinX > 0.f, south = L.mWinY > 0.f;
     const bool east = L.mWinX + L.mWinW < (F32)L.mSizeX, north = L.mWinY + L.mWinH < (F32)L.mSizeY;
-    auto ease = [F](S32 d) { const F32 t = (F32)d / (F32)F; return t * t * (3.f - 2.f * t); };
+    // Captureless on purpose: WINDOW_FADE_PX is a static constant, and Apple clang rejects a
+    // capture it does not need (-Werror,-Wunused-lambda-capture) - that failed the w38 mac build.
+    auto ease = [](S32 d) { const F32 t = (F32)d / (F32)WINDOW_FADE_PX; return t * t * (3.f - 2.f * t); };
     for (S32 j = 0; j < H; ++j)
     {
         F32 fy = 1.f;

@@ -239,6 +239,7 @@ private:
     std::vector<U8> mShelterData;          // SHELTER_N^2, 255 open sky / 0 sheltered
     U32  mShelterTex = 0;
     bool mShelterDirty = false;
+    bool mBindLogged = false;
     // </WolfViewer>
 };
 

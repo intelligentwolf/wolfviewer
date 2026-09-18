@@ -663,10 +663,17 @@ void WolfWeather::bindSnowCover(LLGLSLShader* shader, LLViewerRegion* regionp)
         gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
         mShelterDirty = false;
     }
-    const S32 unit = shader->enableTexture(LLShaderMgr::WOLF_SHELTER_MAP);
-    if (unit > -1) gGL.getTexUnit(unit)->bindManual(LLTexUnit::TT_TEXTURE, mShelterTex);
     // The grid sits in agent space round the camera; the shaders work in REGION metres.
     const LLVector3 origin = regionp->getOriginAgent();
+    const S32 unit = shader->enableTexture(LLShaderMgr::WOLF_SHELTER_MAP);
+    if (unit > -1) gGL.getTexUnit(unit)->bindManual(LLTexUnit::TT_TEXTURE, mShelterTex);
+    else LL_WARNS_ONCE("WolfWeather") << "snow cover: shader '" << shader->mName << "' has no wolfShelterMap sampler - the roof grid cannot be applied" << LL_ENDL;
+    if (!mBindLogged)
+    {
+        mBindLogged = true;
+        LL_INFOS("WolfWeather") << "snow cover bound to '" << shader->mName << "': sampler unit " << unit << ", texture " << mShelterTex
+                                << ", cover " << mSnowCover << ", origin " << (mShelterCam.mV[VX] - SHELTER_HALF_M - origin.mV[VX]) << "," << (mShelterCam.mV[VY] - SHELTER_HALF_M - origin.mV[VY]) << LL_ENDL;
+    }
     shader->uniform1f(s_cover, mSnowCover);
     shader->uniform2f(s_origin, mShelterCam.mV[VX] - SHELTER_HALF_M - origin.mV[VX],
                                 mShelterCam.mV[VY] - SHELTER_HALF_M - origin.mV[VY]);

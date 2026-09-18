@@ -127,6 +127,16 @@ uniform vec4 wolf_comp_range;
 uniform float wolf_region_width;
 uniform float wolf_terrain_snow_line;
 uniform vec2 wolf_noise_offset;
+// <WolfViewer 2026-09-18> SNOW ON THE GROUND. Source: wolfstorm terrain_manager.js, the block
+// after wsTerrainPaint - same numbers. wolf_snow_cover 0..1 is how much has settled
+// (WolfWeather::updateSnowCover); wolfShelterMap is the roof grid round the camera, 1 = open
+// sky, at wolf_shelter_origin / wolf_shelter_size in region metres; outside it the ground is
+// open. Patchy as it starts, solid at a full cover; none on steep faces, none on the sea bed,
+// none under a roof. Over the painted roads, like the ground around them.
+uniform float wolf_snow_cover;
+uniform sampler2D wolfShelterMap;
+uniform vec2  wolf_shelter_origin;
+uniform float wolf_shelter_size;
 
 float wsTerrainHash(vec2 p)
 {
@@ -352,6 +362,20 @@ void main()
             outColor.rgb = mix(outColor.rgb, vec3(0.92, 0.94, 0.98), snowW);
         }
     }
+
+    // <WolfViewer 2026-09-18> snow that has settled from the weather
+    if (wolf_snow_cover > 0.0)
+    {
+        vec2 suv = (vary_region_pos.xy - wolf_shelter_origin) / wolf_shelter_size;
+        float open = (suv.x < 0.0 || suv.y < 0.0 || suv.x > 1.0 || suv.y > 1.0) ? 1.0 : texture(wolfShelterMap, suv).r;
+        float cn = wsTerrainNoise((vary_region_pos.xy + wolf_noise_offset) * 0.23);
+        float csteep = 1.0 - clamp(vary_up, 0.0, 1.0);
+        float cover = smoothstep(0.0, 1.0, wolf_snow_cover * 1.3 - cn * 0.6)
+                      * (1.0 - smoothstep(0.30, 0.55, csteep))
+                      * smoothstep(wolf_water_level - 0.2, wolf_water_level + 0.4, vary_region_pos.z) * open;
+        outColor.rgb = mix(outColor.rgb, vec3(0.92, 0.94, 0.98), cover);
+    }
+    // </WolfViewer>
 
     // <WolfViewer 2026-09-06> caustics on the sea bed
     outColor.rgb *= 1.0 + wolfCaustic(vary_region_pos);

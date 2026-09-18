@@ -1639,6 +1639,7 @@ void LLShaderMgr::initAttribsAndUniforms()
     mReservedUniforms.push_back("wolfPaintTex1");
     mReservedUniforms.push_back("wolfPaintTex2");
     mReservedUniforms.push_back("wolfPaintTex3");
+    mReservedUniforms.push_back("wolfShelterMap");  // [SNOW COVER 2026-09-18] wolfweather.cpp
     // </WolfViewer>
 
     llassert(mReservedUniforms.size() == END_RESERVED_UNIFORMS);

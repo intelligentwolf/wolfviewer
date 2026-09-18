@@ -65,6 +65,7 @@ static LLGLSLShader* sShader = NULL;
 #include "llenvironment.h"
 #include "wolfoceanfft.h"
 #include "wolfterrainpaint.h"   // [TERRAIN PAINT 2026-09-10]
+#include "wolfweather.h"   // <WolfViewer 2026-09-18/> snow cover on the terrain
 extern bool gCubeSnapshot;   // Source: lldrawpoolwater.cpp:56 — the same extern the water pool uses
 static void wolf_bind_caustics(LLGLSLShader* shader, LLViewerRegion* regionp)
 {
@@ -365,7 +366,8 @@ void LLDrawPoolTerrain::renderFullShaderTextures()
         shader->uniform1f(s_wolf_region_width, regionp->getWidth());
     }
     wolf_bind_caustics(shader, regionp);   // <WolfViewer 2026-09-06>
-    WolfTerrainPaint::instance().bind(shader, regionp);   // [TERRAIN PAINT 2026-09-10] painted roads/tracks
+    WolfTerrainPaint::instance().bind(shader, regionp);
+    WolfWeather::instance().bindSnowCover(shader, regionp);   // <WolfViewer 2026-09-18/> snow on the ground   // [TERRAIN PAINT 2026-09-10] painted roads/tracks
     // </WolfViewer>
 
     LLSettingsWater::ptr_t pwater = LLEnvironment::instance().getCurrentWater();
@@ -403,7 +405,8 @@ void LLDrawPoolTerrain::renderFullShaderTextures()
     // GL_BLEND disabled by default
     drawLoop();
 
-    WolfTerrainPaint::instance().unbind(sShader);   // [TERRAIN PAINT 2026-09-10]
+    WolfTerrainPaint::instance().unbind(sShader);
+    WolfWeather::instance().unbindSnowCover(sShader);   // <WolfViewer 2026-09-18/>   // [TERRAIN PAINT 2026-09-10]
     // Disable multitexture
     sShader->disableTexture(LLViewerShaderMgr::TERRAIN_ALPHARAMP);
     sShader->disableTexture(LLViewerShaderMgr::TERRAIN_DETAIL0);
@@ -623,6 +626,7 @@ void LLDrawPoolTerrain::renderFullShaderPBR(bool use_local_materials)
     // [TERRAIN PAINT 2026-09-10] For BOTH paint types: bind() also resets wolf_paint_on when
     // this region has nothing, so a value left by the previous region cannot leak.
     WolfTerrainPaint::instance().bind(shader, regionp);
+    WolfWeather::instance().bindSnowCover(shader, regionp);   // <WolfViewer 2026-09-18/> snow on the ground
 
     //
     // GLTF uniforms
@@ -669,7 +673,8 @@ void LLDrawPoolTerrain::renderFullShaderPBR(bool use_local_materials)
     // GL_BLEND disabled by default
     drawLoop();
 
-    WolfTerrainPaint::instance().unbind(sShader);   // [TERRAIN PAINT 2026-09-10]
+    WolfTerrainPaint::instance().unbind(sShader);
+    WolfWeather::instance().unbindSnowCover(sShader);   // <WolfViewer 2026-09-18/>   // [TERRAIN PAINT 2026-09-10]
 
     // Disable multitexture
 

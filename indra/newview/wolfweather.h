@@ -18,6 +18,7 @@
 #define WOLF_WEATHER_H
 
 #include <string>
+#include <vector>   // <WolfViewer 2026-09-18/> the roof grid
 
 #include "llpointer.h"
 #include "llsingleton.h"
@@ -44,6 +45,9 @@
 // white points falling slowly and drifting on the region wind. It rides the viewer's own
 // particle simulation (LLViewerPartSim) and its particle cap, so a heavy scene sheds weather
 // before anything else.
+class LLGLSLShader;   // <WolfViewer 2026-09-18/> bindSnowCover
+class LLViewerRegion;
+
 class WolfWeatherPartSource : public LLViewerPartSource
 {
 public:
@@ -157,6 +161,26 @@ public:
     static F32 auroraAmount();
     /** The active profile's aurora colour as the shader's palette index (0 = green). */
     static S32 auroraColorMode();
+
+    // <WolfViewer 2026-09-18> SNOW ON THE GROUND. Source: wolfstorm environment_manager.js
+    // updateSnowCover / snowCoverStep / sheltered and terrain_manager.js setSnowCover - same
+    // numbers, same rules. Paul: "make the snow settle with the weather" "but obviously not in
+    // houses". ONE number, mSnowCover 0..1, rises while it snows (a full cover in
+    // SNOW_COVER_SECS[level]) and melts over SNOW_MELT_SECS; the terrain shaders lay snow by it.
+    // WHERE NOT: a roof grid of SHELTER_N x SHELTER_N cells round the camera, each rayed from
+    // above (the precipitation's own roof test, kept here so it lives on while the cover melts);
+    // ground with something above it gets none. Beyond the grid the ground counts as open.
+    static constexpr S32 SHELTER_N = 16;
+    static constexpr F32 SHELTER_HALF_M = 70.f;      // the snow box: 140 m round the camera
+    static constexpr S32 SHELTER_RAYS_PER_FRAME = 6;
+    static constexpr F32 SHELTER_HEADROOM_M = 0.6f;  // a hit this far above the ground is a roof
+    static F32  snowCoverStep(F32 cover, bool snowing, S32 level, F32 dt);   // pure, for tests
+    static bool sheltered(F32 landing_z, F32 ground_z);
+    F32  snowCover() const { return mSnowCover; }
+    /** Terrain draw pools: the cover, the roof grid and where it sits, region metres. */
+    void bindSnowCover(LLGLSLShader* shader, LLViewerRegion* regionp);
+    void unbindSnowCover(LLGLSLShader* shader);
+    // </WolfViewer>
     /** Menu tick: is this mode what is ACTUALLY falling now (preview, parcel, region or user)? */
     bool isOn(Mode m) const { return modeOf(mActive.mKind) == m; }
     /** Menu tick: is this mode on at this level? */
@@ -203,6 +227,19 @@ private:
     F64  mNextSweep = 0.0;
     F64  mNextStats = 0.0;
     LLPointer<WolfWeatherPartSource> mSource;
+    // <WolfViewer 2026-09-18> snow cover state (see the note above)
+    void updateSnowCover(F64 now);
+    void updateShelter();
+    F32  mSnowCover = 0.f;
+    F64  mCoverLast = 0.0;
+    F32  mShelterZ[SHELTER_N * SHELTER_N];
+    bool mShelterInit = false;
+    S32  mShelterNext = 0;
+    LLVector3 mShelterCam;                 // agent-space camera the grid is centred on
+    std::vector<U8> mShelterData;          // SHELTER_N^2, 255 open sky / 0 sheltered
+    U32  mShelterTex = 0;
+    bool mShelterDirty = false;
+    // </WolfViewer>
 };
 
 #endif // WOLF_WEATHER_H

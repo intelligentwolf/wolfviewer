@@ -188,6 +188,38 @@ float wolfCaustic(vec3 region_pos)
 // uniform control flow (dFdx in a divergent branch is undefined). Source:
 // wolfstorm/js/world/terrain/terrain_manager.js wsTerrainPaint — keep them in step.
 uniform sampler2D wolfPaintMap;
+// <WolfViewer 2026-09-18> SNOW ON THE GROUND. Source: wolfstorm terrain_manager.js, the block
+// after wsTerrainPaint - same numbers. wolf_snow_cover 0..1 is how much has settled
+// (WolfWeather::updateSnowCover); wolfShelterMap is the roof grid round the camera, 1 = open
+// sky, at wolf_shelter_origin / wolf_shelter_size in region metres; outside it the ground is
+// open. Patchy as it starts, solid at a full cover; none on steep faces, none on the sea bed,
+// none under a roof. Over the painted roads, like the ground around them.
+uniform float wolf_snow_cover;
+uniform sampler2D wolfShelterMap;
+uniform vec2  wolf_shelter_origin;
+uniform float wolf_shelter_size;
+// the terrain noise of terrainF.glsl, for the cover's patchiness (this shader has none of its own)
+float wolfCoverHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float wolfCoverNoise(vec2 p)
+{
+    vec2 i = floor(p), f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(wolfCoverHash(i), wolfCoverHash(i + vec2(1.0, 0.0)), f.x),
+               mix(wolfCoverHash(i + vec2(0.0, 1.0)), wolfCoverHash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+vec3 wolfSnowCover(vec3 ground, vec3 region_pos, float up)
+{
+    if (wolf_snow_cover <= 0.0) return ground;
+    vec2 suv = (region_pos.xy - wolf_shelter_origin) / wolf_shelter_size;
+    float open = (suv.x < 0.0 || suv.y < 0.0 || suv.x > 1.0 || suv.y > 1.0) ? 1.0 : texture(wolfShelterMap, suv).r;
+    float cn = wolfCoverNoise(region_pos.xy * 0.23);
+    float csteep = 1.0 - clamp(up, 0.0, 1.0);
+    float cover = smoothstep(0.0, 1.0, wolf_snow_cover * 1.3 - cn * 0.6)
+                  * (1.0 - smoothstep(0.30, 0.55, csteep))
+                  * smoothstep(wolf_water_level - 0.2, wolf_water_level + 0.4, region_pos.z) * open;
+    return mix(ground, vec3(0.92, 0.94, 0.98), cover);
+}
+
 uniform sampler2D wolfPaintTex0;
 uniform sampler2D wolfPaintTex1;
 uniform sampler2D wolfPaintTex2;
@@ -524,7 +556,9 @@ void main()
 // Matte plastic potato terrain
 #define mix_orm vec3(1.0, 1.0, 0.0)
 #endif
-    frag_data[0] = max(vec4(wolfTerrainPaint(pbr_mix.col.xyz, vary_region_pos.xy) * (1.0 + wolfCaustic(vary_region_pos)), 0.0), vec4(0));   // Diffuse (+ <WolfViewer> painted roads, caustics)
+    // <WolfViewer> painted roads, then the snow settled on them and the ground, then caustics
+    vec3 wolf_col = wolfSnowCover(wolfTerrainPaint(pbr_mix.col.xyz, vary_region_pos.xy), vary_region_pos, vary_normal.z);
+    frag_data[0] = max(vec4(wolf_col * (1.0 + wolfCaustic(vary_region_pos)), 0.0), vec4(0));   // Diffuse
     frag_data[1] = max(vec4(mix_orm.rgb, base_color_factor_alpha), vec4(0));                                    // PBR linear packed Occlusion, Roughness, Metal.
     frag_data[2] = encodeNormal(tnorm, 0, GBUFFER_FLAG_HAS_PBR); // normal, flags
 

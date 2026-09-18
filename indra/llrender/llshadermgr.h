@@ -391,6 +391,7 @@ public:
         WOLF_PAINT_TEX1,                    // "wolfPaintTex1"
         WOLF_PAINT_TEX2,                    // "wolfPaintTex2"
         WOLF_PAINT_TEX3,                    // "wolfPaintTex3"
+        WOLF_SHELTER_MAP,                   // "wolfShelterMap" [SNOW COVER 2026-09-18] wolfweather.cpp
         // </WolfViewer>
         END_RESERVED_UNIFORMS
     } eGLSLReservedUniforms;

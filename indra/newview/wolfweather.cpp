@@ -22,6 +22,11 @@
 
 #include "llagent.h"
 #include "llframetimer.h"
+#include "llimagegl.h"       // <WolfViewer 2026-09-18/> the roof grid texture
+#include "llglslshader.h"
+#include "llshadermgr.h"     // <WolfViewer 2026-09-18/> WOLF_SHELTER_MAP
+#include "llrender.h"
+#include "llviewerregion.h"
 #include "llvector4a.h"
 #include "llworld.h"
 #include "pipeline.h"
@@ -557,7 +562,111 @@ void WolfWeather::idle()
     WolfWeatherSound::instance().idle();
     // [LIGHTNING 2026-09-13] Forks during a thunderstorm; the thunder is timed from them.
     WolfLightning::instance().idle();
+    updateSnowCover(now);   // <WolfViewer 2026-09-18/> what the snow leaves on the ground
 }
+
+// <WolfViewer 2026-09-18> ─── snow on the ground ─────────────────────────────────────────────
+// Source: wolfstorm environment_manager.js SNOW_COVER_SECS / SNOW_MELT_SECS / snowCoverStep.
+F32 WolfWeather::snowCoverStep(F32 cover, bool snowing, S32 level, F32 dt)
+{
+    static const F32 COVER_SECS[5] = { 0.f, 900.f, 600.f, 360.f, 240.f };   // light .. blizzard
+    static const F32 MELT_SECS = 600.f;
+    if (snowing) return llmin(1.f, cover + dt / COVER_SECS[llclamp(level, 1, 4)]);
+    return llmax(0.f, cover - dt / MELT_SECS);
+}
+
+// Source: environment_manager.js sheltered - the first thing above the ground is well above it.
+bool WolfWeather::sheltered(F32 landing_z, F32 ground_z)
+{
+    return landing_z > -1e8f && landing_z > ground_z + SHELTER_HEADROOM_M;
+}
+
+void WolfWeather::updateSnowCover(F64 now)
+{
+    const F32 dt = mCoverLast > 0.0 ? (F32)llclamp(now - mCoverLast, 0.0, 0.5) : 0.f;
+    mCoverLast = now;
+    const bool snowing = mActive.mKind == WolfWeatherProfile::SNOW && mSource.notNull() && !mSource->isDead();
+    mSnowCover = snowCoverStep(mSnowCover, snowing, mActive.mLevel, dt);
+    if (mSnowCover > 0.f && gAgent.getRegion()) updateShelter();
+}
+
+// Source: WolfWeatherPartSource::updateLanding (the precipitation's roof test) and
+// environment_manager.js updateSnowCover: the camera's own cell every frame, the rest round
+// robin; each cell = the higher of the land and the first thing a ray from above hits.
+void WolfWeather::updateShelter()
+{
+    if (!mShelterInit)
+    {
+        for (F32& z : mShelterZ) z = -1e9f;
+        mShelterData.assign((size_t)SHELTER_N * SHELTER_N, 255);
+        mShelterInit = true;
+    }
+    const LLVector3 cam = LLViewerCamera::getInstance()->getOrigin();
+    mShelterCam = cam;
+    const F32 cell = (2.f * SHELTER_HALF_M) / (F32)SHELTER_N;
+    const S32 camera_cell = (SHELTER_N / 2) * SHELTER_N + (SHELTER_N / 2);
+    for (S32 r = -1; r < SHELTER_RAYS_PER_FRAME; ++r)
+    {
+        S32 k;
+        if (r < 0) k = camera_cell;
+        else { k = mShelterNext; mShelterNext = (mShelterNext + 1) % (SHELTER_N * SHELTER_N); }
+        const S32 cx = k % SHELTER_N, cy = k / SHELTER_N;
+        const F32 wx = cam.mV[VX] - SHELTER_HALF_M + ((F32)cx + 0.5f) * cell;
+        const F32 wy = cam.mV[VY] - SHELTER_HALF_M + ((F32)cy + 0.5f) * cell;
+        const LLVector3 probe(wx, wy, cam.mV[VZ]);
+        const F32 ground = LLWorld::getInstance()->resolveLandHeightAgent(probe);
+        F32 landing = -1e9f;
+        LLVector4a start, end, hit;
+        const LLVector3 s3(wx, wy, cam.mV[VZ] + 80.f), e3(wx, wy, cam.mV[VZ] - 60.f);
+        start.load3(s3.mV);
+        end.load3(e3.mV);
+        if (gPipeline.lineSegmentIntersectInWorld(start, end, true, false, true, false, NULL, NULL, NULL, &hit, NULL, NULL, NULL))
+        {
+            landing = hit.getF32ptr()[2];
+        }
+        mShelterZ[k] = landing;
+        const U8 open = sheltered(landing, ground) ? 0 : 255;
+        if (mShelterData[k] != open) { mShelterData[k] = open; mShelterDirty = true; }
+    }
+}
+
+void WolfWeather::bindSnowCover(LLGLSLShader* shader, LLViewerRegion* regionp)
+{
+    static LLStaticHashedString s_cover("wolf_snow_cover");
+    static LLStaticHashedString s_origin("wolf_shelter_origin");
+    static LLStaticHashedString s_size("wolf_shelter_size");
+    if (!shader) return;
+    if (mSnowCover <= 0.f || !regionp || !mShelterInit)
+    {
+        shader->uniform1f(s_cover, 0.f);
+        return;
+    }
+    if (!mShelterTex || mShelterDirty)
+    {
+        if (!mShelterTex) LLImageGL::generateTextures(1, &mShelterTex);
+        gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE, mShelterTex);
+        LLImageGL::setManualImage(LLTexUnit::getInternalType(LLTexUnit::TT_TEXTURE), 0, GL_R8,
+                                  SHELTER_N, SHELTER_N, GL_RED, GL_UNSIGNED_BYTE, mShelterData.data(), false);
+        gGL.getTexUnit(0)->setTextureFilteringOption(LLTexUnit::TFO_BILINEAR);
+        gGL.getTexUnit(0)->setTextureAddressMode(LLTexUnit::TAM_CLAMP);
+        gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
+        mShelterDirty = false;
+    }
+    const S32 unit = shader->enableTexture(LLShaderMgr::WOLF_SHELTER_MAP);
+    if (unit > -1) gGL.getTexUnit(unit)->bindManual(LLTexUnit::TT_TEXTURE, mShelterTex);
+    // The grid sits in agent space round the camera; the shaders work in REGION metres.
+    const LLVector3 origin = regionp->getOriginAgent();
+    shader->uniform1f(s_cover, mSnowCover);
+    shader->uniform2f(s_origin, mShelterCam.mV[VX] - SHELTER_HALF_M - origin.mV[VX],
+                                mShelterCam.mV[VY] - SHELTER_HALF_M - origin.mV[VY]);
+    shader->uniform1f(s_size, 2.f * SHELTER_HALF_M);
+}
+
+void WolfWeather::unbindSnowCover(LLGLSLShader* shader)
+{
+    if (shader) shader->disableTexture(LLShaderMgr::WOLF_SHELTER_MAP);
+}
+// </WolfViewer>
 
 // Source: fswolfwater.cpp sweep — every prim in draw distance is handed to the harvester,
 // answered descriptions are tested for the keyword. Here the prim must also stand in the

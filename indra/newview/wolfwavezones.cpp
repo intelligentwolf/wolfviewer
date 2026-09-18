@@ -780,9 +780,11 @@ void WolfWavePainter::setLayout(S32 w, S32 h, const std::string& zones, const st
 // the same box, scaled to fit (Paul: "on massive regions scale the drawing down").
 F32 WolfWavePainter::cellPx() const
 {
-    // <WolfViewer 2026-09-18/> floor 0.5 -> 0.25 so an 800-cell region still fits the box whole;
-    // at that size it is an overview, and the in-world brush is the tool.
-    return llmax(0.25f, llmin((F32)getRect().getWidth() / (F32)mW, (F32)getRect().getHeight() / (F32)mH));
+    // <WolfViewer 2026-09-18/> floor 0.5 -> 0.2 so the largest grid (MAX_CELLS_EDGE = 1024 cells)
+    // still fits the 224 px box whole. With the old 0.5 floor an 800-cell region drew 400 px
+    // OVER the sliders beside it (Paul: "water painter broken"). At that size the box is an
+    // overview, and the in-world brush is the tool.
+    return llmax(0.2f, llmin((F32)getRect().getWidth() / (F32)mW, (F32)getRect().getHeight() / (F32)mH));
 }
 
 bool WolfWavePainter::cellAt(S32 x, S32 y, S32& cx, S32& cy) const

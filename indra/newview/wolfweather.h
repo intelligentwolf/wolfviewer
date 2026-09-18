@@ -69,8 +69,11 @@ public:
     void update(const F32 dt) override;
 
     /** The roof test grid: LANDING_N x LANDING_N cells over the weather box round the camera. */
-    static constexpr S32 LANDING_N = 12;
-    static constexpr S32 LANDING_RAYS_PER_FRAME = 6;
+    // <WolfViewer 2026-09-18/> 12 -> 24 cells (11.7 m -> 5.8 m over the box): Paul saw "a bit of
+    // snowfall in the house" — a cell straddling a wall let flakes through. 24 rays a frame keeps
+    // the sweep at 24 frames. wolfstorm environment_manager.js LANDING_N 24 same.
+    static constexpr S32 LANDING_N = 24;
+    static constexpr S32 LANDING_RAYS_PER_FRAME = 24;
     /**
      * [LIGHTNING 2026-09-13] Is there a roof over the camera? The landing grid's own answer for
      * the camera's cell: a surface above the camera means indoors. Used by WolfLightning so no

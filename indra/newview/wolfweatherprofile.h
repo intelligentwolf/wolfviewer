@@ -46,7 +46,7 @@ struct WolfWeatherProfile
     LLColor4    mTint        = LLColor4(0.667f, 0.800f, 1.f, 1.f);   ///< #aaccff
     S32         mTintAmount  = 100;     ///< 0..100 %, how far to the tint from the kind's neutral
     S32         mMoveSpeed   = 60;      ///< 0..1000 hundredths of a m/s of lateral drift
-    S32         mDensity     = 100;     ///< 10..1000 % of the level's particle count
+    S32         mDensity     = 100;     ///< 10..4000 % of the level's particle count
     S32         mVelocity    = 100;     ///< 10..1000 % of the level's fall speed
     S32         mSize        = 100;     ///< 10..1000 % of the particle's own width
 
@@ -54,17 +54,30 @@ struct WolfWeatherProfile
     S32         mVolume      = 60;      ///< 0..100 %
     std::string mSoundPreset = "thunder";   ///< the ambience bed  (see WolfWeatherSound)
     std::string mSoundLayer  = "soft";      ///< the near layer
+    // <WolfViewer 2026-09-18> Source: weather_profile.js DEFAULTS.fog / RANGE.fog. Thick air,
+    // 0..100 %, 0 = none. INDEPENDENT of mKind: fog with rain, with snow, or alone under CLEAR.
+    // What a number means is a visibility in metres - fogVisibility().
+    S32         mFog         = 0;
+    // <WolfViewer 2026-09-18> Source: weather_profile.js DEFAULTS.aurora / RANGE.aurora. The
+    // northern lights, 0..100 %, 0 = none; NIGHT ONLY (WolfWeather::auroraAmount fades it with the
+    // daylight) and independent of mKind. 35 faint arc, 70 bright curtains, 100 a storm overhead.
+    S32         mAurora      = 0;
+    // <WolfViewer 2026-09-18> Source: weather_profile.js AURORA_COLORS - green (the default),
+    // red, purple, blue, pink, multi. auroraColorMode() is what the shader gets.
+    std::string mAuroraColor = "green";
 
     // ── ranges, shared by the clamp and the XUI sliders ─────────────────────────────────────
     static constexpr S32 BRIGHTNESS_MIN = 0,  BRIGHTNESS_MAX = 200;
     static constexpr S32 TINT_MIN       = 0,  TINT_MAX       = 100;
     static constexpr S32 MOVE_MIN       = 0,  MOVE_MAX       = 1000;
-    static constexpr S32 DENSITY_MIN    = 10, DENSITY_MAX    = 1000;
+    static constexpr S32 DENSITY_MIN    = 10, DENSITY_MAX    = 4000;   // Source: weather_profile.js RANGE.density (1000 until 2026-09-18)
     static constexpr S32 VELOCITY_MIN   = 10, VELOCITY_MAX   = 1000;
     // NOT SIZE_MIN / SIZE_MAX: <stdint.h> defines SIZE_MAX, so those names expand to a
     // numeric constant here and the declaration does not compile.
     static constexpr S32 PSIZE_MIN      = 10, PSIZE_MAX      = 1000;
     static constexpr S32 VOLUME_MIN     = 0,  VOLUME_MAX     = 100;
+    static constexpr S32 AURORA_MIN     = 0,  AURORA_MAX     = 100;   // Source: weather_profile.js RANGE.aurora
+    static constexpr S32 FOG_MIN        = 0,  FOG_MAX        = 100;   // Source: weather_profile.js RANGE.fog
 
     /** Force every field into range. Called after anything that came from outside this process. */
     void clampAll();
@@ -83,6 +96,15 @@ struct WolfWeatherProfile
      * Source: weather_profile.js drawColor().
      */
     LLColor4 drawColor() const;
+
+    /**
+     * Source: weather_profile.js fogVisibility(). What a fog number MEANS: how far you can see,
+     * metres. 2000 * 0.02^(fog/100): 25 -> ~752, 50 -> ~283, 75 -> ~106, 100 -> 40. A geometric
+     * scale, because the eye reads visibility in ratios. Returns 0 for "no fog" (mFog <= 0) -
+     * the JS returns Infinity; callers test mFog first.
+     */
+    static F32 fogVisibility(S32 fog);
+
 
     /** The neutral colour of a kind, before the tint moves it. rain #aaccff, snow #ffffff. */
     static LLColor4 neutralColor(Kind k);
@@ -129,6 +151,9 @@ struct WolfWeatherProfile
     /** The two Sound Presets dropdowns. id / label, in the order they are shown. */
     static const std::vector<Preset>& soundPresets();
     static const std::vector<Preset>& soundLayers();
+    /** Source: weather_profile.js AURORA_COLORS / auroraColorMode(): the aurora's colour ids and the shader's palette index (0 = green). */
+    static const std::vector<Preset>& auroraColors();
+    static S32 auroraColorMode(const std::string& id);
 };
 
 #endif // WOLF_WEATHER_PROFILE_H

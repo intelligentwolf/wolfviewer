@@ -26,6 +26,10 @@
 // Inputs
 in vec3 vary_HazeColor;
 in float vary_LightNormPosDot;
+in vec3 vary_wolf_sky_dir;         // <WolfViewer 2026-09-18/> skyV.glsl
+uniform float wolf_aurora;         // 0..1: the profile's aurora x night x what the fog lets through (WolfWeather::auroraAmount)
+uniform float wolf_aurora_time;
+uniform int   wolf_aurora_color;   // 0 green 1 red 2 purple 3 blue 4 pink 5 multi (WolfWeatherProfile::auroraColorMode)
 
 #ifdef HAS_HDRI
 in vec4 vary_position;
@@ -81,6 +85,71 @@ vec3 halo22(float d)
     return texture(halo_map, vec2(0, v)).rgb * ice_level;
 }
 
+// <WolfViewer 2026-09-18> The northern lights (WolfWeatherProfile::mAurora).
+// Source: wolfstorm/js/rendering/render_manager.js createSky() wsAurora / wsAuroraCurtain /
+// wsAuroraNoise / wsAuroraHash - the same functions, constant for constant; keep them in step.
+// OUR OWN implementation of the usual idea - a moving 2D curtain pattern extruded upward and
+// summed along the view ray through a stack of altitude slabs - written from the physics, not
+// from anyone's shader. Heights are in units of 100 km: a SHARP lower border near 100 km with a
+// long tail above; colour by altitude (the purple N2+ fringe at 95-105 km, the 557.7 nm oxygen
+// GREEN that dominates to ~180 km, the 630 nm oxygen RED above ~200 km, stronger in a storm);
+// curtains run east-west with fine shimmering rays; the display is a BAND of latitude ~220 km to
+// the north that widens and comes overhead as `amount` rises. `dir` is (east, north, up).
+float wolfAuroraHash(vec2 p) { return fract(sin(dot(p, vec2(41.31, 289.17))) * 45751.37); }
+float wolfAuroraNoise(vec2 p)
+{
+    vec2 i = floor(p), f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(wolfAuroraHash(i), wolfAuroraHash(i + vec2(1.0, 0.0)), f.x),
+               mix(wolfAuroraHash(i + vec2(0.0, 1.0)), wolfAuroraHash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+float wolfAuroraCurtain(vec2 p, float t)
+{
+    vec2 w = p + 1.7 * vec2(wolfAuroraNoise(p * 0.35 + vec2(0.0, t * 0.020)),
+                            wolfAuroraNoise(p * 0.35 + vec2(7.3, -t * 0.017)));
+    float n = wolfAuroraNoise(vec2(w.x * 0.6 + t * 0.03, w.y * 2.4));
+    float ridge = pow(1.0 - abs(2.0 * n - 1.0), 7.0);
+    float rays = 0.55 + 0.45 * wolfAuroraNoise(vec2(w.x * 9.0 - t * 0.35, w.y * 0.7));
+    return ridge * rays;
+}
+// The chosen colour is the curtain's MAIN band (100-180 km); the purple lower fringe and the
+// red high tops stay, as they do in every real display. 'multi' picks a hue per curtain fold.
+vec3 wolfAuroraPalette(int mode)
+{
+    if (mode == 1) return vec3(1.00, 0.16, 0.20);   // red
+    if (mode == 2) return vec3(0.62, 0.22, 0.95);   // purple
+    if (mode == 3) return vec3(0.18, 0.45, 1.00);   // blue
+    if (mode == 4) return vec3(1.00, 0.30, 0.65);   // pink
+    return vec3(0.15, 1.00, 0.40);                   // green
+}
+vec3 wolfAurora(vec3 dir, float t, float amount, int colorMode)
+{
+    if (dir.z < 0.02) return vec3(0.0);
+    vec3 sum = vec3(0.0);
+    for (int i = 0; i < 16; i++)
+    {
+        float h = 0.95 + 2.05 * pow(float(i) / 15.0, 1.6);    // 95 .. 300 km
+        vec2 p = dir.xy / dir.z * h;                           // the ray at that height
+        float lat = (p.y - (2.2 - 1.6 * amount)) / (0.9 + 1.6 * amount);
+        float emit = smoothstep(0.95, 1.05, h) * exp(-(h - 1.05) / 0.45) * exp(-lat * lat);
+        vec3 main;
+        if (colorMode == 5)
+        {
+            float hue = wolfAuroraNoise(vec2(p.x * 0.25 + t * 0.01, 3.7)) * 4.99;
+            main = wolfAuroraPalette(int(hue));
+        }
+        else
+        {
+            main = wolfAuroraPalette(colorMode);
+        }
+        vec3 c = mix(vec3(0.55, 0.20, 0.75), main, smoothstep(0.95, 1.12, h));
+        c = mix(c, vec3(0.90, 0.12, 0.18), smoothstep(1.7, 2.6, h) * (0.35 + 0.65 * amount));
+        sum += c * wolfAuroraCurtain(p, t) * emit;
+    }
+    return sum * (6.6 / 16.0) * smoothstep(0.02, 0.22, dir.z) * amount;
+}
+// </WolfViewer>
+
 void main()
 {
     vec3 color;
@@ -112,6 +181,16 @@ void main()
         color.rgb += rainbow(optic_d);
         color.rgb += halo_22;
         color.rgb *= 2.;
+        // <WolfViewer 2026-09-18> Light ADDED to the night sky. The dome frame is (north, up,
+        // east); wolfAurora wants (east, north, up). This buffer is linear and the WolfStorm
+        // numbers are display-referred, hence srgb_to_linear. Clouds are drawn after the dome,
+        // so they cover it; the fog and the daylight are already in wolf_aurora.
+        if (wolf_aurora > 0.0)
+        {
+            vec3 wd = normalize(vary_wolf_sky_dir);
+            color.rgb += srgb_to_linear(clamp(wolfAurora(vec3(wd.z, wd.x, wd.y), wolf_aurora_time, wolf_aurora, wolf_aurora_color), vec3(0.0), vec3(1.0)));
+        }
+        // </WolfViewer>
         color.rgb = clamp(color.rgb, vec3(0), vec3(5));
 
         frag_data[2] = vec4(0.0,0.0,0.0,GBUFFER_FLAG_SKIP_ATMOS);

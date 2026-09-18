@@ -39,6 +39,10 @@
     <combo_box.item label="Light Snow" value="lightsnow" />
     <combo_box.item label="Snowfall" value="snowfall" />
     <combo_box.item label="Blizzard" value="blizzard" />
+    <combo_box.item label="Morning Mist" value="mist" />
+    <combo_box.item label="Thick Fog" value="thickfog" />
+    <combo_box.item label="Northern Lights" value="aurora" />
+    <combo_box.item label="Aurora Storm" value="aurorastorm" />
   </combo_box>
   <button layout="topleft" follows="left|top" height="20" left_pad="4" top_delta="0" width="86"
           name="weather_preset_apply" label="Apply Preset" />
@@ -90,7 +94,7 @@
     <radio_item layout="topleft" height="16" top_pad="2" name="level1" value="1" label="Light Drizzle — Low density" />
   </radio_group>
   <slider layout="topleft" follows="left|top" height="16" left="252" top="126" width="218" name="weather_density"
-          label="Particle density" min_val="10" max_val="1000" increment="5" initial_value="100"
+          label="Particle density" min_val="10" max_val="4000" increment="5" initial_value="100"
           decimal_digits="0" show_text="true" label_width="112" text_width="34" />
   <slider layout="topleft" follows="left|top" height="16" left="252" top_pad="6" width="218" name="weather_velocity"
           label="Velocity" min_val="10" max_val="1000" increment="5" initial_value="100"
@@ -115,6 +119,28 @@
     <combo_box.item label="On Water" value="water" />
   </combo_box>
   <button layout="topleft" follows="left|top" height="20" left="252" top_pad="6" width="90" name="weather_reset" label="Reset" />
+  <!-- WolfViewer 2026-09-18: the aurora's colour (WolfWeatherProfile::mAuroraColor), beside Reset -
+       the only 20 px of free width left in the column. -->
+  <combo_box layout="topleft" follows="left|top" height="20" left_pad="8" top_delta="0" width="120" name="weather_aurora_color"
+             tool_tip="Northern Lights colour. Green is what the sky usually shows; Multi-coloured cycles through all of them.">
+    <combo_box.item label="Green" value="green" />
+    <combo_box.item label="Red" value="red" />
+    <combo_box.item label="Purple" value="purple" />
+    <combo_box.item label="Blue" value="blue" />
+    <combo_box.item label="Pink" value="pink" />
+    <combo_box.item label="Multi-coloured" value="multi" />
+  </combo_box>
+  <!-- WolfViewer 2026-09-18: fog (WolfWeatherProfile::mFog, 0..100), independent of the weather
+       type. The right column is the only one with room: Reset ends at 274, the status text starts
+       at 326 - room for exactly two sliders (280-296, 300-316) and no header. layout="topleft" is required on every child (tests/wolfweather_layout_test.py). -->
+  <slider layout="topleft" follows="left|top" height="16" left="252" top="280" width="218" name="weather_fog"
+          label="Fog" min_val="0" max_val="100" increment="1" initial_value="0"
+          decimal_digits="0" show_text="true" label_width="112" text_width="34"
+          tool_tip="How thick the air is. 0 is none; 25 sees about 750 m, 50 about 280 m, 75 about 105 m, 100 about 40 m. Works with rain, with snow, or on its own under Clear." />
+  <slider layout="topleft" follows="left|top" height="16" left="252" top_pad="4" width="218" name="weather_aurora"
+          label="Northern Lights" min_val="0" max_val="100" increment="1" initial_value="0"
+          decimal_digits="0" show_text="true" label_width="112" text_width="34"
+          tool_tip="The aurora, shown only after dark. 0 is none; 35 a faint green arc in the north, 70 bright moving curtains, 100 a storm overhead with red tops. Fog and cloud hide it." />
 
   <text layout="topleft" follows="left|top" height="32" left="10" top="326" width="460" word_wrap="true"
         name="weather_status" text_color="0.79 0.64 0.15 1" />

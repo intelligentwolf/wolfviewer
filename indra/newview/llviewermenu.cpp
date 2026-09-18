@@ -715,6 +715,65 @@ class WolfPhotoIsStrength : public view_listener_t
     }
 };
 // </WolfViewer>
+// <WolfViewer 2026-09-18> World > Weather > Fog. Source: menu_handler.js setWeatherFog - the same
+// gate and the same refusal as the rain and snow levels: your own fog applies only when nothing
+// else is deciding the weather, and the menu says who is rather than silently doing nothing.
+class WolfWeatherSetFog : public view_listener_t
+{
+    bool handleEvent(const LLSD& userdata)
+    {
+        if (!wolf_grid_tools_allowed()) return true;
+        const std::string by = WolfWeather::instance().overriddenBy();
+        if (!by.empty())
+        {
+            LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE",
+                by == "parcel" ? "The weather here is set by this parcel."
+                               : "The weather here is set for the whole region."));
+            return true;
+        }
+        WolfWeather::instance().setUserFog((S32)userdata.asInteger());
+        return true;
+    }
+};
+// Source: menu_handler.js setWeatherAurora - the same gate and refusal; and the hint that it
+// is a night sky, so choosing it at noon does not look like nothing happened.
+class WolfWeatherSetAurora : public view_listener_t
+{
+    bool handleEvent(const LLSD& userdata)
+    {
+        if (!wolf_grid_tools_allowed()) return true;
+        const std::string by = WolfWeather::instance().overriddenBy();
+        if (!by.empty())
+        {
+            LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE",
+                by == "parcel" ? "The weather here is set by this parcel."
+                               : "The weather here is set for the whole region."));
+            return true;
+        }
+        const S32 percent = (S32)userdata.asInteger();
+        WolfWeather::instance().setUserAurora(percent);
+        if (percent > 0 && WolfWeather::auroraAmount() <= 0.f)
+        {
+            LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE", "The northern lights show after dark."));
+        }
+        return true;
+    }
+};
+class WolfWeatherIsAurora : public view_listener_t
+{
+    bool handleEvent(const LLSD& userdata)
+    {
+        return WolfWeather::instance().isAurora((S32)userdata.asInteger());
+    }
+};
+class WolfWeatherIsFog : public view_listener_t
+{
+    bool handleEvent(const LLSD& userdata)
+    {
+        return WolfWeather::instance().isFog((S32)userdata.asInteger());
+    }
+};
+// </WolfViewer>
 static void wolf_weather_clear()
 {
     if (!wolf_grid_tools_allowed()) return;
@@ -12944,6 +13003,10 @@ void initialize_menus()
     view_listener_t::addMenu(new WolfWeatherIsEnabled(), "WolfWeather.IsEnabled");           // <WolfViewer 2026-09-12>
     view_listener_t::addMenu(new WolfWeatherSetLevel(), "WolfWeather.SetLevel");
     view_listener_t::addMenu(new WolfWeatherIsLevel(), "WolfWeather.IsLevel");
+    view_listener_t::addMenu(new WolfWeatherSetFog(), "WolfWeather.SetFog");   // <WolfViewer 2026-09-18/>
+    view_listener_t::addMenu(new WolfWeatherIsFog(), "WolfWeather.IsFog");     // <WolfViewer 2026-09-18/>
+    view_listener_t::addMenu(new WolfWeatherSetAurora(), "WolfWeather.SetAurora");   // <WolfViewer 2026-09-18/>
+    view_listener_t::addMenu(new WolfWeatherIsAurora(), "WolfWeather.IsAurora");     // <WolfViewer 2026-09-18/>
     commit.add("WolfWeather.Clear", boost::bind(&wolf_weather_clear));
     // <WolfViewer 2026-09-18> World > Photo Effects
     view_listener_t::addMenu(new WolfPhotoSetFilter(), "WolfPhoto.SetFilter");

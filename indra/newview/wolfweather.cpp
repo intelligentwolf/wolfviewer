@@ -16,6 +16,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "wolfweather.h"
+#include "llenvironment.h"   // <WolfViewer 2026-09-18/> auroraAmount(): the sun
 
 #include <cmath>           // cosf / sinf for the wind direction
 
@@ -201,7 +202,8 @@ void WolfWeatherPartSource::update(const F32 dt)
     mCarry += rate * llclamp(dt, 0.f, 0.1f);
     S32 n = (S32)mCarry;
     mCarry -= (F32)n;
-    // The clamped profile and time step bound work to at most 2240 attempts.
+    // The clamped profile and time step bound work to at most 8960 attempts a frame (blizzard
+    // 2240/s x density 4000 % x dt 0.1 s; it was 2240 while density stopped at 1000 %).
     // A fixed 120-per-frame cap made the same dense profile thinner at lower FPS.
     for (S32 i = 0; i < n; ++i)
     {
@@ -311,9 +313,64 @@ void WolfWeather::setLevel(Mode m, S32 level)
     apply();
 }
 
+// <WolfViewer 2026-09-18> Source: wolfweather.js setUserFog - World > Weather > Fog, the
+// resident's own fog (0..100); like the rain and snow choice it applies only when nothing else
+// is deciding the weather.
+void WolfWeather::setUserFog(S32 percent)
+{
+    mUserFog = llclamp(percent, WolfWeatherProfile::FOG_MIN, WolfWeatherProfile::FOG_MAX);
+    apply();
+}
+
+// <WolfViewer 2026-09-18> Source: wolfweather.js setUserAurora.
+void WolfWeather::setUserAurora(S32 percent)
+{
+    mUserAurora = llclamp(percent, WolfWeatherProfile::AURORA_MIN, WolfWeatherProfile::AURORA_MAX);
+    apply();
+}
+
+// Source: render_manager.js _applyWeatherAurora - the northern lights are a NIGHT sky: the
+// profile's amount faded in as the sun goes from just above the horizon (0.05) to well below it
+// (-0.12), so a region can leave aurora set and it simply appears after dusk. WolfStorm's fog
+// mix hides the aurora in the shader; here the sky's fog is in the vertex haze, which the added
+// light bypasses, so what the fog lets through is folded in with (1 - fog)^2.
+F32 WolfWeather::auroraAmount()
+{
+    if (!instanceExists()) return 0.f;
+    const WolfWeatherProfile& p = instance().mActive;
+    if (p.mAurora <= 0) return 0.f;
+    LLSettingsSky::ptr_t sky = LLEnvironment::instance().getCurrentSky();
+    if (!sky) return 0.f;
+    const F32 sun_z = sky->getSunDirection().mV[VZ];
+    F32 night = llclamp((0.05f - sun_z) / 0.17f, 0.f, 1.f);
+    night = night * night * (3.f - 2.f * night);
+    const F32 clear_air = 1.f - (F32)p.mFog / 100.f;
+    return ((F32)p.mAurora / 100.f) * night * clear_air * clear_air;
+}
+
+S32 WolfWeather::auroraColorMode()
+{
+    if (!instanceExists()) return 0;
+    return WolfWeatherProfile::auroraColorMode(instance().mActive.mAuroraColor);
+}
+
+// Source: render_manager.js _applyWeatherFog - the fog in the air right now as an extinction
+// coefficient, 1/metre, 0 for none. exp(-sigma * visibility) = 0.05, so sigma = ln(20) /
+// visibility. Read every frame by LLSettingsVOSky::applyToUniforms; mActive is already the
+// outcome of the whole precedence rule AND the Weather switch (off -> a default profile, fog 0),
+// so every way the weather ends is also how the fog ends.
+F32 WolfWeather::fogExtinction()
+{
+    if (!instanceExists()) return 0.f;
+    const S32 fog = instance().mActive.mFog;
+    return fog > 0 ? 2.9957f / WolfWeatherProfile::fogVisibility(fog) : 0.f;
+}
+
 void WolfWeather::clear()
 {
     mUser = Mode::NONE;
+    mUserAurora = 0;
+    mUserFog = 0;   // Source: menu_handler.js clearWeather - "Clear Weather" clears the air as well as the sky
     apply();
 }
 
@@ -405,6 +462,8 @@ void WolfWeather::apply()
         {
             prof.mKind  = region.mKind;
             prof.mLevel = region.mLevel;
+            prof.mAurora = region.mAurora;   // Source: wolfweather.js _applyPrecedence
+            prof.mFog   = region.mFog;   // Source: wolfweather.js _applyPrecedence - the region decides, so its fog
             mActiveSource = "region";
         }
         else
@@ -413,6 +472,12 @@ void WolfWeather::apply()
                         : (mUser == Mode::SNOW) ? WolfWeatherProfile::SNOW
                                                 : WolfWeatherProfile::CLEAR;
             prof.mLevel = (mUser == Mode::RAIN) ? mUserRainLevel : mUserSnowLevel;
+            // Source: wolfweather.js _applyPrecedence - the menu decides, so the MENU's fog.
+            // Never the stored region row's: `prof` began as rw.stored(), the region's LOOK,
+            // which is used even when that row is switched off, and its fog would seep into a
+            // resident's own rain.
+            prof.mFog   = mUserFog;
+            prof.mAurora = mUserAurora;   // same rule as the fog
             mActiveSource = "menu";
         }
         prof.mEnabled = true;

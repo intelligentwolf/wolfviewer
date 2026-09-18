@@ -142,6 +142,21 @@ public:
     /** Menu: pick a level 1..4 for a mode and turn it on at that level. */
     void setLevel(Mode m, S32 level);
     void clear();
+    // <WolfViewer 2026-09-18> fog. Source: wolfweather.js setUserFog / render_manager.js _applyWeatherFog.
+    /** Menu: the resident's own fog, 0..100 (0 = off). */
+    void setUserFog(S32 percent);
+    /** Menu tick: is THIS the fog in the air now (whoever set it)? */
+    bool isFog(S32 percent) const { return mActive.mFog == percent; }
+    /** The fog in the air now as an extinction coefficient, 1/metre; 0 = none. Safe before login and after shutdown. */
+    static F32 fogExtinction();
+    // <WolfViewer 2026-09-18> the northern lights. Source: wolfweather.js setUserAurora /
+    // render_manager.js _applyWeatherAurora.
+    void setUserAurora(S32 percent);
+    bool isAurora(S32 percent) const { return mActive.mAurora == percent; }
+    /** What skyF.glsl gets: aurora/100 x night x what the fog lets through. 0 = none, skip the march. */
+    static F32 auroraAmount();
+    /** The active profile's aurora colour as the shader's palette index (0 = green). */
+    static S32 auroraColorMode();
     /** Menu tick: is this mode what is ACTUALLY falling now (preview, parcel, region or user)? */
     bool isOn(Mode m) const { return modeOf(mActive.mKind) == m; }
     /** Menu tick: is this mode on at this level? */
@@ -178,6 +193,8 @@ private:
     Mode mUser = Mode::NONE;
     S32  mUserRainLevel = 2;
     S32  mUserSnowLevel = 2;
+    S32  mUserAurora = 0;       // <WolfViewer 2026-09-18/> Source: wolfweather.js userAurora
+    S32  mUserFog = 0;          // <WolfViewer 2026-09-18/> Source: wolfweather.js userFog
     Mode mForced = Mode::NONE;
     S32  mForcedLevel = 2;
     /** The whole profile a parcel prim asked for, so its look and sound travel with it. */

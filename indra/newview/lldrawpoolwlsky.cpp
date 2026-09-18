@@ -27,6 +27,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "lldrawpoolwlsky.h"
+#include "wolfweather.h"   // <WolfViewer 2026-09-18/> auroraAmount()
 
 #include "llerror.h"
 #include "llface.h"
@@ -189,6 +190,16 @@ void LLDrawPoolWLSky::renderSkyHazeDeferred(const LLVector3& camPosLocal, F32 ca
 
         sky_shader->bindTexture(LLShaderMgr::RAINBOW_MAP, rainbow_tex);
         sky_shader->bindTexture(LLShaderMgr::HALO_MAP,  halo_tex);
+
+        // <WolfViewer 2026-09-18> the northern lights (skyF.glsl wolfAurora). Source:
+        // render_manager.js _applyWeatherAurora. 0 skips the march entirely.
+        static LLStaticHashedString s_wolf_aurora("wolf_aurora");
+        static LLStaticHashedString s_wolf_aurora_time("wolf_aurora_time");
+        sky_shader->uniform1f(s_wolf_aurora, gCubeSnapshot ? 0.f : WolfWeather::auroraAmount());
+        sky_shader->uniform1f(s_wolf_aurora_time, fmodf(gFrameTimeSeconds, 100000.f));
+        static LLStaticHashedString s_wolf_aurora_color("wolf_aurora_color");
+        sky_shader->uniform1i(s_wolf_aurora_color, WolfWeather::auroraColorMode());
+        // </WolfViewer>
 
         F32 moisture_level  = (float)psky->getSkyMoistureLevel();
         F32 droplet_radius  = (float)psky->getSkyDropletRadius();

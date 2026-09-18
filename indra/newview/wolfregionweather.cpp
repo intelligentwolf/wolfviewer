@@ -419,6 +419,7 @@ void WolfRegionWeather::fetchCoro(std::string region_id, bool include_parcel, F3
                             << " level " << self.mProfile.mLevel
                             << (self.mProfile.mEnabled ? " (on)" : " (off)")
                             << " brightness " << self.mProfile.mBrightness
+                            << " fog " << self.mProfile.mFog
                             << "% density " << self.mProfile.mDensity
                             << "% sound " << (self.mProfile.mSound ? self.mProfile.mSoundPreset : "off")
                             << LL_ENDL;
@@ -682,6 +683,9 @@ bool WolfPanelWeather::postBuild()
     mAllowParcel    = getChild<LLCheckBoxCtrl>("weather_allow_parcel");
     mLadder         = getChild<LLRadioGroup>("weather_level");
     mBrightness     = getChild<LLSliderCtrl>("weather_brightness");
+    mAurora         = getChild<LLSliderCtrl>("weather_aurora");
+    mAuroraColor    = getChild<LLComboBox>("weather_aurora_color");   // <WolfViewer 2026-09-18/> Source: land_weather_tab.js wx-aurora
+    mFog            = getChild<LLSliderCtrl>("weather_fog");   // <WolfViewer 2026-09-18/> Source: land_weather_tab.js wx-fog
     mTint           = getChild<LLColorSwatchCtrl>("weather_tint");
     mTintAmount     = getChild<LLSliderCtrl>("weather_tint_amount");
     mMoveSpeed      = getChild<LLSliderCtrl>("weather_move");
@@ -711,6 +715,9 @@ bool WolfPanelWeather::postBuild()
     mAllowParcel->setCommitCallback(changed);
     mLadder->setCommitCallback(changed);
     mBrightness->setCommitCallback(changed);
+    mAurora->setCommitCallback(changed);
+    mAuroraColor->setCommitCallback(changed);
+    mFog->setCommitCallback(changed);
     mTint->setCommitCallback(changed);
     mTintAmount->setCommitCallback(changed);
     mMoveSpeed->setCommitCallback(changed);
@@ -823,6 +830,9 @@ void WolfPanelWeather::readControls()
                                            : !mUseRegion->getValue().asBoolean();
     if (mScope == REGION) mEditAllowParcel = mAllowParcel->getValue().asBoolean();
     mEdit.mBrightness = (S32)mBrightness->getValueF32();
+    mEdit.mAurora     = (S32)mAurora->getValueF32();
+    mEdit.mAuroraColor = mAuroraColor->getValue().asString();
+    mEdit.mFog        = (S32)mFog->getValueF32();
     mEdit.mTint       = LLColor4(mTint->get());
     mEdit.mTintAmount = (S32)mTintAmount->getValueF32();
     mEdit.mMoveSpeed  = (S32)mMoveSpeed->getValueF32();
@@ -847,6 +857,9 @@ void WolfPanelWeather::writeControls()
     mUseRegion->setValue(!mEdit.mEnabled);
     mAllowParcel->setValue(mEditAllowParcel);
     mBrightness->setValue((F32)mEdit.mBrightness);
+    mAurora->setValue((F32)mEdit.mAurora);
+    mAuroraColor->setValue(mEdit.mAuroraColor);
+    mFog->setValue((F32)mEdit.mFog);
     mTint->set(mEdit.mTint, true);
     mTintAmount->setValue((F32)mEdit.mTintAmount);
     mMoveSpeed->setValue((F32)mEdit.mMoveSpeed);
@@ -882,7 +895,7 @@ void WolfPanelWeather::writeControls()
     const bool editable = canEdit();
     static const char* const CONTROLS[] = {
         "weather_preset", "weather_preset_apply", "weather_inv_preset", "weather_kind",
-        "weather_enabled", "weather_use_region", "weather_allow_parcel", "weather_level", "weather_brightness", "weather_tint",
+        "weather_enabled", "weather_use_region", "weather_allow_parcel", "weather_level", "weather_brightness", "weather_fog", "weather_aurora", "weather_aurora_color", "weather_tint",
         "weather_tint_amount", "weather_move", "weather_density", "weather_velocity",
         "weather_size", "weather_sound", "weather_volume", "weather_ambience",
         "weather_near", "weather_reset", "weather_apply",

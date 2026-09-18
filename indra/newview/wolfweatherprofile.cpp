@@ -153,8 +153,11 @@ void WolfWeatherProfile::clampAll()
     mVelocity   = clamp_int(mVelocity, VELOCITY_MIN, VELOCITY_MAX);
     mSize       = clamp_int(mSize, PSIZE_MIN, PSIZE_MAX);
     mVolume     = clamp_int(mVolume, VOLUME_MIN, VOLUME_MAX);
+    mAurora     = clamp_int(mAurora, AURORA_MIN, AURORA_MAX);   // Source: weather_profile.js normalise()
+    mFog        = clamp_int(mFog, FOG_MIN, FOG_MAX);   // Source: weather_profile.js normalise()
     if (!in_list(soundPresets(), mSoundPreset)) mSoundPreset = "thunder";
     if (!in_list(soundLayers(), mSoundLayer))   mSoundLayer  = "soft";
+    if (!in_list(auroraColors(), mAuroraColor)) mAuroraColor = "green";   // Source: weather_profile.js normalise()
 }
 
 void WolfWeatherProfile::fromLLSD(const LLSD& sd)
@@ -177,6 +180,9 @@ void WolfWeatherProfile::fromLLSD(const LLSD& sd)
     mSize        = sd_int(sd, "size", mSize);
     mSound       = sd_bool(sd, "sound", mSound);
     mVolume      = sd_int(sd, "volume", mVolume);
+    mAurora      = sd_int(sd, "aurora", mAurora);
+    mAuroraColor = sd_str(sd, "auroraColor", mAuroraColor);   // Source: weather_profile.js normalise()
+    mFog         = sd_int(sd, "fog", mFog);   // Source: weather_profile.js normalise(); a row from before the column existed has no key and keeps 0
     mSoundPreset = sd_str(sd, "soundPreset", mSoundPreset);
     mSoundLayer  = sd_str(sd, "soundLayer", mSoundLayer);
     clampAll();
@@ -197,9 +203,19 @@ LLSD WolfWeatherProfile::toLLSD() const
     sd["size"]        = mSize;
     sd["sound"]       = mSound;
     sd["volume"]      = mVolume;
+    sd["aurora"]      = mAurora;
+    sd["auroraColor"] = mAuroraColor;   // Source: weather_profile.js toJSON()
+    sd["fog"]         = mFog;   // Source: weather_profile.js toJSON()
     sd["soundPreset"] = mSoundPreset;
     sd["soundLayer"]  = mSoundLayer;
     return sd;
+}
+
+// Source: weather_profile.js fogVisibility() - 2000 * 0.02^(fog/100) metres.
+F32 WolfWeatherProfile::fogVisibility(S32 fog)
+{
+    const S32 f = clamp_int(fog, FOG_MIN, FOG_MAX);
+    return f <= 0 ? 0.f : 2000.f * powf(0.02f, (F32)f / 100.f);
 }
 
 bool WolfWeatherProfile::operator==(const WolfWeatherProfile& o) const
@@ -210,7 +226,9 @@ bool WolfWeatherProfile::operator==(const WolfWeatherProfile& o) const
         && mMoveSpeed == o.mMoveSpeed && mDensity == o.mDensity
         && mVelocity == o.mVelocity && mSize == o.mSize
         && mSound == o.mSound && mVolume == o.mVolume
-        && mSoundPreset == o.mSoundPreset && mSoundLayer == o.mSoundLayer;
+        && mSoundPreset == o.mSoundPreset && mSoundLayer == o.mSoundLayer
+        && mAurora == o.mAurora && mAuroraColor == o.mAuroraColor   // Source: weather_profile.js equal()
+        && mFog == o.mFog;   // Source: weather_profile.js equal() - without it a fog-only edit never lights Apply
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════
@@ -259,11 +277,33 @@ const std::vector<WolfWeatherProfile::Preset>& WolfWeatherProfile::soundLayers()
     return sList;
 }
 
+// Source: weather_profile.js AURORA_COLORS - same ids, same order (the order IS the shader's palette index).
+const std::vector<WolfWeatherProfile::Preset>& WolfWeatherProfile::auroraColors()
+{
+    static const std::vector<Preset> list = {
+        { "green",  "Green" }, { "red", "Red" }, { "purple", "Purple" },
+        { "blue",   "Blue" },  { "pink", "Pink" }, { "multi", "Multi-coloured" },
+    };
+    return list;
+}
+
+S32 WolfWeatherProfile::auroraColorMode(const std::string& id)
+{
+    const std::vector<Preset>& list = auroraColors();
+    for (size_t i = 0; i < list.size(); ++i) if (list[i].mId == id) return (S32)i;
+    return 0;
+}
+
 // static
 WolfWeatherProfile WolfWeatherProfile::applyPreset(const WolfWeatherProfile& base,
                                                    const std::string& id)
 {
     WolfWeatherProfile p = base;
+    // Source: weather_profile.js applyPreset - a preset is a COMPLETE sky: one that does not
+    // mention fog means no fog, not "whatever fog was there before".
+    p.mFog = 0;
+    p.mAurora = 0;
+    p.mAuroraColor = "green";
     auto set = [&p](Kind kind, S32 level, S32 bright, const char* hex, S32 tintAmt, S32 move,
                     S32 density, S32 velocity, S32 size, bool sound, S32 vol,
                     const char* amb, const char* near_layer)
@@ -286,7 +326,14 @@ WolfWeatherProfile WolfWeatherProfile::applyPreset(const WolfWeatherProfile& bas
     else if (id == "thunderstorm") set(RAIN, 4,  55, "#8fb4e6", 100, 180, 170, 140, 120, true, 85, "thunder", "heavy");
     else if (id == "lightsnow")    set(SNOW, 1,  90, "#ffffff", 100,  50,  90,  80, 100, true, 30, "wind",    "none");
     else if (id == "snowfall")     set(SNOW, 2,  95, "#ffffff", 100,  70, 110, 100, 110, true, 40, "wind",    "none");
-    else if (id == "blizzard")     set(SNOW, 4, 100, "#eef4ff", 100, 600, 300, 160, 120, true, 80, "wind",    "none");
+    else if (id == "blizzard")   { set(SNOW, 4, 100, "#eef4ff", 100, 600, 300, 160, 120, true, 80, "wind",    "none"); p.mFog = 45; }
+    // Source: weather_profile.js PRESETS mist / thickfog - fog on its own: CLEAR means nothing
+    // falling, not no weather.
+    else if (id == "mist")       { p.mKind = CLEAR; p.mLevel = 2; p.mEnabled = true; p.mSound = false; p.mFog = 30; }
+    else if (id == "thickfog")   { p.mKind = CLEAR; p.mLevel = 2; p.mEnabled = true; p.mSound = false; p.mFog = 80; }
+    // Source: weather_profile.js PRESETS aurora / aurorastorm
+    else if (id == "aurora")      { p.mKind = CLEAR; p.mLevel = 2; p.mEnabled = true; p.mSound = false; p.mAurora = 70; }
+    else if (id == "aurorastorm") { p.mKind = CLEAR; p.mLevel = 2; p.mEnabled = true; p.mSound = false; p.mAurora = 100; p.mAuroraColor = "multi"; }
     else return base;
 
     p.clampAll();
@@ -374,6 +421,10 @@ bool WolfWeatherProfile::fromDescription(const std::string& lower)
     mVelocity   = desc_int(lower, "vel",    mVelocity);
     mSize       = desc_int(lower, "size",   mSize);
     mVolume     = desc_int(lower, "vol",    mVolume);
+    mAurora     = desc_int(lower, "aurora", mAurora);
+    const std::string acol = desc_word(lower, "acol");   // Source: weather_profile.js fromDescription word('acol')
+    if (!acol.empty()) mAuroraColor = acol;   // Source: weather_profile.js fromDescription num('aurora')
+    mFog        = desc_int(lower, "fog",    mFog);      // Source: weather_profile.js fromDescription num('fog')
 
     const std::string col = desc_word(lower, "col");
     if (!col.empty()) mTint = colorFromHex(col, mTint);

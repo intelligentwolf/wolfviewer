@@ -1671,6 +1671,102 @@
            function="WolfWeather.SetLevel"
            parameter="snow4" />
         </menu_item_check>
+        <menu_item_separator />
+        <!-- WolfViewer 2026-09-18: your own fog, with rain, snow or on its own. The parameter is
+             the fog percent; the five steps are weather_profile.js FOG_LEVELS. The tick shows the
+             fog actually in the air, so a region's or a parcel's fog shows here too. -->
+        <menu_item_check
+         label="Fog: Off"
+         name="WolfWeatherFog0">
+          <menu_item_check.on_check
+           function="WolfWeather.IsFog"
+           parameter="0" />
+          <menu_item_check.on_click
+           function="WolfWeather.SetFog"
+           parameter="0" />
+        </menu_item_check>
+        <menu_item_check
+         label="Fog: Light"
+         name="WolfWeatherFog25">
+          <menu_item_check.on_check
+           function="WolfWeather.IsFog"
+           parameter="25" />
+          <menu_item_check.on_click
+           function="WolfWeather.SetFog"
+           parameter="25" />
+        </menu_item_check>
+        <menu_item_check
+         label="Fog: Moderate"
+         name="WolfWeatherFog50">
+          <menu_item_check.on_check
+           function="WolfWeather.IsFog"
+           parameter="50" />
+          <menu_item_check.on_click
+           function="WolfWeather.SetFog"
+           parameter="50" />
+        </menu_item_check>
+        <menu_item_check
+         label="Fog: Heavy"
+         name="WolfWeatherFog75">
+          <menu_item_check.on_check
+           function="WolfWeather.IsFog"
+           parameter="75" />
+          <menu_item_check.on_click
+           function="WolfWeather.SetFog"
+           parameter="75" />
+        </menu_item_check>
+        <menu_item_check
+         label="Fog: Dense"
+         name="WolfWeatherFog100">
+          <menu_item_check.on_check
+           function="WolfWeather.IsFog"
+           parameter="100" />
+          <menu_item_check.on_click
+           function="WolfWeather.SetFog"
+           parameter="100" />
+        </menu_item_check>
+        <menu_item_separator />
+        <!-- WolfViewer 2026-09-18: the northern lights, night only. weather_profile.js AURORA_LEVELS. -->
+        <menu_item_check
+         label="Northern Lights: Off"
+         name="WolfWeatherAurora0">
+          <menu_item_check.on_check
+           function="WolfWeather.IsAurora"
+           parameter="0" />
+          <menu_item_check.on_click
+           function="WolfWeather.SetAurora"
+           parameter="0" />
+        </menu_item_check>
+        <menu_item_check
+         label="Northern Lights: Faint"
+         name="WolfWeatherAurora35">
+          <menu_item_check.on_check
+           function="WolfWeather.IsAurora"
+           parameter="35" />
+          <menu_item_check.on_click
+           function="WolfWeather.SetAurora"
+           parameter="35" />
+        </menu_item_check>
+        <menu_item_check
+         label="Northern Lights: Bright"
+         name="WolfWeatherAurora70">
+          <menu_item_check.on_check
+           function="WolfWeather.IsAurora"
+           parameter="70" />
+          <menu_item_check.on_click
+           function="WolfWeather.SetAurora"
+           parameter="70" />
+        </menu_item_check>
+        <menu_item_check
+         label="Northern Lights: Storm"
+         name="WolfWeatherAurora100">
+          <menu_item_check.on_check
+           function="WolfWeather.IsAurora"
+           parameter="100" />
+          <menu_item_check.on_click
+           function="WolfWeather.SetAurora"
+           parameter="100" />
+        </menu_item_check>
       </menu>
       <menu
          create_jump_keys="true"

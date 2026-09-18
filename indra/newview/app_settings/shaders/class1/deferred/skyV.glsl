@@ -34,6 +34,10 @@ in vec3 position;
 // Output parameters
 out vec3 vary_HazeColor;
 out float vary_LightNormPosDot;
+// <WolfViewer 2026-09-18> the view ray in the dome's own frame, for the aurora in skyF.glsl
+// (wolfAurora). That frame is Y up, X north, Z east: LLDrawPoolWLSky rotates 120 degrees about
+// (1,1,1) and LLEnvironment::toCFR is (world.y, world.z, world.x).
+out vec3 vary_wolf_sky_dir;
 
 #ifdef HAS_HDRI
 out vec4 vary_position;
@@ -76,6 +80,7 @@ void main()
 
     // Get relative position
     vec3 rel_pos = position.xyz - camPosLocal.xyz + vec3(0, 50, 0);
+    vary_wolf_sky_dir = rel_pos;   // <WolfViewer 2026-09-18/> before the altitude scaling below
 
 #ifdef HAS_HDRI
     vary_rel_pos = rel_pos;

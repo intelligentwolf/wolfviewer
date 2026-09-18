@@ -28,6 +28,7 @@
 #include "llviewerprecompiledheaders.h"
 #include "llviewercontrol.h"
 #include "llsettingsvo.h"
+#include "wolfweather.h"   // <WolfViewer 2026-09-18/> fogExtinction()
 
 #include "pipeline.h"
 
@@ -722,6 +723,33 @@ inline void draw_real(LLShaderUniforms* shader, F32 value, S32 shader_key)
     shader->uniform1f(shader_key, value);
 }
 
+// <WolfViewer 2026-09-18> Weather fog (WolfWeatherProfile::mFog). Source: render_manager.js
+// _applyWeatherFog, which sets a FogExp2 density from the same visibility; here the atmosphere
+// already IS a fog model, so it is thickened rather than a second one added.
+// calcAtmosphericVars (windlight/atmosphericsFuncs.glsl:79-84) attenuates by
+//     exp(-(blue_density + haze_density) * distance * density_multiplier * distance_multiplier)
+// so the extinction per metre is (blue_density + haze_density) * density_multiplier *
+// distance_multiplier, and the weather's own extinction is ADDED by raising distance_multiplier.
+// Deliberately NOT haze_density or density_multiplier: those also feed light_atten (line 66),
+// and the values fog needs there put the sun out entirely. distance_multiplier appears in that
+// one exponent and nowhere else - sky (skyV.glsl), clouds, terrain, objects and water alike - so
+// everything fogs together and the colour is the environment's own horizon haze.
+// BOTH uploads of the uniform use this (applyToUniforms and applySpecial); fixing one alone
+// leaves a shader group un-fogged. It runs every frame (LLEnvironment::update ->
+// updateSettingsUniforms) and fogExtinction() is 0 whenever the weather is clear, switched off
+// or overridden, so there is nothing to revert - and the SETTINGS are never touched: a region's
+// or a resident's EEP is exactly what it was.
+static F32 wolf_fogged_distance_multiplier(const LLSettingsSky& sky)
+{
+    const F32 distance_multiplier = sky.getDistanceMultiplier();
+    const F32 fog_extinction = WolfWeather::fogExtinction();
+    if (fog_extinction <= 0.f) return distance_multiplier;
+    const LLColor3 blue = sky.getBlueDensity();
+    const F32 haze = llmax((blue.mV[0] + blue.mV[1] + blue.mV[2]) / 3.f + sky.getHazeDensity(), 0.001f);
+    return distance_multiplier + fog_extinction / (haze * llmax(sky.getDensityMultiplier(), 0.0000001f));
+}
+// </WolfViewer>
+
 void LLSettingsVOSky::applyToUniforms(void* ptarget)
 {
     LLShaderUniforms* shader = &((LLShaderUniforms*)ptarget)[LLGLSLShader::SG_ANY];
@@ -732,7 +760,7 @@ void LLSettingsVOSky::applyToUniforms(void* ptarget)
     draw_real(shader, getHazeDensity(), LLShaderMgr::HAZE_DENSITY);
     draw_real(shader, getHazeHorizon(), LLShaderMgr::HAZE_HORIZON);
     draw_real(shader, getDensityMultiplier(), LLShaderMgr::DENSITY_MULTIPLIER);
-    draw_real(shader, getDistanceMultiplier(), LLShaderMgr::DISTANCE_MULTIPLIER);
+    draw_real(shader, wolf_fogged_distance_multiplier(*this), LLShaderMgr::DISTANCE_MULTIPLIER);   // <WolfViewer 2026-09-18/> weather fog
     draw_color(shader, getCloudPosDensity2(), LLShaderMgr::CLOUD_POS_DENSITY2);
     draw_real(shader, getCloudScale(), LLShaderMgr::CLOUD_SCALE);
     draw_real(shader, getCloudShadow(), LLShaderMgr::CLOUD_SHADOW);
@@ -863,7 +891,7 @@ void LLSettingsVOSky::applySpecial(void *ptarget, bool force)
     shader->uniform1i(LLShaderMgr::SUN_UP_FACTOR, getIsSunUp() ? 1 : 0);
     shader->uniform1f(LLShaderMgr::SUN_MOON_GLOW_FACTOR, getSunMoonGlowFactor());
     shader->uniform1f(LLShaderMgr::DENSITY_MULTIPLIER, getDensityMultiplier());
-    shader->uniform1f(LLShaderMgr::DISTANCE_MULTIPLIER, getDistanceMultiplier());
+    shader->uniform1f(LLShaderMgr::DISTANCE_MULTIPLIER, wolf_fogged_distance_multiplier(*this));   // <WolfViewer 2026-09-18/> weather fog
 
     shader->uniform1f(LLShaderMgr::GAMMA, g);
 }

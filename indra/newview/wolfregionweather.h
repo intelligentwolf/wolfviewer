@@ -278,6 +278,9 @@ private:
     LLCheckBoxCtrl*    mAllowParcel = nullptr;
     LLRadioGroup*      mLadder = nullptr;
     LLSliderCtrl*      mBrightness = nullptr;
+    LLSliderCtrl* mAurora = nullptr;
+    LLComboBox*   mAuroraColor = nullptr;   // <WolfViewer 2026-09-18/> Source: land_weather_tab.js wx-acol       // <WolfViewer 2026-09-18/> Source: land_weather_tab.js wx-aurora
+    LLSliderCtrl* mFog = nullptr;          // <WolfViewer 2026-09-18/> Source: land_weather_tab.js wx-fog
     LLColorSwatchCtrl* mTint = nullptr;
     LLSliderCtrl*      mTintAmount = nullptr;
     LLSliderCtrl*      mMoveSpeed = nullptr;

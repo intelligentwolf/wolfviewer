@@ -177,7 +177,8 @@ vec4 wsTriplanar(sampler2D d, vec2 uvTop, vec2 uvX, vec2 uvY, vec3 w, float farB
 // </WolfViewer>
 
 // <WolfViewer 2026-09-10> Painted roads and tracks (wolfterrainpaint.cpp; Build > Paint). The
-// paint map (RGBA16F) holds per texel: R,G = a slot-coded radius (0.25 + 0.2·slot) times
+// paint map (RGBA16F) holds per texel: R,G = a slot-coded radius (0.25 + 0.2·slot, slots 0-5,
+// WolfTerrainPaint::SLOT_R0 / SLOT_DR; a code above 1 is fine in a half float) times
 // (cos, sin) of the along-phase of the nearest stroke, B = metres across the band from its
 // left edge / tile, A = coverage. The slot is read from the NEAREST texel (a bilinear blend of
 // two radii would decode as a third texture along a seam); the angle, the across coordinate
@@ -193,22 +194,25 @@ uniform sampler2D wolfPaintTex0;
 uniform sampler2D wolfPaintTex1;
 uniform sampler2D wolfPaintTex2;
 uniform sampler2D wolfPaintTex3;
+uniform sampler2D wolfPaintTex4;   // [6 SLOTS 2026-09-19] WolfTerrainPaint::SLOTS = 6
+uniform sampler2D wolfPaintTex5;
 uniform float wolf_paint_on;
 uniform vec2  wolf_paint_size;     // metres the paint map covers ...
 uniform vec2  wolf_paint_origin;   // ... starting here, region metres: (0,0) unless the region is
                                    // too big for one map and the map is a camera-following window
-uniform vec4  wolf_paint_mode;   // per slot: 0 follow the stroke, 1 world grid
-uniform vec4  wolf_paint_tile;   // per slot: metres per repeat (world grid)
-uniform vec4  wolf_paint_offx;   // per slot: region origin mod tile (metres)
-uniform vec4  wolf_paint_offy;
+uniform float wolf_paint_mode[6];  // per slot (WolfTerrainPaint::SLOTS): 0 follow the stroke, 1 world grid
+uniform float wolf_paint_tile[6];  // per slot: metres per repeat (world grid)
+uniform float wolf_paint_offx[6];  // per slot: region origin mod tile (metres)
+uniform float wolf_paint_offy[6];
 vec4 wolfPaintSample(int slot, vec2 uv, vec2 ddx, vec2 ddy)
 {
     if (slot == 0) return textureGrad(wolfPaintTex0, uv, ddx, ddy);
     if (slot == 1) return textureGrad(wolfPaintTex1, uv, ddx, ddy);
     if (slot == 2) return textureGrad(wolfPaintTex2, uv, ddx, ddy);
-    return textureGrad(wolfPaintTex3, uv, ddx, ddy);
+    if (slot == 3) return textureGrad(wolfPaintTex3, uv, ddx, ddy);
+    if (slot == 4) return textureGrad(wolfPaintTex4, uv, ddx, ddy);
+    return textureGrad(wolfPaintTex5, uv, ddx, ddy);
 }
-float wolfPaintSlotValue(vec4 v, int slot) { return slot == 0 ? v.x : (slot == 1 ? v.y : (slot == 2 ? v.z : v.w)); }
 vec3 wolfTerrainPaint(vec3 ground, vec2 region_xy)
 {
     if (wolf_paint_on < 0.5) return ground;
@@ -223,16 +227,17 @@ vec3 wolfTerrainPaint(vec3 ground, vec2 region_xy)
     if (cov < 0.004) return ground;
     vec2 psz = vec2(textureSize(wolfPaintMap, 0));
     vec2 nrg = texelFetch(wolfPaintMap, ivec2(clamp(puv * psz, vec2(0.0), psz - 1.0)), 0).rg;
-    int slot = int(clamp(floor((length(nrg) - 0.15) / 0.2), 0.0, 3.0));
+    // floor((r - (SLOT_R0 - SLOT_DR / 2)) / SLOT_DR) for r = 0.25 + 0.2 * slot, slots 0-5 (wolfterrainpaint.h)
+    int slot = int(clamp(floor((length(nrg) - 0.15) / 0.2), 0.0, 5.0));
     float r2 = max(dot(cs, cs), 1e-4);
     float along = fract(atan(cs.y, cs.x) / 6.2831853 + 1.0);
     vec2 uvRoad = vec2(pm.b, along);
     vec2 ddxRoad = vec2(dbx, (cs.x * dcx.y - cs.y * dcx.x) / r2 / 6.2831853);
     vec2 ddyRoad = vec2(dby, (cs.x * dcy.y - cs.y * dcy.x) / r2 / 6.2831853);
-    float tile = max(wolfPaintSlotValue(wolf_paint_tile, slot), 0.01);
-    vec2 uvWorld = (region_xy + vec2(wolfPaintSlotValue(wolf_paint_offx, slot), wolfPaintSlotValue(wolf_paint_offy, slot))) / tile;
+    float tile = max(wolf_paint_tile[slot], 0.01);
+    vec2 uvWorld = (region_xy + vec2(wolf_paint_offx[slot], wolf_paint_offy[slot])) / tile;
     vec2 ddxWorld = dwx / tile, ddyWorld = dwy / tile;
-    bool world = wolfPaintSlotValue(wolf_paint_mode, slot) > 0.5;
+    bool world = wolf_paint_mode[slot] > 0.5;
     vec4 c = wolfPaintSample(slot, world ? uvWorld : uvRoad, world ? ddxWorld : ddxRoad, world ? ddyWorld : ddyRoad);
     // The texture's own alpha is respected on top of the stroke's opacity in the coverage.
     return mix(ground, c.rgb, cov * c.a);

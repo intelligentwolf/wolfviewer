@@ -89,7 +89,9 @@ S32 clamp_terrain_mapping(S32 mapping)
 //   detail_[0..3]_normal               #if TERRAIN_PBR_DETAIL >= NORMAL (-2)              4
 //   detail_[0..3]_emissive             #if TERRAIN_PBR_DETAIL >= EMISSIVE (0)             4
 //   wolfCausticTex[01]                 WolfViewer 2026-09-06 caustics                     2
-//   wolfPaintMap, wolfPaintTex[0..3]   WolfViewer 2026-09-10 painted roads                5
+//   wolfPaintMap, wolfPaintTex[0..5]   WolfViewer 2026-09-10 painted roads, six slots     7
+//                                      since 2026-09-19 (WolfTerrainPaint::SLOTS)
+//   wolfShelterMap                     WolfViewer 2026-09-18 snow cover                   1
 // Occlusion (-1) shares detail_N_metallic_roughness, so -1 and -2 cost the same.
 // KEEP IN STEP WITH pbrterrainF.glsl -- adding a sampler there without adding it here puts the
 // count back out of touch with the hardware.
@@ -99,14 +101,14 @@ static S32 terrain_sampler_count(S32 detail)
     if (detail >= TERRAIN_PBR_DETAIL_METALLIC_ROUGHNESS) { n += 4; }
     if (detail >= TERRAIN_PBR_DETAIL_NORMAL)             { n += 4; }
     if (detail >= TERRAIN_PBR_DETAIL_EMISSIVE)           { n += 4; }
-    return n + 7;                                               // WolfViewer caustics + paint
+    return n + 2 + 7 + 1;                                       // WolfViewer caustics + paint + shelter
 }
 
 // Lower the PBR terrain detail level until the fragment shader fits the GPU's sampler budget.
 //
 // Nothing upstream checks this: RenderTerrainPBRDetail comes from featuretable_*.txt, which is a
 // hand-written guess per GPU class and cannot know how many samplers the shader actually
-// declares. Our fork added seven (caustics and painted roads), which pushed the shader past the
+// declares. Our fork added ten (caustics, painted roads, snow cover), which pushed the shader past the
 // 16 texture image units an Apple GPU reports -- GL_MAX_TEXTURE_IMAGE_UNITS is 32 on desktop
 // NVIDIA and AMD, so it linked everywhere we tested and failed only on Macs, where the link error
 // was "No definition of get_terrain_mix_weights in fragment shader". That aborted
@@ -1195,7 +1197,7 @@ bool LLViewerShaderMgr::loadShadersWater()
             {
                 LL_WARNS("ShaderLoading") << "Water: advanced water needs " << before_ours + 6
                                           << " texture image units, this GPU has " << units
-                                          << " -- compiling Firestorm's water instead" << LL_ENDL;
+                                          << " -- compiling the stock water instead" << LL_ENDL;
                 const std::string lost = "advanced water (waves, wakes and shore depth)";
                 if (std::find(sGraphicsFallbacks.begin(), sGraphicsFallbacks.end(), lost) == sGraphicsFallbacks.end())
                 {

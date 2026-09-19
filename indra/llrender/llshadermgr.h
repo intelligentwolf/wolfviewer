@@ -391,6 +391,8 @@ public:
         WOLF_PAINT_TEX1,                    // "wolfPaintTex1"
         WOLF_PAINT_TEX2,                    // "wolfPaintTex2"
         WOLF_PAINT_TEX3,                    // "wolfPaintTex3"
+        WOLF_PAINT_TEX4,                    // "wolfPaintTex4" [6 SLOTS 2026-09-19] WolfTerrainPaint::SLOTS = 6
+        WOLF_PAINT_TEX5,                    // "wolfPaintTex5"
         WOLF_SHELTER_MAP,                   // "wolfShelterMap" [SNOW COVER 2026-09-18] wolfweather.cpp
         // </WolfViewer>
         END_RESERVED_UNIFORMS

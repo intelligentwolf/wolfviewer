@@ -850,7 +850,7 @@ bool WolfTerrainPaint::rasterSegment(Layer& L, F32 x0, F32 y0, F32 x1, F32 y1, F
  * much ground shows through the paint, not a claim on the texel: the brush decides ownership,
  * opacity only the blend. terrain_paint.js _composite is the same rule; keep them in step.
  *
- * Texel (RGBA16F): R,G = (0.25 + 0.2·slot)·(cos φ, sin φ), φ = 2π·along/tile (0 for a
+ * Texel (RGBA16F): R,G = (SLOT_R0 + SLOT_DR·slot)·(cos φ, sin φ), φ = 2π·along/tile (0 for a
  * world-grid slot); B = metres across from the left edge of travel / tile (0 for a world-grid
  * slot); A = coverage.
  */
@@ -864,7 +864,7 @@ void WolfTerrainPaint::composite(Layer& L, const Box& bb, const Stroke& s, const
     const bool erase = s.mSlot < 0;
     const F32 tile = erase ? 4.f : L.mScales[s.mSlot];
     const bool world = !erase && L.mWorld[s.mSlot];
-    const F32 radius = erase ? 0.f : 0.25f + 0.2f * (F32)s.mSlot;
+    const F32 radius = erase ? 0.f : SLOT_R0 + SLOT_DR * (F32)s.mSlot;   // the slot code (see SLOT_R0)
     const bool same = &src == &dst;
     for (S32 j = bb.y0; j < bb.y1; ++j)
     {
@@ -1012,7 +1012,7 @@ void WolfTerrainPaint::bind(LLGLSLShader* shader, LLViewerRegion* regionp)
     static LLStaticHashedString s_offx("wolf_paint_offx");
     static LLStaticHashedString s_offy("wolf_paint_offy");
     const LLVector3d origin = regionp->getOriginGlobal();
-    F32 mode[4], tile[4], offx[4], offy[4];
+    F32 mode[SLOTS], tile[SLOTS], offx[SLOTS], offy[SLOTS];
     for (S32 i = 0; i < SLOTS; ++i)
     {
         const F32 t = llmax(L->mScales[i], 0.01f);
@@ -1021,10 +1021,10 @@ void WolfTerrainPaint::bind(LLGLSLShader* shader, LLViewerRegion* regionp)
         offx[i] = (F32)fmod(origin.mdV[VX], (F64)t);
         offy[i] = (F32)fmod(origin.mdV[VY], (F64)t);
     }
-    shader->uniform4fv(s_mode, 1, mode);
-    shader->uniform4fv(s_tile, 1, tile);
-    shader->uniform4fv(s_offx, 1, offx);
-    shader->uniform4fv(s_offy, 1, offy);
+    shader->uniform1fv(s_mode, SLOTS, mode);
+    shader->uniform1fv(s_tile, SLOTS, tile);
+    shader->uniform1fv(s_offx, SLOTS, offx);
+    shader->uniform1fv(s_offy, SLOTS, offy);
 }
 
 void WolfTerrainPaint::unbind(LLGLSLShader* shader)

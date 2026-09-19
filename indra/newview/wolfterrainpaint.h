@@ -47,15 +47,16 @@ class LLVOWater;
 // direction the person is painting so they can draw roads"; "add transparency level".
 //
 // RECORD (wolfstorm.app php/terrain_paint.php, table robust.terrain_paint), one per region:
-//   textures: four slots {id, scale} (scale = metres of stroke one repeat of the texture
-//   covers along it), strokes: {t (slot 0-3, -1 = erase), w (width m), o (opacity), p
+//   textures: six slots {id, scale} (scale = metres of stroke one repeat of the texture
+//   covers along it), strokes: {t (slot 0-5, -1 = erase), w (width m), o (opacity), p
 //   (region-metre polyline x,y,...)}. Later strokes cover earlier ones.
 //
-// RENDERING: per region an RGBA8 PAINT MAP (4 px/m, at most 2048 px a side for the agent's
-// region, 1024 for a neighbour) rasterised from the strokes: R,G = cos,sin of the along-phase
-// (2π · metres along / tile) of the nearest stroke — an angle survives bilinear filtering where
-// a wrapped fraction would not — B = (slot + across)/4 (across 0 = the left edge of travel,
-// 1 = the right), A = feathered coverage × opacity. terrainF.glsl / pbrterrainF.glsl
+// RENDERING: per region an RGBA16F PAINT MAP (4 px/m, at most 2048 px a side for the agent's
+// region, 1024 for a neighbour) rasterised from the strokes (composite()): R,G = a slot-coded
+// radius (SLOT_R0 + SLOT_DR · slot) times cos,sin of the along-phase (2π · metres along / tile)
+// of the nearest stroke — an angle and a radius survive bilinear filtering where a wrapped
+// fraction would not — B = metres across the band from the left edge of travel / tile,
+// A = feathered coverage × opacity. terrainF.glsl / pbrterrainF.glsl
 // (wolfTerrainPaint) decode it and mix the palette texture — its x across the band, its y
 // along it — over the ground after the composition blend, only once the region's own detail
 // textures and every palette texture in use have loaded. Bound by lldrawpoolterrain.cpp
@@ -71,7 +72,15 @@ class WolfTerrainPaint : public LLSingleton<WolfTerrainPaint>
     ~WolfTerrainPaint();
 
 public:
-    static constexpr S32 SLOTS = 4;
+    // [6 SLOTS 2026-09-19] Palette textures per region (four until today): php/terrain_paint.php
+    // PAINT_SLOTS and WolfStorm TerrainPaint.SLOTS are the same number. A slot is written into
+    // the paint map as the radius SLOT_R0 + SLOT_DR * slot (0.25 … 1.25; the map is RGBA16F, so
+    // a code above 1 is kept as written) and read back by terrainF.glsl / pbrterrainF.glsl as
+    // floor((r - (SLOT_R0 - SLOT_DR / 2)) / SLOT_DR). Each slot is one sampler in both terrain
+    // shaders: llviewershadermgr.cpp terrain_sampler_count() counts them against the GPU.
+    static constexpr S32 SLOTS = 6;
+    static constexpr F32 SLOT_R0 = 0.25f;
+    static constexpr F32 SLOT_DR = 0.2f;
     static constexpr F32 MAP_PX_PER_M = 4.f;
     static constexpr S32 MAP_MAX_PX = 2048;
     static constexpr S32 MAP_MAX_PX_NEIGHBOUR = 1024;
@@ -99,7 +108,7 @@ public:
     };
     struct Stroke
     {
-        S32 mSlot = 0;       // 0-3, -1 = erase, -2 = water (Paul 09-10: "allow users to draw water")
+        S32 mSlot = 0;       // 0-5, -1 = erase, -2 = water (Paul 09-10: "allow users to draw water")
         F32 mWidth = 4.f;
         F32 mOpacity = 1.f;
         std::vector<F32> mPoints;   // x0, y0, x1, y1, ... region metres
@@ -213,9 +222,9 @@ private:
         bool mDirtyGL = false;
         F64  mLastUpload = 0.0;         // uploads are throttled while a bake is in progress
         bool mHasPaint = false;
-        bool mUsed[SLOTS] = { false, false, false, false };
-        F32  mScales[SLOTS] = { 4.f, 4.f, 4.f, 4.f };
-        bool mWorld[SLOTS] = { true, true, true, true };
+        bool mUsed[SLOTS] = {};
+        F32  mScales[SLOTS] = { 4.f, 4.f, 4.f, 4.f, 4.f, 4.f };
+        bool mWorld[SLOTS] = { true, true, true, true, true, true };
         LLPointer<LLViewerFetchedTexture> mPalette[SLOTS];
         std::string mKey;               // the layout the layer follows (edit revision / record version)
         std::string mTexSig;            // what the paint MAP was baked from (texture strokes + tiles)
@@ -380,14 +389,14 @@ private:
     LLTextBox*      mNote = nullptr;
     LLTextBox*      mStatus = nullptr;
     LLTextBox*      mCount = nullptr;
-    LLTextureCtrl*  mTex[WolfTerrainPaint::SLOTS] = { nullptr, nullptr, nullptr, nullptr };
-    LLSpinCtrl*     mScale[WolfTerrainPaint::SLOTS] = { nullptr, nullptr, nullptr, nullptr };
-    LLButton*       mUse[WolfTerrainPaint::SLOTS] = { nullptr, nullptr, nullptr, nullptr };
+    LLTextureCtrl*  mTex[WolfTerrainPaint::SLOTS] = {};
+    LLSpinCtrl*     mScale[WolfTerrainPaint::SLOTS] = {};
+    LLButton*       mUse[WolfTerrainPaint::SLOTS] = {};
     LLButton*       mUseWater = nullptr;
     LLSpinCtrl*     mWaterLevel = nullptr;
     LLSpinCtrl*     mWaterDepth = nullptr;
-    LLButton*       mClearSlot[WolfTerrainPaint::SLOTS] = { nullptr, nullptr, nullptr, nullptr };
-    LLButton*       mModeSlot[WolfTerrainPaint::SLOTS] = { nullptr, nullptr, nullptr, nullptr };
+    LLButton*       mClearSlot[WolfTerrainPaint::SLOTS] = {};
+    LLButton*       mModeSlot[WolfTerrainPaint::SLOTS] = {};
     LLSliderCtrl*   mWidth = nullptr;
     LLSliderCtrl*   mTransparency = nullptr;
     LLCheckBoxCtrl* mErase = nullptr;

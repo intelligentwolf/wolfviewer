@@ -147,7 +147,8 @@ void WolfNaturalWater::idle()
     if (step > 1 && mLoggedDecimation.insert(regionp->getHandle()).second)
     {
         LL_INFOS("WolfNaturalWater") << "Natural water on " << regionp->getName() << " (" << regionp->getWidth() << " m): analysing "
-                                     << grids << "x" << grids << " points at " << mpg << " m (every " << step << "th grid point)" << LL_ENDL;
+                                     << grids << "x" << grids << " points at " << mpg << " m (every " << step << "th grid point)"
+                                     << (mpg > MAX_POOL_ANALYSIS_M ? "; no generated lakes above 4 m per point" : "") << LL_ENDL;
     }
 
     // Prims arrive long after the terrain does, so the built mask is part of the stamp:
@@ -466,6 +467,10 @@ void WolfNaturalWater::compute(Result& out, std::vector<F32> z, std::vector<U8> 
                 ++out.mBuiltBasins;
                 continue;
             }
+            // Source: MAX_POOL_ANALYSIS_M (wolfnaturalwater.h) — a basin found on a grid coarser
+            // than 4 m per point is not trusted to be a basin; the hollow is left as it is for
+            // the stream pass ("a hollow too small or too shallow for a pool" below).
+            if (mpg > MAX_POOL_ANALYSIS_M) continue;
             if ((S32)p.mCells.size() < MIN_POOL_CELLS || p.mDepth < MIN_POOL_DEPTH_M) continue;
             // [2026-09-10] Bank steepness: over every pool cell that touches land (a neighbour
             // outside this pool), the steepest rise of the ground from the water level to that

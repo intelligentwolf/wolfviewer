@@ -82,6 +82,15 @@ private:
     static constexpr F32 MIN_POOL_DEPTH_M = 1.0f;
     static constexpr F32 MIN_POOL_RIM_GRADE = 0.25f;
     static constexpr S32 MIN_POOL_CELLS = 12;
+    // [2026-09-19, Wolf Nation] No generated lakes when the analysis is coarser than this many
+    // metres per point. A 51200 m region is analysed every 50 m (MAX_ANALYSIS_GRIDS), and at
+    // that spacing a mountain valley whose outlet is narrower than a cell looks closed: the
+    // priority flood raised a whole valley to its rim and drew a lake kilometres across, its
+    // edge stepped in 50 m cells, white with reflected sky from above. 4 m is where a basin's
+    // outline is still the basin (regions up to 4096 m), the same limit wolfwaterfield.h
+    // MAX_FIELD_REGION_M puts on the shore field. Streams are not gated: none were drawn on
+    // Wolf Nation, and a stream is a line, not a sheet. natural_water_worker.js same number.
+    static constexpr F32 MAX_POOL_ANALYSIS_M = 4.0f;
     // A drainage chain shorter than this (cells) is a stub, not a stream: dropped.
     // [2026-09-10] A fall can be short: four cells of 40-degree face is a fall worth drawing.
     static constexpr S32 MIN_CHAIN_CELLS = 4;

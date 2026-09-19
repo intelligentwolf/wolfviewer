@@ -34,6 +34,6 @@
 	<menu_item_check label="Mostra notifiche basate sull'età degli avatar" name="RadarReportAgeAlert"/>
 	<menu_item_check label="Mostra notifiche sugli script in entrata" name="RadarEnterChannelAlert"/>
 	<menu_item_check label="Mostra notifiche sugli script in uscita" name="RadarLeaveChannelAlert"/>
-	<menu_item_check label="Potenzia il radar utilizzando il Bridge di Firestorm" name="FSRadarEnhanceByBridge"/>
+	<menu_item_check label="Potenzia il radar utilizzando il Bridge di WolfViewer" name="FSRadarEnhanceByBridge"/>
 	<menu_item_call label="Apri la lista dei residenti e degli oggetti bloccati" name="show_blocked_list"/>
 </toggleable_menu>

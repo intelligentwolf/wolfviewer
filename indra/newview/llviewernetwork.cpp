@@ -62,7 +62,7 @@ const std::string  GRID_LOGIN_IDENTIFIER_TYPES = "login_identifier_types";
 const std::string GRID_SLURL_BASE = "slurl_base";
 const std::string GRID_APP_SLURL_BASE = "app_slurl_base";
 
-const std::string DEFAULT_LOGIN_PAGE = "https://phoenixviewer.com/app/loginV3/";
+const std::string DEFAULT_LOGIN_PAGE = "https://www.wolf-grid.com/";   // [2026-09-19] see fsgridhandler.cpp
 
 const std::string MAIN_GRID_LOGIN_URI = "https://login.agni.lindenlab.com/cgi-bin/login.cgi";
 

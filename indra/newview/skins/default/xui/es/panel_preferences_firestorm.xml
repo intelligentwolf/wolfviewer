@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes" ?>
-<panel label="Firestorm" name="firestorm">
-	<tab_container label="Prefs Firestorm" name="tabs">
+<panel label="WolfViewer" name="firestorm">
+	<tab_container label="Prefs WolfViewer" name="tabs">
 		<panel label="Extras" name="tab-extras">
 			<check_box name="checkMiscRLVa" label="Permitir control remoto del visor mediante scripts (RLVa)" width="330"/>
 			<text name="textMiscRLVaRestart">
@@ -11,7 +11,7 @@
 			<check_box label="Desactivar la baliza de seguimiento al alcanzar al avatar (&lt;= 3m)" name="FSDisableAvatarTrackerAtCloseIn" tool_tip="Si lo activas, la baliza de seguimiento se desactivará automáticamente si la distancia con el avatar es menor que 3 metros. (Por defecto)."/>
 			<check_box label="Desactivar la pantalla de progreso del inicio de sesión" name="login_screen_toggle" tool_tip="Desactiva la pantalla negra que muestra el progreso del inicio de la sesión"/>
 			<check_box label="Desactivar la pantalla de progreso del cierre de sesión" name="logout_screen_toggle" tool_tip="Desactiva la pantalla negra que muestra el progreso del cierre de la sesión."/>
-			<check_box label="Activar escalado progresivo de distancia de dibujo" name="FSRenderFarClipStepping" tool_tip="Si lo activas, Firestorm aumentará progresivamente la distancia de dibujo después de un teleporte." width="300"/>
+			<check_box label="Activar escalado progresivo de distancia de dibujo" name="FSRenderFarClipStepping" tool_tip="Si lo activas, WolfViewer aumentará progresivamente la distancia de dibujo después de un teleporte." width="300"/>
 			<slider name="progressive_draw_distance_interval" tool_tip="Intérvalo en segundos entre cada incremento de distancia de dibujo"/>
 			<check_box name="UseLSLBridge" label="Activar el LSL-Client Bridge" tool_tip="Permite al visor usar un accesorio con scripts (Bridge) para extender sus características"/>
 			<!-- <check_box name="UseLSLFlightAssist" label="Activar asistente de vuelo del Bridge" tool_tip="Activa el script que permite volar y flotar a mayor altitud"/> -->

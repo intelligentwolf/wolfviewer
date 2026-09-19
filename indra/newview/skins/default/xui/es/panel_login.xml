@@ -4,7 +4,7 @@
 		http://secondlife.com/account/request.php?lang=es
 	</panel.string>
 	<panel.string name="sign_up_url">
-		https://www.firestormviewer.org/join-secondlife/
+		https://www.wolf-grid.com/index.php?f=newuser
 	</panel.string>
 	<layout_stack name="ui_stack">
 		<layout_panel name="ui_container">

@@ -157,7 +157,7 @@
 			<check_box name="FSLogIMInChatHistory" label="Sauvegarder les IMs dans le Chat local"/>
 			<text name="FSIMChatHistoryFade_label">Fondu du texte des IM dans le fond de la fenêtre de Chat</text>
 			<spinner tool_tip="0.25-1.0, 0.25 pour un fondu important, 1 pour aucun fondu" name="FSIMChatHistoryFade"/>
-			<check_box name="FSShowMessageCountInWindowTitle" label="Afficher le nombre d'IMs non lus dans la barre de titre de Firestorm"/>
+			<check_box name="FSShowMessageCountInWindowTitle" label="Afficher le nombre d'IMs non lus dans la barre de titre de WolfViewer"/>
 			<check_box name="FSAnnounceIncomingIM" label="Annonce de réception d'IMs dès que l'expéditeur commence à écrire"/>
 			<check_box name="FSIMChatFlashOnFriendStatusChange" label="Flasher l'onglet d'IM quand l'ami se connecte ou se déconnecte"/>
 			<check_box name="FSNotifyNearbyChatFlash" label="Flasher le bouton de la fenêtre de conversation quand on parle sur le Chat local" tool_tip="Clignotement du bouton de conversation quand on parle en chat local. La fenêtre de chat local doit être combinée à la fenêtre de conversations, et la fenêtre de conversations doit être fermée pour que le bouton clignote."/>

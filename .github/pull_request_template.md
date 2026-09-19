@@ -1,4 +1,7 @@
-## Firestorm Pull Request Checklist
-Thank you for contributing to the Phoenix Firestorm Project.
-We will endeavour to review you changes and accept/reject/request changes as soon as possible. 
-Please read and follow the [Firestorm Pull Request Guidelines](https://github.com/firestormviewer/phoenix-firestorm/blob/master/FS_PR_GUIDELINES.md) to reduce the likelihood that we need to ask for "Bureaucratic" changes to make the code comply with our workflows.
+## WolfViewer Pull Request Checklist
+Thank you for contributing to WolfViewer.
+
+- [ ] The change builds on the platform you tested (say which) and you ran it in-world.
+- [ ] The commit message says what changed and why.
+- [ ] No TODOs or half-implemented branches are left in the code.
+- [ ] User-facing text and links point at Wolf Territories resources.

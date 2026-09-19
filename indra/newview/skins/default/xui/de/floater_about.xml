@@ -3,15 +3,15 @@
 	<tab_container name="about_tab">
 		<panel label="Info" name="support_panel">
     <text name="support_intro">    
-Aktuelle Informationen über Firestorm finden Sie unter
-https://www.firestormviewer.org
+Aktuelle Informationen über WolfViewer finden Sie unter
+https://www.wolf-grid.com/
     </text>
 			<button label="In Zwischenablage kopieren" name="copy_btn"/>
 			<button label="Nach Updates suchen" name="update_btn"/>
 		</panel>
 		<panel label="Danksagung" name="credits_panel">
 			<text name="linden_intro">
-Ohne Linden Labs Entscheidung, den Second Life-Viewer quelloffen zu machen, wäre Firestorm nicht möglich gewesen.
+Ohne Linden Labs Entscheidung, den Second Life-Viewer quelloffen zu machen, wäre WolfViewer nicht möglich gewesen.
 
 Second Life wird präsentiert von den Lindens,
 mit Open-Source-Beiträgen von:
@@ -20,31 +20,10 @@ mit Open-Source-Beiträgen von:
 				Dummy-Name wird zur Laufzeit ersetzt
 			</text_editor>
 		</panel>
-<!-- Firestorm Credits -->
-		<panel label="Firestorm" name="fs_credits_panel" height="930">
-			<scroll_container name="fs_credits_scroll_container">
-				<panel name="fs_credits_scroll_container_content_panel">
-					<text name="firestorm_intro" height="120">
-Firestorm ist ein Community-Projekt, um das SecondLife(tm)-Viewer-Erlebnis zu verbessern. Wir verbinden Beiträge von Community-Entwicklern mit Code von Linden Lab sowie eigenen Erweiterungen, um ein qualitativ hochwertiges und funktionsreiches Viewer-Erlebnis zu bieten. Wir werden durch ein großes, freiwilliges Support-Team unterstützt. Firestorm wird Ihnen präsentiert von The Phoenix Firestorm Project, Inc., einer gemeinnützigen Organisation.
-
-Das Firestorm Entwickler-Team:
-					</text>
-					<text name="fs_contrib_intro" >
-Zusätzlicher Programmcode von:
-					</text>
-					<text name="fs_support_intro" >
-Besonderer Dank gilt unserem Firestorm-Support-Team sowie den Wiki-Autoren, Schulungsleitern und Übersetzern:
-					</text>
-					<text name="fs_art_intro" >
-Firestorm enthält Starlight, modifiziert für Firestorm. Es ist von Einwohnern für Einwohner und hat das Ziel, eine alternative, freundlichere und hoffentlich einfacher zu bedienende Oberfläche bereitzustellen. Für weitere Details, siehe &lt;nolink&gt;https://wiki.secondlife.com/wiki/Viewer_Skins/Starlight&lt;/nolink&gt;.
-
-UI-Künstler und Designer:
-					</text>
-				</panel>
-			</scroll_container>
-		</panel>
 		<panel label="Lizenzen" name="licenses_panel">
 			<text_editor name="licenses_editor">
+WolfViewer is based on the Firestorm viewer, Copyright (C) 2010-2026 The Phoenix Firestorm Project, Inc., used under the GNU Lesser General Public License version 2.1.
+
 				3Dconnexion SDK Copyright (C) 1992-2009 3Dconnexion.
 APR Copyright (C) 2011 The Apache Software Foundation
 Collada DOM Copyright 2006 Sony Computer Entertainment Inc.

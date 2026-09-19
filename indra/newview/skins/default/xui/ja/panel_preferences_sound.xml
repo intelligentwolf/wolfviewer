@@ -184,7 +184,7 @@
 	<panel.string name="textFSWindowOpen">
 		ウィンドウを開いたとき：
 	</panel.string>
-	<tab_container label="Firestorm初期設定" name="tabs">
+	<tab_container label="WolfViewer初期設定" name="tabs">
 		<!-- Sounds -->
 		<panel label="サウンド" name="Media Sounds Panel">
 			<slider label="マスターボリューム" name="System Volume"/>

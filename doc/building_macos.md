@@ -3,7 +3,6 @@
 The viewer and its libraries are built with the current version of Xcode and Cmake, as well as the standard version of Autobuild from Linden Lab.
 
 > [!WARNING]
-> Please note that we do not give support for compiling the viewer on your own. However, there is a self-compilers group in Second Life that can be joined to ask questions related to compiling the viewer: [Firestorm Self Compilers](https://tinyurl.com/firestorm-self-compilers)
 
 ## Obtaining a shell to work with
 
@@ -14,7 +13,7 @@ The steps listed below are expected to be run from a shell prompt. Simply copy a
 You will need to install the following tools:
 
 ### Xcode
-XCode is a free download from Apple but you will need an Apple ID to login and access the download section. The current version used to compile Firestorm is 16.4.
+XCode is a free download from Apple but you will need an Apple ID to login and access the download section. The current version used to compile WolfViewer is 16.4.
 - Go [here](https://developer.apple.com/download) and log in with an apple ID.
 - Either find the 16.4 download in the list or use this [direct link](https://developer.apple.com/services-account/download?path=/Developer_Tools/Xcode_16.4/Xcode_16.4.xip) (will prompt you to log in if you skipped the above step.)
 - Open the downloaded file and copy the Xcode application to the Applications folder.
@@ -71,7 +70,7 @@ export PATH=$PATH:~/Library/Python/3.9/bin/
 - Once Autobuild is correctly installed, check Autobuild version to be "autobuild 3.9.6" or higher: `autobuild --version`
 
 ### Additional third party libraries 
-If you want to use licensed FMOD Studio API or KDU (short for Kakadu) build libraries (they are optional) you have to provide these yourself. If you're building Firestorm as part of the project team, ask for the libraries for fmodstudio and kdu. Put them into `/opt/firestorm`. Some libraries like Kakadu or Havok require that you purchase a license so do not set the flags to include those packages if you do not have the according licenses.
+If you want to use licensed FMOD Studio API or KDU (short for Kakadu) build libraries (they are optional) you have to provide these yourself. If you're building WolfViewer as part of the project team, ask for the libraries for fmodstudio and kdu. Put them into `/opt/wolfviewer`. Some libraries like Kakadu or Havok require that you purchase a license so do not set the flags to include those packages if you do not have the according licenses.
 
 If you're a community builder, you'll need to build these libraries yourself, then change your autobuild.xml file to point to your own versions, or create a different autobuild.xml with your customizations, and use this with autobuild instead of our default autobuild.xml. There are some examples of how to build FMOD Studio on the LL Wiki and opensource-dev mailing list.
 
@@ -81,17 +80,17 @@ You will probably want to have FMOD enabled and no Kakadu, in that case, you can
 
 ##  Set up your source code tree
 
-Plan your directory structure ahead of time. If you are going to be producing changes or patches you will be cloning a copy of an unaltered source code tree for every change or patch you make, so you might want to have all this work stored in its own directory. If you are a casual compiler and won't be producing any changes, you can use one directory. For this document, we will assume $HOME/firestorm.
+Plan your directory structure ahead of time. If you are going to be producing changes or patches you will be cloning a copy of an unaltered source code tree for every change or patch you make, so you might want to have all this work stored in its own directory. If you are a casual compiler and won't be producing any changes, you can use one directory. For this document, we will assume $HOME/wolfviewer.
 
 ```
-mkdir ~/firestorm
-cd ~/firestorm
-git clone https://github.com/FirestormViewer/phoenix-firestorm.git
+mkdir ~/wolfviewer
+cd ~/wolfviewer
+git clone https://github.com/intelligentwolf/wolfviewer.git
 ```
 
 This can take a while. It's a rather large download.
 
-You will also need to download the build variables used for building the viewer. Like the viewer source, these are downloaded from the Firestorm git repository. Assuming you are still in your ~/firestorm directory (or wherever else you chose), issue the following commands:
+You will also need to download the build variables used for building the viewer. Like the viewer source, these are downloaded from the WolfViewer git repository. Assuming you are still in your ~/wolfviewer directory (or wherever else you chose), issue the following commands:
 
 ```
 git clone https://github.com/FirestormViewer/fs-build-variables.git
@@ -99,16 +98,16 @@ git clone https://github.com/FirestormViewer/fs-build-variables.git
 
 You will then need to add this line to your ~/.zshrc file (assuming you are on Catalina or later):
 ```
-echo 'AUTOBUILD_VARIABLES_FILE=~/firestorm/fs-build-variables/variables' | sudo tee ~/.zshrc
+echo 'AUTOBUILD_VARIABLES_FILE=~/wolfviewer/fs-build-variables/variables' | sudo tee ~/.zshrc
 ```
 
 Again, if you do not wish to restart your terminal:
 ```
-export AUTOBUILD_VARIABLES_FILE=~/firestorm/fs-build-variables/variables
+export AUTOBUILD_VARIABLES_FILE=~/wolfviewer/fs-build-variables/variables
 ```
 
-## Firestorm build targets
-Available premade firestorm-specific build targets:
+## WolfViewer build targets
+Available premade WolfViewer-specific build targets:
 
 ```
 ReleaseFS             (with KDU, with FMOD,   no OpenSim)
@@ -119,7 +118,7 @@ RelWithDebInfoFS_open (  no KDU,   no FMOD,   no OpenSim, with debug info)
 RelWithDebInfoOS      (  no KDU,   no FMOD, with OpenSim, with debug info)
 ```
 
-To build firestorm:
+To build wolfviewer:
 
 ```
 autobuild build -c ReleaseFS                        
@@ -178,10 +177,10 @@ wrote  /Users/yourname/3p-fmodstudio/fmodstudio-2.01.05-darwin-202981448.tar.bz2
 
 Additionally, a file `result.txt` has been created containing the md5 hash value of the package file, which you will need in the next step.
 
-- Next, make a copy of Firestorms autobuild.xml named for example my_autobuild.xml to use your FMOD Studio.
+- Next, make a copy of WolfViewers autobuild.xml named for example my_autobuild.xml to use your FMOD Studio.
 
 ```
-cd ~/firestorm/phoenix-firestorm
+cd ~/wolfviewer/wolfviewer
 cp autobuild.xml my_autobuild.xml
 export AUTOBUILD_CONFIG_FILE=my_autobuild.xml
 ```
@@ -203,7 +202,7 @@ autobuild installables edit fmodstudio platform=darwin64 hash=3b0d38f2a17ff1b73c
 
 The following is all still done from within the terminal window:
 ```
-cd ~/firestorm/phoenix-firestorm
+cd ~/wolfviewer/wolfviewer
 autobuild configure -A 64 -c ReleaseFS_open
 ```
 
@@ -218,7 +217,7 @@ There are a number of switches you can use to modify the configuration process. 
 - **--fmodstudio** controls if the FMOD Studio package is incorporated into the viewer. You must have performed the FMOD Studio installation steps in [FMOD Studio using autobuild](#fmod-studio-using-autobuild) for this to work.
 - **--kdu** will tell autobuiild to use the KDU (Kakadu) package when compiling. 
 - **--package** makes sure all files are copied into viewers output directory. It will also generate a DMG installer package
-- **--chan \<channel name\>** will set a unique channel (and the name) for the viewer, appending whatever is defined to "Firestorm-". By default, the channel is "private" followed by your computer's name.
+- **--chan \<channel name\>** will set a unique channel (and the name) for the viewer, appending whatever is defined to "WolfViewer-". By default, the channel is "private" followed by your computer's name.
 - **-LL_TESTS:BOOL=\<bool\>** controls if the tests are compiled and run. There are quite a lot of them so excluding them is recommended unless you have some reason to need one or more of them.
 
 > [!TIP]
@@ -241,7 +240,7 @@ autobuild configure -A 64 -c ReleaseFS_open
 To compile the code into an app that can be used on your computer, run the following in the terminal window:
 
 ```
-cd ~/firestorm/phoenix-firestorm
+cd ~/wolfviewer/wolfviewer
 autobuild build -A 64 -c ReleaseFS_open --no-configure
 ```
 
@@ -266,7 +265,7 @@ If you used the --package switch, you will also find the DMG installer package i
 
 If you want to update your self-compiled viewer, you don't have to go through this entire page again. Follow these steps to pull down any new code and re-compile.
 
-- First you need to change to the directory where you built the viewer before. Assuming you followed the steps above and used the same names, run the following in the terminal window: `cd ~/firestorm/phoenix-firestorm`
+- First you need to change to the directory where you built the viewer before. Assuming you followed the steps above and used the same names, run the following in the terminal window: `cd ~/wolfviewer/wolfviewer`
 - Next, decide if you are going to remove the already compiled files and perform a "Clean build", or if you want to keep the existing build files, "Dirty build". Clean builds are generally recommended by developers but have the downside of building everything again, which comes at a cost of time; dirty builds on the other hand, keep all the previously compiled files and only compile the parts that have changed. The downside to dirty builds comes when a change to a core file is pulled down, which will then cause everything to be rebuilt, negating any speed benefit or possibly taking longer than a clean build.
 - If you have picked to do a clean build, run the following in the terminal window, otherwise skip to the next step: `rm -r build-darwin-x86_64`
 - If you are using a custom autobuild.xml file, then run the following in the terminal window, otherwise skip this step: `export AUTOBUILD_CONFIG_FILE=my_autobuild.xml`

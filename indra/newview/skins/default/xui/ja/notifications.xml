@@ -39,7 +39,7 @@
 		<usetemplate name="okbutton" yestext="ＯＫ"/>
 	</notification>
 	<notification name="BadInstallation">
-		[APP_NAME]のアップデート時にエラーが発生しました。[https://www.firestormviewer.org/downloads 最新バージョンのビューアをダウンロード]してください。
+		[APP_NAME]のアップデート時にエラーが発生しました。[https://www.wolf-grid.com/index.php?f=osv 最新バージョンのビューアをダウンロード]してください。
 		<usetemplate name="okbutton" yestext="ＯＫ"/>
 	</notification>
 	<notification name="LoginFailedNoNetwork">
@@ -3739,12 +3739,12 @@ Webページにリンクすると、他人がこの場所に簡単にアクセ�
 	<notification name="MeshUploadErrorDetails">
 		[LABEL]をアップロードできませんでした：[MESSAGE]
 [DETAILS]
-詳しくは、Firestorm.logをご覧ください。
+詳しくは、WolfViewer.logをご覧ください。
 	</notification>
 	<notification name="MeshUploadError">
 		[LABEL]をアップロードできませんでした：[MESSAGE]
 
-詳しくは、Firestorm.logをご覧ください。
+詳しくは、WolfViewer.logをご覧ください。
 	</notification>
 	<notification name="MeshUploadPermError">
 		メッシュのアップロード許可をリクエスト時にエラーが発生しました。
@@ -3844,7 +3844,7 @@ UDP：3478, 3479, 5060, 5062, 6250, 12000-32000
 ルーターのSIP ALG機能を無効にします。
 
 音声通話は利用できなくなります。
-https://wiki.firestormviewer.org/fs_voice
+https://www.wolf-grid.com/index.php?f=voicefaq
 		<usetemplate ignoretext="ビューアが音声サーバーに接続できない場合の警告" name="okignore" yestext="ＯＫ"/>
 	</notification>
 	<notification name="NoVoiceConnect-GIAB">
@@ -3852,7 +3852,7 @@ https://wiki.firestormviewer.org/fs_voice
 
 ボイスチャットによるコミュニケーションが利用できません。
 お使いのネットワークやファイアウォールの設定を確認してください。
-[https://wiki.firestormviewer.org/fs_voice]
+[https://www.wolf-grid.com/index.php?f=voicefaq]
 		<usetemplate name="okbutton" yestext="ＯＫ"/>
 	</notification>
 	<notification name="AvatarRezLeftNotification">
@@ -4407,7 +4407,7 @@ https://wiki.firestormviewer.org/fs_voice
 	</notification>
 	<!-- <FS:Zi> Viewer version popup -->
 	<notification name="FirstJoinSupportGroup2">
-		Phoenix/Firestormビューアサポートグループへようこそ!
+		WolfViewerビューアサポートグループへようこそ!
 
 サポートを容易にするために、ビューアのバージョンをグループに通知することをお勧めします。この情報には、現在のビューアのバージョン、ビューアのスキン、オペレーティング システム、ＲＬＶａステータスが含まれます。グループに送信するチャットの前にビューアのバージョンを表示するように選択できます。サポートメンバーが、使用しているビューアのバージョンを知っていれば、より有意義なアドバイスをすぐに提供できます。
 
@@ -4417,7 +4417,7 @@ https://wiki.firestormviewer.org/fs_voice
 		<form name="form">
 			<button name="OK_okcancelignore" text="はい"/>
 			<button name="Cancel_okcancelignore" text="いいえ"/>
-			<ignore name="ignore" text="Phoenix/Firestormサポートグループに参加した" />
+			<ignore name="ignore" text="WolfViewerサポートグループに参加した" />
 		</form>
 	</notification>
 	<!-- <FS:Zi> Viewer version popup -->
@@ -5468,8 +5468,8 @@ http://opensimulator.org/wiki/inventory を使用して問題を修正できま�
 	</notification>
 	<notification name="CurrencyURIOverrideReceived">
 		このリージョンでは、サードパーティの通貨ポータルを指定することを選択しました。
-Firestorm Viewer を通じて行われる通貨の購入は、お客様（ユーザー）と通貨の提供者または販売者との間の取引であることにご注意ください。
-Firestorm Viewer、Phoenix Firestorm Viewer Project Inc.、またはそのチームは、そのような取引から直接的または間接的に生じる費用または損害について一切責任を負いません。
+WolfViewer を通じて行われる通貨の購入は、お客様（ユーザー）と通貨の提供者または販売者との間の取引であることにご注意ください。
+WolfViewer、IntelligentWolf Ltd、またはそのチームは、そのような取引から直接的または間接的に生じる費用または損害について一切責任を負いません。
 これらの利用規約に同意しない場合は、このビューアを使用して金融取引を行うことはできません。
 		<usetemplate ignoretext="リージョンが新しい通貨ヘルパーを設定するとき" name="okignore" yestext="ＯＫ"/>
 	</notification>
@@ -5657,8 +5657,8 @@ Firestorm Viewer、Phoenix Firestorm Viewer Project Inc.、またはそのチー
 		Windlightsの一括インポートが完了しました。
 	</notification>
 	<notification name="FSAOScriptedNotification">
-		Firestormアニメーションオーバーライド：[AO_MESSAGE]
-		<usetemplate ignoretext="スクリプトオブジェクトがFirestormアニメーションオーバーライダーにアクセスしたときに警告" name="notifyignore"/>
+		WolfViewerアニメーションオーバーライド：[AO_MESSAGE]
+		<usetemplate ignoretext="スクリプトオブジェクトがWolfViewerアニメーションオーバーライダーにアクセスしたときに警告" name="notifyignore"/>
 	</notification>
 	<notification name="WarnForceLoginURL">
 		ログインスプラッシュスクリーンのＵＲＬはテスト目的で上書きされます。
@@ -5691,7 +5691,7 @@ Firestorm Viewer、Phoenix Firestorm Viewer Project Inc.、またはそのチー
 
 [APP_NAME]をホワイトリストに登録する方法 (除外するファイルとフォルダのリストを含む) の詳細については、次のガイドをご覧ください。
 
-https://wiki.firestormviewer.org/antivirus_whitelisting
+https://www.wolf-grid.com/blog/faq.php
 	</notification>
 	<notification name="WaterExclusionSurfacesWarning">
 		水面を非表示にするボックスをチェックすると、テクスチャ、凹凸、光沢の選択が上書きされます。

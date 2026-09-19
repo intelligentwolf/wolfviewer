@@ -47,7 +47,7 @@
 			<text name="mode_selection_text">
 				Rejim seçimi
 			</text>
-			<combo_box name="mode_combo" tool_tip="Sizə ən məhərətli olduğunuz tənzimləmə rejimi seçin. Firestorm rejimi əsas olaraq quraşdırılacaq">
+			<combo_box name="mode_combo" tool_tip="Sizə ən məhərətli olduğunuz tənzimləmə rejimi seçin. WolfViewer rejimi əsas olaraq quraşdırılacaq">
 				<combo_box.item label="Hibrid" name="Hybrid"/>
 			</combo_box>
 		</layout_panel>

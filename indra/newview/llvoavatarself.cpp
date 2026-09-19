@@ -3363,7 +3363,9 @@ bool LLVOAvatarSelf::sendAppearanceMessage(LLMessageSystem *mesgsys) const
     LL_INFOS() << "Setting clientTag" << LL_ENDL;
     LLTextureEntry* entry = getTE(0);
     //You edit this to change the tag in your client. Yes.
-    const char* tag_client = "Firestorm";
+    // [2026-09-19] The name other viewers read from this tag; client_list_v2.xml carries the
+    // matching entry (the UUID is these bytes, zero padded).
+    const char* tag_client = "WolfViewer";
     LLUUID client_name;
     strncpy((char*)&client_name.mData[0], tag_client, UUID_BYTES);
     static LLCachedControl<LLColor4> tag_color(gSavedPerAccountSettings, "FirestormTagColor", LLColor4(1,0,1,1));

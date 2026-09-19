@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes" ?>
 <panel label="UI-Pref" name="Display panel">
-<tab_container label="Firestorm Prefs" name="tabs">
+<tab_container label="WolfViewer Prefs" name="tabs">
 
 	<!--3D World-->
 	<panel label="3D-Welt" name="UI Prefs Panel">
@@ -88,12 +88,12 @@
 		<text name="GroupTopRightRequiresRestart" left_delta="280">
 			(Erfordert Neustart)
 		</text>
-		<check_box label="Chiclets für IMs und Gruppenchats deaktivieren" name="FSDisableIMChiclets" tool_tip="Falls aktiviert, wird Firestorm keine Chiclets für IMs und Gruppenchats anzeigen (Icons für Gruppenmitteilungen und Anzahl an ungelesenen IMs werden weiterhin angezeigt)."/>
-		<check_box label="Alte Listendarstellung für Benachrichtigungsfenster verwenden" name="FSLegacyNotificationWell" tool_tip="Falls aktiviert, verwendet Firestorm die ursprüngliche Listendarstellung, um gespeicherte Benachrichtigungen anzuzeigen." width="355"/>
+		<check_box label="Chiclets für IMs und Gruppenchats deaktivieren" name="FSDisableIMChiclets" tool_tip="Falls aktiviert, wird WolfViewer keine Chiclets für IMs und Gruppenchats anzeigen (Icons für Gruppenmitteilungen und Anzahl an ungelesenen IMs werden weiterhin angezeigt)."/>
+		<check_box label="Alte Listendarstellung für Benachrichtigungsfenster verwenden" name="FSLegacyNotificationWell" tool_tip="Falls aktiviert, verwendet WolfViewer die ursprüngliche Listendarstellung, um gespeicherte Benachrichtigungen anzuzeigen." width="355"/>
 		<text name="FSLegacyNotificationWellRequiresRestart">
 			(Erfordert Neustart)
 		</text>
-		<check_box label="Größe des Unterhaltungen- und alten Benachrichtigungen-Fensters automatisch anpassen" name="FSLegacyNotificationWellAutoResize" tool_tip="Falls aktiviert, passt Firestorm die Größe der Unterhaltungen- und klassischen Benachrichtigungen-Fenster automatisch an, wenn Meldungen hinzugefügt oder entfernt werden."/>
+		<check_box label="Größe des Unterhaltungen- und alten Benachrichtigungen-Fensters automatisch anpassen" name="FSLegacyNotificationWellAutoResize" tool_tip="Falls aktiviert, passt WolfViewer die Größe der Unterhaltungen- und klassischen Benachrichtigungen-Fenster automatisch an, wenn Meldungen hinzugefügt oder entfernt werden."/>
 		<check_box label="Shortcuts anpassen, die von Linux verwendet werden (nur Linux; erfordert Neustart)" name="FSRemapLinuxShortcuts" tool_tip="Aktivieren, die Shortcuts umzudefinieren, die bereits durch das Linux-Betriebssystem verwendet werden, z.B. STRG-ALT-Fx."/>
 		<check_box label="Verhindern, dass Statistik-Fenster Fokus erhält" name="FSStatisticsNoFocus" tool_tip="Falls aktiviert, wird verhindert, dass das Statistik-Fenster den Fokus erhält, wenn ein anderes Fenster geschlossen wird (Aktionen wie das Ändern des Layouts sind auch weiterhin möglich)."/>
 		<check_box label="Abbildungen von Inventar-Objekten in Tooltips anzeigen" name="FSShowInventoryThumbnailTooltips" tool_tip="Falls aktiviert, werden die Abbildungen von Inventar-Objekten in Tooltips angezeigt."/>
@@ -114,7 +114,7 @@
 			Status-Leiste:
 		</text>
 		<check_box name="ShowNetStats" label="Datentransfer-Indikator aktivieren" tool_tip="Aktiviert den Datentransfer-Indikator in der Menüleiste"/>
-		<check_box label="Periodischen Mittelwert für Datentransfer-Indikator verwenden" name="FSStatbarLegacyMeanPerSec" tool_tip="Falls aktiviert, verwendet Firestorm für den Datentransfer-Indikator die ursprüngliche Berechnung und zeigt den periodischen Mittelwert anstelle des aktuell gemessenen Wertes."/>
+		<check_box label="Periodischen Mittelwert für Datentransfer-Indikator verwenden" name="FSStatbarLegacyMeanPerSec" tool_tip="Falls aktiviert, verwendet WolfViewer für den Datentransfer-Indikator die ursprüngliche Berechnung und zeigt den periodischen Mittelwert anstelle des aktuell gemessenen Wertes."/>
 		<check_box name="FSUseStatsInsteadOfLagMeter" label="Klick auf Datentransfer-Indikator öffnet Statistik-Fenster anstatt Lag-Meter"/>
 		<check_box label="Mediensteuerung in Menüleiste anzeigen" name="FSEnableVolumeControls" tool_tip="Falls aktiviert, werden in der oberen rechte Ecke des Bildschirms in der Menüleiste die Icons zur Mediensteuerung angezeigt. Nützlich, wenn das Oberflächendesign bereits eigene Icons zur Mediensteuerung besitzt."/>
 		<check_box label="Position in Menüleiste anzeigen" name="ShowMenuBarLocation" />

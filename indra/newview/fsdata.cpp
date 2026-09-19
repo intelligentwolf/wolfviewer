@@ -57,7 +57,6 @@
 #include "rlvhelper.h"
 // [/RLVa:KB]
 
-const std::string LEGACY_CLIENT_LIST_URL = "http://phoenixviewer.com/app/client_tags/client_list_v2.xml";
 const LLUUID MAGIC_ID("3c115e51-04f4-523c-9fa6-98aff1034730");
 
 FSData::FSData() :
@@ -65,11 +64,6 @@ FSData::FSData() :
     mFSDataDone(false),
     mAgentsDone(false)
 {
-    mHeaders.insert("User-Agent", LLViewerMedia::getInstance()->getCurrentUserAgent());
-    mHeaders.insert("viewer-version", LLVersionInfo::getInstance()->getChannelAndVersionFS());
-
-    mBaseURL = gSavedSettings.getBOOL("FSdataQAtest") ? "http://phoenixviewer.com/app/fsdatatest" : "http://phoenixviewer.com/app/fsdata";
-    mFSDataURL = mBaseURL + "/" + "data.xml";
 }
 
 FSData::~FSData()
@@ -82,99 +76,6 @@ FSData::~FSData()
         }
     }
     mAvatarNameCacheConnections.clear();
-}
-
-void FSData::processResponder(const LLSD& content, const std::string& url, bool save_to_file, const LLDate& last_modified)
-{
-    if (url == mFSDataURL)
-    {
-        if (!save_to_file)
-        {
-            LLSD data;
-            LL_DEBUGS("fsdata") << "Loading fsdata.xml from " << mFSdataFilename << LL_ENDL;
-            if (loadFromFile(data, mFSdataFilename))
-            {
-                processData(data);
-            }
-            else
-            {
-                LL_WARNS("fsdata") << "Unable to download or load fsdata.xml" << LL_ENDL;
-            }
-        }
-        else
-        {
-            processData(content);
-            saveLLSD(content, mFSdataFilename, last_modified);
-        }
-        mFSDataDone = true;
-    }
-    else if (url == mAssetsURL)
-    {
-        if (!save_to_file)
-        {
-            LLSD data;
-            LL_DEBUGS("fsdata") << "Loading assets.xml from  " << mAssetsFilename << LL_ENDL;
-            if (loadFromFile(data, mAssetsFilename))
-            {
-                processAssets(data);
-            }
-            else
-            {
-                LL_WARNS("fsdata") << "Unable to download or load assets.xml" << LL_ENDL;
-            }
-        }
-        else
-        {
-            processAssets(content);
-            saveLLSD(content, mAssetsFilename, last_modified);
-        }
-    }
-    else if (url == mAgentsURL)
-    {
-        if (!save_to_file)
-        {
-            LLSD data;
-            LL_DEBUGS("fsdata") << "Loading agents.xml from  " << mAgentsFilename << LL_ENDL;
-            if (loadFromFile(data, mAgentsFilename))
-            {
-                processAgents(data);
-            }
-            else
-            {
-                LL_WARNS("fsdata") << "Unable to download or load agents.xml" << LL_ENDL;
-            }
-        }
-        else
-        {
-            processAgents(content);
-            saveLLSD(content, mAgentsFilename, last_modified);
-        }
-        mAgentsDone = true;
-        addAgents();
-    }
-    else if (url == LEGACY_CLIENT_LIST_URL)
-    {
-        if (!save_to_file)
-        {
-            updateClientTagsLocal();
-        }
-        else
-        {
-            processClientTags(content);
-            saveLLSD(content, mClientTagsFilename, last_modified);
-        }
-    }
-    else if (url == mFSdataDefaultsUrl)
-    {
-        if (!save_to_file)
-        {
-            // do nothing as this file is loaded during app startup.
-        }
-        else
-        {
-            saveLLSD(content, mFSdataDefaultsFilename, last_modified);
-        }
-    }
 }
 
 bool FSData::loadFromFile(LLSD& data, std::string filename)
@@ -201,212 +102,29 @@ bool FSData::loadFromFile(LLSD& data, std::string filename)
     }
 }
 
-void downloadComplete(LLSD const &aData, std::string const &aURL, bool success)
-{
-    LL_DEBUGS("fsdata") << aURL << ": " << aData << " - success = " << success << LL_ENDL;
-
-    LLDate lastModified;
-    LLSD data;
-    if (success)
-    {
-        LLSD header = aData[LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS][LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS_HEADERS];
-        if (header.has("last-modified"))
-        {
-            lastModified.secondsSinceEpoch(FSCommon::secondsSinceEpochFromString("%a, %d %b %Y %H:%M:%S %ZP", header["last-modified"].asString()));
-        }
-
-        const LLSD::Binary& binary = aData[LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS_RAW].asBinary();
-        std::string content;
-        content.assign(binary.begin(), binary.end());
-        std::istringstream raw(content);
-
-        LLPointer<LLSDParser> parser = new LLSDXMLParser();
-        if (parser->parse(raw, data, content.size()) == LLSDParser::PARSE_FAILURE)
-        {
-            LL_WARNS("fsdata") << "Error parsing data received from " << aURL << ":" << LL_NEWLINE << content << LL_ENDL;
-        }
-
-        LL_DEBUGS("fsdata") << "data: " << data << LL_ENDL;
-    }
-
-    FSData::getInstance()->processResponder(data, aURL, success, lastModified);
-}
-
-#ifdef OPENSIM
-static void downloadCompleteScript(LLSD const &aData, std::string const &aURL, std::string const &aFilename)
-{
-    LL_DEBUGS("fsdata") << aURL << ": " << aData << LL_ENDL;
-    LLSD header = aData[LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS][LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS_HEADERS];
-
-    LLDate lastModified;
-    if (header.has("last-modified"))
-    {
-        lastModified.secondsSinceEpoch(FSCommon::secondsSinceEpochFromString("%a, %d %b %Y %H:%M:%S %ZP", header["last-modified"].asString()));
-    }
-    const LLSD::Binary &rawData = aData[LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS_RAW].asBinary();
-
-    if (rawData.size() <= 0)
-    {
-        LL_WARNS("fsdata") << "Received zero data for " << aURL << LL_ENDL;
-        return;
-    }
-
-    // basic check for valid data received
-    LLXMLNodePtr xml_root;
-    std::string stringData;
-    stringData.assign( rawData.begin(), rawData.end() ); // LLXMLNode::parseBuffer wants a U8*, not a const U8*, so need to copy here just to be safe
-    if ( (!LLXMLNode::parseBuffer( reinterpret_cast<char*> ( &stringData[0] ), (U64)stringData.size(), xml_root, NULL)) || (xml_root.isNull()) || (!xml_root->hasName("script_library")) )
-    {
-        LL_WARNS("fsdata") << "Could not read the script library data from "<< aURL << LL_ENDL;
-        return;
-    }
-
-    LLAPRFile outfile ;
-    outfile.open(aFilename, LL_APR_WB);
-    if (!outfile.getFileHandle())
-    {
-        LL_WARNS("fsdata") << "Unable to open file for writing: " << aFilename << LL_ENDL;
-    }
-    else
-    {
-        LL_INFOS("fsdata") << "Saving " << aFilename << LL_ENDL;
-        outfile.write(  &rawData[0], (S32)rawData.size() );
-        outfile.close() ;
-    }
-}
-
-static void downloadError(LLSD const &aData, std::string const &aURL)
-{
-    LLCore::HttpStatus status = LLCoreHttpUtil::HttpCoroutineAdapter::getStatusFromLLSD(aData);
-
-    if (status.getType() == HTTP_NOT_MODIFIED)
-    {
-        LL_INFOS("fsdata") << "Didn't download " << aURL << " - no newer version available" << LL_ENDL;
-    }
-    else
-    {
-        LL_WARNS("fsdata") << "Failed to download " << aURL << ": " << aData << LL_ENDL;
-    }
-}
-#endif
-
-// call this just before the login screen and after the LLProxy has been setup.
+// [NO FIRESTORM SERVICES 2026-09-19] Firestorm's data service (phoenixviewer.com: data.xml,
+// defaults.xml, the OSSL script libraries, agents.xml, assets.xml and a client tag list) is not
+// contacted any more. It carried Firestorm's messages of the day (the OpenSim one replaced the
+// grid's own MOTD at login), Firestorm's support-team badges and Firestorm's release block
+// list, and every start waited on it (llstartup.cpp STATE_LOGIN_WAIT). The client tag list is
+// read from the copy that ships in app_settings; the script libraries ship there too.
 void FSData::startDownload()
 {
-    mFSdataFilename = gDirUtilp->getExpandedFilename(LL_PATH_USER_SETTINGS, "fsdata.xml");
-    mFSdataDefaultsFilename = gDirUtilp->getExpandedFilename(LL_PATH_USER_SETTINGS, llformat("fsdata_defaults.%s.xml", LLVersionInfo::getInstance()->getShortVersion().c_str()));
-    mClientTagsFilename = gDirUtilp->getExpandedFilename(LL_PATH_USER_SETTINGS, "client_list_v2.xml");
-
+    mClientTagsFilename = gDirUtilp->getExpandedFilename(LL_PATH_APP_SETTINGS, "client_list_v2.xml");
+    // FSUseLegacyClienttags: 0 = off, 1 = local list, 2 = the list Firestorm used to download
+    static LLCachedControl<U32> use_legacy_tags(gSavedSettings, "FSUseLegacyClienttags");
+    if (use_legacy_tags)
     {
-        // Stat the file to see if it exists and when it was last modified.
-        time_t last_modified = 0;
-        llstat stat_data;
-        if (!LLFile::stat(mFSdataFilename, &stat_data))
-        {
-            last_modified = stat_data.st_mtime;
-        }
-        LL_INFOS("fsdata") << "Downloading data.xml from " << mFSDataURL << " with last modified of " << last_modified << LL_ENDL;
-        LLCore::HttpOptions::ptr_t httpOpts = std::make_shared<LLCore::HttpOptions>();
-        httpOpts->setWantHeaders(true);
-        httpOpts->setLastModified((long)last_modified);
-        FSCoreHttpUtil::callbackHttpGetRaw(mFSDataURL, boost::bind(downloadComplete, _1, mFSDataURL, true), boost::bind(downloadComplete, _1, mFSDataURL, false), LLCore::HttpHeaders::ptr_t(), httpOpts);
+        updateClientTagsLocal();
     }
-
-    {
-        time_t last_modified = 0;
-        llstat stat_data;
-        if (!LLFile::stat(mFSdataDefaultsFilename, &stat_data))
-        {
-            last_modified = stat_data.st_mtime;
-        }
-        std::string filename = llformat("defaults.%s.xml", LLVersionInfo::getInstance()->getShortVersion().c_str());
-        mFSdataDefaultsUrl = mBaseURL + "/" + filename;
-        LL_INFOS("fsdata") << "Downloading defaults.xml from " << mFSdataDefaultsUrl << " with last modified of " << last_modified << LL_ENDL;
-        LLCore::HttpOptions::ptr_t httpOpts = std::make_shared<LLCore::HttpOptions>();
-        httpOpts->setWantHeaders(true);
-        httpOpts->setLastModified((long)last_modified);
-        FSCoreHttpUtil::callbackHttpGetRaw(mFSdataDefaultsUrl, boost::bind(downloadComplete, _1, mFSdataDefaultsUrl, true), boost::bind(downloadComplete, _1, mFSdataDefaultsUrl, false), LLCore::HttpHeaders::ptr_t(), httpOpts);
-    }
-
-#ifdef OPENSIM
-    std::string filenames[] = { "scriptlibrary_ossl.xml", "scriptlibrary_aa.xml" };
-    for (auto const& script_name : filenames)
-    {
-        std::string filename = gDirUtilp->getExpandedFilename(LL_PATH_USER_SETTINGS, script_name);
-        time_t last_modified = 0;
-        llstat stat_data;
-        if (!LLFile::stat(filename, &stat_data))
-        {
-            last_modified = stat_data.st_mtime;
-        }
-        std::string url = mBaseURL + "/" + script_name;
-        LL_INFOS("fsdata") << "Downloading " << script_name << " from " << url << " with last modified of " << last_modified << LL_ENDL;
-        LLCore::HttpOptions::ptr_t httpOpts = std::make_shared<LLCore::HttpOptions>();
-        httpOpts->setWantHeaders(true);
-        httpOpts->setLastModified((long)last_modified);
-        FSCoreHttpUtil::callbackHttpGetRaw( url, boost::bind( downloadCompleteScript, _1, url, filename ), boost::bind( downloadError, _1, url ), LLCore::HttpHeaders::ptr_t(), httpOpts);
-    }
-#endif
+    mFSDataDone = true;
 }
 
-// call this _after_ the login screen to pick up grid data.
+// [NO FIRESTORM SERVICES 2026-09-19] Firestorm's agents.xml / assets.xml (its team's badges and
+// its asset block list) are not fetched for any grid; llstartup.cpp STATE_AGENT_WAIT sees done.
 void FSData::downloadAgents()
 {
-#ifdef OPENSIM
-    std::string filename_prefix = LLGridManager::getInstance()->getGridId();
-#else
-    std::string filename_prefix = "second_life";
-#endif
-
-#ifdef OPENSIM
-    if (!LLGridManager::getInstance()->isInSecondLife())
-    {
-        // TODO: Let the opensim devs and opensim group figure out the best way
-        // to add "agents.xml" URL to the gridinfo protocol.
-        //getAgentsURL();
-        mAgentsDone = true; // Avoid +15s llstartup STATE_AGENT_WAIT delay --ht
-
-        // there is no need for assets.xml URL for opensim grids as the grid owner can just delete
-        // the bad asset itself.
-    }
-    else
-#endif
-    {
-        mAgentsURL = mBaseURL + "/" + "agents.xml";
-        mAssetsURL = mBaseURL + "/" + "assets.xml";
-    }
-
-    if (!mAgentsURL.empty())
-    {
-        mAgentsFilename = gDirUtilp->getExpandedFilename(LL_PATH_USER_SETTINGS, filename_prefix + "_agents.xml");
-        time_t last_modified = 0;
-        llstat stat_data;
-        if (!LLFile::stat(mAgentsFilename, &stat_data))
-        {
-            last_modified = stat_data.st_mtime;
-        }
-        LL_INFOS("fsdata") << "Downloading agents.xml from " << mAgentsURL << " with last modified of " << last_modified << LL_ENDL;
-        LLCore::HttpOptions::ptr_t httpOpts = std::make_shared<LLCore::HttpOptions>();
-        httpOpts->setWantHeaders(true);
-        httpOpts->setLastModified((long)last_modified);
-        FSCoreHttpUtil::callbackHttpGetRaw(mAgentsURL, boost::bind(downloadComplete, _1, mAgentsURL, true), boost::bind(downloadComplete, _1, mAgentsURL, false), LLCore::HttpHeaders::ptr_t(), httpOpts);
-    }
-
-    if (!mAssetsURL.empty())
-    {
-        mAssetsFilename = gDirUtilp->getExpandedFilename(LL_PATH_USER_SETTINGS, filename_prefix + "_assets.xml");
-        time_t last_modified = 0;
-        llstat stat_data;
-        if (!LLFile::stat(mAssetsFilename, &stat_data))
-        {
-            last_modified = stat_data.st_mtime;
-        }
-        LL_INFOS("fsdata") << "Downloading assets.xml from " << mAssetsURL << " with last modified of " << last_modified << LL_ENDL;
-        LLCore::HttpOptions::ptr_t httpOpts = std::make_shared<LLCore::HttpOptions>();
-        httpOpts->setWantHeaders(true);
-        httpOpts->setLastModified((long)last_modified);
-        FSCoreHttpUtil::callbackHttpGetRaw(mAssetsURL, boost::bind(downloadComplete, _1, mAssetsURL, true), boost::bind(downloadComplete, _1, mAssetsURL, false), LLCore::HttpHeaders::ptr_t(), httpOpts);
-    }
+    mAgentsDone = true;
 }
 
 void FSData::processData(const LLSD& fs_data)
@@ -464,21 +182,7 @@ void FSData::processData(const LLSD& fs_data)
 
     // FSUseLegacyClienttags: 0=Off, 1=Local Clienttags, 2=Download Clienttags
     static LLCachedControl<U32> use_legacy_tags(gSavedSettings, "FSUseLegacyClienttags");
-    if (use_legacy_tags > 1)
-    {
-        time_t last_modified = 0;
-        llstat stat_data;
-        if (!LLFile::stat(mClientTagsFilename, &stat_data))
-        {
-            last_modified = stat_data.st_mtime;
-        }
-        LL_INFOS("fsdata") << "Downloading client_list_v2.xml from " << LEGACY_CLIENT_LIST_URL << " with last modified of " << last_modified << LL_ENDL;
-        LLCore::HttpOptions::ptr_t httpOpts = std::make_shared<LLCore::HttpOptions>();
-        httpOpts->setWantHeaders(true);
-        httpOpts->setLastModified((long)last_modified);
-        FSCoreHttpUtil::callbackHttpGetRaw(LEGACY_CLIENT_LIST_URL, boost::bind(downloadComplete, _1, LEGACY_CLIENT_LIST_URL, true), boost::bind(downloadComplete, _1, LEGACY_CLIENT_LIST_URL, false), LLCore::HttpHeaders::ptr_t(), httpOpts);
-    }
-    else if (use_legacy_tags)
+    if (use_legacy_tags)
     {
         updateClientTagsLocal();
     }

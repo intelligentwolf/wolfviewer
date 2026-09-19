@@ -53,7 +53,7 @@ int main(int argc, char **argv)
 
     if( strAsk == "ask" )
     {
-        auto choice = fl_choice( "Firestorm has crashed, submit the minidump?", "No", "Yes", nullptr );
+        auto choice = fl_choice( "WolfViewer has crashed, submit the minidump?", "No", "Yes", nullptr );
         if( choice == 0 )
         {
             std::cerr << "Abort send due to users choice" << std::endl;
@@ -83,7 +83,7 @@ int main(int argc, char **argv)
 
         field = curl_mime_addpart(form);
         curl_mime_name(field, "product");
-        curl_mime_data(field, "Firestorm-Releasex64", CURL_ZERO_TERMINATED);
+        curl_mime_data(field, "WolfViewer-Releasex64", CURL_ZERO_TERMINATED);
 
         field = curl_mime_addpart(form);
         curl_mime_name(field, "version");
@@ -115,7 +115,7 @@ if (auto curl_handle = curl_easy_init()) {
     // Add the 'product' part
     curl_formadd(&formpost, &lastptr,
                  CURLFORM_COPYNAME, "product",
-                 CURLFORM_COPYCONTENTS, "Firestorm-Releasex64",
+                 CURLFORM_COPYCONTENTS, "WolfViewer-Releasex64",
                  CURLFORM_END);
 
     // Add the 'version' part

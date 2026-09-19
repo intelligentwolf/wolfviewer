@@ -3,14 +3,14 @@
 	<tab_container name="about_tab">
 		<panel label="情報" name="support_panel">
 			<text name="support_intro">
-Firestormの最新情報については下記サイトにて
-https://www.firestormviewer.org
+WolfViewerの最新情報については下記サイトにて
+https://www.wolf-grid.com/
 			</text>
 			<button label="コピー" name="copy_btn"/>
 		</panel>
 		<panel label="Linden Labクレジット" name="credits_panel">
 			<text name="linden_intro">
-Firestormは、Linden LabがSecond Lifeビューアのソースコードを公開するという決定がなければ実現できませんでした。
+WolfViewerは、Linden LabがSecond Lifeビューアのソースコードを公開するという決定がなければ実現できませんでした。
 
 Second LifeはLindenによって提供されており、
 以下のオープンソースの貢献により実現しています：
@@ -19,35 +19,10 @@ Second LifeはLindenによって提供されており、
 				実行時にダミー名が置き換えられます
 			</text_editor>
 		</panel>
-		<panel label="Firestormクレジット" name="fs_credits_panel">
-			<scroll_container name="fs_credits_scroll_container">
-				<panel name="fs_credits_scroll_container_content_panel">
-					<text name="firestorm_intro">
-						Firestormは、SecondLife(tm) ビューアのエクスペリエンスを向上させるためのコミュニティ開発プロジェクトです。私たちは、さまざまなコミュニティ開発者からの貢献と、Linden Labおよび私たち自身のコードをパッケージ化して、大規模なボランティアサポートチームに支えられた高品質で機能豊富なビューアエクスペリエンスを提供します。
-Firestormは、非営利団体のPhoenix Firestorm Project, Inc.によって提供されています。
-
-Firestorm 開発チーム：
-					</text>
-					<!--text name="firestorm_names"/-->
-					<text name="fs_contrib_intro">
-						Firestormに多大な貢献をいただいた追加コード：
-					</text>
-					<!--text name="fs_contrib_names"/-->
-					<text name="fs_support_intro">
-						Firestormサポートチーム、ベータテスター、Wiki編集者、教育者、翻訳者の方々に特に感謝いたします。
-					</text>
-					<!--text name="fs_trans_names"/-->
-					<text name="fs_art_intro">
-						Firestorm には、Firestorm用に修正されたStarlightが含まれています。これは住民によって住民のために提供されており、代替の、より明るく、できれば使いやすいインターフェイスを提供することを目的としています。詳細については、&lt;nolink&gt;https://wiki.secondlife.com/wiki/Viewer_Skins/Starlight&lt;/nolink&gt;を参照してください。
-
-ＵＩアーティストとデザイナー：
-					</text>
-					<!--text name="fs_artists_names"/-->
-				</panel>
-			</scroll_container>
-		</panel>
 		<panel label="ライセンス" name="licenses_panel">
 			<text_editor name="licenses_editor">
+WolfViewer is based on the Firestorm viewer, Copyright (C) 2010-2026 The Phoenix Firestorm Project, Inc., used under the GNU Lesser General Public License version 2.1.
+
 3Dconnexion SDK Copyright (C) 1992-2009 3Dconnexion
 APR Copyright (C) 2011 The Apache Software Foundation
 Collada DOM Copyright 2006 Sony Computer Entertainment Inc.

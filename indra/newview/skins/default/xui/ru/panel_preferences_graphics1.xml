@@ -84,7 +84,7 @@
 			</combo_box>
 			<!-- End of mirror settings -->
 			<!--Top of second column in General tab-->
-			<check_box label="Полноэкранный режим" name="Fullscreen Mode" tool_tip="Запустить Firestorm в полноэкранном режиме. Для изменения этого параметра требуется перезапуск."/>
+			<check_box label="Полноэкранный режим" name="Fullscreen Mode" tool_tip="Запустить WolfViewer в полноэкранном режиме. Для изменения этого параметра требуется перезапуск."/>
 			<slider label="Расстояние прорисовки" name="DrawDistance"/>
 			<text name="DrawDistanceMeterText2">m</text>
 			<slider label="Максимум частиц" name="MaxParticleCount"/>

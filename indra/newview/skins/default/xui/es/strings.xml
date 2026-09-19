@@ -4,16 +4,16 @@
 		[CURRENT_GRID]
 	</string>
 	<string name="APP_NAME">
-		Firestorm
+		WolfViewer
 	</string>
 	<string name="CAPITALIZED_APP_NAME">
-		FIRESTORM
+		WOLFVIEWER
 	</string>
 	<string name="SECOND_LIFE_GRID">
 		Red de Second Life
 	</string>
 	<string name="SUPPORT_SITE">
-		Portal de Soporte de Firestorm
+		Portal de Soporte de WolfViewer
 	</string>
 	<string name="StartupDetectingHardware">
 		Identificando el hardware...
@@ -189,11 +189,11 @@ Versión del servidor de voz: [VOICE_VERSION]
 		Salir
 	</string>
 	<string name="create_account_url">
-		https://www.firestormviewer.org/join-secondlife/
+		https://www.wolf-grid.com/index.php?f=newuser
 	</string>
 	<string name="LoginFailedViewerNotPermitted">
 		Ya no puedes acceder a Second Life con el visor que estás utilizando. Visita la siguiente página para descargar un nuevo visor:
-https://www.firestormviewer.org/choose-your-platform/
+https://www.wolf-grid.com/index.php?f=osv
  
 Si deseas obtener más información, consulta las preguntas frecuentes que aparecen a continuación:
 http://secondlife.com/viewer-access-faq
@@ -6082,8 +6082,8 @@ Inténtalo incluyendo la ruta de acceso al editor entre comillas
 	<string name="render_quality_highultra">Alta-Ultra (6/7)</string>
 	<string name="render_quality_ultra">Ultra (7/7)</string>
 	<string name="render_quality_unknown">Desconocida, por encima del rango normal, comprueba la configuración del depurador RenderQualityPerformance</string>
-	<string name="fsbridge_cant_create_disabled">Firestorm no puede crear el LSL bridge si "Activar el LSL-Client Bridge" está desactivado en Preferencias.</string>
-	<string name="fsbridge_no_library">Firestorm no ha podido crear un LSL bridge. Por favor, activa tu librería y vuelve a iniciar sesión.</string>
+	<string name="fsbridge_cant_create_disabled">WolfViewer no puede crear el LSL bridge si "Activar el LSL-Client Bridge" está desactivado en Preferencias.</string>
+	<string name="fsbridge_no_library">WolfViewer no ha podido crear un LSL bridge. Por favor, activa tu librería y vuelve a iniciar sesión.</string>
 	<string name="fsbridge_already_creating">Creación del bridge en curso, no se puede iniciar otra. Por favor espera unos minutos antes de volverlo a intentar.</string>
 	<string name="fsbridge_creating">Creando el bridge. Puede tardar un momento, por favor espera.</string>
 	<string name="fsbridge_failure_creation_bad_name">No se ha creado el bridge. El bridge tiene un nombre incorrecto. Por favor, usa Avatar -> Salud del avatar -> Regenerar el LSL Bridge para crearlo de nuevo.</string>

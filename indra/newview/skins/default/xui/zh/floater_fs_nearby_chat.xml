@@ -32,7 +32,7 @@
 							<button name="emoji_recent_panel_toggle_btn" tool_tip="顯示/隱藏最近使用的表情符號" />
 						</layout_panel>
 						<layout_panel name="input_button_layout_panel">
-							<spinner name="ChatChannel" tool_tip="要傳送聊天的頻道。可以在設定 -&gt; 聊天 -&gt; Firestorm -&gt; 在聊天欄中顯示頻道選擇。" />
+							<spinner name="ChatChannel" tool_tip="要傳送聊天的頻道。可以在設定 -&gt; 聊天 -&gt; WolfViewer -&gt; 在聊天欄中顯示頻道選擇。" />
 						</layout_panel>
 						<layout_panel name="chat_type_layout_panel">
 							<combo_box name="chat_type" tool_tip="竊竊私語 = 10公尺，正常說話 = 20公尺，大聲呼喊 = 100公尺">

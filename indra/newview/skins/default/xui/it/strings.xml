@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes"?>
 <strings>
 	<string name="SUPPORT_SITE">
-		Portale di supporto di Firestorm
+		Portale di supporto di WolfViewer
 	</string>
 	<string name="StartupDetectingHardware">
 		Ricerca hardware...
@@ -207,7 +207,7 @@ Voice Server Version: [VOICE_VERSION]
 	</string>
 	<string name="LoginFailedViewerNotPermitted">
 		Il viewer utilizzato non è più in grado di accedere a Second Life. Visitare questa pagina per scaricare un nuovo viewer:
-https://www.firestormviewer.org/downloads/
+https://www.wolf-grid.com/index.php?f=osv
 
 Per maggiori informazioni, consultare le domande frequenti alla pagina:
 http://secondlife.com/viewer-access-faq
@@ -555,7 +555,7 @@ Se ritieni che si tratti di un errore, contatta support@secondlife.com
 	</string>
 	<string name="TooltipPrice" value="L$ [AMOUNT]:"/>
 	<string name="TooltipSLIcon">
-		Collegamento ad una pagina sul sito ufficiale SecondLife.com, LindenLab.com o firestormviewer.org.
+		Collegamento ad una pagina sul sito ufficiale SecondLife.com, LindenLab.com o wolf-grid.com.
 	</string>
 	<string name="TooltipFlagScript">
 		Script
@@ -824,7 +824,7 @@ Se ritieni che si tratti di un errore, contatta support@secondlife.com
 	</string>
 	<string name="AssetUploadRequestInvalid">
 		Errore nella richiesta di invio. Visitare
-https://www.firestormviewer.org/support per avere aiuto nella soluzione.
+https://www.wolf-grid.com/blog/faq.php per avere aiuto nella soluzione.
 	</string>
 	<string name="texture">
 		texture
@@ -2706,16 +2706,16 @@ Se il messaggio persiste, contattare il supporto Second Life per assistenza http
 		Questo residente ha attivato la modalità &apos;non disturbare&apos; e vedrà il tuo messaggio più tardi.
 	</string>
 	<string name="AutoResponseModeDefault">
-		Il residente a cui hai mandato un messaggio ha attivato la modalità &apos;auto-risposta&apos; di Firestorm e quindi ha chiesto di non essere disturbato. Il messaggio sarà visibile nel pannello IM per essere letto in seguito.
+		Il residente a cui hai mandato un messaggio ha attivato la modalità &apos;auto-risposta&apos; di WolfViewer e quindi ha chiesto di non essere disturbato. Il messaggio sarà visibile nel pannello IM per essere letto in seguito.
 	</string>
 	<string name="AutoResponseModeNonFriendsDefault">
-		Il residente a cui hai mandato un messaggio ha attivato la modalità auto-risposta di Firestorm e quindi ha chiesto di non essere disturbato.  Il messaggio sarà visibile nel pannello IM per essere letto in seguito.
+		Il residente a cui hai mandato un messaggio ha attivato la modalità auto-risposta di WolfViewer e quindi ha chiesto di non essere disturbato.  Il messaggio sarà visibile nel pannello IM per essere letto in seguito.
 	</string>
 	<string name="RejectTeleportOffersResponseDefault">
-		Il residente a cui hai mandato un messaggio ha attivato la modalità &apos;rifiuta tutti i teleport&apos; di Firestorm e quindi ha chiesto di non essere disturbato con offerte o richieste di TP. Si può sempre mandare un IM.
+		Il residente a cui hai mandato un messaggio ha attivato la modalità &apos;rifiuta tutti i teleport&apos; di WolfViewer e quindi ha chiesto di non essere disturbato con offerte o richieste di TP. Si può sempre mandare un IM.
 	</string>
 	<string name="RejectFriendshipRequestsResponseDefault">
-		Il residente a cui hai mandato un messaggio ha attivato la modalità &apos;rifiuta tutte le amicizie&apos; di Firestorm e quindi ha chiesto di non essere disturbato con richieste di amicizia. Si può sempre mandare un IM.
+		Il residente a cui hai mandato un messaggio ha attivato la modalità &apos;rifiuta tutte le amicizie&apos; di WolfViewer e quindi ha chiesto di non essere disturbato con richieste di amicizia. Si può sempre mandare un IM.
 	</string>
 	<string name="MutedAvatarsResponseDefault">
 		Il residente a cui hai mandato un messaggio ti ha bloccato la possibilità di mandare messaggi.
@@ -6249,10 +6249,10 @@ Assistenza nel sito SecondLife.com e segnala il problema.
 		Sconosciuta, oltre la gamma normale. Controllare l&apos;impostazione di debug RenderQualityPerformance
 	</string>
 	<string name="fsbridge_cant_create_disabled">
-		Firestorm non può creare un bridge LSL se nelle preferenze non è spuntato "Abilita LSL-Client Bridge".
+		WolfViewer non può creare un bridge LSL se nelle preferenze non è spuntato "Abilita LSL-Client Bridge".
 	</string>
 	<string name="fsbridge_no_library">
-		Firestorm non ha potuto creare un bridge LSL. Abilitare la library e riavviare.
+		WolfViewer non ha potuto creare un bridge LSL. Abilitare la library e riavviare.
 	</string>
 	<string name="fsbridge_already_creating">
 		Creazione del bridge in corso, impossibile avviarne un&apos;altra. Attendere qualche minuto e riprovare.
@@ -6306,7 +6306,7 @@ Assistenza nel sito SecondLife.com e segnala il problema.
 		Info script: Il bridge ha emesso una risposta malformata. Riprovare.
 	</string>
 	<string name="fsbridge_error_injection">
-		NOTA: Alcuni script sono stati aggiunti al bridge di Firestorm. Se il messaggio è inatteso, usare il comando di menu &apos;Avatar/Salute avatar/Ricrea LSL bridge&apos; per riavviarlo.
+		NOTA: Alcuni script sono stati aggiunti al bridge di WolfViewer. Se il messaggio è inatteso, usare il comando di menu &apos;Avatar/Salute avatar/Ricrea LSL bridge&apos; per riavviarlo.
 	</string>
 	<string name="fsbridge_error_wrongvm">
 		NOTA: Lo script del bridge usa la vecchia macchina virtuale LSO (limite di memoria 16 KB) invece della nuova Mono (limite 64 KB). Ciò crea molta probabilità di collisioni stack-heap e di blocco del bridge per esaurimento memoria. Usare il comando di menu &apos;Avatar/Salute avatar/Ricrea LSL bridge&apos; per riavviarlo. Se il messaggio ricompare, riprovare in un&apos;altra regione.

@@ -78,7 +78,7 @@
 				<combo_box.item label="Średnio" name="3" />
 				<combo_box.item label="Szybko" name="1" />
 			</combo_box>
-			<check_box label="Pełny ekran" name="Fullscreen Mode" tool_tip="Uruchamia Firestorma na pełnym ekranie. Aby zmienić tryb wymagany jest restart."/>
+			<check_box label="Pełny ekran" name="Fullscreen Mode" tool_tip="Uruchamia WolfViewera na pełnym ekranie. Aby zmienić tryb wymagany jest restart."/>
 			<slider label="Pole widzenia" name="DrawDistance"/>
 			<slider label="Maks. ilość cząsteczek" name="MaxParticleCount"/>
 			<text name="AvatarComplexityModeLabel">

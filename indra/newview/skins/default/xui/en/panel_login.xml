@@ -15,7 +15,7 @@
   </panel.string>
   <panel.string
     name="sign_up_url">
-    https://www.firestormviewer.org/join-secondlife/
+    https://www.wolf-grid.com/index.php?f=newuser
   </panel.string>
   <layout_stack
   follows="left|right|top"

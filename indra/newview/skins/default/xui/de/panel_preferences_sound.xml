@@ -183,7 +183,7 @@
 <panel.string name="textFSWindowOpen">
 	Öffnen eines Fensters:
 </panel.string>
-<tab_container label="Firestorm Prefs" name="tabs">
+<tab_container label="WolfViewer Prefs" name="tabs">
 	<!-- Sounds -->
 	<panel label="Klänge" name="Media Sounds Panel">
 		<slider label="Master-Lautstärke" name="System Volume"/>

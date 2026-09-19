@@ -32,7 +32,7 @@
 							<button name="emoji_recent_panel_toggle_btn" tool_tip="Pokaż/ukryj ostatnie emoji" />
 						</layout_panel>
 						<layout_panel name="input_button_layout_panel">
-							<spinner name="ChatChannel" tool_tip="Kanał, na jaki wiadomość na zostać wysłana. Włączone w Ustawienia -> Czat -> Firestorm -> Oferuj ręczny wybór kanału w pasku czatu."/>
+							<spinner name="ChatChannel" tool_tip="Kanał, na jaki wiadomość na zostać wysłana. Włączone w Ustawienia -> Czat -> WolfViewer -> Oferuj ręczny wybór kanału w pasku czatu."/>
 						</layout_panel>
 						<layout_panel name="chat_type_layout_panel">
 							<combo_box name="chat_type" tool_tip="Szept = 10m, Mów = 20m, Krzyk = 100m">

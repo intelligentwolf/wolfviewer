@@ -31,7 +31,7 @@
      control_name="ForceShowGrid"
      follows="top|left"
      height="15"
-     label="Allow login to other grids (Not all grids will support Firestorm)"
+     label="Allow login to other grids (Not all grids will support WolfViewer)"
      layout="topleft"
      left="30"
      name="show_grid_selection_check"

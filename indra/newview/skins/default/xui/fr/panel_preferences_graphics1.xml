@@ -67,7 +67,7 @@
 				<combo_box.item label="Toutes les 3 images" name="2"/>
 				<combo_box.item label="Toutes les 4 images" name="3"/>
 			</combo_box>
-			<check_box label="Mode plein écran" name="Fullscreen Mode" tool_tip="Exécuter Firestorm en mode plein écran. Un redémarrage est nécessaire pour changer de mode."/>
+			<check_box label="Mode plein écran" name="Fullscreen Mode" tool_tip="Exécuter WolfViewer en mode plein écran. Un redémarrage est nécessaire pour changer de mode."/>
 			<slider label="Distance d'affichage" name="DrawDistance"/>
 			<text name="DrawDistanceMeterText2">m</text>
 			<slider label="Nombre max. de particules" name="MaxParticleCount"/>

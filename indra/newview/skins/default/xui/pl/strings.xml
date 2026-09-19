@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes"?>
 <strings>
 	<string name="SUPPORT_SITE">
-		Portal Pomocy Firestorma
+		Portal Pomocy WolfViewera
 	</string>
 	<string name="StartupLoading">
 		Ładowanie przeglądarki [APP_NAME]...
@@ -213,7 +213,7 @@ Wersja serwera głosu (Voice Server): [VOICE_VERSION]
 	</string>
 	<string name="LoginFailedViewerNotPermitted">
 		Przeglądarka używana przez Ciebie nie ma już dostępu do Second Life. Proszę przejść na poniższą stronę i pobrać nową:
-https://www.firestormviewer.org/choose-your-platform/
+https://www.wolf-grid.com/index.php?f=osv
 
 Więcej informacji w naszym FAQ:
 http://secondlife.com/viewer-access-faq
@@ -540,7 +540,7 @@ Jeśli myślisz, że to błąd skontaktuj się z support@secondlife.com
 	</string>
 	<string name="TooltipPrice" value="[AMOUNT]L$: "/>
 	<string name="TooltipSLIcon">
-		Link do strony znajdującej się w oficjalnej domenie SecondLife.com, LindenLab.com lub firestormviewer.org.
+		Link do strony znajdującej się w oficjalnej domenie SecondLife.com, LindenLab.com lub wolf-grid.com.
 	</string>
 	<string name="TooltipFlagScript">
 		Skrypt
@@ -841,7 +841,7 @@ są dozwolone.
 	</string>
 	<string name="AssetUploadRequestInvalid">
 		Błąd podczas przesyłania. Odwiedź
-https://www.firestormviewer.org/support aby uzyskać pomoc.
+https://www.wolf-grid.com/blog/faq.php aby uzyskać pomoc.
 	</string>
 	<string name="SettingValidationError">
 		Walidacja nie powiodła się - importowanie ustawień [NAME]

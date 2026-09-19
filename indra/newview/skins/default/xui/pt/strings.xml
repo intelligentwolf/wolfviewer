@@ -5,7 +5,7 @@
      that are returned from one component and may appear in many places-->
 <strings>
 	<string name="SUPPORT_SITE">
-		Portal de Supporte Firestorm
+		Portal de Supporte WolfViewer
 	</string>
 	<string name="StartupDetectingHardware">
 		Detectando hardware...
@@ -184,7 +184,7 @@ Versão do servidor de voz: [VOICE_VERSION]
 		Sair
 	</string>
 	<string name="create_account_url">
-		https://www.firestormviewer.org/join-secondlife/
+		https://www.wolf-grid.com/index.php?f=newuser
 	</string>
 	<string name="ViewerDownloadURL">
 		http://secondlife.com/download

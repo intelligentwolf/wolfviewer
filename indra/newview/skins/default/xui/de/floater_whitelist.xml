@@ -4,7 +4,7 @@
 Um die Beinträchtigung zu minimieren und Stabilität und Performance zu erhöhen, raten wir daher eingehend alle Benutzer Ausnahmen (auch bekannt als Whitelisting) für wichtige Verzeichnisse und Programme einzurichten, die vom Viewer verwendet werden.
 
 Weitere Details hierzu finden Sie unter
-https://wiki.firestormviewer.org/antivirus_whitelisting
+https://www.wolf-grid.com/blog/faq.php
 	</text>
 	<text name="whitelist_folder_instruction">
 		Das folgende Textfeld die Verzeichnisse angezeigt, die vom Viewer verwendet werden.

@@ -82,7 +82,7 @@
 		<usetemplate name="okbutton" yestext="確定"/>
 	</notification>
 	<notification name="BadInstallation">
-		[APP_NAME] 更新時出錯。請在 [https://www.firestormviewer.org/downloads 下載] 最新版本的檢視器。
+		[APP_NAME] 更新時出錯。請在 [https://www.wolf-grid.com/index.php?f=osv 下載] 最新版本的檢視器。
 		<usetemplate name="okbutton" yestext="確定"/>
 	</notification>
 	<notification name="FoundLegacyNsisInstallation">
@@ -3903,12 +3903,12 @@ URL：[AUDIOURL]
 	<notification name="MeshUploadErrorDetails">
 		[LABEL] 無法上傳：[MESSAGE]
 
-[DETAILS] 詳情請檢視Firestorm.log檔案。
+[DETAILS] 詳情請檢視WolfViewer.log檔案。
 	</notification>
 	<notification name="MeshUploadError">
 		[LABEL] 上傳失敗：[MESSAGE]
 
-詳情請檢視Firestorm.log檔案。
+詳情請檢視WolfViewer.log檔案。
 	</notification>
 	<notification name="MeshUploadPermError">
 		請求網格模型上傳權限時出錯。
@@ -4011,7 +4011,7 @@ URL：[AUDIOURL]
 關閉路由器中的SIP ALG功能。
 
 將無法用語音通訊。
-https://wiki.firestormviewer.org/fs_voice
+https://www.wolf-grid.com/index.php?f=voicefaq
 		<usetemplate ignoretext="當檢視器無法連線到語音伺服器時警告我" name="okignore" yestext="確定"/>
 	</notification>
 	<notification name="NoVoiceConnect-GIAB">
@@ -4019,7 +4019,7 @@ https://wiki.firestormviewer.org/fs_voice
 
 將無法用語音通訊。
 請檢查你的網路和防火墻設定。
-[https://wiki.firestormviewer.org/fs_voice]
+[https://www.wolf-grid.com/index.php?f=voicefaq]
 		<usetemplate name="okbutton" yestext="確定"/>
 	</notification>
 	<notification name="AvatarRezLeftNotification">
@@ -4558,7 +4558,7 @@ switch語句在沒有預設標籤情況下的行為不正確已被修正。
 		檢視器快取當前為空。在下載新內容時，可能會導致較低的影格率和較慢的庫存載入。
 	</notification>
 	<notification name="FirstJoinSupportGroup2">
-		歡迎加入Phoenix/Firestorm 檢視器支援組！
+		歡迎加入WolfViewer 檢視器支援組！
 
 爲了簡化支援過程，建議您告知該組您的檢視器的當前版本。這些資訊包括檢視器版本、檢視器面板、操作系統和RLVa狀態。因此，您可以選擇是否將檢視器版本資訊新增到此群組聊天中的每條訊息前。如果我們的支援團隊直接知道您使用的是哪個版本的檢視器，他們就可以為您提供更有意義的幫助。
 
@@ -4569,7 +4569,7 @@ switch語句在沒有預設標籤情況下的行為不正確已被修正。
 		<form name="form">
 			<button name="OK_okcancelignore" text="是"/>
 			<button name="Cancel_okcancelignore" text="否"/>
-			<ignore name="ignore" text="加入Phoenix/Firestorm支援群組聊天時。"/>
+			<ignore name="ignore" text="加入WolfViewer支援群組聊天時。"/>
 		</form>
 	</notification>
 	<notification name="ConfirmScriptModify">
@@ -5598,8 +5598,8 @@ Flickr 驗證失敗。請重試並檢查輸入的程式碼。
 	</notification>
 	<notification name="CurrencyURIOverrideReceived">
 此區域選擇使用第三方貨幣入口網站。
-請注意，在 Firestorm 檢視器內進行的貨幣購買是您（使用者）與貨幣提供商或賣家之間的交易。
-Firestorm 檢視器、Phoenix Firestorm 檢視器專案公司或其團隊不對因這些交易直接或間接產生的任何費用或損害承擔責任。
+請注意，在 WolfViewer 檢視器內進行的貨幣購買是您（使用者）與貨幣提供商或賣家之間的交易。
+WolfViewer 檢視器、IntelligentWolf Ltd或其團隊不對因這些交易直接或間接產生的任何費用或損害承擔責任。
 如果您不同意這些使用條款，不應在使用此檢視器時進行任何財務交易。
 		<usetemplate ignoretext="當區域更改貨幣入口網站 URL 時警告我" name="okignore" yestext="確定"/>
 	</notification>
@@ -5799,8 +5799,8 @@ gzip級別6壓縮的測試結果，對[FILE]檔案大小[SIZE] KB：
 		大氣彩現設定批次匯入完成。
 	</notification>
 	<notification name="FSAOScriptedNotification">
-		Firestorm 動畫覆蓋器：[AO_MESSAGE]
-		<usetemplate ignoretext="當Firestorm動畫覆蓋器被指令碼物件訪問時提醒我" name="notifyignore"/>
+		WolfViewer 動畫覆蓋器：[AO_MESSAGE]
+		<usetemplate ignoretext="當WolfViewer動畫覆蓋器被指令碼物件訪問時提醒我" name="notifyignore"/>
 	</notification>
 	<notification name="WarnForceLoginURL">
 		登錄螢幕首頁的 URL 被覆蓋用於測試目的。
@@ -5831,7 +5831,7 @@ gzip級別6壓縮的測試結果，對[FILE]檔案大小[SIZE] KB：
 
 有關如何將 [APP_NAME] 加入防毒軟體白名單的詳細說明，包括需要排除的檔案與資料夾清單，請參閱我們的指南：
 
-https://wiki.firestormviewer.org/antivirus_whitelisting
+https://www.wolf-grid.com/blog/faq.php
 	</notification>
 	<notification name="ConfirmPoserOverwrite">
 		是否覆蓋現有的姿勢「[POSE_NAME]」？

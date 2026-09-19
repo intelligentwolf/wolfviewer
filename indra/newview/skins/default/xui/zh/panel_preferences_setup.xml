@@ -2,7 +2,7 @@
 <panel label="初始化" name="Input panel">
 	<tab_container name="tabs" label="初始化">
 		<panel label="連線" name="tab-conn">
-			<text name="Maximum bandwidth">最大頻寬（[https://wiki.firestormviewer.org/fs_speedtest 需要幫助？]）：</text>
+			<text name="Maximum bandwidth">最大頻寬（[https://www.wolf-grid.com/blog/faq.php 需要幫助？]）：</text>
 			<text name="text_box2">Kbps</text>
 			<text name="NetworkPrefText1">Wi-Fi</text>
 			<text name="NetworkPrefText2">DSL</text>
@@ -31,7 +31,7 @@
 			<text name="home_page_label_l">瀏覽器首頁：</text>
 		</panel>
 		<panel label="檔案夾" name="tab-dir">
-			<text name="cache_size_label_l">快取大小（[https://wiki.firestormviewer.org/cache 需要幫助？]）：</text>
+			<text name="cache_size_label_l">快取大小（[https://www.wolf-grid.com/blog/faq.php 需要幫助？]）：</text>
 			<text name="text_box5">mb</text>
 			<text name="asset_cache_size_label_l">
 				資料資源（資產）快取：

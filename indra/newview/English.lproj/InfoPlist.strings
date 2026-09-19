@@ -1,6 +1,6 @@
 /* Localized versions of Info.plist keys */
 
-CFBundleName = "Firestorm";
+CFBundleName = "WolfViewer";
 
-CFBundleShortVersionString = "Firestorm version %%VERSION%%";
-CFBundleGetInfoString = "Firestorm version %%VERSION%%, Copyright 2010-2026 The Phoenix Firestorm Project, Inc.";
+CFBundleShortVersionString = "WolfViewer version %%VERSION%%";
+CFBundleGetInfoString = "WolfViewer version %%VERSION%%, Copyright 2026 IntelligentWolf Ltd. Based on Firestorm, Copyright 2010-2026 The Phoenix Firestorm Project, Inc.";

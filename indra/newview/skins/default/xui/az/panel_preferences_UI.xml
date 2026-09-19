@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes" ?>
 <panel label="İnterfeys seçimləri" name="Display panel">
-<tab_container label="Firestorm seçimləri" name="tabs">
+<tab_container label="WolfViewer seçimləri" name="tabs">
     <panel label="3D dünya" name="UI Prefs Panel">
         <text name="HoverTipText" width="150">
             Açılan ipuclar:
@@ -74,9 +74,9 @@
            (Yen.başlatma tələb olunur)
         </text>
         <check_box label="Qrup və İM söhbət nişanlarını gizlədin" name="FSDisableIMChiclets" tool_tip="Şəxsi mesajlar və qrup söhbətləri üçün nişanlar silinəcək (Bildirişlər hələ də göstəriləcək)." />
-        <check_box label="Bildirişlər pəncərəsi üçün köhnə siyahıdan istifadə edin." name="FSLegacyNotificationWell" tool_tip="Əgər qeyd olunarsa, Firestorm saxlanmış bildirişləri göstərmək üçün köhnə siyahı görünüşündən istifadə edəcək." width="320" />
+        <check_box label="Bildirişlər pəncərəsi üçün köhnə siyahıdan istifadə edin." name="FSLegacyNotificationWell" tool_tip="Əgər qeyd olunarsa, WolfViewer saxlanmış bildirişləri göstərmək üçün köhnə siyahı görünüşündən istifadə edəcək." width="320" />
         <text name="FSLegacyNotificationWellRequiresRestart" width="150">(Yen.başlatma tələb olunur)</text>
-        <check_box label="Söhbətlərin və Bildirişlərin avtomatik ölçüsü siyahıları" name="FSLegacyNotificationWellAutoResize" tool_tip="Əgər bu qutu işarələnərsə, elementlər əlavə etdikdə və ya sildikdə Firestorm həmişə Söhbət siyahılarınızı və köhnə Bildirişlərinizi avtomatik olaraq dəyişdirəcək."/>
+        <check_box label="Söhbətlərin və Bildirişlərin avtomatik ölçüsü siyahıları" name="FSLegacyNotificationWellAutoResize" tool_tip="Əgər bu qutu işarələnərsə, elementlər əlavə etdikdə və ya sildikdə WolfViewer həmişə Söhbət siyahılarınızı və köhnə Bildirişlərinizi avtomatik olaraq dəyişdirəcək."/>
         <check_box label="Artıq istifadə olunan isti düymələri yenidən təyin edin (yalnız Linux, yenidən başlatma tələb olunur)" name="FSRemapLinuxShortcuts" tool_tip="Aktivləşdirilərsə, Linux əməliyyat sistemi tərəfindən artıq istifadə olunan isti düymələr (məsələn, CTRL-ALT-Fx) yenidən təsvir olunacaq." />
         <check_box label="Statistika Pəncərə Diqqətləşdirməsinin qarşısını alın" name="FSStatisticsNoFocus"
         tool_tip="Aktiv edilərsə, başqa bir pəncərə bağlandıqda statistika pəncərəsi heç vaxt diqqət almayacaq (elementlər üçün qrafik tərtibatını dəyişdirmək kimi hərəkətlər aktiv olduqda hələ də mümkündür)."
@@ -94,7 +94,7 @@
 		</text>
 
 		<check_box tool_tip="Ekranın yuxarı sağ küncündə trafikin ölçülməsini göstərin" label="Ekranın yuxarı sağ küncündə trafikin ölçülməsini göstərin" name="ShowNetStats"/>
-		<check_box label="Gecikmə sayğacı üçün köhnə dəyər ekranından istifadə edin" name="FSStatbarLegacyMeanPerSec" tool_tip="Bu seçim aktivləşdirilərsə, Firestorm məlumatların göstərilməsində ənənəvi üsuldan istifadə edəcək."/>
+		<check_box label="Gecikmə sayğacı üçün köhnə dəyər ekranından istifadə edin" name="FSStatbarLegacyMeanPerSec" tool_tip="Bu seçim aktivləşdirilərsə, WolfViewer məlumatların göstərilməsində ənənəvi üsuldan istifadə edəcək."/>
 		<check_box label="Trafik göstəricisinə basmaqla Statistika açılır" name="FSUseStatsInsteadOfLagMeter"/>
 		<check_box label="Üst menyuda media nəzarətini göstərin" name="FSEnableVolumeControls" tool_tip="Yuxarı sağda axın audio, medianın daxil edilməsinə və söndürülməsinə nəzarət etmək imkanı göstərilir."/>
 		<check_box label="Simulyator kanalını panel statusunda göstərin" name="FSStatusbarShowSimulatorVersion" tool_tip="Kanal simulyatorunu (RC Magnum, RC Le Tigre, RC BlueSteel Və s.) yuxarı çubuğda göstər"/>

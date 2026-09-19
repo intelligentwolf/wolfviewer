@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
-Name=Firestorm
-Exec=firestorm
+Name=WolfViewer
+Exec=wolfviewer
 Comment=Client for virtual worlds
-Icon=firestorm_icon
+Icon=wolfviewer_icon
 Categories=Development;
 Terminal=true

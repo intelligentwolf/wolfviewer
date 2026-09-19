@@ -177,7 +177,7 @@
 	<panel.string name="textFSWindowOpen">
 		Открытие окна:
 	</panel.string>
-	<tab_container label="Настройки Firestorm" name="tabs">
+	<tab_container label="Настройки WolfViewer" name="tabs">
 		<panel label="Звуки" name="Media Sounds Panel">
 			<slider label="Общая громкость" name="System Volume"/>
 			<check_box label="Отключение при сворачивании" name="mute_when_minimized"/>

@@ -21,7 +21,7 @@
 		<panel label="使用者界面" name="ui" />
 		<panel label="皮膚" name="skins" />
 		<panel label="崩潰報告" name="crashreports" />
-		<panel label="Firestorm" name="firestorm" />
+		<panel label="WolfViewer" name="firestorm" />
 		<panel label="OpenSim" name="opensim" />
 		<panel label="備份" name="backup" />
 	</tab_container>

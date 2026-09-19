@@ -7,7 +7,7 @@
 		Botón central del ratón
 	</panel.string>
 	<check_box label="Permitir múltiples instancias del visor (puede reducir la estabilidad y el rendimiento)" name="allow_multiple_viewer_check"/>
-	<check_box label="Permitir el inicio de sesión en otras redes (no todas las redes soportarán Firestorm)" name="show_grid_selection_check"/>
+	<check_box label="Permitir el inicio de sesión en otras redes (no todas las redes soportarán WolfViewer)" name="show_grid_selection_check"/>
 	<check_box label="Mostrar el menú Avanzado" name="show_advanced_menu_check"/>
 	<check_box label="Mostrar el menú Desarrollo" name="show_develop_menu_check"/>
 	<text name="BackgroundYieldTimeText">

@@ -235,7 +235,7 @@
     <key>FSBandwidthTooHigh</key>
     <map>
       <key>Comment</key>
-      <string>Enables Firestorm bandwidth warning over 1500 KBPS</string>
+      <string>Enables WolfViewer bandwidth warning over 1500 KBPS</string>
       <key>Persist</key>
       <integer>1</integer>
       <key>Type</key>

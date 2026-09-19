@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes" ?>
-<floater name="floater_fs_search" title="Búsqueda Firestorm">
+<floater name="floater_fs_search" title="Búsqueda WolfViewer">
 	<floater.string name="string.location">
 		Lugar: [LOCATION]
 	</floater.string>

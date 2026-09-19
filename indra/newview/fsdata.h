@@ -42,7 +42,6 @@ class FSData : public LLSingleton<FSData>
 public:
     void startDownload();
     void downloadAgents();
-    void processResponder(const LLSD& content, const std::string& url, bool save_to_file, const LLDate& last_modified);
     void addAgents();
 
     LLSD resolveClientTag(const LLUUID& id, bool new_system, const LLColor4& new_system_color) const;

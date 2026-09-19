@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes" ?>
 <panel label="Xəta bildirişləri" name="crash_reports">
-    <check_box label="Xəta bildirişlərini firestormviewer.org saytına göndər" name="checkSendCrashReports" />
+    <check_box label="Xəta bildirişlərini wolf-grid.com saytına göndər" name="checkSendCrashReports" />
     <check_box label="Göndərmədən əvvəl həmişə soruş" name="checkSendCrashReportsAlwaysAsk" />
     <check_box label="Seçimlər fayllarını daxil edin" name="checkSendSettings" />
     <text name="textSendSettings">

@@ -11,7 +11,7 @@
  name="chat">
 
 <tab_container
- label="Firestorm Prefs"
+ label="WolfViewer Prefs"
  layout="topleft"
  follows="all"
  top="5"
@@ -1334,7 +1334,7 @@
 		 height="18"
 		 name="FSShowMessageCountInWindowTitle"
 		 control_name="FSShowMessageCountInWindowTitle"
-		 label="Show number of unread IMs in Firestorm's window title"/>
+		 label="Show number of unread IMs in WolfViewer's window title"/>
 
 		<check_box
 		 layout="topleft"

@@ -466,7 +466,7 @@
 			</string>
 			<text name="LOD_swap_ll_default" value="公式"/>
 			<string name="fs_lod_tooltip_msg">
-				"Firestorm のデフォルト値 ([FACTOR])"
+				"WolfViewer のデフォルト値 ([FACTOR])"
 			</string>
 			<text name="LOD_swap_usr_current" tool_tip="現在のＬｏＤ要素"/>
 			<text name="LOD_swap_LOD_Change_label">

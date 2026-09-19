@@ -81,7 +81,7 @@
 			</combo_box>
 			<!-- 映象設定結束 -->
 			<!--General選項卡第二列頂部-->
-			<check_box label="全螢幕模式" name="Fullscreen Mode" tool_tip="以全螢幕模式運行Firestorm。更改模式需要重新啟動。" />
+			<check_box label="全螢幕模式" name="Fullscreen Mode" tool_tip="以全螢幕模式運行WolfViewer。更改模式需要重新啟動。" />
 			<slider label="顯示距離" name="DrawDistance" />
 			<text name="DrawDistanceMeterText2">米</text>
 			<slider label="最大粒子數量" name="MaxParticleCount" />

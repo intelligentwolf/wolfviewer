@@ -79,7 +79,7 @@ Detalles del error: la notificación de nombre &apos;[_NAME]&apos; no se ha enco
 		<usetemplate name="okbutton" yestext="OK"/>
 	</notification>
 	<notification name="BadInstallation">
-		Ha habido un error actualizando [APP_NAME]. Por favor, [https://www.firestormviewer.org/downloads descarga la última versión] del Visor.
+		Ha habido un error actualizando [APP_NAME]. Por favor, [https://www.wolf-grid.com/index.php?f=osv descarga la última versión] del Visor.
 		<usetemplate name="okbutton" yestext="Aceptar"/>
 	</notification>
 	<notification name="LoginFailedNoNetwork">
@@ -642,7 +642,7 @@ El objeto debe de haber sido borrado o estar fuera de alcance (&apos;out of rang
 
 ¿Ir a [_URL] para más información?
 		<url name="url" option="0">
-			https://wiki.firestormviewer.org/fs_system_requirements
+			https://www.wolf-grid.com/blog/faq.php
 		</url>
 		<usetemplate ignoretext="El hardware de mi ordenador no está admitido" name="okcancelignore" notext="No" yestext="Sí"/>
 	</notification>
@@ -1445,7 +1445,7 @@ Si es la primera vez que usas [CURRENT_GRID], debes crear una cuenta para poder 
 
 Puedes revisar tu conexión a Internet y volver a intentarlo en unos minutos, pulsar Ayuda para conectarte a [SUPPORT_SITE], o pulsar Teleporte para intentar teleportarte a tu Base.
 		<url name="url">
-			https://www.firestormviewer.org/support/
+			https://www.wolf-grid.com/blog/faq.php
 		</url>
 		<form name="form">
 			<button name="OK" text="Aceptar"/>
@@ -3740,7 +3740,7 @@ Al ocultar el botón Hablar se desactiva la función de voz.
 		</form>
 	</notification>
 	<notification name="ModeChange">
-		Cambiar entre los diferentes modos requiere que cierres y reinicies Firestorm.
+		Cambiar entre los diferentes modos requiere que cierres y reinicies WolfViewer.
 		<usetemplate name="okcancelbuttons" yestext="Cerrar" notext="No cerrar"/>
 	</notification>
 	<notification label="" name="NoClassifieds">
@@ -4853,7 +4853,7 @@ Configuración actual: [CURRENT_VALUE]
 		La cache del visor está vacía. Por favor, ten en cuenta que puedes sufrir de lentitud de movimiento y de inventario mientras se carga el nuevo contenido.
 	</notification>
 	<notification name="FirstJoinSupportGroup2">
-		¡Bienvenido al Grupo de Soporte de Phoenix/Firestorm Viewer!
+		¡Bienvenido al Grupo de Soporte de WolfViewer Viewer!
 Para facilitar el soporte, se recomienda que publiques la versión de tu visor en el grupo. Esta información incluye la versión actual del visor, el skin del visor, el sistema operativo y el estatus del RLVa. Puedes mostrar la versión de tu visor delante de cada mensaje que envías al grupo. Nuestros miembros de soporte pueden darte respuestas más adecuadas si saben qué visor estás usando.
 
 Puedes activar y desactivar esta función en cualquier momento usando la casilla existente en la ventana del chat del grupo.
@@ -4862,7 +4862,7 @@ Puedes activar y desactivar esta función en cualquier momento usando la casilla
 		<form name="form">
 			<button name="OK_okcancelignore" text="Sí"/>
 			<button name="Cancel_okcancelignore" text="No"/>
-			<ignore name="ignore" text="Te has unido al Grupo de Soporte de Phoenix/Firestorm"/>
+			<ignore name="ignore" text="Te has unido al Grupo de Soporte de WolfViewer"/>
 		</form>
 	</notification>
 	<notification name="ConfirmScriptModify">

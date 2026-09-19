@@ -35,6 +35,7 @@
 #include "llwindowwin32.h" // *FIX: for setting gIconResource.
 
 #include "llappviewerwin32.h"
+#include "indra_constants.h"   // APP_NAME
 
 #include "llgl.h"
 #include "res/resource.h" // *FIX: for setting gIconResource.
@@ -954,9 +955,10 @@ bool LLAppViewerWin32::init()
         checkTemp(); // Always do and log this, no matter if using Bugsplat or not
 
         // Save those early so we don't have to deal with the dynamic memory during in process crash handling.
-        FS::LogfileIn = ll_convert_string_to_wide(gDirUtilp->getExpandedFilename(LL_PATH_LOGS, "Firestorm.log"));
-        FS::LogfileOut = ll_convert_string_to_wide(gDirUtilp->getExpandedFilename(LL_PATH_DUMP, "Firestorm.log"));
-        FS::DumpFile = ll_convert_string_to_wide(gDirUtilp->getExpandedFilename(LL_PATH_DUMP, "Firestorm.dmp"));
+        // [2026-09-19] The log is APP_NAME + ".log" (llappviewer.cpp initLoggingAndGetLastDuration).
+        FS::LogfileIn = ll_convert_string_to_wide(gDirUtilp->getExpandedFilename(LL_PATH_LOGS, APP_NAME + ".log"));
+        FS::LogfileOut = ll_convert_string_to_wide(gDirUtilp->getExpandedFilename(LL_PATH_DUMP, APP_NAME + ".log"));
+        FS::DumpFile = ll_convert_string_to_wide(gDirUtilp->getExpandedFilename(LL_PATH_DUMP, APP_NAME + ".dmp"));
 
         S32 nCrashSubmitBehavior = gCrashSettings.getS32("CrashSubmitBehavior");
         // Don't ever send? bail out!

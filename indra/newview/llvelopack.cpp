@@ -298,7 +298,7 @@ static std::wstring get_app_name()
     // Match viewer_manifest.py app_name() logic: release channel uses "Viewer"
     // suffix instead of "Release" for display purposes (shortcuts, uninstall, etc.)
     std::wstring channel = LL_TO_WSTRING(LL_VIEWER_CHANNEL);
-    // <FS:TJ> Get correct Firestorm app name
+    // <FS:TJ> Get the app name from the channel
     //std::wstring release_suffix = L" Release";
     //if (channel.size() >= release_suffix.size() &&
     //    channel.compare(channel.size() - release_suffix.size(), release_suffix.size(), release_suffix) == 0)
@@ -306,7 +306,7 @@ static std::wstring get_app_name()
     //    channel.replace(channel.size() - release_suffix.size(), release_suffix.size(), L" Viewer");
     //}
     //return channel;
-    std::wstring prefix = L"Firestorm";
+    std::wstring prefix = L"WolfViewer";
     if (channel.starts_with(prefix))
         channel.erase(0, prefix.size());
 #ifdef OPENSIM
@@ -589,10 +589,7 @@ static void register_uninstall_info(const std::wstring& install_dir,
         RegSetValueExW(hkey, L"DisplayVersion", 0, REG_SZ,
                       (BYTE*)version.c_str(), (DWORD)((version.size() + 1) * sizeof(wchar_t)));
         RegSetValueExW(hkey, L"Publisher", 0, REG_SZ,
-                      // <FS:TJ> Use Firestorm installation information
-                      //(BYTE*)L"Linden Research, Inc.", 44);
-                      (BYTE*)L"The Phoenix Firestorm Project, Inc.", 72);
-                      // </FS:TJ>
+                      (BYTE*)L"IntelligentWolf Ltd", (DWORD)((wcslen(L"IntelligentWolf Ltd") + 1) * sizeof(wchar_t)));
         RegSetValueExW(hkey, L"UninstallString", 0, REG_SZ,
                       (BYTE*)uninstall_cmd.c_str(), (DWORD)((uninstall_cmd.size() + 1) * sizeof(wchar_t)));
         RegSetValueExW(hkey, L"DisplayIcon", 0, REG_SZ,

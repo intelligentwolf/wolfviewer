@@ -82,7 +82,7 @@ Hata ayrıntıları: &apos;[_NAME]&apos; adlı bildirim notifications.xml içind
 		<usetemplate name="okbutton" yestext="Tamam"/>
 	</notification>
 	<notification name="BadInstallation">
-		[APP_NAME] güncellenirken bir hata oluştu.  Lütfen Görüntüleyici&apos;nin [https://www.firestormviewer.org/downloads son sürümünü karşıdan yükleyin].
+		[APP_NAME] güncellenirken bir hata oluştu.  Lütfen Görüntüleyici&apos;nin [https://www.wolf-grid.com/index.php?f=osv son sürümünü karşıdan yükleyin].
 		<usetemplate name="okbutton" yestext="Tamam"/>
 	</notification>
 	<notification name="LoginFailedNoNetwork">
@@ -692,7 +692,7 @@ Nesne aralık dışında ya da silinmiş olabilir.
 
 Daha fazla bilgi için [_URL] adresini ziyaret etmek ister misiniz?
 		<url name="url">
-			https://wiki.firestormviewer.org/fs_system_requirements
+			https://www.wolf-grid.com/blog/faq.php
 		</url>
 		<usetemplate ignoretext="Bilgisayar donanımım desteklenmiyor" name="okcancelignore" notext="Hayır" yestext="Evet"/>
 	</notification>

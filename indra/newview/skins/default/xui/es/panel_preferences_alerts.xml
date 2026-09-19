@@ -8,7 +8,7 @@
 	<check_box name="FSPaymentInfoInChat" label="Transacciones de L$ en el chat local en vez de en tostadas"/>
 	<check_box label="Notificar los cambios de versión de simulador al cambiar de región" name="FSShowServerVersionChangeNotice" tool_tip="Muestra un aviso si la versión de simulador cambia durante un teleporte o al cruzar a otra región."/>
 	<check_box label="Activar notificaciones Growl" name="notify_growl_checkbox"/>
-	<check_box name="notify_growl_always_checkbox" label="Mostrar Growl incluso si Firestorm está activo"/>
+	<check_box name="notify_growl_always_checkbox" label="Mostrar Growl incluso si WolfViewer está activo"/>
     </panel>
 
     <!-- People -->

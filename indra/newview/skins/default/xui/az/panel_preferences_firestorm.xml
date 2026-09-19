@@ -12,7 +12,7 @@
 <string name="EmbeddedItemNotLoggedIn">
 	Daxil ol
 </string>
-<tab_container label="Firestorm seçimləri" name="tabs">
+<tab_container label="WolfViewer seçimləri" name="tabs">
     <panel label="Əsas" name="tab-extras">
         <check_box name="checkMiscRLVa" label="Skriptlər ilə nəzarət (RLVa)" />
         <text name="textMiscRLVaRestart">
@@ -24,7 +24,7 @@
         <check_box label="Boş bento animasiyasını düzəldin" name="play_default_bento_idle_animation_toggle" tool_tip="Bu seçim aktivləşdirilərsə, defolt bento animasiyası 0 prioritetində işləyəcək, bu da başqa heç bir bento animasiyası işləmədikdə qolları, qanadları, ağızı və quyruğu öz təbii vəziyyətinə gətirir."/>
         <check_box label="Daxil ol ekranını söndürün" name="login_screen_toggle" tool_tip="Qara daxil ol ekranını söndürün" />
         <check_box label="Çıxış ekranını söndürün" name="logout_screen_toggle" tool_tip="Qara çıxış ekranını söndürün" />
-        <check_box label="Çəkmə məsafəsinin tədricən artması" name="FSRenderFarClipStepping" tool_tip="Bu seçimi aktiv etsəniz, Firestorm teleportdan sonra çəkiliş məsafəsini tədricən artıracaq." />
+        <check_box label="Çəkmə məsafəsinin tədricən artması" name="FSRenderFarClipStepping" tool_tip="Bu seçimi aktiv etsəniz, WolfViewer teleportdan sonra çəkiliş məsafəsini tədricən artıracaq." />
         <slider name="progressive_draw_distance_interval" tool_tip="Hər bir ardıcıl uzatma arasında saniyələrlə interval" />
         <check_box name="UseLSLBridge" label="LSL körpüsünü aktivləşdirin" tool_tip="LSL körpüsünü aktivləşdirin" />
         <combo_box name="UseLSLFlightAssist" tool_tip="Yüksək hündürlüklərdə uçmağa və havada qalmağa kömək etmək üçün skripti aktiv edin">

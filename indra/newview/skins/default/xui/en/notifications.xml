@@ -193,7 +193,7 @@ No tutorial is currently available.
    icon="alertmodal.tga"
    name="BadInstallation"
    type="alertmodal">
- Installation of [APP_NAME] is defective. Please [https://www.firestormviewer.org/downloads download a new copy] of the Viewer and reinstall.
+ Installation of [APP_NAME] is defective. Please [https://www.wolf-grid.com/index.php?f=osv download a new copy] of the Viewer and reinstall.
     <tag>fail</tag>
     <usetemplate
      name="okbutton"
@@ -1923,7 +1923,7 @@ Visit [_URL] for more information?
     <tag>confirm</tag>
     <url option="0" name="url">
 
-			https://wiki.firestormviewer.org/fs_system_requirements
+			https://www.wolf-grid.com/blog/faq.php
     </url>
     <usetemplate
      ignoretext="My computer hardware is not supported"
@@ -4061,7 +4061,7 @@ We&apos;re having trouble connecting. There may be a problem with your Internet 
 You can either check your Internet connection and try again in a few minutes, click Help to view the [SUPPORT_SITE], or click Teleport to attempt to teleport home.
     <url option="1" name="url">
 
-			https://www.firestormviewer.org/support/
+			https://www.wolf-grid.com/blog/faq.php
     </url>
     <form name="form">
       <button
@@ -4089,7 +4089,7 @@ We&apos;re having trouble connecting. There may be a problem with your Internet 
 
 You can either check your Internet connection and try again in a few minutes or click Help to view the [SUPPORT_SITE].
     <url option="1" name="url">
-			https://www.firestormviewer.org/support/
+			https://www.wolf-grid.com/blog/faq.php
     </url>
     <form name="form">
       <button
@@ -10051,7 +10051,7 @@ Select residents to share with.
     icon="alert.tga"
     type="alert">
       [LABEL] failed to upload: [MESSAGE]
-[DETAILS] See Firestorm.log for details
+[DETAILS] See WolfViewer.log for details
   </notification>
 
   <notification
@@ -10060,7 +10060,7 @@ Select residents to share with.
     type="alert">
       [LABEL] failed to upload: [MESSAGE]
 
-See Firestorm.log for details
+See WolfViewer.log for details
   </notification>
 
   <!-- <FS:Wolf> Raised when the model uploader is about to send a texture with no data in it,
@@ -10275,7 +10275,7 @@ Please check your network and firewall setup.
 Disable any SIP ALG feature in your router.
 
 Voice communications will not be available.
-https://wiki.firestormviewer.org/fs_voice
+https://www.wolf-grid.com/index.php?f=voicefaq
     <tag>voice</tag>
   <tag>fail</tag>
     <usetemplate
@@ -10292,7 +10292,7 @@ We're having trouble connecting to your voice server.
 
 Voice communications will not be available.
 Please check your network and firewall setup.
-[https://wiki.firestormviewer.org/fs_voice]
+[https://www.wolf-grid.com/index.php?f=voicefaq]
     <tag>voice</tag>
   <tag>fail</tag>
     <usetemplate
@@ -11679,7 +11679,7 @@ Your viewer cache is currently empty. Please be aware that you may experience sl
    icon="alertmodal.tga"
    name="FirstJoinSupportGroup2"
    type="alertmodal">
-Welcome to the Phoenix/Firestorm Viewer Support Group!
+Welcome to the WolfViewer Viewer Support Group!
 
 To make support easier, it is recommended to announce your viewer's version to the group. This information includes current viewer version, viewer skin, operating system and RLVa status. You can choose to display your viewer's version in front of any chat you send to the group. Our support members can give you more meaningful advice right away if they know the viewer version you are on.
 
@@ -11699,7 +11699,7 @@ Do you want to enable the automatic viewer version display?
        text="No"/>
       <ignore
 	   name="ignore"
-       text="The Phoenix/Firestorm Support Group was joined"
+       text="The WolfViewer Support Group was joined"
        save_option="true" />
     </form>
 
@@ -14394,8 +14394,8 @@ This setting is intended for cases where VRAM detection is reporting incorrect v
    name="CurrencyURIOverrideReceived"
    type="alertmodal">
 This region has elected to specify a third-party currency portal. 
-Please note that currency purchases made through Firestorm Viewer are transactions between you (the user) and the provider(s) or seller(s) of the currency. 
-Neither Firestorm Viewer, the Phoenix Firestorm Viewer Project Inc., nor its team shall be liable for any cost or damage arising either directly or indirectly from any such transaction. 
+Please note that currency purchases made through WolfViewer are transactions between you (the user) and the provider(s) or seller(s) of the currency. 
+Neither WolfViewer, the IntelligentWolf Ltd, nor its team shall be liable for any cost or damage arising either directly or indirectly from any such transaction. 
 If you do not agree to these terms of use, then no financial transactions should be conducted using this viewer.
    <usetemplate
     ignoretext="When the region sets a new currency helper."
@@ -14925,9 +14925,9 @@ Bulk import of Windlights has finished.
    <unique combine = "cancel_old">
      <context>FSAOScriptedNotification</context>
    </unique>
-Firestorm Animation Overrider: [AO_MESSAGE]
+WolfViewer Animation Overrider: [AO_MESSAGE]
    <usetemplate
-    ignoretext="Warn me when the Firestorm Animation Overrider gets accessed by a scripted object"
+    ignoretext="Warn me when the WolfViewer Animation Overrider gets accessed by a scripted object"
     name="notifyignore"/>
   </notification>
   <notification
@@ -14999,7 +14999,7 @@ Some antivirus programs may mistakenly block parts of [APP_NAME], slowing down i
 
 For detailed instructions on how to whitelist [APP_NAME] - including a list of files and folders to exclude - please visit our guide:
 
-https://wiki.firestormviewer.org/antivirus_whitelisting
+https://www.wolf-grid.com/blog/faq.php
   </notification>
 
    <notification

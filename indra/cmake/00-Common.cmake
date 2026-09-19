@@ -217,7 +217,9 @@ if (DARWIN)
   add_compile_definitions(GL_SILENCE_DEPRECATION=1)
 
   set(ENABLE_SIGNING TRUE)
-  set(SIGNING_IDENTITY "Developer ID Application: The Phoenix Firestorm Project, Inc." )
+  # [2026-09-19] Only read when ENABLE_SIGNING is on (newview/CMakeLists.txt); set it to the
+  # certificate the build machine holds — there is no default identity to sign with.
+  set(SIGNING_IDENTITY "" )
 endif(DARWIN)
 
 if (LINUX OR DARWIN)

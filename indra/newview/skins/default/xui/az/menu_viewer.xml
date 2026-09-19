@@ -277,21 +277,21 @@
 		<menu_item_call label="SL Ticarət mərkəzi" name="SL Marketplace"/>
 		<menu_item_call label="LindenXchange" name="LindenXchange"/>
 		<menu_item_call label="Skript Kitabxanası" name="Script Library"/>
-		<menu_item_call label="Firestorm Blog" name="Firestorm Blog"/>
-		<menu_item_call label="Firestorm Flickr" name="Firestorm Flickr"/>
-		<menu_item_call label="Firestorm YouTube" name="Firestorm YouTube"/>
-		<menu_item_call label="Firestorm Twitter" name="Firestorm Twitter"/>
-		<menu_item_call label="Firestorm Plurk" name="Firestorm Plurk"/>
-		<menu_item_call label="Firestorm MoTD" name="Firestorm MoTD"/>
+		<menu_item_call label="WolfViewer Blog" name="Firestorm Blog"/>
+		<menu_item_call label="WolfViewer Flickr" name="Firestorm Flickr"/>
+		<menu_item_call label="WolfViewer YouTube" name="Firestorm YouTube"/>
+		<menu_item_call label="WolfViewer Twitter" name="Firestorm Twitter"/>
+		<menu_item_call label="WolfViewer Plurk" name="Firestorm Plurk"/>
+		<menu_item_call label="WolfViewer MoTD" name="Firestorm MoTD"/>
 	</menu>
 	<!-- Help Menu -->
 	<menu label="Kömək" name="Help">
 		<menu_item_check label="İstifadəçi interfeysi ipuclarını aktivləşdir" name="Enable Hints"/>
-		<menu_item_call label="Firestorm Viki" name="Firestorm Wiki"/>
+		<menu_item_call label="WolfViewer Viki" name="Firestorm Wiki"/>
 		<menu_item_call label="Problem həllinə kömək axtar" name="Troubleshooting"/>
-		<menu_item_call label="Firestorm dəstək qrupuna qoşulun" name="firestorm_support_group"/>
-		<menu_item_call label="Firestorm təlimatlarının təqviminə bax" name="Firestorm Classes Schedule"/>
-		<menu_item_call label="Firestorm Hadisələr Təqvimi" name="Firestorm Events Calendar"/>
+		<menu_item_call label="WolfViewer dəstək qrupuna qoşulun" name="firestorm_support_group"/>
+		<menu_item_call label="WolfViewer təlimatlarının təqviminə bax" name="Firestorm Classes Schedule"/>
+		<menu_item_call label="WolfViewer Hadisələr Təqvimi" name="Firestorm Events Calendar"/>
 		<menu_item_check label="Necə ediləcəyinə dair" name="How To"/>
 		<!-- <menu_item_call label="Second Life Help" name="Second Life Help"/> -->
 		<menu_item_call label="[CURRENT_GRID] kömək" name="current_grid_help"/>

@@ -183,7 +183,7 @@
 	<panel.string name="textFSWindowOpen">
 		Otwieranie okna:
 	</panel.string>
-	<tab_container label="Ust. Firestorma" name="tabs">
+	<tab_container label="Ust. WolfViewera" name="tabs">
 		<panel label="Dźwięki" name="Media Sounds Panel">
 			<slider label="Głośność ogólna" name="System Volume"/>
 			<check_box label="Wycisz gdy zminimalizowane" name="mute_when_minimized"/>

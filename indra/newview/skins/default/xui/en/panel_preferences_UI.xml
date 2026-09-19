@@ -10,7 +10,7 @@
  label="UI-Pref"
  name="Display panel">
 <tab_container
- label="Firestorm Prefs"
+ label="WolfViewer Prefs"
  layout="topleft"
  follows="all"
  top="5"
@@ -580,7 +580,7 @@
          layout="topleft"
          left="5"
          name="FSDisableIMChiclets"
-         tool_tip="If checked, Firestorm will not show any group / IM chat chiclets (notifications envelope and sum of IMs will remain on the screen)."
+         tool_tip="If checked, WolfViewer will not show any group / IM chat chiclets (notifications envelope and sum of IMs will remain on the screen)."
          top_pad="6"
          width="256" />
         <check_box
@@ -591,7 +591,7 @@
          layout="topleft"
          left="5"
          name="FSLegacyNotificationWell"
-         tool_tip="If checked, Firestorm will use the legacy list view to display stored notifications."
+         tool_tip="If checked, WolfViewer will use the legacy list view to display stored notifications."
          top_pad="3"
          width="265" />
         <text
@@ -614,7 +614,7 @@
          layout="topleft"
          left="5"
          name="FSLegacyNotificationWellAutoResize"
-         tool_tip="If checked, Firestorm will always resize the Conversations and legacy Notifications lists automatically when items get added or removed."
+         tool_tip="If checked, WolfViewer will always resize the Conversations and legacy Notifications lists automatically when items get added or removed."
          top_pad="3"
          width="450" />
         <check_box
@@ -766,7 +766,7 @@
 		 width="270"
 		 left="20"
 		 control_name="FSStatbarLegacyMeanPerSec"
-		 tool_tip="If enabled, Firestorm will use the legacy method of showing the period mean per second value in the traffic indicator instead of the current observed value"/>
+		 tool_tip="If enabled, WolfViewer will use the legacy method of showing the period mean per second value in the traffic indicator instead of the current observed value"/>
 		<check_box
 		 enabled_control="ShowNetStats"
 		 top_pad="4"
@@ -786,7 +786,7 @@
 		 left="10"
 		 width="270"
 		 control_name="FSEnableVolumeControls"
-		 tool_tip="If checked, Firestorm will show media controls (volume, media, stream) in upper right corner of the screen. Useful, if skin already has its own controls."/>
+		 tool_tip="If checked, WolfViewer will show media controls (volume, media, stream) in upper right corner of the screen. Useful, if skin already has its own controls."/>
 		<check_box
 		 top_pad="4"
 		 follows="left|top"
@@ -948,7 +948,7 @@
 		 label="Open avatar profile directly when clicking on its name"
 		 layout="topleft"
 		 name="FSInspectAvatarSlurlOpensProfile"
-		 tool_tip="If enabled, Firestorm will open the profile of an avatar directly when clicking on a link with its name"
+		 tool_tip="If enabled, WolfViewer will open the profile of an avatar directly when clicking on a link with its name"
 		 initial_value="true"
 		 top_pad="6"
 		 left="10"

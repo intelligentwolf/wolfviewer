@@ -12,7 +12,7 @@
     <string name="EmbeddedItemNotLoggedIn">
         Non presente
     </string>
-    <tab_container label="Firestorm" name="tabs">
+    <tab_container label="WolfViewer" name="tabs">
         <panel label="Extra" name="tab-extras">
             <check_box name="checkMiscRLVa" label="Abilita Remote Scripted Viewer Controls (RLVa)" />
             <text name="textMiscRLVaRestart">
@@ -24,7 +24,7 @@
             <check_box label="Fix animazione Bento inattiva" name="play_default_bento_idle_animation_toggle" tool_tip="Se questa opzione è abilitata, il viewer esegue l'animazione Bento predefinita con priorità 0, che riporta le mani, le ali, la bocca e la coda nella loro posizione naturale quando nessun'altra animazione Bento è in esecuzione." />
             <check_box label="Disabilita schermata di accesso" name="login_screen_toggle" tool_tip="Disabilita la schermata nera durante l&apos;accesso."/>
             <check_box label="Disabilita schermata di uscita" name="logout_screen_toggle" tool_tip="Disabilita la schermata nera durante la disconnessione" />
-            <check_box label="Abilita aumento progressivo distanza disegno" name="FSRenderFarClipStepping" tool_tip="Firestorm aumenterà progressivamente la distanza di disegno dopo un teleport."/>
+            <check_box label="Abilita aumento progressivo distanza disegno" name="FSRenderFarClipStepping" tool_tip="WolfViewer aumenterà progressivamente la distanza di disegno dopo un teleport."/>
             <slider name="progressive_draw_distance_interval" tool_tip="Intervallo in secondi tra gli incrementi di distanza disegno"/>
             <check_box label="Abilita LSL-Client Bridge" name="UseLSLBridge" tool_tip="Permette di utilizzare lo script che aiuta nel volo ad altezze maggiori" />
             <combo_box name="UseLSLFlightAssist">
@@ -106,7 +106,7 @@
             <button name="delete_beam" label="Elimina" tool_tip="Elimina questa forma di RI" />
             <button name="custom_beam_btn" label="Crea nuova" tool_tip="Crea una nuova forma per il raggio indicatore" />
             <button name="refresh_beams" label="Aggiorna lista" tool_tip="Aggiorna la lista delle forme salvate" width="85"/>
-            <slider name="FSBeamShapeScale" label="Scala:" tool_tip="Cambia la grandezza dell&apos;indicatore a forma di fenice di Firestorm" />
+            <slider name="FSBeamShapeScale" label="Scala:" tool_tip="Cambia la grandezza dell&apos;indicatore a forma di fenice di WolfViewer" />
             <text name="BridgeProtocols">
                 Integrazione protocolli esterni in LSL-Client Bridge:
             </text>
@@ -197,7 +197,7 @@
             <check_box label="Espandi sempre le informazioni avanzate sull'anteprima dell'animazione" tool_tip="Espandi le informazioni avanzate sull'animazione nella finestra dell'anteprima dell'animazione per impostazione predefinita" name="FSAnimationPreviewExpanded" />
             <check_box label="Abilita i dettagli estesi sulle informazioni degli script" tool_tip="Estendi la funzionalità delle informazioni di base sugli script con vari dettagli utili per i costruttori." name="FSScriptInfoExtended" />
             <check_box label="Elenca i punti di attacco nei menu &quot;Attacca a&quot; in ordine alfabetico (richiede riavvio)" tool_tip="Se abilitato, i punti di attacco nei menu &quot;Attacca a&quot; verranno elencati in ordine alfabetico" name="FSSortAttachmentSpotsAlphabetically" />
-            <check_box label="Usa il nuovo pannello texture di Firestorm nella finestra Costruisci/Modifica (richiede riavvio)" tool_tip="Se abilitata, gli strumenti di modifica delle texture utilizzeranno il pannello FS migliorato e consentiranno la modifica sia delle texture Blinn-Phong che PBR." name="FSUseNewTexturePanel" />
+            <check_box label="Usa il nuovo pannello texture di WolfViewer nella finestra Costruisci/Modifica (richiede riavvio)" tool_tip="Se abilitata, gli strumenti di modifica delle texture utilizzeranno il pannello FS migliorato e consentiranno la modifica sia delle texture Blinn-Phong che PBR." name="FSUseNewTexturePanel" />
         </panel>
         <panel label="Script Editor" name="BuildTabScriptEditor">
             <text name="text_box_scripting_font">

@@ -81,7 +81,7 @@ Detalhes do erro: O aviso &apos;[_NAME]&apos; não foi localizado no arquivo not
 		<usetemplate name="okbutton" yestext="OK"/>
 	</notification>
 	<notification name="BadInstallation">
-		Um erro ocorreu ao atualizar o [APP_NAME].  [https://www.firestormviewer.org/downloads Baixe a versão atual] do Visualizador.
+		Um erro ocorreu ao atualizar o [APP_NAME].  [https://www.wolf-grid.com/index.php?f=osv Baixe a versão atual] do Visualizador.
 		<usetemplate name="okbutton" yestext="OK"/>
 	</notification>
 	<notification name="LoginFailedNoNetwork">
@@ -636,7 +636,7 @@ O objeto pode estar fora de alcance ou ter sido deletado.
 
 Consultar [_URL] para mais informações?
 		<url name="url" option="0">
-			https://wiki.firestormviewer.org/fs_system_requirements
+			https://www.wolf-grid.com/blog/faq.php
 		</url>
 		<usetemplate ignoretext="O hardware do meu computador não é suportado" name="okcancelignore" notext="Não" yestext="Sim"/>
 	</notification>
@@ -1384,7 +1384,7 @@ Enquando isso, use o [CURRENT_GRID] normalmente. Seu visual será exibido corret
 		A instalação do [APP_NAME] está pronta.
 
 Se você ainda não conhece o [CURRENT_GRID], basta criar uma conta para começar. 
-Voltar para [https://www.firestormviewer.org/join-secondlife/ firestormviewer.org] para criar sua conta?
+Voltar para [https://www.wolf-grid.com/index.php?f=newuser wolf-grid.com] para criar sua conta?
 		<usetemplate name="okcancelbuttons" notext="Continuar" yestext="Criar conta"/>
 	</notification>
 	<notification name="LoginPacketNeverReceived">

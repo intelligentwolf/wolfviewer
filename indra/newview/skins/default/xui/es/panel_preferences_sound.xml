@@ -174,7 +174,7 @@
 	<panel.string name="textFSWindowOpen">
 		Apertura de ventana:
 	</panel.string>
-	<tab_container label="Prefs. Firestorm" name="tabs">
+	<tab_container label="Prefs. WolfViewer" name="tabs">
 		<panel label="General" name="Media Sounds Panel">
 			<slider label="Volumen general" name="System Volume"/>
 			<check_box label="Silenciar al minimizar" name="mute_when_minimized"/>

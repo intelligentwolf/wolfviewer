@@ -7,7 +7,7 @@
  left="1"
  top="1"
  width="540"
- label="Firestorm"
+ label="WolfViewer"
  name="firestorm">
  
 <panel.string name="BeamsOffLabel">
@@ -24,7 +24,7 @@
 	</string>
 
 <tab_container
- label="Firestorm Prefs"
+ label="WolfViewer Prefs"
  layout="topleft"
  follows="all"
  top="5"
@@ -136,7 +136,7 @@
 		 label="Enable progressive draw distance stepping"
 		 layout="topleft"
 		 name="FSRenderFarClipStepping"
-		 tool_tip="If enabled, Firestorm will use a progressive draw distance stepping after teleporting."
+		 tool_tip="If enabled, WolfViewer will use a progressive draw distance stepping after teleporting."
 		 initial_value="true"
 		 top_pad="10"
 		 width="250" />

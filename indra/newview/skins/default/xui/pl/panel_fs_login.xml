@@ -52,7 +52,7 @@
 			<text name="mode_selection_text">
 				WYBIERZ TRYB
 			</text>
-			<combo_box name="mode_combo" tool_tip="Wybierz ten tryb ustawień, z którym jesteś najbardziej obeznany/a, aby Firestorm mógł dobrać odpowiednie ustawienia domyślne.">
+			<combo_box name="mode_combo" tool_tip="Wybierz ten tryb ustawień, z którym jesteś najbardziej obeznany/a, aby WolfViewer mógł dobrać odpowiednie ustawienia domyślne.">
 				<combo_box.item label="Hybrydowy" name="Hybrid"/>
 				<combo_box.item label="Tekstowy" name="Text"/>
 			</combo_box>

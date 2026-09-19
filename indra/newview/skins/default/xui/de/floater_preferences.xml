@@ -21,7 +21,7 @@
 		<panel label="Benutzerinterface" name="ui"/>
 		<panel label="Oberflächendesign" name="skins"/>
 		<panel label="Absturzmeldungen" name="crashreports"/>
-		<panel label="Firestorm" name="firestorm"/>
+		<panel label="WolfViewer" name="firestorm"/>
 		<panel label="OpenSim" name="opensim"/>
 		<panel label="Sicherung" name="backup"/>
 	</tab_container>

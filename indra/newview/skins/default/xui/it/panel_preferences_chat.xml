@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes"?>
 <panel label="Chat" name="chat">
-	<tab_container label="Firestorm Prefs" name="tabs">
+	<tab_container label="WolfViewer Prefs" name="tabs">
 		<panel label="Vista" name="ChatVisuals">
 			<text name="console_font_size" width="180">
 				Dimensione carattere console:
@@ -185,7 +185,7 @@
 				Sfuma testo IM sullo sfondo della finestra trascrizioni
 			</text>
 			<spinner tool_tip="0.25-1.0, 0.25 sfuma molto, 1 non sfuma" name="FSIMChatHistoryFade"/>
-			<check_box name="FSShowMessageCountInWindowTitle" label="Mostra numero IM non letti nel titolo finestra Firestorm"/>
+			<check_box name="FSShowMessageCountInWindowTitle" label="Mostra numero IM non letti nel titolo finestra WolfViewer"/>
 			<check_box name="FSAnnounceIncomingIM" label="Annuncia IM in arrivo appena iniziano a scrivere"/>
 			<check_box name="FSIMChatFlashOnFriendStatusChange" label="Lampeggia linguetta IM quando amici entrano o escono"/>
 			<check_box name="FSNotifyNearbyChatFlash" label="Lampeggia bottone chat se arrivano nuovi messaggi" tool_tip="Lampeggia il bottone chat nella barra se arriva un messaggio locale. La finestra chat deve essere ridotta e la finestra conversazioni deve essere chiusa perché il bottone lampeggi."/>

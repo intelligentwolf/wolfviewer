@@ -8,7 +8,7 @@
 			<check_box label="更改區域時，如果類比主機(sim)發生變化，就通知我" name="FSShowServerVersionChangeNotice" tool_tip="在傳送或進入地點時顯示檢視器版本變化通知" />
 			<check_box label="登入時查詢status.secondlifegrid.net取得最新訊息" name="AutoQueryGridStatus" />
 			<check_box label="啟用Growl通知" name="notify_growl_checkbox" />
-			<check_box name="notify_growl_always_checkbox" label="即使Firestorm處於活躍狀態也顯示Growl通知" />
+			<check_box name="notify_growl_always_checkbox" label="即使WolfViewer處於活躍狀態也顯示Growl通知" />
 			<check_box name="FSFilterGrowlKeywordDuplicateIMs" label="如果關鍵字警報已顯示，過濾重複的聊天" />
 		</panel>
 		<!-- People -->

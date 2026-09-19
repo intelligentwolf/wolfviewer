@@ -1715,7 +1715,7 @@ std::string LLUrlEntryIcon::getIcon(const std::string &url)
 LLUrlEntryJira::LLUrlEntryJira()
 {
     // <FS:CR> Please make sure to sync these with the items in "static bool stringHasJira(const std::string &text)" if you make a change
-    mPattern = boost::regex("((?:ARVD|BUG|CHOP|CHUIBUG|CTS|DOC|DN|ECC|EXP|FIRE|FITMESH|LEAP|LLSD|MATBUG|MISC|OPEN|PATHBUG|PLAT|PYO|SCR|SH|SINV|SLS|SNOW|SOCIAL|STORM|SUN|SVC|SPOT|SUN|SUP|TPV|VWR|WEB)-\\d+)",
+    mPattern = boost::regex("((?:ARVD|BUG|CHOP|CHUIBUG|CTS|DOC|DN|ECC|EXP|FITMESH|LEAP|LLSD|MATBUG|MISC|OPEN|PATHBUG|PLAT|PYO|SCR|SH|SINV|SNOW|SOCIAL|STORM|SUN|SVC|SPOT|SUN|TPV|VWR|WEB)-\\d+)",
                 // <FS:Ansariel> FIRE-917: Match case to reduce number of false positives
                 //boost::regex::perl|boost::regex::icase);
                 boost::regex::perl);
@@ -1735,16 +1735,8 @@ std::string LLUrlEntryJira::getTooltip(const std::string &string) const
 
 std::string LLUrlEntryJira::getUrl(const std::string &string) const
 {
-    if (string.find("FIRE") != std::string::npos ||
-        string.find("SLS") != std::string::npos ||
-        string.find("SUP") != std::string::npos )
-    {
-        return llformat("https://jira.firestormviewer.org/browse/%s", string.c_str());
-    }
-    else
-    {
-        return llformat("https://jira.secondlife.com/browse/%s", string.c_str());
-    }
+    // [2026-09-19] Only Linden Lab's tracker keys are matched now (see the pattern above).
+    return llformat("https://jira.secondlife.com/browse/%s", string.c_str());
 }
 
 //

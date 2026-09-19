@@ -17,46 +17,46 @@ LangString MULTIUSER_INNERTEXT_INSTALLMODE_CURRENTUSER ${LANG_GERMAN} "Nur für 
 
 ; installation directory text
 LangString DirectoryChooseTitle ${LANG_GERMAN} "Installations-Ordner"
-LangString DirectoryChooseUpdate ${LANG_GERMAN} "Wählen Sie den Firestorm Ordner für dieses Update:"
-LangString DirectoryChooseSetup ${LANG_GERMAN} "Pfad in dem Firestorm installiert werden soll:"
+LangString DirectoryChooseUpdate ${LANG_GERMAN} "Wählen Sie den WolfViewer Ordner für dieses Update:"
+LangString DirectoryChooseSetup ${LANG_GERMAN} "Pfad in dem WolfViewer installiert werden soll:"
 
 LangString MUI_TEXT_DIRECTORY_TITLE ${LANG_GERMAN} "Installationsverzeichnis"
-LangString MUI_TEXT_DIRECTORY_SUBTITLE ${LANG_GERMAN} "Wählen Sie das Verzeichnis aus, in dem Firestorm installiert werden soll:"
+LangString MUI_TEXT_DIRECTORY_SUBTITLE ${LANG_GERMAN} "Wählen Sie das Verzeichnis aus, in dem WolfViewer installiert werden soll:"
 
-LangString MUI_TEXT_INSTALLING_TITLE ${LANG_GERMAN} "Firestorm wird installiert..."
-LangString MUI_TEXT_INSTALLING_SUBTITLE ${LANG_GERMAN} "Firestorm wird im Verzeichnis $INSTDIR installiert"
+LangString MUI_TEXT_INSTALLING_TITLE ${LANG_GERMAN} "WolfViewer wird installiert..."
+LangString MUI_TEXT_INSTALLING_SUBTITLE ${LANG_GERMAN} "WolfViewer wird im Verzeichnis $INSTDIR installiert"
 
-LangString MUI_TEXT_FINISH_TITLE ${LANG_GERMAN} "Firestorm wird installiert"
-LangString MUI_TEXT_FINISH_SUBTITLE ${LANG_GERMAN} "Firestorm wurde im Verzeichnis $INSTDIR installiert."
+LangString MUI_TEXT_FINISH_TITLE ${LANG_GERMAN} "WolfViewer wird installiert"
+LangString MUI_TEXT_FINISH_SUBTITLE ${LANG_GERMAN} "WolfViewer wurde im Verzeichnis $INSTDIR installiert."
 
 LangString MUI_TEXT_ABORT_TITLE ${LANG_GERMAN} "Installation abgebrochen"
-LangString MUI_TEXT_ABORT_SUBTITLE ${LANG_GERMAN} "Firestorm wird nicht im Verzeichnis $INSTDIR installiert."
+LangString MUI_TEXT_ABORT_SUBTITLE ${LANG_GERMAN} "WolfViewer wird nicht im Verzeichnis $INSTDIR installiert."
 
 ; CheckStartupParams message box
 LangString CheckStartupParamsMB ${LANG_GERMAN} "Konnte Programm '$INSTNAME' nicht finden. Stilles Update fehlgeschlagen."
 
 ; installation success dialog
-LangString InstSuccesssQuestion ${LANG_GERMAN} "Firestorm starten?"
+LangString InstSuccesssQuestion ${LANG_GERMAN} "WolfViewer starten?"
 
 ; remove old NSIS version
 LangString RemoveOldNSISVersion ${LANG_GERMAN} "Überprüfe alte Version ..."
 
 ; check windows version
 LangString CheckWindowsVersionDP ${LANG_GERMAN} "Überprüfung der Windows Version ..."
-LangString CheckWindowsVersionMB ${LANG_GERMAN} 'Firestorm unterstützt nur Windows Vista mit Service Pack 2 und höher.$\nEine Installation auf diesem Betriebssystem wird nicht unterstützt. Installation wird beendet...'
-LangString CheckWindowsServPackMB ${LANG_GERMAN} "Es wird empfohlen, das aktuellste Service Pack des Betriebssystems für Firestorm zu verwenden.$\nEs ist hilftreich für Performance und Stabilität des Programms."
+LangString CheckWindowsVersionMB ${LANG_GERMAN} 'WolfViewer unterstützt nur Windows Vista mit Service Pack 2 und höher.$\nEine Installation auf diesem Betriebssystem wird nicht unterstützt. Installation wird beendet...'
+LangString CheckWindowsServPackMB ${LANG_GERMAN} "Es wird empfohlen, das aktuellste Service Pack des Betriebssystems für WolfViewer zu verwenden.$\nEs ist hilftreich für Performance und Stabilität des Programms."
 LangString UseLatestServPackDP ${LANG_GERMAN} "Bitte Windows Update benutzen, um das aktuellste Service Pack zu installieren."
 
 ; checkifadministrator function (install)
 LangString CheckAdministratorInstDP ${LANG_GERMAN} "Überprüfung der Installations-Berechtigungen ..."
-LangString CheckAdministratorInstMB ${LANG_GERMAN} 'Sie besitzen ungenügende Berechtigungen.$\nSie müssen ein "administrator" sein, um Firestorm installieren zu können.'
+LangString CheckAdministratorInstMB ${LANG_GERMAN} 'Sie besitzen ungenügende Berechtigungen.$\nSie müssen ein "administrator" sein, um WolfViewer installieren zu können.'
 
 ; checkifadministrator function (uninstall)
 LangString CheckAdministratorUnInstDP ${LANG_GERMAN} "Überprüfung der Entfernungs-Berechtigungen ..."
-LangString CheckAdministratorUnInstMB ${LANG_GERMAN} 'Sie besitzen ungenügende Berechtigungen.$\nSie müssen ein "administrator" sein, um Firestorm entfernen zu können..'
+LangString CheckAdministratorUnInstMB ${LANG_GERMAN} 'Sie besitzen ungenügende Berechtigungen.$\nSie müssen ein "administrator" sein, um WolfViewer entfernen zu können..'
 
 ; checkcpuflags
-LangString MissingSSE2 ${LANG_GERMAN} "Dieser PC besitzt möglicherweise keinen Prozessor mit SSE2-Unterstützung, die für die Ausführung von Firestorm ${VERSION_LONG} benötigt wird. Trotzdem installieren?"
+LangString MissingSSE2 ${LANG_GERMAN} "Dieser PC besitzt möglicherweise keinen Prozessor mit SSE2-Unterstützung, die für die Ausführung von WolfViewer ${VERSION_LONG} benötigt wird. Trotzdem installieren?"
 
 ; Extended cpu checks (AVX2)
 LangString MissingAVX2 ${LANG_GERMAN} "Ihre CPU unterstützt keine AVX2-Anweisungen. Bitte laden Sie die Version für ältere CPUs von %DLURL% herunter."
@@ -65,35 +65,35 @@ LangString AVX2OverrideConfirmation ${LANG_GERMAN} "Falls Sie glauben, dass Ihr 
 LangString AVX2OverrideNote ${LANG_GERMAN} "Durch das Übersteuern des Installers installieren Sie möglicherweise eine Version, die beim Starten direkt abstürzt. In diesem Fall installieren Sie bitte stattdessen die Standard-Version."
 
 ; closesecondlife function (install)
-LangString CloseSecondLifeInstDP ${LANG_GERMAN} "Warten auf die Beendigung von Firestorm ..."
-LangString CloseSecondLifeInstMB ${LANG_GERMAN} "Firestorm kann nicht installiert oder ersetzt werden, wenn es bereits läuft.$\n$\nBeenden Sie, was Sie gerade tun und klicken Sie OK, um Firestorm zu beenden.$\nKlicken Sie ABBRECHEN, um die Installation abzubrechen."
-LangString CloseSecondLifeInstRM ${LANG_GERMAN} "Firestorm konnte einige Dateien einer vorherigen Installation nicht entfernen."
+LangString CloseSecondLifeInstDP ${LANG_GERMAN} "Warten auf die Beendigung von WolfViewer ..."
+LangString CloseSecondLifeInstMB ${LANG_GERMAN} "WolfViewer kann nicht installiert oder ersetzt werden, wenn es bereits läuft.$\n$\nBeenden Sie, was Sie gerade tun und klicken Sie OK, um WolfViewer zu beenden.$\nKlicken Sie ABBRECHEN, um die Installation abzubrechen."
+LangString CloseSecondLifeInstRM ${LANG_GERMAN} "WolfViewer konnte einige Dateien einer vorherigen Installation nicht entfernen."
 
 ; closesecondlife function (uninstall)
-LangString CloseSecondLifeUnInstDP ${LANG_GERMAN} "Warten auf die Beendigung von Firestorm ..."
-LangString CloseSecondLifeUnInstMB ${LANG_GERMAN} "Firestorm kann nicht entfernt werden, wenn es bereits läuft.$\n$\nBeenden Sie, was Sie gerade tun und klicken Sie OK, um Firestorm zu beenden.$\nKlicken Sie CANCEL, um abzubrechen."
+LangString CloseSecondLifeUnInstDP ${LANG_GERMAN} "Warten auf die Beendigung von WolfViewer ..."
+LangString CloseSecondLifeUnInstMB ${LANG_GERMAN} "WolfViewer kann nicht entfernt werden, wenn es bereits läuft.$\n$\nBeenden Sie, was Sie gerade tun und klicken Sie OK, um WolfViewer zu beenden.$\nKlicken Sie CANCEL, um abzubrechen."
 
 ; CheckNetworkConnection
 LangString CheckNetworkConnectionDP ${LANG_GERMAN} "Prüfe Netzwerkverbindung..."
 
 ; error during installation
-LangString ErrorSecondLifeInstallRetry ${LANG_GERMAN} "Firestorm konnte nicht korrekt installiert werden, einige Dateien wurden eventuell nicht korrekt von der Installationroutine kopiert."
-LangString ErrorSecondLifeInstallSupport ${LANG_GERMAN} "Bitte laden Sie den Viewer erneut von https://www.firestormviewer.org/downloads/ und versuchen Sie die Installation erneut. Sollte das Problem weiterhin bestehen, dann kontaktieren Sie unseren Support unter https://www.firestormviewer.org/support/."
+LangString ErrorSecondLifeInstallRetry ${LANG_GERMAN} "WolfViewer konnte nicht korrekt installiert werden, einige Dateien wurden eventuell nicht korrekt von der Installationroutine kopiert."
+LangString ErrorSecondLifeInstallSupport ${LANG_GERMAN} "Bitte laden Sie den Viewer erneut von https://www.wolf-grid.com/index.php?f=osv und versuchen Sie die Installation erneut. Sollte das Problem weiterhin bestehen, dann kontaktieren Sie unseren Support unter https://www.wolf-grid.com/blog/faq.php."
 
 ; ask to remove user's data files
 LangString RemoveDataFilesMB ${LANG_GERMAN} "Einstellungs- und Cache-Dateien in Dokumente und Einstellungen löschen?"
 
 ; delete program files
-LangString DeleteProgramFilesMB ${LANG_GERMAN} "Es existieren weiterhin Dateien in Ihrem Firestorm Programm-Ordner.$\n$\nDies sind möglicherweise Dateien, die sie modifiziert oder bewegt haben:$\n$INSTDIR$\n$\nMöchten Sie diese ebenfalls löschen?"
+LangString DeleteProgramFilesMB ${LANG_GERMAN} "Es existieren weiterhin Dateien in Ihrem WolfViewer Programm-Ordner.$\n$\nDies sind möglicherweise Dateien, die sie modifiziert oder bewegt haben:$\n$INSTDIR$\n$\nMöchten Sie diese ebenfalls löschen?"
 
 ; uninstall text
-LangString UninstallTextMsg ${LANG_GERMAN} "Dies wird Firestorm ${VERSION_LONG} von Ihrem System entfernen."
+LangString UninstallTextMsg ${LANG_GERMAN} "Dies wird WolfViewer ${VERSION_LONG} von Ihrem System entfernen."
 
 ; ask to remove protocol handler registry entries registry keys that still might be needed by other viewers that are installed
-LangString DeleteRegistryKeysMB ${LANG_GERMAN} "Möchten Sie Firestorm als Standardverknüpfung zum Öffnen von Virtuelle-Welten-Protokollen entfernen?$\n$\nEs wird empfohlen, diese zu behalten, falls Sie noch andere Versionen von Firestorm installiert haben."
+LangString DeleteRegistryKeysMB ${LANG_GERMAN} "Möchten Sie WolfViewer als Standardverknüpfung zum Öffnen von Virtuelle-Welten-Protokollen entfernen?$\n$\nEs wird empfohlen, diese zu behalten, falls Sie noch andere Versionen von WolfViewer installiert haben."
 
 ; <FS:Ansariel> Ask to create protocol handler registry entries
-LangString CreateUrlRegistryEntries ${LANG_GERMAN} "Möchten Sie Firestorm als Standardverknüpfung zum Öffnen von Virtuelle-Welten-Protokollen festlegen?$\n$\nFalls Sie andere Versionen von Firestorm installiert haben, werden bereits bestehenden Verknüpfungen überschrieben."
+LangString CreateUrlRegistryEntries ${LANG_GERMAN} "Möchten Sie WolfViewer als Standardverknüpfung zum Öffnen von Virtuelle-Welten-Protokollen festlegen?$\n$\nFalls Sie andere Versionen von WolfViewer installiert haben, werden bereits bestehenden Verknüpfungen überschrieben."
 
 ; <FS:Ansariel> Optional start menu entry
 LangString CreateStartMenuEntry ${LANG_GERMAN} "Eintrag im Startmenü erstellen?"
@@ -102,8 +102,8 @@ LangString CreateStartMenuEntry ${LANG_GERMAN} "Eintrag im Startmenü erstellen?
 LangString ForOpenSimSuffix ${LANG_GERMAN} "für OpenSimulator"
 
 LangString DeleteDocumentAndSettingsDP ${LANG_GERMAN} 'Dateien unterhalb von "Dokumente und Einstellungen werden gelöscht.'
-LangString UnChatlogsNoticeMB ${LANG_GERMAN} "Diese Deinstallation löscht NICHT die Firestorm-Chatprotokolle und andere private Dateien. Sollen diese gelöscht werden, muss das Firestorm-Verzeichnis im Anwendungsdaten-Verzeichnis manuell gelöscht werden."
-LangString UnRemovePasswordsDP ${LANG_GERMAN} "Lösche gespeicherte Firestorm-Passwörter."
+LangString UnChatlogsNoticeMB ${LANG_GERMAN} "Diese Deinstallation löscht NICHT die WolfViewer-Chatprotokolle und andere private Dateien. Sollen diese gelöscht werden, muss das WolfViewer-Verzeichnis im Anwendungsdaten-Verzeichnis manuell gelöscht werden."
+LangString UnRemovePasswordsDP ${LANG_GERMAN} "Lösche gespeicherte WolfViewer-Passwörter."
 
 LangString MUI_TEXT_LICENSE_TITLE ${LANG_GERMAN} "VivoxVoice System Lizenz-Vereinbarung"
 LangString MUI_TEXT_LICENSE_SUBTITLE ${LANG_GERMAN} "Zusätzliche Lizenz-Vereinbarung für die Vivox-Voice-System-Komponenten."

@@ -7,7 +7,7 @@
 		<check_box label="Region dəyişdikdə simulyator versiyası dəyişməsi barədə məlumat verin" name="FSShowServerVersionChangeNotice" tool_tip="Teleport zamanı və ya region sərhəddini keçərkən simulyator versiyasında dəyişiklik olduğunda xəbərdarlıq göstərin."/>
 		<check_box label="Giriş zamanı son xəbərlər üçün status.secondlifegrid.net sorğusunu et" name="AutoQueryGridStatus"/>
 		<check_box label="Growl bildirişlərini aktivləşdirin" name="notify_growl_checkbox"/>
-		<check_box label="Firestorm aktiv olduğu zaman belə Growl bildirişlərini göstərin" name="notify_growl_always_checkbox"/>
+		<check_box label="WolfViewer aktiv olduğu zaman belə Growl bildirişlərini göstərin" name="notify_growl_always_checkbox"/>
 		<check_box name="FSFilterGrowlKeywordDuplicateIMs" label="Əgər onlar artıq açar sözlərin bir hissəsi kimi göstərilibsə, təkrarlanan IM-ləri filtr edin"/>
 	</panel>
 	<panel label="Adamlar" name="tab-people">

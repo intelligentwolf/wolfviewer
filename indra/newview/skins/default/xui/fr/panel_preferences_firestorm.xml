@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes"?>
-<panel label="Firestorm" name="firestorm">
+<panel label="WolfViewer" name="firestorm">
 	<panel.string name="BeamsOffLabel">=== OFF ===</panel.string>
 	<string name="EmbeddedItemNotSet">Non défini</string>
 	<string name="EmbeddedItemNotAvailable">Non disponible</string>
 	<string name="EmbeddedItemNotLoggedIn">Non connecté</string>
-	<tab_container label="Préférences de Firestorm" name="tabs">
+	<tab_container label="Préférences de WolfViewer" name="tabs">
 		<panel label="Extras" name="tab-extras">
 			<check_box name="checkMiscRLVa" label="Autoriser les contrôles de client scripté à distance (RLVa)"/>
 			<text name="textMiscRLVaRestart">(Redémarrage requis)</text>
@@ -15,7 +15,7 @@
 			<check_box label="Réinitialiser le squelette de l'avatar après s'être levé" name="FSResetSkeletonOnStandUp" tool_tip="Si cette option est activée, le client réinitialisera automatiquement le squelette de votre avatar après qu'il se soit levé. Cette réinitialisation est également transmise aux avatars environnants afin de mettre à jour votre apparence dans le client de leurs utilisateurs."/>
 			<check_box label="Désactiver l'écran de chargement à la connexion" name="login_screen_toggle" tool_tip="Désactive l'écran de chargement à la connexion"/>
 			<check_box label="Désactiver l'écran de chargement à la déconnexion" name="logout_screen_toggle" tool_tip="Désactive l'écran de chargement à la déconnexion"/>
-			<check_box label="Activer la distance d'affichage par paliers" name="FSRenderFarClipStepping" tool_tip="Si activé, Firestorm utilisera une distance d'affichage progressive par paliers après une téléportation"/>
+			<check_box label="Activer la distance d'affichage par paliers" name="FSRenderFarClipStepping" tool_tip="Si activé, WolfViewer utilisera une distance d'affichage progressive par paliers après une téléportation"/>
 			<slider name="progressive_draw_distance_interval" tool_tip="Intervalle entre chaque incrémentation de la distance d'affichage (en secondes)"/>
 			<check_box name="UseLSLBridge" label="Activer le Bridge LSL" tool_tip="Porter un objet scripté afin d'activer certaines fonctionnalités avancées"/>
 			<combo_box name="UseLSLFlightAssist" tool_tip="Active les fonctionnalités d'aide au vol et de lévitation à haute altitude">
@@ -145,7 +145,7 @@
 			<check_box label="Toujours développer les informations détaillées de la prévisualisation de l'animation" tool_tip="Développer par défaut les informations détaillées sur l'animation dans le flotteur de l'aperçu de l'animation" name="FSAnimationPreviewExpanded"/>
 			<check_box label="Active les informations détaillées pour les script" tool_tip="Activée, ajoute aux informations de base sur les scripts des détails utiles aux créateurs" name="FSScriptInfoExtended"/>
 			<check_box label="Points d'attachement alphabétiques dans les menus &quot;Attacher à&quot; (redémarrage requis)" tool_tip="Si cette option est activée, la liste des points d'attachement dans les menus 'Attacher à' sera triée par ordre alphabétique." name="FSSortAttachmentSpotsAlphabetically"/>
-			<check_box label="Nouveau module de texture Firestorm dans la fenêtre d'outils (nécessite un redémarrage)" tool_tip="Si cette option est activée, les outils d'édition de textures utiliseront le flux de travail amélioré de FS et permettront l'édition de textures Blinn-Phong et PBR." name="FSUseNewTexturePanel"/>
+			<check_box label="Nouveau module de texture WolfViewer dans la fenêtre d'outils (nécessite un redémarrage)" tool_tip="Si cette option est activée, les outils d'édition de textures utiliseront le flux de travail amélioré de FS et permettront l'édition de textures Blinn-Phong et PBR." name="FSUseNewTexturePanel"/>
 		</panel>
 		<panel label="Éditeur de script" name="BuildTabScriptEditor">
 			<text name="text_box_scripting_font" width="155">Police de l'éditeur de script :</text>

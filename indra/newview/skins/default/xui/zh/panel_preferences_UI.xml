@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes"?>
 <panel label="使用者界面偏好設定" name="Display panel">
-	<tab_container label="Firestorm偏好設定" name="tabs">
+	<tab_container label="WolfViewer偏好設定" name="tabs">
 		<panel label="3D世界" name="UI Prefs Panel">
 			<text name="HoverTipText">
 				懸停提示：
@@ -84,12 +84,12 @@
 			<text name="GroupTopRightRequiresRestart" left_delta="280">
 				（需要重新啟動）
 			</text>
-			<check_box label="禁用私聊和群組聊天的化身標籤" name="FSDisableIMChiclets" tool_tip="如果啟用，Firestorm將不會顯示私聊和群組聊天的化身標籤（群組通知圖示和未讀私聊數量圖示仍將顯示）。" />
-			<check_box label="使用舊的通知視窗列表顯示方式" name="FSLegacyNotificationWell" tool_tip="如果啟用，Firestorm將使用原始的列表顯示方式來顯示儲存的通知。" width="355" />
+			<check_box label="禁用私聊和群組聊天的化身標籤" name="FSDisableIMChiclets" tool_tip="如果啟用，WolfViewer將不會顯示私聊和群組聊天的化身標籤（群組通知圖示和未讀私聊數量圖示仍將顯示）。" />
+			<check_box label="使用舊的通知視窗列表顯示方式" name="FSLegacyNotificationWell" tool_tip="如果啟用，WolfViewer將使用原始的列表顯示方式來顯示儲存的通知。" width="355" />
 			<text name="FSLegacyNotificationWellRequiresRestart">
 				（需要重新啟動）
 			</text>
-			<check_box label="自動調整對話和舊通知視窗的大小" name="FSLegacyNotificationWellAutoResize" tool_tip="如果啟用，Firestorm將在新增或刪除訊息時自動調整對話和傳統通知視窗的大小。" />
+			<check_box label="自動調整對話和舊通知視窗的大小" name="FSLegacyNotificationWellAutoResize" tool_tip="如果啟用，WolfViewer將在新增或刪除訊息時自動調整對話和傳統通知視窗的大小。" />
 			<check_box label="自訂Linux使用的快速鍵（僅限Linux；需要重新啟動）" name="FSRemapLinuxShortcuts" tool_tip="啟用後，重新定義Linux作業系統已經使用的快速鍵，例如CTRL-ALT-Fx。" />
 			<check_box label="阻止統計視窗取得焦點" name="FSStatisticsNoFocus" tool_tip="如果啟用，當關閉其他視窗時，阻止統計視窗取得焦點（如更改佈局仍然可用）。" />
 			<check_box label="在工具提示中顯示庫存物件的縮圖" name="FSShowInventoryThumbnailTooltips" tool_tip="如果啟用，將在工具提示中顯示庫存物件的縮圖。" />

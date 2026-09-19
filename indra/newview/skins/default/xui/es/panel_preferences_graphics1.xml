@@ -26,7 +26,7 @@
 			<text name="ShadersPrefText4">
 				Ultra
 			</text>
-			<check_box label="Pantalla completa" name="Fullscreen Mode" tool_tip="Ejecutar Firestorm en modo de pantalla completa. Se requiere reiniciar para cambiar el modo."/>
+			<check_box label="Pantalla completa" name="Fullscreen Mode" tool_tip="Ejecutar WolfViewer en modo de pantalla completa. Se requiere reiniciar para cambiar el modo."/>
 			<text name="ShadersText">
 				Efectos gráficos:
 			</text>

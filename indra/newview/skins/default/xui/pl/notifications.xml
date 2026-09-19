@@ -31,7 +31,7 @@ Szczegóły błędu: Błąd o nazwie &apos;[_NAME]&apos; nie został odnaleziony
 		<usetemplate name="okcancelbuttons" notext="Anuluj" yestext="Tak"/>
 	</notification>
 	<notification name="BadInstallation">
-		Instalacja [APP_NAME] jest uszkodzona. Proszę [https://www.firestormviewer.org/downloads pobrać nową kopię] przeglądarki i ponownie ją zainstalować.
+		Instalacja [APP_NAME] jest uszkodzona. Proszę [https://www.wolf-grid.com/index.php?f=osv pobrać nową kopię] przeglądarki i ponownie ją zainstalować.
 	</notification>
 	<notification name="FoundLegacyNsisInstallation">
 		Program [APP_NAME] wykrył zainstalowaną starszą wersję [VERSION]. Aby odinstalować starszą wersję, postępuj zgodnie z [https://community.secondlife.com/knowledgebase/english/how-to-uninstall-and-reinstall-second-life-r524/ tymi instrukcjami].
@@ -1492,7 +1492,7 @@ Możesz normalnie używać [APP_NAME], inni użytkownicy będą Cię widzieli po
 		Instalacja [APP_NAME] zakończona.
 
 Jeżeli używasz [CURRENT_GRID] po raz pierwszy to musisz stworzyć konto żeby móc się zalogować.
-Czy chcesz przejść na stronę [https://www.firestormviewer.org/join-secondlife/ firestormviewer.org] żeby stworzyć nowe konto?
+Czy chcesz przejść na stronę [https://www.wolf-grid.com/index.php?f=newuser wolf-grid.com] żeby stworzyć nowe konto?
 		<usetemplate name="okcancelbuttons" notext="Kontynuuj" yestext="Stwórz konto..."/>
 	</notification>
 	<notification name="LoginCantRemoveUsername">
@@ -3696,11 +3696,11 @@ Przycisk zostanie wyświetlony w przypadku dostatecznej ilości przestrzeni.
 	</notification>
 	<notification name="MeshUploadErrorDetails">
 		Nie można przesłać [LABEL]: [MESSAGE]
-[DETAILS] Zobacz Firestorm.log, aby dowiedzieć się więcej.
+[DETAILS] Zobacz WolfViewer.log, aby dowiedzieć się więcej.
 	</notification>
 	<notification name="MeshUploadError">
 		Nie można przesłać [LABEL]: [MESSAGE]
-Zobacz Firestorm.log, aby dowiedzieć się więcej.
+Zobacz WolfViewer.log, aby dowiedzieć się więcej.
 	</notification>
 	<notification name="MeshUploadPermError">
 		Wystąpił błąd podczas pobierania uprawnień przesyłania meszy.
@@ -3801,7 +3801,7 @@ Porty, które muszą być otwarte dla połączeń głosowych, to:
 Proszę sprawdź swoją sieć i ustawienia firewall.
 Wyłącz wszelkie funkcjonalności SIP ALG (Application Layer Gateway) w swoim routerze.
 
-https://wiki.firestormviewer.org/fs_voice
+https://www.wolf-grid.com/index.php?f=voicefaq
 		<usetemplate name="okignore" ignoretext="Ostrzegaj mnie, gdy przeglądarka nie może połączyć się z serwerem głosu" />
 	</notification>
 	<notification name="NoVoiceConnect-GIAB">
@@ -3810,7 +3810,7 @@ https://wiki.firestormviewer.org/fs_voice
 Komunikacja głosowa nie będzie dostępna.
 Proszę sprawdź swoją sieć i ustawienia firewall.
 
-[https://wiki.firestormviewer.org/fs_voice]
+[https://www.wolf-grid.com/index.php?f=voicefaq]
 	</notification>
 	<notification name="AvatarRezLeftNotification">
 		( [EXISTENCE] sekund w Second Life)
@@ -4318,7 +4318,7 @@ Zobacz FIRE-17710 aby dowiedzieć się więcej.
 		Pamięć podręczna (bufor danych) Twojej Przeglądarki jest pusta. Miej na uwadze, że możesz przez jakiś czas odczuwać obniżoną wydajność i spowolnione doczytywanie obiektów z Szafy.
 	</notification>
 	<notification name="FirstJoinSupportGroup2">
-		Witaj w grupie wsparcia Phoenix/Firestorm!
+		Witaj w grupie wsparcia WolfViewer!
 
 Abyśmy mogli pomóc Ci lepiej zalecamy, aby Twoja Przeglądarka automatycznie prezentowała swoją wersję - będzie ona wyświetlana przed każdą Twoją wypowiedzią na tym czacie grupowym. Informacja te obejmuje aktualną wersję, skórkę, system operacyjny i status RLVa. Osoby z naszej załogi wsparcia będą mogły dać Ci bardziej sensowne porady, jeśli będą znać wersję Twojej Przeglądarki od razu.
 
@@ -4328,7 +4328,7 @@ Chcesz włączyć automatyczne prezentowanie wersji Przeglądarki?
 		<form name="form">
 			<button name="OK_okcancelignore" text="Tak" />
 			<button name="Cancel_okcancelignore" text="Nie" />
-			<ignore name="ignore" text="Dołączenie do grupy wsparcia Phoenix/Firestorm" />
+			<ignore name="ignore" text="Dołączenie do grupy wsparcia WolfViewer" />
 		</form>
 	</notification>
 	<notification name="ConfirmScriptModify">
@@ -5336,8 +5336,8 @@ To ustawienie jest przeznaczone dla przypadków, gdy wykrywanie VRAM zgłasza ni
 	</notification>
 	<notification name="CurrencyURIOverrideReceived">
 		W tym regionie wybrano portal walutowy strony trzeciej.
-Należy pamiętać, że zakupy w walucie dokonywane za pośrednictwem Firestorm Viewer są transakcjami między Tobą (użytkownikiem) a dostawcą (-ami) lub sprzedawcą (-ami) waluty.
-Ani Firestorm Viewer, ani Phoenix Firestorm Viewer Project Inc., ani jego zespół nie ponoszą odpowiedzialności za jakiekolwiek koszty lub szkody wynikające bezpośrednio lub pośrednio z takich transakcji.
+Należy pamiętać, że zakupy w walucie dokonywane za pośrednictwem WolfViewer są transakcjami między Tobą (użytkownikiem) a dostawcą (-ami) lub sprzedawcą (-ami) waluty.
+Ani WolfViewer, ani IntelligentWolf Ltd, ani jego zespół nie ponoszą odpowiedzialności za jakiekolwiek koszty lub szkody wynikające bezpośrednio lub pośrednio z takich transakcji.
 Jeśli nie zgadzasz się z niniejszymi warunkami użytkowania, nie należy przeprowadzać transakcji finansowych za pomocą tej przeglądarki.
 		<usetemplate ignoretext="Kiedy region ustawia nowego pomocnika walutowego." name="okignore" />
 	</notification>
@@ -5526,8 +5526,8 @@ Pamiętaj, że nie można wybrać "otoczenia współdzielonego" i "bazowanego na
 		Zakończył się zbiorowy import Windlightów.
 	</notification>
 	<notification name="FSAOScriptedNotification">
-		Animator Firestorma: [AO_MESSAGE]
-		<usetemplate ignoretext="Ostrzegaj mnie, gdy Animator Firestorma jest proszony o dostęp przez oskryptowany obiekt" name="notifyignore" />
+		Animator WolfViewera: [AO_MESSAGE]
+		<usetemplate ignoretext="Ostrzegaj mnie, gdy Animator WolfViewera jest proszony o dostęp przez oskryptowany obiekt" name="notifyignore" />
 	</notification>
 	<notification name="WarnForceLoginURL">
 		Wygląda na to, że adres URL ekranu logowania jest zastępowany w celach testowych.
@@ -5558,7 +5558,7 @@ Niektóre programy antywirusowe mogą błędnie blokować części [APP_NAME]a, 
 
 Aby uzyskać szczegółowe instrukcje dotyczące umieszczania [APP_NAME]a na białej liście - w tym listę plików i folderów do wykluczenia - zapoznaj się z naszym przewodnikiem:
 
-https://wiki.firestormviewer.org/antivirus_whitelisting
+https://www.wolf-grid.com/blog/faq.php
 	</notification>
 	<notification label="Potwierdź nadpisanie pozy" name="ConfirmPoserOverwrite">
 		Nadpisać istniejącą pozę “[POSE_NAME]”?

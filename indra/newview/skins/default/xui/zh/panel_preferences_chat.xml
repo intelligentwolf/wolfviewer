@@ -161,7 +161,7 @@
 			<check_box name="FSLogIMInChatHistory" label="在本地聊天中儲存私聊" />
 			<text name="FSIMChatHistoryFade_label">在聊天視窗底部漸變私聊文字</text>
 			<spinner tool_tip="設定範圍從0.25到1.0，0.25表示明顯的漸變，1表示沒有漸變" name="FSIMChatHistoryFade" />
-			<check_box name="FSShowMessageCountInWindowTitle" label="在 Firestorm 視窗標題列中顯示未讀私聊數量" />
+			<check_box name="FSShowMessageCountInWindowTitle" label="在 WolfViewer 視窗標題列中顯示未讀私聊數量" />
 			<check_box name="FSAnnounceIncomingIM" label="當發件人開始輸入時立即宣佈接收到的私聊" />
 			<check_box name="FSIMChatFlashOnFriendStatusChange" label="當好友上線或下線時在私聊索引標籤中閃爍" />
 			<check_box name="FSNotifyNearbyChatFlash" label="收到本地聊天時，聊天工具列按鈕閃爍" tool_tip="當本地聊天中有人說話時，聊天工具按鈕會閃爍。本地聊天視窗必須與聊天視窗合併，並且聊天視窗必須關閉才能觸發按鈕閃爍。" />

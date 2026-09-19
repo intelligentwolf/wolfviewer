@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes"?>
 <panel label="ＵＩ初期設定" name="Display panel">
-	<tab_container label="Firestorm初期設定" name="tabs">
+	<tab_container label="WolfViewer初期設定" name="tabs">
 		<!-- 3D World -->
 		<panel label="３Ｄワールド" name="UI Prefs Panel">
 			<text name="HoverTipText">
@@ -95,8 +95,8 @@
 			<text name="GroupTopRightRequiresRestart">
 				（要再起動）
 			</text>
-			<check_box label="グループチャットとＩＭのミニアイコンを表示しない" name="FSDisableIMChiclets" tool_tip="チェックを入れるとFirestormは全てのグループチャットやＩＭのミニアイコンを表示しないようになります。（通知の封筒アイコンとＩＭ数の合計は画面上に残ります。）"/>
-			<check_box label="通知ウィンドウにクラシックなリスト表示レイアウトを使用" name="FSLegacyNotificationWell" tool_tip="ここにチェックを入れるとFirestormは保存された通知の表示にクラシックなリスト表示形式を使用するようになります"/>
+			<check_box label="グループチャットとＩＭのミニアイコンを表示しない" name="FSDisableIMChiclets" tool_tip="チェックを入れるとWolfViewerは全てのグループチャットやＩＭのミニアイコンを表示しないようになります。（通知の封筒アイコンとＩＭ数の合計は画面上に残ります。）"/>
+			<check_box label="通知ウィンドウにクラシックなリスト表示レイアウトを使用" name="FSLegacyNotificationWell" tool_tip="ここにチェックを入れるとWolfViewerは保存された通知の表示にクラシックなリスト表示形式を使用するようになります"/>
 			<text name="FSLegacyNotificationWellRequiresRestart">
 				（要再起動）
 			</text>
@@ -120,7 +120,7 @@
 				ステータスバー
 			</text>
 			<check_box name="ShowNetStats" label="トラフィックインジケータを画面の右上に表示する" tool_tip="ステータスオーバーレイにトラフィックインジケータを表示します。"/>
-			<check_box label="トラフィックインジケータは１秒当りの平均周期を表示する（クラシックな表示方法）" name="FSStatbarLegacyMeanPerSec" tool_tip="ここにチェックを入れると、Firestorm は現在測定されている値でなく、１秒当りの平均周期をラグメータに表示するクラシックな表示方法を使用します。"/>
+			<check_box label="トラフィックインジケータは１秒当りの平均周期を表示する（クラシックな表示方法）" name="FSStatbarLegacyMeanPerSec" tool_tip="ここにチェックを入れると、WolfViewer は現在測定されている値でなく、１秒当りの平均周期をラグメータに表示するクラシックな表示方法を使用します。"/>
 			<check_box label="トラフィックインジケータをクリックしたときにラグメーターでなく統計情報を表示する" name="FSUseStatsInsteadOfLagMeter"/>
 			<check_box name="FSEnableVolumeControls" label="メディアコントロールをトップメニューに表示する" tool_tip="ここにチェックを入れると、ファイアーストームの画面右上にメディアコントロール（音量、メディア、ストリーム）が表示されるようになります。既に独自の場所にコントロールが配置されている場合にこのチェックを外しておくと便利です。"/>
 			<check_box name="FSStatusbarShowSimulatorVersion" label="ステータスバーにシミュレータのチャンネルを表示する" tool_tip="Ｖ１形式のステータスバーに現在のシミュレータのチャンネル（RC Magnum, RC Le Tigre, RC BlueSteel等）を表示します。"/>
@@ -151,7 +151,7 @@
 		</panel>
 		<!-- Interface Windows -->
 		<panel label="インターフェイス" name="UI-interface-windows-tab">
-			<check_box label="名前クリックでアバターのプロフィールを表示する" name="FSInspectAvatarSlurlOpensProfile" tool_tip="ここにチェックを入れると、名前の表示されているリンクをクリックすると Firestormはそのアバターのプロフィールを表示します。"/>
+			<check_box label="名前クリックでアバターのプロフィールを表示する" name="FSInspectAvatarSlurlOpensProfile" tool_tip="ここにチェックを入れると、名前の表示されているリンクをクリックすると WolfViewerはそのアバターのプロフィールを表示します。"/>
 			<check_box label="無視リストが自動的に開かないようにする" name="FSDisableBlockListAutoOpen" tool_tip="アバターやオブジェクトをブロックした時に、無視リストが自動的に開かないようにします。"/>
 			<check_box label="「コミュニケーション」メニューの「フレンド」と「所属グループ」を[SHORT_VIEWER_GENERATION]形式のウィンドウで開く" name="FSUseV2Friends" tool_tip="ここにチェックを入れると、「フレンド」や「所属グループ」を「人物」パネルで開くようになります。チェックを入れない場合は、「連絡先」パネルで開きます。"/>
 			<check_box label="古いタイプのオブジェクトプロパティを使用" name="FSUseLegacyObjectProperties" tool_tip="ここにチェックを入れると、オブジェクトのプロパティを開く時に、古いタイプのオブジェクト・プロパティが使用されます。"/>

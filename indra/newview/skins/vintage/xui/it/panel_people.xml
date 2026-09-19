@@ -51,7 +51,7 @@ Stai cercando persone da frequentare? Prova la [secondlife:///app/worldmap Mappa
 								<check_box label="Notifica quando qualcuno esce dalla regione" name="RadarReportSimRangeLeave"/>
 								<check_box label="Mostra notifiche sugli script in entrata" name="RadarEnterChannelAlert"/>
 								<check_box label="Mostra notifiche sugli script in uscita" name="RadarLeaveChannelAlert"/>
-								<check_box label="Potenzia il radar utilizzando il Bridge di Firestorm" tool_tip="Quando questa opzione è abilitata, le funzioni radar che determinano la distanza degli avatar, sono supportate da LSL Bridge, soprattutto quando le persone sono fuori dal campo visivo." name="FSRadarEnhanceByBridge"/>
+								<check_box label="Potenzia il radar utilizzando il Bridge di WolfViewer" tool_tip="Quando questa opzione è abilitata, le funzioni radar che determinano la distanza degli avatar, sono supportate da LSL Bridge, soprattutto quando le persone sono fuori dal campo visivo." name="FSRadarEnhanceByBridge"/>
 								<check_box label="Colora i nomi in base alla distanza" name="FSRadarColorNamesByDistance"/>
 								<check_box label="Limita distanza:" tool_tip="Limita i risultati a una distanza specifica" name="LimitRadarByRange" />
 								<text name="radarmap_range_label" value="Formato nome radar:"/>

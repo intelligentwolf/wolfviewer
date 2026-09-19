@@ -12,7 +12,7 @@
 <string name="EmbeddedItemNotLoggedIn">
 	Войти
 </string>
-<tab_container label="Настройки Firestorm" name="tabs">
+<tab_container label="Настройки WolfViewer" name="tabs">
     <panel label="Основное" name="tab-extras">
         <check_box name="checkMiscRLVa" label="Контроль скриптами (RLVa)" />
         <text name="textMiscRLVaRestart">
@@ -24,7 +24,7 @@
         <check_box label="Исправить бенто-анимацию простоя" name="play_default_bento_idle_animation_toggle" tool_tip="Если этот параметр включен, будет запускаться бенто-анимацию по умолчанию с приоритетом 0, которая помещает руки, крылья, рот и хвост в естественное положение, когда никакая другая бенто-анимация не запущена."/>
         <check_box label="Отключение экрана входа" name="login_screen_toggle" tool_tip="Отключение черного экрана входа" />
         <check_box label="Отключение экрана выхода" name="logout_screen_toggle" tool_tip="Отключение черного экрана выхода" />
-        <check_box label="Постепенное увеличение дальности прорисовки" name="FSRenderFarClipStepping" tool_tip="Если вы включите эту опцию, Firestorm будет постепенно увеличивать дальность прорисовки после телепортации." />
+        <check_box label="Постепенное увеличение дальности прорисовки" name="FSRenderFarClipStepping" tool_tip="Если вы включите эту опцию, WolfViewer будет постепенно увеличивать дальность прорисовки после телепортации." />
         <slider name="progressive_draw_distance_interval" tool_tip="Интервал в секундах между каждым последующим расширением" />
         <check_box name="UseLSLBridge" label="Активировать мост LSL" tool_tip="Активировать мост LSL" />
         <combo_box name="UseLSLFlightAssist" tool_tip="Включить скрипт, чтобы помочь летать и парить на больших высотах">

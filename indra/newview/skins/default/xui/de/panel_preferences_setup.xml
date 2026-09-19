@@ -3,7 +3,7 @@
 	<tab_container name="tabs">
 		<panel label="Verbindung" name="tab-conn">
 			<text name="Maximum bandwidth">
-				Maximale Bandbreite ([https://wiki.firestormviewer.org/fs_speedtest Empfehlungen anzeigen?]):
+				Maximale Bandbreite ([https://www.wolf-grid.com/blog/faq.php Empfehlungen anzeigen?]):
 			</text>
 			<text name="NetworkPrefText1">
 				Funk
@@ -46,7 +46,7 @@
 		</panel>
 		<panel label="Verzeichnisse" name="tab-dir">
 			<text name="cache_size_label_l">
-				Textur-Cache-Größe ([https://wiki.firestormviewer.org/cache Empfehlungen anzeigen?]):
+				Textur-Cache-Größe ([https://www.wolf-grid.com/blog/faq.php Empfehlungen anzeigen?]):
 			</text>
 			<text name="asset_cache_size_label_l">
 				Asset-Cache-Größe :
@@ -65,7 +65,7 @@
 			<button label="Öffnen" label_selected="Öffnen" name="open_sound_cache"/>
 			<button label="Setzen" label_selected="Setzen" name="set_sound_cache" width="45"/>
 			<button label="Zurücksetzen" label_selected="Zurücksetzen" name="reset_sound_cache" width="82"/>
-			<check_box label="DSF (Sound) Cache-Dateien beim Ausloggen nicht löschen" tool_tip="Falls aktiviert, werden entpackte Sound-Dateien beim Ausloggen nicht aus dem Cache gelöscht, wodurch das Abspielen von Sounds verbessert werden kann. ACHTUNG: Hierdurch kann die Cache-Größe sehr schnell ansteigen und zudem wird Cache-Größenlimit in diesem Fall NICHT beachtet, wodurch mehr als 10GB an Festplattenspeicher belegt werden kann! Diese Option ist in Firestorm standardmäßig deaktiviert." name="keep_unpacked_cache"/>
+			<check_box label="DSF (Sound) Cache-Dateien beim Ausloggen nicht löschen" tool_tip="Falls aktiviert, werden entpackte Sound-Dateien beim Ausloggen nicht aus dem Cache gelöscht, wodurch das Abspielen von Sounds verbessert werden kann. ACHTUNG: Hierdurch kann die Cache-Größe sehr schnell ansteigen und zudem wird Cache-Größenlimit in diesem Fall NICHT beachtet, wodurch mehr als 10GB an Festplattenspeicher belegt werden kann! Diese Option ist in WolfViewer standardmäßig deaktiviert." name="keep_unpacked_cache"/>
 			<text name="log_path_desc">
 				Speicherort für Chatprotokoll und Verläufe:
 			</text>

@@ -290,7 +290,7 @@ void LLCrashLogger::gatherFiles()
     {
         mCrashHost = mFileMap["CrashHostUrl"];
     }
-    // <FS:ND> Might hardcode mCrashHost to crashlogs.phoenixviewer.com if unset
+    // <FS:ND> mCrashHost stays empty unless CrashHostUrl is set
 
     // <FS:ND> Do not send out crash reports to Linden Labs. They won't have much use for them without symbols.
     //default to agni, per product
@@ -559,7 +559,7 @@ bool LLCrashLogger::sendCrashLog(std::string dump_dir)
 
     // std::string dump_path = gDirUtilp->getExpandedFilename(LL_PATH_LOGS,
     //                                                        "SecondLifeCrashReport");
-    std::string dump_path = gDirUtilp->getExpandedFilename(LL_PATH_LOGS, "FirestormCrashReport");
+    std::string dump_path = gDirUtilp->getExpandedFilename(LL_PATH_LOGS, APP_NAME + "CrashReport");
     std::string report_file = dump_path + ".log";
 
     LL_DEBUGS("CRASHREPORT") << "sending " << report_file << LL_ENDL;
@@ -685,20 +685,18 @@ bool LLCrashLogger::init()
     LLCore::LLHttp::initialize();
 
     // We assume that all the logs we're looking for reside on the current drive
+    // [2026-09-19] The same folder the viewer writes (llappviewer.cpp: APP_NAME + "_x64").
 #if ADDRESS_SIZE == 64
-    gDirUtilp->initAppDirs( "Firestorm_x64" );
+    gDirUtilp->initAppDirs(APP_NAME + "_x64");
 #else
-    gDirUtilp->initAppDirs("Firestorm");
+    gDirUtilp->initAppDirs(APP_NAME);
 #endif
 
     LLError::initForApplication(gDirUtilp->getExpandedFilename(LL_PATH_USER_SETTINGS, ""), gDirUtilp->getExpandedFilename(LL_PATH_APP_SETTINGS, ""));
 
     // Default to the product name "Second Life" (this is overridden by the -name argument)
 
-    // <FS:ND> Change default to Firestorm
-    //  mProductName = "Second Life";
-    mProductName = "Firestorm";
-    // </FS:ND>
+    mProductName = APP_NAME;
 
     // Rename current log file to ".old"
     std::string old_log_file = gDirUtilp->getExpandedFilename(LL_PATH_LOGS, "crashreport.log.old");

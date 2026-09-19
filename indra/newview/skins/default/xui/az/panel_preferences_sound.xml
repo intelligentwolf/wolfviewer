@@ -177,7 +177,7 @@
 	<panel.string name="textFSWindowOpen">
 		Pəncərə açılır:
 	</panel.string>
-	<tab_container label="Firestorm Seçimləri" name="tabs">
+	<tab_container label="WolfViewer Seçimləri" name="tabs">
 		<panel label="Səslər" name="Media Sounds Panel">
 			<slider label="Ümumi səs səviyyəsi" name="System Volume"/>
 			<check_box label="Çevirilərkən səssizləşdir" name="mute_when_minimized"/>

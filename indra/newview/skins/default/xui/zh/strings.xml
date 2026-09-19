@@ -8,16 +8,16 @@
 		[當前伺服器]
 	</string>
 	<string name="APP_NAME">
-		Firestorm
+		WolfViewer
 	</string>
 	<string name="CAPITALIZED_APP_NAME">
-		FIRESTORM
+		WOLFVIEWER
 	</string>
 	<string name="SECOND_LIFE_GRID">
 		第二人生
 	</string>
 	<string name="SUPPORT_SITE">
-		Firestorm支援網站
+		WolfViewer支援網站
 	</string>
 	<!-- Will be set in fsgridhandler.cpp / llviewernetwork.cpp -->
 	<string name="VIEWER_GENERATION">
@@ -237,7 +237,7 @@ Voice Server Version: [VOICE_VERSION]
 		退出
 	</string>
 	<string name="create_account_url">
-		https://www.firestormviewer.org/join-secondlife/
+		https://www.wolf-grid.com/index.php?f=newuser
 	</string>
 	<string name="AgniGridLabel">
 		第二人生主網路 (Agni)
@@ -246,11 +246,11 @@ Voice Server Version: [VOICE_VERSION]
 		第二人生測試網路 (Aditi)
 	</string>
 	<string name="ViewerDownloadURL">
-		https://www.firestormviewer.org/choose-your-platform/
+		https://www.wolf-grid.com/index.php?f=osv
 	</string>
 	<string name="LoginFailedViewerNotPermitted">
 目前版本檢視器已無法繼續登入第二人生, 請前往以下網站下載最新版本檢視器:
-https://www.firestormviewer.org/choose-your-platform/
+https://www.wolf-grid.com/index.php?f=osv
 
 更多相關資訊, 請檢視下面的常見問題解答:
 http://secondlife.com/viewer-access-faq
@@ -593,7 +593,7 @@ support@secondlife.com.
 	</string>
 	<string name="TooltipPrice" value="[AMOUNT] L$: " />
 	<string name="TooltipSLIcon">
-		該連結指向 SecondLife.com、LindenLab.com 或 firestormviewer.org 官方頁面.
+		該連結指向 SecondLife.com、LindenLab.com 或 wolf-grid.com 官方頁面.
 	</string>
 	<string name="TooltipFlagScript">
 		指令碼
@@ -838,7 +838,7 @@ support@secondlife.com.
 		發行說明
 	</string>
 	<string name="RELEASE_NOTES_BASE_URL" translate="false">
-		https://wiki.firestormviewer.org/changelog:firestorm_change_log_
+		https://github.com/intelligentwolf/wolfviewer/releases?q=
 	</string>
 	<string name="LoadingData">
 		載入中...
@@ -906,7 +906,7 @@ support@secondlife.com.
 	</string>
 	<string name="AssetUploadRequestInvalid">
 
-上傳請求錯誤。請存取：https://www.firestormviewer.org/support 尋求幫助。
+上傳請求錯誤。請存取：https://www.wolf-grid.com/blog/faq.php 尋求幫助。
 	</string>
 	<!-- Settings errors -->
 	<string name="SettingValidationError">
@@ -2176,7 +2176,7 @@ support@secondlife.com.
 	</string>
 	<!-- Virtual Firestorm system folders -->
 	<string name="InvFolder #Firestorm">
-		#Firestorm
+		#WolfViewer
 	</string>
 	<string name="InvFolder #Phoenix">
 		#Phoenix

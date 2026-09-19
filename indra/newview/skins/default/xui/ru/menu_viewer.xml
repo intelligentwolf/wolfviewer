@@ -323,21 +323,21 @@
 		<menu_item_call label="Торговые данные L$" name="LindenXchange"/>
 		<menu_item_call label="Библиотека скриптов" name="Script Library"/>
 		<menu_item_call label="SL Сообщество (блоги, форумы, новости)" name="SL Community Pages"/>
-		<menu_item_call label="Блог Firestorm" name="Firestorm Blog"/>
-		<menu_item_call label="Firestorm Flickr" name="Firestorm Flickr"/>
-		<menu_item_call label="Firestorm YouTube" name="Firestorm YouTube"/>
-		<menu_item_call label="Firestorm Twitter" name="Firestorm Twitter"/>
-		<menu_item_call label="Firestorm Plurk" name="Firestorm Plurk"/>
+		<menu_item_call label="Блог WolfViewer" name="Firestorm Blog"/>
+		<menu_item_call label="WolfViewer Flickr" name="Firestorm Flickr"/>
+		<menu_item_call label="WolfViewer YouTube" name="Firestorm YouTube"/>
+		<menu_item_call label="WolfViewer Twitter" name="Firestorm Twitter"/>
+		<menu_item_call label="WolfViewer Plurk" name="Firestorm Plurk"/>
 		<menu_item_call label="Сообщение дня" name="Firestorm MoTD"/>
 	</menu>
 	<!-- Help Menu -->
 	<menu label="Помощь" name="Help">
 		<menu_item_check label="Включить подсказки интерфейса клиента" name="Enable Hints"/>
-		<menu_item_call label="Firestorm Wiki" name="Firestorm Wiki"/>
+		<menu_item_call label="WolfViewer Wiki" name="Firestorm Wiki"/>
 		<menu_item_call label="Поиск решения Проблем" name="Troubleshooting"/>
-		<menu_item_call label="Вступить в группу поддержки Firestorm" name="firestorm_support_group"/>
-		<menu_item_call label="Расписание обучений Firestorm" name="Firestorm Classes Schedule"/>
-		<menu_item_call label="Календарь Событий Firestorm" name="Firestorm Events Calendar"/>
+		<menu_item_call label="Вступить в группу поддержки WolfViewer" name="firestorm_support_group"/>
+		<menu_item_call label="Расписание обучений WolfViewer" name="Firestorm Classes Schedule"/>
+		<menu_item_call label="Календарь Событий WolfViewer" name="Firestorm Events Calendar"/>
 		<menu_item_check label="Обучение" name="How To"/>
 		<!-- <menu_item_call label="Second Life Help" name="Second Life Help"/> -->
 		<menu_item_call label="[CURRENT_GRID] помощь" name="current_grid_help"/>

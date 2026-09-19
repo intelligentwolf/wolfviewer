@@ -59,11 +59,8 @@ exportMutliArchDRIPath() {
 ## with Fontconfig error: Cannot load default config file
 # export FONTCONFIG_PATH=/etc/fonts
 
-## - Enable NVidia's threaded optimization by default. If you experience
-##   weird behavior starting with the 6.6.17 Firestorm release that you
-##   can verify not to be present in earlier versions, comment out the
-##   next line. Thanks to Jira user Pazako Karu on FIRE-33398 to make us
-##   aware of this option!
+## - Enable NVidia's threaded optimization by default. If you see odd
+##   behaviour that goes away with it off, comment out the next line.
 export __GL_THREADED_OPTIMIZATIONS=1
 
 if [ "`uname -m`" = "x86_64" ]; then
@@ -177,7 +174,7 @@ done
 # Don't quote $LL_WRAPPER because, if empty, it should simply vanish from the
 # command line. But DO quote "${ARGS[@]}": preserve separate args as
 # individually quoted.
-$LL_WRAPPER bin/do-not-directly-run-firestorm-bin "${ARGS[@]}"
+$LL_WRAPPER bin/do-not-directly-run-wolfviewer-bin "${ARGS[@]}"
 LL_RUN_ERR=$?
 
 # Handle any resulting errors

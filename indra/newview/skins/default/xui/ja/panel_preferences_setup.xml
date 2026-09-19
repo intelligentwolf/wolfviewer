@@ -3,7 +3,7 @@
 	<tab_container name="tabs" label="セットアップ">
 		<panel label="接続" name="tab-conn">
 			<text name="Maximum bandwidth">
-				最大帯域幅（[https://wiki.firestormviewer.org/fs_speedtest 適正な値を設定するには？]）：
+				最大帯域幅（[https://www.wolf-grid.com/blog/faq.php 適正な値を設定するには？]）：
 			</text>
 			<text name="NetworkPrefText2">
 				ＤＳＬ
@@ -46,7 +46,7 @@
 		</panel>
 		<panel label="ディレクトリ" name="tab-dir">
 			<text name="cache_size_label_l">
-				テクスチャのキャッシュサイズ（[https://wiki.firestormviewer.org/cache 推奨設定を確認しますか？]）：
+				テクスチャのキャッシュサイズ（[https://www.wolf-grid.com/blog/faq.php 推奨設定を確認しますか？]）：
 			</text>
 			<text name="text_box5">
 				㎆

@@ -78,7 +78,7 @@
 				<combo_box.item label="Medio" name="3" />
 				<combo_box.item label="Veloce" name="1" />
 			</combo_box>
-			<check_box label="Schermo intero (richiede riavvio)" name="Fullscreen Mode" tool_tip="Avvia Firestorm in modalità Schermo Intero (richiede riavvio)"/>
+			<check_box label="Schermo intero (richiede riavvio)" name="Fullscreen Mode" tool_tip="Avvia WolfViewer in modalità Schermo Intero (richiede riavvio)"/>
 			<slider label="Distanza di disegno" name="DrawDistance"/>
 			<slider label="Numero max particelle" name="MaxParticleCount"/>
 			<text name="AvatarComplexityModeLabel">

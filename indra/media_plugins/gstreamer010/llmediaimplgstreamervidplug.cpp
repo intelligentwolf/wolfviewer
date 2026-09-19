@@ -514,8 +514,8 @@ GST_PLUGIN_DEFINE (GST_VERSION_MAJOR,
            (gchar*)"private-slvideoplugin",
            (gchar*)"SL Video sink plugin",
            plugin_init, (gchar*)"1.0", (gchar*)"LGPL",
-           (gchar*)"Firestorm",
-           (gchar*)"http://www.firestormviewer.org");
+           (gchar*)"WolfViewer",
+           (gchar*)"https://www.wolf-grid.com");
 #undef PACKAGE
 void gst_slvideo_init_class (void)
 {

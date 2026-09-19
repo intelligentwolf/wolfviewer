@@ -71,7 +71,7 @@ https://www.wolf-grid.com
         top="16"
         width="489"
         wrap="true">
-WolfViewer is built on Firestorm, which would not be possible without the decision from Linden Lab to make their viewer source code available.
+WolfViewer would not be possible without the decision from Linden Lab to make their viewer source code available.
 
 With open source contributions from:
       </text>
@@ -90,138 +90,6 @@ Dummy Name replaced at run time
       </text_editor>
     </panel>
     <panel
-      height="920"
-      border="true"
-      label="Firestorm Credits"
-      help_topic="about_fscredits_tab"
-      name="fs_credits_panel">
-        <scroll_container
-         follows="all"
-         layout="topleft"
-         left="0"
-         name="fs_credits_scroll_container"
-         reserve_scroll_corner="false"
-         top="16"
-         bottom="-1"
-         right="-4">
-            <panel
-             name="fs_credits_scroll_container_content_panel"
-             follows="left|top"
-             layout="topleft"
-             min_height="300"
-             top="0"
-             background_visible="false"
-             left="0"
-             right="-15"
-             bottom="-1">
-                <text
-                 follows="top|left|right"
-                 height="102"
-                 layout="topleft"
-                 left="5"
-                 name="firestorm_intro"
-                 top="0"
-                 width="450"
-                 wrap="true">
-Firestorm is a community development project to improve the viewer experience. We package contributions from various community developers along with code from Linden Lab and ourselves to bring you a quality, feature-rich viewer experience backed up by a large volunteer support team. Firestorm is brought to you by The Phoenix Firestorm Project, Inc., a non-profit organization.
-
-The Firestorm Development Team:
-                </text>
-                <text
-                 enabled="false"
-                 follows="top|left"
-                 height="80"
-                 bg_readonly_color="Transparent"
-                 left="5"
-                 text_color="LtGray"
-                 max_length="65536"
-                 name="firestorm_names"
-                 top_pad="4"
-                 width="450"
-                 wrap="true">
-Angeldark Raymaker, Ansariel Hiller, ArminWeatherHax, Arrehn Oberlander, Ayane Lyla, Beq Janus, Cinder Roxley, Hecklezz, Holy Gavenkrantz, Jessica Lyon, Kadah Coba, Kitty Barnett, Liny Odell, LordGregGreg Back, minerjr, Mobius Ryba, Nicky Dasmijn, PanteraPolnocy, ScentualLust, Selo Jacobus, SimonLsAlt, Tankmaster Finesmith, Techwolf Lupindo, Tonya Souther, Tozh Taurog, Vortex Saito, WoLf Loonie, Wolfspirit Magic, Yay N' Stuff (mygoditsfullofstars), and Zi Ree.
-                </text>
-                <text
-                 follows="top|left"
-                 height="15"
-                 layout="topleft"
-                 left="5"
-                 name="fs_contrib_intro"
-                 top_pad="8"
-                 width="450"
-                 wrap="true">
-Additional code generously contributed to Firestorm by:
-                </text>
-                <text
-                 enabled="false"
-                 follows="top|left"
-                 height="215"
-                 bg_readonly_color="Transparent"
-                 left="5"
-                 text_color="LtGray"
-                 max_length="65536"
-                 name="fs_contrib_names"
-                 top_pad="4"
-                 width="450"
-                 wrap="true">
-Aira Yumi, Albatroz Hird, Alexie Birman, Andromeda Rage, Angus Boyd, Animats, Armin Weatherwax, Casper Warden, Chalice Yao, Chaser Zaks, Chorazin Allen, Cron Stardust, Damian Zhaoying, Dan Threebeards, Darlcat, Dawa Gurbux, Dax Dupont, Denver Maksim, Dragonborn Forzane, Drake Arconis, Felyza Wishbringer, f0rbidden, Fractured Crystal, Geenz Spad, Gibson Firehawk, Hitomi Tiponi, humbletim, Inusaito Sayori, Jean Severine, Katharine Berry, Kittin Ninetails, Kool Koolhoven, Lance Corrimal, Lassie, Latif Khalifa, Laurent Bechir, Logue Takacs, Magne Metaverse LLC, Magus Freston, Makidoll, Manami Hokkigai, MartinRJ Fayray, McCabe Maxstead, Melancholy Lemon, Melysmile, Mimika Oh, Mister Acacia, MorganMegan, Morgan Pennent, Mysty Saunders, Nagi Michinaga, Name Short, nhede Core, NiranV Dean, Nogardrevlis Lectar, olizinha, OrangeStripyDog, Oren Hurvitz, paperwork, Penny Patton, Peyton Menges, programmtest, Qwerty Venom, rafak360, Rebecca Ashbourne, Revolution Smythe, Romka Swallowtail, Sahkolihaa Contepomi, sal Kaligawa, Samm Florian, Satomi Ahn, Sei Lisa, Sekkmer, Sempervirens Oddfellow, Shin Wasp, Shyotl Kuhr, Sione Lomu, Skills Hak, StarlightShining, Sunset Faulkes, Tapple Gao, Testicular Slingshot, Thickbrick Sleaford, Ubit Umarov, Vaalith Jinn, Vincent Sylvester, Whirly Fizzle, Xenhat Liamano, 小滢 Zi Ying, Zwagoth Klaar and others.
-                </text>
-                <text
-                 follows="top|left"
-                 height="35"
-                 layout="topleft"
-                 left="5"
-                 name="fs_support_intro"
-                 top_pad="8"
-                 width="450"
-                 wrap="true">
-Special thanks to our Firestorm Support Team, Beta Testers, wiki editors, educators and translators:
-                </text>
-                <text
-                 enabled="false"
-                 follows="top|left"
-                 height="275"
-                 bg_readonly_color="Transparent"
-                 left="5"
-                 text_color="LtGray"
-                 max_length="65536"
-                 name="fs_trans_names"
-                 top_pad="4"
-                 width="450"
-                 word_wrap="true">
-Afrika Burton, Albatroz Hird, Alexru Resident, alison Seesaw, AnaLucia Loon, Angell Airy, Annuccia Resident, Annuccia Vuckovic, Anubi Alter, Atthosz Amiot, Ayelin Ethaniel, Basement Desade, Bia Scribe, Bluezy Bleac, Clarke2, Christy Mansbridge, Chymy India, Cordoba Cluny, Damian Zhaoying, DARK Mirabella, Emmanuella Checchinato, Ed Merryman, Enigma Conundrum, Eressea Karsin, Erick Gregan, F0RBIDDEN, Fabry String, Fetish3d, Flandria Connolly, Foksy, FreeSpirit Simmering, Gee McAuley, Greatfox Snowpaw, Gweneth Lange, Hatake Kohime, Hiroshi Kumaki, Hope Dreier, Jodi Nikolaidis, JogiTE Clip, Kool Koolhoven, Kosmox Voom, Lachrimo Skytower, Lalwende Leakey, Landaree Levee, Lassie, Lette Ponnier, Lina Pussycat, Lyn Mimistrobell, Marianne Qunhua, Marybeth Oceanlane, Mel Hinarada, Mickeala Praga, Miller Thor, Miro Collas, Mister Acacia, Morgause Whiteberry, Mysty Saunders, Nano Bouscario, narcisssia McMahon, Natem Andel, Nicoletta Schnute, Nisa Maverick, NogarDrevlis Lectar, Norton Burns, PanteraPolnocy, Peewee Musytari, Pisano Smit, PixelProphet Lane, Pol Xaron, Poledra Behemoth, Programmtest, Rander Teskat, Ricky Munz, Riku Highfield, RINOBIT Footman, Robert0 Siamendes, Roth Grut, Sabah Back, SaHaRa Connor, Selene Gregoire, Selo Jacobus, silvanaf Demina, Sniper Siemans, Spartaco Zemenis, Spino Forcella, Srilania Svoboda, Sunset Faulkes, Tanja Levenque, TankMaster Finesmith, Tarlyn Dagger, Thea Brianna, Toy Wylie, Whirly Fizzle, Willow Wilder, Wolfspirit Magic and XLR8RRICK Hudson.
-                </text>
-                <text
-                 follows="top|left"
-                 height="78"
-                 layout="topleft"
-                 left="5"
-                 name="fs_art_intro"
-                 top_pad="8"
-                 width="450"
-                 wrap="true">
-Firestorm includes Starlight, modified for Firestorm. It is provided by residents for residents, with the intention of providing an alternative, brighter, and hopefully easier to use interface.
-
-UI Artists and Designers:
-                </text>
-                <text
-                 enabled="false"
-                 follows="top|left"
-                 height="85"
-                 bg_readonly_color="Transparent"
-                 left="5"
-                 text_color="LtGray"
-                 max_length="65536"
-                 name="fs_artists_names"
-                 top_pad="4"
-                 width="450"
-                 wrap="true">
-Adam Frisby, Alexandrea Fride, DarkAgent Baphomet, David Rowe, Digital Scribe, Dragonborn Forzane, Hitomi Tiponi, Hugh Helendale, KirstenLee Cinquetti, Mobius Ryba, Nadin, Naomah Beaumont, psi Merlin, samm florian, Sammie Benoir, Tommi Waydelich and Vincent Nacon.
-                </text>
-            </panel>
-        </scroll_container>
-    </panel>
-    <panel
       border="true"
       label="Licenses"
       help_topic="about_licenses_tab"
@@ -238,6 +106,8 @@ Adam Frisby, Alexandrea Fride, DarkAgent Baphomet, David Rowe, Digital Scribe, D
        top="16"
        width="474"
        word_wrap="true">
+WolfViewer is based on the Firestorm viewer, Copyright (C) 2010-2026 The Phoenix Firestorm Project, Inc., used under the GNU Lesser General Public License version 2.1.
+
 3Dconnexion SDK Copyright (C) 1992-2009 3Dconnexion
 APR Copyright (C) 2011 The Apache Software Foundation
 Collada DOM Copyright 2006 Sony Computer Entertainment Inc.

@@ -183,7 +183,7 @@
 	<panel.string name="textFSWindowOpen">
 		開啟視窗：
 	</panel.string>
-	<tab_container label="Firestorm 偏好設定" name="tabs">
+	<tab_container label="WolfViewer 偏好設定" name="tabs">
 		<panel label="常規" name="Media Sounds Panel">
 			<slider label="主音量" name="System Volume" />
 			<check_box label="最小化時靜音" name="mute_when_minimized" />

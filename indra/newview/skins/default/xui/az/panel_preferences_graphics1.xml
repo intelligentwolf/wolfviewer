@@ -29,7 +29,7 @@
 			<text name="ShadersPrefText4">
 				Ultra
 			</text>
-			<check_box label="Tam ekran rejimi" name="Fullscreen Mode" tool_tip="Firestorm-u tam ekran rejimində işə salın. Bu seçimi dəyişmək üçün yenidən başlatma tələb olunur."/>
+			<check_box label="Tam ekran rejimi" name="Fullscreen Mode" tool_tip="WolfViewer-u tam ekran rejimində işə salın. Bu seçimi dəyişmək üçün yenidən başlatma tələb olunur."/>
 			<text name="ShadersText">
 				Şeyderlər:
 			</text>

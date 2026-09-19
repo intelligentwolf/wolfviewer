@@ -56,22 +56,24 @@
      label="Help"
      tear_off="true"
      name="Help">
+        <!-- [2026-09-19] Same targets as menu_viewer.xml's Help menu: F1 reaches help for this
+             viewer and this grid; a problem goes to Discord. -->
         <menu_item_call
-         label="Firestorm Wiki"
+         label="Wolf Territories Help"
          name="Firestorm Wiki"
          shortcut="F1">
             <menu_item_call.on_click
              function="PromptShowURL"
-             name="script_library_url"
-             parameter="WebLaunchExternalTarget,https://wiki.firestormviewer.org/doku.php?id=start" />
+             name="wolf_help_url"
+             parameter="WebLaunchExternalTarget,https://www.wolf-grid.com/blog/faq.php" />
        </menu_item_call>
        <menu_item_call
-        label="Troubleshooting"
+        label="Get Support on Discord"
         name="Troubleshooting">
            <menu_item_call.on_click
             function="PromptShowURL"
-            name="wiki_troubleshooting_url"
-            parameter="WebLaunchExternalTarget,https://wiki.firestormviewer.org/firestorm_troubleshooting" />
+            name="wolf_support_url"
+            parameter="WebLaunchExternalTarget,https://discord.gg/S3wj882aQH" />
        </menu_item_call>
         <menu_item_call
          label="Guidebook"

@@ -3,7 +3,7 @@
 	<tab_container name="tabs">
 		<panel label="Połączenie" name="tab-conn">
 			<text name="Maximum bandwidth">
-				Maksymalna przepustowość ([https://wiki.firestormviewer.org/fs_speedtest potrzebujesz sugestii?]):
+				Maksymalna przepustowość ([https://www.wolf-grid.com/blog/faq.php potrzebujesz sugestii?]):
 			</text>
 			<text name="NetworkPrefText3">
 				Światłowód
@@ -40,7 +40,7 @@
 		</panel>
 		<panel label="Lokalizacje" name="tab-dir">
 			<text name="cache_size_label_l">
-				Pamięć podręczna tekstur ([https://wiki.firestormviewer.org/cache potrzebujesz sugestii?]):
+				Pamięć podręczna tekstur ([https://www.wolf-grid.com/blog/faq.php potrzebujesz sugestii?]):
 			</text>
 			<text name="asset_cache_size_label_l">
 				Pamięć podręczna zasobów danych (assetów):

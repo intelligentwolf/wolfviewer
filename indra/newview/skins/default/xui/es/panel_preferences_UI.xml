@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes" ?>
 <panel label="UI-Pref" name="Display panel">
-	<tab_container label="Prefs Firestorm" name="tabs">
+	<tab_container label="Prefs WolfViewer" name="tabs">
 		<panel label="3D mundo" name="UI Prefs Panel">
 			<text name="HoverTipText">
 				Bulas:
@@ -56,7 +56,7 @@
 			<text name="GroupTopRightRequiresRestart" left_delta="267">
 				(requiere reiniciar)
 			</text>
-			<check_box label="Ocultar los iconos de notificación de chat de grupo y MI" name="FSDisableIMChiclets" tool_tip="Si se activa, Firestorm no mostrará ningún icono de notificación de chat de grupo / MI (el sobre de los avisos de grupo y la suma de MIs permanecerán en pantalla)."/>
+			<check_box label="Ocultar los iconos de notificación de chat de grupo y MI" name="FSDisableIMChiclets" tool_tip="Si se activa, WolfViewer no mostrará ningún icono de notificación de chat de grupo / MI (el sobre de los avisos de grupo y la suma de MIs permanecerán en pantalla)."/>
 			<slider label_width="230" label="Número de parpadeos de los botones:" tool_tip="Número de veces que los botones parpadean para llamar tu atención" name="ButtonsFlashCount"/>
 			<slider label_width="230" name="ButtonFlashRate"/>
 <!--
@@ -68,7 +68,7 @@
 		</panel>
 		<panel name="UI-interface-top-bars">
 			<check_box name="ShowNetStats" label="Mostrar medidor de lag" tool_tip="Muestra el medidor de lag en la barra de estado"/>
-			<check_box label="Mostrar controles de medios en esquina superior derecha" name="FSEnableVolumeControls" tool_tip="Si lo activas, Firestorm mostrará los controles de sonido, flujos de medios y audio, etc.) en la esquina superior derecha de la pantalla. Puede ser útil desactivarlo si la skin seleccionada ya dispone de sus propios controles." />
+			<check_box label="Mostrar controles de medios en esquina superior derecha" name="FSEnableVolumeControls" tool_tip="Si lo activas, WolfViewer mostrará los controles de sonido, flujos de medios y audio, etc.) en la esquina superior derecha de la pantalla. Puede ser útil desactivarlo si la skin seleccionada ya dispone de sus propios controles." />
 			<check_box label="Mostrar canal del simulador en la barra de estado" name="FSStatusbarShowSimulatorVersion" tool_tip="Muestra el canal del simulador actual (RC Magnum, RC Le Tigre, RC BlueSteel etc.) en la barra de estado estilo V1."/>
 			<check_box label="Mostrar localización en la barra de menú" name="ShowMenuBarLocation" />
 			<check_box label="Mostrar la barra de favoritos" name="ShowNavbarFavoritesPanel" />

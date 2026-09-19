@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes" ?>
 <panel label="Reporte de fallos" name="crash_reports">
-	<check_box label="Enviar reportes de fallos a firestormviewer.org" name="checkSendCrashReports"/>
+	<check_box label="Enviar reportes de fallos a wolf-grid.com" name="checkSendCrashReports"/>
 	<check_box label="Preguntar siempre antes de enviar" name="checkSendCrashReportsAlwaysAsk"/>
 	<check_box label="Incluir settings.xml" name="checkSendSettings"/>
 	<text name="textSendSettings">

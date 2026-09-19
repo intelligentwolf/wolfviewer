@@ -10,7 +10,7 @@
  label="Crash Reports"
  name="crash_reports">
     <panel.string name="PrivacyPolicyUrl">
-        https://www.firestormviewer.org/privacy-policy
+        https://www.wolf-grid.com/index.php?f=privacy
     </panel.string>
     <check_box
      layout="topleft"
@@ -19,7 +19,7 @@
      top="30"
      width="250"
      height="16"
-     label="Send crash reports to firestormviewer.org"
+     label="Send crash reports"
      name="checkSendCrashReports"
      enabled="false" />
 

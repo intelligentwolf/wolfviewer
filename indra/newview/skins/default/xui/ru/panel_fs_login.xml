@@ -52,7 +52,7 @@
 			<text name="mode_selection_text">
 				Выбор режима
 			</text>
-			<combo_box name="mode_combo" tool_tip="Выберите режим настройки, с которой вы наиболее знакомы. По умолчанию будет установлен режим Firestorm">
+			<combo_box name="mode_combo" tool_tip="Выберите режим настройки, с которой вы наиболее знакомы. По умолчанию будет установлен режим WolfViewer">
 				<combo_box.item label="Гибридный" name="Hybrid"/>
 			</combo_box>
 		</layout_panel>

@@ -47,7 +47,7 @@
 				SELECCIONAR MODO:
 			</text>
 			<combo_box name="mode_combo" tool_tip="Selecciona con qué estilo de visor estás más familiarizado para establecer tus opciones por defecto apropiadamente.">
-				<combo_box.item label="Firestorm" name="Firestorm"/>
+				<combo_box.item label="WolfViewer" name="Firestorm"/>
 				<combo_box.item label="Phoenix" name="Phoenix"/>
 				<combo_box.item label="Híbrido" name="Hybrid"/>
 			</combo_box>

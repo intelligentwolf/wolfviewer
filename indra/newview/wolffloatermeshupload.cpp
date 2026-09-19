@@ -141,7 +141,7 @@ void WolfFloaterMeshUpload::onFilePicked(const std::vector<std::string>& filenam
         // COLLADA belongs to Firestorm's uploader, which carries the rigging, LOD and physics
         // machinery this one has no equivalent for. Say so and offer the button rather than
         // failing with "unsupported format".
-        setStatus("COLLADA (.dae) files are uploaded by Firestorm's own uploader. "
+        setStatus("COLLADA (.dae) files are uploaded by the classic model uploader. "
                   "Press \"Old Upload\" to open it.", true);
         return;
     }
@@ -285,7 +285,7 @@ void WolfFloaterMeshUpload::onUpload()
     if (!WolfMeshUpload::isAvailable())
     {
         setStatus("This uploader works on Wolf Territories only. Press \"Old Upload\" to use "
-                  "Firestorm's uploader.", true);
+                  "the classic uploader.", true);
         return;
     }
 

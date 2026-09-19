@@ -147,7 +147,8 @@ void gridDownloadComplete(const LLSD& aData, LLGridManager* mOwner, GridEntry* m
     }
 }
 
-const char* DEFAULT_LOGIN_PAGE = "https://phoenixviewer.com/app/loginV3/";
+// [2026-09-19] The grid's own welcome page (get_grid_info <welcome>), not Firestorm's login page.
+const char* DEFAULT_LOGIN_PAGE = "https://www.wolf-grid.com/";
 
 const char* SYSTEM_GRID_SLURL_BASE     = "secondlife://%s/secondlife/";
 const char* MAIN_GRID_SLURL_BASE       = "https://maps.secondlife.com/secondlife/";

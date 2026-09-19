@@ -87,7 +87,7 @@
       height="16"
       control_name="FSGrowlWhenActive"
       name="notify_growl_always_checkbox"
-      label="Show Growl Notifications even when Firestorm is active"/>
+      label="Show Growl Notifications even when WolfViewer is active"/>
     <check_box
       enabled_control="FSEnableGrowl"
       layout="topleft"

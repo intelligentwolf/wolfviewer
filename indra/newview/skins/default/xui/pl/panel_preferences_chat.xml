@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes"?>
 <panel label="Czat/IM" name="chat">
-	<tab_container label="Ustawienia Firestorma" name="tabs">
+	<tab_container label="Ustawienia WolfViewera" name="tabs">
 		<panel label="Wizualne" name="ChatVisuals">
 			<text name="console_font_size">
 				Czcionka konsoli ekranu:
@@ -199,7 +199,7 @@
 				Wyszarzanie tekstu wiadomości IM w tle okna logów czatu
 			</text>
 			<spinner tool_tip="0.25-1.0, 0.25 dla silnego wygaszania, 1 dla braku wygaszania" name="FSIMChatHistoryFade"/>
-			<check_box name="FSShowMessageCountInWindowTitle" label="Pokaż ilość nieprzeczytanych IM na belce tytułu okna Firestorma"/>
+			<check_box name="FSShowMessageCountInWindowTitle" label="Pokaż ilość nieprzeczytanych IM na belce tytułu okna WolfViewera"/>
 			<check_box name="FSAnnounceIncomingIM" label="Powiadamiaj o nowej IM, gdy tylko nadawca zacznie pisać"/>
 			<check_box name="FSIMChatFlashOnFriendStatusChange" label="Mrugaj kartami IM, gdy znajomi się logują/wylogowywują"/>
 			<check_box name="FSNotifyNearbyChatFlash" label="Mrugaj przyciskiem 'czat' na dolnym pasku, gdy nadchodzi wiadomość czatu w pobliżu" tool_tip="Mruga przyciskiem 'czat' na dolnym pasku, gdy nadchodzi nowa wiadomość czatu w pobliżu. Okno czatu w pobliżu musi być zadokowane w oknie rozmów, a okno rozmów musi być zamknięte, aby przycisk mrugał."/>

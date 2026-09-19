@@ -354,7 +354,7 @@
   <key>FSDisableIMChiclets</key>
   <map>
     <key>Comment</key>
-    <string>If enabled, Firestorm will not show any group / IM chat chiclets (notifications envelope and sum of IMs will remain on the screen).</string>
+    <string>If enabled, WolfViewer will not show any group / IM chat chiclets (notifications envelope and sum of IMs will remain on the screen).</string>
     <key>Persist</key>
     <integer>1</integer>
     <key>Type</key>
@@ -378,7 +378,7 @@
   <key>FSUseStandalonePlaceDetailsFloater</key>
   <map>
     <key>Comment</key>
-    <string>If enabled, Firestorm will use a standalone floater for each landmark details, teleport history details and parcel details view.</string>
+    <string>If enabled, WolfViewer will use a standalone floater for each landmark details, teleport history details and parcel details view.</string>
     <key>Persist</key>
     <integer>1</integer>
     <key>Type</key>
@@ -390,7 +390,7 @@
   <key>FSUseStandaloneTeleportHistoryFloater</key>
   <map>
     <key>Comment</key>
-    <string>If enabled, Firestorm will use a standalone floater for the teleport history view.</string>
+    <string>If enabled, WolfViewer will use a standalone floater for the teleport history view.</string>
     <key>Persist</key>
     <integer>1</integer>
     <key>Type</key>
@@ -402,7 +402,7 @@
   <key>FSUseStandaloneBlocklistFloater</key>
   <map>
     <key>Comment</key>
-    <string>If enabled, Firestorm will use a standalone floater for the blocklist.</string>
+    <string>If enabled, WolfViewer will use a standalone floater for the blocklist.</string>
     <key>Persist</key>
     <integer>1</integer>
     <key>Type</key>
@@ -414,7 +414,7 @@
   <key>FSEnableVolumeControls</key>
   <map>
     <key>Comment</key>
-    <string>If true, Firestorm will show volume controls (sounds, media, stream) in upper right corner of the screen. Useful, if skin already has its own controls.</string>
+    <string>If true, WolfViewer will show volume controls (sounds, media, stream) in upper right corner of the screen. Useful, if skin already has its own controls.</string>
     <key>Persist</key>
     <integer>1</integer>
     <key>Type</key>

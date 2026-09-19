@@ -3,7 +3,7 @@
 	<tab_container name="tabs">
 		<panel label="Qoşulma" name="tab-conn">
 			<text name="Maximum bandwidth">
-				Maksimum kanal genişliyi ([https://wiki.firestormviewer.org/fs_speedtest İpuculara ehtiyac var?] (İngiliscə)):
+				Maksimum kanal genişliyi ([https://www.wolf-grid.com/blog/faq.php İpuculara ehtiyac var?] (İngiliscə)):
 			</text>
 			<text name="NetworkPrefText3">
 				Kabel
@@ -41,7 +41,7 @@
 		</panel>
 		<panel label="Kataloqlar" name="tab-dir">
 			<text name="cache_size_label_l">
-				Tekstur keşinin ölçüsü ([https://wiki.firestormviewer.org/cache İpuculara ehtiyac var?] (İngiliscə)):
+				Tekstur keşinin ölçüsü ([https://www.wolf-grid.com/blog/faq.php İpuculara ehtiyac var?] (İngiliscə)):
 			</text>
 			<text name="text_box5">
 				MB

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes"?>
 <strings>
 	<string name="SUPPORT_SITE">
-		Firestormサポートポータル
+		WolfViewerサポートポータル
 	</string>
 	<string name="StartupLoading">
 		[APP_NAME]をインストールしています…
@@ -203,7 +203,7 @@ LibVLCのバージョン：[LIBVLC_VERSION]
 	<string name="AditiGridLabel">Second Lifeベータテストグリッド（Aditi）</string>
 	<string name="LoginFailedViewerNotPermitted">
 		お使いの古いビューアでは、[CURRENT_GRID]にアクセスできません。以下のページから新しいビューアをダウンロードしてください：
-https://www.firestormviewer.org/choose-your-platform/
+https://www.wolf-grid.com/index.php?f=osv
 
 詳細については、ＦＡＱを参照してください：
 https://secondlife.com/viewer-access-faq
@@ -491,7 +491,7 @@ https://secondlife.com/viewer-access-faq
 	</string>
 	<string name="TooltipPrice" value="L$ [AMOUNT]："/>
 	<string name="TooltipSLIcon">
-		これは、SecondLife.com、LindenLab.com、または firestormviewer.org の公式ドメイン上のページにリンクします。
+		これは、SecondLife.com、LindenLab.com、または wolf-grid.com の公式ドメイン上のページにリンクします。
 	</string>
 	<string name="TooltipFlagScript">スクリプト</string>
 	<string name="TooltipFlagPhysics">物理効果</string>
@@ -2009,7 +2009,7 @@ https://support.secondlife.com よりSecond Lifeのサポートまでお問い�
 		全員
 	</string>
 	<!-- Virtual Firestorm system folders -->
-	<string name="InvFolder #Firestorm">#Firestorm</string>
+	<string name="InvFolder #Firestorm">#WolfViewer</string>
 	<string name="InvFolder #Phoenix">#Phoenix</string>
 	<string name="InvFolder #RLV">#RLV</string>
 	<string name="InvFolder My Suitcase">

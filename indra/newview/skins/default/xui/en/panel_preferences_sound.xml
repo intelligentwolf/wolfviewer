@@ -255,7 +255,7 @@
     </panel.string>
 
 <tab_container
- label="Firestorm Prefs"
+ label="WolfViewer Prefs"
  layout="topleft"
  follows="all"
  top="5"

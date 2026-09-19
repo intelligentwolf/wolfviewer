@@ -3,7 +3,7 @@
 	<tab_container name="tabs">
 		<panel label="Rete" name="tab-conn">
 			<text name="Maximum bandwidth">
-				Capacità massima di banda ([https://wiki.firestormviewer.org/fs_speedtest serve un consiglio?]):
+				Capacità massima di banda ([https://www.wolf-grid.com/blog/faq.php serve un consiglio?]):
 			</text>
 			<text name="NetworkPrefText1" >
 				Wi-Fi
@@ -46,7 +46,7 @@
 		</panel>
 		<panel label="Cartelle" name="tab-dir">
 			<text name="cache_size_label_l">
-				Dimensioni cache ([https://wiki.firestormviewer.org/cache serve un consiglio?]):
+				Dimensioni cache ([https://www.wolf-grid.com/blog/faq.php serve un consiglio?]):
 			</text>
 			<text name="asset_cache_size_label_l">
 				Dimensione cache delle risorse:

@@ -8,16 +8,16 @@
 		[CURRENT_GRID]
 	</string>
 	<string name="APP_NAME">
-		Firestorm
+		WolfViewer
 	</string>
 	<string name="CAPITALIZED_APP_NAME">
-		FIRESTORM
+		WOLFVIEWER
 	</string>
 	<string name="SECOND_LIFE_GRID">
 		Сеть Second Life
 	</string>
 	<string name="SUPPORT_SITE">
-		Портал технической поддержки Firestorm
+		Портал технической поддержки WolfViewer
 	</string>
 	<string name="StartupDetectingHardware">
 		Обнаружение оборудования...
@@ -225,7 +225,7 @@ SLURL: &lt;nolink&gt;[SLURL]&lt;/nolink&gt;
 		Выйти
 	</string>
 	<string name="create_account_url">
-		https://www.firestormviewer.org/join-secondlife/
+		https://www.wolf-grid.com/index.php?f=newuser
 	</string>
 	<string name="AgniGridLabel">
 		Second Life Главная Сетка (Agni)
@@ -234,11 +234,11 @@ SLURL: &lt;nolink&gt;[SLURL]&lt;/nolink&gt;
 		Second Life Бета-тест Сетка (Aditi)
 	</string>
 	<string name="ViewerDownloadURL">
-		https://www.firestormviewer.org/choose-your-platform/
+		https://www.wolf-grid.com/index.php?f=osv
 	</string>
 	<string name="LoginFailedViewerNotPermitted">
 		У клиента, которым вы пользуетесь, больше нет доступа к игре Second Life. Загрузить новую версию клиента можно по адресу:
-https://www.firestormviewer.org/choose-your-platform/
+https://www.wolf-grid.com/index.php?f=osv
 
 Дополнительные сведения смотрите в разделе вопросов и ответов по адресу:
 http://secondlife.com/viewer-access-faq
@@ -570,7 +570,7 @@ support@secondlife.com.
 	</string>
 	<string name="TooltipPrice" value="L$[AMOUNT]: "/>
 	<string name="TooltipSLIcon">
-		Это ссылка на страницу официального домена SecondLife.com, LindenLab.com или firestormviewer.org.
+		Это ссылка на страницу официального домена SecondLife.com, LindenLab.com или wolf-grid.com.
 	</string>
 	<string name="TooltipFlagScript">
 		Скрипт
@@ -871,7 +871,7 @@ support@secondlife.com.
 	</string>
 	<string name="AssetUploadRequestInvalid">
 Ошибка в запросе на загрузку.  Пожалуйста, посетите
-https://www.firestormviewer.org/support за помощь в решении этой проблемы.
+https://www.wolf-grid.com/blog/faq.php за помощь в решении этой проблемы.
 	</string>
 	<string name="SettingValidationError">
 		Ошибка при импорте настроек [NAME]
@@ -2071,7 +2071,7 @@ https://www.firestormviewer.org/support за помощь в решении эт
 		Все
 	</string>
 	<string name="InvFolder #Firestorm">
-		#Firestorm
+		#WolfViewer
 	</string>
 	<string name="InvFolder #Phoenix">
 		#Phoenix

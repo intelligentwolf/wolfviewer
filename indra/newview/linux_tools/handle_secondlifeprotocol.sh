@@ -12,14 +12,12 @@ if [ -z "$URL" ]; then
 fi
 
 RUN_PATH=`dirname "$0" || echo .`
-#cd "${RUN_PATH}/.."
-ch "${RUN_PATH}"
+# [2026-09-19] This script lives in etc/; the launcher is one level up.
+cd "${RUN_PATH}"
 
-#exec ./firestorm -url \'"${URL}"\'
-if [ `pidof do-not-directly-run-firestorm-bin` ]; then
+if [ `pidof do-not-directly-run-wolfviewer-bin` ]; then
 	exec dbus-send --type=method_call --dest=com.secondlife.ViewerAppAPIService /com/secondlife/ViewerAppAPI com.secondlife.ViewerAppAPI.GoSLURL string:"$1"
 else
-	exec ../firestorm -url \'"${URL}"\'
+	exec ../wolfviewer -url \'"${URL}"\'
 fi
-`
 

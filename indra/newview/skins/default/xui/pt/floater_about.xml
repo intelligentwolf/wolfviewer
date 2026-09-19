@@ -46,15 +46,15 @@ Versão do servidor de voz: [VOICE_VERSION]
 	<tab_container name="about_tab">
 		<panel label="Info" name="support_panel">
 			<text name="support_intro">    
-For the latest information about Firestorm, visit    
-https://www.firestormviewer.org
+For the latest information about WolfViewer, visit    
+https://www.wolf-grid.com/
     		</text>
 			<button label="Copiar" name="copy_btn"/>
 			<button label="Verificar atualizações" name="update_btn"/>
 		</panel>
 		<panel label="Créditos" name="credits_panel">
 			<text name="linden_intro">
-			Firestorm would not be possible without the decision from Linden Lab to make their Second Life viewer source code available.
+			WolfViewer would not be possible without the decision from Linden Lab to make their Second Life viewer source code available.
 			
 O Second Life é trazido a você pela Lindens,
 com contribuições de código aberto de:
@@ -65,6 +65,8 @@ com contribuições de código aberto de:
 		</panel>
 		<panel label="Licenças" name="licenses_panel">
 			<text_editor name="licenses_editor">
+WolfViewer is based on the Firestorm viewer, Copyright (C) 2010-2026 The Phoenix Firestorm Project, Inc., used under the GNU Lesser General Public License version 2.1.
+
 				3Dconnexion SDK Copyright (C) 1992-2009 3Dconnexion
 APR Copyright (C) 2011 The Apache Software Foundation
 Collada DOM Copyright 2006 Sony Computer Entertainment Inc.

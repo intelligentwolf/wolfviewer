@@ -8,7 +8,7 @@
 		Grille de Second Life
 	</string>
 	<string name="SUPPORT_SITE">
-		Portail Assistance Firestorm
+		Portail Assistance WolfViewer
 	</string>
 	<string name="StartupLoading">
 		Chargement de [APP_NAME]...
@@ -203,7 +203,7 @@ Version serveur vocal : [VOICE_VERSION]
 		Quitter
 	</string>
 	<string name="create_account_url">
-		https://www.firestormviewer.org/join-secondlife/
+		https://www.wolf-grid.com/index.php?f=newuser
 	</string>
 	<string name="AgniGridLabel">
 		Grille principale de Second Life (Agni)
@@ -509,7 +509,7 @@ Si vous pensez qu'il s'agit d'une erreur, veuillez contacter support@secondlife.
 	</string>
 	<string name="TooltipPrice" value="[AMOUNT] L$ :"/>
 	<string name="TooltipSLIcon">
-		Il s’agit d’un lien vers une page dans le domaine officiel SecondLife.com, LindenLab.com ou firestormviewer.org.
+		Il s’agit d’un lien vers une page dans le domaine officiel SecondLife.com, LindenLab.com ou wolf-grid.com.
 	</string>
 	<string name="TooltipFlagScript">
 		Script

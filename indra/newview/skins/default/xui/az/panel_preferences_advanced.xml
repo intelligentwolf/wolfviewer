@@ -4,7 +4,7 @@
 		Orta maus düyməsi
 	</panel.string>
 	<check_box label="Bir neçə klientin açılmasına icazə ver" name="allow_multiple_viewer_check"/>
-	<check_box label="Giriş zamanı şəbəkənin seçilməsinə icazə ver (Firestorm-u hər şəbəkə dəstəkləmir)" name="show_grid_selection_check"/>
+	<check_box label="Giriş zamanı şəbəkənin seçilməsinə icazə ver (WolfViewer-u hər şəbəkə dəstəkləmir)" name="show_grid_selection_check"/>
 	<check_box label="Əlavə menyunu göstər (Öz riskinizə görə istifadə edin!)" name="show_advanced_menu_check"/>
 	<check_box label="Sazlama menyusunu göstər (Öz riskinizə görə istifadə edin!)" name="show_develop_menu_check"/>
 	<check_box label="Windows sistemlərində WMI ilə VRAM aşkarlamasını söndür" name="FSDisableWMIProbing"/>

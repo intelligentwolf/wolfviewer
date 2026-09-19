@@ -12,20 +12,20 @@ function install_desktop_entry()
 
     local desktop_entry="\
 [Desktop Entry]\n\
-Name=Firestorm Viewer\n\
+Name=WolfViewer\n\
 Comment=Client for accessing 3D virtual worlds\n\
-Exec=${installation_prefix}/firestorm\n\
-Icon=${installation_prefix}/firestorm_icon.png\n\
+Exec=${installation_prefix}/wolfviewer\n\
+Icon=${installation_prefix}/wolfviewer_icon.png\n\
 Terminal=false\n\
 Type=Application\n\
 Categories=Application;Internet;Network;\n\
 StartupNotify=true\n\
 X-Desktop-File-Install-Version=3.0\n\
-StartupWMClass=do-not-directly-run-firestorm-bin"
+StartupWMClass=do-not-directly-run-wolfviewer-bin"
 
     echo " - Installing menu entries in ${desktop_entries_dir}"
     mkdir -vp "${desktop_entries_dir}"
-    echo -e $desktop_entry > "${desktop_entries_dir}/firestorm-viewer.desktop" || "Failed to install application menu!"
+    echo -e $desktop_entry > "${desktop_entries_dir}/wolfviewer.desktop" || "Failed to install application menu!"
 }
 
 if [ "$UID" == "0" ]; then

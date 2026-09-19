@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes" ?>
-<panel label="Firestorm" name="firestorm">
+<panel label="WolfViewer" name="firestorm">
 
 <panel.string name="BeamsOffLabel">
 	=== AUS ===
@@ -14,7 +14,7 @@
 		Nicht eingeloggt
 	</string>
 
-<tab_container label="Firestorm Prefs" name="tabs">
+<tab_container label="WolfViewer Prefs" name="tabs">
 
 	<!--Extras-->
 	<panel label="Extras" name="tab-extras" >
@@ -29,7 +29,7 @@
 		<check_box label="Avatar-Skelett nach Aufstehen zurücksetzen" name="FSResetSkeletonOnStandUp" tool_tip="Falls aktiviert wird das Skelett des Avatars automatisch nach dem Aufstehen zurückgesetzt. Der Reset wird ebenfalls an andere Avatare in der Umgebung gesendet, so dass Ihr Aussehen auch auf den Viewern der entsprechenden Benutzer aktualisiert wird."/>
 		<check_box label="Deaktiviere Fortschrittsanzeige während des Logins" name="login_screen_toggle" tool_tip="Deaktiviert die schwarze Fortschrittsanzeige während des Logins."/>
 		<check_box label="Deaktiviere Fortschrittsanzeige während des Logouts" name="logout_screen_toggle" tool_tip="Deaktiviert die schwarze Fortschrittsanzeige während des Logouts."/>
-		<check_box label="Aktiviere progressives Draw-Distance-Stepping" name="FSRenderFarClipStepping" tool_tip="Falls aktiviert wird Firestorm nach einem Teleport die Draw Distance progressiv erhöhen."/>
+		<check_box label="Aktiviere progressives Draw-Distance-Stepping" name="FSRenderFarClipStepping" tool_tip="Falls aktiviert wird WolfViewer nach einem Teleport die Draw Distance progressiv erhöhen."/>
 		<slider name="progressive_draw_distance_interval" tool_tip="Intervall in Sekunden zwischen den jeweiligen Erhöhungen der Draw Distance."/>
 		<check_box name="UseLSLBridge" label="LSL-Client-Brücke aktivieren" tool_tip="Erlaub dem Viewer die Nutzung eines geskripteten Objektes (Brücke), um weitergehende Funktionen anzubieten."/>
 		<combo_box name="UseLSLFlightAssist" tool_tip="Aktiviert ein Skript, dass Fliegen und Schweben in größeren Höhen ermöglicht.">

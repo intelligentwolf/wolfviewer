@@ -246,6 +246,20 @@
         <key>name</key>
             <string>Shotta</string>
         </map>
+    <key>576f6c66-5669-6577-6572-000000000000</key>
+        <map>
+        <key>color</key>
+            <array>
+                <real>0.76274509803921997</real>
+                <real>0.32745098039215997</real>
+                <real>0.22549019607842999</real>
+                <real>1</real>
+            </array>
+        <key>name</key>
+            <string>WolfViewer</string>
+        <key>tpvd</key>
+            <boolean>1</boolean>
+        </map>
     <key>46697265-7374-6f72-6d00-000000000000</key>
         <map>
         <key>color</key>

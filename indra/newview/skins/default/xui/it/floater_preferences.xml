@@ -20,7 +20,7 @@
 		<panel label="Interfaccia" name="ui"/>
 		<panel label="Skin del Viewer" name="skins" />
 		<panel label="Segnala Crash" name="crashreports" />
-		<panel label="Firestorm" name="firestorm" />
+		<panel label="WolfViewer" name="firestorm" />
 		<panel label="OpenSim" name="opensim" />
 		<panel label="Backup e Ripristino" name="backup" />
 	</tab_container>

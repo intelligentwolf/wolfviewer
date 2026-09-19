@@ -8,7 +8,7 @@
 		Second Life-Grid:
 	</string>
 	<string name="SUPPORT_SITE">
-		Firestorm Support-Portal
+		WolfViewer Support-Portal
 	</string>
 	<string name="StartupLoading">
 		[APP_NAME] wird geladen...
@@ -213,7 +213,7 @@ Voice-Serverversion: [VOICE_VERSION]
 		Beenden
 	</string>
 	<string name="create_account_url">
-		https://www.firestormviewer.org/join-secondlife/
+		https://www.wolf-grid.com/index.php?f=newuser
 	</string>
 	<string name="AgniGridLabel">
 		Second Life Main Grid (Agni)
@@ -226,7 +226,7 @@ Voice-Serverversion: [VOICE_VERSION]
 	</string>
 	<string name="LoginFailedViewerNotPermitted">
 		Mit dem von Ihnen verwendeten Viewer ist der Zugriff nicht mehr möglich. Laden Sie von den folgenden Seite einen neuen Viewer herunter:
-https://www.firestormviewer.org/choose-your-platform/
+https://www.wolf-grid.com/index.php?f=osv
 
 Weitere Informationen finden Sie auf der folgenden FAQ-Seite: 
 http://secondlife.com/viewer-access-faq
@@ -594,7 +594,7 @@ Wenn Sie der Ansicht sind, dass Sie diese Meldung fälschlicherweise erhalten ha
 	</string>
 	<string name="TooltipPrice" value="[AMOUNT] L$"/>
 	<string name="TooltipSLIcon">
-		Führt zu einer Seite in der offiziellen Domäne SecondLife.com, LindenLab.com oder firestormviewer.org.
+		Führt zu einer Seite in der offiziellen Domäne SecondLife.com, LindenLab.com oder wolf-grid.com.
 	</string>
 	<string name="TooltipOutboxDragToWorld">
 		Sie können keine Objekte aus dem Marktplatz-Auflistungsordner rezzen
@@ -865,7 +865,7 @@ sind erlaubt.
 	</string>
 	<string name="AssetUploadRequestInvalid">
 Fehler in der Upload-Anforderung. Bitte besuchen Sie
-https://www.firestormviewer.org/support für Hilfe zum Lösen des Problems.
+https://www.wolf-grid.com/blog/faq.php für Hilfe zum Lösen des Problems.
 	</string>
 	<string name="SettingValidationError">
 		Validierung für das Importieren der Einstellungen [NAME] fehlgeschlagen

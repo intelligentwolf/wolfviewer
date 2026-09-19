@@ -17,7 +17,7 @@
 		Second Life Ağı
 	</string>
 	<string name="SUPPORT_SITE">
-		Firestorm Destek Portalı
+		WolfViewer Destek Portalı
 	</string>
 	<string name="StartupDetectingHardware">
 		Donanım saptanıyor...
@@ -192,7 +192,7 @@ Ses Sunucusu Sürümü: [VOICE_VERSION]
 		Çık
 	</string>
 	<string name="create_account_url">
-		https://www.firestormviewer.org/join-secondlife/
+		https://www.wolf-grid.com/index.php?f=newuser
 	</string>
 	<string name="AgniGridLabel">
 		Second Life Ana Ağı (Agni)
@@ -492,7 +492,7 @@ Lütfen bir dakika içerisinde tekrar oturum açmayı deneyin.
 	</string>
 	<string name="TooltipPrice" value="L$[AMOUNT]:"/>
 	<string name="TooltipSLIcon">
-		Bu bağlantı, resmi SecondLife.com, LindenLab.com ya da firestormviewer.org etki alanındaki bir sayfaya gider.
+		Bu bağlantı, resmi SecondLife.com, LindenLab.com ya da wolf-grid.com etki alanındaki bir sayfaya gider.
 	</string>
 	<string name="TooltipOutboxDragToWorld">
 		Pazaryeri İlanları klasöründen öğe oluşturamazsınız

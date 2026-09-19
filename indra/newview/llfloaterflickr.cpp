@@ -65,7 +65,7 @@ static LLPanelInjector<LLFlickrPhotoPanel> t_panel_photo("llflickrphotopanel");
 static LLPanelInjector<LLFlickrAccountPanel> t_panel_account("llflickraccountpanel");
 
 // <FS:Ansariel> Don't assume we're always in Second Life
-const std::string DEFAULT_TAG_TEXT = "Firestorm ";
+const std::string DEFAULT_TAG_TEXT = "WolfViewer ";
 static std::string FLICKR_MACHINE_TAGS_NAMESPACE = "secondlife";
 // </FS:Ansariel>
 

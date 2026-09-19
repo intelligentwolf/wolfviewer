@@ -20,7 +20,7 @@
 媒體瀏覽器外掛程式正在載入。
 如果外掛程式未載入，有關如何解決問題的資訊，請存取
 
-https://wiki.firestormviewer.org/fs_media
+https://www.wolf-grid.com/blog/faq.php
 			</text>
 			<button label="用我的瀏覽器開啟" name="open_browser" />
 			<button label="關閉" name="close" />

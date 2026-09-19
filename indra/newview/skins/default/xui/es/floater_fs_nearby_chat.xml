@@ -17,7 +17,7 @@
 				<layout_panel name="chat_layout_panel">
 					<layout_stack name="input_panels">
 						<layout_panel name="input_button_layout_panel">
-							<spinner name="ChatChannel" tool_tip="Canal al que enviar el chat. Activado en Preferencias  -> Chat -> Firestorm -> Mostrar selector de canal en la barra de chat."/>
+							<spinner name="ChatChannel" tool_tip="Canal al que enviar el chat. Activado en Preferencias  -> Chat -> WolfViewer -> Mostrar selector de canal en la barra de chat."/>
 						</layout_panel>
 						<layout_panel name="chat_type_layout_panel">
 							<combo_box name="chat_type" tool_tip="Susurrar = 10m, Hablar = 20m, Gritar = 100m">

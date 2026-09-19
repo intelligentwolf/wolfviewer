@@ -35,7 +35,7 @@
 							<button name="emoji_recent_panel_toggle_btn" tool_tip="Zuletzt verwendete Emoji-Auswahl öffnen/schliessen"/>
 						</layout_panel>
 						<layout_panel name="input_button_layout_panel">
-							<spinner name="ChatChannel" tool_tip="Kanal, an den der Chat gesendet werden soll. Kann unter Einstellungen -> Chat -> Firestorm -> Kanalauswahl in Eingabezeile anzeigen aktiviert werden." label_width="35"/>
+							<spinner name="ChatChannel" tool_tip="Kanal, an den der Chat gesendet werden soll. Kann unter Einstellungen -> Chat -> WolfViewer -> Kanalauswahl in Eingabezeile anzeigen aktiviert werden." label_width="35"/>
 						</layout_panel>
 						<layout_panel name="chat_type_layout_panel">
 							<combo_box name="chat_type" tool_tip="Flüstern = 10m, Sprechen = 20m, Rufen = 100m">

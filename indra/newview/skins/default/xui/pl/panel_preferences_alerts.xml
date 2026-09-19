@@ -7,7 +7,7 @@
 		<check_box label="Powiadom, jeśli wersja symulatora ulegnie zmianie podczas zmiany regionu" name="FSShowServerVersionChangeNotice" tool_tip="Wyświetla powiadomienie, jeśli wersja symulatora ulegnie zmianie podczas teleportowania się lub przekraczania granicy regionu."/>
 		<check_box label="Pobieraj najnowszego newsa z status.secondlifegrid.net przy logowaniu" name="AutoQueryGridStatus"/>
 		<check_box label="Włącz powiadomienia Growl" name="notify_growl_checkbox"/>
-		<check_box label="Włącz Growl nawet gdy Firestorm jest aktywny" name="notify_growl_always_checkbox"/>
+		<check_box label="Włącz Growl nawet gdy WolfViewer jest aktywny" name="notify_growl_always_checkbox"/>
 		<check_box name="FSFilterGrowlKeywordDuplicateIMs" label="Filtruj zduplikowane IM, jeśli były już pokazane przez Detektor Słów"/>
 	</panel>
 	<panel label="Ludzie" name="tab-people">

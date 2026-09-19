@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes"?>
-<floater name="floater_fs_search" title="Firestorm検索">
+<floater name="floater_fs_search" title="WolfViewer検索">
 	<floater.string name="string.location">
 		場所：[LOCATION]
 	</floater.string>

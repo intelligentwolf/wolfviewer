@@ -536,7 +536,7 @@
          layout="topleft"
          left="196"
          name="Fullscreen Mode"
-         tool_tip="Run Firestorm in Fullscreen mode. A restart is required to change mode."
+         tool_tip="Run WolfViewer in Fullscreen mode. A restart is required to change mode."
          top="60"
          width="280" />
 
@@ -1641,7 +1641,7 @@ If you do not understand the distinction then leave this control alone."
          layout="topleft"
          left="10"
          name="WolfTerrainLook"
-         tool_tip="Shades the region's own terrain textures: less tiling at a distance and darker creases and valleys. The texture layers stay exactly as the estate set them. Uncheck for the stock Firestorm blend."
+         tool_tip="Shades the region's own terrain textures: less tiling at a distance and darker creases and valleys. The texture layers stay exactly as the estate set them. Uncheck for the stock WolfViewer blend."
          top_pad="4"
          width="150" />
         <check_box

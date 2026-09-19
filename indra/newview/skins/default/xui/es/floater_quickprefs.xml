@@ -3,7 +3,7 @@
 	<panel name="quickprefs" width="265">
 		<layout_stack name="wl_options_stack">
 			<layout_panel name="wl_options_panel">
-				<text name="Maximum bandwidth" tool_tip="Configura el ancho de banda de red máximo que puede consumir Firestorm Viewer (en kilobits por segundo)" width="91">
+				<text name="Maximum bandwidth" tool_tip="Configura el ancho de banda de red máximo que puede consumir WolfViewer (en kilobits por segundo)" width="91">
 					Ancho de banda:
 				</text>
 				<slider name="max_bandwidth"/>

@@ -36,6 +36,7 @@
 #include <unistd.h>
 #include <glob.h>
 #include <boost/filesystem.hpp>
+#include <filesystem>
 #include "lldir_utils_objc.h"
 
 // --------------------------------------------------------------------------------
@@ -64,7 +65,11 @@ LLDir_Mac::LLDir_Mac()
 {
     mDirDelimiter = "/";
 
-    const std::string     secondLifeString = "Firestorm";
+    // [2026-09-19] WolfViewer's own folders. Until now the Mac build kept its settings in
+    // ~/Library/Application Support/Firestorm (and Caches/FirestormOS_x64) because this name
+    // was never changed with the product; Linux and Windows already used APP_NAME.
+    const std::string     secondLifeString = "WolfViewer";
+    const std::string     legacyAppDirName = "Firestorm";
 
     std::string executablepathstr = getSystemExecutableFolder();
 
@@ -113,6 +118,24 @@ LLDir_Mac::LLDir_Mac()
         std::string appdir = getSystemApplicationSupportFolder();
         std::string rootdir;
 
+        // [2026-09-19] One-time migration: a user who ran an earlier Mac WolfViewer has settings,
+        // logs and per-account data under the old Firestorm-named folder. Copy them to the new
+        // folder the first time it does not exist, so nothing is lost. Never touches an existing
+        // WolfViewer folder and never deletes the old one.
+        {
+            boost::filesystem::path oldRoot(appdir), newRoot(appdir);
+            oldRoot /= legacyAppDirName;
+            newRoot /= secondLifeString;
+            boost::system::error_code ec;
+            if (!boost::filesystem::exists(newRoot, ec) && boost::filesystem::is_directory(oldRoot, ec))
+            {
+                std::error_code sec;
+                std::filesystem::copy(oldRoot.string(), newRoot.string(),
+                                      std::filesystem::copy_options::recursive | std::filesystem::copy_options::skip_existing, sec);
+                // A failure here is not fatal: the viewer starts with fresh settings, as it would
+                // for a new user. Logging is not up yet, so there is nowhere to report it.
+            }
+        }
         //Create root directory
         if (CreateDirectory(appdir, secondLifeString, &rootdir))
         {

@@ -31,7 +31,7 @@ Xəta təfərrüatları: &quot;[_NAME]&quot; adlı bildiriş notifications.xml f
 		<usetemplate name="okcancelbuttons" notext="Ləğv et" yestext="Bəli"/>
 	</notification>
 	<notification name="BadInstallation">
-		[APP_NAME] yenilənərkən xəta baş verdi. Klientin [https://www.firestormviewer.org/downloads ən son versiyasını yükləyin].
+		[APP_NAME] yenilənərkən xəta baş verdi. Klientin [https://www.wolf-grid.com/index.php?f=osv ən son versiyasını yükləyin].
 	</notification>
 	<notification name="LoginFailedNoNetwork">
 		[CURRENT_GRID] şəbəkəsinə qoşulmaq alınmadı.
@@ -657,7 +657,7 @@ Obyekt əhatə dairəsindən kənarda ola və ya silinə bilər.
 
 Ətraflı məlumat üçün [_URL] saytına daxil olmaq istərdinizmi?
 		<url name="url">
-			https://wiki.firestormviewer.org/fs_system_requirements
+			https://www.wolf-grid.com/blog/faq.php
 		</url>
 		<usetemplate ignoretext="Mənim kompüter avadanlığım dəstəklənmir" name="okcancelignore" notext="Xeyr" yestext="Bəli"/>
 	</notification>
@@ -3600,12 +3600,12 @@ Bunun üçün kifayət qədər yer olduqda düymə görünəcək.
 	</notification>
 	<notification name="MeshUploadErrorDetails">
 		[LABEL] yükləmək alınmadı: [MESSAGE]
-[DETAILS] Ətraflı məlumat üçün Firestorm.log-a baxın
+[DETAILS] Ətraflı məlumat üçün WolfViewer.log-a baxın
 	</notification>
 	<notification name="MeshUploadError">
 		[LABEL] yükləmək alınmadı: [MESSAGE]
 
-Ətraflı məlumat üçün Firestorm.log-a baxın
+Ətraflı məlumat üçün WolfViewer.log-a baxın
 	</notification>
 	<notification name="MeshUploadPermError">
 		Mesh yükləmə icazələri tələb edilərkən xəta baş verdi.
@@ -3707,7 +3707,7 @@ Zəhmət olmasa şəbəkənizi və təhlükəsizlik divarı quraşdırmanızı y
 Routerinizdə hər hansı SIP ALG funksiyasını söndürün.
 
 Səsli rabitə mövcud olmayacaq.
-https://wiki.firestormviewer.org/fs_voice
+https://www.wolf-grid.com/index.php?f=voicefaq
 		<usetemplate ignoretext="Səs serverinə qoşulma zamanı problemlər yarandı" name="okignore" yestext="Bəli"/>
 	</notification>
 	<notification name="NoVoiceConnect-GIAB">
@@ -3715,7 +3715,7 @@ https://wiki.firestormviewer.org/fs_voice
 
 Səsli rabitə mövcud olmayacaq.
 Zəhmət olmasa şəbəkənizi və təhlükəsizlik divarı quraşdırmanızı yoxlayın.
-[https://wiki.firestormviewer.org/fs_voice]
+[https://www.wolf-grid.com/index.php?f=voicefaq]
 	</notification>
 	<notification name="AvatarRezLeftNotification">
 		( [EXISTENCE] san. canlı )
@@ -4179,7 +4179,7 @@ Defolt halda olmayan switch() ifadələri üçün davranış əvvəllər səhv i
 		İzləyici keşiniz hazırda boşdur. Nəzərə alın ki, yeni məzmun endirərkən qısa müddət ərzində yavaş kadr sürətləri və inventar yüklənməsi ilə qarşılaşa bilərsiniz.
 	</notification>
 	<notification name="FirstJoinSupportGroup2">
-		Phoenix/Firestorm Viewer Dəstək Qrupuna xoş gəlmisiniz!
+		WolfViewer Viewer Dəstək Qrupuna xoş gəlmisiniz!
 
 Dəstəyi asanlaşdırmaq üçün qrupa izləyicinizin versiyasını bildirmək tövsiyə olunur. Bu məlumatlara cari izləyici versiyası, izləyici üslubu, əməliyyat sistemi və RLVa statusu daxildir. Siz qrupa göndərdiyiniz hər hansı söhbətin qarşısında izləyicinizin versiyasını göstərməyi seçə bilərsiniz. Dəstək üzvlərimiz istifadə etdiyiniz tamaşaçı versiyasını bilsələr, sizə daha mənalı məsləhət verə bilərlər.
 
@@ -4190,7 +4190,7 @@ Avtomatik izləyici versiyası göstərməsini aktiv etmək istəyirsiniz?
 		<form name="form">
 			<button name="OK_okcancelignore" text="Bəli"/>
 			<button name="Cancel_okcancelignore" text="Xeyr"/>
-			<ignore name="ignore" text="Phoenix/Firestorm Dəstək Qrupuna qoşulmaq"/>
+			<ignore name="ignore" text="WolfViewer Dəstək Qrupuna qoşulmaq"/>
 		</form>
 	</notification>
 	<notification name="ConfirmScriptModify">
@@ -5182,8 +5182,8 @@ LOD > 8 səviyyəsi: real təsiri yoxdur. Səhvlərə səbəb ola bilər.
 	</notification>
 	<notification name="CurrencyURIOverrideReceived">
 Bu bölgə üçüncü tərəf valyuta portalını təyin etməyi seçdi.
-Nəzərə alın ki, Firestorm Viewer vasitəsilə edilən valyuta alışları sizin (istifadəçi) və valyutanın provayder(lər)i və ya satıcısı(lar)ı arasında aparılan əməliyyatlardır.
-Nə Firestorm Viewer, nə Phoenix Firestorm Viewer Project Inc., nə də onun komandası hər hansı belə əməliyyatdan birbaşa və ya dolayısı ilə yaranan hər hansı xərc və ya zərərə görə məsuliyyət daşımır.
+Nəzərə alın ki, WolfViewer vasitəsilə edilən valyuta alışları sizin (istifadəçi) və valyutanın provayder(lər)i və ya satıcısı(lar)ı arasında aparılan əməliyyatlardır.
+Nə WolfViewer, nə IntelligentWolf Ltd, nə də onun komandası hər hansı belə əməliyyatdan birbaşa və ya dolayısı ilə yaranan hər hansı xərc və ya zərərə görə məsuliyyət daşımır.
 Bu istifadə şərtləri ilə razı deyilsinizsə, bu izləyicidən istifadə edərək heç bir maliyyə əməliyyatı aparılmamalıdır.
 		<usetemplate ignoretext="Bölgə yeni bir valyuta köməkçisi təyin etdikdə." name="okignore" yestext="Bəli"/>
 	</notification>

@@ -147,8 +147,8 @@
     <key>Value</key>
     <integer>1</integer>
   </map>
-  <!-- <FS:WolfViewer> Off by default. GridListDownloadURL is Firestorm's own
-       http://phoenixviewer.com/app/fsdata/grids.xml, fetched over PLAIN HTTP and merged
+  <!-- <FS:WolfViewer> Off by default, and GridListDownloadURL is empty (2026-09-19). The grid
+       list used to come from another viewer's data service over PLAIN HTTP and was merged
        straight into the login grid list (gate llstartup.cpp:1015, fetch 1031-1032), so anyone able to tamper
        with that response could inject a grid whose loginuri collects credentials. Users add
        the grids they want through the grid manager instead. Do not switch this back on
@@ -174,7 +174,7 @@
     <key>Type</key>
     <string>String</string>
     <key>Value</key>
-    <string>http://phoenixviewer.com/app/fsdata/grids.xml</string>
+    <string></string>
   </map>
   <key>FSPrimfeedViewerApiKey</key>
   <map>
@@ -196,7 +196,7 @@
     <key>Type</key>
     <string>String</string>
     <key>Value</key>
-    <string>https://phoenixviewer.com/app/fsdata/fs_grid_builder.html</string>
+    <string>https://www.wolf-grid.com/</string>
   </map>
   <key>LastConnectedGrid</key>
   <map>
@@ -6072,7 +6072,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>https://wiki.firestormviewer.org/[TOPIC]</string>
+      <string>https://www.wolf-grid.com/blog/faq.php?topic=[TOPIC]</string>
       <key>Backup</key>
       <integer>0</integer>
     </map>
@@ -6085,7 +6085,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>https://wiki.firestormviewer.org/start#basic_functions</string>
+      <string>https://www.wolf-grid.com/blog/faq.php</string>
       <key>Backup</key>
       <integer>0</integer>
     </map>    
@@ -6809,7 +6809,7 @@
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>https://wiki.secondlife.com/wiki/[LSL_STRING]</string>
+      <string>https://www.wolf-grid.com/index.php?f=lsl</string>
       <key>Backup</key>
       <integer>0</integer>
     </map>
@@ -13340,7 +13340,7 @@ Change of this parameter will affect the layout of buttons in notification toast
     <key>WolfTerrainLook</key>
     <map>
       <key>Comment</key>
-      <string>Enhanced terrain on the region's own four textures and its Low/High heights: composition per pixel (no contour stripes on cliffs), rock on steep faces, snow held in hollows and solid above the estate's High, height-based layer blending, triplanar sampling on cliffs, distance anti-tiling, valley shading. Off = stock Firestorm blend.</string>
+      <string>Enhanced terrain on the region's own four textures and its Low/High heights: composition per pixel (no contour stripes on cliffs), rock on steep faces, snow held in hollows and solid above the estate's High, height-based layer blending, triplanar sampling on cliffs, distance anti-tiling, valley shading. Off = stock WolfViewer blend.</string>
       <key>Persist</key>
       <integer>1</integer>
       <key>Type</key>
@@ -14009,7 +14009,7 @@ Change of this parameter will affect the layout of buttons in notification toast
 			<key>Type</key>
 			<string>String</string>
 			<key>Value</key>
-			<string>https://phoenixviewer.com/app/file-a-jira/?environment=[ENVIRONMENT]</string>
+			<string>https://github.com/intelligentwolf/wolfviewer/issues</string>
 		</map>
 	<key>RevokePermsOnStopAnimation</key>
     <map>
@@ -14690,7 +14690,7 @@ Change of this parameter will affect the layout of buttons in notification toast
   <key>FSUseLegacyUnsupportedHardwareChecks</key>
     <map>
       <key>Comment</key>
-      <string>If enabled, Firestorm will perform utterly pointless checks that probably made sense in 2004.</string>
+      <string>If enabled, WolfViewer will perform utterly pointless checks that probably made sense in 2004.</string>
       <key>Persist</key>
       <integer>1</integer>
       <key>Type</key>
@@ -14701,7 +14701,7 @@ Change of this parameter will affect the layout of buttons in notification toast
   <key>FSUseStandaloneGroupFloater</key>
     <map>
       <key>Comment</key>
-      <string>If enabled, Firestorm will use a standalone floater for each group profile.</string>
+      <string>If enabled, WolfViewer will use a standalone floater for each group profile.</string>
       <key>Persist</key>
       <integer>1</integer>
       <key>Type</key>
@@ -19729,7 +19729,7 @@ Change of this parameter will affect the layout of buttons in notification toast
 		<key>WolfViewerWaterSeaStateFromRegion</key>
 		<map>
 			<key>Comment</key>
-			<string>Derive the wave field (swell height, wavelength, chaos, direction and the wind of the spectral wind sea) from the region's own environment water settings: wave1_direction's speed and normal_scale's strength relative to the Firestorm defaults, which map to the 0.22 m / 20 m sea this viewer has always shown. Off = use WolfViewerWaterWaveHeight / WolfViewerWaterWaveScale as fixed values.</string>
+			<string>Derive the wave field (swell height, wavelength, chaos, direction and the wind of the spectral wind sea) from the region's own environment water settings: wave1_direction's speed and normal_scale's strength relative to the WolfViewer defaults, which map to the 0.22 m / 20 m sea this viewer has always shown. Off = use WolfViewerWaterWaveHeight / WolfViewerWaterWaveScale as fixed values.</string>
 			<key>Persist</key>
 			<integer>1</integer>
 			<key>Type</key>
@@ -20405,7 +20405,7 @@ Change of this parameter will affect the layout of buttons in notification toast
     <key>NearbyListShowMap</key>
     <map>
       <key>Comment</key>
-      <string>Show/hide map above nearby people list (unused by firestorm)</string>
+      <string>Show/hide map above nearby people list (unused)</string>
       <key>Persist</key>
       <integer>1</integer>
       <key>Type</key>
@@ -22393,7 +22393,7 @@ Change of this parameter will affect the layout of buttons in notification toast
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>Firestorm</string>
+      <string>Classic</string>
     </map>
   <key>FSSkinCurrentThemeReadableName</key>
     <map>
@@ -23816,7 +23816,7 @@ Change of this parameter will affect the layout of buttons in notification toast
     <key>FSUseStandalonePlaceDetailsFloater</key>
     <map>
       <key>Comment</key>
-      <string>If enabled, Firestorm will use a standalone floater for each landmark details, teleport history details and parcel details view.</string>
+      <string>If enabled, WolfViewer will use a standalone floater for each landmark details, teleport history details and parcel details view.</string>
       <key>Persist</key>
       <integer>1</integer>
       <key>Type</key>
@@ -23827,7 +23827,7 @@ Change of this parameter will affect the layout of buttons in notification toast
     <key>FSUseStandaloneTeleportHistoryFloater</key>
     <map>
       <key>Comment</key>
-      <string>If enabled, Firestorm will use a standalone floater for the teleport history view.</string>
+      <string>If enabled, WolfViewer will use a standalone floater for the teleport history view.</string>
       <key>Persist</key>
       <integer>1</integer>
       <key>Type</key>
@@ -23838,7 +23838,7 @@ Change of this parameter will affect the layout of buttons in notification toast
     <key>FSUseStandaloneBlocklistFloater</key>
     <map>
       <key>Comment</key>
-      <string>If enabled, Firestorm will use a standalone floater for the blocklist.</string>
+      <string>If enabled, WolfViewer will use a standalone floater for the blocklist.</string>
       <key>Persist</key>
       <integer>1</integer>
       <key>Type</key>
@@ -23849,7 +23849,7 @@ Change of this parameter will affect the layout of buttons in notification toast
     <key>FSDisableIMChiclets</key>
     <map>
       <key>Comment</key>
-      <string>If enabled, Firestorm will not show any group / IM chat chiclets (notifications envelope and sum of IMs will remain on the screen).</string>
+      <string>If enabled, WolfViewer will not show any group / IM chat chiclets (notifications envelope and sum of IMs will remain on the screen).</string>
       <key>Persist</key>
       <integer>1</integer>
       <key>Type</key>
@@ -23871,7 +23871,7 @@ Change of this parameter will affect the layout of buttons in notification toast
     <key>FSDisableMouseWheelCameraZoom</key>
     <map>
       <key>Comment</key>
-      <string>If true, Firestorm will not use mouse wheel to zoom in/out the camera.</string>
+      <string>If true, WolfViewer will not use mouse wheel to zoom in/out the camera.</string>
       <key>Persist</key>
       <integer>1</integer>
       <key>Type</key>
@@ -23893,7 +23893,7 @@ Change of this parameter will affect the layout of buttons in notification toast
     <key>FSEnableVolumeControls</key>
     <map>
         <key>Comment</key>
-        <string>If true, Firestorm will show volume controls (sounds, media, stream) in upper right corner of the screen. Useful, if skin already has its own controls.</string>
+        <string>If true, WolfViewer will show volume controls (sounds, media, stream) in upper right corner of the screen. Useful, if skin already has its own controls.</string>
         <key>Persist</key>
         <integer>1</integer>
         <key>Type</key>
@@ -23904,7 +23904,7 @@ Change of this parameter will affect the layout of buttons in notification toast
     <key>FSResetCameraOnMovement</key>
     <map>
         <key>Comment</key>
-        <string>If true, Firestorm will reset camera on avatar movement.</string>
+        <string>If true, WolfViewer will reset camera on avatar movement.</string>
         <key>Persist</key>
         <integer>1</integer>
         <key>Type</key>
@@ -23915,7 +23915,7 @@ Change of this parameter will affect the layout of buttons in notification toast
     <key>FSShowInterfaceInMouselook</key>
     <map>
         <key>Comment</key>
-        <string>If true, Firestorm will show user interface in mouselook mode.</string>
+        <string>If true, WolfViewer will show user interface in mouselook mode.</string>
         <key>Persist</key>
         <integer>1</integer>
         <key>Type</key>
@@ -25076,7 +25076,7 @@ Change of this parameter will affect the layout of buttons in notification toast
     <key>FSFlashOnScriptDialog</key>
     <map>
       <key>Comment</key>
-      <string>Flash/Bounce the app icon when a script dialog is received and Firestorm is not in focus</string>
+      <string>Flash/Bounce the app icon when a script dialog is received and WolfViewer is not in focus</string>
       <key>Persist</key>
       <integer>1</integer>
       <key>Type</key>
@@ -25087,7 +25087,7 @@ Change of this parameter will affect the layout of buttons in notification toast
     <key>FSFlashOnMessage</key>
     <map>
       <key>Comment</key>
-      <string>Flash/Bounce the app icon when a new message is received and Firestorm is not in focus</string>
+      <string>Flash/Bounce the app icon when a new message is received and WolfViewer is not in focus</string>
       <key>Persist</key>
       <integer>1</integer>
       <key>Type</key>
@@ -25098,7 +25098,7 @@ Change of this parameter will affect the layout of buttons in notification toast
     <key>FSFlashOnObjectIM</key>
     <map>
       <key>Comment</key>
-      <string>Flash/Bounce the app icon when a new instant message from an object is received and Firestorm is not in focus.</string>
+      <string>Flash/Bounce the app icon when a new instant message from an object is received and WolfViewer is not in focus.</string>
       <key>Persist</key>
       <integer>1</integer>
       <key>Type</key>
@@ -25505,7 +25505,7 @@ Change of this parameter will affect the layout of buttons in notification toast
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string>https://phoenixviewer.com/app/loginV3/secondlifegrid.xml</string>
+      <string></string>
     </map>
     <key>FSIgnoreAdHocSessions</key>
     <map>
@@ -26150,7 +26150,7 @@ Change of this parameter will affect the layout of buttons in notification toast
     <key>FSNoVersionPopup</key>
     <map>
       <key>Comment</key>
-      <string>Disables version popup on the Firestorm Login page</string>
+      <string>Disables version popup on the WolfViewer Login page</string>
       <key>Persist</key>
       <integer>1</integer>
       <key>Type</key>
@@ -28023,7 +28023,7 @@ Change of this parameter will affect the layout of buttons in notification toast
     <key>FSUseFSLegacySearch</key>
     <map>
       <key>Comment</key>
-      <string>Uses Firestorm&apos;s legacy search if enabled - the Linden Lab version instead if disabled</string>
+      <string>Uses WolfViewer&apos;s legacy search if enabled - the Linden Lab version instead if disabled</string>
       <key>Persist</key>
       <integer>1</integer>
       <key>Type</key>

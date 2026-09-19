@@ -217,7 +217,7 @@ https://accounts.secondlife.com/change_email/
         <panel
          class="panel_preference_firestorm"
          filename="panel_preferences_firestorm.xml"
-         label="Firestorm"
+         label="WolfViewer"
          layout="topleft"
          help_topic="preferences_firestorm_tab"
          name="firestorm" />

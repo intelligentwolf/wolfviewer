@@ -173,7 +173,7 @@
    layout="topleft"
    left_pad="6"
    name="old_upload_btn"
-   tool_tip="Open Firestorm's model uploader instead - LODs, physics, rigging and COLLADA (.dae)."
+   tool_tip="Open the classic model uploader instead - LODs, physics, rigging and COLLADA (.dae)."
    top_delta="0"
    width="100" />
 

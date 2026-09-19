@@ -154,7 +154,7 @@
         <key>Type</key>
             <string>String</string>
         <key>Value</key>
-            <string>The Resident you messaged has activated Firestorm viewer&apos;s &apos;autorespond mode&apos; which means they have requested not to be disturbed.  Your message will still be shown in their IM panel for later viewing.</string>
+            <string>The Resident you messaged has activated WolfViewer&apos;s &apos;autorespond mode&apos; which means they have requested not to be disturbed.  Your message will still be shown in their IM panel for later viewing.</string>
         </map>
     <key>FSAutoResponseChanged</key>
         <map>
@@ -187,7 +187,7 @@
         <key>Type</key>
             <string>String</string>
         <key>Value</key>
-            <string>The Resident you messaged has activated Firestorm viewer&apos;s &apos;autorespond mode&apos; which means they have requested not to be disturbed.  Your message will still be shown in their IM panel for later viewing.</string>
+            <string>The Resident you messaged has activated WolfViewer&apos;s &apos;autorespond mode&apos; which means they have requested not to be disturbed.  Your message will still be shown in their IM panel for later viewing.</string>
         </map>
     <key>FSAutoResponseNonFriendsChanged</key>
         <map>
@@ -231,7 +231,7 @@
         <key>Type</key>
             <string>String</string>
         <key>Value</key>
-            <string>The Resident you messaged has activated Firestorm viewer&apos;s &apos;reject all teleport offers and requests mode&apos; which means they have requested not to be disturbed with teleport offers and requests. You may still send an IM message manually.</string>
+            <string>The Resident you messaged has activated WolfViewer&apos;s &apos;reject all teleport offers and requests mode&apos; which means they have requested not to be disturbed with teleport offers and requests. You may still send an IM message manually.</string>
         </map>
     <key>FSRejectTeleportOffersResponseChanged</key>
         <map>
@@ -275,7 +275,7 @@
         <key>Type</key>
             <string>String</string>
         <key>Value</key>
-            <string>The Resident you messaged has activated Firestorm viewer&apos;s &apos;reject all friendship requests mode&apos; which means they have requested not to be disturbed with friendship requests. You may still send an IM message manually.</string>
+            <string>The Resident you messaged has activated WolfViewer&apos;s &apos;reject all friendship requests mode&apos; which means they have requested not to be disturbed with friendship requests. You may still send an IM message manually.</string>
         </map>
     <key>FSRejectFriendshipRequestsResponseChanged</key>
         <map>
@@ -1399,7 +1399,7 @@
      <key>FSEnableDiscordIntegration</key>
         <map>
         <key>Comment</key>
-            <string>If enabled, will allow Firestorm to connect to discord if open and share location data with. Default (false)</string>
+            <string>If enabled, will allow WolfViewer to connect to discord if open and share location data with. Default (false)</string>
         <key>Persist</key>
             <integer>1</integer>
         <key>Type</key>
@@ -1443,7 +1443,7 @@
      <key>FSShareNameToDiscord</key>
         <map>
         <key>Comment</key>
-            <string>If enabled, will allow Firestorm to share avatar user and display name with discord. Default (false)</string>
+            <string>If enabled, will allow WolfViewer to share avatar user and display name with discord. Default (false)</string>
         <key>Persist</key>
             <integer>1</integer>
         <key>Type</key>

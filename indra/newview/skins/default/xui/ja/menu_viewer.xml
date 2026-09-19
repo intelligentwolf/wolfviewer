@@ -286,22 +286,22 @@
 		<menu_item_call label="L$マーケットデータ" name="LindenXchange"/>
 		<menu_item_call label="スクリプトライブラリ" name="Script Library"/>
 		<menu_item_call label="ＳＬコミュニティ（ブログ、フォーラム、ニュース）" name="SL Community Pages"/>
-		<menu_item_call label="Firestormブログ" name="Firestorm Blog"/>
-		<menu_item_call label="Firestorm Flickr" name="Firestorm Flickr"/>
-		<menu_item_call label="Firestorm YouTube" name="Firestorm YouTube"/>
-		<menu_item_call label="Firestorm X" name="Firestorm Twitter"/>
-		<menu_item_call label="Firestorm Plurk" name="Firestorm Plurk"/>
+		<menu_item_call label="WolfViewerブログ" name="Firestorm Blog"/>
+		<menu_item_call label="WolfViewer Flickr" name="Firestorm Flickr"/>
+		<menu_item_call label="WolfViewer YouTube" name="Firestorm YouTube"/>
+		<menu_item_call label="WolfViewer X" name="Firestorm Twitter"/>
+		<menu_item_call label="WolfViewer Plurk" name="Firestorm Plurk"/>
 		<!-- added Mar.15, 2015 -->
 		<menu_item_call label="本日のメッセージ" name="Firestorm MoTD"/>
 		<!-- added Mar.15, 2015 -->
 	</menu>
 	<menu label="ヘルプ" name="Help">
 		<menu_item_check label="ヒントを有効にする" name="Enable Hints"/>
-		<menu_item_call label="Firestorm Wiki" name="Firestorm Wiki"/>
+		<menu_item_call label="WolfViewer Wiki" name="Firestorm Wiki"/>
 		<menu_item_call label="問題の解決" name="Troubleshooting"/>
-		<menu_item_call label="Firestormサポートグループに参加" name="firestorm_support_group"/>
-		<menu_item_call label="Firestorm勉強会スケジュール" name="Firestorm Classes Schedule"/>
-		<menu_item_call label="Firestormイベントカレンダー" name="Firestorm Events Calendar"/>
+		<menu_item_call label="WolfViewerサポートグループに参加" name="firestorm_support_group"/>
+		<menu_item_call label="WolfViewer勉強会スケジュール" name="Firestorm Classes Schedule"/>
+		<menu_item_call label="WolfViewerイベントカレンダー" name="Firestorm Events Calendar"/>
 		<menu_item_call label="ガイドブック" name="How To"/>
 		<menu_item_call label="[CURRENT_GRID]ヘルプ" name="current_grid_help"/>
 		<menu_item_call label="[CURRENT_GRID]について" name="current_grid_about"/>

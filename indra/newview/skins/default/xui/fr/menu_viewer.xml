@@ -282,21 +282,21 @@
 		<menu_item_call label="Taux de change du L$" name="LindenXchange"/>
 		<menu_item_call label="Bibliothèque de scripts" name="Script Library"/>
 		<menu_item_call label="Communauté SL (blogs, forums, nouvelles)" name="SL Community Pages"/>
-		<menu_item_call label="Blog Firestorm" name="Firestorm Blog"/>
-		<menu_item_call label="Primfeed Firestorm" name="Firestorm Primfeed"/>
-		<menu_item_call label="Flickr Firestorm" name="Firestorm Flickr"/>
-		<menu_item_call label="YouTube Firestorm" name="Firestorm YouTube"/>
-		<menu_item_call label="Twitter Firestorm" name="Firestorm Twitter"/>
-		<menu_item_call label="Plurk Firestorm" name="Firestorm Plurk"/>
+		<menu_item_call label="Blog WolfViewer" name="Firestorm Blog"/>
+		<menu_item_call label="Primfeed WolfViewer" name="Firestorm Primfeed"/>
+		<menu_item_call label="Flickr WolfViewer" name="Firestorm Flickr"/>
+		<menu_item_call label="YouTube WolfViewer" name="Firestorm YouTube"/>
+		<menu_item_call label="Twitter WolfViewer" name="Firestorm Twitter"/>
+		<menu_item_call label="Plurk WolfViewer" name="Firestorm Plurk"/>
 		<menu_item_call label="Message du jour" name="Firestorm MoTD"/>
 	</menu>
 	<menu label="Aide" name="Help">
 		<menu_item_check label="Affficher les conseils" name="Enable Hints"/>
-		<menu_item_call label="Wiki Firestorm" name="Firestorm Wiki"/>
+		<menu_item_call label="Wiki WolfViewer" name="Firestorm Wiki"/>
 		<menu_item_call label="Dépannage" name="Troubleshooting"/>
-		<menu_item_call label="Rejoindre un groupe d'aide Firestorm" name="firestorm_support_group"/>
-		<menu_item_call label="Horaires des classes Firestorm" name="Firestorm Classes Schedule"/>
-		<menu_item_call label="Calendrier des évènements Firestorm" name="Firestorm Events Calendar"/>
+		<menu_item_call label="Rejoindre un groupe d'aide WolfViewer" name="firestorm_support_group"/>
+		<menu_item_call label="Horaires des classes WolfViewer" name="Firestorm Classes Schedule"/>
+		<menu_item_call label="Calendrier des évènements WolfViewer" name="Firestorm Events Calendar"/>
 		<menu_item_check label="Guide" name="How To"/>
 		<!-- <menu_item_call label="Aide Second Life" name="Second Life Help"/>-->
 		<menu_item_call label="Aide [CURRENT_GRID]" name="current_grid_help"/>

@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes"?>
-<panel label="Firestorm" name="firestorm">
+<panel label="WolfViewer" name="firestorm">
 	<panel.string name="BeamsOffLabel">=== 關閉 ===</panel.string>
 	<string name="EmbeddedItemNotSet">未設定</string>
 	<string name="EmbeddedItemNotAvailable">不可用</string>
 	<string name="EmbeddedItemNotLoggedIn">未登入</string>
-	<tab_container label="Firestorm Preferences" name="tabs">
+	<tab_container label="WolfViewer Preferences" name="tabs">
 		<panel label="更多" name="tab-extras">
 			<check_box name="checkMiscRLVa" label="允許遠端指令碼檢視器控制項 (RLVa)" />
 			<text name="textMiscRLVaRestart">(需要重新啟動)</text>
@@ -15,7 +15,7 @@
 			<check_box label="站立後重置化身骨骼" name="FSResetSkeletonOnStandUp" tool_tip="啟用此選項後，當你站起時，檢視器會自動重置您的化身骨骼，並將重置訊息發送給周圍的其他居民，以便讓他們的用戶端同時更你您的外觀。" />
 			<check_box label="登入時禁用載入螢幕" name="login_screen_toggle" tool_tip="禁用登入時的載入螢幕" />
 			<check_box label="登出時禁用載入螢幕" name="logout_screen_toggle" tool_tip="禁用登出時的載入螢幕" />
-			<check_box label="啟用漸進式遠景剪裁距離" name="FSRenderFarClipStepping" tool_tip="如果啟用，Firestorm 將在傳送後使用逐步遠景剪裁距離。" />
+			<check_box label="啟用漸進式遠景剪裁距離" name="FSRenderFarClipStepping" tool_tip="如果啟用，WolfViewer 將在傳送後使用逐步遠景剪裁距離。" />
 			<slider name="progressive_draw_distance_interval" tool_tip="每次距離變化間隔的秒數" />
 			<check_box name="UseLSLBridge" label="啟用 LSL 橋" tool_tip="攜帶一個指令碼物件以啟用某些進階功能" />
 			<combo_box name="UseLSLFlightAssist" tool_tip="啟用飛行輔助和高空漂浮功能">

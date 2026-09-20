@@ -46,7 +46,7 @@ public:
     struct Field
     {
         U32 mDepthTex = 0;      // GL texture, RES x RES RGBA32F over the FIELD (mX0, mY0, mSizeX, mSizeY)
-        U32 mExpoTex = 0;       // GL texture, ERES x ERES R32F over the 3x span
+        U32 mExpoTex = 0;       // GL texture, ERES x ERES RGBA32F over the 3x span: R exposure, G distance to land, B distance from the open sea
         // <WolfViewer 2026-09-20> The depth field's region-space origin and size: (0, 0) and
         // the region up to WINDOW_M an edge, else a WINDOW_M window that follows the camera
         // (fieldWindow). Shader uniform depthOrigin / depthRegionSize.
@@ -60,6 +60,10 @@ public:
         F32 mExpoSX = 768.f;
         F32 mExpoSY = 768.f;
         U64 mStamp = 0;
+        // <WolfViewer 2026-09-20> the newest terrain stamp seen and when it first appeared: a
+        // terrain change re-bakes only once the stamp has held for STAMP_SETTLE_SECS.
+        U64 mPendingStamp = 0;
+        F64 mPendingSince = 0.0;
         F64 mBakedAt = 0.0;
         bool mReady = false;
         // CPU copies of the two bakes, for the boat rocker's wave sampler (wolfboatrock.cpp
@@ -85,6 +89,14 @@ public:
     static constexpr F32 CHECK_INTERVAL_SECS = 2.f;
     static constexpr F32 REBAKE_SECS = 20.f;     // neighbours stream in over a minute
     static constexpr F32 MIN_REBAKE_SECS = 8.f;  // [2026-09-10] never re-shape the sea faster than this per region
+    // <WolfViewer 2026-09-20> A terrain change is acted on only after the stamp has been
+    // unchanged for this long. On Wolf Nation (51,200 m) patches stream in for as long as you
+    // fly, so the stamp never stopped changing and the fields re-baked every MIN_REBAKE_SECS
+    // — the sea re-shaped itself every 8 s, the "water flickers when I move" report (and the
+    // Dire Wolf freeze of 09-10, which disabling fields above 4096 m had hidden). Now the sea
+    // settles once, when the streaming pauses; a window move still re-bakes at once.
+    static constexpr F32 STAMP_SETTLE_SECS = 10.f;
+    static constexpr F32 STAMP_MARGIN_M = 256.f;   // patches this far outside the window still count (the 3x exposure span reads them)
     // <WolfViewer 2026-09-20> Fields bake over the whole region up to this many metres an
     // edge (8 m depth texels), else over a camera-following window this wide. Replaces the
     // 09-10 rule "no field above 4096 m" (RES texels would be > 16 m): Wolf Nation (51,200 m)
@@ -127,12 +139,16 @@ public:
     static F32 zoneAt(const Field& f, F32 rx, F32 ry);
     /** [SURF 2026-09-07] Distance to land (exposure bake G), bilinear; 4000 outside the span. */
     static F32 distanceAt(const Field& f, F32 rx, F32 ry);
+    /** <WolfViewer 2026-09-20/> Distance from the open sea (exposure bake B), bilinear; 4000 outside the span. */
+    static F32 openDistanceAt(const Field& f, F32 rx, F32 ry);
     /** [WAVES 2026-09-07] Bake every field again at the next check (a layout arrived / was saved / is previewed). */
     void invalidate();
 
 private:
     void bake(LLViewerRegion* regionp, Field& f);
     static U64 terrainStamp(LLViewerRegion* regionp);
+    /** <WolfViewer 2026-09-20/> terrainStamp over the patches inside region rect (x0, y0, sx, sy) only: a 51,200 m region has 10 million patches, a 2048 m window 16 thousand. */
+    static U64 terrainStampIn(LLViewerRegion* regionp, F32 x0, F32 y0, F32 sx, F32 sy);
     /** Terrain height at region-relative (px, py) metres, answering from this region or
      *  any live neighbour; false = no region covers the point (open water). */
     static bool heightAt(LLViewerRegion* regionp, F32 px, F32 py, F32& out);
@@ -142,7 +158,7 @@ private:
     std::map<U64, Field> mFields;
     F64 mNextCheck = 0.0;
     // Scratch, reused across bakes.
-    std::vector<F32> mH, mTmp, mSm, mDist, mDepthData, mExpoData, mZoneData;
+    std::vector<F32> mH, mTmp, mSm, mDist, mOpen, mDepthData, mExpoData, mZoneData;   // <WolfViewer 2026-09-20/> mOpen
     bool mRebakeAll = false;   // [WAVES 2026-09-07] set by invalidate()
     U32 mBakes = 0;
     U32 mLastSurfTexels = 0;

@@ -559,17 +559,35 @@ void main()
             // [SURF 2026-09-07 rev2] Water.js, same math: the wave's coordinate is the baked
             // DISTANCE TO LAND (exposure G) — crests are iso-distance contours that wrap the
             // coast; direction = down the distance gradient taken 1/32 of the span wide.
-            vec2 dW = vec2(1.0 / 32.0);
-            float dist = WOLF_TEX_WOLF_EXPOSURE_FIELD( euv).g;
-            float dxp = WOLF_TEX_WOLF_EXPOSURE_FIELD( clamp(euv + vec2(dW.x, 0.0), 0.0, 1.0)).g;
-            float dxm = WOLF_TEX_WOLF_EXPOSURE_FIELD( clamp(euv - vec2(dW.x, 0.0), 0.0, 1.0)).g;
-            float dyp = WOLF_TEX_WOLF_EXPOSURE_FIELD( clamp(euv + vec2(0.0, dW.y), 0.0, 1.0)).g;
-            float dym = WOLF_TEX_WOLF_EXPOSURE_FIELD( clamp(euv - vec2(0.0, dW.y), 0.0, 1.0)).g;
-            vec2 grad = vec2(dxp - dxm, dyp - dym);
+            // [SURF 2026-09-20] The direction is read 80 m either side (was 1/32 of the span, 24 m
+            // on a 256 m region): differenced that close, the distance field points at the NEAREST
+            // bank — sideways along a bay, at a rock, at a pier — and the surf ran along the shore
+            // (Paul: "they should always go towards the shore not sideways"). 80 m averages the
+            // small features out and points at the coast; the crest coordinate is the same five-tap
+            // mean so the crest lines follow the smoothed contours. CPU mirrors: terrain_manager.js
+            // _surfSampleCPU / wolfboatrock.cpp use 80 m too.
+            // <WolfViewer 2026-09-20> The wave's coordinate is the DISTANCE FROM THE OPEN SEA
+            // (exposure bake B): crests parallel to the sea front, travelling LANDWARD, up a bay
+            // to its head. Distance to land (G) put crests parallel to the nearest bank and rings
+            // round every islet; it stays as the fallback where no open sea is in reach.
+            // Source: Water.js [SURF 2026-09-20]; CPU mirror wolfboatrock.cpp.
+            vec2 dW = vec2(80.0) / exposureSize;
+            vec4 eC = WOLF_TEX_WOLF_EXPOSURE_FIELD( euv);
+            vec4 eXp = WOLF_TEX_WOLF_EXPOSURE_FIELD( clamp(euv + vec2(dW.x, 0.0), 0.0, 1.0));
+            vec4 eXm = WOLF_TEX_WOLF_EXPOSURE_FIELD( clamp(euv - vec2(dW.x, 0.0), 0.0, 1.0));
+            vec4 eYp = WOLF_TEX_WOLF_EXPOSURE_FIELD( clamp(euv + vec2(0.0, dW.y), 0.0, 1.0));
+            vec4 eYm = WOLF_TEX_WOLF_EXPOSURE_FIELD( clamp(euv - vec2(0.0, dW.y), 0.0, 1.0));
+            vec2 ograd = vec2(eXp.b - eXm.b, eYp.b - eYm.b);
+            float ol = length(ograd);
+            bool haveOpen = eC.b < 3000.0 && ol > 1.0;
+            float dist = eC.g;
+            vec2 grad = vec2(eXp.g - eXm.g, eYp.g - eYm.g);
             float gl = length(grad);
             bool haveLand = dist < 3000.0 && gl > 1.0;
-            vec2 dir = haveLand ? -grad / gl : normalize(depthOrigin + depthRegionSize * 0.5 - regionXY + vec2(0.001, 0.0));
-            float coord = haveLand ? -dist : dot(regionXY, dir);
+            vec2 dir = haveOpen ? ograd / ol : (haveLand ? -grad / gl : normalize(depthOrigin + depthRegionSize * 0.5 - regionXY + vec2(0.001, 0.0)));
+            float openS = (eC.b + eXp.b + eXm.b + eYp.b + eYm.b) * 0.2;   // smoothed contours
+            float distS = (dist + eXp.g + eXm.g + eYp.g + eYm.g) * 0.2;
+            float coord = haveOpen ? openS : (haveLand ? -distS : dot(regionXY, dir));
             float h = 30.0;
             if (depthReady > 0.5)
             {

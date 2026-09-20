@@ -205,6 +205,50 @@ vec3 wolfPhotoPaint(sampler2D src, vec2 uv, vec2 texel, vec2 uvMax, int mode)
         float cover = 1.0 - smoothstep(bestRad - 1.5 * s, bestRad + 0.5 * s, bd);
         return mix(canvas, dcol, cover);
     }
+    if (mode >= 13) {
+        // [2026-09-20] Cartoon / Line Art / Comic share one ink: a Sobel edge on luminance,
+        // 1.5 px apart (scaled), read as a line strength.
+        vec2 dx = vec2(1.5 * s * texel.x, 0.0), dy = vec2(0.0, 1.5 * s * texel.y);
+        float tl = wpLum(wpTap(src, uv - dx + dy, texel, uvMax)), tc = wpLum(wpTap(src, uv + dy, texel, uvMax)), tr = wpLum(wpTap(src, uv + dx + dy, texel, uvMax));
+        float ml = wpLum(wpTap(src, uv - dx, texel, uvMax)),      mr = wpLum(wpTap(src, uv + dx, texel, uvMax));
+        float bl = wpLum(wpTap(src, uv - dx - dy, texel, uvMax)), bc = wpLum(wpTap(src, uv - dy, texel, uvMax)), br = wpLum(wpTap(src, uv + dx - dy, texel, uvMax));
+        float gx = (tr + 2.0 * mr + br) - (tl + 2.0 * ml + bl);
+        float gy = (tl + 2.0 * tc + tr) - (bl + 2.0 * bc + br);
+        float mag = sqrt(gx * gx + gy * gy);
+        // flat colour: a 3x3 average, then six levels a channel
+        vec3 avg = (wpTap(src, uv - dx, texel, uvMax) + c + wpTap(src, uv + dx, texel, uvMax)
+                  + wpTap(src, uv - dy, texel, uvMax) + wpTap(src, uv + dy, texel, uvMax)) / 5.0;
+        if (mode == 13) {
+            // Cartoon: cel colours (six tones, a little more saturated) with a dark line on
+            // every strong edge.
+            vec3 cel = floor(wpSat(avg, 1.25) * 6.0 + 0.5) / 6.0;
+            float ink = smoothstep(0.10, 0.30, mag);
+            return mix(cel, vec3(0.06, 0.05, 0.06), ink);
+        }
+        if (mode == 14) {
+            // Line Art: black ink on paper. Edges draw the lines; the darker tones get a light
+            // diagonal hatch so shadow reads without any fill.
+            float ink = smoothstep(0.06, 0.22, mag);
+            float l = wpLum(avg);
+            float stripe = step(0.55, fract((pxc.x + pxc.y) / (5.0 * s)));
+            float hatch = stripe * smoothstep(0.55, 0.15, l) * 0.55;
+            vec3 paper = vec3(0.97, 0.96, 0.92);
+            return paper * (1.0 - 0.88 * ink) * (1.0 - hatch);
+        }
+        // Comic (15): flat saturated colour printed as halftone dots (Ben-Day), bold black
+        // outlines, and a paper-white where the tone is light.
+        float l = wpLum(avg);
+        vec3 inkFlat = floor(wpSat(avg, 1.6) * 5.0 + 0.5) / 5.0;
+        float D = 6.0 * s;
+        vec2 rot = vec2(pxc.x * 0.7071 - pxc.y * 0.7071, pxc.x * 0.7071 + pxc.y * 0.7071);   // 45-degree screen
+        vec2 cellp = (floor(rot / D) + 0.5) * D;
+        float dotR = D * 0.62 * (1.0 - l);   // darker tone = bigger dot
+        float dotm = 1.0 - smoothstep(dotR - 0.8 * s, dotR + 0.8 * s, length(rot - cellp));
+        vec3 paper = vec3(0.98, 0.97, 0.93);
+        vec3 tone = mix(paper, inkFlat, clamp(dotm + (1.0 - l) * 0.35, 0.0, 1.0));
+        float ink = smoothstep(0.10, 0.26, mag);
+        return mix(tone, vec3(0.03, 0.03, 0.04), ink);
+    }
     return c;
 }
 

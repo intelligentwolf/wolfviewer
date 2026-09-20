@@ -208,6 +208,12 @@ with the same filename but different name
   <texture name="WolfPhoto_monet_Sel" file_name="wolf_photo/monet_sel.png" preload="false" />
   <texture name="WolfPhoto_seurat" file_name="wolf_photo/seurat.png" preload="false" />
   <texture name="WolfPhoto_seurat_Sel" file_name="wolf_photo/seurat_sel.png" preload="false" />
+  <texture name="WolfPhoto_cartoon" file_name="wolf_photo/cartoon.png" preload="false" />
+  <texture name="WolfPhoto_cartoon_Sel" file_name="wolf_photo/cartoon_sel.png" preload="false" />
+  <texture name="WolfPhoto_lineart" file_name="wolf_photo/lineart.png" preload="false" />
+  <texture name="WolfPhoto_lineart_Sel" file_name="wolf_photo/lineart_sel.png" preload="false" />
+  <texture name="WolfPhoto_comic" file_name="wolf_photo/comic.png" preload="false" />
+  <texture name="WolfPhoto_comic_Sel" file_name="wolf_photo/comic_sel.png" preload="false" />
   <texture name="Command_WolfDictate_Icon"     file_name="toolbar_icons/wolf_dictate.png"     preload="true" />
   <texture name="Command_WolfRain_Icon"        file_name="toolbar_icons/wolf_rain.png"        preload="true" />
   <texture name="Command_WolfSnow_Icon"        file_name="toolbar_icons/wolf_snow.png"        preload="true" />

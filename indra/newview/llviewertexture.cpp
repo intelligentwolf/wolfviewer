@@ -3193,7 +3193,17 @@ void LLViewerLODTexture::processTextureStats()
         S32 current_discard = getDiscardLevel();
         if (mBoostLevel < LLGLTexture::BOOST_AVATAR_BAKED)
         {
-            if (current_discard < mDesiredDiscardLevel && !mForceToSaveRawImage)
+            // <WolfViewer 2026-09-20> Hysteresis. Stock scales a texture down the moment the
+            // camera makes it ONE discard level smaller, and re-fetches it when it grows
+            // again; flying over a dense city that is hundreds of textures dropping and
+            // reloading every few seconds — Paul: "texture flicker" on Wolf Nation. With
+            // WolfViewerTextureScaleDownSlack levels of slack (default 1) a texture is kept
+            // until it is 4x oversized. Slack is withdrawn as soon as the VRAM budget bias
+            // rises (LLViewerTexture::sDesiredDiscardBias > 1), so a low-VRAM machine
+            // behaves exactly as stock.
+            static LLCachedControl<S32> scale_down_slack(gSavedSettings, "WolfViewerTextureScaleDownSlack", 1);
+            const S32 slack = sDesiredDiscardBias > 1.f ? 0 : llclamp((S32)scale_down_slack, 0, 2);
+            if (current_discard + slack < mDesiredDiscardLevel && !mForceToSaveRawImage)
             { // should scale down
                 scaleDown();
             }

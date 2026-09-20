@@ -19737,6 +19737,17 @@ Change of this parameter will affect the layout of buttons in notification toast
 			<key>Value</key>
 			<integer>1</integer>
 		</map>
+		<key>WolfViewerTextureScaleDownSlack</key>
+		<map>
+			<key>Comment</key>
+			<string>How many discard levels a loaded texture may be oversized before it is scaled down (0 = scale down as soon as it is one level too big, the stock behaviour, which reloads textures constantly while moving through a dense build). Ignored while the texture VRAM budget is under pressure.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>1</integer>
+		</map>
 		<key>WolfViewerWaterShoreField</key>
 		<map>
 			<key>Comment</key>
@@ -19757,7 +19768,7 @@ Change of this parameter will affect the layout of buttons in notification toast
 			<key>Type</key>
 			<string>Boolean</string>
 			<key>Value</key>
-			<integer>1</integer>
+			<integer>0</integer>
 		</map>
 		<key>WolfViewerWaterWake</key>
 		<map>
@@ -19784,7 +19795,7 @@ Change of this parameter will affect the layout of buttons in notification toast
 		<key>WolfViewerPhotoFilter</key>
 		<map>
 			<key>Comment</key>
-			<string>World &gt; Photo Effects: a colour grade over the world view, for you only. 0 off, 1 Sepia, 2 Black and White, 3 Noir, 4 Vintage, 5 Warm, 6 Cool, 7 Faded, 8 Vivid, 9 Picasso, 10 Van Gogh, 11 Monet, 12 Seurat.</string>
+			<string>World &gt; Photo Effects: a colour grade over the world view, for you only. 0 off, 1 Sepia, 2 Black and White, 3 Noir, 4 Vintage, 5 Warm, 6 Cool, 7 Faded, 8 Vivid, 9 Picasso, 10 Van Gogh, 11 Monet, 12 Seurat, 13 Cartoon, 14 Line Art, 15 Comic.</string>
 			<key>Persist</key>
 			<integer>1</integer>
 			<key>Type</key>

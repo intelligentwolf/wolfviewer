@@ -474,7 +474,7 @@ void LLDrawPoolWater::renderPostDeferred(S32 pass)
     // rides. Not inside a cube snapshot or the mirror pass (the sea's own rule, above), not
     // under water, not for a zero surf height (other grids).
     {
-        static LLCachedControl<bool> curl_on(gSavedSettings, "WolfViewerWaterSurfCurl", true);
+        static LLCachedControl<bool> curl_on(gSavedSettings, "WolfViewerWaterSurfCurl", false);   // <WolfViewer 2026-09-20/> off: Paul "drop the ribbon"
         if (curl_on && !underwater && !gCubeSnapshot && !gPipeline.mHeroProbeManager.isMirrorPass()
             && LLPipeline::sRenderTransparentWater && mSurfHeight > 0.01f)
         {

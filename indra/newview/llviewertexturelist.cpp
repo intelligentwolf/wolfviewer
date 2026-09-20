@@ -1141,7 +1141,10 @@ F32 LLViewerTextureList::updateImagesCreateTextures(F32 max_time)
         imagep->postCreateTexture();
         imagep->mCreatePending = false;
 
-        if (imagep->hasGLTexture() && imagep->getDiscardLevel() < imagep->getDesiredDiscardLevel() &&
+        // <WolfViewer 2026-09-20/> same slack as LLViewerLODTexture::processTextureStats
+        static LLCachedControl<S32> scale_down_slack(gSavedSettings, "WolfViewerTextureScaleDownSlack", 1);
+        const S32 slack = LLViewerTexture::sDesiredDiscardBias > 1.f ? 0 : llclamp((S32)scale_down_slack, 0, 2);
+        if (imagep->hasGLTexture() && imagep->getDiscardLevel() + slack < imagep->getDesiredDiscardLevel() &&
            (imagep->getDesiredDiscardLevel() <= MAX_DISCARD_LEVEL))
         {
             // NOTE: this may happen if the desired discard reduces while a decode is in progress and does not

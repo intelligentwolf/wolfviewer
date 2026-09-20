@@ -687,7 +687,7 @@ class WolfPhotoSetFilter : public view_listener_t
 {
     bool handleEvent(const LLSD& userdata)
     {
-        gSavedSettings.setS32("WolfViewerPhotoFilter", llclamp((S32)userdata.asInteger(), 0, 12));   // [PAINTERS 2026-09-20/] 9..12
+        gSavedSettings.setS32("WolfViewerPhotoFilter", llclamp((S32)userdata.asInteger(), 0, 15));   // [PAINTERS 2026-09-20/] 9..15
         return true;
     }
 };

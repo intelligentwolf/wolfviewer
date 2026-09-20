@@ -8594,7 +8594,7 @@ bool LLPipeline::wolfPhotoFilter(LLRenderTarget* src, LLRenderTarget* dst)
     static LLCachedControl<F32> filter_strength(gSavedSettings, "WolfViewerPhotoFilterStrength", 1.f);
     const S32 mode = filter_mode;
     // 1..8 are the looks wolfPhotoGrade() knows; anything else in the setting means off.
-    if (mode < 1 || mode > 12 || !gWolfPhotoFilterProgram.isComplete())   // [PAINTERS 2026-09-20/] 9..12 paint
+    if (mode < 1 || mode > 15 || !gWolfPhotoFilterProgram.isComplete())   // [PAINTERS 2026-09-20/] 9..15 paint
     {
         return false;
     }

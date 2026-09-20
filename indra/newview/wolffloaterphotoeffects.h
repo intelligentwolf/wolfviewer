@@ -31,7 +31,7 @@ public:
     bool postBuild() override;
     void onOpen(const LLSD& key) override;
 
-    static constexpr S32 MODE_COUNT = 13;   // 0 Off .. 12 Seurat (pipeline.cpp wolfPhotoFilter)
+    static constexpr S32 MODE_COUNT = 16;   // 0 Off .. 15 Comic (pipeline.cpp wolfPhotoFilter)
 
 private:
     void onTile(S32 mode);

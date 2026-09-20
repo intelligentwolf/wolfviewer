@@ -203,7 +203,18 @@ void LLDrawPoolTerrain::renderDeferred(S32 pass)
 
     boostTerrainDetailTextures();
 
-    renderFullShader();
+    {
+        // <WolfViewer 2026-09-20> Pick the prim. A road, a floor or a slab laid exactly on the
+        // ground z-fights the terrain and flickers as the camera moves (Paul, Galway on Wolf
+        // Nation: "flickering can also be when ... the prim is too close to the terrain ... we
+        // should just pick one"). The terrain is the background: pushed one depth unit deeper
+        // (slope-scaled) it always loses a tie, and nothing else changes. The parcel-owner
+        // overlay below already uses the opposite offset to sit ON the terrain. WolfStorm
+        // terrain_manager.js polygonOffset same.
+        LLGLEnable polyOffset(GL_POLYGON_OFFSET_FILL);
+        glPolygonOffset(1.0f, 1.0f);
+        renderFullShader();
+    }
 
     // Special-case for land ownership feedback
     // <FS:Ansariel> Use faster LLCachedControls for frequently visited locations

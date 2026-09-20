@@ -509,6 +509,12 @@ public:
     static LLPointer<LLObjectMediaNavigateClient> sObjectMediaNavigateClient;
 protected:
     static S32 sNumLODChanges;
+public:
+    // <WolfViewer 2026-09-20> Set by the weather roof probes (wolfweather.cpp) around their
+    // lineSegmentIntersectInWorld calls: a roof whose click action is "Ignore" — common on
+    // mesh and sculpted builds, so clicks pass to what is behind — must still stop the rain.
+    static bool sWolfRoofProbe;
+protected:
 
     friend class LLVolumeImplFlexible;
 };

@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes" ?>
 <!-- [PAINTERS 2026-09-20] World > Photo Effects… (wolffloaterphotoeffects.cpp). One image tile
      per style (textures.xml WolfPhoto_*, textures/wolf_photo/ — the real post shader run over a
-     harbour scene), Grades then Painters, and a strength slider. Same layout and tiles as
-     WolfStorm floater_photo_effects.js. tile_N is WolfViewerPhotoFilter value N. -->
+     harbour scene), Grades then Painters and ink, and a strength slider. Same layout and tiles
+     as WolfStorm floater_photo_effects.js. tile_N is WolfViewerPhotoFilter value N. -->
 <floater
  can_close="true"
  can_minimize="true"
  can_resize="false"
- height="500"
+ height="591"
  layout="topleft"
  name="wolf_photo_effects"
  save_rect="true"
@@ -51,7 +51,7 @@
           image_unselected="WolfPhoto_vivid" image_selected="WolfPhoto_vivid_Sel" image_hover_unselected="WolfPhoto_vivid" image_hover_selected="WolfPhoto_vivid_Sel"
           image_pressed="WolfPhoto_vivid_Sel" image_pressed_selected="WolfPhoto_vivid_Sel" label="" tool_tip="Vivid" />
   <text follows="left|top" layout="topleft" left="12" top="281" width="120" height="14" halign="center" font="SansSerifSmall" name="tile_8_label">Vivid</text>
-  <text follows="left|top" layout="topleft" left="12" top="297" width="300" height="14" name="painters_title" font="SansSerifSmall">Painters</text>
+  <text follows="left|top" layout="topleft" left="12" top="297" width="300" height="14" name="painters_title" font="SansSerifSmall">Painters and ink</text>
   <button follows="left|top" layout="topleft" left="12" top="315" width="120" height="67" name="tile_9" is_toggle="true" scale_image="true"
           image_unselected="WolfPhoto_picasso" image_selected="WolfPhoto_picasso_Sel" image_hover_unselected="WolfPhoto_picasso" image_hover_selected="WolfPhoto_picasso_Sel"
           image_pressed="WolfPhoto_picasso_Sel" image_pressed_selected="WolfPhoto_picasso_Sel" label="" tool_tip="Picasso" />
@@ -68,7 +68,19 @@
           image_unselected="WolfPhoto_seurat" image_selected="WolfPhoto_seurat_Sel" image_hover_unselected="WolfPhoto_seurat" image_hover_selected="WolfPhoto_seurat_Sel"
           image_pressed="WolfPhoto_seurat_Sel" image_pressed_selected="WolfPhoto_seurat_Sel" label="" tool_tip="Seurat" />
   <text follows="left|top" layout="topleft" left="396" top="384" width="120" height="14" halign="center" font="SansSerifSmall" name="tile_12_label">Seurat</text>
-  <text follows="left|top" layout="topleft" left="12" top="420" width="300" height="14" name="strength_label" font="SansSerifSmall">Strength (%)</text>
-  <slider follows="left|top" layout="topleft" left="12" top="436" width="504" height="16" name="strength" min_val="0" max_val="100" increment="5" initial_value="100" decimal_digits="0" show_text="true" />
-  <text follows="left|top" layout="topleft" left="12" top="460" width="504" height="28" word_wrap="true" name="status" font="SansSerifSmall">Applies to your own view only. Snapshots include it.</text>
+  <button follows="left|top" layout="topleft" left="12" top="406" width="120" height="67" name="tile_13" is_toggle="true" scale_image="true"
+          image_unselected="WolfPhoto_cartoon" image_selected="WolfPhoto_cartoon_Sel" image_hover_unselected="WolfPhoto_cartoon" image_hover_selected="WolfPhoto_cartoon_Sel"
+          image_pressed="WolfPhoto_cartoon_Sel" image_pressed_selected="WolfPhoto_cartoon_Sel" label="" tool_tip="Cartoon" />
+  <text follows="left|top" layout="topleft" left="12" top="475" width="120" height="14" halign="center" font="SansSerifSmall" name="tile_13_label">Cartoon</text>
+  <button follows="left|top" layout="topleft" left="140" top="406" width="120" height="67" name="tile_14" is_toggle="true" scale_image="true"
+          image_unselected="WolfPhoto_lineart" image_selected="WolfPhoto_lineart_Sel" image_hover_unselected="WolfPhoto_lineart" image_hover_selected="WolfPhoto_lineart_Sel"
+          image_pressed="WolfPhoto_lineart_Sel" image_pressed_selected="WolfPhoto_lineart_Sel" label="" tool_tip="Line Art" />
+  <text follows="left|top" layout="topleft" left="140" top="475" width="120" height="14" halign="center" font="SansSerifSmall" name="tile_14_label">Line Art</text>
+  <button follows="left|top" layout="topleft" left="268" top="406" width="120" height="67" name="tile_15" is_toggle="true" scale_image="true"
+          image_unselected="WolfPhoto_comic" image_selected="WolfPhoto_comic_Sel" image_hover_unselected="WolfPhoto_comic" image_hover_selected="WolfPhoto_comic_Sel"
+          image_pressed="WolfPhoto_comic_Sel" image_pressed_selected="WolfPhoto_comic_Sel" label="" tool_tip="Comic" />
+  <text follows="left|top" layout="topleft" left="268" top="475" width="120" height="14" halign="center" font="SansSerifSmall" name="tile_15_label">Comic</text>
+  <text follows="left|top" layout="topleft" left="12" top="511" width="300" height="14" name="strength_label" font="SansSerifSmall">Strength (%)</text>
+  <slider follows="left|top" layout="topleft" left="12" top="527" width="504" height="16" name="strength" min_val="0" max_val="100" increment="5" initial_value="100" decimal_digits="0" show_text="true" />
+  <text follows="left|top" layout="topleft" left="12" top="551" width="504" height="28" word_wrap="true" name="status" font="SansSerifSmall">Applies to your own view only. Snapshots include it.</text>
 </floater>

@@ -105,6 +105,7 @@ F32 LLVOVolume::sLODFactor = 1.f;
 F32 LLVOVolume::sLODSlopDistanceFactor = 0.5f; //Changing this to zero, effectively disables the LOD transition slop
 F32 LLVOVolume::sDistanceFactor = 1.0f;
 S32 LLVOVolume::sNumLODChanges = 0;
+bool LLVOVolume::sWolfRoofProbe = false;   // <WolfViewer 2026-09-20/>
 S32 LLVOVolume::mRenderComplexity_last = 0;
 S32 LLVOVolume::mRenderComplexity_current = 0;
 LLPointer<LLObjectMediaDataClient> LLVOVolume::sObjectMediaClient = NULL;
@@ -4950,7 +4951,8 @@ bool LLVOVolume::lineSegmentIntersect(const LLVector4a& start, const LLVector4a&
         }
     }
 
-    if (getClickAction() == CLICK_ACTION_IGNORE && !LLFloater::isVisible(gFloaterTools))
+    // <WolfViewer 2026-09-20/> sWolfRoofProbe: the weather's roof test sees "Ignore" prims too
+    if (getClickAction() == CLICK_ACTION_IGNORE && !LLFloater::isVisible(gFloaterTools) && !sWolfRoofProbe)
     {
         return false;
     }

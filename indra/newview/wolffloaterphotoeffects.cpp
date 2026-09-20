@@ -22,7 +22,7 @@ namespace
     const char* const MODE_LABELS[WolfFloaterPhotoEffects::MODE_COUNT] =
     {
         "Off", "Sepia", "Black & White", "Noir", "Vintage", "Warm", "Cool", "Faded", "Vivid",
-        "Picasso", "Van Gogh", "Monet", "Seurat"
+        "Picasso", "Van Gogh", "Monet", "Seurat", "Cartoon", "Line Art", "Comic"
     };
 }
 

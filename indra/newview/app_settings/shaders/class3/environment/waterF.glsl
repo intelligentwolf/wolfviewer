@@ -772,10 +772,13 @@ void main()
         // (Paul 09-07: more whitewater, never full-bright, NOT a sheet over the whole crest
         // band) the PEAK of every surf wave carries some, a breaking wave is white from the
         // lip down, and the churn it leaves behind it (vSurf.w) is patchy wash. Water.js same.
-        float crestFoam = sc * (0.5 + 0.5 * sb) * sNoise;
-        float face = smoothstep(0.3, 1.0, sc) * sb;
+        // [SURF 2026-09-20] Foam on the crest and the breaking lip only: the old face term
+        // whitened the whole face of a big breaker, a white slab that bloomed (Paul: "that
+        // weird white glow"). Water.js same.
+        float crestFoam = sc * sc * (0.45 + 0.40 * sb) * sNoise;
+        float face = smoothstep(0.78, 1.0, sc) * sb * 0.6;
         float wash = sw * 0.35 * sNoise2 * sNoise2;
-        float sf = clamp(max(max(crestFoam, face), wash), 0.0, 0.85);
+        float sf = clamp(max(max(crestFoam, face), wash), 0.0, 0.65);
         float surfLight = clamp(dot(sunlit_linear + amblit, vec3(0.3333)), 0.08, 1.0);
         color = mix(color, vec3(0.90, 0.94, 0.97) * surfLight, sf);
     }

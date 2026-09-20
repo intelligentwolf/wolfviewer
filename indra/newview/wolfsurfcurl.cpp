@@ -80,7 +80,7 @@ bool WolfSurfCurl::rebuild(F32 surf_h)
     mIndexCount = 0;
     mVertexCount = 0;
     if (!fld || !fld->mReady || fld->mDepth.size() != (size_t)RES * RES * 4
-        || fld->mExpo.size() != (size_t)ERES * ERES * 2)
+        || fld->mExpo.size() != (size_t)ERES * ERES * 4)   // <WolfViewer 2026-09-20/> RGBA
     {
         mVB = nullptr;
         return false;
@@ -181,7 +181,7 @@ bool WolfSurfCurl::rebuild(F32 surf_h)
         const F32 fx = uu * (ERES - 1), fy = vv * (ERES - 1);
         const S32 i0 = llmin(ERES - 2, (S32)fx), j0 = llmin(ERES - 2, (S32)fy);
         const F32 tx = fx - i0, ty = fy - j0;
-        auto d = [&](S32 ii, S32 jj) { return expo[((size_t)jj * ERES + ii) * 2 + 1]; };
+        auto d = [&](S32 ii, S32 jj) { return expo[((size_t)jj * ERES + ii) * 4 + 1]; };   // <WolfViewer 2026-09-20/> RGBA stride
         out = (d(i0, j0) * (1 - tx) + d(i0 + 1, j0) * tx) * (1 - ty) + (d(i0, j0 + 1) * (1 - tx) + d(i0 + 1, j0 + 1) * tx) * ty;
         return true;
     };

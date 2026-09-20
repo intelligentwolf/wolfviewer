@@ -17,6 +17,7 @@
 
 #include "wolfweather.h"
 #include "llenvironment.h"   // <WolfViewer 2026-09-18/> auroraAmount(): the sun
+#include "llvovolume.h"      // <WolfViewer 2026-09-20/> sWolfRoofProbe
 
 #include <cmath>           // cosf / sinf for the wind direction
 
@@ -59,6 +60,9 @@ namespace
     constexpr F32 SNOW_SPEED_BY_LEVEL[5] = { 0.f, 1.1f, 1.6f, 2.1f, 3.0f };
     constexpr F32 RAIN_RATE_PER_S   = 700.f;   // (kept for reference; the tables above are used)
     constexpr F32 RAIN_BOX_XY_M     = 28.f;    // half-width of the box round the camera
+    // <WolfViewer 2026-09-20> how far above the camera a roof probe starts: any building or
+    // sky platform up to this height over your head is a roof. wolfstorm environment_manager.js same.
+    constexpr F32 ROOF_PROBE_ABOVE_M = 300.f;
     constexpr F32 RAIN_TOP_M        = 18.f;    // spawn height above the camera
     constexpr F32 RAIN_BOTTOM_M     = 6.f;
     constexpr F32 RAIN_SPEED_MPS    = 16.f;
@@ -139,13 +143,22 @@ void WolfWeatherPartSource::updateLanding(const LLVector3& cam, F32 half_xy, F32
             land_z = LLWorld::getInstance()->resolveLandHeightAgent(probe);
         }
         LLVector4a start, end, hit;
-        const LLVector3 s3(wx, wy, cam.mV[VZ] + top + 20.f), e3(wx, wy, cam.mV[VZ] - 60.f);
+        // <WolfViewer 2026-09-20> The ray starts ROOF_PROBE_ABOVE_M above the camera, not just
+        // above the weather box (top + 20 m, i.e. ~38 m): a mesh hall or a sculpted tower
+        // roof higher than that was never on the ray, the ray hit the floor instead, and it
+        // rained indoors (Paul: "snow is falling inside buildings and rain if they have mesh
+        // or sculpty rooves"). And LLVOVolume::sWolfRoofProbe lets the probe see prims whose
+        // click action is "Ignore", which the pick raycast otherwise skips.
+        const LLVector3 s3(wx, wy, cam.mV[VZ] + ROOF_PROBE_ABOVE_M), e3(wx, wy, cam.mV[VZ] - 60.f);
         start.load3(s3.mV);
         end.load3(e3.mV);
-        // pick_transparent false: glass roofs do not stop rain in this test either way, but a
-        // transparent prim is most often a window, and rain must not fall THROUGH a roof that
-        // happens to carry alpha. pick_unselectable true: builds are often locked / no-select.
-        if (gPipeline.lineSegmentIntersectInWorld(start, end, true, false, true, false, NULL, NULL, NULL, &hit, NULL, NULL, NULL))
+        // pick_transparent true: a transparent prim is most often a window, and rain must not
+        // fall THROUGH a roof that happens to carry alpha. pick_unselectable true: builds are
+        // often locked / no-select.
+        LLVOVolume::sWolfRoofProbe = true;
+        const bool roof_hit = gPipeline.lineSegmentIntersectInWorld(start, end, true, false, true, false, NULL, NULL, NULL, &hit, NULL, NULL, NULL);
+        LLVOVolume::sWolfRoofProbe = false;
+        if (roof_hit)
         {
             const F32 hz = hit.getF32ptr()[2];
             if (hz > land_z) land_z = hz;
@@ -628,10 +641,13 @@ void WolfWeather::updateShelter()
         const F32 ground = LLWorld::getInstance()->resolveLandHeightAgent(probe);
         F32 landing = -1e9f;
         LLVector4a start, end, hit;
-        const LLVector3 s3(wx, wy, cam.mV[VZ] + 80.f), e3(wx, wy, cam.mV[VZ] - 60.f);
+        const LLVector3 s3(wx, wy, cam.mV[VZ] + ROOF_PROBE_ABOVE_M), e3(wx, wy, cam.mV[VZ] - 60.f);   // <WolfViewer 2026-09-20/> same reach as updateLanding
         start.load3(s3.mV);
         end.load3(e3.mV);
-        if (gPipeline.lineSegmentIntersectInWorld(start, end, true, false, true, false, NULL, NULL, NULL, &hit, NULL, NULL, NULL))
+        LLVOVolume::sWolfRoofProbe = true;   // <WolfViewer 2026-09-20/>
+        const bool roof_hit = gPipeline.lineSegmentIntersectInWorld(start, end, true, false, true, false, NULL, NULL, NULL, &hit, NULL, NULL, NULL);
+        LLVOVolume::sWolfRoofProbe = false;
+        if (roof_hit)
         {
             landing = hit.getF32ptr()[2];
         }

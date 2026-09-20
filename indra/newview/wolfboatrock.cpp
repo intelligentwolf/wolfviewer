@@ -739,14 +739,22 @@ WolfBoatRock::Sample WolfBoatRock::sampleWave(const LLViewerObject* objectp, F32
         const F32 surf_zone = smoothstep01(0.62f, 0.95f, WolfWaterField::zoneAt(*field, rx, ry));   // surf cells only (waterV.glsl surfZone)
         if (surf_zone > 0.001f)
         {
-            const F32 dW = field->mExpoSX / 32.f, dH = field->mExpoSY / 32.f;
+            const F32 dW = 80.f, dH = 80.f;   // <WolfViewer 2026-09-20/> waterV.glsl: 80 m either side, not 1/32 of the span
+            // <WolfViewer 2026-09-20> travel = UP the distance-from-the-open-sea gradient (landward),
+            // the old distance-to-land rule only where no open sea is in reach (waterV.glsl same).
+            const F32 d_open = WolfWaterField::openDistanceAt(*field, rx, ry);
+            const F32 ox = WolfWaterField::openDistanceAt(*field, rx + dW, ry) - WolfWaterField::openDistanceAt(*field, rx - dW, ry);
+            const F32 oy = WolfWaterField::openDistanceAt(*field, rx, ry + dH) - WolfWaterField::openDistanceAt(*field, rx, ry - dH);
+            const F32 ol = sqrtf(ox * ox + oy * oy);
             const F32 dist = WolfWaterField::distanceAt(*field, rx, ry);
             const F32 gx = WolfWaterField::distanceAt(*field, rx + dW, ry) - WolfWaterField::distanceAt(*field, rx - dW, ry);
             const F32 gy = WolfWaterField::distanceAt(*field, rx, ry + dH) - WolfWaterField::distanceAt(*field, rx, ry - dH);
             const F32 gl = sqrtf(gx * gx + gy * gy);
+            const bool have_open = d_open < 3000.f && ol > 1.f;
             const bool have_land = dist < 3000.f && gl > 1.f;
             F32 dx, dy, coord;
-            if (have_land) { dx = -gx / gl; dy = -gy / gl; coord = -dist; }
+            if (have_open) { dx = ox / ol; dy = oy / ol; coord = d_open; }
+            else if (have_land) { dx = -gx / gl; dy = -gy / gl; coord = -dist; }
             else
             {
                 const F32 cx = field->mSizeX * 0.5f - rx + 0.001f, cy = field->mSizeY * 0.5f - ry;

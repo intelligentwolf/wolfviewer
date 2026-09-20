@@ -505,6 +505,7 @@ void LLDrawPoolWater::pushWaterPlanes(int pass)
     static LLStaticHashedString s_depth_ready("depthReady");
     static LLStaticHashedString s_region_origin("wolfRegionOrigin");
     static LLStaticHashedString s_depth_region_size("depthRegionSize");
+    static LLStaticHashedString s_depth_origin("depthOrigin");   // <WolfViewer 2026-09-20/> the field window's origin
     static LLStaticHashedString s_depth_water_level("depthWaterLevel");
     static LLStaticHashedString s_expo_origin("exposureOrigin");
     static LLStaticHashedString s_expo_size("exposureSize");
@@ -574,6 +575,7 @@ void LLDrawPoolWater::pushWaterPlanes(int pass)
                 const LLVector3 origin = rgn->getOriginAgent();
                 cur_shader->uniform2f(s_region_origin, origin.mV[VX], origin.mV[VY]);
                 cur_shader->uniform2f(s_depth_region_size, fld->mSizeX, fld->mSizeY);
+                cur_shader->uniform2f(s_depth_origin, fld->mX0, fld->mY0);   // <WolfViewer 2026-09-20/>
                 cur_shader->uniform1f(s_depth_water_level, fld->mWaterLevel);
                 cur_shader->uniform2f(s_expo_origin, fld->mExpoX0, fld->mExpoY0);
                 cur_shader->uniform2f(s_expo_size, fld->mExpoSX, fld->mExpoSY);

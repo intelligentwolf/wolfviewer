@@ -130,6 +130,9 @@ uniform float stormChaos;
 uniform float maxWaveHeight;
 uniform vec2 wolfRegionOrigin;
 uniform vec2 depthRegionSize;
+// <WolfViewer 2026-09-20> region-space origin of the depth field: (0,0) for a whole-region
+// bake, the camera window's corner on regions wider than 2048 m (wolfwaterfield.cpp fieldWindow).
+uniform vec2 depthOrigin;
 uniform float depthWaterLevel;
 uniform vec2 exposureOrigin;
 uniform vec2 exposureSize;
@@ -258,7 +261,10 @@ vec3 gerstnerWave(vec2 pos, float wavelength, float amp, vec2 dir, float steepne
     float k = 6.28318 / wavelength;
     float c = sqrt(9.8 / k);
     vec2 d = normalize(dir);
-    float f = k * (dot(d, pos) - c * time * waveSpeed);
+    // <WolfViewer 2026-09-20> wrap the phase before sin/cos: 50,000 m from the region origin it
+    // is ~10^5 rad, beyond where GPU sin() precision is specified (Intel and the D3D path lose
+    // it first). mod() in float32 keeps ~1 mrad; identical below a few hundred metres.
+    float f = mod(k * (dot(d, pos) - c * time * waveSpeed), 6.2831853);
     float Q = steepness / (k * amp * numWaves + 0.001);
     return vec3(Q * amp * d.x * cos(f),
                 Q * amp * d.y * cos(f),
@@ -273,7 +279,10 @@ vec2 gerstnerSlope(vec2 pos, float wavelength, float amp, vec2 dir)
     float k = 6.28318 / wavelength;
     float c = sqrt(9.8 / k);
     vec2 d = normalize(dir);
-    float f = k * (dot(d, pos) - c * time * waveSpeed);
+    // <WolfViewer 2026-09-20> wrap the phase before sin/cos: 50,000 m from the region origin it
+    // is ~10^5 rad, beyond where GPU sin() precision is specified (Intel and the D3D path lose
+    // it first). mod() in float32 keeps ~1 mrad; identical below a few hundred metres.
+    float f = mod(k * (dot(d, pos) - c * time * waveSpeed), 6.2831853);
     return d * (amp * k * cos(f));
 }
 // </FS:WolfViewer> -------------------------------------------------------------------
@@ -498,7 +507,7 @@ void main()
     // set, a river bank (no fetch anywhere) drops to 0.35x.
     if (depthReady > 0.5 && shoreWavesEnabled > 0.5 && boundedWaterDepth <= 0.0)
     {
-        vec2 sduv = regionXY / depthRegionSize;
+        vec2 sduv = (regionXY - depthOrigin) / depthRegionSize;
         if (sduv.x >= 0.0 && sduv.x <= 1.0 && sduv.y >= 0.0 && sduv.y <= 1.0)
         {
             vec2 ef = smoothstep(vec2(0.0), vec2(0.04), sduv)
@@ -559,7 +568,7 @@ void main()
             vec2 grad = vec2(dxp - dxm, dyp - dym);
             float gl = length(grad);
             bool haveLand = dist < 3000.0 && gl > 1.0;
-            vec2 dir = haveLand ? -grad / gl : normalize(vec2(depthRegionSize.x * 0.5, depthRegionSize.y * 0.5) - regionXY + vec2(0.001, 0.0));
+            vec2 dir = haveLand ? -grad / gl : normalize(depthOrigin + depthRegionSize * 0.5 - regionXY + vec2(0.001, 0.0));
             float coord = haveLand ? -dist : dot(regionXY, dir);
             float h = 30.0;
             if (depthReady > 0.5)
@@ -567,7 +576,7 @@ void main()
                 // Past the region border the depth CONTINUES from the border texel and eases
                 // to deep water over 64 m (the void planes share these fields now): a hard
                 // switch to 30 m at the edge changed the shoaling and tore the crest.
-                vec2 sduv = regionXY / depthRegionSize;
+                vec2 sduv = (regionXY - depthOrigin) / depthRegionSize;
                 vec2 over = max(max(-sduv, sduv - 1.0), 0.0) * depthRegionSize;
                 float outside = smoothstep(0.0, 64.0, max(over.x, over.y));
                 vec4 dt = WOLF_TEX_WOLF_DEPTH_FIELD( clamp(sduv, 0.0, 1.0));

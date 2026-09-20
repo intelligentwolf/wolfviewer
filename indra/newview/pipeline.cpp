@@ -8594,13 +8594,14 @@ bool LLPipeline::wolfPhotoFilter(LLRenderTarget* src, LLRenderTarget* dst)
     static LLCachedControl<F32> filter_strength(gSavedSettings, "WolfViewerPhotoFilterStrength", 1.f);
     const S32 mode = filter_mode;
     // 1..8 are the looks wolfPhotoGrade() knows; anything else in the setting means off.
-    if (mode < 1 || mode > 8 || !gWolfPhotoFilterProgram.isComplete())
+    if (mode < 1 || mode > 12 || !gWolfPhotoFilterProgram.isComplete())   // [PAINTERS 2026-09-20/] 9..12 paint
     {
         return false;
     }
     LL_PROFILE_GPU_ZONE("WolfPhotoFilter");
     static LLStaticHashedString s_uMode("uMode");
     static LLStaticHashedString s_uStrength("uStrength");
+    static LLStaticHashedString s_uTexel("uTexel");   // [PAINTERS 2026-09-20/]
 
     LLGLSLShader* shader = &gWolfPhotoFilterProgram;
     shader->bind();
@@ -8618,6 +8619,7 @@ bool LLPipeline::wolfPhotoFilter(LLRenderTarget* src, LLRenderTarget* dst)
     src->bindTexture(0, channel, LLTexUnit::TFO_POINT);
     shader->uniform1i(s_uMode, mode);
     shader->uniform1f(s_uStrength, llclamp((F32)filter_strength, 0.f, 1.f));
+    shader->uniform2f(s_uTexel, 1.f / (F32)llmax(src->getWidth(), 1), 1.f / (F32)llmax(src->getHeight(), 1));   // [PAINTERS 2026-09-20/]
 
     mScreenTriangleVB->setBuffer();
     mScreenTriangleVB->drawArrays(LLRender::TRIANGLES, 0, 3);

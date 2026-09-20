@@ -107,7 +107,7 @@ bool WolfSurfCurl::rebuild(F32 surf_h)
             const F32 f01 = f[(size_t)(j + 1) * RES + i], f11 = f[(size_t)(j + 1) * RES + i + 1];
             const S32 c = (f00 > 0 ? 1 : 0) | (f10 > 0 ? 2 : 0) | (f11 > 0 ? 4 : 0) | (f01 > 0 ? 8 : 0);
             if (c == 0 || c == 15) continue;
-            const F32 x0 = i * cellX, y0 = j * cellY;
+            const F32 x0 = fld->mX0 + i * cellX, y0 = fld->mY0 + j * cellY;   // <WolfViewer 2026-09-20/> field origin
             F32 px[4], py[4];
             S32 n = 0;
             if ((c & 1) != ((c >> 1) & 1)) { px[n] = lerp_zero(x0, x0 + cellX, f00, f10); py[n] = y0; ++n; }
@@ -163,8 +163,8 @@ bool WolfSurfCurl::rebuild(F32 surf_h)
     // Samplers. Direction of travel = up the smoothed-height gradient (toward rising terrain).
     auto grad_at = [&](F32 x, F32 y, F32& gx, F32& gy) -> bool
     {
-        const S32 ti = llclamp((S32)std::lround(x / cellX), 1, RES - 2);
-        const S32 tj = llclamp((S32)std::lround(y / cellY), 1, RES - 2);
+        const S32 ti = llclamp((S32)std::lround((x - fld->mX0) / cellX), 1, RES - 2);   // <WolfViewer 2026-09-20/>
+        const S32 tj = llclamp((S32)std::lround((y - fld->mY0) / cellY), 1, RES - 2);
         auto a = [&](S32 ii, S32 jj) { return data[((size_t)jj * RES + ii) * 4 + 3]; };
         gx = (a(ti + 1, tj) - a(ti - 1, tj)) / (2.f * cellX);
         gy = (a(ti, tj + 1) - a(ti, tj - 1)) / (2.f * cellY);

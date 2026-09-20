@@ -126,6 +126,14 @@ public:
     bool onGrid() const { return current() != nullptr; }
     /** Zones for a record: stored+enabled, else the automatic default. */
     std::string zonesFor(const Region& r) const;
+    /**
+     * <WolfViewer 2026-09-20> What the EDITOR starts from: the stored cells whenever a
+     * layout is stored, even while it is switched off ("Reset to automatic" keeps the painted
+     * cells and only unticks the box, so ticking it again must bring them back — the painter
+     * used to start from zonesFor(), the automatic layout, and the painted cells were lost the
+     * moment anyone saved). The WATER keeps zonesFor(): off = automatic. wave_zones.js same.
+     */
+    std::string editorZonesFor(const Region& r) const;
     /** The automatic layout, from the exposure field of the agent region's bake. */
     std::string defaultZones(const Region& r) const;
 
@@ -218,6 +226,8 @@ public:
     void setPaintCallback(const std::function<void()>& cb) { mOnPaint = cb; }
     /** Called when the brush hit a locked cell (once per stroke). */
     void setRefusedCallback(const std::function<void()>& cb) { mOnRefused = cb; }
+    /** <WolfViewer 2026-09-20/> asked before a cell is painted; false refuses the stroke (WolfPanelLandWaves::ensureEnabled) */
+    void setBeforePaintCallback(const std::function<bool()>& cb) { mBeforePaint = cb; }
 
     void draw() override;
     bool handleMouseDown(S32 x, S32 y, MASK mask) override;
@@ -244,6 +254,7 @@ private:
     bool mRefusedThisStroke = false;
     bool mDirty = false;
     std::function<void()> mOnPaint, mOnRefused;
+    std::function<bool()> mBeforePaint;   // <WolfViewer 2026-09-20/>
 };
 
 /** Region / Estate > Waves. Source: llfloaterregioninfo.cpp programmatic region-panel shape. */
@@ -276,6 +287,14 @@ private:
     void setStatus(const std::string& msg, bool error);
     bool targetCurrent() const;
     void invalidateTarget();
+    /**
+     * <WolfViewer 2026-09-20> Painting means "use my layout". Wolf Nation's record was saved
+     * with the box off (Reset to automatic + Save) and every later brush stroke was accepted,
+     * previewed nothing and saved as enabled=0 — Paul: "I draw on the water and it doesn't
+     * work". A region holder painting now ticks the box; a parcel owner, who cannot, is told
+     * why. Returns whether painting may go ahead. land_waves_tab.js _wavesEnsureEnabled same.
+     */
+    bool ensureEnabled();
 
     WolfWavePainter* mPainter = nullptr;
     LLPointer<WolfToolWavePaint> mWorldTool;

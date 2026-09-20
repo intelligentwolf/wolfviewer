@@ -1404,147 +1404,19 @@
         </menu_item_check>
         <menu_item_separator/>-->
 
-      <!-- WolfViewer 2026-09-18: World > Photo Effects (pipeline.cpp wolfPhotoFilter). A colour
-           grade over the world view, for you only; every grid. Same list, same order, as
-           WolfStorm's World > Photo Effects. The parameter is the WolfViewerPhotoFilter value. -->
-      <menu
-         create_jump_keys="true"
-         label="Photo Effects"
-         name="WolfPhotoEffects"
-         tear_off="true">
-        <menu_item_check
-         label="Off"
-         name="WolfPhotoFilter0">
-          <menu_item_check.on_check
-           function="WolfPhoto.IsFilter"
-           parameter="0" />
-          <menu_item_check.on_click
-           function="WolfPhoto.SetFilter"
-           parameter="0" />
-        </menu_item_check>
-        <menu_item_separator />
-        <menu_item_check
-         label="Sepia"
-         name="WolfPhotoFilter1">
-          <menu_item_check.on_check
-           function="WolfPhoto.IsFilter"
-           parameter="1" />
-          <menu_item_check.on_click
-           function="WolfPhoto.SetFilter"
-           parameter="1" />
-        </menu_item_check>
-        <menu_item_check
-         label="Black &amp; White"
-         name="WolfPhotoFilter2">
-          <menu_item_check.on_check
-           function="WolfPhoto.IsFilter"
-           parameter="2" />
-          <menu_item_check.on_click
-           function="WolfPhoto.SetFilter"
-           parameter="2" />
-        </menu_item_check>
-        <menu_item_check
-         label="Noir"
-         name="WolfPhotoFilter3">
-          <menu_item_check.on_check
-           function="WolfPhoto.IsFilter"
-           parameter="3" />
-          <menu_item_check.on_click
-           function="WolfPhoto.SetFilter"
-           parameter="3" />
-        </menu_item_check>
-        <menu_item_check
-         label="Vintage"
-         name="WolfPhotoFilter4">
-          <menu_item_check.on_check
-           function="WolfPhoto.IsFilter"
-           parameter="4" />
-          <menu_item_check.on_click
-           function="WolfPhoto.SetFilter"
-           parameter="4" />
-        </menu_item_check>
-        <menu_item_check
-         label="Warm"
-         name="WolfPhotoFilter5">
-          <menu_item_check.on_check
-           function="WolfPhoto.IsFilter"
-           parameter="5" />
-          <menu_item_check.on_click
-           function="WolfPhoto.SetFilter"
-           parameter="5" />
-        </menu_item_check>
-        <menu_item_check
-         label="Cool"
-         name="WolfPhotoFilter6">
-          <menu_item_check.on_check
-           function="WolfPhoto.IsFilter"
-           parameter="6" />
-          <menu_item_check.on_click
-           function="WolfPhoto.SetFilter"
-           parameter="6" />
-        </menu_item_check>
-        <menu_item_check
-         label="Faded"
-         name="WolfPhotoFilter7">
-          <menu_item_check.on_check
-           function="WolfPhoto.IsFilter"
-           parameter="7" />
-          <menu_item_check.on_click
-           function="WolfPhoto.SetFilter"
-           parameter="7" />
-        </menu_item_check>
-        <menu_item_check
-         label="Vivid"
-         name="WolfPhotoFilter8">
-          <menu_item_check.on_check
-           function="WolfPhoto.IsFilter"
-           parameter="8" />
-          <menu_item_check.on_click
-           function="WolfPhoto.SetFilter"
-           parameter="8" />
-        </menu_item_check>
-        <menu_item_separator />
-        <menu_item_check
-         label="Strength: 25%"
-         name="WolfPhotoStrength25">
-          <menu_item_check.on_check
-           function="WolfPhoto.IsStrength"
-           parameter="25" />
-          <menu_item_check.on_click
-           function="WolfPhoto.SetStrength"
-           parameter="25" />
-        </menu_item_check>
-        <menu_item_check
-         label="Strength: 50%"
-         name="WolfPhotoStrength50">
-          <menu_item_check.on_check
-           function="WolfPhoto.IsStrength"
-           parameter="50" />
-          <menu_item_check.on_click
-           function="WolfPhoto.SetStrength"
-           parameter="50" />
-        </menu_item_check>
-        <menu_item_check
-         label="Strength: 75%"
-         name="WolfPhotoStrength75">
-          <menu_item_check.on_check
-           function="WolfPhoto.IsStrength"
-           parameter="75" />
-          <menu_item_check.on_click
-           function="WolfPhoto.SetStrength"
-           parameter="75" />
-        </menu_item_check>
-        <menu_item_check
-         label="Strength: 100%"
-         name="WolfPhotoStrength100">
-          <menu_item_check.on_check
-           function="WolfPhoto.IsStrength"
-           parameter="100" />
-          <menu_item_check.on_click
-           function="WolfPhoto.SetStrength"
-           parameter="100" />
-        </menu_item_check>
-      </menu>
+      <!-- WolfViewer 2026-09-18 / PAINTERS 2026-09-20: World > Photo Effects… opens the floater
+           (floater_wolf_photo_effects.xml: a tile per style, strength slider). The WolfPhoto.*
+           listeners in llviewermenu.cpp stay for keybindings; the submenu they served is gone. -->
+      <menu_item_check
+       label="Photo Effects..."
+       name="WolfPhotoEffects">
+        <menu_item_check.on_check
+         function="Floater.Visible"
+         parameter="wolf_photo_effects" />
+        <menu_item_check.on_click
+         function="Floater.Toggle"
+         parameter="wolf_photo_effects" />
+      </menu_item_check>
 
       <!-- WolfViewer 2026-09-10: World > Weather (wolfweather.cpp). Rain and snow the user
            turns on and off; a parcel whose prims say "wolfrain" / "wolfsnow" overrides it. -->

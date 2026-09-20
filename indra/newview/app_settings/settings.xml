@@ -187,17 +187,6 @@
     <key>Value</key>
     <string>xAcXYt8SBius3Lor4wHle8L96PDHYlAZuWYXIYQUdW4b09mjhQUAwiqmWp5UNYXLpq5GSUtuKHuDYLwaueACPkew93l6MRY8jfBKSH09kv0zyGglpky07X7X7Sp4Rzin</string>
   </map>
-  <key>FSGridBuilderURL</key>
-  <map>
-    <key>Comment</key>
-    <string>Fetch an html page of grids from this URL.</string>
-    <key>Persist</key>
-    <integer>1</integer>
-    <key>Type</key>
-    <string>String</string>
-    <key>Value</key>
-    <string>https://www.wolf-grid.com/</string>
-  </map>
   <key>LastConnectedGrid</key>
   <map>
     <key>Comment</key>
@@ -19795,7 +19784,7 @@ Change of this parameter will affect the layout of buttons in notification toast
 		<key>WolfViewerPhotoFilter</key>
 		<map>
 			<key>Comment</key>
-			<string>World &gt; Photo Effects: a colour grade over the world view, for you only. 0 off, 1 Sepia, 2 Black and White, 3 Noir, 4 Vintage, 5 Warm, 6 Cool, 7 Faded, 8 Vivid.</string>
+			<string>World &gt; Photo Effects: a colour grade over the world view, for you only. 0 off, 1 Sepia, 2 Black and White, 3 Noir, 4 Vintage, 5 Warm, 6 Cool, 7 Faded, 8 Vivid, 9 Picasso, 10 Van Gogh, 11 Monet, 12 Seurat.</string>
 			<key>Persist</key>
 			<integer>1</integer>
 			<key>Type</key>

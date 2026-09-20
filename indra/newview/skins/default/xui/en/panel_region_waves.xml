@@ -10,6 +10,8 @@
   <panel.string name="str_stored">saved layout</panel.string>
   <panel.string name="str_automatic">automatic layout; nothing saved yet</panel.string>
   <panel.string name="str_locked_cell">That cell is on land you do not own — it stays as it is.</panel.string>
+  <panel.string name="str_layout_off_parcel">This region's painted layout is switched off, and only the region holder can turn it on (Use this layout).</panel.string>
+  <panel.string name="str_layout_on_for_paint">Use this layout switched on so your painting shows — Save to keep it.</panel.string>
   <panel.string name="str_saving">Saving…</panel.string>
   <panel.string name="str_saved">Saved — everyone in the region now sees this layout.</panel.string>
   <panel.string name="str_save_failed">Could not save:</panel.string>

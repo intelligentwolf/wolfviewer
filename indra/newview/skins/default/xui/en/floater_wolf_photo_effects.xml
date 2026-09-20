@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [PAINTERS 2026-09-20] World > Photo Effects… (wolffloaterphotoeffects.cpp). One image tile
+     per style (textures.xml WolfPhoto_*, textures/wolf_photo/ — the real post shader run over a
+     harbour scene), Grades then Painters, and a strength slider. Same layout and tiles as
+     WolfStorm floater_photo_effects.js. tile_N is WolfViewerPhotoFilter value N. -->
+<floater
+ can_close="true"
+ can_minimize="true"
+ can_resize="false"
+ height="500"
+ layout="topleft"
+ name="wolf_photo_effects"
+ save_rect="true"
+ single_instance="true"
+ title="Photo Effects"
+ width="528">
+  <text follows="left|top" layout="topleft" left="12" top="12" width="300" height="14" name="grades_title" font="SansSerifSmall">Grades</text>
+  <button follows="left|top" layout="topleft" left="12" top="30" width="120" height="67" name="tile_0" is_toggle="true" scale_image="true"
+          image_unselected="WolfPhoto_off" image_selected="WolfPhoto_off_Sel" image_hover_unselected="WolfPhoto_off" image_hover_selected="WolfPhoto_off_Sel"
+          image_pressed="WolfPhoto_off_Sel" image_pressed_selected="WolfPhoto_off_Sel" label="" tool_tip="Off" />
+  <text follows="left|top" layout="topleft" left="12" top="99" width="120" height="14" halign="center" font="SansSerifSmall" name="tile_0_label">Off</text>
+  <button follows="left|top" layout="topleft" left="140" top="30" width="120" height="67" name="tile_1" is_toggle="true" scale_image="true"
+          image_unselected="WolfPhoto_sepia" image_selected="WolfPhoto_sepia_Sel" image_hover_unselected="WolfPhoto_sepia" image_hover_selected="WolfPhoto_sepia_Sel"
+          image_pressed="WolfPhoto_sepia_Sel" image_pressed_selected="WolfPhoto_sepia_Sel" label="" tool_tip="Sepia" />
+  <text follows="left|top" layout="topleft" left="140" top="99" width="120" height="14" halign="center" font="SansSerifSmall" name="tile_1_label">Sepia</text>
+  <button follows="left|top" layout="topleft" left="268" top="30" width="120" height="67" name="tile_2" is_toggle="true" scale_image="true"
+          image_unselected="WolfPhoto_bw" image_selected="WolfPhoto_bw_Sel" image_hover_unselected="WolfPhoto_bw" image_hover_selected="WolfPhoto_bw_Sel"
+          image_pressed="WolfPhoto_bw_Sel" image_pressed_selected="WolfPhoto_bw_Sel" label="" tool_tip="Black &amp; White" />
+  <text follows="left|top" layout="topleft" left="268" top="99" width="120" height="14" halign="center" font="SansSerifSmall" name="tile_2_label">Black &amp; White</text>
+  <button follows="left|top" layout="topleft" left="396" top="30" width="120" height="67" name="tile_3" is_toggle="true" scale_image="true"
+          image_unselected="WolfPhoto_noir" image_selected="WolfPhoto_noir_Sel" image_hover_unselected="WolfPhoto_noir" image_hover_selected="WolfPhoto_noir_Sel"
+          image_pressed="WolfPhoto_noir_Sel" image_pressed_selected="WolfPhoto_noir_Sel" label="" tool_tip="Noir" />
+  <text follows="left|top" layout="topleft" left="396" top="99" width="120" height="14" halign="center" font="SansSerifSmall" name="tile_3_label">Noir</text>
+  <button follows="left|top" layout="topleft" left="12" top="121" width="120" height="67" name="tile_4" is_toggle="true" scale_image="true"
+          image_unselected="WolfPhoto_vintage" image_selected="WolfPhoto_vintage_Sel" image_hover_unselected="WolfPhoto_vintage" image_hover_selected="WolfPhoto_vintage_Sel"
+          image_pressed="WolfPhoto_vintage_Sel" image_pressed_selected="WolfPhoto_vintage_Sel" label="" tool_tip="Vintage" />
+  <text follows="left|top" layout="topleft" left="12" top="190" width="120" height="14" halign="center" font="SansSerifSmall" name="tile_4_label">Vintage</text>
+  <button follows="left|top" layout="topleft" left="140" top="121" width="120" height="67" name="tile_5" is_toggle="true" scale_image="true"
+          image_unselected="WolfPhoto_warm" image_selected="WolfPhoto_warm_Sel" image_hover_unselected="WolfPhoto_warm" image_hover_selected="WolfPhoto_warm_Sel"
+          image_pressed="WolfPhoto_warm_Sel" image_pressed_selected="WolfPhoto_warm_Sel" label="" tool_tip="Warm" />
+  <text follows="left|top" layout="topleft" left="140" top="190" width="120" height="14" halign="center" font="SansSerifSmall" name="tile_5_label">Warm</text>
+  <button follows="left|top" layout="topleft" left="268" top="121" width="120" height="67" name="tile_6" is_toggle="true" scale_image="true"
+          image_unselected="WolfPhoto_cool" image_selected="WolfPhoto_cool_Sel" image_hover_unselected="WolfPhoto_cool" image_hover_selected="WolfPhoto_cool_Sel"
+          image_pressed="WolfPhoto_cool_Sel" image_pressed_selected="WolfPhoto_cool_Sel" label="" tool_tip="Cool" />
+  <text follows="left|top" layout="topleft" left="268" top="190" width="120" height="14" halign="center" font="SansSerifSmall" name="tile_6_label">Cool</text>
+  <button follows="left|top" layout="topleft" left="396" top="121" width="120" height="67" name="tile_7" is_toggle="true" scale_image="true"
+          image_unselected="WolfPhoto_faded" image_selected="WolfPhoto_faded_Sel" image_hover_unselected="WolfPhoto_faded" image_hover_selected="WolfPhoto_faded_Sel"
+          image_pressed="WolfPhoto_faded_Sel" image_pressed_selected="WolfPhoto_faded_Sel" label="" tool_tip="Faded" />
+  <text follows="left|top" layout="topleft" left="396" top="190" width="120" height="14" halign="center" font="SansSerifSmall" name="tile_7_label">Faded</text>
+  <button follows="left|top" layout="topleft" left="12" top="212" width="120" height="67" name="tile_8" is_toggle="true" scale_image="true"
+          image_unselected="WolfPhoto_vivid" image_selected="WolfPhoto_vivid_Sel" image_hover_unselected="WolfPhoto_vivid" image_hover_selected="WolfPhoto_vivid_Sel"
+          image_pressed="WolfPhoto_vivid_Sel" image_pressed_selected="WolfPhoto_vivid_Sel" label="" tool_tip="Vivid" />
+  <text follows="left|top" layout="topleft" left="12" top="281" width="120" height="14" halign="center" font="SansSerifSmall" name="tile_8_label">Vivid</text>
+  <text follows="left|top" layout="topleft" left="12" top="297" width="300" height="14" name="painters_title" font="SansSerifSmall">Painters</text>
+  <button follows="left|top" layout="topleft" left="12" top="315" width="120" height="67" name="tile_9" is_toggle="true" scale_image="true"
+          image_unselected="WolfPhoto_picasso" image_selected="WolfPhoto_picasso_Sel" image_hover_unselected="WolfPhoto_picasso" image_hover_selected="WolfPhoto_picasso_Sel"
+          image_pressed="WolfPhoto_picasso_Sel" image_pressed_selected="WolfPhoto_picasso_Sel" label="" tool_tip="Picasso" />
+  <text follows="left|top" layout="topleft" left="12" top="384" width="120" height="14" halign="center" font="SansSerifSmall" name="tile_9_label">Picasso</text>
+  <button follows="left|top" layout="topleft" left="140" top="315" width="120" height="67" name="tile_10" is_toggle="true" scale_image="true"
+          image_unselected="WolfPhoto_vangogh" image_selected="WolfPhoto_vangogh_Sel" image_hover_unselected="WolfPhoto_vangogh" image_hover_selected="WolfPhoto_vangogh_Sel"
+          image_pressed="WolfPhoto_vangogh_Sel" image_pressed_selected="WolfPhoto_vangogh_Sel" label="" tool_tip="Van Gogh" />
+  <text follows="left|top" layout="topleft" left="140" top="384" width="120" height="14" halign="center" font="SansSerifSmall" name="tile_10_label">Van Gogh</text>
+  <button follows="left|top" layout="topleft" left="268" top="315" width="120" height="67" name="tile_11" is_toggle="true" scale_image="true"
+          image_unselected="WolfPhoto_monet" image_selected="WolfPhoto_monet_Sel" image_hover_unselected="WolfPhoto_monet" image_hover_selected="WolfPhoto_monet_Sel"
+          image_pressed="WolfPhoto_monet_Sel" image_pressed_selected="WolfPhoto_monet_Sel" label="" tool_tip="Monet" />
+  <text follows="left|top" layout="topleft" left="268" top="384" width="120" height="14" halign="center" font="SansSerifSmall" name="tile_11_label">Monet</text>
+  <button follows="left|top" layout="topleft" left="396" top="315" width="120" height="67" name="tile_12" is_toggle="true" scale_image="true"
+          image_unselected="WolfPhoto_seurat" image_selected="WolfPhoto_seurat_Sel" image_hover_unselected="WolfPhoto_seurat" image_hover_selected="WolfPhoto_seurat_Sel"
+          image_pressed="WolfPhoto_seurat_Sel" image_pressed_selected="WolfPhoto_seurat_Sel" label="" tool_tip="Seurat" />
+  <text follows="left|top" layout="topleft" left="396" top="384" width="120" height="14" halign="center" font="SansSerifSmall" name="tile_12_label">Seurat</text>
+  <text follows="left|top" layout="topleft" left="12" top="420" width="300" height="14" name="strength_label" font="SansSerifSmall">Strength (%)</text>
+  <slider follows="left|top" layout="topleft" left="12" top="436" width="504" height="16" name="strength" min_val="0" max_val="100" increment="5" initial_value="100" decimal_digits="0" show_text="true" />
+  <text follows="left|top" layout="topleft" left="12" top="460" width="504" height="28" word_wrap="true" name="status" font="SansSerifSmall">Applies to your own view only. Snapshots include it.</text>
+</floater>

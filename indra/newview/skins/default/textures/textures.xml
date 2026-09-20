@@ -181,6 +181,33 @@ with the same filename but different name
   <texture name="Command_Snapshot_Icon"     file_name="toolbar_icons/snapshot.png"     preload="true" />
   <texture name="Command_Speak_Icon"        file_name="toolbar_icons/speak.png"        preload="true" />
   <!-- WolfViewer 2026-09-06: Wolf Territories-only commands -->
+  <!-- [PAINTERS 2026-09-20] Photo Effects floater tiles (floater_wolf_photo_effects.xml) -->
+  <texture name="WolfPhoto_off" file_name="wolf_photo/off.png" preload="false" />
+  <texture name="WolfPhoto_off_Sel" file_name="wolf_photo/off_sel.png" preload="false" />
+  <texture name="WolfPhoto_sepia" file_name="wolf_photo/sepia.png" preload="false" />
+  <texture name="WolfPhoto_sepia_Sel" file_name="wolf_photo/sepia_sel.png" preload="false" />
+  <texture name="WolfPhoto_bw" file_name="wolf_photo/bw.png" preload="false" />
+  <texture name="WolfPhoto_bw_Sel" file_name="wolf_photo/bw_sel.png" preload="false" />
+  <texture name="WolfPhoto_noir" file_name="wolf_photo/noir.png" preload="false" />
+  <texture name="WolfPhoto_noir_Sel" file_name="wolf_photo/noir_sel.png" preload="false" />
+  <texture name="WolfPhoto_vintage" file_name="wolf_photo/vintage.png" preload="false" />
+  <texture name="WolfPhoto_vintage_Sel" file_name="wolf_photo/vintage_sel.png" preload="false" />
+  <texture name="WolfPhoto_warm" file_name="wolf_photo/warm.png" preload="false" />
+  <texture name="WolfPhoto_warm_Sel" file_name="wolf_photo/warm_sel.png" preload="false" />
+  <texture name="WolfPhoto_cool" file_name="wolf_photo/cool.png" preload="false" />
+  <texture name="WolfPhoto_cool_Sel" file_name="wolf_photo/cool_sel.png" preload="false" />
+  <texture name="WolfPhoto_faded" file_name="wolf_photo/faded.png" preload="false" />
+  <texture name="WolfPhoto_faded_Sel" file_name="wolf_photo/faded_sel.png" preload="false" />
+  <texture name="WolfPhoto_vivid" file_name="wolf_photo/vivid.png" preload="false" />
+  <texture name="WolfPhoto_vivid_Sel" file_name="wolf_photo/vivid_sel.png" preload="false" />
+  <texture name="WolfPhoto_picasso" file_name="wolf_photo/picasso.png" preload="false" />
+  <texture name="WolfPhoto_picasso_Sel" file_name="wolf_photo/picasso_sel.png" preload="false" />
+  <texture name="WolfPhoto_vangogh" file_name="wolf_photo/vangogh.png" preload="false" />
+  <texture name="WolfPhoto_vangogh_Sel" file_name="wolf_photo/vangogh_sel.png" preload="false" />
+  <texture name="WolfPhoto_monet" file_name="wolf_photo/monet.png" preload="false" />
+  <texture name="WolfPhoto_monet_Sel" file_name="wolf_photo/monet_sel.png" preload="false" />
+  <texture name="WolfPhoto_seurat" file_name="wolf_photo/seurat.png" preload="false" />
+  <texture name="WolfPhoto_seurat_Sel" file_name="wolf_photo/seurat_sel.png" preload="false" />
   <texture name="Command_WolfDictate_Icon"     file_name="toolbar_icons/wolf_dictate.png"     preload="true" />
   <texture name="Command_WolfRain_Icon"        file_name="toolbar_icons/wolf_rain.png"        preload="true" />
   <texture name="Command_WolfSnow_Icon"        file_name="toolbar_icons/wolf_snow.png"        preload="true" />

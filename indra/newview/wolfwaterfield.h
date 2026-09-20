@@ -45,8 +45,13 @@ class WolfWaterField : public LLSingleton<WolfWaterField>
 public:
     struct Field
     {
-        U32 mDepthTex = 0;      // GL texture, RES x RES RGBA32F, region space 0..width
+        U32 mDepthTex = 0;      // GL texture, RES x RES RGBA32F over the FIELD (mX0, mY0, mSizeX, mSizeY)
         U32 mExpoTex = 0;       // GL texture, ERES x ERES R32F over the 3x span
+        // <WolfViewer 2026-09-20> The depth field's region-space origin and size: (0, 0) and
+        // the region up to WINDOW_M an edge, else a WINDOW_M window that follows the camera
+        // (fieldWindow). Shader uniform depthOrigin / depthRegionSize.
+        F32 mX0 = 0.f;
+        F32 mY0 = 0.f;
         F32 mSizeX = 256.f;
         F32 mSizeY = 256.f;
         F32 mWaterLevel = 20.f;
@@ -80,7 +85,21 @@ public:
     static constexpr F32 CHECK_INTERVAL_SECS = 2.f;
     static constexpr F32 REBAKE_SECS = 20.f;     // neighbours stream in over a minute
     static constexpr F32 MIN_REBAKE_SECS = 8.f;  // [2026-09-10] never re-shape the sea faster than this per region
-    static constexpr F32 MAX_FIELD_REGION_M = 4096.f;   // [2026-09-10] no shore field above this: RES texels would be > 16 m
+    // <WolfViewer 2026-09-20> Fields bake over the whole region up to this many metres an
+    // edge (8 m depth texels), else over a camera-following window this wide. Replaces the
+    // 09-10 rule "no field above 4096 m" (RES texels would be > 16 m): Wolf Nation (51,200 m)
+    // had no depth, no exposure and NO ZONE FIELD at all, so every stretch of water there
+    // carried full open-sea swell and painted zones were ignored — Paul: "the ocean and
+    // rivers don't look right on the 200x200 ... I draw on the water and it doesn't work".
+    // WolfStorm terrain_manager.js WATER_FIELD_WINDOW_M same.
+    static constexpr F32 WINDOW_M = 2048.f;
+    /**
+     * Where a region's field should sit right now: the whole region below WINDOW_M, else a
+     * WINDOW_M window snapped to an eighth of itself and held inside the region, centred on
+     * the camera — except that an existing field keeps its window while the camera is still
+     * in the inner half of it, so the sea never re-shapes itself under a boat for a step.
+     */
+    static void fieldWindow(const LLViewerRegion* regionp, const Field* current, F32& x0, F32& y0, F32& sx, F32& sy);
 
     /** Every frame from LLAppViewer::idle(); bakes at most one region per check. */
     void idle();
@@ -110,7 +129,6 @@ public:
     static F32 distanceAt(const Field& f, F32 rx, F32 ry);
     /** [WAVES 2026-09-07] Bake every field again at the next check (a layout arrived / was saved / is previewed). */
     void invalidate();
-    std::set<U64> mNoFieldLogged;   // [2026-09-10] regions told once that they get no field
 
 private:
     void bake(LLViewerRegion* regionp, Field& f);

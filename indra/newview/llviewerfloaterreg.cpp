@@ -106,6 +106,7 @@
 #include "llfloatermemleak.h"
 #include "llfloatermodelpreview.h"
 #include "wolffloatermeshupload.h"
+#include "wolffloaterphotoeffects.h"   // [PAINTERS 2026-09-20/]
 #include "wolflslcomplete.h" // <FS:Wolf/>
 #include "llfloatermyscripts.h"
 #include "llfloatermyenvironment.h"
@@ -644,6 +645,7 @@ void LLViewerFloaterReg::registerFloaters()
     // "upload" floater opened from here would have gone the same way. An empty group name makes
     // the floater its own group (LLFloaterReg::add), so lookups by any other name never see it.
     LLFloaterReg::add("wolf_mesh_upload", "floater_wolf_mesh_upload.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterMeshUpload>);
+    LLFloaterReg::add("wolf_photo_effects", "floater_wolf_photo_effects.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterPhotoEffects>);   // [PAINTERS 2026-09-20/]
     // [FLOATER SPLIT 2026-09-11] Ground painting and AI model creation, each its own window
     // instead of a tab in the build floater. No custom floater class: the panel inside does all
     // the work, so the generic host is enough (the pattern at :581).

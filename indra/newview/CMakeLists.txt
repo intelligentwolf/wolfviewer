@@ -917,6 +917,7 @@ set(viewer_SOURCE_FILES
     wolfnaturalwater.cpp
     wolfobjectprops.cpp
     wolffloatermeshupload.cpp
+    wolffloaterphotoeffects.cpp
     wolfmeshupload.cpp
     wolfscreenshare.cpp
     wolfweather.cpp
@@ -1802,6 +1803,7 @@ set(viewer_HEADER_FILES
     wolfgrid.h
     wolfobjectprops.h
     wolffloatermeshupload.h
+    wolffloaterphotoeffects.h
     wolfmeshupload.h
     wolfscreenshare.h
     wolfweather.h

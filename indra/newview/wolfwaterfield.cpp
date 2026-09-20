@@ -23,6 +23,7 @@
 #include "llrender.h"
 #include "llsurface.h"
 #include "llsurfacepatch.h"
+#include "llviewercamera.h"   // <WolfViewer 2026-09-20/> fieldWindow
 #include "llviewercontrol.h"
 #include "llviewerregion.h"
 #include "llworld.h"
@@ -148,6 +149,9 @@ bool WolfWaterField::depthAt(const Field& f, F32 rx, F32 ry, F32 out[4])
     {
         return false;
     }
+    // <WolfViewer 2026-09-20> relative to the field's origin (a camera window on a huge region)
+    rx -= f.mX0;
+    ry -= f.mY0;
     if (rx < 0.f || ry < 0.f || rx > f.mSizeX || ry > f.mSizeY)
     {
         return false;
@@ -274,7 +278,7 @@ void WolfWaterField::idle()
         // [2026-09-10] Three guards from Paul's Dire Wolf teleport (25,600 m: "the region
         // freezes for about 20 seconds" ... "the waves are not right and flickering really
         // badly"). The log showed "baked Dire Wolf" every 2 s from arrival on:
-        //  1. A region wider than MAX_FIELD_REGION_M gets NO field. RES x RES texels over
+        //  1. (2026-09-20: superseded by WINDOW_M, below) A region wider than 4096 m got NO field. RES x RES texels over
         //     25,600 m are 100 m of ground each — no beach can be read from that, and the
         //     shader's fallback with no field (open sea, no breakers, no swash) is stable.
         //  2. No bake until the terrain has height data (LLSurface::hasZData): before that
@@ -282,29 +286,21 @@ void WolfWaterField::idle()
         //  3. At most one bake per MIN_REBAKE_SECS per region however often the terrain
         //     stamp changes: patches stream in for a minute and the sea must not re-shape
         //     itself on every one of them.
-        if (regionp->getWidth() > MAX_FIELD_REGION_M)
-        {
-            auto it = mFields.find(regionp->getHandle());
-            if (it != mFields.end() && it->second.mReady)
-            {
-                releaseField(it->second);
-                mFields.erase(it);
-            }
-            if (mNoFieldLogged.insert(regionp->getHandle()).second)
-            {
-                LL_INFOS("WolfWaterField") << "no shore field for " << regionp->getName() << " (" << regionp->getWidth()
-                                           << " m > " << MAX_FIELD_REGION_M << " m): open sea, no breakers" << LL_ENDL;
-            }
-            continue;
-        }
+        // <WolfViewer 2026-09-20> Guard 1 is gone: a region wider than WINDOW_M gets a
+        // camera-following WINDOW field instead of none (wolfwaterfield.h WINDOW_M). A
+        // window that no longer holds the camera in its inner half is stale like changed
+        // terrain, under the same MIN_REBAKE_SECS pace. Guards 2 and 3 stand.
         if (!regionp->getLand().hasZData())
         {
             continue;
         }
         Field& f = mFields[regionp->getHandle()];
         const U64 stamp = terrainStamp(regionp);
+        F32 wx0, wy0, wsx, wsy;
+        fieldWindow(regionp, f.mReady ? &f : nullptr, wx0, wy0, wsx, wsy);
+        const bool moved = f.mReady && (wx0 != f.mX0 || wy0 != f.mY0);
         const bool stale = !f.mReady || f.mStamp != stamp || (now - f.mBakedAt) > REBAKE_SECS
-                        || f.mWaterLevel != regionp->getWaterHeight();
+                        || f.mWaterLevel != regionp->getWaterHeight() || moved;
         if (stale && (!f.mReady || now - f.mBakedAt >= MIN_REBAKE_SECS))
         {
             pick = regionp;
@@ -319,6 +315,34 @@ void WolfWaterField::idle()
         LL_INFOS("WolfWaterField") << "baked " << pick->getName() << " in "
                                    << (S32)((LLFrameTimer::getElapsedSeconds() - t0) * 1000.0) << " ms" << LL_ENDL;
     }
+}
+
+// <WolfViewer 2026-09-20> see wolfwaterfield.h. Source: WolfStorm terrain_manager.js
+// _waterFieldWindow / _tickWaterFieldWindow and terrain_paint.js windowOriginFor / recentre.
+void WolfWaterField::fieldWindow(const LLViewerRegion* regionp, const Field* current, F32& x0, F32& y0, F32& sx, F32& sy)
+{
+    const F32 rw = regionp->getWidth();
+    if (rw <= WINDOW_M)
+    {
+        x0 = 0.f; y0 = 0.f; sx = rw; sy = rw;
+        return;
+    }
+    sx = WINDOW_M; sy = WINDOW_M;
+    // the camera, region metres (agent space minus the region's agent-space origin)
+    const LLVector3 cam = LLViewerCamera::getInstance()->getOrigin() - regionp->getOriginAgent();
+    const F32 cx = cam.mV[VX], cy = cam.mV[VY];
+    if (current && current->mSizeX == sx && current->mSizeY == sy)
+    {
+        const F32 mx = current->mX0 + sx * 0.5f, my = current->mY0 + sy * 0.5f;
+        if (fabsf(cx - mx) <= sx * 0.25f && fabsf(cy - my) <= sy * 0.25f)
+        {
+            x0 = current->mX0; y0 = current->mY0;   // still in the inner half: keep it
+            return;
+        }
+    }
+    const F32 g = WINDOW_M / 8.f;
+    x0 = llclamp((F32)ll_round((cx - sx * 0.5f) / g) * g, 0.f, rw - sx);
+    y0 = llclamp((F32)ll_round((cy - sy * 0.5f) / g) * g, 0.f, rw - sy);
 }
 
 bool WolfWaterField::heightAt(LLViewerRegion* regionp, F32 px, F32 py, F32& out)
@@ -362,8 +386,13 @@ void WolfWaterField::upload(U32& tex, S32 w, S32 h, U32 internal_format, U32 for
 void WolfWaterField::bake(LLViewerRegion* regionp, Field& f)
 {
     LL_PROFILE_ZONE_SCOPED;
-    const F32 sx = regionp->getWidth();
-    const F32 sy = regionp->getWidth();
+    // <WolfViewer 2026-09-20> sx/sy are the FIELD's size (the window's on a huge region) and
+    // ox/oy its region-space origin: texel (i, j) is the region point (ox + i * texel,
+    // oy + j * texel). Whole region below WINDOW_M — ox = oy = 0, byte-identical to before.
+    F32 ox, oy, sx, sy;
+    fieldWindow(regionp, f.mReady ? &f : nullptr, ox, oy, sx, sy);
+    f.mX0 = ox;
+    f.mY0 = oy;
     const F32 water_level = regionp->getWaterHeight();
     const LLSurface& land = regionp->getLand();
 
@@ -380,10 +409,10 @@ void WolfWaterField::bake(LLViewerRegion* regionp, Field& f)
     mDepthData.assign((size_t)R * R * 4, 0.f);
     for (S32 j = 0; j < R; ++j)
     {
-        const F32 y = j * sy / (R - 1);
+        const F32 y = oy + j * sy / (R - 1);
         for (S32 i = 0; i < R; ++i)
         {
-            mH[j * R + i] = land.resolveHeightRegion(i * sx / (R - 1), y);
+            mH[j * R + i] = land.resolveHeightRegion(ox + i * sx / (R - 1), y);
         }
     }
     const S32 RAD = 6;
@@ -430,12 +459,14 @@ void WolfWaterField::bake(LLViewerRegion* regionp, Field& f)
                 if (conf > 0.02f)
                 {
                     const F32 ux = -(gx / mag), uy = -(gy / mag);   // seaward unit
-                    const F32 px0 = i * texel_x, py0 = j * texel_y;
+                    const F32 px0 = ox + i * texel_x, py0 = oy + j * texel_y;   // region space
                     F32 open = FETCH_FULL;
                     for (F32 s = FETCH_STEP; s <= FETCH_FULL; s += FETCH_STEP)
                     {
                         const F32 px = px0 + ux * s, py = py0 + uy * s;
-                        if (px < 0.f || py < 0.f || px > sx || py > sy)
+                        // <WolfViewer 2026-09-20> past the FIELD: heightAt reads this region's
+                        // own grid or a neighbour's for points outside the window too.
+                        if (px < ox || py < oy || px > ox + sx || py > oy + sy)
                         {
                             F32 hn;
                             if (!heightAt(regionp, px, py, hn))
@@ -449,8 +480,8 @@ void WolfWaterField::bake(LLViewerRegion* regionp, Field& f)
                             }
                             continue;
                         }
-                        const S32 ti = llclamp((S32)ll_round(px / texel_x), 0, R - 1);
-                        const S32 tj = llclamp((S32)ll_round(py / texel_y), 0, R - 1);
+                        const S32 ti = llclamp((S32)ll_round((px - ox) / texel_x), 0, R - 1);
+                        const S32 tj = llclamp((S32)ll_round((py - oy) / texel_y), 0, R - 1);
                         if (mH[tj * R + ti] >= water_level)
                         {
                             open = s - FETCH_STEP;
@@ -480,7 +511,8 @@ void WolfWaterField::bake(LLViewerRegion* regionp, Field& f)
     // terrain at or above the water level in this region or any neighbour; space no
     // region covers counts as open water. Two-pass chamfer distance transform in metres.
     const S32 E = ERES;
-    const F32 ex0 = -sx, ey0 = -sy;
+    // <WolfViewer 2026-09-20> 3x the FIELD (window) — 3x the region below WINDOW_M as before.
+    const F32 ex0 = ox - sx, ey0 = oy - sy;
     const F32 esx = 3.f * sx, esy = 3.f * sy;
     const F32 etx = esx / (E - 1), ety = esy / (E - 1);
     const F32 diag = sqrtf(etx * etx + ety * ety);

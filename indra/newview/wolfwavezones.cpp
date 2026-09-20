@@ -303,6 +303,13 @@ const WolfWaveZones::Region* WolfWaveZones::current() const
     return it == mByHandle.end() ? nullptr : &it->second;
 }
 
+// <WolfViewer 2026-09-20/> see wolfwavezones.h
+std::string WolfWaveZones::editorZonesFor(const Region& r) const
+{
+    if (r.mStored && (S32)r.mZones.size() == r.w() * r.h()) return r.mZones;
+    return zonesFor(r);
+}
+
 std::string WolfWaveZones::zonesFor(const Region& r) const
 {
     auto pv = mPreview.find(r.mHandle);
@@ -965,6 +972,7 @@ void WolfWavePainter::paint(S32 x, S32 y)
         if (!mRefusedThisStroke && mOnRefused) { mRefusedThisStroke = true; mOnRefused(); }
         return;
     }
+    if (mBeforePaint && !mBeforePaint()) return;   // <WolfViewer 2026-09-20/>
     if (paintCell(cx, cy) && mOnPaint) mOnPaint();
 }
 
@@ -1221,6 +1229,7 @@ bool WolfPanelLandWaves::postBuild()
 
     mPainter->setPaintCallback([this]() { onParamChanged(); });
     mPainter->setRefusedCallback([this]() { setStatus(getString("str_locked_cell"), true); });
+    mPainter->setBeforePaintCallback([this]() { return ensureEnabled(); });   // <WolfViewer 2026-09-20/>
     onBrush('s');
     return true;
 }
@@ -1234,10 +1243,9 @@ void WolfPanelLandWaves::toggleWorldBrush()
         setStatus("The region's wave layout is not ready. Wait for it to load before painting.", true);
         return;
     }
-    if (!mEnabled->get())
+    if (!ensureEnabled())   // <WolfViewer 2026-09-20/> ticks the box for a region holder, explains to a parcel owner
     {
         mWorldPaint->setToggleState(false);
-        setStatus("Tick Use this layout before painting on the water.", true);
         return;
     }
     // Source: LLViewerWindow::renderSelections uses a HUD projection while HUDs are
@@ -1434,7 +1442,7 @@ void WolfPanelLandWaves::rebuild()
             for (S32 cx = 0; cx < w; ++cx)
                 locked[(size_t)cy * w + cx] = !wz.cellEditable(cx, cy);
     }
-    mPainter->setLayout(w, h, wz.zonesFor(*r), locked);
+    mPainter->setLayout(w, h, wz.editorZonesFor(*r), locked);   // <WolfViewer 2026-09-20/> stored cells even while switched off
     mPainter->setEnabled(true);
     const LLSD& p = r->mParams;
     // explicit F32: LLSliderCtrl::setValue(F32) and MSVC's C4244 is an error on the CI
@@ -1527,6 +1535,22 @@ void WolfPanelLandWaves::onRevert()
 // as its saved layout — "its flat and boring, i set the water back to automatic"). With the
 // box off the grid stores enabled=0 and every viewer computes the automatic layout live. The
 // painted cells are kept, so ticking the box again brings them back.
+// <WolfViewer 2026-09-20/> see wolfwavezones.h
+bool WolfPanelLandWaves::ensureEnabled()
+{
+    if (!mEnabled) return false;
+    if (mEnabled->get()) return true;
+    if (!WolfWaveZones::instance().canEditAll())
+    {
+        setStatus(getString("str_layout_off_parcel"), true);
+        return false;
+    }
+    mEnabled->set(true);
+    mDirty = true;
+    setStatus(getString("str_layout_on_for_paint"), false);
+    return true;
+}
+
 void WolfPanelLandWaves::onDefault()
 {
     if (!WolfGrid::isWolfTerritories()) { setStatus("These tools are only available on Wolf Territories Grid.", true); return; }

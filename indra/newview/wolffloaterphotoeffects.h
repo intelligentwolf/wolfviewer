@@ -36,7 +36,7 @@ public:
 private:
     void onTile(S32 mode);
     void onStrength();
-    void refresh();
+    void refresh() override;   // LLPanel::refresh is virtual: clang -Winconsistent-missing-override is an error on the mac CI
 
     LLButton*     mTiles[MODE_COUNT] = { nullptr };
     LLSliderCtrl* mStrength = nullptr;

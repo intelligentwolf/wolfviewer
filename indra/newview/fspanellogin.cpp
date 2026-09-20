@@ -1521,7 +1521,13 @@ void FSPanelLogin::onClickGridMgrHelp(void*)
 //static
 void FSPanelLogin::onClickGridBuilder(void*)
 {
-    LLWeb::loadURLInternal(gSavedSettings.getString("FSGridBuilderURL"));
+    // <FS:WolfViewer> "Click to add more grids" used to open a web page. Grids are added in
+    // Preferences > Opensim (the grid manager), so open that directly -- same as Ctrl+P and
+    // picking the tab. "tab" is the key LLFloaterPreference::onOpen already honours for
+    // secondlife:///app/openfloater/preferences?tab=... links; "opensim" is the panel name in
+    // floater_preferences.xml.
+    LLFloaterReg::showInstance("preferences", LLSD().with("tab", "opensim"));
+    // </FS:WolfViewer>
 }
 
 void FSPanelLogin::onSelectUser()

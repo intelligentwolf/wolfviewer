@@ -2457,7 +2457,7 @@ void session_starter_helper(
     msg->addStringFast(_PREHASH_Message, LLStringUtil::null);
     msg->addU32Fast(_PREHASH_ParentEstateID, 0);
     msg->addUUIDFast(_PREHASH_RegionID, LLUUID::null);
-    msg->addVector3Fast(_PREHASH_Position, gAgent.getPositionAgent());
+    msg->addVector3Fast(_PREHASH_Position, gAgent.getPositionRegion());   // <WolfViewer> region frame
 }
 
 void start_deprecated_conference_chat(

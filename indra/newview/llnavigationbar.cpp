@@ -725,8 +725,11 @@ void LLNavigationBar::onTeleportFinished(const LLVector3d& global_agent_pos)
      * At this moment gAgent.getPositionAgent() contains previous coordinates.
      * according to EXT-65 agent position is being reseted on each frame.
      */
+        // <WolfViewer> buildLocationString takes a REGION position; the agent frame may be rebased
         LLAgentUI::buildLocationString(location, LLAgentUI::LOCATION_FORMAT_NO_MATURITY,
-                    gAgent.getPosAgentFromGlobal(global_agent_pos));
+                    gAgent.getRegion() ? gAgent.getRegion()->getPosRegionFromGlobal(global_agent_pos)
+                                       : gAgent.getPosAgentFromGlobal(global_agent_pos));
+        // </WolfViewer>
     // <FS:Beq pp Oren> FIRE-30768: SLURL's don't work in VarRegions
     //std::string tooltip (LLSLURL(gAgent.getRegion()->getName(), global_agent_pos).getSLURLString());
     std::string grid = LLGridManager::getInstance()->getGrid();

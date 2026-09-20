@@ -356,7 +356,13 @@ void LLSurfacePatch::eval(const U32 x, const U32 y, const U32 stride, LLVector3 
     pos_agent.mV[VX] += x * mSurfacep->getMetersPerGrid();
     pos_agent.mV[VY] += y * mSurfacep->getMetersPerGrid();
     pos_agent.mV[VZ]  = *(mDataZ + point_offset);
-    *vertex     = pos_agent-mVObjp->getRegion()->getOriginAgent();
+    // <WolfViewer 2026-09-20> PATCH-LOCAL vertex (was region-local: pos_agent minus the region
+    // origin agent). Drawn with LLVOSurfacePatch::wolfRenderMatrix() = T(patch origin agent),
+    // and the terrain shaders add terrain_patch_origin (getOriginRegion) back for texturing.
+    // Region-local coordinates on a 51,200 m region are a 4 mm float32 grid and the region's
+    // ~20 km draw translation jitters with every camera rotation — the same defect the static
+    // prims had (llspatialpartition.h mWolfOriginRegion).
+    vertex->set(x * mSurfacep->getMetersPerGrid(), y * mSurfacep->getMetersPerGrid(), pos_agent.mV[VZ]);
 
     // tex0 is used for ownership overlay
     LLVector3 rel_pos = pos_agent - mSurfacep->getOriginAgent();

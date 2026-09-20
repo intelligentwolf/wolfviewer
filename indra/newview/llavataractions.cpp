@@ -693,7 +693,7 @@ void LLAvatarActions::teleport_request_callback(const LLSD& notification, const 
 //      msg->addStringFast(_PREHASH_Message, response["message"]);
         msg->addU32Fast(_PREHASH_ParentEstateID, 0);
         msg->addUUIDFast(_PREHASH_RegionID, LLUUID::null);
-        msg->addVector3Fast(_PREHASH_Position, gAgent.getPositionAgent());
+        msg->addVector3Fast(_PREHASH_Position, gAgent.getPositionRegion());   // <WolfViewer> region frame
 
         gMessageSystem->addBinaryDataFast(
                 _PREHASH_BinaryBucket,

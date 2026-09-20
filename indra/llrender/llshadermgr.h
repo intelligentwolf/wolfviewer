@@ -386,6 +386,7 @@ public:
         WOLF_ZONE_FIELD,                    // "wolfZoneField" [WAVES 2026-09-07]
         WOLF_CAUSTIC_TEX0,                  // "wolfCausticTex0"
         WOLF_CAUSTIC_TEX1,                  // "wolfCausticTex1"
+        WOLF_TERRAIN_PATCH_ORIGIN,          // "terrain_patch_origin" [HUGE REGIONS 2026-09-20] lldrawpoolterrain.cpp
         WOLF_PAINT_MAP,                     // "wolfPaintMap"  [TERRAIN PAINT 2026-09-10] wolfterrainpaint.cpp
         WOLF_PAINT_TEX0,                    // "wolfPaintTex0"
         WOLF_PAINT_TEX1,                    // "wolfPaintTex1"

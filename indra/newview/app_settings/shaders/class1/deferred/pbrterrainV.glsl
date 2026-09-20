@@ -38,6 +38,12 @@ uniform mat4 modelview_projection_matrix;
 #if TERRAIN_PAINT_TYPE == TERRAIN_PAINT_TYPE_PBR_PAINTMAP
 uniform float region_scale;
 #endif
+// <WolfViewer 2026-09-20> `position` is PATCH-local (LLSurfacePatch::eval); region_pos in main()
+// = position + this patch origin (lldrawpoolterrain.cpp wolfApplyPatchMatrix) is what
+// `position` used to be for every texture / paint / caustic coordinate below. Declared for
+// EVERY paint type (the first install had it inside the paintmap #if and the heightmap variant
+// failed to compile: "undefined variable terrain_patch_origin", viewer would not start).
+uniform vec3 terrain_patch_origin;
 
 in vec3 position;
 in vec3 normal;
@@ -84,7 +90,8 @@ void main()
     //transform vertex
     gl_Position = modelview_projection_matrix * vec4(position.xyz, 1.0);
     vary_position = (modelview_matrix*vec4(position.xyz, 1.0)).xyz;
-    vary_region_pos = position.xyz;   // <WolfViewer 2026-09-06>
+    vec3 region_pos = position.xyz + terrain_patch_origin;   // <WolfViewer 2026-09-20>
+    vary_region_pos = region_pos;   // <WolfViewer 2026-09-06>
 
     vec3 n = normal_matrix * normal;
 #if TERRAIN_PLANAR_TEXTURE_SAMPLE_COUNT == 3
@@ -130,13 +137,13 @@ void main()
     // Transform and pass tex coords
     {
         vec4[2] ttt;
-#define transform_xy()             terrain_texture_transform(position.xy,               ttt)
+#define transform_xy()             terrain_texture_transform(region_pos.xy,               ttt)
 #if TERRAIN_PLANAR_TEXTURE_SAMPLE_COUNT == 3
 // Don't care about upside-down (transform_xy_flipped())
-#define transform_yz()             terrain_texture_transform(position.yz,               ttt)
-#define transform_negx_z()         terrain_texture_transform(position.xz * vec2(-1, 1), ttt)
-#define transform_yz_flipped()     terrain_texture_transform(position.yz * vec2(-1, 1), ttt)
-#define transform_negx_z_flipped() terrain_texture_transform(position.xz,               ttt)
+#define transform_yz()             terrain_texture_transform(region_pos.yz,               ttt)
+#define transform_negx_z()         terrain_texture_transform(region_pos.xz * vec2(-1, 1), ttt)
+#define transform_yz_flipped()     terrain_texture_transform(region_pos.yz * vec2(-1, 1), ttt)
+#define transform_negx_z_flipped() terrain_texture_transform(region_pos.xz,               ttt)
         // material 1
         ttt[0].xyz = terrain_texture_transforms[0].xyz;
         ttt[1].x = terrain_texture_transforms[0].w;
@@ -201,6 +208,6 @@ void main()
     vary_texcoord1.xy = tc.xy-vec2(2.0, 0.0);
     vary_texcoord1.zw = tc.xy-vec2(1.0, 0.0);
 #elif TERRAIN_PAINT_TYPE == TERRAIN_PAINT_TYPE_PBR_PAINTMAP
-    vary_texcoord = position.xy / region_scale;
+    vary_texcoord = region_pos.xy / region_scale;
 #endif
 }

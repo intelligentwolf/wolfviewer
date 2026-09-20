@@ -1194,11 +1194,16 @@ void LLAgent::setRegion(LLViewerRegion *regionp)
             // NaCl End
 
             // We've changed regions, we're now going to change our agent coordinate frame.
+            const LLVector3d agent_offset_global_old = mAgentOriginGlobal;   // <WolfViewer> see delta below
             mAgentOriginGlobal = regionp->getOriginGlobal();
             LLVector3d agent_offset_global = mRegionp->getOriginGlobal();
 
             LLVector3 delta;
-            delta.setVec(regionp->getOriginGlobal() - mRegionp->getOriginGlobal());
+            // <WolfViewer> The frame we are leaving is the AGENT origin, which a huge-region
+            // rebase (rebaseOrigin) may have moved off the old region's origin. Identical to
+            // the stock `regionp->getOriginGlobal() - mRegionp->getOriginGlobal()` otherwise.
+            delta.setVec(regionp->getOriginGlobal() - agent_offset_global_old);
+            // </WolfViewer>
 
             setPositionAgent(getPositionAgent() - delta);
 
@@ -1536,6 +1541,64 @@ LLVector3d LLAgent::getPosGlobalFromAgent(const LLVector3 &pos_agent) const
     pos_agent_d.setVec(pos_agent);
     return pos_agent_d + mAgentOriginGlobal;
 }
+
+// <WolfViewer> Huge-region origin rebase — see llagent.h.
+LLVector3 LLAgent::getPositionRegion()
+{
+    const LLVector3 pos_agent = getPositionAgent();
+    return mRegionp ? mRegionp->getPosRegionFromAgent(pos_agent) : pos_agent;
+}
+
+void LLAgent::rebaseOrigin(const LLVector3d& new_origin_global)
+{
+    // Source: LLAgent::setRegion above (the region-crossing frame change) and
+    // llviewermessage.cpp process_agent_movement_complete, which follows gAgent.setRegion with
+    // gObjectList.shiftObjects(old origin - new origin). Same steps, no region bookkeeping:
+    // new origin, agent and camera moved by -delta, every object/drawable/partition shifted by
+    // -delta (LLViewerObjectList::shiftObjects -> LLPipeline::shiftObjects, GEOM_DIRTY rebuilds
+    // the agent-space vertex buffers), hole-covering water and the selection centre refreshed as
+    // setRegion does.
+    LLVector3 delta;
+    delta.setVec(new_origin_global - mAgentOriginGlobal);
+    if (delta.isExactlyZero())
+    {
+        return;
+    }
+    LL_INFOS("AgentLocation") << "Rebasing agent origin by " << delta << " to " << new_origin_global << LL_ENDL;
+    mAgentOriginGlobal = new_origin_global;
+
+    setPositionAgent(getPositionAgent() - delta);
+
+    LLVector3 camera_position_agent = LLViewerCamera::getInstance()->getOrigin();
+    LLViewerCamera::getInstance()->setOrigin(camera_position_agent - delta);
+
+    LLWorld::getInstance()->updateAgentOffset(mAgentOriginGlobal);
+    gObjectList.shiftObjects(-delta);
+    LLWorld::getInstance()->updateWaterObjects();
+    LLSelectMgr::getInstance()->updateSelectionCenter();
+}
+
+void LLAgent::updateHugeRegionOrigin()
+{
+    if (!mRegionp || mTeleportState != TELEPORT_NONE)
+    {
+        return;
+    }
+    if (mRegionp->getWidth() <= WOLF_ORIGIN_REBASE_TRIGGER_M)
+    {
+        return;   // a normal grid never gets here: byte-identical behaviour
+    }
+    const LLVector3 cam = LLViewerCamera::getInstance()->getOrigin();
+    if (fabsf(cam.mV[VX]) <= WOLF_ORIGIN_REBASE_TRIGGER_M && fabsf(cam.mV[VY]) <= WOLF_ORIGIN_REBASE_TRIGGER_M)
+    {
+        return;
+    }
+    LLVector3d new_origin = mAgentOriginGlobal;
+    new_origin.mdV[VX] += floor(cam.mV[VX] / WOLF_ORIGIN_REBASE_SNAP_M) * WOLF_ORIGIN_REBASE_SNAP_M;
+    new_origin.mdV[VY] += floor(cam.mV[VY] / WOLF_ORIGIN_REBASE_SNAP_M) * WOLF_ORIGIN_REBASE_SNAP_M;
+    rebaseOrigin(new_origin);
+}
+// </WolfViewer>
 
 void LLAgent::sitDown()
 {
@@ -3129,7 +3192,9 @@ void LLAgent::setStartPosition( U32 location_id )
     const F32 REGION_WIDTH = getRegion()->getWidth();
 // </FS:CR> Aurora Sim
 
-    LLVector3 agent_pos = getPositionAgent();
+    // <WolfViewer> region frame: clamped against getWidth() and sent as the home location
+    LLVector3 agent_pos = getPositionRegion();
+    // </WolfViewer>
 
     if (isAgentAvatarValid())
     {

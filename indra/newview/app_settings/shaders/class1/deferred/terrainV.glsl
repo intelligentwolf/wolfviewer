@@ -48,6 +48,10 @@ out vec3 vary_region_normal;   // for the triplanar blend on steep faces
 
 uniform vec4 object_plane_s;
 uniform vec4 object_plane_t;
+// <WolfViewer 2026-09-20> `position` is PATCH-local (LLSurfacePatch::eval); this is the patch
+// origin in the region frame (lldrawpoolterrain.cpp wolfApplyPatchMatrix), so region_pos below
+// is what `position` used to be.
+uniform vec3 terrain_patch_origin;
 
 vec2 texgen_object(vec4 vpos, mat4 mat, vec4 tp0, vec4 tp1)
 {
@@ -67,6 +71,7 @@ void main()
 {
     //transform vertex
     vec4 pre_pos = vec4(position.xyz, 1.0);
+    vec3 region_pos = position.xyz + terrain_patch_origin;   // <WolfViewer 2026-09-20>
     vec4 t_pos = modelview_projection_matrix * pre_pos;
 
     gl_Position = t_pos;
@@ -77,11 +82,11 @@ void main()
     // normal.z is the world-up component and position.z the terrain height in metres.
     vary_ao = diffuse_color.r;
     vary_up = normal.z;
-    vary_region_pos = position;
+    vary_region_pos = region_pos;
     vary_region_normal = normal;
 
     // Transform and pass tex coords
-    vary_texcoord0.xy = texgen_object(vec4(position, 1.0), texture_matrix0, object_plane_s, object_plane_t);
+    vary_texcoord0.xy = texgen_object(vec4(region_pos, 1.0), texture_matrix0, object_plane_s, object_plane_t);
 
     vec4 t = vec4(texcoord1,0,1);
 

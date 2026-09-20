@@ -1639,7 +1639,7 @@ void process_enable_simulator(LLMessageSystem *msg, void **user_data)
         if (current_region)
         {
             F32 regionSize = current_region->getWidth();
-            LLVector3 avPos = gAgent.getPositionAgent();
+            LLVector3 avPos = gAgent.getPositionRegion();   // <WolfViewer> compared against the region width
             if (avPos.mV[VX] >= 0 && avPos.mV[VX] <= regionSize && avPos.mV[VY] >= 0 && avPos.mV[VY] <= regionSize)
             {
                 if (current_region->getHandle() != handle)

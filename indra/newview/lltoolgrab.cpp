@@ -741,7 +741,7 @@ void LLToolGrabBase::handleHoverActive(S32 x, S32 y, MASK mask)
                 msg->addVector3("UVCoord", LLVector3(mGrabPick.mUVCoords));
                 msg->addVector3("STCoord", LLVector3(mGrabPick.mSTCoords));
                 msg->addS32Fast(_PREHASH_FaceIndex, mGrabPick.mObjectFace);
-                msg->addVector3("Position", mGrabPick.mIntersection);
+                msg->addVector3("Position", objectp->getRegion()->getPosRegionFromAgent(mGrabPick.mIntersection));   // <WolfViewer> region frame
                 msg->addVector3("Normal", mGrabPick.mNormal);
                 msg->addVector3("Binormal", mGrabPick.mBinormal);
 
@@ -910,7 +910,7 @@ void LLToolGrabBase::handleHoverNonPhysical(S32 x, S32 y, MASK mask)
         msg->addVector3("UVCoord", LLVector3(pick.mUVCoords));
         msg->addVector3("STCoord", LLVector3(pick.mSTCoords));
         msg->addS32Fast(_PREHASH_FaceIndex, pick.mObjectFace);
-        msg->addVector3("Position", pick.mIntersection);
+        msg->addVector3("Position", objectp->getRegion()->getPosRegionFromAgent(pick.mIntersection));   // <WolfViewer> region frame
         msg->addVector3("Normal", pick.mNormal);
         msg->addVector3("Binormal", pick.mBinormal);
 
@@ -1201,7 +1201,7 @@ void send_ObjectGrab_message(LLViewerObject* object, const LLPickInfo & pick, co
     msg->addVector3("UVCoord", LLVector3(pick.mUVCoords));
     msg->addVector3("STCoord", LLVector3(pick.mSTCoords));
     msg->addS32Fast(_PREHASH_FaceIndex, pick.mObjectFace);
-    msg->addVector3("Position", pick.mIntersection);
+    msg->addVector3("Position", object->getRegion()->getPosRegionFromAgent(pick.mIntersection));   // <WolfViewer> region frame
     msg->addVector3("Normal", pick.mNormal);
     msg->addVector3("Binormal", pick.mBinormal);
     msg->sendMessage( object->getRegion()->getHost());
@@ -1239,7 +1239,7 @@ void send_ObjectDeGrab_message(LLViewerObject* object, const LLPickInfo & pick)
     msg->addVector3("UVCoord", LLVector3(pick.mUVCoords));
     msg->addVector3("STCoord", LLVector3(pick.mSTCoords));
     msg->addS32Fast(_PREHASH_FaceIndex, pick.mObjectFace);
-    msg->addVector3("Position", pick.mIntersection);
+    msg->addVector3("Position", object->getRegion()->getPosRegionFromAgent(pick.mIntersection));   // <WolfViewer> region frame
     msg->addVector3("Normal", pick.mNormal);
     msg->addVector3("Binormal", pick.mBinormal);
     msg->sendMessage(object->getRegion()->getHost());

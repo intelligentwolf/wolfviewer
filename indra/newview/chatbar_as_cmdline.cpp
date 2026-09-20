@@ -866,8 +866,9 @@ bool cmd_line_chat(std::string_view revised_text, EChatType type, bool from_gest
             else if (command == sFSCmdLineGround())
             {
                 LLVector3 agentPos = gAgent.getPositionAgent();
+                LLVector3 regionPos = gAgent.getPositionRegion();   // <WolfViewer> paired with the region handle
                 U64 agentRegion = gAgent.getRegion()->getHandle();
-                LLVector3 targetPos(agentPos.mV[VX],agentPos.mV[VY], LLWorld::getInstance()->resolveLandHeightAgent(agentPos));
+                LLVector3 targetPos(regionPos.mV[VX],regionPos.mV[VY], LLWorld::getInstance()->resolveLandHeightAgent(agentPos));
                 LLVector3d pos_global = from_region_handle(agentRegion);
                 pos_global += LLVector3d((F64)targetPos.mV[VX], (F64)targetPos.mV[VY], (F64)targetPos.mV[VZ]);
                 if (RlvActions::canTeleportToLocal(pos_global))
@@ -881,7 +882,7 @@ bool cmd_line_chat(std::string_view revised_text, EChatType type, bool from_gest
                 F32 z;
                 if (i >> z)
                 {
-                    LLVector3 agentPos = gAgent.getPositionAgent();
+                    LLVector3 agentPos = gAgent.getPositionRegion();   // <WolfViewer> paired with the region handle
                     U64 agentRegion = gAgent.getRegion()->getHandle();
                     LLVector3 targetPos(agentPos.mV[VX], agentPos.mV[VY], z);
                     LLVector3d pos_global = from_region_handle(agentRegion);

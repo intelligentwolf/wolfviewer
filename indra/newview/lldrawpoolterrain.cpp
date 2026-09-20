@@ -260,6 +260,25 @@ void LLDrawPoolTerrain::renderShadow(S32 pass)
 }
 
 
+// <WolfViewer 2026-09-20> One translation per PATCH instead of per region: the vertices are
+// patch-local (LLSurfacePatch::eval) and the matrix is T(patch origin agent), so nothing large
+// reaches the float32 modelview on a 51,200 m region. The bound terrain shader also gets the
+// patch origin in the region frame (terrain_patch_origin) to rebuild region coordinates for
+// texturing, paint and caustics; a shader without that uniform (shadow pass) ignores it.
+static void wolfApplyPatchMatrix(LLFace* facep)
+{
+    LLViewerObject* objectp = facep->getDrawable()->getVObj();
+    LLVOSurfacePatch* vop = (LLVOSurfacePatch*)objectp;
+    gGLLastMatrix = NULL;   // applyModelMatrix caches by POINTER; this matrix is rewritten in place
+    LLRenderPass::applyModelMatrix(vop->wolfRenderMatrix());
+    LLGLSLShader* shader = LLGLSLShader::sCurBoundShaderPtr;
+    if (shader && vop->getPatch())
+    {
+        const LLVector3& o = vop->getPatch()->getOriginRegion();
+        shader->uniform3f(LLShaderMgr::WOLF_TERRAIN_PATCH_ORIGIN, o.mV[VX], o.mV[VY], o.mV[VZ]);
+    }
+}
+
 void LLDrawPoolTerrain::drawLoop()
 {
     if (!mDrawFace.empty())
@@ -270,7 +289,7 @@ void LLDrawPoolTerrain::drawLoop()
             LLFace *facep = *iter;
 
             llassert(gGL.getMatrixMode() == LLRender::MM_MODELVIEW);
-            LLRenderPass::applyModelMatrix(&facep->getDrawable()->getRegion()->mRenderMatrix);
+            wolfApplyPatchMatrix(facep);   // <WolfViewer> was the region's mRenderMatrix
 
             facep->renderIndexed();
         }
@@ -1131,10 +1150,11 @@ void LLDrawPoolTerrain::renderSimple()
     gGL.getTexUnit(0)->enable(LLTexUnit::TT_TEXTURE);
     gGL.getTexUnit(0)->bind(mTexturep);
 
-    LLVector3 origin_agent = mDrawFace[0]->getDrawable()->getVObj()->getRegion()->getOriginAgent();
+    // <WolfViewer> texgen now runs on region_pos in the shader (terrain_patch_origin), so no
+    // origin offset: the planes are plain x/256, y/256.
     F32 tscale = 1.f/256.f;
-    tp0.setVec(tscale, 0.f, 0.0f, -1.f*(origin_agent.mV[0]/256.f));
-    tp1.setVec(0.f, tscale, 0.0f, -1.f*(origin_agent.mV[1]/256.f));
+    tp0.setVec(tscale, 0.f, 0.0f, 0.f);
+    tp1.setVec(0.f, tscale, 0.0f, 0.f);
 
     sShader->uniform4fv(LLShaderMgr::OBJECT_PLANE_S, 1, tp0.mV);
     sShader->uniform4fv(LLShaderMgr::OBJECT_PLANE_T, 1, tp1.mV);
@@ -1187,6 +1207,7 @@ void LLDrawPoolTerrain::renderOwnership()
          iter != mDrawFace.end(); iter++)
     {
         LLFace *facep = *iter;
+        wolfApplyPatchMatrix(facep);   // <WolfViewer> per-patch matrix (this loop relied on drawLoop's)
         facep->renderIndexed();
     }
 

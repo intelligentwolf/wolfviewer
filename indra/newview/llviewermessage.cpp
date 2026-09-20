@@ -634,7 +634,7 @@ void send_sound_trigger(const LLUUID& sound_id, F32 gain)
 
     msg->addU64Fast(_PREHASH_Handle, gAgent.getRegion()->getHandle());
 
-    LLVector3 position = gAgent.getPositionAgent();
+    LLVector3 position = gAgent.getPositionRegion();   // <WolfViewer> region frame, paired with Handle
     msg->addVector3Fast(_PREHASH_Position, position);
     msg->addF32Fast(_PREHASH_Gain, gain);
 
@@ -1758,7 +1758,7 @@ void LLOfferInfo::sendReceiveResponse(bool accept, const LLUUID &destination_fol
     msg->addStringFast(_PREHASH_Message, "");
     msg->addU32Fast(_PREHASH_ParentEstateID, 0);
     msg->addUUIDFast(_PREHASH_RegionID, LLUUID::null);
-    msg->addVector3Fast(_PREHASH_Position, gAgent.getPositionAgent());
+    msg->addVector3Fast(_PREHASH_Position, gAgent.getPositionRegion());   // <WolfViewer> region frame
 
     // ACCEPT. The math for the dialog works, because the accept
     // for inventory_offered, task_inventory_offer or
@@ -1821,7 +1821,7 @@ void LLOfferInfo::send_decline_response(void)
     msg->addStringFast(_PREHASH_Message, "");
     msg->addU32Fast(_PREHASH_ParentEstateID, 0);
     msg->addUUIDFast(_PREHASH_RegionID, LLUUID::null);
-    msg->addVector3Fast(_PREHASH_Position, gAgent.getPositionAgent());
+    msg->addVector3Fast(_PREHASH_Position, gAgent.getPositionRegion());   // <WolfViewer> region frame
     msg->addU8Fast(_PREHASH_Dialog, (U8)(mIM + 2));
     msg->addBinaryDataFast(_PREHASH_BinaryBucket, &(destination_folder_id.mData), sizeof(destination_folder_id.mData));
     msg->sendReliable(mHost);
@@ -3912,8 +3912,16 @@ void process_agent_movement_complete(LLMessageSystem* msg, void**)
 
     // set our upstream host the new simulator and shuffle things as
     // appropriate.
-    LLVector3 shift_vector = regionp->getPosRegionFromGlobal(
-        gAgent.getRegion()->getOriginGlobal());
+    // <WolfViewer> Objects shift by (old agent origin - new agent origin). gAgent.setRegion
+    // moves the agent origin onto regionp's origin for a NEW region and leaves it alone for the
+    // region we are already in — where a huge-region rebase (LLAgent::rebaseOrigin) may have
+    // put it off the region origin, so the stock "old region origin - new region origin" would
+    // be wrong in both cases. Identical to stock without a rebase.
+    const LLVector3d new_agent_origin = (regionp == gAgent.getRegion())
+        ? gAgent.getAgentOriginGlobal() : regionp->getOriginGlobal();
+    LLVector3 shift_vector;
+    shift_vector.setVec(gAgent.getAgentOriginGlobal() - new_agent_origin);
+    // </WolfViewer>
     gAgent.setRegion(regionp);
     gObjectList.shiftObjects(shift_vector);
 // <FS:CR> FIRE-11593: Opensim "4096 Bug" Fix by Latif Khalifa
@@ -3995,7 +4003,8 @@ void process_agent_movement_complete(LLMessageSystem* msg, void**)
             }
             // [/FS:CR]
             // Set the new position
-            gAgentAvatarp->setPositionAgent(agent_pos);
+            // <WolfViewer> the message position is region-local; the agent frame may be rebased
+            gAgentAvatarp->setPositionAgent(regionp->getPosAgentFromRegion(agent_pos));
             gAgentAvatarp->clearChat();
             gAgentAvatarp->slamPosition();
         }
@@ -4371,7 +4380,8 @@ void send_agent_update(bool force_send, bool send_reliable)
     msg->addU8Fast(_PREHASH_State, render_state);
     msg->addU8Fast(_PREHASH_Flags, flags);
 
-    msg->addVector3Fast(_PREHASH_CameraCenter, camera_pos_agent);
+    // <WolfViewer> the simulator reads CameraCenter as region-local; the agent frame may be rebased
+    msg->addVector3Fast(_PREHASH_CameraCenter, gAgent.getRegion()->getPosRegionFromAgent(camera_pos_agent));
     msg->addVector3Fast(_PREHASH_CameraAtAxis, camera_at);
     msg->addVector3Fast(_PREHASH_CameraLeftAxis, LLViewerCamera::getInstance()->getLeftAxis());
     msg->addVector3Fast(_PREHASH_CameraUpAxis, LLViewerCamera::getInstance()->getUpAxis());
@@ -7878,7 +7888,8 @@ void process_teleport_local(LLMessageSystem *msg,void**)
     // <FS:Ansariel> Stop typing after teleport (possible fix for FIRE-7273)
     gAgent.stopTyping();
 
-    gAgent.setPositionAgent(pos);
+    // <WolfViewer> TeleportLocal Position is region-local; the agent frame may be rebased
+    gAgent.setPositionAgent(gAgent.getRegion() ? gAgent.getRegion()->getPosAgentFromRegion(pos) : pos);
     gAgentCamera.slamLookAt(look_at);
 
     if ( !(gAgent.getTeleportKeepsLookAt() && LLViewerJoystick::getInstance()->getOverrideCamera()) && gSavedSettings.getBOOL("FSResetCameraOnTP") )

@@ -42,6 +42,7 @@
 #include "llfloatertools.h"
 #include "llviewercontrol.h"
 #include "llviewerregion.h"
+#include "llvosurfacepatch.h"   // <WolfViewer> per-patch terrain matrix
 #include "llcamera.h"
 #include "pipeline.h"
 #include "llmeshrepository.h"
@@ -464,6 +465,7 @@ void LLSpatialGroup::shift(const LLVector4a &offset)
     mObjectBounds[0].add(offset);
     mObjectExtents[0].add(offset);
     mObjectExtents[1].add(offset);
+    wolfUpdateRenderMatrix();   // <WolfViewer> the agent origin moved: region origin agent changed
 
     if (!getSpatialPartition()->mRenderByGroup &&
         getSpatialPartition()->mPartitionType != LLViewerRegion::PARTITION_TREE &&
@@ -476,6 +478,30 @@ void LLSpatialGroup::shift(const LLVector4a &offset)
         gPipeline.markRebuild(this);
     }
 }
+
+// <WolfViewer 2026-09-20> see llspatialpartition.h mWolfOriginRegion
+void LLSpatialGroup::wolfSetOriginFromNode()
+{
+    LLSpatialPartition* part = getSpatialPartition();
+    if (!part || !part->mRegionp || !mOctreeNode)
+    {
+        mWolfOriginRegion.setZero();
+    }
+    else
+    {
+        const LLVector4a& c = mOctreeNode->getCenter();
+        mWolfOriginRegion = LLVector3(c.getF32ptr()) - part->mRegionp->getOriginAgent();
+    }
+    wolfUpdateRenderMatrix();
+}
+
+void LLSpatialGroup::wolfUpdateRenderMatrix()
+{
+    LLSpatialPartition* part = getSpatialPartition();
+    const LLVector3 origin_agent = (part && part->mRegionp) ? part->mRegionp->getOriginAgent() : LLVector3::zero;
+    mWolfRenderMatrix.setTranslation(origin_agent + mWolfOriginRegion);
+}
+// </WolfViewer>
 
 class LLSpatialSetState : public OctreeTraveler
 {
@@ -2163,7 +2189,16 @@ void renderNormals(LLDrawable *drawablep)
 
                 shader->uniform1f(LLShaderMgr::DEBUG_NORMAL_DRAW_LENGTH, draw_length);
 
-                LLRenderPass::applyModelMatrix(&facep->getDrawable()->getRegion()->mRenderMatrix);
+                // <WolfViewer 2026-09-20> terrain patches draw with their own matrix (llvosurfacepatch.h)
+                LLViewerObject* dbg_obj = facep->getDrawable()->getVObj();
+                if (dbg_obj && dbg_obj->getPCode() == LLViewerObject::LL_VO_SURFACE_PATCH)
+                {
+                    LLRenderPass::applyModelMatrix(((LLVOSurfacePatch*)dbg_obj)->wolfRenderMatrix());
+                }
+                else
+                {
+                    LLRenderPass::applyModelMatrix(&facep->getDrawable()->getRegion()->mRenderMatrix);
+                }
 
                 buf->setBuffer();
                 // *NOTE: The render type in the vertex shader is TRIANGLES, but gets converted to LINES in the geometry shader

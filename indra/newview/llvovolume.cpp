@@ -5659,7 +5659,10 @@ void LLVolumeGeometryManager::registerFace(LLSpatialGroup* group, LLFace* facep,
     }
     else
     {
-        model_mat = &(drawable->getRegion()->mRenderMatrix);
+        // <WolfViewer 2026-09-20> static: the group's own origin, not the region's (see
+        // llspatialpartition.h mWolfOriginRegion; the vertices were built against it in
+        // genDrawInfo / rebuildMesh below).
+        model_mat = &(group->mWolfRenderMatrix);
     }
 
     //drawable->getVObj()->setDebugText(llformat("%d", drawable->isState(LLDrawable::ANIMATED_CHILD)));
@@ -5923,6 +5926,8 @@ void LLVolumeGeometryManager::rebuildGeom(LLSpatialGroup* group)
         }
         return;
     }
+
+    group->wolfSetOriginFromNode();   // <WolfViewer 2026-09-20> static vertices are built against it below
 
     group->mBuilt = 1.f;
 
@@ -6512,9 +6517,16 @@ void LLVolumeGeometryManager::rebuildMesh(LLSpatialGroup* group)
                             LLVertexBuffer* buff = face->getVertexBuffer();
                             if (buff)
                             {
+                                // <WolfViewer 2026-09-20> static faces: region frame minus the
+                                // group origin (same test as registerFace's model_mat choice)
+                                LLMatrix4 mat_vert = vobj->getRelativeXform();
+                                if (!drawablep->isActive() && !drawablep->isState(LLDrawable::ANIMATED_CHILD))
+                                {
+                                    mat_vert.setTranslation(mat_vert.getTranslation() - group->mWolfOriginRegion);
+                                }
                                 if (!face->getGeometryVolume(*volume, // volume
                                     face->getTEOffset(),              // face_index
-                                    vobj->getRelativeXform(),         // mat_vert_in
+                                    mat_vert,                         // mat_vert_in
                                     vobj->getRelativeXformInvTrans(), // mat_norm_in
                                     face->getGeomIndex(),             // index_offset
                                     false,                            // force_rebuild
@@ -6876,8 +6888,15 @@ U32 LLVolumeGeometryManager::genDrawInfo(LLSpatialGroup* group, U32 mask, LLFace
 
                     U32 te_idx = facep->getTEOffset();
 
+                    // <WolfViewer 2026-09-20> static faces: region frame minus the group origin
+                    // (exactly the faces registerFace draws with group->mWolfRenderMatrix)
+                    LLMatrix4 mat_vert = vobj->getRelativeXform();
+                    if (!rigged && !drawablep->isActive() && !drawablep->isState(LLDrawable::ANIMATED_CHILD))
+                    {
+                        mat_vert.setTranslation(mat_vert.getTranslation() - group->mWolfOriginRegion);
+                    }
                     if (!facep->getGeometryVolume(*volume, te_idx,
-                        vobj->getRelativeXform(), vobj->getRelativeXformInvTrans(), index_offset,true))
+                        mat_vert, vobj->getRelativeXformInvTrans(), index_offset,true))
                     {
                         LL_WARNS() << "Failed to get geometry for face!" << LL_ENDL;
                     }

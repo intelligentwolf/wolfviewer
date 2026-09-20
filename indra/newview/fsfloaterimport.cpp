@@ -497,7 +497,7 @@ void FSFloaterImport::onClickBtnImport()
     mObjectSelection = LLSelectMgr::getInstance()->getEditSelection();
     LLSelectMgr::getInstance()->deselectAll();
 
-    mStartPosition = gAgent.getPositionAgent();
+    mStartPosition = gAgent.getPositionRegion();   // <WolfViewer> region frame: RayStart/RayEnd and setPrimPosition
     LL_DEBUGS("import") << "gAgent position is " << mStartPosition << LL_ENDL;
     LLVector3 offset;
     offset.set(gSavedSettings.getVector3("FSImportBuildOffset"));

@@ -123,6 +123,7 @@ public:
 
 
     LLVector3 getOriginAgent() const;
+    const LLVector3& getOriginRegion() const { return mOriginRegion; }   // <WolfViewer> patch origin, region frame
     const LLVector3d &getOriginGlobal() const;
     void setOriginGlobal(const LLVector3d &origin_global);
 

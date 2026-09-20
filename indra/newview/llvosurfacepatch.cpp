@@ -776,6 +776,13 @@ void LLVOSurfacePatch::updateEastGeometry(LLFace *facep,
     index_offset += num_vertices;
 }
 
+// <WolfViewer 2026-09-20> see llvosurfacepatch.h
+const LLMatrix4* LLVOSurfacePatch::wolfRenderMatrix()
+{
+    mWolfRenderMatrix.setTranslation(mPatchp ? mPatchp->getOriginAgent() : LLVector3::zero);
+    return &mWolfRenderMatrix;
+}
+
 void LLVOSurfacePatch::setPatch(LLSurfacePatch *patchp)
 {
     mPatchp = patchp;

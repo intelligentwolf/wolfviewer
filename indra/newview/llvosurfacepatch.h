@@ -70,6 +70,12 @@ public:
 
     void setPatch(LLSurfacePatch *patchp);
     LLSurfacePatch  *getPatch() const       { return mPatchp; }
+    // <WolfViewer 2026-09-20> per-patch draw matrix T(patch origin agent): precise, because the
+    // patch origin is a double (LLSurfacePatch::mOriginGlobal) minus the agent origin, which
+    // LLAgent::updateHugeRegionOrigin keeps near the camera. LLSurfacePatch::eval writes
+    // patch-local vertices to match.
+    const LLMatrix4* wolfRenderMatrix();
+    LLMatrix4        mWolfRenderMatrix;
 
     void dirtyPatch();
     void dirtyGeom();

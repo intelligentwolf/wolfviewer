@@ -325,6 +325,24 @@ public:
 
     LLSpatialPartition* getSpatialPartition() {return (LLSpatialPartition*)mSpatialPartition;}
 
+    // <WolfViewer 2026-09-20> Static-geometry origin. Static (inactive) volumes are built in
+    // REGION-LOCAL coordinates (LLVOVolume::updateRelativeXform static branch) and drawn with
+    // LLViewerRegion::mRenderMatrix — one translation per region (registerFace). Fine at 256 m;
+    // on a 51,200 m region a building 30 km out sits on a 2-4 mm float32 grid and its draw
+    // matrix carries a ~20 km translation whose float32 product with the modelview changes
+    // with every camera rotation: the buildings flicker (Paul 09-20, only on the 200x200).
+    // So each group's static vertices are built relative to mWolfOriginRegion (this octree
+    // node's centre in the region frame, fixed when the group's geometry is rebuilt) and drawn
+    // with mWolfRenderMatrix = T(region origin agent + mWolfOriginRegion). Both the stored
+    // vertices and that translation are small once LLAgent::updateHugeRegionOrigin keeps the
+    // agent origin near the camera, and the sum is exact in float32 (origin agent is a multiple
+    // of 1024 m). A zero origin is the stock region frame.
+    LLVector3 mWolfOriginRegion;
+    LLMatrix4 mWolfRenderMatrix;
+    void wolfSetOriginFromNode();      // at the start of a geometry rebuild (rebuildGeom)
+    void wolfUpdateRenderMatrix();     // after every agent-origin change (shift)
+    // </WolfViewer>
+
      //LISTENER FUNCTIONS
     virtual void handleInsertion(const TreeNode* node, LLViewerOctreeEntry* face);
     virtual void handleRemoval(const TreeNode* node, LLViewerOctreeEntry* face);

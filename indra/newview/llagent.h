@@ -193,6 +193,23 @@ public:
 
     LLVector3       getPosAgentFromGlobal(const LLVector3d &pos_global) const;
     LLVector3d      getPosGlobalFromAgent(const LLVector3 &pos_agent) const;
+    // <WolfViewer> Huge-region origin rebase. Agent space is float32 (LLVector3): on a
+    // 51,200 m region every vertex buffer (LLFace::getGeometryVolume, agent space), drawable
+    // and the F32 modelview (llrender.cpp gGLModelView) sit on a 2-4 mm grid 20-50 km from
+    // the region origin, and coplanar faces flicker as the camera moves (Paul 09-20,
+    // "textures flicker" on the 200x200). The origin of agent space is therefore moved onto
+    // a 1024 m grid near the camera whenever the camera is more than 2048 m from it, with
+    // the region-crossing frame change (setRegion + gObjectList.shiftObjects). Regions up to
+    // 2048 m never rebase, so a normal grid is untouched. The current region's frame is then
+    // NOT agent space: anything the simulator reads as region-local goes through
+    // getPositionRegion() / LLViewerRegion::getPosRegionFromAgent().
+    const LLVector3d& getAgentOriginGlobal() const { return mAgentOriginGlobal; }
+    LLVector3       getPositionRegion();          // agent position in the current region's frame
+    void            rebaseOrigin(const LLVector3d& new_origin_global);
+    void            updateHugeRegionOrigin();     // once per frame from LLAppViewer::idle()
+    static constexpr F32 WOLF_ORIGIN_REBASE_TRIGGER_M = 2048.f;  // float32 ULP at 2048 m = 0.24 mm
+    static constexpr F32 WOLF_ORIGIN_REBASE_SNAP_M = 1024.f;     // exact in float32, >= 1024 m between rebases
+    // </WolfViewer>
     const LLVector3d &getPositionGlobal() const;
     const LLVector3 &getPositionAgent();
     // Call once per frame to update position, angles (radians).

@@ -6035,6 +6035,11 @@ void LLAppViewer::idle()
         LL_RECORD_BLOCK_TIME(FTM_AGENT_POSITION);
         LLGestureMgr::instance().update();
 
+        // <WolfViewer> Huge regions: keep the agent-space origin within 2048 m of the camera
+        // (LLAgent::updateHugeRegionOrigin). Same phase as a region crossing's shift.
+        gAgent.updateHugeRegionOrigin();
+        // </WolfViewer>
+
         gAgent.updateAgentPosition(gFrameDTClamped, yaw, current_mouse.mX, current_mouse.mY);
     }
 

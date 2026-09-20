@@ -67,7 +67,7 @@ void LLAgentUI::buildSLURL(LLSLURL& slurl, const bool escaped /*= true*/)
 #ifdef OPENSIM
         if (LLGridManager::instance().isInOpenSim())
         {
-            return_slurl = LLSLURL(LFSimFeatureHandler::getInstance()->hyperGridURL(), regionp->getName(), gAgent.getPositionAgent());
+            return_slurl = LLSLURL(LFSimFeatureHandler::getInstance()->hyperGridURL(), regionp->getName(), gAgent.getPositionRegion());   // <WolfViewer> region frame
         }
         else
 #endif
@@ -328,5 +328,5 @@ bool LLAgentUI::buildLocationString(std::string& str, ELocationFormat fmt,const 
 }
 bool LLAgentUI::buildLocationString(std::string& str, ELocationFormat fmt)
 {
-    return buildLocationString(str,fmt, gAgent.getPositionAgent());
+    return buildLocationString(str,fmt, gAgent.getPositionRegion());   // <WolfViewer> the parameter is agent_pos_region
 }

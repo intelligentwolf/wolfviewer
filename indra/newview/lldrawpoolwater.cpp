@@ -515,6 +515,7 @@ void LLDrawPoolWater::pushWaterPlanes(int pass)
     static LLStaticHashedString s_zone_size("zoneSize");
     static LLStaticHashedString s_zone_ready("zoneReady");
     static LLStaticHashedString s_wake_ready("wakeReady");
+    static LLStaticHashedString s_surf_path_k0("surfPathK0");   // <WolfViewer 2026-09-21/>
     // </WolfViewer>
     // </FS:WolfViewer>
 
@@ -581,6 +582,9 @@ void LLDrawPoolWater::pushWaterPlanes(int pass)
                 cur_shader->uniform2f(s_expo_size, fld->mExpoSX, fld->mExpoSY);
                 cur_shader->uniform1f(s_depth_ready, 1.f);
                 cur_shader->uniform1f(s_expo_ready, 1.f);
+                // <WolfViewer 2026-09-21> the k0 the exposure bake's A channel (the surf's
+                // optical path) was integrated with — waterV.glsl multiplies the path by it.
+                cur_shader->uniform1f(s_surf_path_k0, fld->mSurfK0);
                 // [WAVES 2026-09-07] zone energy, same span as the exposure field.
                 ch = cur_shader->enableTexture(LLShaderMgr::WOLF_ZONE_FIELD);
                 if (ch > -1 && fld->mZoneTex) gGL.getTexUnit(ch)->bindManual(LLTexUnit::TT_TEXTURE, fld->mZoneTex);
@@ -593,6 +597,7 @@ void LLDrawPoolWater::pushWaterPlanes(int pass)
                 cur_shader->uniform1f(s_depth_ready, 0.f);
                 cur_shader->uniform1f(s_expo_ready, 0.f);
                 cur_shader->uniform1f(s_zone_ready, 0.f);
+                cur_shader->uniform1f(s_surf_path_k0, 0.f);   // <WolfViewer 2026-09-21/>
             }
             const bool wake_here = own_plane && rgn == gAgent.getRegion() && WolfWakeField::instance().isReady();
             cur_shader->uniform1f(s_wake_ready, wake_here ? 1.f : 0.f);
@@ -613,6 +618,13 @@ void LLDrawPoolWater::pushWaterPlanes(int pass)
                     / llmax(LLVOSurfacePatch::sLODFactor, 0.1f);
             }
             cur_shader->uniform1f(s_wolf_lod, lod);
+            // <WolfViewer 2026-09-21> The lattice this plane was tessellated with
+            // (llvowater.cpp wolf_graded_axis): the camera it was graded about and the per-axis
+            // step scale. waterV.glsl needs it to know how many vertices a wave has here, and
+            // so to stop asking the lattice for crests it cannot draw — see wolfLatticeStep().
+            static LLStaticHashedString s_wolf_lattice("wolfLatticeGrade");
+            const LLVector4& grade = water->getWolfLatticeGrade();
+            cur_shader->uniform4f(s_wolf_lattice, grade.mV[VX], grade.mV[VY], grade.mV[VZ], grade.mV[VW]);
             // </WolfViewer>
             // 0 for the region's own water, the prim's Z extent for a wolfwater surface.
             // See LLVOWater::setBoundedWaterDepth for what the shader does with it.

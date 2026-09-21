@@ -59,6 +59,11 @@ public:
         F32 mExpoY0 = -256.f;
         F32 mExpoSX = 768.f;
         F32 mExpoSY = 768.f;
+        // <WolfViewer 2026-09-21> The deep-water surf wavenumber the A-channel optical path
+        // was integrated with. The shader multiplies the path by THIS, not by whatever the
+        // sliders say right now, so phase and path can never disagree while a rebake is due.
+        // 0 = this field has no surf path (no region record, or surf switched off).
+        F32 mSurfK0 = 0.f;
         U64 mStamp = 0;
         // <WolfViewer 2026-09-20> the newest terrain stamp seen and when it first appeared: a
         // terrain change re-bakes only once the stamp has held for STAMP_SETTLE_SECS.
@@ -86,6 +91,12 @@ public:
 
     static constexpr S32 RES = 256;
     static constexpr S32 ERES = 256;
+    // <WolfViewer 2026-09-21> Deep water for the surf dispersion: the depth used where no
+    // region covers a texel, and the cap on the depth fed to the wavenumber. waterV.glsl uses
+    // the same 30 m beyond the depth field. A 36 m wave has k0 h = 5.2 there, where Guo's
+    // shallow-water correction is under 0.1 % — anything past ~20 m is deep and the exact
+    // value cannot matter.
+    static constexpr F32 DEEP_REF_M = 30.f;
     static constexpr F32 CHECK_INTERVAL_SECS = 2.f;
     static constexpr F32 REBAKE_SECS = 20.f;     // neighbours stream in over a minute
     static constexpr F32 MIN_REBAKE_SECS = 8.f;  // [2026-09-10] never re-shape the sea faster than this per region
@@ -141,6 +152,35 @@ public:
     static F32 distanceAt(const Field& f, F32 rx, F32 ry);
     /** <WolfViewer 2026-09-20/> Distance from the open sea (exposure bake B), bilinear; 4000 outside the span. */
     static F32 openDistanceAt(const Field& f, F32 rx, F32 ry);
+    /**
+     * <WolfViewer 2026-09-21/> The surf train's OPTICAL path from the open sea (exposure bake
+     * A), bilinear; 40000 outside the span. Multiply by Field::mSurfK0 for the wave phase.
+     */
+    static F32 openPathAt(const Field& f, F32 rx, F32 ry);
+    /**
+     * <WolfViewer 2026-09-21/> The surf train's DEEP-WATER wavenumber: 2*pi over
+     * max(surfLength, 12 * surfHeight), the same wavelength waterV.glsl builds.
+     *
+     * It takes no region because the surf parameters are not per region here: lldrawpoolwater
+     * .cpp reads WolfWaveZones::current() — the AGENT's region — and sends those uniforms to
+     * every water plane in the scene, neighbours included. The bake has to integrate the
+     * optical path against the same wavelength the shader will draw with, so it asks the same
+     * question. 0 = no region record, i.e. no surf train at all.
+     */
+    static F32 surfK0();
+    /**
+     * <WolfViewer 2026-09-21/> The local wavenumber of a wave of deep-water wavenumber k0 in
+     * depth h. Guo (2002) Coastal Engineering 45, 71-74, restated by Fenton (2006) eq. (3):
+     * k = k0 * (1 - exp(-(k0 h)^(5/4)))^(-2/5). Exact in the deep and shallow limits, 0.7 %
+     * between. KEEP BYTE-IDENTICAL with waterV.glsl wolfSurfK() and the WolfStorm mirrors.
+     */
+    static F32 surfWavenumber(F32 k0, F32 h);
+    /**
+     * <WolfViewer 2026-09-21/> Green's-law shoaling gain Ks = sqrt(cg0 / cg), the factor a
+     * wave's height grows by as it shoals from deep water into depth h, from conservation of
+     * energy flux with the frequency held constant. KEEP BYTE-IDENTICAL with the shaders.
+     */
+    static F32 surfShoalGain(F32 k0, F32 k, F32 h);
     /** [WAVES 2026-09-07] Bake every field again at the next check (a layout arrived / was saved / is previewed). */
     void invalidate();
 
@@ -159,6 +199,7 @@ private:
     F64 mNextCheck = 0.0;
     // Scratch, reused across bakes.
     std::vector<F32> mH, mTmp, mSm, mDist, mOpen, mDepthData, mExpoData, mZoneData;   // <WolfViewer 2026-09-20/> mOpen
+    std::vector<F32> mEDepth, mPath;   // <WolfViewer 2026-09-21/> depth per exposure texel, and the eikonal path baked from it
     bool mRebakeAll = false;   // [WAVES 2026-09-07] set by invalidate()
     U32 mBakes = 0;
     U32 mLastSurfTexels = 0;

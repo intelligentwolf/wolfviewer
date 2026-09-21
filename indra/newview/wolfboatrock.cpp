@@ -750,10 +750,21 @@ WolfBoatRock::Sample WolfBoatRock::sampleWave(const LLViewerObject* objectp, F32
             const F32 gx = WolfWaterField::distanceAt(*field, rx + dW, ry) - WolfWaterField::distanceAt(*field, rx - dW, ry);
             const F32 gy = WolfWaterField::distanceAt(*field, rx, ry + dH) - WolfWaterField::distanceAt(*field, rx, ry - dH);
             const F32 gl = sqrtf(gx * gx + gy * gy);
+            // <WolfViewer 2026-09-21> The baked OPTICAL PATH and its gradient — the ray
+            // direction and the wave phase, exactly as waterV.glsl reads them. A boat has to
+            // rock on the sea that is drawn, so this block mirrors the shader term for term;
+            // the shader's LATTICE BAND LIMIT is the one thing deliberately not mirrored,
+            // because that is a drawing limit and the water really is under the hull.
+            const F32 d_path = WolfWaterField::openPathAt(*field, rx, ry);
+            const F32 px = WolfWaterField::openPathAt(*field, rx + dW, ry) - WolfWaterField::openPathAt(*field, rx - dW, ry);
+            const F32 py = WolfWaterField::openPathAt(*field, rx, ry + dH) - WolfWaterField::openPathAt(*field, rx, ry - dH);
+            const F32 pl = sqrtf(px * px + py * py);
             const bool have_open = d_open < 3000.f && ol > 1.f;
+            const bool have_path = field->mSurfK0 > 0.f && d_open < 3000.f && pl > 1.f;
             const bool have_land = dist < 3000.f && gl > 1.f;
             F32 dx, dy, coord;
-            if (have_open) { dx = ox / ol; dy = oy / ol; coord = d_open; }
+            if (have_path) { dx = px / pl; dy = py / pl; coord = d_open; }
+            else if (have_open) { dx = ox / ol; dy = oy / ol; coord = d_open; }
             else if (have_land) { dx = -gx / gl; dy = -gy / gl; coord = -dist; }
             else
             {
@@ -761,6 +772,7 @@ WolfBoatRock::Sample WolfBoatRock::sampleWave(const LLViewerObject* objectp, F32
                 F32 cl = sqrtf(cx * cx + cy * cy); if (cl <= 0.f) cl = 1.f;
                 dx = cx / cl; dy = cy / cl; coord = rx * dx + ry * dy;
             }
+            const F32 path = have_path ? d_path : coord;
             // depth: the smoothed height, continuing past the border and easing to 30 m
             F32 h = 30.f;
             F32 dt4[4];
@@ -774,13 +786,14 @@ WolfBoatRock::Sample WolfBoatRock::sampleWave(const LLViewerObject* objectp, F32
             }
             const F32 g9 = 9.81f;
             const F32 lambda = llmax(surf_len, 12.f * surf_h);
-            const F32 k = 6.2831853f / llmax(lambda, 8.f);
-            const F32 tk = tanhf(k * llmax(h, 0.05f));
-            const F32 omega = sqrtf(g9 * k * tk);
-            const F32 set_ph = 6.2831853f * (t / llmax(surf_set, 10.f)) - coord * (0.22f / lambda);
+            // <WolfViewer 2026-09-21/> k0 deep-water, omega0 CONSTANT, k local by Guo (2002)
+            const F32 k0 = field->mSurfK0 > 0.f ? field->mSurfK0 : 6.2831853f / llmax(lambda, 8.f);
+            const F32 omega0 = sqrtf(g9 * k0);
+            const F32 k = WolfWaterField::surfWavenumber(k0, h);
+            const F32 set_ph = 6.2831853f * (t / llmax(surf_set, 10.f)) - path * (0.22f / lambda);
             const F32 set_env = 0.30f + 0.70f * smoothstep01(0.15f, 1.f, 0.5f + 0.5f * sinf(set_ph));
             const F32 crest_var = 0.85f + 0.15f * sinf((rx * -dy + ry * dx) * (1.1f / lambda) + t * 0.1f);
-            const F32 ksh = llclamp(1.f / sqrtf(llmax(tk, 0.05f)), 1.f, 1.8f);
+            const F32 ksh = llclamp(WolfWaterField::surfShoalGain(k0, k, h), 0.8f, 1.8f);
             F32 crest_h = llmin(surf_h * surf_zone * set_env * ksh * crest_var, surf_h * 1.15f);
             const F32 h_max = 0.78f * (h + 0.8f * surf_h);
             const F32 break_f = smoothstep01(0.7f, 1.15f, crest_h / llmax(h_max, 0.01f));
@@ -788,8 +801,7 @@ WolfBoatRock::Sample WolfBoatRock::sampleWave(const LLViewerObject* objectp, F32
             crest_h *= smoothstep01(0.2f, 0.6f + 0.5f * surf_h, h);
             if (crest_h > 0.01f)
             {
-                const F32 kl = k / sqrtf(llmax(tk, 0.05f));
-                const F32 ph = kl * coord - omega * t;
+                const F32 ph = k0 * path - omega0 * t;
                 const F32 ph2 = ph + (0.30f + 0.45f * break_f) * sinf(ph);
                 const F32 sn = sinf(ph2), cs = cosf(ph2);
                 const F32 up = 0.5f + 0.5f * sn;
@@ -798,7 +810,7 @@ WolfBoatRock::Sample WolfBoatRock::sampleWave(const LLViewerObject* objectp, F32
                 const F32 tip = upk * upk * upk;
                 const F32 lip = 0.55f * break_f * tip;
                 out.mZ += crest_h * (prof - 0.35f * lip);
-                const F32 sl2 = crest_h * 0.6f * kl * cs * (0.3f + 0.7f * upk);
+                const F32 sl2 = crest_h * 0.6f * k * cs * (0.3f + 0.7f * upk);
                 out.mSx += dx * sl2;
                 out.mSy += dy * sl2;
             }

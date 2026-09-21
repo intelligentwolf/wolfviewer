@@ -58,8 +58,14 @@ template<class T> inline T LERP(T a, T b, F32 factor)
 // exponentially from the camera to a 5 km horizon), laid on the axis-aligned planes
 // LLWorld::updateWaterObjects builds — so the swell no longer stops dead at the region
 // border. Capped so (n+1)^2 stays under the U16 index ceiling.
-static void wolf_graded_axis(F32 half, F32 focus_off, std::vector<F32>& out)
+//
+// <WolfViewer 2026-09-21> step_scale reports the decimation that cap forced: 1 normally, 2
+// once the axis wanted more than 255 lines (a region wider than ~8 km), 4 beyond that. The
+// water vertex shader multiplies its own copy of the step rule by it to know how many
+// vertices a wave has here — see waterV.glsl wolfLatticeStep().
+static void wolf_graded_axis(F32 half, F32 focus_off, std::vector<F32>& out, F32& step_scale)
 {
+    step_scale = 1.f;
     const F32 lo = -half, hi = half;
     const F32 f = llclamp(focus_off, lo, hi);
     std::vector<F32> right, left;
@@ -105,6 +111,7 @@ static void wolf_graded_axis(F32 half, F32 focus_off, std::vector<F32>& out)
         for (size_t i = 0; i < out.size(); i += 2) d.push_back(out[i]);
         if (d.back() < out.back()) d.push_back(out.back());
         out.swap(d);
+        step_scale *= 2.f;   // <WolfViewer 2026-09-21/> every other line dropped = twice the step
     }
     if (out.size() < 2)
     {
@@ -250,6 +257,9 @@ bool LLVOWater::updateGeometry(LLDrawable *drawable)
     // marks every static water drawable for rebuild, and this runs again with the new origin.
     if (mMesh)
     {
+        // <WolfViewer 2026-09-21/> A conforming stream mesh is not a graded lattice: tell the
+        // shader so (see waterV.glsl wolfLatticeStep).
+        mWolfLatticeGrade.set(0.f, 0.f, 0.f, 0.f);
         const ConformingMesh& m = *mMesh;
         if (m.mVerts.empty() || m.mIndices.empty() || m.mVerts.size() > 65535)
         {
@@ -359,6 +369,7 @@ bool LLVOWater::updateGeometry(LLDrawable *drawable)
         // the wave shader at all, so tessellating it would buy nothing.
         size_x = 1;
         size_y = 1;
+        mWolfLatticeGrade.set(0.f, 0.f, 0.f, 0.f);   // <WolfViewer 2026-09-21/>
     }
     else
     {
@@ -372,12 +383,15 @@ bool LLVOWater::updateGeometry(LLDrawable *drawable)
         const LLVector3 center = getPositionAgent();
         const LLVector3 half = getScale() * 0.5f;
         const LLVector3 focus = LLViewerCamera::getInstance()->getOrigin();
-        wolf_graded_axis(half.mV[VX], focus.mV[VX] - center.mV[VX], xs);
-        wolf_graded_axis(half.mV[VY], focus.mV[VY] - center.mV[VY], ys);
+        F32 step_scale_x = 1.f, step_scale_y = 1.f;
+        wolf_graded_axis(half.mV[VX], focus.mV[VX] - center.mV[VX], xs, step_scale_x);
+        wolf_graded_axis(half.mV[VY], focus.mV[VY] - center.mV[VY], ys, step_scale_y);
         size_x = (S32)xs.size() - 1;
         size_y = (S32)ys.size() - 1;
         shared_lattice = true;
         mWolfLatticeFocus = focus;
+        // <WolfViewer 2026-09-21/> the lattice the water shader has to fit its waves into.
+        mWolfLatticeGrade.set(focus.mV[VX], focus.mV[VY], step_scale_x, step_scale_y);
         mWolfLatticeBuiltAt = LLFrameTimer::getElapsedSeconds();
         mWolfLatticeValid = true;
         (void)TARGET_STEP_M; (void)MAX_STEPS;

@@ -173,17 +173,21 @@ bool WolfSurfCurl::rebuild(F32 surf_h)
         gx /= l; gy /= l;
         return true;
     };
-    // Distance to land, bilinear (a nearest read quantises the phase along the line).
-    auto dist_at = [&](F32 x, F32 y, F32& out) -> bool
+    // <WolfViewer 2026-09-21> The surf's OPTICAL PATH from the open sea (exposure A), bilinear
+    // (a nearest read quantises the phase along the line). Was the distance to LAND, which the
+    // water shader stopped using on 09-20 when the surf moved to sea-relative coordinates —
+    // the ribbons have been keyed to a different wave from the sea's ever since. Same field,
+    // same channel, same k0 now, so a curl sits on the crest that threw it.
+    auto path_at = [&](F32 x, F32 y, F32& out) -> bool
     {
         const F32 uu = (x - fld->mExpoX0) / fld->mExpoSX, vv = (y - fld->mExpoY0) / fld->mExpoSY;
         if (uu < 0.f || uu > 1.f || vv < 0.f || vv > 1.f) return false;
         const F32 fx = uu * (ERES - 1), fy = vv * (ERES - 1);
         const S32 i0 = llmin(ERES - 2, (S32)fx), j0 = llmin(ERES - 2, (S32)fy);
         const F32 tx = fx - i0, ty = fy - j0;
-        auto d = [&](S32 ii, S32 jj) { return expo[((size_t)jj * ERES + ii) * 4 + 1]; };   // <WolfViewer 2026-09-20/> RGBA stride
+        auto d = [&](S32 ii, S32 jj) { return expo[((size_t)jj * ERES + ii) * 4 + 3]; };
         out = (d(i0, j0) * (1 - tx) + d(i0 + 1, j0) * tx) * (1 - ty) + (d(i0, j0 + 1) * (1 - tx) + d(i0 + 1, j0 + 1) * tx) * ty;
-        return true;
+        return out < 39000.f;   // no open sea in reach: no surf train to curl
     };
     auto in_surf = [&](F32 x, F32 y) { return WolfWaterField::zoneAt(*fld, x, y) >= 0.9f; };   // painted surf cells only
 
@@ -223,7 +227,7 @@ bool WolfSurfCurl::rebuild(F32 surf_h)
         for (const auto& p : pts)
         {
             F32 gx, gy, dd;
-            if (grad_at(p.first, p.second, gx, gy) && dist_at(p.first, p.second, dd) && in_surf(p.first, p.second))
+            if (grad_at(p.first, p.second, gx, gy) && path_at(p.first, p.second, dd) && in_surf(p.first, p.second))
                 run.push_back({ p.first, p.second, gx, gy, dd });
             else
                 flush();
@@ -331,6 +335,7 @@ void WolfSurfCurl::render(F32 surf_h, F32 surf_set, F32 surf_len, F32 phase_time
     static LLStaticHashedString s_surf_speed("surfSpeed");
     static LLStaticHashedString s_water_level("waterLevel");
     static LLStaticHashedString s_h_break("hBreak");
+    static LLStaticHashedString s_surf_path_k0("surfPathK0");   // <WolfViewer 2026-09-21/>
     static LLStaticHashedString s_region_origin("wolfRegionOrigin");
     static LLStaticHashedString s_water_color("curlWaterColor");
     static LLStaticHashedString s_sun_color("curlSunColor");
@@ -346,6 +351,8 @@ void WolfSurfCurl::render(F32 surf_h, F32 surf_set, F32 surf_len, F32 phase_time
     sh.uniform1f(s_surf_speed, 1.f);
     sh.uniform1f(s_water_level, fld->mWaterLevel);
     sh.uniform1f(s_h_break, breakDepth(surf_h));
+    // <WolfViewer 2026-09-21/> the k0 the ribbons' optical path was integrated with
+    sh.uniform1f(s_surf_path_k0, fld->mSurfK0);
     sh.uniform2f(s_region_origin, origin.mV[VX], origin.mV[VY]);
     // The sea's fog colour and the sun, in linear light like waterF.glsl's own terms.
     const LLColor3 fog_linear = linearColor3(pwater->getWaterFogColor());

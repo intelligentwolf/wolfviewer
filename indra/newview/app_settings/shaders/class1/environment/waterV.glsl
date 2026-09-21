@@ -148,6 +148,17 @@ uniform float surfHeight;
 uniform float surfSetInterval;
 uniform float surfLength;
 uniform float surfSpeed;
+// <WolfViewer 2026-09-21> The lattice this water plane was tessellated with
+// (llvowater.cpp wolf_graded_axis, pushed per face by lldrawpoolwater.cpp):
+// xy = the agent-space camera position it was graded about, zw = the per-axis step scale the
+// U16 vertex cap forced. zw = 0 = not a graded lattice (a conforming stream mesh).
+uniform vec4 wolfLatticeGrade;
+// <WolfViewer 2026-09-21> The deep-water surf wavenumber the exposure bake's A channel (the
+// OPTICAL PATH from the open sea) was integrated with — wolfwaterfield.cpp, Field::mSurfK0.
+// The phase is k0 * path, so it must be THIS k0 and not whatever the sliders read this frame,
+// or phase and path disagree for the seconds between a slider move and the rebake.
+// 0 = no baked path; the surf falls back to a constant-wavelength train on the plain distance.
+uniform float surfPathK0;
 uniform float calmRipple;   // [WAVES 2026-09-07] the calm cells' ripple, metres (lldrawpoolwater.cpp)
 uniform float smallScale;   // [WAVES 2026-09-10] the small-wave cells' swell, fraction of the open sea (lldrawpoolwater.cpp)
 out vec4 vSurf;   // [SURF rev3] x crest (peak only), y breaking, z amplitude used (0 = no surf), w wash behind the crest
@@ -270,6 +281,67 @@ vec3 gerstnerWave(vec2 pos, float wavelength, float amp, vec2 dir, float steepne
                 Q * amp * d.y * cos(f),
                 amp * sin(f));
 }
+
+// <WolfViewer 2026-09-21> ----------------------------------------------------------------
+// METRES BETWEEN THIS VERTEX AND ITS NEIGHBOURS on the water lattice.
+//
+// THE PROBLEM THIS SOLVES (Paul 09-21: "these are supposed to be surf waves I painted on the
+// water, they look jagged and rubbish"). The lattice is graded about the camera — 2 m beside
+// the eye, 4 % of the distance further out — so at 84 m the vertices are 3.4 m apart and at
+// 310 m they are 12.4 m apart. The surf train's own wavelength in the shallows is ~21 m
+// (36 m deep-water length, shortened by finite-depth dispersion), which is 6 vertices per
+// wave at 84 m but 1.7 at 310 m — BELOW NYQUIST. The crest could not be drawn, so it was
+// aliased instead: one vertex per crest pulled up into a sharp pyramid, a whole seascape of
+// them, each exactly one lattice quad wide. The same screenshot shows the near water, where
+// the lattice does resolve the crest, rolling smoothly.
+//
+// So the wave has to be band-limited to the lattice, the way the spectral cascades already
+// fade their displacement with distance. This function is the lattice half of that: it MUST
+// mirror llvowater.cpp wolf_graded_axis — step out from the focus is 4 % of the distance to
+// it, never under 2 m nor over 128 m, times the decimation the vertex cap forced.
+// Returns 0 where this surface is not a graded lattice; callers treat that as fully resolved.
+float wolfLatticeStep(vec2 p)
+{
+    if (wolfLatticeGrade.z <= 0.0 || wolfLatticeGrade.w <= 0.0)
+    {
+        return 0.0;
+    }
+    vec2 s = clamp(abs(p - wolfLatticeGrade.xy) * 0.04, 2.0, 128.0) * wolfLatticeGrade.zw;
+    return max(s.x, s.y);
+}
+// </WolfViewer> ---------------------------------------------------------------------------
+
+// <WolfViewer 2026-09-21> ----------------------------------------------------------------
+// SURF DISPERSION. KEEP BYTE-IDENTICAL with wolfsurfcurlV.glsl, wolfboatrock.cpp,
+// wolfwaterfield.cpp (WolfWaterField::surfWavenumber / surfShoalGain) and the WolfStorm
+// mirrors in Water.js, surf_curl.js and terrain_manager.js.
+//
+// The local wavenumber of a wave whose DEEP-water wavenumber is k0, in depth h.
+// Source: Guo (2002), "Simple and explicit solution of wave dispersion equation", Coastal
+// Engineering 45, 71-74, restated by Fenton (2006) "A note on two approximations to the
+// linear dispersion relation for surface gravity water waves" eq. (3):
+//     k d = (sigma^2 d / g) (1 - exp(-(sigma sqrt(d/g))^(5/2)))^(-2/5).
+// surfLength IS the deep-water wavelength, so sigma^2 = g k0 and sigma sqrt(d/g) = sqrt(k0 d),
+// which collapses the whole expression to the line below. Exact in both the deep-water limit
+// (k -> k0) and the shallow-water limit (k -> omega / sqrt(g h)), within 0.7 % between them.
+float wolfSurfK(float k0, float h)
+{
+    float u = pow(max(k0 * max(h, 0.02), 1e-4), 1.25);
+    return k0 * pow(max(1.0 - exp(-u), 1e-6), -0.4);
+}
+
+// Green's-law shoaling gain: the factor a wave's height grows by coming from deep water into
+// depth h, from conservation of energy flux at CONSTANT frequency.
+//     Ks = sqrt(cg0 / cg),  cg = n omega / k,  n = 0.5 (1 + 2kh / sinh 2kh),  cg0 = 0.5 omega / k0
+// so Ks = sqrt(0.5 (k / k0) / n). 1 in deep water; the familiar h^(-1/4) of Green's law in the
+// shallows. Source: Wikipedia, Wave shoaling (shoaling coefficient / energy flux).
+float wolfSurfShoal(float k0, float k, float h)
+{
+    float kh2 = min(2.0 * k * max(h, 0.02), 20.0);   // sinh overflows past ~20; n is 0.5 long before
+    float n = 0.5 * (1.0 + kh2 / sinh(max(kh2, 1e-4)));
+    return sqrt(0.5 * (k / max(k0, 1e-6)) / max(n, 1e-4));
+}
+// </WolfViewer> ---------------------------------------------------------------------------
 
 // Analytic slope of that wave's z component: dz/dxy = d * A * k * cos(f). MUST be called
 // with the same arguments as its matching gerstnerWave() or the lighting drifts off the
@@ -571,12 +643,28 @@ void main()
             // to its head. Distance to land (G) put crests parallel to the nearest bank and rings
             // round every islet; it stays as the fallback where no open sea is in reach.
             // Source: Water.js [SURF 2026-09-20]; CPU mirror wolfboatrock.cpp.
+            // <WolfViewer 2026-09-21> The wave's coordinate is the baked OPTICAL PATH from
+            // the open sea (exposure A, wolfwaterfield.cpp): the integral of k along the ray,
+            // in units of the deep-water wavelength, so that phase = surfPathK0 * path is the
+            // WKB/ray-theory phase of a real wave train. Its gradient IS the ray direction
+            // and its magnitude IS the local wavenumber, so refraction round a headland,
+            // crest bunching in the shallows and the direction of travel all come out of the
+            // one field and cannot disagree with each other.
+            // Direction is still differenced 80 m either side: the chamfer sweep that built
+            // the path is 8-connected, and over one texel its gradient carries that
+            // quantisation. Over 80 m it does not. The PHASE uses the centre tap, not a mean
+            // of the five — the field is already smooth, and averaging it would flatten
+            // exactly the crest curvature that makes a wave wrap into a bay.
             vec2 dW = vec2(80.0) / exposureSize;
             vec4 eC = WOLF_TEX_WOLF_EXPOSURE_FIELD( euv);
             vec4 eXp = WOLF_TEX_WOLF_EXPOSURE_FIELD( clamp(euv + vec2(dW.x, 0.0), 0.0, 1.0));
             vec4 eXm = WOLF_TEX_WOLF_EXPOSURE_FIELD( clamp(euv - vec2(dW.x, 0.0), 0.0, 1.0));
             vec4 eYp = WOLF_TEX_WOLF_EXPOSURE_FIELD( clamp(euv + vec2(0.0, dW.y), 0.0, 1.0));
             vec4 eYm = WOLF_TEX_WOLF_EXPOSURE_FIELD( clamp(euv - vec2(0.0, dW.y), 0.0, 1.0));
+            bool havePath = surfPathK0 > 0.0 && eC.b < 3000.0;
+            vec2 pgrad = vec2(eXp.a - eXm.a, eYp.a - eYm.a);
+            float pl = length(pgrad);
+            havePath = havePath && pl > 1.0;
             vec2 ograd = vec2(eXp.b - eXm.b, eYp.b - eYm.b);
             float ol = length(ograd);
             bool haveOpen = eC.b < 3000.0 && ol > 1.0;
@@ -584,10 +672,16 @@ void main()
             vec2 grad = vec2(eXp.g - eXm.g, eYp.g - eYm.g);
             float gl = length(grad);
             bool haveLand = dist < 3000.0 && gl > 1.0;
-            vec2 dir = haveOpen ? ograd / ol : (haveLand ? -grad / gl : normalize(depthOrigin + depthRegionSize * 0.5 - regionXY + vec2(0.001, 0.0)));
+            vec2 dir = havePath ? pgrad / pl
+                     : (haveOpen ? ograd / ol
+                     : (haveLand ? -grad / gl : normalize(depthOrigin + depthRegionSize * 0.5 - regionXY + vec2(0.001, 0.0))));
             float openS = (eC.b + eXp.b + eXm.b + eYp.b + eYm.b) * 0.2;   // smoothed contours
             float distS = (dist + eXp.g + eXm.g + eYp.g + eYm.g) * 0.2;
+            // Fallbacks (a landlocked lake with surf painted on it, or a field baked before
+            // the region's record arrived) travel on the plain geometric distance at the
+            // deep-water wavelength: no shoaling, but a clean train rather than a mess.
             float coord = haveOpen ? openS : (haveLand ? -distS : dot(regionXY, dir));
+            float path = havePath ? eC.a : coord;
             float h = 30.0;
             if (depthReady > 0.5)
             {
@@ -600,17 +694,23 @@ void main()
                 vec4 dt = WOLF_TEX_WOLF_DEPTH_FIELD( clamp(sduv, 0.0, 1.0));
                 h = mix(max(depthWaterLevel - dt.a, 0.0), 30.0, outside);
             }
+            // <WolfViewer 2026-09-21> k0 is the DEEP-water wavenumber and omega0 its
+            // deep-water frequency. omega0 is the same number everywhere in the field: in a
+            // shoaling wave train the FREQUENCY is what is conserved, the wavelength is what
+            // changes. The old code took omega from the LOCAL depth, so deep water and the
+            // surf zone ran at frequencies ~0.55 rad/s apart and drifted a whole crest out of
+            // step every 11 s — after an hour of uptime they were 300 crests apart, which is
+            // the "mess" in Paul's screenshot. k is the local wavenumber (Guo 2002).
             const float g = 9.81;
             float lambda = max(surfLength, 12.0 * surfHeight);
-            float k = 6.2831853 / max(lambda, 8.0);
-            float kh = k * max(h, 0.05);
-            float tk = tanh(kh);
-            float omega = sqrt(g * k * tk);
+            float k0 = surfPathK0 > 0.0 ? surfPathK0 : 6.2831853 / max(lambda, 8.0);
+            float omega0 = sqrt(g * k0);
+            float k = wolfSurfK(k0, h);
             vec2 across = vec2(-dir.y, dir.x);
-            float setPh = 6.2831853 * (time * surfSpeed / max(surfSetInterval, 10.0)) - coord * (0.22 / lambda);
+            float setPh = 6.2831853 * (time * surfSpeed / max(surfSetInterval, 10.0)) - path * (0.22 / lambda);
             float setEnv = 0.30 + 0.70 * smoothstep(0.15, 1.0, 0.5 + 0.5 * sin(setPh));
             float crestVar = 0.85 + 0.15 * sin(dot(regionXY, across) * (1.1 / lambda) + time * 0.1);
-            float ksh = clamp(inversesqrt(max(tk, 0.05)), 1.0, 1.8);
+            float ksh = clamp(wolfSurfShoal(k0, k, h), 0.8, 1.8);
             float crestH = min(surfHeight * surfZone * setEnv * ksh * crestVar, surfHeight * 1.15);
             float hEff = h + 0.8 * surfHeight;
             float Hmax = 0.78 * hEff;
@@ -619,9 +719,32 @@ void main()
             crestH *= smoothstep(0.2, 0.6 + 0.5 * surfHeight, h);
             if (crestH > 0.01)
             {
-                float kl = k * inversesqrt(max(tk, 0.05));
-                float ph = kl * coord - omega * time * surfSpeed;
-                float ph2 = ph + (0.30 + 0.45 * breakF) * sin(ph);
+                // <WolfViewer 2026-09-21> BAND LIMIT — the crest can only be as sharp as the
+                // lattice under it. res = vertices this wave gets here, mapped through the
+                // boundary Paul's 09-21 screenshot draws for us: at 84 m the sea had 6.2
+                // vertices per wave and rolled smoothly, at 310 m it had 1.7 and was a field
+                // of one-quad pyramids. So res = 1 at 6 vertices per wave and 0 at 3, and
+                // every term that SHARPENS the crest — the forward lean, the cnoidal peaking,
+                // the barrel, the Gerstner pinch — and finally the crest height itself fade
+                // with it. res = 1 leaves the arithmetic below bit-identical to the pre-band-
+                // limit code. The FOAM (vSurf) keeps the full crest, so distant surf still
+                // reads as a white line of breakers on water the lattice can actually draw —
+                // the same trade the spectral cascades make with fftFade.
+                // The wavelength measured here is 2 pi / k, the LOCAL one, which is now the
+                // wavelength actually drawn: the phase is k0 * path and |grad(k0 path)| = k
+                // by construction of the eikonal bake. Under the old k(x) * distance phase it
+                // was not — the drawn spacing had a second term, distance * dk/dx, that this
+                // test could not see, which is why one-quad spikes survived the first pass.
+                // NOT mirrored on the CPU (wolfboatrock.cpp): a boat rides the real wave, and
+                // this is a drawing limit, not a change to the sea.
+                float vstep = wolfLatticeStep(position.xy);
+                float lamEff = 6.2831853 / max(k, 0.0001);
+                float vpw = (vstep > 0.0) ? lamEff / vstep : 64.0;
+                float res = smoothstep(3.0, 6.0, vpw);
+                float breakG = breakF * res;    // the break as GEOMETRY
+                float crestG = crestH * res;    // the crest height the lattice can carry
+                float ph = k0 * path - omega0 * time * surfSpeed;
+                float ph2 = ph + (0.30 + 0.45 * breakF) * res * sin(ph);
                 float sn = sin(ph2), cs = cos(ph2);
                 float up = 0.5 + 0.5 * sn;
                 // [SURF rev3, Paul 09-07 "looks weird": 20 m crests were 240 m plateaus with
@@ -629,16 +752,17 @@ void main()
                 // trough. upk peaks the crest (exponent 1.6 -> 2.8 as it breaks) and every
                 // forward term is weighted by it, so only the top leans and throws — a concave
                 // face, not a wall. Water.js same.
-                float upk = pow(up, 1.6 + 1.2 * breakF);
-                float prof = mix(-0.25, 1.0, upk) + 0.25 * breakF * upk * upk;
-                float tip = upk * upk * upk;
-                float lip = 0.55 * breakF * tip;   // the crest tip thrown past fold-over: the barrel
-                float Q = mix(0.35, 0.9, breakF);
-                float horiz = crestH * (0.5 * Q * cs * upk + 0.35 * breakF * upk * upk + lip);
-                float lift = crestH * (prof - 0.35 * lip);
+                float upk = pow(up, 1.6 + 1.2 * breakF);                    // foam shape
+                float upkG = pow(up, mix(1.0, 1.6 + 1.2 * breakF, res));    // geometry shape
+                float prof = mix(-0.25, 1.0, upkG) + 0.25 * breakG * upkG * upkG;
+                float tip = upkG * upkG * upkG;
+                float lip = 0.55 * breakG * tip;   // the crest tip thrown past fold-over: the barrel
+                float Q = mix(0.35, 0.9, breakG);
+                float horiz = crestG * (0.5 * Q * cs * upkG + 0.35 * breakG * upkG * upkG + lip);
+                float lift = crestG * (prof - 0.35 * lip);
                 wave_pos += surf_t * (dir.x * horiz) + surf_b * (dir.y * horiz) + surf_n * lift;
-                wave_h += crestH * prof;
-                wave_slope += dir * (crestH * 0.6 * kl * cs * (0.3 + 0.7 * upk));
+                wave_h += crestG * prof;
+                wave_slope += dir * (crestG * 0.6 * k * cs * (0.3 + 0.7 * upkG));
                 // wash = the churn a broken crest leaves BEHIND it (its back slope, cs > 0)
                 float wash = breakF * smoothstep(0.3, 1.0, cs) * smoothstep(0.1, 0.5, up);
                 vSurf = vec4(smoothstep(0.3, 1.0, upk), breakF, crestH, wash);   // peak only

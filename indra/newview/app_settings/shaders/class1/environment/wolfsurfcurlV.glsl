@@ -27,6 +27,8 @@ uniform float time;
 uniform float surfHeight;
 uniform float surfSetInterval;
 uniform float surfLength;
+// <WolfViewer 2026-09-21/> the k0 texcoord2.x's optical path was integrated with; 0 = none
+uniform float surfPathK0;
 uniform float surfSpeed;
 uniform float waterLevel;
 uniform float hBreak;
@@ -43,32 +45,35 @@ void main()
     vec2 base = position.xy;
     vec2 dir = texcoord1;
     float u = texcoord0.y;
-    float aDist = texcoord2.x;
+    // <WolfViewer 2026-09-21/> the ribbon's OPTICAL PATH from the open sea (wolfsurfcurl.cpp)
+    float aPath = texcoord2.x;
 
     // ── the sea's own surf train at the break line (waterV.glsl [SURF], same numbers) ──
     const float g = 9.81;
     float lambda = max(surfLength, 12.0 * surfHeight);
-    float k = 6.2831853 / max(lambda, 8.0);
+    // <WolfViewer 2026-09-21> k0 deep-water, omega0 CONSTANT across the field, k local by Guo
+    // (2002) — see waterV.glsl wolfSurfK(). KEEP BYTE-IDENTICAL with it.
+    float k0 = surfPathK0 > 0.0 ? surfPathK0 : 6.2831853 / max(lambda, 8.0);
+    float omega0 = sqrt(g * k0);
     float h = hBreak;
-    float kh = k * max(h, 0.05);
-    float tk = tanh(kh);
-    float omega = sqrt(g * k * tk);
-    float kl = k * inversesqrt(max(tk, 0.05));
-    float coord = -aDist;
-    float setPh = 6.2831853 * (time * surfSpeed / max(surfSetInterval, 10.0)) - coord * (0.22 / lambda);
+    float ku = pow(max(k0 * max(h, 0.02), 1e-4), 1.25);
+    float k = k0 * pow(max(1.0 - exp(-ku), 1e-6), -0.4);
+    float kh2 = min(2.0 * k * max(h, 0.02), 20.0);
+    float nGrp = 0.5 * (1.0 + kh2 / sinh(max(kh2, 1e-4)));
+    float setPh = 6.2831853 * (time * surfSpeed / max(surfSetInterval, 10.0)) - aPath * (0.22 / lambda);
     float setEnv = 0.30 + 0.70 * smoothstep(0.15, 1.0, 0.5 + 0.5 * sin(setPh));
     vec2 across = vec2(-dir.y, dir.x);
     float crestVar = 0.85 + 0.15 * sin(dot(base, across) * (1.1 / lambda) + time * 0.1);
-    float ksh = clamp(inversesqrt(max(tk, 0.05)), 1.0, 1.8);
+    float ksh = clamp(sqrt(0.5 * (k / max(k0, 1e-6)) / max(nGrp, 1e-4)), 0.8, 1.8);
     float crestH = min(surfHeight * setEnv * ksh * crestVar, surfHeight * 1.15);
     float Hmax = 0.78 * (h + 0.8 * surfHeight);
     crestH = min(crestH, Hmax);
     crestH *= smoothstep(0.2, 0.6 + 0.5 * surfHeight, h);
 
     // ── how far past the break line is the last crest? (the sea's crest sits at ph = 0.95) ──
-    float ph = kl * coord - omega * time * surfSpeed;
+    float ph = k0 * aPath - omega0 * time * surfSpeed;
     float past = mod(0.95 - ph, 6.2831853);
-    float shift = past / kl;
+    float shift = past / k;
     float peel = 0.25 * lambda * (0.5 + 0.5 * sin(texcoord0.x * 0.02 + time * 0.05));
     float travel = 0.45 * lambda;
     float p = (shift - peel) / travel;

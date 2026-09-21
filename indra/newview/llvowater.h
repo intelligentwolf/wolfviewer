@@ -31,6 +31,7 @@
 #include "llviewertexture.h"
 #include "pipeline.h"
 #include "v2math.h"
+#include "v4math.h"   // <WolfViewer 2026-09-21> LLVector4 mWolfLatticeGrade
 #include <memory>   // <WolfViewer> ConformingMesh
 #include <vector>
 
@@ -140,12 +141,21 @@ public:
     void setConformingMesh(std::shared_ptr<const ConformingMesh> mesh, F32 flow_mps);
     F32  getStreamFlow() const { return mStreamFlow; }
     bool hasConformingMesh() const { return mMesh != nullptr; }
+    // <WolfViewer 2026-09-21> The lattice this plane was last tessellated with, for the water
+    // shader's wave band limit: xy = the agent-space camera position updateGeometry graded it
+    // about, zw = the per-axis step scale the U16 vertex cap forced (see wolf_graded_axis).
+    // zw = 0 means this surface has no graded lattice (a conforming stream mesh, or opaque
+    // legacy water, neither of which runs the wave shader).
+    const LLVector4& getWolfLatticeGrade() const { return mWolfLatticeGrade; }
     // </WolfViewer>
     // </FS:WolfViewer>
 
 protected:
     bool mIsEdgePatch;
     LLVector3 mWolfLatticeFocus;       // <WolfViewer 2026-09-10> agent-space camera the lattice was graded about
+    // <WolfViewer 2026-09-21> (focus x, focus y, step scale x, step scale y); zw 0 = not a
+    // graded lattice. Explicitly zeroed: LLVector4's default is (0, 0, 0, 1).
+    LLVector4 mWolfLatticeGrade = LLVector4(0.f, 0.f, 0.f, 0.f);
     F64       mWolfLatticeBuiltAt = 0.0;
     bool      mWolfLatticeValid = false;
     S32  mRenderType;

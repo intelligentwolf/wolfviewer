@@ -141,6 +141,49 @@ F32 WolfWaterField::openDistanceAt(const Field& f, F32 rx, F32 ry)
     return (d(i0, j0) * (1 - tx) + d(i0 + 1, j0) * tx) * (1 - ty) + (d(i0, j0 + 1) * (1 - tx) + d(i0 + 1, j0 + 1) * tx) * ty;
 }
 
+// <WolfViewer 2026-09-21/> see wolfwaterfield.h. Source: exposure bake A channel.
+F32 WolfWaterField::openPathAt(const Field& f, F32 rx, F32 ry)
+{
+    if (!f.mReady || f.mExpo.size() != (size_t)ERES * ERES * 4) return 40000.f;
+    const F32 u = (rx - f.mExpoX0) / f.mExpoSX, v = (ry - f.mExpoY0) / f.mExpoSY;
+    if (u < 0.f || u > 1.f || v < 0.f || v > 1.f) return 40000.f;
+    const F32 fx = u * (ERES - 1), fy = v * (ERES - 1);
+    const S32 i0 = llmin(ERES - 2, (S32)fx), j0 = llmin(ERES - 2, (S32)fy);
+    const F32 tx = fx - i0, ty = fy - j0;
+    auto d = [&](S32 i, S32 j) { return f.mExpo[((size_t)j * ERES + i) * 4 + 3]; };
+    return (d(i0, j0) * (1 - tx) + d(i0 + 1, j0) * tx) * (1 - ty) + (d(i0, j0 + 1) * (1 - tx) + d(i0 + 1, j0 + 1) * tx) * ty;
+}
+
+// <WolfViewer 2026-09-21/> see wolfwaterfield.h. The wavelength lldrawpoolwater.cpp sends the
+// shader, from the same clamps: surfLength 12..400 m, surfHeight 0.2..20 m.
+F32 WolfWaterField::surfK0()
+{
+    const WolfWaveZones::Region* wr = WolfWaveZones::instance().current();
+    if (!wr) return 0.f;
+    const LLSD& p = WolfWaveZones::instance().params();
+    const F32 h = llclamp(p.has("surfHeight") ? (F32)p["surfHeight"].asReal() : 3.f, 0.2f, 20.f);
+    const F32 len = llclamp(p.has("surfLength") ? (F32)p["surfLength"].asReal() : 36.f, 12.f, 400.f);
+    if (h <= 0.01f) return 0.f;
+    return 6.2831853f / llmax(len, 12.f * h);
+}
+
+// <WolfViewer 2026-09-21/> see wolfwaterfield.h — Guo (2002) / Fenton (2006) eq. (3).
+F32 WolfWaterField::surfWavenumber(F32 k0, F32 h)
+{
+    const F32 u = powf(llmax(k0 * llmax(h, 0.02f), 1e-4f), 1.25f);
+    return k0 * powf(llmax(1.f - expf(-u), 1e-6f), -0.4f);
+}
+
+// <WolfViewer 2026-09-21/> see wolfwaterfield.h.
+// cg = n * omega / k with n = 0.5 * (1 + 2kh / sinh 2kh); cg0 = 0.5 * omega / k0 (deep water).
+// Ks = sqrt(cg0 / cg) = sqrt(0.5 * (k / k0) / n).
+F32 WolfWaterField::surfShoalGain(F32 k0, F32 k, F32 h)
+{
+    const F32 kh2 = llmin(2.f * k * llmax(h, 0.02f), 20.f);   // sinh overflows past ~20; n is 0.5 long before
+    const F32 n = 0.5f * (1.f + kh2 / sinhf(llmax(kh2, 1e-4f)));
+    return sqrtf(0.5f * (k / llmax(k0, 1e-6f)) / llmax(n, 1e-4f));
+}
+
 void WolfWaterField::invalidate()
 {
     // One region is baked per check (idle), so every field is marked stale and they follow
@@ -569,6 +612,11 @@ void WolfWaterField::bake(LLViewerRegion* regionp, Field& f)
     const F32 diag = sqrtf(etx * etx + ety * ety);
     const F32 BIG = 1e9f;
     mDist.assign((size_t)E * E, BIG);
+    // <WolfViewer 2026-09-21> The water DEPTH at every exposure texel, kept for the eikonal
+    // pass below. Space no region covers is open ocean: 30 m, the same deep reference
+    // waterV.glsl uses beyond the depth field. Anything past ~20 m is deep water to a 36 m
+    // wave (k0 h > 3.5 puts Guo's correction inside 0.1 %), so the exact value cannot matter.
+    mEDepth.assign((size_t)E * E, DEEP_REF_M);
     for (S32 j = 0; j < E; ++j)
     {
         const F32 py = ey0 + j * ety;
@@ -577,6 +625,7 @@ void WolfWaterField::bake(LLViewerRegion* regionp, Field& f)
             F32 hh;
             const bool has = heightAt(regionp, ex0 + i * etx, py, hh);
             mDist[j * E + i] = (has && hh >= water_level) ? 0.f : BIG;
+            mEDepth[j * E + i] = has ? llclamp(water_level - hh, 0.f, DEEP_REF_M) : DEEP_REF_M;
         }
     }
     for (S32 j = 0; j < E; ++j)
@@ -652,9 +701,97 @@ void WolfWaterField::bake(LLViewerRegion* regionp, Field& f)
             mOpen[row + i] = d;
         }
     }
+    // <WolfViewer 2026-09-21> ------------------------------------------------------------
+    // THE EIKONAL (OPTICAL) PATH from the open sea — what the surf train's phase is made of.
+    //
+    // THE BUG THIS REPLACES (Paul 09-21: "doesn't really look like surfing waves just a
+    // mess"): the shader built its phase as `kl * coord`, the LOCAL shallow-water wavenumber
+    // times the absolute distance from the sea. That is not a wave. A wave train in water of
+    // varying depth has phase  phi = INTEGRAL of k along the ray, minus omega t with omega
+    // CONSTANT — frequency is the conserved quantity as a wave shoals, not wavelength
+    // (Wikipedia, Wave shoaling: "wave crests are conserved and the frequency must remain
+    // constant along a wave ray"). Writing k(x)*s instead gives
+    //   d(phase)/dx = k + s * dk/dx,
+    // and with s in the hundreds of metres the second term swamps the first: crests piled
+    // into ribbons wherever the seabed sloped and cancelled to a stationary plateau where it
+    // did not — the giant smooth white dome in Paul's screenshot was one such plateau. The
+    // old code also used a LOCAL omega, so deep and shallow water drifted apart by ~0.55
+    // rad/s: after an hour of uptime the two were 300 crests out of step.
+    //
+    // Fix: bake the true eikonal solution. The chamfer sweeps above already relax a shortest
+    // path; relaxing the same neighbourhood with the step WEIGHTED by k/k0 gives Fermat's
+    // shortest OPTICAL path T = integral of (k/k0) ds, and phi = k0 * T is then exactly the
+    // WKB/ray-theory phase, with |grad phi| = k and grad phi along the ray — so crest
+    // spacing, crest bending (refraction) and direction all come out of one field.
+    // T is stored rather than phi so the texture holds a SMOOTH metre-scale quantity that
+    // bilinear filtering can carry; the shader multiplies by k0 and gets the oscillation.
+    //
+    // The local wavenumber is Guo (2002), "Simple and explicit solution of wave dispersion
+    // equation", Coastal Engineering 45, 71-74, as restated by Fenton (2006) eq. (3):
+    //     k d = (sigma^2 d / g) * (1 - exp(-(sigma sqrt(d/g))^(5/2)))^(-2/5)
+    // Here sigma^2 = g k0 by definition of surfLength (the DEEP-water wavelength), so
+    // sigma sqrt(d/g) = sqrt(k0 d) and the whole thing collapses to
+    //     k = k0 * (1 - exp(-(k0 h)^(5/4)))^(-2/5),
+    // exact in both the deep and the shallow limit and within 0.7 % between them.
+    // KEEP BYTE-IDENTICAL with waterV.glsl wolfSurfK(), wolfsurfcurlV.glsl, wolfboatrock.cpp
+    // and WolfStorm Water.js / surf_curl.js / terrain_manager.js.
+    // -------------------------------------------------------------------------------------
+    const F32 k0 = surfK0();
+    mPath.assign((size_t)E * E, BIG);
+    std::vector<F32> kr((size_t)E * E, 1.f);   // k / k0 at each texel, >= 1 everywhere
+    // No region record, or surf switched off: no wavelength to integrate against, so the
+    // path stays 0 and the shader keeps its geometric fallback (mSurfK0 0 says so).
+    if (k0 > 0.f)
+    {
+        for (S32 k = 0; k < E * E; ++k)
+        {
+            kr[k] = surfWavenumber(k0, mEDepth[k]) / k0;
+            if (mOpen[k] <= 0.f) mPath[k] = 0.f;   // seeded on the same open-sea texels as mOpen
+        }
+        // Weight for a step INTO texel c from texel n: the mean of the two texels' k/k0 times the
+        // step length — the trapezoid rule for the integral along that step.
+        auto relax = [&](S32 c, S32 n, F32 len)
+        {
+            const F32 w = mPath[n] + 0.5f * (kr[c] + kr[n]) * len;
+            if (w < mPath[c]) mPath[c] = w;
+        };
+        for (S32 j = 0; j < E; ++j)
+        {
+            const S32 row = j * E, up = row - E;
+            for (S32 i = 0; i < E; ++i)
+            {
+                if (i > 0) relax(row + i, row + i - 1, etx);
+                if (j > 0)
+                {
+                    relax(row + i, up + i, ety);
+                    if (i > 0) relax(row + i, up + i - 1, diag);
+                    if (i < E - 1) relax(row + i, up + i + 1, diag);
+                }
+            }
+        }
+        for (S32 j = E - 1; j >= 0; --j)
+        {
+            const S32 row = j * E, dn = row + E;
+            for (S32 i = E - 1; i >= 0; --i)
+            {
+                if (i < E - 1) relax(row + i, row + i + 1, etx);
+                if (j < E - 1)
+                {
+                    relax(row + i, dn + i, ety);
+                    if (i < E - 1) relax(row + i, dn + i + 1, diag);
+                    if (i > 0) relax(row + i, dn + i - 1, diag);
+                }
+            }
+        }
+    }
+    else
+    {
+        mPath.assign((size_t)E * E, 0.f);
+    }
     // [SURF 2026-09-07] R = exposure (every existing reader unchanged), G = the chamfer
-    // DISTANCE TO LAND in metres (capped at 4000), B = distance from the open sea, A = 1
-    // (RGBA32F: RGB32F is not filterable). Source: terrain_manager.js _bakeSwellExposure.
+    // DISTANCE TO LAND in metres (capped at 4000), B = distance from the open sea.
+    // <WolfViewer 2026-09-21> A = the OPTICAL path from the open sea (was a constant 1).
+    // Capped at 40000: 10x the distance cap, and k/k0 never exceeds ~10 above 2 cm of water.
     mExpoData.assign((size_t)E * E * 4, 1.f);
     for (S32 k = 0; k < E * E; ++k)
     {
@@ -662,8 +799,10 @@ void WolfWaterField::bake(LLViewerRegion* regionp, Field& f)
         mExpoData[(size_t)k * 4] = t * t * (3.f - 2.f * t);
         mExpoData[(size_t)k * 4 + 1] = llmin(mDist[k], 4000.f);
         mExpoData[(size_t)k * 4 + 2] = llmin(mOpen[k], 4000.f);
+        mExpoData[(size_t)k * 4 + 3] = llmin(mPath[k], 40000.f);
     }
     upload(f.mExpoTex, E, E, GL_RGBA32F, GL_RGBA, mExpoData.data());
+    f.mSurfK0 = k0;
 
     // [WAVES 2026-09-07] The painted wave zones over the same span, one texel per cell.
     // [2026-09-10] The cell is the region's own (16 m, bigger on huge regions — wolfwavezones

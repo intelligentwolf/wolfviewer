@@ -618,12 +618,23 @@ void WolfWaveZones::preview(const std::string& zones)
 void WolfWaveZones::previewParams(const LLSD& params)
 {
     if (!WolfGrid::isWolfTerritories()) { notify("These tools are only available on Wolf Territories Grid."); return; }
-    // Uniforms, read every frame by lldrawpoolwater.cpp through params(): no rebake needed.
     LLViewerRegion* region = gAgent.getRegion();
     if (!region) return;
+    // <WolfViewer 2026-09-21> Most of these are uniforms read every frame through params() and
+    // need no rebake. The surf WAVELENGTH is not: the exposure bake integrates the surf's
+    // optical path against it (wolfwaterfield.cpp), so moving that slider — or the height
+    // slider, since the wavelength is max(surfLength, 12 * surfHeight) — leaves the baked path
+    // describing a different wave from the one being drawn. Rebake, but only when the
+    // wavelength actually moved; a rebake per slider tick on every other control would be a
+    // hitch for nothing. WolfWaterField paces itself at MIN_REBAKE_SECS regardless.
+    const F32 k0_before = WolfWaterField::surfK0();
     ++mPreviewRevision;
     mPreviewParamsFor = region->getHandle();
     mPreviewParams = params;
+    if (WolfWaterField::surfK0() != k0_before)
+    {
+        WolfWaterField::instance().invalidate();
+    }
 }
 
 const LLSD& WolfWaveZones::params() const

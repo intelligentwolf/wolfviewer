@@ -5661,8 +5661,10 @@ void LLVolumeGeometryManager::registerFace(LLSpatialGroup* group, LLFace* facep,
     {
         // <WolfViewer 2026-09-20> static: the group's own origin, not the region's (see
         // llspatialpartition.h mWolfOriginRegion; the vertices were built against it in
-        // genDrawInfo / rebuildMesh below).
-        model_mat = &(group->mWolfRenderMatrix);
+        // genDrawInfo / rebuildMesh below). [2026-09-21 hotfix] A bridge group keeps the stock
+        // region matrix (its origin is zero and its region pointer is not to be trusted).
+        LLSpatialPartition* part = group->getSpatialPartition();
+        model_mat = (part && part->isBridge()) ? &(drawable->getRegion()->mRenderMatrix) : &(group->mWolfRenderMatrix);
     }
 
     //drawable->getVObj()->setDebugText(llformat("%d", drawable->isState(LLDrawable::ANIMATED_CHILD)));

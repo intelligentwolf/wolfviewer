@@ -341,6 +341,7 @@ public:
     LLMatrix4 mWolfRenderMatrix;
     void wolfSetOriginFromNode();      // at the start of a geometry rebuild (rebuildGeom)
     void wolfUpdateRenderMatrix();     // after every agent-origin change (shift)
+    LLViewerRegion* wolfLiveRegion();  // this group's region, or null for a bridge / a dead region
     // </WolfViewer>
 
      //LISTENER FUNCTIONS

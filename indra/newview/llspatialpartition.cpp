@@ -42,6 +42,7 @@
 #include "llfloatertools.h"
 #include "llviewercontrol.h"
 #include "llviewerregion.h"
+#include "llworld.h"   // <WolfViewer> isRegionListed (wolfLiveRegion)
 #include "llvosurfacepatch.h"   // <WolfViewer> per-patch terrain matrix
 #include "llcamera.h"
 #include "pipeline.h"
@@ -480,26 +481,52 @@ void LLSpatialGroup::shift(const LLVector4a &offset)
 }
 
 // <WolfViewer 2026-09-20> see llspatialpartition.h mWolfOriginRegion
-void LLSpatialGroup::wolfSetOriginFromNode()
+//
+// [2026-09-21 w42 HOTFIX — "crashing when teleporting"] The region these helpers read MUST NOT
+// come from a bridge. A spatial bridge (attachment, moving linkset, HUD, control avatar) keeps
+// the LLViewerRegion pointer it was constructed with (lldrawable.cpp new LLVolumeBridge(this,
+// getRegion())) and nothing ever updates it when the avatar changes region; stock code never
+// reads a bridge's mRegionp, so it was harmless. w42 read it here, and one second after every
+// cross-region teleport — when the region left behind is deleted (process_disable_simulator ->
+// LLWorld::removeRegion) — the next attachment rebuild dereferenced freed memory (resident log:
+// TELEPORT_NONE at :44, "status: error" at :45, no ERROR line = SIGSEGV). Bridges never draw
+// through the group matrix anyway (their drawables are active), so they keep the stock region
+// frame: zero origin, identity matrix, and registerFace keeps the drawable's region matrix.
+// Region-owned partitions die with their region, and the list check catches the rest.
+LLViewerRegion* LLSpatialGroup::wolfLiveRegion()
 {
     LLSpatialPartition* part = getSpatialPartition();
-    if (!part || !part->mRegionp || !mOctreeNode)
+    if (!part || part->isBridge() || !part->mRegionp)
+    {
+        return nullptr;
+    }
+    return LLWorld::getInstance()->isRegionListed(part->mRegionp) ? part->mRegionp : nullptr;
+}
+
+void LLSpatialGroup::wolfSetOriginFromNode()
+{
+    LLViewerRegion* region = wolfLiveRegion();
+    if (!region || !mOctreeNode)
     {
         mWolfOriginRegion.setZero();
     }
     else
     {
         const LLVector4a& c = mOctreeNode->getCenter();
-        mWolfOriginRegion = LLVector3(c.getF32ptr()) - part->mRegionp->getOriginAgent();
+        mWolfOriginRegion = LLVector3(c.getF32ptr()) - region->getOriginAgent();
     }
     wolfUpdateRenderMatrix();
 }
 
 void LLSpatialGroup::wolfUpdateRenderMatrix()
 {
-    LLSpatialPartition* part = getSpatialPartition();
-    const LLVector3 origin_agent = (part && part->mRegionp) ? part->mRegionp->getOriginAgent() : LLVector3::zero;
-    mWolfRenderMatrix.setTranslation(origin_agent + mWolfOriginRegion);
+    LLViewerRegion* region = wolfLiveRegion();
+    if (!region)
+    {
+        mWolfRenderMatrix.setIdentity();
+        return;
+    }
+    mWolfRenderMatrix.setTranslation(region->getOriginAgent() + mWolfOriginRegion);
 }
 // </WolfViewer>
 

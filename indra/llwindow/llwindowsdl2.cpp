@@ -137,6 +137,40 @@ namespace
     // Unused in the current clipboard implementation -Zi
     // long const MAX_PASTE_BUFFER_SIZE = 16383;
 
+    // <WolfViewer 2026-09-21> THE VIEWER MUST NEVER LET Xlib CALL exit().
+    //
+    // Xlib's default protocol-error handler is _XDefaultError, and its last act is exit().
+    // Nothing in this viewer installed a handler, so ANY X protocol error killed the process
+    // from whatever thread hit it. That is how a clipboard copy froze the whole viewer
+    // (Paul 09-21, proven under gdb — the chain was
+    //   filterSelectionRequest -> XSync -> _XReply -> _XError -> _XDefaultError -> exit()
+    //   -> __call_tls_dtors -> boost::fibers::context_initializer::~context_initializer
+    //   -> boost::fibers::scheduler::~scheduler
+    // which sets the fiber scheduler's shutdown_ flag and then spins in scheduler::dispatch()
+    // forever, because exit() during normal operation leaves worker fibers that never
+    // terminate. Window dead, process alive, one core pinned. See llwindowsdl2.cpp's
+    // selection code below for what generated the error.)
+    //
+    // A protocol error is recoverable — the X server has already discarded the bad request.
+    // Returning 0 from a handler installed with XSetErrorHandler is the documented way to
+    // carry on. (XSetIOErrorHandler is the separate, genuinely fatal one; we leave it alone.)
+    int wolfX11ErrorHandler( Display* display, XErrorEvent* event )
+    {
+        char text[256] = { 0 };
+        if (display && event)
+        {
+            XGetErrorText( display, event->error_code, text, sizeof(text) - 1 );
+        }
+        LL_WARNS("Window") << "X protocol error " << (event ? (S32)event->error_code : -1)
+                           << " (" << text << ") on request "
+                           << (event ? (S32)event->request_code : -1) << "."
+                           << (event ? (S32)event->minor_code : -1)
+                           << " resource " << std::hex << (event ? (U64)event->resourceid : 0) << std::dec
+                           << " -- ignored. Xlib's default handler would have called exit()."
+                           << LL_ENDL;
+        return 0;
+    }
+
     void filterSelectionRequest( XEvent aEvent )
     {
         auto *display = LLWindowSDL::getSDLDisplay();
@@ -161,9 +195,44 @@ namespace
             else
                 utf8 = wstring_to_utf8str(gWindowImplementation->getSecondaryText());
 
-            XChangeProperty(display, request.requestor, request.property,
-                            request.target, 8, PropModeReplace,
-                            (unsigned char *) utf8.c_str(), utf8.length());
+            // <WolfViewer 2026-09-21> A selection bigger than one X request is what broke
+            // this. The whole string went into a single XChangeProperty with no size check
+            // and no INCR fallback, so copying a large script made the server reject the
+            // request -- and with no error handler installed that reached exit(). The dead
+            // `MAX_PASTE_BUFFER_SIZE = 16383` above is the guard that used to be here.
+            //
+            // Ask the server what it will actually take. XMaxRequestSize is in 4-byte units;
+            // XExtendedMaxRequestSize is non-zero only when the BIG-REQUESTS extension is
+            // present, and Xlib uses it automatically for XChangeProperty when it is. Keep a
+            // margin for the request header itself.
+            long units = XExtendedMaxRequestSize( display );
+            if (0 == units)
+            {
+                units = XMaxRequestSize( display );
+            }
+            const size_t max_bytes = (units > 64) ? (size_t)(units - 64) * 4 : 16383;
+
+            if (utf8.length() <= max_bytes)
+            {
+                XChangeProperty(display, request.requestor, request.property,
+                                request.target, 8, PropModeReplace,
+                                (unsigned char *) utf8.c_str(), utf8.length());
+            }
+            else
+            {
+                // Too big to hand over in one request, and we do not implement the ICCCM
+                // INCR protocol. Refuse the transfer properly (property None) instead of
+                // issuing a request the server will reject: the requestor sees a failed
+                // conversion, which is what ICCCM asks of us, and the viewer stays alive.
+                // DECLARED LIMIT: pasting a selection this large into ANOTHER application
+                // will not work; inside the viewer it is unaffected, because that reads
+                // mSecondaryClipboard directly and never goes near X.
+                LL_WARNS("Window") << "Selection of " << utf8.length()
+                                   << " bytes exceeds the " << max_bytes
+                                   << " byte X request limit; refusing the transfer."
+                                   << " (INCR is not implemented.)" << LL_ENDL;
+                reply.property = None;
+            }
         }
         else if (request.selection == XA_CLIPBOARD)
         {
@@ -250,6 +319,9 @@ void LLWindowSDL::initialiseX11Clipboard()
 {
     if (!mSDL_Display)
         return;
+
+    // <WolfViewer 2026-09-21/> before anything can generate one — see wolfX11ErrorHandler
+    XSetErrorHandler( wolfX11ErrorHandler );
 
     SDL_EventState(SDL_SYSWMEVENT, SDL_ENABLE);
     SDL_SetEventFilter(x11_clipboard_filter, nullptr);

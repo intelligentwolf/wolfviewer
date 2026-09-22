@@ -86,12 +86,17 @@ private:
         F32         mGain = 0.f;
         bool        mWantName = false;
         bool        mInBand = false;     // passed the waterline-band gate (diagnostics)
+        // <WolfViewer 2026-09-22> A BOARD planes on top of the water; a hull rides down into
+        // the troughs. Paul: "the surfboard should ALWAYS be above the water its no good it
+        // being under it". Same wave, different rule about the downstroke — see idle().
+        bool        mBoard = false;
         const char* mWhy = "";
     };
     enum NameVerdict
     {
         NAME_UNKNOWN,   // properties not received yet
         NAME_BOAT,
+        NAME_BOARD,     // <WolfViewer 2026-09-22/> a boat that planes: never below the surface
         NAME_NOT_BOAT
     };
     struct Sample
@@ -114,6 +119,7 @@ private:
         F32          mAppliedBob = 0.f;
         LLQuaternion mAppliedTilt;
         bool         mApplied = false;
+        bool         mBoard = false;   // <WolfViewer 2026-09-22/> never dips below the surface
     };
 
     void sweep();

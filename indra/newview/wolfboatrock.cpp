@@ -56,6 +56,12 @@ namespace
     const std::regex BOAT_RE("boat|jet ?ski|yacht|dinghy|dinghies|canoe|kayak|catamaran|gondola|\\bships?\\b|\\bsail(?:ing|s|boats?)?\\b"
                              "|\\bsurf ?boards?\\b|\\bpaddle ?boards?\\b|\\bbody ?boards?\\b|\\blong ?boards?\\b|\\bsurf\\b",
                              std::regex::ECMAScript | std::regex::icase);
+    // <WolfViewer 2026-09-22> The boards out of that list. A board PLANES: it rides the crest
+    // and sits on the surface in the trough, it never goes under. A hull does go under --
+    // the waterline band below reaches 3 m down for exactly that reason -- so the two cannot
+    // share one rule. KEEP IN STEP with WolfStorm terrain_manager.js _BOARD_RE.
+    const std::regex BOARD_RE("\\bsurf ?boards?\\b|\\bpaddle ?boards?\\b|\\bbody ?boards?\\b|\\blong ?boards?\\b|\\bsurf\\b",
+                              std::regex::ECMAScript | std::regex::icase);
 
     // Source: terrain_manager.js updateFloaters() — the low-pass runs per 30 Hz logic
     // tick: bob += (target - bob) * 0.15, slopes * 0.12 ("hulls have inertia, and 30Hz
@@ -206,12 +212,14 @@ void WolfBoatRock::sweep()
         if (it != mRockers.end())
         {
             it->second.mGain = c.mVerdict.mGain;
+            it->second.mBoard = c.mVerdict.mBoard;   // <WolfViewer 2026-09-22/>
         }
         else
         {
             Rocker r;
             r.mObject = c.mObject;
             r.mGain = c.mVerdict.mGain;
+            r.mBoard = c.mVerdict.mBoard;   // <WolfViewer 2026-09-22/>
             mRockers[c.mObject] = r;
             LL_DEBUGS("WolfBoatRock") << "rocking " << c.mObject->getID() << " gain " << c.mVerdict.mGain
                                       << ": " << c.mVerdict.mWhy << LL_ENDL;
@@ -275,6 +283,16 @@ void WolfBoatRock::step()
         // gain: 1.0 physical/crewed, 0.6 parked floaters (classify())
         const F32 g = (r.mGain > 0.f) ? r.mGain : 1.f;
         r.mBob += (w.mZ * g - r.mBob) * bob_alpha;
+        // <WolfViewer 2026-09-22> A BOARD PLANES. The bob is an offset from where the sim
+        // put the object, and on the downstroke it goes NEGATIVE — correct for a hull, which
+        // rides down into the trough (the waterline band reaches 3 m down for exactly that),
+        // but it is what pushed a surfboard under the surface. A board rides the crest up and
+        // sits on the surface in the trough: clamp the downstroke away, keep the lift.
+        // Clamped after the low-pass so the smoothing cannot reintroduce a dip.
+        if (r.mBoard && r.mBob < 0.f)
+        {
+            r.mBob = 0.f;
+        }
         r.mSx += (w.mSx * g - r.mSx) * slope_alpha;
         r.mSy += (w.mSy * g - r.mSy) * slope_alpha;
 
@@ -495,6 +513,8 @@ WolfBoatRock::Verdict WolfBoatRock::classify(LLViewerObject* objectp) const
     {
         return no("name says not a boat");
     }
+    // <WolfViewer 2026-09-22/> carried through to idle(), which holds a board on the surface
+    v.mBoard = (nv == NAME_BOARD);
     if (physical || crewed)
     {
         v.mRock = true;
@@ -555,6 +575,10 @@ WolfBoatRock::NameVerdict WolfBoatRock::nameVerdict(const LLViewerObject* object
     if (std::regex_search(name, NOT_BOAT_RE))
     {
         return NAME_NOT_BOAT;
+    }
+    if (std::regex_search(name, BOARD_RE) || std::regex_search(desc, BOARD_RE))
+    {
+        return NAME_BOARD;   // <WolfViewer 2026-09-22/> floats, but never dips under
     }
     if (std::regex_search(name, BOAT_RE) || std::regex_search(desc, BOAT_RE))
     {

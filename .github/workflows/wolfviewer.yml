@@ -1,7 +1,16 @@
 name: WolfViewer
 
 on:
-  workflow_dispatch: {}
+  # [2026-09-22] Pick a single platform when you are iterating. A push still builds all four.
+  # Re-running one FAILED platform of an existing run needs no dispatch at all:
+  #   gh run rerun --job <job-id> --repo intelligentwolf/wolfviewer
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: "Platform to build"
+        type: choice
+        default: all
+        options: [all, linux64, windows64, windows64-avx2, macos64]
   push:
     branches: ["wolfviewer"]
     tags: ["v*"]
@@ -24,23 +33,44 @@ env:
   release_name: "Sandy Shores"
 
 jobs:
+  # [2026-09-22] The matrix is built here so workflow_dispatch can ask for ONE platform.
+  # A push (or any dispatch asking for "all") gets the full four, exactly as before.
+  # The four entries live here and nowhere else.
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.pick.outputs.matrix }}
+    steps:
+      - id: pick
+        shell: bash
+        run: |
+          # Second Windows flavour is compiled with MSVC /arch:AVX2 (00-Common.cmake:116).
+          # viewer_manifest packages it with an "AVX2" name and ISAVX2=1, so its installer
+          # refuses non-AVX2 CPUs and the plain installer offers it to AVX2 CPUs.
+          ALL='[
+            {"os":"ubuntu-22.04","name":"linux64","cmake_extra":""},
+            {"os":"windows-2022","name":"windows64","cmake_extra":""},
+            {"os":"windows-2022","name":"windows64-avx2","cmake_extra":"-DUSE_AVX2_OPTIMIZATION:BOOL=ON"},
+            {"os":"macos-15","name":"macos64","cmake_extra":""}
+          ]'
+          WANT="${{ inputs.platform }}"
+          if [ -z "$WANT" ] || [ "$WANT" = "all" ]; then
+            M=$(echo "$ALL" | jq -c .)
+          else
+            M=$(echo "$ALL" | jq -c --arg n "$WANT" '[.[] | select(.name == $n)]')
+            if [ "$(echo "$M" | jq 'length')" = "0" ]; then
+              echo "::error::no platform named '$WANT'"; exit 1
+            fi
+          fi
+          echo "building: $(echo "$M" | jq -r '[.[].name] | join(", ")')"
+          echo "matrix=$M" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: plan
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-22.04
-            name: linux64
-          - os: windows-2022
-            name: windows64
-          # Second Windows flavour compiled with MSVC /arch:AVX2 (00-Common.cmake:116).
-          # viewer_manifest packages it with an "AVX2" name and ISAVX2=1, so its installer
-          # refuses non-AVX2 CPUs and the plain installer offers it to AVX2 CPUs.
-          - os: windows-2022
-            name: windows64-avx2
-            cmake_extra: "-DUSE_AVX2_OPTIMIZATION:BOOL=ON"
-          - os: macos-15
-            name: macos64
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -66,6 +96,37 @@ jobs:
         if: runner.os == 'Windows'
         run: choco install nsis -y
 
+      # [2026-09-22] COMPILER CACHE. Every run used to compile the whole viewer from cold,
+      # which is where the ~85 minutes went — the matrix was never the problem, the jobs have
+      # always run in parallel on separate runners and fail-fast is off.
+      #
+      # ccache is content-addressed: it keys on the preprocessed source and the compiler
+      # flags, so a stale entry cannot be returned for changed code. Safe for release builds.
+      #
+      # Linux and macOS only, deliberately. They are the long poles (1h25m and 1h22m against
+      # Windows' 46-54m), and MSVC caching additionally needs the build switched from /Zi to
+      # /Z7 for debug info to be cacheable — autobuild owns those flags, and getting it wrong
+      # yields either a broken build or unusable PDBs. Not worth it for the fastest platform.
+      - name: Compiler cache (Linux/macOS)
+        if: runner.os != 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          # Per platform, and newest-first restore so a changed source file still starts from
+          # the last good cache instead of from nothing.
+          key: ccache-${{ matrix.name }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ matrix.name }}-
+
+      - name: Install ccache (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then brew install ccache; else sudo apt-get install -y ccache; fi
+          ccache --max-size=5G
+          ccache --zero-stats
+          echo "CCACHE_DIR=$HOME/.ccache" >> "$GITHUB_ENV"
+
       - uses: actions/setup-python@v5
         with: { python-version: '3.11' }
 
@@ -83,11 +144,26 @@ jobs:
 
       - name: Configure
         shell: bash
-        run: autobuild configure -A 64 -c "$AUTOBUILD_CONFIG" -- -DVIEWER_CHANNEL="$VIEWER_CHANNEL" -DLL_TESTS:BOOL=FALSE -DOPENSIM:BOOL=ON -DHAVOK_TPV:BOOL=OFF ${{ matrix.cmake_extra }}
+        run: |
+          # [2026-09-22] Route the compilers through ccache where we installed it. Passed as
+          # cmake launchers rather than by shadowing gcc in PATH, so the CC/CXX the Linux step
+          # pins (gcc-11) still selects the compiler and ccache only wraps it.
+          CACHE_ARGS=""
+          if [ "$RUNNER_OS" != "Windows" ]; then
+            CACHE_ARGS="-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
+          fi
+          autobuild configure -A 64 -c "$AUTOBUILD_CONFIG" -- \
+            -DVIEWER_CHANNEL="$VIEWER_CHANNEL" -DLL_TESTS:BOOL=FALSE -DOPENSIM:BOOL=ON \
+            -DHAVOK_TPV:BOOL=OFF $CACHE_ARGS ${{ matrix.cmake_extra }}
 
       - name: Build
         shell: bash
         run: autobuild build -A 64 -c "$AUTOBUILD_CONFIG" --no-configure
+
+      - name: Cache stats (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: ccache --show-stats || true
 
       - name: Package
         shell: bash

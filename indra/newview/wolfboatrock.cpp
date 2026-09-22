@@ -50,7 +50,11 @@ namespace
     //   static _NOT_BOAT_RE = /dock|boat ?house/i;
     //   static _BOAT_RE = /boat|jet ?ski|yacht|dinghy|dinghies|canoe|kayak|catamaran|gondola|\bships?\b|\bsail(?:ing|s|boats?)?\b/i;
     const std::regex NOT_BOAT_RE("dock|boat ?house", std::regex::ECMAScript | std::regex::icase);
-    const std::regex BOAT_RE("boat|jet ?ski|yacht|dinghy|dinghies|canoe|kayak|catamaran|gondola|\\bships?\\b|\\bsail(?:ing|s|boats?)?\\b",
+    // <WolfViewer 2026-09-22> Boards ride the swell too (Paul asked for a surfboard). Word
+    // boundaries throughout so "surface", "resurfaced" and "keyboard" are not boats.
+    // KEEP IN STEP with WolfStorm terrain_manager.js _BOAT_RE.
+    const std::regex BOAT_RE("boat|jet ?ski|yacht|dinghy|dinghies|canoe|kayak|catamaran|gondola|\\bships?\\b|\\bsail(?:ing|s|boats?)?\\b"
+                             "|\\bsurf ?boards?\\b|\\bpaddle ?boards?\\b|\\bbody ?boards?\\b|\\blong ?boards?\\b|\\bsurf\\b",
                              std::regex::ECMAScript | std::regex::icase);
 
     // Source: terrain_manager.js updateFloaters() — the low-pass runs per 30 Hz logic

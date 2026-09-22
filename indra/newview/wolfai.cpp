@@ -307,7 +307,7 @@ void WolfAI::requestScript(const std::string& prompt, const std::string& existin
     if (!done) return;
     if (!WolfGrid::isWolfTerritories())
     {
-        done(false, "These tools are only available on Wolf Territories Grid.");
+        done(false, "Sorry, this function is only available on Wolf Territories Grid.");
         return;
     }
     if ((S32)prompt.length() > MAX_PROMPT_CHARS)
@@ -359,7 +359,7 @@ void WolfAI::generateModel(const std::string& prompt, const std::string& inv_nam
 {
     syncSession();
     if (!done) return;
-    if (!WolfGrid::isWolfTerritories()) { done(false, "These tools are only available on Wolf Territories Grid.", LLUUID::null); return; }
+    if (!WolfGrid::isWolfTerritories()) { done(false, "Sorry, this function is only available on Wolf Territories Grid.", LLUUID::null); return; }
     if (mGenerating)
     {
         done(false, "A model is already being generated.", LLUUID::null);
@@ -667,7 +667,7 @@ void WolfAI::getBuild(const LLUUID& id, build_fn done, std::function<bool()> val
 void WolfAI::buildRequest(const std::string& path, LLSD body, const std::string& task, build_fn done)
 {
     syncSession();
-    if (!WolfGrid::isWolfTerritories()) { done(false, "These tools are only available on Wolf Territories Grid."); return; }
+    if (!WolfGrid::isWolfTerritories()) { done(false, "Sorry, this function is only available on Wolf Territories Grid."); return; }
     if (pending(task)) { done(false, "This action is already running."); return; }
     mTasks.insert(task); error(task, ""); ++mMutation;
     const Session auth = mSession;
@@ -930,7 +930,7 @@ void WolfPanelAI::refresh()
     const bool wolf = WolfGrid::isWolfTerritories();
     if (!wolf)
     {
-        ai.error("grid", "These tools are only available on Wolf Territories Grid.");
+        ai.error("grid", "Sorry, this function is only available on Wolf Territories Grid.");
         mBuild->setEnabled(false); mCollect->setEnabled(false); mResume->setEnabled(false);
         mError->setText(ai.errors()); return;
     }
@@ -1072,7 +1072,7 @@ void WolfPanelAI::renderJobs()
 }
 void WolfPanelAI::onReload()
 {
-    if (!WolfGrid::isWolfTerritories()) { setStatus("These tools are only available on Wolf Territories Grid.", true); return; }
+    if (!WolfGrid::isWolfTerritories()) { setStatus("Sorry, this function is only available on Wolf Territories Grid.", true); return; }
     if (mListPending) return;
     mNeedList = false; mListPending = true;
     const auto auth = mSession; const U64 generation = mReadGeneration; LLHandle<LLPanel> handle = getHandle();
@@ -1108,7 +1108,7 @@ void WolfPanelAI::setStatus(const std::string& message, bool failure)
 }
 void WolfPanelAI::onBuild()
 {
-    if (!WolfGrid::isWolfTerritories()) { setStatus("These tools are only available on Wolf Territories Grid.", true); return; }
+    if (!WolfGrid::isWolfTerritories()) { setStatus("Sorry, this function is only available on Wolf Territories Grid.", true); return; }
     saveDraft();
     std::string prompt = mPrompt->getText(); LLStringUtil::trim(prompt);
     if (prompt.empty()) { setStatus("Describe what you want to build.", true); mPrompt->setFocus(true); return; }
@@ -1135,7 +1135,7 @@ void WolfPanelAI::onBuild()
 }
 void WolfPanelAI::onConfirmStart()
 {
-    if (!WolfGrid::isWolfTerritories()) { setStatus("These tools are only available on Wolf Territories Grid.", true); return; }
+    if (!WolfGrid::isWolfTerritories()) { setStatus("Sorry, this function is only available on Wolf Territories Grid.", true); return; }
     saveDraft();
     std::string prompt = mPrompt->getText(); LLStringUtil::trim(prompt);
     if (prompt.empty()) { setStatus("Describe what you want to build.", true); setStep(Step::Form); return; }
@@ -1157,7 +1157,7 @@ void WolfPanelAI::onConfirmStart()
 }
 void WolfPanelAI::onResume()
 {
-    if (!WolfGrid::isWolfTerritories()) { setStatus("These tools are only available on Wolf Territories Grid.", true); return; }
+    if (!WolfGrid::isWolfTerritories()) { setStatus("Sorry, this function is only available on Wolf Territories Grid.", true); return; }
     const auto* j = WolfAI::instance().job(WolfAI::instance().mSelected); if (!j || !j->resumable()) return;
     invalidateReads(); const auto auth = mSession; const U64 generation = mReadGeneration; LLHandle<LLPanel> handle = getHandle();
     WolfAI::instance().resumeBuild(*j, [handle, auth, generation](bool, const std::string&)
@@ -1165,7 +1165,7 @@ void WolfPanelAI::onResume()
 }
 void WolfPanelAI::onCollect()
 {
-    if (!WolfGrid::isWolfTerritories()) { setStatus("These tools are only available on Wolf Territories Grid.", true); return; }
+    if (!WolfGrid::isWolfTerritories()) { setStatus("Sorry, this function is only available on Wolf Territories Grid.", true); return; }
     const auto* j = WolfAI::instance().job(WolfAI::instance().mSelected); if (!j || (!j->collectable() && j->state != "delivered")) return;
     invalidateReads(); const auto auth = mSession; const U64 generation = mReadGeneration; LLHandle<LLPanel> handle = getHandle();
     WolfAI::instance().collectBuild(*j, [handle, auth, generation](bool, const std::string&)

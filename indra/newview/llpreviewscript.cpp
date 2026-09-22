@@ -994,7 +994,7 @@ void LLScriptEdCore::onBtnWolfAI()
     // Source: WolfGrid login identity; WolfAI also binds all HTTP work to this session.
     if (!WolfGrid::isWolfTerritories())
     {
-        LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE", "These tools are only available on Wolf Territories Grid."));
+        LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE", "Sorry, this function is only available on Wolf Territories Grid."));
         return;
     }
     if (!WolfAI::instance().scriptReady())
@@ -1038,7 +1038,7 @@ bool LLScriptEdCore::onWolfAIPrompt(const LLSD& notification, const LLSD& respon
     // Source: WolfGrid login identity; WolfAI also binds all HTTP work to this session.
     if (!WolfGrid::isWolfTerritories())
     {
-        LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE", "These tools are only available on Wolf Territories Grid."));
+        LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE", "Sorry, this function is only available on Wolf Territories Grid."));
         return false;
     }
     // Source: llpaneloutfitsinventory.cpp:221 onSaveCommit — option 0 is OK, the typed text is

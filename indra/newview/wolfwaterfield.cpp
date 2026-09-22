@@ -16,6 +16,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "wolfwaterfield.h"
+#include "wolfgrid.h"   // <WolfViewer 2026-09-22/> Wolf Territories only
 
 #include "llagent.h"
 #include "llframetimer.h"
@@ -286,6 +287,10 @@ U64 WolfWaterField::terrainStamp(LLViewerRegion* regionp)
 
 void WolfWaterField::idle()
 {
+    // <WolfViewer 2026-09-22> Wolf Territories only (Paul 09-22: "I don't want people from
+    // other grids getting a free ride on what we have created"). Off-grid this whole
+    // subsystem is inert, which also saves the work it would otherwise do for nothing.
+    if (!WolfGrid::isWolfTerritories()) return;
     static LLCachedControl<bool> enabled(gSavedSettings, "WolfViewerWaterShoreField", true);
     if (!enabled)
     {

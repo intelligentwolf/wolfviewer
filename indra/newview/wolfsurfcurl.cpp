@@ -15,6 +15,7 @@
 
 #include "llviewerprecompiledheaders.h"
 #include "wolfsurfcurl.h"
+#include "wolfgrid.h"   // <WolfViewer 2026-09-22/> Wolf Territories only
 
 #include "llagent.h"
 #include "llglslshader.h"
@@ -309,6 +310,8 @@ void WolfSurfCurl::render(F32 surf_h, F32 surf_set, F32 surf_len, F32 phase_time
                           const LLSettingsWater::ptr_t& pwater, LLViewerTexture* normal_map)
 {
     if (!gWolfSurfCurlProgram.isComplete()) return;
+    // <WolfViewer 2026-09-22/> Wolf Territories only — the barrel is ours.
+    if (!WolfGrid::isWolfTerritories()) return;
     LLViewerRegion* rgn = gAgent.getRegion();
     if (!rgn) return;
     const WolfWaterField::Field* fld = WolfWaterField::instance().get(rgn);

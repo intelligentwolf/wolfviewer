@@ -266,6 +266,13 @@ std::vector<U64> WolfTerrainPaint::neighbourHandles() const
 
 void WolfTerrainPaint::refresh()
 {
+    // <WolfViewer 2026-09-22> GRID GATE AT THE CHOKE POINT, not only at idle().
+    // idle() was gated, but WolfPanelTerrainPaint::refresh() reaches this directly with only a
+    // gDisconnected check, so merely showing the paint panel on ANOTHER GRID sent that grid's
+    // region handles to the Wolf Territories service. Region handles identify a specific
+    // region on a specific grid; we have no business logging Second Life's. wolfwavezones.cpp
+    // and wolfregionweather.cpp already gate their panel paths — this one did not.
+    if (!WolfGrid::isWolfTerritories()) return;
     if (mFetching) return;
     std::vector<U64> handles = neighbourHandles();
     if (handles.empty()) return;
@@ -362,6 +369,8 @@ WolfTerrainPaint::Record WolfTerrainPaint::parseRecord(const LLSD& r)
 // Source: wolfwavezones.cpp fetchCoro — the same adapter shape (getRawAndSuspend, JSON body).
 void WolfTerrainPaint::fetchCoro(std::vector<U64> handles)
 {
+    // <WolfViewer 2026-09-22/> belt and braces: nothing reaches the service off-grid
+    if (!WolfGrid::isWolfTerritories()) return;
     std::string url = std::string(API_URL) + "?handles=";
     for (size_t i = 0; i < handles.size(); ++i)
     {
@@ -1776,6 +1785,14 @@ void WolfPanelTerrainPaint::draw()
     // guaranteed to be inside its floater by the time it is being drawn, and the guard needs the
     // parent to do its work. See WolfGrid::fitFloaterToContents for what this prevents.
     if (!mFitted) { mFitted = true; WolfGrid::fitFloaterToContents(this); }
+    // <WolfViewer 2026-09-22> Off-grid the panel now fetches nothing (WolfTerrainPaint::refresh),
+    // so say why rather than sit there looking broken. Same wording as every other gate.
+    if (!WolfGrid::isWolfTerritories())
+    {
+        setStatus("Sorry, this function is only available on Wolf Territories Grid.", true);
+        LLPanel::draw();
+        return;
+    }
     const F64 now = LLFrameTimer::getElapsedSeconds();
     if (now >= mNextPoll)
     {

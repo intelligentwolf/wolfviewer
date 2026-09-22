@@ -594,7 +594,7 @@ static WolfWeather::Mode wolf_weather_mode(const std::string& s)
 static bool wolf_grid_tools_allowed()
 {
     if (WolfGrid::isWolfTerritories()) return true;
-    LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE", "These tools are only available on Wolf Territories Grid."));
+    LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE", "Sorry, this function is only available on Wolf Territories Grid."));
     return false;
 }
 class WolfWeatherToggle : public view_listener_t

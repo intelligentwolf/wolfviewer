@@ -59,6 +59,7 @@
 #include "wolfwaterfield.h"
 #include "wolfwavezones.h"   // [SURF 2026-09-07]
 #include "wolfsurfcurl.h"    // [SURF 2026-09-07 phase 2]
+#include "wolfgrid.h"        // <WolfViewer 2026-09-22/> Wolf Territories only
 // </WolfViewer>
 
 bool LLDrawPoolWater::sSkipScreenCopy = false;
@@ -547,8 +548,17 @@ void LLDrawPoolWater::pushWaterPlanes(int pass)
             // nothing to calm them (arabian sands' white glittering sea, "the water flashes" on
             // an M4, 09-13). Amplitude 0 is, by the shader's own contract, stock Firestorm water:
             // no displacement, and every one of those effects is gated on waveAmplitude > 0.001.
+            // <WolfViewer 2026-09-22> ...nor on another grid. The wave EDITOR was always Wolf
+            // Territories only (wolfwavezones.cpp), but the WATER ITSELF rendered everywhere,
+            // so Second Life residents were running our sea (Paul 09-22: "someone told me they
+            // were using the water stuff on second life, these features are for wolf
+            // territories grid only"). Amplitude 0 is, by this shader's own contract, stock
+            // Firestorm water: no displacement, and every dependent effect — whitecaps, foam
+            // lace, crest glow, breakers, the surf train — is gated on waveAmplitude > 0.001.
+            // The same one line therefore switches the whole feature off cleanly.
             const bool no_swell = water->getWaterfall() > 0.f || water->getStreamFlow() > 0.f || water->getStillWater()
-                               || !LLViewerShaderMgr::wolfWaterFull();
+                               || !LLViewerShaderMgr::wolfWaterFull()
+                               || !WolfGrid::isWolfTerritories();
             cur_shader->uniform1f(LLShaderMgr::WATER_WAVE_AMPLITUDE, no_swell ? 0.f : amplitude);
 
             // The depth + exposure fields and the wake belong to a region's OWN water plane

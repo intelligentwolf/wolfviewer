@@ -320,6 +320,15 @@ void WolfRegionWeather::fetchCoro(std::string region_id, bool include_parcel, F3
     options->setTimeout(20);
     LLCore::HttpHeaders::ptr_t headers = std::make_shared<LLCore::HttpHeaders>();
     headers->append(HTTP_OUT_HEADER_ACCEPT, "application/json");
+    // <WolfViewer 2026-09-22> Identify ourselves on READS too, not only on writes.
+    // wt_authenticate() already validates this pair against the grid presence service
+    // (METHOD getagent), so a session from any other grid cannot satisfy it. Reads have
+    // always been anonymous, which let anyone pull Wolf Territories' saved layouts.
+    // Sending them now costs nothing -- the service ignores headers it does not require
+    // -- and is what lets the service START requiring them once enough viewers carry
+    // them. Enforcing before then would break every older viewer ON our own grid.
+    headers->append("X-Wolf-Agent", gAgentID.asString());
+    headers->append("X-Wolf-Session", gAgentSessionID.asString());
 
     LLSD result = adapter->getRawAndSuspend(request, url, options, headers);
     LLSD httpResults = result[LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS];

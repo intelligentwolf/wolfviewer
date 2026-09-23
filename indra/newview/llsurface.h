@@ -28,6 +28,8 @@
 #define LL_LLSURFACE_H
 
 #include "llterraingridoffset.h"
+#include <memory>
+#include <vector>
 #include "v3math.h"
 #include "v3dmath.h"
 
@@ -84,8 +86,12 @@ public:
     virtual void decompressDCTPatch(LLBitPack &bitpack, LLGroupHeader *gopp, bool b_large_patch);
     virtual void updatePatchVisibilities(LLAgent &agent);
 
-    inline F32 getZ(const size_t k) const              { return mSurfaceZ[k]; }
-    inline F32 getZ(const S32 i, const S32 j) const { return mSurfaceZ[terrainGridOffset(i, j, mGridsPerEdge)]; }
+    // <WolfViewer 2026-09-23> Height at surface grid point (i, j), 0..mGridsPerEdge-1 each way.
+    // The surface no longer holds one region-sized array (16 bytes per square metre: 17 TB at
+    // 1,048,576 m); each patch holds its own (grids_per_patch + 1)^2 heights, and this finds the
+    // patch that owns the point. A point on ground no patch has been made for reads 0, as the
+    // zero-filled array did.
+    F32 getZ(const S32 i, const S32 j) const;
 
     LLVector3 getOriginAgent() const;
     const LLVector3d &getOriginGlobal() const;
@@ -107,7 +113,19 @@ public:
     LLSurfacePatch *resolvePatchRegion(const F32 x, const F32 y) const;
     LLSurfacePatch *resolvePatchRegion(const LLVector3 &position_region) const;
     LLSurfacePatch *resolvePatchGlobal(const LLVector3d &position_global) const;
+    // <WolfViewer 2026-09-23> Patches are created on first use (see createPatch). getPatch makes
+    // the patch if it does not exist yet, exactly as every patch used to exist from the start;
+    // findPatch only returns one that already does.
     LLSurfacePatch *getPatch(const S32 x, const S32 y) const;
+    LLSurfacePatch *findPatch(const S32 x, const S32 y) const;
+    // Every patch created so far, in creation order.
+    const std::vector<LLSurfacePatch*>& getAllPatches() const  { return mAllPatches; }
+    // Goes up whenever any patch's heights change (LLSurfacePatch::dirtyZ), so a whole-surface
+    // "has the terrain changed" test no longer has to visit every patch.
+    U64 getTerrainRevision() const                  { return mTerrainRevision; }
+    // Would a patch at (x, y) - which may lie outside this surface - have a neighbour patch that
+    // simply has not been made yet? True inside this surface and inside any connected neighbour.
+    bool expectsPatchAt(const S32 x, const S32 y) const;
 
     // Update methods (called during idle, normally)
     template<bool PBR>
@@ -150,7 +168,9 @@ public:
     F32 mOOGridsPerEdge;            // Inverse of grids per edge
 
     S32 mPatchesPerEdge;            // Number of patches on one side of a region
-    S32 mNumberOfPatches;           // Total number of patches
+    // <WolfViewer 2026-09-23/> S64: 65536 x 65536 patches (a 1,048,576 m region) is 2^32, which
+    // an S32 wrapped to exactly 0.
+    S64 mNumberOfPatches;           // Total number of patches
 
 
     // Each surface points at 8 neighbors (or NULL)
@@ -174,18 +194,34 @@ private:
     void createPatchData();     // Allocates memory for patches.
     void destroyPatchData();    // Deallocates memory for patches.
 
-    LLVector3d  mOriginGlobal;      // In absolute frame
-    LLSurfacePatch *mPatchList;     // Array of all patches
+    // <WolfViewer 2026-09-23> Make patch (x, y): its own height/normal block, its origin, and its
+    // links to whichever of its eight neighbours exist - in this surface or a connected one.
+    LLSurfacePatch *createPatch(const S32 x, const S32 y);
+    // Link patchp to its existing neighbours (only those in only_surface, if given); cross-surface
+    // links also refresh the shared edge the way connectNeighbor always did (see the note there).
+    void linkPatch(LLSurfacePatch *patchp, const S32 x, const S32 y, const LLSurface *only_surface = nullptr);
+    // The connected surface that holds the patch at global patch position (gx, gy) - patches
+    // counted from the world origin - and that patch's index in it; null if none does.
+    LLSurface *neighborSurfaceAt(const S64 gx, const S64 gy, S32 &nx, S32 &ny) const;
+    S64 globalPatchX() const;
+    S64 globalPatchY() const;
 
-    // Array of grid data, mGridsPerEdge * mGridsPerEdge
-    F32 *mSurfaceZ;
+    LLVector3d  mOriginGlobal;      // In absolute frame
+
+    // <WolfViewer 2026-09-23> Sparse patch directory, replacing the region-sized LLSurfacePatch
+    // array (one object per 16 m patch: 4.3 billion at 1,048,576 m, and new[] of a count that
+    // wrapped to 0). Pages of PATCH_PAGE_EDGE^2 patch pointers, a page made when any patch in it
+    // is; patches are allocated one by one so their addresses never move - LLVOSurfacePatch,
+    // grass, the dirty list and every neighbour link hold them.
+    static constexpr S32 PATCH_PAGE_EDGE = 64;
+    S32 mPatchPagesPerEdge = 0;
+    std::vector<std::unique_ptr<LLSurfacePatch*[]>> mPatchPages;
+    std::vector<LLSurfacePatch*> mAllPatches;
+    U64 mTerrainRevision = 0;
     // <FS:Wolf/> The patch index box updatePatchVisibilities scanned last frame, so patches that
     // have just fallen out of range can be told they are no longer visible without rescanning
     // the whole region. -1 means "nothing scanned yet".
     S32 mLastScanMinI = -1, mLastScanMaxI = -1, mLastScanMinJ = -1, mLastScanMaxJ = -1;
-
-    // Array of grid normals, mGridsPerEdge * mGridsPerEdge
-    LLVector3 *mNorm;
 
     std::set<LLSurfacePatch *> mDirtyPatchList;
 

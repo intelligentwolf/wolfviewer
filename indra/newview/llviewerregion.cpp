@@ -829,8 +829,9 @@ LLViewerRegion::~LLViewerRegion()
     mImpl = NULL;
 
 // [SL:KB] - Patch: World-MinimapOverlay | Checked: 2012-07-26 (Catznip-3.3)
-    for (tex_matrix_t::iterator i = mWorldMapTiles.begin(), iend = mWorldMapTiles.end(); i != iend; ++i)
-        (*i)->setBoostLevel(LLViewerTexture::BOOST_NONE);
+    for (auto& tile : mWorldMapTiles)   // <WolfViewer 2026-09-23/> the tiles that were fetched
+        if (tile.second.notNull())
+            tile.second->setBoostLevel(LLViewerTexture::BOOST_NONE);
 // [/SL:KB]
 }
 
@@ -2348,31 +2349,28 @@ F32 LLViewerRegion::getLandHeightRegion(const LLVector3& region_pos)
 }
 
 // [SL:KB] - Patch: World-MinimapOverlay | Checked: 2012-06-20 (Catznip-3.3)
-const LLViewerRegion::tex_matrix_t& LLViewerRegion::getWorldMapTiles() const
+LLViewerTexture* LLViewerRegion::getWorldMapTile(U32 tile_x, U32 tile_y) const
 {
-    if (mWorldMapTiles.empty())
+    // <WolfViewer 2026-09-23> Same URL, flags and boost as the whole-region list used; made on
+    // first request instead (see the header).
+    const U64 key = ((U64)tile_x << 32) | tile_y;
+    auto it = mWorldMapTiles.find(key);
+    if (it != mWorldMapTiles.end())
     {
-        U32 gridX, gridY;
-        grid_from_region_handle(mHandle, &gridX, &gridY);
-        U32 totalX = (U32)(getWidth() / REGION_WIDTH_U32);
-        if (!totalX) ++totalX; // If this region is too small, still get an image.
-        /* TODO: Nonsquare regions?
-        U32 totalY(getLength()/REGION_WIDTH_U32);
-        if (!totalY) ++totalY; // If this region is too small, still get an image.
-        */
-        const U32 totalY(totalX);
-        mWorldMapTiles.reserve(totalX * totalY);
-        for (U32 x = 0; x != totalX; ++x)
-            for (U32 y = 0; y != totalY; ++y)
-            {
-                const std::string map_url = LFSimFeatureHandler::instance().mapServerURL() + llformat("map-1-%d-%d-objects.jpg", gridX + x, gridY + y);
-                LLPointer<LLViewerTexture> tex(LLViewerTextureManager::getFetchedTextureFromUrl(map_url, FTT_MAP_TILE, true,
-                                                                            LLViewerTexture::BOOST_NONE, LLViewerTexture::LOD_TEXTURE));
-                mWorldMapTiles.push_back(tex);
-                tex->setBoostLevel(LLViewerTexture::BOOST_MAP);
-            }
+        return it->second.get();
     }
-    return mWorldMapTiles;
+    U32 gridX, gridY;
+    grid_from_region_handle(mHandle, &gridX, &gridY);
+    const std::string map_url = LFSimFeatureHandler::instance().mapServerURL() + llformat("map-1-%d-%d-objects.jpg", gridX + tile_x, gridY + tile_y);
+    LLPointer<LLViewerTexture> tex(LLViewerTextureManager::getFetchedTextureFromUrl(map_url, FTT_MAP_TILE, true,
+                                                                LLViewerTexture::BOOST_NONE, LLViewerTexture::LOD_TEXTURE));
+    if (tex.notNull())
+    {
+        tex->setBoostLevel(LLViewerTexture::BOOST_MAP);
+    }
+    mWorldMapTiles[key] = tex;
+    return tex.get();
+    // </WolfViewer>
 }
 // [/SL:KB]
 

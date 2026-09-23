@@ -53,9 +53,11 @@ LLSurfacePatch::LLSurfacePatch()
     mDirty(false),
     mDirtyZStats(true),
     mHeightsGenerated(false),
-    mDataOffset(0),
     mDataZ(NULL),
     mDataNorm(NULL),
+    mDataStride(0),
+    mPatchX(0),
+    mPatchY(0),
     mVObjp(NULL),
     mOriginRegion(0.f, 0.f, 0.f),
     mCenterRegion(0.f, 0.f, 0.f),
@@ -131,6 +133,30 @@ void LLSurfacePatch::setSurface(LLSurface *surfacep)
     mSurfacep = surfacep;
     llassert(mSurfacep->mType == 'l');
 }
+
+// <WolfViewer 2026-09-23> See the note in llsurfacepatch.h. Heights start at 0 and normals at
+// (0,0,0), what the zero-filled region arrays these replace held (llsurface.cpp create()).
+void LLSurfacePatch::initData(const S32 patch_x, const S32 patch_y)
+{
+    mPatchX = patch_x;
+    mPatchY = patch_y;
+    mDataStride = mSurfacep->getGridsPerPatchEdge() + 1;
+    const size_t points = (size_t)mDataStride * mDataStride;
+    mZStore.reset(new F32[points]());
+    mNormStore.reset(new LLVector3[points]);
+    mDataZ = mZStore.get();
+    mDataNorm = mNormStore.get();
+}
+
+bool LLSurfacePatch::neighborReady(const U32 direction) const
+{
+    if (const LLSurfacePatch* neighbor = getNeighborPatch(direction))
+    {
+        return neighbor->getHasReceivedData();
+    }
+    return !mSurfacep->expectsPatchAt(mPatchX + gDirAxes[direction][0], mPatchY + gDirAxes[direction][1]);
+}
+// </WolfViewer>
 
 bool LLSurfacePatch::ensureVObj()
 {
@@ -259,8 +285,7 @@ void LLSurfacePatch::disconnectNeighbor(LLSurface *surfacep)
 
 LLVector3 LLSurfacePatch::getPointAgent(const U32 x, const U32 y) const
 {
-    U32 surface_stride = mSurfacep->getGridsPerEdge();
-    U32 point_offset = x + y*surface_stride;
+    U32 point_offset = x + y*mDataStride;   // <WolfViewer 2026-09-23/> patch-local block
     LLVector3 pos;
     pos = getOriginAgent();
     pos.mV[VX] += x * mSurfacep->getMetersPerGrid();
@@ -272,7 +297,7 @@ LLVector3 LLSurfacePatch::getPointAgent(const U32 x, const U32 y) const
 LLVector2 LLSurfacePatch::getTexCoords(const U32 x, const U32 y) const
 {
     U32 surface_stride = mSurfacep->getGridsPerEdge();
-    U32 point_offset = x + y*surface_stride;
+    U32 point_offset = x + y*mDataStride;   // <WolfViewer 2026-09-23/> patch-local block
     LLVector3 pos, rel_pos;
     pos = getOriginAgent();
     pos.mV[VX] += x * mSurfacep->getMetersPerGrid();
@@ -348,7 +373,7 @@ void LLSurfacePatch::eval(const U32 x, const U32 y, const U32 stride, LLVector3 
     llassert_always(vertex && normal && tex1);
 
     U32 surface_stride = mSurfacep->getGridsPerEdge();
-    U32 point_offset = x + y*surface_stride;
+    U32 point_offset = x + y*mDataStride;   // <WolfViewer 2026-09-23/> patch-local block
 
     *normal = getNormal(x, y);
 
@@ -391,7 +416,8 @@ template<>
 void LLSurfacePatch::calcNormal</*PBR=*/false>(const U32 x, const U32 y, const U32 stride)
 {
     U32 patch_width = mSurfacep->mPVArray.mPatchWidth;
-    U32 surface_stride = mSurfacep->getGridsPerEdge();
+    // <WolfViewer 2026-09-23/> row stride of each patch's own block (was the surface's)
+    U32 surface_stride = mDataStride;
 
     const F32 mpg = mSurfacep->getMetersPerGrid() * stride;
 
@@ -448,7 +474,7 @@ void LLSurfacePatch::calcNormal</*PBR=*/false>(const U32 x, const U32 y, const U
 // <FS:CR> Aurora Sim
                     ppatches[i][j] = ppatches[i][j]->getNeighborPatch(WEST);
                     poffsets[i][j][0] += patch_width;
-                    poffsets[i][j][2] = ppatches[i][j]->getSurface()->getGridsPerEdge();
+                    poffsets[i][j][2] = ppatches[i][j]->mDataStride;   // <WolfViewer 2026-09-23/>
 // </FS:CR> Aurora Sim
                 }
             }
@@ -463,7 +489,7 @@ void LLSurfacePatch::calcNormal</*PBR=*/false>(const U32 x, const U32 y, const U
 // <FS:CR> Aurora Sim
                     ppatches[i][j] = ppatches[i][j]->getNeighborPatch(SOUTH);
                     poffsets[i][j][1] += patch_width;
-                    poffsets[i][j][2] = ppatches[i][j]->getSurface()->getGridsPerEdge();
+                    poffsets[i][j][2] = ppatches[i][j]->mDataStride;   // <WolfViewer 2026-09-23/>
 // </FS>CR> Aurora Sim
                 }
             }
@@ -478,7 +504,7 @@ void LLSurfacePatch::calcNormal</*PBR=*/false>(const U32 x, const U32 y, const U
 // <FS:CR> Aurora Sim
                     ppatches[i][j] = ppatches[i][j]->getNeighborPatch(EAST);
                     poffsets[i][j][0] -= patch_width;
-                    poffsets[i][j][2] = ppatches[i][j]->getSurface()->getGridsPerEdge();
+                    poffsets[i][j][2] = ppatches[i][j]->mDataStride;   // <WolfViewer 2026-09-23/>
 // </FS:CR> Aurora Sim
                 }
             }
@@ -493,7 +519,7 @@ void LLSurfacePatch::calcNormal</*PBR=*/false>(const U32 x, const U32 y, const U
 // <FS:CR> Aurora Sim
                     ppatches[i][j] = ppatches[i][j]->getNeighborPatch(NORTH);
                     poffsets[i][j][1] -= patch_width;
-                    poffsets[i][j][2] = ppatches[i][j]->getSurface()->getGridsPerEdge();
+                    poffsets[i][j][2] = ppatches[i][j]->mDataStride;   // <WolfViewer 2026-09-23/>
 // </FS:CR> Aurora Sim
                 }
             }
@@ -546,7 +572,7 @@ void LLSurfacePatch::calcNormal</*PBR=*/true>(const U32 x, const U32 y, const U3
     llassert(mDataNorm);
     constexpr U32 index = 0;
 
-    const U32 surface_stride = mSurfacep->getGridsPerEdge();
+    const U32 surface_stride = mDataStride;   // <WolfViewer 2026-09-23/>
     LLVector3& normal_out = *(mDataNorm + surface_stride * y + x);
     calcNormalFlat(normal_out, x, y, index);
 }
@@ -558,7 +584,6 @@ void LLSurfacePatch::calcNormalFlat(LLVector3& normal_out, const U32 x, const U3
     llassert(index == 0 || index == 1);
 
     U32 patch_width = mSurfacep->mPVArray.mPatchWidth;
-    U32 surface_stride = mSurfacep->getGridsPerEdge();
 
     // Vertex stride is always 1 because we want the flat surface of the current triangle face
     constexpr U32 stride = 1;
@@ -646,19 +671,19 @@ void LLSurfacePatch::calcNormalFlat(LLVector3& normal_out, const U32 x, const U3
     LLVector3 p00(-mpg,-mpg,
                   *(ppatches[0][0]->mDataZ
                   + poffsets[0][0][0]
-                  + poffsets[0][0][1]*surface_stride));
+                  + poffsets[0][0][1]*ppatches[0][0]->mDataStride));
     LLVector3 p01(-mpg,+mpg,
                   *(ppatches[0][1]->mDataZ
                   + poffsets[0][1][0]
-                  + poffsets[0][1][1]*surface_stride));
+                  + poffsets[0][1][1]*ppatches[0][1]->mDataStride));
     LLVector3 p10(+mpg,-mpg,
                   *(ppatches[1][0]->mDataZ
                   + poffsets[1][0][0]
-                  + poffsets[1][0][1]*surface_stride));
+                  + poffsets[1][0][1]*ppatches[1][0]->mDataStride));
     LLVector3 p11(+mpg,+mpg,
                   *(ppatches[1][1]->mDataZ
                   + poffsets[1][1][0]
-                  + poffsets[1][1][1]*surface_stride));
+                  + poffsets[1][1][1]*ppatches[1][1]->mDataStride));
 
     // Triangle index / coordinate convention
     // for a single surface patch
@@ -702,9 +727,8 @@ void LLSurfacePatch::calcNormalFlat(LLVector3& normal_out, const U32 x, const U3
 
 const LLVector3 &LLSurfacePatch::getNormal(const U32 x, const U32 y) const
 {
-    U32 surface_stride = mSurfacep->getGridsPerEdge();
     llassert(mDataNorm);
-    return *(mDataNorm + surface_stride * y + x);
+    return *(mDataNorm + mDataStride * y + x);   // <WolfViewer 2026-09-23/> patch-local block
 }
 
 
@@ -742,7 +766,7 @@ void LLSurfacePatch::updateVerticalStats()
     }
 
     U32 grids_per_patch_edge = mSurfacep->getGridsPerPatchEdge();
-    U32 grids_per_edge = mSurfacep->getGridsPerEdge();
+    U32 grids_per_edge = mDataStride;   // <WolfViewer 2026-09-23/> row stride of the patch block
     F32 meters_per_grid = mSurfacep->getMetersPerGrid();
 
     U32 i, j, k;
@@ -826,7 +850,9 @@ void LLSurfacePatch::updateNormals()
     }
     // </FS:Wolf>
     U32 grids_per_patch_edge = mSurfacep->getGridsPerPatchEdge();
-    U32 grids_per_edge = mSurfacep->getGridsPerEdge();
+    // <WolfViewer 2026-09-23/> row stride of the patch's own block; every pointer step below
+    // walks this patch's (or a neighbour's) block, never a region-sized array now.
+    U32 grids_per_edge = mDataStride;
 
     bool dirty_patch = false;
 
@@ -899,7 +925,7 @@ void LLSurfacePatch::updateNormals()
             if(getNeighborPatch(SOUTHEAST)->getHasReceivedData())
             {
                 *(mDataZ + grids_per_patch_edge) =
-                *(getNeighborPatch(SOUTHEAST)->mDataZ + grids_per_patch_edge * getNeighborPatch(SOUTHEAST)->getSurface()->getGridsPerEdge());
+                *(getNeighborPatch(SOUTHEAST)->mDataZ + grids_per_patch_edge * getNeighborPatch(SOUTHEAST)->mDataStride);
             }
         }
 // </FS:CR> Aurora Sim
@@ -934,7 +960,7 @@ void LLSurfacePatch::updateNormals()
                         *(mDataZ + grids_per_patch_edge + grids_per_patch_edge*grids_per_edge) =
 // <FS:CR> Aurora Sim
                             //*(getNeighborPatch(EAST)->mDataZ + (grids_per_patch_edge - 1)*grids_per_edge);
-                            *(getNeighborPatch(EAST)->mDataZ + (getNeighborPatch(EAST)->getSurface()->getGridsPerPatchEdge() - 1)*getNeighborPatch(EAST)->getSurface()->getGridsPerEdge());
+                            *(getNeighborPatch(EAST)->mDataZ + (getNeighborPatch(EAST)->getSurface()->getGridsPerPatchEdge() - 1)*getNeighborPatch(EAST)->mDataStride);
 // </FS:CR> Aurora Sim
                     }
                     else
@@ -980,31 +1006,29 @@ void LLSurfacePatch::updateNormals()
                 &&
                 (!getNeighborPatch(EAST) || (getNeighborPatch(EAST)->mSurfacep != mSurfacep)))
             {
-// <FS:CR> Aurora Sim
-                U32 own_xpos, own_ypos, neighbor_xpos, neighbor_ypos;
-                S32 own_offset = 0, neighbor_offset = 0;
-                from_region_handle(mSurfacep->getRegion()->getHandle(), &own_xpos, &own_ypos);
-                from_region_handle(getNeighborPatch(NORTHEAST)->mSurfacep->getRegion()->getHandle(), &neighbor_xpos, &neighbor_ypos);
-                if(own_ypos >= neighbor_ypos) {
-                    neighbor_offset = own_ypos - neighbor_ypos;
-                }
-                else {
-                    own_offset = neighbor_ypos - own_ypos;
-                }
-// </FS:CR> Aurora Sim
-
-                *(mDataZ + grids_per_patch_edge + grids_per_patch_edge*grids_per_edge) =
-                                        *(getNeighborPatch(NORTHEAST)->mDataZ +
-// <FS:CR> Aurora Sim
-                                            (grids_per_edge + neighbor_offset - own_offset - 1) *
-                                            getNeighborPatch(NORTHEAST)->getSurface()->getGridsPerEdge() );
-// </FS:CR> Aurora Sim
+                // <WolfViewer 2026-09-23> The corner point (this patch's (gpp, gpp)) is the
+                // northeast surface's grid point at the same world position. Aurora read it at
+                // NE->mDataZ + (grids_per_edge + neighbor_offset - own_offset - 1) * NE stride,
+                // an offset into the northeast SURFACE's region-sized array (right when the two
+                // regions' corners meet, rows off when they do not). Patches keep their own
+                // blocks now, so the point is looked up in that surface by position instead.
+                const LLSurface* ne_surface = getNeighborPatch(NORTHEAST)->mSurfacep;
+                const F64 mpg = mSurfacep->getMetersPerGrid();
+                const F64 gx = mSurfacep->getOriginGlobal().mdV[VX] + (mPatchX + 1) * (F64)grids_per_patch_edge * mpg;
+                const F64 gy = mSurfacep->getOriginGlobal().mdV[VY] + (mPatchY + 1) * (F64)grids_per_patch_edge * mpg;
+                const F64 ne_mpg = ne_surface->getMetersPerGrid();
+                const S32 ni = (S32)floor((gx - ne_surface->getOriginGlobal().mdV[VX]) / ne_mpg + 0.5);
+                const S32 nj = (S32)floor((gy - ne_surface->getOriginGlobal().mdV[VY]) / ne_mpg + 0.5);
+                *(mDataZ + grids_per_patch_edge + grids_per_patch_edge*grids_per_edge) = ne_surface->getZ(ni, nj);
+                // </WolfViewer>
             }
         }
         else
         {
             // We've got a northeast patch in the same surface.
             // The z and normals will be handled by that patch.
+            // <WolfViewer 2026-09-23/> The z is now copied into this patch's own corner by
+            // updateNortheastCorner (from updateEastEdge / updateNorthEdge).
         }
         calcNormal<PBR>(grids_per_patch_edge, grids_per_patch_edge, 2);
         calcNormal<PBR>(grids_per_patch_edge, grids_per_patch_edge - 1, 2);
@@ -1042,32 +1066,29 @@ template void LLSurfacePatch::updateNormals</*PBR=*/true>();
 
 void LLSurfacePatch::updateEastEdge()
 {
+    // <WolfViewer 2026-09-23> Each patch owns a (gpp + 1)^2 block now, so its east buffer
+    // column is a COPY of the east neighbour's first column even inside one surface. When the
+    // surface was one array that column simply was the neighbour's memory and a same-surface
+    // neighbour returned early here; only a neighbour in another surface (mConnectedEdge) was
+    // copied. Every neighbour is copied now, from its own block and stride.
     U32 grids_per_patch_edge = mSurfacep->getGridsPerPatchEdge();
-    U32 grids_per_edge = mSurfacep->getGridsPerEdge();
-// <FS:CR> Aurora Sim
+    U32 grids_per_edge = mDataStride;
     U32 grids_per_edge_east = grids_per_edge;
 
-    //U32 j, k;
     U32 j, k, h;
-// <FS:CR> Aurora Sim
     F32 *west_surface, *east_surface;
 
-    if (!getNeighborPatch(EAST))
+    LLSurfacePatch* east = getNeighborPatch(EAST);
+    if (!east)
     {
         west_surface = mDataZ + grids_per_patch_edge;
         east_surface = mDataZ + grids_per_patch_edge - 1;
     }
-    else if (mConnectedEdge & EAST_EDGE)
-    {
-        west_surface = mDataZ + grids_per_patch_edge;
-        east_surface = getNeighborPatch(EAST)->mDataZ;
-// <FS:CR> Aurora Sim
-        grids_per_edge_east = getNeighborPatch(EAST)->getSurface()->getGridsPerEdge();
-// <FS:CR> Aurora Sim
-    }
     else
     {
-        return;
+        west_surface = mDataZ + grids_per_patch_edge;
+        east_surface = east->mDataZ;
+        grids_per_edge_east = east->mDataStride;
     }
 
     // If patchp is on the east edge of its surface, then we update the east
@@ -1075,36 +1096,34 @@ void LLSurfacePatch::updateEastEdge()
     for (j=0; j < grids_per_patch_edge; j++)
     {
         k = j * grids_per_edge;
-// <FS:CR> Aurora Sim
         h = j * grids_per_edge_east;
         *(west_surface + k) = *(east_surface + h);  // update buffer Z
-        //*(west_surface + k) = *(east_surface + k);    // update buffer Z
-// </FS:CR> Aurora Sim
     }
+    updateNortheastCorner();
+    // </WolfViewer>
 }
 
 
 void LLSurfacePatch::updateNorthEdge()
 {
+    // <WolfViewer 2026-09-23> As updateEastEdge: the north buffer row is copied from any north
+    // neighbour, which a same-surface neighbour used to share by memory.
     U32 grids_per_patch_edge = mSurfacep->getGridsPerPatchEdge();
-    U32 grids_per_edge = mSurfacep->getGridsPerEdge();
+    U32 grids_per_edge = mDataStride;
 
     U32 i;
     F32 *south_surface, *north_surface;
 
-    if (!getNeighborPatch(NORTH))
+    LLSurfacePatch* north = getNeighborPatch(NORTH);
+    if (!north)
     {
         south_surface = mDataZ + grids_per_patch_edge*grids_per_edge;
         north_surface = mDataZ + (grids_per_patch_edge - 1) * grids_per_edge;
     }
-    else if (mConnectedEdge & NORTH_EDGE)
-    {
-        south_surface = mDataZ + grids_per_patch_edge*grids_per_edge;
-        north_surface = getNeighborPatch(NORTH)->mDataZ;
-    }
     else
     {
-        return;
+        south_surface = mDataZ + grids_per_patch_edge*grids_per_edge;
+        north_surface = north->mDataZ;
     }
 
     // Update patchp's north edge ...
@@ -1112,7 +1131,23 @@ void LLSurfacePatch::updateNorthEdge()
     {
         *(south_surface + i) = *(north_surface + i);    // update buffer Z
     }
+    updateNortheastCorner();
+    // </WolfViewer>
 }
+
+// <WolfViewer 2026-09-23> The (gpp, gpp) corner of a patch whose northeast neighbour is in the
+// same surface is that neighbour's (0, 0) - shared memory once, a copy now. A northeast
+// neighbour in another surface is left to updateNormals, which has always filled that case.
+void LLSurfacePatch::updateNortheastCorner()
+{
+    LLSurfacePatch* ne = getNeighborPatch(NORTHEAST);
+    if (ne && ne->mSurfacep == mSurfacep)
+    {
+        const U32 gpp = mSurfacep->getGridsPerPatchEdge();
+        *(mDataZ + gpp + gpp * mDataStride) = *(ne->mDataZ);
+    }
+}
+// </WolfViewer>
 
 bool LLSurfacePatch::updateTexture()
 {
@@ -1131,10 +1166,9 @@ bool LLSurfacePatch::updateTexture()
         F32 meters_per_grid = getSurface()->getMetersPerGrid();
         F32 grids_per_patch_edge = (F32)getSurface()->getGridsPerPatchEdge();
 
-        if ((!getNeighborPatch(EAST) || getNeighborPatch(EAST)->getHasReceivedData())
-            && (!getNeighborPatch(WEST) || getNeighborPatch(WEST)->getHasReceivedData())
-            && (!getNeighborPatch(SOUTH) || getNeighborPatch(SOUTH)->getHasReceivedData())
-            && (!getNeighborPatch(NORTH) || getNeighborPatch(NORTH)->getHasReceivedData()))
+        // <WolfViewer 2026-09-23/> neighborReady: a neighbour that has not been made yet but would
+        // be (inside this region or a connected one) is waited for, as an empty one always was.
+        if (neighborReady(EAST) && neighborReady(WEST) && neighborReady(SOUTH) && neighborReady(NORTH))
         {
             LLViewerRegion *regionp = getSurface()->getRegion();
             LLVector3d origin_region = getOriginGlobal() - getSurface()->getOriginGlobal();
@@ -1228,6 +1262,7 @@ void LLSurfacePatch::dirtyZ()
 
     dirty();
     mLastUpdateTime = gFrameTime;
+    ++mSurfacep->mTerrainRevision;   // <WolfViewer 2026-09-23/> see LLSurface::getTerrainRevision
 }
 
 
@@ -1488,6 +1523,18 @@ LLSurfacePatch *LLSurfacePatch::getNeighborPatch(const U32 direction) const
 {
     return mNeighborPatches[direction];
 }
+
+// <WolfViewer 2026-09-23> See LLSurface::updatePatchVisibilities. killObject marks the object
+// dead, and LLVOSurfacePatch::markDead calls clearVObj() on this patch.
+void LLSurfacePatch::releaseVObj()
+{
+    if (mVObjp.notNull() && !mVObjp->isDead())
+    {
+        gObjectList.killObject(mVObjp);
+    }
+    mVObjp = NULL;
+}
+// </WolfViewer>
 
 void LLSurfacePatch::clearVObj()
 {

@@ -49,6 +49,7 @@
 #include "llviewertexture.h"
 #include "llworld.h"
 #include "wolfgrid.h"
+#include "wolfnearbyregions.h"
 #include "wolfwaterfield.h"
 #include "wolfwavebrush.h"
 
@@ -77,10 +78,6 @@ namespace
     {
         x = (S32)(handle >> 32);
         y = (S32)(handle & 0xffffffffULL);
-    }
-    U64 handle_of(S32 x, S32 y)
-    {
-        return ((U64)(U32)x << 32) | (U64)(U32)y;
     }
 
     /** Parse a JSON body into LLSD, or an undefined LLSD when it is not JSON. */
@@ -157,28 +154,11 @@ WolfWaveZones::~WolfWaveZones()
 
 std::vector<U64> WolfWaveZones::neighbourHandles() const
 {
-    std::vector<U64> out;
-    LLViewerRegion* rgn = gAgent.getRegion();
-    if (!rgn) return out;
-    S32 x, y;
-    handle_xy(rgn->getHandle(), x, y);
-    const S32 sx = (S32)rgn->getWidth(), sy = (S32)rgn->getWidth();
-    // Source: wave_zones.js neighbourHandles — a var region's western or southern neighbour
-    // sits its OWN size away, so both the 256 m step and this region's size are asked for.
-    const S32 dxs[] = { 0, sx, -256, -sx, 256 };
-    const S32 dys[] = { 0, sy, -256, -sy, 256 };
-    for (S32 dx : dxs)
-    {
-        for (S32 dy : dys)
-        {
-            const S32 nx = x + dx, ny = y + dy;
-            if (nx < 0 || ny < 0) continue;
-            const U64 h = handle_of(nx, ny);
-            if (std::find(out.begin(), out.end(), h) == out.end()) out.push_back(h);
-            if (out.size() >= 24) return out;
-        }
-    }
-    return out;
+    // <WolfViewer 2026-09-23> The regions the viewer is actually connected to, the agent's own
+    // first, nearest next - not a guessed ring of corner offsets, which missed any neighbour
+    // not sitting on one of them (wolfnearbyregions.h). 24 = the service's own cap
+    // (php/waves.php WAVES_MAX_HANDLES; wt_regions_by_handles fails the whole request above it).
+    return WolfNearbyRegions::handles(24);
 }
 
 void WolfWaveZones::idle()
@@ -188,7 +168,19 @@ void WolfWaveZones::idle()
     LLViewerRegion* rgn = gAgent.getRegion();
     if (!rgn) return;
     const F64 now = LLFrameTimer::getElapsedSeconds();
-    if (rgn->getHandle() != mFetchedForHandle || now >= mNextRefresh)
+    // <WolfViewer 2026-09-23> ...or when a neighbour connects or drops: after a crossing the
+    // fetch goes out before the neighbours have all connected, and a region that connects
+    // later would otherwise wait REFRESH_SECS for its waves. The neighbour set is sorted from the
+    // whole region list, so it is compared once a second rather than every frame.
+    bool neighbours_changed = false;
+    if (now >= mNextNeighbourCheck)
+    {
+        mNextNeighbourCheck = now + 1.0;
+        // An empty set (no region yet) makes refresh() return before recording it.
+        const std::vector<U64> handles = neighbourHandles();
+        neighbours_changed = !handles.empty() && handles != mRequestedHandles;
+    }
+    if (rgn->getHandle() != mFetchedForHandle || now >= mNextRefresh || neighbours_changed)
     {
         refresh();
     }
@@ -202,6 +194,7 @@ void WolfWaveZones::refresh()
     std::vector<U64> handles = neighbourHandles();
     if (handles.empty()) return;
     mFetching = true;
+    mRequestedHandles = handles;
     mNextRefresh = LLFrameTimer::getElapsedSeconds() + REFRESH_SECS;
     const U64 requested_handle = region->getHandle();
     const U64 generation = mFetchGeneration;

@@ -304,6 +304,8 @@ private:
     F32  mBandTol = 0.3f;
     U64  mFetchedForHandle = 0;
     F64  mNextRefresh = 0.0;
+    std::vector<U64> mRequestedHandles;   // <WolfViewer 2026-09-23/> the set the last fetch asked for
+    F64 mNextNeighbourCheck = 0.0;       // <WolfViewer 2026-09-23/> idle compares the neighbour set once a second
     F64  mLastFetchAt = 0.0;
     bool mFetching = false;
     bool mSaving = false;

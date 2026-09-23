@@ -683,19 +683,30 @@ void LLNetMap::draw()
                 bool isAgentTeleporting = gAgent.getTeleportState() != LLAgent::TELEPORT_NONE;
                 if (!isAgentTeleporting)
                 {
-                    const LLViewerRegion::tex_matrix_t& tiles(regionp->getWorldMapTiles());
-                    for (S32 i(0), scaled_width((S32)(real_width / region_width)), square_width(scaled_width * scaled_width);
-                         i < square_width; ++i)
+                    // <WolfViewer 2026-09-23> Only the tiles the map can show. Every tile of
+                    // the region was fetched and walked here each frame (16.7 M at 1,048,576 m).
+                    // The map is drawn about its centre and may be rotated, so a tile can show if
+                    // it meets the disc of the map's half-diagonal (plus the pan) about the origin.
+                    const S32 scaled_width = (S32)(real_width / region_width);
+                    const F32 view_radius = 0.5f * sqrtf((F32)(getRect().getWidth() * getRect().getWidth() + getRect().getHeight() * getRect().getHeight()))
+                                            + fabsf(mCurPan.mV[VX]) + fabsf(mCurPan.mV[VY]);
+                    const S32 min_tx = llmax(0, (S32)floorf((-view_radius - left) / mScale));
+                    const S32 max_tx = llmin(scaled_width - 1, (S32)ceilf((view_radius - left) / mScale));
+                    const S32 min_ty = llmax(0, (S32)floorf((-view_radius - bottom) / mScale));
+                    const S32 max_ty = llmin(scaled_width - 1, (S32)ceilf((view_radius - bottom) / mScale));
+                    for (S32 ty = min_ty; ty <= max_ty; ++ty)
+                    for (S32 tx = min_tx; tx <= max_tx; ++tx)
                     {
-                        const F32                  y = (F32)(i / scaled_width);
-                        const F32                  x = (F32)(i - y * scaled_width);
+                        const F32                  y = (F32)ty;
+                        const F32                  x = (F32)tx;
                         const F32                  local_left(left + x * mScale);
                         const F32                  local_right(local_left + mScale);
                         const F32                  local_bottom(bottom + y * mScale);
                         const F32                  local_top(local_bottom + mScale);
-                        LLPointer<LLViewerTexture> pRegionImage = tiles[(U64)(x * scaled_width + y)];
+                        LLPointer<LLViewerTexture> pRegionImage = regionp->getWorldMapTile((U32)tx, (U32)ty);
                         if (pRegionImage.isNull())
                             continue;
+                        // </WolfViewer>
 
                         if (pRegionImage->hasGLTexture())
                         {
@@ -2204,67 +2215,108 @@ void LLNetMap::renderPropertyLinesForRegion(const LLViewerRegion* pRegion, const
     const F32 GRID_STEP = PARCEL_GRID_STEP_METERS;
     const S32 GRIDS_PER_EDGE = (S32)(real_width / GRID_STEP);
 
-    const U8* pOwnership = pRegion->getParcelOverlay()->getOwnership();
-    const U8* pCollision = (pRegion->getHandle() == LLViewerParcelMgr::instance().getCollisionRegionHandle()) ? LLViewerParcelMgr::instance().getCollisionBitmap() : NULL;
-    for (S32 idxRow = 0; idxRow < GRIDS_PER_EDGE; idxRow++)
+    // <WolfViewer 2026-09-23> The ownership grid and the collision parcel are cell quadtrees now
+    // (llviewerparceloverlay.h, wolfparcelbitmap.h), and this walked all GRIDS_PER_EDGE^2 cells of
+    // the region on every camera move - 655 M at 102,400 m. It now pairs up their uniform blocks,
+    // keeps only cells that land on the image, and draws each uniform block's fill as the one
+    // rectangle its cells' overlapping rectangles made, and its lines row by row / column by
+    // column as the cells' lines joined up. Same pixels, same colours, same precedence.
+    const WolfCellQuadTree<U8>& ownership = pRegion->getParcelOverlay()->getOwnership();
+    const WolfParcelCells* pCollision = (pRegion->getHandle() == LLViewerParcelMgr::instance().getCollisionRegionHandle())
+        ? &LLViewerParcelMgr::instance().getCollisionBitmap() : NULL;
+    if (pCollision && (pCollision->width() != GRIDS_PER_EDGE || pCollision->height() != GRIDS_PER_EDGE))
     {
-        for (S32 idxCol = 0; idxCol < GRIDS_PER_EDGE; idxCol++)
+        pCollision = NULL;   // decoded for another region's grid
+    }
+    const F32 cell_px = GRID_STEP * mObjectMapTPM;
+    if (cell_px <= 0.f)
+    {
+        return;
+    }
+    // Cells whose pixels can reach the image.
+    const S32 col0 = llmax(0, (S32)floorf(-originX / cell_px) - 1);
+    const S32 col1 = llmin(GRIDS_PER_EDGE, (S32)ceilf((imgWidth - originX) / cell_px) + 1);
+    const S32 row0 = llmax(0, (S32)floorf(-originY / cell_px) - 1);
+    const S32 row1 = llmin(GRIDS_PER_EDGE, (S32)ceilf((imgHeight - originY) / cell_px) + 1);
+
+    static LLCachedControl<bool> s_fForSaleParcels(gSavedSettings, "MiniMapForSaleParcels");
+    static LLCachedControl<bool> s_fShowCollisionParcels(gSavedSettings, "MiniMapCollisionParcels");
+
+    auto drawArea = [&](S32 bx, S32 by, S32 bw, S32 bh, S32 overlay, bool fCollision)
+    {
+        bool fForSale = ((overlay & PARCEL_COLOR_MASK) == PARCEL_FOR_SALE);
+        bool fAuction = ((overlay & PARCEL_COLOR_MASK) == PARCEL_AUCTION);
+        if ( (!fForSale) && (!fCollision) && (!fAuction) && (0 == (overlay & (PARCEL_SOUTH_LINE | PARCEL_WEST_LINE))) )
+            return;
+
+        const S32 cell_w = ll_round(GRID_STEP * mObjectMapTPM);
+        const S32 posX0 = originX + ll_round(bx * GRID_STEP * mObjectMapTPM);
+        const S32 posY0 = originY + ll_round(by * GRID_STEP * mObjectMapTPM);
+        const S32 posX1 = originX + ll_round((bx + bw - 1) * GRID_STEP * mObjectMapTPM);   // last cell
+        const S32 posY1 = originY + ll_round((by + bh - 1) * GRID_STEP * mObjectMapTPM);
+
+        if ( ((s_fForSaleParcels) && (fForSale || fAuction)) || ((s_fShowCollisionParcels) && (fCollision)) )
         {
-            S32 overlay = pOwnership[idxRow * GRIDS_PER_EDGE + idxCol];
-            S32 idxCollision = idxRow * GRIDS_PER_EDGE + idxCol;
-            bool fForSale = ((overlay & PARCEL_COLOR_MASK) == PARCEL_FOR_SALE);
-            bool fAuction = ((overlay & PARCEL_COLOR_MASK) == PARCEL_AUCTION);
-            bool fCollision = (pCollision) && (pCollision[idxCollision / 8] & (1 << (idxCollision % 8)));
-            if ( (!fForSale) && (!fCollision) && (!fAuction) && (0 == (overlay & (PARCEL_SOUTH_LINE | PARCEL_WEST_LINE))) )
-                continue;
-
-            const S32 posX = originX + ll_round(idxCol * GRID_STEP * mObjectMapTPM);
-            const S32 posY = originY + ll_round(idxRow * GRID_STEP * mObjectMapTPM);
-
-            static LLCachedControl<bool> s_fForSaleParcels(gSavedSettings, "MiniMapForSaleParcels");
-            static LLCachedControl<bool> s_fShowCollisionParcels(gSavedSettings, "MiniMapCollisionParcels");
-            if ( ((s_fForSaleParcels) && (fForSale || fAuction)) || ((s_fShowCollisionParcels) && (fCollision)) )
+            U32 texcolor = LLColor4U(255, 128, 128, 192).asRGBA();
+            if (fForSale)
             {
-                S32 curY = llclamp(posY, 0, imgHeight), endY = llclamp(posY + ll_round(GRID_STEP * mObjectMapTPM), 0, imgHeight - 1);
-                for (; curY <= endY; curY++)
+                texcolor = LLColor4U(255, 255, 128, 192).asRGBA();
+            }
+            else if (fAuction)
+            {
+                texcolor = LLColor4U(128, 0, 255, 102).asRGBA();
+            }
+            S32 curY = llclamp(posY0, 0, imgHeight), endY = llclamp(posY1 + cell_w, 0, imgHeight - 1);
+            for (; curY <= endY; curY++)
+            {
+                S32 curX = llclamp(posX0, 0, imgWidth), endX = llclamp(posX1 + cell_w, 0, imgWidth - 1);
+                for (; curX <= endX; curX++)
                 {
-                    S32 curX = llclamp(posX, 0, imgWidth) , endX = llclamp(posX + ll_round(GRID_STEP * mObjectMapTPM), 0, imgWidth - 1);
-                    for (; curX <= endX; curX++)
-                    {
-                        U32 texcolor = LLColor4U(255, 128, 128, 192).asRGBA();
-                        if (fForSale)
-                        {
-                            texcolor = LLColor4U(255, 255, 128, 192).asRGBA();
-                        }
-                        else if (fAuction)
-                        {
-                            texcolor = LLColor4U(128, 0, 255, 102).asRGBA();
-                        }
-
-                        pTextureData[curY * imgWidth + curX] = texcolor;
-                    }
+                    pTextureData[curY * imgWidth + curX] = texcolor;
                 }
             }
-            if (overlay & PARCEL_SOUTH_LINE)
+        }
+        if (overlay & PARCEL_SOUTH_LINE)
+        {
+            for (S32 row = by; row < by + bh; row++)
             {
+                const S32 posY = originY + ll_round(row * GRID_STEP * mObjectMapTPM);
                 if ( (posY >= 0) && (posY < imgHeight) )
                 {
-                    S32 curX = llclamp(posX, 0, imgWidth), endX = llclamp(posX + ll_round(GRID_STEP * mObjectMapTPM), 0, imgWidth - 1);
+                    S32 curX = llclamp(posX0, 0, imgWidth), endX = llclamp(posX1 + cell_w, 0, imgWidth - 1);
                     for (; curX <= endX; curX++)
                         pTextureData[posY * imgWidth + curX] = clrOverlay.asRGBA();
                 }
             }
-            if (overlay & PARCEL_WEST_LINE)
+        }
+        if (overlay & PARCEL_WEST_LINE)
+        {
+            for (S32 col = bx; col < bx + bw; col++)
             {
+                const S32 posX = originX + ll_round(col * GRID_STEP * mObjectMapTPM);
                 if ( (posX >= 0) && (posX < imgWidth) )
                 {
-                    S32 curY = llclamp(posY, 0, imgHeight), endY = llclamp(posY + ll_round(GRID_STEP * mObjectMapTPM), 0, imgHeight - 1);
+                    S32 curY = llclamp(posY0, 0, imgHeight), endY = llclamp(posY1 + cell_w, 0, imgHeight - 1);
                     for (; curY <= endY; curY++)
                         pTextureData[curY * imgWidth + posX] = clrOverlay.asRGBA();
                 }
             }
         }
-    }
+    };
+
+    ownership.forEachBlock(col0, row0, col1, row1, [&](S32 bx, S32 by, S32 bw, S32 bh, U8 overlay)
+    {
+        if (!pCollision)
+        {
+            drawArea(bx, by, bw, bh, overlay, false);
+            return;
+        }
+        pCollision->forEachBlock(bx, by, bx + bw, by + bh, [&](S32 cx, S32 cy, S32 cw, S32 ch, U8 collision)
+        {
+            drawArea(cx, cy, cw, ch, overlay, collision != 0);
+        });
+    });
+    // </WolfViewer>
 }
 // [/SL:KB]
 

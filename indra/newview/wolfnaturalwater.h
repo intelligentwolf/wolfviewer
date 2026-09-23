@@ -18,6 +18,7 @@
 #include "llpointer.h"
 #include "v3math.h"
 #include "llvowater.h"
+#include <map>
 #include <memory>
 #include <set>
 #include <vector>
@@ -160,12 +161,25 @@ private:
     void apply(std::shared_ptr<Result> result);
     static U64 terrainStamp(LLViewerRegion* regionp);
 
-    U64  mRegionHandle{ 0 };
-    U64  mAppliedStamp{ 0 };
+    /** Main thread: kill one region's surfaces. */
+    static void killSurfaces(std::vector<LLPointer<LLVOWater>>& surfaces);
+
+    // <WolfViewer 2026-09-23> Paul: "the region next to the one i'm in needs to show its water
+    // ... even if i'm not in that region". Every connected region keeps its own surfaces and
+    // stamp; one analysis runs at a time (mBusy). The agent's region is looked at on every
+    // other check, so it reacts as fast as it did when it was the only one; the neighbours
+    // share the checks in between, nearest first (wolfnearbyregions.h).
+    struct RegionWater
+    {
+        U64 mAppliedStamp{ 0 };
+        std::vector<LLPointer<LLVOWater>> mSurfaces;
+    };
+    std::map<U64, RegionWater> mRegions;
     bool mBusy{ false };
     F64  mNextCheck{ 0.0 };
+    bool mAgentTurn{ true };
+    size_t mNeighbourCursor{ 0 };
     std::set<U64> mLoggedDecimation;   // <WolfViewer 2026-09-10> regions told once about the coarse grid
-    std::vector<LLPointer<LLVOWater>> mSurfaces;
 };
 
 #endif // WOLF_NATURALWATER_H

@@ -1880,6 +1880,12 @@ class LLAdvancedTerrainCreateLocalPaintMap : public view_listener_t
         // If baking the paintmap failed, set the paintmap to nullptr. This
         // causes LLDrawPoolTerrain to use a blank paintmap instead.
         if (!success) { tex = nullptr; }
+        // <WolfViewer 2026-09-23/> say so: a region over 4096 m is refused (llterrainpaintmap.cpp)
+        if (!success)
+        {
+            LLNotificationsUtil::add("GenericAlert", LLSD().with("MESSAGE",
+                "The terrain paint map could not be baked for this region. Regions larger than 4096 m cannot be baked; see the log for details."));
+        }
         gLocalTerrainMaterials.setPaintMap(tex);
 
         return true;

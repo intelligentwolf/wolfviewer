@@ -30,6 +30,7 @@
 // The ownership data for land parcels.
 // One of these structures per region.
 
+#include "wolfcellquadtree.h"   // <WolfViewer 2026-09-23/>
 #include "llbbox.h"
 #include "llframetimer.h"
 #include "lluuid.h"
@@ -66,7 +67,8 @@ public:
 
     F32             getOwnedRatio() const;
 // [SL:KB] - Patch: World-MinimapOverlay | Checked: 2012-06-20 (Catznip-3.3)
-    const U8*       getOwnership() const { return mOwnership; }
+    // <WolfViewer 2026-09-23/> the ownership grid itself (sparse; see mOwnership), for the minimap
+    const WolfCellQuadTree<U8>& getOwnership() const { return mOwnership; }
 // [/SL:KB]
 
     // Returns the number of vertices drawn
@@ -115,7 +117,11 @@ private:
     // Size: mParcelGridsPerEdge * mParcelGridsPerEdge
     // Each value is 0-3, PARCEL_AVAIL to PARCEL_SELF in the two low bits
     // and other flags in the upper bits.
-    U8              *mOwnership;
+    // <WolfViewer 2026-09-23> A quadtree, not new U8[grids * grids]: that was 655 MB, filled
+    // eagerly, at 102,400 m, and an S32 product that wrapped to 0 at 1,048,576 m (with
+    // uncompressLandOverlay then memcpy'ing into the empty block). Cells are (x = column,
+    // y = row); a region the sim sends no overlay for stays one PARCEL_PUBLIC node.
+    WolfCellQuadTree<U8> mOwnership;
 
     // Update propery lines and overlay texture
     bool            mDirty;

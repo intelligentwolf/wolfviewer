@@ -27,6 +27,7 @@
 #ifndef LL_LLVIEWERPARCELMGR_H
 #define LL_LLVIEWERPARCELMGR_H
 
+#include "wolfparcelbitmap.h"   // <WolfViewer 2026-09-23/>
 #include "v3dmath.h"
 #include "llframetimer.h"
 #include "llsingleton.h"
@@ -102,18 +103,18 @@ public:
     // Returns selected area
     S32 getSelectedArea() const;
 
-    void resetSegments(U8* segments);
-    // <FS:Wolf/> (Re)size every buffer that is indexed by mParcelsPerEdge.
-    void allocateParcelBuffers(S32 parcels_per_edge);
+    // <WolfViewer 2026-09-23/> segments are boundary runs now (WolfParcelSegments), not a
+    // (parcels_per_edge + 1)^2 byte grid, and nothing is sized by mParcelsPerEdge any more.
+    void resetSegments(WolfParcelSegments& segments);
 
     // write a rectangle's worth of line segments into the highlight array
     void writeHighlightSegments(F32 west, F32 south, F32 east, F32 north);
 
     // Write highlight segments from a packed bitmap of the appropriate
     // parcel.
-    void writeSegmentsFromBitmap(U8* bitmap, U8* segments);
+    void writeSegmentsFromBitmap(const WolfParcelCells& bitmap, WolfParcelSegments& segments);
 
-    void writeAgentParcelFromBitmap(U8* bitmap);
+    void writeAgentParcelFromBitmap(WolfParcelCells&& bitmap);
 
     // Select the collision parcel
     void selectCollisionParcel();
@@ -169,8 +170,8 @@ public:
 
     LLParcel*   getCollisionParcel() const;
 // [SL:KB] - Patch: World-MinimapOverlay | Checked: 2012-06-20 (Catznip-3.3)
-    const U8*   getCollisionBitmap() const { return mCollisionBitmap; }
-    size_t      getCollisionBitmapSize() const { return mParcelsPerEdge * mParcelsPerEdge / 8; }
+    // <WolfViewer 2026-09-23/> the decoded collision parcel, one cell per 4 m (see wolfparcelbitmap.h)
+    const WolfParcelCells& getCollisionBitmap() const { return mCollisionBitmap; }
     U64         getCollisionRegionHandle() const { return mCollisionRegionHandle; }
 
     typedef boost::signals2::signal<void (const LLViewerRegion*)> collision_update_signal_t;
@@ -219,8 +220,8 @@ public:
     //void  renderOneSegment(F32 x1, F32 y1, F32 x2, F32 y2, F32 height, U8 direction, LLViewerRegion* regionp);
     void    renderOneSegment(F32 x1, F32 y1, F32 x2, F32 y2, F32 height, U8 direction, LLViewerRegion* regionp, bool absolute_height = false);
     // </FS:Ansariel>
-    void    renderHighlightSegments(const U8* segments, LLViewerRegion* regionp);
-    void    renderCollisionSegments(U8* segments, bool use_pass, LLViewerRegion* regionp);
+    void    renderHighlightSegments(const WolfParcelSegments& segments, LLViewerRegion* regionp);
+    void    renderCollisionSegments(const WolfParcelSegments& segments, bool use_pass, LLViewerRegion* regionp);
 
     static S32 PARCEL_BAN_LINES_HIDE;
     static S32 PARCEL_BAN_LINES_ON_COLLISION;
@@ -376,26 +377,26 @@ private:
     // WEST_MASK = draw west edge
     // SOUTH_MASK = draw south edge
     S32                         mParcelsPerEdge;
-    // <FS:Wolf/> How many parcels per edge the buffers below were actually sized for. They used
-    // to be allocated once for an assumed 8192 m maximum while mParcelsPerEdge tracked the real
-    // region, so a larger varregion overran every one of them. See allocateParcelBuffers.
-    S32                         mParcelBufferParcelsPerEdge = 0;
-    U8*                         mHighlightSegments;
-    U8*                         mAgentParcelOverlay;
+    // <WolfViewer 2026-09-23> These were byte arrays sized from mParcelsPerEdge (the 2026-09
+    // FS:Wolf growth fixed their overrun on Dire Wolf): about 2.2 GB committed at 102,400 m, and
+    // S32 products that wrapped at 1,048,576 m. Edges are boundary runs and the agent parcel a
+    // cell quadtree now, so their size follows the parcels, not the region.
+    WolfParcelSegments          mHighlightSegments;
+    WolfParcelCells             mAgentParcelOverlay;
 
-    // Raw data buffer for unpacking parcel overlay chunks
-    // Size = parcels_per_edge * parcels_per_edge / parcel_overlay_chunks
-    static U8*                  sPackedOverlay;
+    // Raw data buffer for unpacking parcel overlay chunks: one ParcelOverlay payload (processParcelOverlay's
+    // expected_size). It was allocated at parcels_per_edge^2 / PARCEL_OVERLAY_CHUNKS, far more than one chunk.
+    static U8                   sPackedOverlay[1024];
 
     // Watch for pending collisions with a parcel you can't access.
     // If it's coming, draw the parcel's boundaries.
     LLParcel*                   mCollisionParcel;
 // [SL:KB] - Patch: World-MinimapOverlay | Checked: 2012-06-20 (Catznip-3.3)
-    U8*                         mCollisionBitmap;
+    WolfParcelCells             mCollisionBitmap;   // <WolfViewer 2026-09-23/>
     U64                         mCollisionRegionHandle;
     collision_update_signal_t*  mCollisionUpdateSignal;
 // [/SL:KB]
-    U8*                         mCollisionSegments;
+    WolfParcelSegments          mCollisionSegments;   // <WolfViewer 2026-09-23/>
     bool                        mRenderCollision;
     bool                        mRenderSelection;
     S32                         mCollisionBanned;

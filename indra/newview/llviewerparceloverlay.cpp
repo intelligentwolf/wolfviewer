@@ -109,11 +109,8 @@ LLViewerParcelOverlay::LLViewerParcelOverlay(LLViewerRegion* region, F32 region_
 
     // Create storage for ownership information from simulator
     // and initialize it.
-    mOwnership = new U8[ mParcelGridsPerEdge * mParcelGridsPerEdge ];
-    for (S32 i = 0; i < mParcelGridsPerEdge * mParcelGridsPerEdge; i++)
-    {
-        mOwnership[i] = PARCEL_PUBLIC;
-    }
+    // <WolfViewer 2026-09-23/> one PARCEL_PUBLIC node, however large the region (see the header)
+    mOwnership.reset(mParcelGridsPerEdge, mParcelGridsPerEdge, PARCEL_PUBLIC);
 
     gPipeline.markGLRebuild(this);
 }
@@ -121,8 +118,6 @@ LLViewerParcelOverlay::LLViewerParcelOverlay(LLViewerRegion* region, F32 region_
 
 LLViewerParcelOverlay::~LLViewerParcelOverlay()
 {
-    delete[] mOwnership;
-    mOwnership = NULL;
     mImageRaw = NULL;
 }
 
@@ -245,7 +240,7 @@ bool LLViewerParcelOverlay::encroachesOnNearbyParcel(const std::vector<LLBBox>& 
                 // This is not the rightmost column
                 if (col < GRIDS_PER_EDGE-1)
                 {
-                    U8 east_overlay = mOwnership[row*GRIDS_PER_EDGE+col+1];
+                    U8 east_overlay = mOwnership.get(col + 1, row);   // <WolfViewer 2026-09-23/>
                     // If the column to the east of the current one marks
                     // the other parcel's west edge and the box extends
                     // to the west it crosses the parcel border.
@@ -258,7 +253,7 @@ bool LLViewerParcelOverlay::encroachesOnNearbyParcel(const std::vector<LLBBox>& 
                 // This is not the topmost column
                 if (row < GRIDS_PER_EDGE-1)
                 {
-                    U8 north_overlay = mOwnership[(row+1)*GRIDS_PER_EDGE+col];
+                    U8 north_overlay = mOwnership.get(col, row + 1);   // <WolfViewer 2026-09-23/>
                     // If the row to the north of the current one marks
                     // the other parcel's south edge and the box extends
                     // to the south it crosses the parcel border.
@@ -308,23 +303,24 @@ U8 LLViewerParcelOverlay::parcelFlags(S32 row, S32 col, U8 flags) const
         LL_WARNS() << "Attempted to get ownership out of region's overlay, row: " << row << " col: " << col << LL_ENDL;
         return flags;
     }
-    return mOwnership[row * mParcelGridsPerEdge + col] & flags;
+    return mOwnership.get(col, row) & flags;   // <WolfViewer 2026-09-23/>
 }
 
 F32 LLViewerParcelOverlay::getOwnedRatio() const
 {
-    S32 size = mParcelGridsPerEdge * mParcelGridsPerEdge;
-    S32 total = 0;
+    // <WolfViewer 2026-09-23/> counted per uniform block of the grid, in S64 (S32 wrapped)
+    const S64 size = (S64)mParcelGridsPerEdge * mParcelGridsPerEdge;
+    S64 total = 0;
 
-    for (S32 i = 0; i < size; i++)
+    mOwnership.forEachBlock([&](S32, S32, S32 w, S32 h, U8 value)
     {
-        if ((mOwnership[i] & PARCEL_COLOR_MASK) != PARCEL_PUBLIC)
+        if ((value & PARCEL_COLOR_MASK) != PARCEL_PUBLIC)
         {
-            total++;
+            total += (S64)w * h;
         }
-    }
+    });
 
-    return (F32)total / (F32)size;
+    return size > 0 ? (F32)((F64)total / (F64)size) : 0.f;
 }
 
 //---------------------------------------------------------------------------
@@ -367,7 +363,7 @@ void LLViewerParcelOverlay::updateOverlayTexture()
     {
         const S32 row = parcelOverlaySourceCell(i / texture_edge, mParcelGridsPerEdge, texture_edge);
         const S32 column = parcelOverlaySourceCell(i % texture_edge, mParcelGridsPerEdge, texture_edge);
-        U8 ownership = mOwnership[row * mParcelGridsPerEdge + column];
+        U8 ownership = mOwnership.get(column, row);   // <WolfViewer 2026-09-23/>
 
         U8 r,g,b,a;
 
@@ -452,7 +448,23 @@ void LLViewerParcelOverlay::uncompressLandOverlay(S32 chunk, U8* packed_overlay)
         return;
     }
     const size_t offset = static_cast<size_t>(chunk) * PARCEL_OVERLAY_PAYLOAD_BYTES;
-    memcpy(mOwnership + offset, packed_overlay, PARCEL_OVERLAY_PAYLOAD_BYTES);
+    // <WolfViewer 2026-09-23> The payload is the next 1024 cells in row-major order (what the
+    // memcpy into the array wrote); runs of one value along a row go in as one rectangle.
+    const size_t grids = (size_t)mParcelGridsPerEdge;
+    for (S32 i = 0; i < PARCEL_OVERLAY_PAYLOAD_BYTES;)
+    {
+        const size_t cell = offset + (size_t)i;
+        const S32 row = (S32)(cell / grids), col = (S32)(cell % grids);
+        const U8 value = packed_overlay[i];
+        S32 run = 1;
+        while (i + run < PARCEL_OVERLAY_PAYLOAD_BYTES && col + run < mParcelGridsPerEdge && packed_overlay[i + run] == value)
+        {
+            ++run;
+        }
+        mOwnership.fillRect(col, row, col + run, row + 1, value);
+        i += run;
+    }
+    // </WolfViewer>
 
     // Force property lines and overlay texture to update
     setDirty();
@@ -477,57 +489,65 @@ void LLViewerParcelOverlay::updatePropertyLines()
     constexpr F32 GRID_STEP = PARCEL_GRID_STEP_METERS;
     const S32 GRIDS_PER_EDGE = mParcelGridsPerEdge;
 
-    for (S32 row = 0; row < GRIDS_PER_EDGE; row++)
+    // <WolfViewer 2026-09-23> Upstream visited every cell and skipped all but owned, group,
+    // for-sale and auction ones; the grid's uniform blocks are visited instead and only those
+    // blocks' cells are examined, which finds the same edges without walking a region's worth of
+    // public land (6.9e10 cells at 1,048,576 m).
+    mOwnership.forEachBlock([&](S32 block_x, S32 block_y, S32 block_w, S32 block_h, U8 block_value)
     {
-        for (S32 col = 0; col < GRIDS_PER_EDGE; col++)
+        switch (block_value & PARCEL_COLOR_MASK)
         {
-            U8 overlay = mOwnership[row * GRIDS_PER_EDGE + col];
-            S32 colorIndex = overlay & PARCEL_COLOR_MASK;
-            switch (colorIndex)
+        case PARCEL_SELF:
+        case PARCEL_GROUP:
+        case PARCEL_OWNED:
+        case PARCEL_FOR_SALE:
+        case PARCEL_AUCTION:
+            break;
+        default:
+            return;
+        }
+        for (S32 row = block_y; row < block_y + block_h; row++)
+        {
+            for (S32 col = block_x; col < block_x + block_w; col++)
             {
-            case PARCEL_SELF:
-            case PARCEL_GROUP:
-            case PARCEL_OWNED:
-            case PARCEL_FOR_SALE:
-            case PARCEL_AUCTION:
-                break;
-            default:
-                continue;
-            }
+                U8 overlay = block_value;
+                S32 colorIndex = overlay & PARCEL_COLOR_MASK;
 
-            const LLColor4U& color = colors[colorIndex];
+                const LLColor4U& color = colors[colorIndex];
 
-            F32 left = col * GRID_STEP;
-            F32 right = left + GRID_STEP;
+                F32 left = col * GRID_STEP;
+                F32 right = left + GRID_STEP;
 
-            F32 bottom = row * GRID_STEP;
-            F32 top = bottom + GRID_STEP;
+                F32 bottom = row * GRID_STEP;
+                F32 top = bottom + GRID_STEP;
 
-            // West edge
-            if (overlay & PARCEL_WEST_LINE)
-            {
-                addPropertyLine(left, bottom, 0, 1, LINE_WIDTH, 0, color);
-            }
+                // West edge
+                if (overlay & PARCEL_WEST_LINE)
+                {
+                    addPropertyLine(left, bottom, 0, 1, LINE_WIDTH, 0, color);
+                }
 
-            // East edge
-            if (col == GRIDS_PER_EDGE - 1 || mOwnership[row * GRIDS_PER_EDGE + col + 1] & PARCEL_WEST_LINE)
-            {
-                addPropertyLine(right, bottom, 0, 1, -LINE_WIDTH, 0, color);
-            }
+                // East edge
+                if (col == GRIDS_PER_EDGE - 1 || mOwnership.get(col + 1, row) & PARCEL_WEST_LINE)
+                {
+                    addPropertyLine(right, bottom, 0, 1, -LINE_WIDTH, 0, color);
+                }
 
-            // South edge
-            if (overlay & PARCEL_SOUTH_LINE)
-            {
-                addPropertyLine(left, bottom, 1, 0, 0, LINE_WIDTH, color);
-            }
+                // South edge
+                if (overlay & PARCEL_SOUTH_LINE)
+                {
+                    addPropertyLine(left, bottom, 1, 0, 0, LINE_WIDTH, color);
+                }
 
-            // North edge
-            if (row == GRIDS_PER_EDGE - 1 || mOwnership[(row + 1) * GRIDS_PER_EDGE + col] & PARCEL_SOUTH_LINE)
-            {
-                addPropertyLine(left, top, 1, 0, 0, -LINE_WIDTH, color);
+                // North edge
+                if (row == GRIDS_PER_EDGE - 1 || mOwnership.get(col, row + 1) & PARCEL_SOUTH_LINE)
+                {
+                    addPropertyLine(left, top, 1, 0, 0, -LINE_WIDTH, color);
+                }
             }
         }
-    }
+    });
+    // </WolfViewer>
 
     // Everything's clean now
     mDirty = false;
@@ -839,7 +859,7 @@ void LLViewerParcelOverlay::renderPropertyLinesOnMinimap(F32 scale_pixels_per_me
 {
     static LLCachedControl<bool> show(gSavedSettings, "MiniMapShowPropertyLines");
 
-    if (!mOwnership || !show)
+    if (!show)
     {
         return;
     }
@@ -854,23 +874,38 @@ void LLViewerParcelOverlay::renderPropertyLinesOnMinimap(F32 scale_pixels_per_me
     gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
     gGL.setLineWidth(1.0f);
     gGL.color4fv(parcel_outline_color);
-    for (S32 i = 0; i <= GRIDS_PER_EDGE; i++)
+    // <WolfViewer 2026-09-23> Upstream walked all (grids + 1)^2 cells. The region's own east and
+    // north boundary (i or j == GRIDS_PER_EDGE) is drawn along its length, and interior cells
+    // only where the grid holds a west or south line - found per uniform block, not per cell.
+    for (S32 k = 0; k < GRIDS_PER_EDGE; k++)
     {
-        const F32 bottom = region_bottom + (i * map_parcel_width);
-        const F32 top    = bottom + map_parcel_width;
-        for (S32 j = 0; j <= GRIDS_PER_EDGE; j++)
-        {
-            const F32  left               = region_left + (j * map_parcel_width);
-            const F32  right              = left + map_parcel_width;
-            const bool is_region_boundary = i == GRIDS_PER_EDGE || j == GRIDS_PER_EDGE;
-            const U8   overlay            = is_region_boundary ? 0 : mOwnership[(i * GRIDS_PER_EDGE) + j];
-            // The property line vertices are three-dimensional, but here we only care about the x and y coordinates, as we are drawing on a
-            // 2D map
-            const bool has_left   = i != GRIDS_PER_EDGE && (j == GRIDS_PER_EDGE || (overlay & PARCEL_WEST_LINE));
-            const bool has_bottom = j != GRIDS_PER_EDGE && (i == GRIDS_PER_EDGE || (overlay & PARCEL_SOUTH_LINE));
-            grid_2d_part_lines(left, top, right, bottom, has_left, has_bottom);
-        }
+        // column j == GRIDS_PER_EDGE: has_left, no bottom; row i == GRIDS_PER_EDGE: has_bottom
+        const F32 east_left = region_left + (GRIDS_PER_EDGE * map_parcel_width);
+        const F32 row_bottom = region_bottom + (k * map_parcel_width);
+        grid_2d_part_lines(east_left, row_bottom + map_parcel_width, east_left + map_parcel_width, row_bottom, true, false);
+        const F32 north_bottom = region_bottom + (GRIDS_PER_EDGE * map_parcel_width);
+        const F32 col_left = region_left + (k * map_parcel_width);
+        grid_2d_part_lines(col_left, north_bottom + map_parcel_width, col_left + map_parcel_width, north_bottom, false, true);
     }
+    mOwnership.forEachBlock([&](S32 block_x, S32 block_y, S32 block_w, S32 block_h, U8 overlay)
+    {
+        if (!(overlay & (PARCEL_WEST_LINE | PARCEL_SOUTH_LINE)))
+        {
+            return;
+        }
+        for (S32 i = block_y; i < block_y + block_h; i++)
+        {
+            const F32 bottom = region_bottom + (i * map_parcel_width);
+            const F32 top    = bottom + map_parcel_width;
+            for (S32 j = block_x; j < block_x + block_w; j++)
+            {
+                const F32 left  = region_left + (j * map_parcel_width);
+                const F32 right = left + map_parcel_width;
+                grid_2d_part_lines(left, top, right, bottom, (overlay & PARCEL_WEST_LINE) != 0, (overlay & PARCEL_SOUTH_LINE) != 0);
+            }
+        }
+    });
+    // </WolfViewer>
 }
 
 // [SL:KB] - Patch: World-MinimapOverlay | Checked: 2012-06-20 (Catznip-3.3)

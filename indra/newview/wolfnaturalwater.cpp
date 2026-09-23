@@ -15,6 +15,7 @@
 
 #include "wolfnaturalwater.h"
 #include "wolfgrid.h"   // <WolfViewer 2026-09-22/> Wolf Territories only
+#include "wolfnearbyregions.h"
 
 #include <algorithm>
 #include <cmath>
@@ -31,6 +32,7 @@
 #include "llviewerobjectlist.h"
 #include "llviewerregion.h"
 #include "llvowater.h"
+#include "llworld.h"
 #include "pipeline.h"
 #include "workqueue.h"
 
@@ -42,41 +44,38 @@ WolfNaturalWater::~WolfNaturalWater()
 {
     // LLPointers into the object list, which outlives this singleton's teardown order
     // guarantees — drop the references without touching the pipeline.
-    mSurfaces.clear();
+    mRegions.clear();
 }
 
-void WolfNaturalWater::reset()
+// static
+void WolfNaturalWater::killSurfaces(std::vector<LLPointer<LLVOWater>>& surfaces)
 {
-    for (auto& p : mSurfaces)
+    for (auto& p : surfaces)
     {
         if (p.notNull() && !p->isDead())
         {
             gObjectList.killObject(p);
         }
     }
-    mSurfaces.clear();
-    mAppliedStamp = 0;
+    surfaces.clear();
+}
+
+void WolfNaturalWater::reset()
+{
+    for (auto& kv : mRegions)
+    {
+        killSurfaces(kv.second.mSurfaces);
+    }
+    mRegions.clear();
 }
 
 // Changes whenever any patch of the region's surface was updated (terrain edits, new
 // LayerData): LLSurfacePatch::dirtyZ() stamps mLastUpdateTime = gFrameTime (llsurfacepatch.cpp).
 U64 WolfNaturalWater::terrainStamp(LLViewerRegion* regionp)
 {
-    const LLSurface& land = regionp->getLand();
-    const S32 per_edge = land.getPatchesPerEdge();
-    U64 stamp = 1469598103934665603ull;
-    for (S32 y = 0; y < per_edge; ++y)
-    {
-        for (S32 x = 0; x < per_edge; ++x)
-        {
-            const LLSurfacePatch* patchp = land.getPatch(x, y);
-            if (patchp)
-            {
-                stamp = (stamp ^ patchp->getLastUpdateTime()) * 1099511628211ull;
-            }
-        }
-    }
-    return stamp;
+    // <WolfViewer 2026-09-23> See WolfWaterField::terrainStamp: the surface's own revision
+    // counter, not a walk over every patch (which now would make every patch).
+    return regionp->getLand().getTerrainRevision();
 }
 
 void WolfNaturalWater::idle()
@@ -89,22 +88,11 @@ void WolfNaturalWater::idle()
     static LLCachedControl<F32> catchment(gSavedSettings, "WolfTerrainWaterCatchment", 5000.f);
     if (!enabled)
     {
-        if (!mSurfaces.empty())
+        if (!mRegions.empty())
         {
             reset();
         }
         return;
-    }
-
-    LLViewerRegion* regionp = gAgent.getRegion();
-    if (!regionp)
-    {
-        return;
-    }
-    if (regionp->getHandle() != mRegionHandle)
-    {
-        reset();
-        mRegionHandle = regionp->getHandle();
     }
 
     const F64 now = LLFrameTimer::getElapsedSeconds();
@@ -112,7 +100,37 @@ void WolfNaturalWater::idle()
     {
         return;
     }
-    mNextCheck = now + CHECK_INTERVAL_SECS;
+    // <WolfViewer 2026-09-23> Half the interval, alternating agent region / one neighbour, so
+    // the agent's region is still looked at every CHECK_INTERVAL_SECS.
+    mNextCheck = now + CHECK_INTERVAL_SECS * 0.5f;
+
+    // <WolfViewer 2026-09-23> Every connected region, not just the agent's. A region that has
+    // left the world takes its water with it; one that is still here keeps it across a
+    // crossing, so walking over a border no longer blanks the water on either side.
+    // 24 matches the paint and wave fetches (wolfnearbyregions.h).
+    const std::vector<LLViewerRegion*> nearby = WolfNearbyRegions::regions(24);
+    if (nearby.empty())
+    {
+        return;
+    }
+    for (auto it = mRegions.begin(); it != mRegions.end();)
+    {
+        const bool alive = std::any_of(nearby.begin(), nearby.end(),
+                                       [&](LLViewerRegion* r) { return r->getHandle() == it->first; });
+        if (alive)
+        {
+            ++it;
+            continue;
+        }
+        killSurfaces(it->second.mSurfaces);
+        it = mRegions.erase(it);
+    }
+    LLViewerRegion* regionp = nearby.front();   // the agent's region
+    if (!mAgentTurn && nearby.size() > 1)
+    {
+        regionp = nearby[1 + mNeighbourCursor++ % (nearby.size() - 1)];
+    }
+    mAgentTurn = !mAgentTurn;
 
     // Snapshot the heights; the analysis must not touch the live surface off the main thread.
     const LLSurface& land = regionp->getLand();
@@ -172,7 +190,7 @@ void WolfNaturalWater::idle()
         memcpy(&bits, &f, sizeof(bits));
         stamp = (stamp ^ bits) * 1099511628211ull;
     }
-    if (stamp == mAppliedStamp)
+    if (stamp == mRegions[regionp->getHandle()].mAppliedStamp)
     {
         return;
     }
@@ -1039,19 +1057,25 @@ void WolfNaturalWater::compute(Result& out, std::vector<F32> z, std::vector<U8> 
 void WolfNaturalWater::apply(std::shared_ptr<Result> result)
 {
     mBusy = false;
-    LLViewerRegion* regionp = gAgent.getRegion();
-    if (!regionp || !result || regionp->getHandle() != result->mRegionHandle)
+    if (!result)
     {
-        return;   // teleported while computing; the next idle() recomputes for the new region
+        return;
     }
-    for (auto& p : mSurfaces)
+    // Switched off while this was computing: reset() has already cleared everything.
+    static LLCachedControl<bool> enabled(gSavedSettings, "WolfTerrainWater", true);
+    if (!enabled || !WolfGrid::isWolfTerritories())
     {
-        if (p.notNull() && !p->isDead())
-        {
-            gObjectList.killObject(p);
-        }
+        return;
     }
-    mSurfaces.clear();
+    // <WolfViewer 2026-09-23> The region the result was computed for, which need not be the
+    // agent's. Gone while computing (teleport, neighbour dropped): nothing to apply.
+    LLViewerRegion* regionp = LLWorld::getInstance()->getRegionFromHandle(result->mRegionHandle);
+    if (!regionp || !regionp->isAlive())
+    {
+        return;
+    }
+    RegionWater& rw = mRegions[result->mRegionHandle];
+    killSurfaces(rw.mSurfaces);
     size_t verts = 0;
     auto create = [&](const Surface& sf, bool still)
     {
@@ -1072,13 +1096,13 @@ void WolfNaturalWater::apply(std::shared_ptr<Result> result)
         waterp->setStillWater(still);
         waterp->mbCanSelect = false;
         gPipeline.createObject(waterp);
-        mSurfaces.push_back(waterp);
+        rw.mSurfaces.push_back(waterp);
         verts += sf.mMesh->mVerts.size();
         return true;
     };
     for (const Surface& sf : result->mPools)   { if (!create(sf, true)) break; }
     for (const Surface& sf : result->mStreams) { if (!create(sf, false)) break; }
-    mAppliedStamp = result->mTerrainStamp;
+    rw.mAppliedStamp = result->mTerrainStamp;
     LL_INFOS("WolfNaturalWater") << "Natural water: " << result->mPools.size() << " pools, "
         << result->mBuiltBasins << " built hollows skipped, "
         << result->mStreams.size() << " streams (" << verts << " vertices) on region "

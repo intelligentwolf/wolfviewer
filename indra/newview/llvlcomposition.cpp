@@ -555,7 +555,7 @@ bool LLVLComposition::generateHeights(const F32 x, const F32 y,
 
             scaled_noisy_height = llmax(0.f, scaled_noisy_height);
             scaled_noisy_height = llmin(3.f, scaled_noisy_height);
-            *(mDatap + terrainGridOffset(i, j, mWidth)) = scaled_noisy_height;
+            setValue(i, j, scaled_noisy_height);   // <WolfViewer 2026-09-23/> sparse layer
         }
     }
     return true;

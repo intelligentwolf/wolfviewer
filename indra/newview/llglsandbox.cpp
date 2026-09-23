@@ -46,6 +46,7 @@
 #include "llvoavatarself.h"
 #include "llsky.h"
 #include "llagent.h"
+#include "llagentcamera.h"   // <WolfViewer 2026-09-23/> selection outline clip
 #include "lltoolmgr.h"
 #include "llselectmgr.h"
 #include "llhudmanager.h"
@@ -539,9 +540,37 @@ void LLViewerParcelMgr::renderOneSegment(F32 x1, F32 y1, F32 x2, F32 y2, F32 hei
 }
 
 
-void LLViewerParcelMgr::renderHighlightSegments(const U8* segments, LLViewerRegion* regionp)
+// <WolfViewer 2026-09-23> Both renderers below walked a (parcels_per_edge + 1)^2 byte grid every
+// frame (655 M bytes at 102,400 m) looking for set segment bits. The segments are boundary runs
+// now (WolfParcelSegments), expanded here into exactly the per-cell segments the grid held, in
+// the same order of calls to renderOneSegment per cell. A run is clipped to the cells that can
+// show at all: within the far clip for the selection outline, and within the fade distance for
+// collision lines, whose alpha is 0 past MAX_DIST_SQ - those were drawn invisibly before.
+namespace
 {
-    S32 x, y;
+    template <typename F>
+    void for_each_segment_cell(const WolfParcelSegments& segments, S32 min_x, S32 min_y, S32 max_x, S32 max_y, F f)
+    {
+        for (const WolfParcelSegments::Run& run : segments.runs())
+        {
+            if (run.mMask & SOUTH_MASK)
+            {
+                if (run.mY < min_y || run.mY > max_y) continue;
+                const S32 x0 = llmax(run.mX, min_x), x1 = llmin(run.mX + run.mLength - 1, max_x);
+                for (S32 x = x0; x <= x1; x++) f(x, run.mY, SOUTH_MASK);
+            }
+            else
+            {
+                if (run.mX < min_x || run.mX > max_x) continue;
+                const S32 y0 = llmax(run.mY, min_y), y1 = llmin(run.mY + run.mLength - 1, max_y);
+                for (S32 y = y0; y <= y1; y++) f(run.mX, y, WEST_MASK);
+            }
+        }
+    }
+}
+
+void LLViewerParcelMgr::renderHighlightSegments(const WolfParcelSegments& segments, LLViewerRegion* regionp)
+{
     F32 x1, y1; // start point
     F32 x2, y2; // end point
     bool has_segments = false;
@@ -559,17 +588,18 @@ void LLViewerParcelMgr::renderHighlightSegments(const U8* segments, LLViewerRegi
 
     gGL.color4f(1.f, 1.f, 0.f, 0.2f);
 
-    const S32 STRIDE = (mParcelsPerEdge+1);
-
     // Cheat and give this the same pick-name as land
 
+    // Cells within the far clip of the camera, in this region's cell grid.
+    const LLVector3 cam = regionp->getPosRegionFromGlobal(gAgentCamera.getCameraPositionGlobal());
+    const F32 reach = LLViewerCamera::getInstance()->getFar() + PARCEL_GRID_STEP_METERS;
+    const S32 min_x = (S32)floorf((cam.mV[VX] - reach) / PARCEL_GRID_STEP_METERS);
+    const S32 max_x = (S32)ceilf((cam.mV[VX] + reach) / PARCEL_GRID_STEP_METERS);
+    const S32 min_y = (S32)floorf((cam.mV[VY] - reach) / PARCEL_GRID_STEP_METERS);
+    const S32 max_y = (S32)ceilf((cam.mV[VY] + reach) / PARCEL_GRID_STEP_METERS);
 
-    for (y = 0; y < STRIDE; y++)
+    for_each_segment_cell(segments, min_x, min_y, max_x, max_y, [&](S32 x, S32 y, U8 segment_mask)
     {
-        for (x = 0; x < STRIDE; x++)
-        {
-            U8 segment_mask = segments[x + y*STRIDE];
-
             if (segment_mask & SOUTH_MASK)
             {
                 x1 = x * PARCEL_GRID_STEP_METERS;
@@ -607,8 +637,7 @@ void LLViewerParcelMgr::renderHighlightSegments(const U8* segments, LLViewerRegi
                 renderOneSegment(x1, y1, x2, y2, height, WEST_MASK, regionp, fsRenderParcelSelectionToMaxBuildHeight);
                 // </FS:Ansariel>
             }
-        }
-    }
+    });
 
     if (has_segments)
     {
@@ -617,18 +646,15 @@ void LLViewerParcelMgr::renderHighlightSegments(const U8* segments, LLViewerRegi
 }
 
 
-void LLViewerParcelMgr::renderCollisionSegments(U8* segments, bool use_pass, LLViewerRegion* regionp)
+void LLViewerParcelMgr::renderCollisionSegments(const WolfParcelSegments& segments, bool use_pass, LLViewerRegion* regionp)
 {
 
-    S32 x, y;
     F32 x1, y1; // start point
     F32 x2, y2; // end point
     F32 alpha = 0;
     F32 dist = 0;
     F32 dx, dy;
     F32 collision_height;
-
-    const S32 STRIDE = (mParcelsPerEdge+1);
 
     LLVector3 pos = gAgent.getPositionAgent();
 
@@ -661,16 +687,23 @@ void LLViewerParcelMgr::renderCollisionSegments(U8* segments, bool use_pass, LLV
 
     gGL.begin(LLRender::TRIANGLES);
 
-    for (y = 0; y < STRIDE; y++)
+    const F32 MAX_ALPHA = 0.95f;
+    const S32 DIST_OFFSET = 5;
+    const S32 MIN_DIST_SQ = DIST_OFFSET*DIST_OFFSET;
+    const S32 MAX_DIST_SQ = 169;
+    // A segment farther than sqrt(MAX_DIST_SQ) + DIST_OFFSET (plus a cell) from (pos_x, pos_y)
+    // gets alpha 0, so only cells within that box are expanded. The box is taken from the same
+    // pos_x / pos_y the alpha below compares segment coordinates with, so exactly the segments
+    // that were visible before are drawn.
+    const F32 reach = 13.f + DIST_OFFSET + 2.f * PARCEL_GRID_STEP_METERS;
+    const S32 min_x = (S32)floorf((pos_x - reach) / PARCEL_GRID_STEP_METERS);
+    const S32 max_x = (S32)ceilf((pos_x + reach) / PARCEL_GRID_STEP_METERS);
+    const S32 min_y = (S32)floorf((pos_y - reach) / PARCEL_GRID_STEP_METERS);
+    const S32 max_y = (S32)ceilf((pos_y + reach) / PARCEL_GRID_STEP_METERS);
+
+    for_each_segment_cell(segments, min_x, min_y, max_x, max_y, [&](S32 x, S32 y, U8 segment_mask)
     {
-        for (x = 0; x < STRIDE; x++)
-        {
-            U8 segment_mask = segments[x + y*STRIDE];
             U8 direction;
-            const F32 MAX_ALPHA = 0.95f;
-            const S32 DIST_OFFSET = 5;
-            const S32 MIN_DIST_SQ = DIST_OFFSET*DIST_OFFSET;
-            const S32 MAX_DIST_SQ = 169;
 
             if (segment_mask & SOUTH_MASK)
             {
@@ -747,11 +780,11 @@ void LLViewerParcelMgr::renderCollisionSegments(U8* segments, bool use_pass, LLV
                 renderOneSegment(x1+0.1f, y1+0.1f, x2+0.1f, y2+0.1f, collision_height, direction, regionp);
 
             }
-        }
-    }
+    });
 
     gGL.end();
 }
+// </WolfViewer>
 
 void LLViewerParcelMgr::resetCollisionTimer()
 {

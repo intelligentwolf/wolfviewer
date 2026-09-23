@@ -59,6 +59,7 @@
 #include "m3math.h"
 #include "pipeline.h"
 #include "wolfgrid.h"
+#include "wolfnearbyregions.h"
 
 // Source: wolfstorm/js/world/terrain_paint.js TerrainPaint.API — one host owns the data for every viewer.
 const char* WolfTerrainPaint::API_URL = "https://wolfstorm.app/php/terrain_paint.php";
@@ -68,10 +69,6 @@ static LLPanelInjector<WolfPanelTerrainPaint> t_wolf_panel_terrain_paint("wolf_p
 namespace
 {
     constexpr F32 TAU = 6.2831853f;
-
-    // Region handles are (x << 32) | y in metres (indra/llmath/v3dmath.h from_region_handle).
-    U64 handle_of(S32 x, S32 y) { return ((U64)(U32)x << 32) | (U64)(U32)y; }
-    void handle_xy(U64 handle, S32& x, S32& y) { x = (S32)(handle >> 32); y = (S32)(handle & 0xffffffffULL); }
 
     LLSD json_to_llsd(const LLSD::Binary& bytes)
     {
@@ -241,27 +238,11 @@ F64 WolfTerrainPaint::lastFetchAgeSecs() const
 
 std::vector<U64> WolfTerrainPaint::neighbourHandles() const
 {
-    // Source: wolfwavezones.cpp neighbourHandles — the same ring, var-region aware.
-    std::vector<U64> out;
-    LLViewerRegion* rgn = gAgent.getRegion();
-    if (!rgn) return out;
-    S32 x, y;
-    handle_xy(rgn->getHandle(), x, y);
-    const S32 sx = (S32)rgn->getWidth(), sy = (S32)rgn->getWidth();
-    const S32 dxs[] = { 0, sx, -256, -sx, 256 };
-    const S32 dys[] = { 0, sy, -256, -sy, 256 };
-    for (S32 dx : dxs)
-    {
-        for (S32 dy : dys)
-        {
-            const S32 nx = x + dx, ny = y + dy;
-            if (nx < 0 || ny < 0) continue;
-            const U64 h = handle_of(nx, ny);
-            if (std::find(out.begin(), out.end(), h) == out.end()) out.push_back(h);
-            if (out.size() >= 24) return out;
-        }
-    }
-    return out;
+    // <WolfViewer 2026-09-23> The regions the viewer is actually connected to, the agent's own
+    // first, nearest next - not a guessed ring of corner offsets, which missed any neighbour
+    // not sitting on one of them (wolfnearbyregions.h). 24 = the service's own cap
+    // (php/terrain_paint.php PAINT_MAX_HANDLES, "up to 24 regions by handle").
+    return WolfNearbyRegions::handles(24);
 }
 
 void WolfTerrainPaint::refresh()
@@ -277,6 +258,7 @@ void WolfTerrainPaint::refresh()
     std::vector<U64> handles = neighbourHandles();
     if (handles.empty()) return;
     mFetching = true;
+    mRequestedHandles = handles;
     mNextRefresh = LLFrameTimer::getElapsedSeconds() + REFRESH_SECS;
     LLCoros::instance().launch("WolfTerrainPaint fetch", [handles]() { WolfTerrainPaint::instance().fetchCoro(handles); });
 }
@@ -1058,7 +1040,17 @@ void WolfTerrainPaint::idle()
     LLViewerRegion* agent_rgn = gAgent.getRegion();
     if (!agent_rgn) return;
     const F64 now = LLFrameTimer::getElapsedSeconds();
-    if (agent_rgn->getHandle() != mFetchedForHandle || now >= mNextRefresh) refresh();
+    // <WolfViewer 2026-09-23> ...or when a neighbour connects or drops (wolfwavezones.cpp idle, same
+    // rule). The neighbour set is sorted from the whole region list, so it is compared once a second.
+    bool neighbours_changed = false;
+    if (now >= mNextNeighbourCheck)
+    {
+        mNextNeighbourCheck = now + 1.0;
+        // An empty set (no region yet) makes refresh() return before recording it.
+        const std::vector<U64> handles = neighbourHandles();
+        neighbours_changed = !handles.empty() && handles != mRequestedHandles;
+    }
+    if (agent_rgn->getHandle() != mFetchedForHandle || now >= mNextRefresh || neighbours_changed) refresh();
     const bool check_windows = now >= mNextWindowCheck;
     if (check_windows) mNextWindowCheck = now + WINDOW_CHECK_SECS;
 

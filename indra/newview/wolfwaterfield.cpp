@@ -256,7 +256,9 @@ U64 WolfWaterField::terrainStampIn(LLViewerRegion* regionp, F32 x0, F32 y0, F32 
     {
         for (S32 x = px0; x <= px1; ++x)
         {
-            const LLSurfacePatch* patchp = land.getPatch(x, y);
+            // <WolfViewer 2026-09-23/> findPatch: patches are made on first use now, and a
+            // stamp must not make them. A patch not made yet has no update to stamp.
+            const LLSurfacePatch* patchp = land.findPatch(x, y);
             if (patchp)
             {
                 stamp = (stamp ^ patchp->getLastUpdateTime()) * 1099511628211ull;
@@ -268,21 +270,10 @@ U64 WolfWaterField::terrainStampIn(LLViewerRegion* regionp, F32 x0, F32 y0, F32 
 
 U64 WolfWaterField::terrainStamp(LLViewerRegion* regionp)
 {
-    const LLSurface& land = regionp->getLand();
-    const S32 per_edge = land.getPatchesPerEdge();
-    U64 stamp = 1469598103934665603ull;
-    for (S32 y = 0; y < per_edge; ++y)
-    {
-        for (S32 x = 0; x < per_edge; ++x)
-        {
-            const LLSurfacePatch* patchp = land.getPatch(x, y);
-            if (patchp)
-            {
-                stamp = (stamp ^ patchp->getLastUpdateTime()) * 1099511628211ull;
-            }
-        }
-    }
-    return stamp;
+    // <WolfViewer 2026-09-23> Changes whenever any patch's heights change, like the hash of
+    // every patch's update time it replaces - which visited every patch of the region (and,
+    // with patches now made on first use, would have made them all).
+    return regionp->getLand().getTerrainRevision();
 }
 
 void WolfWaterField::idle()

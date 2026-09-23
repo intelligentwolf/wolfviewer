@@ -54,6 +54,19 @@ bool LLTerrainPaintMap::bakeHeightNoiseIntoPBRPaintMapRGB(const LLViewerRegion& 
     const LLSurface& surface = region.getLand();
     const U32 patch_count = surface.getPatchesPerEdge();
 
+    // <WolfViewer 2026-09-23> This bake builds ONE vertex buffer for the whole region: 289
+    // vertices and 1536 indices per patch, in U32 counts that overflow above ~26,750 m, and it
+    // makes every patch of the region to evaluate it. A debug bake of a region that size cannot
+    // be done this way; say so instead of allocating a wrapped-size buffer.
+    const U32 MAX_BAKE_PATCHES_PER_EDGE = 256;   // 4096 m
+    if (patch_count > MAX_BAKE_PATCHES_PER_EDGE)
+    {
+        LL_WARNS() << "Region " << region.getName() << " is " << patch_count << " patches a side; the paint map bake handles at most "
+                   << MAX_BAKE_PATCHES_PER_EDGE << " (4096 m)" << LL_ENDL;
+        return false;
+    }
+    // </WolfViewer>
+
     // *TODO: mHeightsGenerated isn't guaranteed to be true. Assume terrain is
     // loaded for now. Would be nice to fix the loading issue or find a better
     // heuristic to determine that the terrain is sufficiently loaded.

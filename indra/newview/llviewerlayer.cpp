@@ -37,33 +37,17 @@ LLViewerLayer::LLViewerLayer(const S32 width, const F32 scale)
     mScale = scale;
     mScaleInv = 1.f/scale;
 
-    // <FS:Wolf> Reserve the layer, do not COMMIT it. Same reasoning as LLSurface::create.
-    //
-    // This is 4 bytes per square metre of region: 256 KB for a standard region, but 2.6 GB for
-    // a 25,600 m varregion — and the loop below wrote every one of those bytes at region
-    // construction, before a single terrain packet had arrived. That is resident memory for
-    // ground the user may never go near, and on a machine with 30 GB it was enough on its own
-    // to push the viewer into swap, where it froze for seconds at a time and took minutes to
-    // shut down.
-    //
-    // calloc returns the same already-zero mmap pages without walking them, so the cost becomes
-    // proportional to the terrain actually generated. generateHeights() writes only the texels
-    // of the patch it is given, so pages are faulted in as ground is composited, and the value
-    // read back from an untouched page is 0.f exactly as the loop used to leave it.
-    const size_t count = (size_t)width * (size_t)width;
-    mDatap = (F32*)calloc(count, sizeof(F32));
-    if (!mDatap)
-    {
-        LL_ERRS() << "Could not reserve a " << width << " x " << width
-                  << " viewer layer (" << ((count * sizeof(F32)) >> 20) << " MB)" << LL_ENDL;
-    }
-    // </FS:Wolf>
+    // <WolfViewer 2026-09-23> See the note on mPages in llviewerlayer.h: only the page
+    // directory is made here. (It replaced the 2026-09-09 calloc of width x width floats, which
+    // itself replaced an eager loop that wrote all of them.)
+    const S32 page_texels = TILE_EDGE * PAGE_TILES;
+    mPagesPerEdge = (width + page_texels - 1) / page_texels;
+    mPages.resize((size_t)mPagesPerEdge * mPagesPerEdge);
+    // </WolfViewer>
 }
 
 LLViewerLayer::~LLViewerLayer()
 {
-    free(mDatap);   // <FS:Wolf/> calloc'd above, so free() — not delete[].
-    mDatap = NULL;
 }
 
 F32 LLViewerLayer::getValue(const S32 x, const S32 y) const
@@ -73,8 +57,47 @@ F32 LLViewerLayer::getValue(const S32 x, const S32 y) const
 //  llassert(y >= 0);
 //  llassert(y < mWidth);
 
-    return *(mDatap + terrainGridOffset(x, y, mWidth));
+    // <WolfViewer 2026-09-23> page -> tile -> texel; anything not written yet is 0.
+    if (x < 0 || y < 0 || x >= mWidth || y >= mWidth)
+    {
+        return 0.f;
+    }
+    const S32 tx = x / TILE_EDGE, ty = y / TILE_EDGE;
+    const auto& page = mPages[(size_t)(ty / PAGE_TILES) * mPagesPerEdge + (tx / PAGE_TILES)];
+    if (!page)
+    {
+        return 0.f;
+    }
+    const auto& tile = page[(ty % PAGE_TILES) * PAGE_TILES + (tx % PAGE_TILES)];
+    if (!tile)
+    {
+        return 0.f;
+    }
+    return tile[(y % TILE_EDGE) * TILE_EDGE + (x % TILE_EDGE)];
+    // </WolfViewer>
 }
+
+// <WolfViewer 2026-09-23> See llviewerlayer.h.
+void LLViewerLayer::setValue(const S32 x, const S32 y, const F32 value)
+{
+    if (x < 0 || y < 0 || x >= mWidth || y >= mWidth)
+    {
+        return;
+    }
+    const S32 tx = x / TILE_EDGE, ty = y / TILE_EDGE;
+    auto& page = mPages[(size_t)(ty / PAGE_TILES) * mPagesPerEdge + (tx / PAGE_TILES)];
+    if (!page)
+    {
+        page.reset(new std::unique_ptr<F32[]>[PAGE_TILES * PAGE_TILES]);
+    }
+    auto& tile = page[(ty % PAGE_TILES) * PAGE_TILES + (tx % PAGE_TILES)];
+    if (!tile)
+    {
+        tile.reset(new F32[TILE_EDGE * TILE_EDGE]());
+    }
+    tile[(y % TILE_EDGE) * TILE_EDGE + (x % TILE_EDGE)] = value;
+}
+// </WolfViewer>
 
 F32 LLViewerLayer::getValueScaled(const F32 x, const F32 y) const
 {
@@ -101,14 +124,11 @@ F32 LLViewerLayer::getValueScaled(const F32 x, const F32 y) const
     y2 = llmax(0, y2);
 
     // Take weighted average of all four points (bilinear interpolation)
-    const std::ptrdiff_t row1 = terrainGridOffset(0, y1, mWidth);
-    const std::ptrdiff_t row2 = terrainGridOffset(0, y2, mWidth);
-
-    // Access in squential order in memory, and don't use immediately.
-    F32 row1_left  = mDatap[ row1 + x1 ];
-    F32 row1_right = mDatap[ row1 + x2 ];
-    F32 row2_left  = mDatap[ row2 + x1 ];
-    F32 row2_right = mDatap[ row2 + x2 ];
+    // <WolfViewer 2026-09-23/> through getValue: the texels are in sparse tiles now
+    F32 row1_left  = getValue(x1, y1);
+    F32 row1_right = getValue(x2, y1);
+    F32 row2_left  = getValue(x1, y2);
+    F32 row2_right = getValue(x2, y2);
 
     F32 row1_interp = row1_left - x_frac * (row1_left - row1_right);
     F32 row2_interp = row2_left - x_frac * (row2_left - row2_right);

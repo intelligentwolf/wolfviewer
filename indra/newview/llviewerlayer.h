@@ -29,6 +29,9 @@
 
 // Viewer-side representation of a layer...
 
+#include <memory>
+#include <vector>
+
 class LLViewerLayer
 {
 public:
@@ -38,11 +41,23 @@ public:
     F32 getValueScaled(const F32 x, const F32 y) const;
 protected:
     F32 getValue(const S32 x, const S32 y) const;
+    // <WolfViewer 2026-09-23/> the only way to write a texel now (see mPages)
+    void setValue(const S32 x, const S32 y, const F32 value);
 protected:
     S32 mWidth;
     F32 mScale;
     F32 mScaleInv;
-    F32 *mDatap;
+private:
+    // <WolfViewer 2026-09-23> Sparse storage. This was one calloc'd width x width float array:
+    // 4 bytes per square metre, reserved not committed (the 2026-09-09 change), which is 4.4 TB
+    // of address space at 1,048,576 m and refused. Texels live in TILE_EDGE^2 tiles, grouped in
+    // pages of PAGE_TILES^2 tile pointers; a tile is made when a texel in it is first written
+    // (generateHeights, per patch), and a texel never written reads 0, as the zero pages did.
+    static constexpr S32 TILE_EDGE = 64;
+    static constexpr S32 PAGE_TILES = 64;
+    S32 mPagesPerEdge;
+    std::vector<std::unique_ptr<std::unique_ptr<F32[]>[]>> mPages;
+    // </WolfViewer>
 };
 
 #endif // LL_LLVIEWERLAYER_H

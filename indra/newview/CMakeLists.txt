@@ -915,6 +915,7 @@ set(viewer_SOURCE_FILES
     wolfboatrock.cpp
     wolfupdate.cpp
     wolfnaturalwater.cpp
+    wolfparcelbitmap.cpp
     wolfobjectprops.cpp
     wolffloatermeshupload.cpp
     wolffloaterphotoeffects.cpp
@@ -1800,6 +1801,9 @@ set(viewer_HEADER_FILES
     wolfboatrock.h
     wolfupdate.h
     wolfnaturalwater.h
+    wolfcellquadtree.h
+    wolfnearbyregions.h
+    wolfparcelbitmap.h
     wolfgrid.h
     wolfobjectprops.h
     wolffloatermeshupload.h

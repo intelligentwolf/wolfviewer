@@ -1451,6 +1451,16 @@ void LLWorld::updateWaterObjects()
         for (y = min_y; y <= max_y; y += step)
 // </FS:CR> Fix water height on regions larger than 2048x2048
         {
+            // <WolfViewer 2026-09-23> A 256 m cell inside the agent's own region always finds that
+            // region, so it is never a hole: jump the column straight past it. The box is the
+            // region plus a ring `range` wide, and walking all of it was 16.8 M lookups for a
+            // 1,048,576 m region on every rebase, water-height change and far-clip change.
+            if (x >= (S32)region_x && x < (S32)region_x + rwidth && y >= (S32)region_y && y < (S32)region_y + rwidth)
+            {
+                y = (S32)region_y + rwidth - step;   // the loop's += step lands on the first cell past it
+                continue;
+            }
+            // </WolfViewer>
             U64 region_handle = to_region_handle(x, y);
             if (!getRegionFromHandle(region_handle))
             {   // No region at that area, so make water

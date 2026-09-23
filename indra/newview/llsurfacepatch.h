@@ -30,6 +30,7 @@
 #include "v3math.h"
 #include "v3dmath.h"
 #include "llpointer.h"
+#include <memory>
 
 class LLSurface;
 class LLVOSurfacePatch;
@@ -82,6 +83,7 @@ public:
 
     void updateEastEdge();
     void updateNorthEdge();
+    void updateNortheastCorner();   // <WolfViewer 2026-09-23/>
 
     void updateCameraDistanceRegion( const LLVector3 &pos_region);
     void updateVisibility();
@@ -142,11 +144,21 @@ public:
     S32 getRenderLevel() const;
 
     void setSurface(LLSurface *surfacep);
+    // <WolfViewer 2026-09-23> Give the patch its index in the surface and its own height/normal
+    // block: (grids_per_patch_edge + 1)^2 points, row stride getDataStride(). Patch-local, not a
+    // window into a region-sized array, so a patch costs the same on any size of region.
+    void initData(const S32 patch_x, const S32 patch_y);
+    S32 getPatchX() const                       { return mPatchX; }
+    S32 getPatchY() const                       { return mPatchY; }
+    // Row stride of mDataZ / mDataNorm: grids_per_patch_edge + 1 (was the surface's grids per edge).
+    U32 getDataStride() const                   { return mDataStride; }
+    // Is the neighbour in this direction there with data - or not expected at all? A neighbour
+    // position inside this region or a connected one whose patch has not been made yet is
+    // "there without data", as it was when every patch existed from the start.
+    bool neighborReady(const U32 direction) const;
     // <FS:Wolf/> Create this patch's viewer object if it has none yet. Returns false if one
     // could not be made. See the note on setSurface.
     bool ensureVObj();
-    void setDataZ(F32 *data_z)                  { mDataZ = data_z; }
-    void setDataNorm(LLVector3 *data_norm)      { mDataNorm = data_norm; }
     F32 *getDataZ() const                       { return mDataZ; }
 
     void dirty();           // Mark this surface patch as dirty...
@@ -155,6 +167,7 @@ public:
     bool isHeightsGenerated() const { return mHeightsGenerated; }
 
     void clearVObj();
+    void releaseVObj();   // <WolfViewer 2026-09-23/> kill the viewer object; ensureVObj makes another
 
 public:
     bool mHasReceivedData;  // has the patch EVER received height data?
@@ -168,9 +181,14 @@ protected:
     bool mDirtyZStats;
     bool mHeightsGenerated;
 
-    U32 mDataOffset;
     F32 *mDataZ;
     LLVector3 *mDataNorm;
+    // <WolfViewer 2026-09-23/> the storage mDataZ / mDataNorm point at, and where the patch is.
+    std::unique_ptr<F32[]> mZStore;
+    std::unique_ptr<LLVector3[]> mNormStore;
+    U32 mDataStride;
+    S32 mPatchX;
+    S32 mPatchY;
 
     // Pointer to the LLVOSurfacePatch object which is used in the new renderer.
     LLPointer<LLVOSurfacePatch> mVObjp;

@@ -29,6 +29,7 @@
 
 // A ViewerRegion is a class that contains a bunch of objects and surfaces
 // that are in to a particular region.
+#include <unordered_map>
 #include <string>
 #include <boost/signals2.hpp>
 
@@ -152,8 +153,11 @@ public:
 // [SL:KB] - Patch: World-MinimapOverlay | Checked: 2012-06-20 (Catznip-3.3)
     bool isAlive() const; // can become false if circuit disconnects
 
-    typedef std::vector<LLPointer<LLViewerTexture> > tex_matrix_t;
-    const tex_matrix_t& getWorldMapTiles() const;
+    // <WolfViewer 2026-09-23> One 256 m world-map tile of this region, fetched the first time it is
+    // asked for. getWorldMapTiles() made a texture and an HTTP fetch for EVERY tile of the region
+    // up front - 16,777,216 of them for a 1,048,576 m region - and the minimap re-boosted every one
+    // of them each frame; now only the tiles the minimap actually shows are ever made.
+    LLViewerTexture* getWorldMapTile(U32 tile_x, U32 tile_y) const;
 // [/SL:KB]
 
     void setWaterHeight(F32 water_level);
@@ -631,7 +635,7 @@ public:
     // </FS:CR>
 
 // [SL:KB] - Patch: World-MinimapOverlay | Checked: 2012-07-26 (Catznip-3.3)
-    mutable tex_matrix_t mWorldMapTiles;
+    mutable std::unordered_map<U64, LLPointer<LLViewerTexture>> mWorldMapTiles;   // <WolfViewer 2026-09-23/> by (x << 32) | y
 // [/SL:KB]
 
     class CacheMissItem

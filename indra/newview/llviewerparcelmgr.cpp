@@ -79,7 +79,7 @@ const F32 PARCEL_COLLISION_DRAW_SECS_ON_PROXIMITY = 1.f;
 
 // Globals
 
-U8* LLViewerParcelMgr::sPackedOverlay = NULL;
+U8 LLViewerParcelMgr::sPackedOverlay[1024];   // <WolfViewer 2026-09-23/> one ParcelOverlay payload
 S32 LLViewerParcelMgr::PARCEL_BAN_LINES_HIDE = 0;
 S32 LLViewerParcelMgr::PARCEL_BAN_LINES_ON_COLLISION = 1;
 S32 LLViewerParcelMgr::PARCEL_BAN_LINES_ON_PROXIMITY = 2;
@@ -146,25 +146,11 @@ LLViewerParcelMgr::LLViewerParcelMgr()
     mHoverParcel = new LLParcel();
     mCollisionParcel = new LLParcel();
 
-// <FS:Wolf> Size the parcel buffers for the region we are actually in, not for a guess.
-//
-// This used to allocate once for an assumed 8192 m maximum ("Max region size on Aurora-Sim")
-// and then let init() move mParcelsPerEdge to the real region's value WITHOUT reallocating.
-// Every buffer below is indexed by mParcelsPerEdge, so any region bigger than that assumption
-// overran all of them. On Wolf Territories' 25600 m "Dire Wolf" the agent parcel overlay needs
-// 6400 x 6400 = 40,960,000 bytes and had 2048 x 2048 = 4,194,304, so
-// LLViewerParcelMgr::writeAgentParcelFromBitmap wrote 35 MB past the end of the heap block the
-// moment the first ParcelProperties arrived. That corrupted the heap and the viewer died in an
-// unrelated thread, which is why the crash looked like a WebRTC fault.
-//
-// allocateParcelBuffers grows them on demand instead. 2048 is kept as the starting size so the
-// common case still allocates exactly once, at exactly the size it always did.
-    mHighlightSegments = NULL;
-    mCollisionBitmap = NULL;
-    mCollisionSegments = NULL;
-    mAgentParcelOverlay = NULL;
-    allocateParcelBuffers(S32(8192.f / PARCEL_GRID_STEP_METERS));
-// </FS:Wolf>
+// <WolfViewer 2026-09-23> Nothing to size here any more: the segment runs and parcel cell trees
+// (llviewerparcelmgr.h) are default-constructed and grow with the parcels they hold. The
+// 2026-09 FS:Wolf allocateParcelBuffers - which fixed a 35 MB heap overrun on Dire Wolf by growing
+// byte arrays to the region - is gone with the arrays.
+// </WolfViewer>
 
     // JC: Resolved a merge conflict here, eliminated
     // mBlockedImage->setAddressMode(LLTexUnit::TAM_WRAP);
@@ -182,70 +168,9 @@ LLViewerParcelMgr::LLViewerParcelMgr()
 // <FS:CR> Aurora Sim
 void LLViewerParcelMgr::init(F32 region_size)
 {
-    // <FS:Wolf/> Grow the buffers FIRST. Setting mParcelsPerEdge alone, as this used to do, left
-    // every parcel buffer sized for the previous region — see allocateParcelBuffers.
-    const S32 parcels_per_edge = S32( region_size / PARCEL_GRID_STEP_METERS );
-    allocateParcelBuffers(parcels_per_edge);
-    mParcelsPerEdge = parcels_per_edge;
+    // <WolfViewer 2026-09-23/> no buffers to grow first (see the constructor)
+    mParcelsPerEdge = S32( region_size / PARCEL_GRID_STEP_METERS );
 }
-
-// <FS:Wolf> (Re)size every buffer indexed by mParcelsPerEdge, growing only.
-//
-// NOTE this sets mParcelsPerEdge as part of its job: resetSegments() and getCollisionBitmapSize()
-// both read it to work out how much to touch, so it has to be correct while they run. Callers set
-// their own final value afterwards.
-void LLViewerParcelMgr::allocateParcelBuffers(S32 parcels_per_edge)
-{
-    if (parcels_per_edge <= mParcelBufferParcelsPerEdge)
-    {
-        return;   // what we already hold is big enough; never shrink, region crossings are common
-    }
-
-    mParcelsPerEdge = parcels_per_edge;
-
-    const S32 segment_count = (parcels_per_edge + 1) * (parcels_per_edge + 1);
-    const S32 overlay_count = parcels_per_edge * parcels_per_edge;
-
-    // Allocate everything BEFORE freeing anything. A throw part way through a
-    // delete-then-new sequence would leave freed pointers in the members for the destructor to
-    // free a second time; unique_ptr means a failure here leaves the old buffers untouched.
-    std::unique_ptr<U8[]> highlight(new U8[segment_count]);
-    std::unique_ptr<U8[]> collision_segments(new U8[segment_count]);
-    std::unique_ptr<U8[]> collision_bitmap(new U8[getCollisionBitmapSize()]);
-    std::unique_ptr<U8[]> packed_overlay(new U8[overlay_count / PARCEL_OVERLAY_CHUNKS]);
-    std::unique_ptr<U8[]> agent_overlay(new U8[overlay_count]);
-
-    delete[] mHighlightSegments;
-    mHighlightSegments = highlight.release();
-    resetSegments(mHighlightSegments);
-
-    delete[] mCollisionSegments;
-    mCollisionSegments = collision_segments.release();
-    resetSegments(mCollisionSegments);
-
-// [SL:KB] - Patch: World-MinimapOverlay | Checked: 2012-06-20 (Catznip-3.3)
-    delete[] mCollisionBitmap;
-    mCollisionBitmap = collision_bitmap.release();
-    memset(mCollisionBitmap, 0, getCollisionBitmapSize());
-// [/SL:KB]
-
-    delete[] sPackedOverlay;
-    sPackedOverlay = packed_overlay.release();
-
-    delete[] mAgentParcelOverlay;
-    mAgentParcelOverlay = agent_overlay.release();
-    memset(mAgentParcelOverlay, 0, overlay_count);
-
-    mParcelBufferParcelsPerEdge = parcels_per_edge;
-
-    LL_INFOS() << "Parcel buffers sized for " << parcels_per_edge << " parcels per edge ("
-               << (parcels_per_edge * PARCEL_GRID_STEP_METERS) << " m region), "
-               << (((size_t)segment_count * 2 + (size_t)overlay_count
-                    + (size_t)overlay_count / PARCEL_OVERLAY_CHUNKS
-                    + getCollisionBitmapSize()) >> 20)
-               << " MB" << LL_ENDL;
-}
-// </FS:Wolf>
 // </FS:CR> Aurora Sim
 
 LLViewerParcelMgr::~LLViewerParcelMgr()
@@ -268,22 +193,7 @@ LLViewerParcelMgr::~LLViewerParcelMgr()
     delete mHoverParcel;
     mHoverParcel = NULL;
 
-    delete[] mHighlightSegments;
-    mHighlightSegments = NULL;
-
-// [SL:KB] - Patch: World-MinimapOverlay | Checked: 2012-06-20 (Catznip-3.3)
-    delete[] mCollisionBitmap;
-    mCollisionBitmap = NULL;
-// [/SL:KB]
-
-    delete[] mCollisionSegments;
-    mCollisionSegments = NULL;
-
-    delete[] sPackedOverlay;
-    sPackedOverlay = NULL;
-
-    delete[] mAgentParcelOverlay;
-    mAgentParcelOverlay = NULL;
+    // <WolfViewer 2026-09-23/> the parcel segment/cell members free themselves
 
     sBlockedImage = NULL;
     sPassImage = NULL;
@@ -379,125 +289,39 @@ S32 LLViewerParcelMgr::getSelectedArea() const
     return rv;
 }
 
-void LLViewerParcelMgr::resetSegments(U8* segments)
+void LLViewerParcelMgr::resetSegments(WolfParcelSegments& segments)
 {
-    S32 i;
-    S32 count = (mParcelsPerEdge+1)*(mParcelsPerEdge+1);
-    for (i = 0; i < count; i++)
-    {
-        segments[i] = 0x0;
-    }
+    segments.clear();   // <WolfViewer 2026-09-23/> was: zero (parcels_per_edge + 1)^2 bytes
 }
 
 
 void LLViewerParcelMgr::writeHighlightSegments(F32 west, F32 south, F32 east,
                                                F32 north)
 {
-    S32 x, y;
     S32 min_x = ll_round( west / PARCEL_GRID_STEP_METERS );
     S32 max_x = ll_round( east / PARCEL_GRID_STEP_METERS );
     S32 min_y = ll_round( south / PARCEL_GRID_STEP_METERS );
     S32 max_y = ll_round( north / PARCEL_GRID_STEP_METERS );
 
-    const S32 STRIDE = mParcelsPerEdge+1;
-
-    // south edge
-    y = min_y;
-    for (x = min_x; x < max_x; x++)
-    {
-        // exclusive OR means that writing to this segment twice
-        // will turn it off
-        mHighlightSegments[x + y*STRIDE] ^= SOUTH_MASK;
-    }
-
-    // west edge
-    x = min_x;
-    for (y = min_y; y < max_y; y++)
-    {
-        mHighlightSegments[x + y*STRIDE] ^= WEST_MASK;
-    }
-
-    // north edge - draw the south border on the y+1'th cell,
-    // which given C-style arrays, is item foo[max_y]
-    y = max_y;
-    for (x = min_x; x < max_x; x++)
-    {
-        mHighlightSegments[x + y*STRIDE] ^= SOUTH_MASK;
-    }
-
-    // east edge - draw west border on x+1'th cell
-    x = max_x;
-    for (y = min_y; y < max_y; y++)
-    {
-        mHighlightSegments[x + y*STRIDE] ^= WEST_MASK;
-    }
+    // <WolfViewer 2026-09-23> The south, west, north (at max_y) and east (at max_x) sides that
+    // four XOR loops wrote into the grid, as runs (WolfParcelSegments::addRectangle).
+    mHighlightSegments.addRectangle(min_x, min_y, max_x, max_y, SOUTH_MASK, WEST_MASK);
 }
 
 
-void LLViewerParcelMgr::writeSegmentsFromBitmap(U8* bitmap, U8* segments)
+void LLViewerParcelMgr::writeSegmentsFromBitmap(const WolfParcelCells& bitmap, WolfParcelSegments& segments)
 {
-    S32 x;
-    S32 y;
-    const S32 IN_STRIDE = mParcelsPerEdge;
-    const S32 OUT_STRIDE = mParcelsPerEdge+1;
-
-    for (y = 0; y < IN_STRIDE; y++)
-    {
-        x = 0;
-        while( x < IN_STRIDE )
-        {
-            U8 byte = bitmap[ (x + y*IN_STRIDE) / 8 ];
-
-            S32 bit;
-            for (bit = 0; bit < 8; bit++)
-            {
-                if (byte & (1 << bit) )
-                {
-                    S32 out = x+y*OUT_STRIDE;
-
-                    // This and one above it
-                    segments[out]            ^= SOUTH_MASK;
-                    segments[out+OUT_STRIDE] ^= SOUTH_MASK;
-
-                    // This and one to the right
-                    segments[out]   ^= WEST_MASK;
-                    segments[out+1] ^= WEST_MASK;
-                }
-                x++;
-            }
-        }
-    }
+    // <WolfViewer 2026-09-23> Each set cell XORed its four sides into the grid, so sides shared
+    // by two set cells cancelled: the edges left are the set cells' boundary, collected per
+    // uniform block (WolfParcelSegments::addBoundary).
+    segments.addBoundary(bitmap, SOUTH_MASK, WEST_MASK);
 }
 
 
-void LLViewerParcelMgr::writeAgentParcelFromBitmap(U8* bitmap)
+void LLViewerParcelMgr::writeAgentParcelFromBitmap(WolfParcelCells&& bitmap)
 {
-    S32 x;
-    S32 y;
-    const S32 IN_STRIDE = mParcelsPerEdge;
-
-    for (y = 0; y < IN_STRIDE; y++)
-    {
-        x = 0;
-        while( x < IN_STRIDE )
-        {
-            U8 byte = bitmap[ (x + y*IN_STRIDE) / 8 ];
-
-            S32 bit;
-            for (bit = 0; bit < 8; bit++)
-            {
-                if (byte & (1 << bit) )
-                {
-                    mAgentParcelOverlay[x+y*IN_STRIDE] = 1;
-                }
-                else
-                {
-                    mAgentParcelOverlay[x+y*IN_STRIDE] = 0;
-                }
-                x++;
-            }
-        }
-    }
+    // <WolfViewer 2026-09-23/> the decoded parcel IS the agent parcel overlay (1 = in the parcel)
+    mAgentParcelOverlay = std::move(bitmap);
 }
 
 
@@ -941,7 +765,9 @@ bool LLViewerParcelMgr::inAgentParcel(const LLVector3d &pos_global) const
     S32 row =    S32(pos_region.mV[VY] / PARCEL_GRID_STEP_METERS);
     S32 column = S32(pos_region.mV[VX] / PARCEL_GRID_STEP_METERS);
 
-    if (mAgentParcelOverlay[row*mParcelsPerEdge + column])
+    // <WolfViewer 2026-09-23/> bounds-checked: the S32 index row * mParcelsPerEdge + column was not
+    if (row >= 0 && column >= 0 && row < mAgentParcelOverlay.height() && column < mAgentParcelOverlay.width()
+        && mAgentParcelOverlay.get(column, row))
     {
         return true;
     }
@@ -1861,14 +1687,24 @@ void LLViewerParcelMgr::processParcelProperties(LLMessageSystem *msg, void **use
         if (parcel == parcel_mgr.mAgentParcel)
         {
             // new agent parcel
-            S32 bitmap_size =   parcel_mgr.mParcelsPerEdge
-                                * parcel_mgr.mParcelsPerEdge
-                                / 8;
-            U8* bitmap = new U8[ bitmap_size ];
-            msg->getBinaryDataFast(_PREHASH_ParcelData, _PREHASH_Bitmap, bitmap, bitmap_size);
+            // <WolfViewer 2026-09-23> Decoded from whatever the sim sent - the legacy bitmap, or
+            // the compact form OpenSimWolf sends for regions over 102,400 m (wolfparcelbitmap.h).
+            // Was a parcels_per_edge^2 / 8 byte buffer: 8.6 GB for a 1,048,576 m region.
+            WolfParcelCells bitmap;
+            const S32 bitmap_size = msg->getSizeFast(_PREHASH_ParcelData, _PREHASH_Bitmap);
+            if (bitmap_size > 0)
+            {
+                std::vector<U8> bytes((size_t)bitmap_size);
+                msg->getBinaryDataFast(_PREHASH_ParcelData, _PREHASH_Bitmap, bytes.data(), bitmap_size);
+                wolfDecodeParcelBitmap(bytes.data(), bitmap_size, parcel_mgr.mParcelsPerEdge, parcel_mgr.mParcelsPerEdge, bitmap);
+            }
+            else
+            {
+                bitmap.reset(parcel_mgr.mParcelsPerEdge, parcel_mgr.mParcelsPerEdge, 0);
+            }
 
-            parcel_mgr.writeAgentParcelFromBitmap(bitmap);
-            delete[] bitmap;
+            parcel_mgr.writeAgentParcelFromBitmap(std::move(bitmap));
+            // </WolfViewer>
 
             // Let interesting parties know about agent parcel change.
             LLViewerParcelMgr* instance = LLViewerParcelMgr::getInstance();
@@ -1957,27 +1793,30 @@ void LLViewerParcelMgr::processParcelProperties(LLMessageSystem *msg, void **use
                 parcel_mgr.mEastNorth = region->getPosGlobalFromRegion( aabb_max );
 
                 // Owned land, highlight the boundaries
-                S32 bitmap_size =   parcel_mgr.mParcelsPerEdge
-                                    * parcel_mgr.mParcelsPerEdge
-                                    / 8;
+                // <WolfViewer 2026-09-23> Legacy or compact bitmap (wolfparcelbitmap.h); the
+                // expected-size check only means anything for the legacy form.
+                const S64 bitmap_size = (S64)parcel_mgr.mParcelsPerEdge * parcel_mgr.mParcelsPerEdge / 8;
                 S32 size = msg->getSizeFast(_PREHASH_ParcelData, _PREHASH_Bitmap);
-                if (size != bitmap_size)
+                std::vector<U8> bytes((size_t)llmax(0, size));
+                if (size > 0)
+                {
+                    msg->getBinaryDataFast(_PREHASH_ParcelData, _PREHASH_Bitmap, bytes.data(), size);
+                }
+                const bool compact = size >= 4 && memcmp(bytes.data(), "OSLB", 4) == 0;
+                if (!compact && size != bitmap_size)
                 {
                     // Might be better to ignore bitmap and drop highlights
                     LL_WARNS("ParcelMgr") << "Parcel Bitmap size expected: " << bitmap_size
                         << " actual " << size
                         << ". Bitmap might be corrupted!" << LL_ENDL;
-                    bitmap_size = size;
                 }
 
-                U8* bitmap = new U8[ bitmap_size ];
-                msg->getBinaryDataFast(_PREHASH_ParcelData, _PREHASH_Bitmap, bitmap, bitmap_size);
+                WolfParcelCells bitmap;
+                wolfDecodeParcelBitmap(bytes.data(), size, parcel_mgr.mParcelsPerEdge, parcel_mgr.mParcelsPerEdge, bitmap);
 
                 parcel_mgr.resetSegments(parcel_mgr.mHighlightSegments);
                 parcel_mgr.writeSegmentsFromBitmap( bitmap, parcel_mgr.mHighlightSegments );
-
-                delete[] bitmap;
-                bitmap = NULL;
+                // </WolfViewer>
 
                 parcel_mgr.mCurrentParcelSelection->mWholeParcelSelected = true;
             }
@@ -2028,7 +1867,18 @@ void LLViewerParcelMgr::processParcelProperties(LLMessageSystem *msg, void **use
 //      U8* bitmap = new U8[ bitmap_size ];
 //      msg->getBinaryDataFast(_PREHASH_ParcelData, _PREHASH_Bitmap, bitmap, bitmap_size);
 // [SL:KB] - Patch: World-MinimapOverlay | Checked: 2012-06-20 (Catznip-3.3)
-        msg->getBinaryDataFast(_PREHASH_ParcelData, _PREHASH_Bitmap, parcel_mgr.mCollisionBitmap, static_cast<S32>(parcel_mgr.getCollisionBitmapSize()));
+        // <WolfViewer 2026-09-23> decoded into a cell tree (legacy or compact, wolfparcelbitmap.h)
+        {
+            const S32 size = msg->getSizeFast(_PREHASH_ParcelData, _PREHASH_Bitmap);
+            std::vector<U8> bytes((size_t)llmax(0, size));
+            if (size > 0)
+            {
+                msg->getBinaryDataFast(_PREHASH_ParcelData, _PREHASH_Bitmap, bytes.data(), size);
+            }
+            wolfDecodeParcelBitmap(bytes.data(), size, parcel_mgr.mParcelsPerEdge, parcel_mgr.mParcelsPerEdge,
+                                   parcel_mgr.mCollisionBitmap);
+        }
+        // </WolfViewer>
 // [/SL:KB]
 
         parcel_mgr.resetSegments(parcel_mgr.mCollisionSegments);

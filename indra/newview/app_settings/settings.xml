@@ -13293,6 +13293,28 @@ Change of this parameter will affect the layout of buttons in notification toast
       <key>Value</key>
       <real>1.0</real>
     </map>
+    <key>WolfMoveControlsButtons</key>
+    <map>
+      <key>Comment</key>
+      <string>Move floater: show the arrow-button grid (Buttons tab) instead of the analogue stick (Joysticks tab).</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>Boolean</string>
+      <key>Value</key>
+      <integer>0</integer>
+    </map>
+    <key>WolfCameraControlsButtons</key>
+    <map>
+      <key>Comment</key>
+      <string>Camera floater: use Firestorm's arrow-quadrant camera controls (Buttons tab) instead of the analogue sticks (Joysticks tab).</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>Boolean</string>
+      <key>Value</key>
+      <integer>0</integer>
+    </map>
     <key>WolfLSLAutoComplete</key>
     <map>
       <key>Comment</key>
@@ -13303,6 +13325,17 @@ Change of this parameter will affect the layout of buttons in notification toast
       <string>Boolean</string>
       <key>Value</key>
       <integer>1</integer>
+    </map>
+    <key>WolfMapEditImages</key>
+    <map>
+      <key>Comment</key>
+      <string>World Map: move, stretch and delete the map images on regions you own (Wolf Territories only).</string>
+      <key>Persist</key>
+      <integer>0</integer>
+      <key>Type</key>
+      <string>Boolean</string>
+      <key>Value</key>
+      <integer>0</integer>
     </map>
     <key>WolfTerrainPaintBrushWidth</key>
     <map>

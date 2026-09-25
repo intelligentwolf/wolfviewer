@@ -98,6 +98,18 @@ public:
 
     // <WolfViewer 2026-09-06> analogue stick state and drawing (see the .cpp header note)
     bool            isWolfAnalog() const { return mWolfAnalog; }
+    /** <WolfViewer 2026-09-25> The Joysticks | Buttons tabs (llfloatercamera.cpp) flip a
+     *  stick between the analogue knob and Firestorm's stock quadrant widget at runtime.
+     *  Every analogue branch reads mWolfAnalog live, so clearing the knob state is all the
+     *  switch needs; the stock path keeps its own state (mInitialQuadrant etc.). */
+    void            setWolfAnalog(bool on)
+    {
+        mWolfAnalog = on;
+        mWolfActive = false;
+        mWolfCentred = false;
+        mWolfNX = 0.f;
+        mWolfNY = 0.f;
+    }
     /** Deflection past the dead zone, remapped to -1..1 per axis (camera_controls.js _axis). */
     static F32      wolfAxis(F32 v);
     /** A press that never left the centre dot was released (camera_controls.js onUp). */

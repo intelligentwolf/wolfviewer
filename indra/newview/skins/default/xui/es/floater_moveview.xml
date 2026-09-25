@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes"?>
-<floater name="move_floater" title="" width="92">
+<floater name="move_floater" title="">
 	<string name="walk_forward_tooltip">
 		Caminar hacia adelante (cursor arriba o W)
 	</string>
@@ -49,13 +49,13 @@
 		Agacharse (C)
 	</string>
 	<panel name="panel_actions">
-		<button label="" label_selected="" name="turn left btn" tool_tip="Girar a la izquierda (cursor izq. o A)" left="6"/>
+		<button label="" label_selected="" name="turn left btn" tool_tip="Girar a la izquierda (cursor izq. o A)"/>
 		<joystick_slide name="move left btn" tool_tip="Caminar a la izquierda (pulsa Mayúscula + cursor izq. o A)"/>
-		<button label="" label_selected="" name="turn right btn" tool_tip="Girar a la derecha (cursor der. o D)" right="-34"/>
+		<button label="" label_selected="" name="turn right btn" tool_tip="Girar a la derecha (cursor der. o D)"/>
 		<joystick_slide name="move right btn" tool_tip="Caminar a la derecha (pulsa Mayúscula + cursor der. o D)"/>
-		<joystick_turn name="forward btn" tool_tip="Caminar hacia adelante (cursor arriba o W)" left="25"/>
+		<joystick_turn name="forward btn" tool_tip="Caminar hacia adelante (cursor arriba o W)"/>
 		<joystick_turn name="backward btn" tool_tip="Caminar de espaldas (cursor abajo o S)"/>
-		<button label="" label_selected="" name="move up btn" tool_tip="Remontar vuelo (E)" right="-16"/>
+		<button label="" label_selected="" name="move up btn" tool_tip="Remontar vuelo (E)"/>
 		<button label="" label_selected="" name="move down btn" tool_tip="Descender (C)"/>
 	</panel>
 	<panel name="panel_modes">

@@ -935,6 +935,7 @@ set(viewer_SOURCE_FILES
     wolflslcomplete.cpp
     wolfterrainpaint.cpp
     wolfsurfcurl.cpp
+    wolfmapoverlays.cpp
     NACLantispam.cpp
     NACLfloaterexploresounds.cpp
     )
@@ -1825,6 +1826,7 @@ set(viewer_HEADER_FILES
     wolflslcomplete.h
     wolfterrainpaint.h
     wolfsurfcurl.h
+    wolfmapoverlays.h
     VertexCache.h
     VorbisFramework.h
     NACLantispam.h

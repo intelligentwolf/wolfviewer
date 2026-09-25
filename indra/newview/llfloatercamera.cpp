@@ -36,6 +36,7 @@
 #include "llagentcamera.h"
 #include "llpresetsmanager.h"
 #include "lljoystickbutton.h"
+#include "llbutton.h"   // <WolfViewer 2026-09-25>
 #include "llviewercontrol.h"
 #include "llviewercamera.h"
 #include "lltoolmgr.h"
@@ -625,6 +626,19 @@ bool LLFloaterCamera::postBuild()
     }
     // </FS:Ansariel>
 
+    // <WolfViewer 2026-09-25> Joysticks | Buttons tabs — present only where the XUI has them.
+    mJoysticksTab = findChild<LLButton>("joysticks_tab");
+    mButtonsTab = findChild<LLButton>("buttons_tab");
+    if (mJoysticksTab && mButtonsTab)
+    {
+        mRotateAnalogToolTip = mRotate->getToolTip();
+        mTrackAnalogToolTip = mTrack->getToolTip();
+        mJoysticksTab->setCommitCallback(boost::bind(&LLFloaterCamera::setControlsStyle, this, false));
+        mButtonsTab->setCommitCallback(boost::bind(&LLFloaterCamera::setControlsStyle, this, true));
+        setControlsStyle(gSavedSettings.getBOOL("WolfCameraControlsButtons"));
+    }
+    // </WolfViewer>
+
     update();
 
     // ensure that appearance mode is handled while building. See EXT-7796.
@@ -632,6 +646,22 @@ bool LLFloaterCamera::postBuild()
 
     return LLFloater::postBuild();
 }
+
+// <WolfViewer 2026-09-25> "Buttons" is Firestorm's stock camera floater: the same two
+// widgets with the analogue mode off, so orbit / pan go back to the quadrant hit-test and
+// the Cam_Rotate / Cam_Tracking arrow images (lljoystickbutton.cpp stock branches), and the
+// tool tips go back to the floater's own rotate_tooltip / move_tooltip strings.
+void LLFloaterCamera::setControlsStyle(bool buttons)
+{
+    mRotate->setWolfAnalog(!buttons);
+    mTrack->setWolfAnalog(!buttons);
+    mRotate->setToolTip(buttons ? getString("rotate_tooltip") : mRotateAnalogToolTip);
+    mTrack->setToolTip(buttons ? getString("move_tooltip") : mTrackAnalogToolTip);
+    mJoysticksTab->setToggleState(!buttons);
+    mButtonsTab->setToggleState(buttons);
+    gSavedSettings.setBOOL("WolfCameraControlsButtons", buttons);
+}
+// </WolfViewer>
 
 F32 LLFloaterCamera::getCurrentTransparency()
 {

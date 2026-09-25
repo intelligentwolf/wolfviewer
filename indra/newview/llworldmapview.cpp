@@ -68,6 +68,7 @@
 #endif
 
 #include "llglheaders.h"
+#include "wolfmapoverlays.h"      // <WolfViewer 2026-09-25/> map images
 
 // # Constants
 static constexpr F32 MAP_DEFAULT_SCALE = 128.f;
@@ -443,6 +444,10 @@ void LLWorldMapView::draw()
 #endif //OPENSIM
 // </FS:CR> Aurora Sim
 
+    // <WolfViewer 2026-09-25/> Region owners' map images: over the tiles, under the names and
+    // markers, and inside the tilt so they lie on the map plane.
+    WolfMapOverlays::instance().draw(*this);
+
     // Draw per sim overlayed information (names, mature, offline...)
     static LLCachedControl<bool> show_for_sale(gSavedSettings, "MapShowLandForSale");
     LLWorldMap::sim_info_map_t::const_iterator end = LLWorldMap::instance().getRegionMap().end();
@@ -738,6 +743,9 @@ void LLWorldMapView::draw()
     updateDirections();
 
     LLView::draw();
+
+    // <WolfViewer 2026-09-25/> The owner's "Edit my map images" button, flat, over everything.
+    WolfMapOverlays::instance().drawControls(*this);
 
     // Get sim info for all sims in view
     updateVisibleBlocks();
@@ -1416,6 +1424,13 @@ bool LLWorldMapView::handleToolTip( S32 x, S32 y, MASK mask )
         }
         tooltip_msg.assign( message );
 
+        // <WolfViewer 2026-09-25/> Name the map image under the pointer first.
+        const std::string image_name = WolfMapOverlays::instance().toolTipAt(*this, x, y);
+        if (!image_name.empty())
+        {
+            tooltip_msg = image_name + "\n" + tooltip_msg;
+        }
+
         // Optionally show region flags
         std::string region_flags = info->getFlagsString();
 
@@ -1937,6 +1952,21 @@ void LLWorldMapView::handleClick(S32 x, S32 y, MASK mask,
 
 bool LLWorldMapView::handleMouseDown( S32 x, S32 y, MASK mask )
 {
+    // <WolfViewer 2026-09-25> The owner's "Edit my map images" button, then an owner's map image
+    // under the pointer (while editing): it is moved or stretched instead of the map panned.
+    if (WolfMapOverlays::instance().clickControls(x, y))
+    {
+        return true;
+    }
+    if (WolfMapOverlays::instance().mouseDown(*this, x, y, mask))
+    {
+        mWolfOverlayPress = true;
+        gFocusMgr.setMouseCapture(this);
+        setFocus(true);             // so Delete reaches handleKeyHere
+        return true;
+    }
+    mWolfOverlayPress = false;
+    // </WolfViewer>
     gFocusMgr.setMouseCapture( this );
 
     mMouseDownPanX = ll_round(mPanX);
@@ -1951,6 +1981,14 @@ bool LLWorldMapView::handleMouseUp( S32 x, S32 y, MASK mask )
 {
     if (hasMouseCapture())
     {
+        // <WolfViewer 2026-09-25/> Finish a map-image move / stretch (it saves itself).
+        if (mWolfOverlayPress)
+        {
+            mWolfOverlayPress = false;
+            WolfMapOverlays::instance().mouseUp();
+            gFocusMgr.setMouseCapture(NULL);
+            return true;
+        }
         if (mPanning)
         {
             // restore mouse cursor
@@ -2015,6 +2053,17 @@ void LLWorldMapView::updateVisibleBlocks()
 
 bool LLWorldMapView::handleHover( S32 x, S32 y, MASK mask )
 {
+    // <WolfViewer 2026-09-25/> A map image being moved or stretched follows the pointer.
+    if (hasMouseCapture() && mWolfOverlayPress)
+    {
+        WolfMapOverlays::instance().mouseMove(*this, x, y, mask);
+        gViewerWindow->setCursor(UI_CURSOR_HAND);
+        return true;
+    }
+    if (!hasMouseCapture() && WolfMapOverlays::instance().hoverCursor(*this, x, y))
+    {
+        return true;
+    }
     if (hasMouseCapture())
     {
         if (mPanning || llabs(x - mMouseDownX) > 1 || llabs(y - mMouseDownY) > 1)
@@ -2063,6 +2112,11 @@ bool LLWorldMapView::handleHover( S32 x, S32 y, MASK mask )
 
 bool LLWorldMapView::handleDoubleClick( S32 x, S32 y, MASK mask )
 {
+    // <WolfViewer 2026-09-25/> While editing, a double-click on your own map image is not a teleport.
+    if (WolfMapOverlays::instance().hitEditable(*this, x, y))
+    {
+        return true;
+    }
     if( sHandledLastClick )
     {
         S32 hit_type;
@@ -2141,3 +2195,35 @@ F32 LLWorldMapView::scaleFromZoom(F32 zoom) { return exp2(zoom) * 256.0f; }
 
 // static
 F32 LLWorldMapView::zoomFromScale(F32 scale) { return log2(scale / 256.f); }
+
+// <WolfViewer 2026-09-25> Map images (wolfmapoverlays.cpp).
+bool LLWorldMapView::handleDragAndDrop(S32 x, S32 y, MASK mask, bool drop, EDragAndDropType cargo_type,
+                                       void* cargo_data, EAcceptance* accept, std::string& tooltip_msg)
+{
+    if (WolfMapOverlays::instance().dragAndDrop(*this, x, y, drop, cargo_type, cargo_data, accept, tooltip_msg))
+    {
+        return true;
+    }
+    return LLPanel::handleDragAndDrop(x, y, mask, drop, cargo_type, cargo_data, accept, tooltip_msg);
+}
+
+bool LLWorldMapView::handleKeyHere(KEY key, MASK mask)
+{
+    if (WolfMapOverlays::instance().handleKey(key, mask))
+    {
+        return true;
+    }
+    return LLPanel::handleKeyHere(key, mask);
+}
+
+void LLWorldMapView::onMouseCaptureLost()
+{
+    // A move / stretch cut short (focus stolen mid-drag) still saves where the image got to.
+    if (mWolfOverlayPress)
+    {
+        mWolfOverlayPress = false;
+        WolfMapOverlays::instance().mouseUp();
+    }
+    LLPanel::onMouseCaptureLost();
+}
+// </WolfViewer>

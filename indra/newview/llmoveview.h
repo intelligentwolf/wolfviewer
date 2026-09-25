@@ -93,6 +93,9 @@ private:
     void setModeButtonToggleState(const EMovementMode mode);
     void updateButtonsWithMovementMode(const EMovementMode newMode);
     void showModeButtons(bool bShow);
+    // <WolfViewer 2026-09-25> Joysticks | Buttons tabs (floater_moveview.xml)
+    void setControlsStyle(bool buttons);
+    // </WolfViewer>
 
 public:
 
@@ -104,8 +107,19 @@ public:
     LLButton*               mTurnRightButton;
     LLButton*               mMoveUpButton;
     LLButton*               mMoveDownButton;
+    // <WolfViewer 2026-09-25> fly up / down beside the analogue stick on the Joysticks tab;
+    // the grid's own pair above is on the Buttons tab.
+    LLButton*               mStickUpButton;
+    LLButton*               mStickDownButton;
+    // </WolfViewer>
 private:
     LLPanel*                mModeActionsPanel;
+    // <WolfViewer 2026-09-25>
+    LLButton*               mJoysticksTab;
+    LLButton*               mButtonsTab;
+    LLPanel*                mSticksPanel;
+    LLPanel*                mButtonsPanel;
+    // </WolfViewer>
 
     typedef std::map<LLView*, std::string> control_tooltip_map_t;
     typedef std::map<EMovementMode, control_tooltip_map_t> mode_control_tooltip_map_t;

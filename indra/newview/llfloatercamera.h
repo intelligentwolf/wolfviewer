@@ -37,6 +37,7 @@ class LLJoystickCameraTrack;
 class LLFloaterReg;
 class LLPanelCameraZoom;
 class LLComboBox;
+class LLButton;   // <WolfViewer 2026-09-25>
 
 enum ECameraControlMode
 {
@@ -98,6 +99,16 @@ private:
     static LLFloaterCamera* findSmallInstance();
 
     /*virtual*/ bool postBuild();
+
+    // <WolfViewer 2026-09-25> Joysticks | Buttons tabs (floater_camera.xml). Only the main
+    // camera floater has them; the small and Phototools floaters share this class and keep
+    // whatever their XUI sets.
+    void setControlsStyle(bool buttons);
+    LLButton* mJoysticksTab { nullptr };
+    LLButton* mButtonsTab { nullptr };
+    std::string mRotateAnalogToolTip;
+    std::string mTrackAnalogToolTip;
+    // </WolfViewer>
 
     F32 getCurrentTransparency();
 

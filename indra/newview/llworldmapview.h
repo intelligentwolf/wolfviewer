@@ -63,6 +63,13 @@ public:
     virtual bool    handleDoubleClick( S32 x, S32 y, MASK mask );
     virtual bool    handleHover( S32 x, S32 y, MASK mask );
     virtual bool    handleToolTip( S32 x, S32 y, MASK mask);
+    // <WolfViewer 2026-09-25> Map images (wolfmapoverlays.cpp): drop a texture on a region you
+    // own; Delete removes the selected image.
+    virtual bool    handleDragAndDrop(S32 x, S32 y, MASK mask, bool drop, EDragAndDropType cargo_type,
+                                      void* cargo_data, EAcceptance* accept, std::string& tooltip_msg);
+    virtual bool    handleKeyHere(KEY key, MASK mask);
+    virtual void    onMouseCaptureLost();
+    // </WolfViewer>
 
     bool            checkItemHit(S32 x, S32 y, LLItemInfo& item, LLUUID* id, bool track);
     void            handleClick(S32 x, S32 y, MASK mask, S32* hit_type, LLUUID* id);
@@ -175,6 +182,8 @@ public:
 
     // Are we mid-pan from a user drag?
     bool            mPanning;
+    // <WolfViewer 2026-09-25/> This press belongs to a map image (move / stretch), not the pan.
+    bool            mWolfOverlayPress = false;
     S32             mMouseDownPanX;     // value at start of drag
     S32             mMouseDownPanY;     // value at start of drag
     S32             mMouseDownX;

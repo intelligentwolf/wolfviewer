@@ -12,8 +12,8 @@
     can_close="false"
     chrome="true"
     follows="bottom"
-    height="180"
-    min_height="165"
+    height="203"
+    min_height="203"
     layout="topleft"
     name="camera_floater"
     title="Camera Controls"
@@ -37,6 +37,41 @@
         View Object
   </floater.string>
   <string name="inactive_combo_text">Use preset</string>
+  <!-- WolfViewer 2026-09-25: Joysticks | Buttons tabs. "Buttons" turns both camera sticks
+       back into Firestorm's stock arrow-quadrant widgets (lljoystickbutton.h setWolfAnalog,
+       llfloatercamera.cpp setControlsStyle; saved in WolfCameraControlsButtons). This strip
+       is the FIRST child, so every sibling below, all chained by top_pad / top_delta from
+       it, moves down by exactly its bottom edge; the floater is that much taller. -->
+  <button
+      follows="left|top"
+      height="20"
+      image_unselected="TabTop_Left_Off"
+      image_selected="TabTop_Left_Selected"
+      image_pressed="TabTop_Left_Selected"
+      image_pressed_selected="TabTop_Left_Selected"
+      label="Joysticks"
+      layout="topleft"
+      left="5"
+      name="joysticks_tab"
+      tool_tip="Use the analogue camera sticks"
+      top="3"
+      width="117"/>
+  <button
+      follows="left|top"
+      height="20"
+      image_unselected="TabTop_Right_Off"
+      image_selected="TabTop_Right_Selected"
+      image_pressed="TabTop_Right_Selected"
+      image_pressed_selected="TabTop_Right_Selected"
+      label="Buttons"
+      layout="topleft"
+      left="122"
+      name="buttons_tab"
+      tool_tip="Use the arrow-button camera controls"
+      top="3"
+      width="117"/>
+  <!-- The chain below starts from the last XUI child's rect (llview.cpp
+       get_last_child_rect), which is the Buttons tab above. -->
   <panel
       follows="top|left"
       height="25"
@@ -340,7 +375,7 @@
   <panel
     name="viewer_camera_info"
     left="0"
-    top="135"
+    top="158"
     width="400"
     height="150"
     border="true"
@@ -349,7 +384,7 @@
   <panel
     name="agent_camera_info"
     left="0"
-    top="285"
+    top="308"
     width="400"
     height="150"
     border="true"

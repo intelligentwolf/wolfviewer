@@ -22,7 +22,10 @@
 //
 // WHAT EACH CONTROL SENDS — nothing new on the wire; the same LLAgent calls as the keyboard:
 //   wheel turned   -> gAgent.moveYaw()      (llviewerinput.cpp agent_turn_left / _right)
-//   pedal held     -> gAgent.moveAt(+1 / -1) in D / R (agent_push_forwardbackward), N: none
+//   pedal down     -> gAgent.moveAt(+1 / -1) in D / R (agent_push_forwardbackward), N: none.
+//                     A click latches it down and the idle loop drives every frame; a second
+//                     click lets it up. A mouse is one pointer, so a pedal that had to be held
+//                     could never be used while steering (Paul, 2026-09-26).
 //   lever, seated  -> gAgent.moveUp(+1 / -1) held for one short tap per gear, i.e. what
 //                     PageUp / PageDown do on a vehicle (key_bindings.xml <sitting> PGUP ->
 //                     spin_over_sitting -> agent_jump -> moveUp when the script has taken the
@@ -31,9 +34,7 @@
 //                     listen. On foot the lever sends nothing — PageUp there is jump / fly —
 //                     and only picks the pedal's direction.
 //
-// KEYBOARD while the Vehicle tab shows (handleScanKey, called from LLViewerInput::scanKey).
-// A mouse is one pointer, so it cannot hold the pedal and turn the wheel at once; the
-// keyboard works either control while the mouse works the other:
+// KEYBOARD while the Vehicle tab shows (handleScanKey, called from LLViewerInput::scanKey):
 //   Up / W         -> the pedal: follows the gear (D: its own binding, R: Down / S's
 //                     binding, N: nothing) and shows pressed
 //   Left/Right/A/D -> unchanged bindings; the wheel shows full lock
@@ -92,6 +93,9 @@ namespace
     F64  sTapPhaseStart = 0.0;
     bool sTapIdleRegistered = false;
 
+    bool sPedalLatched = false;
+    F64  sPedalLatchedAt = 0.0;
+
     F64 now()
     {
         return LLFrameTimer::getTotalSeconds();
@@ -142,6 +146,37 @@ namespace
         sTapQueue.pop_front();
         sTapPhaseStart = t;
         gAgent.moveUp(sTapDir);
+    }
+
+    // The latched pedal drives every frame (the Move floater's buttons do the same from their
+    // held-down callbacks). It lets go by itself when the Vehicle tab is no longer showing.
+    void pedalIdle(void*)
+    {
+        if (!WolfVehicle::active())
+        {
+            WolfVehicle::setPedalLatched(false);
+            return;
+        }
+        if (gAgent.isMovementLocked())
+        {
+            return;
+        }
+        S32 dir = 0;
+        switch (sGear)
+        {
+        case WolfVehicle::GEAR_D: dir = 1;  break;
+        case WolfVehicle::GEAR_R: dir = -1; break;
+        default:                  return;   // neutral: the pedal does nothing
+        }
+        // Source: llviewerinput.cpp agent_push_forwardbackward — a nudge first, then full.
+        if (now() - sPedalLatchedAt < NUDGE_TIME)
+        {
+            gAgent.moveAtNudge(dir);
+        }
+        else
+        {
+            gAgent.moveAt(dir);
+        }
     }
 
     // Thick line as two triangles; gl_line_2d is one pixel wide.
@@ -224,6 +259,29 @@ namespace WolfVehicle
     {
         const S32 g = llclamp((S32)sGear + steps, (S32)GEAR_R, (S32)GEAR_D);
         setGear((EGear)g, send_to_vehicle);
+    }
+
+    void setPedalLatched(bool on)
+    {
+        if (on == sPedalLatched)
+        {
+            return;
+        }
+        sPedalLatched = on;
+        if (on)
+        {
+            sPedalLatchedAt = now();
+            gIdleCallbacks.addFunction(pedalIdle, nullptr);
+        }
+        else
+        {
+            gIdleCallbacks.deleteFunction(pedalIdle, nullptr);
+        }
+    }
+
+    bool pedalLatched()
+    {
+        return sPedalLatched;
     }
 
     void noteKeyboardPedal(bool held)
@@ -440,36 +498,19 @@ void WolfSteeringWheel::draw()
 WolfPedal::WolfPedal(const Params& p)
 :   LLButton(p)
 {
-    // Every frame from the first, like the Move floater's own buttons (llmoveview.cpp
-    // MOVE_BUTTON_DELAY = 0); the stock button template waits 0.5 s (widgets/button.xml).
-    setHeldDownDelay(0.f);
-    setHeldDownCallback(&WolfPedal::onHeldDown, this);
 }
 
-// static
-void WolfPedal::onHeldDown(void* userdata)
+// A click toggles the latch. No mouse capture and no LLButton press: nothing is held, so the
+// pointer is free for the wheel the moment the button comes up.
+bool WolfPedal::handleMouseDown(S32 x, S32 y, MASK mask)
 {
-    WolfPedal* self = (WolfPedal*)userdata;
-    if (!self || gAgent.isMovementLocked())
-    {
-        return;
-    }
-    S32 dir = 0;
-    switch (WolfVehicle::gear())
-    {
-    case WolfVehicle::GEAR_D: dir = 1;  break;
-    case WolfVehicle::GEAR_R: dir = -1; break;
-    default:                  return;   // neutral: the pedal does nothing
-    }
-    // Source: llviewerinput.cpp agent_push_forwardbackward — a nudge first, then full.
-    if (self->getHeldDownTime() < NUDGE_TIME)
-    {
-        gAgent.moveAtNudge(dir);
-    }
-    else
-    {
-        gAgent.moveAt(dir);
-    }
+    WolfVehicle::setPedalLatched(!WolfVehicle::pedalLatched());
+    return true;
+}
+
+bool WolfPedal::handleMouseUp(S32 x, S32 y, MASK mask)
+{
+    return true;
 }
 
 // Source: css/touch_controls.css .touch-pedal / .touch-pedal-ribs / .active / .neutral.
@@ -481,7 +522,7 @@ void WolfPedal::draw()
     static LLUIColor border_act  = LLUIColorTable::instance().getColor("WolfJoystickBorderActive", LLColor4(0.745f, 0.882f, 1.f, 0.90f));
     static LLUIColor ribs        = LLUIColorTable::instance().getColor("WolfPedalRibs",        LLColor4(0.824f, 0.882f, 0.961f, 0.55f));
 
-    const bool pressed = hasMouseCapture() || WolfVehicle::keyboardPedalHeld();
+    const bool pressed = WolfVehicle::pedalLatched() || WolfVehicle::keyboardPedalHeld();
     // Neutral: the pedal does nothing, so it reads as inactive.
     const F32 alpha = WolfVehicle::gear() == WolfVehicle::GEAR_N ? 0.5f : 1.f;
 

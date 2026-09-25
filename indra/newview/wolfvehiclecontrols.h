@@ -40,6 +40,11 @@ namespace WolfVehicle
     void    setGear(EGear g, bool send_to_vehicle);
     void    shiftGear(S32 steps, bool send_to_vehicle);
 
+    /** The pedal clicked down: it stays down (driving every frame from the idle loop)
+     *  until clicked again, the tab changes or the floater closes. */
+    void    setPedalLatched(bool on);
+    bool    pedalLatched();
+
     /** Keyboard state for drawing: Up / W holding the pedal, Left / Right steering. */
     void    noteKeyboardPedal(bool held);
     bool    keyboardPedalHeld();
@@ -83,10 +88,12 @@ private:
 };
 
 /**
- * Accelerator pedal. Held, it drives the agent in the lever's direction — forward in D,
- * backward in R, nothing in N — with the stock nudge ramp (llviewerinput.cpp
- * agent_push_forwardbackward). A scripted vehicle gets CONTROL_FWD / CONTROL_BACK and ramps
- * its own speed while the pedal is down. Up / W held on the keyboard shows it pressed.
+ * Accelerator pedal. Click it and it LATCHES down, driving the agent in the lever's direction
+ * — forward in D, backward in R, nothing in N — with the stock nudge ramp (llviewerinput.cpp
+ * agent_push_forwardbackward); click again and it comes up. It latches rather than needing
+ * to be held because a mouse is one pointer: held, it could never steer at the same time
+ * (Paul, 2026-09-26). A scripted vehicle gets CONTROL_FWD / CONTROL_BACK and ramps its own
+ * speed while the pedal is down. Up / W held on the keyboard also shows it pressed.
  */
 class WolfPedal : public LLButton
 {
@@ -97,10 +104,9 @@ public:
     };
     WolfPedal(const Params& p);
 
+    bool    handleMouseDown(S32 x, S32 y, MASK mask) override;
+    bool    handleMouseUp(S32 x, S32 y, MASK mask) override;
     void    draw() override;
-
-private:
-    static void onHeldDown(void* userdata);
 };
 
 #endif // WOLF_VEHICLECONTROLS_H

@@ -498,7 +498,7 @@
              layout="topleft"
              left="152"
              name="accelerator"
-             tool_tip="Accelerator: hold to drive in the lever's direction — forward in D, backward in R, nothing in N (or hold Up Arrow / W)"
+             tool_tip="Accelerator: click to drive in the lever's direction — forward in D, backward in R, nothing in N — and click again to stop (or hold Up Arrow / W)"
              top="4"
              width="34"/>
         </panel>

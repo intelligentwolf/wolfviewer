@@ -40,10 +40,23 @@ namespace WolfVehicle
     void    setGear(EGear g, bool send_to_vehicle);
     void    shiftGear(S32 steps, bool send_to_vehicle);
 
-    /** The pedal clicked down: it stays down (driving every frame from the idle loop)
-     *  until clicked again, the tab changes or the floater closes. */
-    void    setPedalLatched(bool on);
-    bool    pedalLatched();
+    /** Registers the per-frame drive step (once; LLFloaterMove::postBuild). */
+    void    init();
+
+    /** Mouse driving (see the .cpp header). A world click the UI did not take: true when the
+     *  Vehicle tab has consumed it (left = accelerator, right = brake). */
+    bool    handleWorldMouse(EMouseClickType click, bool down);
+    /** Any button-up, wherever the pointer is, ends that button's pedal. */
+    void    handleMouseUpAnywhere(EMouseClickType click);
+    /** Once a frame from LLViewerWindow::updateUI: did the hover reach the world, and where. */
+    void    noteMouseOverWorld(bool over, S32 x);
+    /** The mouse over the world is steering; `turn` is -1..1 (for drawing the wheel). */
+    bool    mouseSteering(F32& turn);
+
+    /** Pedal state for drawing, from every source (mouse, keyboard, on-screen). */
+    bool    accelDown();
+    bool    brakeDown();
+    void    setScreenPedal(bool brake, bool held);
 
     /** Keyboard state for drawing: Up / W holding the pedal, Left / Right steering. */
     void    noteKeyboardPedal(bool held);
@@ -88,25 +101,28 @@ private:
 };
 
 /**
- * Accelerator pedal. Click it and it LATCHES down, driving the agent in the lever's direction
- * — forward in D, backward in R, nothing in N — with the stock nudge ramp (llviewerinput.cpp
- * agent_push_forwardbackward); click again and it comes up. It latches rather than needing
- * to be held because a mouse is one pointer: held, it could never steer at the same time
- * (Paul, 2026-09-26). A scripted vehicle gets CONTROL_FWD / CONTROL_BACK and ramps its own
- * speed while the pedal is down. Up / W held on the keyboard also shows it pressed.
+ * Accelerator or brake pedal (wolf_brake="true"). Held, it drives in the lever's direction
+ * (accelerator) or against it (brake) — the per-frame work is WolfVehicle's drive step, so a
+ * held pedal, a held mouse button over the world and Up / W all end up in one place. It also
+ * lights whenever any of those has it down.
  */
 class WolfPedal : public LLButton
 {
 public:
     struct Params : public LLInitParam::Block<Params, LLButton::Params>
     {
-        Params() { changeDefault(label, ""); }
+        Optional<bool> wolf_brake;
+        Params() : wolf_brake("wolf_brake", false) { changeDefault(label, ""); }
     };
     WolfPedal(const Params& p);
 
     bool    handleMouseDown(S32 x, S32 y, MASK mask) override;
     bool    handleMouseUp(S32 x, S32 y, MASK mask) override;
+    void    onMouseCaptureLost() override;
     void    draw() override;
+
+private:
+    bool    mBrake;
 };
 
 #endif // WOLF_VEHICLECONTROLS_H

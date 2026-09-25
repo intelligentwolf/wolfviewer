@@ -167,6 +167,7 @@ bool LLFloaterMove::postBuild()
         mGearButtons[g]->setCommitCallback(boost::bind(&WolfVehicle::setGear, (WolfVehicle::EGear)g, true));
     }
     refreshGearButtons();
+    WolfVehicle::init();   // the per-frame drive step (mouse driving, pedals)
 
     setControlsStyle(gSavedSettings.getBOOL("WolfMoveControlsVehicle") ? STYLE_VEHICLE
                      : gSavedSettings.getBOOL("WolfMoveControlsButtons") ? STYLE_BUTTONS

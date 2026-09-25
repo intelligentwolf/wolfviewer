@@ -22,10 +22,21 @@
 //
 // WHAT EACH CONTROL SENDS — nothing new on the wire; the same LLAgent calls as the keyboard:
 //   wheel turned   -> gAgent.moveYaw()      (llviewerinput.cpp agent_turn_left / _right)
-//   pedal down     -> gAgent.moveAt(+1 / -1) in D / R (agent_push_forwardbackward), N: none.
-//                     A click latches it down and the idle loop drives every frame; a second
-//                     click lets it up. A mouse is one pointer, so a pedal that had to be held
-//                     could never be used while steering (Paul, 2026-09-26).
+//   accelerator    -> gAgent.moveAt(+1 / -1) in D / R (agent_push_forwardbackward), N: none
+//   brake          -> the other way: moveAt(-1) in D, (+1) in R, N: none — how an SL vehicle
+//                     brakes. The brake wins if both are down.
+//
+// MOUSE DRIVING while the Vehicle tab shows and the mouse is over the 3D world (Paul,
+// 2026-09-26: one pointer cannot hold a pedal and turn a wheel, so the mouse is the car):
+//   left button held   -> accelerator         right button held -> brake
+//   mouse left / right of the world view's centre -> the wheel: a centre band is straight,
+//                         full lock halfway to the edge (touch_controls.js DRIVE_FULL_LOCK)
+// Hooks: LLViewerWindow::handleAnyMouseClick hands a click the UI did not take to
+// handleWorldMouse before the current tool sees it — so no touch / select, camera drag or
+// pie menu in the world meanwhile — and releases a button anywhere (handleMouseUpAnywhere);
+// LLViewerWindow::updateUI reports every frame whether the hover reached the world
+// (noteMouseOverWorld). driveIdle turns all of it, plus the on-screen pedals, into agent
+// input each frame.
 //   lever, seated  -> gAgent.moveUp(+1 / -1) held for one short tap per gear, i.e. what
 //                     PageUp / PageDown do on a vehicle (key_bindings.xml <sitting> PGUP ->
 //                     spin_over_sitting -> agent_jump -> moveUp when the script has taken the
@@ -56,6 +67,7 @@
 #include "llrender.h"
 #include "llrender2dutils.h"
 #include "lluicolortable.h"
+#include "llviewerwindow.h"
 #include "llvoavatarself.h"
 
 #include <deque>
@@ -93,8 +105,29 @@ namespace
     F64  sTapPhaseStart = 0.0;
     bool sTapIdleRegistered = false;
 
-    bool sPedalLatched = false;
-    F64  sPedalLatchedAt = 0.0;
+    // Source: touch_controls.js DRIVE_FULL_LOCK — full lock this fraction of the world
+    // view's width from its centre.
+    const F32 DRIVE_FULL_LOCK = 0.25f;
+
+    bool sMouseAccel = false;      // left button held in the world
+    bool sMouseBrake = false;      // right button held in the world
+    bool sMouseOverWorld = false;  // this frame's hover reached the world tool
+    F32  sMouseSteer = 0.f;        // -1..1 from the mouse's place in the world view
+    bool sScreenAccel = false;     // on-screen pedals held with the pointer
+    bool sScreenBrake = false;
+    S32  sDriveDir = 0;            // what the pedals are doing: +1 / -1 / 0
+    F64  sDriveSince = 0.0;
+    F32  sSteerAxis = 0.f;
+    F64  sSteerSince = 0.0;
+    bool sDriveIdleRegistered = false;
+
+    // Past the dead zone, remapped to 0..1 (LLJoystick::wolfAxis).
+    F32 steerAxis(F32 v)
+    {
+        if (v > DEAD_ZONE) return llmin(1.f, (v - DEAD_ZONE) / (1.f - DEAD_ZONE));
+        if (v < -DEAD_ZONE) return llmax(-1.f, (v + DEAD_ZONE) / (1.f - DEAD_ZONE));
+        return 0.f;
+    }
 
     F64 now()
     {
@@ -148,28 +181,51 @@ namespace
         gAgent.moveUp(sTapDir);
     }
 
-    // The latched pedal drives every frame (the Move floater's buttons do the same from their
-    // held-down callbacks). It lets go by itself when the Vehicle tab is no longer showing.
-    void pedalIdle(void*)
+    // Every frame: mouse steering and the pedals (mouse buttons and on-screen) become agent
+    // input — what the Move floater's buttons do from their held-down callbacks.
+    void driveIdle(void*)
     {
         if (!WolfVehicle::active())
         {
-            WolfVehicle::setPedalLatched(false);
+            sMouseAccel = sMouseBrake = false;
+            sMouseOverWorld = false;
+            sDriveDir = 0;
+            sSteerAxis = 0.f;
             return;
         }
         if (gAgent.isMovementLocked())
         {
             return;
         }
-        S32 dir = 0;
-        switch (sGear)
+        const F64 t = now();
+
+        const F32 axis = sMouseOverWorld ? steerAxis(sMouseSteer) : 0.f;
+        if ((axis != 0.f) != (sSteerAxis != 0.f))
         {
-        case WolfVehicle::GEAR_D: dir = 1;  break;
-        case WolfVehicle::GEAR_R: dir = -1; break;
-        default:                  return;   // neutral: the pedal does nothing
+            sSteerSince = t;   // the yaw ramp restarts with each turn, as a key's would
+        }
+        sSteerAxis = axis;
+        if (axis != 0.f)
+        {
+            // +axis turns right, i.e. negative yaw (LLJoystickAgentTurn::onHeldDown).
+            gAgent.moveYaw(-LLFloaterMove::getYawRate((F32)(t - sSteerSince)) * axis);
+        }
+
+        const S32 fwd = sGear == WolfVehicle::GEAR_D ? 1 : sGear == WolfVehicle::GEAR_R ? -1 : 0;
+        const bool brake = sMouseBrake || sScreenBrake;
+        const bool accel = sMouseAccel || sScreenAccel;
+        const S32 dir = brake ? -fwd : accel ? fwd : 0;
+        if (dir != sDriveDir)
+        {
+            sDriveDir = dir;
+            sDriveSince = t;
+        }
+        if (dir == 0)
+        {
+            return;
         }
         // Source: llviewerinput.cpp agent_push_forwardbackward — a nudge first, then full.
-        if (now() - sPedalLatchedAt < NUDGE_TIME)
+        if (t - sDriveSince < NUDGE_TIME)
         {
             gAgent.moveAtNudge(dir);
         }
@@ -261,27 +317,76 @@ namespace WolfVehicle
         setGear((EGear)g, send_to_vehicle);
     }
 
-    void setPedalLatched(bool on)
+    void init()
     {
-        if (on == sPedalLatched)
+        if (!sDriveIdleRegistered)
         {
-            return;
-        }
-        sPedalLatched = on;
-        if (on)
-        {
-            sPedalLatchedAt = now();
-            gIdleCallbacks.addFunction(pedalIdle, nullptr);
-        }
-        else
-        {
-            gIdleCallbacks.deleteFunction(pedalIdle, nullptr);
+            sDriveIdleRegistered = true;
+            gIdleCallbacks.addFunction(driveIdle, nullptr);
         }
     }
 
-    bool pedalLatched()
+    bool handleWorldMouse(EMouseClickType click, bool down)
     {
-        return sPedalLatched;
+        if (!active())
+        {
+            return false;
+        }
+        switch (click)
+        {
+        case CLICK_LEFT:
+        case CLICK_DOUBLELEFT:
+            if (down) sMouseAccel = true;
+            return true;
+        case CLICK_RIGHT:
+            if (down) sMouseBrake = true;
+            return true;
+        default:
+            return false;   // middle / extra buttons keep their bindings
+        }
+    }
+
+    void handleMouseUpAnywhere(EMouseClickType click)
+    {
+        if (click == CLICK_LEFT || click == CLICK_DOUBLELEFT) sMouseAccel = false;
+        if (click == CLICK_RIGHT) sMouseBrake = false;
+    }
+
+    void noteMouseOverWorld(bool over, S32 x)
+    {
+        sMouseOverWorld = over;
+        if (!over || !gViewerWindow)
+        {
+            return;
+        }
+        const LLRect world = gViewerWindow->getWorldViewRectScaled();
+        const F32 half = world.getWidth() * DRIVE_FULL_LOCK;
+        sMouseSteer = half > 0.f ? llclamp((F32)(x - world.getCenterX()) / half, -1.f, 1.f) : 0.f;
+    }
+
+    bool mouseSteering(F32& turn)
+    {
+        if (!sMouseOverWorld || !active())
+        {
+            return false;
+        }
+        turn = sMouseSteer;
+        return true;
+    }
+
+    bool accelDown()
+    {
+        return sMouseAccel || sScreenAccel || keyboardPedalHeld();
+    }
+
+    bool brakeDown()
+    {
+        return sMouseBrake || sScreenBrake;
+    }
+
+    void setScreenPedal(bool brake, bool held)
+    {
+        (brake ? sScreenBrake : sScreenAccel) = held;
     }
 
     void noteKeyboardPedal(bool held)
@@ -433,10 +538,13 @@ void WolfSteeringWheel::draw()
     static LLUIColor hub        = LLUIColorTable::instance().getColor("WolfWheelHub",             LLColor4(0.235f, 0.392f, 0.706f, 0.92f));
     static LLUIColor mark       = LLUIColorTable::instance().getColor("WolfWheelMark",            LLColor4(0.961f, 0.690f, 0.255f, 1.f));
 
+    // What turns the drawn wheel: dragging it, else the mouse over the world, else the keys.
     const bool mouse = hasMouseCapture();
-    const S32 kbd = mouse ? 0 : WolfVehicle::keyboardSteerDir();
-    const F32 turn = mouse ? mTurn : (F32)kbd;
-    const bool turning = mouse || kbd != 0;
+    F32 world_turn = 0.f;
+    const bool world = !mouse && WolfVehicle::mouseSteering(world_turn);
+    const S32 kbd = (mouse || world) ? 0 : WolfVehicle::keyboardSteerDir();
+    const F32 turn = mouse ? mTurn : world ? world_turn : (F32)kbd;
+    const bool turning = mouse || (world && fabsf(world_turn) > DEAD_ZONE) || kbd != 0;
 
     LLGLSUIDefault gls_ui;
     gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
@@ -496,21 +604,29 @@ void WolfSteeringWheel::draw()
 //-----------------------------------------------------------------------------
 
 WolfPedal::WolfPedal(const Params& p)
-:   LLButton(p)
+:   LLButton(p),
+    mBrake(p.wolf_brake)
 {
 }
 
-// A click toggles the latch. No mouse capture and no LLButton press: nothing is held, so the
-// pointer is free for the wheel the moment the button comes up.
+// Held with the pointer: driveIdle reads the flag every frame. The mouse button over the
+// world does the same job, so this is for a finger or for trying the pedal out.
 bool WolfPedal::handleMouseDown(S32 x, S32 y, MASK mask)
 {
-    WolfVehicle::setPedalLatched(!WolfVehicle::pedalLatched());
-    return true;
+    WolfVehicle::setScreenPedal(mBrake, true);
+    return LLButton::handleMouseDown(x, y, mask);
 }
 
 bool WolfPedal::handleMouseUp(S32 x, S32 y, MASK mask)
 {
-    return true;
+    WolfVehicle::setScreenPedal(mBrake, false);
+    return LLButton::handleMouseUp(x, y, mask);
+}
+
+void WolfPedal::onMouseCaptureLost()
+{
+    WolfVehicle::setScreenPedal(mBrake, false);
+    LLButton::onMouseCaptureLost();
 }
 
 // Source: css/touch_controls.css .touch-pedal / .touch-pedal-ribs / .active / .neutral.
@@ -521,8 +637,11 @@ void WolfPedal::draw()
     static LLUIColor border      = LLUIColorTable::instance().getColor("WolfJoystickBorder",   LLColor4(0.627f, 0.784f, 1.f,    0.50f));
     static LLUIColor border_act  = LLUIColorTable::instance().getColor("WolfJoystickBorderActive", LLColor4(0.745f, 0.882f, 1.f, 0.90f));
     static LLUIColor ribs        = LLUIColorTable::instance().getColor("WolfPedalRibs",        LLColor4(0.824f, 0.882f, 0.961f, 0.55f));
+    // css/touch_controls.css .touch-brake.active: red, so the two pedals never read alike.
+    static LLUIColor brake_press = LLUIColorTable::instance().getColor("WolfBrakeBodyPressed", LLColor4(0.706f, 0.216f, 0.216f, 0.95f));
+    static LLUIColor brake_rim   = LLUIColorTable::instance().getColor("WolfBrakeBorderActive", LLColor4(1.f, 0.745f, 0.745f, 0.90f));
 
-    const bool pressed = WolfVehicle::pedalLatched() || WolfVehicle::keyboardPedalHeld();
+    const bool pressed = mBrake ? WolfVehicle::brakeDown() : WolfVehicle::accelDown();
     // Neutral: the pedal does nothing, so it reads as inactive.
     const F32 alpha = WolfVehicle::gear() == WolfVehicle::GEAR_N ? 0.5f : 1.f;
 
@@ -536,10 +655,10 @@ void WolfPedal::draw()
     const S32 inset = pressed ? llmax(1, w / 16) : 0;
     const S32 l = inset, r = w - 1 - inset, t = h - 1 - sink, b = 0;
 
-    LLColor4 c = (pressed ? body_press : body).get();
+    LLColor4 c = (pressed ? (mBrake ? brake_press : body_press) : body).get();
     c.mV[VALPHA] *= alpha;
     gl_rect_2d(l, t, r, b, c, true);
-    c = (pressed ? border_act : border).get();
+    c = (pressed ? (mBrake ? brake_rim : border_act) : border).get();
     c.mV[VALPHA] *= alpha;
     gl_rect_2d(l, t, r, b, c, false);
 

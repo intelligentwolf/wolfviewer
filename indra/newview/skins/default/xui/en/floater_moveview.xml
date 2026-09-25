@@ -103,7 +103,9 @@
          names, images and tool tips), scaled up to the floater's width. llmoveview.cpp
          flips the panes and remembers the choice in WolfMoveControlsButtons /
          WolfMoveControlsVehicle. "Vehicle" (after WolfStorm's Vehicle tab) is a steering
-         wheel, a D / N / R gear lever and an accelerator pedal — wolfvehiclecontrols.cpp.
+         wheel, a D / N / R gear lever, a brake and an accelerator — wolfvehiclecontrols.cpp.
+         While it shows, the mouse over the world drives: left button accelerates, right
+         brakes, left / right of the centre steers.
          The walk / run / fly row (and the Stand / Stop Flying dock in modes_container) is
          shared. -->
     <panel
@@ -438,7 +440,7 @@
             </layout_panel>
         </layout_stack>
         </panel>
-        <!-- Vehicle: wheel | lever | pedal (WolfStorm css/touch_controls.css order). -->
+        <!-- Vehicle: wheel | lever | brake | accelerator (WolfStorm css/touch_controls.css order). -->
         <panel
          border="false"
          follows="left|top"
@@ -452,52 +454,62 @@
          width="188">
             <wolf_steering_wheel
              follows="left|top"
-             height="104"
+             height="96"
              layout="topleft"
              left="0"
              name="steering wheel"
-             tool_tip="Steering wheel: drag left or right to steer (or Left / Right Arrow, A / D)"
-             top="0"
-             width="104"/>
+             tool_tip="Steering wheel: move the mouse left or right over the world (or drag this wheel, or Left / Right Arrow, A / D)"
+             top="4"
+             width="96"/>
             <button
              follows="left|top"
              height="30"
              label="D"
              layout="topleft"
-             left="114"
+             left="100"
              name="gear_d_btn"
              tool_tip="Drive (Page Up shifts up)"
              top="4"
-             width="30"/>
+             width="28"/>
             <button
              follows="left|top"
              height="30"
              label="N"
              layout="topleft"
-             left="114"
+             left="100"
              name="gear_n_btn"
-             tool_tip="Neutral: the accelerator does nothing"
+             tool_tip="Neutral: the pedals do nothing"
              top="37"
-             width="30"/>
+             width="28"/>
             <button
              follows="left|top"
              height="30"
              label="R"
              layout="topleft"
-             left="114"
+             left="100"
              name="gear_r_btn"
              tool_tip="Reverse (Page Down shifts down)"
              top="70"
-             width="30"/>
+             width="28"/>
+            <wolf_pedal
+             wolf_brake="true"
+             follows="left|top"
+             height="64"
+             layout="topleft"
+             left="132"
+             name="brake"
+             tool_tip="Brake: hold the right mouse button over the world (or hold this pedal)"
+             top="36"
+             width="24"/>
             <wolf_pedal
              follows="left|top"
              height="96"
              layout="topleft"
-             left="152"
+             left="160"
              name="accelerator"
-             tool_tip="Accelerator: click to drive in the lever's direction — forward in D, backward in R, nothing in N — and click again to stop (or hold Up Arrow / W)"
+             tool_tip="Accelerator: hold the left mouse button over the world — forward in D, backward in R, nothing in N (or hold this pedal, or Up Arrow / W)"
              top="4"
-             width="34"/>
+             width="26"/>
         </panel>
         <!-- modes_container is where LLPanelStandStopFlying docks (llmoveview.cpp ~709) and
              reshapes itself to; panel_modes' width and height should be synchronized with

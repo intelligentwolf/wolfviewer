@@ -26,6 +26,7 @@
 
 #include "llviewerprecompiledheaders.h"
 #include "llviewerwindow.h"
+#include "wolfvehiclecontrols.h"   // <WolfViewer 2026-09-26> Vehicle tab mouse driving
 
 
 // system library includes
@@ -1111,6 +1112,14 @@ bool LLViewerWindow::handleAnyMouseClick(LLWindow *window, LLCoordGL pos, MASK m
     // Handle non-consuming global keybindings, like voice
     gViewerInput.handleGlobalBindsMouse(clicktype, mask, down);
 
+    // <WolfViewer 2026-09-26> Move floater Vehicle tab: a button let go anywhere ends its
+    // pedal, even if the pointer wandered onto a floater while it was down.
+    if (!down)
+    {
+        WolfVehicle::handleMouseUpAnywhere(clicktype);
+    }
+    // </WolfViewer>
+
     // only send mouse clicks to UI if UI is visible
     if(gPipeline.hasRenderDebugFeatureMask(LLPipeline::RENDER_DEBUG_FEATURE_UI))
     {
@@ -1243,6 +1252,15 @@ bool LLViewerWindow::handleAnyMouseClick(LLWindow *window, LLCoordGL pos, MASK m
                 LL_INFOS() << buttonname << " Mouse " << buttonstatestr << " not handled by view" << LL_ENDL;
             }
     }
+
+    // <WolfViewer 2026-09-26> Vehicle tab mouse driving: a world click the UI did not take is
+    // the accelerator (left) or brake (right) — ahead of the tool, so no touch / select /
+    // camera drag, and ahead of the pie menu below. wolfvehiclecontrols.cpp.
+    if (!gDisconnected && WolfVehicle::handleWorldMouse(clicktype, down))
+    {
+        return true;
+    }
+    // </WolfViewer>
 
     // Do not allow tool manager to handle mouseclicks if we have disconnected
     if(!gDisconnected && LLToolMgr::getInstance()->getCurrentTool()->handleAnyMouseClick( x, y, mask, clicktype, down ) )
@@ -4092,6 +4110,11 @@ void LLViewerWindow::updateUI()
     // store resulting hover set for next frame
     swap(mMouseHoverViews, mouse_hover_set);
 
+    // <WolfViewer 2026-09-26> Vehicle tab steering: off the world unless the hover reaches the
+    // current tool below (wolfvehiclecontrols.cpp noteMouseOverWorld).
+    WolfVehicle::noteMouseOverWorld(false, x);
+    // </WolfViewer>
+
     // only handle hover events when UI is enabled
     if (gPipeline.hasRenderDebugFeatureMask(LLPipeline::RENDER_DEBUG_FEATURE_UI))
     {
@@ -4152,6 +4175,7 @@ void LLViewerWindow::updateUI()
                 if(mMouseInWindow && tool)
                 {
                     handled = tool->handleHover(x, y, mask);
+                    WolfVehicle::noteMouseOverWorld(true, x);   // <WolfViewer 2026-09-26>
                 }
             }
         }
@@ -4255,6 +4279,7 @@ void LLViewerWindow::updateUI()
         if(mMouseInWindow && tool)
         {
             handled = tool->handleHover(x, y, mask);
+            WolfVehicle::noteMouseOverWorld(true, x);   // <WolfViewer 2026-09-26>
         }
     }
 

@@ -98,14 +98,17 @@
     <string
      name="fly_title">
     </string>
-    <!-- WolfViewer 2026-09-25: Joysticks | Buttons tabs. "Joysticks" is the analogue
+    <!-- WolfViewer 2026-09-25: Joysticks | Buttons | Vehicle tabs. "Joysticks" is the analogue
          movement stick (lljoystickbutton.cpp wolf_analog, after WolfStorm's
          js/input/touch_controls.js: push up/down to walk, left/right to turn) with fly-up /
          fly-down beside it. "Buttons" is Firestorm's own 4 x 2 arrow grid, restored exactly
          as floater_moveview.xml had it before the 09-06 joystick commit (same widget types,
          names, images and tool tips), scaled up to the floater's width. llmoveview.cpp
-         flips the two panes and remembers the choice in WolfMoveControlsButtons. The walk /
-         run / fly row (and the Stand / Stop Flying dock in modes_container) is shared. -->
+         flips the panes and remembers the choice in WolfMoveControlsButtons /
+         WolfMoveControlsVehicle. "Vehicle" (after WolfStorm's Vehicle tab) is a steering
+         wheel, a D / N / R gear lever and an accelerator pedal — wolfvehiclecontrols.cpp.
+         The walk / run / fly row (and the Stand / Stop Flying dock in modes_container) is
+         shared. -->
     <panel
      border="false"
      top="4"
@@ -129,7 +132,21 @@
          name="joysticks_tab"
          tool_tip="Show the analogue movement stick"
          top="0"
-         width="94"/>
+         width="63"/>
+        <button
+         follows="left|top"
+         height="20"
+         image_unselected="TabTop_Middle_Off"
+         image_selected="TabTop_Middle_Selected"
+         image_pressed="TabTop_Middle_Selected"
+         image_pressed_selected="TabTop_Middle_Selected"
+         label="Buttons"
+         layout="topleft"
+         left="63"
+         name="buttons_tab"
+         tool_tip="Show the movement arrow buttons"
+         top="0"
+         width="62"/>
         <button
          follows="left|top"
          height="20"
@@ -137,13 +154,13 @@
          image_selected="TabTop_Right_Selected"
          image_pressed="TabTop_Right_Selected"
          image_pressed_selected="TabTop_Right_Selected"
-         label="Buttons"
+         label="Vehicle"
          layout="topleft"
-         left="94"
-         name="buttons_tab"
-         tool_tip="Show the movement arrow buttons"
+         left="125"
+         name="vehicle_tab"
+         tool_tip="Show the steering wheel, gear lever and accelerator"
          top="0"
-         width="94"/>
+         width="63"/>
         <panel
          border="false"
          follows="left|top"
@@ -423,6 +440,67 @@
                 </layout_stack>
             </layout_panel>
         </layout_stack>
+        </panel>
+        <!-- Vehicle: wheel | lever | pedal (WolfStorm css/touch_controls.css order). -->
+        <panel
+         border="false"
+         follows="left|top"
+         height="104"
+         layout="topleft"
+         left="0"
+         mouse_opaque="false"
+         name="move_vehicle_panel"
+         top="24"
+         visible="false"
+         width="188">
+            <wolf_steering_wheel
+             follows="left|top"
+             height="104"
+             layout="topleft"
+             left="0"
+             name="steering wheel"
+             tool_tip="Steering wheel: drag left or right to steer (or Left / Right Arrow, A / D)"
+             top="0"
+             width="104"/>
+            <button
+             follows="left|top"
+             height="30"
+             label="D"
+             layout="topleft"
+             left="114"
+             name="gear_d_btn"
+             tool_tip="Drive (Page Up shifts up)"
+             top="4"
+             width="30"/>
+            <button
+             follows="left|top"
+             height="30"
+             label="N"
+             layout="topleft"
+             left="114"
+             name="gear_n_btn"
+             tool_tip="Neutral: the accelerator does nothing"
+             top="37"
+             width="30"/>
+            <button
+             follows="left|top"
+             height="30"
+             label="R"
+             layout="topleft"
+             left="114"
+             name="gear_r_btn"
+             tool_tip="Reverse (Page Down shifts down)"
+             top="70"
+             width="30"/>
+            <wolf_pedal
+             follows="left|top"
+             height="96"
+             layout="topleft"
+             left="152"
+             name="accelerator"
+             tool_tip="Accelerator: hold to drive in the lever's direction — forward in D, backward in R, nothing in N (or hold Up Arrow / W)"
+             top="4"
+             width="34"/>
         </panel>
         <!-- modes_container is where LLPanelStandStopFlying docks (llmoveview.cpp ~709) and
              reshapes itself to; panel_modes' width and height should be synchronized with

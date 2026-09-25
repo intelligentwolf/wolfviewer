@@ -936,6 +936,7 @@ set(viewer_SOURCE_FILES
     wolfterrainpaint.cpp
     wolfsurfcurl.cpp
     wolfmapoverlays.cpp
+    wolfvehiclecontrols.cpp
     NACLantispam.cpp
     NACLfloaterexploresounds.cpp
     )
@@ -1827,6 +1828,7 @@ set(viewer_HEADER_FILES
     wolfterrainpaint.h
     wolfsurfcurl.h
     wolfmapoverlays.h
+    wolfvehiclecontrols.h
     VertexCache.h
     VorbisFramework.h
     NACLantispam.h

@@ -52,6 +52,7 @@
 #include "lltooltip.h"
 // [RLVa:KB] - Checked: 2010-03-07 (RLVa-1.2.0c)
 #include "rlvactions.h"
+#include "wolfvehiclecontrols.h"   // <WolfViewer 2026-09-25> Vehicle tab
 // [/RLVa:KB]
 
 //
@@ -80,8 +81,12 @@ LLFloaterMove::LLFloaterMove(const LLSD& key)
     mModeActionsPanel(NULL),
     mJoysticksTab(NULL),
     mButtonsTab(NULL),
+    mVehicleTab(NULL),
     mSticksPanel(NULL),
-    mButtonsPanel(NULL),        // </WolfViewer>
+    mButtonsPanel(NULL),
+    mVehiclePanel(NULL),
+    mGearButtons{ NULL, NULL, NULL },
+    mControlsStyle(STYLE_STICKS), // </WolfViewer>
     mCurrentMode(MM_WALK)
 {
 }
@@ -145,11 +150,27 @@ bool LLFloaterMove::postBuild()
 
     mJoysticksTab = getChild<LLButton>("joysticks_tab");
     mButtonsTab = getChild<LLButton>("buttons_tab");
+    mVehicleTab = getChild<LLButton>("vehicle_tab");
     mSticksPanel = getChild<LLPanel>("move_sticks_panel");
     mButtonsPanel = getChild<LLPanel>("move_buttons_panel");
-    mJoysticksTab->setCommitCallback(boost::bind(&LLFloaterMove::setControlsStyle, this, false));
-    mButtonsTab->setCommitCallback(boost::bind(&LLFloaterMove::setControlsStyle, this, true));
-    setControlsStyle(gSavedSettings.getBOOL("WolfMoveControlsButtons"));
+    mVehiclePanel = getChild<LLPanel>("move_vehicle_panel");
+    mJoysticksTab->setCommitCallback(boost::bind(&LLFloaterMove::setControlsStyle, this, STYLE_STICKS));
+    mButtonsTab->setCommitCallback(boost::bind(&LLFloaterMove::setControlsStyle, this, STYLE_BUTTONS));
+    mVehicleTab->setCommitCallback(boost::bind(&LLFloaterMove::setControlsStyle, this, STYLE_VEHICLE));
+
+    // Vehicle tab: the wheel and pedal drive the agent themselves (wolfvehiclecontrols.cpp);
+    // the lever is three buttons, D at the top so PageUp reads as "up".
+    const char* gear_names[3] = { "gear_r_btn", "gear_n_btn", "gear_d_btn" };
+    for (S32 g = WolfVehicle::GEAR_R; g <= WolfVehicle::GEAR_D; ++g)
+    {
+        mGearButtons[g] = getChild<LLButton>(gear_names[g]);
+        mGearButtons[g]->setCommitCallback(boost::bind(&WolfVehicle::setGear, (WolfVehicle::EGear)g, true));
+    }
+    refreshGearButtons();
+
+    setControlsStyle(gSavedSettings.getBOOL("WolfMoveControlsVehicle") ? STYLE_VEHICLE
+                     : gSavedSettings.getBOOL("WolfMoveControlsButtons") ? STYLE_BUTTONS
+                     : STYLE_STICKS);
     // </WolfViewer>
 
 
@@ -317,15 +338,37 @@ void LLFloaterMove::moveDown()
     gAgent.moveUp(-1);
 }
 
-// <WolfViewer 2026-09-25> Joysticks | Buttons tabs: show one pane, light its tab, remember
-// the choice. Nothing can be held across the switch — the tab click itself takes the mouse.
-void LLFloaterMove::setControlsStyle(bool buttons)
+// <WolfViewer 2026-09-25> Joysticks | Buttons | Vehicle tabs: show one pane, light its tab,
+// remember the choice. Nothing can be held across the switch — the tab click itself takes
+// the mouse. WolfMoveControlsButtons keeps its meaning (grid vs. stick) so the Vehicle tab
+// is its own flag, and leaving Vehicle returns to whichever of the two was picked.
+void LLFloaterMove::setControlsStyle(EControlsStyle style)
 {
-    mSticksPanel->setVisible(!buttons);
-    mButtonsPanel->setVisible(buttons);
-    mJoysticksTab->setToggleState(!buttons);
-    mButtonsTab->setToggleState(buttons);
-    gSavedSettings.setBOOL("WolfMoveControlsButtons", buttons);
+    mControlsStyle = style;
+    mSticksPanel->setVisible(style == STYLE_STICKS);
+    mButtonsPanel->setVisible(style == STYLE_BUTTONS);
+    mVehiclePanel->setVisible(style == STYLE_VEHICLE);
+    mJoysticksTab->setToggleState(style == STYLE_STICKS);
+    mButtonsTab->setToggleState(style == STYLE_BUTTONS);
+    mVehicleTab->setToggleState(style == STYLE_VEHICLE);
+    gSavedSettings.setBOOL("WolfMoveControlsVehicle", style == STYLE_VEHICLE);
+    if (style != STYLE_VEHICLE)
+    {
+        gSavedSettings.setBOOL("WolfMoveControlsButtons", style == STYLE_BUTTONS);
+    }
+}
+
+// Light the lever's current gear (WolfVehicle::setGear calls this on every change).
+void LLFloaterMove::refreshGearButtons()
+{
+    const S32 current = (S32)WolfVehicle::gear();
+    for (S32 g = WolfVehicle::GEAR_R; g <= WolfVehicle::GEAR_D; ++g)
+    {
+        if (mGearButtons[g])
+        {
+            mGearButtons[g]->setToggleState(g == current);
+        }
+    }
 }
 // </WolfViewer>
 

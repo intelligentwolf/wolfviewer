@@ -93,11 +93,16 @@ private:
     void setModeButtonToggleState(const EMovementMode mode);
     void updateButtonsWithMovementMode(const EMovementMode newMode);
     void showModeButtons(bool bShow);
-    // <WolfViewer 2026-09-25> Joysticks | Buttons tabs (floater_moveview.xml)
-    void setControlsStyle(bool buttons);
+    // <WolfViewer 2026-09-25> Joysticks | Buttons | Vehicle tabs (floater_moveview.xml)
+    enum EControlsStyle { STYLE_STICKS, STYLE_BUTTONS, STYLE_VEHICLE };
+    void setControlsStyle(EControlsStyle style);
     // </WolfViewer>
 
 public:
+    // <WolfViewer 2026-09-25> Vehicle tab (wolfvehiclecontrols.cpp)
+    bool isVehicleStyle() const { return mControlsStyle == STYLE_VEHICLE; }
+    void refreshGearButtons();
+    // </WolfViewer>
 
     LLJoystickAgentTurn*    mForwardButton;
     LLJoystickAgentTurn*    mBackwardButton;
@@ -117,8 +122,12 @@ private:
     // <WolfViewer 2026-09-25>
     LLButton*               mJoysticksTab;
     LLButton*               mButtonsTab;
+    LLButton*               mVehicleTab;
     LLPanel*                mSticksPanel;
     LLPanel*                mButtonsPanel;
+    LLPanel*                mVehiclePanel;
+    LLButton*               mGearButtons[3];    // indexed by WolfVehicle::EGear (R, N, D)
+    EControlsStyle          mControlsStyle;
     // </WolfViewer>
 
     typedef std::map<LLView*, std::string> control_tooltip_map_t;

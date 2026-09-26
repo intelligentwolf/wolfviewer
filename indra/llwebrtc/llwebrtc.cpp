@@ -43,6 +43,7 @@
 #include "modules/audio_processing/audio_buffer.h"
 #include "modules/audio_mixer/audio_mixer_impl.h"
 #include "api/environment/environment_factory.h"
+#include "api/audio/create_audio_device_module.h"   // <WolfViewer 2026-09-26/> m144 CreateAudioDeviceModule
 
 // <FS:minerjr> [FIRE-36022] - Removing my USB headset crashes entire viewer
 // Audio device mutex to be shared between audio engine and Voice systems to 
@@ -268,6 +269,7 @@ void LLCustomProcessor::Process(webrtc::AudioBuffer *audio)
 //
 
 LLWebRTCImpl::LLWebRTCImpl(LLWebRTCLogCallback* logCallback) :
+    mEnv(webrtc::CreateEnvironment(webrtc::CreateDefaultTaskQueueFactory())),   // <WolfViewer 2026-09-26/> m144, as secondlife/viewer develop
     mLogSink(new LLWebRTCLogSink(logCallback)),
     mPeerCustomProcessor(nullptr),
     mMute(true),
@@ -290,8 +292,6 @@ void LLWebRTCImpl::init()
     webrtc::LogMessage::SetLogToStderr(true);
     webrtc::LogMessage::AddLogToStream(mLogSink, webrtc::LS_VERBOSE);
 
-    mTaskQueueFactory = webrtc::CreateDefaultTaskQueueFactory();
-
     // Create the native threads.
     mNetworkThread = webrtc::Thread::CreateWithSocketServer();
     mNetworkThread->SetName("WebRTCNetworkThread", nullptr);
@@ -306,8 +306,9 @@ void LLWebRTCImpl::init()
     mWorkerThread->BlockingCall(
         [this]()
         {
+            // <WolfViewer 2026-09-26> m144 API. Source: secondlife/viewer develop llwebrtc.cpp:326.
             webrtc::scoped_refptr<webrtc::AudioDeviceModule> realADM =
-                webrtc::AudioDeviceModule::Create(webrtc::AudioDeviceModule::AudioLayer::kPlatformDefaultAudio, mTaskQueueFactory.get());
+                webrtc::CreateAudioDeviceModule(mEnv, webrtc::AudioDeviceModule::AudioLayer::kPlatformDefaultAudio);
             mDeviceModule = webrtc::make_ref_counted<LLWebRTCAudioDeviceModule>(realADM);
             mDeviceModule->SetObserver(this);
         });
@@ -404,7 +405,6 @@ void LLWebRTCImpl::terminate()
                 mDeviceModule->Terminate();
             }
             mDeviceModule     = nullptr;
-            mTaskQueueFactory = nullptr;
         });
 
     // In case peer connections still somehow have jobs in workers,

@@ -1268,8 +1268,8 @@ bool LLMaterialEditor::decodeAsset(const std::vector<char>& buffer)
                 {
                     std::string data = asset["data"];
 
-                    tinygltf::TinyGLTF gltf;
                     tinygltf::TinyGLTF loader;
+                    LLGLTFMaterial::makeLoaderNetworkSafe(loader);   // <WolfViewer 2026-09-26/> another user's asset
                     std::string        error_msg;
                     std::string        warn_msg;
 

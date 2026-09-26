@@ -276,9 +276,20 @@ void HttpOpRequest::visitNotifier(HttpRequest * request)
 
         HttpResponse::TransferStats::ptr_t stats = std::make_shared<HttpResponse::TransferStats>();
 
+#if LIBCURL_VERSION_NUM >= 0x073700
+        // <WolfViewer 2026-09-26> curl 7.55+: the double-valued forms are deprecated (curl.h
+        // CURL_DEPRECATED(7.55.0, "Use CURLINFO_SIZE_DOWNLOAD_T")); the _T forms are curl_off_t.
+        curl_off_t size_download = 0, speed_download = 0;
+        curl_easy_getinfo(mCurlHandle, CURLINFO_SIZE_DOWNLOAD_T, &size_download);
+        curl_easy_getinfo(mCurlHandle, CURLINFO_SPEED_DOWNLOAD_T, &speed_download);
+        stats->mSizeDownload = (F64)size_download;
+        stats->mSpeedDownload = (F64)speed_download;
+        curl_easy_getinfo(mCurlHandle, CURLINFO_TOTAL_TIME, &stats->mTotalTime);
+#else
         curl_easy_getinfo(mCurlHandle, CURLINFO_SIZE_DOWNLOAD, &stats->mSizeDownload);
         curl_easy_getinfo(mCurlHandle, CURLINFO_TOTAL_TIME, &stats->mTotalTime);
         curl_easy_getinfo(mCurlHandle, CURLINFO_SPEED_DOWNLOAD, &stats->mSpeedDownload);
+#endif
 
         response->setTransferStats(stats);
 
@@ -558,6 +569,18 @@ HttpStatus HttpOpRequest::prepareRequest(HttpService * service)
         lastModified = (curl_off_t)mReqOptions->getLastModified();
     }
     check_curl_easy_setopt(mCurlHandle, CURLOPT_FOLLOWLOCATION, follow_redirect);
+    // <WolfViewer 2026-09-26> Requests and redirects may only use HTTP or HTTPS. curl 7.x
+    // follows a redirect into any compiled-in protocol except FILE/SCP/SMB, so any server the
+    // viewer talks to (a Hypergrid grid, a web asset host) could send it into FTP or TFTP code
+    // with known heap overflows. curl >= 7.85 takes the string form; the bitmask form is
+    // deprecated there (a -Werror build fails on it). curl.h: CURLOPT_REDIR_PROTOCOLS_STR = 319.
+#if LIBCURL_VERSION_NUM >= 0x075500
+    check_curl_easy_setopt(mCurlHandle, CURLOPT_PROTOCOLS_STR, "http,https");
+    check_curl_easy_setopt(mCurlHandle, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
+#else
+    check_curl_easy_setopt(mCurlHandle, CURLOPT_PROTOCOLS, (long)(CURLPROTO_HTTP | CURLPROTO_HTTPS));
+    check_curl_easy_setopt(mCurlHandle, CURLOPT_REDIR_PROTOCOLS, (long)(CURLPROTO_HTTP | CURLPROTO_HTTPS));
+#endif
 
     check_curl_easy_setopt(mCurlHandle, CURLOPT_SSL_VERIFYPEER, sslPeerV);
     check_curl_easy_setopt(mCurlHandle, CURLOPT_SSL_VERIFYHOST, sslHostV);

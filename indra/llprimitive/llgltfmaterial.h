@@ -43,6 +43,7 @@ namespace tinygltf
     class Model;
     struct TextureInfo;
     class Value;
+    class TinyGLTF;
 }
 
 class LLTextureEntry;
@@ -61,6 +62,11 @@ public:
     static constexpr size_t MAX_ASSET_LENGTH = 2048;
     static const std::array<std::string, 2> ACCEPTED_ASSET_VERSIONS;
     static bool isAcceptedVersion(const std::string& version) { return std::find(ACCEPTED_ASSET_VERSIONS.cbegin(), ACCEPTED_ASSET_VERSIONS.cend(), version) != ACCEPTED_ASSET_VERSIONS.cend(); }
+
+    // <WolfViewer 2026-09-26> Configure a loader for material JSON that came from the network
+    // (another user's material asset): no image is decoded and no file is ever opened.
+    // Materials name their textures by UUID in images[].uri, which tinygltf keeps either way.
+    static void makeLoaderNetworkSafe(tinygltf::TinyGLTF& gltf);
 
     struct TextureTransform
     {

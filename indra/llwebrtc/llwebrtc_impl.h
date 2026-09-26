@@ -62,6 +62,7 @@
 #include "modules/audio_device/include/audio_device_data_observer.h"
 #include "api/task_queue/task_queue_factory.h"
 #include "api/task_queue/default_task_queue_factory.h"
+#include "api/environment/environment.h"   // <WolfViewer 2026-09-26/> libwebrtc m144
 #include "modules/audio_device/include/audio_device_defines.h"
 
 namespace llwebrtc
@@ -525,6 +526,14 @@ class LLWebRTCImpl : public LLWebRTCDeviceInterface, public webrtc::AudioDeviceO
   protected:
 
     void workerDeployDevices();
+
+    // <WolfViewer 2026-09-26> libwebrtc m144: the audio device module is created from an
+    // Environment (which owns the task queue factory) instead of a raw TaskQueueFactory.
+    // Source: secondlife/viewer develop 95120bc676 llwebrtc_impl.h (const webrtc::Environment mEnv).
+    // Declared first so it is constructed before and destroyed after every member that may use
+    // it, as webrtc/api/environment/environment.h asks ("the first member in the class").
+    const webrtc::Environment                                     mEnv;
+
     LLWebRTCLogSink*                                           mLogSink;
 
     // The native webrtc threads
@@ -538,7 +547,6 @@ class LLWebRTCImpl : public LLWebRTCDeviceInterface, public webrtc::AudioDeviceO
     webrtc::scoped_refptr<webrtc::AudioProcessing>                mAudioProcessingModule;
 
     // more native webrtc stuff
-    std::unique_ptr<webrtc::TaskQueueFactory>                     mTaskQueueFactory;
 
 
     // Devices

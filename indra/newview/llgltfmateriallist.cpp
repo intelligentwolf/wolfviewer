@@ -574,6 +574,7 @@ void LLGLTFMaterialList::onAssetLoadComplete(const LLUUID& id, LLAssetType::ETyp
 
                                 LL_PROFILE_ZONE_SCOPED;
                                 tinygltf::TinyGLTF gltf;
+                                LLGLTFMaterial::makeLoaderNetworkSafe(gltf);   // <WolfViewer 2026-09-26/>
 
                                 if (!gltf.LoadASCIIFromString(&asset_data->mModelIn, &error_msg, &warn_msg, data.c_str(), static_cast<U32>(data.length()), ""))
                                 {

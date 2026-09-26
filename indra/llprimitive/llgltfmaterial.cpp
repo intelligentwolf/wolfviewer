@@ -182,10 +182,43 @@ bool LLGLTFMaterial::operator==(const LLGLTFMaterial& rhs) const
         mOverrideAlphaMode == rhs.mOverrideAlphaMode;
 }
 
+// <WolfViewer 2026-09-26> see llgltfmaterial.h. Without this, tinygltf's defaults
+// (tiny_gltf.h ParseImage) decode a "data:" image with the bundled stb_image, and treat any
+// other image uri as a file path relative to basedir "" and try to open it — an absolute path,
+// or on Windows a \\server\share path that makes the viewer offer the user's NTLM credentials
+// to another machine. Loading a material never needs either: the uri string (the texture UUID)
+// is kept before any load is attempted.
+void LLGLTFMaterial::makeLoaderNetworkSafe(tinygltf::TinyGLTF& gltf)
+{
+    gltf.SetImageLoader([](tinygltf::Image*, const int, std::string*, std::string*, int, int,
+                           const unsigned char*, int, void*) { return true; }, nullptr);
+    tinygltf::FsCallbacks fs;
+    fs.FileExists = [](const std::string&, void*) { return false; };
+    fs.ExpandFilePath = [](const std::string& path, void*) { return path; };
+    fs.ReadWholeFile = [](std::vector<unsigned char>*, std::string* err, const std::string&, void*)
+    {
+        if (err) *err += "file access is disabled for network material data\n";
+        return false;
+    };
+    fs.WriteWholeFile = [](std::string* err, const std::string&, const std::vector<unsigned char>&, void*)
+    {
+        if (err) *err += "file access is disabled for network material data\n";
+        return false;
+    };
+    fs.GetFileSizeInBytes = [](size_t*, std::string* err, const std::string&, void*)
+    {
+        if (err) *err += "file access is disabled for network material data\n";
+        return false;
+    };
+    fs.user_data = nullptr;
+    gltf.SetFsCallbacks(fs);
+}
+
 bool LLGLTFMaterial::fromJSON(const std::string& json, std::string& warn_msg, std::string& error_msg)
 {
     LL_PROFILE_ZONE_SCOPED;
     tinygltf::TinyGLTF gltf;
+    makeLoaderNetworkSafe(gltf);   // <WolfViewer 2026-09-26/>
 
     tinygltf::Model model_in;
 

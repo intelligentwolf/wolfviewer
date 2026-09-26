@@ -9,16 +9,6 @@
     <map>
       <key>SDL2</key>
       <map>
-        <key>copyright</key>
-        <string>Copyright (C) 1997-2023 Sam Lantinga</string>
-        <key>description</key>
-        <string>Simple DirectMedia Layer is a cross-platform multimedia library designed to provide low level access to audio, keyboard, mouse, joystick, 3D hardware via OpenGL, and 2D video framebuffer.</string>
-        <key>license</key>
-        <string>zlib</string>
-        <key>license_file</key>
-        <string>LICENSES/SDL.txt</string>
-        <key>name</key>
-        <string>SDL2</string>
         <key>platforms</key>
         <map>
           <key>linux64</key>
@@ -36,19 +26,21 @@
             <string>linux64</string>
           </map>
         </map>
+        <key>license</key>
+        <string>zlib</string>
+        <key>license_file</key>
+        <string>LICENSES/SDL.txt</string>
+        <key>copyright</key>
+        <string>Copyright (C) 1997-2023 Sam Lantinga</string>
         <key>version</key>
         <string>2.24.1</string>
+        <key>name</key>
+        <string>SDL2</string>
+        <key>description</key>
+        <string>Simple DirectMedia Layer is a cross-platform multimedia library designed to provide low level access to audio, keyboard, mouse, joystick, 3D hardware via OpenGL, and 2D video framebuffer.</string>
       </map>
       <key>gstreamer10</key>
       <map>
-        <key>copyright</key>
-        <string>Copyright (C) 2007 Free Software Foundation, Inc. &lt;http://fsf.org/&gt;</string>
-        <key>license</key>
-        <string>LGPL</string>
-        <key>license_file</key>
-        <string>LICENSES/gstreamer.txt</string>
-        <key>name</key>
-        <string>gstreamer10</string>
         <key>platforms</key>
         <map>
           <key>linux64</key>
@@ -64,19 +56,19 @@
             <string>linux64</string>
           </map>
         </map>
+        <key>license</key>
+        <string>LGPL</string>
+        <key>license_file</key>
+        <string>LICENSES/gstreamer.txt</string>
+        <key>copyright</key>
+        <string>Copyright (C) 2007 Free Software Foundation, Inc. &lt;http://fsf.org/&gt;</string>
         <key>version</key>
         <string>0.10.6.294903</string>
+        <key>name</key>
+        <string>gstreamer10</string>
       </map>
       <key>breakpad</key>
       <map>
-        <key>copyright</key>
-        <string>Copyright (C) google</string>
-        <key>license</key>
-        <string>BSD</string>
-        <key>license_file</key>
-        <string>LICENSES/google_breakpad.txt</string>
-        <key>name</key>
-        <string>breakpad</string>
         <key>platforms</key>
         <map>
           <key>linux64</key>
@@ -92,19 +84,19 @@
             <string>linux64</string>
           </map>
         </map>
+        <key>license</key>
+        <string>BSD</string>
+        <key>license_file</key>
+        <string>LICENSES/google_breakpad.txt</string>
+        <key>copyright</key>
+        <string>Copyright (C) google</string>
         <key>version</key>
         <string>2.48.0</string>
+        <key>name</key>
+        <string>breakpad</string>
       </map>
       <key>glib</key>
       <map>
-        <key>copyright</key>
-        <string>Copyright (C) glib project</string>
-        <key>license</key>
-        <string>LGPL</string>
-        <key>license_file</key>
-        <string>LICENSES/glib.txt</string>
-        <key>name</key>
-        <string>glib</string>
         <key>platforms</key>
         <map>
           <key>linux64</key>
@@ -122,19 +114,19 @@
             <string>linux64</string>
           </map>
         </map>
+        <key>license</key>
+        <string>LGPL</string>
+        <key>license_file</key>
+        <string>LICENSES/glib.txt</string>
+        <key>copyright</key>
+        <string>Copyright (C) glib project</string>
         <key>version</key>
         <string>2.48.0</string>
+        <key>name</key>
+        <string>glib</string>
       </map>
       <key>fltk</key>
       <map>
-        <key>copyright</key>
-        <string>Copyright (C) fltk project</string>
-        <key>license</key>
-        <string>LGPL/fltk</string>
-        <key>license_file</key>
-        <string>LICENSES/fltk.txt</string>
-        <key>name</key>
-        <string>fltk</string>
         <key>platforms</key>
         <map>
           <key>linux64</key>
@@ -152,21 +144,19 @@
             <string>linux</string>
           </map>
         </map>
+        <key>license</key>
+        <string>LGPL/fltk</string>
+        <key>license_file</key>
+        <string>LICENSES/fltk.txt</string>
+        <key>copyright</key>
+        <string>Copyright (C) fltk project</string>
         <key>version</key>
         <string>1.3.5</string>
+        <key>name</key>
+        <string>fltk</string>
       </map>
       <key>jemalloc</key>
       <map>
-        <key>copyright</key>
-        <string>Copyright (C) 2002-present Jason Evans jasone@canonware.com.</string>
-        <key>description</key>
-        <string>jemalloc is a general purpose malloc(3) implementation that emphasizes fragmentation avoidance and scalable concurrency support.</string>
-        <key>license</key>
-        <string>jemalloc (BSD derived)</string>
-        <key>license_file</key>
-        <string>LICENSES/jemalloc.txt</string>
-        <key>name</key>
-        <string>jemalloc</string>
         <key>platforms</key>
         <map>
           <key>linux64</key>
@@ -182,19 +172,21 @@
             <string>linux64</string>
           </map>
         </map>
+        <key>license</key>
+        <string>jemalloc (BSD derived)</string>
+        <key>license_file</key>
+        <string>LICENSES/jemalloc.txt</string>
+        <key>copyright</key>
+        <string>Copyright (C) 2002-present Jason Evans jasone@canonware.com.</string>
         <key>version</key>
         <string>5.1.0</string>
+        <key>name</key>
+        <string>jemalloc</string>
+        <key>description</key>
+        <string>jemalloc is a general purpose malloc(3) implementation that emphasizes fragmentation avoidance and scalable concurrency support.</string>
       </map>
       <key>glod</key>
       <map>
-        <key>copyright</key>
-        <string>Copyright 2003 Jonathan Cohen, Nat Duca, David Luebke, Brenden Schubert - Johns Hopkins University and University of Virginia</string>
-        <key>license</key>
-        <string>GLOD Open-Source License   Version 1.0</string>
-        <key>license_file</key>
-        <string>LICENSES/GLOD.txt</string>
-        <key>name</key>
-        <string>glod</string>
         <key>platforms</key>
         <map>
           <key>darwin64</key>
@@ -234,19 +226,19 @@
             <string>windows64</string>
           </map>
         </map>
+        <key>license</key>
+        <string>GLOD Open-Source License   Version 1.0</string>
+        <key>license_file</key>
+        <string>LICENSES/GLOD.txt</string>
+        <key>copyright</key>
+        <string>Copyright 2003 Jonathan Cohen, Nat Duca, David Luebke, Brenden Schubert - Johns Hopkins University and University of Virginia</string>
         <key>version</key>
         <string>1.0pre3.532346</string>
+        <key>name</key>
+        <string>glod</string>
       </map>
       <key>gntp-growl</key>
       <map>
-        <key>copyright</key>
-        <string>The Growl Project</string>
-        <key>description</key>
-        <string>A unified notification system for Mac OS X</string>
-        <key>license</key>
-        <string>bsd</string>
-        <key>name</key>
-        <string>gntp-growl</string>
         <key>platforms</key>
         <map>
           <key>darwin64</key>
@@ -286,19 +278,17 @@
             <string>windows64</string>
           </map>
         </map>
+        <key>license</key>
+        <string>bsd</string>
+        <key>copyright</key>
+        <string>The Growl Project</string>
+        <key>name</key>
+        <string>gntp-growl</string>
+        <key>description</key>
+        <string>A unified notification system for Mac OS X</string>
       </map>
       <key>discord-rpc</key>
       <map>
-        <key>copyright</key>
-        <string>Copyright 2019 Discord, Inc.</string>
-        <key>description</key>
-        <string>C++ library to interface with Discord's API</string>
-        <key>license</key>
-        <string>MIT</string>
-        <key>license_file</key>
-        <string>LICENSES/discord-rpc.txt</string>
-        <key>name</key>
-        <string>discord-rpc</string>
         <key>platforms</key>
         <map>
           <key>windows64</key>
@@ -338,6 +328,16 @@
             <string>darwin64</string>
           </map>
         </map>
+        <key>license</key>
+        <string>MIT</string>
+        <key>license_file</key>
+        <string>LICENSES/discord-rpc.txt</string>
+        <key>copyright</key>
+        <string>Copyright 2019 Discord, Inc.</string>
+        <key>name</key>
+        <string>discord-rpc</string>
+        <key>description</key>
+        <string>C++ library to interface with Discord's API</string>
       </map>
       <key>apr_suite</key>
       <map>
@@ -348,11 +348,11 @@
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>3f8e58fe74e144b771858e89a5514bf354964c76</string>
+              <string>2579912a9c43bb07d1a1c11924517b17f0246474</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-apr_suite/releases/download/v1.7.5-r2/apr_suite-1.7.5-18696779749-darwin64-18696779749.tar.zst</string>
+              <string>https://github.com/intelligentwolf/3p-apr_suite/releases/download/v1.7.5-w2/apr_suite-1.7.5-36235958433-darwin64-36235958433.tar.zst</string>
             </map>
             <key>name</key>
             <string>darwin64</string>
@@ -362,11 +362,11 @@
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>df36114eb8fb66fdcbb190011222a7d336791d98</string>
+              <string>22e785e255b2091f59e512fc13a509b97f8392bb</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-apr_suite/releases/download/v1.7.5-r2/apr_suite-1.7.5-18696779749-linux64-18696779749.tar.zst</string>
+              <string>https://github.com/intelligentwolf/3p-apr_suite/releases/download/v1.7.5-w2/apr_suite-1.7.5-36235958433-linux64-36235958433.tar.zst</string>
             </map>
             <key>name</key>
             <string>linux64</string>
@@ -376,11 +376,11 @@
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>164705831819d247753c9fd608c2c1ac8dca1883</string>
+              <string>a275bf48f3b3f33ecb42fc826b265b0118d05001</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-apr_suite/releases/download/v1.7.5-r2/apr_suite-1.7.5-18696779749-windows64-18696779749.tar.zst</string>
+              <string>https://github.com/intelligentwolf/3p-apr_suite/releases/download/v1.7.5-w2/apr_suite-1.7.5-36235958433-windows64-36235958433.tar.zst</string>
             </map>
             <key>name</key>
             <string>windows64</string>
@@ -393,7 +393,7 @@
         <key>copyright</key>
         <string>Copyright © 2012 The Apache Software Foundation, Licensed under the Apache License, Version 2.0.</string>
         <key>version</key>
-        <string>1.7.5-18696779749</string>
+        <string>1.7.5-36235958433</string>
         <key>name</key>
         <string>apr_suite</string>
         <key>description</key>
@@ -408,11 +408,11 @@
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>a4553df5b8fde2e9cd54ebb94c6efb8eb5fe3c38</string>
+              <string>61cc299413a32350175cf7139f64388d3d096ec7</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-boost/releases/download/v1.86.0-be1a669/boost-1.86-darwin64-13246092114.tar.zst</string>
+              <string>https://github.com/secondlife/3p-boost/releases/download/v1.90.0-c7a9feb/boost-1.90-darwin64-20977261894.tar.zst</string>
             </map>
             <key>name</key>
             <string>darwin64</string>
@@ -422,11 +422,11 @@
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>4a2a19dc5cb555e157ad894ba917f5a83a35b20d</string>
+              <string>6b93e323284bfab8ec20a7f3bc740c6915980bf8</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-boost/releases/download/v1.86.0-be1a669/boost-1.86-linux64-13246092114.tar.zst</string>
+              <string>https://github.com/secondlife/3p-boost/releases/download/v1.90.0-c7a9feb/boost-1.90-linux64-20977261894.tar.zst</string>
             </map>
             <key>name</key>
             <string>linux64</string>
@@ -436,11 +436,11 @@
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>8a1fa9366bfe49009286e4805d7aaedb7c3df82e</string>
+              <string>c543437ca30a63dcd2538fffa89a43ef43f625fb</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-boost/releases/download/v1.86.0-be1a669/boost-1.86-windows64-13246092114.tar.zst</string>
+              <string>https://github.com/secondlife/3p-boost/releases/download/v1.90.0-c7a9feb/boost-1.90-windows64-20977261894.tar.zst</string>
             </map>
             <key>name</key>
             <string>windows64</string>
@@ -453,7 +453,7 @@
         <key>copyright</key>
         <string>(see individual source files)</string>
         <key>version</key>
-        <string>1.86</string>
+        <string>1.90.0-c7a9feb</string>
         <key>name</key>
         <string>boost</string>
         <key>description</key>
@@ -514,11 +514,11 @@
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>bf2fe4e8272e990bc8687b3b37bf4bb2b2ad6eb4</string>
+              <string>06485688b36355d0e323566c6a465778253b4ace</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-colladadom/releases/download/v2.3-r10/colladadom-2.3.0-r10-darwin64-13259816660.tar.zst</string>
+              <string>https://github.com/intelligentwolf/3p-colladadom/releases/download/v2.3-w1/colladadom-2.3.0-w1-darwin64-36237003846.tar.zst</string>
             </map>
             <key>name</key>
             <string>darwin64</string>
@@ -528,11 +528,11 @@
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>118e509ca464182ef4b94ee8c4aa5b14a6c52a94</string>
+              <string>00e2857994b311753a391c60b5f59a5c35b034fa</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-colladadom/releases/download/v2.3-r10/colladadom-2.3.0-r10-linux64-13259816660.tar.zst</string>
+              <string>https://github.com/intelligentwolf/3p-colladadom/releases/download/v2.3-w1/colladadom-2.3.0-w1-linux64-36237003846.tar.zst</string>
             </map>
             <key>name</key>
             <string>linux64</string>
@@ -542,11 +542,11 @@
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>d7aee1b2ec17bd88a2c27359281b58a11ec52d48</string>
+              <string>b30d3a568aaa00113787e86a9dcaaf56903ba55d</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-colladadom/releases/download/v2.3-r10/colladadom-2.3.0-r10-windows64-13259816660.tar.zst</string>
+              <string>https://github.com/intelligentwolf/3p-colladadom/releases/download/v2.3-w1/colladadom-2.3.0-w1-windows64-36237003846.tar.zst</string>
             </map>
             <key>name</key>
             <string>windows64</string>
@@ -559,7 +559,7 @@
         <key>copyright</key>
         <string>Copyright 2006 Sony Computer Entertainment Inc.</string>
         <key>version</key>
-        <string>2.3.0-r10</string>
+        <string>2.3.0-w1</string>
         <key>name</key>
         <string>colladadom</string>
       </map>
@@ -630,11 +630,11 @@
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>e742b1e2d0a58d607b023bf55411041ac65e8a76</string>
+              <string>7718949d4bf1007808c3945f4aacefbef0a93187</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-curl/releases/download/v7.54.1-r3/curl-7.54.1-13259824618-darwin64-13259824618.tar.zst</string>
+              <string>https://github.com/intelligentwolf/3p-curl/releases/download/v8.22.0-r3/curl-8.22.0-36239270799-darwin64-36239270799.tar.zst</string>
             </map>
             <key>name</key>
             <string>darwin64</string>
@@ -644,11 +644,11 @@
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>49621c70f385d37c95bcb69a9a24d86ac25f4781</string>
+              <string>acc264672a31b97d1b5919408e3073c68d090146</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-curl/releases/download/v7.54.1-r3/curl-7.54.1-13259824618-linux64-13259824618.tar.zst</string>
+              <string>https://github.com/intelligentwolf/3p-curl/releases/download/v8.22.0-r3/curl-8.22.0-36239270799-linux64-36239270799.tar.zst</string>
             </map>
             <key>name</key>
             <string>linux64</string>
@@ -658,11 +658,11 @@
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>2522201692116cf0adb7203e169be9126885108c</string>
+              <string>b3889eb2de7716f8de807dd5ff7c2fc804157939</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-curl/releases/download/v7.54.1-r3/curl-7.54.1-13259824618-windows64-13259824618.tar.zst</string>
+              <string>https://github.com/intelligentwolf/3p-curl/releases/download/v8.22.0-r3/curl-8.22.0-36239270799-windows64-36239270799.tar.zst</string>
             </map>
             <key>name</key>
             <string>windows64</string>
@@ -675,7 +675,7 @@
         <key>copyright</key>
         <string>Copyright (c) 1996 - 2014, Daniel Stenberg, (daniel@haxx.se).</string>
         <key>version</key>
-        <string>7.54.1-13259824618</string>
+        <string>8.22.0-36239270799</string>
         <key>name</key>
         <string>curl</string>
         <key>description</key>
@@ -720,11 +720,11 @@
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>2c81fa7aa03b427088ab54ce3b71088a0003126b</string>
+              <string>b7255a36fa9af6ac311645da2f291195679f7bae</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/dullahan/releases/download/v1.26.0-CEF_139.0.40/dullahan-1.26.0.202510161627_139.0.40_g465474a_chromium-139.0.7258.139-darwin64-18568015445.tar.zst</string>
+              <string>https://github.com/secondlife/dullahan/releases/download/v1.50.0-CEF_152.0.6.83/dullahan-1.50.0.202609160023_152.0.6_g708dc14_chromium-152.0.7977.83-darwin64-35039647119.tar.zst</string>
             </map>
             <key>name</key>
             <string>darwin64</string>
@@ -734,11 +734,11 @@
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>8e06d060729250c5bfcb993c8f818f36ea17de16</string>
+              <string>c8f92179257a12382a31187eda9a84747f6cbe38</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/dullahan/releases/download/v1.26.0-CEF_139.0.40/dullahan-1.26.0.202510161627_139.0.40_g465474a_chromium-139.0.7258.139-linux64-18568015445.tar.zst</string>
+              <string>https://github.com/secondlife/dullahan/releases/download/v1.50.0-CEF_152.0.6.83/dullahan-1.50.0.202609160023_152.0.6_g708dc14_chromium-152.0.7977.83-linux64-35039647119.tar.zst</string>
             </map>
             <key>name</key>
             <string>linux64</string>
@@ -748,11 +748,11 @@
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>7ca6db37f019b47e230c0861607c546d45535367</string>
+              <string>7d5826579fb88b9d5d855d68d614947c1958a401</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/dullahan/releases/download/v1.26.0-CEF_139.0.40/dullahan-1.26.0.202510161628_139.0.40_g465474a_chromium-139.0.7258.139-windows64-18568015445.tar.zst</string>
+              <string>https://github.com/secondlife/dullahan/releases/download/v1.50.0-CEF_152.0.6.83/dullahan-1.50.0.202609160023_152.0.6_g708dc14_chromium-152.0.7977.83-windows64-35039647119.tar.zst</string>
             </map>
             <key>name</key>
             <string>windows64</string>
@@ -765,7 +765,7 @@
         <key>copyright</key>
         <string>Copyright (c) 2017, Linden Research, Inc.</string>
         <key>version</key>
-        <string>1.26.0.202510161627_139.0.40_g465474a_chromium-139.0.7258.139</string>
+        <string>1.50.0.202609160023_152.0.6_g708dc14_chromium-152.0.7977.83</string>
         <key>name</key>
         <string>dullahan</string>
         <key>description</key>
@@ -814,11 +814,11 @@
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>e0ba69946f2203c03faf89c1f6d5bbc48d88d2a9</string>
+              <string>5a86692290c72c45dd21d221536c2bc80bc80207</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-expat/releases/download/v2.6.4-r1/expat-2.6.4-r1-darwin64-11943227858.tar.zst</string>
+              <string>https://github.com/intelligentwolf/3p-expat/releases/download/v2.8.5-r1/expat-2.8.5-r1-darwin64-36234656839.tar.zst</string>
             </map>
             <key>name</key>
             <string>darwin64</string>
@@ -828,11 +828,11 @@
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>13483477c1f8b4bad9055fba561c64137453c3da</string>
+              <string>ba17f46ae87ae15872beef23a38e87a486a269ee</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-expat/releases/download/v2.6.4-r1/expat-2.6.4-r1-linux64-11943227858.tar.zst</string>
+              <string>https://github.com/intelligentwolf/3p-expat/releases/download/v2.8.5-r1/expat-2.8.5-r1-linux64-36234656839.tar.zst</string>
             </map>
             <key>name</key>
             <string>linux64</string>
@@ -842,11 +842,11 @@
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>542af7d8bb8de3297c80c23a771bbcb513a630b7</string>
+              <string>887ee496c0bc559a7749f37f0123f5f877bb2867</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-expat/releases/download/v2.6.4-r1/expat-2.6.4-r1-windows64-11943227858.tar.zst</string>
+              <string>https://github.com/intelligentwolf/3p-expat/releases/download/v2.8.5-r1/expat-2.8.5-r1-windows64-36234656839.tar.zst</string>
             </map>
             <key>name</key>
             <string>windows64</string>
@@ -859,7 +859,7 @@
         <key>copyright</key>
         <string>Copyright (c) 1998-2000 Thai Open Source Software Center Ltd and Clark Cooper - Copyright (c) 2001-2022 Expat maintainers.</string>
         <key>version</key>
-        <string>2.6.4-r1</string>
+        <string>2.8.5-r1</string>
         <key>name</key>
         <string>expat</string>
         <key>description</key>
@@ -932,11 +932,11 @@
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>5e6c7b9aaf73d90d7feab846a4024193c48eff6c</string>
+              <string>7db971f700dc3f1208bfcdd8cc4b829a0bfb0d19</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-freetype/releases/download/v2.13.3-r3/freetype-2.13.3-r3-darwin64-13259804885.tar.zst</string>
+              <string>https://github.com/intelligentwolf/3p-freetype/releases/download/v2.14.3-r3/freetype-2.14.3-dev0.g927d38a.d20260926-darwin64-36236769413.tar.zst</string>
             </map>
             <key>name</key>
             <string>darwin64</string>
@@ -946,11 +946,11 @@
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>a9a3c371958e64a49b07d7be8f59218dfd6b0352</string>
+              <string>79c38a3d75f65b17b393e81108e769e1adf9bb0f</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-freetype/releases/download/v2.13.3-r3/freetype-2.13.3-r3-linux64-13259804885.tar.zst</string>
+              <string>https://github.com/intelligentwolf/3p-freetype/releases/download/v2.14.3-r3/freetype-2.14.3-dev0.g927d38a.d20260926-linux64-36236769413.tar.zst</string>
             </map>
             <key>name</key>
             <string>linux64</string>
@@ -960,11 +960,11 @@
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>ad7fbc4a01607ec43d86035a49dadd43d6f2a4e5</string>
+              <string>e8dac6d48a37d642c618041be0237babb8b42462</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-freetype/releases/download/v2.13.3-r3/freetype-2.13.3-r3-windows64-13259804885.tar.zst</string>
+              <string>https://github.com/intelligentwolf/3p-freetype/releases/download/v2.14.3-r3/freetype-2.14.3-dev0.g927d38a.d20260926-windows64-36236769413.tar.zst</string>
             </map>
             <key>name</key>
             <string>windows64</string>
@@ -977,7 +977,7 @@
         <key>copyright</key>
         <string>Copyright 2006, 2007, 2008, 2009, 2010 by David Turner, Robert Wilhelm, and Werner Lemberg.</string>
         <key>version</key>
-        <string>2.13.3-r3</string>
+        <string>2.14.3-r3</string>
         <key>name</key>
         <string>freetype</string>
         <key>description</key>
@@ -1440,11 +1440,11 @@
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>a453355ee032f79aea4142218a957085a22c7656</string>
+              <string>5c056a361c8e85db6a4aff994ecad4d923787ec9</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-libpng/releases/download/v1.6.44-r2/libpng-1.6.44-r2-darwin64-13246065198.tar.zst</string>
+              <string>https://github.com/intelligentwolf/3p-libpng/releases/download/v1.6.58-r1/libpng-1.6.58-r1-darwin64-36234731723.tar.zst</string>
             </map>
             <key>name</key>
             <string>darwin64</string>
@@ -1454,11 +1454,11 @@
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>75c7608646c9f5b99b1a9e3946326e2804a304d7</string>
+              <string>e6aa361369254146d5a1990746c2750fa7c86594</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-libpng/releases/download/v1.6.44-r2/libpng-1.6.44-r2-linux64-13246065198.tar.zst</string>
+              <string>https://github.com/intelligentwolf/3p-libpng/releases/download/v1.6.58-r1/libpng-1.6.58-r1-linux64-36234731723.tar.zst</string>
             </map>
             <key>name</key>
             <string>linux64</string>
@@ -1468,11 +1468,11 @@
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>09af51774c4ee7c03fe67a87dfc52e846aa625ea</string>
+              <string>87eee2c1a67f62786d61c140cbb8a5ed219c453f</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-libpng/releases/download/v1.6.44-r2/libpng-1.6.44-r2-windows64-13246065198.tar.zst</string>
+              <string>https://github.com/intelligentwolf/3p-libpng/releases/download/v1.6.58-r1/libpng-1.6.58-r1-windows64-36234731723.tar.zst</string>
             </map>
             <key>name</key>
             <string>windows64</string>
@@ -1485,7 +1485,7 @@
         <key>copyright</key>
         <string>Copyright (c) 2004, 2006-2013 Glenn Randers-Pehrson</string>
         <key>version</key>
-        <string>1.6.44-r2</string>
+        <string>1.6.58-r1</string>
         <key>name</key>
         <string>libpng</string>
         <key>description</key>
@@ -1530,11 +1530,11 @@
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>372c92936d940b1cfb5ba34310691d4bb435c161</string>
+              <string>f6e052a94f4cd06aefe40e27d745b16a0fe8d0f8</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-libxml2/releases/download/v2.13.5-r2/libxml2-2.13.5-r2-darwin64-13246071272.tar.zst</string>
+              <string>https://github.com/intelligentwolf/3p-libxml2/releases/download/v2.15.4-r1/libxml2-2.15.4-r1-darwin64-36236863200.tar.zst</string>
             </map>
             <key>name</key>
             <string>darwin64</string>
@@ -1544,11 +1544,11 @@
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>ba6fbc34112b1acab1c8615dcd13de983f3678d3</string>
+              <string>9ba5982a4a8ceeb4ddf9cac2e27716d4207c95d1</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-libxml2/releases/download/v2.13.5-r2/libxml2-2.13.5-r2-linux64-13246071272.tar.zst</string>
+              <string>https://github.com/intelligentwolf/3p-libxml2/releases/download/v2.15.4-r1/libxml2-2.15.4-r1-linux64-36236863200.tar.zst</string>
             </map>
             <key>name</key>
             <string>linux64</string>
@@ -1558,11 +1558,11 @@
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>71968c4b621636e8ae0c5680e631f4aa67561944</string>
+              <string>a97b75abaf52e1f003787d7dfc3e3f8ef125d5fe</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-libxml2/releases/download/v2.13.5-r2/libxml2-2.13.5-r2-windows64-13246071272.tar.zst</string>
+              <string>https://github.com/intelligentwolf/3p-libxml2/releases/download/v2.15.4-r1/libxml2-2.15.4-r1-windows64-36236863200.tar.zst</string>
             </map>
             <key>name</key>
             <string>windows64</string>
@@ -1575,7 +1575,7 @@
         <key>copyright</key>
         <string>Copyright (C) 1998-2012 Daniel Veillard.  All Rights Reserved.</string>
         <key>version</key>
-        <string>2.13.5-r2</string>
+        <string>2.15.4-r1</string>
         <key>name</key>
         <string>libxml2</string>
         <key>description</key>
@@ -1761,11 +1761,11 @@
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>874a7d2bc843554aa4facd03b3a6d681f2b5150c</string>
+              <string>3692af717636da9c2b1e0f13eb084ce022b67f6c</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-meshoptimizer/releases/download/v220-r1/meshoptimizer-220.0.0-r1-darwin64-11968851109.tar.zst</string>
+              <string>https://github.com/secondlife/3p-meshoptimizer/releases/download/v1.0.1-9d6a006/meshoptimizer-1.0.1-9d6a006-darwin64-20867041007.tar.zst</string>
             </map>
             <key>name</key>
             <string>darwin64</string>
@@ -1775,11 +1775,11 @@
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>31a537f1a3d38ef85443214315111dd56a534d9a</string>
+              <string>22ad1be39a1196a1ca3902ba936460cb69252b9c</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-meshoptimizer/releases/download/v220-r1/meshoptimizer-220.0.0-r1-linux64-11968851109.tar.zst</string>
+              <string>https://github.com/secondlife/3p-meshoptimizer/releases/download/v1.0.1-9d6a006/meshoptimizer-1.0.1-9d6a006-linux64-20867041007.tar.zst</string>
             </map>
             <key>name</key>
             <string>linux64</string>
@@ -1789,11 +1789,11 @@
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>6fd727a9ccb3e7a6c6b4ffef8179e266c032eb3e</string>
+              <string>2c9769f31da5de3920d7ee400d280398c911a30f</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-meshoptimizer/releases/download/v220-r1/meshoptimizer-220.0.0-r1-windows64-11968851109.tar.zst</string>
+              <string>https://github.com/secondlife/3p-meshoptimizer/releases/download/v1.0.1-9d6a006/meshoptimizer-1.0.1-9d6a006-windows64-20867041007.tar.zst</string>
             </map>
             <key>name</key>
             <string>windows64</string>
@@ -1885,11 +1885,11 @@
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>b628d088e1f368a0cd51a6b66292aaf9a025e2d4</string>
+              <string>85179317015c5c91986000d69c9f61a01af7617f</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-minizip-ng/releases/download/v4.0.7-r3/minizip_ng-4.0.7-r3-darwin64-13246046977.tar.zst</string>
+              <string>https://github.com/secondlife/3p-minizip-ng/releases/download/v4.0.7-r4/minizip_ng-4.0.7-r4-darwin64-20933148061.tar.zst</string>
             </map>
             <key>name</key>
             <string>darwin64</string>
@@ -1899,11 +1899,11 @@
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>492ce9175b730d43df63821c4481685e035af623</string>
+              <string>ef1524f507f44fed6f1c1f00ae274ddb8a1ac359</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-minizip-ng/releases/download/v4.0.7-r3/minizip_ng-4.0.7-r3-linux64-13246046977.tar.zst</string>
+              <string>https://github.com/secondlife/3p-minizip-ng/releases/download/v4.0.7-r4/minizip_ng-4.0.7-r4-linux64-20933148061.tar.zst</string>
             </map>
             <key>name</key>
             <string>linux64</string>
@@ -1913,11 +1913,11 @@
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>58773e707ff3490822b7b8217d7729ade2186632</string>
+              <string>90be39cf789b596377458f1ea78f415a9c281a8c</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-minizip-ng/releases/download/v4.0.7-r3/minizip_ng-4.0.7-r3-windows64-13246046977.tar.zst</string>
+              <string>https://github.com/secondlife/3p-minizip-ng/releases/download/v4.0.7-r4/minizip_ng-4.0.7-r4-windows64-20933148061.tar.zst</string>
             </map>
             <key>name</key>
             <string>windows64</string>
@@ -1930,7 +1930,7 @@
         <key>copyright</key>
         <string>This project uses the zlib license. Copyright (C) 1995-2013 Jean-loup Gailly and Mark Adler</string>
         <key>version</key>
-        <string>4.0.7-r3</string>
+        <string>4.0.7-r4</string>
         <key>name</key>
         <string>minizip-ng</string>
         <key>canonical_repo</key>
@@ -2003,11 +2003,11 @@
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>f45ea5a42d6a419f9b605dd3f976fbcb3850d736</string>
+              <string>73a11195a78af783f875ba249e97b6e8bc89fab9</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-nghttp2/releases/download/v1.64.0-r2/nghttp2-1.64.0-r1-darwin64-13184359419.tar.zst</string>
+              <string>https://github.com/intelligentwolf/3p-nghttp2/releases/download/v1.70.0-r1/nghttp2-1.70.0-r1-darwin64-36234809878.tar.zst</string>
             </map>
             <key>name</key>
             <string>darwin64</string>
@@ -2017,11 +2017,11 @@
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>c6e450fa41f24f1b4103d2006d706595f2a36c59</string>
+              <string>774ad98265e236830dafdf90475c301c76fa8cc3</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-nghttp2/releases/download/v1.64.0-r2/nghttp2-1.64.0-r1-linux64-13184359419.tar.zst</string>
+              <string>https://github.com/intelligentwolf/3p-nghttp2/releases/download/v1.70.0-r1/nghttp2-1.70.0-r1-linux64-36234809878.tar.zst</string>
             </map>
             <key>name</key>
             <string>linux64</string>
@@ -2031,11 +2031,11 @@
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>3bd92f892e155104740570fe244ea4dbb0b57d4b</string>
+              <string>bc33b3c7d442054feffa341d722d8861216ad5b7</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-nghttp2/releases/download/v1.64.0-r2/nghttp2-1.64.0-r1-windows64-13184359419.tar.zst</string>
+              <string>https://github.com/intelligentwolf/3p-nghttp2/releases/download/v1.70.0-r1/nghttp2-1.70.0-r1-windows64-36234809878.tar.zst</string>
             </map>
             <key>name</key>
             <string>windows64</string>
@@ -2049,7 +2049,7 @@
         <string>Copyright (c) 2012, 2014, 2015, 2016 Tatsuhiro Tsujikawa
 Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
         <key>version</key>
-        <string>1.64.0-r1</string>
+        <string>1.70.0-r1</string>
         <key>name</key>
         <string>nghttp2</string>
         <key>description</key>
@@ -2151,18 +2151,6 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
       </map>
       <key>open-libndofdev</key>
       <map>
-        <key>license</key>
-        <string>BSD</string>
-        <key>license_file</key>
-        <string>LICENSES/libndofdev.txt</string>
-        <key>copyright</key>
-        <string>Copyright (c) 2008, Jan Ciger (jan.ciger (at) gmail.com)</string>
-        <key>version</key>
-        <string>0.14.11968684513</string>
-        <key>name</key>
-        <string>open-libndofdev</string>
-        <key>description</key>
-        <string>Open Source replacement for 3DConnection SDK</string>
         <key>platforms</key>
         <map>
           <key>linux64</key>
@@ -2180,8 +2168,18 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
             <string>linux64</string>
           </map>
         </map>
+        <key>license</key>
+        <string>BSD</string>
+        <key>license_file</key>
+        <string>LICENSES/libndofdev.txt</string>
+        <key>copyright</key>
+        <string>Copyright (c) 2008, Jan Ciger (jan.ciger (at) gmail.com)</string>
         <key>version</key>
         <string>0.13.222872202</string>
+        <key>name</key>
+        <string>open-libndofdev</string>
+        <key>description</key>
+        <string>Open Source replacement for 3DConnection SDK</string>
       </map>
       <key>openal</key>
       <map>
@@ -2252,11 +2250,11 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>94a72c6ddbfb23796ce913c55bc47c128542a582</string>
+              <string>ac740900e97ead85a5dcb380e136b4be548ae3ec</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-openjpeg/releases/download/v2.5.3-r1/openjpeg-2.5.3.15590356935-darwin64-15590356935.tar.zst</string>
+              <string>https://github.com/intelligentwolf/3p-openjpeg/releases/download/v2.5.4-w1/openjpeg-2.5.4.36236810806-darwin64-36236810806.tar.zst</string>
             </map>
             <key>name</key>
             <string>darwin64</string>
@@ -2266,11 +2264,11 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>751172af405f4a47a3aebb37729d62229cab6c07</string>
+              <string>3228c3c08f8762276ec0d8af9b8938287dc231db</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-openjpeg/releases/download/v2.5.3-r1/openjpeg-2.5.3.15590356935-linux64-15590356935.tar.zst</string>
+              <string>https://github.com/intelligentwolf/3p-openjpeg/releases/download/v2.5.4-w1/openjpeg-2.5.4.36236810806-linux64-36236810806.tar.zst</string>
             </map>
             <key>name</key>
             <string>linux64</string>
@@ -2280,11 +2278,11 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>8aab9cf250dfee252386e1c79b5205e6d3b3e19e</string>
+              <string>3a5711913c71bbebe8ab3d81775c8f32278ac99c</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-openjpeg/releases/download/v2.5.3-r1/openjpeg-2.5.3.15590356935-windows64-15590356935.tar.zst</string>
+              <string>https://github.com/intelligentwolf/3p-openjpeg/releases/download/v2.5.4-w1/openjpeg-2.5.4.36236810806-windows64-36236810806.tar.zst</string>
             </map>
             <key>name</key>
             <string>windows64</string>
@@ -2297,7 +2295,7 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
         <key>copyright</key>
         <string>Copyright (c) 2002-2007, Communications and Remote Sensing Laboratory, Universite catholique de Louvain (UCL), Belgium; Copyright (c) 2002-2007, Professor Benoit Macq; Copyright (c) 2001-2003, David Janssens; Copyright (c) 2002-2003, Yannick Verschueren; Copyright (c) 2003-2007, Francois-Olivier Devaux and Antonin Descampe; Copyright (c) 2005, Herve Drolon, FreeImage Team; Copyright (c) 2006-2007, Parvatha Elangovan; Copyright (c) 2008, Jerome Fimes, Communications &amp; Systemes &lt;jerome.fimes@c-s.fr&gt;; Copyright (c) 2010-2011, Kaori Hagihara; Copyright (c) 2011-2012, Centre National d'Etudes Spatiales (CNES), France; Copyright (c) 2012, CS Systemes d'Information, France;</string>
         <key>version</key>
-        <string>2.5.3.15590356935</string>
+        <string>2.5.4.36236810806</string>
         <key>name</key>
         <string>openjpeg</string>
         <key>description</key>
@@ -2312,11 +2310,11 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>157193699127ac5056c5fc1a410f9c98d39731e2</string>
+              <string>4ccd32146289fb980cc62d1ff8a861e0af6e4a03</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-openssl/releases/download/v1.1.1w-r3/openssl-1.1.1w-r3-darwin64-13246054022.tar.zst</string>
+              <string>https://github.com/intelligentwolf/3p-openssl/releases/download/v3.5.8-r3/openssl-3.5.8-r3-darwin64-36236981569.tar.zst</string>
             </map>
             <key>name</key>
             <string>darwin64</string>
@@ -2326,11 +2324,11 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>2e29c127dbd002d64ae55bc000f8b6ed0249fad7</string>
+              <string>89b2da7d2fdcc6dcff36bf99de2ed3edd690bdfe</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-openssl/releases/download/v1.1.1w-r3/openssl-1.1.1w-r3-linux64-13246054022.tar.zst</string>
+              <string>https://github.com/intelligentwolf/3p-openssl/releases/download/v3.5.8-r3/openssl-3.5.8-dev0.g25c9133.d20260926-linux64-36236981569.tar.zst</string>
             </map>
             <key>name</key>
             <string>linux64</string>
@@ -2340,11 +2338,11 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>ae9ced89051e03a99628c99b9ac78530fdea1e5a</string>
+              <string>8b386e3e5fc401a41032e9056e53dc050849cd35</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-openssl/releases/download/v1.1.1w-r3/openssl-1.1.1w-r3-windows64-13246054022.tar.zst</string>
+              <string>https://github.com/intelligentwolf/3p-openssl/releases/download/v3.5.8-r3/openssl-3.5.8-r3-windows64-36236981569.tar.zst</string>
             </map>
             <key>name</key>
             <string>windows64</string>
@@ -2357,7 +2355,7 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
         <key>copyright</key>
         <string>Copyright (c) 1998-2011 The OpenSSL Project.  All rights reserved; Copyright (C) 1995-1998 Eric Young (eay@cryptsoft.com)</string>
         <key>version</key>
-        <string>1.1.1w-r3</string>
+        <string>3.5.8-r3</string>
         <key>name</key>
         <string>openssl</string>
         <key>description</key>
@@ -2820,11 +2818,11 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>6d72afd5cc21446c65899615909b1f09f155585d</string>
+              <string>35ccb8e04dbac7c19223e8e3cf929fb81fb32363</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-vlc-bin/releases/download/v3.0.21.296d9f4/vlc_bin-3.0.21.11968962952-darwin64-11968962952.tar.zst</string>
+              <string>https://github.com/intelligentwolf/3p-vlc-bin/releases/download/v3.0.24-r1/vlc_bin-3.0.24.36235526467-darwin64-36235526467.tar.zst</string>
             </map>
             <key>name</key>
             <string>darwin64</string>
@@ -2834,11 +2832,11 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>f986e6e93acf8a32a8be5b638f0bd0e2e07d7507</string>
+              <string>13eaf967251972379c3a76d08a8cc55e23d65fa8</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-vlc-bin/releases/download/v3.0.21.296d9f4/vlc_bin-3.0.21.11968962952-windows64-11968962952.tar.zst</string>
+              <string>https://github.com/intelligentwolf/3p-vlc-bin/releases/download/v3.0.24-r1/vlc_bin-3.0.24.36235526467-windows64-36235526467.tar.zst</string>
             </map>
             <key>name</key>
             <string>windows64</string>
@@ -2851,7 +2849,7 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
         <key>copyright</key>
         <string>Copyright (C) 1998-2016 VLC authors and VideoLAN</string>
         <key>version</key>
-        <string>3.0.21.11968962952</string>
+        <string>3.0.24.36235526467</string>
         <key>name</key>
         <string>vlc-bin</string>
       </map>
@@ -2898,11 +2896,11 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>7338377a9c6913bc8768d446fe627b8176bc89d4</string>
+              <string>8590471da4019b8a6eb894747058466570c97785</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-webrtc-build/releases/download/m137.7151.04.23/webrtc-m137.7151.04.23.22004231636-darwin64-22004231636.tar.zst</string>
+              <string>https://github.com/secondlife/3p-webrtc-build/releases/download/m144.7559.06.20/webrtc-m144.7559.06.20.36004322351-darwin64-36004322351.tar.zst</string>
             </map>
             <key>name</key>
             <string>darwin64</string>
@@ -2912,11 +2910,11 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>a2df83ed8d7fc1374398d7a37633bae17f5d68a1</string>
+              <string>2baa19cebc78b0009e919fb7a4fc74674ff44eae</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-webrtc-build/releases/download/m137.7151.04.23/webrtc-m137.7151.04.23.22004231636-linux64-22004231636.tar.zst</string>
+              <string>https://github.com/secondlife/3p-webrtc-build/releases/download/m144.7559.06.20/webrtc-m144.7559.06.20.36004322351-linux64-36004322351.tar.zst</string>
             </map>
             <key>name</key>
             <string>linux64</string>
@@ -2926,11 +2924,11 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>665c2447c794a88542fab30638f0013bea58480c</string>
+              <string>4838e91071b6cb8169f1987418a483b28d2513c7</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-webrtc-build/releases/download/m137.7151.04.23/webrtc-m137.7151.04.23.22004231636-windows64-22004231636.tar.zst</string>
+              <string>https://github.com/secondlife/3p-webrtc-build/releases/download/m144.7559.06.20/webrtc-m144.7559.06.20.36004322351-windows64-36004322351.tar.zst</string>
             </map>
             <key>name</key>
             <string>windows64</string>
@@ -2943,7 +2941,7 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
         <key>copyright</key>
         <string>Copyright (c) 2011, The WebRTC project authors. All rights reserved.</string>
         <key>version</key>
-        <string>m137.7151.04.23.22004231636</string>
+        <string>m144.7559.06.20.36004322351</string>
         <key>name</key>
         <string>webrtc</string>
         <key>vcs_branch</key>
@@ -2996,11 +2994,11 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>e363e3b889c52fda7601d7aeaa9832307034651e</string>
+              <string>4906257288c61b14d2e16116fc3139af35d3374f</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-zlib-ng/releases/download/v2.2.3-r1/zlib_ng-2.2.3-dev0.g8aa13e3.d20250206-darwin64-13183604450.tar.zst</string>
+              <string>https://github.com/secondlife/3p-zlib-ng/releases/download/v2.2.5-0d88d03/zlib_ng-2.2.5-dev0.g0d88d03.d20260112-darwin64-20930307098.tar.zst</string>
             </map>
             <key>name</key>
             <string>darwin64</string>
@@ -3010,11 +3008,11 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>3cdd52f7fb3691789d50f0b40ed6f5642321ff32</string>
+              <string>2b81a6a4ebd9ae5555d48b52eea7c2d875d68f60</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-zlib-ng/releases/download/v2.2.3-r1/zlib_ng-2.2.3-dev0.g8aa13e3.d20250206-linux64-13183604450.tar.zst</string>
+              <string>https://github.com/secondlife/3p-zlib-ng/releases/download/v2.2.5-0d88d03/zlib_ng-2.2.5-dev0.g0d88d03.d20260112-linux64-20930307098.tar.zst</string>
             </map>
             <key>name</key>
             <string>linux64</string>
@@ -3024,11 +3022,11 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
             <key>archive</key>
             <map>
               <key>hash</key>
-              <string>e802a28139328bb2421ad39e13d996d350d8106d</string>
+              <string>e2e0f964ba44fe2e6428e1e7ca262a3f80d92e65</string>
               <key>hash_algorithm</key>
               <string>sha1</string>
               <key>url</key>
-              <string>https://github.com/secondlife/3p-zlib-ng/releases/download/v2.2.3-r1/zlib_ng-2.2.3-dev0.g8aa13e3.d20250206-windows64-13183604450.tar.zst</string>
+              <string>https://github.com/secondlife/3p-zlib-ng/releases/download/v2.2.5-0d88d03/zlib_ng-2.2.5-dev0.g0d88d03.d20260112-windows64-20930307098.tar.zst</string>
             </map>
             <key>name</key>
             <string>windows64</string>
@@ -3041,7 +3039,7 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
         <key>copyright</key>
         <string>Copyright (C) 1995-2013 Jean-loup Gailly and Mark Adler</string>
         <key>version</key>
-        <string>2.2.3-dev0.g8aa13e3.d20250206</string>
+        <string>2.2.5-0d88d03</string>
         <key>name</key>
         <string>zlib-ng</string>
         <key>canonical_repo</key>
@@ -3320,18 +3318,6 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
             </map>
             <key>ReleaseFS</key>
             <map>
-              <key>build</key>
-              <map>
-                <key>command</key>
-                <string>bash</string>
-                <key>options</key>
-                <array>
-                  <string>../scripts/configure_firestorm.sh</string>
-                  <string>--build</string>
-                  <string>--version</string>
-                  <string>--opensim</string>
-                </array>
-              </map>
               <key>configure</key>
               <map>
                 <key>command</key>
@@ -3340,6 +3326,18 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
                 <array>
                   <string>../scripts/configure_firestorm.sh</string>
                   <string>--config</string>
+                  <string>--version</string>
+                  <string>--opensim</string>
+                </array>
+              </map>
+              <key>build</key>
+              <map>
+                <key>command</key>
+                <string>bash</string>
+                <key>options</key>
+                <array>
+                  <string>../scripts/configure_firestorm.sh</string>
+                  <string>--build</string>
                   <string>--version</string>
                   <string>--opensim</string>
                 </array>
@@ -3349,19 +3347,6 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
             </map>
             <key>ReleaseFS_AVX</key>
             <map>
-              <key>build</key>
-              <map>
-                <key>command</key>
-                <string>bash</string>
-                <key>options</key>
-                <array>
-                  <string>../scripts/configure_firestorm.sh</string>
-                  <string>--build</string>
-                  <string>--version</string>
-                  <string>--opensim</string>
-                  <string>--avx</string>
-                </array>
-              </map>
               <key>configure</key>
               <map>
                 <key>command</key>
@@ -3370,6 +3355,19 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
                 <array>
                   <string>../scripts/configure_firestorm.sh</string>
                   <string>--config</string>
+                  <string>--version</string>
+                  <string>--opensim</string>
+                  <string>--avx</string>
+                </array>
+              </map>
+              <key>build</key>
+              <map>
+                <key>command</key>
+                <string>bash</string>
+                <key>options</key>
+                <array>
+                  <string>../scripts/configure_firestorm.sh</string>
+                  <string>--build</string>
                   <string>--version</string>
                   <string>--opensim</string>
                   <string>--avx</string>
@@ -3380,19 +3378,6 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
             </map>
             <key>ReleaseFS_AVX2</key>
             <map>
-              <key>build</key>
-              <map>
-                <key>command</key>
-                <string>bash</string>
-                <key>options</key>
-                <array>
-                  <string>../scripts/configure_firestorm.sh</string>
-                  <string>--build</string>
-                  <string>--version</string>
-                  <string>--opensim</string>
-                  <string>--avx2</string>
-                </array>
-              </map>
               <key>configure</key>
               <map>
                 <key>command</key>
@@ -3401,6 +3386,19 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
                 <array>
                   <string>../scripts/configure_firestorm.sh</string>
                   <string>--config</string>
+                  <string>--version</string>
+                  <string>--opensim</string>
+                  <string>--avx2</string>
+                </array>
+              </map>
+              <key>build</key>
+              <map>
+                <key>command</key>
+                <string>bash</string>
+                <key>options</key>
+                <array>
+                  <string>../scripts/configure_firestorm.sh</string>
+                  <string>--build</string>
                   <string>--version</string>
                   <string>--opensim</string>
                   <string>--avx2</string>
@@ -3411,18 +3409,6 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
             </map>
             <key>ReleaseFS_open</key>
             <map>
-              <key>build</key>
-              <map>
-                <key>command</key>
-                <string>bash</string>
-                <key>options</key>
-                <array>
-                  <string>../scripts/configure_firestorm.sh</string>
-                  <string>--build</string>
-                  <string>--version</string>
-                  <string>--opensim</string>
-                </array>
-              </map>
               <key>configure</key>
               <map>
                 <key>command</key>
@@ -3431,6 +3417,18 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
                 <array>
                   <string>../scripts/configure_firestorm.sh</string>
                   <string>--config</string>
+                  <string>--version</string>
+                  <string>--opensim</string>
+                </array>
+              </map>
+              <key>build</key>
+              <map>
+                <key>command</key>
+                <string>bash</string>
+                <key>options</key>
+                <array>
+                  <string>../scripts/configure_firestorm.sh</string>
+                  <string>--build</string>
                   <string>--version</string>
                   <string>--opensim</string>
                 </array>
@@ -3440,19 +3438,6 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
             </map>
             <key>RelWithDebInfoFS</key>
             <map>
-              <key>build</key>
-              <map>
-                <key>command</key>
-                <string>bash</string>
-                <key>options</key>
-                <array>
-                  <string>../scripts/configure_firestorm.sh</string>
-                  <string>--btype RelWithDebInfo</string>
-                  <string>--build</string>
-                  <string>--version</string>
-                  <string>--opensim</string>
-                </array>
-              </map>
               <key>configure</key>
               <map>
                 <key>command</key>
@@ -3462,6 +3447,19 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
                   <string>../scripts/configure_firestorm.sh</string>
                   <string>--btype RelWithDebInfo</string>
                   <string>--config</string>
+                  <string>--version</string>
+                  <string>--opensim</string>
+                </array>
+              </map>
+              <key>build</key>
+              <map>
+                <key>command</key>
+                <string>bash</string>
+                <key>options</key>
+                <array>
+                  <string>../scripts/configure_firestorm.sh</string>
+                  <string>--btype RelWithDebInfo</string>
+                  <string>--build</string>
                   <string>--version</string>
                   <string>--opensim</string>
                 </array>
@@ -3471,19 +3469,6 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
             </map>
             <key>RelWithDebInfoFS_open</key>
             <map>
-              <key>build</key>
-              <map>
-                <key>command</key>
-                <string>bash</string>
-                <key>options</key>
-                <array>
-                  <string>../scripts/configure_firestorm.sh</string>
-                  <string>--btype RelWithDebInfo</string>
-                  <string>--build</string>
-                  <string>--version</string>
-                  <string>--opensim</string>
-                </array>
-              </map>
               <key>configure</key>
               <map>
                 <key>command</key>
@@ -3493,6 +3478,19 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
                   <string>../scripts/configure_firestorm.sh</string>
                   <string>--btype RelWithDebInfo</string>
                   <string>--config</string>
+                  <string>--version</string>
+                  <string>--opensim</string>
+                </array>
+              </map>
+              <key>build</key>
+              <map>
+                <key>command</key>
+                <string>bash</string>
+                <key>options</key>
+                <array>
+                  <string>../scripts/configure_firestorm.sh</string>
+                  <string>--btype RelWithDebInfo</string>
+                  <string>--build</string>
                   <string>--version</string>
                   <string>--opensim</string>
                 </array>
@@ -3536,10 +3534,6 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
                   <string>$AUTOBUILD_CPU_COUNT</string>
                 </array>
               </map>
-              <!-- FS:Ansariel: This will cause packages being installed twice
-              <key>default</key>
-              <string>True</string>
-              -->
               <key>name</key>
               <string>RelWithDebInfo</string>
             </map>
@@ -3574,10 +3568,6 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
             <map>
               <key>configure</key>
               <map>
-                <key>arguments</key>
-                <array>
-                  <string>../indra</string>
-                </array>
                 <key>options</key>
                 <array>
                   <string>-G</string>
@@ -3634,16 +3624,6 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
             </map>
             <key>RelWithDebInfoFS</key>
             <map>
-              <key>build</key>
-              <map>
-                <key>options</key>
-                <array>
-                  <string>--package</string>
-                  <string>--platform darwin</string>
-                  <string>--fmodstudio</string>
-                  <string>--kdu</string>
-                </array>
-              </map>
               <key>configure</key>
               <map>
                 <key>options</key>
@@ -3654,29 +3634,35 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
                   <string>--kdu</string>
                 </array>
               </map>
-              <!-- FS:Ansariel: This will cause packages being installed twice
-              <key>default</key>
-              <string>True</string>
-              -->
+              <key>build</key>
+              <map>
+                <key>options</key>
+                <array>
+                  <string>--package</string>
+                  <string>--platform darwin</string>
+                  <string>--fmodstudio</string>
+                  <string>--kdu</string>
+                </array>
+              </map>
               <key>name</key>
               <string>RelWithDebInfoFS</string>
             </map>
             <key>RelWithDebInfoFS_open</key>
             <map>
-              <key>build</key>
-              <map>
-                <key>options</key>
-                <array>
-                  <string>--package</string>
-                  <string>--platform darwin</string>
-                </array>
-              </map>
               <key>configure</key>
               <map>
                 <key>options</key>
                 <array>
                   <string>--platform darwin</string>
                   <string>--package</string>
+                </array>
+              </map>
+              <key>build</key>
+              <map>
+                <key>options</key>
+                <array>
+                  <string>--package</string>
+                  <string>--platform darwin</string>
                 </array>
               </map>
               <key>name</key>
@@ -3684,15 +3670,6 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
             </map>
             <key>ReleaseFS</key>
             <map>
-              <key>build</key>
-              <map>
-                <key>options</key>
-                <array>
-                  <string>--platform darwin</string>
-                  <string>--fmodstudio</string>
-                  <string>--kdu</string>
-                </array>
-              </map>
               <key>configure</key>
               <map>
                 <key>options</key>
@@ -3700,6 +3677,15 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
                   <string>--platform darwin</string>
                   <string>--kdu</string>
                   <string>--fmodstudio</string>
+                </array>
+              </map>
+              <key>build</key>
+              <map>
+                <key>options</key>
+                <array>
+                  <string>--platform darwin</string>
+                  <string>--fmodstudio</string>
+                  <string>--kdu</string>
                 </array>
               </map>
               <key>default</key>
@@ -3707,16 +3693,16 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
               <key>name</key>
               <string>ReleaseFS</string>
             </map>
-             <key>ReleaseFS_open</key>
+            <key>ReleaseFS_open</key>
             <map>
-              <key>build</key>
+              <key>configure</key>
               <map>
                 <key>options</key>
                 <array>
                   <string>--platform darwin</string>
                 </array>
               </map>
-              <key>configure</key>
+              <key>build</key>
               <map>
                 <key>options</key>
                 <array>
@@ -3756,10 +3742,6 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
                 <key>command</key>
                 <string>ninja</string>
               </map>
-              <!-- FS:Ansariel: This will cause packages being installed twice
-              <key>default</key>
-              <string>True</string>
-              -->
               <key>name</key>
               <string>Release</string>
             </map>
@@ -3792,14 +3774,6 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
             </map>
             <key>RelWithDebInfoFS</key>
             <map>
-              <key>build</key>
-              <map>
-                <key>options</key>
-                <array>
-                  <string>--platform linux</string>
-                  <string>--package</string>
-                </array>
-              </map>
               <key>configure</key>
               <map>
                 <key>options</key>
@@ -3810,15 +3784,6 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
                   <string>--package</string>
                 </array>
               </map>
-              <!-- FS:Ansariel: This will cause packages being installed twice
-              <key>default</key>
-              <string>True</string>
-              -->
-              <key>name</key>
-              <string>RelWithDebInfoFS</string>
-            </map>
-            <key>RelWithDebInfoFS_open</key>
-            <map>
               <key>build</key>
               <map>
                 <key>options</key>
@@ -3827,7 +3792,20 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
                   <string>--package</string>
                 </array>
               </map>
+              <key>name</key>
+              <string>RelWithDebInfoFS</string>
+            </map>
+            <key>RelWithDebInfoFS_open</key>
+            <map>
               <key>configure</key>
+              <map>
+                <key>options</key>
+                <array>
+                  <string>--platform linux</string>
+                  <string>--package</string>
+                </array>
+              </map>
+              <key>build</key>
               <map>
                 <key>options</key>
                 <array>
@@ -3840,20 +3818,20 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
             </map>
             <key>ReleaseFS</key>
             <map>
-              <key>build</key>
-              <map>
-                <key>options</key>
-                <array>
-                  <string>--build</string>
-                  <string>--platform linux</string>
-                </array>
-              </map>
               <key>configure</key>
               <map>
                 <key>options</key>
                 <array>
                   <string>--kdu</string>
                   <string>--fmodstudio</string>
+                  <string>--platform linux</string>
+                </array>
+              </map>
+              <key>build</key>
+              <map>
+                <key>options</key>
+                <array>
+                  <string>--build</string>
                   <string>--platform linux</string>
                 </array>
               </map>
@@ -3864,19 +3842,19 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
             </map>
             <key>ReleaseFS_open</key>
             <map>
+              <key>configure</key>
+              <map>
+                <key>options</key>
+                <array>
+                  <string>--platform linux</string>
+                  <string>--package</string>
+                </array>
+              </map>
               <key>build</key>
               <map>
                 <key>options</key>
                 <array>
                   <string>--build</string>
-                  <string>--platform linux</string>
-                  <string>--package</string>
-                </array>
-              </map>
-              <key>configure</key>
-              <map>
-                <key>options</key>
-                <array>
                   <string>--platform linux</string>
                   <string>--package</string>
                 </array>
@@ -3924,10 +3902,6 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
                   <string>SecondLife.sln</string>
                 </array>
               </map>
-              <!-- FS:Ansariel: This will cause packages being installed twice
-              <key>default</key>
-              <string>True</string>
-              -->
               <key>name</key>
               <string>RelWithDebInfo</string>
             </map>
@@ -4047,16 +4021,6 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
             </map>
             <key>RelWithDebInfoFS</key>
             <map>
-              <key>build</key>
-              <map>
-                <key>options</key>
-                <array>
-                  <string>--fmodstudio</string>
-                  <string>--kdu</string>
-                  <string>--version</string>
-                  <string>--platform windows</string>
-                </array>
-              </map>
               <key>configure</key>
               <map>
                 <key>options</key>
@@ -4067,16 +4031,22 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
                   <string>--platform windows</string>
                 </array>
               </map>
-              <!-- FS:Ansariel: This will cause packages being installed twice
-              <key>default</key>
-              <string>True</string>
-              -->
+              <key>build</key>
+              <map>
+                <key>options</key>
+                <array>
+                  <string>--fmodstudio</string>
+                  <string>--kdu</string>
+                  <string>--version</string>
+                  <string>--platform windows</string>
+                </array>
+              </map>
               <key>name</key>
               <string>RelWithDebInfoFS</string>
             </map>
             <key>RelWithDebInfoFS_open</key>
             <map>
-              <key>build</key>
+              <key>configure</key>
               <map>
                 <key>options</key>
                 <array>
@@ -4085,7 +4055,7 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
                   <string>--platform windows</string>
                 </array>
               </map>
-              <key>configure</key>
+              <key>build</key>
               <map>
                 <key>options</key>
                 <array>
@@ -4099,7 +4069,7 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
             </map>
             <key>ReleaseFS</key>
             <map>
-              <key>build</key>
+              <key>configure</key>
               <map>
                 <key>options</key>
                 <array>
@@ -4109,7 +4079,7 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
                   <string>--platform windows</string>
                 </array>
               </map>
-              <key>configure</key>
+              <key>build</key>
               <map>
                 <key>options</key>
                 <array>
@@ -4126,7 +4096,7 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
             </map>
             <key>ReleaseFS_AVX</key>
             <map>
-              <key>build</key>
+              <key>configure</key>
               <map>
                 <key>options</key>
                 <array>
@@ -4136,7 +4106,7 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
                   <string>--platform windows</string>
                 </array>
               </map>
-              <key>configure</key>
+              <key>build</key>
               <map>
                 <key>options</key>
                 <array>
@@ -4151,7 +4121,7 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
             </map>
             <key>ReleaseFS_AVX2</key>
             <map>
-              <key>build</key>
+              <key>configure</key>
               <map>
                 <key>options</key>
                 <array>
@@ -4161,7 +4131,7 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
                   <string>--platform windows</string>
                 </array>
               </map>
-              <key>configure</key>
+              <key>build</key>
               <map>
                 <key>options</key>
                 <array>
@@ -4176,7 +4146,7 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
             </map>
             <key>ReleaseFS_open</key>
             <map>
-              <key>build</key>
+              <key>configure</key>
               <map>
                 <key>options</key>
                 <array>
@@ -4184,7 +4154,7 @@ Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors</string>
                   <string>--platform windows</string>
                 </array>
               </map>
-              <key>configure</key>
+              <key>build</key>
               <map>
                 <key>options</key>
                 <array>

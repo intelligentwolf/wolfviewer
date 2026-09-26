@@ -48,6 +48,8 @@
 #include "llviewerregion.h"
 #include "llviewertexture.h"
 #include "llworld.h"
+#include "llworldmap.h"        // <WolfViewer 2026-09-26/> map tiles under the painter on huge regions
+#include "llworldmipmap.h"
 #include "wolfgrid.h"
 #include "wolfnearbyregions.h"
 #include "wolfwaterfield.h"
@@ -1011,6 +1013,67 @@ void WolfWavePainter::refreshTerrain()
 // holds several cells every painted cell is then put on its texel, so a one-dab stroke on a
 // huge region still shows. Rebuilt at most ten times a second while painting. Source:
 // land_waves_tab.js draw() (the same tints) and refreshTerrain() here for the texture.
+// <WolfViewer 2026-09-26> Paul: the painter showed a grey square on Ireland ("it should be the
+// whole island's terrain"). A region wider than 12 x 256 m has its terrain streamed by view
+// distance only, with no whole-region sweep (OpenSimWolf TerrainModule.cs AddRegion,
+// TerrainData.UsesPagedStorage: width > 12 * Constants.RegionSize), so the viewer never holds
+// the whole island's heights. The world map does: draw its tiles instead, at the farthest level
+// that covers the region in at most 16 tiles an edge (Ireland, 1800 regions: level 8, 128
+// regions a tile, 15 x 15). Tiles are placed and cropped as LLWorldMapView::drawMipmapLevel
+// does (SW corner at grid * REGION_WIDTH_METERS, v = 0 at the south edge).
+bool WolfWavePainter::drawMapUnderlay(S32 gw, S32 gh)
+{
+    LLViewerRegion* rgn = gAgent.getRegion();
+    if (!rgn) return false;
+    const F64 width = (F64)rgn->getWidth();
+    if (width <= 12.0 * REGION_WIDTH_METERS) return false;
+
+    const S32 regions = (S32)ceil(width / REGION_WIDTH_METERS);
+    S32 level = 1;
+    while (level < LLWorldMipmap::MAP_LEVELS && (regions + (1 << (level - 1)) - 1) / (1 << (level - 1)) > 16) ++level;
+    const F64 tile_m = (F64)REGION_WIDTH_METERS * (F64)(1 << (level - 1));
+
+    const LLVector3d origin = rgn->getOriginGlobal();
+    const F64 x0 = origin.mdV[VX], y0 = origin.mdV[VY];
+    const F64 x1 = x0 + width, y1 = y0 + width;
+    const F64 sx = (F64)gw / width, sy = (F64)gh / width;
+
+    LLWorldMap* world_map = LLWorldMap::getInstance();
+    LLGLSUIDefault gls_ui;
+    gGL.color4f(1.f, 1.f, 1.f, 1.f);
+    for (F64 ty = floor(y0 / tile_m) * tile_m; ty < y1; ty += tile_m)
+    {
+        for (F64 tx = floor(x0 / tile_m) * tile_m; tx < x1; tx += tile_m)
+        {
+            U32 grid_x, grid_y;
+            LLWorldMipmap::globalToMipmap(tx, ty, level, &grid_x, &grid_y);
+            LLPointer<LLViewerFetchedTexture> tile = world_map->getObjectsTile(grid_x, grid_y, level, true);
+            if (tile.isNull() || !tile->hasGLTexture()) continue;
+            // The part of this tile inside the region, in metres, then in the tile's 0..1 and the box's pixels.
+            const F64 gx0 = (F64)grid_x * REGION_WIDTH_METERS, gy0 = (F64)grid_y * REGION_WIDTH_METERS;
+            const F64 cx0 = llmax(gx0, x0), cx1 = llmin(gx0 + tile_m, x1);
+            const F64 cy0 = llmax(gy0, y0), cy1 = llmin(gy0 + tile_m, y1);
+            if (cx1 <= cx0 || cy1 <= cy0) continue;
+            const F32 u0 = (F32)((cx0 - gx0) / tile_m), u1 = (F32)((cx1 - gx0) / tile_m);
+            const F32 v0 = (F32)((cy0 - gy0) / tile_m), v1 = (F32)((cy1 - gy0) / tile_m);
+            const F32 left = (F32)((cx0 - x0) * sx), right = (F32)((cx1 - x0) * sx);
+            const F32 bottom = (F32)((cy0 - y0) * sy), top = (F32)((cy1 - y0) * sy);
+            gGL.getTexUnit(0)->bind(tile.get());
+            tile->setAddressMode(LLTexUnit::TAM_CLAMP);
+            gGL.begin(LLRender::TRIANGLES);
+            gGL.texCoord2f(u0, v1); gGL.vertex3f(left, top, 0.f);
+            gGL.texCoord2f(u0, v0); gGL.vertex3f(left, bottom, 0.f);
+            gGL.texCoord2f(u1, v0); gGL.vertex3f(right, bottom, 0.f);
+            gGL.texCoord2f(u0, v1); gGL.vertex3f(left, top, 0.f);
+            gGL.texCoord2f(u1, v0); gGL.vertex3f(right, bottom, 0.f);
+            gGL.texCoord2f(u1, v1); gGL.vertex3f(right, top, 0.f);
+            gGL.end();
+        }
+    }
+    gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
+    return true;
+}
+
 void WolfWavePainter::refreshZones()
 {
     if (!mHasLayout || mZoneTW <= 0 || mZoneTH <= 0) return;
@@ -1083,10 +1146,13 @@ void WolfWavePainter::draw()
     const F32 px = cellPx();
     const S32 gw = ll_round(mSrc.mW * px), gh = ll_round(mSrc.mH * px);
     gl_rect_2d(0, getRect().getHeight(), getRect().getWidth(), 0, LLColor4(0.04f, 0.06f, 0.12f, 1.f));
-    refreshTerrain();
-    if (mTerrainTex.notNull())
+    if (!drawMapUnderlay(gw, gh))   // <WolfViewer 2026-09-26/>
     {
-        gl_draw_scaled_image(0, 0, gw, gh, mTerrainTex);
+        refreshTerrain();
+        if (mTerrainTex.notNull())
+        {
+            gl_draw_scaled_image(0, 0, gw, gh, mTerrainTex);
+        }
     }
     if (mHasLayout)
     {
@@ -1678,8 +1744,8 @@ void WolfPanelLandWaves::onRevert()
 // rather than copying the automatic cells into the painter: a copy saved as a layout froze the
 // automatic rule of that moment for good (Paul's WT Atlantic 131 kept a flat first-cut default
 // as its saved layout — "its flat and boring, i set the water back to automatic"). With the
-// box off the grid stores enabled=0 and every viewer computes the automatic layout live. The
-// painted cells are kept, so ticking the box again brings them back.
+// box off the grid stores enabled=0 and every viewer computes the automatic layout live.
+// [2026-09-26] Reset also clears the painted cells (see onDefault); unticking the box keeps them.
 // <WolfViewer 2026-09-20/> see wolfwavezones.h
 bool WolfPanelLandWaves::ensureEnabled()
 {
@@ -1703,6 +1769,12 @@ void WolfPanelLandWaves::onDefault()
     WolfWaveZones& wz = WolfWaveZones::instance();
     const WolfWaveZones::Region* r = wz.current();
     if (!r || !mPainter || !mEnabled) return;
+    // <WolfViewer 2026-09-26> Paul: "reset to automatic should clear any customisations". The
+    // kept cells came back with the next brush stroke (ensureEnabled ticks the box again), so
+    // Reset empties the painter's tiles too and Save stores enabled=0 with none. Unticking
+    // "Use this layout" is still the way to switch painting off and keep it.
+    mPainter->setLayout(wz.sourceFor(*r), WolfWaveZones::Tiles(), wz.canEditAll());
+    // </WolfViewer>
     mEnabled->set(false);
     onParamChanged();   // previews the automatic layout at once (enabled off -> defaultZones)
     setStatus(getString("str_default_loaded"), false);

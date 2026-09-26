@@ -282,6 +282,9 @@ private:
     F32 cellPx() const;
     /** Rebuild the terrain underlay texture from the agent region's heights (every few seconds while drawn). */
     void refreshTerrain();
+    /** <WolfViewer 2026-09-26> World-map tiles as the underlay on regions whose terrain the
+     *  sim streams by view distance only; false when the terrain underlay is the one to use. */
+    bool drawMapUnderlay(S32 gw, S32 gh);
     /** Rebuild the zone overlay texture when the working copy changed (at most ten times a second). */
     void refreshZones();
 

@@ -15,7 +15,7 @@
   <panel.string name="str_saving">Saving…</panel.string>
   <panel.string name="str_saved">Saved — everyone in the region now sees this layout.</panel.string>
   <panel.string name="str_save_failed">Could not save:</panel.string>
-  <panel.string name="str_default_loaded">Automatic layout on; your painted cells are kept but not used — Save to keep it.</panel.string>
+  <panel.string name="str_default_loaded">Automatic layout on; your painting is cleared — Save to keep it (Revert undoes it).</panel.string>
   <text follows="left|top" height="30" left="10" top="8" width="460" word_wrap="true" name="waves_help">
 Paint on the map or directly on the water. Surf, Open, Small, Calm and Off use the same saved layout.
   </text>

@@ -34,6 +34,7 @@
 #include "patch_code.h"
 #include "llbitpack.h"
 #include "llviewerobjectlist.h"
+#include "llvosurfacepatch.h"   // <WolfViewer 2026-09-26/> block objects
 #include "llregionhandle.h"
 #include "llagent.h"
 #include "llagentcamera.h"
@@ -102,6 +103,14 @@ LLSurface::~LLSurface()
     mGridsPerPatchEdge = 0;
     mPatchesPerEdge = 0;
     mNumberOfPatches = 0;
+    // <WolfViewer 2026-09-26> Block objects the region has not killed yet let go of this surface
+    // and of its patches before the patches are deleted.
+    for (auto& entry : mBlockObjects)
+    {
+        entry.second->detachSurface();
+    }
+    mBlockObjects.clear();
+    // </WolfViewer>
     destroyPatchData();
 
     LLDrawPoolTerrain *poolp = (LLDrawPoolTerrain*) gPipeline.findPool(LLDrawPool::POOL_TERRAIN, mSTexturep);
@@ -805,25 +814,67 @@ void LLSurface::updatePatchVisibilities(LLAgent &agent)
     }
 
     // Pass 2: the patches in range now. This is the only pass that counts.
+    //
+    // <WolfViewer 2026-09-26> ...culled a 256 m BLOCK at a time first (the terrain draw block,
+    // LLSurfacePatch::WOLF_TERRAIN_BLOCK_M). With a 4,096 m far clip on Ireland every loaded patch
+    // in the box - tens of thousands, most beside or behind the camera - ran the frustum test and
+    // LOD maths every frame (perf: 11.6% of the main thread). A block whose box is outside the
+    // frustum has every patch in it marked invisible, exactly what updateVisibility decides for
+    // each of them (and without making viewer objects for patches that cannot be seen). The box
+    // holds every patch's own test box: a patch tests centre +- mRadius, with centre z inside the
+    // region's [mMinZ, mMaxZ] and mRadius = |(P, P, dz)| / 2, dz <= mMaxZ - mMinZ
+    // (LLSurfacePatch::updateVerticalStats), so r_max = |(P, P, mMaxZ - mMinZ)| / 2.
+    const S32 block_patches = llmax(1, (S32)(LLSurfacePatch::WOLF_TERRAIN_BLOCK_M / patch_meters));
+    const bool block_cull = mMaxZ >= mMinZ;   // no height data yet: test every patch as before
+    const F32 dz = block_cull ? (mMaxZ - mMinZ) : 0.f;
+    const F32 r_max = 0.5f * sqrtf(2.f * patch_meters * patch_meters + dz * dz);
+    const F32 block_m = (F32)block_patches * patch_meters;
+    LLVector4a block_half;
+    block_half.set(0.5f * block_m - 0.5f * patch_meters + r_max, 0.5f * block_m - 0.5f * patch_meters + r_max, 0.5f * dz + r_max);
+    const LLVector3 origin_agent = getOriginAgent();
+    LLViewerCamera* camera = LLViewerCamera::getInstance();
     mVisiblePatchCount = 0;
-    for (S32 j = min_j; j <= max_j; j++)
+    for (S32 bj = (min_j / block_patches) * block_patches; bj <= max_j; bj += block_patches)
     {
-        for (S32 i = min_i; i <= max_i; i++)
+        for (S32 bi = (min_i / block_patches) * block_patches; bi <= max_i; bi += block_patches)
         {
-            // <WolfViewer 2026-09-23/> only patches that exist; one never made has no data
-            patchp = findPatch(i, j);
-            if (!patchp)
+            const S32 i0 = llmax(bi, min_i), i1 = llmin(bi + block_patches - 1, max_i);
+            const S32 j0 = llmax(bj, min_j), j1 = llmin(bj + block_patches - 1, max_j);
+            bool in_view = true;
+            if (block_cull)
             {
-                continue;
+                LLVector4a block_center;
+                block_center.set(origin_agent.mV[VX] + ((F32)bi + 0.5f * (F32)block_patches) * patch_meters,
+                                 origin_agent.mV[VY] + ((F32)bj + 0.5f * (F32)block_patches) * patch_meters,
+                                 origin_agent.mV[VZ] + 0.5f * (mMinZ + mMaxZ));
+                in_view = camera->AABBInFrustumNoFarClip(block_center, block_half) != 0;
             }
-            patchp->updateVisibility();
-            if (patchp->getVisible())
+            for (S32 j = j0; j <= j1; j++)
             {
-                mVisiblePatchCount++;
-                patchp->updateCameraDistanceRegion(pos_region);
+                for (S32 i = i0; i <= i1; i++)
+                {
+                    // <WolfViewer 2026-09-23/> only patches that exist; one never made has no data
+                    patchp = findPatch(i, j);
+                    if (!patchp)
+                    {
+                        continue;
+                    }
+                    if (!in_view)
+                    {
+                        patchp->setInvisible();
+                        continue;
+                    }
+                    patchp->updateVisibility();
+                    if (patchp->getVisible())
+                    {
+                        mVisiblePatchCount++;
+                        patchp->updateCameraDistanceRegion(pos_region);
+                    }
+                }
             }
         }
     }
+    // </WolfViewer>
 
     mLastScanMinI = min_i; mLastScanMaxI = max_i;
     mLastScanMinJ = min_j; mLastScanMaxJ = max_j;
@@ -1341,6 +1392,43 @@ LLSurfacePatch *LLSurface::createPatch(const S32 x, const S32 y)
 }
 // </WolfViewer>
 
+
+// <WolfViewer 2026-09-26> see llsurface.h
+LLVOSurfacePatch* LLSurface::getBlockObject(S32 block_i, S32 block_j, bool create)
+{
+    const U64 key = ((U64)(U32)block_j << 32) | (U32)block_i;
+    auto it = mBlockObjects.find(key);
+    if (it != mBlockObjects.end())
+    {
+        return it->second;
+    }
+    if (!create || !mRegionp)
+    {
+        return NULL;
+    }
+    LLVOSurfacePatch* objectp = (LLVOSurfacePatch*)gObjectList.createObjectViewer(LLViewerObject::LL_VO_SURFACE_PATCH, mRegionp);
+    if (!objectp)
+    {
+        return NULL;
+    }
+    objectp->setBlock(this, block_i, block_j);
+    mBlockObjects[key] = objectp;
+    gPipeline.createObject(objectp);
+    mBuiltPatchObject = true;
+    mDiagObjectsBuilt++;
+    return objectp;
+}
+
+void LLSurface::forgetBlockObject(S32 block_i, S32 block_j, const LLVOSurfacePatch* objectp)
+{
+    const U64 key = ((U64)(U32)block_j << 32) | (U32)block_i;
+    auto it = mBlockObjects.find(key);
+    if (it != mBlockObjects.end() && it->second == objectp)
+    {
+        mBlockObjects.erase(it);
+    }
+}
+// </WolfViewer>
 
 void LLSurface::destroyPatchData()
 {

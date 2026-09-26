@@ -28,6 +28,8 @@
 
 #include "lldrawpoolterrain.h"
 
+#include <algorithm>   // <WolfViewer 2026-09-26/> std::is_sorted / std::stable_sort (block order)
+
 #include "llfasttimer.h"
 
 #include "llagent.h"
@@ -265,17 +267,109 @@ void LLDrawPoolTerrain::renderShadow(S32 pass)
 // reaches the float32 modelview on a 51,200 m region. The bound terrain shader also gets the
 // patch origin in the region frame (terrain_patch_origin) to rebuild region coordinates for
 // texturing, paint and caustics; a shader without that uniform (shadow pass) ignores it.
-static void wolfApplyPatchMatrix(LLFace* facep)
+//
+// <WolfViewer 2026-09-26> ...per 256 m BLOCK now (LLSurfacePatch::getBlockOriginRegion). Per
+// patch, every visible patch reloaded the modelview, re-synced the matrices and set the uniform
+// in every pass, and on Ireland (460,800 m, 4,096 m draw distance) the patches the sim streams
+// in kept arriving: 947 -> 5,210 visible in 90 s, 98 -> 44 fps standing still over open sea,
+// with the matrix work the largest share of the main thread (perf). The faces are kept sorted
+// by block and the matrix and uniform change only when the block does — up to 256 patches per
+// switch. The draw calls themselves are one per patch, as stock.
+namespace
 {
-    LLViewerObject* objectp = facep->getDrawable()->getVObj();
-    LLVOSurfacePatch* vop = (LLVOSurfacePatch*)objectp;
-    gGLLastMatrix = NULL;   // applyModelMatrix caches by POINTER; this matrix is rewritten in place
-    LLRenderPass::applyModelMatrix(vop->wolfRenderMatrix());
-    LLGLSLShader* shader = LLGLSLShader::sCurBoundShaderPtr;
-    if (shader && vop->getPatch())
+    struct WolfBlockState
     {
-        const LLVector3& o = vop->getPatch()->getOriginRegion();
-        shader->uniform3f(LLShaderMgr::WOLF_TERRAIN_PATCH_ORIGIN, o.mV[VX], o.mV[VY], o.mV[VZ]);
+        const LLSurface* mSurface = nullptr;
+        LLVector3        mBlock;
+        bool             mValid = false;
+    };
+
+    LLSurfacePatch* wolfFacePatch(LLFace* facep)
+    {
+        LLDrawable* drawablep = facep ? facep->getDrawable() : nullptr;
+        LLViewerObject* objectp = drawablep ? drawablep->getVObj().get() : nullptr;
+        return objectp ? ((LLVOSurfacePatch*)objectp)->getPatch() : nullptr;
+    }
+
+    // Surface, then draw-block row, then column: the faces of one 256 m draw block follow each
+    // other, so they share the matrix. Keys are computed once per face per sort, not per compare.
+    struct WolfFaceKey
+    {
+        const LLSurface* mSurface;
+        F32              mBlockY, mBlockX;
+        LLFace*          mFace;
+        bool operator<(const WolfFaceKey& o) const
+        {
+            if (mSurface != o.mSurface) return mSurface < o.mSurface;
+            if (mBlockY != o.mBlockY) return mBlockY < o.mBlockY;
+            return mBlockX < o.mBlockX;
+        }
+    };
+
+    void wolfSortFacesByBlock(std::vector<LLFace*>& faces)
+    {
+        static std::vector<WolfFaceKey> keys;   // main thread only (draw pools)
+        keys.clear();
+        keys.reserve(faces.size());
+        for (LLFace* facep : faces)
+        {
+            const LLSurfacePatch* patchp = wolfFacePatch(facep);
+            const LLVector3 block = patchp ? patchp->getBlockOriginRegion() : LLVector3::zero;
+            keys.push_back({ patchp ? patchp->getSurface() : nullptr, block.mV[VY], block.mV[VX], facep });
+        }
+        if (std::is_sorted(keys.begin(), keys.end()))
+        {
+            return;
+        }
+        std::stable_sort(keys.begin(), keys.end());
+        for (size_t n = 0; n < keys.size(); ++n)
+        {
+            faces[n] = keys[n].mFace;
+        }
+    }
+
+    void wolfApplyBlockMatrix(LLFace* facep, WolfBlockState& state)
+    {
+        LLViewerObject* objectp = facep->getDrawable()->getVObj();
+        LLVOSurfacePatch* vop = (LLVOSurfacePatch*)objectp;
+        const LLSurfacePatch* patchp = vop->getPatch();
+        if (patchp && state.mValid && state.mSurface == patchp->getSurface() && state.mBlock == patchp->getBlockOriginRegion())
+        {
+            return;   // same block: the matrix and uniform already set are this patch's
+        }
+        gGLLastMatrix = NULL;   // applyModelMatrix caches by POINTER; this matrix is rewritten in place
+        LLRenderPass::applyModelMatrix(vop->wolfRenderMatrix());
+        LLGLSLShader* shader = LLGLSLShader::sCurBoundShaderPtr;
+        if (shader && patchp)
+        {
+            const LLVector3& o = patchp->getBlockOriginRegion();
+            shader->uniform3f(LLShaderMgr::WOLF_TERRAIN_PATCH_ORIGIN, o.mV[VX], o.mV[VY], o.mV[VZ]);
+        }
+        state.mValid = patchp != nullptr;
+        if (patchp)
+        {
+            state.mSurface = patchp->getSurface();
+            state.mBlock = patchp->getBlockOriginRegion();
+        }
+    }
+
+    // <WolfViewer 2026-09-26> Draw the faces in draw-block order, one call each: a face is a
+    // whole terrain block object (llvosurfacepatch.h WOLF_BLOCK_PATCHES) with its own buffer
+    // (LLTerrainPartition::getGeometry), and the matrix changes only between draw blocks.
+    void wolfDrawFaces(std::vector<LLFace*>& faces)
+    {
+        wolfSortFacesByBlock(faces);
+        WolfBlockState block;   // fresh per pass: the shader may differ
+        for (LLFace* facep : faces)
+        {
+            if (!facep->getVertexBuffer())
+            {
+                continue;   // not built yet (LLTerrainPartition::getGeometry)
+            }
+            llassert(gGL.getMatrixMode() == LLRender::MM_MODELVIEW);
+            wolfApplyBlockMatrix(facep, block);   // <WolfViewer> was the region's mRenderMatrix
+            facep->renderIndexed();
+        }
     }
 }
 
@@ -283,16 +377,7 @@ void LLDrawPoolTerrain::drawLoop()
 {
     if (!mDrawFace.empty())
     {
-        for (std::vector<LLFace*>::iterator iter = mDrawFace.begin();
-             iter != mDrawFace.end(); iter++)
-        {
-            LLFace *facep = *iter;
-
-            llassert(gGL.getMatrixMode() == LLRender::MM_MODELVIEW);
-            wolfApplyPatchMatrix(facep);   // <WolfViewer> was the region's mRenderMatrix
-
-            facep->renderIndexed();
-        }
+        wolfDrawFaces(mDrawFace);   // <WolfViewer 2026-09-26/> per block, merged runs (see wolfDrawFaces)
     }
 }
 
@@ -1203,13 +1288,7 @@ void LLDrawPoolTerrain::renderOwnership()
 
     const F32 TEXTURE_FUDGE = 257.f / 256.f;
     gGL.scalef( TEXTURE_FUDGE, TEXTURE_FUDGE, 1.f );
-    for (std::vector<LLFace*>::iterator iter = mDrawFace.begin();
-         iter != mDrawFace.end(); iter++)
-    {
-        LLFace *facep = *iter;
-        wolfApplyPatchMatrix(facep);   // <WolfViewer> per-patch matrix (this loop relied on drawLoop's)
-        facep->renderIndexed();
-    }
+    wolfDrawFaces(mDrawFace);   // <WolfViewer 2026-09-26/> per-block matrix, merged runs (this loop relied on drawLoop's)
 
     gGL.matrixMode(LLRender::MM_TEXTURE);
     gGL.popMatrix();

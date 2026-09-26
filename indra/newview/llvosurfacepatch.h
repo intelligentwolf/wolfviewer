@@ -29,12 +29,14 @@
 
 #include "llviewerobject.h"
 #include "llstrider.h"
+#include <vector>
 
 class LLSurfacePatch;
 class LLDrawPool;
 class LLVector2;
 class LLFacePool;
 class LLFace;
+class LLSurface;
 
 class LLVOSurfacePatch : public LLStaticViewerObject
 {
@@ -68,12 +70,27 @@ public:
     /*virtual*/ void updateSpatialExtents(LLVector4a& newMin, LLVector4a& newMax);
     /*virtual*/ bool isActive() const; // Whether this object needs to do an idleUpdate.
 
-    void setPatch(LLSurfacePatch *patchp);
-    LLSurfacePatch  *getPatch() const       { return mPatchp; }
-    // <WolfViewer 2026-09-20> per-patch draw matrix T(patch origin agent): precise, because the
-    // patch origin is a double (LLSurfacePatch::mOriginGlobal) minus the agent origin, which
-    // LLAgent::updateHugeRegionOrigin keeps near the camera. LLSurfacePatch::eval writes
-    // patch-local vertices to match.
+    // <WolfViewer 2026-09-26> ONE OBJECT PER BLOCK of WOLF_BLOCK_PATCHES x WOLF_BLOCK_PATCHES
+    // patches (8 x 8 = 128 m on a 1 m grid), not one per patch. Every drawable costs a cull, a
+    // sort and a draw call in every pass, so a region streaming terrain out to a 4,096 m draw
+    // distance (Ireland) made the frame slower with every patch that arrived: 13,917 visible
+    // patch objects and 32 fps with the terrain only half loaded. The patches keep their data,
+    // normals and per-patch LOD strides; the block object draws them all from one face and its
+    // own vertex buffer (LLTerrainPartition::getGeometry), at most 64 x 322 = 20,608 vertices,
+    // inside the U16 index limit. The patch geometry code is unchanged: getTerrainGeometry
+    // points mPatchp and mLast*Stride at each member patch in turn and runs it.
+    static constexpr S32 WOLF_BLOCK_PATCHES = 8;
+    void setBlock(LLSurface* surfacep, S32 block_i, S32 block_j);
+    void addPatch(LLSurfacePatch* patchp);
+    size_t removePatch(LLSurfacePatch* patchp);   // returns the patches left
+    void detachSurface();                          // the surface is going: forget it and its patches
+    // A member patch (any: they share the block and its draw matrix), or NULL when empty.
+    LLSurfacePatch  *getPatch() const       { return mPatches.empty() ? NULL : mPatches.front(); }
+    // <WolfViewer 2026-09-20> draw matrix T(origin agent): precise, because the origin is a
+    // double minus the agent origin, which LLAgent::updateHugeRegionOrigin keeps near the camera.
+    // 2026-09-26: the origin is the patch's 256 m draw BLOCK (LLSurfacePatch::getBlockOriginGlobal)
+    // and LLSurfacePatch::eval writes block-local vertices to match, so the patches of a block
+    // share one matrix (lldrawpoolterrain.cpp switches it per block).
     const LLMatrix4* wolfRenderMatrix();
     LLMatrix4        mWolfRenderMatrix;
 
@@ -99,7 +116,23 @@ protected:
     LLFacePool      *mPool;
     LLFacePool      *getPool();
     S32             mBaseComp;
-    LLSurfacePatch  *mPatchp;
+    LLSurfacePatch  *mPatchp;   // <WolfViewer 2026-09-26/> the patch the geometry code is working on (getTerrainGeometry)
+
+    // <WolfViewer 2026-09-26> the block (see WOLF_BLOCK_PATCHES)
+    struct WolfPatchLOD
+    {
+        LLSurfacePatch* mPatch;
+        S32             mStride;
+        S32             mNorthStride;
+        S32             mEastStride;
+    };
+    LLSurface*                   mSurfacep;
+    S32                          mBlockI;
+    S32                          mBlockJ;
+    std::vector<LLSurfacePatch*> mPatches;    // member patches
+    std::vector<WolfPatchLOD>    mPatchLOD;   // their strides as of the last updateGeometry
+    void wolfSelectPatch(const WolfPatchLOD& lod);   // point mPatchp / mLast*Stride at one member
+    // </WolfViewer>
     bool            mDirtyTexture;
     bool            mDirtyTerrain;
 

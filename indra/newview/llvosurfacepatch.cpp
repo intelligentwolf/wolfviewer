@@ -28,6 +28,8 @@
 
 #include "llvosurfacepatch.h"
 
+#include "llagent.h"            // <WolfViewer 2026-09-26/> gAgent.getPosAgentFromGlobal (wolfRenderMatrix)
+#include <algorithm>            // <WolfViewer 2026-09-26/> std::stable_sort (block order in getGeometry)
 #include "lldrawpoolterrain.h"
 
 #include "lldrawable.h"
@@ -57,7 +59,10 @@ LLVOSurfacePatch::LLVOSurfacePatch(const LLUUID &id, const LLPCode pcode, LLView
         mLastNorthStride(0),
         mLastEastStride(0),
         mLastStride(0),
-        mLastLength(0)
+        mLastLength(0),
+        mSurfacep(NULL),   // <WolfViewer 2026-09-26/> block members (setBlock)
+        mBlockI(0),
+        mBlockJ(0)
 {
     // Terrain must draw during selection passes so it can block objects behind it.
     mbCanSelect = true;
@@ -73,11 +78,20 @@ LLVOSurfacePatch::~LLVOSurfacePatch()
 
 void LLVOSurfacePatch::markDead()
 {
-    if (mPatchp)
+    // <WolfViewer 2026-09-26> every member patch loses its object, and the surface forgets the block
+    for (LLSurfacePatch* patchp : mPatches)
     {
-        mPatchp->clearVObj();
-        mPatchp = NULL;
+        patchp->clearVObj();
     }
+    mPatches.clear();
+    mPatchLOD.clear();
+    mPatchp = NULL;
+    if (mSurfacep)
+    {
+        mSurfacep->forgetBlockObject(mBlockI, mBlockJ, this);
+        mSurfacep = NULL;
+    }
+    // </WolfViewer>
     LLViewerObject::markDead();
 }
 
@@ -102,7 +116,7 @@ void LLVOSurfacePatch::updateTextures()
 
 LLFacePool *LLVOSurfacePatch::getPool()
 {
-    mPool = (LLDrawPoolTerrain*) gPipeline.getPool(LLDrawPool::POOL_TERRAIN, mPatchp->getSurface()->getSTexture());
+    mPool = (LLDrawPoolTerrain*) gPipeline.getPool(LLDrawPool::POOL_TERRAIN, mSurfacep->getSTexture());   // <WolfViewer 2026-09-26/> the block's surface
 
     return mPool;
 }
@@ -114,21 +128,10 @@ LLDrawable *LLVOSurfacePatch::createDrawable(LLPipeline *pipeline)
 
     mDrawable->setRenderType(LLPipeline::RENDER_TYPE_TERRAIN);
 
-    mBaseComp = llfloor(mPatchp->getMinComposition());
-    S32 min_comp, max_comp, range;
-    min_comp = llfloor(mPatchp->getMinComposition());
-    max_comp = llceil(mPatchp->getMaxComposition());
-    range = (max_comp - min_comp);
-    range++;
-    if (range > 3)
-    {
-        if ((mPatchp->getMinComposition() - min_comp) > (max_comp - mPatchp->getMaxComposition()))
-        {
-            // The top side runs over more
-            mBaseComp++;
-        }
-        range = 3;
-    }
+    // <WolfViewer 2026-09-26> A block object is created before its first patch joins (setBlock,
+    // then addPatch), so the base composition is worked out in updateGeometry as before, from
+    // the patches it then has; nothing reads it in between.
+    mBaseComp = 0;
 
     LLFacePool *poolp = getPool();
 
@@ -140,10 +143,16 @@ LLDrawable *LLVOSurfacePatch::createDrawable(LLPipeline *pipeline)
 
 void LLVOSurfacePatch::updateGL()
 {
-    if (mPatchp)
+    // <WolfViewer 2026-09-26> Every member patch waiting on its texture update: each one marked
+    // this block for a GL rebuild (LLSurfacePatch::updateTexture) and stays on the surface's
+    // dirty list until its own mSTexUpdate clears.
+    LL_PROFILE_ZONE_SCOPED;
+    for (LLSurfacePatch* patchp : mPatches)
     {
-        LL_PROFILE_ZONE_SCOPED;
-        mPatchp->updateGL();
+        if (patchp->mSTexUpdate)
+        {
+            patchp->updateGL();
+        }
     }
 }
 
@@ -152,6 +161,18 @@ bool LLVOSurfacePatch::updateGeometry(LLDrawable *drawable)
     LL_PROFILE_ZONE_SCOPED;
 
     dirtySpatialGroup();
+
+    // <WolfViewer 2026-09-26> Per member patch, exactly what this did for its one patch: the
+    // base composition (from the first member, as it was from the patch) and the strides.
+    mPatchLOD.clear();
+    if (mPatches.empty())
+    {
+        mPatchp = NULL;
+        mLastStride = 0;
+        return true;
+    }
+    mPatchp = mPatches.front();
+    // </WolfViewer>
 
     S32 min_comp, max_comp, range;
     min_comp = lltrunc(mPatchp->getMinComposition());
@@ -180,36 +201,55 @@ bool LLVOSurfacePatch::updateGeometry(LLDrawable *drawable)
     //
     //
 
-    U32 patch_width, render_stride, north_stride, east_stride, length;
-    render_stride = mPatchp->getRenderStride();
-    patch_width = mPatchp->getSurface()->getGridsPerPatchEdge();
-
-    length = patch_width / render_stride;
-
-    if (mPatchp->getNeighborPatch(NORTH))
+    mPatchLOD.reserve(mPatches.size());   // <WolfViewer 2026-09-26/>
+    for (LLSurfacePatch* patchp : mPatches)   // <WolfViewer 2026-09-26/> each member
     {
-        north_stride = mPatchp->getNeighborPatch(NORTH)->getRenderStride();
-    }
-    else
-    {
-        north_stride = render_stride;
-    }
+        U32 patch_width, render_stride, north_stride, east_stride, length;
+        render_stride = patchp->getRenderStride();
+        if (!render_stride)
+        {
+            // <WolfViewer 2026-09-26> A member whose LOD was never set (it joined the block but
+            // has not been in view: LLSurfacePatch::updateVisibility sets the stride only then)
+            // has nothing to draw yet; stride 0 is skipped by updateFaceSize/getTerrainGeometry.
+            mPatchLOD.push_back({ patchp, 0, 0, 0 });
+            continue;
+        }
+        patch_width = patchp->getSurface()->getGridsPerPatchEdge();
 
-    if (mPatchp->getNeighborPatch(EAST))
-    {
-        east_stride = mPatchp->getNeighborPatch(EAST)->getRenderStride();
-    }
-    else
-    {
-        east_stride = render_stride;
-    }
+        length = patch_width / render_stride;
 
-    mLastLength = length;
-    mLastStride = render_stride;
-    mLastNorthStride = north_stride;
-    mLastEastStride = east_stride;
+        if (patchp->getNeighborPatch(NORTH))
+        {
+            north_stride = patchp->getNeighborPatch(NORTH)->getRenderStride();
+        }
+        else
+        {
+            north_stride = render_stride;
+        }
+
+        if (patchp->getNeighborPatch(EAST))
+        {
+            east_stride = patchp->getNeighborPatch(EAST)->getRenderStride();
+        }
+        else
+        {
+            east_stride = render_stride;
+        }
+
+        mLastLength = length;
+        mPatchLOD.push_back({ patchp, (S32)render_stride, (S32)north_stride, (S32)east_stride });   // <WolfViewer 2026-09-26/>
+    }
 
     return true;
+}
+
+// <WolfViewer 2026-09-26> point the per-patch geometry code (mPatchp, mLast*Stride) at one member
+void LLVOSurfacePatch::wolfSelectPatch(const WolfPatchLOD& lod)
+{
+    mPatchp = lod.mPatch;
+    mLastStride = lod.mStride;
+    mLastNorthStride = lod.mNorthStride;
+    mLastEastStride = lod.mEastStride;
 }
 
 void LLVOSurfacePatch::updateFaceSize(S32 idx)
@@ -227,12 +267,17 @@ void LLVOSurfacePatch::updateFaceSize(S32 idx)
         S32 num_vertices = 0;
         S32 num_indices = 0;
 
-        if (mLastStride)
+        for (const WolfPatchLOD& lod : mPatchLOD)   // <WolfViewer 2026-09-26/> every member patch
         {
-            getGeomSizesMain(mLastStride, num_vertices, num_indices);
-            getGeomSizesNorth(mLastStride, mLastNorthStride, num_vertices, num_indices);
-            getGeomSizesEast(mLastStride, mLastEastStride, num_vertices, num_indices);
+            wolfSelectPatch(lod);
+            if (mLastStride)
+            {
+                getGeomSizesMain(mLastStride, num_vertices, num_indices);
+                getGeomSizesNorth(mLastStride, mLastNorthStride, num_vertices, num_indices);
+                getGeomSizesEast(mLastStride, mLastEastStride, num_vertices, num_indices);
+            }
         }
+        mPatchp = getPatch();   // <WolfViewer 2026-09-26/>
 
         facep->setSize(num_vertices, num_indices);
     }
@@ -258,15 +303,16 @@ void LLVOSurfacePatch::getTerrainGeometry(LLStrider<LLVector3> &verticesp,
 
     U32 index_offset = facep->getGeomIndex();
 
-    updateMainGeometry(facep,
-                    verticesp,
-                    normalsp,
-                    texCoords0p,
-                    texCoords1p,
-                    colorsp,
-                    indicesp,
-                    index_offset);
-    updateNorthGeometry(facep,
+    // <WolfViewer 2026-09-26> every member patch in turn, with the strides updateFaceSize sized
+    for (const WolfPatchLOD& lod : mPatchLOD)
+    {
+        wolfSelectPatch(lod);
+        if (!mLastStride)
+        {
+            continue;
+        }
+        // </WolfViewer>
+        updateMainGeometry(facep,
                         verticesp,
                         normalsp,
                         texCoords0p,
@@ -274,14 +320,27 @@ void LLVOSurfacePatch::getTerrainGeometry(LLStrider<LLVector3> &verticesp,
                         colorsp,
                         indicesp,
                         index_offset);
-    updateEastGeometry(facep,
-                        verticesp,
-                        normalsp,
-                        texCoords0p,
-                        texCoords1p,
-                        colorsp,
-                        indicesp,
-                        index_offset);
+        updateNorthGeometry(facep,
+                            verticesp,
+                            normalsp,
+                            texCoords0p,
+                            texCoords1p,
+                            colorsp,
+                            indicesp,
+                            index_offset);
+        updateEastGeometry(facep,
+                            verticesp,
+                            normalsp,
+                            texCoords0p,
+                            texCoords1p,
+                            colorsp,
+                            indicesp,
+                            index_offset);
+    }   // <WolfViewer 2026-09-26/>
+    // <WolfViewer 2026-09-26> The per-patch functions each set the face centre to their own
+    // patch; the face is the whole block.
+    mPatchp = getPatch();
+    facep->mCenterAgent = getPositionAgent();
 }
 
 void LLVOSurfacePatch::updateMainGeometry(LLFace *facep,
@@ -779,31 +838,92 @@ void LLVOSurfacePatch::updateEastGeometry(LLFace *facep,
 // <WolfViewer 2026-09-20> see llvosurfacepatch.h
 const LLMatrix4* LLVOSurfacePatch::wolfRenderMatrix()
 {
-    mWolfRenderMatrix.setTranslation(mPatchp ? mPatchp->getOriginAgent() : LLVector3::zero);
+    // <WolfViewer 2026-09-26> T(block origin agent): the vertices are block-local (LLSurfacePatch::eval).
+    // Any member will do: every patch of a block object lies in the same 256 m draw block.
+    const LLSurfacePatch* patchp = getPatch();
+    mWolfRenderMatrix.setTranslation(patchp ? gAgent.getPosAgentFromGlobal(patchp->getBlockOriginGlobal()) : LLVector3::zero);
     return &mWolfRenderMatrix;
 }
 
-void LLVOSurfacePatch::setPatch(LLSurfacePatch *patchp)
+// <WolfViewer 2026-09-26> see WOLF_BLOCK_PATCHES in llvosurfacepatch.h
+void LLVOSurfacePatch::setBlock(LLSurface* surfacep, S32 block_i, S32 block_j)
 {
-    mPatchp = patchp;
+    mSurfacep = surfacep;
+    mBlockI = block_i;
+    mBlockJ = block_j;
+    dirtyPatch();   // position and size of the block, before the pipeline places the object
+}
 
+void LLVOSurfacePatch::addPatch(LLSurfacePatch* patchp)
+{
+    if (!patchp || std::find(mPatches.begin(), mPatches.end(), patchp) != mPatches.end())
+    {
+        return;
+    }
+    mPatches.push_back(patchp);
+    // Row, then column: the order the patches are laid out in the block's buffer.
+    std::sort(mPatches.begin(), mPatches.end(), [](const LLSurfacePatch* a, const LLSurfacePatch* b)
+    {
+        return a->getPatchY() != b->getPatchY() ? a->getPatchY() < b->getPatchY() : a->getPatchX() < b->getPatchX();
+    });
     dirtyPatch();
-};
+}
 
+size_t LLVOSurfacePatch::removePatch(LLSurfacePatch* patchp)
+{
+    mPatches.erase(std::remove(mPatches.begin(), mPatches.end(), patchp), mPatches.end());
+    // Out of the stride snapshot too, so a rebuild before the next updateGeometry cannot draw it.
+    mPatchLOD.erase(std::remove_if(mPatchLOD.begin(), mPatchLOD.end(),
+                                   [patchp](const WolfPatchLOD& lod) { return lod.mPatch == patchp; }),
+                    mPatchLOD.end());
+    if (mPatchp == patchp)
+    {
+        mPatchp = getPatch();
+    }
+    if (!mPatches.empty())
+    {
+        dirtyPatch();
+    }
+    return mPatches.size();
+}
+
+void LLVOSurfacePatch::detachSurface()
+{
+    for (LLSurfacePatch* patchp : mPatches)
+    {
+        patchp->clearVObj();
+    }
+    mPatches.clear();
+    mPatchLOD.clear();
+    mPatchp = NULL;
+    mSurfacep = NULL;
+}
 
 void LLVOSurfacePatch::dirtyPatch()
 {
     mDirtiedPatch = true;
     dirtyGeom();
     mDirtyTerrain = true;
-    LLVector3 center = mPatchp->getCenterRegion();
-    LLSurface *surfacep = mPatchp->getSurface();
-
-    setPositionRegion(center);
-
-    F32 scale_factor = surfacep->getGridsPerPatchEdge() * surfacep->getMetersPerGrid();
-    setScale(LLVector3(scale_factor, scale_factor, mPatchp->getMaxZ() - mPatchp->getMinZ()));
+    if (!mSurfacep)
+    {
+        return;
+    }
+    // The block's square in the region, and the height range of the patches it holds (a patch
+    // placed itself at its centre with its own min..max z the same way).
+    const F32 patch_m = mSurfacep->getGridsPerPatchEdge() * mSurfacep->getMetersPerGrid();
+    const F32 block_m = patch_m * (F32)WOLF_BLOCK_PATCHES;
+    F32 min_z = 0.f, max_z = 0.f;
+    bool first = true;
+    for (const LLSurfacePatch* patchp : mPatches)
+    {
+        min_z = first ? patchp->getMinZ() : llmin(min_z, patchp->getMinZ());
+        max_z = first ? patchp->getMaxZ() : llmax(max_z, patchp->getMaxZ());
+        first = false;
+    }
+    setPositionRegion(LLVector3(((F32)mBlockI + 0.5f) * block_m, ((F32)mBlockJ + 0.5f) * block_m, 0.5f * (min_z + max_z)));
+    setScale(LLVector3(block_m, block_m, max_z - min_z));
 }
+// </WolfViewer>
 
 void LLVOSurfacePatch::dirtyGeom()
 {
@@ -1059,78 +1179,119 @@ void gen_terrain_tangents(U32                    strider_vertex_count,
     delete[] tangents;
 }
 
+// <WolfViewer 2026-09-26> Each terrain block object gets a vertex buffer of its own instead of
+// sharing its spatial group's. A group's buffer is the sum of every face in it, with U16 indices
+// and nothing bounding the sum but the octree's node capacity (gOctreeMaxCapacity, which a node
+// can exceed): 128 patch objects could never pass 65,535 vertices, 128 block objects could. A
+// block object is at most 64 x 322 = 20,608. And only a block whose buffer is gone is rebuilt -
+// dirtyGeom and LLPipeline::resetVertexBuffers clear the face's buffer - not every block in the
+// group, as the shared buffer forced.
+void LLTerrainPartition::rebuildGeom(LLSpatialGroup* group)
+{
+    if (group->isDead() || !group->hasState(LLSpatialGroup::GEOM_DIRTY))
+    {
+        return;
+    }
+
+    if (group->changeLOD())
+    {
+        group->mLastUpdateDistance = group->mDistance;
+        group->mLastUpdateViewAngle = group->mViewAngle;
+    }
+
+    LL_PROFILE_ZONE_SCOPED_CATEGORY_SPATIAL;
+
+    group->clearDrawMap();
+    group->mVertexBuffer = NULL;   // unused: the faces carry their own
+    group->mBufferMap.clear();
+    group->mBuilt = 1.f;
+
+    getGeometry(group);
+
+    group->mLastUpdateTime = gFrameTimeSeconds;
+    group->clearState(LLSpatialGroup::GEOM_DIRTY);
+}
+
 void LLTerrainPartition::getGeometry(LLSpatialGroup* group)
 {
     LL_PROFILE_ZONE_SCOPED;
 
-    LLVertexBuffer* buffer = group->mVertexBuffer;
-
-    //get vertex buffer striders
-    LLStrider<LLVector3> vertices_start;
-    LLStrider<LLVector3> normals_start;
-    LLStrider<LLVector4a> tangents_start;
-    LLStrider<LLVector2> texcoords0_start; // ownership overlay
-    LLStrider<LLVector2> texcoords2_start;
-    LLStrider<LLColor4U> colors_start;   // <WolfViewer> heightmap AO
-    LLStrider<U16> indices_start;
-
-    llassert_always(buffer->getVertexStrider(vertices_start));
-    llassert_always(buffer->getNormalStrider(normals_start));
-    llassert_always(buffer->getTangentStrider(tangents_start));
-    llassert_always(buffer->getTexCoord0Strider(texcoords0_start));
-    llassert_always(buffer->getTexCoord1Strider(texcoords2_start));
-    llassert_always(buffer->getColorStrider(colors_start));   // <WolfViewer>
-    llassert_always(buffer->getIndexStrider(indices_start));
-
-    U32 indices_index = 0;
-    U32 index_offset = 0;
-
+    for (LLSpatialGroup::element_iter drawable_iter = group->getDataBegin(); drawable_iter != group->getDataEnd(); ++drawable_iter)
     {
-        LLStrider<LLVector3> vertices = vertices_start;
-        LLStrider<LLVector3> normals = normals_start;
-        LLStrider<LLVector2> texcoords0 = texcoords0_start;
-        LLStrider<LLVector2> texcoords2 = texcoords2_start;
-        LLStrider<LLColor4U> colors = colors_start;   // <WolfViewer>
-        LLStrider<U16> indices = indices_start;
-
-        for (std::vector<LLFace*>::iterator i = mFaceList.begin(); i != mFaceList.end(); ++i)
+        LLDrawable* drawablep = (LLDrawable*)(*drawable_iter)->getDrawable();
+        if (!drawablep || drawablep->isDead() || drawablep->getNumFaces() < 1)
         {
-            LLFace* facep = *i;
+            continue;
+        }
+        LLFace* facep = drawablep->getFace(0);
+        if (!facep || facep->getVertexBuffer())
+        {
+            continue;   // built, and not dirtied since
+        }
+        LLVOSurfacePatch* objectp = (LLVOSurfacePatch*)facep->getViewerObject();
+        if (!objectp)
+        {
+            continue;
+        }
 
-            facep->setIndicesIndex(indices_index);
-            facep->setGeomIndex(index_offset);
-            facep->setVertexBuffer(buffer);
+        drawablep->updateFaceSize(0);
+        const U32 vertex_count = facep->getGeomCount();
+        const U32 index_count = facep->getIndicesCount();
+        if (vertex_count == 0 || index_count == 0)
+        {
+            continue;
+        }
 
-            LLVOSurfacePatch* patchp = (LLVOSurfacePatch*) facep->getViewerObject();
-            patchp->getTerrainGeometry(vertices, normals, texcoords0, texcoords2, colors, indices);
+        LLPointer<LLVertexBuffer> buffer = new LLVertexBuffer(mVertexDataMask);
+        if (!buffer->allocateBuffer(vertex_count, index_count))
+        {
+            LL_WARNS() << "Failed to allocate Vertex Buffer for a terrain block: "
+                       << vertex_count << " vertices and " << index_count << " indices" << LL_ENDL;
+            continue;
+        }
+        facep->setIndicesIndex(0);
+        facep->setGeomIndex(0);
+        facep->setVertexBuffer(buffer);
 
-            indices_index += facep->getIndicesCount();
-            index_offset += facep->getGeomCount();
+        //get vertex buffer striders
+        LLStrider<LLVector3> vertices_start;
+        LLStrider<LLVector3> normals_start;
+        LLStrider<LLVector4a> tangents_start;
+        LLStrider<LLVector2> texcoords0_start; // ownership overlay
+        LLStrider<LLVector2> texcoords2_start;
+        LLStrider<LLColor4U> colors_start;   // <WolfViewer> heightmap AO
+        LLStrider<U16> indices_start;
+
+        llassert_always(buffer->getVertexStrider(vertices_start));
+        llassert_always(buffer->getNormalStrider(normals_start));
+        llassert_always(buffer->getTangentStrider(tangents_start));
+        llassert_always(buffer->getTexCoord0Strider(texcoords0_start));
+        llassert_always(buffer->getTexCoord1Strider(texcoords2_start));
+        llassert_always(buffer->getColorStrider(colors_start));   // <WolfViewer>
+        llassert_always(buffer->getIndexStrider(indices_start));
+
+        {
+            LLStrider<LLVector3> vertices = vertices_start;
+            LLStrider<LLVector3> normals = normals_start;
+            LLStrider<LLVector2> texcoords0 = texcoords0_start;
+            LLStrider<LLVector2> texcoords2 = texcoords2_start;
+            LLStrider<LLColor4U> colors = colors_start;   // <WolfViewer>
+            LLStrider<U16> indices = indices_start;
+
+            objectp->getTerrainGeometry(vertices, normals, texcoords0, texcoords2, colors, indices);
+        }
+
+        const bool has_tangents = tangents_start.get() != nullptr;
+        if (has_tangents) // <FS:Beq/> FIRE-34672 OPENSIM bugsplat crash (vertex_count > 0 above)
+        {
+            LLStrider<LLVector3> vertices = vertices_start;
+            LLStrider<LLVector3> normals = normals_start;
+            LLStrider<LLVector4a> tangents = tangents_start;
+            LLStrider<U16> indices = indices_start;
+
+            const F32 region_width = objectp->getRegion() ? objectp->getRegion()->getWidth() : 256.f;
+            gen_terrain_tangents(vertex_count, index_count, vertices, normals, tangents, indices, region_width);
         }
     }
-
-    const bool has_tangents = tangents_start.get() != nullptr;
-    if (has_tangents && index_offset > 0) // <FS:Beq/> FIRE-34672 OPENSIM bugsplat crash
-    {
-        LLStrider<LLVector3> vertices = vertices_start;
-        LLStrider<LLVector3> normals = normals_start;
-        LLStrider<LLVector4a> tangents = tangents_start;
-        LLStrider<U16> indices = indices_start;
-
-        F32 region_width = 256.0f;
-        if (mFaceList.empty())
-        {
-            llassert(false);
-        }
-        else
-        {
-            const LLViewerRegion* regionp = mFaceList[0]->getViewerObject()->getRegion();
-            llassert(regionp == mFaceList.back()->getViewerObject()->getRegion()); // Assume this spatial group is confined to one region
-            region_width = regionp->getWidth();
-        }
-        gen_terrain_tangents(index_offset, indices_index, vertices, normals, tangents, indices, region_width);
-    }
-
-    mFaceList.clear();
 }
-
+// </WolfViewer>

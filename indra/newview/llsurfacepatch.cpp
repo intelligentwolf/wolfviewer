@@ -188,16 +188,17 @@ bool LLSurfacePatch::ensureVObj()
     }
     // </FS:Wolf>
 
-    mVObjp = (LLVOSurfacePatch *)gObjectList.createObjectViewer(LLViewerObject::LL_VO_SURFACE_PATCH, mSurfacep->getRegion());
-    if (mVObjp.isNull())
+    // <WolfViewer 2026-09-26> The patch joins its BLOCK's object (llvosurfacepatch.h
+    // WOLF_BLOCK_PATCHES), made by the surface on first use, instead of getting one of its own.
+    LLVOSurfacePatch* blockp = mSurfacep->getBlockObject(mPatchX / LLVOSurfacePatch::WOLF_BLOCK_PATCHES,
+                                                         mPatchY / LLVOSurfacePatch::WOLF_BLOCK_PATCHES, true);
+    if (!blockp)
     {
         return false;
     }
-    mVObjp->setPatch(this);
-    mVObjp->setPositionRegion(mCenterRegion);
-    gPipeline.createObject(mVObjp);
-    mSurfacep->mBuiltPatchObject = true;
-    mSurfacep->mDiagObjectsBuilt++;
+    mVObjp = blockp;
+    blockp->addPatch(this);
+    // </WolfViewer>
 
     // This patch may already be holding terrain data that updateTexture declined to build while
     // there was nothing to build it into, and updateNormals will have skipped it for the same
@@ -387,7 +388,11 @@ void LLSurfacePatch::eval(const U32 x, const U32 y, const U32 stride, LLVector3 
     // Region-local coordinates on a 51,200 m region are a 4 mm float32 grid and the region's
     // ~20 km draw translation jitters with every camera rotation — the same defect the static
     // prims had (llspatialpartition.h mWolfOriginRegion).
-    vertex->set(x * mSurfacep->getMetersPerGrid(), y * mSurfacep->getMetersPerGrid(), pos_agent.mV[VZ]);
+    // <WolfViewer 2026-09-26> ...now BLOCK-local (getBlockOriginRegion): the patch's offset in its
+    // 256 m block plus the grid step, so a whole block draws under one matrix.
+    vertex->set(mOriginRegion.mV[VX] - mBlockOriginRegion.mV[VX] + x * mSurfacep->getMetersPerGrid(),
+                mOriginRegion.mV[VY] - mBlockOriginRegion.mV[VY] + y * mSurfacep->getMetersPerGrid(),
+                pos_agent.mV[VZ]);
 
     // tex0 is used for ownership overlay
     LLVector3 rel_pos = pos_agent - mSurfacep->getOriginAgent();
@@ -1289,6 +1294,10 @@ void LLSurfacePatch::setOriginGlobal(const LLVector3d &origin_global)
     origin_region.setVec(mOriginGlobal - mSurfacep->getOriginGlobal());
 
     mOriginRegion = origin_region;
+    // <WolfViewer 2026-09-26> the 256 m draw block (llsurfacepatch.h getBlockOriginRegion)
+    mBlockOriginRegion.set(floorf(origin_region.mV[VX] / WOLF_TERRAIN_BLOCK_M) * WOLF_TERRAIN_BLOCK_M,
+                           floorf(origin_region.mV[VY] / WOLF_TERRAIN_BLOCK_M) * WOLF_TERRAIN_BLOCK_M,
+                           origin_region.mV[VZ]);
     mCenterRegion.mV[VX] = origin_region.mV[VX] + 0.5f*mSurfacep->getGridsPerPatchEdge()*mSurfacep->getMetersPerGrid();
     mCenterRegion.mV[VY] = origin_region.mV[VY] + 0.5f*mSurfacep->getGridsPerPatchEdge()*mSurfacep->getMetersPerGrid();
 
@@ -1421,6 +1430,12 @@ const LLVector3d &LLSurfacePatch::getOriginGlobal() const
     return mOriginGlobal;
 }
 
+// <WolfViewer 2026-09-26> see llsurfacepatch.h getBlockOriginRegion
+LLVector3d LLSurfacePatch::getBlockOriginGlobal() const
+{
+    return mSurfacep->getOriginGlobal() + LLVector3d(mBlockOriginRegion);
+}
+
 LLVector3 LLSurfacePatch::getOriginAgent() const
 {
     return gAgent.getPosAgentFromGlobal(mOriginGlobal);
@@ -1528,11 +1543,13 @@ LLSurfacePatch *LLSurfacePatch::getNeighborPatch(const U32 direction) const
 // dead, and LLVOSurfacePatch::markDead calls clearVObj() on this patch.
 void LLSurfacePatch::releaseVObj()
 {
-    if (mVObjp.notNull() && !mVObjp->isDead())
-    {
-        gObjectList.killObject(mVObjp);
-    }
+    // <WolfViewer 2026-09-26> Leave the block object; the last patch out kills it.
+    LLPointer<LLVOSurfacePatch> blockp = mVObjp;
     mVObjp = NULL;
+    if (blockp.notNull() && !blockp->isDead() && blockp->removePatch(this) == 0)
+    {
+        gObjectList.killObject(blockp);
+    }
 }
 // </WolfViewer>
 

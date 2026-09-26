@@ -126,6 +126,14 @@ public:
 
     LLVector3 getOriginAgent() const;
     const LLVector3& getOriginRegion() const { return mOriginRegion; }   // <WolfViewer> patch origin, region frame
+    // <WolfViewer 2026-09-26> The 256 m terrain DRAW BLOCK this patch belongs to. Vertices are
+    // block-local (eval) and drawn with T(block origin agent) (LLVOSurfacePatch::wolfRenderMatrix),
+    // so every patch of a block shares one model matrix and one terrain_patch_origin: the draw
+    // loop switches them per block, not per patch (lldrawpoolterrain.cpp drawLoop). Block-local
+    // coordinates stay under 256 m, the range stock region-local terrain has on a 256 m region.
+    static constexpr F32 WOLF_TERRAIN_BLOCK_M = 256.f;
+    const LLVector3& getBlockOriginRegion() const { return mBlockOriginRegion; }
+    LLVector3d getBlockOriginGlobal() const;
     const LLVector3d &getOriginGlobal() const;
     void setOriginGlobal(const LLVector3d &origin_global);
 
@@ -140,6 +148,7 @@ public:
 
 
     bool getVisible() const;
+    void setInvisible() { mVisInfo.mbIsVisible = false; }   // <WolfViewer 2026-09-26/> updateVisibility's out-of-frustum result (LLSurface block cull)
     U32 getRenderStride() const;
     S32 getRenderLevel() const;
 
@@ -199,6 +208,7 @@ protected:
     // pointers to beginnings of patch data fields
     LLVector3d mOriginGlobal;
     LLVector3 mOriginRegion;
+    LLVector3 mBlockOriginRegion;   // <WolfViewer 2026-09-26/> see getBlockOriginRegion
 
 
     // height field stats

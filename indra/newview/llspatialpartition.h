@@ -634,6 +634,7 @@ class LLTerrainPartition : public LLSpatialPartition
 {
 public:
     LLTerrainPartition(LLViewerRegion* regionp);
+    virtual void rebuildGeom(LLSpatialGroup* group);   // <WolfViewer 2026-09-26/> a buffer per block object
     virtual void getGeometry(LLSpatialGroup* group);
 };
 

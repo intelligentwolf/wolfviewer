@@ -30,6 +30,7 @@
 #include "llterraingridoffset.h"
 #include <memory>
 #include <vector>
+#include <unordered_map>
 #include "v3math.h"
 #include "v3dmath.h"
 
@@ -56,6 +57,7 @@ const S32 ABOVE_WATERLINE_ALPHA = 32;  // The alpha of water when the land eleva
 
 class LLViewerRegion;
 class LLSurfacePatch;
+class LLVOSurfacePatch;
 class LLBitPack;
 class LLGroupHeader;
 
@@ -120,6 +122,11 @@ public:
     LLSurfacePatch *findPatch(const S32 x, const S32 y) const;
     // Every patch created so far, in creation order.
     const std::vector<LLSurfacePatch*>& getAllPatches() const  { return mAllPatches; }
+    // <WolfViewer 2026-09-26> The terrain BLOCK objects (LLVOSurfacePatch, one per
+    // WOLF_BLOCK_PATCHES x WOLF_BLOCK_PATCHES patches), by block index. getBlockObject makes one
+    // on first use when create is set; the object calls forgetBlockObject when it dies.
+    LLVOSurfacePatch* getBlockObject(S32 block_i, S32 block_j, bool create);
+    void forgetBlockObject(S32 block_i, S32 block_j, const LLVOSurfacePatch* objectp);
     // Goes up whenever any patch's heights change (LLSurfacePatch::dirtyZ), so a whole-surface
     // "has the terrain changed" test no longer has to visit every patch.
     U64 getTerrainRevision() const                  { return mTerrainRevision; }
@@ -248,6 +255,7 @@ private:
     // pool, so a surface nobody ever looked at legitimately has no pool at destruction. Without
     // this the destructor warns about that every time.
     bool        mBuiltPatchObject = false;
+    std::unordered_map<U64, LLVOSurfacePatch*> mBlockObjects;   // <WolfViewer 2026-09-26/> getBlockObject
 
 public:
     // <FS:Wolf> Terrain diagnostics for very large varregions.

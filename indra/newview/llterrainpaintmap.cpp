@@ -220,7 +220,7 @@ bool LLTerrainPaintMap::bakeHeightNoiseIntoPBRPaintMapRGB(const LLViewerRegion& 
                         LLVector2 tex0_temp;
                         LLVector2 tex1_temp;
                         patch->eval(i, j, stride, &pos3, &scratch3, &tex0_temp, &tex1_temp);
-                        pos3 += patch->getOriginRegion();   // <WolfViewer> eval() is patch-local; the bake wants region coords
+                        pos3 += patch->getBlockOriginRegion();   // <WolfViewer> eval() is block-local (2026-09-26); the bake wants region coords
                         (*pos++).set(pos3.mV[VX], pos3.mV[VY], pos3.mV[VZ]);
                         *tex1++ = tex1_temp;
                         vertex_total++;

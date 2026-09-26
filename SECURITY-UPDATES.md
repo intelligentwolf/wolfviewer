@@ -1,4 +1,4 @@
-# WolfViewer security updates — 7.2.4 w48 "Fanatical Frog"
+# WolfViewer security updates — "Fanatical Frog" (w48)
 
 This release replaces most of the third-party libraries WolfViewer inherited from the
 Firestorm / Second Life viewer build with current, patched versions, and fixes several

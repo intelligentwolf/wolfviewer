@@ -566,6 +566,24 @@ void LLDrawPoolWater::pushWaterPlanes(int pass)
             // pointer but lie elsewhere, and bounded / stream surfaces have their own rules.
             // Source: wolfstorm terrain_manager.js — fields are per region water mesh.
             LLViewerRegion* rgn = water->getRegion();
+            // <WolfViewer 2026-09-26> The swell converges on the centre of the region this
+            // water belongs to (waterV.glsl wolfSwellCentre). Hole and edge planes carry the
+            // agent region's pointer (llworld.cpp updateWaterObjects), so they roll in toward it.
+            {
+                static LLStaticHashedString s_swell_centre("wolfSwellCentre");
+                static LLStaticHashedString s_swell_half("wolfSwellHalf");
+                if (rgn)
+                {
+                    const LLVector3 o = rgn->getOriginAgent();
+                    const F32 half = rgn->getWidth() * 0.5f;
+                    cur_shader->uniform2f(s_swell_centre, o.mV[VX] + half, o.mV[VY] + half);
+                    cur_shader->uniform1f(s_swell_half, half);
+                }
+                else
+                {
+                    cur_shader->uniform1f(s_swell_half, 0.f);   // no region: the EEP heading
+                }
+            }
             const bool own_plane = rgn && !water->getIsEdgePatch() && water->getBoundedWaterDepth() <= 0.f
                                 && !water->hasConformingMesh() && water->getWaterfall() <= 0.f
                                 && rgn->getLand().getWaterObj() == water;

@@ -141,6 +141,9 @@ uniform float fresnelOffset;
 // the region asked for.
 uniform float waveAmplitude;
 uniform vec2 waveDir1;
+// <WolfViewer 2026-09-26> the swell converges on its region's centre (waterV.glsl)
+uniform vec2 wolfSwellCentre;
+uniform float wolfSwellHalf;
 // The same wave clock waterV.glsl runs on (LLDrawPoolWater uploads WATER_TIME once for the
 // whole program), so the shoreline sets keep step with the swell geometry.
 uniform float time;
@@ -284,6 +287,17 @@ float swellFoldFraction(vec2 p, float t)
 {
     float baseWl = 1.0 / (waveFrequency + 0.001);
     vec2 d1 = normalize(waveDir1);
+    // <WolfViewer 2026-09-26> same direction and phase origin as waterV.glsl's swell
+    if (wolfSwellHalf > 0.0)
+    {
+        vec2 rel = p - wolfSwellCentre;
+        float r = length(rel);
+        if (r > 0.5)
+        {
+            d1 = -rel / r;
+        }
+        p = rel;
+    }
     vec2 d2 = vec2(d1.x * 0.819 - d1.y * 0.574, d1.x * 0.574 + d1.y * 0.819);
     vec2 d3 = vec2(d1.x * 0.5 + d1.y * 0.866, -d1.x * 0.866 + d1.y * 0.5);
     float A = vSwell.x;
@@ -542,9 +556,19 @@ void main()
 
     refPos = getPositionWithNDC(vec3(distort2 * 2.0 - vec2(1.0), depth * 2.0 - 1.0));
 
+    // <WolfViewer 2026-09-26> the bottom the foam depth is measured to (see below)
+    vec3 wolfBottom = refPos;
     if (pos.z < refPos.z - 0.05)
     {
         distort2 = distort;
+        // <WolfViewer 2026-09-26> The wave-distorted sample landed on something IN FRONT of
+        // the water — an avatar, a wall rising out of it. Stock falls back to the undistorted
+        // coordinate for the colour but kept refPos, and the depth below then came out
+        // negative, clamped to 0: "zero-depth" water, i.e. full shoreline foam, flickering
+        // white round every silhouette as the waves moved the distortion (Paul 09-26: "a
+        // white flash around my avatar when the waves come in and buildings"). Measure the
+        // foam depth at the fragment's own pixel instead, where nothing can be in front.
+        wolfBottom = getPositionWithNDC(vec3(distort * 2.0 - vec2(1.0), texture(depthMap, distort).r * 2.0 - 1.0));
     }
 
     // <FS:WolfViewer> refPos is the geometry seen THROUGH the water, unprojected from the
@@ -553,7 +577,9 @@ void main()
     // a true depth — it reads the actual seabed, riverbed or pool floor, including prims —
     // and it costs nothing, because the two positions are already computed above for the
     // refraction blend.
-    wolf_water_depth = max(0.0, pos.z - refPos.z);
+    // <WolfViewer 2026-09-26> A bottom still in front of the surface is not a bottom: count
+    // the water as deep (no foam) rather than as zero-depth (all foam).
+    wolf_water_depth = (pos.z < wolfBottom.z - 0.05) ? 1e6 : max(0.0, pos.z - wolfBottom.z);
     // </FS:WolfViewer>
 
     vec4 fb = texture(screenTex, distort2);

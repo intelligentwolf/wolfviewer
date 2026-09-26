@@ -677,7 +677,34 @@ WolfBoatRock::Sample WolfBoatRock::sampleWave(const LLViewerObject* objectp, F32
         {
             d1.set(1.04999f, -0.42000f);
         }
-        const F32 local_amp = amp * 0.5f * swell_scale;
+        F32 local_amp = amp * 0.5f * swell_scale;
+        // <WolfViewer 2026-09-26> Mirror of waterV.glsl: the swell converges on the centre of
+        // the region the water belongs to (the hull's region — its own water plane), phased on
+        // the position relative to that centre, calmed within 32 m of the region edge and two
+        // wavelengths of the centre (lldrawpoolwater.cpp wolfSwellCentre / wolfSwellHalf).
+        F32 px = ax, py = ay;
+        if (regionp)
+        {
+            const LLVector3 o = regionp->getOriginAgent();
+            const F32 half = regionp->getWidth() * 0.5f;
+            const F32 relx = ax - (o.mV[VX] + half), rely = ay - (o.mV[VY] + half);
+            const F32 r = sqrtf(relx * relx + rely * rely);
+            const F32 qx = fabsf(relx) - half, qy = fabsf(rely) - half;
+            const F32 to_edge = (qx < 0.f && qy < 0.f) ? llmin(-qx, -qy)
+                                                      : sqrtf(llmax(qx, 0.f) * llmax(qx, 0.f) + llmax(qy, 0.f) * llmax(qy, 0.f));
+            auto smooth = [](F32 e0, F32 e1, F32 x)
+            {
+                const F32 t = llclamp((x - e0) / (e1 - e0), 0.f, 1.f);
+                return t * t * (3.f - 2.f * t);   // GLSL smoothstep
+            };
+            local_amp *= smooth(0.f, 32.f, to_edge) * smooth(0.f, 4.f * base_wl, r);
+            if (r > 0.5f)
+            {
+                d1.set(-relx / r, -rely / r);
+            }
+            px = relx;
+            py = rely;
+        }
         // Source: waterV.glsl:352-355 dir2/dir3 rotation constants (+35 / -60 degrees).
         const F32 d1x = d1.mV[VX], d1y = d1.mV[VY];
         const LLVector2 dir2(d1x * 0.819f - d1y * 0.574f, d1x * 0.574f + d1y * 0.819f);
@@ -691,7 +718,7 @@ WolfBoatRock::Sample WolfBoatRock::sampleWave(const LLViewerObject* objectp, F32
             F32 len = d.length();
             if (len <= 0.f) len = 1.f;
             const F32 dx = d.mV[VX] / len, dy = d.mV[VY] / len;
-            const F32 f = k * (dx * ax + dy * ay - c * t * speed);
+            const F32 f = k * (dx * px + dy * py - c * t * speed);
             out.mZ += A * sinf(f);
             const F32 s = A * k * cosf(f);
             out.mSx += dx * s;

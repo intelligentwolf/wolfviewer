@@ -129,6 +129,13 @@ uniform float wolfTerrainLod;
 uniform float stormChaos;
 uniform float maxWaveHeight;
 uniform vec2 wolfRegionOrigin;
+// <WolfViewer 2026-09-26> SWELL TOWARD THE REGION CENTRE (Paul: "waves should ALWAYS travel
+// towards the center of the region" — the next region's waves pointed the way of the one the
+// agent stood in, because the swell ran on one EEP compass heading for every region). The
+// agent-space centre and half width of the region this water belongs to, per plane
+// (lldrawpoolwater.cpp); wolfSwellHalf 0 = no region: keep the EEP heading.
+uniform vec2 wolfSwellCentre;
+uniform float wolfSwellHalf;
 uniform vec2 depthRegionSize;
 // <WolfViewer 2026-09-20> region-space origin of the depth field: (0,0) for a whole-region
 // bake, the camera window's corner on regions wider than 2048 m (wolfwaterfield.cpp fieldWindow).
@@ -500,12 +507,39 @@ void main()
             float localAmp = waveAmplitude * localVariation * fade * swellScale;
 
             float baseWavelength = 1.0 / (waveFrequency + 0.001);
+
+            // <WolfViewer 2026-09-26> The swell converges on the region's centre: phased on the
+            // position RELATIVE to the centre with d = the unit vector toward it, dot(d, rel) is
+            // minus the distance, so the crests are rings rolling inward. Each region has its own
+            // rings, which do not line up with the next region's, so the swell calms to nothing
+            // within SWELL_EDGE_CALM m of every region edge (inside and in the open-sea planes
+            // round it, so both sides of a border are flat and nothing tears), and within two
+            // wavelengths of the centre, where the rings would pile into a point.
+            // wolfboatrock.cpp sampleWave mirrors this term for term; waterF.glsl
+            // swellFoldFraction uses the same directions and phase.
+            vec2 swellPos = wxy;
+            vec2 swellDir = normalize(waveDir1);
+            if (wolfSwellHalf > 0.0)
+            {
+                const float SWELL_EDGE_CALM = 32.0;
+                vec2 rel = wxy - wolfSwellCentre;
+                float r = length(rel);
+                vec2 q = abs(rel) - vec2(wolfSwellHalf);
+                float toEdge = (q.x < 0.0 && q.y < 0.0) ? min(-q.x, -q.y) : length(max(q, vec2(0.0)));
+                localAmp *= smoothstep(0.0, SWELL_EDGE_CALM, toEdge)
+                          * smoothstep(0.0, 4.0 * baseWavelength, r);
+                if (r > 0.5)
+                {
+                    swellDir = -rel / r;
+                }
+                swellPos = rel;
+            }
             float wavelengthJitter = 1.0 + stormChaos * 0.3 * snoise(wxy * 0.001 + time * 0.01);
             vSwell.xy = vec2(localAmp, wavelengthJitter);
 
             // Primary swell direction is the region's own EEP wave direction, so a region
             // that sets its water rolling one way gets its geometry rolling that way too.
-            vec2 dir1 = normalize(waveDir1);
+            vec2 dir1 = swellDir;
             // +35 degrees and -60 degrees off the primary: a real sea is several trains
             // crossing, not one.
             vec2 dir2 = vec2(dir1.x * 0.819 - dir1.y * 0.574,
@@ -515,14 +549,14 @@ void main()
             vec2 dir5 = vec2(-dir1.x * 0.5 - dir1.y * 0.866,
                               dir1.x * 0.866 - dir1.y * 0.5);
 
-            vec3 w1 = gerstnerWave(wxy, baseWavelength * 2.0 * wavelengthJitter, localAmp * 0.40, dir1, 0.65, numWaves);
-            vec3 w2 = gerstnerWave(wxy, baseWavelength * 1.5 * wavelengthJitter, localAmp * 0.30, dir2, 0.55, numWaves);
-            vec3 w3 = gerstnerWave(wxy, baseWavelength * 1.2,                    localAmp * 0.25, dir3, 0.50, numWaves);
+            vec3 w1 = gerstnerWave(swellPos, baseWavelength * 2.0 * wavelengthJitter, localAmp * 0.40, dir1, 0.65, numWaves);
+            vec3 w2 = gerstnerWave(swellPos, baseWavelength * 1.5 * wavelengthJitter, localAmp * 0.30, dir2, 0.55, numWaves);
+            vec3 w3 = gerstnerWave(swellPos, baseWavelength * 1.2,                    localAmp * 0.25, dir3, 0.50, numWaves);
             float oppositeAmp = localAmp * (0.15 + stormChaos * 0.15) * chopKeep;
-            vec3 w4 = gerstnerWave(wxy, baseWavelength * 0.8,                    oppositeAmp, -dir1 * 0.7 + dir2 * 0.3, 0.45, numWaves);
-            vec3 w5 = gerstnerWave(wxy, baseWavelength * 0.5,                    localAmp * 0.15 * chopKeep, dir5, 0.35, numWaves);
+            vec3 w4 = gerstnerWave(swellPos, baseWavelength * 0.8,                    oppositeAmp, -dir1 * 0.7 + dir2 * 0.3, 0.45, numWaves);
+            vec3 w5 = gerstnerWave(swellPos, baseWavelength * 0.5,                    localAmp * 0.15 * chopKeep, dir5, 0.35, numWaves);
             float chopAmp = localAmp * (0.08 + stormChaos * 0.12) * chopKeep;
-            vec3 w6 = gerstnerWave(wxy, baseWavelength * 0.3,                    chopAmp, dir3 * 0.6 - dir2 * 0.4, 0.25, numWaves);
+            vec3 w6 = gerstnerWave(swellPos, baseWavelength * 0.3,                    chopAmp, dir3 * 0.6 - dir2 * 0.4, 0.25, numWaves);
             vec3 w7 = vec3(0.0);
             vec3 w8 = vec3(0.0);
             if (stormChaos > 0.1)
@@ -537,9 +571,9 @@ void main()
             total.z += fbm(wxy * 0.02, time) * localAmp * (0.1 + stormChaos * 0.1) * chopKeep;
 
             // Slopes of the three dominant trains, same arguments as their waves above.
-            wave_slope = gerstnerSlope(wxy, baseWavelength * 2.0 * wavelengthJitter, localAmp * 0.40, dir1)
-                       + gerstnerSlope(wxy, baseWavelength * 1.5 * wavelengthJitter, localAmp * 0.30, dir2)
-                       + gerstnerSlope(wxy, baseWavelength * 1.2,                    localAmp * 0.25, dir3);
+            wave_slope = gerstnerSlope(swellPos, baseWavelength * 2.0 * wavelengthJitter, localAmp * 0.40, dir1)
+                       + gerstnerSlope(swellPos, baseWavelength * 1.5 * wavelengthJitter, localAmp * 0.30, dir2)
+                       + gerstnerSlope(swellPos, baseWavelength * 1.2,                    localAmp * 0.25, dir3);
 
             // Backstop, not the height (2.5x the amplitude from lldrawpoolwater.cpp).
             if (maxWaveHeight > 0.0)

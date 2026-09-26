@@ -31,8 +31,10 @@ namespace WolfVehicle
     // Lowest gear first (touch_controls.js GEARS): PageUp steps up, PageDown steps down.
     enum EGear { GEAR_R = 0, GEAR_N = 1, GEAR_D = 2 };
 
-    /** The Move floater is open on its Vehicle tab — the keyboard hooks apply only then. */
+    /** The Move floater is open on its Vehicle tab — the keyboard mirror applies only then. */
     bool    active();
+    /** Registers the per-frame step for the on-screen pedals (once; LLFloaterMove::postBuild). */
+    void    init();
 
     EGear   gear();
     /** Put the lever in `g`. When `send_to_vehicle` and seated, one PageUp / PageDown tap per
@@ -40,35 +42,15 @@ namespace WolfVehicle
     void    setGear(EGear g, bool send_to_vehicle);
     void    shiftGear(S32 steps, bool send_to_vehicle);
 
-    /** Registers the per-frame drive step (once; LLFloaterMove::postBuild). */
-    void    init();
-
-    /** Mouse driving (see the .cpp header). A world click the UI did not take: true when the
-     *  Vehicle tab has consumed it (left = accelerator, right = brake). */
-    bool    handleWorldMouse(EMouseClickType click, bool down);
-    /** Any button-up, wherever the pointer is, ends that button's pedal. */
-    void    handleMouseUpAnywhere(EMouseClickType click);
-    /** Once a frame from LLViewerWindow::updateUI: did the hover reach the world, and where. */
-    void    noteMouseOverWorld(bool over, S32 x);
-    /** The mouse over the world is steering; `turn` is -1..1 (for drawing the wheel). */
-    bool    mouseSteering(F32& turn);
-
-    /** Pedal state for drawing, from every source (mouse, keyboard, on-screen). */
+    /** Drawing state from every source: on-screen pedals and the Up/W, Down/S keys. */
     bool    accelDown();
     bool    brakeDown();
     void    setScreenPedal(bool brake, bool held);
+    S32     keyboardSteerDir();   // -1, 0 or +1 from Left/A, Right/D
 
-    /** Keyboard state for drawing: Up / W holding the pedal, Left / Right steering. */
-    void    noteKeyboardPedal(bool held);
-    bool    keyboardPedalHeld();
-    void    noteKeyboardSteer(S32 dir, bool held);   // dir -1 left, +1 right
-    S32     keyboardSteerDir();                       // -1, 0 or +1
-
-    /** Called from LLViewerInput::scanKey for every key before its binding runs. Returns
-     *  true when the Vehicle tab has consumed the key; `redirect` is set to another key whose
-     *  binding should run instead (Up / W in R runs Down / S). */
-    bool    handleScanKey(KEY key, MASK mask, bool key_down, bool key_up, bool key_level,
-                          bool repeat, KEY& redirect);
+    /** Called from LLViewerInput::scanKey for every key before its binding runs. Only
+     *  watches — the Vehicle tab reflects the keys, it never consumes or changes them. */
+    void    noteScanKey(KEY key, MASK mask, bool key_down, bool key_up, bool key_level, bool repeat);
 }
 
 /**
@@ -101,10 +83,9 @@ private:
 };
 
 /**
- * Accelerator or brake pedal (wolf_brake="true"). Held, it drives in the lever's direction
- * (accelerator) or against it (brake) — the per-frame work is WolfVehicle's drive step, so a
- * held pedal, a held mouse button over the world and Up / W all end up in one place. It also
- * lights whenever any of those has it down.
+ * Accelerator (moveAt +1) or brake (wolf_brake="true", moveAt -1) pedal, held with the
+ * pointer; the per-frame work is WolfVehicle's drive step so the brake can win. It also lights
+ * while Up / W (accelerator) or Down / S (brake) is held.
  */
 class WolfPedal : public LLButton
 {

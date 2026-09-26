@@ -1726,21 +1726,10 @@ bool LLViewerInput::scanKey(KEY key, bool key_down, bool key_up, bool key_level)
     // don't process key down on repeated keys
     bool repeat = gKeyboard->getKeyRepeated(key);
 
-    // <WolfViewer 2026-09-25> Move floater Vehicle tab: Up / W is the accelerator (follows
-    // the D / N / R lever), PageUp / PageDown shift the lever, Left / Right turn the drawn
-    // wheel. After the mKeyHandledByUI bail, so typing in chat is never touched. See
-    // wolfvehiclecontrols.cpp for the full table.
-    KEY redirect = KEY_NONE;
-    if (WolfVehicle::handleScanKey(key, mask, key_down, key_up, key_level, repeat, redirect))
-    {
-        return true;
-    }
-    if (redirect != KEY_NONE)
-    {
-        // Gear R: the pedal key runs the reverse key's own binding in this mode (push_backward
-        // on foot, move_backward_sitting on a vehicle), so it behaves exactly like Down / S.
-        key = redirect;
-    }
+    // <WolfViewer 2026-09-26> Move floater Vehicle tab: the pedals, wheel and gear lever show
+    // the driving keys. Only watches — every key goes on to its binding below unchanged.
+    // After the mKeyHandledByUI bail, so typing in chat never lights anything.
+    WolfVehicle::noteScanKey(key, mask, key_down, key_up, key_level, repeat);
     // </WolfViewer>
 
     bool res = scanKey(mKeyBindings[mode], static_cast<S32>(mKeyBindings[mode].size()), key, mask, key_down, key_up, key_level, repeat);

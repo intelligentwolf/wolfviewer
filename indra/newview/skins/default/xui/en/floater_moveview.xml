@@ -103,9 +103,8 @@
          names, images and tool tips), scaled up to the floater's width. llmoveview.cpp
          flips the panes and remembers the choice in WolfMoveControlsButtons /
          WolfMoveControlsVehicle. "Vehicle" (after WolfStorm's Vehicle tab) is a steering
-         wheel, a D / N / R gear lever, a brake and an accelerator — wolfvehiclecontrols.cpp.
-         While it shows, the mouse over the world drives: left button accelerates, right
-         brakes, left / right of the centre steers.
+         wheel, a D / N / R gear lever, a brake and an accelerator that show the driving keys
+         (Up / W, Down / S, Left / Right, Page Up / Down) — wolfvehiclecontrols.cpp.
          The walk / run / fly row (and the Stand / Stop Flying dock in modes_container) is
          shared. -->
     <panel
@@ -458,7 +457,7 @@
              layout="topleft"
              left="0"
              name="steering wheel"
-             tool_tip="Steering wheel: move the mouse left or right over the world (or drag this wheel, or Left / Right Arrow, A / D)"
+             tool_tip="Steering wheel: turns with Left / Right Arrow or A / D (or drag it left or right)"
              top="4"
              width="96"/>
             <button
@@ -478,7 +477,7 @@
              layout="topleft"
              left="100"
              name="gear_n_btn"
-             tool_tip="Neutral: the pedals do nothing"
+             tool_tip="Neutral"
              top="37"
              width="28"/>
             <button
@@ -498,7 +497,7 @@
              layout="topleft"
              left="132"
              name="brake"
-             tool_tip="Brake: hold the right mouse button over the world (or hold this pedal)"
+             tool_tip="Brake: lights with Down Arrow or S (or hold it to go back)"
              top="36"
              width="24"/>
             <wolf_pedal
@@ -507,7 +506,7 @@
              layout="topleft"
              left="160"
              name="accelerator"
-             tool_tip="Accelerator: hold the left mouse button over the world — forward in D, backward in R, nothing in N (or hold this pedal, or Up Arrow / W)"
+             tool_tip="Accelerator: lights with Up Arrow or W (or hold it to go forward)"
              top="4"
              width="26"/>
         </panel>

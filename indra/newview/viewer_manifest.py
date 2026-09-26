@@ -2249,6 +2249,13 @@ class LinuxManifest(ViewerManifest):
             #self.fs_path("libminizip.so")
             self.path("libuuid.so*")
             self.path("libSDL*.so*")
+            # <WolfViewer> Native Wayland title bar on GNOME: libdecor and its cairo plugin come in
+            # the SDL2 package (intelligentwolf/3p-sdl2). The plugin directory must hold nothing
+            # else, since libdecor dlopens every .so in it; wrapper.sh points
+            # LIBDECOR_PLUGIN_DIR at it.
+            self.path("libdecor-0.so*")
+            with self.prefix(src_dst="libdecor-plugins"):
+                self.path("libdecor-cairo.so")
             self.path_optional("libdirectfb*.so*")
             self.path_optional("libfusion*.so*")
             self.path_optional("libdirect*.so*")

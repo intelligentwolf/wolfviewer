@@ -136,6 +136,14 @@ export SAVED_LD_LIBRARY_PATH="${LD_LIBRARY_PATH}"
 if ! test -f FS_No_LD_Hacks.txt; then
 
 export LD_LIBRARY_PATH="$PWD/lib:${LD_LIBRARY_PATH}"
+
+# <WolfViewer> Native Wayland (opt-in) on GNOME gets its title bar from libdecor, and libdecor
+# draws nothing without a plugin ("falling back on no decorations", libdecor.c libdecor_new).
+# lib/ ships libdecor-0.so.0 (found first through LD_LIBRARY_PATH above) and its cairo plugin
+# alone in lib/libdecor-plugins; the plugin path built into libdecor is the CI build directory.
+if [ -z "${LIBDECOR_PLUGIN_DIR}" ] && [ -d "$PWD/lib/libdecor-plugins" ]; then
+	export LIBDECOR_PLUGIN_DIR="$PWD/lib/libdecor-plugins"
+fi
 # AO: experimentally removing to allow --settings on the command line w/o error. FIRE-1031
 #export SL_OPT="`cat etc/gridargs.dat` $@"
 

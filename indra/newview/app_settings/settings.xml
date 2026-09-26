@@ -27299,7 +27299,7 @@ Change of this parameter will affect the layout of buttons in notification toast
     <key>WolfNativeWayland</key>
     <map>
       <key>Comment</key>
-      <string>Linux: on a Wayland desktop, run as a native Wayland window instead of through XWayland (takes effect on restart). Setting SDL_VIDEODRIVER overrides this. Off by default: the bundled SDL has no libdecor, so on GNOME the native window has no title bar.</string>
+      <string>Linux: on a Wayland desktop, run as a native Wayland window instead of through XWayland (takes effect on restart). Setting SDL_VIDEODRIVER overrides this. Off by default (older Linux desktops); users opt in. On GNOME the title bar comes from the bundled libdecor (lib/, lib/libdecor-plugins, wrapper.sh).</string>
       <key>Persist</key>
       <integer>1</integer>
       <key>Type</key>

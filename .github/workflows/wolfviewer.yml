@@ -30,7 +30,7 @@ env:
   # stays because it has to — viewerRes.rc:145 FILEVERSION must be numeric, and wolfupdate parses
   # "-wN" out of the tag to decide whether a newer release exists — but it is no longer the thing
   # anyone is asked to quote. Keep the tag as v7.2.4-wN-<name> so both halves survive.
-  release_name: "Driving Dawg"
+  release_name: "Fanatical Frog"
 
 jobs:
   # [2026-09-22] The matrix is built here so workflow_dispatch can ask for ONE platform.

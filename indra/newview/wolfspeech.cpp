@@ -143,6 +143,14 @@ void WolfSpeech::idle()
         {
             if (now >= it->mDeleteAt)
             {
+                // <WolfViewer 2026-09-26> Every line is played under a fresh UUID, and the
+                // engine keeps an LLAudioData for each one it is asked to play
+                // (llaudioengine.cpp getAudioData) until removeAudioData — so drop it with the
+                // file, or the map grows by one entry per line spoken.
+                if (gAudiop)
+                {
+                    gAudiop->removeAudioData(it->mId);
+                }
                 LLFile::remove(it->mPath);
                 it = mPlayed.erase(it);
             }
@@ -731,7 +739,7 @@ void WolfSpeech::onSynthesised(bool ok, S32 status, const LLSD::Binary& wav, con
     // A short gap between lines reads as punctuation; the file lives well past its playback
     // so the engine's own loading can never race the delete.
     mSpeakingUntil = now + seconds + 0.25;
-    mPlayed.push_back({ path, now + seconds + 30.0 });
+    mPlayed.push_back({ path, now + seconds + 30.0, id });
 }
 
 // Duration of a RIFF/WAVE PCM file from its fmt and data chunks; 0 if not parseable.

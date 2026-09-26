@@ -346,6 +346,11 @@ void WolfRegionWeather::fetchCoro(std::string region_id, bool include_parcel, F3
         return;
     }
     self.mAcceptedFetchSerial = fetch_serial;
+    // <WolfViewer 2026-09-26> Every outcome from here on — a row, no row, an error — is this
+    // visit's answer (answeredThisVisit). The rest of this coroutine applies it without
+    // yielding, so by the next frame the weather it implies is in effect.
+    self.mAnsweredGeneration = region_generation;
+    self.mAnsweredValid = true;
     if (!status)
     {
         // Off grid, offline, or the service having a moment. Not worth a dialog: the user did not

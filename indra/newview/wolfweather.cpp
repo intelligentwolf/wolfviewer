@@ -38,6 +38,7 @@
 #include "llviewerpartsim.h"
 #include "llviewertexture.h"
 #include "llvoavatar.h"        // LLViewerPartSource holds an LLPointer<LLVOAvatar>: the destructor needs the complete type
+#include "wolfgrid.h"            // <WolfViewer 2026-09-26/> snow cover region settle
 #include "wolfobjectprops.h"
 #include "wolfregionweather.h"
 #include "wolfweathersound.h"
@@ -569,6 +570,7 @@ void WolfWeather::idle()
     {
         mNextSweep = now + SWEEP_INTERVAL_SECS;
         sweep();
+        ++mSweepCount;   // <WolfViewer 2026-09-26/> snow cover region settle
     }
     // [WEATHER 2026-09-12] The region's own answer, and the sound that goes with the sky.
     WolfRegionWeather::instance().idle();
@@ -599,6 +601,47 @@ void WolfWeather::updateSnowCover(F64 now)
     const F32 dt = mCoverLast > 0.0 ? (F32)llclamp(now - mCoverLast, 0.0, 0.5) : 0.f;
     mCoverLast = now;
     const bool snowing = mActive.mKind == WolfWeatherProfile::SNOW && mSource.notNull() && !mSource->isDead();
+
+    // <WolfViewer 2026-09-26> Region change: hold the cover until the destination's weather is
+    // known, then keep it (snowing there too) or clear it (not). See mCoverRegion in the header.
+    LLViewerRegion* regionp = gAgent.getRegion();
+    const U64 handle = regionp ? regionp->getHandle() : 0;
+    if (handle != mCoverRegion)
+    {
+        if (mSnowCover <= 0.f)
+        {
+            mCoverRegion = handle;   // nothing on the ground to carry or clear
+            mCoverPending = false;
+        }
+        else if (!mCoverPending)
+        {
+            mCoverPending = true;
+            mCoverPendingSince = now;
+            mCoverPendingSweep = mSweepCount;
+        }
+    }
+    if (mCoverPending)
+    {
+        const bool answered = !WolfGrid::isWolfTerritories()
+                           || WolfRegionWeather::instance().answeredThisVisit();
+        const bool swept = mSweepCount > mCoverPendingSweep;   // the parcel prims were looked at
+        if (!(answered && swept) && now - mCoverPendingSince < COVER_SETTLE_MAX_SECS)
+        {
+            return;   // held: not building, not melting
+        }
+        mCoverPending = false;
+        mCoverRegion = handle;
+        if (!snowing)
+        {
+            LL_INFOS("WolfWeather") << "snow cover cleared: it does not snow in the region we moved to ("
+                                    << (S32)(mSnowCover * 100.f) << "% left behind)" << LL_ENDL;
+            mSnowCover = 0.f;
+            return;
+        }
+        LL_INFOS("WolfWeather") << "snow cover kept: it snows in the region we moved to too" << LL_ENDL;
+    }
+    // </WolfViewer>
+
     const F32 before = mSnowCover;
     mSnowCover = snowCoverStep(mSnowCover, snowing, mActive.mLevel, dt);
     if (mSnowCover > 0.f && gAgent.getRegion()) updateShelter();

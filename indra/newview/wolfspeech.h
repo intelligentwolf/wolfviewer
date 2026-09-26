@@ -154,6 +154,7 @@ private:
     {
         std::string mPath;
         F64         mDeleteAt;
+        LLUUID      mId;        // <WolfViewer 2026-09-26/> the engine's LLAudioData key, dropped with the file
     };
     std::vector<Played>     mPlayed;
 };

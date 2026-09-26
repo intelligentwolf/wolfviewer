@@ -167,7 +167,10 @@ void WolfObjectProps::idle()
         LL_INFOS("WolfObjectProps") << "props: " << mProps.size() << " objects answered, "
                                     << mAsked.size() << " asked, " << mLastSent
                                     << " request(s) sent last drain, " << mSentTotal
-                                    << " sent this region (" << mRefreshedTotal
+                                    // <WolfViewer 2026-09-26> these totals are never reset
+                                    // (reset() clears only the per-region queues), so they
+                                    // are since login — the old label said "this region".
+                                    << " sent since login (" << mRefreshedTotal
                                     << " refresh) over " << mDrains << " drains" << LL_ENDL;
     }
 }

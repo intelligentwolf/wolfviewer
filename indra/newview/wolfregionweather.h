@@ -84,6 +84,10 @@ public:
 
     /** True when this region is known to the grid — the only case the tab exists. */
     bool onGrid() const { return mHaveRow; }
+    /** <WolfViewer 2026-09-26> The grid has answered (row, no row, or error) since the agent
+     *  arrived in this region — WolfWeather waits for it before deciding what happens to the
+     *  snow already on the ground. */
+    bool answeredThisVisit() const { return mAnsweredValid && mRegionGate.accepts(mAnsweredGeneration); }
 
     /**
      * The region's stored profile, complete. Usable even when the region has no opinion about
@@ -177,6 +181,8 @@ private:
     F32                mParcelX = 0.f;
     F32                mParcelY = 0.f;
     WolfWeatherAsyncGate mRegionGate;
+    WolfWeatherAsyncGate::generation_t mAnsweredGeneration = 0;   // <WolfViewer 2026-09-26/>
+    bool mAnsweredValid = false;
     WolfWeatherAsyncGate mParcelGate;
     U64                mNextFetchSerial = 0;
     U64                mAcceptedFetchSerial = 0;

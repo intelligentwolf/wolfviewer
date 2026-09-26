@@ -176,6 +176,15 @@ void WolfWakeField::update(F32 dt)
             boats.push_back(obj);
         }
     }
+    // <WolfViewer 2026-09-26> Forget boats that have gone (derezzed, left, stopped floating):
+    // mBoats used to keep one entry per boat ever seen until the next region change.
+    for (auto it = mBoats.begin(); it != mBoats.end();)
+    {
+        const U32 local_id = it->first;
+        const bool live = std::any_of(boats.begin(), boats.end(),
+                                      [local_id](LLViewerObject* b) { return b->getLocalID() == local_id; });
+        it = live ? std::next(it) : mBoats.erase(it);
+    }
     // Early-out once the field has provably faded (several half-lives with no boat).
     mIdleSecs = boats.empty() ? mIdleSecs + dt : 0.f;
     const F32 settle_secs = llmax(FOAM_HALF_LIFE, CREST_HALF_LIFE) * 4.f;

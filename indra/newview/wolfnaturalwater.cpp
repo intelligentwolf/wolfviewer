@@ -67,6 +67,7 @@ void WolfNaturalWater::reset()
         killSurfaces(kv.second.mSurfaces);
     }
     mRegions.clear();
+    mLoggedDecimation.clear();   // <WolfViewer 2026-09-26/> bounded with mRegions
 }
 
 // Changes whenever any patch of the region's surface was updated (terrain edits, new
@@ -123,6 +124,7 @@ void WolfNaturalWater::idle()
             continue;
         }
         killSurfaces(it->second.mSurfaces);
+        mLoggedDecimation.erase(it->first);   // <WolfViewer 2026-09-26/> told again on a later visit
         it = mRegions.erase(it);
     }
     LLViewerRegion* regionp = nearby.front();   // the agent's region

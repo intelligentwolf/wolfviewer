@@ -235,6 +235,18 @@ private:
     void updateShelter();
     F32  mSnowCover = 0.f;
     F64  mCoverLast = 0.0;
+    // <WolfViewer 2026-09-26> The snow on the ground belongs to the region it fell in. After a
+    // region change it is HELD (neither building nor melting) until the new region's weather
+    // is known — the grid has answered and a parcel sweep has run — then kept if it snows
+    // there too, or cleared at once if not. Before this it melted for MELT_SECS (8 minutes)
+    // wherever the resident went (reported by a resident, 2026-09-26: "when one jumps from a region it
+    // has the snow covered ... to one it has not, one still can see the snow").
+    static constexpr F64 COVER_SETTLE_MAX_SECS = 15.0;   // give up waiting for an answer
+    U64  mCoverRegion = 0;         // region handle the cover belongs to
+    bool mCoverPending = false;
+    F64  mCoverPendingSince = 0.0;
+    U32  mCoverPendingSweep = 0;
+    U32  mSweepCount = 0;
     F32  mShelterZ[SHELTER_N * SHELTER_N];
     bool mShelterInit = false;
     S32  mShelterNext = 0;

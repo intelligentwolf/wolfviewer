@@ -1230,6 +1230,18 @@ If you do not understand the distinction then leave this control alone."
          width="100">
             Second(s)
         </text>
+
+        <!-- WolfViewer 2026-09-26: Linux only (hidden elsewhere in LLFloaterPreference::postBuild) -->
+        <check_box
+         control_name="WolfNativeWayland"
+         height="16"
+         label="Use native Wayland on Wayland desktops (off = X11 through XWayland; requires restart)"
+         layout="topleft"
+         left="10"
+         name="WolfNativeWayland"
+         tool_tip="On a Wayland desktop the viewer opens a native Wayland window. Turn this off to run through XWayland (X11) instead. X11 desktops always use X11. Takes effect after restarting the viewer."
+         top_pad="15"
+         width="480"/>
     </panel>
 
 <!--Rendering-->

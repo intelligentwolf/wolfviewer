@@ -204,8 +204,20 @@ protected:
     int         mReallyCapturedCount;
 
     SDL_Window* mWindow;
-    SDL_Surface* mSurface;
     SDL_GLContext mContext;
+
+    // <WolfViewer 2026-09-26> Native Wayland (SDL's Wayland video driver instead of XWayland).
+    // A Wayland window with SDL_WINDOW_ALLOW_HIGHDPI has a GL drawable larger than the window
+    // on a scaled output (1.6x on Paul's laptop); the viewer works in drawable pixels and SDL's
+    // window, mouse and IME calls in window units, so every crossing goes through these.
+    // On X11 the two are the same and the scale is exactly 1.
+    bool mWayland;
+    S32 mPixelW, mPixelH;             // GL drawable size (was SDL_GetWindowSurface's, see refreshPixelSize)
+    F32 mPixelScaleX, mPixelScaleY;   // drawable pixels per SDL window unit
+    S32 mAppliedMinW, mAppliedMinH;   // last minimum size handed to SDL (window units)
+    void refreshPixelSize();
+    LLCoordWindow sdlToWindow(S32 x, S32 y) const;
+    // </WolfViewer>
     SDL_Cursor* mSDLCursors[UI_CURSOR_COUNT];
     LLPreeditor* mPreeditor;
     bool mIMEEnabled;

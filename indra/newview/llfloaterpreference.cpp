@@ -858,6 +858,21 @@ bool LLFloaterPreference::postBuild()
 #endif
     // </FS:Ansariel>
 
+    // <WolfViewer 2026-09-26> Wayland/X11 choice: Linux only, and only meaningful on a Wayland
+    // desktop (LLWindowSDL::createContext asks for Wayland only when WAYLAND_DISPLAY is set).
+#if LL_LINUX
+    {
+        const char* wayland_display = getenv("WAYLAND_DISPLAY");
+        if (!wayland_display || !*wayland_display)
+        {
+            childSetEnabled("WolfNativeWayland", false);
+        }
+    }
+#else
+    childSetVisible("WolfNativeWayland", false);
+#endif
+    // </WolfViewer>
+
     // <FS:Zi> FIRE-19539 - Include the alert messages in Prefs>Notifications>Alerts in preference Search.
     mPopupList = getChild<LLScrollListCtrl>("all_popups");
     mPopupList->setFilterColumn(COLUMN_POPUP_LABEL);

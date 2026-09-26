@@ -38,6 +38,9 @@
 #include "llgl.h"
 #include "llstring.h"
 #include "lldir.h"
+#include "llfile.h"   // <WolfViewer 2026-09-26/> LLFile::isfile
+#include <dlfcn.h>      // <WolfViewer 2026-09-26/> EGL for Wayland worker contexts (WolfWaylandEGL)
+#include "SDL2/SDL_egl.h"
 #include "llfindlocale.h"
 #include "llframetimer.h"
 
@@ -472,6 +475,10 @@ LLWindowSDL::LLWindowSDL(LLWindowCallbacks* callbacks,
     // Ignore use_gl for now, only used for drones on PC
     mWindow = NULL;
     mContext = {};
+    mWayland = false;                       // <WolfViewer 2026-09-26/> see llwindowsdl2.h
+    mPixelW = mPixelH = 0;
+    mPixelScaleX = mPixelScaleY = 1.f;
+    mAppliedMinW = mAppliedMinH = -1;
     mNeedsResize = false;
     mOverrideAspectRatio = 0.f;
     mGrabbyKeyFlags = 0;
@@ -758,11 +765,49 @@ bool LLWindowSDL::createContext(int x, int y, int width, int height, int bits, b
         SDL_SetHint( SDL_HINT_IME_INTERNAL_EDITING, "1");
     }
 
+    // <WolfViewer 2026-09-26> Native Wayland. SDL 2.28 tries X11 before Wayland (SDL_video.c
+    // bootstrap[]), so on a Wayland desktop the viewer always ran through XWayland. Ask for
+    // Wayland first when there is a Wayland display, keeping X11 as SDL's own fallback (the hint
+    // is a comma list, SDL_VideoInit). Someone who set SDL_VIDEODRIVER keeps their choice, and
+    // WolfNativeWayland = FALSE goes back to XWayland.
+    {
+        const char* forced = getenv("SDL_VIDEODRIVER");
+        const char* wl = getenv("WAYLAND_DISPLAY");
+        if ((!forced || !*forced) && wl && *wl && gSavedSettings.getBOOL("WolfNativeWayland"))
+        {
+            SDL_SetHint(SDL_HINT_VIDEODRIVER, "wayland,x11");
+            // On a laptop with an NVIDIA GPU beside the integrated one (Paul's: RTX 5090 + Radeon
+            // 890M), XWayland's GLX gave the viewer the NVIDIA card, but a Wayland EGL context
+            // defaults to the GPU driving the screen — the integrated one ("graphics card
+            // changed", 2026-09-26 test). NVIDIA's PRIME render offload switch asks its EGL for
+            // the discrete card; tested here: GL_RENDERER NVIDIA GeForce RTX 5090 Laptop GPU on
+            // a native Wayland window. Set only when the NVIDIA driver is loaded and nobody chose
+            // a GPU already (DRI_PRIME, an EGL vendor file, or the switch itself).
+            const bool nvidia = LLFile::isfile("/proc/driver/nvidia/version");
+            const char* chosen = getenv("__NV_PRIME_RENDER_OFFLOAD") ? "__NV_PRIME_RENDER_OFFLOAD"
+                               : getenv("__EGL_VENDOR_LIBRARY_FILENAMES") ? "__EGL_VENDOR_LIBRARY_FILENAMES"
+                               : getenv("__EGL_VENDOR_LIBRARY_DIRS") ? "__EGL_VENDOR_LIBRARY_DIRS"
+                               : getenv("DRI_PRIME") ? "DRI_PRIME" : nullptr;
+            if (nvidia && !chosen)
+            {
+                setenv("__NV_PRIME_RENDER_OFFLOAD", "1", 0);
+            }
+            LL_INFOS() << "Wayland GPU: NVIDIA driver " << (nvidia ? "present" : "absent")
+                       << (chosen ? std::string(", already chosen by ") + chosen
+                                  : std::string(nvidia ? ", requesting it (PRIME render offload)" : ", using the default")) << LL_ENDL;
+        }
+    }
+
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO ) < 0 )
     {
         LL_INFOS() << "sdl_init() failed! " << SDL_GetError() << LL_ENDL;
         setupFailure("sdl_init() failure,  window creation error", "error", OSMB_OK);
         return false;
+    }
+    {
+        const char* driver = SDL_GetCurrentVideoDriver();
+        mWayland = driver && !strcmp(driver, "wayland");
+        LL_INFOS() << "SDL video driver: " << (driver ? driver : "(none)") << LL_ENDL;
     }
 
     SDL_version c_sdl_version;
@@ -786,6 +831,13 @@ bool LLWindowSDL::createContext(int x, int y, int width, int height, int bits, b
     mFullscreen = fullscreen;
 
     int sdlflags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE;
+    // <WolfViewer 2026-09-26> On Wayland, draw at the output's real resolution (fractional
+    // scale included, wp_fractional_scale_v1) rather than at the scaled-down window size that
+    // the compositor would then stretch. X11 ignores the flag.
+    if (mWayland)
+    {
+        sdlflags |= SDL_WINDOW_ALLOW_HIGHDPI;
+    }
 
     if( mFullscreen )
     {
@@ -802,31 +854,64 @@ bool LLWindowSDL::createContext(int x, int y, int width, int height, int bits, b
     if (getenv("LL_GL_NO_STENCIL"))
         stencilBits = 0;
 
-    SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, alphaBits);
-    SDL_GL_SetAttribute(SDL_GL_RED_SIZE,   redBits);
-    SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, greenBits);
-    SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE,  blueBits);
-    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, depthBits );
-
-    // We need stencil support for a few (minor) things.
-    if (stencilBits)
-        SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, stencilBits);
-
-    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
-
-    if (mFSAASamples > 0)
+    // <WolfViewer 2026-09-26> In a lambda so the Wayland-to-X11 fallback below can apply the
+    // same attributes again: SDL_VideoInit() resets them (SDL_video.c:514 SDL_GL_ResetAttributes).
+    auto applyGLAttributes = [&]()
     {
-        SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
-        SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, mFSAASamples);
-    }
+        SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, alphaBits);
+        SDL_GL_SetAttribute(SDL_GL_RED_SIZE,   redBits);
+        SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, greenBits);
+        SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE,  blueBits);
+        SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, depthBits );
 
-    // <FS:Zi> Make shared context work on Linux for multithreaded OpenGL
-    SDL_GL_SetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 1);
+        // We need stencil support for a few (minor) things.
+        if (stencilBits)
+            SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, stencilBits);
+
+        SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+
+        if (mFSAASamples > 0)
+        {
+            SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
+            SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, mFSAASamples);
+        }
+
+        // <FS:Zi> Make shared context work on Linux for multithreaded OpenGL
+        SDL_GL_SetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 1);
+    };
+    applyGLAttributes();
+    // </WolfViewer>
+    mContext = {};   // <WolfViewer 2026-09-26/> destroyContext() leaves the old handle behind
     mWindow = SDL_CreateWindow( mWindowTitle.c_str(), SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, width, height, mSDLFlags );
+
+    // <WolfViewer 2026-09-26> A Wayland session whose GL cannot make a window or a context (an
+    // EGL driver problem) falls back to XWayland once, as the viewer ran before, rather than
+    // failing to start.
+    if (mWayland && (!mWindow || !(mContext = SDL_GL_CreateContext(mWindow))))
+    {
+        LL_WARNS() << "Wayland window/GL context failed (" << SDL_GetError() << "); falling back to X11" << LL_ENDL;
+        if (mWindow) { SDL_DestroyWindow(mWindow); mWindow = NULL; }
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        SDL_SetHint(SDL_HINT_VIDEODRIVER, "x11");
+        if (SDL_InitSubSystem(SDL_INIT_VIDEO) < 0)
+        {
+            LL_WARNS() << "X11 video init failed too: " << SDL_GetError() << LL_ENDL;
+            setupFailure("sdl_init() failure,  window creation error", "error", OSMB_OK);
+            return false;
+        }
+        mWayland = false;
+        mSDLFlags &= ~SDL_WINDOW_ALLOW_HIGHDPI;
+        applyGLAttributes();
+        mWindow = SDL_CreateWindow( mWindowTitle.c_str(), SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, width, height, mSDLFlags );
+        mContext = {};
+    }
 
     if( mWindow )
     {
-        mContext = SDL_GL_CreateContext( mWindow );
+        if (!mContext)
+        {
+            mContext = SDL_GL_CreateContext( mWindow );
+        }
 
         if( mContext == 0 )
         {
@@ -839,17 +924,21 @@ bool LLWindowSDL::createContext(int x, int y, int width, int height, int bits, b
         // the flag will get set again later in void LLViewerWindow::setStartupComplete() -Zi
         toggleVSync(enable_vsync);
 
-        mSurface = SDL_GetWindowSurface( mWindow );
+        // <WolfViewer 2026-09-26> Sizes come from the GL drawable, not SDL_GetWindowSurface():
+        // SDL documents the window surface as not for OpenGL windows, and on Wayland (no native
+        // window framebuffer) SDL builds it with the 2D renderer. Same numbers on X11.
+        refreshPixelSize();
+        LL_INFOS() << "GL drawable " << mPixelW << "x" << mPixelH << ", " << mPixelScaleX << " pixels per window unit" << LL_ENDL;
     }
 
 
     if( mFullscreen )
     {
-        if (mSurface)
+        if (mWindow)
         {
             mFullscreen = true;
-            mFullscreenWidth = mSurface->w;
-            mFullscreenHeight = mSurface->h;
+            mFullscreenWidth = mPixelW;
+            mFullscreenHeight = mPixelH;
             mFullscreenRefresh = -1;
 
             LL_INFOS() << "Running at " << mFullscreenWidth
@@ -1162,10 +1251,10 @@ bool LLWindowSDL::getPosition(LLCoordScreen *position)
 
 bool LLWindowSDL::getSize(LLCoordScreen *size)
 {
-    if (mSurface)
+    if (mWindow)
     {
-        size->mX = mSurface->w;
-        size->mY = mSurface->h;
+        size->mX = mPixelW;
+        size->mY = mPixelH;
         return (true);
     }
 
@@ -1174,14 +1263,32 @@ bool LLWindowSDL::getSize(LLCoordScreen *size)
 
 bool LLWindowSDL::getSize(LLCoordWindow *size)
 {
-    if (mSurface)
+    if (mWindow)
     {
-        size->mX = mSurface->w;
-        size->mY = mSurface->h;
+        size->mX = mPixelW;
+        size->mY = mPixelH;
         return (true);
     }
 
     return (false);
+}
+
+// <WolfViewer 2026-09-26> see llwindowsdl2.h
+void LLWindowSDL::refreshPixelSize()
+{
+    if (!mWindow) return;
+    int ww = 0, wh = 0, pw = 0, ph = 0;
+    SDL_GetWindowSize(mWindow, &ww, &wh);
+    SDL_GL_GetDrawableSize(mWindow, &pw, &ph);
+    mPixelW = pw > 0 ? pw : ww;
+    mPixelH = ph > 0 ? ph : wh;
+    mPixelScaleX = (ww > 0 && pw > 0) ? (F32)pw / (F32)ww : 1.f;
+    mPixelScaleY = (wh > 0 && ph > 0) ? (F32)ph / (F32)wh : 1.f;
+}
+
+LLCoordWindow LLWindowSDL::sdlToWindow(S32 x, S32 y) const
+{
+    return LLCoordWindow(ll_round((F32)x * mPixelScaleX), ll_round((F32)y * mPixelScaleY));
 }
 
 bool LLWindowSDL::setPosition(const LLCoordScreen position)
@@ -1195,7 +1302,8 @@ bool LLWindowSDL::setPosition(const LLCoordScreen position)
     return true;
 }
 
-template< typename T > bool setSizeImpl( const T& newSize, SDL_Window *pWin )
+// <WolfViewer 2026-09-26> newSize is in drawable pixels; SDL sizes windows in window units.
+template< typename T > bool setSizeImpl( const T& newSize, SDL_Window *pWin, F32 scaleX, F32 scaleY )
 {
     if( !pWin )
         return false;
@@ -1205,14 +1313,14 @@ template< typename T > bool setSizeImpl( const T& newSize, SDL_Window *pWin )
     if( nFlags & SDL_WINDOW_MAXIMIZED )
         SDL_RestoreWindow( pWin );
 
-
-    SDL_SetWindowSize( pWin, newSize.mX, newSize.mY );
+    const int w = ll_round((F32)newSize.mX / scaleX), h = ll_round((F32)newSize.mY / scaleY);
+    SDL_SetWindowSize( pWin, w, h );
     SDL_Event event;
     event.type = SDL_WINDOWEVENT;
     event.window.event = SDL_WINDOWEVENT_RESIZED;
     event.window.windowID = SDL_GetWindowID( pWin );
-    event.window.data1 = newSize.mX;
-    event.window.data2 = newSize.mY;
+    event.window.data1 = w;
+    event.window.data2 = h;
     SDL_PushEvent( &event );
 
     return true;
@@ -1220,12 +1328,12 @@ template< typename T > bool setSizeImpl( const T& newSize, SDL_Window *pWin )
 
 bool LLWindowSDL::setSizeImpl(const LLCoordScreen size)
 {
-    return ::setSizeImpl( size, mWindow );
+    return ::setSizeImpl( size, mWindow, mPixelScaleX, mPixelScaleY );
 }
 
 bool LLWindowSDL::setSizeImpl(const LLCoordWindow size)
 {
-    return ::setSizeImpl( size, mWindow );
+    return ::setSizeImpl( size, mWindow, mPixelScaleX, mPixelScaleY );
 }
 
 
@@ -1289,15 +1397,35 @@ void LLWindowSDL::setMinSize(U32 min_width, U32 min_height, bool enforce_immedia
 #if LL_X11
     // Set the minimum size limits for X11 window
     // so the window manager doesn't allow resizing below those limits.
-    XSizeHints* hints = XAllocSizeHints();
-    hints->flags |= PMinSize;
-    hints->min_width = mMinWindowWidth;
-    hints->min_height = mMinWindowHeight;
+    if (mSDL_Display)   // <WolfViewer 2026-09-26/> no X display on Wayland: this dereferenced NULL
+    {
+        XSizeHints* hints = XAllocSizeHints();
+        hints->flags |= PMinSize;
+        hints->min_width = mMinWindowWidth;
+        hints->min_height = mMinWindowHeight;
 
-    XSetWMNormalHints(mSDL_Display, mSDL_XWindowID, hints);
+        XSetWMNormalHints(mSDL_Display, mSDL_XWindowID, hints);
 
-    XFree(hints);
+        XFree(hints);
+    }
+    else
 #endif
+    if (mWindow)
+    {
+        // <WolfViewer 2026-09-26> Wayland: SDL passes it on (xdg_toplevel set_min_size), in
+        // window units. Only when it changes: SDL commits the surface on this call
+        // (SDL_waylandwindow.c SetMinMaxDimensions), and LLViewerWindow::reshape calls
+        // setMinSize on EVERY resize — a commit after SDL has set the new, larger viewport
+        // source but before the next frame's buffer is swapped in, which the compositor
+        // rejects ("wp_viewport: Box doesn't fit") and closes the connection.
+        const S32 w = ll_round((F32)mMinWindowWidth / mPixelScaleX), h = ll_round((F32)mMinWindowHeight / mPixelScaleY);
+        if (w != mAppliedMinW || h != mAppliedMinH)
+        {
+            mAppliedMinW = w;
+            mAppliedMinH = h;
+            SDL_SetWindowMinimumSize(mWindow, w, h);
+        }
+    }
 }
 
 bool LLWindowSDL::setCursorPosition(const LLCoordWindow position)
@@ -1312,8 +1440,10 @@ bool LLWindowSDL::setCursorPosition(const LLCoordWindow position)
 
     //LL_INFOS() << "setCursorPosition(" << screen_pos.mX << ", " << screen_pos.mY << ")" << LL_ENDL;
 
-    // do the actual forced cursor move.
-    SDL_WarpMouseInWindow(mWindow, screen_pos.mX, screen_pos.mY);
+    // do the actual forced cursor move. <WolfViewer 2026-09-26/> pixels -> window units
+    // (Wayland: SDL emulates the warp with a pointer lock while the cursor is hidden,
+    // SDL_waylandmouse.c Wayland_WarpMouse — which is how mouselook hides and recentres it).
+    SDL_WarpMouseInWindow(mWindow, ll_round((F32)screen_pos.mX / mPixelScaleX), ll_round((F32)screen_pos.mY / mPixelScaleY));
 
     //LL_INFOS() << llformat("llcw %d,%d -> scr %d,%d", position.mX, position.mY, screen_pos.mX, screen_pos.mY) << LL_ENDL;
 
@@ -1329,8 +1459,9 @@ bool LLWindowSDL::getCursorPosition(LLCoordWindow *position)
     int x, y;
     SDL_GetMouseState(&x, &y);
 
-    screen_pos.mX = x;
-    screen_pos.mY = y;
+    const LLCoordWindow px = sdlToWindow(x, y);   // <WolfViewer 2026-09-26/> window units -> pixels
+    screen_pos.mX = px.mX;
+    screen_pos.mY = px.mY;
 
     return convertCoords(screen_pos, position);
 }
@@ -1476,6 +1607,13 @@ void LLWindowSDL::flashIcon(F32 seconds)
 #if !LL_X11
         LL_INFOS() << "Stub LLWindowSDL::flashIcon(" << seconds << ")" << LL_ENDL;
 #else
+        // <WolfViewer 2026-09-26> No X display (native Wayland): ask the compositor through SDL
+        // (xdg-activation, SDL_waylandwindow.c Wayland_FlashWindow). There is nothing to cancel.
+        if (!mSDL_Display)
+        {
+            if (mWindow) SDL_FlashWindow(mWindow, SDL_FLASH_UNTIL_FOCUSED);
+            return;
+        }
         LL_INFOS() << "X11 LLWindowSDL::flashIcon(" << seconds << ")" << LL_ENDL;
 
         F32 remaining_time = mFlashTimer.getRemainingTimeF32();
@@ -1490,34 +1628,54 @@ void LLWindowSDL::flashIcon(F32 seconds)
     }
 }
 
+// <WolfViewer 2026-09-26> Without an X display (native Wayland) the X11 selection code above
+// has nothing to talk to and every copy and paste failed; SDL's own clipboard and primary
+// selection (SDL_waylandclipboard.c: wl_data_device, zwp_primary_selection) take over.
+namespace
+{
+    bool sdl_text(char* text, LLWString& dst)
+    {
+        if (!text) return false;
+        dst = utf8str_to_wstring(text);
+        SDL_free(text);
+        return !dst.empty();
+    }
+}
+
 bool LLWindowSDL::isClipboardTextAvailable()
 {
-    return mSDL_Display && XGetSelectionOwner(mSDL_Display, XA_CLIPBOARD) != None;
+    if (!mSDL_Display) return SDL_HasClipboardText() == SDL_TRUE;
+    return XGetSelectionOwner(mSDL_Display, XA_CLIPBOARD) != None;
 }
 
 bool LLWindowSDL::pasteTextFromClipboard(LLWString &dst)
 {
+    if (!mSDL_Display) return sdl_text(SDL_GetClipboardText(), dst);
     return getSelectionText(XA_CLIPBOARD, dst);
 }
 
 bool LLWindowSDL::copyTextToClipboard(const LLWString &s)
 {
+    if (!mSDL_Display) return SDL_SetClipboardText(wstring_to_utf8str(s).c_str()) == 0;
     return setSelectionText(XA_CLIPBOARD, s);
 }
 
 bool LLWindowSDL::isPrimaryTextAvailable()
 {
+    if (!mSDL_Display) return SDL_HasPrimarySelectionText() == SDL_TRUE;
     LLWString text;
     return getSelectionText(XA_PRIMARY, text) && !text.empty();
 }
 
 bool LLWindowSDL::pasteTextFromPrimary(LLWString &dst)
 {
+    if (!mSDL_Display) return sdl_text(SDL_GetPrimarySelectionText(), dst);
     return getSelectionText(XA_PRIMARY, dst);
 }
 
 bool LLWindowSDL::copyTextToPrimary(const LLWString &s)
 {
+    if (!mSDL_Display) return SDL_SetPrimarySelectionText(wstring_to_utf8str(s).c_str()) == 0;
     return setSelectionText(XA_PRIMARY, s);
 }
 
@@ -1567,7 +1725,7 @@ bool LLWindowSDL::convertCoords(LLCoordGL from, LLCoordWindow *to)
         return false;
 
     to->mX = from.mX;
-    to->mY = mSurface->h - from.mY - 1;
+    to->mY = mPixelH - from.mY - 1;
 
     return true;
 }
@@ -1578,7 +1736,7 @@ bool LLWindowSDL::convertCoords(LLCoordWindow from, LLCoordGL* to)
         return false;
 
     to->mX = from.mX;
-    to->mY = mSurface->h - from.mY - 1;
+    to->mY = mPixelH - from.mY - 1;
 
     return true;
 }
@@ -1860,6 +2018,40 @@ void LLWindowSDL::processMiscNativeEvents()
     }
 }
 
+// <WolfViewer> Wayland has no detectable auto-repeat: with some input-method setups
+// (seen with fcitx5 on Hyprland after a focus change) a held key arrives as a stream of
+// release+press pairs. Each pair reset LLKeyboard's hold timer, so arrow turning stayed at
+// nudge speed and Page Up never lasted FLY_TIME. A release immediately followed by a
+// press of the same key is treated as a repeat, the same test SDL's X11 backend applies
+// (Source: SDL-release-2.28.0 src/video/x11/SDL_x11events.c:159 X11_KeyRepeatCheckIfEvent).
+static bool wolf_is_repeat_release(const SDL_Event& up)
+{
+    // Like X11_KeyRepeatCheckIfEvent, look through every queued key press, not only the next
+    // event: mouse motion (turning while looking around) often lands between the two halves.
+    auto matches = [&up]()
+    {
+        SDL_Event downs[64];
+        const int count = SDL_PeepEvents(downs, 64, SDL_PEEKEVENT, SDL_KEYDOWN, SDL_KEYDOWN);
+        for (int i = 0; i < count; ++i)
+        {
+            if (downs[i].key.keysym.scancode == up.key.keysym.scancode
+                && downs[i].key.timestamp - up.key.timestamp < 2)
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+    if (matches())
+    {
+        return true;
+    }
+    // The press may still be in the Wayland socket; fetch it without consuming anything.
+    SDL_PumpEvents();
+    return matches();
+}
+// </WolfViewer>
+
 void LLWindowSDL::gatherInput()
 {
     const Uint32 CLICK_THRESHOLD = 300;  // milliseconds
@@ -1911,7 +2103,7 @@ void LLWindowSDL::gatherInput()
 
             case SDL_MOUSEMOTION:
             {
-                LLCoordWindow winCoord(event.button.x, event.button.y);
+                LLCoordWindow winCoord = sdlToWindow(event.button.x, event.button.y);
                 LLCoordGL openGlCoord;
                 convertCoords(winCoord, &openGlCoord);
                 MASK mask = gKeyboard->currentMask(true);
@@ -1986,6 +2178,11 @@ void LLWindowSDL::gatherInput()
                 break;
 
             case SDL_KEYUP:
+                if (mWayland && wolf_is_repeat_release(event))
+                {
+                    LL_INFOS_ONCE("Window") << "Wayland: a held key arrived as release+press pairs; treating them as key repeat" << LL_ENDL;
+                    break; // <WolfViewer> see wolf_is_repeat_release()
+                }
                 mKeyVirtualKey = event.key.keysym.sym;
                 mKeyModifiers = event.key.keysym.mod & (~altGrMask);
                 mInputType = "keyup";
@@ -2005,7 +2202,7 @@ void LLWindowSDL::gatherInput()
             case SDL_MOUSEBUTTONDOWN:
             {
                 bool isDoubleClick = false;
-                LLCoordWindow winCoord(event.button.x, event.button.y);
+                LLCoordWindow winCoord = sdlToWindow(event.button.x, event.button.y);
                 LLCoordGL openGlCoord;
                 convertCoords(winCoord, &openGlCoord);
                 MASK mask = gKeyboard->currentMask(true);
@@ -2068,7 +2265,7 @@ void LLWindowSDL::gatherInput()
 
             case SDL_MOUSEBUTTONUP:
             {
-                LLCoordWindow winCoord(event.button.x, event.button.y);
+                LLCoordWindow winCoord = sdlToWindow(event.button.x, event.button.y);
                 LLCoordGL openGlCoord;
                 convertCoords(winCoord, &openGlCoord);
                 MASK mask = gKeyboard->currentMask(true);
@@ -2086,14 +2283,24 @@ void LLWindowSDL::gatherInput()
 
             case SDL_WINDOWEVENT:  // *FIX: handle this?
             {
-                if( event.window.event == SDL_WINDOWEVENT_RESIZED
-                    /* || event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED*/ ) // <FS:ND> SDL_WINDOWEVENT_SIZE_CHANGED is followed by SDL_WINDOWEVENT_RESIZED, so handling one shall be enough
+                // <WolfViewer 2026-09-26> On Wayland a new output scale (moving the window to
+                // another monitor) changes the drawable without changing the window size: SDL
+                // then sends SIZE_CHANGED alone, so that counts too when the pixels changed.
+                const S32 prev_pixel_w = mPixelW, prev_pixel_h = mPixelH;
+                if (event.window.event == SDL_WINDOWEVENT_RESIZED || event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED)
                 {
-                    LL_INFOS() << "Handling a resize event: " << event.window.data1 << "x" << event.window.data2 << LL_ENDL;
+                    refreshPixelSize();
+                }
+                if( event.window.event == SDL_WINDOWEVENT_RESIZED
+                    || (mWayland && event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED
+                        && (mPixelW != prev_pixel_w || mPixelH != prev_pixel_h)) ) // <FS:ND> SDL_WINDOWEVENT_SIZE_CHANGED is followed by SDL_WINDOWEVENT_RESIZED, so handling one shall be enough
+                {
+                    LL_INFOS() << "Handling a resize event: " << event.window.data1 << "x" << event.window.data2
+                               << " (" << mPixelW << "x" << mPixelH << " pixels)" << LL_ENDL;
 
-                    S32 width = llmax(event.window.data1, (S32)mMinWindowWidth);
-                    S32 height = llmax(event.window.data2, (S32)mMinWindowHeight);
-                    mSurface = SDL_GetWindowSurface( mWindow );
+                    // <WolfViewer 2026-09-26/> the viewer sizes its GL viewport in drawable pixels
+                    S32 width = llmax(ll_round((F32)event.window.data1 * mPixelScaleX), (S32)mMinWindowWidth);
+                    S32 height = llmax(ll_round((F32)event.window.data2 * mPixelScaleY), (S32)mMinWindowHeight);
 
                     // *FIX: I'm not sure this is necessary!
                     // <FS:ND> I think is is not
@@ -2757,8 +2964,68 @@ class sharedContext
         SDL_GLContext mContext;
 };
 
+// <WolfViewer 2026-09-26> Native Wayland worker contexts. Under EGL a surface may be current in
+// only one thread, and the main thread holds the window's, so the texture/media upload thread
+// must go current WITHOUT a surface. SDL 2.28 cannot do that on Wayland:
+// SDL_waylandopengles.c Wayland_GLES_MakeCurrent passes a context without a window on as
+// SDL_EGL_MakeCurrent(_this, NULL, NULL) - it unbinds everything and still returns success,
+// which left the upload thread with no context at all (the login page never appeared, 09-26).
+// So the worker calls EGL itself, through the libEGL SDL already loaded. SDL's EGL contexts are
+// EGLContexts (SDL_egl.c SDL_EGL_CreateContext returns the egl_context). eglBindAPI is per
+// thread and defaults to OpenGL ES, so the worker selects desktop OpenGL first, as
+// SDL_EGL_MakeCurrent does on its own threads.
+namespace
+{
+    struct WolfWaylandEGL
+    {
+        bool mReady = false;
+        EGLDisplay mDisplay = EGL_NO_DISPLAY;
+        EGLBoolean (EGLAPIENTRY* mBindAPI)(EGLenum) = nullptr;
+        EGLBoolean (EGLAPIENTRY* mMakeCurrent)(EGLDisplay, EGLSurface, EGLSurface, EGLContext) = nullptr;
+    };
+    WolfWaylandEGL sWaylandEGL;
+
+    /** On the main thread with the window's context current. False = no surfaceless contexts here. */
+    bool wolf_wayland_egl_init()
+    {
+        if (sWaylandEGL.mReady) return true;
+        void* lib = dlopen("libEGL.so.1", RTLD_NOW | RTLD_NOLOAD);
+        if (!lib)
+        {
+            LL_WARNS() << "Wayland: libEGL is not loaded; background GL uploads disabled" << LL_ENDL;
+            return false;
+        }
+        auto getDisplay = (EGLDisplay (EGLAPIENTRY*)(void))dlsym(lib, "eglGetCurrentDisplay");
+        auto query = (const char* (EGLAPIENTRY*)(EGLDisplay, EGLint))dlsym(lib, "eglQueryString");
+        sWaylandEGL.mBindAPI = (EGLBoolean (EGLAPIENTRY*)(EGLenum))dlsym(lib, "eglBindAPI");
+        sWaylandEGL.mMakeCurrent = (EGLBoolean (EGLAPIENTRY*)(EGLDisplay, EGLSurface, EGLSurface, EGLContext))dlsym(lib, "eglMakeCurrent");
+        dlclose(lib);   // RTLD_NOLOAD took a reference; SDL's own keeps the library loaded
+        if (!getDisplay || !query || !sWaylandEGL.mBindAPI || !sWaylandEGL.mMakeCurrent) return false;
+        sWaylandEGL.mDisplay = getDisplay();
+        if (sWaylandEGL.mDisplay == EGL_NO_DISPLAY) return false;
+        // Surfaceless: EGL 1.5, or EGL_KHR_surfaceless_context (the rule SDL_egl.c applies).
+        const char* version = query(sWaylandEGL.mDisplay, EGL_VERSION);
+        const char* extensions = query(sWaylandEGL.mDisplay, EGL_EXTENSIONS);
+        int major = 0, minor = 0;
+        if (version) sscanf(version, "%d.%d", &major, &minor);
+        const bool surfaceless = major > 1 || (major == 1 && minor >= 5)
+            || (extensions && strstr(extensions, "EGL_KHR_surfaceless_context"));
+        LL_INFOS() << "Wayland EGL " << (version ? version : "?") << ", surfaceless contexts "
+                   << (surfaceless ? "supported" : "NOT supported: background GL uploads disabled") << LL_ENDL;
+        sWaylandEGL.mReady = surfaceless;
+        return surfaceless;
+    }
+}
+// </WolfViewer>
+
 void* LLWindowSDL::createSharedContext()
 {
+    // <WolfViewer 2026-09-26> Without surfaceless EGL the upload thread could never be made
+    // current on Wayland; no shared context makes LLImageGLThread upload on the main thread.
+    if (mWayland && !wolf_wayland_egl_init())
+    {
+        return nullptr;
+    }
     sharedContext* sc = new sharedContext();
     sc->mContext = SDL_GL_CreateContext(mWindow);
     if (sc->mContext)
@@ -2789,7 +3056,19 @@ void* LLWindowSDL::createSharedContext()
 void LLWindowSDL::makeContextCurrent(void* context)
 {
     LL_PROFILER_GPU_CONTEXT;
-    SDL_GL_MakeCurrent(mWindow, ((sharedContext*)context)->mContext);
+    // <WolfViewer 2026-09-26> Native Wayland: the worker goes current without a surface, through
+    // EGL directly (see WolfWaylandEGL above for why not through SDL).
+    if (mWayland && context && sWaylandEGL.mReady)
+    {
+        sWaylandEGL.mBindAPI(EGL_OPENGL_API);
+        if (!sWaylandEGL.mMakeCurrent(sWaylandEGL.mDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE,
+                                      (EGLContext)((sharedContext*)context)->mContext))
+        {
+            LL_WARNS() << "Wayland: eglMakeCurrent without a surface failed for a background GL context" << LL_ENDL;
+        }
+        return;
+    }
+    SDL_GL_MakeCurrent(mWindow, context ? ((sharedContext*)context)->mContext : nullptr);
 }
 
 void LLWindowSDL::destroySharedContext(void* context)
@@ -2861,8 +3140,8 @@ void LLWindowSDL::setLanguageTextInput(const LLCoordGL& position)
     convertCoords( position, &win_pos );
 
     SDL_Rect r;
-    r.x = win_pos.mX;
-    r.y = win_pos.mY;
+    r.x = ll_round((F32)win_pos.mX / mPixelScaleX);   // <WolfViewer 2026-09-26/> pixels -> window units
+    r.y = ll_round((F32)win_pos.mY / mPixelScaleY);
     r.w = 500;
     r.h = 16;
 

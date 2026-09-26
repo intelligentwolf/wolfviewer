@@ -306,6 +306,8 @@ namespace
         }
     };
 
+    // Reorders the pool's own face list in place (every terrain pass draws through here). Nothing
+    // else depends on its order, and once sorted it stays sorted until faces come or go.
     void wolfSortFacesByBlock(std::vector<LLFace*>& faces)
     {
         static std::vector<WolfFaceKey> keys;   // main thread only (draw pools)

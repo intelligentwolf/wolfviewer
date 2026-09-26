@@ -103,13 +103,24 @@ LLSurface::~LLSurface()
     mGridsPerPatchEdge = 0;
     mPatchesPerEdge = 0;
     mNumberOfPatches = 0;
-    // <WolfViewer 2026-09-26> Block objects the region has not killed yet let go of this surface
-    // and of its patches before the patches are deleted.
+    // <WolfViewer 2026-09-26> Defensive: ~LLViewerRegion kills the region's objects (and so every
+    // block object, which forgets itself here) before it deletes the land, so this is empty on
+    // that path. Any block object still here lets go of this surface and its patches before the
+    // patches are deleted, and is killed so it cannot linger in the object list.
+    std::vector<LLPointer<LLVOSurfacePatch>> leftover;
     for (auto& entry : mBlockObjects)
     {
         entry.second->detachSurface();
+        leftover.push_back(entry.second);
     }
     mBlockObjects.clear();
+    for (LLPointer<LLVOSurfacePatch>& objectp : leftover)
+    {
+        if (!objectp->isDead())
+        {
+            gObjectList.killObject(objectp);
+        }
+    }
     // </WolfViewer>
     destroyPatchData();
 

@@ -48,6 +48,17 @@
 
 F32 LLVOSurfacePatch::sLODFactor = 1.f;
 
+// <WolfViewer 2026-09-26> A block object must lie inside ONE draw block: wolfRenderMatrix takes the
+// draw-block origin of any member for the whole buffer. With the sim's 16-grid patches
+// (llworld.cpp WORLD_PATCH_SIZE) on the 1 m grid, the object block (WOLF_BLOCK_PATCHES patches)
+// has to divide the draw block evenly; both are anchored at the region origin. addPatch checks the
+// run-time sizes as well.
+static_assert(((S32)LLSurfacePatch::WOLF_TERRAIN_BLOCK_M % (LLVOSurfacePatch::WOLF_BLOCK_PATCHES * 16)) == 0,
+              "a terrain block object must fit inside one 256 m draw block");
+// ...and its worst case (every patch at stride 1: 256 + 2 x 33 = 322 vertices) must fit U16 indices.
+static_assert(LLVOSurfacePatch::WOLF_BLOCK_PATCHES * LLVOSurfacePatch::WOLF_BLOCK_PATCHES * 322 <= 65535,
+              "a terrain block object must fit U16 indices");
+
 LLVOSurfacePatch::LLVOSurfacePatch(const LLUUID &id, const LLPCode pcode, LLViewerRegion *regionp)
     :   LLStaticViewerObject(id, LL_VO_SURFACE_PATCH, regionp),
         mDirtiedPatch(false),
@@ -208,9 +219,9 @@ bool LLVOSurfacePatch::updateGeometry(LLDrawable *drawable)
         render_stride = patchp->getRenderStride();
         if (!render_stride)
         {
-            // <WolfViewer 2026-09-26> A member whose LOD was never set (it joined the block but
-            // has not been in view: LLSurfacePatch::updateVisibility sets the stride only then)
-            // has nothing to draw yet; stride 0 is skipped by updateFaceSize/getTerrainGeometry.
+            // <WolfViewer 2026-09-26> Defensive only: setOriginGlobal starts every patch at a
+            // stride of one patch edge, so this does not happen today; a 0 would divide by zero
+            // below. Stride 0 is skipped by updateFaceSize/getTerrainGeometry.
             mPatchLOD.push_back({ patchp, 0, 0, 0 });
             continue;
         }
@@ -860,6 +871,14 @@ void LLVOSurfacePatch::addPatch(LLSurfacePatch* patchp)
     {
         return;
     }
+    if (!mPatches.empty() && mPatches.front()->getBlockOriginRegion() != patchp->getBlockOriginRegion())
+    {
+        // Only possible if the grid or patch size ever changed (see the static_assert above): the
+        // one matrix would misplace this patch, so say so rather than draw it in the wrong place.
+        LL_WARNS_ONCE("Terrain") << "terrain patch " << patchp->getPatchX() << "," << patchp->getPatchY()
+                                 << " is not in the draw block of its block object; not drawn" << LL_ENDL;
+        return;
+    }
     mPatches.push_back(patchp);
     // Row, then column: the order the patches are laid out in the block's buffer.
     std::sort(mPatches.begin(), mPatches.end(), [](const LLSurfacePatch* a, const LLSurfacePatch* b)
@@ -1204,7 +1223,6 @@ void LLTerrainPartition::rebuildGeom(LLSpatialGroup* group)
     group->clearDrawMap();
     group->mVertexBuffer = NULL;   // unused: the faces carry their own
     group->mBufferMap.clear();
-    group->mBuilt = 1.f;
 
     getGeometry(group);
 
@@ -1241,6 +1259,12 @@ void LLTerrainPartition::getGeometry(LLSpatialGroup* group)
         {
             continue;
         }
+        if (vertex_count > 65535)
+        {
+            // U16 indices would wrap (static_assert above rules it out for today's sizes)
+            LL_WARNS_ONCE("Terrain") << "terrain block needs " << vertex_count << " vertices, over the U16 limit; not drawn" << LL_ENDL;
+            continue;
+        }
 
         LLPointer<LLVertexBuffer> buffer = new LLVertexBuffer(mVertexDataMask);
         if (!buffer->allocateBuffer(vertex_count, index_count))
@@ -1252,6 +1276,7 @@ void LLTerrainPartition::getGeometry(LLSpatialGroup* group)
         facep->setIndicesIndex(0);
         facep->setGeomIndex(0);
         facep->setVertexBuffer(buffer);
+        group->mBuilt = 1.f;   // as the base rebuildGeom: only when geometry was built
 
         //get vertex buffer striders
         LLStrider<LLVector3> vertices_start;

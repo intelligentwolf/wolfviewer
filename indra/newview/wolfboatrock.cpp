@@ -53,8 +53,13 @@ namespace
     // <WolfViewer 2026-09-22> Boards ride the swell too (Paul asked for a surfboard). Word
     // boundaries throughout so "surface", "resurfaced" and "keyboard" are not boats.
     // KEEP IN STEP with WolfStorm terrain_manager.js _BOAT_RE.
+    // <WolfViewer 2026-09-26> Paul: "purely by name anything with boat, ship, tug, etc": more
+    // vessel words, whole words so "aircraft" is not a raft.
     const std::regex BOAT_RE("boat|jet ?ski|yacht|dinghy|dinghies|canoe|kayak|catamaran|gondola|\\bships?\\b|\\bsail(?:ing|s|boats?)?\\b"
-                             "|\\bsurf ?boards?\\b|\\bpaddle ?boards?\\b|\\bbody ?boards?\\b|\\blong ?boards?\\b|\\bsurf\\b",
+                             "|\\bsurf ?boards?\\b|\\bpaddle ?boards?\\b|\\bbody ?boards?\\b|\\blong ?boards?\\b|\\bsurf\\b"
+                             "|\\btugs?\\b|\\bferry\\b|\\bferries\\b|\\bbarges?\\b|\\btrawlers?\\b|\\bcruisers?\\b|\\brafts?\\b|\\bpunts?\\b"
+                             "|\\bliners?\\b|\\bfreighters?\\b|\\btankers?\\b|\\bvessels?\\b|\\bschooners?\\b|\\bketch(?:es)?\\b|\\bsloops?\\b"
+                             "|\\bgalleons?\\b|\\bfrigates?\\b|\\bhovercraft\\b|\\bpedalos?\\b",
                              std::regex::ECMAScript | std::regex::icase);
     // <WolfViewer 2026-09-22> The boards out of that list. A board PLANES: it rides the crest
     // and sits on the surface in the trough, it never goes under. A hull does go under --
@@ -399,10 +404,10 @@ void WolfBoatRock::apply(const LLViewerObject* objectp, LLVector3& pos, LLQuater
 //    Source: object_flags.h FLAGS_USE_PHYSICS = 1<<0, LLViewerObject::flagUsePhysics()).
 //  - someone ABOARD (a seated avatar is a child object) -> rocks at full strength — the
 //    sat-on boat case even before the physics update round-trips.
-//  - parked/static floaters    -> gentle rock (gain 0.6), EXCEPT wide thin PLATES
-//    (pontoons, docks, swim platforms: max(x,y) > 5m and >8x wider than tall) and anything
-//    whose bottom touches the seabed (pilings, ramps) — those stay still — and only when
-//    NAMED or DESCRIBED as a boat ([ROCK-NAME 2026-08-29]).
+//  - parked/static floaters    -> gentle rock (gain 0.6) when NAMED or DESCRIBED as a boat
+//    or board ([ROCK-NAME 2026-08-29]). The wide-thin-PLATE and bottom-on-seabed gates were
+//    removed 2026-09-26: they read the root prim only and refused boats built on a deck/hull
+//    plate root; the name gate covers pontoons, docks and pilings.
 WolfBoatRock::Verdict WolfBoatRock::classify(LLViewerObject* objectp) const
 {
     Verdict v;
@@ -522,20 +527,17 @@ WolfBoatRock::Verdict WolfBoatRock::classify(LLViewerObject* objectp) const
         v.mWhy = physical ? "physical" : "crewed";
         return v;
     }
-    // Parked/static floater: pontoon-vs-hull shape gate.
-    const LLVector3& scale = objectp->getScale();
-    const F32 sx = scale.mV[VX] > 0.f ? scale.mV[VX] : 1.f;
-    const F32 sy = scale.mV[VY] > 0.f ? scale.mV[VY] : 1.f;
-    const F32 sz = scale.mV[VZ] > 0.f ? scale.mV[VZ] : 1.f;
-    const F32 wide = llmax(sx, sy);
-    if (wide > 5.f && wide / llmax(sz, 0.01f) > 8.f)
-    {
-        return no("flat plate (pontoon/dock)");
-    }
-    if (p.mV[VZ] - sz * 0.5f < th + 0.15f)
-    {
-        return no("bottom on seabed (anchored)");
-    }
+    // Parked/static floater.
+    // <WolfViewer 2026-09-26> The pontoon-vs-hull "flat plate" gate is gone (WolfStorm
+    // terrain_manager.js _classifyFloater the same): it measured the ROOT PRIM, and a boat
+    // whose root is its deck or hull plate (wider than 5 m, 8x wider than tall) was refused
+    // as a pontoon before its name was ever asked for, so a freshly rezzed boat sat still
+    // until someone boarded it (Paul 09-26, log: "flat plate (pontoon/dock)"). The name gate
+    // below does that job now: a parked floater rocks only when named or described as a
+    // boat, and "dock" / "boathouse" names are refused above.
+    // The "bottom on seabed" gate went too: it measured the root prim as well. Paul 09-26:
+    // rock "purely by name ... that is on water" — the waterline band and the over-water test
+    // above are the "on water"; the name or description is the rest.
     if (nv == NAME_UNKNOWN)
     {
         v.mRock = false;
@@ -544,7 +546,7 @@ WolfBoatRock::Verdict WolfBoatRock::classify(LLViewerObject* objectp) const
         v.mWhy = "static floater, name not fetched yet";
         return v;
     }
-    if (nv != NAME_BOAT)
+    if (nv != NAME_BOAT && nv != NAME_BOARD)   // <WolfViewer 2026-09-26/> a parked board rocks too
     {
         return no("static floater with no boat word in name/description");
     }

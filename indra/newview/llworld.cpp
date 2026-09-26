@@ -63,6 +63,7 @@
 #include "llfloaterreg.h"
 // </FS:CR> Aurora Sim
 
+#include <algorithm>   // <WolfViewer 2026-09-26/> std::find_if (hole water rectangles)
 #include <deque>
 #include <queue>
 #include <map>
@@ -1444,9 +1445,21 @@ void LLWorld::updateWaterObjects()
     S32 x, y;
 // <FS:CR> Fix water height on regions larger than 2048x2048
     S32 step = 256;
+    // <WolfViewer 2026-09-26> Hole cells are merged into rectangles before any water is made.
+    // One LLVOWater per 256 m cell meant ~14,400 planes round a lone 460,800 m region
+    // (Ireland), every one pushed, re-latticed (wolfFollowCamera) and drawn in each water pass:
+    // perf put LLDrawPoolWater::pushWaterPlanes at 40% of the main thread there, 10 fps with
+    // the GPU at 35%. The cells found are the same; consecutive holes in a column become one
+    // run, and runs spanning the same rows in neighbouring columns grow into one rectangle.
+    struct HoleRun { S32 y0, y1; };             // metres, [y0, y1)
+    struct HoleRect { S32 x0, x1, y0, y1; };    // metres, [x0, x1) x [y0, y1)
+    std::vector<HoleRun> runs;
+    std::vector<HoleRect> open_rects, next_rects, hole_rects;
+    // </WolfViewer>
     //for (x = min_x; x <= max_x; x += rwidth)
     for (x = min_x; x <= max_x; x += step)
     {
+        runs.clear();   // <WolfViewer 2026-09-26/>
         //for (y = min_y; y <= max_y; y += rwidth)
         for (y = min_y; y <= max_y; y += step)
 // </FS:CR> Fix water height on regions larger than 2048x2048
@@ -1464,22 +1477,61 @@ void LLWorld::updateWaterObjects()
             U64 region_handle = to_region_handle(x, y);
             if (!getRegionFromHandle(region_handle))
             {   // No region at that area, so make water
-                LLVOWater* waterp = (LLVOWater *)gObjectList.createObjectViewer(LLViewerObject::LL_VO_WATER, gAgent.getRegion());
-// <FS:CR> Fix water height on regions larger than 2048x2048
-                //waterp->setPositionGlobal(LLVector3d(x + rwidth/2,
-                //                                   y + rwidth/2,
-                //                                   256.f + water_height));
-                //waterp->setScale(LLVector3((F32)rwidth, (F32)rwidth, 512.f));
-                waterp->setPositionGlobal(LLVector3d(x + step/2,
-                                                     y + step/2,
-                                                     256.f + water_height));
-                waterp->setScale(LLVector3((F32)step, (F32)step, 512.f));
-// </FS:CR> Fix water height on regions larger than 2048x2048
-                gPipeline.createObject(waterp);
-                mHoleWaterObjects.push_back(waterp);
+                // <WolfViewer 2026-09-26> ...recorded as a run; the planes are made below.
+                if (!runs.empty() && runs.back().y1 == y)
+                {
+                    runs.back().y1 = y + step;
+                }
+                else
+                {
+                    runs.push_back({ y, y + step });
+                }
+                // </WolfViewer>
             }
         }
+        // <WolfViewer 2026-09-26> A rectangle still open reached this column; it grows if this
+        // column has a run over exactly its rows, and is finished otherwise.
+        next_rects.clear();
+        for (const HoleRun& run : runs)
+        {
+            auto it = std::find_if(open_rects.begin(), open_rects.end(),
+                                   [&run](const HoleRect& r) { return r.y0 == run.y0 && r.y1 == run.y1; });
+            if (it != open_rects.end())
+            {
+                HoleRect grown = *it;
+                grown.x1 = x + step;
+                next_rects.push_back(grown);
+                open_rects.erase(it);
+            }
+            else
+            {
+                next_rects.push_back({ x, x + step, run.y0, run.y1 });
+            }
+        }
+        hole_rects.insert(hole_rects.end(), open_rects.begin(), open_rects.end());
+        open_rects.swap(next_rects);
+        // </WolfViewer>
     }
+    // <WolfViewer 2026-09-26> One plane per rectangle, placed and sized as the cells were.
+    hole_rects.insert(hole_rects.end(), open_rects.begin(), open_rects.end());
+    for (const HoleRect& r : hole_rects)
+    {
+        LLVOWater* waterp = (LLVOWater *)gObjectList.createObjectViewer(LLViewerObject::LL_VO_WATER, gAgent.getRegion());
+// <FS:CR> Fix water height on regions larger than 2048x2048
+        //waterp->setPositionGlobal(LLVector3d(x + rwidth/2,
+        //                                   y + rwidth/2,
+        //                                   256.f + water_height));
+        //waterp->setScale(LLVector3((F32)rwidth, (F32)rwidth, 512.f));
+        waterp->setPositionGlobal(LLVector3d((F64)r.x0 + (F64)(r.x1 - r.x0) * 0.5,
+                                             (F64)r.y0 + (F64)(r.y1 - r.y0) * 0.5,
+                                             256.f + water_height));
+        waterp->setScale(LLVector3((F32)(r.x1 - r.x0), (F32)(r.y1 - r.y0), 512.f));
+// </FS:CR> Fix water height on regions larger than 2048x2048
+        gPipeline.createObject(waterp);
+        mHoleWaterObjects.push_back(waterp);
+    }
+    LL_DEBUGS("WolfWater") << "hole water: " << hole_rects.size() << " plane(s) round " << regionp->getName() << LL_ENDL;
+    // </WolfViewer>
 
     // Update edge water objects
     S32 wx, wy;

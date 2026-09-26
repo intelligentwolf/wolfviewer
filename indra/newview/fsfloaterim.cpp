@@ -499,7 +499,8 @@ void FSFloaterIM::sendMsgFromInputEditor(EChatType type)
                             }
                             else// In testing groups we'll allow all non-release recognised channels.
                             {
-                                str_version_tag = LLVersionInfo::getInstance()->getBuildVersion();
+                                // <WolfViewer 2026-09-26/> our release name, not Firestorm's build number
+                                str_version_tag = LLVersionInfo::getInstance()->getReleaseName().empty() ? LLVersionInfo::getInstance()->getBuildVersion() : LLVersionInfo::getInstance()->getReleaseName();
                             }
                             utf8_text.insert(insert_pos, ("(" + str_address_size_tag + str_operating_system_tag + str_optimization_tag + " " + str_version_tag + " " + skin_indicator + str_viewer_mode + str_rlv_enabled + str_opensim_tag + ") "));
                         }
@@ -526,7 +527,8 @@ void FSFloaterIM::sendMsgFromInputEditor(EChatType type)
                             }
                             else
                             {
-                                str_version_tag = LLVersionInfo::getInstance()->getShortVersion();
+                                // <WolfViewer 2026-09-26/> our release name, not Firestorm's version number
+                                str_version_tag = LLVersionInfo::getInstance()->getReleaseName().empty() ? LLVersionInfo::getInstance()->getShortVersion() : LLVersionInfo::getInstance()->getReleaseName();
                             }
                             utf8_text.insert(insert_pos, ("(" + str_address_size_tag + str_operating_system_tag + str_optimization_tag + " " + str_version_tag + " " + skin_indicator + str_viewer_mode + str_rlv_enabled + str_opensim_tag + ") "));
                         }

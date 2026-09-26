@@ -3554,7 +3554,16 @@ bool LLAppViewer::initConfiguration()
     //
     // Set the name of the window
     //
-    gWindowTitle = LLVersionInfo::getInstance()->getChannelAndVersion();    // <FS:CR>
+    // <WolfViewer 2026-09-26> Paul: "get rid of the firestorm version in the top bar and just use
+    // our version name". The release name, as the login screen shows it (llpanellogin.cpp
+    // viewer_version_text); a build with no name (local or untagged) keeps the channel and
+    // version rather than pretending to be a release.
+    {
+        const std::string release_name = LLVersionInfo::getInstance()->getReleaseName();
+        gWindowTitle = release_name.empty() ? LLVersionInfo::getInstance()->getChannelAndVersion()    // <FS:CR>
+                                            : std::string("WolfViewer \xE2\x80\x94 ") + release_name;   // U+2014 em dash
+    }
+    // </WolfViewer>
 #if LL_DEBUG
     gWindowTitle += std::string(" [DEBUG]");
 #endif
@@ -3910,6 +3919,12 @@ LLSD LLAppViewer::getViewerInfo() const
     info["VIEWER_VERSION"] = llsd::array(versionInfo.getMajor(), versionInfo.getMinor(),
                                          versionInfo.getPatch(), stringize(versionInfo.getBuild()));
     info["VIEWER_VERSION_STR"] = versionInfo.getVersion();
+    // <WolfViewer 2026-09-26> What About shows instead of Firestorm's numbers (AboutHeader); a build
+    // with no release name (local or untagged) shows its version, as the login screen does.
+    {
+        const std::string release_name = versionInfo.getReleaseName();
+        info["RELEASE_NAME"] = release_name.empty() ? versionInfo.getVersion() : release_name;
+    }
     info["VIEWER_VERSION_LL"] = versionInfo.getLLViewerVersion(); // <FS:PP>
     info["BUILD_DATE"] = __DATE__;
     info["BUILD_TIME"] = __TIME__;

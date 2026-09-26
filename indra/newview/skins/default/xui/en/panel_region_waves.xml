@@ -27,7 +27,7 @@ Paint on the map or directly on the water. Surf, Open, Small, Calm and Off use t
   <button follows="left|top" height="20" left_pad="4" top_delta="0" width="60" name="waves_brush_c" label="Calm" is_toggle="true" />
   <button follows="left|top" height="20" left_pad="4" top_delta="0" width="60" name="waves_brush_x" label="Off" is_toggle="true" />
   <button follows="left|top" height="22" left="10" top_pad="6" width="130" name="waves_world_paint" label="Paint on water" is_toggle="true" />
-  <slider follows="left|top" height="22" left_pad="8" top_delta="0" width="322" name="waves_brush_diameter" label="Diameter (cells)" label_width="110" min_val="1" max_val="8" increment="1" initial_value="1" decimal_digits="0" show_text="true" tool_tip="Circular brush diameter in wave cells. Every touched water cell is painted." />
+  <slider follows="left|top" height="22" left_pad="8" top_delta="0" width="322" name="waves_brush_diameter" label="Diameter (16 m)" label_width="110" min_val="1" max_val="8" increment="1" initial_value="1" decimal_digits="0" show_text="true" tool_tip="Circular brush diameter in 16 m cells, the same size on every region: 1 is 16 m, 8 is 128 m. Every touched water cell is painted." />
   <wolf_wave_painter follows="left|top" height="224" width="224" left="10" top_pad="6" name="waves_painter" />
   <text follows="left|top" height="14" left="244" top_delta="0" width="226" name="waves_surf_height_lbl">Surf wave height (m)</text>
   <slider follows="left|top" height="16" left="244" top_pad="2" width="226" name="waves_surf_height" min_val="0.2" max_val="20" increment="0.1" initial_value="3" decimal_digits="1" show_text="true" />

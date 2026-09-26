@@ -38,10 +38,16 @@ class WolfToolWavePaint;
 // Source: wolfstorm/js/world/wave_zones.js (2026-09-07) — the same layout, the same API, the
 // same default rule, the same texture. WAVES_PLAN_2026-09-07.md §3-5.
 //
-// A region's sea is cells (16 m; doubled on huge regions so the grid is at most 256 cells an
-// edge — the service's waves_cell() decides and sends `cell`), each surf (s) / open (o) /
-// small waves (m) / calm (c) / off (x). The layout is set by whoever may edit the land and
-// stored on the grid (wolfstorm.app php/waves.php, table robust.waves).
+// A region's sea is painted in 16 m cells, each surf (s) / open (o) / small waves (m) /
+// calm (c) / off (x); a cell nobody painted takes the automatic layout below. The layout is
+// set by whoever may edit the land and stored on the grid (wolfstorm.app php/waves.php, table
+// robust.waves).
+// <WolfViewer 2026-09-26> Layout v2: the SAME 16 m paint cell on every region (Paul: "i cant
+// go to region 1 and put the size on 1 and its huge and go to region2 and the size on 1 its a
+// different size" — the v1 grid grew with the region, 512 m cells on Ireland). Painted cells
+// arrive as sparse 256 m tiles (php/waves.php WAVES_PAINT_CELL_M); the automatic layout is
+// still worked out on the coarser waves_cell() grid (Region::mCell, at most MAX_CELLS_EDGE an
+// edge). wave_zones.js same.
 // [2026-09-10, Paul] "there should be NO waves inside the region only at the outside of it ...
 // only do waves if someone has drawn the waves with the wave editor", then "put the waves back
 // round the region automatically if there are no user defined settings": a region with no
@@ -65,9 +71,21 @@ class WolfWaveZones : public LLSingleton<WolfWaveZones>
     ~WolfWaveZones();
 
 public:
-    /** The base cell; a region's real cell is Region::mCell (php/waves.php waves_cell). */
+    /** The base cell; a region's AUTOMATIC grid is Region::mCell (php/waves.php waves_cell). */
     static constexpr S32 CELL_M = 16;
     static constexpr S32 MAX_CELLS_EDGE = 1024;   // <WolfViewer 2026-09-18/> was 256; php/waves.php + wave_zones.js same
+    // <WolfViewer 2026-09-26> Layout v2: the paint cell on every region, cells per tile edge and
+    // per tile (php/waves.php WAVES_PAINT_CELL_M, WAVES_TILE_CELLS). Tile index math uses >> 4 / & 15.
+    static constexpr S32 PAINT_CELL_M = 16;
+    static constexpr S32 TILE_CELLS = 16;
+    static constexpr S32 TILE_LEN = 256;
+    /** Painted tiles: key tileKey(tx, ty) -> 256 chars (row-major, south row first; '.' = not painted). */
+    using Tiles = std::map<U32, std::string>;
+    static U32 tileKey(S32 tx, S32 ty) { return (U32)ty * 65536u + (U32)tx; }
+    /** Paint 16 m cell (fx, fy) of a tile map; true when it changed. */
+    static bool setTileCell(Tiles& tiles, S32 fx, S32 fy, char z);
+    /** A tile map as the service takes it: {"tx,ty": cells}, a repeated char sent once; always a map. */
+    static LLSD tilesToLLSD(const Tiles& tiles);
     /** Source: wave_zones.js cellHasWater — any of five points (centre + quarter points) under the water. */
     static bool cellHasWater(LLViewerRegion* regionp, S32 cx, S32 cy, S32 cell);
     static constexpr F32 SURF_BAND_M = 48.f;
@@ -82,14 +100,29 @@ public:
         U64         mHandle = 0;
         S32         mSizeX = 256;
         S32         mSizeY = 256;
-        S32         mCell = CELL_M;    // cell size (m) the service uses for this region
+        S32         mCell = CELL_M;    // the AUTOMATIC layout's cell (m) for this region (waves_cell)
         S32         mVersion = 0;
         bool        mEnabled = true;
         bool        mStored = false;   // a layout exists on the grid
-        std::string mZones;            // stored zones (w*h chars) or empty
+        Tiles       mTiles;            // <WolfViewer 2026-09-26/> stored painted tiles (layout v2)
         LLSD        mParams;
+        /** The automatic grid, in mCell cells. */
         S32 w() const { return llmax(1, mSizeX / mCell); }
         S32 h() const { return llmax(1, mSizeY / mCell); }
+        /** The paint grid, in 16 m cells (php/waves.php waves_paint_dims). */
+        S32 pw() const { return llmax(1, llmax(256, mSizeX) / PAINT_CELL_M); }
+        S32 ph() const { return llmax(1, llmax(256, mSizeY) / PAINT_CELL_M); }
+    };
+
+    /** <WolfViewer 2026-09-26> One region ready for zone lookups: painted tiles over the automatic layout. */
+    struct Source
+    {
+        const Tiles* mTiles = nullptr;   // nullptr = automatic only
+        std::string  mAuto;              // defaultZones(), aw x ah on the mCell grid
+        S32 mAutoW = 1, mAutoCell = CELL_M;
+        S32 mW = 16, mH = 16;            // paint grid
+        /** The zone of 16 m cell (fx, fy): the painted char, else the automatic one. */
+        char at(S32 fx, S32 fy) const;
     };
 
     // Source: php/waves.php POST region/version; retained when the editor adopts a row.
@@ -100,14 +133,14 @@ public:
         S32 mVersion = 0;
     };
 
-    /** The service's rule: 16 m, doubled until the region is at most MAX_CELLS_EDGE cells an edge. */
+    /** The service's rule for the AUTOMATIC grid: 16 m, doubled until the region is at most MAX_CELLS_EDGE cells an edge. */
     static S32 cellFor(S32 sizeX, S32 sizeY);
     /**
-     * Texel size (m) of the baked zone texture for a region's field: its own cell, then doubled
-     * until a span of span_m is at most 768 texels (a 25,600 m region would otherwise bake a
-     * 92 MB float texture).
+     * Texel size (m) of the baked zone texture: the 16 m paint cell, doubled until a span of
+     * span_m is at most 768 texels. The field span is at most 3 x WolfWaterField::WINDOW_M, so
+     * this is 16 m on every region and a painted cell reaches the water at its own size.
      */
-    S32 texelM(LLViewerRegion* regionp, F32 span_m) const;
+    static S32 texelM(F32 span_m);
     /**
      * Zone energy -> swell scale, the ONE mapping waterV.glsl (zoneScale), the boat rocker and
      * WolfStorm (Water.js, WaveZones.zoneScale) all use — keep them in step. Piecewise linear
@@ -124,16 +157,17 @@ public:
     const Region* current() const;
     /** True when the current region is known to the grid — the only case the editor exists. */
     bool onGrid() const { return current() != nullptr; }
-    /** Zones for a record: stored+enabled, else the automatic default. */
-    std::string zonesFor(const Region& r) const;
+    /** The painted tiles the WATER uses for a record: the editor preview, else the stored ones while enabled; nullptr = automatic only. */
+    const Tiles* paintedFor(const Region& r) const;
+    /** A record ready for zone lookups (paintedFor over defaultZones). */
+    Source sourceFor(const Region& r) const;
     /**
      * <WolfViewer 2026-09-20> What the EDITOR starts from: the stored cells whenever a
      * layout is stored, even while it is switched off ("Reset to automatic" keeps the painted
-     * cells and only unticks the box, so ticking it again must bring them back — the painter
-     * used to start from zonesFor(), the automatic layout, and the painted cells were lost the
-     * moment anyone saved). The WATER keeps zonesFor(): off = automatic. wave_zones.js same.
+     * cells and only unticks the box, so ticking it again must bring them back). The WATER
+     * uses paintedFor(): off = automatic. wave_zones.js editorTilesFor same.
      */
-    std::string editorZonesFor(const Region& r) const;
+    const Tiles& editorTilesFor(const Region& r) const { return r.mTiles; }
     /** The automatic layout, from the exposure field of the agent region's bake. */
     std::string defaultZones(const Region& r) const;
 
@@ -151,8 +185,8 @@ public:
     /** Editor: the working copy for the current region (zones + params + enabled). */
     bool canEditAll() const;
     bool cellEditable(S32 cx, S32 cy) const;
-    /** Preview a working layout in the water until the next fetch/save. */
-    void preview(const std::string& zones);
+    /** Preview a working layout in the water until Save or Revert: the painted tiles, or enabled=false for the automatic layout alone. */
+    void preview(const Tiles& tiles, bool enabled);
     /** Preview the editor's slider values (surf height, set interval, calm ripple) likewise. */
     void previewParams(const LLSD& params);
     /** The parameters the water should use now: the preview if one is up, else the saved ones. */
@@ -165,7 +199,7 @@ public:
     /** Seconds since the last fetch answered (a large number before the first). */
     F64 lastFetchAgeSecs() const;
     /** Save; the reply arrives through the notification system and a refresh. */
-    bool save(const SaveTarget& target, const std::string& zones, const LLSD& params, bool enabled);
+    bool save(const SaveTarget& target, const Tiles& tiles, const LLSD& params, bool enabled);
     bool saving() const { return mSaving; }
     const std::string& lastError() const { return mLastError; }
     const std::string& lastSaveError() const { return mLastSaveError; }
@@ -175,12 +209,15 @@ public:
 
 private:
     void fetchCoro(std::vector<U64> handles, U64 requested_handle, U64 generation);
-    void saveCoro(SaveTarget target, std::string zones, LLSD params, bool enabled, U64 preview_revision, bool retried);
+    void saveCoro(SaveTarget target, Tiles tiles, LLSD params, bool enabled, U64 preview_revision, bool retried);
+    /** Stored tiles from a v2 payload layout; entries the service would not have written are dropped. */
+    static Tiles parseTiles(const LLSD& layout, S32 pw, S32 ph);
     std::vector<U64> neighbourHandles() const;
     static F32 energyOf(char z);
 
     std::map<U64, Region> mByHandle;
-    std::map<U64, std::string> mPreview;   // handle -> zones being edited
+    struct Preview { Tiles mTiles; bool mEnabled = true; };
+    std::map<U64, Preview> mPreview;       // handle -> the layout being edited
     LLSD mPreviewParams;                   // slider values being edited (undefined = none)
     U64 mPreviewParamsFor = 0;
     U64 mPreviewRevision = 0;
@@ -200,12 +237,14 @@ private:
 
 /**
  * The painted grid in About Land > Waves: the region's terrain (water blue by depth, land
- * green -> brown -> grey -> white by height, hill-shaded) with one tinted square per painted
- * cell over it — off cells show the terrain through — south row at the bottom (as the map
- * draws a region), locked cells darkened; click or drag paints the brush. Cells are drawn at
- * a fractional pixel size so a 256-cell region fits the same box as a 16-cell one (Paul: "on
- * massive regions scale the drawing down"; "the terrain drawn on it so the user can see where
- * they are drawing").
+ * green -> brown -> grey -> white by height, hill-shaded) with the zones tinted over it — off
+ * cells show the terrain through — south row at the bottom (as the map draws a region), locked
+ * areas darkened; click or drag paints with the panel's brush. Drawn scaled to fit the box
+ * (Paul: "on massive regions scale the drawing down"; "the terrain drawn on it so the user can
+ * see where they are drawing").
+ * <WolfViewer 2026-09-26> The zones are one texture of up to 512 texels an edge, rebuilt when
+ * they change: with 16 m cells on every region Ireland is 28,800 cells an edge, far below a
+ * pixel each, so painted cells are put on their own texel after the grid is sampled.
  */
 class WolfWavePainter : public LLUICtrl
 {
@@ -216,20 +255,21 @@ public:
     };
     WolfWavePainter(const Params& p);
 
-    void setLayout(S32 w, S32 h, const std::string& zones, const std::vector<bool>& locked);
-    const std::string& zones() const { return mZones; }
+    /** The working copy: tiles painted over src's automatic layout; locked areas shaded unless all. */
+    void setLayout(const WolfWaveZones::Source& src, const WolfWaveZones::Tiles& tiles, bool all);
+    void clearLayout();
+    const WolfWaveZones::Tiles& tiles() const { return mTiles; }
+    S32 cellsW() const { return mSrc.mW; }
+    S32 cellsH() const { return mSrc.mH; }
+    bool hasLayout() const { return mHasLayout; }
     void setBrush(char z) { mBrush = z; }
     char brush() const { return mBrush; }
     bool dirty() const { return mDirty; }
     void clearDirty() { mDirty = false; }
-    /** World brush writes the same draft as the map, with one preview per stroke segment. */
+    /** The panel's brush writes the working copy through this, one 16 m cell at a time. */
     bool paintCell(S32 cx, S32 cy);
-    /** Called after each painted cell (the panel previews live). */
-    void setPaintCallback(const std::function<void()>& cb) { mOnPaint = cb; }
-    /** Called when the brush hit a locked cell (once per stroke). */
-    void setRefusedCallback(const std::function<void()>& cb) { mOnRefused = cb; }
-    /** <WolfViewer 2026-09-20/> asked before a cell is painted; false refuses the stroke (WolfPanelLandWaves::ensureEnabled) */
-    void setBeforePaintCallback(const std::function<bool()>& cb) { mBeforePaint = cb; }
+    /** Called with each stroke segment in region metres (the panel runs its brush over it). */
+    void setStrokeCallback(const std::function<void(F32 ax, F32 ay, F32 bx, F32 by)>& cb) { mOnStroke = cb; }
 
     void draw() override;
     bool handleMouseDown(S32 x, S32 y, MASK mask) override;
@@ -237,26 +277,35 @@ public:
     bool handleHover(S32 x, S32 y, MASK mask) override;
 
 private:
-    bool cellAt(S32 x, S32 y, S32& cx, S32& cy) const;
-    void paint(S32 x, S32 y);
+    bool pointAt(S32 x, S32 y, F32& mx, F32& my) const;
+    void stroke(S32 x, S32 y);
     F32 cellPx() const;
     /** Rebuild the terrain underlay texture from the agent region's heights (every few seconds while drawn). */
     void refreshTerrain();
+    /** Rebuild the zone overlay texture when the working copy changed (at most ten times a second). */
+    void refreshZones();
 
-    S32 mW = 16, mH = 16;
     LLPointer<LLImageRaw>      mTerrainRaw;
     LLPointer<LLViewerTexture> mTerrainTex;
     S32  mTerrainN = 0;
     U64  mTerrainHandle = 0;
     F64  mTerrainBuiltAt = 0.0;
-    std::string mZones;
-    std::vector<bool> mLocked;
+    WolfWaveZones::Source mSrc;           // mSrc.mTiles points at mTiles
+    WolfWaveZones::Tiles  mTiles;
+    bool mHasLayout = false;
+    LLPointer<LLImageRaw>      mZoneRaw;
+    LLPointer<LLViewerTexture> mZoneTex;
+    S32  mZoneK = 1;                      // cells per overlay texel
+    S32  mZoneTW = 0, mZoneTH = 0;
+    std::vector<U8> mLockedTexels;        // per overlay texel, computed in setLayout
+    bool mZonesStale = true;
+    F64  mZonesBuiltAt = 0.0;
     char mBrush = 's';
     bool mPainting = false;
-    bool mRefusedThisStroke = false;
+    bool mPrevious = false;
+    F32  mLastX = 0.f, mLastY = 0.f;
     bool mDirty = false;
-    std::function<void()> mOnPaint, mOnRefused;
-    std::function<bool()> mBeforePaint;   // <WolfViewer 2026-09-20/>
+    std::function<void(F32, F32, F32, F32)> mOnStroke;
 };
 
 /** Region / Estate > Waves. Source: llfloaterregioninfo.cpp programmatic region-panel shape. */
@@ -276,7 +325,8 @@ private:
     friend class WolfToolWavePaint;
     void toggleWorldBrush();
     void stopWorldBrush();
-    bool paintWorld(F32 ax, F32 ay, F32 bx, F32 by);
+    /** The brush along a segment in region metres; waterOnly for the in-world brush (the map paints any cell). */
+    bool paintStroke(F32 ax, F32 ay, F32 bx, F32 by, bool waterOnly);
     void rebuild();
     void onBrush(char z);
     void onSave();

@@ -804,8 +804,10 @@ void WolfWaterField::bake(LLViewerRegion* regionp, Field& f)
     // [2026-09-10] The cell is the region's own (16 m, bigger on huge regions — wolfwavezones
     // texelM), so a 25,600 m region bakes 3 x 200 texels an edge, not 3 x 1600 (a 92 MB
     // float texture). Source: wolfstorm wave_zones.js bake() / texelM().
+    // <WolfViewer 2026-09-26> Now the 16 m paint cell on every region: the span is at most
+    // 3 x WINDOW_M, 384 texels at 16 m (wolfwavezones.h texelM).
     {
-        const F32 texel = (F32)WolfWaveZones::instance().texelM(regionp, esx);
+        const F32 texel = (F32)WolfWaveZones::texelM(esx);
         const S32 zw = llmax(1, (S32)ll_round(esx / texel));
         const S32 zh = llmax(1, (S32)ll_round(esy / texel));
         WolfWaveZones::instance().fill(regionp, ex0, ey0, esx, esy, zw, zh, mZoneData);

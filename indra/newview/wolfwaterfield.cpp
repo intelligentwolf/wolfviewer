@@ -86,7 +86,8 @@ F32 WolfWaterField::exposureAt(const Field& f, F32 rx, F32 ry)
     }
     const F32 u = (rx - f.mExpoX0) / f.mExpoSX;
     const F32 v = (ry - f.mExpoY0) / f.mExpoSY;
-    if (u < 0.f || u > 1.f || v < 0.f || v > 1.f)
+    // <WolfViewer 2026-09-27/> isfinite: NaN passed every compare below and reached the (S32) index casts.
+    if (!std::isfinite(u) || !std::isfinite(v) || u < 0.f || u > 1.f || v < 0.f || v > 1.f)
     {
         return 1.f;
     }
@@ -108,7 +109,8 @@ F32 WolfWaterField::zoneAt(const Field& f, F32 rx, F32 ry)
     }
     const F32 u = (rx - f.mZoneX0) / f.mZoneSX;
     const F32 v = (ry - f.mZoneY0) / f.mZoneSY;
-    if (u < 0.f || u > 1.f || v < 0.f || v > 1.f)
+    // <WolfViewer 2026-09-27/> isfinite: NaN passed every compare below and reached the (S32) index casts.
+    if (!std::isfinite(u) || !std::isfinite(v) || u < 0.f || u > 1.f || v < 0.f || v > 1.f)
     {
         return WolfWaveZones::OPEN_ENERGY;
     }
@@ -121,7 +123,8 @@ F32 WolfWaterField::distanceAt(const Field& f, F32 rx, F32 ry)
 {
     if (!f.mReady || f.mExpo.size() != (size_t)ERES * ERES * 4) return 4000.f;
     const F32 u = (rx - f.mExpoX0) / f.mExpoSX, v = (ry - f.mExpoY0) / f.mExpoSY;
-    if (u < 0.f || u > 1.f || v < 0.f || v > 1.f) return 4000.f;
+    // <WolfViewer 2026-09-27/> isfinite: NaN passed every compare below and reached the (S32) index casts.
+    if (!std::isfinite(u) || !std::isfinite(v) || u < 0.f || u > 1.f || v < 0.f || v > 1.f) return 4000.f;
     const F32 fx = u * (ERES - 1), fy = v * (ERES - 1);
     const S32 i0 = llmin(ERES - 2, (S32)fx), j0 = llmin(ERES - 2, (S32)fy);
     const F32 tx = fx - i0, ty = fy - j0;
@@ -134,7 +137,8 @@ F32 WolfWaterField::openDistanceAt(const Field& f, F32 rx, F32 ry)
 {
     if (!f.mReady || f.mExpo.size() != (size_t)ERES * ERES * 4) return 4000.f;
     const F32 u = (rx - f.mExpoX0) / f.mExpoSX, v = (ry - f.mExpoY0) / f.mExpoSY;
-    if (u < 0.f || u > 1.f || v < 0.f || v > 1.f) return 4000.f;
+    // <WolfViewer 2026-09-27/> isfinite: NaN passed every compare below and reached the (S32) index casts.
+    if (!std::isfinite(u) || !std::isfinite(v) || u < 0.f || u > 1.f || v < 0.f || v > 1.f) return 4000.f;
     const F32 fx = u * (ERES - 1), fy = v * (ERES - 1);
     const S32 i0 = llmin(ERES - 2, (S32)fx), j0 = llmin(ERES - 2, (S32)fy);
     const F32 tx = fx - i0, ty = fy - j0;
@@ -147,7 +151,8 @@ F32 WolfWaterField::openPathAt(const Field& f, F32 rx, F32 ry)
 {
     if (!f.mReady || f.mExpo.size() != (size_t)ERES * ERES * 4) return 40000.f;
     const F32 u = (rx - f.mExpoX0) / f.mExpoSX, v = (ry - f.mExpoY0) / f.mExpoSY;
-    if (u < 0.f || u > 1.f || v < 0.f || v > 1.f) return 40000.f;
+    // <WolfViewer 2026-09-27/> isfinite: NaN passed every compare below and reached the (S32) index casts.
+    if (!std::isfinite(u) || !std::isfinite(v) || u < 0.f || u > 1.f || v < 0.f || v > 1.f) return 40000.f;
     const F32 fx = u * (ERES - 1), fy = v * (ERES - 1);
     const S32 i0 = llmin(ERES - 2, (S32)fx), j0 = llmin(ERES - 2, (S32)fy);
     const F32 tx = fx - i0, ty = fy - j0;
@@ -210,7 +215,8 @@ bool WolfWaterField::depthAt(const Field& f, F32 rx, F32 ry, F32 out[4])
     // <WolfViewer 2026-09-20> relative to the field's origin (a camera window on a huge region)
     rx -= f.mX0;
     ry -= f.mY0;
-    if (rx < 0.f || ry < 0.f || rx > f.mSizeX || ry > f.mSizeY)
+    // <WolfViewer 2026-09-27/> isfinite: as above.
+    if (!std::isfinite(rx) || !std::isfinite(ry) || rx < 0.f || ry < 0.f || rx > f.mSizeX || ry > f.mSizeY)
     {
         return false;
     }
@@ -247,6 +253,7 @@ U64 WolfWaterField::terrainStampIn(LLViewerRegion* regionp, F32 x0, F32 y0, F32 
     const S32 per_edge = land.getPatchesPerEdge();
     if (per_edge <= 0) return 0;
     const F32 patch_m = regionp->getWidth() / (F32)per_edge;
+    if (!std::isfinite(x0) || !std::isfinite(y0) || !std::isfinite(sx) || !std::isfinite(sy)) return 0;   // <WolfViewer 2026-09-27/> before the (S32) casts
     const S32 px0 = llclamp((S32)floorf(x0 / patch_m), 0, per_edge - 1);
     const S32 py0 = llclamp((S32)floorf(y0 / patch_m), 0, per_edge - 1);
     const S32 px1 = llclamp((S32)ceilf((x0 + sx) / patch_m), 0, per_edge - 1);

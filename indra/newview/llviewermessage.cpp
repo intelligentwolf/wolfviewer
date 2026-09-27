@@ -1846,7 +1846,25 @@ void LLOfferInfo::handleRespond(const LLSD& notification, const LLSD& response)
 void inventory_offer_name_callback(const LLAvatarName& av_name, const std::string& from_name, const std::string& message)
 {
     LLSD args;
-    args["MESSAGE"] = llformat(from_name.c_str(), av_name.getUserName().c_str()) + message;
+    // <WolfViewer 2026-09-27> from_name is the text after "uuid|" in LLOfferInfo::mFromName.
+    // The viewer builds that itself for group-notice attachments (llimprocessing.cpp, FIRE-29677
+    // workaround: InvOfferGroupNoticeName with NAME = "%s"), but for an ordinary inventory offer
+    // mFromName is the sender's own FromAgentName, so it was used as a printf format string --
+    // "uuid|%n%n%n" from any avatar or object wrote to memory. Substitute only when the text is
+    // exactly the viewer's own template (the same comparison works for offers restored from a
+    // saved notification), with plain string replacement; anything else is shown verbatim.
+    //args["MESSAGE"] = llformat(from_name.c_str(), av_name.getUserName().c_str()) + message;
+    LLStringUtil::format_map_t placeholder_args;
+    placeholder_args["NAME"] = "%s";
+    const std::string placeholder_from_name = LLTrans::getString("InvOfferGroupNoticeName", placeholder_args);
+    std::string display_from_name = from_name;
+    const size_t name_pos = display_from_name.find("%s");
+    if (display_from_name == placeholder_from_name && name_pos != std::string::npos)
+    {
+        display_from_name.replace(name_pos, 2, av_name.getUserName());
+    }
+    args["MESSAGE"] = display_from_name + message;
+    // </WolfViewer 2026-09-27>
     LLNotificationsUtil::add("SystemMessageTip", args);
 }
 
@@ -3708,11 +3726,14 @@ void process_teleport_finish(LLMessageSystem* msg, void**)
         msg->getU32Fast(_PREHASH_Info, _PREHASH_RegionSizeY, region_size_y);
 
         //and a little hack for Second Life compatibility
-        if (region_size_y == 0 || region_size_x == 0)
-        {
-            region_size_x = 256;
-            region_size_y = 256;
-        }
+        // <WolfViewer 2026-09-27> was: only 0 was replaced with 256.
+        //if (region_size_y == 0 || region_size_x == 0)
+        //{
+        //    region_size_x = 256;
+        //    region_size_y = 256;
+        //}
+        wolf_sanitize_region_size(region_size_x, region_size_y, "TeleportFinish");
+        // </WolfViewer 2026-09-27>
     }
 #endif
 // </FS:CR> Aurora Sim
@@ -4161,11 +4182,14 @@ void process_crossed_region(LLMessageSystem* msg, void**)
         msg->getU32(_PREHASH_RegionData, _PREHASH_RegionSizeY, region_size_y);
 
         //and a little hack for Second Life compatibility
-        if (region_size_y == 0 || region_size_x == 0)
-        {
-            region_size_x = 256;
-            region_size_y = 256;
-        }
+        // <WolfViewer 2026-09-27> was: only 0 was replaced with 256.
+        //if (region_size_y == 0 || region_size_x == 0)
+        //{
+        //    region_size_x = 256;
+        //    region_size_y = 256;
+        //}
+        wolf_sanitize_region_size(region_size_x, region_size_y, "CrossedRegion");
+        // </WolfViewer 2026-09-27>
     }
 #endif
 // </FS:CR> Aurora Sim

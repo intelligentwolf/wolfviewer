@@ -316,7 +316,8 @@ void WolfRegionWeather::fetchCoro(std::string region_id, bool include_parcel, F3
     LLCoreHttpUtil::HttpCoroutineAdapter::ptr_t adapter =
         std::make_shared<LLCoreHttpUtil::HttpCoroutineAdapter>("WolfRegionWeather", LLCore::HttpRequest::DEFAULT_POLICY_ID);
     LLCore::HttpRequest::ptr_t request = std::make_shared<LLCore::HttpRequest>();
-    LLCore::HttpOptions::ptr_t options = std::make_shared<LLCore::HttpOptions>();
+    // <WolfViewer 2026-09-27> verify the host name too: this request carries the session id.
+    LLCore::HttpOptions::ptr_t options = WolfGrid::makeVerifiedHttpOptions();
     options->setTimeout(20);
     LLCore::HttpHeaders::ptr_t headers = std::make_shared<LLCore::HttpHeaders>();
     headers->append(HTTP_OUT_HEADER_ACCEPT, "application/json");
@@ -566,7 +567,8 @@ void WolfRegionWeather::saveCoro(std::string body, std::string scope, std::strin
     LLCoreHttpUtil::HttpCoroutineAdapter::ptr_t adapter =
         std::make_shared<LLCoreHttpUtil::HttpCoroutineAdapter>("WolfRegionWeather", LLCore::HttpRequest::DEFAULT_POLICY_ID);
     LLCore::HttpRequest::ptr_t request = std::make_shared<LLCore::HttpRequest>();
-    LLCore::HttpOptions::ptr_t options = std::make_shared<LLCore::HttpOptions>();
+    // <WolfViewer 2026-09-27> verify the host name too: this request carries the session id.
+    LLCore::HttpOptions::ptr_t options = WolfGrid::makeVerifiedHttpOptions();
     options->setTimeout(30);
     LLCore::HttpHeaders::ptr_t headers = std::make_shared<LLCore::HttpHeaders>();
     headers->append(HTTP_OUT_HEADER_CONTENT_TYPE, "application/json");

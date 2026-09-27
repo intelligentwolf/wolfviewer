@@ -4963,15 +4963,30 @@ bool process_login_success_response(U32 &first_sim_size_x, U32 &first_sim_size_y
 
 // <FS:CR> Aurora Sim
     text = response["region_size_x"].asString();
-    if (!text.empty())
+    // <WolfViewer 2026-09-27> Validate the pair (llworld.cpp wolf_sanitize_region_size) before
+    // anything is sized from it; the parcel manager is initialised after that, not before.
+    //if (!text.empty())
+    //{
+    //    first_sim_size_x = strtoul(text.c_str(), NULL, 10);
+    //    LLViewerParcelMgr::getInstance()->init((F32)first_sim_size_x);
+    //}
+    const bool have_region_size_x = !text.empty();
+    if (have_region_size_x)
     {
         first_sim_size_x = strtoul(text.c_str(), NULL, 10);
-        LLViewerParcelMgr::getInstance()->init((F32)first_sim_size_x);
     }
+    // </WolfViewer 2026-09-27>
 
     //region Y size is currently unused, major refactoring required. - Patrick Sapinski (2/10/2011)
     text = response["region_size_y"].asString();
     if(!text.empty()) first_sim_size_y = strtoul(text.c_str(), NULL, 10);
+    // <WolfViewer 2026-09-27>
+    wolf_sanitize_region_size(first_sim_size_x, first_sim_size_y, "login response");
+    if (have_region_size_x)
+    {
+        LLViewerParcelMgr::getInstance()->init((F32)first_sim_size_x);
+    }
+    // </WolfViewer 2026-09-27>
 // </FS:CR> Aurora Sim
     const std::string look_at_str = response["look_at"];
     if (!look_at_str.empty())

@@ -1010,8 +1010,30 @@ bool LLVivoxVoiceClient::startAndLaunchDaemon()
         switch( viewerUsesWineForVoice() )
         {
             case EWineMode::eNoWine:
+            {
+                // <WolfViewer 2026-09-27> The native Linux SLVoice is Vivox SDK 3.2, a 32-bit
+                // binary that statically carries OpenSSL 0.9.8k (2009, unpatched since) and
+                // talks TLS to the voice servers. It is no longer launched unless the resident
+                // opts in with WolfLinuxNativeSLVoice. WebRTC voice (Wolf Territories, and every
+                // region advertising "webrtc") never goes through here. The wine-hosted Windows
+                // SLVoice (FSLinuxEnableWin32/64VoiceProxy) is unaffected.
+                static LLCachedControl<bool> native_slvoice(gSavedSettings, "WolfLinuxNativeSLVoice", false);
+                if (!native_slvoice)
+                {
+                    static bool warned = false;
+                    if (!warned)
+                    {
+                        warned = true;
+                        LL_WARNS("Voice") << "Not launching the native Linux SLVoice (Vivox 3.2, bundled OpenSSL 0.9.8k). "
+                                          << "Set WolfLinuxNativeSLVoice, or FSLinuxEnableWin64VoiceProxy to use the Windows client under wine."
+                                          << LL_ENDL;
+                    }
+                    return false;
+                }
+                // </WolfViewer 2026-09-27>
                 gDirUtilp->append(exe_path, "SLVoice"); // native version
                 break;
+            }
             case EWineMode::e32Bit:
                 gDirUtilp->append(exe_path, "win32/SLVoice.exe"); // use bundled win32 version
                 break;

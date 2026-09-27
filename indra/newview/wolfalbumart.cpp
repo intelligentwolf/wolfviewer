@@ -14,6 +14,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "wolfalbumart.h"
+#include "wolfgrid.h"   // <WolfViewer 2026-09-27> makeVerifiedHttpOptions()
 
 #include "llaudioengine.h"
 #include "llcorehttputil.h"
@@ -33,6 +34,42 @@
 static const std::string ITUNES_SEARCH_URL = "https://itunes.apple.com/search?media=music&entity=song&limit=1&term=";
 static const std::string ITUNES_ART_SIZE_IN = "100x100";
 static const std::string ITUNES_ART_SIZE_OUT = "256x256";
+
+// <WolfViewer 2026-09-27> The artwork URL comes from a third-party JSON reply and goes
+// straight to the texture fetcher, which also reads file:// URLs from local disk and fetches
+// any http host. Only Apple's image CDN (https://<name>.mzstatic.com/..., as in the reply
+// shown above) is accepted; anything else shows the title without a cover.
+static bool is_itunes_art_url(const std::string& url)
+{
+    static const std::string SCHEME = "https://";
+    static const std::string SUFFIX = ".mzstatic.com";
+    if (url.compare(0, SCHEME.length(), SCHEME) != 0)
+    {
+        return false;
+    }
+    const size_t host_end = url.find('/', SCHEME.length());
+    if (host_end == std::string::npos)
+    {
+        return false;
+    }
+    const std::string host = url.substr(SCHEME.length(), host_end - SCHEME.length());
+    if (host.length() <= SUFFIX.length()
+        || host.compare(host.length() - SUFFIX.length(), SUFFIX.length(), SUFFIX) != 0)
+    {
+        return false;
+    }
+    // Letters, digits, '-' and '.' only: no userinfo ('@'), port, or anything else that would
+    // make the real host differ from the suffix test above.
+    for (char c : host)
+    {
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '.'))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+// </WolfViewer 2026-09-27>
 
 WolfAlbumArt::~WolfAlbumArt()
 {
@@ -132,7 +169,8 @@ void WolfAlbumArt::lookupCoro(std::string term, U32 seq)
 
     std::string url = ITUNES_SEARCH_URL + LLURI::escapeQueryValue(term);
     // getJsonAndSuspend returns the JSON body converted to LLSD, with the status under HTTP_RESULTS
-    LLSD result = httpAdapter->getJsonAndSuspend(httpRequest, url);
+    // <WolfViewer 2026-09-27> verify itunes.apple.com's name as well as its certificate.
+    LLSD result = httpAdapter->getJsonAndSuspend(httpRequest, url, WolfGrid::makeVerifiedHttpOptions());
 
     if (seq != mSeq)
     {
@@ -153,7 +191,8 @@ void WolfAlbumArt::lookupCoro(std::string term, U32 seq)
     }
     const LLSD& hit = result["results"][0];
     std::string art_url = hit["artworkUrl100"].asString();
-    if (art_url.empty())
+    // <WolfViewer 2026-09-27> Apple's image CDN only (see is_itunes_art_url).
+    if (art_url.empty() || !is_itunes_art_url(art_url))
     {
         setArt("", "");
         return;

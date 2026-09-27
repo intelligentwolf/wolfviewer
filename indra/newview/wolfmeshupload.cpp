@@ -836,6 +836,86 @@ bool Model::loadGltf(const std::string& path, std::string& error)
         },
         NULL);
 
+    // <WolfViewer 2026-09-27> tinygltf's default file callbacks open whatever a buffer or image
+    // "uri" names: JoinPath(basedir, uri) with no check (tiny_gltf.h FindFile / LoadExternalFile),
+    // so a .gltf someone sent the user could name "../../.ssh/id_rsa" or an absolute path, and
+    // those bytes would be read and uploaded as a texture. Only the chosen
+    // file itself and files at or below its own folder are readable now: a relative uri
+    // without ".." (textures/ subfolders, as Blender and Sketchfab exports use, keep working).
+    // tinygltf's "." fallback path (the process working directory) is refused the same way.
+    // Nothing is written during a load, so writing is refused outright.
+    {
+        const size_t last_sep = path.find_last_of("/\\");
+        const std::string base_dir = last_sep == std::string::npos ? std::string() : path.substr(0, last_sep + 1);
+        auto allowed = [path, base_dir](const std::string& candidate) -> bool
+        {
+            if (candidate == path)
+            {
+                return true;
+            }
+            if (base_dir.empty() || candidate.size() <= base_dir.size()
+                || candidate.compare(0, base_dir.size(), base_dir) != 0)
+            {
+                return false;
+            }
+            const std::string rest = candidate.substr(base_dir.size());
+#if LL_WINDOWS
+            if (rest.find(':') != std::string::npos)
+            {
+                return false;   // a drive letter or an alternate data stream
+            }
+#endif
+            size_t start = 0;
+            while (start <= rest.size())
+            {
+                size_t end = rest.find_first_of("/\\", start);
+                if (end == std::string::npos)
+                {
+                    end = rest.size();
+                }
+                const std::string part = rest.substr(start, end - start);
+                if (part.empty() || part == "..")
+                {
+                    return false;
+                }
+                start = end + 1;
+            }
+            return true;
+        };
+        tinygltf::FsCallbacks fs;
+        fs.FileExists = [allowed](const std::string& p, void* ud)
+        {
+            return allowed(p) && tinygltf::FileExists(p, ud);
+        };
+        fs.ExpandFilePath = [](const std::string& p, void*) { return p; };
+        fs.ReadWholeFile = [allowed](std::vector<unsigned char>* out, std::string* err, const std::string& p, void* ud)
+        {
+            if (!allowed(p))
+            {
+                if (err) *err += "only files in the model's own folder can be read\n";
+                return false;
+            }
+            return tinygltf::ReadWholeFile(out, err, p, ud);
+        };
+        fs.WriteWholeFile = [](std::string* err, const std::string&, const std::vector<unsigned char>&, void*)
+        {
+            if (err) *err += "writing files is disabled while reading a model\n";
+            return false;
+        };
+        fs.GetFileSizeInBytes = [allowed](size_t* size_out, std::string* err, const std::string& p, void* ud)
+        {
+            if (!allowed(p))
+            {
+                if (err) *err += "only files in the model's own folder can be read\n";
+                return false;
+            }
+            return tinygltf::GetFileSizeInBytes(size_out, err, p, ud);
+        };
+        fs.user_data = nullptr;
+        loader.SetFsCallbacks(fs);
+    }
+    // </WolfViewer 2026-09-27>
+
     std::string ext = gDirUtilp->getExtension(path);
     const bool ok = (ext == "glb")
         ? loader.LoadBinaryFromFile(&model, &err, &warn, path)
@@ -1808,7 +1888,8 @@ namespace
         LLCoreHttpUtil::HttpCoroutineAdapter::ptr_t adapter =
             std::make_shared<LLCoreHttpUtil::HttpCoroutineAdapter>("WolfMeshUpload", LLCore::HttpRequest::DEFAULT_POLICY_ID);
         LLCore::HttpRequest::ptr_t request = std::make_shared<LLCore::HttpRequest>();
-        LLCore::HttpOptions::ptr_t opts = std::make_shared<LLCore::HttpOptions>();
+        // <WolfViewer 2026-09-27> verify the host name too: this request carries the session id.
+        LLCore::HttpOptions::ptr_t opts = WolfGrid::makeVerifiedHttpOptions();
         // The proxy zlib-compresses three blocks per prim and writes two assets plus an
         // inventory item through ROBUST; its own outbound client allows 60 s (main.rs:238-246).
         opts->setTimeout(180);

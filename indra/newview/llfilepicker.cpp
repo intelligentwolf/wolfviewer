@@ -2245,7 +2245,23 @@ namespace
                 if (save)
                 {
                     args.push_back("--getsavefilename");
-                    args.push_back(proposed_name.empty() ? std::string(".") : proposed_name);
+                    // <WolfViewer 2026-09-27> A proposed name can come from in-world text (an
+                    // object or snapshot name). One starting with '-' would be read by kdialog as
+                    // an option, not the start path; "./-name" is the same relative file.
+                    //args.push_back(proposed_name.empty() ? std::string(".") : proposed_name);
+                    if (proposed_name.empty())
+                    {
+                        args.push_back(".");
+                    }
+                    else if (proposed_name[0] == '-')
+                    {
+                        args.push_back("./" + proposed_name);
+                    }
+                    else
+                    {
+                        args.push_back(proposed_name);
+                    }
+                    // </WolfViewer 2026-09-27>
                 }
                 else
                 {

@@ -362,7 +362,8 @@ void WolfTerrainPaint::fetchCoro(std::vector<U64> handles)
     LLCoreHttpUtil::HttpCoroutineAdapter::ptr_t adapter =
         std::make_shared<LLCoreHttpUtil::HttpCoroutineAdapter>("WolfTerrainPaint", LLCore::HttpRequest::DEFAULT_POLICY_ID);
     LLCore::HttpRequest::ptr_t request = std::make_shared<LLCore::HttpRequest>();
-    LLCore::HttpOptions::ptr_t options = std::make_shared<LLCore::HttpOptions>();
+    // <WolfViewer 2026-09-27> verify the host name too: this request carries the session id.
+    LLCore::HttpOptions::ptr_t options = WolfGrid::makeVerifiedHttpOptions();
     options->setTimeout(20);
     LLCore::HttpHeaders::ptr_t headers = std::make_shared<LLCore::HttpHeaders>();
     headers->append(HTTP_OUT_HEADER_ACCEPT, "application/json");
@@ -1451,7 +1452,8 @@ void WolfTerrainPaint::saveCoro(std::string region_uuid, LLSD layout, bool enabl
     LLCoreHttpUtil::HttpCoroutineAdapter::ptr_t adapter =
         std::make_shared<LLCoreHttpUtil::HttpCoroutineAdapter>("WolfTerrainPaint", LLCore::HttpRequest::DEFAULT_POLICY_ID);
     LLCore::HttpRequest::ptr_t request = std::make_shared<LLCore::HttpRequest>();
-    LLCore::HttpOptions::ptr_t options = std::make_shared<LLCore::HttpOptions>();
+    // <WolfViewer 2026-09-27> verify the host name too: this request carries the session id.
+    LLCore::HttpOptions::ptr_t options = WolfGrid::makeVerifiedHttpOptions();
     options->setTimeout(30);
     LLCore::HttpHeaders::ptr_t headers = std::make_shared<LLCore::HttpHeaders>();
     headers->append(HTTP_OUT_HEADER_CONTENT_TYPE, "application/json");

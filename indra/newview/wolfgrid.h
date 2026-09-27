@@ -17,6 +17,9 @@
 #define WOLF_GRID_H
 
 #include "llviewernetwork.h"
+// <WolfViewer 2026-09-27> makeVerifiedHttpOptions() below.
+#include "httpoptions.h"
+// </WolfViewer 2026-09-27>
 
 #include "llfloater.h"
 #include "llpanel.h"
@@ -42,8 +45,52 @@ namespace WolfGrid
         {
             return true;
         }
-        return gm->getGrid().find("wolfterritories.org") != std::string::npos;
+        // <WolfViewer 2026-09-27> Was a substring search, which "wolfterritories.org.evil.com"
+        // or "notwolfterritories.org" also satisfied - and a positive answer makes the viewer
+        // send the session id to Wolf services and offer Wolf-only features. Now the grid's HOST
+        // must be wolfterritories.org or a name under it; scheme, port and path are ignored, so
+        // "grid.wolfterritories.org:8002" (grids.xml, llviewernetwork.h MAINGRID) and any
+        // hand-added variant of it still match.
+        //return gm->getGrid().find("wolfterritories.org") != std::string::npos;
+        std::string host = gm->getGrid();
+        LLStringUtil::toLower(host);
+        const size_t scheme = host.find("://");
+        if (scheme != std::string::npos)
+        {
+            host.erase(0, scheme + 3);
+        }
+        const size_t host_end = host.find_first_of(":/");
+        if (host_end != std::string::npos)
+        {
+            host.erase(host_end);
+        }
+        static const std::string WOLF_DOMAIN = "wolfterritories.org";
+        static const std::string WOLF_SUFFIX = ".wolfterritories.org";
+        return host == WOLF_DOMAIN
+            || (host.size() > WOLF_SUFFIX.size()
+                && host.compare(host.size() - WOLF_SUFFIX.size(), WOLF_SUFFIX.size(), WOLF_SUFFIX) == 0);
+        // </WolfViewer 2026-09-27>
     }
+
+    // <WolfViewer 2026-09-27> Options for every request to a Wolf service (and the other fixed
+    // third-party hosts this viewer calls). Those requests carry X-Wolf-Agent/X-Wolf-Session --
+    // the live session id -- so the server must be proven to BE wolfstorm.app. HttpOptions
+    // defaults verify the peer only when NoVerifySSLCert is off (httpoptions.cpp
+    // sDefaultVerifyPeer, llappcorehttp.cpp:324) and never verify the host name
+    // (httpoptions.cpp mVerifyHost(false)), so any valid certificate for ANY name would have
+    // been accepted. Redirects are refused because curl forwards custom headers to the
+    // redirect target. Same settings wolfai.cpp has always used. Every endpoint is https to a
+    // host with a certificate that chains to ISRG Root X1 in the shipped ca-bundle.crt, and
+    // none of them redirects (checked 2026-09-27).
+    inline LLCore::HttpOptions::ptr_t makeVerifiedHttpOptions()
+    {
+        LLCore::HttpOptions::ptr_t opts = std::make_shared<LLCore::HttpOptions>();
+        opts->setSSLVerifyPeer(true);
+        opts->setSSLVerifyHost(true);
+        opts->setFollowRedirects(false);
+        return opts;
+    }
+    // </WolfViewer 2026-09-27>
 
     // The WolfStorm Rust proxy's HTTP API, on port 8080 of the host serving the viewer; the
     // primary host is wolfstorm.app (rust_proxy/src/main.rs:46-92 binds 8080 with TLS, and the

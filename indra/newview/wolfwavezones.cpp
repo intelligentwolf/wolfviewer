@@ -285,7 +285,8 @@ void WolfWaveZones::fetchCoro(std::vector<U64> handles, U64 requested_handle, U6
     LLCoreHttpUtil::HttpCoroutineAdapter::ptr_t adapter =
         std::make_shared<LLCoreHttpUtil::HttpCoroutineAdapter>("WolfWaveZones", LLCore::HttpRequest::DEFAULT_POLICY_ID);
     LLCore::HttpRequest::ptr_t request = std::make_shared<LLCore::HttpRequest>();
-    LLCore::HttpOptions::ptr_t options = std::make_shared<LLCore::HttpOptions>();
+    // <WolfViewer 2026-09-27> verify the host name too: this request carries the session id.
+    LLCore::HttpOptions::ptr_t options = WolfGrid::makeVerifiedHttpOptions();
     options->setTimeout(20);
     LLCore::HttpHeaders::ptr_t headers = std::make_shared<LLCore::HttpHeaders>();
     headers->append(HTTP_OUT_HEADER_ACCEPT, "application/json");
@@ -332,17 +333,38 @@ void WolfWaveZones::fetchCoro(std::vector<U64> handles, U64 requested_handle, U6
     }
     const auto previous = std::move(mByHandle);
     mByHandle.clear();
+    // <WolfViewer 2026-09-27> The service answers for at most WAVES_MAX_HANDLES = 24 regions
+    // (php/waves.php); anything past this many is not a reply this viewer asked for.
+    static constexpr size_t MAX_REPLY_REGIONS = 64;
+    size_t reply_regions = 0;
+    // </WolfViewer 2026-09-27>
     for (const LLSD& r : llsd::inArray(reply["regions"]))
     {
+        // <WolfViewer 2026-09-27>
+        if (++reply_regions > MAX_REPLY_REGIONS)
+        {
+            LL_WARNS("WolfWaveZones") << "fetch: reply lists more than " << MAX_REPLY_REGIONS << " regions; the rest are ignored" << LL_ENDL;
+            break;
+        }
+        // </WolfViewer 2026-09-27>
         Region rec;
         rec.mUuid = r["region"].asString();
         rec.mName = r["name"].asString();
         rec.mHandle = std::strtoull(r["handle"].asString().c_str(), nullptr, 10);
-        rec.mSizeX = llmax(256, r["sizeX"].asInteger());
-        rec.mSizeY = llmax(256, r["sizeY"].asInteger());
+        // <WolfViewer 2026-09-27> Sizes clamped to OpenSim's own range (Constants.MaximumRegionSize
+        // = 1,048,576 m), and the automatic cell never finer than waves_cell() gives for that size,
+        // so defaultZones' w() * h() grid stays within MAX_CELLS_EDGE^2 whatever the reply says.
+        // Both are exactly what the service sends for every real region.
+        //rec.mSizeX = llmax(256, r["sizeX"].asInteger());
+        //rec.mSizeY = llmax(256, r["sizeY"].asInteger());
+        rec.mSizeX = llclamp(r["sizeX"].asInteger(), 256, 1048576);
+        rec.mSizeY = llclamp(r["sizeY"].asInteger(), 256, 1048576);
         // [2026-09-10] the service's cell for this region (php/waves.php waves_cell); its own
         // rule if an older service omits it.
-        rec.mCell = r.has("cell") ? llmax(CELL_M, r["cell"].asInteger()) : cellFor(rec.mSizeX, rec.mSizeY);
+        //rec.mCell = r.has("cell") ? llmax(CELL_M, r["cell"].asInteger()) : cellFor(rec.mSizeX, rec.mSizeY);
+        const S32 rule_cell = cellFor(rec.mSizeX, rec.mSizeY);
+        rec.mCell = r.has("cell") ? llclamp(r["cell"].asInteger(), rule_cell, 1048576) : rule_cell;
+        // </WolfViewer 2026-09-27>
         rec.mVersion = r["version"].asInteger();
         rec.mEnabled = r["enabled"].asBoolean();
         if (r["layout"].isMap())
@@ -766,7 +788,8 @@ void WolfWaveZones::saveCoro(SaveTarget target, Tiles tiles, LLSD params, bool e
     LLCoreHttpUtil::HttpCoroutineAdapter::ptr_t adapter =
         std::make_shared<LLCoreHttpUtil::HttpCoroutineAdapter>("WolfWaveZones", LLCore::HttpRequest::DEFAULT_POLICY_ID);
     LLCore::HttpRequest::ptr_t request = std::make_shared<LLCore::HttpRequest>();
-    LLCore::HttpOptions::ptr_t options = std::make_shared<LLCore::HttpOptions>();
+    // <WolfViewer 2026-09-27> verify the host name too: this request carries the session id.
+    LLCore::HttpOptions::ptr_t options = WolfGrid::makeVerifiedHttpOptions();
     options->setTimeout(30);
     LLCore::HttpHeaders::ptr_t headers = std::make_shared<LLCore::HttpHeaders>();
     headers->append(HTTP_OUT_HEADER_CONTENT_TYPE, "application/json");

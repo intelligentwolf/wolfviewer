@@ -1,3 +1,42 @@
+# WolfViewer security updates — "Safety Tiger" (w49)
+
+This release fixes the issues found in a full security review of the viewer on 27 September
+2026. It does not change how you log in or which grids you can use.
+
+## Fixes in WolfViewer's own code
+
+- **Inventory offers can no longer crash the viewer or write to its memory.** The name shown in
+  an inventory-offer notice came from the sender and was used as a formatting template, so a
+  crafted name could crash the viewer when you accepted the offer. The name is now shown as text.
+- **Wolf Territories services now check the server's certificate name.** Weather, waves, terrain
+  paint, map overlays, speech, screen share, mesh upload and album-art requests send your session
+  to Wolf's servers; they now refuse any server whose certificate is not for that exact host, so
+  a network attacker cannot collect your session.
+- **A region cannot crash the viewer with an impossible size.** Region sizes from the server must
+  be a multiple of 256 and at most 1,048,576 m (OpenSim's own rule); anything else is treated as
+  256 m with a warning instead of allocating gigabytes.
+- **Parcel and wave data from the server are size-checked** before they are expanded or
+  allocated.
+- **Album-art images are only fetched from Apple's image servers** (never local files or other
+  hosts).
+- **glTF mesh uploads can only read files from the chosen file's own folder.**
+- **Wolf features only switch on for the real Wolf Territories grid** (the grid name is matched
+  exactly, not as a substring).
+- **Saved logins are never overwritten if encryption fails**, and water sampling ignores
+  non-numeric positions.
+- **Linux:** the old native Vivox voice client (SLVoice 3.2, which carries its own 2009 OpenSSL)
+  can now be switched off with the `WolfLinuxNativeSLVoice` setting. It stays on by default so
+  nobody on a Vivox grid loses voice; Wolf Territories uses WebRTC voice and never starts it.
+
+## Still pending
+
+- **Built-in web browser (CEF).** The viewer embeds Chromium 152.0.7977.83, from Second Life's
+  current dullahan package (v1.50.0-CEF_152.0.6.83, the newest available). Newer Chromium
+  releases fix security bugs, including one exploited in the wild. It will be updated as soon as
+  a dullahan build with a newer CEF is available.
+
+---
+
 # WolfViewer security updates — "Fanatical Frog" (w48)
 
 This release replaces most of the third-party libraries WolfViewer inherited from the

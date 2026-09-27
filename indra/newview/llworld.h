@@ -333,4 +333,10 @@ void process_region_handshake(LLMessageSystem* msg, void** user_data);
 void send_agent_pause();
 void send_agent_resume();
 
+// <WolfViewer 2026-09-27> Every region size a server sends passes through here before the
+// viewer sizes anything from it. Returns true if the pair was usable as sent; otherwise both
+// are set to 256 and a warning is logged.
+bool wolf_sanitize_region_size(U32& size_x, U32& size_y, const char* source);
+// </WolfViewer 2026-09-27>
+
 #endif

@@ -1726,11 +1726,14 @@ void process_enable_simulator(LLMessageSystem *msg, void **user_data)
         msg->getU32Fast(_PREHASH_SimulatorInfo, _PREHASH_RegionSizeX, region_size_x);
         msg->getU32Fast(_PREHASH_SimulatorInfo, _PREHASH_RegionSizeY, region_size_y);
 
-        if (region_size_y == 0 || region_size_x == 0)
-        {
-            region_size_x = 256;
-            region_size_y = 256;
-        }
+        // <WolfViewer 2026-09-27> was: only 0 was replaced with 256.
+        //if (region_size_y == 0 || region_size_x == 0)
+        //{
+        //    region_size_x = 256;
+        //    region_size_y = 256;
+        //}
+        wolf_sanitize_region_size(region_size_x, region_size_y, "EnableSimulator");
+        // </WolfViewer 2026-09-27>
     }
 #endif
 // </FS:CR> Aurora Sim
@@ -2072,3 +2075,35 @@ boost::signals2::connection LLWorld::setRegionRemovedCallback(const region_remov
 LLHTTPRegistration<LLEstablishAgentCommunication>
     gHTTPRegistrationEstablishAgentCommunication(
                             "/message/EstablishAgentCommunication");
+
+// <WolfViewer 2026-09-27> Region sizes arrive from the simulator (EnableSimulator,
+// TeleportFinish, CrossedRegion) and from the login response, and the viewer allocates
+// per-region structures from them. Before this only 0 was rejected, so any server - including
+// any Hypergrid destination - could send 0xFFFFFFFF or a size that is not a whole number of
+// 256 m blocks. The accepted range is exactly what OpenSimulator itself enforces on a region
+// (RegionInfo.cs:760-800 DoRegionSizeSanityChecks: a multiple of Constants.RegionSize = 256,
+// at most Constants.MaximumRegionSize = 1048576, Constants.cs:73), so every region a real
+// grid runs - Wolf Territories' 1,048,576 m regions included - is accepted unchanged.
+// Anything else falls back to 256, the same fallback 0 has always had, rather than
+// disconnecting.
+bool wolf_sanitize_region_size(U32& size_x, U32& size_y, const char* source)
+{
+    const U32 MAX_REGION_SIZE = 1048576;   // OpenSim Constants.MaximumRegionSize
+    const bool x_ok = size_x != 0 && size_x <= MAX_REGION_SIZE && (size_x % REGION_WIDTH_U32) == 0;
+    const bool y_ok = size_y != 0 && size_y <= MAX_REGION_SIZE && (size_y % REGION_WIDTH_U32) == 0;
+    if (x_ok && y_ok)
+    {
+        return true;
+    }
+    // 0 x 0 is how a grid without variable-size regions says "256" (the old Second Life
+    // compatibility case), so it is not worth a warning.
+    if (size_x != 0 || size_y != 0)
+    {
+        LL_WARNS("Messaging") << "Ignoring invalid region size " << size_x << " x " << size_y
+                              << " from " << (source ? source : "server") << "; using 256 x 256" << LL_ENDL;
+    }
+    size_x = REGION_WIDTH_U32;
+    size_y = REGION_WIDTH_U32;
+    return false;
+}
+// </WolfViewer 2026-09-27>

@@ -167,7 +167,8 @@ namespace
 {
     // The compact form into out (already sized to the region's cells). False, with out left to
     // the caller to reset, when data is not a well-formed compact bitmap.
-    bool decodeCompact(const U8* data, S32 size, WolfParcelCells& out)
+    // <WolfViewer 2026-09-27> cells_x / cells_y: the region's own grid (see below).
+    bool decodeCompact(const U8* data, S32 size, S32 cells_x, S32 cells_y, WolfParcelCells& out)
     {
         if (data[4] != COMPACT_VERSION)
         {
@@ -178,6 +179,19 @@ namespace
         {
             return false;
         }
+        // <WolfViewer 2026-09-27> The inflate limit below is sized from this header, so a
+        // bitmap claiming 262,144 x 262,144 cells let a small packet on a small region inflate
+        // to ~8.6 GB. OpenSimWolf only ever sends a bitmap of the parcel's own region
+        // (LandObject.ConvertLandBitmapToBytes -> LandBitmap.ToBytes of a bitmap made by
+        // LandBitmap.ForRegion / fitted to the region in ConvertBytesToLandBitmap), and the
+        // callers pass that region's grid (llviewerparcelmgr.cpp mParcelsPerEdge from the
+        // message's region), so anything larger is refused before inflating and read as legacy
+        // bytes like every other non-compact bitmap.
+        if (width > cells_x || height > cells_y)
+        {
+            return false;
+        }
+        // </WolfViewer 2026-09-27>
         // Source: OpenSimWolf LandBitmap.FromCompactBytes maxBody - a tag byte for every node of
         // the padded tree, plus a leaf's bits for every leaf holding in-bounds cells.
         S64 side = LEAF_EDGE;
@@ -215,7 +229,7 @@ bool wolfDecodeParcelBitmap(const U8* data, S32 size, S32 cells_x, S32 cells_y, 
     // existing parcel is legacy. Only one that fully decodes (version, gzip CRC32 and length, a
     // tree ending exactly at the end of the stream) is taken as compact; anything else is read
     // as legacy below, as every viewer always has.
-    if (size >= COMPACT_HEADER && memcmp(data, COMPACT_MAGIC, 4) == 0 && decodeCompact(data, size, out))
+    if (size >= COMPACT_HEADER && memcmp(data, COMPACT_MAGIC, 4) == 0 && decodeCompact(data, size, cells_x, cells_y, out))   // <WolfViewer 2026-09-27/> region grid passed
     {
         return true;
     }

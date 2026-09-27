@@ -1438,13 +1438,29 @@ void LLSecAPIBasicHandler::_writeProtectedData()
     llofstream protected_data_stream(tmp_filename.c_str(),
                                      std::ios_base::binary);
     EVP_CIPHER_CTX *ctx = NULL;
+    // <WolfViewer 2026-09-27> Only a completely written temp file may replace the saved
+    // credentials. Before, a failed EVP_EncryptInit (e.g. RC4 unavailable in the OpenSSL build)
+    // went unnoticed, EVP_EncryptUpdate then wrote an uninitialised length of garbage, and the
+    // exception path below removed the temp file but still went on to delete the existing store
+    // before its rename failed - every saved login lost.
+    bool written = false;
+    // </WolfViewer 2026-09-27>
     try
     {
 
         ctx = EVP_CIPHER_CTX_new();
         // todo: ctx error handling
 
-        EVP_EncryptInit(ctx, EVP_rc4(), salt, NULL);
+        // <WolfViewer 2026-09-27> check the context and the init result.
+        //EVP_EncryptInit(ctx, EVP_rc4(), salt, NULL);
+        if (!ctx || EVP_EncryptInit(ctx, EVP_rc4(), salt, NULL) != 1)
+        {
+            LL_WARNS("SECAPI") << "Could not initialise the protected data cipher; the saved store is left unchanged" << LL_ENDL;
+        }
+        else
+        {
+        bool encrypt_ok = true;
+        // </WolfViewer 2026-09-27>
         unsigned char unique_id[MAC_ADDRESS_BYTES];
         LLMachineID::getUniqueID(unique_id, sizeof(unique_id));
         LLXORCipher cipher(unique_id, sizeof(unique_id));
@@ -1459,15 +1475,42 @@ void LLSecAPIBasicHandler::_writeProtectedData()
                 break;
             }
             int encrypted_length;
-            EVP_EncryptUpdate(ctx, encrypted_buffer, &encrypted_length,
-                          buffer, (int)formatted_data_istream.gcount());
+            // <WolfViewer 2026-09-27> stop on a failed update rather than write an unset length.
+            //EVP_EncryptUpdate(ctx, encrypted_buffer, &encrypted_length,
+            //              buffer, (int)formatted_data_istream.gcount());
+            if (EVP_EncryptUpdate(ctx, encrypted_buffer, &encrypted_length,
+                                  buffer, (int)formatted_data_istream.gcount()) != 1)
+            {
+                LL_WARNS("SECAPI") << "Protected data encryption failed; the saved store is left unchanged" << LL_ENDL;
+                encrypt_ok = false;
+                break;
+            }
+            // </WolfViewer 2026-09-27>
             protected_data_stream.write((const char *)encrypted_buffer, encrypted_length);
         }
+        // <WolfViewer 2026-09-27>
+        written = encrypt_ok;
+        }
+        // </WolfViewer 2026-09-27>
 
         // no EVP_EncrypteFinal, as this is a stream cipher
-        EVP_CIPHER_CTX_free(ctx);
+        // <WolfViewer 2026-09-27> ctx may be NULL now, and is cleared so the catch below cannot free it twice.
+        //EVP_CIPHER_CTX_free(ctx);
+        if (ctx)
+        {
+            EVP_CIPHER_CTX_free(ctx);
+            ctx = NULL;
+        }
+        // </WolfViewer 2026-09-27>
 
         protected_data_stream.close();
+        // <WolfViewer 2026-09-27> a short write (disk full) also leaves the old store in place.
+        if (written && protected_data_stream.fail())
+        {
+            LL_WARNS("SECAPI") << "Could not write " << tmp_filename << "; the saved store is left unchanged" << LL_ENDL;
+            written = false;
+        }
+        // </WolfViewer 2026-09-27>
     }
     catch (...)
     {
@@ -1486,6 +1529,14 @@ void LLSecAPIBasicHandler::_writeProtectedData()
         // Decided throwing an exception here was overkill until we figure out why this happens
         //LLTHROW(LLProtectedDataException("Error writing Protected Data Store"));
     }
+
+    // <WolfViewer 2026-09-27> see `written` above: keep the existing store.
+    if (!written)
+    {
+        LLFile::remove(tmp_filename);
+        return;
+    }
+    // </WolfViewer 2026-09-27>
 
     try
     {

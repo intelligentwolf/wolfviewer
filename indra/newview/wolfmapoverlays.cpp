@@ -645,7 +645,8 @@ void WolfMapOverlays::fetchCoro(F64 x0, F64 y0, F64 x1, F64 y1)
     LLCoreHttpUtil::HttpCoroutineAdapter::ptr_t adapter =
         std::make_shared<LLCoreHttpUtil::HttpCoroutineAdapter>("WolfMapOverlays", LLCore::HttpRequest::DEFAULT_POLICY_ID);
     LLCore::HttpRequest::ptr_t request = std::make_shared<LLCore::HttpRequest>();
-    LLCore::HttpOptions::ptr_t options = std::make_shared<LLCore::HttpOptions>();
+    // <WolfViewer 2026-09-27> verify the host name too, same as the save below.
+    LLCore::HttpOptions::ptr_t options = WolfGrid::makeVerifiedHttpOptions();
     options->setTimeout(20);
     LLCore::HttpHeaders::ptr_t headers = std::make_shared<LLCore::HttpHeaders>();
     headers->append(HTTP_OUT_HEADER_ACCEPT, "application/json");
@@ -789,7 +790,8 @@ LLSD WolfMapOverlays::post(const LLSD& body, S32& http_status)
     LLCoreHttpUtil::HttpCoroutineAdapter::ptr_t adapter =
         std::make_shared<LLCoreHttpUtil::HttpCoroutineAdapter>("WolfMapOverlays", LLCore::HttpRequest::DEFAULT_POLICY_ID);
     LLCore::HttpRequest::ptr_t request = std::make_shared<LLCore::HttpRequest>();
-    LLCore::HttpOptions::ptr_t options = std::make_shared<LLCore::HttpOptions>();
+    // <WolfViewer 2026-09-27> verify the host name too: this request carries the session id.
+    LLCore::HttpOptions::ptr_t options = WolfGrid::makeVerifiedHttpOptions();
     options->setTimeout(30);
     LLCore::HttpHeaders::ptr_t headers = std::make_shared<LLCore::HttpHeaders>();
     headers->append(HTTP_OUT_HEADER_CONTENT_TYPE, "application/json");

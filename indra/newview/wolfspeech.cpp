@@ -60,7 +60,8 @@ namespace
         LLCoreHttpUtil::HttpCoroutineAdapter::ptr_t adapter =
             std::make_shared<LLCoreHttpUtil::HttpCoroutineAdapter>("WolfSpeech", LLCore::HttpRequest::DEFAULT_POLICY_ID);
         LLCore::HttpRequest::ptr_t request = std::make_shared<LLCore::HttpRequest>();
-        LLCore::HttpOptions::ptr_t options = std::make_shared<LLCore::HttpOptions>();
+        // <WolfViewer 2026-09-27> verify the host name too: this request carries the session id.
+        LLCore::HttpOptions::ptr_t options = WolfGrid::makeVerifiedHttpOptions();
         options->setTimeout(40);   // whisper's own budget is 30 s (main.rs STT_TIMEOUT_SECS)
         LLCore::HttpHeaders::ptr_t headers = std::make_shared<LLCore::HttpHeaders>();
         headers->append(HTTP_OUT_HEADER_CONTENT_TYPE, content_type);

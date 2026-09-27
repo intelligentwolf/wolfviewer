@@ -141,9 +141,9 @@ public:
      */
     static F32 exposureAt(const Field& f, F32 rx, F32 ry);
     /**
-     * The depth bake's nearest texel at region-relative (rx, ry): out[0] height, out[1..2]
-     * beachward unit direction x confidence, out[3] box-smoothed height. False outside the
-     * region. Source: terrain_manager.js _waveSampleCPU() depth-texture read.
+     * The depth bake, bilinear (as the GPU reads it), at region-space (rx, ry): out[0] height,
+     * out[1..2] beachward unit direction x confidence, out[3] box-smoothed height. False
+     * outside the field. Source: terrain_manager.js _waveSampleCPU() depth-texture read.
      */
     static bool depthAt(const Field& f, F32 rx, F32 ry, F32 out[4]);
     /** [WAVES 2026-09-07] Zone energy at region-relative (rx, ry): nearest texel, 0.55 outside. */

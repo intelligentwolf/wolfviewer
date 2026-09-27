@@ -220,13 +220,21 @@ bool WolfWaterField::depthAt(const Field& f, F32 rx, F32 ry, F32 out[4])
     {
         return false;
     }
-    const S32 ti = llclamp((S32)ll_round(rx * (RES - 1) / f.mSizeX), 0, RES - 1);
-    const S32 tj = llclamp((S32)ll_round(ry * (RES - 1) / f.mSizeY), 0, RES - 1);
-    const F32* t = &f.mDepth[((size_t)tj * RES + ti) * 4];
-    out[0] = t[0];
-    out[1] = t[1];
-    out[2] = t[2];
-    out[3] = t[3];
+    // <WolfViewer 2026-09-27> Bilinear, like the GPU's read of the same texture (upload():
+    // TFO_BILINEAR) and like distanceAt below. The nearest texel was 8 m wide on a windowed
+    // field: the boat rocker now differences this across a hull, and a step between texels
+    // read as a slope that is not in the drawn water.
+    const F32 fx = rx * (RES - 1) / f.mSizeX, fy = ry * (RES - 1) / f.mSizeY;
+    const S32 i0 = llclamp((S32)fx, 0, RES - 2), j0 = llclamp((S32)fy, 0, RES - 2);
+    const F32 tx = llclamp(fx - i0, 0.f, 1.f), ty = llclamp(fy - j0, 0.f, 1.f);
+    const F32* t00 = &f.mDepth[((size_t)j0 * RES + i0) * 4];
+    const F32* t10 = t00 + 4;
+    const F32* t01 = t00 + (size_t)RES * 4;
+    const F32* t11 = t01 + 4;
+    for (S32 c = 0; c < 4; ++c)
+    {
+        out[c] = (t00[c] * (1.f - tx) + t10[c] * tx) * (1.f - ty) + (t01[c] * (1.f - tx) + t11[c] * tx) * ty;
+    }
     return true;
 }
 

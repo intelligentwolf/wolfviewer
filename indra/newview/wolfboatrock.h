@@ -21,9 +21,11 @@
 #include "llpointer.h"
 #include "llquaternion.h"
 #include "llsingleton.h"
+#include "v2math.h"
 #include "v3math.h"
 
 class LLViewerObject;
+class LLViewerRegion;
 
 // Source: wolfstorm/js/world/terrain/terrain_manager.js [ROCK 2026-08-15] updateFloaters(),
 // _classifyFloater(), _boatNameVerdict(), _restoreFloater(), _waveSampleCPU(),
@@ -34,9 +36,11 @@ class LLViewerObject;
 // A 2.5 s sweep tags candidate floaters: ROOT prims near the camera whose position sits
 // in the waterline band, over real water (terrain below the surface), and NOT
 // bottom-anchored — a dock piling reaches the seabed, a hull does not. Every frame the
-// floaters ride the SAME wave surface the shader draws (sampleWave() mirrors waterV.glsl's
-// three dominant Gerstner trains and its geometric shore breaker), low-pass filtered so
-// hulls read as having inertia. Big vessels tilt less than dinghies.
+// floaters ride the SAME wave surface the shader draws (waveHeight() mirrors waterV.glsl's
+// three dominant Gerstner trains, its geometric shore breaker and the surf train), low-pass
+// filtered so hulls read as having inertia. The tilt is MEASURED: the water's height at the
+// bow, stern, port and starboard ends of the linkset (measureHull()), so a long hull spans
+// short waves and rides steadier than a dinghy without a rule for it.
 //
 // HOW THE OFFSET IS APPLIED. WolfStorm writes the rocked transform into obj.group and
 // leaves obj._lastPos/_lastRot (what the sim said) alone, re-deriving the group from them
@@ -105,6 +109,21 @@ private:
         F32 mSx = 0.f;  // surface slope dz/dx
         F32 mSy = 0.f;  // surface slope dz/dy
     };
+    // <WolfViewer 2026-09-27> The sea state and settings the water is drawn with this frame,
+    // read once per step() instead of once per measured point.
+    struct Sea
+    {
+        F32       mAmp = 0.f;
+        F32       mFreq = 0.1f;
+        F32       mSpeed = 1.f;
+        LLVector2 mDir1;
+        bool      mShoreOn = true;
+        F32       mCalm = 0.03f;
+        F32       mSmall = 0.f;
+        F32       mSurfH = 0.f;
+        F32       mSurfSet = 90.f;
+        F32       mSurfLen = 36.f;
+    };
     struct Rocker
     {
         LLPointer<LLViewerObject> mObject;
@@ -120,6 +139,10 @@ private:
         LLQuaternion mAppliedTilt;
         bool         mApplied = false;
         bool         mBoard = false;   // <WolfViewer 2026-09-22/> never dips below the surface
+        // <WolfViewer 2026-09-27> The linkset's footprint in the root's own frame, X bow to
+        // stern and Y the beam, metres; refreshed every sweep (hullExtents()).
+        LLVector2    mMin = LLVector2(-0.5f, -0.5f);
+        LLVector2    mMax = LLVector2(0.5f, 0.5f);
     };
 
     void sweep();
@@ -130,7 +153,13 @@ private:
 
     Verdict classify(LLViewerObject* objectp) const;
     NameVerdict nameVerdict(const LLViewerObject* objectp) const;
-    Sample sampleWave(const LLViewerObject* objectp, F32 t) const;
+    Sea seaNow() const;
+    /** Height of the drawn water above its rest level at agent-space (ax, ay), in the frame
+     *  and fields of regionp (the hull's own region). */
+    F32 waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F32 ay, F32 t) const;
+    /** Bob and surface slope for a hull, from waveHeight() at its centre and four ends. */
+    Sample measureHull(const Rocker& r, const LLViewerObject* objectp, const Sea& sea, F32 t) const;
+    static void hullExtents(const LLViewerObject* root, LLVector2& lo, LLVector2& hi);
 
     std::map<const LLViewerObject*, Rocker> mRockers;
     F64 mNextSweep = 0.0;

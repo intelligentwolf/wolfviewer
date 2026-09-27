@@ -218,6 +218,7 @@ void WolfBoatRock::sweep()
         {
             it->second.mGain = c.mVerdict.mGain;
             it->second.mBoard = c.mVerdict.mBoard;   // <WolfViewer 2026-09-22/>
+            hullExtents(c.mObject, it->second.mMin, it->second.mMax);   // <WolfViewer 2026-09-27/> prims can be linked or resized
         }
         else
         {
@@ -225,6 +226,7 @@ void WolfBoatRock::sweep()
             r.mObject = c.mObject;
             r.mGain = c.mVerdict.mGain;
             r.mBoard = c.mVerdict.mBoard;   // <WolfViewer 2026-09-22/>
+            hullExtents(c.mObject, r.mMin, r.mMax);   // <WolfViewer 2026-09-27/>
             mRockers[c.mObject] = r;
             LL_DEBUGS("WolfBoatRock") << "rocking " << c.mObject->getID() << " gain " << c.mVerdict.mGain
                                       << ": " << c.mVerdict.mWhy << LL_ENDL;
@@ -252,6 +254,7 @@ void WolfBoatRock::step()
     const F32 bob_alpha = lowpassAlpha(dt, BOB_TAU_SECS);
     const F32 slope_alpha = lowpassAlpha(dt, SLOPE_TAU_SECS);
     const LLVector3 up(0.f, 0.f, 1.f);
+    const Sea sea = seaNow();   // <WolfViewer 2026-09-27/> once per frame, not per measured point
 
     for (auto it = mRockers.begin(); it != mRockers.end();)
     {
@@ -284,7 +287,7 @@ void WolfBoatRock::step()
             continue;
         }
 
-        const Sample w = sampleWave(objectp, t);
+        const Sample w = measureHull(r, objectp, sea, t);
         // gain: 1.0 physical/crewed, 0.6 parked floaters (classify())
         const F32 g = (r.mGain > 0.f) ? r.mGain : 1.f;
         r.mBob += (w.mZ * g - r.mBob) * bob_alpha;
@@ -301,14 +304,11 @@ void WolfBoatRock::step()
         r.mSx += (w.mSx * g - r.mSx) * slope_alpha;
         r.mSy += (w.mSy * g - r.mSy) * slope_alpha;
 
-        // Big vessels ride steadier than dinghies.
-        const LLVector3& scale = objectp->getScale();
-        const F32 radius = llmax(scale.mV[VX] > 0.f ? scale.mV[VX] : 1.f,
-                                 scale.mV[VY] > 0.f ? scale.mV[VY] : 1.f);
-        const F32 tilt_scale = llmin(1.f, 6.f / llmax(radius, 1.f));
-
-        // n = normalize(-sx * tiltScale, -sy * tiltScale, 1); tiltQ = up -> n.
-        LLVector3 n(-r.mSx * tilt_scale, -r.mSy * tilt_scale, 1.f);
+        // <WolfViewer 2026-09-27> No tiltScale (6 m / hull radius) any more: the slope is
+        // measured across the hull's own length and beam (measureHull), which is what made a
+        // big vessel steadier than a dinghy in the first place.
+        // n = normalize(-sx, -sy, 1); tiltQ = up -> n.
+        LLVector3 n(-r.mSx, -r.mSy, 1.f);
         n.normalize();
         r.mTargetBob = r.mBob;
         r.mTargetTilt.shortestArc(up, n);
@@ -589,29 +589,19 @@ WolfBoatRock::NameVerdict WolfBoatRock::nameVerdict(const LLViewerObject* object
     return NAME_NOT_BOAT;
 }
 
-// Source: terrain_manager.js _waveSampleCPU(x, y, t, u) — CPU mirror of the shader's wave
-// surface at the hull: the three dominant Gerstner swells (same arguments as the
-// gerstnerWave/gerstnerSlope calls, here waterV.glsl w1/w2/w3) plus the geometric shore
-// breaker (same phase as the vertex stage). localAmp uses the GPU noise field's MEAN (0.5)
-// — the per-position simplex variation, the chaos wavelength jitter and the spectral
-// cascades are omitted; hulls cannot visibly disagree with the surface over their own
-// footprint. The distance fade (waveFade 320..1500 m) is 1 inside the 256 m sweep radius.
-// Returns height offset and surface slope.
-//
-// SPACES: waterV.glsl phases the swell on AGENT-space XY (`wxy = position.xy`) so
-// neighbouring regions' water joins up, and reads the baked fields in the vertex's own
-// REGION space (`regionXY = position.xy - wolfRegionOrigin`, lldrawpoolwater.cpp
-// pushWaterPlanes binds each region's own field). The same two spaces here.
-WolfBoatRock::Sample WolfBoatRock::sampleWave(const LLViewerObject* objectp, F32 t) const
+// <WolfViewer 2026-09-27> The sea state the water is drawn with this frame, read once per
+// step(). The same reads sampleWave() made per hull before it became waveHeight().
+WolfBoatRock::Sea WolfBoatRock::seaNow() const
 {
-    Sample out;
-
+    Sea sea;
     // The sea state the water was drawn with (lldrawpoolwater.cpp renderPostDeferred sets
     // it every frame from the region's EEP water, or the manual height when pinned).
     WolfSeaState st;
+    LLDrawPoolWater* wp = nullptr;
     if (LLDrawPool* poolp = gPipeline.findPool(LLDrawPool::POOL_WATER))
     {
-        st = static_cast<LLDrawPoolWater*>(poolp)->getSeaState();
+        wp = static_cast<LLDrawPoolWater*>(poolp);
+        st = wp->getSeaState();
     }
     // Source: lldrawpoolwater.cpp:326-332 — waveFrequency = sea_from_region ?
     // mSeaState.mFrequency : max(0.001, WolfViewerWaterWaveScale); waveSpeed =
@@ -622,30 +612,72 @@ WolfBoatRock::Sample WolfBoatRock::sampleWave(const LLViewerObject* objectp, F32
     static LLCachedControl<F32> wave_scale(gSavedSettings, "WolfViewerWaterWaveScale", 0.1f);
     static LLCachedControl<F32> wave_speed(gSavedSettings, "WolfViewerWaterWaveSpeed", 1.f);
     static LLCachedControl<bool> shore_on(gSavedSettings, "WolfViewerWaterShoreField", true);
-    const F32 amp = st.mAmplitude;
-    const F32 freq = sea_from_region ? st.mFrequency : llmax(0.001f, (F32)wave_scale);
-    const F32 speed = (F32)wave_speed;
+    sea.mAmp = st.mAmplitude;
+    sea.mFreq = sea_from_region ? st.mFrequency : llmax(0.001f, (F32)wave_scale);
+    sea.mSpeed = (F32)wave_speed;
+    sea.mShoreOn = shore_on;
 
     // Source: lldrawpoolwater.cpp:309 WATER_WAVE_DIR1 = pwater->getWave1Dir() (raw: the
     // shader normalises it for dir1 and uses its LENGTH for the breaker's speedScale).
-    LLVector2 wd1(1.04999f, -0.42000f);   // llsettingswater.cpp:107 default, like wolfseastate.h
+    sea.mDir1.set(1.04999f, -0.42000f);   // llsettingswater.cpp:107 default, like wolfseastate.h
     {
         LLSettingsWater::ptr_t pwater = LLEnvironment::instance().getCurrentWater();
         if (pwater)
         {
-            wd1 = pwater->getWave1Dir();
+            sea.mDir1 = pwater->getWave1Dir();
         }
     }
 
-    LLViewerRegion* regionp = objectp->getRegion();
-    const LLVector3 pa = objectp->getPositionAgent();
-    const LLVector3 pr = objectp->getPositionRegion();
-    const F32 ax = pa.mV[VX], ay = pa.mV[VY];   // swell phase: agent space
-    const F32 rx = pr.mV[VX], ry = pr.mV[VY];   // baked fields: region space
+    // [WAVES 2026-09-10] the painted zones' calm ripple and small-wave scale (WolfWaveZones).
+    const LLSD& zp = WolfWaveZones::instance().params();
+    sea.mCalm = llclamp(zp.has("calmRipple") ? (F32)zp["calmRipple"].asReal() : 0.03f, 0.f, 0.1f);
+    sea.mSmall = llclamp(zp.has("smallScale") ? (F32)zp["smallScale"].asReal() : WolfWaveZones::SMALL_SCALE_DEFAULT, 0.05f, 0.8f);
+
+    if (wp)
+    {
+        sea.mSurfH = wp->getSurfHeight();
+        sea.mSurfSet = wp->getSurfSetInterval();
+        sea.mSurfLen = wp->getSurfLength();
+    }
+    return sea;
+}
+
+// Source: terrain_manager.js _waveSampleCPU(x, y, t, u) — CPU mirror of the shader's wave
+// surface: the three dominant Gerstner swells (same arguments as the gerstnerWave calls,
+// here waterV.glsl w1/w2/w3) plus the geometric shore breaker (same phase as the vertex
+// stage) and the surf train. localAmp uses the GPU noise field's MEAN (0.5) — the
+// per-position simplex variation, the chaos wavelength jitter and the spectral cascades are
+// omitted. The distance fade (waveFade 320..1500 m) is 1 inside the 256 m sweep radius.
+// <WolfViewer 2026-09-27> HEIGHT ONLY. It used to return a slope too, from analytic
+// derivatives, and the breaker's was not the drawn water's: it stood in 0.5 for the seabed
+// grade (typically 0.01-0.05), so in a shallow marina a hull rolled up to 45 degrees every
+// few seconds (Paul 09-27, a customer's boat at Cape Cod "moving like crazy with the
+// waves"). The slope is now measured from this height across the hull (measureHull).
+//
+// SPACES: waterV.glsl phases the swell on AGENT-space XY (`wxy = position.xy`) so
+// neighbouring regions' water joins up, and reads the baked fields in the vertex's own
+// REGION space (`regionXY = position.xy - wolfRegionOrigin`, lldrawpoolwater.cpp
+// pushWaterPlanes binds each region's own field). The same two spaces here.
+F32 WolfBoatRock::waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F32 ay, F32 t) const
+{
+    F32 z = 0.f;
+    const F32 amp = sea.mAmp;
+    F32 rx = ax, ry = ay;   // baked fields: region space
+    if (regionp)
+    {
+        const LLVector3 o = regionp->getOriginAgent();
+        rx = ax - o.mV[VX];
+        ry = ay - o.mV[VY];
+    }
     const WolfWaterField::Field* field = regionp ? WolfWaterField::instance().get(regionp) : nullptr;
     auto exposure_at = [field](F32 x, F32 y) -> F32
     {
         return field ? WolfWaterField::exposureAt(*field, x, y) : 1.f;
+    };
+    auto smoothstep01 = [](F32 e0, F32 e1, F32 x)
+    {
+        const F32 u = llclamp((x - e0) / (e1 - e0), 0.f, 1.f);
+        return u * u * (3.f - 2.f * u);   // GLSL smoothstep
     };
 
     // [SWELL-EXPOSURE 2026-08-31] Mirror of the vertex stage's swellScale = mix(0.15, 1.3,
@@ -661,20 +693,14 @@ WolfBoatRock::Sample WolfBoatRock::sampleWave(const LLViewerObject* objectp, F32
     // (waterV.glsl zoneScale — WolfWaveZones::zoneScale is the one mapping): a boat on an OFF
     // cell sits still (the default everywhere inside a region now), on a small-wave cell it
     // rides smallScale of the open sea, on open / surf cells the full swell.
-    F32 zone_mul = 1.f;
-    {
-        const LLSD& zp = WolfWaveZones::instance().params();
-        const F32 calm = llclamp(zp.has("calmRipple") ? (F32)zp["calmRipple"].asReal() : 0.03f, 0.f, 0.1f);
-        const F32 small = llclamp(zp.has("smallScale") ? (F32)zp["smallScale"].asReal() : WolfWaveZones::SMALL_SCALE_DEFAULT, 0.05f, 0.8f);
-        const F32 energy = field ? WolfWaterField::zoneAt(*field, rx, ry) : WolfWaveZones::OPEN_ENERGY;
-        zone_mul = WolfWaveZones::zoneScale(energy, amp, calm, small);
-    }
+    const F32 energy = field ? WolfWaterField::zoneAt(*field, rx, ry) : WolfWaveZones::OPEN_ENERGY;
+    const F32 zone_mul = WolfWaveZones::zoneScale(energy, amp, sea.mCalm, sea.mSmall);
     const F32 swell_scale = llmax(0.15f + 1.15f * exposure_at(rx, ry), 0.7f) * zone_mul;
 
     if (amp > 0.01f)
     {
-        const F32 base_wl = 1.0f / (freq + 0.001f);
-        LLVector2 d1 = wd1;
+        const F32 base_wl = 1.0f / (sea.mFreq + 0.001f);
+        LLVector2 d1 = sea.mDir1;
         if (d1.length() < 1e-4f)
         {
             d1.set(1.04999f, -0.42000f);
@@ -694,12 +720,7 @@ WolfBoatRock::Sample WolfBoatRock::sampleWave(const LLViewerObject* objectp, F32
             const F32 qx = fabsf(relx) - half, qy = fabsf(rely) - half;
             const F32 to_edge = (qx < 0.f && qy < 0.f) ? llmin(-qx, -qy)
                                                       : sqrtf(llmax(qx, 0.f) * llmax(qx, 0.f) + llmax(qy, 0.f) * llmax(qy, 0.f));
-            auto smooth = [](F32 e0, F32 e1, F32 x)
-            {
-                const F32 t = llclamp((x - e0) / (e1 - e0), 0.f, 1.f);
-                return t * t * (3.f - 2.f * t);   // GLSL smoothstep
-            };
-            local_amp *= smooth(0.f, 32.f, to_edge) * smooth(0.f, 4.f * base_wl, r);
+            local_amp *= smoothstep01(0.f, 32.f, to_edge) * smoothstep01(0.f, 4.f * base_wl, r);
             if (r > 0.5f)
             {
                 d1.set(-relx / r, -rely / r);
@@ -711,8 +732,8 @@ WolfBoatRock::Sample WolfBoatRock::sampleWave(const LLViewerObject* objectp, F32
         const F32 d1x = d1.mV[VX], d1y = d1.mV[VY];
         const LLVector2 dir2(d1x * 0.819f - d1y * 0.574f, d1x * 0.574f + d1y * 0.819f);
         const LLVector2 dir3(d1x * 0.5f + d1y * 0.866f, -d1x * 0.866f + d1y * 0.5f);
-        // Source: waterV.glsl gerstnerWave()/gerstnerSlope(): k = 2pi/wl, c = sqrt(9.8/k),
-        // f = k * (dot(d, pos) - c * time * waveSpeed); z += A sin f; slope = d * A k cos f.
+        // Source: waterV.glsl gerstnerWave(): k = 2pi/wl, c = sqrt(9.8/k),
+        // f = k * (dot(d, pos) - c * time * waveSpeed); z += A sin f.
         auto acc = [&](F32 wl, F32 A, const LLVector2& d)
         {
             const F32 k = 6.28318f / wl;
@@ -720,11 +741,8 @@ WolfBoatRock::Sample WolfBoatRock::sampleWave(const LLViewerObject* objectp, F32
             F32 len = d.length();
             if (len <= 0.f) len = 1.f;
             const F32 dx = d.mV[VX] / len, dy = d.mV[VY] / len;
-            const F32 f = k * (dx * px + dy * py - c * t * speed);
-            out.mZ += A * sinf(f);
-            const F32 s = A * k * cosf(f);
-            out.mSx += dx * s;
-            out.mSy += dy * s;
+            const F32 f = k * (dx * px + dy * py - c * t * sea.mSpeed);
+            z += A * sinf(f);
         };
         // Source: waterV.glsl:359-361 w1/w2/w3 — the three dominant trains.
         acc(base_wl * 2.0f, local_amp * 0.40f, d1);
@@ -732,32 +750,27 @@ WolfBoatRock::Sample WolfBoatRock::sampleWave(const LLViewerObject* objectp, F32
         acc(base_wl * 1.2f, local_amp * 0.25f, dir3);
     }
 
-    // Geometric shore breaker (waterV.glsl:421-454, Water.js vertex stage formula).
+    // Geometric shore breaker (waterV.glsl:614-646, Water.js vertex stage formula).
     F32 dtex[4];
-    if (field && shore_on && WolfWaterField::depthAt(*field, rx, ry, dtex))
+    if (field && sea.mShoreOn && WolfWaterField::depthAt(*field, rx, ry, dtex))
     {
         const F32 g = dtex[1], b = dtex[2];
         const F32 conf = sqrtf(g * g + b * b);
         if (conf > 0.02f)
         {
             const F32 smooth_depth = llmax(field->mWaterLevel - dtex[3], 0.f);
-            // smoothstep(0.5, 8.0, smoothDepth)
-            const F32 sst = llclamp((smooth_depth - 0.5f) / 7.5f, 0.f, 1.f);
-            // waterV.glsl:426-428 edgeFade — faded out over a 4% band INSIDE the region
-            // edge so nothing can pop a hull across the border (the drawn breaker fades
-            // the same way; WolfStorm's single-region mirror has no border to fade at).
-            auto smoothstep01 = [](F32 e0, F32 e1, F32 x)
-            {
-                const F32 u = llclamp((x - e0) / (e1 - e0), 0.f, 1.f);
-                return u * u * (3.f - 2.f * u);
-            };
-            const F32 su = rx / field->mSizeX, sv = ry / field->mSizeY;
+            // waterV.glsl edgeFade — faded out over a 4% band INSIDE the field's edge so
+            // nothing can pop a hull across the border (the drawn breaker fades the same way).
+            // <WolfViewer 2026-09-27> Measured from the field's origin, as the shader's sduv
+            // = (regionXY - depthOrigin) / depthRegionSize: on a region wider than 2048 m the
+            // field is a camera window and rx / mSizeX was the wrong fraction of it.
+            const F32 su = (rx - field->mX0) / field->mSizeX, sv = (ry - field->mY0) / field->mSizeY;
             const F32 edge_fade = smoothstep01(0.f, 0.04f, su) * (1.f - smoothstep01(0.96f, 1.f, su))
                                 * smoothstep01(0.f, 0.04f, sv) * (1.f - smoothstep01(0.96f, 1.f, sv));
-            const F32 shoal = (1.f - sst * sst * (3.f - 2.f * sst)) * llmin(conf * 1.5f, 1.f) * edge_fade;
+            const F32 shoal = (1.f - smoothstep01(0.5f, 8.0f, smooth_depth)) * llmin(conf * 1.5f, 1.f) * edge_fade;
             if (shoal > 0.01f)
             {
-                const F32 speed_scale = llclamp(wd1.length() * 0.885f, 0.4f, 2.0f);
+                const F32 speed_scale = llclamp(sea.mDir1.length() * 0.885f, 0.4f, 2.0f);
                 const F32 phase = t * 4.5f * speed_scale + sqrtf(smooth_depth) * 8.0f;
                 // [SWELL-EXPOSURE 2026-08-31] Mirror of the vertex stage's breaker feed:
                 // exposure tapped ~45m seaward (-(g,b)/conf is the seaward unit vector),
@@ -769,35 +782,17 @@ WolfBoatRock::Sample WolfBoatRock::sampleWave(const LLViewerObject* objectp, F32
                 const F32 b_amp = llmin(0.10f + amp * 0.9f, 0.5f) * shoal
                                 * llmax(0.35f + 0.65f * sqrtf(feed), 0.7f);
                 const F32 br = sinf(phase);
-                out.mZ += (br + 0.35f * br * br) * b_amp;
-                // Slope along the travel direction — d/ds of sin(8*sqrt(d)) steepens as
-                // depth shrinks, capped.
-                const F32 sl = cosf(phase) * b_amp
-                             * llmin(4.f / llmax(sqrtf(smooth_depth), 0.5f), 4.f) * 0.5f;
-                out.mSx += (g / conf) * sl;
-                out.mSy += (b / conf) * sl;
+                z += (br + 0.35f * br * br) * b_amp;
             }
         }
     }
 
     // [SURF 2026-09-07] The SURF TRAIN (waterV.glsl [SURF rev2]; terrain_manager.js
-    // _surfSampleCPU, same numbers): the crest-referenced profile's height and slope, so a
-    // boat in a surf cell rides the wall the water draws. Horizontal push omitted.
-    F32 surf_h = 0.f, surf_set = 90.f, surf_len = 36.f;
-    if (LLDrawPool* poolp = gPipeline.findPool(LLDrawPool::POOL_WATER))
+    // _surfSampleCPU, same numbers): the crest-referenced profile's height, so a boat in a
+    // surf cell rides the wall the water draws. Horizontal push omitted.
+    if (field && sea.mShoreOn && sea.mSurfH > 0.01f && field->mZoneTex)
     {
-        LLDrawPoolWater* wp = static_cast<LLDrawPoolWater*>(poolp);
-        surf_h = wp->getSurfHeight();
-        surf_set = wp->getSurfSetInterval();
-        surf_len = wp->getSurfLength();
-    }
-    if (field && shore_on && surf_h > 0.01f && field->mZoneTex)
-    {
-        auto smoothstep01 = [](F32 e0, F32 e1, F32 x)
-        {
-            const F32 u = llclamp((x - e0) / (e1 - e0), 0.f, 1.f);
-            return u * u * (3.f - 2.f * u);
-        };
+        const F32 surf_h = sea.mSurfH, surf_set = sea.mSurfSet, surf_len = sea.mSurfLen;
         const F32 surf_zone = smoothstep01(0.62f, 0.95f, WolfWaterField::zoneAt(*field, rx, ry));   // surf cells only (waterV.glsl surfZone)
         if (surf_zone > 0.001f)
         {
@@ -830,18 +825,24 @@ WolfBoatRock::Sample WolfBoatRock::sampleWave(const LLViewerObject* objectp, F32
             else if (have_land) { dx = -gx / gl; dy = -gy / gl; coord = -dist; }
             else
             {
-                const F32 cx = field->mSizeX * 0.5f - rx + 0.001f, cy = field->mSizeY * 0.5f - ry;
+                // <WolfViewer 2026-09-27> toward the FIELD's centre, waterV.glsl
+                // normalize(depthOrigin + depthRegionSize * 0.5 - regionXY + vec2(0.001, 0.0)).
+                const F32 cx = field->mX0 + field->mSizeX * 0.5f - rx + 0.001f, cy = field->mY0 + field->mSizeY * 0.5f - ry;
                 F32 cl = sqrtf(cx * cx + cy * cy); if (cl <= 0.f) cl = 1.f;
                 dx = cx / cl; dy = cy / cl; coord = rx * dx + ry * dy;
             }
             const F32 path = have_path ? d_path : coord;
-            // depth: the smoothed height, continuing past the border and easing to 30 m
+            // depth: the smoothed height, continuing past the field's border and easing to 30 m
+            // <WolfViewer 2026-09-27> the border is the FIELD's, as waterV.glsl sduv/over:
+            // on a windowed field it is not (0, 0)-(mSizeX, mSizeY) in region space.
             F32 h = 30.f;
             F32 dt4[4];
-            const F32 qx = llclamp(rx, 0.f, field->mSizeX), qy = llclamp(ry, 0.f, field->mSizeY);
+            const F32 fx0 = field->mX0, fy0 = field->mY0;
+            const F32 fx1 = fx0 + field->mSizeX, fy1 = fy0 + field->mSizeY;
+            const F32 qx = llclamp(rx, fx0, fx1), qy = llclamp(ry, fy0, fy1);
             if (WolfWaterField::depthAt(*field, qx, qy, dt4))
             {
-                const F32 over = llmax(llmax(-rx, rx - field->mSizeX), llmax(-ry, ry - field->mSizeY), 0.f);
+                const F32 over = llmax(llmax(fx0 - rx, rx - fx1), llmax(fy0 - ry, ry - fy1), 0.f);
                 const F32 outside = smoothstep01(0.f, 64.f, over);
                 const F32 h_in = llmax(field->mWaterLevel - dt4[3], 0.f);
                 h = h_in + (30.f - h_in) * outside;
@@ -865,18 +866,103 @@ WolfBoatRock::Sample WolfBoatRock::sampleWave(const LLViewerObject* objectp, F32
             {
                 const F32 ph = k0 * path - omega0 * t;
                 const F32 ph2 = ph + (0.30f + 0.45f * break_f) * sinf(ph);
-                const F32 sn = sinf(ph2), cs = cosf(ph2);
+                const F32 sn = sinf(ph2);
                 const F32 up = 0.5f + 0.5f * sn;
                 const F32 upk = powf(up, 1.6f + 1.2f * break_f);   // [SURF rev3] peaked crest
                 const F32 prof = -0.25f + 1.25f * upk + 0.25f * break_f * upk * upk;
                 const F32 tip = upk * upk * upk;
                 const F32 lip = 0.55f * break_f * tip;
-                out.mZ += crest_h * (prof - 0.35f * lip);
-                const F32 sl2 = crest_h * 0.6f * k * cs * (0.3f + 0.7f * upk);
-                out.mSx += dx * sl2;
-                out.mSy += dy * sl2;
+                z += crest_h * (prof - 0.35f * lip);
             }
         }
     }
+    return z;
+}
+
+// <WolfViewer 2026-09-27> Paul: "it should measure the wave height at that point for that
+// boat". The water's height is measured under the hull's middle and at its four ends — bow,
+// stern, port, starboard, along the root prim's own axes over the whole linkset's footprint
+// (hullExtents) — and the hull takes the mean as its heave and the end-to-end differences
+// as its slope. A wave shorter than the hull lifts one end while it drops the other and so
+// barely moves it, which is why a ferry rides steadier than a dinghy.
+WolfBoatRock::Sample WolfBoatRock::measureHull(const Rocker& r, const LLViewerObject* objectp, const Sea& sea, F32 t) const
+{
+    Sample out;
+    LLViewerRegion* regionp = objectp->getRegion();
+    const LLVector3 pa = objectp->getPositionAgent();
+    // Region and agent space share their axes, so the region rotation orients agent XY.
+    const LLQuaternion rot = objectp->getRotationRegion();
+    const LLVector3 axis_x = LLVector3::x_axis * rot;   // bow-stern
+    const LLVector3 axis_y = LLVector3::y_axis * rot;   // beam
+    const F32 mx = 0.5f * (r.mMin.mV[VX] + r.mMax.mV[VX]);
+    const F32 my = 0.5f * (r.mMin.mV[VY] + r.mMax.mV[VY]);
+    auto height = [&](F32 lx, F32 ly)
+    {
+        const LLVector3 p = pa + axis_x * lx + axis_y * ly;
+        return waveHeight(sea, regionp, p.mV[VX], p.mV[VY], t);
+    };
+    const F32 z_mid   = height(mx, my);
+    const F32 z_bow   = height(r.mMax.mV[VX], my);
+    const F32 z_stern = height(r.mMin.mV[VX], my);
+    const F32 z_port  = height(mx, r.mMax.mV[VY]);
+    const F32 z_stbd  = height(mx, r.mMin.mV[VY]);
+    out.mZ = (z_mid + z_bow + z_stern + z_port + z_stbd) * 0.2f;
+
+    // The slopes along the two measured lines, then the surface gradient that has them:
+    // g . u = s_u and g . v = s_v, u and v the lines' horizontal directions.
+    const LLVector2 u(axis_x.mV[VX], axis_x.mV[VY]);
+    const LLVector2 v(axis_y.mV[VX], axis_y.mV[VY]);
+    const F32 lu = u.length(), lv = v.length();
+    const F32 len_u = (r.mMax.mV[VX] - r.mMin.mV[VX]) * lu;   // horizontal bow-stern distance
+    const F32 len_v = (r.mMax.mV[VY] - r.mMin.mV[VY]) * lv;
+    if (len_u < 0.05f || len_v < 0.05f)
+    {
+        return out;   // the hull stands on end: no horizontal line to measure along, no tilt
+    }
+    const F32 s_u = (z_bow - z_stern) / len_u;
+    const F32 s_v = (z_port - z_stbd) / len_v;
+    const F32 ux = u.mV[VX] / lu, uy = u.mV[VY] / lu;
+    const F32 vx = v.mV[VX] / lv, vy = v.mV[VY] / lv;
+    const F32 det = ux * vy - uy * vx;
+    if (fabsf(det) < 0.1f)
+    {
+        return out;   // the two lines are near parallel seen from above: no gradient from them
+    }
+    out.mSx = (s_u * vy - s_v * uy) / det;
+    out.mSy = (s_v * ux - s_u * vx) / det;
     return out;
+}
+
+// <WolfViewer 2026-09-27> The linkset's footprint in the root prim's own frame: the root's
+// box and every linked prim's box corners (a child's position and rotation are relative to
+// the root, LLXform). Seated avatars are children too and are not hull.
+void WolfBoatRock::hullExtents(const LLViewerObject* root, LLVector2& lo, LLVector2& hi)
+{
+    const LLVector3& rs = root->getScale();
+    lo.set(-0.5f * rs.mV[VX], -0.5f * rs.mV[VY]);
+    hi.set(0.5f * rs.mV[VX], 0.5f * rs.mV[VY]);
+    LLViewerObject::const_child_list_t& kids = root->getChildren();
+    for (LLViewerObject::child_list_t::const_iterator ki = kids.begin(); ki != kids.end(); ++ki)
+    {
+        const LLViewerObject* kid = *ki;
+        if (!kid || kid->isAvatar())
+        {
+            continue;
+        }
+        const LLVector3 half = kid->getScale() * 0.5f;
+        const LLVector3 cp = kid->getPosition();
+        const LLQuaternion cr = kid->getRotation();
+        for (S32 c = 0; c < 8; ++c)
+        {
+            const LLVector3 corner((c & 1) ? half.mV[VX] : -half.mV[VX],
+                                   (c & 2) ? half.mV[VY] : -half.mV[VY],
+                                   (c & 4) ? half.mV[VZ] : -half.mV[VZ]);
+            const LLVector3 q = corner * cr + cp;
+            lo.set(llmin(lo.mV[VX], q.mV[VX]), llmin(lo.mV[VY], q.mV[VY]));
+            hi.set(llmax(hi.mV[VX], q.mV[VX]), llmax(hi.mV[VY], q.mV[VY]));
+        }
+    }
+    // A sliver of a root with nothing linked still gets a measurable line.
+    if (hi.mV[VX] - lo.mV[VX] < 0.5f) { const F32 c = 0.5f * (hi.mV[VX] + lo.mV[VX]); lo.mV[VX] = c - 0.25f; hi.mV[VX] = c + 0.25f; }
+    if (hi.mV[VY] - lo.mV[VY] < 0.5f) { const F32 c = 0.5f * (hi.mV[VY] + lo.mV[VY]); lo.mV[VY] = c - 0.25f; hi.mV[VY] = c + 0.25f; }
 }

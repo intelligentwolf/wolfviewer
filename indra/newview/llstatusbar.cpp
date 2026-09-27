@@ -28,6 +28,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "llstatusbar.h"
+#include "llversioninfo.h"   // <WolfViewer 2026-09-27/> release name in the location text
 
 // viewer includes
 #include "llagent.h"
@@ -1429,6 +1430,15 @@ void LLStatusBar::buildLocationString(std::string& loc_str, bool show_coords)
     {
         loc_str = "???";
     }
+    // <WolfViewer 2026-09-27> Show the release name (e.g. "Safety Tiger") at the start of the
+    // menu-bar location text, so the running release is always visible (Paul, 2026-09-27).
+    // The window title carries it too, but a native Wayland window may have no title bar.
+    const std::string& release_name = LLVersionInfo::instance().getReleaseName();
+    if (!release_name.empty())
+    {
+        loc_str = release_name + " \xC2\xB7 " + loc_str;   // U+00B7 middle dot
+    }
+    // </WolfViewer 2026-09-27>
 }
 
 void LLStatusBar::setParcelInfoText(const std::string& new_text)

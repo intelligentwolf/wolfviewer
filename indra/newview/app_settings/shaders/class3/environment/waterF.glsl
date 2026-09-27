@@ -164,6 +164,9 @@ uniform float stormChaos;
 uniform vec3  eyeVec;
 uniform vec2  wolfRegionOrigin;
 uniform vec2  depthRegionSize;
+// <WolfViewer 2026-09-27> the field window's region-space corner (waterV.glsl depthOrigin,
+// wolfwaterfield.cpp fieldWindow): non-zero on regions wider than 2048 m.
+uniform vec2  depthOrigin;
 uniform float depthWaterLevel;
 uniform float shoreWavesEnabled;
 uniform vec2  fftTile;
@@ -409,7 +412,11 @@ void main()
     float fieldDepth = 1e6;
     if (depthReady > 0.5 && boundedWaterDepth <= 0.0)
     {
-        vec2 sduv = regionXY / depthRegionSize;
+        // <WolfViewer 2026-09-27> minus the window origin, as waterV.glsl does. Without it a
+        // region wider than 2048 m read its camera window's land at the wrong place: a white
+        // zero-depth silhouette of the coast out at sea, jumping each time the window
+        // recentred (Cape Cod, 3072 m). Water.js fragment same.
+        vec2 sduv = (regionXY - depthOrigin) / depthRegionSize;
         if (sduv.x >= 0.0 && sduv.x <= 1.0 && sduv.y >= 0.0 && sduv.y <= 1.0)
         {
             vec4 dtex = WOLF_TEX_WOLF_DEPTH_FIELD( sduv);

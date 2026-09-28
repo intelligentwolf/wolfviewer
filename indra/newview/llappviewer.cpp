@@ -3555,13 +3555,19 @@ bool LLAppViewer::initConfiguration()
     // Set the name of the window
     //
     // <WolfViewer 2026-09-26> Paul: "get rid of the firestorm version in the top bar and just use
-    // our version name". The release name, as the login screen shows it (llpanellogin.cpp
-    // viewer_version_text); a build with no name (local or untagged) keeps the channel and
-    // version rather than pretending to be a release.
+    // our version name". A build with no name (local or untagged) keeps the channel and
+    // version rather than pretending to be a release. (llpanellogin.cpp is #if 0 in Firestorm —
+    // the login screen is FSPanelLogin — so its viewer_version_text is never shown.)
     {
         const std::string release_name = LLVersionInfo::getInstance()->getReleaseName();
         gWindowTitle = release_name.empty() ? LLVersionInfo::getInstance()->getChannelAndVersion()    // <FS:CR>
                                             : std::string("WolfViewer \xE2\x80\x94 ") + release_name;   // U+2014 em dash
+#ifdef USE_AVX2_OPTIMIZATION
+        // <WolfViewer 2026-09-28> Say so when this is the AVX2 build: the Linux launcher picks it
+        // from /proc/cpuinfo and the Windows installer from the CPU, so nobody chose it knowingly.
+        // Same compiled-in flag as Help > About's SIMD field.
+        gWindowTitle += " \xC2\xB7 AVX2";   // U+00B7 middle dot
+#endif
     }
     // </WolfViewer>
 #if LL_DEBUG

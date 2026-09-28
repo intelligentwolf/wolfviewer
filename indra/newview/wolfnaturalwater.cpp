@@ -16,6 +16,7 @@
 #include "wolfnaturalwater.h"
 #include "wolfgrid.h"   // <WolfViewer 2026-09-22/> Wolf Territories only
 #include "wolfnearbyregions.h"
+#include "wolfwavezones.h"   // <WolfViewer 2026-09-28/> the region owner's natural water switch
 
 #include <algorithm>
 #include <cmath>
@@ -95,6 +96,11 @@ void WolfNaturalWater::idle()
         }
         return;
     }
+    // <WolfViewer 2026-09-28> The region owner's switch travels with the wave layouts, which
+    // WolfWaterField::idle fetches — but only while the shore field is on. Ask from here too, so a
+    // switched-off region is honoured whatever that setting is. Harmless twice a frame: it
+    // throttles itself and returns while a read is out (WolfWaveZones::idle / refresh).
+    WolfWaveZones::instance().idle();
 
     const F64 now = LLFrameTimer::getElapsedSeconds();
     if (now < mNextCheck || mBusy)
@@ -114,11 +120,14 @@ void WolfNaturalWater::idle()
     {
         return;
     }
+    const WolfWaveZones& zones = WolfWaveZones::instance();
     for (auto it = mRegions.begin(); it != mRegions.end();)
     {
         const bool alive = std::any_of(nearby.begin(), nearby.end(),
                                        [&](LLViewerRegion* r) { return r->getHandle() == it->first; });
-        if (alive)
+        // <WolfViewer 2026-09-28> Paul: "i need the region owner to be able to turn it off for the
+        // whole region". A region switched off loses its water on the next check, like one that left.
+        if (alive && zones.naturalWaterFor(it->first) != WolfWaveZones::NaturalWaterRule::OFF)
         {
             ++it;
             continue;
@@ -133,6 +142,12 @@ void WolfNaturalWater::idle()
         regionp = nearby[1 + mNeighbourCursor++ % (nearby.size() - 1)];
     }
     mAgentTurn = !mAgentTurn;
+    // <WolfViewer 2026-09-28> OFF: nothing for this region (its water went in the sweep above).
+    // NOT_KNOWN: the first read for this visit is still out — wait for it.
+    if (zones.naturalWaterFor(regionp->getHandle()) != WolfWaveZones::NaturalWaterRule::ALLOWED)
+    {
+        return;
+    }
 
     // Snapshot the heights; the analysis must not touch the live surface off the main thread.
     const LLSurface& land = regionp->getLand();
@@ -1073,6 +1088,11 @@ void WolfNaturalWater::apply(std::shared_ptr<Result> result)
     // agent's. Gone while computing (teleport, neighbour dropped): nothing to apply.
     LLViewerRegion* regionp = LLWorld::getInstance()->getRegionFromHandle(result->mRegionHandle);
     if (!regionp || !regionp->isAlive())
+    {
+        return;
+    }
+    // <WolfViewer 2026-09-28> The region owner switched it off while this was computing.
+    if (WolfWaveZones::instance().naturalWaterFor(result->mRegionHandle) != WolfWaveZones::NaturalWaterRule::ALLOWED)
     {
         return;
     }

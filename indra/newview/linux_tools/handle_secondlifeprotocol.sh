@@ -15,7 +15,8 @@ RUN_PATH=`dirname "$0" || echo .`
 # [2026-09-19] This script lives in etc/; the launcher is one level up.
 cd "${RUN_PATH}"
 
-if [ `pidof do-not-directly-run-wolfviewer-bin` ]; then
+# The launcher runs one of two binaries (wrapper.sh picks the -avx2 one on an AVX2 CPU).
+if pidof do-not-directly-run-wolfviewer-bin do-not-directly-run-wolfviewer-bin-avx2 >/dev/null; then
 	exec dbus-send --type=method_call --dest=com.secondlife.ViewerAppAPIService /com/secondlife/ViewerAppAPI com.secondlife.ViewerAppAPI.GoSLURL string:"$1"
 else
 	exec ../wolfviewer -url \'"${URL}"\'

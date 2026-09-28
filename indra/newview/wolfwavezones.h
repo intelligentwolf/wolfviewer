@@ -103,6 +103,7 @@ public:
         S32         mCell = CELL_M;    // the AUTOMATIC layout's cell (m) for this region (waves_cell)
         S32         mVersion = 0;
         bool        mEnabled = true;
+        bool        mNaturalWater = true;   // <WolfViewer 2026-09-28/> php/waves.php naturalWater: the owner's whole-region switch
         bool        mStored = false;   // a layout exists on the grid
         Tiles       mTiles;            // <WolfViewer 2026-09-26/> stored painted tiles (layout v2)
         LLSD        mParams;
@@ -157,6 +158,14 @@ public:
     const Region* current() const;
     /** True when the current region is known to the grid — the only case the editor exists. */
     bool onGrid() const { return current() != nullptr; }
+    /**
+     * <WolfViewer 2026-09-28> The region owner's natural-water switch (Region / Estate > Waves).
+     * NOT_KNOWN until the first read for this visit has finished, so WolfNaturalWater waits rather
+     * than build lakes a switched-off region takes away seconds later. A region the grid does not
+     * list, or a failed read, counts as ALLOWED. wave_zones.js naturalWaterFor same.
+     */
+    enum class NaturalWaterRule { ALLOWED, OFF, NOT_KNOWN };
+    NaturalWaterRule naturalWaterFor(U64 handle) const;
     /** The painted tiles the WATER uses for a record: the editor preview, else the stored ones while enabled; nullptr = automatic only. */
     const Tiles* paintedFor(const Region& r) const;
     /** A record ready for zone lookups (paintedFor over defaultZones). */
@@ -199,7 +208,7 @@ public:
     /** Seconds since the last fetch answered (a large number before the first). */
     F64 lastFetchAgeSecs() const;
     /** Save; the reply arrives through the notification system and a refresh. */
-    bool save(const SaveTarget& target, const Tiles& tiles, const LLSD& params, bool enabled);
+    bool save(const SaveTarget& target, const Tiles& tiles, const LLSD& params, bool enabled, bool natural_water);
     bool saving() const { return mSaving; }
     const std::string& lastError() const { return mLastError; }
     const std::string& lastSaveError() const { return mLastSaveError; }
@@ -209,7 +218,7 @@ public:
 
 private:
     void fetchCoro(std::vector<U64> handles, U64 requested_handle, U64 generation);
-    void saveCoro(SaveTarget target, Tiles tiles, LLSD params, bool enabled, U64 preview_revision, bool retried);
+    void saveCoro(SaveTarget target, Tiles tiles, LLSD params, bool enabled, bool natural_water, U64 preview_revision, bool retried);
     /** Stored tiles from a v2 payload layout; entries the service would not have written are dropped. */
     static Tiles parseTiles(const LLSD& layout, S32 pw, S32 ph);
     std::vector<U64> neighbourHandles() const;
@@ -336,6 +345,7 @@ private:
     void onRevert();
     void onDefault();
     void onParamChanged();
+    void onNaturalWaterChanged();   // <WolfViewer 2026-09-28/>
     void previewEdit();
     void armBakeConfirm();
     LLSD paramsFromControls() const;
@@ -362,6 +372,7 @@ private:
     LLSliderCtrl*    mCalmRipple = nullptr;
     LLSliderCtrl*    mSmallScale = nullptr;
     LLCheckBoxCtrl*  mEnabled = nullptr;
+    LLCheckBoxCtrl*  mNaturalWater = nullptr;   // <WolfViewer 2026-09-28/> whole-region natural water switch
     LLButton*        mSave = nullptr;
     LLButton*        mBrushS = nullptr;
     LLButton*        mBrushO = nullptr;

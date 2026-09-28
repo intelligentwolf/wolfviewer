@@ -54,6 +54,7 @@ public:
     /*virtual*/ void draw();
     void drawStartTexture(F32 alpha);
     void drawLogos(F32 alpha);
+    void drawDancingWolf(F32 alpha);   // <WolfViewer 2026-09-28/>
 
     /*virtual*/ bool handleHover(S32 x, S32 y, MASK mask);
     /*virtual*/ bool handleKeyHere(KEY key, MASK mask);
@@ -117,6 +118,7 @@ protected:
     void loadLogo(const std::string &path, const U8 image_codec, const LLRect &pos_rect, const LLRectf &clip_rect, const LLRectf &offset_rect);
     // logos have unusual location and need to be preloaded to not appear grey, then deleted
     void initLogos();
+    void initDancingWolf();   // <WolfViewer 2026-09-28/>
     // Loads a bitmap to display during load
     void initStartTexture(S32 location_id, bool is_in_production);
 
@@ -133,6 +135,11 @@ private:
         LLRectf mOffsetRect;
     };
     std::vector<TextureData> mLogosList;
+    // <WolfViewer 2026-09-28> The dancing wolf: its frames (loaded with the logos, released with
+    // them, so it dances on the login screen only) and the clock that picks the frame.
+    std::vector<LLPointer<LLViewerTexture>> mDanceFrames;
+    LLFrameTimer mDanceTimer;
+    // </WolfViewer>
 };
 
 class LLProgressViewMini :

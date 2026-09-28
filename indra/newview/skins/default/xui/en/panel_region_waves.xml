@@ -15,6 +15,8 @@
   <panel.string name="str_saving">Saving…</panel.string>
   <panel.string name="str_saved">Saved — everyone in the region now sees this layout.</panel.string>
   <panel.string name="str_save_failed">Could not save:</panel.string>
+  <panel.string name="str_natural_water_on">Natural lakes and waterfalls on — Save to apply it for everyone in the region.</panel.string>
+  <panel.string name="str_natural_water_off">Natural lakes and waterfalls off — Save to remove them for everyone in the region.</panel.string>
   <panel.string name="str_default_loaded">Automatic layout on; your painting is cleared — Save to keep it (Revert undoes it).</panel.string>
   <text follows="left|top" height="30" left="10" top="8" width="460" word_wrap="true" name="waves_help">
 Paint on the map or directly on the water. Surf, Open, Small, Calm and Off use the same saved layout.
@@ -38,6 +40,9 @@ Paint on the map or directly on the water. Surf, Open, Small, Calm and Off use t
   <text follows="left|top" height="14" left="244" top_pad="8" width="226" name="waves_small_scale_lbl">Small waves (% of open sea)</text>
   <slider follows="left|top" height="16" left="244" top_pad="2" width="226" name="waves_small_scale" min_val="5" max_val="80" increment="5" initial_value="30" decimal_digits="0" show_text="true" />
   <check_box follows="left|top" height="16" left="244" top_pad="10" width="226" name="waves_enabled" label="Use this layout (off = automatic)" initial_value="true" />
+  <!-- <WolfViewer 2026-09-28> Paul: "i need the region owner to be able to turn it off for the whole region". -->
+  <check_box follows="left|top" height="16" left="244" top_pad="6" width="226" name="waves_natural_water" label="Natural lakes and waterfalls" initial_value="true"
+             tool_tip="The lakes, streams and waterfalls the viewers make from the shape of the land. Off = none anywhere in this region, for everyone. Only the region holder can change it." />
   <text follows="left|top" height="42" left="10" top="380" width="460" word_wrap="true" name="waves_status" />
   <button follows="left|top" height="22" left="10" top_pad="4" width="80" name="waves_save" label="Save" />
   <button follows="left|top" height="22" left_pad="6" top_delta="0" width="80" name="waves_revert" label="Revert" />

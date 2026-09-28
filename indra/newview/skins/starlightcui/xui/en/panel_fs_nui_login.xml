@@ -56,6 +56,19 @@
     left="0"
     top="10"
     name="sl_logo_small" />
+  <!-- <WolfViewer 2026-09-28> The release, under the logo (Paul: "I diddnt see the release name when i logged in").
+       The 09-12 label went into panel_login.xml, which FSPanelLogin never loads. Set in fspanellogin.cpp. -->
+  <text
+    follows="left|top"
+    font="SansSerifSmall"
+    text_color="LabelTextColor"
+    halign="center"
+    height="14"
+    left="0"
+    top="137"
+    width="135"
+    name="wolf_release_text"
+    tool_tip="Which release of WolfViewer you are running. Quote this name when reporting a problem." />
 
     <layout_stack
       animate="false"

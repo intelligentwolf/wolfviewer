@@ -329,6 +329,18 @@
             name="Text"
             value="settings_text.xml" />
         </combo_box>
+      <!-- <WolfViewer 2026-09-28> The release, under the mode selector. Set in fspanellogin.cpp. -->
+      <text
+          follows="right|bottom"
+          font="SansSerifSmall"
+          text_color="LabelTextColor"
+          halign="right"
+          height="14"
+          top="62"
+          right="-15"
+          width="200"
+          name="wolf_release_text"
+          tool_tip="Which release of WolfViewer you are running. Quote this name when reporting a problem." />
     </layout_panel>
   </layout_stack>
 </panel>

@@ -51,6 +51,7 @@
 #include "llappviewer.h"
 #include "llweb.h"
 #include "lluictrlfactory.h"
+#include "llversioninfo.h"   // <WolfViewer 2026-09-28/> release name in the heading
 // <FS:Ansariel> [FS Login Panel]
 //#include "llpanellogin.h"
 #include "fspanellogin.h"
@@ -157,7 +158,22 @@ bool LLProgressView::postBuild()
     mLayoutMOTD = getChild<LLView>("panel_motd");
     mLayoutMOTDRectInitial = mLayoutMOTD->getRect();
 
-    getChild<LLTextBox>("title_text")->setText(LLStringExplicit(LLAppViewer::instance()->getSecondLifeTitle()));
+    // <WolfViewer 2026-09-28> The release in the loading box's heading (Paul: "I diddnt see the
+    // release name when i logged in", with a screenshot of this box reading "WolfViewer_x64").
+    // Worded as the window title (llappviewer.cpp); a build with no release name keeps the
+    // app name. " · AVX2" on the AVX2 build — About's SIMD flag. getSecondLifeTitle() itself is
+    // left alone: it also names the viewer to the crash logger.
+    //getChild<LLTextBox>("title_text")->setText(LLStringExplicit(LLAppViewer::instance()->getSecondLifeTitle()));
+    {
+        const std::string release_name = LLVersionInfo::getInstance()->getReleaseName();
+        std::string heading = release_name.empty() ? LLAppViewer::instance()->getSecondLifeTitle()
+                                                   : std::string("WolfViewer \xE2\x80\x94 ") + release_name;   // U+2014 em dash
+#ifdef USE_AVX2_OPTIMIZATION
+        heading += " \xC2\xB7 AVX2";   // U+00B7 middle dot
+#endif
+        getChild<LLTextBox>("title_text")->setText(LLStringExplicit(heading));
+    }
+    // </WolfViewer>
 
     getChild<LLTextBox>("message_text")->setClickedCallback(onClickMessage, this);
 
@@ -343,6 +359,105 @@ void LLProgressView::drawLogos(F32 alpha)
     }
 }
 
+// We need these images very early, so we have to force-load them, otherwise they might not load
+// in time. Null when the file is missing or does not decode. (Was the body of loadLogo.)
+static LLPointer<LLViewerTexture> load_local_image(const std::string& path, const U8 image_codec)
+{
+    if (!gDirUtilp->fileExists(path))
+    {
+        return nullptr;
+    }
+
+    LLPointer<LLImageFormatted> start_image_frmted = LLImageFormatted::createFromType(image_codec);
+    if (!start_image_frmted->load(path))
+    {
+        LL_WARNS("AppInit") << "Image load failed: " << path << LL_ENDL;
+        return nullptr;
+    }
+
+    LLPointer<LLImageRaw> raw = new LLImageRaw;
+    if (!start_image_frmted->decode(raw, 0.0f))
+    {
+        LL_WARNS("AppInit") << "Image decode failed " << path << LL_ENDL;
+        return nullptr;
+    }
+    // HACK: getLocalTexture allows only power of two dimentions
+    raw->expandToPowerOfTwo();
+
+    return LLViewerTextureManager::getLocalTexture(raw.get(), false);
+}
+
+// <WolfViewer 2026-09-28> Paul: "that loading bar on login is dog boring ... could we have a
+// dancing wolf". Frames: skins/default/textures/wolf_dance (README.txt: Wolf by Quaternius, CC0,
+// dance keyed and rendered for WolfViewer). Loaded like the logos — force-loaded, because this
+// screen is up before the texture pipeline is — and released with them.
+namespace
+{
+    constexpr S32 DANCE_FRAMES = 32;
+    constexpr F32 DANCE_FPS = 24.f;
+    constexpr S32 DANCE_MAX_PX = 150;   // the wolf's square, at most
+    constexpr S32 DANCE_MIN_PX = 60;    // smaller than this and it is left out
+    constexpr S32 DANCE_GAP_PX = 8;     // from the bar below and the heading beside
+}
+
+void LLProgressView::initDancingWolf()
+{
+    mDanceFrames.clear();
+    if (!gSavedSettings.getBOOL("WolfLoadingDancingWolf"))
+    {
+        return;
+    }
+    const std::string dir = gDirUtilp->getExpandedFilename(LL_PATH_DEFAULT_SKIN, "textures", "wolf_dance");
+    for (S32 i = 0; i < DANCE_FRAMES; ++i)
+    {
+        LLPointer<LLViewerTexture> frame = load_local_image(dir + gDirUtilp->getDirDelimiter() + llformat("wolf_dance_%02d.png", i), IMG_CODEC_PNG);
+        if (frame.isNull())
+        {
+            // A missing frame would stutter the loop: no wolf rather than a broken one.
+            LL_WARNS("AppInit") << "Dancing wolf frame " << i << " missing in " << dir << "; not shown" << LL_ENDL;
+            mDanceFrames.clear();
+            return;
+        }
+        mDanceFrames.push_back(frame);
+    }
+    mDanceTimer.reset();
+    mDanceTimer.start();
+}
+
+void LLProgressView::drawDancingWolf(F32 alpha)
+{
+    if (mDanceFrames.empty() || !mProgressBar || !mLayoutPanel4)
+    {
+        return;
+    }
+    // Placed from the live widgets each frame, as drawLogos does, because the box resizes (the MOTD
+    // grows it): above the progress bar, right-aligned with it, below the top of the box, and never
+    // over the heading.
+    LLRect bar, box;
+    mProgressBar->localRectToScreen(mProgressBar->getLocalRect(), &bar);
+    mLayoutPanel4->localRectToScreen(mLayoutPanel4->getLocalRect(), &box);
+    S32 size = llmin(DANCE_MAX_PX, box.mTop - bar.mTop - 2 * DANCE_GAP_PX);
+    S32 left = bar.mRight - size;
+    if (LLTextBox* title = findChild<LLTextBox>("title_text"))
+    {
+        LLRect title_rect;
+        title->localRectToScreen(title->getLocalRect(), &title_rect);
+        const S32 text_right = title_rect.mLeft + (S32)title->getFont()->getWidthF32(title->getWText().c_str()) + DANCE_GAP_PX;
+        if (left < text_right)
+        {
+            size -= text_right - left;
+            left = text_right;
+        }
+    }
+    if (size < DANCE_MIN_PX)
+    {
+        return;
+    }
+    const S32 frame = (S32)(mDanceTimer.getElapsedTimeF32() * DANCE_FPS) % DANCE_FRAMES;
+    gl_draw_scaled_image(left, bar.mTop + DANCE_GAP_PX, size, size, mDanceFrames[frame].get(), UI_VERTEX_COLOR % alpha);
+}
+// </WolfViewer>
+
 void LLProgressView::draw()
 {
     static LLTimer timer;
@@ -359,6 +474,7 @@ void LLProgressView::draw()
 
         LLPanel::draw();
         drawLogos(alpha);
+        drawDancingWolf(alpha);   // <WolfViewer 2026-09-28/>
         return;
     }
 
@@ -372,6 +488,7 @@ void LLProgressView::draw()
         drawStartTexture(alpha);
         LLPanel::draw();
         drawLogos(alpha);
+        drawDancingWolf(alpha);   // <WolfViewer 2026-09-28/>
 
         // faded out completely - remove panel and reveal world
         if (mFadeToWorldTimer.getElapsedTimeF32() > FADE_TO_WORLD_TIME )
@@ -407,6 +524,7 @@ void LLProgressView::draw()
     // draw children
     LLPanel::draw();
     drawLogos(1.0f);
+    drawDancingWolf(1.0f);   // <WolfViewer 2026-09-28/>
 }
 
 void LLProgressView::setText(const std::string& text)
@@ -443,30 +561,16 @@ void LLProgressView::loadLogo(const std::string &path,
                               const LLRectf &clip_rect,
                               const LLRectf &offset_rect)
 {
-    // We need these images very early, so we have to force-load them, otherwise they might not load in time.
-    if (!gDirUtilp->fileExists(path))
+    // <WolfViewer 2026-09-28> The force-load moved to load_local_image (above drawDancingWolf)
+    // so the dancing wolf's frames load the same way; behaviour unchanged.
+    LLPointer<LLViewerTexture> texture = load_local_image(path, image_codec);
+    if (texture.isNull())
     {
         return;
     }
-
-    LLPointer<LLImageFormatted> start_image_frmted = LLImageFormatted::createFromType(image_codec);
-    if (!start_image_frmted->load(path))
-    {
-        LL_WARNS("AppInit") << "Image load failed: " << path << LL_ENDL;
-        return;
-    }
-
-    LLPointer<LLImageRaw> raw = new LLImageRaw;
-    if (!start_image_frmted->decode(raw, 0.0f))
-    {
-        LL_WARNS("AppInit") << "Image decode failed " << path << LL_ENDL;
-        return;
-    }
-    // HACK: getLocalTexture allows only power of two dimentions
-    raw->expandToPowerOfTwo();
 
     TextureData data;
-    data.mTexturep = LLViewerTextureManager::getLocalTexture(raw.get(), false);
+    data.mTexturep = texture;
     data.mDrawRect = pos_rect;
     data.mClipRect = clip_rect;
     data.mOffsetRect = offset_rect;
@@ -616,6 +720,7 @@ void LLProgressView::initTextures(S32 location_id, bool is_in_production)
 {
     initStartTexture(location_id, is_in_production);
     initLogos();
+    initDancingWolf();   // <WolfViewer 2026-09-28/>
 
     childSetVisible("panel_icons", !mLogosList.empty());
     childSetVisible("panel_top_spacer", mLogosList.empty());
@@ -625,6 +730,7 @@ void LLProgressView::releaseTextures()
 {
     gStartTexture = NULL;
     mLogosList.clear();
+    mDanceFrames.clear();   // <WolfViewer 2026-09-28/> login only, like the logos
 
     childSetVisible("panel_top_spacer", true);
     childSetVisible("panel_icons", false);

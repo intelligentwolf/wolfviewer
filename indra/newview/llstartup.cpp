@@ -3762,16 +3762,10 @@ void set_startup_status(const F32 frac, const std::string& string, const std::st
     // (teleports set the progress message directly from update_tp_display), and a build with no
     // release name -- a local or untagged one -- adds nothing rather than claiming a release.
     // message_text word-wraps and LLProgressView::setMessage grows the panel for a second line.
-    std::string shown = msg;
-    if (!shown.empty())
-    {
-        const std::string release_name = LLVersionInfo::instance().getReleaseName();
-        if (!release_name.empty())
-        {
-            shown += "\n" + LLTrans::getString("WolfLoadingRelease", LLSD().with("NAME", release_name));
-        }
-    }
-    gViewerWindow->setProgressMessage(shown);
+    // <WolfViewer 2026-09-28> Paul: "it now says the version name on the loading bar thing twice".
+    // The release is in the loading box's heading now (llprogressview.cpp title_text), which the
+    // teleport screens show too, so this second line under the MOTD is gone.
+    gViewerWindow->setProgressMessage(msg);
 }
 
 bool login_alert_status(const LLSD& notification, const LLSD& response)

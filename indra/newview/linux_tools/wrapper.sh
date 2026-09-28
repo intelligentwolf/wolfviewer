@@ -178,11 +178,28 @@ for ARG in "$@"; do
     fi
 done
 
+# <WolfViewer> The tarball carries two builds of the viewer: the standard one and one compiled
+# with -mavx2 (00-Common.cmake). Pick here, in a shell script, because the AVX2 binary cannot
+# test the CPU itself — the compiler may use AVX2 in code that runs before main(), so on an
+# older CPU it would die with "Illegal instruction" before any check of its own could run.
+# WOLFVIEWER_NO_AVX2=1 forces the standard build.
+VIEWER_BIN=bin/do-not-directly-run-wolfviewer-bin
+if [ -z "${WOLFVIEWER_NO_AVX2}" ] && [ -x "${VIEWER_BIN}-avx2" ] \
+	&& grep -qw avx2 /proc/cpuinfo 2>/dev/null; then
+	VIEWER_BIN="${VIEWER_BIN}-avx2"
+	# SDL names the X11 WM_CLASS and the Wayland app_id after the executable
+	# (SDL_x11video.c / SDL_waylandvideo.c get_classname) unless this is set. Keep the
+	# standard name so the desktop entry's StartupWMClass and taskbar grouping still match.
+	export SDL_VIDEO_X11_WMCLASS="${SDL_VIDEO_X11_WMCLASS:-do-not-directly-run-wolfviewer-bin}"
+fi
+echo "Starting ${VIEWER_BIN}"
+# </WolfViewer>
+
 # Run the program.
 # Don't quote $LL_WRAPPER because, if empty, it should simply vanish from the
 # command line. But DO quote "${ARGS[@]}": preserve separate args as
 # individually quoted.
-$LL_WRAPPER bin/do-not-directly-run-wolfviewer-bin "${ARGS[@]}"
+$LL_WRAPPER "${VIEWER_BIN}" "${ARGS[@]}"
 LL_RUN_ERR=$?
 
 # Handle any resulting errors

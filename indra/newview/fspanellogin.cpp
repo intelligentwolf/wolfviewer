@@ -332,6 +332,22 @@ FSPanelLogin::FSPanelLogin(const LLRect &rect,
         patreon_text->setClickedCallback(onClickPatreon, NULL);
     }
 
+    // <WolfViewer 2026-09-28> The release on the login screen (Paul: "I diddnt see the release name
+    // when i logged in"). The 09-12 version of this went into llpanellogin.cpp, which is #if 0 in
+    // Firestorm — this panel is the live one. The release NAME, as the window title and About show
+    // it; a build with no name (local or untagged) shows the version instead. " · AVX2" on the AVX2
+    // build, the same compiled-in flag as About's SIMD field. findChild, as patreon_text above.
+    if (LLTextBox* release_text = findChild<LLTextBox>("wolf_release_text"))
+    {
+        const std::string release_name = LLVersionInfo::getInstance()->getReleaseName();
+        std::string label = release_name.empty() ? version : release_name;
+#ifdef USE_AVX2_OPTIMIZATION
+        label += " \xC2\xB7 AVX2";   // U+00B7 middle dot
+#endif
+        release_text->setText(label);
+    }
+    // </WolfViewer>
+
     loadLoginPage();
 
     LLComboBox* username_combo(getChild<LLComboBox>("username_combo"));

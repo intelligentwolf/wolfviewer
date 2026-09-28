@@ -273,6 +273,19 @@ void WolfWaveZones::refresh()
     });
 }
 
+// <WolfViewer 2026-09-28> Paul: "i need the region owner to be able to turn it off for the whole
+// region". mFetchedForHandle names the agent region the last read finished for, on success AND
+// on failure (fetchCoro), and is cleared when a visit is invalidated — so "not in the reply" only
+// means ALLOWED once this visit has had its answer.
+WolfWaveZones::NaturalWaterRule WolfWaveZones::naturalWaterFor(U64 handle) const
+{
+    const auto it = mByHandle.find(handle);
+    if (it != mByHandle.end()) return it->second.mNaturalWater ? NaturalWaterRule::ALLOWED : NaturalWaterRule::OFF;
+    const LLViewerRegion* agent_region = gAgent.getRegion();
+    return agent_region && mFetchedForHandle == agent_region->getHandle() ? NaturalWaterRule::ALLOWED : NaturalWaterRule::NOT_KNOWN;
+}
+// </WolfViewer>
+
 // Source: wolfspeech.cpp postRaw for the adapter shape; llcorehttputil.h getRawAndSuspend.
 void WolfWaveZones::fetchCoro(std::vector<U64> handles, U64 requested_handle, U64 generation)
 {
@@ -367,6 +380,8 @@ void WolfWaveZones::fetchCoro(std::vector<U64> handles, U64 requested_handle, U6
         // </WolfViewer 2026-09-27>
         rec.mVersion = r["version"].asInteger();
         rec.mEnabled = r["enabled"].asBoolean();
+        // <WolfViewer 2026-09-28/> absent (a service from before the switch) = on
+        rec.mNaturalWater = !r.has("naturalWater") || r["naturalWater"].asBoolean();
         if (r["layout"].isMap())
         {
             rec.mStored = true;
@@ -749,7 +764,7 @@ void WolfWaveZones::clearPreview()
 
 // ── save ───────────────────────────────────────────────────────────────────────────────
 
-bool WolfWaveZones::save(const SaveTarget& target, const Tiles& tiles, const LLSD& params, bool enabled)
+bool WolfWaveZones::save(const SaveTarget& target, const Tiles& tiles, const LLSD& params, bool enabled, bool natural_water)
 {
     // Source: WolfGrid login identity; the server separately verifies the captured request.
     if (!WolfGrid::isWolfTerritories()) { mLastSaveError = "Sorry, this function is only available on Wolf Territories Grid."; notify(mLastSaveError); return false; }
@@ -766,22 +781,23 @@ bool WolfWaveZones::save(const SaveTarget& target, const Tiles& tiles, const LLS
     const U64 preview_revision = mPreviewRevision;
     // Source: php/waves.php region/version checks and browser WaveZones.save: preserve the
     // editor's version across polling and its region across coroutine suspension/retry.
-    LLCoros::instance().launch("WolfWaveZones save", [target, tiles, params, enabled, preview_revision]()
+    LLCoros::instance().launch("WolfWaveZones save", [target, tiles, params, enabled, natural_water, preview_revision]()
     {
-        WolfWaveZones::instance().saveCoro(target, tiles, params, enabled, preview_revision, false);
+        WolfWaveZones::instance().saveCoro(target, tiles, params, enabled, natural_water, preview_revision, false);
     });
     return true;
 }
 
 // Source: wolfspeech.cpp postRaw — the agent and session ids the service verifies against
 // the grid's presence service; no secret is carried by this (public) viewer.
-void WolfWaveZones::saveCoro(SaveTarget target, Tiles tiles, LLSD params, bool enabled, U64 preview_revision, bool retried)
+void WolfWaveZones::saveCoro(SaveTarget target, Tiles tiles, LLSD params, bool enabled, bool natural_water, U64 preview_revision, bool retried)
 {
     LLSD body;
     body["region"] = target.mUuid;
     // <WolfViewer 2026-09-26> layout v2: the painted 16 m tiles (php/waves.php WAVES_PAINT_CELL_M)
     body["layout"] = LLSD().with("v", 2).with("tiles", tilesToLLSD(tiles)).with("params", params);
     body["enabled"] = enabled;
+    body["naturalWater"] = natural_water;   // <WolfViewer 2026-09-28/> region rights only (php/waves.php)
     body["version"] = target.mVersion;
     const std::string text = boost::json::serialize(LlsdToJson(body));
 
@@ -830,7 +846,7 @@ void WolfWaveZones::saveCoro(SaveTarget target, Tiles tiles, LLSD params, bool e
                 && std::strtoull(row["handle"].asString().c_str(), nullptr, 10) == target.mHandle)
             {
                 target.mVersion = row["version"].asInteger();
-                saveCoro(target, tiles, params, enabled, preview_revision, true);
+                saveCoro(target, tiles, params, enabled, natural_water, preview_revision, true);
                 return;
             }
         }
@@ -866,6 +882,8 @@ void WolfWaveZones::saveCoro(SaveTarget target, Tiles tiles, LLSD params, bool e
         Region& rec = it->second;
         rec.mVersion = r["version"].asInteger();
         rec.mEnabled = r["enabled"].asBoolean();
+        // <WolfViewer 2026-09-28/> absent (a service from before the switch) = on
+        rec.mNaturalWater = !r.has("naturalWater") || r["naturalWater"].asBoolean();
         if (r["layout"].isMap())
         {
             rec.mStored = true;
@@ -1444,6 +1462,7 @@ bool WolfPanelLandWaves::postBuild()
     mCalmRipple  = getChild<LLSliderCtrl>("waves_calm_ripple");
     mSmallScale  = getChild<LLSliderCtrl>("waves_small_scale");
     mEnabled     = getChild<LLCheckBoxCtrl>("waves_enabled");
+    mNaturalWater = getChild<LLCheckBoxCtrl>("waves_natural_water");   // <WolfViewer 2026-09-28/>
     mSave        = getChild<LLButton>("waves_save");
     mBrushS      = getChild<LLButton>("waves_brush_s");
     mBrushO      = getChild<LLButton>("waves_brush_o");
@@ -1464,6 +1483,7 @@ bool WolfPanelLandWaves::postBuild()
     mCalmRipple->setCommitCallback(boost::bind(&WolfPanelLandWaves::onParamChanged, this));
     mSmallScale->setCommitCallback(boost::bind(&WolfPanelLandWaves::onParamChanged, this));
     mEnabled->setCommitCallback(boost::bind(&WolfPanelLandWaves::onParamChanged, this));
+    mNaturalWater->setCommitCallback(boost::bind(&WolfPanelLandWaves::onNaturalWaterChanged, this));   // <WolfViewer 2026-09-28/>
 
     // <WolfViewer 2026-09-26> The map paints with the same brush (diameter in 16 m cells) as the
     // water; it may paint land cells as before, the in-world brush only water.
@@ -1685,6 +1705,8 @@ void WolfPanelLandWaves::rebuild()
     mCalmRipple->setValue((F32)(p.has("calmRipple") ? p["calmRipple"].asReal() * 100.0 : 3.0));
     mSmallScale->setValue((F32)(p.has("smallScale") ? p["smallScale"].asReal() * 100.0 : WolfWaveZones::SMALL_SCALE_DEFAULT * 100.0));
     mEnabled->set(r->mEnabled);
+    mNaturalWater->set(r->mNaturalWater);   // <WolfViewer 2026-09-28/>
+    mNaturalWater->setEnabled(all);
     mSurfHeight->setEnabled(all);
     mSetInterval->setEnabled(all);
     mCalmRipple->setEnabled(all);
@@ -1726,6 +1748,20 @@ void WolfPanelLandWaves::onParamChanged()
     previewEdit();
 }
 
+// <WolfViewer 2026-09-28> The whole-region natural water switch. Nothing to preview (each viewer
+// makes its own lakes from the terrain), so it applies on Save; land_waves_tab.js same.
+void WolfPanelLandWaves::onNaturalWaterChanged()
+{
+    if (mWriting) return;
+    if (!WolfGrid::isWolfTerritories()) { setStatus("Sorry, this function is only available on Wolf Territories Grid.", true); return; }
+    if (!targetCurrent()) { invalidateTarget(); refresh(); return; }
+    if (!WolfWaveZones::instance().current() || !mPainter) return;
+    mDirty = true;
+    ++mEditRevision;
+    setStatus(getString(mNaturalWater->get() ? "str_natural_water_on" : "str_natural_water_off"), false);
+}
+// </WolfViewer>
+
 void WolfPanelLandWaves::previewEdit()
 {
     if (!targetCurrent() || !isInVisibleChain()) return;
@@ -1744,7 +1780,7 @@ void WolfPanelLandWaves::onSave()
     if (mWasSaving) return;
     WolfWaveZones& wz = WolfWaveZones::instance();
     mSubmittedRevision = mEditRevision;
-    mWasSaving = wz.save(mTarget, mPainter->tiles(), paramsFromControls(), mEnabled->get());
+    mWasSaving = wz.save(mTarget, mPainter->tiles(), paramsFromControls(), mEnabled->get(), mNaturalWater->get());
     mSave->setEnabled(!mWasSaving);
     setStatus(mWasSaving ? getString("str_saving") : getString("str_save_failed") + " " + wz.lastSaveError(), !mWasSaving);
 }

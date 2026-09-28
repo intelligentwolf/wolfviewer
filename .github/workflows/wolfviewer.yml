@@ -1,7 +1,7 @@
 name: WolfViewer
 
 on:
-  # [2026-09-22] Pick a single platform when you are iterating. A push still builds all four.
+  # [2026-09-22] Pick a single platform when you are iterating. A push still builds them all.
   # Re-running one FAILED platform of an existing run needs no dispatch at all:
   #   gh run rerun --job <job-id> --repo intelligentwolf/wolfviewer
   workflow_dispatch:
@@ -10,7 +10,8 @@ on:
         description: "Platform to build"
         type: choice
         default: all
-        options: [all, linux64, windows64, windows64-avx2, macos64]
+        # "linux" = both Linux builds plus the job that bundles them into one tarball.
+        options: [all, linux, linux64, linux64-avx2, windows64, windows64-avx2, macos64]
   push:
     branches: ["wolfviewer"]
     tags: ["v*"]
@@ -20,22 +21,22 @@ env:
   # hyphen, NOT a space: the channel feeds app_name() and the installer/tar
   # filenames (fs_viewer_manifest.py:132), and viewer_manifest.py warns
   # whitespace there "break[s] a lot of things in the old FS installer logic".
-  VIEWER_CHANNEL: "WolfViewer-Release-w49"
+  VIEWER_CHANNEL: "WolfViewer-Release-w50"
   AUTOBUILD_CONFIG: "ReleaseOS"     # OpenSim edition, open codecs (no FMOD/KDU/secrets)
   # BuildVersion.cmake:14 reads ENV{revision} for the 4th version field (must be
   # numeric — viewerRes.rc:145 FILEVERSION). Pin to the wolf revision number so the
   # viewer reports 7.2.4.1 instead of a meaningless git commit count.
-  revision: "49"
+  revision: "50"
   # [2026-09-12] From here on a release has a NAME, and that is what residents see. The number
   # stays because it has to — viewerRes.rc:145 FILEVERSION must be numeric, and wolfupdate parses
   # "-wN" out of the tag to decide whether a newer release exists — but it is no longer the thing
   # anyone is asked to quote. Keep the tag as v7.2.4-wN-<name> so both halves survive.
-  release_name: "Safety Tiger"
+  release_name: "Powerful Panda"
 
 jobs:
   # [2026-09-22] The matrix is built here so workflow_dispatch can ask for ONE platform.
-  # A push (or any dispatch asking for "all") gets the full four, exactly as before.
-  # The four entries live here and nowhere else.
+  # A push (or any dispatch asking for "all") gets the full set.
+  # The entries live here and nowhere else.
   plan:
     runs-on: ubuntu-latest
     outputs:
@@ -47,8 +48,12 @@ jobs:
           # Second Windows flavour is compiled with MSVC /arch:AVX2 (00-Common.cmake:116).
           # viewer_manifest packages it with an "AVX2" name and ISAVX2=1, so its installer
           # refuses non-AVX2 CPUs and the plain installer offers it to AVX2 CPUs.
+          # [2026-09-28] Second Linux flavour is compiled with -mavx2 (00-Common.cmake). It is
+          # not a download of its own: linux-bundle below takes its viewer binary into the
+          # linux64 tarball, and wrapper.sh runs it when /proc/cpuinfo lists avx2.
           ALL='[
             {"os":"ubuntu-22.04","name":"linux64","cmake_extra":""},
+            {"os":"ubuntu-22.04","name":"linux64-avx2","cmake_extra":"-DUSE_AVX2_OPTIMIZATION:BOOL=ON"},
             {"os":"windows-2022","name":"windows64","cmake_extra":""},
             {"os":"windows-2022","name":"windows64-avx2","cmake_extra":"-DUSE_AVX2_OPTIMIZATION:BOOL=ON"},
             {"os":"macos-15","name":"macos64","cmake_extra":""}
@@ -57,7 +62,8 @@ jobs:
           if [ -z "$WANT" ] || [ "$WANT" = "all" ]; then
             M=$(echo "$ALL" | jq -c .)
           else
-            M=$(echo "$ALL" | jq -c --arg n "$WANT" '[.[] | select(.name == $n)]')
+            M=$(echo "$ALL" | jq -c --arg n "$WANT" \
+              '[.[] | select(.name == $n or ($n == "linux" and (.name | startswith("linux64"))))]')
             if [ "$(echo "$M" | jq 'length')" = "0" ]; then
               echo "::error::no platform named '$WANT'"; exit 1
             fi
@@ -191,4 +197,63 @@ jobs:
           # went GREEN and simply uploaded nothing — which is how the Windows AVX2 download was
           # absent from the website from w21 until somebody happened to notice. A platform that
           # builds nothing is a failed release, and it should look like one.
+          if-no-files-found: error
+
+  # [2026-09-28] ONE Linux download that runs the AVX2 build where the CPU has it. The two Linux
+  # builds run side by side above; this takes the viewer binary out of the AVX2 tarball and adds
+  # it to the standard tarball as bin/do-not-directly-run-wolfviewer-bin-avx2. It must sit in bin/
+  # beside the other: the viewer finds SLPlugin, chrome-sandbox, SLVoice and the crash logger
+  # relative to its own directory (lldir_linux.cpp mExecutableDir). wrapper.sh does the choosing.
+  linux-bundle:
+    needs: [plan, build]
+    if: ${{ !cancelled() && contains(needs.plan.outputs.matrix, '"linux64"') && contains(needs.plan.outputs.matrix, '"linux64-avx2"') }}
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: WolfViewer-linux64, path: in/legacy }
+      - uses: actions/download-artifact@v4
+        with: { name: WolfViewer-linux64-avx2, path: in/avx2 }
+
+      - name: Add the AVX2 viewer binary to the standard tarball
+        shell: bash
+        run: |
+          set -euo pipefail
+          one() {
+            local h; mapfile -t h < <(find "$1" -maxdepth 1 -type f -name "$2")
+            [ "${#h[@]}" -eq 1 ] || { echo "::error::expected one $2 in $1, found ${#h[@]}" >&2; exit 1; }
+            echo "${h[0]}"
+          }
+          # fs_viewer_manifest.py fs_installer_basename(): _LEGACY- or _AVX2- names the flavour.
+          LEG=$(one in/legacy '*_LEGACY-*.tar.xz')
+          AVX=$(one in/avx2 '*_AVX2-*.tar.xz')
+          TOP=$(basename "$LEG" .tar.xz)
+          ATOP=$(basename "$AVX" .tar.xz)
+          # Same channel and version on both sides, or the pair came from different commits.
+          [ "${TOP/_LEGACY-/_AVX2-}" = "$ATOP" ] || { echo "::error::$TOP and $ATOP do not match"; exit 1; }
+
+          mkdir work
+          tar -C work -xpf "$LEG"
+          BIN="work/$TOP/bin/do-not-directly-run-wolfviewer-bin"
+          test -x "$BIN"
+          tar -xOf "$AVX" "$ATOP/bin/do-not-directly-run-wolfviewer-bin" > "$BIN-avx2"
+          chmod 755 "$BIN-avx2"
+
+          # The AVX2 build must really be the AVX2 build: a different file, with far more
+          # 256-bit (ymm) instructions than the standard one.
+          cmp -s "$BIN" "$BIN-avx2" && { echo "::error::the two viewer binaries are identical"; exit 1; }
+          ymm() { objdump -d --no-show-raw-insn "$1" | grep -c ymm || true; }
+          L=$(ymm "$BIN"); A=$(ymm "$BIN-avx2")
+          echo "ymm instructions: standard $L, avx2 $A"
+          [ "$A" -gt $(( L * 2 + 1000 )) ] || { echo "::error::avx2 binary does not look AVX2-compiled"; exit 1; }
+
+          mkdir -p dist
+          # Same tar options as viewer_manifest.py LinuxManifest.package_finish().
+          XZ_OPT=-T0 tar -C work --numeric-owner -caf "dist/$TOP.tar.xz" "$TOP"
+          ls -la dist
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WolfViewer-linux64-bundle
+          path: dist/**
           if-no-files-found: error

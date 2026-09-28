@@ -176,6 +176,16 @@ if (LINUX)
       -pthread
       )
 
+  # <WolfViewer> The Linux counterpart of /arch:AVX2 above, which is MSVC-only. Only the viewer
+  # binary of this build ships: it goes into the standard tarball as
+  # bin/do-not-directly-run-wolfviewer-bin-avx2, and linux_tools/wrapper.sh runs it only on a CPU
+  # whose /proc/cpuinfo lists avx2. The binary cannot check that itself — the compiler may emit
+  # AVX2 in code that runs before main().
+  if (USE_AVX2_OPTIMIZATION)
+    add_compile_options(-mavx2)
+  endif (USE_AVX2_OPTIMIZATION)
+  # </WolfViewer>
+
   # force this platform to accept TOS via external browser <FS:ND> No, do not.
   # add_definitions(-DEXTERNAL_TOS)
 

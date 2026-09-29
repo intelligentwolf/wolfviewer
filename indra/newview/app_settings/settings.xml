@@ -16164,7 +16164,7 @@ Change of this parameter will affect the layout of buttons in notification toast
     <key>WolfTranslateOutgoing</key>
     <map>
       <key>Comment</key>
-      <string>Translate outgoing chat and IMs into WolfTranslateTheirLang before sending (WolfStorm chat_translator.js outgoingActive)</string>
+      <string>Translate outgoing chat and IMs into WolfTranslateTheirLang (one language, or "auto" = everyone here) before sending (WolfStorm chat_translator.js outgoingActive)</string>
       <key>Persist</key>
       <integer>1</integer>
       <key>Type</key>
@@ -16175,13 +16175,13 @@ Change of this parameter will affect the layout of buttons in notification toast
     <key>WolfTranslateTheirLang</key>
     <map>
       <key>Comment</key>
-      <string>Language outgoing chat is translated into; empty disables outgoing translation</string>
+      <string>Language outgoing chat is translated into; "auto" (or empty) = every language the people in that conversation have written in recently (WolfStorm chat_translator.js outgoingTargets)</string>
       <key>Persist</key>
       <integer>1</integer>
       <key>Type</key>
       <string>String</string>
       <key>Value</key>
-      <string></string>
+      <string>auto</string>
     </map>
     <key>WolfTranslateShowOriginal</key>
     <map>

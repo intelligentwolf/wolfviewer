@@ -918,6 +918,7 @@ set(viewer_SOURCE_FILES
     wolfparcelbitmap.cpp
     wolfobjectprops.cpp
     wolffloatermeshupload.cpp
+    wolffloaterlagdetector.cpp
     wolffloaterphotoeffects.cpp
     wolfmeshupload.cpp
     wolfscreenshare.cpp
@@ -1809,6 +1810,7 @@ set(viewer_HEADER_FILES
     wolfgrid.h
     wolfobjectprops.h
     wolffloatermeshupload.h
+    wolffloaterlagdetector.h
     wolffloaterphotoeffects.h
     wolfmeshupload.h
     wolfscreenshare.h

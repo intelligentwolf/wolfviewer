@@ -1218,6 +1218,17 @@
              function="Floater.CanShow"
              parameter="region_info" />
         </menu_item_call>
+        <!-- [LAG DETECTOR 2026-09-29] wolffloaterlagdetector.cpp: what on this region is slowing it
+             down that its owner can fix (runaway scripts, heavy scripts, physics hogs). Works only
+             while open. Always offered: estate managers see the region, parcel owners their parcel,
+             and the window says so when neither applies. -->
+        <menu_item_call
+         label="Lag Detector..."
+         name="WolfLagDetector">
+            <menu_item_call.on_click
+             function="Floater.Show"
+             parameter="wolf_lag_detector" />
+        </menu_item_call>
         <menu_item_call
              label="Set Home to Here"
              name="Set Home to Here">

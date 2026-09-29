@@ -2760,6 +2760,15 @@ void process_decline_callingcard(LLMessageSystem* msg, void**)
 
 void translateSuccess(LLChat chat, LLSD toastArgs, std::string originalMsg, std::string expectLang, std::string translation, const std::string detected_language)
 {
+    // <FS:WolfViewer> [TRANSLATE MULTI 2026-09-29] Remember what this resident speaks, for
+    // "Everyone here" outgoing translation (nearby chat = session LLUUID::null). Residents
+    // only (llchat.h CHAT_SOURCE_AGENT), and only lines that really translated.
+    if (chat.mSourceType == CHAT_SOURCE_AGENT && !translation.empty() && !detected_language.empty()
+        && LLStringUtil::compareInsensitive(LLTranslate::removeNoTranslateTags(translation), originalMsg) != 0)
+    {
+        LLTranslate::noteSpeakerLanguage(LLUUID::null, chat.mFromID, detected_language);
+    }
+    // </FS:WolfViewer>
     // filter out non-interesting responses
     if (!translation.empty()
         && ((detected_language.empty()) || (expectLang != detected_language))

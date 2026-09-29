@@ -6711,6 +6711,31 @@ Press Save in the Build floater's Paint tab to keep it.
      yestext="Quit and lose the paint"/>
   </notification>
 
+  <!-- [LAG DETECTOR 2026-09-29] wolffloaterlagdetector.cpp Return / Delete confirmations. -->
+  <notification
+   icon="alertmodal.tga"
+   name="WolfLagDetectorReturn"
+   type="alertmodal">
+Return "[OBJECT]" to its owner, [OWNER]? It will leave the region and go back to their inventory.
+    <tag>confirm</tag>
+    <usetemplate
+     name="okcancelbuttons"
+     notext="Cancel"
+     yestext="Return"/>
+  </notification>
+
+  <notification
+   icon="alertmodal.tga"
+   name="WolfLagDetectorDelete"
+   type="alertmodal">
+Delete "[OBJECT]"? It will go to your Trash.
+    <tag>confirm</tag>
+    <usetemplate
+     name="okcancelbuttons"
+     notext="Cancel"
+     yestext="Delete"/>
+  </notification>
+
   <notification
    icon="alertmodal.tga"
    name="ConfirmRestoreToybox"

@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [LAG DETECTOR 2026-09-29] World > Lag Detector… (wolffloaterlagdetector.cpp). What on this
+     region is slowing it down that its owner can fix, in plain words, worst first. Works only
+     while open: every 30 s it asks for Top Scripts + Top Colliders and works out each object's
+     share of a CPU core itself; region speed comes from the SimStats every viewer receives.
+     Same layout and wording as WolfStorm floater_lag_detector.js. -->
+<floater
+ can_close="true"
+ can_minimize="true"
+ can_resize="true"
+ height="470"
+ layout="topleft"
+ min_height="360"
+ min_width="520"
+ name="wolf_lag_detector"
+ help_topic="wolf_lag_detector"
+ save_rect="true"
+ single_instance="true"
+ title="Lag Detector"
+ width="620">
+    <floater.string name="scope_region">the whole region</floater.string>
+    <floater.string name="scope_parcel">the parcel you are standing on</floater.string>
+    <floater.string name="unknown_parcel">(unknown parcel)</floater.string>
+    <floater.string name="speed_line">Region speed [SPEED]% · simulator [SIMFPS] fps · physics [PHYSFPS] fps · scripts using [CORES] CPU cores</floater.string>
+    <floater.string name="where_line">Owner: [OWNER] · Parcel: [PARCEL] · Position: [POS]</floater.string>
+
+    <floater.string name="verdict_no_region">Not connected to a region.</floater.string>
+    <floater.string name="verdict_measuring">Measuring [REGION] (checking [SCOPE])… first results in about a minute.</floater.string>
+    <floater.string name="verdict_fine">No lag problems found. [REGION] is running at [SPEED]% speed (checking [SCOPE]).</floater.string>
+    <floater.string name="verdict_one_problem">1 problem is slowing [REGION] down. It is running at [SPEED]% speed.</floater.string>
+    <floater.string name="verdict_problems">[COUNT] problems are slowing [REGION] down. It is running at [SPEED]% speed.</floater.string>
+    <floater.string name="verdict_slow_not_ours">[REGION] is running slowly ([SPEED]% speed), but nothing here that you can fix is to blame (checking [SCOPE]). The server itself may be busy.</floater.string>
+
+    <floater.string name="level_runaway">RUNAWAY</floater.string>
+    <floater.string name="level_heavy">HEAVY</floater.string>
+    <floater.string name="level_region">REGION</floater.string>
+    <floater.string name="level_busy">busy</floater.string>
+
+    <floater.string name="runaway_title">[OBJECT] is stuck in a loop ([PERCENT] of a CPU core)</floater.string>
+    <floater.string name="runaway_detail">"[OBJECT]" has used [PERCENT] of one CPU core without a break for at least [MINUTES] minutes. A script that busy is almost certainly stuck in a loop: it does the same thing over and over and never stops. It slows everything else on the region down. Returning it to its owner stops it at once.</floater.string>
+    <floater.string name="heavy_title">[OBJECT] has very busy scripts ([PERCENT] of a CPU core)</floater.string>
+    <floater.string name="heavy_detail">"[OBJECT]" has used about [PERCENT] of one CPU core over the last [MINUTES] minutes. That is far more than a normal object needs, and it slows the region down. Ask the owner to check it, or return it.</floater.string>
+    <floater.string name="scripts_total_title">Many busy scripts add up to [CORES] CPU cores</floater.string>
+    <floater.string name="scripts_total_detail">No single object is to blame, but together the scripts here are using [CORES] CPU cores - as much as a runaway script. The busiest objects are listed below; removing or quietening a few of them will help.</floater.string>
+    <floater.string name="scripts_object_title">   [OBJECT] ([PERCENT] of a CPU core)</floater.string>
+    <floater.string name="scripts_object_detail">"[OBJECT]" is one of the busiest scripted objects here, using about [PERCENT] of one CPU core.</floater.string>
+    <floater.string name="physics_title">Physics is struggling ([PHYSFPS] fps, [ACTIVE] active objects)</floater.string>
+    <floater.string name="physics_detail">The region's physics is running at [PHYSFPS] frames a second, below the warning level. That usually means objects are constantly bumping into things, spinning or tumbling, or there are too many moving physical objects ([ACTIVE] active now). The objects colliding the most are listed below. Returning them, or asking their owners to make them non-physical, will help.</floater.string>
+    <floater.string name="physics_object_title">   [OBJECT] (colliding a lot)</floater.string>
+    <floater.string name="physics_object_detail">"[OBJECT]" is one of the objects colliding the most on this region, which costs physics time.</floater.string>
+    <floater.string name="busy_title">[OBJECT] ([PERCENT] of a CPU core)</floater.string>
+    <floater.string name="busy_detail">"[OBJECT]" is busy but not a problem: about [PERCENT] of one CPU core over the last [MINUTES] minutes.</floater.string>
+    <floater.string name="detail_none">Select a problem to see what it means and what you can do.</floater.string>
+
+    <text
+     follows="left|top|right"
+     font="SansSerifBold"
+     height="36"
+     layout="topleft"
+     left="12"
+     name="verdict_text"
+     top="24"
+     width="596"
+     word_wrap="true">
+Measuring…
+    </text>
+    <text
+     follows="left|top|right"
+     height="16"
+     layout="topleft"
+     left="12"
+     name="speed_text"
+     text_color="LtGray_50"
+     top_pad="2"
+     width="596">
+Region speed …
+    </text>
+    <scroll_list
+     draw_heading="true"
+     follows="all"
+     height="180"
+     layout="topleft"
+     left="12"
+     multi_select="false"
+     name="problems_list"
+     top_pad="8"
+     width="596">
+        <scroll_list.columns label="" name="level" width="80" />
+        <scroll_list.columns label="Problem" name="problem" dynamicwidth="true" />
+    </scroll_list>
+    <text
+     follows="left|right|bottom"
+     height="100"
+     layout="topleft"
+     left="12"
+     name="detail_text"
+     top_pad="8"
+     width="596"
+     word_wrap="true">
+Select a problem to see what it means and what you can do.
+    </text>
+    <check_box
+     follows="left|bottom"
+     height="16"
+     label="Also list busy objects that are not a problem"
+     layout="topleft"
+     left="12"
+     name="show_busy_check"
+     top_pad="6"
+     width="360" />
+    <button
+     follows="bottom|left"
+     height="23"
+     label="Check Now"
+     layout="topleft"
+     left="12"
+     name="check_now_btn"
+     top_pad="10"
+     width="90" />
+    <button
+     follows="bottom|left"
+     height="23"
+     label="Show Beacon"
+     layout="topleft"
+     left_pad="6"
+     name="beacon_btn"
+     top_delta="0"
+     width="100" />
+    <button
+     follows="bottom|left"
+     height="23"
+     label="Teleport To"
+     layout="topleft"
+     left_pad="6"
+     name="teleport_btn"
+     top_delta="0"
+     width="100" />
+    <button
+     follows="bottom|right"
+     height="23"
+     label="Return to Owner"
+     layout="topleft"
+     right="-130"
+     name="return_btn"
+     top_delta="0"
+     width="120" />
+    <button
+     follows="bottom|right"
+     height="23"
+     label="Delete"
+     layout="topleft"
+     right="-12"
+     name="delete_btn"
+     top_delta="0"
+     width="80" />
+</floater>

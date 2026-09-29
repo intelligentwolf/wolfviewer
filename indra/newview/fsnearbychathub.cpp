@@ -430,24 +430,16 @@ void FSNearbyChat::sendChatFromViewer(const LLWString& wtext, const LLWString& o
         && LLTranslate::isOutgoingTranslationActive()
         && LLTranslate::worthTranslating(utf8_out_text))
     {
-        const std::string from_lang = LLTranslate::getTranslateLanguage();
-        const std::string to_lang = LLTranslate::getOutgoingLanguage();
-        LLTranslate::instance().logCharsSent(utf8_out_text.size());
-        // The send happens INSIDE the callbacks, after the translation returns —
-        // never build output before a delay and send it later.
-        LLTranslate::translateMessage(from_lang, to_lang, utf8_out_text,
-            [utf8_out_text, type, animate, channel](std::string translation, std::string detected_lang)
+        // [TRANSLATE MULTI 2026-09-29] Into one language, or every language the people
+        // here write in (nearby chat = session LLUUID::null). The send happens INSIDE the
+        // callback, after the translations return — never build output before a delay.
+        LLTranslate::translateOutgoing(LLUUID::null, utf8_out_text,
+            [type, animate, channel](const std::vector<std::string>& lines)
             {
-                std::string combined = LLTranslate::combineWithOriginal(
-                    LLTranslate::removeNoTranslateTags(translation), utf8_out_text);
-                FSNearbyChat::sendChatFromViewerFinal(combined, combined, type, animate, channel);
-            },
-            [utf8_out_text, type, animate, channel](int status, std::string err_msg)
-            {
-                // Translator unreachable — send the original rather than losing the line.
-                LL_WARNS("FSNearbyChatHub") << "Outgoing translation failed (" << status
-                    << "): " << err_msg << " — sending untranslated" << LL_ENDL;
-                FSNearbyChat::sendChatFromViewerFinal(utf8_out_text, utf8_out_text, type, animate, channel);
+                for (const std::string& line : lines)
+                {
+                    FSNearbyChat::sendChatFromViewerFinal(line, line, type, animate, channel);
+                }
             });
         return;
     }

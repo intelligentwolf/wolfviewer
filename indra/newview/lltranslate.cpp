@@ -30,7 +30,10 @@
 
 #include <curl/curl.h>
 
+#include "llagent.h"
 #include "llbufferstream.h"
+#include "lldbstrings.h"
+#include "lltimer.h"
 #include "lltrans.h"
 #include "llui.h"
 #include "llversioninfo.h"
@@ -40,6 +43,7 @@
 #include "llurlregistry.h"
 #include "stringize.h"
 
+#include <algorithm>
 #include <boost/json.hpp>
 
 static const std::string AZURE_NOTRANSLATE_OPENING_TAG("<div translate=\"no\">");
@@ -1563,16 +1567,179 @@ bool LLTranslate::isOutgoingTranslationActive()
     {
         return false;
     }
-    std::string their_lang = getOutgoingLanguage();
-    return !their_lang.empty()
-        && their_lang != getTranslateLanguage()
-        && isTranslationConfigured();
+    // [TRANSLATE MULTI 2026-09-29] "auto" (everyone here) is a valid target now; which
+    // languages that means is decided per message (getOutgoingTargets).
+    return isTranslationConfigured();
 }
 
 // static
 std::string LLTranslate::getOutgoingLanguage()
 {
     return gSavedSettings.getString("WolfTranslateTheirLang");
+}
+
+// [TRANSLATE MULTI 2026-09-29] Source: wolfstorm/js/chat/chat_translator.js noteSpeaker /
+// audienceLanguages / outgoingTargets / prepareOutgoing — the same rules in both viewers.
+static constexpr F64 AUDIENCE_WINDOW_SECONDS = 15.0 * 60.0;
+
+// static
+void LLTranslate::noteSpeakerLanguage(const LLUUID& session_id, const LLUUID& speaker_id, const std::string& lang)
+{
+    if (speaker_id.isNull() || speaker_id == gAgentID || lang.empty())
+    {
+        return;
+    }
+    SpokenLanguage& spoken = instance().mSpeakerLanguages[session_id][speaker_id];
+    spoken.mLang = lang;
+    spoken.mAt = LLTimer::getTotalSeconds();
+}
+
+// static
+std::vector<std::string> LLTranslate::getAudienceLanguages(const LLUUID& session_id)
+{
+    std::vector<std::string> out;
+    auto& sessions = instance().mSpeakerLanguages;
+    auto it = sessions.find(session_id);
+    if (it == sessions.end())
+    {
+        return out;
+    }
+    const F64 since = F64(LLTimer::getTotalSeconds()) - AUDIENCE_WINDOW_SECONDS;
+    std::vector<SpokenLanguage> recent;
+    for (auto speaker = it->second.begin(); speaker != it->second.end(); )
+    {
+        if (speaker->second.mAt < since)
+        {
+            speaker = it->second.erase(speaker);   // gone quiet: forget them
+            continue;
+        }
+        recent.push_back(speaker->second);
+        ++speaker;
+    }
+    std::sort(recent.begin(), recent.end(),
+        [](const SpokenLanguage& a, const SpokenLanguage& b) { return a.mAt > b.mAt; });
+    const std::string mine = getTranslateLanguage();
+    for (const SpokenLanguage& spoken : recent)
+    {
+        if (spoken.mLang != mine && std::find(out.begin(), out.end(), spoken.mLang) == out.end())
+        {
+            out.push_back(spoken.mLang);
+        }
+    }
+    return out;
+}
+
+// static
+std::vector<std::string> LLTranslate::getOutgoingTargets(const LLUUID& session_id)
+{
+    const std::string their_lang = getOutgoingLanguage();
+    if (their_lang.empty() || their_lang == "auto")
+    {
+        return getAudienceLanguages(session_id);
+    }
+    if (their_lang == getTranslateLanguage())
+    {
+        return {};
+    }
+    return { their_lang };
+}
+
+// static
+std::vector<std::string> LLTranslate::buildOutgoingLines(
+    const std::vector<std::pair<std::string, std::string>>& results, const std::string& original)
+{
+    // Source: chat_translator.js prepareOutgoing. One language: "translation (original)" as
+    // before. Several: one line "[es] ... · [de] ... (original)"; over the wire budget,
+    // one line per language then the original on its own - never cut off mid-translation.
+    // Budget: MAX_MSG_BUF_SIZE = 1024 including the terminator (lldbstrings.h:77).
+    std::string orig_trimmed = original;
+    LLStringUtil::trim(orig_trimmed);
+    std::vector<std::pair<std::string, std::string>> done;
+    for (const auto& result : results)
+    {
+        std::string text = result.second;
+        LLStringUtil::trim(text);
+        if (!text.empty() && text != orig_trimmed)
+        {
+            done.emplace_back(result.first, text);
+        }
+    }
+    if (done.empty())
+    {
+        return { original };
+    }
+    if (done.size() == 1)
+    {
+        return { combineWithOriginal(done[0].second, original) };
+    }
+    static LLCachedControl<bool> show_original(gSavedSettings, "WolfTranslateShowOriginal");
+    std::vector<std::string> tagged;
+    std::string combined;
+    for (const auto& d : done)
+    {
+        tagged.push_back("[" + d.first + "] " + d.second);
+        combined += (combined.empty() ? "" : " \xC2\xB7 ") + tagged.back();   // U+00B7 middle dot
+    }
+    if (show_original)
+    {
+        combined += " (" + orig_trimmed + ")";
+    }
+    if (combined.size() <= (size_t)(MAX_MSG_BUF_SIZE - 1))
+    {
+        return { combined };
+    }
+    if (show_original)
+    {
+        tagged.push_back(original);
+    }
+    return tagged;
+}
+
+// static
+void LLTranslate::translateOutgoing(const LLUUID& session_id, const std::string& text, OutgoingLines_fn send)
+{
+    const std::vector<std::string> targets = getOutgoingTargets(session_id);
+    if (targets.empty())
+    {
+        send({ text });   // nobody here writes in another language (yet): send as typed
+        return;
+    }
+    // Every target is asked at once; the send happens INSIDE the last callback, after all the
+    // translations return. The callbacks run on the main coroutine, so no locking.
+    struct Gather
+    {
+        size_t mRemaining = 0;
+        std::vector<std::pair<std::string, std::string>> mResults;
+    };
+    auto gather = std::make_shared<Gather>();
+    gather->mRemaining = targets.size();
+    gather->mResults.resize(targets.size());
+    const std::string from_lang = getTranslateLanguage();
+    for (size_t i = 0; i < targets.size(); ++i)
+    {
+        const std::string to_lang = targets[i];
+        gather->mResults[i].first = to_lang;
+        instance().logCharsSent(text.size());
+        translateMessage(from_lang, to_lang, text,
+            [gather, i, text, send](std::string translation, std::string detected_lang)
+            {
+                gather->mResults[i].second = removeNoTranslateTags(translation);
+                if (--gather->mRemaining == 0)
+                {
+                    send(buildOutgoingLines(gather->mResults, text));
+                }
+            },
+            [gather, to_lang, text, send](int status, std::string err_msg)
+            {
+                // That language is sent without a translation rather than losing the line.
+                LL_WARNS("Translate") << "Outgoing translation into " << to_lang << " failed ("
+                    << status << "): " << err_msg << LL_ENDL;
+                if (--gather->mRemaining == 0)
+                {
+                    send(buildOutgoingLines(gather->mResults, text));
+                }
+            });
+    }
 }
 
 // static

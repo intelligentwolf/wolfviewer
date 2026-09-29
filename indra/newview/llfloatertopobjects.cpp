@@ -46,6 +46,7 @@
 #include "lltextbox.h"
 #include "lltracker.h"
 #include "llviewermessage.h"
+#include "wolffloaterlagdetector.h" // <WolfViewer/> [LAG DETECTOR 2026-09-29]
 #include "llviewerparcelmgr.h"
 #include "llviewerregion.h"
 #include "lluictrlfactory.h"
@@ -134,6 +135,11 @@ void LLFloaterTopObjects::setMode(U32 mode)
 // static
 void LLFloaterTopObjects::handle_land_reply(LLMessageSystem* msg, void** data)
 {
+    // <WolfViewer> [LAG DETECTOR 2026-09-29] The Lag Detector asks the same LandStatRequest and
+    // marks its RequestFlags (the region echoes them back); its replies go to it, not to this floater.
+    if (WolfFloaterLagDetector::handleLandStatReply(msg))
+        return;
+    // </WolfViewer>
     LLFloaterTopObjects* instance = LLFloaterReg::getTypedInstance<LLFloaterTopObjects>("top_objects");
     if(instance && instance->isInVisibleChain())
     {

@@ -31,6 +31,8 @@
 #include "llsingleton.h"
 
 #include <functional>
+#include <map>
+#include <vector>
 
 class LLTranslationAPIHandler;
 /**
@@ -99,8 +101,20 @@ public :
     // (wolfstorm/js/chat/chat_translator.js outgoingActive/prepareOutgoing).
     /** True when outgoing chat should be machine-translated before sending. */
     static bool isOutgoingTranslationActive();
-    /** The language outgoing chat is translated into (WolfTranslateTheirLang). */
+    /** WolfTranslateTheirLang: one language code, or "auto" (or empty) = everyone here. */
     static std::string getOutgoingLanguage();
+    // [TRANSLATE MULTI 2026-09-29] Luna: "when you have multiple ppl speaking different
+    // languages, you can only pick one language". "Everyone here" = the languages the people
+    // in that conversation have written in over the last AUDIENCE_WINDOW_SECONDS.
+    // Nearby chat is session LLUUID::null; IMs and group chat use their IM session id.
+    /** Remember the language a resident last wrote in (a newer line replaces an older guess). */
+    static void noteSpeakerLanguage(const LLUUID& session_id, const LLUUID& speaker_id, const std::string& lang);
+    /** Languages other than mine written in this session recently, newest first. */
+    static std::vector<std::string> getAudienceLanguages(const LLUUID& session_id);
+    typedef std::function<void(const std::vector<std::string>& lines)> OutgoingLines_fn;
+    /** Translate an outgoing line for this session and hand the line(s) to send to `send` -
+        always called exactly once, with the original if nothing could be translated. */
+    static void translateOutgoing(const LLUUID& session_id, const std::string& text, OutgoingLines_fn send);
     /** "translation (original)" when WolfTranslateShowOriginal is set, else the translation. */
     static std::string combineWithOriginal(const std::string& translation, const std::string& original);
     /** False for text with fewer than two letters once URLs are ignored — nothing to translate. */
@@ -115,6 +129,13 @@ public :
 private:
     static LLTranslationAPIHandler& getPreferredHandler();
     static LLTranslationAPIHandler& getHandler(EService service);
+
+    static std::vector<std::string> getOutgoingTargets(const LLUUID& session_id);
+    static std::vector<std::string> buildOutgoingLines(const std::vector<std::pair<std::string, std::string>>& results,
+                                                       const std::string& original);
+
+    struct SpokenLanguage { std::string mLang; F64 mAt = 0.0; };
+    std::map<LLUUID, std::map<LLUUID, SpokenLanguage>> mSpeakerLanguages;   // session -> speaker -> last language
 
     size_t mCharsSeen;
     size_t mCharsSent;

@@ -134,7 +134,8 @@ void LLFloaterTranslationSettings::onOpen(const LLSD& key)
     // <FS:WolfViewer> outgoing translation settings
     mOutgoingCB->setValue(gSavedSettings.getBOOL("WolfTranslateOutgoing"));
     std::string their_lang = gSavedSettings.getString("WolfTranslateTheirLang");
-    mTheirLanguageCombo->setSelectedByValue(their_lang.empty() ? std::string("none") : their_lang, true);
+    // [TRANSLATE MULTI 2026-09-29] empty (older settings) = everyone here
+    mTheirLanguageCombo->setSelectedByValue(their_lang.empty() || their_lang == "none" ? std::string("auto") : their_lang, true);
     mShowOriginalCB->setValue(gSavedSettings.getBOOL("WolfTranslateShowOriginal"));
     // </FS:WolfViewer>
 
@@ -286,11 +287,10 @@ void LLFloaterTranslationSettings::updateControlsEnabledState()
     mTranslationServiceRadioGroup->setEnabled(on);
     mLanguageCombo->setEnabled(on);
 
-    // <FS:WolfViewer> Outgoing translation controls. Outgoing needs a concrete
-    // target language (chat_translator.js:77-78 — cannot translate INTO "auto").
+    // <FS:WolfViewer> Outgoing translation controls. [TRANSLATE MULTI 2026-09-29] "auto"
+    // (everyone here) is a target too, so outgoing is available whenever translation is on.
     mTheirLanguageCombo->setEnabled(on);
-    std::string their_lang = mTheirLanguageCombo->getSelectedValue().asString();
-    mOutgoingCB->setEnabled(on && their_lang != "none");
+    mOutgoingCB->setEnabled(on);
     mShowOriginalCB->setEnabled(on);
     // </FS:WolfViewer>
 
@@ -450,15 +450,9 @@ void LLFloaterTranslationSettings::onBtnOK()
     gSavedSettings.setBOOL("TranslateChat", mMachineTranslationCB->getValue().asBoolean());
     gSavedSettings.setString("TranslateLanguage", mLanguageCombo->getSelectedValue().asString());
     gSavedSettings.setString("TranslationService", getSelectedService());
-    // <FS:WolfViewer> outgoing translation settings ("none" stores as empty = off)
-    std::string their_lang = mTheirLanguageCombo->getSelectedValue().asString();
-    if (their_lang == "none")
-    {
-        their_lang.clear();
-    }
-    gSavedSettings.setString("WolfTranslateTheirLang", their_lang);
-    gSavedSettings.setBOOL("WolfTranslateOutgoing",
-        mOutgoingCB->getValue().asBoolean() && !their_lang.empty());
+    // <FS:WolfViewer> outgoing translation settings ("auto" = everyone here)
+    gSavedSettings.setString("WolfTranslateTheirLang", mTheirLanguageCombo->getSelectedValue().asString());
+    gSavedSettings.setBOOL("WolfTranslateOutgoing", mOutgoingCB->getValue().asBoolean());
     gSavedSettings.setBOOL("WolfTranslateShowOriginal", mShowOriginalCB->getValue().asBoolean());
     // </FS:WolfViewer>
     gSavedSettings.setLLSD("AzureTranslateAPIKey", getEnteredAzureKey());

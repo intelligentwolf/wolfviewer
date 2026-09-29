@@ -426,12 +426,13 @@
   max_chars="135"
   mouse_opaque="true"
   name="wolf_their_language_combo"
+  tool_tip="Everyone here: your messages are translated into every language the people in that chat have written in over the last 15 minutes. Incoming chat is always detected line by line."
   top_delta="-4"
   width="190">
   <combo_box.item
-   label="None (choose a language)"
-   name="None"
-   value="none" />
+   label="Everyone here (automatic)"
+   name="Auto"
+   value="auto" />
   <combo_box.item
    label="English"
    name="English"

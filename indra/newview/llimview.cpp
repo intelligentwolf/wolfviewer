@@ -750,6 +750,15 @@ void translateSuccess(const LLUUID& session_id, const std::string& from, const L
                         U64 time_n_flags, std::string originalMsg, std::string expectLang, std::string translation, const std::string detected_language)
 {
     std::string message_txt(utf8_text);
+    // <FS:WolfViewer> [TRANSLATE MULTI 2026-09-29] Only a line that really translated says
+    // what its speaker speaks ("ok", "lol" come back unchanged) — chat_translator.js
+    // translateIncoming. Feeds "Everyone here" outgoing translation.
+    if (!translation.empty() && !detected_language.empty()
+        && LLStringUtil::compareInsensitive(LLTranslate::removeNoTranslateTags(translation), originalMsg) != 0)
+    {
+        LLTranslate::noteSpeakerLanguage(session_id, from_id, detected_language);
+    }
+    // </FS:WolfViewer>
     // filter out non-interesting responses
     if (!translation.empty()
         && ((detected_language.empty()) || (expectLang != detected_language))
@@ -2280,24 +2289,16 @@ void LLIMModel::sendMessage(const std::string& utf8_text,
         && LLTranslate::isOutgoingTranslationActive()
         && LLTranslate::worthTranslating(utf8_text))
     {
-        const std::string from_lang = LLTranslate::getTranslateLanguage();
-        const std::string to_lang = LLTranslate::getOutgoingLanguage();
-        LLTranslate::instance().logCharsSent(utf8_text.size());
-        // The send (and its local echo) runs INSIDE the callbacks, after the
-        // translation returns.
-        LLTranslate::translateMessage(from_lang, to_lang, utf8_text,
-            [utf8_text, im_session_id, other_participant_id, dialog](std::string translation, std::string detected_lang)
+        // [TRANSLATE MULTI 2026-09-29] Into one language, or every language the people in
+        // this session write in. The send (and its local echo) runs INSIDE the callback,
+        // after the translations return.
+        LLTranslate::translateOutgoing(im_session_id, utf8_text,
+            [im_session_id, other_participant_id, dialog](const std::vector<std::string>& lines)
             {
-                std::string combined = LLTranslate::combineWithOriginal(
-                    LLTranslate::removeNoTranslateTags(translation), utf8_text);
-                LLIMModel::sendMessageInternal(combined, im_session_id, other_participant_id, dialog);
-            },
-            [utf8_text, im_session_id, other_participant_id, dialog](int status, std::string err_msg)
-            {
-                // Translator unreachable — send the original rather than losing the line.
-                LL_WARNS("Messaging") << "Outgoing IM translation failed (" << status
-                    << "): " << err_msg << " — sending untranslated" << LL_ENDL;
-                LLIMModel::sendMessageInternal(utf8_text, im_session_id, other_participant_id, dialog);
+                for (const std::string& line : lines)
+                {
+                    LLIMModel::sendMessageInternal(line, im_session_id, other_participant_id, dialog);
+                }
             });
         return;
     }

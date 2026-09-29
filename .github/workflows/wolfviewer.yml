@@ -32,6 +32,14 @@ env:
   # "-wN" out of the tag to decide whether a newer release exists — but it is no longer the thing
   # anyone is asked to quote. Keep the tag as v7.2.4-wN-<name> so both halves survive.
   release_name: "Powerful Panda"
+  # [2026-09-29] Windows code signing (Azure Artifact Signing, account in Paul's Azure subscription,
+  # resource group wolfviewer-signing). None of these are secrets. The endpoint must be the one for
+  # the account's region, North Europe (how-to-signing-integrations endpoint table), and the
+  # certificate CN is the validated legal name, so it is what every signature is checked against.
+  ARTIFACT_SIGNING_ENDPOINT: "https://neu.codesigning.azure.net"
+  ARTIFACT_SIGNING_ACCOUNT: "intelligentwolf-signing"
+  ARTIFACT_SIGNING_PROFILE: "wolfviewer-public"
+  SIGNING_SUBJECT_CN: "IntelligentWolf Ltd"
 
 jobs:
   # [2026-09-22] The matrix is built here so workflow_dispatch can ask for ONE platform.
@@ -78,6 +86,17 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
+    # id-token lets azure/login sign in to Azure with GitHub's OIDC token instead of a stored secret.
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      # [2026-09-29] Sign Windows builds of the wolfviewer branch once the repository variable
+      # AZURE_CLIENT_ID exists. The Azure federated credential (app wolfviewer-ci-signing) trusts
+      # only repo:intelligentwolf@15034842/wolfviewer@751350843:ref:refs/heads/wolfviewer (this repo
+      # sends GitHub's immutable-ID subject), so a tag or another branch could not sign anyway;
+      # they build unsigned. collect_artifacts.sh refuses an unsigned installer.
+      WV_SIGN: ${{ startsWith(matrix.name, 'windows') && github.ref == 'refs/heads/wolfviewer' && vars.AZURE_CLIENT_ID != '' }}
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
@@ -165,6 +184,55 @@ jobs:
       - name: Build
         shell: bash
         run: autobuild build -A 64 -c "$AUTOBUILD_CONFIG" --no-configure
+
+      # [2026-09-29] WINDOWS SIGNING, after the build rather than inside it: a GitHub OIDC login
+      # expires 5 minutes after azure/login, far short of the ~50 minute build, so each signing
+      # stage gets a fresh login right before it. Why, and what each stage does:
+      # .github/scripts/wolfviewer-sign-windows.ps1.
+      - name: "Signing: .NET 8 runtime for the Artifact Signing dlib"
+        if: env.WV_SIGN == 'true'
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with: { dotnet-version: '8.0.x' }
+
+      - name: "Signing: fetch signtool and dlib, find the build"
+        if: env.WV_SIGN == 'true'
+        shell: pwsh
+        run: .github/scripts/wolfviewer-sign-windows.ps1 -Stage prepare
+
+      - name: "Signing: Azure login (binaries)"
+        if: env.WV_SIGN == 'true'
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          # The app's only role is Certificate Profile Signer on the signing account; it has no
+          # subscription-level access, and signing needs none.
+          allow-no-subscriptions: true
+
+      - name: "Signing: sign viewer executables"
+        if: env.WV_SIGN == 'true'
+        shell: pwsh
+        run: .github/scripts/wolfviewer-sign-windows.ps1 -Stage sign-binaries
+
+      - name: "Signing: rebuild installer from the signed files"
+        if: env.WV_SIGN == 'true'
+        shell: pwsh
+        run: .github/scripts/wolfviewer-sign-windows.ps1 -Stage repack
+
+      - name: "Signing: Azure login (installer)"
+        if: env.WV_SIGN == 'true'
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          # The app's only role is Certificate Profile Signer on the signing account; it has no
+          # subscription-level access, and signing needs none.
+          allow-no-subscriptions: true
+
+      - name: "Signing: sign installer"
+        if: env.WV_SIGN == 'true'
+        shell: pwsh
+        run: .github/scripts/wolfviewer-sign-windows.ps1 -Stage sign-installer
 
       - name: Cache stats (Linux/macOS)
         if: runner.os != 'Windows'

@@ -19,14 +19,13 @@
 #include "llfloaterreg.h"
 #include "llinventorymodel.h"
 #include "llnotificationsutil.h"
-#include "llparcel.h"
+#include "llparcel.h"            // RT_NONE for Return to Owner
 #include "llscrolllistctrl.h"
 #include "llselectmgr.h"
 #include "lltextbox.h"
 #include "lltracker.h"
 #include "llviewerobject.h"
 #include "llviewerobjectlist.h"
-#include "llviewerparcelmgr.h"
 #include "llviewerregion.h"
 #include "llviewerstats.h"
 #include "message.h"
@@ -44,6 +43,14 @@ namespace
     constexpr F32 RUNAWAY_FRACTION = 0.9f;
     constexpr F32 HEAVY_FRACTION = 0.5f;
     constexpr F32 BUSY_FRACTION = 0.1f;
+    // [WOLF THROTTLE 2026-09-30] OpenSimWolf holds back a script that runs nonstop to about a
+    // fifth of a core (YEngine XMRInstMain.cs HOT_SLICES / HOLD_MS: 60 ms run, 240 ms held -
+    // measured 19% on VWEC Sandbox), unless someone is sitting on it. Such an object reads
+    // as a flat 0.2 x its stuck scripts: at least HELD_MIN every interval, varying by no more
+    // than HELD_SPREAD, for HELD_INTERVALS in a row. Normal busy scripts rise and fall.
+    constexpr F32 HELD_MIN = 0.15f;
+    constexpr F32 HELD_SPREAD = 0.05f;
+    constexpr size_t HELD_INTERVALS = 3;
     // All scripts together using a whole core with no single culprit: the same load one runaway
     // script puts on the machine, spread over many objects.
     constexpr F32 SCRIPTS_TOTAL_FRACTION = 1.0f;
@@ -161,9 +168,7 @@ void WolfFloaterLagDetector::resetForRegion()
 {
     LLViewerRegion* region = gAgent.getRegion();
     mRegionHandle = region ? region->getHandle() : 0;
-    mRegionScope = gAgent.canManageEstate();
-    LLParcel* parcel = LLViewerParcelMgr::getInstance()->getAgentParcel();
-    mParcelLocalID = parcel ? parcel->getLocalID() : 0;
+    mCanManage = gAgent.canManageEstate();
     mScripts.clear();
     mColliders.clear();
     mScriptReplies = 0;
@@ -175,10 +180,12 @@ void WolfFloaterLagDetector::resetForRegion()
 void WolfFloaterLagDetector::draw()
 {
     LLViewerRegion* region = gAgent.getRegion();
-    if (region && region->getHandle() != mRegionHandle)
+    // Estate rights come with RegionHandshake, which can land after a teleport has already
+    // switched the region - so they are re-checked every frame, not only on opening.
+    if (region && (region->getHandle() != mRegionHandle || gAgent.canManageEstate() != mCanManage))
         resetForRegion();
 
-    if (region && (mFirstPoll || mPollTimer.getElapsedTimeF32() >= POLL_SECONDS))
+    if (region && mCanManage && (mFirstPoll || mPollTimer.getElapsedTimeF32() >= POLL_SECONDS))
     {
         mFirstPoll = false;
         mPollTimer.reset();
@@ -209,13 +216,10 @@ void WolfFloaterLagDetector::draw()
 
 void WolfFloaterLagDetector::sendRequests()
 {
-    // Estate managers ask about the whole region; anyone else about the parcel they stand on
-    // (RequestFlags bit 1, the Top Objects "this parcel" filter). The region decides what they
-    // actually get (EstateManagementModule.cs LandStatAllowed).
-    const U32 flags = REQUEST_MARKER | (mRegionScope ? 0u : 1u);
-    const S32 parcel = mRegionScope ? 0 : mParcelLocalID;
-    sendLandStatRequest(REPORT_SCRIPTS, flags, parcel);
-    sendLandStatRequest(REPORT_COLLIDERS, flags, parcel);
+    // Region owners and estate managers only (Paul 2026-09-30: "i only want region owners to
+    // have it") - always the whole region, so no parcel bit and no parcel ID.
+    sendLandStatRequest(REPORT_SCRIPTS, REQUEST_MARKER, 0);
+    sendLandStatRequest(REPORT_COLLIDERS, REQUEST_MARKER, 0);
 }
 
 // static
@@ -355,7 +359,6 @@ void WolfFloaterLagDetector::rebuild()
     const std::string region_name = region ? region->getName() : std::string();
     LLStringUtil::format_map_t base;
     base["[REGION]"] = region_name;
-    base["[SCOPE]"] = mRegionScope ? getString("scope_region") : getString("scope_parcel");
 
     // --- Scripts, per object -----------------------------------------------------------------
     std::vector<std::pair<LLUUID, const ScriptLoad*>> by_load;
@@ -385,6 +388,15 @@ void WolfFloaterLagDetector::rebuild()
         mRows.push_back(row);
     };
 
+    auto held_back = [this](const ScriptLoad& s)
+    {
+        if (s.mFractions.size() < HELD_INTERVALS)
+            return false;
+        const F32 lo = minFraction(s);
+        const F32 hi = *std::max_element(s.mFractions.begin(), s.mFractions.end());
+        return lo >= HELD_MIN && lo < RUNAWAY_FRACTION && hi - lo <= HELD_SPREAD;
+    };
+
     bool single_culprit = false;
     for (const auto& [id, s] : by_load)
     {
@@ -393,11 +405,17 @@ void WolfFloaterLagDetector::rebuild()
             add_object_row(ROW_RUNAWAY, id, *s, "runaway_title", "runaway_detail", averageFraction(*s));
             single_culprit = true;
         }
+        else if (held_back(*s))
+        {
+            add_object_row(ROW_RUNAWAY, id, *s, "held_title", "held_detail", averageFraction(*s));
+            single_culprit = true;
+        }
     }
     for (const auto& [id, s] : by_load)
     {
         const F32 avg = averageFraction(*s);
-        if (s->mFractions.size() >= 2 && avg >= HEAVY_FRACTION && minFraction(*s) < RUNAWAY_FRACTION)
+        if (s->mFractions.size() >= 2 && avg >= HEAVY_FRACTION && minFraction(*s) < RUNAWAY_FRACTION
+            && !held_back(*s))
         {
             add_object_row(ROW_HEAVY, id, *s, "heavy_title", "heavy_detail", avg);
             single_culprit = true;
@@ -461,7 +479,7 @@ void WolfFloaterLagDetector::rebuild()
         for (const auto& [id, s] : by_load)
         {
             const F32 avg = averageFraction(*s);
-            if (avg >= BUSY_FRACTION && avg < HEAVY_FRACTION)
+            if (avg >= BUSY_FRACTION && avg < HEAVY_FRACTION && !held_back(*s))
                 add_object_row(ROW_BUSY, id, *s, "busy_title", "busy_detail", avg);
         }
     }
@@ -502,6 +520,8 @@ void WolfFloaterLagDetector::rebuild()
     std::string verdict;
     if (!region)
         verdict = getString("verdict_no_region", args);
+    else if (!mCanManage)
+        verdict = getString("verdict_not_manager", args);
     else if (mScriptReplies < 2)
         verdict = getString("verdict_measuring", args);
     else if (problems > 0)

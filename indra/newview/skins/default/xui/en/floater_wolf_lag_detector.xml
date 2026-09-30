@@ -18,18 +18,17 @@
  single_instance="true"
  title="Lag Detector"
  width="620">
-    <floater.string name="scope_region">the whole region</floater.string>
-    <floater.string name="scope_parcel">the parcel you are standing on</floater.string>
     <floater.string name="unknown_parcel">(unknown parcel)</floater.string>
     <floater.string name="speed_line">Region speed [SPEED]% · simulator [SIMFPS] fps · physics [PHYSFPS] fps · scripts using [CORES] CPU cores</floater.string>
     <floater.string name="where_line">Owner: [OWNER] · Parcel: [PARCEL] · Position: [POS]</floater.string>
 
     <floater.string name="verdict_no_region">Not connected to a region.</floater.string>
-    <floater.string name="verdict_measuring">Measuring [REGION] (checking [SCOPE])… first results in about a minute.</floater.string>
-    <floater.string name="verdict_fine">No lag problems found. [REGION] is running at [SPEED]% speed (checking [SCOPE]).</floater.string>
+    <floater.string name="verdict_not_manager">Only the owner and estate managers of [REGION] can use the Lag Detector.</floater.string>
+    <floater.string name="verdict_measuring">Measuring [REGION]… first results in about a minute.</floater.string>
+    <floater.string name="verdict_fine">No lag problems found. [REGION] is running at [SPEED]% speed.</floater.string>
     <floater.string name="verdict_one_problem">1 problem is slowing [REGION] down. It is running at [SPEED]% speed.</floater.string>
     <floater.string name="verdict_problems">[COUNT] problems are slowing [REGION] down. It is running at [SPEED]% speed.</floater.string>
-    <floater.string name="verdict_slow_not_ours">[REGION] is running slowly ([SPEED]% speed), but nothing here that you can fix is to blame (checking [SCOPE]). The server itself may be busy.</floater.string>
+    <floater.string name="verdict_slow_not_ours">[REGION] is running slowly ([SPEED]% speed), but nothing here that you can fix is to blame. The server itself may be busy.</floater.string>
 
     <floater.string name="level_runaway">RUNAWAY</floater.string>
     <floater.string name="level_heavy">HEAVY</floater.string>
@@ -38,6 +37,8 @@
 
     <floater.string name="runaway_title">[OBJECT] is stuck in a loop ([PERCENT] of a CPU core)</floater.string>
     <floater.string name="runaway_detail">"[OBJECT]" has used [PERCENT] of one CPU core without a break for at least [MINUTES] minutes. A script that busy is almost certainly stuck in a loop: it does the same thing over and over and never stops. It slows everything else on the region down. Returning it to its owner stops it at once.</floater.string>
+    <floater.string name="held_title">[OBJECT] is running nonstop - held back by the region ([PERCENT] of a CPU core)</floater.string>
+    <floater.string name="held_detail">"[OBJECT]" has been running without a break for at least [MINUTES] minutes, so it is almost certainly stuck in a loop. The region holds scripts like this back to about a fifth of a CPU core each so they cannot lag everyone, but it is still wasting [PERCENT] of a core for nothing. Returning it to its owner stops it.</floater.string>
     <floater.string name="heavy_title">[OBJECT] has very busy scripts ([PERCENT] of a CPU core)</floater.string>
     <floater.string name="heavy_detail">"[OBJECT]" has used about [PERCENT] of one CPU core over the last [MINUTES] minutes. That is far more than a normal object needs, and it slows the region down. Ask the owner to check it, or return it.</floater.string>
     <floater.string name="scripts_total_title">Many busy scripts add up to [CORES] CPU cores</floater.string>

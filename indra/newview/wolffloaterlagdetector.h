@@ -51,9 +51,8 @@ class LLTextBox;
 //   physics struggling - physics FPS under the Lag Meter's warning level (LFSimFeatureHandler
 //                        simulatorFPSWarn): the Top Colliders list (sorted here - OpenSim's
 //                        BulletS returns 25 in no order, BSScene.cs GetTopColliders discards its sort).
-// Estate owner and managers get the whole region; anyone else gets the parcel they stand on
-// (RequestFlags bit 1), which OpenSimWolf allows when they can edit that parcel
-// (EstateManagementModule.cs LandStatAllowed) and otherwise answers with an empty report.
+// Region owners and estate managers only (Paul 2026-09-30: "i only want region owners to have
+// it"); anyone else is told so and nothing is sent.
 class WolfFloaterLagDetector : public LLFloater
 {
 public:
@@ -139,8 +138,7 @@ private:
     LLFrameTimer      mPollTimer;
     bool              mFirstPoll = true;
     U64               mRegionHandle = 0;
-    bool              mRegionScope = false;   // estate powers: the whole region
-    S32               mParcelLocalID = 0;     // otherwise the parcel stood on
+    bool              mCanManage = false;     // region owner / estate manager: the only users
     S32               mScriptReplies = 0;     // replies received since the window opened
 
     std::map<LLUUID, ScriptLoad> mScripts;

@@ -3378,4 +3378,6 @@ Your current position: [AVATAR_POS]
   <string name="OmnifilterReplacement">Omnifilter Replacement: [REPLACEMENT]</string>
   <string name="FSAvatarAlignToggleMini">Mini</string>
   <string name="FSAvatarAlignToggleFull">Full</string>
+  <!-- WolfViewer 2026-10-01: process_teleport_failed automatic retry -->
+  <string name="WolfTeleportRetrying">The destination region did not finish connecting. Trying the teleport once more...</string>
 </strings>

@@ -7846,6 +7846,25 @@ void process_teleport_failed(LLMessageSystem *msg, void**)
             args["REASON"] = message_id;
         }
     }
+    // <WolfViewer 2026-10-01> SAFETY NET. OpenSim's EntityTransferModule.Fail sends
+    // "Problems connecting to destination <region>, reason: Connection between viewer and destination
+    // region could not be established." when the destination gave up waiting for the departing
+    // region's agent update (ScenePresence.WaitForUpdateAgent) -- a timing failure on the servers,
+    // not a refusal, and the same teleport usually works at once (Paul 10-01, Welcome Area -> Wolf
+    // Territories Home: "if i go to sand box and then back ... it will work"). Retry it once,
+    // automatically, instead of showing the error; a second failure is shown as before.
+    {
+        static const std::string NO_CONNECTION("Connection between viewer and destination region could not be established");
+        if ((message_id.find(NO_CONNECTION) != std::string::npos || args["REASON"].asString().find(NO_CONNECTION) != std::string::npos)
+            && gAgent.restartFailedTeleportOnce())
+        {
+            LLSD tip;
+            tip["MESSAGE"] = LLTrans::getString("WolfTeleportRetrying");
+            LLNotificationsUtil::add("SystemMessageTip", tip);
+            return;
+        }
+    }
+    // </WolfViewer>
     LL_WARNS("Teleport") << "Displaying CouldNotTeleportReason string, REASON= " << args["REASON"] << LL_ENDL;
 
     // <FS:Ansariel> Stop typing after teleport (possible fix for FIRE-7273)

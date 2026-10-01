@@ -4942,6 +4942,25 @@ void LLAgent::restartFailedTeleportRequest()
     }
 }
 
+// <WolfViewer 2026-10-01> The automatic retry for a teleport the destination could not complete
+// (process_teleport_failed). Once per request: the request object is reused by a restart, so the
+// one we last restarted is remembered and a second failure of it goes to the user as before.
+bool LLAgent::restartFailedTeleportOnce()
+{
+    if (!hasRestartableFailedTeleportRequest())
+    {
+        return false;
+    }
+    if (mTeleportAutoRetried.lock() == mTeleportRequest)
+    {
+        return false;
+    }
+    mTeleportAutoRetried = mTeleportRequest;
+    LL_INFOS("Teleport") << "Automatically retrying a teleport the destination could not complete." << LL_ENDL;
+    restartFailedTeleportRequest();
+    return true;
+}
+
 void LLAgent::clearTeleportRequest()
 {
     if(LLVoiceClient::instanceExists())

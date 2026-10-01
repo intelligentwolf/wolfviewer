@@ -783,6 +783,9 @@ protected:
 public:
     bool            hasRestartableFailedTeleportRequest();
     void            restartFailedTeleportRequest();
+    // <WolfViewer 2026-10-01> restart a failed teleport automatically, at most once per request;
+    // false = not restartable, or this request was already retried (see process_teleport_failed)
+    bool            restartFailedTeleportOnce();
     void            clearTeleportRequest();
     void            setMaturityRatingChangeDuringTeleport(U8 pMaturityRatingChange);
     void            sheduleTeleportIM();
@@ -798,6 +801,7 @@ private:
 
     LLTeleportRequestPtr        mTeleportRequest;
     LLTeleportRequestPtr        mTeleportCanceled;
+    std::weak_ptr<LLTeleportRequest> mTeleportAutoRetried;   // <WolfViewer 2026-10-01/> the request restartFailedTeleportOnce() last restarted
     boost::signals2::connection mTeleportFinishedSlot;
     boost::signals2::connection mTeleportFailedSlot;
 

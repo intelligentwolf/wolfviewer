@@ -48,12 +48,14 @@ void WolfSurfCurl::release()
     mPoints = 0;
 }
 
-// Source: surf_curl.js breakDepth — waterV.glsl [SURF]: breakF = 1 once crestH / (0.78 (h + 0.8 H))
-// >= 1.15 with crestH capped at 1.15 H, i.e. h <= 0.48 H; the dissipation ramp
-// smoothstep(0.2, 0.6 + 0.5 H, h) still leaves 0.9 of the crest at 0.6 H.
+// Source: surf_curl.js breakDepth — waterV.glsl [SURF]: breakF = 1 once crestH / (0.78 h) >= 1.15
+// with crestH capped at 1.15 H, i.e. h <= H / 0.78 = 1.28 H, the McCowan breaking depth itself.
+// <WolfViewer 2026-10-01> Was 0.6 H, from the old limit 0.78 (h + 0.8 H) (full break at
+// h <= 0.48 H); with the limit on the real depth the break line moves out to 1.28 H, where the
+// dissipation ramp smoothstep(0.2, 0.6 + 0.5 H, h) leaves the whole crest for H >= 1 m.
 F32 WolfSurfCurl::breakDepth(F32 surf_h)
 {
-    return llclamp(0.6f * surf_h, 0.5f, 40.f);
+    return llclamp(surf_h / 0.78f, 0.5f, 40.f);
 }
 
 namespace
@@ -92,11 +94,17 @@ bool WolfSurfCurl::rebuild(F32 surf_h)
     const F32 hB = breakDepth(surf_h);
 
     // Field: f = depth - hB on the RES^2 grid (A channel = smoothed height).
+    // <WolfViewer 2026-10-01> the SURF depth — real or the reef slope, WolfWaterField::surfDepth,
+    // as waterV.glsl reads it — so the curls sit on the break line the water actually draws.
+    // Source: surf_curl.js _rebuild, same field.
+    const F32 cellX = sx / (RES - 1), cellY = sy / (RES - 1);
     std::vector<F32> f((size_t)RES * RES);
     for (S32 j = 0; j < RES; ++j)
         for (S32 i = 0; i < RES; ++i)
-            f[(size_t)j * RES + i] = (wl - data[((size_t)j * RES + i) * 4 + 3]) - hB;
-    const F32 cellX = sx / (RES - 1), cellY = sy / (RES - 1);
+        {
+            const F32 d = WolfWaterField::distanceAt(*fld, fld->mX0 + i * cellX, fld->mY0 + j * cellY);
+            f[(size_t)j * RES + i] = WolfWaterField::surfDepth(wl - data[((size_t)j * RES + i) * 4 + 3], d) - hB;
+        }
 
     // Marching squares: segments in region metres.
     std::vector<Seg> segs;

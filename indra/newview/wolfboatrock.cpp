@@ -455,9 +455,23 @@ WolfBoatRock::Verdict WolfBoatRock::classify(LLViewerObject* objectp) const
     const LLVector3 p = objectp->getPositionRegion();
     const F32 wh = regionp->getWaterHeight();
     // Hulls ride BELOW the waterline — band reaches 3m down.
+    // <WolfViewer 2026-10-01> ...or the HULL crosses the waterline. The band tests the ROOT
+    // prim's centre, and a tall ship's centre is far above the water: Paul's 64 x 14 x 17.8 m
+    // welcome ferry floats with its centre 6.5 m up (wolfferry build notes), so it was refused
+    // before its name was ever read and sat dead still while 30 m surf rolled past (Paul 10-01:
+    // "i want bigger boats to rock ... the boats should always respond to the waves"). A
+    // linkset whose vertical span (hullVerticalSpan: root + linked prims, rotated) has water
+    // above its bottom and air below its top is in the water whatever its root's height. The
+    // name / physics gates below still decide whether it is a boat.
+    // Source: terrain_manager.js _classifyFloater, same rule.
     if (p.mV[VZ] < wh - 3.0f || p.mV[VZ] > wh + 2.5f)
     {
-        return no("outside waterline band");
+        F32 zlo, zhi;
+        hullVerticalSpan(objectp, zlo, zhi);
+        if (!(zlo < wh && zhi > wh))
+        {
+            return no("outside waterline band");
+        }
     }
     v.mInBand = true;
     const LLSurface& land = regionp->getLand();
@@ -793,7 +807,8 @@ F32 WolfBoatRock::waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F3
     if (field && sea.mShoreOn && sea.mSurfH > 0.01f && field->mZoneTex)
     {
         const F32 surf_h = sea.mSurfH, surf_set = sea.mSurfSet, surf_len = sea.mSurfLen;
-        const F32 surf_zone = smoothstep01(0.62f, 0.95f, WolfWaterField::zoneAt(*field, rx, ry));   // surf cells only (waterV.glsl surfZone)
+        // surf cells only (waterV.glsl surfZone). <WolfViewer 2026-10-01/> from the surf WEIGHT, as the shader now reads it
+        const F32 surf_zone = smoothstep01(0.62f, 0.95f, 0.55f + 0.45f * WolfWaterField::surfWeightAt(*field, rx, ry));
         if (surf_zone > 0.001f)
         {
             const F32 dW = 80.f, dH = 80.f;   // <WolfViewer 2026-09-20/> waterV.glsl: 80 m either side, not 1/32 of the span
@@ -847,6 +862,7 @@ F32 WolfBoatRock::waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F3
                 const F32 h_in = llmax(field->mWaterLevel - dt4[3], 0.f);
                 h = h_in + (30.f - h_in) * outside;
             }
+            h = WolfWaterField::surfDepth(h, dist);   // <WolfViewer 2026-10-01/> real or reef depth, waterV.glsl same
             const F32 g9 = 9.81f;
             const F32 lambda = llmax(surf_len, 12.f * surf_h);
             // <WolfViewer 2026-09-21/> k0 deep-water, omega0 CONSTANT, k local by Guo (2002)
@@ -856,9 +872,9 @@ F32 WolfBoatRock::waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F3
             const F32 set_ph = 6.2831853f * (t / llmax(surf_set, 10.f)) - path * (0.22f / lambda);
             const F32 set_env = 0.30f + 0.70f * smoothstep01(0.15f, 1.f, 0.5f + 0.5f * sinf(set_ph));
             const F32 crest_var = 0.85f + 0.15f * sinf((rx * -dy + ry * dx) * (1.1f / lambda) + t * 0.1f);
-            const F32 ksh = llclamp(WolfWaterField::surfShoalGain(k0, k, h), 0.8f, 1.8f);
+            const F32 ksh = llclamp(WolfWaterField::surfShoalGain(k0, k, h), 1.f, 1.8f);   // <WolfViewer 2026-10-01/> floor 1, waterV.glsl same
             F32 crest_h = llmin(surf_h * surf_zone * set_env * ksh * crest_var, surf_h * 1.15f);
-            const F32 h_max = 0.78f * (h + 0.8f * surf_h);
+            const F32 h_max = 0.78f * h;   // <WolfViewer 2026-10-01/> McCowan on the surf depth (real or reef), waterV.glsl same
             const F32 break_f = smoothstep01(0.7f, 1.15f, crest_h / llmax(h_max, 0.01f));
             crest_h = llmin(crest_h, h_max);
             crest_h *= smoothstep01(0.2f, 0.6f + 0.5f * surf_h, h);
@@ -936,6 +952,42 @@ WolfBoatRock::Sample WolfBoatRock::measureHull(const Rocker& r, const LLViewerOb
 // <WolfViewer 2026-09-27> The linkset's footprint in the root prim's own frame: the root's
 // box and every linked prim's box corners (a child's position and rotation are relative to
 // the root, LLXform). Seated avatars are children too and are not hull.
+// <WolfViewer 2026-10-01> The linkset's vertical span in REGION metres: the eight corners of
+// the root prim and of every linked prim (avatars excluded, as hullExtents), through the
+// child's own rotation and offset into the root's frame, then the root's rotation and region
+// position. Source: terrain_manager.js _hullVerticalSpan(), same corners.
+void WolfBoatRock::hullVerticalSpan(const LLViewerObject* root, F32& zlo, F32& zhi)
+{
+    const LLVector3 rp = root->getPositionRegion();
+    const LLQuaternion rr = root->getRotation();
+    zlo = rp.mV[VZ];
+    zhi = rp.mV[VZ];
+    auto add_box = [&](const LLVector3& scale, const LLQuaternion& rot, const LLVector3& off)
+    {
+        const LLVector3 half = scale * 0.5f;
+        for (S32 c = 0; c < 8; ++c)
+        {
+            const LLVector3 corner((c & 1) ? half.mV[VX] : -half.mV[VX],
+                                   (c & 2) ? half.mV[VY] : -half.mV[VY],
+                                   (c & 4) ? half.mV[VZ] : -half.mV[VZ]);
+            const F32 z = ((corner * rot + off) * rr).mV[VZ] + rp.mV[VZ];
+            zlo = llmin(zlo, z);
+            zhi = llmax(zhi, z);
+        }
+    };
+    add_box(root->getScale(), LLQuaternion(), LLVector3::zero);
+    LLViewerObject::const_child_list_t& kids = root->getChildren();
+    for (LLViewerObject::child_list_t::const_iterator ki = kids.begin(); ki != kids.end(); ++ki)
+    {
+        const LLViewerObject* kid = *ki;
+        if (!kid || kid->isAvatar())
+        {
+            continue;
+        }
+        add_box(kid->getScale(), kid->getRotation(), kid->getPosition());
+    }
+}
+
 void WolfBoatRock::hullExtents(const LLViewerObject* root, LLVector2& lo, LLVector2& hi)
 {
     const LLVector3& rs = root->getScale();

@@ -190,7 +190,7 @@ namespace
 }
 void LLVOWater::wolfFollowCamera()
 {
-    if (mMesh || !LLPipeline::sRenderTransparentWater || mDrawable.isNull()) return;
+    if (mMesh || mDrawable.isNull()) return;   // <WolfViewer 2026-10-01/> opaque water swells too (see updateGeometry)
     const F64 now = LLFrameTimer::getElapsedSeconds();
     if (mWolfLatticeValid && now - mWolfLatticeBuiltAt < WOLF_REANCHOR_SECS) return;
     const LLVector3 cam = LLViewerCamera::getInstance()->getOrigin();
@@ -363,15 +363,14 @@ bool LLVOWater::updateGeometry(LLDrawable *drawable)
     // <WolfViewer 2026-09-06> per-axis lattice line offsets for the graded void planes
     std::vector<F32> xs, ys;
 
-    if (!LLPipeline::sRenderTransparentWater)
-    {
-        // Opaque legacy water: one quad, as stock. renderOpaqueLegacyWater() does not run
-        // the wave shader at all, so tessellating it would buy nothing.
-        size_x = 1;
-        size_y = 1;
-        mWolfLatticeGrade.set(0.f, 0.f, 0.f, 0.f);   // <WolfViewer 2026-09-21/>
-    }
-    else
+    // <WolfViewer 2026-10-01> Opaque water (Transparent Water off) is tessellated as well.
+    // It used to get one stock quad on the premise that renderOpaqueLegacyWater() skipped
+    // the wave shader -- that function is gone: LLDrawPoolWater::renderPostDeferred draws
+    // BOTH modes with gWaterProgram, opaque merely without TRANSPARENT_WATER (waterF.glsl
+    // then has no refraction depth and switches the shore foam off). One quad left that
+    // shader no vertices to displace, so every Low..MidHigh preset (featuretable*.txt set
+    // RenderTransparentWater 0 there) got a flat sea with natural water on -- Jimmy Olsen's
+    // Linux "no waves" (Discord 10-01).
     {
         // <WolfViewer 2026-09-10> EVERY wave-bearing plane — region and void — is graded about
         // the CAMERA (see wolfFollowCamera above): 2 m beside the eye, 4 % of the distance

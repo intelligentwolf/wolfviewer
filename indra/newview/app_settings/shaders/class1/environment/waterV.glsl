@@ -447,6 +447,9 @@ void main()
     float zoneEnergy = 0.55;
     float zoneScale = 1.0;
     float shoreGate = 1.0;
+    // <WolfViewer 2026-10-01> the surf weight (zone field G: the surf cells grown and blurred by a
+    // quarter of the surf wavelength, wolfwaterfield.cpp bake). Water.js surfW same.
+    float surfW = 0.0;
     if (zoneReady > 0.5)
     {
         vec2 zuv = (regionXY - zoneOrigin) / zoneSize;
@@ -454,7 +457,9 @@ void main()
         {
             vec2 zf = smoothstep(vec2(0.0), vec2(0.02), zuv)
                     * (vec2(1.0) - smoothstep(vec2(0.98), vec2(1.0), zuv));
-            zoneEnergy = mix(0.55, WOLF_TEX_WOLF_ZONE_FIELD( zuv).r, zf.x * zf.y);
+            vec4 ztex = WOLF_TEX_WOLF_ZONE_FIELD( zuv);
+            zoneEnergy = mix(0.55, ztex.r, zf.x * zf.y);
+            surfW = ztex.g * zf.x * zf.y;
             float calmFloor = clamp(calmRipple / max(waveAmplitude, 0.02), 0.0, 1.0);
             float small = clamp(smallScale, calmFloor, 1.0);
             if (zoneEnergy < 0.15)      zoneScale = calmFloor * max(zoneEnergy, 0.0) / 0.15;
@@ -658,7 +663,11 @@ void main()
     if (surfHeight > 0.01 && zoneReady > 0.5 && shoreWavesEnabled > 0.5 && boundedWaterDepth <= 0.0 && exposureReady > 0.5)
     {
         // Surf ONLY where a designer painted it (Paul 09-07: "surf is a special thing"). Water.js same.
-        float surfZone = smoothstep(0.62, 0.95, zoneEnergy);
+        // <WolfViewer 2026-10-01> From the surf WEIGHT, not the 3x3 energy: 0.55 + 0.45 w is
+        // the energy a surf/open mix of that ratio has. w is 1 on every painted cell and fades
+        // over half a wavelength outside the paint (Paul 10-01: 20 m surf on a 48 m strip was
+        // jagged walls; "if i specify 30m waves they should start at 30m").
+        float surfZone = smoothstep(0.62, 0.95, 0.55 + 0.45 * surfW);
         vec2 euv = (regionXY - exposureOrigin) / exposureSize;
         if (surfZone > 0.01 && euv.x >= 0.0 && euv.x <= 1.0 && euv.y >= 0.0 && euv.y <= 1.0)
         {
@@ -728,6 +737,14 @@ void main()
                 vec4 dt = WOLF_TEX_WOLF_DEPTH_FIELD( clamp(sduv, 0.0, 1.0));
                 h = mix(max(depthWaterLevel - dt.a, 0.0), 30.0, outside);
             }
+            // <WolfViewer 2026-10-01> The surf's depth: the real depth, or a 1-in-4 reef slope
+            // up to the shoreline, whichever is deeper (WolfWaterField::SURF_REEF_SLOPE /
+            // surfDepth — the path bake integrates the same depth). Paul 10-01: "if i specify
+            // 30m waves they should start at 30m": the region's shallow sea broke a 30 m wave
+            // long before the beach; on this slope it keeps its height to 5.1 H out, plunges,
+            // and runs in as a bore that shrinks to nothing at the waterline. Water.js same.
+            const float SURF_REEF_SLOPE = 0.25;
+            h = max(h, SURF_REEF_SLOPE * dist);
             // <WolfViewer 2026-09-21> k0 is the DEEP-water wavenumber and omega0 its
             // deep-water frequency. omega0 is the same number everywhere in the field: in a
             // shoaling wave train the FREQUENCY is what is conserved, the wavelength is what
@@ -744,10 +761,20 @@ void main()
             float setPh = 6.2831853 * (time * surfSpeed / max(surfSetInterval, 10.0)) - path * (0.22 / lambda);
             float setEnv = 0.30 + 0.70 * smoothstep(0.15, 1.0, 0.5 + 0.5 * sin(setPh));
             float crestVar = 0.85 + 0.15 * sin(dot(regionXY, across) * (1.1 / lambda) + time * 0.1);
-            float ksh = clamp(wolfSurfShoal(k0, k, h), 0.8, 1.8);
+            // <WolfViewer 2026-10-01> Floor 1 (was 0.8). Green's law dips to 0.915 at intermediate
+            // depth (k h ~ 1.2) and a 360 m wave is intermediate in 100 m of water, so a 30 m surf
+            // arrived at 27-28 m. Paul 10-01: "if i specify 30m waves they should start at 30m":
+            // the set height is the least a wave carries before it breaks; it still grows as it
+            // stands up at the break. Water.js, wolfsurfcurlV.glsl, wolfboatrock.cpp same.
+            float ksh = clamp(wolfSurfShoal(k0, k, h), 1.0, 1.8);
             float crestH = min(surfHeight * surfZone * setEnv * ksh * crestVar, surfHeight * 1.15);
-            float hEff = h + 0.8 * surfHeight;
-            float Hmax = 0.78 * hEff;
+            // <WolfViewer 2026-10-01> McCowan on the surf depth h above (real or reef). It was
+            // 0.78 (h + 0.8 surfHeight): 16 m of pretend depth EVERYWHERE at a 20 m surf, right up
+            // to the waterline, so 7-16 m crests stood over the bank (Paul 10-01, Wolf
+            // Territories Home). The reef depth is 0 at the shore, so the bore runs out there.
+            // A crest higher than 0.78 h has broken; it cannot stand. Water.js, wolfsurfcurlV.glsl, wolfboatrock.cpp,
+            // surf_curl.js and terrain_manager.js _surfSampleCPU same.
+            float Hmax = 0.78 * h;
             float breakF = smoothstep(0.7, 1.15, crestH / max(Hmax, 0.01));
             crestH = min(crestH, Hmax);
             crestH *= smoothstep(0.2, 0.6 + 0.5 * surfHeight, h);
@@ -772,7 +799,20 @@ void main()
                 // NOT mirrored on the CPU (wolfboatrock.cpp): a boat rides the real wave, and
                 // this is a drawing limit, not a change to the sea.
                 float vstep = wolfLatticeStep(position.xy);
-                float lamEff = 6.2831853 / max(k, 0.0001);
+                // <WolfViewer 2026-10-01> ...and the wavenumber the DRAWN phase actually has: k0 times
+                // the path's slope across one exposure texel either side along the travel direction.
+                // Where the baked path bends faster than the local depth says (a shore texel, a
+                // channel narrower than a texel -- Paul 10-01 "spikey waves near the shore"), the
+                // crest is band-limited by what is drawn, not by what the depth predicts. Water.js same.
+                float kDraw = k;
+                if (havePath)
+                {
+                    vec2 du = dir / 255.0;   // one texel of the 256-texel exposure bake (wolfwaterfield.h ERES)
+                    float aP = WOLF_TEX_WOLF_EXPOSURE_FIELD( clamp(euv + du, 0.0, 1.0)).a;
+                    float aM = WOLF_TEX_WOLF_EXPOSURE_FIELD( clamp(euv - du, 0.0, 1.0)).a;
+                    kDraw = max(k, k0 * abs(aP - aM) / max(2.0 * length(du * exposureSize), 0.01));
+                }
+                float lamEff = 6.2831853 / max(kDraw, 0.0001);
                 float vpw = (vstep > 0.0) ? lamEff / vstep : 64.0;
                 float res = smoothstep(3.0, 6.0, vpw);
                 float breakG = breakF * res;    // the break as GEOMETRY
@@ -793,6 +833,26 @@ void main()
                 float lip = 0.55 * breakG * tip;   // the crest tip thrown past fold-over: the barrel
                 float Q = mix(0.35, 0.9, breakG);
                 float horiz = crestG * (0.5 * Q * cs * upkG + 0.35 * breakG * upkG * upkG + lip);
+                // <WolfViewer 2026-10-01> FOLD GUARD. A displaced grid cannot draw an overhang:
+                // once the forward push changes faster than the wave itself, neighbouring vertices
+                // pass each other and the surface folds into jagged triangles (the Gerstner loop
+                // condition, Q k A > 1 -- Tessendorf, "Simulating Ocean Water"). Measured from this
+                // profile: d(horiz)/d(phase) peaks at crestG * (0.19 / 0.37 / 0.67 / 1.07 / 1.57) for
+                // breakF 0 / .25 / .5 / .75 / 1, fitted below. A 30 m surf on a straight coast
+                // reached k * crest * D = 0.96 just after the break, and where crests converge in a
+                // cove (Paul 10-01: "choppiness near the shore ... two land masses next to each
+                // other") over 1. So: hold that product at <= 0.7, with k the larger of the local
+                // wavenumber and the one the baked path actually shows over the 160 m baseline
+                // (convergence), and fade the push where the path is incoherent -- two trains
+                // meeting behind a headland, where the 160 m difference cancels below the local k.
+                // The height and profile are untouched; the plunge is the curl ribbons' job.
+                // Water.js same.
+                {
+                    float foldD = 0.2 + 0.45 * breakF + 0.92 * breakF * breakF;
+                    float kPh = max(havePath ? max(k, k0 * pl / 160.0) : k, kDraw);   // 10-01: and the drawn phase (kDraw, above)
+                    float coh = havePath ? clamp(pl / max(160.0 * k / k0, 1e-3), 0.0, 1.0) : 1.0;
+                    horiz *= min(1.0, 0.7 / max(kPh * crestG * foldD, 1e-4)) * smoothstep(0.5, 0.9, coh);
+                }
                 float lift = crestG * (prof - 0.35 * lip);
                 wave_pos += surf_t * (dir.x * horiz) + surf_b * (dir.y * horiz) + surf_n * lift;
                 wave_h += crestG * prof;

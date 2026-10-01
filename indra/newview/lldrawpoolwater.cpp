@@ -229,7 +229,8 @@ void LLDrawPoolWater::renderPostDeferred(S32 pass)
             mSeaState = WolfSeaState::fromIndex(WolfSeaState::indexForAmplitude(manual_height), pwater->getWave1Dir());
             mSeaState.mAmplitude = llclamp((F32)manual_height, 0.f, 5.f);
         }
-        if (!gCubeSnapshot && !gPipeline.mHeroProbeManager.isMirrorPass() && LLPipeline::sRenderTransparentWater)
+        // <WolfViewer 2026-10-01/> not gated on Transparent Water: opaque water swells too (llvowater.cpp)
+        if (!gCubeSnapshot && !gPipeline.mHeroProbeManager.isMirrorPass())
         {
             if (fft_on)
             {
@@ -379,7 +380,7 @@ void LLDrawPoolWater::renderPostDeferred(S32 pass)
             {
                 // The saved parameters, or the ones being previewed in About Land > Waves.
                 const LLSD& p = WolfWaveZones::instance().params();
-                surf_h = llclamp(p.has("surfHeight") ? (F32)p["surfHeight"].asReal() : 3.f, 0.2f, 20.f);   // Paul 09-07: up to 20 m
+                surf_h = llclamp(p.has("surfHeight") ? (F32)p["surfHeight"].asReal() : 3.f, 0.2f, 30.f);   // Paul 09-07: up to 20 m; 10-01: 30 m
                 surf_set = llclamp(p.has("setInterval") ? (F32)p["setInterval"].asReal() : 90.f, 30.f, 600.f);
                 surf_len = llclamp(p.has("surfLength") ? (F32)p["surfLength"].asReal() : 36.f, 12.f, 400.f);
                 calm = llclamp(p.has("calmRipple") ? (F32)p["calmRipple"].asReal() : 0.03f, 0.f, 0.1f);
@@ -477,7 +478,7 @@ void LLDrawPoolWater::renderPostDeferred(S32 pass)
     {
         static LLCachedControl<bool> curl_on(gSavedSettings, "WolfViewerWaterSurfCurl", false);   // <WolfViewer 2026-09-20/> off: Paul "drop the ribbon"
         if (curl_on && !underwater && !gCubeSnapshot && !gPipeline.mHeroProbeManager.isMirrorPass()
-            && LLPipeline::sRenderTransparentWater && mSurfHeight > 0.01f)
+            && mSurfHeight > 0.01f)
         {
             WolfSurfCurl::instance().render(mSurfHeight, mSurfSetInterval, mSurfLength, phase_time,
                                             light_dir, light_diffuse, pwater, mWaterNormp[0]);

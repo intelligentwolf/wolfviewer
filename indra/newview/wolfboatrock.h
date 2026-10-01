@@ -160,6 +160,8 @@ private:
     /** Bob and surface slope for a hull, from waveHeight() at its centre and four ends. */
     Sample measureHull(const Rocker& r, const LLViewerObject* objectp, const Sea& sea, F32 t) const;
     static void hullExtents(const LLViewerObject* root, LLVector2& lo, LLVector2& hi);
+    /** <WolfViewer 2026-10-01/> The linkset's lowest and highest point, region metres (the waterline gate). */
+    static void hullVerticalSpan(const LLViewerObject* root, F32& zlo, F32& zhi);
 
     std::map<const LLViewerObject*, Rocker> mRockers;
     F64 mNextSweep = 0.0;

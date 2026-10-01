@@ -72,6 +72,7 @@ void WolfWaterField::releaseField(Field& f)
     f.mReady = false;
     f.mDepth.clear();
     f.mExpo.clear();
+    f.mSurfW.clear();   // <WolfViewer 2026-10-01/>
 }
 
 // Source: terrain_manager.js _swellExposureAt(x, y):
@@ -117,6 +118,35 @@ F32 WolfWaterField::zoneAt(const Field& f, F32 rx, F32 ry)
     const S32 i = llclamp((S32)(u * f.mZoneW), 0, f.mZoneW - 1);
     const S32 j = llclamp((S32)(v * f.mZoneH), 0, f.mZoneH - 1);
     return f.mZone[(size_t)j * f.mZoneW + i];
+}
+
+// <WolfViewer 2026-10-01> Source: wave_zones.js surfWeightAt() — zoneAt()'s texel rule on G.
+F32 WolfWaterField::surfWeightAt(const Field& f, F32 rx, F32 ry)
+{
+    if (!f.mReady || f.mZoneW <= 0 || f.mSurfW.size() != (size_t)f.mZoneW * f.mZoneH)
+    {
+        return 0.f;
+    }
+    const F32 u = (rx - f.mZoneX0) / f.mZoneSX;
+    const F32 v = (ry - f.mZoneY0) / f.mZoneSY;
+    if (!std::isfinite(u) || !std::isfinite(v) || u < 0.f || u > 1.f || v < 0.f || v > 1.f)
+    {
+        return 0.f;
+    }
+    const S32 i = llclamp((S32)(u * f.mZoneW), 0, f.mZoneW - 1);
+    const S32 j = llclamp((S32)(v * f.mZoneH), 0, f.mZoneH - 1);
+    return f.mSurfW[(size_t)j * f.mZoneW + i];
+}
+
+// <WolfViewer 2026-10-01> Source: wave_zones.js surfBlurRadius() — see wolfwaterfield.h.
+S32 WolfWaterField::surfBlurRadius(F32 k0, F32 texel_m)
+{
+    if (k0 <= 0.f || texel_m <= 0.f)
+    {
+        return 1;
+    }
+    const F32 quarter = 0.25f * F_TWO_PI / k0;
+    return llclamp((S32)ll_round(quarter / texel_m), 1, SURF_BLUR_MAX_TEXELS);
 }
 
 F32 WolfWaterField::distanceAt(const Field& f, F32 rx, F32 ry)
@@ -167,7 +197,7 @@ F32 WolfWaterField::surfK0()
     const WolfWaveZones::Region* wr = WolfWaveZones::instance().current();
     if (!wr) return 0.f;
     const LLSD& p = WolfWaveZones::instance().params();
-    const F32 h = llclamp(p.has("surfHeight") ? (F32)p["surfHeight"].asReal() : 3.f, 0.2f, 20.f);
+    const F32 h = llclamp(p.has("surfHeight") ? (F32)p["surfHeight"].asReal() : 3.f, 0.2f, 30.f);   // <WolfViewer 2026-10-01/> up to 30 m (Paul)
     const F32 len = llclamp(p.has("surfLength") ? (F32)p["surfLength"].asReal() : 36.f, 12.f, 400.f);
     if (h <= 0.01f) return 0.f;
     return 6.2831853f / llmax(len, 12.f * h);
@@ -756,7 +786,7 @@ void WolfWaterField::bake(LLViewerRegion* regionp, Field& f)
     {
         for (S32 k = 0; k < E * E; ++k)
         {
-            kr[k] = surfWavenumber(k0, mEDepth[k]) / k0;
+            kr[k] = surfWavenumber(k0, surfDepth(mEDepth[k], mDist[k])) / k0;   // <WolfViewer 2026-10-01/> real or reef depth
             if (mOpen[k] <= 0.f) mPath[k] = 0.f;   // seeded on the same open-sea texels as mOpen
         }
         // Weight for a step INTO texel c from texel n: the mean of the two texels' k/k0 times the
@@ -799,6 +829,52 @@ void WolfWaterField::bake(LLViewerRegion* regionp, Field& f)
     {
         mPath.assign((size_t)E * E, 0.f);
     }
+    // <WolfViewer 2026-10-01> SHORE EXTRAPOLATION. The relaxation runs through LAND texels too,
+    // where the surf depth is ~0 and k/k0 is ~50 (Guo at h = 0.02 m), so one 24 m land texel
+    // (a 2048 m window's exposure span is 6144 m over 255 texels) adds ~1,270 m of path. The
+    // shader reads the path BILINEARLY, so every water vertex within a texel of the shore
+    // blended toward that jump: the phase k0 * path climbed ~23 rad across one texel, 3-4 crests
+    // in 24 m, drawn as a row of spikes -- worst in a channel one or two texels wide, which is
+    // nearly all shore (Paul 10-01, Wolf Territories Home: "spikey waves near the shore").
+    // Land texels next to water (8-connected, two rings) take the LOWEST path of their water /
+    // already-filled neighbours, so a bilinear read across the waterline stays continuous.
+    // Water texels are untouched. Source: terrain_manager.js _bakeSwellExposure, same passes.
+    if (k0 > 0.f)
+    {
+        std::vector<F32> filled(mPath);
+        std::vector<U8> known((size_t)E * E, 0);
+        for (S32 k = 0; k < E * E; ++k) known[k] = mDist[k] > 0.f ? 1 : 0;
+        for (S32 ring = 0; ring < 2; ++ring)
+        {
+            std::vector<U8> next(known);
+            for (S32 j = 0; j < E; ++j)
+            {
+                for (S32 i = 0; i < E; ++i)
+                {
+                    const S32 c = j * E + i;
+                    if (known[c]) continue;
+                    F32 best = BIG;
+                    for (S32 dj = -1; dj <= 1; ++dj)
+                    {
+                        const S32 jj = j + dj; if (jj < 0 || jj >= E) continue;
+                        for (S32 di = -1; di <= 1; ++di)
+                        {
+                            const S32 ii = i + di; if (ii < 0 || ii >= E) continue;
+                            const S32 n = jj * E + ii;
+                            if (known[n] && filled[n] < best) best = filled[n];
+                        }
+                    }
+                    if (best < BIG)
+                    {
+                        filled[c] = best;
+                        next[c] = 1;
+                    }
+                }
+            }
+            known.swap(next);
+        }
+        mPath.swap(filled);
+    }
     // [SURF 2026-09-07] R = exposure (every existing reader unchanged), G = the chamfer
     // DISTANCE TO LAND in metres (capped at 4000), B = distance from the open sea.
     // <WolfViewer 2026-09-21> A = the OPTICAL path from the open sea (was a constant 1).
@@ -825,8 +901,71 @@ void WolfWaterField::bake(LLViewerRegion* regionp, Field& f)
         const F32 texel = (F32)WolfWaveZones::texelM(esx);
         const S32 zw = llmax(1, (S32)ll_round(esx / texel));
         const S32 zh = llmax(1, (S32)ll_round(esy / texel));
-        WolfWaveZones::instance().fill(regionp, ex0, ey0, esx, esy, zw, zh, mZoneData);
-        upload(f.mZoneTex, zw, zh, GL_R32F, GL_RED, mZoneData.data());
+        WolfWaveZones::instance().fill(regionp, ex0, ey0, esx, esy, zw, zh, mZoneData, &mSurfMask);
+        // <WolfViewer 2026-10-01> THE SURF WEIGHT (G). Paul 10-01, Wolf Territories Home: a
+        // 20 m surf (wavelength 12 x 20 = 240 m) painted as a 2-3 cell strip stood up as jagged
+        // white walls. The surf height followed the painted cells through the energy's 3x3
+        // (48 m) blur, so at every painted edge a crest of 8-16 m appeared or vanished within
+        // ~10 m. A wave cannot change height along its crest faster than its own scale allows.
+        // Paul then: "if i specify 30m waves they should start at 30m" — so a PAINTED cell is
+        // always full height and the ramp lies OUTSIDE the paint: the surf cells are grown by a
+        // quarter wavelength (a max filter), then box-blurred by the same radius. Every painted
+        // texel's blur window lies inside the grown area, so it stays exactly 1; the weight
+        // falls to 0 over the next half wavelength (120 m for a 240 m wave, 32 m for the
+        // default 36 m). Both passes separable; the blur averages in-bounds taps only, the
+        // energy 3x3's edge rule (wolfwavezones.cpp fill).
+        // Source: wave_zones.js bake() surf weight, same passes.
+        {
+            const S32 rad = surfBlurRadius(k0, texel);
+            const size_t n = (size_t)zw * zh;
+            mSurfW.assign(n, 0.f);
+            mSurfTmp.assign(n, 0.f);
+            mSurfGrown.assign(n, 0.f);
+            for (S32 j = 0; j < zh; ++j)
+            {
+                for (S32 i = 0; i < zw; ++i)
+                {
+                    F32 m = 0.f;
+                    for (S32 ii = llmax(0, i - rad); ii <= llmin(zw - 1, i + rad); ++ii) m = llmax(m, mSurfMask[(size_t)j * zw + ii]);
+                    mSurfTmp[(size_t)j * zw + i] = m;
+                }
+            }
+            for (S32 j = 0; j < zh; ++j)
+            {
+                for (S32 i = 0; i < zw; ++i)
+                {
+                    F32 m = 0.f;
+                    for (S32 jj = llmax(0, j - rad); jj <= llmin(zh - 1, j + rad); ++jj) m = llmax(m, mSurfTmp[(size_t)jj * zw + i]);
+                    mSurfGrown[(size_t)j * zw + i] = m;
+                }
+            }
+            for (S32 j = 0; j < zh; ++j)
+            {
+                for (S32 i = 0; i < zw; ++i)
+                {
+                    F32 acc = 0.f; S32 c = 0;
+                    for (S32 ii = llmax(0, i - rad); ii <= llmin(zw - 1, i + rad); ++ii) { acc += mSurfGrown[(size_t)j * zw + ii]; ++c; }
+                    mSurfTmp[(size_t)j * zw + i] = acc / (F32)c;
+                }
+            }
+            for (S32 j = 0; j < zh; ++j)
+            {
+                for (S32 i = 0; i < zw; ++i)
+                {
+                    F32 acc = 0.f; S32 c = 0;
+                    for (S32 jj = llmax(0, j - rad); jj <= llmin(zh - 1, j + rad); ++jj) { acc += mSurfTmp[(size_t)jj * zw + i]; ++c; }
+                    mSurfW[(size_t)j * zw + i] = acc / (F32)c;
+                }
+            }
+            mZoneRG.resize(n * 2);
+            for (size_t k = 0; k < n; ++k)
+            {
+                mZoneRG[k * 2] = mZoneData[k];
+                mZoneRG[k * 2 + 1] = mSurfW[k];
+            }
+        }
+        upload(f.mZoneTex, zw, zh, GL_RG32F, GL_RG, mZoneRG.data());
+        f.mSurfW = mSurfW;
         f.mZoneW = zw;
         f.mZoneH = zh;
         f.mZoneX0 = ex0;

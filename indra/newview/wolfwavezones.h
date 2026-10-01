@@ -184,8 +184,12 @@ public:
      * Fill the zone-energy span of a region's field (WolfWaterField::bake uploads it): w x h
      * texels over region-relative [x0, x0+sx) x [y0, y0+sy), from every fetched region that
      * covers a texel; space no region covers is open water (0.55).
+     * <WolfViewer 2026-10-01> surf_mask, when given, receives 1 for every SURF texel (painted
+     * surf, or the void past a surf edge cell) and 0 elsewhere, taken BEFORE the 3x3 blur —
+     * WolfWaterField::bake grows and blurs it by a quarter of the surf wavelength for the surf weight.
      */
-    void fill(LLViewerRegion* regionp, F32 x0, F32 y0, F32 sx, F32 sy, S32 w, S32 h, std::vector<F32>& out) const;
+    void fill(LLViewerRegion* regionp, F32 x0, F32 y0, F32 sx, F32 sy, S32 w, S32 h, std::vector<F32>& out,
+              std::vector<F32>* surf_mask = nullptr) const;
     /** Zone energy for the CURRENT region at region-relative (rx, ry), for the boat rocker. */
     F32 energyAt(F32 rx, F32 ry) const;
     /** The default "open" energy, for space no layout covers. */

@@ -64,9 +64,9 @@ void main()
     float setEnv = 0.30 + 0.70 * smoothstep(0.15, 1.0, 0.5 + 0.5 * sin(setPh));
     vec2 across = vec2(-dir.y, dir.x);
     float crestVar = 0.85 + 0.15 * sin(dot(base, across) * (1.1 / lambda) + time * 0.1);
-    float ksh = clamp(sqrt(0.5 * (k / max(k0, 1e-6)) / max(nGrp, 1e-4)), 0.8, 1.8);
+    float ksh = clamp(sqrt(0.5 * (k / max(k0, 1e-6)) / max(nGrp, 1e-4)), 1.0, 1.8);   // <WolfViewer 2026-10-01/> floor 1, waterV.glsl same
     float crestH = min(surfHeight * setEnv * ksh * crestVar, surfHeight * 1.15);
-    float Hmax = 0.78 * (h + 0.8 * surfHeight);
+    float Hmax = 0.78 * h;   // <WolfViewer 2026-10-01/> McCowan on the real depth, waterV.glsl same
     crestH = min(crestH, Hmax);
     crestH *= smoothstep(0.2, 0.6 + 0.5 * surfHeight, h);
 

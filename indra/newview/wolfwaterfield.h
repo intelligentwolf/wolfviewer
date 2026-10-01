@@ -79,6 +79,9 @@ public:
         // [WAVES 2026-09-07] The painted wave zones (wolfwavezones.cpp fill) over the SAME
         // span as the exposure bake, one texel per 16 m cell: surf 1, open 0.55, calm 0.15,
         // off 0. Sampled by waterV.glsl as wolfZoneField; the CPU copy feeds zoneAt().
+        // <WolfViewer 2026-10-01> The texture is RG: R the energy above, G the SURF WEIGHT
+        // (bake: the surf cells grown, then box-blurred, by a quarter of the surf wavelength), which is
+        // what scales the surf train's height. CPU copy mSurfW, read by surfWeightAt().
         U32 mZoneTex = 0;
         S32 mZoneW = 0;
         S32 mZoneH = 0;
@@ -87,6 +90,7 @@ public:
         F32 mZoneSX = 768.f;
         F32 mZoneSY = 768.f;
         std::vector<F32> mZone;
+        std::vector<F32> mSurfW;   // <WolfViewer 2026-10-01/> G of mZoneTex, same layout as mZone
     };
 
     static constexpr S32 RES = 256;
@@ -97,6 +101,25 @@ public:
     // shallow-water correction is under 0.1 % — anything past ~20 m is deep and the exact
     // value cannot matter.
     static constexpr F32 DEEP_REF_M = 30.f;
+    /**
+     * <WolfViewer 2026-10-01> The seabed slope the SURF TRAIN feels where the real water is
+     * shallower: 1 in 4 up to the shoreline. Paul 10-01: "if i specify 30m waves they should
+     * start at 30m" — a 30 m wave needs ~38 m of water to stand (breaker index 0.78), and a
+     * region's sea is a few metres deep, so on the real depth a big surf was flattened long
+     * before the beach. On this slope it keeps its full height to h = H / 0.78, i.e. 5.1 H from
+     * the shore (154 m for 30 m, 15 m for 3 m), then breaks and runs in as a bore that shrinks
+     * to nothing at the waterline. Why 1 in 4: breakers PLUNGE (a barrel) for an Iribarren
+     * number 0.5 < xi < 3.3, xi = tan(slope) / sqrt(H / L0) (Battjes 1974; Wikipedia, Iribarren
+     * number); the surf wavelength is 12 H, so xi = 0.25 * sqrt(12) = 0.87 at every size.
+     * Source: terrain_manager.js SURF_REEF_SLOPE.
+     */
+    static constexpr F32 SURF_REEF_SLOPE = 0.25f;
+    /**
+     * <WolfViewer 2026-10-01> The depth the surf train uses: the real depth or the reef slope's
+     * depth at that distance from land, whichever is deeper. The path bake, waterV.glsl,
+     * wolfsurfcurl.cpp and wolfboatrock.cpp all use it. Source: TerrainManager.surfDepth().
+     */
+    static F32 surfDepth(F32 h, F32 dist_to_land) { return llmax(h, SURF_REEF_SLOPE * dist_to_land); }
     static constexpr F32 CHECK_INTERVAL_SECS = 2.f;
     static constexpr F32 REBAKE_SECS = 20.f;     // neighbours stream in over a minute
     static constexpr F32 MIN_REBAKE_SECS = 8.f;  // [2026-09-10] never re-shape the sea faster than this per region
@@ -148,6 +171,20 @@ public:
     static bool depthAt(const Field& f, F32 rx, F32 ry, F32 out[4]);
     /** [WAVES 2026-09-07] Zone energy at region-relative (rx, ry): nearest texel, 0.55 outside. */
     static F32 zoneAt(const Field& f, F32 rx, F32 ry);
+    /**
+     * <WolfViewer 2026-10-01> Surf weight at region-relative (rx, ry): nearest texel like
+     * zoneAt, 0 outside. The surf train's height scale is smoothstep(0.62, 0.95, 0.55 + 0.45 w)
+     * — the old smoothstep on the energy, from the surf cells grown and blurred by a quarter wavelength.
+     * Source: wave_zones.js surfWeightAt().
+     */
+    static F32 surfWeightAt(const Field& f, F32 rx, F32 ry);
+    /**
+     * <WolfViewer 2026-10-01> Box-blur radius, in zone texels, of the surf weight: a quarter of
+     * the surf train's deep-water wavelength 2 pi / k0, at least 1 (the 3x3 the energy already
+     * gets) and at most SURF_BLUR_MAX_TEXELS. Source: wave_zones.js surfBlurRadius().
+     */
+    static S32 surfBlurRadius(F32 k0, F32 texel_m);
+    static constexpr S32 SURF_BLUR_MAX_TEXELS = 16;
     /** [SURF 2026-09-07] Distance to land (exposure bake G), bilinear; 4000 outside the span. */
     static F32 distanceAt(const Field& f, F32 rx, F32 ry);
     /** <WolfViewer 2026-09-20/> Distance from the open sea (exposure bake B), bilinear; 4000 outside the span. */
@@ -200,6 +237,7 @@ private:
     // Scratch, reused across bakes.
     std::vector<F32> mH, mTmp, mSm, mDist, mOpen, mDepthData, mExpoData, mZoneData;   // <WolfViewer 2026-09-20/> mOpen
     std::vector<F32> mEDepth, mPath;   // <WolfViewer 2026-09-21/> depth per exposure texel, and the eikonal path baked from it
+    std::vector<F32> mSurfMask, mSurfTmp, mSurfGrown, mSurfW, mZoneRG;   // <WolfViewer 2026-10-01/> the surf weight bake
     bool mRebakeAll = false;   // [WAVES 2026-09-07] set by invalidate()
     U32 mBakes = 0;
     U32 mLastSurfTexels = 0;

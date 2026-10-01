@@ -558,9 +558,11 @@ std::string WolfWaveZones::defaultZones(const Region& r) const
     return land_out;
 }
 
-void WolfWaveZones::fill(LLViewerRegion* regionp, F32 x0, F32 y0, F32 sx, F32 sy, S32 w, S32 h, std::vector<F32>& out) const
+void WolfWaveZones::fill(LLViewerRegion* regionp, F32 x0, F32 y0, F32 sx, F32 sy, S32 w, S32 h, std::vector<F32>& out,
+                         std::vector<F32>* surf_mask) const
 {
     out.assign((size_t)w * h, OPEN_ENERGY);
+    if (surf_mask) surf_mask->assign((size_t)w * h, 0.f);
     if (!regionp || mByHandle.empty()) return;
     S32 bx, by;
     handle_xy(regionp->getHandle(), bx, by);
@@ -632,6 +634,13 @@ void WolfWaveZones::fill(LLViewerRegion* regionp, F32 x0, F32 y0, F32 sx, F32 sy
     // [SURF rev3] 3x3 box blur (48 m footprint): a bilinear read of 16 m cells stepped the
     // crest height every cell and the surf came out TERRACED (Paul's Sandbox screenshot,
     // 09-07). A designer paints cells; the sea needs a 48 m ramp between them. wave_zones.js same.
+    // <WolfViewer 2026-10-01> The surf cells, unblurred, for the wavelength-wide surf weight
+    // (WolfWaterField::bake). Source: wave_zones.js bake() surfMask, same rule.
+    if (surf_mask)
+    {
+        const F32 surf_e = energy_of('s');
+        for (size_t k = 0; k < out.size(); ++k) (*surf_mask)[k] = out[k] >= surf_e ? 1.f : 0.f;
+    }
     std::vector<F32> src(out);
     for (S32 j = 0; j < h; ++j)
     {

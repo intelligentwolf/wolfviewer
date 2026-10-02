@@ -2759,6 +2759,10 @@ void LLViewerRegion::setSimulatorFeatures(const LLSD& sim_features)
         mMaxTEs   = LLAvatarAppearanceDefines::ETextureIndex::TEX_HEAD_UNIVERSAL_TATTOO;
     }
     mMinSimHeight = mSimulatorFeatures.has("OpenSimExtras") && mSimulatorFeatures["OpenSimExtras"].has("MinSimHeight") ? (F32)mSimulatorFeatures["OpenSimExtras"]["MinSimHeight"].asReal() : 0.0f;
+    // <WolfViewer 2026-10-02> OPEN SEA (Wolf Territories' OpenSim fork, SimulatorFeaturesModule): the
+    // distance past an empty edge the region keeps you. Absent on any other server = 0 = a wall.
+    mWolfOpenSeaM = mSimulatorFeatures.has("OpenSimExtras") && mSimulatorFeatures["OpenSimExtras"].has("WolfOpenSea")
+                  ? llmax(0.f, (F32)mSimulatorFeatures["OpenSimExtras"]["WolfOpenSea"].asReal()) : 0.f;
 // </FS>
 }
 

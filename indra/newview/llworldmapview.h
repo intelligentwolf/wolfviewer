@@ -78,6 +78,13 @@ public:
     // Zoom is used for UI and will interpolate the map scale over multiple frames.
     void zoom(F32 zoom);
     void zoomWithPivot(F32 zoom, S32 x, S32 y);
+    // <WolfViewer 2026-10-02> Wolf Territories: fly to a place like Google Earth, zooming out
+    // far enough to see from here to there, across, then down to end_zoom (zoom units). Any
+    // press, drag or scroll on the map stops it. Paul: "if i search and click it should zoom out
+    // and in like google earth does".
+    void wolfFlyTo(const LLVector3d& target, F32 end_zoom);
+    void wolfStopFlight() { mWolfFlying = false; }
+    bool wolfFlying() const { return mWolfFlying; }
     F32 getZoom();
     // Scale is a linear scaling factor of in-world coordinates
     F32 getScale();
@@ -184,6 +191,22 @@ public:
     bool            mPanning;
     // <WolfViewer 2026-09-25/> This press belongs to a map image (move / stretch), not the pan.
     bool            mWolfOverlayPress = false;
+    // <WolfViewer 2026-10-02> Globe (wolfmapglobe.h): a drag holds the point first pressed under
+    // the pointer; let go while moving and the globe keeps turning, slowing down.
+    bool            mWolfGlobeGrab = false;
+    LLVector3d      mWolfGrabPoint;            // global point held under the pointer
+    LLVector3d      mWolfSpinVelocity;         // view centre, metres per second (x, y)
+    F64             mWolfLastMoveTime = 0.0;   // last drag step, LLTimer seconds
+    F64             mWolfLastDrawTime = 0.0;   // for the spin's time step
+    bool            mWolfFlying = false;       // wolfFlyTo under way
+    F64             mWolfFlyStart = 0.0;       // LLTimer seconds
+    F64             mWolfFlyDuration = 0.0;
+    LLVector3d      mWolfFlyFrom, mWolfFlyTarget;
+    F32             mWolfFlyZoomFrom = 0.f, mWolfFlyZoomTo = 0.f, mWolfFlyZoomPeak = 0.f;
+    void            wolfStepFlight();
+    // Move the view centre to this global point (sets the pan); returns the point after the clamp.
+    LLVector3d      wolfSetGlobeCentre(const LLVector3d& centre);
+    // </WolfViewer>
     S32             mMouseDownPanX;     // value at start of drag
     S32             mMouseDownPanY;     // value at start of drag
     S32             mMouseDownX;

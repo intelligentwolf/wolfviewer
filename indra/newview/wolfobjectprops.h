@@ -132,8 +132,16 @@ public:
      * Declare interest in an object's name/description. Idempotent and cheap — safe to
      * call every sweep for every candidate. Objects that are fully answered and still
      * fresh, or that have exhausted their attempts, are dropped here rather than queued.
+     *
+     * <WolfViewer 2026-10-02> keep_fresh: re-ask an ANSWERED object every REFRESH_SECS. Only
+     * for objects a feature is actually acting on (a matched wolfwater prim, a weather prim in
+     * the agent's parcel): those are the ones a script may change with llSetObjectDesc. Every
+     * other answer is asked once. Refreshing everything meant the budget never ran dry — with
+     * 26,722 prims in draw distance the viewer sent 48 requests every 1.5 s for as long as it
+     * stayed (Paul's log, Wolf Territories Home, 10-02), for 0 matches. An in-world edit still
+     * updates the store at once: selecting a prim brings its ObjectProperties (note()).
      */
-    void want(LLViewerObject* objectp);
+    void want(LLViewerObject* objectp, bool keep_fresh = false);
 
     /** Every frame from LLAppViewer::idle(); drains the interest list within budget. */
     void idle();

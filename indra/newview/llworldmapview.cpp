@@ -69,6 +69,27 @@
 
 #include "llglheaders.h"
 #include "wolfmapoverlays.h"      // <WolfViewer 2026-09-25/> map images
+#include "wolfmapglobe.h"         // <WolfViewer 2026-10-02/> animated water + globe (Wolf Territories only)
+
+namespace
+{
+    // <WolfViewer 2026-10-02> The globe's view of this frame. The global point at the middle of
+    // the view is the camera less the pan (globalPosToView: screen = (global - camera) * ratio +
+    // half size + pan).
+    WolfMapGlobe::View wolf_globe_view(F32 pan_x, F32 pan_y, F32 map_ratio, F32 map_scale, S32 width, S32 height)
+    {
+        WolfMapGlobe::View v;
+        v.centre = gAgentCamera.getCameraPositionGlobal();
+        v.centre.mdV[VX] -= pan_x / map_ratio;
+        v.centre.mdV[VY] -= pan_y / map_ratio;
+        v.ppr = map_scale;
+        v.t = WolfMapGlobe::instance().amount(map_scale);
+        v.width = (F32)width;
+        v.height = (F32)height;
+        v.radius = WolfMapGlobe::instance().radius();
+        return v;
+    }
+}
 
 // # Constants
 static constexpr F32 MAP_DEFAULT_SCALE = 128.f;
@@ -273,6 +294,12 @@ void LLWorldMapView::zoomWithPivot(F32 zoom, S32 x, S32 y)
 {
     mTargetMapScale = scaleFromZoom(zoom);
     sZoomPivot      = LLVector2((F32)x, (F32)y);
+    // <WolfViewer 2026-10-02/> The globe zooms about its centre: setScale's pivot correction
+    // assumes the flat map's straight-line scaling, which the curved globe does not have.
+    if (WolfMapGlobe::instance().amount(mMapScale) > 0.f || WolfMapGlobe::instance().amount(mTargetMapScale) > 0.f)
+    {
+        sZoomPivot = LLVector2(0.f, 0.f);
+    }
     if (!sZoomTimer.getStarted() && mMapScale != mTargetMapScale)
     {
         sZoomTimer.start();
@@ -306,10 +333,22 @@ void LLWorldMapView::setScale(F32 scale, bool snap)
         mMapIterpTime = MAP_ITERP_TIME_CONSTANT;
 
         F32 ratio = (scale / old_scale);
+        // <WolfViewer 2026-10-02> Wolf Territories: a pan under way (a search result being
+        // centred while the map zooms down to it) keeps going, scaled with the map. Elsewhere the
+        // stock behaviour: zooming stops it where it is.
+        if (WolfMapGlobe::instance().active())
+        {
+            mTargetPanX *= ratio;
+            mTargetPanY *= ratio;
+        }
+        else
+        {
+            mTargetPanX = mPanX * ratio;
+            mTargetPanY = mPanY * ratio;
+        }
+        // </WolfViewer>
         mPanX *= ratio;
         mPanY *= ratio;
-        mTargetPanX         = mPanX;
-        mTargetPanY         = mPanY;
         sVisibleTilesLoaded = false;
 
         // If we are zooming relative to somewhere else rather than the center of the map, compensate for the difference in panning here
@@ -387,6 +426,12 @@ void LLWorldMapView::draw()
 
     mVisibleRegions.clear();
 
+    // <WolfViewer 2026-10-02/> A Google Earth style flight (wolfFlyTo) sets the zoom and the pan.
+    if (mWolfFlying)
+    {
+        wolfStepFlight();
+    }
+
     // animate pan if necessary
     mPanX = lerp(mPanX, mTargetPanX, LLSmoothInterpolation::getInterpolant(mMapIterpTime));
     mPanY = lerp(mPanY, mTargetPanY, LLSmoothInterpolation::getInterpolant(mMapIterpTime));
@@ -423,10 +468,67 @@ void LLWorldMapView::draw()
 
     gGL.matrixMode(LLRender::MM_MODELVIEW);
 
+    // <WolfViewer 2026-10-02> On Wolf Territories the sea moves (the tiles' water is see-through,
+    // wolfmapglobe.cpp) and, zoomed out past the flat map, the map is a globe. Other grids and
+    // Second Life keep the plain background and the flat map below, unchanged.
+    WolfMapGlobe& globe = WolfMapGlobe::instance();
+    if (globe.active())
+    {
+        globe.setViewSize(width, height);
+        // <WolfViewer 2026-10-02> Paul: "if i spin it the globe should keep going and slow down".
+        // Let go while moving and the centre carries on at that speed, halving every ~0.55 s
+        // (time constant 0.8 s); it stops below 1 m/s on the globe or at the edge of the map.
+        const F64 now = LLTimer::getElapsedSeconds();
+        if (!mWolfGlobeGrab && !mWolfSpinVelocity.isExactlyZero())
+        {
+            const F64 dt = llclamp(now - mWolfLastDrawTime, 0.0, 0.1);
+            WolfMapGlobe::View sv = wolf_globe_view(mPanX, mPanY, mMapRatio, mMapScale, width, height);
+            if (sv.t <= 0.f || mWolfSpinVelocity.magVec() < 1.0)
+            {
+                mWolfSpinVelocity.clearVec();
+            }
+            else
+            {
+                LLVector3d want = sv.centre + mWolfSpinVelocity * dt;
+                const LLVector3d kept = wolfSetGlobeCentre(want);
+                if (kept != want)
+                {
+                    mWolfSpinVelocity.clearVec();   // ran into the edge of the map
+                }
+                mWolfSpinVelocity *= exp(-dt / 0.8);
+            }
+        }
+        mWolfLastDrawTime = now;
+        // </WolfViewer>
+        WolfMapGlobe::View gv = wolf_globe_view(mPanX, mPanY, mMapRatio, mMapScale, width, height);
+        if (gv.t > 0.f)
+        {
+            // Spinning is panning; keep the centre on the grid (see clampCentre).
+            const LLVector3d kept = globe.clampCentre(gv.centre);
+            if (kept != gv.centre)
+            {
+                mPanX = mTargetPanX = (F32)((camera_global.mdV[VX] - kept.mdV[VX]) * mMapRatio);
+                mPanY = mTargetPanY = (F32)((camera_global.mdV[VY] - kept.mdV[VY]) * mMapRatio);
+                gv.centre = kept;
+            }
+            globe.drawGlobe(gv, sHomeImage, sAvatarYouImage);
+            // None of the flat map's names, markers or tilt: straight to the floater's own parts.
+            LLGLDisable no_scissor(GL_SCISSOR_TEST);
+            updateDirections();
+            LLView::draw();
+            WolfMapOverlays::instance().drawControls(*this);
+            return;
+        }
+        globe.drawFlatWater(gv);
+    }
+    else
+    {
+    // </WolfViewer>
     // Draw background rectangle
     gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
     gGL.color4fv(mBackgroundColor.mV);
     gl_rect_2d(0, height, width, 0);
+    } // <WolfViewer 2026-10-02/>
 
     // <FS:Wolf/> Everything from here to the matching pop is the MAP, and it tilts. The
     // background above stays flat so the panel is still filled corner to corner, and the
@@ -840,8 +942,16 @@ bool LLWorldMapView::drawMipmapLevel(S32 width, S32 height, S32 level, bool load
             // </FS:Ansariel>
             if (simimage)
             {
+                // <WolfViewer 2026-10-02> On Wolf Territories the tile's water is see-through over
+                // the moving sea; until that copy exists the tile counts as not yet loaded.
+                LLViewerTexture* draw_image = simimage.get();
+                if (WolfMapGlobe::instance().active())
+                {
+                    draw_image = WolfMapGlobe::instance().keyedTile(simimage.get(), level, grid_x, grid_y);
+                }
+                // </WolfViewer>
                 // Checks that the image has a valid texture
-                if (simimage->hasGLTexture())
+                if (draw_image && simimage->hasGLTexture())
                 {
                     // Increment the number of completly fetched tiles
                     completed_tiles++;
@@ -862,8 +972,8 @@ bool LLWorldMapView::drawMipmapLevel(S32 width, S32 height, S32 level, bool load
 
                     // Draw the tile
                     LLGLSUIDefault gls_ui;
-                    gGL.getTexUnit(0)->bind(simimage.get());
-                    simimage->setAddressMode(LLTexUnit::TAM_CLAMP);
+                    gGL.getTexUnit(0)->bind(draw_image);   // <WolfViewer 2026-10-02/> was simimage
+                    draw_image->setAddressMode(LLTexUnit::TAM_CLAMP);
 
                     gGL.color4f(1.f, 1.0f, 1.0f, 1.0f);
 
@@ -1358,6 +1468,20 @@ void LLWorldMapView::untiltViewPos(F32& x, F32& y) const
 
 LLVector3d LLWorldMapView::viewPosToGlobal( S32 x, S32 y )
 {
+    // <WolfViewer 2026-10-02> On the globe, the point under the pointer on the sphere (off its
+    // edge: the middle of the view).
+    if (WolfMapGlobe::instance().amount(mMapScale) > 0.f)
+    {
+        const WolfMapGlobe::View gv = wolf_globe_view(mPanX, mPanY, mMapRatio, mMapScale, getRect().getWidth(), getRect().getHeight());
+        LLVector3d on_globe;
+        if (!WolfMapGlobe::unproject(gv, (F32)x, (F32)y, on_globe))
+        {
+            on_globe = gv.centre;
+        }
+        on_globe.mdV[VZ] = gAgent.isGodlike() ? GODLY_TELEPORT_HEIGHT : gAgent.getPositionAgent().mV[VZ];
+        return on_globe;
+    }
+    // </WolfViewer>
     // <FS:Wolf/> Undo the tilt first, so a click lands where the user aimed. No-op at tilt 0.
     F32 fx = (F32)x;
     F32 fy = (F32)y;
@@ -1974,8 +2098,99 @@ bool LLWorldMapView::handleMouseDown( S32 x, S32 y, MASK mask )
     mMouseDownX = x;
     mMouseDownY = y;
     sHandledLastClick = true;
+
+    // <WolfViewer 2026-10-02> On the globe the drag holds the point pressed, under the pointer
+    // (Paul: "when i click and drag it doesn't do it from the place i clicked"); a press also
+    // stops a spin.
+    mWolfSpinVelocity.clearVec();
+    mWolfFlying = false;
+    mWolfGlobeGrab = false;
+    if (WolfMapGlobe::instance().amount(mMapScale) > 0.f)
+    {
+        const WolfMapGlobe::View gv = wolf_globe_view(mPanX, mPanY, mMapRatio, mMapScale, getRect().getWidth(), getRect().getHeight());
+        mWolfGlobeGrab = WolfMapGlobe::unproject(gv, (F32)x, (F32)y, mWolfGrabPoint);
+        mWolfLastMoveTime = LLTimer::getElapsedSeconds();
+    }
+    // </WolfViewer>
     return true;
 }
+
+// <WolfViewer 2026-10-02>
+LLVector3d LLWorldMapView::wolfSetGlobeCentre(const LLVector3d& centre)
+{
+    const LLVector3d kept = WolfMapGlobe::instance().clampCentre(centre);
+    const LLVector3d camera_global = gAgentCamera.getCameraPositionGlobal();
+    mPanX = mTargetPanX = (F32)((camera_global.mdV[VX] - kept.mdV[VX]) * mMapRatio);
+    mPanY = mTargetPanY = (F32)((camera_global.mdV[VY] - kept.mdV[VY]) * mMapRatio);
+    sVisibleTilesLoaded = false;
+    return kept;
+}
+
+void LLWorldMapView::wolfFlyTo(const LLVector3d& target, F32 end_zoom)
+{
+    WolfMapGlobe& globe = WolfMapGlobe::instance();
+    if (!globe.active())
+    {
+        return;
+    }
+    const S32 w = getRect().getWidth(), h = getRect().getHeight();
+    const S32 view_px = llmax(1, llmin(w, h));
+    mWolfFlyFrom = wolf_globe_view(mPanX, mPanY, mMapRatio, mMapScale, w, h).centre;
+    mWolfFlyTarget = target;
+    mWolfFlyZoomFrom = zoomFromScale(mMapScale);
+    mWolfFlyZoomTo = end_zoom;
+
+    // High enough to see from here to there: the two points 60% of the view apart. zoom is
+    // log2(pixels per metre) (zoomFromScale: log2(scale / 256), scale = pixels per region).
+    const F64 dx = target.mdV[VX] - mWolfFlyFrom.mdV[VX], dy = target.mdV[VY] - mWolfFlyFrom.mdV[VY];
+    const F64 d = llmax(sqrt(dx * dx + dy * dy), (F64)REGION_WIDTH_METERS);
+    F32 peak = llmin(mWolfFlyZoomFrom, mWolfFlyZoomTo, (F32)log2(0.6 * view_px / d));
+    // No further out than the slider goes: the whole globe, or before the map's box has come the
+    // stock limit of 512 regions across (LLFloaterWorldMap MAX_VISIBLE_REGIONS).
+    const F32 lowest = globe.hasExtent() ? globe.globeZoom(w, h) : (F32)log2((F64)view_px / (512.0 * REGION_WIDTH_METERS));
+    mWolfFlyZoomPeak = llmax(peak, lowest);
+    // Longer the further out it goes: 1 s plus half a second per halving of the scale, at most 4 s.
+    const F32 climb = (mWolfFlyZoomFrom - mWolfFlyZoomPeak) + (mWolfFlyZoomTo - mWolfFlyZoomPeak);
+    mWolfFlyDuration = llclamp(1.0 + 0.5 * climb, 1.0, 4.0);
+    mWolfFlyStart = LLTimer::getElapsedSeconds();
+    mWolfSpinVelocity.clearVec();
+    mWolfFlying = true;
+}
+
+// One frame of the flight: zoom out over the first half and down over the second (each eased),
+// the centre moving fastest in the middle, at the top.
+void LLWorldMapView::wolfStepFlight()
+{
+    auto smooth = [](F64 u) { u = llclamp(u, 0.0, 1.0); return u * u * (3.0 - 2.0 * u); };
+    const F64 u = (LLTimer::getElapsedSeconds() - mWolfFlyStart) / mWolfFlyDuration;
+    F32 zoom_now;
+    if (u < 0.5)
+    {
+        zoom_now = (F32)(mWolfFlyZoomFrom + (mWolfFlyZoomPeak - mWolfFlyZoomFrom) * smooth(u * 2.0));
+    }
+    else
+    {
+        zoom_now = (F32)(mWolfFlyZoomPeak + (mWolfFlyZoomTo - mWolfFlyZoomPeak) * smooth((u - 0.5) * 2.0));
+    }
+    if (u >= 1.0)
+    {
+        zoom_now = mWolfFlyZoomTo;
+        mWolfFlying = false;
+    }
+    sZoomPivot = LLVector2(0.f, 0.f);
+    setScale(scaleFromZoom(zoom_now), true);
+    const F64 f = smooth(u);
+    LLVector3d centre = mWolfFlyFrom;
+    centre.mdV[VX] += (mWolfFlyTarget.mdV[VX] - mWolfFlyFrom.mdV[VX]) * f;
+    centre.mdV[VY] += (mWolfFlyTarget.mdV[VY] - mWolfFlyFrom.mdV[VY]) * f;
+    wolfSetGlobeCentre(centre);
+    // The floater's slider drives the zoom every frame (LLFloaterWorldMap::draw); keep it with us.
+    if (gFloaterWorldMap)
+    {
+        gFloaterWorldMap->wolfSetMapZoom(zoom_now);
+    }
+}
+// </WolfViewer>
 
 bool LLWorldMapView::handleMouseUp( S32 x, S32 y, MASK mask )
 {
@@ -1989,6 +2204,22 @@ bool LLWorldMapView::handleMouseUp( S32 x, S32 y, MASK mask )
             gFocusMgr.setMouseCapture(NULL);
             return true;
         }
+        // <WolfViewer 2026-10-02> Let go of the globe: the pointer was never hidden. Still moving
+        // (a step within the last 0.1 s) and it keeps turning (draw slows it down).
+        if (mPanning && mWolfGlobeGrab)
+        {
+            mPanning = false;
+            mWolfGlobeGrab = false;
+            if (LLTimer::getElapsedSeconds() - mWolfLastMoveTime > 0.1)
+            {
+                mWolfSpinVelocity.clearVec();
+            }
+            mWolfLastDrawTime = LLTimer::getElapsedSeconds();
+            mMouseDownX = 0;
+            mMouseDownY = 0;
+        }
+        else
+        // </WolfViewer>
         if (mPanning)
         {
             // restore mouse cursor
@@ -2006,8 +2237,10 @@ bool LLWorldMapView::handleMouseUp( S32 x, S32 y, MASK mask )
             mMouseDownX = 0;
             mMouseDownY = 0;
         }
-        else
+        // <WolfViewer 2026-10-02/> A click on the globe picks nothing (double-click flies in).
+        else if (WolfMapGlobe::instance().amount(mMapScale) <= 0.f)
         {
+            mWolfGlobeGrab = false;
             // ignore whether we hit an event or not
             S32 hit_type;
             LLUUID id;
@@ -2064,6 +2297,47 @@ bool LLWorldMapView::handleHover( S32 x, S32 y, MASK mask )
     {
         return true;
     }
+    // <WolfViewer 2026-10-02> Dragging the globe: find the centre that puts the grabbed point
+    // under the pointer. unproject from the current centre says where the pointer is now; moving
+    // the centre by the difference converges in a few steps (near the identity locally). Off the
+    // globe's edge, it waits until the pointer is back on it.
+    if (hasMouseCapture() && mWolfGlobeGrab && WolfMapGlobe::instance().amount(mMapScale) > 0.f)
+    {
+        if (mPanning || llabs(x - mMouseDownX) > 1 || llabs(y - mMouseDownY) > 1)
+        {
+            mPanning = true;
+            const F64 now = LLTimer::getElapsedSeconds();
+            WolfMapGlobe::View gv = wolf_globe_view(mPanX, mPanY, mMapRatio, mMapScale, getRect().getWidth(), getRect().getHeight());
+            const LLVector3d before = gv.centre;
+            for (int i = 0; i < 6; ++i)
+            {
+                LLVector3d under;
+                if (!WolfMapGlobe::unproject(gv, (F32)x, (F32)y, under))
+                {
+                    break;
+                }
+                const LLVector3d step(mWolfGrabPoint.mdV[VX] - under.mdV[VX], mWolfGrabPoint.mdV[VY] - under.mdV[VY], 0.0);
+                gv.centre.mdV[VX] += step.mdV[VX];
+                gv.centre.mdV[VY] += step.mdV[VY];
+                if (step.magVecSquared() < 0.01)
+                {
+                    break;
+                }
+            }
+            const LLVector3d kept = wolfSetGlobeCentre(gv.centre);
+            // The spin a release would carry on with: the centre's recent speed, smoothed.
+            const F64 dt = now - mWolfLastMoveTime;
+            if (dt > 1e-3)
+            {
+                const LLVector3d v((kept.mdV[VX] - before.mdV[VX]) / dt, (kept.mdV[VY] - before.mdV[VY]) / dt, 0.0);
+                mWolfSpinVelocity = mWolfSpinVelocity * 0.5 + v * 0.5;
+            }
+            mWolfLastMoveTime = now;
+        }
+        gViewerWindow->setCursor(UI_CURSOR_HAND);
+        return true;
+    }
+    // </WolfViewer>
     if (hasMouseCapture())
     {
         if (mPanning || llabs(x - mMouseDownX) > 1 || llabs(y - mMouseDownY) > 1)
@@ -2117,6 +2391,19 @@ bool LLWorldMapView::handleDoubleClick( S32 x, S32 y, MASK mask )
     {
         return true;
     }
+    // <WolfViewer 2026-10-02> Double-click on the globe: fly in there, like Google Earth. The
+    // floater's zoom slider drives the zoom (LLFloaterWorldMap::draw), so it is set there.
+    if (WolfMapGlobe::instance().amount(mMapScale) > 0.f)
+    {
+        const WolfMapGlobe::View gv = wolf_globe_view(mPanX, mPanY, mMapRatio, mMapScale, getRect().getWidth(), getRect().getHeight());
+        LLVector3d target;
+        if (WolfMapGlobe::unproject(gv, (F32)x, (F32)y, target) && gFloaterWorldMap)
+        {
+            wolfFlyTo(WolfMapGlobe::instance().clampCentre(target), WolfMapGlobe::instance().flyInZoom());
+        }
+        return true;
+    }
+    // </WolfViewer>
     if( sHandledLastClick )
     {
         S32 hit_type;
@@ -2223,6 +2510,13 @@ void LLWorldMapView::onMouseCaptureLost()
     {
         mWolfOverlayPress = false;
         WolfMapOverlays::instance().mouseUp();
+    }
+    // A globe drag cut short: let go without a spin.
+    if (mWolfGlobeGrab)
+    {
+        mWolfGlobeGrab = false;
+        mPanning = false;
+        mWolfSpinVelocity.clearVec();
     }
     LLPanel::onMouseCaptureLost();
 }

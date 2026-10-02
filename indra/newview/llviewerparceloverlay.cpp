@@ -300,7 +300,7 @@ U8 LLViewerParcelOverlay::parcelFlags(S32 row, S32 col, U8 flags) const
         || row < 0
         || col < 0)
     {
-        LL_WARNS() << "Attempted to get ownership out of region's overlay, row: " << row << " col: " << col << LL_ENDL;
+        LL_WARNS_ONCE("ParcelOverlay") << "Attempted to get ownership out of region's overlay, row: " << row << " col: " << col << LL_ENDL;
         return flags;
     }
     return mOwnership.get(col, row) & flags;   // <WolfViewer 2026-09-23/>

@@ -27,6 +27,11 @@ version 74
 // NOTE: All settings are set to the MIN of applied values, including 'all'!
 //
 list all
+// <WolfViewer 2026-10-02> Wolf extras that cost GPU time without changing the sea itself.
+// The waves (WolfViewerWaterFFT) are NOT here: Paul 10-02 "dont disable waves on low settings".
+WolfViewerWaterCaustics		1	1
+WolfViewerWaterWake			1	1
+WolfViewerWaterGodRays		1	1
 RenderAnisotropic			1	1
 RenderAvatarLODFactor		1	1.0
 RenderAvatarPhysicsLODFactor 1	1.0
@@ -92,6 +97,9 @@ RenderReflectionProbeCount  1   256
 // Low Graphics Settings
 //
 list Low
+WolfViewerWaterCaustics		1	0
+WolfViewerWaterWake			1	0
+WolfViewerWaterGodRays		1	0
 RenderAnisotropic			1	0
 RenderAvatarLODFactor		1	0
 RenderAvatarPhysicsLODFactor 1	0
@@ -135,6 +143,7 @@ RenderReflectionProbeCount  1   1
 // Medium Low Graphics Settings
 //
 list LowMid
+WolfViewerWaterCaustics		1	0
 RenderAnisotropic			1	0
 RenderAvatarLODFactor		1	0.5
 RenderAvatarMaxComplexity   1	100000

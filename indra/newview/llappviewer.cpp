@@ -73,6 +73,7 @@
 #include "llviewerwindow.h"
 #include "fswolfwater.h" // <FS:WolfViewer> wolfwater prim surfaces
 #include "wolfterrainpaint.h"
+#include "wolfupdate.h"         // <WolfViewer 2026-10-02/> WolfUpdate::shutdown
 #include "wolfai.h"   // [AI CREDITS 2026-09-11] availability + balance   // [TERRAIN PAINT 2026-09-10]
 #include "wolfnaturalwater.h" // <WolfViewer> streams and pools from the heightmap
 #include "wolfwaterfield.h" // <WolfViewer> water depth / exposure fields for the water shader
@@ -2014,6 +2015,9 @@ bool LLAppViewer::cleanup()
     }
     velopack_cleanup();
 #endif
+
+    // <WolfViewer 2026-10-02/> stop and join an update download before the HTTP stack goes away
+    WolfUpdate::shutdown();
 
     //ditch LLVOAvatarSelf instance
     gAgentAvatarp = NULL;

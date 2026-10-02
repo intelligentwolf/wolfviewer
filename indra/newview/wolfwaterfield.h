@@ -121,7 +121,6 @@ public:
      */
     static F32 surfDepth(F32 h, F32 dist_to_land) { return llmax(h, SURF_REEF_SLOPE * dist_to_land); }
     static constexpr F32 CHECK_INTERVAL_SECS = 2.f;
-    static constexpr F32 REBAKE_SECS = 20.f;     // neighbours stream in over a minute
     static constexpr F32 MIN_REBAKE_SECS = 8.f;  // [2026-09-10] never re-shape the sea faster than this per region
     // <WolfViewer 2026-09-20> A terrain change is acted on only after the stamp has been
     // unchanged for this long. On Wolf Nation (51,200 m) patches stream in for as long as you
@@ -178,6 +177,9 @@ public:
      * Source: wave_zones.js surfWeightAt().
      */
     static F32 surfWeightAt(const Field& f, F32 rx, F32 ry);
+    /** [SURF HEIGHT 2026-10-02] The shader's surf zone for a surf weight G (waterV.glsl surfZone), and its inverse. */
+    static F32 surfZoneOf(F32 w);
+    static F32 surfWeightFor(F32 z);
     /**
      * <WolfViewer 2026-10-01> Box-blur radius, in zone texels, of the surf weight: a quarter of
      * the surf train's deep-water wavelength 2 pi / k0, at least 1 (the 3x3 the energy already
@@ -224,6 +226,13 @@ public:
 private:
     void bake(LLViewerRegion* regionp, Field& f);
     static U64 terrainStamp(LLViewerRegion* regionp);
+    /**
+     * <WolfViewer 2026-10-02> The terrain revisions of every region within STAMP_MARGIN_M of this
+     * one, folded together: the bake reads neighbours' land too (heightAt), and that is the one
+     * input no other trigger caught — a timed re-bake every 20 s (REBAKE_SECS) stood in for it,
+     * re-baking every field forever whether anything had changed or not.
+     */
+    static U64 neighbourStamp(LLViewerRegion* regionp);
     /** <WolfViewer 2026-09-20/> terrainStamp over the patches inside region rect (x0, y0, sx, sy) only: a 51,200 m region has 10 million patches, a 2048 m window 16 thousand. */
     static U64 terrainStampIn(LLViewerRegion* regionp, F32 x0, F32 y0, F32 sx, F32 sy);
     /** Terrain height at region-relative (px, py) metres, answering from this region or
@@ -238,6 +247,7 @@ private:
     std::vector<F32> mH, mTmp, mSm, mDist, mOpen, mDepthData, mExpoData, mZoneData;   // <WolfViewer 2026-09-20/> mOpen
     std::vector<F32> mEDepth, mPath;   // <WolfViewer 2026-09-21/> depth per exposure texel, and the eikonal path baked from it
     std::vector<F32> mSurfMask, mSurfTmp, mSurfGrown, mSurfW, mZoneRG;   // <WolfViewer 2026-10-01/> the surf weight bake
+    std::vector<F32> mSurfScale, mScaleNum, mScaleDen, mScaleTmpN, mScaleTmpD;   // [SURF HEIGHT 2026-10-02/] the surf height bake
     bool mRebakeAll = false;   // [WAVES 2026-09-07] set by invalidate()
     U32 mBakes = 0;
     U32 mLastSurfTexels = 0;

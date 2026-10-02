@@ -91,6 +91,7 @@
 #include "llsdutil_math.h"
 #include "alfloaterregiontracker.h"
 #include "llstartup.h"
+#include "wolfmapglobe.h"   // <WolfViewer 2026-10-02/>
 
 //---------------------------------------------------------------------------
 // Constants
@@ -552,6 +553,13 @@ void LLFloaterWorldMap::onOpen(const LLSD& key)
         // so use that to adjust the view.
         adjustZoomSliderBounds();
 
+        // <WolfViewer 2026-10-02> Paul: "start off like a globe and the user can spin and then
+        // zoom in like google earth". Opened to show a place (center_on_target), it does not.
+        static LLCachedControl<bool> start_as_globe(gSavedSettings, "WolfMapStartAsGlobe", true);
+        // Applied in draw(), once the map view has its size (on a first open it may not yet).
+        mWolfGlobeStartPending = start_as_globe && !center_on_target && WolfMapGlobe::instance().active();
+        // </WolfViewer>
+
         // Could be first show
         //LLFirstUse::useMap();
 
@@ -609,6 +617,7 @@ bool LLFloaterWorldMap::handleScrollWheel(S32 x, S32 y, S32 clicks)
         S32 map_y = y - mMapView->getRect().mBottom;
         if (mMapView->pointInView(map_x, map_y))
         {
+            mMapView->wolfStopFlight();   // <WolfViewer 2026-10-02/> a scroll takes over from a flight
             F32 old_slider_zoom = (F32) mZoomSlider->getValue().asReal();
             F32 slider_zoom     = old_slider_zoom + ((F32) clicks * -0.3333f);
             mZoomSlider->setValue(LLSD(slider_zoom));
@@ -712,6 +721,32 @@ void LLFloaterWorldMap::draw()
     setMouseOpaque(true);
     getDragHandle()->setMouseOpaque(true);
 
+    // <WolfViewer 2026-10-02> Wolf Territories: the globe's zoom limit depends on the view's size,
+    // so it is worked out again when that changes; and the open-as-globe zoom waits for a size.
+    if (WolfMapGlobe::instance().active())
+    {
+        WolfMapGlobe& globe = WolfMapGlobe::instance();
+        const LLRect view_rect = mMapView->getRect();
+        const S32 w = view_rect.getWidth(), h = view_rect.getHeight();
+        globe.setViewSize(w, h);   // also asks for the map's box
+        if (w > 0 && h > 0)
+        {
+            if (w != mWolfViewWidth || h != mWolfViewHeight || globe.extentGeneration() != mWolfExtentGen)
+            {
+                mWolfViewWidth = w;
+                mWolfViewHeight = h;
+                mWolfExtentGen = globe.extentGeneration();
+                adjustZoomSliderBounds();
+            }
+            // The globe needs the map's box (map_extent.php); until it has come, the map is flat.
+            if (mWolfGlobeStartPending && globe.hasExtent())
+            {
+                mWolfGlobeStartPending = false;
+                wolfSetMapZoom(WolfMapGlobe::instance().globeZoom(w, h));
+            }
+        }
+    }
+    // </WolfViewer>
     mMapView->zoom((F32)mZoomSlider->getValue().asReal());
 
     // Enable/disable checkboxes depending on the zoom level
@@ -1426,8 +1461,21 @@ void LLFloaterWorldMap::adjustZoomSliderBounds()
 
     F32 min_power = log(pixels_per_region/256.f)/log(2.f);
 
+    // <WolfViewer 2026-10-02/> On Wolf Territories the slider goes on out to the whole globe.
+    if (WolfMapGlobe::instance().active() && WolfMapGlobe::instance().hasExtent())
+    {
+        min_power = llmin(min_power, WolfMapGlobe::instance().globeZoom(view_width, view_height));
+    }
+
     mZoomSlider->setMinValue(min_power);
 }
+
+// <WolfViewer 2026-10-02>
+void LLFloaterWorldMap::wolfSetMapZoom(F32 zoom)
+{
+    mZoomSlider->setValue(LLSD(zoom));   // the slider clamps it to its range
+}
+// </WolfViewer>
 
 
 //-------------------------------------------------------------------------
@@ -2023,6 +2071,7 @@ void LLFloaterWorldMap::onTeleportFinished()
 
 void LLFloaterWorldMap::onCommitSearchResult(bool from_search)
 {
+    bool wolf_flying = false;   // <WolfViewer 2026-10-02/> the flight centres it instead
     std::string sim_name = mSearchResults->getSelectedValue().asString();
     if (sim_name.empty())
     {
@@ -2061,11 +2110,28 @@ void LLFloaterWorldMap::onCommitSearchResult(bool from_search)
             trackLocation(pos_global);
             mProcessingSearchUpdate = from_search;
             mTrackCtrlsPanel->setDefaultBtn(mTeleportButton);
+            // <WolfViewer 2026-10-02> Wolf Territories: zoom down to the region found (from the
+            // globe too), not only pan to it. onShowTargetBtn below does the pan.
+            if (WolfMapGlobe::instance().active())
+            {
+                const LLRect view_rect = mMapView->getRect();
+                // The middle of the region, not the landing point: the whole region is shown.
+                LLVector3d middle = info->getGlobalOrigin();
+                middle.mdV[VX] += info->mSizeX * 0.5;
+                middle.mdV[VY] += info->mSizeY * 0.5;
+                mMapView->wolfFlyTo(middle, WolfMapGlobe::instance().regionZoom((F32)info->mSizeX, (F32)info->mSizeY,
+                                                                                view_rect.getWidth(), view_rect.getHeight()));
+                wolf_flying = true;
+            }
+            // </WolfViewer>
             break;
         }
     }
 
-    onShowTargetBtn();
+    if (!wolf_flying)
+    {
+        onShowTargetBtn();
+    }
 }
 
 void LLFloaterWorldMap::onChangeMaturity()

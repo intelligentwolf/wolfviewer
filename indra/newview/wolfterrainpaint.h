@@ -228,6 +228,7 @@ private:
         LLPointer<LLViewerFetchedTexture> mPalette[SLOTS];
         std::string mKey;               // the layout the layer follows (edit revision / record version)
         std::string mTexSig;            // what the paint MAP was baked from (texture strokes + tiles)
+        std::string mSigKey;   // <WolfViewer 2026-10-02/> the stored record's key mTexSig was computed for (idle)
         std::string mWaterKey;          // what the water planes were built from
         std::vector<LLPointer<LLVOWater>> mWater;   // one plane per water-stroke segment
         // per-stroke scratch: nearest-segment distance, metres along, signed lateral (left +)

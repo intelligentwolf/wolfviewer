@@ -809,6 +809,16 @@ LLSD WolfMapOverlays::post(const LLSD& body, S32& http_status)
     {
         reply = json_to_llsd(result[LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS_RAW].asBinary());
     }
+    else if (!status && httpResults.has("error_body"))
+    {
+        // <WolfViewer 2026-10-02> An error reply's body never arrives as "raw": for a 4xx the raw
+        // handler's parseBody returns nothing, and onCompleted keeps the body only as
+        // http_result["error_body"]. Source: llcorehttputil.cpp:270-325 HttpCoroHandler::onCompleted.
+        // Reading it here lets a refusal show the service's own words and hand back its copy of
+        // the image, instead of the bare status text — Paul's "Conflict" on every move, 10-02.
+        const std::string text = httpResults["error_body"].asString();
+        reply = json_to_llsd(LLSD::Binary(text.begin(), text.end()));
+    }
     const std::string action = body["action"].asString();
     if (reply.isMap() && reply["success"].asBoolean() && (action == "create" || action == "update" || action == "delete"))
     {

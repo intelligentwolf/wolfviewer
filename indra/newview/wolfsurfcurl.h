@@ -62,7 +62,7 @@ public:
     void release();
 
 private:
-    struct Pt { F32 x, y, dx, dy, dist; };
+    struct Pt { F32 x, y, dx, dy, dist, height = 1.f; };   // [SURF HEIGHT 2026-10-02/] height: the painted surf height there, 0..1
     bool rebuild(F32 surf_h);
     void appendRibbon(const std::vector<Pt>& run, F32 s0);
 
@@ -76,7 +76,7 @@ private:
     S32  mRibbons = 0;
     S32  mPoints = 0;
     // build scratch
-    std::vector<F32> mPos, mUV, mDir, mDist;
+    std::vector<F32> mPos, mUV, mDir, mDist, mHeight;   // [SURF HEIGHT 2026-10-02/] mHeight -> texcoord2.y
     std::vector<U16> mIdx;
 };
 

@@ -3388,8 +3388,8 @@ bool idle_startup()
         // </WolfViewer>
 
         // [UPDATE CHECK 2026-09-12] Once per run, and only now: the network is up, the user is
-        // in-world, and a dialog here is seen rather than lost behind the login screen. It never
-        // downloads anything — it offers the download page and the user decides.
+        // in-world, and a dialog here is seen rather than lost behind the login screen.
+        // <WolfViewer 2026-10-02/> It now fetches and installs on request (wolfupdate.h).
         WolfUpdate::checkOnce();
 
         // <FS:Ansariel> Draw Distance stepping; originally based on SpeedRez by Henri Beauchamp, licensed under LGPL

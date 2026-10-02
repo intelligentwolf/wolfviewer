@@ -6694,6 +6694,164 @@ Are you sure you want to quit?
     </form>
   </notification>
 
+  <!-- [UPDATER 2026-10-02] wolfupdate.cpp. One release offered per run; "Skip this version"
+       stores WolfViewerUpdateSkipped. Failures are alertmodal and stay until dismissed. -->
+  <notification
+   icon="alertmodal.tga"
+   name="WolfUpdateAvailable"
+   type="alertmodal">
+WolfViewer [NAME] (w[LATEST]) is available. You are running w[MINE].
+
+Update now downloads it ([SIZE] MB) in the background. You can keep playing, and you will be asked before anything restarts.
+    <form name="form">
+      <button
+       default="true"
+       index="0"
+       name="Update"
+       text="Update now"/>
+      <button
+       index="1"
+       name="Later"
+       text="Later"/>
+      <button
+       index="2"
+       name="Skip"
+       text="Skip this version"/>
+    </form>
+  </notification>
+
+  <notification
+   icon="notifytip.tga"
+   name="WolfUpdateDownloading"
+   log_to_chat="false"
+   type="notifytip">
+Downloading WolfViewer [NAME] ([SIZE] MB) in the background. You will be asked before it is installed.
+  </notification>
+
+  <notification
+   icon="alertmodal.tga"
+   name="WolfUpdateReady"
+   type="alertmodal">
+WolfViewer [NAME] (w[LATEST]) is downloaded and checked.
+
+Restart and update closes WolfViewer, installs the new version and starts it again. Your settings, saved logins and chat logs are kept. On Windows, Windows will ask for permission to install.
+    <form name="form">
+      <button
+       default="true"
+       index="0"
+       name="Restart"
+       text="Restart and update"/>
+      <button
+       index="1"
+       name="Later"
+       text="Later"/>
+      <button
+       index="2"
+       name="Skip"
+       text="Skip this version"/>
+    </form>
+  </notification>
+
+  <notification
+   icon="alertmodal.tga"
+   name="WolfUpdateReadyMac"
+   type="alertmodal">
+WolfViewer [NAME] (w[LATEST]) is downloaded and checked.
+
+Open installer shows it in Finder. Drag WolfViewer onto Applications and choose Replace, then quit WolfViewer and start it again. Your settings and saved logins are kept.
+    <form name="form">
+      <button
+       default="true"
+       index="0"
+       name="Open"
+       text="Open installer"/>
+      <button
+       index="1"
+       name="Later"
+       text="Later"/>
+      <button
+       index="2"
+       name="Skip"
+       text="Skip this version"/>
+    </form>
+  </notification>
+
+  <notification
+   icon="notifytip.tga"
+   name="WolfUpdateInstalling"
+   log_to_chat="false"
+   type="notifytip">
+Installing WolfViewer [NAME]. WolfViewer will restart when it is ready.
+  </notification>
+
+  <notification
+   icon="alertmodal.tga"
+   name="WolfUpdatePackaged"
+   type="alertmodal">
+WolfViewer [NAME] (w[LATEST]) is available. You are running w[MINE].
+
+You installed WolfViewer from the Wolf Territories package repository, so your system's software updater will offer it with your other updates.
+    <usetemplate
+     name="okbutton"
+     yestext="OK"/>
+  </notification>
+
+  <notification
+   icon="alertmodal.tga"
+   name="WolfUpdateManual"
+   type="alertmodal">
+WolfViewer [NAME] (w[LATEST]) is available. You are running w[MINE].
+
+WolfViewer is installed in [DIR], which your account cannot change, so it cannot update itself. Download the new version, or install WolfViewer from the Wolf Territories package repository so your system keeps it up to date.
+    <form name="form">
+      <button
+       default="true"
+       index="0"
+       name="Download"
+       text="Open download page"/>
+      <button
+       index="1"
+       name="Later"
+       text="Later"/>
+      <button
+       index="2"
+       name="Skip"
+       text="Skip this version"/>
+    </form>
+  </notification>
+
+  <notification
+   icon="alertmodal.tga"
+   name="WolfUpdateFailed"
+   type="alertmodal">
+The WolfViewer update could not be completed: [REASON]
+
+The version you are running is unchanged. You can try again next time you log in, or download it from the website.
+    <form name="form">
+      <button
+       default="true"
+       index="0"
+       name="OK"
+       text="OK"/>
+      <button
+       index="1"
+       name="Download"
+       text="Open download page"/>
+    </form>
+  </notification>
+
+  <notification
+   icon="alertmodal.tga"
+   name="WolfUpdateUnsavedPaint"
+   type="alertmodal">
+You have unsaved ground paint on [REGION]. Restarting to update would lose it.
+
+Press Save in the Build floater's Paint tab, then choose Restart and update again from the update message next time you log in.
+    <usetemplate
+     name="okbutton"
+     yestext="OK"/>
+  </notification>
+
   <!-- [WolfViewer 2026-09-11] Raised by LLAppViewer::userQuit instead of ConfirmQuit when
        WolfTerrainPaint::hasUnsavedPaint: the ground-paint working copy lives in memory only.
        Not ignorable on purpose — losing paint is not something to click through once and forget. -->

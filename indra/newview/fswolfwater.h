@@ -75,6 +75,10 @@ class FSWolfWater : public LLSingleton<FSWolfWater>
 public:
     /** The keyword, matched case-insensitively anywhere in a description. */
     static const std::string KEYWORD;
+    // <WolfViewer 2026-10-02> Which prims are asked about: inside draw distance AND within
+    // NEAR_M + PER_METRE_M x the prim's longest side, in metres (see FSWolfWater::sweep).
+    static constexpr F32 NEAR_M = 64.f;
+    static constexpr F32 PER_METRE_M = 32.f;
 
     /** Called every frame from LLAppViewer::idle(). Rate-limits itself. */
     void idle();

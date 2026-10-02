@@ -97,96 +97,189 @@ WolfWeatherPartSource::WolfWeatherPartSource() : LLViewerPartSource(LL_PART_SOUR
 // shouldAddPart() cap, LLViewerPart::init, addPart). The simulation integrates mVelocity and
 // mAccel itself (llviewerpartsim.cpp:350-352) and applies the region wind to LL_PART_WIND_MASK
 // particles (:317-318), so snow needs no callback.
-// THE ROOF TEST (Paul: "rain and snow must not go inside houses or buildings"). A grid of
-// LANDING_N x LANDING_N cells over the weather box round the camera; for each cell one ray is
-// cast straight DOWN from above the box through the world (gPipeline.lineSegmentIntersectInWorld,
-// the pick's own object raycast), and the higher of that hit and the land
-// (LLWorld::resolveLandHeightAgent) is where weather in that cell lands. A particle is only
-// spawned above its cell's landing height and is given exactly the lifetime it needs to fall
-// to it, so nothing ever falls through a roof and the room under it stays dry. A few rays per
-// frame (LANDING_RAYS_PER_FRAME) so a full refresh takes well under a second and no frame pays
-// for all of it. Source: wolfstorm environment_manager.js _updateLanding / _landingZ.
-void WolfWeatherPartSource::updateLanding(const LLVector3& cam, F32 half_xy, F32 top)
+// THE ROOF TEST (Paul: "rain and snow must not go inside houses or buildings"). The roof grid
+// (WolfRoofGrid, below) over the weather box round the camera: a particle is only spawned above
+// its cell's landing height, and lives only until its own path meets a roof or the ground
+// (pathLife), so nothing falls through a roof and the room under it stays dry. A few rays per
+// frame so a full refresh takes well under a second and no frame pays for all of it.
+// Source: wolfstorm environment_manager.js _updateLanding / _landingZ.
+
+// ── WolfRoofGrid ─────────────────────────────────────────────────────────────────────────
+
+void WolfRoofGrid::configure(S32 n, F32 half_m)
 {
-    if (!mLandingInit)
+    if (n == mN && half_m == mHalf) return;
+    mN = n;
+    mHalf = half_m;
+    mCell = (2.f * half_m) / (F32)n;
+    clear();
+}
+
+void WolfRoofGrid::clear()
+{
+    mLand.assign((size_t)mN * mN, UNKNOWN);
+    mGround.assign((size_t)mN * mN, NOTHING);
+    mAnchored = false;
+    mNext = 0;
+    mCameraCell = -1;
+}
+
+LLVector3 WolfRoofGrid::originAgent() const
+{
+    const LLVector3d g(mOriginX, mOriginY, 0.0);
+    LLVector3 a = gAgent.getPosAgentFromGlobal(g);
+    a.mV[VZ] = 0.f;
+    return a;
+}
+
+// The corner in agent space as of the last update(): landingAt runs per step of every drop's
+// path (a blizzard is thousands a frame), so it must not convert from global each call. The agent
+// frame only moves on a region change, and update() runs first in every frame that emits.
+
+F32 WolfRoofGrid::landingAt(F32 x_agent, F32 y_agent) const
+{
+    if (!ready()) return UNKNOWN;
+    const S32 cx = (S32)floorf((x_agent - mOriginAgent.mV[VX]) / mCell);
+    const S32 cy = (S32)floorf((y_agent - mOriginAgent.mV[VY]) / mCell);
+    if (cx < 0 || cy < 0 || cx >= mN || cy >= mN) return UNKNOWN;
+    return mLand[cy * mN + cx];
+}
+
+void WolfRoofGrid::update(const LLVector3& cam, S32 rays)
+{
+    if (mN <= 0 || !gAgent.getRegion()) return;
+    // Snap the south-west corner to whole cells in GLOBAL metres, and slide what is stored when
+    // that corner moves: a cell keeps meaning the same patch of ground for as long as it is in
+    // the grid. Source of the bug this replaces: see the class comment in wolfweather.h.
+    const LLVector3d cam_g = gAgent.getPosGlobalFromAgent(cam);
+    const F64 cell = (F64)mCell;
+    const F64 ox = floor((cam_g.mdV[VX] - (F64)mHalf) / cell) * cell;
+    const F64 oy = floor((cam_g.mdV[VY] - (F64)mHalf) / cell) * cell;
+    if (!mAnchored)
     {
-        for (F32& z : mLandingZ) z = -1e9f;
-        mLandingInit = true;
+        mOriginX = ox; mOriginY = oy;
+        mAnchored = true;
     }
-    const F32 cell = (2.f * half_xy) / (F32)LANDING_N;
-    // [2026-09-13] THE CAMERA'S OWN CELL IS RE-RAYED EVERY FRAME, before the round-robin and in
-    // addition to it. The round-robin refreshes 6 of 144 cells a frame, so a full sweep is 24
-    // frames — walk through a door and the rain kept falling on you until the grid caught up,
-    // because your cell still held the height it had outdoors. Whatever is above your head is
-    // now never more than one frame stale, and stepping under a roof stops the weather on you
-    // at once. Source: wolfstorm environment_manager.js _updateLanding (cameraCell), the web
-    // viewer's own fix, ported for parity (Paul: "NO WEATHER CAN ENTER A BUILDING").
-    const S32 camera_cell = (LANDING_N / 2) * LANDING_N + (LANDING_N / 2);
-    for (S32 r = -1; r < LANDING_RAYS_PER_FRAME; ++r)
+    else if (ox != mOriginX || oy != mOriginY)
     {
-        S32 k;
-        if (r < 0)
+        const S32 dx = (S32)floor((ox - mOriginX) / cell + 0.5);
+        const S32 dy = (S32)floor((oy - mOriginY) / cell + 0.5);
+        std::vector<F32> land((size_t)mN * mN, UNKNOWN), ground((size_t)mN * mN, NOTHING);
+        for (S32 y = 0; y < mN; ++y)
         {
-            k = camera_cell;
+            const S32 sy = y + dy;
+            if (sy < 0 || sy >= mN) continue;
+            for (S32 x = 0; x < mN; ++x)
+            {
+                const S32 sx = x + dx;
+                if (sx < 0 || sx >= mN) continue;
+                land[y * mN + x] = mLand[sy * mN + sx];
+                ground[y * mN + x] = mGround[sy * mN + sx];
+            }
         }
-        else
-        {
-            k = mLandingNext;
-            mLandingNext = (mLandingNext + 1) % (LANDING_N * LANDING_N);
-        }
-        const S32 cx = k % LANDING_N, cy = k / LANDING_N;
-        const F32 wx = cam.mV[VX] - half_xy + ((F32)cx + 0.5f) * cell;
-        const F32 wy = cam.mV[VY] - half_xy + ((F32)cy + 0.5f) * cell;
-        F32 land_z = -1e9f;
-        const LLVector3 probe(wx, wy, cam.mV[VZ]);
-        if (gAgent.getRegion())
-        {
-            land_z = LLWorld::getInstance()->resolveLandHeightAgent(probe);
-        }
-        LLVector4a start, end, hit;
-        // <WolfViewer 2026-09-20> The ray starts ROOF_PROBE_ABOVE_M above the camera, not just
-        // above the weather box (top + 20 m, i.e. ~38 m): a mesh hall or a sculpted tower
-        // roof higher than that was never on the ray, the ray hit the floor instead, and it
-        // rained indoors (Paul: "snow is falling inside buildings and rain if they have mesh
-        // or sculpty rooves"). And LLVOVolume::sWolfRoofProbe lets the probe see prims whose
-        // click action is "Ignore", which the pick raycast otherwise skips.
-        const LLVector3 s3(wx, wy, cam.mV[VZ] + ROOF_PROBE_ABOVE_M), e3(wx, wy, cam.mV[VZ] - 60.f);
-        start.load3(s3.mV);
-        end.load3(e3.mV);
-        // pick_transparent true: a transparent prim is most often a window, and rain must not
-        // fall THROUGH a roof that happens to carry alpha. pick_unselectable true: builds are
-        // often locked / no-select.
-        LLVOVolume::sWolfRoofProbe = true;
-        const bool roof_hit = gPipeline.lineSegmentIntersectInWorld(start, end, true, false, true, false, NULL, NULL, NULL, &hit, NULL, NULL, NULL);
-        LLVOVolume::sWolfRoofProbe = false;
-        if (roof_hit)
-        {
-            const F32 hz = hit.getF32ptr()[2];
-            if (hz > land_z) land_z = hz;
-        }
-        mLandingZ[k] = land_z;
+        mLand.swap(land);
+        mGround.swap(ground);
+        mOriginX = ox; mOriginY = oy;
+    }
+    // The camera's own cell every frame, before the round-robin and in addition to it, so what is
+    // above your head is never more than a frame old: step under a roof and the weather on you
+    // stops at once (2026-09-13, environment_manager.js _updateLanding cameraCell).
+    mOriginAgent = originAgent();
+    const LLVector3& o = mOriginAgent;
+    const S32 ccx = (S32)floorf((cam.mV[VX] - o.mV[VX]) / mCell);
+    const S32 ccy = (S32)floorf((cam.mV[VY] - o.mV[VY]) / mCell);
+    mCameraCell = (ccx >= 0 && ccy >= 0 && ccx < mN && ccy < mN) ? ccy * mN + ccx : -1;
+    if (mCameraCell >= 0) rayCell(mCameraCell, cam.mV[VZ]);
+    // Unanswered cells first (a slide just exposed a strip of them, where nothing may fall until
+    // a ray has looked), then the oldest answers round-robin.
+    const S32 cells = mN * mN;
+    S32 r = 0;
+    for (S32 k = 0; k < cells && r < rays; ++k)
+    {
+        if (mLand[k] >= UNKNOWN) { rayCell(k, cam.mV[VZ]); ++r; }
+    }
+    for (; r < rays; ++r)
+    {
+        const S32 k = mNext;
+        mNext = (mNext + 1) % cells;
+        rayCell(k, cam.mV[VZ]);
     }
 }
 
-F32 WolfWeatherPartSource::landingZ(const LLVector3& cam, F32 x, F32 y, F32 half_xy) const
+void WolfRoofGrid::rayCell(S32 k, F32 camera_z)
 {
-    if (!mLandingInit) return -1e9f;
-    const F32 cell = (2.f * half_xy) / (F32)LANDING_N;
-    const S32 cx = (S32)floorf((x - (cam.mV[VX] - half_xy)) / cell);
-    const S32 cy = (S32)floorf((y - (cam.mV[VY] - half_xy)) / cell);
-    if (cx < 0 || cy < 0 || cx >= LANDING_N || cy >= LANDING_N) return -1e9f;
-    return mLandingZ[cy * LANDING_N + cx];
+    const LLVector3& o = mOriginAgent;
+    const S32 cx = k % mN, cy = k / mN;
+    const F32 wx = o.mV[VX] + ((F32)cx + 0.5f) * mCell;
+    const F32 wy = o.mV[VY] + ((F32)cy + 0.5f) * mCell;
+    const LLVector3 probe(wx, wy, camera_z);
+    const F32 ground = LLWorld::getInstance()->resolveLandHeightAgent(probe);
+    F32 land = ground;
+    LLVector4a start, end, hit;
+    // <WolfViewer 2026-09-20> The ray starts ROOF_PROBE_ABOVE_M above the camera: a mesh hall or
+    // a sculpted tower roof higher than the weather box was never on a shorter ray (Paul: "snow is
+    // falling inside buildings and rain if they have mesh or sculpty rooves"). pick_transparent
+    // true: a transparent prim is most often a window, and rain must not fall THROUGH a roof that
+    // carries alpha. pick_unselectable true: builds are often locked / no-select. sWolfRoofProbe:
+    // "Ignore" prims and roofs the camera did not draw this frame count too (llvovolume.cpp,
+    // llspatialpartition.cpp LLOctreeIntersect::check).
+    const LLVector3 s3(wx, wy, camera_z + ROOF_PROBE_ABOVE_M), e3(wx, wy, camera_z - 60.f);
+    start.load3(s3.mV);
+    end.load3(e3.mV);
+    LLVOVolume::sWolfRoofProbe = true;
+    const bool roof_hit = gPipeline.lineSegmentIntersectInWorld(start, end, true, false, true, false, NULL, NULL, NULL, &hit, NULL, NULL, NULL);
+    LLVOVolume::sWolfRoofProbe = false;
+    if (roof_hit)
+    {
+        const F32 hz = hit.getF32ptr()[2];
+        if (hz > land) land = hz;
+    }
+    mLand[k] = land;
+    mGround[k] = ground;
 }
 
-// [LIGHTNING 2026-09-13] The camera's cell is re-rayed every frame (updateLanding above), so
-// this is at most one frame stale. The ray starts above the weather box and stops at the first
-// surface; a landing height ABOVE the camera can only be a roof (or a bridge, a deck) over it.
+// ── the falling weather ──────────────────────────────────────────────────────────────────
+
+F32 WolfWeatherPartSource::pathLife(const LLVector3& pos, const LLVector3& vel, F32 max_age) const
+{
+    if (max_age <= 0.f || !mRoofs.ready()) return 0.f;
+    // Steps no longer than half a cell sideways, so the path cannot hop a wall-sized cell; at
+    // least 8 so a near-vertical fall is still checked against its own column on the way down.
+    const F32 h_speed = sqrtf(vel.mV[VX] * vel.mV[VX] + vel.mV[VY] * vel.mV[VY]);
+    F32 dt = max_age / 8.f;
+    if (h_speed > 0.f) dt = llmin(dt, 0.5f * mRoofs.cell() / h_speed);
+    dt = llmax(dt, 0.005f);
+    F32 prev_t = 0.f, prev_gap = 0.f;
+    for (S32 i = 0; i <= 2048; ++i)
+    {
+        const F32 t = llmin((F32)i * dt, max_age);
+        const LLVector3 p = pos + vel * t;
+        const F32 land = mRoofs.landingAt(p.mV[VX], p.mV[VY]);
+        // Unknown ground, or out of the box: the drop ends here (at birth: not born at all).
+        if (land >= WolfRoofGrid::UNKNOWN) return t;
+        const F32 gap = p.mV[VZ] - land;
+        if (gap <= 0.f)
+        {
+            if (i == 0) return 0.f;
+            // Between the last step above it and this one, where the fall met it.
+            return prev_t + (t - prev_t) * (prev_gap / llmax(prev_gap - gap, 1.e-4f));
+        }
+        prev_t = t; prev_gap = gap;
+        if (t >= max_age) break;
+    }
+    return max_age;
+}
+
+// [LIGHTNING 2026-09-13] The camera's cell is re-rayed every frame (WolfRoofGrid::update), so this
+// is at most one frame stale. A landing height ABOVE the camera can only be a roof (or a bridge, a
+// deck) over it.
 bool WolfWeatherPartSource::cameraUnderRoof() const
 {
-    if (!mLandingInit) return false;
+    const S32 k = mRoofs.cameraCell();
+    if (k < 0) return false;
     const LLVector3 cam = LLViewerCamera::getInstance()->getOrigin();
-    const S32 camera_cell = (LANDING_N / 2) * LANDING_N + (LANDING_N / 2);
-    return mLandingZ[camera_cell] > cam.mV[VZ];
+    const F32 land = mRoofs.landing(k);
+    return land < WolfRoofGrid::UNKNOWN && land > cam.mV[VZ];
 }
 
 /**
@@ -212,7 +305,9 @@ void WolfWeatherPartSource::update(const F32 dt)
     }
     const LLVector3 cam = LLViewerCamera::getInstance()->getOrigin();
     mPosAgent = cam;
-    updateLanding(cam, mMode == RAIN ? RAIN_BOX_XY_M : SNOW_BOX_XY_M, mMode == RAIN ? RAIN_TOP_M : SNOW_TOP_M);
+    // <WolfViewer 2026-10-02/> the world-anchored roof grid over this mode's box (see WolfRoofGrid)
+    mRoofs.configure(LANDING_N, mMode == RAIN ? RAIN_BOX_XY_M : SNOW_BOX_XY_M);
+    mRoofs.update(cam, LANDING_RAYS_PER_FRAME);
     // The level's rate at the profile's density. The viewer's own particle cap
     // (RenderMaxPartCount) is still the ceiling — shouldAddPart() below refuses when it is near
     // — so extreme weather still respects the resident's chosen rendering budget.
@@ -253,17 +348,18 @@ void WolfWeatherPartSource::emit(const LLVector3& cam)
         part->mPosAgent = cam + LLVector3(ll_frand(2.f * RAIN_BOX_XY_M) - RAIN_BOX_XY_M,
                                           ll_frand(2.f * RAIN_BOX_XY_M) - RAIN_BOX_XY_M,
                                           RAIN_BOTTOM_M + ll_frand(RAIN_TOP_M - RAIN_BOTTOM_M));
-        // THE GOLDEN RULE (Paul: "rain and snow must never go into houses"). Nothing spawns
-        // under a roof; a drop above one lives exactly long enough to REACH it and no longer.
-        const F32 land = landingZ(cam, part->mPosAgent.mV[VX], part->mPosAgent.mV[VY], RAIN_BOX_XY_M);
-        if (part->mPosAgent.mV[VZ] <= land) { delete part; return; }
         // A near-vertical fall leaning on the wind, every drop at its own speed.
         const F32 speed = RAIN_SPEED_BY_LEVEL[mLevel] * vel_k * (0.85f + ll_frand(0.3f));
         part->mVelocity = LLVector3(w.mV[VX] + ll_frand(1.6f) - 0.8f,
                                     w.mV[VY] + ll_frand(1.6f) - 0.8f,
                                     -speed);
         part->mAccel = LLVector3::zero;
-        part->mMaxAge = llmin(RAIN_AGE_S, (part->mPosAgent.mV[VZ] - land) / speed);
+        // THE GOLDEN RULE (Paul: "rain and snow must never go into houses"). Nothing spawns
+        // under a roof, and a drop lives exactly until its own path reaches a roof or the
+        // ground — never through a wall on the wind (pathLife, 2026-10-02).
+        const F32 life = pathLife(part->mPosAgent, part->mVelocity, RAIN_AGE_S);
+        if (life <= 0.f) { delete part; return; }
+        part->mMaxAge = life;
         // A streak, not a dot: oriented along the velocity. 7 cm wide — the first cut's 2.5 cm
         // was below a pixel at any distance and the rain was invisible (Paul: "snowing worked
         // ... raining did not"; snow is 9 cm). Size scales both, so heavier rain is fatter as
@@ -285,18 +381,17 @@ void WolfWeatherPartSource::emit(const LLVector3& cam)
         part->mPosAgent = cam + LLVector3(ll_frand(2.f * SNOW_BOX_XY_M) - SNOW_BOX_XY_M,
                                           ll_frand(2.f * SNOW_BOX_XY_M) - SNOW_BOX_XY_M,
                                           SNOW_BOTTOM_M + ll_frand(SNOW_TOP_M - SNOW_BOTTOM_M));
-        // THE GOLDEN RULE again: no flake is born below the roof above it, and none outlives
-        // the fall to its own landing height.
-        const F32 land = landingZ(cam, part->mPosAgent.mV[VX], part->mPosAgent.mV[VY], SNOW_BOX_XY_M);
-        if (part->mPosAgent.mV[VZ] <= land) { delete part; return; }
-        // Slow, each flake its own speed and a sideways drift on the profile's wind; the
-        // LL_PART_WIND_MASK below lets the region wind push it as well.
+        // Slow, each flake its own speed and a sideways drift on the profile's wind.
         const F32 speed = SNOW_SPEED_BY_LEVEL[mLevel] * vel_k * (0.6f + ll_frand(0.8f));
         part->mVelocity = LLVector3(w.mV[VX] + ll_frand(1.0f) - 0.5f,
                                     w.mV[VY] + ll_frand(1.0f) - 0.5f,
                                     -speed);
         part->mAccel = LLVector3::zero;
-        part->mMaxAge = llmin(SNOW_AGE_S, (part->mPosAgent.mV[VZ] - land) / speed);
+        // THE GOLDEN RULE again: no flake is born below a roof, and none outlives its own path
+        // to a roof or the ground (pathLife, 2026-10-02).
+        const F32 life = pathLife(part->mPosAgent, part->mVelocity, SNOW_AGE_S);
+        if (life <= 0.f) { delete part; return; }
+        part->mMaxAge = life;
         part->mScale.set(0.09f * size_k, 0.09f * size_k);
         part->mStartScale = part->mScale;
         part->mEndScale = part->mScale;
@@ -305,7 +400,12 @@ void WolfWeatherPartSource::emit(const LLVector3& cam)
         part->mColor = part->mStartColor;
         // [2026-09-12] NOT emissive, for the same reason as the rain above: snow that lights
         // itself is glowing white confetti at night instead of snow.
-        part->mFlags = LLViewerPart::LL_PART_INTERP_COLOR_MASK | LLViewerPart::LL_PART_WIND_MASK;
+        // <WolfViewer 2026-10-02> No LL_PART_WIND_MASK any more. It steers the flake towards the
+        // region wind at 10% a second (llviewerpartsim.cpp:315-318), over a fall of up to
+        // SNOW_AGE_S, so its path could not be known when it was born — and a path that cannot be
+        // known cannot be stopped at the roof it crosses: snow drifted in through walls. The drift
+        // is the profile's own wind() above, fixed at birth.
+        part->mFlags = LLViewerPart::LL_PART_INTERP_COLOR_MASK;
     }
     part->mParameter = 0.f;
     LLViewerPartSim::getInstance()->addPart(part);
@@ -657,45 +757,25 @@ void WolfWeather::updateSnowCover(F64 now)
     }
 }
 
-// Source: WolfWeatherPartSource::updateLanding (the precipitation's roof test) and
-// environment_manager.js updateSnowCover: the camera's own cell every frame, the rest round
-// robin; each cell = the higher of the land and the first thing a ray from above hits.
+// Source: the precipitation's roof test and environment_manager.js updateSnowCover: the camera's
+// own cell every frame, the rest round robin; each cell = the higher of the land and the first
+// thing a ray from above hits. <WolfViewer 2026-10-02/> One WolfRoofGrid, world-anchored, so the
+// cover grid no longer slides under the snow when the camera moves (wolfweather.h).
 void WolfWeather::updateShelter()
 {
     if (!mShelterInit)
     {
-        for (F32& z : mShelterZ) z = -1e9f;
-        mShelterData.assign((size_t)SHELTER_N * SHELTER_N, 255);
+        mShelter.configure(SHELTER_N, SHELTER_HALF_M);
+        mShelterData.assign((size_t)SHELTER_N * SHELTER_N, 0);
         mShelterInit = true;
     }
-    const LLVector3 cam = LLViewerCamera::getInstance()->getOrigin();
-    mShelterCam = cam;
-    const F32 cell = (2.f * SHELTER_HALF_M) / (F32)SHELTER_N;
-    const S32 camera_cell = (SHELTER_N / 2) * SHELTER_N + (SHELTER_N / 2);
-    for (S32 r = -1; r < SHELTER_RAYS_PER_FRAME; ++r)
+    mShelter.update(LLViewerCamera::getInstance()->getOrigin(), SHELTER_RAYS_PER_FRAME);
+    // Rebuilt whole each frame (256 bytes): a slide moves every cell at once. A cell no ray has
+    // answered yet stays bare — snow on a floor is the complaint, not a dry patch outdoors.
+    for (S32 k = 0; k < SHELTER_N * SHELTER_N; ++k)
     {
-        S32 k;
-        if (r < 0) k = camera_cell;
-        else { k = mShelterNext; mShelterNext = (mShelterNext + 1) % (SHELTER_N * SHELTER_N); }
-        const S32 cx = k % SHELTER_N, cy = k / SHELTER_N;
-        const F32 wx = cam.mV[VX] - SHELTER_HALF_M + ((F32)cx + 0.5f) * cell;
-        const F32 wy = cam.mV[VY] - SHELTER_HALF_M + ((F32)cy + 0.5f) * cell;
-        const LLVector3 probe(wx, wy, cam.mV[VZ]);
-        const F32 ground = LLWorld::getInstance()->resolveLandHeightAgent(probe);
-        F32 landing = -1e9f;
-        LLVector4a start, end, hit;
-        const LLVector3 s3(wx, wy, cam.mV[VZ] + ROOF_PROBE_ABOVE_M), e3(wx, wy, cam.mV[VZ] - 60.f);   // <WolfViewer 2026-09-20/> same reach as updateLanding
-        start.load3(s3.mV);
-        end.load3(e3.mV);
-        LLVOVolume::sWolfRoofProbe = true;   // <WolfViewer 2026-09-20/>
-        const bool roof_hit = gPipeline.lineSegmentIntersectInWorld(start, end, true, false, true, false, NULL, NULL, NULL, &hit, NULL, NULL, NULL);
-        LLVOVolume::sWolfRoofProbe = false;
-        if (roof_hit)
-        {
-            landing = hit.getF32ptr()[2];
-        }
-        mShelterZ[k] = landing;
-        const U8 open = sheltered(landing, ground) ? 0 : 255;
+        const F32 landing = mShelter.landing(k);
+        const U8 open = (landing < WolfRoofGrid::UNKNOWN && !sheltered(landing, mShelter.ground(k))) ? 255 : 0;
         if (mShelterData[k] != open) { mShelterData[k] = open; mShelterDirty = true; }
     }
 }
@@ -706,7 +786,7 @@ void WolfWeather::bindSnowCover(LLGLSLShader* shader, LLViewerRegion* regionp)
     static LLStaticHashedString s_origin("wolf_shelter_origin");
     static LLStaticHashedString s_size("wolf_shelter_size");
     if (!shader) return;
-    if (mSnowCover <= 0.f || !regionp || !mShelterInit)
+    if (mSnowCover <= 0.f || !regionp || !mShelterInit || !mShelter.ready())
     {
         shader->uniform1f(s_cover, 0.f);
         return;
@@ -724,6 +804,7 @@ void WolfWeather::bindSnowCover(LLGLSLShader* shader, LLViewerRegion* regionp)
     }
     // The grid sits in agent space round the camera; the shaders work in REGION metres.
     const LLVector3 origin = regionp->getOriginAgent();
+    const LLVector3 grid = mShelter.originAgent();   // <WolfViewer 2026-10-02/> the grid's own corner
     const S32 unit = shader->enableTexture(LLShaderMgr::WOLF_SHELTER_MAP);
     if (unit > -1) gGL.getTexUnit(unit)->bindManual(LLTexUnit::TT_TEXTURE, mShelterTex);
     else LL_WARNS_ONCE("WolfWeather") << "snow cover: shader '" << shader->mName << "' has no wolfShelterMap sampler - the roof grid cannot be applied" << LL_ENDL;
@@ -731,11 +812,10 @@ void WolfWeather::bindSnowCover(LLGLSLShader* shader, LLViewerRegion* regionp)
     {
         mBindLogged = true;
         LL_INFOS("WolfWeather") << "snow cover bound to '" << shader->mName << "': sampler unit " << unit << ", texture " << mShelterTex
-                                << ", cover " << mSnowCover << ", origin " << (mShelterCam.mV[VX] - SHELTER_HALF_M - origin.mV[VX]) << "," << (mShelterCam.mV[VY] - SHELTER_HALF_M - origin.mV[VY]) << LL_ENDL;
+                                << ", cover " << mSnowCover << ", origin " << (grid.mV[VX] - origin.mV[VX]) << "," << (grid.mV[VY] - origin.mV[VY]) << LL_ENDL;
     }
     shader->uniform1f(s_cover, mSnowCover);
-    shader->uniform2f(s_origin, mShelterCam.mV[VX] - SHELTER_HALF_M - origin.mV[VX],
-                                mShelterCam.mV[VY] - SHELTER_HALF_M - origin.mV[VY]);
+    shader->uniform2f(s_origin, grid.mV[VX] - origin.mV[VX], grid.mV[VY] - origin.mV[VY]);
     shader->uniform1f(s_size, 2.f * SHELTER_HALF_M);
 }
 
@@ -777,15 +857,19 @@ void WolfWeather::sweep()
         if (objectp->isHUDAttachment() || objectp->isAttachment()) continue;
         if (objectp->getPCode() != LL_PCODE_VOLUME) continue;
         if ((objectp->getPositionAgent() - camera_pos).lengthSquared() > range_sq) continue;
+        // <WolfViewer 2026-10-02> The parcel test FIRST: only a prim in the agent's parcel can
+        // set the weather, so only those are asked about — and kept fresh, because a weather
+        // prim is typically scripted (llSetObjectDesc). Asking about every prim in draw
+        // distance and filtering afterwards sent thousands of requests for nothing.
+        if (!parcels->inAgentParcel(objectp->getPositionGlobal())) continue;
         ++n_in_range;
-        props.want(objectp);
+        props.want(objectp, true);
         const WolfObjectProps::Props* known = props.get(objectp->getID());
         if (!known) continue;
         ++n_known;
         if (!matches(known->mDescriptionLower, KEYWORD_RAIN)
             && !matches(known->mDescriptionLower, KEYWORD_SNOW)
             && !matches(known->mDescriptionLower, KEYWORD_CLEAR)) continue;
-        if (!parcels->inAgentParcel(objectp->getPositionGlobal())) continue;
         WolfWeatherProfile candidate;
         if (!candidate.fromDescription(known->mDescriptionLower)) continue;
         if (!found
@@ -818,6 +902,6 @@ void WolfWeather::sweep()
     {
         mNextStats = now + STATS_INTERVAL_SECS;
         LL_INFOS("WolfWeather") << (effective() == Mode::RAIN ? "rain" : "snow") << (mForced != Mode::NONE ? " (parcel)" : " (menu)")
-                                << ", " << n_in_range << " prims in range, " << n_known << " descriptions known" << LL_ENDL;
+                                << ", " << n_in_range << " prims in your parcel, " << n_known << " descriptions known" << LL_ENDL;
     }
 }

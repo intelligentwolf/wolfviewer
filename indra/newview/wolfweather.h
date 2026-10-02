@@ -42,11 +42,62 @@
 //
 // The weather itself is one LLViewerPartSource that follows the camera: rain as thin,
 // velocity-aligned streaks falling fast through a box round the camera, snow as small soft
-// white points falling slowly and drifting on the region wind. It rides the viewer's own
+// white points falling slowly and drifting on the weather's own wind. It rides the viewer's own
 // particle simulation (LLViewerPartSim) and its particle cap, so a heavy scene sheds weather
 // before anything else.
 class LLGLSLShader;   // <WolfViewer 2026-09-18/> bindSnowCover
 class LLViewerRegion;
+
+/**
+ * <WolfViewer 2026-10-02> THE ROOF GRID: N x N cells round the camera, each the higher of the land
+ * and the first thing a ray straight down from above hits. Shared by the falling weather and the
+ * snow on the ground (Source: the two copies it replaces, WolfWeatherPartSource::updateLanding and
+ * WolfWeather::updateShelter, 2026-09-13 / 09-18 / 09-20).
+ *
+ * ANCHORED TO THE WORLD, not to the camera. The old grids were centred on the camera, so every
+ * camera move re-meant every cell while the heights stayed where they were, and a full refresh
+ * took N*N / rays frames (24 at 24 rays a frame; ~2 s at 13 fps): rain was spawned under roofs
+ * from heights measured somewhere else (Paul 10-02: "people are still complaining about rain
+ * going in buildings"). Now the grid's corner is snapped to whole cells in GLOBAL coordinates (so
+ * a region crossing cannot shift it), a move slides the stored heights with it, and a cell no ray
+ * has answered yet is UNKNOWN — covered, never open sky.
+ */
+class WolfRoofGrid
+{
+public:
+    static constexpr F32 UNKNOWN = 1.e9f;    // not rayed yet: nothing may fall or settle here
+    static constexpr F32 NOTHING = -1.e9f;   // rayed, and nothing below (the void)
+
+    /** Size the grid; changing either clears it. */
+    void configure(S32 n, F32 half_m);
+    void clear();
+    /** Re-anchor on the camera (agent space), then ray the camera's own cell and `rays` more. */
+    void update(const LLVector3& camera_agent, S32 rays);
+    bool ready() const { return mN > 0 && mAnchored; }
+    S32  size() const { return mN; }
+    F32  cell() const { return mCell; }
+    /** Landing height (agent z) of the cell holding this agent-space point; UNKNOWN outside the grid. */
+    F32  landingAt(F32 x_agent, F32 y_agent) const;
+    F32  landing(S32 k) const { return mLand[k]; }
+    F32  ground(S32 k) const { return mGround[k]; }
+    /** The grid's south-west corner in agent space. */
+    LLVector3 originAgent() const;
+    /** The cell the camera stands in, or -1. */
+    S32  cameraCell() const { return mCameraCell; }
+
+private:
+    void rayCell(S32 k, F32 camera_z);
+    S32  mN = 0;
+    F32  mHalf = 0.f;
+    F32  mCell = 0.f;
+    bool mAnchored = false;
+    F64  mOriginX = 0.0, mOriginY = 0.0;   // global metres of cell (0,0)'s corner
+    LLVector3 mOriginAgent;                // that corner in agent space, as of the last update()
+    S32  mNext = 0;
+    S32  mCameraCell = -1;
+    std::vector<F32> mLand;
+    std::vector<F32> mGround;
+};
 
 class WolfWeatherPartSource : public LLViewerPartSource
 {
@@ -83,8 +134,13 @@ public:
 
 private:
     void emit(const LLVector3& camera_pos);
-    void updateLanding(const LLVector3& camera_pos, F32 half_xy, F32 top);
-    F32  landingZ(const LLVector3& camera_pos, F32 x, F32 y, F32 half_xy) const;
+    /**
+     * <WolfViewer 2026-10-02> How long a drop starting at `pos` with constant velocity `vel` may
+     * live: until its own path first meets a roof or the ground, or `max_age`; 0 = do not spawn.
+     * Stepping along the path, not reading the start cell alone, is what stops wind carrying a
+     * drop that began outdoors through a wall and down to the floor inside.
+     */
+    F32  pathLife(const LLVector3& pos, const LLVector3& vel, F32 max_age) const;
     /** The wind the weather leans on, from the profile's movement speed. Slowly turning, so
         rain does not fall in one fixed diagonal for the whole session. */
     LLVector3 wind() const;
@@ -93,9 +149,7 @@ private:
     WolfWeatherProfile mProfile;
     F32  mAge = 0.f;     // seconds this source has been alive, for the wind's rotation
     F32  mCarry = 0.f;   // fractional particles carried to the next frame
-    F32  mLandingZ[LANDING_N * LANDING_N];   // agent-space landing height per cell (-1e9 = nothing below)
-    S32  mLandingNext = 0;
-    bool mLandingInit = false;
+    WolfRoofGrid mRoofs;   // <WolfViewer 2026-10-02/> was mLandingZ / mLandingNext / mLandingInit
 };
 
 class WolfWeather : public LLSingleton<WolfWeather>
@@ -247,11 +301,9 @@ private:
     F64  mCoverPendingSince = 0.0;
     U32  mCoverPendingSweep = 0;
     U32  mSweepCount = 0;
-    F32  mShelterZ[SHELTER_N * SHELTER_N];
+    WolfRoofGrid mShelter;                 // <WolfViewer 2026-10-02/> was mShelterZ / mShelterNext / mShelterCam
     bool mShelterInit = false;
-    S32  mShelterNext = 0;
-    LLVector3 mShelterCam;                 // agent-space camera the grid is centred on
-    std::vector<U8> mShelterData;          // SHELTER_N^2, 255 open sky / 0 sheltered
+    std::vector<U8> mShelterData;          // SHELTER_N^2, 255 open sky / 0 sheltered (or not rayed yet)
     U32  mShelterTex = 0;
     bool mShelterDirty = false;
     bool mBindLogged = false;

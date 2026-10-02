@@ -14,7 +14,7 @@
 // position  = ribbon base on the break contour (region metres, z unused)
 // texcoord0 = (s along the line in metres, u across the profile 0..1)
 // texcoord1 = direction of travel (toward land)
-// texcoord2 = (distance to land at the base, 0)
+// texcoord2 = (distance to land at the base, painted surf height there 0..1)   [SURF HEIGHT 2026-10-02]
 
 uniform mat4 modelview_projection_matrix;
 
@@ -66,6 +66,8 @@ void main()
     float crestVar = 0.85 + 0.15 * sin(dot(base, across) * (1.1 / lambda) + time * 0.1);
     float ksh = clamp(sqrt(0.5 * (k / max(k0, 1e-6)) / max(nGrp, 1e-4)), 1.0, 1.8);   // <WolfViewer 2026-10-01/> floor 1, waterV.glsl same
     float crestH = min(surfHeight * setEnv * ksh * crestVar, surfHeight * 1.15);
+    // [SURF HEIGHT 2026-10-02] the area's own surf height, as the sea's surfZone scales it
+    crestH *= clamp(texcoord2.y, 0.0, 1.0);
     float Hmax = 0.78 * h;   // <WolfViewer 2026-10-01/> McCowan on the real depth, waterV.glsl same
     crestH = min(crestH, Hmax);
     crestH *= smoothstep(0.2, 0.6 + 0.5 * surfHeight, h);

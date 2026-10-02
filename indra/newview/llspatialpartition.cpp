@@ -4016,7 +4016,13 @@ public:
     {
         LLDrawable* drawable = (LLDrawable*)entry->getDrawable();
 
-        if (!drawable || !gPipeline.hasRenderType(drawable->getRenderType()) || !drawable->isVisible())
+        // <WolfViewer 2026-10-02> The weather's roof probe (LLVOVolume::sWolfRoofProbe) must see a
+        // roof whether or not the camera drew it this frame: isVisible() is this frame's camera
+        // cull (llvieweroctree.cpp:406, :761), and the roof over a room is off screen whenever you
+        // look across the room — so the ray missed it and rain fell indoors, even under a plain
+        // prim laid over the building (Paul, 10-02).
+        if (!drawable || !gPipeline.hasRenderType(drawable->getRenderType())
+            || (LLVOVolume::sWolfRoofProbe ? drawable->isDead() : !drawable->isVisible()))
         {
             return false;
         }
@@ -4037,7 +4043,9 @@ public:
             if (vobj &&
                 (!vobj->isReflectionProbe() || mPickReflectionProbe))
             {
-                if (vobj->getClickAction() == CLICK_ACTION_IGNORE && !LLFloater::isVisible(gFloaterTools))
+                // <WolfViewer 2026-10-02/> the roof probe sees "Ignore" prims here too; the 09-20 fix
+                // only lifted the copy of this test in LLVOVolume::lineSegmentIntersect.
+                if (vobj->getClickAction() == CLICK_ACTION_IGNORE && !LLFloater::isVisible(gFloaterTools) && !LLVOVolume::sWolfRoofProbe)
                 {
                     return false;
                 }

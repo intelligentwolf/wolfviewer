@@ -31,6 +31,7 @@
 
 #include "llviewertexturelist.h"
 #include "math.h"   // log()
+#include "wolfmapglobe.h"   // <WolfViewer 2026-10-02/>
 
 // <FS:CR> HG maps
 #include "lfsimfeaturehandler.h"
@@ -205,6 +206,10 @@ LLPointer<LLViewerFetchedTexture> LLWorldMipmap::loadObjectsTile(U32 grid_x, U32
     //LL_INFOS("MAPURL") << "fetching map tile from " << imageurl << LL_ENDL;
 
     img->setBoostLevel(LLGLTexture::BOOST_MAP);
+
+    // <WolfViewer 2026-10-02/> Wolf Territories: keep the decoded pixels, so the map can make the
+    // tile's water see-through over the animated sea (wolfmapglobe.cpp). No-op on other grids.
+    WolfMapGlobe::instance().prepareTile(img.get());
 
     // Return the smart pointer
     return img;

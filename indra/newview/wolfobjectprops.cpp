@@ -60,7 +60,7 @@ const WolfObjectProps::Props* WolfObjectProps::get(const LLUUID& object_id) cons
 }
 
 // Source: object_props_harvester.js want()
-void WolfObjectProps::want(LLViewerObject* objectp)
+void WolfObjectProps::want(LLViewerObject* objectp, bool keep_fresh)
 {
     if (!objectp || objectp->isDead())
     {
@@ -77,8 +77,13 @@ void WolfObjectProps::want(LLViewerObject* objectp)
     Want w;
     if (mProps.count(id))
     {
-        // Answered. Only worth asking again once the answer is old enough to be suspect,
-        // and only ever with budget nothing new wanted.
+        // Answered. Asked again only for a caller that is acting on it (keep_fresh, see the
+        // header), once the answer is old enough to be suspect, and only ever with budget
+        // nothing new wanted.
+        if (!keep_fresh)
+        {
+            return;
+        }
         if (rec != mAsked.end() && (now - rec->second.mSentAt) < REFRESH_SECS)
         {
             return;

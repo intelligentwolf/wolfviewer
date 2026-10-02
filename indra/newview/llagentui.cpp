@@ -323,6 +323,21 @@ bool LLAgentUI::buildLocationString(std::string& str, ELocationFormat fmt,const 
         // </FS:Ansariel> V1 format statusbar
         }
     }
+    // <WolfViewer 2026-10-02> OPEN SEA: past an edge with no region beyond it, the region still owns
+    // you (getWolfOpenSeaMeters), so its name alone would say you are on it. Say how far out you are.
+    // Never in a landmark's name.
+    if (fmt != LOCATION_FORMAT_LANDMARK && region->getWolfOpenSeaMeters() > 0.f)
+    {
+        const F32 w = region->getWidth();
+        const F32 out_x = llmax(0.f, llmax(-agent_pos_region.mV[VX], agent_pos_region.mV[VX] - w));
+        const F32 out_y = llmax(0.f, llmax(-agent_pos_region.mV[VY], agent_pos_region.mV[VY] - w));
+        const F32 out = sqrtf(out_x * out_x + out_y * out_y);
+        if (out > 0.f)
+        {
+            buffer = (out < 1000.f ? llformat("Open sea, %.0f m from ", out) : llformat("Open sea, %.1f km from ", out / 1000.f)) + buffer;
+        }
+    }
+    // </WolfViewer>
     str = buffer;
     return true;
 }

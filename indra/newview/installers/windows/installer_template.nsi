@@ -160,6 +160,8 @@ Var SKIP_DIALOGS        # Set from command line in  .onInit. autoinstall GUI and
 Var DO_UNINSTALL_V2     # If non-null, path to a previous Viewer 2 installation that will be uninstalled.
 Var NO_STARTMENU        # <FS:Ansariel> Optional start menu entry
 Var FRIENDLY_APP_NAME   # <FS:Ansariel> FIRE-30446: Set FriendlyAppName for protocols
+Var IS_UPDATE           # <WolfViewer 2026-10-02> "/UPDATE": started by the viewer's updater (wolfupdate.cpp)
+Var HAD_OLD_DESKTOP     # <WolfViewer 2026-10-02> a per-release (-wN) install being removed had a desktop shortcut
 
 # Function definitions should go before file includes, because calls to
 # DLLs like LangDLL trigger an implicit file include, so if that call is at
@@ -274,10 +276,12 @@ Function CheckCPUFlagsAVX2
     ; AVX2 not supported
     ; Replace %DLURL% in the language string with the URL
     ${WordReplace} "$(MissingAVX2)" "%DLURL%" "${DL_URL}" "+*" $3
-    MessageBox MB_OK "$3"
+    # <WolfViewer 2026-10-02> /SD everywhere: a silent install (the updater's /S) shows any
+    # MessageBox without one (NSIS Docs/src/silent.but). Silent and no AVX2: do not install.
+    MessageBox MB_OK "$3" /SD IDOK
     
-    MessageBox MB_YESNO $(AVX2OverrideConfirmation) IDNO NoInstall
-    MessageBox MB_OKCANCEL $(AVX2OverrideNote) IDCANCEL NoInstall
+    MessageBox MB_YESNO $(AVX2OverrideConfirmation) /SD IDNO IDNO NoInstall
+    MessageBox MB_OKCANCEL $(AVX2OverrideNote) /SD IDCANCEL IDCANCEL NoInstall
 
     ; User chose to proceed
     Pop $3
@@ -286,6 +290,7 @@ Function CheckCPUFlagsAVX2
     Return
 
   NoInstall:
+    IfSilent +2 0   # <WolfViewer 2026-10-02/> no browser window from a silent install
     ${OpenURL} "${DL_URL}"
     Quit
 
@@ -307,7 +312,7 @@ Function CheckCPUFlagsAVX2_Prompt
     ; Replace %DLURL% in the language string with the URL
     ${WordReplace} "$(AVX2Available)" "%DLURL%" "${DL_URL}" "+*" $3
 
-    MessageBox MB_YESNO $3 IDYES DownloadAVX2 IDNO ContinueInstall
+    MessageBox MB_YESNO $3 /SD IDNO IDYES DownloadAVX2 IDNO ContinueInstall   # <WolfViewer 2026-10-02/> silent: keep this flavour
     DownloadAVX2:
       ${OpenURL} '${DL_URL}'
       Quit
@@ -324,8 +329,13 @@ FunctionEnd
 Function dirLeave
     StrCmp $SKIP_DIALOGS "true" label_create_start_menu
 	
-    MessageBox MB_YESNO|MB_ICONQUESTION $(CreateStartMenuEntry) IDYES label_create_start_menu
+    MessageBox MB_YESNO|MB_ICONQUESTION $(CreateStartMenuEntry) IDYES label_yes_start_menu
     StrCpy $NO_STARTMENU "true"
+    Goto label_create_start_menu
+
+label_yes_start_menu:
+    # <WolfViewer 2026-10-02/> asked again: the answer now, not the one remembered in .onInit
+    StrCpy $NO_STARTMENU ""
 
 label_create_start_menu:
 
@@ -363,6 +373,12 @@ ${If} $1 != ""
     StrCpy $INSTDIR $1 $2 4	# Skip over " /D="
     Goto after_instdir
 ${EndIf}
+
+# <WolfViewer 2026-10-02> The Start Menu answer from the last install, for a silent update
+# (dirLeave asks again on an interactive one).
+ReadRegStr $0 SHELL_CONTEXT "${INSTNAME_KEY}" "NoStartMenu"
+StrCmp $0 "1" 0 +2
+  StrCpy $NO_STARTMENU "true"
 
 # if $0 is empty, this is the first time for this viewer name
 ReadRegStr $0 SHELL_CONTEXT "${INSTNAME_KEY}" ""
@@ -506,19 +522,19 @@ FunctionEnd
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 Function CheckWindowsVersion
   ${If} ${AtMostWin2003}
-    MessageBox MB_OK $(CheckWindowsVersionMB)
+    MessageBox MB_OK $(CheckWindowsVersionMB) /SD IDOK
     Quit
   ${EndIf}
 
   ${If} ${IsWinVista}
   ${AndIfNot} ${IsServicePack} 2
-    MessageBox MB_OK $(CheckWindowsVersionMB)
+    MessageBox MB_OK $(CheckWindowsVersionMB) /SD IDOK
     Quit
   ${EndIf}
 
   ${If} ${IsWin2008}
   ${AndIfNot} ${IsServicePack} 2
-    MessageBox MB_OK $(CheckWindowsVersionMB)
+    MessageBox MB_OK $(CheckWindowsVersionMB) /SD IDOK
     Quit
   ${EndIf}
 
@@ -540,6 +556,18 @@ StrCpy $INSTSHORTCUT "${SHORTCUT}"
 Call CheckIfAdministrator		# Make sure the user can install/uninstall
 Call CloseSecondLife			# Make sure Second Life not currently running
 Call CheckWillUninstallV2		# Check if Second Life is already installed
+
+# <WolfViewer 2026-10-02> Started by the viewer's updater?
+StrCpy $IS_UPDATE ""
+Push $0
+${GetParameters} $COMMANDLINE
+ClearErrors
+${GetOptions} $COMMANDLINE "/UPDATE" $0
+IfErrors +2 0
+  StrCpy $IS_UPDATE "true"
+Pop $0
+ClearErrors
+Call RemoveOldReleaseInstalls	# <WolfViewer 2026-10-02/> the per-release (-wN) installs this one replaces
 
 StrCmp $DO_UNINSTALL_V2 "" PRESERVE_DONE
 PRESERVE_DONE:
@@ -609,9 +637,17 @@ SetOutPath "$INSTDIR"
 
 Push $0
 ${GetParameters} $COMMANDLINE
+# <WolfViewer 2026-10-02> An update keeps the desktop as it was: a shortcut is made only if this
+# install already had one, or a per-release install it replaced did. Deleting it stays deleted.
+StrCmp $IS_UPDATE "true" 0 DESKTOP_NOT_UPDATE
+  IfFileExists "$DESKTOP\$INSTSHORTCUT.lnk" DESKTOP_SHORTCUT_MAKE 0
+  StrCmp $HAD_OLD_DESKTOP "true" DESKTOP_SHORTCUT_MAKE DESKTOP_SHORTCUT_DONE
+DESKTOP_NOT_UPDATE:
+ClearErrors
 ${GetOptionsS} $COMMANDLINE "/marker" $0
 # Returns error if option does not exist
 IfErrors 0 DESKTOP_SHORTCUT_DONE
+DESKTOP_SHORTCUT_MAKE:
   # "/marker" is set by updater, do not recreate desktop shortcut
   CreateShortCut "$DESKTOP\$INSTSHORTCUT.lnk" \
         "$INSTDIR\$VIEWER_EXE" "$SHORTCUT_LANG_PARAM"
@@ -629,6 +665,11 @@ CreateShortCut "$INSTDIR\Uninstall $INSTSHORTCUT.lnk" \
 
 # Write registry
 WriteRegStr SHELL_CONTEXT "${INSTNAME_KEY}" "" "$INSTDIR"
+# <WolfViewer 2026-10-02/> remembered for silent updates (.onInit)
+StrCmp $NO_STARTMENU "true" 0 +3
+  WriteRegStr SHELL_CONTEXT "${INSTNAME_KEY}" "NoStartMenu" "1"
+  Goto +2
+  DeleteRegValue SHELL_CONTEXT "${INSTNAME_KEY}" "NoStartMenu"
 WriteRegStr SHELL_CONTEXT "${INSTNAME_KEY}" "Version" "${VERSION_LONG}"
 WriteRegStr SHELL_CONTEXT "${INSTNAME_KEY}" "Shortcut" "$INSTSHORTCUT"
 WriteRegStr SHELL_CONTEXT "${INSTNAME_KEY}" "Exe" "$VIEWER_EXE"
@@ -665,7 +706,18 @@ WriteRegDWORD SHELL_CONTEXT "${MSUNINSTALL_KEY}" "NoModify" 1
 WriteRegDWORD SHELL_CONTEXT "${MSUNINSTALL_KEY}" "NoRepair" 1
 
 # <FS:Ansariel> Ask before creating protocol registry entries
+# <WolfViewer 2026-10-02> Not asked on a silent update: the links are re-pointed at this folder only
+# if they were registered before (a per-release install they pointed into may just have gone).
+IfSilent 0 url_registry_ask
+  ClearErrors
+  ReadRegStr $0 HKEY_CLASSES_ROOT "secondlife\shell\open\command" ""
+  IfErrors 0 url_registry_write
+  ClearErrors
+  ReadRegStr $0 HKEY_CLASSES_ROOT "hop\shell\open\command" ""
+  IfErrors skip_create_url_registry_entries url_registry_write
+url_registry_ask:
 MessageBox MB_YESNO|MB_ICONQUESTION $(CreateUrlRegistryEntries) IDNO skip_create_url_registry_entries
+url_registry_write:
 
 # Write URL registry info
 WriteRegStr HKEY_CLASSES_ROOT "${URLNAME}" "(default)" "URL:Second Life"
@@ -722,6 +774,114 @@ StrCmp $DO_UNINSTALL_V2 "" REMOVE_SLV2_DONE
 REMOVE_SLV2_DONE:
 
 SectionEnd
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; <WolfViewer 2026-10-02> Remove the per-release installs this one replaces.
+;;
+;; Until w52 the channel carried the release (VIEWER_CHANNEL "WolfViewer-Release-wN"), and
+;; viewer_manifest.py app_name() makes INSTNAME from the channel, so every release installed as a
+;; new program: its own folder, Start Menu folder and Add/Remove entry
+;; ("WolfViewerOS-Release-w52"). From w53 the channel is "WolfViewer-Release" and updates land in
+;; one place. Each old entry under Windows' Uninstall key whose name is ${INSTNAME}-w<digits> and
+;; whose folder still carries that same name (the default layout) is uninstalled silently: its
+;; own uninstaller keeps the user's settings and the protocol keys when silent (un.UserSettingsFiles
+;; "ifSilent Keep", un.ProgramFiles "ifSilent NoDelete"). An install in a folder of the user's own
+;; choosing is left alone: the old uninstaller deletes its whole folder when silent
+;; (un.ProgramFiles RMDir /r), and that folder may hold other things.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+!macro WolfRemoveOldReleaseInstallsIn ROOT
+  StrCpy $R0 0
+  ${Do}
+    ClearErrors
+    EnumRegKey $R1 ${ROOT} "${MSCURRVER_KEY}\Uninstall" $R0
+    ${If} ${Errors}
+    ${OrIf} $R1 == ""
+      ${ExitDo}
+    ${EndIf}
+    StrCpy $R6 "0"   # 1 = this entry was removed, so the same index now names the next one
+    StrLen $R2 "${INSTNAME}-w"
+    StrCpy $R3 $R1 $R2
+    ${If} $R3 == "${INSTNAME}-w"
+      StrCpy $R4 $R1 "" $R2          # what follows "-w": must be all digits
+      StrCpy $R9 "1"
+      ${If} $R4 == ""
+        StrCpy $R9 "0"
+      ${EndIf}
+      StrCpy $R8 0
+      ${Do}
+        StrCpy $R7 $R4 1 $R8
+        ${If} $R7 == ""
+          ${ExitDo}
+        ${EndIf}
+        ${If} $R7 S< "0"
+        ${OrIf} $R7 S> "9"
+          StrCpy $R9 "0"
+          ${ExitDo}
+        ${EndIf}
+        IntOp $R8 $R8 + 1
+      ${Loop}
+      ${If} $R9 == "1"
+        ClearErrors
+        ReadRegStr $R5 ${ROOT} "${MSCURRVER_KEY}\Uninstall\$R1" "UninstallString"
+        ${IfNot} ${Errors}
+          # '"C:\...\WolfViewerOS-Release-w52\uninst.exe"' (written quoted, see the install
+          # section's UninstallString) -> its folder
+          StrCpy $R9 $R5 1
+          ${If} $R9 == '"'
+            StrCpy $R5 $R5 "" 1
+            StrCpy $R5 $R5 -1
+          ${EndIf}
+          ${GetParent} $R5 $R7
+          ${GetFileName} $R7 $R8
+          ${If} $R8 == $R1
+          ${AndIf} ${FileExists} "$R7\uninst.exe"
+            IfFileExists "$DESKTOP\$R1.lnk" 0 +2
+              StrCpy $HAD_OLD_DESKTOP "true"
+            DetailPrint "Removing the earlier install $R1"
+            ExecWait '"$R7\uninst.exe" /S _?=$R7'
+            Delete "$R7\uninst.exe"
+            RMDir "$R7"
+            ClearErrors
+            ReadRegStr $R9 ${ROOT} "${MSCURRVER_KEY}\Uninstall\$R1" "UninstallString"
+            ${If} ${Errors}
+              StrCpy $R6 "1"
+            ${EndIf}
+          ${EndIf}
+        ${EndIf}
+      ${EndIf}
+    ${EndIf}
+    ${If} $R6 == "0"
+      IntOp $R0 $R0 + 1
+    ${EndIf}
+  ${Loop}
+!macroend
+
+Function RemoveOldReleaseInstalls
+  Push $R0
+  Push $R1
+  Push $R2
+  Push $R3
+  Push $R4
+  Push $R5
+  Push $R6
+  Push $R7
+  Push $R8
+  Push $R9
+  StrCpy $HAD_OLD_DESKTOP ""
+  !insertmacro WolfRemoveOldReleaseInstallsIn HKLM
+  !insertmacro WolfRemoveOldReleaseInstallsIn HKCU
+  ClearErrors
+  Pop $R9
+  Pop $R8
+  Pop $R7
+  Pop $R6
+  Pop $R5
+  Pop $R4
+  Pop $R3
+  Pop $R2
+  Pop $R1
+  Pop $R0
+FunctionEnd
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Uninstall Section
@@ -781,7 +941,7 @@ Function CheckIfAdministrator
     UserInfo::GetAccountType
     Pop $R0
     StrCmp $R0 "Admin" lbl_is_admin
-        MessageBox MB_OK $(CheckAdministratorInstMB)
+        MessageBox MB_OK $(CheckAdministratorInstMB) /SD IDOK
         Quit
 lbl_is_admin:
     Return
@@ -1178,14 +1338,14 @@ FunctionEnd
 Function CheckWindowsServPack
   ${If} ${IsWin7}
   ${AndIfNot} ${IsServicePack} 1
-    MessageBox MB_OK $(CheckWindowsServPackMB)
+    MessageBox MB_OK $(CheckWindowsServPackMB) /SD IDOK
     DetailPrint $(UseLatestServPackDP)
     Return
   ${EndIf}
 
   ${If} ${IsWin2008R2}
   ${AndIfNot} ${IsServicePack} 1
-    MessageBox MB_OK $(CheckWindowsServPackMB)
+    MessageBox MB_OK $(CheckWindowsServPackMB) /SD IDOK
     DetailPrint $(UseLatestServPackDP)
     Return
   ${EndIf}

@@ -71,6 +71,10 @@ class WolfWaveZones : public LLSingleton<WolfWaveZones>
     ~WolfWaveZones();
 
 public:
+    // [SURF HEIGHT 2026-10-02] surf height of a cell (fraction of surfHeight, 0 if not surf), and the
+    // surf char for a height in percent (10..100, steps of 10; 100 is 's').
+    static F32 surfScaleOf(char z);
+    static char surfCharFor(S32 percent);
     /** The base cell; a region's AUTOMATIC grid is Region::mCell (php/waves.php waves_cell). */
     static constexpr S32 CELL_M = 16;
     static constexpr S32 MAX_CELLS_EDGE = 1024;   // <WolfViewer 2026-09-18/> was 256; php/waves.php + wave_zones.js same
@@ -187,9 +191,12 @@ public:
      * <WolfViewer 2026-10-01> surf_mask, when given, receives 1 for every SURF texel (painted
      * surf, or the void past a surf edge cell) and 0 elsewhere, taken BEFORE the 3x3 blur —
      * WolfWaterField::bake grows and blurs it by a quarter of the surf wavelength for the surf weight.
+     * [SURF HEIGHT 2026-10-02] surf_scale, when given, receives each surf texel's painted height as a
+     * fraction of the region's surfHeight (surfScaleOf: 1 for 's', 0.1..0.9 for '1'..'9'; the
+     * highest under a wide texel), 0 elsewhere, also before the blur.
      */
     void fill(LLViewerRegion* regionp, F32 x0, F32 y0, F32 sx, F32 sy, S32 w, S32 h, std::vector<F32>& out,
-              std::vector<F32>* surf_mask = nullptr) const;
+              std::vector<F32>* surf_mask = nullptr, std::vector<F32>* surf_scale = nullptr) const;
     /** Zone energy for the CURRENT region at region-relative (rx, ry), for the boat rocker. */
     F32 energyAt(F32 rx, F32 ry) const;
     /** The default "open" energy, for space no layout covers. */
@@ -375,6 +382,7 @@ private:
     LLSliderCtrl*    mSetInterval = nullptr;
     LLSliderCtrl*    mCalmRipple = nullptr;
     LLSliderCtrl*    mSmallScale = nullptr;
+    LLSliderCtrl*    mSurfHere = nullptr;   // [SURF HEIGHT 2026-10-02/] surf brush height, %
     LLCheckBoxCtrl*  mEnabled = nullptr;
     LLCheckBoxCtrl*  mNaturalWater = nullptr;   // <WolfViewer 2026-09-28/> whole-region natural water switch
     LLButton*        mSave = nullptr;

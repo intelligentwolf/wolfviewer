@@ -2692,6 +2692,25 @@ void LLViewerObject::interpolateLinearMotion(const F64SecondsImplicit& frame_tim
 
             // Clip the positions to known regions
             LLVector3d clip_pos_global = LLWorld::getInstance()->clipToVisibleRegions(old_pos_global, new_pos_global);
+            // <WolfViewer 2026-10-02> OPEN SEA: a Wolf Territories region keeps a boat, a swimmer or a
+            // flyer past an edge with no region beyond it, out to getWolfOpenSeaMeters() (the server
+            // then puts them on the next region along, or wraps round). Clipping the prediction here
+            // held the object at the edge and zeroed it, and every server update snapped it forward
+            // again: a stutter for as long as you were out there. Within the limit, keep predicting.
+            const F32 open_sea = mRegionp->getWolfOpenSeaMeters();
+            bool in_open_sea = false;
+            if (open_sea > 0.f && clip_pos_global != new_pos_global)
+            {
+                const F32 w = mRegionp->getWidth();
+                const F32 out_x = llmax(0.f, llmax(-new_pos.mV[VX], new_pos.mV[VX] - w));
+                const F32 out_y = llmax(0.f, llmax(-new_pos.mV[VY], new_pos.mV[VY] - w));
+                if (out_x * out_x + out_y * out_y <= open_sea * open_sea)
+                {
+                    clip_pos_global = new_pos_global;
+                    in_open_sea = true;
+                }
+            }
+            // </WolfViewer>
             if (clip_pos_global != new_pos_global)
             {
                 // Was clipped, so this means we hit a edge where there is no region to enter
@@ -2704,6 +2723,12 @@ void LLViewerObject::interpolateLinearMotion(const F64SecondsImplicit& frame_tim
                 // Stop motion and get server update for bouncing on the edge
                 new_v.clear();
                 setAcceleration(LLVector3::zero);
+            }
+            else if (in_open_sea)
+            {
+                // <WolfViewer 2026-10-02/> not a crossing: the region still owns it, so no crossing
+                // timer (it stops all motion after sMaxRegionCrossingInterpolationTime).
+                mRegionCrossExpire = 0;
             }
             else
             {

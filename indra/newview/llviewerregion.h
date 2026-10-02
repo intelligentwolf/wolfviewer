@@ -263,6 +263,10 @@ public:
     F32 getWidth() const                        { return mWidth; }
     F32 getWidthScaleFactor() const             { return mWidthScaleFactor; } // <FS:Ansariel> FIRE-19563: Scaling for OpenSim VarRegions
     F32 getMinSimHeight() const                 { return mMinSimHeight; } // <FS:humbletim/> FIRE-33613: [OpenSim] [PBR] Camera cannot be located at negative Z
+    /// <WolfViewer 2026-10-02> OPEN SEA: how far past an edge with no region beyond it this region
+    /// keeps its agents and vehicles (OpenSimExtras "WolfOpenSea", metres). 0 = not supported:
+    /// the edge is a wall, as on stock OpenSim.
+    F32 getWolfOpenSeaMeters() const            { return mWolfOpenSeaM; }
 
     // regions are expensive to release, this function gradually releases cache from memory
     static void idleCleanup(F32 max_update_time);
@@ -565,6 +569,7 @@ public:
     S32         mMaxBakes; // <FS:Beq/> store max bakes on the region
     S32         mMaxTEs; // <FS:Beq/> store max texture entries on the region
     F32         mMinSimHeight; // <FS:humbletim/> FIRE-33613: [OpenSim] [PBR] Camera cannot be located at negative Z
+    F32         mWolfOpenSeaM = 0.f;   // <WolfViewer 2026-10-02/> getWolfOpenSeaMeters
     // simulator name
     std::string mName;
     std::string mZoning;

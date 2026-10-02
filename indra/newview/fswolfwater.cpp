@@ -222,14 +222,27 @@ void FSWolfWater::sweep()
         {
             continue;
         }
+        // <WolfViewer 2026-10-02> ...and big enough to be seen as water from here: within
+        // NEAR_M, plus PER_METRE_M for every metre of the prim's longest side (about 1.8
+        // degrees of view, ~35 px of a 1080p screen at 60 degrees FOV). A 10 m pool counts to
+        // 384 m, a 100 m lake to 3,264 m. Every prim in draw distance used to be asked about:
+        // 26,722 at Wolf Territories Home, all furniture too small to show water from afar.
+        const LLVector3 scale = objectp->getScale();
+        const F32 reach = NEAR_M + PER_METRE_M * llmax(scale.mV[VX], llmax(scale.mV[VY], scale.mV[VZ]));
+        if (dist_sq > reach * reach)
+        {
+            continue;
+        }
         ++n_in_range;
 
-        // Declare interest unconditionally. want() decides for itself whether this prim is
-        // already answered and fresh, in flight, or given up on, and only queues the rest.
-        // Source: wolfwater.js sweep — harvester.want(obj) for every prim in range.
-        props.want(objectp);
-
         const LLUUID& id = objectp->getID();
+        // Declare interest unconditionally. want() decides for itself whether this prim is
+        // already answered, in flight, or given up on, and only queues the rest; a prim that
+        // IS water is kept fresh, so a script that clears the keyword turns it back off.
+        // Source: wolfwater.js sweep — harvester.want(obj) for every prim in range.
+        const WolfObjectProps::Props* before = props.get(id);
+        props.want(objectp, before && matches(before->mDescriptionLower));
+
         const WolfObjectProps::Props* known = props.get(id);
         if (known)
         {
@@ -265,7 +278,7 @@ void FSWolfWater::sweep()
     {
         mNextStatsLog = now + STATS_INTERVAL_SECS;
         LL_INFOS("WolfWater") << "sweep: " << n_scanned << " prims, " << n_in_range
-                              << " within " << (F32)draw_distance << "m draw distance, "
+                              << " within " << (F32)draw_distance << "m draw distance and big enough to see, "
                               << n_known << " descriptions known, "
                               << n_matched << " matching \"" << KEYWORD << "\", "
                               << mSurfaces.size() << " water surface(s)" << LL_ENDL;

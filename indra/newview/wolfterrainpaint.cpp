@@ -1075,7 +1075,14 @@ void WolfTerrainPaint::idle()
         }
         Layer& L = layerFor(rgn);
         L.mKey = key;
-        const std::string sig = texSig(key, textures, *strokes);
+        // <WolfViewer 2026-10-02> A stored record is replaced only whole, from the service, with a
+        // new version (fetch / save: mByHandle[...] = parseRecord), so its key names its content
+        // and the signature is reused until the key changes. The working copy changes under one
+        // key while it is painted, so it is still signed every frame.
+        const bool editing = key.rfind("edit:", 0) == 0;
+        const std::string sig = (editing || L.mTexSig.empty() || L.mSigKey != key)
+                              ? texSig(key, textures, *strokes) : L.mTexSig;
+        L.mSigKey = key;
         // <WolfViewer 2026-09-18> Source: terrain_paint.js TerrainPaint.tick — keep a windowed
         // map under the camera; looked at twice a second, never while a brush drag is writing
         // into it. Same strokes, new window: clearing the signature forces the re-bake below.

@@ -68,11 +68,24 @@ namespace
         switch (z)
         {
             case 's': return 1.0f;
+            // [SURF HEIGHT 2026-10-02] surf at 10%..90% height is surf all the same (php/waves.php
+            // WAVES_ENERGY); its height is surf_scale_of's.
+            case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8': case '9': return 1.0f;
             case 'm': return 0.35f;   // [2026-09-10] small waves
             case 'c': return 0.15f;
             case 'x': return 0.0f;
             default:  return WolfWaveZones::OPEN_ENERGY;
         }
+    }
+
+    // [SURF HEIGHT 2026-10-02] Paul: "per area surf lets build that now". The surf height of a
+    // painted cell as a fraction of the region's surfHeight: 's' 1, '1'..'9' 0.1..0.9 (php/waves.php
+    // WAVES_SURF_DIGITS); 0 for anything that is not surf. wave_zones.js surfScaleOf() same.
+    F32 surf_scale_of(char z)
+    {
+        if (z == 's') return 1.f;
+        if (z >= '1' && z <= '9') return (F32)(z - '0') / 10.f;
+        return 0.f;
     }
 
     // Region handles are (x << 32) | y in metres (indra/llmath/v3dmath.h from_region_handle).
@@ -99,6 +112,14 @@ namespace
 }
 
 F32 WolfWaveZones::energyOf(char z) { return energy_of(z); }
+F32 WolfWaveZones::surfScaleOf(char z) { return surf_scale_of(z); }
+
+// [SURF HEIGHT 2026-10-02] The surf char painted at a height (percent, 10..100 in steps of 10).
+char WolfWaveZones::surfCharFor(S32 percent)
+{
+    const S32 tenths = llclamp((percent + 5) / 10, 1, 10);
+    return tenths >= 10 ? 's' : (char)('0' + tenths);
+}
 
 // Source: php/waves.php waves_cell() — the same rule, so a payload without `cell` still agrees.
 S32 WolfWaveZones::cellFor(S32 sizeX, S32 sizeY)
@@ -167,7 +188,7 @@ WolfWaveZones::Tiles WolfWaveZones::parseTiles(const LLSD& layout, S32 pw, S32 p
         std::string cells = it->second.asString();
         if (cells.size() == 1) cells.assign(TILE_LEN, cells[0]);
         else if (cells.size() != (size_t)TILE_LEN) continue;
-        if (cells.find_first_not_of("somcx.") != std::string::npos) continue;
+        if (cells.find_first_not_of("somcx.123456789") != std::string::npos) continue;   // [SURF HEIGHT 2026-10-02/] digits: ?v=3
         out[tileKey((S32)tx, (S32)ty)] = cells;
     }
     return out;
@@ -289,7 +310,7 @@ WolfWaveZones::NaturalWaterRule WolfWaveZones::naturalWaterFor(U64 handle) const
 // Source: wolfspeech.cpp postRaw for the adapter shape; llcorehttputil.h getRawAndSuspend.
 void WolfWaveZones::fetchCoro(std::vector<U64> handles, U64 requested_handle, U64 generation)
 {
-    std::string url = std::string(API_URL) + "?v=2&handles=";   // <WolfViewer 2026-09-26/> layout v2
+    std::string url = std::string(API_URL) + "?v=3&handles=";   // <WolfViewer 2026-09-26/> layout v2; [SURF HEIGHT 2026-10-02/] v=3 = with surf heights
     for (size_t i = 0; i < handles.size(); ++i)
     {
         if (i) url += ",";
@@ -559,10 +580,11 @@ std::string WolfWaveZones::defaultZones(const Region& r) const
 }
 
 void WolfWaveZones::fill(LLViewerRegion* regionp, F32 x0, F32 y0, F32 sx, F32 sy, S32 w, S32 h, std::vector<F32>& out,
-                         std::vector<F32>* surf_mask) const
+                         std::vector<F32>* surf_mask, std::vector<F32>* surf_scale) const
 {
     out.assign((size_t)w * h, OPEN_ENERGY);
     if (surf_mask) surf_mask->assign((size_t)w * h, 0.f);
+    if (surf_scale) surf_scale->assign((size_t)w * h, 0.f);
     if (!regionp || mByHandle.empty()) return;
     S32 bx, by;
     handle_xy(regionp->getHandle(), bx, by);
@@ -584,7 +606,8 @@ void WolfWaveZones::fill(LLViewerRegion* regionp, F32 x0, F32 y0, F32 sx, F32 sy
     {
         size_t surf = 0;
         if (mine->src.mTiles)
-            for (const auto& t : *mine->src.mTiles) surf += std::count(t.second.begin(), t.second.end(), 's');
+            for (const auto& t : *mine->src.mTiles)
+                surf += std::count_if(t.second.begin(), t.second.end(), [](char c) { return surf_scale_of(c) > 0.f; });
         const bool previewed = mPreview.find(regionp->getHandle()) != mPreview.end();
         LL_INFOS("WolfWaveZones") << "fill for " << regionp->getName() << ": " << (mine->src.mTiles ? mine->src.mTiles->size() : 0)
                                   << " painted tiles, " << surf << " painted surf cells, source "
@@ -609,11 +632,16 @@ void WolfWaveZones::fill(LLViewerRegion* regionp, F32 x0, F32 y0, F32 sx, F32 sy
                 // (A single OFF cell inside open sea is lost at that scale; surf is what a
                 // designer paints on a coast.) wave_zones.js bake() same.
                 const S32 cx0 = (S32)floorf((px - s.x - tx * 0.5f) / PAINT_CELL_M), cy0 = (S32)floorf((py - s.y - ty * 0.5f) / PAINT_CELL_M);
-                F32 best = -1.f;
+                F32 best = -1.f, best_scale = 0.f;
                 for (S32 cy = llmax(0, cy0); cy < llmin(s.src.mH, cy0 + per); ++cy)
                     for (S32 cx = llmax(0, cx0); cx < llmin(s.src.mW, cx0 + per); ++cx)
-                        best = llmax(best, energy_of(s.src.at(cx, cy)));
+                    {
+                        const char z = s.src.at(cx, cy);
+                        best = llmax(best, energy_of(z));
+                        best_scale = llmax(best_scale, surf_scale_of(z));   // [SURF HEIGHT 2026-10-02/] the highest surf under the texel
+                    }
                 out[(size_t)j * w + i] = best < 0.f ? OPEN_ENERGY : best;
+                if (surf_scale) (*surf_scale)[(size_t)j * w + i] = best_scale;
                 covered = true;
                 break;
             }
@@ -627,7 +655,13 @@ void WolfWaveZones::fill(LLViewerRegion* regionp, F32 x0, F32 y0, F32 sx, F32 sy
             if (!covered && mine)
             {
                 const F32 qx = llclamp(px, 0.f, rw - 0.5f), qy = llclamp(py, 0.f, rh - 0.5f);
-                if (mine->src.at((S32)(qx / PAINT_CELL_M), (S32)(qy / PAINT_CELL_M)) == 's') out[(size_t)j * w + i] = energy_of('s');
+                // [SURF HEIGHT 2026-10-02/] any surf edge cell, at its own height
+                const F32 edge_scale = surf_scale_of(mine->src.at((S32)(qx / PAINT_CELL_M), (S32)(qy / PAINT_CELL_M)));
+                if (edge_scale > 0.f)
+                {
+                    out[(size_t)j * w + i] = energy_of('s');
+                    if (surf_scale) (*surf_scale)[(size_t)j * w + i] = edge_scale;
+                }
             }
         }
     }
@@ -805,6 +839,7 @@ void WolfWaveZones::saveCoro(SaveTarget target, Tiles tiles, LLSD params, bool e
     body["region"] = target.mUuid;
     // <WolfViewer 2026-09-26> layout v2: the painted 16 m tiles (php/waves.php WAVES_PAINT_CELL_M)
     body["layout"] = LLSD().with("v", 2).with("tiles", tilesToLLSD(tiles)).with("params", params);
+    body["heights"] = true;   // [SURF HEIGHT 2026-10-02/] answer with the surf height digits (php/waves.php)
     body["enabled"] = enabled;
     body["naturalWater"] = natural_water;   // <WolfViewer 2026-09-28/> region rights only (php/waves.php)
     body["version"] = target.mVersion;
@@ -841,7 +876,7 @@ void WolfWaveZones::saveCoro(SaveTarget target, Tiles tiles, LLSD params, bool e
         LL_INFOS("WolfWaveZones") << "save: version conflict, refetching and retrying once" << LL_ENDL;
         // Source: php/waves.php:162-167 accepts an exact UUID read. A conflict reload must
         // not publish current-region state or substitute the destination after movement.
-        LLSD reload = adapter->getRawAndSuspend(request, std::string(API_URL) + "?v=2&region=" + target.mUuid, options, headers);
+        LLSD reload = adapter->getRawAndSuspend(request, std::string(API_URL) + "?v=3&region=" + target.mUuid, options, headers);
         const LLCore::HttpStatus reload_status = LLCoreHttpUtil::HttpCoroutineAdapter::getStatusFromLLSD(
             reload[LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS]);
         LLSD fresh;
@@ -1142,6 +1177,9 @@ void WolfWavePainter::refreshZones()
         switch (z)
         {
             case 's': r = 0.31f; g = 0.64f; b = 1.0f;  a = 0.72f; break;
+            // [SURF HEIGHT 2026-10-02] lower surf: the surf blue, fainter the lower it is
+            case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8': case '9':
+                r = 0.31f; g = 0.64f; b = 1.0f; a = 0.22f + 0.50f * surf_scale_of(z); break;
             case 'o': r = 0.17f; g = 0.44f; b = 0.71f; a = 0.66f; break;
             case 'm': r = 0.51f; g = 0.77f; b = 0.93f; a = 0.58f; break;
             case 'c': r = 0.44f; g = 0.76f; b = 0.64f; a = 0.55f; break;
@@ -1470,6 +1508,7 @@ bool WolfPanelLandWaves::postBuild()
     mSetInterval = getChild<LLSliderCtrl>("waves_set_interval");
     mCalmRipple  = getChild<LLSliderCtrl>("waves_calm_ripple");
     mSmallScale  = getChild<LLSliderCtrl>("waves_small_scale");
+    mSurfHere    = getChild<LLSliderCtrl>("waves_surf_here");   // [SURF HEIGHT 2026-10-02/]
     mEnabled     = getChild<LLCheckBoxCtrl>("waves_enabled");
     mNaturalWater = getChild<LLCheckBoxCtrl>("waves_natural_water");   // <WolfViewer 2026-09-28/>
     mSave        = getChild<LLButton>("waves_save");
@@ -1480,6 +1519,8 @@ bool WolfPanelLandWaves::postBuild()
     mBrushX      = getChild<LLButton>("waves_brush_x");
 
     mBrushS->setCommitCallback(boost::bind(&WolfPanelLandWaves::onBrush, this, 's'));
+    // [SURF HEIGHT 2026-10-02/] the surf brush's height; picking it selects the surf brush
+    mSurfHere->setCommitCallback(boost::bind(&WolfPanelLandWaves::onBrush, this, 's'));
     mBrushO->setCommitCallback(boost::bind(&WolfPanelLandWaves::onBrush, this, 'o'));
     mBrushM->setCommitCallback(boost::bind(&WolfPanelLandWaves::onBrush, this, 'm'));
     mBrushC->setCommitCallback(boost::bind(&WolfPanelLandWaves::onBrush, this, 'c'));
@@ -1556,7 +1597,9 @@ bool WolfPanelLandWaves::paintStroke(F32 ax, F32 ay, F32 bx, F32 by, bool waterO
 void WolfPanelLandWaves::onBrush(char z)
 {
     if (!WolfGrid::isWolfTerritories()) { setStatus("Sorry, this function is only available on Wolf Territories Grid.", true); return; }
-    if (mPainter) mPainter->setBrush(z);
+    // [SURF HEIGHT 2026-10-02] The surf brush paints at the "Height %" slider's height.
+    const char paint = (z == 's' && mSurfHere) ? WolfWaveZones::surfCharFor(ll_round(mSurfHere->getValueF32())) : z;
+    if (mPainter) mPainter->setBrush(paint);
     mBrushS->setToggleState(z == 's');
     mBrushO->setToggleState(z == 'o');
     mBrushM->setToggleState(z == 'm');

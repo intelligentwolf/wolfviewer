@@ -319,7 +319,7 @@ LLPanelLogin::LLPanelLogin(const LLRect &rect,
     //
     // Releases are NAMED from Howling Hati onwards, and the name is what a resident sees and is
     // asked to quote. The numbers still exist — viewerRes.rc needs a numeric FILEVERSION and
-    // wolfupdate compares the "-wN" in the release tag — but they mean nothing to anybody and
+    // wolfupdate compares the revision with latest.json's — but they mean nothing to anybody and
     // are not put in front of them. A build with no name is a local or untagged one, and falls
     // back to the version rather than pretending to be a release it is not.
     if (LLTextBox* version_text = findChild<LLTextBox>("viewer_version_text"))

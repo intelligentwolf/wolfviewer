@@ -19,7 +19,7 @@
   <panel.string name="str_natural_water_off">Natural lakes and waterfalls off — Save to remove them for everyone in the region.</panel.string>
   <panel.string name="str_default_loaded">Automatic layout on; your painting is cleared — Save to keep it (Revert undoes it).</panel.string>
   <text follows="left|top" height="30" left="10" top="8" width="460" word_wrap="true" name="waves_help">
-Paint on the map or directly on the water. Surf, Open, Small, Calm and Off use the same saved layout.
+Paint on the map or directly on the water. Surf, Open, Small, Calm and Off use the same saved layout; Surf paints at the Height % you choose.
   </text>
   <text follows="left|top" height="28" left="10" top_pad="2" width="460" word_wrap="true"
         name="waves_note" text_color="0.79 0.64 0.15 1" />
@@ -28,6 +28,10 @@ Paint on the map or directly on the water. Surf, Open, Small, Calm and Off use t
   <button follows="left|top" height="20" left_pad="4" top_delta="0" width="60" name="waves_brush_m" label="Small" is_toggle="true" />
   <button follows="left|top" height="20" left_pad="4" top_delta="0" width="60" name="waves_brush_c" label="Calm" is_toggle="true" />
   <button follows="left|top" height="20" left_pad="4" top_delta="0" width="60" name="waves_brush_x" label="Off" is_toggle="true" />
+  <!-- [SURF HEIGHT 2026-10-02] Paul: "per area surf lets build that now". -->
+  <slider follows="left|top" height="20" left_pad="6" top_delta="0" width="136" name="waves_surf_here" label="Height %" label_width="52"
+          min_val="10" max_val="100" increment="10" initial_value="100" decimal_digits="0" show_text="true"
+          tool_tip="How high the Surf brush paints, as a percentage of the surf wave height below. Paint one area at 30% and the rest at 100% to calm the surf just there." />
   <button follows="left|top" height="22" left="10" top_pad="6" width="130" name="waves_world_paint" label="Paint on water" is_toggle="true" />
   <slider follows="left|top" height="22" left_pad="8" top_delta="0" width="322" name="waves_brush_diameter" label="Diameter (16 m)" label_width="110" min_val="1" max_val="8" increment="1" initial_value="1" decimal_digits="0" show_text="true" tool_tip="Circular brush diameter in 16 m cells, the same size on every region: 1 is 16 m, 8 is 128 m. Every touched water cell is painted." />
   <wolf_wave_painter follows="left|top" height="224" width="224" left="10" top_pad="6" name="waves_painter" />

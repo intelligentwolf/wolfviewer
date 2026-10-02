@@ -7468,6 +7468,28 @@
       <key>Value</key>
       <integer>1</integer>
     </map>
+    <key>WolfMapGlobe</key>
+    <map>
+      <key>Comment</key>
+      <string>On Wolf Territories, the world map's sea moves (the region tiles' water is drawn as animated water) and zooming out past the flat map turns it into a globe you can spin and zoom back into. Other grids always have the ordinary map.</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>Boolean</string>
+      <key>Value</key>
+      <integer>1</integer>
+    </map>
+    <key>WolfMapStartAsGlobe</key>
+    <map>
+      <key>Comment</key>
+      <string>On Wolf Territories (with WolfMapGlobe on), the world map opens as the globe, centred on you, unless it was opened to show a place.</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>Boolean</string>
+      <key>Value</key>
+      <integer>1</integer>
+    </map>
     <key>MapTiltDegrees</key>
     <map>
       <key>Comment</key>
@@ -19586,13 +19608,35 @@ Change of this parameter will affect the layout of buttons in notification toast
 		<key>WolfViewerCheckForUpdates</key>
 		<map>
 			<key>Comment</key>
-			<string>Ask the Wolf Territories release page once per run whether a newer WolfViewer has been published, and offer to open the download page. Nothing is downloaded or installed automatically. Turn this off to never be told.</string>
+			<string>Once per run, ask wolf-grid.com (a signed latest.json) whether a newer WolfViewer has been published, and offer to update. Turn this off to never be told.</string>
 			<key>Persist</key>
 			<integer>1</integer>
 			<key>Type</key>
 			<string>Boolean</string>
 			<key>Value</key>
 			<integer>1</integer>
+		</map>
+		<key>WolfViewerAutoDownloadUpdates</key>
+		<map>
+			<key>Comment</key>
+			<string>Download a newer WolfViewer in the background as soon as it is found (and checked against its signed SHA-256), then ask before installing it. Off: ask first, then download.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>1</integer>
+		</map>
+		<key>WolfViewerUpdateSkipped</key>
+		<map>
+			<key>Comment</key>
+			<string>The newest WolfViewer release the user chose "Skip this version" for; that release is not offered again, the next one is.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>0</integer>
 		</map>
 		<key>WolfViewerUpdateLastTold</key>
 		<map>

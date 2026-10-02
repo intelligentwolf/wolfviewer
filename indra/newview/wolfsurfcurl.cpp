@@ -200,7 +200,7 @@ bool WolfSurfCurl::rebuild(F32 surf_h)
     };
     auto in_surf = [&](F32 x, F32 y) { return WolfWaterField::zoneAt(*fld, x, y) >= 0.9f; };   // painted surf cells only
 
-    mPos.clear(); mUV.clear(); mDir.clear(); mDist.clear(); mIdx.clear();
+    mPos.clear(); mUV.clear(); mDir.clear(); mDist.clear(); mHeight.clear(); mIdx.clear();
     S32 along = 0, ribbons = 0;
     for (const auto& line : polylines)
     {
@@ -237,7 +237,10 @@ bool WolfSurfCurl::rebuild(F32 surf_h)
         {
             F32 gx, gy, dd;
             if (grad_at(p.first, p.second, gx, gy) && path_at(p.first, p.second, dd) && in_surf(p.first, p.second))
-                run.push_back({ p.first, p.second, gx, gy, dd });
+                // [SURF HEIGHT 2026-10-02] the painted surf height there (the weight inside painted
+                // cells is the coverage 1 times the height, wolfwaterfield.cpp bake)
+                run.push_back({ p.first, p.second, gx, gy, dd,
+                                WolfWaterField::surfZoneOf(WolfWaterField::surfWeightAt(*fld, p.first, p.second)) });
             else
                 flush();
         }
@@ -275,7 +278,7 @@ bool WolfSurfCurl::rebuild(F32 surf_h)
         vert[v].set(mPos[v * 3], mPos[v * 3 + 1], mPos[v * 3 + 2]);
         uv[v].set(mUV[v * 2], mUV[v * 2 + 1]);
         dir[v].set(mDir[v * 2], mDir[v * 2 + 1]);
-        dist[v].set(mDist[v], 0.f);
+        dist[v].set(mDist[v], mHeight[v]);   // [SURF HEIGHT 2026-10-02/] y was unused (0)
     }
     for (U32 k = 0; k < mIndexCount; ++k) idx[k] = mIdx[k];
     mVB->unmapBuffer();
@@ -299,6 +302,7 @@ void WolfSurfCurl::appendRibbon(const std::vector<Pt>& run, F32 s0)
             mPos.push_back(p.x); mPos.push_back(p.y); mPos.push_back(0.f);
             mDir.push_back(p.dx); mDir.push_back(p.dy);
             mDist.push_back(p.dist);
+            mHeight.push_back(p.height);
             mUV.push_back(s); mUV.push_back((F32)m / (F32)(M - 1));
         }
     }

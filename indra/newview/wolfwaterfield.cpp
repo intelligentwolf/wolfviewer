@@ -120,6 +120,26 @@ F32 WolfWaterField::zoneAt(const Field& f, F32 rx, F32 ry)
     return f.mZone[(size_t)j * f.mZoneW + i];
 }
 
+// [SURF HEIGHT 2026-10-02] The shader's surf zone for a weight G: waterV.glsl surfZone =
+// smoothstep(0.62, 0.95, 0.55 + 0.45 * surfW) (GLSL smoothstep: t = clamp((x - e0) / (e1 - e0)),
+// t * t * (3 - 2t)). wave_zones.js surfZoneOf() same.
+F32 WolfWaterField::surfZoneOf(F32 w)
+{
+    const F32 t = llclamp((0.55f + 0.45f * w - 0.62f) / (0.95f - 0.62f), 0.f, 1.f);
+    return t * t * (3.f - 2.f * t);
+}
+
+// [SURF HEIGHT 2026-10-02] The weight G whose surfZoneOf is z (0..1): the inverse of
+// t * t * (3 - 2t) on [0, 1] is t = 0.5 - sin(asin(1 - 2z) / 3); then undo the 0.62..0.95 window
+// and the 0.55 + 0.45 G. 0 stays 0 (no surf). wave_zones.js surfWeightFor() same.
+F32 WolfWaterField::surfWeightFor(F32 z)
+{
+    if (z <= 0.f) return 0.f;
+    z = llmin(z, 1.f);
+    const F32 t = 0.5f - sinf(asinf(1.f - 2.f * z) / 3.f);
+    return llclamp((0.62f + (0.95f - 0.62f) * t - 0.55f) / 0.45f, 0.f, 1.f);
+}
+
 // <WolfViewer 2026-10-01> Source: wave_zones.js surfWeightAt() — zoneAt()'s texel rule on G.
 F32 WolfWaterField::surfWeightAt(const Field& f, F32 rx, F32 ry)
 {
@@ -313,6 +333,28 @@ U64 WolfWaterField::terrainStampIn(LLViewerRegion* regionp, F32 x0, F32 y0, F32 
     return stamp;
 }
 
+U64 WolfWaterField::neighbourStamp(LLViewerRegion* regionp)
+{
+    const LLVector3d o = regionp->getOriginGlobal();
+    const F64 m = (F64)STAMP_MARGIN_M;
+    const F64 x0 = o.mdV[VX] - m, y0 = o.mdV[VY] - m;
+    const F64 x1 = o.mdV[VX] + (F64)regionp->getWidth() + m, y1 = o.mdV[VY] + (F64)regionp->getWidth() + m;
+    // Order-independent (the region list order is not fixed): a sum of per-region mixes. A
+    // neighbour arriving, leaving or getting its height data all change it, as do new heights.
+    U64 sum = 0;
+    for (LLViewerRegion* n : LLWorld::getInstance()->getRegionList())
+    {
+        if (!n || n == regionp || !n->isAlive()) continue;
+        const LLVector3d no = n->getOriginGlobal();
+        const F64 w = (F64)n->getWidth();
+        if (no.mdV[VX] >= x1 || no.mdV[VX] + w <= x0 || no.mdV[VY] >= y1 || no.mdV[VY] + w <= y0) continue;
+        U64 h = n->getHandle() * 0x9E3779B97F4A7C15ULL;
+        h ^= (n->getLand().hasZData() ? terrainStamp(n) : 0ULL) + 0x632BE59BD9B4E019ULL + (h << 6) + (h >> 2);
+        sum += h;
+    }
+    return sum;
+}
+
 U64 WolfWaterField::terrainStamp(LLViewerRegion* regionp)
 {
     // <WolfViewer 2026-09-23> Changes whenever any patch's heights change, like the hash of
@@ -425,16 +467,21 @@ void WolfWaterField::idle()
         // <WolfViewer 2026-09-20> the stamp covers the window's patches (plus a margin), and a
         // change counts only once it has held for STAMP_SETTLE_SECS (see wolfwaterfield.h).
         const bool windowed = wsx < regionp->getWidth();
-        const U64 stamp = windowed ? terrainStampIn(regionp, wx0 - STAMP_MARGIN_M, wy0 - STAMP_MARGIN_M,
-                                                    wsx + 2.f * STAMP_MARGIN_M, wsy + 2.f * STAMP_MARGIN_M)
-                                   : terrainStamp(regionp);
+        const U64 own = windowed ? terrainStampIn(regionp, wx0 - STAMP_MARGIN_M, wy0 - STAMP_MARGIN_M,
+                                                  wsx + 2.f * STAMP_MARGIN_M, wsy + 2.f * STAMP_MARGIN_M)
+                                 : terrainStamp(regionp);
+        // <WolfViewer 2026-10-02/> neighbours' land counts too, under the same settle rule.
+        const U64 stamp = own ^ (neighbourStamp(regionp) * 0xBF58476D1CE4E5B9ULL);
         if (stamp != f.mPendingStamp)
         {
             f.mPendingStamp = stamp;
             f.mPendingSince = now;
         }
         const bool terrain_changed = f.mStamp != stamp && (now - f.mPendingSince) >= STAMP_SETTLE_SECS;
-        const bool stale = !f.mReady || terrain_changed || (now - f.mBakedAt) > REBAKE_SECS
+        // <WolfViewer 2026-10-02> No timed re-bake: every input now has its own trigger — this
+        // region's and its neighbours' terrain (the stamp), the water level, the window, and the
+        // painted zones (WolfWaveZones calls invalidate()).
+        const bool stale = !f.mReady || terrain_changed
                         || f.mWaterLevel != regionp->getWaterHeight() || moved;
         if (stale && (!f.mReady || now - f.mBakedAt >= MIN_REBAKE_SECS))
         {
@@ -901,7 +948,7 @@ void WolfWaterField::bake(LLViewerRegion* regionp, Field& f)
         const F32 texel = (F32)WolfWaveZones::texelM(esx);
         const S32 zw = llmax(1, (S32)ll_round(esx / texel));
         const S32 zh = llmax(1, (S32)ll_round(esy / texel));
-        WolfWaveZones::instance().fill(regionp, ex0, ey0, esx, esy, zw, zh, mZoneData, &mSurfMask);
+        WolfWaveZones::instance().fill(regionp, ex0, ey0, esx, esy, zw, zh, mZoneData, &mSurfMask, &mSurfScale);
         // <WolfViewer 2026-10-01> THE SURF WEIGHT (G). Paul 10-01, Wolf Territories Home: a
         // 20 m surf (wavelength 12 x 20 = 240 m) painted as a 2-3 cell strip stood up as jagged
         // white walls. The surf height followed the painted cells through the energy's 3x3
@@ -955,6 +1002,57 @@ void WolfWaterField::bake(LLViewerRegion* regionp, Field& f)
                     F32 acc = 0.f; S32 c = 0;
                     for (S32 jj = llmax(0, j - rad); jj <= llmin(zh - 1, j + rad); ++jj) { acc += mSurfTmp[(size_t)jj * zw + i]; ++c; }
                     mSurfW[(size_t)j * zw + i] = acc / (F32)c;
+                }
+            }
+            // [SURF HEIGHT 2026-10-02] Paul: "per area surf lets build that now". Each surf cell
+            // may be painted at its own height (WolfWaveZones::surfScaleOf). The height is
+            // averaged over the surf texels within TWICE the radius — the weight's own ramp is the
+            // grow plus the blur — so between a 30% and a 100% area it changes over about a
+            // wavelength, as the weight does at a painted edge, and the ramp outside the paint
+            // takes the height of the surf it leads to. Then G is written so the shader's own rule,
+            // surfZone = smoothstep(0.62, 0.95, 0.55 + 0.45 G) (waterV.glsl; wolfboatrock.cpp and
+            // wave_zones.js the same), gives exactly (that rule on the coverage) x height: nothing
+            // that reads G changes. A layout painted only at 100% keeps G exactly as before.
+            // Source: wave_zones.js bake() surf height, same passes.
+            {
+                const S32 rad2 = 2 * rad;
+                mScaleNum.assign(n, 0.f); mScaleDen.assign(n, 0.f);
+                mScaleTmpN.assign(n, 0.f); mScaleTmpD.assign(n, 0.f);
+                for (size_t k = 0; k < n; ++k)
+                {
+                    mScaleTmpN[k] = mSurfMask[k] * mSurfScale[k];
+                    mScaleTmpD[k] = mSurfMask[k];
+                }
+                for (S32 j = 0; j < zh; ++j)
+                {
+                    for (S32 i = 0; i < zw; ++i)
+                    {
+                        F32 a = 0.f, b = 0.f;
+                        for (S32 ii = llmax(0, i - rad2); ii <= llmin(zw - 1, i + rad2); ++ii)
+                        {
+                            a += mScaleTmpN[(size_t)j * zw + ii];
+                            b += mScaleTmpD[(size_t)j * zw + ii];
+                        }
+                        mScaleNum[(size_t)j * zw + i] = a;
+                        mScaleDen[(size_t)j * zw + i] = b;
+                    }
+                }
+                for (S32 j = 0; j < zh; ++j)
+                {
+                    for (S32 i = 0; i < zw; ++i)
+                    {
+                        F32 a = 0.f, b = 0.f;
+                        for (S32 jj = llmax(0, j - rad2); jj <= llmin(zh - 1, j + rad2); ++jj)
+                        {
+                            a += mScaleNum[(size_t)jj * zw + i];
+                            b += mScaleDen[(size_t)jj * zw + i];
+                        }
+                        const size_t k = (size_t)j * zw + i;
+                        const F32 height = b > 0.f ? llclamp(a / b, 0.f, 1.f) : 1.f;
+                        if (height >= 0.999f || mSurfW[k] <= 0.f) continue;   // full height: G as before
+                        const F32 want = surfZoneOf(mSurfW[k]) * height;
+                        mSurfW[k] = surfWeightFor(want);
+                    }
                 }
             }
             mZoneRG.resize(n * 2);

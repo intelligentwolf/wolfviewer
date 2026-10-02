@@ -2162,6 +2162,7 @@ class LinuxManifest(ViewerManifest):
                 self.path("register_secondlifeprotocol.sh")
                 self.path("refresh_desktop_app_entry.sh")
                 self.path("launch_url.sh")
+                self.path("wolfviewer-update.sh")   # <WolfViewer 2026-10-02/> wolfupdate.cpp self-update
             self.path("install.sh")
 
         with self.prefix(dst="bin"):

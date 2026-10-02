@@ -128,6 +128,11 @@ public:
     // see the whole world, plus a little.
     void            adjustZoomSliderBounds();
 
+    // <WolfViewer 2026-10-02/> Zoom the map to this (LLWorldMapView zoom units). The zoom slider
+    // drives the map's zoom every frame, so a zoom the map makes itself (the globe's double-click
+    // fly-in) goes through the slider.
+    void            wolfSetMapZoom(F32 zoom);
+
     // Catch changes in the sim list
     void            updateSims(bool found_null_sim);
 
@@ -257,6 +262,13 @@ private:
     // </FS>
 
     LLSliderCtrl*           mZoomSlider = nullptr;
+
+    // <WolfViewer 2026-10-02/> Globe (wolfmapglobe.h): open-as-globe waiting for the view's size,
+    // and the size the zoom slider's globe limit was last worked out for.
+    bool                    mWolfGlobeStartPending = false;
+    S32                     mWolfViewWidth = 0;
+    S32                     mWolfViewHeight = 0;
+    U32                     mWolfExtentGen = 0;
 
     LLComboBox*             mLandmarkCombo = nullptr;
     LLComboBox*             mFriendCombo = nullptr;

@@ -83,6 +83,9 @@
 #include "llviewerregion.h"
 #include "llviewershadermgr.h"
 #include "llviewertexturelist.h"
+#include "llimagegl.h"      // <WolfViewer 2026-10-02/> memory breakdown
+#include "llimage.h"        // <WolfViewer 2026-10-02/> memory breakdown
+#include "llcharacter.h"    // <WolfViewer 2026-10-02/> memory breakdown
 #include "llviewerwindow.h"
 #include "llvoavatarself.h"
 #include "llvograss.h"
@@ -148,6 +151,7 @@ U32 gRecentFrameCount = 0; // number of 'recent' frames
 LLFrameTimer gRecentFPSTime;
 LLFrameTimer gRecentMemoryTime;
 LLFrameTimer gAssetStorageLogTime;
+LLFrameTimer gWolfMemoryBreakdownTime;   // <WolfViewer 2026-10-02/>
 
 // Rendering stuff
 void render_ui(F32 zoom_factor = 1.f, int subfield = 0);
@@ -305,6 +309,25 @@ void display_stats()
         LL_INFOS() << "MEMORY: " << memory << LL_ENDL;
         LLMemory::logMemoryInfo(true) ;
         gRecentMemoryTime.reset();
+    }
+    // <WolfViewer 2026-10-02> WHERE THE MEMORY IS, once a minute. A resident's log showed the
+    // viewer at 12 GB on a 16 GB machine at WolfFest (+1.85 GB in one minute as prims came into
+    // range) with nothing to say what held it; MEMORY above is every 600 s and is RSS alone.
+    // These are the viewer's own counters, read, not estimated: GL texture bytes
+    // (LLImageGL::getTextureBytesAllocated), compressed image bytes held
+    // (LLImageFormatted::sGlobalFormattedMemory), decoded raw images alive
+    // (LLImageRaw::sRawImageCount), textures known, objects and avatars.
+    if (gWolfMemoryBreakdownTime.getElapsedTimeF32() >= 60.f)
+    {
+        gWolfMemoryBreakdownTime.reset();
+        LL_INFOS("WolfMemory") << llformat("RSS %llu MB | GL textures %llu MB, %d textures | compressed images %d MB | raw images %d | objects %d | avatars %d",
+                                           (unsigned long long)(LLMemory::getCurrentRSS() >> 20),
+                                           (unsigned long long)(LLImageGL::getTextureBytesAllocated() >> 20),
+                                           gTextureList.getNumImages(),
+                                           LLImageFormatted::sGlobalFormattedMemory >> 20,
+                                           LLImageRaw::sRawImageCount,
+                                           gObjectList.getNumObjects(),
+                                           (S32)LLCharacter::sInstances.size()) << LL_ENDL;
     }
     constexpr F32 ASSET_STORAGE_LOG_FREQUENCY = 60.f;
     if (gAssetStorageLogTime.getElapsedTimeF32() >= ASSET_STORAGE_LOG_FREQUENCY)

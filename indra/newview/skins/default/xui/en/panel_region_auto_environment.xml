@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- <WolfViewer 2026-10-03> Region / Estate > Jimmy Olsen's Automatic Environment.
+     Code: wolfautoenvironment.cpp. Service: wolfstorm php/auto_environment.php.
+     Width 480 / height 530 as the other Region / Estate tabs (floater_region_info.xml 485 x 575,
+     tab header subtracted by lltabcontainer.cpp). -->
+<panel border="true" follows="all" height="530" width="480" label="Jimmy's EEP &amp; Weather"
+       layout="topleft" name="panel_region_auto_environment">
+  <panel.string name="str_loading">Reading this region's settings…</panel.string>
+  <panel.string name="str_read_only">Only the owner of this region can change Jimmy Olsen's Automatic Environment.</panel.string>
+  <panel.string name="str_unsaved">Changed — Apply to save it for everyone in the region.</panel.string>
+  <panel.string name="str_saving">Saving…</panel.string>
+  <panel.string name="str_saved">Saved. The region's sky updates within a minute.</panel.string>
+  <panel.string name="str_save_failed">Could not save:</panel.string>
+  <panel.string name="str_read_failed">Could not read the settings:</panel.string>
+  <panel.string name="str_searching">Searching…</panel.string>
+  <panel.string name="str_search_short">Type at least two letters of a place name.</panel.string>
+  <panel.string name="str_search_failed">Search failed:</panel.string>
+  <panel.string name="str_pick">Pick a place from the list, then Apply.</panel.string>
+  <panel.string name="str_none_found">No places found with that name.</panel.string>
+  <panel.string name="str_conflict">These settings were changed elsewhere, so they have been reloaded. Your changes are still shown here: press Apply again to save them.</panel.string>
+
+  <text layout="topleft" follows="left|top" height="16" left="10" top="6" width="460"
+        name="ae_title" text_color="EmphasisColor">Jimmy Olsen's Automatic Environment</text>
+  <text layout="topleft" follows="left|top" height="44" left="10" top_pad="0" width="460"
+        name="ae_intro" word_wrap="true">This region's sky and weather follow a real place on Earth: the sun, moon (with its real phase) and stars where they really are, real clouds, haze and wind, and real rain, snow, fog and thunder.</text>
+
+  <check_box layout="topleft" follows="left|top" height="18" left="10" top_pad="6" width="460"
+             name="ae_enabled" label="Follow a real place" />
+  <check_box layout="topleft" follows="left|top" height="18" left="30" top_pad="2" width="440"
+             name="ae_sky" label="Real sun, moon, stars, clouds and haze" />
+  <check_box layout="topleft" follows="left|top" height="18" left="30" top_pad="2" width="440"
+             name="ae_weather" label="Real rain, snow, fog and thunder" />
+
+  <text layout="topleft" follows="left|top" height="14" left="10" top_pad="10" width="460"
+        name="ae_hdr_place" text_color="LabelSelectedColor">Place</text>
+  <line_editor layout="topleft" follows="left|top" height="20" left="10" top_pad="4" width="370"
+               name="ae_search" max_length_bytes="120" label="Search for a town or city…" commit_on_focus_lost="false" />
+  <button layout="topleft" follows="left|top" height="20" left_pad="6" top_delta="0" width="84"
+          name="ae_search_btn" label="Search" />
+  <scroll_list layout="topleft" follows="left|top" height="56" left="10" top_pad="4" width="460"
+               name="ae_results" multi_select="false" draw_heading="false" />
+  <text layout="topleft" follows="left|top" height="16" left="10" top_pad="8" width="60"
+        name="ae_place_lbl">Name</text>
+  <line_editor layout="topleft" follows="left|top" height="20" left_pad="4" top_delta="-2" width="396"
+               name="ae_place" max_length_bytes="200" />
+  <spinner layout="topleft" follows="left|top" height="20" left="10" top_pad="6" width="200"
+           name="ae_lat" label="Latitude" label_width="64" decimal_digits="4" increment="0.0001"
+           min_val="-90" max_val="90" />
+  <spinner layout="topleft" follows="left|top" height="20" left_pad="20" top_delta="0" width="210"
+           name="ae_lon" label="Longitude" label_width="70" decimal_digits="4" increment="0.0001"
+           min_val="-180" max_val="180" />
+
+  <check_box layout="topleft" follows="left|top" height="18" left="10" top_pad="8" width="200"
+             name="ae_preview_on" label="Preview time (only you see it)" />
+  <slider layout="topleft" follows="left|top" height="18" left_pad="4" top_delta="0" width="250"
+          name="ae_preview" min_val="0" max_val="23.75" increment="0.25" initial_value="0"
+          decimal_digits="2" show_text="false" can_edit_text="false" />
+  <text layout="topleft" follows="left|top" height="14" left="30" top_pad="2" width="440"
+        name="ae_preview_time" text_color="EmphasisColor">Now</text>
+  <text layout="topleft" follows="left|top" height="14" left="10" top_pad="6" width="460"
+        name="ae_hdr_now" text_color="LabelSelectedColor">Right now</text>
+  <text layout="topleft" follows="left|top" height="64" left="10" top_pad="2" width="460"
+        name="ae_now" word_wrap="true">Reading this region's settings…</text>
+
+  <button layout="topleft" follows="left|top" height="22" left="10" top_pad="4" width="90"
+          name="ae_apply" label="Apply" />
+  <button layout="topleft" follows="left|top" height="22" left_pad="6" top_delta="0" width="90"
+          name="ae_revert" label="Revert" />
+  <text layout="topleft" follows="left|top" height="30" left="10" top_pad="4" width="460"
+        name="ae_status" word_wrap="true" />
+  <text layout="topleft" follows="left|top" height="28" left="10" top_pad="2" width="460"
+        name="ae_credit" word_wrap="true" text_color="LabelDisabledColor">Weather data: MET Norway (CC BY 4.0). Place search: © OpenStreetMap contributors. Sun and moon computed from NOAA / Meeus astronomy.</text>
+</panel>

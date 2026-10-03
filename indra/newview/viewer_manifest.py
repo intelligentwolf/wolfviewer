@@ -99,6 +99,9 @@ class ViewerManifest(LLManifest,FSViewerManifest):
                 self.exclude("logcontrol-dev.xml")
                 self.path("*.ini")
                 self.path("*.xml")
+                # <WolfViewer 2026-10-03> the real star map (llvowlsky.cpp loadStarCatalogue)
+                self.path("wolf_stars.txt")
+                self.path("wolf_constellations.txt")
 
                 # include the entire shaders directory recursively
                 self.path("shaders")

@@ -171,14 +171,10 @@ std::string LLVersionInfo::getChannelAndVersionFS() const
 
 std::string LLVersionInfo::getReleaseName() const
 {
-    // Same macro-to-string dance as the channel above, and the same stray-quote trim: the define
-    // arrives unquoted from the CMake command line and LL_TO_STRING adds its own.
-#if defined(LL_VIEWER_RELEASE_NAME)
-    std::string name(LL_TO_STRING(LL_VIEWER_RELEASE_NAME));
-    if (LLStringUtil::startsWith(name, "\"") && name.size() > 2)
-    {
-        name = name.substr(1, name.size() - 2);
-    }
+    // <WolfViewer 2026-10-03> fsversionvalues.h gives the name as a string literal (it may hold an
+    // apostrophe, as w54 "Jimmy's Weather" does).
+#if defined(LL_VIEWER_RELEASE_NAME_STR)
+    std::string name(LL_VIEWER_RELEASE_NAME_STR);
     LLStringUtil::trim(name);
     return name;
 #else

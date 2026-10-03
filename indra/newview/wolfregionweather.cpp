@@ -31,6 +31,8 @@
 #include "lldispatcher.h"
 #include "llcoros.h"
 #include "llframetimer.h"
+#include "llenvironment.h"
+#include "lldate.h"
 #include "llhttpconstants.h"
 #include "llfilesystem.h"
 #include "llinventoryfunctions.h"
@@ -199,6 +201,8 @@ void WolfRegionWeather::onRegionChanged()
     // The region row belongs to the old region just as surely as the parcel row does. Clearing
     // both prevents the previous sky being applied while the destination requests are in flight.
     mHaveRow = false;
+    setAutoEnvPreview(false, 0.0);   // <WolfViewer 2026-10-03/> a preview belongs to the region it was made in
+    readAutoEnv(LLSD());
     mProfile = WolfWeatherProfile();
     mKind.clear();
     mRegionName.clear();
@@ -395,6 +399,7 @@ void WolfRegionWeather::fetchCoro(std::string region_id, bool include_parcel, F3
     self.mKind       = (!r.has("kind") || r["kind"].isUndefined()) ? std::string() : r["kind"].asString();
     self.mProfile    = WolfWeatherProfile();
     self.mProfile.fromLLSD(r);
+    self.readAutoEnv(r);
     self.mLastError.clear();
     if (include_parcel && self.mParcelGate.accepts(parcel_generation))
     {
@@ -460,6 +465,68 @@ void WolfRegionWeather::recomputeParcelApplies()
                                               mParcelProfile.mEnabled, !mParcelKind.empty());
 }
 
+// <WolfViewer 2026-10-03> The module stamps its day cycle with this name (WolfSim
+// WolfAutoEnvironmentModule.CYCLE_NAME, written as the day cycle's "name").
+static const std::string WOLF_AUTO_CYCLE_NAME("Jimmy Olsen's Automatic Environment");
+
+bool WolfRegionWeather::autoEnvRealSky() const
+{
+    if (!autoEnvSky()) return false;
+    LLSettingsDay::ptr_t day = LLEnvironment::instance().getCurrentDay();
+    return day && day->getName() == WOLF_AUTO_CYCLE_NAME;
+}
+
+F64 WolfRegionWeather::autoEnvSkyTime() const
+{
+    // The day cycle runs on the grid clock (LLDate::now + any preview); the stars and the moon's
+    // tilt are for the moment the sky SHOWS — the place at grid wall-clock time (+ skyShift).
+    return LLDate::now().secondsSinceEpoch() + autoEnvTimeOffset() + mAutoEnvSkyShift;
+}
+
+void WolfRegionWeather::setAutoEnvPreview(bool on, F64 seconds_ahead)
+{
+    // Source: llviewermenu.cpp:828-829 — clearing ENV_LOCAL and selecting it is how the viewer
+    // returns to the shared (region) environment.
+    LLEnvironment& env = LLEnvironment::instance();
+    if (!on || !autoEnvSky())
+    {
+        if (mAutoEnvPreviewOn)
+        {
+            env.clearEnvironment(LLEnvironment::ENV_LOCAL);
+            env.setSelectedEnvironment(LLEnvironment::ENV_LOCAL, LLEnvironment::TRANSITION_INSTANT);
+        }
+        mAutoEnvPreviewOn = false;
+        mAutoEnvPreview = 0.0;
+        return;
+    }
+    LLSettingsDay::ptr_t day = env.getEnvironmentDay(LLEnvironment::ENV_REGION);
+    if (!day) return;
+    // The region's own cycle, as a personal environment, run ahead by the preview: the cycle's
+    // position is (LLDate::now() + offset) % length (llenvironment.cpp getAdjustedNow).
+    env.setEnvironment(LLEnvironment::ENV_LOCAL, day,
+                       env.getEnvironmentDayLength(LLEnvironment::ENV_REGION),
+                       env.getEnvironmentDayOffset(LLEnvironment::ENV_REGION) + LLSettingsDay::Seconds(seconds_ahead));
+    env.setSelectedEnvironment(LLEnvironment::ENV_LOCAL, LLEnvironment::TRANSITION_INSTANT);
+    mAutoEnvPreviewOn = true;
+    mAutoEnvPreview = seconds_ahead;
+}
+
+// <WolfViewer 2026-10-03> Source: weather.php region_payload() `autoEnv` {enabled, skyOn,
+// weatherOn, placeName, lat, lon} (php/auto_env_lib.php ae_config). Absent = not automatic.
+void WolfRegionWeather::readAutoEnv(const LLSD& row)
+{
+    const LLSD& ae = row.isMap() ? row["autoEnv"] : LLSD();
+    mAutoEnvOn      = ae.isMap() && ae["enabled"].asBoolean();
+    mAutoEnvSky     = ae.isMap() && ae["skyOn"].asBoolean();
+    mAutoEnvWeather = ae.isMap() && ae["weatherOn"].asBoolean();
+    mAutoEnvPlace   = ae.isMap() ? ae["placeName"].asString() : std::string();
+    mAutoEnvLat     = ae.isMap() ? ae["lat"].asReal() : 0.0;
+    mAutoEnvLon     = ae.isMap() ? ae["lon"].asReal() : 0.0;
+    // [GRID TIME 2026-10-03] The sky shows the place at the grid's (Pacific) wall-clock time:
+    // that moment is now + skyShift (php/auto_env_lib.php ae_timezone_fields).
+    mAutoEnvSkyShift = ae.isMap() ? ae["skyShift"].asReal() : 0.0;
+}
+
 void WolfRegionWeather::applyPush(const LLSD& row)
 {
     if (!row.isMap()) return;
@@ -473,6 +540,7 @@ void WolfRegionWeather::applyPush(const LLSD& row)
     if (row.has("allowParcel")) mAllowParcel = row["allowParcel"].asBoolean();
     mProfile = WolfWeatherProfile();
     mProfile.fromLLSD(row);
+    if (row.has("autoEnv")) readAutoEnv(row);
     recomputeParcelApplies();
     mLastError.clear();
     mGeneration++;
@@ -628,6 +696,7 @@ void WolfRegionWeather::saveCoro(std::string body, std::string scope, std::strin
             self.mAllowParcel = reply["allowParcel"].asBoolean();
             self.mProfile = WolfWeatherProfile();
             self.mProfile.fromLLSD(reply);
+            self.readAutoEnv(reply);
             self.recomputeParcelApplies();
         }
     }
@@ -758,6 +827,9 @@ bool WolfPanelWeather::canEdit() const
 {
     LLViewerRegion* region = gAgent.getRegion();
     if (!WolfGrid::isWolfTerritories() || !region) return false;
+    // <WolfViewer 2026-10-03> While Jimmy Olsen's Automatic Environment drives this region's
+    // weather, weather.php refuses a hand-set region value (409), so the region scope is locked.
+    if (mScope == REGION && WolfRegionWeather::instance().autoEnvWeather()) return false;
     if (region->canManageEstate()) return true;
     if (mScope == REGION) return false;
     // Source: weather.php:396-417 and llviewerparcelmgr.h:162. Courtesy-only permission uses
@@ -1146,7 +1218,14 @@ void WolfPanelWeather::draw()
         }
         if (mRegionLine) mRegionLine->setText(getString(mScope == REGION ? "str_region" : "str_parcel", args));
 
-        if (!target_changed && !canEdit() && mStatus && mStatus->getText().empty())
+        if (mScope == REGION && rw.autoEnvWeather())
+        {
+            // <WolfViewer 2026-10-03> Say WHY it is locked and where to change it.
+            LLStringUtil::format_map_t aargs;
+            aargs["PLACE"] = rw.autoEnvPlace();
+            setStatus(getString("str_auto_env", aargs), false);
+        }
+        else if (!target_changed && !canEdit() && mStatus && mStatus->getText().empty())
         {
             setStatus(getString(mScope == REGION ? "str_read_only" : "str_read_only_parcel"), false);
         }

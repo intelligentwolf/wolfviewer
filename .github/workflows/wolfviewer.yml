@@ -29,12 +29,12 @@ env:
   # BuildVersion.cmake:14 reads ENV{revision} for the 4th version field (must be
   # numeric — viewerRes.rc:145 FILEVERSION). Pin to the wolf revision number so the
   # viewer reports 7.2.4.1 instead of a meaningless git commit count.
-  revision: "53"
+  revision: "54"
   # [2026-09-12] From here on a release has a NAME, and that is what residents see. The number
   # stays because it has to — viewerRes.rc:145 FILEVERSION must be numeric, and wolfupdate.cpp
   # compares it with the signed latest.json's "revision" — but it is no longer the thing anyone is
   # asked to quote. Tags stay v7.2.4-wN (w52 and older viewers read the GitHub tag).
-  release_name: "Bouncing Panda"
+  release_name: "Jimmy's Weather"
   # [2026-09-29] Windows code signing (Azure Artifact Signing, account in Paul's Azure subscription,
   # resource group wolfviewer-signing). None of these are secrets. The endpoint must be the one for
   # the account's region, North Europe (how-to-signing-integrations endpoint table), and the
@@ -327,4 +327,89 @@ jobs:
         with:
           name: WolfViewer-linux64-bundle
           path: dist/**
+          if-no-files-found: error
+
+  # [2026-10-02] The Linux packages (.deb, .rpm, .pkg.tar.zst) built from the bundle tarball, each
+  # in its own distribution's container with its own tools, and each installed into a clean
+  # container of that family before it is uploaded. Signing and the repositories at
+  # wolf-grid.com/linux/ are NOT done here: ~/wolfviewer-releases/publish_linux_repos.sh signs with
+  # the key that never leaves Paul's machine, from this job's artifact WolfViewer-linux-packages.
+  # The deb is built on Ubuntu 22.04 (the oldest supported) so its Depends name the oldest
+  # library versions; the same recipe made the w53 packages by hand (build_linux_packages_w53.sh).
+  linux-packages:
+    needs: [linux-bundle]
+    if: ${{ !cancelled() && needs.linux-bundle.result == 'success' }}
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
+      - uses: actions/download-artifact@v4
+        with: { name: WolfViewer-linux64-bundle, path: in }
+
+      - name: Build and install-test deb, rpm and arch packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t T < <(find in -maxdepth 1 -type f -name '*.tar.xz')
+          [ "${#T[@]}" -eq 1 ] || { echo "::error::expected one bundle tarball, found ${#T[@]}"; exit 1; }
+          TB=$(basename "${T[0]}")
+          # fs_viewer_manifest.py names it ..._LEGACY-7-2-4-53.tar.xz: the version is the last four numbers.
+          V=$(basename "$TB" .tar.xz | sed -nE 's/.*-([0-9]+)-([0-9]+)-([0-9]+)-([0-9]+)$/\1.\2.\3.\4/p')
+          [ -n "$V" ] || { echo "::error::no version in $TB"; exit 1; }
+          echo "bundle $TB, package version $V"
+          IN="$PWD/in"; S="$PWD/.github/scripts"; OUT="$PWD/packages"; mkdir -p "$OUT"
+          U="$(id -u):$(id -g)"
+
+          echo "::group::deb (Ubuntu 22.04)"
+          docker run --rm -v "$IN:/in:ro" -v "$OUT:/out" -v "$S:/s:ro" ubuntu:22.04 bash -c "set -euo pipefail
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update >/dev/null; apt-get install -y dpkg-dev file binutils xz-utils >/dev/null
+            /s/wolfviewer-deb-runtime-libs.sh /in/$TB
+            /s/wolfviewer-linux-packages.sh deb /in/$TB $V /out
+            chown -R $U /out"
+          echo "::endgroup::"
+
+          echo "::group::rpm (Fedora)"
+          docker run --rm -v "$IN:/in:ro" -v "$OUT:/out" -v "$S:/s:ro" fedora:latest bash -c "set -euo pipefail
+            dnf -y -q install rpm-build file binutils findutils xz tar >/dev/null
+            /s/wolfviewer-linux-packages.sh rpm /in/$TB $V /out
+            chown -R $U /out"
+          echo "::endgroup::"
+
+          echo "::group::arch (Arch Linux, makepkg as a normal user)"
+          docker run --rm -v "$IN:/in:ro" -v "$OUT:/out" -v "$S:/s:ro" archlinux:latest bash -c "set -euo pipefail
+            pacman -Syu --noconfirm --needed base-devel file binutils >/dev/null
+            pacman -Fy >/dev/null
+            useradd -m b; mkdir -p /tmp/o; chown b /tmp/o
+            su b -c '/s/wolfviewer-linux-packages.sh arch /in/$TB $V /tmp/o'
+            cp /tmp/o/*.pkg.tar.zst /out/; chown -R $U /out"
+          echo "::endgroup::"
+
+          # The names publish_linux_repos.sh takes.
+          for f in "wolfviewer_${V}_amd64.deb" "wolfviewer-${V}-1.x86_64.rpm" "wolfviewer-${V}-1-x86_64.pkg.tar.zst"; do
+            [ -s "$OUT/$f" ] || { echo "::error::missing $f"; ls -la "$OUT"; exit 1; }
+          done
+
+          # Each package into a clean system of its family; every library both viewer binaries
+          # need must resolve (the bundle's own lib/ first, as wrapper.sh sets it).
+          # (Not "! ldd | grep": set -e ignores a negated pipeline, so a miss would still pass.)
+          LDD='LD_LIBRARY_PATH=/opt/wolfviewer/lib ldd /opt/wolfviewer/bin/do-not-directly-run-wolfviewer-bin /opt/wolfviewer/bin/do-not-directly-run-wolfviewer-bin-avx2 > /tmp/ldd.txt
+            if grep "not found" /tmp/ldd.txt; then echo "::error::missing libraries"; exit 1; fi'
+          echo "::group::install tests"
+          docker run --rm -v "$OUT:/out:ro" ubuntu:22.04 bash -c "set -euo pipefail; export DEBIAN_FRONTEND=noninteractive
+            apt-get update >/dev/null; apt-get install -y /out/wolfviewer_${V}_amd64.deb >/dev/null; $LDD; echo deb OK"
+          docker run --rm -v "$OUT:/out:ro" fedora:latest bash -c "set -euo pipefail
+            dnf -y -q install /out/wolfviewer-${V}-1.x86_64.rpm >/dev/null; $LDD; echo rpm OK"
+          docker run --rm -v "$OUT:/out:ro" archlinux:latest bash -c "set -euo pipefail
+            pacman -Sy --noconfirm >/dev/null; pacman -U --noconfirm /out/wolfviewer-${V}-1-x86_64.pkg.tar.zst >/dev/null; $LDD; echo arch OK"
+          echo "::endgroup::"
+          ls -la "$OUT"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WolfViewer-linux-packages
+          path: packages/*
           if-no-files-found: error

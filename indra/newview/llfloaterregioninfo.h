@@ -72,6 +72,7 @@ class LLPanelRegionExperiences;
 class LLPanelEstateAccess;
 class LLPanelRegionEnvironment;
 class WolfPanelRegionWeather;
+class WolfPanelRegionAutoEnvironment;
 class WolfPanelLandWaves;
 
 class LLEventTimer;
@@ -133,6 +134,7 @@ protected:
     info_panels_t mInfoPanels;
     LLPanelRegionEnvironment *mEnvironmentPanel;
     WolfPanelRegionWeather *mWeatherPanel = nullptr;
+    WolfPanelRegionAutoEnvironment *mAutoEnvPanel = nullptr;   // <WolfViewer 2026-10-03/>
     WolfPanelLandWaves *mWavesPanel = nullptr;
     //static S32 sRequestSerial;    // serial # of last EstateOwnerRequest
     static LLUUID sRequestInvoice;

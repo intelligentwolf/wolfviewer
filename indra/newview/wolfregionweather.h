@@ -134,6 +134,31 @@ public:
     void applyPush(const LLSD& row);
 
     const std::string& lastError() const { return mLastError; }
+
+    /**
+     * <WolfViewer 2026-10-03> Jimmy Olsen's Automatic Environment, as weather.php reports it in
+     * every region reply (`autoEnv`): the region follows a real place. autoEnvSky() turns on the
+     * real moon phase (lldrawpoolwlsky.cpp); autoEnvWeather() means the region's weather is the
+     * real place's and the Weather tab's region scope is read-only.
+     */
+    bool autoEnvSky() const { return mHaveRow && mAutoEnvOn && mAutoEnvSky; }
+    bool autoEnvWeather() const { return mHaveRow && mAutoEnvOn && mAutoEnvWeather; }
+    const std::string& autoEnvPlace() const { return mAutoEnvPlace; }
+    F64 autoEnvLat() const { return mAutoEnvLat; }
+    F64 autoEnvLon() const { return mAutoEnvLon; }
+    /** True when the sky on screen IS the automatic one: the region follows a place AND the
+     *  current day cycle is the module's (a personal sky, a parcel's own EEP or an editor
+     *  preview replaces it, and then the real stars and moon must not be drawn over it). */
+    bool autoEnvRealSky() const;
+    /** <WolfViewer 2026-10-03> Preview time (Jimmy's Weather tab): the real sky N seconds ahead,
+     *  on this viewer only. The stars and moon are placed for now + this. */
+    F64  autoEnvTimeOffset() const { return mAutoEnvPreviewOn ? mAutoEnvPreview : 0.0; }
+    bool autoEnvPreviewOn() const { return mAutoEnvPreviewOn; }
+    void setAutoEnvPreview(bool on, F64 seconds_ahead);
+    /** Seconds since the epoch, UTC, of the moment the sky shows (LLDate::now, the clock
+     *  LLEnvironment's day cycle runs on, llenvironment.cpp getAdjustedNow). */
+    F64  autoEnvSkyTime() const;
+
     /** Bumped whenever the answer changes, so a panel can notice without polling fields. */
     S32 generation() const { return mGeneration; }
 
@@ -152,8 +177,18 @@ private:
     void invalidateParcel();
     void finishFetch();
     void recomputeParcelApplies();
+    void readAutoEnv(const LLSD& row);   ///< <WolfViewer 2026-10-03/> weather.php region_payload `autoEnv`
 
     bool               mHaveRow = false;
+    bool               mAutoEnvOn = false;      // <WolfViewer 2026-10-03/>
+    bool               mAutoEnvSky = false;
+    bool               mAutoEnvWeather = false;
+    std::string        mAutoEnvPlace;
+    F64                mAutoEnvLat = 0.0;
+    F64                mAutoEnvLon = 0.0;
+    F64                mAutoEnvSkyShift = 0.0;   // [GRID TIME 2026-10-03] weather.php autoEnv.skyShift
+    bool               mAutoEnvPreviewOn = false;
+    F64                mAutoEnvPreview = 0.0;
     WolfWeatherProfile mProfile;
     std::string        mKind;         // "" = no opinion; NOT the same as "clear"
     bool               mAllowParcel = true;

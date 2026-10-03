@@ -928,6 +928,7 @@ set(viewer_SOURCE_FILES
     wolfoceanfft.cpp
     wolfwakefield.cpp
     wolfwaterfield.cpp
+    wolfautoenvironment.cpp
     wolfregionweather.cpp
     wolfwavezones.cpp
     wolfweatherprofile.cpp
@@ -1822,6 +1823,7 @@ set(viewer_HEADER_FILES
     wolfseastate.h
     wolfwakefield.h
     wolfwaterfield.h
+    wolfautoenvironment.h
     wolfregionweather.h
     wolfwavezones.h
     wolfweatherprofile.h
@@ -2231,6 +2233,8 @@ set(viewer_APPSETTINGS_FILES
     app_settings/anim.ini
     app_settings/autoreplace.xml
     app_settings/client_list_v2.xml
+    app_settings/wolf_stars.txt
+    app_settings/wolf_constellations.txt
     app_settings/cloud.xml
     app_settings/cmd_line.xml
     app_settings/commands.xml

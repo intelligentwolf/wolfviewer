@@ -1229,6 +1229,19 @@
              function="Floater.Show"
              parameter="wolf_lag_detector" />
         </menu_item_call>
+        <!-- [ASTRONOMY 2026-10-03] Paul: "show atronomy, where it would show and label the star groups
+             like orion". Constellation figures and names over the real star map (llvowlsky.cpp), on
+             regions following a real place (Jimmy's Weather). -->
+        <menu_item_check
+         label="Show Astronomy"
+         name="WolfShowAstronomy">
+            <menu_item_check.on_check
+             function="CheckControl"
+             parameter="WolfShowAstronomy" />
+            <menu_item_check.on_click
+             function="ToggleControl"
+             parameter="WolfShowAstronomy" />
+        </menu_item_check>
         <menu_item_call
              label="Set Home to Here"
              name="Set Home to Here">

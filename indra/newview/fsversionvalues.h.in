@@ -40,7 +40,10 @@
 #define LL_VIEWER_CHANNEL @VIEWER_CHANNEL@
 // <WolfViewer 2026-09-12> The release NAME, e.g. Howling Hati — what residents are shown.
 // Empty for a local or untagged build, which is correct: it is not a named release.
-#define LL_VIEWER_RELEASE_NAME @VIEWER_RELEASE_NAME@
+// <WolfViewer 2026-10-03> A string literal, not bare tokens: w54 is "Jimmy's Weather", and a lone
+// apostrophe in bare macro tokens is an unterminated character literal that LL_TO_STRING cannot
+// stringise (compilers reject it).
+#define LL_VIEWER_RELEASE_NAME_STR "@VIEWER_RELEASE_NAME@"
 #define LL_VIEWER_VERSION_MAJOR @VIEWER_VERSION_MAJOR@
 #define LL_VIEWER_VERSION_MINOR @VIEWER_VERSION_MINOR@
 #define LL_VIEWER_VERSION_PATCH @VIEWER_VERSION_PATCH@

@@ -48,6 +48,24 @@ void main()
 {
     // camera above water: class1\deferred\starsF.glsl
     // camera below water: class1\environment\starsF.glsl
+    // <WolfViewer 2026-10-03> World > Show Astronomy: constellation lines share this pass (and its
+    // depth test against the scene) but are flagged with texcoords > 1.5 (llvowlsky.cpp
+    // updateConstellations): their own steady colour, faded in with the stars, no twinkle.
+    if (vary_texcoord0.x > 1.5)
+    {
+        // Full strength as soon as the stars are properly out (custom_alpha 0.25), not only at
+        // the darkest sky: a half moon alone keeps custom_alpha near 0.35.
+        vec4 lc = vec4(vertex_color.rgb, vertex_color.a * smoothstep(0.0f, 0.25f, custom_alpha));
+        frag_data[1] = vec4(0.0f);
+        frag_data[2] = vec4(0.0, 1.0, 0.0, GBUFFER_FLAG_SKIP_ATMOS);
+#if defined(HAS_EMISSIVE)
+        frag_data[0] = vec4(0);
+        frag_data[3] = lc;
+#else
+        frag_data[0] = lc;
+#endif
+        return;
+    }
     vec4 col_a = texture(diffuseMap, vary_texcoord0.xy);
     vec4 col_b = texture(diffuseMap, vary_texcoord0.xy);
     vec4 col = mix(col_b, col_a, blend_factor);

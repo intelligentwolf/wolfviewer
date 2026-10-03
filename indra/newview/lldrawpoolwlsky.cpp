@@ -45,11 +45,17 @@
 #include "llvowlsky.h"
 #include "llsettingsvo.h"
 #include "llviewercontrol.h"
+#include "lltimer.h"
+#include "llviewertexturelist.h"
+#include "wolfregionweather.h"   // <WolfViewer 2026-10-03/> autoEnvSky() for the moon phase
 
 extern bool gCubeSnapshot;
 
 static LLStaticHashedString sCamPosLocal("camPosLocal");
 static LLStaticHashedString sCustomAlpha("custom_alpha");
+// <WolfViewer 2026-10-03> moonF.glsl wolf_moon_phase (Jimmy Olsen's Automatic Environment).
+static LLStaticHashedString sWolfMoonPhase("wolf_moon_phase");
+static LLStaticHashedString sWolfMoonNorth("wolf_moon_north");
 
 static LLGLSLShader* cloud_shader = NULL;
 static LLGLSLShader* sky_shader   = NULL;
@@ -243,6 +249,8 @@ void LLDrawPoolWLSky::renderStarsDeferred(const LLVector3& camPosLocal) const
     // If start_brightness is not set, exit
     if(star_alpha < 0.001f)
     {
+        // <WolfViewer 2026-10-03> no stars, so no constellation names either (Show Astronomy)
+        if (gSky.mVOWLSkyp) gSky.mVOWLSkyp->hideConstellationNames();
         LL_DEBUGS("SKY") << "star_brightness below threshold." << LL_ENDL;
         return;
     }
@@ -275,7 +283,13 @@ void LLDrawPoolWLSky::renderStarsDeferred(const LLVector3& camPosLocal) const
 
     gGL.pushMatrix();
     gGL.translatef(camPosLocal.mV[0], camPosLocal.mV[1], camPosLocal.mV[2]);
-    gGL.rotatef(gFrameTimeSeconds*0.01f, 0.f, 0.f, 1.f);
+    // <WolfViewer 2026-10-03> The real star map is placed for the real time already
+    // (LLVOWLSky::updateRealStars); only the stock random field gets the slow decorative spin.
+    // drawingRealStars() reports the previous frame's choice, which is the same choice.
+    if (!gSky.mVOWLSkyp->drawingRealStars())
+    {
+        gGL.rotatef(gFrameTimeSeconds*0.01f, 0.f, 0.f, 1.f);
+    }
     gDeferredStarProgram.uniform1f(LLShaderMgr::BLEND_FACTOR, blend_factor);
 
     if (LLPipeline::sReflectionRender)
@@ -467,6 +481,66 @@ void LLDrawPoolWLSky::renderHeavenlyBodies()
             //moon_shader->uniform1f(LLShaderMgr::BLEND_FACTOR, blend_factor);
             moon_shader->uniform3fv(LLShaderMgr::DEFERRED_MOON_DIR, 1, psky->getMoonDirection().mV); // shader: moon_dir
 
+            // <WolfViewer 2026-10-03> The real moon, on regions following a real place (the
+            // default sky keeps the moon close to the sun, which would make it nearly new).
+            // The disc's axes are rebuilt exactly as LLVOSky::updateHeavenlyBodyGeometry builds
+            // the quad (llvosky.cpp): right = to_dir x Z, up = right x to_dir, with its zenith
+            // fallback; there texture u runs along right and v along up (TEX00..TEX11 corners).
+            // The sun direction in that frame, with z towards the viewer (-moon direction), is
+            // what moonF.glsl lights the sphere by. The sun direction is the sky's own
+            // (LLSettingsSky::getSunDirection), the same one the Jimmy's Weather tab reports.
+            {
+                LLVector4 phase(0.f, 0.f, 1.f, 0.f);
+                LLVector4 north(0.f, 1.f, 0.f, 0.f);
+                static LLPointer<LLViewerFetchedTexture> sMoonMap;
+                if (WolfRegionWeather::instance().autoEnvRealSky())
+                {
+                    if (sMoonMap.isNull())
+                    {
+                        // NASA SVS CGI Moon Kit (svs.gsfc.nasa.gov/4720), LRO colour, 2048 x 1024.
+                        sMoonMap = LLViewerTextureManager::getFetchedTextureFromFile("world/wolf_moon_lroc.png",
+                                        FTT_LOCAL_FILE, true, LLGLTexture::BOOST_UI);
+                    }
+                    const LLQuaternion rot = gSky.mVOSkyp->getMoon().getRotation();
+                    const LLVector3 to_dir = LLVector3::x_axis * rot;
+                    LLVector3 sun_dir = psky->getSunDirection();
+                    sun_dir.normalize();
+                    LLVector3 hb_right = to_dir % LLVector3::z_axis;
+                    LLVector3 hb_up = hb_right % to_dir;
+                    if ((to_dir * LLVector3::z_axis) > 0.99f)
+                    {
+                        hb_right = LLVector3::y_axis_neg * rot;
+                        hb_up = LLVector3::z_axis * rot;
+                    }
+                    hb_right.normalize();
+                    hb_up.normalize();
+                    phase.set(sun_dir * hb_right, sun_dir * hb_up, -(sun_dir * to_dir), 1.f);
+
+                    // Lunar north ~ the ecliptic north pole (RA 270, Dec 66.56; the Moon's axis
+                    // is 1.5 deg from it), placed in this sky as LLVOWLSky::updateRealStars places
+                    // a star: LST from GMST (Meeus 12.4) + longitude, then Meeus 13.5/13.6.
+                    const F64 lat = WolfRegionWeather::instance().autoEnvLat() * DEG_TO_RAD;
+                    const F64 lon = WolfRegionWeather::instance().autoEnvLon();
+                    const F64 jd = WolfRegionWeather::instance().autoEnvSkyTime() / 86400.0 + 2440587.5;
+                    const F64 t = (jd - 2451545.0) / 36525.0;
+                    const F64 gmst = 280.46061837 + 360.98564736629 * (jd - 2451545.0) + 0.000387933 * t * t - t * t * t / 38710000.0;
+                    const F64 h = fmod(fmod(gmst + lon, 360.0) + 360.0, 360.0) * DEG_TO_RAD - 270.0 * DEG_TO_RAD;
+                    const F64 dec = 66.56 * DEG_TO_RAD;
+                    const LLVector3 pole((F32)(-cos(dec) * sin(h)),
+                                         (F32)(sin(dec) * cos(lat) - cos(dec) * cos(h) * sin(lat)),
+                                         (F32)(sin(dec) * sin(lat) + cos(dec) * cos(h) * cos(lat)));
+                    LLVector2 nd(pole * hb_right, pole * hb_up);
+                    if (nd.length() < 1e-3f) nd.set(0.f, 1.f);
+                    nd.normalize();
+                    // Earthshine fades in as the sky darkens (sun from 0 to 10 degrees below).
+                    const F32 night = llclamp(-sun_dir.mV[VZ] / 0.17f, 0.f, 1.f);
+                    north.set(nd.mV[VX], nd.mV[VY], night, 0.f);
+                    moon_shader->bindTexture(LLShaderMgr::ALTERNATE_DIFFUSE_MAP, sMoonMap, LLTexUnit::TT_TEXTURE);
+                }
+                moon_shader->uniform4f(sWolfMoonPhase, phase.mV[0], phase.mV[1], phase.mV[2], phase.mV[3]);
+                moon_shader->uniform4f(sWolfMoonNorth, north.mV[0], north.mV[1], north.mV[2], north.mV[3]);
+            }
+
             face->renderIndexed();
 
             gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
@@ -507,7 +581,35 @@ void LLDrawPoolWLSky::renderDeferred(S32 pass)
         {
             renderSkyCloudsDeferred(origin, camHeightLocal, cloud_shader);
         }
+
+        // <WolfViewer 2026-10-03> World > Show Astronomy — in FRONT of the clouds (Paul: "it
+        // needs to go in front of the clouds"), still depth-tested against the scene.
+        if (!gCubeSnapshot)
+        {
+            renderConstellationsDeferred(origin);
+        }
     }
+}
+
+// <WolfViewer 2026-10-03> The constellation figures, after the clouds. The star program draws them
+// (starsF.glsl's flagged-line path: the vertex colour, scaled by smoothstep(0, 0.25, custom_alpha));
+// custom_alpha 1 here = full bright white whenever the star pass has drawn the night sky at all.
+void LLDrawPoolWLSky::renderConstellationsDeferred(const LLVector3& camPosLocal) const
+{
+    if (!gSky.mVOSkyp || !gSky.mVOWLSkyp || use_hdri_sky()) return;
+    if (LLEnvironment::instance().getCurrentSky()->getStarBrightness() / 500.0f < 0.001f) return;   // day: no night sky
+
+    LLGLSPipelineBlendSkyBox gls_sky(true, false);
+    gGL.setSceneBlendType(LLRender::BT_ALPHA);
+    gDeferredStarProgram.bind();
+    gGL.pushMatrix();
+    gGL.translatef(camPosLocal.mV[0], camPosLocal.mV[1], camPosLocal.mV[2]);
+    gDeferredStarProgram.uniform1f(sCustomAlpha, 1.0f);
+    gDeferredStarProgram.uniform1f(LLShaderMgr::BLEND_FACTOR, 0.f);
+    gSky.mVOWLSkyp->drawConstellations();
+    gGL.popMatrix();
+    gDeferredStarProgram.unbind();
+    gGL.setSceneBlendType(LLRender::BT_ALPHA);
 }
 
 

@@ -94,6 +94,17 @@ while IFS= read -r -d '' f; do
     esac
 done < <(find "$APP" -type f -print0)
 mapfile -t LIBDIRS < <(find "$APP" -type f -name '*.so*' -printf '%h\n' | sort -u)
+# Every name the bundle answers to: the files, their symlinks (libuuid.so.16 -> libuuid.so.16.0.22)
+# and each library's own SONAME, which is what a NEEDED entry names. File names alone left
+# libuuid.so.16 looking like a system library (rpm then required it; Fedora has none).
+bundled_sonames() {
+    {
+        find "$APP" \( -type f -o -type l \) -name '*.so*' -printf '%f\n'
+        find "$APP" -type f -name '*.so*' -print0 | while IFS= read -r -d '' f; do
+            readelf -d "$f" 2>/dev/null | sed -n 's/.*(SONAME).*\[\(.*\)\]/\1/p'
+        done
+    } | sort -u
+}
 echo "ELF: ${#ELF64[@]} 64-bit, ${#ELF32[@]} 32-bit (left out of the dependency scan)"
 
 POSTINST='if command -v update-desktop-database >/dev/null 2>&1; then update-desktop-database -q /usr/share/applications || true; fi
@@ -138,7 +149,7 @@ EOF
     ;;
 rpm)
     # Bundled sonames: never Required from the system, never Provided to it.
-    mapfile -t SONAMES < <(find "$APP" -type f -name '*.so*' -printf '%f\n' | sort -u)
+    mapfile -t SONAMES < <(bundled_sonames)
     REQ_EXCLUDE="^($(printf '%s\n' "${SONAMES[@]}" | sed -e 's/[.+]/\\\\&/g' | paste -sd'|'))"
     EXCL_FROM=""
     for f in "${ELF32[@]}"; do
@@ -185,13 +196,13 @@ ${POSTINST}
 EOF
     rpmbuild --define "_topdir $WORK/rpm" -bb "$WORK/rpm/SPECS/wolfviewer.spec" >"$WORK/rpmbuild.log" 2>&1 \
         || { tail -40 "$WORK/rpmbuild.log" >&2; exit 1; }
-    RPM="$(find "$WORK/rpm/RPMS" -name 'wolfviewer-*.rpm' | head -1)"
+    RPM="$(find "$WORK/rpm/RPMS" -name 'wolfviewer-*.rpm' | sed -n 1p)"
     [ -n "$RPM" ] || { echo "rpmbuild made no package" >&2; exit 1; }
     cp "$RPM" "$OUT/"
-    echo "Requires:"; rpm -qp --requires "$RPM" | grep -v '^rpmlib(' | head -80
+    echo "Requires:"; rpm -qp --requires "$RPM" | grep -v '^rpmlib(' | sed -n 1,80p
     ;;
 arch)
-    mapfile -t SONAMES < <(find "$APP" -type f -name '*.so*' -printf '%f\n' | sort -u)
+    mapfile -t SONAMES < <(bundled_sonames)
     declare -A BUNDLED=(); for s in "${SONAMES[@]}"; do BUNDLED["$s"]=1; done
     declare -A NEED=()
     for f in "${ELF64[@]}"; do
@@ -201,7 +212,7 @@ arch)
     done
     declare -A PKGS=(); MISSING=()
     for so in "${!NEED[@]}"; do
-        owner="$(pacman -Fq "usr/lib/$so" 2>/dev/null | head -1)"
+        owner="$(pacman -Fq "usr/lib/$so" 2>/dev/null | sed -n 1p)"   # sed reads to the end: head -1 + pipefail ends the script (SIGPIPE)
         if [ -n "$owner" ]; then PKGS["${owner##*/}"]=1; else MISSING+=("$so"); fi
     done
     [ "${#MISSING[@]}" -eq 0 ] || { echo "no Arch package provides: ${MISSING[*]}" >&2; exit 1; }

@@ -89,6 +89,7 @@
 #include "llviewerstats.h"
 #include "llviewertexteditor.h"
 #include "llviewerwindow.h"
+#include "wolfautoenvironment.h"
 #include "wolfregionweather.h"
 #include "wolfwavezones.h"
 #include "lltrans.h"
@@ -310,6 +311,12 @@ bool LLFloaterRegionInfo::postBuild()
     mWeatherPanel = new WolfPanelRegionWeather;
     mWeatherPanel->buildFromFile("panel_weather_controls.xml");
     mTab->addTabPanel(mWeatherPanel);
+
+    // <WolfViewer 2026-10-03> Jimmy Olsen's Automatic Environment (wolfautoenvironment.cpp):
+    // the region's sky and weather follow a real place. Next to Weather, which it drives.
+    mAutoEnvPanel = new WolfPanelRegionAutoEnvironment;
+    mAutoEnvPanel->buildFromFile("panel_region_auto_environment.xml");
+    mTab->addTabPanel(mAutoEnvPanel);
 
     mWavesPanel = new WolfPanelLandWaves;
     mWavesPanel->buildFromFile("panel_region_waves.xml");
@@ -775,6 +782,7 @@ void LLFloaterRegionInfo::refresh()
     }
     mEnvironmentPanel->refresh();
     if (mWeatherPanel) mWeatherPanel->refresh();
+    if (mAutoEnvPanel) mAutoEnvPanel->refresh();
     if (mWavesPanel) mWavesPanel->refresh();
 }
 

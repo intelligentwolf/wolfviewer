@@ -40,6 +40,7 @@ private:
 
 public:
     LLVOWLSky(const LLUUID &id, const LLPCode pcode, LLViewerRegion *regionp);
+    ~LLVOWLSky();   // <WolfViewer 2026-10-03/> releases the constellation names
 
     /*virtual*/ void         idleUpdate(LLAgent &agent, const F64 &time);
     /*virtual*/ bool         isActive(void) const;
@@ -47,6 +48,13 @@ public:
     /*virtual*/ bool         updateGeometry(LLDrawable *drawable);
 
     void drawStars(void);
+    /** <WolfViewer 2026-10-03> True while the real star map is drawn (Jimmy Olsen's Automatic
+     *  Environment): the draw pool then leaves out the stock star field's slow spin. */
+    bool drawingRealStars() const { return mRealStarsActive; }
+    /** [ASTRONOMY 2026-10-03] World > Show Astronomy lines; drawn after the clouds. */
+    bool drawConstellations();
+    /** [ASTRONOMY 2026-10-03] Hide the names (the star pass is skipped in daylight, so it cannot). */
+    void hideConstellationNames();
     void drawDome(void);
     void drawFsSky(void); // fullscreen sky for advanced atmo
     void resetVertexBuffers(void);
@@ -85,6 +93,26 @@ private:
     std::vector<LLVector3>  mStarVertices;              // Star verticies
     std::vector<LLColor4>   mStarColors;                // Star colors
     std::vector<F32>        mStarIntensities;           // Star intensities
+
+    // <WolfViewer 2026-10-03> The real star map — Yale Bright Star Catalogue (app_settings/
+    // wolf_stars.txt), placed for the region's real place and the real time.
+    struct WolfStar { F32 ra; F32 dec; F32 vmag; F32 bv; };
+    static bool loadStarCatalogue();
+    bool updateRealStars(F64 lat_deg, F64 lon_deg);
+    LLPointer<LLVertexBuffer> mRealStarsVerts;
+    U32  mRealStarsDrawn = 0;
+    F64  mRealStarsNext = 0.0;
+    F64  mRealStarsLat = 999.0;
+    F64  mRealStarsLon = 999.0;
+    F64  mRealStarsPreview = 0.0;
+    // [ASTRONOMY 2026-10-03] World > Show Astronomy: constellation figures + names.
+    static bool loadConstellations();
+    void updateConstellations(F64 lat_deg, F64 lon_deg, F64 jd);
+    LLPointer<LLVertexBuffer> mConstVerts;
+    U32  mConstDrawn = 0;
+    std::vector<LLPointer<class LLHUDText>> mConstNames;
+    std::vector<LLVector3> mConstDirs;
+    bool mRealStarsActive = false;
 };
 
 #endif // LL_VOWLSKY_H

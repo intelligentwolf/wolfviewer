@@ -66,8 +66,9 @@ if (NOT DEFINED VIEWER_SHORT_VERSION) # will be true in indra/, false in indra/n
         set(VIEWER_RELEASE_NAME "")
     endif ()
 
+    # <WolfViewer 2026-10-03> LL_VIEWER_RELEASE_NAME is no longer put on the command line: nothing
+    # these files compile reads it, and the name now travels as a string in fsversionvalues.h.
     set(VIEWER_CHANNEL_VERSION_DEFINES
-        "LL_VIEWER_RELEASE_NAME=${VIEWER_RELEASE_NAME}"
         "LL_VIEWER_CHANNEL=${VIEWER_CHANNEL}"
         "LL_VIEWER_VERSION_MAJOR=${VIEWER_VERSION_MAJOR}"
         "LL_VIEWER_VERSION_MINOR=${VIEWER_VERSION_MINOR}"

@@ -601,6 +601,274 @@ void WolfMapGlobe::drawWaterMesh(const View& v)
     drawWaterLayers(v, mWater, WATER_FRAMES, fill);
 }
 
+// ── space (2026-10-03) ───────────────────────────────────────────────────────────────────
+
+// The sky, made once from a fixed seed so it is the same sky every time, and the same sky as
+// WolfStorm's. Source: wolfstorm js/world/map_globe.js MapGlobe._makeSky — ported call for call
+// (the random numbers are drawn in the same order, so the stars land in the same places):
+// stars with real-star brightness falloff and colours, a few bright ones with a halo, the Milky
+// Way as faint stars and soft glow with a dark dust lane, and three faint nebulae.
+void WolfMapGlobe::makeSky()
+{
+    mSkyMade = true;
+    mSkyAdd.clear();
+    mSkyOver.clear();
+
+    // mulberry32, as JavaScript computes it with Math.imul and >>> (32-bit wrap-around).
+    U32 seed = 0x5751F00Du;
+    auto rnd = [&seed]() -> F64
+    {
+        seed += 0x6D2B79F5u;
+        U32 t = seed;
+        t = (t ^ (t >> 15)) * (t | 1u);
+        t ^= t + (t ^ (t >> 7)) * (t | 61u);
+        return (F64)(t ^ (t >> 14)) / 4294967296.0;
+    };
+    auto gauss = [&rnd]() -> F64
+    {
+        F64 u = 0.0;
+        while (u == 0.0)
+        {
+            u = rnd();
+        }
+        const F64 r = sqrt(-2.0 * log(u));
+        return r * cos(2.0 * F_PI * rnd());
+    };
+    auto onSphere = [&rnd](F64 out[3])
+    {
+        const F64 z = rnd() * 2.0 - 1.0;
+        const F64 a = rnd() * 2.0 * F_PI;
+        const F64 r = sqrt(1.0 - z * z);
+        out[0] = r * cos(a);
+        out[1] = r * sin(a);
+        out[2] = z;
+    };
+    // Star colours by spectral class (approximate blackbody tints) and how common each is among
+    // stars bright enough to see.
+    struct StarClass { F64 weight; F32 c[3]; };
+    static const StarClass CLASSES[] = {
+        { 0.10, { 0.66f, 0.76f, 1.00f } },   // O/B blue-white
+        { 0.22, { 0.86f, 0.90f, 1.00f } },   // A white
+        { 0.33, { 1.00f, 0.97f, 0.90f } },   // F/G yellow-white
+        { 0.23, { 1.00f, 0.84f, 0.64f } },   // K orange
+        { 0.12, { 1.00f, 0.70f, 0.52f } },   // M orange-red
+    };
+    auto colour = [&rnd]() -> const F32*
+    {
+        F64 r = rnd();
+        for (const StarClass& sc : CLASSES)
+        {
+            if ((r -= sc.weight) <= 0.0)
+            {
+                return sc.c;
+            }
+        }
+        return CLASSES[2].c;
+    };
+    auto push = [](std::vector<SkyPoint>& list, const F64 d[3], F64 size, const F32 c[3], F64 a)
+    {
+        SkyPoint p;
+        for (int i = 0; i < 3; ++i)
+        {
+            p.d[i] = (F32)d[i];
+            p.c[i] = c[i];
+        }
+        p.size = (F32)size;
+        p.a = (F32)a;
+        list.push_back(p);
+    };
+
+    // Field stars: many faint, few bright (brightness ~ u^3).
+    for (int i = 0; i < 2400; ++i)
+    {
+        const F64 b = pow(rnd(), 3.2);
+        F64 d[3];
+        onSphere(d);
+        const F32* c = colour();
+        push(mSkyAdd, d, 1.2 + 2.6 * b, c, 0.25 + 0.75 * llmin(1.0, b * 1.6));
+    }
+    // A handful of bright ones with a soft halo.
+    for (int i = 0; i < 14; ++i)
+    {
+        F64 d[3];
+        onSphere(d);
+        const F32* c = colour();
+        const F64 core_size = 3.6 + 1.6 * rnd();
+        push(mSkyAdd, d, core_size, c, 1.0);
+        const F64 halo_size = 10.0 + 6.0 * rnd();
+        push(mSkyAdd, d, halo_size, c, 0.16);
+    }
+
+    // The Milky Way: a great circle tilted across the sky, densest and brightest towards one side
+    // (the galactic centre). Aimed so the band crosses the view at the map's middle (the view
+    // looks along +z; band(-pi/2, 0) is nearly +z for this tilt), the core just off to one side.
+    F64 n[3] = { 0.6, -0.78, 0.15 };
+    {
+        const F64 l = sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+        for (F64& x : n) x /= l;
+    }
+    F64 e1[3] = { n[1], -n[0], 0.0 };
+    {
+        const F64 l = sqrt(e1[0] * e1[0] + e1[1] * e1[1] + e1[2] * e1[2]);
+        for (F64& x : e1) x /= l;
+    }
+    const F64 e2[3] = { n[1] * e1[2] - n[2] * e1[1], n[2] * e1[0] - n[0] * e1[2], n[0] * e1[1] - n[1] * e1[0] };
+    auto band = [&](F64 lon, F64 lat, F64 out[3])
+    {
+        const F64 cl = cos(lat);
+        for (int i = 0; i < 3; ++i)
+        {
+            out[i] = cl * (cos(lon) * e1[i] + sin(lon) * e2[i]) + sin(lat) * n[i];
+        }
+    };
+    const F64 core_lon = -1.1;
+    auto near_core = [core_lon](F64 lon)
+    {
+        return fabs(fmod(fmod(lon - core_lon, 2.0 * F_PI) + 3.0 * F_PI, 2.0 * F_PI) - F_PI);
+    };
+    static const F32 BAND_COOL[3] = { 0.95f, 0.93f, 1.0f };
+    static const F32 BAND_WARM[3] = { 1.0f, 0.92f, 0.80f };
+    for (int i = 0; i < 9000; ++i)
+    {
+        const F64 lon = rnd() * 2.0 * F_PI;
+        const F64 core = exp(-pow(near_core(lon) / 0.9, 2.0));
+        if (rnd() > 0.35 + 0.65 * core)
+        {
+            continue;
+        }
+        const F64 lat = gauss() * (0.07 + 0.08 * core);
+        F64 d[3];
+        band(lon, lat, d);
+        const F64 size = 1.0 + 0.9 * rnd();
+        const F32* c = rnd() < 0.5 ? BAND_COOL : BAND_WARM;
+        const F64 a = 0.18 + 0.30 * rnd() * (0.5 + core);
+        push(mSkyAdd, d, size, c, a);
+    }
+    // Its glow: soft, very faint, large.
+    for (int i = 0; i < 1100; ++i)
+    {
+        const F64 lon = rnd() * 2.0 * F_PI;
+        const F64 core = exp(-pow(near_core(lon) / 0.9, 2.0));
+        const F64 lat = gauss() * (0.05 + 0.06 * core);
+        const F64 warm = core * 0.5 + rnd() * 0.3;
+        F64 d[3];
+        band(lon, lat, d);
+        const F64 size = 40.0 + 70.0 * rnd() + 60.0 * core;
+        const F32 c[3] = { (F32)(0.78 + 0.22 * warm), (F32)(0.80 + 0.10 * warm), (F32)(1.0 - 0.18 * warm) };
+        push(mSkyAdd, d, size, c, 0.022 + 0.04 * core);
+    }
+    // The dark dust lane down the bright middle: drawn over the glow in the space colour.
+    for (int i = 0; i < 160; ++i)
+    {
+        const F64 lon = core_lon + gauss() * 0.9;
+        const F64 lat = gauss() * 0.018 + 0.01 * sin(lon * 3.0);
+        F64 d[3];
+        band(lon, lat, d);
+        const F64 size = 18.0 + 26.0 * rnd();
+        push(mSkyOver, d, size, SPACE.mV, 0.12);
+    }
+    // Nebulae: three faint coloured clouds away from the band.
+    static const F32 NEB[3][3] = { { 1.0f, 0.45f, 0.62f }, { 0.42f, 0.80f, 0.85f }, { 0.70f, 0.50f, 1.0f } };
+    for (const auto& c : NEB)
+    {
+        F64 centre[3];
+        onSphere(centre);
+        for (int i = 0; i < 26; ++i)
+        {
+            F64 d[3];
+            for (int k = 0; k < 3; ++k)
+            {
+                d[k] = centre[k] + gauss() * 0.035;
+            }
+            const F64 l = sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+            for (F64& x : d) x /= l;
+            const F64 size = 22.0 + 40.0 * rnd();
+            push(mSkyAdd, d, size, c, 0.022 + 0.02 * rnd());
+        }
+    }
+
+    // The soft round dot each point is drawn with: alpha exp(-4 r^2) inside the unit circle
+    // (map_globe.js's point shader, r^2 = |p - centre|^2 * 4).
+    constexpr S32 DOT = 32;
+    LLPointer<LLImageRaw> raw = new LLImageRaw(DOT, DOT, 4);
+    U8* o = raw->getData();
+    if (o)
+    {
+        for (S32 y = 0; y < DOT; ++y)
+        {
+            for (S32 x = 0; x < DOT; ++x, o += 4)
+            {
+                const F32 dx = (x + 0.5f) / DOT - 0.5f, dy = (y + 0.5f) / DOT - 0.5f;
+                const F32 r2 = (dx * dx + dy * dy) * 4.f;
+                o[0] = o[1] = o[2] = 255;
+                o[3] = (r2 > 1.f) ? 0 : (U8)ll_round(255.f * expf(-r2 * 4.f));
+            }
+        }
+        mStarDot = LLViewerTextureManager::getLocalTexture(raw.get(), false);
+    }
+}
+
+// The sky behind the globe. It turns as the globe is spun: the centre's offset from the map's
+// middle, as an angle round the globe (scaled so the far sky drifts at about the land's pace),
+// seen through a camera looking at the globe. Source: map_globe.js MapGlobe._drawSpace (screen y
+// grows up here, down there).
+void WolfMapGlobe::drawSpace(const View& v, F32 alpha)
+{
+    if (alpha <= 0.01f || !mHaveExtent)
+    {
+        return;
+    }
+    if (!mSkyMade)
+    {
+        makeSky();
+    }
+    if (mStarDot.isNull())
+    {
+        return;
+    }
+    const F64 mid_x = 0.5 * (mX0 + mX1), mid_y = 0.5 * (mY0 + mY1);
+    const F64 yaw = (v.centre.mdV[VX] - mid_x) / v.radius * 0.35;
+    const F64 pitch = (v.centre.mdV[VY] - mid_y) / v.radius * 0.35;
+    const F32 cyw = (F32)cos(yaw), syw = (F32)sin(yaw), cp = (F32)cos(pitch), sp = (F32)sin(pitch);
+    const F32 f = 0.8f * llmax(v.width, v.height);
+    const F32 W = v.width, H = v.height;
+
+    auto draw = [&](const std::vector<SkyPoint>& list)
+    {
+        gGL.getTexUnit(0)->bind(mStarDot);
+        gGL.begin(LLRender::TRIANGLES);
+        for (const SkyPoint& s : list)
+        {
+            const F32 x = s.d[0], y = s.d[1], z = s.d[2];
+            const F32 x1 = x * cyw - z * syw, z1 = x * syw + z * cyw;
+            const F32 y2 = y * cp - z1 * sp, z2 = y * sp + z1 * cp;
+            if (z2 < 0.05f)
+            {
+                continue;
+            }
+            const F32 sx = W * 0.5f + f * x1 / z2, sy = H * 0.5f + f * y2 / z2;
+            const F32 h = s.size * 0.5f;
+            if (sx < -h || sy < -h || sx > W + h || sy > H + h)
+            {
+                continue;
+            }
+            gGL.color4f(s.c[0], s.c[1], s.c[2], s.a * alpha);
+            gGL.texCoord2f(0.f, 1.f); gGL.vertex2f(sx - h, sy + h);
+            gGL.texCoord2f(0.f, 0.f); gGL.vertex2f(sx - h, sy - h);
+            gGL.texCoord2f(1.f, 0.f); gGL.vertex2f(sx + h, sy - h);
+            gGL.texCoord2f(0.f, 1.f); gGL.vertex2f(sx - h, sy + h);
+            gGL.texCoord2f(1.f, 0.f); gGL.vertex2f(sx + h, sy - h);
+            gGL.texCoord2f(1.f, 1.f); gGL.vertex2f(sx + h, sy + h);
+        }
+        gGL.end();
+    };
+    gGL.blendFunc(LLRender::BF_SOURCE_ALPHA, LLRender::BF_ONE);                    // starlight adds up
+    draw(mSkyAdd);
+    gGL.blendFunc(LLRender::BF_SOURCE_ALPHA, LLRender::BF_ONE_MINUS_SOURCE_ALPHA);  // the dust lane covers
+    draw(mSkyOver);
+    gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
+}
+
 // ── the globe ────────────────────────────────────────────────────────────────────────────
 
 void WolfMapGlobe::drawTiles(const View& v)
@@ -707,6 +975,8 @@ void WolfMapGlobe::drawGlobe(const View& v, LLUIImage* home_image, LLUIImage* yo
     gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
     gGL.color4fv(lerp(WATER_MEAN, SPACE, smooth(v.t * 1.5f)).mV);
     gl_rect_2d(0, (S32)v.height, (S32)v.width, 0);
+    // <WolfViewer 2026-10-03/> The stars come out with it.
+    drawSpace(v, smooth(v.t * 1.5f));
 
     // The atmosphere: a soft ring just outside the globe's rim.
     const F32 rim = (F32)projectedRadius(F_PI_BY_TWO * v.radius, k, v.t, v.radius);

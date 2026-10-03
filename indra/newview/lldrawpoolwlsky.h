@@ -70,6 +70,7 @@ private:
     void renderSkyCloudsDeferred(const LLVector3& camPosLocal, F32 camHeightLocal, LLGLSLShader* cloudshader) const;
 
     void renderStarsDeferred(const LLVector3& camPosLocal) const;
+    void renderConstellationsDeferred(const LLVector3& camPosLocal) const;   // <WolfViewer 2026-10-03/> Show Astronomy
     void renderHeavenlyBodies();
 };
 

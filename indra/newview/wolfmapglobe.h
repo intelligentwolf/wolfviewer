@@ -20,6 +20,7 @@
 #include "llpointer.h"
 #include "v3dmath.h"
 #include <map>
+#include <vector>
 
 class LLViewerTexture;
 class LLViewerFetchedTexture;
@@ -39,6 +40,11 @@ class LLUIImage;
 // equidistant). At the centre the globe's scale is the flat map's in every direction, so zooming
 // in bends the globe into the flat map with nothing jumping; zooming out does the reverse.
 // Spinning is panning: dragging moves the centre point across the grid.
+//
+// SPACE (2026-10-03, Paul: "add stars and stuff to the back ground of it please so that it looks
+// more realistic", "when you rotate the globe it should move the stars etc behind it"). The same
+// sky as WolfStorm's map (js/world/map_globe.js _makeSky / _drawSpace, same seed, same stars),
+// turning as the globe is spun.
 class WolfMapGlobe : public LLSingleton<WolfMapGlobe>
 {
     LLSINGLETON_EMPTY_CTOR(WolfMapGlobe);
@@ -113,6 +119,9 @@ private:
     F32 pprForScreenRadius(F32 half_views) const;
     void drawWaterMesh(const View& v);
     void drawTiles(const View& v);
+    // <WolfViewer 2026-10-03> Space behind the globe: stars, the Milky Way, nebulae.
+    void makeSky();
+    void drawSpace(const View& v, F32 alpha);
     void drawMarker(const View& v, const LLVector3d& global, LLUIImage* image);
 
     struct Keyed
@@ -138,6 +147,20 @@ private:
     static constexpr S32 WATER_FRAMES = 16;
     LLPointer<LLViewerFetchedTexture> mWater[WATER_FRAMES];
     bool mWaterLoaded = false;
+
+    // <WolfViewer 2026-10-03> The sky (makeSky): a direction on the unit sphere, a size in
+    // pixels, a colour and an alpha per point; drawn as soft round dots (mStarDot).
+    struct SkyPoint
+    {
+        F32 d[3];
+        F32 size;
+        F32 c[3];
+        F32 a;
+    };
+    std::vector<SkyPoint> mSkyAdd;    // starlight: added
+    std::vector<SkyPoint> mSkyOver;   // the dust lane: drawn over
+    bool mSkyMade = false;
+    LLPointer<LLViewerTexture> mStarDot;
 };
 
 #endif // WOLF_MAPGLOBE_H

@@ -24,6 +24,7 @@
   <panel.string name="str_preset_loaded">Preset loaded — Apply to save it.</panel.string>
   <panel.string name="str_reset">Back to the default look and sound.</panel.string>
   <panel.string name="str_particles">Particle Effects ([KIND])</panel.string>
+  <panel.string name="str_auto_env">This region's weather follows the real weather in [PLACE] (Jimmy's EEP &amp; Weather tab). Turn its weather off there to set it by hand.</panel.string>
 
   <text layout="topleft" follows="left|top" height="14" left="10" top="6" width="460"
         name="weather_region_line" text_color="EmphasisColor">Weather:</text>

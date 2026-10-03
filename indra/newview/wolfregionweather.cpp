@@ -505,7 +505,7 @@ void WolfRegionWeather::setAutoEnvPreview(bool on, F64 seconds_ahead)
     // position is (LLDate::now() + offset) % length (llenvironment.cpp getAdjustedNow).
     env.setEnvironment(LLEnvironment::ENV_LOCAL, day,
                        env.getEnvironmentDayLength(LLEnvironment::ENV_REGION),
-                       env.getEnvironmentDayOffset(LLEnvironment::ENV_REGION) + LLSettingsDay::Seconds(seconds_ahead));
+                       env.getEnvironmentDayOffset(LLEnvironment::ENV_REGION) + LLSettingsDay::Seconds(ll_round((F32)seconds_ahead)));
     env.setSelectedEnvironment(LLEnvironment::ENV_LOCAL, LLEnvironment::TRANSITION_INSTANT);
     mAutoEnvPreviewOn = true;
     mAutoEnvPreview = seconds_ahead;

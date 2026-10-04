@@ -746,8 +746,10 @@ WolfDJMixer::WolfDJMixer()
 {
     mBus.assign(TICK_FRAMES * 2, 0.f);
     mTmp.assign(TICK_FRAMES * 2, 0.f);
-    mChannels[CH_MUSIC_A].mFader = 0.7f;
-    mChannels[CH_MUSIC_B].mFader = 0.7f;
+    for (int ci = CH_MUSIC_A; ci < CH_COUNT; ++ci)
+    {
+        mChannels[ci].mFader = 0.7f;
+    }
 }
 
 WolfDJMixer::~WolfDJMixer()
@@ -846,6 +848,7 @@ void WolfDJMixer::mixTick()
     std::fill(mBus.begin(), mBus.end(), 0.f);
     const int cue = mCue.load();
     std::vector<float> cue_buf;
+    std::vector<float> monitor_buf;     // channels heard through the DJ's own output (the playlist)
     float mic_level = 0.f;
     const bool talk_over = mTalkOver.load();
 
@@ -885,7 +888,7 @@ void WolfDJMixer::mixTick()
         // Talk-over: the music channels dip while the mic is in use (decided below, applied
         // with this tick's smoothed gain).
         float gain = ch.mMute ? 0.f : wolfdj_fader_gain(ch.mFader);
-        if (ci == CH_MUSIC_A || ci == CH_MUSIC_B)
+        if (ci >= CH_MUSIC_A)
         {
             gain *= ch.mDuck;
         }
@@ -897,6 +900,11 @@ void WolfDJMixer::mixTick()
             post_peak = std::max(post_peak, fabsf(y));
             sum_sq += y * y;
         }
+        if (ch.mMonitor)
+        {
+            if (monitor_buf.empty()) monitor_buf.assign(N * 2, 0.f);
+            for (size_t i = 0; i < N * 2; ++i) monitor_buf[i] += mTmp[i] * gain;
+        }
         ch.mPeak = post_peak;
         if (ci == CH_MIC)
         {
@@ -906,7 +914,7 @@ void WolfDJMixer::mixTick()
 
     // Talk-over envelope: fast down, slow back up. 0.02 RMS = about -34 dBFS, i.e. speech.
     const float duck_target = (talk_over && mic_level > 0.02f) ? 0.3f : 1.f;
-    for (int ci : { (int)CH_MUSIC_A, (int)CH_MUSIC_B })
+    for (int ci = CH_MUSIC_A; ci < CH_COUNT; ++ci)
     {
         float& d = mChannels[ci].mDuck;
         d = duck_target < d ? std::max(duck_target, d - 0.25f) : std::min(duck_target, d + 0.04f);
@@ -939,8 +947,12 @@ void WolfDJMixer::mixTick()
     mMasterPeak = master_peak;
     if (cue == CUE_MASTER) cue_buf.assign(mBus.begin(), mBus.end());
 
-    // Cue: to the main thread's OpenAL source.
-    if (cue != CUE_NONE && !cue_buf.empty())
+    // Local output: the cue when one is on, otherwise the monitored channels (the playlist).
+    if (cue == CUE_NONE && !monitor_buf.empty())
+    {
+        cue_buf.swap(monitor_buf);
+    }
+    if (!cue_buf.empty())
     {
         std::lock_guard<std::mutex> lock(mCueMutex);
         for (float v : cue_buf)
@@ -1061,7 +1073,12 @@ void WolfDJMixer::setNowPlaying(const std::string& artist, const std::string& ti
 void WolfDJMixer::idleCue()
 {
 #if LL_OPENAL
-    const bool want = mRunning && mCue.load() != CUE_NONE;
+    bool monitored = false;
+    for (const WolfDJChannel& ch : mChannels)
+    {
+        monitored = monitored || ch.mMonitor.load();
+    }
+    const bool want = mRunning && (mCue.load() != CUE_NONE || monitored);
     if (!want)
     {
         if (mCueSource)

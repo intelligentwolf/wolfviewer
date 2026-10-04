@@ -439,9 +439,16 @@ namespace
     class PlayerStream : public WolfDJCaptureStream
     {
     public:
-        explicit PlayerStream(WolfDJChannel* ch) : mChannel(ch) { WolfDJPlayer::instance().setOutput(ch); }
+        explicit PlayerStream(WolfDJChannel* ch) : mChannel(ch)
+        {
+            WolfDJPlayer::instance().setOutput(ch);
+            // The playlist plays only inside the viewer: let the DJ hear it (setting
+            // WolfDJPlaylistMonitor, the playlist floater's "Hear it myself").
+            ch->mMonitor = gSavedSettings.getBOOL("WolfDJPlaylistMonitor");
+        }
         ~PlayerStream() override
         {
+            mChannel->mMonitor = false;
             if (WolfDJPlayer::instance().output() == mChannel) WolfDJPlayer::instance().setOutput(nullptr);
         }
         bool ok() const override { return true; }

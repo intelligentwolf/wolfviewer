@@ -26,6 +26,8 @@
 #include "lllineeditor.h"
 #include "llnotificationsutil.h"
 #include "llparcel.h"
+#include "llscrollcontainer.h"
+#include "lllocalcliprect.h"
 #include "llsecapi.h"
 #include "llsliderctrl.h"
 #include "lltextbox.h"
@@ -46,7 +48,7 @@ using namespace WolfDJ;
 
 namespace
 {
-    const char* STRIP_KEYS[CH_COUNT] = { "voice", "mic", "music_a", "music_b" };
+    const char* STRIP_KEYS[CH_COUNT] = { "voice", "mic", "music_a", "music_b", "music_c", "music_d" };
     const char* MY_STREAM_PAGE = "https://www.wolf-grid.com/index.php?f=mystream";
     const char* PROTECTED_TYPE = "wolf_dj";
 
@@ -145,10 +147,21 @@ bool WolfFloaterDJ::postBuild()
         gSavedSettings.setBOOL("WolfDJTalkOver", c->getValue().asBoolean());
     });
 
-    mSourceA = getChild<LLComboBox>("source_music_a");
-    mSourceB = getChild<LLComboBox>("source_music_b");
-    mSourceA->setCommitCallback([this](LLUICtrl*, const LLSD&) { onSource(CH_MUSIC_A); });
-    mSourceB->setCommitCallback([this](LLUICtrl*, const LLSD&) { onSource(CH_MUSIC_B); });
+    for (int ch = CH_MUSIC_A; ch < CH_COUNT; ++ch)
+    {
+        LLComboBox* combo = getChild<LLComboBox>(std::string("source_") + STRIP_KEYS[ch]);
+        mSources[ch - CH_MUSIC_A] = combo;
+        combo->setCommitCallback([this, ch](LLUICtrl*, const LLSD&) { onSource(ch); });
+        // Paul: "a refresh button for music sources" - and the list refreshes itself every time
+        // it is opened (LLComboBox::onButtonMouseDown calls prearrangeList before showing it).
+        combo->setPrearrangeCallback([this, combo, ch](LLUICtrl*, const LLSD&)
+        {
+            std::vector<WolfDJApp> apps;
+            std::string why;
+            WolfDJCapture::listApps(apps, why);
+            fillSources(combo, ch, apps);
+        });
+    }
     getChild<LLButton>("refresh_sources")->setCommitCallback([this](LLUICtrl*, const LLSD&) { refreshApps(); });
 
     mUrl = getChild<LLLineEditor>("stream_url");
@@ -159,6 +172,7 @@ bool WolfFloaterDJ::postBuild()
     mLiveBtn = getChild<LLButton>("go_live");
     mStatus = getChild<LLTextBox>("status_text");
     mVoiceNote = getChild<LLTextBox>("voice_note");
+    mStripsScroll = getChild<LLScrollContainer>("strips_scroll");
 
     mUrl->setCommitCallback([](LLUICtrl* c, const LLSD&) { gSavedPerAccountSettings.setString("WolfDJStreamURL", c->getValue().asString()); });
     mStation->setCommitCallback([](LLUICtrl* c, const LLSD&) { gSavedPerAccountSettings.setString("WolfDJStationName", c->getValue().asString()); });
@@ -245,11 +259,18 @@ void WolfFloaterDJ::refreshApps()
 {
     std::vector<WolfDJApp> apps;
     std::string why;
-    const bool ok = WolfDJCapture::listApps(apps, why);
-    WolfDJMixer& mix = WolfDJMixer::instance();
-    for (LLComboBox* combo : { mSourceA, mSourceB })
+    WolfDJCapture::listApps(apps, why);
+    for (int ch = CH_MUSIC_A; ch < CH_COUNT; ++ch)
     {
-        const int ch = combo == mSourceA ? CH_MUSIC_A : CH_MUSIC_B;
+        fillSources(sourceCombo(ch), ch, apps);
+    }
+    getChild<LLTextBox>("sources_note")->setText(why);
+}
+
+void WolfFloaterDJ::fillSources(LLComboBox* combo, int ch, const std::vector<WolfDJApp>& apps)
+{
+    WolfDJMixer& mix = WolfDJMixer::instance();
+    {
         combo->removeall();
         combo->add("(nothing)", LLSD(std::string()));
         combo->add("Wolf DJ playlist", LLSD(std::string(WOLFDJ_PLAYLIST_ID)));
@@ -268,12 +289,11 @@ void WolfFloaterDJ::refreshApps()
             combo->setSelectedByValue(LLSD(std::string()), true);
         }
     }
-    getChild<LLTextBox>("sources_note")->setText(ok ? (why.empty() ? std::string() : why) : why);
 }
 
 void WolfFloaterDJ::onSource(int ch)
 {
-    LLComboBox* combo = ch == CH_MUSIC_A ? mSourceA : mSourceB;
+    LLComboBox* combo = sourceCombo(ch);
     const std::string id = combo->getValue().asString();
     WolfDJMixer& mix = WolfDJMixer::instance();
     if (id == mix.captureId(ch)) return;
@@ -284,12 +304,14 @@ void WolfFloaterDJ::onSource(int ch)
     }
     if (id == WOLFDJ_PLAYLIST_ID)
     {
-        // One channel plays the playlist: picking it here takes it off the other one.
-        const int other = ch == CH_MUSIC_A ? CH_MUSIC_B : CH_MUSIC_A;
-        if (mix.captureId(other) == WOLFDJ_PLAYLIST_ID)
+        // One channel plays the playlist: picking it here takes it off any other.
+        for (int other = CH_MUSIC_A; other < CH_COUNT; ++other)
         {
-            mix.setCapture(other, nullptr, std::string());
-            (other == CH_MUSIC_A ? mSourceA : mSourceB)->setSelectedByValue(LLSD(std::string()), true);
+            if (other != ch && mix.captureId(other) == WOLFDJ_PLAYLIST_ID)
+            {
+                mix.setCapture(other, nullptr, std::string());
+                sourceCombo(other)->setSelectedByValue(LLSD(std::string()), true);
+            }
         }
         mix.setCapture(ch, wolfdj_open_playlist_stream(&mix.channel(ch)), id);
         return;
@@ -620,13 +642,13 @@ void WolfFloaterDJ::updateStatus()
     mMaster.mCue->setToggleState(cue == CUE_MASTER);
 
     // A program that has gone (closed, or its sound stream ended).
-    for (int ch : { (int)CH_MUSIC_A, (int)CH_MUSIC_B })
+    for (int ch = CH_MUSIC_A; ch < CH_COUNT; ++ch)
     {
         WolfDJCaptureStream* cap = mix.capture(ch);
         if (cap && !cap->ok())
         {
             mix.setCapture(ch, nullptr, std::string());
-            (ch == CH_MUSIC_A ? mSourceA : mSourceB)->setSelectedByValue(LLSD(std::string()), true);
+            sourceCombo(ch)->setSelectedByValue(LLSD(std::string()), true);
         }
     }
 }
@@ -642,7 +664,9 @@ void WolfFloaterDJ::drawMeter(LLView* meter, float peak, float& shown_db, float&
     shown_db = std::max(db, shown_db - 24.f * dt);
     if (peak >= 0.99f) clip_until = now + 2.f;
 
-    const LLRect r = meter->getRect();
+    // The meter lives in the scrolled strips panel: its rect in this floater's coordinates.
+    LLRect r;
+    meter->localRectToOtherView(meter->getLocalRect(), &r, this);
     const S32 segs = 13;    // 12 level LEDs + the clip LED on top
     const S32 gap = 2;
     const S32 seg_h = std::max(2, (r.getHeight() - gap * (segs - 1)) / segs);
@@ -672,19 +696,27 @@ void WolfFloaterDJ::drawMeter(LLView* meter, float peak, float& shown_db, float&
 void WolfFloaterDJ::draw()
 {
     updateStatus();
-    LLFloater::draw();
-    if (isMinimized()) return;
     WolfDJMixer& mix = WolfDJMixer::instance();
     for (int ch = 0; ch < CH_COUNT; ++ch)
     {
-        Strip& s = mStrips[ch];
         const WolfDJChannel& c = mix.channel(ch);
-        drawMeter(s.mMeter, c.mPeak.load(), s.mShownDb, s.mClipUntil);
-        s.mDb->setText(c.mMute ? std::string("muted") : llformat("%+.0f dB", wolfdj_lin_to_db(wolfdj_fader_gain(c.mFader))));
+        mStrips[ch].mDb->setText(c.mMute ? std::string("muted") : llformat("%+.0f dB", wolfdj_lin_to_db(wolfdj_fader_gain(c.mFader))));
     }
-    drawMeter(mMaster.mMeter, mix.mMasterPeak.load(), mMaster.mShownDb, mMaster.mClipUntil);
     const float lim = mix.mLimiterDb.load();
     mMaster.mDb->setText(lim < -0.5f ? llformat("limit %.0f dB", lim) : llformat("%+.0f dB", wolfdj_lin_to_db(wolfdj_fader_gain(mix.mMasterFader))));
+    LLFloater::draw();
+    if (isMinimized()) return;
+
+    // LEDs only inside the visible part of the scrolled strips.
+    LLRect window;
+    mStripsScroll->localRectToOtherView(mStripsScroll->getContentWindowRect(), &window, this);
+    LLLocalClipRect clip(window);
+    for (int ch = 0; ch < CH_COUNT; ++ch)
+    {
+        Strip& s = mStrips[ch];
+        drawMeter(s.mMeter, mix.channel(ch).mPeak.load(), s.mShownDb, s.mClipUntil);
+    }
+    drawMeter(mMaster.mMeter, mix.mMasterPeak.load(), mMaster.mShownDb, mMaster.mClipUntil);
 }
 
 // static - LLAppViewer::requestQuit: end a show while the region can still hear us.

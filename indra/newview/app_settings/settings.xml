@@ -6633,6 +6633,17 @@
     <key>Value</key>
     <string />
   </map>
+  <key>WolfDJPlaylistMonitor</key>
+  <map>
+    <key>Comment</key>
+    <string>Wolf DJ playlist: also play it through your own speakers or headphones (after its fader).</string>
+    <key>Persist</key>
+    <integer>1</integer>
+    <key>Type</key>
+    <string>Boolean</string>
+    <key>Value</key>
+    <integer>1</integer>
+  </map>
   <key>WolfDJPlaylistTitles</key>
   <map>
     <key>Comment</key>

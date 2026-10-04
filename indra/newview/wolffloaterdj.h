@@ -16,12 +16,15 @@
 #include "wolfdjaudio.h"
 
 #include <array>
+#include <vector>
 
 class LLButton;
 class LLComboBox;
 class LLLineEditor;
+class LLScrollContainer;
 class LLSliderCtrl;
 class LLTextBox;
+struct WolfDJApp;
 
 // [WOLF DJ 2026-10-04] Paul's rules: a Wolf user who OWNS A REGION can DJ (the GridManager rule
 // for /radio/ streams - streamauth.php refuses anyone else); they broadcast to their own stream
@@ -54,6 +57,7 @@ private:
     };
 
     void refreshApps();
+    void fillSources(LLComboBox* combo, int ch, const std::vector<WolfDJApp>& apps);
     void onSource(int ch);
     void onGoLive();
     void onSendTitle();
@@ -69,8 +73,9 @@ private:
 
     std::array<Strip, WolfDJ::CH_COUNT> mStrips;
     Strip mMaster;
-    LLComboBox* mSourceA = nullptr;
-    LLComboBox* mSourceB = nullptr;
+    // Music 1..4 source pickers (channels CH_MUSIC_A..CH_MUSIC_D).
+    std::array<LLComboBox*, WolfDJ::CH_COUNT - WolfDJ::CH_MUSIC_A> mSources{};
+    LLComboBox* sourceCombo(int ch) const { return mSources[ch - WolfDJ::CH_MUSIC_A]; }
     LLLineEditor* mUrl = nullptr;
     LLLineEditor* mPassword = nullptr;
     LLLineEditor* mStation = nullptr;
@@ -79,6 +84,7 @@ private:
     LLButton* mLiveBtn = nullptr;
     LLTextBox* mStatus = nullptr;
     LLTextBox* mVoiceNote = nullptr;
+    LLScrollContainer* mStripsScroll = nullptr;    // the channel strips scroll when the window is small
     LLFrameTimer mClock;
     F32 mNextListeners = 0.f;
     S32 mListeners = -1;

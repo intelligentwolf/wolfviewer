@@ -13,6 +13,7 @@
 #include "wolffloaterdjplaylist.h"
 
 #include "wolfdjplayer.h"
+#include "wolfdjaudio.h"
 
 #include "llbutton.h"
 #include "llcheckboxctrl.h"
@@ -126,6 +127,12 @@ bool WolfFloaterDJPlaylist::postBuild()
     {
         gSavedSettings.setBOOL("WolfDJPlaylistTitles", c->getValue().asBoolean());
     });
+    getChild<LLCheckBoxCtrl>("hear_it")->setCommitCallback([](LLUICtrl* c, const LLSD&)
+    {
+        const bool on = c->getValue().asBoolean();
+        gSavedSettings.setBOOL("WolfDJPlaylistMonitor", on);
+        if (WolfDJChannel* out = WolfDJPlayer::instance().output()) out->mMonitor = on;
+    });
     return true;
 }
 
@@ -133,6 +140,7 @@ void WolfFloaterDJPlaylist::onOpen(const LLSD& key)
 {
     LLFloater::onOpen(key);
     getChild<LLCheckBoxCtrl>("send_titles")->set(gSavedSettings.getBOOL("WolfDJPlaylistTitles"));
+    getChild<LLCheckBoxCtrl>("hear_it")->set(gSavedSettings.getBOOL("WolfDJPlaylistMonitor"));
     WolfDJPlayer& player = WolfDJPlayer::instance();
     if (player.files().empty())
     {

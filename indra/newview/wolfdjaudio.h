@@ -52,8 +52,10 @@ namespace WolfDJ
     {
         CH_VOICE = 0,   // in-world voice: everyone you hear (llwebrtc playout tap)
         CH_MIC,         // your microphone
-        CH_MUSIC_A,     // another program (or everything you hear)
+        CH_MUSIC_A,     // another program, everything you hear, or the playlist
         CH_MUSIC_B,
+        CH_MUSIC_C,     // [WOLF DJ 2026-10-04] Paul: "can we have more channels"
+        CH_MUSIC_D,
         CH_COUNT
     };
     constexpr int CUE_NONE = -1;
@@ -109,6 +111,10 @@ public:
     std::atomic<float> mPeak{ 0.f };            // post-fader peak of the last tick, 0..1+
     std::atomic<float> mPrePeak{ 0.f };         // pre-fader (what cue hears)
     std::atomic<bool>  mActive{ false };        // a source is attached and delivering
+    // Also play this channel (post-fader) through the DJ's own output. Set for the playlist:
+    // its music exists only inside the viewer, so without this the DJ hears nothing (Paul: "dj
+    // playlist i cant hear the music it needs to monitor back"). Cue, when on, replaces it.
+    std::atomic<bool>  mMonitor{ false };
 
     // Mixer-thread EQ state.
     WolfDJBiquad mLow, mMid, mHigh;

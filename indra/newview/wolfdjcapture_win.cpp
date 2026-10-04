@@ -19,7 +19,15 @@
 #include <mmdeviceapi.h>
 #include <audioclient.h>
 #include <audiopolicy.h>
+// The SDK declares the process loopback types only `#if (NTDDI_VERSION >= NTDDI_WIN10_FE)`
+// (audioclientactivationparams.h, Application Family region), and the viewer's precompiled
+// headers leave NTDDI_VERSION lower. Raised for this one header only: windows_build() refuses to
+// use process loopback on anything older than build 20348, so nothing here runs where it is absent.
+#pragma push_macro("NTDDI_VERSION")
+#undef NTDDI_VERSION
+#define NTDDI_VERSION NTDDI_WIN10_FE
 #include <audioclientactivationparams.h>
+#pragma pop_macro("NTDDI_VERSION")
 #include <mmreg.h>
 #include <wrl/client.h>
 #include <wrl/implements.h>

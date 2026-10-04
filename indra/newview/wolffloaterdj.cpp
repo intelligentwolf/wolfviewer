@@ -33,8 +33,6 @@
 #include "lltextbox.h"
 #include "lluri.h"
 #include "llviewercontrol.h"
-#include "llvieweraudio.h"
-#include "llviewermedia.h"
 #include "llviewerparcelmgr.h"
 #include "llviewerregion.h"
 #include "llweb.h"
@@ -60,8 +58,6 @@ namespace
         std::string mPrevMusicUrl;
         S32 mParcelLocalId = 0;
         LLUUID mRegionId;
-        bool mMusicSilenced = false;
-        bool mPrevStreamingMusic = true;
         std::string mListenUrl;
         std::string mStatusHost;
         int mStatusPort = 0;
@@ -111,15 +107,6 @@ namespace
                         + (sShow.mPrevMusicUrl.empty() ? std::string("none") : sShow.mPrevMusicUrl) + ".";
             }
             sShow.mLandSet = false;
-        }
-        if (sShow.mMusicSilenced)
-        {
-            gSavedSettings.setBOOL("AudioStreamingMusic", sShow.mPrevStreamingMusic);
-            if (sShow.mPrevStreamingMusic)
-            {
-                LLViewerAudio::getInstance()->startInternetStreamWithAutoFade(LLViewerMedia::getInstance()->getParcelAudioURL());
-            }
-            sShow.mMusicSilenced = false;
         }
     }
 }
@@ -463,13 +450,8 @@ void WolfFloaterDJ::onGoLive()
     sShow.mStatusPort = cfg.mPort;
     sShow.mMount = cfg.mMount;
 
-    // The DJ must not hear their own stream 10 seconds late: silence this viewer's parcel music
-    // for the show (optionallyStartMusic honours AudioStreamingMusic, so it stays off even when
-    // the parcel's music changes to the stream below).
-    sShow.mPrevStreamingMusic = gSavedSettings.getBOOL("AudioStreamingMusic");
-    gSavedSettings.setBOOL("AudioStreamingMusic", false);
-    LLViewerAudio::getInstance()->stopInternetStreamWithAutoFade();
-    sShow.mMusicSilenced = true;
+    // The viewer's parcel music is left alone while live (Paul: "you dont need to do that leave it
+    // on so they can test it") - the DJ can listen to their own stream as listeners hear it.
 
     std::string land_note;
     if (getChild<LLCheckBoxCtrl>("play_on_land")->get())

@@ -36,6 +36,7 @@
 #include "llviewercontrol.h"
 #include "llviewerregion.h"
 #include "llviewerparcelmgr.h"
+#include "llworld.h"    // <WolfViewer 2026-10-04/> visiting land: the region under the agent
 #include "llvoavatarself.h"
 #include "llslurl.h"
 // [RLVa:KB] - Checked: 2010-04-04 (RLVa-1.2.0d)
@@ -97,12 +98,38 @@ bool LLAgentUI::checkAgentDistance(const LLVector3& pole, F32 radius)
 
     return  sqrt( delta_x* delta_x + delta_y* delta_y ) < radius;
 }
-bool LLAgentUI::buildLocationString(std::string& str, ELocationFormat fmt,const LLVector3& agent_pos_region)
+bool LLAgentUI::buildLocationString(std::string& str, ELocationFormat fmt,const LLVector3& agent_pos_in_region)
 {
     LLViewerRegion* region = gAgent.getRegion();
     LLParcel* parcel = LLViewerParcelMgr::getInstance()->getAgentParcel();
 
     if (!region || !parcel) return false;
+
+    // <WolfViewer 2026-10-04> VISITING LAND (Wolf Territories' OpenSim fork, WolfVisitingLand.cs): a
+    // driven vehicle near a border stays on its own region while it runs over the neighbour's ground,
+    // so the agent region is the one behind you. Past the edge with a real region underneath, name
+    // that region and the position in it instead of "Open sea ... from" the one behind. Its parcel
+    // names are not sent to us, so the parcel name is left out. Never in a landmark's name, which
+    // the agent region creates.
+    LLVector3 agent_pos_region = agent_pos_in_region;
+    bool visiting = false;
+    if (fmt != LOCATION_FORMAT_LANDMARK && region->getWolfOpenSeaMeters() > 0.f)
+    {
+        const F32 w = region->getWidth();
+        if (agent_pos_region.mV[VX] < 0.f || agent_pos_region.mV[VX] >= w ||
+            agent_pos_region.mV[VY] < 0.f || agent_pos_region.mV[VY] >= w)
+        {
+            const LLVector3d pos_global = region->getPosGlobalFromRegion(agent_pos_region);
+            LLViewerRegion* under = LLWorld::getInstance()->getRegionFromPosGlobal(pos_global);
+            if (under && under != region)
+            {
+                agent_pos_region = under->getPosRegionFromGlobal(pos_global);
+                region = under;
+                visiting = true;
+            }
+        }
+    }
+    // </WolfViewer>
 
     S32 pos_x = S32(agent_pos_region.mV[VX] + 0.5f);
     S32 pos_y = S32(agent_pos_region.mV[VY] + 0.5f);
@@ -152,7 +179,7 @@ bool LLAgentUI::buildLocationString(std::string& str, ELocationFormat fmt,const 
     // </FS:Ansariel> FIRE-1874: Show server version in statusbar
 
     // create a default name and description for the landmark
-    std::string parcel_name = LLViewerParcelMgr::getInstance()->getAgentParcelName();
+    std::string parcel_name = visiting ? std::string() : LLViewerParcelMgr::getInstance()->getAgentParcelName();   // <WolfViewer 2026-10-04/> visiting land
     std::string region_name = region->getName();
 // [RLVa:KB] - Checked: 2010-04-04 (RLVa-1.2.0d) | Modified: RLVa-1.2.0d
     // RELEASE-RLVa: [SL-2.0.0] Check ELocationFormat to make sure our switch still makes sense

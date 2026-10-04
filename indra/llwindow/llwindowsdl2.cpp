@@ -608,7 +608,9 @@ static int x11_detect_VRAM_kb()
     FILE *fp;
     char *display_env = getenv("DISPLAY"); // e.g. :0 or :0.0 or :1.0 etc
     // parse DISPLAY number so we can go grab the right log file
-    if (display_env[0] == ':' &&
+    // <WolfViewer 2026-10-04/> DISPLAY is unset on a native Wayland session without XWayland;
+    // this dereferenced NULL there (inherited from Firestorm). Fall back to display 0.
+    if (display_env && display_env[0] == ':' &&
         display_env[1] >= '0' && display_env[1] <= '9')
     {
         display_num = display_env[1] - '0';
@@ -2997,6 +2999,7 @@ namespace
         }
         auto getDisplay = (EGLDisplay (EGLAPIENTRY*)(void))dlsym(lib, "eglGetCurrentDisplay");
         auto query = (const char* (EGLAPIENTRY*)(EGLDisplay, EGLint))dlsym(lib, "eglQueryString");
+        auto getError = (EGLint (EGLAPIENTRY*)(void))dlsym(lib, "eglGetError");   // <WolfViewer 2026-10-04/>
         sWaylandEGL.mBindAPI = (EGLBoolean (EGLAPIENTRY*)(EGLenum))dlsym(lib, "eglBindAPI");
         sWaylandEGL.mMakeCurrent = (EGLBoolean (EGLAPIENTRY*)(EGLDisplay, EGLSurface, EGLSurface, EGLContext))dlsym(lib, "eglMakeCurrent");
         dlclose(lib);   // RTLD_NOLOAD took a reference; SDL's own keeps the library loaded
@@ -3005,6 +3008,14 @@ namespace
         if (sWaylandEGL.mDisplay == EGL_NO_DISPLAY) return false;
         // Surfaceless: EGL 1.5, or EGL_KHR_surfaceless_context (the rule SDL_egl.c applies).
         const char* version = query(sWaylandEGL.mDisplay, EGL_VERSION);
+        // <WolfViewer 2026-10-04> NVIDIA 595 on GNOME logged "Wayland EGL ?" here (2026-09-26/27,
+        // Markus): eglQueryString gave NULL for the current display. Record why (eglQueryString
+        // sets the EGL error when it returns NULL) so the next log says which error.
+        if (!version && getError)
+        {
+            LL_WARNS() << "Wayland: eglQueryString(EGL_VERSION) failed, EGL error 0x" << std::hex << getError() << std::dec << LL_ENDL;
+        }
+        // </WolfViewer>
         const char* extensions = query(sWaylandEGL.mDisplay, EGL_EXTENSIONS);
         int major = 0, minor = 0;
         if (version) sscanf(version, "%d.%d", &major, &minor);

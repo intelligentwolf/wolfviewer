@@ -104,6 +104,11 @@ struct WolfWeatherProfile
      * the JS returns Infinity; callers test mFog first.
      */
     static F32 fogVisibility(S32 fog);
+    // <WolfViewer 2026-10-04> Paul: "it should never be so dark you can't see anything". The
+    // thickest fog still lets you see this far (fog 100 was 40 m: in Jimmy's Weather's real London
+    // fog at night everything past a few metres went black). A visual calibration, not a
+    // measurement. Source: weather_profile.js FOG_MIN_VISIBILITY_M, same value.
+    static constexpr F32 FOG_MIN_VISIBILITY_M = 150.f;
 
 
     /** The neutral colour of a kind, before the tint moves it. rain #aaccff, snow #ffffff. */

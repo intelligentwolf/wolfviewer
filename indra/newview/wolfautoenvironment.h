@@ -22,6 +22,7 @@
 
 class LLButton;
 class LLCheckBoxCtrl;
+class LLComboBox;
 class LLLineEditor;
 class LLScrollListCtrl;
 class LLSliderCtrl;
@@ -37,7 +38,8 @@ class LLTextBox;
  * rain, snow, fog and thunder. This tab chooses the place and what follows it.
  *
  *   GET  php/auto_environment.php?region=<uuid>   settings + the place's current observation
- *   POST {region, version, enabled, skyOn, weatherOn, placeName, lat, lon}   save
+ *   GET  php/auto_environment.php?timezones=1     the zones the sky clock can be set to
+ *   POST {region, version, enabled, skyOn, weatherOn, placeName, lat, lon, clock}   save
  *   POST {action: "search", q}                     place search (OpenStreetMap Nominatim)
  *
  * WHO MAY CHANGE IT: the region owner only (Paul 2026-10-03), or a god — the same rule
@@ -71,6 +73,9 @@ private:
     bool canEdit() const;
     std::string regionId() const;
 
+    void fillClocks();
+    void onClockSearchCommit();
+    static void zonesCoro(LLHandle<LLPanel> handle);
     static void fetchCoro(LLHandle<LLPanel> handle, std::string region_id, U64 serial);
     static void postCoro(LLHandle<LLPanel> handle, std::string body, std::string region_id, bool search, U64 serial);
     void applyReply(const LLSD& reply);
@@ -95,6 +100,8 @@ private:
     LLLineEditor*     mPlace = nullptr;
     LLSpinCtrl*       mLat = nullptr;
     LLSpinCtrl*       mLon = nullptr;
+    LLComboBox*       mClock = nullptr;     ///< [SKY CLOCK 2026-10-04] the clock the sky runs on
+    LLLineEditor*     mClockSearch = nullptr;   ///< filters mClock's zones (Paul 10-04: "we need a searchable box")
     LLTextBox*        mNow = nullptr;
     LLTextBox*        mStatus = nullptr;
     LLCheckBoxCtrl*   mPreviewOn = nullptr;

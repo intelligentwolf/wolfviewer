@@ -21,9 +21,14 @@ enum class WolfWeatherSource
     PREVIEW
 };
 
-inline WolfWeatherSource wolfWeatherSource(bool preview, bool prim, bool parcel, bool region)
+// <WolfViewer 2026-10-04> `personal`: the resident overrides whatever the land sets (Paul: "if
+// the region has set weather and the user wants to override it in their viewer let them" /
+// "with EEP off there should be no fog if we're not using the region") — they chose weather from
+// the menu, or they are not using the shared environment. Their own preview still comes first.
+inline WolfWeatherSource wolfWeatherSource(bool preview, bool prim, bool parcel, bool region, bool personal = false)
 {
     if (preview) return WolfWeatherSource::PREVIEW;
+    if (personal) return WolfWeatherSource::MENU;
     if (prim)    return WolfWeatherSource::PRIM;
     if (parcel)  return WolfWeatherSource::PARCEL;
     if (region)  return WolfWeatherSource::REGION;

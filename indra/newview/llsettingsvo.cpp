@@ -818,7 +818,7 @@ void LLSettingsVOSky::applySpecial(void *ptarget, bool force)
     shader = &((LLShaderUniforms*)ptarget)[LLGLSLShader::SG_ANY];
     shader->uniform1f(LLShaderMgr::SCENE_LIGHT_STRENGTH, mSceneLightStrength);
 
-    LLColor3 ambient(getTotalAmbient());
+    LLColor3 ambient(WolfWeather::indoorAmbient(LLColor3(getTotalAmbient())));   // <WolfViewer 2026-10-04/> a little light indoors
 
     F32 g = getGamma();
 

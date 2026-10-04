@@ -23,6 +23,7 @@
 #include "llagent.h"
 #include "llbutton.h"
 #include "llcheckboxctrl.h"
+#include "llcombobox.h"
 #include "llcorehttputil.h"
 #include "llcoros.h"
 #include "llenvironment.h"
@@ -47,6 +48,21 @@ const char* WolfPanelRegionAutoEnvironment::API_URL = "https://wolfstorm.app/php
 namespace
 {
     constexpr F64 FETCH_SECS = 60.0;   // the place's weather changes on MET's own clock (tens of minutes)
+
+    // [SKY CLOCK 2026-10-04] Paul: "we need to be able to set the timezone". The clock the sky
+    // runs on (php/auto_env_lib.php AE_CLOCK_PLACE): "" = the grid's (the combo shows it as
+    // "grid", since an empty value cannot be told from no selection), "place" = the place's own
+    // time, or a tzdata zone. The zone list is the server's (auto_environment.php?timezones=1),
+    // read once per session, so it is exactly what a save accepts.
+    LLSD sZones;
+    bool sZonesAsked = false;
+    const char* CLOCK_GRID = "grid";
+
+    std::string clock_of(const LLSD& config)
+    {
+        const std::string c = config.isMap() ? config["clock"].asString() : std::string();
+        return c.empty() ? std::string(CLOCK_GRID) : c;
+    }
 
     LLSD json_to_llsd(const LLSD::Binary& bytes)
     {
@@ -105,6 +121,8 @@ bool WolfPanelRegionAutoEnvironment::postBuild()
     mPlace   = getChild<LLLineEditor>("ae_place");
     mLat     = getChild<LLSpinCtrl>("ae_lat");
     mLon     = getChild<LLSpinCtrl>("ae_lon");
+    mClock   = getChild<LLComboBox>("ae_clock");
+    mClockSearch = getChild<LLLineEditor>("ae_clock_search");
     mNow     = getChild<LLTextBox>("ae_now");
     mStatus  = getChild<LLTextBox>("ae_status");
     mPreviewOn   = getChild<LLCheckBoxCtrl>("ae_preview_on");
@@ -122,6 +140,12 @@ bool WolfPanelRegionAutoEnvironment::postBuild()
         static_cast<WolfPanelRegionAutoEnvironment*>(data)->onChanged(); }, this);
     mLat->setCommitCallback(changed);
     mLon->setCommitCallback(changed);
+    mClock->setCommitCallback(changed);
+    // [SKY CLOCK SEARCH 2026-10-04] Typing filters the zone list; Enter picks the first match.
+    mClockSearch->setKeystrokeCallback([](LLLineEditor*, void* data) {
+        static_cast<WolfPanelRegionAutoEnvironment*>(data)->fillClocks(); }, this);
+    mClockSearch->setCommitCallback([this](LLUICtrl*, const LLSD&) { onClockSearchCommit(); });
+    fillClocks();
     mSearch->setCommitCallback([this](LLUICtrl*, const LLSD&) { onSearch(); });
     // One click on a result picks it (not only a double click).
     mResults->setCommitOnSelectionChange(true);
@@ -171,6 +195,12 @@ void WolfPanelRegionAutoEnvironment::draw()
         LLPanel::draw();
         return;
     }
+    if (!sZonesAsked)
+    {
+        sZonesAsked = true;
+        const LLHandle<LLPanel> handle = getHandle();
+        LLCoros::instance().launch("WolfAutoEnvZones", [handle]() { WolfPanelRegionAutoEnvironment::zonesCoro(handle); });
+    }
     const std::string id = regionId();
     const F64 now = LLFrameTimer::getElapsedSeconds();
     if (!id.empty() && (id != mFetchedFor || now >= mNextFetch) && !mBusy)
@@ -211,6 +241,8 @@ void WolfPanelRegionAutoEnvironment::writeControls()
     mPlace->setText(have ? mConfig["placeName"].asString() : std::string());
     mLat->setValue(have ? mConfig["lat"].asReal() : 0.0);
     mLon->setValue(have ? mConfig["lon"].asReal() : 0.0);
+    fillClocks();
+    mClock->setValue(clock_of(have ? mConfig : LLSD()));
     mWriting = false;
 
     // Preview time is this viewer's own view, so anyone may use it while the region follows a place.
@@ -225,7 +257,7 @@ void WolfPanelRegionAutoEnvironment::writeControls()
 
     const bool editable = canEdit() && !mBusy;
     for (const char* name : { "ae_enabled", "ae_sky", "ae_weather", "ae_search", "ae_search_btn",
-                              "ae_results", "ae_place", "ae_lat", "ae_lon", "ae_apply" })
+                              "ae_results", "ae_place", "ae_lat", "ae_lon", "ae_clock", "ae_clock_search", "ae_apply" })
     {
         if (LLView* v = findChild<LLView>(name)) v->setEnabled(editable);
     }
@@ -289,16 +321,20 @@ void WolfPanelRegionAutoEnvironment::onPreviewChanged()
     showPreviewTime();
 }
 
-/** "Showing Sat 23:00 grid time (13 h 30 min ahead)". [GRID TIME 2026-10-03] Paul: "the weather
- *  should be at grid time not local time" — the sky shows the place at the GRID's (Pacific)
- *  wall-clock time, so that is the clock this reads in. auto_environment.php gives the grid
- *  zone's UTC offset now and 12 h from now. */
+/** "Showing Sat 23:00, Grid time (13 h 30 min ahead)". [GRID TIME 2026-10-03] Paul: "the weather
+ *  should be at grid time not local time" — the sky shows the place at the sky clock's wall-clock
+ *  time: the GRID's (Pacific) by default, or the zone the owner chose [SKY CLOCK 2026-10-04], so
+ *  that is the clock this reads in. auto_environment.php gives that zone's UTC offset now and
+ *  12 h from now (clockUtcOffset*, or only gridUtcOffset* from a server older than the setting). */
 void WolfPanelRegionAutoEnvironment::showPreviewTime()
 {
     if (!mPreviewTime) return;
     if (!mHave || !mConfig.isMap()) { mPreviewTime->setText(LLStringUtil::null); return; }
     const F64 ahead = WolfRegionWeather::instance().autoEnvTimeOffset();
-    const S32 offset = (ahead < 43200.0 ? mConfig["gridUtcOffset"] : mConfig["gridUtcOffset12h"]).asInteger();
+    const bool has_clock = mConfig.has("clockUtcOffset");
+    const S32 offset = (ahead < 43200.0 ? mConfig[has_clock ? "clockUtcOffset" : "gridUtcOffset"]
+                                        : mConfig[has_clock ? "clockUtcOffset12h" : "gridUtcOffset12h"]).asInteger();
+    const std::string label = mConfig.has("clockLabel") ? mConfig["clockLabel"].asString() : std::string("Grid time");
     const time_t local = (time_t)(LLDate::now().secondsSinceEpoch() + ahead + offset);
     struct tm parts;
 #if LL_WINDOWS
@@ -312,13 +348,13 @@ void WolfPanelRegionAutoEnvironment::showPreviewTime()
     if (WolfRegionWeather::instance().autoEnvPreviewOn())
     {
         const S32 mins = (S32)(ahead / 60.0 + 0.5);
-        mPreviewTime->setText(llformat("Showing %s grid time (%d h %02d min ahead) - only on your screen.",
-                                       clock, mins / 60, mins % 60));
+        mPreviewTime->setText(llformat("Showing %s, %s (%d h %02d min ahead) - only on your screen.",
+                                       clock, label.c_str(), mins / 60, mins % 60));
     }
     else
     {
-        mPreviewTime->setText(llformat("Grid time %s: the sky shows %s as it looks at %s there.",
-                                       clock, place.c_str(), clock));
+        mPreviewTime->setText(llformat("%s %s: the sky shows %s as it looks at %s there.",
+                                       label.c_str(), clock, place.c_str(), clock));
     }
 }
 
@@ -399,6 +435,8 @@ void WolfPanelRegionAutoEnvironment::onApply()
     body["placeName"] = mPlace->getText();
     body["lat"]       = mLat->getValue().asReal();
     body["lon"]       = mLon->getValue().asReal();
+    const std::string clock = mClock->getValue().asString();
+    body["clock"]     = (clock == CLOCK_GRID) ? std::string() : clock;
     mBusy = true;
     setStatus(getString("str_saving"), false);
     const std::string text = boost::json::serialize(LlsdToJson(body));
@@ -408,6 +446,95 @@ void WolfPanelRegionAutoEnvironment::onApply()
     LLCoros::instance().launch("WolfAutoEnvSave", [handle, text, id, serial]() {
         WolfPanelRegionAutoEnvironment::postCoro(handle, text, id, false, serial);
     });
+}
+
+void WolfPanelRegionAutoEnvironment::fillClocks()
+{
+    if (!mClock) return;
+    const LLSD keep = mClock->getValue();
+    // [SKY CLOCK SEARCH 2026-10-04] Only zones whose name contains the search text (any case,
+    // "_" and " " alike, so "new york" finds America/New_York). Grid time and the place's own
+    // time are always listed.
+    std::string filter = mClockSearch ? mClockSearch->getText() : std::string();
+    LLStringUtil::replaceChar(filter, '_', ' ');
+    LLStringUtil::toLower(filter);
+    LLStringUtil::trim(filter);
+    mClock->removeall();
+    mClock->add(getString("str_clock_grid"), LLSD(CLOCK_GRID));
+    mClock->add(getString("str_clock_place"), LLSD("place"));
+    for (LLSD::array_const_iterator it = sZones.beginArray(); it != sZones.endArray(); ++it)
+    {
+        std::string label = it->asString();
+        LLStringUtil::replaceChar(label, '_', ' ');
+        if (!filter.empty())
+        {
+            std::string lower = label;
+            LLStringUtil::toLower(lower);
+            if (lower.find(filter) == std::string::npos) continue;
+        }
+        mClock->add(label, *it);
+    }
+    // A zone the region already uses (or the one picked), even when the list has not arrived or
+    // the search hides it, is still shown — so a search never changes the choice by itself.
+    const std::string current = clock_of(mHave ? mConfig : LLSD());
+    const std::string picked = keep.asString().empty() ? current : keep.asString();
+    if (!mClock->getItemByValue(LLSD(picked)))
+    {
+        std::string label = picked;
+        LLStringUtil::replaceChar(label, '_', ' ');
+        mClock->add(label, LLSD(picked));
+    }
+    mClock->setValue(LLSD(picked));
+}
+
+/** [SKY CLOCK SEARCH 2026-10-04] Enter in the search box picks the first zone that matches. */
+void WolfPanelRegionAutoEnvironment::onClockSearchCommit()
+{
+    std::string filter = mClockSearch->getText();
+    LLStringUtil::replaceChar(filter, '_', ' ');
+    LLStringUtil::toLower(filter);
+    LLStringUtil::trim(filter);
+    if (filter.empty() || !canEdit()) return;
+    for (LLSD::array_const_iterator it = sZones.beginArray(); it != sZones.endArray(); ++it)
+    {
+        std::string lower = it->asString();
+        LLStringUtil::replaceChar(lower, '_', ' ');
+        LLStringUtil::toLower(lower);
+        if (lower.find(filter) == std::string::npos) continue;
+        mClock->setValue(*it);
+        onChanged();
+        return;
+    }
+}
+
+// static
+void WolfPanelRegionAutoEnvironment::zonesCoro(LLHandle<LLPanel> handle)
+{
+    LLCoreHttpUtil::HttpCoroutineAdapter::ptr_t adapter =
+        std::make_shared<LLCoreHttpUtil::HttpCoroutineAdapter>("WolfAutoEnvironment", LLCore::HttpRequest::DEFAULT_POLICY_ID);
+    LLCore::HttpRequest::ptr_t request = std::make_shared<LLCore::HttpRequest>();
+    LLCore::HttpOptions::ptr_t options = WolfGrid::makeVerifiedHttpOptions();
+    options->setTimeout(20);
+    LLCore::HttpHeaders::ptr_t headers = std::make_shared<LLCore::HttpHeaders>();
+    headers->append(HTTP_OUT_HEADER_ACCEPT, "application/json");
+    LLSD result = adapter->getRawAndSuspend(request, std::string(API_URL) + "?timezones=1", options, headers);
+    LLCore::HttpStatus status = LLCoreHttpUtil::HttpCoroutineAdapter::getStatusFromLLSD(
+        result[LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS]);
+    LLSD reply;
+    if (result.has(LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS_RAW))
+        reply = json_to_llsd(result[LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS_RAW].asBinary());
+    if (!status || !reply.isMap() || !reply["zones"].isArray())
+    {
+        sZonesAsked = false;     // try again the next time the tab is built
+        LL_WARNS("WolfAutoEnv") << "time zone list not read: " << status.toString() << LL_ENDL;
+        return;
+    }
+    sZones = reply["zones"];
+    WolfPanelRegionAutoEnvironment* self = static_cast<WolfPanelRegionAutoEnvironment*>(handle.get());
+    if (!self) return;
+    self->mWriting = true;
+    self->fillClocks();
+    self->mWriting = false;
 }
 
 void WolfPanelRegionAutoEnvironment::fetch()

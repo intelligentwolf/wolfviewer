@@ -211,11 +211,12 @@ LLSD WolfWeatherProfile::toLLSD() const
     return sd;
 }
 
-// Source: weather_profile.js fogVisibility() - 2000 * 0.02^(fog/100) metres.
+// Source: weather_profile.js fogVisibility() - 2000 * 0.02^(fog/100) metres, never under
+// FOG_MIN_VISIBILITY_M (2026-10-04).
 F32 WolfWeatherProfile::fogVisibility(S32 fog)
 {
     const S32 f = clamp_int(fog, FOG_MIN, FOG_MAX);
-    return f <= 0 ? 0.f : 2000.f * powf(0.02f, (F32)f / 100.f);
+    return f <= 0 ? 0.f : llmax(FOG_MIN_VISIBILITY_M, 2000.f * powf(0.02f, (F32)f / 100.f));
 }
 
 bool WolfWeatherProfile::operator==(const WolfWeatherProfile& o) const

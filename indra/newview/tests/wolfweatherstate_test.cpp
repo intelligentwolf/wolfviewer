@@ -12,6 +12,11 @@ int main()
     assert(wolfWeatherSource(false, false, true, true) == Source::PARCEL);
     assert(wolfWeatherSource(false, true, true, true) == Source::PRIM);
     assert(wolfWeatherSource(true, true, true, true) == Source::PREVIEW);
+    // 2026-10-04: the resident's own choice (menu weather, or EEP off) beats the land's,
+    // but not their own preview.
+    assert(wolfWeatherSource(false, true, true, true, true) == Source::MENU);
+    assert(wolfWeatherSource(false, false, false, true, true) == Source::MENU);
+    assert(wolfWeatherSource(true, true, true, true, true) == Source::PREVIEW);
     assert(wolfWeatherUsesRegionArtDirection(Source::MENU));
     assert(wolfWeatherUsesRegionArtDirection(Source::REGION));
     assert(!wolfWeatherUsesRegionArtDirection(Source::PARCEL));

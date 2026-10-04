@@ -22,6 +22,7 @@
 
 #include "llpointer.h"
 #include "llsingleton.h"
+#include "v3color.h"   // <WolfViewer 2026-10-04/> indoorAmbient()
 #include "llviewerpartsource.h"
 #include "wolfweatherprofile.h"
 #include "wolfweatherstate.h"
@@ -208,8 +209,25 @@ public:
     void setUserFog(S32 percent);
     /** Menu tick: is THIS the fog in the air now (whoever set it)? */
     bool isFog(S32 percent) const { return mActive.mFog == percent; }
-    /** The fog in the air now as an extinction coefficient, 1/metre; 0 = none. Safe before login and after shutdown. */
+    /** The fog in the air now as an extinction coefficient, 1/metre; 0 = none. Safe before login and after shutdown.
+        <WolfViewer 2026-10-04/> Faded out while the camera is under a roof (updateIndoors). */
     static F32 fogExtinction();
+    // <WolfViewer 2026-10-04> INDOORS. Paul: "fog should never go inside buildings" and "add a
+    // slight bit of light inside buildings". One roof cell over the camera is rayed every frame
+    // (the precipitation's own roof test, WolfRoofGrid — rain and snow have their own grid, but
+    // it only exists while something falls). Under a roof, eased over INDOOR_FADE_SECS:
+    //  - the weather fog fades out (fogExtinction): it is the atmosphere's own distance haze
+    //    thickened (llsettingsvo.cpp wolf_fogged_distance_multiplier), so it filled every room;
+    //  - the ambient light is lifted to at least INDOOR_AMBIENT_FLOOR (indoorAmbient), so a room
+    //    at night or under a black storm sky is dim, never pitch dark. 0.25 grey is EEP's own
+    //    default ambient (llsettingsvo.cpp SETTING_AMBIENT DefaultParam); a brighter sky is untouched.
+    static constexpr F32 INDOOR_ROOF_HALF_M = 1.f;     // one 2 m cell round the camera
+    static constexpr F32 INDOOR_FADE_SECS = 0.5f;
+    static constexpr F32 INDOOR_AMBIENT_FLOOR = 0.25f;
+    /** 0 outdoors .. 1 under a roof, eased. Safe before login and after shutdown. */
+    static F32 indoors();
+    /** The sky's ambient with the indoor floor applied (unchanged outdoors). */
+    static LLColor3 indoorAmbient(const LLColor3& ambient);
     // <WolfViewer 2026-09-18> the northern lights. Source: wolfweather.js setUserAurora /
     // render_manager.js _applyWeatherAurora.
     void setUserAurora(S32 percent);
@@ -286,6 +304,13 @@ private:
     LLPointer<WolfWeatherPartSource> mSource;
     // <WolfViewer 2026-09-18> snow cover state (see the note above)
     void updateSnowCover(F64 now);
+    void updateIndoors(F64 now);   // <WolfViewer 2026-10-04/>
+    // <WolfViewer 2026-10-04> The resident overrides the land's weather (wolfweatherstate.h
+    // wolfWeatherSource `personal`): they chose weather from the menu, or they are not using the
+    // shared environment (EEP off / their own sky or day cycle). Re-applied when that changes.
+    static bool usingSharedEnvironment();
+    bool menuChoice() const { return mUser != Mode::NONE || mUserFog > 0 || mUserAurora > 0; }
+    bool mSharedEnv = true;
     void updateShelter();
     F32  mSnowCover = 0.f;
     F64  mCoverLast = 0.0;
@@ -301,6 +326,9 @@ private:
     F64  mCoverPendingSince = 0.0;
     U32  mCoverPendingSweep = 0;
     U32  mSweepCount = 0;
+    WolfRoofGrid mIndoorRoof;              // <WolfViewer 2026-10-04/> the roof over the camera
+    F32  mIndoors = 0.f;                   // 0 outdoors .. 1 under a roof, eased
+    F64  mIndoorLast = 0.0;
     WolfRoofGrid mShelter;                 // <WolfViewer 2026-10-02/> was mShelterZ / mShelterNext / mShelterCam
     bool mShelterInit = false;
     std::vector<U8> mShelterData;          // SHELTER_N^2, 255 open sky / 0 sheltered (or not rayed yet)

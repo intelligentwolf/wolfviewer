@@ -482,7 +482,8 @@ F32 WolfWeather::fogExtinction()
 {
     if (!instanceExists()) return 0.f;
     const S32 fog = instance().mActive.mFog;
-    return fog > 0 ? 2.9957f / WolfWeatherProfile::fogVisibility(fog) : 0.f;
+    // <WolfViewer 2026-10-04/> under a roof the fog fades out (updateIndoors).
+    return fog > 0 ? 2.9957f / WolfWeatherProfile::fogVisibility(fog) * (1.f - instance().mIndoors) : 0.f;
 }
 
 void WolfWeather::clear()
@@ -530,6 +531,9 @@ void WolfWeather::toggleEnabled()
 
 void WolfWeather::apply()
 {
+    // <WolfViewer 2026-10-04> Recorded before any early return, so idle() does not re-apply
+    // every frame while the switch is off and the resident is not using the shared environment.
+    mSharedEnv = usingSharedEnvironment();
     // THE SWITCH FIRST. Off is off: no region weather, no parcel weather, no menu choice, and
     // no preview — see WolfWeather::enabled().
     if (!enabled())
@@ -555,7 +559,8 @@ void WolfWeather::apply()
     WolfWeatherProfile region;
     const bool parcel_forces = rw.parcelForcedProfile(parcel);
     const WolfWeatherSource selected = wolfWeatherSource(preview != nullptr, mForcedFound,
-                                                         parcel_forces, rw.forcedProfile(region));
+                                                         parcel_forces, rw.forcedProfile(region),
+                                                         menuChoice() || !mSharedEnv);   // <WolfViewer 2026-10-04/>
     if (selected == WolfWeatherSource::PREVIEW)
     {
         prof = *preview;
@@ -678,6 +683,61 @@ void WolfWeather::idle()
     // [LIGHTNING 2026-09-13] Forks during a thunderstorm; the thunder is timed from them.
     WolfLightning::instance().idle();
     updateSnowCover(now);   // <WolfViewer 2026-09-18/> what the snow leaves on the ground
+    updateIndoors(now);     // <WolfViewer 2026-10-04/> no fog, and a little light, inside buildings
+    // <WolfViewer 2026-10-04> EEP switched off or back on: the land's weather leaves or returns.
+    if (usingSharedEnvironment() != mSharedEnv) apply();
+}
+
+// <WolfViewer 2026-10-04> Is the resident looking at the region's environment? Not when their
+// own fixed sky or day cycle is in ENV_LOCAL — the EEP switch off (llviewermenu.cpp wolf_is_eep)
+// or a personal environment. Jimmy's Weather's Preview time puts the REGION's own cycle in
+// ENV_LOCAL (WolfRegionWeather::setAutoEnvPreview), so that still counts as the region's.
+bool WolfWeather::usingSharedEnvironment()
+{
+    if (!LLEnvironment::instanceExists()) return true;   // LLSimpleton: before startup / after shutdown
+    if (WolfRegionWeather::instance().autoEnvPreviewOn()) return true;
+    LLEnvironment& env = LLEnvironment::instance();
+    return !env.getEnvironmentFixedSky(LLEnvironment::ENV_LOCAL) && !env.getEnvironmentDay(LLEnvironment::ENV_LOCAL);
+}
+
+// <WolfViewer 2026-10-04> Is there a roof over the camera? The same test the rain uses
+// (WolfWeatherPartSource::cameraUnderRoof): the first thing a ray from above meets in the
+// camera's cell is above the camera. One ray a frame. A cell no ray has answered yet counts as
+// outdoors; the camera's cell is rayed every frame, so it is answered on the first frame anyway.
+void WolfWeather::updateIndoors(F64 now)
+{
+    const F32 dt = (mIndoorLast > 0.0) ? (F32)llclamp(now - mIndoorLast, 0.0, 0.5) : 0.f;
+    mIndoorLast = now;
+    if (!gAgent.getRegion())
+    {
+        mIndoors = 0.f;
+        return;
+    }
+    mIndoorRoof.configure(1, INDOOR_ROOF_HALF_M);
+    const LLVector3 cam = LLViewerCamera::getInstance()->getOrigin();
+    mIndoorRoof.update(cam, 0);
+    const S32 k = mIndoorRoof.cameraCell();
+    const F32 land = k >= 0 ? mIndoorRoof.landing(k) : WolfRoofGrid::UNKNOWN;
+    const F32 target = (land < WolfRoofGrid::UNKNOWN && land > cam.mV[VZ]) ? 1.f : 0.f;
+    const F32 step = dt / INDOOR_FADE_SECS;
+    mIndoors = target > mIndoors ? llmin(target, mIndoors + step) : llmax(target, mIndoors - step);
+}
+
+F32 WolfWeather::indoors()
+{
+    return instanceExists() ? instance().mIndoors : 0.f;
+}
+
+LLColor3 WolfWeather::indoorAmbient(const LLColor3& ambient)
+{
+    const F32 in = indoors();
+    if (in <= 0.f) return ambient;
+    LLColor3 out = ambient;
+    for (S32 i = 0; i < 3; ++i)
+    {
+        if (out.mV[i] < INDOOR_AMBIENT_FLOOR) out.mV[i] += (INDOOR_AMBIENT_FLOOR - out.mV[i]) * in;
+    }
+    return out;
 }
 
 // <WolfViewer 2026-09-18> ─── snow on the ground ─────────────────────────────────────────────

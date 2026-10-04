@@ -223,7 +223,12 @@ void WolfWakeField::update(F32 dt)
         sh.uniform1f(s_uFoamDecay, powf(0.5f, dt / FOAM_HALF_LIFE));
         sh.uniform1f(s_uCrestDecay, powf(0.5f, dt / CREST_HALF_LIFE));
         sh.uniform1f(s_uTexel, 1.f / RES);
-        sh.uniform1f(s_uSpread, llmin(0.6f, 2.2f * dt));
+        // <WolfViewer 2026-10-04> WAKE STERN: the blur moves foam one TEXEL per pass, and the
+        // field is RES texels over the whole region — 0.5 m on 256 m, 6 m on Wolf Territories
+        // Home (3,072 m), so foam spread 12x further in metres, forward of the bow too. Scale
+        // the rate by (256 / region)^2 so the spread in metres matches a 256 m region.
+        const F32 region_m = llmax(256.f, (mRegionSizeX + mRegionSizeY) * 0.5f);
+        sh.uniform1f(s_uSpread, llmin(0.6f, 2.2f * dt) * (256.f / region_m) * (256.f / region_m));
         gPipeline.mScreenTriangleVB->setBuffer();
         gPipeline.mScreenTriangleVB->drawArrays(LLRender::TRIANGLES, 0, 3);
         sh.unbind();
@@ -278,8 +283,21 @@ S32 WolfWakeField::stampBoat(LLViewerObject* obj, S32 budget)
     const F32 ux = dx / dir_len, uy = dy / dir_len;
 
     const LLVector3& sc = obj->getScale();
+    // <WolfViewer 2026-10-04> WAKE STERN (wake_field.js [WAKE STERN 2026-10-04]): the hull's
+    // real extent along the heading — the root prim's X and Y sides projected onto it. Paul,
+    // on the welcome ferry (73 m) in Wolf Territories Home: "boat wash is going in front of
+    // the boat" — the wash started at the hull's CENTRE, 36 m behind the bow, and a 45 m cap
+    // sized it for a launch. It now starts at the stern, and only a hull longer than the old
+    // cap grows past it, so every boat under 45 m keeps its size.
+    const LLQuaternion rot = obj->getRotationRegion();
+    const LLVector3 hull_x = LLVector3::x_axis * rot;
+    const LLVector3 hull_y = LLVector3::y_axis * rot;
+    const F32 along = fabsf(ux * hull_x.mV[VX] + uy * hull_x.mV[VY]) * sc.mV[VX]
+                    + fabsf(ux * hull_y.mV[VX] + uy * hull_y.mV[VY]) * sc.mV[VY];
     const F32 hull_width = llmax(1.f, llmin(llmax(sc.mV[VX], sc.mV[VY]), 30.f));
-    const F32 hull_len = llmax(hull_width, llmin(llmax(sc.mV[VX], sc.mV[VY]) * 1.6f, 45.f));
+    const F32 hull_len = llmax(llmax(hull_width, llmin(llmax(sc.mV[VX], sc.mV[VY]) * 1.6f, 45.f)), along);
+    const F32 stern_x = -ux * along * 0.5f, stern_y = -uy * along * 0.5f;
+    // </WolfViewer>
     const F32 width = hull_width * (1.1f + 2.6f * sp);
     const F32 length = hull_len * (1.2f + 2.8f * sp);
     const S32 segs = llmax(1, llmin(budget, (S32)ceilf(moved / llmax(0.75f, length * 0.4f))));
@@ -301,8 +319,9 @@ S32 WolfWakeField::stampBoat(LLViewerObject* obj, S32 budget)
     sh.uniform1f(s_uFoam, 1.f / segs);
     sh.uniform1f(s_uKelvinTan, tanf(asinf(1.f / 3.f)));
     // Field space: 0..1 over the region. Local +Y is "ahead" = the heading; +X is right of
-    // it. The quad is slid back by half its length so the wake sits astern of the hull.
-    const F32 back_x = -ux * length * 0.5f, back_y = -uy * length * 0.5f;
+    // it. The quad is slid back by half its length so the wake sits astern of the hull —
+    // from the STERN, not the centre (<WolfViewer 2026-10-04/> WAKE STERN).
+    const F32 back_x = stern_x - ux * length * 0.5f, back_y = stern_y - uy * length * 0.5f;
     const F32 ax_x = uy * width / mRegionSizeX, ax_y = -ux * width / mRegionSizeY;
     const F32 ay_x = ux * length / mRegionSizeX, ay_y = uy * length / mRegionSizeY;
     sh.uniform2f(s_uAxisX, ax_x, ax_y);

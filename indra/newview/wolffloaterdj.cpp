@@ -40,6 +40,7 @@
 #include "llweb.h"
 #include "llrender.h"
 #include "llui.h"
+#include "lluicolortable.h"
 #include "roles_constants.h"
 
 #include <boost/json.hpp>
@@ -71,6 +72,25 @@ namespace
     std::string password_id()
     {
         return gAgentID.asString();
+    }
+
+    // Paul: "please save the users stream password". setProtectedData only changes the store in
+    // memory (llsechandler_basic.cpp LLSecAPIBasicHandler::setProtectedData); syncProtectedMap
+    // writes it to the encrypted file (_writeProtectedData), so it is there next session.
+    // Paul: "add a check box Save Password?" - setting WolfDJSavePassword. Off: the stored copy
+    // is removed and the typed password is used only this session.
+    void save_password(const std::string& pw)
+    {
+        if (!gSecAPIHandler) return;
+        if (gSavedSettings.getBOOL("WolfDJSavePassword") && !pw.empty())
+        {
+            gSecAPIHandler->setProtectedData(PROTECTED_TYPE, password_id(), LLSD(pw));
+        }
+        else
+        {
+            gSecAPIHandler->deleteProtectedData(PROTECTED_TYPE, password_id());
+        }
+        gSecAPIHandler->syncProtectedMap();
     }
 
     // Put the land and the viewer's own parcel music back as they were.
@@ -176,12 +196,11 @@ bool WolfFloaterDJ::postBuild()
 
     mUrl->setCommitCallback([](LLUICtrl* c, const LLSD&) { gSavedPerAccountSettings.setString("WolfDJStreamURL", c->getValue().asString()); });
     mStation->setCommitCallback([](LLUICtrl* c, const LLSD&) { gSavedPerAccountSettings.setString("WolfDJStationName", c->getValue().asString()); });
-    mPassword->setCommitCallback([](LLUICtrl* c, const LLSD&)
+    mPassword->setCommitCallback([](LLUICtrl* c, const LLSD&) { save_password(c->getValue().asString()); });
+    getChild<LLCheckBoxCtrl>("save_password")->setCommitCallback([this](LLUICtrl* c, const LLSD&)
     {
-        if (gSecAPIHandler)
-        {
-            gSecAPIHandler->setProtectedData(PROTECTED_TYPE, password_id(), LLSD(c->getValue().asString()));
-        }
+        gSavedSettings.setBOOL("WolfDJSavePassword", c->getValue().asBoolean());
+        save_password(mPassword->getValue().asString());
     });
     getChild<LLButton>("get_stream")->setCommitCallback([](LLUICtrl*, const LLSD&) { LLWeb::loadURLExternal(MY_STREAM_PAGE); });
     getChild<LLButton>("copy_url")->setCommitCallback([this](LLUICtrl*, const LLSD&) { onCopyUrl(); });
@@ -209,7 +228,8 @@ void WolfFloaterDJ::onOpen(const LLSD& key)
         station = gAgentUsername.empty() ? std::string("Wolf DJ") : gAgentUsername + " live";
     }
     mStation->setValue(station);
-    if (gSecAPIHandler)
+    getChild<LLCheckBoxCtrl>("save_password")->set(gSavedSettings.getBOOL("WolfDJSavePassword"));
+    if (gSecAPIHandler && mPassword->getValue().asString().empty())
     {
         const LLSD pw = gSecAPIHandler->getProtectedData(PROTECTED_TYPE, password_id());
         mPassword->setValue(pw.isString() ? pw.asString() : std::string());
@@ -232,6 +252,20 @@ void WolfFloaterDJ::onOpen(const LLSD& key)
             mStatus->setText("Microphone: " + err);
         }
     }
+    // Paul: "music 1 should always default to wolf dj play[list]" - unless the DJ has put
+    // something else there, or the playlist is already on another channel.
+    if (mix.captureId(CH_MUSIC_A).empty())
+    {
+        bool elsewhere = false;
+        for (int ch = CH_MUSIC_B; ch < CH_COUNT; ++ch)
+        {
+            elsewhere = elsewhere || mix.captureId(ch) == WOLFDJ_PLAYLIST_ID;
+        }
+        if (!elsewhere)
+        {
+            mix.setCapture(CH_MUSIC_A, wolfdj_open_playlist_stream(&mix.channel(CH_MUSIC_A)), WOLFDJ_PLAYLIST_ID);
+        }
+    }
     refreshApps();
     mClock.reset();
 }
@@ -239,6 +273,8 @@ void WolfFloaterDJ::onOpen(const LLSD& key)
 void WolfFloaterDJ::onClose(bool app_quitting)
 {
     WolfDJMixer& mix = WolfDJMixer::instance();
+    // The password field may still have focus (its commit fires on focus loss / Enter).
+    save_password(mPassword->getValue().asString());
     if (app_quitting)
     {
         return;     // LLAppViewer::requestQuit already ended the show (WolfDJ quit hook)
@@ -419,10 +455,7 @@ void WolfFloaterDJ::onGoLive()
     cfg.mDescription = "Live from Wolf Territories with WolfViewer";
     gSavedPerAccountSettings.setString("WolfDJStreamURL", mUrl->getValue().asString());
     gSavedPerAccountSettings.setString("WolfDJStationName", cfg.mStationName);
-    if (gSecAPIHandler)
-    {
-        gSecAPIHandler->setProtectedData(PROTECTED_TYPE, password_id(), LLSD(cfg.mPassword));
-    }
+    save_password(cfg.mPassword);
 
     sShow = Show();
     sShow.mListenUrl = "http://" + cfg.mHost + ":" + std::to_string(cfg.mPort) + cfg.mMount;
@@ -599,8 +632,33 @@ void WolfFloaterDJ::updateStatus()
     WolfDJMixer& mix = WolfDJMixer::instance();
     const EState st = mix.state();
     const bool live = mix.isLiveRequested();
-    mLiveBtn->setLabel(live ? std::string("Stop") : std::string("Go Live"));
-    mLiveBtn->setToggleState(live);
+    // Paul: "go live should go red when you're live and changed to ON AIR". Amber while it
+    // connects or reconnects; back to the skin's own button colour off air.
+    static const LLUIColor normal = LLUIColorTable::instance().getColor("ButtonImageColor");
+    if (live && st == ON_AIR)
+    {
+        mLiveBtn->setLabel(std::string("ON AIR"));
+        mLiveBtn->setImageColor(LLUIColor(LLColor4(0.95f, 0.12f, 0.12f, 1.f)));
+        mLiveBtn->setToolTip(std::string("You are live. Click to go off air."));
+    }
+    else if (live && (st == CONNECTING || st == RETRYING || st == OFF_AIR))
+    {
+        mLiveBtn->setLabel(std::string("Connecting..."));
+        mLiveBtn->setImageColor(LLUIColor(LLColor4(1.f, 0.62f, 0.1f, 1.f)));
+        mLiveBtn->setToolTip(std::string("Connecting to your stream. Click to cancel."));
+    }
+    else if (live)
+    {
+        mLiveBtn->setLabel(std::string("Stop"));
+        mLiveBtn->setImageColor(normal);
+        mLiveBtn->setToolTip(std::string("The stream server refused - see the message. Click to stop."));
+    }
+    else
+    {
+        mLiveBtn->setLabel(std::string("Go Live"));
+        mLiveBtn->setImageColor(normal);
+        mLiveBtn->setToolTip(std::string("Start broadcasting to your stream."));
+    }
     if (live)
     {
         std::string text;

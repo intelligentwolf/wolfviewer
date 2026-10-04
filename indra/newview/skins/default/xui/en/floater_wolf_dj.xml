@@ -29,10 +29,12 @@
     <button follows="right|top" height="20" label="Copy" layout="topleft" left="634" name="copy_url" top="22" width="48"
      tool_tip="Copy your stream address, to give a region owner for their land's music." />
     <text follows="left|top" height="16" layout="topleft" left="10" name="pw_label" top="50" width="96">Password</text>
-    <line_editor follows="left|top" height="20" is_password="true" layout="topleft" left="108" max_length_bytes="128" name="stream_password" top="48" width="150"
+    <line_editor follows="left|top" height="20" is_password="true" layout="topleft" left="108" max_length_bytes="128" name="stream_password" top="48" width="120"
      tool_tip="Your stream password (shown once on My Radio Stream). Kept in the viewer's encrypted store." />
-    <text follows="left|top" height="16" layout="topleft" left="266" name="station_label" top="50" width="70">Show name</text>
-    <line_editor follows="left|top|right" height="20" layout="topleft" left="338" max_length_bytes="120" name="station_name" top="48" width="344" />
+    <check_box follows="left|top" height="16" label="Save password" layout="topleft" left="234" name="save_password" top="50" width="110"
+     tool_tip="Keep the stream password in the viewer's encrypted store for next time. Untick to forget it." />
+    <text follows="left|top" height="16" layout="topleft" left="346" name="station_label" top="50" width="70">Show name</text>
+    <line_editor follows="left|top|right" height="20" layout="topleft" left="418" max_length_bytes="120" name="station_name" top="48" width="264" />
     <scroll_container
      follows="all"
      height="304"
@@ -178,7 +180,7 @@
     <line_editor follows="left|bottom" height="20" label="Artist" layout="topleft" left="92" max_length_bytes="120" name="now_artist" top="426" width="150" />
     <line_editor follows="left|right|bottom" height="20" label="Title" layout="topleft" left="246" max_length_bytes="160" name="now_title" top="426" width="342" />
     <button follows="right|bottom" height="20" label="Send title" layout="topleft" left="594" name="send_title" top="426" width="88" tool_tip="Show this to listeners as the song playing now." />
-    <button follows="left|bottom" height="28" is_toggle="true" label="Go Live" layout="topleft" left="10" name="go_live" top="456" width="110" font="SansSerifBold" />
+    <button follows="left|bottom" height="28" image_color="ButtonImageColor" label="Go Live" layout="topleft" left="10" name="go_live" top="456" width="110" font="SansSerifBold" />
     <button follows="left|bottom" height="28" label="Playlist..." layout="topleft" left="126" name="open_playlist" top="456" width="90" tool_tip="Open the Wolf DJ playlist: pick songs from your computer and play them on a music channel." />
     <text follows="left|right|bottom" font="SansSerifBold" height="34" layout="topleft" left="224" name="status_text" top="456" width="458" wrap="true">Off air.</text>
     <text follows="left|right|bottom" height="32" layout="topleft" left="10" name="land_note" top="492" width="672" wrap="true" text_color="LtGray_50" />

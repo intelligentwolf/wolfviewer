@@ -687,6 +687,19 @@ void WolfFloaterDJ::updateStatus()
         }
     }
 
+    // Paul: "if i'm on air ... my playlist songs playing i need to be able to see them" - the
+    // Now playing fields follow the playlist as each song starts (the player sends the same
+    // artist/title to the stream, wolfdjplayer.cpp player_idle).
+    WolfDJPlayer& player = WolfDJPlayer::instance();
+    if (player.output() && player.isPlaying() && player.trackSerial() != mShownTrack)
+    {
+        mShownTrack = player.trackSerial();
+        std::string artist, title;
+        player.nowPlaying(artist, title);
+        mArtist->setValue(artist);
+        mTitle->setValue(title);
+    }
+
     // In-world voice is only there while voice is connected.
     const bool voice_signal = mix.channel(CH_VOICE).mPrePeak.load() > 0.f;
     mVoiceNote->setText(voice_signal ? std::string() : std::string("Voice: what you hear in voice chat"));

@@ -24,6 +24,7 @@
 
 #if LL_OPENAL
 #include "AL/al.h"
+#include "AL/alc.h"
 #endif
 
 #include <algorithm>
@@ -1081,32 +1082,48 @@ void WolfDJMixer::idleCue()
     const bool want = mRunning && (mCue.load() != CUE_NONE || monitored);
     if (!want)
     {
-        if (mCueSource)
-        {
-            ALuint src = mCueSource;
-            alSourceStop(src);
-            ALint queued = 0;
-            alGetSourcei(src, AL_BUFFERS_QUEUED, &queued);
-            while (queued-- > 0)
-            {
-                ALuint b = 0;
-                alSourceUnqueueBuffers(src, 1, &b);
-                mCueFreeBuffers.push_back(b);
-            }
-            for (unsigned b : mCueFreeBuffers)
-            {
-                ALuint ab = b;
-                alDeleteBuffers(1, &ab);
-            }
-            mCueFreeBuffers.clear();
-            alDeleteSources(1, &src);
-            mCueSource = 0;
-            mCueStarted = false;
-        }
+        closeCueOutput();
         std::lock_guard<std::mutex> lock(mCueMutex);
         mCueRing.clear();
         return;
     }
+
+    // Our own device + context; every call below runs with it current and the viewer's put back.
+    if (!mCueContext)
+    {
+        ALCdevice* dev = alcOpenDevice(NULL);
+        if (!dev) return;
+        ALCcontext* ctx = alcCreateContext(dev, NULL);
+        if (!ctx)
+        {
+            alcCloseDevice(dev);
+            return;
+        }
+        mCueDevice = dev;
+        mCueContext = ctx;
+    }
+    ALCcontext* viewer_ctx = alcGetCurrentContext();
+    alcMakeContextCurrent((ALCcontext*)mCueContext);
+    struct Restore
+    {
+        ALCcontext* mCtx;
+        ~Restore() { alcMakeContextCurrent(mCtx); }
+    } restore{ viewer_ctx };
+
+    // Unplugged (ALC_EXT_disconnect): start again on the default device next time.
+    ALCdevice* dev = (ALCdevice*)mCueDevice;
+    if (alcIsExtensionPresent(dev, "ALC_EXT_disconnect"))
+    {
+        ALCint connected = 1;
+        alcGetIntegerv(dev, alcGetEnumValue(dev, "ALC_CONNECTED"), 1, &connected);
+        if (!connected)
+        {
+            alcMakeContextCurrent(viewer_ctx);
+            closeCueOutput();
+            return;
+        }
+    }
+
     if (!mCueSource)
     {
         alGetError();
@@ -1159,5 +1176,42 @@ void WolfDJMixer::idleCue()
         alSourcePlay(src);      // also restarts after an underrun
         mCueStarted = true;
     }
+#endif
+}
+
+// Main thread. Releases the DJ output's source, buffers, context and device.
+void WolfDJMixer::closeCueOutput()
+{
+#if LL_OPENAL
+    if (!mCueContext) return;
+    ALCcontext* viewer_ctx = alcGetCurrentContext();
+    alcMakeContextCurrent((ALCcontext*)mCueContext);
+    if (mCueSource)
+    {
+        ALuint src = mCueSource;
+        alSourceStop(src);
+        ALint queued = 0;
+        alGetSourcei(src, AL_BUFFERS_QUEUED, &queued);
+        while (queued-- > 0)
+        {
+            ALuint b = 0;
+            alSourceUnqueueBuffers(src, 1, &b);
+            mCueFreeBuffers.push_back(b);
+        }
+        for (unsigned b : mCueFreeBuffers)
+        {
+            ALuint ab = b;
+            alDeleteBuffers(1, &ab);
+        }
+        mCueFreeBuffers.clear();
+        alDeleteSources(1, &src);
+        mCueSource = 0;
+        mCueStarted = false;
+    }
+    alcMakeContextCurrent(viewer_ctx == (ALCcontext*)mCueContext ? NULL : viewer_ctx);
+    alcDestroyContext((ALCcontext*)mCueContext);
+    alcCloseDevice((ALCdevice*)mCueDevice);
+    mCueContext = nullptr;
+    mCueDevice = nullptr;
 #endif
 }

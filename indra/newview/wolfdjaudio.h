@@ -221,6 +221,13 @@ private:
     // Cue ring (mixer thread -> main thread).
     std::mutex mCueMutex;
     std::deque<int16_t> mCueRing;
+    // The DJ's own OpenAL device and context: the viewer's listener gain is 0 whenever it mutes
+    // (MuteAudio, or MuteWhenMinimized when its window loses focus - llvieweraudio.cpp
+    // audio_update_volume -> LLAudioEngine::setMuted -> LLAudioEngine_OpenAL::setInternalGain),
+    // and the DJ must hear the playlist and the cue while working in other programs.
+    void* mCueDevice = nullptr;                 // ALCdevice*
+    void* mCueContext = nullptr;                // ALCcontext*
+    void closeCueOutput();
     unsigned mCueSource = 0;                    // OpenAL source, 0 = none
     std::vector<unsigned> mCueFreeBuffers;
     bool mCueStarted = false;

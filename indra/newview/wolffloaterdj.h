@@ -89,6 +89,7 @@ private:
     F32 mNextListeners = 0.f;
     S32 mListeners = -1;
     bool mListenersBusy = false;
+    int mShownTrack = -1;       // the playlist track whose title the Now playing fields show
 };
 
 // LLAppViewer::requestQuit: go off air and put the land's music back while still connected.

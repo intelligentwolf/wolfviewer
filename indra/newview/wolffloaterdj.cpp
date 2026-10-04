@@ -139,7 +139,7 @@ bool WolfFloaterDJ::postBuild()
     mMaster.mFader->setCommitCallback([this](LLUICtrl* c, const LLSD&) { WolfDJMixer::instance().mMasterFader = (F32)c->getValue().asReal(); saveLevels(); });
     mMaster.mCue->setCommitCallback([this](LLUICtrl*, const LLSD&) { onCue(CUE_MASTER); });
 
-    getChild<LLCheckBoxCtrl>("talk_over")->setCommitCallback([this](LLUICtrl* c, const LLSD&)
+    getChild<LLCheckBoxCtrl>("talk_over")->setCommitCallback([](LLUICtrl* c, const LLSD&)
     {
         WolfDJMixer::instance().mTalkOver = c->getValue().asBoolean();
         gSavedSettings.setBOOL("WolfDJTalkOver", c->getValue().asBoolean());

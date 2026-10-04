@@ -919,6 +919,10 @@ set(viewer_SOURCE_FILES
     wolfobjectprops.cpp
     wolffloatermeshupload.cpp
     wolffloaterlagdetector.cpp
+    wolfdjaudio.cpp
+    wolfdjplayer.cpp
+    wolffloaterdj.cpp
+    wolffloaterdjplaylist.cpp
     wolffloaterphotoeffects.cpp
     wolfmeshupload.cpp
     wolfscreenshare.cpp
@@ -1813,6 +1817,11 @@ set(viewer_HEADER_FILES
     wolfobjectprops.h
     wolffloatermeshupload.h
     wolffloaterlagdetector.h
+    wolfdjaudio.h
+    wolfdjcapture.h
+    wolfdjplayer.h
+    wolffloaterdj.h
+    wolffloaterdjplaylist.h
     wolffloaterphotoeffects.h
     wolfmeshupload.h
     wolfscreenshare.h
@@ -1938,6 +1947,14 @@ if (DARWIN)
     SKIP_PRECOMPILE_HEADERS TRUE
   )
 
+  # [WOLF DJ 2026-10-04] mic (AudioQueue) + other programs' sound (ScreenCaptureKit, macOS 13+).
+  LIST(APPEND viewer_SOURCE_FILES wolfdjcapture_mac.mm)
+  set_source_files_properties(
+    wolfdjcapture_mac.mm
+    PROPERTIES
+    SKIP_PRECOMPILE_HEADERS TRUE
+  )
+
   # This should be compiled with the viewer.
   LIST(APPEND viewer_SOURCE_FILES llappdelegate-objc.mm)
   set_source_files_properties(
@@ -1985,6 +2002,7 @@ endif (DARWIN)
 
 if (LINUX)
     LIST(APPEND viewer_SOURCE_FILES llappviewerlinux.cpp)
+    LIST(APPEND viewer_SOURCE_FILES wolfdjcapture_linux.cpp)   # [WOLF DJ 2026-10-04/]
     set_source_files_properties(
       llappviewerlinux.cpp
       PROPERTIES
@@ -2048,6 +2066,7 @@ if (WINDOWS)
          growlmanager.cpp
          growlnotifierwin.cpp
          llappviewerwin32.cpp
+         wolfdjcapture_win.cpp
          llvelopack.cpp
          llwindebug.cpp
          )
@@ -2674,6 +2693,15 @@ endif (WINDOWS)
 # variables, PNG_PRELOAD_ARCHIVES and ZLIBNG_PRELOAD_ARCHIVES, get the archives
 # dumped into the target binary and runtime lookup will find the most
 # modern version.
+
+# [WOLF DJ 2026-10-04] wolfdjcapture_win.cpp: ActivateAudioInterfaceAsync is in mmdevapi.
+# wolfdjcapture_mac.mm: ScreenCaptureKit is weak-linked (absent before macOS 12.3; used from 13).
+if (WINDOWS)
+  target_link_libraries(${VIEWER_BINARY_NAME} mmdevapi)
+endif ()
+if (DARWIN)
+  target_link_libraries(${VIEWER_BINARY_NAME} "-weak_framework ScreenCaptureKit" "-framework CoreMedia")
+endif ()
 
 target_link_libraries(${VIEWER_BINARY_NAME}
         llaudio

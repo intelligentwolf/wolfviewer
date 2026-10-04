@@ -155,14 +155,27 @@ int32_t LLWebRTCAudioTransport::NeedMorePlayData(size_t   number_of_frames,
     }
 
     // Only the engine should fill the buffer.
-    return engine->NeedMorePlayData(number_of_frames,
-                                    bytes_per_frame,
-                                    number_of_channels,
-                                    samples_per_sec,
-                                    audio_data,
-                                    number_of_samples_out,
-                                    elapsed_time_ms,
-                                    ntp_time_ms);
+    int32_t ret = engine->NeedMorePlayData(number_of_frames,
+                                           bytes_per_frame,
+                                           number_of_channels,
+                                           samples_per_sec,
+                                           audio_data,
+                                           number_of_samples_out,
+                                           elapsed_time_ms,
+                                           ntp_time_ms);
+
+    // <WolfViewer 2026-10-04> WOLF DJ talk-show mode: hand a copy of what will be played (the
+    // mixed far-end voices) to the tap. 16-bit PCM: bytes_per_frame is 2 x channels here, the
+    // only layout the ADM's AudioDeviceBuffer uses (kBytesPerSample checks below are defensive).
+    if (LLWebRTCPlayoutTap* tap = mPlayoutTap.load(std::memory_order_acquire))
+    {
+        if (ret == 0 && number_of_channels > 0 && bytes_per_frame == 2 * number_of_channels)
+        {
+            tap->onPlayoutAudio(static_cast<const int16_t*>(audio_data), number_of_frames, number_of_channels, samples_per_sec);
+        }
+    }
+    // </WolfViewer>
+    return ret;
 }
 
 void LLWebRTCAudioTransport::PullRenderData(int      bits_per_sample,
@@ -838,6 +851,16 @@ float LLWebRTCImpl::getPeerConnectionAudioLevel()
                        : (mPeerCustomProcessor ? -20 * log10f(mPeerCustomProcessor->getMicrophoneEnergy())
                                                : std::numeric_limits<float>::infinity());
 }
+
+// <WolfViewer 2026-10-04> WOLF DJ: see LLWebRTCPlayoutTap.
+void LLWebRTCImpl::setPlayoutTap(LLWebRTCPlayoutTap* tap)
+{
+    if (mDeviceModule)
+    {
+        mDeviceModule->SetPlayoutTap(tap);
+    }
+}
+// </WolfViewer>
 
 void LLWebRTCImpl::setMicGain(float gain)
 {

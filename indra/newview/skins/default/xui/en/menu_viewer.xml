@@ -1229,6 +1229,15 @@
              function="Floater.Show"
              parameter="wolf_lag_detector" />
         </menu_item_call>
+        <!-- [WOLF DJ 2026-10-04] wolffloaterdj.cpp: a mini mixer (in-world voice, mic, programs,
+             the Wolf DJ playlist) to the region owner's own radio stream. -->
+        <menu_item_call
+         label="Wolf DJ / Talk Show..."
+         name="WolfDJ">
+            <menu_item_call.on_click
+             function="Floater.Show"
+             parameter="wolf_dj" />
+        </menu_item_call>
         <!-- [ASTRONOMY 2026-10-03] Paul: "show atronomy, where it would show and label the star groups
              like orion". Constellation figures and names over the real star map (llvowlsky.cpp), on
              regions following a real place (Jimmy's Weather). -->

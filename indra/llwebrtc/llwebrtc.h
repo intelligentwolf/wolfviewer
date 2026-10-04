@@ -38,6 +38,7 @@
 #ifndef LLWEBRTC_H
 #define LLWEBRTC_H
 
+#include <cstdint>   // <WolfViewer 2026-10-04/> LLWebRTCPlayoutTap
 #include <string>
 #include <vector>
 // <FS:minerjr> [FIRE-36022] - Removing my USB headset crashes entire viewer
@@ -124,6 +125,18 @@ class LLWebRTCDevicesObserver
 };
 
 
+// <WolfViewer 2026-10-04> WOLF DJ talk-show mode (newview wolfdjaudio.cpp): a copy of the mixed
+// voice audio the viewer is about to play - everyone you hear in voice - so it can go out on the
+// DJ's radio stream. Called on the audio device's playout thread for every buffer the device asks
+// for, after the voice engine has filled it; the implementation must only copy the samples and
+// return (no locks held long, no blocking).
+class LLWebRTCPlayoutTap
+{
+  public:
+    virtual void onPlayoutAudio(const int16_t* samples, size_t frames, size_t channels, uint32_t sample_rate) = 0;
+};
+// </WolfViewer>
+
 // The LLWebRTCDeviceInterface provides a way for the viewer
 // to enumerate, set, and get notifications of changes
 // for both capture (microphone) and render (speaker)
@@ -173,6 +186,10 @@ class LLWebRTCDeviceInterface
     virtual void setTuningMicGain(float gain)        = 0;
 
     virtual void setMute(bool mute, int delay_ms = 0) = 0;
+
+    // <WolfViewer 2026-10-04/> WOLF DJ: nullptr removes it. The tap must outlive the voice engine
+    // or be removed first.
+    virtual void setPlayoutTap(LLWebRTCPlayoutTap* tap) = 0;
 };
 
 // LLWebRTCAudioInterface provides the viewer with a way

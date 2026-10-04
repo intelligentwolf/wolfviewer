@@ -1,5 +1,27 @@
 <llsd>
     <map>
+    <key>WolfDJStreamURL</key>
+    <map>
+      <key>Comment</key>
+      <string>Wolf DJ: this account's radio stream address (My Radio Stream).</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>String</string>
+      <key>Value</key>
+      <string />
+    </map>
+    <key>WolfDJStationName</key>
+    <map>
+      <key>Comment</key>
+      <string>Wolf DJ: the show name sent to the stream server.</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>String</string>
+      <key>Value</key>
+      <string />
+    </map>
     <key>AvatarHoverOffsetZ</key>
     <map>
       <key>Comment</key>

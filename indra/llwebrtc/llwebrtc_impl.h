@@ -163,6 +163,7 @@ public:
 
     float GetMicrophoneEnergy() { return mMicrophoneEnergy.load(std::memory_order_relaxed); }
     void  SetGain(float gain) { mGain.store(gain, std::memory_order_relaxed); }
+    void  SetPlayoutTap(LLWebRTCPlayoutTap* tap) { mPlayoutTap.store(tap, std::memory_order_release); }   // <WolfViewer 2026-10-04/> WOLF DJ
 
 private:
     std::atomic<webrtc::AudioTransport*> engine_{ nullptr };
@@ -170,6 +171,7 @@ private:
     float                                mSumVector[NUM_PACKETS_TO_FILTER];
     std::atomic<float>                   mMicrophoneEnergy;
     std::atomic<float>                   mGain{ 0.0f };
+    std::atomic<LLWebRTCPlayoutTap*>     mPlayoutTap{ nullptr };   // <WolfViewer 2026-10-04/> WOLF DJ
 
 };
 
@@ -324,6 +326,7 @@ public:
     // tuning microphone energy calculations
     float GetMicrophoneEnergy() { return audio_transport_.GetMicrophoneEnergy(); }
     void SetTuningMicGain(float gain) { audio_transport_.SetGain(gain); }
+    void SetPlayoutTap(LLWebRTCPlayoutTap* tap) { audio_transport_.SetPlayoutTap(tap); }   // <WolfViewer 2026-10-04/> WOLF DJ
     void  SetTuning(bool tuning, bool mute)
     {
         tuning_ = tuning;
@@ -454,6 +457,7 @@ class LLWebRTCImpl : public LLWebRTCDeviceInterface, public webrtc::AudioDeviceO
     void setTuningMicGain(float gain) override;
 
     void setMute(bool mute, int delay_ms = 20) override;
+    void setPlayoutTap(LLWebRTCPlayoutTap* tap) override;   // <WolfViewer 2026-10-04/> WOLF DJ
 
     void intSetMute(bool mute, int delay_ms = 20);
 

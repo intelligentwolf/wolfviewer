@@ -74,6 +74,9 @@
 #include "fswolfwater.h" // <FS:WolfViewer> wolfwater prim surfaces
 #include "wolfterrainpaint.h"
 #include "wolfupdate.h"         // <WolfViewer 2026-10-02/> WolfUpdate::shutdown
+#include "wolfdjaudio.h"        // [WOLF DJ 2026-10-04/] WolfDJMixer::shutdown
+#include "wolffloaterdj.h"      // [WOLF DJ 2026-10-04/] wolfdj_on_app_quit
+#include "wolfdjplayer.h"       // [WOLF DJ 2026-10-04/] WolfDJPlayer::shutdown
 #include "wolfai.h"   // [AI CREDITS 2026-09-11] availability + balance   // [TERRAIN PAINT 2026-09-10]
 #include "wolfnaturalwater.h" // <WolfViewer> streams and pools from the heightmap
 #include "wolfwaterfield.h" // <WolfViewer> water depth / exposure fields for the water shader
@@ -2018,6 +2021,11 @@ bool LLAppViewer::cleanup()
 
     // <WolfViewer 2026-10-02/> stop and join an update download before the HTTP stack goes away
     WolfUpdate::shutdown();
+
+    // [WOLF DJ 2026-10-04/] capture streams, the voice tap and the mixer/sender threads, before
+    // the voice engine and the audio engine go away
+    WolfDJMixer::instance().shutdown();
+    WolfDJPlayer::instance().shutdown();
 
     //ditch LLVOAvatarSelf instance
     gAgentAvatarp = NULL;
@@ -4979,6 +4987,8 @@ void LLAppViewer::fastQuit(S32 error_code)
 void LLAppViewer::requestQuit()
 {
     LL_INFOS() << "requestQuit" << LL_ENDL;
+
+    wolfdj_on_app_quit();   // [WOLF DJ 2026-10-04/] off air, land music put back, while the region can still hear us
 
     LLViewerRegion* region = gAgent.getRegion();
 

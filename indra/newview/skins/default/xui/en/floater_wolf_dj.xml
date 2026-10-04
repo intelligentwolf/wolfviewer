@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLF DJ 2026-10-04] World > Wolf DJ / Talk Show... (wolffloaterdj.cpp, engine wolfdjaudio.cpp).
+     A mini mixer that sends in-world voice, the microphone and music from other programs (or the
+     Wolf DJ playlist) to the region owner's own radio stream on cast.wolfterritories.org. Paul:
+     "talk show mode so that we can pick up voice in world and transmit it on to the stream",
+     "faders as well with eq levels", "level indicator leds", "a button to just listen to one
+     channel through the output". -->
+<floater
+ can_close="true"
+ can_minimize="true"
+ can_resize="false"
+ height="534"
+ layout="topleft"
+ name="wolf_dj"
+ help_topic="wolf_dj"
+ save_rect="true"
+ single_instance="true"
+ title="Wolf DJ / Talk Show"
+ width="584">
+    <text follows="left|top" height="16" layout="topleft" left="10" name="url_label" top="24" width="96">Stream address</text>
+    <line_editor follows="left|top" height="20" layout="topleft" left="108" max_length_bytes="255" name="stream_url" top="22" width="300"
+     tool_tip="Your stream from My Radio Stream on wolf-grid.com, e.g. http://cast.wolfterritories.org:8000/radio/your-name. Every region owner gets one free." />
+    <button follows="left|top" height="20" label="My Radio Stream..." layout="topleft" left="412" name="get_stream" top="22" width="120"
+     tool_tip="Open My Radio Stream on wolf-grid.com: make your stream, see its address and password." />
+    <button follows="left|top" height="20" label="Copy" layout="topleft" left="536" name="copy_url" top="22" width="44"
+     tool_tip="Copy your stream address, to give a region owner for their land's music." />
+    <text follows="left|top" height="16" layout="topleft" left="10" name="pw_label" top="50" width="96">Password</text>
+    <line_editor follows="left|top" height="20" is_password="true" layout="topleft" left="108" max_length_bytes="128" name="stream_password" top="48" width="150"
+     tool_tip="Your stream password (shown once on My Radio Stream). Kept in the viewer's encrypted store." />
+    <text follows="left|top" height="16" layout="topleft" left="266" name="station_label" top="50" width="70">Show name</text>
+    <line_editor follows="left|top" height="20" layout="topleft" left="338" max_length_bytes="120" name="station_name" top="48" width="242" />
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="10" name="title_voice" top="78" width="106">Voice (in-world)</text>
+    <text follows="left|top" height="20" layout="topleft" left="10" name="voice_note" top="96" width="104" wrap="true" text_color="LtGray_50">Voice: what you hear in voice chat</text>
+    <slider can_edit_text="false" decimal_digits="0" follows="left|top" height="15" increment="1" initial_value="0"
+     label="H" label_width="12" layout="topleft" left="10" max_val="12" min_val="-24" name="eq_high_voice"
+     show_text="false" tool_tip="Treble (-24 to +12 dB). Double-click the knob to reset." top="122" width="100" />
+    <slider can_edit_text="false" decimal_digits="0" follows="left|top" height="15" increment="1" initial_value="0"
+     label="M" label_width="12" layout="topleft" left="10" max_val="12" min_val="-24" name="eq_mid_voice"
+     show_text="false" tool_tip="Mid (-24 to +12 dB). Double-click the knob to reset." top="141" width="100" />
+    <slider can_edit_text="false" decimal_digits="0" follows="left|top" height="15" increment="1" initial_value="0"
+     label="L" label_width="12" layout="topleft" left="10" max_val="12" min_val="-24" name="eq_low_voice"
+     show_text="false" tool_tip="Bass (-24 to +12 dB). Double-click the knob to reset." top="160" width="100" />
+    <slider can_edit_text="false" decimal_digits="2" follows="left|top" height="150" increment="0.01" initial_value="0.75"
+     layout="topleft" left="28" max_val="1" min_val="0" name="fader_voice" orientation="vertical" show_text="false"
+     tool_tip="Fader: how loud this goes out on the stream." top="182" width="22" />
+    <panel follows="left|top" height="150" layout="topleft" left="60" name="meter_voice" top="182" width="14" mouse_opaque="false" tool_tip="Level: green is fine, amber is loud, red is too hot. The top LED lights when it clips." />
+    <text follows="left|top" halign="center" height="14" layout="topleft" left="10" name="db_voice" top="336" width="100">0 dB</text>
+    <button follows="left|top" height="20" is_toggle="true" label="Mute" layout="topleft" left="10" name="mute_voice" top="354" width="50" tool_tip="Take this channel off the stream." />
+    <button follows="left|top" height="20" is_toggle="true" label="Cue" layout="topleft" left="62" name="cue_voice" top="354" width="50" tool_tip="Listen to just this channel yourself (before its fader). Click again to stop." />
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="124" name="title_mic" top="78" width="106">Microphone</text>
+    <text follows="left|top" height="20" layout="topleft" left="124" name="mic_note" top="96" width="104" text_color="LtGray_50">Your default mic</text>
+    <slider can_edit_text="false" decimal_digits="0" follows="left|top" height="15" increment="1" initial_value="0"
+     label="H" label_width="12" layout="topleft" left="124" max_val="12" min_val="-24" name="eq_high_mic"
+     show_text="false" tool_tip="Treble (-24 to +12 dB). Double-click the knob to reset." top="122" width="100" />
+    <slider can_edit_text="false" decimal_digits="0" follows="left|top" height="15" increment="1" initial_value="0"
+     label="M" label_width="12" layout="topleft" left="124" max_val="12" min_val="-24" name="eq_mid_mic"
+     show_text="false" tool_tip="Mid (-24 to +12 dB). Double-click the knob to reset." top="141" width="100" />
+    <slider can_edit_text="false" decimal_digits="0" follows="left|top" height="15" increment="1" initial_value="0"
+     label="L" label_width="12" layout="topleft" left="124" max_val="12" min_val="-24" name="eq_low_mic"
+     show_text="false" tool_tip="Bass (-24 to +12 dB). Double-click the knob to reset." top="160" width="100" />
+    <slider can_edit_text="false" decimal_digits="2" follows="left|top" height="150" increment="0.01" initial_value="0.75"
+     layout="topleft" left="142" max_val="1" min_val="0" name="fader_mic" orientation="vertical" show_text="false"
+     tool_tip="Fader: how loud this goes out on the stream." top="182" width="22" />
+    <panel follows="left|top" height="150" layout="topleft" left="174" name="meter_mic" top="182" width="14" mouse_opaque="false" tool_tip="Level: green is fine, amber is loud, red is too hot. The top LED lights when it clips." />
+    <text follows="left|top" halign="center" height="14" layout="topleft" left="124" name="db_mic" top="336" width="100">0 dB</text>
+    <button follows="left|top" height="20" is_toggle="true" label="Mute" layout="topleft" left="124" name="mute_mic" top="354" width="50" tool_tip="Take this channel off the stream." />
+    <button follows="left|top" height="20" is_toggle="true" label="Cue" layout="topleft" left="176" name="cue_mic" top="354" width="50" tool_tip="Listen to just this channel yourself (before its fader). Click again to stop." />
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="238" name="title_music_a" top="78" width="106">Music 1</text>
+    <combo_box follows="left|top" height="20" layout="topleft" left="238" name="source_music_a" top="96" width="104" tool_tip="What plays on this channel: a program, everything you hear, or your Wolf DJ playlist." />
+    <slider can_edit_text="false" decimal_digits="0" follows="left|top" height="15" increment="1" initial_value="0"
+     label="H" label_width="12" layout="topleft" left="238" max_val="12" min_val="-24" name="eq_high_music_a"
+     show_text="false" tool_tip="Treble (-24 to +12 dB). Double-click the knob to reset." top="122" width="100" />
+    <slider can_edit_text="false" decimal_digits="0" follows="left|top" height="15" increment="1" initial_value="0"
+     label="M" label_width="12" layout="topleft" left="238" max_val="12" min_val="-24" name="eq_mid_music_a"
+     show_text="false" tool_tip="Mid (-24 to +12 dB). Double-click the knob to reset." top="141" width="100" />
+    <slider can_edit_text="false" decimal_digits="0" follows="left|top" height="15" increment="1" initial_value="0"
+     label="L" label_width="12" layout="topleft" left="238" max_val="12" min_val="-24" name="eq_low_music_a"
+     show_text="false" tool_tip="Bass (-24 to +12 dB). Double-click the knob to reset." top="160" width="100" />
+    <slider can_edit_text="false" decimal_digits="2" follows="left|top" height="150" increment="0.01" initial_value="0.75"
+     layout="topleft" left="256" max_val="1" min_val="0" name="fader_music_a" orientation="vertical" show_text="false"
+     tool_tip="Fader: how loud this goes out on the stream." top="182" width="22" />
+    <panel follows="left|top" height="150" layout="topleft" left="288" name="meter_music_a" top="182" width="14" mouse_opaque="false" tool_tip="Level: green is fine, amber is loud, red is too hot. The top LED lights when it clips." />
+    <text follows="left|top" halign="center" height="14" layout="topleft" left="238" name="db_music_a" top="336" width="100">0 dB</text>
+    <button follows="left|top" height="20" is_toggle="true" label="Mute" layout="topleft" left="238" name="mute_music_a" top="354" width="50" tool_tip="Take this channel off the stream." />
+    <button follows="left|top" height="20" is_toggle="true" label="Cue" layout="topleft" left="290" name="cue_music_a" top="354" width="50" tool_tip="Listen to just this channel yourself (before its fader). Click again to stop." />
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="352" name="title_music_b" top="78" width="106">Music 2</text>
+    <combo_box follows="left|top" height="20" layout="topleft" left="352" name="source_music_b" top="96" width="104" tool_tip="What plays on this channel: a program, everything you hear, or your Wolf DJ playlist." />
+    <slider can_edit_text="false" decimal_digits="0" follows="left|top" height="15" increment="1" initial_value="0"
+     label="H" label_width="12" layout="topleft" left="352" max_val="12" min_val="-24" name="eq_high_music_b"
+     show_text="false" tool_tip="Treble (-24 to +12 dB). Double-click the knob to reset." top="122" width="100" />
+    <slider can_edit_text="false" decimal_digits="0" follows="left|top" height="15" increment="1" initial_value="0"
+     label="M" label_width="12" layout="topleft" left="352" max_val="12" min_val="-24" name="eq_mid_music_b"
+     show_text="false" tool_tip="Mid (-24 to +12 dB). Double-click the knob to reset." top="141" width="100" />
+    <slider can_edit_text="false" decimal_digits="0" follows="left|top" height="15" increment="1" initial_value="0"
+     label="L" label_width="12" layout="topleft" left="352" max_val="12" min_val="-24" name="eq_low_music_b"
+     show_text="false" tool_tip="Bass (-24 to +12 dB). Double-click the knob to reset." top="160" width="100" />
+    <slider can_edit_text="false" decimal_digits="2" follows="left|top" height="150" increment="0.01" initial_value="0.75"
+     layout="topleft" left="370" max_val="1" min_val="0" name="fader_music_b" orientation="vertical" show_text="false"
+     tool_tip="Fader: how loud this goes out on the stream." top="182" width="22" />
+    <panel follows="left|top" height="150" layout="topleft" left="402" name="meter_music_b" top="182" width="14" mouse_opaque="false" tool_tip="Level: green is fine, amber is loud, red is too hot. The top LED lights when it clips." />
+    <text follows="left|top" halign="center" height="14" layout="topleft" left="352" name="db_music_b" top="336" width="100">0 dB</text>
+    <button follows="left|top" height="20" is_toggle="true" label="Mute" layout="topleft" left="352" name="mute_music_b" top="354" width="50" tool_tip="Take this channel off the stream." />
+    <button follows="left|top" height="20" is_toggle="true" label="Cue" layout="topleft" left="404" name="cue_music_b" top="354" width="50" tool_tip="Listen to just this channel yourself (before its fader). Click again to stop." />
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="466" name="title_master" top="78" width="106">Master</text>
+    <slider can_edit_text="false" decimal_digits="2" follows="left|top" height="150" increment="0.01" initial_value="0.75"
+     layout="topleft" left="484" max_val="1" min_val="0" name="fader_master" orientation="vertical" show_text="false"
+     tool_tip="Fader: how loud this goes out on the stream." top="182" width="22" />
+    <panel follows="left|top" height="150" layout="topleft" left="516" name="meter_master" top="182" width="14" mouse_opaque="false" tool_tip="Level: green is fine, amber is loud, red is too hot. The top LED lights when it clips." />
+    <text follows="left|top" halign="center" height="14" layout="topleft" left="466" name="db_master" top="336" width="100">0 dB</text>
+    <button follows="left|top" height="20" is_toggle="true" label="Cue" layout="topleft" left="466" name="cue_master" top="354" width="50" tool_tip="Listen to just this channel yourself (before its fader). Click again to stop." />
+    <check_box follows="left|top" height="16" label="Talk-over (my mic dips the music)" layout="topleft" left="10" name="talk_over" top="384" width="230" />
+    <check_box follows="left|top" height="16" label="Play on my land when I go live" layout="topleft" left="250" name="play_on_land" top="384" width="230"
+     tool_tip="On your own region: sets this parcel's music to your stream while you are live, and puts the old music back after." />
+    <button follows="left|top" height="20" label="Refresh" layout="topleft" left="492" name="refresh_sources" top="382" width="88" tool_tip="Look again for programs playing sound." />
+    <text follows="left|top" height="16" layout="topleft" left="10" name="sources_note" top="404" width="570" text_color="LtGray_50" />
+    <text follows="left|top" height="16" layout="topleft" left="10" name="np_label" top="426" width="80">Now playing</text>
+    <line_editor follows="left|top" height="20" label="Artist" layout="topleft" left="92" max_length_bytes="120" name="now_artist" top="424" width="170" />
+    <line_editor follows="left|top" height="20" label="Title" layout="topleft" left="266" max_length_bytes="160" name="now_title" top="424" width="220" />
+    <button follows="left|top" height="20" label="Send title" layout="topleft" left="492" name="send_title" top="424" width="88" tool_tip="Show this to listeners as the song playing now." />
+    <button follows="left|top" height="28" is_toggle="true" label="Go Live" layout="topleft" left="10" name="go_live" top="454" width="110" font="SansSerifBold" />
+    <button follows="left|top" height="28" label="Playlist..." layout="topleft" left="126" name="open_playlist" top="454" width="90" tool_tip="Open the Wolf DJ playlist: pick songs from your computer and play them on a music channel." />
+    <text follows="left|top" font="SansSerifBold" height="18" layout="topleft" left="224" name="status_text" top="456" width="356" wrap="true">Off air.</text>
+    <text follows="left|top" height="32" layout="topleft" left="10" name="land_note" top="488" width="570" wrap="true" text_color="LtGray_50" />
+</floater>

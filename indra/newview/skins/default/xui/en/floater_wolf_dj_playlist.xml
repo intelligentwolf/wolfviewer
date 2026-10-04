@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLF DJ 2026-10-04] Wolf DJ playlist (wolffloaterdjplaylist.cpp, player wolfdjplayer.cpp).
+     Paul: "audio playlists ... on the left the files and folders and then on the right the files
+     ... it could open as another floater i'm concerned about screen space". Opened from the mixer's
+     Playlist... button; plays on whichever music channel has "Wolf DJ playlist" as its source. -->
+<floater
+ can_close="true"
+ can_minimize="true"
+ can_resize="true"
+ height="430"
+ layout="topleft"
+ min_height="330"
+ min_width="560"
+ name="wolf_dj_playlist"
+ help_topic="wolf_dj_playlist"
+ save_rect="true"
+ single_instance="true"
+ title="Wolf DJ Playlist"
+ width="660">
+    <!-- Left: folders and audio files on this computer -->
+    <button follows="left|top" height="20" label="Music" layout="topleft" left="10" name="music_dir" top="24" width="60" tool_tip="Your Music folder." />
+    <button follows="left|top" height="20" label="Home" layout="topleft" left="74" name="home_dir" top="24" width="60" tool_tip="Your home folder." />
+    <button follows="left|top" height="20" label="Up" layout="topleft" left="138" name="up_dir" top="24" width="50" tool_tip="The folder above this one." />
+    <text follows="left|top" height="16" layout="topleft" left="10" name="path_text" top="50" width="300" text_color="LtGray_50" use_ellipses="true" />
+    <scroll_list
+     draw_heading="false"
+     follows="left|top|bottom"
+     height="270"
+     layout="topleft"
+     left="10"
+     multi_select="true"
+     name="browser"
+     top="68"
+     tool_tip="Double-click a folder to open it, or a song to add it to the playlist."
+     width="300">
+        <scroll_list.columns label="Name" name="name" dynamicwidth="true" />
+    </scroll_list>
+    <button follows="left|bottom" height="20" label="Add" layout="topleft" left="10" name="add_files" top="344" width="90" tool_tip="Add the selected songs to the playlist." />
+    <button follows="left|bottom" height="20" label="Add folder" layout="topleft" left="104" name="add_folder" top="344" width="100" tool_tip="Add every song in this folder to the playlist." />
+
+    <!-- Right: the playlist and the transport -->
+    <button follows="left|top" height="24" label="|&lt;" layout="topleft" left="324" name="prev" top="22" width="40" tool_tip="Previous song (or back to the start of this one)." />
+    <button follows="left|top" height="24" label="Play" layout="topleft" left="368" name="play" top="22" width="64" tool_tip="Play / pause." />
+    <button follows="left|top" height="24" label="&gt;|" layout="topleft" left="436" name="next" top="22" width="40" tool_tip="Next song." />
+    <button follows="left|top" height="24" label="Stop" layout="topleft" left="480" name="stop" top="22" width="54" />
+    <text follows="left|top|right" font="SansSerifBold" height="16" layout="topleft" left="324" name="now_playing" top="52" width="326" use_ellipses="true">Nothing playing</text>
+    <text follows="left|top|right" height="16" layout="topleft" left="324" name="time_text" top="68" width="326" text_color="LtGray_50" />
+    <scroll_list
+     draw_heading="false"
+     follows="all"
+     height="252"
+     layout="topleft"
+     left="324"
+     multi_select="true"
+     name="playlist"
+     top="86"
+     tool_tip="Double-click a song to play it."
+     width="326">
+        <scroll_list.columns label="" name="mark" width="22" />
+        <scroll_list.columns label="Song" name="name" dynamicwidth="true" />
+    </scroll_list>
+    <button follows="left|bottom" height="20" label="Up" layout="topleft" left="324" name="move_up" top="344" width="50" tool_tip="Move the selected song up." />
+    <button follows="left|bottom" height="20" label="Down" layout="topleft" left="378" name="move_down" top="344" width="54" tool_tip="Move the selected song down." />
+    <button follows="left|bottom" height="20" label="Remove" layout="topleft" left="436" name="remove" top="344" width="70" />
+    <button follows="left|bottom" height="20" label="Clear" layout="topleft" left="510" name="clear" top="344" width="60" />
+    <check_box follows="left|bottom" height="16" label="Send each song's title to the stream" layout="topleft" left="324" name="send_titles" top="372" width="320" />
+    <text follows="left|bottom|right" height="40" layout="topleft" left="10" name="playlist_note" top="372" width="300" wrap="true" text_color="LtGray_50">To hear it on air, pick "Wolf DJ playlist" as the source of Music 1 or Music 2 in the mixer.</text>
+    <text follows="left|bottom|right" height="16" layout="topleft" left="324" name="error_text" top="394" width="326" text_color="Red" use_ellipses="true" />
+</floater>

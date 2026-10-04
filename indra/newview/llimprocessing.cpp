@@ -1270,9 +1270,14 @@ void LLIMProcessing::processNewMessage(LLUUID from_id,
 
         case IM_MESSAGEBOX:
         {
-            // This is a block, modeless dialog.
-            args["MESSAGE"] = message;
-            LLNotificationsUtil::add("SystemMessageTip", args);
+            // <WolfViewer 2026-10-04> Into nearby chat, not a pop-up. The money module (Gloebit,
+            // addon-modules/Gloebit GloebitMoneyModule.cs SendNewSessionMessaging ->
+            // sendMessageToClient, InstantMessageDialog.MessageBox) sends its "Welcome ... This
+            // area is using the Gloebit Money Module" box on EVERY region arrival, and its
+            // delivery and payment notices the same way. Paul: "no more gloebit or wt$ popups
+            // please people hate it - just something in chat".
+            FSCommon::report_to_nearby_chat(message);
+            // </WolfViewer>
         }
         break;
         case IM_GROUP_NOTICE:
@@ -2272,7 +2277,6 @@ void LLIMProcessing::processNewMessage(LLUUID from_id,
 
         case IM_GOTO_URL:
         {
-            LLSD args;
             // n.b. this is for URLs sent by the system, not for
             // URLs sent by scripts (i.e. llLoadURL)
             if (binary_bucket_size <= 0)
@@ -2286,11 +2290,11 @@ void LLIMProcessing::processNewMessage(LLUUID from_id,
             std::string url;
 
             url.assign((char*)binary_bucket, binary_bucket_size - 1);
-            args["MESSAGE"] = message;
-            args["URL"] = url;
-            LLSD payload;
-            payload["url"] = url;
-            LLNotificationsUtil::add("GotoURL", args, payload);
+            // <WolfViewer 2026-10-04> Into nearby chat with the link (chat makes it clickable),
+            // not a pop-up: Gloebit's SendUrlToClient (InstantMessageDialog.GotoUrl) is its
+            // link-your-account / buy-gloebits box on arrival — see IM_MESSAGEBOX above.
+            FSCommon::report_to_nearby_chat(message + "\n" + url);
+            // </WolfViewer>
         }
         break;
 

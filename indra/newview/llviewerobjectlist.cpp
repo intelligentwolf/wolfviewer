@@ -1126,6 +1126,69 @@ void LLViewerObjectList::update(LLAgent &agent)
 
     sample(LLStatViewer::NUM_OBJECTS, mObjects.size());
     sample(LLStatViewer::NUM_ACTIVE_OBJECTS, idle_count);
+
+    wolfWatchCrossing(agent);
+}
+
+// <WolfViewer 2026-10-05> CROSSING MONITOR. Paul: "stop the jerkiness its horrible" - a jerk at
+// every region hand-off, even a standing one. For 10 s after the agent's region changes, log every
+// slow frame (a stall) and every frame where the own avatar or the camera moved further than the
+// avatar's speed explains (a snap), so a crossing's log says which it was and when. Silent otherwise.
+void LLViewerObjectList::wolfWatchCrossing(LLAgent& agent)
+{
+    static U64 last_handle = 0;
+    static F64 changed_at = -100.0;
+    static bool have_last = false;
+    static LLVector3d last_av, last_cam;
+    static F32 last_speed = 0.f;
+
+    const F64 now = LLFrameTimer::getElapsedSeconds();
+    LLViewerRegion* regionp = agent.getRegion();
+    const U64 handle = regionp ? regionp->getHandle() : 0;
+    if (handle != last_handle)
+    {
+        if (last_handle != 0 && regionp)
+        {
+            changed_at = now;
+            LL_INFOS("WolfCrossing") << "now in " << regionp->getName() << LL_ENDL;
+        }
+        last_handle = handle;
+    }
+    const F64 since = now - changed_at;
+    if (since > 10.0 || !isAgentAvatarValid())
+    {
+        have_last = false;
+        return;
+    }
+
+    const F32 dt = gFrameIntervalSeconds.value();
+    const LLVector3d av = gAgentAvatarp->getPositionGlobal();
+    const LLVector3d cam = gAgentCamera.getCameraPositionGlobal();
+    const F32 speed = gAgentAvatarp->getVelocity().length();
+    if (dt > 0.045f)
+    {
+        LL_INFOS("WolfCrossing") << llformat("slow frame %.0f ms at %+.2f s", dt * 1000.f, since) << LL_ENDL;
+    }
+    if (have_last)
+    {
+        const F32 explained = llmax(speed, last_speed) * dt * 1.5f;
+        const F32 av_move = (F32)(av - last_av).length();
+        const F32 cam_move = (F32)(cam - last_cam).length();
+        if (av_move > explained + 0.25f)
+        {
+            LL_INFOS("WolfCrossing") << llformat("avatar jumped %.2f m at %+.2f s (speed %.1f m/s, frame %.0f ms)",
+                av_move, since, speed, dt * 1000.f) << LL_ENDL;
+        }
+        if (cam_move > explained + 0.5f)
+        {
+            LL_INFOS("WolfCrossing") << llformat("camera jumped %.2f m at %+.2f s (speed %.1f m/s, frame %.0f ms)",
+                cam_move, since, speed, dt * 1000.f) << LL_ENDL;
+        }
+    }
+    last_av = av;
+    last_cam = cam;
+    last_speed = speed;
+    have_last = true;
 }
 
 void LLViewerObjectList::fetchObjectCosts()

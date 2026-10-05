@@ -6774,6 +6774,22 @@ void process_alert_core(const std::string& message, bool modal)
 {
     const std::string ALERT_PREFIX("ALERT: ");
     const std::string NOTIFY_PREFIX("NOTIFY: ");
+
+    // <WolfViewer 2026-10-05> The WT$ money module's arrival notice goes to nearby chat, not a
+    // popup. Source: addon-modules/OpenSim.Region.OptionalModules.Currency DTLNSLMoneyModule.cs:1078
+    // OnMakeRootAgent -> SendAgentAlertMessage("This region transacts " + symbol + " currency. ...", false)
+    // on EVERY region arrival, and LLClientView.cs:3156 SendAgentAlertMessage prepends "/" to a
+    // non-modal message - the "/" branch below (SystemMessage popup), so test with and without it.
+    // Paul: "that should be in the CHAT not as a pop up".
+    static const std::string MONEY_ARRIVAL_PREFIX("This region transacts ");
+    const size_t money_off = (!message.empty() && message[0] == '/') ? 1 : 0;
+    if (message.compare(money_off, MONEY_ARRIVAL_PREFIX.length(), MONEY_ARRIVAL_PREFIX) == 0)
+    {
+        FSCommon::report_to_nearby_chat(message.substr(money_off));
+        return;
+    }
+    // </WolfViewer>
+
     if (message.find(ALERT_PREFIX) == 0)
     {
         // Allow the server to spawn a named alert so that server alerts can be
@@ -6925,18 +6941,6 @@ void process_alert_core(const std::string& message, bool modal)
 // [/RLVa:KB]
 
             args["MESSAGE"] = is_message_localized ? localized_msg : new_msg;
-            // <WolfViewer 2026-10-05> The WT$ money module's arrival notice goes to nearby chat,
-            // like Gloebit's boxes (llimprocessing.cpp IM_MESSAGEBOX). Source:
-            // addon-modules/OpenSim.Region.OptionalModules.Currency DTLNSLMoneyModule.cs:1078
-            // OnMakeRootAgent -> SendAgentAlertMessage("This region transacts " + symbol + " currency. ...", false)
-            // on EVERY region arrival. Luke K: "Money message still appearing" after w56.
-            static const std::string MONEY_ARRIVAL_PREFIX("This region transacts ");
-            if (message.compare(0, MONEY_ARRIVAL_PREFIX.length(), MONEY_ARRIVAL_PREFIX) == 0)
-            {
-                FSCommon::report_to_nearby_chat(args["MESSAGE"].asString());
-                return;
-            }
-            // </WolfViewer>
             LLNotificationsUtil::add("SystemMessageTip", args);
         }
     }

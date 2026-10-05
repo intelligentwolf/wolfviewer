@@ -91,6 +91,7 @@ public:
     void processCachedObjectUpdate(LLMessageSystem *mesgsys, void **user_data, EObjectUpdateType update_type);
     void updateApparentAngles(LLAgent &agent);
     void update(LLAgent &agent);
+    void wolfWatchCrossing(LLAgent& agent);   // <WolfViewer 2026-10-05> crossing monitor (log only)
 
     void fetchObjectCosts();
     void fetchPhysicsFlags();

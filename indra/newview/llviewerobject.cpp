@@ -2697,9 +2697,16 @@ void LLViewerObject::interpolateLinearMotion(const F64SecondsImplicit& frame_tim
             // then puts them on the next region along, or wraps round). Clipping the prediction here
             // held the object at the edge and zeroed it, and every server update snapped it forward
             // again: a stutter for as long as you were out there. Within the limit, keep predicting.
+            // <WolfViewer 2026-10-05> VISITING LAND: the same region also keeps a walker, flyer, driven
+            // vehicle or keyframed ferry over a REAL neighbour's land (WolfSim WolfVisitingLand: no
+            // crossing until a calm hand-off). That is not clipped above, so it fell into the crossing
+            // branch below: predicted for at most sMaxRegionCrossingInterpolationTime, then stopped
+            // dead until the next server update snapped it on - move, freeze, snap for as long as it
+            // was kept. Paul: "stop the jerkiness its horrible". Within the limit, keep predicting
+            // either way; a real crossing still ends with the old region's kill and the new update.
             const F32 open_sea = mRegionp->getWolfOpenSeaMeters();
             bool in_open_sea = false;
-            if (open_sea > 0.f && clip_pos_global != new_pos_global)
+            if (open_sea > 0.f)
             {
                 const F32 w = mRegionp->getWidth();
                 const F32 out_x = llmax(0.f, llmax(-new_pos.mV[VX], new_pos.mV[VX] - w));

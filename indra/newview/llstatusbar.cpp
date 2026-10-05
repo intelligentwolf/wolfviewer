@@ -109,6 +109,7 @@
 #include "llviewernetwork.h"
 #endif // OPENSIM
 #include "llviewerparcelmedia.h"
+#include "llweb.h"   // <WolfViewer 2026-10-05/> Wolf Grid button
 #include "rlvhandler.h"
 
 //
@@ -444,6 +445,15 @@ bool LLStatusBar::postBuild()
     mPanelNearByMedia->setFollows(FOLLOWS_TOP|FOLLOWS_RIGHT);
     mPanelNearByMedia->setVisible(false);
 
+    // <WolfViewer 2026-10-05> Paul: "i want to add a wolf grid button to the top of the wolfviewer
+    // that links to our website". Opens it in the system browser.
+    mWolfGridBtn = findChild<LLButton>("wolf_grid_btn");
+    if (mWolfGridBtn)
+    {
+        mWolfGridBtn->setCommitCallback([](LLUICtrl*, const LLSD&) { LLWeb::loadURLExternal("https://www.wolf-grid.com/"); });
+    }
+    // </WolfViewer>
+
     updateBalancePanelPosition();
 
     // Hook up and init for filtering
@@ -486,6 +496,7 @@ bool LLStatusBar::postBuild()
 
     mBalancePanel = getChild<LLPanel>("balance_bg");
     mTimeMediaPanel = getChild<LLPanel>("time_and_media_bg");
+    updateWolfGridButtonPosition();   // <WolfViewer 2026-10-05/> now that the balance panel is known
 
     // <FS:Beq> Make FPS a clickable button with contextual colour
     // mFPSText = getChild<LLButton>("FPSText");
@@ -1298,6 +1309,7 @@ void LLStatusBar::updateMenuSearchVisibility(const LLSD& data)
     {
         updateMenuSearchPosition();
     }
+    updateWolfGridButtonPosition();   // <WolfViewer 2026-10-05/>
 }
 
 void LLStatusBar::updateMenuSearchPosition()
@@ -1309,7 +1321,26 @@ void LLStatusBar::updateMenuSearchPosition()
     searchRect.mLeft = balanceRect.mLeft - w - HPAD;
     searchRect.mRight = searchRect.mLeft + w;
     mSearchPanel->setShape( searchRect );
+    updateWolfGridButtonPosition();   // <WolfViewer 2026-10-05/>
 }
+
+// <WolfViewer 2026-10-05> The Wolf Grid button sits just left of the menu search box, or of the
+// L$ balance when the search box is hidden; both move as the balance's width changes.
+void LLStatusBar::updateWolfGridButtonPosition()
+{
+    if (!mWolfGridBtn || !mBalancePanel)
+    {
+        return;
+    }
+    const S32 HPAD = 8;
+    LLRect anchor = (mSearchPanel && mSearchPanel->getVisible()) ? mSearchPanel->getRect() : mBalancePanel->getRect();
+    LLRect r = mWolfGridBtn->getRect();
+    const S32 w = r.getWidth();
+    r.mRight = anchor.mLeft - HPAD;
+    r.mLeft = r.mRight - w;
+    mWolfGridBtn->setShape(r);
+}
+// </WolfViewer>
 
 void LLStatusBar::updateBalancePanelPosition()
 {
@@ -1336,6 +1367,7 @@ void LLStatusBar::updateBalancePanelPosition()
     balance_bg_rect.mLeft = balance_bg_rect.mRight - (buy_rect.getWidth() + balance_rect.getWidth() + HPAD);
     // </FS:Ansariel>
     balance_bg_view->setShape(balance_bg_rect);
+    updateWolfGridButtonPosition();   // <WolfViewer 2026-10-05/>
 }
 
 void LLStatusBar::setBalanceVisible(bool visible)
@@ -1463,6 +1495,9 @@ void LLStatusBar::setParcelInfoText(const std::string& new_text)
     // The menu search editor is left from the balance rect. If it is shown, use that rect
     if (mSearchPanel && mSearchPanel->getVisible())
         panelBalanceRect = mSearchPanel->getRect();
+    // <WolfViewer 2026-10-05> and the Wolf Grid button is left of both
+    if (mWolfGridBtn && mWolfGridBtn->getVisible())
+        panelBalanceRect = mWolfGridBtn->getRect();
 
     panelParcelInfoRect.mRight = panelParcelInfoRect.mLeft + rect.mRight;
     S32 borderRight = panelBalanceRect.mLeft - ParcelInfoSpacing;

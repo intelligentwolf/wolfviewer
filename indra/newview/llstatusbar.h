@@ -190,6 +190,10 @@ private:
     void updateMenuSearchVisibility( const LLSD& data );
     void updateMenuSearchPosition(); // depends onto balance position
     void updateBalancePanelPosition();
+    // <WolfViewer 2026-10-05> "Wolf Grid" button: the website, left of the menu search / balance
+    LLButton* mWolfGridBtn = nullptr;
+    void updateWolfGridButtonPosition();
+    // </WolfViewer>
 
     class LLParcelChangeObserver;
 
@@ -361,7 +365,7 @@ private:
     LLTextBox*              mDamageText;
     LLIconCtrl*             mParcelIcon[ICON_COUNT];
     LLParcelChangeObserver* mParcelChangedObserver;
-    LLPanel*                mBalancePanel;
+    LLPanel*                mBalancePanel = nullptr;   // <WolfViewer 2026-10-05/> read before postBuild sets it (updateWolfGridButtonPosition)
     LLButton*               mBuyParcelBtn;
     LLPanel*                mTimeMediaPanel;
 

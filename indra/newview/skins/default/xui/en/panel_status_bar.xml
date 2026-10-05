@@ -209,6 +209,19 @@
         L$ [AMT]
     </panel.string>
 
+	<!-- <WolfViewer 2026-10-05> Wolf Grid: our website (llstatusbar.cpp places it left of the menu
+	     search / balance, updateWolfGridButtonPosition). Paul: "a wolf grid button to the top of the
+	     wolfviewer that links to our website". -->
+	<button
+	 follows="right|top"
+	 height="16"
+	 label="Wolf Grid"
+	 layout="topleft"
+	 left="-560"
+	 name="wolf_grid_btn"
+	 tool_tip="Open the Wolf Grid website (wolf-grid.com) in your browser"
+	 top="1"
+	 width="70" />
 	<panel
 	 height="18"
 	 left="-481"

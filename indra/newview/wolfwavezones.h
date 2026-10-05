@@ -201,6 +201,8 @@ public:
     F32 energyAt(F32 rx, F32 ry) const;
     /** The default "open" energy, for space no layout covers. */
     static constexpr F32 OPEN_ENERGY = 0.55f;
+    /** <WolfViewer 2026-10-05/> the void sea continues a surf edge cell, tapering to nothing over this (fill). wave_zones.js VOID_SURF_FADE_M same. */
+    static constexpr F32 VOID_SURF_FADE_M = 1500.f;
 
     /** Editor: the working copy for the current region (zones + params + enabled). */
     bool canEditAll() const;

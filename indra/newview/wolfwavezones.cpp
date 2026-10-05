@@ -645,13 +645,33 @@ void WolfWaveZones::fill(LLViewerRegion* regionp, F32 x0, F32 y0, F32 sx, F32 sy
                 break;
             }
             // Space no region covers (the void sea round the region) is OPEN water (Paul
-            // 09-10: waves "only at the outside" of a region). <WolfViewer 2026-10-05> ALWAYS
-            // open now: it used to continue a SURF edge cell outwards ([SURF 2026-09-07]), and
-            // Madrigal's big painted waves then rolled across the whole void sea - Paul sailing
-            // south to Paha Sapa: "the void sea had big waves ... because of madrigals big waves
-            // i made so really it shouldnt do that - out at open sea it should be a lot more
-            // choppy than near land ... but no big waves". The 48 m blur below is the ramp from
-            // the open sea to a painted cell inside. wave_zones.js bake() same.
+            // 09-10: waves "only at the outside" of a region) - except beyond a SURF edge cell,
+            // which it continues so the surf painted along the edge rolls in from the open sea
+            // ([SURF 2026-09-07], Paul: "waves from the edge of the region").
+            // <WolfViewer 2026-10-05> ...TAPERED to nothing over VOID_SURF_FADE_M. Continued at full
+            // height, Madrigal's 30 m surf rolled across the whole void sea (Paul, sailing to Paha
+            // Sapa: "no big waves" out there). Not continued at all, the surf rose out of flat sea
+            // within the last ~190 m before the border - a 30 m wave grown in under one 360 m
+            // wavelength is a standing wall (Paul's screenshot: "water walls on madrigal"). Over
+            // 1.5 km (about four wavelengths) the rise is a slope of 1 in 50. The height reaches
+            // the shader through surf_scale (WolfWaterField::bake's height pass). Off / calm /
+            // small edge cells do NOT reach out. wave_zones.js bake() same.
+            if (!covered && mine)
+            {
+                const F32 qx = llclamp(px, 0.f, mine->sx - 0.5f), qy = llclamp(py, 0.f, mine->sy - 0.5f);
+                const F32 edge_scale = surf_scale_of(mine->src.at((S32)(qx / PAINT_CELL_M), (S32)(qy / PAINT_CELL_M)));
+                if (edge_scale > 0.f)
+                {
+                    const F32 out_m = sqrtf((px - qx) * (px - qx) + (py - qy) * (py - qy));
+                    const F32 u = llclamp(out_m / VOID_SURF_FADE_M, 0.f, 1.f);
+                    const F32 taper = 1.f - u * u * (3.f - 2.f * u);   // 1 - smoothstep(0, fade, out)
+                    if (taper > 0.01f)
+                    {
+                        out[(size_t)j * w + i] = energy_of('s');
+                        if (surf_scale) (*surf_scale)[(size_t)j * w + i] = edge_scale * taper;
+                    }
+                }
+            }
         }
     }
     // [SURF rev3] 3x3 box blur (48 m footprint): a bilinear read of 16 m cells stepped the

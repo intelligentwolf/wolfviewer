@@ -815,10 +815,21 @@ void main()
                 float lamEff = 6.2831853 / max(kDraw, 0.0001);
                 float vpw = (vstep > 0.0) ? lamEff / vstep : 64.0;
                 float res = smoothstep(3.0, 6.0, vpw);
-                float breakG = breakF * res;    // the break as GEOMETRY
+                // <WolfViewer 2026-10-05> FACE LIMIT. The profile below is scale-free - the same
+                // pinched peak, squeezed front and thrown lip at every size, since a wave's length
+                // grows with its height (lambda >= 12 H). On a 3 m wave that reads as a breaking
+                // wave; on Madrigal's 30 m surf the same shape is a near-vertical face 30 m high,
+                // which a displaced grid can only draw as a sheer cliff with stretched streaks
+                // (Paul 10-05: "water walls", moving to the shore). Every sharpening term fades to
+                // half between 8 and 20 m of crest: a 30 m wave's breaking face drops from ~60 to
+                // ~33 degrees (measured on this profile), the height is untouched, and the foam (vSurf) and the curl
+                // ribbons (wolfsurfcurlV.glsl, same factor) still show the break. Under 8 m: the
+                // arithmetic below is bit-identical. Water.js same.
+                float sharp = res * mix(1.0, 0.5, smoothstep(8.0, 20.0, crestH));
+                float breakG = breakF * sharp;  // the break as GEOMETRY
                 float crestG = crestH * res;    // the crest height the lattice can carry
                 float ph = k0 * path - omega0 * time * surfSpeed;
-                float ph2 = ph + (0.30 + 0.45 * breakF) * res * sin(ph);
+                float ph2 = ph + (0.30 + 0.45 * breakF) * sharp * sin(ph);
                 float sn = sin(ph2), cs = cos(ph2);
                 float up = 0.5 + 0.5 * sn;
                 // [SURF rev3, Paul 09-07 "looks weird": 20 m crests were 240 m plateaus with
@@ -827,7 +838,7 @@ void main()
                 // forward term is weighted by it, so only the top leans and throws — a concave
                 // face, not a wall. Water.js same.
                 float upk = pow(up, 1.6 + 1.2 * breakF);                    // foam shape
-                float upkG = pow(up, mix(1.0, 1.6 + 1.2 * breakF, res));    // geometry shape
+                float upkG = pow(up, mix(1.0, 1.6 + 1.2 * breakF, sharp));  // geometry shape
                 float prof = mix(-0.25, 1.0, upkG) + 0.25 * breakG * upkG * upkG;
                 float tip = upkG * upkG * upkG;
                 float lip = 0.55 * breakG * tip;   // the crest tip thrown past fold-over: the barrel

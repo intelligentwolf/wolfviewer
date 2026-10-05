@@ -72,9 +72,18 @@ void main()
     crestH = min(crestH, Hmax);
     crestH *= smoothstep(0.2, 0.6 + 0.5 * surfHeight, h);
 
-    // ── how far past the break line is the last crest? (the sea's crest sits at ph = 0.95) ──
+    // <WolfViewer 2026-10-05> FACE LIMIT, as waterV.glsl: the sea's sharpening fades to half
+    // between 8 and 20 m of crest, so its crest moves along the phase and its top drops a little.
+    float sharpC = mix(1.0, 0.5, smoothstep(8.0, 20.0, crestH));
+
+    // ── how far past the break line is the last crest? ──
+    // The sea's crest is where ph + a sin(ph) = pi/2 (waterV.glsl ph2, broken: a = 0.75 x sharp):
+    // ph = 0.95 at full sharpness, as before; nearer pi/2 for big surf. Fixed-point solve.
+    float aSk = 0.75 * sharpC;
+    float phC = 0.95;
+    for (int it = 0; it < 6; ++it) phC = 1.5707963 - aSk * sin(phC);
     float ph = k0 * aPath - omega0 * time * surfSpeed;
-    float past = mod(0.95 - ph, 6.2831853);
+    float past = mod(phC - ph, 6.2831853);
     float shift = past / k;
     float peel = 0.25 * lambda * (0.5 + 0.5 * sin(texcoord0.x * 0.02 + time * 0.05));
     float travel = 0.45 * lambda;
@@ -83,7 +92,7 @@ void main()
     p = clamp(p, 0.0, 1.0);
 
     // ── the curl ──
-    float Hc = crestH * 1.06;   // rev3 crest top: prof 1.25 - 0.35 lip 0.55
+    float Hc = crestH * (1.0 + 0.0575 * sharpC);   // rev3 crest top: prof 1 + 0.25 bG - 0.35 lip (0.55 bG), bG = sharp (1.06 at full)
     float open = smoothstep(0.0, 0.55, p);
     float spent = smoothstep(0.7, 1.0, p);
     float R = 0.35 * Hc;

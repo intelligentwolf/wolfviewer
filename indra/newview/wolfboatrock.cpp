@@ -36,6 +36,7 @@
 #include "llviewerobject.h"
 #include "llviewerobjectlist.h"
 #include "llviewerregion.h"
+#include "llworld.h"   // <WolfViewer 2026-10-05/> the land under a hull past its region's edge
 #include "pipeline.h"
 #include "wolfobjectprops.h"
 #include "wolfseastate.h"
@@ -49,7 +50,9 @@ namespace
     // Source: terrain_manager.js:34-35
     //   static _NOT_BOAT_RE = /dock|boat ?house/i;
     //   static _BOAT_RE = /boat|jet ?ski|yacht|dinghy|dinghies|canoe|kayak|catamaran|gondola|\bships?\b|\bsail(?:ing|s|boats?)?\b/i;
-    const std::regex NOT_BOAT_RE("dock|boat ?house", std::regex::ECMAScript | std::regex::icase);
+    // <WolfViewer 2026-10-05> + "manager": the SF Sail boat system's "SFsail Manager" control box is
+    // not a boat (KEEP IN STEP with WolfStorm terrain_manager.js _NOT_BOAT_RE).
+    const std::regex NOT_BOAT_RE("dock|boat ?house|\\bmanager\\b", std::regex::ECMAScript | std::regex::icase);
     // <WolfViewer 2026-09-22> Boards ride the swell too (Paul asked for a surfboard). Word
     // boundaries throughout so "surface", "resurfaced" and "keyboard" are not boats.
     // KEEP IN STEP with WolfStorm terrain_manager.js _BOAT_RE.
@@ -59,7 +62,13 @@ namespace
                              "|\\bsurf ?boards?\\b|\\bpaddle ?boards?\\b|\\bbody ?boards?\\b|\\blong ?boards?\\b|\\bsurf\\b"
                              "|\\btugs?\\b|\\bferry\\b|\\bferries\\b|\\bbarges?\\b|\\btrawlers?\\b|\\bcruisers?\\b|\\brafts?\\b|\\bpunts?\\b"
                              "|\\bliners?\\b|\\bfreighters?\\b|\\btankers?\\b|\\bvessels?\\b|\\bschooners?\\b|\\bketch(?:es)?\\b|\\bsloops?\\b"
-                             "|\\bgalleons?\\b|\\bfrigates?\\b|\\bhovercraft\\b|\\bpedalos?\\b",
+                             "|\\bgalleons?\\b|\\bfrigates?\\b|\\bhovercraft\\b|\\bpedalos?\\b"
+                             // <WolfViewer 2026-10-05> Paul: "sf sailboat is a boat" - SF Sail boats are named
+                             // sfsail, sfsail_4, sfsail_5... (Madrigal), no word boundary before "sail".
+                             "|\\bsfsail"
+                             // <WolfViewer 2026-10-05> Paul: "bouy should be another wave keyword" - buoys
+                             // bob on the swell (and the common spelling "bouy").
+                             "|\\bbuoys?\\b|\\bbouys?\\b",
                              std::regex::ECMAScript | std::regex::icase);
     // <WolfViewer 2026-09-22> The boards out of that list. A board PLANES: it rides the crest
     // and sits on the surface in the trough, it never goes under. A hull does go under --
@@ -481,11 +490,37 @@ WolfBoatRock::Verdict WolfBoatRock::classify(LLViewerObject* objectp) const
         return no("terrain not loaded");
     }
     const F32 width = regionp->getWidth();
+    F32 th;
     if (p.mV[VX] < 0.f || p.mV[VX] > width || p.mV[VY] < 0.f || p.mV[VY] > width)
     {
-        return no("outside this region (terrain unknown)");
+        // <WolfViewer 2026-10-05> Past this region's edge but still its own (the open sea,
+        // WolfOpenSea.cs, or visiting land over a neighbour, WolfVisitingLand.cs). Paul: "if you
+        // have waves out in opensea the boats are not going over them" - every hull out there was
+        // refused here. Over a neighbour: that region's land, which the viewer holds. Over open
+        // sea (no region there, the region allows it): deep water. Otherwise unknown, as before.
+        const LLVector3d pg = regionp->getPosGlobalFromRegion(p);
+        LLViewerRegion* over = LLWorld::getInstance()->getRegionFromPosGlobal(pg);
+        if (over && over != regionp)
+        {
+            if (over->getLand().getGridsPerEdge() < 4)
+            {
+                return no("neighbour's terrain not loaded");
+            }
+            th = over->getLand().resolveHeightGlobal(pg);
+        }
+        else if (!over && regionp->getWolfOpenSeaMeters() > 0.f)
+        {
+            th = wh - 100.f;
+        }
+        else
+        {
+            return no("outside this region (terrain unknown)");
+        }
     }
-    const F32 th = land.resolveHeightRegion(p.mV[VX], p.mV[VY]);
+    else
+    {
+        th = land.resolveHeightRegion(p.mV[VX], p.mV[VY]);
+    }
     if (th > wh - 0.4f)
     {
         return no("not over water");

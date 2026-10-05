@@ -6925,6 +6925,18 @@ void process_alert_core(const std::string& message, bool modal)
 // [/RLVa:KB]
 
             args["MESSAGE"] = is_message_localized ? localized_msg : new_msg;
+            // <WolfViewer 2026-10-05> The WT$ money module's arrival notice goes to nearby chat,
+            // like Gloebit's boxes (llimprocessing.cpp IM_MESSAGEBOX). Source:
+            // addon-modules/OpenSim.Region.OptionalModules.Currency DTLNSLMoneyModule.cs:1078
+            // OnMakeRootAgent -> SendAgentAlertMessage("This region transacts " + symbol + " currency. ...", false)
+            // on EVERY region arrival. Luke K: "Money message still appearing" after w56.
+            static const std::string MONEY_ARRIVAL_PREFIX("This region transacts ");
+            if (message.compare(0, MONEY_ARRIVAL_PREFIX.length(), MONEY_ARRIVAL_PREFIX) == 0)
+            {
+                FSCommon::report_to_nearby_chat(args["MESSAGE"].asString());
+                return;
+            }
+            // </WolfViewer>
             LLNotificationsUtil::add("SystemMessageTip", args);
         }
     }

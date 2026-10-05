@@ -29,6 +29,7 @@
 #include "llframetimer.h"
 #include "wolfwaterfield.h"
 #include "wolfwavezones.h"
+#include "llsettingsvo.h"   // wolfLitWaterFogColor
 
 #include <cmath>
 #include <map>
@@ -370,7 +371,7 @@ void WolfSurfCurl::render(F32 surf_h, F32 surf_set, F32 surf_len, F32 phase_time
     sh.uniform1f(s_surf_path_k0, fld->mSurfK0);
     sh.uniform2f(s_region_origin, origin.mV[VX], origin.mV[VY]);
     // The sea's fog colour and the sun, in linear light like waterF.glsl's own terms.
-    const LLColor3 fog_linear = linearColor3(pwater->getWaterFogColor());
+    const LLColor3 fog_linear = linearColor3(LLSettingsVOWater::wolfLitWaterFogColor());   // <WolfViewer 2026-10-05/> lit, as waterF's fog
     const LLColor3 sun_linear = linearColor3(light_diffuse);
     sh.uniform3fv(s_water_color, 1, fog_linear.mV);
     sh.uniform3fv(s_sun_color, 1, sun_linear.mV);

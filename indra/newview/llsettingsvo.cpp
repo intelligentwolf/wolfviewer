@@ -943,6 +943,48 @@ LLSettingsSky::parammapping_t LLSettingsVOSky::getParameterMap() const
 //=========================================================================
 const F32 LLSettingsVOWater::WATER_FOG_LIGHT_CLAMP(0.3f);
 
+// <WolfViewer 2026-10-05> LIT WATER. Paul: "research water on the internet colours and shades and
+// make it look ULTRA realistic". The deep water's colour is light the sea scatters back up: pure
+// water absorbs red (0.28 /m at 620 nm), then green (0.057 /m at 550 nm), and hardly any blue
+// (0.0092 /m at 450 nm) (Pope & Fry 1997, Appl. Opt. 36:8710), and the backscattered remainder is
+// the blue we see - so it is only as bright as the daylight falling on the sea: deep blue in sun,
+// grey and leaden under overcast, nearly black at night. The stock water fog colour was painted on
+// UNLIT (waterFogF.glsl getWaterFogViewNoClip, waterHazeF.glsl): the same blue at midnight as at
+// noon, and under any other sky than the default one it no longer matched the light around it
+// (Paul: "the water has become one colour a horrible blue").
+// The region's water fog colour is kept as the water's own colour, and lit by the light reaching
+// the sea: the sun (or moon) by its height above the horizon, less what the cloud deck hides, plus
+// the sky's ambient light - relative to the light of the default day cycle's midday frame
+// (5646d39e: sunlight 0.734, 0.782, 0.9; ambient 1.05; cloud_shadow 0.27; sun 45 degrees), the sky
+// the water was tuned under, and never brighter than that: at that midday the water is exactly as
+// before, and it darkens as the light goes.
+LLColor3 LLSettingsVOWater::wolfLitWaterFogColor()
+{
+    LLEnvironment& env = LLEnvironment::instance();
+    LLSettingsWater::ptr_t pwater = env.getCurrentWater();
+    LLSettingsSky::ptr_t psky = env.getCurrentSky();
+    if (!pwater) return LLColor3(0.f, 0.f, 0.f);
+    const LLColor3 fog = pwater->getWaterFogColor();
+    if (!psky) return fog;
+
+    const bool sun_up = psky->getIsSunUp();
+    const LLColor3 direct = sun_up ? psky->getSunlightColor() : psky->getMoonlightColor();
+    const F32 height = llmax((sun_up ? psky->getSunDirection() : psky->getMoonDirection()).mV[VZ], 0.f);
+    const F32 cloud = llclamp(psky->getCloudShadow(), 0.f, 1.f);
+    const LLColor3 ambient = psky->getAmbientColor();
+    const LLColor3 light = direct * (height * (1.f - 0.8f * cloud)) + ambient;
+
+    // The default midday: sin(45 deg) = 0.7071, (1 - 0.8 * 0.27) = 0.784.
+    static const LLColor3 REF = LLColor3(0.734f, 0.782f, 0.9f) * (0.7071f * 0.784f) + LLColor3(1.05f, 1.05f, 1.05f);
+    LLColor3 lit;
+    for (S32 i = 0; i < 3; ++i)
+    {
+        lit.mV[i] = fog.mV[i] * llclamp(light.mV[i] / REF.mV[i], 0.02f, 1.f);
+    }
+    return lit;
+}
+// </WolfViewer>
+
 //-------------------------------------------------------------------------
 LLSettingsVOWater::LLSettingsVOWater(const LLSD &data) :
     LLSettingsWater(data)
@@ -1158,7 +1200,7 @@ void LLSettingsVOWater::applySpecial(void *ptarget, bool force)
         F32 waterFogDensity = env.getCurrentWater()->getModifiedWaterFogDensity(underwater);
         shader->uniform1f(LLShaderMgr::WATER_FOGDENSITY, waterFogDensity);
 
-        LLColor4 fog_color(env.getCurrentWater()->getWaterFogColor());
+        LLColor4 fog_color(wolfLitWaterFogColor(), 1.f);   // <WolfViewer 2026-10-05/> lit by the sky
         shader->uniform4fv(LLShaderMgr::WATER_FOGCOLOR, fog_color.mV);
 
         shader->uniform3fv(LLShaderMgr::WATER_FOGCOLOR_LINEAR, linearColor3(fog_color).mV);

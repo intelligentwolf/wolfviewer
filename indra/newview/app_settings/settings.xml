@@ -6666,6 +6666,39 @@
     <key>Value</key>
     <integer>1</integer>
   </map>
+  <key>WolfMusicPresets</key>
+  <map>
+    <key>Comment</key>
+    <string>About Land &gt; Sound: the user's own 10 music stream presets ("" = empty slot). Filled once from FSStreamList.</string>
+    <key>Persist</key>
+    <integer>1</integer>
+    <key>Type</key>
+    <string>LLSD</string>
+    <key>Value</key>
+    <array />
+  </map>
+  <key>WolfMusicPresetsMigrated</key>
+  <map>
+    <key>Comment</key>
+    <string>The old saved stream list (FSStreamList) has been copied into WolfMusicPresets.</string>
+    <key>Persist</key>
+    <integer>1</integer>
+    <key>Type</key>
+    <string>Boolean</string>
+    <key>Value</key>
+    <integer>0</integer>
+  </map>
+  <key>WolfRadioGenre</key>
+  <map>
+    <key>Comment</key>
+    <string>The Radio Stations floater's last genre (radio_stations.php genre id).</string>
+    <key>Persist</key>
+    <integer>1</integer>
+    <key>Type</key>
+    <string>String</string>
+    <key>Value</key>
+    <string>featured</string>
+  </map>
   <key>WolfDJJingles</key>
   <map>
     <key>Comment</key>

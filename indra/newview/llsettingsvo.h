@@ -135,6 +135,11 @@ public:
 
     static LLSD     convertToLegacy(const ptr_t &);
 
+    // <WolfViewer 2026-10-05> The water body's colour as the light falling on the sea makes it
+    // (llsettingsvo.cpp): the current water's fog colour, lit by the current sky. Every user of
+    // the water fog colour takes it from here.
+    static LLColor3 wolfLitWaterFogColor();
+
 protected:
     LLSettingsVOWater();
 

@@ -934,6 +934,8 @@ set(viewer_SOURCE_FILES
     wolfwaterfield.cpp
     wolfautoenvironment.cpp
     wolfregionweather.cpp
+    wolfradiostations.cpp
+    wolffloaterradio.cpp
     wolfwavezones.cpp
     wolfweatherprofile.cpp
     wolfweathersound.cpp
@@ -1834,6 +1836,8 @@ set(viewer_HEADER_FILES
     wolfwaterfield.h
     wolfautoenvironment.h
     wolfregionweather.h
+    wolfradiostations.h
+    wolffloaterradio.h
     wolfwavezones.h
     wolfweatherprofile.h
     wolfweathersound.h

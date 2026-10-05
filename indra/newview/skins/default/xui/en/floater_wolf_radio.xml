@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WolfViewer 2026-10-05] About Land > Sound > Radio Stations... (wolffloaterradio.cpp, lists from
+     wolfstorm.app/php/radio_stations.php via wolfradiostations.cpp). Paul: "a floater that looks like a
+     radio with a genre choice this you click on to bring up a set of stations ... say 10 for each genre".
+     A walnut cabinet, a glowing dial that shows the station, genre preset buttons, the stations, and
+     Listen / Set on land / Add to my presets. -->
+<floater
+ can_close="true"
+ can_minimize="true"
+ can_resize="false"
+ height="452"
+ layout="topleft"
+ name="wolf_radio"
+ help_topic="wolf_radio"
+ save_rect="true"
+ single_instance="true"
+ title="Radio Stations"
+ width="560">
+    <panel background_opaque="true" background_visible="true" bg_opaque_color="0.30 0.18 0.10 1" follows="all" height="432" layout="topleft"
+     left="0" name="cabinet" top="20" width="560">
+        <panel background_opaque="true" background_visible="true" bg_opaque_color="0.06 0.05 0.03 1" border="true" follows="left|top" height="64"
+         layout="topleft" left="12" name="dial" top="8" width="536">
+            <text follows="left|top" font="SansSerifHuge" height="30" layout="topleft" left="12" name="dial_station" text_color="1 0.72 0.30 1"
+             top="6" width="512" use_ellipses="true">WOLF RADIO</text>
+            <text follows="left|top" font="SansSerif" height="18" layout="topleft" left="12" name="dial_detail" text_color="0.85 0.65 0.38 1"
+             top="38" width="512" use_ellipses="true">Pick a genre, then a station.</text>
+        </panel>
+        <panel background_visible="false" follows="left|top" height="60" layout="topleft" left="0" name="genres" top="78" width="560">
+        <button follows="left|top" height="22" is_toggle="true" label="" layout="topleft" left="12" name="genre_0" top="8" width="74"
+         tool_tip="Show this genre's stations" />
+        <button follows="left|top" height="22" is_toggle="true" label="" layout="topleft" left="88" name="genre_1" top="8" width="74"
+         tool_tip="Show this genre's stations" />
+        <button follows="left|top" height="22" is_toggle="true" label="" layout="topleft" left="164" name="genre_2" top="8" width="74"
+         tool_tip="Show this genre's stations" />
+        <button follows="left|top" height="22" is_toggle="true" label="" layout="topleft" left="240" name="genre_3" top="8" width="74"
+         tool_tip="Show this genre's stations" />
+        <button follows="left|top" height="22" is_toggle="true" label="" layout="topleft" left="316" name="genre_4" top="8" width="74"
+         tool_tip="Show this genre's stations" />
+        <button follows="left|top" height="22" is_toggle="true" label="" layout="topleft" left="392" name="genre_5" top="8" width="74"
+         tool_tip="Show this genre's stations" />
+        <button follows="left|top" height="22" is_toggle="true" label="" layout="topleft" left="468" name="genre_6" top="8" width="74"
+         tool_tip="Show this genre's stations" />
+        <button follows="left|top" height="22" is_toggle="true" label="" layout="topleft" left="12" name="genre_7" top="34" width="74"
+         tool_tip="Show this genre's stations" />
+        <button follows="left|top" height="22" is_toggle="true" label="" layout="topleft" left="88" name="genre_8" top="34" width="74"
+         tool_tip="Show this genre's stations" />
+        <button follows="left|top" height="22" is_toggle="true" label="" layout="topleft" left="164" name="genre_9" top="34" width="74"
+         tool_tip="Show this genre's stations" />
+        <button follows="left|top" height="22" is_toggle="true" label="" layout="topleft" left="240" name="genre_10" top="34" width="74"
+         tool_tip="Show this genre's stations" />
+        <button follows="left|top" height="22" is_toggle="true" label="" layout="topleft" left="316" name="genre_11" top="34" width="74"
+         tool_tip="Show this genre's stations" />
+        <button follows="left|top" height="22" is_toggle="true" label="" layout="topleft" left="392" name="genre_12" top="34" width="74"
+         tool_tip="Show this genre's stations" />
+        </panel>
+        <scroll_list column_padding="0" draw_heading="true" follows="left|top" height="226" layout="topleft" left="12" multi_select="false"
+         name="stations" top="140" width="536" bg_readonly_color="0.10 0.07 0.04 1" fg_readonly_color="0.95 0.88 0.72 1"
+         tool_tip="Double-click a station to listen to it">
+            <scroll_list.columns label="Station" name="name" dynamicwidth="true" />
+            <scroll_list.columns label="Country" name="country" width="140" />
+            <scroll_list.columns label="kbps" name="kbps" width="50" />
+        </scroll_list>
+        <button follows="left|top" height="24" is_toggle="true" label="Listen" label_selected="Stop" layout="topleft" left="12" name="listen_btn" top="374" width="96"
+         tool_tip="Listen to the station yourself (only you hear it). Press again to stop and get the land's music back." />
+        <button follows="left|top" height="24" label="Set on land" layout="topleft" left_pad="8" name="set_land_btn" top_delta="0" width="120"
+         tool_tip="Make this station the music on this land, for everyone here" />
+        <button follows="left|top" height="24" label="Add to my presets" layout="topleft" left_pad="8" name="add_preset_btn" top_delta="0" width="150"
+         tool_tip="Keep this station in My presets on the Sound tab" />
+        <text follows="left|top" height="20" layout="topleft" left="12" name="status" text_color="0.95 0.88 0.72 1" top="404" width="536" wrap="true">
+            Stations from Radio Browser (radio-browser.info), checked every 6 hours.
+        </text>
+    </panel>
+</floater>

@@ -25,6 +25,7 @@
  */
 
 #include "llviewerprecompiledheaders.h"
+#include "llsettingsvo.h"   // <WolfViewer 2026-10-05/> wolfLitWaterFogColor
 
 #include "lllegacyatmospherics.h"
 
@@ -482,7 +483,7 @@ void LLAtmospherics::updateFog(const F32 distance, const LLVector3& tosun_in)
     {
         LLSettingsWater::ptr_t pwater = LLEnvironment::instance().getCurrentWater();
         F32 depth = water_height - camera_height;
-        LLColor4 water_fog_color(pwater->getWaterFogColor());
+        LLColor4 water_fog_color(LLSettingsVOWater::wolfLitWaterFogColor(), 1.f);   // <WolfViewer 2026-10-05/> lit, as the shaders' water fog
 
         // adjust the color based on depth.  We're doing linear approximations
         float depth_scale = gSavedSettings.getF32("WaterGLFogDepthScale");

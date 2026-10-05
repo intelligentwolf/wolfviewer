@@ -599,7 +599,6 @@ void WolfWaveZones::fill(LLViewerRegion* regionp, F32 x0, F32 y0, F32 sx, F32 sy
         spans.push_back({ (F32)(ax - bx), (F32)(ay - by), (F32)r.mSizeX, (F32)r.mSizeY, sourceFor(r) });
     }
     const F32 tx = sx / w, ty = sy / h;
-    const F32 rw = regionp->getWidth(), rh = regionp->getWidth();
     const Span* mine = nullptr;
     for (const Span& s : spans) if (s.x == 0.f && s.y == 0.f) { mine = &s; break; }
     if (mine)
@@ -646,23 +645,13 @@ void WolfWaveZones::fill(LLViewerRegion* regionp, F32 x0, F32 y0, F32 sx, F32 sy
                 break;
             }
             // Space no region covers (the void sea round the region) is OPEN water (Paul
-            // 09-10: waves "only at the outside" of a region) — except beyond a SURF edge cell,
-            // which it continues so the surf painted along the edge rolls in from far out
-            // instead of fading over the last texel before the border ([SURF 2026-09-07],
-            // Paul: "waves from the edge of the region"). Off / calm / small edge cells do NOT
-            // reach out: the 48 m blur below is the ramp from the open sea outside to the
-            // painted cell inside. wave_zones.js bake() same.
-            if (!covered && mine)
-            {
-                const F32 qx = llclamp(px, 0.f, rw - 0.5f), qy = llclamp(py, 0.f, rh - 0.5f);
-                // [SURF HEIGHT 2026-10-02/] any surf edge cell, at its own height
-                const F32 edge_scale = surf_scale_of(mine->src.at((S32)(qx / PAINT_CELL_M), (S32)(qy / PAINT_CELL_M)));
-                if (edge_scale > 0.f)
-                {
-                    out[(size_t)j * w + i] = energy_of('s');
-                    if (surf_scale) (*surf_scale)[(size_t)j * w + i] = edge_scale;
-                }
-            }
+            // 09-10: waves "only at the outside" of a region). <WolfViewer 2026-10-05> ALWAYS
+            // open now: it used to continue a SURF edge cell outwards ([SURF 2026-09-07]), and
+            // Madrigal's big painted waves then rolled across the whole void sea - Paul sailing
+            // south to Paha Sapa: "the void sea had big waves ... because of madrigals big waves
+            // i made so really it shouldnt do that - out at open sea it should be a lot more
+            // choppy than near land ... but no big waves". The 48 m blur below is the ramp from
+            // the open sea to a painted cell inside. wave_zones.js bake() same.
         }
     }
     // [SURF rev3] 3x3 box blur (48 m footprint): a bilinear read of 16 m cells stepped the

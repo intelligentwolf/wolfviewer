@@ -50,6 +50,7 @@ void WolfWaterField::reset()
         releaseField(kv.second);
     }
     mFields.clear();
+    mGoneSince.clear();   // <WolfViewer 2026-10-05/>
 }
 
 void WolfWaterField::releaseField(Field& f)
@@ -392,7 +393,9 @@ void WolfWaterField::idle()
     {
         return;
     }
-    // Drop fields of regions that have gone.
+    // Drop fields of regions that have gone - <WolfViewer 2026-10-05> after GONE_KEEP_SECS, and
+    // only beyond the GONE_KEEP_MAX most recent: a region that comes back (same handle) uses its
+    // field at once instead of plain swell until its terrain has streamed in and re-baked.
     std::set<U64> live;
     for (LLViewerRegion* regionp : world->getRegionList())
     {
@@ -403,8 +406,16 @@ void WolfWaterField::idle()
     }
     for (auto it = mFields.begin(); it != mFields.end();)
     {
-        if (live.find(it->first) == live.end())
+        if (live.find(it->first) != live.end())
         {
+            mGoneSince.erase(it->first);
+            ++it;
+            continue;
+        }
+        auto gone = mGoneSince.emplace(it->first, now).first;
+        if (now - gone->second > GONE_KEEP_SECS)
+        {
+            mGoneSince.erase(gone);
             releaseField(it->second);
             it = mFields.erase(it);
         }
@@ -412,6 +423,21 @@ void WolfWaterField::idle()
         {
             ++it;
         }
+    }
+    while (mGoneSince.size() > GONE_KEEP_MAX)
+    {
+        auto oldest = mGoneSince.begin();
+        for (auto g = mGoneSince.begin(); g != mGoneSince.end(); ++g)
+        {
+            if (g->second < oldest->second) oldest = g;
+        }
+        auto f = mFields.find(oldest->first);
+        if (f != mFields.end())
+        {
+            releaseField(f->second);
+            mFields.erase(f);
+        }
+        mGoneSince.erase(oldest);
     }
 
     // Bake ONE region per check, the agent's own first: a bake is a few hundred thousand

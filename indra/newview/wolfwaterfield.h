@@ -129,6 +129,12 @@ public:
     // Dire Wolf freeze of 09-10, which disabling fields above 4096 m had hidden). Now the sea
     // settles once, when the streaming pauses; a window move still re-bakes at once.
     static constexpr F32 STAMP_SETTLE_SECS = 10.f;
+    // <WolfViewer 2026-10-05> A region that has gone out of range keeps its field this long (at
+    // most GONE_KEEP_MAX of them), so coming back finds its sea at once. Paul, sailing back into
+    // Madrigal: "my 30 ft waves had become small until after about 10 seconds" - the field had
+    // been dropped and the re-bake waits for the terrain (LLSurface::hasZData), 7 s in the log.
+    static constexpr F64 GONE_KEEP_SECS = 600.0;
+    static constexpr size_t GONE_KEEP_MAX = 8;
     static constexpr F32 STAMP_MARGIN_M = 256.f;   // patches this far outside the window still count (the 3x exposure span reads them)
     // <WolfViewer 2026-09-20> Fields bake over the whole region up to this many metres an
     // edge (8 m depth texels), else over a camera-following window this wide. Replaces the
@@ -242,6 +248,7 @@ private:
     static void releaseField(Field& f);
 
     std::map<U64, Field> mFields;
+    std::map<U64, F64> mGoneSince;   // <WolfViewer 2026-10-05/> fields of regions out of range, kept GONE_KEEP_SECS
     F64 mNextCheck = 0.0;
     // Scratch, reused across bakes.
     std::vector<F32> mH, mTmp, mSm, mDist, mOpen, mDepthData, mExpoData, mZoneData;   // <WolfViewer 2026-09-20/> mOpen

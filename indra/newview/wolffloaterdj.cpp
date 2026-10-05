@@ -14,6 +14,7 @@
 
 #include "wolfdjcapture.h"
 #include "wolfdjplayer.h"
+#include "wolfgrid.h"
 
 #include "llagent.h"
 #include "llbutton.h"
@@ -48,7 +49,7 @@ using namespace WolfDJ;
 namespace
 {
     const char* STRIP_KEYS[CH_COUNT] = { "voice", "mic", "music_a", "music_b", "music_c", "music_d" };
-    const char* MY_STREAM_PAGE = "https://www.wolf-grid.com/index.php?f=mystream";
+    const char* GRID_STREAM_API = "https://www.wolf-grid.com/gridstream.php";   // gridmanager/gridstream.php
     const char* PROTECTED_TYPE = "wolf_dj";
 
     // A show in progress: what to put back afterwards. Survives the floater being closed.
@@ -140,7 +141,43 @@ bool WolfFloaterDJ::postBuild()
         s.mEqLow->setCommitCallback([this, chan](LLUICtrl* c, const LLSD&) { chan->mEqLowDb = (F32)c->getValue().asReal(); saveLevels(); });
         s.mMute->setCommitCallback([this, chan](LLUICtrl* c, const LLSD&) { chan->mMute = c->getValue().asBoolean(); saveLevels(); });
         s.mCue->setCommitCallback([this, ch](LLUICtrl*, const LLSD&) { onCue(ch); });
+        // [WOLF DJ 2026-10-05] Paul: "can we add some basic effects?"
+        s.mFx = getChild<LLComboBox>("fx_" + k);
+        s.mFxAmount = getChild<LLSliderCtrl>("fx_amount_" + k);
+        s.mFx->setCommitCallback([this, chan](LLUICtrl* c, const LLSD&)
+        {
+            chan->mFx = llclamp(c->getValue().asInteger(), (S32)FX_NONE, (S32)FX_COUNT - 1);
+            saveLevels();
+        });
+        s.mFxAmount->setCommitCallback([this, chan](LLUICtrl* c, const LLSD&) { chan->mFxAmount = (F32)c->getValue().asReal(); saveLevels(); });
     }
+
+    // [WOLF DJ 2026-10-05] Jingle pads, each its own colour (WolfDJJingles::PAD_RGB).
+    static_assert(WolfDJJingles::PAD_COUNT == 8, "mPads and the XML have 8 pads");
+    for (int i = 0; i < (int)mPads.size(); ++i)
+    {
+        const float* rgb = WolfDJJingles::PAD_RGB[i];
+        mPads[i] = getChild<LLButton>(llformat("jingle_%d", i));
+        mPads[i]->setImageColor(LLUIColor(LLColor4(rgb[0], rgb[1], rgb[2], 1.f)));
+        mPads[i]->setCommitCallback([i](LLUICtrl*, const LLSD&)
+        {
+            const int pad = i;
+            if (WolfDJJingles::instance().pad(pad).empty())
+            {
+                // Empty: straight to where a song is put on it (a status line note was overwritten
+                // every frame while on air - Paul 10-05).
+                LLFloaterReg::showInstance("wolf_dj_playlist");
+                return;
+            }
+            WolfDJJingles::instance().trigger(pad);
+        });
+    }
+    getChild<LLButton>("jingle_stop")->setCommitCallback([](LLUICtrl*, const LLSD&) { WolfDJJingles::instance().stop(); });
+    getChild<LLSliderCtrl>("jingle_level")->setCommitCallback([this](LLUICtrl* c, const LLSD&)
+    {
+        WolfDJMixer::instance().mJingleLevel = (F32)c->getValue().asReal();
+        saveLevels();
+    });
     mMaster.mFader = getChild<LLSliderCtrl>("fader_master");
     mMaster.mCue = getChild<LLButton>("cue_master");
     mMaster.mMeter = getChild<LLView>("meter_master");
@@ -189,7 +226,9 @@ bool WolfFloaterDJ::postBuild()
         gSavedSettings.setBOOL("WolfDJSavePassword", c->getValue().asBoolean());
         save_password(mPassword->getValue().asString());
     });
-    getChild<LLButton>("get_stream")->setCommitCallback([](LLUICtrl*, const LLSD&) { LLWeb::loadURLExternal(MY_STREAM_PAGE); });
+    // Paul 10-05: "a button saying Grid Stream - click it and it just gets your grid stream if
+    // you have a region, if not it reminds you to purchase a region with a link to the regions page".
+    getChild<LLButton>("get_stream")->setCommitCallback([this](LLUICtrl*, const LLSD&) { onGridStream(false); });
     getChild<LLButton>("copy_url")->setCommitCallback([this](LLUICtrl*, const LLSD&) { onCopyUrl(); });
     getChild<LLButton>("send_title")->setCommitCallback([this](LLUICtrl*, const LLSD&) { onSendTitle(); });
     mLiveBtn->setCommitCallback([this](LLUICtrl*, const LLSD&) { onGoLive(); });
@@ -287,7 +326,12 @@ void WolfFloaterDJ::refreshApps()
     {
         fillSources(sourceCombo(ch), ch, apps);
     }
-    getChild<LLTextBox>("sources_note")->setText(why);
+    // Paul 10-05: "we need to tell people they need to play audio then hit refresh streams to get a
+    // feed into it from another application" - a program only shows in the lists while it is
+    // playing sound (wolfdjcapture listApps). A reason the lists cannot be made wins.
+    getChild<LLTextBox>("sources_note")->setText(why.empty()
+        ? std::string("Another program: start it playing first, press Refresh sources, then pick it on a Music channel.")
+        : why);
 }
 
 void WolfFloaterDJ::fillSources(LLComboBox* combo, int ch, const std::vector<WolfDJApp>& apps)
@@ -365,7 +409,7 @@ bool WolfFloaterDJ::parseStreamUrl(const std::string& url_in, WolfDJMixer::Strea
     LLStringUtil::trim(url);
     if (url.empty())
     {
-        err = "Paste your stream address from My Radio Stream (it looks like http://cast.wolfterritories.org:8000/radio/your-name).";
+        err = "Press Grid Stream to fill in your stream, or paste its address (it looks like http://cast.wolfterritories.org:8000/radio/your-name).";
         return false;
     }
     if (url.find("://") == std::string::npos)
@@ -435,7 +479,7 @@ void WolfFloaterDJ::onGoLive()
     cfg.mPassword = mPassword->getValue().asString();
     if (cfg.mPassword.empty())
     {
-        mStatus->setText(std::string("Enter your stream password (from My Radio Stream - it is shown once when you make or renew it)."));
+        mStatus->setText(std::string("Enter your stream password, or press Grid Stream to get it (it is shown once when it is made)."));
         return;
     }
     cfg.mStationName = mStation->getValue().asString();
@@ -512,9 +556,12 @@ void WolfFloaterDJ::saveLevels()
         s["mid"] = c.mEqMidDb.load();
         s["low"] = c.mEqLowDb.load();
         s["mute"] = c.mMute.load();
+        s["fx"] = c.mFx.load();
+        s["fx_amount"] = c.mFxAmount.load();
         levels[STRIP_KEYS[ch]] = s;
     }
     levels["master"] = mix.mMasterFader.load();
+    levels["jingle"] = mix.mJingleLevel.load();
     gSavedSettings.setLLSD("WolfDJLevels", levels);
 }
 
@@ -533,6 +580,11 @@ void WolfFloaterDJ::loadLevels()
             c.mEqMidDb = (F32)s["mid"].asReal();
             c.mEqLowDb = (F32)s["low"].asReal();
             c.mMute = s["mute"].asBoolean();
+            if (s.has("fx"))
+            {
+                c.mFx = llclamp(s["fx"].asInteger(), (S32)FX_NONE, (S32)FX_COUNT - 1);
+                c.mFxAmount = llclamp((F32)s["fx_amount"].asReal(), 0.f, 1.f);
+            }
         }
         Strip& st = mStrips[ch];
         st.mFader->setValue(c.mFader.load());
@@ -540,12 +592,152 @@ void WolfFloaterDJ::loadLevels()
         st.mEqMid->setValue(c.mEqMidDb.load());
         st.mEqLow->setValue(c.mEqLowDb.load());
         st.mMute->setValue(c.mMute.load());
+        st.mFx->setValue(c.mFx.load());
+        st.mFxAmount->setValue(c.mFxAmount.load());
     }
+    if (levels.has("jingle"))
+    {
+        mix.mJingleLevel = llclamp((F32)levels["jingle"].asReal(), 0.f, 1.f);
+    }
+    getChild<LLSliderCtrl>("jingle_level")->setValue(mix.mJingleLevel.load());
     if (levels.has("master"))
     {
         mix.mMasterFader = (F32)levels["master"].asReal();
     }
     mMaster.mFader->setValue(mix.mMasterFader.load());
+}
+
+void WolfFloaterDJ::onGridStream(bool new_password)
+{
+    if (!WolfGrid::isWolfTerritories())
+    {
+        // The request carries this login's agent and session ids: only ever to Wolf's own site.
+        mStatus->setText(std::string("Grid Stream is for Wolf Territories. On this grid, paste your stream's address and password."));
+        return;
+    }
+    if (mGridStreamBusy) return;
+    mGridStreamBusy = true;
+    mStatus->setText(std::string(new_password ? "Getting a new password for your grid stream..." : "Getting your grid stream..."));
+    const LLHandle<LLFloater> handle = getHandle();
+    const std::string body = new_password ? "action=newpassword" : "action=get";
+    LLCoros::instance().launch("WolfDJGridStream", [handle, body]() { gridStreamCoro(handle, body); });
+}
+
+// static
+void WolfFloaterDJ::gridStreamCoro(LLHandle<LLFloater> handle, std::string body)
+{
+    LLCoreHttpUtil::HttpCoroutineAdapter::ptr_t adapter =
+        std::make_shared<LLCoreHttpUtil::HttpCoroutineAdapter>("WolfDJGridStream", LLCore::HttpRequest::DEFAULT_POLICY_ID);
+    LLCore::HttpRequest::ptr_t request = std::make_shared<LLCore::HttpRequest>();
+    // Same verified options and identity headers as Jimmy's weather (wolfautoenvironment.cpp postCoro).
+    LLCore::HttpOptions::ptr_t options = WolfGrid::makeVerifiedHttpOptions();
+    options->setTimeout(20);
+    options->setRetries(0);     // a retried "newpassword" would make a second password
+    LLCore::HttpHeaders::ptr_t headers = std::make_shared<LLCore::HttpHeaders>();
+    headers->append(HTTP_OUT_HEADER_CONTENT_TYPE, "application/x-www-form-urlencoded");
+    headers->append(HTTP_OUT_HEADER_ACCEPT, "application/json");
+    headers->append("X-Wolf-Agent", gAgentID.asString());
+    headers->append("X-Wolf-Session", gAgentSessionID.asString());
+    LLCore::BufferArray::ptr_t raw(new LLCore::BufferArray());
+    raw->append(body.data(), body.size());
+    LLSD result = adapter->postRawAndSuspend(request, GRID_STREAM_API, raw, options, headers);
+    LLCore::HttpStatus status = LLCoreHttpUtil::HttpCoroutineAdapter::getStatusFromLLSD(
+        result[LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS]);
+
+    // gridstream.php: {success, url, mount, created, password?, message?} or {success:false, error, noRegion?, regionsUrl?}
+    bool success = false, no_region = false;
+    std::string error, url, password, message, regions_url;
+    if (result.has(LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS_RAW))
+    {
+        const LLSD::Binary& bin = result[LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS_RAW].asBinary();
+        boost::system::error_code ec;
+        boost::json::value root = boost::json::parse(std::string(bin.begin(), bin.end()), ec);
+        if (!ec && root.is_object())
+        {
+            const boost::json::object& o = root.as_object();
+            auto str = [&o](const char* k) {
+                const boost::json::value* v = o.if_contains(k);
+                return v && v->is_string() ? std::string(v->as_string().c_str()) : std::string();
+            };
+            auto flag = [&o](const char* k) {
+                const boost::json::value* v = o.if_contains(k);
+                return v && v->is_bool() && v->as_bool();
+            };
+            success = flag("success");
+            no_region = flag("noRegion");
+            error = str("error");
+            url = str("url");
+            password = str("password");
+            message = str("message");
+            regions_url = str("regionsUrl");
+        }
+    }
+
+    WolfFloaterDJ* self = static_cast<WolfFloaterDJ*>(handle.get());
+    if (self) self->mGridStreamBusy = false;
+
+    if (!success && no_region)
+    {
+        const std::string link = regions_url.empty() ? std::string("https://www.wolf-grid.com/index.php?f=ns") : regions_url;
+        if (self) self->mStatus->setText(std::string("You need a region of your own to get a grid stream."));
+        LLNotificationsUtil::add("GenericAlertYesCancel",
+            LLSD().with("MESSAGE", "You need a region of your own to get a grid stream - every region on Wolf Territories "
+                                   "comes with its own free radio stream.\n\nOpen the regions page to get one?"),
+            LLSD(), [link](const LLSD& n, const LLSD& r)
+            {
+                if (LLNotificationsUtil::getSelectedOption(n, r) == 0) LLWeb::loadURLExternal(link);
+                return false;
+            });
+        return;
+    }
+    if (!success || url.empty())
+    {
+        const std::string why = !error.empty() ? error : !status ? status.toString() : std::string("the website gave an unreadable answer");
+        if (self) self->mStatus->setText("Could not get your grid stream: " + why);
+        else LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE", "Could not get your grid stream: " + why));
+        return;
+    }
+
+    gSavedPerAccountSettings.setString("WolfDJStreamURL", url);
+    if (!password.empty())
+    {
+        save_password(password);
+    }
+    if (!self)
+    {
+        if (!password.empty() && !gSavedSettings.getBOOL("WolfDJSavePassword"))
+        {
+            // Not saved and nowhere to show it: say it, or it is lost (the site keeps only a hash).
+            LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE", "Your grid stream password is " + password + " - keep it safe."));
+        }
+        return;
+    }
+    self->mUrl->setValue(url);
+    if (!password.empty())
+    {
+        self->mPassword->setValue(password);
+        self->mStatus->setText((message.empty() ? std::string("Your grid stream is ready.") : message)
+            + (gSavedSettings.getBOOL("WolfDJSavePassword") ? " Address and password filled in and saved." : " Address and password filled in."));
+        return;
+    }
+    if (!self->mPassword->getValue().asString().empty())
+    {
+        self->mStatus->setText(std::string("Your grid stream address is filled in. Using your saved password - press Go Live."));
+        return;
+    }
+    // The stream exists but this viewer has no copy of its password, and the site cannot hand
+    // the old one back (it keeps only a hash): offer a new one, saying what that does.
+    self->mStatus->setText(std::string("Your grid stream address is filled in. It needs its password."));
+    const LLHandle<LLFloater> h = handle;
+    LLNotificationsUtil::add("GenericAlertYesCancel",
+        LLSD().with("MESSAGE", "Your grid stream already has a password, and it is only shown once, when it is made.\n\n"
+                               "Get a new one now? Any other DJ software using the old password will need the new one."),
+        LLSD(), [h](const LLSD& n, const LLSD& r)
+        {
+            WolfFloaterDJ* f = static_cast<WolfFloaterDJ*>(h.get());
+            if (f && LLNotificationsUtil::getSelectedOption(n, r) == 0) f->onGridStream(true);
+            return false;
+        });
 }
 
 void WolfFloaterDJ::requestListeners()
@@ -757,6 +949,7 @@ void WolfFloaterDJ::draw()
     }
     const float lim = mix.mLimiterDb.load();
     mMaster.mDb->setText(lim < -0.5f ? llformat("limit %.0f dB", lim) : llformat("%+.0f dB", wolfdj_lin_to_db(wolfdj_fader_gain(mix.mMasterFader))));
+    updatePads();
     LLFloater::draw();
     if (isMinimized()) return;
 
@@ -770,6 +963,34 @@ void WolfFloaterDJ::draw()
         drawMeter(s.mMeter, mix.channel(ch).mPeak.load(), s.mShownDb, s.mClipUntil);
     }
     drawMeter(mMaster.mMeter, mix.mMasterPeak.load(), mMaster.mShownDb, mMaster.mClipUntil);
+}
+
+// [WOLF DJ 2026-10-05] Each pad shows its file's name (set from the Playlist window) and stays
+// lit while it plays.
+void WolfFloaterDJ::updatePads()
+{
+    WolfDJJingles& j = WolfDJJingles::instance();
+    const int playing = j.playing();
+    for (int i = 0; i < (int)mPads.size(); ++i)
+    {
+        const std::string path = j.pad(i);
+        if (path != mPadShown[i])
+        {
+            mPadShown[i] = path;
+            const std::string name = WolfDJJingles::padLabel(path);
+            mPads[i]->setLabel(name.empty() ? llformat("%d", i + 1) : name);
+            mPads[i]->setToolTip(name.empty()
+                ? llformat("Jingle pad %d - empty. Put a song on it from the Playlist window.", i + 1)
+                : llformat("Jingle pad %d: %s. Click to play it on air; click again to stop.", i + 1, name.c_str()));
+        }
+        mPads[i]->setToggleState(playing == i);
+    }
+    // A file that would not play: say so where it cannot be missed (it is not a toast that goes).
+    const std::string err = j.takeError();
+    if (!err.empty())
+    {
+        LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE", "Jingle pad: " + err));
+    }
 }
 
 // static - LLAppViewer::requestQuit: end a show while the region can still hear us.

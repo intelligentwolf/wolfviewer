@@ -11,7 +11,7 @@
  can_close="true"
  can_minimize="true"
  can_resize="true"
- height="536"
+ height="610"
  layout="topleft"
  min_height="400"
  min_width="440"
@@ -24,8 +24,8 @@
     <text follows="left|top" height="16" layout="topleft" left="10" name="url_label" top="24" width="96">Stream address</text>
     <line_editor follows="left|top|right" height="20" layout="topleft" left="108" max_length_bytes="255" name="stream_url" top="22" width="394"
      tool_tip="Your stream from My Radio Stream on wolf-grid.com, e.g. http://cast.wolfterritories.org:8000/radio/your-name. Every region owner gets one free." />
-    <button follows="right|top" height="20" label="My Radio Stream..." layout="topleft" left="506" name="get_stream" top="22" width="124"
-     tool_tip="Open My Radio Stream on wolf-grid.com: make your stream, see its address and password." />
+    <button follows="right|top" height="20" label="Grid Stream" layout="topleft" left="506" name="get_stream" top="22" width="124"
+     tool_tip="Get your own Wolf Territories radio stream and fill in its address and password. Every region owner has one; it is made for you the first time." />
     <button follows="right|top" height="20" label="Copy" layout="topleft" left="634" name="copy_url" top="22" width="48"
      tool_tip="Copy your stream address, to give a region owner for their land's music." />
     <text follows="left|top" height="16" layout="topleft" left="10" name="pw_label" top="50" width="96">Password</text>
@@ -37,7 +37,7 @@
     <line_editor follows="left|top|right" height="20" layout="topleft" left="418" max_length_bytes="120" name="station_name" top="48" width="264" />
     <scroll_container
      follows="all"
-     height="304"
+     height="348"
      layout="topleft"
      left="0"
      name="strips_scroll"
@@ -47,7 +47,7 @@
      width="686">
         <panel
          follows="left|top"
-         height="304"
+         height="348"
          layout="topleft"
          left="0"
          name="strips_panel"
@@ -72,6 +72,14 @@
             <text follows="left|top" halign="center" height="14" layout="topleft" left="10" name="db_voice" top="262" width="86">0 dB</text>
             <button follows="left|top" height="20" is_toggle="true" label="Mute" layout="topleft" left="10" name="mute_voice" top="280" width="44" tool_tip="Take this channel off the stream." />
             <button follows="left|top" height="20" is_toggle="true" label="Cue" layout="topleft" left="56" name="cue_voice" top="280" width="44" tool_tip="Listen to just this channel yourself (before its fader). Click again to stop." />
+            <combo_box follows="left|top" height="20" layout="topleft" left="10" name="fx_voice" top="304" width="86" tool_tip="An effect on this channel, after its EQ: Echo, Reverb (a room), or Radio voice (a telephone sound).">
+                <combo_box.item label="No effect" name="fx_none" value="0" />
+                <combo_box.item label="Echo" name="fx_echo" value="1" />
+                <combo_box.item label="Reverb" name="fx_reverb" value="2" />
+                <combo_box.item label="Radio voice" name="fx_radio" value="3" />
+            </combo_box>
+            <slider can_edit_text="false" decimal_digits="2" follows="left|top" height="14" increment="0.01" initial_value="0.35" label="" layout="topleft" left="10" max_val="1" min_val="0" name="fx_amount_voice"
+             show_text="false" tool_tip="How much of the effect: for Echo, louder and longer repeats; for Reverb, more room; for Radio, more grit." top="328" width="86" />
             <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="106" name="title_mic" top="4" width="90">Mic</text>
             <text follows="left|top" height="20" layout="topleft" left="106" name="mic_note" top="22" width="88" text_color="LtGray_50">Your mic</text>
             <slider can_edit_text="false" decimal_digits="0" follows="left|top" height="15" increment="1" initial_value="0"
@@ -90,6 +98,14 @@
             <text follows="left|top" halign="center" height="14" layout="topleft" left="106" name="db_mic" top="262" width="86">0 dB</text>
             <button follows="left|top" height="20" is_toggle="true" label="Mute" layout="topleft" left="106" name="mute_mic" top="280" width="44" tool_tip="Take this channel off the stream." />
             <button follows="left|top" height="20" is_toggle="true" label="Cue" layout="topleft" left="152" name="cue_mic" top="280" width="44" tool_tip="Listen to just this channel yourself (before its fader). Click again to stop." />
+            <combo_box follows="left|top" height="20" layout="topleft" left="106" name="fx_mic" top="304" width="86" tool_tip="An effect on this channel, after its EQ: Echo, Reverb (a room), or Radio voice (a telephone sound).">
+                <combo_box.item label="No effect" name="fx_none" value="0" />
+                <combo_box.item label="Echo" name="fx_echo" value="1" />
+                <combo_box.item label="Reverb" name="fx_reverb" value="2" />
+                <combo_box.item label="Radio voice" name="fx_radio" value="3" />
+            </combo_box>
+            <slider can_edit_text="false" decimal_digits="2" follows="left|top" height="14" increment="0.01" initial_value="0.35" label="" layout="topleft" left="106" max_val="1" min_val="0" name="fx_amount_mic"
+             show_text="false" tool_tip="How much of the effect: for Echo, louder and longer repeats; for Reverb, more room; for Radio, more grit." top="328" width="86" />
             <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="202" name="title_music_a" top="4" width="90">Music 1</text>
             <combo_box follows="left|top" height="20" layout="topleft" left="202" name="source_music_a" top="22" width="88" tool_tip="What plays on this channel: a program, everything you hear, or the Wolf DJ playlist. The list refreshes every time you open it." />
             <slider can_edit_text="false" decimal_digits="0" follows="left|top" height="15" increment="1" initial_value="0"
@@ -108,6 +124,14 @@
             <text follows="left|top" halign="center" height="14" layout="topleft" left="202" name="db_music_a" top="262" width="86">0 dB</text>
             <button follows="left|top" height="20" is_toggle="true" label="Mute" layout="topleft" left="202" name="mute_music_a" top="280" width="44" tool_tip="Take this channel off the stream." />
             <button follows="left|top" height="20" is_toggle="true" label="Cue" layout="topleft" left="248" name="cue_music_a" top="280" width="44" tool_tip="Listen to just this channel yourself (before its fader). Click again to stop." />
+            <combo_box follows="left|top" height="20" layout="topleft" left="202" name="fx_music_a" top="304" width="86" tool_tip="An effect on this channel, after its EQ: Echo, Reverb (a room), or Radio voice (a telephone sound).">
+                <combo_box.item label="No effect" name="fx_none" value="0" />
+                <combo_box.item label="Echo" name="fx_echo" value="1" />
+                <combo_box.item label="Reverb" name="fx_reverb" value="2" />
+                <combo_box.item label="Radio voice" name="fx_radio" value="3" />
+            </combo_box>
+            <slider can_edit_text="false" decimal_digits="2" follows="left|top" height="14" increment="0.01" initial_value="0.35" label="" layout="topleft" left="202" max_val="1" min_val="0" name="fx_amount_music_a"
+             show_text="false" tool_tip="How much of the effect: for Echo, louder and longer repeats; for Reverb, more room; for Radio, more grit." top="328" width="86" />
             <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="298" name="title_music_b" top="4" width="90">Music 2</text>
             <combo_box follows="left|top" height="20" layout="topleft" left="298" name="source_music_b" top="22" width="88" tool_tip="What plays on this channel: a program, everything you hear, or the Wolf DJ playlist. The list refreshes every time you open it." />
             <slider can_edit_text="false" decimal_digits="0" follows="left|top" height="15" increment="1" initial_value="0"
@@ -126,6 +150,14 @@
             <text follows="left|top" halign="center" height="14" layout="topleft" left="298" name="db_music_b" top="262" width="86">0 dB</text>
             <button follows="left|top" height="20" is_toggle="true" label="Mute" layout="topleft" left="298" name="mute_music_b" top="280" width="44" tool_tip="Take this channel off the stream." />
             <button follows="left|top" height="20" is_toggle="true" label="Cue" layout="topleft" left="344" name="cue_music_b" top="280" width="44" tool_tip="Listen to just this channel yourself (before its fader). Click again to stop." />
+            <combo_box follows="left|top" height="20" layout="topleft" left="298" name="fx_music_b" top="304" width="86" tool_tip="An effect on this channel, after its EQ: Echo, Reverb (a room), or Radio voice (a telephone sound).">
+                <combo_box.item label="No effect" name="fx_none" value="0" />
+                <combo_box.item label="Echo" name="fx_echo" value="1" />
+                <combo_box.item label="Reverb" name="fx_reverb" value="2" />
+                <combo_box.item label="Radio voice" name="fx_radio" value="3" />
+            </combo_box>
+            <slider can_edit_text="false" decimal_digits="2" follows="left|top" height="14" increment="0.01" initial_value="0.35" label="" layout="topleft" left="298" max_val="1" min_val="0" name="fx_amount_music_b"
+             show_text="false" tool_tip="How much of the effect: for Echo, louder and longer repeats; for Reverb, more room; for Radio, more grit." top="328" width="86" />
             <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="394" name="title_music_c" top="4" width="90">Music 3</text>
             <combo_box follows="left|top" height="20" layout="topleft" left="394" name="source_music_c" top="22" width="88" tool_tip="What plays on this channel: a program, everything you hear, or the Wolf DJ playlist. The list refreshes every time you open it." />
             <slider can_edit_text="false" decimal_digits="0" follows="left|top" height="15" increment="1" initial_value="0"
@@ -144,6 +176,14 @@
             <text follows="left|top" halign="center" height="14" layout="topleft" left="394" name="db_music_c" top="262" width="86">0 dB</text>
             <button follows="left|top" height="20" is_toggle="true" label="Mute" layout="topleft" left="394" name="mute_music_c" top="280" width="44" tool_tip="Take this channel off the stream." />
             <button follows="left|top" height="20" is_toggle="true" label="Cue" layout="topleft" left="440" name="cue_music_c" top="280" width="44" tool_tip="Listen to just this channel yourself (before its fader). Click again to stop." />
+            <combo_box follows="left|top" height="20" layout="topleft" left="394" name="fx_music_c" top="304" width="86" tool_tip="An effect on this channel, after its EQ: Echo, Reverb (a room), or Radio voice (a telephone sound).">
+                <combo_box.item label="No effect" name="fx_none" value="0" />
+                <combo_box.item label="Echo" name="fx_echo" value="1" />
+                <combo_box.item label="Reverb" name="fx_reverb" value="2" />
+                <combo_box.item label="Radio voice" name="fx_radio" value="3" />
+            </combo_box>
+            <slider can_edit_text="false" decimal_digits="2" follows="left|top" height="14" increment="0.01" initial_value="0.35" label="" layout="topleft" left="394" max_val="1" min_val="0" name="fx_amount_music_c"
+             show_text="false" tool_tip="How much of the effect: for Echo, louder and longer repeats; for Reverb, more room; for Radio, more grit." top="328" width="86" />
             <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="490" name="title_music_d" top="4" width="90">Music 4</text>
             <combo_box follows="left|top" height="20" layout="topleft" left="490" name="source_music_d" top="22" width="88" tool_tip="What plays on this channel: a program, everything you hear, or the Wolf DJ playlist. The list refreshes every time you open it." />
             <slider can_edit_text="false" decimal_digits="0" follows="left|top" height="15" increment="1" initial_value="0"
@@ -162,6 +202,14 @@
             <text follows="left|top" halign="center" height="14" layout="topleft" left="490" name="db_music_d" top="262" width="86">0 dB</text>
             <button follows="left|top" height="20" is_toggle="true" label="Mute" layout="topleft" left="490" name="mute_music_d" top="280" width="44" tool_tip="Take this channel off the stream." />
             <button follows="left|top" height="20" is_toggle="true" label="Cue" layout="topleft" left="536" name="cue_music_d" top="280" width="44" tool_tip="Listen to just this channel yourself (before its fader). Click again to stop." />
+            <combo_box follows="left|top" height="20" layout="topleft" left="490" name="fx_music_d" top="304" width="86" tool_tip="An effect on this channel, after its EQ: Echo, Reverb (a room), or Radio voice (a telephone sound).">
+                <combo_box.item label="No effect" name="fx_none" value="0" />
+                <combo_box.item label="Echo" name="fx_echo" value="1" />
+                <combo_box.item label="Reverb" name="fx_reverb" value="2" />
+                <combo_box.item label="Radio voice" name="fx_radio" value="3" />
+            </combo_box>
+            <slider can_edit_text="false" decimal_digits="2" follows="left|top" height="14" increment="0.01" initial_value="0.35" label="" layout="topleft" left="490" max_val="1" min_val="0" name="fx_amount_music_d"
+             show_text="false" tool_tip="How much of the effect: for Echo, louder and longer repeats; for Reverb, more room; for Radio, more grit." top="328" width="86" />
             <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="586" name="title_master" top="4" width="90">Master</text>
             <slider can_edit_text="false" decimal_digits="2" follows="left|top" height="150" increment="0.01" initial_value="0.75"
              layout="topleft" left="600" max_val="1" min_val="0" name="fader_master" orientation="vertical" show_text="false"
@@ -171,17 +219,32 @@
             <button follows="left|top" height="20" is_toggle="true" label="Cue" layout="topleft" left="586" name="cue_master" top="280" width="44" tool_tip="Listen to just this channel yourself (before its fader). Click again to stop." />
         </panel>
     </scroll_container>
-    <check_box follows="left|bottom" height="16" label="Talk-over (my mic dips the music)" layout="topleft" left="10" name="talk_over" top="386" width="230" />
-    <check_box follows="left|bottom" height="16" label="Play on my land when I go live" layout="topleft" left="250" name="play_on_land" top="386" width="220"
+    <!-- [WOLF DJ 2026-10-05] Jingle pads (WolfDJJingles, wolfdjplayer.cpp). Paul: "a jingle set of buttons in
+         different colours you can apply files to in the playlist folder". The colours are set in
+         wolffloaterdj.cpp (PAD_COLOURS); the files are put on them from the Playlist window. -->
+    <text follows="left|bottom" height="16" layout="topleft" left="10" name="jingles_label" top="432" width="52">Jingles</text>
+    <button follows="left|bottom" height="22" label="1" layout="topleft" left="62" name="jingle_0" top="428" width="62" use_ellipses="true" />
+    <button follows="left|bottom" height="22" label="2" layout="topleft" left="128" name="jingle_1" top="428" width="62" use_ellipses="true" />
+    <button follows="left|bottom" height="22" label="3" layout="topleft" left="194" name="jingle_2" top="428" width="62" use_ellipses="true" />
+    <button follows="left|bottom" height="22" label="4" layout="topleft" left="260" name="jingle_3" top="428" width="62" use_ellipses="true" />
+    <button follows="left|bottom" height="22" label="5" layout="topleft" left="326" name="jingle_4" top="428" width="62" use_ellipses="true" />
+    <button follows="left|bottom" height="22" label="6" layout="topleft" left="392" name="jingle_5" top="428" width="62" use_ellipses="true" />
+    <button follows="left|bottom" height="22" label="7" layout="topleft" left="458" name="jingle_6" top="428" width="62" use_ellipses="true" />
+    <button follows="left|bottom" height="22" label="8" layout="topleft" left="524" name="jingle_7" top="428" width="62" use_ellipses="true" />
+    <button follows="left|bottom" height="22" label="Stop" layout="topleft" left="590" name="jingle_stop" top="428" width="40" tool_tip="Stop the jingle that is playing." />
+    <slider can_edit_text="false" follows="left|bottom" height="16" increment="0.01" initial_value="0.75" label="" layout="topleft" left="634" max_val="1" min_val="0" name="jingle_level" show_text="false" top="431" width="48" tool_tip="Jingle level: how loud the jingle pads go out on the stream." />
+    <check_box follows="left|bottom" height="16" label="Talk-over (my mic dips the music)" layout="topleft" left="10" name="talk_over" top="460" width="230" />
+    <check_box follows="left|bottom" height="16" label="Play on my land when I go live" layout="topleft" left="250" name="play_on_land" top="460" width="220"
      tool_tip="On your own region: sets this parcel's music to your stream while you are live, and puts the old music back after." />
-    <button follows="right|bottom" height="20" label="Refresh sources" layout="topleft" left="562" name="refresh_sources" top="384" width="120" tool_tip="Look again for programs playing sound (the lists also refresh when you open them)." />
-    <text follows="left|right|bottom" height="16" layout="topleft" left="10" name="sources_note" top="406" width="672" text_color="LtGray_50" use_ellipses="true" />
-    <text follows="left|bottom" height="16" layout="topleft" left="10" name="np_label" top="428" width="80">Now playing</text>
-    <line_editor follows="left|bottom" height="20" label="Artist" layout="topleft" left="92" max_length_bytes="120" name="now_artist" top="426" width="150" />
-    <line_editor follows="left|right|bottom" height="20" label="Title" layout="topleft" left="246" max_length_bytes="160" name="now_title" top="426" width="342" />
-    <button follows="right|bottom" height="20" label="Send title" layout="topleft" left="594" name="send_title" top="426" width="88" tool_tip="Show this to listeners as the song playing now." />
-    <button follows="left|bottom" height="28" image_color="ButtonImageColor" label="Go Live" layout="topleft" left="10" name="go_live" top="456" width="110" font="SansSerifBold" />
-    <button follows="left|bottom" height="28" label="Playlist..." layout="topleft" left="126" name="open_playlist" top="456" width="90" tool_tip="Open the Wolf DJ playlist: pick songs from your computer and play them on a music channel." />
-    <text follows="left|right|bottom" font="SansSerifBold" height="34" layout="topleft" left="224" name="status_text" top="456" width="458" wrap="true">Off air.</text>
-    <text follows="left|right|bottom" height="32" layout="topleft" left="10" name="land_note" top="492" width="672" wrap="true" text_color="LtGray_50" />
+    <button follows="right|bottom" height="20" label="Refresh sources" layout="topleft" left="562" name="refresh_sources" top="458" width="120" tool_tip="Look again for programs playing sound. A program only shows while it is playing: start it playing first, then press this (the lists also refresh when you open them)." />
+    <text follows="left|right|bottom" height="16" layout="topleft" left="10" name="sources_note" top="480" width="672" text_color="LtGray_50" use_ellipses="true"
+     tool_tip="To send music from another program (a music player, a browser...): start it playing first, press Refresh sources, then pick it in the list at the top of Music 1, 2, 3 or 4." />
+    <text follows="left|bottom" height="16" layout="topleft" left="10" name="np_label" top="502" width="80">Now playing</text>
+    <line_editor follows="left|bottom" height="20" label="Artist" layout="topleft" left="92" max_length_bytes="120" name="now_artist" top="500" width="150" />
+    <line_editor follows="left|right|bottom" height="20" label="Title" layout="topleft" left="246" max_length_bytes="160" name="now_title" top="500" width="342" />
+    <button follows="right|bottom" height="20" label="Send title" layout="topleft" left="594" name="send_title" top="500" width="88" tool_tip="Show this to listeners as the song playing now." />
+    <button follows="left|bottom" height="28" image_color="ButtonImageColor" label="Go Live" layout="topleft" left="10" name="go_live" top="530" width="110" font="SansSerifBold" />
+    <button follows="left|bottom" height="28" label="Playlist..." layout="topleft" left="126" name="open_playlist" top="530" width="90" tool_tip="Open the Wolf DJ playlist: pick songs from your computer and play them on a music channel." />
+    <text follows="left|right|bottom" font="SansSerifBold" height="34" layout="topleft" left="224" name="status_text" top="530" width="458" wrap="true">Off air.</text>
+    <text follows="left|right|bottom" height="32" layout="topleft" left="10" name="land_note" top="566" width="672" wrap="true" text_color="LtGray_50" />
 </floater>

@@ -58,6 +58,15 @@ namespace WolfDJ
         CH_MUSIC_D,
         CH_COUNT
     };
+    // [WOLF DJ 2026-10-05] Paul: "can we add some basic effects?" - one per channel, after its EQ.
+    enum EFx
+    {
+        FX_NONE = 0,
+        FX_ECHO,        // 375 ms delay with feedback
+        FX_REVERB,      // Freeverb-style room
+        FX_RADIO,       // telephone band (300 Hz - 3.4 kHz) with drive
+        FX_COUNT
+    };
     constexpr int CUE_NONE = -1;
     constexpr int CUE_MASTER = CH_COUNT;        // cue the stream mix
 
@@ -81,6 +90,9 @@ struct WolfDJBiquad
     void setLowShelf(float f0, float db);
     void setPeaking(float f0, float q, float db);
     void setHighShelf(float f0, float db);
+    void setLowPass(float f0, float q);     // [WOLF DJ 2026-10-05] the radio effect
+    void setHighPass(float f0, float q);
+    void reset() { z1[0] = z1[1] = z2[0] = z2[1] = 0.f; }
     float process(int side, float x)
     {
         const float y = b0 * x + z1[side];
@@ -88,6 +100,37 @@ struct WolfDJBiquad
         z2[side] = b2 * x - a2 * y;
         return y;
     }
+};
+
+// [WOLF DJ 2026-10-05] A channel's effect. Mixer thread only. Changing the effect clears its
+// state, so a new echo or room does not start with the tail of the last one.
+class WolfDJEffect
+{
+public:
+    // stereo: frames x 2 interleaved floats, processed in place. amount 0..1.
+    void process(int fx, float amount, float* stereo, size_t frames);
+
+private:
+    void reset(int fx);
+
+    struct Comb
+    {
+        std::vector<float> mBuf;
+        size_t mPos = 0;
+        float mStore = 0.f;
+    };
+    struct AllPass
+    {
+        std::vector<float> mBuf;
+        size_t mPos = 0;
+    };
+
+    int mFx = -1;
+    std::vector<float> mDelay;          // echo, stereo frames
+    size_t mDelayPos = 0;
+    Comb mComb[2][4];                   // reverb, per side
+    AllPass mAll[2][2];
+    WolfDJBiquad mHighPass, mLowPass;   // radio
 };
 
 // A mixer channel: capture threads push audio in (any rate, any channel count), the mixer
@@ -116,7 +159,11 @@ public:
     // playlist i cant hear the music it needs to monitor back"). Cue, when on, replaces it.
     std::atomic<bool>  mMonitor{ false };
 
-    // Mixer-thread EQ state.
+    std::atomic<int>   mFx{ WolfDJ::FX_NONE };  // [WOLF DJ 2026-10-05] WolfDJ::EFx
+    std::atomic<float> mFxAmount{ 0.35f };      // 0..1
+
+    // Mixer-thread EQ and effect state.
+    WolfDJEffect mEffect;
     WolfDJBiquad mLow, mMid, mHigh;
     float mLastLow = 0.f, mLastMid = 0.f, mLastHigh = 0.f;
     float mDuck = 1.f;                          // talk-over gain, smoothed
@@ -179,6 +226,12 @@ public:
     std::atomic<float> mMasterPeak{ 0.f };
     std::atomic<float> mLimiterDb{ 0.f };       // gain reduction now, for the floater
 
+    // [WOLF DJ 2026-10-05] Jingle pads (WolfDJJingles, wolfdjplayer.cpp) play into this: not a
+    // strip, just a level. Always heard by the DJ too (like the playlist), never ducked.
+    WolfDJChannel& jingleChannel() { return mJingle; }
+    std::atomic<float> mJingleLevel{ 0.75f };   // fader position 0..1 (wolfdj_fader_gain)
+    std::atomic<float> mJinglePeak{ 0.f };
+
     // Cue output (main thread, OpenAL): the cued channel or the master, pre-fader.
     void idleCue();
 
@@ -201,6 +254,7 @@ private:
     static void onIdle(void*);
 
     std::array<WolfDJChannel, WolfDJ::CH_COUNT> mChannels;
+    WolfDJChannel mJingle;              // [WOLF DJ 2026-10-05] the jingle pads
     // After mChannels, so they are destroyed first (they push into the channels).
     std::array<std::unique_ptr<WolfDJCaptureStream>, WolfDJ::CH_COUNT> mCaptures;
     std::array<std::string, WolfDJ::CH_COUNT> mCaptureIds;

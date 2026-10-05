@@ -486,6 +486,164 @@ bool WolfDJPlayer::isAudioFile(const std::string& path)
     return ext == "ogg" || ext == "oga" || ext == "mp3" || ext == "flac" || ext == "wav";
 }
 
+// ---------------------------------------------------------------------------------------------
+// Jingle pads [WOLF DJ 2026-10-05]
+// ---------------------------------------------------------------------------------------------
+
+const float WolfDJJingles::PAD_RGB[PAD_COUNT][3] = {
+    { 0.90f, 0.22f, 0.22f },    // red
+    { 0.95f, 0.55f, 0.12f },    // orange
+    { 0.92f, 0.80f, 0.15f },    // yellow
+    { 0.25f, 0.75f, 0.30f },    // green
+    { 0.15f, 0.70f, 0.75f },    // teal
+    { 0.25f, 0.45f, 0.90f },    // blue
+    { 0.60f, 0.35f, 0.85f },    // purple
+    { 0.90f, 0.35f, 0.65f },    // pink
+};
+
+WolfDJJingles& WolfDJJingles::instance()
+{
+    static WolfDJJingles sInstance;
+    return sInstance;
+}
+
+WolfDJJingles::WolfDJJingles()
+{
+    mPads.assign(PAD_COUNT, std::string());
+    const LLSD saved = gSavedSettings.getLLSD("WolfDJJingles");
+    for (int i = 0; i < PAD_COUNT && saved.isArray() && i < (int)saved.size(); ++i)
+    {
+        mPads[i] = saved[i].asString();
+    }
+}
+
+WolfDJJingles::~WolfDJJingles()
+{
+    shutdown();
+}
+
+void WolfDJJingles::shutdown()
+{
+    mRunning = false;
+    if (mThread.joinable()) mThread.join();
+}
+
+std::string WolfDJJingles::pad(int pad) const
+{
+    std::lock_guard<std::mutex> lock(mMutex);
+    return pad >= 0 && pad < PAD_COUNT ? mPads[pad] : std::string();
+}
+
+// static
+std::string WolfDJJingles::padLabel(const std::string& path)
+{
+    return path.empty() ? std::string() : base_name(path);
+}
+
+void WolfDJJingles::setPad(int pad, const std::string& path)
+{
+    if (pad < 0 || pad >= PAD_COUNT) return;
+    LLSD arr = LLSD::emptyArray();
+    {
+        std::lock_guard<std::mutex> lock(mMutex);
+        mPads[pad] = path;
+        for (const std::string& p : mPads) arr.append(p);
+    }
+    gSavedSettings.setLLSD("WolfDJJingles", arr);
+    LL_INFOS("WolfDJ") << "jingle pad " << (pad + 1) << " set to " << path << LL_ENDL;
+}
+
+void WolfDJJingles::trigger(int pad)
+{
+    if (pad < 0 || pad >= PAD_COUNT) return;
+    const std::string path = this->pad(pad);
+    LL_INFOS("WolfDJ") << "jingle pad " << (pad + 1) << " pressed (" << (path.empty() ? std::string("empty") : path)
+                       << "), playing now: " << (mPlaying.load() + 1) << LL_ENDL;
+    if (path.empty()) return;
+    mRequest = pad;     // from the start, even if it is the one playing
+    if (!mRunning)
+    {
+        if (mThread.joinable()) mThread.join();
+        mRunning = true;
+        mThread = std::thread([this]() { run(); });
+    }
+}
+
+void WolfDJJingles::stop()
+{
+    mRequest = -2;
+}
+
+std::string WolfDJJingles::takeError()
+{
+    std::lock_guard<std::mutex> lock(mMutex);
+    std::string e;
+    e.swap(mError);
+    return e;
+}
+
+void WolfDJJingles::run()
+{
+    using clock = std::chrono::steady_clock;
+    std::unique_ptr<Decoder> dec;
+    std::vector<float> buf;
+    double pushed = 0.0;
+    clock::time_point base = clock::now();
+    while (mRunning)
+    {
+        const int req = mRequest.exchange(-1);
+        if (req == -2)
+        {
+            dec.reset();
+            mPlaying = -1;
+        }
+        else if (req >= 0)
+        {
+            std::string err;
+            const std::string path = pad(req);
+            dec = open_decoder(path, err);
+            {
+                std::lock_guard<std::mutex> lock(mMutex);
+                if (!dec) mError = err;
+            }
+            mPlaying = dec ? req : -1;
+            pushed = 0.0;
+            base = clock::now();
+            if (dec)
+                LL_INFOS("WolfDJ") << "jingle pad " << (req + 1) << " playing " << path << " ("
+                                   << dec->mDuration << " s, " << dec->mRate << " Hz, " << dec->mChannels << " ch)" << LL_ENDL;
+            else
+                LL_WARNS("WolfDJ") << "jingle pad " << (req + 1) << ": " << err << LL_ENDL;
+        }
+        if (!dec)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            continue;
+        }
+        // Real-time pace, about 100 ms ahead (as WolfDJPlayer::run).
+        const double elapsed = std::chrono::duration<double>(clock::now() - base).count();
+        if (pushed - elapsed > 0.1)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            continue;
+        }
+        const size_t frames = 1024;
+        buf.resize(frames * dec->mChannels);
+        const size_t got = dec->read(buf.data(), frames);
+        if (got == 0)
+        {
+            LL_INFOS("WolfDJ") << "jingle pad " << (mPlaying.load() + 1) << " finished after " << pushed << " s" << LL_ENDL;
+            dec.reset();
+            mPlaying = -1;
+            continue;
+        }
+        WolfDJMixer::instance().jingleChannel().pushFloat(buf.data(), got, dec->mChannels, dec->mRate);
+        pushed += (double)got / (double)dec->mRate;
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+
 WolfDJPlayer& WolfDJPlayer::instance()
 {
     static WolfDJPlayer sInstance;

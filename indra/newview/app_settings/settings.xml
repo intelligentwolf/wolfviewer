@@ -6666,6 +6666,17 @@
     <key>Value</key>
     <integer>1</integer>
   </map>
+  <key>WolfDJJingles</key>
+  <map>
+    <key>Comment</key>
+    <string>Wolf DJ jingle pads: the audio file on each of the 8 pads ("" = empty).</string>
+    <key>Persist</key>
+    <integer>1</integer>
+    <key>Type</key>
+    <string>LLSD</string>
+    <key>Value</key>
+    <array />
+  </map>
   <key>WolfDJPlaylist</key>
   <map>
     <key>Comment</key>

@@ -2026,6 +2026,7 @@ bool LLAppViewer::cleanup()
     // the voice engine and the audio engine go away
     WolfDJMixer::instance().shutdown();
     WolfDJPlayer::instance().shutdown();
+    WolfDJJingles::instance().shutdown();   // [WOLF DJ 2026-10-05] jingle pads
 
     //ditch LLVOAvatarSelf instance
     gAgentAvatarp = NULL;

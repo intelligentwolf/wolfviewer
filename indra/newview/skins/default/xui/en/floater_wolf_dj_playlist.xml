@@ -7,9 +7,9 @@
  can_close="true"
  can_minimize="true"
  can_resize="true"
- height="430"
+ height="462"
  layout="topleft"
- min_height="330"
+ min_height="362"
  min_width="560"
  name="wolf_dj_playlist"
  help_topic="wolf_dj_playlist"
@@ -68,4 +68,16 @@
      tool_tip="Play the playlist through your own output too, after its fader - the music exists only inside the viewer, so without this you hear it only on the stream." />
     <text follows="left|bottom|right" height="40" layout="topleft" left="10" name="playlist_note" top="372" width="300" wrap="true" text_color="LtGray_50">To hear it on air, pick "Wolf DJ playlist" as the source of Music 1 or Music 2 in the mixer.</text>
     <text follows="left|bottom|right" height="16" layout="topleft" left="324" name="error_text" top="406" width="326" text_color="Red" use_ellipses="true" />
+    <!-- [WOLF DJ 2026-10-05] Jingle pads: pick a song, press a pad to put it there (wolffloaterdjplaylist.cpp
+         setJinglePad). The pads play from the mixer window; colours from WolfDJJingles::PAD_RGB. -->
+    <text follows="left|bottom" height="16" layout="topleft" left="10" name="jingle_label" top="434" width="72">Jingle pads</text>
+    <button follows="left|bottom" height="22" label="1" layout="topleft" left="84" name="set_jingle_0" top="430" width="26" tool_tip="Put the selected song on jingle pad 1 (it plays from the pads in the mixer). Pick another song to replace it." />
+    <button follows="left|bottom" height="22" label="2" layout="topleft" left="112" name="set_jingle_1" top="430" width="26" tool_tip="Put the selected song on jingle pad 2 (it plays from the pads in the mixer). Pick another song to replace it." />
+    <button follows="left|bottom" height="22" label="3" layout="topleft" left="140" name="set_jingle_2" top="430" width="26" tool_tip="Put the selected song on jingle pad 3 (it plays from the pads in the mixer). Pick another song to replace it." />
+    <button follows="left|bottom" height="22" label="4" layout="topleft" left="168" name="set_jingle_3" top="430" width="26" tool_tip="Put the selected song on jingle pad 4 (it plays from the pads in the mixer). Pick another song to replace it." />
+    <button follows="left|bottom" height="22" label="5" layout="topleft" left="196" name="set_jingle_4" top="430" width="26" tool_tip="Put the selected song on jingle pad 5 (it plays from the pads in the mixer). Pick another song to replace it." />
+    <button follows="left|bottom" height="22" label="6" layout="topleft" left="224" name="set_jingle_5" top="430" width="26" tool_tip="Put the selected song on jingle pad 6 (it plays from the pads in the mixer). Pick another song to replace it." />
+    <button follows="left|bottom" height="22" label="7" layout="topleft" left="252" name="set_jingle_6" top="430" width="26" tool_tip="Put the selected song on jingle pad 7 (it plays from the pads in the mixer). Pick another song to replace it." />
+    <button follows="left|bottom" height="22" label="8" layout="topleft" left="280" name="set_jingle_7" top="430" width="26" tool_tip="Put the selected song on jingle pad 8 (it plays from the pads in the mixer). Pick another song to replace it." />
+    <text follows="left|right|bottom" height="16" layout="topleft" left="316" name="jingle_note" top="434" width="334" text_color="LtGray_50" use_ellipses="true">Pick a song, then press a pad to put it there.</text>
 </floater>

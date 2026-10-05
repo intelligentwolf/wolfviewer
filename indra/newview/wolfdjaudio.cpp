@@ -106,6 +106,153 @@ void WolfDJBiquad::setHighShelf(float f0, float db)
     a2 = ((A + 1.f) - (A - 1.f) * cw - sa) / a0;
 }
 
+// Same cookbook, LPF and HPF.
+void WolfDJBiquad::setLowPass(float f0, float q)
+{
+    const float w0 = 2.f * PI_F * f0 / (float)RATE;
+    const float cw = cosf(w0), sw = sinf(w0);
+    const float alpha = sw / (2.f * q);
+    const float a0 = 1.f + alpha;
+    b0 = (1.f - cw) / 2.f / a0;
+    b1 = (1.f - cw) / a0;
+    b2 = (1.f - cw) / 2.f / a0;
+    a1 = -2.f * cw / a0;
+    a2 = (1.f - alpha) / a0;
+}
+
+void WolfDJBiquad::setHighPass(float f0, float q)
+{
+    const float w0 = 2.f * PI_F * f0 / (float)RATE;
+    const float cw = cosf(w0), sw = sinf(w0);
+    const float alpha = sw / (2.f * q);
+    const float a0 = 1.f + alpha;
+    b0 = (1.f + cw) / 2.f / a0;
+    b1 = -(1.f + cw) / a0;
+    b2 = (1.f + cw) / 2.f / a0;
+    a1 = -2.f * cw / a0;
+    a2 = (1.f - alpha) / a0;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Effects [WOLF DJ 2026-10-05] - Paul: "can we add some basic effects?"
+// Reverb: the Schroeder/Moorer structure of Jezar's public-domain Freeverb (tuning.h): parallel
+// lowpass-feedback combs then series allpasses, its 44.1 kHz delay lengths scaled to RATE, the
+// right side 23 samples longer (stereospread), input gain 0.015 (fixedgain), allpass feedback
+// 0.5, room 0.84 (offsetroom 0.7 + 0.5 x scaleroom 0.28), damping 0.2 (0.5 x scaledamp 0.4).
+// The first four combs and first two allpasses: a basic room, not the full eight-comb tank.
+// ---------------------------------------------------------------------------------------------
+
+namespace
+{
+    constexpr size_t ECHO_FRAMES = RATE * 375 / 1000;
+    constexpr int FV_COMB[4] = { 1116, 1188, 1277, 1356 };
+    constexpr int FV_ALLPASS[2] = { 556, 441 };
+    constexpr int FV_SPREAD = 23;
+    constexpr float FV_FIXED_GAIN = 0.015f;
+    constexpr float FV_ROOM = 0.84f;
+    constexpr float FV_DAMP = 0.2f;
+    constexpr float FV_ALLPASS_FEEDBACK = 0.5f;
+
+    size_t fv_len(int at44k, int side)
+    {
+        return (size_t)((at44k + (side ? FV_SPREAD : 0)) * (double)RATE / 44100.0);
+    }
+}
+
+void WolfDJEffect::reset(int fx)
+{
+    mFx = fx;
+    mDelay.clear();
+    mDelayPos = 0;
+    for (int s = 0; s < 2; ++s)
+    {
+        for (Comb& c : mComb[s]) { c.mBuf.clear(); c.mPos = 0; c.mStore = 0.f; }
+        for (AllPass& a : mAll[s]) { a.mBuf.clear(); a.mPos = 0; }
+    }
+    if (fx == FX_ECHO)
+    {
+        mDelay.assign(ECHO_FRAMES * 2, 0.f);
+    }
+    else if (fx == FX_REVERB)
+    {
+        for (int s = 0; s < 2; ++s)
+        {
+            for (int i = 0; i < 4; ++i) mComb[s][i].mBuf.assign(fv_len(FV_COMB[i], s), 0.f);
+            for (int i = 0; i < 2; ++i) mAll[s][i].mBuf.assign(fv_len(FV_ALLPASS[i], s), 0.f);
+        }
+    }
+    else if (fx == FX_RADIO)
+    {
+        mHighPass.setHighPass(300.f, 0.707f);
+        mLowPass.setLowPass(3400.f, 0.707f);
+        mHighPass.reset();
+        mLowPass.reset();
+    }
+}
+
+void WolfDJEffect::process(int fx, float amount, float* stereo, size_t frames)
+{
+    if (fx != mFx) reset(fx);
+    if (fx == FX_NONE) return;
+    amount = llclamp(amount, 0.f, 1.f);
+    if (fx == FX_ECHO)
+    {
+        const float feedback = 0.25f + 0.4f * amount;    // more amount: louder and longer repeats
+        for (size_t f = 0; f < frames; ++f)
+        {
+            for (int s = 0; s < 2; ++s)
+            {
+                float& d = mDelay[mDelayPos * 2 + s];
+                const float x = stereo[f * 2 + s];
+                const float echoed = d;
+                d = x + echoed * feedback;
+                stereo[f * 2 + s] = x + echoed * amount;
+            }
+            if (++mDelayPos == ECHO_FRAMES) mDelayPos = 0;
+        }
+    }
+    else if (fx == FX_REVERB)
+    {
+        const float wet = amount * 3.f;     // Freeverb scalewet
+        const float dry = 1.f - 0.5f * amount;
+        for (size_t f = 0; f < frames; ++f)
+        {
+            const float in = (stereo[f * 2] + stereo[f * 2 + 1]) * FV_FIXED_GAIN;
+            for (int s = 0; s < 2; ++s)
+            {
+                float out = 0.f;
+                for (Comb& c : mComb[s])
+                {
+                    const float y = c.mBuf[c.mPos];
+                    c.mStore = y * (1.f - FV_DAMP) + c.mStore * FV_DAMP;
+                    c.mBuf[c.mPos] = in + c.mStore * FV_ROOM;
+                    if (++c.mPos == c.mBuf.size()) c.mPos = 0;
+                    out += y;
+                }
+                for (AllPass& a : mAll[s])
+                {
+                    const float b = a.mBuf[a.mPos];
+                    a.mBuf[a.mPos] = out + b * FV_ALLPASS_FEEDBACK;
+                    if (++a.mPos == a.mBuf.size()) a.mPos = 0;
+                    out = b - out;
+                }
+                stereo[f * 2 + s] = stereo[f * 2 + s] * dry + out * wet;
+            }
+        }
+    }
+    else if (fx == FX_RADIO)
+    {
+        const float drive = 1.f + 4.f * amount;
+        const float norm = 1.f / tanhf(drive);
+        for (size_t i = 0; i < frames * 2; ++i)
+        {
+            const int side = (int)(i & 1);
+            const float x = mLowPass.process(side, mHighPass.process(side, stereo[i]));
+            stereo[i] = tanhf(x * drive) * norm;
+        }
+    }
+}
+
 float wolfdj_fader_gain(float pos)
 {
     pos = llclamp(pos, 0.f, 1.f);
@@ -871,17 +1018,22 @@ void WolfDJMixer::mixTick()
         if (mi != ch.mLastMid) { ch.mMid.setPeaking(1000.f, 0.7f, mi); ch.mLastMid = mi; }
         if (hi != ch.mLastHigh) { ch.mHigh.setHighShelf(8000.f, hi); ch.mLastHigh = hi; }
         const bool eq_on = lo != 0.f || mi != 0.f || hi != 0.f;
+        if (eq_on)
+        {
+            for (size_t i = 0; i < N * 2; ++i)
+            {
+                const int side = (int)(i & 1);
+                mTmp[i] = ch.mHigh.process(side, ch.mMid.process(side, ch.mLow.process(side, mTmp[i])));
+            }
+        }
+        // [WOLF DJ 2026-10-05] the channel's effect, after its EQ (so Cue hears it too). Called
+        // for FX_NONE as well: that clears the last effect's tail, so turning it back on later
+        // does not replay it.
+        ch.mEffect.process(ch.mFx.load(), ch.mFxAmount.load(), mTmp.data(), N);
         float pre_peak = 0.f;
         for (size_t i = 0; i < N * 2; ++i)
         {
-            float x = mTmp[i];
-            if (eq_on)
-            {
-                const int side = (int)(i & 1);
-                x = ch.mHigh.process(side, ch.mMid.process(side, ch.mLow.process(side, x)));
-                mTmp[i] = x;
-            }
-            pre_peak = std::max(pre_peak, fabsf(x));
+            pre_peak = std::max(pre_peak, fabsf(mTmp[i]));
         }
         ch.mPrePeak = pre_peak;
         if (cue == ci) cue_buf.assign(mTmp.begin(), mTmp.end());
@@ -911,6 +1063,25 @@ void WolfDJMixer::mixTick()
         {
             mic_level = sqrtf(sum_sq / (float)(N * 2));
         }
+    }
+
+    // [WOLF DJ 2026-10-05] Jingle pads: on air at their own level, and in the DJ's ears.
+    {
+        const size_t got = mJingle.pull(mTmp.data(), N);
+        float jpeak = 0.f;
+        if (got > 0)
+        {
+            const float gain = wolfdj_fader_gain(mJingleLevel);
+            if (monitor_buf.empty()) monitor_buf.assign(N * 2, 0.f);
+            for (size_t i = 0; i < N * 2; ++i)
+            {
+                const float y = mTmp[i] * gain;
+                mBus[i] += y;
+                monitor_buf[i] += y;
+                jpeak = std::max(jpeak, fabsf(y));
+            }
+        }
+        mJinglePeak = jpeak;
     }
 
     // Talk-over envelope: fast down, slow back up. 0.02 RMS = about -34 dBFS, i.e. speech.

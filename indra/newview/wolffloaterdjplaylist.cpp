@@ -83,6 +83,7 @@ bool WolfFloaterDJPlaylist::postBuild()
     mTime = getChild<LLTextBox>("time_text");
     mError = getChild<LLTextBox>("error_text");
     mPlay = getChild<LLButton>("play");
+    mJingleNote = getChild<LLTextBox>("jingle_note");
 
     mBrowser->setDoubleClickCallback([this]() { onBrowserDoubleClick(); });
     mPlaylist->setDoubleClickCallback([this]()
@@ -103,6 +104,15 @@ bool WolfFloaterDJPlaylist::postBuild()
         if (p.has_parent_path() && p.parent_path() != p) showFolder(from_path(p.parent_path()));
     });
     getChild<LLButton>("add_files")->setCommitCallback([this](LLUICtrl*, const LLSD&) { addSelected(); });
+    // [WOLF DJ 2026-10-05] Paul: "a jingle set of buttons in different colours you can apply files
+    // to in the playlist folder": pick a song (left, or in the playlist), press a pad to put it there.
+    for (int i = 0; i < WolfDJJingles::PAD_COUNT; ++i)
+    {
+        const float* rgb = WolfDJJingles::PAD_RGB[i];
+        LLButton* pad = getChild<LLButton>(llformat("set_jingle_%d", i));
+        pad->setImageColor(LLUIColor(LLColor4(rgb[0], rgb[1], rgb[2], 1.f)));
+        pad->setCommitCallback([this, i](LLUICtrl*, const LLSD&) { setJinglePad(i); });
+    }
     getChild<LLButton>("add_folder")->setCommitCallback([this](LLUICtrl*, const LLSD&) { addFolder(); });
 
     WolfDJPlayer& player = WolfDJPlayer::instance();
@@ -227,6 +237,31 @@ void WolfFloaterDJPlaylist::onBrowserDoubleClick()
     {
         addFiles({ mEntries[i].mPath });
     }
+}
+
+// [WOLF DJ 2026-10-05] The selected song (the folder on the left first, else the playlist) onto a jingle pad.
+void WolfFloaterDJPlaylist::setJinglePad(int pad)
+{
+    std::string path;
+    if (LLScrollListItem* item = mBrowser->getFirstSelected())
+    {
+        const S32 i = item->getValue().asInteger();
+        if (i >= 0 && i < (S32)mEntries.size() && !mEntries[i].mDir) path = mEntries[i].mPath;
+    }
+    if (path.empty())
+    {
+        const S32 idx = mPlaylist->getFirstSelectedIndex();
+        const std::vector<std::string> files = WolfDJPlayer::instance().files();
+        if (idx >= 0 && idx < (S32)files.size()) path = files[idx];
+    }
+    if (path.empty())
+    {
+        mError->setText(llformat("Pick a song first (on the left, or in the playlist), then press pad %d.", pad + 1));
+        return;
+    }
+    WolfDJJingles::instance().setPad(pad, path);
+    mError->setText(std::string());
+    mJingleNote->setText(llformat("Pad %d: %s", pad + 1, WolfDJJingles::padLabel(path).c_str()));
 }
 
 void WolfFloaterDJPlaylist::addSelected()

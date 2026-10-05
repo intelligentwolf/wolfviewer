@@ -41,6 +41,7 @@ private:
     void showFolder(const std::string& folder);
     void onBrowserDoubleClick();
     void addSelected();
+    void setJinglePad(int pad);         // [WOLF DJ 2026-10-05]
     void addFolder();
     void addFiles(const std::vector<std::string>& paths);
     void rebuildPlaylist();
@@ -54,6 +55,7 @@ private:
     LLTextBox* mNowPlaying = nullptr;
     LLTextBox* mTime = nullptr;
     LLTextBox* mError = nullptr;
+    LLTextBox* mJingleNote = nullptr;   // [WOLF DJ 2026-10-05] what was just put on a pad
     LLButton* mPlay = nullptr;
     std::string mFolder;
     std::vector<Entry> mEntries;

@@ -52,6 +52,8 @@ private:
         LLButton* mCue = nullptr;
         LLView* mMeter = nullptr;
         LLTextBox* mDb = nullptr;
+        LLComboBox* mFx = nullptr;          // [WOLF DJ 2026-10-05] effect (not on the master)
+        LLSliderCtrl* mFxAmount = nullptr;
         float mShownDb = -60.f;
         float mClipUntil = 0.f;
     };
@@ -67,6 +69,11 @@ private:
     void loadLevels();
     void updateStatus();
     void requestListeners();
+    // <WolfViewer 2026-10-05> Grid Stream: the avatar's own stream from wolf-grid.com
+    // (gridmanager/gridstream.php), made there if they own a region and have none yet.
+    void onGridStream(bool new_password);
+    static void gridStreamCoro(LLHandle<LLFloater> handle, std::string body);
+    bool mGridStreamBusy = false;
     void drawMeter(LLView* meter, float peak, float& shown_db, float& clip_until);
     bool parseStreamUrl(const std::string& url, WolfDJMixer::StreamConfig& cfg, std::string& err) const;
     bool canSetLand(std::string& why) const;
@@ -90,6 +97,10 @@ private:
     S32 mListeners = -1;
     bool mListenersBusy = false;
     int mShownTrack = -1;       // the playlist track whose title the Now playing fields show
+    // [WOLF DJ 2026-10-05] jingle pads (WolfDJJingles)
+    std::array<LLButton*, 8> mPads{};           // WolfDJJingles::PAD_COUNT
+    std::array<std::string, 8> mPadShown;       // the file each pad's label was made from
+    void updatePads();
 };
 
 // LLAppViewer::requestQuit: go off air and put the land's music back while still connected.

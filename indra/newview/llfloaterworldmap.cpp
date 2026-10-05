@@ -92,6 +92,10 @@
 #include "alfloaterregiontracker.h"
 #include "llstartup.h"
 #include "wolfmapglobe.h"   // <WolfViewer 2026-10-02/>
+#include "wolfgrid.h"       // <WolfViewer 2026-10-05/> Buy Land
+#include "llcorehttputil.h"
+#include "llcoros.h"
+#include <boost/json.hpp>
 
 //---------------------------------------------------------------------------
 // Constants
@@ -526,9 +530,81 @@ void LLFloaterWorldMap::onClose(bool app_quitting)
     mTeleportFinishConnection.disconnect();
 }
 
+// <WolfViewer 2026-10-05> Buy Land. Paul: "can we add a "Buy Land" on the world map if a user is
+// from wolf territories and doesn't have a region". Shown only on Wolf Territories, and only when
+// wolf-grid.com says this avatar owns no region (gridmanager/hasregion.php, the same "owns a region"
+// rule as the free radio stream). Asked each time the map opens, so a region bought this session
+// hides it next time.
+namespace
+{
+    const char* WOLF_HAS_REGION_API = "https://www.wolf-grid.com/hasregion.php";
+
+    void wolf_update_buy_land(LLFloater* map)
+    {
+        LLButton* btn = map->findChild<LLButton>("wolf_buy_land");
+        if (!btn) return;
+        if (!WolfGrid::isWolfTerritories())
+        {
+            // The request carries this login's agent and session ids: only ever to Wolf's own site.
+            btn->setVisible(false);
+            return;
+        }
+        const LLHandle<LLFloater> handle = map->getHandle();
+        LLCoros::instance().launch("WolfBuyLand", [handle]()
+        {
+            LLCoreHttpUtil::HttpCoroutineAdapter::ptr_t adapter =
+                std::make_shared<LLCoreHttpUtil::HttpCoroutineAdapter>("WolfBuyLand", LLCore::HttpRequest::DEFAULT_POLICY_ID);
+            LLCore::HttpRequest::ptr_t request = std::make_shared<LLCore::HttpRequest>();
+            LLCore::HttpOptions::ptr_t options = WolfGrid::makeVerifiedHttpOptions();
+            options->setTimeout(15);
+            LLCore::HttpHeaders::ptr_t headers = std::make_shared<LLCore::HttpHeaders>();
+            headers->append(HTTP_OUT_HEADER_ACCEPT, "application/json");
+            headers->append("X-Wolf-Agent", gAgentID.asString());
+            headers->append("X-Wolf-Session", gAgentSessionID.asString());
+            LLCore::BufferArray::ptr_t raw(new LLCore::BufferArray());
+            LLSD result = adapter->postRawAndSuspend(request, WOLF_HAS_REGION_API, raw, options, headers);
+
+            // {success, ownsRegion, regionsUrl}. Anything else (an error, no answer): leave it hidden.
+            bool show = false;
+            std::string url;
+            if (result.has(LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS_RAW))
+            {
+                const LLSD::Binary& bin = result[LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS_RAW].asBinary();
+                boost::system::error_code ec;
+                boost::json::value root = boost::json::parse(std::string(bin.begin(), bin.end()), ec);
+                if (!ec && root.is_object())
+                {
+                    const boost::json::object& o = root.as_object();
+                    const boost::json::value* ok = o.if_contains("success");
+                    const boost::json::value* owns = o.if_contains("ownsRegion");
+                    const boost::json::value* u = o.if_contains("regionsUrl");
+                    show = ok && ok->is_bool() && ok->as_bool() && owns && owns->is_bool() && !owns->as_bool();
+                    if (u && u->is_string()) url = u->as_string().c_str();
+                }
+            }
+            LLFloater* map = handle.get();
+            LLButton* btn = map ? map->findChild<LLButton>("wolf_buy_land") : nullptr;
+            if (!btn) return;
+            if (url.empty()) url = "https://www.wolf-grid.com/index.php?f=ns";
+            btn->setCommitCallback([url](LLUICtrl*, const LLSD&) { LLWeb::loadURLExternal(url); });
+            // Paul 10-05: "make the buy land button our usual green with white writing please it
+            // gets a bit lost on the map" - the green of WolfStorm's Get Land (css/viewer_menu.css
+            // .get-land-btn #15803d).
+            static const LLUIColor green(LLColor4(0x15 / 255.f, 0x80 / 255.f, 0x3d / 255.f, 1.f));
+            static const LLUIColor white(LLColor4::white);
+            btn->setImageColor(green);
+            btn->setUnselectedLabelColor(white);
+            btn->setSelectedLabelColor(white);
+            btn->setVisible(show);
+        });
+    }
+}
+// </WolfViewer>
+
 // virtual
 void LLFloaterWorldMap::onOpen(const LLSD& key)
 {
+    wolf_update_buy_land(this);   // <WolfViewer 2026-10-05/>
     mTeleportFinishConnection = LLViewerParcelMgr::getInstance()->
         setTeleportFinishedCallback(boost::bind(&LLFloaterWorldMap::onTeleportFinished, this));
 

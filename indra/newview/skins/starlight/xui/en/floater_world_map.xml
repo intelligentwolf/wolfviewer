@@ -73,6 +73,20 @@
      show_text="false"
      width="150" />
     </panel>
+   <!-- <WolfViewer 2026-10-05> Paul: "a Buy Land on the world map if a user is from wolf territories and
+        doesn't have a region". Hidden until llfloaterworldmap.cpp wolf_update_buy_land hears from
+        wolf-grid.com/hasregion.php that this avatar owns no region. Same strip and placement rule as
+        layout_panel_6 (the zoom slider), at the other end of it. -->
+   <button
+    follows="left|bottom"
+    height="20"
+    label="Buy Land"
+    left="12"
+    bottom="487"
+    name="wolf_buy_land"
+    tool_tip="Get your own region on Wolf Territories - every region comes with its own free radio stream. Opens the regions page."
+    visible="false"
+    width="80" />
    </layout_panel>
 
   <!-- <FS:Zi> FIRE-31376: Splitter panel to show/hide map details -->

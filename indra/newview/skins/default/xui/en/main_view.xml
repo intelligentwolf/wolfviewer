@@ -81,6 +81,16 @@
              mouse_opaque="false"
              name="login_panel_holder"
              width="1024"/>
+      <!-- [FLIGHT MODE 2026-10-06] wolfflightdeck.cpp: the flight deck, under the floaters and the
+           toolbars, over the world. Draws nothing and takes no clicks until World > Flight Mode. -->
+      <wolf_flight_deck follows="all"
+                        left="0"
+                        top="0"
+                        height="500"
+                        width="1024"
+                        mouse_opaque="false"
+                        tab_stop="false"
+                        name="wolf_flight_deck"/>
       <debug_view follows="all"
                   left="0"
                   top="0"

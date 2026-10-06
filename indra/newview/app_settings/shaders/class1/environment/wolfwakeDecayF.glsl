@@ -22,10 +22,16 @@ uniform float uFoamDecay;
 uniform float uCrestDecay;
 uniform float uTexel;
 uniform float uSpread;
+uniform vec2 uShift;   // <WolfViewer 2026-10-06> the field's window moved (UV): carry the wash with it
 
 void main()
 {
-    vec2 uv = gl_FragCoord.xy * uTexel;
+    vec2 uv = gl_FragCoord.xy * uTexel + uShift;
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0)
+    {
+        frag_color = vec4(0.0, 0.0, 0.0, 1.0);   // newly in view: clean water
+        return;
+    }
     vec4 c = texture(uPrev, uv);
     vec4 n = texture(uPrev, uv + vec2(uTexel, 0.0))
            + texture(uPrev, uv - vec2(uTexel, 0.0))

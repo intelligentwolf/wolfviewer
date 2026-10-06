@@ -94,6 +94,30 @@
     <file>SourceCodePro-Regular.ttf</file>
   </font>
 
+  <!-- <WolfViewer 2026-10-06> Flight Mode cockpit lettering: B612, the typeface Airbus
+       designed for its flight displays (SIL Open Font License, B612-OFL.txt). -->
+  <font name="B612"
+	comment="Flight Mode avionics font (Airbus B612)">
+    <file>B612-Regular.ttf</file>
+  </font>
+
+  <font name="B612"
+	comment="Flight Mode avionics font (Airbus B612, bold)"
+	font_style="BOLD">
+    <file>B612-Bold.ttf</file>
+  </font>
+
+  <font name="B612Mono"
+	comment="Flight Mode avionics digits (Airbus B612 Mono)">
+    <file>B612Mono-Regular.ttf</file>
+  </font>
+
+  <font name="B612Mono"
+	comment="Flight Mode avionics digits (Airbus B612 Mono, bold)"
+	font_style="BOLD">
+    <file>B612Mono-Bold.ttf</file>
+  </font>
+
 	<font name="OCRA"
 	comment="OCRA machine character recognition used in script editor compile errors">
     <file>ocra.ttf</file>
@@ -211,5 +235,54 @@
   <font_size name="Pie"
 	     comment="Size of pie menu font (points, or 1/72 of an inch)"
 	     size="7.5"
+	     />
+  <!-- <WolfViewer 2026-10-06> Flight Mode: wolfflightdeck.cpp picks the one that fits its scale. -->
+  <font_size name="Avionics0"
+	     comment="Flight Mode avionics size 0 (points)"
+	     size="6"
+	     />
+  <font_size name="Avionics1"
+	     comment="Flight Mode avionics size 1 (points)"
+	     size="7"
+	     />
+  <font_size name="Avionics2"
+	     comment="Flight Mode avionics size 2 (points)"
+	     size="8"
+	     />
+  <font_size name="Avionics3"
+	     comment="Flight Mode avionics size 3 (points)"
+	     size="9"
+	     />
+  <font_size name="Avionics4"
+	     comment="Flight Mode avionics size 4 (points)"
+	     size="10"
+	     />
+  <font_size name="Avionics5"
+	     comment="Flight Mode avionics size 5 (points)"
+	     size="11"
+	     />
+  <font_size name="Avionics6"
+	     comment="Flight Mode avionics size 6 (points)"
+	     size="12"
+	     />
+  <font_size name="Avionics7"
+	     comment="Flight Mode avionics size 7 (points)"
+	     size="14"
+	     />
+  <font_size name="Avionics8"
+	     comment="Flight Mode avionics size 8 (points)"
+	     size="16"
+	     />
+  <font_size name="Avionics9"
+	     comment="Flight Mode avionics size 9 (points)"
+	     size="19"
+	     />
+  <font_size name="Avionics10"
+	     comment="Flight Mode avionics size 10 (points)"
+	     size="22"
+	     />
+  <font_size name="Avionics11"
+	     comment="Flight Mode avionics size 11 (points)"
+	     size="26"
 	     />
 </fonts>

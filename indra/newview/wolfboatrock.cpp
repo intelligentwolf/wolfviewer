@@ -150,6 +150,27 @@ void WolfBoatRock::idle()
                                  << mRockers.size() << " rocking (cap " << MAX_ROCKERS << "), "
                                  << mStatWantName << " waiting for a name, "
                                  << mStatDenied << " denied" << LL_ENDL;
+        // <WolfViewer 2026-10-06> How far the nearest rocking hulls really moved since the last line.
+        const LLVector3 cam = LLViewerCamera::getInstance()->getOrigin();
+        std::vector<std::pair<F32, Rocker*>> near_;
+        for (auto& kv : mRockers)
+        {
+            if (kv.second.mObject.notNull() && !kv.second.mObject->isDead())
+            {
+                near_.push_back({ (kv.second.mObject->getPositionAgent() - cam).lengthSquared(), &kv.second });
+            }
+        }
+        std::sort(near_.begin(), near_.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+        for (size_t k = 0; k < near_.size() && k < 8; ++k)
+        {
+            Rocker& r = *near_[k].second;
+            const WolfObjectProps::Props* np = WolfObjectProps::instance().get(r.mObject->getID());
+            LL_DEBUGS("WolfBoatRock") << "moves: [" << (np ? np->mName : std::string("?")) << "] gain " << r.mGain
+                                      << " peak bob " << r.mPeakBob << " m, peak slope " << r.mPeakSlope
+                                      << " at " << llround(sqrtf(near_[k].first)) << " m" << LL_ENDL;
+            r.mPeakBob = 0.f;
+            r.mPeakSlope = 0.f;
+        }
     }
 }
 
@@ -189,7 +210,10 @@ void WolfBoatRock::sweep()
             if (!verdict.mRock && !verdict.mWantName)
             {
                 ++mStatDenied;
-                LL_DEBUGS("WolfBoatRock") << "still " << objectp->getID() << ": " << verdict.mWhy << LL_ENDL;
+                const WolfObjectProps::Props* np = props.get(objectp->getID());
+                LL_DEBUGS("WolfBoatRock") << "still " << objectp->getID() << ": " << verdict.mWhy
+                                          << " [" << (np ? np->mName : std::string("?")) << "] at "
+                                          << objectp->getPositionRegion() << LL_ENDL;
             }
         }
         if (verdict.mWantName)
@@ -296,7 +320,11 @@ void WolfBoatRock::step()
             continue;
         }
 
-        const Sample w = measureHull(r, objectp, sea, t);
+        Sample w = measureHull(r, objectp, sea, t);
+        const Sample s = mooringSway(r, objectp, t);
+        w.mZ += s.mZ;
+        w.mSx += s.mSx;
+        w.mSy += s.mSy;
         // gain: 1.0 physical/crewed, 0.6 parked floaters (classify())
         const F32 g = (r.mGain > 0.f) ? r.mGain : 1.f;
         r.mBob += (w.mZ * g - r.mBob) * bob_alpha;
@@ -321,6 +349,8 @@ void WolfBoatRock::step()
         n.normalize();
         r.mTargetBob = r.mBob;
         r.mTargetTilt.shortestArc(up, n);
+        r.mPeakBob = llmax(r.mPeakBob, fabsf(r.mBob));
+        r.mPeakSlope = llmax(r.mPeakSlope, sqrtf(r.mSx * r.mSx + r.mSy * r.mSy));
 
         // The offset lands in LLDrawable::updateXform() (apply/removeApplied); all this
         // pass does is make sure updateXform runs for the hull this frame. Damped, and only
@@ -523,6 +553,10 @@ WolfBoatRock::Verdict WolfBoatRock::classify(LLViewerObject* objectp) const
     }
     if (th > wh - 0.4f)
     {
+        // <WolfViewer 2026-10-06> The numbers behind the refusal (Madrigal: 372 of 400 in-band
+        // objects refused here), so a shallow berth can be told from a hull on dry land.
+        LL_DEBUGS("WolfBoatRock") << "not over water " << objectp->getID() << " at " << p
+                                  << " ground " << th << " water " << wh << LL_ENDL;
         return no("not over water");
     }
 
@@ -743,7 +777,14 @@ F32 WolfBoatRock::waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F3
     // cell sits still (the default everywhere inside a region now), on a small-wave cell it
     // rides smallScale of the open sea, on open / surf cells the full swell.
     const F32 energy = field ? WolfWaterField::zoneAt(*field, rx, ry) : WolfWaveZones::OPEN_ENERGY;
-    const F32 zone_mul = WolfWaveZones::zoneScale(energy, amp, sea.mCalm, sea.mSmall);
+    // <WolfViewer 2026-10-06> ...but never below HARBOUR_SLOP for the ROCKER. Paul at Madrigal marina:
+    // "none of the boats appear to be rocking" / "i just dont see a lot of rocking" - the marina is
+    // unpainted (OFF, zone 0), so the 09-10 zone rule multiplied every moored hull by 0 and undid the
+    // 08-31 floor above. Moored boats sway from harbour slop even where the drawn water is flat;
+    // the surface keeps the painted zones. Paul chose the fix 10-06; about a third of the open sea.
+    // Mirror: wolfstorm terrain_manager.js _waveSampleCPU, same constant.
+    const F32 HARBOUR_SLOP = 0.33f;
+    const F32 zone_mul = llmax(WolfWaveZones::zoneScale(energy, amp, sea.mCalm, sea.mSmall), HARBOUR_SLOP);
     const F32 swell_scale = llmax(0.15f + 1.15f * exposure_at(rx, ry), 0.7f) * zone_mul;
 
     if (amp > 0.01f)
@@ -981,6 +1022,67 @@ WolfBoatRock::Sample WolfBoatRock::measureHull(const Rocker& r, const LLViewerOb
     }
     out.mSx = (s_u * vy - s_v * uy) / det;
     out.mSy = (s_v * ux - s_u * vx) / det;
+    return out;
+}
+
+// <WolfViewer 2026-10-06> MOORING SWAY. Measured at Madrigal marina with the "moves:" debug
+// line: the region's water is the calmest sea state (WolfSeaState MIN_INDEX 0.15 -> swell
+// 0.22 * 0.15^1.5 = 1.3 cm), so after the harbour scaling the 35 rocking hulls moved 0.1-3 mm
+// and tilted under 0.1 degree — rocking that nobody can see (Paul: "hardly any of my boats are
+// rocking"). A moored hull is never that still: wind on the topsides and the wakes of passing
+// boats roll and pitch it even on glassy water. This is that motion, independent of the sea
+// state, added to the wave-following one: roll about the keel, pitch about the beam and a
+// little heave, each a slow sine with a second, longer one beating against it so the motion
+// never looks mechanical. Every hull's periods and phases come from its UUID, so neighbours
+// never move in step. Scaled down for long hulls (a 6 m dinghy gets the full roll, a 24 m
+// yacht a third) and by the rocker gain like the waves.
+// Mirror: wolfstorm js/world/terrain/terrain_manager.js _mooringSway, same constants.
+WolfBoatRock::Sample WolfBoatRock::mooringSway(const Rocker& r, const LLViewerObject* objectp, F32 t) const
+{
+    static const F32 ROLL_DEG = 2.5f;     // full-size roll, either side
+    static const F32 PITCH_DEG = 0.9f;
+    static const F32 HEAVE_M = 0.05f;
+    static const F32 REF_LENGTH_M = 8.f;  // hulls up to this long sway fully
+
+    Sample out;
+    const LLUUID& id = objectp->getID();
+    // Four bytes of the UUID per figure, 0..1.
+    auto h = [&id](S32 i)
+    {
+        const U8* b = id.mData + (i * 4) % 16;
+        return (F32)((b[0] << 8) | b[1]) / 65535.f;
+    };
+    const F32 TWO_PI = 6.28318f;
+    const F32 roll_period = 5.0f + 2.0f * h(0);
+    const F32 pitch_period = 3.8f + 1.4f * h(1);
+    const F32 heave_period = 4.4f + 1.6f * h(2);
+    const F32 ph = TWO_PI * h(3);
+
+    const F32 length = llmax(r.mMax.mV[VX] - r.mMin.mV[VX], 0.5f);
+    const F32 size = llclamp(REF_LENGTH_M / length, 0.35f, 1.f);
+
+    const F32 roll = ROLL_DEG * DEG_TO_RAD * size
+                   * (sinf(TWO_PI * t / roll_period + ph) + 0.35f * sinf(TWO_PI * t / (roll_period * 2.7f) + ph * 1.7f));
+    const F32 pitch = PITCH_DEG * DEG_TO_RAD * size
+                    * (sinf(TWO_PI * t / pitch_period + ph * 2.3f) + 0.3f * sinf(TWO_PI * t / (pitch_period * 3.1f) + ph * 0.6f));
+    out.mZ = HEAVE_M * size * sinf(TWO_PI * t / heave_period + ph * 3.1f);
+
+    // The slope a tilted plane has along the hull's own horizontal axes, as a world gradient
+    // (measureHull's convention: n = normalize(-sx, -sy, 1)). Bow-stern carries the pitch,
+    // the beam the roll.
+    const LLQuaternion rot = objectp->getRotationRegion();
+    LLVector2 u((LLVector3::x_axis * rot).mV[VX], (LLVector3::x_axis * rot).mV[VY]);
+    LLVector2 v((LLVector3::y_axis * rot).mV[VX], (LLVector3::y_axis * rot).mV[VY]);
+    if (u.length() < 0.1f || v.length() < 0.1f)
+    {
+        return out;   // standing on end: heave only
+    }
+    u.normalize();
+    v.normalize();
+    const F32 s_u = tanf(pitch);
+    const F32 s_v = tanf(roll);
+    out.mSx = s_u * u.mV[VX] + s_v * v.mV[VX];
+    out.mSy = s_u * u.mV[VY] + s_v * v.mV[VY];
     return out;
 }
 

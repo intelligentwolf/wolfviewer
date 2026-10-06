@@ -823,6 +823,32 @@ void LLFloaterWorldMap::draw()
         }
     }
     // </WolfViewer>
+    // <WolfViewer 2026-10-06> wolfShowArea: the area fills 85% of the view's shorter side.
+    // zoom is log2(pixels per metre) (LLWorldMapView::zoomFromScale), so the view's centre goes
+    // to the area's centre by a pan of -(centre - camera) * 2^zoom pixels (globalPosToView).
+    if (mWolfAreaPending)
+    {
+        const LLRect view_rect = mMapView->getRect();
+        const S32 w = view_rect.getWidth(), h = view_rect.getHeight();
+        if (w > 0 && h > 0)
+        {
+            mWolfAreaPending = false;
+            const F64 span = llmax(mWolfAreaSpan, (F64)REGION_WIDTH_METERS);
+            const F32 z = (F32)log2(0.85 * llmin(w, h) / span);
+            if (WolfMapGlobe::instance().active())
+            {
+                mMapView->wolfFlyTo(mWolfAreaCentre, z);   // the globe's own flight there
+            }
+            else
+            {
+                wolfSetMapZoom(z);
+                const LLVector3d rel = mWolfAreaCentre - gAgentCamera.getCameraPositionGlobal();
+                const F64 ppm = pow(2.0, (F64)z);
+                mMapView->setPan(-(S32)ll_round(rel.mdV[VX] * ppm), -(S32)ll_round(rel.mdV[VY] * ppm), true);
+            }
+        }
+    }
+    // </WolfViewer>
     mMapView->zoom((F32)mZoomSlider->getValue().asReal());
 
     // Enable/disable checkboxes depending on the zoom level
@@ -1550,6 +1576,14 @@ void LLFloaterWorldMap::adjustZoomSliderBounds()
 void LLFloaterWorldMap::wolfSetMapZoom(F32 zoom)
 {
     mZoomSlider->setValue(LLSD(zoom));   // the slider clamps it to its range
+}
+
+void LLFloaterWorldMap::wolfShowArea(const LLVector3d& centre, F64 span_m)
+{
+    mWolfAreaCentre = centre;
+    mWolfAreaSpan = span_m;
+    mWolfAreaPending = true;
+    mWolfGlobeStartPending = false;   // shown for a place: not the opening globe
 }
 // </WolfViewer>
 

@@ -104,6 +104,7 @@ private:
     static void onClickNewAccount(void*);
     static void onClickVersion(void*);
     static void onClickPatreon(void*);   // <FS:Wolf/>
+    static void onClickWhatsNew(void*);  // <WolfViewer 2026-10-06>
     static void onClickForgotPassword(void*);
     static void onClickHelp(void*);
     static void onPassKey(LLLineEditor* caller, void* user_data);

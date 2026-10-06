@@ -1055,10 +1055,13 @@
     
     <!-- World Menu -->
     
+    <!-- <WolfViewer 2026-10-06> Paul: "make it scrolling if its too long for the page" — up/down
+         arrows and the mouse wheel (llmenugl.cpp mScrollable) instead of a "More" spillover. -->
     <menu
      create_jump_keys="true"
      label="World"
      name="World"
+     scrollable="true"
      tear_off="true"
      visible="true">
         <menu_item_call
@@ -1250,6 +1253,36 @@
             <menu_item_check.on_click
              function="ToggleControl"
              parameter="WolfShowAstronomy" />
+        </menu_item_check>
+        <!-- [FLIGHT MODE 2026-10-06] wolfflight.cpp / wolfflightdeck.cpp: Paul, "World, Flight Mode,
+             adds a flight control interface for flying planes including an AUTOPILOT". The flight
+             deck across the bottom of the screen; the bottom toolbar folds away (its arrow brings it
+             back). -->
+        <menu_item_check
+         label="Flight Mode"
+         name="WolfFlightMode">
+            <menu_item_check.on_check
+             function="CheckControl"
+             parameter="WolfFlightMode" />
+            <menu_item_check.on_click
+             function="ToggleControl"
+             parameter="WolfFlightMode" />
+            <menu_item_check.on_visible
+             function="WolfGrid.IsWolfTerritories" />
+        </menu_item_check>
+        <!-- [SAILING MODE 2026-10-06] Paul: "can we add a sailing one as well — World, Sailing Mode".
+             The same deck with marine instruments and the sailing autopilot (wolfflight.cpp). -->
+        <menu_item_check
+         label="Sailing Mode"
+         name="WolfSailMode">
+            <menu_item_check.on_check
+             function="CheckControl"
+             parameter="WolfSailMode" />
+            <menu_item_check.on_click
+             function="ToggleControl"
+             parameter="WolfSailMode" />
+            <menu_item_check.on_visible
+             function="WolfGrid.IsWolfTerritories" />
         </menu_item_check>
         <menu_item_call
              label="Set Home to Here"
@@ -3074,6 +3107,16 @@
              function="PromptShowURL"
              name="wolf_help_url"
              parameter="WebLaunchExternalTarget,https://www.wolf-grid.com/blog/faq.php" />
+        </menu_item_call>
+        <!-- <WolfViewer 2026-10-06> What's new on the grid and in the viewers (WolfGrid::WHATSNEW_URL;
+             also on the login screen). -->
+        <menu_item_call
+         label="What's New"
+         name="WolfWhatsNew">
+             <menu_item_call.on_click
+             function="PromptShowURL"
+             name="wolf_whatsnew_url"
+             parameter="WebLaunchExternalTarget,https://www.wolf-grid.com/index.php?f=whatsnew" />
         </menu_item_call>
         
         <!-- <WolfViewer 2026-09-12> "Troubleshooting" is gone rather than repointed. It went to

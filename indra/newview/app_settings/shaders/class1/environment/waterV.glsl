@@ -172,6 +172,7 @@ out vec4 vSurf;   // [SURF rev3] x crest (peak only), y breaking, z amplitude us
 uniform vec2 fftTile;
 uniform vec2 fftFade;
 uniform vec2 wakeRegionSize;
+uniform vec2 wakeOrigin;   // <WolfViewer 2026-10-06/> the wake field window's south-west corner, region metres
 uniform float wakeStrength;
 uniform float boundedWaterDepth;
 // </WolfViewer>
@@ -879,7 +880,7 @@ void main()
     // surface and the churn astern depresses it (G lift, B dip, differenced at read).
     if (wakeReady > 0.5 && wakeStrength > 0.0)
     {
-        vec2 wkuv = regionXY / wakeRegionSize;
+        vec2 wkuv = (regionXY - wakeOrigin) / wakeRegionSize;   // <WolfViewer 2026-10-06/> the field window
         if (wkuv.x >= 0.0 && wkuv.x <= 1.0 && wkuv.y >= 0.0 && wkuv.y <= 1.0)
         {
             vec4 wk = WOLF_TEX_WAKE_SAMPLER( wkuv);

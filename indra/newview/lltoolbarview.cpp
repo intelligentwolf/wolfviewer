@@ -30,6 +30,7 @@
 #include "lltoolbarview.h"
 #include "lllayoutstack.h"
 #include "wolfgrid.h" // <WolfViewer> Wolf Territories-only toolbar buttons
+#include "wolfflight.h"   // <WolfViewer 2026-10-06/> the Plane / Boat deck toggles
 
 #include "llapp.h"
 #include "llappviewer.h"
@@ -121,6 +122,12 @@ bool LLToolBarView::postBuild()
     mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM]->getCenterLayoutPanel()->setLocationId(LLToolBarEnums::TOOLBAR_BOTTOM);
 
     mBottomToolbarPanel = getChild<LLView>("bottom_toolbar_panel");
+    // <WolfViewer 2026-10-06> shown height as the skin lays it out (90 in most skins, 28 in
+    // Vintage), read before applyBottomToolbarHidden() can shrink it
+    if (mBottomToolbarPanel && mBottomToolbarPanel->getRect().getHeight() > 0)
+    {
+        mBottomToolbarShownDim = mBottomToolbarPanel->getRect().getHeight();
+    }
     // <WolfViewer 2026-09-10> the bottom bar's width is set every frame in draw() (screen
     // centring); it must stop following its panel's right edge or the parent's reshape would
     // stretch it back.
@@ -133,7 +140,21 @@ bool LLToolBarView::postBuild()
     if (mWolfToolbarToggle)
     {
         mWolfToolbarToggle->setCommitCallback(boost::bind(&LLToolBarView::toggleBottomToolbar, this));
-        applyBottomToolbarHidden(gSavedSettings.getBOOL("WolfViewerBottomToolbarHidden"));
+        // <WolfViewer 2026-10-06> Paul: "the viewer should always start in toolbar mode". Hidden
+        // lasts for the session only (Flight / Sailing Mode fold it away; a restart brings it back).
+        gSavedSettings.setBOOL("WolfViewerBottomToolbarHidden", false);
+        applyBottomToolbarHidden(false);
+    }
+    // <WolfViewer 2026-10-06> beside it, the Flight Mode and Sailing Mode decks' show / hide
+    mWolfPlaneToggle = findChild<LLButton>("wolf_plane_toggle");
+    if (mWolfPlaneToggle)
+    {
+        mWolfPlaneToggle->setCommitCallback([](LLUICtrl*, const LLSD&) { WolfFlight::instance().toggleDeck(false); });
+    }
+    mWolfBoatToggle = findChild<LLButton>("wolf_boat_toggle");
+    if (mWolfBoatToggle)
+    {
+        mWolfBoatToggle->setCommitCallback([](LLUICtrl*, const LLSD&) { WolfFlight::instance().toggleDeck(true); });
     }
     // </WolfViewer>
 
@@ -949,19 +970,19 @@ void LLToolBarView::refreshChatStripWidth()
 // bar, which shares this panel, goes with it — press the arrow again to have both back.
 void LLToolBarView::applyBottomToolbarHidden(bool hidden)
 {
-    static const S32 SHOWN_DIM = 90;    // panel_toolbar_view.xml bottom_toolbar_panel height
-    static const S32 HIDDEN_DIM = 16;   // the arrow plus a pixel
+    static const S32 HIDDEN_DIM = 26;   // the three toggle icons (22 px) and a margin
     if (mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM])
     {
         mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM]->setVisible(!hidden);
     }
     if (LLLayoutPanel* panel = dynamic_cast<LLLayoutPanel*>(mBottomToolbarPanel))
     {
-        panel->setTargetDim(hidden ? HIDDEN_DIM : SHOWN_DIM);
+        panel->setTargetDim(hidden ? HIDDEN_DIM : mBottomToolbarShownDim);
     }
     if (mWolfToolbarToggle)
     {
-        mWolfToolbarToggle->setToggleState(hidden);
+        // <WolfViewer 2026-10-06> lit while the toolbar shows (it was an up/down arrow)
+        mWolfToolbarToggle->setToggleState(!hidden);
         mWolfToolbarToggle->setToolTip(hidden ? std::string("Show the toolbar") : std::string("Hide the toolbar"));
     }
 }
@@ -988,6 +1009,17 @@ void LLToolBarView::draw()
     // The hide/show arrow (panel_toolbar_view.xml) keeps the panel's far right, which the
     // narrowed toolbar now leaves clear.
     static LLCachedControl<bool> bottom_hidden(gSavedSettings, "WolfViewerBottomToolbarHidden", false);
+    // <WolfViewer 2026-10-06> the Plane / Boat icons lit while their deck shows
+    {
+        const WolfFlight& wf = WolfFlight::instance();
+        const bool deck = wf.active() && !wf.deckHidden();
+        if (mWolfPlaneToggle) mWolfPlaneToggle->setToggleState(deck && !wf.sailing());
+        if (mWolfBoatToggle) mWolfBoatToggle->setToggleState(deck && wf.sailing());
+        // Flight and Sailing Mode are Wolf Territories only (WolfFlight::requestMode)
+        const bool wolf = WolfGrid::isOnWolfTerritories();
+        if (mWolfPlaneToggle) mWolfPlaneToggle->setVisible(wolf);
+        if (mWolfBoatToggle) mWolfBoatToggle->setVisible(wolf);
+    }
     if (mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM] && !bottom_hidden)
     {
         LLToolBar* bar = mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM];
@@ -995,7 +1027,7 @@ void LLToolBarView::draw()
         const LLView* strip = findChildView("chat_bar_stand_fly_container_panel", true);
         const S32 strip_w = (strip && strip->getVisible()) ? strip->getRect().getWidth() : 0;
         const S32 panel_w = parent ? parent->getRect().getWidth() : bar->getRect().getWidth();
-        S32 want = panel_w - strip_w - 18;   // 18: the hide/show arrow's corner
+        S32 want = panel_w - strip_w - 78;   // 78: the three show / hide icons' corner
         // The buttons' own width (the centred button panel) is the floor.
         const LLView* buttons = bar->findChildView("button_panel", true);
         const S32 need = buttons ? buttons->getRect().getWidth() + 8 : 0;

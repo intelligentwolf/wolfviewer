@@ -913,6 +913,8 @@ set(viewer_SOURCE_FILES
     utilitybar.cpp
     wolfalbumart.cpp
     wolfboatrock.cpp
+    wolfflight.cpp
+    wolfflightdeck.cpp
     wolfupdate.cpp
     wolfnaturalwater.cpp
     wolfparcelbitmap.cpp
@@ -1810,6 +1812,8 @@ set(viewer_HEADER_FILES
     utilitybar.h
     wolfalbumart.h
     wolfboatrock.h
+    wolfflight.h
+    wolfflightdeck.h
     wolfupdate.h
     wolfnaturalwater.h
     wolfcellquadtree.h

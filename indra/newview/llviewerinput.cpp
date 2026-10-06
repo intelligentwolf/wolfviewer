@@ -55,6 +55,7 @@
 #include "fsfloatersearch.h"
 #include "llvoiceclient.h"
 #include "wolfvehiclecontrols.h"   // <WolfViewer 2026-09-25> Move floater Vehicle tab
+#include "wolfflight.h"            // <WolfViewer 2026-10-06> Flight Mode
 
 //
 // Constants
@@ -1730,6 +1731,10 @@ bool LLViewerInput::scanKey(KEY key, bool key_down, bool key_up, bool key_level)
     // the driving keys. Only watches — every key goes on to its binding below unchanged.
     // After the mKeyHandledByUI bail, so typing in chat never lights anything.
     WolfVehicle::noteScanKey(key, mask, key_down, key_up, key_level, repeat);
+    // </WolfViewer>
+    // <WolfViewer 2026-10-06> Flight Mode: the pilot's keys (the control picture, and the
+    // autopilot disconnects when the pilot takes the controls). Watches only.
+    WolfFlight::instance().noteScanKey(key, mask, key_down, key_up, key_level, repeat);
     // </WolfViewer>
 
     bool res = scanKey(mKeyBindings[mode], static_cast<S32>(mKeyBindings[mode].size()), key, mask, key_down, key_up, key_level, repeat);

@@ -331,6 +331,12 @@ FSPanelLogin::FSPanelLogin(const LLRect &rect,
     {
         patreon_text->setClickedCallback(onClickPatreon, NULL);
     }
+    // <WolfViewer 2026-10-06> What's new (Paul: "a latest updates thing on the loading page"). findChild,
+    // as patreon_text: a skin without the link must not break login.
+    if (LLTextBox* whatsnew_text = findChild<LLTextBox>("whatsnew_text"))
+    {
+        whatsnew_text->setClickedCallback(onClickWhatsNew, NULL);
+    }
 
     // <WolfViewer 2026-09-28> The release on the login screen (Paul: "I diddnt see the release name
     // when i logged in"). The 09-12 version of this went into llpanellogin.cpp, which is #if 0 in
@@ -1146,6 +1152,12 @@ void FSPanelLogin::onClickVersion(void*)
 void FSPanelLogin::onClickPatreon(void*)
 {
     LLWeb::loadURLExternal(WolfGrid::PATREON_URL);
+}
+
+// <WolfViewer 2026-10-06>
+void FSPanelLogin::onClickWhatsNew(void*)
+{
+    LLWeb::loadURLExternal(WolfGrid::WHATSNEW_URL);
 }
 // </FS:Wolf>
 

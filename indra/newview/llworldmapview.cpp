@@ -70,6 +70,7 @@
 #include "llglheaders.h"
 #include "wolfmapoverlays.h"      // <WolfViewer 2026-09-25/> map images
 #include "wolfmapglobe.h"         // <WolfViewer 2026-10-02/> animated water + globe (Wolf Territories only)
+#include "wolfflight.h"           // <WolfViewer 2026-10-06/> the trip on the map
 
 namespace
 {
@@ -789,6 +790,9 @@ void LLWorldMapView::draw()
     // Draw the current agent viewing angle
     drawFrustum();
 
+    // <WolfViewer 2026-10-06/> the Flight / Sailing Mode trip over the map
+    drawWolfRoute();
+
     // Draw icons for the avatars in each region.
     // Drawn this after the current agent avatar so one can see nearby people
     static LLCachedControl<bool> mapShowPeople(gSavedSettings, "MapShowPeople");
@@ -1239,6 +1243,91 @@ void LLWorldMapView::drawFrustum()
     gGL.popMatrix();
 }
 
+
+// <WolfViewer 2026-10-06> Paul: "overlay it on the world map the trip ... great fun if the person
+// wants to fly or sail the route themselves". While Flight or Sailing Mode has a destination: the
+// route as the deck's PLAN view draws it - legs behind dimmed, the one being sailed magenta and
+// thick, the rest white - with numbered turning points, the destination's star and name, and a
+// line from the boat or plane to its next turning point. Drawn whether or not the autopilot is on.
+// View coordinates are globalPosToView's (the same ones the region squares above are drawn in).
+void LLWorldMapView::drawWolfRoute()
+{
+    const WolfFlight& f = WolfFlight::instance();
+    if (!f.active() || !f.dest().mValid)
+    {
+        return;
+    }
+    const WolfFlight::Route& route = f.route();
+    std::vector<LLVector3d> pts;
+    if (route.mValid)
+    {
+        pts = route.mPts;
+    }
+    else if (f.data().mValid)
+    {
+        pts = { f.data().mPosGlobal, f.dest().mGlobal };
+    }
+    if (pts.size() < 2)
+    {
+        return;
+    }
+    const S32 leg = route.mValid ? llclamp(route.mLeg, 1, (S32)pts.size() - 1) : 1;
+    static const LLColor4 MAGENTA(1.f, 0.35f, 1.f, 1.f), DONE(0.6f, 0.6f, 0.65f, 0.7f), AHEAD(1.f, 1.f, 1.f, 0.9f),
+                          SHADOW(0.f, 0.f, 0.f, 0.55f);
+    gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
+    // A line as two triangles: line widths above 1 are not available on every driver.
+    auto seg = [](const LLVector3& a, const LLVector3& b, F32 width, const LLColor4& c)
+    {
+        F32 dx = b.mV[VX] - a.mV[VX], dy = b.mV[VY] - a.mV[VY];
+        const F32 len = sqrtf(dx * dx + dy * dy);
+        if (len < 0.5f) return;
+        const F32 nx = -dy / len * width * 0.5f, ny = dx / len * width * 0.5f;
+        gGL.color4fv(c.mV);
+        gGL.begin(LLRender::TRIANGLES);
+        gGL.vertex2f(a.mV[VX] + nx, a.mV[VY] + ny);
+        gGL.vertex2f(a.mV[VX] - nx, a.mV[VY] - ny);
+        gGL.vertex2f(b.mV[VX] - nx, b.mV[VY] - ny);
+        gGL.vertex2f(a.mV[VX] + nx, a.mV[VY] + ny);
+        gGL.vertex2f(b.mV[VX] - nx, b.mV[VY] - ny);
+        gGL.vertex2f(b.mV[VX] + nx, b.mV[VY] + ny);
+        gGL.end();
+    };
+    auto diamond = [](const LLVector3& p, F32 s, const LLColor4& c)
+    {
+        gGL.color4fv(c.mV);
+        gGL.begin(LLRender::TRIANGLES);
+        gGL.vertex2f(p.mV[VX], p.mV[VY] + s); gGL.vertex2f(p.mV[VX] - s, p.mV[VY]); gGL.vertex2f(p.mV[VX] + s, p.mV[VY]);
+        gGL.vertex2f(p.mV[VX] - s, p.mV[VY]); gGL.vertex2f(p.mV[VX], p.mV[VY] - s); gGL.vertex2f(p.mV[VX] + s, p.mV[VY]);
+        gGL.end();
+    };
+    std::vector<LLVector3> v;
+    for (const LLVector3d& p : pts) v.push_back(globalPosToView(p));
+    // the legs, with a dark edge so they read on sea and land alike
+    for (S32 i = 1; i < (S32)v.size(); ++i)
+    {
+        const bool active = i == leg, done = i < leg;
+        seg(v[i - 1], v[i], active ? 6.f : 4.5f, SHADOW);
+        seg(v[i - 1], v[i], active ? 3.5f : 2.f, done ? DONE : (active ? MAGENTA : AHEAD));
+    }
+    // from where the craft is now to the turning point it is making for
+    if (f.data().mValid)
+    {
+        const LLVector3 here = globalPosToView(f.data().mPosGlobal);
+        seg(here, v[leg], 2.f, MAGENTA);
+    }
+    const LLFontGL* font = LLFontGL::getFontSansSerifSmall();
+    for (S32 i = 1; i < (S32)v.size(); ++i)
+    {
+        const bool last = i == (S32)v.size() - 1;
+        const LLColor4& c = i == leg ? MAGENTA : (i < leg ? DONE : AHEAD);
+        diamond(v[i], last ? 9.f : 6.f, SHADOW);
+        diamond(v[i], last ? 7.f : 4.5f, last ? MAGENTA : c);
+        const std::string label = last ? f.dest().mRegion : llformat("WP%d", i);
+        font->renderUTF8(label, 0, v[i].mV[VX] + (last ? 11.f : 8.f), v[i].mV[VY], last ? MAGENTA : c,
+                         LLFontGL::LEFT, LLFontGL::VCENTER, LLFontGL::NORMAL, LLFontGL::DROP_SHADOW);
+    }
+}
+// </WolfViewer>
 
 LLVector3 LLWorldMapView::globalPosToView( const LLVector3d& global_pos )
 {

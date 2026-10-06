@@ -232,8 +232,21 @@
           height="16"
           name="create_new_account_text"
           top="10"
-          width="280">
+          width="180">
         Create an account
+      </text>
+      <!-- <WolfViewer 2026-10-06> What's new: the latest changes, on wolf-grid.com
+           (fspanellogin.cpp onClickWhatsNew, WolfGrid::WHATSNEW_URL). -->
+      <text
+          follows="left|bottom"
+          font="SansSerifSmall"
+          text_color="EmphasisColor"
+          left="200"
+          height="16"
+          name="whatsnew_text"
+          top="10"
+          width="80">
+        What's new
       </text>
       <text
           follows="left|bottom"

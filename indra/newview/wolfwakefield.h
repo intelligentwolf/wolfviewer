@@ -44,13 +44,19 @@ public:
     static constexpr S32 MAX_BOATS = 6;
     static constexpr S32 MAX_STAMPS_PER_FRAME = 48;
     static constexpr F32 MAX_STRENGTH = 0.25f;
+    // <WolfViewer 2026-10-06> The field covers at most this many metres (1 m a texel), centred on
+    // the camera on bigger regions: over the whole of Madrigal (3,072 m) a texel was 6 m, and a
+    // wash stamped at the stern smeared over the bow (Paul: "still wash in front of the boat").
+    static constexpr F32 FIELD_M = 512.f;
 
     /** Once per frame from the water pool: decay, then stamp every boat's path. */
     void update(F32 dt);
     bool isReady() const { return mReady && mAllocated; }
     LLRenderTarget* texture() { return mAllocated ? &mRT[mCur] : nullptr; }
-    F32 getRegionSizeX() const { return mRegionSizeX; }
-    F32 getRegionSizeY() const { return mRegionSizeY; }
+    /** The field's square: its south-west corner (region metres) and side (metres). */
+    F32 getFieldOriginX() const { return mFieldOX; }
+    F32 getFieldOriginY() const { return mFieldOY; }
+    F32 getFieldSize() const { return mFieldSize; }
     /** Reset to clean water (region change, kill switch). */
     void clear();
     void release();
@@ -73,6 +79,8 @@ private:
     F32 mRegionSizeX = 256.f;
     F32 mRegionSizeY = 256.f;
     F32 mIdleSecs = 0.f;
+    F32 mFieldOX = 0.f, mFieldOY = 0.f, mFieldSize = 256.f;
+    F32 mShiftU = 0.f, mShiftV = 0.f;   // the window moved: the next decay pass moves the wash with it
 };
 
 #endif // WOLF_WAKEFIELD_H

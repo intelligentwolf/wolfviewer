@@ -19792,6 +19792,325 @@ Change of this parameter will affect the layout of buttons in notification toast
 			<key>Value</key>
 			<integer>1</integer>
 		</map>
+		<key>WolfFlightMode</key>
+		<map>
+			<key>Comment</key>
+			<string>World &gt; Flight Mode (wolfflight.cpp): the flight deck across the bottom of the screen, the bottom toolbar folded away.</string>
+			<key>Persist</key>
+			<integer>0</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfFlightHelpShown</key>
+		<map>
+			<key>Comment</key>
+			<string>Flight Mode: the quick guide has opened by itself once (HELP reopens it).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfSailMode</key>
+		<map>
+			<key>Comment</key>
+			<string>World &gt; Sailing Mode (wolfflight.cpp): the deck with marine instruments and the sailing autopilot.</string>
+			<key>Persist</key>
+			<integer>0</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfSailTackAngle</key>
+		<map>
+			<key>Comment</key>
+			<string>Sailing Mode: how close to the wind the boat sails when the autopilot beats upwind (degrees off the true wind).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>F32</string>
+			<key>Value</key>
+			<real>45.0</real>
+		</map>
+		<key>WolfSailDraft</key>
+		<map>
+			<key>Comment</key>
+			<string>Sailing Mode: the boat's draft in metres; water shallower than this is land to the route planner and the shoal alarm.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>F32</string>
+			<key>Value</key>
+			<real>1.5</real>
+		</map>
+		<key>WolfSailCommand</key>
+		<map>
+			<key>Comment</key>
+			<string>Sailing Mode: what the SAIL button says to the boat (chat). Paul 2026-10-06: "when you click sail try saying raise in the chat". Empty = not set.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>String</string>
+			<key>Value</key>
+			<string>raise</string>
+		</map>
+		<key>WolfSailCommandChannel</key>
+		<map>
+			<key>Comment</key>
+			<string>Sailing Mode: the chat channel for the sail command.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfSailBankInvert</key>
+		<map>
+			<key>Comment</key>
+			<string>Sailing Mode: TRUE = the Left key steers to starboard on this boat. Its own setting, not Flight Mode's (a plane's AUTO LEARN once reversed a boat's helm, 2026-10-06).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfSailThrottleInvert</key>
+		<map>
+			<key>Comment</key>
+			<string>Sailing Mode: TRUE = the motor pair's first key goes astern.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfSailThrottleSteps</key>
+		<map>
+			<key>Comment</key>
+			<string>Sailing Mode: TRUE = each motor key press is one notch; FALSE = power while the key is held.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>1</integer>
+		</map>
+		<key>WolfSailBankPair</key>
+		<map>
+			<key>Comment</key>
+			<string>Sailing Mode: the keys that steer the boat. Same numbering as WolfFlightPitchPair.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>1</integer>
+		</map>
+		<key>WolfSailThrottlePair</key>
+		<map>
+			<key>Comment</key>
+			<string>Sailing Mode: the motor keys. Same numbering as WolfFlightPitchPair.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>2</integer>
+		</map>
+		<key>WolfFlightNDPlan</key>
+		<map>
+			<key>Comment</key>
+			<string>Flight / Sailing Mode: the navigation display shows PLAN (the whole route, north up, on the world map) instead of MAP (heading up, around you).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfSailHelpShown</key>
+		<map>
+			<key>Comment</key>
+			<string>Sailing Mode: its quick guide has opened by itself once (HELP reopens it).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfFlightHUD</key>
+		<map>
+			<key>Comment</key>
+			<string>Flight Mode: the head-up display (horizon, pitch ladder, flight path vector) over the view.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>1</integer>
+		</map>
+		<key>WolfFlightCraft</key>
+		<map>
+			<key>Comment</key>
+			<string>Flight Mode: 0 aeroplane (keys pitch, bank, throttle), 1 helicopter (forward, yaw, lift).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfFlightPitchPair</key>
+		<map>
+			<key>Comment</key>
+			<string>Flight Mode: the keys that pitch the aircraft (helicopter: forward / back). 0 up/down arrows (W/S), 1 left/right arrows (turn), 2 PgUp/PgDn, 3 Shift+left/right, 4 none.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfFlightPitchInvert</key>
+		<map>
+			<key>Comment</key>
+			<string>Flight Mode: FALSE = the Up arrow pushes the nose down (a yoke); TRUE = it raises the nose. Helicopter: TRUE = Up goes backwards. Auto Learn turns it over when the aircraft answers the other way.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfFlightBankPair</key>
+		<map>
+			<key>Comment</key>
+			<string>Flight Mode: the keys that bank the aircraft (helicopter: yaw). Same numbering as WolfFlightPitchPair.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>1</integer>
+		</map>
+		<key>WolfFlightBankInvert</key>
+		<map>
+			<key>Comment</key>
+			<string>Flight Mode: TRUE = the Left key banks right on this aircraft.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfFlightThrottlePair</key>
+		<map>
+			<key>Comment</key>
+			<string>Flight Mode: the throttle keys (helicopter: lift). Same numbering as WolfFlightPitchPair.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>2</integer>
+		</map>
+		<key>WolfFlightThrottleInvert</key>
+		<map>
+			<key>Comment</key>
+			<string>Flight Mode: TRUE = PgUp (or the throttle pair's first key) takes power OFF.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfFlightThrottleSteps</key>
+		<map>
+			<key>Comment</key>
+			<string>Flight Mode: TRUE = each throttle key press is one notch (the autothrottle taps); FALSE = power while the key is held.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>1</integer>
+		</map>
+		<key>WolfFlightAutoLearn</key>
+		<map>
+			<key>Comment</key>
+			<string>Flight Mode: the autopilot watches how the aircraft answers its keys and turns a reversed pitch, bank or lift setting over by itself.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>1</integer>
+		</map>
+		<key>WolfFlightGearCommand</key>
+		<map>
+			<key>Comment</key>
+			<string>Flight Mode: what the gear lever says to the aircraft (chat), e.g. g. Empty = not set.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>String</string>
+			<key>Value</key>
+			<string>g</string>
+		</map>
+		<key>WolfFlightGearChannel</key>
+		<map>
+			<key>Comment</key>
+			<string>Flight Mode: the chat channel for the gear command (0 = said aloud).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfFlightEngineCommand</key>
+		<map>
+			<key>Comment</key>
+			<string>Flight Mode: what the ENG button says to the aircraft (chat), e.g. start. Empty = not set.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>String</string>
+			<key>Value</key>
+			<string></string>
+		</map>
+		<key>WolfFlightEngineChannel</key>
+		<map>
+			<key>Comment</key>
+			<string>Flight Mode: the chat channel for the engine command.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfFlightNDRange</key>
+		<map>
+			<key>Comment</key>
+			<string>Flight Mode: navigation display range, index into 0.25 / 0.5 / 1 / 2 / 5 / 10 / 20 / 40 NM.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>2</integer>
+		</map>
 		<key>WolfViewerBottomToolbarHidden</key>
 		<map>
 			<key>Comment</key>

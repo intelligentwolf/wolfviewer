@@ -139,6 +139,10 @@ private:
         LLQuaternion mAppliedTilt;
         bool         mApplied = false;
         bool         mBoard = false;   // <WolfViewer 2026-09-22/> never dips below the surface
+        // <WolfViewer 2026-10-06> Largest |bob| (m) and |slope| since the last stats line, for
+        // the debug report of how far the nearest hulls really move (Madrigal, "hardly any rocking").
+        F32          mPeakBob = 0.f;
+        F32          mPeakSlope = 0.f;
         // <WolfViewer 2026-09-27> The linkset's footprint in the root's own frame, X bow to
         // stern and Y the beam, metres; refreshed every sweep (hullExtents()).
         LLVector2    mMin = LLVector2(-0.5f, -0.5f);
@@ -159,6 +163,8 @@ private:
     F32 waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F32 ay, F32 t) const;
     /** Bob and surface slope for a hull, from waveHeight() at its centre and four ends. */
     Sample measureHull(const Rocker& r, const LLViewerObject* objectp, const Sea& sea, F32 t) const;
+    /** <WolfViewer 2026-10-06/> A moored hull's own roll, pitch and heave, whatever the sea state. */
+    Sample mooringSway(const Rocker& r, const LLViewerObject* objectp, F32 t) const;
     static void hullExtents(const LLViewerObject* root, LLVector2& lo, LLVector2& hi);
     /** <WolfViewer 2026-10-01/> The linkset's lowest and highest point, region metres (the waterline gate). */
     static void hullVerticalSpan(const LLViewerObject* root, F32& zlo, F32& zhi);

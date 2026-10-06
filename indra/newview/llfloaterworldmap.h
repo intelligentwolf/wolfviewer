@@ -132,6 +132,9 @@ public:
     // drives the map's zoom every frame, so a zoom the map makes itself (the globe's double-click
     // fly-in) goes through the slider.
     void            wolfSetMapZoom(F32 zoom);
+    // <WolfViewer 2026-10-06> Fit the map to a square `span_m` metres across about `centre`
+    // (Flight / Sailing Mode's MAP button); applied in draw() once the map view has its size.
+    void            wolfShowArea(const LLVector3d& centre, F64 span_m);
 
     // Catch changes in the sim list
     void            updateSims(bool found_null_sim);
@@ -266,6 +269,9 @@ private:
     // <WolfViewer 2026-10-02/> Globe (wolfmapglobe.h): open-as-globe waiting for the view's size,
     // and the size the zoom slider's globe limit was last worked out for.
     bool                    mWolfGlobeStartPending = false;
+    bool                    mWolfAreaPending = false;     // <WolfViewer 2026-10-06/> wolfShowArea
+    LLVector3d              mWolfAreaCentre;
+    F64                     mWolfAreaSpan = 0.0;
     S32                     mWolfViewWidth = 0;
     S32                     mWolfViewHeight = 0;
     U32                     mWolfExtentGen = 0;

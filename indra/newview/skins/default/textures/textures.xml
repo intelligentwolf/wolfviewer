@@ -58,6 +58,13 @@ with the same filename but different name
 
   <texture name="Arrow_Down" file_name="widgets/Arrow_Down.png"	preload="true" />
   <texture name="Arrow_Up" file_name="widgets/Arrow_Up.png" preload="true" />
+  <!-- WolfViewer 2026-10-06: the bottom-right toggles for the toolbar, Flight Mode and Sailing Mode -->
+  <texture name="WolfTb_Toolbar_Off" file_name="icons/wolf_tb_toolbar_off.png" preload="true" />
+  <texture name="WolfTb_Toolbar_On" file_name="icons/wolf_tb_toolbar_on.png" preload="true" />
+  <texture name="WolfTb_Plane_Off" file_name="icons/wolf_tb_plane_off.png" preload="true" />
+  <texture name="WolfTb_Plane_On" file_name="icons/wolf_tb_plane_on.png" preload="true" />
+  <texture name="WolfTb_Boat_Off" file_name="icons/wolf_tb_boat_off.png" preload="true" />
+  <texture name="WolfTb_Boat_On" file_name="icons/wolf_tb_boat_on.png" preload="true" />
   <texture name="Arrow_Left" file_name="widgets/Arrow_Left.png" preload="true" />
   <texture name="Arrow_Right" file_name="widgets/Arrow_Right.png" preload="true" />
 

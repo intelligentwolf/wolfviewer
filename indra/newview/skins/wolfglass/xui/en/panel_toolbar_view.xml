@@ -297,24 +297,64 @@
 	            image_name="Caret_Bottom_Icon"
 	            name="caret" />
     </toolbar>
-    <!-- WolfViewer 2026-09-10: hide / show arrow, same as skins/default (keep in step). -->
+    <!-- WolfViewer 2026-10-06, same as skins/default (keep in step) (Paul: "the airplane and boat interfaces need hide and show — create
+         3 icons at the bottom right, replace the current toolbar down arrow with them to show when
+         each interface is selected like toggle; users can have toolbar + airplane or toolbar + boat").
+         Lit = showing. Toolbar: the bottom bar (was the 2026-09-10 arrow; WolfViewerBottomToolbarHidden,
+         lltoolbarview.cpp toggleBottomToolbar). Plane / Boat: the Flight / Sailing Mode deck; hiding it
+         keeps the mode and its autopilot running (WolfFlight::toggleDeck). When the bar is hidden this
+         panel shrinks to a strip just tall enough for the icons. -->
     <button layout="topleft"
             name="wolf_toolbar_toggle"
-            width="14"
-            height="14"
-            right="-2"
-            top="74"
+            width="22"
+            height="22"
+            right="-50"
+            top="66"
             follows="right|bottom"
             is_toggle="true"
-            image_unselected="Arrow_Down"
-            image_selected="Arrow_Up"
-            image_pressed="Arrow_Down"
-            image_pressed_selected="Arrow_Up"
-            image_hover_unselected="Arrow_Down"
-            image_hover_selected="Arrow_Up"
+            image_unselected="WolfTb_Toolbar_Off"
+            image_selected="WolfTb_Toolbar_On"
+            image_pressed="WolfTb_Toolbar_On"
+            image_pressed_selected="WolfTb_Toolbar_Off"
+            image_hover_unselected="WolfTb_Toolbar_Off"
+            image_hover_selected="WolfTb_Toolbar_On"
             tab_stop="false"
             chrome="true"
-            tool_tip="Hide or show the toolbar" />
+            tool_tip="Show or hide the toolbar" />
+    <button layout="topleft"
+            name="wolf_plane_toggle"
+            width="22"
+            height="22"
+            right="-26"
+            top="66"
+            follows="right|bottom"
+            is_toggle="true"
+            image_unselected="WolfTb_Plane_Off"
+            image_selected="WolfTb_Plane_On"
+            image_pressed="WolfTb_Plane_On"
+            image_pressed_selected="WolfTb_Plane_Off"
+            image_hover_unselected="WolfTb_Plane_Off"
+            image_hover_selected="WolfTb_Plane_On"
+            tab_stop="false"
+            chrome="true"
+            tool_tip="Flight Mode: show or hide the flight deck (the autopilot keeps flying while it is hidden)" />
+    <button layout="topleft"
+            name="wolf_boat_toggle"
+            width="22"
+            height="22"
+            right="-2"
+            top="66"
+            follows="right|bottom"
+            is_toggle="true"
+            image_unselected="WolfTb_Boat_Off"
+            image_selected="WolfTb_Boat_On"
+            image_pressed="WolfTb_Boat_On"
+            image_pressed_selected="WolfTb_Boat_Off"
+            image_hover_unselected="WolfTb_Boat_Off"
+            image_hover_selected="WolfTb_Boat_On"
+            tab_stop="false"
+            chrome="true"
+            tool_tip="Sailing Mode: show or hide the sailing deck (the autopilot keeps sailing while it is hidden)" />
 
   </layout_panel>
   <!-- The toolbar itself -->

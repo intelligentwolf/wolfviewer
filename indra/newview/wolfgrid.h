@@ -145,6 +145,10 @@ namespace WolfGrid
     // (wolfstorm/index.php:564).
     const char* const PATREON_URL = "https://www.patreon.com/15362110/join";
 
+    // <WolfViewer 2026-10-06> What's new on the grid and in the viewers (gridmanager whatsnew.php,
+    // from whatsnew.json). On the login screen and Help > What's new; the same page WolfStorm links.
+    const char* const WHATSNEW_URL = "https://www.wolf-grid.com/index.php?f=whatsnew";
+
     // Screen sharing: the token endpoint (wolfstorm js/voice/screen_share.js TOKEN_URL, host
     // SHARE_HOST = 'wolfstorm.app') and the publisher page (wolfstorm/publish.php).
     const char* const SHARE_TOKEN_URL = "https://wolfstorm.app/php/screen_token.php";

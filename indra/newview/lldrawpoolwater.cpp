@@ -355,6 +355,7 @@ void LLDrawPoolWater::renderPostDeferred(S32 pass)
         static LLStaticHashedString s_fft_fade("fftFade");
         static LLStaticHashedString s_wake_strength("wakeStrength");
         static LLStaticHashedString s_wake_region_size("wakeRegionSize");
+        static LLStaticHashedString s_wake_origin("wakeOrigin");
         static LLStaticHashedString s_shore_on("shoreWavesEnabled");
         static LLCachedControl<bool> shore_on(gSavedSettings, "WolfViewerWaterShoreField", true);
         static LLCachedControl<F32> wake_strength(gSavedSettings, "WolfViewerWaterWakeStrength", 0.05f);
@@ -416,7 +417,9 @@ void LLDrawPoolWater::renderPostDeferred(S32 pass)
         if (wake.isReady())
         {
             shader->bindTexture(LLShaderMgr::WOLF_WAKE_SAMPLER, wake.texture(), false, LLTexUnit::TFO_BILINEAR, 0);
-            shader->uniform2f(s_wake_region_size, wake.getRegionSizeX(), wake.getRegionSizeY());
+            // <WolfViewer 2026-10-06> the field's window (at most 512 m, about the camera)
+            shader->uniform2f(s_wake_region_size, wake.getFieldSize(), wake.getFieldSize());
+            shader->uniform2f(s_wake_origin, wake.getFieldOriginX(), wake.getFieldOriginY());
         }
         shader->uniform1f(s_wake_strength, llclamp((F32)wake_strength, 0.f, WolfWakeField::MAX_STRENGTH));
     }

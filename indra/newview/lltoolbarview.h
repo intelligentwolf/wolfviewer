@@ -142,6 +142,9 @@ private:
     bool                mShowToolbars;
     LLView*             mBottomToolbarPanel;
     LLButton*           mWolfToolbarToggle = nullptr;   // <WolfViewer 2026-09-10>
+    S32                 mBottomToolbarShownDim = 90;    // <WolfViewer 2026-10-06> the skin's own bottom_toolbar_panel height
+    LLButton*           mWolfPlaneToggle = nullptr;     // <WolfViewer 2026-10-06> Flight Mode deck
+    LLButton*           mWolfBoatToggle = nullptr;      // <WolfViewer 2026-10-06> Sailing Mode deck
 
     // <FS:Ansariel> Member variables needed for console chat bottom offset
     LLView*             mBottomChatStack;

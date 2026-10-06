@@ -1275,7 +1275,10 @@ void LLViewerRegion::killCacheEntry(LLVOCacheEntry* entry, bool for_rendering)
         }
     }
     // Kill the assocaited overrides
-    mImpl->mGLTFOverridesLLSD.erase(entry->getLocalID());
+    if (mImpl->mGLTFOverridesLLSD.erase(entry->getLocalID()))
+    {
+        LL_DEBUGS("GLTF") << "killCacheEntry dropped cached overrides for local " << entry->getLocalID() << LL_ENDL;
+    }
     //will remove it from the object cache, real deletion
     entry->setState(LLVOCacheEntry::INACTIVE);
     entry->removeOctreeEntry();
@@ -2081,6 +2084,24 @@ void LLViewerRegion::connectNeighbor(LLViewerRegion *neighborp, U32 direction)
 void LLViewerRegion::disconnectAllNeighbors()
 {
     mImpl->mLandp->disconnectAllNeighbors();
+
+    // <WolfViewer 2026-10-06> A surface has one neighbour slot per direction, but along a big
+    // region's edge LLWorld::addRegion (llworld.cpp:639-648) connects every smaller region there
+    // in the same direction, so the big surface's slot keeps only the last one while each of the
+    // others still points back at it. The slot walk above never reaches those, and once this
+    // surface was freed the next of them to go crashed in LLSurface::disconnectNeighbor
+    // (llsurface.cpp:577). So every other region's land lets go of this one too.
+    // LLWorld::removeRegion (llworld.cpp:719-732) takes this region out of the list before
+    // deleting it, so the list holds only live regions here.
+    LLSurface* land = mImpl->mLandp;
+    for (LLViewerRegion* regionp : LLWorld::getInstance()->getRegionList())
+    {
+        if (regionp && regionp != this && regionp->mImpl && regionp->mImpl->mLandp)
+        {
+            regionp->mImpl->mLandp->disconnectNeighbor(land);
+        }
+    }
+    // </WolfViewer>
 }
 
 LLVLComposition * LLViewerRegion::getComposition() const

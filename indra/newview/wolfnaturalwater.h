@@ -63,6 +63,7 @@ public:
         std::vector<Surface> mPools;
         std::vector<Surface> mStreams;
         S32 mBuiltBasins = 0;   // hollows that got no pool because something is built in them
+        S32 mSeaBasins = 0;     // hollows that got no pool because the region's water is already in them
     };
 
 private:
@@ -148,6 +149,14 @@ private:
     static constexpr F32 BUILT_SINK_M = 0.5f;
     static constexpr F32 BUILT_BELOW_M = 1.0f;
     static constexpr F32 BUILT_ABOVE_M = 0.5f;
+    // <WolfViewer 2026-10-06> OBJECTS SITTING ON THE GROUND. Paul: "make sure natural pools and
+    // water dont draw over or under objects that sit on the ground". An object whose underside is
+    // within OBJECT_CLEAR_M of the ground (the built mask: streams stop, a hollow it stands in gets
+    // no pool) or of a pool's water (a deck, a floor on posts, a jetty) sits on it: no natural
+    // water under it or over it. Was BUILT_BELOW_M (1 m) and BUILT_ABOVE_M (0.5 m): a floor 1-3 m
+    // up had a stream or a pool drawn under it, showing through gaps and at its edges. A bridge
+    // or deck higher than this still has the stream run under it. natural_water_worker.js same.
+    static constexpr F32 OBJECT_CLEAR_M = 3.0f;
     // Off the channel, water never stands more than this above the ground at any vertex —
     // a ribbon edge over a drop beside the stream is pulled down rather than left hanging.
     static constexpr F32 MAX_STAND_M = 0.35f;

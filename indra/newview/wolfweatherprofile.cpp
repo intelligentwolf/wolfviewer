@@ -70,9 +70,10 @@ namespace
 // static
 LLColor4 WolfWeatherProfile::neutralColor(Kind k)
 {
-    // rain #aaccff, snow #ffffff — the same two constants as weather_profile.js NEUTRAL.
-    return (k == SNOW) ? LLColor4(1.f, 1.f, 1.f, 1.f)
-                       : LLColor4(0xaa / 255.f, 0xcc / 255.f, 1.f, 1.f);
+    // <WolfViewer 2026-10-06> #808080 for both - weather_profile.js NEUTRAL. Jimmy Olsen: rain and
+    // snow at (0.5, 0.5, 0.5) look most like real life; Paul: "rain and snow DEFAULT to that
+    // colour". Was rain #aaccff, snow #ffffff.
+    return LLColor4(0x80 / 255.f, 0x80 / 255.f, 0x80 / 255.f, 1.f);
 }
 
 // static
@@ -321,13 +322,13 @@ WolfWeatherProfile WolfWeatherProfile::applyPreset(const WolfWeatherProfile& bas
     {
         p.mKind = CLEAR; p.mLevel = 2; p.mEnabled = true; p.mSound = false;
     }
-    else if (id == "drizzle")      set(RAIN, 1,  70, "#aaccff", 100,  40,  90,  85,  90, true, 40, "steady",  "soft");
-    else if (id == "steady")       set(RAIN, 2,  75, "#aaccff", 100,  60, 100, 100, 100, true, 60, "steady",  "soft");
-    else if (id == "downpour")     set(RAIN, 3,  65, "#9fc2f0", 100, 110, 130, 120, 115, true, 75, "steady",  "heavy");
-    else if (id == "thunderstorm") set(RAIN, 4,  55, "#8fb4e6", 100, 180, 170, 140, 120, true, 85, "thunder", "heavy");
-    else if (id == "lightsnow")    set(SNOW, 1,  90, "#ffffff", 100,  50,  90,  80, 100, true, 30, "wind",    "none");
-    else if (id == "snowfall")     set(SNOW, 2,  95, "#ffffff", 100,  70, 110, 100, 110, true, 40, "wind",    "none");
-    else if (id == "blizzard")   { set(SNOW, 4, 100, "#eef4ff", 100, 600, 300, 160, 120, true, 80, "wind",    "none"); p.mFog = 45; }
+    else if (id == "drizzle")      set(RAIN, 1, 100, "#808080", 100,  40,  90,  85,  90, true, 40, "steady",  "soft");
+    else if (id == "steady")       set(RAIN, 2, 100, "#808080", 100,  60, 100, 100, 100, true, 60, "steady",  "soft");
+    else if (id == "downpour")     set(RAIN, 3, 100, "#808080", 100, 110, 130, 120, 115, true, 75, "steady",  "heavy");
+    else if (id == "thunderstorm") set(RAIN, 4, 100, "#808080", 100, 180, 170, 140, 120, true, 85, "thunder", "heavy");
+    else if (id == "lightsnow")    set(SNOW, 1, 100, "#808080", 100,  50,  90,  80, 100, true, 30, "wind",    "none");
+    else if (id == "snowfall")     set(SNOW, 2, 100, "#808080", 100,  70, 110, 100, 110, true, 40, "wind",    "none");
+    else if (id == "blizzard")   { set(SNOW, 4, 100, "#808080", 100, 600, 300, 160, 120, true, 80, "wind",    "none"); p.mFog = 45; }
     // Source: weather_profile.js PRESETS mist / thickfog - fog on its own: CLEAR means nothing
     // falling, not no weather.
     else if (id == "mist")       { p.mKind = CLEAR; p.mLevel = 2; p.mEnabled = true; p.mSound = false; p.mFog = 30; }

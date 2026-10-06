@@ -207,11 +207,18 @@ void WolfNaturalWater::idle()
         memcpy(&bits, &f, sizeof(bits));
         stamp = (stamp ^ bits) * 1099511628211ull;
     }
+    // <WolfViewer 2026-10-06> the region's water level is part of the answer now (a hollow it
+    // already fills gets no pool), so a tide or an estate change of it re-runs the analysis.
+    const F32 sea = regionp->getWaterHeight();
+    {
+        U32 bits;
+        memcpy(&bits, &sea, sizeof(bits));
+        stamp = (stamp ^ bits) * 1099511628211ull;
+    }
     if (stamp == mRegions[regionp->getHandle()].mAppliedStamp)
     {
         return;
     }
-    const F32 sea = regionp->getWaterHeight();
     const F32 catchment_m2 = llmax(25.f, (F32)catchment);
 
     auto result = std::make_shared<Result>();
@@ -282,7 +289,7 @@ void WolfNaturalWater::rasterizeBuilt(LLViewerRegion* regionp, const std::vector
             for (S32 x = x0; x <= x1; ++x)
             {
                 const F32 ground = z[x + y * n];
-                if (ground >= minz - BUILT_BELOW_M && ground <= maxz + BUILT_ABOVE_M)
+                if (ground >= minz - OBJECT_CLEAR_M && ground <= maxz + BUILT_ABOVE_M)   // <WolfViewer 2026-10-06/> was minz - BUILT_BELOW_M
                 {
                     built[x + y * n] = 1;
                 }
@@ -454,6 +461,7 @@ void WolfNaturalWater::compute(Result& out, std::vector<F32> z, std::vector<U8> 
         lake[k] = (filled[k] - z[k] > 0.05 && filled[k] > sea + 0.05) ? 1 : 0;
     }
     struct Pool { F32 mLevel; F32 mDepth; S32 mMinX, mMinY, mMaxX, mMaxY; std::vector<S32> mCells; };
+    std::vector<U8> sea_basin(total, 0);   // <WolfViewer 2026-10-06/> hollows the region's water already fills
     std::vector<Pool> pools;
     {
         std::vector<U8> seen(total, 0);
@@ -488,10 +496,31 @@ void WolfNaturalWater::compute(Result& out, std::vector<F32> z, std::vector<U8> 
             // (see BUILT_ABOVE_M in the header): no pool, and the whole hollow is blocked so
             // no stream runs across it either. Tested before the size gate on purpose — a
             // tiny dip under a prim is under the prim.
+            // <WolfViewer 2026-10-06> THERE IS ALREADY WATER HERE. Paul: "i had a terrain with a lake
+            // in the middle and it made natural water on top of the lake, it should never make it if
+            // there is already water in the area". A hollow whose floor dips below the region's
+            // water level holds a real lake up to that level; the flood fill raises it to its spill
+            // height and a pool there would float above the real water. No pool, and streams that
+            // reach it end at the real water surface (sea_basin, step 4). natural_water_worker.js same.
+            bool in_sea = false;
+            for (S32 k : p.mCells)
+            {
+                if (z[k] < sea) { in_sea = true; break; }
+            }
+            if (in_sea)
+            {
+                for (S32 k : p.mCells)
+                {
+                    sea_basin[k] = 1;
+                    lake[k] = 0;
+                }
+                ++out.mSeaBasins;
+                continue;
+            }
             bool built_on = false;
             for (S32 k : p.mCells)
             {
-                if (built[k] || prim_floor[k] <= p.mLevel + BUILT_ABOVE_M)
+                if (built[k] || prim_floor[k] <= p.mLevel + OBJECT_CLEAR_M)   // <WolfViewer 2026-10-06/> was + BUILT_ABOVE_M
                 {
                     built_on = true;
                     break;
@@ -772,7 +801,7 @@ void WolfNaturalWater::compute(Result& out, std::vector<F32> z, std::vector<U8> 
             if (is_stream(c))               { ch.mEndLevel = (F32)filled[c] + STREAM_FILL_M - 0.03f; }
             else if (blocked[c])            { ch.mEndLevel = z[c] - BUILT_SINK_M; }
             else if (pooled[c])             { ch.mEndLevel = (F32)filled[c] - 0.03f; }
-            else if (z[c] + STREAM_FILL_M <= sea) { ch.mEndLevel = sea - 0.05f; }
+            else if (z[c] + STREAM_FILL_M <= sea || sea_basin[c]) { ch.mEndLevel = sea - 0.05f; }   // <WolfViewer 2026-10-06/> + a lake the region's water fills
             else                            { ch.mEndLevel = (F32)filled[c] + STREAM_FILL_M - 0.03f; }
             ch.mCells.push_back(c);
             has_end = true;
@@ -1126,7 +1155,7 @@ void WolfNaturalWater::apply(std::shared_ptr<Result> result)
     for (const Surface& sf : result->mStreams) { if (!create(sf, false)) break; }
     rw.mAppliedStamp = result->mTerrainStamp;
     LL_INFOS("WolfNaturalWater") << "Natural water: " << result->mPools.size() << " pools, "
-        << result->mBuiltBasins << " built hollows skipped, "
+        << result->mBuiltBasins << " built hollows skipped, " << result->mSeaBasins << " hollows already under the region's water, "
         << result->mStreams.size() << " streams (" << verts << " vertices) on region "
         << regionp->getName() << LL_ENDL;
 }

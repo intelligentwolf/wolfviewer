@@ -42,8 +42,8 @@ struct WolfWeatherProfile
     S32         mLevel       = 2;
     bool        mEnabled     = false;
 
-    S32         mBrightness  = 75;      ///< 0..200 %, scales the precipitation's lit colour
-    LLColor4    mTint        = LLColor4(0.667f, 0.800f, 1.f, 1.f);   ///< #aaccff
+    S32         mBrightness  = 100;     ///< 0..200 %, scales the precipitation's lit colour (2026-10-06: was 75)
+    LLColor4    mTint        = LLColor4(0x80 / 255.f, 0x80 / 255.f, 0x80 / 255.f, 1.f);   ///< #808080 (2026-10-06: was #aaccff)
     S32         mTintAmount  = 100;     ///< 0..100 %, how far to the tint from the kind's neutral
     S32         mMoveSpeed   = 60;      ///< 0..1000 hundredths of a m/s of lateral drift
     S32         mDensity     = 100;     ///< 10..4000 % of the level's particle count
@@ -111,7 +111,7 @@ struct WolfWeatherProfile
     static constexpr F32 FOG_MIN_VISIBILITY_M = 150.f;
 
 
-    /** The neutral colour of a kind, before the tint moves it. rain #aaccff, snow #ffffff. */
+    /** The neutral colour of a kind, before the tint moves it. #808080 for rain and snow (2026-10-06). */
     static LLColor4 neutralColor(Kind k);
 
     static const char* kindName(Kind k);

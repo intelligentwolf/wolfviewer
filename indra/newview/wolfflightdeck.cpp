@@ -2326,9 +2326,10 @@ void WolfFlightDeck::drawND(F32 l, F32 b, F32 r, F32 t)
             F32 x, y;
             toScreen(de, dn, x, y);
             if (y < sb || (x - cx) * (x - cx) + (y - cy) * (y - cy) > R * R) continue;
-            const bool near = (de * de + dn * dn) < (range_m * 0.15f) * (range_m * 0.15f) && fabsf(dz_ft) < 1200.f;
-            const LLColor4 c = near ? C_CYAN : FG;
-            if (near)
+            // "closeby", not "near": Windows' headers #define near (windef.h)
+            const bool closeby = (de * de + dn * dn) < (range_m * 0.15f) * (range_m * 0.15f) && fabsf(dz_ft) < 1200.f;
+            const LLColor4 c = closeby ? C_CYAN : FG;
+            if (closeby)
             {
                 quadF(x, y + s, x + s, y, x, y - s, x - s, y, c);
             }

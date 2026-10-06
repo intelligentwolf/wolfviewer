@@ -133,7 +133,6 @@ private:
     S32 mPressStep = 0;             // a knob held down: which way it keeps turning
     F64 mLastRepeat = 0.0;
     F64 mFlightStart = 0.0;
-    S32 mHoverHit = H_NONE;
 
     // EGPWS terrain picture on the ND, rebuilt a few times a second
     struct TerrainDot { F32 mX, mY; U8 mLevel; };

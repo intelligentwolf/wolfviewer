@@ -543,7 +543,7 @@ namespace
     {
         LLButton* btn = map->findChild<LLButton>("wolf_buy_land");
         if (!btn) return;
-        if (!WolfGrid::isWolfTerritories())
+        if (!WolfGrid::isOnWolfTerritories())   // <WolfViewer 2026-10-06/> and not while visiting another grid
         {
             // The request carries this login's agent and session ids: only ever to Wolf's own site.
             btn->setVisible(false);

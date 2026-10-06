@@ -17,6 +17,7 @@
 #define WOLF_GRID_H
 
 #include "llviewernetwork.h"
+#include "lfsimfeaturehandler.h"   // <WolfViewer 2026-10-06/> the region's own grid (isOnWolfTerritories)
 // <WolfViewer 2026-09-27> makeVerifiedHttpOptions() below.
 #include "httpoptions.h"
 // </WolfViewer 2026-09-27>
@@ -34,6 +35,31 @@ namespace WolfGrid
     // "grid.wolfterritories.org:8002" and grid_login_id "wolfterritories"
     // (llviewernetwork.cpp:42 GRID_ID_VALUE = "grid_login_id"; LLGridManager::getGridId()
     // returns that value for the current grid, getGrid() the key).
+    // <WolfViewer 2026-10-06> host of a grid address ("http://grid.wolfterritories.org:8002",
+    // "grid.wolfterritories.org:8002", ...) is wolfterritories.org or a name under it. Scheme,
+    // port and path are ignored. Split out of isWolfTerritories() so the region's grid is held
+    // to the same exact-host rule.
+    inline bool isWolfHost(std::string host)
+    {
+        LLStringUtil::toLower(host);
+        const size_t scheme = host.find("://");
+        if (scheme != std::string::npos)
+        {
+            host.erase(0, scheme + 3);
+        }
+        const size_t host_end = host.find_first_of(":/");
+        if (host_end != std::string::npos)
+        {
+            host.erase(host_end);
+        }
+        static const std::string WOLF_DOMAIN = "wolfterritories.org";
+        static const std::string WOLF_SUFFIX = ".wolfterritories.org";
+        return host == WOLF_DOMAIN
+            || (host.size() > WOLF_SUFFIX.size()
+                && host.compare(host.size() - WOLF_SUFFIX.size(), WOLF_SUFFIX.size(), WOLF_SUFFIX) == 0);
+    }
+    // </WolfViewer 2026-10-06>
+
     inline bool isWolfTerritories()
     {
         LLGridManager* gm = LLGridManager::getInstance();
@@ -52,25 +78,32 @@ namespace WolfGrid
         // "grid.wolfterritories.org:8002" (grids.xml, llviewernetwork.h MAINGRID) and any
         // hand-added variant of it still match.
         //return gm->getGrid().find("wolfterritories.org") != std::string::npos;
-        std::string host = gm->getGrid();
-        LLStringUtil::toLower(host);
-        const size_t scheme = host.find("://");
-        if (scheme != std::string::npos)
-        {
-            host.erase(0, scheme + 3);
-        }
-        const size_t host_end = host.find_first_of(":/");
-        if (host_end != std::string::npos)
-        {
-            host.erase(host_end);
-        }
-        static const std::string WOLF_DOMAIN = "wolfterritories.org";
-        static const std::string WOLF_SUFFIX = ".wolfterritories.org";
-        return host == WOLF_DOMAIN
-            || (host.size() > WOLF_SUFFIX.size()
-                && host.compare(host.size() - WOLF_SUFFIX.size(), WOLF_SUFFIX.size(), WOLF_SUFFIX) == 0);
+        return isWolfHost(gm->getGrid());
         // </WolfViewer 2026-09-27>
     }
+
+    // <WolfViewer 2026-10-06> Logged in to Wolf Territories AND standing on one of its regions
+    // now. Paul: "if the avatar tp's to another region in wolfstorm or wolfviewer go back to the
+    // conventional map untill they get back to wolf territories grid". isWolfTerritories() is the
+    // LOGIN grid and stays true after a hypergrid jump. The region says which grid it belongs to
+    // in its SimulatorFeatures, OpenSimExtras "GridURL" (lfsimfeaturehandler.cpp:125 ->
+    // hyperGridURL(), protocol stripped). OpenSim fills it from GatekeeperURI (Scene.cs:1288,
+    // GridInfo.cs:407); every Wolf region has GatekeeperURI "http://grid.wolfterritories.org:8002".
+    // Before the first region's features arrive the value is empty: then the login grid decides.
+    inline bool isOnWolfTerritories()
+    {
+        if (!isWolfTerritories())
+        {
+            return false;
+        }
+        if (!LFSimFeatureHandler::instanceExists())
+        {
+            return true;
+        }
+        const std::string region_grid = LFSimFeatureHandler::instance().hyperGridURL();
+        return region_grid.empty() || isWolfHost(region_grid);
+    }
+    // </WolfViewer 2026-10-06>
 
     // <WolfViewer 2026-09-27> Options for every request to a Wolf service (and the other fixed
     // third-party hosts this viewer calls). Those requests carry X-Wolf-Agent/X-Wolf-Session --

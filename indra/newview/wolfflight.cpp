@@ -682,9 +682,14 @@ F32 WolfFlight::obstacleNeed(F32 track_deg, F32 speed, F32 z) const
             continue;
         }
         const F32 top = ext[1][2], bottom = ext[0][2];
-        if (top + margin <= z || bottom > z + margin)
+        // <WolfViewer 2026-10-07> Only what reaches down to the aircraft's own height (its underside
+        // at most 10 m above it) is in the way; anything higher is flown under. With "within the
+        // margin above" a skybox or floating build 30-40 m overhead counted, the climb brought the
+        // next one into range, and over open sea near Blindside the plane climbed 600 m+ with cruise
+        // set to 500 ft (Paul, 2026-10-07).
+        if (top + margin <= z || bottom > z + 10.f)
         {
-            continue;   // already clear above it, or high above the aircraft
+            continue;   // already clear above it, or above the aircraft: flown under
         }
         const F32 cx = (ext[0][0] + ext[1][0]) * 0.5f - pos.mV[VX], cy = (ext[0][1] + ext[1][1]) * 0.5f - pos.mV[VY];
         const F32 hx = (ext[1][0] - ext[0][0]) * 0.5f, hy = (ext[1][1] - ext[0][1]) * 0.5f;

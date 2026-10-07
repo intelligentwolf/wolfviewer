@@ -259,6 +259,7 @@ private:
     void clearTrip();   // destination, route and alerts gone: a mode entered or left starts clean
     F32  boatRay(const LLVector3& from, const LLVector3& dir, F32 reach);
     F32  terrainNeed(F32 track_deg, F32 speed, F32 z) const;
+    F32  obstacleNeed(F32 track_deg, F32 speed, F32 z) const;   // <WolfViewer 2026-10-07/> the same for objects
     void advanceRoute();
     void planWaterRoute();
     void sailAlarms();
@@ -273,7 +274,10 @@ private:
     S32 mTack = 0;                  // +1 starboard tack (wind on the starboard bow), -1 port
     F64 mLastTack = 0.0;
     F64 mAvoidUntil = 0.0;          // turning away from a shoal or an obstacle until then
-    F32 mAvoidTurn = 0.f;
+    F32 mAvoidHeading = 0.f;        // <WolfViewer 2026-10-07/> the heading steered while avoiding
+    bool mAvoidBlocked = false;     // <WolfViewer 2026-10-07/> the way ahead was blocked at the last check
+    F32 mAvoidTurned = 0.f;         // <WolfViewer 2026-10-07/> degrees turned to port in this blocked spell
+    F32 mAvoidLastHeading = 0.f;
     bool mRouteDirty = false;
     F32 mBoatObstacle = 1e9f;
     F32 mWindAvgX = 0.f, mWindAvgY = 0.f;   // the sim's wind, averaged (measure)

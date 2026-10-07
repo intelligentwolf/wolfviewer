@@ -29,6 +29,8 @@
 #include "lltracker.h"
 #include "llviewercontrol.h"
 #include "llviewerobject.h"
+#include "llviewerobjectlist.h"   // <WolfViewer 2026-10-07/> obstacleNeed
+#include "lldrawable.h"
 #include "llviewerregion.h"
 #include "llvoavatarself.h"
 #include "llworld.h"
@@ -636,6 +638,56 @@ F32 WolfFlight::terrainNeed(F32 track_deg, F32 speed, F32 z) const
     return need;
 }
 
+// <WolfViewer 2026-10-07> Paul: "autopilot on planes ... it should fly higher if it sees an
+// obstruction ahead of it". terrainNeed for OBJECTS: the climb (m/s) that clears, with the same
+// margin, every object the next minute's track passes over - towers, buildings, masts, ships. One
+// pass over the object list: a prim's drawn box (the drawable's octree extents, as
+// WolfNaturalWater::rasterizeBuilt reads them) counts when its footprint comes within the margin
+// of the track and its bottom is below the aircraft plus the margin (a skybox far overhead is
+// flown under, not climbed to). The craft itself, avatars, attachments and phantom prims (which
+// cannot be hit) are ignored. Nearer than 6 s it is divided by 6, as terrainNeed does.
+F32 WolfFlight::obstacleNeed(F32 track_deg, F32 speed, F32 z) const
+{
+    const F32 margin = (craft() == CRAFT_HELI) ? 12.f : 40.f;
+    const F32 dx = sinf(track_deg * DEG_TO_RAD), dy = cosf(track_deg * DEG_TO_RAD);
+    const F32 reach = speed * 60.f;
+    const LLVector3 pos = gAgent.getPosAgentFromGlobal(mData.mPosGlobal);
+    LLViewerObject* own = vehicleRoot();
+    F32 need = -1e9f;
+    const S32 count = gObjectList.getNumObjects();
+    for (S32 i = 0; i < count; ++i)
+    {
+        LLViewerObject* o = gObjectList.getObject(i);
+        if (!o || o->isDead() || o->mDrawable.isNull() || o->isAvatar() || o->isAttachment() || o->isHUDAttachment()
+            || o->flagPhantom() || (own && (o == own || o->getRootEdit() == own)))
+        {
+            continue;
+        }
+        const LLVector4a* ext = o->mDrawable->getSpatialExtents();
+        if (!ext || !ext[0].isFinite3() || !ext[1].isFinite3())
+        {
+            continue;
+        }
+        const F32 top = ext[1][2], bottom = ext[0][2];
+        if (top + margin <= z || bottom > z + margin)
+        {
+            continue;   // already clear above it, or high above the aircraft
+        }
+        const F32 cx = (ext[0][0] + ext[1][0]) * 0.5f - pos.mV[VX], cy = (ext[0][1] + ext[1][1]) * 0.5f - pos.mV[VY];
+        const F32 hx = (ext[1][0] - ext[0][0]) * 0.5f, hy = (ext[1][1] - ext[0][1]) * 0.5f;
+        const F32 r = sqrtf(hx * hx + hy * hy);   // the footprint, as a circle round the box
+        const F32 along = cx * dx + cy * dy;
+        const F32 across = fabsf(cx * dy - cy * dx);
+        if (along + r < 0.f || along - r > reach || across > r + margin)
+        {
+            continue;
+        }
+        const F32 t = llmax(6.f, (along - r) / speed);
+        need = llmax(need, (top + margin - z) / t);
+    }
+    return need;
+}
+
 F32 WolfFlight::targetAltitudeZ() const
 {
     const F32 sel_z = mData.mWaterZ + mSelAltFt / FT;
@@ -775,7 +827,7 @@ void WolfFlight::guidance(F32 dt)
         if (now >= mNextTerrainScan)
         {
             mNextTerrainScan = now + 0.25;
-            mTerrainNeed = terrainNeed(track, speed, z);
+            mTerrainNeed = llmax(terrainNeed(track, speed, z), obstacleNeed(track, speed, z));   // <WolfViewer 2026-10-07/> objects too
         }
         // Paul: "if it sees terrain it should fly UPWARDS not turn constantly". Land ahead is
         // only ever climbed over: up to a 20 degree climb path (at least 2 m/s), steeper than
@@ -2246,13 +2298,47 @@ void WolfFlight::sailAlarms()
         mNextAlarmSound = now + 1.5;
         make_ui_sound("UISndAlert");
     }
-    if (mAP && (shoal || collision) && now > mAvoidUntil)
+    // <WolfViewer 2026-10-07> Paul: "boats should automatically turn left until they find a clear
+    // route when on auto pilot". While the way ahead is blocked the boat steers 50 degrees to port
+    // of where its bow points NOW, re-aimed on every check, so it keeps turning left until the
+    // rays and the shoal look-ahead find the way clear. It then holds that clear heading for 4 s
+    // before going back to its route, which is re-planned from there. (Was: 50 degrees off the
+    // route's bearing to the clearer side for 6 s, then straight back at the obstacle.)
+    // Paul: "boats should only do that once though if there's no way clear it should turn off auto
+    // pilot and tell the user ... there's no point spinning forever". One full turn: when the boat
+    // has turned 360 degrees to port in one blocked spell and the way is still not clear, the
+    // autopilot lets go and says why.
+    const bool blocked = mAP && (shoal || collision);
+    if (blocked)
     {
-        mAvoidUntil = now + 6.0;
-        // away to the clearer side; starboard (the rule of the road) when they are alike
-        mAvoidTurn = (collision && mBoatClearL > mBoatClearR + 1.f) ? -50.f : 50.f;
+        if (!mAvoidBlocked)
+        {
+            mRouteDirty = true;   // once per blocked spell, not every frame
+            mAvoidTurned = 0.f;
+            mAvoidLastHeading = mData.mHeading;
+        }
+        // to port is a falling heading: count what it fell by since the last check
+        mAvoidTurned += llmax(0.f, wrap180(mAvoidLastHeading - mData.mHeading));
+        mAvoidLastHeading = mData.mHeading;
+        if (mAvoidTurned >= 360.f)
+        {
+            mAvoidBlocked = false;
+            mAvoidUntil = 0.0;
+            disconnectAP("NO CLEAR WAY", false);
+            LLNotificationsUtil::add("GenericAlert", LLSD().with("MESSAGE",
+                std::string("Autopilot off: the boat turned a full circle and found no clear way ahead"
+                            " (shallow water or objects all round). Steer it clear by hand, then switch the autopilot back on.")));
+            return;
+        }
+        mAvoidHeading = wrap360(mData.mHeading - 50.f);
+        mAvoidUntil = now + 4.0;
+    }
+    else if (mAvoidBlocked && now < mAvoidUntil)
+    {
+        mAvoidHeading = mData.mHeading;   // clear: hold the heading that found the way
         mRouteDirty = true;
     }
+    mAvoidBlocked = blocked;
 }
 
 void WolfFlight::sailGuidance(F32 dt)
@@ -2330,9 +2416,9 @@ void WolfFlight::sailGuidance(F32 dt)
     default:
         break;
     }
-    if (now < mAvoidUntil)
+    if (mAP && now < mAvoidUntil)
     {
-        want = wrap360(want + mAvoidTurn);
+        want = mAvoidHeading;   // <WolfViewer 2026-10-07/> sailAlarms: turning left round an obstacle
     }
     mWantTrack = want;
     mWantSpeed = mSelSpeedKt / KT;

@@ -946,8 +946,18 @@ void WolfFlight::landGuidance(F32 dt)
         mLandWantSpeed = llmax(approach, llmin(cruise, approach + to_faf / 60.f));
         F32 along = 0.f, across = 0.f;
         land_track(mData.mPosGlobal, mLandFaf, mLandDir, along, across);
-        // at the fix, or already past it on the centreline's side of it
-        if (to_faf < llmax(150.f, mData.mGS * 6.f) || (along > 0.f && fabsf(across) < 300.f))
+        // At the fix, or already past it on the centreline's side of it AND where final would want
+        // the plane: on the glide path (within 30 m) and at least 300 m before the threshold.
+        // <WolfViewer 2026-10-07> Paul's first autoland at Breathe Resort: the runway was found with
+        // the plane 511 m up beside the airport, "past the fix" sent it straight to final, final
+        // saw it far above the path close in and went around, and the go-around's new fix did the
+        // same on the next frame - two go-arounds and AUTOLAND FAILED within a second.
+        F32 t_along = 0.f, t_across = 0.f;
+        land_track(mData.mPosGlobal, mLandThr, mLandDir, t_along, t_across);
+        const F32 aim = llmin(mLandLen * 0.25f, 150.f);
+        const F32 path = mLandTop + llmax(0.f, aim - t_along) * GLIDE_TAN;
+        const bool on_final_already = along > 0.f && fabsf(across) < 300.f && t_along < -300.f && fabsf(z - path) < 30.f;
+        if (to_faf < llmax(150.f, mData.mGS * 6.f) || on_final_already)
         {
             mLand = LAND_FINAL;
             if (!mGearDown)

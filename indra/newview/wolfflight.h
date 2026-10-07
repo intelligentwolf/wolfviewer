@@ -298,6 +298,28 @@ private:
     F32 mObstacleImpact = 1e9f;
     F64 mPullUpUntil = 0.0, mTerrainUntil = 0.0, mNextAlarmSound = 0.0;
     void learn(F32 dt);
+    // <WolfViewer 2026-10-07> AUTOLAND (Paul: "autopilot should find if there is an airport on a
+    // region and head for that ... try and find the runway ... and land when it gets there").
+    // A plane whose destination region has an airport (WolfAirports) flies to it, finds the runway
+    // round it, flies a 3 degree approach and lands. Phases in order; NONE = no airport / not landing.
+    enum ELand { LAND_NONE = 0, LAND_CRUISE, LAND_SEARCH, LAND_APPROACH, LAND_FINAL, LAND_FLARE, LAND_ROLLOUT };
+    void landCheckAirport();
+    void landGuidance(F32 dt);
+    void landSetRunway(const LLVector3d& a, const LLVector3d& b, F32 width, F32 top, bool keep_direction);
+    void landGiveUp(const std::string& cas, const std::string& message);
+    void landReset();
+    ELand mLand = LAND_NONE;
+    bool mLandChecked = false;          // the destination has been looked up in the airports list
+    std::string mLandAirport;           // its name
+    bool mLandAirportExact = false;
+    LLVector3d mLandAirportGlobal;
+    LLVector3d mLandThr;                // the landing threshold (global, at the surface)
+    LLVector3 mLandDir;                 // the landing direction, horizontal unit
+    F32 mLandLen = 0.f, mLandWidth = 0.f, mLandTop = 0.f;
+    LLVector3d mLandFaf;                // the final approach fix, on the extended centreline
+    F64 mLandSearchStart = 0.0, mNextRunwayScan = 0.0, mLandTouchSince = 0.0, mLandStopSince = 0.0;
+    S32 mLandGoArounds = 0;
+    F32 mLandWantTrack = 0.f, mLandWantVS = 0.f, mLandWantSpeed = 0.f;
     void resolveDestination();
     void holdPair(EPair pair, F32 cmd, F32 phase_offset);
     void tapPair(EPair pair, S32 dir);

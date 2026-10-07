@@ -42,6 +42,7 @@
 #include "llimage.h"
 #include "llui.h"
 #include "pipeline.h"
+#include "wolfairports.h"   // <WolfViewer 2026-10-07/> autoland
 #include "wolfobjectprops.h"
 #include "wolfgrid.h"
 
@@ -342,7 +343,10 @@ void WolfFlight::idle()
     if (mAP)
     {
         if (mSail) sailDrive(dt); else drive(dt);
-        learn(dt);
+        if (mLand < LAND_FLARE)   // <WolfViewer 2026-10-07/> no AUTO LEARN from a landing's flare and rollout
+        {
+            learn(dt);
+        }
     }
     else
     {
@@ -352,7 +356,16 @@ void WolfFlight::idle()
 
     if (!mSail)
     {
-        groundProximity();
+        // <WolfViewer 2026-10-07> Not on an autoland's final: the runway ahead is meant to be hit.
+        if (mAP && mLand >= LAND_FINAL)
+        {
+            clearCas("PULL UP");
+            clearCas("TERRAIN");
+        }
+        else
+        {
+            groundProximity();
+        }
     }
 }
 
@@ -716,10 +729,325 @@ F32 WolfFlight::targetAltitudeZ() const
     return sel_z;
 }
 
+//-----------------------------------------------------------------------------
+// AUTOLAND (Paul, 2026-10-07: "autopilot should find if there is an airport on a region and head
+// for that we have an airports database, so check the api and try and find the runway ... and land
+// when it gets there"). A plane only; a helicopter is just sent to the airport's point.
+//
+//   CRUISE    LNAV to the airport's point (the destination is moved there from the region's spot).
+//   SEARCH    within LAND_SEARCH_M: look for the runway among the prims round the point
+//             (WolfAirports::findRunway) every 2 s, circling over the airport (the ordinary hold)
+//             while there is none; LAND_SEARCH_SECS without one = give up, keep circling, say so.
+//   APPROACH  to the final approach fix: on the extended centreline, far enough out for a 3 degree
+//             glide from where the plane is (600 to 3000 m), at the glide path's height there.
+//   FINAL     along the centreline down the 3 degree glide path to the aim point, gear down,
+//             approach speed; terrain / object climbs and the ground alarms are off (the runway
+//             itself is "an obstacle"). Too far off the line or the path close in = go around.
+//   FLARE     LAND_FLARE_M above the surface: sink slowly, power back.
+//   ROLLOUT   on the runway: speed 0 along the centreline; stopped = autopilot off, LANDED.
+//-----------------------------------------------------------------------------
+namespace
+{
+    const F32 LAND_SEARCH_M = 2500.f;       // start looking for the runway this close
+    const F32 LAND_SEARCH_SECS = 180.f;     // two or three circles without one: give up
+    const F32 GLIDE_TAN = 0.0524f;          // tan 3 degrees
+    const F32 LAND_FLARE_M = 5.f;           // root of the aircraft above the surface
+    const F32 LAND_APPROACH_SPEED = 0.7f;   // of the selected speed
+    const S32 LAND_MAX_GO_AROUNDS = 2;
+
+    // along-track (+ = past the point, in the direction) and cross-track (+ = right) metres
+    void land_track(const LLVector3d& p, const LLVector3d& o, const LLVector3& d, F32& along, F32& across)
+    {
+        const F32 rx = (F32)(p.mdV[VX] - o.mdV[VX]), ry = (F32)(p.mdV[VY] - o.mdV[VY]);
+        along = rx * d.mV[VX] + ry * d.mV[VY];
+        across = rx * d.mV[VY] - ry * d.mV[VX];
+    }
+}
+
+void WolfFlight::landReset()
+{
+    mLand = LAND_NONE;
+    mLandChecked = false;
+    mLandAirport.clear();
+    mLandGoArounds = 0;
+    clearCas("NO RUNWAY FOUND");
+    clearCas("AUTOLAND FAILED");
+}
+
+// The destination's region in the airports list: move the destination to the airport.
+void WolfFlight::landCheckAirport()
+{
+    WolfAirports& airports = WolfAirports::instance();
+    airports.refresh();
+    if (mLandChecked || !mDest.mValid || mDest.mPending || !airports.loaded())
+    {
+        return;
+    }
+    mLandChecked = true;
+    const WolfAirports::Airport* ap = airports.forRegion(mDest.mRegion);
+    if (!ap)
+    {
+        return;
+    }
+    mLandAirport = ap->mName;
+    mLandAirportExact = ap->mExact;
+    mLandAirportGlobal = ap->mGlobal;
+    mDest.mGlobal.mdV[VX] = ap->mGlobal.mdV[VX];
+    mDest.mGlobal.mdV[VY] = ap->mGlobal.mdV[VY];
+    rebuildRoute();
+    mLand = craft() == CRAFT_PLANE ? LAND_CRUISE : LAND_NONE;
+    std::string shown = utf8str_truncate(ap->mName, 24);
+    LLStringUtil::toUpper(shown);
+    postCas("AIRPORT " + shown, CAS_MEMO);
+    LL_INFOS("WolfFlight") << "destination " << mDest.mRegion << " has airport " << ap->mName << " at " << ap->mGlobal
+                           << (ap->mExact ? "" : " (region centre)") << LL_ENDL;
+}
+
+// The runway found: land on it into the wind when there is some, otherwise from the end nearer
+// the plane's way in; the final approach fix far enough out for a 3 degree glide from here.
+void WolfFlight::landSetRunway(const LLVector3d& a, const LLVector3d& b, F32 width, F32 top, bool keep_direction)
+{
+    LLVector3 ab((F32)(b.mdV[VX] - a.mdV[VX]), (F32)(b.mdV[VY] - a.mdV[VY]), 0.f);
+    const F32 len = ab.normVec();
+    if (len < 1.f)
+    {
+        return;
+    }
+    bool from_a;
+    if (keep_direction)
+    {
+        from_a = ab * mLandDir >= 0.f;
+    }
+    else if (LLVector3(mData.mWind.mV[VX], mData.mWind.mV[VY], 0.f).length() > 3.f)
+    {
+        from_a = mData.mWind * ab < 0.f;   // the wind blows from B toward A: land A -> B, into it
+    }
+    else
+    {
+        // the threshold whose approach starts nearer the plane
+        const F64 da = (a.mdV[VX] - mData.mPosGlobal.mdV[VX]) * (a.mdV[VX] - mData.mPosGlobal.mdV[VX])
+                     + (a.mdV[VY] - mData.mPosGlobal.mdV[VY]) * (a.mdV[VY] - mData.mPosGlobal.mdV[VY]);
+        const F64 db = (b.mdV[VX] - mData.mPosGlobal.mdV[VX]) * (b.mdV[VX] - mData.mPosGlobal.mdV[VX])
+                     + (b.mdV[VY] - mData.mPosGlobal.mdV[VY]) * (b.mdV[VY] - mData.mPosGlobal.mdV[VY]);
+        from_a = da <= db;
+    }
+    mLandThr = from_a ? a : b;
+    mLandDir = from_a ? ab : -ab;
+    mLandLen = len;
+    mLandWidth = width;
+    mLandTop = top;
+    mLandThr.mdV[VZ] = top;
+    if (!keep_direction)
+    {
+        const F32 z = (F32)mData.mPosGlobal.mdV[VZ];
+        const F32 out = llclamp((z - top) / GLIDE_TAN, 600.f, 3000.f);
+        mLandFaf = mLandThr - LLVector3d(mLandDir * out);
+        mLandFaf.mdV[VZ] = top + out * GLIDE_TAN;
+        const S32 rwy = llmax(1, (S32)llround(wrap360((F32)(atan2(mLandDir.mV[VX], mLandDir.mV[VY]) * RAD_TO_DEG)) / 10.f));
+        postCas(llformat("RWY %02d %dM", rwy > 36 ? rwy - 36 : rwy, (S32)len), CAS_MEMO);
+        LL_INFOS("WolfFlight") << "runway at " << mLandAirport << ": threshold " << mLandThr << " heading "
+                               << atan2(mLandDir.mV[VX], mLandDir.mV[VY]) * RAD_TO_DEG << " length " << len << " width "
+                               << width << " surface " << top << ", final approach fix " << out << " m out" << LL_ENDL;
+    }
+}
+
+void WolfFlight::landGiveUp(const std::string& cas, const std::string& message)
+{
+    mLand = LAND_NONE;
+    postCas(cas, CAS_WARNING);
+    make_ui_sound("UISndAlert");
+    LLNotificationsUtil::add("GenericAlert", LLSD().with("MESSAGE", message));
+    // circle over the airport, as at any destination without one
+    if (mDest.mValid)
+    {
+        mLateral = LAT_HOLD;
+    }
+    LL_INFOS("WolfFlight") << "autoland: " << cas << LL_ENDL;
+}
+
+void WolfFlight::landGuidance(F32 dt)
+{
+    landCheckAirport();
+    if (mLand == LAND_NONE || craft() != CRAFT_PLANE)
+    {
+        return;
+    }
+    if (!mAP || (mLateral != LAT_LNAV && mLateral != LAT_HOLD))
+    {
+        if (mLand >= LAND_APPROACH)
+        {
+            mLand = LAND_SEARCH;   // the pilot took over: start again from the runway if re-engaged
+            mLandSearchStart = nowSeconds();
+        }
+        return;
+    }
+    const F64 now = nowSeconds();
+    const F32 z = (F32)mData.mPosGlobal.mdV[VZ];
+    const F32 cruise = mSelSpeedKt / KT;
+    const F32 approach = llmax(1.f, cruise * LAND_APPROACH_SPEED);
+    switch (mLand)
+    {
+    case LAND_CRUISE:
+        if (destDistance() < LAND_SEARCH_M)
+        {
+            mLand = LAND_SEARCH;
+            mLandSearchStart = now;
+            mNextRunwayScan = 0.0;
+        }
+        break;
+    case LAND_SEARCH:
+        if (now >= mNextRunwayScan)
+        {
+            mNextRunwayScan = now + 2.0;
+            WolfAirports::Airport ap;
+            ap.mName = mLandAirport;
+            ap.mGlobal = mLandAirportGlobal;
+            ap.mHasZ = mLandAirportGlobal.mdV[VZ] != 0.0;
+            ap.mExact = mLandAirportExact;
+            const WolfAirports::Runway r = WolfAirports::findRunway(ap);
+            if (r.mValid)
+            {
+                landSetRunway(r.mA, r.mB, r.mWidth, r.mTopZ, false);
+                mLand = LAND_APPROACH;
+                mLateral = LAT_LNAV;
+                mAT = true;   // the approach is flown on speed
+                clearCas("NO RUNWAY FOUND");
+                break;
+            }
+        }
+        if (now - mLandSearchStart > LAND_SEARCH_SECS)
+        {
+            landGiveUp("NO RUNWAY FOUND", "Autopilot: no runway was found at " + mLandAirport
+                       + ". It is circling over the airport. Land by hand, or pick another destination.");
+        }
+        break;
+    case LAND_APPROACH:
+    {
+        // a longer runway as more of it loads: same direction, same fix
+        if (now >= mNextRunwayScan)
+        {
+            mNextRunwayScan = now + 3.0;
+            WolfAirports::Airport ap;
+            ap.mName = mLandAirport;
+            ap.mGlobal = mLandAirportGlobal;
+            ap.mHasZ = mLandAirportGlobal.mdV[VZ] != 0.0;
+            ap.mExact = mLandAirportExact;
+            const WolfAirports::Runway r = WolfAirports::findRunway(ap);
+            if (r.mValid && r.length() > mLandLen + 1.f)
+            {
+                landSetRunway(r.mA, r.mB, r.mWidth, r.mTopZ, true);
+            }
+        }
+        const F64 dx = mLandFaf.mdV[VX] - mData.mPosGlobal.mdV[VX], dy = mLandFaf.mdV[VY] - mData.mPosGlobal.mdV[VY];
+        const F32 to_faf = (F32)sqrt(dx * dx + dy * dy);
+        mLandWantTrack = wrap360((F32)(atan2(dx, dy) * RAD_TO_DEG));
+        const F32 max_vs = llclamp(mData.mAirspeed * 0.176f, 0.7f, 8.f);
+        mLandWantVS = llclamp(((F32)mLandFaf.mdV[VZ] - z) * 0.15f, -max_vs, max_vs);
+        mLandWantSpeed = llmax(approach, llmin(cruise, approach + to_faf / 60.f));
+        F32 along = 0.f, across = 0.f;
+        land_track(mData.mPosGlobal, mLandFaf, mLandDir, along, across);
+        // at the fix, or already past it on the centreline's side of it
+        if (to_faf < llmax(150.f, mData.mGS * 6.f) || (along > 0.f && fabsf(across) < 300.f))
+        {
+            mLand = LAND_FINAL;
+            if (!mGearDown)
+            {
+                sendGearCommand();
+            }
+            postCas("FINAL", CAS_MEMO);
+        }
+        break;
+    }
+    case LAND_FINAL:
+    case LAND_FLARE:
+    case LAND_ROLLOUT:
+    {
+        F32 along = 0.f, across = 0.f;
+        land_track(mData.mPosGlobal, mLandThr, mLandDir, along, across);
+        const F32 rwy_hdg = wrap360((F32)(atan2(mLandDir.mV[VX], mLandDir.mV[VY]) * RAD_TO_DEG));
+        // onto the centreline: up to 30 degrees of intercept, half a degree per metre off it
+        mLandWantTrack = wrap360(rwy_hdg + llclamp(-across * 0.5f, -30.f, 30.f));
+        const F32 aim = llmin(mLandLen * 0.25f, 150.f);
+        const F32 height = z - mLandTop;
+        if (mLand == LAND_FINAL)
+        {
+            const F32 path = mLandTop + llmax(0.f, aim - along) * GLIDE_TAN;
+            mLandWantVS = llclamp((path - z) * 0.25f - mData.mGS * GLIDE_TAN, -4.f, 2.f);
+            mLandWantSpeed = approach;
+            // close in and not stable: go around
+            const bool close_in = along > -400.f;
+            const bool off_line = fabsf(across) > mLandWidth * 0.5f + 25.f;
+            const bool off_path = z - path > 40.f || path - z > 25.f;
+            const bool long_land = along > aim + mLandLen * 0.5f && height > LAND_FLARE_M * 3.f;
+            if ((close_in && (off_line || off_path)) || long_land)
+            {
+                if (++mLandGoArounds > LAND_MAX_GO_AROUNDS)
+                {
+                    landGiveUp("AUTOLAND FAILED", "Autopilot: could not line up on the runway at " + mLandAirport
+                               + " after " + std::to_string(LAND_MAX_GO_AROUNDS) + " go-arounds. It is circling over the"
+                               " airport. Land by hand, or pick another destination.");
+                    break;
+                }
+                postCas("GO AROUND", CAS_CAUTION);
+                landSetRunway(mLandThr, mLandThr + LLVector3d(mLandDir * mLandLen), mLandWidth, mLandTop, false);
+                mLand = LAND_APPROACH;
+                mLandFaf.mdV[VZ] = llmax((F32)mLandFaf.mdV[VZ], mLandTop + 100.f);   // climb away first
+                break;
+            }
+            if (height < LAND_FLARE_M && along > -50.f)
+            {
+                mLand = LAND_FLARE;
+                mLandTouchSince = 0.0;
+                postCas("FLARE", CAS_MEMO);
+            }
+        }
+        else if (mLand == LAND_FLARE)
+        {
+            mLandWantVS = -0.6f;
+            mLandWantSpeed = approach * 0.8f;
+            // down: no longer sinking, within the flare height, over the runway, for a second
+            const bool down = mVSf > -0.3f && height < LAND_FLARE_M + 1.f && along > -20.f && along < mLandLen;
+            mLandTouchSince = down ? (mLandTouchSince > 0.0 ? mLandTouchSince : now) : 0.0;
+            if (mLandTouchSince > 0.0 && now - mLandTouchSince > 1.0)
+            {
+                mLand = LAND_ROLLOUT;
+                mLandStopSince = 0.0;
+                postCas("TOUCHDOWN", CAS_MEMO);
+            }
+        }
+        else
+        {
+            mLandWantVS = 0.f;   // level: no pitch keys on the ground
+            mLandWantSpeed = 0.f;
+            mLandStopSince = mData.mGS < 1.f ? (mLandStopSince > 0.0 ? mLandStopSince : now) : 0.0;
+            if (mLandStopSince > 0.0 && now - mLandStopSince > 2.0)
+            {
+                mAP = false;
+                mAT = false;
+                mOutPitch = mOutBank = mOutThrottle = 0.f;
+                mLand = LAND_NONE;
+                mArrived = true;
+                clearCas("FINAL");
+                clearCas("FLARE");
+                clearCas("TOUCHDOWN");
+                postCas("LANDED", CAS_MEMO);
+                LL_INFOS("WolfFlight") << "autoland: landed at " << mLandAirport << LL_ENDL;
+            }
+        }
+        break;
+    }
+    default:
+        break;
+    }
+    (void)dt;
+}
+
 void WolfFlight::guidance(F32 dt)
 {
     // the vertical speed arrives in steps with each object update: filtered for the guidance
     mVSf = ema(mVSf, mData.mVS, dt, 0.8f);
+    landGuidance(dt);   // <WolfViewer 2026-10-07/> autoland: its targets override below
+    const bool landing = mAP && mLand >= LAND_APPROACH;
     const bool heli = craft() == CRAFT_HELI;
     const F32 z = (F32)mData.mPosGlobal.mdV[VZ];
     mFDValid = mLateral != LAT_NONE || mVertical != VERT_NONE;
@@ -759,7 +1087,7 @@ void WolfFlight::guidance(F32 dt)
                     }
                 }
             }
-            else if (dist < HOLD_ENTRY_M && mAP)
+            else if (dist < HOLD_ENTRY_M && mAP && mLand < LAND_APPROACH)   // <WolfViewer 2026-10-07/> not on an approach
             {
                 mLateral = LAT_HOLD;
                 postCas("HOLDING AT DEST", CAS_MEMO);
@@ -779,6 +1107,12 @@ void WolfFlight::guidance(F32 dt)
         break;
     default:
         break;
+    }
+    if (landing)   // <WolfViewer 2026-10-07/> autoland steers and sets the speed
+    {
+        want = mLandWantTrack;
+        use_track = mData.mGS > 5.f;
+        mWantSpeed = mLandWantSpeed;
     }
     mWantTrack = want;
     const F32 current = use_track ? mData.mTrack : mData.mHeading;
@@ -812,8 +1146,13 @@ void WolfFlight::guidance(F32 dt)
         mWantVS = 0.f;
         break;
     }
+    if (landing)   // <WolfViewer 2026-10-07/> autoland's glide
+    {
+        mWantVS = mLandWantVS;
+    }
     // Never below the land ahead, whatever the mode asks (a climb wins over any descent).
-    if (mVertical != VERT_NONE || mAP)
+    // <WolfViewer 2026-10-07> Except on final: there the runway is the land ahead.
+    if ((mVertical != VERT_NONE || mAP) && !(landing && mLand >= LAND_FINAL))
     {
         const F32 floor_z = terrainFloorZ();
         if (z < floor_z)
@@ -1405,6 +1744,7 @@ void WolfFlight::setDestination(const std::string& region_in, const LLVector3& l
         d.mGlobal.mdV[VZ] = mData.mPosGlobal.mdV[VZ];
     }
     mDest = d;
+    landReset();   // <WolfViewer 2026-10-07/> a new destination is looked up in the airports list
     rebuildRoute();
     mArrived = false;
     clearCas("NOT IN DATABASE");
@@ -1451,6 +1791,7 @@ bool WolfFlight::setDestinationFromMap()
     }
     d.mRequestedAt = nowSeconds();
     mDest = d;
+    landReset();   // <WolfViewer 2026-10-07/>
     rebuildRoute();
     mArrived = false;
     clearCas("NO MAP DESTINATION");
@@ -1459,6 +1800,7 @@ bool WolfFlight::setDestinationFromMap()
 
 void WolfFlight::clearTrip()
 {
+    landReset();   // <WolfViewer 2026-10-07/>
     mDest = Dest();
     mRoute = Route();
     mArrived = false;
@@ -1468,6 +1810,7 @@ void WolfFlight::clearTrip()
 
 void WolfFlight::clearDestination()
 {
+    landReset();   // <WolfViewer 2026-10-07/>
     mDest = Dest();
     mRoute = Route();
     if (mLateral == LAT_LNAV || mLateral == LAT_HOLD)

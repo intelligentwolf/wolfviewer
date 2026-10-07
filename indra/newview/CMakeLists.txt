@@ -942,6 +942,7 @@ set(viewer_SOURCE_FILES
     wolfweatherprofile.cpp
     wolfweathersound.cpp
     wolfai.cpp
+    wolfairports.cpp
     wolflslcomplete.cpp
     wolfterrainpaint.cpp
     wolfsurfcurl.cpp
@@ -1846,6 +1847,7 @@ set(viewer_HEADER_FILES
     wolfweatherprofile.h
     wolfweathersound.h
     wolfai.h
+    wolfairports.h
     wolflslcomplete.h
     wolfterrainpaint.h
     wolfsurfcurl.h

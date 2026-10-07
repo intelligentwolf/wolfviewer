@@ -12,9 +12,13 @@ on:
         default: all
         # "linux" = both Linux builds plus the job that bundles them into one tarball.
         options: [all, linux, linux64, linux64-avx2, windows64, windows64-avx2, macos64]
+  # [2026-10-07] Branch pushes only, no `tags: ["v*"]`. Creating the release tag started a SECOND
+  # full build of the same commit (w59: 07:06-08:58Z, after the branch run 21:33-00:14Z), and from
+  # cold, because a tag run cannot restore the branch's caches (0 ccache hits). It was unsigned as
+  # well (WV_SIGN needs refs/heads/wolfviewer), so its artifacts were never the ones to ship. A
+  # release publishes the branch run's artifacts (collect_artifacts.sh <run-id>).
   push:
     branches: ["wolfviewer"]
-    tags: ["v*"]
 
 env:
   # [2026-10-02] NO "-wN" IN THE CHANNEL ANY MORE. viewer_manifest.py app_name() makes the
@@ -29,12 +33,12 @@ env:
   # BuildVersion.cmake:14 reads ENV{revision} for the 4th version field (must be
   # numeric — viewerRes.rc:145 FILEVERSION). Pin to the wolf revision number so the
   # viewer reports 7.2.4.1 instead of a meaningless git commit count.
-  revision: "59"
+  revision: "60"
   # [2026-09-12] From here on a release has a NAME, and that is what residents see. The number
   # stays because it has to — viewerRes.rc:145 FILEVERSION must be numeric, and wolfupdate.cpp
   # compares it with the signed latest.json's "revision" — but it is no longer the thing anyone is
   # asked to quote. Tags stay v7.2.4-wN (w52 and older viewers read the GitHub tag).
-  release_name: "Flying Fox"
+  release_name: "Smooth Seal"
   # [2026-09-29] Windows code signing (Azure Artifact Signing, account in Paul's Azure subscription,
   # resource group wolfviewer-signing). None of these are secrets. The endpoint must be the one for
   # the account's region, North Europe (how-to-signing-integrations endpoint table), and the
@@ -142,9 +146,12 @@ jobs:
           path: ~/.ccache
           # Per platform, and newest-first restore so a changed source file still starts from
           # the last good cache instead of from nothing.
-          key: ccache-${{ matrix.name }}-${{ github.sha }}
+          # [2026-10-07] "@" ends the platform name. With "-", linux64's restore prefix
+          # "ccache-linux64-" also matched "ccache-linux64-avx2-...", so linux64 restored the AVX2
+          # cache and got 0 hits (w59 branch run: "Cache restored from key: ccache-linux64-avx2-...").
+          key: ccache-${{ matrix.name }}@${{ github.sha }}
           restore-keys: |
-            ccache-${{ matrix.name }}-
+            ccache-${{ matrix.name }}@
 
       - name: Install ccache (Linux/macOS)
         if: runner.os != 'Windows'
@@ -154,6 +161,14 @@ jobs:
           ccache --max-size=5G
           ccache --zero-stats
           echo "CCACHE_DIR=$HOME/.ccache" >> "$GITHUB_ENV"
+          # [2026-10-07] Precompiled headers. newview builds with target_precompile_headers
+          # (newview/CMakeLists.txt:2396, USE_PRECOMPILED_HEADERS ON by default), and ccache
+          # refuses a compile that uses a PCH unless told the PCH's defines and time macros may
+          # be trusted, and refuses a header newer than the compile's start, which the .gch made
+          # earlier in the same build always is. w59: 862 compiles "Uncacheable", so a run with
+          # every cacheable call a hit still compiled for 69 minutes. The settings ccache's
+          # manual gives for precompiled headers:
+          echo "CCACHE_SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime" >> "$GITHUB_ENV"
 
       - uses: actions/setup-python@v5
         with: { python-version: '3.11' }

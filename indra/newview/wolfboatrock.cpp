@@ -228,6 +228,30 @@ void WolfBoatRock::sweep()
         {
             continue;
         }
+        // <WolfViewer 2026-10-07> Paul: "we only need to rock boats we can see". A hull that was
+        // not drawn last frame (behind the camera, off screen, hidden behind a building) is not
+        // rocked: every rocker makes its drawable active and is moved every frame. Any prim of the
+        // linkset counts - a tiny or hidden root prim must not stop a visible hull.
+        auto drawn = [](const LLViewerObject* o)
+        {
+            return o->mDrawable.notNull() && o->mDrawable->isVisible();
+        };
+        bool seen = drawn(objectp);
+        if (!seen)
+        {
+            for (const LLViewerObject* child : objectp->getChildren())
+            {
+                if (child && drawn(child))
+                {
+                    seen = true;
+                    break;
+                }
+            }
+        }
+        if (!seen)
+        {
+            continue;
+        }
         const LLVector3 pa = objectp->getPositionAgent();
         const F32 ddx = pa.mV[VX] - camera_pos.mV[VX];
         const F32 ddy = pa.mV[VY] - camera_pos.mV[VY];

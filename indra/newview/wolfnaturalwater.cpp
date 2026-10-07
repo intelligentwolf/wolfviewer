@@ -203,9 +203,9 @@ void WolfNaturalWater::idle()
     }
     for (F32 f : prim_floor)   // a prim rezzing above a basin floor changes the answer too
     {
-        U32 bits;
-        memcpy(&bits, &f, sizeof(bits));
-        stamp = (stamp ^ bits) * 1099511628211ull;
+        // <WolfViewer 2026-10-07> to 5 cm: a float's last bits must not re-run the analysis.
+        const S32 cm5 = std::isfinite(f) ? ll_round(f * 20.f) : std::numeric_limits<S32>::max();
+        stamp = (stamp ^ (U32)cm5) * 1099511628211ull;
     }
     // <WolfViewer 2026-10-06> the region's water level is part of the answer now (a hollow it
     // already fills gets no pool), so a tide or an estate change of it re-runs the analysis.
@@ -215,7 +215,24 @@ void WolfNaturalWater::idle()
         memcpy(&bits, &sea, sizeof(bits));
         stamp = (stamp ^ bits) * 1099511628211ull;
     }
-    if (stamp == mRegions[regionp->getHandle()].mAppliedStamp)
+    RegionWater& rw = mRegions[regionp->getHandle()];
+    if (rw.mApplied && stamp == rw.mAppliedStamp)
+    {
+        rw.mPendingSince = -1.0;
+        return;
+    }
+    // <WolfViewer 2026-10-07> Wait for the objects to settle (SETTLE_SECS, see the header). The
+    // first result of a visit is not held back, so water still shows on arrival.
+    if (stamp != rw.mSeenStamp)
+    {
+        rw.mSeenStamp = stamp;
+        rw.mSeenSince = now;
+    }
+    if (rw.mPendingSince < 0.0)
+    {
+        rw.mPendingSince = now;
+    }
+    if (rw.mApplied && now - rw.mSeenSince < SETTLE_SECS && now - rw.mPendingSince < MAX_PENDING_SECS)
     {
         return;
     }
@@ -231,6 +248,7 @@ void WolfNaturalWater::idle()
     if (!main_queue || !general_queue)
     {
         compute(*result, std::move(z), std::move(built), std::move(prim_floor), grids, mpg, sea, catchment_m2);
+        result->mShape = shapeHash(*result);   // <WolfViewer 2026-10-07/>
         apply(result);
         return;
     }
@@ -239,6 +257,7 @@ void WolfNaturalWater::idle()
         [result, z = std::move(z), built = std::move(built), prim_floor = std::move(prim_floor), grids, mpg, sea, catchment_m2]() mutable // General queue
         {
             compute(*result, std::move(z), std::move(built), std::move(prim_floor), grids, mpg, sea, catchment_m2);
+            result->mShape = shapeHash(*result);   // <WolfViewer 2026-10-07/> off the main thread
             return true;
         },
         [result](bool) // main thread
@@ -266,6 +285,15 @@ void WolfNaturalWater::rasterizeBuilt(LLViewerRegion* regionp, const std::vector
         LLViewerObject* obj = gObjectList.getObject(i);
         if (!obj || obj->getRegion() != regionp || obj->getPCode() != LL_PCODE_VOLUME
             || obj->isAttachment() || obj->isHUDAttachment() || obj->mDrawable.isNull())
+        {
+            continue;
+        }
+        // <WolfViewer 2026-10-07> Only what stands still is "built". A moving drawable - a boat
+        // the rocker bobs (wolfboatrock.h: it makes the hull's drawable active), a vehicle being
+        // sailed or flown, anything spinning or being dragged - changed its box every frame, so
+        // this region's stamp changed on every 2 s check and the whole analysis and the water
+        // surfaces were rebuilt ~40 times a minute (Paul: "jerky, not smooth like it used to be").
+        if (obj->mDrawable->isActive())
         {
             continue;
         }
@@ -302,6 +330,48 @@ void WolfNaturalWater::rasterizeBuilt(LLViewerRegion* regionp, const std::vector
             }
         }
     }
+}
+
+// static
+// <WolfViewer 2026-10-07> Everything apply() hands to the water objects: each surface's mesh
+// (positions, normals, UVs, LOD lift, indices), flow and depth, pools and streams apart. compute()
+// is deterministic, so unchanged inputs give bit-identical meshes and the same hash.
+U64 WolfNaturalWater::shapeHash(const Result& result)
+{
+    U64 h = 1469598103934665603ull;
+    auto mix = [&h](const void* data, size_t bytes)
+    {
+        const U8* b = static_cast<const U8*>(data);
+        for (size_t i = 0; i < bytes; ++i)
+        {
+            h = (h ^ b[i]) * 1099511628211ull;
+        }
+    };
+    auto add_surfaces = [&](const std::vector<Surface>& surfaces)
+    {
+        const U64 count = surfaces.size();
+        mix(&count, sizeof(count));
+        for (const Surface& sf : surfaces)
+        {
+            mix(&sf.mFlow, sizeof(sf.mFlow));
+            mix(&sf.mDepth, sizeof(sf.mDepth));
+            const LLVOWater::ConformingMesh* m = sf.mMesh.get();
+            if (!m)
+            {
+                continue;
+            }
+            const U64 sizes[5] = { m->mVerts.size(), m->mNormals.size(), m->mUVs.size(), m->mLodLift.size(), m->mIndices.size() };
+            mix(sizes, sizeof(sizes));
+            mix(m->mVerts.data(), m->mVerts.size() * sizeof(LLVector3));
+            mix(m->mNormals.data(), m->mNormals.size() * sizeof(LLVector3));
+            mix(m->mUVs.data(), m->mUVs.size() * sizeof(LLVector2));
+            mix(m->mLodLift.data(), m->mLodLift.size() * sizeof(LLVector2));
+            mix(m->mIndices.data(), m->mIndices.size() * sizeof(U16));
+        }
+    };
+    add_surfaces(result.mPools);
+    add_surfaces(result.mStreams);
+    return h;
 }
 
 // static
@@ -1126,6 +1196,23 @@ void WolfNaturalWater::apply(std::shared_ptr<Result> result)
         return;
     }
     RegionWater& rw = mRegions[result->mRegionHandle];
+    // <WolfViewer 2026-10-07> Same water as is already drawn (objects came and went, none of
+    // them changed a pool or a stream): keep the live surfaces. Killing and re-creating them
+    // was the visible jerk.
+    rw.mPendingSince = -1.0;
+    if (rw.mApplied && result->mShape == rw.mAppliedShape)
+    {
+        bool live = true;
+        for (const auto& p : rw.mSurfaces)
+        {
+            live = live && p.notNull() && !p->isDead();
+        }
+        if (live)
+        {
+            rw.mAppliedStamp = result->mTerrainStamp;
+            return;
+        }
+    }
     killSurfaces(rw.mSurfaces);
     size_t verts = 0;
     auto create = [&](const Surface& sf, bool still)
@@ -1154,6 +1241,8 @@ void WolfNaturalWater::apply(std::shared_ptr<Result> result)
     for (const Surface& sf : result->mPools)   { if (!create(sf, true)) break; }
     for (const Surface& sf : result->mStreams) { if (!create(sf, false)) break; }
     rw.mAppliedStamp = result->mTerrainStamp;
+    rw.mAppliedShape = result->mShape;   // <WolfViewer 2026-10-07/>
+    rw.mApplied = true;
     LL_INFOS("WolfNaturalWater") << "Natural water: " << result->mPools.size() << " pools, "
         << result->mBuiltBasins << " built hollows skipped, " << result->mSeaBasins << " hollows already under the region's water, "
         << result->mStreams.size() << " streams (" << verts << " vertices) on region "

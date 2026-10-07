@@ -64,10 +64,20 @@ public:
         std::vector<Surface> mStreams;
         S32 mBuiltBasins = 0;   // hollows that got no pool because something is built in them
         S32 mSeaBasins = 0;     // hollows that got no pool because the region's water is already in them
+        U64 mShape = 0;         // <WolfViewer 2026-10-07/> hash of every surface (shapeHash), to keep the live water when nothing changed
     };
 
 private:
     static constexpr F32 CHECK_INTERVAL_SECS = 2.f;
+    // <WolfViewer 2026-10-07> Paul: water "jerky and horrible" at 4096 m draw distance while
+    // Magical Fairies Pass rezzed. With ObjectsCullingByDistance the sims keep sending and killing
+    // objects as the agent moves, every object change changed the built mask, and Madrigal's
+    // water was re-analysed and its surfaces killed and re-created every 2 s check (50 times in
+    // 4 minutes, the same "2 pools, 253 vertices" each time). A region is now re-analysed only
+    // once its objects have stopped changing for SETTLE_SECS, or after MAX_PENDING_SECS of
+    // constant change, and a result identical to the live water (mShape) keeps the live water.
+    static constexpr F64 SETTLE_SECS = 6.0;
+    static constexpr F64 MAX_PENDING_SECS = 30.0;
     // [2026-09-10] Grid points an edge the analysis will handle; bigger regions are decimated
     // (see idle()). 1025 points = a 1024 m region at 1 m, ~1 M cells, ~60 MB of working arrays.
     static constexpr S32 MAX_ANALYSIS_GRIDS = 1024;
@@ -162,6 +172,8 @@ private:
     static constexpr F32 MAX_STAND_M = 0.35f;
 
     /** Runs on the General queue: heights + built mask -> surfaces. */
+    /** Hash of everything apply() would build from a result (any thread). */
+    static U64 shapeHash(const Result& result);
     static void compute(Result& out, std::vector<F32> z, std::vector<U8> built, std::vector<F32> prim_floor, S32 grids, F32 mpg, F32 sea_level, F32 catchment_m2);
     /** Main thread: one byte per grid point, 1 where a prim stands on (or in) the ground, and
      *  per grid point the lowest bottom of any prim box over it that is not buried (+inf if none). */
@@ -181,6 +193,11 @@ private:
     struct RegionWater
     {
         U64 mAppliedStamp{ 0 };
+        U64 mAppliedShape{ 0 };      // <WolfViewer 2026-10-07/> Result::mShape of the live surfaces
+        bool mApplied{ false };      // <WolfViewer 2026-10-07/> a result has been applied this visit
+        U64 mSeenStamp{ 0 };         // <WolfViewer 2026-10-07/> stamp at the last check, and since when
+        F64 mSeenSince{ 0.0 };
+        F64 mPendingSince{ -1.0 };   // <WolfViewer 2026-10-07/> first check that differed from the applied stamp
         std::vector<LLPointer<LLVOWater>> mSurfaces;
     };
     std::map<U64, RegionWater> mRegions;

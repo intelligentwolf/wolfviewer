@@ -1400,6 +1400,40 @@ void WolfFlight::guidance(F32 dt)
             mWantVS = llmax(mWantVS, llmin(mTerrainNeedSmooth * 1.2f, terrain_vs));
         }
     }
+    // <WolfViewer 2026-10-08> SPEED PROTECTION. Paul's flight 08:20Z: crossing into Diamonds Customs 2 the plane
+    // lost its thrust, the autothrottle tapped up ten times for nothing (A/T FAIL), and ALT hold went on
+    // asking for height: the pitch trim wound to its +12 stop and the nose came up until the plane stalled
+    // (62 -> 3 m/s, then nose down at -60). Below 60% of the selected speed a plane trades height for speed
+    // instead: SPEED LOW, the nose-up trim taken off at once, and a descent that grows with the shortfall,
+    // until it is back above 75%. Not on the take-off (its own speeds) or once on final (autoland's).
+    if (mAP && !mSail && !heli && !takeoff && !(landing && mLand >= LAND_FINAL) && mWantSpeed > 1.f)
+    {
+        const F32 low = mWantSpeed * 0.6f, recovered = mWantSpeed * 0.75f;
+        if (!mSpeedLow && mData.mAirspeed < low)
+        {
+            mSpeedLow = true;
+            postCas("SPEED LOW", CAS_WARNING);
+            make_ui_sound("UISndAlert");
+            LL_INFOS("WolfFlight") << "speed protection: ias " << mData.mAirspeed << " < " << low << LL_ENDL;
+        }
+        else if (mSpeedLow && mData.mAirspeed > recovered)
+        {
+            mSpeedLow = false;
+            clearCas("SPEED LOW");
+            LL_INFOS("WolfFlight") << "speed protection off: ias " << mData.mAirspeed << LL_ENDL;
+        }
+        if (mSpeedLow)
+        {
+            mWantVS = llmin(mWantVS, -llclamp((recovered - mData.mAirspeed) * 0.2f, 1.f, 8.f));
+            mPitchTrim = llmin(mPitchTrim, 0.f);
+        }
+    }
+    else if (mSpeedLow)
+    {
+        mSpeedLow = false;
+        clearCas("SPEED LOW");
+    }
+    // </WolfViewer>
     if (mAP)
     {
         // The integrator: the pitch that gives the vertical speed asked for.
@@ -1841,6 +1875,11 @@ void WolfFlight::disconnectAP(const std::string& why, bool by_pilot)
     mAP = false;
     mAT = false;
     mOutPitch = mOutBank = mOutThrottle = 0.f;
+    if (mSpeedLow)   // <WolfViewer 2026-10-08/> the pilot has it
+    {
+        mSpeedLow = false;
+        clearCas("SPEED LOW");
+    }
     if (mTakeoff != TO_NONE)   // <WolfViewer 2026-10-07/> the pilot has it
     {
         mTakeoff = TO_NONE;

@@ -381,6 +381,7 @@ private:
     S32 mThrottleStreak = 0;       // taps in one direction without the speed answering
     F32 mThrottleStreakSpeed = 0.f;
     bool mArrived = false;
+    bool mSpeedLow = false;        // <WolfViewer 2026-10-08/> speed protection active (guidance)
 
     // AUTO LEARN: does holding "nose up" raise the nose, does "bank right" turn right?
     F32 mLearnPitchAcc = 0.f, mLearnPitchWeight = 0.f;

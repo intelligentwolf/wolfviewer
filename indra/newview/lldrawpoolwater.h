@@ -86,6 +86,9 @@ public:
     F32 getSurfHeight() const { return mSurfHeight; }
     F32 getSurfSetInterval() const { return mSurfSetInterval; }
     F32 getSurfLength() const { return mSurfLength; }
+    // <WolfViewer 2026-10-07> true while the camera is high enough to draw plain water
+    // (no swell, foam or surf); see wolfUpdateBasicWater.
+    bool isBasicWater() const { return mBasicWater; }
     // </WolfViewer>
 
 protected:
@@ -104,6 +107,9 @@ protected:
     F32 mSurfHeight = 0.f;
     F32 mSurfSetInterval = 90.f;
     F32 mSurfLength = 36.f;
+    // <WolfViewer 2026-10-07> basic water from up high
+    void wolfUpdateBasicWater(F32 camera_above_water);
+    bool mBasicWater = false;
     // </WolfViewer>
 };
 

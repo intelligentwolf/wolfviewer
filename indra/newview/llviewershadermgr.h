@@ -222,6 +222,7 @@ extern LLGLSLShader         gWolfWakeDecayProgram;
 extern LLGLSLShader         gWolfWakeStampProgram;
 extern LLGLSLShader         gWolfSurfCurlProgram;   // [SURF 2026-09-07 phase 2] wolfsurfcurl.cpp
 extern LLGLSLShader         gWolfGodRaysProgram;
+extern LLGLSLShader         gWolfCloudDeckProgram;   // <WolfViewer 2026-10-07/> the cloud layer to fly through
 // </WolfViewer>
 extern LLGLSLShader         gGlowProgram;
 extern LLGLSLShader         gGlowExtractProgram;

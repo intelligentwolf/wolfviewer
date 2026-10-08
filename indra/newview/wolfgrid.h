@@ -105,6 +105,30 @@ namespace WolfGrid
     }
     // </WolfViewer 2026-10-06>
 
+    // <WolfViewer 2026-10-08> Standing on a Wolf Territories region now, WHATEVER grid this viewer
+    // logged in to: a hypergrid visitor too. Jimmy Olsen 10-08: Luke K came from DigiWorldz to his
+    // sim in this viewer and saw fog and snow while the sim rained - isWolfTerritories() is the LOGIN
+    // grid (DigiWorldz), so the region's weather was never read and his own Weather menu showed. The
+    // region's grid address (SimulatorFeatures GridURL, as isOnWolfTerritories) says whose region it
+    // is; empty (not arrived yet) = not known, so false.
+    inline bool isOnWolfRegion()
+    {
+        if (!LFSimFeatureHandler::instanceExists())
+        {
+            return false;
+        }
+        const std::string region_grid = LFSimFeatureHandler::instance().hyperGridURL();
+        return !region_grid.empty() && isWolfHost(region_grid);
+    }
+
+    // What the region's weather and sky follow: logged in here and on one of our regions, or a
+    // visitor on one of our regions. Reading only - a visitor sends no session (see the callers).
+    inline bool showsWolfRegionWeather()
+    {
+        return isOnWolfTerritories() || isOnWolfRegion();
+    }
+    // </WolfViewer 2026-10-08>
+
     // <WolfViewer 2026-09-27> Options for every request to a Wolf service (and the other fixed
     // third-party hosts this viewer calls). Those requests carry X-Wolf-Agent/X-Wolf-Session --
     // the live session id -- so the server must be proven to BE wolfstorm.app. HttpOptions

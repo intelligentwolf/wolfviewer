@@ -60,6 +60,7 @@
 #include "wolfwavezones.h"   // [SURF 2026-09-07]
 #include "wolfsurfcurl.h"    // [SURF 2026-09-07 phase 2]
 #include "wolfgrid.h"        // <WolfViewer 2026-09-22/> Wolf Territories only
+#include "wolfaltitudesky.h"  // <WolfViewer 2026-10-07/> the sky's ocean to the horizon
 // </WolfViewer>
 
 bool LLDrawPoolWater::sSkipScreenCopy = false;
@@ -229,8 +230,18 @@ void LLDrawPoolWater::renderPostDeferred(S32 pass)
             mSeaState = WolfSeaState::fromIndex(WolfSeaState::indexForAmplitude(manual_height), pwater->getWave1Dir());
             mSeaState.mAmplitude = llclamp((F32)manual_height, 0.f, 5.f);
         }
-        // <WolfViewer 2026-10-01/> not gated on Transparent Water: opaque water swells too (llvowater.cpp)
+        // <WolfViewer 2026-10-07> basic water from up high: no swell, and none of its cost.
         if (!gCubeSnapshot && !gPipeline.mHeroProbeManager.isMirrorPass())
+        {
+            wolfUpdateBasicWater(LLViewerCamera::getInstance()->getOrigin().mV[VZ] - environment.getWaterHeight());
+        }
+        if (mBasicWater)
+        {
+            mSeaState.mAmplitude = 0.f;   // the boat rocker (getSeaState) rides the same flat sea
+        }
+        // </WolfViewer>
+        // <WolfViewer 2026-10-01/> not gated on Transparent Water: opaque water swells too (llvowater.cpp)
+        if (!gCubeSnapshot && !gPipeline.mHeroProbeManager.isMirrorPass() && !mBasicWater)
         {
             if (fft_on)
             {
@@ -304,6 +315,13 @@ void LLDrawPoolWater::renderPostDeferred(S32 pass)
     F32 water_height = environment.getWaterHeight();
     F32 camera_height = LLViewerCamera::getInstance()->getOrigin().mV[2];
     shader->uniform1f(LLShaderMgr::WATER_WATERHEIGHT, camera_height - water_height);
+    // <WolfViewer 2026-10-07> the fade into the sky's ocean at the far clip (waterF.glsl)
+    {
+        static LLStaticHashedString s_wolf_sea_height("wolf_sea_height");
+        static LLStaticHashedString s_wolf_far_clip("wolf_far_clip");
+        shader->uniform1f(s_wolf_sea_height, WolfAltitudeSky::horizonSeaHeight());
+        shader->uniform1f(s_wolf_far_clip, LLViewerCamera::getInstance()->getFar());
+    }
     shader->uniform1f(LLShaderMgr::WATER_TIME, phase_time);
     shader->uniform3fv(LLShaderMgr::WATER_EYEVEC, 1, LLViewerCamera::getInstance()->getOrigin().mV);
 
@@ -481,7 +499,7 @@ void LLDrawPoolWater::renderPostDeferred(S32 pass)
     {
         static LLCachedControl<bool> curl_on(gSavedSettings, "WolfViewerWaterSurfCurl", false);   // <WolfViewer 2026-09-20/> off: Paul "drop the ribbon"
         if (curl_on && !underwater && !gCubeSnapshot && !gPipeline.mHeroProbeManager.isMirrorPass()
-            && mSurfHeight > 0.01f)
+            && mSurfHeight > 0.01f && !mBasicWater)
         {
             WolfSurfCurl::instance().render(mSurfHeight, mSurfSetInterval, mSurfLength, phase_time,
                                             light_dir, light_diffuse, pwater, mWaterNormp[0]);
@@ -562,7 +580,8 @@ void LLDrawPoolWater::pushWaterPlanes(int pass)
             // The same one line therefore switches the whole feature off cleanly.
             const bool no_swell = water->getWaterfall() > 0.f || water->getStreamFlow() > 0.f || water->getStillWater()
                                || !LLViewerShaderMgr::wolfWaterFull()
-                               || !WolfGrid::isWolfTerritories();
+                               || !WolfGrid::isWolfTerritories()
+                               || mBasicWater;   // <WolfViewer 2026-10-07/> basic water from up high
             cur_shader->uniform1f(LLShaderMgr::WATER_WAVE_AMPLITUDE, no_swell ? 0.f : amplitude);
 
             // The depth + exposure fields and the wake belong to a region's OWN water plane
@@ -678,6 +697,28 @@ void LLDrawPoolWater::pushWaterPlanes(int pass)
         }
     }
 }
+
+// <WolfViewer 2026-10-07> BASIC WATER FROM UP HIGH. Paul, flying the Concorde: "at that height the
+// viewer should only draw basic water". From an aircraft the swell, foam lace, crest glow and surf
+// are too small to see, yet the spectral cascades and the wake field still ran every frame.
+// Above WolfViewerWaterBasicAboveM (camera over the water level) the planes get amplitude 0, which
+// is by waterV/waterF's own contract stock water: no displacement, and every effect gated on
+// waveAmplitude > 0.001 off. The FFT and the wake stop updating. It comes back BASIC_WATER_HYST_M
+// lower so a camera at about that height does not flick between the two. 0 = never.
+void LLDrawPoolWater::wolfUpdateBasicWater(F32 camera_above_water)
+{
+    static const F32 BASIC_WATER_HYST_M = 30.f;
+    static LLCachedControl<F32> basic_above(gSavedSettings, "WolfViewerWaterBasicAboveM", 150.f);
+    const F32 start = (F32)basic_above;
+    if (start <= 0.f)
+    {
+        mBasicWater = false;
+        return;
+    }
+    mBasicWater = mBasicWater ? camera_above_water >= start - BASIC_WATER_HYST_M
+                              : camera_above_water >= start;
+}
+// </WolfViewer>
 
 LLViewerTexture *LLDrawPoolWater::getDebugTexture()
 {

@@ -928,6 +928,8 @@ set(viewer_SOURCE_FILES
     wolffloaterphotoeffects.cpp
     wolfmeshupload.cpp
     wolfscreenshare.cpp
+    wolfaltitudesky.cpp
+    wolffarground.cpp
     wolfweather.cpp
     wolflightning.cpp
     wolfspeech.cpp
@@ -1832,6 +1834,8 @@ set(viewer_HEADER_FILES
     wolffloaterphotoeffects.h
     wolfmeshupload.h
     wolfscreenshare.h
+    wolfaltitudesky.h
+    wolffarground.h
     wolfweather.h
     wolflightning.h
     wolfspeech.h

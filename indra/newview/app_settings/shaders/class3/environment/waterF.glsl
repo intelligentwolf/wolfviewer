@@ -154,6 +154,9 @@ uniform float boundedWaterDepth;
 // Region water never needs these here because its body comes from fog applied to submerged
 // geometry; a bounded surface has to colour itself.
 uniform vec3  waterFogColorLinear;
+// <WolfViewer 2026-10-07> the sky's ocean to the true horizon (class1/deferred/skyF.glsl wolfHorizonSea)
+uniform float wolf_sea_height;   // camera metres above the sea; < 0 = off
+uniform float wolf_far_clip;     // the camera's far clip, metres
 uniform float waterFogDensity;
 // </FS:WolfViewer>
 // <WolfViewer 2026-09-06> The rest of WolfStorm's water, ported (Water.js fragment stage
@@ -547,6 +550,7 @@ void main()
     // making it up.
     float wolf_water_depth = 1e6;
     // </FS:WolfViewer>
+    bool wolf_behind_sky = false;   // <WolfViewer 2026-10-07/> nothing under this water but the sky
 #ifdef TRANSPARENT_WATER
     float depth = texture(depthMap, distort).r;
 
@@ -591,6 +595,21 @@ void main()
     // </FS:WolfViewer>
 
     vec4 fb = texture(screenTex, distort2);
+
+    // <WolfViewer 2026-10-07> OPEN SEA. Paul: "it should draw sea as default?" Out past the regions
+    // (the open sea, gaps between regions) the water has nothing under it: the refraction depth is
+    // the clear value, as hazeF.glsl tests for the sky, so the screen behind it was the SKY and the
+    // sea showed the sky through it - grey at night, white by day, around every region seen from the
+    // air. Deep water instead: the same water fog the opaque path uses (below), over 2 km of it.
+    // Not for a bounded pool or a waterfall, which have their own bodies further down.
+    // With the horizon sea on (Wolf Territories) the sky behind already IS the sea - the sky's ocean
+    // to the true horizon - so it is left as it is, and the planes fade into it at the far clip (below).
+    wolf_behind_sky = texture(depthMap, distort2).r >= 1.0 && boundedWaterDepth <= 0.0 && vary_fall <= 0.005;
+    if (wolf_behind_sky && wolf_sea_height < 0.0)
+    {
+        fb = applyWaterFogViewLinear(viewVec * 2048.0, vec4(1.0));
+    }
+    // </WolfViewer>
 
 #else
     vec4 fb = applyWaterFogViewLinear(viewVec*2048.0, vec4(1.0));
@@ -860,6 +879,16 @@ void main()
         color = mix(color, vec3(0.90, 0.94, 0.97) * ambLight, ambFoam);
     }
     // </FS:WolfViewer>
+
+#ifdef TRANSPARENT_WATER
+    // <WolfViewer 2026-10-07> No edge where the planes stop: over the last stretch before the far
+    // clip the water becomes the sky's ocean behind it (the same direction, the same sea), so it runs
+    // on unbroken to the true horizon.
+    if (wolf_behind_sky && wolf_sea_height >= 0.0 && wolf_far_clip > 0.0)
+    {
+        color = mix(color, fb.rgb, smoothstep(wolf_far_clip * 0.6, wolf_far_clip * 0.95, length(pos.xyz)));
+    }
+#endif
 
     float spec = min(max(max(punctual.r, punctual.g), punctual.b), 0);
 

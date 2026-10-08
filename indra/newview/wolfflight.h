@@ -119,7 +119,7 @@ public:
     {
         bool        mValid = false;
         bool        mPending = false;     // waiting for the map server to name the region
-        bool        mFailed = false;      // NOT IN DATABASE
+        bool        mFailed = false;      // DEST NOT FOUND: no region of that name
         bool        mHasZ = false;
         std::string mRegion;
         LLVector3   mLocal;               // region metres
@@ -320,6 +320,27 @@ private:
     F64 mLandSearchStart = 0.0, mNextRunwayScan = 0.0, mLandTouchSince = 0.0, mLandStopSince = 0.0;
     S32 mLandGoArounds = 0;
     F32 mLandWantTrack = 0.f, mLandWantVS = 0.f, mLandWantSpeed = 0.f;
+    // <WolfViewer 2026-10-07> AUTO TAKE-OFF (Paul: "auto pilot, should be able to take off, fly and
+    // land perfectly"). The autopilot engaged with a plane on the ground takes off along the heading
+    // it points: ROLL at full power, ROTATE once the speed is up, CLIMB out (gear up at 30 m), then
+    // the ordinary modes from 120 m. REJECT = power off along the runway until stopped. NONE = not taking off.
+    enum ETakeoff { TO_NONE = 0, TO_ROLL, TO_ROTATE, TO_CLIMB, TO_REJECT };
+    void takeoffStart();
+    void takeoffGuidance();
+    void takeoffReject(const std::string& why);
+    void takeoffClearCas();
+    bool takeoffOnRunway() const { return mTakeoff == TO_ROLL || mTakeoff == TO_ROTATE || mTakeoff == TO_REJECT; }
+    ETakeoff mTakeoff = TO_NONE;
+    F32 mToHeading = 0.f;               // the runway heading: the way the plane pointed when engaged
+    F32 mToGroundZ = 0.f;               // the pilot's height on the runway
+    F64 mToPhaseStart = 0.0;
+    F32 mToBestSpeed = 0.f;             // the fastest the roll has gone...
+    F64 mToBestSpeedAt = 0.0;           // ...and when it last went faster by TO_SPEED_GAIN
+    F32 mToWantVS = 0.f;                // the climb the phase wants, m/s
+    F64 mToStoppedSince = 0.0;          // REJECT: stopped on the runway since (0 = still moving)
+public:
+    bool takingOff() const { return mTakeoff != TO_NONE; }
+private:
     void resolveDestination();
     void holdPair(EPair pair, F32 cmd, F32 phase_offset);
     void tapPair(EPair pair, S32 dir);

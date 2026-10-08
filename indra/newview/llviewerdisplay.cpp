@@ -27,6 +27,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "llviewerdisplay.h"
+#include "wolfaltitudesky.h"   // <WolfViewer 2026-10-07/> far clip grows with height
 
 #include "fstransporterfx.h"   // WolfViewer teleport beam
 
@@ -253,6 +254,13 @@ void display_update_camera()
     {
         final_far = llmax(32.f, final_far / (LLViewerTexture::sDesiredDiscardBias - 1.f));
     }
+    // <WolfViewer 2026-10-07> The far clip grows with the camera's height above the water, so the
+    // ground within the draw distance is still in view from the air (wolfaltitudesky.h).
+    if (!gCubeSnapshot && CAMERA_MODE_CUSTOMIZE_AVATAR != gAgentCamera.getCameraMode())
+    {
+        final_far += WolfAltitudeSky::farClipExtra();
+    }
+    // </WolfViewer>
 // <FS:CR> Aurora sim
     if(LLWorld::getInstance()->getLockedDrawDistance())
     {

@@ -20276,6 +20276,72 @@ Change of this parameter will affect the layout of buttons in notification toast
 			<key>Value</key>
 			<real>1500.0</real>
 		</map>
+		<key>WolfViewerFlyClouds</key>
+		<map>
+			<key>Comment</key>
+			<string>In bad weather (rain, snow, fog or a heavily clouded sky) a cloud layer to fly through: an overcast from below, a sea of cloud from above, white-out inside. Only while flying (or riding something that is), fading in as the camera climbs from 150 to 400 m. Wolf Territories only.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>1</integer>
+		</map>
+		<key>WolfViewerHorizonSea</key>
+		<map>
+			<key>Comment</key>
+			<string>The sea runs on past the far clip to the true horizon: the sky draws it below the horizon dip for the camera's height (earth curvature, Fresnel reflection of the sky, haze over distance), and the water fades into it before the far clip. Wolf Territories only.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>1</integer>
+		</map>
+		<key>WolfViewerFarGroundMapTiles</key>
+		<map>
+			<key>Comment</key>
+			<string>Regions that are on the world map but not connected (too far, still loading, or down) are drawn as their map tiles, flat at the water level, until the real land loads. Wolf Territories only.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>1</integer>
+		</map>
+		<key>WolfViewerFarClipFollowsHeight</key>
+		<map>
+			<key>Comment</key>
+			<string>The camera's far clip grows by its height above the water (up to 30 km), so the ground within the draw distance stays in view from the air. Wolf Territories only.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>1</integer>
+		</map>
+		<key>WolfViewerAltitudeSky</key>
+		<map>
+			<key>Comment</key>
+			<string>The sky thins with the camera's height above sea level at real-world rates: darker overhead, the cloud layer gone above 14 km, stars by day from about 20 km, space by about 35 km. Wolf Territories only. The region's own sky settings are not changed.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>1</integer>
+		</map>
+		<key>WolfViewerWaterBasicAboveM</key>
+		<map>
+			<key>Comment</key>
+			<string>With the camera this many metres above the water, the sea is drawn as basic water: no swell, foam or surf, and the wave simulation stops (back to full 30 m lower). 0 = always full water.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>F32</string>
+			<key>Value</key>
+			<real>150.0</real>
+		</map>
 		<key>WolfViewerWaterSeaStateFromRegion</key>
 		<map>
 			<key>Comment</key>

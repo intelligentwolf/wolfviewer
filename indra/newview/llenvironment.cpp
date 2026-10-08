@@ -68,6 +68,8 @@
 // [/RLVa:KB]
 #include "fscommon.h"
 #include "llviewernetwork.h"
+#include "llhttpnode.h"   // <WolfViewer 2026-10-08/> WindLightRefresh
+#include "wolfgrid.h"
 
 //=========================================================================
 namespace
@@ -818,6 +820,54 @@ const F64Seconds LLEnvironment::TRANSITION_INSTANT(0.0f);
 const F64Seconds LLEnvironment::TRANSITION_FAST(1.0f);
 const F64Seconds LLEnvironment::TRANSITION_DEFAULT(5.0f);
 const F64Seconds LLEnvironment::TRANSITION_SLOW(10.0f);
+
+// <WolfViewer 2026-10-08> THE REGION SKY'S OWN FADE. Jimmy Olsen: "The EEP transition is too fast (from
+// PCLEAR to a CLOUDY EEP for instance) ... I even tried it on my script to be 120sec but it still goes
+// fast". osReplaceRegionEnvironment(transition, ...) tells the simulator how long to fade; for this
+// viewer the simulator then re-sends the region info, and the sky it fetches was always faded in
+// TRANSITION_DEFAULT (5 s) - the script's seconds never reached the viewer. WolfSim now sends them first
+// in the WindLightRefresh event ("Transition", seconds; EnvironmentModule.WindlightRefresh), and the
+// region fetch that follows within WOLF_TRANSITION_WINDOW_S uses them. Only from Wolf regions.
+namespace
+{
+    constexpr F64 WOLF_TRANSITION_WINDOW_S = 20.0;
+    constexpr F64 WOLF_TRANSITION_MAX_S = 600.0;
+    F64 sWolfPendingTransition = 0.0;
+    F64 sWolfPendingTransitionAt = -1000.0;
+
+    LLSettingsBase::Seconds wolf_region_transition(LLSettingsBase::Seconds dflt)
+    {
+        if (sWolfPendingTransition > 0.0
+            && LLFrameTimer::getElapsedSeconds() - sWolfPendingTransitionAt < WOLF_TRANSITION_WINDOW_S)
+        {
+            const LLSettingsBase::Seconds t(sWolfPendingTransition);
+            sWolfPendingTransition = 0.0;
+            LL_INFOS("ENVIRONMENT") << "region sky fades over " << t.value() << " s, as its script asked" << LL_ENDL;
+            return t;
+        }
+        return dflt;
+    }
+
+    class WolfWindLightRefresh : public LLHTTPNode
+    {
+        void post(LLHTTPNode::ResponsePtr response, const LLSD& context, const LLSD& input) const override
+        {
+            if (!input.isMap() || !input.has("body") || !WolfGrid::isOnWolfRegion())
+            {
+                return;
+            }
+            const LLSD& body = input["body"];
+            const F64 secs = body.has("Transition") ? body["Transition"].asReal() : 0.0;
+            if (secs > 0.0)
+            {
+                sWolfPendingTransition = llmin(secs, WOLF_TRANSITION_MAX_S);
+                sWolfPendingTransitionAt = LLFrameTimer::getElapsedSeconds();
+            }
+        }
+    };
+    LLHTTPRegistration<WolfWindLightRefresh> gHTTPRegistrationWolfWindLightRefresh("/message/WindLightRefresh");
+}
+// </WolfViewer>
 const F64Seconds LLEnvironment::TRANSITION_ALTITUDE(5.0f);
 
 const LLUUID LLEnvironment::KNOWN_SKY_SUNRISE("01e41537-ff51-2f1f-8ef7-17e4df760bfb");
@@ -2019,7 +2069,7 @@ void LLEnvironment::requestParcel(S32 parcel_id, environment_apply_fn cb)
                 cb = [this, transition](S32 pid, EnvironmentInfo::ptr_t envinfo)
                 {
                     clearEnvironment(ENV_PARCEL);
-                    recordEnvironment(pid, envinfo, transition);
+                    recordEnvironment(pid, envinfo, wolf_region_transition(transition));   // <WolfViewer 2026-10-08/>
                 };
             }
 
@@ -2036,7 +2086,8 @@ void LLEnvironment::requestParcel(S32 parcel_id, environment_apply_fn cb)
     if (!cb)
     {
         LLSettingsBase::Seconds transition = LLViewerParcelMgr::getInstance()->getTeleportInProgress() ? TRANSITION_FAST : TRANSITION_DEFAULT;
-        cb = [this, transition](S32 pid, EnvironmentInfo::ptr_t envinfo) { recordEnvironment(pid, envinfo, transition); };
+        // <WolfViewer 2026-10-08/> the script's own fade when WolfSim sent one (wolf_region_transition)
+        cb = [this, transition](S32 pid, EnvironmentInfo::ptr_t envinfo) { recordEnvironment(pid, envinfo, wolf_region_transition(transition)); };
     }
 
     LLCoros::instance().launch("LLEnvironment::coroRequestEnvironment",

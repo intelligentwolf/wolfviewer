@@ -30,6 +30,25 @@ in vec3 vary_wolf_sky_dir;         // <WolfViewer 2026-09-18/> skyV.glsl
 uniform float wolf_aurora;         // 0..1: the profile's aurora x night x what the fog lets through (WolfWeather::auroraAmount)
 uniform float wolf_aurora_time;
 uniform int   wolf_aurora_color;   // 0 green 1 red 2 purple 3 blue 4 pink 5 multi (WolfWeatherProfile::auroraColorMode)
+// <WolfViewer 2026-10-07> the ocean to the true horizon (wolfHorizonSea below)
+uniform float wolf_sea_height;     // camera metres above the sea; < 0 = off (WolfAltitudeSky::horizonSeaHeight)
+uniform vec3  waterFogColorLinear; // the region's EEP water colour (LLSettingsVOWater, every shader group)
+uniform vec3  blue_density;
+uniform float haze_density;
+uniform float density_multiplier;  // the sky group's: thinner with height (WolfAltitudeSky::airFraction)
+uniform float distance_multiplier;
+// the rest of skyV.glsl's inputs, for the sky the sea mirrors (wolfSkyColour)
+uniform vec3  lightnorm;
+uniform vec3  sunlight_color;
+uniform vec3  moonlight_color;
+uniform int   sun_up_factor;
+uniform vec3  ambient_color;
+uniform vec3  blue_horizon;
+uniform float haze_horizon;
+uniform float cloud_shadow;
+uniform float max_y;
+uniform vec3  glow;
+uniform float sun_moon_glow_factor;
 
 #ifdef HAS_HDRI
 in vec4 vary_position;
@@ -150,6 +169,87 @@ vec3 wolfAurora(vec3 dir, float t, float amount, int colorMode)
 }
 // </WolfViewer>
 
+// <WolfViewer 2026-10-07> THE OCEAN TO THE TRUE HORIZON. Paul, flying high over Wolf North: "its still
+// like i'm flying over a square not the horizon blue downwards ... real horizon make it look perfect".
+// The water planes stop at the far clip; the sea out to the real horizon is drawn here, by direction,
+// as flight simulators draw what lies past their geometry. The earth is a sphere (R = 6371 km): from a
+// height h the sea is in view down to the horizon dip, sqrt(2h/R) below level, ~2 degrees at 3.8 km,
+// sqrt(2Rh + h^2) away, 220 km. Each direction below it meets the sea after t metres (ray / sphere);
+// the sea there is its water colour, lit as the sky is, mirroring the sky by Schlick's Fresnel
+// (2 % straight down, nearly all of it at grazing angles), seen through t metres of the same air the
+// windlight atmosphere fogs everything with (exp(-(blue + haze density) x density x distance multiplier
+// x t), atmosphericsFuncs.glsl), so it fades into the horizon haze exactly as the sky does. The water
+// shader fades its planes into this toward the far clip, so there is no edge.
+// The sky's own colour for a direction ABOVE the horizon, exactly as skyV.glsl works it out per
+// vertex (same steps, same constants), times 2 as main() does. dir: dome frame (x north, y up, z east),
+// normalised, dir.y > 0.
+vec3 wolfSkyColour(vec3 dir)
+{
+    vec3 rel_pos = dir * (max_y / max(dir.y, 0.001));        // skyV: rel_pos *= max_y / rel_pos.y
+    vec3 rel_pos_norm = dir;
+    float rel_pos_len = length(rel_pos);
+    float rel_pos_lightnorm_dot = dot(rel_pos_norm, lightnorm.xyz);
+    vec3 sunlight = (sun_up_factor == 1) ? sunlight_color : moonlight_color * 0.7;
+    vec3 light_atten = (blue_density + vec3(haze_density * 0.25)) * (density_multiplier * max_y);
+    vec3 combined_haze = max(abs(blue_density) + vec3(abs(haze_density)), vec3(1e-6));
+    vec3 blue_weight = blue_density / combined_haze;
+    vec3 haze_weight = haze_density / combined_haze;
+    float off_axis = 1.0 / max(1e-6, max(0., rel_pos_norm.y) + lightnorm.y);
+    sunlight *= exp(-light_atten * off_axis);
+    float density_dist = rel_pos_len * density_multiplier;
+    combined_haze = exp(-combined_haze * density_dist);
+    float haze_glow = 1.0 - rel_pos_lightnorm_dot;
+    haze_glow = max(haze_glow, .001);
+    haze_glow *= glow.x;
+    haze_glow = pow(haze_glow, glow.z);
+    haze_glow = (sun_moon_glow_factor < 1.0) ? 0.0 : (sun_moon_glow_factor * (haze_glow + 0.25));
+    vec3 color = (blue_horizon * blue_weight * (sunlight + ambient_color)
+               + (haze_horizon * haze_weight) * (sunlight * haze_glow + ambient_color));
+    color *= (1. - combined_haze);
+    vec3 ambient = ambient_color + max(vec3(0), (1. - ambient_color)) * cloud_shadow * 0.5;
+    sunlight *= max(0.0, (1. - cloud_shadow));
+    vec3 add_below_cloud = (blue_horizon * blue_weight * (sunlight + ambient)
+                         + (haze_horizon * haze_weight) * (sunlight * haze_glow + ambient));
+    combined_haze = sqrt(combined_haze);
+    color += (add_below_cloud - color) * (1. - sqrt(combined_haze));
+    return color * 2.0;
+}
+
+// dir: the view direction (dome frame, normalised); sky = the dome's own colour for it (below the
+// horizon that is the windlight haze, which is what the distance fades the sea into).
+// <WolfViewer 2026-10-07> Paul at midday: the first version mirrored that haze, so the whole sea came
+// out white-grey. Water mirrors the sky at the MIRRORED angle - as far above the horizon as the ray
+// is below it - which is bluer; the body is deep water, lit by the sun and sky.
+vec3 wolfHorizonSea(vec3 dir, vec3 sky)
+{
+    const float R = 6371000.0;
+    float dir_up = dir.y;
+    float h = max(wolf_sea_height, 0.5);
+    float rh = R + h;
+    float b = rh * dir_up;                       // (camera from the earth's centre) . dir
+    float disc = b * b - (2.0 * R * h + h * h);
+    float dip_up = -sqrt(max(0.0, 1.0 - (R / rh) * (R / rh)));   // the horizon's up component
+    // a soft edge a tenth of a degree wide across the horizon, so it does not crawl
+    float sea_w = clamp((dip_up - dir_up) / 0.0015 + 0.5, 0.0, 1.0);
+    if (sea_w <= 0.0)
+    {
+        return sky;
+    }
+    float t = (disc > 0.0) ? (-b - sqrt(disc)) : sqrt(2.0 * R * h + h * h);
+    float cos_i = clamp(-(b + t) / R, 0.0, 1.0);            // -dir . the surface normal there
+    float fresnel = 0.02 + 0.98 * pow(1.0 - cos_i, 5.0);
+    // the sky at the mirrored angle (the surface tilts with the curve: cos_i above the horizon)
+    vec3 mirror_dir = normalize(vec3(dir.x, max(cos_i, 0.002), dir.z));
+    vec3 mirrored = wolfSkyColour(mirror_dir);
+    vec3 sunlight = (sun_up_factor == 1) ? sunlight_color : moonlight_color * 0.7;
+    vec3 body = waterFogColorLinear * (sunlight * max(lightnorm.y, 0.0) + ambient_color);
+    vec3 sea = mix(body, mirrored, fresnel);
+    float ext = ((blue_density.r + blue_density.g + blue_density.b) / 3.0 + haze_density) * density_multiplier * distance_multiplier;
+    float haze = 1.0 - exp(-ext * t);
+    return mix(sky, mix(sea, sky, haze), sea_w);
+}
+// </WolfViewer>
+
 void main()
 {
     vec3 color;
@@ -181,6 +281,13 @@ void main()
         color.rgb += rainbow(optic_d);
         color.rgb += halo_22;
         color.rgb *= 2.;
+        // <WolfViewer 2026-10-07> below the horizon: the sea (dome frame: x north, y up, z east).
+        // skyV.glsl adds 50 m of lift to rel_pos for the windlight haze; the true view ray from the
+        // camera is without it (renderDome: the dome is drawn at position - camPosLocal).
+        if (wolf_sea_height >= 0.0)
+        {
+            color.rgb = wolfHorizonSea(normalize(vary_wolf_sky_dir - vec3(0.0, 50.0, 0.0)), color.rgb);
+        }
         // <WolfViewer 2026-09-18> Light ADDED to the night sky. The dome frame is (north, up,
         // east); wolfAurora wants (east, north, up). This buffer is linear and the WolfStorm
         // numbers are display-referred, hence srgb_to_linear. Clouds are drawn after the dome,

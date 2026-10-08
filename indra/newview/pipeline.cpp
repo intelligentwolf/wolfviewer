@@ -143,6 +143,8 @@
 #endif
 #define A_CPU 1
 #include "app_settings/shaders/class1/deferred/CASF.glsl" // This is also C++
+#include "wolffarground.h"   // <WolfViewer 2026-10-07/> map tiles for regions not connected
+#include "wolfaltitudesky.h"  // <WolfViewer 2026-10-07/> the cloud layer to fly through
 
 extern bool gSnapshot;
 bool gShiftFrame = false;
@@ -4312,6 +4314,13 @@ void LLPipeline::renderGeomDeferred(LLCamera& camera, bool do_occlusion)
             stop_glerror();
         }
 
+        // <WolfViewer 2026-10-07> the map tiles standing in for regions not connected (wolffarground.h)
+        if (&camera == LLViewerCamera::getInstance() && !gCubeSnapshot)
+        {
+            WolfFarGround::instance().renderDeferred();
+        }
+        // </WolfViewer>
+
         gGLLastMatrix = NULL;
         gGL.matrixMode(LLRender::MM_MODELVIEW);
         gGL.loadMatrix(gGLModelView);
@@ -7932,6 +7941,98 @@ void LLPipeline::gammaCorrect(LLRenderTarget* src, LLRenderTarget* dst)
 // below the surface under the EEP fog density, and the chop cascade of the spectral ocean
 // breaks the beams up where it is running. Source: wolfstorm/js/rendering/underwater_rays.js.
 #include "wolfoceanfft.h"
+// <WolfViewer 2026-10-07> THE CLOUD LAYER TO FLY THROUGH (wolfaltitudesky.h cloudDeck,
+// deferred/wolfCloudDeckF.glsl). Two steps, because mRT->screen shares its depth buffer with
+// mRT->deferredScreen (allocate: shareDepthBuffer) and the march reads that depth: the layer is
+// marched into mRT->deferredLight (free until the tone mapping, premultiplied: rgb = light toward the
+// eye, a = 1 - transmittance), then laid over mRT->screen with the copy program and a premultiplied
+// blend.
+void LLPipeline::wolfCloudDeck()
+{
+    WolfAltitudeSky::CloudDeck deck;
+    // mRT->deferredLight exists only with HDR, shadows, SSAO or depth of field (allocateScreenBuffer):
+    // on the lowest settings there is no layer to march into, so no clouds.
+    if (gCubeSnapshot || !gWolfCloudDeckProgram.isComplete() || !gCopyProgram.isComplete()
+        || !mRT->deferredLight.isComplete() || !WolfAltitudeSky::cloudDeck(deck))
+    {
+        return;
+    }
+    LLEnvironment& env = LLEnvironment::instance();
+    LLSettingsSky::ptr_t psky = env.getCurrentSky();
+    if (!psky)
+    {
+        return;
+    }
+    LL_PROFILE_GPU_ZONE("wolf cloud deck");
+    LLViewerCamera* cam = LLViewerCamera::getInstance();
+    LLVector3 light = env.getLightDirection();
+    light.normalize();
+    const bool sun = env.getIsSunUp();
+    static LLCachedControl<F32> sunlight_scale(gSavedSettings, "RenderSkySunlightScale", 1.5f);
+    static LLCachedControl<F32> ambient_scale(gSavedSettings, "RenderSkyAmbientScale", 1.5f);
+    const LLColor3 sun_col = linearColor3(sun ? psky->getSunlightColor() : psky->getMoonlightColor() * 0.7f) * (F32)sunlight_scale;
+    const LLColor3 amb_col = linearColor3(LLColor3(psky->getTotalAmbient())) * (F32)ambient_scale;
+    const LLVector3d origin = gAgent.getPosGlobalFromAgent(LLVector3::zero);
+    const F32 t = gFrameTimeSeconds;
+
+    static LLStaticHashedString s_cam_pos("uCamPos"), s_cam_at("uCamAt"), s_cam_left("uCamLeft"), s_cam_up("uCamUp");
+    static LLStaticHashedString s_tan_half("uTanHalf"), s_aspect("uAspect"), s_near("uNear"), s_far("uFar");
+    static LLStaticHashedString s_offset("uOffset"), s_base("uBase"), s_top("uTop"), s_cover("uCover");
+    static LLStaticHashedString s_density("uDensity"), s_fade("uFade"), s_wind("uWind"), s_sun_dir("uSunDir");
+    static LLStaticHashedString s_sun_color("uSunColor"), s_ambient("uAmbient"), s_max_dist("uMaxDist");
+
+    LLRenderTarget& layer = mRT->deferredLight;
+    layer.bindTarget();
+    layer.clear();
+    {
+        LLGLDepthTest depth_test(GL_FALSE, GL_FALSE);
+        LLGLDisable blend(GL_BLEND);
+        LLGLSLShader& sh = gWolfCloudDeckProgram;
+        sh.bind();
+        sh.bindTexture(LLShaderMgr::DEFERRED_DEPTH, &mRT->deferredScreen, true);
+        const LLVector3& o = cam->getOrigin();
+        sh.uniform3f(s_cam_pos, o.mV[VX], o.mV[VY], o.mV[VZ]);
+        const LLVector3 at = cam->getAtAxis(), left = cam->getLeftAxis(), up = cam->getUpAxis();
+        sh.uniform3f(s_cam_at, at.mV[VX], at.mV[VY], at.mV[VZ]);
+        sh.uniform3f(s_cam_left, left.mV[VX], left.mV[VY], left.mV[VZ]);
+        sh.uniform3f(s_cam_up, up.mV[VX], up.mV[VY], up.mV[VZ]);
+        sh.uniform1f(s_tan_half, tanf(cam->getView() * 0.5f));
+        sh.uniform1f(s_aspect, cam->getAspect());
+        sh.uniform1f(s_near, cam->getNear());
+        sh.uniform1f(s_far, cam->getFar());
+        sh.uniform2f(s_offset, (F32)origin.mdV[VX], (F32)origin.mdV[VY]);
+        sh.uniform1f(s_base, deck.mBase);
+        sh.uniform1f(s_top, deck.mTop);
+        sh.uniform1f(s_cover, deck.mCover);
+        sh.uniform1f(s_density, deck.mDensity);
+        sh.uniform1f(s_fade, deck.mFade);
+        sh.uniform2f(s_wind, fmodf(t * 6.f, 1.0e6f), fmodf(t * 2.f, 1.0e6f));   // a steady drift, west to east
+        sh.uniform3f(s_sun_dir, light.mV[VX], light.mV[VY], light.mV[VZ]);
+        sh.uniform3f(s_sun_color, sun_col.mV[0], sun_col.mV[1], sun_col.mV[2]);
+        sh.uniform3f(s_ambient, amb_col.mV[0], amb_col.mV[1], amb_col.mV[2]);
+        sh.uniform1f(s_max_dist, llmax(cam->getFar() * 2.f, 20000.f));
+        mScreenTriangleVB->setBuffer();
+        mScreenTriangleVB->drawArrays(LLRender::TRIANGLES, 0, 3);
+        sh.unbind();
+    }
+    layer.flush();
+
+    mRT->screen.bindTarget();
+    {
+        LLGLDepthTest depth_test(GL_FALSE, GL_FALSE);
+        LLGLEnable blend(GL_BLEND);
+        gGL.blendFunc(LLRender::BF_ONE, LLRender::BF_ONE_MINUS_SOURCE_ALPHA);
+        gCopyProgram.bind();
+        gGL.getTexUnit(0)->bind(&layer);
+        mScreenTriangleVB->setBuffer();
+        mScreenTriangleVB->drawArrays(LLRender::TRIANGLES, 0, 3);
+        gCopyProgram.unbind();
+        gGL.setSceneBlendType(LLRender::BT_ALPHA);
+    }
+    mRT->screen.flush();
+}
+// </WolfViewer>
+
 void LLPipeline::wolfGodRays(LLRenderTarget* dst)
 {
     static LLCachedControl<bool> rays_on(gSavedSettings, "WolfViewerWaterGodRays", true);
@@ -9071,6 +9172,8 @@ void LLPipeline::renderFinalize()
 
     gGL.setColorMask(true, true);
     glClearColor(0, 0, 0, 0);
+
+    wolfCloudDeck();   // <WolfViewer 2026-10-07/> into the lit HDR frame, before the tone mapping
 
     static LLCachedControl<bool> has_hdr(gSavedSettings, "RenderHDREnabled", true);
     bool hdr = gGLManager.mGLVersion > 4.05f && has_hdr();

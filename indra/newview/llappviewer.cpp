@@ -82,6 +82,7 @@
 #include "wolfwaterfield.h" // <WolfViewer> water depth / exposure fields for the water shader
 #include "wolfboatrock.h" // <WolfViewer> client-side buoyancy for boats
 #include "wolfflight.h"   // <WolfViewer 2026-10-06/> Flight Mode
+#include "wolffarground.h"   // <WolfViewer 2026-10-07/> map tiles for regions not connected
 #include "wolfobjectprops.h" // <WolfViewer> shared object name/description harvester
 #include "wolfspeech.h" // <WolfViewer> dictation + read aloud (Wolf Territories only)
 #include "wolfscreenshare.h"
@@ -6192,6 +6193,7 @@ void LLAppViewer::idle()
     // the next one, exactly like the Move floater's pedals (wolfvehiclecontrols.cpp driveIdle).
     WolfFlight::instance().idle();
     // </WolfViewer>
+    WolfFarGround::instance().idle();   // <WolfViewer 2026-10-07/> map tiles for the regions not connected
     {
         LL_PROFILE_ZONE_NAMED_CATEGORY_APP("world update"); //LL_RECORD_BLOCK_TIME(FTM_WORLD_UPDATE);
         gPipeline.updateMove();

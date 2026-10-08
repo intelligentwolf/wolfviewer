@@ -343,7 +343,8 @@ void WolfFlight::idle()
     if (mAP)
     {
         if (mSail) sailDrive(dt); else drive(dt);
-        if (mLand < LAND_FLARE)   // <WolfViewer 2026-10-07/> no AUTO LEARN from a landing's flare and rollout
+        // <WolfViewer 2026-10-07/> no AUTO LEARN from a landing's flare and rollout, nor a take-off's roll
+        if (mLand < LAND_FLARE && !takeoffOnRunway())
         {
             learn(dt);
         }
@@ -357,7 +358,8 @@ void WolfFlight::idle()
     if (!mSail)
     {
         // <WolfViewer 2026-10-07> Not on an autoland's final: the runway ahead is meant to be hit.
-        if (mAP && mLand >= LAND_FINAL)
+        // <WolfViewer 2026-10-07/> nor on the take-off roll and rotation: the same runway
+        if (mAP && (mLand >= LAND_FINAL || takeoffOnRunway()))
         {
             clearCas("PULL UP");
             clearCas("TERRAIN");
@@ -1057,12 +1059,202 @@ void WolfFlight::landGuidance(F32 dt)
     (void)dt;
 }
 
+//-----------------------------------------------------------------------------
+// AUTO TAKE-OFF (Paul, 2026-10-07: "auto pilot, should be able to take off, fly and land perfectly").
+// The autopilot engaged with a plane on the ground (under 10 m) takes off along the heading the
+// plane points - line it up on the runway first - and then flies whatever was set: the route (LNAV
+// and VNAV, autoland at an airport) or the selected heading and altitude.
+//
+//   ROLL     A/T at the selected speed (a stepping throttle taps up to full), the heading held with
+//            the turn keys, the pitch keys left alone. ROTATE at TO_ROTATE_FRACTION of the selected
+//            speed, or once the speed has stopped building for TO_PLATEAU_SECS: many SL plane
+//            scripts move in fixed steps (Paul's Caravan read exactly 4 and 8 m/s) and never reach
+//            a fraction of a selected speed. Not moving after TO_NO_ROLL_SECS = rejected.
+//   ROTATE   nose up to TO_ROTATE_PITCH until it climbs (5 m up, or rising at 1 m/s);
+//            TO_NO_LIFT_SECS without = rejected.
+//   CLIMB    the heading held, climbing on a 10 degree path; gear up at TO_GEAR_UP_M; at
+//            TO_DONE_M the ordinary modes take over.
+//   REJECT   the power back to nothing (A/T to 0: a stepping throttle stays where it was left, so
+//            letting go is not enough), the heading held; stopped for 2 s = the autopilot off.
+// The ground alarms, the land / object climbs and AUTO LEARN are off on the runway (as on an
+// autoland's final): the runway ahead is meant to be there, and a nose that cannot rise until the
+// speed is up is not a reversed elevator.
+//-----------------------------------------------------------------------------
+namespace
+{
+    const F32 TO_ROTATE_FRACTION = 0.75f;
+    const F32 TO_SPEED_GAIN = 0.5f;         // m/s faster counts as still accelerating
+    const F32 TO_PLATEAU_SECS = 6.f;        // longer than a throttle notch takes to build speed
+    const F32 TO_MIN_ROTATE_SPEED = 3.f;    // m/s: no plateau rotation before this
+    const F32 TO_NO_ROLL_SECS = 20.f;
+    const F32 TO_ROTATE_PITCH = 10.f;       // degrees
+    const F32 TO_NO_LIFT_SECS = 15.f;
+    const F32 TO_LIFT_M = 5.f;
+    const F32 TO_GEAR_UP_M = 30.f;
+    const F32 TO_DONE_M = 120.f;            // about 400 ft
+    const F32 TO_MIN_CRUISE_FT = 500.f;     // above the runway: a lower cruise is raised to this
+}
+
+void WolfFlight::takeoffStart()
+{
+    const F64 now = nowSeconds();
+    mTakeoff = TO_ROLL;
+    mToHeading = mData.mHeading;
+    mToGroundZ = (F32)mData.mPosGlobal.mdV[VZ];
+    mToPhaseStart = now;
+    mToBestSpeed = mData.mAirspeed;
+    mToBestSpeedAt = now;
+    mAT = true;
+    mPitchTrim = 0.f;
+    // Where to after the climb: the route, or straight ahead to a safe height.
+    const F32 field_ft = mData.mAltMSL * FT;
+    if (mCruiseAltFt < field_ft + TO_MIN_CRUISE_FT)
+    {
+        mCruiseAltFt = 100.f * ceilf((field_ft + TO_MIN_CRUISE_FT) / 100.f);
+    }
+    if (mDest.mValid)
+    {
+        mLateral = LAT_LNAV;
+        mVertical = VERT_VNAV;
+    }
+    else
+    {
+        mLateral = LAT_HDG;
+        mSelHeading = (F32)llround(mToHeading);
+        mVertical = VERT_ALT;
+        mSelAltFt = llmax(mSelAltFt, mCruiseAltFt);
+    }
+    if (!mGearDown)
+    {
+        sendGearCommand();   // on the ground the gear is down; say so to the plane's script
+    }
+    clearCas("TAKEOFF REJECTED");
+    postCas("TAKEOFF", CAS_MEMO);
+    LL_INFOS("WolfFlight") << "take-off: heading " << mToHeading << ", runway z " << mToGroundZ << ", then "
+                           << (mDest.mValid ? "the route" : "the selected heading") << " at " << mCruiseAltFt << " ft" << LL_ENDL;
+}
+
+void WolfFlight::takeoffClearCas()
+{
+    clearCas("TAKEOFF");
+    clearCas("ROTATE");
+    clearCas("POSITIVE CLIMB");
+}
+
+void WolfFlight::takeoffReject(const std::string& why)
+{
+    LL_INFOS("WolfFlight") << "take-off rejected: " << why << LL_ENDL;
+    mTakeoff = TO_REJECT;
+    mToPhaseStart = nowSeconds();
+    mToStoppedSince = 0.0;
+    mAT = true;   // to take the power off
+    takeoffClearCas();
+    postCas("TAKEOFF REJECTED", CAS_WARNING);
+    make_ui_sound("UISndAlert");
+    LLNotificationsUtil::add("GenericAlert", LLSD().with("MESSAGE", "Autopilot: take-off rejected - " + why
+                             + ". It is taking the power off and stopping on the runway, then the autopilot lets go."));
+}
+
+// The phase, and the climb it wants (mToWantVS); guidance() applies them over the modes' own
+// targets, as it does an autoland's.
+void WolfFlight::takeoffGuidance()
+{
+    if (mTakeoff == TO_NONE)
+    {
+        return;
+    }
+    if (!mAP || craft() != CRAFT_PLANE)
+    {
+        mTakeoff = TO_NONE;
+        takeoffClearCas();
+        return;
+    }
+    const F64 now = nowSeconds();
+    const F32 height = (F32)mData.mPosGlobal.mdV[VZ] - mToGroundZ;
+    const F32 sel = mSelSpeedKt / KT;
+    const F32 climb = llclamp(mData.mAirspeed * 0.176f, 0.7f, 8.f);   // a 10 degree path, as guidance()
+    switch (mTakeoff)
+    {
+    case TO_ROLL:
+    {
+        mToWantVS = 0.f;
+        if (mData.mAirspeed > mToBestSpeed + TO_SPEED_GAIN)
+        {
+            mToBestSpeed = mData.mAirspeed;
+            mToBestSpeedAt = now;
+        }
+        const bool fast = mData.mAirspeed >= sel * TO_ROTATE_FRACTION;
+        const bool plateau = mData.mAirspeed >= TO_MIN_ROTATE_SPEED && now - mToBestSpeedAt > TO_PLATEAU_SECS;
+        if (fast || plateau || height > TO_LIFT_M)
+        {
+            mTakeoff = TO_ROTATE;
+            mToPhaseStart = now;
+            postCas("ROTATE", CAS_MEMO);
+            LL_INFOS("WolfFlight") << "take-off: rotate at " << mData.mAirspeed << " m/s ("
+                                   << (fast ? "speed" : (plateau ? "speed steady" : "already climbing")) << ")" << LL_ENDL;
+        }
+        else if (now - mToPhaseStart > TO_NO_ROLL_SECS && mData.mAirspeed < TO_MIN_ROTATE_SPEED)
+        {
+            takeoffReject("it did not start rolling (check the engine and the throttle keys)");
+        }
+        break;
+    }
+    case TO_ROTATE:
+        mToWantVS = climb;
+        if (height > TO_LIFT_M || mVSf > 1.f)
+        {
+            mTakeoff = TO_CLIMB;
+            mToPhaseStart = now;
+            mPitchTrim = llclamp(mData.mPitch, -10.f, 12.f);   // the pitch it lifted off at
+            mLearnHoldUntil = now + 10.0;                      // AUTO LEARN only once it is flying
+            clearCas("ROTATE");
+            postCas("POSITIVE CLIMB", CAS_MEMO);
+        }
+        else if (now - mToPhaseStart > TO_NO_LIFT_SECS)
+        {
+            takeoffReject("it did not lift off (check the pitch keys on the CDU CONTROLS page)");
+        }
+        break;
+    case TO_CLIMB:
+        mToWantVS = climb;
+        if (mGearDown && height > TO_GEAR_UP_M)
+        {
+            sendGearCommand();
+        }
+        if (height > TO_DONE_M)
+        {
+            mTakeoff = TO_NONE;
+            takeoffClearCas();
+            LL_INFOS("WolfFlight") << "take-off: done at " << (S32)height << " m, handing over to lateral "
+                                   << (S32)mLateral << " vertical " << (S32)mVertical << LL_ENDL;
+        }
+        break;
+    case TO_REJECT:
+        mToWantVS = 0.f;
+        mToStoppedSince = mData.mGS < 1.f ? (mToStoppedSince > 0.0 ? mToStoppedSince : now) : 0.0;
+        if (mToStoppedSince > 0.0 && now - mToStoppedSince > 2.0)
+        {
+            mTakeoff = TO_NONE;
+            mAP = false;
+            mAT = false;
+            mOutPitch = mOutBank = mOutThrottle = 0.f;
+            LL_INFOS("WolfFlight") << "take-off rejected: stopped, autopilot off" << LL_ENDL;
+        }
+        break;
+    default:
+        break;
+    }
+}
+
 void WolfFlight::guidance(F32 dt)
 {
     // the vertical speed arrives in steps with each object update: filtered for the guidance
     mVSf = ema(mVSf, mData.mVS, dt, 0.8f);
     landGuidance(dt);   // <WolfViewer 2026-10-07/> autoland: its targets override below
+    takeoffGuidance();  // <WolfViewer 2026-10-07/> auto take-off: the same
     const bool landing = mAP && mLand >= LAND_APPROACH;
+    const bool takeoff = mAP && mTakeoff != TO_NONE;
+    const bool on_runway = takeoff && takeoffOnRunway();   // rolling, rotating or stopping
     const bool heli = craft() == CRAFT_HELI;
     const F32 z = (F32)mData.mPosGlobal.mdV[VZ];
     mFDValid = mLateral != LAT_NONE || mVertical != VERT_NONE;
@@ -1129,6 +1321,15 @@ void WolfFlight::guidance(F32 dt)
         use_track = mData.mGS > 5.f;
         mWantSpeed = mLandWantSpeed;
     }
+    if (takeoff)   // <WolfViewer 2026-10-07/> straight down the runway and out along it
+    {
+        want = mToHeading;
+        use_track = false;
+        if (mTakeoff == TO_REJECT)
+        {
+            mWantSpeed = 0.f;
+        }
+    }
     mWantTrack = want;
     const F32 current = use_track ? mData.mTrack : mData.mHeading;
     const F32 err = wrap180(want - current);
@@ -1165,9 +1366,15 @@ void WolfFlight::guidance(F32 dt)
     {
         mWantVS = mLandWantVS;
     }
+    if (takeoff)   // <WolfViewer 2026-10-07/> level on the roll, then the climb out
+    {
+        mWantVS = on_runway ? mToWantVS : llmax(mWantVS, mToWantVS);
+    }
     // Never below the land ahead, whatever the mode asks (a climb wins over any descent).
-    // <WolfViewer 2026-10-07> Except on final: there the runway is the land ahead.
-    if ((mVertical != VERT_NONE || mAP) && !(landing && mLand >= LAND_FINAL))
+    // <WolfViewer 2026-10-07> Except on final: there the runway is the land ahead. Nor on the
+    // take-off roll: the floor is 40 m above the runway, and a climb asked for at 0 m/s pulls the
+    // nose up before the plane can fly.
+    if ((mVertical != VERT_NONE || mAP) && !(landing && mLand >= LAND_FINAL) && !on_runway)
     {
         const F32 floor_z = terrainFloorZ();
         if (z < floor_z)
@@ -1199,6 +1406,18 @@ void WolfFlight::guidance(F32 dt)
         mPitchTrim = llclamp(mPitchTrim + (mWantVS - mVSf) * 0.25f * dt, -10.f, 12.f);
     }
     mFDPitch = ema(mFDPitch, llclamp(mPitchTrim + (mWantVS - mVSf) * 2.0f, -12.f, 18.f), dt, 1.5f);   // steadier: 1.5 s
+    // <WolfViewer 2026-10-07> Take-off: no pitch keys on the roll or a rejected take-off (the director follows the nose, so
+    // drive() holds none), then the rotation's nose-up, with the trim kept at the nose until it flies.
+    if ((mTakeoff == TO_ROLL || mTakeoff == TO_REJECT) && mAP)
+    {
+        mPitchTrim = 0.f;
+        mFDPitch = mData.mPitch;
+    }
+    else if (mTakeoff == TO_ROTATE && mAP)
+    {
+        mPitchTrim = llclamp(mData.mPitch, -10.f, 12.f);
+        mFDPitch = TO_ROTATE_PITCH;
+    }
     if (mAP && nowSeconds() >= mNextFlightLog)
     {
         mNextFlightLog = nowSeconds() + 3.0;
@@ -1562,11 +1781,8 @@ void WolfFlight::engageAP()
         postCas("AP: NOT SEATED", CAS_CAUTION);
         return;
     }
-    if (!mSail && craft() == CRAFT_PLANE && mData.mAGL < 10.f)
-    {
-        postCas("AP: ON GROUND", CAS_CAUTION);
-        return;
-    }
+    // <WolfViewer 2026-10-07> A plane on the ground takes off (takeoffStart) instead of refusing.
+    const bool take_off = !mSail && craft() == CRAFT_PLANE && mData.mAGL < 10.f;
     clearCas("AP: NOT SEATED");
     clearCas("AP: ON GROUND");
     clearCas("AUTOPILOT DISC");
@@ -1608,8 +1824,12 @@ void WolfFlight::engageAP()
     mLearnHoldUntil = nowSeconds() + 10.0;
     mPitchRevStreak = mBankRevStreak = mLiftRevStreak = 0;
     mAP = true;
+    if (take_off)
+    {
+        takeoffStart();
+    }
     LL_INFOS("WolfFlight") << "AP engaged, craft " << (S32)craft() << " lateral " << (S32)mLateral
-                           << " vertical " << (S32)mVertical << LL_ENDL;
+                           << " vertical " << (S32)mVertical << (take_off ? ", taking off" : "") << LL_ENDL;
 }
 
 void WolfFlight::disconnectAP(const std::string& why, bool by_pilot)
@@ -1621,6 +1841,11 @@ void WolfFlight::disconnectAP(const std::string& why, bool by_pilot)
     mAP = false;
     mAT = false;
     mOutPitch = mOutBank = mOutThrottle = 0.f;
+    if (mTakeoff != TO_NONE)   // <WolfViewer 2026-10-07/> the pilot has it
+    {
+        mTakeoff = TO_NONE;
+        takeoffClearCas();
+    }
     mApOffFlashUntil = nowSeconds() + 6.0;
     postCas(why, CAS_WARNING);
     make_ui_sound("UISndAlert");   // an autopilot never lets go silently
@@ -1730,29 +1955,15 @@ void WolfFlight::setDestination(const std::string& region_in, const LLVector3& l
     }
     if (!d.mValid)
     {
+        // <WolfViewer 2026-10-07> Ask the map server, and take ONLY a region of exactly this name when
+        // the answer lands in the world map (resolveDestination). Paul: "if the autopilot cant find the
+        // region it needs to say not found not take you to some weird far off place". The callback form
+        // of this request goes through Firestorm's hypergrid exact-name path
+        // (fsworldmapmessage.cpp processExactNamedRegionResponse), which takes a lone result with no name
+        // as the match - for a name the grid does not have, that is some other region, and the plane
+        // set off for it.
         d.mPending = true;
-        const F64 asked = d.mRequestedAt;
-        LLWorldMapMessage::getInstance()->sendNamedRegionRequest(region,
-            [asked](U64 handle, const std::string&, const LLUUID&, bool)
-            {
-                WolfFlight& f = WolfFlight::instance();
-                if (!f.mDest.mPending || f.mDest.mRequestedAt != asked)
-                {
-                    return;   // a newer destination replaced this one
-                }
-                F64 x = 0.0, y = 0.0;
-                U32 ux = 0, uy = 0;
-                from_region_handle(handle, &ux, &uy);
-                x = (F64)ux;
-                y = (F64)uy;
-                f.mDest.mGlobal = LLVector3d(x, y, 0.0) + LLVector3d(f.mDest.mLocal);
-                f.mDest.mPending = false;
-                f.mDest.mValid = true;
-                f.clearCas("NOT IN DATABASE");
-                f.rebuildRoute();
-                LL_INFOS("WolfFlight") << "destination " << f.mDest.mRegion << " found at " << f.mDest.mGlobal << LL_ENDL;
-            },
-            std::string(), false);
+        LLWorldMapMessage::getInstance()->sendNamedRegionRequest(region);
     }
     if (!has_z)
     {
@@ -1762,17 +1973,51 @@ void WolfFlight::setDestination(const std::string& region_in, const LLVector3& l
     landReset();   // <WolfViewer 2026-10-07/> a new destination is looked up in the airports list
     rebuildRoute();
     mArrived = false;
-    clearCas("NOT IN DATABASE");
+    clearCas("DEST NOT FOUND");
     LL_INFOS("WolfFlight") << "destination " << region << " " << local << (d.mPending ? " (asking the map)" : "") << LL_ENDL;
 }
 
 void WolfFlight::resolveDestination()
 {
-    if (mDest.mPending && nowSeconds() - mDest.mRequestedAt > DEST_TIMEOUT)
+    if (mDest.mPending)
     {
-        mDest.mPending = false;
-        mDest.mFailed = true;
-        postCas("NOT IN DATABASE", CAS_ADVISORY);
+        // The map server's answer goes into the world map: a region of exactly this name, or nothing.
+        if (LLSimInfo* info = LLWorldMap::getInstance()->simInfoFromName(mDest.mRegion))
+        {
+            mDest.mRegion = info->getName();
+            mDest.mGlobal = info->getGlobalOrigin() + LLVector3d(mDest.mLocal);
+            if (!mDest.mHasZ)
+            {
+                mDest.mGlobal.mdV[VZ] = mData.mPosGlobal.mdV[VZ];
+            }
+            mDest.mPending = false;
+            mDest.mValid = true;
+            clearCas("DEST NOT FOUND");
+            landReset();
+            rebuildRoute();
+            LL_INFOS("WolfFlight") << "destination " << mDest.mRegion << " found at " << mDest.mGlobal << LL_ENDL;
+        }
+        else if (nowSeconds() - mDest.mRequestedAt > DEST_TIMEOUT)
+        {
+            // Not on the grid: say so, and go nowhere - no destination, the heading held.
+            mDest.mPending = false;
+            mDest.mFailed = true;
+            mDest.mValid = false;
+            if (mLateral == LAT_LNAV || mLateral == LAT_HOLD)
+            {
+                mLateral = LAT_HDG;
+                mSelHeading = (F32)llround(mData.mHeading);
+            }
+            if (mVertical == VERT_VNAV)
+            {
+                mVertical = VERT_ALT;
+            }
+            postCas("DEST NOT FOUND", CAS_CAUTION);
+            make_ui_sound("UISndAlert");
+            LLNotificationsUtil::add("GenericAlert", LLSD().with("MESSAGE", "Autopilot: no region called \"" + mDest.mRegion
+                                     + "\" was found. Check the name; the autopilot is holding the current heading."));
+            LL_INFOS("WolfFlight") << "destination " << mDest.mRegion << " not found" << LL_ENDL;
+        }
     }
     if (!mDest.mHasZ && mDest.mValid)
     {

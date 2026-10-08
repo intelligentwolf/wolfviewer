@@ -259,7 +259,7 @@ bool WolfRegionWeather::parcelForcedProfile(WolfWeatherProfile& out) const
 
 void WolfRegionWeather::idle()
 {
-    if (!WolfGrid::isWolfTerritories()) return;
+    if (!WolfGrid::showsWolfRegionWeather()) return;   // <WolfViewer 2026-10-08/> hypergrid visitors too
     const std::string id = currentRegionId();
     if (id.empty()) return;
     // Source: LLFrameTimer and the 60-second weather polling contract above. An attempted target
@@ -271,7 +271,7 @@ void WolfRegionWeather::idle()
 
 void WolfRegionWeather::refresh(bool force)
 {
-    if (!WolfGrid::isWolfTerritories()) return;
+    if (!WolfGrid::showsWolfRegionWeather()) return;   // <WolfViewer 2026-10-08/> hypergrid visitors too
     const std::string id = currentRegionId();
     if (id.empty()) return;
     if (!force && id == mAttemptedFor && LLFrameTimer::getElapsedSeconds() < mNextPoll) return;
@@ -332,8 +332,13 @@ void WolfRegionWeather::fetchCoro(std::string region_id, bool include_parcel, F3
     // Sending them now costs nothing -- the service ignores headers it does not require
     // -- and is what lets the service START requiring them once enough viewers carry
     // them. Enforcing before then would break every older viewer ON our own grid.
-    headers->append("X-Wolf-Agent", gAgentID.asString());
-    headers->append("X-Wolf-Session", gAgentSessionID.asString());
+    // <WolfViewer 2026-10-08> Only for our own residents: a hypergrid visitor's session belongs to
+    // another grid and is not ours to send anywhere; the read is anonymous for them.
+    if (WolfGrid::isWolfTerritories())
+    {
+        headers->append("X-Wolf-Agent", gAgentID.asString());
+        headers->append("X-Wolf-Session", gAgentSessionID.asString());
+    }
 
     LLSD result = adapter->getRawAndSuspend(request, url, options, headers);
     LLSD httpResults = result[LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS];

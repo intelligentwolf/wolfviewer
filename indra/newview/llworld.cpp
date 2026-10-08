@@ -71,6 +71,7 @@
 
 #include "fscommon.h"
 #include "llselectmgr.h"
+#include "wolffarground.h"   // <WolfViewer 2026-10-07/> map tiles stand in for regions not connected
 
 //
 // Globals
@@ -663,6 +664,7 @@ LLViewerRegion* LLWorld::addRegion(const U64 &region_handle, const LLHost &host,
     }
 
     updateWaterObjects();
+    WolfFarGround::instance().invalidate();   // <WolfViewer 2026-10-07/> its map tile cells give way to the region
 
 // <AW: opensim-limits>
     if(mLimitsNeedRefresh)
@@ -724,6 +726,7 @@ void LLWorld::removeRegion(const LLHost &host)
     mRegionRemovedSignal(regionp);
 
     updateWaterObjects();
+    WolfFarGround::instance().invalidate();   // <WolfViewer 2026-10-07/> its cells become map tiles again
 
     //double check all objects of this region are removed.
     gObjectList.clearAllMapObjectsInRegion(regionp) ;
@@ -1410,6 +1413,14 @@ void LLWorld::updateWaterObjects()
 
     // We only want to fill in water for stuff that's near us, say, within 256 or 512m
     S32 range = LLViewerCamera::getInstance()->getFar() > 256.f ? 512 : 256;
+    // <WolfViewer 2026-10-07> SEA TO THE HORIZON. Paul: "by default generate water from the horizon
+    // regardless of what is there then the region software fills it in". Every 256 m cell out to the
+    // land far clip (setLandFarClip, which re-runs this each time it crosses a 256 m step, and which
+    // grows with the camera's height) that no connected region covers gets sea; a region that
+    // connects cuts its own out (addRegion re-runs this). The edge planes still run on past it.
+    // Holes are merged into rectangles below, so the plane count stays small.
+    range = llmax(range, (S32)(llceil(mLandFarClip / 256.f) * 256));
+    // </WolfViewer>
 
     LLViewerRegion* regionp = gAgent.getRegion();
     from_region_handle(regionp->getHandle(), &region_x, &region_y);
@@ -1475,7 +1486,8 @@ void LLWorld::updateWaterObjects()
             }
             // </WolfViewer>
             U64 region_handle = to_region_handle(x, y);
-            if (!getRegionFromHandle(region_handle))
+            // <WolfViewer 2026-10-07> ...and not drawn as a map tile either (wolffarground.h).
+            if (!getRegionFromHandle(region_handle) && !(x >= 0 && y >= 0 && WolfFarGround::instance().coversCell((U32)x, (U32)y)))
             {   // No region at that area, so make water
                 // <WolfViewer 2026-09-26> ...recorded as a run; the planes are made below.
                 if (!runs.empty() && runs.back().y1 == y)

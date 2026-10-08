@@ -782,7 +782,7 @@ void WolfWeather::updateSnowCover(F64 now)
     }
     if (mCoverPending)
     {
-        const bool answered = !WolfGrid::isWolfTerritories()
+        const bool answered = !WolfGrid::showsWolfRegionWeather()   // <WolfViewer 2026-10-08/>
                            || WolfRegionWeather::instance().answeredThisVisit();
         const bool swept = mSweepCount > mCoverPendingSweep;   // the parcel prims were looked at
         if (!(answered && swept) && now - mCoverPendingSince < COVER_SETTLE_MAX_SECS)

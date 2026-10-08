@@ -277,6 +277,7 @@ LLGLSLShader        gWolfWakeDecayProgram;
 LLGLSLShader        gWolfWakeStampProgram;
 LLGLSLShader        gWolfSurfCurlProgram;
 LLGLSLShader        gWolfGodRaysProgram;
+LLGLSLShader        gWolfCloudDeckProgram;   // <WolfViewer 2026-10-07/>
 // </WolfViewer>
 LLGLSLShader        gUnderWaterProgram;
 
@@ -2800,6 +2801,23 @@ bool LLViewerShaderMgr::loadShadersDeferred()
         gWolfGodRaysProgram.mShaderLevel = mShaderLevel[SHADER_DEFERRED];
         success = gWolfGodRaysProgram.createShader();
         llassert(success);
+    }
+    // </WolfViewer>
+
+    // <WolfViewer 2026-10-07> the cloud layer to fly through (LLPipeline::wolfCloudDeck). Its failing
+    // turns the clouds off, not the rest of the deferred shaders.
+    if (success)
+    {
+        gWolfCloudDeckProgram.mName = "Wolf Cloud Deck Post Process";
+        gWolfCloudDeckProgram.mShaderFiles.clear();
+        gWolfCloudDeckProgram.clearPermutations();
+        gWolfCloudDeckProgram.mShaderFiles.push_back(make_pair("deferred/postDeferredNoTCV.glsl", GL_VERTEX_SHADER));
+        gWolfCloudDeckProgram.mShaderFiles.push_back(make_pair("deferred/wolfCloudDeckF.glsl", GL_FRAGMENT_SHADER));
+        gWolfCloudDeckProgram.mShaderLevel = mShaderLevel[SHADER_DEFERRED];
+        if (!gWolfCloudDeckProgram.createShader())
+        {
+            LL_WARNS("ShaderLoading") << "Wolf cloud deck shader failed: no cloud layer" << LL_ENDL;
+        }
     }
     // </WolfViewer>
 

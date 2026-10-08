@@ -48,6 +48,7 @@
 #include "lltimer.h"
 #include "llviewertexturelist.h"
 #include "wolfregionweather.h"   // <WolfViewer 2026-10-03/> autoEnvSky() for the moon phase
+#include "wolfaltitudesky.h"   // <WolfViewer 2026-10-07/> stars by day in space
 
 extern bool gCubeSnapshot;
 
@@ -206,6 +207,9 @@ void LLDrawPoolWLSky::renderSkyHazeDeferred(const LLVector3& camPosLocal, F32 ca
         static LLStaticHashedString s_wolf_aurora_color("wolf_aurora_color");
         sky_shader->uniform1i(s_wolf_aurora_color, WolfWeather::auroraColorMode());
         // </WolfViewer>
+        // <WolfViewer 2026-10-07> the ocean out to the true horizon (skyF.glsl wolfHorizonSea)
+        static LLStaticHashedString s_wolf_sea_height("wolf_sea_height");
+        sky_shader->uniform1f(s_wolf_sea_height, WolfAltitudeSky::horizonSeaHeight());
 
         F32 moisture_level  = (float)psky->getSkyMoistureLevel();
         F32 droplet_radius  = (float)psky->getSkyDropletRadius();
@@ -245,6 +249,7 @@ void LLDrawPoolWLSky::renderStarsDeferred(const LLVector3& camPosLocal) const
     gGL.setSceneBlendType(LLRender::BT_ADD_WITH_ALPHA);
 
     F32 star_alpha = LLEnvironment::instance().getCurrentSky()->getStarBrightness() / 500.0f;
+    star_alpha = llmax(star_alpha, WolfAltitudeSky::spaceStarAlpha());   // <WolfViewer 2026-10-07/> stars by day in space
 
     // If start_brightness is not set, exit
     if(star_alpha < 0.001f)
@@ -597,7 +602,8 @@ void LLDrawPoolWLSky::renderDeferred(S32 pass)
 void LLDrawPoolWLSky::renderConstellationsDeferred(const LLVector3& camPosLocal) const
 {
     if (!gSky.mVOSkyp || !gSky.mVOWLSkyp || use_hdri_sky()) return;
-    if (LLEnvironment::instance().getCurrentSky()->getStarBrightness() / 500.0f < 0.001f) return;   // day: no night sky
+    if (llmax(LLEnvironment::instance().getCurrentSky()->getStarBrightness() / 500.0f,
+              WolfAltitudeSky::spaceStarAlpha()) < 0.001f) return;   // day: no night sky (<WolfViewer 2026-10-07/> unless in space)
 
     LLGLSPipelineBlendSkyBox gls_sky(true, false);
     gGL.setSceneBlendType(LLRender::BT_ALPHA);

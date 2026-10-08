@@ -29,6 +29,7 @@
 #include "llviewercontrol.h"
 #include "llsettingsvo.h"
 #include "wolfweather.h"   // <WolfViewer 2026-09-18/> fogExtinction()
+#include "wolfaltitudesky.h"   // <WolfViewer 2026-10-07/> the sky thins with height
 
 #include "pipeline.h"
 
@@ -894,6 +895,22 @@ void LLSettingsVOSky::applySpecial(void *ptarget, bool force)
     shader->uniform1f(LLShaderMgr::DISTANCE_MULTIPLIER, wolf_fogged_distance_multiplier(*this));   // <WolfViewer 2026-09-18/> weather fog
 
     shader->uniform1f(LLShaderMgr::GAMMA, g);
+
+    // <WolfViewer 2026-10-07> ALTITUDE SKY (wolfaltitudesky.h): thinner air and no cloud layer above
+    // you as the camera climbs, for the sky group only (sky, clouds, sun, moon, stars). The group's
+    // uniforms are applied after SG_ANY's (LLEnvironment::updateShaderUniforms), so these win there
+    // and the land, water and objects keep the EEP values.
+    {
+        const F32 air = WolfAltitudeSky::airFraction();
+        const F32 clouds = WolfAltitudeSky::cloudFraction();
+        if (air < 1.f || clouds < 1.f)
+        {
+            LLShaderUniforms* sky = &((LLShaderUniforms*)ptarget)[LLGLSLShader::SG_SKY];
+            sky->uniform1f(LLShaderMgr::DENSITY_MULTIPLIER, getDensityMultiplier() * air);
+            sky->uniform1f(LLShaderMgr::CLOUD_SHADOW, getCloudShadow() * clouds);
+        }
+    }
+    // </WolfViewer>
 }
 
 LLSettingsSky::parammapping_t LLSettingsVOSky::getParameterMap() const

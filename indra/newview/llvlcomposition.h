@@ -51,6 +51,7 @@ class LLTerrainMaterials : public LLModifyRegion
 public:
     friend class LLDrawPoolTerrain;
     friend class WolfTerrainPaint;   // [TERRAIN PAINT 2026-09-10] waits for the detail textures before drawing paint
+    friend class WolfFarTerrain;     // <WolfViewer 2026-10-08/> far ground textured with the region's own detail textures
 
     LLTerrainMaterials() {}
     virtual ~LLTerrainMaterials();

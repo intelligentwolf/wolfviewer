@@ -35,6 +35,7 @@
 #include "wolfgrid.h"
 #include "wolfmapglobe.h"
 #include "wolfaltitudesky.h"
+#include "wolffarterrain.h"
 
 namespace
 {
@@ -86,10 +87,10 @@ void WolfFarGround::idle()
         mNextRefresh = now + REFRESH_SECS;
         refresh();
     }
-    else if (agent_region && (agent_region->getOriginGlobal() != mBuiltOrigin
+    else if (agent_region && (gAgent.getAgentOriginGlobal() != mBuiltOrigin
                               || agent_region->getWaterHeight() != mBuiltWaterZ) && !mTiles.empty())
     {
-        rebuildBuffer();   // a crossing moved the agent frame the vertices are in
+        rebuildBuffer();   // a crossing or a huge-region rebase (LLAgent::rebaseOrigin) moved the agent frame the vertices are in
     }
     // Wanted at full size every frame, as the world map view marks the tiles it draws: the texture
     // list lowers what nothing has asked for since the last frame.
@@ -173,7 +174,8 @@ void WolfFarGround::refresh()
             for (U32 y = cy0; y < cy1; y += CELL_M)
             {
                 const U64 handle = to_region_handle(x, y);
-                if (connected(handle) || cells >= MAX_QUADS)
+                // <WolfViewer 2026-10-08> nor where WolfFarTerrain draws the ground in relief
+                if (connected(handle) || WolfFarTerrain::instance().coversCell(x, y) || cells >= MAX_QUADS)
                 {
                     continue;
                 }
@@ -218,7 +220,7 @@ void WolfFarGround::rebuildBuffer()
     {
         return;
     }
-    mBuiltOrigin = agent_region->getOriginGlobal();
+    mBuiltOrigin = gAgent.getAgentOriginGlobal();
     mBuiltWaterZ = agent_region->getWaterHeight();
     U32 quads = 0;
     for (const Tile& t : mTiles)
@@ -292,7 +294,8 @@ void WolfFarGround::rebuildBuffer()
                 (*pos++).set(corners[k].mV[VX], corners[k].mV[VY], corners[k].mV[VZ], 0.f);   // w = texture index 0
                 *norm++ = LLVector3::z_axis;
                 *uv++ = uvs[k];
-                *col++ = LLColor4U(255, 255, 255, 0);   // alpha = no shininess (diffuseIndexedF.glsl)
+                // opaque: diffuseAlphaMaskF.glsl multiplies the texture by this colour and discards below minimum_alpha
+                *col++ = LLColor4U(255, 255, 255, 255);
             }
             // counter-clockwise seen from above, so the culled side is underneath
             *idx++ = (U16)v; *idx++ = (U16)(v + 1); *idx++ = (U16)(v + 2);

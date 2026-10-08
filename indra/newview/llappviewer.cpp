@@ -83,6 +83,7 @@
 #include "wolfboatrock.h" // <WolfViewer> client-side buoyancy for boats
 #include "wolfflight.h"   // <WolfViewer 2026-10-06/> Flight Mode
 #include "wolffarground.h"   // <WolfViewer 2026-10-07/> map tiles for regions not connected
+#include "wolffarterrain.h"   // <WolfViewer 2026-10-08/> elevation tiles beyond the terrain received
 #include "wolfobjectprops.h" // <WolfViewer> shared object name/description harvester
 #include "wolfspeech.h" // <WolfViewer> dictation + read aloud (Wolf Territories only)
 #include "wolfscreenshare.h"
@@ -6193,6 +6194,7 @@ void LLAppViewer::idle()
     // the next one, exactly like the Move floater's pedals (wolfvehiclecontrols.cpp driveIdle).
     WolfFlight::instance().idle();
     // </WolfViewer>
+    WolfFarTerrain::instance().idle();  // <WolfViewer 2026-10-08/> the ground beyond the terrain received (before the flat tiles: they skip its cells)
     WolfFarGround::instance().idle();   // <WolfViewer 2026-10-07/> map tiles for the regions not connected
     {
         LL_PROFILE_ZONE_NAMED_CATEGORY_APP("world update"); //LL_RECORD_BLOCK_TIME(FTM_WORLD_UPDATE);

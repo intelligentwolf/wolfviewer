@@ -78,7 +78,7 @@ private:
     LLPointer<LLVertexBuffer> mVB;
     U32 mVerts = 0;
     F64 mNextRefresh = 0.0;
-    LLVector3d mBuiltOrigin;                  // the agent region's origin the buffer was built in
+    LLVector3d mBuiltOrigin;                  // the agent frame origin the buffer was built in (moves on a huge-region rebase too)
     F32 mBuiltWaterZ = 0.f;
     S32 mLevel = 1;
 };

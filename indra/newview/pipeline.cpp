@@ -144,6 +144,7 @@
 #define A_CPU 1
 #include "app_settings/shaders/class1/deferred/CASF.glsl" // This is also C++
 #include "wolffarground.h"   // <WolfViewer 2026-10-07/> map tiles for regions not connected
+#include "wolffarterrain.h"   // <WolfViewer 2026-10-08/> elevation tiles beyond the terrain received
 #include "wolfaltitudesky.h"  // <WolfViewer 2026-10-07/> the cloud layer to fly through
 
 extern bool gSnapshot;
@@ -4377,6 +4378,7 @@ void LLPipeline::renderGeomDeferred(LLCamera& camera, bool do_occlusion)
         // <WolfViewer 2026-10-07> the map tiles standing in for regions not connected (wolffarground.h)
         if (&camera == LLViewerCamera::getInstance() && !gCubeSnapshot)
         {
+            WolfFarTerrain::instance().renderDeferred();   // <WolfViewer 2026-10-08/> the far ground in relief (wolffarterrain.h)
             WolfFarGround::instance().renderDeferred();
         }
         // </WolfViewer>

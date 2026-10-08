@@ -47,7 +47,7 @@ namespace
     // Source: WolfSim WolfElevationModule / wolf-grid.com elev.php (the tile format and levels)
     constexpr S32 N = 33;                       // samples per tile side
     constexpr S32 Z_MIN = 4, Z_MAX = 8;
-    constexpr S16 NO_DATA = -32768;
+    constexpr S16 ELEV_NO_DATA = -32768;       // not NO_DATA: winsock.h #defines that (MSVC C2059, w62 CI)
     constexpr U32 CELL_M = 256;
     constexpr size_t TILE_BYTES = 8 + N * N * 2;
     const char* URL = "https://wolf-grid.com/elev.php?rx=%u&ry=%u&z=%d&x=%u&y=%u";
@@ -544,7 +544,7 @@ void WolfFarTerrain::buildMesh(const PieceKey& key, Piece& p)
     const F64 step = size / (N - 1);
     const F64 gx0 = (F64)tx * CELL_M, gy0 = (F64)ty * CELL_M;
     const LLVector3d cam = gAgentCamera.getCameraPositionGlobal();
-    auto valid = [&](S32 i, S32 j) { return p.mHeights[j * N + i] != NO_DATA; };
+    auto valid = [&](S32 i, S32 j) { return p.mHeights[j * N + i] != ELEV_NO_DATA; };
     auto hgt = [&](S32 i, S32 j) { return (F32)p.mHeights[j * N + i] * 0.25f; };
 
     // vertices: every sample with data; then skirts down from the tile's edges (they hide the cracks between levels)
@@ -836,7 +836,7 @@ bool WolfFarTerrain::bakeGround(const PieceKey& key, Piece& p)
                                 p.mHeights[(j0 + 1) * N + i0 + 1] };
             for (S32 k = 0; k < 4; ++k)
             {
-                if (hs[k] != NO_DATA)
+                if (hs[k] != ELEV_NO_DATA)
                 {
                     hsum += wts[k] * (F32)hs[k] * 0.25f;
                     wsum += wts[k];

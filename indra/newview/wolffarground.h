@@ -16,7 +16,6 @@
 #ifndef WOLF_FAR_GROUND_H
 #define WOLF_FAR_GROUND_H
 
-#include <unordered_set>
 #include <vector>
 
 #include "llpointer.h"
@@ -33,13 +32,18 @@ class LLViewerTexture;
 // cell within reach of the camera that the world map knows a region on, but that no connected region
 // covers, is drawn as that region's map tile, flat at the water level - a top-down picture of the
 // land and what is built on it, which is what it looks like from the air. When the region connects,
-// its cells drop out and the real land takes over; cells with no region at all are the open sea
-// (LLWorld::updateWaterObjects leaves out the cells drawn here, so the two never overlap).
+// its cells drop out and the real land takes over. The sea is drawn under the tiles as everywhere else
+// (only their land shows: the water in a tile is cut away), and each tile lies a little above the sea,
+// more the further it is, so the two never fight for the same depth.
+// <WolfViewer 2026-10-08> Paul, standing at Wolf Territories Home: "why is there a big grey hole in the
+// water" - the sea used to be left out under tiles, and where a tile's water was cut away the paler
+// sky-drawn horizon sea showed through.
 //
 // Drawn in the deferred geometry pass with the alpha-cut diffuse program (LLDrawPoolGrass's), so the
 // tiles are lit, fogged and darkened at night like any other surface, and their water - cut away by
-// WolfMapGlobe::keyedTile - shows the sea behind (the sky's ocean, skyF.glsl).
-// Wolf Territories only; WolfViewerFarGroundMapTiles turns it off.
+// WolfMapGlobe::keyedTile - shows the sea beneath.
+// Only while flying (WolfAltitudeSky::agentFlying) at least 100 m up. Wolf Territories only;
+// WolfViewerFarGroundMapTiles turns it off.
 class WolfFarGround : public LLSingleton<WolfFarGround>
 {
     LLSINGLETON(WolfFarGround);
@@ -51,10 +55,6 @@ public:
 
     /** From LLPipeline::renderGeomDeferred, for the main camera only. */
     void renderDeferred();
-
-    /** True when the 256 m cell whose south-west corner is at global (x, y) metres is drawn as a
-     *  map tile now (so it needs no water). */
-    bool coversCell(U32 x, U32 y) const;
 
     /** A region connected or went: look again on the next frame. */
     void invalidate() { mNextRefresh = 0.0; }
@@ -75,12 +75,9 @@ private:
     void clear();
 
     std::vector<Tile> mTiles;
-    std::unordered_set<U64> mCovered;         // cells drawn (texture loaded), by handle
     LLPointer<LLVertexBuffer> mVB;
     U32 mVerts = 0;
     F64 mNextRefresh = 0.0;
-    F64 mLastWaterUpdate = 0.0;
-    bool mWaterDirty = false;
     LLVector3d mBuiltOrigin;                  // the agent region's origin the buffer was built in
     F32 mBuiltWaterZ = 0.f;
     S32 mLevel = 1;

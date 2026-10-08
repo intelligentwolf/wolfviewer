@@ -1486,8 +1486,7 @@ void LLWorld::updateWaterObjects()
             }
             // </WolfViewer>
             U64 region_handle = to_region_handle(x, y);
-            // <WolfViewer 2026-10-07> ...and not drawn as a map tile either (wolffarground.h).
-            if (!getRegionFromHandle(region_handle) && !(x >= 0 && y >= 0 && WolfFarGround::instance().coversCell((U32)x, (U32)y)))
+            if (!getRegionFromHandle(region_handle))
             {   // No region at that area, so make water
                 // <WolfViewer 2026-09-26> ...recorded as a run; the planes are made below.
                 if (!runs.empty() && runs.back().y1 == y)

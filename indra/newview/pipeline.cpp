@@ -2989,11 +2989,23 @@ void LLPipeline::updateGeom(F32 max_dtime)
     // for now, only LLVOVolume does this to throttle LOD changes
     LLVOVolume::preUpdateGeom();
 
-    // Iterate through all drawables on the priority build queue,
-    for (LLDrawable::drawable_list_t::iterator iter = mBuildQ1.begin();
-         iter != mBuildQ1.end();)
+    // <WolfViewer 2026-10-08> PACED FAR REBUILDS. Paul: with regions 4 km away in view "the water was
+    // jerky and bad". Every queued drawable was rebuilt in the frame it was queued, whatever that cost
+    // (max_dtime was never used here), so a burst of objects arriving from far away stalled frames.
+    // Now in-world prims and mesh farther than WOLF_NEAR_REBUILD_M from the camera are set aside and
+    // rebuilt after the rest, NEAREST FIRST, for at most WolfViewerFarRebuildMs a frame (at least one a
+    // frame, so the queue always drains); what is left waits for the next frame. Everything else -
+    // near prims, attachments (HUDs included), avatars, terrain, water, sky - is rebuilt at once as
+    // before. WolfViewerFarRebuildMs 0 = the old behaviour.
+    static LLCachedControl<F32> wolf_far_ms(gSavedSettings, "WolfViewerFarRebuildMs", 2.f);
+    static const F32 WOLF_NEAR_REBUILD_M = 256.f;
+    static const size_t WOLF_FAR_SORTED = 256;   // more than fit in one frame's budget
+    const bool wolf_pace = wolf_far_ms() > 0.f;
+    const LLVector3 wolf_cam = LLViewerCamera::getInstance()->getOrigin();
+    std::vector<std::pair<F32, LLDrawable::drawable_list_t::iterator>> wolf_far;
+    // the original loop body: rebuild one queued drawable, off the queue once built
+    auto wolf_rebuild = [this](LLDrawable::drawable_list_t::iterator curiter)
     {
-        LLDrawable::drawable_list_t::iterator curiter = iter++;
         LLDrawable* drawablep = *curiter;
         if (drawablep && !drawablep->isDead())
         {
@@ -3013,7 +3025,55 @@ void LLPipeline::updateGeom(F32 max_dtime)
         {
             mBuildQ1.erase(curiter);
         }
+    };
+    // </WolfViewer>
+    // Iterate through all drawables on the priority build queue,
+    for (LLDrawable::drawable_list_t::iterator iter = mBuildQ1.begin();
+         iter != mBuildQ1.end();)
+    {
+        LLDrawable::drawable_list_t::iterator curiter = iter++;
+        // <WolfViewer 2026-10-08> a far in-world prim waits for the far pass below
+        LLDrawable* drawablep = *curiter;
+        if (wolf_pace && drawablep && !drawablep->isDead())
+        {
+            LLVOVolume* vol = drawablep->getVOVolume();
+            if (vol && !vol->getRootEdit()->isAttachment())
+            {
+                const F32 d2 = dist_vec_squared(drawablep->getPositionAgent(), wolf_cam);
+                if (d2 > WOLF_NEAR_REBUILD_M * WOLF_NEAR_REBUILD_M)
+                {
+                    wolf_far.emplace_back(d2, curiter);
+                    continue;
+                }
+            }
+        }
+        wolf_rebuild(curiter);
+        // </WolfViewer>
     }
+
+    // <WolfViewer 2026-10-08> the far pass: nearest first, within the budget
+    if (!wolf_far.empty())
+    {
+        auto nearer = [](const std::pair<F32, LLDrawable::drawable_list_t::iterator>& a,
+                         const std::pair<F32, LLDrawable::drawable_list_t::iterator>& b) { return a.first < b.first; };
+        const size_t n = llmin(wolf_far.size(), WOLF_FAR_SORTED);
+        if (n < wolf_far.size())
+        {
+            std::nth_element(wolf_far.begin(), wolf_far.begin() + n, wolf_far.end(), nearer);
+        }
+        std::sort(wolf_far.begin(), wolf_far.begin() + n, nearer);
+        LLTimer far_timer;
+        const F32 far_budget = wolf_far_ms() * 0.001f;
+        for (size_t i = 0; i < n; ++i)
+        {
+            if (i > 0 && far_timer.getElapsedTimeF32() > far_budget)
+            {
+                break;
+            }
+            wolf_rebuild(wolf_far[i].second);
+        }
+    }
+    // </WolfViewer>
 
     updateMovedList(mMovedBridge);
 }

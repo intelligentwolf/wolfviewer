@@ -34,11 +34,17 @@
 #include "pipeline.h"
 #include "wolfgrid.h"
 #include "wolfmapglobe.h"
+#include "wolfaltitudesky.h"
 
 namespace
 {
     constexpr F64 REFRESH_SECS = 1.0;           // look again this often (the map and the regions change slowly)
-    constexpr F64 WATER_UPDATE_SECS = 2.0;      // at most this often re-cut the sea round the tiles
+    // A tile lies this far above the sea per metre from the camera (between the limits): enough for the
+    // depth buffer to keep the sea under it at that distance, too little to see.
+    constexpr F32 TILES_MIN_HEIGHT_M = 100.f;   // the camera this high over the sea, and flying
+    constexpr F32 LIFT_PER_M = 0.003f;
+    constexpr F32 LIFT_MIN_M = 0.3f;
+    constexpr F32 LIFT_MAX_M = 40.f;
     constexpr S32 MAX_TILES_ACROSS = 8;         // the tile level: no more than this many tiles across the reach
     constexpr U32 MAX_QUADS = 16383;            // U16 indices: 4 vertices a cell
     constexpr U32 CELL_M = 256;
@@ -64,19 +70,9 @@ WolfFarGround::~WolfFarGround()
 {
 }
 
-bool WolfFarGround::coversCell(U32 x, U32 y) const
-{
-    return mCovered.count(to_region_handle(x, y)) > 0;
-}
-
 void WolfFarGround::clear()
 {
-    if (!mCovered.empty())
-    {
-        mWaterDirty = true;
-    }
     mTiles.clear();
-    mCovered.clear();
     mVB = nullptr;
     mVerts = 0;
 }
@@ -115,19 +111,16 @@ void WolfFarGround::idle()
     {
         mNextRefresh = 0.0;
     }
-    // The sea leaves out the cells drawn here (LLWorld::updateWaterObjects): cut it again when they change.
-    if (mWaterDirty && now - mLastWaterUpdate >= WATER_UPDATE_SECS && agent_region)
-    {
-        mWaterDirty = false;
-        mLastWaterUpdate = now;
-        LLWorld::getInstance()->updateWaterObjects();
-    }
 }
 
 void WolfFarGround::refresh()
 {
     LLViewerRegion* agent_region = gAgent.getRegion();
-    if (!enabled() || !agent_region)
+    // <WolfViewer 2026-10-08> Only flying, and high over it. Paul: "really the tile should only appear when
+    // flying above it not when on the ground" - on the ground (and up to TILES_MIN_HEIGHT_M) the regions
+    // out of reach are sea, as they always were.
+    if (!enabled() || !agent_region || !WolfAltitudeSky::agentFlying()
+        || WolfAltitudeSky::cameraAltitude() < TILES_MIN_HEIGHT_M)
     {
         clear();
         return;
@@ -195,7 +188,6 @@ void WolfFarGround::refresh()
         }
     }
 
-    std::unordered_set<U64> covered;
     mTiles.clear();
     mTiles.reserve(tiles.size());
     for (auto& kv : tiles)
@@ -212,16 +204,7 @@ void WolfFarGround::refresh()
         {
             t.mDraw = WolfMapGlobe::instance().keyedTile(t.mTexture.get(), level, t.mGridX, t.mGridY);
         }
-        if (t.mDraw.notNull())
-        {
-            covered.insert(t.mCells.begin(), t.mCells.end());
-        }
         mTiles.push_back(std::move(t));
-    }
-    if (covered != mCovered)
-    {
-        mCovered.swap(covered);
-        mWaterDirty = true;
     }
     rebuildBuffer();
 }
@@ -272,6 +255,7 @@ void WolfFarGround::rebuildBuffer()
     }
     const F32 tile_m = (F32)(CELL_M << (mLevel - 1));
     const F32 z = mBuiltWaterZ;
+    const LLVector3d cam = gAgentCamera.getCameraPositionGlobal();
     U32 v = 0, i = 0;
     for (Tile& t : mTiles)
     {
@@ -293,10 +277,14 @@ void WolfFarGround::rebuildBuffer()
             // Map tiles are north up: v = 0 is the south edge, u = 0 the west (llworldmapview.cpp).
             const F32 u0 = (F32)((cx - tx) / tile_m), u1 = (F32)((cx + CELL_M - tx) / tile_m);
             const F32 v0 = (F32)((cy - ty) / tile_m), v1 = (F32)((cy + CELL_M - ty) / tile_m);
-            const LLVector3 sw = gAgent.getPosAgentFromGlobal(LLVector3d(cx, cy, z));
-            const LLVector3 se = gAgent.getPosAgentFromGlobal(LLVector3d(cx + CELL_M, cy, z));
-            const LLVector3 ne = gAgent.getPosAgentFromGlobal(LLVector3d(cx + CELL_M, cy + CELL_M, z));
-            const LLVector3 nw = gAgent.getPosAgentFromGlobal(LLVector3d(cx, cy + CELL_M, z));
+            // lifted over the sea by its distance (see LIFT_PER_M)
+            const F64 ddx = (F64)cx + CELL_M * 0.5 - cam.mdV[VX], ddy = (F64)cy + CELL_M * 0.5 - cam.mdV[VY];
+            const F32 dist = (F32)sqrt(ddx * ddx + ddy * ddy);
+            const F32 tz = z + llclamp(dist * LIFT_PER_M, LIFT_MIN_M, LIFT_MAX_M);
+            const LLVector3 sw = gAgent.getPosAgentFromGlobal(LLVector3d(cx, cy, tz));
+            const LLVector3 se = gAgent.getPosAgentFromGlobal(LLVector3d(cx + CELL_M, cy, tz));
+            const LLVector3 ne = gAgent.getPosAgentFromGlobal(LLVector3d(cx + CELL_M, cy + CELL_M, tz));
+            const LLVector3 nw = gAgent.getPosAgentFromGlobal(LLVector3d(cx, cy + CELL_M, tz));
             const LLVector3 corners[4] = { sw, se, ne, nw };
             const LLVector2 uvs[4] = { LLVector2(u0, v0), LLVector2(u1, v0), LLVector2(u1, v1), LLVector2(u0, v1) };
             for (S32 k = 0; k < 4; ++k)

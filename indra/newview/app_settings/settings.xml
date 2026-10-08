@@ -20298,6 +20298,17 @@ Change of this parameter will affect the layout of buttons in notification toast
 			<key>Value</key>
 			<integer>1</integer>
 		</map>
+		<key>WolfViewerFarRebuildMs</key>
+		<map>
+			<key>Comment</key>
+			<string>Prims and mesh more than 256 m from the camera are built nearest first, for at most this many milliseconds a frame, so a burst of distant objects cannot stall frames (near objects are always built at once). 0 = build everything at once.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>F32</string>
+			<key>Value</key>
+			<real>2.0</real>
+		</map>
 		<key>WolfViewerFarGroundMapTiles</key>
 		<map>
 			<key>Comment</key>

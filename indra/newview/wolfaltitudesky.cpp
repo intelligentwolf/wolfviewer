@@ -114,23 +114,8 @@ bool WolfAltitudeSky::cloudDeck(CloudDeck& out)
     {
         return false;
     }
-    // Only while flying (Paul: "cloud only appears if flying, someone might have a skybox"): the avatar
-    // flying, or seated on something moving (an aircraft) faster than a walk.
-    if (!isAgentAvatarValid())
-    {
-        return false;
-    }
-    bool flying = gAgent.getFlying();
-    if (!flying && gAgentAvatarp->isSitting())
-    {
-        LLViewerObject* seat = (LLViewerObject*)gAgentAvatarp->getParent();
-        while (seat && seat->getParent())
-        {
-            seat = (LLViewerObject*)seat->getParent();
-        }
-        flying = seat && seat->getVelocity().length() > 5.f;
-    }
-    if (!flying)
+    // Only while flying (Paul: "cloud only appears if flying, someone might have a skybox").
+    if (!agentFlying())
     {
         return false;
     }
@@ -159,4 +144,31 @@ bool WolfAltitudeSky::cloudDeck(CloudDeck& out)
     out.mDensity = lerp(0.004f, 0.02f, cover);
     out.mFade = smoothstep(150.f, 400.f, altitude());
     return out.mFade > 0.f;
+}
+
+bool WolfAltitudeSky::agentFlying()
+{
+    if (!isAgentAvatarValid())
+    {
+        return false;
+    }
+    if (gAgent.getFlying())
+    {
+        return true;
+    }
+    if (gAgentAvatarp->isSitting())
+    {
+        LLViewerObject* seat = (LLViewerObject*)gAgentAvatarp->getParent();
+        while (seat && seat->getParent())
+        {
+            seat = (LLViewerObject*)seat->getParent();
+        }
+        return seat && seat->getVelocity().length() > 5.f;
+    }
+    return false;
+}
+
+F32 WolfAltitudeSky::cameraAltitude()
+{
+    return altitude();
 }

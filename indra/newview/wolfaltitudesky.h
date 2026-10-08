@@ -64,6 +64,13 @@ namespace WolfAltitudeSky
     // fades in as the camera climbs from 150 to 400 m, so on the ground the sky is the region's own, and
     // it is only there while flying (or riding something that is), never for a skybox.
     // WolfViewerFlyClouds turns it off; Wolf Territories only. Heights are agent (region) metres.
+    // The avatar is flying, or riding something that is moving faster than a walk (an aircraft).
+    // Paul: clouds and map tiles are for flying, "someone might have a skybox".
+    bool agentFlying();
+
+    // The camera's height above the water (sea level), metres; never below 0.
+    F32 cameraAltitude();
+
     struct CloudDeck
     {
         F32 mCover = 0.f;       // 0..1

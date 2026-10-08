@@ -97,6 +97,8 @@ private:
     };
 
     void refresh();
+    void idleBody();
+    void jerkProbe(F32 idle_ms);   // <WolfViewer 2026-10-08/> flight smoothness log (WolfJerk), seated only
     void fetch(const PieceKey& key);
     void buildMesh(const PieceKey& key, Piece& p);
     bool bakeGround(const PieceKey& key, Piece& p);

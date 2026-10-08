@@ -142,6 +142,12 @@ F64Seconds  LLViewerObject::sMaxUpdateInterpolationTime(3.0);       // For motio
 F64Seconds  LLViewerObject::sPhaseOutUpdateInterpolationTime(2.0);  // For motion interpolation: after Y seconds with no updates, taper off motion prediction
 F64Seconds  LLViewerObject::sMaxRegionCrossingInterpolationTime(1.0);// For motion interpolation: don't interpolate over this time on region crossing
 
+// <WolfViewer 2026-10-08> OWN VEHICLE SNAP (processUpdateMessage / idleUpdate): the vehicle you sit on
+// and the server correction still easing in on it, in its region frame. Only one vehicle at a time.
+static LLUUID sWolfSnapObject;
+static LLVector3 sWolfSnapBlend;
+// </WolfViewer>
+
 std::map<std::string, U32> LLViewerObject::sObjectDataMap;
 
 // The maximum size of an object extra parameters binary (packed) block
@@ -2357,7 +2363,41 @@ U32 LLViewerObject::processUpdateMessage(LLMessageSystem *mesgsys,
         F32 mag_sqr = diff.magVecSquared() ;
         if(llfinite(mag_sqr))
         {
-            setPositionParent(new_pos_parent);
+            // <WolfViewer 2026-10-08> OWN VEHICLE SNAP: between server updates the prediction above
+            // carries the vehicle on in a straight line; after a gap in updates the server's position
+            // lands far behind (Paul's 17:13Z flight over Ireland, WolfJerk probe: 344 m back after a
+            // 3.29 s gap, 74 m after 0.78 s, 44-64 m after 0.5-0.7 s) and the plane, and the camera on
+            // it, jumped there in one frame: "the screen twiches back like its spinning fast and then
+            // back to the plane". For the root of the vehicle you sit on, take the server's position but
+            // keep drawing it where it was, and ease that difference out in idleUpdate.
+            // A difference past WOLF_SNAP_BLEND_MAX_M is a move, not a correction: that still snaps.
+            static const F32 WOLF_SNAP_BLEND_MIN_M = 0.5f;
+            static const F32 WOLF_SNAP_BLEND_MAX_M = 600.f;
+            if (!mParent && isAgentAvatarValid() && gAgentAvatarp->isSitting()
+                && gAgentAvatarp->getRoot() == this
+                && mag_sqr > WOLF_SNAP_BLEND_MIN_M * WOLF_SNAP_BLEND_MIN_M
+                && mag_sqr < WOLF_SNAP_BLEND_MAX_M * WOLF_SNAP_BLEND_MAX_M)
+            {
+                sWolfSnapObject = mID;
+                sWolfSnapBlend = test_pos_parent - new_pos_parent;
+                setPositionParent(test_pos_parent);
+                if (mag_sqr > 25.f)
+                {
+                    LL_INFOS("WolfSnap") << "own vehicle: server put it " << diff.length() << " m from the prediction after "
+                                         << (F32)(LLFrameTimer::getElapsedSeconds() - mLastMessageUpdateSecs.value())
+                                         << " s, easing in; vel " << getVelocity() << " accel " << getAcceleration() << LL_ENDL;
+                }
+            }
+            else
+            {
+                if (sWolfSnapObject == mID)
+                {
+                    sWolfSnapObject.setNull();
+                    sWolfSnapBlend.clear();
+                }
+                setPositionParent(new_pos_parent);
+            }
+            // </WolfViewer>
         }
         else
         {
@@ -2558,6 +2598,23 @@ void LLViewerObject::idleUpdate(LLAgent &agent, const F64 &frame_time)
                 interpolateLinearMotion(frame_time, dt);
             }
         }
+
+        // <WolfViewer 2026-10-08> OWN VEHICLE SNAP (processUpdateMessage): ease the server's correction
+        // in over about half a second (time constant WOLF_SNAP_EASE_S) instead of one frame
+        if (sWolfSnapObject == mID && !sWolfSnapBlend.isExactlyZero())
+        {
+            static const F32 WOLF_SNAP_EASE_S = 0.5f;
+            const F32 frame_dt = llclamp((F32)gFrameDTClamped, 0.f, 0.25f);
+            LLVector3 remove = sWolfSnapBlend * (1.f - expf(-frame_dt / WOLF_SNAP_EASE_S));
+            if ((sWolfSnapBlend - remove).magVecSquared() < 0.01f)
+            {
+                remove = sWolfSnapBlend;
+            }
+            sWolfSnapBlend -= remove;
+            setPositionParent(getPosition() - remove);
+            setChanged(MOVED | SILHOUETTE);
+        }
+        // </WolfViewer>
 
         updateDrawable(false);
     }

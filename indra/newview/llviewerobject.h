@@ -1057,6 +1057,7 @@ public:
     void setLastUpdateType(EObjectUpdateType last_update_type);
     bool getLastUpdateCached() const;
     void setLastUpdateCached(bool last_update_cached);
+    F64Seconds getLastMessageUpdateSecs() const { return mLastMessageUpdateSecs; }   // <WolfViewer 2026-10-08/> WolfFarTerrain jerk probe
 
     virtual void updateRiggingInfo() {}
 

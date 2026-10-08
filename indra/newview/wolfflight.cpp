@@ -16,6 +16,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "wolfflight.h"
+#include "wolfaltitudesky.h"
 
 #include <algorithm>
 #include <queue>
@@ -708,6 +709,60 @@ F32 WolfFlight::obstacleNeed(F32 track_deg, F32 speed, F32 z) const
     return need;
 }
 
+// <WolfViewer 2026-10-08> OUT OF THE CLOUD. Paul: "when i'm in cloud i cant see anything", then "make the autopilot fly
+// above or below normally below but if its not safe fly above". When the height the plane is sent to lies in the cloud
+// deck (WolfAltitudeSky::cloudDeck: base 350..900 m over the water, 900..2600 m thick), cruise CLOUD_CLEAR_M under its
+// base - if that still clears the land ahead (terrainFloorZ, the next 15 s, plus CLOUD_MIN_GAP) and no climb over land
+// is due in the next minute - otherwise CLOUD_CLEAR_M over its top. Back under only with CLOUD_BACK_GAP to spare, so it
+// does not swap sides on every hill. A plane on its way down to land (VNAV past top of descent, autoland) goes through.
+namespace
+{
+    const F32 CLOUD_CLEAR_M = 100.f;
+    const F32 CLOUD_MIN_GAP = 100.f;
+    const F32 CLOUD_BACK_GAP = 250.f;
+}
+
+F32 WolfFlight::clearOfCloud(F32 target_z)
+{
+    S32 side = 0;
+    WolfAltitudeSky::CloudDeck deck;
+    const bool descending = mVertical == VERT_VNAV && mDest.mValid && mDest.mHasZ
+                            && target_z == (F32)mDest.mGlobal.mdV[VZ];
+    WolfAltitudeSky::cloudDeck(deck);   // the deck's numbers are filled in even while its fog is faded out low down
+    if (craft() != CRAFT_HELI && mAP && !descending && mLand < LAND_APPROACH && deck.mTop > deck.mBase
+        && target_z > deck.mBase - CLOUD_CLEAR_M && target_z < deck.mTop + CLOUD_CLEAR_M)
+    {
+        const F32 under_z = deck.mBase - CLOUD_CLEAR_M;
+        const F32 gap = (mCloudSide > 0) ? CLOUD_BACK_GAP : CLOUD_MIN_GAP;
+        const bool under_safe = under_z >= terrainFloorZ() + gap && mTerrainNeedSmooth <= 0.f;
+        side = under_safe ? -1 : 1;
+    }
+    if (side != mCloudSide)
+    {
+        if (mCloudSide != 0)
+        {
+            clearCas(mCloudSide < 0 ? "UNDER CLOUD" : "OVER CLOUD");
+        }
+        if (side != 0)
+        {
+            postCas(side < 0 ? "UNDER CLOUD" : "OVER CLOUD", CAS_MEMO);
+            LL_INFOS("WolfFlight") << "cloud deck " << deck.mBase << ".." << deck.mTop << ": flying "
+                                   << (side < 0 ? "under" : "over") << " it, not at " << target_z << LL_ENDL;
+        }
+        mCloudSide = side;
+    }
+    if (side < 0)
+    {
+        return deck.mBase - CLOUD_CLEAR_M;
+    }
+    if (side > 0)
+    {
+        return deck.mTop + CLOUD_CLEAR_M;
+    }
+    return target_z;
+}
+// </WolfViewer>
+
 F32 WolfFlight::targetAltitudeZ() const
 {
     const F32 sel_z = mData.mWaterZ + mSelAltFt / FT;
@@ -1095,10 +1150,21 @@ namespace
     const F32 TO_MIN_CRUISE_FT = 500.f;     // above the runway: a lower cruise is raised to this
 }
 
+namespace
+{
+    const F32 SPEED_LOW_MIN_AGL = 150.f;   // <WolfViewer 2026-10-08/> metres: speed protection dives only above this
+}
+
 void WolfFlight::takeoffStart()
 {
     const F64 now = nowSeconds();
     mTakeoff = TO_ROLL;
+    // <WolfViewer 2026-10-08/> Paul: "assume the command to start a plane is start" - the engine command first, so a plane
+    // sat on with its engine off rolls instead of being rejected after TO_NO_ROLL_SECS (nothing said when not set)
+    if (!gSavedSettings.getString("WolfFlightEngineCommand").empty())
+    {
+        sendEngineCommand();
+    }
     mToHeading = mData.mHeading;
     mToGroundZ = (F32)mData.mPosGlobal.mdV[VZ];
     mToPhaseStart = now;
@@ -1356,7 +1422,22 @@ void WolfFlight::guidance(F32 dt)
     case VERT_ALT:
     case VERT_VNAV:
     case VERT_HOVER:
-        mWantVS = llclamp((targetAltitudeZ() - z) * 0.15f, -max_vs, max_vs);
+        mWantVS = llclamp(((mVertical == VERT_HOVER ? targetAltitudeZ() : clearOfCloud(targetAltitudeZ())) - z) * 0.15f,
+                          -max_vs, max_vs);
+        // <WolfViewer 2026-10-08> Paul: "the plane is still jerking". Past top of descent the target is the destination's
+        // height, and 0.15 x (dest - z) asked for the full -8 m/s at once, against the terrain look-ahead's climb: 16:43Z
+        // the ask flipped -8 / +8 every few seconds, pitch 3 / 16, until SPEED LOW. A plane descends ALONG the glide line
+        // instead: the height still to lose over the time left to the destination - gentle, and it never dives early.
+        if (mVertical == VERT_VNAV && craft() != CRAFT_HELI && mDest.mValid && mDest.mHasZ
+            && targetAltitudeZ() == (F32)mDest.mGlobal.mdV[VZ])
+        {
+            const F32 to_lose = z - (F32)mDest.mGlobal.mdV[VZ];
+            const F32 secs_left = destDistance() / llmax(mData.mGS, 15.f);
+            if (to_lose > 0.f && secs_left > 1.f)
+            {
+                mWantVS = llclamp(-to_lose / secs_left, -max_vs, 0.f);
+            }
+        }
         break;
     default:
         mWantVS = 0.f;
@@ -1406,9 +1487,15 @@ void WolfFlight::guidance(F32 dt)
     // (62 -> 3 m/s, then nose down at -60). Below 60% of the selected speed a plane trades height for speed
     // instead: SPEED LOW, the nose-up trim taken off at once, and a descent that grows with the shortfall,
     // until it is back above 75%. Not on the take-off (its own speeds) or once on final (autoland's).
+    // <WolfViewer 2026-10-08> Measured against what the plane really flies, not only the selected speed: Paul set SPD far
+    // past this plane's best (279 m/s, it tops out near 180), take-off handed over at 131 m/s - under 60% of 279 - and
+    // SPEED LOW dived it at 124 m into the ground. The reference is the lower of the selected speed and the fastest flown
+    // lately, which falls back 0.5 m/s a second: a plane slowing towards a stall (62 -> 3 m/s in seconds) still trips it.
+    mSpeedRef = llmax(mData.mAirspeed, mSpeedRef - 0.5f * dt);
     if (mAP && !mSail && !heli && !takeoff && !(landing && mLand >= LAND_FINAL) && mWantSpeed > 1.f)
     {
-        const F32 low = mWantSpeed * 0.6f, recovered = mWantSpeed * 0.75f;
+        const F32 ref = llmin(mWantSpeed, mSpeedRef);
+        const F32 low = ref * 0.6f, recovered = ref * 0.75f;
         if (!mSpeedLow && mData.mAirspeed < low)
         {
             mSpeedLow = true;
@@ -1424,8 +1511,17 @@ void WolfFlight::guidance(F32 dt)
         }
         if (mSpeedLow)
         {
-            mWantVS = llmin(mWantVS, -llclamp((recovered - mData.mAirspeed) * 0.2f, 1.f, 8.f));
+            // the nose-up trim always goes; the dive only with room under it - never against the land climb above, and
+            // never below SPEED_LOW_MIN_AGL (it hit the ground from 124 m)
             mPitchTrim = llmin(mPitchTrim, 0.f);
+            if (mTerrainNeedSmooth <= 0.f && mData.mAGL > SPEED_LOW_MIN_AGL)
+            {
+                mWantVS = llmin(mWantVS, -llclamp((recovered - mData.mAirspeed) * 0.2f, 1.f, 8.f));
+            }
+            else
+            {
+                mWantVS = llmax(mWantVS, 0.f);   // level, the trim off: speed comes back without losing height
+            }
         }
     }
     else if (mSpeedLow)
@@ -1434,12 +1530,37 @@ void WolfFlight::guidance(F32 dt)
         clearCas("SPEED LOW");
     }
     // </WolfViewer>
+    // <WolfViewer 2026-10-08> Paul, SPD taken "right up" to 170 m/s: "its going crazy" - pitch 2 to 16 degrees every
+    // 3 s, vs -20 to +17. A degree of pitch moves the vertical speed by airspeed x sin 1 deg (0.0175): 1 m/s at the
+    // 60 m/s these gains were tuned at, 3 m/s at 170, so the same gains overshot three times as hard. Both scale
+    // down above 60 m/s (unchanged below it, the slow planes they were tuned on).
+    const F32 pitch_scale = pitchSpeedScale();
+    // <WolfViewer 2026-10-08> The vertical speed asked for never jumps: it may rise quickly (land or an object ahead
+    // to climb over, 2.5 m/s each second) but falls only slowly (0.8 m/s each second), so the end of a terrain climb
+    // or a mode change eases the nose down instead of snapping from +8 to -8 (Paul's jerking, 16:43Z). Not on the take-off
+    // roll or autoland's final, which set their own exact rates.
+    if (mAP && !on_runway && !(landing && mLand >= LAND_FINAL))
+    {
+        if (!mWantVSSlewInit)
+        {
+            mWantVSSlew = mVSf;
+            mWantVSSlewInit = true;
+        }
+        mWantVSSlew = llclamp(mWantVS, mWantVSSlew - 0.8f * dt, mWantVSSlew + 2.5f * dt);
+        mWantVS = mWantVSSlew;
+    }
+    else
+    {
+        mWantVSSlew = mWantVS;
+        mWantVSSlewInit = mAP;
+    }
     if (mAP)
     {
         // The integrator: the pitch that gives the vertical speed asked for.
-        mPitchTrim = llclamp(mPitchTrim + (mWantVS - mVSf) * 0.25f * dt, -10.f, 12.f);
+        mPitchTrim = llclamp(mPitchTrim + (mWantVS - mVSf) * 0.25f * pitch_scale * dt, -10.f, 12.f);
     }
-    mFDPitch = ema(mFDPitch, llclamp(mPitchTrim + (mWantVS - mVSf) * 2.0f, -12.f, 18.f), dt, 1.5f);   // steadier: 1.5 s
+    mFDPitch = ema(mFDPitch, llclamp(mPitchTrim + (mWantVS - mVSf) * 2.0f * pitch_scale, -12.f, 18.f), dt, 1.5f);   // steadier: 1.5 s
+    // </WolfViewer>
     // <WolfViewer 2026-10-07> Take-off: no pitch keys on the roll or a rejected take-off (the director follows the nose, so
     // drive() holds none), then the rotation's nose-up, with the trim kept at the nose until it flies.
     if ((mTakeoff == TO_ROLL || mTakeoff == TO_REJECT) && mAP)
@@ -1540,9 +1661,15 @@ void WolfFlight::drive(F32 dt)
         // up, so every pulse rocked it (Paul: "still rocking like mad", roll -8 to +32). A pilot
         // holds the key: down when more than 6 degrees off, up again within 1.5 allowing for
         // the turn already going on (half a second of it), so it rolls out on the heading.
-        const F32 lead = err - mData.mTurnRate * 0.5f;
-        if (mTurnHeld == 0 && fabsf(err) > 6.f) mTurnHeld = err > 0.f ? 1 : -1;
-        else if (mTurnHeld != 0 && (lead * mTurnHeld < 1.5f)) mTurnHeld = 0;
+        // <WolfViewer 2026-10-08> Paul: "its still jerking". The turn after take-off at 110 m/s: roll -3 -24 -36 -37 -16 -12
+        // with the director flipping -24 / +2 / -3 / -10 / +11 (17:13Z). The plane's script keeps the bank on for a second
+        // or more after the key comes up, so half a second of lead let it sail past the heading and swing back. Now the
+        // key comes up allowing 1.5 s of the turn still to come, and also when the bank passes 30 degrees (it went to 37);
+        // it goes down again only below 20, a wide gap so the wings are not rocked by short presses.
+        const F32 lead = err - mData.mTurnRate * 1.5f;
+        const S32 dir = err > 0.f ? 1 : -1;
+        if (mTurnHeld == 0 && fabsf(err) > 6.f && mData.mRoll * dir < 20.f) mTurnHeld = dir;
+        else if (mTurnHeld != 0 && (lead * mTurnHeld < 1.5f || mData.mRoll * mTurnHeld > 30.f)) mTurnHeld = 0;
         mOutBank = (F32)mTurnHeld;   // + = right
     }
     // Softer and better damped (Paul: "still wobbling"): the pitch keys swung full down / full up
@@ -1551,10 +1678,12 @@ void WolfFlight::drive(F32 dt)
     // scripts pitch fast while a key is held; the keys are left alone within 2.5 degrees, and the
     // correction is gentler and more damped.
     {
-        // held the same way: nose up / down when more than 4 degrees off, released within 1
+        // held the same way: nose up / down when more than 4 degrees off, released within 1. <WolfViewer 2026-10-08/>
+        // Fast, 4 degrees is a big vertical speed (12 m/s at 170 m/s): the dead band narrows with the speed, to 1.5
         const F32 perr = mFDPitch - mData.mPitch;
         const F32 plead = perr - mData.mPitchRate * 0.4f;
-        if (mPitchHeld == 0 && fabsf(perr) > 4.f) mPitchHeld = perr > 0.f ? 1 : -1;
+        const F32 press_deg = llmax(4.f * pitchSpeedScale(), 1.5f);
+        if (mPitchHeld == 0 && fabsf(perr) > press_deg) mPitchHeld = perr > 0.f ? 1 : -1;
         else if (mPitchHeld != 0 && (plead * mPitchHeld < 1.f)) mPitchHeld = 0;
         mOutPitch = (F32)mPitchHeld;   // + = nose up
     }
@@ -1566,6 +1695,12 @@ void WolfFlight::drive(F32 dt)
 }
 
 // AUTOTHROTTLE: the selected speed through the throttle keys (a plane, or a boat's motor).
+// <WolfViewer 2026-10-08/> 1 up to 60 m/s (the speed the pitch gains were tuned at), then 60 / airspeed, at least 0.25
+F32 WolfFlight::pitchSpeedScale() const
+{
+    return llclamp(60.f / llmax(mData.mAirspeed, 1.f), 0.25f, 1.f);
+}
+
 void WolfFlight::autothrottle(F32 dt)
 {
     const bool thr_inv = WolfFlight::invert(WolfFlight::keySetting("ThrottleInvert"));
@@ -1815,6 +1950,7 @@ void WolfFlight::engageAP()
         postCas("AP: NOT SEATED", CAS_CAUTION);
         return;
     }
+    mWantVSSlewInit = false;   // <WolfViewer 2026-10-08/> the climb-rate limiter starts from what the plane is doing
     // <WolfViewer 2026-10-07> A plane on the ground takes off (takeoffStart) instead of refusing.
     const bool take_off = !mSail && craft() == CRAFT_PLANE && mData.mAGL < 10.f;
     clearCas("AP: NOT SEATED");

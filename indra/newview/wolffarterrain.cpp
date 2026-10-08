@@ -20,6 +20,7 @@
 #include <algorithm>
 
 #include "llagent.h"
+#include "llvoavatarself.h"
 #include "llagentcamera.h"
 #include "llcorehttputil.h"
 #include "llcoros.h"
@@ -110,6 +111,105 @@ void WolfFarTerrain::clearAll()
 }
 
 void WolfFarTerrain::idle()
+{
+    LLTimer timer;
+    idleBody();
+    jerkProbe(timer.getElapsedTimeF32() * 1000.f);
+}
+
+// <WolfViewer 2026-10-08> flight smoothness log (Paul: "it keeps like jerking back", flying at 166 m/s). While seated,
+// every 5 s: how the seat really moved frame to frame against where its velocity says it should be, the gaps in the
+// sim's updates for it, and the worst frame spent in this class. It found the own-vehicle snap that
+// LLViewerObject::processUpdateMessage now eases in, and is how a regression of that shows up in a log.
+void WolfFarTerrain::jerkProbe(F32 idle_ms)
+{
+    static LLVector3d last_pos;
+    static bool have_last = false;
+    static S32 frames = 0, backwards = 0, big_dev = 0;
+    static F32 max_dev = 0.f, max_back = 0.f, max_idle_ms = 0.f, max_frame_ms = 0.f, sum_idle_ms = 0.f;
+    static F64 next_log = 0.0;
+    if (!isAgentAvatarValid() || !gAgentAvatarp->isSitting())
+    {
+        have_last = false;
+        return;
+    }
+    LLViewerObject* root = (LLViewerObject*)gAgentAvatarp->getParent();
+    while (root && root->getParent())
+    {
+        root = (LLViewerObject*)root->getParent();
+    }
+    if (!root)
+    {
+        return;
+    }
+    const LLVector3d pos = root->getPositionGlobal();
+    const LLVector3 vel = root->getVelocity();
+    const F32 dt = gFrameIntervalSeconds;
+    // the sim's updates for it: how many, how far apart, and the speed they show against the speed they report
+    static F64 last_msg = 0.0, last_msg_at_pos_time = 0.0;
+    static LLVector3d last_msg_pos;
+    static S32 msgs = 0;
+    static F32 max_gap = 0.f, sum_reported = 0.f, sum_actual = 0.f;
+    const F64 msg = root->getLastMessageUpdateSecs().value();
+    if (msg != last_msg)
+    {
+        if (last_msg > 0.0 && msg > last_msg)
+        {
+            const F32 gap = (F32)(msg - last_msg);
+            max_gap = llmax(max_gap, gap);
+            const F32 actual = (F32)(pos - last_msg_pos).magVec() / gap;
+            sum_reported += vel.length();
+            sum_actual += actual;
+            ++msgs;
+        }
+        last_msg = msg;
+        last_msg_pos = pos;
+        last_msg_at_pos_time = msg;
+    }
+    if (have_last && dt > 0.f)
+    {
+        const LLVector3 moved((F32)(pos.mdV[VX] - last_pos.mdV[VX]), (F32)(pos.mdV[VY] - last_pos.mdV[VY]),
+                              (F32)(pos.mdV[VZ] - last_pos.mdV[VZ]));
+        const LLVector3 expected = vel * dt;
+        const F32 dev = (moved - expected).length();
+        const F32 speed = vel.length();
+        const F32 along = speed > 1.f ? (moved * vel) / speed : 0.f;
+        ++frames;
+        max_dev = llmax(max_dev, dev);
+        if (dev > 2.f) ++big_dev;
+        if (along < -0.5f)
+        {
+            ++backwards;
+            max_back = llmax(max_back, -along);
+        }
+        max_frame_ms = llmax(max_frame_ms, dt * 1000.f);
+    }
+    last_pos = pos;
+    have_last = true;
+    max_idle_ms = llmax(max_idle_ms, idle_ms);
+    sum_idle_ms += idle_ms;
+    const F64 now = LLFrameTimer::getElapsedSeconds();
+    if (now >= next_log)
+    {
+        if (frames > 0)
+        {
+            LL_INFOS("WolfJerk") << "speed " << vel.length() << " frames " << frames << " backwards " << backwards
+                                 << " (max " << max_back << " m) off-path >2m " << big_dev << " (max " << max_dev
+                                 << " m) worst frame " << max_frame_ms << " ms | far terrain worst " << max_idle_ms
+                                 << " ms avg " << sum_idle_ms / frames << " ms | sim updates " << msgs << " max gap "
+                                 << max_gap << " s speed reported " << (msgs ? sum_reported / msgs : 0.f) << " flown "
+                                 << (msgs ? sum_actual / msgs : 0.f) << " dilation "
+                                 << (root->getRegion() ? root->getRegion()->getTimeDilation() : 0.f) << LL_ENDL;
+            msgs = 0;
+            max_gap = sum_reported = sum_actual = 0.f;
+        }
+        next_log = now + 5.0;
+        frames = backwards = big_dev = 0;
+        max_dev = max_back = max_idle_ms = max_frame_ms = sum_idle_ms = 0.f;
+    }
+}
+
+void WolfFarTerrain::idleBody()
 {
     const F64 now = LLFrameTimer::getElapsedSeconds();
     if (now >= mNextRefresh)

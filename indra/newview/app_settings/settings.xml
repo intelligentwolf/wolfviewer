@@ -20081,13 +20081,13 @@ Change of this parameter will affect the layout of buttons in notification toast
 		<key>WolfFlightEngineCommand</key>
 		<map>
 			<key>Comment</key>
-			<string>Flight Mode: what the ENG button says to the aircraft (chat), e.g. start. Empty = not set.</string>
+			<string>Flight Mode: what the ENG button says to the aircraft (chat), and what the auto take-off says before the roll. Paul 2026-10-08: assume start. Empty = not set.</string>
 			<key>Persist</key>
 			<integer>1</integer>
 			<key>Type</key>
 			<string>String</string>
 			<key>Value</key>
-			<string></string>
+			<string>start</string>
 		</map>
 		<key>WolfFlightEngineChannel</key>
 		<map>

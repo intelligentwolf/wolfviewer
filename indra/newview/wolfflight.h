@@ -253,6 +253,7 @@ private:
     void drive(F32 dt);
     void manualDrive();
     void autothrottle(F32 dt);
+    F32 pitchSpeedScale() const;   // <WolfViewer 2026-10-08/> pitch gains eased above 60 m/s
     void groundProximity();
     void syncModeSettings();
     void refuseOffGrid(bool sail);
@@ -346,6 +347,7 @@ private:
     void tapPair(EPair pair, S32 dir);
     F32 terrainFloorZ() const;
     F32 targetAltitudeZ() const;
+    F32 clearOfCloud(F32 target_z);   // <WolfViewer 2026-10-08/> a cruise height under (or over) the cloud deck
     void applyToolbar(bool flight_on);
 
     bool mActive = false;
@@ -371,6 +373,8 @@ private:
     bool mFDValid = false;
     F32 mFDPitch = 0.f, mFDRoll = 0.f;
     F32 mWantVS = 0.f;             // m/s the vertical guidance asks for
+    F32 mWantVSSlew = 0.f;         // <WolfViewer 2026-10-08/> mWantVS rate-limited (no jumps between climb and dive)
+    bool mWantVSSlewInit = false;
     F32 mVSf = 0.f;                // the vertical speed, filtered
     F32 mWantTrack = 0.f;          // degrees the lateral guidance asks for
     F32 mWantSpeed = 0.f;          // m/s
@@ -382,6 +386,8 @@ private:
     F32 mThrottleStreakSpeed = 0.f;
     bool mArrived = false;
     bool mSpeedLow = false;        // <WolfViewer 2026-10-08/> speed protection active (guidance)
+    S32 mCloudSide = 0;            // <WolfViewer 2026-10-08/> -1 under the cloud deck, +1 over it, 0 clear of it
+    F32 mSpeedRef = 0.f;           // <WolfViewer 2026-10-08/> the fastest flown lately (falls back 0.5 m/s a second)
 
     // AUTO LEARN: does holding "nose up" raise the nose, does "bank right" turn right?
     F32 mLearnPitchAcc = 0.f, mLearnPitchWeight = 0.f;

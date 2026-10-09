@@ -210,6 +210,10 @@ public:
 
 
     void OnConnectionEstablished(const std::string& channelID, const LLUUID& regionID);
+    // <WolfViewer 2026-10-09> A connection finished its join (VOICE_STATE_SESSION_UP): the
+    // moment a make-before-break switch may let go of the session it is replacing.
+    void OnConnectionUp(const std::string& channelID, const LLUUID& regionID);
+    // </WolfViewer>
     void OnConnectionShutDown(const std::string &channelID, const LLUUID &regionID);
     void OnConnectionFailure(const std::string &channelID,
         const LLUUID &regionID,
@@ -307,6 +311,13 @@ public:
 
         bool isEmpty() { return mWebRTCConnections.empty(); }
 
+        // <WolfViewer 2026-10-09> wolf_move hands a live connection from one session to another.
+        void wolfAdoptConnection(const connectionPtr_t& connection);
+        void wolfDetachConnection(const connectionPtr_t& connection);
+        connectionPtr_t wolfMovableConnection(const LLUUID& agent_region);
+        bool wolfOwnsConnection(const connectionPtr_t& connection);
+        // </WolfViewer>
+
         virtual bool isSpatial() = 0;
         virtual bool isEstate()  = 0;
         virtual bool isCallbackPossible() = 0;
@@ -347,7 +358,7 @@ public:
     class estateSessionState : public sessionState
     {
       public:
-        estateSessionState();
+        estateSessionState(bool create_connection = true); // <WolfViewer 2026-10-09/> false: wolf_move adopts one
         bool processConnectionStates() override;
 
         bool isSpatial() override { return true; }
@@ -356,12 +367,16 @@ public:
 
       private:
         bool isRegionWebRTCEnabled(const LLUUID& regionID);
+        // <WolfViewer 2026-10-09> the agent's region the last time we had a connection to it:
+        // after a teleport, the connection to this region is the one to wolf_move.
+        LLUUID mWolfLastAgentRegion;
+        // </WolfViewer>
     };
 
     class parcelSessionState : public sessionState
     {
       public:
-        parcelSessionState(const std::string& channelID, S32 parcel_local_id);
+        parcelSessionState(const std::string& channelID, S32 parcel_local_id, bool create_connection = true); // <WolfViewer 2026-10-09/>
 
         bool isSpatial() override { return true; }
         bool isEstate() override { return false; }
@@ -469,6 +484,33 @@ private:
     sessionStatePtr_t mSession;    // Session state for the current session
 
     sessionStatePtr_t mNextSession;    // Session state for the session we're trying to join
+
+    // <WolfViewer 2026-10-09> Voice that stays connected and moves you.
+    // 1) wolf_move (wolfstorm/wolfvoice/VOICE_MOVE.md): when the primary spatial connection would
+    //    be rebuilt (parcel-channel change, teleport) the existing PeerConnection is re-keyed by
+    //    wolfvoice into the new room through the new region's ProvisionVoiceAccountRequest cap.
+    // 2) If the move is refused: make-before-break. The old spatial session stays up while
+    //    mNextSession negotiates, is parked in mPreviousSession once the new one is established,
+    //    and is shut down when the new one reaches VOICE_STATE_SESSION_UP (or the cap runs out).
+    sessionStatePtr_t mPreviousSession;
+    connectionPtr_t   mWolfMovingConnection; // a wolf_move in flight (one at a time)
+    LLFrameTimer      mWolfSwitchTimer;      // running while an old session is kept for a switch
+    LLFrameTimer      mWolfParcelHoldTimer;  // running while the agent parcel is still another region's
+    bool wolfSwitchSpatialSession(const std::string& channelID, S32 parcel_local_id,
+                                  const std::function<sessionStatePtr_t(bool)>& make_session);
+    void wolfOnParcelMoveResult(const connectionPtr_t& connection, bool moved, const std::string& channelID,
+                                S32 parcel_local_id, const std::function<sessionStatePtr_t(bool)>& make_session);
+    void wolfCancelStaleSwitch(bool want_estate, const std::string& channelID);
+    void wolfRetirePreviousSession();
+    void wolfCheckSwitchTimeout();
+    bool wolfHoldForParcelData(LLViewerRegion* regionp, LLParcel* parcel);
+    void wolfNotifySessionJoined();
+  public:
+    bool wolfMoveAllowed() const;
+    // Estate (neighbour) path: a teleport moves the primary connection instead of rebuilding it.
+    bool wolfStartEstateMove(const connectionPtr_t& connection, const LLUUID& region_id);
+  private:
+    // </WolfViewer>
 
     llwebrtc::LLWebRTCDeviceInterface *mWebRTCDeviceInterface;
 
@@ -694,7 +736,12 @@ class LLVoiceWebRTCConnection :
 
     LLUUID mRegionID;
     bool   mPrimary;
-    LLUUID mViewerSession;
+    // <WolfViewer 2026-10-09> Was LLUUID. wolfvoice hands out "wv-<uuid>" (39 chars), which
+    // LLUUID::set() rejects (lluuid.cpp:215-237) and nulls, so every ICE trickle and logout went
+    // up with the NULL uuid and wolfvoice never recognised them. Keep the server's value as the
+    // LLSD it arrived as and echo it back unchanged (a uuid stays a uuid for Second Life).
+    LLSD   mViewerSession;
+    // </WolfViewer>
     std::string mChannelID;
 
     std::string mChannelSDP;
@@ -718,6 +765,32 @@ class LLVoiceWebRTCConnection :
     llwebrtc::LLWebRTCPeerConnectionInterface *mWebRTCPeerConnectionInterface;
     llwebrtc::LLWebRTCAudioInterface *mWebRTCAudioInterface;
     llwebrtc::LLWebRTCDataInterface  *mWebRTCDataInterface;
+
+    // <WolfViewer 2026-10-09> Short receive-side fades instead of hard cuts. llwebrtc has no
+    // per-connection fade; the per-connection gain hook it does have is
+    // LLWebRTCAudioInterface::setReceiveVolume (llwebrtc.cpp LLWebRTCPeerConnectionImpl::
+    // setReceiveVolume -> remote track source SetVolume), so the ramp is stepped from the main
+    // loop. The receive volume applied is always mSpeakerVolume * mWolfFadeGain.
+    F32  mWolfFadeGain       = 0.f;   // 0 = silent, 1 = full mSpeakerVolume
+    U32  mWolfFadeGeneration = 0;     // bumps on every new fade; an older ramp stops itself
+    bool mWolfFading         = false; // a ramp is in progress
+    bool mWolfFadingOut      = false; // the disconnect fade-out has been started
+    void wolfApplyReceiveVolume();
+    void wolfFadeReceiveTo(F32 target);
+
+    // wolf_move state
+    bool mWolfMoving      = false;  // a wolf_move request is in flight for this connection
+    bool mWolfMoveRefused = false;  // the server refused a move; this connection is rebuilt the stock way
+    LLFrameTimer mWolfOrphanTimer;  // estate path: running while this primary waits to be moved
+
+  public:
+    bool wolfIsUp() { return getVoiceConnectionState() == VOICE_STATE_SESSION_UP && !mShutDown; }
+    bool wolfIsMoving() const { return mWolfMoving; }
+    bool wolfMoveRefused() const { return mWolfMoveRefused; }
+    LLFrameTimer& wolfOrphanTimer() { return mWolfOrphanTimer; }
+    // Called after a successful wolf_move: we are primary in the new room - re-send the join.
+    void wolfRejoinAfterMove();
+    // </WolfViewer>
 };
 
 
@@ -733,6 +806,13 @@ class LLVoiceWebRTCSpatialConnection :
 
     bool isSpatial() override { return true; }
 
+    // <WolfViewer 2026-10-09> Ask wolfvoice, through region_id's ProvisionVoiceAccountRequest
+    // cap, to re-key this live session into (region_id, parcel_local_id). On success the
+    // connection's region, parcel and channel become the new ones. done(moved) runs on the
+    // main coroutine either way.
+    void wolfRequestMove(const LLUUID& region_id, S32 parcel_local_id, const std::string& channel_id,
+                         std::function<void(bool)> done);
+    // </WolfViewer>
 
 protected:
 

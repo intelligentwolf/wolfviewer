@@ -28,6 +28,7 @@
 #include "lltooltip.h"
 
 #include "llmediactrl.h"
+#include "lluri.h"   // [WOLF GAME 2026-10-09/]
 
 // viewer includes
 #include "llfloaterworldmap.h"
@@ -794,6 +795,7 @@ bool LLMediaCtrl::ensureMediaSourceExists()
             mMediaSource->addObserver( this );
             mMediaSource->setBackgroundColor( getBackgroundColor() );
             mMediaSource->setTrustedBrowser(mTrusted);
+            mMediaSource->setWolfNoSLURL(mWolfNoSLURL);   // [WOLF GAME 2026-10-09/]
 
             F32 scale_factor = LLUI::getScaleFactor().mV[ VX ];
             if (scale_factor != mMediaSource->getPageZoomFactor())
@@ -1124,6 +1126,21 @@ void LLMediaCtrl::handleMediaEvent(LLPluginClassMedia* self, EMediaEvent event)
             std::string uuid = self->getClickUUID();
             LL_DEBUGS("Media") << "Media event:  MEDIA_EVENT_CLICK_LINK_HREF, target is \"" << target << "\", uri is " << url << LL_ENDL;
 
+            // [WOLF GAME 2026-10-09] [SECURITY] a game's page: never a SLURL; only http(s) opens.
+            if (mWolfNoSLURL)
+            {
+                std::string scheme = LLURI(url).scheme();
+                LLStringUtil::toLower(scheme);
+                if (scheme == "http" || scheme == "https")
+                {
+                    LLWeb::loadURL(url, target, uuid);
+                }
+                else
+                {
+                    LL_WARNS("Media") << "game page link refused: " << url << LL_ENDL;
+                }
+                break;
+            }
             // try as slurl first
             if (!LLURLDispatcher::dispatch(url, "clicked", NULL, mTrusted))
             {
@@ -1304,6 +1321,16 @@ void LLMediaCtrl::hideNotification()
     if (mWindowShade)
     {
         mWindowShade->hide();
+    }
+}
+
+// [WOLF GAME 2026-10-09] [SECURITY]
+void LLMediaCtrl::setWolfNoSLURL(bool no_slurl)
+{
+    mWolfNoSLURL = no_slurl;
+    if (mMediaSource)
+    {
+        mMediaSource->setWolfNoSLURL(no_slurl);
     }
 }
 

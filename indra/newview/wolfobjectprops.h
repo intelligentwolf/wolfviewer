@@ -143,6 +143,10 @@ public:
      */
     void want(LLViewerObject* objectp, bool keep_fresh = false);
 
+    /** <WolfViewer 2026-10-09> Drop a want not yet sent (WolfDrive leaving Wolf: a vehicle-name
+     *  request queued on Wolf must not go to the next, foreign, region). */
+    void unwant(const LLUUID& object_id) { mWants.erase(object_id); }
+
     /** Every frame from LLAppViewer::idle(); drains the interest list within budget. */
     void idle();
 

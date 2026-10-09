@@ -91,6 +91,29 @@
                         mouse_opaque="false"
                         tab_stop="false"
                         name="wolf_flight_deck"/>
+      <!-- [WOLF DRIVE 2026-10-09] wolfdashboard.cpp: the car / truck / bike dashboard, under the
+           floaters and the toolbars, over the world. Draws nothing and takes no clicks until World >
+           Car Dashboard (Wolf Territories only); with its PANEL off only its controls take clicks. -->
+      <wolf_car_dashboard follows="all"
+                          left="0"
+                          top="0"
+                          height="500"
+                          width="1024"
+                          mouse_opaque="false"
+                          tab_stop="false"
+                          name="wolf_car_dashboard"/>
+      <!-- [WOLF GAME 2026-10-09] wolfgamehud.cpp: Wolf Roleplay on the world view - the stat panel,
+           notices, markers, the downed overlay and the screen effects. Under the floaters and the
+           toolbars, so the UI stays usable over every overlay. Clicks pass through to the world
+           except on the stat panel and the notices. -->
+      <wolf_game_hud follows="all"
+                     left="0"
+                     top="0"
+                     height="500"
+                     width="1024"
+                     mouse_opaque="false"
+                     tab_stop="false"
+                     name="wolf_game_hud"/>
       <debug_view follows="all"
                   left="0"
                   top="0"

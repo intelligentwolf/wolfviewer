@@ -31,6 +31,8 @@
 #include "lllayoutstack.h"
 #include "wolfgrid.h" // <WolfViewer> Wolf Territories-only toolbar buttons
 #include "wolfflight.h"   // <WolfViewer 2026-10-06/> the Plane / Boat deck toggles
+#include "wolfgame.h"     // <WolfViewer 2026-10-09/> the Game Mode icon
+#include "wolfdrive.h"    // <WolfViewer 2026-10-09/> the Car Dashboard icon
 
 #include "llapp.h"
 #include "llappviewer.h"
@@ -155,6 +157,36 @@ bool LLToolBarView::postBuild()
     if (mWolfBoatToggle)
     {
         mWolfBoatToggle->setCommitCallback([](LLUICtrl*, const LLSD&) { WolfFlight::instance().toggleDeck(true); });
+    }
+    // <WolfViewer 2026-10-09> Paul: "there should be an icon down the bottom ... for the gaming
+    // system as well as car, plane and boat and normal control panel". They run the same commands
+    // as World > Game Mode and World > Car Dashboard (llviewermenu.cpp), so the refusals and the
+    // forced-region lock behave the same wherever they are pressed.
+    auto run = [](const char* fn)
+    {
+        if (LLUICtrl::CommitCallbackRegistry::ptr_value_t cb = LLUICtrl::CommitCallbackRegistry::getValue(fn))
+        {
+            (*cb)(nullptr, LLSD());
+        }
+    };
+    mWolfGameToggle = findChild<LLButton>("wolf_game_toggle");
+    if (mWolfGameToggle)
+    {
+        // [GAME HUD 2026-10-09] like Plane / Boat: with Game Mode off the icon switches it on (the
+        // same command as World > Game Mode, so its refusals say why); with it on, the icon shows
+        // or hides the game HUD across the bottom and the game keeps running while it is hidden.
+        mWolfGameToggle->setCommitCallback([run](LLUICtrl*, const LLSD&)
+        {
+            WolfGame& g = WolfGame::instance();
+            const bool on = g.gameModeShownOn();
+            if (on) g.toggleHud();
+            else run("WolfGame.ToggleGameMode");
+        });
+    }
+    mWolfCarToggle = findChild<LLButton>("wolf_car_toggle");
+    if (mWolfCarToggle)
+    {
+        mWolfCarToggle->setCommitCallback([run](LLUICtrl*, const LLSD&) { run("WolfDrive.ToggleDashboard"); });
     }
     // </WolfViewer>
 
@@ -1020,6 +1052,60 @@ void LLToolBarView::draw()
         if (mWolfPlaneToggle) mWolfPlaneToggle->setVisible(wolf);
         if (mWolfBoatToggle) mWolfBoatToggle->setVisible(wolf);
     }
+    // <WolfViewer 2026-10-09> the Game and Car icons: Game lit while the game HUD shows (as Plane
+    // and Boat are while their deck shows), Car while the dashboard shows; Wolf Territories only,
+    // like Plane and Boat. The tooltip says what a press does now (a forced region: Game Mode is
+    // locked on, VIEWER_SPEC.md §6, but the HUD can still be hidden).
+    {
+        const bool wolf = WolfGrid::isOnWolfTerritories();
+        if (mWolfGameToggle)
+        {
+            const WolfGame& g = WolfGame::instance();
+            const bool on = g.gameModeShownOn();
+            const bool showing = on && g.hudShowing();
+            mWolfGameToggle->setVisible(wolf);
+            // Paul 2026-10-09: "the game paw stays highlighted even when i've closed it" - lit while
+            // the game HUD shows, like Plane / Boat / Car; the HUD's own GAME switch and the tooltip
+            // say whether Game Mode is on.
+            mWolfGameToggle->setToggleState(showing);
+            std::string tip;
+            if (g.gameModeConnecting() && !g.forced()) tip = "Game Mode: connecting...";
+            else if (!on) tip = "Game Mode: OFF - click to switch it on and show the game HUD (Wolf Territories)";
+            else if (showing) tip = "Game Mode: ON - click to hide the game HUD (Game Mode keeps running)";
+            else if (!g.hudHidden() && WolfGame::bottomTaken()) tip = "Game HUD: the flight deck or car dashboard has the bottom - click to show the game HUD instead";
+            else tip = "Game Mode: ON, HUD hidden - click to show the game HUD";
+            if (g.forced()) tip += "\nGame Mode is locked on: this region requires it";
+            if (mWolfGameToggle->getToolTip() != tip) mWolfGameToggle->setToolTip(tip);
+        }
+        if (mWolfCarToggle)
+        {
+            mWolfCarToggle->setVisible(wolf);
+            mWolfCarToggle->setToggleState(WolfDrive::instance().dashboardOn());
+        }
+        // <WolfViewer 2026-10-09> Paul: "when i open the game paw, please hide the normal toolbar same
+        // with all the others, cars, flight". While any bottom panel shows - the flight / sailing
+        // deck, the car dashboard, the game HUD - the bar folds away (its hide arrow, as Flight Mode
+        // always did); when the last one goes it comes back as the player had it.
+        const WolfFlight& wfl = WolfFlight::instance();
+        const bool panel_up = wolf && ((wfl.active() && !wfl.deckHidden()) || WolfDrive::instance().dashboardOn()
+                                       || WolfGame::instance().hudShowing());
+        if (panel_up != mWolfPanelUp)
+        {
+            mWolfPanelUp = panel_up;
+            if (panel_up)
+            {
+                mWolfBarWasHidden = gSavedSettings.getBOOL("WolfViewerBottomToolbarHidden");
+                gSavedSettings.setBOOL("WolfViewerBottomToolbarHidden", true);
+                applyBottomToolbarHidden(true);
+            }
+            else
+            {
+                gSavedSettings.setBOOL("WolfViewerBottomToolbarHidden", mWolfBarWasHidden);
+                applyBottomToolbarHidden(mWolfBarWasHidden);
+            }
+        }
+        // </WolfViewer>
+    }
     if (mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM] && !bottom_hidden)
     {
         LLToolBar* bar = mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM];
@@ -1027,7 +1113,7 @@ void LLToolBarView::draw()
         const LLView* strip = findChildView("chat_bar_stand_fly_container_panel", true);
         const S32 strip_w = (strip && strip->getVisible()) ? strip->getRect().getWidth() : 0;
         const S32 panel_w = parent ? parent->getRect().getWidth() : bar->getRect().getWidth();
-        S32 want = panel_w - strip_w - 78;   // 78: the three show / hide icons' corner
+        S32 want = panel_w - strip_w - 126;   // 126: the five show / hide icons' corner (5 x 24 + 6)
         // The buttons' own width (the centred button panel) is the floor.
         const LLView* buttons = bar->findChildView("button_panel", true);
         const S32 need = buttons ? buttons->getRect().getWidth() + 8 : 0;

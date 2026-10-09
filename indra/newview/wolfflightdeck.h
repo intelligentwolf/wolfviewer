@@ -83,7 +83,7 @@ public:
         H_AT, H_SPD_KNOB, H_LNAV, H_VNAV, H_HDG_KNOB, H_HDG_SEL, H_ALT_KNOB, H_ALT_HOLD,
         H_VS_WHEEL, H_VS, H_CMD, H_RANGE_KNOB, H_HUD, H_HELP, H_EXIT,
         H_GEAR, H_ENGINE, H_STICK, H_THROTTLE,
-        H_PLAN, H_ND_SCREEN, H_TWA_KNOB, H_WIND, H_TACK, H_SAIL, H_WEB, H_MAP,
+        H_PLAN, H_ND_SCREEN, H_TWA_KNOB, H_WIND, H_TACK, H_SAIL, H_WEB, H_MAP, H_BACKGROUND,
         H_CDU_SCREEN, H_CDU_DIR, H_CDU_CTL, H_CDU_EXEC, H_CDU_CLR, H_CDU_DEL, H_CDU_HELP,
         H_LSK_L1, H_LSK_L2, H_LSK_L3, H_LSK_L4, H_LSK_L5, H_LSK_L6,
         H_LSK_R1, H_LSK_R2, H_LSK_R3, H_LSK_R4, H_LSK_R5, H_LSK_R6,
@@ -168,6 +168,8 @@ private:
 
     void addHit(F32 l, F32 b, F32 r, F32 t, EHit id, const std::string& tip);
     const Hit* hitAt(S32 x, S32 y) const;
+    static bool showBackground();          // WolfFlightDeckBackground: the PANEL button
+    bool    onPanel(S32 x, S32 y) const;   // takes the mouse here (see wolfflightdeck.cpp)
     void press(EHit id, S32 x, S32 y, S32 step);
     void knob(EHit id, S32 step);
     void lsk(bool left, S32 line);

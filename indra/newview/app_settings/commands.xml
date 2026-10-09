@@ -334,6 +334,45 @@
            is_enabled_function="WolfGrid.IsWolfTerritories"
            is_running_function="WolfScreenShare.IsSharing"
            />
+  <!-- [WOLF GAME 2026-10-09] Wolf Roleplay (wolffloaterroleplay.cpp, VIEWER_SPEC.md §3.3): opens
+       the Roleplay floater. In the toybox for any toolbar; lit while it is open. -->
+  <command name="wolf_roleplay"
+           available_in_toybox="true"
+           icon="Command_WolfRoleplay_Icon"
+           label_ref="Command_WolfRoleplay_Label"
+           tooltip_ref="Command_WolfRoleplay_Tooltip"
+           execute_function="Floater.ToggleOrBringToFront"
+           execute_parameters="wolf_roleplay"
+           is_enabled_function="WolfGrid.IsOnWolfTerritories"
+           is_running_function="Floater.IsOpen"
+           is_running_parameters="wolf_roleplay"
+           />
+  <!-- [WOLF GAME 2026-10-09] The Game Mode switch (VIEWER_SPEC.md §3.2, OFF by default): sends
+       ["gamemode","1"|"0"]; lit while Game Mode is on (or turning on). wolfgame.cpp
+       updateGameModeButtons writes "Game Mode: On / Off" into the button's label and tooltip so
+       the state is never colour alone. On the default bottom toolbar: it is how people turn
+       Game Mode on. -->
+  <command name="wolf_gamemode"
+           available_in_toybox="true"
+           icon="Command_WolfGameMode_Icon"
+           label_ref="Command_WolfGameMode_Label"
+           tooltip_ref="Command_WolfGameMode_Tooltip"
+           execute_function="WolfGame.ToggleGameMode"
+           is_enabled_function="WolfGame.CanSwitch"
+           is_running_function="WolfGame.IsGameMode"
+           />
+  <!-- [WOLF DRIVE 2026-10-09] The car / truck / bike dashboard (wolfdashboard.cpp): flips
+       WolfDashboardMode; lit while it is up. Wolf Territories only - off it the button is removed
+       from the toolbars (wolfdrive.cpp refreshDashGate) and put back on return. -->
+  <command name="wolf_dashboard"
+           available_in_toybox="true"
+           icon="Command_WolfDashboard_Icon"
+           label_ref="Command_WolfDashboard_Label"
+           tooltip_ref="Command_WolfDashboard_Tooltip"
+           execute_function="WolfDrive.ToggleDashboard"
+           is_enabled_function="WolfGrid.IsOnWolfTerritories"
+           is_running_function="WolfDrive.IsDashboard"
+           />
   <command name="RFO"
          available_in_toybox="true"
          icon="Command_RFO_Icon"

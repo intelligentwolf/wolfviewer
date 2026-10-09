@@ -54,6 +54,8 @@ protected:
     void onBtnRestoreDefaults();
 
     void onToolBarButtonEnter(LLView* button);
+    void fillCommands();     // <WolfViewer 2026-10-09/> the offered commands, for this grid / region
+    S32  mFilledOnWolf = -1; // <WolfViewer 2026-10-09/> isOnWolfTerritories() when last filled
 
 public:
     LLToolBar * mToolBar;

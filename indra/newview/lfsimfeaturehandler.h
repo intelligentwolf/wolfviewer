@@ -91,6 +91,13 @@ public:
     std::string gridStatusURL() const { return mGridStatusURL; }
     std::string gridStatusRSS() const { return mGridStatusRSS; }
     std::string hyperGridURL() const { return mHyperGridPrefix; }
+    // <WolfViewer 2026-10-09> Whose features these are, and whether the REGION named its grid (an
+    // OpenSimExtras "GridURL") rather than hyperGridURL() falling back to the login grid's
+    // gatekeeper. WolfGrid::isOnWolfTerritories needs both: a foreign region that sends no GridURL
+    // must not count as Wolf, and until the new region's features arrive the old ones are stale.
+    const LLUUID& featuresRegionID() const { return mFeaturesRegionID; }
+    bool gridURLFromRegion() const { return mGridURLFromRegion; }
+    // </WolfViewer 2026-10-09>
     std::string searchURL() const { return mSearchURL; }
     U32 sayRange() const { return mSayRange; }
     U32 shoutRange() const { return mShoutRange; }
@@ -119,6 +126,8 @@ private:
     std::string mGridStatusURL;
     std::string mGridStatusRSS;
     std::string mHyperGridPrefix;
+    LLUUID mFeaturesRegionID;          // <WolfViewer 2026-10-09/> the region setSupportedFeatures last read
+    bool mGridURLFromRegion = false;   // <WolfViewer 2026-10-09/> it sent OpenSimExtras GridURL
     SignaledType<std::string> mSearchURL;
     SignaledType<U32> mSayRange;
     SignaledType<U32> mShoutRange;

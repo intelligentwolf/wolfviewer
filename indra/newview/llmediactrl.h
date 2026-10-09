@@ -150,6 +150,9 @@ public:
         void hideNotification();
 
         void setTrustedContent(bool trusted);
+        // [WOLF GAME 2026-10-09] [SECURITY] wolf_game_web / overlay: clicked links are never
+        // dispatched as SLURLs (secondlife:///app/...); http(s) still opens via LLWeb::loadURL.
+        void setWolfNoSLURL(bool no_slurl);
 
         void setAllowFileDownload(bool allow) { mAllowFileDownload = allow; }
 
@@ -198,6 +201,7 @@ public:
         bool    mFrequentUpdates,
                 mForceUpdate,
                 mTrusted,
+                mWolfNoSLURL = false,   // [WOLF GAME 2026-10-09/]
                 mAlwaysRefresh,
                 mTakeFocusOnClick,
                 mStretchToFill,

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLF GAME UI 2026-10-09] A wolfGameDialog (wolffloaterroleplay.cpp WolfFloaterGameDialog,
+     VIEWER_SPEC.md §3.5), drawn in the game's style (WolfGameDialogView): title, source with
+     "Unverified" when not the game's own (and then the plain palette), the text, the buttons three
+     a row. Placed like llDialog, top-right under any script dialogs; not modal. Its height follows
+     the text. The X (or Escape) closes it and sends nothing; the title band drags it. -->
+<floater
+ can_close="false"
+ can_drag_on_left="false"
+ can_minimize="false"
+ can_resize="false"
+ header_height="30"
+ height="200"
+ layout="topleft"
+ legacy_header_height="30"
+ name="wolf_game_dialog"
+ save_rect="false"
+ show_title="false"
+ single_instance="false"
+ title="Game"
+ width="340">
+    <wolf_game_dialog_view
+     follows="all"
+     height="200"
+     layout="topleft"
+     left="0"
+     mouse_opaque="false"
+     name="view"
+     tab_stop="true"
+     top="0"
+     width="340" />
+</floater>

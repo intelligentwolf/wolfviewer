@@ -402,6 +402,9 @@ public:
 
     bool isTrustedBrowser() { return mTrustedBrowser; }
     void setTrustedBrowser(bool trusted) { mTrustedBrowser = trusted; }
+    // [WOLF GAME 2026-10-09] [SECURITY] a game's page: its links never reach LLURLDispatcher.
+    void setWolfNoSLURL(bool no_slurl) { mWolfNoSLURL = no_slurl; }
+    bool isWolfNoSLURL() const { return mWolfNoSLURL; }
 
     typedef enum
     {
@@ -499,6 +502,7 @@ private:
     bool mNavigateSuspended;
     bool mNavigateSuspendedDeferred;
     bool mTrustedBrowser;
+    bool mWolfNoSLURL = false;   // [WOLF GAME 2026-10-09/]
     std::string mTarget;
     LLNotificationPtr mNotification;
     bool mCleanBrowser;     // force the creation of a clean browsing target with full options enabled

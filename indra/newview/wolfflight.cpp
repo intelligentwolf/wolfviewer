@@ -280,21 +280,11 @@ void WolfFlight::setActive(bool on)
 // 2026-09-10) does exactly that; leaving Flight Mode puts it back how the pilot had it.
 void WolfFlight::applyToolbar(bool flight_on)
 {
-    if (!gToolBarView)
-    {
-        return;
-    }
-    if (flight_on)
-    {
-        mToolbarWasHidden = gSavedSettings.getBOOL("WolfViewerBottomToolbarHidden");
-        gSavedSettings.setBOOL("WolfViewerBottomToolbarHidden", true);
-        gToolBarView->applyBottomToolbarHidden(true);
-    }
-    else
-    {
-        gSavedSettings.setBOOL("WolfViewerBottomToolbarHidden", mToolbarWasHidden);
-        gToolBarView->applyBottomToolbarHidden(mToolbarWasHidden);
-    }
+    // <WolfViewer 2026-10-09> Now done for every bottom panel at once - the deck, the car dashboard
+    // and the game HUD - by LLToolBarView::draw (Paul: "hide the normal toolbar same with all the
+    // others"), which also brings the bar back when the deck is hidden from its corner icon and
+    // puts it back as the player had it when the last panel goes.
+    (void)flight_on;
 }
 
 //-----------------------------------------------------------------------------
@@ -2479,7 +2469,7 @@ S32 WolfFlight::pilotThrottle() const
     return WolfFlight::invert(WolfFlight::keySetting("ThrottleInvert")) ? -dir : dir;    // + = more
 }
 
-// Source: wolfvehiclecontrols.cpp WolfVehicle::noteScanKey — the same watch-only hook in
+// Source: wolfdrive.cpp WolfDrive::noteScanKey (the old Vehicle tab's) — the same watch-only hook in
 // LLViewerInput::scanKey, after the UI-has-the-key bail. The default bindings
 // (key_bindings.xml): arrows and WASD move/turn, PgUp/E up, PgDn/C down, Shift+arrows slide.
 void WolfFlight::noteScanKey(KEY key, MASK mask, bool key_down, bool key_up, bool key_level, bool repeat)

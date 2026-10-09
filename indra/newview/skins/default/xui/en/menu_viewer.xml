@@ -1232,6 +1232,39 @@
              function="Floater.Show"
              parameter="wolf_lag_detector" />
         </menu_item_call>
+        <!-- [WOLF GAME 2026-10-09] wolffloaterroleplay.cpp: Wolf Roleplay - your stats, money, level,
+             the game's panel and buttons, items, pets, Leave game; and the region's game
+             (VIEWER_SPEC.md §3.3). -->
+        <!-- [WOLF GAME 2026-10-09] The Game Mode switch (§3.2, off by default), the same one as the
+             toolbar's Game Mode button and the switch at the top of the Roleplay floater. -->
+        <menu_item_check
+         label="Game Mode"
+         name="WolfGameMode">
+            <menu_item_check.on_check
+             function="WolfGame.IsGameMode" />
+            <menu_item_check.on_click
+             function="WolfGame.ToggleGameMode" />
+            <!-- [FORCED 2026-10-09] greyed (and labelled with the reason) while the region
+                 requires Game Mode: wolfgame.cpp updateGameModeButtons -->
+            <menu_item_check.on_enable
+             function="WolfGame.CanSwitch" />
+            <!-- [WOLF GRID GATE 2026-10-09] gone (not greyed) off Wolf Territories -->
+            <menu_item_check.on_visible
+             function="WolfGrid.IsOnWolfTerritories" />
+        </menu_item_check>
+        <menu_item_check
+         label="Roleplay"
+         name="WolfRoleplay">
+            <menu_item_check.on_check
+             function="Floater.Visible"
+             parameter="wolf_roleplay" />
+            <menu_item_check.on_click
+             function="Floater.Toggle"
+             parameter="wolf_roleplay" />
+            <!-- [WOLF GRID GATE 2026-10-09] gone (not greyed) off Wolf Territories -->
+            <menu_item_check.on_visible
+             function="WolfGrid.IsOnWolfTerritories" />
+        </menu_item_check>
         <!-- [WOLF DJ 2026-10-04] wolffloaterdj.cpp: a mini mixer (in-world voice, mic, programs,
              the Wolf DJ playlist) to the region owner's own radio stream. -->
         <menu_item_call
@@ -1253,6 +1286,33 @@
             <menu_item_check.on_click
              function="ToggleControl"
              parameter="WolfShowAstronomy" />
+        </menu_item_check>
+        <!-- [WOLF DRIVE 2026-10-09] wolfdrive.cpp / wolfdashboard.cpp: the car / truck / bike dashboard
+             and Driving Controls for a wheel, pedals or gamepad. Both Wolf Territories only, gone (not
+             greyed) elsewhere: Paul, "other grids can't use these interfaces they are only for wolf". -->
+        <menu_item_check
+         label="Car Dashboard"
+         name="WolfDashboardMode">
+            <menu_item_check.on_check
+             function="CheckControl"
+             parameter="WolfDashboardMode" />
+            <menu_item_check.on_click
+             function="ToggleControl"
+             parameter="WolfDashboardMode" />
+            <menu_item_check.on_visible
+             function="WolfGrid.IsOnWolfTerritories" />
+        </menu_item_check>
+        <menu_item_check
+         label="Driving Controls..."
+         name="WolfDriveControls">
+            <menu_item_check.on_check
+             function="Floater.Visible"
+             parameter="wolf_drive_controls" />
+            <menu_item_check.on_click
+             function="Floater.Toggle"
+             parameter="wolf_drive_controls" />
+            <menu_item_check.on_visible
+             function="WolfGrid.IsOnWolfTerritories" />
         </menu_item_check>
         <!-- [FLIGHT MODE 2026-10-06] wolfflight.cpp / wolfflightdeck.cpp: Paul, "World, Flight Mode,
              adds a flight control interface for flying planes including an AUTOPILOT". The flight

@@ -65,6 +65,10 @@ with the same filename but different name
   <texture name="WolfTb_Plane_On" file_name="icons/wolf_tb_plane_on.png" preload="true" />
   <texture name="WolfTb_Boat_Off" file_name="icons/wolf_tb_boat_off.png" preload="true" />
   <texture name="WolfTb_Boat_On" file_name="icons/wolf_tb_boat_on.png" preload="true" />
+  <texture name="WolfTb_Game_Off" file_name="icons/wolf_tb_game_off.png" preload="true" />
+  <texture name="WolfTb_Game_On" file_name="icons/wolf_tb_game_on.png" preload="true" />
+  <texture name="WolfTb_Car_Off" file_name="icons/wolf_tb_car_off.png" preload="true" />
+  <texture name="WolfTb_Car_On" file_name="icons/wolf_tb_car_on.png" preload="true" />
   <texture name="Arrow_Left" file_name="widgets/Arrow_Left.png" preload="true" />
   <texture name="Arrow_Right" file_name="widgets/Arrow_Right.png" preload="true" />
 
@@ -222,6 +226,9 @@ with the same filename but different name
   <texture name="WolfPhoto_comic" file_name="wolf_photo/comic.png" preload="false" />
   <texture name="WolfPhoto_comic_Sel" file_name="wolf_photo/comic_sel.png" preload="false" />
   <texture name="Command_WolfDictate_Icon"     file_name="toolbar_icons/wolf_dictate.png"     preload="true" />
+  <texture name="Command_WolfGameMode_Icon"   file_name="toolbar_icons/wolf_gamemode.png"   preload="true" />   <!-- [WOLF GAME 2026-10-09] the paw -->
+  <texture name="Command_WolfRoleplay_Icon"   file_name="toolbar_icons/wolf_roleplay.png"   preload="true" />   <!-- [WOLF GAME 2026-10-09] shield and crossed swords -->
+  <texture name="Command_WolfDashboard_Icon"  file_name="toolbar_icons/wolf_dashboard.png"  preload="true" />   <!-- [WOLF DRIVE 2026-10-09] a rev counter -->
   <texture name="Command_WolfRain_Icon"        file_name="toolbar_icons/wolf_rain.png"        preload="true" />
   <texture name="Command_WolfSnow_Icon"        file_name="toolbar_icons/wolf_snow.png"        preload="true" />
   <texture name="Command_WolfReadAloud_Icon"   file_name="toolbar_icons/wolf_readaloud.png"   preload="true" />
@@ -1245,4 +1252,12 @@ with the same filename but different name
 <texture name="LagStatus_Good" file_name="icons/green_square.png" preload="false" />
 <texture name="LagStatus_Warning" file_name="icons/yellow_square.png" preload="false" />
 <texture name="LagStatus_Critical" file_name="icons/red_square.png" preload="false" />
+<!-- [WOLF GAME UI 2026-10-09] Wolf Roleplay photographs (wolfgamehud.cpp WolfGameDraw::photo),
+     cropped and graded to the night / amber palette. Sources, authors and licences:
+     wolfgame/CREDITS.txt (also shown on the game window's Help page). -->
+<texture name="WolfGame_Portrait" file_name="wolfgame/wolfgame_portrait.jpg" preload="false" />
+<texture name="WolfGame_Pup" file_name="wolfgame/wolfgame_pup.jpg" preload="false" />
+<texture name="WolfGame_Raven" file_name="wolfgame/wolfgame_raven.jpg" preload="false" />
+<texture name="WolfGame_Background" file_name="wolfgame/wolfgame_background.jpg" preload="false" />
+<texture name="WolfGame_Figure" file_name="wolfgame/wolfgame_figure.png" preload="false" />
 </textures>

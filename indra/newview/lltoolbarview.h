@@ -145,6 +145,10 @@ private:
     S32                 mBottomToolbarShownDim = 90;    // <WolfViewer 2026-10-06> the skin's own bottom_toolbar_panel height
     LLButton*           mWolfPlaneToggle = nullptr;     // <WolfViewer 2026-10-06> Flight Mode deck
     LLButton*           mWolfBoatToggle = nullptr;      // <WolfViewer 2026-10-06> Sailing Mode deck
+    LLButton*           mWolfGameToggle = nullptr;      // <WolfViewer 2026-10-09> Game Mode
+    LLButton*           mWolfCarToggle = nullptr;       // <WolfViewer 2026-10-09> Car Dashboard
+    bool                mWolfPanelUp = false;           // <WolfViewer 2026-10-09> a bottom panel (deck, dashboard, game HUD) shows
+    bool                mWolfBarWasHidden = false;      // <WolfViewer 2026-10-09> the bar's own state before it did
 
     // <FS:Ansariel> Member variables needed for console chat bottom offset
     LLView*             mBottomChatStack;

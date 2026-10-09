@@ -26,6 +26,7 @@
 
 #include "llviewerprecompiledheaders.h"
 #include "llviewerwindow.h"
+#include "wolfgame.h"   // [WOLF GAME 2026-10-09/] Escape for the game's overlay, dialogs, effects
 
 
 // system library includes
@@ -3258,6 +3259,15 @@ bool LLViewerWindow::handleKey(KEY key, MASK mask)
         return true;
     }
 
+    // [WOLF GAME 2026-10-09] Escape closes the game's overlay page or a focused game dialog
+    // (VIEWER_SPEC.md §3.5 / §3.8) - before the focused web page can swallow it - and otherwise
+    // clears the game's screen effects unless a text field has the keyboard (a blackout or blur
+    // must never be undismissable). wolfgame.cpp WolfGame::handleEscape decides.
+    if (key == KEY_ESCAPE && mask == MASK_NONE && WolfGame::instanceExists() && WolfGame::instance().handleEscape())
+    {
+        return true;
+    }
+
     LLFocusableElement* keyboard_focus = gFocusMgr.getKeyboardFocus();
 
     if (keyboard_focus
@@ -3501,6 +3511,15 @@ bool LLViewerWindow::handleKey(KEY key, MASK mask)
     {
         LL_DEBUGS() << "LLviewerWindow::handleKey check gesture trigger" << LL_ENDL;
         LLViewerEventRecorder::instance().logKeyEvent(key,mask);
+        return true;
+    }
+
+    // [WOLF GAME COMBAT 2026-10-09] The game's action bar keys 1-9, 0, -, = (wolfgame.cpp
+    // handleActionKey, VIEWER_SPEC.md §5.4): after the focused control, the tool and gestures have
+    // had the key, and before "letter keys start chat" below would take it.
+    if (WolfGame::instanceExists() && WolfGame::instance().handleActionKey(key, mask))
+    {
+        LLViewerEventRecorder::instance().logKeyEvent(key, mask);
         return true;
     }
 

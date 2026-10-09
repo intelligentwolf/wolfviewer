@@ -2761,6 +2761,12 @@ name="Command_360_Capture_Label">360° Snapshot</string>
   <string name="Command_WolfSnow_Label">Snow</string>
   <!-- WolfViewer 2026-09-12: one Weather button in place of the Rain and Snow pair. -->
   <string name="Command_WolfWeather_Label">Weather</string>
+  <string name="Command_WolfRoleplay_Label">Roleplay</string>
+  <string name="Command_WolfGameMode_Label">Game Mode</string>
+  <string name="Command_WolfGameMode_Tooltip">Game Mode: play the region's roleplay game wherever you go (off by default)</string>
+  <string name="Command_WolfRoleplay_Tooltip">Wolf Roleplay: your stats, money and level, and the region's game</string>
+  <string name="Command_WolfDashboard_Label">Dashboard</string>
+  <string name="Command_WolfDashboard_Tooltip">Car Dashboard: speedometer, rev counter, gears and a steering wheel for the vehicle you sit in (car, truck or bike)</string>
   <string name="Command_WolfWeather_Tooltip">Show or hide the weather — the region's, the parcel's, or your own</string>
   <string name="Command_View_Label">Camera controls</string>
 <!-- Ansariel: Renamed for FS (FIRE-5019)

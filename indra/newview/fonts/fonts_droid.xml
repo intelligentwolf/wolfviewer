@@ -118,6 +118,13 @@
     <file>B612Mono-Bold.ttf</file>
   </font>
 
+  <!-- <WolfViewer 2026-10-09> Wolf Roleplay lettering (wolfgamehud.cpp WolfGameDraw::display):
+       Cinzel Bold for the game interface's titles (SIL Open Font License, Cinzel-OFL.txt). -->
+  <font name="WolfDisplay"
+	comment="Wolf Roleplay display font (Cinzel Bold)">
+    <file>Cinzel-Bold.ttf</file>
+  </font>
+
   <font name="OCRA"
     comment="OCRA machine character recognition used in script editor compile errors">
     <file>ocra.ttf</file>

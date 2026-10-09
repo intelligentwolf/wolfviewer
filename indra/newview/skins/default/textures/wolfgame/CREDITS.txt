@@ -1,0 +1,34 @@
+Wolf Roleplay photographs - sources, authors and licences
+==========================================================
+Each picture was cropped, resized and colour-graded (a night-blue / moon-silver / amber split
+tone, a vignette) for the WolfViewer and WolfStorm game interface on 2026-10-09. The adapted
+files are distributed under the same licence as their source.
+
+wolfgame_portrait.jpg  (the default portrait)
+  "Front view of a resting Canis lupus ssp." by Gary Kramer, U.S. Fish and Wildlife Service
+  https://commons.wikimedia.org/wiki/File:Front_view_of_a_resting_Canis_lupus_ssp.jpg
+  Licence: Public domain (a work of the US federal government)
+
+wolfgame_pup.jpg  (the Wolf Pup pet card)
+  "It's hot out there...." by Keven Law from Los Angeles, USA
+  https://commons.wikimedia.org/wiki/File:Flickr_-_law_keven_-_It%27s_hot_out_there.....jpg
+  Licence: CC BY-SA 2.0  https://creativecommons.org/licenses/by-sa/2.0
+  This adapted picture is likewise CC BY-SA 2.0.
+
+wolfgame_background.jpg  (the Wolves theme's window background)
+  "[7237] Howling wolf" by zoofanatic
+  https://commons.wikimedia.org/wiki/File:-7237-_Howling_wolf_(20823670579).jpg
+  Licence: CC BY 2.0  https://creativecommons.org/licenses/by/2.0
+
+wolfgame_figure.png  (the paper-doll figure, cut out of its snowy background)
+  "The Wolf (explored 27.4.2019)" by E L from Western-Finland
+  https://commons.wikimedia.org/wiki/File:The_Wolf_(explored_27.4.2019)_-_Flickr_-_eba5684.jpg
+  Licence: CC BY 2.0  https://creativecommons.org/licenses/by/2.0
+
+wolfgame_raven.jpg  (the Raven pet card)
+  "Portrait of Common Raven" by Alan Vernon
+  https://commons.wikimedia.org/wiki/File:Corvus_corax_head_profile.jpg
+  Licence: CC BY 2.0  https://creativecommons.org/licenses/by/2.0
+
+The display lettering is Cinzel Bold, Copyright 2020 The Cinzel Project Authors
+(https://github.com/NDISCOVER/Cinzel), SIL Open Font License 1.1 (fonts/Cinzel-OFL.txt).

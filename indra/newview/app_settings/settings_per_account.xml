@@ -933,6 +933,103 @@
 		<key>Value</key>
 			<integer>0</integer>
 	</map>
+	<!-- [WOLF GRID GATE 2026-10-09] wolfgame.cpp WolfGame::gateToolbar: the Game Mode / Roleplay
+	     toolbar buttons taken off while away from Wolf Territories, and where they were
+	     ([{name, toolbar, rank}]). Kept across relaunches so a layout saved off Wolf never loses
+	     them; put back on the next arrival on Wolf, then cleared. -->
+	<key>WolfDashboardToolbarHidden</key>
+	<map>
+		<key>Comment</key>
+			<string>Car dashboard toolbar button removed while off Wolf Territories (toolbar and rank), to restore on return</string>
+		<key>Persist</key>
+			<integer>1</integer>
+		<key>Type</key>
+			<string>LLSD</string>
+		<key>Value</key>
+			<map>
+			</map>
+	</map>
+	<key>WolfDashboardVehicleTypes</key>
+	<map>
+		<key>Comment</key>
+			<string>Car dashboard design chosen per vehicle, by the vehicle's name (0 car, 1 truck, 2 bike); at most 200</string>
+		<key>Persist</key>
+			<integer>1</integer>
+		<key>Type</key>
+			<string>LLSD</string>
+		<key>Value</key>
+			<map>
+			</map>
+	</map>
+	<key>WolfGameToolbarHidden</key>
+	<map>
+		<key>Comment</key>
+			<string>Wolf Roleplay toolbar buttons removed while off Wolf Territories, to restore on return</string>
+		<key>Persist</key>
+			<integer>1</integer>
+		<key>Type</key>
+			<string>LLSD</string>
+		<key>Value</key>
+			<array>
+			</array>
+	</map>
+	<!-- [WOLF GAME 2026-10-09] The Roleplay window's background (wolffloaterroleplay.cpp
+	     WolfGameBackground, the Look page). Paul: "users can set the background image". -->
+	<key>WolfGameBgSource</key>
+	<map>
+		<key>Comment</key>
+			<string>Roleplay window background: theme (the game's own), texture (one dragged from inventory) or file (a picture on this computer)</string>
+		<key>Persist</key>
+			<integer>1</integer>
+		<key>Type</key>
+			<string>String</string>
+		<key>Value</key>
+			<string>theme</string>
+	</map>
+	<key>WolfGameBgTexture</key>
+	<map>
+		<key>Comment</key>
+			<string>Roleplay window background: the asset id of the texture dragged from inventory</string>
+		<key>Persist</key>
+			<integer>1</integer>
+		<key>Type</key>
+			<string>String</string>
+		<key>Value</key>
+			<string></string>
+	</map>
+	<key>WolfGameBgFile</key>
+	<map>
+		<key>Comment</key>
+			<string>Roleplay window background: the picture file chosen on this computer (loaded as a local texture)</string>
+		<key>Persist</key>
+			<integer>1</integer>
+		<key>Type</key>
+			<string>String</string>
+		<key>Value</key>
+			<string></string>
+	</map>
+	<key>WolfGameBgOpacity</key>
+	<map>
+		<key>Comment</key>
+			<string>Roleplay window background: how strongly the picture shows, 0 to 1</string>
+		<key>Persist</key>
+			<integer>1</integer>
+		<key>Type</key>
+			<string>F32</string>
+		<key>Value</key>
+			<real>0.7</real>
+	</map>
+	<key>WolfGameBgTint</key>
+	<map>
+		<key>Comment</key>
+			<string>Roleplay window background: the tint over the picture (natural, amber, moonlight, blood, forest, dusk)</string>
+		<key>Persist</key>
+			<integer>1</integer>
+		<key>Type</key>
+			<string>String</string>
+		<key>Value</key>
+			<string>natural</string>
+	</map>
 	<key>FSLastOpenIMs</key>
 	<map>
 		<key>Comment</key>

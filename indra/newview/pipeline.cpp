@@ -27,6 +27,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "pipeline.h"
+#include "wolfgame.h"   // [WOLF GAME 2026-10-09/] roleplay desaturate / blur
 
 // library includes
 #include "llimagepng.h"
@@ -8757,7 +8758,20 @@ bool LLPipeline::wolfPhotoFilter(LLRenderTarget* src, LLRenderTarget* dst)
     static LLCachedControl<F32> filter_strength(gSavedSettings, "WolfViewerPhotoFilterStrength", 1.f);
     const S32 mode = filter_mode;
     // 1..8 are the looks wolfPhotoGrade() knows; anything else in the setting means off.
-    if (mode < 1 || mode > 15 || !gWolfPhotoFilterProgram.isComplete())   // [PAINTERS 2026-09-20/] 9..15 paint
+    if (mode < 1 || mode > 15)   // [PAINTERS 2026-09-20/] 9..15 paint
+    {
+        return false;
+    }
+    return wolfPhotoPass(src, dst, mode, llclamp((F32)filter_strength, 0.f, 1.f));
+}
+
+// [WOLF GAME 2026-10-09] The photo filter's pass, for any mode and strength: World > Photo Effects
+// above, and Wolf Roleplay's screen effects (VIEWER_SPEC.md §3.6) - "desaturate" is mode 2 (Black &
+// White) at the effect's strength, "blur" is mode 16 (wolfPhotoFilterF.glsl). Unchanged from
+// wolfPhotoFilter's body before the split.
+bool LLPipeline::wolfPhotoPass(LLRenderTarget* src, LLRenderTarget* dst, S32 mode, F32 strength)
+{
+    if (!gWolfPhotoFilterProgram.isComplete())
     {
         return false;
     }
@@ -8781,7 +8795,7 @@ bool LLPipeline::wolfPhotoFilter(LLRenderTarget* src, LLRenderTarget* dst)
     dst->bindTarget();
     src->bindTexture(0, channel, LLTexUnit::TFO_POINT);
     shader->uniform1i(s_uMode, mode);
-    shader->uniform1f(s_uStrength, llclamp((F32)filter_strength, 0.f, 1.f));
+    shader->uniform1f(s_uStrength, llclamp(strength, 0.f, 1.f));
     shader->uniform2f(s_uTexel, 1.f / (F32)llmax(src->getWidth(), 1), 1.f / (F32)llmax(src->getHeight(), 1));   // [PAINTERS 2026-09-20/]
 
     mScreenTriangleVB->setBuffer();
@@ -9329,6 +9343,16 @@ void LLPipeline::renderFinalize()
         std::swap(auxActiveBuffer, auxTargetBuffer);
     }
     // </WolfViewer>
+    // [WOLF GAME 2026-10-09] Wolf Roleplay's desaturate and blur (wolfgame.cpp sets these each idle),
+    // after the player's own photo look so they apply on top of it.
+    if (WolfGame::sDesaturate > 0.f && wolfPhotoPass(auxActiveBuffer, auxTargetBuffer, 2, WolfGame::sDesaturate))
+    {
+        std::swap(auxActiveBuffer, auxTargetBuffer);
+    }
+    if (WolfGame::sBlur > 0.f && wolfPhotoPass(auxActiveBuffer, auxTargetBuffer, 16, WolfGame::sBlur))
+    {
+        std::swap(auxActiveBuffer, auxTargetBuffer);
+    }
     // <FS:Beq> new shader for snapshot frame helper
     if (renderSnapshotFrame(auxActiveBuffer, auxTargetBuffer))
     {

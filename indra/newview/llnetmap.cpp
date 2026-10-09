@@ -28,6 +28,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "llnetmap.h"
+#include "wolfgame.h"   // [WOLF GAME 2026-10-09/] roleplay markers
 
 // Library includes (should move below)
 #include "indra_constants.h"
@@ -1051,6 +1052,21 @@ void LLNetMap::draw()
             }
         }
 
+        // [WOLF GAME 2026-10-09] Wolf Roleplay markers: a dot in the marker's colour (VIEWER_SPEC.md
+        // §3.9), in the same view coordinates as the avatars; off the map they are not drawn.
+        for (const auto& kv : WolfGame::instance().markers())
+        {
+            LLVector3d marker_global;
+            if (!WolfGame::markerGlobal(kv.second, marker_global)) continue;
+            const LLVector3 marker_map = globalPosToView(marker_global);
+            if (!getLocalRect().pointInRect(ll_round(marker_map.mV[VX]), ll_round(marker_map.mV[VY]))) continue;
+            gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
+            gGL.color4fv(kv.second.mColor.mV);
+            gl_circle_2d(marker_map.mV[VX], marker_map.mV[VY], mDotRadius, 16, true);
+            gGL.color4f(0.f, 0.f, 0.f, 0.85f);
+            gl_circle_2d(marker_map.mV[VX], marker_map.mV[VY], mDotRadius, 16, false);
+        }
+
         // Draw dot for self avatar position
         static LLUIColor self_tag_color = LLUIColorTable::instance().getColor("MapAvatarSelfColor", LLColor4::yellow); // <FS:CR> FIRE-1061
         LLVector3d pos_global = gAgent.getPositionGlobal();
@@ -1510,6 +1526,22 @@ void LLNetMap::draw3D()
                     gl_circle_2d(tx, ty, mDotRadius, 16, false);
                 }
             }
+        }
+
+        // [WOLF GAME 2026-10-09] Wolf Roleplay markers on this region: a dot in the marker's colour
+        // (VIEWER_SPEC.md §3.9), drawn like the tracked location above.
+        for (const auto& kv : WolfGame::instance().markers())
+        {
+            LLVector3d marker_global;
+            if (!WolfGame::markerGlobal(kv.second, marker_global)) continue;
+            LLVector3 pos_region = regionp->getPosRegionFromGlobal(marker_global);
+            if (pos_region.mV[VX] < 0.f || pos_region.mV[VX] > sSize3D || pos_region.mV[VY] < 0.f || pos_region.mV[VY] > sSize3D) continue;
+            F32 tx, ty, td;
+            fs3dProject(pos_region.mV[VX], pos_region.mV[VY], pos_region.mV[VZ] + 2.f, cam, tx, ty, td);
+            gGL.color4fv(kv.second.mColor.mV);
+            gl_circle_2d(tx, ty, mDotRadius, 16, true);
+            gGL.color4f(0.f, 0.f, 0.f, 0.85f);
+            gl_circle_2d(tx, ty, mDotRadius, 16, false);
         }
 
         // ── "you are here", at the agent's real height ── (terrain3d_view.js:533-551)

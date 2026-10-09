@@ -47,6 +47,7 @@
 #include "llagentcamera.h"
 #include "llfocusmgr.h"
 #include "llmoveview.h"
+#include "wolfdrive.h"   // <WolfViewer 2026-10-09/> wheel / pedals / gamepad driving
 
 #if LL_WINDOWS && !LL_MESA_HEADLESS
 // Require DirectInput version 8
@@ -1445,6 +1446,16 @@ void LLViewerJoystick::scanJoystick()
     {
         return;
     }
+
+    // <WolfViewer 2026-10-09> Seated with "Drive with this controller" on, the controller is the
+    // vehicle's wheel and pedals (wolfdrive.cpp): it sends the keyboard's flags itself and must
+    // not also toggle the flycam or move the avatar. Wolf Territories only: elsewhere joystickStep
+    // returns false at once and everything below is stock.
+    if (WolfDrive::instance().joystickStep(this))
+    {
+        return;
+    }
+    // </WolfViewer>
 
     static long toggle_flycam = 0;
 

@@ -32,6 +32,8 @@
 #endif
 
 #include "llviewermenu.h"
+#include "wolfgame.h"   // [WOLF GAME 2026-10-09/] Game Mode
+#include "wolfdrive.h"   // [WOLF DRIVE 2026-10-09/] the Car Dashboard toolbar button
 // <WolfViewer 2026-09-06> Wolf Territories-only features
 #include "wolfgrid.h"
 #include "wolfai.h"   // [FLOATER SPLIT 2026-09-11] WolfAI.CanUse
@@ -12985,6 +12987,9 @@ void initialize_menus()
     // share (wolfspeech.cpp, wolfscreenshare.cpp). Their menu items are hidden and their
     // toolbar buttons greyed on any other grid (WolfGrid.IsWolfTerritories, wolfgrid.h).
     enable.add("WolfGrid.IsWolfTerritories", boost::bind(&WolfGrid::isWolfTerritories));
+    // [WOLF GRID GATE 2026-10-09] Standing on a Wolf Territories region now (logged in there too):
+    // World > Game Mode / Roleplay and their toolbar buttons (wolfgrid.h, the Flight Mode gate).
+    enable.add("WolfGrid.IsOnWolfTerritories", boost::bind(&WolfGrid::isOnWolfTerritories));
     // [FLOATER SPLIT 2026-09-11] Build > Create a Model with AI is hidden unless this account
     // may actually use it: Wolf Territories AND the service says so (WolfAI reads the account
     // level from the grid). The service re-checks on every call, so this only decides whether
@@ -12999,6 +13004,39 @@ void initialize_menus()
     enable.add("WolfSpeech.IsDictating", boost::bind(&wolf_is_dictating));
     commit.add("WolfSpeech.ToggleReadAloud", boost::bind(&wolf_toggle_read_aloud));
     enable.add("WolfSpeech.IsReadingAloud", boost::bind(&WolfSpeech::isReadingAloud));
+    // [WOLF GAME 2026-10-09] Game Mode (VIEWER_SPEC.md §3.2): the toolbar button and World > Game
+    // Mode. Lit while on, or while turning on.
+    commit.add("WolfGame.ToggleGameMode", [](LLUICtrl*, const LLSD&)
+    {
+        // (While the region forces Game Mode, WolfGame.CanSwitch greys this command and the menu
+        // item, and their labels give the reason - wolfgame.cpp updateGameModeButtons.)
+        // [2026-10-09] Paul: no "wait a few seconds" box - the switch is always taken; when the
+        // region cannot take it yet it is sent as soon as it can, and the buttons say "Connecting...".
+        WolfGame& g = WolfGame::instance();
+        g.requestGameMode(!g.gameModeShownOn());
+    });
+    enable.add("WolfGame.IsGameMode", [](LLUICtrl*, const LLSD&) -> bool
+    {
+        return WolfGame::instance().gameModeShownOn();
+    });
+    // [FORCED 2026-10-09] The switch may be flipped: on Wolf Territories, and not on a region
+    // that requires Game Mode (VIEWER_SPEC.md §6).
+    enable.add("WolfGame.CanSwitch", [](LLUICtrl*, const LLSD&) -> bool
+    {
+        return WolfGrid::isOnWolfTerritories() && !WolfGame::instance().forced();
+    });
+    // [WOLF DRIVE 2026-10-09] the Car Dashboard toolbar button (wolfdrive.cpp): flips
+    // WolfDashboardMode, which WolfDrive::requestDashboard follows. Wolf Territories only: the
+    // button is removed elsewhere, and this does nothing there either.
+    commit.add("WolfDrive.ToggleDashboard", [](LLUICtrl*, const LLSD&)
+    {
+        if (!WolfGrid::isOnWolfTerritories()) return;
+        gSavedSettings.setBOOL("WolfDashboardMode", !WolfDrive::instance().dashboardOn());
+    });
+    enable.add("WolfDrive.IsDashboard", [](LLUICtrl*, const LLSD&) -> bool
+    {
+        return WolfDrive::instance().dashboardOn();
+    });
     // <WolfViewer 2026-09-10> the EEP toolbar button (every grid)
     commit.add("WolfEnv.ToggleEEP", boost::bind(&wolf_toggle_eep));
     enable.add("WolfEnv.IsEEP", boost::bind(&wolf_is_eep));

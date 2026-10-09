@@ -2300,20 +2300,27 @@ void LLIMProcessing::processNewMessage(LLUUID from_id,
 
         case IM_FRIENDSHIP_OFFERED:
         {
-
-            // <FS:PP> FIRE-15233: Automatic friendship request refusal
-            if (is_rejecting_friendship_requests)
-            {
-                send_rejecting_friendship_requests_message(gMessageSystem, from_id);
-                return;
-            }
-            // </FS:PP>
-
             LLSD payload;
             payload["from_id"] = from_id;
             payload["session_id"] = session_id;
             payload["online"] = (offline == IM_ONLINE);
             payload["sender"] = sender.getIPandPort();
+
+            // <FS:PP> FIRE-15233: Automatic friendship request refusal
+            if (is_rejecting_friendship_requests)
+            {
+                send_rejecting_friendship_requests_message(gMessageSystem, from_id);
+                // <WolfViewer 2026-10-09> Decline it as well (no toast for us; the grid tells
+                // the sender it was declined). Left undeclined the offer stays pending and the
+                // grid re-sends it at every login, so the sender got this auto-reply several
+                // times a day instead of once.
+                LLSD notification;
+                notification["payload"] = payload;
+                decline_friendship_offer(notification, -1);
+                // </WolfViewer>
+                return;
+            }
+            // </FS:PP>
 
             bool add_notification = true;
             for (auto& panel : LLToastNotifyPanel::instance_snapshot())

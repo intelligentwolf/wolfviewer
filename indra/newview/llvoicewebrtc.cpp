@@ -25,6 +25,7 @@
  */
 #include <algorithm>
 #include "llvoicewebrtc.h"
+#include "wolfgrid.h"   // [WOLF GRID GATE 2026-10-09/] wolf_move on Wolf Territories only
 
 #include "llsdutil.h"
 
@@ -104,6 +105,18 @@ namespace {
     // Don't send positional updates more frequently than this:
     const F32 UPDATE_THROTTLE_SECONDS = 0.1f;
     const F32 MAX_RETRY_WAIT_SECONDS  = 10.0f;
+
+    // <WolfViewer 2026-10-09>
+    // Receive-side fade on connection start/stop (Paul: voice "claps out"). 40 ms is inside the
+    // 30-50 ms asked for; the ramp is stepped once per frame (LLEventTimer::updateClass), so at
+    // 60 fps that is 2-3 gain steps instead of one hard cut.
+    const F32 WOLF_VOICE_FADE_SECONDS = 0.04f;
+    // Longest an old spatial session is kept for a make-before-break switch, or a stale-parcel
+    // hold / estate move is waited for. Equal to MAX_RETRY_WAIT_SECONDS: once the retry back-off
+    // has reached its ceiling the new connection is failing, and keeping the old channel any
+    // longer only leaves the user in the wrong parcel's conversation.
+    const F32 WOLF_VOICE_SWITCH_MAX_SECONDS = MAX_RETRY_WAIT_SECONDS;
+    // </WolfViewer>
 
     // Cosine of a "trivially" small angle
     const F32 FOUR_DEGREES = 4.0f * (F_PI / 180.0f);
@@ -265,6 +278,12 @@ void LLWebRTCVoiceClient::cleanupSingleton()
     {
         mNextSession->shutdownAllConnections();
     }
+    // <WolfViewer 2026-10-09>
+    if (mPreviousSession)
+    {
+        mPreviousSession->shutdownAllConnections();
+    }
+    // </WolfViewer>
     cleanUp();
     sessionState::clearSessions();
 
@@ -312,6 +331,12 @@ void LLWebRTCVoiceClient::cleanUp()
 {
     mNextSession.reset();
     mSession.reset();
+    // <WolfViewer 2026-10-09>
+    mPreviousSession.reset();
+    mWolfMovingConnection.reset();
+    mWolfSwitchTimer.stop();
+    mWolfParcelHoldTimer.stop();
+    // </WolfViewer>
     mNeighboringRegions.clear();
     sessionState::for_each(boost::bind(predShutdownSession, _1));
     LL_DEBUGS("Voice") << "Exiting" << LL_ENDL;
@@ -559,9 +584,22 @@ void LLWebRTCVoiceClient::voiceConnectionCoro()
 
                 voiceEnabled = voiceEnabled && regionp->isVoiceEnabled();
 
+                // <WolfViewer 2026-10-09> While the agent parcel still describes the region we
+                // came from (teleport / crossing, before this region's ParcelProperties), its
+                // local id and voice flags are not this region's: hold the current session
+                // instead of switching to a bogus channel or dropping voice on the old parcel's
+                // flags. The region's own flag above still turns voice off.
+                LLParcel *wolf_parcel = LLViewerParcelMgr::getInstance()->getAgentParcel();
+                bool      wolf_hold   = wolfHoldForParcelData(regionp, wolf_parcel);
+                if (voiceEnabled && wolf_hold)
+                {
+                    // keep the current session; positions still go out below.
+                }
+                else
+                // </WolfViewer>
                 if (voiceEnabled)
                 {
-                    LLParcel *parcel = LLViewerParcelMgr::getInstance()->getAgentParcel();
+                    LLParcel *parcel = wolf_parcel; // <WolfViewer 2026-10-09/> was getAgentParcel() again
                     // check to see if parcel changed.
                     if (parcel && parcel->getLocalID() != INVALID_PARCEL_ID)
                     {
@@ -577,11 +615,16 @@ void LLWebRTCVoiceClient::voiceConnectionCoro()
                             std::string channelID       = regionp->getRegionID().asString() + "-" + std::to_string(parcel->getLocalID());
 
                             useEstateVoice = false;
+                            wolfCancelStaleSwitch(false, channelID); // <WolfViewer 2026-10-09/>
                             if (!inOrJoiningChannel(channelID))
                             {
                                 startParcelSession(channelID, parcel_local_id);
                             }
                         }
+                    }
+                    if (voiceEnabled && useEstateVoice)
+                    {
+                        wolfCancelStaleSwitch(true, "Estate"); // <WolfViewer 2026-10-09/>
                     }
                     if (voiceEnabled && useEstateVoice && !inEstateChannel())
                     {
@@ -628,6 +671,7 @@ void LLWebRTCVoiceClient::voiceConnectionCoro()
                         return;
                     }
                     sessionState::processSessionStates();
+                    wolfCheckSwitchTimeout(); // <WolfViewer 2026-10-09/>
                     if (mProcessChannels && voiceEnabled && !mHidden)
                     {
                         sendPositionUpdate(false);
@@ -1019,6 +1063,18 @@ void LLWebRTCVoiceClient::OnConnectionEstablished(const std::string &channelID, 
         {
             if (mSession)
             {
+                // <WolfViewer 2026-10-09> make-before-break: a spatial session being replaced
+                // by a spatial one stays audible until the new one is UP (OnConnectionUp).
+                if (mSession->isSpatial() && mNextSession->isSpatial() && !mSession->mShuttingDown)
+                {
+                    if (mPreviousSession && mPreviousSession != mSession)
+                    {
+                        mPreviousSession->shutdownAllConnections();
+                    }
+                    mPreviousSession = mSession;
+                }
+                else
+                // </WolfViewer>
                 mSession->shutdownAllConnections();
             }
             mSession = mNextSession;
@@ -1079,6 +1135,281 @@ void LLWebRTCVoiceClient::OnConnectionFailure(const std::string                 
         }
     }
 }
+
+// <WolfViewer 2026-10-09> Voice that stays connected and moves you (see llvoicewebrtc.h).
+
+// wolf_move is a wolfvoice extension (wolfstorm/wolfvoice/VOICE_MOVE.md); never send it to
+// Second Life's voice service.
+bool LLWebRTCVoiceClient::wolfMoveAllowed() const
+{
+#ifdef OPENSIM
+    // [WOLF GRID GATE 2026-10-09] Only Wolf Territories' voice service knows wolf_move: on any
+    // other grid (or a hypergrid jump away) the stock path is used and nothing is sent.
+    return !LLGridManager::getInstance()->isInSecondLife() && WolfGrid::isOnWolfTerritories();
+#else
+    return false;
+#endif
+}
+
+// The same notifications OnConnectionEstablished sends when the current session comes up.
+void LLWebRTCVoiceClient::wolfNotifySessionJoined()
+{
+    LLViewerRegion* regionp = gAgent.getRegion();
+    if (!mSession || !regionp)
+    {
+        return;
+    }
+    mSession->addParticipant(gAgentID, regionp->getRegionID());
+    notifyStatusObservers(LLVoiceClientStatusObserver::STATUS_LOGGED_IN);
+    if (!mSession->mNotifyOnFirstJoin)
+    {
+        notifyStatusObservers(LLVoiceClientStatusObserver::STATUS_JOINED);
+    }
+}
+
+// The new current session's connection to the agent's region has joined: the old session
+// (kept by OnConnectionEstablished) can go now, with its fade-out.
+void LLWebRTCVoiceClient::OnConnectionUp(const std::string& channelID, const LLUUID& regionID)
+{
+    LLViewerRegion* regionp = gAgent.getRegion();
+    if (!regionp || regionp->getRegionID() != regionID)
+    {
+        return;
+    }
+    if (mPreviousSession && mSession && mSession->mChannelID == channelID)
+    {
+        wolfRetirePreviousSession();
+    }
+}
+
+void LLWebRTCVoiceClient::wolfRetirePreviousSession()
+{
+    if (mPreviousSession)
+    {
+        LL_INFOS("Voice") << "Make-before-break: leaving " << mPreviousSession->mChannelID << LL_ENDL;
+        mPreviousSession->shutdownAllConnections();
+        mPreviousSession.reset();
+    }
+    if (!(mNextSession && mSession))
+    {
+        mWolfSwitchTimer.stop();
+    }
+}
+
+// Overlap cap: past it, fall back to the stock behaviour (old channel gone, wait for the new).
+void LLWebRTCVoiceClient::wolfCheckSwitchTimeout()
+{
+    if (!mWolfSwitchTimer.getStarted() || mWolfSwitchTimer.getElapsedTimeF32() < WOLF_VOICE_SWITCH_MAX_SECONDS)
+    {
+        return;
+    }
+    LL_WARNS("Voice") << "Voice switch still not up after " << WOLF_VOICE_SWITCH_MAX_SECONDS
+                      << " s; dropping the old channel" << LL_ENDL;
+    wolfRetirePreviousSession();
+    if (mNextSession && mSession && mSession->isSpatial())
+    {
+        deleteSession(mSession);
+    }
+    mWolfSwitchTimer.stop();
+}
+
+// The current session is again the channel we want, but an older switch is still negotiating:
+// with the old session kept up that switch is stale (stock code never had both, because it
+// left the old channel first).
+void LLWebRTCVoiceClient::wolfCancelStaleSwitch(bool want_estate, const std::string& channelID)
+{
+    if (!mSession || !mNextSession)
+    {
+        return;
+    }
+    bool session_matches = want_estate ? mSession->isEstate() : (mSession->mChannelID == channelID);
+    bool next_matches    = want_estate ? mNextSession->isEstate() : (mNextSession->mChannelID == channelID);
+    if (session_matches && !next_matches)
+    {
+        deleteSession(mNextSession);
+        if (!mPreviousSession)
+        {
+            mWolfSwitchTimer.stop();
+        }
+    }
+}
+
+// True while the agent parcel is still the previous region's (LLViewerParcelMgr stamps every
+// parcel it unpacks with the sender region, llviewerparcelmgr.cpp processParcelProperties
+// "store region_id in the parcel"), capped at WOLF_VOICE_SWITCH_MAX_SECONDS.
+// Region voice flags need no hold: a new LLViewerRegion starts with REGION_FLAGS_DEFAULT, which
+// includes REGION_FLAGS_ALLOW_VOICE (llregionflags.h), so it cannot read "off" before its
+// handshake.
+bool LLWebRTCVoiceClient::wolfHoldForParcelData(LLViewerRegion* regionp, LLParcel* parcel)
+{
+    bool hold = (mSession || mNextSession) && regionp && parcel &&
+                parcel->getRegionID().notNull() && parcel->getRegionID() != regionp->getRegionID();
+    if (!hold)
+    {
+        mWolfParcelHoldTimer.stop();
+        return false;
+    }
+    if (!mWolfParcelHoldTimer.getStarted())
+    {
+        mWolfParcelHoldTimer.start();
+    }
+    return mWolfParcelHoldTimer.getElapsedTimeF32() < WOLF_VOICE_SWITCH_MAX_SECONDS;
+}
+
+// Spatial session switch. Returns false when there is no live spatial session to keep, so the
+// caller does the stock leave-then-join.
+bool LLWebRTCVoiceClient::wolfSwitchSpatialSession(const std::string& channelID, S32 parcel_local_id,
+                                                   const std::function<sessionStatePtr_t(bool)>& make_session)
+{
+    if (mWolfMovingConnection)
+    {
+        return true; // one move at a time; the voice loop asks again next tick
+    }
+    LLViewerRegion* regionp = gAgent.getRegion();
+    if (!regionp || !mSession || !mSession->isSpatial() || mSession->mShuttingDown)
+    {
+        return false;
+    }
+
+    // Straight back to the channel we were leaving, still up: take it back.
+    if (mPreviousSession && mPreviousSession->mChannelID == channelID && !mPreviousSession->mShuttingDown)
+    {
+        deleteSession(mNextSession);
+        sessionStatePtr_t abandoned = mSession;
+        mSession = mPreviousSession;
+        mPreviousSession.reset();
+        abandoned->shutdownAllConnections();
+        mWolfSwitchTimer.stop();
+        wolfNotifySessionJoined();
+        return true;
+    }
+
+    // A session of that channel is still closing. addSession() would revive it, and a revived
+    // parcel session never gets a connection again (only estateSessionState rebuilds its own);
+    // wait until processSessionStates() has reaped it.
+    sessionStatePtr_t namesake = sessionState::matchSessionByChannelID(channelID);
+    if (namesake && namesake->mShuttingDown)
+    {
+        return true;
+    }
+
+    // 1) wolf_move: keep the PeerConnection, re-key it into the new room.
+    if (wolfMoveAllowed())
+    {
+        connectionPtr_t connection = mSession->wolfMovableConnection(regionp->getRegionID());
+        if (connection)
+        {
+            if (!regionp->capabilitiesReceived() || regionp->getCapability("ProvisionVoiceAccountRequest").empty())
+            {
+                return true; // the move goes through this region's cap; wait for it
+            }
+            deleteSession(mNextSession);
+            mWolfMovingConnection = connection;
+            sessionState::wptr_t from = mSession;
+            std::static_pointer_cast<LLVoiceWebRTCSpatialConnection>(connection)->wolfRequestMove(
+                regionp->getRegionID(), parcel_local_id, channelID,
+                [this, connection, from, channelID, parcel_local_id, make_session](bool moved)
+                {
+                    if (mWolfMovingConnection == connection)
+                    {
+                        mWolfMovingConnection.reset();
+                    }
+                    sessionStatePtr_t from_session = from.lock();
+                    if (from_session)
+                    {
+                        wolfOnParcelMoveResult(connection, moved, channelID, parcel_local_id, make_session);
+                    }
+                });
+            return true;
+        }
+    }
+
+    // 2) Make-before-break: the new channel negotiates while the current one stays audible.
+    deleteSession(mNextSession);
+    mNextSession = addSession(channelID, make_session(true));
+    mWolfSwitchTimer.start();
+    return true;
+}
+
+void LLWebRTCVoiceClient::wolfOnParcelMoveResult(const connectionPtr_t& connection, bool moved,
+                                                 const std::string& channelID, S32 parcel_local_id,
+                                                 const std::function<sessionStatePtr_t(bool)>& make_session)
+{
+    if (sShuttingDown || connection->isShuttingDown())
+    {
+        return; // we left voice meanwhile; that connection is closing and logs out
+    }
+    sessionStatePtr_t from = mSession;
+    if (!from || !from->wolfOwnsConnection(connection))
+    {
+        // The current session changed under the move: we cannot account for this connection's
+        // room any more, so close it.
+        connection->shutDown();
+        return;
+    }
+
+    if (!moved)
+    {
+        // Refused (old relay, old wolfvoice, unknown session...): VOICE_MOVE.md says fall back
+        // to a fresh provision, make-before-break.
+        LL_INFOS("Voice") << "wolf_move refused; rebuilding " << channelID << " make-before-break" << LL_ENDL;
+        sessionStatePtr_t namesake = sessionState::matchSessionByChannelID(channelID);
+        if (!(namesake && namesake->mShuttingDown))
+        {
+            deleteSession(mNextSession);
+            mNextSession = addSession(channelID, make_session(true));
+            mWolfSwitchTimer.start();
+        }
+        return;
+    }
+
+    // Moved: same transport, new room. Hand the connection to a session for the new channel and
+    // drop the rest of the old session (an estate session's neighbour connections when we move
+    // into a parcel channel; nothing else when we move out of one).
+    from->wolfDetachConnection(connection);
+    sessionStatePtr_t to = addSession(channelID, make_session(false));
+    to->wolfAdoptConnection(connection);
+    mSession = to;
+    from->shutdownAllConnections();
+    wolfRetirePreviousSession();
+    deleteSession(mNextSession);
+    mWolfSwitchTimer.stop();
+    connection->wolfRejoinAfterMove();
+    wolfNotifySessionJoined();
+    LL_INFOS("Voice") << "Voice moved to " << channelID << " (parcel " << parcel_local_id << ") on the same connection" << LL_ENDL;
+}
+
+// Estate path (estateSessionState::processConnectionStates): after a teleport the old primary
+// left the neighbour set; move it to the agent's region instead of shutting it down.
+bool LLWebRTCVoiceClient::wolfStartEstateMove(const connectionPtr_t& connection, const LLUUID& region_id)
+{
+    if (!wolfMoveAllowed() || mWolfMovingConnection)
+    {
+        return false;
+    }
+    mWolfMovingConnection = connection;
+    std::static_pointer_cast<LLVoiceWebRTCSpatialConnection>(connection)->wolfRequestMove(
+        region_id, INVALID_PARCEL_ID, "Estate",
+        [this, connection](bool moved)
+        {
+            if (mWolfMovingConnection == connection)
+            {
+                mWolfMovingConnection.reset();
+            }
+            if (moved && !sShuttingDown && !connection->isShuttingDown())
+            {
+                connection->wolfRejoinAfterMove();
+                if (mSession && mSession->isEstate() && mSession->wolfOwnsConnection(connection))
+                {
+                    wolfNotifySessionJoined();
+                }
+            }
+            // Refused: the connection is marked refused and the estate loop shuts it down and
+            // builds the new region's connection the stock way on its next pass.
+        });
+    return true;
+}
+// </WolfViewer>
 
 // -----------------------------------------------------------
 // positional functionality.
@@ -1474,6 +1805,13 @@ void LLWebRTCVoiceClient::sessionState::removeAllParticipants(const LLUUID &regi
 // Initiated the various types of sessions.
 bool LLWebRTCVoiceClient::startEstateSession()
 {
+    // <WolfViewer 2026-10-09> move or make-before-break instead of leave-then-join
+    if (wolfSwitchSpatialSession("Estate", INVALID_PARCEL_ID,
+                                 [](bool create_connection) { return sessionStatePtr_t(new estateSessionState(create_connection)); }))
+    {
+        return true;
+    }
+    // </WolfViewer>
     leaveChannel(false);
     mNextSession = addSession("Estate", sessionState::ptr_t(new estateSessionState()));
     return true;
@@ -1481,6 +1819,14 @@ bool LLWebRTCVoiceClient::startEstateSession()
 
 bool LLWebRTCVoiceClient::startParcelSession(const std::string &channelID, S32 parcelID)
 {
+    // <WolfViewer 2026-10-09> move or make-before-break instead of leave-then-join
+    if (wolfSwitchSpatialSession(channelID, parcelID,
+                                 [channelID, parcelID](bool create_connection)
+                                 { return sessionStatePtr_t(new parcelSessionState(channelID, parcelID, create_connection)); }))
+    {
+        return true;
+    }
+    // </WolfViewer>
     leaveChannel(false);
     mNextSession = addSession(channelID, sessionState::ptr_t(new parcelSessionState(channelID, parcelID)));
     return true;
@@ -1620,6 +1966,18 @@ void LLWebRTCVoiceClient::leaveChannel(bool stopTalking)
     {
         deleteSession(mNextSession);
     }
+
+    // <WolfViewer 2026-10-09> the session kept by a make-before-break switch goes too; a move in
+    // flight is forgotten (its connection was shut down with its session, and the move result
+    // only re-homes a connection the current session still owns).
+    if (mPreviousSession)
+    {
+        mPreviousSession->shutdownAllConnections();
+        mPreviousSession.reset();
+    }
+    mWolfMovingConnection.reset();
+    mWolfSwitchTimer.stop();
+    // </WolfViewer>
 
     // If voice was on, turn it off
     if (stopTalking && LLVoiceClient::getInstance()->getUserPTTState())
@@ -2133,6 +2491,50 @@ void LLWebRTCVoiceClient::sessionState::shutdownAllConnections()
     }
 }
 
+// <WolfViewer 2026-10-09> wolf_move: hand a live connection between sessions.
+void LLWebRTCVoiceClient::sessionState::wolfAdoptConnection(const connectionPtr_t& connection)
+{
+    if (connection && !wolfOwnsConnection(connection))
+    {
+        mWebRTCConnections.push_back(connection);
+    }
+}
+
+void LLWebRTCVoiceClient::sessionState::wolfDetachConnection(const connectionPtr_t& connection)
+{
+    mWebRTCConnections.remove(connection);
+}
+
+bool LLWebRTCVoiceClient::sessionState::wolfOwnsConnection(const connectionPtr_t& connection)
+{
+    return std::find(mWebRTCConnections.begin(), mWebRTCConnections.end(), connection) != mWebRTCConnections.end();
+}
+
+// The connection a channel change would otherwise rebuild: this session's joined connection to
+// the agent's region; for a parcel session (one connection, no neighbours) its connection even
+// when it is still to the region we teleported away from.
+connectionPtr_t LLWebRTCVoiceClient::sessionState::wolfMovableConnection(const LLUUID& agent_region)
+{
+    connectionPtr_t fallback;
+    for (auto& connection : mWebRTCConnections)
+    {
+        if (!connection->isSpatial() || !connection->wolfIsUp() || connection->wolfIsMoving() || connection->wolfMoveRefused())
+        {
+            continue;
+        }
+        if (connection->getRegionID() == agent_region)
+        {
+            return connection;
+        }
+        if (!isEstate() && !fallback)
+        {
+            fallback = connection;
+        }
+    }
+    return fallback;
+}
+// </WolfViewer>
+
 // in case we drop into a session (spatial, etc.) right after
 // telling the session to shut down, revive it so it reconnects.
 void LLWebRTCVoiceClient::sessionState::revive()
@@ -2228,6 +2630,32 @@ bool LLWebRTCVoiceClient::estateSessionState::processConnectionStates()
         // Estate voice requires connection to neighboring regions.
         std::set<LLUUID> neighbor_ids = LLWebRTCVoiceClient::getInstance()->getNeighboringRegions();
 
+        // <WolfViewer 2026-10-09> Teleport (or a crossing with FSDisableNeighbourRegionConnections):
+        // the agent's region has no connection of ours, and the old primary just fell out of the
+        // neighbour set. Stock code shut it down and built a new one from scratch; move it into
+        // the agent's region instead (wolf_move), and only fall back to the stock path when the
+        // move is refused, the region is not WebRTC, or WOLF_VOICE_SWITCH_MAX_SECONDS pass.
+        LLWebRTCVoiceClient* client = LLWebRTCVoiceClient::getInstance();
+        LLViewerRegion* agent_region = gAgent.getRegion();
+        LLUUID agent_region_id = agent_region ? agent_region->getRegionID() : LLUUID::null;
+        bool agent_region_covered = agent_region_id.isNull();
+        for (auto &connection : mWebRTCConnections)
+        {
+            if (!connection->isShuttingDown() && connection->getRegionID() == agent_region_id)
+            {
+                agent_region_covered = true;
+            }
+        }
+        // Remember where we were primary. Not mPrimary itself: the connection's own UP state can
+        // flip that off on the very tick the agent's region changes, before this loop sees it.
+        bool had_last_region = mWolfLastAgentRegion.notNull();
+        LLUUID last_agent_region = mWolfLastAgentRegion;
+        if (agent_region_covered && agent_region_id.notNull())
+        {
+            mWolfLastAgentRegion = agent_region_id;
+        }
+        // </WolfViewer>
+
         for (auto &connection : mWebRTCConnections)
         {
             std::shared_ptr<LLVoiceWebRTCSpatialConnection> spatialConnection =
@@ -2237,6 +2665,46 @@ bool LLWebRTCVoiceClient::estateSessionState::processConnectionStates()
 
             if (neighbor_ids.find(regionID) == neighbor_ids.end())
             {
+                // <WolfViewer 2026-10-09>
+                if (spatialConnection->wolfIsMoving())
+                {
+                    // on its way to the agent's region: keep it, build nothing there.
+                    neighbor_ids.erase(agent_region_id);
+                    agent_region_covered = true;
+                    continue;
+                }
+                LLFrameTimer& orphan = spatialConnection->wolfOrphanTimer();
+                bool candidate = !agent_region_covered && !spatialConnection->isShuttingDown() &&
+                                 !spatialConnection->wolfMoveRefused() && client->wolfMoveAllowed() &&
+                                 (orphan.getStarted() ||
+                                  (had_last_region && regionID == last_agent_region && spatialConnection->wolfIsUp()));
+                if (candidate && agent_region->simulatorFeaturesReceived() && !isRegionWebRTCEnabled(agent_region_id))
+                {
+                    candidate = false; // the destination is not WebRTC voice: nothing to move into
+                }
+                if (candidate)
+                {
+                    if (!orphan.getStarted())
+                    {
+                        orphan.start();
+                    }
+                    if (orphan.getElapsedTimeF32() < WOLF_VOICE_SWITCH_MAX_SECONDS)
+                    {
+                        if (agent_region->capabilitiesReceived() &&
+                            !agent_region->getCapability("ProvisionVoiceAccountRequest").empty() &&
+                            isRegionWebRTCEnabled(agent_region_id) && spatialConnection->wolfIsUp())
+                        {
+                            client->wolfStartEstateMove(connection, agent_region_id);
+                        }
+                        // moving, or waiting for the destination's caps/features: keep this one
+                        // and do not build a second connection to the agent's region.
+                        neighbor_ids.erase(agent_region_id);
+                        agent_region_covered = true;
+                        continue;
+                    }
+                }
+                orphan.stop();
+                // </WolfViewer>
                 // shut down connections to neighbors that are too far away.
                 spatialConnection.get()->shutDown();
             }
@@ -2277,23 +2745,29 @@ bool LLWebRTCVoiceClient::estateSessionState::processConnectionStates()
 
 // Various session state constructors.
 
-LLWebRTCVoiceClient::estateSessionState::estateSessionState()
+LLWebRTCVoiceClient::estateSessionState::estateSessionState(bool create_connection)
 {
     mHangupOnLastLeave = false;
     mNotifyOnFirstJoin = false;
     mChannelID         = "Estate";
     LLUUID region_id   = gAgent.getRegion()->getRegionID();
 
-    mWebRTCConnections.emplace_back(new LLVoiceWebRTCSpatialConnection(region_id, INVALID_PARCEL_ID, "Estate"));
+    if (create_connection) // <WolfViewer 2026-10-09/> false: a moved connection is adopted
+    {
+        mWebRTCConnections.emplace_back(new LLVoiceWebRTCSpatialConnection(region_id, INVALID_PARCEL_ID, "Estate"));
+    }
 }
 
-LLWebRTCVoiceClient::parcelSessionState::parcelSessionState(const std::string &channelID, S32 parcel_local_id)
+LLWebRTCVoiceClient::parcelSessionState::parcelSessionState(const std::string &channelID, S32 parcel_local_id, bool create_connection)
 {
     mHangupOnLastLeave = false;
     mNotifyOnFirstJoin = false;
     LLUUID region_id   = gAgent.getRegion()->getRegionID();
     mChannelID         = channelID;
-    mWebRTCConnections.emplace_back(new LLVoiceWebRTCSpatialConnection(region_id, parcel_local_id, channelID));
+    if (create_connection) // <WolfViewer 2026-10-09/> false: a moved connection is adopted
+    {
+        mWebRTCConnections.emplace_back(new LLVoiceWebRTCSpatialConnection(region_id, parcel_local_id, channelID));
+    }
 }
 
 LLWebRTCVoiceClient::adhocSessionState::adhocSessionState(const std::string &channelID,
@@ -2533,7 +3007,9 @@ void LLVoiceWebRTCConnection::processIceUpdatesCoro(connectionPtr_t connection)
             connection->mIceCompleted   = false;
         }
 
-        body["viewer_session"]    = connection->mViewerSession;
+        // <WolfViewer 2026-10-09> before the provision answer this was the null uuid; keep that
+        body["viewer_session"]    = connection->mViewerSession.isUndefined() ? LLSD(LLUUID::null) : connection->mViewerSession;
+        // </WolfViewer>
         body["voice_server_type"] = WEBRTC_VOICE_SERVER_TYPE;
 
         LLCoreHttpUtil::HttpCoroutineAdapter::ptr_t httpAdapter =
@@ -2620,6 +3096,12 @@ void LLVoiceWebRTCConnection::OnAudioEstablished(llwebrtc::LLWebRTCAudioInterfac
             LL_DEBUGS("Voice") << "On AudioEstablished." << LL_ENDL;
             connection->mWebRTCAudioInterface = audio_interface;
             connection->mWebRTCAudioInterface->setMute(true);  // mute will be set appropriately later when we finish setting up.
+            // <WolfViewer 2026-10-09> receive silently until VOICE_STATE_SESSION_UP fades it in
+            connection->mWolfFadeGeneration++;
+            connection->mWolfFading   = false;
+            connection->mWolfFadeGain = 0.f;
+            connection->wolfApplyReceiveVolume();
+            // </WolfViewer>
             connection->setVoiceConnectionState(VOICE_STATE_SESSION_ESTABLISHED);
         });
 }
@@ -2674,11 +3156,75 @@ void LLVoiceWebRTCConnection::setMuteMic(bool muted)
 void LLVoiceWebRTCConnection::setSpeakerVolume(F32 volume)
 {
     mSpeakerVolume = volume;
+    // <WolfViewer 2026-10-09> scaled by the start/stop fade (a running ramp reads mSpeakerVolume)
+    wolfApplyReceiveVolume();
+    // </WolfViewer>
+}
+
+// <WolfViewer 2026-10-09>
+void LLVoiceWebRTCConnection::wolfApplyReceiveVolume()
+{
     if (mWebRTCAudioInterface)
     {
-        mWebRTCAudioInterface->setReceiveVolume(volume);
+        mWebRTCAudioInterface->setReceiveVolume(mSpeakerVolume * mWolfFadeGain);
     }
 }
+
+// Ramp mWolfFadeGain to target over WOLF_VOICE_FADE_SECONDS, stepped once per frame by
+// doPeriodically (llcallbacklist.h; LLEventTimer::updateClass fires a 0 s period every frame).
+// The ramp holds a reference to the connection and its own audio-interface pointer, so it stays
+// valid while breakVoiceConnectionCoro clears mWebRTCAudioInterface; after shutdownConnection()
+// setReceiveVolume() is a no-op (it checks mPeerConnection, llwebrtc.cpp).
+void LLVoiceWebRTCConnection::wolfFadeReceiveTo(F32 target)
+{
+    const U32 generation = ++mWolfFadeGeneration;
+    llwebrtc::LLWebRTCAudioInterface* audio = mWebRTCAudioInterface;
+    if (!audio || LLWebRTCVoiceClient::isShuttingDown())
+    {
+        mWolfFading   = false;
+        mWolfFadeGain = target;
+        return;
+    }
+    mWolfFading = true;
+    const F32 start      = mWolfFadeGain;
+    const F64 start_time = LLTimer::getTotalSeconds();
+    connectionPtr_t connection = shared_from_this();
+    doPeriodically(
+        [connection, audio, generation, start, target, start_time]() -> bool
+        {
+            if (LLWebRTCVoiceClient::isShuttingDown() || connection->mWolfFadeGeneration != generation)
+            {
+                return true; // superseded by a newer fade, or the viewer is quitting
+            }
+            F32 t = (F32)((LLTimer::getTotalSeconds() - start_time) / WOLF_VOICE_FADE_SECONDS);
+            t = llclamp(t, 0.f, 1.f);
+            connection->mWolfFadeGain = (t >= 1.f) ? target : start + (target - start) * t;
+            audio->setReceiveVolume(connection->mSpeakerVolume * connection->mWolfFadeGain);
+            if (t >= 1.f)
+            {
+                connection->mWolfFading = false;
+                return true;
+            }
+            return false;
+        },
+        0.f);
+}
+
+void LLVoiceWebRTCConnection::wolfRejoinAfterMove()
+{
+    mWolfOrphanTimer.stop();
+    LLViewerRegion* regionp = gAgent.getRegion();
+    mPrimary = regionp && regionp->getRegionID() == mRegionID;
+    if (mWebRTCAudioInterface)
+    {
+        mWebRTCAudioInterface->setMute(mMuted || !mPrimary);
+    }
+    // VOICE_MOVE.md: after wolf_moved, send the join again and keep sending positions.
+    sendJoin();
+    LLWebRTCVoiceClient::getInstance()->updatePosition();
+    LLWebRTCVoiceClient::getInstance()->sendPositionUpdate(true);
+}
+// </WolfViewer>
 
 void LLVoiceWebRTCConnection::setUserVolume(const LLUUID& id, F32 volume)
 {
@@ -2727,6 +3273,17 @@ void LLVoiceWebRTCConnection::breakVoiceConnectionCoro(connectionPtr_t connectio
     }
     connection->mWebRTCAudioInterface   = nullptr;
     LLViewerRegion *regionp = LLWorld::instance().getRegionFromID(connection->mRegionID);
+    // <WolfViewer 2026-10-09> A connection that is being shut down whose region is gone (we
+    // teleported away and LLWorld dropped it) used to bounce RETRY -> DISCONNECT -> here forever
+    // and never close. The logout is only a courtesy (see below); close the transport.
+    std::string url = (regionp && regionp->capabilitiesReceived()) ? regionp->getCapability("ProvisionVoiceAccountRequest") : std::string();
+    if (url.empty() && connection->mShutDown)
+    {
+        connection->setVoiceConnectionState(VOICE_STATE_SESSION_EXIT);
+        connection->mOutstandingRequests--;
+        return;
+    }
+    // </WolfViewer>
     if (!regionp || !regionp->capabilitiesReceived())
     {
         LL_DEBUGS("Voice") << "no capabilities for voice provisioning; waiting " << LL_ENDL;
@@ -2735,7 +3292,6 @@ void LLVoiceWebRTCConnection::breakVoiceConnectionCoro(connectionPtr_t connectio
         return;
     }
 
-    std::string url = regionp->getCapability("ProvisionVoiceAccountRequest");
     if (url.empty())
     {
         connection->setVoiceConnectionState(VOICE_STATE_SESSION_RETRY);
@@ -2748,7 +3304,9 @@ void LLVoiceWebRTCConnection::breakVoiceConnectionCoro(connectionPtr_t connectio
     LLVoiceWebRTCStats::getInstance()->provisionAttemptStart();
     LLSD body;
     body["logout"]         = true;
-    body["viewer_session"] = connection->mViewerSession;
+    // <WolfViewer 2026-10-09> before the provision answer this was the null uuid; keep that
+    body["viewer_session"] = connection->mViewerSession.isUndefined() ? LLSD(LLUUID::null) : connection->mViewerSession;
+    // </WolfViewer>
     body["voice_server_type"] = WEBRTC_VOICE_SERVER_TYPE;
 
     LLCoreHttpUtil::HttpCoroutineAdapter::ptr_t httpAdapter =
@@ -2873,7 +3431,19 @@ void LLVoiceWebRTCConnection::OnVoiceConnectionRequestSuccess(const LLSD &result
         result["jsep"].has("sdp"))
     {
         mRemoteChannelSDP = result["jsep"]["sdp"].asString();
-        mViewerSession    = result["viewer_session"];
+        // <WolfViewer 2026-10-09> a real uuid is stored as LLUUID exactly as before (Second Life
+        // gets back what it always got); anything else (wolfvoice "wv-<uuid>") is kept verbatim.
+        // Was: mViewerSession = result["viewer_session"]; into an LLUUID.
+        const LLSD& viewer_session = result["viewer_session"];
+        if (viewer_session.isUUID() || LLUUID::validate(viewer_session.asString()))
+        {
+            mViewerSession = viewer_session.asUUID();
+        }
+        else
+        {
+            mViewerSession = viewer_session;
+        }
+        // </WolfViewer>
     }
     else
     {
@@ -2949,6 +3519,7 @@ bool LLVoiceWebRTCConnection::connectionStateMachine()
                 break;
             }
             mIceCompleted = false;
+            mWolfFadingOut = false; // <WolfViewer 2026-10-09/> a restarted connection may fade out again
             setVoiceConnectionState(VOICE_STATE_WAIT_FOR_SESSION_START);
 
             // tell the webrtc library that we want a connection.  The library will
@@ -3008,7 +3579,7 @@ bool LLVoiceWebRTCConnection::connectionStateMachine()
                 // we'll determine primary state later and set mute accordinly
                 mPrimary = false;
             }
-            mWebRTCAudioInterface->setReceiveVolume(mSpeakerVolume);
+            wolfApplyReceiveVolume(); // <WolfViewer 2026-10-09/> was setReceiveVolume(mSpeakerVolume): silent until UP
             LLWebRTCVoiceClient::getInstance()->OnConnectionEstablished(mChannelID, mRegionID);
             setVoiceConnectionState(VOICE_STATE_WAIT_FOR_DATA_CHANNEL);
             break;
@@ -3034,6 +3605,11 @@ bool LLVoiceWebRTCConnection::connectionStateMachine()
                 {
                     mWebRTCAudioInterface->setMute(mMuted);
                 }
+                // <WolfViewer 2026-10-09> fade in, and let a make-before-break switch drop the
+                // session this one replaces.
+                wolfFadeReceiveTo(1.f);
+                LLWebRTCVoiceClient::getInstance()->OnConnectionUp(mChannelID, mRegionID);
+                // </WolfViewer>
             }
             break;
         }
@@ -3050,7 +3626,10 @@ bool LLVoiceWebRTCConnection::connectionStateMachine()
             }
             else
             {
-                if (isSpatial() && gAgent.getRegion())
+                // <WolfViewer 2026-10-09> a primary waiting for / in a wolf_move keeps primary;
+                // wolfRejoinAfterMove() sets it for the new region.
+                if (isSpatial() && gAgent.getRegion() && !mWolfMoving && !mWolfOrphanTimer.getStarted())
+                // </WolfViewer>
                 {
                     bool primary = (mRegionID == gAgent.getRegion()->getRegionID());
                     if (primary != mPrimary)
@@ -3086,6 +3665,22 @@ bool LLVoiceWebRTCConnection::connectionStateMachine()
             break;
 
         case VOICE_STATE_DISCONNECT:
+            // <WolfViewer 2026-10-09> fade the received audio out before the logout and the
+            // peer-connection shutdown cut it (the state machine runs every 100 ms, the fade
+            // takes WOLF_VOICE_FADE_SECONDS, so this waits one tick).
+            if (!LLWebRTCVoiceClient::isShuttingDown() && mWebRTCAudioInterface && mWolfFadeGain > 0.f)
+            {
+                if (!mWolfFadingOut)
+                {
+                    mWolfFadingOut = true;
+                    wolfFadeReceiveTo(0.f);
+                }
+                if (mWolfFading)
+                {
+                    break;
+                }
+            }
+            // </WolfViewer>
             if (!LLWebRTCVoiceClient::isShuttingDown())
             {
                 mOutstandingRequests++;
@@ -3391,6 +3986,79 @@ void LLVoiceWebRTCSpatialConnection::setMuteMic(bool muted)
         }
     }
 }
+
+// <WolfViewer 2026-10-09> wolf_move request. Wire format: wolfstorm/wolfvoice/VOICE_MOVE.md
+// "Request"; server side App::move_session (wolfvoice src/main.rs), relayed by WolfSim's
+// WebRtcVoiceServiceModule.ProvisionVoiceAccountRequest, which registers the moving session in
+// the new region so its ICE and logout route there too.
+void LLVoiceWebRTCSpatialConnection::wolfRequestMove(const LLUUID& region_id, S32 parcel_local_id,
+                                                     const std::string& channel_id, std::function<void(bool)> done)
+{
+    mWolfMoving = true;
+    mOutstandingRequests++;
+    std::shared_ptr<LLVoiceWebRTCSpatialConnection> connection =
+        std::static_pointer_cast<LLVoiceWebRTCSpatialConnection>(shared_from_this());
+    LLCoros::instance().launch("LLVoiceWebRTCSpatialConnection::wolfRequestMove",
+        [connection, region_id, parcel_local_id, channel_id, done]()
+        {
+            LL_PROFILE_ZONE_SCOPED_CATEGORY_VOICE;
+            bool moved = false;
+            LLViewerRegion* regionp = LLWorld::instance().getRegionFromID(region_id);
+            std::string url = (regionp && regionp->capabilitiesReceived()) ? regionp->getCapability("ProvisionVoiceAccountRequest")
+                                                                            : std::string();
+            // the session id the server gave us is the whole key; without it there is nothing to move
+            bool have_session = connection->mViewerSession.isString() && !connection->mViewerSession.asString().empty();
+            if (!LLWebRTCVoiceClient::isShuttingDown() && !url.empty() && have_session)
+            {
+                LLSD body;
+                body["voice_server_type"] = WEBRTC_VOICE_SERVER_TYPE;
+                body["channel_type"]      = "local";
+                body["viewer_session"]    = connection->mViewerSession;
+                body["wolf_move"]         = true;
+                if (parcel_local_id != INVALID_PARCEL_ID)
+                {
+                    body["parcel_local_id"] = parcel_local_id; // exactly as requestVoiceConnection() sends it
+                }
+
+                LLCoreHttpUtil::HttpCoroutineAdapter::ptr_t httpAdapter =
+                    std::make_shared<LLCoreHttpUtil::HttpCoroutineAdapter>("LLVoiceWebRTCSpatialConnection::wolfRequestMove",
+                                                                           LLCore::HttpRequest::DEFAULT_POLICY_ID);
+                LLCore::HttpRequest::ptr_t httpRequest = std::make_shared<LLCore::HttpRequest>();
+                LLCore::HttpOptions::ptr_t httpOpts    = std::make_shared<LLCore::HttpOptions>();
+                httpOpts->setWantHeaders(true);
+
+                LLSD result = httpAdapter->postAndSuspend(httpRequest, url, body, httpOpts);
+
+                LLSD httpResults = result[LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS];
+                LLCore::HttpStatus status = LLCoreHttpUtil::HttpCoroutineAdapter::getStatusFromLLSD(httpResults);
+                // VOICE_MOVE.md "Answers": success is a map with wolf_moved = true; anything else
+                // (non-200, no wolf_moved, an error key) is a refusal.
+                moved = status && result.has("wolf_moved") && result["wolf_moved"].asBoolean() && !result.has("error");
+                LL_INFOS("Voice") << "wolf_move to region " << region_id << " parcel " << parcel_local_id << ": "
+                                  << (moved ? std::string("moved") : (status ? std::string("refused") : status.toString())) << LL_ENDL;
+            }
+            connection->mOutstandingRequests--;
+            connection->mWolfMoving = false;
+            if (LLWebRTCVoiceClient::isShuttingDown())
+            {
+                return;
+            }
+            if (moved)
+            {
+                // the server's room is now (region_id, parcel_local_id): so is ours, and logout /
+                // ICE go through the new region's caps.
+                connection->mRegionID      = region_id;
+                connection->mParcelLocalID = parcel_local_id;
+                connection->mChannelID     = channel_id;
+            }
+            else
+            {
+                connection->mWolfMoveRefused = true;
+            }
+            done(moved);
+        });
+}
+// </WolfViewer>
 
 /////////////////////////////
 // WebRTC Spatial Connection

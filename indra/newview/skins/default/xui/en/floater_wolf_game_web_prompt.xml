@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLF GAME 2026-10-09] [SECURITY] wolfGameShowWeb from a script that is not the game's own
+     (verified 0): nothing loads until Open (wolffloaterroleplay.cpp WolfFloaterGameWebPrompt).
+     Drawn by WolfGameDialogView in the plain palette with the Unverified mark: the host and the
+     script's name are drawn text, never links. -->
+<floater
+ can_close="false"
+ can_drag_on_left="false"
+ can_minimize="false"
+ can_resize="false"
+ header_height="30"
+ height="160"
+ layout="topleft"
+ legacy_header_height="30"
+ name="wolf_game_web_prompt"
+ save_rect="false"
+ show_title="false"
+ single_instance="true"
+ title="Open a page?"
+ width="360">
+    <wolf_game_dialog_view
+     follows="all"
+     height="160"
+     layout="topleft"
+     left="0"
+     mouse_opaque="false"
+     name="view"
+     tab_stop="true"
+     top="0"
+     width="360" />
+</floater>

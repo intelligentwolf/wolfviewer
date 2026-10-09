@@ -71,6 +71,7 @@
 #include "wolfmapoverlays.h"      // <WolfViewer 2026-09-25/> map images
 #include "wolfmapglobe.h"         // <WolfViewer 2026-10-02/> animated water + globe (Wolf Territories only)
 #include "wolfflight.h"           // <WolfViewer 2026-10-06/> the trip on the map
+#include "wolfgame.h"             // [WOLF GAME 2026-10-09/] roleplay markers
 
 namespace
 {
@@ -792,6 +793,7 @@ void LLWorldMapView::draw()
 
     // <WolfViewer 2026-10-06/> the Flight / Sailing Mode trip over the map
     drawWolfRoute();
+    drawWolfGameMarkers();   // [WOLF GAME 2026-10-09/]
 
     // Draw icons for the avatars in each region.
     // Drawn this after the current agent avatar so one can see nearby people
@@ -1243,6 +1245,28 @@ void LLWorldMapView::drawFrustum()
     gGL.popMatrix();
 }
 
+
+// [WOLF GAME 2026-10-09] Wolf Roleplay markers (VIEWER_SPEC.md §3.9): a dot in the marker's colour
+// with its label, wherever on the grid the marker is - on another region once the map server has
+// named it (wolfgame.cpp resolveMarkers asks by name). View coordinates are globalPosToView's.
+void LLWorldMapView::drawWolfGameMarkers()
+{
+    const LLFontGL* font = LLFontGL::getFontSansSerifSmall();
+    for (const auto& kv : WolfGame::instance().markers())
+    {
+        LLVector3d global;
+        if (!WolfGame::markerGlobal(kv.second, global)) continue;
+        const LLVector3 p = globalPosToView(global);
+        gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
+        gGL.color4f(0.f, 0.f, 0.f, 0.85f);
+        gl_circle_2d(p.mV[VX], p.mV[VY], 6.f, 16, true);
+        gGL.color4fv(kv.second.mColor.mV);
+        gl_circle_2d(p.mV[VX], p.mV[VY], 4.5f, 16, true);
+        const std::string& label = kv.second.mLabel.empty() ? kv.second.mId : kv.second.mLabel;
+        font->renderUTF8(label, 0, p.mV[VX], p.mV[VY] + 8.f, LLColor4::white, LLFontGL::HCENTER, LLFontGL::BOTTOM,
+                         LLFontGL::NORMAL, LLFontGL::DROP_SHADOW);
+    }
+}
 
 // <WolfViewer 2026-10-06> Paul: "overlay it on the world map the trip ... great fun if the person
 // wants to fly or sail the route themselves". While Flight or Sailing Mode has a destination: the

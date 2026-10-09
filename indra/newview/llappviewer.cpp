@@ -82,6 +82,8 @@
 #include "wolfwaterfield.h" // <WolfViewer> water depth / exposure fields for the water shader
 #include "wolfboatrock.h" // <WolfViewer> client-side buoyancy for boats
 #include "wolfflight.h"   // <WolfViewer 2026-10-06/> Flight Mode
+#include "wolfgame.h"     // [WOLF GAME 2026-10-09/] Wolf Roleplay
+#include "wolfdrive.h"    // <WolfViewer 2026-10-09/> driving: wheel / pedals, dashboard
 #include "wolffarground.h"   // <WolfViewer 2026-10-07/> map tiles for regions not connected
 #include "wolffarterrain.h"   // <WolfViewer 2026-10-08/> elevation tiles beyond the terrain received
 #include "wolfobjectprops.h" // <WolfViewer> shared object name/description harvester
@@ -2147,6 +2149,11 @@ bool LLAppViewer::cleanup()
         FSAvatarRenderPersistence::getInstance()->deleteSingleton();
     // </FS:ND>
 
+    // [WOLF GAME 2026-10-09] The roleplay tags hold LLHUDText pointers; drop them first.
+    if (WolfGame::instanceExists())
+    {
+        WolfGame::instance().releaseTags();
+    }
     // Must clean up texture references before viewer window is destroyed.
     if(LLHUDManager::instanceExists())
     {
@@ -6191,11 +6198,18 @@ void LLAppViewer::idle()
     // </WolfViewer>
     // <WolfViewer 2026-10-06> Flight Mode: flight data and the autopilot. After this frame's
     // AgentUpdate went out and the control flags were reset, so the keys it holds go out with
-    // the next one, exactly like the Move floater's pedals (wolfvehiclecontrols.cpp driveIdle).
+    // the next one, exactly like the dashboard's pedals (wolfdrive.cpp applyControlFlags).
     WolfFlight::instance().idle();
+    // </WolfViewer>
+    // <WolfViewer 2026-10-09> Driving: the dashboard's controls, the analogue link to WolfSim and
+    // the dashboard's data; after WolfFlight, so Flight Mode coming on takes the panel's place.
+    WolfDrive::instance().idle();
     // </WolfViewer>
     WolfFarTerrain::instance().idle();  // <WolfViewer 2026-10-08/> the ground beyond the terrain received (before the flat tiles: they skip its cells)
     WolfFarGround::instance().idle();   // <WolfViewer 2026-10-07/> map tiles for the regions not connected
+    // [WOLF GAME 2026-10-09] Wolf Roleplay: timers, markers, effects, and the tags under the name
+    // tags - after gObjectList.update() above has placed this frame's name tags.
+    WolfGame::instance().idle();
     {
         LL_PROFILE_ZONE_NAMED_CATEGORY_APP("world update"); //LL_RECORD_BLOCK_TIME(FTM_WORLD_UPDATE);
         gPipeline.updateMove();
@@ -6238,6 +6252,9 @@ void LLAppViewer::idle()
     WolfWeather::instance().idle();   // <WolfViewer 2026-09-10> rain / snow, menu or parcel prims
     // </WolfViewer>
 
+    // [WOLF GAME 2026-10-09] wolfGameEffect "shake": last frame's jitter off before the camera is
+    // placed (updateCamera can return early and keep the old origin), this frame's on after.
+    WolfGame::instance().unshakeCamera();
     if (gAgentPilot.isPlaying() && gAgentPilot.getOverrideCamera())
     {
         gAgentPilot.moveCamera();
@@ -6255,6 +6272,7 @@ void LLAppViewer::idle()
 
         gAgentCamera.updateCamera();
     }
+    WolfGame::instance().shakeCamera();   // [WOLF GAME 2026-10-09/]
 
     // update media focus
     LLViewerMediaFocus::getInstance()->update();

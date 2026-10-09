@@ -205,6 +205,24 @@ vec3 wolfPhotoPaint(sampler2D src, vec2 uv, vec2 texel, vec2 uvMax, int mode)
         float cover = 1.0 - smoothstep(bestRad - 1.5 * s, bestRad + 0.5 * s, bd);
         return mix(canvas, dcol, cover);
     }
+    if (mode == 16) {
+        // [WOLF GAME 2026-10-09] Wolf Roleplay's "blur" effect (wolfgame.cpp, pipeline.cpp
+        // wolfPhotoPass), viewer-only - not one of the Photo Effects looks. A 7x7 Gaussian-weighted
+        // blur whose radius grows with the strength (2 to 20 px on a 1080-line frame); main()
+        // then mixes it in by the same strength.
+        float R = (2.0 + 18.0 * uStrength) * s;
+        vec3 acc = vec3(0.0);
+        float wsum = 0.0;
+        for (int j = -3; j <= 3; j++) {
+            for (int i = -3; i <= 3; i++) {
+                vec2 o = vec2(float(i), float(j)) / 3.0;
+                float w = exp(-2.0 * dot(o, o));
+                acc += wpTap(src, uv + o * R * texel, texel, uvMax) * w;
+                wsum += w;
+            }
+        }
+        return acc / wsum;
+    }
     if (mode >= 13) {
         // [2026-09-20] Cartoon / Line Art / Comic share one ink: a Sobel edge on luminance,
         // 1.5 px apart (scaled), read as a line strength.

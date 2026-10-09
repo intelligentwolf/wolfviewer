@@ -52,7 +52,14 @@ LFSimFeatureHandler::LFSimFeatureHandler()
     // Call setSupportedFeatures -> This will work because we construct
     // our singleton instance during STATE_SEED_CAP_GRANTED startup state
     // after we received the initial region caps
-    setSupportedFeatures();
+    // <WolfViewer 2026-10-09> ...but the region's SimulatorFeatures may not have ARRIVED yet: then
+    // nothing read them again for the login region (only a region change set the callback), and
+    // WolfGrid::isOnWolfTerritories saw "this region sent no GridURL" - not Wolf - for the whole
+    // session (Paul: Game Mode "wait a few seconds", everything bright). handleRegionChange reads
+    // them now if they are in, or when they come.
+    //setSupportedFeatures();
+    handleRegionChange();
+    // </WolfViewer 2026-10-09>
 }
 
 ExportSupport LFSimFeatureHandler::exportPolicy() const
@@ -90,6 +97,14 @@ void LFSimFeatureHandler::setSupportedFeatures()
     {
         LLSD info;
         region->getSimulatorFeatures(info);
+        // <WolfViewer 2026-10-09> which region these features describe (WolfGrid::isOnWolfTerritories)
+        // - only once they have arrived: an empty map says nothing about the region's grid.
+        if (region->simulatorFeaturesReceived())
+        {
+            mFeaturesRegionID = region->getRegionID();
+            mGridURLFromRegion = false;
+        }
+        // </WolfViewer 2026-10-09>
         if (!LLGridManager::getInstance()->isInSecondLife() && info.has("OpenSimExtras")) // OpenSim specific sim features
         {
             LL_INFOS("SimFeatures") << "Setting OpenSimExtras..." << LL_ENDL;
@@ -126,6 +141,7 @@ void LFSimFeatureHandler::setSupportedFeatures()
             {
                 // If we have GridURL specified in the extras then we use this by default
                 mHyperGridPrefix =  extras["GridURL"].asString();
+                mGridURLFromRegion = true;   // <WolfViewer 2026-10-09/>
                 auto pos = mHyperGridPrefix.find("://");
                 if( pos != std::string::npos)
                 {

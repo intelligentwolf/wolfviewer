@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLF GAME UI 2026-10-09] World > Roleplay, the toolbar's Roleplay button, or a click on the
+     game HUD (wolffloaterroleplay.cpp WolfFloaterRoleplay, VIEWER_SPEC.md §3.3). Paul: "it should
+     be like the airplane and sailing interfaces ... model it on REAL games". Its whole face is the
+     drawn game console (WolfGameConsole): hero, Game Mode switch, wallet, the Stats / Combat / Bag /
+     Pets / Game / Look / Help pages, the game's buttons and the footer. The floater gives only the
+     window: the 34 px drag strip lies under the console's title band, so the title band moves it. -->
+<floater
+ can_close="false"
+ can_drag_on_left="false"
+ can_minimize="false"
+ can_resize="true"
+ header_height="34"
+ height="720"
+ layout="topleft"
+ legacy_header_height="34"
+ min_height="560"
+ min_width="480"
+ name="wolf_roleplay"
+ save_rect="true"
+ show_title="false"
+ single_instance="true"
+ title="Roleplay"
+ width="580">
+    <wolf_game_console
+     follows="all"
+     height="720"
+     layout="topleft"
+     left="0"
+     mouse_opaque="false"
+     name="console"
+     tab_stop="true"
+     top="0"
+     width="580" />
+</floater>

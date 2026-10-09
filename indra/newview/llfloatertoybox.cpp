@@ -67,6 +67,17 @@ bool LLFloaterToybox::postBuild()
     mToolBar->setHandleDropCallback(boost::bind(LLToolBarView::handleDropTool,_1,_2,_3,_4,_5));
     mToolBar->setButtonEnterCallback(boost::bind(&LLFloaterToybox::onToolBarButtonEnter,this,_1));
 
+    fillCommands();
+
+    return true;
+}
+
+// <WolfViewer 2026-10-09> The commands offered, in label order. Filled again by draw() when the
+// Wolf answer changes, so a Wolf-only command leaves (and comes back) with the region.
+void LLFloaterToybox::fillCommands()
+{
+    mFilledOnWolf = WolfGrid::isOnWolfTerritories() ? 1 : 0;
+    mToolBar->clearCommandsList();
     //
     // Sort commands by localized labels so they will appear alphabetized in all languages
     //
@@ -81,6 +92,12 @@ bool LLFloaterToybox::postBuild()
         // <WolfViewer 2026-09-07> the Wolf Territories-only commands (app_settings/commands.xml
         // wolf_*) do not exist on any other grid: not offered here, not on a toolbar.
         if (command->name().rfind("wolf_", 0) == 0 && !WolfGrid::isWolfTerritories())
+        {
+            continue;
+        }
+        // <WolfViewer 2026-10-09> the car dashboard: not on a foreign region either, a hypergrid
+        // trip included (Paul: "other grids can't use these interfaces they are only for wolf").
+        if (command->name() == "wolf_dashboard" && !WolfGrid::isOnWolfTerritories())
         {
             continue;
         }
@@ -102,12 +119,17 @@ bool LLFloaterToybox::postBuild()
         mToolBar->addCommand((*it)->id());
     }
 
-    return true;
 }
+// </WolfViewer>
 
 void LLFloaterToybox::draw()
 {
     llassert(gToolBarView != NULL);
+
+    if ((WolfGrid::isOnWolfTerritories() ? 1 : 0) != mFilledOnWolf)
+    {
+        fillCommands();
+    }
 
     const command_id_list_t& command_list = mToolBar->getCommandsList();
 

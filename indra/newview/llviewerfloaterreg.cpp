@@ -108,9 +108,11 @@
 #include "wolffloatermeshupload.h"
 #include "wolffloaterphotoeffects.h"   // [PAINTERS 2026-09-20/]
 #include "wolffloaterlagdetector.h"   // [LAG DETECTOR 2026-09-29/]
+#include "wolffloaterdrivecontrols.h"   // [WOLF DRIVE 2026-10-09/]
 #include "wolffloaterdj.h"            // [WOLF DJ 2026-10-04/]
 #include "wolffloaterdjplaylist.h"    // [WOLF DJ 2026-10-04/]
 #include "wolffloaterradio.h"   // [RADIO 2026-10-05/]
+#include "wolffloaterroleplay.h"   // [WOLF GAME 2026-10-09/]
 #include "wolflslcomplete.h" // <FS:Wolf/>
 #include "llfloatermyscripts.h"
 #include "llfloatermyenvironment.h"
@@ -651,8 +653,16 @@ void LLViewerFloaterReg::registerFloaters()
     LLFloaterReg::add("wolf_mesh_upload", "floater_wolf_mesh_upload.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterMeshUpload>);
     LLFloaterReg::add("wolf_photo_effects", "floater_wolf_photo_effects.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterPhotoEffects>);   // [PAINTERS 2026-09-20/]
     LLFloaterReg::add("wolf_lag_detector", "floater_wolf_lag_detector.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterLagDetector>);   // [LAG DETECTOR 2026-09-29/]
+    LLFloaterReg::add("wolf_drive_controls", "floater_wolf_drive_controls.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterDriveControls>);   // [WOLF DRIVE 2026-10-09/] wheel / pedal / gamepad setup
     LLFloaterReg::add("wolf_dj", "floater_wolf_dj.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterDJ>);   // [WOLF DJ 2026-10-04/]
     LLFloaterReg::add("wolf_dj_playlist", "floater_wolf_dj_playlist.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterDJPlaylist>);   // [WOLF DJ 2026-10-04/]
+    // [WOLF GAME 2026-10-09] Wolf Roleplay (wolfgame.cpp, VIEWER_SPEC.md §3): the Roleplay floater, the
+    // game's dialogs (one per dialog id) and its web page.
+    LLFloaterReg::add("wolf_roleplay", "floater_wolf_roleplay.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterRoleplay>);
+    LLFloaterReg::add("wolf_game_dialog", "floater_wolf_game_dialog.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterGameDialog>);
+    LLFloaterReg::add("wolf_game_web", "floater_wolf_game_web.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterGameWeb>);
+    LLFloaterReg::add("wolf_game_web_overlay", "floater_wolf_game_web_overlay.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterGameWeb>);
+    LLFloaterReg::add("wolf_game_web_prompt", "floater_wolf_game_web_prompt.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterGameWebPrompt>);   // [SECURITY 2026-10-09/]
     LLFloaterReg::add("wolf_radio", "floater_wolf_radio.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterRadio>);   // [RADIO 2026-10-05/] About Land > Sound > Radio Stations
     // [FLOATER SPLIT 2026-09-11] Ground painting and AI model creation, each its own window
     // instead of a tab in the build floater. No custom floater class: the panel inside does all

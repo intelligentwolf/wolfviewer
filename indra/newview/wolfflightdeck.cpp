@@ -539,6 +539,23 @@ void WolfFlightDeck::pickFonts(F32 unit)
     mF.mMonoHuge  = avionics("B612Mono", LLFontGL::BOLD, unit * 1.75f);
 }
 
+bool WolfFlightDeck::showBackground()
+{
+    static LLCachedControl<bool> bg(gSavedSettings, "WolfFlightDeckBackground", true);
+    return bg;
+}
+
+// The mouse is over the deck: anywhere in the panel's band while its background shows, and only
+// on a control while it is hidden, so the world between the instruments takes the click.
+bool WolfFlightDeck::onPanel(S32 x, S32 y) const
+{
+    if (!WolfFlight::instance().active() || y > mPanelTop || y < mPanelBottom)
+    {
+        return false;
+    }
+    return showBackground() || hitAt(x, y) != nullptr;
+}
+
 void WolfFlightDeck::draw()
 {
     WolfFlight& f = WolfFlight::instance();
@@ -653,12 +670,14 @@ void WolfFlightDeck::layoutAndDraw()
 
     // the panel
     const F32 M = llclamp(H * 0.15f, 30.f, 54.f);
-    if (sail)
+    // Paul 2026-10-09: "add an option to hide the background on the flight and sailing huds".
+    // With the background off only the instruments and controls are drawn, over the world.
+    if (showBackground() && sail)
     {
         walnut(0.f, bottom, W, top - M, (top - M - bottom) / 3.f);
         rectG(0.f, top - M - 3.f, W, top - M, C_BRASS_HI, C_BRASS_LO);   // a brass rubbing strip
     }
-    else
+    else if (showBackground())
     {
         rectG(0.f, bottom, W, top - M, C_PANEL_TOP, C_PANEL_BOT);
         // a faint panel seam every so often, as real panels are made in sections
@@ -788,10 +807,13 @@ void WolfFlightDeck::drawGlareshield(F32 l, F32 b, F32 r, F32 t)
 {
     WolfFlight& f = WolfFlight::instance();
     const F32 M = t - b;
-    // the anti-glare lip and the panel face
-    rectG(l, b, r, t, C_GLARE_TOP, C_GLARE_BOT);
-    rectF(l, t - 2.f, r, t, LLColor4(0.f, 0.f, 0.f, 1.f));
-    rectF(l, b, r, b + 1.f, LLColor4(1.f, 1.f, 1.f, 0.08f));
+    // the anti-glare lip and the panel face (not with the background hidden: PANEL button)
+    if (showBackground())
+    {
+        rectG(l, b, r, t, C_GLARE_TOP, C_GLARE_BOT);
+        rectF(l, t - 2.f, r, t, LLColor4(0.f, 0.f, 0.f, 1.f));
+        rectF(l, b, r, b + 1.f, LLColor4(1.f, 1.f, 1.f, 0.08f));
+    }
 
     // The items, left to right, in units of the strip height.
     enum EKind { K_MASTER_W, K_MASTER_C, K_BUTTON, K_WINDOW, K_KNOB, K_WHEEL, K_GAP };
@@ -835,6 +857,7 @@ void WolfFlightDeck::drawGlareshield(F32 l, F32 b, F32 r, F32 t)
         items.push_back({ K_BUTTON, 0.95f, H_PLAN, "PLAN", "", gSavedSettings.getBOOL("WolfFlightNDPlan"), "Chartplotter: PLAN (the whole route, north up) or CHART (course up, around you)" });
         items.push_back({ K_BUTTON, 0.95f, H_MAP, "MAP", "", false, "World Map, zoomed to the whole trip: the planned route and where you are on it" });
         items.push_back({ K_BUTTON, 0.95f, H_WEB, "CLUB", "", false, "The Wolf Territories sailing club page on wolf-grid.com" });
+        items.push_back({ K_BUTTON, 0.95f, H_BACKGROUND, "PANEL", "", showBackground(), "Show or hide the panel behind the instruments" });
         items.push_back({ K_BUTTON, 0.95f, H_HELP, "HELP", "", mShowHelp, "How to sail with Sailing Mode: the quick guide" });
         items.push_back({ K_GAP, 0.35f, H_NONE, "", "", false, "" });
         items.push_back({ K_BUTTON, 1.0f, H_EXIT, "EXIT", "", false, "Leave Sailing Mode" });
@@ -877,6 +900,7 @@ void WolfFlightDeck::drawGlareshield(F32 l, F32 b, F32 r, F32 t)
         items.push_back({ K_BUTTON, 0.95f, H_HUD, "HUD", "", gSavedSettings.getBOOL("WolfFlightHUD"), "Head-up display over the view" });
         items.push_back({ K_BUTTON, 0.95f, H_MAP, "MAP", "", false, "World Map, zoomed to the whole trip: the planned route and where you are on it" });
         items.push_back({ K_BUTTON, 1.05f, H_WEB, "AIRPORTS", "", false, "The Wolf Territories airports page on wolf-grid.com" });
+        items.push_back({ K_BUTTON, 0.95f, H_BACKGROUND, "PANEL", "", showBackground(), "Show or hide the panel behind the instruments" });
         items.push_back({ K_BUTTON, 0.95f, H_HELP, "HELP", "", mShowHelp, "How to fly with Flight Mode: the quick guide" });
         items.push_back({ K_GAP, 0.35f, H_NONE, "", "", false, "" });
         items.push_back({ K_BUTTON, 1.0f, H_EXIT, "EXIT", "", false, "Leave Flight Mode" });
@@ -3232,7 +3256,7 @@ bool WolfFlightDeck::handleMouseDown(S32 x, S32 y, MASK mask)
         mShowHelp = false;   // the guide is in the way of the world: a click puts it away
         return true;
     }
-    if (!WolfFlight::instance().active() || y > mPanelTop || y < mPanelBottom)
+    if (!onPanel(x, y))
     {
         return false;
     }
@@ -3303,12 +3327,12 @@ bool WolfFlightDeck::handleMouseUp(S32 x, S32 y, MASK mask)
     }
     mPressed = H_NONE;
     mPressStep = 0;
-    return was || (WolfFlight::instance().active() && y <= mPanelTop && y >= mPanelBottom);
+    return was || onPanel(x, y);
 }
 
 bool WolfFlightDeck::handleHover(S32 x, S32 y, MASK mask)
 {
-    if (!WolfFlight::instance().active() || ((y > mPanelTop || y < mPanelBottom) && !hasMouseCapture()))
+    if (!hasMouseCapture() && !onPanel(x, y))
     {
         return false;
     }
@@ -3324,7 +3348,7 @@ bool WolfFlightDeck::handleHover(S32 x, S32 y, MASK mask)
 
 bool WolfFlightDeck::handleScrollWheel(S32 x, S32 y, S32 clicks)
 {
-    if (!WolfFlight::instance().active() || y > mPanelTop || y < mPanelBottom)
+    if (!onPanel(x, y))
     {
         return false;
     }
@@ -3338,12 +3362,12 @@ bool WolfFlightDeck::handleScrollWheel(S32 x, S32 y, S32 clicks)
 bool WolfFlightDeck::handleRightMouseDown(S32 x, S32 y, MASK mask)
 {
     // no context menu for the world through the panel
-    return WolfFlight::instance().active() && y <= mPanelTop && y >= mPanelBottom;
+    return onPanel(x, y);
 }
 
 bool WolfFlightDeck::handleDoubleClick(S32 x, S32 y, MASK mask)
 {
-    if (!WolfFlight::instance().active() || y > mPanelTop || y < mPanelBottom)
+    if (!onPanel(x, y))
     {
         return false;
     }
@@ -3353,7 +3377,7 @@ bool WolfFlightDeck::handleDoubleClick(S32 x, S32 y, MASK mask)
 
 bool WolfFlightDeck::handleToolTip(S32 x, S32 y, MASK mask)
 {
-    if (!WolfFlight::instance().active() || y > mPanelTop || y < mPanelBottom)
+    if (!onPanel(x, y))
     {
         return false;
     }
@@ -3479,6 +3503,7 @@ void WolfFlightDeck::press(EHit id, S32 x, S32 y, S32 step)
     case H_VS: f.pressVS(); break;
     case H_CMD: f.engageAP(); break;
     case H_HUD: gSavedSettings.setBOOL("WolfFlightHUD", !gSavedSettings.getBOOL("WolfFlightHUD")); break;
+    case H_BACKGROUND: gSavedSettings.setBOOL("WolfFlightDeckBackground", !showBackground()); break;
     case H_PLAN:
     case H_ND_SCREEN: gSavedSettings.setBOOL("WolfFlightNDPlan", !gSavedSettings.getBOOL("WolfFlightNDPlan")); break;
     case H_WIND: f.pressWIND(); break;

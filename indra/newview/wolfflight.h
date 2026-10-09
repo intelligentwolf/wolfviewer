@@ -351,7 +351,6 @@ private:
     void applyToolbar(bool flight_on);
 
     bool mActive = false;
-    bool mToolbarWasHidden = false;
     Data mData;
     bool mHaveLast = false;
     LLVector3 mLastVel;

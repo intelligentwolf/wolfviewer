@@ -312,6 +312,63 @@ void decline_friendship_coro(std::string url, LLSD notification, S32 option)
     }
 }
 
+// <WolfViewer 2026-10-09> Decline transport lifted out of friendship_offer_callback so the
+// reject-all-friendship-requests path (llimprocessing.cpp) can decline too. Without a
+// decline the offer stays pending on the grid and OpenSim re-sends it at every login
+// (FriendsModule.SendFriendsOnlineIfNeeded, "Send outstanding friendship offers"), so the
+// sender got the auto-reply over and over. option 1 = declined toast, 2 = open IM,
+// anything else = no follow-up UI.
+void decline_friendship_offer(const LLSD& notification, S32 option)
+{
+    LLMessageSystem* msg = gMessageSystem;
+    const LLSD& payload = notification["payload"];
+
+    // decline
+    // We no longer notify other viewers, but we DO still send
+    // the rejection to the simulator to delete the pending userop.
+    std::string url = gAgent.getRegionCapability("DeclineFriendship");
+    // <FS:Ansariel> This only seems to work for offline FRs if FSUseReadOfflineMsgsCap has been used
+    if (!gSavedSettings.getBOOL("FSUseReadOfflineMsgsCap"))
+    {
+        url = "";
+    }
+    // </FS:Ansariel>
+    LL_DEBUGS("Friendship") << "Cap string: " << url << LL_ENDL;
+    if (!url.empty() && payload.has("online") && !payload["online"].asBoolean())
+    {
+        LL_DEBUGS("Friendship") << "Declining friendship via capability" << LL_ENDL;
+        LLCoros::instance().launch("LLMessageSystem::declineFriendshipOffer",
+            boost::bind(decline_friendship_coro, url, notification, option));
+    }
+    else if (payload.has("session_id") && payload["session_id"].asUUID().notNull())
+    {
+        LL_DEBUGS("Friendship") << "Declining friendship via viewer message" << LL_ENDL;
+        msg->newMessageFast(_PREHASH_DeclineFriendship);
+        msg->nextBlockFast(_PREHASH_AgentData);
+        msg->addUUIDFast(_PREHASH_AgentID, gAgent.getID());
+        msg->addUUIDFast(_PREHASH_SessionID, gAgent.getSessionID());
+        msg->nextBlockFast(_PREHASH_TransactionBlock);
+        msg->addUUIDFast(_PREHASH_TransactionID, payload["session_id"]);
+        msg->sendReliable(LLHost(payload["sender"].asString()));
+
+        if (option == 1)
+        {
+            LLNotificationsUtil::add("FriendshipDeclinedByMe",
+                notification["substitutions"], payload);
+        }
+        else if (option == 2)
+        {
+            // start IM session
+            LLAvatarActions::startIM(payload["from_id"].asUUID());
+        }
+    }
+    else
+    {
+        LL_WARNS("Friendship") << "Failed to decline friendship offer, neither capability nor transaction id are accessible" << LL_ENDL;
+    }
+}
+// </WolfViewer>
+
 bool friendship_offer_callback(const LLSD& notification, const LLSD& response)
 {
     S32 option = LLNotificationsUtil::getSelectedOption(notification, response);
@@ -376,49 +433,7 @@ bool friendship_offer_callback(const LLSD& notification, const LLSD& response)
         case 2: // Send IM - decline and start IM session
             {
                 LLUIUsage::instance().logCommand("Agent.DeclineFriendship");
-                // decline
-                // We no longer notify other viewers, but we DO still send
-                // the rejection to the simulator to delete the pending userop.
-                std::string url = gAgent.getRegionCapability("DeclineFriendship");
-                // <FS:Ansariel> This only seems to work for offline FRs if FSUseReadOfflineMsgsCap has been used
-                if (!gSavedSettings.getBOOL("FSUseReadOfflineMsgsCap"))
-                {
-                    url = "";
-                }
-                // </FS:Ansariel>
-                LL_DEBUGS("Friendship") << "Cap string: " << url << LL_ENDL;
-                if (!url.empty() && payload.has("online") && !payload["online"].asBoolean())
-                {
-                    LL_DEBUGS("Friendship") << "Declining friendship via capability" << LL_ENDL;
-                    LLCoros::instance().launch("LLMessageSystem::declineFriendshipOffer",
-                        boost::bind(decline_friendship_coro, url, notification, option));
-                }
-                else if (payload.has("session_id") && payload["session_id"].asUUID().notNull())
-                {
-                    LL_DEBUGS("Friendship") << "Declining friendship via viewer message" << LL_ENDL;
-                    msg->newMessageFast(_PREHASH_DeclineFriendship);
-                    msg->nextBlockFast(_PREHASH_AgentData);
-                    msg->addUUIDFast(_PREHASH_AgentID, gAgent.getID());
-                    msg->addUUIDFast(_PREHASH_SessionID, gAgent.getSessionID());
-                    msg->nextBlockFast(_PREHASH_TransactionBlock);
-                    msg->addUUIDFast(_PREHASH_TransactionID, payload["session_id"]);
-                    msg->sendReliable(LLHost(payload["sender"].asString()));
-
-                    if (option == 1) // due to fall-through
-                    {
-                        LLNotificationsUtil::add("FriendshipDeclinedByMe",
-                            notification["substitutions"], payload);
-                    }
-                    else if (option == 2)
-                    {
-                        // start IM session
-                        LLAvatarActions::startIM(payload["from_id"].asUUID());
-                    }
-                }
-                else
-                {
-                    LL_WARNS("Friendship") << "Failed to decline friendship offer, neither capability nor transaction id are accessible" << LL_ENDL;
-                }
+                decline_friendship_offer(notification, option);
         }
         default:
             // close button probably, possibly timed out

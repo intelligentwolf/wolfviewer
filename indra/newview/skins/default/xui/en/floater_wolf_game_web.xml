@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLF GAME 2026-10-09] The game's web page, modes "panel" (docked on the right) and "window"
+     (wolffloaterroleplay.cpp WolfFloaterGameWeb, VIEWER_SPEC.md §3.8). https only, shown as
+     untrusted content in the viewer's media browser. The title is the source's name. -->
+<floater
+ can_close="true"
+ can_minimize="true"
+ can_resize="true"
+ height="600"
+ layout="topleft"
+ min_height="160"
+ min_width="200"
+ name="wolf_game_web"
+ save_rect="false"
+ single_instance="true"
+ title="Game page"
+ width="420">
+    <web_browser
+     follows="all"
+     height="574"
+     layout="topleft"
+     left="0"
+     name="browser"
+     top="24"
+     trusted_content="false"
+     width="420" />
+</floater>

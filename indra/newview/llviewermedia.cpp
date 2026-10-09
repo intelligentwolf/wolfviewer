@@ -3400,6 +3400,12 @@ void LLViewerMediaImpl::handleMediaEvent(LLPluginClassMedia* plugin, LLPluginCla
             LL_DEBUGS("Media") << "MEDIA_EVENT_CLICK_LINK_NOFOLLOW, uri is: " << plugin->getClickURL() << LL_ENDL;
             std::string url = plugin->getClickURL();
             std::string nav_type = plugin->getClickNavType();
+            // [WOLF GAME 2026-10-09] [SECURITY] a game's page may not drive the viewer by SLURL.
+            if (mWolfNoSLURL)
+            {
+                LL_WARNS("Media") << "game page link not dispatched as a SLURL: " << url << LL_ENDL;
+                break;
+            }
             LLURLDispatcher::dispatch(url, nav_type, NULL, mTrustedBrowser);
         }
         break;

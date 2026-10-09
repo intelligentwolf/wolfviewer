@@ -161,6 +161,7 @@ public:
     void wolfGodRays(LLRenderTarget* dst);   // <WolfViewer 2026-09-06> underwater sunlight shafts
     void wolfCloudDeck();                    // <WolfViewer 2026-10-07> a cloud layer to fly through
     bool wolfPhotoFilter(LLRenderTarget* src, LLRenderTarget* dst);   // <WolfViewer 2026-09-18> World > Photo Effects
+    bool wolfPhotoPass(LLRenderTarget* src, LLRenderTarget* dst, S32 mode, F32 strength);   // [WOLF GAME 2026-10-09] one run of that pass
     void applyCAS(LLRenderTarget* src, LLRenderTarget* dst);
     void applyFXAA(LLRenderTarget* src, LLRenderTarget* dst);
     void generateSMAABuffers(LLRenderTarget* src);

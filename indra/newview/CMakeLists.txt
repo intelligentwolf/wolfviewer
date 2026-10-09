@@ -941,6 +941,9 @@ set(viewer_SOURCE_FILES
     wolfregionweather.cpp
     wolfradiostations.cpp
     wolffloaterradio.cpp
+    wolffloaterroleplay.cpp
+    wolfgame.cpp
+    wolfgamehud.cpp
     wolfwavezones.cpp
     wolfweatherprofile.cpp
     wolfweathersound.cpp
@@ -951,7 +954,9 @@ set(viewer_SOURCE_FILES
     wolfsurfcurl.cpp
     wolfmapglobe.cpp
     wolfmapoverlays.cpp
-    wolfvehiclecontrols.cpp
+    wolfdrive.cpp
+    wolfdashboard.cpp
+    wolffloaterdrivecontrols.cpp
     NACLantispam.cpp
     NACLfloaterexploresounds.cpp
     )
@@ -1849,6 +1854,9 @@ set(viewer_HEADER_FILES
     wolfregionweather.h
     wolfradiostations.h
     wolffloaterradio.h
+    wolffloaterroleplay.h
+    wolfgame.h
+    wolfgamehud.h
     wolfwavezones.h
     wolfweatherprofile.h
     wolfweathersound.h
@@ -1859,7 +1867,9 @@ set(viewer_HEADER_FILES
     wolfsurfcurl.h
     wolfmapglobe.h
     wolfmapoverlays.h
-    wolfvehiclecontrols.h
+    wolfdrive.h
+    wolfdashboard.h
+    wolffloaterdrivecontrols.h
     VertexCache.h
     VorbisFramework.h
     NACLantispam.h

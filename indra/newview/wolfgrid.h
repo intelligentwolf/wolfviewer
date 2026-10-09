@@ -18,6 +18,8 @@
 
 #include "llviewernetwork.h"
 #include "lfsimfeaturehandler.h"   // <WolfViewer 2026-10-06/> the region's own grid (isOnWolfTerritories)
+#include "llagent.h"                // <WolfViewer 2026-10-09/> isOnWolfTerritoriesConfirmed: gAgent.getRegion()
+#include "llviewerregion.h"
 // <WolfViewer 2026-09-27> makeVerifiedHttpOptions() below.
 #include "httpoptions.h"
 // </WolfViewer 2026-09-27>
@@ -90,6 +92,15 @@ namespace WolfGrid
     // hyperGridURL(), protocol stripped). OpenSim fills it from GatekeeperURI (Scene.cs:1288,
     // GridInfo.cs:407); every Wolf region has GatekeeperURI "http://grid.wolfterritories.org:8002".
     // Before the first region's features arrive the value is empty: then the login grid decides.
+    //
+    // <WolfViewer 2026-10-09> Paul: "other grids can't use these interfaces they are only for wolf".
+    // Two holes closed. (1) A region that sends no GridURL left hyperGridURL() on the LOGIN grid's
+    // gatekeeper (lfsimfeaturehandler.cpp fallback), so a foreign region counted as Wolf: once the
+    // CURRENT region's features are in, only its own GridURL can make it Wolf. (2) While a new
+    // region's features are on their way the previous region's answer stands - that keeps Flight
+    // Mode, the dashboard and the game HUD steady across ordinary Wolf region crossings; anything
+    // that SENDS to the region uses isOnWolfTerritoriesConfirmed() instead, which says no until
+    // this region has said which grid it is.
     inline bool isOnWolfTerritories()
     {
         if (!isWolfTerritories())
@@ -100,9 +111,29 @@ namespace WolfGrid
         {
             return true;
         }
-        const std::string region_grid = LFSimFeatureHandler::instance().hyperGridURL();
-        return region_grid.empty() || isWolfHost(region_grid);
+        const LFSimFeatureHandler& f = LFSimFeatureHandler::instance();
+        const std::string region_grid = f.hyperGridURL();
+        if (f.featuresRegionID().isNull())
+        {
+            return region_grid.empty() || isWolfHost(region_grid);   // nothing read yet: the login grid decides
+        }
+        return f.gridURLFromRegion() && isWolfHost(region_grid);
     }
+
+    // On Wolf Territories AND the region the agent is in now has said so itself. For sending
+    // anything Wolf-only to the region (game hello, wolfdrive), never for showing UI.
+    inline bool isOnWolfTerritoriesConfirmed()
+    {
+        if (!isWolfTerritories() || !LFSimFeatureHandler::instanceExists())
+        {
+            return false;
+        }
+        const LLViewerRegion* region = gAgent.getRegion();
+        const LFSimFeatureHandler& f = LFSimFeatureHandler::instance();
+        return region && region->getRegionID() == f.featuresRegionID()
+            && f.gridURLFromRegion() && isWolfHost(f.hyperGridURL());
+    }
+    // </WolfViewer 2026-10-09>
     // </WolfViewer 2026-10-06>
 
     // <WolfViewer 2026-10-08> Standing on a Wolf Territories region now, WHATEVER grid this viewer

@@ -13458,17 +13458,6 @@ Change of this parameter will affect the layout of buttons in notification toast
       <key>Value</key>
       <integer>0</integer>
     </map>
-    <key>WolfMoveControlsVehicle</key>
-    <map>
-      <key>Comment</key>
-      <string>Move floater: show the Vehicle tab (steering wheel, accelerator, D/N/R gear lever). While it shows, Up/W is the accelerator and Page Up/Page Down change gear.</string>
-      <key>Persist</key>
-      <integer>1</integer>
-      <key>Type</key>
-      <string>Boolean</string>
-      <key>Value</key>
-      <integer>0</integer>
-    </map>
     <key>WolfCameraControlsButtons</key>
     <map>
       <key>Comment</key>
@@ -19792,6 +19781,392 @@ Change of this parameter will affect the layout of buttons in notification toast
 			<key>Value</key>
 			<integer>1</integer>
 		</map>
+		<key>WolfDashboardMode</key>
+		<map>
+			<key>Comment</key>
+			<string>World &gt; Car Dashboard (wolfdrive.cpp, wolfdashboard.cpp): the car / truck / bike dashboard across the bottom of the screen. Wolf Territories only.</string>
+			<key>Persist</key>
+			<integer>0</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfDashboardAuto</key>
+		<map>
+			<key>Comment</key>
+			<string>Open the car dashboard by itself when sitting in a vehicle that is being driven (physical) or whose script drives the dashboard.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>1</integer>
+		</map>
+		<key>WolfDashboardBackground</key>
+		<map>
+			<key>Comment</key>
+			<string>Car dashboard PANEL button: draw the panel behind the instruments. Off, only the instruments and controls are drawn and clicks between them reach the world.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>1</integer>
+		</map>
+		<key>WolfDashboardAutoCar</key>
+		<map>
+			<key>Comment</key>
+			<string>Car Dashboard (wolfdrive.cpp): the car's gearbox in the viewer's own model - on: AUTO (the automatic picks the gear from the speed, + / - take one yourself); off: MANUAL, the default (Page Up / Page Down step one gear, top gear at most, below 1 is N then R). The dashboard's AUTO / MANUAL button sets it. Wolf Territories only.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfDashboardAutoTruck</key>
+		<map>
+			<key>Comment</key>
+			<string>Car Dashboard (wolfdrive.cpp): the truck's gearbox in the viewer's own model - on: AUTO (the automatic picks the gear from the speed, + / - take one yourself); off: MANUAL, the default (Page Up / Page Down step one gear, top gear at most, below 1 is N then R). The dashboard's AUTO / MANUAL button sets it. Wolf Territories only.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfDashboardMph</key>
+		<map>
+			<key>Comment</key>
+			<string>Car dashboard speed in miles per hour (off: km/h).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfDashboardType</key>
+		<map>
+			<key>Comment</key>
+			<string>Car dashboard design last chosen: 0 car, 1 truck, 2 bike (the default for a vehicle not chosen for before).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfDashboardOdometerKm</key>
+		<map>
+			<key>Comment</key>
+			<string>Car dashboard odometer when no script sends one: kilometres driven in this viewer.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>F32</string>
+			<key>Value</key>
+			<real>0.0</real>
+		</map>
+		<key>WolfDashboardHelpCar</key>
+		<map>
+			<key>Comment</key>
+			<string>The car dashboard guide has opened by itself once (HELP reopens it).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfDashboardHelpTruck</key>
+		<map>
+			<key>Comment</key>
+			<string>The truck dashboard guide has opened by itself once (HELP reopens it).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfDashboardHelpBike</key>
+		<map>
+			<key>Comment</key>
+			<string>The bike dashboard guide has opened by itself once (HELP reopens it).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfDriveHardware</key>
+		<map>
+			<key>Comment</key>
+			<string>Driving Controls: drive with the joystick / wheel / gamepad while seated (it then does not move the avatar or the flycam).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfDriveDeadZone</key>
+		<map>
+			<key>Comment</key>
+			<string>Driving Controls: how far the wheel turns or a pedal moves before it counts (0 to 0.5).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>F32</string>
+			<key>Value</key>
+			<real>0.1</real>
+		</map>
+		<key>WolfDriveCombinedPedals</key>
+		<map>
+			<key>Comment</key>
+			<string>Driving Controls: one axis for both pedals - the accelerator one way from the middle, the brake the other (WolfDriveThrottleAxis).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfDriveSteerAxis</key>
+		<map>
+			<key>Comment</key>
+			<string>Driving Controls: the controller axis for the steering (-1 none, 0-7 as Joystick Configuration numbers them).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfDriveSteerInvert</key>
+		<map>
+			<key>Comment</key>
+			<string>Driving Controls: the steering axis works the wrong way round.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfDriveThrottleAxis</key>
+		<map>
+			<key>Comment</key>
+			<string>Driving Controls: the controller axis for the accelerator (-1 none, 0-7 as Joystick Configuration numbers them).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>-1</integer>
+		</map>
+		<key>WolfDriveThrottleInvert</key>
+		<map>
+			<key>Comment</key>
+			<string>Driving Controls: the accelerator axis works the wrong way round.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfDriveThrottleFullRange</key>
+		<map>
+			<key>Comment</key>
+			<string>Driving Controls: the accelerator rests at one end of its axis (-1 released), not in the middle.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>1</integer>
+		</map>
+		<key>WolfDriveBrakeAxis</key>
+		<map>
+			<key>Comment</key>
+			<string>Driving Controls: the controller axis for the brake (-1 none, 0-7 as Joystick Configuration numbers them).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>-1</integer>
+		</map>
+		<key>WolfDriveBrakeInvert</key>
+		<map>
+			<key>Comment</key>
+			<string>Driving Controls: the brake axis works the wrong way round.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfDriveBrakeFullRange</key>
+		<map>
+			<key>Comment</key>
+			<string>Driving Controls: the brake rests at one end of its axis (-1 released), not in the middle.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>1</integer>
+		</map>
+		<key>WolfDriveClutchAxis</key>
+		<map>
+			<key>Comment</key>
+			<string>Driving Controls: the controller axis for the clutch (-1 none, 0-7 as Joystick Configuration numbers them).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>-1</integer>
+		</map>
+		<key>WolfDriveClutchInvert</key>
+		<map>
+			<key>Comment</key>
+			<string>Driving Controls: the clutch axis works the wrong way round.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfDriveClutchFullRange</key>
+		<map>
+			<key>Comment</key>
+			<string>Driving Controls: the clutch rests at one end of its axis (-1 released), not in the middle.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>1</integer>
+		</map>
+		<key>WolfDriveButtonGearUp</key>
+		<map>
+			<key>Comment</key>
+			<string>Driving Controls: the controller button for gear up (-1 none, 0-15).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>-1</integer>
+		</map>
+		<key>WolfDriveButtonGearDown</key>
+		<map>
+			<key>Comment</key>
+			<string>Driving Controls: the controller button for gear down (-1 none, 0-15).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>-1</integer>
+		</map>
+		<key>WolfDriveButtonHorn</key>
+		<map>
+			<key>Comment</key>
+			<string>Driving Controls: the controller button for horn (-1 none, 0-15).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>-1</integer>
+		</map>
+		<key>WolfDriveButtonLights</key>
+		<map>
+			<key>Comment</key>
+			<string>Driving Controls: the controller button for lights (-1 none, 0-15).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>-1</integer>
+		</map>
+		<key>WolfDriveButtonIndicatorLeft</key>
+		<map>
+			<key>Comment</key>
+			<string>Driving Controls: the controller button for left indicator (-1 none, 0-15).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>-1</integer>
+		</map>
+		<key>WolfDriveButtonIndicatorRight</key>
+		<map>
+			<key>Comment</key>
+			<string>Driving Controls: the controller button for right indicator (-1 none, 0-15).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>-1</integer>
+		</map>
+		<key>WolfDriveButtonHandbrake</key>
+		<map>
+			<key>Comment</key>
+			<string>Driving Controls: the controller button for handbrake (-1 none, 0-15).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>-1</integer>
+		</map>
+		<key>WolfDriveButtonHazards</key>
+		<map>
+			<key>Comment</key>
+			<string>Driving Controls: the controller button for the hazard lights (-1 none, 0-15).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>-1</integer>
+		</map>
+		<key>WolfDriveButtonCruise</key>
+		<map>
+			<key>Comment</key>
+			<string>Driving Controls: the controller button for cruise control (-1 none, 0-15).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>-1</integer>
+		</map>
+		<key>WolfDriveActions</key>
+		<map>
+			<key>Comment</key>
+			<string>Driving Controls: per action (gear_up, gear_down, horn, lights, ind_left, ind_right, handbrake, hazards, cruise) its key (key = LLKeyboard key name, unmodified), what it sends the vehicle (out: 0 nothing, 1 Page Up, 2 Page Down, 3 chat) and the chat command (cmd) and channel (ch). Missing = the default (wolfdrive.cpp actionDefault). Horn with nothing set plays the built-in horn on Wolf Territories.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>LLSD</string>
+			<key>Value</key>
+			<map>
+			</map>
+		</map>
 		<key>WolfFlightMode</key>
 		<map>
 			<key>Comment</key>
@@ -19813,6 +20188,30 @@ Change of this parameter will affect the layout of buttons in notification toast
 			<string>Boolean</string>
 			<key>Value</key>
 			<integer>0</integer>
+		</map>
+		<!-- [WOLF GAME UI 2026-10-09] wolffloaterroleplay.cpp: the game's guide opens by itself the
+		     first time Game Mode comes on (the flight deck's pattern); the window's Help tab reopens it. -->
+		<key>WolfGameHelpShown</key>
+		<map>
+			<key>Comment</key>
+			<string>Wolf Roleplay: the Game Mode guide on the game HUD has shown once (the Help tab has the full help).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfGameHudBackground</key>
+		<map>
+			<key>Comment</key>
+			<string>Wolf Roleplay: the game HUD across the bottom draws its panel (its PANEL button); off, only the orbs, slots and buttons, over the world.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>1</integer>
 		</map>
 		<key>WolfSailMode</key>
 		<map>
@@ -19945,6 +20344,17 @@ Change of this parameter will affect the layout of buttons in notification toast
 			<string>Boolean</string>
 			<key>Value</key>
 			<integer>0</integer>
+		</map>
+		<key>WolfFlightDeckBackground</key>
+		<map>
+			<key>Comment</key>
+			<string>Flight and Sailing Mode: draw the panel behind the instruments (the PANEL button). Off, the instruments and controls float over the view.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>1</integer>
 		</map>
 		<key>WolfFlightHUD</key>
 		<map>

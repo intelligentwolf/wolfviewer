@@ -92,6 +92,13 @@ public:
 
     // The route the autopilot follows: the start, any turning points, the destination.
     // A plane's is the straight line; a boat's goes round the land (planWaterRoute).
+    struct BlockedRegion
+    {
+        LLVector3d mMin, mMax;          // the region's ground square, global metres
+        std::string mName;
+        F64 mUntil = 0.0;               // forgotten after this (it may come back, or let us in)
+    };
+
     struct Route
     {
         std::vector<LLVector3d> mPts;
@@ -152,6 +159,11 @@ public:
     F32 routeTotal() const;         // metres along the whole route
     F32 routeFlown() const;         // metres along it so far
     void rebuildRoute();
+    // <WolfViewer 2026-10-10> Paul: "if the plane etc sees somewhere it can't go it should go round it", "if a region
+    // doesn't respond it should either fly round it or do opensea". The region's refusal at the border (an alert,
+    // llviewermessage.cpp process_alert_core) marks it; routes then go round it for a while.
+    bool onCrossingRefused(const std::string& alert);   // true when the alert was a crossing refusal it acted on
+    bool blockedAt(F64 x, F64 y) const;
 
     /** Every frame from LLAppViewer::idle(), after the agent update is sent. */
     void idle();
@@ -195,6 +207,16 @@ public:
     const Dest& dest() const { return mDest; }
     /** Look the region up (map server) and fly there once known. Empty region = this one. */
     void setDestination(const std::string& region, const LLVector3& local, bool has_z);
+    // <WolfViewer 2026-10-10> fly to this airport (the flight computer's AIRPORTS page): its region, and that airport
+    // rather than the first one listed on the region (landCheckAirport)
+    void setDestinationAirport(S32 airport_id);
+    // <WolfViewer 2026-10-10> the Airports window's "Fly there": that airport, and LNAV + VNAV as soon as its region
+    // is found (as the flight computer's EXEC). destSerial() counts destination changes, so the CDU shows them.
+    void flyToAirport(S32 airport_id);
+    // Paul: "i put in a region name it should still use that for flying as well as airports" - a region by name,
+    // its middle as DIR TO takes a bare region (128/128, as low as the terrain floor allows), the route engaged
+    void flyToRegion(const std::string& region);
+    U32 destSerial() const { return mDestSerial; }
     /** The destination set on the world map, if it has one. */
     bool setDestinationFromMap();
     void clearDestination();
@@ -271,6 +293,14 @@ private:
     bool mDeckHidden = false;
     bool mSyncing = false;
     Route mRoute;
+    F64 mCornerUntil = 0.0;                // <WolfViewer 2026-10-10/> cornerTurn: the nudge held this long
+    F32 mCornerTurn = 0.f;                 // <WolfViewer 2026-10-10/> degrees added to the wanted track
+    F32 cornerTurn();                      // <WolfViewer 2026-10-10/> steer off a region corner (two crossings close together)
+    U32 mDestSerial = 0;                   // <WolfViewer 2026-10-10/> setDestination count (destSerial)
+    bool mArmOnDest = false;               // <WolfViewer 2026-10-10/> flyToAirport: LNAV + VNAV once the region is known
+    S32 mDestAirportId = 0;                // <WolfViewer 2026-10-10/> the airport picked by name (setDestinationAirport)
+    std::vector<BlockedRegion> mBlocked;   // <WolfViewer 2026-10-10/> regions that refused the crossing (onCrossingRefused)
+    void routeAroundBlocked();             // <WolfViewer 2026-10-10/> a plane's route: corners round them
     F32 mSelTWA = 45.f;
     S32 mTack = 0;                  // +1 starboard tack (wind on the starboard bow), -1 port
     F64 mLastTack = 0.0;
@@ -387,6 +417,8 @@ private:
     bool mSpeedLow = false;        // <WolfViewer 2026-10-08/> speed protection active (guidance)
     S32 mCloudSide = 0;            // <WolfViewer 2026-10-08/> -1 under the cloud deck, +1 over it, 0 clear of it
     F32 mSpeedRef = 0.f;           // <WolfViewer 2026-10-08/> the fastest flown lately (falls back 0.5 m/s a second)
+    F32 mSpeedSmooth = -1.f;       // <WolfViewer 2026-10-10/> airspeed over about a second, for speed protection
+    F64 mSpeedLowSince = 0.0;      // <WolfViewer 2026-10-10/> when the smoothed speed first fell under the limit
 
     // AUTO LEARN: does holding "nose up" raise the nose, does "bank right" turn right?
     F32 mLearnPitchAcc = 0.f, mLearnPitchWeight = 0.f;

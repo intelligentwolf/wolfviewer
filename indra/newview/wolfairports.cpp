@@ -18,6 +18,7 @@
 #include "wolfairports.h"
 
 #include <boost/json.hpp>
+#include <algorithm>
 #include <cmath>
 
 #include "llagent.h"
@@ -177,6 +178,77 @@ const WolfAirports::Airport* WolfAirports::forRegion(const std::string& region) 
     }
     return nullptr;
 }
+
+// <WolfViewer 2026-10-10> see wolfairports.h search()
+// static
+std::string WolfAirports::fold(const std::string& utf8)
+{
+    // Latin-1 letters U+00C0..U+00FF to their plain letter ('*' and '/' stand for the multiply and divide signs).
+    static const char LATIN1[] = "aaaaaaaceeeeiiiidnooooo*ouuuuytsaaaaaaaceeeeiiiidnooooo/ouuuuyty";
+    const LLWString w = utf8str_to_wstring(utf8);
+    std::string out;
+    out.reserve(w.size());
+    for (llwchar c : w)
+    {
+        if (c >= 'A' && c <= 'Z') out += (char)(c - 'A' + 'a');
+        else if (c >= 32 && c < 127) out += (char)c;
+        else if (c >= 0xC0 && c <= 0xFF) out += LATIN1[c - 0xC0];
+        else if (c == 0x152 || c == 0x153) out += "oe";
+        else if (c == 0x160 || c == 0x161) out += 's';
+        else if (c == 0x17D || c == 0x17E) out += 'z';
+        else if (c == 0x178) out += 'y';
+        else out += ' ';
+    }
+    return out;
+}
+
+std::vector<const WolfAirports::Airport*> WolfAirports::search(const std::string& text, const LLVector3d& from) const
+{
+    std::string q = fold(text);
+    LLStringUtil::trim(q);
+    std::vector<std::pair<std::pair<S32, F64>, const Airport*>> ranked;
+    if (q.empty())
+    {
+        return {};
+    }
+    for (const Airport& a : mAirports)
+    {
+        const std::string name = fold(a.mName), region = fold(a.mRegion);
+        S32 rank = -1;
+        const size_t at = name.find(q);
+        if (at == 0) rank = 0;
+        else if (at != std::string::npos && !isalnum((unsigned char)name[at - 1])) rank = 1;
+        else if (at != std::string::npos) rank = 2;
+        else if (region.find(q) != std::string::npos) rank = 3;
+        if (rank < 0)
+        {
+            continue;
+        }
+        const F64 dx = a.mGlobal.mdV[VX] - from.mdV[VX], dy = a.mGlobal.mdV[VY] - from.mdV[VY];
+        ranked.push_back({ { rank, dx * dx + dy * dy }, &a });
+    }
+    std::sort(ranked.begin(), ranked.end(), [](const auto& l, const auto& r) { return l.first < r.first; });
+    std::vector<const Airport*> out;
+    out.reserve(ranked.size());
+    for (const auto& r : ranked)
+    {
+        out.push_back(r.second);
+    }
+    return out;
+}
+
+const WolfAirports::Airport* WolfAirports::byId(S32 id) const
+{
+    for (const Airport& a : mAirports)
+    {
+        if (a.mId == id)
+        {
+            return &a;
+        }
+    }
+    return nullptr;
+}
+// </WolfViewer>
 
 // static
 // The runway, from the prims the viewer has round the airport's point: every flat, long, narrow

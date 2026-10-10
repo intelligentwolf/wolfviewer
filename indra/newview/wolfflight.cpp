@@ -308,6 +308,20 @@ void WolfFlight::idle()
     const F32 dt = llclamp((F32)gFrameIntervalSeconds, 0.001f, 0.25f);
     measure(dt);
     resolveDestination();
+    // <WolfViewer 2026-10-10> flyToAirport: the route engaged once the map server has named the region
+    if (mArmOnDest)
+    {
+        if (mDest.mValid)
+        {
+            mArmOnDest = false;
+            pressLNAV();
+            pressVNAV();
+        }
+        else if (!mDest.mPending)
+        {
+            mArmOnDest = false;   // DEST NOT FOUND says why
+        }
+    }
     if (!mData.mValid)
     {
         if (mAP)
@@ -836,11 +850,25 @@ void WolfFlight::landCheckAirport()
         return;
     }
     mLandChecked = true;
-    const WolfAirports::Airport* ap = airports.forRegion(mDest.mRegion);
+    // <WolfViewer 2026-10-10> the airport picked by name, when it is on this region; otherwise the region's first
+    const WolfAirports::Airport* ap = mDestAirportId ? airports.byId(mDestAirportId) : nullptr;
+    if (ap && LLStringUtil::compareInsensitive(ap->mRegion, mDest.mRegion) != 0)
+    {
+        ap = nullptr;
+    }
+    if (!ap)
+    {
+        ap = airports.forRegion(mDest.mRegion);
+    }
     if (!ap)
     {
         return;
     }
+    // the region's origin, from where the destination stood in it, so the shown X/Y follow the airport
+    const LLVector3d origin = mDest.mGlobal - LLVector3d(mDest.mLocal.mV[VX], mDest.mLocal.mV[VY], 0.0);
+    mDest.mLocal.mV[VX] = (F32)(ap->mGlobal.mdV[VX] - origin.mdV[VX]);
+    mDest.mLocal.mV[VY] = (F32)(ap->mGlobal.mdV[VY] - origin.mdV[VY]);
+    // </WolfViewer>
     mLandAirport = ap->mName;
     mLandAirportExact = ap->mExact;
     mLandAirportGlobal = ap->mGlobal;
@@ -1330,6 +1358,12 @@ void WolfFlight::guidance(F32 dt)
         {
             const F32 dist = destDistance();
             want = destBearing();
+            // <WolfViewer 2026-10-10> a plane going round a refusing region steers for the route's corner first
+            if (!mSail && mRoute.mValid && mRoute.mLeg < (S32)mRoute.mPts.size() - 1)
+            {
+                const LLVector3d wp = activeWaypoint();
+                want = wrap360((F32)(atan2(wp.mdV[VX] - mData.mPosGlobal.mdV[VX], wp.mdV[VY] - mData.mPosGlobal.mdV[VY]) * RAD_TO_DEG));
+            }
             if (heli)
             {
                 // Slow down on the way in: about a sixth of the distance, m/s.
@@ -1370,6 +1404,11 @@ void WolfFlight::guidance(F32 dt)
         break;
     default:
         break;
+    }
+    // <WolfViewer 2026-10-10> two border crossings close together: off the corner (cornerTurn)
+    if (mAP && !mSail)
+    {
+        want = wrap360(want + cornerTurn());
     }
     if (landing)   // <WolfViewer 2026-10-07/> autoland steers and sets the speed
     {
@@ -1481,23 +1520,47 @@ void WolfFlight::guidance(F32 dt)
     // past this plane's best (279 m/s, it tops out near 180), take-off handed over at 131 m/s - under 60% of 279 - and
     // SPEED LOW dived it at 124 m into the ground. The reference is the lower of the selected speed and the fastest flown
     // lately, which falls back 0.5 m/s a second: a plane slowing towards a stall (62 -> 3 m/s in seconds) still trips it.
-    mSpeedRef = llmax(mData.mAirspeed, mSpeedRef - 0.5f * dt);
+    // <WolfViewer 2026-10-10> Paul: "when running autopilot i keep getting speed low ... surely the aircraft auto pilot
+    // should raise the speed if it needs it". His log 10:38-10:40Z: a plane flying a steady ~95 m/s read 94, 39, 129,
+    // 122, 100, 30 three seconds apart - single readings off by half (slow frames, crossings) - and every 39 or 30 set
+    // SPEED LOW, which took the nose-up trim off (the lumpy flight), while the 129s pushed the "fastest lately" up so a
+    // true 74 counted as low. So protection reads the speed over about a second, and a low has to last 1.5 s.
+    mSpeedSmooth = (mSpeedSmooth < 0.f) ? mData.mAirspeed : ema(mSpeedSmooth, mData.mAirspeed, dt, 1.f);
+    mSpeedRef = llmax(mSpeedSmooth, mSpeedRef - 0.5f * dt);
     if (mAP && !mSail && !heli && !takeoff && !(landing && mLand >= LAND_FINAL) && mWantSpeed > 1.f)
     {
         const F32 ref = llmin(mWantSpeed, mSpeedRef);
         const F32 low = ref * 0.6f, recovered = ref * 0.75f;
-        if (!mSpeedLow && mData.mAirspeed < low)
+        const F64 now_s = nowSeconds();
+        if (mSpeedSmooth >= low)
+        {
+            mSpeedLowSince = 0.0;
+        }
+        else if (mSpeedLowSince <= 0.0)
+        {
+            mSpeedLowSince = now_s;
+        }
+        if (!mSpeedLow && mSpeedLowSince > 0.0 && now_s - mSpeedLowSince >= 1.5)
         {
             mSpeedLow = true;
             postCas("SPEED LOW", CAS_WARNING);
             make_ui_sound("UISndAlert");
-            LL_INFOS("WolfFlight") << "speed protection: ias " << mData.mAirspeed << " < " << low << LL_ENDL;
+            LL_INFOS("WolfFlight") << "speed protection: ias " << mSpeedSmooth << " (now " << mData.mAirspeed << ") < " << low << LL_ENDL;
         }
-        else if (mSpeedLow && mData.mAirspeed > recovered)
+        else if (mSpeedLow && mSpeedSmooth > recovered)
         {
             mSpeedLow = false;
             clearCas("SPEED LOW");
-            LL_INFOS("WolfFlight") << "speed protection off: ias " << mData.mAirspeed << LL_ENDL;
+            LL_INFOS("WolfFlight") << "speed protection off: ias " << mSpeedSmooth << LL_ENDL;
+        }
+        // The autopilot gets its speed back itself: A/T on again if the pilot or an A/T FAIL had taken it off (Chad's deck,
+        // 10-10: CMD on, A/T off, SPEED LOW), its fail count started over.
+        if (mSpeedLow && !mAT)
+        {
+            mAT = true;
+            mThrottleStreak = 0;
+            clearCas("A/T FAIL");
+            LL_INFOS("WolfFlight") << "speed protection: A/T back on" << LL_ENDL;
         }
         if (mSpeedLow)
         {
@@ -1570,7 +1633,12 @@ void WolfFlight::guidance(F32 dt)
                                << " fd " << (S32)mFDPitch << " roll " << (S32)mData.mRoll << " fdroll " << (S32)mFDRoll
                                << " vs " << mVSf << " want " << mWantVS << " trim " << mPitchTrim << " out p/b/t "
                                << mOutPitch << "/" << mOutBank << "/" << mOutThrottle << " ias " << mData.mAirspeed
-                               << " agl " << (S32)mData.mAGL << " terrain " << mTerrainNeedSmooth << LL_ENDL;
+                               << " agl " << (S32)mData.mAGL << " terrain " << mTerrainNeedSmooth
+                               << " spd " << mSpeedSmooth << "/" << mWantSpeed << (mAT ? " A/T" : " no A/T")
+                               // <WolfViewer 2026-10-10/> Paul: "autopilot doesn't seem to land successfully" - every
+                               // landing stage in the log: state, height over the runway surface, wanted climb and speed
+                               << " land " << (S32)mLand << " above rwy " << (mLand >= LAND_APPROACH ? (F32)mData.mPosGlobal.mdV[VZ] - mLandTop : 0.f)
+                               << " want vs/spd " << mLandWantVS << "/" << mLandWantSpeed << " gear " << (mGearDown ? "down" : "up") << LL_ENDL;
     }
 }
 
@@ -1858,7 +1926,12 @@ void WolfFlight::learn(F32 dt)
     // reversal must show in two windows running before a setting is changed.
     const bool settling = now < mLearnHoldUntil;
     const bool not_flying = !mSail && !heli && (mData.mAirspeed < 10.f || mData.mAGL < 15.f);
-    if ((mSail && mData.mGS < 1.f) || settling || not_flying)
+    // <WolfViewer 2026-10-10> Paul at Dire Wolf, 11:52Z: just after take-off the plane pitched 22, 1, 28, 11 and rolled
+    // -2..-12 on its own (the region's physics - Chad's jet went the same way there); from that one window the AP took
+    // PITCH and BANK both as reversed, flipped both, and every correction then went the wrong way: roll -150, pitch -55,
+    // PULL UP. Nothing is learned from an aircraft that far from level: what it does there is not what its keys do.
+    const bool wild = !mSail && (fabsf(mData.mRoll) > 30.f || fabsf(mData.mPitch) > 20.f);
+    if ((mSail && mData.mGS < 1.f) || settling || not_flying || wild)
     {
         mLearnPitchAcc = mLearnPitchWeight = 0.f;
         mLearnBankAcc = mLearnBankWeight = 0.f;
@@ -1896,6 +1969,26 @@ void WolfFlight::learn(F32 dt)
         LL_INFOS("WolfFlight") << what << " keys look reversed: response " << (weight > 0.f ? acc / weight : 0.f)
                                << " over " << weight << " s of command" << LL_ENDL;
     };
+    // <WolfViewer 2026-10-10> Pitch and bank BOTH looking reversed at once is not two swapped keys - a plane's keys do
+    // not swap on both axes together - it is an aircraft not answering its controls (the region's physics, a script).
+    // Swapping both is what turned Dire Wolf's wobble into an upside-down dive: change nothing, say so.
+    if (!heli)
+    {
+        const bool pitch_rev = mLearnPitchWeight > 2.4f && mLearnPitchAcc / mLearnPitchWeight < -2.f;
+        const bool bank_rev = mLearnBankWeight > 2.4f && mLearnBankAcc / mLearnBankWeight < -2.f;
+        if (pitch_rev && bank_rev)
+        {
+            evidence("pitch", mLearnPitchAcc, mLearnPitchWeight);
+            evidence("bank", mLearnBankAcc, mLearnBankWeight);
+            LL_INFOS("WolfFlight") << "both axes look reversed at once: the aircraft is not answering its controls; keys left as they are" << LL_ENDL;
+            postCas("CONTROLS NOT ANSWERING", CAS_CAUTION);
+            mPitchRevStreak = mBankRevStreak = 0;
+            mLearnPitchAcc = mLearnPitchWeight = 0.f;
+            mLearnBankAcc = mLearnBankWeight = 0.f;
+            mLearnWindowStart = now;
+            return;
+        }
+    }
     if (!heli && check(mLearnPitchAcc, mLearnPitchWeight, 2.f, mPitchRevStreak))
     {
         evidence("pitch", mLearnPitchAcc, mLearnPitchWeight);
@@ -1941,6 +2034,8 @@ void WolfFlight::engageAP()
         return;
     }
     mWantVSSlewInit = false;   // <WolfViewer 2026-10-08/> the climb-rate limiter starts from what the plane is doing
+    mSpeedSmooth = -1.f;       // <WolfViewer 2026-10-10/> speed protection starts from this flight's speed
+    mSpeedLowSince = 0.0;
     // <WolfViewer 2026-10-07> A plane on the ground takes off (takeoffStart) instead of refusing.
     const bool take_off = !mSail && craft() == CRAFT_PLANE && mData.mAGL < 10.f;
     clearCas("AP: NOT SEATED");
@@ -2135,11 +2230,134 @@ void WolfFlight::setDestination(const std::string& region_in, const LLVector3& l
         d.mGlobal.mdV[VZ] = mData.mPosGlobal.mdV[VZ];
     }
     mDest = d;
+    ++mDestSerial;        // <WolfViewer 2026-10-10/> the CDU picks the new destination up (destSerial)
+    mDestAirportId = 0;   // <WolfViewer 2026-10-10/> setDestinationAirport sets it again after this
     landReset();   // <WolfViewer 2026-10-07/> a new destination is looked up in the airports list
     rebuildRoute();
     mArrived = false;
     clearCas("DEST NOT FOUND");
     LL_INFOS("WolfFlight") << "destination " << region << " " << local << (d.mPending ? " (asking the map)" : "") << LL_ENDL;
+}
+
+// <WolfViewer 2026-10-10> see wolfflight.h
+void WolfFlight::setDestinationAirport(S32 airport_id)
+{
+    const WolfAirports::Airport* ap = WolfAirports::instance().byId(airport_id);
+    if (!ap)
+    {
+        return;
+    }
+    // the region first (found the usual way); landCheckAirport then puts the destination on this airport
+    setDestination(ap->mRegion, LLVector3(128.f, 128.f, 0.f), false);
+    mDestAirportId = airport_id;
+    LL_INFOS("WolfFlight") << "destination airport " << ap->mName << " (" << ap->mRegion << ")" << LL_ENDL;
+}
+
+// <WolfViewer 2026-10-10> OFF THE CORNERS. Paul lost his jet at Wolf North 32 (12:08:59Z): at 128 m/s it clipped the
+// corner of Wolf North 3 / 33 / 32 and crossed twice inside a second on a busy server (regions4 load 41). The grid
+// carries the vehicle first and its pilot after (SceneObjectGroup.cs CrossAsync :986 then :1023); a crossing that
+// finds the pilot still in the last one is refused and the vehicle stopped dead at the edge (:909-910, then
+// CrossAsyncCompleted :1128-1148), and a pilot whose own crossing fails is stood up at the edge (:1040-1074) - Paul
+// was left at 1021/135/367 and the jet went on alone. So while the autopilot flies, the next two borders along the
+// track are found from the regions' squares; when they come less than 4 s apart (a corner, not a narrow region) the
+// track turns 20 degrees away from the second border, held 3 s, so one crossing has finished before the next.
+F32 WolfFlight::cornerTurn()
+{
+    const F64 now = nowSeconds();
+    if (now < mCornerUntil)
+    {
+        return mCornerTurn;
+    }
+    mCornerTurn = 0.f;
+    const F32 gs = mData.mGS;
+    if (gs < 20.f || !mData.mValid)
+    {
+        return 0.f;
+    }
+    // A region's square, from the regions loaded or the world map.
+    auto square = [](const LLVector3d& p, F64& x0, F64& y0, F64& x1, F64& y1)
+    {
+        if (LLViewerRegion* r = LLWorld::getInstance()->getRegionFromPosGlobal(p))
+        {
+            const LLVector3d o = r->getOriginGlobal();
+            x0 = o.mdV[VX]; y0 = o.mdV[VY]; x1 = x0 + r->getWidth(); y1 = y0 + r->getWidth();
+            return true;
+        }
+        if (LLSimInfo* s = LLWorldMap::getInstance()->simInfoFromPosGlobal(p))
+        {
+            const LLVector3d o = s->getGlobalOrigin();
+            x0 = o.mdV[VX]; y0 = o.mdV[VY];
+            x1 = x0 + (s->getSizeX() > 0 ? s->getSizeX() : REGION_WIDTH_METERS);
+            y1 = y0 + (s->getSizeY() > 0 ? s->getSizeY() : REGION_WIDTH_METERS);
+            return true;
+        }
+        return false;
+    };
+    // How far along dir from p to the square's edge, and which axis that edge is on (0 x, 1 y).
+    auto exitOf = [](F64 px, F64 py, F64 dx, F64 dy, F64 x0, F64 y0, F64 x1, F64 y1, int& axis)
+    {
+        const F64 tx = dx > 1e-6 ? (x1 - px) / dx : dx < -1e-6 ? (x0 - px) / dx : 1e30;
+        const F64 ty = dy > 1e-6 ? (y1 - py) / dy : dy < -1e-6 ? (y0 - py) / dy : 1e30;
+        axis = tx < ty ? 0 : 1;
+        return llmax(0.0, llmin(tx, ty));
+    };
+    const F32 trk = mData.mTrack * DEG_TO_RAD;
+    const F64 dx = sin(trk), dy = cos(trk);
+    const LLVector3d p = mData.mPosGlobal;
+    F64 x0, y0, x1, y1;
+    if (!square(p, x0, y0, x1, y1))
+    {
+        return 0.f;
+    }
+    int axis1 = 0, axis2 = 0;
+    const F64 d1 = exitOf(p.mdV[VX], p.mdV[VY], dx, dy, x0, y0, x1, y1, axis1);
+    if (d1 > gs * 20.0)
+    {
+        return 0.f;   // the next border is far off
+    }
+    const F64 qx = p.mdV[VX] + dx * (d1 + 1.0), qy = p.mdV[VY] + dy * (d1 + 1.0);
+    if (!square(LLVector3d(qx, qy, p.mdV[VZ]), x0, y0, x1, y1))
+    {
+        return 0.f;   // open sea beyond: one crossing
+    }
+    const F64 d2 = exitOf(qx, qy, dx, dy, x0, y0, x1, y1, axis2);
+    if (axis1 == axis2 || (d2 + 1.0) / gs >= 4.0)
+    {
+        return 0.f;   // a narrow region in line, or time enough between the two
+    }
+    // Away from the second border: less of the track's component across it.
+    F32 turn = 20.f;
+    if (axis2 == 0)
+    {
+        // an east wall: towards north when heading north-east, south when south-east; a west wall the mirror
+        turn = dx > 0.0 ? (dy >= 0.0 ? -20.f : 20.f) : (dy >= 0.0 ? 20.f : -20.f);
+    }
+    else
+    {
+        turn = (dy > 0.0) == (dx >= 0.0) ? 20.f : -20.f;   // a north wall: towards east or west, whichever side it heads
+    }
+    mCornerTurn = turn;
+    mCornerUntil = now + 3.0;
+    LL_INFOS("WolfFlight") << "corner ahead: borders " << (S32)d1 << " m and " << (S32)(d1 + d2) << " m along the track at "
+                           << (S32)gs << " m/s; turning " << turn << " degrees off it" << LL_ENDL;
+    return mCornerTurn;
+}
+
+void WolfFlight::flyToAirport(S32 airport_id)
+{
+    if (!WolfAirports::instance().byId(airport_id))
+    {
+        return;
+    }
+    setDestinationAirport(airport_id);
+    mArmOnDest = true;
+}
+
+void WolfFlight::flyToRegion(const std::string& region)
+{
+    // Source: wolfflightdeck.cpp lsk() DIR TO line 1 - a bare region is 128/128/0 with Z, the terrain floor's
+    setDestination(region, LLVector3(128.f, 128.f, 0.f), true);
+    mArmOnDest = true;
 }
 
 void WolfFlight::resolveDestination()
@@ -2530,7 +2748,249 @@ void WolfFlight::rebuildRoute()
     mRoute.mLeg = 1;
     mRoute.mValid = true;
     mRoute.mPlannedAt = nowSeconds();
+    routeAroundBlocked();   // <WolfViewer 2026-10-10/> unless a region on the way refused us
 }
+
+// <WolfViewer 2026-10-10> GOING ROUND A REGION THAT WILL NOT LET US IN. Paul: "if the plane etc sees somewhere it can't
+// go it should go round it" (Chad's deck: "Denied access to private region little ST.Lucia" six times over, the
+// plane pushed back at the border each time), "if a region doesn't respond it should either fly round it or do
+// opensea". A region marked offline is already open sea on the server (EntityTransferModule.cs:1591-1592
+// RegionOnline); one that refuses or does not answer sends, at every try, the reason as an alert:
+//   Scene.cs:4603 / :4761  "Denied access to private region <name>: You are not on the access list ..." /
+//                          "...: You do not have access to that region."
+//   EntityTransferModule.cs:1597 "Access Denied or Temporary not possible" (refused in the last 60 s, banned cache)
+//   EntityTransferModule.cs:1615 "Access Denied" (QueryAccess failed with no reason - no answer)
+// Such a region is kept out of routes for ten minutes.
+namespace
+{
+    const F64 BLOCKED_KEEP_SECS = 600.0;
+    const F64 BLOCKED_MARGIN_M = 150.0;   // corners this far out: room for a plane's turn
+
+    // Does the segment a-b pass through the box (Liang-Barsky)?
+    bool segmentHitsBox(F64 ax, F64 ay, F64 bx, F64 by, F64 x0, F64 y0, F64 x1, F64 y1)
+    {
+        F64 t0 = 0.0, t1 = 1.0;
+        const F64 dx = bx - ax, dy = by - ay;
+        const F64 p[4] = { -dx, dx, -dy, dy };
+        const F64 q[4] = { ax - x0, x1 - ax, ay - y0, y1 - ay };
+        for (int i = 0; i < 4; ++i)
+        {
+            if (p[i] == 0.0)
+            {
+                if (q[i] < 0.0) return false;
+                continue;
+            }
+            const F64 t = q[i] / p[i];
+            if (p[i] < 0.0) { if (t > t1) return false; if (t > t0) t0 = t; }
+            else            { if (t < t0) return false; if (t < t1) t1 = t; }
+        }
+        return t0 < t1;
+    }
+
+    F64 flat(const LLVector3d& a, const LLVector3d& b)
+    {
+        const F64 dx = b.mdV[VX] - a.mdV[VX], dy = b.mdV[VY] - a.mdV[VY];
+        return sqrt(dx * dx + dy * dy);
+    }
+}
+
+bool WolfFlight::onCrossingRefused(const std::string& alert)
+{
+    std::string text = (!alert.empty() && alert[0] == '/') ? alert.substr(1) : alert;
+    static const std::string PRIVATE_PREFIX("Denied access to private region ");
+    std::string name;
+    if (text.compare(0, PRIVATE_PREFIX.size(), PRIVATE_PREFIX) == 0)
+    {
+        const size_t colon = text.find(':', PRIVATE_PREFIX.size());
+        name = text.substr(PRIVATE_PREFIX.size(), colon == std::string::npos ? std::string::npos : colon - PRIVATE_PREFIX.size());
+    }
+    else if (text != "Access Denied or Temporary not possible" && text != "Access Denied")
+    {
+        return false;
+    }
+    // Only a craft under way on the deck is going round anything.
+    if (!mActive || !mData.mValid || !mData.mSeated)
+    {
+        return false;
+    }
+
+    // The region: by name when the alert gives one, else the one just ahead on the track.
+    LLVector3d lo, hi;
+    bool found = false;
+    LLWorldMap* map = LLWorldMap::getInstance();
+    LLSimInfo* info = name.empty() ? nullptr : map->simInfoFromName(name);
+    if (!info)
+    {
+        const F32 dir = (mData.mGS > 0.7f ? mData.mTrack : mData.mHeading) * DEG_TO_RAD;
+        const LLVector3d ahead = mData.mPosGlobal + LLVector3d(sin(dir) * 48.0, cos(dir) * 48.0, 0.0);
+        if (LLViewerRegion* regionp = LLWorld::getInstance()->getRegionFromPosGlobal(ahead);
+            regionp && regionp != gAgent.getRegion())
+        {
+            lo = regionp->getOriginGlobal();
+            hi = lo + LLVector3d(regionp->getWidth(), regionp->getWidth(), 0.0);
+            found = true;
+            if (name.empty()) name = regionp->getName();
+        }
+        else
+        {
+            info = map->simInfoFromPosGlobal(ahead);
+        }
+    }
+    if (!found && info)
+    {
+        lo = info->getGlobalOrigin();
+        const F64 sx = info->getSizeX() > 0 ? info->getSizeX() : REGION_WIDTH_METERS;
+        const F64 sy = info->getSizeY() > 0 ? info->getSizeY() : REGION_WIDTH_METERS;
+        hi = lo + LLVector3d(sx, sy, 0.0);
+        found = true;
+        if (name.empty()) name = info->getName();
+    }
+    if (!found)
+    {
+        LL_INFOS("WolfFlight") << "crossing refused (" << text << ") but the region is not on the map yet" << LL_ENDL;
+        return false;
+    }
+    // Inside it already (the refusal was for somewhere else): nothing sensible to go round.
+    const LLVector3d& at = mData.mPosGlobal;
+    if (at.mdV[VX] > lo.mdV[VX] && at.mdV[VX] < hi.mdV[VX] && at.mdV[VY] > lo.mdV[VY] && at.mdV[VY] < hi.mdV[VY])
+    {
+        return false;
+    }
+
+    const F64 now = nowSeconds();
+    auto replan = [&]()
+    {
+        std::string shown = utf8str_truncate(name, 24);
+        LLStringUtil::toUpper(shown);
+        postCas("AVOIDING " + shown, CAS_CAUTION);
+        if (mDest.mValid)
+        {
+            if (mSail)
+            {
+                mRouteDirty = true;   // planWaterRoute treats it as land
+            }
+            else
+            {
+                rebuildRoute();
+            }
+        }
+        else if (mAP && mLateral == LAT_HDG)
+        {
+            mSelHeading = wrap360(mSelHeading + 180.f);   // no destination: turn away from it
+        }
+    };
+    for (BlockedRegion& b : mBlocked)
+    {
+        if (b.mMin == lo && b.mMax == hi)
+        {
+            // the same refusal again (the server repeats it at every try): keep it, drop the repeat popup
+            const bool repeat = b.mUntil > now;
+            b.mUntil = now + BLOCKED_KEEP_SECS;
+            if (!repeat)
+            {
+                replan();
+            }
+            return repeat;
+        }
+    }
+    BlockedRegion b;
+    b.mMin = lo;
+    b.mMax = hi;
+    b.mName = name;
+    b.mUntil = now + BLOCKED_KEEP_SECS;
+    mBlocked.push_back(b);
+    LL_INFOS("WolfFlight") << "crossing refused by " << name << " (" << text << "): going round "
+                           << lo.mdV[VX] << "," << lo.mdV[VY] << " - " << hi.mdV[VX] << "," << hi.mdV[VY] << LL_ENDL;
+    replan();
+    return false;
+}
+
+bool WolfFlight::blockedAt(F64 x, F64 y) const
+{
+    const F64 now = nowSeconds();
+    for (const BlockedRegion& b : mBlocked)
+    {
+        if (b.mUntil > now && x >= b.mMin.mdV[VX] && x < b.mMax.mdV[VX] && y >= b.mMin.mdV[VY] && y < b.mMax.mdV[VY])
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+void WolfFlight::routeAroundBlocked()
+{
+    const F64 now = nowSeconds();
+    mBlocked.erase(std::remove_if(mBlocked.begin(), mBlocked.end(), [now](const BlockedRegion& b) { return b.mUntil <= now; }),
+                   mBlocked.end());
+    if (mBlocked.empty() || !mRoute.mValid || mRoute.mPts.size() < 2)
+    {
+        return;
+    }
+    // A route may cross a refusing region's square only near its edge, never through it: the test box is the
+    // square itself, the corners are BLOCKED_MARGIN_M outside it.
+    auto hits = [&](const LLVector3d& a, const LLVector3d& b, const BlockedRegion& r)
+    {
+        return segmentHitsBox(a.mdV[VX], a.mdV[VY], b.mdV[VX], b.mdV[VY],
+                              r.mMin.mdV[VX] + 1.0, r.mMin.mdV[VY] + 1.0, r.mMax.mdV[VX] - 1.0, r.mMax.mdV[VY] - 1.0);
+    };
+    std::vector<LLVector3d>& pts = mRoute.mPts;
+    for (int pass = 0; pass < 12; ++pass)
+    {
+        size_t seg = 0;
+        const BlockedRegion* in_way = nullptr;
+        for (size_t i = 1; i < pts.size() && !in_way; ++i)
+        {
+            for (const BlockedRegion& r : mBlocked)
+            {
+                if (hits(pts[i - 1], pts[i], r)) { seg = i; in_way = &r; break; }
+            }
+        }
+        if (!in_way)
+        {
+            break;
+        }
+        const LLVector3d a = pts[seg - 1], b = pts[seg];
+        const F64 z = b.mdV[VZ];
+        const F64 m = BLOCKED_MARGIN_M;
+        const LLVector3d corner[4] = {
+            LLVector3d(in_way->mMin.mdV[VX] - m, in_way->mMin.mdV[VY] - m, z),
+            LLVector3d(in_way->mMax.mdV[VX] + m, in_way->mMin.mdV[VY] - m, z),
+            LLVector3d(in_way->mMax.mdV[VX] + m, in_way->mMax.mdV[VY] + m, z),
+            LLVector3d(in_way->mMin.mdV[VX] - m, in_way->mMax.mdV[VY] + m, z) };
+        // one corner, or two neighbouring ones (round a whole side), the shortest that is clear
+        F64 best = 1e30;
+        std::vector<LLVector3d> via;
+        for (int c = 0; c < 4; ++c)
+        {
+            if (!hits(a, corner[c], *in_way) && !hits(corner[c], b, *in_way))
+            {
+                const F64 len = flat(a, corner[c]) + flat(corner[c], b);
+                if (len < best) { best = len; via = { corner[c] }; }
+            }
+        }
+        for (int c = 0; c < 4; ++c)
+        {
+            for (int step : { 1, 3 })
+            {
+                const int d = (c + step) % 4;
+                if (!hits(a, corner[c], *in_way) && !hits(corner[d], b, *in_way))
+                {
+                    const F64 len = flat(a, corner[c]) + flat(corner[c], corner[d]) + flat(corner[d], b);
+                    if (len < best) { best = len; via = { corner[c], corner[d] }; }
+                }
+            }
+        }
+        if (via.empty())
+        {
+            LL_WARNS("WolfFlight") << "no way round " << in_way->mName << LL_ENDL;
+            break;
+        }
+        pts.insert(pts.begin() + seg, via.begin(), via.end());
+    }
+    mRoute.mLeg = 1;
+}
+// </WolfViewer>
 
 LLVector3d WolfFlight::activeWaypoint() const
 {
@@ -2732,6 +3192,11 @@ void WolfFlight::planWaterRoute()
         for (S32 i = 0; i < nx; ++i)
         {
             const LLVector3d p(x0 + (i + 0.5) * cell, y0 + (j + 0.5) * cell, 0.0);
+            if (blockedAt(p.mdV[VX], p.mdV[VY]))
+            {
+                kind[j * nx + i] = 1;   // <WolfViewer 2026-10-10/> refused the crossing (onCrossingRefused): sail round it
+                continue;
+            }
             LLViewerRegion* regionp = world->getRegionFromPosGlobal(p);
             if (!regionp)
             {

@@ -67,6 +67,12 @@ public:
         H_TYPE_CAR, H_TYPE_TRUCK, H_TYPE_BIKE,
         H_UNITS, H_PANEL, H_CONTROLS, H_TRIP, H_CLOSE, H_MAP, H_HELP,
         H_LIGHTS, H_IND_L, H_IND_R, H_HANDBRAKE, H_HORN, H_HAZARDS, H_CRUISE,
+        // [GEAR STICK 2026-10-10] the manual gate's slots: R, N, then gears 1..12; the truck's
+        // range collar (LOW / HIGH) and splitter rocker (L / H) on the knob
+        H_GATE_0, H_GATE_1, H_GATE_2, H_GATE_3, H_GATE_4, H_GATE_5, H_GATE_6, H_GATE_7,
+        H_GATE_8, H_GATE_9, H_GATE_10, H_GATE_11, H_GATE_12, H_GATE_13,
+        H_RANGE, H_SPLIT,
+        H_MINI,   // <WolfViewer 2026-10-10/> shrink to the mini bar / bring the dashboard back
     };
 
 private:
@@ -89,6 +95,7 @@ private:
     void addHit(F32 l, F32 b, F32 r, F32 t, EHit id, const std::string& tip);
     const Hit* hitAt(S32 x, S32 y) const;
     bool onPanel(S32 x, S32 y) const;
+    void drawMiniBar(F32 bottom);   // <WolfViewer 2026-10-10/> WolfDashboardMini
     void press(EHit id);
     void release();
     void drawHelp(F32 top);

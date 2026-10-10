@@ -227,6 +227,8 @@ with the same filename but different name
   <texture name="WolfPhoto_comic_Sel" file_name="wolf_photo/comic_sel.png" preload="false" />
   <texture name="Command_WolfDictate_Icon"     file_name="toolbar_icons/wolf_dictate.png"     preload="true" />
   <texture name="Command_WolfGameMode_Icon"   file_name="toolbar_icons/wolf_gamemode.png"   preload="true" />   <!-- [WOLF GAME 2026-10-09] the paw -->
+  <texture name="Wolf_WatchWolf_Icon"   file_name="toolbar_icons/wolf_watchwolf.png"   preload="true" />   <!-- [WATCHWOLF 2026-10-10] the wolf head (region-terrain-work/watchwolf/make_wolf_icon.py) -->
+  <texture name="Wolf_WatchWolf_Icon_64"   file_name="toolbar_icons/wolf_watchwolf_64.png"   preload="true" />
   <texture name="Command_WolfRoleplay_Icon"   file_name="toolbar_icons/wolf_roleplay.png"   preload="true" />   <!-- [WOLF GAME 2026-10-09] shield and crossed swords -->
   <texture name="Command_WolfDashboard_Icon"  file_name="toolbar_icons/wolf_dashboard.png"  preload="true" />   <!-- [WOLF DRIVE 2026-10-09] a rev counter -->
   <texture name="Command_WolfRain_Icon"        file_name="toolbar_icons/wolf_rain.png"        preload="true" />

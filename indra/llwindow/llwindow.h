@@ -74,6 +74,20 @@ public:
     virtual bool getSize(LLCoordScreen *size) = 0;
     virtual bool getSize(LLCoordWindow *size) = 0;
     virtual bool setPosition(LLCoordScreen position) = 0;
+
+    // <WolfViewer 2026-10-10> Paul: "an option to make the viewer spread across all available
+    // screens". One window covering the bounding box of every monitor, no border; span = false puts
+    // back the size, place and border it had. SPAN_COMPOSITOR: this window cannot place itself (a
+    // Wayland client), so the desktop has to be asked - the viewer side (wolfspanscreens.cpp) does
+    // that. message says why when it is SPAN_FAILED.
+    enum ESpanResult { SPAN_DONE, SPAN_FAILED, SPAN_COMPOSITOR };
+    virtual ESpanResult spanAllScreens(bool span, std::string& message)
+    {
+        message = "This system cannot spread one window across several screens.";
+        return SPAN_FAILED;
+    }
+    bool getSpanningScreens() const { return mSpanAllScreens; }
+    // </WolfViewer>
     bool setSize(LLCoordScreen size);
     bool setSize(LLCoordWindow size);
     virtual void setMinSize(U32 min_width, U32 min_height, bool enforce_immediately = true);
@@ -241,6 +255,7 @@ protected:
     S32         mMinWindowWidth;
     S32         mMinWindowHeight;
     S32         mRefreshRate;
+    bool        mSpanAllScreens = false;   // <WolfViewer 2026-10-10/> spanAllScreens(true) is in force
 
     // Handle a UTF-16 encoding unit received from keyboard.
     // Converting the series of UTF-16 encoding units to UTF-32 data,

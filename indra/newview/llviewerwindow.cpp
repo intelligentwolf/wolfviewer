@@ -27,6 +27,7 @@
 #include "llviewerprecompiledheaders.h"
 #include "llviewerwindow.h"
 #include "wolfgame.h"   // [WOLF GAME 2026-10-09/] Escape for the game's overlay, dialogs, effects
+#include "wolfspanscreens.h"   // <WolfViewer 2026-10-10/> spread across all screens: do not save that size
 
 
 // system library includes
@@ -2818,7 +2819,8 @@ void LLViewerWindow::reshape(S32 width, S32 height)
             mWindow->setMinSize(min_window_width, min_window_height);
 
             LLCoordScreen window_rect;
-            if (!gNonInteractive && mWindow->getSize(&window_rect))
+            // <WolfViewer 2026-10-10/> nor the size of the window spread across all screens
+            if (!gNonInteractive && !WolfSpanScreens::active() && mWindow->getSize(&window_rect))
             {
             // Only save size if not maximized
                 gSavedSettings.setU32("WindowWidth", window_rect.mX);

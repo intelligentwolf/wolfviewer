@@ -13,6 +13,7 @@
 
 #include "wolfdjaudio.h"
 #include "wolfdjcapture.h"
+#include "wolfdjplayer.h"
 
 #include "llbase64.h"
 #include "llcallbacklist.h"
@@ -129,6 +130,21 @@ void WolfDJBiquad::setHighPass(float f0, float q)
     b0 = (1.f + cw) / 2.f / a0;
     b1 = -(1.f + cw) / a0;
     b2 = (1.f + cw) / 2.f / a0;
+    a1 = -2.f * cw / a0;
+    a2 = (1.f - alpha) / a0;
+}
+
+// Source: RBJ cookbook, BPF "constant 0 dB peak gain": b0 = alpha, b1 = 0, b2 = -alpha,
+// a0 = 1 + alpha, a1 = -2 cos(w0), a2 = 1 - alpha.
+void WolfDJBiquad::setBandPass(float f0, float q)
+{
+    const float w0 = 2.f * PI_F * f0 / (float)RATE;
+    const float cw = cosf(w0), sw = sinf(w0);
+    const float alpha = sw / (2.f * q);
+    const float a0 = 1.f + alpha;
+    b0 = alpha / a0;
+    b1 = 0.f;
+    b2 = -alpha / a0;
     a1 = -2.f * cw / a0;
     a2 = (1.f - alpha) / a0;
 }
@@ -253,11 +269,44 @@ void WolfDJEffect::process(int fx, float amount, float* stereo, size_t frames)
     }
 }
 
-float wolfdj_fader_gain(float pos)
+// Source: the Behringer X32 / Midas M32 fader scale (X32 OSC protocol, documented by Patrick-Gilles
+// Maillot): four straight dB runs - 0..0.0625 is -90..-60 dB, 0.0625..0.25 is -60..-30 dB,
+// 0.25..0.5 is -30..-10 dB, 0.5..1 is -10..+10 dB - so 0 dB sits at 0.75, as on any desk's
+// long-throw fader. The bottom stop is off (the desk's -inf).
+float wolfdj_fader_db(float pos)
 {
     pos = llclamp(pos, 0.f, 1.f);
-    return pos * pos * 1.4125f;     // 1.4125 = +3 dB at the top; 0.84 = 0 dB
+    if (pos <= 0.001f) return -120.f;
+    if (pos >= 0.5f) return pos * 40.f - 30.f;
+    if (pos >= 0.25f) return pos * 80.f - 50.f;
+    if (pos >= 0.0625f) return pos * 160.f - 70.f;
+    return pos * 480.f - 90.f;
 }
+
+float wolfdj_fader_pos(float db)
+{
+    if (db <= -90.f) return 0.f;
+    if (db < -60.f) return (db + 90.f) / 480.f;
+    if (db < -30.f) return (db + 70.f) / 160.f;
+    if (db < -10.f) return (db + 50.f) / 80.f;
+    return llclamp((db + 30.f) / 40.f, 0.f, 1.f);
+}
+
+float wolfdj_fader_gain(float pos)
+{
+    const float db = wolfdj_fader_db(pos);
+    return db <= -120.f ? 0.f : powf(10.f, db / 20.f);
+}
+
+// The law before 10-10 was pos^2 x 1.4125 (+3 dB at the top): the same gain on the new scale.
+float wolfdj_old_fader_to_pos(float old_pos)
+{
+    old_pos = llclamp(old_pos, 0.f, 1.f);
+    const float gain = old_pos * old_pos * 1.4125f;
+    return gain <= 0.f ? 0.f : wolfdj_fader_pos(20.f * log10f(gain));
+}
+
+const float WolfDJ::SPECTRUM_HZ[WolfDJ::SPECTRUM_BANDS] = { 31.5f, 63.f, 125.f, 250.f, 500.f, 1000.f, 2000.f, 4000.f, 8000.f, 16000.f };
 
 float wolfdj_lin_to_db(float lin)
 {
@@ -269,10 +318,12 @@ float wolfdj_lin_to_db(float lin)
 // ---------------------------------------------------------------------------------------------
 
 static constexpr size_t RING_FRAMES = RATE * 2;             // 2 s
+static constexpr int CUE_BUFFERS = 12;                     // the DJ's own output queue, 20 ms each
 static constexpr size_t MAX_LAG_FRAMES = RATE / 4;          // more than 250 ms queued...
 static constexpr size_t TRIM_TO_FRAMES = RATE * 8 / 100;    // ...is trimmed back to 80 ms
 
 WolfDJChannel::WolfDJChannel()
+:   mMaxLag(MAX_LAG_FRAMES), mTrimTo(TRIM_TO_FRAMES)
 {
     mRing.assign(RING_FRAMES * 2, 0.f);
     mLow.setLowShelf(100.f, 0.f);
@@ -367,12 +418,25 @@ void WolfDJChannel::pushStereo(const float* in, size_t frames, unsigned rate)
     }
 }
 
+void WolfDJChannel::setLagLimit(float seconds)
+{
+    std::lock_guard<std::mutex> lock(mMutex);
+    if (seconds <= 0.f)
+    {
+        mMaxLag = MAX_LAG_FRAMES;
+        mTrimTo = TRIM_TO_FRAMES;
+        return;
+    }
+    mMaxLag = llclamp((size_t)(seconds * RATE), TRIM_TO_FRAMES, RING_FRAMES - RATE / 4);
+    mTrimTo = mMaxLag * 2 / 3;
+}
+
 size_t WolfDJChannel::pull(float* out, size_t frames)
 {
     std::lock_guard<std::mutex> lock(mMutex);
-    if (mCount > MAX_LAG_FRAMES)
+    if (mCount > mMaxLag)
     {
-        const size_t drop = mCount - TRIM_TO_FRAMES;
+        const size_t drop = mCount - mTrimTo;
         mHead = (mHead + drop) % RING_FRAMES;
         mCount -= drop;
     }
@@ -898,6 +962,14 @@ WolfDJMixer::WolfDJMixer()
     {
         mChannels[ci].mFader = 0.7f;
     }
+    mJingle.setLagLimit(PLAYER_RING_SECONDS);   // the jingles decode ahead too
+    // [WOLF DJ 2026-10-10] Octave bands: Q = sqrt(2) is a one-octave bandwidth (RBJ cookbook,
+    // 1/Q = 2 sinh(ln(2)/2 * BW * w0/sin(w0)), about sqrt(2) for BW = 1 well below Nyquist).
+    for (int b = 0; b < SPECTRUM_BANDS; ++b)
+    {
+        mSpectrumFilters[b].setBandPass(SPECTRUM_HZ[b], 1.41421356f);
+        mSpectrum[b] = 0.f;
+    }
 }
 
 WolfDJMixer::~WolfDJMixer()
@@ -913,6 +985,9 @@ void WolfDJMixer::setCapture(int ch, std::unique_ptr<WolfDJCaptureStream> cap, c
     mChannels[ch].clear();
     mCaptures[ch] = std::move(cap);
     mCaptureIds[ch] = mCaptures[ch] ? id : std::string();
+    // [WOLF DJ 2026-10-10] The playlist decodes ahead (WolfDJPlayer::run, PLAYER_LEAD): give it
+    // room so a slow moment on its thread is not trimmed away as lag. Live sources keep 250 ms.
+    mChannels[ch].setLagLimit(mCaptureIds[ch] == WOLFDJ_PLAYLIST_ID ? PLAYER_RING_SECONDS : 0.f);
 }
 
 void WolfDJMixer::shutdown()
@@ -949,6 +1024,12 @@ void WolfDJMixer::stopEngineIfIdle()
         ch.mPrePeak = 0.f;
     }
     mMasterPeak = 0.f;
+    mMasterPeakL = 0.f;
+    mMasterPeakR = 0.f;
+    mMasterPrePeak = 0.f;
+    mJinglePeak = 0.f;
+    mJinglePrePeak = 0.f;
+    for (std::atomic<float>& b : mSpectrum) b = 0.f;
 }
 
 void WolfDJMixer::attachVoiceTap(bool attach)
@@ -963,6 +1044,19 @@ void WolfDJMixer::attachVoiceTap(bool attach)
 void WolfDJMixer::onIdle(void* data)
 {
     WolfDJMixer* self = static_cast<WolfDJMixer*>(data);
+    // [WOLF DJ 2026-10-10] Window shut, nothing live, the playlist stopped: nothing left to mix.
+    // Stopping removes this callback - safe from inside it (LLCallbackList::callFunctions has
+    // already moved past it).
+    if (!self->mWindowOpen && !self->mLiveRequested && !WolfDJPlayer::instance().isPlaying())
+    {
+        for (int ch = 0; ch < CH_COUNT; ++ch)
+        {
+            self->setCapture(ch, nullptr, std::string());
+        }
+        self->mCue = CUE_NONE;
+        self->stopEngineIfIdle();
+        return;
+    }
     // The voice engine can be torn down and rebuilt (voice off/on, a device change): put the
     // tap back now and then. It is one atomic store.
     self->mVoiceTapSeconds += 1.f / 30.f;
@@ -1065,27 +1159,32 @@ void WolfDJMixer::mixTick()
         }
     }
 
-    // [WOLF DJ 2026-10-05] Jingle pads: on air at their own level, and in the DJ's ears.
+    // [WOLF DJ 2026-10-05] Jingle pads: on air at their own level, and in the DJ's ears while
+    // the jingle strip's MON is on (10-10).
     {
         const size_t got = mJingle.pull(mTmp.data(), N);
-        float jpeak = 0.f;
+        float jpeak = 0.f, jpre = 0.f;
         if (got > 0)
         {
             const float gain = wolfdj_fader_gain(mJingleLevel);
-            if (monitor_buf.empty()) monitor_buf.assign(N * 2, 0.f);
+            const bool mon = mJingleMonitor.load();
+            if (mon && monitor_buf.empty()) monitor_buf.assign(N * 2, 0.f);
             for (size_t i = 0; i < N * 2; ++i)
             {
                 const float y = mTmp[i] * gain;
                 mBus[i] += y;
-                monitor_buf[i] += y;
+                if (mon) monitor_buf[i] += y;
+                jpre = std::max(jpre, fabsf(mTmp[i]));
                 jpeak = std::max(jpeak, fabsf(y));
             }
         }
         mJinglePeak = jpeak;
+        mJinglePrePeak = jpre;
     }
 
     // Talk-over envelope: fast down, slow back up. 0.02 RMS = about -34 dBFS, i.e. speech.
     const float duck_target = (talk_over && mic_level > 0.02f) ? 0.3f : 1.f;
+    mDucking = duck_target < 1.f;
     for (int ci = CH_MUSIC_A; ci < CH_COUNT; ++ci)
     {
         float& d = mChannels[ci].mDuck;
@@ -1093,17 +1192,20 @@ void WolfDJMixer::mixTick()
     }
 
     // Master + limiter (no look-ahead: the gain change is spread over the tick, then hard clip).
-    const float master = wolfdj_fader_gain(mMasterFader);
-    float peak = 0.f;
+    // [WOLF DJ 2026-10-10] A master fader per side (Paul: "stereo sliders for the main mix").
+    const float master[2] = { wolfdj_fader_gain(mMasterFaderL), wolfdj_fader_gain(mMasterFaderR) };
+    float peak = 0.f, pre_master = 0.f;
     for (size_t i = 0; i < N * 2; ++i)
     {
-        mBus[i] *= master;
+        pre_master = std::max(pre_master, fabsf(mBus[i]));
+        mBus[i] *= master[i & 1];
         peak = std::max(peak, fabsf(mBus[i]));
     }
+    mMasterPrePeak = pre_master;
     const float old_lim = mLimiter;
     float new_lim = std::min(1.f, mLimiter * 1.01f);
     if (peak * new_lim > 0.95f) new_lim = 0.95f / peak;
-    float master_peak = 0.f;
+    float side_peak[2] = { 0.f, 0.f };
     for (size_t i = 0; i < N; ++i)
     {
         const float g = old_lim + (new_lim - old_lim) * (float)(i + 1) / (float)N;
@@ -1111,12 +1213,28 @@ void WolfDJMixer::mixTick()
         {
             float& v = mBus[i * 2 + s];
             v = llclamp(v * g, -1.f, 1.f);
-            master_peak = std::max(master_peak, fabsf(v));
+            side_peak[s] = std::max(side_peak[s], fabsf(v));
         }
     }
     mLimiter = new_lim;
     mLimiterDb = wolfdj_lin_to_db(new_lim);
-    mMasterPeak = master_peak;
+    mMasterPeakL = side_peak[0];
+    mMasterPeakR = side_peak[1];
+    mMasterPeak = std::max(side_peak[0], side_peak[1]);
+
+    // [WOLF DJ 2026-10-10] The spectrum display: each octave band's RMS over this tick, of the
+    // mono sum of what goes on air.
+    for (int b = 0; b < SPECTRUM_BANDS; ++b)
+    {
+        WolfDJBiquad& f = mSpectrumFilters[b];
+        float sum_sq = 0.f;
+        for (size_t i = 0; i < N; ++i)
+        {
+            const float y = f.process(0, 0.5f * (mBus[i * 2] + mBus[i * 2 + 1]));
+            sum_sq += y * y;
+        }
+        mSpectrum[b] = sqrtf(sum_sq / (float)N);
+    }
     if (cue == CUE_MASTER) cue_buf.assign(mBus.begin(), mBus.end());
 
     // Local output: the cue when one is on, otherwise the monitored channels (the playlist).
@@ -1245,10 +1363,13 @@ void WolfDJMixer::setNowPlaying(const std::string& artist, const std::string& ti
 void WolfDJMixer::idleCue()
 {
 #if LL_OPENAL
-    bool monitored = false;
-    for (const WolfDJChannel& ch : mChannels)
+    // [WOLF DJ 2026-10-10] A channel's MON only counts while it has a source (MON stays on a
+    // channel with nothing on it, and that must not hold the output open); the jingles' MON while
+    // a pad plays.
+    bool monitored = mJingleMonitor.load() && WolfDJJingles::instance().playing() >= 0;
+    for (int ch = 0; ch < CH_COUNT; ++ch)
     {
-        monitored = monitored || ch.mMonitor.load();
+        monitored = monitored || (mChannels[ch].mMonitor.load() && mCaptures[ch]);
     }
     const bool want = mRunning && (mCue.load() != CUE_NONE || monitored);
     if (!want)
@@ -1304,15 +1425,18 @@ void WolfDJMixer::idleCue()
         alSourcei(src, AL_SOURCE_RELATIVE, AL_TRUE);
         alSource3f(src, AL_POSITION, 0.f, 0.f, 0.f);
         alSourcef(src, AL_GAIN, 1.f);
-        ALuint bufs[6];
-        alGenBuffers(6, bufs);
+        // [WOLF DJ 2026-10-10] 12 x 20 ms: this is fed from the main thread, so the queue has to
+        // ride out a slow viewer frame (a teleport, a region crossing) without the DJ's own
+        // monitoring dropping out (Paul: "stop it from not playing"). It starts after 3 (60 ms).
+        ALuint bufs[CUE_BUFFERS];
+        alGenBuffers(CUE_BUFFERS, bufs);
         if (alGetError() != AL_NO_ERROR)
         {
             alDeleteSources(1, &src);
             return;
         }
         mCueSource = src;
-        mCueFreeBuffers.assign(bufs, bufs + 6);
+        mCueFreeBuffers.assign(bufs, bufs + CUE_BUFFERS);
         mCueStarted = false;
     }
     ALuint src = mCueSource;

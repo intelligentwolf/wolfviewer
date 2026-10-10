@@ -61,6 +61,7 @@ private:
     std::vector<Entry> mEntries;
     int mShownCurrent = -2;
     int mShownSerial = -1;
+    int mShownLengths = -1;     // WolfDJPlayer::lengthsVersion the list was made with
 };
 
 #endif // WOLF_FLOATERDJPLAYLIST_H

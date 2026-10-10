@@ -1304,6 +1304,186 @@ bool LLWindowSDL::setPosition(const LLCoordScreen position)
     return true;
 }
 
+// <WolfViewer 2026-10-10> Spread across all screens (see llwindow.h spanAllScreens).
+// X11 window managers keep an ordinary window on one monitor (GNOME, KDE and others shrink or push
+// back anything bigger), so on X11 the window also asks to be fullscreen over the monitors at the
+// edges of the desktop: _NET_WM_FULLSCREEN_MONITORS then _NET_WM_STATE_FULLSCREEN, both EWMH client
+// messages to the root window. The monitor indices are Xinerama's, which libXinerama gives; it is
+// opened at run time so the viewer still starts on a system without it (then the plain borderless
+// box is all there is).
+// Source: /usr/include/X11/extensions/Xinerama.h:32 XineramaScreenInfo {int screen_number; short
+// x_org, y_org, width, height}; :66 XineramaQueryScreens(Display*, int* number).
+#if LL_X11
+struct WolfXineramaScreenInfo { int screen_number; short x_org; short y_org; short width; short height; };
+typedef Bool (*WolfXineramaIsActiveFn)(Display*);
+typedef WolfXineramaScreenInfo* (*WolfXineramaQueryScreensFn)(Display*, int*);
+#endif
+
+bool LLWindowSDL::x11FullscreenMonitors(bool on)
+{
+#if LL_X11
+    if (!mSDL_Display || !mSDL_XWindowID)
+        return false;
+    Display* dpy = mSDL_Display;
+    const Window root = DefaultRootWindow(dpy);
+    // Source: /usr/include/xcb/xcb_ewmh.h:339-341 XCB_EWMH_WM_STATE_REMOVE = 0, _ADD = 1;
+    // :244 XCB_EWMH_CLIENT_SOURCE_TYPE_NORMAL = 1 (an ordinary application).
+    const long STATE_REMOVE = 0, STATE_ADD = 1, SOURCE_NORMAL = 1;
+    auto send = [&](Atom type, long l0, long l1, long l2, long l3, long l4)
+    {
+        XEvent ev = {};
+        ev.xclient.type = ClientMessage;
+        ev.xclient.serial = 0;
+        ev.xclient.send_event = True;
+        ev.xclient.display = dpy;
+        ev.xclient.window = mSDL_XWindowID;
+        ev.xclient.message_type = type;
+        ev.xclient.format = 32;
+        ev.xclient.data.l[0] = l0;
+        ev.xclient.data.l[1] = l1;
+        ev.xclient.data.l[2] = l2;
+        ev.xclient.data.l[3] = l3;
+        ev.xclient.data.l[4] = l4;
+        XSendEvent(dpy, root, False, SubstructureRedirectMask | SubstructureNotifyMask, &ev);
+    };
+    const Atom wm_state = XInternAtom(dpy, "_NET_WM_STATE", False);
+    const Atom wm_fullscreen = XInternAtom(dpy, "_NET_WM_STATE_FULLSCREEN", False);
+    if (!on)
+    {
+        // Source: XWM.cpp (Hyprland 0.56.2):434-437 _NET_WM_STATE data32[0] = action, [1], [2] = the
+        // states, matching xcb_ewmh_request_change_wm_state (xcb_ewmh.h:1991).
+        send(wm_state, STATE_REMOVE, (long)wm_fullscreen, 0, SOURCE_NORMAL, 0);
+        XFlush(dpy);
+        return true;
+    }
+    void* lib = dlopen("libXinerama.so.1", RTLD_NOW | RTLD_LOCAL);
+    if (!lib)
+    {
+        LL_INFOS("Window") << "Span screens: no libXinerama, using a plain borderless window" << LL_ENDL;
+        return false;
+    }
+    bool sent = false;
+    auto is_active = (WolfXineramaIsActiveFn)dlsym(lib, "XineramaIsActive");
+    auto query = (WolfXineramaQueryScreensFn)dlsym(lib, "XineramaQueryScreens");
+    int count = 0;
+    WolfXineramaScreenInfo* screens = (is_active && query && is_active(dpy)) ? query(dpy, &count) : nullptr;
+    if (screens && count > 0)
+    {
+        int top = 0, bottom = 0, left = 0, right = 0;
+        for (int i = 1; i < count; ++i)
+        {
+            if (screens[i].y_org < screens[top].y_org) top = i;
+            if (screens[i].y_org + screens[i].height > screens[bottom].y_org + screens[bottom].height) bottom = i;
+            if (screens[i].x_org < screens[left].x_org) left = i;
+            if (screens[i].x_org + screens[i].width > screens[right].x_org + screens[right].width) right = i;
+        }
+        // Source: xcb_ewmh.h:419-430 _NET_WM_FULLSCREEN_MONITORS = top, bottom, left, right (Xinerama
+        // indices) and xcb_ewmh_request_change_wm_fullscreen_monitors (:2372) adds the source.
+        send(XInternAtom(dpy, "_NET_WM_FULLSCREEN_MONITORS", False),
+             screens[top].screen_number, screens[bottom].screen_number,
+             screens[left].screen_number, screens[right].screen_number, SOURCE_NORMAL);
+        send(wm_state, STATE_ADD, (long)wm_fullscreen, 0, SOURCE_NORMAL, 0);
+        XFlush(dpy);
+        sent = true;
+        LL_INFOS("Window") << "Span screens: X11 fullscreen over " << count << " monitors (top " << top << ", bottom "
+                           << bottom << ", left " << left << ", right " << right << ")" << LL_ENDL;
+    }
+    if (screens)
+        XFree(screens);
+    dlclose(lib);
+    return sent;
+#else
+    return false;
+#endif
+}
+
+LLWindow::ESpanResult LLWindowSDL::spanAllScreens(bool span, std::string& message)
+{
+    if (!mWindow)
+    {
+        message = "The viewer window is not open yet.";
+        return SPAN_FAILED;
+    }
+    if (span == mSpanAllScreens)
+        return SPAN_DONE;
+    // A Wayland client cannot place its own window; the desktop has to be asked.
+    if (mWayland)
+        return SPAN_COMPOSITOR;
+    if (mFullscreen)
+    {
+        message = "Turn off full screen first; the viewer then spreads its window over every screen.";
+        return SPAN_FAILED;
+    }
+
+    if (span)
+    {
+        const int n = SDL_GetNumVideoDisplays();
+        SDL_Rect all = {0, 0, 0, 0};
+        int found = 0;
+        for (int i = 0; i < n; ++i)
+        {
+            SDL_Rect r;
+            if (SDL_GetDisplayBounds(i, &r) != 0 || r.w <= 0 || r.h <= 0)
+                continue;
+            if (found++ == 0)
+                all = r;
+            else
+                SDL_UnionRect(&all, &r, &all);
+        }
+        if (!found)
+        {
+            message = std::string("Could not read the screen layout: ") + SDL_GetError();
+            return SPAN_FAILED;
+        }
+        SDL_GetWindowPosition(mWindow, &mSpanSavedX, &mSpanSavedY);
+        SDL_GetWindowSize(mWindow, &mSpanSavedW, &mSpanSavedH);
+        mSpanSavedMaximized = (SDL_GetWindowFlags(mWindow) & SDL_WINDOW_MAXIMIZED) != 0;
+        if (mSpanSavedMaximized)
+            SDL_RestoreWindow(mWindow);
+        SDL_SetWindowBordered(mWindow, SDL_FALSE);
+        // The window manager's fullscreen-over-monitors first, from the normal size, so that is the size it
+        // keeps to go back to; only without it (no Xinerama) is the box set by hand.
+        mSpanUsedX11Fullscreen = x11FullscreenMonitors(true);
+        if (!mSpanUsedX11Fullscreen)
+        {
+            SDL_SetWindowPosition(mWindow, all.x, all.y);
+            SDL_SetWindowSize(mWindow, all.w, all.h);
+        }
+        SDL_RaiseWindow(mWindow);
+        mSpanAllScreens = true;
+        LL_INFOS("Window") << "Span screens: " << found << " screen(s), " << all.w << "x" << all.h << " at "
+                           << all.x << "," << all.y << LL_ENDL;
+    }
+    else
+    {
+        if (mSpanUsedX11Fullscreen)
+            x11FullscreenMonitors(false);
+        mSpanUsedX11Fullscreen = false;
+        SDL_SetWindowBordered(mWindow, SDL_TRUE);
+        if (mSpanSavedW > 0 && mSpanSavedH > 0)
+        {
+            SDL_SetWindowSize(mWindow, mSpanSavedW, mSpanSavedH);
+            SDL_SetWindowPosition(mWindow, mSpanSavedX, mSpanSavedY);
+        }
+        if (mSpanSavedMaximized)
+            SDL_MaximizeWindow(mWindow);
+        mSpanAllScreens = false;
+    }
+
+    // Same as setSizeImpl below: tell the viewer the size now rather than wait for the window manager.
+    int w = 0, h = 0;
+    SDL_GetWindowSize(mWindow, &w, &h);
+    SDL_Event event;
+    event.type = SDL_WINDOWEVENT;
+    event.window.event = SDL_WINDOWEVENT_RESIZED;
+    event.window.windowID = SDL_GetWindowID(mWindow);
+    event.window.data1 = w;
+    event.window.data2 = h;
+    SDL_PushEvent(&event);
+    return SPAN_DONE;
+}
+// </WolfViewer>
+
 // <WolfViewer 2026-09-26> newSize is in drawable pixels; SDL sizes windows in window units.
 template< typename T > bool setSizeImpl( const T& newSize, SDL_Window *pWin, F32 scaleX, F32 scaleY )
 {

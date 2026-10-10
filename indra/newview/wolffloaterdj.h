@@ -21,9 +21,8 @@
 class LLButton;
 class LLComboBox;
 class LLLineEditor;
-class LLScrollContainer;
-class LLSliderCtrl;
 class LLTextBox;
+class WolfDJDesk;
 struct WolfDJApp;
 
 // [WOLF DJ 2026-10-04] Paul's rules: a Wolf user who OWNS A REGION can DJ (the GridManager rule
@@ -42,29 +41,12 @@ public:
     void draw() override;
 
 private:
-    struct Strip
-    {
-        LLSliderCtrl* mFader = nullptr;
-        LLSliderCtrl* mEqHigh = nullptr;
-        LLSliderCtrl* mEqMid = nullptr;
-        LLSliderCtrl* mEqLow = nullptr;
-        LLButton* mMute = nullptr;
-        LLButton* mCue = nullptr;
-        LLView* mMeter = nullptr;
-        LLTextBox* mDb = nullptr;
-        LLComboBox* mFx = nullptr;          // [WOLF DJ 2026-10-05] effect (not on the master)
-        LLSliderCtrl* mFxAmount = nullptr;
-        float mShownDb = -60.f;
-        float mClipUntil = 0.f;
-    };
-
     void refreshApps();
     void fillSources(LLComboBox* combo, int ch, const std::vector<WolfDJApp>& apps);
     void onSource(int ch);
     void onGoLive();
     void onSendTitle();
     void onCopyUrl();
-    void onCue(int ch);
     void saveLevels();
     void loadLevels();
     void updateStatus();
@@ -74,12 +56,11 @@ private:
     void onGridStream(bool new_password);
     static void gridStreamCoro(LLHandle<LLFloater> handle, std::string body);
     bool mGridStreamBusy = false;
-    void drawMeter(LLView* meter, float peak, float& shown_db, float& clip_until);
     bool parseStreamUrl(const std::string& url, WolfDJMixer::StreamConfig& cfg, std::string& err) const;
     bool canSetLand(std::string& why) const;
 
-    std::array<Strip, WolfDJ::CH_COUNT> mStrips;
-    Strip mMaster;
+    // [WOLF DJ 2026-10-10] The mixing desk: every strip, the master and the meter bridge.
+    WolfDJDesk* mDesk = nullptr;
     // Music 1..4 source pickers (channels CH_MUSIC_A..CH_MUSIC_D).
     std::array<LLComboBox*, WolfDJ::CH_COUNT - WolfDJ::CH_MUSIC_A> mSources{};
     LLComboBox* sourceCombo(int ch) const { return mSources[ch - WolfDJ::CH_MUSIC_A]; }
@@ -90,8 +71,6 @@ private:
     LLLineEditor* mTitle = nullptr;
     LLButton* mLiveBtn = nullptr;
     LLTextBox* mStatus = nullptr;
-    LLTextBox* mVoiceNote = nullptr;
-    LLScrollContainer* mStripsScroll = nullptr;    // the channel strips scroll when the window is small
     LLFrameTimer mClock;
     F32 mNextListeners = 0.f;
     S32 mListeners = -1;

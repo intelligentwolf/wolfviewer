@@ -58,6 +58,7 @@ public:
     bool getSize(LLCoordScreen *size) override;
     bool getSize(LLCoordWindow *size) override;
     bool setPosition(LLCoordScreen position) override;
+    ESpanResult spanAllScreens(bool span, std::string& message) override;   // <WolfViewer 2026-10-10/>
     bool setSizeImpl(LLCoordScreen size) override;
     bool setSizeImpl(LLCoordWindow size) override;
     bool switchContext(bool fullscreen, const LLCoordScreen &size, bool enable_vsync, const LLCoordScreen * const posp = NULL) override;

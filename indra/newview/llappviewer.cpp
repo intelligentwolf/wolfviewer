@@ -90,6 +90,8 @@
 #include "wolfspeech.h" // <WolfViewer> dictation + read aloud (Wolf Territories only)
 #include "wolfscreenshare.h"
 #include "wolfweather.h" // <WolfViewer> rain and snow // <WolfViewer> share focus/zoom follow-up
+#include "wolffx.h"   // <WolfViewer 2026-10-10/>
+#include "wolfspanscreens.h"   // <WolfViewer 2026-10-10/>
 #include "llviewerdisplay.h"
 #include "llviewermedia.h"
 #include "llviewerparcelaskplay.h"
@@ -1217,6 +1219,7 @@ bool LLAppViewer::init()
     gGLActive = true;
     initWindow();
     LL_INFOS("InitInfo") << "Window is initialized." << LL_ENDL ;
+    WolfSpanScreens::startup();    // <WolfViewer 2026-10-10/> spread across all screens again if it was
     // <FS:Beq> allow detected hardware to be overridden.
     gGLManager.mVRAMDetected = gGLManager.mVRAM;
     LL_INFOS("AppInit") << "VRAM detected: " << gGLManager.mVRAMDetected << LL_ENDL;
@@ -4431,7 +4434,8 @@ void LLAppViewer::cleanupSavedSettings()
     if(NULL != gViewerWindow)
     {
         bool maximized = gViewerWindow->getWindow()->getMaximized();
-        if (!maximized)
+        // <WolfViewer 2026-10-10/> spread across all screens is not the place to come back to
+        if (!maximized && !WolfSpanScreens::active())
         {
             LLCoordScreen window_pos;
 
@@ -6250,6 +6254,7 @@ void LLAppViewer::idle()
     // Focus + zoom the shared face once its media exists (wolfscreenshare.cpp).
     WolfScreenShare::instance().idle();
     WolfWeather::instance().idle();   // <WolfViewer 2026-09-10> rain / snow, menu or parcel prims
+    WolfFX::instance().idle();        // <WolfViewer 2026-10-10/> wolfEffect explosions, fire, smoke (wolffx.h)
     // </WolfViewer>
 
     // [WOLF GAME 2026-10-09] wolfGameEffect "shake": last frame's jitter off before the camera is

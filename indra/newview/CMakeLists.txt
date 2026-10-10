@@ -922,9 +922,14 @@ set(viewer_SOURCE_FILES
     wolffloatermeshupload.cpp
     wolffloaterlagdetector.cpp
     wolfdjaudio.cpp
+    wolfcamerafx.cpp
+    wolffx.cpp
+    wolfdjdesk.cpp
     wolfdjplayer.cpp
     wolffloaterdj.cpp
     wolffloaterdjplaylist.cpp
+    wolffloaterweatherreport.cpp
+    wolffloaterwatchwolf.cpp
     wolffloaterphotoeffects.cpp
     wolfmeshupload.cpp
     wolfscreenshare.cpp
@@ -932,6 +937,8 @@ set(viewer_SOURCE_FILES
     wolffarground.cpp
     wolffarterrain.cpp
     wolfweather.cpp
+    wolfspanscreens.cpp
+    wolffloaterairports.cpp
     wolflightning.cpp
     wolfspeech.cpp
     wolfoceanfft.cpp
@@ -1834,9 +1841,14 @@ set(viewer_HEADER_FILES
     wolffloaterlagdetector.h
     wolfdjaudio.h
     wolfdjcapture.h
+    wolfcamerafx.h
+    wolffx.h
+    wolfdjdesk.h
     wolfdjplayer.h
     wolffloaterdj.h
     wolffloaterdjplaylist.h
+    wolffloaterweatherreport.h
+    wolffloaterwatchwolf.h
     wolffloaterphotoeffects.h
     wolfmeshupload.h
     wolfscreenshare.h
@@ -1844,6 +1856,8 @@ set(viewer_HEADER_FILES
     wolffarground.h
     wolffarterrain.h
     wolfweather.h
+    wolfspanscreens.h
+    wolffloaterairports.h
     wolflightning.h
     wolfspeech.h
     wolfoceanfft.h

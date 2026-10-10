@@ -1156,6 +1156,74 @@ bool LLWindowWin32::setPosition(const LLCoordScreen position)
     return true;
 }
 
+// <WolfViewer 2026-10-10> Spread across all screens (see llwindow.h spanAllScreens). Windows calls
+// the box around every monitor the virtual screen (GetSystemMetrics SM_XVIRTUALSCREEN,
+// SM_YVIRTUALSCREEN, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN). A WS_POPUP window - no caption or
+// frame - is placed over it; Windows does not hold a popup to one monitor. The old style and
+// placement are put back after. Win32 calls run on the window thread like moveWindow's; the WM_SIZE
+// that follows resizes the viewer.
+LLWindow::ESpanResult LLWindowWin32::spanAllScreens(bool span, std::string& message)
+{
+    if (!mWindowHandle)
+    {
+        message = "The viewer window is not open yet.";
+        return SPAN_FAILED;
+    }
+    if (span == mSpanAllScreens)
+        return SPAN_DONE;
+    if (mFullscreen)
+    {
+        message = "Turn off full screen first; the viewer then spreads its window over every screen.";
+        return SPAN_FAILED;
+    }
+    if (span && (GetSystemMetrics(SM_CXVIRTUALSCREEN) <= 0 || GetSystemMetrics(SM_CYVIRTUALSCREEN) <= 0))
+    {
+        message = "Windows did not report the screen layout.";
+        return SPAN_FAILED;
+    }
+
+    if (span)
+    {
+        mWindowThread->post([=]()
+            {
+                const int x = GetSystemMetrics(SM_XVIRTUALSCREEN);
+                const int y = GetSystemMetrics(SM_YVIRTUALSCREEN);
+                const int w = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+                const int h = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+                mSpanSavedPlacement = {};
+                mSpanSavedPlacement.length = sizeof(WINDOWPLACEMENT);
+                GetWindowPlacement(mWindowHandle, &mSpanSavedPlacement);
+                mSpanSavedStyle = GetWindowLongPtr(mWindowHandle, GWL_STYLE);
+                if (IsZoomed(mWindowHandle))
+                {
+                    ShowWindow(mWindowHandle, SW_RESTORE);
+                }
+                SetWindowLongPtr(mWindowHandle, GWL_STYLE, (mSpanSavedStyle & ~(LONG_PTR)WS_OVERLAPPEDWINDOW) | WS_POPUP);
+                SetWindowPos(mWindowHandle, HWND_TOP, x, y, w, h, SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+                LL_INFOS("Window") << "Span screens: virtual screen " << w << "x" << h << " at " << x << "," << y << LL_ENDL;
+            });
+    }
+    else
+    {
+        mWindowThread->post([=]()
+            {
+                if (mSpanSavedStyle)
+                {
+                    SetWindowLongPtr(mWindowHandle, GWL_STYLE, mSpanSavedStyle);
+                }
+                SetWindowPos(mWindowHandle, NULL, 0, 0, 0, 0,
+                             SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER);
+                if (mSpanSavedPlacement.length == sizeof(WINDOWPLACEMENT))
+                {
+                    SetWindowPlacement(mWindowHandle, &mSpanSavedPlacement);
+                }
+            });
+    }
+    mSpanAllScreens = span;
+    return SPAN_DONE;
+}
+// </WolfViewer>
+
 bool LLWindowWin32::setSizeImpl(const LLCoordScreen size)
 {
     LLCoordScreen position;

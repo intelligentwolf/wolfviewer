@@ -122,6 +122,8 @@ void convertWindowToScreen(NSWindowRef window, float *coord);
 void convertRectToScreen(NSWindowRef window, float *coord);
 void convertRectFromScreen(NSWindowRef window, float *coord);
 void setWindowPos(NSWindowRef window, float* pos);
+// <WolfViewer 2026-10-10/> true when done; false with message set when it cannot be done
+bool spanWindowAllScreens(NSWindowRef window, bool span, std::string& message);
 void closeWindow(NSWindowRef window);
 void removeGLView(GLViewRef view);
 void makeFirstResponder(NSWindowRef window, GLViewRef view);

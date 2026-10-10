@@ -59,6 +59,7 @@ public:
     bool getSize(LLCoordScreen *size) override;
     bool getSize(LLCoordWindow *size) override;
     bool setPosition(LLCoordScreen position) override;
+    ESpanResult spanAllScreens(bool span, std::string& message) override;   // <WolfViewer 2026-10-10/>
     bool setSizeImpl(LLCoordScreen size) override;
     bool setSizeImpl(LLCoordWindow size) override;
     bool switchContext(bool fullscreen, const LLCoordScreen &size, bool enable_vsync, const LLCoordScreen * const posp = NULL) override;
@@ -190,6 +191,10 @@ protected:
     WCHAR       *mWindowClassName;
 
     HWND        mWindowHandle = 0;  // window handle
+    // <WolfViewer 2026-10-10> spanAllScreens: the style and place to go back to (window thread only)
+    LONG_PTR        mSpanSavedStyle = 0;
+    WINDOWPLACEMENT mSpanSavedPlacement = {};
+    // </WolfViewer>
     HGLRC       mhRC = 0;           // OpenGL rendering context
     HDC         mhDC = 0;           // Windows Device context handle
     HINSTANCE   mhInstance;     // handle to application instance

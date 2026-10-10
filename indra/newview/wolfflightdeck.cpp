@@ -36,6 +36,8 @@
 #include "llviewerregion.h"
 #include "llviewerwindow.h"
 #include "llweb.h"
+#include "llclipboard.h"   // <WolfViewer 2026-10-10/> Ctrl+V into the scratchpad
+#include "wolfairports.h"   // <WolfViewer 2026-10-10/> the AIRPORTS page
 #include "llwindow.h"
 #include "llworld.h"
 #include "llworldmap.h"
@@ -553,7 +555,8 @@ bool WolfFlightDeck::onPanel(S32 x, S32 y) const
     {
         return false;
     }
-    return showBackground() || hitAt(x, y) != nullptr;
+    static LLCachedControl<bool> mini(gSavedSettings, "WolfFlightDeckMini", false);   // <WolfViewer 2026-10-10/>
+    return (showBackground() && !mini) || hitAt(x, y) != nullptr;
 }
 
 void WolfFlightDeck::draw()
@@ -604,6 +607,15 @@ void WolfFlightDeck::draw()
             }
         }
     }
+    // <WolfViewer 2026-10-10> a destination set elsewhere (the Airports window): show it, unless one is being typed
+    if (f.destSerial() != mDestSerialSeen)
+    {
+        mDestSerialSeen = f.destSerial();
+        if (!mModified)
+        {
+            syncRouteFromDest();
+        }
+    }
     // An EXECuted route whose region the map server has just named: fly it.
     if (mArmRoute)
     {
@@ -652,6 +664,20 @@ void WolfFlightDeck::layoutAndDraw()
             }
         }
     }
+    // <WolfViewer 2026-10-10> Paul: "the huds allow them to be minimised to just minimal stuff and brought back up
+    // again like a mini version of them". MINI on the glareshield: one bar, FULL on it brings the deck back.
+    if (gSavedSettings.getBOOL("WolfFlightDeckMini"))
+    {
+        LLGLSUIDefault gls_ui;
+        drawMini(bottom);
+        if (!WolfFlight::instance().sailing())
+        {
+            drawHUD(mPanelTop);
+        }
+        drawWarnings(mPanelTop);
+        return;
+    }
+    // </WolfViewer>
     F32 H = llclamp(Hv * 0.34f, 200.f, 430.f);
     H = llmin(H, (Hv - bottom) * 0.62f);
     const F32 top = bottom + H;
@@ -859,6 +885,7 @@ void WolfFlightDeck::drawGlareshield(F32 l, F32 b, F32 r, F32 t)
         items.push_back({ K_BUTTON, 0.95f, H_WEB, "CLUB", "", false, "The Wolf Territories sailing club page on wolf-grid.com" });
         items.push_back({ K_BUTTON, 0.95f, H_BACKGROUND, "PANEL", "", showBackground(), "Show or hide the panel behind the instruments" });
         items.push_back({ K_BUTTON, 0.95f, H_HELP, "HELP", "", mShowHelp, "How to sail with Sailing Mode: the quick guide" });
+        items.push_back({ K_BUTTON, 0.95f, H_MINI, "MINI", "", false, "Shrink the deck to one small bar (the autopilot keeps sailing); FULL brings it back" });
         items.push_back({ K_GAP, 0.35f, H_NONE, "", "", false, "" });
         items.push_back({ K_BUTTON, 1.0f, H_EXIT, "EXIT", "", false, "Leave Sailing Mode" });
     }
@@ -898,10 +925,18 @@ void WolfFlightDeck::drawGlareshield(F32 l, F32 b, F32 r, F32 t)
         items.push_back({ K_KNOB, 0.85f, H_RANGE_KNOB, "RANGE", fmt("%g", ND_RANGES_NM[range_idx]), false, "Navigation display range (nautical miles)" });
         items.push_back({ K_BUTTON, 0.95f, H_PLAN, "PLAN", "", gSavedSettings.getBOOL("WolfFlightNDPlan"), "Navigation display: PLAN (the whole route, north up) or MAP (heading up, around you)" });
         items.push_back({ K_BUTTON, 0.95f, H_HUD, "HUD", "", gSavedSettings.getBOOL("WolfFlightHUD"), "Head-up display over the view" });
+        // [WOLF FLIGHT 2026-10-10] Paul: "add to the plane hud a thing where i can turn it on and the viewer follows
+        // the plane, so if i fly upside down the viewer renders the same way" - on by default (llagentcamera.cpp).
+        items.push_back({ K_BUTTON, 0.95f, H_FOLLOW_CAM, "CAM", "", gSavedSettings.getBOOL("WolfFlightFollowCam"),
+                          gSavedSettings.getBOOL("WolfFlightFollowCam")
+                              ? "Chase camera ON: the view rides with the aircraft - it banks, climbs and rolls with you (upside down too). Click for the level camera."
+                              : "Chase camera OFF: the normal level camera. Click to have the view ride with the aircraft." });
         items.push_back({ K_BUTTON, 0.95f, H_MAP, "MAP", "", false, "World Map, zoomed to the whole trip: the planned route and where you are on it" });
-        items.push_back({ K_BUTTON, 1.05f, H_WEB, "AIRPORTS", "", false, "The Wolf Territories airports page on wolf-grid.com" });
+        items.push_back({ K_BUTTON, 1.05f, H_WEB, "AIRPORTS", "", LLFloaterReg::instanceVisible("wolf_airports"),
+                          "The Airports window: find an airport by name, then fly there and land" });
         items.push_back({ K_BUTTON, 0.95f, H_BACKGROUND, "PANEL", "", showBackground(), "Show or hide the panel behind the instruments" });
         items.push_back({ K_BUTTON, 0.95f, H_HELP, "HELP", "", mShowHelp, "How to fly with Flight Mode: the quick guide" });
+        items.push_back({ K_BUTTON, 0.95f, H_MINI, "MINI", "", false, "Shrink the deck to one small bar (the autopilot keeps flying); FULL brings it back" });
         items.push_back({ K_GAP, 0.35f, H_NONE, "", "", false, "" });
         items.push_back({ K_BUTTON, 1.0f, H_EXIT, "EXIT", "", false, "Leave Flight Mode" });
     }
@@ -2662,6 +2697,71 @@ void WolfFlightDeck::cduLines(std::string (&label)[6][2], std::string (&data)[6]
             col[i][s] = C_WHITE;
         }
     }
+    // <WolfViewer 2026-10-10> AIRPORTS: search the grid's airports directory by name (WolfAirports::search), four to a
+    // page with their region and distance; a line key beside one flies there and lands on its runway.
+    if (mPage == PAGE_APT)
+    {
+        WolfAirports& airports = WolfAirports::instance();
+        airports.refresh();
+        title = "AIRPORTS";
+        label[0][0] = "NAME OR REGION";
+        data[0][0] = mAptQuery.empty() ? std::string("----------") : utf8str_truncate(mAptQuery, 15);
+        LLStringUtil::toUpper(data[0][0]);
+        if (mAptQuery.empty()) col[0][0] = C_DIM;
+        label[0][1] = "FOUND";
+        if (!airports.loaded())
+        {
+            data[0][1] = "LOADING";
+            col[0][1] = C_CYAN;
+        }
+        else if (!mAptQuery.empty())
+        {
+            const S32 found = (S32)mAptIds.size() - (mAptQuery.empty() ? 0 : 1);   // airports, not the region line
+            data[0][1] = fmt("%d", found);
+            col[0][1] = found == 0 ? C_AMBER : C_WHITE;
+        }
+        const LLVector3d here = f.data().mPosGlobal;
+        for (S32 i = 0; i < 4; ++i)
+        {
+            const S32 n = mAptPage * 4 + i;
+            if (n >= (S32)mAptIds.size()) break;
+            if (mAptIds[n] == -1)
+            {
+                std::string region = WolfAirports::fold(mAptQuery);
+                LLStringUtil::toUpper(region);
+                label[i + 1][0] = "REGION";
+                data[i + 1][0] = "<" + (region.size() > 22 ? region.substr(0, 21) + "." : region);
+                col[i + 1][0] = C_MAGENTA;
+                continue;
+            }
+            const WolfAirports::Airport* ap = airports.byId(mAptIds[n]);
+            if (!ap) continue;
+            std::string name = WolfAirports::fold(ap->mName);
+            LLStringUtil::trim(name);
+            LLStringUtil::toUpper(name);
+            if (name.size() > 22) name = name.substr(0, 21) + ".";
+            std::string region = WolfAirports::fold(ap->mRegion);
+            LLStringUtil::toUpper(region);
+            const F64 dx = ap->mGlobal.mdV[VX] - here.mdV[VX], dy = ap->mGlobal.mdV[VY] - here.mdV[VY];
+            const F32 nm = (F32)sqrt(dx * dx + dy * dy) / NM;
+            label[i + 1][0] = utf8str_truncate(region, 18);
+            label[i + 1][1] = nm < 10.f ? fmt("%.1fNM", nm) : fmt("%dNM", (S32)llround(nm));
+            data[i + 1][0] = "<" + name;
+            col[i + 1][0] = C_CYAN;
+        }
+        if (mAptQuery.empty() && airports.loaded())
+        {
+            label[2][0] = "TYPE A NAME, PRESS ENTER";
+            label[3][0] = "OR PASTE IT: CTRL+V";
+        }
+        if (mAptPage > 0)
+        {
+            data[5][0] = "<PREV";
+        }
+        data[5][1] = ((mAptPage + 1) * 4 < (S32)mAptIds.size()) ? "NEXT>" : "WEB LIST>";
+        return;
+    }
+    // </WolfViewer>
     if (mPage == PAGE_DIR)
     {
         const WolfFlight::Dest& dest = f.dest();
@@ -2860,7 +2960,9 @@ void WolfFlightDeck::drawCDU(F32 l, F32 b, F32 r, F32 t)
     {
         LLLocalClipRect clip(LLRect((S32)sl, (S32)st, (S32)sr, (S32)sb));
         text(big, title, (sl + sr) * 0.5f, st - lh * 0.5f, C_WHITE, LLFontGL::HCENTER, LLFontGL::VCENTER);
-        text(small, mPage == PAGE_DIR ? "1/1" : "1/1", sr - pad, st - lh * 0.5f, C_WHITE, LLFontGL::RIGHT, LLFontGL::VCENTER);
+        const S32 apt_pages = llmax(1, ((S32)mAptIds.size() + 3) / 4);
+        text(small, mPage == PAGE_APT ? fmt("%d/%d", mAptPage + 1, apt_pages) : std::string("1/1"), sr - pad, st - lh * 0.5f, C_WHITE,
+             LLFontGL::RIGHT, LLFontGL::VCENTER);
         for (S32 i = 0; i < 6; ++i)
         {
             const F32 ly = st - lh * (1.5f + 2 * i);
@@ -2873,6 +2975,10 @@ void WolfFlightDeck::drawCDU(F32 l, F32 b, F32 r, F32 t)
         // the scratchpad
         const F32 spy = sb + lh * 0.5f;
         std::string sp = mDelete ? std::string("DELETE") : (!mScratchMsg.empty() ? mScratchMsg : mScratch);
+        if (sp.size() > 23)   // <WolfViewer 2026-10-10/> a long airport name: its end, as an edit line scrolls
+        {
+            sp = "<" + sp.substr(sp.size() - 22);
+        }
         const LLColor4 spc = (!mScratchMsg.empty() && !mDelete) ? C_AMBER : C_WHITE;
         if (hasFocus() && mScratchMsg.empty() && !mDelete && blink(1.f))
         {
@@ -2907,6 +3013,7 @@ void WolfFlightDeck::drawCDU(F32 l, F32 b, F32 r, F32 t)
     // the function keys below the screen
     struct Key { const char* label; EHit id; const char* tip; };
     const Key row1[] = { { "DIR TO", H_CDU_DIR, "DIRECT TO page: where to fly" },
+                         { "APT", H_CDU_APT, "AIRPORTS page: find an airport by name, then fly there and land" },
                          { "CTL", H_CDU_CTL, "CONTROLS page: which keys your aircraft uses, gear and engine commands" },
                          { "EXEC", H_CDU_EXEC, "Execute the modified route" } };
     const Key row2[] = { { "CLR", H_CDU_CLR, "Clear the scratchpad (one character; hold for all)" },
@@ -2930,15 +3037,103 @@ void WolfFlightDeck::drawCDU(F32 l, F32 b, F32 r, F32 t)
         addHit(kl, kb, kr, kt, k.id, k.tip);
     };
     {
-        const F32 kw = (sr - sl) / 3.f;
-        for (S32 i = 0; i < 3; ++i)
+        const S32 n1 = (S32)(sizeof(row1) / sizeof(row1[0])), n2 = (S32)(sizeof(row2) / sizeof(row2[0]));
+        const F32 kw1 = (sr - sl) / (F32)n1, kw2 = (sr - sl) / (F32)n2;
+        for (S32 i = 0; i < n1; ++i)
         {
-            key(sl + kw * i + 3.f, k1b, sl + kw * (i + 1) - 3.f, k1t, row1[i], mModified && mPage == PAGE_DIR);
+            key(sl + kw1 * i + 3.f, k1b, sl + kw1 * (i + 1) - 3.f, k1t, row1[i], mModified && mPage == PAGE_DIR);
         }
-        for (S32 i = 0; i < 3; ++i)
+        for (S32 i = 0; i < n2; ++i)
         {
-            key(sl + kw * i + 3.f, k2b, sl + kw * (i + 1) - 3.f, k2t, row2[i], false);
+            key(sl + kw2 * i + 3.f, k2b, sl + kw2 * (i + 1) - 3.f, k2t, row2[i], false);
         }
+    }
+}
+
+//-----------------------------------------------------------------------------
+// <WolfViewer 2026-10-10> The mini deck: one bar at the bottom, the readouts a pilot glances at, the autopilot's
+// state (click to engage or drop it, as on the glareshield), FULL and EXIT. Everything beside it is the world's.
+//-----------------------------------------------------------------------------
+
+void WolfFlightDeck::drawMini(F32 bottom)
+{
+    WolfFlight& f = WolfFlight::instance();
+    const WolfFlight::Data& d = f.data();
+    const bool sail = f.sailing();
+    const F32 W = (F32)getRect().getWidth();
+    const F32 h = llclamp((F32)getRect().getHeight() * 0.055f, 36.f, 56.f);
+    struct Cell { std::string label, value; LLColor4 col; EHit hit; std::string tip; F32 w; bool key; };
+    std::vector<Cell> cells;
+    const bool ap = f.apEngaged();
+    if (sail)
+    {
+        cells.push_back({ "AUTO", ap ? "ON" : "OFF", ap ? C_GREEN : C_DIM, H_CMD, "The autopilot: click to engage or drop it", 1.0f, false });
+        cells.push_back({ "SOG KT", fmt("%d", (S32)llround(d.mGS * KT)), C_WHITE, H_NONE, "", 1.0f, false });
+        cells.push_back({ "HDG", fmt("%03d", (S32)llround(d.mHeading) % 360), C_WHITE, H_NONE, "", 1.0f, false });
+        cells.push_back({ "WIND", fmt("%d KT %+d", (S32)llround(d.mTWS * KT), (S32)llround(d.mTWA)), C_CYAN, H_NONE, "True wind speed and its angle off the bow", 1.7f, false });
+        cells.push_back({ "DEPTH M", fmt("%.1f", d.mDepth), d.mDepth < 2.f ? C_AMBER : C_WHITE, H_NONE, "", 1.1f, false });
+    }
+    else
+    {
+        cells.push_back({ "AP", ap ? "CMD" : "OFF", ap ? C_GREEN : C_DIM, H_CMD, "The autopilot: click to engage or drop it", 1.0f, false });
+        cells.push_back({ "A/T", f.atEngaged() ? "ON" : "OFF", f.atEngaged() ? C_GREEN : C_DIM, H_AT, "Autothrottle: click to switch it", 0.9f, false });
+        cells.push_back({ "IAS KT", fmt("%d", (S32)llround(d.mAirspeed * KT)), C_WHITE, H_NONE, "", 1.0f, false });
+        cells.push_back({ "ALT FT", fmt("%d", (S32)llround(d.mAltMSL * FT)), C_WHITE, H_NONE, "", 1.2f, false });
+        cells.push_back({ "HDG", fmt("%03d", (S32)llround(d.mHeading) % 360), C_WHITE, H_NONE, "", 0.9f, false });
+        cells.push_back({ "V/S FPM", fmt("%+d", (S32)llround(d.mVS * FT * 60.f / 10.f) * 10), C_WHITE, H_NONE, "", 1.1f, false });
+    }
+    {
+        const WolfFlight::Dest& dest = f.dest();
+        std::string where = "----";
+        if (dest.mValid)
+        {
+            where = WolfAirports::fold(dest.mRegion);
+            LLStringUtil::toUpper(where);
+            if (where.size() > 14) where = where.substr(0, 13) + ".";
+            const F32 nm = f.destDistance() / NM;
+            where += nm < 10.f ? fmt(" %.1fNM", nm) : fmt(" %dNM", (S32)llround(nm));
+        }
+        cells.push_back({ "DEST", where, dest.mValid ? C_MAGENTA : C_DIM, H_MAP, "Where the route goes: click for the World Map", 2.6f, false });
+    }
+    cells.push_back({ "", "FULL", C_WHITE, H_MINI, "Bring the whole deck back", 1.0f, true });
+    cells.push_back({ "", "EXIT", C_WHITE, H_EXIT, sail ? "Leave Sailing Mode" : "Leave Flight Mode", 1.0f, true });
+
+    const F32 unit = h * 1.45f;
+    F32 total = 0.f;
+    for (const Cell& c : cells) total += c.w * unit;
+    const F32 scale = llmin(1.f, (W - 16.f) / total);   // never wider than the window
+    const F32 bw = total * scale;
+    const F32 l = (W - bw) * 0.5f, r = l + bw, b = bottom + 4.f, t = b + h;
+    mPanelBottom = bottom;
+    mPanelTop = t + 2.f;
+
+    roundRectF(l - 3.f, b - 3.f, r + 3.f, t + 3.f, 6.f, C_BEZEL_HI, C_BEZEL_LO);
+    roundRectF(l, b, r, t, 5.f, C_GLARE_BOT, C_GLARE_TOP);
+    const LLFontGL* vf = avionics("B612Mono", LLFontGL::BOLD, h * 0.42f);
+    const LLFontGL* lf = avionics("B612", LLFontGL::NORMAL, h * 0.24f);
+    const LLFontGL* kf = avionics("B612", LLFontGL::BOLD, h * 0.34f);
+    F32 x = l;
+    for (const Cell& c : cells)
+    {
+        const F32 cw = c.w * unit * scale;
+        const F32 cl = x + 2.f, cr = x + cw - 2.f;
+        if (c.key)
+        {
+            const bool pressed = mPressed == c.hit;
+            roundRectF(cl + 2.f, b + 5.f - (pressed ? 1.f : 0.f), cr - 2.f, t - 5.f - (pressed ? 1.f : 0.f), 3.f, C_BTN_T, C_BTN_B);
+            text(kf, c.value, (cl + cr) * 0.5f, (b + t) * 0.5f - (pressed ? 1.f : 0.f), c.col, LLFontGL::HCENTER, LLFontGL::VCENTER);
+        }
+        else
+        {
+            rectF(cl, b + 4.f, cr, t - 4.f, C_SCREEN);
+            text(lf, c.label, (cl + cr) * 0.5f, t - 4.f - h * 0.17f, C_GREY, LLFontGL::HCENTER, LLFontGL::VCENTER);
+            text(vf, c.value, (cl + cr) * 0.5f, b + 4.f + h * 0.30f, c.col, LLFontGL::HCENTER, LLFontGL::VCENTER);
+        }
+        if (c.hit != H_NONE)
+        {
+            addHit(cl, b, cr, t, c.hit, c.tip);
+        }
+        x += cw;
     }
 }
 
@@ -3420,6 +3615,12 @@ bool WolfFlightDeck::handleKeyHere(KEY key, MASK mask)
         press(H_CDU_DEL, 0, 0, 0);
         return true;
     case KEY_RETURN:
+        // <WolfViewer 2026-10-10> Enter on AIRPORTS: search for what was typed
+        if (mPage == PAGE_APT && !mScratch.empty() && !mDelete)
+        {
+            lsk(true, 0);
+            return true;
+        }
         // Enter with a destination typed on DIRECT TO: put it in and fly it, no line keys
         // needed (Paul: "i cant work out how to set the autopilot").
         if (mPage == PAGE_DIR && !mScratch.empty() && !mDelete)
@@ -3439,6 +3640,12 @@ bool WolfFlightDeck::handleKeyHere(KEY key, MASK mask)
     default:
         break;
     }
+    // <WolfViewer 2026-10-10> Ctrl+V: paste (Paul: "input airport name or paste from clipboard")
+    if (key == 'V' && (mask & MASK_CONTROL) && !(mask & MASK_ALT))
+    {
+        pasteScratch();
+        return true;
+    }
     // Everything else typed goes to the scratchpad (handleUnicodeCharHere); keep the flight
     // keys away from the aircraft while typing.
     return mask == MASK_NONE || mask == MASK_SHIFT;
@@ -3450,7 +3657,8 @@ bool WolfFlightDeck::handleUnicodeCharHere(llwchar uni_char)
     {
         return false;
     }
-    if (uni_char >= 32 && uni_char < 127 && mScratch.size() < 24)
+    // <WolfViewer 2026-10-10/> 64: airport names (Paul: "its too short for people to type input airport name")
+    if (uni_char >= 32 && uni_char < 127 && mScratch.size() < 64)
     {
         if (!mScratchMsg.empty())
         {
@@ -3504,6 +3712,8 @@ void WolfFlightDeck::press(EHit id, S32 x, S32 y, S32 step)
     case H_CMD: f.engageAP(); break;
     case H_HUD: gSavedSettings.setBOOL("WolfFlightHUD", !gSavedSettings.getBOOL("WolfFlightHUD")); break;
     case H_BACKGROUND: gSavedSettings.setBOOL("WolfFlightDeckBackground", !showBackground()); break;
+    case H_FOLLOW_CAM: gSavedSettings.setBOOL("WolfFlightFollowCam", !gSavedSettings.getBOOL("WolfFlightFollowCam")); break;
+    case H_MINI: gSavedSettings.setBOOL("WolfFlightDeckMini", !gSavedSettings.getBOOL("WolfFlightDeckMini")); break;   // <WolfViewer 2026-10-10/>
     case H_PLAN:
     case H_ND_SCREEN: gSavedSettings.setBOOL("WolfFlightNDPlan", !gSavedSettings.getBOOL("WolfFlightNDPlan")); break;
     case H_WIND: f.pressWIND(); break;
@@ -3511,7 +3721,18 @@ void WolfFlightDeck::press(EHit id, S32 x, S32 y, S32 step)
     case H_SAIL: f.sendSailCommand(); break;
     case H_WEB:
         // Paul: the sailing club and the airports pages on the website
-        LLWeb::loadURL(f.sailing() ? "https://www.wolf-grid.com/index.php?f=wtgs" : "https://www.wolf-grid.com/index.php?f=ap");
+        // <WolfViewer 2026-10-10> a plane's AIRPORTS button opens the flight computer's airport search (the website
+        // list is its WEB LIST> key); the sailing club page stays a web page
+        if (f.sailing())
+        {
+            LLWeb::loadURL("https://www.wolf-grid.com/index.php?f=wtgs");
+        }
+        else
+        {
+            // Paul: "the airports button on the aircraft hud should have its own floater for search from airports
+            // not open web browser" - the Airports window (wolffloaterairports.cpp)
+            LLFloaterReg::toggleInstanceOrBringToFront("wolf_airports");
+        }
         break;
     case H_MAP:
     {
@@ -3543,6 +3764,7 @@ void WolfFlightDeck::press(EHit id, S32 x, S32 y, S32 step)
     case H_GEAR: f.sendGearCommand(); break;
     case H_ENGINE: f.sendEngineCommand(); break;
     case H_CDU_DIR: mPage = PAGE_DIR; break;
+    case H_CDU_APT: mPage = PAGE_APT; setFocus(true); break;   // <WolfViewer 2026-10-10/>
     case H_CDU_CTL: mPage = PAGE_CTL; break;
     case H_CDU_EXEC:
         if (mPage == PAGE_DIR && mModified)
@@ -3588,12 +3810,103 @@ void WolfFlightDeck::execRoute()
     mArmRoute = true;   // LNAV + VNAV as soon as the region is known (draw())
 }
 
+// <WolfViewer 2026-10-10> see wolfflightdeck.h
+void WolfFlightDeck::aptSearch(const std::string& text)
+{
+    mAptQuery = text;
+    LLStringUtil::trim(mAptQuery);
+    mAptPage = 0;
+    mAptIds.clear();
+    // Paul: "i put in a region name it should still use that for flying as well as airports" - what was typed, as a
+    // region, first (-1), then the airports
+    if (!mAptQuery.empty())
+    {
+        mAptIds.push_back(-1);
+    }
+    for (const WolfAirports::Airport* ap : WolfAirports::instance().search(mAptQuery, WolfFlight::instance().data().mPosGlobal))
+    {
+        mAptIds.push_back(ap->mId);
+    }
+}
+
+bool WolfFlightDeck::pasteScratch()
+{
+    LLWString clip;
+    if (!LLClipboard::instance().pasteFromClipboard(clip))
+    {
+        return false;
+    }
+    // one line, in the screen's own letters (accents dropped), within the scratchpad's 64
+    std::string text = WolfAirports::fold(wstring_to_utf8str(clip));
+    std::string out;
+    for (char c : text)
+    {
+        const char ch = (c == '\t' || c == '\r' || c == '\n') ? ' ' : c;
+        if (ch == ' ' && (out.empty() || out.back() == ' ')) continue;
+        out += ch;
+    }
+    LLStringUtil::trim(out);
+    LLStringUtil::toUpper(out);
+    if (out.empty())
+    {
+        return false;
+    }
+    mScratchMsg.clear();
+    mDelete = false;
+    mScratch = (mScratch + out).substr(0, 64);
+    return true;
+}
+// </WolfViewer>
+
 void WolfFlightDeck::lsk(bool left, S32 line)
 {
     WolfFlight& f = WolfFlight::instance();
     const std::string sp = mScratch;
     const bool have = !sp.empty();
     auto invalid = [&]() { mScratchMsg = "INVALID ENTRY"; };
+
+    // <WolfViewer 2026-10-10> AIRPORTS page (cduLines)
+    if (mPage == PAGE_APT)
+    {
+        if (line == 0)
+        {
+            if (mDelete) { mDelete = false; aptSearch(""); return; }
+            if (!have) { mScratch = mAptQuery; return; }
+            aptSearch(sp);
+            mScratch.clear();
+            return;
+        }
+        if (line >= 1 && line <= 4)
+        {
+            const S32 n = mAptPage * 4 + line - 1;
+            if (n >= (S32)mAptIds.size()) return;
+            if (mAptIds[n] == -1)
+            {
+                f.flyToRegion(mAptQuery);   // the route engaged once the map server names it (WolfFlight::idle)
+                mModified = false;
+                mPage = PAGE_DIR;
+                return;
+            }
+            // fly there: the destination is the airport, the route armed (LNAV + VNAV once the region is known)
+            f.setDestinationAirport(mAptIds[n]);
+            syncRouteFromDest();
+            mModified = false;
+            mArmRoute = true;
+            mPage = PAGE_DIR;
+            return;
+        }
+        if (line == 5)
+        {
+            if (left && mAptPage > 0) { --mAptPage; return; }
+            if (!left)
+            {
+                if ((mAptPage + 1) * 4 < (S32)mAptIds.size()) ++mAptPage;
+                else LLWeb::loadURL("https://www.wolf-grid.com/index.php?f=ap");
+            }
+        }
+        return;
+    }
+    // </WolfViewer>
 
     if (mPage == PAGE_DIR)
     {

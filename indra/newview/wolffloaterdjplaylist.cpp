@@ -137,12 +137,6 @@ bool WolfFloaterDJPlaylist::postBuild()
     {
         gSavedSettings.setBOOL("WolfDJPlaylistTitles", c->getValue().asBoolean());
     });
-    getChild<LLCheckBoxCtrl>("hear_it")->setCommitCallback([](LLUICtrl* c, const LLSD&)
-    {
-        const bool on = c->getValue().asBoolean();
-        gSavedSettings.setBOOL("WolfDJPlaylistMonitor", on);
-        if (WolfDJChannel* out = WolfDJPlayer::instance().output()) out->mMonitor = on;
-    });
     return true;
 }
 
@@ -150,22 +144,7 @@ void WolfFloaterDJPlaylist::onOpen(const LLSD& key)
 {
     LLFloater::onOpen(key);
     getChild<LLCheckBoxCtrl>("send_titles")->set(gSavedSettings.getBOOL("WolfDJPlaylistTitles"));
-    getChild<LLCheckBoxCtrl>("hear_it")->set(gSavedSettings.getBOOL("WolfDJPlaylistMonitor"));
-    WolfDJPlayer& player = WolfDJPlayer::instance();
-    if (player.files().empty())
-    {
-        // The playlist saved last time.
-        std::vector<std::string> files;
-        const LLSD saved = gSavedSettings.getLLSD("WolfDJPlaylist");
-        if (saved.isArray())
-        {
-            for (const LLSD& f : llsd::inArray(saved))
-            {
-                if (f.isString()) files.push_back(f.asString());
-            }
-        }
-        player.setFiles(files);
-    }
+    WolfDJPlayer::instance().loadSaved();      // the playlist saved last time
     std::string folder = gSavedSettings.getString("WolfDJPlaylistFolder");
     std::error_code ec;
     if (folder.empty() || !fs::is_directory(to_path(folder), ec))
@@ -351,17 +330,23 @@ void WolfFloaterDJPlaylist::rebuildPlaylist()
         row["columns"][1]["column"] = "name";
         row["columns"][1]["value"] = display_name(files[i]);
         if ((int)i == cur && player.isPlaying()) row["columns"][1]["font"]["style"] = "BOLD";
+        // [WOLF DJ 2026-10-10] Each song's length, as the background scan learns it.
+        const double len = player.knownDuration(files[i]);
+        const S32 secs = (S32)len;
+        row["columns"][2]["column"] = "length";
+        row["columns"][2]["value"] = len < 0.0 ? std::string("...") : (len <= 0.0 ? std::string("?") : llformat("%d:%02d", secs / 60, secs % 60));
         mPlaylist->addElement(row);
     }
     if (keep >= 0 && keep < (S32)files.size()) mPlaylist->selectNthItem(keep);
     mShownCurrent = player.isPlaying() ? cur : -1;
+    mShownLengths = player.lengthsVersion();
 }
 
 void WolfFloaterDJPlaylist::draw()
 {
     WolfDJPlayer& player = WolfDJPlayer::instance();
     const int shown = player.isPlaying() ? player.current() : -1;
-    if (shown != mShownCurrent || player.trackSerial() != mShownSerial)
+    if (shown != mShownCurrent || player.trackSerial() != mShownSerial || player.lengthsVersion() != mShownLengths)
     {
         mShownSerial = player.trackSerial();
         rebuildPlaylist();
@@ -374,7 +359,11 @@ void WolfFloaterDJPlaylist::draw()
         const S32 pos = (S32)player.position();
         const S32 len = (S32)player.duration();
         std::string t = llformat("%d:%02d", pos / 60, pos % 60);
-        if (len > 0) t += llformat(" / %d:%02d", len / 60, len % 60);
+        if (len > 0)
+        {
+            const S32 left = std::max(0, len - pos);
+            t += llformat(" / %d:%02d    %d:%02d left", len / 60, len % 60, left / 60, left % 60);
+        }
         if (player.isPaused()) t += "  (paused)";
         if (!player.output()) t += "  - not on a mixer channel";
         mTime->setText(t);

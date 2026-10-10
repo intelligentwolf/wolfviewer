@@ -70,6 +70,11 @@ namespace WolfDJ
     constexpr int CUE_NONE = -1;
     constexpr int CUE_MASTER = CH_COUNT;        // cue the stream mix
 
+    // [WOLF DJ 2026-10-10] The desk's spectrum display: octave bands of what is on air, centred
+    // on the ISO 266 preferred octave frequencies 31.5 Hz .. 16 kHz.
+    constexpr int SPECTRUM_BANDS = 10;
+    extern const float SPECTRUM_HZ[SPECTRUM_BANDS];
+
     enum EState
     {
         OFF_AIR = 0,
@@ -92,6 +97,7 @@ struct WolfDJBiquad
     void setHighShelf(float f0, float db);
     void setLowPass(float f0, float q);     // [WOLF DJ 2026-10-05] the radio effect
     void setHighPass(float f0, float q);
+    void setBandPass(float f0, float q);    // [WOLF DJ 2026-10-10] the spectrum display
     void reset() { z1[0] = z1[1] = z2[0] = z2[1] = 0.f; }
     float process(int side, float x)
     {
@@ -148,14 +154,21 @@ public:
     // Consumer side - mixer thread only. Fills frames x 2 floats; returns frames actually had.
     size_t pull(float* out, size_t frames);
 
+    // [WOLF DJ 2026-10-10] How much may wait in the ring before the oldest is dropped. Live
+    // sources (mic, voice, programs) keep the default 250 ms so they stay close to real time; a
+    // file player that decodes ahead (the playlist, the jingles) gets more, so a moment's delay
+    // on its thread is not a gap on air (Paul: "stop it from not playing").
+    void setLagLimit(float seconds);
+
     std::atomic<float> mFader{ 0.75f };         // 0..1, see faderGain()
     std::atomic<bool>  mMute{ false };
     std::atomic<float> mEqLowDb{ 0.f }, mEqMidDb{ 0.f }, mEqHighDb{ 0.f };
     std::atomic<float> mPeak{ 0.f };            // post-fader peak of the last tick, 0..1+
     std::atomic<float> mPrePeak{ 0.f };         // pre-fader (what cue hears)
     std::atomic<bool>  mActive{ false };        // a source is attached and delivering
-    // Also play this channel (post-fader) through the DJ's own output. Set for the playlist:
-    // its music exists only inside the viewer, so without this the DJ hears nothing (Paul: "dj
+    // Also play this channel (post-fader) through the DJ's own output: the strip's MON button
+    // (Paul 10-10: "have a MON button on each channel so i can turn off monitoring"). On by
+    // default for the playlist, whose music exists only inside the viewer (Paul 10-04: "dj
     // playlist i cant hear the music it needs to monitor back"). Cue, when on, replaces it.
     std::atomic<bool>  mMonitor{ false };
 
@@ -174,6 +187,7 @@ private:
     std::mutex mMutex;
     std::vector<float> mRing;                   // stereo frames
     size_t mHead = 0, mCount = 0;               // in frames
+    size_t mMaxLag, mTrimTo;                    // in frames, see setLagLimit
     // Linear resampler: position since the last input frame of the previous block.
     unsigned mInRate = 0;
     double mPos = 1.0;
@@ -181,9 +195,15 @@ private:
     std::vector<float> mScratch, mResampled;
 };
 
-// Fader position (0..1) to linear gain: a squared law with the top at +3 dB.
-float wolfdj_fader_gain(float pos);
+// [WOLF DJ 2026-10-10] Fader position (0..1) to dB and back: a mixing desk's long-throw scale,
+// +10 dB at the top, 0 dB three quarters of the way up, -60 dB near the bottom, off at the
+// bottom stop (Paul: "make the volume controls into proper mixing desk sliders"). See the .cpp.
+float wolfdj_fader_db(float pos);               // -120 (off) at the bottom stop
+float wolfdj_fader_pos(float db);
+float wolfdj_fader_gain(float pos);             // linear
 float wolfdj_lin_to_db(float lin);
+// The fader law before 10-10 (a squared law, +3 dB at the top), for saved levels.
+float wolfdj_old_fader_to_pos(float old_pos);
 
 class WolfDJCaptureStream;
 class WolfDJEncoder;
@@ -220,17 +240,28 @@ public:
     // Song title for listeners (a new chained Ogg stream with TITLE/ARTIST comments).
     void setNowPlaying(const std::string& artist, const std::string& title);
 
-    std::atomic<float> mMasterFader{ 0.8f };
+    // [WOLF DJ 2026-10-10] Paul: "we need stereo sliders for the main mix" - a fader per side.
+    std::atomic<float> mMasterFaderL{ 0.75f };
+    std::atomic<float> mMasterFaderR{ 0.75f };
     std::atomic<bool>  mTalkOver{ true };       // the mic dips the music channels
+    std::atomic<bool>  mDucking{ false };       // [WOLF DJ 2026-10-10] talk-over is dipping them now
     std::atomic<int>   mCue{ WolfDJ::CUE_NONE };
-    std::atomic<float> mMasterPeak{ 0.f };
+    std::atomic<float> mMasterPeak{ 0.f };      // the louder side, post-limiter
+    std::atomic<float> mMasterPeakL{ 0.f };     // [WOLF DJ 2026-10-10] each side, post-limiter
+    std::atomic<float> mMasterPeakR{ 0.f };
     std::atomic<float> mLimiterDb{ 0.f };       // gain reduction now, for the floater
 
     // [WOLF DJ 2026-10-05] Jingle pads (WolfDJJingles, wolfdjplayer.cpp) play into this: not a
     // strip, just a level. Always heard by the DJ too (like the playlist), never ducked.
     WolfDJChannel& jingleChannel() { return mJingle; }
     std::atomic<float> mJingleLevel{ 0.75f };   // fader position 0..1 (wolfdj_fader_gain)
-    std::atomic<float> mJinglePeak{ 0.f };
+    std::atomic<float> mJinglePeak{ 0.f };      // post-fader
+    std::atomic<float> mJinglePrePeak{ 0.f };   // [WOLF DJ 2026-10-10] pre-fader, for the desk
+    std::atomic<bool>  mJingleMonitor{ true };  // [WOLF DJ 2026-10-10] the jingle strip's MON
+
+    // [WOLF DJ 2026-10-10] The on-air spectrum (RMS per band, linear), for the desk's display.
+    std::array<std::atomic<float>, WolfDJ::SPECTRUM_BANDS> mSpectrum;
+    std::atomic<float> mMasterPrePeak{ 0.f };   // the mix before the master fader
 
     // Cue output (main thread, OpenAL): the cued channel or the master, pre-fader.
     void idleCue();
@@ -243,6 +274,11 @@ public:
 
     // Viewer quitting: off air, sources closed, engine stopped (LLAppViewer::cleanup).
     void shutdown();
+
+    // [WOLF DJ 2026-10-10] The Wolf DJ window is open. With it shut, a playlist left playing
+    // keeps the engine going (WolfFloaterDJ::onClose); once that stops and nothing is live, the
+    // engine stops itself (onIdle).
+    void setWindowOpen(bool open) { mWindowOpen = open; }
 
     ~WolfDJMixer();
 
@@ -261,10 +297,12 @@ private:
     std::thread mThread;
     std::atomic<bool> mRunning{ false };
     std::atomic<bool> mLiveRequested{ false };
+    bool mWindowOpen = false;           // main thread
 
     // Mixer-thread state.
     std::vector<float> mBus, mTmp;
     float mLimiter = 1.f;
+    std::array<WolfDJBiquad, WolfDJ::SPECTRUM_BANDS> mSpectrumFilters;
     std::unique_ptr<WolfDJEncoder> mEncoder;
     std::unique_ptr<WolfDJSender> mSender;
 

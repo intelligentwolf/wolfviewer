@@ -26,6 +26,7 @@
 
 #include "llviewerprecompiledheaders.h"
 #include "llviewermessage.h"
+#include "wolfflight.h"   // <WolfViewer 2026-10-10/> crossing refusals -> go round
 
 // Linden libraries
 #include "llanimationstates.h"
@@ -6801,6 +6802,14 @@ void process_alert_core(const std::string& message, bool modal)
     if (message.compare(money_off, MONEY_ARRIVAL_PREFIX.length(), MONEY_ARRIVAL_PREFIX) == 0)
     {
         FSCommon::report_to_nearby_chat(message.substr(money_off));
+        return;
+    }
+    // </WolfViewer>
+    // <WolfViewer 2026-10-10> A region refusing the crossing repeats its alert at every try (Chad's screen: six
+    // "Denied access to private region little ST.Lucia"). The flight deck goes round it (wolfflight.cpp
+    // onCrossingRefused), and the first alert is shown, not the repeats.
+    if (WolfFlight::instanceExists() && WolfFlight::instance().onCrossingRefused(message))
+    {
         return;
     }
     // </WolfViewer>

@@ -291,6 +291,74 @@ void setWindowSize(NSWindowRef window, int width, int height)
     [(LLNSWindow*)window setFrame:frame display:TRUE];
 }
 
+// <WolfViewer 2026-10-10> Spread across all screens (see llwindow.h spanAllScreens). One
+// borderless window over the union of every NSScreen frame (all in the same global coordinates),
+// the Dock and menu bar hidden while it is there. macOS draws a window on one display only while
+// "Displays have separate Spaces" is on ([NSScreen screensHaveSeparateSpaces]), so then it says so
+// instead. The window's resize notification (llopenglview-objc.mm windowResized) resizes the viewer.
+static NSRect sSpanSavedFrame;
+static NSWindowStyleMask sSpanSavedStyle = 0;
+static bool sSpanSaved = false;
+
+bool spanWindowAllScreens(NSWindowRef window, bool span, std::string& message)
+{
+    LLNSWindow* w = (LLNSWindow*)window;
+    if (!w)
+    {
+        message = "The viewer window is not open yet.";
+        return false;
+    }
+    if (span)
+    {
+        if ([w styleMask] & NSWindowStyleMaskFullScreen)
+        {
+            message = "Leave macOS full screen first; the viewer then spreads its window over every screen.";
+            return false;
+        }
+        NSArray<NSScreen*>* screens = [NSScreen screens];
+        if ([screens count] > 1 && [NSScreen screensHaveSeparateSpaces])
+        {
+            message = "macOS keeps each window on one screen while \"Displays have separate Spaces\" is on. "
+                      "Turn it off in System Settings > Desktop & Dock > Mission Control, log out and back in, then try again.";
+            return false;
+        }
+        NSRect all = NSZeroRect;
+        for (NSScreen* s in screens)
+        {
+            all = NSIsEmptyRect(all) ? [s frame] : NSUnionRect(all, [s frame]);
+        }
+        if (NSIsEmptyRect(all))
+        {
+            message = "macOS did not report the screen layout.";
+            return false;
+        }
+        sSpanSavedFrame = [w frame];
+        sSpanSavedStyle = [w styleMask];
+        sSpanSaved = true;
+        w.wolfSpanning = YES;
+        [w setStyleMask:NSWindowStyleMaskBorderless];
+        [NSApp setPresentationOptions:NSApplicationPresentationAutoHideDock | NSApplicationPresentationAutoHideMenuBar];
+        [w setFrame:all display:YES];
+        [w makeKeyAndOrderFront:nil];
+        [w makeFirstResponder:[w contentView]];
+    }
+    else
+    {
+        w.wolfSpanning = NO;
+        [NSApp setPresentationOptions:NSApplicationPresentationDefault];
+        if (sSpanSaved)
+        {
+            [w setStyleMask:sSpanSavedStyle];
+            [w setFrame:sSpanSavedFrame display:YES];
+            sSpanSaved = false;
+        }
+        [w makeKeyAndOrderFront:nil];
+        [w makeFirstResponder:[w contentView]];
+    }
+    return true;
+}
+// </WolfViewer>
+
 void setWindowPos(NSWindowRef window, float* pos)
 {
     NSPoint point;

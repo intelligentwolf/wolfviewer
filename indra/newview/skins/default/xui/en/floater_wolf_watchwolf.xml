@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WATCHWOLF 2026-10-10] Wolf World > WatchWolf (wolffloaterwatchwolf.cpp, the site's watchwolf.php).
+     Who is on the regions you own or manage; IM, profile, eject, ban. One page at a time, sorted on the
+     site by the column you click. -->
+<floater
+ can_close="true"
+ can_minimize="true"
+ can_resize="true"
+ height="440"
+ layout="topleft"
+ min_height="300"
+ min_width="560"
+ name="wolf_watchwolf"
+ help_topic="wolf_watchwolf"
+ save_rect="true"
+ single_instance="true"
+ title="WatchWolf"
+ width="700">
+    <icon follows="left|top" height="40" image_name="Wolf_WatchWolf_Icon_64" layout="topleft" left="10" name="wolf_icon" top="24" width="40" />
+    <text follows="left|top|right" font="SansSerifBold" height="18" layout="topleft" left="58" name="title_text" top="26" width="620">WatchWolf - who is on your regions</text>
+    <text follows="left|top|right" height="16" layout="topleft" left="58" name="summary" top="46" width="620" text_color="LtGray_50">Looking...</text>
+    <line_editor follows="left|top" height="22" label="Filter by name, region or estate" layout="topleft" left="10" name="filter" top="72" width="260"
+     tool_tip="Type part of a name, region or estate and press Enter." />
+    <check_box follows="left|top" height="18" label="Show NPCs" layout="topleft" left="280" name="show_npcs" top="74" width="100"
+     tool_tip="NPCs (bots, greeters) are hidden unless this is ticked." />
+    <text follows="left|top" height="16" layout="topleft" left="390" name="per_label" top="76" width="60">Per page</text>
+    <combo_box follows="left|top" height="22" layout="topleft" left="450" name="per_page" top="72" width="60">
+        <combo_box.item label="25" name="p25" value="25" />
+        <combo_box.item label="50" name="p50" value="50" />
+        <combo_box.item label="100" name="p100" value="100" />
+    </combo_box>
+    <button follows="right|top" height="22" label="Refresh" layout="topleft" left="610" name="refresh" top="72" width="80" tool_tip="Look again now (it also refreshes every 20 seconds)." />
+    <!-- [WATCHWOLF 2026-10-10] gods only (shown when the site says isGod): Paul "watchwolf though is showing all
+         regions not just my estates" -> "yes i'd like that". Setting WolfWatchWolfMineOnly. -->
+    <check_box follows="left|top" height="18" label="Only regions I own or manage" layout="topleft" left="520" name="mine_only" top="48" visible="false" width="170"
+     tool_tip="As a grid god you can see every region on the grid. Tick to see only the regions you own and the estates you own or manage." />
+    <scroll_list
+     draw_heading="true"
+     follows="all"
+     height="270"
+     layout="topleft"
+     left="10"
+     multi_select="false"
+     name="people"
+     search_column="0"
+     top="102"
+     tool_tip="Click a column heading to sort the whole list by it. Double-click someone to IM them."
+     width="680">
+        <scroll_list.columns label="Name" name="name" relative_width="0.27" />
+        <scroll_list.columns label="Region" name="region" relative_width="0.25" />
+        <scroll_list.columns label="Estate" name="estate" relative_width="0.2" />
+        <scroll_list.columns label="Status" name="status" relative_width="0.1" />
+        <scroll_list.columns label="Position" name="position" relative_width="0.18" />
+    </scroll_list>
+    <button follows="left|bottom" height="22" label="&lt; Previous" layout="topleft" left="10" name="prev" top="378" width="90" />
+    <text follows="left|bottom" halign="center" height="16" layout="topleft" left="104" name="page_text" top="382" width="100">Page 1 of 1</text>
+    <button follows="left|bottom" height="22" label="Next &gt;" layout="topleft" left="208" name="next" top="378" width="90" />
+    <button follows="right|bottom" height="22" label="IM" layout="topleft" left="370" name="im" top="378" width="70" tool_tip="Open an instant message with them." />
+    <button follows="right|bottom" height="22" label="Profile" layout="topleft" left="444" name="profile" top="378" width="76" />
+    <button follows="right|bottom" height="22" label="Eject" layout="topleft" left="524" name="eject" top="378" width="76" tool_tip="Send them home from that region (asks first)." />
+    <button follows="right|bottom" height="22" label="Ban" layout="topleft" left="604" name="ban" top="378" width="86" tool_tip="Ban them from that region's whole estate and send them home (asks first)." />
+    <text follows="left|right|bottom" height="34" layout="topleft" left="10" name="status" top="404" width="680" wrap="true" />
+</floater>

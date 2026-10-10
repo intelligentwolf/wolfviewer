@@ -56,6 +56,7 @@
 #include "rlvhandler.h"
 // [/RLVa:KB]
 #include "fscommon.h"
+#include "wolfcamerafx.h"   // <WolfViewer 2026-10-10/>
 #include "lltrans.h"
 
 using namespace LLAvatarAppearanceDefines;
@@ -1605,6 +1606,10 @@ void LLAgentCamera::updateCamera()
 
     LLVector3 focus_agent = gAgent.getPosAgentFromGlobal(mFocusGlobal);
     LLVector3 position_agent = gAgent.getPosAgentFromGlobal(camera_pos_global);
+
+    // <WolfViewer 2026-10-10> the Flight Mode chase camera and camera shake (wolfcamerafx.h)
+    WolfCameraFX::instance().apply(position_agent, focus_agent, mCameraUpVector, camera_mode, mFocusOnAvatar);
+    // </WolfViewer>
 
     // Try to move the camera
 

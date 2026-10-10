@@ -13,6 +13,8 @@
 #define WOLF_DJPLAYER_H
 
 #include <atomic>
+#include <condition_variable>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -27,6 +29,15 @@ class WolfDJChannel;
 // dr_flac.h by David Reid, public domain or MIT-0, vendored in newview) and WAV.
 #define WOLFDJ_PLAYLIST_ID "playlist"
 
+namespace WolfDJ
+{
+    // [WOLF DJ 2026-10-10] How far ahead of the clock the playlist and the jingles decode, and the
+    // room their mixer channel gives them (WolfDJChannel::setLagLimit) - more than the lead, so a
+    // late wake-up of the player's thread is not trimmed away. Live sources keep 250 ms.
+    constexpr double PLAYER_LEAD = 0.25;
+    constexpr float PLAYER_RING_SECONDS = 0.6f;
+}
+
 class WolfDJPlayer
 {
 public:
@@ -40,11 +51,19 @@ public:
     WolfDJChannel* output() const { return mOutput.load(); }
     void setFiles(const std::vector<std::string>& files);
     std::vector<std::string> files() const;
+    // The playlist saved last time (setting WolfDJPlaylist), once per session, so the desk's
+    // play button works before the playlist window has ever been opened.
+    void loadSaved();
     void play(int index);
     void togglePause();
     void stop();
     void next();
     void previous();
+
+    // [WOLF DJ 2026-10-10] Paul: "stop it from not playing". Pressing play while the playlist is
+    // on no mixer channel used to sit at 0:00 in silence; now it is put on Music 1 (or the first
+    // free music channel) first. False, with the reason, when every music channel is in use.
+    bool routeToMixer(std::string& why);
 
     int current() const { return mCurrent.load(); }
     bool isPlaying() const { return mPlaying.load(); }
@@ -56,17 +75,27 @@ public:
     void nowPlaying(std::string& artist, std::string& title) const;
     std::string lastError() const;
 
+    // [WOLF DJ 2026-10-10] The song after this one once it is loaded into memory ("" until then).
+    std::string preloadedNext() const;
+    // A file's length in seconds, from a scan in the background: < 0 while not known yet.
+    double knownDuration(const std::string& path) const;
+    int lengthsVersion() const { return mLengthsVersion.load(); }   // changes when a length is learnt
+
     void shutdown();
     ~WolfDJPlayer();
 
 private:
     WolfDJPlayer();
     void run();
+    void preload(int index);                    // any thread: ask the loader for a song
+    void loaderLoop();                          // the loader's thread
+    void scanLengths();                         // the length scan's thread
 
     std::thread mThread;
     std::atomic<bool> mRunning{ false };
+    bool mLoadedSaved = false;
     std::atomic<WolfDJChannel*> mOutput{ nullptr };
-    mutable std::mutex mMutex;                  // mFiles, mArtist, mTitle, mError, mRequest
+    mutable std::mutex mMutex;                  // mFiles, mArtist, mTitle, mError, mNext*, mLengths
     std::vector<std::string> mFiles;
     std::string mArtist, mTitle, mError;
     std::atomic<int> mCurrent{ -1 };
@@ -76,6 +105,22 @@ private:
     std::atomic<double> mPosition{ 0.0 };
     std::atomic<double> mDuration{ 0.0 };
     std::atomic<int> mTrackSerial{ 0 };
+
+    // The next song, read into memory by a loader thread while this one plays.
+    std::thread mLoader;
+    std::condition_variable mLoadCv;
+    std::string mLoadWant;                      // the song the loader should have ready
+    std::string mNextPath;                      // what mNextBytes holds ("" none)
+    std::shared_ptr<const std::vector<unsigned char>> mNextBytes;
+    std::string mNextLabel;                     // its name for the desk, once loaded
+    bool mNextStream = false;                   // it is too big to hold: opened (and streamed) when it plays
+
+    // Song lengths for the playlist window.
+    std::thread mScanner;
+    std::atomic<bool> mScanning{ false };
+    std::atomic<bool> mScanStop{ false };
+    std::map<std::string, double> mLengths;
+    std::atomic<int> mLengthsVersion{ 0 };
 };
 
 // [WOLF DJ 2026-10-05] Jingle pads. Paul: "a jingle set of buttons in different colours you can

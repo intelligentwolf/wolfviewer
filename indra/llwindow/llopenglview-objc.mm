@@ -905,4 +905,27 @@ attributedStringInfo getSegments(NSAttributedString *str)
     callQuitHandler();
 }
 
+// <WolfViewer 2026-10-10> spread across all screens (spanWindowAllScreens, llwindowmacosx-objc.mm).
+// AppKit keeps a window's frame on one screen and a borderless window cannot become key by
+// default; neither holds while the viewer covers every screen.
+- (NSRect) constrainFrameRect:(NSRect)frameRect toScreen:(NSScreen *)screen
+{
+    if (self.wolfSpanning)
+    {
+        return frameRect;
+    }
+    return [super constrainFrameRect:frameRect toScreen:screen];
+}
+
+- (BOOL) canBecomeKeyWindow
+{
+    return YES;
+}
+
+- (BOOL) canBecomeMainWindow
+{
+    return YES;
+}
+// </WolfViewer>
+
 @end

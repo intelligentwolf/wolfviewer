@@ -364,7 +364,22 @@ namespace
                 lineW(x0, y0, x1, y1, llmax(1.f, o.r * 0.012f), (o.red > 0.f && v >= o.red) ? C_RED : LLColor4(0.79f, 0.8f, 0.82f, 1.f));
             }
         }
+        // <WolfViewer 2026-10-10> Paul (330 km/h car dial): "make numbers smaller" - at the top of the dial neighbouring
+        // figures sit side by side and "140 160 180" ran into each other. The figures are as big as the mockup asks
+        // only while the widest one fits the chord to its neighbour on the figure circle (0.62 r); smaller otherwise.
         const LLFontGL* nf = face("B612", LLFontGL::BOLD, o.num_px * 1.25f);
+        {
+            const F32 step = o.label_every > 0.f ? o.label_every : o.major;
+            const F32 gap_deg = 270.f * step / llmax(1.f, o.max);
+            const F32 chord = 2.f * o.r * 0.62f * sinf(gap_deg * 0.5f * DEG_TO_RAD);
+            const std::string widest = llformat("%d", (S32)llround(o.max / o.div));
+            F32 px = o.num_px * 1.25f;
+            while (nf && px > 6.f && nf->getWidthF32(widest) > chord * 0.85f)
+            {
+                px -= 1.f;
+                nf = face("B612", LLFontGL::BOLD, px);
+            }
+        }
         for (F32 m = 0.f; m <= o.max + 0.01f; m += o.major)
         {
             const bool red = o.red > 0.f && m >= o.red;
@@ -534,6 +549,76 @@ const WolfDashboard::Hit* WolfDashboard::hitAt(S32 x, S32 y) const
     return nullptr;
 }
 
+// <WolfViewer 2026-10-10> The mini dashboard: one bar at the bottom - speed, gear, fuel, the indicator and lamp
+// tell-tales, cruise and the first warning - with FULL and X. Everything beside it is the world's.
+void WolfDashboard::drawMiniBar(F32 bottom)
+{
+    const WolfDrive::Shown& s = WolfDrive::instance().shown();
+    const F32 W = (F32)getRect().getWidth();
+    const F32 h = llclamp((F32)getRect().getHeight() * 0.055f, 36.f, 56.f);
+    struct Cell { std::string label, value; LLColor4 col; EHit hit; std::string tip; F32 w; bool key; };
+    std::vector<Cell> cells;
+    const bool blink_on = fmod(LLFrameTimer::getElapsedSeconds(), 1.0) < 0.5;
+    cells.push_back({ "", (s.mIndicators == 1 || s.mIndicators == 3) && blink_on ? "<" : "", C_GREEN, H_IND_L, "Left indicator", 0.6f, false });
+    cells.push_back({ s.mMph ? "MPH" : "KM/H", llformat("%d", (S32)llround(s.mSpeed * (s.mMph ? MPH : KMH))), C_WHITE, H_UNITS,
+                      s.mMph ? "Click for km/h" : "Click for miles per hour", 1.2f, false });
+    cells.push_back({ "GEAR", s.mGear.empty() ? std::string("-") : s.mGear, C_WHITE, H_NONE, "", 0.9f, false });
+    cells.push_back({ "FUEL", llformat("%d%%", (S32)llround(s.mFuel)), s.mFuel < 15.f ? C_AMBER : C_WHITE, H_NONE, "", 1.0f, false });
+    cells.push_back({ "LIGHTS", s.mLights == 2 ? "MAIN" : (s.mLights == 1 ? "ON" : "OFF"), s.mLights == 2 ? C_BLUE : (s.mLights ? C_GREEN : C_DIM),
+                      H_LIGHTS, "Lamps: click to change", 1.0f, false });
+    cells.push_back({ "CRUISE", s.mCruise ? "ON" : "OFF", s.mCruise ? C_GREEN : C_DIM, H_CRUISE, "Cruise control: click to switch", 1.0f, false });
+    if (!s.mWarnings.empty())
+    {
+        std::string label;
+        LLColor4 col = C_AMBER;
+        warningLook(s.mWarnings.front(), label, col);
+        cells.push_back({ "WARNING", label, col, H_NONE, "", 1.8f, false });
+    }
+    cells.push_back({ "", (s.mIndicators == 2 || s.mIndicators == 3) && blink_on ? ">" : "", C_GREEN, H_IND_R, "Right indicator", 0.6f, false });
+    cells.push_back({ "", "FULL", C_WHITE, H_MINI, "Bring the whole dashboard back", 1.0f, true });
+    cells.push_back({ "", "X", C_WHITE, H_CLOSE, "Close the dashboard", 0.6f, true });
+
+    const F32 unit = h * 1.45f;
+    F32 total = 0.f;
+    for (const Cell& c : cells) total += c.w * unit;
+    const F32 scale = llmin(1.f, (W - 16.f) / total);
+    const F32 bw = total * scale;
+    const F32 l = (W - bw) * 0.5f, r = l + bw, b = bottom + 4.f, t = b + h;
+    mPanelB = bottom;
+    mPanelT = t + 2.f;
+
+    roundRectF(l - 3.f, b - 3.f, r + 3.f, t + 3.f, 6.f, C_GREY, C_OFF);
+    roundRectF(l, b, r, t, 5.f, LLColor4(0.10f, 0.10f, 0.11f, 0.95f), LLColor4(0.03f, 0.03f, 0.04f, 0.95f));
+    const LLFontGL* vf = face("B612", LLFontGL::BOLD, h * 0.42f);
+    const LLFontGL* lf = face("B612", LLFontGL::NORMAL, h * 0.24f);
+    const LLFontGL* kf = face("B612", LLFontGL::BOLD, h * 0.34f);
+    F32 x = l;
+    for (const Cell& c : cells)
+    {
+        const F32 cw = c.w * unit * scale;
+        const F32 cl = x + 2.f, cr = x + cw - 2.f;
+        if (c.key)
+        {
+            const bool pressed = mPressed == c.hit;
+            roundRectF(cl + 2.f, b + 5.f - (pressed ? 1.f : 0.f), cr - 2.f, t - 5.f - (pressed ? 1.f : 0.f), 3.f,
+                       LLColor4(0.22f, 0.23f, 0.25f, 1.f), LLColor4(0.12f, 0.12f, 0.14f, 1.f));
+            text(kf, c.value, (cl + cr) * 0.5f, (b + t) * 0.5f - (pressed ? 1.f : 0.f), c.col);
+        }
+        else
+        {
+            rectF(cl, b + 4.f, cr, t - 4.f, C_BLACK);
+            text(lf, c.label, (cl + cr) * 0.5f, t - 4.f - h * 0.17f, C_GREY);
+            text(vf, c.value, (cl + cr) * 0.5f, b + 4.f + h * 0.30f, c.col);
+        }
+        if (c.hit != H_NONE)
+        {
+            addHit(cl, b, cr, t, c.hit, c.tip);
+        }
+        x += cw;
+    }
+}
+// </WolfViewer>
+
 // With the background on the whole panel is solid (a click on it is not a click on the world);
 // with it off only the controls are, so the gaps between the gauges belong to the world.
 bool WolfDashboard::onPanel(S32 x, S32 y) const
@@ -546,7 +631,7 @@ bool WolfDashboard::onPanel(S32 x, S32 y) const
     {
         return true;
     }
-    if (!gSavedSettings.getBOOL("WolfDashboardBackground"))
+    if (!gSavedSettings.getBOOL("WolfDashboardBackground") || gSavedSettings.getBOOL("WolfDashboardMini"))   // <WolfViewer 2026-10-10/> mini: only its controls
     {
         return false;
     }
@@ -591,6 +676,7 @@ namespace
         const B bs[] =
         {
             { 30.f, "X", false, WolfDashboard::H_CLOSE, "Close the dashboard. World > Car Dashboard (or the toolbar button) brings it back." },
+            { 70.f, "MINI", false, WolfDashboard::H_MINI, "Shrink the dashboard to one small bar; FULL on it brings it back" },
             { 70.f, "HELP", false, WolfDashboard::H_HELP, "How the dashboard works, setting up a wheel and keys, and wolfDashboard for vehicle makers" },
             { 120.f, "CONTROLS", false, WolfDashboard::H_CONTROLS, "Driving Controls: a steering wheel, pedals or gamepad, and the keys for the horn, lamps and gears" },
             { 70.f, "MAP", false, WolfDashboard::H_MAP, "World Map, centred on where you are driving" },
@@ -732,6 +818,251 @@ namespace
                    ab ? "Gearbox: AUTOMATIC - it picks the gear from the speed; + / - take one yourself (M). Click for MANUAL."
                       : "Gearbox: MANUAL - Page Up / Page Down (or + / -) step one gear; past top you stay in top, below 1 is N then R. Click for AUTOMATIC.",
                    11.f);
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════════════════
+    // [GEAR STICK 2026-10-10] Paul: "the car gear sticks and lorry gears sticks dont look like a
+    // real gear shifts research on the internet and make that better". Drawn as the real things
+    // look from the driver's seat, looking down at the console:
+    //   CAR MANUAL   an H-pattern gate in a brushed plate (the 911's: R out to the left, then
+    //                1/2, 3/4, 5/6 and 7/8 - Porsche put its 7-speed's seventh up and right of
+    //                fifth), the lever in a leather gaiter, a round black knob with the shift
+    //                pattern engraved on its top. The neutral rail runs across the middle.
+    //   TRUCK MANUAL Scania GRS905 range-splitter: first is left and back, second right and
+    //                forward, third straight back from second (R forward of first); the range
+    //                collar under the knob (LOW 1-6 / HIGH 7-12) and the splitter rocker on the
+    //                knob's front (L / H half-gear) - each gear is a slot, a range and a split.
+    //   AUTOMATIC    a straight gated slot P R N D (truck Opticruise R N A) with the lit letter
+    //                beside it, and the M gate beside D: forward + / back - takes a gear.
+    // Every slot is a click (WolfDrive::setSelector: one Page Up / Page Down tap per step, as
+    // the keys do); the knob glides to the gear it is in.
+    // ════════════════════════════════════════════════════════════════════════════════════
+
+    struct KnobPos { F32 x = -1.f, y = -1.f; };
+    KnobPos sKnob[3];     // per vehicle type: where the knob is drawn, gliding to its slot
+
+    void glideKnob(KnobPos& k, F32 tx, F32 ty)
+    {
+        if (k.x < 0.f) { k.x = tx; k.y = ty; return; }
+        const F32 a = 1.f - expf(-llclamp(LLFrameTimer::getFrameDeltaTimeF32(), 0.f, 0.1f) / 0.05f);
+        k.x += (tx - k.x) * a;
+        k.y += (ty - k.y) * a;
+    }
+
+    void plate(F32 l, F32 b, F32 r, F32 t)
+    {
+        roundRectF(l, b, r, t, S(10.f), LLColor4(0.20f, 0.21f, 0.23f, 1.f), LLColor4(0.08f, 0.085f, 0.095f, 1.f));
+        // brushed lines
+        for (F32 y = b + S(6.f); y < t - S(4.f); y += S(3.f))
+        {
+            rectF(l + S(6.f), y, r - S(6.f), y + 1.f, LLColor4(1.f, 1.f, 1.f, 0.025f));
+        }
+        frameW(l, b, r, t, 1.2f, LLColor4(0.33f, 0.35f, 0.38f, 1.f));
+    }
+
+    // A slot cut in the plate, from (x0,y0) to (x1,y1): dark, with a light lip on one side.
+    void slot(F32 x0, F32 y0, F32 x1, F32 y1)
+    {
+        const F32 w = S(5.f);
+        lineW(x0, y0, x1, y1, w + S(2.f), LLColor4(0.34f, 0.36f, 0.39f, 1.f));
+        lineW(x0, y0, x1, y1, w, LLColor4(0.01f, 0.01f, 0.012f, 1.f));
+    }
+
+    // The lever seen from above: the gaiter round the pivot, the shaft to the knob, the knob.
+    void lever(F32 px, F32 py, F32 kx, F32 ky, F32 kr, bool truck, const std::string& top_label)
+    {
+        // leather gaiter: folded rings round the pivot, pulled towards the knob
+        const F32 gr = kr * 1.7f;
+        for (S32 i = 3; i >= 0; --i)
+        {
+            const F32 f = (F32)i / 3.f;
+            const F32 cx = px + (kx - px) * (0.25f * (1.f - f)), cy = py + (ky - py) * (0.25f * (1.f - f));
+            const F32 shade = 0.05f + 0.035f * (3 - i);
+            circleF(cx, cy, gr * (0.55f + 0.45f * f), LLColor4(shade, shade, shade * 1.05f, 1.f), 32);
+        }
+        // shaft
+        lineW(px, py, kx, ky, kr * 0.45f, LLColor4(0.05f, 0.05f, 0.055f, 1.f));
+        // knob: a shaded dome, leather black (car) or the truck's grey
+        circleF(kx + S(2.f), ky - S(2.f), kr, LLColor4(0.f, 0.f, 0.f, 0.5f), 40);
+        circleShaded(kx, ky, kr, truck ? LLColor4(0.42f, 0.44f, 0.47f, 1.f) : LLColor4(0.30f, 0.30f, 0.32f, 1.f),
+                     truck ? LLColor4(0.10f, 0.11f, 0.12f, 1.f) : LLColor4(0.02f, 0.02f, 0.025f, 1.f), 40);
+        if (!top_label.empty())
+        {
+            T(kx, ky, top_label, llclamp(kr / g.cur.u * 0.9f, 9.f, 16.f), C_WHITE, true);
+        }
+    }
+
+    // The engraved shift pattern on top of a car knob: R 1 3 5 7 over 2 4 6 8, in white lines.
+    void knobPattern(F32 cx, F32 cy, F32 kr, S32 gears)
+    {
+        const S32 cols = (gears + 1) / 2 + 1;
+        const F32 w = kr * 1.15f, h = kr * 0.9f;
+        const LLColor4 ink(0.85f, 0.86f, 0.88f, 0.9f);
+        const F32 lw = llmax(1.f, kr * 0.06f);
+        lineW(cx - w * 0.5f, cy, cx + w * 0.5f, cy, lw, ink);
+        for (S32 i = 0; i < cols; ++i)
+        {
+            const F32 x = cx - w * 0.5f + w * (F32)i / (F32)(cols - 1);
+            lineW(x, cy, x, cy + h * 0.5f, lw, ink);
+            if (i > 0) lineW(x, cy, x, cy - h * 0.5f, lw, ink);
+        }
+    }
+
+    void gearShifter(Ctx& c, F32 xl, F32 xr, F32 ytop, F32 ybot, WolfDrive::EType ty)
+    {
+        WolfDrive& d = WolfDrive::instance();
+        const bool ab = d.autoBox();
+        const bool truck = ty == WolfDrive::TYPE_TRUCK;
+        const S32 gears = WolfDrive::spec(ty).mGears;
+        const S32 sel = d.selector();
+        KnobPos& kp = sKnob[llclamp((S32)ty, 0, 2)];
+
+        // the gearbox mode button above (as before), the +/- below
+        const F32 mt = ytop + S(30.f), mb = ytop + S(6.f);
+        button(c, xl, mb, xr, mt, ab ? "AUTO" : "MANUAL", ab, WolfDashboard::H_BOX_MODE,
+               ab ? "Gearbox: AUTOMATIC - it picks the gear from the speed; + / - (or the M gate) take one yourself. Click for MANUAL."
+                  : "Gearbox: MANUAL - click a gear in the gate, or Page Up / Page Down (+ / -) one gear at a time. Click for AUTOMATIC.",
+               11.f);
+        const F32 bh = S(22.f);
+        const F32 pb = ybot + bh + S(6.f);     // the plate's bottom: the +/- row under it
+        const F32 mid = (xl + xr) * 0.5f;
+        button(c, xl, ybot, mid - S(3.f), ybot + bh, "-", false, WolfDashboard::H_SHIFT_DOWN,
+               "Gear down: one gear (Page Down, or your gear-down key or button)", 16.f);
+        button(c, mid + S(3.f), ybot, xr, ybot + bh, "+", false, WolfDashboard::H_SHIFT_UP,
+               "Gear up: one gear (Page Up, or your gear-up key or button)", 16.f);
+        plate(xl, pb, xr, ytop);
+
+        const F32 w = xr - xl, h = ytop - pb;
+        const F32 kr = llmin(w * 0.15f, S(15.f));
+
+        if (ab)
+        {
+            // AUTOMATIC: P R N D (truck R N A) in a straight gate; the M gate beside D.
+            const std::vector<S32> pos = WolfDrive::selectorPositions(ty, true);
+            const S32 n = (S32)pos.size();
+            const F32 gx = xl + w * 0.36f, top = ytop - h * 0.12f, bot = pb + h * 0.18f;
+            slot(gx, top, gx, bot);
+            const F32 mx = xl + w * 0.72f;
+            slot(gx, bot, mx, bot);                                    // across to M
+            slot(mx, bot + h * 0.18f, mx, bot - h * 0.06f);            // M: + forward, - back
+            F32 tx = gx, tyy = bot;
+            for (S32 i = 0; i < n; ++i)
+            {
+                const F32 y = top - (top - bot) * (F32)i / (F32)llmax(1, n - 1);
+                const S32 gsel = pos[i];
+                const bool on = sel == gsel;
+                std::string label = WolfDrive::gearLabel(gsel);
+                if (gsel == WolfDrive::GEAR_D && truck) label = "A";
+                T(xl + w * 0.13f, y, label, 13.f, on ? (gsel == WolfDrive::GEAR_R ? C_RED : C_GREEN) : C_DIM, true);
+                if (on) { tx = gx; tyy = y; }
+                c.hit(xl, y - h * 0.08f, gx + w * 0.12f, y + h * 0.08f, (WolfDashboard::EHit)(WolfDashboard::H_SEL_0 + i),
+                      "Put the lever in " + label + (gsel == WolfDrive::GEAR_D ? " - the automatic drives" : ""));
+            }
+            T(mx + w * 0.14f, bot + h * 0.16f, "+", 12.f, C_GREY, true);
+            T(mx + w * 0.14f, bot - h * 0.04f, "-", 12.f, C_GREY, true);
+            T(mx, bot - h * 0.14f, "M", 11.f, C_GREY, true);
+            c.hit(mx - w * 0.1f, bot + h * 0.02f, mx + w * 0.22f, bot + h * 0.24f, WolfDashboard::H_SHIFT_UP, "M gate forward: a gear up, held by you");
+            c.hit(mx - w * 0.1f, bot - h * 0.12f, mx + w * 0.22f, bot - h * 0.01f, WolfDashboard::H_SHIFT_DOWN, "M gate back: a gear down, held by you");
+            glideKnob(kp, tx, tyy);
+            lever(gx, (top + bot) * 0.5f, kp.x, kp.y, kr * 0.85f, truck, "");
+            return;
+        }
+
+        // MANUAL
+        const F32 rail = pb + h * 0.5f;
+        const F32 up = ytop - h * 0.14f, down = pb + h * 0.14f;
+        struct Gate { S32 sel; F32 x, y; };
+        std::vector<Gate> gates;
+        if (!truck)
+        {
+            // R 1 3 5 7 forward, 2 4 6 8 back; R out on the left (911 style)
+            const S32 cols = (gears + 1) / 2 + 1;
+            auto colx = [&](S32 i) { return xl + w * 0.12f + (w * 0.76f) * (F32)i / (F32)(cols - 1); };
+            slot(colx(0), rail, colx(cols - 1), rail);
+            gates.push_back({ WolfDrive::GEAR_R, colx(0), up });
+            slot(colx(0), rail, colx(0), up);
+            for (S32 gnum = 1; gnum <= gears; ++gnum)
+            {
+                const S32 col = (gnum + 1) / 2;
+                const F32 y = (gnum % 2) ? up : down;
+                slot(colx(col), rail, colx(col), y);
+                gates.push_back({ gnum, colx(col), y });
+            }
+            gates.push_back({ WolfDrive::GEAR_N, colx((cols - 1) / 2), rail });
+        }
+        else
+        {
+            // GRS905: R forward-left, 1 back-left, 2 forward-right, 3 back-right; the range and the
+            // split say which of the twelve
+            const F32 x0 = xl + w * 0.3f, x1 = xl + w * 0.72f;
+            slot(x0, rail, x1, rail);
+            slot(x0, up, x0, down);
+            slot(x1, up, x1, down);
+            const S32 cur = sel >= 1 ? sel : 1;
+            const S32 range = (cur - 1) / 6, split = (cur - 1) % 2;
+            gates.push_back({ WolfDrive::GEAR_R, x0, up });
+            for (S32 p = 1; p <= 3; ++p)
+            {
+                const S32 gnum = range * 6 + (p - 1) * 2 + split + 1;
+                gates.push_back({ gnum, p == 1 ? x0 : x1, p == 2 ? up : down });
+            }
+            gates.push_back({ WolfDrive::GEAR_N, (x0 + x1) * 0.5f, rail });
+        }
+
+        F32 tx = gates.back().x, tyy = rail;   // N unless a gate matches
+        for (const Gate& gt : gates)
+        {
+            bool on;
+            std::string label;
+            if (truck && gt.sel >= 1)
+            {
+                // the slot holds two of the twelve in this range: it is "on" for either split
+                on = sel >= 1 && ((sel - 1) / 6 == (gt.sel - 1) / 6) && (((sel - 1) % 6) / 2 == ((gt.sel - 1) % 6) / 2);
+                label = llformat("%d", ((gt.sel - 1) % 6) / 2 + 1);
+            }
+            else
+            {
+                on = sel == gt.sel;
+                label = WolfDrive::gearLabel(gt.sel);
+            }
+            if (on) { tx = gt.x; tyy = gt.y; }
+            if (gt.sel != WolfDrive::GEAR_N)
+            {
+                const F32 ly = gt.y + (gt.y > rail ? S(10.f) : -S(10.f));
+                T(gt.x, ly, label, 11.f, on ? (gt.sel == WolfDrive::GEAR_R ? C_RED : C_WHITE) : C_DIM, true);
+            }
+            const S32 idx = gt.sel == WolfDrive::GEAR_R ? 0 : gt.sel == WolfDrive::GEAR_N ? 1 : 1 + gt.sel;
+            const F32 hw = llmax(S(8.f), w * 0.09f);
+            const std::string tip = gt.sel == WolfDrive::GEAR_R ? std::string("Reverse")
+                                  : gt.sel == WolfDrive::GEAR_N ? std::string("Neutral")
+                                  : truck ? llformat("Gear %d (this slot in the %s range, %s split)", gt.sel, gt.sel <= 6 ? "LOW" : "HIGH", ((gt.sel - 1) % 2) ? "H" : "L")
+                                          : llformat("Gear %d", gt.sel);
+            c.hit(gt.x - hw, gt.y - hw, gt.x + hw, gt.y + hw, (WolfDashboard::EHit)(WolfDashboard::H_GATE_0 + llclamp(idx, 0, 13)), tip + ": click to put it in");
+        }
+        glideKnob(kp, tx, tyy);
+        const F32 px = (xl + xr) * 0.5f, py = rail;
+        lever(px, py, kp.x, kp.y, kr, truck, std::string());
+        if (!truck)
+        {
+            knobPattern(kp.x, kp.y, kr * 0.75f, gears);
+        }
+        else
+        {
+            // the range collar round the knob and the splitter rocker on its front
+            const bool high = sel >= 7;
+            const bool hsplit = sel >= 1 && ((sel - 1) % 2) == 1;
+            arcW(kp.x, kp.y, kr + S(3.f), S(4.f), 0.f, 6.2831853f, high ? C_AMBER : C_TEAL, 40);
+            const F32 rw = kr * 0.9f, rh = kr * 0.45f;
+            roundRectF(kp.x - rw * 0.5f, kp.y - kr * 0.75f, kp.x + rw * 0.5f, kp.y - kr * 0.75f + rh, S(2.f),
+                       LLColor4(0.15f, 0.15f, 0.17f, 1.f), LLColor4(0.06f, 0.06f, 0.07f, 1.f));
+            T(kp.x, kp.y - kr * 0.75f + rh * 0.5f, hsplit ? "H" : "L", 9.f, C_WHITE, true);
+            T(kp.x, kp.y + kr * 0.25f, high ? "HI" : "LO", 9.f, high ? C_AMBER : C_TEAL, true);
+            c.hit(kp.x - rw * 0.5f, kp.y - kr * 0.8f, kp.x + rw * 0.5f, kp.y - kr * 0.75f + rh, WolfDashboard::H_SPLIT,
+                  hsplit ? "Splitter H (the higher half-gear): click for L" : "Splitter L (the lower half-gear): click for H");
+            c.hit(kp.x - kr - S(5.f), kp.y - S(2.f), kp.x + kr + S(5.f), kp.y + kr + S(5.f), WolfDashboard::H_RANGE,
+                  high ? "Range collar: HIGH (gears 7-12). Click for LOW." : "Range collar: LOW (gears 1-6). Click for HIGH.");
+            T(xl + w * 0.5f, pb + S(8.f), high ? "RANGE HIGH" : "RANGE LOW", 9.f, high ? C_AMBER : C_TEAL);
         }
     }
 
@@ -1096,6 +1427,16 @@ void WolfDashboard::draw()
             }
         }
     }
+    // <WolfViewer 2026-10-10> Paul: "the huds allow them to be minimised to just minimal stuff and brought back up
+    // again like a mini version of them" - MINI on the strip: one bar, FULL on it brings the dashboard back.
+    if (gSavedSettings.getBOOL("WolfDashboardMini"))
+    {
+        LLGLSUIDefault gls_ui;
+        drawMiniBar(bottom);
+        mDrawn = true;
+        return;
+    }
+    // </WolfViewer>
     // The panel is the mockup's 304 units tall. Its size is chosen in pixels (30% of the window,
     // 170 to 380) and turned into UI units with the UI scale, so a bigger UI makes it bigger; it
     // never takes more than 55% of what the toolbar leaves.
@@ -1203,7 +1544,7 @@ void WolfDashboard::draw()
         wheel(X(220.f), YM(761.f), S(124.f), d.steer(), false);
         addHit(X(96.f), YM(885.f), X(344.f), YM(637.f), H_WHEEL, "Steering wheel: drag left or right (or Left / Right, A / D, or your own wheel)");
         use(g.R);
-        selector(c, X(1175.f), X(1267.f), YM(632.f), YM(832.f), ty, "gears");
+        gearShifter(c, X(1175.f), X(1267.f), YM(632.f), YM(832.f), ty);   // [GEAR STICK 2026-10-10]
         pedals(c, X(1310.f), X(1580.f), YM(666.f), 172.f, d.brake(), d.throttle(), false);
         lampButtons(c, X(1310.f), X(1580.f), YM(858.f), s, d.buttonsHeld());
     }
@@ -1302,7 +1643,7 @@ void WolfDashboard::draw()
         wheel(X(200.f), YM(748.f), S(140.f), d.steer(), true);
         addHit(X(60.f), YM(888.f), X(340.f), YM(608.f), H_WHEEL, "Steering wheel: drag left or right (or Left / Right, A / D, or your own wheel)");
         use(g.R);
-        selector(c, X(1255.f), X(1347.f), YM(632.f), YM(812.f), ty, "gears");
+        gearShifter(c, X(1255.f), X(1347.f), YM(632.f), YM(812.f), ty);   // [GEAR STICK 2026-10-10]
         pedals(c, X(1378.f), X(1580.f), YM(666.f), 172.f, d.brake(), d.throttle(), false);
         lampButtons(c, X(1255.f), X(1580.f), YM(858.f), s, d.buttonsHeld());
     }
@@ -1458,6 +1799,19 @@ void WolfDashboard::press(EHit id)
     case H_BOX_MODE:   d.setAutoBox(!d.autoBox()); break;
     case H_SHIFT_DOWN: d.pressAction(WolfDrive::ACT_GEAR_DOWN); break;
     case H_TYPE_CAR:   d.chooseType(WolfDrive::TYPE_CAR); break;
+    // [GEAR STICK 2026-10-10] the gate's slots, the truck's range collar and splitter
+    case H_RANGE:
+    {
+        const S32 cur = d.selector() >= 1 ? d.selector() : 1;
+        d.setSelector(cur <= 6 ? llmin(cur + 6, WolfDrive::spec(d.type()).mGears) : cur - 6);
+        break;
+    }
+    case H_SPLIT:
+    {
+        const S32 cur = d.selector() >= 1 ? d.selector() : 1;
+        d.setSelector(((cur - 1) % 2) ? cur - 1 : llmin(cur + 1, WolfDrive::spec(d.type()).mGears));
+        break;
+    }
     case H_TYPE_TRUCK: d.chooseType(WolfDrive::TYPE_TRUCK); break;
     case H_TYPE_BIKE:  d.chooseType(WolfDrive::TYPE_BIKE); break;
     case H_UNITS:      gSavedSettings.setBOOL("WolfDashboardMph", !gSavedSettings.getBOOL("WolfDashboardMph")); break;
@@ -1465,6 +1819,7 @@ void WolfDashboard::press(EHit id)
     case H_CONTROLS:   LLFloaterReg::toggleInstanceOrBringToFront("wolf_drive_controls"); break;
     case H_TRIP:       d.resetTrip(); break;
     case H_CLOSE:      d.requestDashboard(false); break;
+    case H_MINI:       gSavedSettings.setBOOL("WolfDashboardMini", !gSavedSettings.getBOOL("WolfDashboardMini")); break;   // <WolfViewer 2026-10-10/>
     case H_HELP:       mShowHelp = !mShowHelp; break;
     case H_MAP:
     {
@@ -1486,6 +1841,12 @@ void WolfDashboard::press(EHit id)
     case H_HAZARDS:    d.setScreenButton(WolfDrive::BTN_HAZARDS, true); break;
     case H_CRUISE:     d.setScreenButton(WolfDrive::BTN_CRUISE, true); break;
     default:
+        if (id >= H_GATE_0 && id <= H_GATE_13)
+        {
+            const S32 i = id - H_GATE_0;
+            d.setSelector(i == 0 ? WolfDrive::GEAR_R : i == 1 ? WolfDrive::GEAR_N : i - 1);
+            break;
+        }
         if (id >= H_SEL_0 && id <= H_SEL_7)
         {
             const std::vector<S32> pos = WolfDrive::selectorPositions(d.type(), d.autoBox());

@@ -84,6 +84,10 @@
 
 @interface LLNSWindow : NSWindow
 
+// <WolfViewer 2026-10-10> spread across all screens: while set, the frame is not pulled back onto
+// one screen (constrainFrameRect) and the borderless window still takes the keyboard.
+@property (nonatomic) BOOL wolfSpanning;
+
 @end
 
 @interface NSScreen (PointConversion)

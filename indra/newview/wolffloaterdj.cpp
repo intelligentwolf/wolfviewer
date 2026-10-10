@@ -13,6 +13,7 @@
 #include "wolffloaterdj.h"
 
 #include "wolfdjcapture.h"
+#include "wolfdjdesk.h"
 #include "wolfdjplayer.h"
 #include "wolfgrid.h"
 
@@ -122,35 +123,10 @@ WolfFloaterDJ::~WolfFloaterDJ()
 
 bool WolfFloaterDJ::postBuild()
 {
-    for (int ch = 0; ch < CH_COUNT; ++ch)
-    {
-        const std::string k = STRIP_KEYS[ch];
-        Strip& s = mStrips[ch];
-        s.mFader = getChild<LLSliderCtrl>("fader_" + k);
-        s.mEqHigh = getChild<LLSliderCtrl>("eq_high_" + k);
-        s.mEqMid = getChild<LLSliderCtrl>("eq_mid_" + k);
-        s.mEqLow = getChild<LLSliderCtrl>("eq_low_" + k);
-        s.mMute = getChild<LLButton>("mute_" + k);
-        s.mCue = getChild<LLButton>("cue_" + k);
-        s.mMeter = getChild<LLView>("meter_" + k);
-        s.mDb = getChild<LLTextBox>("db_" + k);
-        WolfDJChannel* chan = &WolfDJMixer::instance().channel(ch);
-        s.mFader->setCommitCallback([this, chan](LLUICtrl* c, const LLSD&) { chan->mFader = (F32)c->getValue().asReal(); saveLevels(); });
-        s.mEqHigh->setCommitCallback([this, chan](LLUICtrl* c, const LLSD&) { chan->mEqHighDb = (F32)c->getValue().asReal(); saveLevels(); });
-        s.mEqMid->setCommitCallback([this, chan](LLUICtrl* c, const LLSD&) { chan->mEqMidDb = (F32)c->getValue().asReal(); saveLevels(); });
-        s.mEqLow->setCommitCallback([this, chan](LLUICtrl* c, const LLSD&) { chan->mEqLowDb = (F32)c->getValue().asReal(); saveLevels(); });
-        s.mMute->setCommitCallback([this, chan](LLUICtrl* c, const LLSD&) { chan->mMute = c->getValue().asBoolean(); saveLevels(); });
-        s.mCue->setCommitCallback([this, ch](LLUICtrl*, const LLSD&) { onCue(ch); });
-        // [WOLF DJ 2026-10-05] Paul: "can we add some basic effects?"
-        s.mFx = getChild<LLComboBox>("fx_" + k);
-        s.mFxAmount = getChild<LLSliderCtrl>("fx_amount_" + k);
-        s.mFx->setCommitCallback([this, chan](LLUICtrl* c, const LLSD&)
-        {
-            chan->mFx = llclamp(c->getValue().asInteger(), (S32)FX_NONE, (S32)FX_COUNT - 1);
-            saveLevels();
-        });
-        s.mFxAmount->setCommitCallback([this, chan](LLUICtrl* c, const LLSD&) { chan->mFxAmount = (F32)c->getValue().asReal(); saveLevels(); });
-    }
+    // [WOLF DJ 2026-10-10] The desk draws and handles every strip (wolfdjdesk.cpp); it commits
+    // when a move is finished, and the levels are saved then.
+    mDesk = getChild<WolfDJDesk>("desk");
+    mDesk->setCommitCallback([this](LLUICtrl*, const LLSD&) { saveLevels(); });
 
     // [WOLF DJ 2026-10-05] Jingle pads, each its own colour (WolfDJJingles::PAD_RGB).
     static_assert(WolfDJJingles::PAD_COUNT == 8, "mPads and the XML have 8 pads");
@@ -173,17 +149,6 @@ bool WolfFloaterDJ::postBuild()
         });
     }
     getChild<LLButton>("jingle_stop")->setCommitCallback([](LLUICtrl*, const LLSD&) { WolfDJJingles::instance().stop(); });
-    getChild<LLSliderCtrl>("jingle_level")->setCommitCallback([this](LLUICtrl* c, const LLSD&)
-    {
-        WolfDJMixer::instance().mJingleLevel = (F32)c->getValue().asReal();
-        saveLevels();
-    });
-    mMaster.mFader = getChild<LLSliderCtrl>("fader_master");
-    mMaster.mCue = getChild<LLButton>("cue_master");
-    mMaster.mMeter = getChild<LLView>("meter_master");
-    mMaster.mDb = getChild<LLTextBox>("db_master");
-    mMaster.mFader->setCommitCallback([this](LLUICtrl* c, const LLSD&) { WolfDJMixer::instance().mMasterFader = (F32)c->getValue().asReal(); saveLevels(); });
-    mMaster.mCue->setCommitCallback([this](LLUICtrl*, const LLSD&) { onCue(CUE_MASTER); });
 
     getChild<LLCheckBoxCtrl>("talk_over")->setCommitCallback([](LLUICtrl* c, const LLSD&)
     {
@@ -195,6 +160,10 @@ bool WolfFloaterDJ::postBuild()
     {
         LLComboBox* combo = getChild<LLComboBox>(std::string("source_") + STRIP_KEYS[ch]);
         mSources[ch - CH_MUSIC_A] = combo;
+        // On the desk, in the slot its strip leaves for it (the desk sits at the panel's origin).
+        LLRect r = mDesk->sourceRect(ch);
+        r.translate(mDesk->getRect().mLeft, mDesk->getRect().mBottom);
+        combo->setShape(r);
         combo->setCommitCallback([this, ch](LLUICtrl*, const LLSD&) { onSource(ch); });
         // Paul: "a refresh button for music sources" - and the list refreshes itself every time
         // it is opened (LLComboBox::onButtonMouseDown calls prearrangeList before showing it).
@@ -215,8 +184,6 @@ bool WolfFloaterDJ::postBuild()
     mTitle = getChild<LLLineEditor>("now_title");
     mLiveBtn = getChild<LLButton>("go_live");
     mStatus = getChild<LLTextBox>("status_text");
-    mVoiceNote = getChild<LLTextBox>("voice_note");
-    mStripsScroll = getChild<LLScrollContainer>("strips_scroll");
 
     mUrl->setCommitCallback([](LLUICtrl* c, const LLSD&) { gSavedPerAccountSettings.setString("WolfDJStreamURL", c->getValue().asString()); });
     mStation->setCommitCallback([](LLUICtrl* c, const LLSD&) { gSavedPerAccountSettings.setString("WolfDJStationName", c->getValue().asString()); });
@@ -244,6 +211,7 @@ void WolfFloaterDJ::onOpen(const LLSD& key)
 {
     LLFloater::onOpen(key);
     WolfDJMixer& mix = WolfDJMixer::instance();
+    mix.setWindowOpen(true);
     mix.startEngine();
     loadLevels();
 
@@ -292,6 +260,18 @@ void WolfFloaterDJ::onOpen(const LLSD& key)
             mix.setCapture(CH_MUSIC_A, wolfdj_open_playlist_stream(&mix.channel(CH_MUSIC_A)), WOLFDJ_PLAYLIST_ID);
         }
     }
+    // [WOLF DJ 2026-10-10] MON is per channel now. A channel with no MON saved yet takes the old
+    // playlist "Hear it myself" setting if it has the playlist.
+    const LLSD saved = gSavedSettings.getLLSD("WolfDJLevels");
+    for (int ch = CH_MUSIC_A; ch < CH_COUNT; ++ch)
+    {
+        const bool has_mon = saved.has(STRIP_KEYS[ch]) && saved[STRIP_KEYS[ch]].has("mon");
+        if (!has_mon && mix.captureId(ch) == WOLFDJ_PLAYLIST_ID)
+        {
+            mix.channel(ch).mMonitor = gSavedSettings.getBOOL("WolfDJPlaylistMonitor");
+        }
+    }
+    WolfDJPlayer::instance().loadSaved();
     refreshApps();
     mClock.reset();
 }
@@ -299,6 +279,7 @@ void WolfFloaterDJ::onOpen(const LLSD& key)
 void WolfFloaterDJ::onClose(bool app_quitting)
 {
     WolfDJMixer& mix = WolfDJMixer::instance();
+    mix.setWindowOpen(false);
     // The password field may still have focus (its commit fires on focus loss / Enter).
     save_password(mPassword->getValue().asString());
     if (app_quitting)
@@ -307,13 +288,22 @@ void WolfFloaterDJ::onClose(bool app_quitting)
     }
     if (!mix.isLiveRequested())
     {
-        // Not on air: nothing should keep listening to the mic or to other programs.
+        // Not on air: nothing should keep listening to the mic or to other programs. [10-10] A
+        // playlist that is playing carries on (and the engine with it, so the DJ still hears it
+        // through MON): closing the mixer used to silence it (Paul: "stop it from not playing").
+        const bool playlist_on = WolfDJPlayer::instance().isPlaying();
         for (int ch = 0; ch < CH_COUNT; ++ch)
         {
-            mix.setCapture(ch, nullptr, std::string());
+            if (!(playlist_on && mix.captureId(ch) == WOLFDJ_PLAYLIST_ID))
+            {
+                mix.setCapture(ch, nullptr, std::string());
+            }
         }
         mix.mCue = CUE_NONE;
-        mix.stopEngineIfIdle();
+        if (!playlist_on)
+        {
+            mix.stopEngineIfIdle();
+        }
     }
 }
 
@@ -381,6 +371,8 @@ void WolfFloaterDJ::onSource(int ch)
             }
         }
         mix.setCapture(ch, wolfdj_open_playlist_stream(&mix.channel(ch)), id);
+        mix.channel(ch).mMonitor = true;    // the playlist is only heard through MON
+        saveLevels();
         return;
     }
     std::string err;
@@ -395,12 +387,9 @@ void WolfFloaterDJ::onSource(int ch)
         return;
     }
     mix.setCapture(ch, std::move(cap), id);
-}
-
-void WolfFloaterDJ::onCue(int ch)
-{
-    WolfDJMixer& mix = WolfDJMixer::instance();
-    mix.mCue = (mix.mCue.load() == ch) ? CUE_NONE : ch;
+    // Another program already plays through the DJ's speakers: MON would play it twice.
+    mix.channel(ch).mMonitor = false;
+    saveLevels();
 }
 
 bool WolfFloaterDJ::parseStreamUrl(const std::string& url_in, WolfDJMixer::StreamConfig& cfg, std::string& err) const
@@ -558,10 +547,17 @@ void WolfFloaterDJ::saveLevels()
         s["mute"] = c.mMute.load();
         s["fx"] = c.mFx.load();
         s["fx_amount"] = c.mFxAmount.load();
+        s["mon"] = c.mMonitor.load();
         levels[STRIP_KEYS[ch]] = s;
     }
-    levels["master"] = mix.mMasterFader.load();
+    // [WOLF DJ 2026-10-10] Fader positions on the desk scale (law 2, wolfdj_fader_db); a stereo
+    // master; the jingle strip's MON.
+    levels["law"] = 2;
+    levels["master_l"] = mix.mMasterFaderL.load();
+    levels["master_r"] = mix.mMasterFaderR.load();
+    levels["master_link"] = mDesk->masterLinked();
     levels["jingle"] = mix.mJingleLevel.load();
+    levels["jingle_mon"] = mix.mJingleMonitor.load();
     gSavedSettings.setLLSD("WolfDJLevels", levels);
 }
 
@@ -569,42 +565,51 @@ void WolfFloaterDJ::loadLevels()
 {
     WolfDJMixer& mix = WolfDJMixer::instance();
     const LLSD levels = gSavedSettings.getLLSD("WolfDJLevels");
+    // Levels saved before the desk (10-10) were on the old fader law: the same gain, moved to
+    // where it sits on the desk scale.
+    const bool old_law = levels.isMap() && !levels.has("law");
+    auto fader = [old_law](const LLSD& v) { const float f = llclamp((F32)v.asReal(), 0.f, 1.f); return old_law ? wolfdj_old_fader_to_pos(f) : f; };
     for (int ch = 0; ch < CH_COUNT; ++ch)
     {
         WolfDJChannel& c = mix.channel(ch);
         const LLSD s = levels.has(STRIP_KEYS[ch]) ? levels[STRIP_KEYS[ch]] : LLSD();
         if (s.isMap())
         {
-            c.mFader = (F32)s["fader"].asReal();
-            c.mEqHighDb = (F32)s["high"].asReal();
-            c.mEqMidDb = (F32)s["mid"].asReal();
-            c.mEqLowDb = (F32)s["low"].asReal();
+            c.mFader = fader(s["fader"]);
+            c.mEqHighDb = llclamp((F32)s["high"].asReal(), EQ_MIN_DB, EQ_MAX_DB);
+            c.mEqMidDb = llclamp((F32)s["mid"].asReal(), EQ_MIN_DB, EQ_MAX_DB);
+            c.mEqLowDb = llclamp((F32)s["low"].asReal(), EQ_MIN_DB, EQ_MAX_DB);
             c.mMute = s["mute"].asBoolean();
             if (s.has("fx"))
             {
                 c.mFx = llclamp(s["fx"].asInteger(), (S32)FX_NONE, (S32)FX_COUNT - 1);
                 c.mFxAmount = llclamp((F32)s["fx_amount"].asReal(), 0.f, 1.f);
             }
+            if (s.has("mon"))
+            {
+                c.mMonitor = s["mon"].asBoolean();
+            }
         }
-        Strip& st = mStrips[ch];
-        st.mFader->setValue(c.mFader.load());
-        st.mEqHigh->setValue(c.mEqHighDb.load());
-        st.mEqMid->setValue(c.mEqMidDb.load());
-        st.mEqLow->setValue(c.mEqLowDb.load());
-        st.mMute->setValue(c.mMute.load());
-        st.mFx->setValue(c.mFx.load());
-        st.mFxAmount->setValue(c.mFxAmount.load());
     }
     if (levels.has("jingle"))
     {
-        mix.mJingleLevel = llclamp((F32)levels["jingle"].asReal(), 0.f, 1.f);
+        mix.mJingleLevel = fader(levels["jingle"]);
     }
-    getChild<LLSliderCtrl>("jingle_level")->setValue(mix.mJingleLevel.load());
-    if (levels.has("master"))
+    if (levels.has("jingle_mon"))
     {
-        mix.mMasterFader = (F32)levels["master"].asReal();
+        mix.mJingleMonitor = levels["jingle_mon"].asBoolean();
     }
-    mMaster.mFader->setValue(mix.mMasterFader.load());
+    if (levels.has("master_l"))
+    {
+        mix.mMasterFaderL = fader(levels["master_l"]);
+        mix.mMasterFaderR = fader(levels["master_r"]);
+        mDesk->setMasterLinked(levels["master_link"].asBoolean());
+    }
+    else if (levels.has("master"))
+    {
+        mix.mMasterFaderL = fader(levels["master"]);    // one master fader before 10-10
+        mix.mMasterFaderR = mix.mMasterFaderL.load();
+    }
 }
 
 void WolfFloaterDJ::onGridStream(bool new_password)
@@ -874,17 +879,23 @@ void WolfFloaterDJ::updateStatus()
         mTitle->setValue(title);
     }
 
-    // In-world voice is only there while voice is connected.
-    const bool voice_signal = mix.channel(CH_VOICE).mPrePeak.load() > 0.f;
-    mVoiceNote->setText(voice_signal ? std::string() : std::string("Voice: what you hear in voice chat"));
-
-    // Cue buttons show which one is on.
-    const int cue = mix.mCue.load();
-    for (int ch = 0; ch < CH_COUNT; ++ch)
+    // [WOLF DJ 2026-10-10] The playlist can put itself on a channel when play is pressed
+    // (WolfDJPlayer::routeToMixer): keep the source lists showing what each channel really has.
+    for (int ch = CH_MUSIC_A; ch < CH_COUNT; ++ch)
     {
-        mStrips[ch].mCue->setToggleState(cue == ch);
+        LLComboBox* combo = sourceCombo(ch);
+        const std::string& id = mix.captureId(ch);
+        if (combo->getValue().asString() != id && !combo->hasFocus())
+        {
+            if (!combo->setSelectedByValue(LLSD(id), true))
+            {
+                std::vector<WolfDJApp> apps;
+                std::string why;
+                WolfDJCapture::listApps(apps, why);
+                fillSources(combo, ch, apps);
+            }
+        }
     }
-    mMaster.mCue->setToggleState(cue == CUE_MASTER);
 
     // A program that has gone (closed, or its sound stream ended).
     for (int ch = CH_MUSIC_A; ch < CH_COUNT; ++ch)
@@ -898,71 +909,11 @@ void WolfFloaterDJ::updateStatus()
     }
 }
 
-// LED meter: 12 segments from -48 dBFS to 0 dBFS (green to -12, amber to -3, red above), plus a
-// clip LED that stays lit 2 s after a peak at full scale. Falls at 24 dB a second.
-void WolfFloaterDJ::drawMeter(LLView* meter, float peak, float& shown_db, float& clip_until)
-{
-    static const float SEG_DB[12] = { -48.f, -42.f, -36.f, -30.f, -24.f, -18.f, -12.f, -9.f, -6.f, -3.f, -1.5f, -0.5f };
-    const float now = mClock.getElapsedTimeF32();
-    const float db = wolfdj_lin_to_db(peak);
-    const float dt = llclamp(LLFrameTimer::getFrameDeltaTimeF32(), 0.f, 0.25f);
-    shown_db = std::max(db, shown_db - 24.f * dt);
-    if (peak >= 0.99f) clip_until = now + 2.f;
-
-    // The meter lives in the scrolled strips panel: its rect in this floater's coordinates.
-    LLRect r;
-    meter->localRectToOtherView(meter->getLocalRect(), &r, this);
-    const S32 segs = 13;    // 12 level LEDs + the clip LED on top
-    const S32 gap = 2;
-    const S32 seg_h = std::max(2, (r.getHeight() - gap * (segs - 1)) / segs);
-    gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
-    for (S32 i = 0; i < segs; ++i)
-    {
-        const S32 bottom = r.mBottom + i * (seg_h + gap);
-        LLColor4 on, off;
-        bool lit;
-        if (i == segs - 1)
-        {
-            on = LLColor4(1.f, 0.1f, 0.1f, 1.f);
-            lit = now < clip_until;
-        }
-        else
-        {
-            if (SEG_DB[i] < -12.f) on = LLColor4(0.15f, 0.9f, 0.25f, 1.f);
-            else if (SEG_DB[i] < -3.f) on = LLColor4(1.f, 0.75f, 0.1f, 1.f);
-            else on = LLColor4(1.f, 0.2f, 0.15f, 1.f);
-            lit = shown_db >= SEG_DB[i];
-        }
-        off = LLColor4(on.mV[VRED] * 0.18f, on.mV[VGREEN] * 0.18f, on.mV[VBLUE] * 0.18f, 1.f);
-        gl_rect_2d(r.mLeft, bottom + seg_h, r.mRight, bottom, lit ? on : off, true);
-    }
-}
-
 void WolfFloaterDJ::draw()
 {
     updateStatus();
-    WolfDJMixer& mix = WolfDJMixer::instance();
-    for (int ch = 0; ch < CH_COUNT; ++ch)
-    {
-        const WolfDJChannel& c = mix.channel(ch);
-        mStrips[ch].mDb->setText(c.mMute ? std::string("muted") : llformat("%+.0f dB", wolfdj_lin_to_db(wolfdj_fader_gain(c.mFader))));
-    }
-    const float lim = mix.mLimiterDb.load();
-    mMaster.mDb->setText(lim < -0.5f ? llformat("limit %.0f dB", lim) : llformat("%+.0f dB", wolfdj_lin_to_db(wolfdj_fader_gain(mix.mMasterFader))));
     updatePads();
     LLFloater::draw();
-    if (isMinimized()) return;
-
-    // LEDs only inside the visible part of the scrolled strips.
-    LLRect window;
-    mStripsScroll->localRectToOtherView(mStripsScroll->getContentWindowRect(), &window, this);
-    LLLocalClipRect clip(window);
-    for (int ch = 0; ch < CH_COUNT; ++ch)
-    {
-        Strip& s = mStrips[ch];
-        drawMeter(s.mMeter, mix.channel(ch).mPeak.load(), s.mShownDb, s.mClipUntil);
-    }
-    drawMeter(mMaster.mMeter, mix.mMasterPeak.load(), mMaster.mShownDb, mMaster.mClipUntil);
 }
 
 // [WOLF DJ 2026-10-05] Each pad shows its file's name (set from the Playlist window) and stays

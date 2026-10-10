@@ -59,6 +59,16 @@ public:
     bool loaded() const { return mLoaded; }
     /** The airport on this region (name, any case), or nullptr. */
     const Airport* forRegion(const std::string& region) const;
+    // <WolfViewer 2026-10-10> Paul: "users should be able to search for airports ... by airport name ... it looks
+    // up the airport in our database and then gets them to the right place on the region". Every airport whose
+    // name or region holds the text (any case, accents ignored): names starting with it first, then a word
+    // starting with it, then anywhere; nearest first within each. And one by its directory id.
+    std::vector<const Airport*> search(const std::string& text, const LLVector3d& from) const;
+    const Airport* byId(S32 id) const;
+    const std::vector<Airport>& all() const { return mAirports; }   // <WolfViewer 2026-10-10/> the Airports window
+    /** Plain lower-case ASCII for matching and for the flight computer's screen: accents dropped. */
+    static std::string fold(const std::string& utf8);
+    // </WolfViewer>
     /** Look for the runway round an airport among the objects the viewer has. Invalid if none. */
     static Runway findRunway(const Airport& airport);
 

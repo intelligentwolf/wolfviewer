@@ -1221,129 +1221,15 @@
              function="Floater.CanShow"
              parameter="region_info" />
         </menu_item_call>
-        <!-- [LAG DETECTOR 2026-09-29] wolffloaterlagdetector.cpp: what on this region is slowing it
-             down that its owner can fix (runaway scripts, heavy scripts, physics hogs). Works only
-             while open. Always offered: estate managers see the region, parcel owners their parcel,
-             and the window says so when neither applies. -->
-        <menu_item_call
-         label="Lag Detector..."
-         name="WolfLagDetector">
-            <menu_item_call.on_click
-             function="Floater.Show"
-             parameter="wolf_lag_detector" />
-        </menu_item_call>
-        <!-- [WOLF GAME 2026-10-09] wolffloaterroleplay.cpp: Wolf Roleplay - your stats, money, level,
-             the game's panel and buttons, items, pets, Leave game; and the region's game
-             (VIEWER_SPEC.md §3.3). -->
-        <!-- [WOLF GAME 2026-10-09] The Game Mode switch (§3.2, off by default), the same one as the
-             toolbar's Game Mode button and the switch at the top of the Roleplay floater. -->
-        <menu_item_check
-         label="Game Mode"
-         name="WolfGameMode">
-            <menu_item_check.on_check
-             function="WolfGame.IsGameMode" />
-            <menu_item_check.on_click
-             function="WolfGame.ToggleGameMode" />
-            <!-- [FORCED 2026-10-09] greyed (and labelled with the reason) while the region
-                 requires Game Mode: wolfgame.cpp updateGameModeButtons -->
-            <menu_item_check.on_enable
-             function="WolfGame.CanSwitch" />
-            <!-- [WOLF GRID GATE 2026-10-09] gone (not greyed) off Wolf Territories -->
-            <menu_item_check.on_visible
-             function="WolfGrid.IsOnWolfTerritories" />
-        </menu_item_check>
-        <menu_item_check
-         label="Roleplay"
-         name="WolfRoleplay">
-            <menu_item_check.on_check
-             function="Floater.Visible"
-             parameter="wolf_roleplay" />
-            <menu_item_check.on_click
-             function="Floater.Toggle"
-             parameter="wolf_roleplay" />
-            <!-- [WOLF GRID GATE 2026-10-09] gone (not greyed) off Wolf Territories -->
-            <menu_item_check.on_visible
-             function="WolfGrid.IsOnWolfTerritories" />
-        </menu_item_check>
-        <!-- [WOLF DJ 2026-10-04] wolffloaterdj.cpp: a mini mixer (in-world voice, mic, programs,
-             the Wolf DJ playlist) to the region owner's own radio stream. -->
-        <menu_item_call
-         label="Wolf DJ / Talk Show..."
-         name="WolfDJ">
-            <menu_item_call.on_click
-             function="Floater.Show"
-             parameter="wolf_dj" />
-        </menu_item_call>
-        <!-- [ASTRONOMY 2026-10-03] Paul: "show atronomy, where it would show and label the star groups
-             like orion". Constellation figures and names over the real star map (llvowlsky.cpp), on
-             regions following a real place (Jimmy's Weather). -->
-        <menu_item_check
-         label="Show Astronomy"
-         name="WolfShowAstronomy">
-            <menu_item_check.on_check
-             function="CheckControl"
-             parameter="WolfShowAstronomy" />
-            <menu_item_check.on_click
-             function="ToggleControl"
-             parameter="WolfShowAstronomy" />
-        </menu_item_check>
-        <!-- [WOLF DRIVE 2026-10-09] wolfdrive.cpp / wolfdashboard.cpp: the car / truck / bike dashboard
-             and Driving Controls for a wheel, pedals or gamepad. Both Wolf Territories only, gone (not
-             greyed) elsewhere: Paul, "other grids can't use these interfaces they are only for wolf". -->
-        <menu_item_check
-         label="Car Dashboard"
-         name="WolfDashboardMode">
-            <menu_item_check.on_check
-             function="CheckControl"
-             parameter="WolfDashboardMode" />
-            <menu_item_check.on_click
-             function="ToggleControl"
-             parameter="WolfDashboardMode" />
-            <menu_item_check.on_visible
-             function="WolfGrid.IsOnWolfTerritories" />
-        </menu_item_check>
-        <menu_item_check
-         label="Driving Controls..."
-         name="WolfDriveControls">
-            <menu_item_check.on_check
-             function="Floater.Visible"
-             parameter="wolf_drive_controls" />
-            <menu_item_check.on_click
-             function="Floater.Toggle"
-             parameter="wolf_drive_controls" />
-            <menu_item_check.on_visible
-             function="WolfGrid.IsOnWolfTerritories" />
-        </menu_item_check>
-        <!-- [FLIGHT MODE 2026-10-06] wolfflight.cpp / wolfflightdeck.cpp: Paul, "World, Flight Mode,
-             adds a flight control interface for flying planes including an AUTOPILOT". The flight
-             deck across the bottom of the screen; the bottom toolbar folds away (its arrow brings it
-             back). -->
-        <menu_item_check
-         label="Flight Mode"
-         name="WolfFlightMode">
-            <menu_item_check.on_check
-             function="CheckControl"
-             parameter="WolfFlightMode" />
-            <menu_item_check.on_click
-             function="ToggleControl"
-             parameter="WolfFlightMode" />
-            <menu_item_check.on_visible
-             function="WolfGrid.IsWolfTerritories" />
-        </menu_item_check>
-        <!-- [SAILING MODE 2026-10-06] Paul: "can we add a sailing one as well — World, Sailing Mode".
-             The same deck with marine instruments and the sailing autopilot (wolfflight.cpp). -->
-        <menu_item_check
-         label="Sailing Mode"
-         name="WolfSailMode">
-            <menu_item_check.on_check
-             function="CheckControl"
-             parameter="WolfSailMode" />
-            <menu_item_check.on_click
-             function="ToggleControl"
-             parameter="WolfSailMode" />
-            <menu_item_check.on_visible
-             function="WolfGrid.IsWolfTerritories" />
-        </menu_item_check>
+
+
+
+
+
+
+
+
+
         <menu_item_call
              label="Set Home to Here"
              name="Set Home to Here">
@@ -1530,242 +1416,9 @@
         </menu_item_check>
         <menu_item_separator/>-->
 
-      <!-- WolfViewer 2026-09-18 / PAINTERS 2026-09-20: World > Photo Effects… opens the floater
-           (floater_wolf_photo_effects.xml: a tile per style, strength slider). The WolfPhoto.*
-           listeners in llviewermenu.cpp stay for keybindings; the submenu they served is gone. -->
-      <menu_item_check
-       label="Photo Effects..."
-       name="WolfPhotoEffects">
-        <menu_item_check.on_check
-         function="Floater.Visible"
-         parameter="wolf_photo_effects" />
-        <menu_item_check.on_click
-         function="Floater.Toggle"
-         parameter="wolf_photo_effects" />
-      </menu_item_check>
 
-      <!-- WolfViewer 2026-09-10: World > Weather (wolfweather.cpp). Rain and snow the user
-           turns on and off; a parcel whose prims say "wolfrain" / "wolfsnow" overrides it. -->
-      <menu
-         create_jump_keys="true"
-         label="Weather"
-         name="WolfWeather"
-         tear_off="true">
-        <menu_item_check
-         label="Weather"
-         name="WolfWeatherEnabled">
-          <on_check
-           function="WolfWeather.IsEnabled" />
-          <on_click
-           function="WolfWeather.ToggleEnabled" />
-        </menu_item_check>
-        <menu_item_separator/>
-        <menu_item_check
-         label="Rain"
-         name="WolfWeatherRain">
-          <menu_item_check.on_check
-           function="WolfWeather.IsOn"
-           parameter="rain" />
-          <menu_item_check.on_click
-           function="WolfWeather.Toggle"
-           parameter="rain" />
-        </menu_item_check>
-        <menu_item_check
-         label="Snow"
-         name="WolfWeatherSnow">
-          <menu_item_check.on_check
-           function="WolfWeather.IsOn"
-           parameter="snow" />
-          <menu_item_check.on_click
-           function="WolfWeather.Toggle"
-           parameter="snow" />
-        </menu_item_check>
-        <menu_item_separator />
-        <menu_item_call
-         label="Clear Weather"
-         name="WolfWeatherClear">
-          <menu_item_call.on_click
-           function="WolfWeather.Clear" />
-        </menu_item_call>
-        <menu_item_separator />
-        <menu_item_check
-         label="Rain: Light"
-         name="WolfWeatherRain1">
-          <menu_item_check.on_check
-           function="WolfWeather.IsLevel"
-           parameter="rain1" />
-          <menu_item_check.on_click
-           function="WolfWeather.SetLevel"
-           parameter="rain1" />
-        </menu_item_check>
-        <menu_item_check
-         label="Rain: Moderate"
-         name="WolfWeatherRain2">
-          <menu_item_check.on_check
-           function="WolfWeather.IsLevel"
-           parameter="rain2" />
-          <menu_item_check.on_click
-           function="WolfWeather.SetLevel"
-           parameter="rain2" />
-        </menu_item_check>
-        <menu_item_check
-         label="Rain: Heavy"
-         name="WolfWeatherRain3">
-          <menu_item_check.on_check
-           function="WolfWeather.IsLevel"
-           parameter="rain3" />
-          <menu_item_check.on_click
-           function="WolfWeather.SetLevel"
-           parameter="rain3" />
-        </menu_item_check>
-        <menu_item_check
-         label="Rain: Torrential"
-         name="WolfWeatherRain4">
-          <menu_item_check.on_check
-           function="WolfWeather.IsLevel"
-           parameter="rain4" />
-          <menu_item_check.on_click
-           function="WolfWeather.SetLevel"
-           parameter="rain4" />
-        </menu_item_check>
-        <menu_item_separator />
-        <menu_item_check
-         label="Snow: Light"
-         name="WolfWeatherSnow1">
-          <menu_item_check.on_check
-           function="WolfWeather.IsLevel"
-           parameter="snow1" />
-          <menu_item_check.on_click
-           function="WolfWeather.SetLevel"
-           parameter="snow1" />
-        </menu_item_check>
-        <menu_item_check
-         label="Snow: Moderate"
-         name="WolfWeatherSnow2">
-          <menu_item_check.on_check
-           function="WolfWeather.IsLevel"
-           parameter="snow2" />
-          <menu_item_check.on_click
-           function="WolfWeather.SetLevel"
-           parameter="snow2" />
-        </menu_item_check>
-        <menu_item_check
-         label="Snow: Heavy"
-         name="WolfWeatherSnow3">
-          <menu_item_check.on_check
-           function="WolfWeather.IsLevel"
-           parameter="snow3" />
-          <menu_item_check.on_click
-           function="WolfWeather.SetLevel"
-           parameter="snow3" />
-        </menu_item_check>
-        <menu_item_check
-         label="Snow: Blizzard"
-         name="WolfWeatherSnow4">
-          <menu_item_check.on_check
-           function="WolfWeather.IsLevel"
-           parameter="snow4" />
-          <menu_item_check.on_click
-           function="WolfWeather.SetLevel"
-           parameter="snow4" />
-        </menu_item_check>
-        <menu_item_separator />
-        <!-- WolfViewer 2026-09-18: your own fog, with rain, snow or on its own. The parameter is
-             the fog percent; the five steps are weather_profile.js FOG_LEVELS. The tick shows the
-             fog actually in the air, so a region's or a parcel's fog shows here too. -->
-        <menu_item_check
-         label="Fog: Off"
-         name="WolfWeatherFog0">
-          <menu_item_check.on_check
-           function="WolfWeather.IsFog"
-           parameter="0" />
-          <menu_item_check.on_click
-           function="WolfWeather.SetFog"
-           parameter="0" />
-        </menu_item_check>
-        <menu_item_check
-         label="Fog: Light"
-         name="WolfWeatherFog25">
-          <menu_item_check.on_check
-           function="WolfWeather.IsFog"
-           parameter="25" />
-          <menu_item_check.on_click
-           function="WolfWeather.SetFog"
-           parameter="25" />
-        </menu_item_check>
-        <menu_item_check
-         label="Fog: Moderate"
-         name="WolfWeatherFog50">
-          <menu_item_check.on_check
-           function="WolfWeather.IsFog"
-           parameter="50" />
-          <menu_item_check.on_click
-           function="WolfWeather.SetFog"
-           parameter="50" />
-        </menu_item_check>
-        <menu_item_check
-         label="Fog: Heavy"
-         name="WolfWeatherFog75">
-          <menu_item_check.on_check
-           function="WolfWeather.IsFog"
-           parameter="75" />
-          <menu_item_check.on_click
-           function="WolfWeather.SetFog"
-           parameter="75" />
-        </menu_item_check>
-        <menu_item_check
-         label="Fog: Dense"
-         name="WolfWeatherFog100">
-          <menu_item_check.on_check
-           function="WolfWeather.IsFog"
-           parameter="100" />
-          <menu_item_check.on_click
-           function="WolfWeather.SetFog"
-           parameter="100" />
-        </menu_item_check>
-        <menu_item_separator />
-        <!-- WolfViewer 2026-09-18: the northern lights, night only. weather_profile.js AURORA_LEVELS. -->
-        <menu_item_check
-         label="Northern Lights: Off"
-         name="WolfWeatherAurora0">
-          <menu_item_check.on_check
-           function="WolfWeather.IsAurora"
-           parameter="0" />
-          <menu_item_check.on_click
-           function="WolfWeather.SetAurora"
-           parameter="0" />
-        </menu_item_check>
-        <menu_item_check
-         label="Northern Lights: Faint"
-         name="WolfWeatherAurora35">
-          <menu_item_check.on_check
-           function="WolfWeather.IsAurora"
-           parameter="35" />
-          <menu_item_check.on_click
-           function="WolfWeather.SetAurora"
-           parameter="35" />
-        </menu_item_check>
-        <menu_item_check
-         label="Northern Lights: Bright"
-         name="WolfWeatherAurora70">
-          <menu_item_check.on_check
-           function="WolfWeather.IsAurora"
-           parameter="70" />
-          <menu_item_check.on_click
-           function="WolfWeather.SetAurora"
-           parameter="70" />
-        </menu_item_check>
-        <menu_item_check
-         label="Northern Lights: Storm"
-         name="WolfWeatherAurora100">
-          <menu_item_check.on_check
-           function="WolfWeather.IsAurora"
-           parameter="100" />
-          <menu_item_check.on_click
-           function="WolfWeather.SetAurora"
-           parameter="100" />
-        </menu_item_check>
-      </menu>
+
+
       <menu
          create_jump_keys="true"
          label="Environment"
@@ -2143,6 +1796,449 @@
           function="CheckPerAccountControl"
           parameter="FSRenderFriendsOnly"/>
       </menu_item_check>
+    </menu>
+    <!-- [WOLF WORLD 2026-10-10] Paul: "i think we need to split world into another menu its getting crazy
+         long perhaps wolfworld with all the wolf functions on one menu and world just shows the other".
+         Every Wolf function from World, plus the new ones. Each Wolf-only item keeps its own
+         WolfGrid.IsOnWolfTerritories gate, so off Wolf this menu shows only what works on any grid (the
+         Lag Detector, Photo Effects, weather, astronomy, the effect switches). -->
+    <menu
+     create_jump_keys="true"
+     label="Wolf World"
+     name="WolfWorld"
+     tear_off="true">
+        <!-- [LAG DETECTOR 2026-09-29] wolffloaterlagdetector.cpp: what on this region is slowing it
+             down that its owner can fix (runaway scripts, heavy scripts, physics hogs). Works only
+             while open. Always offered: estate managers see the region, parcel owners their parcel,
+             and the window says so when neither applies. -->
+        <menu_item_call
+         label="Lag Detector..."
+         name="WolfLagDetector">
+            <menu_item_call.on_click
+             function="Floater.Show"
+             parameter="wolf_lag_detector" />
+        </menu_item_call>
+        <!-- [WOLF GAME 2026-10-09] wolffloaterroleplay.cpp: Wolf Roleplay - your stats, money, level,
+             the game's panel and buttons, items, pets, Leave game; and the region's game
+             (VIEWER_SPEC.md §3.3). -->
+        <!-- [WOLF GAME 2026-10-09] The Game Mode switch (§3.2, off by default), the same one as the
+             toolbar's Game Mode button and the switch at the top of the Roleplay floater. -->
+        <menu_item_check
+         label="Game Mode"
+         name="WolfGameMode">
+            <menu_item_check.on_check
+             function="WolfGame.IsGameMode" />
+            <menu_item_check.on_click
+             function="WolfGame.ToggleGameMode" />
+            <!-- [FORCED 2026-10-09] greyed (and labelled with the reason) while the region
+                 requires Game Mode: wolfgame.cpp updateGameModeButtons -->
+            <menu_item_check.on_enable
+             function="WolfGame.CanSwitch" />
+            <!-- [WOLF GRID GATE 2026-10-09] gone (not greyed) off Wolf Territories -->
+            <menu_item_check.on_visible
+             function="WolfGrid.IsOnWolfTerritories" />
+        </menu_item_check>
+        <menu_item_check
+         label="Roleplay"
+         name="WolfRoleplay">
+            <menu_item_check.on_check
+             function="Floater.Visible"
+             parameter="wolf_roleplay" />
+            <menu_item_check.on_click
+             function="Floater.Toggle"
+             parameter="wolf_roleplay" />
+            <!-- [WOLF GRID GATE 2026-10-09] gone (not greyed) off Wolf Territories -->
+            <menu_item_check.on_visible
+             function="WolfGrid.IsOnWolfTerritories" />
+        </menu_item_check>
+        <!-- [WOLF DJ 2026-10-04] wolffloaterdj.cpp: a mini mixer (in-world voice, mic, programs,
+             the Wolf DJ playlist) to the region owner's own radio stream. -->
+        <menu_item_call
+         label="Wolf DJ / Talk Show..."
+         name="WolfDJ">
+            <menu_item_call.on_click
+             function="Floater.Show"
+             parameter="wolf_dj" />
+        </menu_item_call>
+        <!-- [ASTRONOMY 2026-10-03] Paul: "show atronomy, where it would show and label the star groups
+             like orion". Constellation figures and names over the real star map (llvowlsky.cpp), on
+             regions following a real place (Jimmy's Weather). -->
+        <menu_item_check
+         label="Show Astronomy"
+         name="WolfShowAstronomy">
+            <menu_item_check.on_check
+             function="CheckControl"
+             parameter="WolfShowAstronomy" />
+            <menu_item_check.on_click
+             function="ToggleControl"
+             parameter="WolfShowAstronomy" />
+        </menu_item_check>
+        <!-- [AIRPORTS 2026-10-10] wolffloaterairports.cpp: find an airport (or type a region) and fly there. The
+             directory is Wolf Territories', so the item is too. -->
+        <menu_item_call
+         label="Airports..."
+         name="WolfAirports">
+            <menu_item_call.on_click
+             function="Floater.Toggle"
+             parameter="wolf_airports" />
+            <menu_item_call.on_visible
+             function="WolfGrid.IsOnWolfTerritories" />
+        </menu_item_call>
+        <!-- [SPAN SCREENS 2026-10-10] wolfspanscreens.cpp: Paul, "an option to make the viewer spread
+             across all available screens" - every grid, every system ("make sure everyone gets the
+             feature"). Remembered (WolfSpanAllScreens) and put back at the next start. -->
+        <menu_item_check
+         label="Spread Across All Screens"
+         name="WolfSpanAllScreens">
+            <menu_item_check.on_check
+             function="Wolf.SpanScreensOn" />
+            <menu_item_check.on_click
+             function="Wolf.SpanScreensToggle" />
+        </menu_item_check>
+        <!-- [WOLF DRIVE 2026-10-09] wolfdrive.cpp / wolfdashboard.cpp: the car / truck / bike dashboard
+             and Driving Controls for a wheel, pedals or gamepad. Both Wolf Territories only, gone (not
+             greyed) elsewhere: Paul, "other grids can't use these interfaces they are only for wolf". -->
+        <menu_item_check
+         label="Car Dashboard"
+         name="WolfDashboardMode">
+            <menu_item_check.on_check
+             function="CheckControl"
+             parameter="WolfDashboardMode" />
+            <menu_item_check.on_click
+             function="ToggleControl"
+             parameter="WolfDashboardMode" />
+            <menu_item_check.on_visible
+             function="WolfGrid.IsOnWolfTerritories" />
+        </menu_item_check>
+        <menu_item_check
+         label="Driving Controls..."
+         name="WolfDriveControls">
+            <menu_item_check.on_check
+             function="Floater.Visible"
+             parameter="wolf_drive_controls" />
+            <menu_item_check.on_click
+             function="Floater.Toggle"
+             parameter="wolf_drive_controls" />
+            <menu_item_check.on_visible
+             function="WolfGrid.IsOnWolfTerritories" />
+        </menu_item_check>
+        <!-- [FLIGHT MODE 2026-10-06] wolfflight.cpp / wolfflightdeck.cpp: Paul, "World, Flight Mode,
+             adds a flight control interface for flying planes including an AUTOPILOT". The flight
+             deck across the bottom of the screen; the bottom toolbar folds away (its arrow brings it
+             back). -->
+        <menu_item_check
+         label="Flight Mode"
+         name="WolfFlightMode">
+            <menu_item_check.on_check
+             function="CheckControl"
+             parameter="WolfFlightMode" />
+            <menu_item_check.on_click
+             function="ToggleControl"
+             parameter="WolfFlightMode" />
+            <menu_item_check.on_visible
+             function="WolfGrid.IsWolfTerritories" />
+        </menu_item_check>
+        <!-- [SAILING MODE 2026-10-06] Paul: "can we add a sailing one as well — World, Sailing Mode".
+             The same deck with marine instruments and the sailing autopilot (wolfflight.cpp). -->
+        <menu_item_check
+         label="Sailing Mode"
+         name="WolfSailMode">
+            <menu_item_check.on_check
+             function="CheckControl"
+             parameter="WolfSailMode" />
+            <menu_item_check.on_click
+             function="ToggleControl"
+             parameter="WolfSailMode" />
+            <menu_item_check.on_visible
+             function="WolfGrid.IsWolfTerritories" />
+        </menu_item_check>
+      <!-- WolfViewer 2026-09-18 / PAINTERS 2026-09-20: World > Photo Effects… opens the floater
+           (floater_wolf_photo_effects.xml: a tile per style, strength slider). The WolfPhoto.*
+           listeners in llviewermenu.cpp stay for keybindings; the submenu they served is gone. -->
+      <menu_item_check
+       label="Photo Effects..."
+       name="WolfPhotoEffects">
+        <menu_item_check.on_check
+         function="Floater.Visible"
+         parameter="wolf_photo_effects" />
+        <menu_item_check.on_click
+         function="Floater.Toggle"
+         parameter="wolf_photo_effects" />
+      </menu_item_check>
+      <!-- WolfViewer 2026-09-10: World > Weather (wolfweather.cpp). Rain and snow the user
+           turns on and off; a parcel whose prims say "wolfrain" / "wolfsnow" overrides it. -->
+      <menu
+         create_jump_keys="true"
+         label="Weather"
+         name="WolfWeather"
+         tear_off="true">
+        <menu_item_check
+         label="Weather"
+         name="WolfWeatherEnabled">
+          <on_check
+           function="WolfWeather.IsEnabled" />
+          <on_click
+           function="WolfWeather.ToggleEnabled" />
+        </menu_item_check>
+        <menu_item_separator/>
+        <menu_item_check
+         label="Rain"
+         name="WolfWeatherRain">
+          <menu_item_check.on_check
+           function="WolfWeather.IsOn"
+           parameter="rain" />
+          <menu_item_check.on_click
+           function="WolfWeather.Toggle"
+           parameter="rain" />
+        </menu_item_check>
+        <menu_item_check
+         label="Snow"
+         name="WolfWeatherSnow">
+          <menu_item_check.on_check
+           function="WolfWeather.IsOn"
+           parameter="snow" />
+          <menu_item_check.on_click
+           function="WolfWeather.Toggle"
+           parameter="snow" />
+        </menu_item_check>
+        <menu_item_separator />
+        <menu_item_call
+         label="Clear Weather"
+         name="WolfWeatherClear">
+          <menu_item_call.on_click
+           function="WolfWeather.Clear" />
+        </menu_item_call>
+        <menu_item_separator />
+        <menu_item_check
+         label="Rain: Light"
+         name="WolfWeatherRain1">
+          <menu_item_check.on_check
+           function="WolfWeather.IsLevel"
+           parameter="rain1" />
+          <menu_item_check.on_click
+           function="WolfWeather.SetLevel"
+           parameter="rain1" />
+        </menu_item_check>
+        <menu_item_check
+         label="Rain: Moderate"
+         name="WolfWeatherRain2">
+          <menu_item_check.on_check
+           function="WolfWeather.IsLevel"
+           parameter="rain2" />
+          <menu_item_check.on_click
+           function="WolfWeather.SetLevel"
+           parameter="rain2" />
+        </menu_item_check>
+        <menu_item_check
+         label="Rain: Heavy"
+         name="WolfWeatherRain3">
+          <menu_item_check.on_check
+           function="WolfWeather.IsLevel"
+           parameter="rain3" />
+          <menu_item_check.on_click
+           function="WolfWeather.SetLevel"
+           parameter="rain3" />
+        </menu_item_check>
+        <menu_item_check
+         label="Rain: Torrential"
+         name="WolfWeatherRain4">
+          <menu_item_check.on_check
+           function="WolfWeather.IsLevel"
+           parameter="rain4" />
+          <menu_item_check.on_click
+           function="WolfWeather.SetLevel"
+           parameter="rain4" />
+        </menu_item_check>
+        <menu_item_separator />
+        <menu_item_check
+         label="Snow: Light"
+         name="WolfWeatherSnow1">
+          <menu_item_check.on_check
+           function="WolfWeather.IsLevel"
+           parameter="snow1" />
+          <menu_item_check.on_click
+           function="WolfWeather.SetLevel"
+           parameter="snow1" />
+        </menu_item_check>
+        <menu_item_check
+         label="Snow: Moderate"
+         name="WolfWeatherSnow2">
+          <menu_item_check.on_check
+           function="WolfWeather.IsLevel"
+           parameter="snow2" />
+          <menu_item_check.on_click
+           function="WolfWeather.SetLevel"
+           parameter="snow2" />
+        </menu_item_check>
+        <menu_item_check
+         label="Snow: Heavy"
+         name="WolfWeatherSnow3">
+          <menu_item_check.on_check
+           function="WolfWeather.IsLevel"
+           parameter="snow3" />
+          <menu_item_check.on_click
+           function="WolfWeather.SetLevel"
+           parameter="snow3" />
+        </menu_item_check>
+        <menu_item_check
+         label="Snow: Blizzard"
+         name="WolfWeatherSnow4">
+          <menu_item_check.on_check
+           function="WolfWeather.IsLevel"
+           parameter="snow4" />
+          <menu_item_check.on_click
+           function="WolfWeather.SetLevel"
+           parameter="snow4" />
+        </menu_item_check>
+        <menu_item_separator />
+        <!-- WolfViewer 2026-09-18: your own fog, with rain, snow or on its own. The parameter is
+             the fog percent; the five steps are weather_profile.js FOG_LEVELS. The tick shows the
+             fog actually in the air, so a region's or a parcel's fog shows here too. -->
+        <menu_item_check
+         label="Fog: Off"
+         name="WolfWeatherFog0">
+          <menu_item_check.on_check
+           function="WolfWeather.IsFog"
+           parameter="0" />
+          <menu_item_check.on_click
+           function="WolfWeather.SetFog"
+           parameter="0" />
+        </menu_item_check>
+        <menu_item_check
+         label="Fog: Light"
+         name="WolfWeatherFog25">
+          <menu_item_check.on_check
+           function="WolfWeather.IsFog"
+           parameter="25" />
+          <menu_item_check.on_click
+           function="WolfWeather.SetFog"
+           parameter="25" />
+        </menu_item_check>
+        <menu_item_check
+         label="Fog: Moderate"
+         name="WolfWeatherFog50">
+          <menu_item_check.on_check
+           function="WolfWeather.IsFog"
+           parameter="50" />
+          <menu_item_check.on_click
+           function="WolfWeather.SetFog"
+           parameter="50" />
+        </menu_item_check>
+        <menu_item_check
+         label="Fog: Heavy"
+         name="WolfWeatherFog75">
+          <menu_item_check.on_check
+           function="WolfWeather.IsFog"
+           parameter="75" />
+          <menu_item_check.on_click
+           function="WolfWeather.SetFog"
+           parameter="75" />
+        </menu_item_check>
+        <menu_item_check
+         label="Fog: Dense"
+         name="WolfWeatherFog100">
+          <menu_item_check.on_check
+           function="WolfWeather.IsFog"
+           parameter="100" />
+          <menu_item_check.on_click
+           function="WolfWeather.SetFog"
+           parameter="100" />
+        </menu_item_check>
+        <menu_item_separator />
+        <!-- WolfViewer 2026-09-18: the northern lights, night only. weather_profile.js AURORA_LEVELS. -->
+        <menu_item_check
+         label="Northern Lights: Off"
+         name="WolfWeatherAurora0">
+          <menu_item_check.on_check
+           function="WolfWeather.IsAurora"
+           parameter="0" />
+          <menu_item_check.on_click
+           function="WolfWeather.SetAurora"
+           parameter="0" />
+        </menu_item_check>
+        <menu_item_check
+         label="Northern Lights: Faint"
+         name="WolfWeatherAurora35">
+          <menu_item_check.on_check
+           function="WolfWeather.IsAurora"
+           parameter="35" />
+          <menu_item_check.on_click
+           function="WolfWeather.SetAurora"
+           parameter="35" />
+        </menu_item_check>
+        <menu_item_check
+         label="Northern Lights: Bright"
+         name="WolfWeatherAurora70">
+          <menu_item_check.on_check
+           function="WolfWeather.IsAurora"
+           parameter="70" />
+          <menu_item_check.on_click
+           function="WolfWeather.SetAurora"
+           parameter="70" />
+        </menu_item_check>
+        <menu_item_check
+         label="Northern Lights: Storm"
+         name="WolfWeatherAurora100">
+          <menu_item_check.on_check
+           function="WolfWeather.IsAurora"
+           parameter="100" />
+          <menu_item_check.on_click
+           function="WolfWeather.SetAurora"
+           parameter="100" />
+        </menu_item_check>
+      </menu>
+        <!-- [WOLF WORLD 2026-10-10] Jimmy's Weather Report (wolffloaterweatherreport.cpp) -->
+        <menu_item_call
+         label="Jimmy's Weather Report..."
+         name="WolfWeatherReport">
+            <menu_item_call.on_click
+             function="Floater.Show"
+             parameter="wolf_weather_report" />
+            <menu_item_call.on_visible
+             function="WolfGrid.IsOnWolfTerritories" />
+        </menu_item_call>
+        <!-- [WATCHWOLF 2026-10-10] who is on the regions you own or manage (wolffloaterwatchwolf.cpp) -->
+        <menu_item_call
+         label="WatchWolf..."
+         name="WolfWatchWolf">
+            <menu_item_call.on_click
+             function="Floater.Show"
+             parameter="wolf_watchwolf" />
+            <menu_item_call.on_visible
+             function="WolfGrid.IsOnWolfTerritories" />
+        </menu_item_call>
+        <menu_item_separator />
+        <!-- [WOLF FX 2026-10-10] script effects and camera shake (wolffx.cpp, wolfcamerafx.cpp) -->
+        <menu_item_check
+         label="Show Script Effects (explosions, fire...)"
+         name="WolfFXEnabled">
+            <menu_item_check.on_check
+             function="CheckControl"
+             parameter="WolfFXEnabled" />
+            <menu_item_check.on_click
+             function="ToggleControl"
+             parameter="WolfFXEnabled" />
+        </menu_item_check>
+        <menu_item_check
+         label="Allow Camera Shake"
+         name="WolfFXCameraShake">
+            <menu_item_check.on_check
+             function="CheckControl"
+             parameter="WolfFXCameraShake" />
+            <menu_item_check.on_click
+             function="ToggleControl"
+             parameter="WolfFXCameraShake" />
+        </menu_item_check>
+        <menu_item_check
+         label="Flight Chase Camera (rolls with the plane)"
+         name="WolfFlightFollowCam">
+            <menu_item_check.on_check
+             function="CheckControl"
+             parameter="WolfFlightFollowCam" />
+            <menu_item_check.on_click
+             function="ToggleControl"
+             parameter="WolfFlightFollowCam" />
+        </menu_item_check>
     </menu>
     <menu
      create_jump_keys="true"

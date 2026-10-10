@@ -1073,6 +1073,24 @@ bool LLWindowMacOSX::setPosition(const LLCoordScreen position)
     return true;
 }
 
+// <WolfViewer 2026-10-10> Spread across all screens (see llwindow.h; the AppKit work is
+// spanWindowAllScreens in llwindowmacosx-objc.mm).
+LLWindow::ESpanResult LLWindowMacOSX::spanAllScreens(bool span, std::string& message)
+{
+    if (span == mSpanAllScreens)
+        return SPAN_DONE;
+    if (!mWindow)
+    {
+        message = "The viewer window is not open yet.";
+        return SPAN_FAILED;
+    }
+    if (!spanWindowAllScreens(mWindow, span, message))
+        return SPAN_FAILED;
+    mSpanAllScreens = span;
+    return SPAN_DONE;
+}
+// </WolfViewer>
+
 bool LLWindowMacOSX::setSizeImpl(const LLCoordScreen size)
 {
     if(mWindow)

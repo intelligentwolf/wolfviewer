@@ -63,6 +63,7 @@ public:
     /*virtual*/ bool getSize(LLCoordScreen *size);
     /*virtual*/ bool getSize(LLCoordWindow *size);
     /*virtual*/ bool setPosition(LLCoordScreen position);
+    ESpanResult spanAllScreens(bool span, std::string& message) override;   // <WolfViewer 2026-10-10/>
     /*virtual*/ bool setSizeImpl(LLCoordScreen size);
     /*virtual*/ bool setSizeImpl(LLCoordWindow size);
     /*virtual*/ bool switchContext(bool fullscreen, const LLCoordScreen &size, bool enable_vsync, const LLCoordScreen * const posp = NULL);
@@ -216,6 +217,13 @@ protected:
     F32 mPixelScaleX, mPixelScaleY;   // drawable pixels per SDL window unit
     S32 mAppliedMinW, mAppliedMinH;   // last minimum size handed to SDL (window units)
     void refreshPixelSize();
+    // <WolfViewer 2026-10-10> spanAllScreens: where the window was before, and the X11 request that
+    // lets a window manager stretch one fullscreen window over several monitors.
+    int mSpanSavedX = 0, mSpanSavedY = 0, mSpanSavedW = 0, mSpanSavedH = 0;
+    bool mSpanSavedMaximized = false;
+    bool mSpanUsedX11Fullscreen = false;
+    bool x11FullscreenMonitors(bool on);
+    // </WolfViewer>
     LLCoordWindow sdlToWindow(S32 x, S32 y) const;
     // </WolfViewer>
     SDL_Cursor* mSDLCursors[UI_CURSOR_COUNT];

@@ -83,8 +83,8 @@ public:
         H_AT, H_SPD_KNOB, H_LNAV, H_VNAV, H_HDG_KNOB, H_HDG_SEL, H_ALT_KNOB, H_ALT_HOLD,
         H_VS_WHEEL, H_VS, H_CMD, H_RANGE_KNOB, H_HUD, H_HELP, H_EXIT,
         H_GEAR, H_ENGINE, H_STICK, H_THROTTLE,
-        H_PLAN, H_ND_SCREEN, H_TWA_KNOB, H_WIND, H_TACK, H_SAIL, H_WEB, H_MAP, H_BACKGROUND,
-        H_CDU_SCREEN, H_CDU_DIR, H_CDU_CTL, H_CDU_EXEC, H_CDU_CLR, H_CDU_DEL, H_CDU_HELP,
+        H_PLAN, H_ND_SCREEN, H_TWA_KNOB, H_WIND, H_TACK, H_SAIL, H_WEB, H_MAP, H_BACKGROUND, H_FOLLOW_CAM, H_MINI,
+        H_CDU_SCREEN, H_CDU_DIR, H_CDU_APT, H_CDU_CTL, H_CDU_EXEC, H_CDU_CLR, H_CDU_DEL, H_CDU_HELP,
         H_LSK_L1, H_LSK_L2, H_LSK_L3, H_LSK_L4, H_LSK_L5, H_LSK_L6,
         H_LSK_R1, H_LSK_R2, H_LSK_R3, H_LSK_R4, H_LSK_R5, H_LSK_R6,
     };
@@ -117,16 +117,24 @@ private:
     void pickFonts(F32 unit);
 
     // the flight computer
-    enum EPage { PAGE_DIR = 0, PAGE_CTL };
+    enum EPage { PAGE_DIR = 0, PAGE_CTL, PAGE_APT };   // <WolfViewer 2026-10-10/> PAGE_APT: find an airport by name
     EPage mPage = PAGE_DIR;
     std::string mScratch;
     std::string mScratchMsg;        // "INVALID ENTRY" and friends, shown until CLR
+    // <WolfViewer 2026-10-10> the AIRPORTS page: what was searched for, the matches (directory ids), the page of them
+    std::string mAptQuery;
+    std::vector<S32> mAptIds;
+    S32 mAptPage = 0;
+    void aptSearch(const std::string& text);
+    bool pasteScratch();            // Ctrl+V: the clipboard into the scratchpad
+    // </WolfViewer>
     bool mModified = false;         // a route typed in and not yet EXECuted
     std::string mModRegion;
     F32 mModX = 128.f, mModY = 128.f, mModZ = 0.f;
     bool mModHasXY = false, mModHasZ = false;
     bool mDelete = false;           // DEL pressed: the next LSK deletes that field
-    bool mArmRoute = false;         // EXECuted: engage LNAV / VNAV once the region is found
+    bool mArmRoute = false;
+    U32 mDestSerialSeen = 0;        // <WolfViewer 2026-10-10/> WolfFlight::destSerial last shown on DIR TO         // EXECuted: engage LNAV / VNAV once the region is found
 
     S32 mPressed = H_NONE;
     F64 mPressedAt = 0.0;
@@ -148,6 +156,7 @@ private:
     bool mHelpChecked = false;      // which mode's first-time guide was last considered
     bool mHelpForSail = false;
     void drawGlareshield(F32 l, F32 b, F32 r, F32 t);
+    void drawMini(F32 bottom);   // <WolfViewer 2026-10-10/> the deck shrunk to one bar (WolfFlightDeckMini)
     void drawClock(F32 l, F32 b, F32 r, F32 t);
     void drawGear(F32 l, F32 b, F32 r, F32 t);
     void drawStick(F32 l, F32 b, F32 r, F32 t);

@@ -58,15 +58,14 @@
      width="326">
         <scroll_list.columns label="" name="mark" width="22" />
         <scroll_list.columns label="Song" name="name" dynamicwidth="true" />
+        <scroll_list.columns label="Length" name="length" width="44" />
     </scroll_list>
     <button follows="left|bottom" height="20" label="Up" layout="topleft" left="324" name="move_up" top="344" width="50" tool_tip="Move the selected song up." />
     <button follows="left|bottom" height="20" label="Down" layout="topleft" left="378" name="move_down" top="344" width="54" tool_tip="Move the selected song down." />
     <button follows="left|bottom" height="20" label="Remove" layout="topleft" left="436" name="remove" top="344" width="70" />
     <button follows="left|bottom" height="20" label="Clear" layout="topleft" left="510" name="clear" top="344" width="60" />
     <check_box follows="left|bottom" height="16" label="Send each song's title to the stream" layout="topleft" left="324" name="send_titles" top="368" width="320" />
-    <check_box follows="left|bottom" height="16" label="Hear it myself (speakers / headphones)" layout="topleft" left="324" name="hear_it" top="386" width="320"
-     tool_tip="Play the playlist through your own output too, after its fader - the music exists only inside the viewer, so without this you hear it only on the stream." />
-    <text follows="left|bottom|right" height="40" layout="topleft" left="10" name="playlist_note" top="372" width="300" wrap="true" text_color="LtGray_50">To hear it on air, pick "Wolf DJ playlist" as the source of Music 1 or Music 2 in the mixer.</text>
+    <text follows="left|bottom|right" height="40" layout="topleft" left="10" name="playlist_note" top="372" width="300" wrap="true" text_color="LtGray_50">It plays on whichever music channel has "Wolf DJ playlist" as its source (Play puts it on a free one). To hear it yourself, turn on that channel's MON on the desk.</text>
     <text follows="left|bottom|right" height="16" layout="topleft" left="324" name="error_text" top="406" width="326" text_color="Red" use_ellipses="true" />
     <!-- [WOLF DJ 2026-10-05] Jingle pads: pick a song, press a pad to put it there (wolffloaterdjplaylist.cpp
          setJinglePad). The pads play from the mixer window; colours from WolfDJJingles::PAD_RGB. -->

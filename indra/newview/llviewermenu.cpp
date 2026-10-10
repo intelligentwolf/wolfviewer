@@ -40,6 +40,7 @@
 #include "wolfspeech.h"
 #include "wolfscreenshare.h"
 #include "wolfweather.h"  // <WolfViewer> World > Weather
+#include "wolfspanscreens.h"  // <WolfViewer 2026-10-10/> Wolf World > Spread Across All Screens
 // </WolfViewer>
 
 // linden library includes
@@ -13019,6 +13020,9 @@ void initialize_menus()
     {
         return WolfGame::instance().gameModeShownOn();
     });
+    // [SPAN SCREENS 2026-10-10] Wolf World > Spread Across All Screens (wolfspanscreens.cpp)
+    commit.add("Wolf.SpanScreensToggle", [](LLUICtrl*, const LLSD&) { WolfSpanScreens::toggle(); });
+    enable.add("Wolf.SpanScreensOn", [](LLUICtrl*, const LLSD&) -> bool { return WolfSpanScreens::isOn(); });
     // [FORCED 2026-10-09] The switch may be flipped: on Wolf Territories, and not on a region
     // that requires Game Mode (VIEWER_SPEC.md §6).
     enable.add("WolfGame.CanSwitch", [](LLUICtrl*, const LLSD&) -> bool

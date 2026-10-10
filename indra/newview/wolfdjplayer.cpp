@@ -16,6 +16,7 @@
 #include "wolfdjcapture.h"
 
 #include "llcallbacklist.h"
+#include "llsdutil.h"
 #include "llfile.h"
 #include "llviewercontrol.h"
 #include "llstring.h"
@@ -90,38 +91,147 @@ namespace
         }
     }
 
-    // ---- file callbacks shared by the decoders (LLFILE*, so Windows paths are UTF-8 safe) ----
-    size_t file_read(void* ud, void* out, size_t bytes) { return fread(out, 1, bytes, static_cast<LLFILE*>(ud)); }
-    long file_tell(void* ud) { return ftell(static_cast<LLFILE*>(ud)); }
-    int file_seek(void* ud, long offset, int whence) { return fseek(static_cast<LLFILE*>(ud), offset, whence); }
+    // [WOLF DJ 2026-10-10] A track is read into memory first and decoded from there (Paul:
+    // "pre-load it", "stop it from not playing"): a slow disk, a sleeping drive or a network
+    // folder can then hold up only the load - before the song starts, or while the song before
+    // it is still playing - never the music on air. A very big file (over STREAM_ABOVE: a long
+    // uncompressed mix) is not held in memory but streamed from the disk as it plays (Paul: "the dj
+    // player should not refuse files but it should stream them").
+    typedef std::shared_ptr<const std::vector<unsigned char>> bytes_t;
+    constexpr long long STREAM_ABOVE = 64ll * 1024 * 1024;
+
+    /** What a decoder reads: the file's bytes, or (no bytes) the file itself, streamed. */
+    struct Source
+    {
+        bytes_t mBytes;
+        std::string mStreamPath;
+        long long mSize = 0;
+        bool ok() const { return mBytes || !mStreamPath.empty(); }
+    };
+
+    Source load_file(const std::string& path, std::string& err)
+    {
+        Source src;
+        llstat st;
+        if (LLFile::stat(path, &st) != 0)
+        {
+            err = "Could not open " + base_name(path) + ".";
+            return src;
+        }
+        if ((long long)st.st_size > STREAM_ABOVE)
+        {
+            src.mStreamPath = path;
+            src.mSize = (long long)st.st_size;
+            return src;
+        }
+        LLFILE* f = LLFile::fopen(path, "rb");
+        if (!f)
+        {
+            err = "Could not open " + base_name(path) + ".";
+            return src;
+        }
+        auto data = std::make_shared<std::vector<unsigned char>>();
+        data->reserve((size_t)st.st_size);
+        unsigned char buf[65536];
+        size_t n;
+        while ((n = fread(buf, 1, sizeof(buf), f)) > 0)
+        {
+            data->insert(data->end(), buf, buf + n);
+        }
+        const bool bad = ferror(f) != 0;
+        fclose(f);
+        if (bad || data->empty())
+        {
+            err = "Could not read " + base_name(path) + ".";
+            return src;
+        }
+        src.mBytes = data;
+        src.mSize = (long long)data->size();
+        return src;
+    }
+
+    /** A read position in a loaded file, or in a file streamed from the disk, for the decoders'
+     *  callbacks. Seeks are absolute (64-bit on every platform). */
+    struct Reader
+    {
+        const unsigned char* mData = nullptr;
+        LLFILE* mFile = nullptr;
+        unsigned long long mSize = 0, mPos = 0;
+
+        ~Reader() { if (mFile) fclose(mFile); }
+
+        size_t read(void* out, size_t bytes)
+        {
+            const size_t n = (size_t)std::min<unsigned long long>(bytes, mSize - mPos);
+            if (n == 0) return 0;
+            size_t got = n;
+            if (mFile) got = fread(out, 1, n, mFile);
+            else memcpy(out, mData + mPos, n);
+            mPos += got;
+            return got;
+        }
+        int seek(long long offset, int whence)
+        {
+            const long long base = whence == SEEK_SET ? 0 : (whence == SEEK_CUR ? (long long)mPos : (long long)mSize);
+            const long long to = base + offset;
+            if (to < 0 || to > (long long)mSize) return -1;
+            if (mFile)
+            {
+#if LL_WINDOWS
+                if (_fseeki64(mFile, to, SEEK_SET) != 0) return -1;
+#else
+                if (fseeko(mFile, (off_t)to, SEEK_SET) != 0) return -1;
+#endif
+            }
+            mPos = (unsigned long long)to;
+            return 0;
+        }
+        unsigned long long left() const { return mSize - mPos; }
+    };
 
     class Decoder
     {
     public:
-        virtual ~Decoder() { if (mFile) fclose(mFile); }
+        virtual ~Decoder() {}
         // Interleaved float frames; 0 at the end.
         virtual size_t read(float* out, size_t frames) = 0;
         unsigned mRate = 0, mChannels = 0;
         double mDuration = 0.0;
         std::string mArtist, mTitle;
     protected:
-        LLFILE* mFile = nullptr;
+        bytes_t mBytes;     // kept alive while the decoder reads it
+        Reader mIn;
+        bool setSource(const Source& src)
+        {
+            if (src.mBytes)
+            {
+                mBytes = src.mBytes;
+                mIn.mData = mBytes->data();
+                mIn.mSize = mBytes->size();
+                return mIn.mSize > 0;
+            }
+            mIn.mFile = LLFile::fopen(src.mStreamPath, "rb");
+            mIn.mSize = (unsigned long long)src.mSize;
+            return mIn.mFile != nullptr && mIn.mSize > 0;
+        }
     };
 
     // ---- Ogg Vorbis: libvorbisfile ----
     class VorbisDecoder : public Decoder
     {
     public:
-        bool open(const std::string& path)
+        bool open(const Source& src)
         {
-            mFile = LLFile::fopen(path, "rb");
-            if (!mFile) return false;
+            if (!setSource(src)) return false;
             ov_callbacks cb;
-            cb.read_func = [](void* ptr, size_t size, size_t n, void* ud) -> size_t { return fread(ptr, size, n, static_cast<LLFILE*>(ud)); };
-            cb.seek_func = [](void* ud, ogg_int64_t off, int whence) -> int { return fseek(static_cast<LLFILE*>(ud), (long)off, whence); };
-            cb.close_func = nullptr;    // the Decoder closes mFile
-            cb.tell_func = [](void* ud) -> long { return ftell(static_cast<LLFILE*>(ud)); };
-            if (ov_open_callbacks(mFile, &mVf, NULL, 0, cb) != 0) return false;
+            cb.read_func = [](void* ptr, size_t size, size_t n, void* ud) -> size_t
+            {
+                return size ? static_cast<Reader*>(ud)->read(ptr, size * n) / size : 0;
+            };
+            cb.seek_func = [](void* ud, ogg_int64_t off, int whence) -> int { return static_cast<Reader*>(ud)->seek((long long)off, whence); };
+            cb.close_func = nullptr;
+            cb.tell_func = [](void* ud) -> long { return (long)static_cast<Reader*>(ud)->mPos; };
+            if (ov_open_callbacks(&mIn, &mVf, NULL, 0, cb) != 0) return false;
             mOpen = true;
             vorbis_info* vi = ov_info(&mVf, -1);
             if (!vi) return false;
@@ -238,20 +348,14 @@ namespace
     class Mp3Decoder : public Decoder
     {
     public:
-        bool open(const std::string& path)
+        // known_length >= 0: the length is already known (the loader or the scan counted it),
+        // so the pass over the frames is not made again when the song starts.
+        bool open(const Source& src, double known_length)
         {
-            mFile = LLFile::fopen(path, "rb");
-            if (!mFile) return false;
-            auto onRead = [](void* ud, void* out, size_t n) -> size_t { return file_read(static_cast<Ctx*>(ud)->mFile, out, n); };
-            auto onSeek = [](void* ud, int off, drmp3_seek_origin o) -> drmp3_bool32
-            {
-                const int whence = o == DRMP3_SEEK_SET ? SEEK_SET : (o == DRMP3_SEEK_CUR ? SEEK_CUR : SEEK_END);
-                return file_seek(static_cast<Ctx*>(ud)->mFile, off, whence) == 0;
-            };
-            auto onTell = [](void* ud, drmp3_int64* cur) -> drmp3_bool32 { *cur = file_tell(static_cast<Ctx*>(ud)->mFile); return *cur >= 0; };
+            if (!setSource(src)) return false;
             auto onMeta = [](void* ud, const drmp3_metadata* m)
             {
-                Mp3Decoder* self = static_cast<Mp3Decoder*>(static_cast<Ctx*>(ud)->mSelf);
+                Mp3Decoder* self = static_cast<Mp3Decoder*>(ud);
                 const unsigned char* d = static_cast<const unsigned char*>(m->pRawData);
                 if (!d) return;
                 if (m->type == DRMP3_METADATA_TYPE_ID3V2)
@@ -266,12 +370,30 @@ namespace
                     LLStringUtil::trim(self->mArtist);
                 }
             };
-            mCtx.mFile = mFile;
-            mCtx.mSelf = this;
-            if (!drmp3_init(&mMp3, onRead, onSeek, onTell, onMeta, &mCtx, NULL)) return false;
+            // Callbacks for memory and disk alike (Reader): dr_mp3 buffers its own reads.
+            auto onRead = [](void* ud, void* out, size_t n) -> size_t { return static_cast<Mp3Decoder*>(ud)->mIn.read(out, n); };
+            auto onSeek = [](void* ud, int off, drmp3_seek_origin o) -> drmp3_bool32
+            {
+                const int whence = o == DRMP3_SEEK_SET ? SEEK_SET : (o == DRMP3_SEEK_CUR ? SEEK_CUR : SEEK_END);
+                return static_cast<Mp3Decoder*>(ud)->mIn.seek(off, whence) == 0;
+            };
+            auto onTell = [](void* ud, drmp3_int64* cur) -> drmp3_bool32 { *cur = (drmp3_int64)static_cast<Mp3Decoder*>(ud)->mIn.mPos; return DRMP3_TRUE; };
+            if (!drmp3_init(&mMp3, onRead, onSeek, onTell, onMeta, this, NULL)) return false;
             mOpen = true;
             mRate = mMp3.sampleRate;
             mChannels = mMp3.channels;
+            // [WOLF DJ 2026-10-10] Paul: "i need to see how long a track is as it's playing" - an
+            // MP3 had no length before. Source: dr_mp3.h drmp3_get_pcm_frame_count - the Xing/LAME
+            // frame count when the file has one, otherwise a pass over the frame headers that
+            // seeks back to the start (drmp3_get_mp3_and_pcm_frame_count).
+            if (known_length >= 0.0)
+            {
+                mDuration = known_length;
+            }
+            else if (mRate > 0)
+            {
+                mDuration = (double)drmp3_get_pcm_frame_count(&mMp3) / (double)mRate;
+            }
             return mRate > 0 && mChannels > 0;
         }
         ~Mp3Decoder() override { if (mOpen) drmp3_uninit(&mMp3); }
@@ -280,12 +402,6 @@ namespace
             return (size_t)drmp3_read_pcm_frames_f32(&mMp3, frames, out);
         }
     private:
-        struct Ctx
-        {
-            LLFILE* mFile;
-            void* mSelf;
-        };
-        Ctx mCtx;
         drmp3 mMp3;
         bool mOpen = false;
     };
@@ -294,17 +410,9 @@ namespace
     class FlacDecoder : public Decoder
     {
     public:
-        bool open(const std::string& path)
+        bool open(const Source& src)
         {
-            mFile = LLFile::fopen(path, "rb");
-            if (!mFile) return false;
-            auto onRead = [](void* ud, void* out, size_t n) -> size_t { return fread(out, 1, n, static_cast<FlacDecoder*>(ud)->mFile); };
-            auto onSeek = [](void* ud, int off, drflac_seek_origin o) -> drflac_bool32
-            {
-                const int whence = o == DRFLAC_SEEK_SET ? SEEK_SET : (o == DRFLAC_SEEK_CUR ? SEEK_CUR : SEEK_END);
-                return fseek(static_cast<FlacDecoder*>(ud)->mFile, off, whence) == 0;
-            };
-            auto onTell = [](void* ud, drflac_int64* cur) -> drflac_bool32 { *cur = ftell(static_cast<FlacDecoder*>(ud)->mFile); return *cur >= 0; };
+            if (!setSource(src)) return false;
             auto onMeta = [](void* ud, drflac_metadata* m)
             {
                 if (m->type != DRFLAC_METADATA_BLOCK_TYPE_VORBIS_COMMENT) return;
@@ -323,6 +431,13 @@ namespace
                     else if (key == "TITLE") self->mTitle = s.substr(eq + 1);
                 }
             };
+            auto onRead = [](void* ud, void* out, size_t n) -> size_t { return static_cast<FlacDecoder*>(ud)->mIn.read(out, n); };
+            auto onSeek = [](void* ud, int off, drflac_seek_origin o) -> drflac_bool32
+            {
+                const int whence = o == DRFLAC_SEEK_SET ? SEEK_SET : (o == DRFLAC_SEEK_CUR ? SEEK_CUR : SEEK_END);
+                return static_cast<FlacDecoder*>(ud)->mIn.seek(off, whence) == 0;
+            };
+            auto onTell = [](void* ud, drflac_int64* cur) -> drflac_bool32 { *cur = (drflac_int64)static_cast<FlacDecoder*>(ud)->mIn.mPos; return DRFLAC_TRUE; };
             mFlac = drflac_open_with_metadata(onRead, onSeek, onTell, onMeta, this, NULL);
             if (!mFlac) return false;
             mRate = mFlac->sampleRate;
@@ -343,22 +458,23 @@ namespace
     class WavDecoder : public Decoder
     {
     public:
-        bool open(const std::string& path)
+        bool open(const Source& src)
         {
-            mFile = LLFile::fopen(path, "rb");
-            if (!mFile) return false;
+            if (!setSource(src)) return false;
             unsigned char h[12];
-            if (fread(h, 1, 12, mFile) != 12 || memcmp(h, "RIFF", 4) != 0 || memcmp(h + 8, "WAVE", 4) != 0) return false;
+            if (mIn.read(h, 12) != 12 || memcmp(h, "RIFF", 4) != 0 || memcmp(h + 8, "WAVE", 4) != 0) return false;
             bool have_fmt = false;
             while (true)
             {
                 unsigned char ch[8];
-                if (fread(ch, 1, 8, mFile) != 8) return false;
+                if (mIn.read(ch, 8) != 8) return false;
                 const U32 size = (U32)ch[4] | (U32)ch[5] << 8 | (U32)ch[6] << 16 | (U32)ch[7] << 24;
                 if (memcmp(ch, "fmt ", 4) == 0)
                 {
+                    // Checked before the buffer is made: a broken file can claim 4 GB here.
+                    if (size < 16 || size > mIn.left()) return false;
                     std::vector<unsigned char> f(size);
-                    if (size < 16 || fread(f.data(), 1, size, mFile) != size) return false;
+                    if (mIn.read(f.data(), size) != size) return false;
                     U16 tag = (U16)(f[0] | f[1] << 8);
                     mChannels = (U16)(f[2] | f[3] << 8);
                     mRate = (U32)f[4] | (U32)f[5] << 8 | (U32)f[6] << 16 | (U32)f[7] << 24;
@@ -366,20 +482,21 @@ namespace
                     if (tag == 0xFFFE && size >= 26) tag = (U16)(f[24] | f[25] << 8);   // SubFormat GUID's first two bytes
                     mFloat = (tag == 3);
                     if (tag != 1 && tag != 3) return false;
-                    if (size & 1) fseek(mFile, 1, SEEK_CUR);
+                    if (size & 1) mIn.seek(1, SEEK_CUR);
                     have_fmt = true;
                 }
                 else if (memcmp(ch, "data", 4) == 0)
                 {
                     if (!have_fmt || mChannels == 0 || mRate == 0) return false;
-                    mBytesLeft = size;
+                    // A file cut short (or a streaming writer's 0xFFFFFFFF) plays what is there.
+                    mBytesLeft = (U32)std::min<unsigned long long>(size, mIn.left());
                     const unsigned bpf = mChannels * (mBits / 8);
-                    if (bpf > 0) mDuration = (double)(size / bpf) / (double)mRate;
+                    if (bpf > 0) mDuration = (double)(mBytesLeft / bpf) / (double)mRate;
                     return (mBits == 8 || mBits == 16 || mBits == 24 || mBits == 32);
                 }
-                else
+                else if (mIn.seek((long long)size + (size & 1), SEEK_CUR) != 0)
                 {
-                    fseek(mFile, (long)(size + (size & 1)), SEEK_CUR);
+                    return false;
                 }
             }
         }
@@ -387,9 +504,9 @@ namespace
         {
             const unsigned bps = mBits / 8;
             const unsigned bpf = bps * mChannels;
-            size_t want = std::min((size_t)(mBytesLeft / bpf), frames);
+            const size_t want = std::min((size_t)(mBytesLeft / bpf), frames);
             mRaw.resize(want * bpf);
-            const size_t got = want ? fread(mRaw.data(), 1, want * bpf, mFile) / bpf : 0;
+            const size_t got = want ? mIn.read(mRaw.data(), want * bpf) / bpf : 0;
             mBytesLeft -= (U32)(got * bpf);
             for (size_t i = 0; i < got * mChannels; ++i)
             {
@@ -411,15 +528,22 @@ namespace
         std::vector<unsigned char> mRaw;
     };
 
-    std::unique_ptr<Decoder> open_decoder(const std::string& path, std::string& err)
+    // A decoder for a loaded (or streamed) file. known_length: see Mp3Decoder::open.
+    std::unique_ptr<Decoder> open_decoder(const std::string& path, const Source& src, std::string& err, double known_length = -1.0)
     {
         const std::string ext = lower_ext(path);
         std::unique_ptr<Decoder> d;
         bool ok = false;
-        if (ext == "ogg" || ext == "oga") { auto v = std::make_unique<VorbisDecoder>(); ok = v->open(path); d = std::move(v); }
-        else if (ext == "mp3") { auto v = std::make_unique<Mp3Decoder>(); ok = v->open(path); d = std::move(v); }
-        else if (ext == "flac") { auto v = std::make_unique<FlacDecoder>(); ok = v->open(path); d = std::move(v); }
-        else if (ext == "wav") { auto v = std::make_unique<WavDecoder>(); ok = v->open(path); d = std::move(v); }
+        if (src.ok())
+        {
+            if (ext == "ogg" || ext == "oga") { auto v = std::make_unique<VorbisDecoder>(); ok = v->open(src); d = std::move(v); }
+            else if (ext == "mp3") { auto v = std::make_unique<Mp3Decoder>(); ok = v->open(src, known_length); d = std::move(v); }
+            else if (ext == "flac") { auto v = std::make_unique<FlacDecoder>(); ok = v->open(src); d = std::move(v); }
+            else if (ext == "wav") { auto v = std::make_unique<WavDecoder>(); ok = v->open(src); d = std::move(v); }
+        }
+        // [SECURITY 2026-10-10] sane audio only: a crafted header with thousands of channels or a 1 Hz
+        // rate would make the mixer's buffers enormous.
+        if (ok && (d->mChannels < 1 || d->mChannels > 8 || d->mRate < 8000 || d->mRate > 384000)) ok = false;
         if (!ok)
         {
             err = "Could not play " + base_name(path) + " (not a playable Ogg, MP3, FLAC or WAV file).";
@@ -435,20 +559,51 @@ namespace
         return d;
     }
 
+    // Load from disk (or open to stream), then a decoder (the jingle pads, the length scan, and a
+    // song that was not preloaded). These run on the DJ's own threads, where nothing else would
+    // catch a failure: out of memory, or a decoder library's own exception, is a song that will
+    // not play, not the viewer closing.
+    std::unique_ptr<Decoder> open_decoder(const std::string& path, std::string& err, double known_length = -1.0)
+    {
+        try
+        {
+            const Source src = load_file(path, err);
+            return src.ok() ? open_decoder(path, src, err, known_length) : nullptr;
+        }
+        catch (const std::exception& e)
+        {
+            err = "Could not play " + base_name(path) + " (" + e.what() + ").";
+            return nullptr;
+        }
+    }
+
+    std::unique_ptr<Decoder> open_decoder_safe(const std::string& path, const bytes_t& bytes, std::string& err, double known_length = -1.0)
+    {
+        try
+        {
+            Source src;
+            src.mBytes = bytes;
+            src.mSize = bytes ? (long long)bytes->size() : 0;
+            return open_decoder(path, src, err, known_length);
+        }
+        catch (const std::exception& e)
+        {
+            err = "Could not play " + base_name(path) + " (" + e.what() + ").";
+            return nullptr;
+        }
+    }
+
     // The playlist as a mixer source: picking it on a channel points the player at that channel.
     class PlayerStream : public WolfDJCaptureStream
     {
     public:
+        // Whether the DJ hears it is the channel strip's MON button (WolfDJChannel::mMonitor).
         explicit PlayerStream(WolfDJChannel* ch) : mChannel(ch)
         {
             WolfDJPlayer::instance().setOutput(ch);
-            // The playlist plays only inside the viewer: let the DJ hear it (setting
-            // WolfDJPlaylistMonitor, the playlist floater's "Hear it myself").
-            ch->mMonitor = gSavedSettings.getBOOL("WolfDJPlaylistMonitor");
         }
         ~PlayerStream() override
         {
-            mChannel->mMonitor = false;
             if (WolfDJPlayer::instance().output() == mChannel) WolfDJPlayer::instance().setOutput(nullptr);
         }
         bool ok() const override { return true; }
@@ -620,9 +775,9 @@ void WolfDJJingles::run()
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
             continue;
         }
-        // Real-time pace, about 100 ms ahead (as WolfDJPlayer::run).
+        // Real-time pace, PLAYER_LEAD ahead (as WolfDJPlayer::run).
         const double elapsed = std::chrono::duration<double>(clock::now() - base).count();
-        if (pushed - elapsed > 0.1)
+        if (pushed - elapsed > WolfDJ::PLAYER_LEAD)
         {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
             continue;
@@ -661,8 +816,16 @@ WolfDJPlayer::~WolfDJPlayer()
 
 void WolfDJPlayer::shutdown()
 {
-    mRunning = false;
+    mScanStop = true;       // first: the scan may be part way through a slow file
+    {
+        // Under the lock, so the loader cannot miss this between its check and its wait.
+        std::lock_guard<std::mutex> lock(mMutex);
+        mRunning = false;
+    }
+    mLoadCv.notify_all();
     if (mThread.joinable()) mThread.join();
+    if (mLoader.joinable()) mLoader.join();
+    if (mScanner.joinable()) mScanner.join();
     gIdleCallbacks.deleteFunction(&player_idle, nullptr);
 }
 
@@ -671,19 +834,70 @@ void WolfDJPlayer::setOutput(WolfDJChannel* ch)
     mOutput = ch;
 }
 
+bool WolfDJPlayer::routeToMixer(std::string& why)
+{
+    if (mOutput.load()) return true;
+    WolfDJMixer& mix = WolfDJMixer::instance();
+    int pick = -1;
+    for (int ch = WolfDJ::CH_MUSIC_A; ch < WolfDJ::CH_COUNT && pick < 0; ++ch)
+    {
+        if (mix.captureId(ch).empty()) pick = ch;
+    }
+    if (pick < 0)
+    {
+        why = "Every music channel has a program on it: pick \"Wolf DJ playlist\" on one of them in the Wolf DJ mixer.";
+        return false;
+    }
+    mix.startEngine();
+    mix.setCapture(pick, wolfdj_open_playlist_stream(&mix.channel(pick)), WOLFDJ_PLAYLIST_ID);
+    mix.channel(pick).mMonitor = true;      // the playlist is heard only through MON
+    LL_INFOS("WolfDJ") << "playlist put on music channel " << (pick - WolfDJ::CH_MUSIC_A + 1) << " to play" << LL_ENDL;
+    return true;
+}
+
 void WolfDJPlayer::setFiles(const std::vector<std::string>& files)
 {
-    std::lock_guard<std::mutex> lock(mMutex);
-    // Keep the playing track playing: find it in the new list.
-    const int cur = mCurrent.load();
-    std::string playing = (cur >= 0 && cur < (int)mFiles.size()) ? mFiles[cur] : std::string();
-    mFiles = files;
-    int idx = -1;
-    for (size_t i = 0; i < mFiles.size(); ++i)
+    bool start_scan = false;
     {
-        if (!playing.empty() && mFiles[i] == playing) { idx = (int)i; break; }
+        std::lock_guard<std::mutex> lock(mMutex);
+        // Keep the playing track playing: find it in the new list.
+        const int cur = mCurrent.load();
+        std::string playing = (cur >= 0 && cur < (int)mFiles.size()) ? mFiles[cur] : std::string();
+        mFiles = files;
+        int idx = -1;
+        for (size_t i = 0; i < mFiles.size(); ++i)
+        {
+            if (!playing.empty() && mFiles[i] == playing) { idx = (int)i; break; }
+        }
+        mCurrent = idx;
+        start_scan = !mScanning;
+        if (start_scan) mScanning = true;
     }
-    mCurrent = idx;
+    // The order may have changed: load whatever now follows the playing song.
+    if (mRunning && mCurrent.load() >= 0) preload(mCurrent.load() + 1);
+    if (start_scan)
+    {
+        if (mScanner.joinable()) mScanner.join();   // it has said it is finished
+        mScanStop = false;
+        mScanner = std::thread([this]() { scanLengths(); });
+    }
+}
+
+void WolfDJPlayer::loadSaved()
+{
+    if (mLoadedSaved) return;
+    mLoadedSaved = true;
+    if (!files().empty()) return;
+    std::vector<std::string> list;
+    const LLSD saved = gSavedSettings.getLLSD("WolfDJPlaylist");
+    if (saved.isArray())
+    {
+        for (const LLSD& f : llsd::inArray(saved))
+        {
+            if (f.isString()) list.push_back(f.asString());
+        }
+    }
+    setFiles(list);
 }
 
 std::vector<std::string> WolfDJPlayer::files() const
@@ -698,14 +912,22 @@ void WolfDJPlayer::play(int index)
         std::lock_guard<std::mutex> lock(mMutex);
         if (index < 0 || index >= (int)mFiles.size()) return;
     }
+    std::string why;
+    if (!routeToMixer(why))
+    {
+        std::lock_guard<std::mutex> lock(mMutex);
+        mError = why;
+    }
     mRequest = index;
     mPlaying = true;
     mPaused = false;
     if (!mRunning)
     {
         if (mThread.joinable()) mThread.join();
+        if (mLoader.joinable()) mLoader.join();
         mRunning = true;
         mThread = std::thread([this]() { run(); });
+        mLoader = std::thread([this]() { loaderLoop(); });
         gIdleCallbacks.addFunction(&player_idle, nullptr);
     }
 }
@@ -716,6 +938,15 @@ void WolfDJPlayer::togglePause()
     {
         play(mCurrent.load() >= 0 ? mCurrent.load() : 0);
         return;
+    }
+    if (mPaused)
+    {
+        std::string why;
+        if (!routeToMixer(why))
+        {
+            std::lock_guard<std::mutex> lock(mMutex);
+            mError = why;
+        }
     }
     mPaused = !mPaused;
 }
@@ -751,6 +982,117 @@ std::string WolfDJPlayer::lastError() const
     return mError;
 }
 
+std::string WolfDJPlayer::preloadedNext() const
+{
+    std::lock_guard<std::mutex> lock(mMutex);
+    return (mNextBytes || mNextStream) ? mNextLabel : std::string();
+}
+
+double WolfDJPlayer::knownDuration(const std::string& path) const
+{
+    std::lock_guard<std::mutex> lock(mMutex);
+    auto it = mLengths.find(path);
+    return it == mLengths.end() ? -1.0 : it->second;
+}
+
+// Ask the loader for the song at index (out of range: nothing). Never waits.
+void WolfDJPlayer::preload(int index)
+{
+    std::lock_guard<std::mutex> lock(mMutex);
+    const std::string want = (index >= 0 && index < (int)mFiles.size()) ? mFiles[index] : std::string();
+    if (want == mLoadWant) return;
+    mLoadWant = want;
+    if (mNextPath != want)
+    {
+        mNextPath.clear();
+        mNextBytes.reset();
+        mNextLabel.clear();
+        mNextStream = false;
+    }
+    mLoadCv.notify_all();
+}
+
+// The loader thread: reads the wanted song into memory, so the player can start it without
+// touching the disk.
+void WolfDJPlayer::loaderLoop()
+{
+    std::unique_lock<std::mutex> lock(mMutex);
+    while (mRunning)
+    {
+        mLoadCv.wait(lock, [this]() { return !mRunning || (!mLoadWant.empty() && mLoadWant != mNextPath); });
+        if (!mRunning) break;
+        const std::string path = mLoadWant;
+        lock.unlock();
+        std::string err;
+        Source src;
+        try
+        {
+            src = load_file(path, err);
+        }
+        catch (const std::exception& e)     // out of memory: the player will say so
+        {
+            err = e.what();
+        }
+        const std::shared_ptr<const std::vector<unsigned char>> bytes = src.mBytes;
+        const bool stream = !bytes && !src.mStreamPath.empty();     // too big to hold: streamed when it plays
+        std::string label;
+        if (src.ok())
+        {
+            std::string e2;
+            std::unique_ptr<Decoder> d;
+            try { d = open_decoder(path, src, e2); } catch (const std::exception&) {}
+            if (d)     // tags and length
+            {
+                label = d->mArtist.empty() ? d->mTitle : d->mArtist + " - " + d->mTitle;
+                std::lock_guard<std::mutex> l2(mMutex);
+                mLengths[path] = d->mDuration;
+                ++mLengthsVersion;
+            }
+        }
+        lock.lock();
+        if (mLoadWant == path)
+        {
+            // A song that would not load is left to the player, which skips it and says why.
+            mNextPath = path;
+            mNextBytes = bytes;
+            mNextStream = stream && !label.empty();
+            mNextLabel = (bytes || mNextStream) ? label : std::string();
+            if (!bytes && !mNextStream) mLoadWant.clear();      // do not try it again and again
+            LL_INFOS("WolfDJ") << "preloaded " << path << (bytes ? llformat(" (%u bytes)", (unsigned)bytes->size())
+                                                           : mNextStream ? std::string(" (big: streamed from the disk)") : std::string(": ") + err) << LL_ENDL;
+        }
+    }
+}
+
+// Song lengths for the playlist window, one file at a time, newest list first.
+void WolfDJPlayer::scanLengths()
+{
+    while (!mScanStop)
+    {
+        std::string path;
+        {
+            std::lock_guard<std::mutex> lock(mMutex);
+            for (const std::string& f : mFiles)
+            {
+                if (mLengths.find(f) == mLengths.end()) { path = f; break; }
+            }
+            if (path.empty())
+            {
+                mScanning = false;
+                return;
+            }
+        }
+        std::string err;
+        double len = 0.0;
+        if (std::unique_ptr<Decoder> d = open_decoder(path, err)) len = d->mDuration;
+        std::lock_guard<std::mutex> lock(mMutex);
+        mLengths[path] = len;       // 0: could not be read; not tried again
+        ++mLengthsVersion;
+    }
+    std::lock_guard<std::mutex> lock(mMutex);
+    mScanning = false;
+}
+
 void WolfDJPlayer::run()
 {
     using clock = std::chrono::steady_clock;
@@ -759,33 +1101,57 @@ void WolfDJPlayer::run()
     double pushed = 0.0;                // seconds of the current track handed to the mixer
     clock::time_point base = clock::now();
     bool was_paused = false;
+    int auto_next = -1;                 // the song the player itself moved on to at a song's end
+
+    bool carry_on = false;              // the next start follows the last song without a break
 
     auto start_track = [&](int idx) -> bool
     {
         std::string path;
+        std::shared_ptr<const std::vector<unsigned char>> bytes;
+        double known = -1.0;
         {
             std::lock_guard<std::mutex> lock(mMutex);
             if (idx < 0 || idx >= (int)mFiles.size()) return false;
             path = mFiles[idx];
+            if (mNextBytes && mNextPath == path) bytes = mNextBytes;    // preloaded: no disk now
+            auto len = mLengths.find(path);
+            if (len != mLengths.end() && len->second > 0.0) known = len->second;
         }
         std::string err;
-        dec = open_decoder(path, err);
+        dec = bytes ? open_decoder_safe(path, bytes, err, known) : open_decoder(path, err, known);
         mCurrent = idx;
+        if (carry_on)
+        {
+            // Straight on from the last song: its last PLAYER_LEAD is still queued, so this one
+            // is timed from where that ends, not from now - otherwise every change of song would
+            // queue another lead's worth until the channel trimmed it away mid-song.
+            base += std::chrono::duration_cast<clock::duration>(std::chrono::duration<double>(pushed));
+        }
+        else
+        {
+            base = clock::now();
+        }
         pushed = 0.0;
         mPosition = 0.0;
-        base = clock::now();
-        std::lock_guard<std::mutex> lock(mMutex);
-        if (!dec)
         {
-            mError = err;
-            mDuration = 0.0;
-            return false;
+            std::lock_guard<std::mutex> lock(mMutex);
+            if (!dec)
+            {
+                mError = err;
+                mDuration = 0.0;
+                return false;
+            }
+            if (mOutput.load()) mError.clear();     // else keep "every music channel is in use"
+            mArtist = dec->mArtist;
+            mTitle = dec->mTitle;
+            mDuration = dec->mDuration;
+            mLengths[path] = dec->mDuration;
+            ++mLengthsVersion;
+            ++mTrackSerial;
         }
-        mError.clear();
-        mArtist = dec->mArtist;
-        mTitle = dec->mTitle;
-        mDuration = dec->mDuration;
-        ++mTrackSerial;
+        LL_INFOS("WolfDJ") << "playing " << path << " (" << dec->mDuration << " s, " << (bytes ? "preloaded" : "loaded now") << ")" << LL_ENDL;
+        preload(idx + 1);
         return true;
     };
 
@@ -802,6 +1168,7 @@ void WolfDJPlayer::run()
             // Skip files that will not open, to the end of the list at most.
             const int n = (int)files().size();
             int idx = req;
+            carry_on = req == auto_next;
             while (mPlaying && !start_track(idx))
             {
                 if (++idx >= n)
@@ -810,6 +1177,8 @@ void WolfDJPlayer::run()
                     dec.reset();
                 }
             }
+            carry_on = false;
+            auto_next = -1;
         }
 
         WolfDJChannel* out = mOutput.load();
@@ -827,23 +1196,31 @@ void WolfDJPlayer::run()
             was_paused = false;
         }
 
-        // Real-time pace, about 100 ms ahead of the clock (the mixer keeps under 250 ms queued).
+        // Real-time pace, PLAYER_LEAD ahead of the clock (the channel holds PLAYER_RING_SECONDS).
         const double elapsed = std::chrono::duration<double>(clock::now() - base).count();
-        if (pushed - elapsed > 0.1)
+        if (pushed - elapsed > WolfDJ::PLAYER_LEAD)
         {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
             continue;
+        }
+        if (elapsed - pushed > 0.5)
+        {
+            // This thread was held up (the machine stalled): carry on from here rather than
+            // pushing a burst the channel would only trim away.
+            base = clock::now() - std::chrono::duration_cast<clock::duration>(std::chrono::duration<double>(pushed));
         }
         const size_t frames = 1024;
         buf.resize(frames * dec->mChannels);
         const size_t got = dec->read(buf.data(), frames);
         if (got == 0)
         {
-            // End of the track: the next one, or the end of the list.
+            // End of the track: straight into the next (preloaded), or the end of the list.
             const int nxt = mCurrent.load() + 1;
             if (nxt < (int)files().size())
             {
-                mRequest = nxt;
+                // Unless the DJ asks for something else first (compare_exchange: their request wins).
+                int none = -1;
+                if (mRequest.compare_exchange_strong(none, nxt)) auto_next = nxt;
             }
             else
             {

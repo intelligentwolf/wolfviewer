@@ -105,7 +105,7 @@ private:
 
     // The value a control changes (normalised 0..1 for knobs and faders) and its reset value.
     float value(EKind kind, int strip) const;
-    void setValue(EKind kind, int strip, float v);
+    void setControlValue(EKind kind, int strip, float v);   // not setValue: that would hide LLUICtrl::setValue(const LLSD&) (macOS -Werror,-Woverloaded-virtual)
     float defaultValue(EKind kind) const;
     void toggle(EKind kind, int strip);
     void nudge(const Hit& h, S32 clicks);

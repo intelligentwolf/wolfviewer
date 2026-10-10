@@ -333,7 +333,7 @@ float WolfDJDesk::value(EKind kind, int strip) const
     }
 }
 
-void WolfDJDesk::setValue(EKind kind, int strip, float v)
+void WolfDJDesk::setControlValue(EKind kind, int strip, float v)
 {
     v = llclamp(v, 0.f, 1.f);
     WolfDJMixer& mix = WolfDJMixer::instance();
@@ -417,18 +417,18 @@ void WolfDJDesk::nudge(const Hit& h, S32 clicks)
     switch (h.mKind)
     {
     case K_FADER:
-        setValue(K_FADER, h.mStrip, fader(value(K_FADER, h.mStrip)));
+        setControlValue(K_FADER, h.mStrip, fader(value(K_FADER, h.mStrip)));
         break;
     case K_MASTER_L:
     case K_MASTER_R:
     {
         const float before = value(h.mKind, h.mStrip);
         const float after = fader(before);
-        setValue(h.mKind, h.mStrip, after);
+        setControlValue(h.mKind, h.mStrip, after);
         if (mLinked)
         {
             const EKind other = h.mKind == K_MASTER_L ? K_MASTER_R : K_MASTER_L;
-            setValue(other, h.mStrip, value(other, h.mStrip) + (after - before));
+            setControlValue(other, h.mStrip, value(other, h.mStrip) + (after - before));
         }
         break;
     }
@@ -965,10 +965,10 @@ bool WolfDJDesk::handleMouseDown(S32 x, S32 y, MASK mask)
             {
                 // A click on the slot moves the cap there, as on a desk you put your finger on it.
                 const float to = llclamp((float)(y - mDragB) / (float)std::max(1, mDragT - mDragB), 0.f, 1.f);
-                setValue(h->mKind, h->mStrip, to);
+                setControlValue(h->mKind, h->mStrip, to);
                 if ((h->mKind == K_MASTER_L || h->mKind == K_MASTER_R) && mLinked)
                 {
-                    setValue(other, h->mStrip, mDragOther + (to - mDragStart));
+                    setControlValue(other, h->mStrip, mDragOther + (to - mDragStart));
                     mDragOther = value(other, h->mStrip);
                 }
                 mDragStart = to;
@@ -1050,11 +1050,11 @@ bool WolfDJDesk::handleHover(S32 x, S32 y, MASK mask)
             v = mDragStart + (float)(y - mDragY) / ((mask & MASK_SHIFT) ? 1000.f : 200.f);
         }
         v = llclamp(v, 0.f, 1.f);
-        setValue(mDragKind, mDragStrip, v);
+        setControlValue(mDragKind, mDragStrip, v);
         if ((mDragKind == K_MASTER_L || mDragKind == K_MASTER_R) && mLinked)
         {
             const EKind other = mDragKind == K_MASTER_L ? K_MASTER_R : K_MASTER_L;
-            setValue(other, mDragStrip, mDragOther + (v - mDragStart));
+            setControlValue(other, mDragStrip, mDragOther + (v - mDragStart));
         }
         getWindow()->setCursor(UI_CURSOR_HAND);
         return true;
@@ -1085,12 +1085,12 @@ bool WolfDJDesk::handleDoubleClick(S32 x, S32 y, MASK mask)
     switch (h->mKind)
     {
     case K_FADER: case K_EQ_HIGH: case K_EQ_MID: case K_EQ_LOW: case K_FX_AMOUNT:
-        setValue(h->mKind, h->mStrip, defaultValue(h->mKind));
+        setControlValue(h->mKind, h->mStrip, defaultValue(h->mKind));
         onCommit();
         return true;
     case K_MASTER_L: case K_MASTER_R:
-        setValue(h->mKind, h->mStrip, defaultValue(h->mKind));
-        if (mLinked) setValue(h->mKind == K_MASTER_L ? K_MASTER_R : K_MASTER_L, h->mStrip, defaultValue(h->mKind));
+        setControlValue(h->mKind, h->mStrip, defaultValue(h->mKind));
+        if (mLinked) setControlValue(h->mKind == K_MASTER_L ? K_MASTER_R : K_MASTER_L, h->mStrip, defaultValue(h->mKind));
         onCommit();
         return true;
     case K_PLAY: case K_DECK:

@@ -26,6 +26,7 @@
 
 #include "llviewerprecompiledheaders.h"
 
+#include "wolfsuitcase.h"   // [SUITCASE 2026-10-10/] landmarks into My Suitcase on a hypergrid trip
 #include "llappviewer.h"
 
 // Viewer includes
@@ -6254,7 +6255,8 @@ void LLAppViewer::idle()
     // Focus + zoom the shared face once its media exists (wolfscreenshare.cpp).
     WolfScreenShare::instance().idle();
     WolfWeather::instance().idle();   // <WolfViewer 2026-09-10> rain / snow, menu or parcel prims
-    WolfFX::instance().idle();        // <WolfViewer 2026-10-10/> wolfEffect explosions, fire, smoke (wolffx.h)
+    WolfFX::instance().idle();
+    WolfSuitcase::idle();             // [SUITCASE 2026-10-10/] hypergrid trips: what arrived in My Suitcase comes home        // <WolfViewer 2026-10-10/> wolfEffect explosions, fire, smoke (wolffx.h)
     // </WolfViewer>
 
     // [WOLF GAME 2026-10-09] wolfGameEffect "shake": last frame's jitter off before the camera is

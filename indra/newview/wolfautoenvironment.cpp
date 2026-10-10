@@ -170,7 +170,7 @@ bool WolfPanelRegionAutoEnvironment::canEdit() const
     // LLViewerRegion::getOwner() is the handshake's SimOwner, which OpenSim fills with the
     // ESTATE owner (LLClientView.cs:907), so it cannot answer this.
     LLViewerRegion* rgn = gAgent.getRegion();
-    if (!WolfGrid::isWolfTerritories() || !rgn || !mHave) return false;
+    if (!WolfGrid::isOnWolfTerritories() || !rgn || !mHave) return false;
     return mRegionOwner == gAgentID || gAgent.isGodlike();
 }
 
@@ -189,7 +189,7 @@ void WolfPanelRegionAutoEnvironment::refresh()
 
 void WolfPanelRegionAutoEnvironment::draw()
 {
-    if (!WolfGrid::isWolfTerritories())
+    if (!WolfGrid::isOnWolfTerritories())
     {
         setStatus("Sorry, this function is only available on Wolf Territories Grid.", true);
         LLPanel::draw();

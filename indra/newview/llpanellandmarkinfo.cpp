@@ -26,6 +26,7 @@
 
 #include "llviewerprecompiledheaders.h"
 
+#include "wolfsuitcase.h"   // [SUITCASE 2026-10-10/] landmarks into My Suitcase on a hypergrid trip
 #include "llpanellandmarkinfo.h"
 
 #include "llcombobox.h"
@@ -422,7 +423,7 @@ void LLPanelLandmarkInfo::createLandmark(const LLUUID& folder_id)
 
     // If no folder chosen use the "Landmarks" folder.
     LLLandmarkActions::createLandmarkHere(name, desc,
-        folder_id.notNull() ? folder_id : gInventory.findCategoryUUIDForType(LLFolderType::FT_LANDMARK));
+        folder_id.notNull() ? folder_id : WolfSuitcase::landmarkFolder());   // [SUITCASE 2026-10-10/] My Suitcase abroad
 }
 
 // static

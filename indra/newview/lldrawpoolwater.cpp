@@ -580,7 +580,7 @@ void LLDrawPoolWater::pushWaterPlanes(int pass)
             // The same one line therefore switches the whole feature off cleanly.
             const bool no_swell = water->getWaterfall() > 0.f || water->getStreamFlow() > 0.f || water->getStillWater()
                                || !LLViewerShaderMgr::wolfWaterFull()
-                               || !WolfGrid::isWolfTerritories()
+                               || !WolfGrid::isOnWolfTerritories()
                                || mBasicWater;   // <WolfViewer 2026-10-07/> basic water from up high
             cur_shader->uniform1f(LLShaderMgr::WATER_WAVE_AMPLITUDE, no_swell ? 0.f : amplitude);
 

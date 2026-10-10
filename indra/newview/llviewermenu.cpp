@@ -592,11 +592,11 @@ static WolfWeather::Mode wolf_weather_mode(const std::string& s)
 {
     return s == "rain" ? WolfWeather::Mode::RAIN : s == "snow" ? WolfWeather::Mode::SNOW : WolfWeather::Mode::NONE;
 }
-// Source: WolfGrid::isWolfTerritories identifies this viewer login; private server routes
+// Source: WolfGrid::isOnWolfTerritories - logged in to Wolf AND on one of its regions (wolfgrid.h); private server routes
 // independently verify the agent/session. Denied clicks must remain visible to the resident.
 static bool wolf_grid_tools_allowed()
 {
-    if (WolfGrid::isWolfTerritories()) return true;
+    if (WolfGrid::isOnWolfTerritories()) return true;
     LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE", "Sorry, this function is only available on Wolf Territories Grid."));
     return false;
 }

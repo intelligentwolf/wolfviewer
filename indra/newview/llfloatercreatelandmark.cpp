@@ -26,6 +26,7 @@
 
 #include "llviewerprecompiledheaders.h"
 
+#include "wolfsuitcase.h"   // [SUITCASE 2026-10-10/] landmarks into My Suitcase on a hypergrid trip
 #include "llfloatercreatelandmark.h"
 
 #include "llagent.h"
@@ -130,7 +131,7 @@ bool LLFloaterCreateLandmark::postBuild()
     mLandmarkTitleEditor->setCommitCallback([this](LLUICtrl* ctrl, const LLSD& param) { onCommitTextChanges(); });
     mNotesEditor->setCommitCallback([this](LLUICtrl* ctrl, const LLSD& param) { onCommitTextChanges(); });
 
-    mLandmarksID = gInventory.findCategoryUUIDForType(LLFolderType::FT_LANDMARK);
+    mLandmarksID = WolfSuitcase::landmarkFolder();   // [SUITCASE 2026-10-10/] My Suitcase's Landmarks abroad
 
     return true;
 }
@@ -190,7 +191,7 @@ void LLFloaterCreateLandmark::setLandmarkInfo(const LLUUID &folder_id)
 
     // <FS:Ansariel> FIRE-31689: Landmark initially shown in wrong folder while creating
     //LLLandmarkActions::createLandmarkHere(name, "", folder_id.notNull() ? folder_id : gInventory.findCategoryUUIDForType(LLFolderType::FT_FAVORITE));
-    LLLandmarkActions::createLandmarkHere(name, "", folder_id.notNull() ? folder_id : gInventory.findCategoryUUIDForType(LLFolderType::FT_LANDMARK));
+    LLLandmarkActions::createLandmarkHere(name, "", folder_id.notNull() ? folder_id : WolfSuitcase::landmarkFolder());   // [SUITCASE 2026-10-10/]
 }
 
 bool cmp_folders(const folder_pair_t& left, const folder_pair_t& right)

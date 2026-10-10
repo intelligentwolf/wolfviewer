@@ -324,7 +324,7 @@ void WolfSurfCurl::render(F32 surf_h, F32 surf_set, F32 surf_len, F32 phase_time
 {
     if (!gWolfSurfCurlProgram.isComplete()) return;
     // <WolfViewer 2026-09-22/> Wolf Territories only — the barrel is ours.
-    if (!WolfGrid::isWolfTerritories()) return;
+    if (!WolfGrid::isOnWolfTerritories()) return;
     LLViewerRegion* rgn = gAgent.getRegion();
     if (!rgn) return;
     const WolfWaterField::Field* fld = WolfWaterField::instance().get(rgn);

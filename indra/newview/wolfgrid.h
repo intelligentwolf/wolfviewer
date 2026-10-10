@@ -101,6 +101,10 @@ namespace WolfGrid
     // Mode, the dashboard and the game HUD steady across ordinary Wolf region crossings; anything
     // that SENDS to the region uses isOnWolfTerritoriesConfirmed() instead, which says no until
     // this region has said which grid it is.
+    // <WolfViewer 2026-10-10> Paul, hypergridded to OSFest at 610 m: its sky thinned to space by the altitude sky, and Wolf's
+    // automatic sky, waves, natural water, terrain paint and map overlays all kept running on a foreign grid - they tested
+    // isWolfTerritories() (the LOGIN grid). Everything tied to the region underfoot (what is drawn, what is fetched or
+    // changed for this region) uses this; isWolfTerritories() is only for the login itself (Wolf services, the toolbar).
     inline bool isOnWolfTerritories()
     {
         if (!isWolfTerritories())

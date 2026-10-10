@@ -27,6 +27,7 @@
 #include "llviewerprecompiledheaders.h"
 #include "lllandmarkactions.h"
 
+#include "wolfsuitcase.h"   // [SUITCASE 2026-10-10/] landmarks into My Suitcase on a hypergrid trip
 #include "roles_constants.h"
 
 #include "llinventory.h"
@@ -335,7 +336,7 @@ void LLLandmarkActions::createLandmarkHere()
 
     LLAgentUI::buildLocationString(landmark_name, LLAgentUI::LOCATION_FORMAT_LANDMARK);
     LLAgentUI::buildLocationString(landmark_desc, LLAgentUI::LOCATION_FORMAT_FULL);
-    const LLUUID folder_id = gInventory.findCategoryUUIDForType(LLFolderType::FT_LANDMARK);
+    const LLUUID folder_id = WolfSuitcase::landmarkFolder();   // [SUITCASE 2026-10-10/] My Suitcase abroad
 
     createLandmarkHere(landmark_name, landmark_desc, folder_id);
 }

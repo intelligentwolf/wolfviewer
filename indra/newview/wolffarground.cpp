@@ -59,7 +59,7 @@ namespace
     bool enabled()
     {
         static LLCachedControl<bool> on(gSavedSettings, "WolfViewerFarGroundMapTiles", true);
-        return on && WolfGrid::isWolfTerritories();
+        return on && WolfGrid::isOnWolfTerritories();
     }
 }
 

@@ -42,7 +42,9 @@ namespace
     bool enabled()
     {
         static LLCachedControl<bool> on(gSavedSettings, "WolfViewerAltitudeSky", true);
-        return on && WolfGrid::isWolfTerritories();
+        // <WolfViewer 2026-10-10/> ON a Wolf region, not only logged in to Wolf: after a hypergrid jump Paul at 610 m on
+        // OSFest saw its sky thinned to space (black, a white glare at the horizon) - isWolfTerritories() is the login grid
+        return on && WolfGrid::isOnWolfTerritories();
     }
 
     // Camera height above the water, which is sea level on the grid.
@@ -89,7 +91,7 @@ F32 WolfAltitudeSky::spaceStarAlpha()
 F32 WolfAltitudeSky::farClipExtra()
 {
     static LLCachedControl<bool> on(gSavedSettings, "WolfViewerFarClipFollowsHeight", true);
-    if (!on || !WolfGrid::isWolfTerritories())
+    if (!on || !WolfGrid::isOnWolfTerritories())
     {
         return 0.f;
     }
@@ -99,7 +101,7 @@ F32 WolfAltitudeSky::farClipExtra()
 F32 WolfAltitudeSky::horizonSeaHeight()
 {
     static LLCachedControl<bool> on(gSavedSettings, "WolfViewerHorizonSea", true);
-    if (!on || !WolfGrid::isWolfTerritories())
+    if (!on || !WolfGrid::isOnWolfTerritories())
     {
         return -1.f;
     }
@@ -110,7 +112,7 @@ F32 WolfAltitudeSky::horizonSeaHeight()
 bool WolfAltitudeSky::cloudDeck(CloudDeck& out)
 {
     static LLCachedControl<bool> on(gSavedSettings, "WolfViewerFlyClouds", true);
-    if (!on || !WolfGrid::isWolfTerritories() || !WolfWeather::instanceExists() || !WolfWeather::enabled())
+    if (!on || !WolfGrid::isOnWolfTerritories() || !WolfWeather::instanceExists() || !WolfWeather::enabled())
     {
         return false;
     }

@@ -111,7 +111,7 @@ WolfMapOverlays::~WolfMapOverlays() {}
 bool WolfMapOverlays::active() const
 {
     // Always drawn on the grid — Paul 09-25: "make sure everyone can always see map textures".
-    return WolfGrid::isWolfTerritories();
+    return WolfGrid::isOnWolfTerritories();
 }
 
 bool WolfMapOverlays::editMode() const
@@ -509,7 +509,7 @@ bool WolfMapOverlays::dragAndDrop(LLWorldMapView& view, S32 x, S32 y, bool drop,
     // LLInventoryItem being dragged.
     if (cargo_type != DAD_TEXTURE) return false;
     *accept = ACCEPT_NO;
-    if (!WolfGrid::isWolfTerritories())
+    if (!WolfGrid::isOnWolfTerritories())
     {
         tooltip_msg = MAP_IMAGES_GRID_MESSAGE;
         if (drop) notify_error(MAP_IMAGES_GRID_MESSAGE);
@@ -640,7 +640,7 @@ void WolfMapOverlays::ensureFetched(LLWorldMapView& view)
 // Source: wolfterrainpaint.cpp fetchCoro — the same adapter shape (getRawAndSuspend, JSON body).
 void WolfMapOverlays::fetchCoro(F64 x0, F64 y0, F64 x1, F64 y1)
 {
-    if (!WolfGrid::isWolfTerritories()) { mFetching = false; return; }
+    if (!WolfGrid::isOnWolfTerritories()) { mFetching = false; return; }
     const std::string url = std::string(API_URL) + llformat("?x0=%.0f&y0=%.0f&x1=%.0f&y1=%.0f", x0, y0, x1, y1);
     LLCoreHttpUtil::HttpCoroutineAdapter::ptr_t adapter =
         std::make_shared<LLCoreHttpUtil::HttpCoroutineAdapter>("WolfMapOverlays", LLCore::HttpRequest::DEFAULT_POLICY_ID);
@@ -782,7 +782,7 @@ void WolfMapOverlays::rightsCoro(std::vector<LLUUID> regions)
 LLSD WolfMapOverlays::post(const LLSD& body, S32& http_status)
 {
     http_status = 0;
-    if (!WolfGrid::isWolfTerritories())
+    if (!WolfGrid::isOnWolfTerritories())
     {
         return LLSD().with("success", false).with("error", MAP_IMAGES_GRID_MESSAGE);
     }

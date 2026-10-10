@@ -103,7 +103,7 @@ void WolfFloaterWeatherReport::fetch()
 {
     LLViewerRegion* region = gAgent.getRegion();
     if (!region) return;
-    if (!WolfGrid::isWolfTerritories())
+    if (!WolfGrid::isOnWolfTerritories())
     {
         // The request carries this login's agent and session: only ever to Wolf's own site.
         mStatus->setText(std::string("The weather report is for Wolf Territories regions."));

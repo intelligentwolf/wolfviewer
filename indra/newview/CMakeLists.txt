@@ -939,6 +939,7 @@ set(viewer_SOURCE_FILES
     wolfweather.cpp
     wolfspanscreens.cpp
     wolffloaterairports.cpp
+    wolfsuitcase.cpp
     wolflightning.cpp
     wolfspeech.cpp
     wolfoceanfft.cpp
@@ -1858,6 +1859,7 @@ set(viewer_HEADER_FILES
     wolfweather.h
     wolfspanscreens.h
     wolffloaterairports.h
+    wolfsuitcase.h
     wolflightning.h
     wolfspeech.h
     wolfoceanfft.h

@@ -949,6 +949,18 @@
 			<map>
 			</map>
 	</map>
+	<key>WolfSuitcaseArrivals</key>
+	<map>
+		<key>Comment</key>
+			<string>Items that arrived in My Suitcase on a hypergrid trip, moved into their normal folders on the way home (wolfsuitcase.cpp)</string>
+		<key>Persist</key>
+			<integer>1</integer>
+		<key>Type</key>
+			<string>LLSD</string>
+		<key>Value</key>
+			<array>
+			</array>
+	</map>
 	<key>WolfDashboardVehicleTypes</key>
 	<map>
 		<key>Comment</key>

@@ -255,7 +255,7 @@ std::vector<U64> WolfWaveZones::neighbourHandles() const
 void WolfWaveZones::idle()
 {
     // Other grids get the automatic layout: nothing is asked of the Wolf Territories service.
-    if (!WolfGrid::isWolfTerritories()) return;
+    if (!WolfGrid::isOnWolfTerritories()) return;
     LLViewerRegion* rgn = gAgent.getRegion();
     if (!rgn) return;
     const F64 now = LLFrameTimer::getElapsedSeconds();
@@ -760,7 +760,7 @@ bool WolfWaveZones::cellEditable(S32 cx, S32 cy) const
 
 void WolfWaveZones::preview(const Tiles& tiles, bool enabled)
 {
-    if (!WolfGrid::isWolfTerritories()) { notify("Sorry, this function is only available on Wolf Territories Grid."); return; }
+    if (!WolfGrid::isOnWolfTerritories()) { notify("Sorry, this function is only available on Wolf Territories Grid."); return; }
     LLViewerRegion* rgn = gAgent.getRegion();
     if (!rgn) return;
     ++mPreviewRevision;
@@ -774,7 +774,7 @@ void WolfWaveZones::preview(const Tiles& tiles, bool enabled)
 
 void WolfWaveZones::previewParams(const LLSD& params)
 {
-    if (!WolfGrid::isWolfTerritories()) { notify("Sorry, this function is only available on Wolf Territories Grid."); return; }
+    if (!WolfGrid::isOnWolfTerritories()) { notify("Sorry, this function is only available on Wolf Territories Grid."); return; }
     LLViewerRegion* region = gAgent.getRegion();
     if (!region) return;
     // <WolfViewer 2026-09-21> Most of these are uniforms read every frame through params() and
@@ -819,7 +819,7 @@ void WolfWaveZones::clearPreview()
 bool WolfWaveZones::save(const SaveTarget& target, const Tiles& tiles, const LLSD& params, bool enabled, bool natural_water)
 {
     // Source: WolfGrid login identity; the server separately verifies the captured request.
-    if (!WolfGrid::isWolfTerritories()) { mLastSaveError = "Sorry, this function is only available on Wolf Territories Grid."; notify(mLastSaveError); return false; }
+    if (!WolfGrid::isOnWolfTerritories()) { mLastSaveError = "Sorry, this function is only available on Wolf Territories Grid."; notify(mLastSaveError); return false; }
     const Region* r = current();
     if (!r || r->mUuid != target.mUuid || r->mHandle != target.mHandle)
     {
@@ -1554,7 +1554,7 @@ bool WolfPanelLandWaves::postBuild()
 void WolfPanelLandWaves::toggleWorldBrush()
 {
     if (mWorldTool->active()) { stopWorldBrush(); setStatus("Water brush stopped. Save to keep your changes.", false); return; }
-    if (gDisconnected || !WolfGrid::isWolfTerritories() || !targetCurrent())
+    if (gDisconnected || !WolfGrid::isOnWolfTerritories() || !targetCurrent())
     {
         mWorldPaint->setToggleState(false);
         setStatus("The region's wave layout is not ready. Wait for it to load before painting.", true);
@@ -1605,7 +1605,7 @@ bool WolfPanelLandWaves::paintStroke(F32 ax, F32 ay, F32 bx, F32 by, bool waterO
 
 void WolfPanelLandWaves::onBrush(char z)
 {
-    if (!WolfGrid::isWolfTerritories()) { setStatus("Sorry, this function is only available on Wolf Territories Grid.", true); return; }
+    if (!WolfGrid::isOnWolfTerritories()) { setStatus("Sorry, this function is only available on Wolf Territories Grid.", true); return; }
     // [SURF HEIGHT 2026-10-02] The surf brush paints at the "Height %" slider's height.
     const char paint = (z == 's' && mSurfHere) ? WolfWaveZones::surfCharFor(ll_round(mSurfHere->getValueF32())) : z;
     if (mPainter) mPainter->setBrush(paint);
@@ -1635,7 +1635,7 @@ void WolfPanelLandWaves::armBakeConfirm()
 void WolfPanelLandWaves::draw()
 {
     if (gDisconnected) stopWorldBrush();
-    if (!WolfGrid::isWolfTerritories()) { refresh(); LLPanel::draw(); return; }
+    if (!WolfGrid::isOnWolfTerritories()) { refresh(); LLPanel::draw(); return; }
     if (mTarget.mHandle && !targetCurrent()) { invalidateTarget(); refresh(); }
     const F64 now = LLFrameTimer::getElapsedSeconds();
     if (mBakeWaitUntil > 0.0 && !mStatusError && !mWasSaving)
@@ -1674,7 +1674,7 @@ void WolfPanelLandWaves::draw()
 void WolfPanelLandWaves::refresh()
 {
     if (mTarget.mHandle && !targetCurrent()) invalidateTarget();
-    if (!WolfGrid::isWolfTerritories())
+    if (!WolfGrid::isOnWolfTerritories())
     {
         setStatus("Sorry, this function is only available on Wolf Territories Grid.", true);
         if (mNote) mNote->setText(std::string("Sorry, this function is only available on Wolf Territories Grid."));
@@ -1797,7 +1797,7 @@ LLSD WolfPanelLandWaves::paramsFromControls() const
 void WolfPanelLandWaves::onParamChanged()
 {
     if (mWriting) return;
-    if (!WolfGrid::isWolfTerritories()) { setStatus("Sorry, this function is only available on Wolf Territories Grid.", true); return; }
+    if (!WolfGrid::isOnWolfTerritories()) { setStatus("Sorry, this function is only available on Wolf Territories Grid.", true); return; }
     if (!targetCurrent()) { invalidateTarget(); refresh(); return; }
     if (!mEnabled->get()) stopWorldBrush();
     // Live in the water until Save or Revert, like the brush (WolfStorm land_waves_tab.js).
@@ -1814,7 +1814,7 @@ void WolfPanelLandWaves::onParamChanged()
 void WolfPanelLandWaves::onNaturalWaterChanged()
 {
     if (mWriting) return;
-    if (!WolfGrid::isWolfTerritories()) { setStatus("Sorry, this function is only available on Wolf Territories Grid.", true); return; }
+    if (!WolfGrid::isOnWolfTerritories()) { setStatus("Sorry, this function is only available on Wolf Territories Grid.", true); return; }
     if (!targetCurrent()) { invalidateTarget(); refresh(); return; }
     if (!WolfWaveZones::instance().current() || !mPainter) return;
     mDirty = true;
@@ -1835,7 +1835,7 @@ void WolfPanelLandWaves::previewEdit()
 
 void WolfPanelLandWaves::onSave()
 {
-    if (!WolfGrid::isWolfTerritories()) { setStatus("Sorry, this function is only available on Wolf Territories Grid.", true); return; }
+    if (!WolfGrid::isOnWolfTerritories()) { setStatus("Sorry, this function is only available on Wolf Territories Grid.", true); return; }
     if (!mPainter) return;
     if (!targetCurrent()) { invalidateTarget(); refresh(); setStatus("The region changed. Review this region's layout before saving.", true); return; }
     if (mWasSaving) return;
@@ -1884,7 +1884,7 @@ bool WolfPanelLandWaves::ensureEnabled()
 
 void WolfPanelLandWaves::onDefault()
 {
-    if (!WolfGrid::isWolfTerritories()) { setStatus("Sorry, this function is only available on Wolf Territories Grid.", true); return; }
+    if (!WolfGrid::isOnWolfTerritories()) { setStatus("Sorry, this function is only available on Wolf Territories Grid.", true); return; }
     if (!targetCurrent()) { invalidateTarget(); refresh(); return; }
     WolfWaveZones& wz = WolfWaveZones::instance();
     const WolfWaveZones::Region* r = wz.current();

@@ -334,7 +334,7 @@ void WolfRegionWeather::fetchCoro(std::string region_id, bool include_parcel, F3
     // them. Enforcing before then would break every older viewer ON our own grid.
     // <WolfViewer 2026-10-08> Only for our own residents: a hypergrid visitor's session belongs to
     // another grid and is not ours to send anywhere; the read is anonymous for them.
-    if (WolfGrid::isWolfTerritories())
+    if (WolfGrid::isOnWolfTerritories())
     {
         headers->append("X-Wolf-Agent", gAgentID.asString());
         headers->append("X-Wolf-Session", gAgentSessionID.asString());
@@ -563,7 +563,7 @@ void WolfRegionWeather::applyToWeather()
 U64 WolfRegionWeather::saveRegion(const WolfWeatherProfile& profile, bool allow_parcel,
                                   const WolfWeatherSaveTarget& captured_target)
 {
-    if (!WolfGrid::isWolfTerritories()) { mLastError = "Sorry, this function is only available on Wolf Territories Grid."; ++mGeneration; return 0; }
+    if (!WolfGrid::isOnWolfTerritories()) { mLastError = "Sorry, this function is only available on Wolf Territories Grid."; ++mGeneration; return 0; }
     if (mSavingRegion) { mLastError = "A region weather change is already saving."; ++mGeneration; return 0; }
     const std::string id = currentRegionId();
     if (id.empty() || captured_target.mEditorTarget != regionTarget()
@@ -598,7 +598,7 @@ U64 WolfRegionWeather::saveRegion(const WolfWeatherProfile& profile, bool allow_
 U64 WolfRegionWeather::saveParcel(const WolfWeatherProfile& profile,
                                   const WolfWeatherSaveTarget& captured_target)
 {
-    if (!WolfGrid::isWolfTerritories()) { mLastError = "Sorry, this function is only available on Wolf Territories Grid."; ++mGeneration; return 0; }
+    if (!WolfGrid::isOnWolfTerritories()) { mLastError = "Sorry, this function is only available on Wolf Territories Grid."; ++mGeneration; return 0; }
     if (mSavingParcel) { mLastError = "A parcel weather change is already saving."; ++mGeneration; return 0; }
     const std::string id = currentRegionId();
     // Source: llviewerparcelmgr.cpp:1860-1894 updates the agent-parcel record and emits
@@ -831,7 +831,7 @@ bool WolfPanelWeather::postBuild()
 bool WolfPanelWeather::canEdit() const
 {
     LLViewerRegion* region = gAgent.getRegion();
-    if (!WolfGrid::isWolfTerritories() || !region) return false;
+    if (!WolfGrid::isOnWolfTerritories() || !region) return false;
     // <WolfViewer 2026-10-03> While Jimmy Olsen's Automatic Environment drives this region's
     // weather, weather.php refuses a hand-set region value (409), so the region scope is locked.
     if (mScope == REGION && WolfRegionWeather::instance().autoEnvWeather()) return false;
@@ -1002,7 +1002,7 @@ void WolfPanelWeather::writeControls()
 
 void WolfPanelWeather::updatePreview()
 {
-    if (!WolfGrid::isWolfTerritories()) { setStatus("Sorry, this function is only available on Wolf Territories Grid.", true); return; }
+    if (!WolfGrid::isOnWolfTerritories()) { setStatus("Sorry, this function is only available on Wolf Territories Grid.", true); return; }
     WolfWeatherProfile p = mEdit;
     // A preview is always ON, whatever the "Apply Global Weather" box says: the box decides
     // what OTHER people get, and previewing nothing would make the slider look broken.
@@ -1034,7 +1034,7 @@ void WolfPanelWeather::onVisibilityChange(bool visible)
 
 void WolfPanelWeather::onControlChanged()
 {
-    if (!WolfGrid::isWolfTerritories()) { setStatus("Sorry, this function is only available on Wolf Territories Grid.", true); return; }
+    if (!WolfGrid::isOnWolfTerritories()) { setStatus("Sorry, this function is only available on Wolf Territories Grid.", true); return; }
     if (mWriting) return;
     readControls();
     markEdited();
@@ -1044,7 +1044,7 @@ void WolfPanelWeather::onControlChanged()
 
 void WolfPanelWeather::onKindChanged()
 {
-    if (!WolfGrid::isWolfTerritories()) { setStatus("Sorry, this function is only available on Wolf Territories Grid.", true); return; }
+    if (!WolfGrid::isOnWolfTerritories()) { setStatus("Sorry, this function is only available on Wolf Territories Grid.", true); return; }
     if (mWriting) return;
     const WolfWeatherProfile::Kind was = mEdit.mKind;
     readControls();
@@ -1061,7 +1061,7 @@ void WolfPanelWeather::onKindChanged()
 
 void WolfPanelWeather::onApplyPreset()
 {
-    if (!WolfGrid::isWolfTerritories()) { setStatus("Sorry, this function is only available on Wolf Territories Grid.", true); return; }
+    if (!WolfGrid::isOnWolfTerritories()) { setStatus("Sorry, this function is only available on Wolf Territories Grid.", true); return; }
     const std::string id = mPreset->getValue().asString();
     if (id.empty()) return;
     mEdit = WolfWeatherProfile::applyPreset(mEdit, id);
@@ -1073,7 +1073,7 @@ void WolfPanelWeather::onApplyPreset()
 
 void WolfPanelWeather::onReset()
 {
-    if (!WolfGrid::isWolfTerritories()) { setStatus("Sorry, this function is only available on Wolf Territories Grid.", true); return; }
+    if (!WolfGrid::isOnWolfTerritories()) { setStatus("Sorry, this function is only available on Wolf Territories Grid.", true); return; }
     // Reset is the DEFAULTS, keeping what falls; Revert is what puts the grid's row back. Two
     // buttons that did the same thing would be worse than useless.
     WolfWeatherProfile fresh;
@@ -1090,7 +1090,7 @@ void WolfPanelWeather::onReset()
 
 void WolfPanelWeather::onApply()
 {
-    if (!WolfGrid::isWolfTerritories()) { setStatus("Sorry, this function is only available on Wolf Territories Grid.", true); return; }
+    if (!WolfGrid::isOnWolfTerritories()) { setStatus("Sorry, this function is only available on Wolf Territories Grid.", true); return; }
     if (mSavePending) { setStatus(getString("str_saving"), false); return; }
     if (!canEdit()) { setStatus(getString(mScope == REGION ? "str_read_only" : "str_read_only_parcel"), true); return; }
     readControls();
@@ -1135,7 +1135,7 @@ void WolfPanelWeather::refresh()
 
 void WolfPanelWeather::draw()
 {
-    if (!WolfGrid::isWolfTerritories()) { setStatus("Sorry, this function is only available on Wolf Territories Grid.", true); LLPanel::draw(); return; }
+    if (!WolfGrid::isOnWolfTerritories()) { setStatus("Sorry, this function is only available on Wolf Territories Grid.", true); LLPanel::draw(); return; }
     WolfRegionWeather& rw = WolfRegionWeather::instance();
     const bool target_changed = currentTarget() != mTarget;
     if (target_changed) adoptTarget(true);
@@ -1439,7 +1439,7 @@ private:
 
 void WolfPanelWeather::onInventoryPreset()
 {
-    if (!WolfGrid::isWolfTerritories()) { setStatus("Sorry, this function is only available on Wolf Territories Grid.", true); return; }
+    if (!WolfGrid::isOnWolfTerritories()) { setStatus("Sorry, this function is only available on Wolf Territories Grid.", true); return; }
     cancelPresetLoad();
     const LLHandle<LLView> owner = getHandle();
     const std::string target = mTarget;
@@ -1453,7 +1453,7 @@ void WolfPanelWeather::onInventoryPreset()
             WolfPanelWeather* panel = static_cast<WolfPanelWeather*>(owner.get());
             if (!panel || !panel->isInVisibleChain() || panel->mTarget != target
                 || panel->currentTarget() != target || !panel->mEditGate.accepts(edit)) return;
-            if (!WolfGrid::isWolfTerritories()) { panel->setStatus("Sorry, this function is only available on Wolf Territories Grid.", true); return; }
+            if (!WolfGrid::isOnWolfTerritories()) { panel->setStatus("Sorry, this function is only available on Wolf Territories Grid.", true); return; }
             panel->mEdit = p;
             panel->mEdit.clampAll();
             panel->markEdited();

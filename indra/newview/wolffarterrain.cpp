@@ -88,7 +88,7 @@ namespace
 bool WolfFarTerrain::enabled()
 {
     static LLCachedControl<bool> on(gSavedSettings, "WolfViewerFarTerrain", true);
-    return on && WolfGrid::isWolfTerritories();
+    return on && WolfGrid::isOnWolfTerritories();
 }
 
 WolfFarTerrain::WolfFarTerrain()

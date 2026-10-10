@@ -85,7 +85,7 @@ void WolfNaturalWater::idle()
     // <WolfViewer 2026-09-22> Wolf Territories only (Paul 09-22: "I don't want people from
     // other grids getting a free ride on what we have created"). Off-grid this whole
     // subsystem is inert, which also saves the work it would otherwise do for nothing.
-    if (!WolfGrid::isWolfTerritories()) return;
+    if (!WolfGrid::isOnWolfTerritories()) return;
     static LLCachedControl<bool> enabled(gSavedSettings, "WolfTerrainWater", true);
     static LLCachedControl<F32> catchment(gSavedSettings, "WolfTerrainWaterCatchment", 5000.f);
     if (!enabled)
@@ -1179,7 +1179,7 @@ void WolfNaturalWater::apply(std::shared_ptr<Result> result)
     }
     // Switched off while this was computing: reset() has already cleared everything.
     static LLCachedControl<bool> enabled(gSavedSettings, "WolfTerrainWater", true);
-    if (!enabled || !WolfGrid::isWolfTerritories())
+    if (!enabled || !WolfGrid::isOnWolfTerritories())
     {
         return;
     }

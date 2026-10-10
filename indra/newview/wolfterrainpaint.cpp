@@ -253,7 +253,7 @@ void WolfTerrainPaint::refresh()
     // region handles to the Wolf Territories service. Region handles identify a specific
     // region on a specific grid; we have no business logging Second Life's. wolfwavezones.cpp
     // and wolfregionweather.cpp already gate their panel paths — this one did not.
-    if (!WolfGrid::isWolfTerritories()) return;
+    if (!WolfGrid::isOnWolfTerritories()) return;
     if (mFetching) return;
     std::vector<U64> handles = neighbourHandles();
     if (handles.empty()) return;
@@ -352,7 +352,7 @@ WolfTerrainPaint::Record WolfTerrainPaint::parseRecord(const LLSD& r)
 void WolfTerrainPaint::fetchCoro(std::vector<U64> handles)
 {
     // <WolfViewer 2026-09-22/> belt and braces: nothing reaches the service off-grid
-    if (!WolfGrid::isWolfTerritories()) return;
+    if (!WolfGrid::isOnWolfTerritories()) return;
     std::string url = std::string(API_URL) + "?handles=";
     for (size_t i = 0; i < handles.size(); ++i)
     {
@@ -1037,7 +1037,7 @@ void WolfTerrainPaint::unbind(LLGLSLShader* shader)
 
 void WolfTerrainPaint::idle()
 {
-    if (!WolfGrid::isWolfTerritories()) return;
+    if (!WolfGrid::isOnWolfTerritories()) return;
     LLViewerRegion* agent_rgn = gAgent.getRegion();
     if (!agent_rgn) return;
     const F64 now = LLFrameTimer::getElapsedSeconds();
@@ -1797,7 +1797,7 @@ void WolfPanelTerrainPaint::draw()
     if (!mFitted) { mFitted = true; WolfGrid::fitFloaterToContents(this); }
     // <WolfViewer 2026-09-22> Off-grid the panel now fetches nothing (WolfTerrainPaint::refresh),
     // so say why rather than sit there looking broken. Same wording as every other gate.
-    if (!WolfGrid::isWolfTerritories())
+    if (!WolfGrid::isOnWolfTerritories())
     {
         setStatus("Sorry, this function is only available on Wolf Territories Grid.", true);
         LLPanel::draw();

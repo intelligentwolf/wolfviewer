@@ -355,6 +355,7 @@ private:
     // inside the turn circle), and the side of the centreline it went out on (+1 right, -1 left)
     bool mLandOutbound = false;
     F32 mLandOutSide = 1.f;
+    F32 mLandTurnR = 0.f;   // <WolfViewer 2026-10-11/> the approach's turn radius, fixed (0 = not yet)
     // <WolfViewer 2026-10-07> AUTO TAKE-OFF (Paul: "auto pilot, should be able to take off, fly and
     // land perfectly"). The autopilot engaged with a plane on the ground takes off along the heading
     // it points: ROLL at full power, ROTATE once the speed is up, CLIMB out (gear up at 30 m), then

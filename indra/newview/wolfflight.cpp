@@ -922,6 +922,7 @@ void WolfFlight::landSetRunway(const LLVector3d& a, const LLVector3d& b, F32 wid
     if (!keep_direction)
     {
         mLandOutbound = false;
+        mLandTurnR = 0.f;   // <WolfViewer 2026-10-11/> worked out again for the new approach
         const F32 z = (F32)mData.mPosGlobal.mdV[VZ];
         const F32 out = llclamp((z - top) / GLIDE_TAN, 600.f, 3000.f);
         mLandFaf = mLandThr - LLVector3d(mLandDir * out);
@@ -1053,8 +1054,19 @@ void WolfFlight::landGuidance(F32 dt)
         // past the fix or pointing away from the runway near it, so a slow intercept never loops.
         // FINAL once lined up within the capture distance of the fix.
         const F32 rwy_hdg = wrap360((F32)(atan2(mLandDir.mV[VX], mLandDir.mV[VY]) * RAD_TO_DEG));
-        const F32 v = llmax(mData.mGS, 15.f);
-        const F32 turn_r = llclamp(v * v / (G * 0.4663f) * 1.2f, 120.f, 1500.f);   // tan 25 = 0.4663
+        // <WolfViewer 2026-10-11> Paul, flying to Tromso on the w65 build: "now its gone mad". The radius was worked out
+        // from the speed of the moment, and that swung 28..70 m/s (speed protection, terrain climbs), so the radius
+        // swung ~300..1500 m: it turned in at 1376 m out, then 5 s later counted the fix inside the turn again and flew
+        // out again - long hard reversing turns, in which the control learner took the bank keys as reversed and
+        // every roll went the wrong way. Now ONE radius per leg: from the faster of the selected speed and the ground
+        // speed, fixed when the runway is set and again when an outbound leg starts, so the in / out tests cannot
+        // flip-flop with the speed.
+        if (mLandTurnR <= 0.f)
+        {
+            const F32 v = llmax(llmax(cruise, mData.mGS), 15.f);
+            mLandTurnR = llclamp(v * v / (G * 0.4663f) * 1.2f, 120.f, 1500.f);   // tan 25 = 0.4663
+        }
+        const F32 turn_r = mLandTurnR;
         const F32 capture = llmax(150.f, mData.mGS * 6.f);
         const F32 track_err = fabsf(wrap180(mData.mTrack - rwy_hdg));
         const bool aligned = fabsf(across) < llmax(60.f, mLandWidth) && track_err < 25.f;
@@ -1062,6 +1074,8 @@ void WolfFlight::landGuidance(F32 dt)
         {
             mLandOutbound = true;
             mLandOutSide = across >= 0.f ? 1.f : -1.f;
+            const F32 v = llmax(llmax(cruise, mData.mGS), 15.f);
+            mLandTurnR = llclamp(v * v / (G * 0.4663f) * 1.2f, 120.f, 1500.f);   // the leg's radius, fixed for it
             postCas("TURNING FOR FINAL", CAS_MEMO);
             LL_INFOS("WolfFlight") << "autoland: fix inside the turn (" << to_faf << " m, turn radius " << turn_r
                                    << "), flying out on the " << (mLandOutSide > 0.f ? "right" : "left") << LL_ENDL;
@@ -1979,7 +1993,12 @@ void WolfFlight::learn(F32 dt)
     // PITCH and BANK both as reversed, flipped both, and every correction then went the wrong way: roll -150, pitch -55,
     // PULL UP. Nothing is learned from an aircraft that far from level: what it does there is not what its keys do.
     const bool wild = !mSail && (fabsf(mData.mRoll) > 30.f || fabsf(mData.mPitch) > 20.f);
-    if ((mSail && mData.mGS < 1.f) || settling || not_flying || wild)
+    // <WolfViewer 2026-10-11> Paul, Tromso: on the approach the AP flies long turns and reverses them (out, round,
+    // onto the centreline); a plane still turning one way while the keys ask for the other looks exactly like
+    // reversed keys, and at 12:18:14 the bank keys were "learned" reversed - the plane tumbled. The keys are learned
+    // in the cruise, never from the approach to the ground (or the take-off).
+    const bool landing_now = mLand >= LAND_APPROACH || mTakeoff != TO_NONE;
+    if ((mSail && mData.mGS < 1.f) || settling || not_flying || wild || landing_now)
     {
         mLearnPitchAcc = mLearnPitchWeight = 0.f;
         mLearnBankAcc = mLearnBankWeight = 0.f;

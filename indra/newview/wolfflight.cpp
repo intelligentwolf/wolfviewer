@@ -1032,7 +1032,9 @@ void WolfFlight::landSetRunway(const LLVector3d& a, const LLVector3d& b, F32 wid
         mLandOutbound = false;
         mLandTurnR = 0.f;   // <WolfViewer 2026-10-11/> worked out again for the new approach
         const F32 z = (F32)mData.mPosGlobal.mdV[VZ];
-        const F32 out = llclamp((z - top) / GLIDE_TAN, 600.f, 3000.f);
+        // <WolfViewer 2026-10-11> at most 2 km out (was 3): final now comes down at up to 10 degrees when high, and a
+        // shorter final keeps the whole approach close (Paul: "its flying miles away from tromso")
+        const F32 out = llclamp((z - top) / GLIDE_TAN, 600.f, 2000.f);
         mLandFaf = mLandThr - LLVector3d(mLandDir * out);
         mLandFaf.mdV[VZ] = top + out * GLIDE_TAN;
         const S32 rwy = llmax(1, (S32)llround(wrap360((F32)(atan2(mLandDir.mV[VX], mLandDir.mV[VY]) * RAD_TO_DEG)) / 10.f));
@@ -1143,7 +1145,7 @@ void WolfFlight::landGuidance(F32 dt)
         const F32 to_faf = (F32)sqrt(dx * dx + dy * dy);
         const F32 max_vs = llclamp(mData.mAirspeed * 0.176f, 0.7f, 8.f);
         mLandWantVS = llclamp(((F32)mLandFaf.mdV[VZ] - z) * 0.15f, -max_vs, max_vs);
-        mLandWantSpeed = llmax(approach, llmin(cruise, approach + to_faf / 60.f));
+        mLandWantSpeed = approach;   // <WolfViewer 2026-10-11/> slow for the whole approach: a tight turn, a short way out
         F32 along = 0.f, across = 0.f;
         land_track(mData.mPosGlobal, mLandFaf, mLandDir, along, across);
         // At the fix, or already past it on the centreline's side of it AND where final would want
@@ -1176,7 +1178,12 @@ void WolfFlight::landGuidance(F32 dt)
         // flip-flop with the speed.
         // The speed for it: the selected speed, but never more than the plane has lately flown (mSpeedRef - Paul once set
         // 279 m/s on a plane that tops out near 180), and never less than it is doing now.
-        const F32 radius_speed = llmax(llmax(llmin(cruise, mSpeedRef > 1.f ? mSpeedRef : cruise), mData.mGS), 15.f);
+        // <WolfViewer 2026-10-11> Paul, Iceland -> Tromso: "its flying miles away from tromso" - the turn was sized for the
+        // cruise speed (62 m/s: ~1 km radius, so out 3 radii past a 3 km fix = over 6 km away). The approach is now flown at
+        // the approach speed (below), so the radius is the approach speed's, of what the plane really flies: in simulation
+        // (scratchpad sim2.py, 40 / 62 / 100 m/s, six starts each, slowing as the A/T would) every start reaches FINAL,
+        // and at 62 m/s the plane stays within ~3.8 km instead of ~6.7 km.
+        const F32 radius_speed = llmax(llmin(approach, mSpeedRef > 1.f ? mSpeedRef : approach), 15.f);
         if (mLandTurnR <= 0.f)
         {
             mLandTurnR = llclamp(radius_speed * radius_speed / (G * 0.4663f) * 1.2f, 120.f, 1500.f);   // tan 25 = 0.4663

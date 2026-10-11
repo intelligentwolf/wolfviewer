@@ -112,9 +112,12 @@ WolfSpeech::~WolfSpeech()
         LLFile::remove(p.mPath);
     }
     mPlayed.clear();
-    for (const auto& kv : mTowerCache)   // <WolfViewer 2026-10-11/> the tower's phrases
+    for (const auto& kv : mTowerCache)   // <WolfViewer 2026-10-11/> the tower's phrases (the sound cache may have purged them)
     {
-        LLFile::remove(kv.second.mPath);
+        if (gDirUtilp->fileExists(kv.second.mPath))
+        {
+            LLFile::remove(kv.second.mPath);
+        }
     }
     mTowerCache.clear();
 }

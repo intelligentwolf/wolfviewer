@@ -380,29 +380,18 @@ private:
     // land perfectly"). The autopilot engaged with a plane on the ground takes off along the heading
     // it points: ROLL at full power, ROTATE once the speed is up, CLIMB out (gear up at 30 m), then
     // the ordinary modes from 120 m. REJECT = power off along the runway until stopped. NONE = not taking off.
-    // <WolfViewer 2026-10-11> LINEUP before the roll (Paul: "the first thing to do is make the plane 100% straight and
-    // right on the runway THEN do the take off"): taxi onto the centreline of the runway it sits on, pointing down it.
-    enum ETakeoff { TO_NONE = 0, TO_ROLL, TO_ROTATE, TO_CLIMB, TO_REJECT, TO_LINEUP };
+    enum ETakeoff { TO_NONE = 0, TO_ROLL, TO_ROTATE, TO_CLIMB, TO_REJECT };
     void takeoffStart();
     void takeoffGuidance();
     void takeoffReject(const std::string& why);
     void takeoffClearCas();
-    void takeoffBeginRoll();            // <WolfViewer 2026-10-11/> lined up (or no runway): power on, cleared for take-off
+    void takeoffBeginRoll();            // <WolfViewer 2026-10-11/> the roll: cleared for take-off
     S32  rollSteer(F32 err);            // <WolfViewer 2026-10-11/> on the ground: short taps of the turn keys toward the heading
-    bool takeoffOnRunway() const { return mTakeoff == TO_ROLL || mTakeoff == TO_ROTATE || mTakeoff == TO_REJECT || mTakeoff == TO_LINEUP; }
+    bool takeoffOnRunway() const { return mTakeoff == TO_ROLL || mTakeoff == TO_ROTATE || mTakeoff == TO_REJECT; }
     ETakeoff mTakeoff = TO_NONE;
-    // <WolfViewer 2026-10-11> the runway taken off from (takeoffStart: WolfAirports::findRunway at the plane): its centreline
-    // through mToLineOrigin along mToLineDir (the end facing the plane's heading), its far end mToLineLen along
-    bool mToHaveRunway = false;
-    LLVector3d mToLineOrigin;
-    LLVector3 mToLineDir;
-    F32 mToLineLen = 0.f, mToLineWidth = 0.f;
-    LLVector3d mToRollStart;            // where the roll began (the run to rotation is measured from it)
-    F32 mToRunMeasured = 0.f;           // metres from the roll's start to rotation, last take-off this session
     F64 mToSteerUntil = 0.0, mToSteerNext = 0.0;   // rollSteer's tap
     S32 mToSteerDir = 0;
     F64 mToNextRollLog = 0.0;           // the roll in the log twice a second
-    F32 mToSteer = 0.f;                 // the heading steered on the ground: the runway's, plus the way back to its centreline
     // </WolfViewer>
     F32 mToHeading = 0.f;               // the runway heading: the way the plane pointed when engaged
     F32 mToGroundZ = 0.f;               // the pilot's height on the runway

@@ -1178,16 +1178,30 @@ void LLToolBarView::draw()
         const LLView* strip = findChildView("chat_bar_stand_fly_container_panel", true);
         const S32 strip_w = (strip && strip->getVisible()) ? strip->getRect().getWidth() : 0;
         const S32 panel_w = parent ? parent->getRect().getWidth() : bar->getRect().getWidth();
-        // <WolfViewer 2026-10-11> 198: the eight show / hide icons' corner (8 x 24 + 6) - w65 added Speedboat,
-        // Spaceship and Submarine (was 126 for five)
-        S32 want = panel_w - strip_w - 198;
-        // The buttons' own width (the centred button panel) is the floor.
+        // <WolfViewer 2026-10-11> Paul: "the toolbars at the bottom need to be in the middle but they are pushed over
+        // ... the little buttons ... move it". The bar was only narrowed from the right to clear the icons' corner, so its
+        // centre sat half the corner left of the screen's (63 px with five icons, 99 px with eight). Now it is trimmed
+        // EQUALLY on both sides about the screen centre, just enough to clear the corner: centred whatever the icons.
+        // Panel-local: the screen centre is at (panel_w - strip_w) / 2 (the panel starts strip_w right of the screen's
+        // left edge); the bar may reach left to 0 and right to panel_w - corner. 198: the eight show / hide icons'
+        // corner (8 x 24 + 6, panel_toolbar_view.xml); 0 when the icons are hidden (WolfHideToolbarIcons).
+        const S32 corner = (mWolfToolbarToggle && mWolfToolbarToggle->getVisible()) ? 198 : 0;
+        const S32 centre = (panel_w - strip_w) / 2;
+        const S32 half = llmax(0, llmin(centre, panel_w - corner - centre));
+        S32 want = 2 * half;
+        S32 left = centre - half;
+        // The buttons' own width (the centred button panel) is the floor: if they would not fit, the whole panel.
         const LLView* buttons = bar->findChildView("button_panel", true);
         const S32 need = buttons ? buttons->getRect().getWidth() + 8 : 0;
-        if (want < need) want = panel_w;
-        if (want > 0 && bar->getRect().getWidth() != want)
+        if (want < need)
+        {
+            want = panel_w;
+            left = 0;
+        }
+        if (want > 0 && (bar->getRect().getWidth() != want || bar->getRect().mLeft != left))
         {
             bar->reshape(want, bar->getRect().getHeight());
+            bar->setOrigin(left, bar->getRect().mBottom);
         }
     }
     // </WolfViewer>

@@ -353,6 +353,7 @@ private:
     // </WolfViewer>
     ELand mLand = LAND_NONE;
     bool mLandChecked = false;          // the destination has been looked up in the airports list
+    bool mLandByHandSaid = false;       // <WolfViewer 2026-10-11/> autoland off: "please land the plane yourself" said
     std::string mLandAirport;           // its name
     bool mLandAirportExact = false;
     LLVector3d mLandAirportGlobal;

@@ -1032,6 +1032,8 @@ F32 WolfFlight::landRunwayNeed() const
 void WolfFlight::landReset()
 {
     mLand = LAND_NONE;
+    mLandByHandSaid = false;   // <WolfViewer 2026-10-11/>
+    clearCas("LAND BY HAND");   // <WolfViewer 2026-10-11/>
     mLandChecked = false;
     mLandAirport.clear();
     mLandOutbound = false;
@@ -1076,7 +1078,9 @@ void WolfFlight::landCheckAirport()
     mDest.mGlobal.mdV[VX] = ap->mGlobal.mdV[VX];
     mDest.mGlobal.mdV[VY] = ap->mGlobal.mdV[VY];
     rebuildRoute();
-    mLand = craft() == CRAFT_PLANE ? LAND_CRUISE : LAND_NONE;
+    // <WolfViewer 2026-10-11> autoland only with WolfFlightAutoland (Paul: off for this release - the plane flies to the
+    // airport and circles over it, and the pilot lands; see the hold entry in guidance())
+    mLand = (craft() == CRAFT_PLANE && gSavedSettings.getBOOL("WolfFlightAutoland")) ? LAND_CRUISE : LAND_NONE;
     std::string shown = utf8str_truncate(ap->mName, 24);
     LLStringUtil::toUpper(shown);
     postCas("AIRPORT " + shown, CAS_MEMO);
@@ -1799,6 +1803,16 @@ void WolfFlight::guidance(F32 dt)
             {
                 mLateral = LAT_HOLD;
                 postCas("HOLDING AT DEST", CAS_MEMO);
+                // <WolfViewer 2026-10-11> autoland off (WolfFlightAutoland): over an airport, once, the pilot is asked to land
+                if (!mLandAirport.empty() && mLand == LAND_NONE && !mLandByHandSaid && craft() == CRAFT_PLANE)
+                {
+                    mLandByHandSaid = true;
+                    const std::string said = towerCallsign() + ", you are over " + mLandAirport + ". Please land the plane yourself.";
+                    tower_say(said);
+                    postCas("LAND BY HAND", CAS_MEMO);
+                    LLNotificationsUtil::add("SystemMessageTip", LLSD().with("MESSAGE", said));
+                    LL_INFOS("WolfFlight") << "holding over " << mLandAirport << ", autoland off: the pilot lands" << LL_ENDL;
+                }
             }
         }
         break;

@@ -77,7 +77,7 @@ namespace
     // avatars are just a jumbled mess". Two faults: (1) every ADD inside the suitcase while away was noted, and the
     // suitcase's own contents also arrive as ADDs as they load abroad, so things already in it were taken for new;
     // (2) each noted item went home on its own to its type's folder, so a folder got from the trip was torn apart.
-    // Now: only items CREATED during the trip are noted (inventory creation date at or after the trip's start, less 10
+    // Now: only items CREATED during the trip are noted (inventory creation date at or after the trip's start, less 2
     // minutes for clocks; WolfSuitcaseTripStart, per account, set when the agent is first seen abroad), and a folder
     // goes home WHOLE (to the top of the inventory, where a given folder lands) when everything in it came on the trip;
     // a folder that mixes trip things with things already packed stays in the suitcase, untouched.
@@ -376,10 +376,27 @@ namespace WolfSuitcase
         {
             gSavedPerAccountSettings.setU32("WolfSuitcaseTripStart", (U32)time(nullptr));
         }
+        static F64 home_since = 0.0;
+        if (abroad)
+        {
+            home_since = 0.0;
+        }
         if (region_known() && !abroad)
         {
+            if (home_since == 0.0)
+            {
+                home_since = now;
+            }
             bring_home();
-            const LLSD left = gSavedPerAccountSettings.getLLSD("WolfSuitcaseArrivals");
+            LLSD left = gSavedPerAccountSettings.getLLSD("WolfSuitcaseArrivals");
+            // anything still noted after 10 minutes home never loaded (deleted while away): let it go, so the trip ends
+            // and the next one starts its own clock
+            if (left.isArray() && left.size() > 0 && now - home_since > 600.0)
+            {
+                LL_INFOS("WolfSuitcase") << "home: " << left.size() << " noted things never loaded, forgotten" << LL_ENDL;
+                gSavedPerAccountSettings.setLLSD("WolfSuitcaseArrivals", LLSD::emptyArray());
+                left = LLSD::emptyArray();
+            }
             if ((!left.isArray() || left.size() == 0) && gSavedPerAccountSettings.getU32("WolfSuitcaseTripStart") != 0)
             {
                 gSavedPerAccountSettings.setU32("WolfSuitcaseTripStart", 0);

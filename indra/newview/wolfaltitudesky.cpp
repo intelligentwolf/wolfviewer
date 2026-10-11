@@ -136,16 +136,23 @@ bool WolfAltitudeSky::cloudDeck(CloudDeck& out)
     }
     cover = llmax(cover, llclamp((F32)p.mFog / 100.f, 0.f, 1.f) * 0.9f);
     // the sky's own cover: from about half (broken cloud) upward
-    cover = llmax(cover, llclamp(((F32)psky->getCloudShadow() - 0.45f) / 0.5f, 0.f, 1.f) * 0.85f);
+    // <WolfViewer 2026-10-11> Paul, flying Iceland -> Tromso: "its so bright i cant see its like very bright cloud". Jimmy
+    // Olsen's skies (since 10-10) set cloud coverage (cloud_shadow) to 1 for partly cloudy as well as cloudy - the copies
+    // in region-terrain-work/jimmy-eep-v9c/skies: PCLOUDY, CLOUDY and FOGGY all 1, TCLEAR 0 - so every cloudy day made the
+    // full overcast slab, base 370 m above the sea, and a plane held at 550 m over the hills flew in dense white
+    // (extinction 0.02 / m: ~150 m to see). The sky alone now makes at most a broken layer (gaps through it), only
+    // rain, snow or fog the full overcast; the base sits higher (800 m broken, 500 m in the worst weather) and the
+    // thick of it lets you see ~500 m (extinction at most 0.008 / m).
+    cover = llmax(cover, llclamp(((F32)psky->getCloudShadow() - 0.45f) / 0.5f, 0.f, 1.f) * 0.55f);
     if (cover < 0.3f)
     {
         return false;
     }
     const F32 water = LLEnvironment::instance().getWaterHeight();
     out.mCover = cover;
-    out.mBase = water + lerp(900.f, 350.f, cover);
+    out.mBase = water + lerp(1200.f, 500.f, cover);
     out.mTop = out.mBase + lerp(900.f, 2600.f, cover);
-    out.mDensity = lerp(0.004f, 0.02f, cover);
+    out.mDensity = lerp(0.003f, 0.008f, cover);
     out.mFade = smoothstep(150.f, 400.f, altitude());
     return out.mFade > 0.f;
 }

@@ -349,7 +349,6 @@ private:
     F32 mLandLen = 0.f, mLandWidth = 0.f, mLandTop = 0.f;
     LLVector3d mLandFaf;                // the final approach fix, on the extended centreline
     F64 mLandSearchStart = 0.0, mNextRunwayScan = 0.0, mLandTouchSince = 0.0, mLandStopSince = 0.0;
-    S32 mLandGoArounds = 0;
     F32 mLandWantTrack = 0.f, mLandWantVS = 0.f, mLandWantSpeed = 0.f;
     // <WolfViewer 2026-10-11> APPROACH: flying out to turn back onto the centreline (the fix was
     // inside the turn circle), and the side of the centreline it went out on (+1 right, -1 left)
@@ -429,6 +428,11 @@ private:
     F32 mThrottleStreakSpeed = 0.f;
     bool mArrived = false;
     bool mSpeedLow = false;        // <WolfViewer 2026-10-08/> speed protection active (guidance)
+    // <WolfViewer 2026-10-11> anti-spin: an upset seen since (0 none), recovering, calm since (0 not yet)
+    F64  mUpsetSince = 0.0, mUpsetCalmSince = 0.0;
+    bool mUpsetRecovery = false;
+    F64  mUpsetStarted = 0.0;   // when the recovery began (it hands back after UPSET_MAX_SECS whatever)
+    F32  mBankLimit = 25.f;     // <WolfViewer 2026-10-11/> drive()'s turn-key bank band centre (guidance sets it)
     S32 mCloudSide = 0;            // <WolfViewer 2026-10-08/> -1 under the cloud deck, +1 over it, 0 clear of it
     F32 mSpeedRef = 0.f;           // <WolfViewer 2026-10-08/> the fastest flown lately (falls back 0.5 m/s a second)
     F32 mSpeedSmooth = -1.f;       // <WolfViewer 2026-10-10/> airspeed over about a second, for speed protection

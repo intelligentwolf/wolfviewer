@@ -928,9 +928,9 @@ void WolfFlight::towerCallouts(F32 height_m)
     while (mTowerCallout < CALLOUT_COUNT && ft < CALLOUTS[mTowerCallout].mFt)
     {
         const bool just_passed = mTowerCallout + 1 >= CALLOUT_COUNT || ft >= CALLOUTS[mTowerCallout + 1].mFt;
-        if (just_passed)
+        if (just_passed && WolfSpeech::towerOn())
         {
-            tower_say(CALLOUTS[mTowerCallout].mSaid);
+            WolfSpeech::instance().announce(CALLOUTS[mTowerCallout].mSaid, 3.f);   // a callout more than 3 s late is noise
         }
         ++mTowerCallout;
     }
@@ -942,7 +942,6 @@ void WolfFlight::landReset()
     mLand = LAND_NONE;
     mLandChecked = false;
     mLandAirport.clear();
-    mLandGoArounds = 0;
     mLandOutbound = false;
     clearCas("TURNING FOR FINAL");   // <WolfViewer 2026-10-11/>
     clearCas("NO RUNWAY FOUND");
@@ -1050,6 +1049,8 @@ void WolfFlight::landGiveUp(const std::string& cas, const std::string& message)
     mLand = LAND_NONE;
     mLandOutbound = false;
     clearCas("TURNING FOR FINAL");   // <WolfViewer 2026-10-11/>
+    clearCas("UNSTABLE");   // <WolfViewer 2026-10-11/> not left on the deck
+    mTowerUnstableSaid = false;
     postCas(cas, CAS_WARNING);
     make_ui_sound("UISndAlert");
     LLNotificationsUtil::add("GenericAlert", LLSD().with("MESSAGE", message));
@@ -1075,6 +1076,8 @@ void WolfFlight::landGuidance(F32 dt)
             mLand = LAND_SEARCH;   // the pilot took over: start again from the runway if re-engaged
             mLandOutbound = false;
             clearCas("TURNING FOR FINAL");   // <WolfViewer 2026-10-11/>
+            clearCas("UNSTABLE");   // <WolfViewer 2026-10-11/> not left on the deck
+            mTowerUnstableSaid = false;
             mLandSearchStart = nowSeconds();
         }
         return;
@@ -1171,10 +1174,12 @@ void WolfFlight::landGuidance(F32 dt)
         // every roll went the wrong way. Now ONE radius per leg: from the faster of the selected speed and the ground
         // speed, fixed when the runway is set and again when an outbound leg starts, so the in / out tests cannot
         // flip-flop with the speed.
+        // The speed for it: the selected speed, but never more than the plane has lately flown (mSpeedRef - Paul once set
+        // 279 m/s on a plane that tops out near 180), and never less than it is doing now.
+        const F32 radius_speed = llmax(llmax(llmin(cruise, mSpeedRef > 1.f ? mSpeedRef : cruise), mData.mGS), 15.f);
         if (mLandTurnR <= 0.f)
         {
-            const F32 v = llmax(llmax(cruise, mData.mGS), 15.f);
-            mLandTurnR = llclamp(v * v / (G * 0.4663f) * 1.2f, 120.f, 1500.f);   // tan 25 = 0.4663
+            mLandTurnR = llclamp(radius_speed * radius_speed / (G * 0.4663f) * 1.2f, 120.f, 1500.f);   // tan 25 = 0.4663
         }
         const F32 turn_r = mLandTurnR;
         const F32 capture = llmax(150.f, mData.mGS * 6.f);
@@ -1184,10 +1189,9 @@ void WolfFlight::landGuidance(F32 dt)
         {
             mLandOutbound = true;
             mLandOutSide = across >= 0.f ? 1.f : -1.f;
-            const F32 v = llmax(llmax(cruise, mData.mGS), 15.f);
-            mLandTurnR = llclamp(v * v / (G * 0.4663f) * 1.2f, 120.f, 1500.f);   // the leg's radius, fixed for it
+            mLandTurnR = llclamp(radius_speed * radius_speed / (G * 0.4663f) * 1.2f, 120.f, 1500.f);   // the leg's radius, fixed for it
             postCas("TURNING FOR FINAL", CAS_MEMO);
-            LL_INFOS("WolfFlight") << "autoland: fix inside the turn (" << to_faf << " m, turn radius " << turn_r
+            LL_INFOS("WolfFlight") << "autoland: fix inside the turn (" << to_faf << " m, turn radius " << mLandTurnR
                                    << "), flying out on the " << (mLandOutSide > 0.f ? "right" : "left") << LL_ENDL;
         }
         else if (mLandOutbound && along < -2.5f * turn_r)
@@ -1625,7 +1629,27 @@ void WolfFlight::guidance(F32 dt)
     const F32 current = use_track ? mData.mTrack : mData.mHeading;
     const F32 err = wrap180(want - current);
     // Smoothed: the targets ease in instead of jumping with every object update (Paul: "jerky").
-    mFDRoll = ema(mFDRoll, (mLateral == LAT_NONE) ? 0.f : llclamp(err * 1.2f - mData.mTurnRate * 1.5f, -25.f, 25.f), dt, 0.6f);
+    // <WolfViewer 2026-10-11> Paul: "keep the plane stable also after take off you may be technically quite a way off
+    // course". Joining the route after the climb-out can mean a turn of half a circle, asked for at the full 25 degrees
+    // while the plane is still low and slow - the steep slow turn his small plane stalled in. Less bank when low (15 under
+    // 150 m above the ground, except on an approach, whose geometry is worked out for 25) and when slow (15 under 90% of
+    // the reference speed, 10 under 80%): the turn back onto the course is wider, never steep and slow.
+    F32 bank_limit = 25.f;
+    if (mAP && !heli && !mSail)
+    {
+        if (mData.mAGL < 150.f && mLand < LAND_APPROACH)
+        {
+            bank_limit = 15.f;
+        }
+        const F32 ref_b = llmin(mWantSpeed, mSpeedRef);
+        if (ref_b > 1.f && mSpeedSmooth > 0.f && mLand < LAND_APPROACH)   // the approach's turns are worked out for 25
+        {
+            if (mSpeedSmooth < ref_b * 0.8f) bank_limit = llmin(bank_limit, 10.f);
+            else if (mSpeedSmooth < ref_b * 0.9f) bank_limit = llmin(bank_limit, 15.f);
+        }
+    }
+    mBankLimit = bank_limit;   // drive() holds the turn keys within it (the director below is the display)
+    mFDRoll = ema(mFDRoll, (mLateral == LAT_NONE) ? 0.f : llclamp(err * 1.2f - mData.mTurnRate * 1.5f, -bank_limit, bank_limit), dt, 0.6f);
 
     // ---- vertical ----
     // A plane climbs at most about 10 degrees up its path: at 4 m/s (Paul's slow plane, 2026-10-06)
@@ -1723,6 +1747,32 @@ void WolfFlight::guidance(F32 dt)
     // true 74 counted as low. So protection reads the speed over about a second, and a low has to last 1.5 s.
     mSpeedSmooth = (mSpeedSmooth < 0.f) ? mData.mAirspeed : ema(mSpeedSmooth, mData.mAirspeed, dt, 1.f);
     mSpeedRef = llmax(mSpeedSmooth, mSpeedRef - 0.5f * dt);
+    // <WolfViewer 2026-10-11> CLIMB WITH SPEED FIRST. Paul's small plane out of Tromso, 12:52-12:53Z: VNAV asked for its
+    // 8 m/s climb to the cruise height, the plane could not climb that fast, the pitch trim wound to its +12 stop at 14-16
+    // degrees nose up and the speed bled 63 -> 41 m/s - a stall and a spin (pitch 61, roll -58) before SPEED LOW (60%)
+    // could act. A climb now gives way to the speed, as a real autopilot's: below 90% of the reference speed the climb
+    // asked for shrinks, to level at 80%, so the plane climbs as fast as it really can and never pulls itself into a
+    // stall. A climb the land ahead needs keeps more (75% -> 65%): clearing the ground first, but still never a stall.
+    // Not on the take-off (its own speeds) or once on final (autoland's).
+    // The cap is applied AFTER the climb-rate limiter below as well (a review: the limiter lets the asked climb fall only
+    // 0.8 m/s a second, so cutting 8 m/s took 10 s while the speed bled); "the land ahead" includes the height floor.
+    F32 climb_cap = 1e9f;
+    if (mAP && !mSail && !heli && !takeoff && !(landing && mLand >= LAND_FINAL) && mWantSpeed > 1.f && mWantVS > 0.f)
+    {
+        const F32 ref = llmin(mWantSpeed, mSpeedRef);
+        const bool ground = mTerrainNeedSmooth > 0.f || z < terrainFloorZ();
+        const F32 full = ref * (ground ? 0.75f : 0.9f), none = ref * (ground ? 0.65f : 0.8f);
+        const F32 room = llclamp((mSpeedSmooth - none) / llmax(1.f, full - none), 0.f, 1.f);
+        const F32 asked = mWantVS;
+        mWantVS *= room;
+        // never level into rising ground: a climb the land needs keeps at least a gentle 1.5 m/s (anti-spin is there for
+        // the stall side), as SPEED LOW keeps the terrain climb
+        if (ground)
+        {
+            mWantVS = llmax(mWantVS, llmin(asked, 1.5f));
+        }
+        climb_cap = mWantVS;
+    }
     if (mAP && !mSail && !heli && !takeoff && !(landing && mLand >= LAND_FINAL) && mWantSpeed > 1.f)
     {
         const F32 ref = llmin(mWantSpeed, mSpeedRef);
@@ -1796,6 +1846,11 @@ void WolfFlight::guidance(F32 dt)
             mWantVSSlewInit = true;
         }
         mWantVSSlew = llclamp(mWantVS, mWantVSSlew - 0.8f * dt, mWantVSSlew + 2.5f * dt);
+        // <WolfViewer 2026-10-11> speed first: a climb the speed cannot afford is cut at once, not eased off
+        if (climb_cap < 1e9f)
+        {
+            mWantVSSlew = llmin(mWantVSSlew, llmax(climb_cap, 0.f));
+        }
         mWantVS = mWantVSSlew;
     }
     else
@@ -1822,6 +1877,77 @@ void WolfFlight::guidance(F32 dt)
         mPitchTrim = llclamp(mData.mPitch, -10.f, 12.f);
         mFDPitch = TO_ROTATE_PITCH;
     }
+    // <WolfViewer 2026-10-11> ANTI-SPIN (Paul: "implement anti-spin code when on autopilot", after his small plane spun out of
+    // Tromso at 12:53Z: pitch 61, roll -58, 63 -> 41 m/s). An upset - banked past 60 degrees, the nose past 30 up or 40 down,
+    // or turning faster than 40 degrees a second while slow (under 70% of the reference speed) - lasting 0.4 s takes the
+    // director over, the order every spin and upset recovery teaches: the wings level first (roll target 0), then the
+    // nose down (pitch target -10, the up trim taken off) until the speed is back over 80%, then the nose level (pitch
+    // 0). Near the ground (under 60 m) the nose only comes down to level, never below. It hands back once the wings are
+    // within 15 degrees, the nose within 15, the speed over 80% and the turn under 10 degrees a second, for 2 s. Not on
+    // the take-off roll or once in the flare (the ground is right there; they have their own laws); planes only.
+    if (mAP && !mSail && !heli && !on_runway && !(landing && mLand >= LAND_FLARE) && mData.mAGL > 15.f)
+    {
+        const F64 now_u = nowSeconds();
+        const F32 ref_u = llmax(1.f, llmin(mWantSpeed > 1.f ? mWantSpeed : mSpeedRef, mSpeedRef));
+        const bool upset = fabsf(mData.mRoll) > 60.f || mData.mPitch > 30.f || mData.mPitch < -40.f
+                           || (fabsf(mData.mTurnRate) > 40.f && mSpeedSmooth < ref_u * 0.7f);
+        if (!mUpsetRecovery)
+        {
+            mUpsetSince = upset ? (mUpsetSince > 0.0 ? mUpsetSince : now_u) : 0.0;
+            if (mUpsetSince > 0.0 && now_u - mUpsetSince >= 0.4)
+            {
+                mUpsetRecovery = true;
+                mUpsetCalmSince = 0.0;
+                mUpsetStarted = now_u;
+                // the speed is half the recovery: the autothrottle on (as SPEED LOW does), its fail count started over
+                mAT = true;
+                mThrottleStreak = 0;
+                clearCas("A/T FAIL");
+                postCas("SPIN RECOVERY", CAS_WARNING);
+                make_ui_sound("UISndAlert");
+                LL_INFOS("WolfFlight") << "anti-spin: recovering - pitch " << mData.mPitch << " roll " << mData.mRoll
+                                       << " turn " << mData.mTurnRate << " ias " << mSpeedSmooth << " ref " << ref_u << LL_ENDL;
+            }
+        }
+        if (mUpsetRecovery)
+        {
+            mFDRoll = 0.f;
+            mPitchTrim = llmin(mPitchTrim, 0.f);
+            const bool slow = mSpeedSmooth < ref_u * 0.8f;
+            if (fabsf(mData.mRoll) > 30.f)
+            {
+                mFDPitch = 0.f;                                     // the wings first: no pull while steeply banked
+            }
+            else if (slow || mData.mPitch > 5.f)
+            {
+                // unload and get the speed back - but never nose-down near the ground or with land rising ahead
+                mFDPitch = (mData.mAGL < 60.f || mTerrainNeedSmooth > 0.f) ? 0.f : -10.f;
+            }
+            else
+            {
+                mFDPitch = 0.f;                                     // speed back: level
+            }
+            const bool calm = fabsf(mData.mRoll) < 15.f && fabsf(mData.mPitch) < 15.f && !slow && fabsf(mData.mTurnRate) < 10.f;
+            mUpsetCalmSince = calm ? (mUpsetCalmSince > 0.0 ? mUpsetCalmSince : now_u) : 0.0;
+            // hands back after 2 s calm - or after UPSET_MAX_SECS whatever, so it can never hold the plane for good
+            const F64 UPSET_MAX_SECS = 20.0;
+            if ((mUpsetCalmSince > 0.0 && now_u - mUpsetCalmSince >= 2.0) || now_u - mUpsetStarted >= UPSET_MAX_SECS)
+            {
+                mUpsetRecovery = false;
+                mUpsetSince = 0.0;
+                mWantVSSlew = mVSf;   // pick the climb / descent back up from where the plane is, not with a jump
+                clearCas("SPIN RECOVERY");
+                LL_INFOS("WolfFlight") << "anti-spin: recovered at ias " << mSpeedSmooth << ", agl " << mData.mAGL << LL_ENDL;
+            }
+        }
+    }
+    else if (mUpsetRecovery || mUpsetSince > 0.0)
+    {
+        mUpsetRecovery = false;
+        mUpsetSince = mUpsetCalmSince = 0.0;
+        clearCas("SPIN RECOVERY");
+    }
+    // </WolfViewer>
     if (mAP && nowSeconds() >= mNextFlightLog)
     {
         mNextFlightLog = nowSeconds() + 3.0;
@@ -1922,8 +2048,20 @@ void WolfFlight::drive(F32 dt)
         // it goes down again only below 20, a wide gap so the wings are not rocked by short presses.
         const F32 lead = err - mData.mTurnRate * 1.5f;
         const S32 dir = err > 0.f ? 1 : -1;
-        if (mTurnHeld == 0 && fabsf(err) > 6.f && mData.mRoll * dir < 20.f) mTurnHeld = dir;
-        else if (mTurnHeld != 0 && (lead * mTurnHeld < 1.5f || mData.mRoll * mTurnHeld > 30.f)) mTurnHeld = 0;
+        // <WolfViewer 2026-10-11> the band follows guidance's bank limit (25 -> down below 20, up past 30, as before; 15 or 10
+        // when low or slow - mBankLimit), so the limit reaches the keys, not only the director's bar
+        const F32 press_below = mBankLimit - 5.f, release_past = mBankLimit + 5.f;
+        if (mTurnHeld == 0 && fabsf(err) > 6.f && mData.mRoll * dir < press_below) mTurnHeld = dir;
+        else if (mTurnHeld != 0 && (lead * mTurnHeld < 1.5f || mData.mRoll * mTurnHeld > release_past)) mTurnHeld = 0;
+        // <WolfViewer 2026-10-11> ANTI-SPIN (guidance): the turn keys oppose the rotation - the opposite rudder of every spin
+        // recovery - while it is still turning faster than 10 degrees a second; then they take the bank off (the key away
+        // from the low wing) until the wings are within 5 degrees; then none.
+        if (mUpsetRecovery)
+        {
+            if (fabsf(mData.mTurnRate) > 10.f) mTurnHeld = mData.mTurnRate > 0.f ? -1 : 1;
+            else if (fabsf(mData.mRoll) > 5.f) mTurnHeld = mData.mRoll > 0.f ? -1 : 1;
+            else mTurnHeld = 0;
+        }
         mOutBank = (F32)mTurnHeld;   // + = right
     }
     // Softer and better damped (Paul: "still wobbling"): the pitch keys swung full down / full up
@@ -2237,6 +2375,9 @@ void WolfFlight::engageAP()
     mWantVSSlewInit = false;   // <WolfViewer 2026-10-08/> the climb-rate limiter starts from what the plane is doing
     mSpeedSmooth = -1.f;       // <WolfViewer 2026-10-10/> speed protection starts from this flight's speed
     mSpeedLowSince = 0.0;
+    mUpsetRecovery = false;    // <WolfViewer 2026-10-11/> anti-spin starts clean
+    mUpsetSince = mUpsetCalmSince = mUpsetStarted = 0.0;
+    clearCas("SPIN RECOVERY");
     // <WolfViewer 2026-10-07> A plane on the ground takes off (takeoffStart) instead of refusing.
     const bool take_off = !mSail && craft() == CRAFT_PLANE && mData.mAGL < 10.f;
     clearCas("AP: NOT SEATED");

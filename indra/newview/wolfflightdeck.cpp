@@ -1866,7 +1866,12 @@ void WolfFlightDeck::drawPFD(F32 l, F32 b, F32 r, F32 t)
     const F32 ppd = ah / 22.f;   // pixels per degree of pitch
     {
         LLLocalClipRect adi_clip(LLRect((S32)(cx - aw), (S32)(cy + ah), (S32)(cx + aw), (S32)(cy - ah)));
-        const Rot rot(cx, cy, -d.mRoll);
+        // <WolfViewer 2026-10-11> Paul: "the artificial horizon indicator ... i think it is banking the wrong direction".
+        // It was: mRoll is + right wing down (wolfflight.cpp measure: atan2(left.z, up.z)), and the world seen from a
+        // plane banked right turns the other way - counter-clockwise, the horizon rising to the right - but the sphere
+        // was turned by -mRoll (clockwise, Rot turns counter-clockwise by its angle): a mirror of the real bank. The
+        // bank pointer turns with it, so it now swings left of the zero index in a right bank, as on a real ADI.
+        const Rot rot(cx, cy, d.mRoll);
         const F32 y0 = -d.mPitch * ppd;
         const F32 L = (aw + ah) * 3.f;
         F32 x1, y1, x2, y2, x3, y3, x4, y4;

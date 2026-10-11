@@ -1727,7 +1727,9 @@ namespace
             const F32 ppd = ah / 25.f;
             {
                 LLLocalClipRect clip(LLRect((S32)(cx - aw), (S32)(cy + ah), (S32)(cx + aw), (S32)(cy - ah)));
-                const Rot rot(cx, cy, -s.mRoll);
+                // <WolfViewer 2026-10-11> + mRoll (right wing down) turns the world counter-clockwise: the same fix as the
+                // flight deck's ADI (wolfflightdeck.cpp drawPFD), which this copied with the mirrored sign
+                const Rot rot(cx, cy, s.mRoll);
                 const F32 y0 = -s.mPitch * ppd;
                 F32 x1, y1, x2, y2;
                 rot.p(-aw * 3.f, y0, x1, y1);

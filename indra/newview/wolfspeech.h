@@ -82,8 +82,9 @@ public:
     // thirty ... ten" are not a second late. Setting WolfTowerVoice (default on); Wolf Territories only, as all of
     // this class.
     static bool towerOn();
-    /** Say a tower line: next after the line playing now; a cached phrase plays without a fetch. */
-    void announce(const std::string& text);
+    /** Say a tower line: next after the line playing now; a cached phrase plays without a fetch. A line that could
+     *  not start within max_age seconds is dropped (a late callout is worse than none). */
+    void announce(const std::string& text, F32 max_age = 10.f);
     /** Synthesise a tower phrase into the cache without playing it. */
     void prefetch(const std::string& text);
     // </WolfViewer>
@@ -178,7 +179,13 @@ private:
     std::vector<Played>     mPlayed;
     // <WolfViewer 2026-10-11> tower: lines waiting, and every tower phrase synthesised this run (kept on disk
     // until the viewer quits; a handful of short WAVs)
-    std::deque<std::string> mTowerQueue;
+    struct TowerLine
+    {
+        std::string mText;
+        F64         mDropAt = 0.0;   // not started by then: dropped
+    };
+    std::deque<TowerLine>   mTowerQueue;
+    std::deque<std::string> mTowerCacheOrder;   // oldest first, for the cap (TOWER_CACHE_MAX)
     struct Cached
     {
         LLUUID      mId;

@@ -677,9 +677,13 @@ void WolfSpeech::pumpSpeech()
         return;   // the previous line is still playing
     }
     // <WolfViewer 2026-10-11> the tower before any chat: a phrase heard before plays from the cache at once
+    while (!mTowerQueue.empty() && LLFrameTimer::getElapsedSeconds() > mTowerQueue.front().mDropAt)
+    {
+        mTowerQueue.pop_front();   // too late to be worth saying
+    }
     if (!mTowerQueue.empty())
     {
-        const std::string text = mTowerQueue.front();
+        const std::string text = mTowerQueue.front().mText;
         mTowerQueue.pop_front();
         const auto it = mTowerCache.find(text);
         if (it != mTowerCache.end())
@@ -710,7 +714,7 @@ bool WolfSpeech::towerOn()
     return tower && isAvailable() && gAudiop;
 }
 
-void WolfSpeech::announce(const std::string& text)
+void WolfSpeech::announce(const std::string& text, F32 max_age)
 {
     if (!towerOn())
     {
@@ -722,7 +726,7 @@ void WolfSpeech::announce(const std::string& text)
         return;
     }
     // A late call is worth less than none: never more than a few waiting (the oldest goes, as chat does).
-    mTowerQueue.push_back(said);
+    mTowerQueue.push_back({ said, LLFrameTimer::getElapsedSeconds() + max_age });
     while ((S32)mTowerQueue.size() > MAX_QUEUE)
     {
         mTowerQueue.pop_front();
@@ -795,6 +799,11 @@ void WolfSpeech::onSynthesised(bool ok, S32 status, const LLSD::Binary& wav, con
     }
     if (!ok)
     {
+        if (kind != SYNTH_CHAT)   // <WolfViewer 2026-10-11/> the tower's own words, not "reading aloud"
+        {
+            reportOnce("tower-" + std::to_string(status), "Tower voice: the speech service could not be reached (" + error + ").");
+            return;
+        }
         if (status == 503)
         {
             reportOnce("busy", "The speech service is busy — some lines will not be read.");
@@ -829,7 +838,36 @@ void WolfSpeech::onSynthesised(bool ok, S32 status, const LLSD::Binary& wav, con
     // from there next time; a prefetched one is only stored
     if (kind != SYNTH_CHAT)
     {
+        // A phrase fetched twice (a prefetch racing the line itself): keep the first, drop this file - never orphan one.
+        auto have = mTowerCache.find(text);
+        if (have != mTowerCache.end())
+        {
+            LLFile::remove(path);
+            if (kind == SYNTH_TOWER)
+            {
+                playSound(have->second.mId, have->second.mSeconds);
+            }
+            return;
+        }
         mTowerCache[text] = { id, path, seconds };
+        mTowerCacheOrder.push_back(text);
+        // At most TOWER_CACHE_MAX phrases kept (the wind and runway lines differ every flight): the oldest go, file and
+        // the audio engine's entry with them - a phrase still playing is a few seconds old, never the oldest of 40.
+        const size_t TOWER_CACHE_MAX = 40;
+        while (mTowerCacheOrder.size() > TOWER_CACHE_MAX)
+        {
+            auto old = mTowerCache.find(mTowerCacheOrder.front());
+            if (old != mTowerCache.end())
+            {
+                if (gAudiop)
+                {
+                    gAudiop->removeAudioData(old->second.mId);
+                }
+                LLFile::remove(old->second.mPath);
+                mTowerCache.erase(old);
+            }
+            mTowerCacheOrder.pop_front();
+        }
         if (kind == SYNTH_TOWER)
         {
             playSound(id, seconds);

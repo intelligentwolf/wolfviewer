@@ -113,7 +113,7 @@ F32 WolfAltitudeSky::horizonSeaHeight()
 
 bool WolfAltitudeSky::cloudDeck(CloudDeck& out)
 {
-    static LLCachedControl<bool> on(gSavedSettings, "WolfViewerFlyClouds", true);
+    static LLCachedControl<bool> on(gSavedSettings, "WolfViewerFlyClouds", false);   // <WolfViewer 2026-10-11/> off by default - Paul: "get rid of that horrible bright cloud"
     if (!on || !WolfGrid::isOnWolfTerritories() || !WolfWeather::instanceExists() || !WolfWeather::enabled())
     {
         return false;

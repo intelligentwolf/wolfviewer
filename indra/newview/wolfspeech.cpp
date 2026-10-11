@@ -112,6 +112,11 @@ WolfSpeech::~WolfSpeech()
         LLFile::remove(p.mPath);
     }
     mPlayed.clear();
+    for (const auto& kv : mTowerCache)   // <WolfViewer 2026-10-11/> the tower's phrases
+    {
+        LLFile::remove(kv.second.mPath);
+    }
+    mTowerCache.clear();
 }
 
 // static
@@ -655,27 +660,105 @@ std::string WolfSpeech::speakable(const std::string& line)
 // Source: text_to_speech.js _pump(): one line at a time, in order.
 void WolfSpeech::pumpSpeech()
 {
-    if (mSynthesising || mQueue.empty())
+    if (mSynthesising || (mQueue.empty() && mTowerQueue.empty()))
     {
         return;
     }
     if (!isReadingAloud())
     {
         mQueue.clear();
-        return;
+    }
+    if (!towerOn())
+    {
+        mTowerQueue.clear();   // <WolfViewer 2026-10-11/>
     }
     if (LLFrameTimer::getElapsedSeconds() < mSpeakingUntil)
     {
         return;   // the previous line is still playing
     }
+    // <WolfViewer 2026-10-11> the tower before any chat: a phrase heard before plays from the cache at once
+    if (!mTowerQueue.empty())
+    {
+        const std::string text = mTowerQueue.front();
+        mTowerQueue.pop_front();
+        const auto it = mTowerCache.find(text);
+        if (it != mTowerCache.end())
+        {
+            playSound(it->second.mId, it->second.mSeconds);
+            return;
+        }
+        mSynthesising = true;
+        LLCoros::instance().launch("WolfSpeech tower", [text]() { ttsCoro(text, SYNTH_TOWER); });
+        return;
+    }
+    // </WolfViewer>
+    if (mQueue.empty())
+    {
+        return;
+    }
     const std::string text = mQueue.front();
     mQueue.pop_front();
     mSynthesising = true;
-    LLCoros::instance().launch("WolfSpeech tts", [text]() { ttsCoro(text); });
+    LLCoros::instance().launch("WolfSpeech tts", [text]() { ttsCoro(text, SYNTH_CHAT); });
 }
 
+// <WolfViewer 2026-10-11> TOWER - see wolfspeech.h.
 // static
-void WolfSpeech::ttsCoro(std::string text)
+bool WolfSpeech::towerOn()
+{
+    static LLCachedControl<bool> tower(gSavedSettings, "WolfTowerVoice", true);
+    return tower && isAvailable() && gAudiop;
+}
+
+void WolfSpeech::announce(const std::string& text)
+{
+    if (!towerOn())
+    {
+        return;
+    }
+    const std::string said = speakable(text);
+    if (said.empty())
+    {
+        return;
+    }
+    // A late call is worth less than none: never more than a few waiting (the oldest goes, as chat does).
+    mTowerQueue.push_back(said);
+    while ((S32)mTowerQueue.size() > MAX_QUEUE)
+    {
+        mTowerQueue.pop_front();
+    }
+    pumpSpeech();
+}
+
+void WolfSpeech::prefetch(const std::string& text)
+{
+    if (!towerOn())
+    {
+        return;
+    }
+    const std::string said = speakable(text);
+    if (said.empty() || mTowerCache.count(said) || mPrefetching.count(said))
+    {
+        return;
+    }
+    mPrefetching.insert(said);
+    LLCoros::instance().launch("WolfSpeech tower prefetch", [said]() { ttsCoro(said, SYNTH_PREFETCH); });
+}
+
+void WolfSpeech::playSound(const LLUUID& id, F32 seconds)
+{
+    if (!gAudiop)
+    {
+        return;
+    }
+    gAudiop->triggerSound(id, gAgentID, 1.f, LLAudioEngine::AUDIO_TYPE_UI);
+    // A short gap between lines reads as punctuation.
+    mSpeakingUntil = LLFrameTimer::getElapsedSeconds() + seconds + 0.25;
+}
+// </WolfViewer>
+
+// static
+void WolfSpeech::ttsCoro(std::string text, S32 kind)
 {
     // Source: text_to_speech.js _say(): POST JSON {text} to TTS_URL; reply audio/wav.
     LLSD body;
@@ -687,7 +770,7 @@ void WolfSpeech::ttsCoro(std::string text)
     const S32 status = postRaw(std::string(WolfGrid::SPEECH_API_BASE) + "/tts", "application/json", bytes, reply, error);
     if (status >= 200 && status < 300 && reply.size() > 44)
     {
-        WolfSpeech::instance().onSynthesised(true, status, reply, std::string());
+        WolfSpeech::instance().onSynthesised(true, status, reply, std::string(), text, kind);
     }
     else
     {
@@ -696,13 +779,20 @@ void WolfSpeech::ttsCoro(std::string text)
         {
             msg = "speech service returned HTTP " + std::to_string(status) + (error.empty() ? "" : " (" + error + ")");
         }
-        WolfSpeech::instance().onSynthesised(false, status, LLSD::Binary(), msg);
+        WolfSpeech::instance().onSynthesised(false, status, LLSD::Binary(), msg, text, kind);
     }
 }
 
-void WolfSpeech::onSynthesised(bool ok, S32 status, const LLSD::Binary& wav, const std::string& error)
+void WolfSpeech::onSynthesised(bool ok, S32 status, const LLSD::Binary& wav, const std::string& error, const std::string& text, S32 kind)
 {
-    mSynthesising = false;
+    if (kind == SYNTH_PREFETCH)
+    {
+        mPrefetching.erase(text);   // <WolfViewer 2026-10-11/> a prefetch never held the one-at-a-time slot
+    }
+    else
+    {
+        mSynthesising = false;
+    }
     if (!ok)
     {
         if (status == 503)
@@ -715,7 +805,7 @@ void WolfSpeech::onSynthesised(bool ok, S32 status, const LLSD::Binary& wav, con
         }
         return;
     }
-    if (!isReadingAloud() || !gAudiop)
+    if (!gAudiop || (kind == SYNTH_CHAT ? !isReadingAloud() : !towerOn()))
     {
         return;
     }
@@ -735,12 +825,21 @@ void WolfSpeech::onSynthesised(bool ok, S32 status, const LLSD::Binary& wav, con
         out.write(reinterpret_cast<const char*>(wav.data()), wav.size());
     }
     const F32 seconds = wavSeconds(wav);
-    gAudiop->triggerSound(id, gAgentID, 1.f, LLAudioEngine::AUDIO_TYPE_UI);
-    const F64 now = LLFrameTimer::getElapsedSeconds();
-    // A short gap between lines reads as punctuation; the file lives well past its playback
-    // so the engine's own loading can never race the delete.
-    mSpeakingUntil = now + seconds + 0.25;
-    mPlayed.push_back({ path, now + seconds + 30.0, id });
+    // <WolfViewer 2026-10-11> a tower phrase is kept for the rest of the run (deleted in the destructor) and plays
+    // from there next time; a prefetched one is only stored
+    if (kind != SYNTH_CHAT)
+    {
+        mTowerCache[text] = { id, path, seconds };
+        if (kind == SYNTH_TOWER)
+        {
+            playSound(id, seconds);
+        }
+        return;
+    }
+    // </WolfViewer>
+    playSound(id, seconds);
+    // The file lives well past its playback so the engine's own loading can never race the delete.
+    mPlayed.push_back({ path, LLFrameTimer::getElapsedSeconds() + seconds + 30.0, id });
 }
 
 // Duration of a RIFF/WAVE PCM file from its fmt and data chunks; 0 if not parseable.

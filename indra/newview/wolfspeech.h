@@ -18,6 +18,8 @@
 #define WOLF_SPEECH_H
 
 #include <deque>
+#include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -72,6 +74,20 @@ public:
     void toggleReadAloud();
     static bool isReadingAloud();
 
+    // <WolfViewer 2026-10-11> TOWER (Paul: "is there someway of having audio announcements from the tower?" ->
+    // "we have text to speech could we use that" -> "IMPLEMENT IT default tower on"). The autopilot's tower calls and
+    // height callouts (wolfflight.cpp towerSay / towerCallouts) through the same /tts voice, spoken whether or not
+    // chat is read aloud, ahead of any chat waiting. Every phrase synthesised for the tower is kept (mTowerCache)
+    // so a repeat plays at once; the height callouts are fetched as the approach starts (prefetch), so "fifty ...
+    // thirty ... ten" are not a second late. Setting WolfTowerVoice (default on); Wolf Territories only, as all of
+    // this class.
+    static bool towerOn();
+    /** Say a tower line: next after the line playing now; a cached phrase plays without a fetch. */
+    void announce(const std::string& text);
+    /** Synthesise a tower phrase into the cache without playing it. */
+    void prefetch(const std::string& text);
+    // </WolfViewer>
+
     /** FSFloaterNearbyChat::addMessage — a nearby chat line as it is displayed. */
     void onNearbyChat(const LLChat& chat);
     /** LLIMModel::processAddingMessage — an instant message as it is displayed. */
@@ -125,8 +141,11 @@ private:
     // read aloud
     void enqueue(const std::string& line);
     void pumpSpeech();
-    static void ttsCoro(std::string text);
-    void onSynthesised(bool ok, S32 status, const LLSD::Binary& wav, const std::string& error);
+    // <WolfViewer 2026-10-11> what a synthesis is for: chat read aloud, a tower line to play, a tower phrase to cache
+    enum ESynth { SYNTH_CHAT = 0, SYNTH_TOWER, SYNTH_PREFETCH };
+    static void ttsCoro(std::string text, S32 kind);
+    void onSynthesised(bool ok, S32 status, const LLSD::Binary& wav, const std::string& error, const std::string& text, S32 kind);
+    void playSound(const LLUUID& id, F32 seconds);
     static std::string speakable(const std::string& line);
     static F32 wavSeconds(const LLSD::Binary& wav);
 
@@ -157,6 +176,18 @@ private:
         LLUUID      mId;        // <WolfViewer 2026-09-26/> the engine's LLAudioData key, dropped with the file
     };
     std::vector<Played>     mPlayed;
+    // <WolfViewer 2026-10-11> tower: lines waiting, and every tower phrase synthesised this run (kept on disk
+    // until the viewer quits; a handful of short WAVs)
+    std::deque<std::string> mTowerQueue;
+    struct Cached
+    {
+        LLUUID      mId;
+        std::string mPath;
+        F32         mSeconds = 0.f;
+    };
+    std::map<std::string, Cached> mTowerCache;
+    std::set<std::string>   mPrefetching;
+    // </WolfViewer>
 };
 
 #endif // WOLF_SPEECH_H

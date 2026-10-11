@@ -46,6 +46,8 @@
 #include "wolfairports.h"   // <WolfViewer 2026-10-07/> autoland
 #include "wolfobjectprops.h"
 #include "wolfgrid.h"
+#include "wolfspeech.h"   // <WolfViewer 2026-10-11/> the tower
+#include "llagentdata.h"   // gAgentUsername: the tower callsign
 
 namespace
 {
@@ -829,6 +831,112 @@ namespace
     }
 }
 
+// <WolfViewer 2026-10-11> TOWER (Paul: "is there someway of having audio announcements from the tower?", then
+// "IMPLEMENT IT default tower on"). Spoken through WolfSpeech::announce (the /tts voice): take-off clearance, cleared
+// to the destination airport, expect runway, cleared to land with the wind, "check your approach" once when the
+// approach is UNSTABLE, the height callouts on final, and the welcome. Numbers are said digit by digit as on the radio
+// ("runway one eight", "wind two one zero at eight knots"). Setting WolfTowerVoice (default on), callsign
+// WolfTowerCallsign (default: the first part of the avatar's user name).
+namespace
+{
+    const char* const DIGIT_WORDS[10] = { "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "niner" };
+    std::string spoken_digits(const std::string& digits)
+    {
+        std::string out;
+        for (char ch : digits)
+        {
+            if (ch < '0' || ch > '9') continue;
+            if (!out.empty()) out += ' ';
+            out += DIGIT_WORDS[ch - '0'];
+        }
+        return out;
+    }
+    // Feet above the runway, said as the callout; a callout is due on passing below its height.
+    struct Callout { F32 mFt; const char* mSaid; };
+    const Callout CALLOUTS[] = { { 500.f, "five hundred" }, { 100.f, "one hundred" }, { 50.f, "fifty" },
+                                 { 30.f, "thirty" }, { 10.f, "ten" } };
+    const S32 CALLOUT_COUNT = sizeof(CALLOUTS) / sizeof(CALLOUTS[0]);
+
+    void tower_say(const std::string& line)
+    {
+        if (WolfSpeech::towerOn())
+        {
+            WolfSpeech::instance().announce(line);
+        }
+    }
+}
+
+// static
+std::string WolfFlight::towerCallsign()
+{
+    std::string cs = gSavedSettings.getString("WolfTowerCallsign");
+    LLStringUtil::trim(cs);
+    if (cs.empty())
+    {
+        cs = gAgentUsername;   // "lone.wolf" / "Lone Wolf": the first part
+        const size_t cut = cs.find_first_of(". ");
+        if (cut != std::string::npos) cs = cs.substr(0, cut);
+        if (!cs.empty()) cs[0] = (char)toupper((unsigned char)cs[0]);
+    }
+    return cs.empty() ? std::string("Wolf") : cs;
+}
+
+std::string WolfFlight::towerRunway() const
+{
+    const F32 hdg = wrap360((F32)(atan2(mLandDir.mV[VX], mLandDir.mV[VY]) * RAD_TO_DEG));
+    S32 rwy = (S32)llround(hdg / 10.f);
+    if (rwy < 1) rwy += 36;
+    if (rwy > 36) rwy -= 36;
+    return "runway " + spoken_digits(llformat("%02d", rwy));
+}
+
+std::string WolfFlight::towerWind() const
+{
+    const F32 wx = mData.mWind.mV[VX], wy = mData.mWind.mV[VY];
+    const S32 kt = (S32)llround(sqrtf(wx * wx + wy * wy) * KT);
+    if (kt < 2)
+    {
+        return "wind calm";
+    }
+    // the wind blows along (wx, wy); it comes FROM the opposite way, to the nearest ten degrees, 360 for north
+    S32 from = (S32)llround(wrap360((F32)(atan2(-wx, -wy) * RAD_TO_DEG)) / 10.f) * 10;
+    if (from <= 0) from += 360;
+    if (from > 360) from -= 360;
+    return "wind " + spoken_digits(llformat("%03d", from)) + " at " + std::to_string(kt) + " knots";
+}
+
+// The runway is set: expect it, and fetch the callouts so they are not late.
+void WolfFlight::towerApproachStart()
+{
+    mTowerUnstableSaid = false;
+    mTowerCallout = 0;
+    tower_say(mLandAirport + " Tower, " + towerCallsign() + ", expect " + towerRunway() + ".");
+    if (WolfSpeech::towerOn())
+    {
+        for (const Callout& c : CALLOUTS)
+        {
+            WolfSpeech::instance().prefetch(c.mSaid);
+        }
+    }
+}
+
+// On final and in the flare: each callout once, on passing below its height. One already passed when final began is
+// skipped (FINAL calls with the height at entry first), never said late.
+void WolfFlight::towerCallouts(F32 height_m)
+{
+    const F32 ft = height_m * FT;
+    while (mTowerCallout < CALLOUT_COUNT && ft < CALLOUTS[mTowerCallout].mFt)
+    {
+        const bool just_passed = mTowerCallout + 1 >= CALLOUT_COUNT || ft >= CALLOUTS[mTowerCallout + 1].mFt;
+        if (just_passed)
+        {
+            tower_say(CALLOUTS[mTowerCallout].mSaid);
+        }
+        ++mTowerCallout;
+    }
+}
+// </WolfViewer>
+
 void WolfFlight::landReset()
 {
     mLand = LAND_NONE;
@@ -881,6 +989,7 @@ void WolfFlight::landCheckAirport()
     std::string shown = utf8str_truncate(ap->mName, 24);
     LLStringUtil::toUpper(shown);
     postCas("AIRPORT " + shown, CAS_MEMO);
+    tower_say(towerCallsign() + ", cleared to " + ap->mName + ".");   // <WolfViewer 2026-10-11/> tower
     LL_INFOS("WolfFlight") << "destination " << mDest.mRegion << " has airport " << ap->mName << " at " << ap->mGlobal
                            << (ap->mExact ? "" : " (region centre)") << LL_ENDL;
 }
@@ -929,6 +1038,7 @@ void WolfFlight::landSetRunway(const LLVector3d& a, const LLVector3d& b, F32 wid
         mLandFaf.mdV[VZ] = top + out * GLIDE_TAN;
         const S32 rwy = llmax(1, (S32)llround(wrap360((F32)(atan2(mLandDir.mV[VX], mLandDir.mV[VY]) * RAD_TO_DEG)) / 10.f));
         postCas(llformat("RWY %02d %dM", rwy > 36 ? rwy - 36 : rwy, (S32)len), CAS_MEMO);
+        towerApproachStart();   // <WolfViewer 2026-10-11/> tower
         LL_INFOS("WolfFlight") << "runway at " << mLandAirport << ": threshold " << mLandThr << " heading "
                                << atan2(mLandDir.mV[VX], mLandDir.mV[VY]) * RAD_TO_DEG << " length " << len << " width "
                                << width << " surface " << top << ", final approach fix " << out << " m out" << LL_ENDL;
@@ -1107,6 +1217,14 @@ void WolfFlight::landGuidance(F32 dt)
                 sendGearCommand();
             }
             postCas("FINAL", CAS_MEMO);
+            // <WolfViewer 2026-10-11> tower: cleared to land; callouts above the height now are already behind
+            tower_say(towerCallsign() + ", " + towerRunway() + ", " + towerWind() + ", cleared to land.");
+            mTowerCallout = 0;
+            {
+                const F32 ft = (z - mLandTop) * FT;
+                while (mTowerCallout < CALLOUT_COUNT && ft < CALLOUTS[mTowerCallout].mFt) ++mTowerCallout;
+            }
+            // </WolfViewer>
         }
         break;
     }
@@ -1121,6 +1239,10 @@ void WolfFlight::landGuidance(F32 dt)
         mLandWantTrack = wrap360(rwy_hdg + llclamp(-across * 0.5f, -30.f, 30.f));
         const F32 aim = llmin(mLandLen * 0.25f, 150.f);
         const F32 height = z - mLandTop;
+        if (mLand == LAND_FINAL || mLand == LAND_FLARE)
+        {
+            towerCallouts(height);   // <WolfViewer 2026-10-11/> tower
+        }
         if (mLand == LAND_FINAL)
         {
             const F32 path = mLandTop + llmax(0.f, aim - along) * GLIDE_TAN;
@@ -1136,6 +1258,11 @@ void WolfFlight::landGuidance(F32 dt)
             if ((close_in && (off_line || off_path)) || long_land)
             {
                 postCas("UNSTABLE", CAS_CAUTION);
+                if (!mTowerUnstableSaid)   // <WolfViewer 2026-10-11/> tower, once an approach
+                {
+                    mTowerUnstableSaid = true;
+                    tower_say(towerCallsign() + ", check your approach.");
+                }
             }
             else
             {
@@ -1179,6 +1306,7 @@ void WolfFlight::landGuidance(F32 dt)
                 clearCas("FLARE");
                 clearCas("TOUCHDOWN");
                 postCas("LANDED", CAS_MEMO);
+                tower_say(towerCallsign() + ", welcome to " + mLandAirport + ".");   // <WolfViewer 2026-10-11/> tower
                 LL_INFOS("WolfFlight") << "autoland: landed at " << mLandAirport << LL_ENDL;
             }
         }
@@ -1243,6 +1371,16 @@ void WolfFlight::takeoffStart()
     }
     mToHeading = mData.mHeading;
     mToGroundZ = (F32)mData.mPosGlobal.mdV[VZ];
+    // <WolfViewer 2026-10-11> tower: cleared for take-off from this region's tower, the runway from the heading
+    {
+        S32 rwy = (S32)llround(wrap360(mToHeading) / 10.f);
+        if (rwy < 1) rwy += 36;
+        if (rwy > 36) rwy -= 36;
+        const LLViewerRegion* here = gAgent.getRegion();
+        tower_say((here ? here->getName() + " Tower, " : std::string()) + towerCallsign() + ", runway "
+                  + spoken_digits(llformat("%02d", rwy)) + ", " + towerWind() + ", cleared for take-off.");
+    }
+    // </WolfViewer>
     mToPhaseStart = now;
     mToBestSpeed = mData.mAirspeed;
     mToBestSpeedAt = now;

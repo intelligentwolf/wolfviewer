@@ -356,6 +356,15 @@ private:
     bool mLandOutbound = false;
     F32 mLandOutSide = 1.f;
     F32 mLandTurnR = 0.f;   // <WolfViewer 2026-10-11/> the approach's turn radius, fixed (0 = not yet)
+    // <WolfViewer 2026-10-11> TOWER (WolfSpeech::announce): what was said on this approach
+    bool mTowerUnstableSaid = false;
+    S32  mTowerCallout = 0;     // index into the height callouts: the next one due
+    std::string towerRunway() const;    // "runway one eight"
+    std::string towerWind() const;      // "wind two one zero at eight knots" / "wind calm"
+    static std::string towerCallsign();
+    void towerApproachStart();
+    void towerCallouts(F32 height_m);
+    // </WolfViewer>
     // <WolfViewer 2026-10-07> AUTO TAKE-OFF (Paul: "auto pilot, should be able to take off, fly and
     // land perfectly"). The autopilot engaged with a plane on the ground takes off along the heading
     // it points: ROLL at full power, ROTATE once the speed is up, CLIMB out (gear up at 30 m), then

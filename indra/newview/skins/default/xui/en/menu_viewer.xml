@@ -1975,6 +1975,20 @@
             <menu_item_check.on_visible
              function="WolfGrid.IsWolfTerritories" />
         </menu_item_check>
+        <!-- [TOWER 2026-10-11] wolfflight.cpp tower_say / wolfspeech.cpp announce: Paul, "audio announcements from the
+             tower" with the text to speech, "default tower on". The autopilot's tower calls and height callouts, spoken. -->
+        <menu_item_check
+         label="Tower Voice (autopilot)"
+         name="WolfTowerVoice">
+            <menu_item_check.on_check
+             function="CheckControl"
+             parameter="WolfTowerVoice" />
+            <menu_item_check.on_click
+             function="ToggleControl"
+             parameter="WolfTowerVoice" />
+            <menu_item_check.on_visible
+             function="WolfGrid.IsWolfTerritories" />
+        </menu_item_check>
         <!-- [SPACESHIP HUD 2026-10-11] w65 Space Rabbit (wolfdashboard.cpp): Paul, "spaceships are basically
              aircraft" - the dashboard in its spaceship / rocket design, beside Flight Mode. Wolf Territories
              only, gone (not greyed) elsewhere, like the Car Dashboard. -->

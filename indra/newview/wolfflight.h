@@ -282,6 +282,9 @@ private:
     void clearTrip();   // destination, route and alerts gone: a mode entered or left starts clean
     F32  boatRay(const LLVector3& from, const LLVector3& dir, F32 reach);
     F32  terrainNeed(F32 track_deg, F32 speed, F32 z) const;
+    // <WolfViewer 2026-10-11> the same along the path the plane will FLY: turning from track_deg toward want_deg at the bank limit's
+    // rate, horizon seconds ahead (Paul: "look at the terrain when its in front of you and just adjust")
+    F32  terrainNeedPath(F32 track_deg, F32 want_deg, F32 speed, F32 z, F32 horizon) const;
     F32  obstacleNeed(F32 track_deg, F32 speed, F32 z) const;   // <WolfViewer 2026-10-07/> the same for objects
     void advanceRoute();
     void planWaterRoute();

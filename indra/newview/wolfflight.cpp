@@ -660,6 +660,37 @@ F32 WolfFlight::terrainNeed(F32 track_deg, F32 speed, F32 z) const
     return need;
 }
 
+// <WolfViewer 2026-10-11> Paul, every airport: "its not just tromso its every airport ... you have to look at the terrain
+// etc when its in front of you and just adjust and same landing". His Tromso logs (14:24-14:30Z): circling for the
+// runway the straight-ahead minute (terrainNeed) kept pointing at the mountains round the field - "terrain 10-17", a
+// climb of 3-8 m/s against the landing's -7.5 - so every approach reached final ~550 m up. This looks along the path
+// the plane will really fly: from the track it is on, turning toward the track it is steering for at the rate the bank
+// limit gives (r = v^2 / (g tan bank), the same law drive() holds the keys to), then straight on, for horizon seconds;
+// the worst (land + margin - z) / t along it, as terrainNeed, from 6 s out.
+F32 WolfFlight::terrainNeedPath(F32 track_deg, F32 want_deg, F32 speed, F32 z, F32 horizon) const
+{
+    const F32 margin = (craft() == CRAFT_HELI) ? 12.f : 40.f;
+    const F32 rate = RAD_TO_DEG * G * tanf(llmax(mBankLimit, 5.f) * DEG_TO_RAD) / llmax(speed, 5.f);   // degrees a second
+    const F32 dt = 1.5f;
+    F32 hdg = track_deg;
+    LLVector3d p = mData.mPosGlobal;
+    F32 need = -1e9f;
+    for (F32 t = dt; t <= horizon; t += dt)
+    {
+        const F32 turn = wrap180(want_deg - hdg);
+        hdg = wrap360(hdg + llclamp(turn, -rate * dt, rate * dt));
+        p.mdV[VX] += sinf(hdg * DEG_TO_RAD) * speed * dt;
+        p.mdV[VY] += cosf(hdg * DEG_TO_RAD) * speed * dt;
+        if (t < 6.f)
+        {
+            continue;   // nearer is the floor's (terrainFloorZ), as in terrainNeed
+        }
+        const F32 g = llmax(LLWorld::getInstance()->resolveLandHeightGlobal(p), mData.mWaterZ);
+        need = llmax(need, (g + margin - z) / t);
+    }
+    return need;
+}
+
 // <WolfViewer 2026-10-07> Paul: "autopilot on planes ... it should fly higher if it sees an
 // obstruction ahead of it". terrainNeed for OBJECTS: the climb (m/s) that clears, with the same
 // margin, every object the next minute's track passes over - towers, buildings, masts, ships. One
@@ -1216,7 +1247,22 @@ void WolfFlight::landGuidance(F32 dt)
         {
             mLandWantTrack = wrap360(rwy_hdg + (F32)(atan2(-across, turn_r * 0.75f) * RAD_TO_DEG));
         }
-        if ((!mLandOutbound && aligned && fabsf(along) < capture) || on_final_already)
+        // <WolfViewer 2026-10-11> never onto final higher than the plane can come down from at a flyable angle (Paul: "it may
+        // be it has to do almost vertical landing"): 8 degrees to the aim point, 30 m of slack. Too high, it flies the loop
+        // again - out, round and back, descending all the way (the approach asks for the fix's height): a descending
+        // circuit in the clear air, as pilots lose height at an airport in the hills, instead of a dive.
+        const F32 to_aim = llmax(0.f, aim - t_along);
+        const bool can_make = (z - mLandTop) <= to_aim * 0.1405f + 30.f;   // tan 8 = 0.1405
+        if (!mLandOutbound && aligned && fabsf(along) < capture && !can_make && !on_final_already)
+        {
+            mLandOutbound = true;
+            mLandOutSide = across >= 0.f ? 1.f : -1.f;
+            mLandTurnR = llclamp(radius_speed * radius_speed / (G * 0.4663f) * 1.2f, 120.f, 1500.f);
+            postCas("TURNING FOR FINAL", CAS_MEMO);
+            LL_INFOS("WolfFlight") << "autoland: " << (z - mLandTop) << " m up " << to_aim << " m from the aim point - too high for"
+                                   " final, another loop down" << LL_ENDL;
+        }
+        if ((!mLandOutbound && aligned && fabsf(along) < capture && can_make) || on_final_already)
         {
             mLand = LAND_FINAL;
             mLandOutbound = false;
@@ -1733,10 +1779,22 @@ void WolfFlight::guidance(F32 dt)
     // <WolfViewer 2026-10-07> Except on final: there the runway is the land ahead. Nor on the
     // take-off roll: the floor is 40 m above the runway, and a climb asked for at 0 m/s pulls the
     // nose up before the plane can fly.
-    if ((mVertical != VERT_NONE || mAP) && !(landing && mLand >= LAND_FINAL) && !on_runway)
+    // <WolfViewer 2026-10-11> ...and on final too, up to 800 m before the threshold (Paul, Tromso: final with the ground off
+    // "descended too early and hit a mountain"): the land before the runway is guarded, the runway itself is not.
+    F32 final_horizon = 60.f;
+    bool guard_final = false;
+    if (landing && mLand == LAND_FINAL)
+    {
+        F32 a_thr = 0.f, c_thr = 0.f;
+        land_track(mData.mPosGlobal, mLandThr, mLandDir, a_thr, c_thr);
+        const F32 to_guard = -a_thr - 800.f;   // metres of final still to fly before the last 800 m
+        final_horizon = to_guard / llmax(mData.mGS, 15.f);
+        guard_final = final_horizon >= 6.f;
+    }
+    if ((mVertical != VERT_NONE || mAP) && (!(landing && mLand >= LAND_FINAL) || guard_final) && !on_runway)
     {
         const F32 floor_z = terrainFloorZ();
-        if (z < floor_z)
+        if (z < floor_z && !guard_final)   // the floor looks 15 s along the velocity - on final that is the runway
         {
             mWantVS = llmax(mWantVS, llclamp((floor_z - z) * 0.3f, 1.f, max_vs));
         }
@@ -1747,7 +1805,12 @@ void WolfFlight::guidance(F32 dt)
         if (now >= mNextTerrainScan)
         {
             mNextTerrainScan = now + 0.25;
-            mTerrainNeed = llmax(terrainNeed(track, speed, z), obstacleNeed(track, speed, z));   // <WolfViewer 2026-10-07/> objects too
+            // <WolfViewer 2026-10-11> along the path the plane will fly (terrainNeedPath): a minute in the cruise, 25 s on the
+            // approach (its turns change the way every half minute), on final only up to 800 m before the threshold.
+            // Objects stay on the straight line, the next minute, as before (not on final: the runway's own buildings).
+            const F32 horizon = guard_final ? llmin(final_horizon, 25.f) : (landing ? 25.f : 60.f);
+            mTerrainNeed = llmax(heli ? terrainNeed(track, speed, z) : terrainNeedPath(track, mWantTrack, speed, z, horizon),
+                                 (landing && mLand >= LAND_FINAL) ? -1e9f : obstacleNeed(track, speed, z));   // <WolfViewer 2026-10-07/> objects too
         }
         // Paul: "if it sees terrain it should fly UPWARDS not turn constantly". Land ahead is
         // only ever climbed over: up to a 20 degree climb path (at least 2 m/s), steeper than

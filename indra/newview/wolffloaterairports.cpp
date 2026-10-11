@@ -27,6 +27,7 @@
 #include "llscrolllistctrl.h"
 #include "llsearcheditor.h"
 #include "lltextbox.h"
+#include "llurldispatcher.h"
 #include "llweb.h"
 #include "wolfairports.h"
 #include "wolfflight.h"
@@ -55,6 +56,7 @@ bool WolfFloaterAirports::postBuild()
     mSummary = getChild<LLTextBox>("summary");
     mFly = getChild<LLButton>("fly");
     mShowMap = getChild<LLButton>("show_map");
+    mTeleport = getChild<LLButton>("teleport");
 
     mSearch->setKeystrokeCallback([this](LLUICtrl*, const LLSD&) { fill(); });
     mSearch->setCommitCallback([this](LLUICtrl*, const LLSD&) { fill(); });
@@ -63,6 +65,7 @@ bool WolfFloaterAirports::postBuild()
     mList->setDoubleClickCallback([this]() { onFly(); });
     mFly->setCommitCallback([this](LLUICtrl*, const LLSD&) { onFly(); });
     mShowMap->setCommitCallback([this](LLUICtrl*, const LLSD&) { onShowMap(); });
+    mTeleport->setCommitCallback([this](LLUICtrl*, const LLSD&) { onTeleport(); });
     getChild<LLButton>("website")->setCommitCallback([](LLUICtrl*, const LLSD&)
     {
         // Source: the deck's former AIRPORTS button - the grid's airports page
@@ -192,6 +195,7 @@ void WolfFloaterAirports::updateButtons()
         ? std::string("Start Flight Mode first (World > Flight Mode) and sit in your aircraft; then Fly there sets the autopilot's route.")
         : std::string("Set this airport as the autopilot's destination and fly the route there; it lands on the runway it finds."));
     mShowMap->setEnabled(picked);
+    mTeleport->setEnabled(picked);
 }
 
 void WolfFloaterAirports::onFly()
@@ -215,6 +219,39 @@ void WolfFloaterAirports::onFly()
     {
         mSummary->setText("Flying to " + a->mName + " (" + a->mRegion + "). Engage CMD on the deck if the autopilot is off.");
     }
+}
+
+// <WolfViewer 2026-10-11> Paul: "add a teleport to the airports list so i can tp to the runway". To the airport's point - where
+// its owner stood for "Copy SLurl", on or beside the runway (wolfairports.cpp NEAR_EXACT_M) - at its height when the
+// directory has one, else the region's own ground (z 0: the region puts an arrival on the land). A region typed by name:
+// its middle, by the same app/teleport SLURL the chat bar's own teleport command uses (chatbar_as_cmdline.cpp).
+void WolfFloaterAirports::onTeleport()
+{
+    const S32 id = mList->getSelectedValue().asInteger();
+    if (id == -1)
+    {
+        std::string region = mSearch->getText();
+        LLStringUtil::trim(region);
+        if (region.empty())
+        {
+            return;
+        }
+        LLURLDispatcher::dispatch("secondlife:///app/teleport/" + LLWeb::escapeURL(region) + "/128/128/0", "clicked", NULL, true);
+        mSummary->setText("Teleporting to the region " + region + "...");
+        return;
+    }
+    const WolfAirports::Airport* a = WolfAirports::instance().byId(id);
+    if (!a)
+    {
+        return;
+    }
+    LLVector3d to = a->mGlobal;
+    if (!a->mHasZ)
+    {
+        to.mdV[VZ] = 0.0;
+    }
+    gAgent.teleportViaLocation(to);
+    mSummary->setText("Teleporting to " + a->mName + " (" + a->mRegion + ")...");
 }
 
 void WolfFloaterAirports::onShowMap()

@@ -45,12 +45,14 @@ private:
     void updateButtons();
     void onFly();
     void onShowMap();
+    void onTeleport();   // <WolfViewer 2026-10-11/> Paul: "add a teleport to the airports list so i can tp to the runway"
 
     LLSearchEditor* mSearch = nullptr;
     LLScrollListCtrl* mList = nullptr;
     LLTextBox* mSummary = nullptr;
     LLButton* mFly = nullptr;
     LLButton* mShowMap = nullptr;
+    LLButton* mTeleport = nullptr;
     U32 mFilledGeneration = 0;      // <WolfViewer 2026-10-11/> the directory list it was filled from (0 = none yet)
 };
 

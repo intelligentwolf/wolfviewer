@@ -39,6 +39,8 @@
     </scroll_list>
     <button follows="left|bottom" height="22" label="Airports website" layout="topleft" left="10" name="website" top="350" width="130"
      tool_tip="The airports page on wolf-grid.com, where owners add their airports." />
+    <button follows="right|bottom" height="22" label="Teleport" layout="topleft" left="265" name="teleport" top="350" width="100"
+     tool_tip="Teleport to this airport: its point is on or beside the runway." />
     <button follows="right|bottom" height="22" label="Show on map" layout="topleft" left="370" name="show_map" top="350" width="105"
      tool_tip="Show this airport on the World Map." />
     <button follows="right|bottom" height="22" label="Fly there" layout="topleft" left="480" name="fly" top="350" width="110"

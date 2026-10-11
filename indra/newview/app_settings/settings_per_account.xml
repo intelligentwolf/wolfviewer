@@ -961,6 +961,17 @@
 			<array>
 			</array>
 	</map>
+	<key>WolfSuitcaseTripStart</key>
+	<map>
+		<key>Comment</key>
+			<string>When the current hypergrid trip started (unix seconds; 0 at home): only things created after it count as got on the trip (wolfsuitcase.cpp). 2026-10-11.</string>
+		<key>Persist</key>
+			<integer>1</integer>
+		<key>Type</key>
+			<string>U32</string>
+		<key>Value</key>
+			<integer>0</integer>
+	</map>
 	<key>WolfDashboardVehicleTypes</key>
 	<map>
 		<key>Comment</key>

@@ -819,7 +819,6 @@ namespace
     const F32 GLIDE_TAN = 0.0524f;          // tan 3 degrees
     const F32 LAND_FLARE_M = 5.f;           // root of the aircraft above the surface
     const F32 LAND_APPROACH_SPEED = 0.7f;   // of the selected speed
-    const S32 LAND_MAX_GO_AROUNDS = 2;
 
     // along-track (+ = past the point, in the direction) and cross-track (+ = right) metres
     void land_track(const LLVector3d& p, const LLVector3d& o, const LLVector3& d, F32& along, F32& across)
@@ -840,6 +839,7 @@ void WolfFlight::landReset()
     clearCas("TURNING FOR FINAL");   // <WolfViewer 2026-10-11/>
     clearCas("NO RUNWAY FOUND");
     clearCas("AUTOLAND FAILED");
+    clearCas("UNSTABLE");   // <WolfViewer 2026-10-11/>
 }
 
 // The destination's region in the airports list: move the destination to the airport.
@@ -1126,30 +1126,26 @@ void WolfFlight::landGuidance(F32 dt)
             const F32 path = mLandTop + llmax(0.f, aim - along) * GLIDE_TAN;
             mLandWantVS = llclamp((path - z) * 0.25f - mData.mGS * GLIDE_TAN, -4.f, 2.f);
             mLandWantSpeed = approach;
-            // close in and not stable: go around
+            // <WolfViewer 2026-10-11> Paul: "it should TRY to land anyway" - asked, he chose "land even when unstable":
+            // no go-arounds. Off the line, off the glide path or long, it keeps steering onto the centreline and
+            // coming down the path to touchdown; the deck says UNSTABLE while it is, so the pilot can take over.
             const bool close_in = along > -400.f;
             const bool off_line = fabsf(across) > mLandWidth * 0.5f + 25.f;
             const bool off_path = z - path > 40.f || path - z > 25.f;
             const bool long_land = along > aim + mLandLen * 0.5f && height > LAND_FLARE_M * 3.f;
             if ((close_in && (off_line || off_path)) || long_land)
             {
-                if (++mLandGoArounds > LAND_MAX_GO_AROUNDS)
-                {
-                    landGiveUp("AUTOLAND FAILED", "Autopilot: could not line up on the runway at " + mLandAirport
-                               + " after " + std::to_string(LAND_MAX_GO_AROUNDS) + " go-arounds. It is circling over the"
-                               " airport. Land by hand, or pick another destination.");
-                    break;
-                }
-                postCas("GO AROUND", CAS_CAUTION);
-                landSetRunway(mLandThr, mLandThr + LLVector3d(mLandDir * mLandLen), mLandWidth, mLandTop, false);
-                mLand = LAND_APPROACH;
-                mLandFaf.mdV[VZ] = llmax((F32)mLandFaf.mdV[VZ], mLandTop + 100.f);   // climb away first
-                break;
+                postCas("UNSTABLE", CAS_CAUTION);
+            }
+            else
+            {
+                clearCas("UNSTABLE");
             }
             if (height < LAND_FLARE_M && along > -50.f)
             {
                 mLand = LAND_FLARE;
                 mLandTouchSince = 0.0;
+                clearCas("UNSTABLE");   // <WolfViewer 2026-10-11/> down to it now
                 postCas("FLARE", CAS_MEMO);
             }
         }

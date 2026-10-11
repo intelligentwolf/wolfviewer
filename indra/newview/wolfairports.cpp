@@ -79,6 +79,7 @@ namespace
         LLVector3 mDir;      // the long axis, horizontal, unit
         F32 mLength = 0.f, mWidth = 0.f, mTop = 0.f;
         bool mNamed = false;   // "runway" in its name or description
+        bool mOnPoint = false; // <WolfViewer 2026-10-11/> the airport's own point lies on it
     };
 }
 
@@ -264,7 +265,15 @@ const WolfAirports::Airport* WolfAirports::byId(S32 id) const
 // The runway, from the prims the viewer has round the airport's point: every flat, long, narrow
 // slab (RUNWAY_*), the longest one near the point, then every other slab in line with it (same
 // heading, its centre on this one's centreline, the same height) joined on, end to end.
-WolfAirports::Runway WolfAirports::findRunway(const Airport& airport)
+//
+// <WolfViewer 2026-10-11> Paul's Tromso flights found "RWY 01 64M" and "RWY 27 256M" - two roads beside the airport (prims
+// "GERADE X 5" and "Road_Straight_x5" in the region's DB), while the airfield itself, a 262 x 131 m flat slab with the
+// airport's point on it, failed the shape test (aspect 2 < RUNWAY_MIN_ASPECT). The airport's point is where its owner
+// stood: a flat slab under it is the airfield, whatever its shape (down to the named limits), and counts as a named one
+// does. Of those first, the longest - every candidate is tried as the chain's start, not only the longest single slab;
+// and a runway shorter than need_len gives way to the longest one there (simulator: region-terrain-work/wolfflightsim,
+// airports.py find_runway(fixed=True)).
+WolfAirports::Runway WolfAirports::findRunway(const Airport& airport, F32 need_len, const LLViewerObject* skip_root)
 {
     Runway out;
     const LLVector3 point = gAgent.getPosAgentFromGlobal(airport.mGlobal);
@@ -275,7 +284,8 @@ WolfAirports::Runway WolfAirports::findRunway(const Airport& airport)
     {
         LLViewerObject* o = gObjectList.getObject(i);
         if (!o || o->isDead() || o->getPCode() != LL_PCODE_VOLUME || o->isAttachment() || o->isHUDAttachment()
-            || o->flagPhantom() || o->mDrawable.isNull())
+            || o->flagPhantom() || o->mDrawable.isNull()
+            || (skip_root && (o == skip_root || o->getRootEdit() == skip_root)))   // <WolfViewer 2026-10-11/> not the plane
         {
             continue;
         }
@@ -322,6 +332,13 @@ WolfAirports::Runway WolfAirports::findRunway(const Airport& airport)
         {
             continue;
         }
+        // <WolfViewer 2026-10-11> the airport's point on the slab: within half its length along it and half its width across
+        if (airport.mExact)
+        {
+            const F32 p_along = d.mV[VX] * sl.mDir.mV[VX] + d.mV[VY] * sl.mDir.mV[VY];
+            const F32 p_across = d.mV[VX] * sl.mDir.mV[VY] - d.mV[VY] * sl.mDir.mV[VX];
+            sl.mOnPoint = fabsf(p_along) <= len * 0.5f && fabsf(p_across) <= wid * 0.5f;
+        }
         // on the ground (or at the airport's own height): not a long slab up in a skybox
         const F32 ground = LLWorld::getInstance()->resolveLandHeightAgent(c);
         const F32 ref = airport.mHasZ ? (F32)airport.mGlobal.mdV[VZ] : ground;
@@ -338,6 +355,7 @@ WolfAirports::Runway WolfAirports::findRunway(const Airport& airport)
             sl.mNamed = name.find("runway") != std::string::npos
                         || pr->mDescriptionLower.find("runway") != std::string::npos;
         }
+        sl.mNamed = sl.mNamed || sl.mOnPoint;   // <WolfViewer 2026-10-11/> the airfield under the airport's point
         if (!sl.mNamed && (len < RUNWAY_MIN_LENGTH || len < wid * RUNWAY_MIN_ASPECT))
         {
             continue;
@@ -348,43 +366,74 @@ WolfAirports::Runway WolfAirports::findRunway(const Airport& airport)
     {
         return out;
     }
-    size_t best = 0;
-    for (size_t i = 1; i < slabs.size(); ++i)
+    // A chain from slab `start`: every other slab in line with it (same heading, its centre on this one's centreline, the
+    // same height) joined on, end to end, repeatedly, so it grows from either end.
+    auto chain = [&slabs](size_t start, LLVector3& a, LLVector3& e)
     {
-        // a named runway first, then the longest
-        if (slabs[i].mNamed != slabs[best].mNamed ? slabs[i].mNamed : slabs[i].mLength > slabs[best].mLength) best = i;
-    }
-    const Slab& b = slabs[best];
-    F32 lo = -b.mLength * 0.5f, hi = b.mLength * 0.5f;
-    // join the segments in line with it, repeatedly, so a chain grows from either end
-    std::vector<bool> used(slabs.size(), false);
-    used[best] = true;
-    for (bool grew = true; grew;)
-    {
-        grew = false;
-        for (size_t i = 0; i < slabs.size(); ++i)
+        const Slab& b = slabs[start];
+        F32 lo = -b.mLength * 0.5f, hi = b.mLength * 0.5f;
+        std::vector<bool> used(slabs.size(), false);
+        used[start] = true;
+        for (bool grew = true; grew;)
         {
-            if (used[i]) continue;
-            const Slab& s = slabs[i];
-            if (fabsf(s.mDir * b.mDir) < SAME_HEADING_COS || fabsf(s.mTop - b.mTop) > 1.5f) continue;
-            const LLVector3 d = s.mCentre - b.mCentre;
-            const F32 along = d.mV[VX] * b.mDir.mV[VX] + d.mV[VY] * b.mDir.mV[VY];
-            const F32 across = fabsf(d.mV[VX] * b.mDir.mV[VY] - d.mV[VY] * b.mDir.mV[VX]);
-            if (across > b.mWidth * 0.5f) continue;
-            const F32 s_lo = along - s.mLength * 0.5f, s_hi = along + s.mLength * 0.5f;
-            if (s_hi < lo - 5.f || s_lo > hi + 5.f) continue;   // must touch the chain (5 m gap allowed)
-            lo = llmin(lo, s_lo);
-            hi = llmax(hi, s_hi);
-            used[i] = true;
-            grew = true;
+            grew = false;
+            for (size_t i = 0; i < slabs.size(); ++i)
+            {
+                if (used[i]) continue;
+                const Slab& s = slabs[i];
+                if (fabsf(s.mDir * b.mDir) < SAME_HEADING_COS || fabsf(s.mTop - b.mTop) > 1.5f) continue;
+                const LLVector3 d = s.mCentre - b.mCentre;
+                const F32 along = d.mV[VX] * b.mDir.mV[VX] + d.mV[VY] * b.mDir.mV[VY];
+                const F32 across = fabsf(d.mV[VX] * b.mDir.mV[VY] - d.mV[VY] * b.mDir.mV[VX]);
+                if (across > b.mWidth * 0.5f) continue;
+                const F32 s_lo = along - s.mLength * 0.5f, s_hi = along + s.mLength * 0.5f;
+                if (s_hi < lo - 5.f || s_lo > hi + 5.f) continue;   // must touch the chain (5 m gap allowed)
+                lo = llmin(lo, s_lo);
+                hi = llmax(hi, s_hi);
+                used[i] = true;
+                grew = true;
+            }
+        }
+        a = b.mCentre + b.mDir * lo;
+        e = b.mCentre + b.mDir * hi;
+        a.mV[VZ] = e.mV[VZ] = b.mTop;
+        return hi - lo;
+    };
+    // <WolfViewer 2026-10-11> the longest named / airfield chain; none, the longest of all; shorter than need_len, the
+    // longest of all if that is longer
+    size_t pick = 0, longest = 0;
+    F32 pick_len = -1.f, longest_len = -1.f;
+    bool pick_named = false;
+    LLVector3 a, e, pa, pe, la, le;
+    for (size_t i = 0; i < slabs.size(); ++i)
+    {
+        const F32 l = chain(i, a, e);
+        if (l > longest_len)
+        {
+            longest = i;
+            longest_len = l;
+            la = a;
+            le = e;
+        }
+        if (slabs[i].mNamed != pick_named ? slabs[i].mNamed : l > pick_len)
+        {
+            pick = i;
+            pick_len = l;
+            pick_named = slabs[i].mNamed;
+            pa = a;
+            pe = e;
         }
     }
-    LLVector3 a = b.mCentre + b.mDir * lo, e = b.mCentre + b.mDir * hi;
-    a.mV[VZ] = e.mV[VZ] = b.mTop;
-    out.mA = gAgent.getPosGlobalFromAgent(a);
-    out.mB = gAgent.getPosGlobalFromAgent(e);
-    out.mWidth = b.mWidth;
-    out.mTopZ = b.mTop;
+    if (pick_len < need_len && longest_len > pick_len + 1.f)
+    {
+        pick = longest;
+        pa = la;
+        pe = le;
+    }
+    out.mA = gAgent.getPosGlobalFromAgent(pa);
+    out.mB = gAgent.getPosGlobalFromAgent(pe);
+    out.mWidth = slabs[pick].mWidth;
+    out.mTopZ = slabs[pick].mTop;
     out.mValid = true;
     return out;
 }

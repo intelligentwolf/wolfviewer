@@ -968,6 +968,43 @@ void WolfFlight::towerCallouts(F32 height_m)
 }
 // </WolfViewer>
 
+// <WolfViewer 2026-10-11> THE PLANE'S OWN NUMBERS (simulator: region-terrain-work/wolfflightsim, newlogic.py approach_speed /
+// roll_need). The approach is flown at LAND_APPROACH_SPEED of the selected speed - but once a take-off this session has
+// shown the speed the plane rotates at, never faster than 0.93 of that (Paul's logs: rotate 46.4, approach 43.2) nor slower
+// than 0.85 (1.3 x a stall the rotation speed is ~1.5 x of: Paul, "stall ~30, rotate ~47"), and on a runway too short for
+// the roll from that speed, down to the 0.85.
+namespace
+{
+    const F32 LAND_FLOAT_M = 60.f;          // sim: flare to touchdown at the firm flare's sink, 45-65 m at 35-40 m/s
+    const F32 ROLL_DECEL_DEFAULT = 2.5f;    // NOT measured - no landing roll in any log: ~0.25 g, light-aircraft braking;
+                                            // replaced by the braking measured on a landing roll (mRollDecel)
+    const F32 LAND_AIM_MIN_FRACTION = 0.05f;
+}
+
+F32 WolfFlight::landApproachSpeed() const
+{
+    F32 v = llmax(1.f, mSelSpeedKt / KT * LAND_APPROACH_SPEED);
+    if (mToRotateSpeed > 1.f)
+    {
+        v = llclamp(v, mToRotateSpeed * 0.85f, mToRotateSpeed * 0.93f);
+        if (mLandLen > 1.f)
+        {
+            const F32 decel = mRollDecel > 0.5f ? mRollDecel : ROLL_DECEL_DEFAULT;
+            const F32 room = mLandLen * (1.f - LAND_AIM_MIN_FRACTION) - LAND_FLOAT_M;
+            const F32 v_fit = sqrtf(llmax(2.f * decel * room, 0.f)) / 0.8f;
+            v = llmax(llmin(v, v_fit), mToRotateSpeed * 0.85f);
+        }
+    }
+    return v;
+}
+
+F32 WolfFlight::landRunwayNeed() const
+{
+    const F32 v = landApproachSpeed() * 0.8f;
+    const F32 decel = mRollDecel > 0.5f ? mRollDecel : ROLL_DECEL_DEFAULT;
+    return v * v / (2.f * decel) + LAND_FLOAT_M;
+}
+
 void WolfFlight::landReset()
 {
     mLand = LAND_NONE;
@@ -1117,8 +1154,7 @@ void WolfFlight::landGuidance(F32 dt)
     }
     const F64 now = nowSeconds();
     const F32 z = (F32)mData.mPosGlobal.mdV[VZ];
-    const F32 cruise = mSelSpeedKt / KT;
-    const F32 approach = llmax(1.f, cruise * LAND_APPROACH_SPEED);
+    const F32 approach = landApproachSpeed();   // <WolfViewer 2026-10-11/> was llmax(1, selected * LAND_APPROACH_SPEED): the plane's own
     switch (mLand)
     {
     case LAND_CRUISE:
@@ -1138,7 +1174,7 @@ void WolfFlight::landGuidance(F32 dt)
             ap.mGlobal = mLandAirportGlobal;
             ap.mHasZ = mLandAirportGlobal.mdV[VZ] != 0.0;
             ap.mExact = mLandAirportExact;
-            const WolfAirports::Runway r = WolfAirports::findRunway(ap);
+            const WolfAirports::Runway r = WolfAirports::findRunway(ap, landRunwayNeed(), vehicleRoot());
             if (r.mValid)
             {
                 landSetRunway(r.mA, r.mB, r.mWidth, r.mTopZ, false);
@@ -1166,7 +1202,7 @@ void WolfFlight::landGuidance(F32 dt)
             ap.mGlobal = mLandAirportGlobal;
             ap.mHasZ = mLandAirportGlobal.mdV[VZ] != 0.0;
             ap.mExact = mLandAirportExact;
-            const WolfAirports::Runway r = WolfAirports::findRunway(ap);
+            const WolfAirports::Runway r = WolfAirports::findRunway(ap, landRunwayNeed(), vehicleRoot());
             if (r.mValid && r.length() > mLandLen + 1.f)
             {
                 landSetRunway(r.mA, r.mB, r.mWidth, r.mTopZ, true);
@@ -1366,6 +1402,8 @@ void WolfFlight::landGuidance(F32 dt)
             {
                 mLand = LAND_ROLLOUT;
                 mLandStopSince = 0.0;
+                mRollStartSpeed = mData.mGS;           // <WolfViewer 2026-10-11/> the roll's braking, measured
+                mRollStartPos = mData.mPosGlobal;
                 postCas("TOUCHDOWN", CAS_MEMO);
             }
         }
@@ -1376,6 +1414,18 @@ void WolfFlight::landGuidance(F32 dt)
             mLandStopSince = mData.mGS < 1.f ? (mLandStopSince > 0.0 ? mLandStopSince : now) : 0.0;
             if (mLandStopSince > 0.0 && now - mLandStopSince > 2.0)
             {
+                // <WolfViewer 2026-10-11> the braking this plane showed: v^2 / 2d from touchdown to the stop (for the next
+                // landing's runway need, landRunwayNeed)
+                {
+                    const F64 rx = mData.mPosGlobal.mdV[VX] - mRollStartPos.mdV[VX], ry = mData.mPosGlobal.mdV[VY] - mRollStartPos.mdV[VY];
+                    const F32 dist = (F32)sqrt(rx * rx + ry * ry);
+                    if (dist > 5.f && mRollStartSpeed > 5.f)
+                    {
+                        mRollDecel = mRollStartSpeed * mRollStartSpeed / (2.f * dist);
+                        LL_INFOS("WolfFlight") << "autoland: roll-out " << dist << " m from " << mRollStartSpeed << " m/s - braking "
+                                               << mRollDecel << " m/s^2" << LL_ENDL;
+                    }
+                }
                 mAP = false;
                 mAT = false;
                 mOutPitch = mOutBank = mOutThrottle = 0.f;
@@ -1431,11 +1481,21 @@ namespace
     const F32 TO_GEAR_UP_M = 30.f;
     const F32 TO_DONE_M = 120.f;            // about 400 ft
     const F32 TO_MIN_CRUISE_FT = 500.f;     // above the runway: a lower cruise is raised to this
+    // <WolfViewer 2026-10-11> LINE-UP and the roll's steering (simulator: region-terrain-work/wolfflightsim, newlogic.py)
+    const F32 TO_TAXI_SPEED = 3.f;          // m/s: lining up
+    const F32 TO_LINEUP_SECS = 60.f;        // lining up longer = the roll from where it is, if near enough, else rejected
+    const F32 TO_LINED_UP_DEG = 2.f;        // pointing down the runway within this...
+    const F32 TO_LINED_UP_M = 1.5f;         // ...and on the centreline within this (or 5% of the width, more)
+    const F32 TO_VEER_DEG = 15.f;           // the roll swinging this far off the runway heading = rejected
+    // Paul's take-off run from his log 14:24:27-35Z: 0, 15.3, 33.8 m/s 3 s apart and rotation at 46.4 m/s 8 s in - about
+    // 180 m (the logged speeds' trapezoid). Used until a take-off this session measures the plane's own (mToRunMeasured).
+    const F32 TO_RUN_DEFAULT_M = 180.f;
 }
 
 namespace
 {
     const F32 SPEED_LOW_MIN_AGL = 150.f;   // <WolfViewer 2026-10-08/> metres: speed protection dives only above this
+    const F32 UPSET_LOW_AGL = 150.f;       // <WolfViewer 2026-10-11/> anti-spin: never nose below level under this
 }
 
 void WolfFlight::takeoffStart()
@@ -1450,15 +1510,54 @@ void WolfFlight::takeoffStart()
     }
     mToHeading = mData.mHeading;
     mToGroundZ = (F32)mData.mPosGlobal.mdV[VZ];
-    // <WolfViewer 2026-10-11> tower: cleared for take-off from this region's tower, the runway from the heading
+    // <WolfViewer 2026-10-11> LINE UP FIRST (Paul: "the first thing to do is make the plane 100% straight and right on the runway
+    // THEN do the take off"). The runway it sits on: WolfAirports::findRunway round the plane itself (the slab under it is the
+    // runway, as the airport's point makes it for a landing), the end it points nearest to. No runway: the old take-off along
+    // the heading it points, and the tower says so.
+    mLevelPitch = mData.mPitch;   // the attitude on the wheels: anti-spin's "level" until the climb-out measures it
+    mToHaveRunway = false;
+    mToSteer = mToHeading;
     {
+        WolfAirports::Airport here;
+        here.mGlobal = mData.mPosGlobal;
+        here.mHasZ = true;
+        here.mExact = true;
+        const WolfAirports::Runway r = WolfAirports::findRunway(here, 0.f, vehicleRoot());   // never the plane's own wing
+        if (r.mValid)
+        {
+            LLVector3 ab((F32)(r.mB.mdV[VX] - r.mA.mdV[VX]), (F32)(r.mB.mdV[VY] - r.mA.mdV[VY]), 0.f);
+            const F32 len = ab.normVec();
+            const LLVector3 nose(sinf(mData.mHeading * DEG_TO_RAD), cosf(mData.mHeading * DEG_TO_RAD), 0.f);
+            const bool along_ab = ab * nose >= 0.f;
+            F32 along = 0.f, across = 0.f;
+            land_track(mData.mPosGlobal, r.mA, ab, along, across);
+            if (len > 1.f && fabsf(across) <= r.mWidth * 0.5f + 10.f && along >= -10.f && along <= len + 10.f)
+            {
+                mToHaveRunway = true;
+                mToLineOrigin = along_ab ? r.mA : r.mB;
+                mToLineDir = along_ab ? ab : -ab;
+                mToLineLen = len;
+                mToLineWidth = r.mWidth;
+                mToHeading = wrap360((F32)(atan2(mToLineDir.mV[VX], mToLineDir.mV[VY]) * RAD_TO_DEG));
+            }
+        }
+    }
+    if (mToHaveRunway)
+    {
+        mTakeoff = TO_LINEUP;
         S32 rwy = (S32)llround(wrap360(mToHeading) / 10.f);
         if (rwy < 1) rwy += 36;
         if (rwy > 36) rwy -= 36;
-        const LLViewerRegion* here = gAgent.getRegion();
-        tower_say((here ? here->getName() + " Tower, " : std::string()) + towerCallsign() + ", runway "
-                  + spoken_digits(llformat("%02d", rwy)) + ", " + towerWind() + ", cleared for take-off.");
+        tower_say(towerCallsign() + ", line up and wait runway " + spoken_digits(llformat("%02d", rwy)) + ".");
+        postCas("LINE UP", CAS_MEMO);
     }
+    else
+    {
+        tower_say(towerCallsign() + ", no runway found under you, take-off on your heading at your discretion.");
+    }
+    LL_INFOS("WolfFlight") << "take-off: " << (mToHaveRunway ? llformat("runway heading %.1f, %.0f m long, %.1f m wide, lining up",
+                                                                       mToHeading, mToLineLen, mToLineWidth)
+                                                             : std::string("no runway under the plane, along its heading")) << LL_ENDL;
     // </WolfViewer>
     mToPhaseStart = now;
     mToBestSpeed = mData.mAirspeed;
@@ -1491,6 +1590,65 @@ void WolfFlight::takeoffStart()
     postCas("TAKEOFF", CAS_MEMO);
     LL_INFOS("WolfFlight") << "take-off: heading " << mToHeading << ", runway z " << mToGroundZ << ", then "
                            << (mDest.mValid ? "the route" : "the selected heading") << " at " << mCruiseAltFt << " ft" << LL_ENDL;
+    if (mTakeoff == TO_ROLL)
+    {
+        takeoffBeginRoll();
+    }
+}
+
+// <WolfViewer 2026-10-11> lined up (or no runway to line up on): the roll. The tower clears it now, not at the line-up, and
+// says when the runway ahead is shorter than the run this plane needs - the run measured on its last take-off this session,
+// else TO_RUN_DEFAULT_M (Paul's logged run) - with 15% to spare.
+void WolfFlight::takeoffBeginRoll()
+{
+    const F64 now = nowSeconds();
+    mTakeoff = TO_ROLL;
+    mToPhaseStart = now;
+    mToBestSpeed = mData.mAirspeed;
+    mToBestSpeedAt = now;
+    mToRollStart = mData.mPosGlobal;
+    clearCas("LINE UP");
+    S32 rwy = (S32)llround(wrap360(mToHeading) / 10.f);
+    if (rwy < 1) rwy += 36;
+    if (rwy > 36) rwy -= 36;
+    const LLViewerRegion* here = gAgent.getRegion();
+    tower_say((here ? here->getName() + " Tower, " : std::string()) + towerCallsign() + ", runway "
+              + spoken_digits(llformat("%02d", rwy)) + ", " + towerWind() + ", cleared for take-off.");
+    if (mToHaveRunway)
+    {
+        F32 along = 0.f, across = 0.f;
+        land_track(mData.mPosGlobal, mToLineOrigin, mToLineDir, along, across);
+        const F32 ahead = mToLineLen - along;
+        const F32 need = (mToRunMeasured > 1.f ? mToRunMeasured : TO_RUN_DEFAULT_M) * 1.15f;
+        if (ahead < need)
+        {
+            tower_say(towerCallsign() + ", runway is short, attempting take-off.");
+            postCas("RUNWAY SHORT", CAS_CAUTION);
+        }
+        LL_INFOS("WolfFlight") << "take-off roll: " << ahead << " m of runway ahead, the run needs about " << need << " m" << LL_ENDL;
+    }
+}
+
+// <WolfViewer 2026-10-11> The turn keys on the ground (Paul, Iceland 14:50Z: "it veered off before it took off"). Held keys
+// with the air's bank band were wrong on the wheels: the band refused a key while the plane sat tilted, and a held key slews a
+// nose wheel round much faster than a bank turns, so it swung past and back. Here: a short tap (0.2 s, at most every 0.5 s)
+// toward the heading when more than 2 degrees off, none when the swing already under way closes it within half a second.
+S32 WolfFlight::rollSteer(F32 err)
+{
+    const F64 now = nowSeconds();
+    if (now < mToSteerUntil)
+    {
+        return mToSteerDir;
+    }
+    mToSteerDir = 0;
+    const F32 lead = err - mData.mTurnRate * 0.5f;
+    if (now >= mToSteerNext && fabsf(err) > 2.f && fabsf(lead) > 1.f)
+    {
+        mToSteerDir = lead > 0.f ? 1 : -1;
+        mToSteerUntil = now + 0.2;
+        mToSteerNext = now + 0.5;
+    }
+    return mToSteerDir;
 }
 
 void WolfFlight::takeoffClearCas()
@@ -1532,11 +1690,70 @@ void WolfFlight::takeoffGuidance()
     const F32 height = (F32)mData.mPosGlobal.mdV[VZ] - mToGroundZ;
     const F32 sel = mSelSpeedKt / KT;
     const F32 climb = llclamp(mData.mAirspeed * 0.176f, 0.7f, 8.f);   // a 10 degree path, as guidance()
+    // <WolfViewer 2026-10-11> on the runway: its heading, plus up to 5 degrees back toward the centreline (20 when lining up)
+    if (mToHaveRunway && (mTakeoff == TO_LINEUP || mTakeoff == TO_ROLL || mTakeoff == TO_ROTATE || mTakeoff == TO_REJECT))
+    {
+        F32 along = 0.f, across = 0.f;
+        land_track(mData.mPosGlobal, mToLineOrigin, mToLineDir, along, across);
+        const F32 cap = mTakeoff == TO_LINEUP ? 20.f : 5.f;
+        mToSteer = wrap360(mToHeading + llclamp(-across * 4.f, -cap, cap));
+    }
+    else
+    {
+        mToSteer = mToHeading;
+    }
     switch (mTakeoff)
     {
+    case TO_LINEUP:
+    {
+        mToWantVS = 0.f;
+        F32 along = 0.f, across = 0.f;
+        land_track(mData.mPosGlobal, mToLineOrigin, mToLineDir, along, across);
+        const F32 hdg_err = fabsf(wrap180(mData.mHeading - mToHeading));
+        const bool lined_up = hdg_err <= TO_LINED_UP_DEG && fabsf(across) <= llmax(TO_LINED_UP_M, mToLineWidth * 0.05f);
+        if (lined_up)
+        {
+            LL_INFOS("WolfFlight") << "take-off: lined up - " << across << " m off the centreline, heading " << mData.mHeading
+                                   << " (runway " << mToHeading << ")" << LL_ENDL;
+            takeoffBeginRoll();
+        }
+        else if (now - mToPhaseStart > TO_LINEUP_SECS)
+        {
+            if (hdg_err <= 5.f && fabsf(across) <= mToLineWidth * 0.25f)
+            {
+                LL_INFOS("WolfFlight") << "take-off: not quite lined up after " << TO_LINEUP_SECS << " s (" << across << " m, "
+                                       << hdg_err << " deg) - rolling, steering onto the centreline" << LL_ENDL;
+                takeoffBeginRoll();
+            }
+            else
+            {
+                tower_say(towerCallsign() + ", unable to line up. Hold position.");
+                takeoffReject("it could not line up on the runway (check the turn keys on the CDU CONTROLS page)");
+            }
+        }
+        break;
+    }
     case TO_ROLL:
     {
         mToWantVS = 0.f;
+        // <WolfViewer 2026-10-11> the roll twice a second in the log, and a swing past TO_VEER_DEG off the runway = rejected
+        // (never lifted off sideways)
+        const F32 veer = wrap180(mData.mHeading - mToHeading);
+        if (now >= mToNextRollLog)
+        {
+            mToNextRollLog = now + 0.5;
+            F32 along = 0.f, across = 0.f;
+            if (mToHaveRunway) land_track(mData.mPosGlobal, mToLineOrigin, mToLineDir, along, across);
+            LL_INFOS("WolfFlight") << "take-off roll: gs " << mData.mGS << " heading " << mData.mHeading << " off " << veer
+                                   << " centreline " << across << " along " << along << " keys bank " << mOutBank
+                                   << " throttle " << mOutThrottle << LL_ENDL;
+        }
+        if (mData.mGS > 5.f && fabsf(veer) > TO_VEER_DEG)
+        {
+            tower_say(towerCallsign() + ", stop, stop. Take-off rejected.");
+            takeoffReject(llformat("it swung %d degrees off the runway heading", (S32)llround(veer)));
+            break;
+        }
         if (mData.mAirspeed > mToBestSpeed + TO_SPEED_GAIN)
         {
             mToBestSpeed = mData.mAirspeed;
@@ -1548,6 +1765,12 @@ void WolfFlight::takeoffGuidance()
         {
             mTakeoff = TO_ROTATE;
             mToPhaseStart = now;
+            mToRotateSpeed = mData.mAirspeed;   // <WolfViewer 2026-10-11/> the plane's own rotation speed (landApproachSpeed)
+            // <WolfViewer 2026-10-11/> the plane's own take-off run, for the next take-off's "runway is short"
+            {
+                const F64 rx = mData.mPosGlobal.mdV[VX] - mToRollStart.mdV[VX], ry = mData.mPosGlobal.mdV[VY] - mToRollStart.mdV[VY];
+                mToRunMeasured = (F32)sqrt(rx * rx + ry * ry);
+            }
             postCas("ROTATE", CAS_MEMO);
             LL_INFOS("WolfFlight") << "take-off: rotate at " << mData.mAirspeed << " m/s ("
                                    << (fast ? "speed" : (plateau ? "speed steady" : "already climbing")) << ")" << LL_ENDL;
@@ -1609,6 +1832,13 @@ void WolfFlight::guidance(F32 dt)
 {
     // the vertical speed arrives in steps with each object update: filtered for the guidance
     mVSf = ema(mVSf, mData.mVS, dt, 0.8f);
+    // <WolfViewer 2026-10-11> the attitude this plane flies level at: pitch less the flight path angle, over ~5 s of calm
+    // flight (wings within 15, the nose not moving, flying) - anti-spin's "level"
+    if (craft() == CRAFT_PLANE && !mSail && mData.mAGL > 15.f && mData.mAirspeed > 15.f && fabsf(mData.mRoll) < 15.f
+        && fabsf(mData.mPitchRate) < 3.f && !mUpsetRecovery)
+    {
+        mLevelPitch = ema(mLevelPitch, mData.mPitch - mData.mFPA, dt, 5.f);
+    }
     landGuidance(dt);   // <WolfViewer 2026-10-07/> autoland: its targets override below
     takeoffGuidance();  // <WolfViewer 2026-10-07/> auto take-off: the same
     const bool landing = mAP && mLand >= LAND_APPROACH;
@@ -1693,11 +1923,16 @@ void WolfFlight::guidance(F32 dt)
     }
     if (takeoff)   // <WolfViewer 2026-10-07/> straight down the runway and out along it
     {
-        want = mToHeading;
+        // <WolfViewer 2026-10-11/> on the runway along its centreline (mToSteer), slow while lining up
+        want = takeoffOnRunway() ? mToSteer : mToHeading;
         use_track = false;
         if (mTakeoff == TO_REJECT)
         {
             mWantSpeed = 0.f;
+        }
+        else if (mTakeoff == TO_LINEUP)
+        {
+            mWantSpeed = TO_TAXI_SPEED;
         }
     }
     mWantTrack = want;
@@ -1959,7 +2194,7 @@ void WolfFlight::guidance(F32 dt)
     // </WolfViewer>
     // <WolfViewer 2026-10-07> Take-off: no pitch keys on the roll or a rejected take-off (the director follows the nose, so
     // drive() holds none), then the rotation's nose-up, with the trim kept at the nose until it flies.
-    if ((mTakeoff == TO_ROLL || mTakeoff == TO_REJECT) && mAP)
+    if ((mTakeoff == TO_ROLL || mTakeoff == TO_REJECT || mTakeoff == TO_LINEUP) && mAP)
     {
         mPitchTrim = 0.f;
         mFDPitch = mData.mPitch;
@@ -2004,22 +2239,29 @@ void WolfFlight::guidance(F32 dt)
         if (mUpsetRecovery)
         {
             mFDRoll = 0.f;
-            mPitchTrim = llmin(mPitchTrim, 0.f);
+            // <WolfViewer 2026-10-11> Every nose target is taken from the attitude THIS plane flies level at (mLevelPitch), not
+            // from 0: Paul's small plane flies level at +8..9 degrees (pitch 0-2 gave -6..-8 m/s at 43 m/s, 14:07:27-14:08:19Z),
+            // so "nose level" was an 8 degree dive and "-10" an 18 degree one - after the rotation at 14:24:40Z it went from
+            // 118 to 86 m with the ground below ("it descends into the ground"). Under UPSET_LOW_AGL, or climbing out, never
+            // below level. (Simulator: region-terrain-work/wolfflightsim, newlogic.py upset_pitch.)
+            const F32 level = mLevelPitch;
+            const bool low = mData.mAGL < UPSET_LOW_AGL || mTakeoff != TO_NONE;
+            mPitchTrim = llmin(mPitchTrim, level);
             const bool slow = mSpeedSmooth < ref_u * 0.8f;
             if (fabsf(mData.mRoll) > 30.f)
             {
-                mFDPitch = 0.f;                                     // the wings first: no pull while steeply banked
+                mFDPitch = level;                                   // the wings first: no pull while steeply banked
             }
-            else if (slow || mData.mPitch > 5.f)
+            else if (slow || mData.mPitch > level + 5.f)
             {
-                // unload and get the speed back - but never nose-down near the ground or with land rising ahead
-                mFDPitch = (mData.mAGL < 60.f || mTerrainNeedSmooth > 0.f) ? 0.f : -10.f;
+                // unload and get the speed back - but never nose-down low down or with land rising ahead
+                mFDPitch = (low || mTerrainNeedSmooth > 0.f) ? level : level - 10.f;
             }
             else
             {
-                mFDPitch = 0.f;                                     // speed back: level
+                mFDPitch = level;                                   // speed back: level
             }
-            const bool calm = fabsf(mData.mRoll) < 15.f && fabsf(mData.mPitch) < 15.f && !slow && fabsf(mData.mTurnRate) < 10.f;
+            const bool calm = fabsf(mData.mRoll) < 15.f && fabsf(mData.mPitch - level) < 15.f && !slow && fabsf(mData.mTurnRate) < 10.f;
             mUpsetCalmSince = calm ? (mUpsetCalmSince > 0.0 ? mUpsetCalmSince : now_u) : 0.0;
             // hands back after 2 s calm - or after UPSET_MAX_SECS whatever, so it can never hold the plane for good
             const F64 UPSET_MAX_SECS = 20.0;
@@ -2028,6 +2270,10 @@ void WolfFlight::guidance(F32 dt)
                 mUpsetRecovery = false;
                 mUpsetSince = 0.0;
                 mWantVSSlew = mVSf;   // pick the climb / descent back up from where the plane is, not with a jump
+                if (mData.mAGL < UPSET_LOW_AGL)
+                {
+                    mWantVSSlew = llmax(mVSf, 0.f);   // <WolfViewer 2026-10-11/> low down: never from a descent
+                }
                 clearCas("SPIN RECOVERY");
                 LL_INFOS("WolfFlight") << "anti-spin: recovered at ias " << mSpeedSmooth << ", agl " << mData.mAGL << LL_ENDL;
             }
@@ -2143,7 +2389,15 @@ void WolfFlight::drive(F32 dt)
         // <WolfViewer 2026-10-11> the band follows guidance's bank limit (25 -> down below 20, up past 30, as before; 15 or 10
         // when low or slow - mBankLimit), so the limit reaches the keys, not only the director's bar
         const F32 press_below = mBankLimit - 5.f, release_past = mBankLimit + 5.f;
-        if (mTurnHeld == 0 && fabsf(err) > 6.f && mData.mRoll * dir < press_below) mTurnHeld = dir;
+        // <WolfViewer 2026-10-11> ON THE WHEELS (lining up, the roll, the rotation, a rejected take-off, a landing's roll-out):
+        // short taps toward the HEADING (rollSteer) - guidance aims the take-off by heading, and this used the track whenever
+        // the plane moved faster than 5 m/s; and no bank band - the plane sits tilted on the ground (Paul's: roll -7)
+        const bool wheels = takeoffOnRunway() || mLand == LAND_ROLLOUT;
+        if (wheels)
+        {
+            mTurnHeld = mLateral == LAT_NONE ? 0 : rollSteer(wrap180(mWantTrack - mData.mHeading));
+        }
+        else if (mTurnHeld == 0 && fabsf(err) > 6.f && mData.mRoll * dir < press_below) mTurnHeld = dir;
         else if (mTurnHeld != 0 && (lead * mTurnHeld < 1.5f || mData.mRoll * mTurnHeld > release_past)) mTurnHeld = 0;
         // <WolfViewer 2026-10-11> ANTI-SPIN (guidance): the turn keys oppose the rotation - the opposite rudder of every spin
         // recovery - while it is still turning faster than 10 degrees a second; then they take the bank off (the key away

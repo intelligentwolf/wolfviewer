@@ -342,6 +342,15 @@ private:
     void landSetRunway(const LLVector3d& a, const LLVector3d& b, F32 width, F32 top, bool keep_direction);
     void landGiveUp(const std::string& cas, const std::string& message);
     void landReset();
+    // <WolfViewer 2026-10-11> the plane's own numbers for landing: the approach speed it is flown at, and the runway it needs
+    // (the roll from the flare's 0.8 x that speed at the braking it showed, plus the flare's float)
+    F32 landApproachSpeed() const;
+    F32 landRunwayNeed() const;
+    F32 mToRotateSpeed = 0.f;   // measured at the last rotation this session
+    F32 mRollDecel = 0.f;       // measured on the last landing roll this session (m/s^2)
+    F32 mRollStartSpeed = 0.f;  // the landing roll's: speed at touchdown...
+    LLVector3d mRollStartPos;   // ...and where
+    // </WolfViewer>
     ELand mLand = LAND_NONE;
     bool mLandChecked = false;          // the destination has been looked up in the airports list
     std::string mLandAirport;           // its name
@@ -371,13 +380,30 @@ private:
     // land perfectly"). The autopilot engaged with a plane on the ground takes off along the heading
     // it points: ROLL at full power, ROTATE once the speed is up, CLIMB out (gear up at 30 m), then
     // the ordinary modes from 120 m. REJECT = power off along the runway until stopped. NONE = not taking off.
-    enum ETakeoff { TO_NONE = 0, TO_ROLL, TO_ROTATE, TO_CLIMB, TO_REJECT };
+    // <WolfViewer 2026-10-11> LINEUP before the roll (Paul: "the first thing to do is make the plane 100% straight and
+    // right on the runway THEN do the take off"): taxi onto the centreline of the runway it sits on, pointing down it.
+    enum ETakeoff { TO_NONE = 0, TO_ROLL, TO_ROTATE, TO_CLIMB, TO_REJECT, TO_LINEUP };
     void takeoffStart();
     void takeoffGuidance();
     void takeoffReject(const std::string& why);
     void takeoffClearCas();
-    bool takeoffOnRunway() const { return mTakeoff == TO_ROLL || mTakeoff == TO_ROTATE || mTakeoff == TO_REJECT; }
+    void takeoffBeginRoll();            // <WolfViewer 2026-10-11/> lined up (or no runway): power on, cleared for take-off
+    S32  rollSteer(F32 err);            // <WolfViewer 2026-10-11/> on the ground: short taps of the turn keys toward the heading
+    bool takeoffOnRunway() const { return mTakeoff == TO_ROLL || mTakeoff == TO_ROTATE || mTakeoff == TO_REJECT || mTakeoff == TO_LINEUP; }
     ETakeoff mTakeoff = TO_NONE;
+    // <WolfViewer 2026-10-11> the runway taken off from (takeoffStart: WolfAirports::findRunway at the plane): its centreline
+    // through mToLineOrigin along mToLineDir (the end facing the plane's heading), its far end mToLineLen along
+    bool mToHaveRunway = false;
+    LLVector3d mToLineOrigin;
+    LLVector3 mToLineDir;
+    F32 mToLineLen = 0.f, mToLineWidth = 0.f;
+    LLVector3d mToRollStart;            // where the roll began (the run to rotation is measured from it)
+    F32 mToRunMeasured = 0.f;           // metres from the roll's start to rotation, last take-off this session
+    F64 mToSteerUntil = 0.0, mToSteerNext = 0.0;   // rollSteer's tap
+    S32 mToSteerDir = 0;
+    F64 mToNextRollLog = 0.0;           // the roll in the log twice a second
+    F32 mToSteer = 0.f;                 // the heading steered on the ground: the runway's, plus the way back to its centreline
+    // </WolfViewer>
     F32 mToHeading = 0.f;               // the runway heading: the way the plane pointed when engaged
     F32 mToGroundZ = 0.f;               // the pilot's height on the runway
     F64 mToPhaseStart = 0.0;
@@ -435,6 +461,9 @@ private:
     F64  mUpsetSince = 0.0, mUpsetCalmSince = 0.0;
     bool mUpsetRecovery = false;
     F64  mUpsetStarted = 0.0;   // when the recovery began (it hands back after UPSET_MAX_SECS whatever)
+    // <WolfViewer 2026-10-11> the attitude this plane flies level at (pitch less the flight path angle, smoothed in calm
+    // flight; started from its attitude on the ground): anti-spin's "nose level" (Paul's small plane flies level at +8..9)
+    F32  mLevelPitch = 0.f;
     F32  mBankLimit = 25.f;     // <WolfViewer 2026-10-11/> drive()'s turn-key bank band centre (guidance sets it)
     S32 mCloudSide = 0;            // <WolfViewer 2026-10-08/> -1 under the cloud deck, +1 over it, 0 clear of it
     F32 mSpeedRef = 0.f;           // <WolfViewer 2026-10-08/> the fastest flown lately (falls back 0.5 m/s a second)

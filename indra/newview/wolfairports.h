@@ -29,6 +29,8 @@
 // owner pasted, in global metres. The directory holds no runway, so the runway is found in-world
 // round that point (findRunway): the longest flat, narrow prim lying there.
 // Wolf Territories only: WolfFlight, the only caller, runs only there (WolfGrid::isOnWolfTerritories).
+class LLViewerObject;
+
 class WolfAirports : public LLSingleton<WolfAirports>
 {
     LLSINGLETON(WolfAirports);
@@ -76,7 +78,10 @@ public:
     static std::string fold(const std::string& utf8);
     // </WolfViewer>
     /** Look for the runway round an airport among the objects the viewer has. Invalid if none. */
-    static Runway findRunway(const Airport& airport);
+    // <WolfViewer 2026-10-11> a flat slab the airport's own point lies on counts as the runway (as a named one does), and the
+    // longest such wins; one shorter than need_len (metres) gives way to a longer runway there if there is one. The linkset
+    // rooted at skip_root (the plane itself, when looking for the runway it sits on) is never a runway.
+    static Runway findRunway(const Airport& airport, F32 need_len = 0.f, const LLViewerObject* skip_root = nullptr);
 
 private:
     void fetchCoro();

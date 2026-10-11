@@ -151,17 +151,17 @@ vec3 wolfAurora(vec3 dir, float t, float amount, int colorMode)
         vec2 p = dir.xy / dir.z * h;                           // the ray at that height
         float lat = (p.y - (2.2 - 1.6 * amount)) / (0.9 + 1.6 * amount);
         float emit = smoothstep(0.95, 1.05, h) * exp(-(h - 1.05) / 0.45) * exp(-lat * lat);
-        vec3 main;
+        vec3 main_col;   // <WolfViewer 2026-10-11/> not "main": a local named after main() may be refused by a strict (Apple) compiler
         if (colorMode == 5)
         {
             float hue = wolfAuroraNoise(vec2(p.x * 0.25 + t * 0.01, 3.7)) * 4.99;
-            main = wolfAuroraPalette(int(hue));
+            main_col = wolfAuroraPalette(int(hue));
         }
         else
         {
-            main = wolfAuroraPalette(colorMode);
+            main_col = wolfAuroraPalette(colorMode);
         }
-        vec3 c = mix(vec3(0.55, 0.20, 0.75), main, smoothstep(0.95, 1.12, h));
+        vec3 c = mix(vec3(0.55, 0.20, 0.75), main_col, smoothstep(0.95, 1.12, h));
         c = mix(c, vec3(0.90, 0.12, 0.18), smoothstep(1.7, 2.6, h) * (0.35 + 0.65 * amount));
         sum += c * wolfAuroraCurtain(p, t) * emit;
     }

@@ -125,6 +125,7 @@ private:
     std::string mAptQuery;
     std::vector<S32> mAptIds;
     S32 mAptPage = 0;
+    U32 mAptGeneration = 0;         // <WolfViewer 2026-10-11/> the directory list mAptIds came from
     void aptSearch(const std::string& text);
     bool pasteScratch();            // Ctrl+V: the clipboard into the scratchpad
     // </WolfViewer>

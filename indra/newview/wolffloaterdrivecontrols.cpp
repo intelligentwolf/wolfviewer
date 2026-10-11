@@ -228,7 +228,7 @@ void WolfFloaterDriveControls::refreshActions()
         if (a == WolfDrive::ACT_HORN)
         {
             mOutCombo[a]->setToolTip(c.mOut == WolfDrive::OUT_NONE
-                ? std::string("Horn: none set - uses the built-in horn (car, truck or bike, by the dashboard's design), played in-world on Wolf Territories")
+                ? std::string("Horn: none set - uses the built-in horn (car, truck, bike or speedboat, by the dashboard's design; the spaceship and submarine have none), played in-world on Wolf Territories")
                 : std::string("What the horn sends the vehicle"));
         }
     }

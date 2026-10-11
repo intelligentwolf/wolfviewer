@@ -98,10 +98,16 @@ F32 WolfAltitudeSky::farClipExtra()
     return llmin(altitude(), FAR_EXTRA_MAX_M);
 }
 
+extern bool gCubeSnapshot;
+
 F32 WolfAltitudeSky::horizonSeaHeight()
 {
     static LLCachedControl<bool> on(gSavedSettings, "WolfViewerHorizonSea", true);
-    if (!on || !WolfGrid::isOnWolfTerritories())
+    // <WolfViewer 2026-10-11> Not in reflection-probe captures (the aurora is left out the same way,
+    // lldrawpoolwlsky.cpp): the probes light interiors and ambient, and the dark sea in the lower half
+    // of every capture, where Firestorm has bright haze, darkened them (Timmy, Mac, w63 "front of the
+    // house very dark"). Both the sky and the water drop to Firestorm's own path in a capture.
+    if (gCubeSnapshot || !on || !WolfGrid::isOnWolfTerritories())
     {
         return -1.f;
     }

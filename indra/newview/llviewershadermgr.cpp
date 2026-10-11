@@ -171,7 +171,7 @@ static const ShaderFallbackStep sShaderFallbackSteps[] =
 {
     { "RenderMirrors",                false, 0,                       "mirrors" },
     { "RenderScreenSpaceReflections", false, 0,                       "screen-space reflections" },
-    { "RenderReflectionsEnabled",     false, 0,                       "reflection probes" },
+    { "RenderReflectionsEnabled",     false, 0,                       "reflection probes (the sky's light inside buildings)" },
     { "RenderShadowDetail",           true,  0,                       "shadows" },
     { "RenderTerrainPBRDetail",       true,  TERRAIN_PBR_DETAIL_MIN,  "detailed terrain textures" },
 };
@@ -198,6 +198,11 @@ static const ShaderFallbackStep* next_shader_fallback_step()
 
 static void apply_shader_fallback_step(const ShaderFallbackStep& step)
 {
+    // <WolfViewer 2026-10-11> remember it was the fallback, not the Low preset (wolfRetryReflections)
+    if (!strcmp(step.setting, "RenderReflectionsEnabled"))
+    {
+        gSavedSettings.setBOOL("WolfReflectionsFellBack", true);
+    }
     if (step.is_s32)
     {
         gSavedSettings.setS32(step.setting, step.value);
@@ -206,6 +211,43 @@ static void apply_shader_fallback_step(const ShaderFallbackStep& step)
     {
         gSavedSettings.setBOOL(step.setting, step.value != 0);
     }
+}
+
+// <WolfViewer 2026-10-11> Timmy (Mac, w63/w64): insides of houses very dark where Firestorm on the
+// same Mac is fine. "reflection probes" on the ladder is RenderReflectionsEnabled, deprecated upstream
+// because off "removes all sky ambiance" (its settings.xml comment): everything lit only by the sky -
+// interiors, shaded sides - goes nearly black. Preferences has no control for it (its reflection boxes
+// are RenderReflectionProbeDetail / Level), so once the ladder had switched it off it stayed off for
+// good, whatever release fixed the shader that failed. So: once per viewer version, switch it back on
+// before the first shader load - when the FALLBACK switched it off (WolfReflectionsFellBack, set by
+// apply_shader_fallback_step). The Low preset also switches it off (featuretable*.txt "Low
+// RenderReflectionsEnabled 1 0"); that is a choice and is left alone. Viewers before w65 did not
+// record the marker, so the first time this runs (no WolfReflectionsRetryVersion yet) an "off" on a
+// preset above Low (RenderQualityPerformance 0 = Low, llfeaturemanager.cpp getNameForGraphicsLevel)
+// counts as the fallback's. If the shaders still will not build, the ladder switches it off again
+// this same start-up and says so (WolfGraphicsDegraded) - one extra load per release, no loop.
+// Called from LLAppViewer::init after the settings are read and before the pipeline exists and the
+// listeners are connected (settings_setup_listeners), so nothing reloads here.
+void LLViewerShaderMgr::wolfRetryReflections()
+{
+    if (gSavedSettings.getBOOL("RenderReflectionsEnabled"))
+    {
+        gSavedSettings.setBOOL("WolfReflectionsFellBack", false);
+        return;
+    }
+    const std::string version = LLVersionInfo::instance().getVersion();
+    const std::string retried = gSavedSettings.getString("WolfReflectionsRetryVersion");
+    const bool fell_back = gSavedSettings.getBOOL("WolfReflectionsFellBack")
+                        || (retried.empty() && gSavedSettings.getU32("RenderQualityPerformance") > 0);
+    if (!fell_back || retried == version)
+    {
+        return;
+    }
+    gSavedSettings.setString("WolfReflectionsRetryVersion", version);
+    gSavedSettings.setBOOL("WolfReflectionsFellBack", false);
+    gSavedSettings.setBOOL("RenderReflectionsEnabled", true);
+    LL_INFOS("ShaderLoading") << "Sky light (RenderReflectionsEnabled) was switched off by the shader fallback; switched back on for "
+                              << version << " - the fallback switches it off again if it still will not build" << LL_ENDL;
 }
 
 // Told at idle, not from inside setShaders(): the first shader load happens during startup, before

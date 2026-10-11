@@ -30,12 +30,16 @@
 #include "llfontgl.h"
 #include "llfontregistry.h"
 #include "llframetimer.h"
+#include "lllocalcliprect.h"
 #include "llrender.h"
 #include "lltoolbarview.h"
 #include "lltooltip.h"
 #include "llui.h"
 #include "llviewercontrol.h"
+#include "llviewerobjectlist.h"
+#include "llvoavatarself.h"
 #include "llwindow.h"
+#include "llworld.h"
 #include "wolfdrive.h"
 
 static LLDefaultChildRegistry::Register<WolfDashboard> r_wolf_dashboard("wolf_car_dashboard");
@@ -64,6 +68,47 @@ namespace
     F64 now() { return LLFrameTimer::getTotalSeconds(); }
     bool blink(F32 period = 0.8f) { return fmod(now(), (F64)period) < period * 0.5f; }
     LLColor4 alpha(const LLColor4& c, F32 a) { return LLColor4(c.mV[VRED], c.mV[VGREEN], c.mV[VBLUE], c.mV[VALPHA] * a); }
+
+    // <WolfViewer 2026-10-11> w65: a speed in m/s in the shown units (units=kn and the spaceship's m/s besides km/h and
+    // mph), and their name. 1 kn = 1852 m / 3600 s.
+    const F32 KN = 3600.f / 1852.f;
+    F32 speedIn(const WolfDrive::Shown& s, F32 ms)
+    {
+        switch (s.mUnits)
+        {
+        case WolfDrive::Shown::UNITS_MPH: return ms * MPH;
+        case WolfDrive::Shown::UNITS_KN:  return ms * KN;
+        case WolfDrive::Shown::UNITS_MS:  return ms;
+        default:                          return ms * KMH;
+        }
+    }
+    const char* unitName(const WolfDrive::Shown& s)
+    {
+        switch (s.mUnits)
+        {
+        case WolfDrive::Shown::UNITS_MPH: return "mph";
+        case WolfDrive::Shown::UNITS_KN:  return "kn";
+        case WolfDrive::Shown::UNITS_MS:  return "m/s";
+        default:                          return "km/h";
+        }
+    }
+    std::string unitUpper(const WolfDrive::Shown& s)
+    {
+        std::string u = unitName(s);
+        LLStringUtil::toUpper(u);
+        return u;
+    }
+    /** The speedboat's speed step as the helm writes it: "3/6" when it is one of the boat's steps, else as sent. */
+    std::string stepText(const WolfDrive::Shown& s)
+    {
+        if (s.mGear.empty()) return "-";
+        const bool digits = s.mGear.find_first_not_of("0123456789") == std::string::npos;
+        if (digits && s.mStepMax > 0 && atoi(s.mGear.c_str()) <= s.mStepMax)
+        {
+            return s.mGear + llformat("/%d", s.mStepMax);
+        }
+        return s.mGear;
+    }
 
     // ---- primitives, view-local, untextured (after wolfflightdeck.cpp's) ----
     void noTex() { gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE); }
@@ -261,6 +306,22 @@ namespace
         else if (w == "air")      { label = "AIR"; col = C_RED; }
         else if (w == "door")     { label = "DOOR"; col = C_RED; }
         else if (w == "esp")      { label = "ESP"; }
+        // <WolfViewer 2026-10-11> w65 (PROTOCOL.md "New warnings words"): red where the craft is at risk now
+        else if (w == "shield")   { label = "SHIELD"; }
+        else if (w == "hull")     { label = "HULL"; col = C_RED; }
+        else if (w == "heat")     { label = "HEAT"; col = C_RED; }
+        else if (w == "stage")    { label = "STAGE"; }
+        else if (w == "boost")    { label = "BOOST"; }
+        else if (w == "anchor")   { label = "ANCHOR"; }
+        else if (w == "depth")
+        {
+            // measured by the viewer: too shallow under a speedboat, past the safe depth in a submarine
+            label = WolfDrive::instance().type() == WolfDrive::TYPE_SUBMARINE ? "TOO DEEP" : "SHALLOW";
+            col = C_RED;
+        }
+        else if (w == "oxygen")   { label = "OXYGEN"; col = C_RED; }
+        else if (w == "battery")  { label = "BATTERY"; }
+        else if (w == "leak")     { label = "LEAK"; col = C_RED; }
     }
 
     // ════════════════════════════════════════════════════════════════════════════════════
@@ -323,6 +384,12 @@ namespace
     const LLColor4 FACE_HI(0.114f, 0.125f, 0.149f, 1.f), FACE_LO(0.012f, 0.012f, 0.016f, 1.f);
     const LLColor4 TFACE_HI(0.133f, 0.157f, 0.188f, 1.f), TFACE_LO(0.027f, 0.035f, 0.043f, 1.f);
     const LLColor4 TRUCK_NEEDLE(1.f, 0.54f, 0.086f, 1.f);
+    // <WolfViewer 2026-10-11> the speedboat helm's navy (Mercury VesselView / Yamaha CL7 / Garmin gauge pages)
+    const LLColor4 NAVY_HI(0.055f, 0.105f, 0.200f, 1.f), NAVY_LO(0.012f, 0.035f, 0.085f, 1.f);
+    const LLColor4 NAVY_FACE_HI(0.07f, 0.13f, 0.24f, 1.f), NAVY_FACE_LO(0.01f, 0.03f, 0.08f, 1.f);
+    const LLColor4 NAVY_SCREEN(0.008f, 0.024f, 0.060f, 1.f);
+    const LLColor4 NAVY_LINE(0.16f, 0.28f, 0.42f, 1.f);
+    const LLColor4 SEA_FACE_HI(0.05f, 0.16f, 0.13f, 1.f), SEA_FACE_LO(0.005f, 0.04f, 0.035f, 1.f);   // the submarine's
 
     void chromeDisc(F32 cx, F32 cy, F32 r) { circleShaded(cx, cy, r, CHROME_HI, CHROME_LO, 64); }
 
@@ -333,6 +400,8 @@ namespace
         bool truck;
         LLColor4 needle;
         F32 num_px;
+        bool navy = false;   // <WolfViewer 2026-10-11/> the speedboat's navy face
+        bool sea = false;    // <WolfViewer 2026-10-11/> the submarine's dark green face
     };
 
     // A round analogue gauge after the mockup's dial(): chrome ring, dark face, green / red arcs,
@@ -343,7 +412,8 @@ namespace
         auto ang = [&](F32 v) { return -135.f + 270.f * llclamp(v / llmax(1.f, o.max), 0.f, 1.04f); };
         chromeDisc(o.cx, o.cy, o.r * 1.09f);
         circleF(o.cx, o.cy, o.r * 1.03f, LLColor4(0.02f, 0.02f, 0.024f, 1.f), 64);
-        circleShaded(o.cx, o.cy, o.r, o.truck ? TFACE_HI : FACE_HI, o.truck ? TFACE_LO : FACE_LO, 64);
+        circleShaded(o.cx, o.cy, o.r, o.sea ? SEA_FACE_HI : o.navy ? NAVY_FACE_HI : o.truck ? TFACE_HI : FACE_HI,
+                     o.sea ? SEA_FACE_LO : o.navy ? NAVY_FACE_LO : o.truck ? TFACE_LO : FACE_LO, 64);
         if (o.green_hi > o.green_lo)
         {
             clockArc(o.cx, o.cy, o.r * 0.86f, o.r * 0.07f, ang(o.green_lo), ang(o.green_hi), C_GREEN);
@@ -559,14 +629,58 @@ void WolfDashboard::drawMiniBar(F32 bottom)
     struct Cell { std::string label, value; LLColor4 col; EHit hit; std::string tip; F32 w; bool key; };
     std::vector<Cell> cells;
     const bool blink_on = fmod(LLFrameTimer::getElapsedSeconds(), 1.0) < 0.5;
-    cells.push_back({ "", (s.mIndicators == 1 || s.mIndicators == 3) && blink_on ? "<" : "", C_GREEN, H_IND_L, "Left indicator", 0.6f, false });
-    cells.push_back({ s.mMph ? "MPH" : "KM/H", llformat("%d", (S32)llround(s.mSpeed * (s.mMph ? MPH : KMH))), C_WHITE, H_UNITS,
-                      s.mMph ? "Click for km/h" : "Click for miles per hour", 1.2f, false });
-    cells.push_back({ "GEAR", s.mGear.empty() ? std::string("-") : s.mGear, C_WHITE, H_NONE, "", 0.9f, false });
-    cells.push_back({ "FUEL", llformat("%d%%", (S32)llround(s.mFuel)), s.mFuel < 15.f ? C_AMBER : C_WHITE, H_NONE, "", 1.0f, false });
-    cells.push_back({ "LIGHTS", s.mLights == 2 ? "MAIN" : (s.mLights == 1 ? "ON" : "OFF"), s.mLights == 2 ? C_BLUE : (s.mLights ? C_GREEN : C_DIM),
-                      H_LIGHTS, "Lamps: click to change", 1.0f, false });
-    cells.push_back({ "CRUISE", s.mCruise ? "ON" : "OFF", s.mCruise ? C_GREEN : C_DIM, H_CRUISE, "Cruise control: click to switch", 1.0f, false });
+    const WolfDrive::EType ty = WolfDrive::instance().type();
+    if (ty == WolfDrive::TYPE_SPEEDBOAT)
+    {
+        // <WolfViewer 2026-10-11> w65: the speedboat helm's mini bar - speed, step, revs, depth, fuel, anchor
+        const bool shallow = s.mDepth < 2.f;
+        cells.push_back({ unitUpper(s), llformat("%d", (S32)llround(speedIn(s, s.mSpeed))), C_WHITE, H_UNITS, "Click to change the speed units", 1.2f, false });
+        cells.push_back({ "STEP", stepText(s), C_WHITE, H_NONE, "", 0.9f, false });
+        cells.push_back({ "RPM", llformat("%d", (S32)llround(s.mRpm / 10.f) * 10), s.mRpm >= s.mRedline ? C_RED : C_WHITE, H_NONE, "", 1.2f, false });
+        cells.push_back({ "DEPTH", s.mDepth <= 0.f ? std::string("AGROUND") : llformat("%.1f m", s.mDepth), shallow ? C_RED : C_WHITE, H_NONE, "", 1.4f, false });
+        cells.push_back({ "FUEL", llformat("%d%%", (S32)llround(s.mFuel)), s.mFuel < 15.f ? C_AMBER : C_WHITE, H_NONE, "", 1.0f, false });
+        cells.push_back({ "ANCHOR", s.mAnchor ? "DOWN" : "UP", s.mAnchor ? C_AMBER : C_DIM, H_ANCHOR, "Anchor: click to send it up or down", 1.0f, false });
+    }
+    else if (ty == WolfDrive::TYPE_SUBMARINE)
+    {
+        // <WolfViewer 2026-10-11> w65: the submarine's - speed, depth, sea bed, battery, oxygen, periscope
+        cells.push_back({ unitUpper(s), llformat("%.1f", speedIn(s, s.mSpeed3D)), C_WHITE, H_UNITS, "Click to change the speed units", 1.1f, false });
+        cells.push_back({ "DEPTH", s.mSubDepth <= 0.f ? std::string("SURF") : llformat("%.0f m", s.mSubDepth),
+                          s.mHasMaxDepth && s.mSubDepth > s.mMaxDepth ? C_RED : C_WHITE, H_NONE, "", 1.2f, false });
+        cells.push_back({ "SEA BED", llformat("%.0f m", s.mSeabed), s.mSeabed < 2.f ? C_RED : s.mSeabed < 5.f ? C_AMBER : C_WHITE, H_NONE, "", 1.2f, false });
+        cells.push_back({ "BATTERY", s.mHasBattery ? llformat("%d%%", (S32)llround(s.mBattery)) : std::string("--"), C_WHITE, H_NONE, "", 1.1f, false });
+        cells.push_back({ "OXYGEN", s.mHasOxygen ? llformat("%d%%", (S32)llround(s.mOxygen)) : std::string("--"), s.mHasOxygen && s.mOxygen < 25.f ? C_AMBER : C_WHITE, H_NONE, "", 1.1f, false });
+        cells.push_back({ "SCOPE", s.mPeriscope ? "UP" : "DOWN", s.mPeriscope ? C_AMBER : C_DIM, H_PERISCOPE, "Periscope: click to raise or lower", 1.0f, false });
+    }
+    else if (ty == WolfDrive::TYPE_SPACESHIP)
+    {
+        // <WolfViewer 2026-10-11> w65: the spaceship's - speed, altitude, vertical speed, throttle, stage, assist, gear
+        cells.push_back({ unitUpper(s), llformat("%d", (S32)llround(speedIn(s, s.mSpeed3D))), C_TEAL, H_NONE, "", 1.2f, false });
+        cells.push_back({ "ALT M", llformat("%d", (S32)llround(s.mAltMSL)), C_TEAL, H_NONE, "", 1.3f, false });
+        cells.push_back({ "VS M/S", llformat("%+.1f", s.mVS), s.mVS < 0.f ? C_AMBER : C_TEAL, H_NONE, "", 1.2f, false });
+        cells.push_back({ "THRUST", llformat("%d%%", (S32)llround(s.mThrottlePct)), C_TEAL, H_NONE, "", 1.1f, false });
+        if (s.mStages > 0)
+        {
+            cells.push_back({ "STAGE", llformat("%d/%d", s.mStage, s.mStages), C_TEAL, H_NONE, "", 0.9f, false });
+            if (s.mRocket)
+            {
+                cells.push_back({ "", "SEP", C_AMBER, H_STAGE, "Separate the stage (sends the stage button to the craft's script)", 0.8f, true });
+            }
+        }
+        cells.push_back({ "ASSIST", s.mAssist ? "ON" : "OFF", s.mAssist ? C_TEAL : C_AMBER, H_ASSIST, "Flight assist: click to switch", 1.0f, false });
+        cells.push_back({ "GEAR", s.mLandingGear ? "DOWN" : "UP", s.mLandingGear ? C_GREEN : C_DIM, H_LANDING_GEAR, "Landing gear: click to raise or lower", 1.0f, false });
+    }
+    else
+    {
+        cells.push_back({ "", (s.mIndicators == 1 || s.mIndicators == 3) && blink_on ? "<" : "", C_GREEN, H_IND_L, "Left indicator", 0.6f, false });
+        cells.push_back({ unitUpper(s), llformat("%d", (S32)llround(speedIn(s, s.mSpeed))), C_WHITE, H_UNITS,
+                          s.mMph ? "Click for km/h" : "Click for miles per hour", 1.2f, false });
+        cells.push_back({ "GEAR", s.mGear.empty() ? std::string("-") : s.mGear, C_WHITE, H_NONE, "", 0.9f, false });
+        cells.push_back({ "FUEL", llformat("%d%%", (S32)llround(s.mFuel)), s.mFuel < 15.f ? C_AMBER : C_WHITE, H_NONE, "", 1.0f, false });
+        cells.push_back({ "LIGHTS", s.mLights == 2 ? "MAIN" : (s.mLights == 1 ? "ON" : "OFF"), s.mLights == 2 ? C_BLUE : (s.mLights ? C_GREEN : C_DIM),
+                          H_LIGHTS, "Lamps: click to change", 1.0f, false });
+        cells.push_back({ "CRUISE", s.mCruise ? "ON" : "OFF", s.mCruise ? C_GREEN : C_DIM, H_CRUISE, "Cruise control: click to switch", 1.0f, false });
+    }
     if (!s.mWarnings.empty())
     {
         std::string label;
@@ -574,7 +688,10 @@ void WolfDashboard::drawMiniBar(F32 bottom)
         warningLook(s.mWarnings.front(), label, col);
         cells.push_back({ "WARNING", label, col, H_NONE, "", 1.8f, false });
     }
-    cells.push_back({ "", (s.mIndicators == 2 || s.mIndicators == 3) && blink_on ? ">" : "", C_GREEN, H_IND_R, "Right indicator", 0.6f, false });
+    if (WolfDrive::isRoad(ty))
+    {
+        cells.push_back({ "", (s.mIndicators == 2 || s.mIndicators == 3) && blink_on ? ">" : "", C_GREEN, H_IND_R, "Right indicator", 0.6f, false });
+    }
     cells.push_back({ "", "FULL", C_WHITE, H_MINI, "Bring the whole dashboard back", 1.0f, true });
     cells.push_back({ "", "X", C_WHITE, H_CLOSE, "Close the dashboard", 0.6f, true });
 
@@ -673,20 +790,38 @@ namespace
         use(sa);
         const bool bg = gSavedSettings.getBOOL("WolfDashboardBackground");
         struct B { F32 w; std::string label; bool lit; WolfDashboard::EHit id; std::string tip; };
-        const B bs[] =
+        // <WolfViewer 2026-10-11> w65: built per design - the speedboat's UNITS goes knots / km/h / mph, the spaceship
+        // has neither UNITS nor TRIP (m/s and no odometer); BOAT and SHIP join the design buttons.
+        const bool boat = ty == WolfDrive::TYPE_SPEEDBOAT || ty == WolfDrive::TYPE_SUBMARINE, ship = ty == WolfDrive::TYPE_SPACESHIP;
+        std::vector<B> bs =
         {
-            { 30.f, "X", false, WolfDashboard::H_CLOSE, "Close the dashboard. World > Car Dashboard (or the toolbar button) brings it back." },
+            { 30.f, "X", false, WolfDashboard::H_CLOSE, "Close the dashboard. Wolf World > Car Dashboard / Speedboat Helm / Spaceship HUD (or the toolbar icons) bring it back." },
             { 70.f, "MINI", false, WolfDashboard::H_MINI, "Shrink the dashboard to one small bar; FULL on it brings it back" },
             { 70.f, "HELP", false, WolfDashboard::H_HELP, "How the dashboard works, setting up a wheel and keys, and wolfDashboard for vehicle makers" },
-            { 120.f, "CONTROLS", false, WolfDashboard::H_CONTROLS, "Driving Controls: a steering wheel, pedals or gamepad, and the keys for the horn, lamps and gears" },
-            { 70.f, "MAP", false, WolfDashboard::H_MAP, "World Map, centred on where you are driving" },
+            { 120.f, "CONTROLS", false, WolfDashboard::H_CONTROLS, "Driving Controls: a steering wheel, pedals or gamepad, and the keys for the horn, lamps, gears and the boat / spaceship buttons" },
+            { 70.f, "MAP", false, WolfDashboard::H_MAP, "World Map, centred on where you are" },
             { 92.f, "PANEL", bg, WolfDashboard::H_PANEL, bg ? "Background on: click to float the instruments over the world" : "Background off: click to put the panel back" },
-            { 92.f, "TRIP 0", false, WolfDashboard::H_TRIP, "Reset the trip meter (and the bike's lean record)" },
-            { 92.f, s.mMph ? "MPH" : "KM/H", false, WolfDashboard::H_UNITS, s.mMph ? "Speed in miles per hour: click for km/h" : "Speed in km/h: click for miles per hour" },
-            { 92.f, "BIKE", ty == WolfDrive::TYPE_BIKE, WolfDashboard::H_TYPE_BIKE, "Motorbike dashboard (superbike TFT, handlebars, sequential gears)" },
-            { 92.f, "TRUCK", ty == WolfDrive::TYPE_TRUCK, WolfDashboard::H_TYPE_TRUCK, "Truck dashboard (Scania style, 12-speed range-splitter: manual or automatic, air brakes)" },
-            { 92.f, "CAR", ty == WolfDrive::TYPE_CAR, WolfDashboard::H_TYPE_CAR, "Car dashboard (Porsche 911 style, 8 gears: manual or automatic)" },
         };
+        if (!ship)
+        {
+            bs.push_back({ 92.f, "TRIP 0", false, WolfDashboard::H_TRIP, "Reset the trip meter (and the bike's lean record)" });
+        }
+        if (boat)
+        {
+            const char* next = s.mUnits == WolfDrive::Shown::UNITS_KN ? "km/h" : s.mUnits == WolfDrive::Shown::UNITS_KMH ? "mph" : "knots";
+            bs.push_back({ 92.f, s.mUnits == WolfDrive::Shown::UNITS_KN ? "KNOTS" : unitUpper(s), false, WolfDashboard::H_UNITS,
+                           std::string("Speed in ") + unitName(s) + ": click for " + next });
+        }
+        else if (!ship)
+        {
+            bs.push_back({ 92.f, s.mMph ? "MPH" : "KM/H", false, WolfDashboard::H_UNITS, s.mMph ? "Speed in miles per hour: click for km/h" : "Speed in km/h: click for miles per hour" });
+        }
+        bs.push_back({ 92.f, "SUB", ty == WolfDrive::TYPE_SUBMARINE, WolfDashboard::H_TYPE_SUBMARINE, "Submarine helm (depth gauge, ballast and planes, sea bed, sonar)" });
+        bs.push_back({ 92.f, "SHIP", ship, WolfDashboard::H_TYPE_SPACESHIP, "Spaceship HUD (Elite / Star Citizen style: heading, pitch ladder, flight-path marker; rocket mode for launches)" });
+        bs.push_back({ 92.f, "BOAT", ty == WolfDrive::TYPE_SPEEDBOAT, WolfDashboard::H_TYPE_SPEEDBOAT, "Speedboat helm (Mercury VesselView style: rev counter, knots, compass, ON PLANE, depth, trim)" });
+        bs.push_back({ 92.f, "BIKE", ty == WolfDrive::TYPE_BIKE, WolfDashboard::H_TYPE_BIKE, "Motorbike dashboard (superbike TFT, handlebars, sequential gears)" });
+        bs.push_back({ 92.f, "TRUCK", ty == WolfDrive::TYPE_TRUCK, WolfDashboard::H_TYPE_TRUCK, "Truck dashboard (Scania style, 12-speed range-splitter: manual or automatic, air brakes)" });
+        bs.push_back({ 92.f, "CAR", ty == WolfDrive::TYPE_CAR, WolfDashboard::H_TYPE_CAR, "Car dashboard (Porsche 911 style, 8 gears: manual or automatic)" });
         const F32 margin = S(14.f), gap = S(8.f), h = S(30.f), line = S(38.f);
         F32 x = g.W - margin;
         F32 bot = g.panelTop + S(8.f);
@@ -1271,6 +1406,801 @@ namespace
         box(hw * 0.66f, -6.f, hw * 0.66f + 6.f, 28.f, throttle > 0.f ? C_GREEN : C_OFF);
     }
 
+    // ════════════════════════════════════════════════════════════════════════════════════
+    // <WolfViewer 2026-10-11> w65 Space Rabbit: the SPEEDBOAT HELM and the SPACESHIP HUD. Both sit in the same panel
+    // as the road designs (the mockup's 1600 x 304 band, anchors L / C / R, two rows in a narrow window) and take
+    // the same WolfDrive::Shown values; their buttons send the wolfDriveInput bits of PROTOCOL.md.
+    // ════════════════════════════════════════════════════════════════════════════════════
+
+    // Source: wolfflightdeck.cpp wrap180
+    F32 wrap180(F32 a)
+    {
+        while (a > 180.f) a -= 360.f;
+        while (a < -180.f) a += 360.f;
+        return a;
+    }
+
+    // Source: wolfflightdeck.cpp struct Rot - a point turned about (cx, cy) by deg, counter-clockwise
+    struct Rot
+    {
+        F32 mCx, mCy, mC, mS;
+        Rot(F32 cx, F32 cy, F32 deg) : mCx(cx), mCy(cy), mC(cosf(deg * DEG_TO_RAD)), mS(sinf(deg * DEG_TO_RAD)) {}
+        void p(F32 x, F32 y, F32& ox, F32& oy) const
+        {
+            ox = mCx + x * mC - y * mS;
+            oy = mCy + x * mS + y * mC;
+        }
+    };
+
+    std::string compassLabel(S32 deg)
+    {
+        switch (deg)
+        {
+        case 0:   return "N";
+        case 90:  return "E";
+        case 180: return "S";
+        case 270: return "W";
+        default:  return llformat("%d", deg);
+        }
+    }
+
+    /** A heading tape, 50 degrees either side of the lubber line: ticks every 5, figures every 30, the course over
+     *  the ground as a small diamond (when moving). Used by both designs, in their own colours. */
+    void headingTape(F32 l, F32 r, F32 b, F32 t, F32 hdg, F32 trk, bool show_trk, const LLColor4& ink, const LLColor4& lubber,
+                     const LLColor4& track, const LLColor4& bg)
+    {
+        if (bg.mV[VALPHA] > 0.f) rectF(l, b, r, t, bg);
+        const F32 span = 50.f;
+        const F32 ppd = (r - l) * 0.5f / span;
+        const F32 cx = (l + r) * 0.5f, h = t - b;
+        {
+            LLLocalClipRect clip(LLRect((S32)l, (S32)t, (S32)r, (S32)b));
+            const LLFontGL* f = font(11.f, true);
+            for (S32 k = 0; k < 360; k += 5)
+            {
+                const F32 rel = wrap180((F32)k - hdg);
+                if (fabsf(rel) > span + 6.f) continue;
+                const F32 x = cx + rel * ppd;
+                const bool major = k % 10 == 0;
+                lineW(x, t, x, t - h * (major ? 0.32f : 0.18f), major ? 1.6f : 1.f, ink);
+                if (k % 30 == 0)
+                {
+                    text(f, compassLabel(k), x, b + h * 0.32f, ink);
+                }
+            }
+            if (show_trk)
+            {
+                const F32 rel = wrap180(trk - hdg);
+                if (fabsf(rel) < span)
+                {
+                    const F32 x = cx + rel * ppd, y = b + h * 0.10f, d = h * 0.12f;
+                    quadF(x, y - d, x + d, y, x, y + d, x - d, y, track);
+                }
+            }
+        }
+        triF(cx, t - h * 0.40f, cx - h * 0.18f, t + h * 0.02f, cx + h * 0.18f, t + h * 0.02f, lubber);
+    }
+
+    /** A labelled horizontal bar 0..100 %. `has` false: "--" and an empty track (the script sends none). */
+    void percentBar(F32 l, F32 r, F32 y_label, F32 b, F32 t, const char* name, bool has, F32 v, const LLColor4& fill,
+                    const LLColor4& ink, const LLColor4& track)
+    {
+        T(l, y_label, name, 10.f, ink, true, false, LLFontGL::LEFT);
+        T(r, y_label, has ? llformat("%d%%", (S32)llround(v)) : std::string("--"), 10.f, has ? fill : alpha(ink, 0.5f), true, true, LLFontGL::RIGHT);
+        rectF(l, b, r, t, track);
+        if (has)
+        {
+            rectF(l, b, l + (r - l) * llclamp(v / 100.f, 0.f, 1.f), t, fill);
+        }
+        for (S32 k = 1; k < 10; ++k)
+        {
+            const F32 x = l + (r - l) * k / 10.f;
+            rectF(x, b, x + 1.f, t, alpha(C_BLACK, 0.5f));
+        }
+        frameW(l, b, r, t, 1.f, alpha(ink, 0.6f));
+    }
+
+    // ---- THE SPEEDBOAT HELM ----
+    // After the engine pages of Mercury VesselView, Yamaha's CL7 and Garmin's gauge screens: a navy panel, white
+    // figures, a teal accent. The tachometer on the left (the Verado 300's full-throttle band green, red above it -
+    // wolfdrive.cpp SPEEDBOAT), the throttle lever beside it (F / N / R), the speedometer in knots on the right with
+    // the helm's buttons, and a centre screen: compass and heading, the speed step, ON PLANE, the depth under the
+    // hull (red under 2 m), trim, fuel and the warnings.
+    void drawSpeedboat(Ctx& c, const WolfDrive::Shown& s, bool bg, U32 held)
+    {
+        WolfDrive& d = WolfDrive::instance();
+        const WolfDrive::Spec& sp = WolfDrive::spec(WolfDrive::TYPE_SPEEDBOAT);
+        if (bg)
+        {
+            rectG(0.f, g.bandB, g.W, g.panelTop, NAVY_HI, NAVY_LO);
+            rectF(0.f, g.panelTop - 2.f, g.W, g.panelTop, C_TEAL);
+        }
+
+        // ---- left: the tachometer, the throttle lever ----
+        use(g.L);
+        {
+            // the green band is the Verado's own; a script with its own red line or scale has its own engine
+            const bool own_engine = fabsf(s.mRedline - sp.mRedline) < 1.f && fabsf(s.mMaxRpm - sp.mDialRpm) < 1.f;
+            Dial tach{ X(190.f), YM(762.f), S(118.f), s.mMaxRpm, 1000.f, 0.f, 500.f, 1000.f, s.mRedline,
+                       own_engine ? sp.mGreenLo : 0.f, own_engine ? sp.mGreenHi : 0.f, s.mRpm, 0.f, "x1000 RPM", false, C_TEAL, S(18.f) };
+            tach.navy = true;
+            drawDial(tach);
+            T(X(190.f), YM(824.f), s.mEngine ? llformat("%d", (S32)llround(s.mRpm / 10.f) * 10) : std::string("ENGINE OFF"), 14.f,
+              s.mEngine ? (s.mRpm >= s.mRedline ? C_RED : C_WHITE) : C_AMBER, true, true);
+        }
+        {
+            const F32 lx = X(385.f), ltop = YM(628.f), lbot = YM(812.f), lmid = (ltop + lbot) * 0.5f;
+            roundRectF(X(338.f), lbot - S(12.f), X(432.f), ltop + S(12.f), S(10.f), NAVY_SCREEN, NAVY_SCREEN);
+            frameW(X(338.f), lbot - S(12.f), X(432.f), ltop + S(12.f), 1.f, NAVY_LINE);
+            lineW(lx, ltop, lx, lbot, S(6.f), LLColor4(0.f, 0.f, 0.f, 1.f));
+            lineW(X(372.f), lmid, X(398.f), lmid, 1.5f, NAVY_LINE);
+            const F32 thr = llclamp(s.mThrottlePct, -100.f, 100.f);
+            T(X(414.f), ltop, "F", 13.f, thr > 0.f ? C_GREEN : C_DIM, true);
+            T(X(414.f), lmid, "N", 13.f, thr == 0.f ? C_WHITE : C_DIM, true);
+            T(X(414.f), lbot, "R", 13.f, thr < 0.f ? C_RED : C_DIM, true);
+            const F32 hy = lmid + (thr / 100.f) * (ltop - lmid);
+            lineW(lx, lmid, lx, hy, S(4.f), LLColor4(0.55f, 0.58f, 0.62f, 1.f));
+            roundRectF(lx - S(20.f), hy - S(8.f), lx + S(12.f), hy + S(8.f), S(4.f), LLColor4(0.2f, 0.21f, 0.23f, 1.f), LLColor4(0.04f, 0.04f, 0.05f, 1.f));
+            frameW(lx - S(20.f), hy - S(8.f), lx + S(12.f), hy + S(8.f), 1.f, C_TEAL);
+            T(X(385.f), YM(836.f), llformat("%+d%%", (S32)llround(thr)), 11.f, s.mThrottleScripted ? C_TEAL : C_GREY, true, true);
+            button(c, X(322.f), YM(880.f), X(383.f), YM(848.f), "AHEAD", d.throttle() > 0.f, WolfDashboard::H_THROTTLE,
+                   "Ahead: hold it (or Up / W, or your accelerator)", 9.f);
+            button(c, X(387.f), YM(880.f), X(448.f), YM(848.f), "ASTERN", d.brake() > 0.f, WolfDashboard::H_BRAKE,
+                   "Astern: hold it (or Down / S, or your brake)", 9.f);
+        }
+
+        // ---- centre: the screen ----
+        use(g.C);
+        {
+            const F32 sl = X(472.f), sr = X(1128.f), st = YM(610.f), sb = YM(890.f);
+            roundRectF(sl, sb, sr, st, S(12.f), alpha(NAVY_SCREEN, bg ? 1.f : 0.9f), alpha(NAVY_SCREEN, bg ? 1.f : 0.9f));
+            frameW(sl, sb, sr, st, 1.f, NAVY_LINE);
+            headingTape(X(492.f), X(1108.f), YM(664.f), YM(620.f), s.mHeading, s.mTrack, s.mSpeed > 1.f, C_WHITE, C_TEAL, C_TEAL,
+                        LLColor4(0.02f, 0.06f, 0.13f, 1.f));
+            T(X(720.f), YM(690.f), "HDG", 11.f, C_TEAL, true);
+            T(X(800.f), YM(690.f), llformat("%03d", (S32)llround(s.mHeading) % 360), 24.f, C_WHITE, true, true);
+            T(X(890.f), YM(690.f), s.mSpeed > 1.f ? llformat("COG %03d", (S32)llround(s.mTrack) % 360) : std::string("COG ---"), 11.f, C_GREY, false, true);
+
+            auto box = [&](F32 l, F32 r, const LLColor4& fill, const LLColor4& edge)
+            {
+                roundRectF(X(l), YM(794.f), X(r), YM(716.f), S(8.f), fill, fill);
+                frameW(X(l), YM(794.f), X(r), YM(716.f), 1.f, edge);
+            };
+            const LLColor4 cell(0.03f, 0.07f, 0.15f, 1.f);
+            // the speed step, with - / + (Page Down / Page Up to the boat, as the keys)
+            box(492.f, 682.f, cell, NAVY_LINE);
+            T(X(587.f), YM(728.f), s.mStepFromChat ? "SPEED STEP  (BOAT)" : "SPEED STEP", 10.f, C_TEAL, true);
+            T(X(587.f), YM(762.f), stepText(s), 28.f, C_WHITE, true, true);
+            button(c, X(498.f), YM(788.f), X(530.f), YM(746.f), "-", false, WolfDashboard::H_SHIFT_DOWN,
+                   "A speed step down (Page Down, or your gear-down key or button)" + keyHint(WolfDrive::ACT_GEAR_DOWN), 16.f);
+            button(c, X(644.f), YM(788.f), X(676.f), YM(746.f), "+", false, WolfDashboard::H_SHIFT_UP,
+                   "A speed step up (Page Up, or your gear-up key or button)" + keyHint(WolfDrive::ACT_GEAR_UP), 16.f);
+            // ON PLANE (the thresholds are wolfdrive.cpp's MODEL)
+            const LLColor4 plane_col = s.mOnPlane ? C_GREEN : s.mPlaning ? C_AMBER : C_DIM;
+            box(700.f, 900.f, s.mOnPlane || s.mPlaning ? alpha(plane_col, 0.22f) : cell, s.mOnPlane || s.mPlaning ? plane_col : NAVY_LINE);
+            T(X(800.f), YM(742.f), s.mOnPlane ? "ON PLANE" : s.mPlaning ? "PLANING" : "DISPLACEMENT", s.mOnPlane ? 17.f : 14.f,
+              s.mOnPlane || s.mPlaning ? plane_col : C_GREY, true);
+            T(X(800.f), YM(774.f), llformat("BOW %+.1f   %.0f kn", s.mPitch, s.mSpeed * KN), 11.f, C_GREY, false, true);
+            // the depth under the hull: water height minus the land's
+            const bool shallow = s.mDepth < 2.f;
+            const bool flash = shallow && blink(0.6f);
+            box(918.f, 1108.f, shallow ? alpha(C_RED, flash ? 0.6f : 0.3f) : cell, shallow ? C_RED : NAVY_LINE);
+            T(X(1013.f), YM(728.f), "DEPTH", 10.f, shallow ? C_WHITE : C_TEAL, true);
+            T(X(1013.f), YM(764.f), s.mDepth <= 0.f ? std::string("AGROUND") : llformat("%.1f m", s.mDepth), s.mDepth <= 0.f ? 18.f : 24.f,
+              C_WHITE, true, true);
+
+            // trim (or, with no trim from the script, the bow's angle measured) and fuel
+            const F32 tl = X(500.f), tr = X(780.f), tmid = (tl + tr) * 0.5f, tb = YM(840.f), tt = YM(826.f);
+            T(tl, YM(810.f), s.mHasTrim ? "TRIM" : "BOW ANGLE", 10.f, C_TEAL, true, false, LLFontGL::LEFT);
+            T(tr, YM(810.f), s.mHasTrim ? llformat("%+d", s.mTrim) : llformat("%+.1f", s.mPitch), 11.f, C_WHITE, true, true, LLFontGL::RIGHT);
+            rectF(tl, tb, tr, tt, LLColor4(0.03f, 0.07f, 0.15f, 1.f));
+            for (S32 k = -5; k <= 5; ++k)
+            {
+                const F32 x = tmid + (tr - tmid) * k / 5.f;
+                rectF(x, tb, x + 1.f, k == 0 ? tt + S(4.f) : tt, k == 0 ? C_WHITE : NAVY_LINE);
+            }
+            const F32 tv = s.mHasTrim ? (F32)s.mTrim / 5.f : llclamp(s.mPitch / 10.f, -1.f, 1.f);
+            const F32 tx = tmid + (tr - tmid) * llclamp(tv, -1.f, 1.f);
+            triF(tx, tt, tx - S(7.f), tb - S(6.f), tx + S(7.f), tb - S(6.f), C_TEAL);
+            T(tl, YM(852.f), s.mHasTrim ? "IN" : "DOWN", 8.f, C_GREY, false, false, LLFontGL::LEFT);
+            T(tr, YM(852.f), s.mHasTrim ? "OUT" : "UP", 8.f, C_GREY, false, false, LLFontGL::RIGHT);
+            percentBar(X(818.f), X(1100.f), YM(810.f), YM(842.f), YM(824.f), "FUEL", true, s.mFuel,
+                       s.mFuel < 10.f ? C_RED : s.mFuel < 15.f ? C_AMBER : C_WHITE, C_TEAL, LLColor4(0.03f, 0.07f, 0.15f, 1.f));
+            telltales(X(480.f), X(1120.f), YM(872.f), s, false, true);
+        }
+
+        // ---- right: the speedometer, the helm's buttons ----
+        use(g.R);
+        {
+            const F32 spd = speedIn(s, s.mSpeed);
+            const F32 maxs = llmax(10.f, s.mMaxSpeed);
+            Dial speedo{ X(1300.f), YM(762.f), S(118.f), maxs, maxs > 100.f ? 20.f : 10.f, 0.f, maxs > 100.f ? 10.f : 5.f, 1.f,
+                         0.f, 0.f, 0.f, spd, 0.f, unitName(s), false, C_TEAL, S(18.f) };
+            speedo.navy = true;
+            drawDial(speedo);
+            T(X(1300.f), YM(824.f), llformat("%d", (S32)llround(spd)), 18.f, C_WHITE, true, true);
+            const bool horn_builtin = d.actionCfg(WolfDrive::ACT_HORN).mOut == WolfDrive::OUT_NONE;
+            struct HB { const char* label; bool lit; WolfDashboard::EHit id; std::string tip; };
+            const HB hb[4] =
+            {
+                { "HORN", (held & WolfDrive::BTN_HORN) != 0, WolfDashboard::H_HORN,
+                  (horn_builtin ? std::string("Horn: the built-in air horn, heard in-world by everyone near (Wolf Territories)")
+                                : std::string("Horn: sends what you set in Driving Controls")) + keyHint(WolfDrive::ACT_HORN) },
+                { s.mLights == 2 ? "MAIN" : "LIGHTS", s.mLights > 0, WolfDashboard::H_LIGHTS, "Navigation lights: off, on, bright" + keyHint(WolfDrive::ACT_LIGHTS) },
+                { "ANCHOR", s.mAnchor, WolfDashboard::H_ANCHOR, std::string(s.mAnchor ? "Anchor down: click to weigh it" : "Anchor up: click to drop it")
+                                                               + keyHint(WolfDrive::ACT_ANCHOR) },
+                { "ENGINE", s.mEngine, WolfDashboard::H_ENGINE, std::string(s.mEngine ? "Engine running: click to stop it" : "Engine stopped: click to start it")
+                                                               + keyHint(WolfDrive::ACT_ENGINE) },
+            };
+            for (S32 i = 0; i < 4; ++i)
+            {
+                const F32 top = 618.f + i * 66.f;
+                button(c, X(1448.f), YM(top + 54.f), X(1586.f), YM(top), hb[i].label, hb[i].lit, hb[i].id, hb[i].tip, 12.f);
+            }
+        }
+    }
+
+    // ---- THE SPACESHIP HUD ----
+    // After Elite Dangerous, Star Citizen and the Space Shuttle's glass cockpit: cyan lines on glass, amber for
+    // caution, red for warning, magenta for a target (the apogee). Ship layout: the heading tape along the top,
+    // the pitch ladder with the boresight (W) and the flight-path marker in the middle, speed and throttle on the
+    // left with fuel / boost / shield / hull / heat, altitude above the water (the ground under it hatched) and
+    // vertical speed on the right with the buttons. mode=rocket puts the launch figures in the middle instead:
+    // altitude, vertical speed, apogee (z + vz^2 / 2g while climbing), stage N/M and SEPARATE.
+    const LLColor4 SC_CYAN(0.30f, 0.92f, 1.00f, 1.f);
+    const LLColor4 SC_MAGENTA(1.00f, 0.35f, 1.00f, 1.f);
+
+    void drawSpaceship(Ctx& c, const WolfDrive::Shown& s, bool bg, U32 held)
+    {
+        const LLColor4 dim = alpha(SC_CYAN, 0.35f);
+        const LLColor4 glass(0.f, 0.02f, 0.04f, 0.55f);
+        if (bg)
+        {
+            rectG(0.f, g.bandB, g.W, g.panelTop, LLColor4(0.f, 0.03f, 0.06f, 0.55f), LLColor4(0.f, 0.01f, 0.03f, 0.75f));
+            rectF(0.f, g.panelTop - 1.5f, g.W, g.panelTop, alpha(SC_CYAN, 0.6f));
+        }
+
+        // ---- left: speed tape, throttle, the systems' bars ----
+        use(g.L);
+        {
+            const F32 tl = X(40.f), tr = X(118.f), tt = YM(620.f), tb = YM(882.f), cy = (tt + tb) * 0.5f;
+            const F32 spd = speedIn(s, s.mSpeed3D);
+            const F32 span = 100.f, ppu = (tt - tb) / span;
+            rectF(tl, tb, tr, tt, glass);
+            {
+                LLLocalClipRect clip(LLRect((S32)tl, (S32)tt, (S32)tr, (S32)tb));
+                for (S32 k = ((S32)(spd - span * 0.5f) / 5) * 5; k <= spd + span * 0.5f; k += 5)
+                {
+                    if (k < 0) continue;
+                    const F32 y = cy + (k - spd) * ppu;
+                    lineW(tr - S(12.f), y, tr, y, 1.2f, SC_CYAN);
+                    if (k % 20 == 0) T(tr - S(16.f), y, llformat("%d", k), 10.f, SC_CYAN, false, true, LLFontGL::RIGHT);
+                }
+            }
+            frameW(tl, tb, tr, tt, 1.f, dim);
+            const F32 bh = S(13.f);
+            rectF(tl - S(4.f), cy - bh, tr, cy + bh, LLColor4(0.f, 0.f, 0.f, 0.85f));
+            frameW(tl - S(4.f), cy - bh, tr, cy + bh, 1.5f, SC_CYAN);
+            T((tl + tr) * 0.5f - S(2.f), cy, llformat("%d", (S32)llround(spd)), 15.f, SC_CYAN, true, true);
+            T((tl + tr) * 0.5f, YM(608.f), std::string("SPD ") + unitName(s), 9.f, SC_CYAN, true);
+            // throttle: up from the middle ahead, down for reverse thrust
+            const F32 bl = X(128.f), br = X(146.f);
+            rectF(bl, tb, br, tt, glass);
+            const F32 thr = llclamp(s.mThrottlePct, -100.f, 100.f);
+            rectF(bl, cy, br, cy + (tt - cy) * thr / 100.f, thr >= 0.f ? SC_CYAN : C_AMBER);
+            rectF(bl - S(3.f), cy - 0.75f, br + S(3.f), cy + 0.75f, C_WHITE);
+            frameW(bl, tb, br, tt, 1.f, dim);
+            T((bl + br) * 0.5f, YM(608.f), "THR", 9.f, SC_CYAN, true);
+            T((bl + br) * 0.5f + S(8.f), YM(892.f), llformat("%d%%", (S32)llround(thr)), 9.f, thr < 0.f ? C_AMBER : SC_CYAN, true, true);
+            // the systems
+            auto low_bad = [](F32 v) { return v < 10.f ? C_RED : v < 25.f ? C_AMBER : SC_CYAN; };
+            const F32 x0 = X(180.f), x1 = X(440.f);
+            const struct { const char* name; bool has; F32 v; LLColor4 col; } bars[5] =
+            {
+                { "FUEL",   s.mFuelScripted, s.mFuel,   low_bad(s.mFuel) },
+                { "BOOST",  s.mHasBoost,     s.mBoost,  low_bad(s.mBoost) },
+                { "SHIELD", s.mHasShield,    s.mShield, low_bad(s.mShield) },
+                { "HULL",   s.mHasHull,      s.mHull,   low_bad(s.mHull) },
+                { "HEAT",   s.mHasHeat,      s.mHeat,   s.mHeat > 90.f ? C_RED : s.mHeat > 75.f ? C_AMBER : SC_CYAN },
+            };
+            for (S32 i = 0; i < 5; ++i)
+            {
+                const F32 y0 = 622.f + i * 52.f;
+                percentBar(x0, x1, YM(y0), YM(y0 + 30.f), YM(y0 + 14.f), bars[i].name, bars[i].has, bars[i].v, bars[i].col, SC_CYAN, glass);
+            }
+        }
+
+        // ---- centre ----
+        use(g.C);
+        headingTape(X(520.f), X(1080.f), YM(642.f), YM(606.f), s.mHeading, s.mTrack, s.mSpeed > 1.f, SC_CYAN, SC_CYAN, SC_CYAN,
+                    LLColor4(0.f, 0.f, 0.f, 0.f));
+        {
+            const F32 bw = S(30.f);
+            rectF(X(800.f) - bw, YM(668.f), X(800.f) + bw, YM(646.f), LLColor4(0.f, 0.f, 0.f, 0.85f));
+            frameW(X(800.f) - bw, YM(668.f), X(800.f) + bw, YM(646.f), 1.2f, SC_CYAN);
+            T(X(800.f), YM(657.f), llformat("%03d", (S32)llround(s.mHeading) % 360), 13.f, SC_CYAN, true, true);
+        }
+        if (!s.mRocket)
+        {
+            // the pitch ladder, the boresight and the flight-path marker
+            const F32 cx = X(800.f), cy = YM(764.f), aw = S(230.f), ah = S(90.f);
+            const F32 ppd = ah / 25.f;
+            {
+                LLLocalClipRect clip(LLRect((S32)(cx - aw), (S32)(cy + ah), (S32)(cx + aw), (S32)(cy - ah)));
+                const Rot rot(cx, cy, -s.mRoll);
+                const F32 y0 = -s.mPitch * ppd;
+                F32 x1, y1, x2, y2;
+                rot.p(-aw * 3.f, y0, x1, y1);
+                rot.p(-aw * 0.08f, y0, x2, y2);
+                lineW(x1, y1, x2, y2, 1.8f, SC_CYAN);
+                rot.p(aw * 0.08f, y0, x1, y1);
+                rot.p(aw * 3.f, y0, x2, y2);
+                lineW(x1, y1, x2, y2, 1.8f, SC_CYAN);
+                for (S32 p = -85; p <= 85; p += 5)
+                {
+                    if (p == 0 || fabsf((F32)p - s.mPitch) > 30.f) continue;
+                    const F32 y = y0 + p * ppd;
+                    const bool ten = p % 10 == 0;
+                    const F32 half = ten ? aw * 0.24f : aw * 0.12f, gap = aw * 0.07f;
+                    const F32 tick = (p > 0 ? -1.f : 1.f) * ah * 0.06f;   // toward the horizon
+                    for (S32 side = -1; side <= 1; side += 2)
+                    {
+                        rot.p(side * gap, y, x1, y1);
+                        rot.p(side * half, y, x2, y2);
+                        if (p > 0)
+                        {
+                            lineW(x1, y1, x2, y2, 1.3f, SC_CYAN);
+                        }
+                        else
+                        {
+                            // below the horizon dashed, as the Shuttle's and the fighters' ladders draw it
+                            const F32 dx = x2 - x1, dy = y2 - y1, len = sqrtf(dx * dx + dy * dy);
+                            const F32 dash = S(6.f);
+                            for (F32 u = 0.f; u < len; u += dash * 2.f)
+                            {
+                                const F32 e = llmin(u + dash, len);
+                                lineW(x1 + dx * u / len, y1 + dy * u / len, x1 + dx * e / len, y1 + dy * e / len, 1.3f, SC_CYAN);
+                            }
+                        }
+                        F32 x3, y3;
+                        rot.p(side * half, y + tick, x3, y3);
+                        lineW(x2, y2, x3, y3, 1.3f, SC_CYAN);
+                        if (ten)
+                        {
+                            rot.p(side * (half + aw * 0.07f), y, x3, y3);
+                            text(font(9.f, true, true), llformat("%d", p), x3, y3, SC_CYAN);
+                        }
+                    }
+                }
+                // the bank pointer, turning with the ladder
+                F32 px, py, qx, qy, ux, uy;
+                rot.p(0.f, ah * 0.92f, px, py);
+                rot.p(-aw * 0.025f, ah * 0.80f, qx, qy);
+                rot.p(aw * 0.025f, ah * 0.80f, ux, uy);
+                triF(px, py, qx, qy, ux, uy, SC_CYAN);
+            }
+            frameW(cx - aw, cy - ah, cx + aw, cy + ah, 1.f, alpha(SC_CYAN, 0.2f));
+            // the fixed bank scale's ticks (10, 20, 30, 45, 60 each way) round the top
+            {
+                const F32 rr = ah * 0.95f;
+                const F32 ticks[] = { -60.f, -45.f, -30.f, -20.f, -10.f, 0.f, 10.f, 20.f, 30.f, 45.f, 60.f };
+                for (F32 a : ticks)
+                {
+                    const F32 ra = (90.f + a) * DEG_TO_RAD;
+                    const F32 len = (a == 0.f || fabsf(a) == 30.f || fabsf(a) == 60.f) ? ah * 0.09f : ah * 0.05f;
+                    lineW(cx + rr * cosf(ra), cy + rr * sinf(ra), cx + (rr + len) * cosf(ra), cy + (rr + len) * sinf(ra), 1.2f, dim);
+                }
+            }
+            // the boresight: where the nose points
+            {
+                const F32 u = S(1.f);
+                lineW(cx - 30.f * u, cy, cx - 13.f * u, cy, 2.f, SC_CYAN);
+                lineW(cx - 13.f * u, cy, cx - 6.5f * u, cy - 8.f * u, 2.f, SC_CYAN);
+                lineW(cx - 6.5f * u, cy - 8.f * u, cx, cy, 2.f, SC_CYAN);
+                lineW(cx, cy, cx + 6.5f * u, cy - 8.f * u, 2.f, SC_CYAN);
+                lineW(cx + 6.5f * u, cy - 8.f * u, cx + 13.f * u, cy, 2.f, SC_CYAN);
+                lineW(cx + 13.f * u, cy, cx + 30.f * u, cy, 2.f, SC_CYAN);
+            }
+            // the flight-path marker: where the craft is really going (amber when off the box)
+            if (s.mFpmValid)
+            {
+                F32 fx = cx + s.mFpmX * ppd, fy = cy + s.mFpmY * ppd;
+                const bool off = fx < cx - aw || fx > cx + aw || fy < cy - ah || fy > cy + ah;
+                fx = llclamp(fx, cx - aw + S(12.f), cx + aw - S(12.f));
+                fy = llclamp(fy, cy - ah + S(12.f), cy + ah - S(12.f));
+                const LLColor4 col = off ? C_AMBER : SC_CYAN;
+                const F32 r = S(7.f);
+                arcW(fx, fy, r, 1.8f, 0.f, 2.f * PI_F, col, 20);
+                lineW(fx - r, fy, fx - r * 2.2f, fy, 1.8f, col);
+                lineW(fx + r, fy, fx + r * 2.2f, fy, 1.8f, col);
+                lineW(fx, fy + r, fx, fy + r * 2.f, 1.8f, col);
+            }
+            T(cx - aw + S(4.f), cy - ah + S(9.f), llformat("PITCH %+d  ROLL %+d", (S32)llround(s.mPitch), (S32)llround(s.mRoll)), 9.f, dim,
+              false, true, LLFontGL::LEFT);
+            T(cx + aw - S(4.f), cy - ah + S(9.f), llformat("FPA %+d", (S32)llround(s.mFPA)), 9.f, dim, false, true, LLFontGL::RIGHT);
+        }
+        else
+        {
+            // ROCKET: the launch figures
+            const bool km = fabsf(s.mAltMSL) >= 10000.f;
+            T(X(640.f), YM(680.f), "ALTITUDE", 11.f, SC_CYAN, true);
+            T(X(640.f), YM(712.f), km ? llformat("%.2f km", s.mAltMSL / 1000.f) : llformat("%d m", (S32)llround(s.mAltMSL)), 30.f, SC_CYAN, true, true);
+            T(X(640.f), YM(742.f), llformat("ABOVE GROUND %d m", (S32)llround(s.mAGL)), 10.f, dim, false, true);
+            T(X(960.f), YM(680.f), "VERTICAL SPEED", 11.f, SC_CYAN, true);
+            T(X(960.f), YM(712.f), llformat("%+.1f m/s", s.mVS), 30.f, s.mVS >= 0.f ? SC_CYAN : C_AMBER, true, true);
+            const bool climbing = s.mVS > 0.f;
+            const F32 apo = s.mApogee;
+            T(X(960.f), YM(742.f), climbing ? (fabsf(apo) >= 10000.f ? llformat("APOGEE %.2f km", apo / 1000.f) : llformat("APOGEE %d m", (S32)llround(apo)))
+                                            : std::string("APOGEE --"), 11.f, climbing ? SC_MAGENTA : dim, true, true);
+            // the stage panel and SEPARATE
+            roundRectF(X(560.f), YM(846.f), X(1040.f), YM(758.f), S(10.f), glass, glass);
+            frameW(X(560.f), YM(846.f), X(1040.f), YM(758.f), 1.f, dim);
+            T(X(640.f), YM(774.f), "STAGE", 11.f, SC_CYAN, true);
+            T(X(640.f), YM(810.f), s.mStages > 0 ? llformat("%d/%d", s.mStage, s.mStages) : std::string("--"), 28.f, SC_CYAN, true, true);
+            const bool more = s.mStages > 0 && s.mStage < s.mStages;
+            button(c, X(740.f), YM(840.f), X(1030.f), YM(764.f), "SEPARATE", more, WolfDashboard::H_STAGE,
+                   "Separate the stage: the craft's script drops the spent stage and fires the next" + keyHint(WolfDrive::ACT_STAGE), 24.f);
+            T(X(800.f), YM(860.f), llformat("PITCH %+d   HDG %03d   SPD %d %s", (S32)llround(s.mPitch), (S32)llround(s.mHeading) % 360,
+                                            (S32)llround(speedIn(s, s.mSpeed3D)), unitName(s)), 10.f, dim, false, true);
+        }
+        // the state lamps and the warnings along the bottom
+        {
+            const F32 y = YM(880.f);
+            F32 x = X(520.f);
+            x += wordLamp(x, y, s.mAssist ? "FA ON" : "FA OFF", s.mAssist ? SC_CYAN : C_AMBER, true) + S(8.f);
+            x += wordLamp(x, y, s.mLandingGear ? "GEAR DOWN" : "GEAR UP", s.mLandingGear ? C_GREEN : SC_CYAN, true) + S(8.f);
+            x += wordLamp(x, y, s.mEngine ? "ENGINE" : "ENGINE OFF", s.mEngine ? SC_CYAN : C_AMBER, true) + S(8.f);
+            if (s.mStages > 0 && !s.mRocket)
+            {
+                x += wordLamp(x, y, llformat("STAGE %d/%d", s.mStage, s.mStages), SC_CYAN, true) + S(8.f);
+            }
+            telltales(x - S(8.f), X(1090.f), y, s, false, true);
+        }
+
+        // ---- right: altitude tape, vertical speed, the buttons ----
+        use(g.R);
+        {
+            const F32 tl = X(1170.f), tr = X(1258.f), tt = YM(620.f), tb = YM(882.f), cy = (tt + tb) * 0.5f;
+            const F32 alt = s.mAltMSL, span = 200.f, ppm = (tt - tb) / span;
+            rectF(tl, tb, tr, tt, glass);
+            {
+                LLLocalClipRect clip(LLRect((S32)tl, (S32)tt, (S32)tr, (S32)tb));
+                // the ground (or water) under the craft, hatched amber
+                const F32 gy = cy + ((alt - s.mAGL) - alt) * ppm;
+                if (gy > tb)
+                {
+                    const F32 top_y = llmin(gy, tt);
+                    for (F32 k = tb - (tr - tl); k < top_y; k += S(8.f))
+                    {
+                        lineW(tl, k, tr, llmin(k + (tr - tl), top_y), 1.f, alpha(C_AMBER, 0.6f));
+                    }
+                    rectF(tl, top_y - 1.f, tr, top_y + 1.f, C_AMBER);
+                }
+                for (S32 k = ((S32)(alt - span * 0.5f) / 10) * 10; k <= alt + span * 0.5f; k += 10)
+                {
+                    const F32 y = cy + (k - alt) * ppm;
+                    lineW(tl, y, tl + S(10.f), y, 1.2f, SC_CYAN);
+                    if (k % 50 == 0) T(tl + S(14.f), y, llformat("%d", k), 10.f, SC_CYAN, false, true, LLFontGL::LEFT);
+                }
+            }
+            frameW(tl, tb, tr, tt, 1.f, dim);
+            const F32 bh = S(13.f);
+            rectF(tl, cy - bh, tr + S(4.f), cy + bh, LLColor4(0.f, 0.f, 0.f, 0.85f));
+            frameW(tl, cy - bh, tr + S(4.f), cy + bh, 1.5f, SC_CYAN);
+            T((tl + tr) * 0.5f + S(2.f), cy, llformat("%d", (S32)llround(alt)), 15.f, SC_CYAN, true, true);
+            T((tl + tr) * 0.5f, YM(608.f), "ALT m", 9.f, SC_CYAN, true);
+            // vertical speed: +/- 50 m/s full scale (the design's choice)
+            const F32 vl = X(1266.f), vr = X(1284.f);
+            rectF(vl, tb, vr, tt, glass);
+            const F32 vs = llclamp(s.mVS / 50.f, -1.f, 1.f);
+            rectF(vl, cy, vr, cy + (tt - cy) * vs, s.mVS >= 0.f ? SC_CYAN : C_AMBER);
+            rectF(vl - S(3.f), cy - 0.75f, vr + S(3.f), cy + 0.75f, C_WHITE);
+            frameW(vl, tb, vr, tt, 1.f, dim);
+            T((vl + vr) * 0.5f, YM(608.f), "VS", 9.f, SC_CYAN, true);
+
+            // the buttons: BOOST (held), ASSIST, GEAR, ENGINE
+            struct SB { const char* label; bool lit; WolfDashboard::EHit id; std::string tip; };
+            const SB sb[4] =
+            {
+                { "BOOST", (held & WolfDrive::BTN_BOOST) != 0, WolfDashboard::H_BOOST, "Boost: hold it" + keyHint(WolfDrive::ACT_BOOST) },
+                { "ASSIST", s.mAssist, WolfDashboard::H_ASSIST, std::string(s.mAssist ? "Flight assist on: click to switch it off" : "Flight assist off: click to switch it on")
+                                                               + keyHint(WolfDrive::ACT_ASSIST) },
+                { "GEAR", s.mLandingGear, WolfDashboard::H_LANDING_GEAR, std::string(s.mLandingGear ? "Landing gear down: click to raise it" : "Landing gear up: click to lower it")
+                                                                        + keyHint(WolfDrive::ACT_LANDING_GEAR) },
+                { "ENGINE", s.mEngine, WolfDashboard::H_ENGINE, std::string(s.mEngine ? "Engine running: click to stop it" : "Engine stopped: click to start it")
+                                                               + keyHint(WolfDrive::ACT_ENGINE) },
+            };
+            for (S32 i = 0; i < 4; ++i)
+            {
+                const F32 l = (i % 2) ? 1458.f : 1310.f, top = (i / 2) ? 680.f : 620.f;
+                button(c, X(l), YM(top + 50.f), X(l + 128.f), YM(top), sb[i].label, sb[i].lit, sb[i].id, sb[i].tip, 13.f);
+            }
+            const F32 lx = X(1314.f);
+            T(lx, YM(754.f), llformat("ABOVE GROUND  %d m", (S32)llround(s.mAGL)), 11.f, s.mAGL < 20.f && s.mVS < -2.f ? C_AMBER : SC_CYAN, false, true, LLFontGL::LEFT);
+            T(lx, YM(778.f), llformat("ABOVE SEA     %d m", (S32)llround(s.mAltMSL)), 11.f, SC_CYAN, false, true, LLFontGL::LEFT);
+            T(lx, YM(802.f), llformat("VERT SPEED    %+.1f m/s", s.mVS), 11.f, s.mVS < 0.f ? C_AMBER : SC_CYAN, false, true, LLFontGL::LEFT);
+            T(lx, YM(826.f), llformat("SPEED         %d %s", (S32)llround(speedIn(s, s.mSpeed3D)), unitName(s)), 11.f, SC_CYAN, false, true, LLFontGL::LEFT);
+            if (s.mVS > 0.f)
+            {
+                const F32 apo = s.mApogee;
+                T(lx, YM(850.f), fabsf(apo) >= 10000.f ? llformat("APOGEE        %.2f km", apo / 1000.f) : llformat("APOGEE        %d m", (S32)llround(apo)),
+                  11.f, SC_MAGENTA, false, true, LLFontGL::LEFT);
+            }
+        }
+    }
+
+    // ---- THE SUBMARINE HELM ----
+    // Paul, 2026-10-11: "add another hud for driving a submarine and lsl commands". A sonar room in dark green and
+    // teal, after a submarine's ship-control panel (depth gauge, ballast, planes, the depth under the keel) and
+    // the sonar screens of games like Silent Hunter and Barotrauma: the DEPTH gauge on the left (below the water
+    // surface, measured; red past the script's max_depth), the ballast tanks and the dive planes beside it; in the
+    // middle the heading tape over a SONAR scope - a sweep that paints the objects and avatars round the
+    // submarine (within SONAR_RANGE, from what the viewer already knows: gObjectList) and the land that rises
+    // above the submarine's depth (the coastline ring) - with the sea bed under the hull, the dive angle, battery,
+    // oxygen and the throttle beside it; the speed in knots and the helm's buttons on the right.
+    const LLColor4 SUB_HI(0.020f, 0.090f, 0.080f, 1.f), SUB_LO(0.f, 0.030f, 0.030f, 1.f);
+    const LLColor4 SUB_SCREEN(0.004f, 0.035f, 0.028f, 1.f);
+    const LLColor4 SUB_LINE(0.10f, 0.32f, 0.26f, 1.f);
+    const LLColor4 SUB_GREEN(0.35f, 1.00f, 0.55f, 1.f);
+
+    // The sonar's picture, refreshed SONAR_PERIOD apart (cheap: the nearest SONAR_MAX_CONTACTS roots, the land
+    // sampled on SONAR_BEARINGS bearings). Design choices, not figures from any real sonar.
+    const F32 SONAR_RANGE = 100.f;          // m
+    const F64 SONAR_PERIOD = 0.25;          // s
+    const size_t SONAR_MAX_CONTACTS = 48;
+    const S32 SONAR_BEARINGS = 36;
+    const F32 SONAR_STEP = 5.f;             // m between the land samples along a bearing
+    struct SonarContact { F32 east, north, size; bool avatar; };
+    struct SonarPicture
+    {
+        F64 at = -1.0;
+        std::vector<SonarContact> contacts;
+        F32 coast[SONAR_BEARINGS];          // m to the first land above the hull's depth on that bearing; < 0 none
+    } sSonar;
+
+    LLViewerObject* vehicleRoot()
+    {
+        if (!isAgentAvatarValid() || !gAgentAvatarp->isSitting()) return nullptr;
+        LLViewerObject* p = (LLViewerObject*)gAgentAvatarp->getParent();
+        while (p && p->getParent()) p = (LLViewerObject*)p->getParent();
+        return p;
+    }
+
+    void refreshSonar()
+    {
+        const F64 t = now();
+        if (sSonar.at >= 0.0 && t - sSonar.at < SONAR_PERIOD) return;
+        sSonar.at = t;
+        sSonar.contacts.clear();
+        for (F32& c : sSonar.coast) c = -1.f;
+        LLViewerObject* self = vehicleRoot();
+        if (!self) return;
+        const LLVector3d here = self->getPositionGlobal();
+        // objects and avatars: root prims only (a linkset is one contact), never the submarine itself
+        std::vector<std::pair<F32, SonarContact>> found;
+        const S32 n = gObjectList.getNumObjects();
+        for (S32 i = 0; i < n; ++i)
+        {
+            LLViewerObject* o = gObjectList.getObject(i);
+            if (!o || o == self || o->getParent() || o->isAttachment() || o->isHUDAttachment()) continue;
+            const LLVector3d d = o->getPositionGlobal() - here;
+            const F32 east = (F32)d.mdV[VX], north = (F32)d.mdV[VY];
+            const F32 dist = sqrtf(east * east + north * north);
+            if (dist > SONAR_RANGE || dist < 0.5f) continue;
+            const LLVector3 sc = o->getScale();
+            found.push_back({ dist, { east, north, llmax(sc.mV[VX], sc.mV[VY]), o->isAvatar() } });
+        }
+        std::sort(found.begin(), found.end(), [](const std::pair<F32, SonarContact>& a, const std::pair<F32, SonarContact>& b) { return a.first < b.first; });
+        for (size_t i = 0; i < found.size() && i < SONAR_MAX_CONTACTS; ++i) sSonar.contacts.push_back(found[i].second);
+        // the land: along each bearing, the first sample where the ground stands higher than the hull
+        LLWorld* world = LLWorld::getInstance();
+        const F32 z = (F32)here.mdV[VZ];
+        for (S32 b = 0; b < SONAR_BEARINGS; ++b)
+        {
+            const F32 a = 2.f * PI_F * b / SONAR_BEARINGS;   // clockwise from north
+            for (F32 r = SONAR_STEP; r <= SONAR_RANGE; r += SONAR_STEP)
+            {
+                LLVector3d p = here;
+                p.mdV[VX] += sinf(a) * r;
+                p.mdV[VY] += cosf(a) * r;
+                if (world->resolveLandHeightGlobal(p) >= z)
+                {
+                    sSonar.coast[b] = r;
+                    break;
+                }
+            }
+        }
+    }
+
+    void drawSonar(F32 cx, F32 cy, F32 R, F32 heading)
+    {
+        refreshSonar();
+        circleF(cx, cy, R, SUB_SCREEN, 64);
+        for (S32 k = 1; k <= 4; ++k)
+        {
+            arcW(cx, cy, R * k / 4.f, 1.f, 0.f, 2.f * PI_F, alpha(SUB_GREEN, k == 4 ? 0.6f : 0.25f), 64);
+        }
+        lineW(cx - R, cy, cx + R, cy, 1.f, alpha(SUB_GREEN, 0.2f));
+        lineW(cx, cy - R, cx, cy + R, 1.f, alpha(SUB_GREEN, 0.2f));
+        // the sweep: one turn every 4 s, heading up; what it passed glows and fades over the turn
+        const F32 sweep = (F32)fmod(now() * 90.0, 360.0);   // degrees clockwise from the top of the scope
+        auto glow = [&](F32 deg) { const F32 behind = fmodf(sweep - deg + 720.f, 360.f); return 1.f - behind / 360.f; };
+        auto at = [&](F32 east, F32 north, F32& x, F32& y, F32& deg)
+        {
+            // world bearing to scope angle: heading up
+            const F32 brg = atan2f(east, north) * RAD_TO_DEG;
+            deg = fmodf(brg - heading + 720.f, 360.f);
+            const F32 r = sqrtf(east * east + north * north) / SONAR_RANGE * R;
+            x = cx + r * sinf(deg * DEG_TO_RAD);
+            y = cy + r * cosf(deg * DEG_TO_RAD);
+        };
+        // the coastline ring: land above the hull's depth
+        for (S32 b = 0; b < SONAR_BEARINGS; ++b)
+        {
+            if (sSonar.coast[b] < 0.f) continue;
+            const F32 a0 = 360.f * b / SONAR_BEARINGS - 5.f, a1 = a0 + 10.f;
+            const F32 deg_mid = fmodf(360.f * b / SONAR_BEARINGS - heading + 720.f, 360.f);
+            const F32 rr = sSonar.coast[b] / SONAR_RANGE * R;
+            clockArc(cx, cy, rr, llmax(2.f, R * 0.03f), a0 - heading, a1 - heading, alpha(C_AMBER, 0.35f + 0.65f * glow(deg_mid)), 6);
+        }
+        for (const SonarContact& k : sSonar.contacts)
+        {
+            F32 x, y, deg;
+            at(k.east, k.north, x, y, deg);
+            const F32 g = glow(deg);
+            const F32 dot = llclamp(k.size / SONAR_RANGE * R, S(2.5f), S(7.f));
+            circleF(x, y, dot, alpha(k.avatar ? C_WHITE : SUB_GREEN, 0.25f + 0.75f * g), 12);
+        }
+        // the sweep's beam
+        F32 sx, sy;
+        pt(cx, cy, R, sweep, sx, sy);
+        lineW(cx, cy, sx, sy, 2.f, SUB_GREEN);
+        for (S32 i = 1; i <= 6; ++i)
+        {
+            F32 tx, ty;
+            pt(cx, cy, R, sweep - i * 4.f, tx, ty);
+            lineW(cx, cy, tx, ty, 2.f, alpha(SUB_GREEN, 0.5f - i * 0.07f));
+        }
+        // the submarine at the centre, bow up
+        triF(cx, cy + S(8.f), cx - S(4.f), cy - S(6.f), cx + S(4.f), cy - S(6.f), C_WHITE);
+        T(cx, cy - R - S(8.f), llformat("SONAR  %d m", (S32)SONAR_RANGE), 9.f, alpha(SUB_GREEN, 0.8f), true);
+    }
+
+    void drawSubmarine(Ctx& c, const WolfDrive::Shown& s, bool bg, U32 held)
+    {
+        WolfDrive& d = WolfDrive::instance();
+        if (bg)
+        {
+            rectG(0.f, g.bandB, g.W, g.panelTop, SUB_HI, SUB_LO);
+            rectF(0.f, g.panelTop - 2.f, g.W, g.panelTop, C_TEAL);
+        }
+
+        // ---- left: the depth gauge, ballast and planes ----
+        use(g.L);
+        {
+            // the scale: a quarter past the safe depth when the script gives one (rounded up to 10 m), else 100 m
+            // (MODEL); red beyond max_depth
+            const F32 safe = s.mHasMaxDepth ? (F32)s.mMaxDepth : 0.f;
+            const F32 scale = s.mHasMaxDepth ? llmax(10.f, ceilf(safe * 1.25f / 10.f) * 10.f) : 100.f;
+            const F32 major = scale > 500.f ? 100.f : scale > 200.f ? 50.f : scale > 50.f ? 10.f : 5.f;
+            const bool too_deep = s.mHasMaxDepth && s.mSubDepth > safe;
+            Dial depth{ X(190.f), YM(762.f), S(118.f), scale, major, major * 2.f, major / 2.f, 1.f, safe, 0.f, 0.f,
+                        llmax(0.f, s.mSubDepth), 0.f, "DEPTH m", false, too_deep ? C_RED : C_TEAL, S(16.f) };
+            depth.sea = true;
+            drawDial(depth);
+            T(X(190.f), YM(824.f), s.mSubDepth <= 0.f ? std::string("SURFACED") : llformat("%.1f m", s.mSubDepth), 14.f,
+              too_deep ? C_RED : C_WHITE, true, true);
+            const F32 rate = s.mDepthRate;
+            T(X(190.f), YM(846.f), llformat("%s %.1f m/min", rate > 0.5f ? "DOWN" : rate < -0.5f ? "UP" : "LEVEL", fabsf(rate)), 10.f,
+              fabsf(rate) > 0.5f ? SUB_GREEN : C_GREY, false, true);
+        }
+        {
+            // the ballast tanks (flooded, from the top) and the dive planes (+ nose down)
+            const F32 top = YM(628.f), bot = YM(846.f);
+            const F32 bl = X(330.f), br = X(370.f);
+            rectF(bl, bot, br, top, SUB_SCREEN);
+            if (s.mHasBallast)
+            {
+                rectF(bl, top - (top - bot) * s.mBallast / 100.f, br, top, alpha(C_BLUE, 0.85f));
+            }
+            frameW(bl, bot, br, top, 1.f, SUB_LINE);
+            T((bl + br) * 0.5f, YM(616.f), "BALLAST", 8.f, C_TEAL, true);
+            T((bl + br) * 0.5f, YM(860.f), s.mHasBallast ? llformat("%d%%", s.mBallast) : std::string("--"), 10.f, C_WHITE, true, true);
+            const F32 pl = X(400.f), pr = X(440.f), mid = (top + bot) * 0.5f;
+            rectF(pl, bot, pr, top, SUB_SCREEN);
+            for (S32 k = -2; k <= 2; ++k) rectF(pl, mid + (top - mid) * k / 2.f, pl + S(8.f), mid + (top - mid) * k / 2.f + 1.f, SUB_LINE);
+            if (s.mHasPlanes)
+            {
+                const F32 y = mid - (top - mid) * s.mPlanes / 100.f;   // nose down drawn downward
+                rectF(pl, llmin(mid, y), pr, llmax(mid, y), s.mPlanes > 0 ? alpha(C_AMBER, 0.8f) : alpha(SUB_GREEN, 0.8f));
+            }
+            rectF(pl - S(3.f), mid - 0.75f, pr + S(3.f), mid + 0.75f, C_WHITE);
+            frameW(pl, bot, pr, top, 1.f, SUB_LINE);
+            T((pl + pr) * 0.5f, YM(616.f), "PLANES", 8.f, C_TEAL, true);
+            T((pl + pr) * 0.5f, YM(860.f), s.mHasPlanes ? llformat("%+d", s.mPlanes) : std::string("--"), 10.f, C_WHITE, true, true);
+            T((pl + pr) * 0.5f, YM(878.f), "+ = DIVE", 7.f, C_GREY);
+        }
+
+        // ---- centre: heading, sonar, the boat's state ----
+        use(g.C);
+        headingTape(X(480.f), X(1120.f), YM(640.f), YM(606.f), s.mHeading, s.mTrack, s.mSpeed > 0.5f, SUB_GREEN, C_TEAL, C_TEAL,
+                    alpha(SUB_SCREEN, 0.9f));
+        T(X(800.f), YM(652.f), llformat("%03d", (S32)llround(s.mHeading) % 360), 12.f, C_WHITE, true, true);
+        drawSonar(X(800.f), YM(774.f), S(104.f), s.mHeading);
+        {
+            auto box = [&](F32 t0, F32 t1, const LLColor4& fill, const LLColor4& edge)
+            {
+                roundRectF(X(482.f), YM(t1), X(676.f), YM(t0), S(8.f), fill, fill);
+                frameW(X(482.f), YM(t1), X(676.f), YM(t0), 1.f, edge);
+            };
+            // the sea bed under the hull: amber under 5 m, red under 2 m
+            const F32 bed = s.mSeabed;
+            const LLColor4 bc = bed < 2.f ? C_RED : bed < 5.f ? C_AMBER : SUB_LINE;
+            box(662.f, 728.f, bed < 5.f ? alpha(bc, bed < 2.f && blink(0.6f) ? 0.55f : 0.28f) : SUB_SCREEN, bc);
+            T(X(579.f), YM(676.f), "SEA BED BELOW", 9.f, bed < 5.f ? C_WHITE : C_TEAL, true);
+            T(X(579.f), YM(706.f), bed <= 0.f ? std::string("ON THE BOTTOM") : llformat("%.1f m", bed), bed <= 0.f ? 13.f : 20.f, C_WHITE, true, true);
+            box(736.f, 802.f, SUB_SCREEN, SUB_LINE);
+            T(X(579.f), YM(750.f), "DIVE ANGLE", 9.f, C_TEAL, true);
+            T(X(579.f), YM(780.f), llformat("%+.1f", -s.mPitch), 20.f, fabsf(s.mPitch) > 20.f ? C_AMBER : C_WHITE, true, true);
+            T(X(660.f), YM(780.f), -s.mPitch > 0.5f ? "DN" : s.mPitch > 0.5f ? "UP" : "", 9.f, C_GREY, true, false, LLFontGL::RIGHT);
+            telltales(X(470.f), X(690.f), YM(830.f), s, false, true);
+            T(X(579.f), YM(868.f), s.mPeriscope ? "PERISCOPE UP" : "PERISCOPE DOWN", 10.f, s.mPeriscope ? C_AMBER : C_GREY, true);
+        }
+        {
+            const LLColor4 track = alpha(SUB_SCREEN, 1.f);
+            auto low_bad = [](F32 v) { return v < 10.f ? C_RED : v < 25.f ? C_AMBER : SUB_GREEN; };
+            percentBar(X(924.f), X(1118.f), YM(668.f), YM(698.f), YM(680.f), "BATTERY", s.mHasBattery, s.mBattery, low_bad(s.mBattery), C_TEAL, track);
+            percentBar(X(924.f), X(1118.f), YM(716.f), YM(746.f), YM(728.f), "OXYGEN", s.mHasOxygen, s.mOxygen, low_bad(s.mOxygen), C_TEAL, track);
+            // the throttle: ahead to the right, astern to the left
+            const F32 tl = X(924.f), tr = X(1118.f), mid = (tl + tr) * 0.5f, tb = YM(796.f), tt = YM(778.f);
+            const F32 thr = llclamp(s.mThrottlePct, -100.f, 100.f);
+            T(tl, YM(766.f), "THROTTLE", 10.f, C_TEAL, true, false, LLFontGL::LEFT);
+            T(tr, YM(766.f), thr > 0.f ? llformat("AHEAD %d%%", (S32)llround(thr)) : thr < 0.f ? llformat("ASTERN %d%%", (S32)llround(-thr)) : std::string("STOP"),
+              10.f, thr < 0.f ? C_AMBER : C_WHITE, true, true, LLFontGL::RIGHT);
+            rectF(tl, tb, tr, tt, track);
+            rectF(llmin(mid, mid + (tr - mid) * thr / 100.f), tb, llmax(mid, mid + (tr - mid) * thr / 100.f), tt, thr < 0.f ? C_AMBER : SUB_GREEN);
+            rectF(mid - 0.75f, tb - S(3.f), mid + 0.75f, tt + S(3.f), C_WHITE);
+            frameW(tl, tb, tr, tt, 1.f, SUB_LINE);
+            button(c, X(924.f), YM(838.f), X(1018.f), YM(806.f), "AHEAD", d.throttle() > 0.f, WolfDashboard::H_THROTTLE,
+                   "Ahead: hold it (or Up / W, or your accelerator)", 10.f);
+            button(c, X(1024.f), YM(838.f), X(1118.f), YM(806.f), "ASTERN", d.brake() > 0.f, WolfDashboard::H_BRAKE,
+                   "Astern: hold it (or Down / S, or your brake)", 10.f);
+            T(X(1021.f), YM(860.f), "Page Up / Page Down: up / down", 8.f, C_GREY);
+        }
+
+        // ---- right: speed, the buttons ----
+        use(g.R);
+        {
+            const F32 spd = speedIn(s, s.mSpeed3D);
+            const F32 maxs = llmax(10.f, s.mMaxSpeed);
+            Dial speedo{ X(1278.f), YM(762.f), S(108.f), maxs, maxs > 100.f ? 20.f : maxs > 40.f ? 10.f : 5.f, 0.f, maxs > 40.f ? 5.f : 1.f, 1.f,
+                         0.f, 0.f, 0.f, spd, 0.f, unitName(s), false, C_TEAL, S(16.f) };
+            speedo.sea = true;
+            drawDial(speedo);
+            T(X(1278.f), YM(822.f), llformat("%.1f", spd), 16.f, C_WHITE, true, true);
+            struct SB { const char* label; bool lit; WolfDashboard::EHit id; std::string tip; };
+            const SB sb[6] =
+            {
+                { "DIVE", (held & WolfDrive::BTN_DIVE) != 0, WolfDashboard::H_DIVE, "Dive: hold it - flood the ballast and go down" + keyHint(WolfDrive::ACT_DIVE) },
+                { "SURFACE", (held & WolfDrive::BTN_SURFACE) != 0, WolfDashboard::H_SURFACE, "Surface: hold it - blow the ballast and go up" + keyHint(WolfDrive::ACT_SURFACE) },
+                { "PERISCOPE", s.mPeriscope, WolfDashboard::H_PERISCOPE, std::string(s.mPeriscope ? "Periscope up: click to lower it" : "Periscope down: click to raise it")
+                                                                         + keyHint(WolfDrive::ACT_PERISCOPE) },
+                { "PING", (held & WolfDrive::BTN_SONAR) != 0, WolfDashboard::H_SONAR, "Sonar ping (sent to the submarine's script)" + keyHint(WolfDrive::ACT_SONAR) },
+                { s.mLights == 2 ? "MAIN" : "LIGHTS", s.mLights > 0, WolfDashboard::H_LIGHTS, "Lights: off, on, bright" + keyHint(WolfDrive::ACT_LIGHTS) },
+                { "ENGINE", s.mEngine, WolfDashboard::H_ENGINE, std::string(s.mEngine ? "Motor running: click to stop it" : "Motor stopped: click to start it")
+                                                               + keyHint(WolfDrive::ACT_ENGINE) },
+            };
+            for (S32 i = 0; i < 6; ++i)
+            {
+                const F32 l = (i % 2) ? 1504.f : 1406.f, top = 618.f + (i / 2) * 50.f;
+                button(c, X(l), YM(top + 42.f), X(l + 94.f), YM(top), sb[i].label, sb[i].lit, sb[i].id, sb[i].tip, 11.f);
+            }
+            T(X(1503.f), YM(784.f), s.mHasMaxDepth ? llformat("SAFE DEPTH %d m", s.mMaxDepth) : std::string("SAFE DEPTH --"), 10.f, C_TEAL, true, true);
+            T(X(1503.f), YM(808.f), llformat("BELOW SURFACE %.1f m", llmax(0.f, s.mSubDepth)), 10.f, C_WHITE, false, true);
+            T(X(1503.f), YM(832.f), llformat("SEA BED %.1f m", s.mSeabed), 10.f, s.mSeabed < 2.f ? C_RED : s.mSeabed < 5.f ? C_AMBER : C_WHITE, false, true);
+        }
+    }
+
     /** The guide's words, per design (the HELP button, and by itself the first time each design
      *  is used - after the flight deck's guide, wolfflightdeck.cpp drawHelp). */
     struct HelpLine { S32 kind; const char* s; };   // 0 heading, 1 text, 2 indented, 3 gap, 4 code
@@ -1332,10 +2262,124 @@ namespace
         { 3, "" },
         { 1, "Click anywhere above the dashboard to close.  HELP reopens it." },
     };
+    // <WolfViewer 2026-10-11> w65: the speedboat helm's and the spaceship HUD's own guides
+    const HelpLine HELP_BOAT[] =
+    {
+        { 0, "THE SPEEDBOAT HELM" },
+        { 1, "Opens by itself when a boat's script asks for it, or from" },
+        { 2, "Wolf World > Speedboat Helm, or its icon beside the boat icon." },
+        { 1, "Left: the rev counter (green: the engine's full-throttle band)." },
+        { 1, "Right: the speed in knots (KNOTS above: km/h, mph)." },
+        { 1, "Centre: compass and heading (COG: where you are going)," },
+        { 2, "the speed step, ON PLANE, the depth under you (red under 2 m)," },
+        { 2, "trim (or the bow's angle), fuel and warnings." },
+        { 1, "Throttle lever: F ahead, N, R astern. AHEAD / ASTERN: hold." },
+        { 3, "" },
+        { 0, "SPEED STEPS" },
+        { 1, "Page Up / + a step up, Page Down / - a step down." },
+        { 1, "A boat that says \"Speed = 3\" aloud shows its own step here," },
+        { 2, "marked BOAT." },
+        { 1, "HORN: the air horn, heard by everyone near (Wolf only)." },
+        { 1, "LIGHTS, ANCHOR, ENGINE: sent to the boat's script." },
+    };
+    const HelpLine HELP_BOAT_MAKERS[] =
+    {
+        { 0, "YOUR KEYS" },
+        { 1, "CONTROLS (above) opens Driving Controls: a key, a controller" },
+        { 2, "button and what it sends, for the horn, lights, anchor (N)" },
+        { 2, "and engine (I). Reset puts them back." },
+        { 3, "" },
+        { 0, "FOR BOAT MAKERS" },
+        { 1, "wolfDashboard(driver, [...]) drives this helm:" },
+        { 4, "wolfDashboard(llAvatarOnSitTarget(), [\"type\",\"speedboat\"," },
+        { 4, "    \"rpm\", 4200, \"gear\", \"3\", \"throttle\", 60, \"trim\", 2]);" },
+        { 1, "Also: anchor, engine, fuel, units (kn kmh mph), warnings." },
+        { 1, "wolfDriveInput(driver) gives the buttons held: 4 horn," },
+        { 2, "8 lights, 2048 anchor, 16384 engine." },
+        { 1, "With no script the helm reads the boat's own speed, heading," },
+        { 2, "bow angle and the depth under it." },
+        { 3, "" },
+        { 1, "Click anywhere above the helm to close.  HELP reopens it." },
+    };
+    const HelpLine HELP_SHIP[] =
+    {
+        { 0, "THE SPACESHIP HUD" },
+        { 1, "Opens by itself when a craft's script asks for it, or from" },
+        { 2, "Wolf World > Spaceship HUD, or its icon beside the plane icon." },
+        { 1, "Top: heading. Centre: the pitch ladder; the W is your nose," },
+        { 2, "the circle is where you are really going (flight path)." },
+        { 1, "Left: speed and throttle; fuel, boost, shield, hull, heat." },
+        { 1, "Right: altitude above the water (the ground under it hatched)," },
+        { 2, "vertical speed and the height above the ground." },
+        { 1, "Cyan normal, amber caution, red warning, magenta target." },
+        { 3, "" },
+        { 0, "ROCKET MODE" },
+        { 1, "A rocket's script switches to the launch layout: altitude," },
+        { 2, "vertical speed, apogee (how high it will coast), stage N/M" },
+        { 2, "and SEPARATE, which drops the spent stage." },
+        { 1, "You fly with the craft's own keys; the HUD's buttons go to" },
+        { 2, "its script: STAGE, BOOST (held), ASSIST, GEAR, ENGINE." },
+    };
+    const HelpLine HELP_SHIP_MAKERS[] =
+    {
+        { 0, "YOUR KEYS" },
+        { 1, "CONTROLS (above) opens Driving Controls: J stage, Y boost," },
+        { 2, "O flight assist, G landing gear, I engine - or your own keys" },
+        { 2, "or controller buttons." },
+        { 3, "" },
+        { 0, "FOR CRAFT MAKERS" },
+        { 1, "wolfDashboard(driver, [...]) drives this HUD:" },
+        { 4, "wolfDashboard(pilot, [\"type\",\"spaceship\",\"mode\",\"rocket\"," },
+        { 4, "    \"stage\", 1, \"stages\", 3, \"throttle\", 100]);" },
+        { 1, "Also: fuel, boost, shield, hull, heat, assist, landing_gear," },
+        { 2, "engine, warnings." },
+        { 1, "wolfDriveInput(driver) buttons held: 512 stage, 1024 boost," },
+        { 2, "4096 assist, 8192 landing gear, 16384 engine." },
+        { 1, "Speed, attitude and heights come from the craft itself." },
+        { 3, "" },
+        { 1, "Click anywhere above the HUD to close.  HELP reopens it." },
+    };
 }
 
 void WolfDashboard::drawHelp(F32 top)
 {
+    // <WolfViewer 2026-10-11> the submarine helm's guide (Paul: "add another hud for driving a submarine and lsl commands")
+    static const HelpLine HELP_SUB[] =
+    {
+        { 0, "THE SUBMARINE HELM" },
+        { 1, "Opens by itself when a submarine's script asks for it, or from" },
+        { 2, "Wolf World > Submarine Helm, or its icon beside the speedboat's." },
+        { 1, "Left: DEPTH below the surface (red past the safe depth), how" },
+        { 2, "fast it changes, the ballast tanks and the dive planes." },
+        { 1, "Centre: heading and the SONAR - objects (green), avatars" },
+        { 2, "(white) and land higher than you (amber) within 100 m." },
+        { 1, "SEA BED BELOW: amber under 5 m, red under 2 m." },
+        { 1, "Right: speed in knots (KNOTS above: km/h, mph)." },
+        { 3, "" },
+        { 0, "DRIVING" },
+        { 1, "Keys as always: Up / W ahead, Down / S astern, Left / Right," },
+        { 2, "Page Up / Page Down up and down - any submarine works." },
+        { 1, "DIVE and SURFACE: hold. PERISCOPE, PING, LIGHTS, ENGINE:" },
+        { 2, "sent to the submarine's script (PING also pings here)." },
+    };
+    static const HelpLine HELP_SUB_MAKERS[] =
+    {
+        { 0, "YOUR KEYS" },
+        { 1, "CONTROLS (above) opens Driving Controls: M dive, U surface," },
+        { 2, "P periscope, Q sonar - or your own keys or controller buttons." },
+        { 3, "" },
+        { 0, "FOR SUBMARINE MAKERS" },
+        { 1, "wolfDashboard(driver, [...]) drives this helm:" },
+        { 4, "wolfDashboard(llAvatarOnSitTarget(), [\"type\",\"submarine\"," },
+        { 4, "    \"ballast\", 60, \"max_depth\", 120, \"planes\", 20]);" },
+        { 1, "Also: oxygen, battery, periscope, throttle, engine, lights," },
+        { 2, "units, warnings (oxygen, battery, leak ...)." },
+        { 1, "wolfDriveInput(driver) buttons held: 32768 dive, 65536" },
+        { 2, "surface, 131072 periscope, 262144 sonar." },
+        { 1, "The depth, sea bed and sonar come from the viewer itself." },
+        { 3, "" },
+        { 1, "Click anywhere above the helm to close.  HELP reopens it." },
+    };
     const F32 W = (F32)getRect().getWidth(), Hv = (F32)getRect().getHeight();
     const F32 avail_h = Hv - top;
     if (avail_h < 120.f)
@@ -1347,15 +2391,34 @@ void WolfDashboard::drawHelp(F32 top)
     const F32 l = (W - cw) * 0.5f, r = l + cw, t = Hv - avail_h * 0.04f, b = t - ch;
     roundRectF(l - 2.f, b - 2.f, r + 2.f, t + 2.f, 10.f, LLColor4(0.3f, 0.315f, 0.335f, 1.f), LLColor4(0.03f, 0.03f, 0.035f, 1.f));
     roundRectF(l, b, r, t, 9.f, LLColor4(0.05f, 0.06f, 0.08f, 0.96f), LLColor4(0.02f, 0.025f, 0.035f, 0.96f));
-    const S32 n1 = (S32)(sizeof(HELP_DRIVE) / sizeof(HELP_DRIVE[0]));
-    const S32 n2 = (S32)(sizeof(HELP_SETUP) / sizeof(HELP_SETUP[0]));
+    // <WolfViewer 2026-10-11> each design's own pair of columns (the road designs share theirs)
+    const WolfDrive::EType ty = WolfDrive::instance().type();
+    const HelpLine* left = HELP_DRIVE;
+    const HelpLine* right = HELP_SETUP;
+    S32 n1 = (S32)(sizeof(HELP_DRIVE) / sizeof(HELP_DRIVE[0]));
+    S32 n2 = (S32)(sizeof(HELP_SETUP) / sizeof(HELP_SETUP[0]));
+    if (ty == WolfDrive::TYPE_SPEEDBOAT)
+    {
+        left = HELP_BOAT;   n1 = (S32)(sizeof(HELP_BOAT) / sizeof(HELP_BOAT[0]));
+        right = HELP_BOAT_MAKERS; n2 = (S32)(sizeof(HELP_BOAT_MAKERS) / sizeof(HELP_BOAT_MAKERS[0]));
+    }
+    else if (ty == WolfDrive::TYPE_SUBMARINE)
+    {
+        left = HELP_SUB;    n1 = (S32)(sizeof(HELP_SUB) / sizeof(HELP_SUB[0]));
+        right = HELP_SUB_MAKERS; n2 = (S32)(sizeof(HELP_SUB_MAKERS) / sizeof(HELP_SUB_MAKERS[0]));
+    }
+    else if (ty == WolfDrive::TYPE_SPACESHIP)
+    {
+        left = HELP_SHIP;   n1 = (S32)(sizeof(HELP_SHIP) / sizeof(HELP_SHIP[0]));
+        right = HELP_SHIP_MAKERS; n2 = (S32)(sizeof(HELP_SHIP_MAKERS) / sizeof(HELP_SHIP_MAKERS[0]));
+    }
     const S32 rows = llmax(n1, n2) + 2;
     const F32 lh = llmin((ch - 20.f) / rows, 26.f);
     const LLFontGL* head = face("B612", LLFontGL::BOLD, lh * 0.95f);
     const LLFontGL* body = face("B612", LLFontGL::NORMAL, lh * 0.82f);
     const LLFontGL* code = face("B612Mono", LLFontGL::NORMAL, lh * 0.8f);
-    static const char* const TITLES[] = { "CAR DASHBOARD", "TRUCK DASHBOARD", "BIKE DASHBOARD" };
-    text(head, TITLES[llclamp((S32)WolfDrive::instance().type(), 0, 2)], (l + r) * 0.5f, t - lh * 0.8f, C_AMBER, LLFontGL::HCENTER, LLFontGL::VCENTER);
+    static const char* const TITLES[WolfDrive::TYPE_COUNT] = { "CAR DASHBOARD", "TRUCK DASHBOARD", "BIKE DASHBOARD", "SPEEDBOAT HELM", "SPACESHIP HUD", "SUBMARINE HELM" };
+    text(head, TITLES[llclamp((S32)ty, 0, (S32)WolfDrive::TYPE_COUNT - 1)], (l + r) * 0.5f, t - lh * 0.8f, C_AMBER, LLFontGL::HCENTER, LLFontGL::VCENTER);
     auto column = [&](const HelpLine* lines, S32 n, F32 x)
     {
         F32 y = t - lh * 1.8f;
@@ -1372,8 +2435,8 @@ void WolfDashboard::drawHelp(F32 top)
             y -= (lines[i].kind == 3) ? lh * 0.5f : lh;
         }
     };
-    column(HELP_DRIVE, n1, l + cw * 0.03f);
-    column(HELP_SETUP, n2, l + cw * 0.52f);
+    column(left, n1, l + cw * 0.03f);
+    column(right, n2, l + cw * 0.52f);
     rectF(l + cw * 0.505f, b + lh, l + cw * 0.505f + 1.f, t - lh * 1.8f, C_DIM);
 }
 
@@ -1401,8 +2464,10 @@ void WolfDashboard::draw()
     if ((S32)ty != mHelpCheckedType)
     {
         mHelpCheckedType = (S32)ty;
-        static const char* const SEEN[] = { "WolfDashboardHelpCar", "WolfDashboardHelpTruck", "WolfDashboardHelpBike" };
-        const char* setting = SEEN[llclamp((S32)ty, 0, 2)];
+        static const char* const SEEN[WolfDrive::TYPE_COUNT] = { "WolfDashboardHelpCar", "WolfDashboardHelpTruck", "WolfDashboardHelpBike",
+                                                                 "WolfDashboardHelpSpeedboat", "WolfDashboardHelpSpaceship",
+                                                                 "WolfDashboardHelpSubmarine" };   // <WolfViewer 2026-10-11/>
+        const char* setting = SEEN[llclamp((S32)ty, 0, (S32)WolfDrive::TYPE_COUNT - 1)];
         if (!gSavedSettings.getBOOL(setting))
         {
             gSavedSettings.setBOOL(setting, true);
@@ -1484,7 +2549,7 @@ void WolfDashboard::draw()
     const WolfDrive::Shown& s = d.shown();
     const bool bg = gSavedSettings.getBOOL("WolfDashboardBackground");
     Ctx c{ this, [this](F32 l, F32 b, F32 r, F32 t, EHit id, const std::string& tip) { addHit(l, b, r, t, id, tip); }, mPressed };
-    const F32 kmh = s.mSpeed * (s.mMph ? MPH : KMH);
+    const F32 kmh = speedIn(s, s.mSpeed);   // <WolfViewer 2026-10-11/> in the shown units (the name is the road designs')
 
     use(g.C);
     if (ty == WolfDrive::TYPE_CAR)
@@ -1504,7 +2569,7 @@ void WolfDashboard::draw()
         const F32 cy = YM(778.f);
         drawDial({ X(588.f), cy, S(82.f), s.mMaxSpeed, s.mMaxSpeed > 250.f ? 30.f : s.mMaxSpeed > 120.f ? 20.f : 10.f,
                    s.mMaxSpeed > 250.f ? 60.f : 0.f, s.mMaxSpeed > 120.f ? 10.f : 5.f, 1.f, 0.f, 0.f, 0.f, kmh, 0.f,
-                   s.mMph ? "mph" : "km/h", false, C_NEEDLE, S(13.f) });
+                   unitName(s), false, C_NEEDLE, S(13.f) });
         T(X(588.f), YM(822.f), llformat("%d", (S32)llround(kmh)), 21.f, C_WHITE, true, true);
         drawDial({ X(800.f), cy, S(104.f), s.mMaxRpm, 1000.f, 0.f, 250.f, 1000.f, s.mRedline, 0.f, 0.f, s.mRpm, 0.f,
                    "x1000/min", false, C_NEEDLE, S(21.f) });
@@ -1565,9 +2630,9 @@ void WolfDashboard::draw()
         drawDial({ X(520.f), cy, S(98.f), s.mMaxRpm, 500.f, 0.f, 100.f, 100.f, s.mRedline, sp.mGreenLo, sp.mGreenHi, s.mRpm, 0.f,
                    "x100/min", true, TRUCK_NEEDLE, S(17.f) });
         T(X(520.f), YM(828.f), llformat("%d", (S32)llround(s.mRpm)), 16.f, C_WHITE, true, true);
-        const F32 gov = sp.mGovernorKmh > 0.f ? (s.mMph ? sp.mGovernorKmh / 1.609344f : sp.mGovernorKmh) : 0.f;
+        const F32 gov = sp.mGovernorKmh > 0.f ? speedIn(s, sp.mGovernorKmh / KMH) : 0.f;   // <WolfViewer 2026-10-11/> any units
         drawDial({ X(990.f), cy, S(98.f), s.mMaxSpeed, s.mMaxSpeed > 100.f ? 20.f : 10.f, 0.f, 5.f, 1.f, 0.f, 0.f, 0.f, kmh, gov,
-                   s.mMph ? "mph" : "km/h", true, TRUCK_NEEDLE, S(17.f) });
+                   unitName(s), true, TRUCK_NEEDLE, S(17.f) });
         T(X(990.f), YM(828.f), llformat("%d", (S32)llround(kmh)), 16.f, C_WHITE, true, true);
         // the centre screen
         const F32 dl = X(642.f), dr = X(868.f), dt = YM(664.f), db = YM(882.f);
@@ -1647,6 +2712,18 @@ void WolfDashboard::draw()
         pedals(c, X(1378.f), X(1580.f), YM(666.f), 172.f, d.brake(), d.throttle(), false);
         lampButtons(c, X(1255.f), X(1580.f), YM(858.f), s, d.buttonsHeld());
     }
+    else if (ty == WolfDrive::TYPE_SPEEDBOAT)
+    {
+        drawSpeedboat(c, s, bg, d.buttonsHeld());   // <WolfViewer 2026-10-11/> w65
+    }
+    else if (ty == WolfDrive::TYPE_SPACESHIP)
+    {
+        drawSpaceship(c, s, bg, d.buttonsHeld());   // <WolfViewer 2026-10-11/> w65
+    }
+    else if (ty == WolfDrive::TYPE_SUBMARINE)
+    {
+        drawSubmarine(c, s, bg, d.buttonsHeld());   // <WolfViewer 2026-10-11/> w65
+    }
     else
     {
         use(g.C);
@@ -1723,7 +2800,7 @@ void WolfDashboard::draw()
         // speed, gear, lean
         const F32 my = YM(758.f);
         T(X(642.f), my, llformat("%d", (S32)llround(kmh)), 60.f, C_WHITE, true, true);
-        T(X(642.f), YM(796.f), s.mMph ? "mph" : "km/h", 12.f, C_GREY);
+        T(X(642.f), YM(796.f), unitName(s), 12.f, C_GREY);
         roundRectF(X(752.f), YM(804.f), X(848.f), YM(712.f), S(10.f), LLColor4(0.051f, 0.082f, 0.133f, 1.f), LLColor4(0.051f, 0.082f, 0.133f, 1.f));
         frameW(X(752.f), YM(804.f), X(848.f), YM(712.f), 1.f, LLColor4(0.15f, 0.25f, 0.37f, 1.f));
         T(X(800.f), YM(756.f), s.mGear, 72.f, s.mGear == "N" ? C_GREEN : C_WHITE, true);
@@ -1814,7 +2891,32 @@ void WolfDashboard::press(EHit id)
     }
     case H_TYPE_TRUCK: d.chooseType(WolfDrive::TYPE_TRUCK); break;
     case H_TYPE_BIKE:  d.chooseType(WolfDrive::TYPE_BIKE); break;
-    case H_UNITS:      gSavedSettings.setBOOL("WolfDashboardMph", !gSavedSettings.getBOOL("WolfDashboardMph")); break;
+    case H_UNITS:
+        if (d.type() == WolfDrive::TYPE_SPEEDBOAT || d.type() == WolfDrive::TYPE_SUBMARINE)
+        {
+            // <WolfViewer 2026-10-11> the speedboat and submarine: knots, km/h, mph, round again
+            gSavedSettings.setS32("WolfDashboardBoatUnits", (llclamp(gSavedSettings.getS32("WolfDashboardBoatUnits"), 0, 2) + 1) % 3);
+        }
+        else
+        {
+            gSavedSettings.setBOOL("WolfDashboardMph", !gSavedSettings.getBOOL("WolfDashboardMph"));
+        }
+        break;
+    // <WolfViewer 2026-10-11> w65: the designs and the new buttons (held while pressed, like the lamps; BOOST is
+    // the one a script reads as held)
+    case H_TYPE_SPEEDBOAT: d.chooseType(WolfDrive::TYPE_SPEEDBOAT); break;
+    case H_TYPE_SPACESHIP: d.chooseType(WolfDrive::TYPE_SPACESHIP); break;
+    case H_STAGE:          d.setScreenButton(WolfDrive::BTN_STAGE, true); break;
+    case H_BOOST:          d.setScreenButton(WolfDrive::BTN_BOOST, true); break;
+    case H_ANCHOR:         d.setScreenButton(WolfDrive::BTN_ANCHOR, true); break;
+    case H_ASSIST:         d.setScreenButton(WolfDrive::BTN_ASSIST, true); break;
+    case H_LANDING_GEAR:   d.setScreenButton(WolfDrive::BTN_LANDING_GEAR, true); break;
+    case H_ENGINE:         d.setScreenButton(WolfDrive::BTN_ENGINE, true); break;
+    case H_TYPE_SUBMARINE: d.chooseType(WolfDrive::TYPE_SUBMARINE); break;
+    case H_DIVE:           d.setScreenButton(WolfDrive::BTN_DIVE, true); break;
+    case H_SURFACE:        d.setScreenButton(WolfDrive::BTN_SURFACE, true); break;
+    case H_PERISCOPE:      d.setScreenButton(WolfDrive::BTN_PERISCOPE, true); break;
+    case H_SONAR:          d.setScreenButton(WolfDrive::BTN_SONAR, true); break;
     case H_PANEL:      gSavedSettings.setBOOL("WolfDashboardBackground", !gSavedSettings.getBOOL("WolfDashboardBackground")); break;
     case H_CONTROLS:   LLFloaterReg::toggleInstanceOrBringToFront("wolf_drive_controls"); break;
     case H_TRIP:       d.resetTrip(); break;
@@ -1864,7 +2966,10 @@ void WolfDashboard::release()
     d.setScreenPedal(true, false);
     d.setScreenSteer(0.f, false);
     d.setScreenButton(WolfDrive::BTN_LIGHTS | WolfDrive::BTN_IND_LEFT | WolfDrive::BTN_IND_RIGHT
-                      | WolfDrive::BTN_HANDBRAKE | WolfDrive::BTN_HORN | WolfDrive::BTN_HAZARDS | WolfDrive::BTN_CRUISE, false);
+                      | WolfDrive::BTN_HANDBRAKE | WolfDrive::BTN_HORN | WolfDrive::BTN_HAZARDS | WolfDrive::BTN_CRUISE
+                      | WolfDrive::BTN_STAGE | WolfDrive::BTN_BOOST | WolfDrive::BTN_ANCHOR | WolfDrive::BTN_ASSIST   // <WolfViewer 2026-10-11/>
+                      | WolfDrive::BTN_LANDING_GEAR | WolfDrive::BTN_ENGINE
+                      | WolfDrive::BTN_DIVE | WolfDrive::BTN_SURFACE | WolfDrive::BTN_PERISCOPE | WolfDrive::BTN_SONAR, false);
     mPressed = H_NONE;
 }
 

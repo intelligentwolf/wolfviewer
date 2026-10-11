@@ -56,6 +56,7 @@
 #include "llappviewer.h"
 #include "llsdserialize.h"
 #include "lltrans.h"
+#include "wolfgrid.h"   // <WolfViewer 2026-10-11/> Invisible Mode: wolf_invisible on Wolf Territories only
 
 #include <boost/regex.hpp>
 #include <sstream>
@@ -239,6 +240,15 @@ void LLLoginInstance::constructAuthParams(LLPointer<LLCredential> user_credentia
     request_params["host_id"] = gSavedSettings.getString("HostID");
     request_params["extended_errors"] = true; // request message_id and message_args
     request_params["token"] = "";
+    // <WolfViewer 2026-10-11> Paul: Invisible Mode, "makes the user invisible to IM's and Friend
+    // requests ... show them offline". The login service hides the session from the start; only
+    // sent to Wolf Territories (the grid being logged in to is already chosen here: connect()
+    // took its login URI from LLGridManager), so no other grid ever sees the parameter.
+    if (gSavedSettings.getBOOL("WolfInvisibleMode") && WolfGrid::isWolfTerritories())
+    {
+        request_params["wolf_invisible"] = "1";
+    }
+    // </WolfViewer 2026-10-11>
 
     // log request_params _before_ adding the credentials or sensitive MFA hash data
     LL_DEBUGS("LLLogin") << "Login parameters: " << LLSDOStreamer<LLSDNotationFormatter>(request_params) << LL_ENDL;

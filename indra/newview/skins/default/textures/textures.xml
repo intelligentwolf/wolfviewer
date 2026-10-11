@@ -69,6 +69,13 @@ with the same filename but different name
   <texture name="WolfTb_Game_On" file_name="icons/wolf_tb_game_on.png" preload="true" />
   <texture name="WolfTb_Car_Off" file_name="icons/wolf_tb_car_off.png" preload="true" />
   <texture name="WolfTb_Car_On" file_name="icons/wolf_tb_car_on.png" preload="true" />
+  <!-- WolfViewer 2026-10-11 (w65): the Speedboat Helm (beside the boat), Spaceship HUD (beside the plane) and Submarine Helm (beside the speedboat) toggles -->
+  <texture name="WolfTb_Speedboat_Off" file_name="icons/wolf_tb_speedboat_off.png" preload="true" />
+  <texture name="WolfTb_Speedboat_On" file_name="icons/wolf_tb_speedboat_on.png" preload="true" />
+  <texture name="WolfTb_Spaceship_Off" file_name="icons/wolf_tb_spaceship_off.png" preload="true" />
+  <texture name="WolfTb_Spaceship_On" file_name="icons/wolf_tb_spaceship_on.png" preload="true" />
+  <texture name="WolfTb_Submarine_Off" file_name="icons/wolf_tb_submarine_off.png" preload="true" />
+  <texture name="WolfTb_Submarine_On" file_name="icons/wolf_tb_submarine_on.png" preload="true" />
   <texture name="Arrow_Left" file_name="widgets/Arrow_Left.png" preload="true" />
   <texture name="Arrow_Right" file_name="widgets/Arrow_Right.png" preload="true" />
 

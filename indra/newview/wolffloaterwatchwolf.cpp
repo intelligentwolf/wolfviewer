@@ -34,6 +34,8 @@
 #include "llsdjson.h"
 #include "lltextbox.h"
 #include "lluri.h"
+#include "llurldispatcher.h"
+#include "llweb.h"
 #include "llviewercontrol.h"
 #include "wolfgrid.h"
 
@@ -85,6 +87,7 @@ bool WolfFloaterWatchWolf::postBuild()
     mPageText = getChild<LLTextBox>("page_text");
     mSummary = getChild<LLTextBox>("summary");
     mStatus = getChild<LLTextBox>("status");
+    mTeleport = getChild<LLButton>("teleport");
     mIm = getChild<LLButton>("im");
     mProfile = getChild<LLButton>("profile");
     mEject = getChild<LLButton>("eject");
@@ -100,6 +103,7 @@ bool WolfFloaterWatchWolf::postBuild()
     mPrev->setCommitCallback([this](LLUICtrl*, const LLSD&) { if (mPage > 1) { --mPage; fetch(); } });
     mNext->setCommitCallback([this](LLUICtrl*, const LLSD&) { if (mPage < mPages) { ++mPage; fetch(); } });
     getChild<LLButton>("refresh")->setCommitCallback([this](LLUICtrl*, const LLSD&) { fetch(); });
+    mTeleport->setCommitCallback([this](LLUICtrl*, const LLSD&) { teleportTo(); });
     mIm->setCommitCallback([this](LLUICtrl*, const LLSD&) { act("im"); });
     mProfile->setCommitCallback([this](LLUICtrl*, const LLSD&) { act("profile"); });
     mEject->setCommitCallback([this](LLUICtrl*, const LLSD&) { act("eject"); });
@@ -237,10 +241,28 @@ void WolfFloaterWatchWolf::onSelection()
     const LLSD r = selectedRow();
     const bool person = r.isMap() && !r["npc"].asBoolean();
     const bool other = person && !r["self"].asBoolean();
+    mTeleport->setEnabled(r.isMap() && !r["self"].asBoolean() && !r["region"].asString().empty());   // NPCs too: go and see
     mIm->setEnabled(other);
     mProfile->setEnabled(person);
     mEject->setEnabled(other);
     mBan->setEnabled(other);
+}
+
+// <WolfViewer 2026-10-11> Paul: "add a teleport to button to wolfwatcher please so you can teleport to
+// people on the list". To where the site last saw them (the row's region and x, y, z, refreshed every
+// 20 s), by the same app/teleport SLURL Firestorm's own chat-bar teleport command dispatches
+// (chatbar_as_cmdline.cpp: secondlife:///app/teleport/<escaped region>/x/y/z, "clicked", trusted).
+// The region's own rules still apply: a ban, an access list or a telehub decides where you land.
+void WolfFloaterWatchWolf::teleportTo()
+{
+    const LLSD r = selectedRow();
+    if (!r.isMap() || r["self"].asBoolean()) return;
+    const std::string region = r["region"].asString();
+    if (region.empty()) return;
+    const S32 x = llmax(0, r["x"].asInteger()), y = llmax(0, r["y"].asInteger()), z = llmax(0, r["z"].asInteger());   // the region clamps the rest
+    const std::string url = llformat("secondlife:///app/teleport/%s/%d/%d/%d", LLWeb::escapeURL(region).c_str(), x, y, z);
+    setStatus("Teleporting to " + r["name"].asString() + " on " + region + "...", false);
+    LLURLDispatcher::dispatch(url, "clicked", NULL, true);
 }
 
 void WolfFloaterWatchWolf::act(const std::string& action)

@@ -50,13 +50,24 @@ class LLViewerObject;
 //   3. THE DASHBOARD (wolfdashboard.cpp), Wolf Territories only. A vehicle script drives it with
 //      wolfDashboard() (GenericMessage "WolfDashboard"); whatever it does not send, the viewer's
 //      own model fills in from the vehicle's real velocity (see WolfDrive::model in the .cpp).
+// <WolfViewer 2026-10-11> w65 Space Rabbit adds two designs to the same state, to the protocol in
+// region-terrain-work/wolfvehicles/PROTOCOL.md: the SPEEDBOAT helm (Paul: it "goes next to the sailing hud") and the
+// SPACESHIP HUD (Paul: "spaceships are basically aircraft", "rocket mode for flying spacecraft is cool").
 class WolfDrive : public LLSingleton<WolfDrive>
 {
     LLSINGLETON(WolfDrive);
     ~WolfDrive();
 
 public:
-    enum EType { TYPE_CAR = 0, TYPE_TRUCK, TYPE_BIKE, TYPE_COUNT };
+    // <WolfViewer 2026-10-11> w65 Space Rabbit: TYPE_SPEEDBOAT and TYPE_SPACESHIP added (PROTOCOL.md, region-terrain-work/
+    // wolfvehicles). The saved value (WolfDashboardType, WolfDashboardVehicleTypes) is this number, so new
+    // designs go on the end.
+    // TYPE_SUBMARINE: Paul, "add another hud for driving a submarine and lsl commands" (the same day).
+    enum EType { TYPE_CAR = 0, TYPE_TRUCK, TYPE_BIKE, TYPE_SPEEDBOAT, TYPE_SPACESHIP, TYPE_SUBMARINE, TYPE_COUNT };
+    /** Car, truck and bike: the designs with wheels, a gearbox and the road telltales. */
+    static bool isRoad(EType t) { return t == TYPE_CAR || t == TYPE_TRUCK || t == TYPE_BIKE; }
+    /** "car" (any road design), "speedboat", "spaceship", "submarine" - the menu's parameter; anything else is the car. */
+    static EType designFromName(const std::string& name);
 
     // The gear selector, as sent to WolfSim and returned by wolfDriveInput.
     // Source: WolfDriveModule.cs GEAR_P .. GEAR_D and LSL_Constants.cs WOLF_DRIVE_GEAR_*.
@@ -67,8 +78,11 @@ public:
     {
         BTN_GEAR_UP = 1, BTN_GEAR_DOWN = 2, BTN_HORN = 4, BTN_LIGHTS = 8,
         BTN_IND_LEFT = 16, BTN_IND_RIGHT = 32, BTN_HANDBRAKE = 64, BTN_HAZARDS = 128, BTN_CRUISE = 256,
+        // <WolfViewer 2026-10-11> w65: region-terrain-work/wolfvehicles/PROTOCOL.md "Viewer to script" (WOLF_DRIVE_BTN_STAGE ..)
+        BTN_STAGE = 512, BTN_BOOST = 1024, BTN_ANCHOR = 2048, BTN_ASSIST = 4096, BTN_LANDING_GEAR = 8192, BTN_ENGINE = 16384,
+        BTN_DIVE = 32768, BTN_SURFACE = 65536, BTN_PERISCOPE = 131072, BTN_SONAR = 262144,   // the submarine's
     };
-    static constexpr U32 BUTTON_MASK = 0x1FF;   // WolfDriveModule.cs BUTTON_MASK
+    static constexpr U32 BUTTON_MASK = 0x7FFFF; // PROTOCOL.md: "BUTTON_MASK goes from 0x1FF to 0x7FFFF" (WolfDriveModule.cs)
     /** One design's vehicle: the real one it is modelled on (sources in wolfdrive.cpp). */
     struct Spec
     {
@@ -87,6 +101,7 @@ public:
         F32  mRedline;
         F32  mGreenLo, mGreenHi;     // the economy band (truck), 0 for none
         F32  mDialKmh, mDialMph;     // the speedometer's full scale (0: digital only)
+        F32  mDialKn;                // <WolfViewer 2026-10-11/> the same in knots (units=kn; the speedboat's own)
         F32  mGovernorKmh;           // a fitted speed limiter, 0 for none
         F32  mRangeKm;               // a full tank's range, for the model's fuel gauge
         F32  mShiftSecs;             // AUTO: the automatic's time between shifts (model)
@@ -100,7 +115,11 @@ public:
     enum EAction
     {
         ACT_GEAR_UP = 0, ACT_GEAR_DOWN, ACT_HORN, ACT_LIGHTS, ACT_IND_LEFT, ACT_IND_RIGHT,
-        ACT_HANDBRAKE, ACT_HAZARDS, ACT_CRUISE, ACTION_COUNT
+        ACT_HANDBRAKE, ACT_HAZARDS, ACT_CRUISE,
+        // <WolfViewer 2026-10-11> w65: bits 9..14 (BTN_STAGE .. BTN_ENGINE)
+        ACT_STAGE, ACT_BOOST, ACT_ANCHOR, ACT_ASSIST, ACT_LANDING_GEAR, ACT_ENGINE,
+        ACT_DIVE, ACT_SURFACE, ACT_PERISCOPE, ACT_SONAR,   // bits 15..18, the submarine's
+        ACTION_COUNT
     };
     static const char* actionSetting(S32 action);   // "WolfDriveButtonGearUp" ...: the controller button
     static const char* actionLabel(S32 action);
@@ -180,6 +199,13 @@ public:
     /** The driver's own choice of design on the dashboard: remembered for this vehicle (by its
      *  name) and as the default for the next. A script's "type" still wins while it sends one. */
     void chooseType(EType t);
+    /** <WolfViewer 2026-10-11> The toolbar icons and Wolf World items (car, speedboat, spaceship): the dashboard in
+     *  that design, or closed when it already shows it. TYPE_CAR stands for the road designs (the last one used). */
+    void toggleDesign(EType t);
+    bool showingDesign(EType t) const;
+    /** <WolfViewer 2026-10-11> Nearby chat from an object (llviewermessage.cpp process_chat_from_simulator): the
+     *  unmodified speedboat's "Speed = N" when it comes from the vehicle sat on. Only watches. */
+    void noteObjectChat(const LLUUID& source, S32 chat_type, const std::string& text);
 
     /** What the instruments show this frame: the script's values where it sent them, the
      *  viewer's model for the rest. Every field is in SI units or percent. */
@@ -192,7 +218,10 @@ public:
         F32   mMaxRpm = 8000.f;      // the rev counter's full scale
         F32   mRedline = 7400.f;
         F32   mMaxSpeed = 330.f;     // the speedometer's full scale, in the display units
-        bool  mMph = false;
+        bool  mMph = false;          // mUnits == UNITS_MPH (the road designs' switch)
+        // <WolfViewer 2026-10-11> w65: the display units (units=kn, the speedboat's knots, the spaceship's m/s)
+        enum EUnits { UNITS_KMH = 0, UNITS_MPH, UNITS_KN, UNITS_MS };
+        S32   mUnits = UNITS_KMH;
         std::string mGear;           // "P", "R", "N", "D", "3", "8H" ...
         S32   mGearNumber = 0;       // the gear the model or the script is in (0 none)
         bool  mManual = false;       // M / sequential: the driver picks the gear
@@ -212,6 +241,50 @@ public:
         F32   mLean = 0.f;           // degrees, + = leaning right
         F32   mMaxLeanL = 0.f, mMaxLeanR = 0.f;
         std::vector<std::string> mWarnings;
+        // <WolfViewer 2026-10-11> w65 Space Rabbit: the speedboat and spaceship. Measured: the attitude of the
+        // seat's frame (as mLean), the vehicle's velocity, the land and water under it.
+        F32   mHeading = 0.f;        // degrees true, 0 north, clockwise
+        F32   mPitch = 0.f;          // degrees, + nose / bow up
+        F32   mRoll = 0.f;           // degrees, + right side down
+        F32   mTrack = 0.f;          // the direction of travel over the ground (heading when slow)
+        F32   mSpeed3D = 0.f;        // m/s, the whole velocity
+        F32   mVS = 0.f;             // m/s, + up
+        F32   mFPA = 0.f;            // flight path angle, degrees (where the velocity points, up / down)
+        // the flight-path marker: where the velocity points, in degrees from the nose in the craft's own frame
+        // (+x right, +y up); not valid below 1 m/s or when going backwards
+        F32   mFpmX = 0.f, mFpmY = 0.f;
+        bool  mFpmValid = false;
+        bool  mFuelScripted = false; // the fuel figure is the script's (the spaceship shows "--" otherwise)
+        F32   mAltMSL = 0.f;         // m above the region's water
+        F32   mAGL = 0.f;            // m above the ground or water under it, whichever is higher
+        F32   mDepth = 0.f;          // m of water under the hull: water height minus land height (<= 0: aground)
+        F32   mApogee = 0.f;         // m above the water: z + vz^2 / 2g while climbing, else the height now
+        F32   mThrottlePct = 0.f;    // -100..100 (script throttle, or the driver's keys / pedals)
+        bool  mThrottleScripted = false;
+        bool  mHasTrim = false;      S32 mTrim = 0;
+        bool  mAnchor = false;
+        bool  mEngine = true;
+        bool  mAssist = true;
+        bool  mLandingGear = true;
+        bool  mRocket = false;       // mode=rocket
+        S32   mStage = 0, mStages = 0;
+        bool  mHasBoost = false;     F32 mBoost = 0.f;
+        bool  mHasShield = false;    F32 mShield = 0.f;
+        bool  mHasHull = false;      F32 mHull = 0.f;
+        bool  mHasHeat = false;      F32 mHeat = 0.f;
+        S32   mStepMax = 0;          // speedboat: the steps the "3/6" is out of
+        bool  mStepFromChat = false; // speedboat: the step is the boat's own "Speed = N"
+        bool  mOnPlane = false, mPlaning = false;   // speedboat: on the plane / climbing onto it
+        // the submarine (PROTOCOL.md ballast .. periscope); measured: the depth below the water and the sea bed
+        F32   mSubDepth = 0.f;       // m below the water surface (water height minus z; < 0: above it)
+        F32   mSeabed = 0.f;         // m from the hull down to the land under it (z minus land height)
+        F32   mDepthRate = 0.f;      // m/min, + = going deeper
+        bool  mHasBallast = false;   S32 mBallast = 0;
+        bool  mHasMaxDepth = false;  S32 mMaxDepth = 0;
+        bool  mHasOxygen = false;    F32 mOxygen = 0.f;
+        bool  mHasBattery = false;   F32 mBattery = 0.f;
+        bool  mHasPlanes = false;    S32 mPlanes = 0;
+        bool  mPeriscope = false;
     };
     const Shown& shown() const { return mShown; }
     void resetTrip();
@@ -227,7 +300,7 @@ private:
         LLUUID mVehicle;             // root of what the agent sat on when they arrived
         F64    mAt = 0.0;
         bool   mHasType = false;     EType mType = TYPE_CAR;
-        bool   mHasUnits = false;    bool mMph = false;
+        bool   mHasUnits = false;    S32 mUnits = Shown::UNITS_KMH;
         bool   mHasGear = false;     std::string mGear;
         bool   mHasRpm = false;      F32 mRpm = 0.f;
         bool   mHasMaxRpm = false;   F32 mMaxRpm = 0.f;
@@ -246,6 +319,26 @@ private:
         bool   mHasDriveTime = false; F32 mDriveTime = 0.f;
         bool   mHasOdo = false;      F64 mOdo = 0.0;
         bool   mHasWarnings = false; std::vector<std::string> mWarnings;
+        // <WolfViewer 2026-10-11> w65: PROTOCOL.md "New keys"
+        bool   mHasThrottle = false; S32 mThrottle = 0;
+        bool   mHasTrim = false;     S32 mTrim = 0;
+        bool   mHasAnchor = false;   bool mAnchor = false;
+        bool   mHasEngine = false;   bool mEngine = false;
+        bool   mHasMode = false;     bool mRocket = false;
+        bool   mHasStage = false;    S32 mStage = 0;
+        bool   mHasStages = false;   S32 mStages = 0;
+        bool   mHasBoost = false;    F32 mBoost = 0.f;
+        bool   mHasShield = false;   F32 mShield = 0.f;
+        bool   mHasHull = false;     F32 mHull = 0.f;
+        bool   mHasHeat = false;     F32 mHeat = 0.f;
+        bool   mHasAssist = false;   bool mAssist = false;
+        bool   mHasLandingGear = false; bool mLandingGear = false;
+        bool   mHasBallast = false;  S32 mBallast = 0;
+        bool   mHasMaxDepth = false; S32 mMaxDepth = 0;
+        bool   mHasOxygen = false;   F32 mOxygen = 0.f;
+        bool   mHasBattery = false;  F32 mBattery = 0.f;
+        bool   mHasPlanes = false;   S32 mPlanes = 0;
+        bool   mHasPeriscope = false; bool mPeriscope = false;
     };
 
 public:
@@ -316,6 +409,17 @@ private:
     S32  mOwnIndicators = 0;
     S32  mOwnLights = 0;
     bool mOwnHandbrake = false;
+    // <WolfViewer 2026-10-11> w65: the same for the new buttons (MODEL starting states: anchor up, engine running,
+    // flight assist on as Elite Dangerous starts, landing gear down as a craft sits on its pad)
+    bool mOwnAnchor = false;
+    bool mOwnEngine = true;
+    bool mOwnAssist = true;
+    bool mOwnLandingGear = true;
+    bool mOwnPeriscope = false;      // the submarine's periscope, down to start
+    // the unmodified speedboat's "Speed = N" (noteObjectChat), for the seat it came from
+    S32    mChatStep = -1;
+    LLUUID mChatStepSeat;
+    EType  mLastRoadType = TYPE_CAR;   // what the car icon / Car Dashboard opens
 
     // sending
     F64  mLastSent = 0.0;

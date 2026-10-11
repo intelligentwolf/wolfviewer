@@ -78,6 +78,9 @@ public:
     // The user is told: a viewer that quietly looks worse than it should is a support case
     // nobody can solve.
     static const std::vector<std::string>& getGraphicsFallbacks() { return sGraphicsFallbacks; }
+    // <WolfViewer 2026-10-11> At start-up, before any shader loads: sky light (RenderReflectionsEnabled)
+    // back on once per viewer version if it is off. See the .cpp.
+    static void wolfRetryReflections();
 
     enum EShaderClass
     {

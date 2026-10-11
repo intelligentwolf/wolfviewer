@@ -51,7 +51,7 @@ private:
     LLTextBox* mSummary = nullptr;
     LLButton* mFly = nullptr;
     LLButton* mShowMap = nullptr;
-    bool mFilledLoaded = false;     // the list was filled from a loaded directory (else: wait for it)
+    U32 mFilledGeneration = 0;      // <WolfViewer 2026-10-11/> the directory list it was filled from (0 = none yet)
 };
 
 #endif // WOLF_FLOATERAIRPORTS_H

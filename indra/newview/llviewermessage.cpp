@@ -27,6 +27,7 @@
 #include "llviewerprecompiledheaders.h"
 #include "llviewermessage.h"
 #include "wolfflight.h"   // <WolfViewer 2026-10-10/> crossing refusals -> go round
+#include "wolfdrive.h"    // <WolfViewer 2026-10-11/> the speedboat helm hears its boat's "Speed = N"
 
 // Linden libraries
 #include "llanimationstates.h"
@@ -2986,6 +2987,15 @@ void process_chat_from_simulator(LLMessageSystem *msg, void **user_data)
 
         color.setVec(1.f,1.f,1.f,1.f);
         msg->getStringFast(_PREHASH_ChatData, _PREHASH_Message, mesg);
+
+        // <WolfViewer 2026-10-11> w65 Speedboat Helm: an unmodified boat script says its speed step aloud
+        // ("Speed = 3"); WolfDrive shows it when it comes from the vehicle the agent sits on (any of its prims).
+        // Only watches - the chat goes on as before. Wolf Territories only (WolfDrive::noteObjectChat).
+        if (chat.mSourceType == CHAT_SOURCE_OBJECT && WolfDrive::instanceExists())
+        {
+            WolfDrive::instance().noteObjectChat(from_id, chat.mChatType, mesg);
+        }
+        // </WolfViewer>
 
         // NaCl - Newline flood protection
         static LLCachedControl<bool> useAntiSpam(gSavedSettings, "UseAntiSpam");

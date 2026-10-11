@@ -108,6 +108,15 @@ void WolfAirports::refresh()
     LLCoros::instance().launch("WolfAirports fetch", []() { WolfAirports::instance().fetchCoro(); });
 }
 
+void WolfAirports::refreshNow()
+{
+    if (!mFetching)
+    {
+        mNextFetch = 0.0;
+    }
+    refresh();
+}
+
 // Source: wolfwavezones.cpp fetchCoro for the adapter shape; llcorehttputil.h getRawAndSuspend.
 void WolfAirports::fetchCoro()
 {
@@ -163,6 +172,7 @@ void WolfAirports::fetchCoro()
     }
     mAirports.swap(list);
     mLoaded = true;
+    ++mGeneration;
     mNextFetch = LLFrameTimer::getElapsedSeconds() + REFRESH_SECS;
     LL_INFOS("WolfAirports") << "airports list: " << mAirports.size() << " airports" << LL_ENDL;
 }

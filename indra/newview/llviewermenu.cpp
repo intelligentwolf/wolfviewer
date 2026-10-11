@@ -13041,6 +13041,27 @@ void initialize_menus()
     {
         return WolfDrive::instance().dashboardOn();
     });
+    // <WolfViewer 2026-10-11> w65 Space Rabbit: Wolf World > Car Dashboard / Speedboat Helm / Spaceship HUD / Submarine Helm. The
+    // parameter is the design ("car" stands for car, truck and bike): opens the dashboard in it, or closes it
+    // when that design already shows (WolfDrive::toggleDesign, Wolf Territories only).
+    commit.add("WolfDrive.ToggleDesign", [](LLUICtrl*, const LLSD& param)
+    {
+        WolfDrive::instance().toggleDesign(WolfDrive::designFromName(param.asString()));
+    });
+    enable.add("WolfDrive.IsDesign", [](LLUICtrl*, const LLSD& param) -> bool
+    {
+        return WolfDrive::instance().showingDesign(WolfDrive::designFromName(param.asString()));
+    });
+    // <WolfViewer 2026-10-11> Wolf World > Show Wolf Icons (bottom right): checked while the icons show, i.e. the
+    // inverse of WolfHideToolbarIcons (lltoolbarview.cpp draw hides them and keeps the toolbar showing). Every grid.
+    commit.add("Wolf.ToggleToolbarIcons", [](LLUICtrl*, const LLSD&)
+    {
+        gSavedSettings.setBOOL("WolfHideToolbarIcons", !gSavedSettings.getBOOL("WolfHideToolbarIcons"));
+    });
+    enable.add("Wolf.ToolbarIconsShown", [](LLUICtrl*, const LLSD&) -> bool
+    {
+        return !gSavedSettings.getBOOL("WolfHideToolbarIcons");
+    });
     // <WolfViewer 2026-09-10> the EEP toolbar button (every grid)
     commit.add("WolfEnv.ToggleEEP", boost::bind(&wolf_toggle_eep));
     enable.add("WolfEnv.IsEEP", boost::bind(&wolf_is_eep));

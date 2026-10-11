@@ -67,6 +67,19 @@ void WolfFloaterPhotoEffects::onOpen(const LLSD& key)
     refresh();
 }
 
+// <WolfViewer 2026-10-11> Paul: "turn off photo effects when the photo effects window is closed".
+// The style lasted after the window shut (and across restarts), so people forgot it was on.
+// Closing turns it off; the strength is kept for next time. Not when the viewer quits: the
+// setting is saved as it is, and the window is not reopened at the next login anyway.
+void WolfFloaterPhotoEffects::onClose(bool app_quitting)
+{
+    if (!app_quitting)
+    {
+        gSavedSettings.setS32("WolfViewerPhotoFilter", 0);
+    }
+    LLFloater::onClose(app_quitting);
+}
+
 void WolfFloaterPhotoEffects::onTile(S32 mode)
 {
     // Source: llviewermenu.cpp WolfPhotoSetFilter — the same setting, the same clamp.
@@ -94,6 +107,6 @@ void WolfFloaterPhotoEffects::refresh()
     {
         mStatus->setText(mode == 0
             ? std::string("Off. Applies to your own view only. Snapshots include it.")
-            : llformat("%s at %d%%. Applies to your own view only. Snapshots include it.", MODE_LABELS[mode], pct));
+            : llformat("%s at %d%%. Your own view only; snapshots include it. Closing this window turns it off.", MODE_LABELS[mode], pct));
     }
 }

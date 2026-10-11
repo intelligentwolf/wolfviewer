@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes" ?>
 <!-- [WOLF DRIVE 2026-10-09] Driving Controls (wolffloaterdrivecontrols.cpp): which axis of a wheel,
      pedals or gamepad steers, accelerates, brakes and works the clutch; and for every action (gears,
-     horn, lamps, handbrake, hazards, cruise) its key, its controller button and what it sends the
+     horn, lamps, handbrake, hazards, cruise; w65: stage, boost, anchor,
+     flight assist, landing gear, engine, dive, surface, periscope, sonar) its key, its controller button and what it sends the
      vehicle (nothing, Page Up / Page Down, or a chat command on a channel - like the flight deck's
      CONTROLS page). Every row shows the control live; Detect and Set key ask you to press it; the
      status line says what happened. Wolf Territories only, like all of WolfDrive (Paul 2026-10-09:
@@ -17,7 +18,7 @@
  save_rect="true"
  single_instance="true"
  title="Driving Controls"
- width="800">
+ width="816">
     <text follows="left|top" font="SansSerifBold" height="18" layout="topleft" left="12" name="device" top="26" width="600" use_ellipses="true">
         Controller:
     </text>
@@ -90,154 +91,324 @@
     <text follows="left|top" font="SansSerifSmallBold" height="16" layout="topleft" left="406" name="ha_5" top="290" width="178">Sends the vehicle</text>
     <text follows="left|top" font="SansSerifSmallBold" height="16" layout="topleft" left="588" name="ha_6" top="290" width="110">Chat command</text>
     <text follows="left|top" font="SansSerifSmallBold" height="16" layout="topleft" left="702" name="ha_7" top="290" width="46">Channel</text>
-    <text follows="left|top" height="18" layout="topleft" left="12" name="gear_up_label" top="311" width="110">Gear up</text>
-    <text follows="left|top" font="SansSerifBold" height="18" layout="topleft" left="124" name="gear_up_key" top="311" width="56" use_ellipses="true"
-     tool_tip="The key that does this (on its own, no Shift / Ctrl / Alt)">none</text>
-    <button follows="left|top" height="22" label="Set key" layout="topleft" left="182" name="gear_up_setkey" top="308" width="64"
-     tool_tip="Press, then press the key you want for gear up (Escape cancels, Backspace removes it)" />
-    <combo_box follows="left|top" height="22" layout="topleft" left="250" name="gear_up_button" top="308" width="96"
-     tool_tip="Which controller button does gear up" />
-    <button follows="left|top" height="22" label="Detect" layout="topleft" left="348" name="gear_up_detect" top="308" width="54"
-     tool_tip="Press, then press the controller button you want for gear up" />
-    <combo_box follows="left|top" height="22" layout="topleft" left="406" name="gear_up_out" top="308" width="178"
-     tool_tip="What gear up sends the vehicle: nothing (the dashboard's lamp and the wolfDriveInput bit only), a Page Up or Page Down tap (what gearbox scripts listen for), or a chat command on a channel" />
-    <line_editor follows="left|top" height="22" layout="topleft" left="588" max_length_bytes="254" name="gear_up_cmd" top="308" width="110"
-     tool_tip="The chat command the vehicle's script listens for, e.g. horn" />
-    <line_editor follows="left|top" height="22" layout="topleft" left="702" max_length_bytes="11" name="gear_up_ch" top="308" width="46"
-     tool_tip="The chat channel the vehicle's script listens on (0 = said aloud)" />
-    <text follows="left|top" font="SansSerifSmallBold" height="16" layout="topleft" left="752" name="gear_up_lit" text_color="0.6 1 0.6 1" top="312" width="44"></text>
-    <text follows="left|top" height="18" layout="topleft" left="12" name="gear_down_label" top="337" width="110">Gear down</text>
-    <text follows="left|top" font="SansSerifBold" height="18" layout="topleft" left="124" name="gear_down_key" top="337" width="56" use_ellipses="true"
-     tool_tip="The key that does this (on its own, no Shift / Ctrl / Alt)">none</text>
-    <button follows="left|top" height="22" label="Set key" layout="topleft" left="182" name="gear_down_setkey" top="334" width="64"
-     tool_tip="Press, then press the key you want for gear down (Escape cancels, Backspace removes it)" />
-    <combo_box follows="left|top" height="22" layout="topleft" left="250" name="gear_down_button" top="334" width="96"
-     tool_tip="Which controller button does gear down" />
-    <button follows="left|top" height="22" label="Detect" layout="topleft" left="348" name="gear_down_detect" top="334" width="54"
-     tool_tip="Press, then press the controller button you want for gear down" />
-    <combo_box follows="left|top" height="22" layout="topleft" left="406" name="gear_down_out" top="334" width="178"
-     tool_tip="What gear down sends the vehicle: nothing (the dashboard's lamp and the wolfDriveInput bit only), a Page Up or Page Down tap (what gearbox scripts listen for), or a chat command on a channel" />
-    <line_editor follows="left|top" height="22" layout="topleft" left="588" max_length_bytes="254" name="gear_down_cmd" top="334" width="110"
-     tool_tip="The chat command the vehicle's script listens for, e.g. horn" />
-    <line_editor follows="left|top" height="22" layout="topleft" left="702" max_length_bytes="11" name="gear_down_ch" top="334" width="46"
-     tool_tip="The chat channel the vehicle's script listens on (0 = said aloud)" />
-    <text follows="left|top" font="SansSerifSmallBold" height="16" layout="topleft" left="752" name="gear_down_lit" text_color="0.6 1 0.6 1" top="338" width="44"></text>
-    <text follows="left|top" height="18" layout="topleft" left="12" name="horn_label" top="363" width="110">Horn</text>
-    <text follows="left|top" font="SansSerifBold" height="18" layout="topleft" left="124" name="horn_key" top="363" width="56" use_ellipses="true"
-     tool_tip="The key that does this (on its own, no Shift / Ctrl / Alt)">none</text>
-    <button follows="left|top" height="22" label="Set key" layout="topleft" left="182" name="horn_setkey" top="360" width="64"
-     tool_tip="Press, then press the key you want for horn (Escape cancels, Backspace removes it)" />
-    <combo_box follows="left|top" height="22" layout="topleft" left="250" name="horn_button" top="360" width="96"
-     tool_tip="Which controller button does horn" />
-    <button follows="left|top" height="22" label="Detect" layout="topleft" left="348" name="horn_detect" top="360" width="54"
-     tool_tip="Press, then press the controller button you want for horn" />
-    <combo_box follows="left|top" height="22" layout="topleft" left="406" name="horn_out" top="360" width="178"
-     tool_tip="What horn sends the vehicle: nothing (the dashboard's lamp and the wolfDriveInput bit only), a Page Up or Page Down tap (what gearbox scripts listen for), or a chat command on a channel" />
-    <line_editor follows="left|top" height="22" layout="topleft" left="588" max_length_bytes="254" name="horn_cmd" top="360" width="110"
-     tool_tip="The chat command the vehicle's script listens for, e.g. horn" />
-    <line_editor follows="left|top" height="22" layout="topleft" left="702" max_length_bytes="11" name="horn_ch" top="360" width="46"
-     tool_tip="The chat channel the vehicle's script listens on (0 = said aloud)" />
-    <text follows="left|top" font="SansSerifSmallBold" height="16" layout="topleft" left="752" name="horn_lit" text_color="0.6 1 0.6 1" top="364" width="44"></text>
-    <text follows="left|top" height="18" layout="topleft" left="12" name="lights_label" top="389" width="110">Lights</text>
-    <text follows="left|top" font="SansSerifBold" height="18" layout="topleft" left="124" name="lights_key" top="389" width="56" use_ellipses="true"
-     tool_tip="The key that does this (on its own, no Shift / Ctrl / Alt)">none</text>
-    <button follows="left|top" height="22" label="Set key" layout="topleft" left="182" name="lights_setkey" top="386" width="64"
-     tool_tip="Press, then press the key you want for lights (Escape cancels, Backspace removes it)" />
-    <combo_box follows="left|top" height="22" layout="topleft" left="250" name="lights_button" top="386" width="96"
-     tool_tip="Which controller button does lights" />
-    <button follows="left|top" height="22" label="Detect" layout="topleft" left="348" name="lights_detect" top="386" width="54"
-     tool_tip="Press, then press the controller button you want for lights" />
-    <combo_box follows="left|top" height="22" layout="topleft" left="406" name="lights_out" top="386" width="178"
-     tool_tip="What lights sends the vehicle: nothing (the dashboard's lamp and the wolfDriveInput bit only), a Page Up or Page Down tap (what gearbox scripts listen for), or a chat command on a channel" />
-    <line_editor follows="left|top" height="22" layout="topleft" left="588" max_length_bytes="254" name="lights_cmd" top="386" width="110"
-     tool_tip="The chat command the vehicle's script listens for, e.g. horn" />
-    <line_editor follows="left|top" height="22" layout="topleft" left="702" max_length_bytes="11" name="lights_ch" top="386" width="46"
-     tool_tip="The chat channel the vehicle's script listens on (0 = said aloud)" />
-    <text follows="left|top" font="SansSerifSmallBold" height="16" layout="topleft" left="752" name="lights_lit" text_color="0.6 1 0.6 1" top="390" width="44"></text>
-    <text follows="left|top" height="18" layout="topleft" left="12" name="ind_left_label" top="415" width="110">Left indicator</text>
-    <text follows="left|top" font="SansSerifBold" height="18" layout="topleft" left="124" name="ind_left_key" top="415" width="56" use_ellipses="true"
-     tool_tip="The key that does this (on its own, no Shift / Ctrl / Alt)">none</text>
-    <button follows="left|top" height="22" label="Set key" layout="topleft" left="182" name="ind_left_setkey" top="412" width="64"
-     tool_tip="Press, then press the key you want for left indicator (Escape cancels, Backspace removes it)" />
-    <combo_box follows="left|top" height="22" layout="topleft" left="250" name="ind_left_button" top="412" width="96"
-     tool_tip="Which controller button does left indicator" />
-    <button follows="left|top" height="22" label="Detect" layout="topleft" left="348" name="ind_left_detect" top="412" width="54"
-     tool_tip="Press, then press the controller button you want for left indicator" />
-    <combo_box follows="left|top" height="22" layout="topleft" left="406" name="ind_left_out" top="412" width="178"
-     tool_tip="What left indicator sends the vehicle: nothing (the dashboard's lamp and the wolfDriveInput bit only), a Page Up or Page Down tap (what gearbox scripts listen for), or a chat command on a channel" />
-    <line_editor follows="left|top" height="22" layout="topleft" left="588" max_length_bytes="254" name="ind_left_cmd" top="412" width="110"
-     tool_tip="The chat command the vehicle's script listens for, e.g. horn" />
-    <line_editor follows="left|top" height="22" layout="topleft" left="702" max_length_bytes="11" name="ind_left_ch" top="412" width="46"
-     tool_tip="The chat channel the vehicle's script listens on (0 = said aloud)" />
-    <text follows="left|top" font="SansSerifSmallBold" height="16" layout="topleft" left="752" name="ind_left_lit" text_color="0.6 1 0.6 1" top="416" width="44"></text>
-    <text follows="left|top" height="18" layout="topleft" left="12" name="ind_right_label" top="441" width="110">Right indicator</text>
-    <text follows="left|top" font="SansSerifBold" height="18" layout="topleft" left="124" name="ind_right_key" top="441" width="56" use_ellipses="true"
-     tool_tip="The key that does this (on its own, no Shift / Ctrl / Alt)">none</text>
-    <button follows="left|top" height="22" label="Set key" layout="topleft" left="182" name="ind_right_setkey" top="438" width="64"
-     tool_tip="Press, then press the key you want for right indicator (Escape cancels, Backspace removes it)" />
-    <combo_box follows="left|top" height="22" layout="topleft" left="250" name="ind_right_button" top="438" width="96"
-     tool_tip="Which controller button does right indicator" />
-    <button follows="left|top" height="22" label="Detect" layout="topleft" left="348" name="ind_right_detect" top="438" width="54"
-     tool_tip="Press, then press the controller button you want for right indicator" />
-    <combo_box follows="left|top" height="22" layout="topleft" left="406" name="ind_right_out" top="438" width="178"
-     tool_tip="What right indicator sends the vehicle: nothing (the dashboard's lamp and the wolfDriveInput bit only), a Page Up or Page Down tap (what gearbox scripts listen for), or a chat command on a channel" />
-    <line_editor follows="left|top" height="22" layout="topleft" left="588" max_length_bytes="254" name="ind_right_cmd" top="438" width="110"
-     tool_tip="The chat command the vehicle's script listens for, e.g. horn" />
-    <line_editor follows="left|top" height="22" layout="topleft" left="702" max_length_bytes="11" name="ind_right_ch" top="438" width="46"
-     tool_tip="The chat channel the vehicle's script listens on (0 = said aloud)" />
-    <text follows="left|top" font="SansSerifSmallBold" height="16" layout="topleft" left="752" name="ind_right_lit" text_color="0.6 1 0.6 1" top="442" width="44"></text>
-    <text follows="left|top" height="18" layout="topleft" left="12" name="handbrake_label" top="467" width="110">Handbrake</text>
-    <text follows="left|top" font="SansSerifBold" height="18" layout="topleft" left="124" name="handbrake_key" top="467" width="56" use_ellipses="true"
-     tool_tip="The key that does this (on its own, no Shift / Ctrl / Alt)">none</text>
-    <button follows="left|top" height="22" label="Set key" layout="topleft" left="182" name="handbrake_setkey" top="464" width="64"
-     tool_tip="Press, then press the key you want for handbrake (Escape cancels, Backspace removes it)" />
-    <combo_box follows="left|top" height="22" layout="topleft" left="250" name="handbrake_button" top="464" width="96"
-     tool_tip="Which controller button does handbrake" />
-    <button follows="left|top" height="22" label="Detect" layout="topleft" left="348" name="handbrake_detect" top="464" width="54"
-     tool_tip="Press, then press the controller button you want for handbrake" />
-    <combo_box follows="left|top" height="22" layout="topleft" left="406" name="handbrake_out" top="464" width="178"
-     tool_tip="What handbrake sends the vehicle: nothing (the dashboard's lamp and the wolfDriveInput bit only), a Page Up or Page Down tap (what gearbox scripts listen for), or a chat command on a channel" />
-    <line_editor follows="left|top" height="22" layout="topleft" left="588" max_length_bytes="254" name="handbrake_cmd" top="464" width="110"
-     tool_tip="The chat command the vehicle's script listens for, e.g. horn" />
-    <line_editor follows="left|top" height="22" layout="topleft" left="702" max_length_bytes="11" name="handbrake_ch" top="464" width="46"
-     tool_tip="The chat channel the vehicle's script listens on (0 = said aloud)" />
-    <text follows="left|top" font="SansSerifSmallBold" height="16" layout="topleft" left="752" name="handbrake_lit" text_color="0.6 1 0.6 1" top="468" width="44"></text>
-    <text follows="left|top" height="18" layout="topleft" left="12" name="hazards_label" top="493" width="110">Hazard lights</text>
-    <text follows="left|top" font="SansSerifBold" height="18" layout="topleft" left="124" name="hazards_key" top="493" width="56" use_ellipses="true"
-     tool_tip="The key that does this (on its own, no Shift / Ctrl / Alt)">none</text>
-    <button follows="left|top" height="22" label="Set key" layout="topleft" left="182" name="hazards_setkey" top="490" width="64"
-     tool_tip="Press, then press the key you want for hazard lights (Escape cancels, Backspace removes it)" />
-    <combo_box follows="left|top" height="22" layout="topleft" left="250" name="hazards_button" top="490" width="96"
-     tool_tip="Which controller button does hazard lights" />
-    <button follows="left|top" height="22" label="Detect" layout="topleft" left="348" name="hazards_detect" top="490" width="54"
-     tool_tip="Press, then press the controller button you want for hazard lights" />
-    <combo_box follows="left|top" height="22" layout="topleft" left="406" name="hazards_out" top="490" width="178"
-     tool_tip="What hazard lights sends the vehicle: nothing (the dashboard's lamp and the wolfDriveInput bit only), a Page Up or Page Down tap (what gearbox scripts listen for), or a chat command on a channel" />
-    <line_editor follows="left|top" height="22" layout="topleft" left="588" max_length_bytes="254" name="hazards_cmd" top="490" width="110"
-     tool_tip="The chat command the vehicle's script listens for, e.g. horn" />
-    <line_editor follows="left|top" height="22" layout="topleft" left="702" max_length_bytes="11" name="hazards_ch" top="490" width="46"
-     tool_tip="The chat channel the vehicle's script listens on (0 = said aloud)" />
-    <text follows="left|top" font="SansSerifSmallBold" height="16" layout="topleft" left="752" name="hazards_lit" text_color="0.6 1 0.6 1" top="494" width="44"></text>
-    <text follows="left|top" height="18" layout="topleft" left="12" name="cruise_label" top="519" width="110">Cruise control</text>
-    <text follows="left|top" font="SansSerifBold" height="18" layout="topleft" left="124" name="cruise_key" top="519" width="56" use_ellipses="true"
-     tool_tip="The key that does this (on its own, no Shift / Ctrl / Alt)">none</text>
-    <button follows="left|top" height="22" label="Set key" layout="topleft" left="182" name="cruise_setkey" top="516" width="64"
-     tool_tip="Press, then press the key you want for cruise control (Escape cancels, Backspace removes it)" />
-    <combo_box follows="left|top" height="22" layout="topleft" left="250" name="cruise_button" top="516" width="96"
-     tool_tip="Which controller button does cruise control" />
-    <button follows="left|top" height="22" label="Detect" layout="topleft" left="348" name="cruise_detect" top="516" width="54"
-     tool_tip="Press, then press the controller button you want for cruise control" />
-    <combo_box follows="left|top" height="22" layout="topleft" left="406" name="cruise_out" top="516" width="178"
-     tool_tip="What cruise control sends the vehicle: nothing (the dashboard's lamp and the wolfDriveInput bit only), a Page Up or Page Down tap (what gearbox scripts listen for), or a chat command on a channel" />
-    <line_editor follows="left|top" height="22" layout="topleft" left="588" max_length_bytes="254" name="cruise_cmd" top="516" width="110"
-     tool_tip="The chat command the vehicle's script listens for, e.g. horn" />
-    <line_editor follows="left|top" height="22" layout="topleft" left="702" max_length_bytes="11" name="cruise_ch" top="516" width="46"
-     tool_tip="The chat channel the vehicle's script listens on (0 = said aloud)" />
-    <text follows="left|top" font="SansSerifSmallBold" height="16" layout="topleft" left="752" name="cruise_lit" text_color="0.6 1 0.6 1" top="520" width="44"></text>
+    <!-- <WolfViewer 2026-10-11> w65: 19 actions no longer fit the window - they scroll (the floater keeps its
+         size, so it still fits a 768-pixel screen) -->
+    <scroll_container follows="left|top" height="236" layout="topleft" left="0" name="actions_scroll" opaque="false"
+     reserve_scroll_corner="false" top="306" width="816">
+        <panel background_visible="false" follows="left|top" height="500" layout="topleft" left="0" name="actions_panel" top="0" width="800">
+        <text follows="left|top" height="18" layout="topleft" left="12" name="gear_up_label" top="5" width="110">Gear up</text>
+        <text follows="left|top" font="SansSerifBold" height="18" layout="topleft" left="124" name="gear_up_key" top="5" width="56" use_ellipses="true"
+         tool_tip="The key that does this (on its own, no Shift / Ctrl / Alt)">none</text>
+        <button follows="left|top" height="22" label="Set key" layout="topleft" left="182" name="gear_up_setkey" top="2" width="64"
+         tool_tip="Press, then press the key you want for gear up (Escape cancels, Backspace removes it)" />
+        <combo_box follows="left|top" height="22" layout="topleft" left="250" name="gear_up_button" top="2" width="96"
+         tool_tip="Which controller button does gear up" />
+        <button follows="left|top" height="22" label="Detect" layout="topleft" left="348" name="gear_up_detect" top="2" width="54"
+         tool_tip="Press, then press the controller button you want for gear up" />
+        <combo_box follows="left|top" height="22" layout="topleft" left="406" name="gear_up_out" top="2" width="178"
+         tool_tip="What gear up sends the vehicle: nothing (the dashboard's lamp and the wolfDriveInput bit only), a Page Up or Page Down tap (what gearbox scripts listen for), or a chat command on a channel" />
+        <line_editor follows="left|top" height="22" layout="topleft" left="588" max_length_bytes="254" name="gear_up_cmd" top="2" width="110"
+         tool_tip="The chat command the vehicle's script listens for, e.g. horn" />
+        <line_editor follows="left|top" height="22" layout="topleft" left="702" max_length_bytes="11" name="gear_up_ch" top="2" width="46"
+         tool_tip="The chat channel the vehicle's script listens on (0 = said aloud)" />
+        <text follows="left|top" font="SansSerifSmallBold" height="16" layout="topleft" left="752" name="gear_up_lit" text_color="0.6 1 0.6 1" top="6" width="44"></text>
+        <text follows="left|top" height="18" layout="topleft" left="12" name="gear_down_label" top="31" width="110">Gear down</text>
+        <text follows="left|top" font="SansSerifBold" height="18" layout="topleft" left="124" name="gear_down_key" top="31" width="56" use_ellipses="true"
+         tool_tip="The key that does this (on its own, no Shift / Ctrl / Alt)">none</text>
+        <button follows="left|top" height="22" label="Set key" layout="topleft" left="182" name="gear_down_setkey" top="28" width="64"
+         tool_tip="Press, then press the key you want for gear down (Escape cancels, Backspace removes it)" />
+        <combo_box follows="left|top" height="22" layout="topleft" left="250" name="gear_down_button" top="28" width="96"
+         tool_tip="Which controller button does gear down" />
+        <button follows="left|top" height="22" label="Detect" layout="topleft" left="348" name="gear_down_detect" top="28" width="54"
+         tool_tip="Press, then press the controller button you want for gear down" />
+        <combo_box follows="left|top" height="22" layout="topleft" left="406" name="gear_down_out" top="28" width="178"
+         tool_tip="What gear down sends the vehicle: nothing (the dashboard's lamp and the wolfDriveInput bit only), a Page Up or Page Down tap (what gearbox scripts listen for), or a chat command on a channel" />
+        <line_editor follows="left|top" height="22" layout="topleft" left="588" max_length_bytes="254" name="gear_down_cmd" top="28" width="110"
+         tool_tip="The chat command the vehicle's script listens for, e.g. horn" />
+        <line_editor follows="left|top" height="22" layout="topleft" left="702" max_length_bytes="11" name="gear_down_ch" top="28" width="46"
+         tool_tip="The chat channel the vehicle's script listens on (0 = said aloud)" />
+        <text follows="left|top" font="SansSerifSmallBold" height="16" layout="topleft" left="752" name="gear_down_lit" text_color="0.6 1 0.6 1" top="32" width="44"></text>
+        <text follows="left|top" height="18" layout="topleft" left="12" name="horn_label" top="57" width="110">Horn</text>
+        <text follows="left|top" font="SansSerifBold" height="18" layout="topleft" left="124" name="horn_key" top="57" width="56" use_ellipses="true"
+         tool_tip="The key that does this (on its own, no Shift / Ctrl / Alt)">none</text>
+        <button follows="left|top" height="22" label="Set key" layout="topleft" left="182" name="horn_setkey" top="54" width="64"
+         tool_tip="Press, then press the key you want for horn (Escape cancels, Backspace removes it)" />
+        <combo_box follows="left|top" height="22" layout="topleft" left="250" name="horn_button" top="54" width="96"
+         tool_tip="Which controller button does horn" />
+        <button follows="left|top" height="22" label="Detect" layout="topleft" left="348" name="horn_detect" top="54" width="54"
+         tool_tip="Press, then press the controller button you want for horn" />
+        <combo_box follows="left|top" height="22" layout="topleft" left="406" name="horn_out" top="54" width="178"
+         tool_tip="What horn sends the vehicle: nothing (the dashboard's lamp and the wolfDriveInput bit only), a Page Up or Page Down tap (what gearbox scripts listen for), or a chat command on a channel" />
+        <line_editor follows="left|top" height="22" layout="topleft" left="588" max_length_bytes="254" name="horn_cmd" top="54" width="110"
+         tool_tip="The chat command the vehicle's script listens for, e.g. horn" />
+        <line_editor follows="left|top" height="22" layout="topleft" left="702" max_length_bytes="11" name="horn_ch" top="54" width="46"
+         tool_tip="The chat channel the vehicle's script listens on (0 = said aloud)" />
+        <text follows="left|top" font="SansSerifSmallBold" height="16" layout="topleft" left="752" name="horn_lit" text_color="0.6 1 0.6 1" top="58" width="44"></text>
+        <text follows="left|top" height="18" layout="topleft" left="12" name="lights_label" top="83" width="110">Lights</text>
+        <text follows="left|top" font="SansSerifBold" height="18" layout="topleft" left="124" name="lights_key" top="83" width="56" use_ellipses="true"
+         tool_tip="The key that does this (on its own, no Shift / Ctrl / Alt)">none</text>
+        <button follows="left|top" height="22" label="Set key" layout="topleft" left="182" name="lights_setkey" top="80" width="64"
+         tool_tip="Press, then press the key you want for lights (Escape cancels, Backspace removes it)" />
+        <combo_box follows="left|top" height="22" layout="topleft" left="250" name="lights_button" top="80" width="96"
+         tool_tip="Which controller button does lights" />
+        <button follows="left|top" height="22" label="Detect" layout="topleft" left="348" name="lights_detect" top="80" width="54"
+         tool_tip="Press, then press the controller button you want for lights" />
+        <combo_box follows="left|top" height="22" layout="topleft" left="406" name="lights_out" top="80" width="178"
+         tool_tip="What lights sends the vehicle: nothing (the dashboard's lamp and the wolfDriveInput bit only), a Page Up or Page Down tap (what gearbox scripts listen for), or a chat command on a channel" />
+        <line_editor follows="left|top" height="22" layout="topleft" left="588" max_length_bytes="254" name="lights_cmd" top="80" width="110"
+         tool_tip="The chat command the vehicle's script listens for, e.g. horn" />
+        <line_editor follows="left|top" height="22" layout="topleft" left="702" max_length_bytes="11" name="lights_ch" top="80" width="46"
+         tool_tip="The chat channel the vehicle's script listens on (0 = said aloud)" />
+        <text follows="left|top" font="SansSerifSmallBold" height="16" layout="topleft" left="752" name="lights_lit" text_color="0.6 1 0.6 1" top="84" width="44"></text>
+        <text follows="left|top" height="18" layout="topleft" left="12" name="ind_left_label" top="109" width="110">Left indicator</text>
+        <text follows="left|top" font="SansSerifBold" height="18" layout="topleft" left="124" name="ind_left_key" top="109" width="56" use_ellipses="true"
+         tool_tip="The key that does this (on its own, no Shift / Ctrl / Alt)">none</text>
+        <button follows="left|top" height="22" label="Set key" layout="topleft" left="182" name="ind_left_setkey" top="106" width="64"
+         tool_tip="Press, then press the key you want for left indicator (Escape cancels, Backspace removes it)" />
+        <combo_box follows="left|top" height="22" layout="topleft" left="250" name="ind_left_button" top="106" width="96"
+         tool_tip="Which controller button does left indicator" />
+        <button follows="left|top" height="22" label="Detect" layout="topleft" left="348" name="ind_left_detect" top="106" width="54"
+         tool_tip="Press, then press the controller button you want for left indicator" />
+        <combo_box follows="left|top" height="22" layout="topleft" left="406" name="ind_left_out" top="106" width="178"
+         tool_tip="What left indicator sends the vehicle: nothing (the dashboard's lamp and the wolfDriveInput bit only), a Page Up or Page Down tap (what gearbox scripts listen for), or a chat command on a channel" />
+        <line_editor follows="left|top" height="22" layout="topleft" left="588" max_length_bytes="254" name="ind_left_cmd" top="106" width="110"
+         tool_tip="The chat command the vehicle's script listens for, e.g. horn" />
+        <line_editor follows="left|top" height="22" layout="topleft" left="702" max_length_bytes="11" name="ind_left_ch" top="106" width="46"
+         tool_tip="The chat channel the vehicle's script listens on (0 = said aloud)" />
+        <text follows="left|top" font="SansSerifSmallBold" height="16" layout="topleft" left="752" name="ind_left_lit" text_color="0.6 1 0.6 1" top="110" width="44"></text>
+        <text follows="left|top" height="18" layout="topleft" left="12" name="ind_right_label" top="135" width="110">Right indicator</text>
+        <text follows="left|top" font="SansSerifBold" height="18" layout="topleft" left="124" name="ind_right_key" top="135" width="56" use_ellipses="true"
+         tool_tip="The key that does this (on its own, no Shift / Ctrl / Alt)">none</text>
+        <button follows="left|top" height="22" label="Set key" layout="topleft" left="182" name="ind_right_setkey" top="132" width="64"
+         tool_tip="Press, then press the key you want for right indicator (Escape cancels, Backspace removes it)" />
+        <combo_box follows="left|top" height="22" layout="topleft" left="250" name="ind_right_button" top="132" width="96"
+         tool_tip="Which controller button does right indicator" />
+        <button follows="left|top" height="22" label="Detect" layout="topleft" left="348" name="ind_right_detect" top="132" width="54"
+         tool_tip="Press, then press the controller button you want for right indicator" />
+        <combo_box follows="left|top" height="22" layout="topleft" left="406" name="ind_right_out" top="132" width="178"
+         tool_tip="What right indicator sends the vehicle: nothing (the dashboard's lamp and the wolfDriveInput bit only), a Page Up or Page Down tap (what gearbox scripts listen for), or a chat command on a channel" />
+        <line_editor follows="left|top" height="22" layout="topleft" left="588" max_length_bytes="254" name="ind_right_cmd" top="132" width="110"
+         tool_tip="The chat command the vehicle's script listens for, e.g. horn" />
+        <line_editor follows="left|top" height="22" layout="topleft" left="702" max_length_bytes="11" name="ind_right_ch" top="132" width="46"
+         tool_tip="The chat channel the vehicle's script listens on (0 = said aloud)" />
+        <text follows="left|top" font="SansSerifSmallBold" height="16" layout="topleft" left="752" name="ind_right_lit" text_color="0.6 1 0.6 1" top="136" width="44"></text>
+        <text follows="left|top" height="18" layout="topleft" left="12" name="handbrake_label" top="161" width="110">Handbrake</text>
+        <text follows="left|top" font="SansSerifBold" height="18" layout="topleft" left="124" name="handbrake_key" top="161" width="56" use_ellipses="true"
+         tool_tip="The key that does this (on its own, no Shift / Ctrl / Alt)">none</text>
+        <button follows="left|top" height="22" label="Set key" layout="topleft" left="182" name="handbrake_setkey" top="158" width="64"
+         tool_tip="Press, then press the key you want for handbrake (Escape cancels, Backspace removes it)" />
+        <combo_box follows="left|top" height="22" layout="topleft" left="250" name="handbrake_button" top="158" width="96"
+         tool_tip="Which controller button does handbrake" />
+        <button follows="left|top" height="22" label="Detect" layout="topleft" left="348" name="handbrake_detect" top="158" width="54"
+         tool_tip="Press, then press the controller button you want for handbrake" />
+        <combo_box follows="left|top" height="22" layout="topleft" left="406" name="handbrake_out" top="158" width="178"
+         tool_tip="What handbrake sends the vehicle: nothing (the dashboard's lamp and the wolfDriveInput bit only), a Page Up or Page Down tap (what gearbox scripts listen for), or a chat command on a channel" />
+        <line_editor follows="left|top" height="22" layout="topleft" left="588" max_length_bytes="254" name="handbrake_cmd" top="158" width="110"
+         tool_tip="The chat command the vehicle's script listens for, e.g. horn" />
+        <line_editor follows="left|top" height="22" layout="topleft" left="702" max_length_bytes="11" name="handbrake_ch" top="158" width="46"
+         tool_tip="The chat channel the vehicle's script listens on (0 = said aloud)" />
+        <text follows="left|top" font="SansSerifSmallBold" height="16" layout="topleft" left="752" name="handbrake_lit" text_color="0.6 1 0.6 1" top="162" width="44"></text>
+        <text follows="left|top" height="18" layout="topleft" left="12" name="hazards_label" top="187" width="110">Hazard lights</text>
+        <text follows="left|top" font="SansSerifBold" height="18" layout="topleft" left="124" name="hazards_key" top="187" width="56" use_ellipses="true"
+         tool_tip="The key that does this (on its own, no Shift / Ctrl / Alt)">none</text>
+        <button follows="left|top" height="22" label="Set key" layout="topleft" left="182" name="hazards_setkey" top="184" width="64"
+         tool_tip="Press, then press the key you want for hazard lights (Escape cancels, Backspace removes it)" />
+        <combo_box follows="left|top" height="22" layout="topleft" left="250" name="hazards_button" top="184" width="96"
+         tool_tip="Which controller button does hazard lights" />
+        <button follows="left|top" height="22" label="Detect" layout="topleft" left="348" name="hazards_detect" top="184" width="54"
+         tool_tip="Press, then press the controller button you want for hazard lights" />
+        <combo_box follows="left|top" height="22" layout="topleft" left="406" name="hazards_out" top="184" width="178"
+         tool_tip="What hazard lights sends the vehicle: nothing (the dashboard's lamp and the wolfDriveInput bit only), a Page Up or Page Down tap (what gearbox scripts listen for), or a chat command on a channel" />
+        <line_editor follows="left|top" height="22" layout="topleft" left="588" max_length_bytes="254" name="hazards_cmd" top="184" width="110"
+         tool_tip="The chat command the vehicle's script listens for, e.g. horn" />
+        <line_editor follows="left|top" height="22" layout="topleft" left="702" max_length_bytes="11" name="hazards_ch" top="184" width="46"
+         tool_tip="The chat channel the vehicle's script listens on (0 = said aloud)" />
+        <text follows="left|top" font="SansSerifSmallBold" height="16" layout="topleft" left="752" name="hazards_lit" text_color="0.6 1 0.6 1" top="188" width="44"></text>
+        <text follows="left|top" height="18" layout="topleft" left="12" name="cruise_label" top="213" width="110">Cruise control</text>
+        <text follows="left|top" font="SansSerifBold" height="18" layout="topleft" left="124" name="cruise_key" top="213" width="56" use_ellipses="true"
+         tool_tip="The key that does this (on its own, no Shift / Ctrl / Alt)">none</text>
+        <button follows="left|top" height="22" label="Set key" layout="topleft" left="182" name="cruise_setkey" top="210" width="64"
+         tool_tip="Press, then press the key you want for cruise control (Escape cancels, Backspace removes it)" />
+        <combo_box follows="left|top" height="22" layout="topleft" left="250" name="cruise_button" top="210" width="96"
+         tool_tip="Which controller button does cruise control" />
+        <button follows="left|top" height="22" label="Detect" layout="topleft" left="348" name="cruise_detect" top="210" width="54"
+         tool_tip="Press, then press the controller button you want for cruise control" />
+        <combo_box follows="left|top" height="22" layout="topleft" left="406" name="cruise_out" top="210" width="178"
+         tool_tip="What cruise control sends the vehicle: nothing (the dashboard's lamp and the wolfDriveInput bit only), a Page Up or Page Down tap (what gearbox scripts listen for), or a chat command on a channel" />
+        <line_editor follows="left|top" height="22" layout="topleft" left="588" max_length_bytes="254" name="cruise_cmd" top="210" width="110"
+         tool_tip="The chat command the vehicle's script listens for, e.g. horn" />
+        <line_editor follows="left|top" height="22" layout="topleft" left="702" max_length_bytes="11" name="cruise_ch" top="210" width="46"
+         tool_tip="The chat channel the vehicle's script listens on (0 = said aloud)" />
+        <text follows="left|top" font="SansSerifSmallBold" height="16" layout="topleft" left="752" name="cruise_lit" text_color="0.6 1 0.6 1" top="214" width="44"></text>
+        <!-- <WolfViewer 2026-10-11> w65 Space Rabbit: the speedboat and spaceship actions (wolfdrive.h ACT_STAGE ..
+             ACT_ENGINE, the wolfDriveInput bits 512 .. 16384) -->
+        <text follows="left|top" height="18" layout="topleft" left="12" name="stage_label" top="239" width="110">Stage (rocket)</text>
+        <text follows="left|top" font="SansSerifBold" height="18" layout="topleft" left="124" name="stage_key" top="239" width="56" use_ellipses="true"
+         tool_tip="The key that does this (on its own, no Shift / Ctrl / Alt)">none</text>
+        <button follows="left|top" height="22" label="Set key" layout="topleft" left="182" name="stage_setkey" top="236" width="64"
+         tool_tip="Press, then press the key you want for stage separation (Escape cancels, Backspace removes it)" />
+        <combo_box follows="left|top" height="22" layout="topleft" left="250" name="stage_button" top="236" width="96"
+         tool_tip="Which controller button does stage separation" />
+        <button follows="left|top" height="22" label="Detect" layout="topleft" left="348" name="stage_detect" top="236" width="54"
+         tool_tip="Press, then press the controller button you want for stage separation" />
+        <combo_box follows="left|top" height="22" layout="topleft" left="406" name="stage_out" top="236" width="178"
+         tool_tip="What stage separation sends the vehicle: nothing (the dashboard's lamp and the wolfDriveInput bit only), a Page Up or Page Down tap (what gearbox scripts listen for), or a chat command on a channel" />
+        <line_editor follows="left|top" height="22" layout="topleft" left="588" max_length_bytes="254" name="stage_cmd" top="236" width="110"
+         tool_tip="The chat command the vehicle's script listens for, e.g. horn" />
+        <line_editor follows="left|top" height="22" layout="topleft" left="702" max_length_bytes="11" name="stage_ch" top="236" width="46"
+         tool_tip="The chat channel the vehicle's script listens on (0 = said aloud)" />
+        <text follows="left|top" font="SansSerifSmallBold" height="16" layout="topleft" left="752" name="stage_lit" text_color="0.6 1 0.6 1" top="240" width="44"></text>
+        <text follows="left|top" height="18" layout="topleft" left="12" name="boost_label" top="265" width="110">Boost (held)</text>
+        <text follows="left|top" font="SansSerifBold" height="18" layout="topleft" left="124" name="boost_key" top="265" width="56" use_ellipses="true"
+         tool_tip="The key that does this (on its own, no Shift / Ctrl / Alt)">none</text>
+        <button follows="left|top" height="22" label="Set key" layout="topleft" left="182" name="boost_setkey" top="262" width="64"
+         tool_tip="Press, then press the key you want for boost (Escape cancels, Backspace removes it)" />
+        <combo_box follows="left|top" height="22" layout="topleft" left="250" name="boost_button" top="262" width="96"
+         tool_tip="Which controller button does boost" />
+        <button follows="left|top" height="22" label="Detect" layout="topleft" left="348" name="boost_detect" top="262" width="54"
+         tool_tip="Press, then press the controller button you want for boost" />
+        <combo_box follows="left|top" height="22" layout="topleft" left="406" name="boost_out" top="262" width="178"
+         tool_tip="What boost sends the vehicle: nothing (the dashboard's lamp and the wolfDriveInput bit only), a Page Up or Page Down tap (what gearbox scripts listen for), or a chat command on a channel" />
+        <line_editor follows="left|top" height="22" layout="topleft" left="588" max_length_bytes="254" name="boost_cmd" top="262" width="110"
+         tool_tip="The chat command the vehicle's script listens for, e.g. horn" />
+        <line_editor follows="left|top" height="22" layout="topleft" left="702" max_length_bytes="11" name="boost_ch" top="262" width="46"
+         tool_tip="The chat channel the vehicle's script listens on (0 = said aloud)" />
+        <text follows="left|top" font="SansSerifSmallBold" height="16" layout="topleft" left="752" name="boost_lit" text_color="0.6 1 0.6 1" top="266" width="44"></text>
+        <text follows="left|top" height="18" layout="topleft" left="12" name="anchor_label" top="291" width="110">Anchor</text>
+        <text follows="left|top" font="SansSerifBold" height="18" layout="topleft" left="124" name="anchor_key" top="291" width="56" use_ellipses="true"
+         tool_tip="The key that does this (on its own, no Shift / Ctrl / Alt)">none</text>
+        <button follows="left|top" height="22" label="Set key" layout="topleft" left="182" name="anchor_setkey" top="288" width="64"
+         tool_tip="Press, then press the key you want for the anchor (Escape cancels, Backspace removes it)" />
+        <combo_box follows="left|top" height="22" layout="topleft" left="250" name="anchor_button" top="288" width="96"
+         tool_tip="Which controller button does the anchor" />
+        <button follows="left|top" height="22" label="Detect" layout="topleft" left="348" name="anchor_detect" top="288" width="54"
+         tool_tip="Press, then press the controller button you want for the anchor" />
+        <combo_box follows="left|top" height="22" layout="topleft" left="406" name="anchor_out" top="288" width="178"
+         tool_tip="What the anchor sends the vehicle: nothing (the dashboard's lamp and the wolfDriveInput bit only), a Page Up or Page Down tap (what gearbox scripts listen for), or a chat command on a channel" />
+        <line_editor follows="left|top" height="22" layout="topleft" left="588" max_length_bytes="254" name="anchor_cmd" top="288" width="110"
+         tool_tip="The chat command the vehicle's script listens for, e.g. horn" />
+        <line_editor follows="left|top" height="22" layout="topleft" left="702" max_length_bytes="11" name="anchor_ch" top="288" width="46"
+         tool_tip="The chat channel the vehicle's script listens on (0 = said aloud)" />
+        <text follows="left|top" font="SansSerifSmallBold" height="16" layout="topleft" left="752" name="anchor_lit" text_color="0.6 1 0.6 1" top="292" width="44"></text>
+        <text follows="left|top" height="18" layout="topleft" left="12" name="assist_label" top="317" width="110">Flight assist</text>
+        <text follows="left|top" font="SansSerifBold" height="18" layout="topleft" left="124" name="assist_key" top="317" width="56" use_ellipses="true"
+         tool_tip="The key that does this (on its own, no Shift / Ctrl / Alt)">none</text>
+        <button follows="left|top" height="22" label="Set key" layout="topleft" left="182" name="assist_setkey" top="314" width="64"
+         tool_tip="Press, then press the key you want for flight assist (Escape cancels, Backspace removes it)" />
+        <combo_box follows="left|top" height="22" layout="topleft" left="250" name="assist_button" top="314" width="96"
+         tool_tip="Which controller button does flight assist" />
+        <button follows="left|top" height="22" label="Detect" layout="topleft" left="348" name="assist_detect" top="314" width="54"
+         tool_tip="Press, then press the controller button you want for flight assist" />
+        <combo_box follows="left|top" height="22" layout="topleft" left="406" name="assist_out" top="314" width="178"
+         tool_tip="What flight assist sends the vehicle: nothing (the dashboard's lamp and the wolfDriveInput bit only), a Page Up or Page Down tap (what gearbox scripts listen for), or a chat command on a channel" />
+        <line_editor follows="left|top" height="22" layout="topleft" left="588" max_length_bytes="254" name="assist_cmd" top="314" width="110"
+         tool_tip="The chat command the vehicle's script listens for, e.g. horn" />
+        <line_editor follows="left|top" height="22" layout="topleft" left="702" max_length_bytes="11" name="assist_ch" top="314" width="46"
+         tool_tip="The chat channel the vehicle's script listens on (0 = said aloud)" />
+        <text follows="left|top" font="SansSerifSmallBold" height="16" layout="topleft" left="752" name="assist_lit" text_color="0.6 1 0.6 1" top="318" width="44"></text>
+        <text follows="left|top" height="18" layout="topleft" left="12" name="landing_gear_label" top="343" width="110">Landing gear</text>
+        <text follows="left|top" font="SansSerifBold" height="18" layout="topleft" left="124" name="landing_gear_key" top="343" width="56" use_ellipses="true"
+         tool_tip="The key that does this (on its own, no Shift / Ctrl / Alt)">none</text>
+        <button follows="left|top" height="22" label="Set key" layout="topleft" left="182" name="landing_gear_setkey" top="340" width="64"
+         tool_tip="Press, then press the key you want for the landing gear (Escape cancels, Backspace removes it)" />
+        <combo_box follows="left|top" height="22" layout="topleft" left="250" name="landing_gear_button" top="340" width="96"
+         tool_tip="Which controller button does the landing gear" />
+        <button follows="left|top" height="22" label="Detect" layout="topleft" left="348" name="landing_gear_detect" top="340" width="54"
+         tool_tip="Press, then press the controller button you want for the landing gear" />
+        <combo_box follows="left|top" height="22" layout="topleft" left="406" name="landing_gear_out" top="340" width="178"
+         tool_tip="What the landing gear sends the vehicle: nothing (the dashboard's lamp and the wolfDriveInput bit only), a Page Up or Page Down tap (what gearbox scripts listen for), or a chat command on a channel" />
+        <line_editor follows="left|top" height="22" layout="topleft" left="588" max_length_bytes="254" name="landing_gear_cmd" top="340" width="110"
+         tool_tip="The chat command the vehicle's script listens for, e.g. horn" />
+        <line_editor follows="left|top" height="22" layout="topleft" left="702" max_length_bytes="11" name="landing_gear_ch" top="340" width="46"
+         tool_tip="The chat channel the vehicle's script listens on (0 = said aloud)" />
+        <text follows="left|top" font="SansSerifSmallBold" height="16" layout="topleft" left="752" name="landing_gear_lit" text_color="0.6 1 0.6 1" top="344" width="44"></text>
+        <text follows="left|top" height="18" layout="topleft" left="12" name="engine_label" top="369" width="110">Engine</text>
+        <text follows="left|top" font="SansSerifBold" height="18" layout="topleft" left="124" name="engine_key" top="369" width="56" use_ellipses="true"
+         tool_tip="The key that does this (on its own, no Shift / Ctrl / Alt)">none</text>
+        <button follows="left|top" height="22" label="Set key" layout="topleft" left="182" name="engine_setkey" top="366" width="64"
+         tool_tip="Press, then press the key you want for engine start / stop (Escape cancels, Backspace removes it)" />
+        <combo_box follows="left|top" height="22" layout="topleft" left="250" name="engine_button" top="366" width="96"
+         tool_tip="Which controller button does engine start / stop" />
+        <button follows="left|top" height="22" label="Detect" layout="topleft" left="348" name="engine_detect" top="366" width="54"
+         tool_tip="Press, then press the controller button you want for engine start / stop" />
+        <combo_box follows="left|top" height="22" layout="topleft" left="406" name="engine_out" top="366" width="178"
+         tool_tip="What engine start / stop sends the vehicle: nothing (the dashboard's lamp and the wolfDriveInput bit only), a Page Up or Page Down tap (what gearbox scripts listen for), or a chat command on a channel" />
+        <line_editor follows="left|top" height="22" layout="topleft" left="588" max_length_bytes="254" name="engine_cmd" top="366" width="110"
+         tool_tip="The chat command the vehicle's script listens for, e.g. horn" />
+        <line_editor follows="left|top" height="22" layout="topleft" left="702" max_length_bytes="11" name="engine_ch" top="366" width="46"
+         tool_tip="The chat channel the vehicle's script listens on (0 = said aloud)" />
+        <text follows="left|top" font="SansSerifSmallBold" height="16" layout="topleft" left="752" name="engine_lit" text_color="0.6 1 0.6 1" top="370" width="44"></text>
+        <!-- <WolfViewer 2026-10-11> the submarine (ACT_DIVE .. ACT_SONAR, the wolfDriveInput bits 32768 .. 262144) -->
+        <text follows="left|top" height="18" layout="topleft" left="12" name="dive_label" top="395" width="110">Dive (held)</text>
+        <text follows="left|top" font="SansSerifBold" height="18" layout="topleft" left="124" name="dive_key" top="395" width="56" use_ellipses="true"
+         tool_tip="The key that does this (on its own, no Shift / Ctrl / Alt)">none</text>
+        <button follows="left|top" height="22" label="Set key" layout="topleft" left="182" name="dive_setkey" top="392" width="64"
+         tool_tip="Press, then press the key you want for dive (Escape cancels, Backspace removes it)" />
+        <combo_box follows="left|top" height="22" layout="topleft" left="250" name="dive_button" top="392" width="96"
+         tool_tip="Which controller button does dive" />
+        <button follows="left|top" height="22" label="Detect" layout="topleft" left="348" name="dive_detect" top="392" width="54"
+         tool_tip="Press, then press the controller button you want for dive" />
+        <combo_box follows="left|top" height="22" layout="topleft" left="406" name="dive_out" top="392" width="178"
+         tool_tip="What dive sends the vehicle: nothing (the dashboard's lamp and the wolfDriveInput bit only), a Page Up or Page Down tap (what gearbox scripts listen for), or a chat command on a channel" />
+        <line_editor follows="left|top" height="22" layout="topleft" left="588" max_length_bytes="254" name="dive_cmd" top="392" width="110"
+         tool_tip="The chat command the vehicle's script listens for, e.g. horn" />
+        <line_editor follows="left|top" height="22" layout="topleft" left="702" max_length_bytes="11" name="dive_ch" top="392" width="46"
+         tool_tip="The chat channel the vehicle's script listens on (0 = said aloud)" />
+        <text follows="left|top" font="SansSerifSmallBold" height="16" layout="topleft" left="752" name="dive_lit" text_color="0.6 1 0.6 1" top="396" width="44"></text>
+        <text follows="left|top" height="18" layout="topleft" left="12" name="surface_label" top="421" width="110">Surface (held)</text>
+        <text follows="left|top" font="SansSerifBold" height="18" layout="topleft" left="124" name="surface_key" top="421" width="56" use_ellipses="true"
+         tool_tip="The key that does this (on its own, no Shift / Ctrl / Alt)">none</text>
+        <button follows="left|top" height="22" label="Set key" layout="topleft" left="182" name="surface_setkey" top="418" width="64"
+         tool_tip="Press, then press the key you want for surface (Escape cancels, Backspace removes it)" />
+        <combo_box follows="left|top" height="22" layout="topleft" left="250" name="surface_button" top="418" width="96"
+         tool_tip="Which controller button does surface" />
+        <button follows="left|top" height="22" label="Detect" layout="topleft" left="348" name="surface_detect" top="418" width="54"
+         tool_tip="Press, then press the controller button you want for surface" />
+        <combo_box follows="left|top" height="22" layout="topleft" left="406" name="surface_out" top="418" width="178"
+         tool_tip="What surface sends the vehicle: nothing (the dashboard's lamp and the wolfDriveInput bit only), a Page Up or Page Down tap (what gearbox scripts listen for), or a chat command on a channel" />
+        <line_editor follows="left|top" height="22" layout="topleft" left="588" max_length_bytes="254" name="surface_cmd" top="418" width="110"
+         tool_tip="The chat command the vehicle's script listens for, e.g. horn" />
+        <line_editor follows="left|top" height="22" layout="topleft" left="702" max_length_bytes="11" name="surface_ch" top="418" width="46"
+         tool_tip="The chat channel the vehicle's script listens on (0 = said aloud)" />
+        <text follows="left|top" font="SansSerifSmallBold" height="16" layout="topleft" left="752" name="surface_lit" text_color="0.6 1 0.6 1" top="422" width="44"></text>
+        <text follows="left|top" height="18" layout="topleft" left="12" name="periscope_label" top="447" width="110">Periscope</text>
+        <text follows="left|top" font="SansSerifBold" height="18" layout="topleft" left="124" name="periscope_key" top="447" width="56" use_ellipses="true"
+         tool_tip="The key that does this (on its own, no Shift / Ctrl / Alt)">none</text>
+        <button follows="left|top" height="22" label="Set key" layout="topleft" left="182" name="periscope_setkey" top="444" width="64"
+         tool_tip="Press, then press the key you want for the periscope (Escape cancels, Backspace removes it)" />
+        <combo_box follows="left|top" height="22" layout="topleft" left="250" name="periscope_button" top="444" width="96"
+         tool_tip="Which controller button does the periscope" />
+        <button follows="left|top" height="22" label="Detect" layout="topleft" left="348" name="periscope_detect" top="444" width="54"
+         tool_tip="Press, then press the controller button you want for the periscope" />
+        <combo_box follows="left|top" height="22" layout="topleft" left="406" name="periscope_out" top="444" width="178"
+         tool_tip="What the periscope sends the vehicle: nothing (the dashboard's lamp and the wolfDriveInput bit only), a Page Up or Page Down tap (what gearbox scripts listen for), or a chat command on a channel" />
+        <line_editor follows="left|top" height="22" layout="topleft" left="588" max_length_bytes="254" name="periscope_cmd" top="444" width="110"
+         tool_tip="The chat command the vehicle's script listens for, e.g. horn" />
+        <line_editor follows="left|top" height="22" layout="topleft" left="702" max_length_bytes="11" name="periscope_ch" top="444" width="46"
+         tool_tip="The chat channel the vehicle's script listens on (0 = said aloud)" />
+        <text follows="left|top" font="SansSerifSmallBold" height="16" layout="topleft" left="752" name="periscope_lit" text_color="0.6 1 0.6 1" top="448" width="44"></text>
+        <text follows="left|top" height="18" layout="topleft" left="12" name="sonar_label" top="473" width="110">Sonar ping</text>
+        <text follows="left|top" font="SansSerifBold" height="18" layout="topleft" left="124" name="sonar_key" top="473" width="56" use_ellipses="true"
+         tool_tip="The key that does this (on its own, no Shift / Ctrl / Alt)">none</text>
+        <button follows="left|top" height="22" label="Set key" layout="topleft" left="182" name="sonar_setkey" top="470" width="64"
+         tool_tip="Press, then press the key you want for the sonar ping (Escape cancels, Backspace removes it)" />
+        <combo_box follows="left|top" height="22" layout="topleft" left="250" name="sonar_button" top="470" width="96"
+         tool_tip="Which controller button does the sonar ping" />
+        <button follows="left|top" height="22" label="Detect" layout="topleft" left="348" name="sonar_detect" top="470" width="54"
+         tool_tip="Press, then press the controller button you want for the sonar ping" />
+        <combo_box follows="left|top" height="22" layout="topleft" left="406" name="sonar_out" top="470" width="178"
+         tool_tip="What the sonar ping sends the vehicle: nothing (the dashboard's lamp and the wolfDriveInput bit only), a Page Up or Page Down tap (what gearbox scripts listen for), or a chat command on a channel" />
+        <line_editor follows="left|top" height="22" layout="topleft" left="588" max_length_bytes="254" name="sonar_cmd" top="470" width="110"
+         tool_tip="The chat command the vehicle's script listens for, e.g. horn" />
+        <line_editor follows="left|top" height="22" layout="topleft" left="702" max_length_bytes="11" name="sonar_ch" top="470" width="46"
+         tool_tip="The chat channel the vehicle's script listens on (0 = said aloud)" />
+        <text follows="left|top" font="SansSerifSmallBold" height="16" layout="topleft" left="752" name="sonar_lit" text_color="0.6 1 0.6 1" top="474" width="44"></text>
+        </panel>
+    </scroll_container>
     <button follows="left|top" height="22" label="Reset keys and buttons to defaults" layout="topleft" left="12" name="reset_actions" top="546" width="260"
      tool_tip="Every action's key, controller button and what it sends back to how they came" />
     <text follows="left|top" height="32" layout="topleft" left="284" name="horn_note" text_color="0.62 0.64 0.67 1" top="544" width="504" wrap="true">
-        Horn with nothing set (Sends: Nothing) plays the built-in horn - car, truck or bike, by the dashboard's design - in-world on Wolf Territories, for everyone near to hear.
+        Horn with nothing set (Sends: Nothing) plays the built-in horn - car, truck, bike or speedboat, by the dashboard's design (none for the spaceship or submarine) - in-world on Wolf Territories, for everyone near to hear.
     </text>
     <text follows="left|top" height="40" layout="topleft" left="12" name="status" top="582" width="776" wrap="true">
         Pick each control, or press Detect beside it and move that control.

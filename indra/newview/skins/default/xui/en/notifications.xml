@@ -1949,7 +1949,7 @@ Everything else works normally. Your graphics card was detected as:
 
     [GPU]
 
-You can try turning these back on in Preferences &gt; Graphics. If WolfViewer then fails to start, it will simply switch them off again.
+To try them back on, one at a time, open Wolf World &gt; Graphics Helper. If a shader still will not build, WolfViewer simply switches it off again. The Graphics Helper can also save a diagnostic file to send to Wolf Territories support.
     <tag>fail</tag>
     <usetemplate
      ignoretext="Graphics features were switched off so the viewer could start"
@@ -2591,6 +2591,23 @@ Welcome to WolfViewer [NAME]
    log_to_chat="false"
    type="notifytip">
 Welcome to WolfViewer
+  </notification>
+
+  <!-- <WolfViewer 2026-10-11> Invisible Mode (wolfinvisible.cpp): shown when a Wolf region is first told
+       it is on (at login, so it is not forgotten) and whenever it is switched while logged in. -->
+  <notification
+   icon="notifytip.tga"
+   name="WolfInvisibleOn"
+   log_to_chat="false"
+   type="notifytip">
+Invisible Mode is on: you appear offline to friends, instant messages and friend requests. Switch it off in Wolf World &gt; Invisible Mode.
+  </notification>
+  <notification
+   icon="notifytip.tga"
+   name="WolfInvisibleOff"
+   log_to_chat="false"
+   type="notifytip">
+Invisible Mode is off: you appear online again.
   </notification>
 
   <notification

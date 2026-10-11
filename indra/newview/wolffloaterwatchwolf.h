@@ -55,6 +55,7 @@ private:
     void onSortChanged();
     void onSelection();
     void act(const std::string& action);
+    void teleportTo();   // <WolfViewer 2026-10-11/> Paul: "add a teleport to button"
     LLSD selectedRow() const;
     void setStatus(const std::string& text, bool error);
 
@@ -68,6 +69,7 @@ private:
     LLTextBox* mPageText = nullptr;
     LLTextBox* mSummary = nullptr;
     LLTextBox* mStatus = nullptr;
+    LLButton* mTeleport = nullptr;
     LLButton* mIm = nullptr;
     LLButton* mProfile = nullptr;
     LLButton* mEject = nullptr;

@@ -186,7 +186,27 @@ bool LLToolBarView::postBuild()
     mWolfCarToggle = findChild<LLButton>("wolf_car_toggle");
     if (mWolfCarToggle)
     {
-        mWolfCarToggle->setCommitCallback([run](LLUICtrl*, const LLSD&) { run("WolfDrive.ToggleDashboard"); });
+        // <WolfViewer 2026-10-11> the road designs (car / truck / bike); the speedboat and spaceship have their own icons
+        mWolfCarToggle->setCommitCallback([](LLUICtrl*, const LLSD&) { WolfDrive::instance().toggleDesign(WolfDrive::TYPE_CAR); });
+    }
+    // <WolfViewer 2026-10-11> w65 Space Rabbit. Paul: the speedboat HUD "goes next to the sailing hud"; the spaceship
+    // HUD beside the plane. Each opens the dashboard in its design, or closes it when that design shows
+    // (WolfDrive::toggleDesign - Wolf Territories only, refused silently elsewhere like the car icon).
+    mWolfSpeedboatToggle = findChild<LLButton>("wolf_speedboat_toggle");
+    if (mWolfSpeedboatToggle)
+    {
+        mWolfSpeedboatToggle->setCommitCallback([](LLUICtrl*, const LLSD&) { WolfDrive::instance().toggleDesign(WolfDrive::TYPE_SPEEDBOAT); });
+    }
+    mWolfSpaceshipToggle = findChild<LLButton>("wolf_spaceship_toggle");
+    if (mWolfSpaceshipToggle)
+    {
+        mWolfSpaceshipToggle->setCommitCallback([](LLUICtrl*, const LLSD&) { WolfDrive::instance().toggleDesign(WolfDrive::TYPE_SPACESHIP); });
+    }
+    // Paul, the same day: "add another hud for driving a submarine" - its icon beside the speedboat's
+    mWolfSubmarineToggle = findChild<LLButton>("wolf_submarine_toggle");
+    if (mWolfSubmarineToggle)
+    {
+        mWolfSubmarineToggle->setCommitCallback([](LLUICtrl*, const LLSD&) { WolfDrive::instance().toggleDesign(WolfDrive::TYPE_SUBMARINE); });
     }
     // </WolfViewer>
 
@@ -1041,6 +1061,9 @@ void LLToolBarView::draw()
     // The hide/show arrow (panel_toolbar_view.xml) keeps the panel's far right, which the
     // narrowed toolbar now leaves clear.
     static LLCachedControl<bool> bottom_hidden(gSavedSettings, "WolfViewerBottomToolbarHidden", false);
+    // <WolfViewer 2026-10-11> WolfHideToolbarIcons: every bottom-right Wolf icon hidden (see below, where the toolbar is
+    // made safe)
+    static LLCachedControl<bool> hide_icons(gSavedSettings, "WolfHideToolbarIcons", false);
     // <WolfViewer 2026-10-06> the Plane / Boat icons lit while their deck shows
     {
         const WolfFlight& wf = WolfFlight::instance();
@@ -1049,8 +1072,8 @@ void LLToolBarView::draw()
         if (mWolfBoatToggle) mWolfBoatToggle->setToggleState(deck && wf.sailing());
         // Flight and Sailing Mode are Wolf Territories only (WolfFlight::requestMode)
         const bool wolf = WolfGrid::isOnWolfTerritories();
-        if (mWolfPlaneToggle) mWolfPlaneToggle->setVisible(wolf);
-        if (mWolfBoatToggle) mWolfBoatToggle->setVisible(wolf);
+        if (mWolfPlaneToggle) mWolfPlaneToggle->setVisible(wolf && !hide_icons);
+        if (mWolfBoatToggle) mWolfBoatToggle->setVisible(wolf && !hide_icons);
     }
     // <WolfViewer 2026-10-09> the Game and Car icons: Game lit while the game HUD shows (as Plane
     // and Boat are while their deck shows), Car while the dashboard shows; Wolf Territories only,
@@ -1063,7 +1086,7 @@ void LLToolBarView::draw()
             const WolfGame& g = WolfGame::instance();
             const bool on = g.gameModeShownOn();
             const bool showing = on && g.hudShowing();
-            mWolfGameToggle->setVisible(wolf);
+            mWolfGameToggle->setVisible(wolf && !hide_icons);
             // Paul 2026-10-09: "the game paw stays highlighted even when i've closed it" - lit while
             // the game HUD shows, like Plane / Boat / Car; the HUD's own GAME switch and the tooltip
             // say whether Game Mode is on.
@@ -1079,9 +1102,51 @@ void LLToolBarView::draw()
         }
         if (mWolfCarToggle)
         {
-            mWolfCarToggle->setVisible(wolf);
-            mWolfCarToggle->setToggleState(WolfDrive::instance().dashboardOn());
+            mWolfCarToggle->setVisible(wolf && !hide_icons);
+            // <WolfViewer 2026-10-11> lit for the road designs only: the speedboat and spaceship light their own
+            mWolfCarToggle->setToggleState(WolfDrive::instance().showingDesign(WolfDrive::TYPE_CAR));
         }
+        // <WolfViewer 2026-10-11> w65: the Speedboat Helm and Spaceship HUD icons, lit while their design shows
+        if (mWolfSpeedboatToggle)
+        {
+            mWolfSpeedboatToggle->setVisible(wolf && !hide_icons);
+            mWolfSpeedboatToggle->setToggleState(WolfDrive::instance().showingDesign(WolfDrive::TYPE_SPEEDBOAT));
+        }
+        if (mWolfSpaceshipToggle)
+        {
+            mWolfSpaceshipToggle->setVisible(wolf && !hide_icons);
+            mWolfSpaceshipToggle->setToggleState(WolfDrive::instance().showingDesign(WolfDrive::TYPE_SPACESHIP));
+        }
+        if (mWolfSubmarineToggle)
+        {
+            mWolfSubmarineToggle->setVisible(wolf && !hide_icons);
+            mWolfSubmarineToggle->setToggleState(WolfDrive::instance().showingDesign(WolfDrive::TYPE_SUBMARINE));
+        }
+        // <WolfViewer 2026-10-11> WolfHideToolbarIcons (Wolf World > Show Wolf Icons): a resident (Spax) asked "how do
+        // I disable and completely remove the blue button on the lower right". With it on every bottom-right Wolf
+        // icon is gone - toolbar, game, car, plane, spaceship, boat, speedboat, submarine - on every grid. The toolbar's own
+        // icon is the only way to bring a hidden toolbar back, so the moment the icons go the toolbar is put back
+        // (and, while a bottom panel has it folded away, it is marked to come back when that panel closes): the safe
+        // choice - a resident can never be left with no toolbar and no icon to show it. The panels' own close
+        // buttons and the Wolf World menu still open and close every mode. (The other icons follow hide_icons where
+        // their Wolf gate sets them, above.)
+        if (mWolfToolbarToggle && mWolfToolbarToggle->getVisible() == (bool)hide_icons)
+        {
+            mWolfToolbarToggle->setVisible(!hide_icons);   // the toolbar icon shows on every grid unless hidden
+        }
+        if (hide_icons)
+        {
+            if (mWolfPanelUp)
+            {
+                mWolfBarWasHidden = false;
+            }
+            else if (gSavedSettings.getBOOL("WolfViewerBottomToolbarHidden"))
+            {
+                gSavedSettings.setBOOL("WolfViewerBottomToolbarHidden", false);
+                applyBottomToolbarHidden(false);
+            }
+        }
+        // </WolfViewer>
         // <WolfViewer 2026-10-09> Paul: "when i open the game paw, please hide the normal toolbar same
         // with all the others, cars, flight". While any bottom panel shows - the flight / sailing
         // deck, the car dashboard, the game HUD - the bar folds away (its hide arrow, as Flight Mode
@@ -1113,7 +1178,9 @@ void LLToolBarView::draw()
         const LLView* strip = findChildView("chat_bar_stand_fly_container_panel", true);
         const S32 strip_w = (strip && strip->getVisible()) ? strip->getRect().getWidth() : 0;
         const S32 panel_w = parent ? parent->getRect().getWidth() : bar->getRect().getWidth();
-        S32 want = panel_w - strip_w - 126;   // 126: the five show / hide icons' corner (5 x 24 + 6)
+        // <WolfViewer 2026-10-11> 198: the eight show / hide icons' corner (8 x 24 + 6) - w65 added Speedboat,
+        // Spaceship and Submarine (was 126 for five)
+        S32 want = panel_w - strip_w - 198;
         // The buttons' own width (the centred button panel) is the floor.
         const LLView* buttons = bar->findChildView("button_panel", true);
         const S32 need = buttons ? buttons->getRect().getWidth() + 8 : 0;

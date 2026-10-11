@@ -2703,6 +2703,13 @@ void WolfFlightDeck::cduLines(std::string (&label)[6][2], std::string (&data)[6]
     {
         WolfAirports& airports = WolfAirports::instance();
         airports.refresh();
+        // <WolfViewer 2026-10-11> a new directory list: the same search again over it, on the same page if it still has one
+        if (!mAptQuery.empty() && mAptGeneration != airports.generation())
+        {
+            const S32 page = mAptPage;
+            aptSearch(mAptQuery);
+            mAptPage = llclamp(page, 0, llmax(0, ((S32)mAptIds.size() - 1) / 4));
+        }
         title = "AIRPORTS";
         label[0][0] = "NAME OR REGION";
         data[0][0] = mAptQuery.empty() ? std::string("----------") : utf8str_truncate(mAptQuery, 15);
@@ -3817,6 +3824,7 @@ void WolfFlightDeck::aptSearch(const std::string& text)
     LLStringUtil::trim(mAptQuery);
     mAptPage = 0;
     mAptIds.clear();
+    mAptGeneration = WolfAirports::instance().generation();
     // Paul: "i put in a region name it should still use that for flying as well as airports" - what was typed, as a
     // region, first (-1), then the airports
     if (!mAptQuery.empty())

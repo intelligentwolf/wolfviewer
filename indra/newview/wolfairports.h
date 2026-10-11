@@ -56,6 +56,12 @@ public:
 
     /** Fetch the list if it has not been fetched (or is 10 minutes old). Cheap to call every frame. */
     void refresh();
+    // <WolfViewer 2026-10-11> Paul: "refresh the airports window every time it opens". Fetch now, not on the
+    // 10 minute clock (unless a fetch is already under way). generation() goes up with every list that arrives,
+    // so a window or page showing it can fill again.
+    void refreshNow();
+    U32 generation() const { return mGeneration; }
+    // </WolfViewer>
     bool loaded() const { return mLoaded; }
     /** The airport on this region (name, any case), or nullptr. */
     const Airport* forRegion(const std::string& region) const;
@@ -78,6 +84,7 @@ private:
     bool mLoaded = false;
     bool mFetching = false;
     F64  mNextFetch = 0.0;
+    U32  mGeneration = 0;   // <WolfViewer 2026-10-11/> lists received
 };
 
 #endif // WOLF_AIRPORTS_H

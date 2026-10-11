@@ -27,6 +27,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "wolfsuitcase.h"   // [SUITCASE 2026-10-10/] landmarks into My Suitcase on a hypergrid trip
+#include "wolfinvisible.h"  // <WolfViewer 2026-10-11/> Invisible Mode: tell each Wolf region
 #include "llappviewer.h"
 
 // Viewer includes
@@ -1006,6 +1007,7 @@ bool LLAppViewer::init()
     }
 
     LL_INFOS("InitInfo") << "Configuration initialized." << LL_ENDL ;
+    LLViewerShaderMgr::wolfRetryReflections();   // <WolfViewer 2026-10-11/> before any shader or pipeline
     //set the max heap size.
     initMaxHeapSize() ;
     LLCoros::instance().setStackSize(gSavedSettings.getS32("CoroutineStackSize"));
@@ -6256,6 +6258,7 @@ void LLAppViewer::idle()
     WolfScreenShare::instance().idle();
     WolfWeather::instance().idle();   // <WolfViewer 2026-09-10> rain / snow, menu or parcel prims
     WolfFX::instance().idle();
+    WolfInvisible::idle();            // <WolfViewer 2026-10-11/> Invisible Mode: the region arrived in, or the switch changed
     WolfSuitcase::idle();             // [SUITCASE 2026-10-10/] hypergrid trips: what arrived in My Suitcase comes home        // <WolfViewer 2026-10-10/> wolfEffect explosions, fire, smoke (wolffx.h)
     // </WolfViewer>
 

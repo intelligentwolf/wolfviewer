@@ -9,7 +9,7 @@
  height="440"
  layout="topleft"
  min_height="300"
- min_width="560"
+ min_width="700"
  name="wolf_watchwolf"
  help_topic="wolf_watchwolf"
  save_rect="true"
@@ -55,6 +55,7 @@
     <button follows="left|bottom" height="22" label="&lt; Previous" layout="topleft" left="10" name="prev" top="378" width="90" />
     <text follows="left|bottom" halign="center" height="16" layout="topleft" left="104" name="page_text" top="382" width="100">Page 1 of 1</text>
     <button follows="left|bottom" height="22" label="Next &gt;" layout="topleft" left="208" name="next" top="378" width="90" />
+    <button follows="right|bottom" height="22" label="Teleport" layout="topleft" left="300" name="teleport" top="378" width="66" tool_tip="Teleport to where they are now (the region's own access rules still apply)." />
     <button follows="right|bottom" height="22" label="IM" layout="topleft" left="370" name="im" top="378" width="70" tool_tip="Open an instant message with them." />
     <button follows="right|bottom" height="22" label="Profile" layout="topleft" left="444" name="profile" top="378" width="76" />
     <button follows="right|bottom" height="22" label="Eject" layout="topleft" left="524" name="eject" top="378" width="76" tool_tip="Send them home from that region (asks first)." />

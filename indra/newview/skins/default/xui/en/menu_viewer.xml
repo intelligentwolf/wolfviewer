@@ -1807,6 +1807,21 @@
      label="Wolf World"
      name="WolfWorld"
      tear_off="true">
+        <!-- <WolfViewer 2026-10-11> Paul: Invisible Mode - appear offline to IMs and friend requests
+             (wolfinvisible.cpp tells each Wolf region; the login screen's Wolf World menu has the same
+             switch). [WOLF GRID GATE] gone (not greyed) off Wolf Territories. -->
+        <menu_item_check
+         label="Invisible Mode"
+         name="WolfInvisibleMode">
+            <menu_item_check.on_check
+             function="CheckControl"
+             parameter="WolfInvisibleMode" />
+            <menu_item_check.on_click
+             function="ToggleControl"
+             parameter="WolfInvisibleMode" />
+            <menu_item_check.on_visible
+             function="WolfGrid.IsOnWolfTerritories" />
+        </menu_item_check>
         <!-- [LAG DETECTOR 2026-09-29] wolffloaterlagdetector.cpp: what on this region is slowing it
              down that its owner can fix (runaway scripts, heavy scripts, physics hogs). Works only
              while open. Always offered: estate managers see the region, parcel owners their parcel,
@@ -1817,6 +1832,15 @@
             <menu_item_call.on_click
              function="Floater.Show"
              parameter="wolf_lag_detector" />
+        </menu_item_call>
+        <!-- [GRAPHICS HELPER 2026-10-11] wolffloatergraphicshelper.cpp: what looks wrong, a switch per
+             graphics feature, and a diagnostic file with the logs. Every grid (also Help on the login screen). -->
+        <menu_item_call
+         label="Graphics Helper..."
+         name="WolfGraphicsHelper">
+            <menu_item_call.on_click
+             function="Floater.Show"
+             parameter="wolf_graphics_helper" />
         </menu_item_call>
         <!-- [WOLF GAME 2026-10-09] wolffloaterroleplay.cpp: Wolf Roleplay - your stats, money, level,
              the game's panel and buttons, items, pets, Leave game; and the region's game
@@ -1895,18 +1919,31 @@
             <menu_item_check.on_click
              function="Wolf.SpanScreensToggle" />
         </menu_item_check>
+        <!-- [WOLF ICONS 2026-10-11] Spax: "how do I disable and completely remove the blue button on the lower right".
+             Unticked, every bottom-right Wolf icon is gone and the toolbar stays showing (lltoolbarview.cpp draw,
+             WolfHideToolbarIcons); ticking it brings them back. Every grid. -->
+        <menu_item_check
+         label="Show Wolf Icons (bottom right)"
+         name="WolfShowToolbarIcons">
+            <menu_item_check.on_check
+             function="Wolf.ToolbarIconsShown" />
+            <menu_item_check.on_click
+             function="Wolf.ToggleToolbarIcons" />
+        </menu_item_check>
         <!-- [WOLF DRIVE 2026-10-09] wolfdrive.cpp / wolfdashboard.cpp: the car / truck / bike dashboard
              and Driving Controls for a wheel, pedals or gamepad. Both Wolf Territories only, gone (not
              greyed) elsewhere: Paul, "other grids can't use these interfaces they are only for wolf". -->
+        <!-- <WolfViewer 2026-10-11> w65: checked for the road designs only, and a click while the speedboat or
+             spaceship design shows switches to the car / truck / bike one (WolfDrive::toggleDesign) -->
         <menu_item_check
          label="Car Dashboard"
          name="WolfDashboardMode">
             <menu_item_check.on_check
-             function="CheckControl"
-             parameter="WolfDashboardMode" />
+             function="WolfDrive.IsDesign"
+             parameter="car" />
             <menu_item_check.on_click
-             function="ToggleControl"
-             parameter="WolfDashboardMode" />
+             function="WolfDrive.ToggleDesign"
+             parameter="car" />
             <menu_item_check.on_visible
              function="WolfGrid.IsOnWolfTerritories" />
         </menu_item_check>
@@ -1938,6 +1975,21 @@
             <menu_item_check.on_visible
              function="WolfGrid.IsWolfTerritories" />
         </menu_item_check>
+        <!-- [SPACESHIP HUD 2026-10-11] w65 Space Rabbit (wolfdashboard.cpp): Paul, "spaceships are basically
+             aircraft" - the dashboard in its spaceship / rocket design, beside Flight Mode. Wolf Territories
+             only, gone (not greyed) elsewhere, like the Car Dashboard. -->
+        <menu_item_check
+         label="Spaceship HUD"
+         name="WolfSpaceshipHud">
+            <menu_item_check.on_check
+             function="WolfDrive.IsDesign"
+             parameter="spaceship" />
+            <menu_item_check.on_click
+             function="WolfDrive.ToggleDesign"
+             parameter="spaceship" />
+            <menu_item_check.on_visible
+             function="WolfGrid.IsOnWolfTerritories" />
+        </menu_item_check>
         <!-- [SAILING MODE 2026-10-06] Paul: "can we add a sailing one as well — World, Sailing Mode".
              The same deck with marine instruments and the sailing autopilot (wolfflight.cpp). -->
         <menu_item_check
@@ -1951,6 +2003,34 @@
              parameter="WolfSailMode" />
             <menu_item_check.on_visible
              function="WolfGrid.IsWolfTerritories" />
+        </menu_item_check>
+        <!-- [SPEEDBOAT HELM 2026-10-11] w65 Space Rabbit (wolfdashboard.cpp): Paul, the speedboat HUD "goes next
+             to the sailing hud". The dashboard in its speedboat design. Wolf Territories only. -->
+        <menu_item_check
+         label="Speedboat Helm"
+         name="WolfSpeedboatHelm">
+            <menu_item_check.on_check
+             function="WolfDrive.IsDesign"
+             parameter="speedboat" />
+            <menu_item_check.on_click
+             function="WolfDrive.ToggleDesign"
+             parameter="speedboat" />
+            <menu_item_check.on_visible
+             function="WolfGrid.IsOnWolfTerritories" />
+        </menu_item_check>
+        <!-- [SUBMARINE HELM 2026-10-11] w65: Paul, "add another hud for driving a submarine and lsl commands" - the
+             dashboard in its submarine design (depth, sea bed, ballast, planes, sonar). Wolf Territories only. -->
+        <menu_item_check
+         label="Submarine Helm"
+         name="WolfSubmarineHelm">
+            <menu_item_check.on_check
+             function="WolfDrive.IsDesign"
+             parameter="submarine" />
+            <menu_item_check.on_click
+             function="WolfDrive.ToggleDesign"
+             parameter="submarine" />
+            <menu_item_check.on_visible
+             function="WolfGrid.IsOnWolfTerritories" />
         </menu_item_check>
       <!-- WolfViewer 2026-09-18 / PAINTERS 2026-09-20: World > Photo Effects… opens the floater
            (floater_wolf_photo_effects.xml: a tile per style, strength slider). The WolfPhoto.*

@@ -147,6 +147,9 @@ private:
     LLButton*           mWolfBoatToggle = nullptr;      // <WolfViewer 2026-10-06> Sailing Mode deck
     LLButton*           mWolfGameToggle = nullptr;      // <WolfViewer 2026-10-09> Game Mode
     LLButton*           mWolfCarToggle = nullptr;       // <WolfViewer 2026-10-09> Car Dashboard
+    LLButton*           mWolfSpeedboatToggle = nullptr; // <WolfViewer 2026-10-11> Speedboat Helm (w65)
+    LLButton*           mWolfSpaceshipToggle = nullptr; // <WolfViewer 2026-10-11> Spaceship HUD (w65)
+    LLButton*           mWolfSubmarineToggle = nullptr; // <WolfViewer 2026-10-11> Submarine Helm (w65)
     bool                mWolfPanelUp = false;           // <WolfViewer 2026-10-09> a bottom panel (deck, dashboard, game HUD) shows
     bool                mWolfBarWasHidden = false;      // <WolfViewer 2026-10-09> the bar's own state before it did
 

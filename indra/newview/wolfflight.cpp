@@ -836,6 +836,8 @@ void WolfFlight::landReset()
     mLandChecked = false;
     mLandAirport.clear();
     mLandGoArounds = 0;
+    mLandOutbound = false;
+    clearCas("TURNING FOR FINAL");   // <WolfViewer 2026-10-11/>
     clearCas("NO RUNWAY FOUND");
     clearCas("AUTOLAND FAILED");
 }
@@ -919,6 +921,7 @@ void WolfFlight::landSetRunway(const LLVector3d& a, const LLVector3d& b, F32 wid
     mLandThr.mdV[VZ] = top;
     if (!keep_direction)
     {
+        mLandOutbound = false;
         const F32 z = (F32)mData.mPosGlobal.mdV[VZ];
         const F32 out = llclamp((z - top) / GLIDE_TAN, 600.f, 3000.f);
         mLandFaf = mLandThr - LLVector3d(mLandDir * out);
@@ -934,6 +937,8 @@ void WolfFlight::landSetRunway(const LLVector3d& a, const LLVector3d& b, F32 wid
 void WolfFlight::landGiveUp(const std::string& cas, const std::string& message)
 {
     mLand = LAND_NONE;
+    mLandOutbound = false;
+    clearCas("TURNING FOR FINAL");   // <WolfViewer 2026-10-11/>
     postCas(cas, CAS_WARNING);
     make_ui_sound("UISndAlert");
     LLNotificationsUtil::add("GenericAlert", LLSD().with("MESSAGE", message));
@@ -957,6 +962,8 @@ void WolfFlight::landGuidance(F32 dt)
         if (mLand >= LAND_APPROACH)
         {
             mLand = LAND_SEARCH;   // the pilot took over: start again from the runway if re-engaged
+            mLandOutbound = false;
+            clearCas("TURNING FOR FINAL");   // <WolfViewer 2026-10-11/>
             mLandSearchStart = nowSeconds();
         }
         return;
@@ -1020,7 +1027,6 @@ void WolfFlight::landGuidance(F32 dt)
         }
         const F64 dx = mLandFaf.mdV[VX] - mData.mPosGlobal.mdV[VX], dy = mLandFaf.mdV[VY] - mData.mPosGlobal.mdV[VY];
         const F32 to_faf = (F32)sqrt(dx * dx + dy * dy);
-        mLandWantTrack = wrap360((F32)(atan2(dx, dy) * RAD_TO_DEG));
         const F32 max_vs = llclamp(mData.mAirspeed * 0.176f, 0.7f, 8.f);
         mLandWantVS = llclamp(((F32)mLandFaf.mdV[VZ] - z) * 0.15f, -max_vs, max_vs);
         mLandWantSpeed = llmax(approach, llmin(cruise, approach + to_faf / 60.f));
@@ -1037,9 +1043,51 @@ void WolfFlight::landGuidance(F32 dt)
         const F32 aim = llmin(mLandLen * 0.25f, 150.f);
         const F32 path = mLandTop + llmax(0.f, aim - t_along) * GLIDE_TAN;
         const bool on_final_already = along > 0.f && fabsf(across) < 300.f && t_along < -300.f && fabsf(z - path) < 30.f;
-        if (to_faf < llmax(150.f, mData.mGS * 6.f) || on_final_already)
+        // <WolfViewer 2026-10-11> Paul: "it does circle the landing point forever even though it says
+        // it sees the runway". Steering straight at the fix cannot reach it once the fix is inside the
+        // turn circle (25 degrees of bank, as LAT_HOLD's radius): the plane went round it for ever.
+        // Now flown like a real approach: on the right side of the fix, intercept the centreline a
+        // turn radius ahead and follow it in; past it, or near it pointing away,
+        // fly out to a point three turn radii back and two across on the plane's own side - a half turn
+        // from there puts it near the centreline with room to settle - then intercept. Out only when
+        // past the fix or pointing away from the runway near it, so a slow intercept never loops.
+        // FINAL once lined up within the capture distance of the fix.
+        const F32 rwy_hdg = wrap360((F32)(atan2(mLandDir.mV[VX], mLandDir.mV[VY]) * RAD_TO_DEG));
+        const F32 v = llmax(mData.mGS, 15.f);
+        const F32 turn_r = llclamp(v * v / (G * 0.4663f) * 1.2f, 120.f, 1500.f);   // tan 25 = 0.4663
+        const F32 capture = llmax(150.f, mData.mGS * 6.f);
+        const F32 track_err = fabsf(wrap180(mData.mTrack - rwy_hdg));
+        const bool aligned = fabsf(across) < llmax(60.f, mLandWidth) && track_err < 25.f;
+        if (!mLandOutbound && !on_final_already && ((along > -turn_r && track_err > 90.f) || along > capture))
+        {
+            mLandOutbound = true;
+            mLandOutSide = across >= 0.f ? 1.f : -1.f;
+            postCas("TURNING FOR FINAL", CAS_MEMO);
+            LL_INFOS("WolfFlight") << "autoland: fix inside the turn (" << to_faf << " m, turn radius " << turn_r
+                                   << "), flying out on the " << (mLandOutSide > 0.f ? "right" : "left") << LL_ENDL;
+        }
+        else if (mLandOutbound && along < -2.5f * turn_r)
+        {
+            mLandOutbound = false;
+            LL_INFOS("WolfFlight") << "autoland: turning onto the centreline " << -along << " m before the fix" << LL_ENDL;
+        }
+        if (mLandOutbound)
+        {
+            const LLVector3 right(mLandDir.mV[VY], -mLandDir.mV[VX], 0.f);
+            const LLVector3d out = mLandFaf - LLVector3d(mLandDir * (3.f * turn_r)) + LLVector3d(right * (mLandOutSide * 2.f * turn_r));
+            mLandWantTrack = wrap360((F32)(atan2(out.mdV[VX] - mData.mPosGlobal.mdV[VX], out.mdV[VY] - mData.mPosGlobal.mdV[VY]) * RAD_TO_DEG));
+        }
+        else
+        {
+            mLandWantTrack = wrap360(rwy_hdg + (F32)(atan2(-across, turn_r * 0.75f) * RAD_TO_DEG));
+        }
+        if ((!mLandOutbound && aligned && fabsf(along) < capture) || on_final_already)
         {
             mLand = LAND_FINAL;
+            mLandOutbound = false;
+            clearCas("TURNING FOR FINAL");
+            LL_INFOS("WolfFlight") << "autoland: final, " << -t_along << " m from the threshold, " << z - mLandTop
+                                   << " m up" << LL_ENDL;
             if (!mGearDown)
             {
                 sendGearCommand();

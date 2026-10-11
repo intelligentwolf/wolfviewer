@@ -37,6 +37,17 @@ class LLFontGL;
 //          fuel and AdBlue, retarder, the tachograph's driving time; a big flat wheel
 //   BIKE   a BMW S 1000 RR / Ducati Panigale TFT: bar rev counter along the top with the shift
 //          light, the gear in the middle, digital speed, lean angle; handlebars, not a wheel
+//   <WolfViewer 2026-10-11> w65 Space Rabbit adds two:
+//   SPEEDBOAT  after Mercury VesselView / Yamaha CL7 / Garmin gauge pages: a navy panel, white figures, teal
+//          accent; the tachometer (left), the speedometer in knots (right), and a centre screen with the
+//          compass, ON PLANE, the depth under the hull, trim, fuel and the speed step; the throttle lever (F N R)
+//   SPACESHIP  after Elite Dangerous / Star Citizen / Shuttle glass: cyan lines on glass, amber caution, red
+//          warning, magenta target - heading tape, pitch ladder and flight-path marker, speed and throttle,
+//          altitude and vertical speed, boost / shield / hull / heat; mode=rocket a launch layout (altitude,
+//          vertical speed, apogee, stage N/M and a big SEPARATE button)
+//   SUBMARINE  a sonar room in dark green and teal: the depth gauge (red past max_depth), ballast and dive planes,
+//          the sea bed under the hull, a sonar scope of what the viewer knows round the boat, battery, oxygen,
+//          throttle, speed in knots, DIVE / SURFACE (held), PERISCOPE, PING, LIGHTS, ENGINE
 // The values are WolfDrive::shown(): the vehicle script's (wolfDashboard) or the viewer's model.
 class WolfDashboard : public LLUICtrl
 {
@@ -73,6 +84,10 @@ public:
         H_GATE_8, H_GATE_9, H_GATE_10, H_GATE_11, H_GATE_12, H_GATE_13,
         H_RANGE, H_SPLIT,
         H_MINI,   // <WolfViewer 2026-10-10/> shrink to the mini bar / bring the dashboard back
+        // <WolfViewer 2026-10-11> w65: the speedboat and spaceship designs and their buttons (WolfDrive::BTN_STAGE ..)
+        H_TYPE_SPEEDBOAT, H_TYPE_SPACESHIP,
+        H_STAGE, H_BOOST, H_ANCHOR, H_ASSIST, H_LANDING_GEAR, H_ENGINE,
+        H_TYPE_SUBMARINE, H_DIVE, H_SURFACE, H_PERISCOPE, H_SONAR,   // the submarine's
     };
 
 private:

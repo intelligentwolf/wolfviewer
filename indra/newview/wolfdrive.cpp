@@ -23,6 +23,7 @@
 #include <cstdlib>
 
 #include "fsnearbychathub.h"
+#include "llchat.h"
 #include "llagent.h"
 #include "llappviewer.h"
 #include "llcommandmanager.h"
@@ -32,11 +33,14 @@
 #include "llmoveview.h"
 #include "llstartup.h"
 #include "lltoolbarview.h"
+#include "llui.h"
 #include "llviewercontrol.h"
 #include "llviewergenericmessage.h"
 #include "llviewerjoystick.h"
 #include "llviewerobject.h"
+#include "llviewerobjectlist.h"
 #include "llviewerregion.h"
+#include "llworld.h"
 #include "llvoavatarself.h"
 #include "wolfflight.h"
 #include "wolfgrid.h"
@@ -83,6 +87,21 @@ namespace
     const F32 BIKE_RATIOS[6] = { 2.647f * BIKE_PRIMARY, 2.091f * BIKE_PRIMARY, 1.727f * BIKE_PRIMARY,
                                  1.500f * BIKE_PRIMARY, 1.360f * BIKE_PRIMARY, 1.261f * BIKE_PRIMARY };
 
+    // <WolfViewer 2026-10-11> w65 Space Rabbit.
+    // SPEEDBOAT - a runabout with one Mercury Verado 300 (V8 4.6 l) outboard.
+    //   Full-throttle range 5200-6000 rpm: Mercury's Verado 300 specification, as dealers list it
+    //   (krenzermarine.com "2024 Mercury Verado 300 hp", boatsonline.com.au "NEW 300 HP Verado": "Full Throttle
+    //   RPM 5200-6000"). The top of the range is the limiter and the red line; the range itself is the green band
+    //   (where Mercury wants the engine at full throttle).
+    //   Speed steps: 6 - Paul's "Lone Wolfs modded speed boat ii" (a Chris Craft) steps 1..6 with Page Up / Page Down
+    //   and says "Speed = N" aloud (WolfDrive::noteObjectChat).
+    //   MODEL (no published figure used): idle 600 rpm; the tachometer's 7000 rpm full scale; the speedometer's
+    //   60 kn / 110 km/h / 70 mph full scales; a 200 km range for the model's fuel gauge.
+    // SPACESHIP - no engine speed and no gears: the HUD shows thrust (the throttle) in percent; every scale it draws
+    //   is a tape. Nothing below is used for it.
+    // SUBMARINE - no engine speed and no gears either (an electric drive: the HUD shows the throttle and the
+    //   battery). MODEL: the speedometer's 30 kn / 55 km/h / 35 mph full scales.
+
     // Rolling circumference from the tyre code: pi x (rim + 2 x section x aspect).
     constexpr F32 tyreCirc(F32 section_mm, F32 aspect, F32 rim_in)
     {
@@ -95,14 +114,25 @@ namespace
         { "CAR",   8, CAR_RATIOS,    3.99f,   3.39f * 0.92f,   tyreCirc(295.f, 0.35f, 20.f),
         //  idle   launch  upL     upF     downL   downF   (MODEL; up / down: the AUTO box only)
             800.f, 2200.f, 2300.f, 6900.f, 1300.f, 3800.f,
-        //  limiter dial    redline  green       km/h    mph     governor range                         shift
-            7500.f, 8000.f, 7400.f,  0.f, 0.f,   330.f,  200.f,  0.f,     16.6f * 21.f * 1.609344f,     0.25f },
+        //  limiter dial    redline  green       km/h    mph     kn      governor range                         shift
+            7500.f, 8000.f, 7400.f,  0.f, 0.f,   330.f,  200.f,  180.f,  0.f,     16.6f * 21.f * 1.609344f,     0.25f },
         { "TRUCK", 12, TRUCK_RATIOS, 14.766f, 2.59f,           tyreCirc(315.f, 0.70f, 22.5f),
             600.f, 1000.f, 1250.f, 1850.f, 950.f,  1250.f,
-            2400.f, 3000.f, 2400.f,  1100.f, 1500.f, 120.f, 80.f, 90.f,    700.f / 25.19f * 100.f,        0.8f },
+            2400.f, 3000.f, 2400.f,  1100.f, 1500.f, 120.f, 80.f, 70.f, 90.f,  700.f / 25.19f * 100.f,        0.8f },
         { "BIKE",  6, BIKE_RATIOS,   0.f,     2.65f,           tyreCirc(190.f, 0.55f, 17.f),
             1300.f, 4000.f, 0.f,   0.f,    0.f,    0.f,
-            14600.f, 15000.f, 14600.f, 0.f, 0.f,  0.f,    0.f,   0.f,     16.5f / 6.4f * 100.f,          0.f },
+            14600.f, 15000.f, 14600.f, 0.f, 0.f,  0.f,    0.f,   0.f,    0.f,     16.5f / 6.4f * 100.f,          0.f },
+        // <WolfViewer 2026-10-11> w65 (sources above; the kn column of the car and truck is MODEL: their km/h scale
+        // in knots, rounded up to the next 10)
+        { "SPEEDBOAT", 6, nullptr,  0.f,     0.f,              0.f,
+            600.f, 0.f,    0.f,    0.f,    0.f,    0.f,
+            6000.f, 7000.f, 6000.f,  5200.f, 6000.f, 110.f, 70.f, 60.f, 0.f,   200.f,                         0.f },
+        { "SPACESHIP", 0, nullptr,  0.f,     0.f,              0.f,
+            0.f,   0.f,    0.f,    0.f,    0.f,    0.f,
+            0.f,    0.f,    0.f,     0.f, 0.f,   0.f,    0.f,  0.f,  0.f,   0.f,                           0.f },
+        { "SUBMARINE", 0, nullptr,  0.f,     0.f,              0.f,
+            0.f,   0.f,    0.f,    0.f,    0.f,    0.f,
+            0.f,    0.f,    0.f,     0.f, 0.f,   55.f,   35.f, 30.f, 0.f,   0.f,                           0.f },
     };
 
     // Source: wolfvehiclecontrols.cpp (the Move floater's Vehicle tab, removed 2026-10-09) and
@@ -182,22 +212,34 @@ namespace
         "WolfDriveButtonGearUp", "WolfDriveButtonGearDown", "WolfDriveButtonHorn", "WolfDriveButtonLights",
         "WolfDriveButtonIndicatorLeft", "WolfDriveButtonIndicatorRight", "WolfDriveButtonHandbrake",
         "WolfDriveButtonHazards", "WolfDriveButtonCruise",
+        "WolfDriveButtonStage", "WolfDriveButtonBoost", "WolfDriveButtonAnchor", "WolfDriveButtonAssist",   // <WolfViewer 2026-10-11/> w65
+        "WolfDriveButtonLandingGear", "WolfDriveButtonEngine",
+        "WolfDriveButtonDive", "WolfDriveButtonSurface", "WolfDriveButtonPeriscope", "WolfDriveButtonSonar",
     };
     const char* const ACTION_LABELS[WolfDrive::ACTION_COUNT] =
     {
         "Gear up", "Gear down", "Horn", "Lights", "Left indicator", "Right indicator", "Handbrake",
         "Hazard lights", "Cruise control",
+        "Stage (rocket)", "Boost (held)", "Anchor", "Flight assist", "Landing gear", "Engine",   // <WolfViewer 2026-10-11/> w65
+        "Dive (held)", "Surface (held)", "Periscope", "Sonar ping",
     };
     const char* const ACTION_IDS[WolfDrive::ACTION_COUNT] =
     {
         "gear_up", "gear_down", "horn", "lights", "ind_left", "ind_right", "handbrake", "hazards", "cruise",
+        "stage", "boost", "anchor", "assist", "landing_gear", "engine",   // <WolfViewer 2026-10-11/> w65
+        "dive", "surface", "periscope", "sonar",
     };
     // The keys an action has until the driver changes it: letters no viewer binding uses unmodified
     // (app_settings/key_bindings.xml binds W A S D E C F R T) - the viewer's own choice. Gear up /
     // down have none: Page Up / Page Down already reach the vehicle as CONTROL_UP / CONTROL_DOWN.
+    // <WolfViewer 2026-10-11> w65: J (jettison) stage, Y boost, N anchor, O flight assist, G landing gear, I ignition;
+    // the submarine M dive, U surface (up), P periscope, Q sonar - the last letters key_bindings.xml leaves unbound
+    // unmodified (the viewer's own choice, changeable in Driving Controls).
     const char* const ACTION_DEFAULT_KEYS[WolfDrive::ACTION_COUNT] =
     {
         "", "", "H", "L", "Z", "X", "B", "V", "K",
+        "J", "Y", "N", "O", "G", "I",
+        "M", "U", "P", "Q",
     };
     const char* const OUT_LABELS[WolfDrive::OUT_COUNT] =
     {
@@ -221,7 +263,23 @@ namespace
     {
         "engine", "oil", "battery", "brake", "abs", "temp", "tyre", "airbag", "seatbelt", "fuel",
         "adblue", "air", "door", "esp",
+        "shield", "hull", "heat", "stage", "boost", "anchor", "depth",   // <WolfViewer 2026-10-11/> PROTOCOL.md "New warnings words"
+        "oxygen", "battery", "leak",
     };
+    const size_t WARNING_COUNT = sizeof(WARNING_NAMES) / sizeof(WARNING_NAMES[0]);
+
+    // <WolfViewer 2026-10-11> Source: OpenSim BulletS/BSParam.cs:555 - the region's gravity, -9.80665 m/s^2 (ubOde
+    // ODEScene.cs:210 uses 9.8). For the rocket's apogee estimate.
+    const F32 REGION_GRAVITY = 9.80665f;
+    const F32 KN_PER_MS = 1.f / 0.514444f;   // 1 kn = 1852 m / 3600 s
+
+    // Source: wolfflight.cpp wrap360
+    F32 wrap360(F32 a)
+    {
+        while (a >= 360.f) a -= 360.f;
+        while (a < 0.f) a += 360.f;
+        return a;
+    }
 }
 
 /**
@@ -248,6 +306,15 @@ namespace
 const WolfDrive::Spec& WolfDrive::spec(EType t)
 {
     return SPECS[llclamp((S32)t, 0, (S32)TYPE_COUNT - 1)];
+}
+
+// static
+WolfDrive::EType WolfDrive::designFromName(const std::string& name)
+{
+    if (name == "speedboat") return TYPE_SPEEDBOAT;
+    if (name == "spaceship") return TYPE_SPACESHIP;
+    if (name == "submarine") return TYPE_SUBMARINE;
+    return TYPE_CAR;
 }
 
 // static
@@ -397,6 +464,7 @@ WolfDrive::WolfDrive()
         });
     }
     mType = (EType)llclamp(gSavedSettings.getS32("WolfDashboardType"), 0, (S32)TYPE_COUNT - 1);
+    mLastRoadType = isRoad(mType) ? mType : TYPE_CAR;   // <WolfViewer 2026-10-11/>
     mOdoKm = llmax(0.0, (F64)gSavedSettings.getF32("WolfDashboardOdometerKm"));
 }
 
@@ -630,7 +698,8 @@ void WolfDrive::setScreenButton(U32 button, bool held)
 // static
 std::vector<S32> WolfDrive::selectorPositions(EType t, bool auto_box)
 {
-    if (t == TYPE_BIKE) return gearSequence(t, false);
+    // <WolfViewer 2026-10-11> the speedboat's lever is its speed steps (R N 1..6); the spaceship has none (N)
+    if (!isRoad(t) || t == TYPE_BIKE) return gearSequence(t, false);
     // AUTO: the automatic's own lever (car P R N D with paddles for M; truck Opticruise R N A).
     if (auto_box) return gearSequence(t, true);
     // MANUAL: R, N and one slot for the forward gears (GEAR_D stands for it; the dashboard writes
@@ -647,6 +716,11 @@ std::vector<S32> WolfDrive::selectorPositions(EType t, bool auto_box)
 std::vector<S32> WolfDrive::gearSequence(EType t, bool auto_box)
 {
     if (t == TYPE_BIKE) return { 1, GEAR_N, 2, 3, 4, 5, 6 };
+    // <WolfViewer 2026-10-11> w65. Spaceship: Page Up / Page Down are its up / down thrust (CONTROL_UP / DOWN), not a
+    // gear - the picture stays in N. Speedboat: R, N and the speed steps 1..6 (the same steps as the manual car's, so
+    // the picture follows the boat's Page Up / Page Down; the protocol's gear key takes R, N and 1..18).
+    if (t == TYPE_SPACESHIP || t == TYPE_SUBMARINE) return { GEAR_N };   // the submarine's Page Up / Down: up / down too
+    if (t == TYPE_SPEEDBOAT) auto_box = false;
     if (auto_box)
     {
         // Paul 2026-10-09: "on the lorry and car make it so you can select automatic or manual".
@@ -722,7 +796,7 @@ void WolfDrive::tapStep()
 void WolfDrive::setSelector(S32 g)
 {
     const bool ab = autoBox();
-    if (g == GEAR_D && mType != TYPE_BIKE && !ab)
+    if (g == GEAR_D && (mType == TYPE_CAR || mType == TYPE_TRUCK) && !ab)
     {
         g = mSelector >= 1 ? mSelector : 1;
     }
@@ -785,7 +859,17 @@ void WolfDrive::doAction(S32 action)
     case ACT_HAZARDS:   mOwnIndicators = mOwnIndicators == 3 ? 0 : 3; break;
     case ACT_HANDBRAKE: mOwnHandbrake = !mOwnHandbrake; break;
     case ACT_CRUISE:    mOwnCruise = !mOwnCruise; break;
-    default: break;   // the horn: the script makes the sound
+    // <WolfViewer 2026-10-11> w65: the lamps of the new buttons when no script says (the script acts on the bit)
+    case ACT_ANCHOR:       mOwnAnchor = !mOwnAnchor; break;
+    case ACT_ASSIST:       mOwnAssist = !mOwnAssist; break;
+    case ACT_LANDING_GEAR: mOwnLandingGear = !mOwnLandingGear; break;
+    case ACT_ENGINE:       mOwnEngine = !mOwnEngine; break;
+    case ACT_PERISCOPE:    mOwnPeriscope = !mOwnPeriscope; break;
+    // the sonar ping is heard at once in the helm: the tracker beacon's ping, the viewer's own UI sound
+    // (settings.xml UISndTrackerBeacon, changeable in Preferences > Sounds; llui.cpp find_ui_sound plays it
+    // without a PlayMode switch). The submarine's script acts on the bit.
+    case ACT_SONAR:        if (mType == TYPE_SUBMARINE) make_ui_sound("UISndTrackerBeacon"); break;
+    default: break;   // the horn: the script makes the sound; stage, boost, dive, surface: the script acts on the bit
     }
     if (!mSeated)
     {
@@ -797,10 +881,13 @@ void WolfDrive::doAction(S32 action)
         // No horn of their own set: the built-in horn for this design, played by the region from
         // the vehicle so everyone near hears it (WolfDriveModule.cs Horn). The region allows one
         // every 2 s or so.
-        if (canSend() && gAgent.getRegion())
+        // <WolfViewer 2026-10-11> PROTOCOL.md "Horn": the speedboat uses the truck air horn; the spaceship has none
+        // (the button is ignored).
+        static const char* const KIND[TYPE_COUNT] = { "car", "truck", "bike", "truck", nullptr, nullptr };   // submarine: none either
+        const char* kind = KIND[llclamp((S32)mType, 0, (S32)TYPE_COUNT - 1)];
+        if (kind && canSend() && gAgent.getRegion())
         {
-            static const char* const KIND[TYPE_COUNT] = { "car", "truck", "bike" };
-            send_generic_message(METHOD_TO_SIM, { "horn", KIND[llclamp((S32)mType, 0, (S32)TYPE_COUNT - 1)] });
+            send_generic_message(METHOD_TO_SIM, { "horn", kind });
         }
         return;
     }
@@ -977,10 +1064,21 @@ void WolfDrive::receiveDashboard(const LLUUID& invoice, const std::vector<std::s
             if (v == "car") { mScript.mHasType = true; mScript.mType = TYPE_CAR; }
             else if (v == "truck") { mScript.mHasType = true; mScript.mType = TYPE_TRUCK; }
             else if (v == "bike") { mScript.mHasType = true; mScript.mType = TYPE_BIKE; }
+            // <WolfViewer 2026-10-11> PROTOCOL.md "Changed allowed values"
+            else if (v == "speedboat") { mScript.mHasType = true; mScript.mType = TYPE_SPEEDBOAT; }
+            else if (v == "spaceship") { mScript.mHasType = true; mScript.mType = TYPE_SPACESHIP; }
+            else if (v == "submarine") { mScript.mHasType = true; mScript.mType = TYPE_SUBMARINE; }
         }
         else if (k == "units")
         {
-            if (v == "kmh" || v == "mph") { mScript.mHasUnits = true; mScript.mMph = v == "mph"; }
+            if (v == "kmh") { mScript.mHasUnits = true; mScript.mUnits = Shown::UNITS_KMH; }
+            else if (v == "mph") { mScript.mHasUnits = true; mScript.mUnits = Shown::UNITS_MPH; }
+            else if (v == "kn") { mScript.mHasUnits = true; mScript.mUnits = Shown::UNITS_KN; }   // <WolfViewer 2026-10-11/>
+        }
+        else if (k == "mode")
+        {
+            // <WolfViewer 2026-10-11> PROTOCOL.md: ^(ship|rocket)\z
+            if (v == "ship" || v == "rocket") { mScript.mHasMode = true; mScript.mRocket = v == "rocket"; }
         }
         else if (k == "gear")
         {
@@ -1007,6 +1105,25 @@ void WolfDrive::receiveDashboard(const LLUUID& invoice, const std::vector<std::s
         else if (k == "cruise")     { mScript.mHasCruise = true; mScript.mCruise = n >= 0.5; }
         else if (k == "drive_time") { mScript.mHasDriveTime = true; mScript.mDriveTime = (F32)llclamp(n, 0.0, 86400.0); }
         else if (k == "odo")        { mScript.mHasOdo = true; mScript.mOdo = llclamp(n, 0.0, 9999999.0); }
+        // <WolfViewer 2026-10-11> w65: PROTOCOL.md "New keys", the same ranges
+        else if (k == "throttle")   { mScript.mHasThrottle = true; mScript.mThrottle = (S32)llclamp(n, -100.0, 100.0); }
+        else if (k == "trim")       { mScript.mHasTrim = true; mScript.mTrim = (S32)llclamp(n, -5.0, 5.0); }
+        else if (k == "anchor")     { mScript.mHasAnchor = true; mScript.mAnchor = n >= 0.5; }
+        else if (k == "engine")     { mScript.mHasEngine = true; mScript.mEngine = n >= 0.5; }
+        else if (k == "stage")      { mScript.mHasStage = true; mScript.mStage = (S32)llclamp(n, 0.0, 9.0); }
+        else if (k == "stages")     { mScript.mHasStages = true; mScript.mStages = (S32)llclamp(n, 0.0, 9.0); }
+        else if (k == "boost")      { mScript.mHasBoost = true; mScript.mBoost = (F32)llclamp(n, 0.0, 100.0); }
+        else if (k == "shield")     { mScript.mHasShield = true; mScript.mShield = (F32)llclamp(n, 0.0, 100.0); }
+        else if (k == "hull")       { mScript.mHasHull = true; mScript.mHull = (F32)llclamp(n, 0.0, 100.0); }
+        else if (k == "heat")       { mScript.mHasHeat = true; mScript.mHeat = (F32)llclamp(n, 0.0, 100.0); }
+        else if (k == "assist")     { mScript.mHasAssist = true; mScript.mAssist = n >= 0.5; }
+        else if (k == "landing_gear") { mScript.mHasLandingGear = true; mScript.mLandingGear = n >= 0.5; }
+        else if (k == "ballast")    { mScript.mHasBallast = true; mScript.mBallast = (S32)llclamp(n, 0.0, 100.0); }
+        else if (k == "max_depth")  { mScript.mHasMaxDepth = true; mScript.mMaxDepth = (S32)llclamp(n, 1.0, 1000.0); }
+        else if (k == "oxygen")     { mScript.mHasOxygen = true; mScript.mOxygen = (F32)llclamp(n, 0.0, 100.0); }
+        else if (k == "battery")    { mScript.mHasBattery = true; mScript.mBattery = (F32)llclamp(n, 0.0, 100.0); }
+        else if (k == "planes")     { mScript.mHasPlanes = true; mScript.mPlanes = (S32)llclamp(n, -100.0, 100.0); }
+        else if (k == "periscope")  { mScript.mHasPeriscope = true; mScript.mPeriscope = n >= 0.5; }
         else if (k == "clear" && n >= 0.5)
         {
             const LLUUID keep = mScript.mVehicle;
@@ -1021,7 +1138,7 @@ void WolfDrive::receiveDashboard(const LLUUID& invoice, const std::vector<std::s
         mScript.mWarnings.clear();
         const std::string list = s.substr(9);
         size_t a = 0;
-        while (a <= list.size() && mScript.mWarnings.size() < 14)
+        while (a <= list.size() && mScript.mWarnings.size() < WARNING_COUNT)
         {
             size_t b = list.find(',', a);
             if (b == std::string::npos) b = list.size();
@@ -1090,6 +1207,7 @@ void WolfDrive::chooseType(EType t)
 {
     t = (EType)llclamp((S32)t, 0, (S32)TYPE_COUNT - 1);
     mType = t;
+    if (isRoad(t)) mLastRoadType = t;   // <WolfViewer 2026-10-11/> what the car icon brings back
     gSavedSettings.setS32("WolfDashboardType", (S32)t);
     if (mNameKnown && !mVehicleName.empty())
     {
@@ -1118,7 +1236,8 @@ const char* WolfDrive::autoBoxSetting(EType t)
 
 bool WolfDrive::autoBox() const
 {
-    return mType != TYPE_BIKE && gSavedSettings.getBOOL(autoBoxSetting(mType));
+    // <WolfViewer 2026-10-11> car and truck only (the bike, speedboat and spaceship have no automatic)
+    return (mType == TYPE_CAR || mType == TYPE_TRUCK) && gSavedSettings.getBOOL(autoBoxSetting(mType));
 }
 
 /** The dashboard's AUTO / MANUAL switch (car and truck; the bike is always manual). Remembered for
@@ -1126,7 +1245,7 @@ bool WolfDrive::autoBox() const
  *  gear, and Page Up / Page Down go to it in both modes. */
 void WolfDrive::setAutoBox(bool on)
 {
-    if (mType == TYPE_BIKE || on == autoBox())
+    if ((mType != TYPE_CAR && mType != TYPE_TRUCK) || on == autoBox())   // <WolfViewer 2026-10-11/> car / truck only
     {
         return;
     }
@@ -1134,6 +1253,82 @@ void WolfDrive::setAutoBox(bool on)
     mSelector = GEAR_N;
     mManualGear = 0;
     mModelGear = 1;
+}
+
+// <WolfViewer 2026-10-11> w65: the toolbar icons and Wolf World items. TYPE_CAR (any road design) brings back the
+// road design last used; a press while that design shows closes the dashboard, as the car icon always did.
+void WolfDrive::toggleDesign(EType t)
+{
+    if (!onWolf())
+    {
+        return;   // [WOLF ONLY] nothing off Wolf, said or done
+    }
+    if (showingDesign(t))
+    {
+        requestDashboard(false);
+        return;
+    }
+    const EType want = isRoad(t) ? (isRoad(mType) ? mType : mLastRoadType) : t;
+    if (mType != want)
+    {
+        chooseType(want);
+    }
+    if (!mDashOn)
+    {
+        requestDashboard(true);
+    }
+}
+
+bool WolfDrive::showingDesign(EType t) const
+{
+    return mDashOn && (isRoad(t) ? isRoad(mType) : mType == t);
+}
+
+// <WolfViewer 2026-10-11> Paul's "Lone Wolfs modded speed boat ii" (a Chris Craft script) says "Speed = N" on channel 0
+// (llSay) each time its speed step changes. Heard from any prim of the vehicle sat on, it is the step the speedboat
+// helm shows while the boat's script sends no gear of its own. Nothing else is read from chat.
+void WolfDrive::noteObjectChat(const LLUUID& source, S32 chat_type, const std::string& text)
+{
+    if (!onWolf() || mSeatRoot.isNull())
+    {
+        return;   // [WOLF ONLY]
+    }
+    if (chat_type != CHAT_TYPE_NORMAL && chat_type != CHAT_TYPE_WHISPER && chat_type != CHAT_TYPE_SHOUT)
+    {
+        return;
+    }
+    static const std::string PREFIX("Speed = ");
+    if (text.size() <= PREFIX.size() || text.size() > PREFIX.size() + 2 || text.compare(0, PREFIX.size(), PREFIX) != 0)
+    {
+        return;
+    }
+    S32 n = 0;
+    for (size_t i = PREFIX.size(); i < text.size(); ++i)
+    {
+        const char c = text[i];
+        if (c < '0' || c > '9') return;
+        n = n * 10 + (c - '0');
+    }
+    if (n > GEAR_MAX)
+    {
+        return;
+    }
+    const LLViewerObject* o = gObjectList.findObject(source);
+    while (o && o->getParent())
+    {
+        o = (const LLViewerObject*)o->getParent();
+    }
+    if (!o || o->getID() != mSeatRoot)
+    {
+        return;   // another boat's, or anything else's
+    }
+    mChatStep = n;
+    mChatStepSeat = mSeatRoot;
+    // the lever's picture follows, so Page Up / Page Down step on from the boat's own step
+    if (mType == TYPE_SPEEDBOAT && n >= 1 && n <= spec(mType).mGears)
+    {
+        mSelector = n;
+    }
 }
 
 void WolfDrive::loadTypeFor(const std::string& name)
@@ -1174,6 +1369,8 @@ void WolfDrive::goInert()
     mSeatRoot.setNull();
     mSeated = false;
     mScript = Script();
+    mChatStep = -1;               // <WolfViewer 2026-10-11/>
+    mChatStepSeat.setNull();
     mAutoOpened = false;
     mAutoDone = false;
     mHelloSeat.setNull();
@@ -1299,6 +1496,14 @@ void WolfDrive::watchSeat()
         mOwnLights = 0;
         mOwnHandbrake = false;
         mOwnCruise = false;
+        // <WolfViewer 2026-10-11> w65: a new seat starts from the model's states (wolfdrive.h)
+        mOwnAnchor = false;
+        mOwnEngine = true;
+        mOwnAssist = true;
+        mOwnLandingGear = true;
+        mOwnPeriscope = false;
+        mChatStep = -1;
+        mChatStepSeat.setNull();
         mPrevButtons = 0;
         resetTrip();
         if (!mSeated)
@@ -1391,7 +1596,9 @@ void WolfDrive::model(F32 dt)
         mManualGear = 0;   // as chooseType: the other design's M gear is not this one's
         mModelGear = 1;
     }
+    if (isRoad(mType)) mLastRoadType = mType;   // <WolfViewer 2026-10-11/>
     const Spec& sp = spec(mType);
+    const bool live = use && now() - sc.mAt < SCRIPT_LIVE_SECONDS;
 
     const LLVector3 vel = root->getVelocity();
     const F32 speed = sqrtf(vel.mV[VX] * vel.mV[VX] + vel.mV[VY] * vel.mV[VY]);
@@ -1408,12 +1615,44 @@ void WolfDrive::model(F32 dt)
     // Page Up / Page Down (gearSequence), and the revs follow the wheels through that gear's cited
     // ratio - they climb in a gear, drop on an upshift and reach the limiter if a low gear is
     // over-revved. AUTO (car / truck, chosen on the dashboard): the automatic as before.
+    // <WolfViewer 2026-10-11> w65: the throttle lever, -100..100: the script's, else the driver's own keys / pedals /
+    // on-screen pedals (ahead with the accelerator, astern with the brake held on its own, as the keys send them)
+    s.mThrottleScripted = live && sc.mHasThrottle;
+    s.mThrottlePct = s.mThrottleScripted ? (F32)sc.mThrottle : (mThrottle > 0.f ? mThrottle * 100.f : -mBrake * 100.f);
+    s.mEngine = use && sc.mHasEngine ? sc.mEngine : mOwnEngine;
+
     const F32 wheel_rps = speed / llmax(0.1f, sp.mTyreCirc);
     F32 target = sp.mIdle;
     S32 gear_n = 0;
     std::string label;
     bool manual = false;
-    if (!autoBox())
+    bool chat_step = false;
+    if (mType == TYPE_SPEEDBOAT)
+    {
+        // <WolfViewer 2026-10-11> THE SPEEDBOAT. The speed step: the boat's own "Speed = N" (noteObjectChat) when it
+        // said one, else the lever's picture (Page Up / Page Down). MODEL: the engine follows the throttle - idle
+        // plus the lever's share of the way to the top of the full-throttle range; the keys' throttle counts as the
+        // step's share of full (step 3 of 6 is half), and a boat moving faster than its keys say (scripts that
+        // keep going at the step's speed) is read from its speed against the dial's full scale.
+        manual = true;
+        chat_step = mChatStep >= 0 && mChatStepSeat == root->getID();
+        gear_n = chat_step ? mChatStep : (mSelector >= 1 ? llmin(mSelector, sp.mGears) : 0);
+        label = chat_step || gear_n > 0 ? llformat("%d", gear_n) : gearLabel(mSelector);
+        F32 lever = fabsf(s.mThrottlePct) / 100.f;
+        if (!s.mThrottleScripted)
+        {
+            const F32 step_share = gear_n > 0 ? llmin(1.f, (F32)gear_n / (F32)llmax(1, sp.mGears)) : 1.f;
+            lever = llmax(lever * step_share, llclamp(speed * KN_PER_MS / llmax(1.f, sp.mDialKn), 0.f, 1.f));
+        }
+        target = s.mEngine ? sp.mIdle + llclamp(lever, 0.f, 1.f) * (sp.mLimiter - sp.mIdle) : 0.f;
+    }
+    else if (mType == TYPE_SPACESHIP || mType == TYPE_SUBMARINE)
+    {
+        // <WolfViewer 2026-10-11> THE SPACESHIP and THE SUBMARINE: no engine speed and no gears; the HUD shows the
+        // thrust (throttle).
+        target = 0.f;
+    }
+    else if (!autoBox())
     {
         manual = true;
         gear_n = mSelector >= 1 ? llmin(mSelector, sp.mGears) : 0;
@@ -1451,7 +1690,11 @@ void WolfDrive::model(F32 dt)
     }
     s.mAutoBox = autoBox();
 
-    if (gear_n > 0)
+    if (!isRoad(mType))
+    {
+        // the speedboat's target is set above; the spaceship has none
+    }
+    else if (gear_n > 0)
     {
         const F32 wheel_rpm = wheel_rps * 60.f * sp.mFinal * sp.mRatios[gear_n - 1];
         if (mClutch > 0.5f)
@@ -1477,15 +1720,38 @@ void WolfDrive::model(F32 dt)
     }
     target = llclamp(target, 0.f, sp.mLimiter);
     mModelRpm += (target - mModelRpm) * llmin(1.f, dt * 8.f);
-    if (mModelRpm < 1.f) mModelRpm = sp.mIdle;
+    if (mModelRpm < 1.f && target > 0.f) mModelRpm = sp.mIdle;   // <WolfViewer 2026-10-11/> a stopped engine stays at 0
 
-    const bool live = use && now() - sc.mAt < SCRIPT_LIVE_SECONDS;
     s.mRpm = live && sc.mHasRpm ? sc.mRpm : mModelRpm;
     s.mMaxRpm = use && sc.mHasMaxRpm ? sc.mMaxRpm : sp.mDialRpm;
     s.mRedline = use && sc.mHasRedline ? llmin(sc.mRedline, s.mMaxRpm) : llmin(sp.mRedline, s.mMaxRpm);
-    s.mMph = use && sc.mHasUnits ? sc.mMph : gSavedSettings.getBOOL("WolfDashboardMph");
-    s.mMaxSpeed = use && sc.mHasMaxSpeed ? sc.mMaxSpeed : (s.mMph ? sp.mDialMph : sp.mDialKmh);
+    // <WolfViewer 2026-10-11> w65 units: the script's, else the design's own - the speedboat's UNITS button
+    // (WolfDashboardBoatUnits: knots first), the spaceship's m/s, the road designs' km/h / mph switch.
+    if (use && sc.mHasUnits)
+    {
+        s.mUnits = sc.mUnits;
+    }
+    else if (mType == TYPE_SPEEDBOAT || mType == TYPE_SUBMARINE)
+    {
+        // the submarine shares the speedboat's units switch (knots first, as at sea)
+        static const S32 BOAT_UNITS[3] = { Shown::UNITS_KN, Shown::UNITS_KMH, Shown::UNITS_MPH };
+        s.mUnits = BOAT_UNITS[llclamp(gSavedSettings.getS32("WolfDashboardBoatUnits"), 0, 2)];
+    }
+    else if (mType == TYPE_SPACESHIP)
+    {
+        s.mUnits = Shown::UNITS_MS;
+    }
+    else
+    {
+        s.mUnits = gSavedSettings.getBOOL("WolfDashboardMph") ? Shown::UNITS_MPH : Shown::UNITS_KMH;
+    }
+    s.mMph = s.mUnits == Shown::UNITS_MPH;
+    const F32 dial = s.mUnits == Shown::UNITS_KN ? sp.mDialKn : s.mUnits == Shown::UNITS_MPH ? sp.mDialMph
+                   : s.mUnits == Shown::UNITS_KMH ? sp.mDialKmh : 0.f;
+    s.mMaxSpeed = use && sc.mHasMaxSpeed ? sc.mMaxSpeed : dial;
     s.mGear = live && sc.mHasGear ? sc.mGear : label;
+    s.mStepFromChat = chat_step && !(live && sc.mHasGear);
+    s.mStepMax = mType == TYPE_SPEEDBOAT ? sp.mGears : 0;
     s.mGearNumber = gear_n;
     if (live && sc.mHasGear)
     {
@@ -1493,8 +1759,10 @@ void WolfDrive::model(F32 dt)
         s.mGearNumber = n > 0 ? n : 0;
     }
     s.mManual = manual;
-    const F32 fuel_model = llclamp(100.f - mFuelUsedKm / llmax(1.f, sp.mRangeKm) * 100.f, 0.f, 100.f);
+    // (a design with no range - the spaceship - has no fuel model: full unless its script says)
+    const F32 fuel_model = sp.mRangeKm > 0.f ? llclamp(100.f - mFuelUsedKm / llmax(1.f, sp.mRangeKm) * 100.f, 0.f, 100.f) : 100.f;
     s.mFuel = use && sc.mHasFuel ? sc.mFuel : fuel_model;
+    s.mFuelScripted = use && sc.mHasFuel;   // <WolfViewer 2026-10-11/>
     s.mAdBlue = use && sc.mHasAdBlue ? sc.mAdBlue : 100.f;   // no published tank size: full unless told
     // coolant: the model warms to 90 C over the first minute driven (MODEL)
     s.mTemp = use && sc.mHasTemp ? sc.mTemp : llmin(90.f, 40.f + mDriving * (50.f / 60.f));
@@ -1527,6 +1795,75 @@ void WolfDrive::model(F32 dt)
     if (-lean > mMaxLeanL) mMaxLeanL = -lean;
     s.mMaxLeanL = mMaxLeanL;
     s.mMaxLeanR = mMaxLeanR;
+
+    // <WolfViewer 2026-10-11> w65: attitude, path and height, as WolfFlight::measure works them out (wolfflight.cpp)
+    // from the seat's frame and the vehicle's velocity
+    {
+        const LLVector3 fwd = LLVector3::x_axis * q;
+        const LLVector3 up = LLVector3::z_axis * q;
+        s.mPitch = asinf(llclamp(fwd.mV[VZ], -1.f, 1.f)) * RAD_TO_DEG;
+        s.mRoll = atan2f(left.mV[VZ], up.mV[VZ]) * RAD_TO_DEG;
+        s.mHeading = wrap360(atan2f(fwd.mV[VX], fwd.mV[VY]) * RAD_TO_DEG);
+        s.mTrack = speed > 0.5f ? wrap360(atan2f(vel.mV[VX], vel.mV[VY]) * RAD_TO_DEG) : s.mHeading;
+        s.mSpeed3D = vel.length();
+        s.mVS = vel.mV[VZ];
+        s.mFPA = s.mSpeed3D > 1.f ? atan2f(vel.mV[VZ], speed) * RAD_TO_DEG : 0.f;
+        const F32 v_fwd = vel * fwd;
+        s.mFpmValid = s.mSpeed3D > 1.f && v_fwd > 0.f;
+        if (s.mFpmValid)
+        {
+            s.mFpmX = -atan2f(vel * left, v_fwd) * RAD_TO_DEG;   // left of the nose is -x on the screen
+            s.mFpmY = atan2f(vel * up, v_fwd) * RAD_TO_DEG;
+        }
+        const LLVector3d pos = root->getPositionGlobal();
+        LLViewerRegion* rgn = LLWorld::getInstance()->getRegionFromPosGlobal(pos);
+        if (!rgn) rgn = gAgent.getRegion();
+        const F32 water = rgn ? rgn->getWaterHeight() : 0.f;
+        const F32 land = LLWorld::getInstance()->resolveLandHeightGlobal(pos);
+        const F32 z = (F32)pos.mdV[VZ];
+        s.mAltMSL = z - water;
+        s.mAGL = z - llmax(land, water);      // a radio altimeter reads the water surface
+        s.mDepth = water - land;              // the sounder: water under the hull
+        s.mApogee = s.mVS > 0.f ? s.mAltMSL + s.mVS * s.mVS / (2.f * REGION_GRAVITY) : s.mAltMSL;
+        // the submarine: below the surface and above the bottom; the rate in m/min as sub depth gauges show it
+        s.mSubDepth = water - z;
+        s.mSeabed = z - land;
+        s.mDepthRate = -s.mVS * 60.f;
+    }
+    // the speedboat. MODEL thresholds, not published figures: on the plane at 15 kn or more with the bow within
+    // -3..+6 degrees of level; below that, from 6 kn, the hull is climbing onto it (the "hump", bow up).
+    if (mType == TYPE_SPEEDBOAT)
+    {
+        const F32 kn = speed * KN_PER_MS;
+        s.mOnPlane = kn >= 15.f && s.mPitch > -3.f && s.mPitch < 6.f;
+        s.mPlaning = !s.mOnPlane && kn >= 6.f;
+    }
+    s.mHasTrim = use && sc.mHasTrim;
+    s.mTrim = s.mHasTrim ? sc.mTrim : 0;
+    s.mAnchor = use && sc.mHasAnchor ? sc.mAnchor : mOwnAnchor;
+    s.mAssist = use && sc.mHasAssist ? sc.mAssist : mOwnAssist;
+    s.mLandingGear = use && sc.mHasLandingGear ? sc.mLandingGear : mOwnLandingGear;
+    s.mRocket = use && sc.mHasMode && sc.mRocket;
+    s.mStages = use && sc.mHasStages ? sc.mStages : 0;
+    s.mStage = use && sc.mHasStage ? sc.mStage : 0;
+    s.mHasBoost = use && sc.mHasBoost;   s.mBoost = sc.mBoost;
+    s.mHasShield = use && sc.mHasShield; s.mShield = sc.mShield;
+    s.mHasHull = use && sc.mHasHull;     s.mHull = sc.mHull;
+    s.mHasHeat = use && sc.mHasHeat;     s.mHeat = sc.mHeat;
+    s.mHasBallast = use && sc.mHasBallast;   s.mBallast = sc.mBallast;
+    s.mHasMaxDepth = use && sc.mHasMaxDepth; s.mMaxDepth = sc.mMaxDepth;
+    s.mHasOxygen = use && sc.mHasOxygen;     s.mOxygen = sc.mOxygen;
+    s.mHasBattery = use && sc.mHasBattery;   s.mBattery = sc.mBattery;
+    s.mHasPlanes = use && sc.mHasPlanes;     s.mPlanes = sc.mPlanes;
+    s.mPeriscope = use && sc.mHasPeriscope ? sc.mPeriscope : mOwnPeriscope;
+    // shallow water under a speedboat: the viewer measures it, so it shows whatever the script's own warnings
+    // (Paul's brief: red under 2 m)
+    // the submarine below its safe depth (max_depth, from its script) likewise
+    if (((mType == TYPE_SPEEDBOAT && s.mDepth < 2.f) || (mType == TYPE_SUBMARINE && s.mHasMaxDepth && s.mSubDepth > (F32)s.mMaxDepth))
+        && std::find(s.mWarnings.begin(), s.mWarnings.end(), std::string("depth")) == s.mWarnings.end())
+    {
+        s.mWarnings.push_back("depth");
+    }
     mShown = s;
 }
 

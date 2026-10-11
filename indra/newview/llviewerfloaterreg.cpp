@@ -112,6 +112,7 @@
 #include "wolffloaterdj.h"            // [WOLF DJ 2026-10-04/]
 #include "wolffloaterdjplaylist.h"    // [WOLF DJ 2026-10-04/]
 #include "wolffloaterweatherreport.h"   // [JIMMY V9C 2026-10-10/]
+#include "wolffloatergraphicshelper.h"   // [GRAPHICS HELPER 2026-10-11/]
 #include "wolffloaterwatchwolf.h"       // [WATCHWOLF 2026-10-10/]
 #include "wolffloaterairports.h"   // [AIRPORTS 2026-10-10/]
 #include "wolffloaterradio.h"   // [RADIO 2026-10-05/]
@@ -660,6 +661,7 @@ void LLViewerFloaterReg::registerFloaters()
     LLFloaterReg::add("wolf_dj", "floater_wolf_dj.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterDJ>);   // [WOLF DJ 2026-10-04/]
     LLFloaterReg::add("wolf_dj_playlist", "floater_wolf_dj_playlist.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterDJPlaylist>);   // [WOLF DJ 2026-10-04/]
     LLFloaterReg::add("wolf_weather_report", "floater_wolf_weather_report.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterWeatherReport>);   // [JIMMY V9C 2026-10-10/]
+    LLFloaterReg::add("wolf_graphics_helper", "floater_wolf_graphics_helper.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterGraphicsHelper>);   // [GRAPHICS HELPER 2026-10-11/]
     LLFloaterReg::add("wolf_watchwolf", "floater_wolf_watchwolf.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterWatchWolf>);   // [WATCHWOLF 2026-10-10/]
     LLFloaterReg::add("wolf_airports", "floater_wolf_airports.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterAirports>);   // [AIRPORTS 2026-10-10/]
     // [WOLF GAME 2026-10-09] Wolf Roleplay (wolfgame.cpp, VIEWER_SPEC.md §3): the Roleplay floater, the

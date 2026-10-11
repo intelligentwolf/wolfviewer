@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [GRAPHICS HELPER 2026-10-11] Wolf World > Graphics Helper (wolffloatergraphicshelper.cpp). Paul: "help
+     users diagnose graphics problems", "a download diagnostic button ... which will include their logs",
+     "buttons that can turn things off and on (toggles) so the user can test different options".
+     A resident whose picture looks wrong finds the feature behind it and sends us the file:
+     read what was found -> switch one thing at a time -> put everything back or keep -> save the file.
+     The checkbox names are the switch table in the .cpp (TOGGLES). -->
+<floater
+ can_close="true"
+ can_minimize="true"
+ can_resize="false"
+ height="644"
+ layout="topleft"
+ name="wolf_graphics_helper"
+ help_topic="wolf_graphics_helper"
+ save_rect="true"
+ single_instance="true"
+ title="Graphics Helper"
+ width="560">
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="12" name="system_label" top="26" width="536">Your computer</text>
+    <text follows="left|top" height="64" layout="topleft" left="12" name="system" top="44" width="536" wrap="true" use_ellipses="true">...</text>
+
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="12" name="problems_label" top="112" width="536">What looks wrong</text>
+    <text_editor follows="left|top" height="96" layout="topleft" left="12" name="problems" top="130" width="536" word_wrap="true" read_only="true" />
+
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="12" name="switches_label" top="236" width="536">Try switching things off</text>
+    <text follows="left|top" height="16" layout="topleft" left="12" name="switches_help" top="252" width="536" text_color="LtGray_50">Each switch changes the picture at once. Change one, look, then change the next.</text>
+
+    <text follows="left|top" font="SansSerifSmallBold" height="16" layout="topleft" left="12" name="render_label" top="276" width="260">Lighting and reflections</text>
+    <check_box follows="left|top" height="18" layout="topleft" left="12" name="t_shadows" top="296" width="260" label="Shadows" tool_tip="Sun, moon and light shadows (RenderShadowDetail)." />
+    <check_box follows="left|top" height="18" layout="topleft" left="12" name="t_skylight" top="316" width="260" label="Sky light on objects" tool_tip="The sky's light on everything. Off makes the insides of buildings and shaded sides very dark (RenderReflectionsEnabled)." />
+    <check_box follows="left|top" height="18" layout="topleft" left="12" name="t_reflections" top="336" width="260" label="Reflections" tool_tip="Reflections of the surroundings on shiny surfaces (RenderReflectionProbeDetail)." />
+    <check_box follows="left|top" height="18" layout="topleft" left="12" name="t_ssr" top="356" width="260" label="Screen-space reflections" tool_tip="RenderScreenSpaceReflections" />
+    <check_box follows="left|top" height="18" layout="topleft" left="12" name="t_mirrors" top="376" width="260" label="Mirrors" tool_tip="RenderMirrors" />
+    <check_box follows="left|top" height="18" layout="topleft" left="12" name="t_ssao" top="396" width="260" label="Ambient occlusion" tool_tip="Soft shading in corners and creases (RenderDeferredSSAO)." />
+    <check_box follows="left|top" height="18" layout="topleft" left="12" name="t_hdr" top="416" width="260" label="HDR lighting" tool_tip="RenderHDREnabled" />
+    <check_box follows="left|top" height="18" layout="topleft" left="12" name="t_glow" top="436" width="260" label="Glow" tool_tip="RenderGlow" />
+    <check_box follows="left|top" height="18" layout="topleft" left="12" name="t_dof" top="456" width="260" label="Depth of field" tool_tip="Blur in front of and behind what you look at (RenderDepthOfField)." />
+    <check_box follows="left|top" height="18" layout="topleft" left="12" name="t_water" top="476" width="260" label="See-through water" tool_tip="RenderTransparentWater. Off draws opaque water, which also has no waves." />
+
+    <text follows="left|top" font="SansSerifSmallBold" height="16" layout="topleft" left="288" name="wolf_label" top="276" width="260">Wolf effects</text>
+    <check_box follows="left|top" height="18" layout="topleft" left="288" name="t_horizon_sea" top="296" width="260" label="Sea to the horizon" tool_tip="The ocean drawn on to the true horizon (WolfViewerHorizonSea). Wolf Territories." />
+    <check_box follows="left|top" height="18" layout="topleft" left="288" name="t_altitude_sky" top="316" width="260" label="Sky thins with height" tool_tip="The sky darkens as you climb (WolfViewerAltitudeSky). Wolf Territories." />
+    <check_box follows="left|top" height="18" layout="topleft" left="288" name="t_fly_clouds" top="336" width="260" label="Clouds to fly through" tool_tip="WolfViewerFlyClouds. Wolf Territories." />
+    <check_box follows="left|top" height="18" layout="topleft" left="288" name="t_far_terrain" top="356" width="260" label="Far land when flying" tool_tip="WolfViewerFarTerrain. Wolf Territories." />
+    <check_box follows="left|top" height="18" layout="topleft" left="288" name="t_weather" top="376" width="260" label="Weather (rain and snow)" tool_tip="WolfWeatherEnabled" />
+    <check_box follows="left|top" height="18" layout="topleft" left="288" name="t_lightning" top="396" width="260" label="Lightning" tool_tip="WolfViewerLightning" />
+    <check_box follows="left|top" height="18" layout="topleft" left="288" name="t_fx" top="416" width="260" label="Script effects (fire, smoke, explosions)" tool_tip="WolfFXEnabled" />
+    <check_box follows="left|top" height="18" layout="topleft" left="288" name="t_waves" top="436" width="260" label="Ocean waves" tool_tip="WolfViewerWaterFFT" />
+    <check_box follows="left|top" height="18" layout="topleft" left="288" name="t_god_rays" top="456" width="260" label="Underwater light rays" tool_tip="WolfViewerWaterGodRays" />
+    <check_box follows="left|top" height="18" layout="topleft" left="288" name="t_caustics" top="476" width="260" label="Light patterns under water" tool_tip="WolfViewerWaterCaustics" />
+    <check_box follows="left|top" height="18" layout="topleft" left="288" name="t_photo" top="496" width="260" label="Photo effect" tool_tip="Wolf World > Photo Effects (WolfViewerPhotoFilter). Can only be switched off here." />
+
+    <slider follows="left|top" height="18" layout="topleft" left="12" name="exposure" top="526" width="400" label="Brightness (exposure)" label_width="150" control_name="RenderExposure" decimal_digits="1" increment="0.1" min_val="0.5" max_val="4.0" tool_tip="RenderExposure. Normal is 1.0." />
+
+    <text follows="left|top" height="32" layout="topleft" left="12" name="privacy" top="552" width="536" wrap="true" text_color="LtGray_50">The diagnostic file holds your settings and your viewer logs, which show your avatar name and the places you visited. Send it only to Wolf Territories support.</text>
+    <text follows="left|bottom" height="16" layout="topleft" left="12" name="status" top="590" width="536" use_ellipses="true" />
+    <button follows="left|bottom" height="23" layout="topleft" left="12" name="put_back_btn" top="612" width="180" label="Put everything back" tool_tip="Every switch and the brightness back to how they were when you first opened this window." />
+    <button follows="right|bottom" height="23" layout="topleft" left="368" name="save_btn" top="612" width="180" label="Save diagnostic file..." tool_tip="Save a text file with what was found, your settings and your logs, to send to Wolf Territories support." />
+</floater>

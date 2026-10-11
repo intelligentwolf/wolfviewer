@@ -51,6 +51,26 @@
              function="File.Quit" />
         </menu_item_call>
     </menu>
+    <!-- <WolfViewer 2026-10-11> Paul: Invisible Mode "can be turned on before login from the Wolf World
+         menu". The same switch as Wolf World > Invisible Mode in world (WolfInvisibleMode, global, so it
+         is set before login). Always shown here: the grid is not chosen yet, and off Wolf Territories the
+         switch is simply never sent (lllogininstance.cpp, wolfinvisible.cpp). -->
+    <menu
+     create_jump_keys="true"
+     label="Wolf World"
+     tear_off="true"
+     name="WolfWorld">
+        <menu_item_check
+         label="Invisible Mode"
+         name="WolfInvisibleMode">
+        <on_check
+         function="CheckControl"
+         parameter="WolfInvisibleMode" />
+        <on_click
+         function="ToggleControl"
+         parameter="WolfInvisibleMode" />
+        </menu_item_check>
+    </menu>
     <menu
      create_jump_keys="true"
      label="Help"
@@ -74,6 +94,14 @@
             function="PromptShowURL"
             name="wolf_support_url"
             parameter="WebLaunchExternalTarget,https://discord.gg/S3wj882aQH" />
+       </menu_item_call>
+       <!-- [GRAPHICS HELPER 2026-10-11] the same window as Wolf World > Graphics Helper, before login -->
+       <menu_item_call
+        label="Graphics Helper..."
+        name="WolfGraphicsHelper">
+           <menu_item_call.on_click
+            function="Floater.Show"
+            parameter="wolf_graphics_helper" />
        </menu_item_call>
         <menu_item_call
          label="Guidebook"

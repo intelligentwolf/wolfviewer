@@ -74,18 +74,19 @@ bool WolfFloaterAirports::postBuild()
 void WolfFloaterAirports::onOpen(const LLSD& key)
 {
     LLFloater::onOpen(key);
-    WolfAirports::instance().refresh();
-    mFilledLoaded = false;
+    // <WolfViewer 2026-10-11> Paul: "refresh the airports window every time it opens" - a new list from the
+    // website each time (draw() fills again when it arrives), the one held meanwhile
+    WolfAirports::instance().refreshNow();
     fill();
     mSearch->setFocus(true);
 }
 
 void WolfFloaterAirports::draw()
 {
-    // The directory arrives a moment after the window opens the first time: fill the list then.
+    // The directory arrives a moment after the window opens: fill the list again then.
     WolfAirports& airports = WolfAirports::instance();
     airports.refresh();
-    if (!mFilledLoaded && airports.loaded())
+    if (airports.loaded() && mFilledGeneration != airports.generation())
     {
         fill();
     }
@@ -104,7 +105,7 @@ void WolfFloaterAirports::fill()
         mSummary->setText(std::string("Loading the airports list..."));
         return;
     }
-    mFilledLoaded = true;
+    mFilledGeneration = airports.generation();
 
     std::string query = mSearch->getText();
     LLStringUtil::trim(query);

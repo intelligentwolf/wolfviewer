@@ -1247,10 +1247,32 @@ void WolfFlight::landGuidance(F32 dt)
         {
             towerCallouts(height);   // <WolfViewer 2026-10-11/> tower
         }
+        // <WolfViewer 2026-10-11> Paul's Tromso test, 13:33-13:39Z: final began 543 m up 3.3 km out (the path there is 172 m:
+        // the terrain floor had held it up over the hills on the way round), it came down at the 4 m/s limit, crossed the
+        // runway still high, went on down past its far end into the sea and sat there in FLARE. "Land even when unstable"
+        // still stands for everything ON the runway - but past its far end there is nothing left to land on: the runway is
+        // behind the plane, so it climbs away and flies the approach again (as often as it takes).
+        if ((mLand == LAND_FINAL || mLand == LAND_FLARE) && along > mLandLen + 50.f)
+        {
+            postCas("GO AROUND", CAS_CAUTION);
+            clearCas("UNSTABLE");
+            clearCas("FLARE");
+            tower_say(towerCallsign() + ", go around, the runway is behind you.");
+            LL_INFOS("WolfFlight") << "autoland: past the runway's end " << (along - mLandLen) << " m, " << height
+                                   << " m up: around again" << LL_ENDL;
+            landSetRunway(mLandThr, mLandThr + LLVector3d(mLandDir * mLandLen), mLandWidth, mLandTop, false);
+            mLand = LAND_APPROACH;
+            mLandFaf.mdV[VZ] = llmax((F32)mLandFaf.mdV[VZ], mLandTop + 100.f);   // climb away first
+            break;
+        }
+        // </WolfViewer>
         if (mLand == LAND_FINAL)
         {
             const F32 path = mLandTop + llmax(0.f, aim - along) * GLIDE_TAN;
-            mLandWantVS = llclamp((path - z) * 0.25f - mData.mGS * GLIDE_TAN, -4.f, 2.f);
+            // <WolfViewer 2026-10-11> high on the path, down at up to 10 degrees (the 4 m/s limit lost only 300 m over the
+            // last 3.3 km at 43 m/s); the autothrottle holds the approach speed. Low, back up to the path as before.
+            const F32 max_desc = llclamp(mData.mGS * 0.176f, 4.f, 10.f);   // tan 10 = 0.176
+            mLandWantVS = llclamp((path - z) * 0.25f - mData.mGS * GLIDE_TAN, -max_desc, 2.f);
             mLandWantSpeed = approach;
             // <WolfViewer 2026-10-11> Paul: "it should TRY to land anyway" - asked, he chose "land even when unstable":
             // no go-arounds. Off the line, off the glide path or long, it keeps steering onto the centreline and

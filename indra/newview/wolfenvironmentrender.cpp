@@ -763,8 +763,12 @@ namespace
             // ...driven by measurement: measureCloudCover adjusts the coverage until the clouds measured over the sky cover the
             // stock share (WolfEepReference::cloudCoveredFraction); before its first measurement, that share itself
             // [round 16] once the stock layer itself has been measured (renderStockCloudProbe), the coverage learned from it
-            const F32 eepCover = !psky ? 0.f : (sStockValid && sCoverAbs >= 0.f) ? sCoverAbs
-                                 : llclamp(WolfEepReference::cloudCoveredFraction(psky) * sCoverScale, 0.f, 1.f);
+            // [WolfViewer 2026-10-14] audit S9: an EEP with no clouds at all means no clouds, at once - the learned coverage
+            // (measureCloudCover) only moves 5 % a reading and is held at 0.02 or more, so a clear region reached by a crossing
+            // kept a thin veil for a minute and never cleared
+            const F32 eepShareNow = psky ? WolfEepReference::cloudCoveredFraction(psky) : 0.f;
+            const F32 eepCover = (!psky || eepShareNow <= 0.f) ? 0.f : (sStockValid && sCoverAbs >= 0.f) ? sCoverAbs
+                                 : llclamp(eepShareNow * sCoverScale, 0.f, 1.f);
             const F32 coverTarget = llclamp(z.hasClouds ? z.clouds : (psky ? eepCover : weatherCover(d)), 0.f, 1.f);
             // [WolfViewer round 17] the EEP's cloud_shadow steps (a region's 120 s sky transition, a day cycle's keyframes, a
             // crossing): the clouds' coverage follows over GENUS_TAU (20 s, as the genus layers do) instead of jumping -
@@ -821,6 +825,17 @@ namespace
                 F64 h = fmod(rw.autoEnvSkyTime() / 3600.0 + rw.autoEnvLon() / 15.0, 24.0);
                 if (h < 0.0) h += 24.0;
                 w.hour = (F32)h;
+                // [WolfViewer 2026-10-14] audit B1: Weather::summer was never set (always true). The warm half-year of the place:
+                // the sun on the place's side of the equator (declination with the latitude's sign), or the tropics (|lat| under
+                // the obliquity, 23.439 deg), where it is always warm. Declination from the U.S. Naval Observatory's "Approximate
+                // Solar Coordinates": n = JD - 2451545, L = 280.459 + 0.98564736 n, g = 357.529 + 0.98560028 n,
+                // lambda = L + 1.915 sin g + 0.020 sin 2g, sin(delta) = sin(23.439) sin(lambda); JD = unix / 86400 + 2440587.5.
+                const F64 n = rw.autoEnvSkyTime() / 86400.0 + 2440587.5 - 2451545.0;
+                const F64 L = 280.459 + 0.98564736 * n, g = (357.529 + 0.98560028 * n) * DEG_TO_RAD;
+                const F64 lambda = (L + 1.915 * sin(g) + 0.020 * sin(2.0 * g)) * DEG_TO_RAD;
+                const F64 sinDelta = sin(23.439 * DEG_TO_RAD) * sin(lambda);
+                const F64 lat = rw.autoEnvLat();
+                w.summer = fabs(lat) < 23.439 || lat * sinDelta > 0.0;
             }
             // the high band's trend over the next hours (rule 9: cirrus invading before a warm front), from the forecast rows
             if (d.mHourly.size() >= 2)
@@ -842,12 +857,19 @@ namespace
             // EEP's, keeping their proportions; the fog / pannus slab (channel a) is not cloud cover in the EEP's sense (the
             // server carries fog as haze, WolfEnvironment.cs:1027-1031 ApplyWeather) and keeps the rule's value
             WolfCloudGenus::Result shown = sGenus;
+            // [WolfViewer 2026-10-14] audit S3: the scale is taken from the weather's own genera (target), not the eased ones, so a
+            // layer fading out keeps fading (scaled by the eased layers' own largest, it was put back to the full cover), and a
+            // share under 1e-3 counts as no cloud (no divide by a vanishing number)
             F32 metMax = 0.f;
-            for (S32 i = 0; i < 3; ++i) metMax = llmax(metMax, shown.layer[i].coverage);
-            if (metMax > 0.f)
+            for (S32 i = 0; i < 3; ++i) if (target.layer[i].height > 0.f) metMax = llmax(metMax, target.layer[i].coverage);
+            if (metMax > 1e-3f)
             {
                 const F32 k = sNext.cover / metMax;
-                for (S32 i = 0; i < 3; ++i) shown.layer[i].coverage = llclamp(shown.layer[i].coverage * k, 0.f, 1.f);
+                for (S32 i = 0; i < 3; ++i)
+                {
+                    const F32 c = shown.layer[i].coverage;
+                    shown.layer[i].coverage = c > 1e-3f ? llclamp(c * k, 0.f, 1.f) : 0.f;
+                }
                 WolfCloudGenus::toCloudLayers(shown, sClouds->layers());
             }
             else
@@ -1108,6 +1130,11 @@ namespace
         f.weather_rotation_deg = sGenusValid ? sGenus.rotationDeg : 0.f;   // [WolfViewer step 3] cloud streets / cirrus along the wind
         f.weather_stretch = sGenusValid ? sGenus.stretch : 1.f;
         for (S32 i = 0; i < 4; ++i) f.weather_layer_stretched[i] = sGenusValid ? sGenus.layerStretch[i] : 0.f;   // [2026-10-14] only those layers
+        // [WolfViewer 2026-10-14] convective layers get a top per column (cloudsCommon.glsl wolfLayerTower; audit B2): the genus's
+        // own value (WolfCloudGenus::towerShare), or a document's cloud style "towering" on takram's low layer, as Cu mediocris
+        for (S32 i = 0; i < 4; ++i) f.weather_layer_tower[i] = sGenusValid ? WolfCloudGenus::towerShare(sGenus.layer[i]) : 0.f;
+        if (d.mCloudStyle == "towering" && f.weather_layer_tower[0] <= 0.f)
+            f.weather_layer_tower[0] = WolfCloudGenus::towerShareOf("Cu_mediocris");
         // [WolfViewer round 13] the offset is added AFTER the repeat and the turn (cloudsCommon.glsl sampleWeather:
         // textureLod(localWeatherTexture, (S R (uv - pivot) + pivot) x repeat + offset)), so a wind of w globe-uv per second
         // moves the clouds at w only as offset velocity = repeat x S R x w - before, w alone: the clouds drifted at 1/100 of
@@ -1119,6 +1146,9 @@ namespace
             // a feature at texture coordinate t sits where repeat x M (uv - pivot) + offset = t: offset growing by delta moves
             // it by -M^-1 delta / repeat in uv, so the clouds go WITH the wind for delta = -repeat M w dt
             f.local_weather_velocity.set(-rep * inv * (ca * wx - sa * wy), -rep * (sa * wx + ca * wy));
+            // [WolfViewer 2026-10-14] the unstretched layers' lookup (R without S, cloudsCommon.glsl sampleWeather) has its own
+            // offset, -repeat R w dt, so a change of the stretch never moves them
+            f.local_weather_velocity_turned.set(-rep * (ca * wx - sa * wy), -rep * (sa * wx + ca * wy));
             f.wind_speed = windSpeed;   // [WolfViewer round 17] the shapes' drift
         }
         // [WolfViewer 2026-10-13] WolfEnvironmentTrace: every input that moves the clouds, four times a second, so a report

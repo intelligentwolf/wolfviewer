@@ -131,6 +131,8 @@ namespace WolfTk
         S32        quality = 2;         // 0 low, 1 medium, 2 high, 3 ultra
         F32        coverage = 0.3f;     // uniforms.ts:54 default
         LLVector2  local_weather_velocity;
+        LLVector2  local_weather_velocity_turned;   // [WolfViewer 2026-10-14] the same drift for the unstretched lookup (R w, no S)
+        F32        weather_layer_tower[4] = { 0.f, 0.f, 0.f, 0.f };   // [WolfViewer 2026-10-14] per-column cloud tops (cloudsCommon.glsl)
         F32        wind_speed = 0.f;   // [WolfViewer round 17] m/s: the shapes' drift wolfCloudEvolution (cloudsCommon.glsl) = 0.2 x the wind's path
         F32        turbulence_displacement = 350.f;   // metres (CloudsMaterial.ts turbulenceDisplacement 350); [WolfViewer 2026-10-13] + the EEP's cloud_variance
         F32        haze_density_scale = 3e-5f;   // CloudsMaterial.ts:536 default

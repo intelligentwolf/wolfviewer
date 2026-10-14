@@ -89,6 +89,7 @@ namespace WolfCloudGenus
             l.profile = g.prof;
             l.coverage = llclamp(cover, 0.f, 1.f);
             l.ice = g.ice; l.absorption = g.absorption; l.shadow = g.shadow;
+            l.tower = towerShareOf(genus);   // [2026-10-14] cloudsCommon.glsl wolfLayerTower
             return l;
         }
         Layer none(char channel) { Layer l; l.channel = channel; return l; }
@@ -137,7 +138,9 @@ namespace WolfCloudGenus
             if (day && w.summer)
             {
                 const bool heavy = w.precip >= 0.95f;   // Factory.cpp precipitation limits {0.1, 0.25, 0.95} mm: heavy
-                R = make(heavy ? "Cb" : "Cu_congestus", cuBase, cuBase + (heavy ? 6000.f : 3000.f), std::max(w.low, 0.3f), 'r');
+                // [WolfViewer 2026-10-14] congestus "+3-5 km" deep (BEAUTY_RESEARCH.md 8.4; was +3 km): with its tower share
+                // (towerShareOf, 0.6) the columns' tops spread over 3 to 5 km above the base instead of one flat 3 km slab
+                R = make(heavy ? "Cb" : "Cu_congestus", cuBase, cuBase + (heavy ? 6000.f : 5000.f), std::max(w.low, 0.3f), 'r');
                 r.notes.push_back("5 Cu congestus / Cb calvus showers");
             }
             else
@@ -146,6 +149,17 @@ namespace WolfCloudGenus
                 A = make("St", 300.f, 600.f, 0.3f * w.low, 'a');
                 r.notes.push_back("6 Sc with pannus (night / winter showers)");
             }
+        }
+        else if (w.thunderPct >= 20.f && w.low > 0.f)
+        {
+            // [WolfViewer 2026-10-14] audit B1: towering cumulus before the rain. Every congestus and Cb path above needs rain in
+            // the next hour, so a dry hour with thunder forecast (MET Locationforecast next_1_hours probability_of_thunder) drew
+            // fair-weather cumulus. Thunder needs the cumulus to grow first: "All cumulus clouds develop because of convection
+            // ... can grow in height and potentially transform into cumulonimbus" (Met Office low-level clouds), congestus being
+            // "markedly sprouting and often of great vertical extent" (WMO International Cloud Atlas, Cumulus congestus). 20 %
+            // is the threshold this table already reads as "thunder later" (rule 15, Ac castellanus, BEAUTY_RESEARCH.md 9.4).
+            R = make("Cu_congestus", cuBase, cuBase + 5000.f, w.low, 'r');
+            r.notes.push_back("4b Cu congestus (thunder forecast, no rain yet)");
         }
         else if (w.precip > 0.f && w.low >= 0.86f && w.medium < 0.3f)
         {
@@ -224,6 +238,23 @@ namespace WolfCloudGenus
         return r;
     }
 
+    // [WolfViewer 2026-10-14] how far a genus's column tops spread (cloudsCommon.glsl wolfLayerTower): 1 - the lowest top as a
+    // share of the layer's depth. From the genera's own depth ranges (BEAUTY_RESEARCH.md 8.1 / 8.4, WMO International Cloud
+    // Atlas): Cu mediocris "a few hundred metres to about 2 km" over its 1.2 km layer here, lowest top 300 m -> 1 - 0.25;
+    // Cu congestus "+3-5 km" over its 5 km layer -> 1 - 0.6. Cu humilis keeps a level top ("tops nearly the same level", WMO
+    // Cumulus humilis) and Cb its flat anvil ("top nearly always flattened", WMO Cumulonimbus): 0, takram's fixed band.
+    F32 towerShareOf(const std::string& genus)
+    {
+        if (genus == "Cu_mediocris") return 1.f - 0.25f;
+        if (genus == "Cu_congestus") return 1.f - 0.6f;
+        return 0.f;
+    }
+
+    F32 towerShare(const Layer& l)
+    {
+        return l.height > 0.f ? l.tower : 0.f;   // eased with the layer's other numbers (approach)
+    }
+
     void toCloudLayers(const Result& r, WolfTk::CloudLayers& out)
     {
         for (S32 i = 0; i < 4; ++i)
@@ -256,6 +287,9 @@ namespace WolfCloudGenus
         for (S32 i = 0; i < 4; ++i)
         {
             Layer& c = cur.layer[i]; const Layer& t = target.layer[i];
+            // [WolfViewer 2026-10-14] which lookup a layer uses may change only while it shows nothing (audit B3: it was taken
+            // once, at the first weather, so cirrus arriving later stayed unstretched)
+            if (c.height <= 0.f) cur.layerStretch[i] = target.layerStretch[i];
             if (c.height <= 0.f && t.height > 0.f)
             {
                 // a layer coming in: start it at the target's shape with no body, so it grows in place
@@ -265,7 +299,7 @@ namespace WolfCloudGenus
             {
                 // a layer going out: its numbers shrink to nothing where it stands
                 towards(c.height, 0.f, k); towards(c.coverage, 0.f, k);
-                if (c.height < 1.f) { c = t; c.channel = t.channel; }
+                if (c.height < 1.f) { c = t; c.channel = t.channel; cur.layerStretch[i] = target.layerStretch[i]; }
                 continue;
             }
             c.genus = t.genus; c.channel = t.channel; c.shadow = t.shadow;
@@ -275,6 +309,7 @@ namespace WolfCloudGenus
             towards(c.profile.expTerm, t.profile.expTerm, k); towards(c.profile.exponent, t.profile.exponent, k);
             towards(c.profile.linearTerm, t.profile.linearTerm, k); towards(c.profile.constantTerm, t.profile.constantTerm, k);
             towards(c.coverage, t.coverage, k); towards(c.ice, t.ice, k); towards(c.absorption, t.absorption, k);
+            towards(c.tower, t.tower, k);   // [2026-10-14] a genus change grows or settles the tops, never jumps
         }
         // [WolfViewer 2026-10-13] the texture's turn and stretch are NOT animated (nor, 2026-10-14, which layers are stretched:
         // switching a layer between the two lookups would re-form its clouds in place).
@@ -285,6 +320,20 @@ namespace WolfCloudGenus
         // stretch are taken once, when the genus state starts (sGenusValid false: first frame or a sky reset,
         // wolfenvironmentrender.cpp:640/659/1061), and held; the only motion left is the drift at the wind's own speed
         // (localWeatherOffset, wolfenvironmentrender.cpp:737).
+        // [WolfViewer 2026-10-14] audit B3: "taken once" froze them at the first weather of the session (sGenusValid is only
+        // reset by a teleport). They now follow whenever nothing on screen would move: the stretch (it acts on the stretched
+        // layers only) once no stretched layer has a body, the turn (it acts on every layer) once no layer has one.
+        bool stretchedShown = false, anyShown = false;
+        for (S32 i = 0; i < 4; ++i)
+        {
+            if (cur.layer[i].height > 0.f && cur.layer[i].coverage > 1e-3f)
+            {
+                anyShown = true;
+                if (cur.layerStretch[i] > 0.5f) stretchedShown = true;
+            }
+        }
+        if (!stretchedShown) cur.stretch = target.stretch;
+        if (!anyShown) cur.rotationDeg = target.rotationDeg;
         cur.dewPoint = target.dewPoint; cur.lcl = target.lcl; cur.notes = target.notes;
     }
 }

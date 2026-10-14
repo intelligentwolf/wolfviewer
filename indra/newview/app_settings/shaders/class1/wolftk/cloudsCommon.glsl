@@ -120,27 +120,43 @@ WeatherSample sampleWeather(const vec2 uv, const float height, const float mipLe
   // [WolfViewer round 13] about wolfWeatherPivot, the globe uv near the camera, not the cube face's centre: a turn of
   // the wind (the hourly forecast, the genus switching streets on / off, smoothed over 20 s) about a point thousands of
   // km away swept the clouds overhead past at hundreds of m/s (Paul 2026-10-13: "the clouds are rushing past")
-  vec2 wuv = (wolfWeatherRotation * (uv - wolfWeatherPivot)) + wolfWeatherPivot;
-  vec4 rawWeather = textureLod(
-    localWeatherTexture,
-    wuv * localWeatherRepeat + localWeatherOffset,
-    mipLevel
-  ).LOCAL_WEATHER_CHANNELS;
   // [WolfViewer 2026-10-14] the stretch only for the layers that have that shape (wolfLayerStretched: cirrus, cloud
   // streets). One lookup served every layer, so a thin cirrus veil drew the cumulus below it 4x long (Paul: "all the
-  // clouds ... seem to be long ... wherever i go"). The other layers read the texture through the turn R alone. The
-  // offset was integrated for S R (wolfenvironmentrender.cpp local_weather_velocity = -repeat S R w), so the same drift
-  // through R alone is S^-1 x that offset: x times the stretch.
-  if (wolfWeatherStretch != 1.0 && any(lessThan(wolfLayerStretched, vec4(0.5)))) {
+  // clouds ... seem to be long ... wherever i go"). Every other layer reads the texture through the turn R alone, always,
+  // with its own offset (wolfWeatherOffsetTurned, integrated from R w: wolfenvironmentrender.cpp
+  // local_weather_velocity_turned), so neither a change of the stretch nor a layer's switch (made only while that layer
+  // shows nothing, wolfcloudgenus.cpp approach) moves a cloud. Each lookup runs only when some layer uses it.
+  bvec4 stretched = greaterThan(wolfLayerStretched, vec4(0.5));
+  vec4 rawWeather = vec4(0.0);
+  if (any(stretched)) {
+    vec2 wuv = (wolfWeatherRotation * (uv - wolfWeatherPivot)) + wolfWeatherPivot;
+    rawWeather = textureLod(localWeatherTexture, wuv * localWeatherRepeat + localWeatherOffset, mipLevel).LOCAL_WEATHER_CHANNELS;
+  }
+  if (!all(stretched)) {
     vec2 tuv = (wolfWeatherTurn * (uv - wolfWeatherPivot)) + wolfWeatherPivot;
-    vec2 toff = vec2(localWeatherOffset.x * wolfWeatherStretch, localWeatherOffset.y);
-    vec4 turned = textureLod(localWeatherTexture, tuv * localWeatherRepeat + toff, mipLevel).LOCAL_WEATHER_CHANNELS;
-    rawWeather = mix(turned, rawWeather, step(vec4(0.5), wolfLayerStretched));
+    vec4 turned = textureLod(localWeatherTexture, tuv * localWeatherRepeat + wolfWeatherOffsetTurned, mipLevel).LOCAL_WEATHER_CHANNELS;
+    rawWeather = mix(turned, rawWeather, vec4(stretched));
   }
   vec4 localWeather = pow(rawWeather, weatherExponents);
   #ifdef SHADOW
   localWeather *= shadowLayerMask;
   #endif // SHADOW
+
+  // [WolfViewer 2026-10-14] a departure from takram, whose layers are fixed bands (clouds.glsl sampleWeather: one
+  // heightFraction per layer between its min and max), so every cumulus tower in a layer had the same top. For a convective
+  // layer (wolfLayerTower > 0: how far the tops spread, 0 = takram's band) the top of each column follows the weather
+  // texture's value there: top = base + depth x (1 - wolfLayerTower x (1 - weather)). That is Schneider's way in Horizon
+  // Zero Dawn's Nubis ("The Real-time Volumetric Cloudscapes of Horizon Zero Dawn", SIGGRAPH 2015 Advances, pp. 34-42): the
+  // weather map, not a fixed band, decides each column's height profile, so denser cells grow into taller towers.
+  // Above its own top a column has no cloud: heightFraction is clamped to 1 there, where shapeAlteringFunction is 0.
+  if (any(greaterThan(wolfLayerTower, vec4(0.0)))) {
+    vec4 topShare = 1.0 - wolfLayerTower * (1.0 - clamp(localWeather, 0.0, 1.0));
+    weather.heightFraction = remapClamped(
+      vec4(height),
+      minLayerHeights,
+      minLayerHeights + (maxLayerHeights - minLayerHeights) * topShare
+    );
+  }
 
   vec4 heightScale = shapeAlteringFunction(weather.heightFraction, shapeAlteringBiases);
 

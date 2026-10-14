@@ -314,25 +314,32 @@ void WolfEnvironmentState::idle()
             // [WOLF GRID GATE] off Wolf nothing of it stays (a hypergrid jump away)
             mRegion = mParcel = mPreview = mAuto = WolfEnvDoc();
             mFetchedFor.clear();
+            mDocsFor.clear();
         }
         return;
     }
     // [WolfViewer 2026-10-14] the region underneath when flying past the agent region's edge (open sea, visiting land), as
     // the EEP sky (LLEnvironment::wolfEnvironmentRegion): Paul, "the environment didnt change as i went over each region"
     LLViewerRegion* region = LLEnvironment::wolfEnvironmentRegion();
-    if (!region || mBusy) return;
+    if (!region) return;
     const std::string id = region->getRegionID().asString();
+    if (mBusy)
+    {
+        // [WolfViewer 2026-10-14] audit S2: a read still in flight for the region left behind (up to its 30 s timeout) held the
+        // next region's read back; it is forgotten (fetchCoro drops a reply whose serial is old) and the new one starts now
+        if (id == mFetchedFor) return;
+        ++mSerial;
+        mBusy = false;
+    }
     LLParcel* parcel = LLViewerParcelMgr::getInstance()->getAgentParcel();
     const S32 local = parcel ? parcel->getLocalID() : -1;
     const F64 now = LLFrameTimer::getElapsedSeconds();
     if (id == mFetchedFor && local == mParcelLocalId && now < mNextFetch) return;
     // a parcel change on the same region is read at most every 5 s (an edge walk flickers the id)
     if (id == mFetchedFor && now - mLastFetch < 5.0) return;
-    if (id != mFetchedFor)
-    {
-        // a new region: what was in force belonged to the old one
-        mRegion = mParcel = mAuto = WolfEnvDoc();
-    }
+    // [WolfViewer 2026-10-14] audit S1: a new region's documents replace the old ones when its reply arrives (applyReply), not
+    // before - clearing them here dropped the sky to the EEP-only document and takram's default layers for the length of the
+    // read, then snapped to the new document. If that read fails, the old region's are cleared then (fetchCoro).
     mLastFetch = now;
     mFetchedFor = id;
     mParcelLocalId = local;
@@ -378,6 +385,13 @@ void WolfEnvironmentState::fetchCoro(std::string url, std::string region_id, U64
         LL_WARNS("WolfEnv") << "Wolf Environment not read: "
                             << (!status ? status.toString() : std::string("the reply was not a success")) << LL_ENDL;
         self.mNextFetch = LLFrameTimer::getElapsedSeconds() + 20.0;
+        // [WolfViewer 2026-10-14] the documents still in force belong to the region left behind (idle keeps them until this
+        // region's reply): they must not stay over a region whose own could not be read
+        if (self.mDocsFor != region_id)
+        {
+            self.mRegion = self.mParcel = self.mAuto = WolfEnvDoc();
+            self.mDocsFor = region_id;
+        }
         return;
     }
     self.applyReply(reply, region_id);
@@ -394,4 +408,5 @@ void WolfEnvironmentState::applyReply(const LLSD& reply, const std::string& regi
     mAuto = reply["autoEnv"].isMap() ? WolfEnvDoc::fromEntry(reply["autoEnv"]) : WolfEnvDoc();
     // A parcel's sky is only shown when the estate shows parcel environments (EnvironmentModule.cs:487,706).
     mUseParcel = reply["estateAllowsParcel"].asBoolean();
+    mDocsFor = region_id;   // [2026-10-14]
 }

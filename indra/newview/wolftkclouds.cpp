@@ -563,6 +563,7 @@ struct Clouds::Impl
     // Source: three-geospatial clouds/src/CloudsEffect.ts:180-186 mutable parameter instances
     glm::vec2 localWeatherRepeat = glm::vec2(100.f);
     glm::vec2 localWeatherOffset = glm::vec2(0.f);
+    glm::vec2 localWeatherOffsetTurned = glm::vec2(0.f);   // [WolfViewer 2026-10-14] the unstretched lookup's (cloudsCommon.glsl)
     glm::vec3 shapeRepeat = glm::vec3(0.0003f);
     glm::vec3 shapeOffset = glm::vec3(0.f);
     glm::vec3 shapeDetailRepeat = glm::vec3(0.006f);
@@ -570,7 +571,7 @@ struct Clouds::Impl
     glm::vec2 turbulenceRepeat = glm::vec2(20.f);
     // CloudsEffect.ts:199-201 velocities (shape / detail: 0; the weather's from the frame)
     glm::vec3 shapeVelocity = glm::vec3(0.f), shapeDetailVelocity = glm::vec3(0.f);
-    F32 cloudEvolution = 0.f;   // [WolfViewer round 17] metres, the shapes' drift
+    F64 cloudEvolution = 0.0;   // [WolfViewer round 17] metres, the shapes' drift ([2026-10-14] F64: it is no longer wrapped)
     S32 lastQuality = -1;
     // the main view's camera (the probe faces select shadow cascades with it)
     glm::mat4 mainView = glm::mat4(1.f);
@@ -758,7 +759,7 @@ struct Clouds::Impl
         // [WolfViewer round 9] the repeat scaled by the EEP's cloud_scale (CloudsFrame weather_repeat_scale): bigger clouds = fewer repeats
         u2f(sh, "localWeatherRepeat", localWeatherRepeat.x * f.weather_repeat_scale, localWeatherRepeat.y * f.weather_repeat_scale);
         u2f(sh, "localWeatherOffset", localWeatherOffset.x, localWeatherOffset.y);
-        u1f(sh, "wolfCloudEvolution", cloudEvolution);   // [WolfViewer round 17]
+        u1f(sh, "wolfCloudEvolution", (F32)cloudEvolution);   // [WolfViewer round 17]
         u3f(sh, "shapeRepeat", shapeRepeat.x, shapeRepeat.y, shapeRepeat.z);
         u3f(sh, "shapeOffset", shapeOffset.x, shapeOffset.y, shapeOffset.z);
         u3f(sh, "shapeDetailRepeat", shapeDetailRepeat.x, shapeDetailRepeat.y, shapeDetailRepeat.z);
@@ -803,9 +804,10 @@ struct Clouds::Impl
             static LLStaticHashedString s_turn("wolfWeatherTurn");
             const S32 tloc = sh.getUniformLocation(s_turn);
             if (tloc >= 0) glUniformMatrix2fv(tloc, 1, GL_FALSE, turn);
-            u1f(sh, "wolfWeatherStretch", llmax(f.weather_stretch, 1e-3f));
             u4f(sh, "wolfLayerStretched", f.weather_layer_stretched[0], f.weather_layer_stretched[1],
                 f.weather_layer_stretched[2], f.weather_layer_stretched[3]);
+            u2f(sh, "wolfWeatherOffsetTurned", localWeatherOffsetTurned.x, localWeatherOffsetTurned.y);
+            u4f(sh, "wolfLayerTower", f.weather_layer_tower[0], f.weather_layer_tower[1], f.weather_layer_tower[2], f.weather_layer_tower[3]);
         }
         u4f(sh, "densityProfile.expTerms", L[0].densityProfile.expTerm, L[1].densityProfile.expTerm, L[2].densityProfile.expTerm, L[3].densityProfile.expTerm);
         u4f(sh, "densityProfile.exponents", L[0].densityProfile.exponent, L[1].densityProfile.exponent, L[2].densityProfile.exponent, L[3].densityProfile.exponent);
@@ -1103,10 +1105,18 @@ bool Clouds::render(const Atmosphere& atmosphere, const CloudsFrame& f)
     ++m.frame;
     // updateSharedUniforms (:345-397): offsets += velocity x deltaTime
     m.localWeatherOffset += glm::vec2(f.local_weather_velocity.mV[0], f.local_weather_velocity.mV[1]) * f.dt;
+    // [WolfViewer 2026-10-14] wrapped into 0..1: the weather texture repeats, so a whole step is no change, and the float keeps
+    // its precision (it grew without end). The plain lookup's x times the stretch (cloudsCommon.glsl sampleWeather) stays
+    // seamless because the stretch is a whole number (wolfcloudgenus.cpp: 1 or 4).
+    m.localWeatherOffset -= glm::floor(m.localWeatherOffset);
+    m.localWeatherOffsetTurned += glm::vec2(f.local_weather_velocity_turned.mV[0], f.local_weather_velocity_turned.mV[1]) * f.dt;
+    m.localWeatherOffsetTurned -= glm::floor(m.localWeatherOffsetTurned);
     // [WolfViewer round 17] the shapes' vertical drift in metres (cloudsCommon.glsl wolfCloudEvolution): takram's ratio of drift to
-    // cloud motion, 2e4 x the offset of its repeat-100 texture (clouds.glsl:120-121), 0.2 - wrapped at the shape texture's
-    // period 1 / shapeRepeat (CloudsEffect.ts:180-186 shapeRepeat 3e-4: 3333 m), where the tiled noise repeats
-    m.cloudEvolution = fmodf(m.cloudEvolution + 0.2f * llmax(f.wind_speed, 0.f) * f.dt, 1.f / llmax(m.shapeRepeat.z, 1e-6f));
+    // cloud motion, 2e4 x the offset of its repeat-100 texture (clouds.glsl:120-121), 0.2.
+    // [WolfViewer 2026-10-14] NOT wrapped any more: it moves the shape lookup along the surface normal (cloudsCommon.glsl
+    // evolution = -surfaceNormal x this), which is not a noise-texture axis, so the wrap at 1 / shapeRepeat.z was no whole
+    // period and every shape jumped at once each wrap (14-55 min apart). Held in F64.
+    m.cloudEvolution += 0.2 * (F64)llmax(f.wind_speed, 0.f) * (F64)f.dt;
     m.shapeOffset += m.shapeVelocity * f.dt;
     m.shapeDetailOffset += m.shapeDetailVelocity * f.dt;
     const glm::mat4 w2e = glm::mat4(f.world_to_ecef);

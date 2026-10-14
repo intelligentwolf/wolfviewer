@@ -152,6 +152,7 @@ private:
     mutable WolfEnvDoc mEepOnly;   // [WolfViewer round 13] WolfEnvironmentAllRegions: a document of the region's EEP alone (active())
     bool        mUseParcel = false;
     std::string mFetchedFor;
+    std::string mDocsFor;   // [2026-10-14] the region mRegion / mParcel / mAuto were read for (kept until the next region's arrive)
     S32         mParcelLocalId = -1;
     F64         mNextFetch = 0.0;
     bool        mBusy = false;

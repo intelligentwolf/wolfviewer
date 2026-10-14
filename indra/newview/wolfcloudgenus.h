@@ -82,6 +82,7 @@ namespace WolfCloudGenus
         F32  ice = 0.f;                         // 0 water .. 1 ice
         F32  absorption = 0.f;                  // per unit density (precipitation darkening)
         bool shadow = false;
+        F32  tower = 0.f;                       // [2026-10-14] how far the column tops spread (towerShareOf; cloudsCommon.glsl)
     };
 
     struct Result
@@ -110,6 +111,11 @@ namespace WolfCloudGenus
      *  jump (they only label), the numbers never do. A layer appearing from nothing grows from the target's base
      *  with zero height and coverage. */
     void approach(Result& cur, const Result& target, F32 dt, F32 tau);
+
+    /** [WolfViewer 2026-10-14] the lowest column top of a convective genus as a share of its layer's depth (cloudsCommon.glsl
+     *  wolfLayerTower), 0 = a flat-topped band; and the same for a layer (0 while it has no body). */
+    F32 towerShareOf(const std::string& genus);
+    F32 towerShare(const Layer& l);
 }
 
 #endif // WOLF_CLOUD_GENUS_H

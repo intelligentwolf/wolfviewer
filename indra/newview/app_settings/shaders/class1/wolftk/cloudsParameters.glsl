@@ -72,9 +72,10 @@ uniform mat2 wolfWeatherRotation;  // the weather texture turned with the wind a
 uniform vec2 wolfWeatherPivot;     // [WolfViewer round 13] the globe uv the turn and stretch are about (near the camera; wolftkclouds.cpp)
 // [WolfViewer 2026-10-14] the stretch is for the layers that have that shape only (cirrus, cloud streets;
 // wolfcloudgenus.cpp layerStretch): the others read the texture through the turn alone
-uniform mat2 wolfWeatherTurn;      // the turn R without the stretch
-uniform float wolfWeatherStretch;  // the stretch S = diag(1 / this, 1) in wolfWeatherRotation = S R
+uniform mat2 wolfWeatherTurn;      // the turn R without the stretch (wolfWeatherRotation = S R)
 uniform vec4 wolfLayerStretched;   // per layer: 1 = read through wolfWeatherRotation (stretched), 0 = through wolfWeatherTurn
+uniform vec2 wolfWeatherOffsetTurned;   // the turned lookup's own offset (wolftkclouds.cpp localWeatherOffsetTurned)
+uniform vec4 wolfLayerTower;       // per layer: 0 = a fixed band (takram); > 0 = convective, 1 - the lowest column top as a share of the depth
 // the ice phase: the forward lobe's asymmetry x this for an ice layer (wolfcloudgenus.h WOLF_ICE_G_SCALE, the viewer
 // and the harness define it from the cited asymmetry parameters); 1 = water everywhere
 #ifndef WOLF_ICE_G_SCALE

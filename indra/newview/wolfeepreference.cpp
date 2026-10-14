@@ -10,6 +10,8 @@
 
 #include "wolfeepreference.h"
 
+#include <algorithm>   // [2026-10-14] std::equal / std::copy (cloudStats cache)
+
 #include "llenvironment.h"
 #include "llviewercontrol.h"
 #include "v3colorutil.h"
@@ -327,6 +329,11 @@ namespace WolfEepReference
         const F32 dv = llmin(1.f, 6.f * NOISE_MEAN * k * 4.f);
         const F32 dens = density0 * (1.f - dv * dv);
         const F32 z1 = sky->getCloudPosDensity1().mV[2], z2 = sky->getCloudPosDensity2().mV[2];
+        // [WolfViewer 2026-10-14] 6400 samples, called up to twice a frame: the last answer is kept for the same five inputs
+        // (cloud_shadow, cloud_variance, cloud_scale and the two densities - everything below reads)
+        static F32 s_key[5] = { -1e9f, 0.f, 0.f, 0.f, 0.f }, s_mean = 0.f, s_covered = 0.f;
+        const F32 key[5] = { sky->getCloudShadow(), sky->getCloudVariance(), sky->getCloudScale(), z1, z2 };
+        if (std::equal(key, key + 5, s_key)) { mean = s_mean; covered = s_covered; return; }
         const S32 SUB = 8;   // sample points inside each tenth
         F32 sum = 0.f, cov = 0.f, wsum = 0.f;
         for (S32 i = 0; i < 10 * SUB; ++i)
@@ -345,6 +352,7 @@ namespace WolfEepReference
         }
         mean = wsum > 0.f ? llclamp(sum / wsum, 0.f, 1.f) : 0.f;
         covered = wsum > 0.f ? llclamp(cov / wsum, 0.f, 1.f) : 0.f;
+        std::copy(key, key + 5, s_key); s_mean = mean; s_covered = covered;
     }
 }
 

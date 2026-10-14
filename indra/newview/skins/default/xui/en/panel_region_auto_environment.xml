@@ -83,6 +83,6 @@
           name="ae_open_wolf_env" label="Open Wolf Environment..." />
   <text layout="topleft" follows="left|top" height="30" left="10" top_pad="4" width="460"
         name="ae_status" word_wrap="true" />
-  <text layout="topleft" follows="left|top" height="28" left="10" top_pad="2" width="460"
-        name="ae_credit" word_wrap="true" text_color="LabelDisabledColor">Weather data: MET Norway (CC BY 4.0). Place search: © OpenStreetMap contributors. Sun and moon computed from NOAA / Meeus astronomy.</text>
+  <text layout="topleft" follows="left|top" height="42" left="10" top_pad="2" width="460"
+        name="ae_credit" word_wrap="true" text_color="LabelDisabledColor">Weather data: MET Norway (CC BY 4.0); thunder and instability outside the Nordic area: Open-Meteo.com (CC BY 4.0). Place search: © OpenStreetMap contributors. Sun and moon computed from NOAA / Meeus astronomy.</text>
 </panel>

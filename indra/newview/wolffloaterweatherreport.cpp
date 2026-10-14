@@ -194,6 +194,9 @@ void WolfFloaterWeatherReport::show(const LLSD& reply)
         t += "The sky follows: " + cfg["clockLabel"].asString() + " (" + hhmm(time(nullptr) + coff) + ")\n";
     }
     t += "Source: MET Norway (yr.no), CC BY 4.0";
+    // [CONVECTION 2026-10-14] auto_env_lib.php ae_add_convection: Open-Meteo's instability where MET has no thunder
+    // data (observation thunderSource), credited as WolfStorm floater_wolf_weather_report.js:212 does (CC BY 4.0).
+    if (obs["thunderSource"].asString() == "open-meteo") t += "; thunder and instability: Open-Meteo.com, CC BY 4.0";
     if (obs["stale"].asBoolean()) t += " - the last reading is old";
     mReport->setText(t);
     mStatus->setText(obs["fetchedAt"].asString().empty() ? std::string() : "Read " + obs["fetchedAt"].asString());

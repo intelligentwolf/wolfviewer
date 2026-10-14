@@ -646,7 +646,10 @@ GLuint LLShaderMgr::loadShaderFile(const std::string& filename, S32 & shader_lev
     //or any shaders longer than 4096 lines... deal - DaveP
     GLchar buff[1024];
     GLchar *extra_code_text[1024];
-    GLchar *shader_code_text[4096 + LL_ARRAY_SIZE(extra_code_text)] = { NULL };
+    // <WolfViewer 2026-10-14> 8192 lines (was 4096): the WolfTk clouds program, assembled from its #wolf_include files,
+    // reached 4066 lines plus the version and define lines, and the loader cut its end off - "unexpected $end", the
+    // native clouds off (Paul's log 13:28:43Z, WolfTk Clouds (medium)). 9216 pointers on the stack, 72 KB.
+    GLchar *shader_code_text[8192 + LL_ARRAY_SIZE(extra_code_text)] = { NULL };
     GLuint extra_code_count = 0, shader_code_count = 0;
     BOOST_STATIC_ASSERT(LL_ARRAY_SIZE(extra_code_text) < LL_ARRAY_SIZE(shader_code_text));
 
@@ -960,7 +963,9 @@ GLuint LLShaderMgr::loadShaderFile(const std::string& filename, S32 & shader_lev
     if (wolf_next < wolf_lines.size())
     {
         // [WOLF ENV TAKRAM 2026-10-12] the line table is full (stock limit, 4096): say so rather than compile a cut file
-        LL_WARNS("ShaderLoading") << filename << ": " << wolf_lines.size() << " lines after #wolf_include, more than the loader holds; truncated" << LL_ENDL;
+        // <WolfViewer 2026-10-14> untagged: "ShaderLoading" is ERROR-only in app_settings/logcontrol.xml, so this warning
+        // never reached the log when it mattered
+        LL_WARNS() << filename << ": " << wolf_lines.size() << " lines after #wolf_include, more than the shader loader holds; truncated" << LL_ENDL;
     }
 
     if(!(flag_extra_block_marker_was_found & flags))

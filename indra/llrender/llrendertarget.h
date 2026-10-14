@@ -148,6 +148,7 @@ public:
     U32 getNumTextures() const;
 
     U32 getDepth(void) const { return mDepth; }
+    U32 getFBO() const { return mFBO; }   // [WolfViewer 2026-10-13] for reading single pixels (WolfEnvironmentRender::verifyFrame)
 
     void bindTexture(U32 index, S32 channel, LLTexUnit::eTextureFilterOptions filter_options = LLTexUnit::TFO_BILINEAR);
 

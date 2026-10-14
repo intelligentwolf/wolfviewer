@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WolfViewer 2026-10-14] Experiences - the welcome chooser (wolffloaterexperiences.cpp; contract
+     wolfstorm/tools/EXPERIENCES_V1.md). Opens by itself after a new resident's login, and from
+     Wolf World > Experiences... and the Experiences toolbar button. The cards are built in code
+     inside cards_scroll (panel_wolf_experience_card.xml); the category chips cat_0 ("All") .. cat_6
+     are labelled, placed and shown by the code. Fixed size: the cards scroll, so nothing is clipped.
+     [WolfViewer 2026-10-14] "Add your experience" (add_btn) beside the checkbox: the builder tools.
+     [WolfViewer 2026-10-14] mode_experiences | mode_whats_on at the top switch to What's on (events,
+     wolfstorm/tools/EVENTS_V1.md); everything below them moved down 28 px, the list's bottom unchanged. -->
+<floater
+ can_close="true"
+ can_minimize="true"
+ can_resize="false"
+ height="548"
+ layout="topleft"
+ name="wolf_experiences"
+ help_topic="wolf_experiences"
+ save_rect="true"
+ single_instance="true"
+ title="Wolf Experiences"
+ width="540">
+    <button follows="left|top" height="24" is_toggle="true" label="Experiences" layout="topleft" left="12" name="mode_experiences" top="22" width="120"
+     tool_tip="Places to go and things to do on Wolf Territories." />
+    <button follows="left|top" height="24" is_toggle="true" label="What's on" layout="topleft" left="136" name="mode_whats_on" top="22" width="120"
+     tool_tip="Events happening now and in the next 7 days, in your own time zone." />
+    <text follows="left|top|right" height="18" layout="topleft" left="12" name="subtitle" top="52" use_ellipses="true" width="516">Pick something to do — we'll take you there.</text>
+    <button follows="left|top" font="SansSerifSmall" height="22" is_toggle="true" label="All" layout="topleft" left="12" name="cat_0" top="76" visible="false" width="48" />
+    <button follows="left|top" font="SansSerifSmall" height="22" is_toggle="true" label="Category" layout="topleft" left="64" name="cat_1" top="76" visible="false" width="64" />
+    <button follows="left|top" font="SansSerifSmall" height="22" is_toggle="true" label="Category" layout="topleft" left="132" name="cat_2" top="76" visible="false" width="64" />
+    <button follows="left|top" font="SansSerifSmall" height="22" is_toggle="true" label="Category" layout="topleft" left="200" name="cat_3" top="76" visible="false" width="64" />
+    <button follows="left|top" font="SansSerifSmall" height="22" is_toggle="true" label="Category" layout="topleft" left="268" name="cat_4" top="76" visible="false" width="64" />
+    <button follows="left|top" font="SansSerifSmall" height="22" is_toggle="true" label="Category" layout="topleft" left="336" name="cat_5" top="76" visible="false" width="64" />
+    <button follows="left|top" font="SansSerifSmall" height="22" is_toggle="true" label="Category" layout="topleft" left="404" name="cat_6" top="76" visible="false" width="64" />
+    <scroll_container
+     follows="all"
+     height="400"
+     layout="topleft"
+     left="10"
+     name="cards_scroll"
+     opaque="false"
+     reserve_scroll_corner="false"
+     top="106"
+     width="520" />
+    <text follows="left|top|right" height="40" layout="topleft" left="20" mouse_opaque="false" name="status" top="114" width="500" wrap="true">Finding experiences…</text>
+    <button follows="left|top" height="24" label="Try again" layout="topleft" left="20" name="retry" top="158" visible="false" width="100"
+     tool_tip="Ask for the list again." />
+    <check_box follows="left|bottom" height="18" label="Don't show this when I arrive" layout="topleft" left="12" name="dont_show" top="518" width="206"
+     tool_tip="Ticked, this window no longer opens by itself after you log in. You can always open it from Wolf World &gt; Experiences..." />
+    <!-- [WolfViewer 2026-10-14] Builder tools (EXPERIENCES_V1.md v1.1): opens floater_wolf_experience_submit.xml. -->
+    <button follows="left|bottom" height="24" label="Add your experience" layout="topleft" left="226" name="add_btn" top="514" width="160"
+     tool_tip="Made somewhere worth visiting? Add it here. A grid admin checks it before new residents see it." />
+    <button follows="right|bottom" height="24" label="Close" layout="topleft" left="440" name="close_btn" top="514" width="90" />
+</floater>

@@ -33,7 +33,7 @@
  left="0"
  top="0"
  width="295"
- height="486">
+ height="512">
     <panel.string name="str_note_all">You hold [REGION]: paint anywhere ([STATE]). The brush lays straight segments and only turns a corner when you do. With Grid on (the default) a texture tiles like the ground textures; with it off it lays square tiles of Tile metres that follow your stroke (a road strip fits a brush as wide as its tile). Water follows the ground you draw over.</panel.string>
     <panel.string name="str_note_parcel">You can paint on your own parcels in [REGION] ([STATE]); the brush stops at land that is not yours. The texture runs along your stroke.</panel.string>
     <panel.string name="str_note_no_overlay">Parcel ownership is not known yet — the brush refuses until it is ([REGION], [STATE]).</panel.string>
@@ -106,5 +106,9 @@
     <button follows="left|top" layout="topleft" left_pad="4" width="66" height="22" name="paint_clear" label="Clear all" />
     <button follows="left|top" layout="topleft" left_pad="4" width="60" height="22" name="paint_revert" label="Revert" />
     <button follows="left|top" layout="topleft" left_pad="4" width="60" height="22" name="paint_save" label="Save" />
+    <!-- [WOLF CAVE 2026-10-12] Paul: "make caves with terrain ... with the paint on terrain tool". The
+         Cave Builder (wolfcave.cpp); shown only on Wolf Territories (WolfPanelTerrainPaint::draw). -->
+    <button follows="left|top" layout="topleft" left="8" top="486" width="80" height="22" name="paint_caves" label="Caves..." tool_tip="Dig a walk-in cave into the hill: draw it on the ground, preview it, build it" />
+    <text follows="left|top" layout="topleft" left_pad="6" top_delta="4" width="190" height="16" font="SansSerifSmall" name="paint_caves_lbl">dig a cave into the hill</text>
 </panel>
 </floater>

@@ -44,6 +44,8 @@ in vec4 vary_fragcoord;
 
 void calcHalfVectors(vec3 lv, vec3 n, vec3 v, out vec3 h, out vec3 l, out float nh, out float nl, out float nv, out float vh, out float lightDist);
 float calcLegacyDistanceAttenuation(float distance, float falloff);
+uniform float wolf_phys;
+float wolfPunctualAtten(float d, float r);
 vec4 getPosition(vec2 pos_screen);
 vec4 getNorm(vec2 screenpos);
 vec2 getScreenXY(vec4 clip);
@@ -114,8 +116,12 @@ void main()
                 lv /= lightDist;
 
                 float dist_atten = calcLegacyDistanceAttenuation(dist, falloff);
+                float k = 3.25;
+                // [WOLF ENV 2026-10-12 physical] deferredUtil.glsl wolfPunctualAtten (candela -> lux)
+                // [WolfViewer 2026-10-13] LL lights keep LL's own falloff under the native sky (display-referred, see
+                // WolfEnvironmentRender::physicalLightColor)
 
-                vec3 intensity = dist_atten * lightColor * 3.25;
+                vec3 intensity = dist_atten * lightColor * k;
                 float nl = 0;
                 vec3 diff = vec3(0);
                 vec3 specPunc = vec3(0);
@@ -145,6 +151,8 @@ void main()
 
                     float fa         = light_col[i].a;
                     float dist_atten = calcLegacyDistanceAttenuation(dist, fa);
+                    // [WOLF ENV 2026-10-12 physical] candela -> lux, Lambert's 1 / pi
+                    // [WolfViewer 2026-10-13] LL's own falloff (see above)
 
                     float lit = nl * dist_atten;
 

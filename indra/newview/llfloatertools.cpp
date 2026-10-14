@@ -27,6 +27,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "llfloatertools.h"
+#include "wolfbuilder.h"   // [WOLF BUILDER 2026-10-13/] Builders Mode
 
 #include "llfontgl.h"
 #include "llcoord.h"
@@ -305,6 +306,9 @@ bool    LLFloaterTools::postBuild()
     mCheckActualRoot = getChild<LLCheckBoxCtrl>("checkbox actual root");
     mCheckSelectProbes = getChild<LLCheckBoxCtrl>("checkbox select probes");
     // </FS:KC>
+    // [WOLF BUILDER 2026-10-13] the box shows the remembered setting; the sky itself is set in onOpen.
+    mCheckWolfBuildersMode = getChild<LLCheckBoxCtrl>("checkbox wolf builders mode");
+    mCheckWolfBuildersMode->setValue(gSavedSettings.getBOOL("WolfBuildersMode"));
 
 
     //
@@ -546,6 +550,9 @@ LLFloaterTools::LLFloaterTools(const LLSD& key)
 
     // <FS:KC> show/hide build highlight
     mCommitCallbackRegistrar.add("BuildTool.commitShowHighlight",   boost::bind(&commit_show_highlight, this));
+    // [WOLF BUILDER 2026-10-13] the Builders Mode check box and the Wolf Builder... button (floater_tools.xml)
+    mCommitCallbackRegistrar.add("BuildTool.WolfBuildersMode",  boost::bind(&LLFloaterTools::onCommitWolfBuildersMode, this));
+    mCommitCallbackRegistrar.add("BuildTool.WolfBuilder",       boost::bind(&LLFloaterTools::onClickWolfBuilder, this));
 
     mLandImpactsObserver = new LLLandImpactsObserver();
     LLViewerParcelMgr::getInstance()->addObserver(mLandImpactsObserver);
@@ -1188,6 +1195,10 @@ void LLFloaterTools::onOpen(const LLSD& key)
     {
         mOpen = true;
         mCheckShowHighlight->setValue(gSavedSettings.getBOOL("RenderHighlightSelections"));
+        // [WOLF BUILDER 2026-10-13] Builders Mode is for building: the Midday sky goes on with the
+        // floater (if the box is ticked) and comes off with it (onClose).
+        mCheckWolfBuildersMode->setValue(gSavedSettings.getBOOL("WolfBuildersMode"));
+        applyWolfBuildersMode();
     }
     // </FS:KC>
 
@@ -1239,6 +1250,13 @@ void LLFloaterTools::onClose(bool app_quitting)
 
     mOpen = false; //hack cause onOpen runs on every selection change but onClose doesnt.
     // </FS:KC>
+
+    // [WOLF BUILDER 2026-10-13] the builder's own sky comes back when building stops; the setting
+    // stays ticked for next time. Not at quit: the environment is on its way out then too.
+    if (!app_quitting)
+    {
+        WolfBuilder::instance().restoreEnvironment();
+    }
 
     gViewerWindow->showCursor();
 
@@ -1491,6 +1509,47 @@ void LLFloaterTools::onClickGridOptions()
     LLFloater* floaterp = LLFloaterReg::showInstance("build_options");
     // position floater next to build tools, not over
     floaterp->setShape(gFloaterView->findNeighboringPosition(this, floaterp), true);
+}
+
+// [WOLF BUILDER 2026-10-13] Paul: "on the build floater add a Builders Mode that will set the EEP to
+// midday so it's easy to see". The box writes WolfBuildersMode; on = the Midday sky now
+// (WolfBuilder::applyBuildersMode, the World > Environment > Midday path with the previous local
+// environment remembered), off = that environment back (restoreEnvironment). A refusal (RLV @setenv,
+// a missing legacy preset) unticks the box and tells the user why, in a dialog they must read:
+// a tick that silently did nothing would be the worst answer to a click.
+void LLFloaterTools::onCommitWolfBuildersMode()
+{
+    const bool on = mCheckWolfBuildersMode->getValue().asBoolean();
+    gSavedSettings.setBOOL("WolfBuildersMode", on);
+    if (on)
+    {
+        applyWolfBuildersMode();
+    }
+    else
+    {
+        WolfBuilder::instance().restoreEnvironment();
+    }
+}
+
+void LLFloaterTools::applyWolfBuildersMode()
+{
+    if (!gSavedSettings.getBOOL("WolfBuildersMode"))
+    {
+        return;
+    }
+    std::string why_not;
+    if (!WolfBuilder::instance().applyBuildersMode(why_not))
+    {
+        gSavedSettings.setBOOL("WolfBuildersMode", false);
+        mCheckWolfBuildersMode->setValue(false);
+        LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE", "Builders Mode could not set the Midday sky. " + why_not));
+    }
+}
+
+// Source: llviewerfloaterreg.cpp "wolf_builder" (floater_wolf_builder.xml, wolffloaterbuilder.cpp).
+void LLFloaterTools::onClickWolfBuilder()
+{
+    LLFloaterReg::showInstance("wolf_builder");
 }
 
 // static

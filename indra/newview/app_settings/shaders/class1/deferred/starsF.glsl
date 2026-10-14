@@ -31,6 +31,7 @@ in vec4 vertex_color;
 in vec2 vary_texcoord0;
 in vec2 screenpos;
 
+uniform vec3 wolf_star_tint;   // [WOLF ENV 2026-10-12/]
 uniform sampler2D diffuseMap;
 uniform float blend_factor;
 uniform float custom_alpha;
@@ -70,6 +71,7 @@ void main()
     vec4 col_b = texture(diffuseMap, vary_texcoord0.xy);
     vec4 col = mix(col_b, col_a, blend_factor);
     col.rgb *= vertex_color.rgb;
+    col.rgb *= wolf_star_tint;   // [WOLF ENV 2026-10-12/] the Wolf sky's star colour; (1,1,1) otherwise (LLDrawPoolWLSky::renderStarsDeferred)
 
     float factor = smoothstep(0.0f, 0.9f, custom_alpha);
 

@@ -154,7 +154,10 @@ public:
      *  on this viewer only. The stars and moon are placed for now + this. */
     F64  autoEnvTimeOffset() const { return mAutoEnvPreviewOn ? mAutoEnvPreview : 0.0; }
     bool autoEnvPreviewOn() const { return mAutoEnvPreviewOn; }
-    void setAutoEnvPreview(bool on, F64 seconds_ahead);
+    /** The region's own day cycle run `seconds_ahead` on ENV_LOCAL, this viewer only. `any_cycle`
+     *  [WOLF ENV 2026-10-12]: the Wolf Environment window's test slider - any baked cycle (not only the
+     *  auto environment's), the parcel's when one is in force, else the region's. */
+    void setAutoEnvPreview(bool on, F64 seconds_ahead, bool any_cycle = false);
     /** Seconds since the epoch, UTC, of the moment the sky shows (LLDate::now, the clock
      *  LLEnvironment's day cycle runs on, llenvironment.cpp getAdjustedNow). */
     F64  autoEnvSkyTime() const;

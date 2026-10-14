@@ -45,6 +45,8 @@ uniform vec2 screen_res;
 uniform mat4 inv_proj;
 uniform vec4 viewport;
 uniform int classic_mode;
+uniform float wolf_phys;
+float wolfPunctualAtten(float d, float r);
 
 void calcHalfVectors(vec3 lv, vec3 n, vec3 v, out vec3 h, out vec3 l, out float nh, out float nl, out float nv, out float vh, out float lightDist);
 float calcLegacyDistanceAttenuation(float distance, float falloff);
@@ -91,6 +93,10 @@ void main()
     }
     float dist = lightDist / size;
     float dist_atten = calcLegacyDistanceAttenuation(dist, falloff);
+    // [WOLF ENV 2026-10-12 physical] deferredUtil.glsl wolfPunctualAtten: candela -> lux; no balance factors,
+    // Lambert's 1 / pi for the legacy (non-PBR) materials
+    float pbrK = 3.25, legK = 1.0;
+    // [WolfViewer 2026-10-13] LL lights keep LL's own falloff under the native sky (WolfEnvironmentRender::physicalLightColor)
 
     if (GET_GBUFFER_FLAG(gb.gbufferFlag, GBUFFER_FLAG_HAS_PBR))
     {
@@ -106,7 +112,7 @@ void main()
 
         vec3 specularColor = mix(f0, baseColor.rgb, metallic);
 
-        vec3 intensity = dist_atten * color * 3.25; // Legacy attenuation, magic number to balance with legacy materials
+        vec3 intensity = dist_atten * color * pbrK; // Legacy attenuation, magic number to balance with legacy materials
 
         float nl = 0;
         vec3 diffPunc = vec3(0);
@@ -125,13 +131,13 @@ void main()
         diffuse = srgb_to_linear(diffuse);
         spec.rgb = srgb_to_linear(spec.rgb);
 
-        float lit = nl * dist_atten;
+        float lit = nl * dist_atten * legK;
 
         final_color = color.rgb*lit*diffuse;
 
         if (spec.a > 0.0)
         {
-            lit = min(nl*6.0, 1.0) * dist_atten;
+            lit = min(nl*6.0, 1.0) * dist_atten * legK;
 
             float sa = nh;
             float fres = pow(1 - vh, 5) * 0.4+0.5;

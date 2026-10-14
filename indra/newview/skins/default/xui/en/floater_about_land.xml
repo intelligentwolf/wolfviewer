@@ -2381,6 +2381,18 @@ Only large parcels can be listed in search.
           name="land_weather_panel"
           filename="panel_weather_controls.xml">
        </panel>
+       <!-- <WolfViewer 2026-10-13> Sandbox mode: auto return + most prims per person (wolflandsandbox.cpp). -->
+       <panel
+          border="true"
+          follows="all"
+          label="Sandbox"
+          layout="topleft"
+          left="0"
+          top="0"
+          help_topic="land_sandbox_tab"
+          name="land_sandbox_panel"
+          filename="panel_land_sandbox.xml">
+       </panel>
        <panel border="true" follows="all" label="Water" layout="topleft"
           left="0" top="0" height="386" width="480" name="land_water_panel">
           <text layout="topleft" follows="left|top" left="10" top="12"

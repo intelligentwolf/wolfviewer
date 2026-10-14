@@ -23,11 +23,15 @@
 #include <vector>
 
 #include "llagent.h"
+#include "llappviewer.h"
+#include "llcorehttputil.h"
+#include "llcoros.h"
 #include "llframetimer.h"
 #include "llinventoryfunctions.h"
 #include "llinventorymodel.h"
 #include "llinventorymodelbackgroundfetch.h"
 #include "llinventoryobserver.h"
+#include "llinventorypanel.h"
 #include "llnotificationsutil.h"
 #include "llviewercontrol.h"
 #include "llviewerinventory.h"
@@ -324,6 +328,185 @@ namespace
         LL_INFOS("WolfSuitcase") << "home: " << moved << " items and " << moved_folders << " folders moved out of My Suitcase, "
                                  << kept << " mixed folders left, " << later.size() << " still to load" << LL_ENDL;
     }
+
+    // <WolfViewer 2026-10-12> Looking at My Suitcase again while away (see wolfsuitcase.h). Abroad, an object's gift is
+    // written into the suitcase by the visited region (Scene.Inventory.cs:1654-1700 MoveTaskInventoryItems makes the new
+    // folder under GetRootFolder, which for a visitor is the suitcase, HGSuitcaseInventoryService.cs:140-170) and the
+    // viewer is not always told. Every write bumps the version of the folder written to (MySQLXInventoryData.cs:243 item,
+    // :287 a new folder bumps its parent), so a folder whose version on the server differs from the viewer's has news.
+    const F64 NOTICE_FIRST_SECS = 2.0;    // after the first offer of a burst
+    const F64 NOTICE_LAST_SECS = 10.0;    // after the last offer of a burst
+    const F64 CHECK_EVERY_SECS = 60.0;    // the fallback for deliveries that come with no offer at all
+    const F64 SWEEP_SECS = 30.0;          // how long folders found unloaded in the suitcase keep being asked for
+    F64 sFirstAt = 0.0;                   // 0: nothing pending
+    F64 sLastAt = 0.0;
+    F64 sNextCheck = 0.0;
+    F64 sSweepUntil = 0.0;
+    bool sChecking = false;               // a version check is waiting for its answer
+
+    // The suitcase's own Current Outfit folder (HGSuitcaseInventoryService.cs:190) holds only links and is never where a
+    // delivery goes: left alone, so the outfit code never sees it reloading.
+    bool leave_alone(const LLViewerInventoryCategory* cat)
+    {
+        return cat->getPreferredType() == LLFolderType::FT_CURRENT_OUTFIT;
+    }
+
+    // Ask for one folder's contents again, as Firestorm's "Reload folder" does (llinventorybridge.cpp:4146-4157). The
+    // stock fetch then adds what is new, new subfolders included (llinventorymodelbackgroundfetch.cpp:1629-1631), and new
+    // items arrive as ADDs, so SuitcaseWatch notes the trip's ones and the Recent tab, which goes by creation date
+    // (llinventoryfilter.cpp:458-483; a gift is created when given, InventoryItemBase.cs:393), shows them.
+    void reload(LLViewerInventoryCategory* cat)
+    {
+        cat->setVersion(LLViewerInventoryCategory::VERSION_UNKNOWN);
+        cat->fetch();
+        sSweepUntil = LLFrameTimer::getElapsedSeconds() + SWEEP_SECS;
+    }
+
+    // While a reload is recent: any folder in the suitcase still without a version (new ones found by the reload, and
+    // theirs in turn) is asked for. fetch() itself waits 10 s between asks of one folder (llviewerinventory.cpp:741-746).
+    void sweep()
+    {
+        const LLUUID box = suitcase();
+        if (box.isNull())
+        {
+            return;
+        }
+        LLInventoryModel::cat_array_t cats;
+        LLInventoryModel::item_array_t items;
+        gInventory.collectDescendents(box, cats, items, LLInventoryModel::EXCLUDE_TRASH);
+        for (const LLPointer<LLViewerInventoryCategory>& c : cats)
+        {
+            if (c->getVersion() == LLViewerInventoryCategory::VERSION_UNKNOWN && !leave_alone(c.get()))
+            {
+                c.get()->fetch();
+            }
+        }
+    }
+
+    // One small request: the suitcase's own version and its folders' versions, no items. The body is the stock folder
+    // request's (llinventorymodelbackgroundfetch.cpp:1304-1309) with fetch_items off, which the server honours
+    // (FetchInvDescHandler.cs:381-384). The answer: folders[].version, and categories[] with category_id and version
+    // (FetchInvDescHandler.cs:194-216; the viewer reads the same "version" key at llinventorymodelbackgroundfetch.cpp:1571,
+    // "category_id" at llinventory.cpp:67).
+    void check_versions(std::string url, LLUUID box)
+    {
+        LLSD folder;
+        folder["folder_id"] = box;
+        folder["owner_id"] = gAgent.getID();
+        folder["sort_order"] = LLSD::Integer(gSavedSettings.getU32(LLInventoryPanel::DEFAULT_SORT_ORDER) & 0x1);
+        folder["fetch_folders"] = LLSD::Boolean(true);
+        folder["fetch_items"] = LLSD::Boolean(false);
+        LLSD body;
+        body["folders"].append(folder);
+
+        LLCoreHttpUtil::HttpCoroutineAdapter::ptr_t adapter =
+            std::make_shared<LLCoreHttpUtil::HttpCoroutineAdapter>("WolfSuitcaseCheck", LLCore::HttpRequest::DEFAULT_POLICY_ID);
+        LLCore::HttpRequest::ptr_t request = std::make_shared<LLCore::HttpRequest>();
+        LLSD result = adapter->postAndSuspend(request, url, body);
+        sChecking = false;
+
+        if (gDisconnected || LLApp::isExiting() || !WolfSuitcase::onForeignGrid() || suitcase() != box)
+        {
+            return;   // gone home (or away) meanwhile: nothing to do
+        }
+        const LLCore::HttpStatus status =
+            LLCoreHttpUtil::HttpCoroutineAdapter::getStatusFromLLSD(result[LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS]);
+        if (!status)
+        {
+            LL_WARNS("WolfSuitcase") << "away: suitcase check failed: " << status.toString() << LL_ENDL;
+            return;
+        }
+        LLViewerInventoryCategory* root = gInventory.getCategory(box);
+        if (!root)
+        {
+            return;
+        }
+        for (const LLSD& f : llsd::inArray(result["folders"]))
+        {
+            if (f["folder_id"].asUUID() != box)
+            {
+                continue;
+            }
+            // a folder without a version is already being asked for (reload, sweep): not again
+            const bool root_loading = root->getVersion() == LLViewerInventoryCategory::VERSION_UNKNOWN;
+            bool reload_root = !root_loading && root->getVersion() != f["version"].asInteger();
+            S32 changed = 0, added = 0;
+            for (const LLSD& c : llsd::inArray(f["categories"]))
+            {
+                LLViewerInventoryCategory* cat = gInventory.getCategory(c["category_id"].asUUID());
+                if (!cat)
+                {
+                    ++added;            // a folder the viewer has never heard of: the suitcase's reload brings it
+                    reload_root = reload_root || !root_loading;
+                    continue;
+                }
+                if (leave_alone(cat) || cat->getVersion() == LLViewerInventoryCategory::VERSION_UNKNOWN
+                    || cat->getVersion() == c["version"].asInteger())
+                {
+                    continue;
+                }
+                reload(cat);
+                ++changed;
+            }
+            if (reload_root)
+            {
+                reload(root);
+            }
+            if (reload_root || changed > 0 || added > 0)
+            {
+                LL_INFOS("WolfSuitcase") << "away: suitcase changed on the server (" << added << " new folders, " << changed
+                                         << " folders changed" << (reload_root ? ", suitcase itself" : "") << "), reloading" << LL_ENDL;
+            }
+            return;
+        }
+    }
+
+    // Look at the suitcase again. after_offer: an offer just went by, so the suitcase itself is reloaded whatever the
+    // check says (a gift's new folder goes straight into it). Returns false when a check is still out (try again later).
+    bool look_again(bool after_offer)
+    {
+        const LLUUID box = suitcase();
+        LLViewerInventoryCategory* root = box.notNull() ? gInventory.getCategory(box) : nullptr;
+        const LLViewerRegion* region = gAgent.getRegion();
+        if (!root || !region)
+        {
+            return true;
+        }
+        if (sChecking)
+        {
+            return false;
+        }
+        if (after_offer)
+        {
+            reload(root);
+        }
+        const std::string url = region->getCapability("FetchInventoryDescendents2");
+        if (url.empty())
+        {
+            // No folder capability on this region (inventory over AIS only, or the old UDP fetch): no cheap way to read
+            // versions, so after an offer the suitcase's own folders are reloaded as well; the minute check skips.
+            if (after_offer)
+            {
+                LLInventoryModel::cat_array_t* cats = nullptr;
+                LLInventoryModel::item_array_t* items = nullptr;
+                gInventory.getDirectDescendentsOf(box, cats, items);
+                if (cats)
+                {
+                    for (const LLPointer<LLViewerInventoryCategory>& c : *cats)
+                    {
+                        if (!leave_alone(c.get()))
+                        {
+                            reload(c.get());
+                        }
+                    }
+                }
+            }
+            return true;
+        }
+        sChecking = true;
+        LLCoros::instance().launch("WolfSuitcaseCheck", [url, box]() { check_versions(url, box); });
+        return true;
+    }
 }
 
 namespace WolfSuitcase
@@ -355,6 +538,21 @@ namespace WolfSuitcase
         return lm.notNull() ? lm : box;
     }
 
+    void deliveryNoticed()
+    {
+        if (!onForeignGrid())
+        {
+            return;
+        }
+        // a burst of offers: one look 2 s after the first, one 10 s after the last
+        const F64 now = LLFrameTimer::getElapsedSeconds();
+        if (sFirstAt == 0.0 && sLastAt == 0.0)   // not already inside a burst
+        {
+            sFirstAt = now + NOTICE_FIRST_SECS;
+        }
+        sLastAt = now + NOTICE_LAST_SECS;
+    }
+
     void idle()
     {
         static F64 next = 0.0;
@@ -380,6 +578,32 @@ namespace WolfSuitcase
         if (abroad)
         {
             home_since = 0.0;
+            // <WolfViewer 2026-10-12> look at the suitcase again: after offers (deliveryNoticed), and once a minute
+            if (sFirstAt > 0.0 && now >= sFirstAt && look_again(true))
+            {
+                sFirstAt = 0.0;
+            }
+            if (sLastAt > 0.0 && now >= sLastAt && look_again(true))
+            {
+                sLastAt = 0.0;
+            }
+            if (sNextCheck == 0.0)
+            {
+                sNextCheck = now + CHECK_EVERY_SECS;
+            }
+            else if (now >= sNextCheck)
+            {
+                look_again(false);   // a check still out counts as this minute's
+                sNextCheck = now + CHECK_EVERY_SECS;
+            }
+            if (now < sSweepUntil)
+            {
+                sweep();
+            }
+        }
+        else if (region_known())
+        {
+            sFirstAt = sLastAt = sNextCheck = sSweepUntil = 0.0;   // home (not just between regions on a trip)
         }
         if (region_known() && !abroad)
         {

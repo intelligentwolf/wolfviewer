@@ -83,6 +83,15 @@ uniform vec4 waterPlane;
 uniform int cube_snapshot;
 
 uniform float sky_hdr_scale;
+uniform float wolf_fullbright;   // [WOLF ENV 2026-10-12 physical] 300 cd/m2 x pre-exposure (WolfEnvironmentRender)
+uniform float wolf_phys;       // [WOLF ENV 2026-10-12 physical] atmosphericsFuncs.glsl
+// [WOLF ENV TAKRAM 2026-10-12] wolftk/atmosphereLibF.glsl, linked as a second unit when WOLF_TK_LIB is defined
+// (llviewershadermgr.cpp wolf_tk_attach): three-geospatial's aerial perspective (aerialPerspectiveEffect.frag
+// applyTransmittanceInscatter) and the clouds' Beer-shadow-map transmittance (:354-358), at an eye-space position.
+#ifdef WOLF_TK_LIB
+vec3 wolfTkAerialPerspective(vec3 eyePos, vec3 radiance);
+float wolfTkCloudShadow(vec3 eyePos);
+#endif
 
 void calcHalfVectors(vec3 lv, vec3 n, vec3 v, out vec3 h, out vec3 l, out float nh, out float nl, out float nv, out float vh, out float lightDist);
 void calcDiffuseSpecular(vec3 baseColor, float metallic, inout vec3 diffuseColor, inout vec3 specularColor);
@@ -112,6 +121,16 @@ void adjustIrradiance(inout vec3 irradiance, float ambocc)
     //irradiance = max(amblit_linear, irradiance);
 
 #if defined(HAS_SSAO)
+    if (wolf_phys > 0.5)
+    {
+        // [WOLF ENV 2026-10-12 physical] ambient occlusion multiplies the indirect diffuse light (Filament,
+        // "Physically based rendering in Filament" 5.6.1 "Diffuse occlusion"). The EEP path's
+        // min(irradiance x 0.5, 0.25) caps it at an ABSOLUTE 0.25: in the pre-exposed frame that crushed
+        // every occluded surface to a constant - most of the ground under an overcast, where all the
+        // light is diffuse - and the constant, not scaled by the exposure, fed back into the metering.
+        irradiance *= ambocc;
+        return;
+    }
     irradiance = mix(ssao_effect_mat * min(irradiance.rgb*ssao_irradiance_scale, vec3(ssao_irradiance_max)), irradiance.rgb, ambocc);
 #endif
 }
@@ -139,6 +158,11 @@ void main()
     float scol       = max(scol_ambocc.r, baseColor.a);
 #else
     float scol = 1.0;
+#endif
+#ifdef WOLF_TK_LIB
+    // [WOLF ENV TAKRAM 2026-10-12] decision D2: the clouds' shadow on the sun term - an adaptation of three-geospatial
+    // aerialPerspectiveEffect.frag:116-118 (sunIrradiance *= sunTransmittance, its post-process lighting) to LL's own lighting
+    if (wolf_phys > 0.5) scol *= wolfTkCloudShadow(pos.xyz);
 #endif
 #if defined(HAS_SSAO)
     float ambocc     = scol_ambocc.g;
@@ -200,8 +224,13 @@ void main()
 #else
         color = baseColor.rgb;
 #endif
-        color = srgb_to_linear(color);
-        color *= sky_hdr_scale;
+        // [WOLF ENV 2026-10-12 physical] the Wolf sky, its moon and stars write linear luminance x the
+        // frame's pre-exposure: copied as they are
+        if (wolf_phys < 0.5)
+        {
+            color = srgb_to_linear(color);
+            color *= sky_hdr_scale;
+        }
     }
     else
     {
@@ -267,7 +296,10 @@ void main()
 
         }
 
-        color.rgb = mix(color.rgb, baseColor.rgb, baseColor.a);
+        // the legacy fullbright mask: the texture's own colour. [WOLF ENV 2026-10-12 physical] As a
+        // fullbright surface's luminance (300 cd/m2, wolf_fullbright, pre-exposed), as fullbrightF.glsl;
+        // as the plain 0..1 colour it was a constant the exposure did not scale.
+        color.rgb = mix(color.rgb, baseColor.rgb * (wolf_phys > 0.5 ? wolf_fullbright : 1.0), baseColor.a);
 
         if (envIntensity > 0.0)
         {  // add environment map

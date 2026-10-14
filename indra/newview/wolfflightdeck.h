@@ -21,6 +21,7 @@
 
 #include "lluictrl.h"
 #include "v4color.h"
+#include "wolfhudscale.h"
 
 class LLFontGL;
 
@@ -84,6 +85,8 @@ public:
         H_VS_WHEEL, H_VS, H_CMD, H_RANGE_KNOB, H_HUD, H_HELP, H_EXIT,
         H_GEAR, H_ENGINE, H_STICK, H_THROTTLE,
         H_PLAN, H_ND_SCREEN, H_TWA_KNOB, H_WIND, H_TACK, H_SAIL, H_WEB, H_MAP, H_BACKGROUND, H_FOLLOW_CAM, H_MINI,
+        H_INVENTORY,   // [HUD INVENTORY 2026-10-12/] the toolbar's Inventory (WolfHud::toggleInventory)
+        H_REZ,         // [HUD REZ 2026-10-12/] rez the free Wolf plane / helicopter / sailing boat and sit in it (WolfVehicleRez::rez)
         H_CDU_SCREEN, H_CDU_DIR, H_CDU_APT, H_CDU_CTL, H_CDU_EXEC, H_CDU_CLR, H_CDU_DEL, H_CDU_HELP,
         H_LSK_L1, H_LSK_L2, H_LSK_L3, H_LSK_L4, H_LSK_L5, H_LSK_L6,
         H_LSK_R1, H_LSK_R2, H_LSK_R3, H_LSK_R4, H_LSK_R5, H_LSK_R6,
@@ -100,7 +103,11 @@ private:
     // layout (view-local), recomputed every frame
     F32 mPanelTop = 0.f;       // top of the deck; above it is the world (and the HUD)
     F32 mPanelBottom = 0.f;
-    std::vector<Hit> mHits;
+    std::vector<Hit> mHits;    // in the picture's units (see mHitScale)
+    // [HUD SIZE 2026-10-12] the size the pilot drags the top edge to (WolfFlightDeckScale), and the scale this frame's
+    // picture was drawn at: a point on the view is (x, y) / mHitScale in mHits and the stick / lever geometry
+    WolfHudResize mResize{ "WolfFlightDeckScale" };
+    F32 mHitScale = 1.f;
 
     // fonts, picked each frame for the size the deck is drawn at
     struct Fonts
@@ -169,7 +176,7 @@ private:
     // the stick's gate and the lever's slot, for dragging them
     F32 mStickCx = 0.f, mStickCy = 0.f, mStickR = 1.f;
     F32 mLeverCy = 0.f, mLeverHalf = 1.f;
-    void dragControl(S32 x, S32 y);
+    void dragControl(F32 x, F32 y);   // in the picture's units
     void drawPFD(F32 l, F32 b, F32 r, F32 t);
     void drawND(F32 l, F32 b, F32 r, F32 t);
     void drawEICAS(F32 l, F32 b, F32 r, F32 t);

@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLF CAVE 2026-10-12] The Cave Builder (wolfcave.cpp WolfFloaterCaves), opened from Build > Make
+     Caves... and Paint the Ground > Caves... Wolf Territories only: the window closes itself anywhere
+     else (WolfCaves::onWolf).
+     [WolfViewer 2026-10-14 v2] Rebuilt around the box design (firestorm/wolfstorm/tools/
+     CAVE_DESIGN_V2.md Flow): the region's caves, then five steps with one primary action each -
+     1 Draw the box, 2 Draw a tunnel, 3 Add doorways, 4 Look, 5 Generate (bottom right). The words
+     right above Generate always say why it cannot be pressed. Spacing: 4 px grid, 6 px between rows,
+     12-14 px before each step header; left edge 10, content width 360. -->
+<floater
+ can_close="true"
+ can_minimize="true"
+ can_resize="false"
+ height="778"
+ layout="topleft"
+ name="wolf_caves"
+ save_rect="true"
+ single_instance="true"
+ title="Cave Builder"
+ width="380">
+    <floater.string name="str_not_editing">Press New cave to make one, or pick a cave in the list and press Change.</floater.string>
+    <floater.string name="str_stats_empty">The land impact shows here once the cave has a box and a doorway.</floater.string>
+    <floater.string name="str_working">Working out the rock...</floater.string>
+    <floater.string name="str_ready">Ready: press Generate.</floater.string>
+    <floater.string name="str_no_rock">The generator made no rock for this cave - change the box or the doorways.</floater.string>
+    <floater.string name="str_pick_one">Pick a cave in the list first.</floater.string>
+    <floater.string name="str_choose_texture">Choose the rock texture in the picker.</floater.string>
+    <floater.string name="str_box_first">Draw the cave box first (step 1).</floater.string>
+    <floater.string name="str_box_placed">The box is placed. Change its size, turn or floor below, or go on to step 2 or 3.</floater.string>
+    <floater.string name="str_undo_live">The tunnel you were drawing was taken back.</floater.string>
+    <floater.string name="str_nothing_to_undo">There is nothing to undo.</floater.string>
+    <floater.string name="str_pen_box">Drag on the ground to draw where the cave goes (a click makes a 12 x 8 m room). Esc puts the pen down.</floater.string>
+    <floater.string name="str_pen_tunnel">Click points from the box outwards; double-click or press Enter to finish the tunnel. Esc puts the pen down.</floater.string>
+    <floater.string name="str_pen_door">Click on the box wall or on a tunnel where people walk in. Esc puts the pen down.</floater.string>
+    <floater.string name="str_draw_box">Draw the box</floater.string>
+    <floater.string name="str_draw_tunnel">Draw a tunnel</floater.string>
+    <floater.string name="str_add_doors">Add doorways</floater.string>
+    <floater.string name="str_stop">Stop drawing</floater.string>
+    <floater.string name="str_build">Generate...</floater.string>
+    <floater.string name="str_rebuild">Generate again...</floater.string>
+    <floater.string name="str_moved">You moved to another region: the drawing was put away.</floater.string>
+    <!-- [WolfViewer 2026-10-14] Every refused button press says why; Stop ends a running job safely. -->
+    <floater.string name="str_not_wolf">The Cave Builder only works on Wolf Territories, in a region the grid knows.</floater.string>
+    <floater.string name="str_no_toolset">The pen cannot be picked up right now - try again in a moment.</floater.string>
+    <floater.string name="str_busy">A cave job is still running - wait for it to finish, or press Stop.</floater.string>
+    <floater.string name="str_stopping">Stopping at the next safe point - a step already under way (making or rezzing the rock) finishes first.</floater.string>
+    <floater.string name="str_rebuild_far">Generating again needs the old rock in view, to take it away first. Stand nearer the cave and press Generate again.</floater.string>
+
+    <!-- The region's caves -->
+    <text follows="left|top" layout="topleft" left="10" top="24" width="360" height="16" font.style="BOLD" name="cave_list_lbl">Caves here</text>
+    <scroll_list follows="left|top" layout="topleft" left="10" top="42" width="360" height="64" name="cave_list" draw_heading="true" multi_select="false" tool_tip="This region's caves">
+        <scroll_list.columns name="name" label="Cave" width="150" />
+        <scroll_list.columns name="state" label="State" width="206" />
+    </scroll_list>
+    <button follows="left|top" layout="topleft" left="10" top="112" width="90" height="22" name="cave_new" label="New cave" tool_tip="Start a new cave: draw its box on the ground" />
+    <button follows="left|top" layout="topleft" left="106" top="112" width="80" height="22" name="cave_edit" label="Change" tool_tip="Open the picked cave to change it and generate it again" />
+    <button follows="left|top" layout="topleft" left="270" top="112" width="100" height="22" name="cave_remove" label="Remove..." tool_tip="Take the picked cave away and put the ground back (asks first)" />
+
+    <text follows="left|top" layout="topleft" left="10" top="148" width="48" height="16" name="cave_name_lbl">Name</text>
+    <line_editor follows="left|top" layout="topleft" left="60" top="146" width="310" height="20" max_length_bytes="63" name="cave_name" tool_tip="The cave's name (also the rock object's name)" />
+
+    <!-- 1. Place the cave -->
+    <text follows="left|top" layout="topleft" left="10" top="178" width="360" height="16" font.style="BOLD" name="cave_step1_lbl">1. Place the cave</text>
+    <text follows="left|top" layout="topleft" left="10" top="196" width="360" height="28" word_wrap="true" font="SansSerifSmall" name="cave_step1_help">Drag on the ground to draw the cave's floor plan. It shows as a 3-D box standing on the ground; change its size, turn and floor below.</text>
+    <button follows="left|top" layout="topleft" left="10" top="228" width="150" height="22" name="cave_pen_box" label="Draw the box" is_toggle="true" tool_tip="Put the pen down on the ground to draw the cave box (press again to stop)" />
+    <spinner follows="left|top" layout="topleft" left="10" top="256" width="116" height="20" label="Width" label_width="44" name="cave_box_w" min_val="3" max_val="128" increment="0.5" initial_value="12" decimal_digits="1" tool_tip="Box width along its own x, metres (3 to 128)" />
+    <spinner follows="left|top" layout="topleft" left="132" top="256" width="116" height="20" label="Depth" label_width="44" name="cave_box_d" min_val="3" max_val="128" increment="0.5" initial_value="8" decimal_digits="1" tool_tip="Box depth along its own y, metres (3 to 128)" />
+    <spinner follows="left|top" layout="topleft" left="254" top="256" width="116" height="20" label="Height" label_width="46" name="cave_box_h" min_val="2.5" max_val="20" increment="0.5" initial_value="4" decimal_digits="1" tool_tip="Clear height from floor to ceiling, metres (2.5 to 20)" />
+    <spinner follows="left|top" layout="topleft" left="10" top="282" width="116" height="20" label="Turn" label_width="44" name="cave_box_turn" min_val="0" max_val="359" increment="5" initial_value="0" decimal_digits="0" tool_tip="Turn of the box, degrees counter-clockwise from east" />
+    <spinner follows="left|top" layout="topleft" left="132" top="282" width="170" height="20" label="Floor height" label_width="78" name="cave_box_floor" min_val="-200" max_val="4096" increment="0.5" initial_value="20" decimal_digits="2" tool_tip="Cave floor, region metres. Set to the ground height at the box centre when you draw the box." />
+
+    <!-- 2. Tunnels (optional) -->
+    <text follows="left|top" layout="topleft" left="10" top="316" width="360" height="16" font.style="BOLD" name="cave_step2_lbl">2. Tunnels (optional)</text>
+    <text follows="left|top" layout="topleft" left="10" top="334" width="360" height="28" word_wrap="true" font="SansSerifSmall" name="cave_step2_help">Click points from the box outwards; double-click or press Enter to finish a tunnel. Tunnels are lower than the room.</text>
+    <button follows="left|top" layout="topleft" left="10" top="366" width="150" height="22" name="cave_pen_tunnel" label="Draw a tunnel" is_toggle="true" tool_tip="Put the pen down to draw a tunnel (press again to stop)" />
+    <slider follows="left|top" layout="topleft" left="168" top="369" width="202" height="16" label="Tunnel width" label_width="76" name="cave_width" min_val="2" max_val="40" increment="0.5" initial_value="3" decimal_digits="1" show_text="true" tool_tip="Width of the next tunnel you draw, metres (2 to 40)" />
+
+    <!-- 3. Doorways -->
+    <text follows="left|top" layout="topleft" left="10" top="400" width="360" height="16" font.style="BOLD" name="cave_step3_lbl">3. Doorways</text>
+    <text follows="left|top" layout="topleft" left="10" top="418" width="360" height="28" word_wrap="true" font="SansSerifSmall" name="cave_step3_help">Click on the box wall or on a tunnel where people walk in. The rock opens there. The cave needs at least one.</text>
+    <button follows="left|top" layout="topleft" left="10" top="450" width="150" height="22" name="cave_pen_door" label="Add doorways" is_toggle="true" tool_tip="Put the pen down to add doorways (press again to stop)" />
+    <text follows="left|top" layout="topleft" left="168" top="453" width="202" height="16" font="SansSerifSmall" name="cave_counts">0 tunnels, 0 doorways</text>
+
+    <!-- 4. Look -->
+    <text follows="left|top" layout="topleft" left="10" top="484" width="360" height="16" font.style="BOLD" name="cave_step4_lbl">4. Look</text>
+    <text follows="left|top" layout="topleft" left="10" top="506" width="96" height="16" name="cave_rock_lbl">Rock texture</text>
+    <combo_box follows="left|top" layout="topleft" left="110" top="504" width="180" height="20" name="cave_rock" tool_tip="The rock of the cave, inside and out">
+        <combo_box.item label="Terrain Rock (default)" name="terrain_rock" value="terrain_rock" />
+        <combo_box.item label="Rocks" name="rocks" value="rocks" />
+        <combo_box.item label="Choose texture..." name="custom" value="custom" />
+    </combo_box>
+    <texture_picker follows="left|top" layout="topleft" left="300" top="496" width="40" height="40" name="cave_rock_tex" allow_no_texture="false" can_apply_immediately="false" tool_tip="The texture chosen for the rock (click to choose another)" />
+    <text follows="left|top" layout="topleft" left="10" top="540" width="96" height="16" name="cave_roof_lbl">Rock above</text>
+    <slider follows="left|top" layout="topleft" left="110" top="540" width="180" height="16" name="cave_roof" min_val="0.5" max_val="6" increment="0.5" initial_value="1.5" decimal_digits="1" show_text="true" tool_tip="Rock thickness over the ceiling, metres (0.5 to 6)" />
+    <text follows="left|top" layout="topleft" left="10" top="562" width="96" height="16" name="cave_rough_lbl">Rough walls</text>
+    <slider follows="left|top" layout="topleft" left="110" top="562" width="180" height="16" name="cave_rough" min_val="0" max_val="1" increment="0.1" initial_value="0.5" decimal_digits="1" show_text="true" tool_tip="0 = smooth walls, 1 = rough rock" />
+    <text follows="left|top" layout="topleft" left="10" top="586" width="96" height="16" name="cave_light_lbl">Inside light</text>
+    <combo_box follows="left|top" layout="topleft" left="110" top="584" width="180" height="20" name="cave_light" tool_tip="Stored as a Wolf Environment cave zone; shown once the Wolf Environment draws local zones">
+        <combo_box.item label="Dark" name="dark" value="dark" />
+        <combo_box.item label="Dim" name="dim" value="dim" />
+        <combo_box.item label="Torch-lit (warm)" name="torch" value="torch" />
+        <combo_box.item label="Glowing crystals (cool)" name="crystal" value="crystal" />
+    </combo_box>
+
+    <!-- 5. Generate -->
+    <text follows="left|top" layout="topleft" left="10" top="618" width="360" height="16" font.style="BOLD" name="cave_step5_lbl">5. Generate</text>
+    <text follows="left|top" layout="topleft" left="10" top="636" width="360" height="44" word_wrap="true" font="SansSerifSmall" name="cave_stats">The land impact shows here once the cave has a box and a doorway.</text>
+    <text follows="left|top" layout="topleft" left="10" top="682" width="360" height="30" word_wrap="true" font="SansSerifSmall" name="cave_status"></text>
+    <text follows="left|top" layout="topleft" left="10" top="714" width="360" height="30" word_wrap="true" font.style="BOLD" name="cave_why">Press New cave to make one, or pick a cave in the list and press Change.</text>
+    <button follows="left|top" layout="topleft" left="10" top="746" width="96" height="22" name="cave_back" label="Back to list" tool_tip="Put the drawing away and go back to the list" />
+    <button follows="left|top" layout="topleft" left="112" top="746" width="76" height="22" name="cave_undo" label="Undo last" tool_tip="Take back the last box, tunnel or doorway added" />
+    <button follows="left|top" layout="topleft" left="194" top="746" width="60" height="22" name="cave_cancel" label="Stop" enabled="false" tool_tip="Stop the running build or removal between two ground changes; what was done so far is kept in the cave's record so Generate again or Remove can finish it" />
+    <button follows="left|top" layout="topleft" left="266" top="746" width="104" height="22" name="cave_build" label="Generate..." tool_tip="Asks first: it rezzes the rock mound and digs the ground" />
+</floater>

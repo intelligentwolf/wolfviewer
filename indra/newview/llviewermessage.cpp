@@ -28,6 +28,7 @@
 #include "llviewermessage.h"
 #include "wolfflight.h"   // <WolfViewer 2026-10-10/> crossing refusals -> go round
 #include "wolfdrive.h"    // <WolfViewer 2026-10-11/> the speedboat helm hears its boat's "Speed = N"
+#include "wolfsuitcase.h" // <WolfViewer 2026-10-12/> an accepted offer abroad -> look at My Suitcase again
 
 // Linden libraries
 #include "llanimationstates.h"
@@ -1799,6 +1800,10 @@ void LLOfferInfo::sendReceiveResponse(bool accept, const LLUUID &destination_fol
                                 sizeof(destination_folder_id.mData));
 
         LL_DEBUGS("Messaging") << "Processing" << (U8)(im + 1) << " with transaction id " << mTransactionID << LL_ENDL;
+        // <WolfViewer 2026-10-12> the accept can move what was given (InventoryTransferModule.cs:298-345): abroad, look
+        // at My Suitcase again
+        WolfSuitcase::deliveryNoticed();
+        // </WolfViewer>
     }
     else
     {

@@ -28,6 +28,7 @@
 
 #include "wolfsuitcase.h"   // [SUITCASE 2026-10-10/] landmarks into My Suitcase on a hypergrid trip
 #include "wolfinvisible.h"  // <WolfViewer 2026-10-11/> Invisible Mode: tell each Wolf region
+#include "wolffloaterexperiences.h"  // [WolfViewer 2026-10-14/] Experiences: auto-open after a new account's login, arrival notice
 #include "llappviewer.h"
 
 // Viewer includes
@@ -89,6 +90,7 @@
 #include "wolffarground.h"   // <WolfViewer 2026-10-07/> map tiles for regions not connected
 #include "wolffarterrain.h"   // <WolfViewer 2026-10-08/> elevation tiles beyond the terrain received
 #include "wolfobjectprops.h" // <WolfViewer> shared object name/description harvester
+#include "wolfbuilder.h"     // [WOLF BUILDER 2026-10-13/] floating object names
 #include "wolfspeech.h" // <WolfViewer> dictation + read aloud (Wolf Territories only)
 #include "wolfscreenshare.h"
 #include "wolfweather.h" // <WolfViewer> rain and snow // <WolfViewer> share focus/zoom follow-up
@@ -6252,6 +6254,9 @@ void LLAppViewer::idle()
     // The shared name/description harvester drains AFTER its consumers (FSWolfWater above,
     // WolfBoatRock before updateMove) have declared this frame's interest.
     WolfObjectProps::instance().idle();
+    // [WOLF BUILDER 2026-10-13] floating object names over nearby prims; declares its interest to
+    // WolfObjectProps (above drains this frame's, so a new tag's name arrives on the next sweep).
+    WolfBuilder::instance().idle();
     // Dictation capture polling and the read-aloud queue (wolfspeech.cpp).
     WolfSpeech::instance().idle();
     // Focus + zoom the shared face once its media exists (wolfscreenshare.cpp).
@@ -6259,6 +6264,7 @@ void LLAppViewer::idle()
     WolfWeather::instance().idle();   // <WolfViewer 2026-09-10> rain / snow, menu or parcel prims
     WolfFX::instance().idle();
     WolfInvisible::idle();            // <WolfViewer 2026-10-11/> Invisible Mode: the region arrived in, or the switch changed
+    WolfExperiences::idle();          // [WolfViewer 2026-10-14/] Experiences: open after a new account's login; the arrive notice after Go
     WolfSuitcase::idle();             // [SUITCASE 2026-10-10/] hypergrid trips: what arrived in My Suitcase comes home        // <WolfViewer 2026-10-10/> wolfEffect explosions, fire, smoke (wolffx.h)
     // </WolfViewer>
 

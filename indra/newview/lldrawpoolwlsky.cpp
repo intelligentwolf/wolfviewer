@@ -28,6 +28,7 @@
 
 #include "lldrawpoolwlsky.h"
 #include "wolfweather.h"   // <WolfViewer 2026-09-18/> auroraAmount()
+#include "wolfaurora.h"    // <WolfViewer 2026-10-12/> [WOLF AURORA]
 
 #include "llerror.h"
 #include "llface.h"
@@ -49,6 +50,7 @@
 #include "llviewertexturelist.h"
 #include "wolfregionweather.h"   // <WolfViewer 2026-10-03/> autoEnvSky() for the moon phase
 #include "wolfaltitudesky.h"   // <WolfViewer 2026-10-07/> stars by day in space
+#include "wolfenvironmentrender.h"   // [WOLF ENV 2026-10-12/] the Wolf Environment's own sky and clouds
 
 extern bool gCubeSnapshot;
 
@@ -159,6 +161,12 @@ void LLDrawPoolWLSky::renderSkyHazeDeferred(const LLVector3& camPosLocal, F32 ca
 
     if (gPipeline.canUseWindLightShaders() && gPipeline.hasRenderType(LLPipeline::RENDER_TYPE_SKY))
     {
+        // [WOLF ENV 2026-10-12] The Wolf Environment's physically based dome instead of the EEP one
+        // (wolfenvironmentrender.h; false = not active, and everything below runs exactly as before).
+        if (!use_hdri_sky() && WolfEnvironmentRender::skyActive() && WolfEnvironmentRender::renderSkyDome())
+        {
+            return;
+        }
         if (use_hdri_sky())
         {
             sky_shader = &gEnvironmentMapProgram;
@@ -198,14 +206,10 @@ void LLDrawPoolWLSky::renderSkyHazeDeferred(const LLVector3& camPosLocal, F32 ca
         sky_shader->bindTexture(LLShaderMgr::RAINBOW_MAP, rainbow_tex);
         sky_shader->bindTexture(LLShaderMgr::HALO_MAP,  halo_tex);
 
-        // <WolfViewer 2026-09-18> the northern lights (skyF.glsl wolfAurora). Source:
-        // render_manager.js _applyWeatherAurora. 0 skips the march entirely.
-        static LLStaticHashedString s_wolf_aurora("wolf_aurora");
-        static LLStaticHashedString s_wolf_aurora_time("wolf_aurora_time");
-        sky_shader->uniform1f(s_wolf_aurora, gCubeSnapshot ? 0.f : WolfWeather::auroraAmount());
-        sky_shader->uniform1f(s_wolf_aurora_time, fmodf(gFrameTimeSeconds, 100000.f));
-        static LLStaticHashedString s_wolf_aurora_color("wolf_aurora_color");
-        sky_shader->uniform1i(s_wolf_aurora_color, WolfWeather::auroraColorMode());
+        // <WolfViewer 2026-10-12> [WOLF AURORA] the northern lights (wolfAuroraF.glsl, attached to this
+        // program): the gate, the eye and the aurora's direction table (WolfAurora::frameUpdate). Source:
+        // render_manager.js _applyWeatherAurora.
+        WolfAurora::bindUniforms(sky_shader);
         // </WolfViewer>
         // <WolfViewer 2026-10-07> the ocean out to the true horizon (skyF.glsl wolfHorizonSea)
         static LLStaticHashedString s_wolf_sea_height("wolf_sea_height");
@@ -250,6 +254,10 @@ void LLDrawPoolWLSky::renderStarsDeferred(const LLVector3& camPosLocal) const
 
     F32 star_alpha = LLEnvironment::instance().getCurrentSky()->getStarBrightness() / 500.0f;
     star_alpha = llmax(star_alpha, WolfAltitudeSky::spaceStarAlpha());   // <WolfViewer 2026-10-07/> stars by day in space
+    // [WOLF ENV 2026-10-12 physical] the stars are always there; their luminance x pre-exposure (starTint)
+    // decides whether the day sky outshines them, not the EEP's star brightness
+    // [WolfViewer 2026-10-13] ... and the EEP's star_brightness scales that luminance (starBrightnessScale): 0 still means none
+    if (WolfEnvironmentRender::skyActive()) star_alpha = WolfEnvironmentRender::starBrightnessScale() > 0.f ? 1.f : 0.f;
 
     // If start_brightness is not set, exit
     if(star_alpha < 0.001f)
@@ -302,6 +310,13 @@ void LLDrawPoolWLSky::renderStarsDeferred(const LLVector3& camPosLocal) const
         star_alpha = 1.0f;
     }
     gDeferredStarProgram.uniform1f(sCustomAlpha, star_alpha);
+    // [WOLF ENV 2026-10-12] starsF.glsl wolf_star_tint: the Wolf sky's star colour, white otherwise
+    // (x 1.0 leaves every star exactly as before). Set on every star draw: an unset uniform is 0.
+    {
+        static LLStaticHashedString s_wolf_star_tint("wolf_star_tint");
+        const LLColor3 tint = WolfEnvironmentRender::starTint();
+        gDeferredStarProgram.uniform3f(s_wolf_star_tint, tint.mV[0], tint.mV[1], tint.mV[2]);
+    }
 
     sStarTime = (F32)LLFrameTimer::getElapsedSeconds() * 0.5f;
 
@@ -323,12 +338,36 @@ void LLDrawPoolWLSky::renderSkyCloudsDeferred(const LLVector3& camPosLocal, F32 
     {
         return;
     }
+    // [WOLF ENV 2026-10-12] the volumetric clouds (LLPipeline::renderFinalize) replace the EEP 2D layer
+    // [WolfViewer 2026-10-13, round 16] ... and the layer is still drawn, unseen, into WolfEnvironmentRender's probe once a
+    // second: what the stock renderer would show is what the native clouds are driven to (renderStockCloudProbe)
+    const bool probe = WolfEnvironmentRender::volumetricActive();
+    if (probe && (gCubeSnapshot || !WolfEnvironmentRender::stockCloudProbeDue()))
+    {
+        return;
+    }
 
     if (gPipeline.canUseWindLightShaders() && gPipeline.hasRenderType(LLPipeline::RENDER_TYPE_CLOUDS) && gSky.mVOSkyp && gSky.mVOSkyp->getCloudNoiseTex())
     {
+        if (probe)
+        {
+            WolfEnvironmentRender::renderStockCloudProbe([this, &camPosLocal, camHeightLocal, cloudshader]()
+                { drawEepCloudLayer(camPosLocal, camHeightLocal, cloudshader, true); });
+            return;
+        }
+        drawEepCloudLayer(camPosLocal, camHeightLocal, cloudshader, false);
+    }
+}
+
+// [WolfViewer 2026-10-13, round 16] the stock cloud draw, unchanged, out of renderSkyCloudsDeferred so the probe can use it: with
+// `probe` the layer's raw colour and opacity are written (no blending, no depth test) instead of blended over the sky
+void LLDrawPoolWLSky::drawEepCloudLayer(const LLVector3& camPosLocal, F32 camHeightLocal, LLGLSLShader* cloudshader, bool probe) const
+{
+    {
         LLSettingsSky::ptr_t psky = LLEnvironment::instance().getCurrentSky();
 
-        LLGLSPipelineBlendSkyBox pipeline(true, true);
+        LLGLSPipelineBlendSkyBox pipeline(!probe, !probe);
+        LLGLDisable no_blend(probe ? GL_BLEND : 0);
 
         cloudshader->bind();
 
@@ -384,6 +423,8 @@ void LLDrawPoolWLSky::renderSkyCloudsDeferred(const LLVector3& camPosLocal, F32 
 void LLDrawPoolWLSky::renderHeavenlyBodies()
 {
     if (!gSky.mVOSkyp || use_hdri_sky()) return;
+    // [WOLF ENV 2026-10-12 physical] the Wolf sky draws the sun's and the moon's discs itself, in its units
+    if (WolfEnvironmentRender::skyActive()) return;
 
     LLGLSPipelineBlendSkyBox gls_skybox(true, true); // SL-14113 we need moon to write to depth to clip stars behind
 
@@ -569,6 +610,17 @@ void LLDrawPoolWLSky::renderDeferred(S32 pass)
     // TODO: remove gSky.mVOSkyp and fold sun/moon into LLVOWLSky
     gSky.mVOSkyp->updateGeometry(gSky.mVOSkyp->mDrawable);
 
+    // [WOLF ENV 2026-10-12] once a frame: the Wolf Environment's state and look-up tables (nothing when inactive)
+    if (!gCubeSnapshot && gPipeline.canUseWindLightShaders())
+    {
+        WolfEnvironmentRender::frameUpdate();
+    }
+    // [WOLF AURORA 2026-10-12] once a frame: the aurora's state and a quarter of its direction table
+    if (!gCubeSnapshot && gPipeline.canUseWindLightShaders())
+    {
+        WolfAurora::frameUpdate();
+    }
+
     const F32 camHeightLocal = LLEnvironment::instance().getCamHeight();
 
     LLVector3 const & origin = LLViewerCamera::getInstance()->getOrigin();
@@ -602,7 +654,14 @@ void LLDrawPoolWLSky::renderDeferred(S32 pass)
 void LLDrawPoolWLSky::renderConstellationsDeferred(const LLVector3& camPosLocal) const
 {
     if (!gSky.mVOSkyp || !gSky.mVOWLSkyp || use_hdri_sky()) return;
-    if (llmax(LLEnvironment::instance().getCurrentSky()->getStarBrightness() / 500.0f,
+    // [WolfViewer 2026-10-13] under the native sky the night is the native sun's, not the EEP's star brightness (Paul:
+    // "stars and planets and of course being able to draw the astronomy - that should all be there")
+    LLVector3 wolf_sun, wolf_moon;
+    if (WolfEnvironmentRender::skyActive() && WolfEnvironmentRender::bodyDirections(wolf_sun, wolf_moon))
+    {
+        if (wolf_sun.mV[VZ] > 0.f && WolfAltitudeSky::spaceStarAlpha() < 0.001f) return;   // the sun is up: day
+    }
+    else if (llmax(LLEnvironment::instance().getCurrentSky()->getStarBrightness() / 500.0f,
               WolfAltitudeSky::spaceStarAlpha()) < 0.001f) return;   // day: no night sky (<WolfViewer 2026-10-07/> unless in space)
 
     LLGLSPipelineBlendSkyBox gls_sky(true, false);

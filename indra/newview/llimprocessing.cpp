@@ -38,6 +38,7 @@
 #include "fsfloaternearbychat.h"
 // </FS:Ansariel> [FS communication UI]
 #include "llimview.h"
+#include "wolfsuitcase.h" // <WolfViewer 2026-10-12/> an inventory offer abroad -> look at My Suitcase again
 #include "llinventoryobserver.h"
 #include "llinventorymodel.h"
 #include "llmutelist.h"
@@ -1561,6 +1562,12 @@ void LLIMProcessing::processNewMessage(LLUUID from_id,
         case IM_TASK_INVENTORY_OFFERED:
             // Someone has offered us some inventory.
         {
+            // <WolfViewer 2026-10-12> the offer comes after the item or folder is already written to the inventory
+            // (OpenSim LSL_Api.cs:5181-5198 llGiveInventory, :8245-8270 llGiveInventoryList; InventoryTransferModule.cs:
+            // 433-470 a resident's offer): abroad, it went into My Suitcase, and the
+            // viewer is not always told - look at the suitcase again
+            WolfSuitcase::deliveryNoticed();
+            // </WolfViewer>
             LLOfferInfo* info = new LLOfferInfo;
             if (IM_INVENTORY_OFFERED == dialog)
             {

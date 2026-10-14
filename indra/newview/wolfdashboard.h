@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "lluictrl.h"
+#include "wolfhudscale.h"
 
 class LLFontGL;
 
@@ -66,6 +67,7 @@ public:
     bool handleHover(S32 x, S32 y, MASK mask) override;
     bool handleRightMouseDown(S32 x, S32 y, MASK mask) override;
     bool handleDoubleClick(S32 x, S32 y, MASK mask) override;
+    bool handleScrollWheel(S32 x, S32 y, S32 clicks) override;   // [WOLF RETARDER 2026-10-12/] the stalk
     bool handleToolTip(S32 x, S32 y, MASK mask) override;
     void onMouseCaptureLost() override;
 
@@ -84,10 +86,17 @@ public:
         H_GATE_8, H_GATE_9, H_GATE_10, H_GATE_11, H_GATE_12, H_GATE_13,
         H_RANGE, H_SPLIT,
         H_MINI,   // <WolfViewer 2026-10-10/> shrink to the mini bar / bring the dashboard back
-        // <WolfViewer 2026-10-11> w65: the speedboat and spaceship designs and their buttons (WolfDrive::BTN_STAGE ..)
-        H_TYPE_SPEEDBOAT, H_TYPE_SPACESHIP,
+        H_INVENTORY,   // [HUD INVENTORY 2026-10-12/] the toolbar's Inventory (WolfHud::toggleInventory)
+        H_REZ,         // [HUD REZ 2026-10-12/] rez this design's free Wolf vehicle and sit in it (WolfVehicleRez::rez)
+        // <WolfViewer 2026-10-11> w65: the speedboat, spaceship and submarine buttons (WolfDrive::BTN_STAGE ..). [HUD SIZE
+        // 2026-10-12] no design buttons for them any more (Paul: "only the car hud needs extra buttons lorry, car, bike
+        // the others dont need them"): Wolf World, the toolbar icons and the craft's own script choose those designs.
         H_STAGE, H_BOOST, H_ANCHOR, H_ASSIST, H_LANDING_GEAR, H_ENGINE,
-        H_TYPE_SUBMARINE, H_DIVE, H_SURFACE, H_PERISCOPE, H_SONAR,   // the submarine's
+        H_DIVE, H_SURFACE, H_PERISCOPE, H_SONAR,   // the submarine's
+        // [WOLF RETARDER 2026-10-12] the truck's retarder stalk: its six positions (click, drag along them, or the
+        // scroll wheel over them), downhill speed control on / off and its set speed - / + (held), AUT
+        H_RET_0, H_RET_1, H_RET_2, H_RET_3, H_RET_4, H_RET_5,
+        H_RET_DSC, H_RET_DSC_DOWN, H_RET_DSC_UP, H_RET_AUT,
     };
 
 private:
@@ -97,8 +106,12 @@ private:
         EHit mId;
         std::string mTip;
     };
-    std::vector<Hit> mHits;
+    std::vector<Hit> mHits;             // in the picture's units (see mHitScale)
     F32 mPanelB = 0.f, mPanelT = 0.f;   // view-local, this frame: the panel's solid band
+    // [HUD SIZE 2026-10-12] the size the driver drags the top edge to (WolfDashboardScale), and the scale this frame's
+    // picture was drawn at: a point on the view is (x, y) / mHitScale in mHits (1 for the mini bar)
+    WolfHudResize mResize{ "WolfDashboardScale" };
+    F32 mHitScale = 1.f;
     bool mDrawn = false;
 
     S32 mPressed = H_NONE;
@@ -109,6 +122,9 @@ private:
 
     void addHit(F32 l, F32 b, F32 r, F32 t, EHit id, const std::string& tip);
     const Hit* hitAt(S32 x, S32 y) const;
+    /** [WOLF RETARDER 2026-10-12] The stalk position under a view point while dragging (the nearest of the six,
+     *  by height, from where the slots were drawn this frame), or -1 when the stalk was not drawn. */
+    S32 retarderSlotAt(S32 y) const;
     bool onPanel(S32 x, S32 y) const;
     void drawMiniBar(F32 bottom);   // <WolfViewer 2026-10-10/> WolfDashboardMini
     void press(EHit id);

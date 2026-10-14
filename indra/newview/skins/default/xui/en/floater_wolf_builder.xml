@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLF BUILDER 2026-10-13] Build > Wolf Builder... / Wolf World > Wolf Builder... / the Build floater's
+     Builders Mode row (wolffloaterbuilder.cpp, wolfbuilder.cpp). Paul: "controls like a grid, easier snapping
+     to defined grids, floating object names (all as options), floating number of prims and location like a
+     card - imagine if you will like a builders helper".
+     A builder with the Build floater open wants an even light, a visible metre grid to line prims up on,
+     the name of each thing nearby, and the prim count and parcel room at a glance, without leaving the
+     build window: tick a switch -> see it in-world at once -> read the card -> untick to clear.
+     Every check box is bound to its setting (control_name); the combos, spinners and button commit in
+     the .cpp; the status line at the bottom says what happened or why it did not. -->
+<floater
+ can_close="true"
+ can_minimize="true"
+ can_resize="false"
+ height="548"
+ layout="topleft"
+ name="wolf_builder"
+ help_topic="wolf_builder"
+ save_rect="true"
+ single_instance="true"
+ title="Wolf Builder"
+ width="330">
+    <!-- Builders Mode is the same setting as the Build floater's check box (both bound to WolfBuildersMode).
+         The grids draw only while it is on (Paul 10-13), so it sits above them, and while it is off the grid
+         switches are greyed out with the line beside it saying why (wolffloaterbuilder.cpp refreshDrawSwitches). -->
+    <check_box follows="left|top" height="18" layout="topleft" left="12" name="builders_mode" top="26" width="120" control_name="WolfBuildersMode"
+     label="Builders Mode" tool_tip="The same switch as the Build floater's Builders Mode: a Midday sky while the Build floater is open, and the grids below. Your own sky comes back when the Build floater closes or this is unticked." />
+    <text follows="left|top" height="16" layout="topleft" left="136" name="builders_mode_hint" top="28" width="182" use_ellipses="true" />
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="12" name="grid_label" top="50" width="306">Grid</text>
+    <check_box follows="left|top" height="18" layout="topleft" left="12" name="grid_show" top="68" width="306" control_name="WolfBuilderGrid"
+     label="Show the grid on the ground while building" tool_tip="The snap grid, drawn on the ground around the selection (or around you) while Builders Mode is on and the Build floater or this window is open, not only while dragging. Its lines are every spacing step." />
+    <text follows="left|top" height="16" layout="topleft" left="12" name="spacing_label" top="94" width="70">Spacing</text>
+    <combo_box follows="left|top" height="22" layout="topleft" left="84" top="91" width="90" name="grid_spacing"
+     tool_tip="The step between grid lines and snap points (the Build floater's GridResolution)." />
+    <text follows="left|top" height="16" layout="topleft" left="186" name="size_label" top="94" width="40">Size</text>
+    <combo_box follows="left|top" height="22" layout="topleft" left="228" top="91" width="90" name="grid_size"
+     tool_tip="How far the drawn grid reaches (the Build floater's GridDrawSize)." />
+    <check_box follows="left|top" height="18" layout="topleft" left="12" name="snap_origin" top="121" width="306" control_name="WolfBuilderSnapOrigin"
+     label="Snap and draw from my own grid origin" tool_tip="Off: the grid starts at the region's south-west corner, as the World grid always has. On: it starts at the point below, so a build that is not on a whole metre still snaps to itself." />
+    <text follows="left|top" height="16" layout="topleft" left="12" name="origin_label" top="147" width="306" text_color="LtGray_50">Origin, in metres from the corner of the region you are in</text>
+    <spinner follows="left|top" height="22" layout="topleft" left="12" top="165" width="96" name="origin_x" label="X" label_width="14"
+     decimal_digits="3" increment="0.25" min_val="-256" max_val="8192" />
+    <spinner follows="left|top" height="22" layout="topleft" left="116" top="165" width="96" name="origin_y" label="Y" label_width="14"
+     decimal_digits="3" increment="0.25" min_val="-256" max_val="8192" />
+    <spinner follows="left|top" height="22" layout="topleft" left="220" top="165" width="98" name="origin_z" label="Z" label_width="14"
+     decimal_digits="3" increment="0.25" min_val="-256" max_val="8192" />
+    <button follows="left|top" height="23" layout="topleft" left="12" top="193" width="200" name="origin_from_selection"
+     label="Set origin from the selection" tool_tip="The centre of what is selected becomes the grid origin. With nothing selected, where you are standing." />
+
+    <check_box follows="left|top" height="18" layout="topleft" left="12" name="object_grid_show" top="226" width="186" control_name="WolfBuilderObjectGrid"
+     label="Show grid on object" tool_tip="The grid on the selected object's own box, in the Build floater's ruler (World, Local or Reference grid), so you see it in relation to the object. Follows the selection; nothing when nothing is selected. Needs Builders Mode on." />
+    <button follows="left|top" height="23" layout="topleft" left="204" top="223" width="114" name="object_grid_btn"
+     label="Grid on object" tool_tip="Select an object first, then press this to show the grid on it." />
+    <check_box follows="left|top" height="18" layout="topleft" left="28" name="object_grid_all_faces" top="248" width="290" control_name="WolfBuilderObjectGridAllFaces"
+     label="On every face, not only the bottom" tool_tip="Grids on all six sides of the selection's box: yellow top and bottom, magenta front and back, cyan left and right (the colours of the Build floater's snap guides)." />
+
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="12" name="names_label" top="278" width="306">Object names</text>
+    <check_box follows="left|top" height="18" layout="topleft" left="12" name="names_show" top="296" width="306" control_name="WolfBuilderNames"
+     label="Float each object's name above it" tool_tip="Every object (never an avatar) within the radius shows its name above it, as hover text does. Off clears them all." />
+    <slider follows="left|top" height="20" layout="topleft" left="12" top="320" width="240" name="names_radius" label="Within" label_width="50"
+     control_name="WolfBuilderNamesRadius" min_val="5" max_val="96" increment="1" decimal_digits="0"
+     tool_tip="Metres from you. Names appear as the region answers, nearest first, at most a hundred at a time." />
+    <text follows="left|top" height="16" layout="topleft" left="256" name="names_unit" top="322" width="20">m</text>
+    <text follows="left|top" height="16" layout="topleft" left="12" name="names_count" top="344" width="306" text_color="LtGray_50" />
+
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="12" name="card_label" top="372" width="306">Selection</text>
+    <view_border bevel_style="in" follows="left|top" height="122" layout="topleft" left="12" name="card_border" top="390" width="306" />
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="20" name="card_selection" top="396" width="290" use_ellipses="true">Nothing selected.</text>
+    <text follows="left|top" height="16" layout="topleft" left="20" name="card_impact" top="414" width="290" use_ellipses="true" />
+    <text follows="left|top" height="16" layout="topleft" left="20" name="card_position" top="432" width="290" use_ellipses="true" />
+    <text follows="left|top" height="16" layout="topleft" left="20" name="card_region" top="450" width="290" use_ellipses="true" />
+    <text follows="left|top" height="16" layout="topleft" left="20" name="card_parcel" top="468" width="290" use_ellipses="true" />
+    <text follows="left|top" height="16" layout="topleft" left="20" name="card_region_prims" top="486" width="290" use_ellipses="true" />
+
+    <text follows="left|bottom" height="16" layout="topleft" left="12" name="status" top="522" width="306" use_ellipses="true" />
+</floater>

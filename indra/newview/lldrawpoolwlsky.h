@@ -68,6 +68,7 @@ private:
 
     void renderSkyHazeDeferred(const LLVector3& camPosLocal, F32 camHeightLocal) const;
     void renderSkyCloudsDeferred(const LLVector3& camPosLocal, F32 camHeightLocal, LLGLSLShader* cloudshader) const;
+    void drawEepCloudLayer(const LLVector3& camPosLocal, F32 camHeightLocal, LLGLSLShader* cloudshader, bool probe) const;   // [WolfViewer round 16]
 
     void renderStarsDeferred(const LLVector3& camPosLocal) const;
     void renderConstellationsDeferred(const LLVector3& camPosLocal) const;   // <WolfViewer 2026-10-03/> Show Astronomy

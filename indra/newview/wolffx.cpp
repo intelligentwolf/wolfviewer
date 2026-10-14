@@ -129,7 +129,7 @@ void WolfFX::receive(const LLUUID& region_id, const std::vector<std::string>& st
 {
     std::string e;
     LLVector3 p, c(1.f, 0.55f, 0.15f), c2(0.25f, 0.24f, 0.23f), dir(0.f, 0.f, 1.f);
-    F32 size = 4.f, duration = 1.f, intensity = 1.f, shake = 0.f, shake_r = 30.f, amp = 0.f;
+    F32 size = 4.f, duration = 1.f, intensity = 1.f, shake = 0.f, shake_r = 30.f, amp = 0.f, roll_deg = 0.f, roll_secs = 0.f;
     bool have_p = false;
     LLUUID owner;
     for (const std::string& kv : strings)
@@ -144,21 +144,36 @@ void WolfFX::receive(const LLUUID& region_id, const std::vector<std::string>& st
         else if (k == "s") size = llclamp(f, 0.2f, 30.f);
         else if (k == "c") parse_vec(v, c);
         else if (k == "c2") parse_vec(v, c2);
-        else if (k == "d") duration = llclamp(f, 0.05f, 30.f);
+        else if (k == "d") { duration = llclamp(f, 0.05f, 30.f); roll_secs = llclamp(f, 0.f, 30.f); }
         else if (k == "i") intensity = llclamp(f, 0.1f, 2.f);
         else if (k == "sh") shake = llclamp(f, 0.f, 1.f);
         else if (k == "sr") shake_r = llclamp(f, 0.f, 150.f);
         else if (k == "dir") parse_vec(v, dir);
         else if (k == "a") amp = llclamp(f, 0.f, 1.f);
+        else if (k == "r") roll_deg = llclamp(f, -180.f, 180.f);     // [2026-10-12] wolfRollCamera
         else if (k == "o") owner.set(v, false);
     }
     // Nothing from someone this viewer has muted (WolfFXModule sends the object's owner).
     if (owner.notNull() && LLMuteList::getInstance()->isMuted(owner)) return;
 
     static LLCachedControl<bool> shake_on(gSavedSettings, "WolfFXCameraShake", true);
+    // [SECURITY 2026-10-12] A shake or a roll of this avatar's camera only from the region the avatar is in.
+    // WolfFXModule sends them only to its own root avatars (Roll/Shake refuse a child agent), but any region
+    // the viewer is connected to - a neighbour, another grid's - can send the message (review 10-12).
+    if (e == "shake" || e == "roll")
+    {
+        LLViewerRegion* here = gAgent.getRegion();
+        if (!here || here->getRegionID() != region_id) return;
+    }
     if (e == "shake")
     {
         if (shake_on) WolfCameraFX::instance().shake(amp * 0.6f, duration);
+        return;
+    }
+    // [2026-10-12] wolfRollCamera (WolfFXModule.Roll): the same switch as the shake turns it off
+    if (e == "roll")
+    {
+        if (shake_on) WolfCameraFX::instance().roll(roll_deg, roll_secs);
         return;
     }
 

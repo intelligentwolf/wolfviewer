@@ -17,6 +17,7 @@
 
 #include "wolfweather.h"
 #include "llenvironment.h"   // <WolfViewer 2026-09-18/> auroraAmount(): the sun
+#include "wolfaurora.h"   // <WolfViewer 2026-10-12/> [WOLF AURORA] auroraAmount()
 #include "llvovolume.h"      // <WolfViewer 2026-09-20/> sWolfRoofProbe
 
 #include <cmath>           // cosf / sinf for the wind direction
@@ -448,23 +449,13 @@ void WolfWeather::setUserAurora(S32 percent)
     apply();
 }
 
-// Source: render_manager.js _applyWeatherAurora - the northern lights are a NIGHT sky: the
-// profile's amount faded in as the sun goes from just above the horizon (0.05) to well below it
-// (-0.12), so a region can leave aurora set and it simply appears after dusk. WolfStorm's fog
-// mix hides the aurora in the shader; here the sky's fog is in the vertex haze, which the added
-// light bypasses, so what the fog lets through is folded in with (1 - fog)^2.
+// <WolfViewer 2026-10-12> [WOLF AURORA] the aurora's gate - the night (the sun from 1 to 4 degrees below
+// the horizon) times what the fog lets through, 0 when there is no aurora - is now WolfAurora's, which
+// works out the whole aurora once a frame (wolfaurora.cpp; Source: wolf_aurora.js state()). The old
+// fade (sun from +0.05 to -0.12 in sine) and (1 - fog)^2 live on there, the fog unchanged.
 F32 WolfWeather::auroraAmount()
 {
-    if (!instanceExists()) return 0.f;
-    const WolfWeatherProfile& p = instance().mActive;
-    if (p.mAurora <= 0) return 0.f;
-    LLSettingsSky::ptr_t sky = LLEnvironment::instance().getCurrentSky();
-    if (!sky) return 0.f;
-    const F32 sun_z = sky->getSunDirection().mV[VZ];
-    F32 night = llclamp((0.05f - sun_z) / 0.17f, 0.f, 1.f);
-    night = night * night * (3.f - 2.f * night);
-    const F32 clear_air = 1.f - (F32)p.mFog / 100.f;
-    return ((F32)p.mAurora / 100.f) * night * clear_air * clear_air;
+    return WolfAurora::gate();
 }
 
 S32 WolfWeather::auroraColorMode()

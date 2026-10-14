@@ -1807,6 +1807,20 @@
      label="Wolf World"
      name="WolfWorld"
      tear_off="true">
+        <!-- [WolfViewer 2026-10-14] Paul: "organise the Wolf World menu ... group things together and put a line between
+             them". Groups: you and your viewer / sky and weather / building and your land / fun and media / vehicles /
+             effects. -->
+        <!-- [WolfViewer 2026-10-14] Experiences: the welcome chooser - pick something to do and be taken there
+             (wolffloaterexperiences.cpp). [WOLF GRID GATE] gone (not greyed) off Wolf Territories. -->
+        <menu_item_call
+         label="Wolf Experiences..."
+         name="WolfExperiences">
+            <menu_item_call.on_click
+             function="Floater.Show"
+             parameter="wolf_experiences" />
+            <menu_item_call.on_visible
+             function="WolfGrid.IsOnWolfTerritories" />
+        </menu_item_call>
         <!-- <WolfViewer 2026-10-11> Paul: Invisible Mode - appear offline to IMs and friend requests
              (wolfinvisible.cpp tells each Wolf region; the login screen's Wolf World menu has the same
              switch). [WOLF GRID GATE] gone (not greyed) off Wolf Territories. -->
@@ -1842,72 +1856,6 @@
              function="Floater.Show"
              parameter="wolf_graphics_helper" />
         </menu_item_call>
-        <!-- [WOLF GAME 2026-10-09] wolffloaterroleplay.cpp: Wolf Roleplay - your stats, money, level,
-             the game's panel and buttons, items, pets, Leave game; and the region's game
-             (VIEWER_SPEC.md §3.3). -->
-        <!-- [WOLF GAME 2026-10-09] The Game Mode switch (§3.2, off by default), the same one as the
-             toolbar's Game Mode button and the switch at the top of the Roleplay floater. -->
-        <menu_item_check
-         label="Game Mode"
-         name="WolfGameMode">
-            <menu_item_check.on_check
-             function="WolfGame.IsGameMode" />
-            <menu_item_check.on_click
-             function="WolfGame.ToggleGameMode" />
-            <!-- [FORCED 2026-10-09] greyed (and labelled with the reason) while the region
-                 requires Game Mode: wolfgame.cpp updateGameModeButtons -->
-            <menu_item_check.on_enable
-             function="WolfGame.CanSwitch" />
-            <!-- [WOLF GRID GATE 2026-10-09] gone (not greyed) off Wolf Territories -->
-            <menu_item_check.on_visible
-             function="WolfGrid.IsOnWolfTerritories" />
-        </menu_item_check>
-        <menu_item_check
-         label="Roleplay"
-         name="WolfRoleplay">
-            <menu_item_check.on_check
-             function="Floater.Visible"
-             parameter="wolf_roleplay" />
-            <menu_item_check.on_click
-             function="Floater.Toggle"
-             parameter="wolf_roleplay" />
-            <!-- [WOLF GRID GATE 2026-10-09] gone (not greyed) off Wolf Territories -->
-            <menu_item_check.on_visible
-             function="WolfGrid.IsOnWolfTerritories" />
-        </menu_item_check>
-        <!-- [WOLF DJ 2026-10-04] wolffloaterdj.cpp: a mini mixer (in-world voice, mic, programs,
-             the Wolf DJ playlist) to the region owner's own radio stream. -->
-        <menu_item_call
-         label="Wolf DJ / Talk Show..."
-         name="WolfDJ">
-            <menu_item_call.on_click
-             function="Floater.Show"
-             parameter="wolf_dj" />
-        </menu_item_call>
-        <!-- [ASTRONOMY 2026-10-03] Paul: "show atronomy, where it would show and label the star groups
-             like orion". Constellation figures and names over the real star map (llvowlsky.cpp), on
-             regions following a real place (Jimmy's Weather). -->
-        <menu_item_check
-         label="Show Astronomy"
-         name="WolfShowAstronomy">
-            <menu_item_check.on_check
-             function="CheckControl"
-             parameter="WolfShowAstronomy" />
-            <menu_item_check.on_click
-             function="ToggleControl"
-             parameter="WolfShowAstronomy" />
-        </menu_item_check>
-        <!-- [AIRPORTS 2026-10-10] wolffloaterairports.cpp: find an airport (or type a region) and fly there. The
-             directory is Wolf Territories', so the item is too. -->
-        <menu_item_call
-         label="Airports..."
-         name="WolfAirports">
-            <menu_item_call.on_click
-             function="Floater.Toggle"
-             parameter="wolf_airports" />
-            <menu_item_call.on_visible
-             function="WolfGrid.IsOnWolfTerritories" />
-        </menu_item_call>
         <!-- [SPAN SCREENS 2026-10-10] wolfspanscreens.cpp: Paul, "an option to make the viewer spread
              across all available screens" - every grid, every system ("make sure everyone gets the
              feature"). Remembered (WolfSpanAllScreens) and put back at the next start. -->
@@ -1930,135 +1878,18 @@
             <menu_item_check.on_click
              function="Wolf.ToggleToolbarIcons" />
         </menu_item_check>
-        <!-- [WOLF DRIVE 2026-10-09] wolfdrive.cpp / wolfdashboard.cpp: the car / truck / bike dashboard
-             and Driving Controls for a wheel, pedals or gamepad. Both Wolf Territories only, gone (not
-             greyed) elsewhere: Paul, "other grids can't use these interfaces they are only for wolf". -->
-        <!-- <WolfViewer 2026-10-11> w65: checked for the road designs only, and a click while the speedboat or
-             spaceship design shows switches to the car / truck / bike one (WolfDrive::toggleDesign) -->
-        <menu_item_check
-         label="Car Dashboard"
-         name="WolfDashboardMode">
-            <menu_item_check.on_check
-             function="WolfDrive.IsDesign"
-             parameter="car" />
-            <menu_item_check.on_click
-             function="WolfDrive.ToggleDesign"
-             parameter="car" />
-            <menu_item_check.on_visible
+        <menu_item_separator />
+        <!-- [WOLF ENV 2026-10-12] the region's / parcel's Wolf Environment (wolffloaterenvironment.cpp).
+             [WOLF GRID GATE] gone (not greyed) off Wolf Territories. -->
+        <menu_item_call
+         label="Wolf Environment..."
+         name="WolfEnvironment">
+            <menu_item_call.on_click
+             function="Floater.Show"
+             parameter="wolf_environment" />
+            <menu_item_call.on_visible
              function="WolfGrid.IsOnWolfTerritories" />
-        </menu_item_check>
-        <menu_item_check
-         label="Driving Controls..."
-         name="WolfDriveControls">
-            <menu_item_check.on_check
-             function="Floater.Visible"
-             parameter="wolf_drive_controls" />
-            <menu_item_check.on_click
-             function="Floater.Toggle"
-             parameter="wolf_drive_controls" />
-            <menu_item_check.on_visible
-             function="WolfGrid.IsOnWolfTerritories" />
-        </menu_item_check>
-        <!-- [FLIGHT MODE 2026-10-06] wolfflight.cpp / wolfflightdeck.cpp: Paul, "World, Flight Mode,
-             adds a flight control interface for flying planes including an AUTOPILOT". The flight
-             deck across the bottom of the screen; the bottom toolbar folds away (its arrow brings it
-             back). -->
-        <menu_item_check
-         label="Flight Mode"
-         name="WolfFlightMode">
-            <menu_item_check.on_check
-             function="CheckControl"
-             parameter="WolfFlightMode" />
-            <menu_item_check.on_click
-             function="ToggleControl"
-             parameter="WolfFlightMode" />
-            <menu_item_check.on_visible
-             function="WolfGrid.IsWolfTerritories" />
-        </menu_item_check>
-        <!-- [TOWER 2026-10-11] wolfflight.cpp tower_say / wolfspeech.cpp announce: Paul, "audio announcements from the
-             tower" with the text to speech, "default tower on". The autopilot's tower calls and height callouts, spoken. -->
-        <menu_item_check
-         label="Tower Voice (autopilot)"
-         name="WolfTowerVoice">
-            <menu_item_check.on_check
-             function="CheckControl"
-             parameter="WolfTowerVoice" />
-            <menu_item_check.on_click
-             function="ToggleControl"
-             parameter="WolfTowerVoice" />
-            <menu_item_check.on_visible
-             function="WolfGrid.IsWolfTerritories" />
-        </menu_item_check>
-        <!-- [SPACESHIP HUD 2026-10-11] w65 Space Rabbit (wolfdashboard.cpp): Paul, "spaceships are basically
-             aircraft" - the dashboard in its spaceship / rocket design, beside Flight Mode. Wolf Territories
-             only, gone (not greyed) elsewhere, like the Car Dashboard. -->
-        <menu_item_check
-         label="Spaceship HUD"
-         name="WolfSpaceshipHud">
-            <menu_item_check.on_check
-             function="WolfDrive.IsDesign"
-             parameter="spaceship" />
-            <menu_item_check.on_click
-             function="WolfDrive.ToggleDesign"
-             parameter="spaceship" />
-            <menu_item_check.on_visible
-             function="WolfGrid.IsOnWolfTerritories" />
-        </menu_item_check>
-        <!-- [SAILING MODE 2026-10-06] Paul: "can we add a sailing one as well — World, Sailing Mode".
-             The same deck with marine instruments and the sailing autopilot (wolfflight.cpp). -->
-        <menu_item_check
-         label="Sailing Mode"
-         name="WolfSailMode">
-            <menu_item_check.on_check
-             function="CheckControl"
-             parameter="WolfSailMode" />
-            <menu_item_check.on_click
-             function="ToggleControl"
-             parameter="WolfSailMode" />
-            <menu_item_check.on_visible
-             function="WolfGrid.IsWolfTerritories" />
-        </menu_item_check>
-        <!-- [SPEEDBOAT HELM 2026-10-11] w65 Space Rabbit (wolfdashboard.cpp): Paul, the speedboat HUD "goes next
-             to the sailing hud". The dashboard in its speedboat design. Wolf Territories only. -->
-        <menu_item_check
-         label="Speedboat Helm"
-         name="WolfSpeedboatHelm">
-            <menu_item_check.on_check
-             function="WolfDrive.IsDesign"
-             parameter="speedboat" />
-            <menu_item_check.on_click
-             function="WolfDrive.ToggleDesign"
-             parameter="speedboat" />
-            <menu_item_check.on_visible
-             function="WolfGrid.IsOnWolfTerritories" />
-        </menu_item_check>
-        <!-- [SUBMARINE HELM 2026-10-11] w65: Paul, "add another hud for driving a submarine and lsl commands" - the
-             dashboard in its submarine design (depth, sea bed, ballast, planes, sonar). Wolf Territories only. -->
-        <menu_item_check
-         label="Submarine Helm"
-         name="WolfSubmarineHelm">
-            <menu_item_check.on_check
-             function="WolfDrive.IsDesign"
-             parameter="submarine" />
-            <menu_item_check.on_click
-             function="WolfDrive.ToggleDesign"
-             parameter="submarine" />
-            <menu_item_check.on_visible
-             function="WolfGrid.IsOnWolfTerritories" />
-        </menu_item_check>
-      <!-- WolfViewer 2026-09-18 / PAINTERS 2026-09-20: World > Photo Effects… opens the floater
-           (floater_wolf_photo_effects.xml: a tile per style, strength slider). The WolfPhoto.*
-           listeners in llviewermenu.cpp stay for keybindings; the submenu they served is gone. -->
-      <menu_item_check
-       label="Photo Effects..."
-       name="WolfPhotoEffects">
-        <menu_item_check.on_check
-         function="Floater.Visible"
-         parameter="wolf_photo_effects" />
-        <menu_item_check.on_click
-         function="Floater.Toggle"
-         parameter="wolf_photo_effects" />
-      </menu_item_check>
+        </menu_item_call>
       <!-- WolfViewer 2026-09-10: World > Weather (wolfweather.cpp). Rain and snow the user
            turns on and off; a parcel whose prims say "wolfrain" / "wolfsnow" overrides it. -->
       <menu
@@ -2280,6 +2111,18 @@
            function="WolfWeather.SetAurora"
            parameter="100" />
         </menu_item_check>
+        <!-- WolfViewer 2026-10-12 [WOLF AURORA]: as the eye sees them (unchecked, the default) or like a
+             photo; the same setting as Preferences > Graphics -->
+        <menu_item_check
+         label="Northern Lights Like a Photo"
+         name="WolfAuroraPhotographic">
+          <menu_item_check.on_check
+           function="CheckControl"
+           parameter="WolfAuroraPhotographic" />
+          <menu_item_check.on_click
+           function="ToggleControl"
+           parameter="WolfAuroraPhotographic" />
+        </menu_item_check>
       </menu>
         <!-- [WOLF WORLD 2026-10-10] Jimmy's Weather Report (wolffloaterweatherreport.cpp) -->
         <menu_item_call
@@ -2291,6 +2134,30 @@
             <menu_item_call.on_visible
              function="WolfGrid.IsOnWolfTerritories" />
         </menu_item_call>
+        <!-- [ASTRONOMY 2026-10-03] Paul: "show atronomy, where it would show and label the star groups
+             like orion". Constellation figures and names over the real star map (llvowlsky.cpp), on
+             regions following a real place (Jimmy's Weather). -->
+        <menu_item_check
+         label="Show Astronomy"
+         name="WolfShowAstronomy">
+            <menu_item_check.on_check
+             function="CheckControl"
+             parameter="WolfShowAstronomy" />
+            <menu_item_check.on_click
+             function="ToggleControl"
+             parameter="WolfShowAstronomy" />
+        </menu_item_check>
+        <menu_item_separator />
+        <!-- [WOLF BUILDER 2026-10-13] wolffloaterbuilder.cpp: the builder's helper - a grid on the ground,
+             snapping to your own grid origin, floating object names, a card with the selection's prims
+             and the parcel's room. Every grid (also under Build). -->
+        <menu_item_call
+         label="Wolf Builder..."
+         name="WolfBuilder">
+            <menu_item_call.on_click
+             function="Floater.Show"
+             parameter="wolf_builder" />
+        </menu_item_call>
         <!-- [WATCHWOLF 2026-10-10] who is on the regions you own or manage (wolffloaterwatchwolf.cpp) -->
         <menu_item_call
          label="WatchWolf..."
@@ -2301,6 +2168,200 @@
             <menu_item_call.on_visible
              function="WolfGrid.IsOnWolfTerritories" />
         </menu_item_call>
+        <menu_item_separator />
+        <!-- [WOLF GAME 2026-10-09] wolffloaterroleplay.cpp: Wolf Roleplay - your stats, money, level,
+             the game's panel and buttons, items, pets, Leave game; and the region's game
+             (VIEWER_SPEC.md §3.3). -->
+        <!-- [WOLF GAME 2026-10-09] The Game Mode switch (§3.2, off by default), the same one as the
+             toolbar's Game Mode button and the switch at the top of the Roleplay floater. -->
+        <menu_item_check
+         label="Game Mode"
+         name="WolfGameMode">
+            <menu_item_check.on_check
+             function="WolfGame.IsGameMode" />
+            <menu_item_check.on_click
+             function="WolfGame.ToggleGameMode" />
+            <!-- [FORCED 2026-10-09] greyed (and labelled with the reason) while the region
+                 requires Game Mode: wolfgame.cpp updateGameModeButtons -->
+            <menu_item_check.on_enable
+             function="WolfGame.CanSwitch" />
+            <!-- [WOLF GRID GATE 2026-10-09] gone (not greyed) off Wolf Territories -->
+            <menu_item_check.on_visible
+             function="WolfGrid.IsOnWolfTerritories" />
+        </menu_item_check>
+        <menu_item_check
+         label="Roleplay"
+         name="WolfRoleplay">
+            <menu_item_check.on_check
+             function="Floater.Visible"
+             parameter="wolf_roleplay" />
+            <menu_item_check.on_click
+             function="Floater.Toggle"
+             parameter="wolf_roleplay" />
+            <!-- [WOLF GRID GATE 2026-10-09] gone (not greyed) off Wolf Territories -->
+            <menu_item_check.on_visible
+             function="WolfGrid.IsOnWolfTerritories" />
+        </menu_item_check>
+        <!-- [WOLF DJ 2026-10-04] wolffloaterdj.cpp: a mini mixer (in-world voice, mic, programs,
+             the Wolf DJ playlist) to the region owner's own radio stream. -->
+        <menu_item_call
+         label="Wolf DJ / Talk Show..."
+         name="WolfDJ">
+            <menu_item_call.on_click
+             function="Floater.Show"
+             parameter="wolf_dj" />
+        </menu_item_call>
+      <!-- WolfViewer 2026-09-18 / PAINTERS 2026-09-20: World > Photo Effects… opens the floater
+           (floater_wolf_photo_effects.xml: a tile per style, strength slider). The WolfPhoto.*
+           listeners in llviewermenu.cpp stay for keybindings; the submenu they served is gone. -->
+      <menu_item_check
+       label="Photo Effects..."
+       name="WolfPhotoEffects">
+        <menu_item_check.on_check
+         function="Floater.Visible"
+         parameter="wolf_photo_effects" />
+        <menu_item_check.on_click
+         function="Floater.Toggle"
+         parameter="wolf_photo_effects" />
+      </menu_item_check>
+        <menu_item_separator />
+        <!-- [WOLF DRIVE 2026-10-09] wolfdrive.cpp / wolfdashboard.cpp: the car / truck / bike dashboard
+             and Driving Controls for a wheel, pedals or gamepad. Both Wolf Territories only, gone (not
+             greyed) elsewhere: Paul, "other grids can't use these interfaces they are only for wolf". -->
+        <!-- <WolfViewer 2026-10-11> w65: checked for the road designs only, and a click while the speedboat or
+             spaceship design shows switches to the car / truck / bike one (WolfDrive::toggleDesign) -->
+        <menu_item_check
+         label="Car Dashboard"
+         name="WolfDashboardMode">
+            <menu_item_check.on_check
+             function="WolfDrive.IsDesign"
+             parameter="car" />
+            <menu_item_check.on_click
+             function="WolfDrive.ToggleDesign"
+             parameter="car" />
+            <menu_item_check.on_visible
+             function="WolfGrid.IsOnWolfTerritories" />
+        </menu_item_check>
+        <menu_item_check
+         label="Driving Controls..."
+         name="WolfDriveControls">
+            <menu_item_check.on_check
+             function="Floater.Visible"
+             parameter="wolf_drive_controls" />
+            <menu_item_check.on_click
+             function="Floater.Toggle"
+             parameter="wolf_drive_controls" />
+            <menu_item_check.on_visible
+             function="WolfGrid.IsOnWolfTerritories" />
+        </menu_item_check>
+        <!-- [FLIGHT MODE 2026-10-06] wolfflight.cpp / wolfflightdeck.cpp: Paul, "World, Flight Mode,
+             adds a flight control interface for flying planes including an AUTOPILOT". The flight
+             deck across the bottom of the screen; the bottom toolbar folds away (its arrow brings it
+             back). -->
+        <menu_item_check
+         label="Flight Mode"
+         name="WolfFlightMode">
+            <menu_item_check.on_check
+             function="CheckControl"
+             parameter="WolfFlightMode" />
+            <menu_item_check.on_click
+             function="ToggleControl"
+             parameter="WolfFlightMode" />
+            <menu_item_check.on_visible
+             function="WolfGrid.IsWolfTerritories" />
+        </menu_item_check>
+        <!-- [TOWER 2026-10-11] wolfflight.cpp tower_say / wolfspeech.cpp announce: Paul, "audio announcements from the
+             tower" with the text to speech, "default tower on". The autopilot's tower calls and height callouts, spoken. -->
+        <menu_item_check
+         label="Tower Voice (autopilot)"
+         name="WolfTowerVoice">
+            <menu_item_check.on_check
+             function="CheckControl"
+             parameter="WolfTowerVoice" />
+            <menu_item_check.on_click
+             function="ToggleControl"
+             parameter="WolfTowerVoice" />
+            <menu_item_check.on_visible
+             function="WolfGrid.IsWolfTerritories" />
+        </menu_item_check>
+        <!-- [AIRPORTS 2026-10-10] wolffloaterairports.cpp: find an airport (or type a region) and fly there. The
+             directory is Wolf Territories', so the item is too. -->
+        <menu_item_call
+         label="Airports..."
+         name="WolfAirports">
+            <menu_item_call.on_click
+             function="Floater.Toggle"
+             parameter="wolf_airports" />
+            <menu_item_call.on_visible
+             function="WolfGrid.IsOnWolfTerritories" />
+        </menu_item_call>
+        <menu_item_check
+         label="Flight Chase Camera (rolls with the plane)"
+         name="WolfFlightFollowCam">
+            <menu_item_check.on_check
+             function="CheckControl"
+             parameter="WolfFlightFollowCam" />
+            <menu_item_check.on_click
+             function="ToggleControl"
+             parameter="WolfFlightFollowCam" />
+        </menu_item_check>
+        <!-- [SPACESHIP HUD 2026-10-11] w65 Space Rabbit (wolfdashboard.cpp): Paul, "spaceships are basically
+             aircraft" - the dashboard in its spaceship / rocket design, beside Flight Mode. Wolf Territories
+             only, gone (not greyed) elsewhere, like the Car Dashboard. -->
+        <menu_item_check
+         label="Spaceship HUD"
+         name="WolfSpaceshipHud">
+            <menu_item_check.on_check
+             function="WolfDrive.IsDesign"
+             parameter="spaceship" />
+            <menu_item_check.on_click
+             function="WolfDrive.ToggleDesign"
+             parameter="spaceship" />
+            <menu_item_check.on_visible
+             function="WolfGrid.IsOnWolfTerritories" />
+        </menu_item_check>
+        <!-- [SAILING MODE 2026-10-06] Paul: "can we add a sailing one as well — World, Sailing Mode".
+             The same deck with marine instruments and the sailing autopilot (wolfflight.cpp). -->
+        <menu_item_check
+         label="Sailing Mode"
+         name="WolfSailMode">
+            <menu_item_check.on_check
+             function="CheckControl"
+             parameter="WolfSailMode" />
+            <menu_item_check.on_click
+             function="ToggleControl"
+             parameter="WolfSailMode" />
+            <menu_item_check.on_visible
+             function="WolfGrid.IsWolfTerritories" />
+        </menu_item_check>
+        <!-- [SPEEDBOAT HELM 2026-10-11] w65 Space Rabbit (wolfdashboard.cpp): Paul, the speedboat HUD "goes next
+             to the sailing hud". The dashboard in its speedboat design. Wolf Territories only. -->
+        <menu_item_check
+         label="Speedboat Helm"
+         name="WolfSpeedboatHelm">
+            <menu_item_check.on_check
+             function="WolfDrive.IsDesign"
+             parameter="speedboat" />
+            <menu_item_check.on_click
+             function="WolfDrive.ToggleDesign"
+             parameter="speedboat" />
+            <menu_item_check.on_visible
+             function="WolfGrid.IsOnWolfTerritories" />
+        </menu_item_check>
+        <!-- [SUBMARINE HELM 2026-10-11] w65: Paul, "add another hud for driving a submarine and lsl commands" - the
+             dashboard in its submarine design (depth, sea bed, ballast, planes, sonar). Wolf Territories only. -->
+        <menu_item_check
+         label="Submarine Helm"
+         name="WolfSubmarineHelm">
+            <menu_item_check.on_check
+             function="WolfDrive.IsDesign"
+             parameter="submarine" />
+            <menu_item_check.on_click
+             function="WolfDrive.ToggleDesign"
+             parameter="submarine" />
+            <menu_item_check.on_visible
+             function="WolfGrid.IsOnWolfTerritories" />
+        </menu_item_check>
         <menu_item_separator />
         <!-- [WOLF FX 2026-10-10] script effects and camera shake (wolffx.cpp, wolfcamerafx.cpp) -->
         <menu_item_check
@@ -2322,16 +2383,6 @@
             <menu_item_check.on_click
              function="ToggleControl"
              parameter="WolfFXCameraShake" />
-        </menu_item_check>
-        <menu_item_check
-         label="Flight Chase Camera (rolls with the plane)"
-         name="WolfFlightFollowCam">
-            <menu_item_check.on_check
-             function="CheckControl"
-             parameter="WolfFlightFollowCam" />
-            <menu_item_check.on_click
-             function="ToggleControl"
-             parameter="WolfFlightFollowCam" />
         </menu_item_check>
     </menu>
     <menu
@@ -2366,6 +2417,18 @@
          <menu_item_call.on_visible
           function="WolfGrid.IsWolfTerritories" />
        </menu_item_call>
+       <!-- [WolfViewer 2026-10-14] Paul: the Cave Builder was "too difficult to find" (only a button inside Paint the Ground).
+            Its own Build menu item, Wolf Territories only: the same region gate the cave code itself uses (WolfCaves::onWolf,
+            WolfGrid::isOnWolfTerritories - off after a hypergrid jump). -->
+       <menu_item_call
+        label="Make Caves..."
+        name="WolfMakeCaves">
+         <menu_item_call.on_click
+          function="Floater.Show"
+          parameter="wolf_caves" />
+         <menu_item_call.on_visible
+          function="WolfGrid.IsOnWolfTerritories" />
+       </menu_item_call>
        <menu_item_call
         label="Create a Model with AI..."
         name="WolfAIModel">
@@ -2374,6 +2437,15 @@
           parameter="wolf_ai" />
          <menu_item_call.on_visible
           function="WolfAI.CanUse" />
+       </menu_item_call>
+       <!-- [WOLF BUILDER 2026-10-13] wolffloaterbuilder.cpp: the builder's helper. Every grid: it asks
+            nothing of the grid, it reads what the viewer already has. -->
+       <menu_item_call
+        label="Wolf Builder..."
+        name="WolfBuilderBuildMenu">
+         <menu_item_call.on_click
+          function="Floater.Show"
+          parameter="wolf_builder" />
        </menu_item_call>
        <menu
           create_jump_keys="true"

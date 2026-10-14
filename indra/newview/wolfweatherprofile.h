@@ -65,6 +65,21 @@ struct WolfWeatherProfile
     // <WolfViewer 2026-09-18> Source: weather_profile.js AURORA_COLORS - green (the default),
     // red, purple, blue, pink, multi. auroraColorMode() is what the shader gets.
     std::string mAuroraColor = "green";
+    // <WolfViewer 2026-10-12> [WOLF AURORA] 'real': the live space weather at the region's real place
+    // (php/auto_env_lib.php ae_aurora_real: NOAA SWPC OVATION along the magnetic meridian, Kp, the
+    // dipole latitude). Sent by the grid, never posted back (toLLSD), not part of operator== (as
+    // weather_profile.js equal()). Source: weather_profile.js normalise() auroraReal.
+    struct AuroraLive
+    {
+        bool mValid = false;
+        F32  mFlux[24] = {};      ///< erg cm^-2 s^-1 at footpoint distances mStartKm + i x mStepKm (poleward +)
+        F32  mStartKm = 0.f, mStepKm = 0.f;
+        F32  mBearing = 0.f;      ///< degrees east of north to the geomagnetic pole
+        F32  mMLat = 0.f;         ///< centred-dipole latitude, degrees (absolute)
+        F32  mKp = -1.f;          ///< planetary K index now; < 0 = unknown
+        F32  mHide = 0.f;         ///< 0..100 % of the sky's low/medium cloud (auto environment)
+    };
+    AuroraLive  mAuroraLive;
 
     // ── ranges, shared by the clamp and the XUI sliders ─────────────────────────────────────
     static constexpr S32 BRIGHTNESS_MIN = 0,  BRIGHTNESS_MAX = 200;

@@ -19,6 +19,7 @@
   <panel.string name="str_none_found">No places found with that name.</panel.string>
   <panel.string name="str_clock_grid">Grid time (Pacific)</panel.string>
   <panel.string name="str_clock_place">The place's own time (its real sky now)</panel.string>
+  <panel.string name="str_wolf_env">This region now uses the Wolf Environment, which sets its place, clock and weather: change them there.</panel.string>
   <panel.string name="str_conflict">These settings were changed elsewhere, so they have been reloaded. Your changes are still shown here: press Apply again to save them.</panel.string>
 
   <text layout="topleft" follows="left|top" height="16" left="10" top="6" width="460"
@@ -77,6 +78,9 @@
           name="ae_apply" label="Apply" />
   <button layout="topleft" follows="left|top" height="22" left_pad="6" top_delta="0" width="90"
           name="ae_revert" label="Revert" />
+  <!-- [WOLF ENV 2026-10-12] the Wolf Environment window, which now holds all of this (wolffloaterenvironment.cpp) -->
+  <button layout="topleft" follows="left|top" height="22" left_pad="40" top_delta="0" width="180"
+          name="ae_open_wolf_env" label="Open Wolf Environment..." />
   <text layout="topleft" follows="left|top" height="30" left="10" top_pad="4" width="460"
         name="ae_status" word_wrap="true" />
   <text layout="topleft" follows="left|top" height="28" left="10" top_pad="2" width="460"

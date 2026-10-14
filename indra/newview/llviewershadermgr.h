@@ -226,6 +226,13 @@ extern LLGLSLShader         gWolfWakeStampProgram;
 extern LLGLSLShader         gWolfSurfCurlProgram;   // [SURF 2026-09-07 phase 2] wolfsurfcurl.cpp
 extern LLGLSLShader         gWolfGodRaysProgram;
 extern LLGLSLShader         gWolfCloudDeckProgram;   // <WolfViewer 2026-10-07/> the cloud layer to fly through
+// [WOLF ENV 2026-10-12] the Wolf Environment's own sky, clouds and fog (wolfenvironmentrender.cpp)
+extern LLGLSLShader         gWolfAuroraLUTProgram;   // [WOLF AURORA 2026-10-12] wolfaurora.cpp
+extern LLGLSLShader         gWolfEnvSkyProgram;            // [WOLF ENV TAKRAM 2026-10-12] wolftk/skyF.glsl
+extern LLGLSLShader         gWolfEnvCompositeProgram[2];   // wolftk/compositeF.glsl: [0] no clouds, [1] clouds (overlay + shafts)
+extern LLGLSLShader         gWolfEnvCameraShadowProgram;   // wolftk/cameraShadowF.glsl: the light meter's cloud shadow
+extern LLGLSLShader         gWolfEnvLogLumProgram;         // wolftk/logLumF.glsl: the light meter's frame log luminance
+extern LLGLSLShader         gWolfEnvLightProgram;          // deferred/wolfEnvZoneF.glsl: a zone's light
 // </WolfViewer>
 extern LLGLSLShader         gGlowProgram;
 extern LLGLSLShader         gGlowExtractProgram;

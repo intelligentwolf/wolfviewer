@@ -395,6 +395,17 @@ public:
         WOLF_PAINT_TEX4,                    // "wolfPaintTex4" [6 SLOTS 2026-09-19] WolfTerrainPaint::SLOTS = 6
         WOLF_PAINT_TEX5,                    // "wolfPaintTex5"
         WOLF_SHELTER_MAP,                   // "wolfShelterMap" [SNOW COVER 2026-09-18] wolfweather.cpp
+        WOLF_AURORA_LUT,                    // "wolfAuroraLUT" [WOLF AURORA 2026-10-12] wolfaurora.cpp
+        WOLF_PHYS,                          // "wolf_phys" [WOLF ENV 2026-10-12 physical] atmosphericsFuncs.glsl and the scene shaders
+        WOLF_SUNLIT,                        // "wolf_sunlit"
+        WOLF_AMB_UP,                        // "wolf_amb_up"
+        WOLF_AMB_DOWN,                      // "wolf_amb_down"
+        WOLF_UP,                            // "wolf_up"
+        WOLF_FULLBRIGHT,                    // "wolf_fullbright"
+        WOLF_EMISSIVE,                      // "wolf_emissive"
+        WOLF_LIGHT_H,                       // "wolf_light_h" the horizontal illuminance / pi, pre-exposed
+        WOLF_TK_HIGHER_ORDER_TEX,           // "higher_order_scattering_texture" [WOLF ENV TAKRAM 2026-10-12] three-geospatial AtmosphereMaterialBase.ts:95
+        WOLF_TK_SHADOW_BUFFER,              // "shadowBuffer" three-geospatial aerialPerspectiveEffect.frag:59 / clouds.frag:73 (sampler2DArray)
         // </WolfViewer>
         END_RESERVED_UNIFORMS
     } eGLSLReservedUniforms;
@@ -421,6 +432,7 @@ public:
     // <WolfViewer 2026-09-05> Feed the BYTES of the shader file that loadShaderFile() would open
     // (same class-fallback search) into a program-cache hash. See LLGLSLShader::hash().
     void hashShaderFileContents(class HBXXH128& hash_obj, const std::string& filename, S32 shader_level);
+    void hashWolfIncludes(class HBXXH128& hash_obj, const std::string& text, S32 depth);   // [WOLF ENV 2026-10-12] #wolf_include
 
     // Implemented in the application to actually point to the shader directory.
     virtual std::string getShaderDirPrefix(void) = 0; // Pure Virtual

@@ -55,6 +55,12 @@ void applyLegacyEnv(inout vec3 color, vec3 legacyenv, vec4 spec, vec3 pos, vec3 
 
 void mirrorClip(vec3 pos);
 
+// [WOLF ENV 2026-10-12 physical] Under the Wolf Environment's physical sky a fullbright surface is a light
+// source of its own: its colour x the luminance of a lit display, 300 cd/m2 (an LCD monitor's typical
+// brightness), x the frame's pre-exposure (WolfEnvironmentRender: wolf_fullbright). HUDs are untouched.
+uniform float wolf_phys;
+uniform float wolf_fullbright;
+
 void main()
 {
     mirrorClip(vary_position);
@@ -86,6 +92,7 @@ void main()
     sampleReflectionProbesLegacy(ambenv, glossenv, legacyenv, vec2(0), pos.xyz, norm.xyz, spec.a, env_intensity, false, amblit);
 
     color.rgb = srgb_to_linear(color.rgb);
+    if (wolf_phys > 0.5) color.rgb *= wolf_fullbright;
 
     applyLegacyEnv(color.rgb, legacyenv, spec, pos, norm, env_intensity);
 #endif

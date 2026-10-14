@@ -25,6 +25,10 @@
 // (OpenSim HGSuitcaseInventoryService.cs:345-356 AddItem "is not within Suitcase tree"); Firestorm (and so this
 // viewer) always asked for the home Landmarks folder (lllandmarkactions.cpp createLandmarkHere,
 // llfloatercreatelandmark.cpp mLandmarksID). And everything that arrives abroad lands in the suitcase.
+// [SUITCASE 2026-10-12] Paul: a Wolf visitor on OSGrid took free "Drinking Horn" objects; OSGrid said "... gave you
+// 'Drinking Horn'" and the folders were written into his home My Suitcase (robust.inventoryfolders, type 100 parent),
+// but his viewer only showed them after a relog - nothing told the viewer's inventory. deliveryNoticed() + a 60 s check
+// while away now fetch the suitcase folders whose version on the server moved.
 namespace WolfSuitcase
 {
     /** Standing on a region of another grid than the one this viewer logged in to (a hypergrid trip). */
@@ -34,6 +38,11 @@ namespace WolfSuitcase
     LLUUID landmarkFolder();
     /** Watch the suitcase while away; move what arrived on the trip home once back. From LLAppViewer idle. */
     void idle();
+    /** An inventory offer arrived or was accepted (llimprocessing.cpp IM_INVENTORY_OFFERED / IM_TASK_INVENTORY_OFFERED,
+     *  llviewermessage.cpp LLOfferInfo::sendReceiveResponse). While away, My Suitcase is looked at again 2 s after the
+     *  first of a burst and 10 s after the last, as the visited grid does not always tell the viewer what it put there.
+     *  Does nothing at home. */
+    void deliveryNoticed();
 }
 
 #endif // WOLF_SUITCASE_H

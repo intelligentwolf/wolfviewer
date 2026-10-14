@@ -15,6 +15,8 @@
 
 #include "llviewerprecompiledheaders.h"
 
+#include "wolfhudscale.h"
+#include "wolfvehiclerez.h"   // [HUD REZ 2026-10-12/]
 #include "wolfdashboard.h"
 
 #include <algorithm>
@@ -22,6 +24,7 @@
 #include <ctime>
 #include <functional>
 #include <map>
+#include <optional>
 
 #include "llagent.h"
 #include "llfloaterreg.h"
@@ -250,8 +253,7 @@ namespace
     void text(const LLFontGL* f, const std::string& s, F32 x, F32 y, const LLColor4& c,
               LLFontGL::HAlign h = LLFontGL::HCENTER, LLFontGL::VAlign v = LLFontGL::VCENTER)
     {
-        if (!f || s.empty()) return;
-        f->renderUTF8(s, 0, x, y, c, h, v, LLFontGL::NORMAL, LLFontGL::NO_SHADOW);
+        WolfHudScale::text(f, s, x, y, c, h, v);   // [HUD SIZE 2026-10-12/] sharp at the size the driver set
     }
 
     // Source: wolfflightdeck.cpp avionics() - the B612 face (fonts.xml Avionics0..11) at the
@@ -322,6 +324,8 @@ namespace
         else if (w == "oxygen")   { label = "OXYGEN"; col = C_RED; }
         else if (w == "battery")  { label = "BATTERY"; }
         else if (w == "leak")     { label = "LEAK"; col = C_RED; }
+        // [WOLF RETARDER 2026-10-12] held back by heat (Scania "Limiting at high temperatures"): a caution, amber
+        else if (w == "retarder") { label = "RETARDER"; }
     }
 
     // ════════════════════════════════════════════════════════════════════════════════════
@@ -609,9 +613,11 @@ void WolfDashboard::addHit(F32 l, F32 b, F32 r, F32 t, EHit id, const std::strin
 
 const WolfDashboard::Hit* WolfDashboard::hitAt(S32 x, S32 y) const
 {
+    // [HUD SIZE 2026-10-12] the view's point in the picture the hits were made in
+    const F32 px = (F32)x / mHitScale, py = (F32)y / mHitScale;
     for (auto it = mHits.rbegin(); it != mHits.rend(); ++it)
     {
-        if (x >= it->mL && x <= it->mR && y >= it->mB && y <= it->mT)
+        if (px >= it->mL && px <= it->mR && py >= it->mB && py <= it->mT)
         {
             return &*it;
         }
@@ -692,6 +698,8 @@ void WolfDashboard::drawMiniBar(F32 bottom)
     {
         cells.push_back({ "", (s.mIndicators == 2 || s.mIndicators == 3) && blink_on ? ">" : "", C_GREEN, H_IND_R, "Right indicator", 0.6f, false });
     }
+    cells.push_back({ "", "REZ", WolfVehicleRez::pending() ? C_AMBER : C_WHITE, H_REZ, WolfVehicleRez::tip(WolfVehicleRez::typeForDesign(ty)), 0.8f, true });   // [HUD REZ 2026-10-12/]
+    cells.push_back({ "", "INV", WolfHud::inventoryOpen() ? C_GREEN : C_WHITE, H_INVENTORY, WolfHud::inventoryTip(), 0.8f, true });   // [HUD INVENTORY 2026-10-12/]
     cells.push_back({ "", "FULL", C_WHITE, H_MINI, "Bring the whole dashboard back", 1.0f, true });
     cells.push_back({ "", "X", C_WHITE, H_CLOSE, "Close the dashboard", 0.6f, true });
 
@@ -800,6 +808,9 @@ namespace
             { 70.f, "HELP", false, WolfDashboard::H_HELP, "How the dashboard works, setting up a wheel and keys, and wolfDashboard for vehicle makers" },
             { 120.f, "CONTROLS", false, WolfDashboard::H_CONTROLS, "Driving Controls: a steering wheel, pedals or gamepad, and the keys for the horn, lamps, gears and the boat / spaceship buttons" },
             { 70.f, "MAP", false, WolfDashboard::H_MAP, "World Map, centred on where you are" },
+            { 120.f, "INVENTORY", WolfHud::inventoryOpen(), WolfDashboard::H_INVENTORY, WolfHud::inventoryTip() },   // [HUD INVENTORY 2026-10-12/]
+            // [HUD REZ 2026-10-12] Paul: "a rez button on each hud that rezzes the vehicle" - lit while a rez is under way
+            { 70.f, "REZ", WolfVehicleRez::pending(), WolfDashboard::H_REZ, WolfVehicleRez::tip(WolfVehicleRez::typeForDesign(ty)) },
             { 92.f, "PANEL", bg, WolfDashboard::H_PANEL, bg ? "Background on: click to float the instruments over the world" : "Background off: click to put the panel back" },
         };
         if (!ship)
@@ -816,12 +827,16 @@ namespace
         {
             bs.push_back({ 92.f, s.mMph ? "MPH" : "KM/H", false, WolfDashboard::H_UNITS, s.mMph ? "Speed in miles per hour: click for km/h" : "Speed in km/h: click for miles per hour" });
         }
-        bs.push_back({ 92.f, "SUB", ty == WolfDrive::TYPE_SUBMARINE, WolfDashboard::H_TYPE_SUBMARINE, "Submarine helm (depth gauge, ballast and planes, sea bed, sonar)" });
-        bs.push_back({ 92.f, "SHIP", ship, WolfDashboard::H_TYPE_SPACESHIP, "Spaceship HUD (Elite / Star Citizen style: heading, pitch ladder, flight-path marker; rocket mode for launches)" });
-        bs.push_back({ 92.f, "BOAT", ty == WolfDrive::TYPE_SPEEDBOAT, WolfDashboard::H_TYPE_SPEEDBOAT, "Speedboat helm (Mercury VesselView style: rev counter, knots, compass, ON PLANE, depth, trim)" });
-        bs.push_back({ 92.f, "BIKE", ty == WolfDrive::TYPE_BIKE, WolfDashboard::H_TYPE_BIKE, "Motorbike dashboard (superbike TFT, handlebars, sequential gears)" });
-        bs.push_back({ 92.f, "TRUCK", ty == WolfDrive::TYPE_TRUCK, WolfDashboard::H_TYPE_TRUCK, "Truck dashboard (Scania style, 12-speed range-splitter: manual or automatic, air brakes)" });
-        bs.push_back({ 92.f, "CAR", ty == WolfDrive::TYPE_CAR, WolfDashboard::H_TYPE_CAR, "Car dashboard (Porsche 911 style, 8 gears: manual or automatic)" });
+        // [HUD SIZE 2026-10-12] Paul: "only the car hud needs extra buttons lorry, car, bike the others dont need them".
+        // The speedboat, spaceship and submarine have none: Wolf World > Speedboat Helm / Spaceship HUD / Submarine
+        // Helm, their toolbar icons (WolfDrive::toggleDesign) and the craft's own script ("type") choose them, and the
+        // car icon or Wolf World > Car Dashboard goes back to the road design last used.
+        if (WolfDrive::isRoad(ty))
+        {
+            bs.push_back({ 92.f, "BIKE", ty == WolfDrive::TYPE_BIKE, WolfDashboard::H_TYPE_BIKE, "Motorbike dashboard (superbike TFT, handlebars, sequential gears)" });
+            bs.push_back({ 92.f, "TRUCK", ty == WolfDrive::TYPE_TRUCK, WolfDashboard::H_TYPE_TRUCK, "Truck dashboard (Scania style, 12-speed range-splitter: manual or automatic, air brakes)" });
+            bs.push_back({ 92.f, "CAR", ty == WolfDrive::TYPE_CAR, WolfDashboard::H_TYPE_CAR, "Car dashboard (Porsche 911 style, 8 gears: manual or automatic)" });
+        }
         const F32 margin = S(14.f), gap = S(8.f), h = S(30.f), line = S(38.f);
         F32 x = g.W - margin;
         F32 bot = g.panelTop + S(8.f);
@@ -1208,6 +1223,89 @@ namespace
         return k.empty() ? std::string() : " (key " + k + ")";
     }
 
+    /**
+     * [WOLF RETARDER 2026-10-12] The truck's retarder stalk, beside the wheel (the real ones and their sources are in
+     * wolfdrive.cpp, above WolfDrive::setRetarderStalk). Top to bottom:
+     *   AUT      the brake pedal brings the retarder in first (lit while on; the driver's own setting)
+     *   DSC      downhill speed control on / off, then its set speed (the script's dsc_speed) with - and + (held)
+     *   0..5     the stalk: the knob sits in the position the DRIVER chose; the figures 1..5 light blue up to the
+     *            stage the vehicle's script says is braking NOW (the "retarder" key), which can be less (the
+     *            accelerator, low speed, heat) or more (the brake pedal with AUT, downhill speed control)
+     *   RET      the retarder lamp: blue while it brakes, amber flashing while the script reports it held back by heat
+     * Pulled DOWN is more braking, as on the Scania lever ("When you move the auxiliary brake lever downwards, the
+     * braking effect increases gradually", Scania Next Gen Quick Guide).
+     */
+    void retarderStalk(Ctx& c, F32 xl, F32 xr, F32 ytop, F32 ybot, const WolfDrive::Shown& s)
+    {
+        WolfDrive& d = WolfDrive::instance();
+        const F32 w = xr - xl;
+        const F32 bh = S(20.f), gap = S(4.f);
+        F32 y = ytop;
+        button(c, xl, y - bh, xr, y, "AUT", d.retarderAut(), WolfDashboard::H_RET_AUT,
+               std::string(d.retarderAut() ? "Retarder AUT: ON - pressing the brake pedal brings the retarder in first, before the wheel brakes. Click for OFF."
+                                           : "Retarder AUT: OFF - the brake pedal works the wheel brakes only. Click for ON.")
+               + keyHint(WolfDrive::ACT_RETARDER_AUT), 9.f);
+        y -= bh + gap;
+        button(c, xl, y - bh, xr, y, "DSC", d.retarderDsc(), WolfDashboard::H_RET_DSC,
+               std::string(d.retarderDsc() ? "Downhill speed control: ON - the retarder holds the set speed downhill (the accelerator pauses it). Click for OFF."
+                                           : "Downhill speed control: OFF. Click to hold the speed you are doing now, downhill, with the retarder.")
+               + keyHint(WolfDrive::ACT_RETARDER_DSC), 9.f);
+        y -= bh + gap;
+        // the set speed, in the shown units (the script sends km/h)
+        const std::string set = s.mHasDscSpeed ? llformat("%d", (S32)llround(speedIn(s, s.mDscSpeed / KMH))) : std::string("--");
+        T((xl + xr) * 0.5f, y - S(8.f), set, 12.f, s.mHasDscSpeed ? C_TEAL : C_DIM, true, true);
+        y -= S(17.f);
+        const F32 half = (w - gap) * 0.5f;
+        button(c, xl, y - bh, xl + half, y, "-", d.actionHeld(WolfDrive::ACT_RETARDER_DSC_DOWN), WolfDashboard::H_RET_DSC_DOWN,
+               "Downhill speed control: set speed down (hold)" + keyHint(WolfDrive::ACT_RETARDER_DSC_DOWN), 14.f);
+        button(c, xr - half, y - bh, xr, y, "+", d.actionHeld(WolfDrive::ACT_RETARDER_DSC_UP), WolfDashboard::H_RET_DSC_UP,
+               "Downhill speed control: set speed up (hold)" + keyHint(WolfDrive::ACT_RETARDER_DSC_UP), 14.f);
+        y -= bh + gap * 2.f;
+        // the stalk's gate: six slots, 0 at the top
+        const F32 lamp_h = S(18.f);
+        const F32 gt = y, gb = ybot + lamp_h + gap;
+        const F32 cell = (gt - gb) / 6.f;
+        const F32 tx = xl + w * 0.30f;                     // the slot the knob runs in
+        roundRectF(xl, gb, xr, gt, S(6.f), LLColor4(0.043f, 0.043f, 0.051f, 1.f), LLColor4(0.043f, 0.043f, 0.051f, 1.f));
+        frameW(xl, gb, xr, gt, 1.f, LLColor4(0.227f, 0.239f, 0.263f, 1.f));
+        lineW(tx, gt - cell * 0.5f, tx, gb + cell * 0.5f, S(5.f) + S(2.f), LLColor4(0.34f, 0.36f, 0.39f, 1.f));
+        lineW(tx, gt - cell * 0.5f, tx, gb + cell * 0.5f, S(5.f), LLColor4(0.01f, 0.01f, 0.012f, 1.f));
+        const S32 sel = d.retarderStalk();
+        const S32 active = llclamp(s.mRetarder, 0, WolfDrive::RETARDER_STALK_MAX);
+        static const char* const TORQUE[6] = { "off", "500 Nm", "1000 Nm", "1500 Nm", "2000 Nm", "3000 Nm" };
+        for (S32 i = 0; i <= WolfDrive::RETARDER_STALK_MAX; ++i)
+        {
+            const F32 ct = gt - cell * i, cb = ct - cell, cy = (ct + cb) * 0.5f;
+            const bool braking = i >= 1 && i <= active;
+            if (braking)
+            {
+                roundRectF(xl + w * 0.56f, cb + S(2.f), xr - S(3.f), ct - S(2.f), S(3.f), alpha(C_BLUE, 0.35f), alpha(C_BLUE, 0.35f));
+            }
+            rectF(tx - S(6.f), cy - 0.5f, tx - S(3.f), cy + 0.5f, C_GREY);   // the notch
+            T(xl + w * 0.75f, cy, llformat("%d", i), 11.f, braking ? C_BLUE : (i == sel ? C_WHITE : C_GREY), true);
+            c.hit(xl, cb, xr, ct, (WolfDashboard::EHit)(WolfDashboard::H_RET_0 + i),
+                  i == 0 ? "Retarder stalk: 0, off. Drag the stalk, click a position or use the scroll wheel over it."
+                               + keyHint(WolfDrive::ACT_RETARDER_DOWN)
+                         : llformat("Retarder stalk: position %d, a fixed %s - braking whenever the accelerator is up "
+                                    "(Scania's five steps). Drag, click or scroll; blue: the stage braking now.", i, TORQUE[i])
+                               + keyHint(i > sel ? WolfDrive::ACT_RETARDER_UP : WolfDrive::ACT_RETARDER_DOWN));
+        }
+        // the knob in the chosen slot (the lever seen from the driver's side)
+        static F32 knob_y = -1.f;
+        const F32 want = gt - cell * (sel + 0.5f);
+        const F32 a = 1.f - expf(-llclamp(LLFrameTimer::getFrameDeltaTimeF32(), 0.f, 0.1f) / 0.05f);
+        knob_y = knob_y < 0.f || knob_y > gt || knob_y < gb ? want : knob_y + (want - knob_y) * a;
+        const F32 kr = llmin(cell * 0.42f, w * 0.22f);
+        circleF(tx + S(1.5f), knob_y - S(1.5f), kr, LLColor4(0.f, 0.f, 0.f, 0.5f), 24);
+        circleShaded(tx, knob_y, kr, LLColor4(0.42f, 0.44f, 0.47f, 1.f), LLColor4(0.10f, 0.11f, 0.12f, 1.f), 24);
+        // the retarder lamp
+        const bool hot = std::find(s.mWarnings.begin(), s.mWarnings.end(), std::string("retarder")) != s.mWarnings.end();
+        const bool lit = hot ? blink(0.7f) : active > 0;
+        const LLColor4 lc = hot ? C_AMBER : C_BLUE;
+        roundRectF(xl, ybot, xr, ybot + lamp_h, S(4.f), alpha(lit ? lc : C_OFF, lit ? 0.22f : 0.5f), alpha(lit ? lc : C_OFF, lit ? 0.22f : 0.5f));
+        T((xl + xr) * 0.5f, ybot + lamp_h * 0.5f, "RET", 11.f, lit ? lc : LLColor4(0.235f, 0.24f, 0.26f, 1.f), true);
+    }
+
     /** The lamp / horn row. Its bottom-right corner sits where the design puts it, but it is never
      *  narrower than LAMP_MIN_W mockup units (so "LAMPS" fits) nor smaller than the strip's size
      *  (g.us, the UI-scale minimum): on a small panel it grows up and to the left instead of
@@ -1454,7 +1552,7 @@ namespace
         const F32 ppd = (r - l) * 0.5f / span;
         const F32 cx = (l + r) * 0.5f, h = t - b;
         {
-            LLLocalClipRect clip(LLRect((S32)l, (S32)t, (S32)r, (S32)b));
+            LLLocalClipRect clip(WolfHudScale::clip(LLRect((S32)l, (S32)t, (S32)r, (S32)b)));
             const LLFontGL* f = font(11.f, true);
             for (S32 k = 0; k < 360; k += 5)
             {
@@ -1668,7 +1766,7 @@ namespace
             const F32 span = 100.f, ppu = (tt - tb) / span;
             rectF(tl, tb, tr, tt, glass);
             {
-                LLLocalClipRect clip(LLRect((S32)tl, (S32)tt, (S32)tr, (S32)tb));
+                LLLocalClipRect clip(WolfHudScale::clip(LLRect((S32)tl, (S32)tt, (S32)tr, (S32)tb)));
                 for (S32 k = ((S32)(spd - span * 0.5f) / 5) * 5; k <= spd + span * 0.5f; k += 5)
                 {
                     if (k < 0) continue;
@@ -1726,7 +1824,7 @@ namespace
             const F32 cx = X(800.f), cy = YM(764.f), aw = S(230.f), ah = S(90.f);
             const F32 ppd = ah / 25.f;
             {
-                LLLocalClipRect clip(LLRect((S32)(cx - aw), (S32)(cy + ah), (S32)(cx + aw), (S32)(cy - ah)));
+                LLLocalClipRect clip(WolfHudScale::clip(LLRect((S32)(cx - aw), (S32)(cy + ah), (S32)(cx + aw), (S32)(cy - ah))));
                 // <WolfViewer 2026-10-11> + mRoll (right wing down) turns the world counter-clockwise: the same fix as the
                 // flight deck's ADI (wolfflightdeck.cpp drawPFD), which this copied with the mirrored sign
                 const Rot rot(cx, cy, s.mRoll);
@@ -1866,7 +1964,7 @@ namespace
             const F32 alt = s.mAltMSL, span = 200.f, ppm = (tt - tb) / span;
             rectF(tl, tb, tr, tt, glass);
             {
-                LLLocalClipRect clip(LLRect((S32)tl, (S32)tt, (S32)tr, (S32)tb));
+                LLLocalClipRect clip(WolfHudScale::clip(LLRect((S32)tl, (S32)tt, (S32)tr, (S32)tb)));
                 // the ground (or water) under the craft, hatched amber
                 const F32 gy = cy + ((alt - s.mAGL) - alt) * ppm;
                 if (gy > tb)
@@ -2230,6 +2328,15 @@ namespace
         { 1, "Each step sends Page Up / Page Down to the vehicle, as the keys do." },
         { 1, "The speed is the vehicle's own; the revs and gear are the" },
         { 2, "vehicle's script's, or the viewer's own model when it sends none." },
+        { 3, "" },
+        // [WOLF RETARDER 2026-10-12] the truck's stalk (wolfdrive.cpp has the sources)
+        { 0, "TRUCK RETARDER (the stalk beside the wheel)" },
+        { 1, "0 off, 1-5 five fixed steps of braking (500 to 3000 Nm): drag it," },
+        { 2, "click, scroll over it, or ] / [. It brakes when you lift off the" },
+        { 2, "accelerator; blue figures show the stage braking now." },
+        { 1, "DSC holds the speed it was switched on at, downhill; - / + (or , / .)" },
+        { 2, "change it, ; switches it. AUT: the brake pedal uses it first." },
+        { 1, "RET lamp: blue braking, amber flashing when held back by heat." },
     };
     const HelpLine HELP_SETUP[] =
     {
@@ -2256,6 +2363,7 @@ namespace
         { 0, "FOR VEHICLE MAKERS" },
         { 1, "wolfDriveInput(driver) gives the exact wheel and pedals:" },
         { 4, "[steer, throttle, brake, clutch, gear, buttons, age]" },
+        { 2, "(the truck's retarder: buttons bits 19 up - PROTOCOL.md)" },   // [WOLF RETARDER 2026-10-12/]
         { 1, "wolfDashboard(driver, [...]) drives this dashboard:" },
         { 4, "wolfDashboard(llAvatarOnSitTarget(), [\"type\",\"car\"," },
         { 4, "    \"rpm\", 3200, \"gear\", \"3\", \"fuel\", 74]);" },
@@ -2459,6 +2567,7 @@ void WolfDashboard::draw()
         {
             release();
         }
+        mResize.hide();   // [HUD SIZE 2026-10-12/]
         return;
     }
     const WolfDrive::EType ty = d.type();
@@ -2477,10 +2586,10 @@ void WolfDashboard::draw()
         }
     }
 
-    const F32 W = (F32)getRect().getWidth();
+    const F32 screen_w = (F32)getRect().getWidth();
     const F32 Hv = (F32)getRect().getHeight();
     // Source: wolfflightdeck.cpp layoutAndDraw - sit on whatever the bottom toolbar leaves.
-    F32 bottom = 0.f;
+    F32 screen_bottom = 0.f;
     if (gToolBarView)
     {
         if (LLView* bp = gToolBarView->findChildView("bottom_toolbar_panel", true))
@@ -2490,7 +2599,7 @@ void WolfDashboard::draw()
                 const LLRect sr = bp->calcScreenRect();
                 S32 lx = 0, ly = 0;
                 screenPointToLocal(sr.mLeft, sr.mTop, &lx, &ly);
-                bottom = llclamp((F32)ly, 0.f, Hv * 0.4f);
+                screen_bottom = llclamp((F32)ly, 0.f, Hv * 0.4f);
             }
         }
     }
@@ -2499,17 +2608,26 @@ void WolfDashboard::draw()
     if (gSavedSettings.getBOOL("WolfDashboardMini"))
     {
         LLGLSUIDefault gls_ui;
-        drawMiniBar(bottom);
+        mHitScale = 1.f;      // [HUD SIZE 2026-10-12] the bar keeps its own size, and has no size handle
+        mResize.hide();
+        drawMiniBar(screen_bottom);
         mDrawn = true;
         return;
     }
     // </WolfViewer>
+    // [HUD SIZE 2026-10-12] Paul: "the huds are all much too big ... the user should be able to drag the top of the
+    // huds (apart from gaming) down to reduce its size on the screen". Everything below is laid out as it always was
+    // (its height from the window's, in pixels) in a picture as wide as the window over `zoom`, and drawn at `zoom`
+    // (WolfHudScale::Scope): the same dashboard, smaller, still across the window and on the toolbar.
+    const F32 zoom = mResize.scale();
+    const F32 W = screen_w / zoom;
+    const F32 bottom = screen_bottom / zoom;
     // The panel is the mockup's 304 units tall. Its size is chosen in pixels (30% of the window,
     // 170 to 380) and turned into UI units with the UI scale, so a bigger UI makes it bigger; it
     // never takes more than 55% of what the toolbar leaves.
     const F32 ui = llmax(0.1f, LLUI::getScaleFactor().mV[VY]);
     const F32 want_h = llclamp(Hv * ui * 0.30f, 170.f, 380.f);
-    const F32 max_h = llmax(60.f, (Hv - bottom) * 0.55f);
+    const F32 max_h = llmax(60.f, (Hv - screen_bottom) * 0.55f);
     const F32 uH = llmin(want_h, max_h) / 304.f;
     const F32 one = llmin(uH, W / 1600.f);
     g.W = W;
@@ -2528,7 +2646,7 @@ void WolfDashboard::draw()
     {
         // a narrow window: the wheel and controls on the bottom row, the cluster on its own above
         g.compact = true;
-        const F32 row_h = llmin(want_h, (Hv - bottom) * 0.30f);
+        const F32 row_h = llmin(want_h, (Hv - screen_bottom) * 0.30f);
         const F32 u2 = llmin(row_h / 304.f, W / 920.f);
         const F32 u1 = llmin(row_h / 304.f, W / 860.f);
         g.L.u = g.R.u = u2;
@@ -2542,12 +2660,14 @@ void WolfDashboard::draw()
     }
     g.panelTop = g.C.top0 - 596.f * g.C.u;
     g.us = llclamp(llmax(g.C.u, US_MIN), US_MIN, US_MAX);
-    mPanelB = bottom;
-    mPanelT = g.panelTop;   // the strip's top is added once it is laid out
+    mPanelB = screen_bottom;
+    mPanelT = g.panelTop * zoom;   // the strip's top is added once it is laid out
     mDrawn = true;
 
 
     LLGLSUIDefault gls_ui;
+    std::optional<WolfHudScale::Scope> zoomed;   // [HUD SIZE 2026-10-12] the dashboard itself, to the strip's top
+    zoomed.emplace(zoom);
     const WolfDrive::Shown& s = d.shown();
     const bool bg = gSavedSettings.getBOOL("WolfDashboardBackground");
     Ctx c{ this, [this](F32 l, F32 b, F32 r, F32 t, EHit id, const std::string& tip) { addHit(l, b, r, t, id, tip); }, mPressed };
@@ -2651,11 +2771,25 @@ void WolfDashboard::draw()
             T(X(810.f), YM(764.f), "SPLIT", 9.f, C_GREY);
         }
         rectF(dl + S(12.f), YM(780.f), dr - S(12.f), YM(780.f) + 1.f, LLColor4(0.15f, 0.19f, 0.23f, 1.f));
-        T(dl + S(14.f), YM(798.f), "RETARDER", 10.f, C_GREY, false, false, LLFontGL::LEFT);
+        // [WOLF RETARDER 2026-10-12] the stages braking now filled blue (the script's), the stalk's own position
+        // framed white; with downhill speed control on, its set speed in place of the word
+        if (d.retarderDsc())
+        {
+            T(dl + S(14.f), YM(798.f), s.mHasDscSpeed ? llformat("DSC %d", (S32)llround(speedIn(s, s.mDscSpeed / KMH))) : std::string("DSC"),
+              10.f, C_TEAL, true, false, LLFontGL::LEFT);
+        }
+        else
+        {
+            T(dl + S(14.f), YM(798.f), "RETARDER", 10.f, C_GREY, false, false, LLFontGL::LEFT);
+        }
         for (S32 i = 0; i < 5; ++i)
         {
             const F32 x = X(740.f + i * 24.f);
             roundRectF(x, YM(804.f), x + S(18.f), YM(792.f), S(2.f), i < s.mRetarder ? C_BLUE : C_OFF, i < s.mRetarder ? C_BLUE : C_OFF);
+            if (i + 1 == d.retarderStalk())
+            {
+                frameW(x - 1.5f, YM(804.f) - 1.5f, x + S(18.f) + 1.5f, YM(792.f) + 1.5f, 1.2f, C_WHITE);
+            }
         }
         const F32 allowed = 4.5f * 3600.f;   // EU drivers' hours: 4.5 h, then a 45-minute break
         const F32 left = allowed - s.mDriveTime;
@@ -2709,6 +2843,9 @@ void WolfDashboard::draw()
         mWheelR = S(140.f);
         wheel(X(200.f), YM(748.f), S(140.f), d.steer(), true);
         addHit(X(60.f), YM(888.f), X(340.f), YM(608.f), H_WHEEL, "Steering wheel: drag left or right (or Left / Right, A / D, or your own wheel)");
+        // [WOLF RETARDER 2026-10-12] the retarder stalk beside the wheel: the strip of the left anchor between the
+        // wheel's hit (to X 340) and the cluster (the centre anchor, from its X 400), free in both layouts
+        retarderStalk(c, X(346.f), X(396.f), YM(606.f), YM(890.f), s);
         use(g.R);
         gearShifter(c, X(1255.f), X(1347.f), YM(632.f), YM(812.f), ty);   // [GEAR STICK 2026-10-10]
         pedals(c, X(1378.f), X(1580.f), YM(666.f), 172.f, d.brake(), d.throttle(), false);
@@ -2853,8 +2990,14 @@ void WolfDashboard::draw()
         pedals(c, X(1372.f), X(1580.f), YM(666.f), 172.f, d.brake(), d.throttle(), true);
         lampButtons(c, X(1372.f), X(1580.f), YM(858.f), s, d.buttonsHeld());
     }
-    mPanelT = strip(c, s, ty, d.vehicleName());
+    mPanelT = strip(c, s, ty, d.vehicleName()) * zoom;
     use(g.C);
+    // [HUD SIZE 2026-10-12] back to the view's own size: the clicks are mapped by mHitScale, the size handle and the
+    // guide (over the world above) are drawn as they are
+    zoomed.reset();
+    mHitScale = zoom;
+    mResize.place(screen_bottom, mPanelT, screen_w);
+    mResize.draw();
 
     // (Paul 2026-10-09: no "sit on a vehicle" banner - the instruments simply rest until you do.)
     if (mShowHelp)
@@ -2904,27 +3047,35 @@ void WolfDashboard::press(EHit id)
             gSavedSettings.setBOOL("WolfDashboardMph", !gSavedSettings.getBOOL("WolfDashboardMph"));
         }
         break;
-    // <WolfViewer 2026-10-11> w65: the designs and the new buttons (held while pressed, like the lamps; BOOST is
-    // the one a script reads as held)
-    case H_TYPE_SPEEDBOAT: d.chooseType(WolfDrive::TYPE_SPEEDBOAT); break;
-    case H_TYPE_SPACESHIP: d.chooseType(WolfDrive::TYPE_SPACESHIP); break;
+    // <WolfViewer 2026-10-11> w65: the new buttons (held while pressed, like the lamps; BOOST is the one a script
+    // reads as held)
     case H_STAGE:          d.setScreenButton(WolfDrive::BTN_STAGE, true); break;
     case H_BOOST:          d.setScreenButton(WolfDrive::BTN_BOOST, true); break;
     case H_ANCHOR:         d.setScreenButton(WolfDrive::BTN_ANCHOR, true); break;
     case H_ASSIST:         d.setScreenButton(WolfDrive::BTN_ASSIST, true); break;
     case H_LANDING_GEAR:   d.setScreenButton(WolfDrive::BTN_LANDING_GEAR, true); break;
     case H_ENGINE:         d.setScreenButton(WolfDrive::BTN_ENGINE, true); break;
-    case H_TYPE_SUBMARINE: d.chooseType(WolfDrive::TYPE_SUBMARINE); break;
     case H_DIVE:           d.setScreenButton(WolfDrive::BTN_DIVE, true); break;
     case H_SURFACE:        d.setScreenButton(WolfDrive::BTN_SURFACE, true); break;
     case H_PERISCOPE:      d.setScreenButton(WolfDrive::BTN_PERISCOPE, true); break;
     case H_SONAR:          d.setScreenButton(WolfDrive::BTN_SONAR, true); break;
+    // [WOLF RETARDER 2026-10-12] the switches through the actions' own edge (as a key or a wheel button would, so
+    // what the driver set them to send goes too); + / - held while pressed; a stalk position is set straight
+    case H_RET_AUT:        d.pressAction(WolfDrive::ACT_RETARDER_AUT); break;
+    case H_RET_DSC:        d.pressAction(WolfDrive::ACT_RETARDER_DSC); break;
+    case H_RET_DSC_UP:     d.setScreenButton(1u << WolfDrive::ACT_RETARDER_DSC_UP, true); break;
+    case H_RET_DSC_DOWN:   d.setScreenButton(1u << WolfDrive::ACT_RETARDER_DSC_DOWN, true); break;
+    case H_RET_0: case H_RET_1: case H_RET_2: case H_RET_3: case H_RET_4: case H_RET_5:
+        if (WolfDrive::onWolf()) d.setRetarderStalk(id - H_RET_0);   // [WOLF ONLY]
+        break;
     case H_PANEL:      gSavedSettings.setBOOL("WolfDashboardBackground", !gSavedSettings.getBOOL("WolfDashboardBackground")); break;
     case H_CONTROLS:   LLFloaterReg::toggleInstanceOrBringToFront("wolf_drive_controls"); break;
     case H_TRIP:       d.resetTrip(); break;
     case H_CLOSE:      d.requestDashboard(false); break;
     case H_MINI:       gSavedSettings.setBOOL("WolfDashboardMini", !gSavedSettings.getBOOL("WolfDashboardMini")); break;   // <WolfViewer 2026-10-10/>
     case H_HELP:       mShowHelp = !mShowHelp; break;
+    case H_INVENTORY:  WolfHud::toggleInventory(); break;   // [HUD INVENTORY 2026-10-12/]
+    case H_REZ:        WolfVehicleRez::rez(WolfVehicleRez::typeForDesign(d.type())); break;   // [HUD REZ 2026-10-12/]
     case H_MAP:
     {
         // Source: wolfflightdeck.cpp press() H_MAP - the World Map, opened and fitted to an area
@@ -2971,12 +3122,20 @@ void WolfDashboard::release()
                       | WolfDrive::BTN_HANDBRAKE | WolfDrive::BTN_HORN | WolfDrive::BTN_HAZARDS | WolfDrive::BTN_CRUISE
                       | WolfDrive::BTN_STAGE | WolfDrive::BTN_BOOST | WolfDrive::BTN_ANCHOR | WolfDrive::BTN_ASSIST   // <WolfViewer 2026-10-11/>
                       | WolfDrive::BTN_LANDING_GEAR | WolfDrive::BTN_ENGINE
-                      | WolfDrive::BTN_DIVE | WolfDrive::BTN_SURFACE | WolfDrive::BTN_PERISCOPE | WolfDrive::BTN_SONAR, false);
+                      | WolfDrive::BTN_DIVE | WolfDrive::BTN_SURFACE | WolfDrive::BTN_PERISCOPE | WolfDrive::BTN_SONAR
+                      | (1u << WolfDrive::ACT_RETARDER_DSC_UP) | (1u << WolfDrive::ACT_RETARDER_DSC_DOWN), false);   // [WOLF RETARDER 2026-10-12/]
     mPressed = H_NONE;
 }
 
 bool WolfDashboard::handleMouseDown(S32 x, S32 y, MASK mask)
 {
+    // [HUD SIZE 2026-10-12] the top edge: a drag sizes the dashboard, and is never a press on a control
+    if (mDrawn && mResize.onGrip(x, y))
+    {
+        mResize.begin(y);
+        gFocusMgr.setMouseCapture(this);
+        return true;
+    }
     if (mDrawn && mShowHelp && y > mPanelT)
     {
         mShowHelp = false;   // the guide is over the world: a click puts it away
@@ -3005,7 +3164,9 @@ bool WolfDashboard::handleMouseDown(S32 x, S32 y, MASK mask)
 
 bool WolfDashboard::handleMouseUp(S32 x, S32 y, MASK mask)
 {
-    const bool was = mPressed != H_NONE;
+    // the edge's own up (the second of a double-click too) stays with the HUD, never the world under it
+    const bool was = mPressed != H_NONE || mResize.dragging() || mResize.onGrip(x, y);
+    mResize.end();   // [HUD SIZE 2026-10-12/]
     if (hasMouseCapture())
     {
         gFocusMgr.setMouseCapture(nullptr);
@@ -3020,8 +3181,34 @@ bool WolfDashboard::handleHover(S32 x, S32 y, MASK mask)
     {
         // Source: the old Vehicle tab's wheel (wolfvehiclecontrols.cpp handleHover): horizontal
         // travel from the press, full lock at one radius.
-        WolfDrive::instance().setScreenSteer(llclamp((F32)(x - mPressX) / llmax(24.f, mWheelR), -1.f, 1.f), true);
+        // [HUD SIZE 2026-10-12] mWheelR is the picture's: the travel too
+        WolfDrive::instance().setScreenSteer(llclamp((F32)(x - mPressX) / mHitScale / llmax(24.f, mWheelR), -1.f, 1.f), true);
         getWindow()->setCursor(UI_CURSOR_HAND);
+        return true;
+    }
+    // [WOLF RETARDER 2026-10-12] dragging the stalk: it follows the pointer from slot to slot (up and down)
+    if (hasMouseCapture() && mPressed >= H_RET_0 && mPressed <= H_RET_5)
+    {
+        const S32 slot = retarderSlotAt(y);
+        if (slot >= 0)
+        {
+            WolfDrive::instance().setRetarderStalk(slot);
+            mPressed = H_RET_0 + slot;
+        }
+        getWindow()->setCursor(UI_CURSOR_SIZENS);
+        return true;
+    }
+    // [HUD SIZE 2026-10-12] Source: llresizebar.cpp handleHover - UI_CURSOR_SIZENS for an edge dragged up and down
+    if (hasMouseCapture() && mResize.dragging())
+    {
+        mResize.drag(y);
+        getWindow()->setCursor(UI_CURSOR_SIZENS);
+        return true;
+    }
+    if (!hasMouseCapture() && mDrawn && mResize.onGrip(x, y))
+    {
+        mResize.hovered();
+        getWindow()->setCursor(UI_CURSOR_SIZENS);
         return true;
     }
     if (!hasMouseCapture() && !onPanel(x, y))
@@ -3034,11 +3221,16 @@ bool WolfDashboard::handleHover(S32 x, S32 y, MASK mask)
 
 bool WolfDashboard::handleRightMouseDown(S32 x, S32 y, MASK mask)
 {
-    return onPanel(x, y);   // no world context menu through the panel
+    return (mDrawn && mResize.onGrip(x, y)) || onPanel(x, y);   // no world context menu through the panel
 }
 
 bool WolfDashboard::handleDoubleClick(S32 x, S32 y, MASK mask)
 {
+    if (mDrawn && mResize.onGrip(x, y))
+    {
+        mResize.reset();   // [HUD SIZE 2026-10-12/] double-click on the top edge: the default size
+        return true;
+    }
     if (!onPanel(x, y))
     {
         return false;
@@ -3046,8 +3238,51 @@ bool WolfDashboard::handleDoubleClick(S32 x, S32 y, MASK mask)
     return handleMouseDown(x, y, mask);
 }
 
+// [WOLF RETARDER 2026-10-12] The scroll wheel over the retarder stalk steps it: towards you (clicks > 0, which
+// llscrollbar.cpp:409 handleScrollWheel turns into changeLine(+), further down a list) is the stalk pulled down,
+// one stage more braking. Anywhere else
+// the wheel goes on to the world as before (the camera's zoom).
+bool WolfDashboard::handleScrollWheel(S32 x, S32 y, S32 clicks)
+{
+    if (!mDrawn || clicks == 0 || !WolfDrive::onWolf())
+    {
+        return false;
+    }
+    const Hit* hit = hitAt(x, y);
+    if (!hit || hit->mId < H_RET_0 || hit->mId > H_RET_5)
+    {
+        return false;
+    }
+    WolfDrive& d = WolfDrive::instance();
+    d.setRetarderStalk(d.retarderStalk() + clicks);
+    return true;
+}
+
+S32 WolfDashboard::retarderSlotAt(S32 y) const
+{
+    const F32 py = (F32)y / mHitScale;   // [HUD SIZE 2026-10-12] the hits are in the picture's units
+    S32 best = -1;
+    F32 best_d = 0.f;
+    for (const Hit& h : mHits)
+    {
+        if (h.mId < H_RET_0 || h.mId > H_RET_5) continue;
+        const F32 dist = fabsf(py - (h.mB + h.mT) * 0.5f);
+        if (best < 0 || dist < best_d)
+        {
+            best = h.mId - H_RET_0;
+            best_d = dist;
+        }
+    }
+    return best;
+}
+
 bool WolfDashboard::handleToolTip(S32 x, S32 y, MASK mask)
 {
+    if (mDrawn && mResize.onGrip(x, y))
+    {
+        LLToolTipMgr::instance().show(WolfHudResize::tip());   // [HUD SIZE 2026-10-12/]
+        return true;
+    }
     if (!onPanel(x, y))
     {
         return false;
@@ -3064,6 +3299,7 @@ bool WolfDashboard::handleToolTip(S32 x, S32 y, MASK mask)
 
 void WolfDashboard::onMouseCaptureLost()
 {
+    mResize.end();   // [HUD SIZE 2026-10-12/]
     release();
     LLUICtrl::onMouseCaptureLost();
 }

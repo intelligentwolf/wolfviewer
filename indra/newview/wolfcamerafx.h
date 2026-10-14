@@ -19,6 +19,7 @@
 
 #include "llquaternion.h"
 #include "llsingleton.h"
+#include "lluuid.h"
 #include "v3math.h"
 
 #include <vector>
@@ -40,6 +41,18 @@
 // jolt of the camera, as games shake theirs for blasts and impacts (amplitude falling with time,
 // a few octaves of noise so it never looks like a sine). Shakes add up; the strongest wins out as
 // they decay. Started by explosions (wolfexplosion.cpp) and by the region (wolfShakeCamera).
+//
+// ROLL [2026-10-12] (Elisa Porter: "expose camera roll as an LSL function in WolfViewer, similar to
+// wolfShakeCamera() ... rotate the camera around its own viewing axis, with adjustable angle,
+// duration and direction, while remaining compatible with existing scripted camera controls"): the
+// region's wolfRollCamera turns the camera's "up" about its line of sight to an angle (+ right,
+// - left) over some seconds, eased in and out, and holds it there until the next roll (0 = level). A roll
+// that comes while one is still turning carries on from the turn's own speed, so a script that follows a
+// vehicle's bank with a roll every fraction of a second moves smoothly instead of stopping each time.
+// Only the up vector turns, after everything else has placed the camera, so llSetCameraParams, the
+// follow camera, mouselook and the chase camera all keep working underneath. Levels itself when the
+// avatar leaves the region the roll came from, teleports (inside the region too), or stands up from the seat
+// it sat on when the roll came, and at once if WolfFXCameraShake is switched off.
 class WolfCameraFX : public LLSingleton<WolfCameraFX>
 {
     LLSINGLETON(WolfCameraFX);
@@ -50,11 +63,15 @@ public:
     // metres of jolt at the start, seconds to die away, jolts per second (0 = the default 18)
     void shake(F32 amplitude, F32 seconds, F32 frequency = 0.f);
 
+    // degrees about the line of sight (+ right, - left, -180..180), seconds to get there (0 = at once)
+    void roll(F32 degrees, F32 seconds);
+
     bool chaseActive() const { return mBlend > 0.f; }
 
 private:
     void chase(LLVector3& position, LLVector3& focus, LLVector3& up, U32 camera_mode, bool focus_on_avatar, F32 dt);
     void applyShake(LLVector3& position, LLVector3& focus, F32 dt);
+    void applyRoll(const LLVector3& position, const LLVector3& focus, LLVector3& up, F32 dt);
 
     // chase
     F32 mBlend = 0.f;               // 0 normal camera .. 1 chase
@@ -68,6 +85,14 @@ private:
         F32 mPhase[6];
     };
     std::vector<Shake> mShakes;
+
+    // roll (degrees)
+    F32 mRollFrom = 0.f, mRollTo = 0.f, mRollNow = 0.f;
+    F32 mRollSeconds = 0.f, mRollAge = 0.f;
+    F32 mRollVel = 0.f;             // degrees a second now (carried into the next roll)
+    F32 mRollStartVel = 0.f;        // ... when this roll began
+    LLUUID mRollRegion;             // the region the roll came from
+    bool mRollSeated = false;       // the avatar sat when the roll came: standing up levels it
 
     F64 mLastTime = 0.0;
 };

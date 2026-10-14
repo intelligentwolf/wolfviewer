@@ -112,8 +112,12 @@
 #include "wolffloaterdj.h"            // [WOLF DJ 2026-10-04/]
 #include "wolffloaterdjplaylist.h"    // [WOLF DJ 2026-10-04/]
 #include "wolffloaterweatherreport.h"   // [JIMMY V9C 2026-10-10/]
+#include "wolfcave.h"                   // [WOLF CAVE 2026-10-12/] the Cave Builder
 #include "wolffloatergraphicshelper.h"   // [GRAPHICS HELPER 2026-10-11/]
+#include "wolffloaterbuilder.h"   // [WOLF BUILDER 2026-10-13/]
+#include "wolffloaterenvironment.h"   // [WOLF ENV 2026-10-12/]
 #include "wolffloaterwatchwolf.h"       // [WATCHWOLF 2026-10-10/]
+#include "wolffloaterexperiences.h"   // [WolfViewer 2026-10-14/] Experiences welcome chooser
 #include "wolffloaterairports.h"   // [AIRPORTS 2026-10-10/]
 #include "wolffloaterradio.h"   // [RADIO 2026-10-05/]
 #include "wolffloaterroleplay.h"   // [WOLF GAME 2026-10-09/]
@@ -662,7 +666,11 @@ void LLViewerFloaterReg::registerFloaters()
     LLFloaterReg::add("wolf_dj_playlist", "floater_wolf_dj_playlist.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterDJPlaylist>);   // [WOLF DJ 2026-10-04/]
     LLFloaterReg::add("wolf_weather_report", "floater_wolf_weather_report.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterWeatherReport>);   // [JIMMY V9C 2026-10-10/]
     LLFloaterReg::add("wolf_graphics_helper", "floater_wolf_graphics_helper.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterGraphicsHelper>);   // [GRAPHICS HELPER 2026-10-11/]
+    LLFloaterReg::add("wolf_builder", "floater_wolf_builder.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterBuilder>);   // [WOLF BUILDER 2026-10-13/] grid, snap origin, names, selection card
+    LLFloaterReg::add("wolf_environment", "floater_wolf_environment.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterEnvironment>);   // [WOLF ENV 2026-10-12/]
     LLFloaterReg::add("wolf_watchwolf", "floater_wolf_watchwolf.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterWatchWolf>);   // [WATCHWOLF 2026-10-10/]
+    LLFloaterReg::add("wolf_experiences", "floater_wolf_experiences.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterExperiences>);   // [WolfViewer 2026-10-14/] Experiences welcome chooser
+    LLFloaterReg::add("wolf_experience_submit", "floater_wolf_experience_submit.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterExperienceSubmit>);   // [WolfViewer 2026-10-14/] Experiences builder tools
     LLFloaterReg::add("wolf_airports", "floater_wolf_airports.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterAirports>);   // [AIRPORTS 2026-10-10/]
     // [WOLF GAME 2026-10-09] Wolf Roleplay (wolfgame.cpp, VIEWER_SPEC.md §3): the Roleplay floater, the
     // game's dialogs (one per dialog id) and its web page.
@@ -676,6 +684,7 @@ void LLViewerFloaterReg::registerFloaters()
     // instead of a tab in the build floater. No custom floater class: the panel inside does all
     // the work, so the generic host is enough (the pattern at :581).
     LLFloaterReg::add("wolf_terrain_paint", "floater_wolf_terrain_paint.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<LLFloater>);
+    LLFloaterReg::add("wolf_caves", "floater_wolf_caves.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterCaves>);   // [WOLF CAVE 2026-10-12/] Paint > Caves...
     LLFloaterReg::add("wolf_ai", "floater_wolf_ai.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<LLFloater>);
     // [AUTOCOMPLETE 2026-09-11] The LSL completion popup, driven by WolfLSLComplete.
     LLFloaterReg::add("wolf_lsl_complete", "floater_wolf_lsl_complete.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterLSLComplete>);

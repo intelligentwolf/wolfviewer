@@ -26,7 +26,7 @@
    label_width="120"
    layout="topleft"
    left="240"
-   max_val="100"
+   max_val="4100"
    name="terrain_raise_spin"
    top_delta="0"
    width="180" />
@@ -39,7 +39,7 @@
    layout="topleft"
    left="240"
    max_val="0"
-   min_val="-100"
+   min_val="-4100"
    name="terrain_lower_spin"
    top_delta="20"
    width="180" />

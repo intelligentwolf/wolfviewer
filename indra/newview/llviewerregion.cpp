@@ -3530,6 +3530,7 @@ void LLViewerRegionImpl::buildCapabilityNames(LLSD& capabilityNames)
     capabilityNames.append("EstateChangeInfo");
     capabilityNames.append("EventQueueGet");
     capabilityNames.append("ExtEnvironment");
+    capabilityNames.append("WolfEnvironmentPreview");   // [WOLF ENV 2026-10-12] WolfSim WolfEnvironment.cs PREVIEW_CAP (wolffloaterenvironment.cpp); other sims ignore an unknown name
 
     // <FS:Ansariel> Force HTTP features on SL
     if (use_http_inventory()) {

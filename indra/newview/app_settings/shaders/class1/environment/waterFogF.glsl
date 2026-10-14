@@ -27,6 +27,8 @@
 
 uniform vec4 waterPlane;
 uniform vec4 waterFogColor;
+uniform float wolf_phys;
+uniform vec3  wolf_light_h;
 uniform float waterFogDensity;
 uniform float waterFogKS;
 
@@ -70,7 +72,11 @@ vec4 getWaterFogViewNoClip(vec3 pos)
 
     float D = pow(0.98, l*kd);
 
-    return vec4(srgb_to_linear(kc.rgb)*L, D);
+    // [WOLF ENV 2026-10-12 physical] the fog colour is the water body's colour: under the physical sky it is
+    // lit by the light on the water (wolf_light_h, the horizontal illuminance / pi, pre-exposed); unlit it
+    // was a constant the exposure did not scale (grey water, and a term the metering read back)
+    vec3 body = srgb_to_linear(kc.rgb) * (wolf_phys > 0.5 ? wolf_light_h : vec3(1.0));
+    return vec4(body*L, D);
 }
 
 vec4 getWaterFogView(vec3 pos)

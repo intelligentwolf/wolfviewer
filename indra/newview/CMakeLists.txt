@@ -930,18 +930,31 @@ set(viewer_SOURCE_FILES
     wolffloaterdjplaylist.cpp
     wolffloaterweatherreport.cpp
     wolffloatergraphicshelper.cpp
+    wolfbuilder.cpp
+    wolffloaterbuilder.cpp
+    wolffloaterenvironment.cpp
+    wolfenvironmentstate.cpp
+    wolfenvironmentrender.cpp
+    wolfeepreference.cpp
+    wolfcloudgenus.cpp
+    wolfexposure.cpp
+    wolftkatmosphere.cpp
+    wolftkclouds.cpp
     wolffloaterwatchwolf.cpp
+    wolffloaterexperiences.cpp   # [WolfViewer 2026-10-14] Experiences welcome chooser
     wolffloaterphotoeffects.cpp
     wolfmeshupload.cpp
     wolfscreenshare.cpp
     wolfaltitudesky.cpp
     wolffarground.cpp
     wolffarterrain.cpp
+    wolfaurora.cpp
     wolfweather.cpp
     wolfspanscreens.cpp
     wolffloaterairports.cpp
     wolfsuitcase.cpp
     wolfinvisible.cpp
+    wolflandsandbox.cpp
     wolflightning.cpp
     wolfspeech.cpp
     wolfoceanfft.cpp
@@ -961,11 +974,14 @@ set(viewer_SOURCE_FILES
     wolfairports.cpp
     wolflslcomplete.cpp
     wolfterrainpaint.cpp
+    wolfcave.cpp
     wolfsurfcurl.cpp
     wolfmapglobe.cpp
     wolfmapoverlays.cpp
     wolfdrive.cpp
     wolfdashboard.cpp
+    wolfhudscale.cpp
+    wolfvehiclerez.cpp
     wolffloaterdrivecontrols.cpp
     NACLantispam.cpp
     NACLfloaterexploresounds.cpp
@@ -1852,18 +1868,32 @@ set(viewer_HEADER_FILES
     wolffloaterdjplaylist.h
     wolffloaterweatherreport.h
     wolffloatergraphicshelper.h
+    wolfbuilder.h
+    wolffloaterbuilder.h
+    wolffloaterenvironment.h
+    wolfenvironmentstate.h
+    wolfenvironmentrender.h
+    wolfeepreference.h
+    wolfcloudgenus.h
+    wolfexposure.h
+    wolftkatmosphere.h
+    wolftkclouds.h
+    wolftkgl.h
     wolffloaterwatchwolf.h
+    wolffloaterexperiences.h   # [WolfViewer 2026-10-14]
     wolffloaterphotoeffects.h
     wolfmeshupload.h
     wolfscreenshare.h
     wolfaltitudesky.h
     wolffarground.h
     wolffarterrain.h
+    wolfaurora.h
     wolfweather.h
     wolfspanscreens.h
     wolffloaterairports.h
     wolfsuitcase.h
     wolfinvisible.h
+    wolflandsandbox.h
     wolflightning.h
     wolfspeech.h
     wolfoceanfft.h
@@ -1884,11 +1914,14 @@ set(viewer_HEADER_FILES
     wolfairports.h
     wolflslcomplete.h
     wolfterrainpaint.h
+    wolfcave.h
     wolfsurfcurl.h
     wolfmapglobe.h
     wolfmapoverlays.h
     wolfdrive.h
     wolfdashboard.h
+    wolfhudscale.h
+    wolfvehiclerez.h
     wolffloaterdrivecontrols.h
     VertexCache.h
     VorbisFramework.h

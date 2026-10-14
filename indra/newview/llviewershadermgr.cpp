@@ -52,6 +52,7 @@
 // <WolfViewer 2026-09-12> telling the user why their graphics were turned down
 #include "llnotificationsutil.h"
 #include "llcallbacklist.h"
+#include "wolfenvironmentrender.h"   // [WOLF ENV TAKRAM 2026-10-12] the native sky's programs
 
 static LLStaticHashedString sTexture0("texture0");
 static LLStaticHashedString sTexture1("texture1");
@@ -320,6 +321,12 @@ LLGLSLShader        gWolfWakeStampProgram;
 LLGLSLShader        gWolfSurfCurlProgram;
 LLGLSLShader        gWolfGodRaysProgram;
 LLGLSLShader        gWolfCloudDeckProgram;   // <WolfViewer 2026-10-07/>
+LLGLSLShader        gWolfEnvSkyProgram;            // [WOLF ENV TAKRAM 2026-10-12] wolfenvironmentrender.cpp
+LLGLSLShader        gWolfEnvCompositeProgram[2];
+LLGLSLShader        gWolfEnvCameraShadowProgram;
+LLGLSLShader        gWolfEnvLogLumProgram;
+LLGLSLShader        gWolfEnvLightProgram;
+LLGLSLShader        gWolfAuroraLUTProgram;   // [WOLF AURORA 2026-10-12] wolfaurora.cpp
 // </WolfViewer>
 LLGLSLShader        gUnderWaterProgram;
 
@@ -472,6 +479,55 @@ static bool make_rigged_variant(LLGLSLShader& shader, LLGLSLShader& riggedShader
 
     shader.mRiggedVariant = &riggedShader;
     return riggedShader.createShader();
+}
+
+// [WOLF ENV TAKRAM 2026-10-12] wolftk/atmosphereLibF.glsl as a second fragment unit of a stock program (the
+// Bruneton demo's pattern: demo.cc:110-131 links model->shader() into the scene program), so the native sky's
+// aerial perspective and the clouds' shadow reach water, transparent surfaces and the sun term of softenLight.
+// WOLF_TK_LIB tells the stock shader the unit is there; every call is also behind wolf_phys at run time, so with
+// the native sky off the program draws exactly as before. The unit adds five samplers: if a GPU's texture units
+// run out (an Apple GPU has 16, llgl.cpp:1290), the program is built again without it (wolf_tk_create) and
+// those surfaces simply get no aerial perspective - logged once.
+// With WolfEnvironmentNativeSky off nothing is attached: the stock programs are built exactly as stock (the setting
+// reloads the shaders when it changes, llviewercontrol.cpp).
+static bool wolf_native_sky_on()
+{
+    return gSavedSettings.getBOOL("WolfEnvironmentNativeSky");
+}
+
+static void wolf_tk_attach(LLGLSLShader& shader)
+{
+    if (!wolf_native_sky_on()) return;
+    shader.mShaderFiles.push_back(make_pair("wolftk/atmosphereLibF.glsl", GL_FRAGMENT_SHADER));
+    shader.addPermutation("WOLF_TK_LIB", "1");
+    WolfEnvironmentRender::addAtmosphereDefines(shader);
+    shader.addPermutation("GROUND", "1");   // AerialPerspectiveEffect.ts:168 ground: true
+}
+
+static bool wolf_tk_create(LLGLSLShader& shader)
+{
+    bool had = false;
+    for (const auto& f : shader.mShaderFiles) if (f.first == "wolftk/atmosphereLibF.glsl") had = true;
+    if (!had) return shader.createShader();   // the stock path, untouched (its own lower-level retries included)
+    // LLGLSLShader::createShader retries a failed link at lower shader levels by itself (llglslshader.cpp), still
+    // with the unit attached; a program that only links one level down WITH the unit is not wanted (a class 2
+    // softenLight is not the class 3 one): then it is built again at its own level without the unit
+    const S32 level = shader.mShaderLevel;
+    if (shader.createShader() && shader.mShaderLevel == level) return true;
+    // (no unload(): it clears the files, defines and features; createShader starts with unloadInternal itself)
+    for (auto it = shader.mShaderFiles.begin(); it != shader.mShaderFiles.end(); )
+    {
+        if (it->first == "wolftk/atmosphereLibF.glsl") it = shader.mShaderFiles.erase(it);
+        else ++it;
+    }
+    shader.removePermutation("WOLF_TK_LIB");
+    shader.mShaderLevel = level;
+    const bool ok = shader.createShader();
+    if (ok)
+    {
+        LL_WARNS("ShaderLoading") << shader.mName << ": built without the native sky's aerial perspective (the program could not link with it)" << LL_ENDL;
+    }
+    return ok;
 }
 
 static void add_common_permutations(LLGLSLShader* shader)
@@ -654,6 +710,7 @@ void LLViewerShaderMgr::finalizeShaderList()
     mShaderList.push_back(&gDeferredAvatarAlphaProgram);
     mShaderList.push_back(&gEnvironmentMapProgram);
     mShaderList.push_back(&gDeferredWLSkyProgram);
+    mShaderList.push_back(&gWolfEnvSkyProgram);   // [WOLF ENV 2026-10-12/] the sky group's uniforms, as the EEP dome
     mShaderList.push_back(&gDeferredWLCloudProgram);
     mShaderList.push_back(&gDeferredWLMoonProgram);
     mShaderList.push_back(&gDeferredWLSunProgram);
@@ -983,6 +1040,9 @@ void LLViewerShaderMgr::setShaders()
 
 void LLViewerShaderMgr::unloadShaders()
 {
+    // [WOLF ENV TAKRAM 2026-10-12] the native sky's own programs go with the rest below: its loaders forget them
+    // first (a table build in flight is cancelled, WolfTk::Atmosphere::unloadShaders)
+    WolfEnvironmentRender::unloadShaders();
     while (!LLGLSLShader::sInstances.empty())
     {
         LLGLSLShader* shader = *(LLGLSLShader::sInstances.begin());
@@ -1251,7 +1311,8 @@ bool LLViewerShaderMgr::loadShadersWater()
 
         gWaterProgram.mShaderGroup = LLGLSLShader::SG_WATER;
         gWaterProgram.mShaderLevel = mShaderLevel[SHADER_WATER];
-        success = gWaterProgram.createShader();
+        wolf_tk_attach(gWaterProgram);   // [WOLF ENV TAKRAM 2026-10-12] aerial perspective + the clouds' shadow on the water
+        success = wolf_tk_create(gWaterProgram);
         llassert(success);
     }
 
@@ -1302,7 +1363,8 @@ bool LLViewerShaderMgr::loadShadersWater()
         sh.mShaderFiles.push_back(make_pair(def.mFrag, GL_FRAGMENT_SHADER));
         sh.clearPermutations();
         sh.mShaderLevel = mShaderLevel[SHADER_WATER];
-        success = sh.createShader();
+        if (&sh == &gWolfSurfCurlProgram) wolf_tk_attach(sh);   // [WOLF ENV TAKRAM 2026-10-12] the surf lit like the water beside it
+        success = wolf_tk_create(sh);
         llassert(success);
     }
     // </WolfViewer>
@@ -1709,7 +1771,10 @@ bool LLViewerShaderMgr::loadShadersDeferred()
                 gDeferredMaterialProgram[i].mRiggedVariant = &gDeferredMaterialProgram[i + 0x10];
             }
 
-            success = gDeferredMaterialProgram[i].createShader();
+            // [WOLF ENV TAKRAM 2026-10-12] decision D14: the alpha-BLENDED materials (DIFFUSE_ALPHA_MODE 1, LLMaterial
+            // DIFFUSE_ALPHA_MODE_BLEND) get the aerial perspective and the clouds' shadow; not the skinned ones (avatars)
+            if (!has_skin && alpha_mode == LLMaterial::DIFFUSE_ALPHA_MODE_BLEND) wolf_tk_attach(gDeferredMaterialProgram[i]);
+            success = wolf_tk_create(gDeferredMaterialProgram[i]);
             llassert(success);
         }
     }
@@ -1849,7 +1914,8 @@ bool LLViewerShaderMgr::loadShadersDeferred()
         success = make_rigged_variant(*shader, gDeferredSkinnedPBRAlphaProgram);
         if (success)
         {
-            success = shader->createShader();
+            wolf_tk_attach(*shader);   // [WOLF ENV TAKRAM 2026-10-12] D14, after the rigged copy (avatars untouched)
+            success = wolf_tk_create(*shader);
         }
         llassert(success);
 
@@ -2183,7 +2249,10 @@ bool LLViewerShaderMgr::loadShadersDeferred()
 
             shader->mShaderLevel = mShaderLevel[SHADER_DEFERRED];
 
-            success = shader->createShader();
+            // [WOLF ENV TAKRAM 2026-10-12] decision D14: aerial perspective and the clouds' shadow on transparent
+            // surfaces - not the rigged (avatar) variant, not HUDs (Paul: no avatar rendering changes)
+            if (!rigged && !hud) wolf_tk_attach(*shader);
+            success = wolf_tk_create(*shader);
             llassert(success);
 
             // Hack
@@ -2378,7 +2447,8 @@ bool LLViewerShaderMgr::loadShadersDeferred()
 
         gDeferredFullbrightAlphaMaskAlphaProgram.mShaderLevel = mShaderLevel[SHADER_DEFERRED];
         success = make_rigged_variant(gDeferredFullbrightAlphaMaskAlphaProgram, gDeferredSkinnedFullbrightAlphaMaskAlphaProgram);
-        success = success && gDeferredFullbrightAlphaMaskAlphaProgram.createShader();
+        if (success) wolf_tk_attach(gDeferredFullbrightAlphaMaskAlphaProgram);   // [WOLF ENV TAKRAM 2026-10-12] D14
+        success = success && wolf_tk_create(gDeferredFullbrightAlphaMaskAlphaProgram);
         llassert(success);
     }
 
@@ -2499,7 +2569,8 @@ bool LLViewerShaderMgr::loadShadersDeferred()
             gDeferredSoftenProgram.addPermutation("HAS_SSAO", "1");
         }
 
-        success = gDeferredSoftenProgram.createShader();
+        wolf_tk_attach(gDeferredSoftenProgram);   // [WOLF ENV TAKRAM 2026-10-12] the clouds' shadow on the sun term
+        success = wolf_tk_create(gDeferredSoftenProgram);
         llassert(success);
     }
 
@@ -2862,6 +2933,92 @@ bool LLViewerShaderMgr::loadShadersDeferred()
         }
     }
     // </WolfViewer>
+
+    // [WOLF ENV TAKRAM 2026-10-12] The native Wolf sky, translated from three-geospatial (atmosphere, clouds) and
+    // Filament (exposure, AgX): the atmosphere's precompute and the clouds' passes build their own programs
+    // (WolfTk::Atmosphere / WolfTk::Clouds via WolfEnvironmentRender::loadShaders); the dome, the composite, the
+    // light meter's cloud shadow and the zone light here. Like the cloud deck, a failure only turns the native
+    // sky off (WolfEnvironmentRender::tier checks every program): the EEP sky and every other shader load as before.
+    if (success && wolf_native_sky_on())
+    {
+        if (!WolfEnvironmentRender::loadShaders(mShaderLevel[SHADER_DEFERRED]))
+        {
+            LL_WARNS("ShaderLoading") << "Wolf native sky: an atmosphere or clouds program failed - the EEP sky is drawn" << LL_ENDL;
+        }
+        // The dome: as gDeferredWLSkyProgram (the sky group's uniforms, sRGB helpers, the emissive permutation).
+        gWolfEnvSkyProgram.mName = "Wolf Env Sky Dome";
+        gWolfEnvSkyProgram.mShaderFiles.clear();
+        gWolfEnvSkyProgram.clearPermutations();
+        gWolfEnvSkyProgram.mFeatures.hasSrgb = true;
+        gWolfEnvSkyProgram.mShaderFiles.push_back(make_pair("deferred/wolfEnvSkyV.glsl", GL_VERTEX_SHADER));
+        gWolfEnvSkyProgram.mShaderFiles.push_back(make_pair("wolftk/skyF.glsl", GL_FRAGMENT_SHADER));
+        gWolfEnvSkyProgram.mShaderFiles.push_back(make_pair("deferred/wolfAuroraF.glsl", GL_FRAGMENT_SHADER));   // [WOLF AURORA] wolfAuroraRadiance
+        gWolfEnvSkyProgram.mShaderLevel = mShaderLevel[SHADER_DEFERRED];
+        gWolfEnvSkyProgram.mShaderGroup = LLGLSLShader::SG_SKY;
+        WolfEnvironmentRender::addAtmosphereDefines(gWolfEnvSkyProgram);
+        gWolfEnvSkyProgram.addPermutation("GROUND", "1");             // AerialPerspectiveEffect.ts:168 / SkyMaterial.ts:50 ground: true
+        gWolfEnvSkyProgram.addPermutation("HAS_SHADOW_LENGTH", "1");  // sky.frag:32-48 (no clouds: a zero table is bound)
+        add_common_permutations(&gWolfEnvSkyProgram);
+        if (!gWolfEnvSkyProgram.createShader())
+        {
+            LL_WARNS("ShaderLoading") << "Wolf Env Sky Dome failed: the native sky is off, the EEP sky is drawn" << LL_ENDL;
+        }
+        for (S32 i = 0; i < 2; ++i)
+        {
+            LLGLSLShader& c = gWolfEnvCompositeProgram[i];
+            c.mName = i ? "Wolf Env Aerial Perspective + Clouds" : "Wolf Env Aerial Perspective";
+            c.mShaderFiles.clear();
+            c.clearPermutations();
+            c.mShaderFiles.push_back(make_pair("wolftk/compositeV.glsl", GL_VERTEX_SHADER));
+            c.mShaderFiles.push_back(make_pair("wolftk/compositeF.glsl", GL_FRAGMENT_SHADER));
+            c.mShaderLevel = mShaderLevel[SHADER_DEFERRED];
+            WolfEnvironmentRender::addAtmosphereDefines(c);
+            c.addPermutation("GROUND", "1");   // AerialPerspectiveEffect.ts:168 ground: true
+            if (i)
+            {
+                c.addPermutation("HAS_OVERLAY", "1");         // CloudsEffect atmosphereOverlay (AerialPerspectiveEffect.ts:384-402)
+                c.addPermutation("HAS_SHADOW_LENGTH", "1");   // CloudsEffect atmosphereShadowLength (:436-454)
+            }
+            if (!c.createShader())
+            {
+                LL_WARNS("ShaderLoading") << c.mName << " failed: the native sky is off, the EEP sky is drawn" << LL_ENDL;
+            }
+        }
+        gWolfEnvCameraShadowProgram.mName = "Wolf Env Camera Cloud Shadow";
+        gWolfEnvCameraShadowProgram.mShaderFiles.clear();
+        gWolfEnvCameraShadowProgram.clearPermutations();
+        gWolfEnvCameraShadowProgram.mShaderFiles.push_back(make_pair("deferred/postDeferredNoTCV.glsl", GL_VERTEX_SHADER));
+        gWolfEnvCameraShadowProgram.mShaderFiles.push_back(make_pair("wolftk/cameraShadowF.glsl", GL_FRAGMENT_SHADER));
+        gWolfEnvCameraShadowProgram.mShaderFiles.push_back(make_pair("wolftk/atmosphereLibF.glsl", GL_FRAGMENT_SHADER));
+        gWolfEnvCameraShadowProgram.mShaderLevel = mShaderLevel[SHADER_DEFERRED];
+        WolfEnvironmentRender::addAtmosphereDefines(gWolfEnvCameraShadowProgram);
+        gWolfEnvCameraShadowProgram.addPermutation("GROUND", "1");
+        if (!gWolfEnvCameraShadowProgram.createShader())
+        {
+            LL_WARNS("ShaderLoading") << "Wolf Env Camera Cloud Shadow failed: the native sky is off" << LL_ENDL;
+        }
+        // [WolfViewer 2026-10-13] the light meter's reflected reading: the frame's log luminance (wolfexposure.h)
+        gWolfEnvLogLumProgram.mName = "Wolf Env Frame Log Luminance";
+        gWolfEnvLogLumProgram.mShaderFiles.clear();
+        gWolfEnvLogLumProgram.clearPermutations();
+        gWolfEnvLogLumProgram.mShaderFiles.push_back(make_pair("deferred/postDeferredNoTCV.glsl", GL_VERTEX_SHADER));
+        gWolfEnvLogLumProgram.mShaderFiles.push_back(make_pair("wolftk/logLumF.glsl", GL_FRAGMENT_SHADER));
+        gWolfEnvLogLumProgram.mShaderLevel = mShaderLevel[SHADER_DEFERRED];
+        if (!gWolfEnvLogLumProgram.createShader())
+        {
+            LL_WARNS("ShaderLoading") << "Wolf Env Frame Log Luminance failed: the meter reads the incident light alone" << LL_ENDL;
+        }
+        gWolfEnvLightProgram.mName = "Wolf Env Zone Light";
+        gWolfEnvLightProgram.mShaderFiles.clear();
+        gWolfEnvLightProgram.clearPermutations();
+        gWolfEnvLightProgram.mShaderFiles.push_back(make_pair("deferred/postDeferredNoTCV.glsl", GL_VERTEX_SHADER));
+        gWolfEnvLightProgram.mShaderFiles.push_back(make_pair("deferred/wolfEnvZoneF.glsl", GL_FRAGMENT_SHADER));
+        gWolfEnvLightProgram.mShaderLevel = mShaderLevel[SHADER_DEFERRED];
+        if (!gWolfEnvLightProgram.createShader())
+        {
+            LL_WARNS("ShaderLoading") << "Wolf Env Zone Light failed: the native sky is off" << LL_ENDL;
+        }
+    }
 
     if (success)
     {
@@ -3259,6 +3416,7 @@ bool LLViewerShaderMgr::loadShadersDeferred()
         add_common_permutations(&gEnvironmentMapProgram);
         gEnvironmentMapProgram.mShaderFiles.push_back(make_pair("deferred/skyV.glsl", GL_VERTEX_SHADER));
         gEnvironmentMapProgram.mShaderFiles.push_back(make_pair("deferred/skyF.glsl", GL_FRAGMENT_SHADER));
+        gEnvironmentMapProgram.mShaderFiles.push_back(make_pair("deferred/wolfAuroraF.glsl", GL_FRAGMENT_SHADER));   // [WOLF AURORA 2026-10-12/]
         gEnvironmentMapProgram.mShaderLevel = mShaderLevel[SHADER_DEFERRED];
         gEnvironmentMapProgram.mShaderGroup = LLGLSLShader::SG_SKY;
 
@@ -3277,6 +3435,7 @@ bool LLViewerShaderMgr::loadShadersDeferred()
 
         gDeferredWLSkyProgram.mShaderFiles.push_back(make_pair("deferred/skyV.glsl", GL_VERTEX_SHADER));
         gDeferredWLSkyProgram.mShaderFiles.push_back(make_pair("deferred/skyF.glsl", GL_FRAGMENT_SHADER));
+        gDeferredWLSkyProgram.mShaderFiles.push_back(make_pair("deferred/wolfAuroraF.glsl", GL_FRAGMENT_SHADER));   // [WOLF AURORA 2026-10-12/]
         gDeferredWLSkyProgram.mShaderLevel = mShaderLevel[SHADER_DEFERRED];
         gDeferredWLSkyProgram.mShaderGroup = LLGLSLShader::SG_SKY;
 
@@ -3284,6 +3443,23 @@ bool LLViewerShaderMgr::loadShadersDeferred()
 
         success = gDeferredWLSkyProgram.createShader();
         llassert(success);
+    }
+
+    // [WOLF AURORA 2026-10-12] the aurora's ray march into its direction table (wolfAuroraF.glsl
+    // WOLF_AURORA_LUT_PASS; WolfAurora::frameUpdate). Not fatal: without it the sky has no aurora.
+    if (success)
+    {
+        gWolfAuroraLUTProgram.mName = "Wolf Aurora LUT";
+        gWolfAuroraLUTProgram.mShaderFiles.clear();
+        gWolfAuroraLUTProgram.clearPermutations();
+        gWolfAuroraLUTProgram.addPermutation("WOLF_AURORA_LUT_PASS", "1");
+        gWolfAuroraLUTProgram.mShaderFiles.push_back(make_pair("deferred/postDeferredNoTCV.glsl", GL_VERTEX_SHADER));
+        gWolfAuroraLUTProgram.mShaderFiles.push_back(make_pair("deferred/wolfAuroraF.glsl", GL_FRAGMENT_SHADER));
+        gWolfAuroraLUTProgram.mShaderLevel = mShaderLevel[SHADER_DEFERRED];
+        if (!gWolfAuroraLUTProgram.createShader())
+        {
+            LL_WARNS("ShaderLoading") << "Wolf Aurora LUT failed: the sky is drawn without the aurora" << LL_ENDL;
+        }
     }
 
     if (success)

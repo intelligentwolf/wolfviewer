@@ -28,6 +28,7 @@
 
 #include "llviewerdisplay.h"
 #include "wolfaltitudesky.h"   // <WolfViewer 2026-10-07/> far clip grows with height
+#include "wolfbuilder.h"       // [WOLF BUILDER 2026-10-13/] the builder's grid on the ground
 
 #include "fstransporterfx.h"   // WolfViewer teleport beam
 
@@ -1929,6 +1930,10 @@ void render_ui_3d()
         drawChatRangeSpheres();
     }
     // </FS:PP>
+
+    // [WOLF BUILDER 2026-10-13] the builder's grid on the ground, drawn here under gUIProgram with the
+    // same state the manipulators' snap grid gets (renderSelections -> tool->render() just above).
+    WolfBuilder::instance().renderGrid();
 
     gViewerWindow->renderSelections(false, false, true); // Non HUD call in render_hud_elements
 

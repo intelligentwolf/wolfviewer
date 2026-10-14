@@ -64,6 +64,17 @@ void main()
             discard;
         }
 
+        // <WolfViewer 2026-10-12> Nothing under this water but the sky: no haze. Source: hazeF.glsl:79-82 (the sky
+        // haze pass) `if (depth >= 1.0) discard; // should only be true of sky, clouds, sun/moon, and stars`. This pass
+        // runs before LLDrawPoolWater copies the screen for the water's refraction (LLPipeline::renderGeomPostDeferred:
+        // doWaterHaze, then LLDrawPoolWater::beginPostDeferredPass -> mWaterDis), so the sky-depth pixels under the
+        // open sea's planes were fogged by 4 km of water (black with a black fog colour, alpha 0) INTO that copy, and
+        // waterF.glsl's blend into the sky's ocean at the far clip (wolfSeaBehind / fb) blended the far water into
+        // that black: the dark line on the horizon.
+        if (depth >= 1.0)
+        {
+            discard;
+        }
     }
 
     vec4  pos          = getPositionWithDepth(tc, depth);

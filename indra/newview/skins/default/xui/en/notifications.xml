@@ -2593,6 +2593,19 @@ Welcome to WolfViewer [NAME]
 Welcome to WolfViewer
   </notification>
 
+  <!-- [WolfViewer 2026-10-14] Experiences (wolffloaterexperiences.cpp): after a Go teleport ends in the
+       experience's region, what to do there. A notify with OK (not a tip) so it stays until read. -->
+  <notification
+   icon="notify.tga"
+   name="WolfExperienceArrived"
+   log_to_chat="false"
+   type="notify">
+[TITLE]: [ARRIVE]
+    <usetemplate
+     name="okbutton"
+     yestext="OK"/>
+  </notification>
+
   <!-- <WolfViewer 2026-10-11> Invisible Mode (wolfinvisible.cpp): shown when a Wolf region is first told
        it is on (at login, so it is not forgotten) and whenever it is switched while logged in. -->
   <notification

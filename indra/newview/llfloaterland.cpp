@@ -32,6 +32,7 @@
 #include "llfloaterland.h"
 #include "wolfgrid.h"        // <WolfViewer 2026-09-07>
 #include "wolfregionweather.h"   // <WolfViewer 2026-09-12> About Land > Weather   // <WolfViewer 2026-09-07>
+#include "wolflandsandbox.h"      // <WolfViewer 2026-10-13> About Land > Sandbox
 
 #include "llavatarnamecache.h"
 #include "llfocusmgr.h"
@@ -333,6 +334,7 @@ LLFloaterLand::LLFloaterLand(const LLSD& seed)
     mFactoryMap["land_experiences_panel"] = LLCallbackMap(createPanelLandExperiences, this);
     mFactoryMap["land_environment_panel"] = LLCallbackMap(createPanelLandEnvironment, this);
     mFactoryMap["land_weather_panel"] = LLCallbackMap(createPanelLandWeather, this);   // <WolfViewer 2026-09-12>
+    mFactoryMap["land_sandbox_panel"] = LLCallbackMap(createPanelLandSandbox, this);   // <WolfViewer 2026-10-13>
 
     sObserver = new LLParcelSelectionObserver();
     LLViewerParcelMgr::getInstance()->addObserver( sObserver );
@@ -388,6 +390,7 @@ void LLFloaterLand::refresh()
     mPanelExperiences->refresh();
     mPanelEnvironment->refresh();
     if (mPanelWeather) mPanelWeather->refresh();
+    if (mPanelSandbox) mPanelSandbox->refresh();   // <WolfViewer 2026-10-13>
 }
 
 
@@ -405,6 +408,15 @@ void* LLFloaterLand::createPanelLandWeather(void* data)
     LLFloaterLand* self = (LLFloaterLand*)data;
     self->mPanelWeather = new WolfPanelLandWeather(self->mParcel);
     return self->mPanelWeather;
+}
+// </WolfViewer>
+
+// <WolfViewer 2026-10-13> About Land > Sandbox (wolflandsandbox.cpp).
+void* LLFloaterLand::createPanelLandSandbox(void* data)
+{
+    LLFloaterLand* self = (LLFloaterLand*)data;
+    self->mPanelSandbox = new WolfPanelLandSandbox(self->mParcel);
+    return self->mPanelSandbox;
 }
 // </WolfViewer>
 

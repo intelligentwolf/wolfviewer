@@ -58,6 +58,7 @@
 #include "llworldmapmessage.h"
 #include "llappviewer.h"
 #include "llviewercontrol.h"
+#include "wolfgrid.h"   // [WolfViewer 2026-10-13] the WE button, Wolf Territories only
 #include "llweb.h"
 #include "llhints.h"
 
@@ -333,6 +334,13 @@ void LLNavigationBar::setupPanel()
         setRightMouseDownCallback(boost::bind(&LLNavigationBar::onRightMouseDown, this, _2, _3, _4));
 
     mView->getChild<LLButton>("PersonalLighting")->setCommitCallback(boost::bind(&LLNavigationBar::onClickedLightingBtn, this)); // <FS:CR> FIRE-11847
+    // [WolfViewer 2026-10-13] the WE button (panel_navigation_bar.xml WolfEnvironmentBtn, bound to WolfEnvironmentNativeSky by
+    // control_name): shown on Wolf Territories only, checked again on every region change (login included).
+    if (LLButton* we = mView->findChild<LLButton>("WolfEnvironmentBtn"))
+    {
+        we->setVisible(WolfGrid::isOnWolfTerritories());
+        gAgent.addRegionChangedCallback([we]() { we->setVisible(WolfGrid::isOnWolfTerritories()); });
+    }
     // </FS:Zi>
 
     fillSearchComboBox();

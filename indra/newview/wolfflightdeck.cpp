@@ -15,11 +15,14 @@
 
 #include "llviewerprecompiledheaders.h"
 
+#include "wolfhudscale.h"
+#include "wolfvehiclerez.h"   // [HUD REZ 2026-10-12/]
 #include "wolfflightdeck.h"
 
 #include <cmath>
 #include <ctime>
 #include <map>
+#include <optional>
 
 #include "llagent.h"
 #include "llfocusmgr.h"
@@ -385,11 +388,7 @@ namespace
     void text(const LLFontGL* f, const std::string& s, F32 x, F32 y, const LLColor4& c,
               LLFontGL::HAlign h = LLFontGL::LEFT, LLFontGL::VAlign v = LLFontGL::BASELINE)
     {
-        if (!f || s.empty())
-        {
-            return;
-        }
-        f->renderUTF8(s, 0, x, y, c, h, v, LLFontGL::NORMAL, LLFontGL::NO_SHADOW);
+        WolfHudScale::text(f, s, x, y, c, h, v);   // [HUD SIZE 2026-10-12/] sharp at the size the pilot set
     }
 
     // The B612 face at the largest size whose line fits px (fonts.xml Avionics0..11).
@@ -519,9 +518,11 @@ void WolfFlightDeck::addHit(F32 l, F32 b, F32 r, F32 t, EHit id, const std::stri
 
 const WolfFlightDeck::Hit* WolfFlightDeck::hitAt(S32 x, S32 y) const
 {
+    // [HUD SIZE 2026-10-12] the view's point in the picture the hits were made in
+    const F32 px = (F32)x / mHitScale, py = (F32)y / mHitScale;
     for (auto it = mHits.rbegin(); it != mHits.rend(); ++it)
     {
-        if (x >= it->mL && x <= it->mR && y >= it->mB && y <= it->mT)
+        if (px >= it->mL && px <= it->mR && py >= it->mB && py <= it->mT)
         {
             return &*it;
         }
@@ -566,6 +567,7 @@ void WolfFlightDeck::draw()
     if (!f.active())
     {
         mPanelTop = mPanelBottom = 0.f;
+        mResize.hide();   // [HUD SIZE 2026-10-12/]
         mFlightStart = 0.0;
         if (hasFocus())
         {
@@ -578,6 +580,7 @@ void WolfFlightDeck::draw()
     if (f.deckHidden())
     {
         mPanelTop = mPanelBottom = 0.f;
+        mResize.hide();   // [HUD SIZE 2026-10-12/]
         if (hasFocus())
         {
             setFocus(false);
@@ -645,12 +648,12 @@ void WolfFlightDeck::draw()
 
 void WolfFlightDeck::layoutAndDraw()
 {
-    const F32 W = (F32)getRect().getWidth();
+    const F32 screen_w = (F32)getRect().getWidth();
     const F32 Hv = (F32)getRect().getHeight();
 
     // Sit on whatever the bottom toolbar leaves: its hide arrow's strip, or the whole bar if
     // the pilot brings it back with the arrow.
-    F32 bottom = 0.f;
+    F32 screen_bottom = 0.f;
     if (gToolBarView)
     {
         if (LLView* bp = gToolBarView->findChildView("bottom_toolbar_panel", true))
@@ -660,7 +663,7 @@ void WolfFlightDeck::layoutAndDraw()
                 const LLRect sr = bp->calcScreenRect();
                 S32 lx = 0, ly = 0;
                 screenPointToLocal(sr.mLeft, sr.mTop, &lx, &ly);
-                bottom = llclamp((F32)ly, 0.f, Hv * 0.4f);
+                screen_bottom = llclamp((F32)ly, 0.f, Hv * 0.4f);
             }
         }
     }
@@ -669,7 +672,9 @@ void WolfFlightDeck::layoutAndDraw()
     if (gSavedSettings.getBOOL("WolfFlightDeckMini"))
     {
         LLGLSUIDefault gls_ui;
-        drawMini(bottom);
+        mHitScale = 1.f;      // [HUD SIZE 2026-10-12] the bar keeps its own size, and has no size handle
+        mResize.hide();
+        drawMini(screen_bottom);
         if (!WolfFlight::instance().sailing())
         {
             drawHUD(mPanelTop);
@@ -679,10 +684,16 @@ void WolfFlightDeck::layoutAndDraw()
     }
     // </WolfViewer>
     F32 H = llclamp(Hv * 0.34f, 200.f, 430.f);
-    H = llmin(H, (Hv - bottom) * 0.62f);
-    const F32 top = bottom + H;
-    mPanelBottom = bottom;
-    mPanelTop = top;
+    H = llmin(H, (Hv - screen_bottom) * 0.62f);
+    // [HUD SIZE 2026-10-12] Paul: "the huds are all much too big ... the user should be able to drag the top of the
+    // huds (apart from gaming) down to reduce its size on the screen". The deck below is laid out as it always was
+    // (H tall) in a picture as wide as the window over `zoom`, and drawn at `zoom` (WolfHudScale::Scope): the same deck,
+    // smaller, still across the window and on the toolbar. The HUD and the warnings over the world are not scaled.
+    const F32 zoom = mResize.scale();
+    const F32 screen_top = screen_bottom + H * zoom;
+    mPanelBottom = screen_bottom;
+    mPanelTop = screen_top;
+    mHitScale = zoom;
 
     LLGLSUIDefault gls_ui;
 
@@ -690,9 +701,15 @@ void WolfFlightDeck::layoutAndDraw()
     const bool sail = WolfFlight::instance().sailing();
     if (!sail)
     {
-        drawHUD(top);
+        drawHUD(screen_top);
     }
-    drawWarnings(top);
+    drawWarnings(screen_top);
+
+    std::optional<WolfHudScale::Scope> zoomed;   // [HUD SIZE 2026-10-12] the deck itself
+    zoomed.emplace(zoom);
+    const F32 W = screen_w / zoom;
+    const F32 bottom = screen_bottom / zoom;
+    const F32 top = bottom + H;
 
     // the panel
     const F32 M = llclamp(H * 0.15f, 30.f, 54.f);
@@ -781,10 +798,14 @@ void WolfFlightDeck::layoutAndDraw()
         }
         x = r + gap * D;
     }
+    // [HUD SIZE 2026-10-12] back to the view's own size for the size handle and the guide over the world
+    zoomed.reset();
+    mResize.place(screen_bottom, screen_top, screen_w);
+    mResize.draw();
 
     if (mShowHelp)
     {
-        drawHelp(top);
+        drawHelp(screen_top);
     }
 }
 
@@ -882,6 +903,8 @@ void WolfFlightDeck::drawGlareshield(F32 l, F32 b, F32 r, F32 t)
         items.push_back({ K_KNOB, 0.85f, H_RANGE_KNOB, "RANGE", fmt("%g", ND_RANGES_NM[range_idx]), false, "Chartplotter range (nautical miles)" });
         items.push_back({ K_BUTTON, 0.95f, H_PLAN, "PLAN", "", gSavedSettings.getBOOL("WolfFlightNDPlan"), "Chartplotter: PLAN (the whole route, north up) or CHART (course up, around you)" });
         items.push_back({ K_BUTTON, 0.95f, H_MAP, "MAP", "", false, "World Map, zoomed to the whole trip: the planned route and where you are on it" });
+        items.push_back({ K_BUTTON, 0.95f, H_INVENTORY, "INV", "", WolfHud::inventoryOpen(), WolfHud::inventoryTip() });   // [HUD INVENTORY 2026-10-12/]
+        items.push_back({ K_BUTTON, 0.95f, H_REZ, "REZ", "", WolfVehicleRez::pending(), WolfVehicleRez::tip(WolfVehicleRez::typeForFlightDeck()) });   // [HUD REZ 2026-10-12/]
         items.push_back({ K_BUTTON, 0.95f, H_WEB, "CLUB", "", false, "The Wolf Territories sailing club page on wolf-grid.com" });
         items.push_back({ K_BUTTON, 0.95f, H_BACKGROUND, "PANEL", "", showBackground(), "Show or hide the panel behind the instruments" });
         items.push_back({ K_BUTTON, 0.95f, H_HELP, "HELP", "", mShowHelp, "How to sail with Sailing Mode: the quick guide" });
@@ -932,6 +955,8 @@ void WolfFlightDeck::drawGlareshield(F32 l, F32 b, F32 r, F32 t)
                               ? "Chase camera ON: the view rides with the aircraft - it banks, climbs and rolls with you (upside down too). Click for the level camera."
                               : "Chase camera OFF: the normal level camera. Click to have the view ride with the aircraft." });
         items.push_back({ K_BUTTON, 0.95f, H_MAP, "MAP", "", false, "World Map, zoomed to the whole trip: the planned route and where you are on it" });
+        items.push_back({ K_BUTTON, 0.95f, H_INVENTORY, "INV", "", WolfHud::inventoryOpen(), WolfHud::inventoryTip() });   // [HUD INVENTORY 2026-10-12/]
+        items.push_back({ K_BUTTON, 0.95f, H_REZ, "REZ", "", WolfVehicleRez::pending(), WolfVehicleRez::tip(WolfVehicleRez::typeForFlightDeck()) });   // [HUD REZ 2026-10-12/]
         items.push_back({ K_BUTTON, 1.05f, H_WEB, "AIRPORTS", "", LLFloaterReg::instanceVisible("wolf_airports"),
                           "The Airports window: find an airport by name, then fly there and land" });
         items.push_back({ K_BUTTON, 0.95f, H_BACKGROUND, "PANEL", "", showBackground(), "Show or hide the panel behind the instruments" });
@@ -1333,14 +1358,14 @@ void WolfFlightDeck::drawStick(F32 l, F32 b, F32 r, F32 t)
     text(mF.mTiny, heli ? "COLL" : "THR", lx, b + h * 0.06f, C_WHITE, LLFontGL::HCENTER, LLFontGL::BOTTOM);
 }
 
-void WolfFlightDeck::dragControl(S32 x, S32 y)
+void WolfFlightDeck::dragControl(F32 x, F32 y)
 {
     WolfFlight& f = WolfFlight::instance();
     const bool heli = WolfFlight::craft() == WolfFlight::CRAFT_HELI;
     if (mPressed == H_STICK)
     {
-        const F32 dx = ((F32)x - mStickCx) / (mStickR * 0.85f);
-        const F32 dy = ((F32)y - mStickCy) / (mStickR * 0.85f);
+        const F32 dx = (x - mStickCx) / (mStickR * 0.85f);
+        const F32 dy = (y - mStickCy) / (mStickR * 0.85f);
         // a plane: down the gate is pulled back, nose up (+); a helicopter: up the gate is forward (+);
         // a boat's wheel only turns
         if (f.sailing()) f.setStick(dx, 0.f);
@@ -1348,7 +1373,7 @@ void WolfFlightDeck::dragControl(S32 x, S32 y)
     }
     else if (mPressed == H_THROTTLE)
     {
-        f.setThrottleLever(((F32)y - mLeverCy) / (mLeverHalf * 0.9f));
+        f.setThrottleLever((y - mLeverCy) / (mLeverHalf * 0.9f));
     }
 }
 
@@ -1597,7 +1622,7 @@ void WolfFlightDeck::drawPlan(F32 l, F32 b, F32 r, F32 t)
     drawBezel(l, b, r, t, (r - l) * 0.045f, sl, sb, sr, st);
     const F32 w = sr - sl, h = st - sb;
     addHit(sl, sb, sr, st, H_ND_SCREEN, sail ? "Click for the CHART view (course up, around you)" : "Click for the MAP view (heading up, around you)");
-    LLLocalClipRect screen_clip(LLRect((S32)sl, (S32)st, (S32)sr, (S32)sb));
+    LLLocalClipRect screen_clip(WolfHudScale::clip(LLRect((S32)sl, (S32)st, (S32)sr, (S32)sb)));
     text(mF.mSmall, "PLAN", sr - w * 0.03f, sb + h * 0.02f, C_GREEN, LLFontGL::RIGHT, LLFontGL::BOTTOM);
     if (!d.mValid || !route.mValid)
     {
@@ -1621,7 +1646,7 @@ void WolfFlightDeck::drawPlan(F32 l, F32 b, F32 r, F32 t)
     const LLVector3d centre((minx + maxx) * 0.5, (miny + maxy) * 0.5, 0.0);
     const F32 cx = sl + w * 0.5f, cy = (mb + mt) * 0.5f;
     {
-        LLLocalClipRect map_clip(LLRect((S32)sl, (S32)mt, (S32)sr, (S32)mb));
+        LLLocalClipRect map_clip(WolfHudScale::clip(LLRect((S32)sl, (S32)mt, (S32)sr, (S32)mb)));
         drawTiles(sl, mb, sr, mt, centre, ppm);
         rectF(sl, mb, sr, mt, LLColor4(0.f, 0.f, 0.f, 0.30f));   // dimmed so the route reads
         auto toS = [&](const LLVector3d& p, F32& x, F32& y)
@@ -1797,7 +1822,7 @@ void WolfFlightDeck::drawPFD(F32 l, F32 b, F32 r, F32 t)
     F32 sl, sb, sr, st;
     drawBezel(l, b, r, t, (r - l) * 0.045f, sl, sb, sr, st);
     const F32 w = sr - sl, h = st - sb;
-    LLLocalClipRect screen_clip(LLRect((S32)sl, (S32)st, (S32)sr, (S32)sb));
+    LLLocalClipRect screen_clip(WolfHudScale::clip(LLRect((S32)sl, (S32)st, (S32)sr, (S32)sb)));
     if (!d.mValid)
     {
         text(mF.mLarge, "ATT", sl + w * 0.5f, sb + h * 0.5f, C_AMBER, LLFontGL::HCENTER, LLFontGL::VCENTER);
@@ -1865,7 +1890,7 @@ void WolfFlightDeck::drawPFD(F32 l, F32 b, F32 r, F32 t)
     const F32 aw = w * 0.235f, ah = h * 0.255f;
     const F32 ppd = ah / 22.f;   // pixels per degree of pitch
     {
-        LLLocalClipRect adi_clip(LLRect((S32)(cx - aw), (S32)(cy + ah), (S32)(cx + aw), (S32)(cy - ah)));
+        LLLocalClipRect adi_clip(WolfHudScale::clip(LLRect((S32)(cx - aw), (S32)(cy + ah), (S32)(cx + aw), (S32)(cy - ah))));
         // <WolfViewer 2026-10-11> Paul: "the artificial horizon indicator ... i think it is banking the wrong direction".
         // It was: mRoll is + right wing down (wolfflight.cpp measure: atan2(left.z, up.z)), and the world seen from a
         // plane banked right turns the other way - counter-clockwise, the horizon rising to the right - but the sphere
@@ -2000,7 +2025,7 @@ void WolfFlightDeck::drawPFD(F32 l, F32 b, F32 r, F32 t)
         const F32 spd = d.mAirspeed * KT;
         const F32 ppk = (tt - tb) / 90.f;
         {
-            LLLocalClipRect clip(LLRect((S32)tl, (S32)tt, (S32)tr + 12, (S32)tb));
+            LLLocalClipRect clip(WolfHudScale::clip(LLRect((S32)tl, (S32)tt, (S32)tr + 12, (S32)tb)));
             rectF(tl, tb, tr, tt, C_TAPE);
             for (S32 k = ((S32)(spd - 50.f) / 10) * 10; k <= spd + 50.f; k += 10)
             {
@@ -2037,7 +2062,7 @@ void WolfFlightDeck::drawPFD(F32 l, F32 b, F32 r, F32 t)
             const F32 frac = llmax(spd, 0.f) - whole;
             const F32 dw = mF.mMonoLarge->getWidthF32(std::string("0"));
             text(mF.mMonoLarge, fmt("%d", whole / 10), br - dw - w * 0.008f, cy, C_WHITE, LLFontGL::RIGHT, LLFontGL::VCENTER);
-            LLLocalClipRect clip(LLRect((S32)(br - dw - w * 0.008f), (S32)(cy + bh), (S32)br, (S32)(cy - bh)));
+            LLLocalClipRect clip(WolfHudScale::clip(LLRect((S32)(br - dw - w * 0.008f), (S32)(cy + bh), (S32)br, (S32)(cy - bh))));
             const F32 step = bh * 1.1f;
             for (S32 k = -1; k <= 1; ++k)
             {
@@ -2056,7 +2081,7 @@ void WolfFlightDeck::drawPFD(F32 l, F32 b, F32 r, F32 t)
         const F32 alt = d.mAltMSL * FT;
         const F32 ppf = (tt - tb) / 800.f;
         {
-            LLLocalClipRect clip(LLRect((S32)tl - 12, (S32)tt, (S32)tr, (S32)tb));
+            LLLocalClipRect clip(WolfHudScale::clip(LLRect((S32)tl - 12, (S32)tt, (S32)tr, (S32)tb)));
             rectF(tl, tb, tr, tt, C_TAPE);
             // the ground: amber hatching below the land's height
             const F32 gnd_ft = (llmax(d.mGround, d.mWaterZ) - d.mWaterZ) * FT;
@@ -2097,7 +2122,7 @@ void WolfFlightDeck::drawPFD(F32 l, F32 b, F32 r, F32 t)
             const F32 rem = a - hundreds * 100.f;   // 0..100, rolled in 20s
             const F32 dw2 = mF.mMonoMed->getWidthF32(std::string("00"));
             text(mF.mMonoLarge, fmt("%s%d", neg ? "-" : "", hundreds), br - dw2 - w * 0.01f, cy, C_WHITE, LLFontGL::RIGHT, LLFontGL::VCENTER);
-            LLLocalClipRect clip(LLRect((S32)(br - dw2 - w * 0.01f), (S32)(cy + bh), (S32)br, (S32)(cy - bh)));
+            LLLocalClipRect clip(WolfHudScale::clip(LLRect((S32)(br - dw2 - w * 0.01f), (S32)(cy + bh), (S32)br, (S32)(cy - bh))));
             const F32 step = bh * 0.9f;
             const S32 base = (S32)floorf(rem / 20.f);
             const F32 frac = rem / 20.f - base;
@@ -2146,7 +2171,7 @@ void WolfFlightDeck::drawPFD(F32 l, F32 b, F32 r, F32 t)
             rectF(vl, sy - h * 0.008f, vl + w * 0.012f, sy + h * 0.008f, C_MAGENTA);
         }
         {
-            LLLocalClipRect clip(LLRect((S32)vl, (S32)vt, (S32)vr, (S32)vb));
+            LLLocalClipRect clip(WolfHudScale::clip(LLRect((S32)vl, (S32)vt, (S32)vr, (S32)vb)));
             lineW(vr + w * 0.06f, cy, vl + w * 0.005f, vsy(vs_fpm), 2.f, C_WHITE);
         }
         if (fabsf(vs_fpm) > 400.f)
@@ -2161,7 +2186,7 @@ void WolfFlightDeck::drawPFD(F32 l, F32 b, F32 r, F32 t)
         const F32 hr = h * 0.40f;
         const F32 hcx = cx, hcy = sb - h * 0.235f;
         const F32 hdg = d.mHeading;
-        LLLocalClipRect clip(LLRect((S32)sl, (S32)(sb + h * 0.19f), (S32)sr, (S32)sb));
+        LLLocalClipRect clip(WolfHudScale::clip(LLRect((S32)sl, (S32)(sb + h * 0.19f), (S32)sr, (S32)sb)));
         circleF(hcx, hcy, hr, LLColor4(0.22f, 0.24f, 0.27f, 0.9f), 64);
         for (S32 k = 0; k < 360; k += 5)
         {
@@ -2234,7 +2259,7 @@ void WolfFlightDeck::drawND(F32 l, F32 b, F32 r, F32 t)
     F32 sl, sb, sr, st;
     drawBezel(l, b, r, t, (r - l) * 0.045f, sl, sb, sr, st);
     const F32 w = sr - sl, h = st - sb;
-    LLLocalClipRect screen_clip(LLRect((S32)sl, (S32)st, (S32)sr, (S32)sb));
+    LLLocalClipRect screen_clip(WolfHudScale::clip(LLRect((S32)sl, (S32)st, (S32)sr, (S32)sb)));
     const bool sail = f.sailing();
     // Sailing: a paper chart — white deep water, blue shallows, buff land, black ink.
     const LLColor4 FG = sail ? C_INK : C_WHITE;
@@ -2565,7 +2590,7 @@ void WolfFlightDeck::drawEICAS(F32 l, F32 b, F32 r, F32 t)
     F32 sl, sb, sr, st;
     drawBezel(l, b, r, t, (r - l) * 0.055f, sl, sb, sr, st);
     const F32 w = sr - sl, h = st - sb;
-    LLLocalClipRect screen_clip(LLRect((S32)sl, (S32)st, (S32)sr, (S32)sb));
+    LLLocalClipRect screen_clip(WolfHudScale::clip(LLRect((S32)sl, (S32)st, (S32)sr, (S32)sb)));
     const bool heli = WolfFlight::craft() == WolfFlight::CRAFT_HELI;
 
     // ---- crew alerts, top: warnings red, cautions amber, advisories amber indented, memos white ----
@@ -2970,7 +2995,7 @@ void WolfFlightDeck::drawCDU(F32 l, F32 b, F32 r, F32 t)
     LLColor4 col[6][2];
     cduLines(label, data, col, title);
     {
-        LLLocalClipRect clip(LLRect((S32)sl, (S32)st, (S32)sr, (S32)sb));
+        LLLocalClipRect clip(WolfHudScale::clip(LLRect((S32)sl, (S32)st, (S32)sr, (S32)sb)));
         text(big, title, (sl + sr) * 0.5f, st - lh * 0.5f, C_WHITE, LLFontGL::HCENTER, LLFontGL::VCENTER);
         const S32 apt_pages = llmax(1, ((S32)mAptIds.size() + 3) / 4);
         text(small, mPage == PAGE_APT ? fmt("%d/%d", mAptPage + 1, apt_pages) : std::string("1/1"), sr - pad, st - lh * 0.5f, C_WHITE,
@@ -3107,6 +3132,8 @@ void WolfFlightDeck::drawMini(F32 bottom)
         }
         cells.push_back({ "DEST", where, dest.mValid ? C_MAGENTA : C_DIM, H_MAP, "Where the route goes: click for the World Map", 2.6f, false });
     }
+    cells.push_back({ "", "REZ", WolfVehicleRez::pending() ? C_AMBER : C_WHITE, H_REZ, WolfVehicleRez::tip(WolfVehicleRez::typeForFlightDeck()), 0.8f, true });   // [HUD REZ 2026-10-12/]
+    cells.push_back({ "", "INV", WolfHud::inventoryOpen() ? C_GREEN : C_WHITE, H_INVENTORY, WolfHud::inventoryTip(), 0.8f, true });   // [HUD INVENTORY 2026-10-12/]
     cells.push_back({ "", "FULL", C_WHITE, H_MINI, "Bring the whole deck back", 1.0f, true });
     cells.push_back({ "", "EXIT", C_WHITE, H_EXIT, sail ? "Leave Sailing Mode" : "Leave Flight Mode", 1.0f, true });
 
@@ -3458,6 +3485,17 @@ void WolfFlightDeck::drawHelp(F32 top)
 
 bool WolfFlightDeck::handleMouseDown(S32 x, S32 y, MASK mask)
 {
+    // [HUD SIZE 2026-10-12] the top edge: a drag sizes the deck, and is never a press on a control
+    if (mResize.onGrip(x, y))
+    {
+        if (hasFocus())
+        {
+            setFocus(false);
+        }
+        mResize.begin(y);
+        gFocusMgr.setMouseCapture(this);
+        return true;
+    }
     if (WolfFlight::instance().active() && !WolfFlight::instance().deckHidden() && mShowHelp && y > mPanelTop)
     {
         mShowHelp = false;   // the guide is in the way of the world: a click puts it away
@@ -3489,16 +3527,17 @@ bool WolfFlightDeck::handleMouseDown(S32 x, S32 y, MASK mask)
     mPressedAt = now();
     mLastRepeat = now();
     mPressStep = 0;
-    // knobs: left half turns down, right half up
+    // knobs: left half turns down, right half up (the hit is the picture's: so is the point, [HUD SIZE 2026-10-12])
+    const F32 px = (F32)x / mHitScale, py = (F32)y / mHitScale;
     if (id == H_SPD_KNOB || id == H_HDG_KNOB || id == H_ALT_KNOB || id == H_VS_WHEEL || id == H_RANGE_KNOB || id == H_TWA_KNOB)
     {
         if (id == H_VS_WHEEL)
         {
-            mPressStep = y > (hit->mB + hit->mT) * 0.5f ? 1 : -1;
+            mPressStep = py > (hit->mB + hit->mT) * 0.5f ? 1 : -1;
         }
         else
         {
-            mPressStep = x > (hit->mL + hit->mR) * 0.5f ? 1 : -1;
+            mPressStep = px > (hit->mL + hit->mR) * 0.5f ? 1 : -1;
         }
         knob(id, mPressStep);
         gFocusMgr.setMouseCapture(this);
@@ -3507,7 +3546,7 @@ bool WolfFlightDeck::handleMouseDown(S32 x, S32 y, MASK mask)
     if (id == H_STICK || id == H_THROTTLE)
     {
         gFocusMgr.setMouseCapture(this);
-        dragControl(x, y);
+        dragControl(px, py);
         return true;
     }
     press(id, x, y, 0);
@@ -3524,7 +3563,9 @@ bool WolfFlightDeck::handleMouseUp(S32 x, S32 y, MASK mask)
     // the stick and the lever spring back when let go
     WolfFlight::instance().setStick(0.f, 0.f);
     WolfFlight::instance().setThrottleLever(0.f);
-    const bool was = mPressed != H_NONE;
+    // the edge's own up (the second of a double-click too) stays with the HUD, never the world under it
+    const bool was = mPressed != H_NONE || mResize.dragging() || mResize.onGrip(x, y);
+    mResize.end();   // [HUD SIZE 2026-10-12/]
     // CLR held: clear the whole scratchpad
     if (mPressed == H_CDU_CLR && now() - mPressedAt > 0.6)
     {
@@ -3539,13 +3580,26 @@ bool WolfFlightDeck::handleMouseUp(S32 x, S32 y, MASK mask)
 
 bool WolfFlightDeck::handleHover(S32 x, S32 y, MASK mask)
 {
+    // [HUD SIZE 2026-10-12] Source: llresizebar.cpp handleHover - UI_CURSOR_SIZENS for an edge dragged up and down
+    if (hasMouseCapture() && mResize.dragging())
+    {
+        mResize.drag(y);
+        getWindow()->setCursor(UI_CURSOR_SIZENS);
+        return true;
+    }
+    if (!hasMouseCapture() && mResize.onGrip(x, y))
+    {
+        mResize.hovered();
+        getWindow()->setCursor(UI_CURSOR_SIZENS);
+        return true;
+    }
     if (!hasMouseCapture() && !onPanel(x, y))
     {
         return false;
     }
     if (hasMouseCapture() && (mPressed == H_STICK || mPressed == H_THROTTLE))
     {
-        dragControl(x, y);
+        dragControl((F32)x / mHitScale, (F32)y / mHitScale);
         getWindow()->setCursor(UI_CURSOR_HAND);
         return true;
     }
@@ -3568,12 +3622,17 @@ bool WolfFlightDeck::handleScrollWheel(S32 x, S32 y, S32 clicks)
 
 bool WolfFlightDeck::handleRightMouseDown(S32 x, S32 y, MASK mask)
 {
-    // no context menu for the world through the panel
-    return onPanel(x, y);
+    // no context menu for the world through the panel (or its top edge)
+    return mResize.onGrip(x, y) || onPanel(x, y);
 }
 
 bool WolfFlightDeck::handleDoubleClick(S32 x, S32 y, MASK mask)
 {
+    if (mResize.onGrip(x, y))
+    {
+        mResize.reset();   // [HUD SIZE 2026-10-12/] double-click on the top edge: the default size
+        return true;
+    }
     if (!onPanel(x, y))
     {
         return false;
@@ -3584,6 +3643,11 @@ bool WolfFlightDeck::handleDoubleClick(S32 x, S32 y, MASK mask)
 
 bool WolfFlightDeck::handleToolTip(S32 x, S32 y, MASK mask)
 {
+    if (mResize.onGrip(x, y))
+    {
+        LLToolTipMgr::instance().show(WolfHudResize::tip());   // [HUD SIZE 2026-10-12/]
+        return true;
+    }
     if (!onPanel(x, y))
     {
         return false;
@@ -3606,6 +3670,7 @@ void WolfFlightDeck::onFocusLost()
 void WolfFlightDeck::onMouseCaptureLost()
 {
     // dragged off and lost (alt-tab, a dialog): nothing stays held
+    mResize.end();   // [HUD SIZE 2026-10-12/]
     WolfFlight::instance().setStick(0.f, 0.f);
     WolfFlight::instance().setThrottleLever(0.f);
     mPressed = H_NONE;
@@ -3772,6 +3837,8 @@ void WolfFlightDeck::press(EHit id, S32 x, S32 y, S32 step)
     }
     case H_HELP:
     case H_CDU_HELP: mShowHelp = !mShowHelp; break;
+    case H_INVENTORY: WolfHud::toggleInventory(); break;   // [HUD INVENTORY 2026-10-12/]
+    case H_REZ: WolfVehicleRez::rez(WolfVehicleRez::typeForFlightDeck()); break;   // [HUD REZ 2026-10-12/]
     case H_EXIT: f.setActive(false); break;
     case H_GEAR: f.sendGearCommand(); break;
     case H_ENGINE: f.sendEngineCommand(); break;

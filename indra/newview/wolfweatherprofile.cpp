@@ -20,6 +20,7 @@
 // strtol / tolower. The Linux precompiled header happens to pull these in; relying on that is
 // how a file builds on one platform and not another.
 #include <cctype>
+#include <cmath>
 #include <cstdlib>
 
 #include "llstring.h"
@@ -183,6 +184,30 @@ void WolfWeatherProfile::fromLLSD(const LLSD& sd)
     mVolume      = sd_int(sd, "volume", mVolume);
     mAurora      = sd_int(sd, "aurora", mAurora);
     mAuroraColor = sd_str(sd, "auroraColor", mAuroraColor);   // Source: weather_profile.js normalise()
+    // <WolfViewer 2026-10-12> [WOLF AURORA] Source: weather_profile.js normalise() auroraReal - a
+    // payload without one (or a malformed one) has no live data
+    if (sd.has("auroraReal"))
+    {
+        const LLSD& r = sd["auroraReal"];
+        AuroraLive live;
+        if (r.isMap() && r.has("flux") && r["flux"].isArray() && r["flux"].size() == 24
+            && r.has("startKm") && r.has("stepKm") && r["stepKm"].asReal() > 0.0)
+        {
+            live.mValid = true;
+            for (S32 i = 0; i < 24; ++i)
+            {
+                const F32 f = (F32)r["flux"][i].asReal();
+                live.mFlux[i] = std::isfinite(f) ? llclamp(f, 0.f, 1000.f) : 0.f;
+            }
+            live.mStartKm = (F32)r["startKm"].asReal();
+            live.mStepKm  = (F32)r["stepKm"].asReal();
+            live.mBearing = (F32)r["bearing"].asReal();
+            live.mMLat    = llclamp(fabsf((F32)r["mlat"].asReal()), 0.f, 90.f);
+            live.mKp      = (r.has("kp") && (r["kp"].isReal() || r["kp"].isInteger())) ? llclamp((F32)r["kp"].asReal(), 0.f, 9.f) : -1.f;
+            live.mHide    = llclamp((F32)r["hide"].asReal(), 0.f, 100.f);
+        }
+        mAuroraLive = live;
+    }
     mFog         = sd_int(sd, "fog", mFog);   // Source: weather_profile.js normalise(); a row from before the column existed has no key and keeps 0
     mSoundPreset = sd_str(sd, "soundPreset", mSoundPreset);
     mSoundLayer  = sd_str(sd, "soundLayer", mSoundLayer);
@@ -283,8 +308,9 @@ const std::vector<WolfWeatherProfile::Preset>& WolfWeatherProfile::soundLayers()
 const std::vector<WolfWeatherProfile::Preset>& WolfWeatherProfile::auroraColors()
 {
     static const std::vector<Preset> list = {
-        { "green",  "Green" }, { "red", "Red" }, { "purple", "Purple" },
+        { "green",  "Green (natural)" }, { "red", "Red" }, { "purple", "Purple" },
         { "blue",   "Blue" },  { "pink", "Pink" }, { "multi", "Multi-coloured" },
+        { "real",   "Real sky (live space weather)" },   // <WolfViewer 2026-10-12/> [WOLF AURORA]
     };
     return list;
 }

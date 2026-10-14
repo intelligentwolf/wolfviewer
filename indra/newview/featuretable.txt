@@ -27,6 +27,7 @@ version 74
 // NOTE: All settings are set to the MIN of applied values, including 'all'!
 //
 list all
+WolfEnvironmentQuality		1	3
 // <WolfViewer 2026-10-02> Wolf extras that cost GPU time without changing the sea itself.
 // The waves (WolfViewerWaterFFT) are NOT here: Paul 10-02 "dont disable waves on low settings".
 WolfViewerWaterCaustics		1	1
@@ -97,6 +98,7 @@ RenderReflectionProbeCount  1   256
 // Low Graphics Settings
 //
 list Low
+WolfEnvironmentQuality		1	0
 WolfViewerWaterCaustics		1	0
 WolfViewerWaterWake			1	0
 WolfViewerWaterGodRays		1	0
@@ -143,6 +145,7 @@ RenderReflectionProbeCount  1   1
 // Medium Low Graphics Settings
 //
 list LowMid
+WolfEnvironmentQuality		1	1
 WolfViewerWaterCaustics		1	0
 RenderAnisotropic			1	0
 RenderAvatarLODFactor		1	0.5
@@ -187,6 +190,7 @@ RenderReflectionProbeCount  1   32
 // Medium Graphics Settings (standard)
 //
 list Mid
+WolfEnvironmentQuality		1	1
 RenderAnisotropic			1	1
 RenderAvatarLODFactor		1	1.0
 RenderAvatarMaxComplexity   1	200000
@@ -229,6 +233,7 @@ RenderReflectionProbeCount  1   64
 // Medium High Graphics Settings
 //
 list MidHigh
+WolfEnvironmentQuality		1	2
 RenderAnisotropic			1	1
 RenderAvatarLODFactor		1	1.0
 RenderAvatarMaxComplexity   1	250000
@@ -271,6 +276,7 @@ RenderReflectionProbeCount  1   64
 // High Graphics Settings (SSAO + sun shadows)
 //
 list High
+WolfEnvironmentQuality		1	2
 RenderAnisotropic			1	1
 RenderAvatarLODFactor		1	1.0
 RenderAvatarMaxComplexity   1	300000
@@ -313,6 +319,7 @@ RenderReflectionProbeCount  1   128
 // High Ultra Graphics Settings (deferred + SSAO + all shadows)
 //
 list HighUltra
+WolfEnvironmentQuality		1	3
 RenderAnisotropic			1	1
 RenderAvatarLODFactor		1	1.0
 RenderAvatarMaxComplexity   1	350000
@@ -355,6 +362,7 @@ RenderReflectionProbeCount  1   256
 // Ultra graphics (REALLY PURTY!)
 //
 list Ultra
+WolfEnvironmentQuality		1	3
 RenderAnisotropic			1	1
 RenderAvatarLODFactor		1	1.0
 RenderAvatarMaxNonImpostors 1   16
@@ -412,6 +420,7 @@ RenderCompressTextures		1	0
 // "Default" setups for safe, low, medium, high
 //
 list safe
+WolfEnvironmentQuality		0	0
 RenderAnisotropic			1	0
 RenderAvatarMaxNonImpostors 1	16
 RenderAvatarMaxComplexity          1	80000
@@ -439,6 +448,7 @@ list AMD
 RenderGLMultiThreadedTextures       1   1
 
 list GL3
+WolfEnvironmentQuality		0	0
 RenderFSAAType  			0	0
 RenderFSAASamples           0   0
 RenderReflectionsEnabled    0   0

@@ -232,7 +232,7 @@ public:
     // render_manager.js _applyWeatherAurora.
     void setUserAurora(S32 percent);
     bool isAurora(S32 percent) const { return mActive.mAurora == percent; }
-    /** What skyF.glsl gets: aurora/100 x night x what the fog lets through. 0 = none, skip the march. */
+    /** The aurora's gate (WolfAurora::gate, wolfaurora.cpp): 0..1, the night and the fog; 0 = none. */
     static F32 auroraAmount();
     /** The active profile's aurora colour as the shader's palette index (0 = green). */
     static S32 auroraColorMode();

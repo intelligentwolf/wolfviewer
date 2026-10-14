@@ -32,6 +32,7 @@
 #include "llsdutil.h"
 #include "llsdserialize.h"
 #include "hbxxh.h"
+#include <functional>
 
 #if LL_DARWIN
 #include "OpenGL/OpenGL.h"
@@ -498,14 +499,47 @@ void LLShaderMgr::hashShaderFileContents(HBXXH128& hash_obj, const std::string& 
             continue;
         }
         hash_obj.update(open_file_name);
+        std::string text;
         U8 buf[4096];
         size_t n;
         while ((n = fread(buf, 1, sizeof(buf), file)) > 0)
         {
             hash_obj.update(buf, n);
+            text.append((const char*)buf, n);
         }
         fclose(file);
+        // [WOLF ENV 2026-10-12] the files a `#wolf_include` line pulls in (loadShaderFile) are part of the
+        // program too: hash them, so editing an included file cannot leave a stale cached binary
+        hashWolfIncludes(hash_obj, text, 0);
         return;
+    }
+}
+
+void LLShaderMgr::hashWolfIncludes(HBXXH128& hash_obj, const std::string& text, S32 depth)
+{
+    if (depth >= 8) return;   // the same nesting limit as loadShaderFile
+    static const std::string KEY = "#wolf_include \"";
+    size_t pos = 0;
+    while ((pos = text.find(KEY, pos)) != std::string::npos)
+    {
+        const size_t start = pos + KEY.size();
+        const size_t end = text.find('"', start);
+        if (end == std::string::npos) break;
+        const std::string path = getShaderDirPrefix() + "1" + gDirUtilp->getDirDelimiter() + text.substr(start, end - start);
+        pos = end + 1;
+        LLFILE* file = LLFile::fopen(path, "rb");
+        if (!file) continue;
+        hash_obj.update(path);
+        std::string inc;
+        U8 buf[4096];
+        size_t n;
+        while ((n = fread(buf, 1, sizeof(buf), file)) > 0)
+        {
+            hash_obj.update(buf, n);
+            inc.append((const char*)buf, n);
+        }
+        fclose(file);
+        hashWolfIncludes(hash_obj, inc, depth + 1);
     }
 }
 // </WolfViewer>
@@ -819,9 +853,53 @@ GLuint LLShaderMgr::loadShaderFile(const std::string& filename, S32 & shader_lev
     bool touched = false;
 #endif
 
-    while(NULL != fgets((char *)buff, 1024, file)
+    // [WOLF ENV 2026-10-12] `#wolf_include "path"` (a line of its own; the path relative to the class 1
+    // shader folder, e.g. "wolftk/brunetonCommon.glsl") is replaced by that file's lines, recursively.
+    // Source: three-geospatial packages/core/src/resolveIncludes.ts:1-22 resolveIncludes (MIT), which
+    // assembles takram's shaders the same way from their `#include "..."` lines. A distinct keyword, so no
+    // stock shader's `#include` (fxaaF.glsl:83, inside a comment) is touched; anything else reads as before
+    // (fgets in 1024-byte pieces).
+    std::vector<std::string> wolf_lines;
+    {
+        const std::string wolf_dir = getShaderDirPrefix() + "1" + gDirUtilp->getDirDelimiter();
+        std::function<void(LLFILE*, S32)> wolf_read = [&](LLFILE* f, S32 depth)
+        {
+            GLchar line[1024];
+            while (NULL != fgets((char*)line, 1024, f))
+            {
+                const char* p = line;
+                while (*p == ' ' || *p == '\t') ++p;
+                static const char KEY[] = "#wolf_include \"";
+                if (depth < 8 && strncmp(p, KEY, sizeof(KEY) - 1) == 0)
+                {
+                    const char* name = p + sizeof(KEY) - 1;
+                    const char* end = strchr(name, '"');
+                    if (end)
+                    {
+                        const std::string path = wolf_dir + std::string(name, end - name);
+                        LLFILE* inc = LLFile::fopen(path, "r");   /* Flawfinder: ignore */
+                        if (inc)
+                        {
+                            wolf_read(inc, depth + 1);
+                            fclose(inc);
+                            wolf_lines.emplace_back("\n");
+                            continue;
+                        }
+                        LL_WARNS("ShaderLoading") << "wolf_include not found: " << path << " (in " << open_file_name << ")" << LL_ENDL;
+                    }
+                }
+                wolf_lines.emplace_back(line);
+            }
+        };
+        wolf_read(file, 0);
+    }
+    size_t wolf_next = 0;
+
+    while(wolf_next < wolf_lines.size()
           && shader_code_count < (LL_ARRAY_SIZE(shader_code_text) - LL_ARRAY_SIZE(extra_code_text)))
     {
+        strncpy((char*)buff, wolf_lines[wolf_next++].c_str(), 1023);
+        buff[1023] = 0;
         file_lines_count++;
 
         bool extra_block_area_found = NULL != strstr((const char*)buff, "[EXTRA_CODE_HERE]");
@@ -879,6 +957,11 @@ GLuint LLShaderMgr::loadShaderFile(const std::string& filename, S32 & shader_lev
             ++shader_code_count;
         }
     } //while
+    if (wolf_next < wolf_lines.size())
+    {
+        // [WOLF ENV TAKRAM 2026-10-12] the line table is full (stock limit, 4096): say so rather than compile a cut file
+        LL_WARNS("ShaderLoading") << filename << ": " << wolf_lines.size() << " lines after #wolf_include, more than the loader holds; truncated" << LL_ENDL;
+    }
 
     if(!(flag_extra_block_marker_was_found & flags))
     {
@@ -1643,6 +1726,17 @@ void LLShaderMgr::initAttribsAndUniforms()
     mReservedUniforms.push_back("wolfPaintTex4");   // [6 SLOTS 2026-09-19] WolfTerrainPaint::SLOTS = 6
     mReservedUniforms.push_back("wolfPaintTex5");
     mReservedUniforms.push_back("wolfShelterMap");  // [SNOW COVER 2026-09-18] wolfweather.cpp
+    mReservedUniforms.push_back("wolfAuroraLUT");   // [WOLF AURORA 2026-10-12] wolfaurora.cpp
+    mReservedUniforms.push_back("wolf_phys");   // [WOLF ENV 2026-10-12 physical]
+    mReservedUniforms.push_back("wolf_sunlit");
+    mReservedUniforms.push_back("wolf_amb_up");
+    mReservedUniforms.push_back("wolf_amb_down");
+    mReservedUniforms.push_back("wolf_up");
+    mReservedUniforms.push_back("wolf_fullbright");
+    mReservedUniforms.push_back("wolf_emissive");
+    mReservedUniforms.push_back("wolf_light_h");
+    mReservedUniforms.push_back("higher_order_scattering_texture");   // [WOLF ENV TAKRAM 2026-10-12]
+    mReservedUniforms.push_back("shadowBuffer");
     // </WolfViewer>
 
     llassert(mReservedUniforms.size() == END_RESERVED_UNIFORMS);

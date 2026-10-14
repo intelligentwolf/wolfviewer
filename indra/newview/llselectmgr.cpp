@@ -30,6 +30,7 @@
 #define LLSELECTMGR_CPP
 #include "llselectmgr.h"
 #include "wolfobjectprops.h" // <WolfViewer> the shared name/description store
+#include "wolfbuilder.h"     // [WOLF BUILDER 2026-10-13/] the builder's own snap origin
 #include "llmaterialmgr.h"
 
 // library includes
@@ -1562,6 +1563,15 @@ void LLSelectMgr::getGrid(LLVector3& origin, LLQuaternion &rotation, LLVector3 &
             break;
         case SELECT_TYPE_WORLD:
             mGridScale = LLVector3(1.f, 1.f, 1.f) * gSavedSettings.getF32("GridResolution");
+            // [WOLF BUILDER 2026-10-13] Paul: "easier snapping to defined grids". The world grid's origin
+            // is the region corner (mGridOrigin cleared above); with the builder's own origin switched on
+            // (Wolf Builder floater, WolfBuilderSnapOrigin / WolfBuilderGridOrigin) it is that point
+            // instead, so llmaniptranslate.cpp handleHover (:573 and :627, both "- mGridOrigin") snaps,
+            // and renderSnapGuides (:1440 tick_offset) measures, from there. Scale and rotation as before.
+            if (WolfBuilder::snapOriginEnabled())
+            {
+                mGridOrigin = WolfBuilder::snapOriginAgent();
+            }
             break;
         }
     }

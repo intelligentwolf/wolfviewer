@@ -154,6 +154,25 @@ uniform float boundedWaterDepth;
 // Region water never needs these here because its body comes from fog applied to submerged
 // geometry; a bounded surface has to colour itself.
 uniform vec3  waterFogColorLinear;
+uniform float wolf_phys;
+uniform float wolfSeaMss;   // [WolfViewer round 11] Cox-Munk mean square slope from the wind (wolftk/seaGlint.glsl; bindSceneUniforms)
+#wolf_include "wolftk/seaGlint.glsl"
+uniform vec3  wolf_light_h;    // [WOLF ENV 2026-10-12 physical] the light on the water / pi, pre-exposed
+vec3 wolfWaterBody() { return waterFogColorLinear * (wolf_phys > 0.5 ? wolf_light_h : vec3(1.0)); }
+// [WOLF ENV TAKRAM 2026-10-12] wolftk/atmosphereLibF.glsl (llviewershadermgr.cpp wolf_tk_attach): three-geospatial's aerial
+// perspective and the clouds' Beer-shadow-map transmittance at an eye-space position.
+#ifdef WOLF_TK_LIB
+vec3 wolfTkAerialPerspective(vec3 eyePos, vec3 radiance);
+float wolfTkCloudShadow(vec3 eyePos);
+#endif
+// [WOLF ENV TAKRAM 2026-10-12] The foam's light. Under the native sky the frame is pre-exposed luminance, so the
+// foam (a near-white Lambert surface: 0.9-0.95 x this) is lit by the sun (/ pi, x its shadow) and the sky (/ pi)
+// as they are; the stock expression's 0.08 .. 1 clamp is in EEP display units (at night it made the foam glow).
+float wolfFoamLight(vec3 sunlit, vec3 amblit, float shadow)
+{
+    if (wolf_phys > 0.5) return dot(sunlit * shadow + amblit, vec3(0.3333));
+    return clamp(dot(sunlit + amblit, vec3(0.3333)), 0.08, 1.0);
+}
 // <WolfViewer 2026-10-07> the sky's ocean to the true horizon (class1/deferred/skyF.glsl wolfHorizonSea)
 uniform float wolf_sea_height;   // camera metres above the sea; < 0 = off
 uniform float wolf_far_clip;     // the camera's far clip, metres
@@ -540,6 +559,11 @@ void main()
 #ifdef HAS_SUN_SHADOW
     shadow = sampleDirectionalShadow(pos.xyz, norm.xyz, distort);
 #endif
+#ifdef WOLF_TK_LIB
+    // [WOLF ENV TAKRAM 2026-10-12] decision D2: the clouds' shadow on the sun's glint - an adaptation of three-geospatial
+    // aerialPerspectiveEffect.frag:116-118 (sunIrradiance *= sunTransmittance) to LL's water lighting
+    if (wolf_phys > 0.5) shadow *= wolfTkCloudShadow(pos.xyz);
+#endif
 
     vec3 sunlit_linear = sunlit;
     float fade = 1;
@@ -551,6 +575,7 @@ void main()
     float wolf_water_depth = 1e6;
     // </FS:WolfViewer>
     bool wolf_behind_sky = false;   // <WolfViewer 2026-10-07/> nothing under this water but the sky
+    vec3 wolfSeaBehind = vec3(0.0);   // [WOLF ENV TAKRAM 2026-10-12] the dome's sea behind this pixel (see below)
 #ifdef TRANSPARENT_WATER
     float depth = texture(depthMap, distort).r;
 
@@ -609,6 +634,16 @@ void main()
     {
         fb = applyWaterFogViewLinear(viewVec * 2048.0, vec4(1.0));
     }
+    // [WOLF ENV TAKRAM 2026-10-12] Under the native sky the dome's sea (wolftk/skyF.glsl, three-geospatial's ground branch
+    // with a water surface) already carries its own reflection and aerial perspective. Seen THROUGH this water it was
+    // reflected twice and fogged by a second model, and the planes' far-clip blend into it showed as a seam. So the
+    // water body (wolfWaterBody: the same fog colour x the same light / pi as the dome's sea body) is what lies under
+    // open water here, and the dome's sea is kept only for the blend at the far clip (below).
+    wolfSeaBehind = fb.rgb;
+    if (wolf_phys > 0.5 && wolf_behind_sky && wolf_sea_height >= 0.0)
+    {
+        fb.rgb = wolfWaterBody();
+    }
     // </WolfViewer>
 
 #else
@@ -653,6 +688,16 @@ void main()
     pbrPunctual(diffuseColor, specularColor, perceptualRoughness, metallic, normalize(wavef+up*max(dist, 32.0)/32.0*(1.0-vdu)), v, normalize(light_dir), nl, diffPunc, specPunc);
 
     vec3 punctual = clamp(nl * (diffPunc + specPunc), vec3(0), vec3(10)) * sunlit_linear * shadow * atten;
+    // [WolfViewer round 11] under the native sky the sun's glint is Cox-Munk (wolftk/seaGlint.glsl), the same model as the dome's
+    // open sea beyond the planes, so the two meet at the far clip with one highlight (the dawn band, round 10). On the normal
+    // pbrPunctual is given above (it tends to the plane's with distance, where the slope pdf is the whole roughness). sunlit
+    // is E_perp x exposure / pi under wolf_phys (WolfEnvironmentRender::sceneSunlit), so x pi gives E_perp x exposure, as
+    // deferredUtil.glsl's sun term does (x M_PI under wolf_phys) - the stock punctual above lacked that pi.
+    if (wolf_phys > 0.5)
+    {
+        vec3 nGlint = normalize(wavef + up * max(dist, 32.0) / 32.0 * (1.0 - vdu));
+        punctual = wolfSeaGlint(nGlint, v, normalize(light_dir), wolfSeaMss) * sunlit_linear * 3.14159265 * shadow * atten;   // pi: deferredUtil.glsl M_PI (not visible in this unit)
+    }
     radiance *= df2.y;
     //radiance = toneMapNoExposure(radiance);
     vec3 color = vec3(0);
@@ -725,7 +770,7 @@ void main()
     if (boundedWaterDepth > 0.0)
     {
         float absorb = 1.0 - exp(-waterFogDensity * boundedWaterDepth);
-        color = mix(color, waterFogColorLinear, clamp(absorb, 0.22, 0.85));
+        color = mix(color, wolfWaterBody(), clamp(absorb, 0.22, 0.85));
     }
     // <WolfViewer> waterfall body: aerated water is mostly white, in streaks that fall with
     // the flow (the same bump maps read as a brightness field, scrolled by world height).
@@ -735,7 +780,7 @@ void main()
         float streak = texture(bumpMap, vec2((vary_world_pos.x - vary_world_pos.y) * 0.9, vary_world_pos.z * 0.25 + time * 2.2)).r;
         float streak2 = texture(bumpMap2, vec2((vary_world_pos.x + vary_world_pos.y) * 1.7, vary_world_pos.z * 0.7 + time * 3.6)).g;
         float foam = clamp(0.35 + 0.45 * streak + 0.25 * streak2, 0.0, 0.92) * vary_fall;
-        float fallLight = clamp(dot(sunlit_linear + amblit, vec3(0.3333)), 0.08, 1.0);
+        float fallLight = wolfFoamLight(sunlit_linear, amblit, shadow);
         color = mix(color, vec3(0.93, 0.96, 0.99) * fallLight, foam);
     }
     // </WolfViewer>
@@ -775,7 +820,7 @@ void main()
     if (depthReady > 0.5 && boundedWaterDepth <= 0.0 && wDepth < 1e5)
     {
         float shallowF = exp(-waterFogDensity * 0.35 * wDepth);
-        float depthLight = clamp(dot(sunlit_linear + amblit, vec3(0.3333)), 0.08, 1.0);
+        float depthLight = wolfFoamLight(sunlit_linear, amblit, shadow);
         vec3 shallowTint = color * 1.25 + vec3(0.03, 0.14, 0.12) * depthLight;
         color = mix(color, shallowTint, shallowF * 0.25 * (1.0 - clamp(df2.x, 0.0, 1.0) * 0.5));
         float clump = clamp((waveShore.x + waveShore.y) * 0.7 + 0.5, 0.0, 1.0);
@@ -809,7 +854,7 @@ void main()
         // reading as a band of surf. Foam is a highlight on the water, not a replacement
         // for it.
         float breakFoam = clamp(crest * 0.45, 0.0, 0.45);
-        float breakLight = clamp(dot(sunlit_linear + amblit, vec3(0.3333)), 0.08, 1.0);
+        float breakLight = wolfFoamLight(sunlit_linear, amblit, shadow);
         color = mix(color, vec3(0.95, 0.97, 0.99) * breakLight, breakFoam);
     }
     // </FS:WolfViewer>
@@ -832,7 +877,7 @@ void main()
         float face = smoothstep(0.78, 1.0, sc) * sb * 0.6;
         float wash = sw * 0.35 * sNoise2 * sNoise2;
         float sf = clamp(max(max(crestFoam, face), wash), 0.0, 0.65);
-        float surfLight = clamp(dot(sunlit_linear + amblit, vec3(0.3333)), 0.08, 1.0);
+        float surfLight = wolfFoamLight(sunlit_linear, amblit, shadow);
         color = mix(color, vec3(0.90, 0.94, 0.97) * surfLight, sf);
     }
 
@@ -854,7 +899,7 @@ void main()
         cap = max(cap * capPatch, fftFoam);
         float ragged = 0.55 + 0.45 * clamp((wave2.x + wave3.y) * 0.8 + 0.5, 0.0, 1.0);
         float capMix = clamp(cap * ragged * 0.85, 0.0, 0.7);
-        float capLight = clamp(dot(sunlit_linear + amblit, vec3(0.3333)), 0.08, 1.0);
+        float capLight = wolfFoamLight(sunlit_linear, amblit, shadow);
         color = mix(color, vec3(0.93, 0.96, 0.98) * capLight, capMix);
     }
     // Boat wash (Water.js [WAKE]): churned water is full of air, so it scatters rather
@@ -862,7 +907,7 @@ void main()
     if (vWake > 0.003)
     {
         float wash = clamp(pow(vWake, 0.7) * 0.80, 0.0, 0.70);
-        float washLight = clamp(dot(sunlit_linear + amblit, vec3(0.3333)), 0.08, 1.0);
+        float washLight = wolfFoamLight(sunlit_linear, amblit, shadow);
         color = mix(color, vec3(0.95, 0.97, 0.99) * washLight, wash);
     }
     // </WolfViewer>
@@ -875,23 +920,32 @@ void main()
                       * clamp(waveAmplitude * 5.0, 0.0, 1.0)
                       // Open sea carries whitecaps; a garden pond does not.
                       * (boundedWaterDepth > 0.0 ? 0.3 : 1.0);
-        float ambLight = clamp(dot(sunlit_linear + amblit, vec3(0.3333)), 0.08, 1.0);
+        float ambLight = wolfFoamLight(sunlit_linear, amblit, shadow);
         color = mix(color, vec3(0.90, 0.94, 0.97) * ambLight, ambFoam);
     }
     // </FS:WolfViewer>
 
+#ifdef WOLF_TK_LIB
+    // [WOLF ENV TAKRAM 2026-10-12] decision D14 / the water seam: the aerial perspective on the water, the same
+    // three-geospatial function the composite gives the opaque frame and the dome gives its sea, so own-region,
+    // neighbour and open-sea water fade into the distance alike
+    if (wolf_phys > 0.5 && wolf_phys < 1.5) color = wolfTkAerialPerspective(pos.xyz, color);
+#endif
 #ifdef TRANSPARENT_WATER
     // <WolfViewer 2026-10-07> No edge where the planes stop: over the last stretch before the far
     // clip the water becomes the sky's ocean behind it (the same direction, the same sea), so it runs
     // on unbroken to the true horizon.
     if (wolf_behind_sky && wolf_sea_height >= 0.0 && wolf_far_clip > 0.0)
     {
-        color = mix(color, fb.rgb, smoothstep(wolf_far_clip * 0.6, wolf_far_clip * 0.95, length(pos.xyz)));
+        color = mix(color, wolf_phys > 0.5 ? wolfSeaBehind : fb.rgb, smoothstep(wolf_far_clip * 0.6, wolf_far_clip * 0.95, length(pos.xyz)));
     }
 #endif
 
     float spec = min(max(max(punctual.r, punctual.g), punctual.b), 0);
 
     frag_color = min(vec4(1),max(vec4(color.rgb, spec * water_mask), vec4(0)));
+    // [WOLF ENV TAKRAM 2026-10-12] the frame is pre-exposed HDR under the native sky: the sun's glint and the bright
+    // sky in the reflection are > 1 there, as the dome's sea beside it is (no clamp to 1, which drew a seam)
+    if (wolf_phys > 0.5) frag_color.rgb = max(color.rgb, vec3(0.0));
 }
 

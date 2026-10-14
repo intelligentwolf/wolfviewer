@@ -92,6 +92,20 @@ vec3 clampHDRRange(vec3 color)
     return clamp(color, vec3(0.0), vec3(11.2));
 }
 
+// [WOLF ENV 2026-10-12 physical] With the Wolf Environment's physical sky (atmosphericsFuncs.glsl wolf_phys)
+// local lights are photometric: the light's colour uniform is its luminous intensity in candela x the
+// frame's pre-exposure (WolfEnvironmentRender::physicalLightColor), the illuminance at distance d the
+// inverse square law windowed to reach 0 at the light's radius r (Filament, "Physically based rendering in
+// Filament", punctual lights: E = I / max(d^2, 0.01^2) <1 - (d/r)^4>^2).
+uniform float wolf_phys;
+uniform float wolf_emissive;   // 1 nit x pre-exposure (WolfEnvironmentRender)
+float wolfPunctualAtten(float d, float r)
+{
+    float x = d / max(r, 1e-3);
+    float w = clamp(1.0 - x * x * x * x, 0.0, 1.0);
+    return w * w / max(d * d, 1e-4);
+}
+
 float calcLegacyDistanceAttenuation(float distance, float falloff)
 {
     float dist_atten = 1.0 - clamp((distance + falloff)/(1.0 + falloff), 0.0, 1.0);
@@ -541,13 +555,15 @@ vec3 pbrCalcPointLightOrSpotLight(vec3 diffuseColor, vec3 specularColor,
         lv /= lightDist;
 
         float dist_atten = calcLegacyDistanceAttenuation(dist, falloff);
+        float k = 3.0; //magic number to balance with legacy materials
+        // [WolfViewer 2026-10-13] LL lights keep LL's own falloff under the native sky (WolfEnvironmentRender::physicalLightColor)
 
         // spotlight coefficient.
         float spot = max(dot(-ld, lv), is_pointlight);
         // spot*spot => GL_SPOT_EXPONENT=2
         float spot_atten = spot*spot;
 
-        vec3 intensity = spot_atten * dist_atten * lightColor * 3.0; //magic number to balance with legacy materials
+        vec3 intensity = spot_atten * dist_atten * lightColor * k;
 
         float nl = 0;
         vec3 diffPunc = vec3(0);
@@ -612,12 +628,16 @@ vec3 pbrBaseLight(vec3 diffuseColor, vec3 specularColor, float metallic, vec3 v,
     }
     else
     {
-        color += clamp(nl * (diffPunc + specPunc), vec3(0), vec3(10)) * sunlit * 3.0 * scol;
+        // [WOLF ENV 2026-10-12 physical] sunlit is the sun's illuminance / pi (atmosphericsFuncs.glsl): x pi
+        // gives E, and diffPunc already carries Lambert's 1 / pi; the 3.0 is the EEP path's balance factor
+        color += clamp(nl * (diffPunc + specPunc), vec3(0), vec3(10)) * sunlit * (wolf_phys > 0.5 ? M_PI : 3.0) * scol;
     }
 
     color.rgb += iblSpec.rgb;
 
-    color += colorEmissive;
+    // [WOLF ENV 2026-10-12 physical] glTF emissive is luminance in nits (the glTF 2.0 spec, emissive texture:
+    // "candela per square meter"; KHR_materials_emissive_strength multiplies it): x pre-exposure
+    color += colorEmissive * (wolf_phys > 0.5 ? wolf_emissive : 1.0);
 
     return color;
 }

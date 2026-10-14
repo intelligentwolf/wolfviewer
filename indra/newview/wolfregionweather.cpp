@@ -51,6 +51,8 @@
 #include "llviewerparcelmgr.h"
 #include "llviewergenericmessage.h"
 #include "llviewerregion.h"
+#include "pipeline.h"
+#include "rlvactions.h"
 #include "wolfgrid.h"
 #include "wolfweather.h"
 
@@ -119,6 +121,8 @@ namespace
     const std::string MESSAGE_WOLF_WEATHER("WolfWeather");
 }
 
+static void wolf_use_shared_environment();   // <WolfViewer 2026-10-12/> below, at onRegionChanged
+
 WolfRegionWeather::WolfRegionWeather()
 {
     // Registered once, for the life of the singleton. LLEnvironment does the same for its own
@@ -134,6 +138,8 @@ WolfRegionWeather::WolfRegionWeather()
     LLViewerRegion* region = gAgent.getRegion();
     LLParcel* parcel = LLViewerParcelMgr::getInstance()->getAgentParcel();
     if (region && parcel && parcel->getRegionID() == region->getRegionID()) mAwaitingParcel = false;
+    // <WolfViewer 2026-10-12> made after the first region arrived (the first WolfWeather idle): that arrival too
+    if (region) wolf_use_shared_environment();
 }
 
 WolfRegionWeather::~WolfRegionWeather()
@@ -196,12 +202,29 @@ void WolfRegionWeather::invalidateParcel()
     applyToWeather();
 }
 
+// <WolfViewer 2026-10-12> Paul: "when someone lands on a region default the EEP to shared EEP and turn it on". On
+// every arrival on a Wolf region (login, teleport, crossing) any personal sky or day cycle is dropped and the
+// shared (region / parcel) environment shows - the EEP toolbar switch on. Source: llviewermenu.cpp wolf_toggle_eep
+// "on" / LLWorldEnvSettings::handleEvent "region" (reflection maps reset, clear ENV_LOCAL, select ENV_LOCAL,
+// instant). Only when something is in ENV_LOCAL (wolfweather.cpp:700's test), so a plain crossing does nothing,
+// and never against RLV's @setenv (RlvActions::canChangeEnvironment, as the switch honours it).
+static void wolf_use_shared_environment()
+{
+    if (!WolfGrid::isOnWolfTerritories() || !RlvActions::canChangeEnvironment()) return;
+    LLEnvironment& env = LLEnvironment::instance();
+    if (!env.getEnvironmentFixedSky(LLEnvironment::ENV_LOCAL) && !env.getEnvironmentDay(LLEnvironment::ENV_LOCAL)) return;
+    gPipeline.mReflectionMapManager.reset();
+    env.clearEnvironment(LLEnvironment::ENV_LOCAL);
+    env.setSelectedEnvironment(LLEnvironment::ENV_LOCAL, LLEnvironment::TRANSITION_INSTANT);
+}
+
 void WolfRegionWeather::onRegionChanged()
 {
     // The region row belongs to the old region just as surely as the parcel row does. Clearing
     // both prevents the previous sky being applied while the destination requests are in flight.
     mHaveRow = false;
     setAutoEnvPreview(false, 0.0);   // <WolfViewer 2026-10-03/> a preview belongs to the region it was made in
+    wolf_use_shared_environment();   // <WolfViewer 2026-10-12/>
     readAutoEnv(LLSD());
     mProfile = WolfWeatherProfile();
     mKind.clear();
@@ -488,12 +511,12 @@ F64 WolfRegionWeather::autoEnvSkyTime() const
     return LLDate::now().secondsSinceEpoch() + autoEnvTimeOffset() + mAutoEnvSkyShift;
 }
 
-void WolfRegionWeather::setAutoEnvPreview(bool on, F64 seconds_ahead)
+void WolfRegionWeather::setAutoEnvPreview(bool on, F64 seconds_ahead, bool any_cycle)
 {
     // Source: llviewermenu.cpp:828-829 — clearing ENV_LOCAL and selecting it is how the viewer
     // returns to the shared (region) environment.
     LLEnvironment& env = LLEnvironment::instance();
-    if (!on || !autoEnvSky())
+    if (!on || (!any_cycle && !autoEnvSky()))
     {
         if (mAutoEnvPreviewOn)
         {
@@ -504,13 +527,17 @@ void WolfRegionWeather::setAutoEnvPreview(bool on, F64 seconds_ahead)
         mAutoEnvPreview = 0.0;
         return;
     }
-    LLSettingsDay::ptr_t day = env.getEnvironmentDay(LLEnvironment::ENV_REGION);
+    // [WOLF ENV 2026-10-12] the Wolf window's slider shows the sky in force here: the parcel's own cycle
+    // when it has one (a parcel Wolf Environment), else the region's. Jimmy's tab keeps the region's.
+    LLEnvironment::EnvSelection_t which = LLEnvironment::ENV_REGION;
+    if (any_cycle && env.getEnvironmentDay(LLEnvironment::ENV_PARCEL)) which = LLEnvironment::ENV_PARCEL;
+    LLSettingsDay::ptr_t day = env.getEnvironmentDay(which);
     if (!day) return;
     // The region's own cycle, as a personal environment, run ahead by the preview: the cycle's
     // position is (LLDate::now() + offset) % length (llenvironment.cpp getAdjustedNow).
     env.setEnvironment(LLEnvironment::ENV_LOCAL, day,
-                       env.getEnvironmentDayLength(LLEnvironment::ENV_REGION),
-                       env.getEnvironmentDayOffset(LLEnvironment::ENV_REGION) + LLSettingsDay::Seconds(ll_round((F32)seconds_ahead)));
+                       env.getEnvironmentDayLength(which),
+                       env.getEnvironmentDayOffset(which) + LLSettingsDay::Seconds(ll_round((F32)seconds_ahead)));
     env.setSelectedEnvironment(LLEnvironment::ENV_LOCAL, LLEnvironment::TRANSITION_INSTANT);
     mAutoEnvPreviewOn = true;
     mAutoEnvPreview = seconds_ahead;

@@ -1702,6 +1702,19 @@ If you do not understand the distinction then leave this control alone."
          tool_tip="Boats sitting in the water bob and tilt with the swell and the shore breakers, viewer-side only. Physical or crewed hulls rock fully; a parked hull has to be named or described as a boat, and nothing named dock ever rocks."
          top_pad="4"
          width="300" />
+        <!-- WolfViewer 2026-10-12 [WOLF AURORA]: how the northern lights are shown (wolfaurora.cpp); the
+             Weather menu has the same switch. Off (the eye) is the default. -->
+        <check_box
+         control_name="WolfAuroraPhotographic"
+         follows="left|top"
+         height="16"
+         label="Northern lights like a photo (unticked: as the eye sees them)"
+         layout="topleft"
+         left="10"
+         name="WolfAuroraPhotographic"
+         tool_tip="Unticked, the northern lights look as your eyes see them at night: a faint display is pale and greyish, its red tops are hard to see, and only a bright one is clearly green. Ticked, they look like a long-exposure photograph: every colour strong, the red and purple included. The aurora itself is the same either way."
+         top_pad="4"
+         width="405" />
         <slider
          control_name="WolfTerrainSnowLine"
          decimal_digits="0"

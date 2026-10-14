@@ -408,20 +408,6 @@ namespace
         }
     }
 
-    // At start-up the window has to be on screen (and, on Hyprland, listed) before it can be
-    // moved, so the spread waits two seconds into the main loop.
-    F64 sStartupAt = 0.0;
-    void startupIdle(void*)
-    {
-        if (LLTimer::getElapsedSeconds() < sStartupAt)
-            return;
-        gIdleCallbacks.deleteFunction(startupIdle, nullptr);
-        if (gSavedSettings.getBOOL("WolfSpanAllScreens"))
-        {
-            // quiet: a failure here is logged, not put in a box before the login screen
-            apply(true, true);
-        }
-    }
 }
 
 namespace WolfSpanScreens
@@ -461,9 +447,9 @@ namespace WolfSpanScreens
 
     void startup()
     {
-        if (!gSavedSettings.getBOOL("WolfSpanAllScreens"))
-            return;
-        sStartupAt = LLTimer::getElapsedSeconds() + 2.0;
-        gIdleCallbacks.addFunction(startupIdle, nullptr);
+        // [WolfViewer 2026-10-13] Paul: "its defaulting to full width on it shouldnt it should start normally".
+        // The viewer always opens as a normal window; spanning is only ever done when asked (the menu or
+        // SUPER+ALT+W). The saved choice from the last session is cleared so the menu tick starts unticked.
+        gSavedSettings.setBOOL("WolfSpanAllScreens", false);
     }
 }

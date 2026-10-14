@@ -30,6 +30,7 @@
 #include "llsettingsvo.h"
 #include "wolfweather.h"   // <WolfViewer 2026-09-18/> fogExtinction()
 #include "wolfaltitudesky.h"   // <WolfViewer 2026-10-07/> the sky thins with height
+#include "wolfenvironmentrender.h"   // [WOLF ENV 2026-10-12 physical/] the scene lit by the Wolf sky
 
 #include "pipeline.h"
 
@@ -836,7 +837,10 @@ void LLSettingsVOSky::applySpecial(void *ptarget, bool force)
     static LLCachedControl<F32> tonemap_mix_setting(gSavedSettings, "RenderTonemapMix", 1.f);
 
     // sky is a "classic" sky following pre SL 7.0 shading
-    bool classic_mode = psky->canAutoAdjust() && !should_auto_adjust();
+    // [WOLF ENV 2026-10-12 physical] under the Wolf Environment's physical sky the scene runs the viewer's
+    // own linear PBR path (classic off), lit by the Wolf sky's sun and sky light (below)
+    const bool wolf_phys = WolfEnvironmentRender::skyActive();
+    bool classic_mode = psky->canAutoAdjust() && !should_auto_adjust() && !wolf_phys;
 
     if (!classic_mode)
     {
@@ -911,6 +915,38 @@ void LLSettingsVOSky::applySpecial(void *ptarget, bool force)
         }
     }
     // </WolfViewer>
+
+    // [WOLF ENV 2026-10-12 physical] The light the scene is lit with when the Wolf Environment draws the sky
+    // (atmosphericsFuncs.glsl wolf_*): the sun at the camera / pi, the sky's diffuse light / pi from above,
+    // the ground's bounce from below, in the frame's pre-exposed units; fullbright surfaces at 300 cd/m2 (a
+    // lit LCD display) and glTF emissive in nits, likewise pre-exposed. 0 = today's EEP, exactly.
+    {
+        LLShaderUniforms* any = &((LLShaderUniforms*)ptarget)[LLGLSLShader::SG_ANY];
+        // [WolfViewer 2026-10-14] 2 = an EEP drives the native sky: the scene keeps the EEP's own stock haze
+        // (atmosphericsFuncs.glsl calcAtmosphericVars); 1 = the physical sky, no EEP haze
+        any->uniform1f(LLShaderMgr::WOLF_PHYS, wolf_phys ? (WolfEnvironmentRender::eepDriven() ? 2.f : 1.f) : 0.f);
+        if (wolf_phys)
+        {
+            const F32 e = WolfEnvironmentRender::exposure();
+            const LLColor3 sunlit = WolfEnvironmentRender::sceneSunlit();
+            const LLColor3 up = WolfEnvironmentRender::sceneAmblit();
+            const LLColor3 down = WolfEnvironmentRender::sceneAmbDown();
+            any->uniform3fv(LLShaderMgr::WOLF_SUNLIT, LLVector3(sunlit.mV));
+            any->uniform3fv(LLShaderMgr::WOLF_AMB_UP, LLVector3(up.mV));
+            any->uniform3fv(LLShaderMgr::WOLF_AMB_DOWN, LLVector3(down.mV));
+            const LLColor3 lh = WolfEnvironmentRender::sceneLightH();
+            any->uniform3fv(LLShaderMgr::WOLF_LIGHT_H, LLVector3(lh.mV));
+            // the world's up in eye space (as LLSettingsVOWater::applySpecial puts the water plane there)
+            const glm::mat4 mv = get_current_modelview();
+            const glm::vec4 upEye = mv * glm::vec4(0.f, 0.f, 1.f, 0.f);
+            any->uniform3fv(LLShaderMgr::WOLF_UP, LLVector3(upEye.x, upEye.y, upEye.z));
+            // [WolfViewer 2026-10-13] LL full-bright, glow and emissive are authored for LL's display range (exposure 1), not
+            // photometric: x the physical exposure they burned white at night (Paul, Sandbox). Added at LL's own brightness.
+            (void)e;
+            any->uniform1f(LLShaderMgr::WOLF_FULLBRIGHT, 1.f);
+            any->uniform1f(LLShaderMgr::WOLF_EMISSIVE, 1.f);
+        }
+    }
 }
 
 LLSettingsSky::parammapping_t LLSettingsVOSky::getParameterMap() const
@@ -983,6 +1019,9 @@ LLColor3 LLSettingsVOWater::wolfLitWaterFogColor()
     if (!pwater) return LLColor3(0.f, 0.f, 0.f);
     const LLColor3 fog = pwater->getWaterFogColor();
     if (!psky) return fog;
+    // [WOLF ENV 2026-10-12 physical] under the physical sky the shaders light the body colour themselves
+    // (wolf_light_h, waterFogF.glsl / waterF.glsl / underWaterF.glsl): the EEP's own light is not applied
+    if (WolfEnvironmentRender::skyActive()) return fog;
 
     const bool sun_up = psky->getIsSunUp();
     const LLColor3 direct = sun_up ? psky->getSunlightColor() : psky->getMoonlightColor();

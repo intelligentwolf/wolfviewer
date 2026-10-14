@@ -83,6 +83,12 @@ public:
         BTN_DIVE = 32768, BTN_SURFACE = 65536, BTN_PERISCOPE = 131072, BTN_SONAR = 262144,   // the submarine's
     };
     static constexpr U32 BUTTON_MASK = 0x7FFFF; // PROTOCOL.md: "BUTTON_MASK goes from 0x1FF to 0x7FFFF" (WolfDriveModule.cs)
+    // [WOLF RETARDER 2026-10-12] The truck's retarder controls: the 8th "in" parameter, a whole number 0..127
+    // (WolfDriveModule.cs RETARDER_MAX / RETARDER_STALK_MASK / RETARDER_STALK_MAX): bits 0-2 the stalk 0 (off) .. 5,
+    // then the four switches below. Never in the buttons parameter: a region from before 2026-10-12 clamps that to
+    // BUTTON_MASK (so a high bit would read as every button held) and reads only the first 7 parameters.
+    static constexpr S32 RETARDER_STALK_MAX = 5;
+    static constexpr U32 RETARDER_W_DSC = 8, RETARDER_W_AUT = 16, RETARDER_W_DSC_UP = 32, RETARDER_W_DSC_DOWN = 64;
     /** One design's vehicle: the real one it is modelled on (sources in wolfdrive.cpp). */
     struct Spec
     {
@@ -119,8 +125,14 @@ public:
         // <WolfViewer 2026-10-11> w65: bits 9..14 (BTN_STAGE .. BTN_ENGINE)
         ACT_STAGE, ACT_BOOST, ACT_ANCHOR, ACT_ASSIST, ACT_LANDING_GEAR, ACT_ENGINE,
         ACT_DIVE, ACT_SURFACE, ACT_PERISCOPE, ACT_SONAR,   // bits 15..18, the submarine's
+        // [WOLF RETARDER 2026-10-12] the truck's retarder stalk (one stage more / less braking), downhill speed
+        // control on / off and its set speed + / - (held), and AUT. These six have NO button bit on the wire: what
+        // they set goes out as the 8th "in" parameter (RETARDER_W_*). Their index is only the action's own bit in
+        // the held-actions mask (ACTION_MASK).
+        ACT_RETARDER_UP, ACT_RETARDER_DOWN, ACT_RETARDER_DSC, ACT_RETARDER_DSC_UP, ACT_RETARDER_DSC_DOWN, ACT_RETARDER_AUT,
         ACTION_COUNT
     };
+    static constexpr U32 ACTION_MASK = (1u << ACTION_COUNT) - 1;   // every action's bit (the buttons are the low 19)
     static const char* actionSetting(S32 action);   // "WolfDriveButtonGearUp" ...: the controller button
     static const char* actionLabel(S32 action);
     static const char* actionId(S32 action);        // "gear_up" ...: the key in WolfDriveActions
@@ -169,6 +181,20 @@ public:
     F32  clutch() const { return mClutch; }
     S32  selector() const { return mSelector; }        // GEAR_* or 1..GEAR_MAX
     U32  buttonsHeld() const { return mButtons; }
+    bool actionHeld(S32 action) const { return action >= 0 && action < ACTION_COUNT && (mActionsHeld & (1u << action)) != 0; }
+
+    // ---- [WOLF RETARDER 2026-10-12] the truck's retarder controls (sources in wolfdrive.cpp) ----
+    /** The stalk the driver set, 0 (off) .. RETARDER_STALK_MAX. */
+    S32  retarderStalk() const { return mRetarderStalk; }
+    void setRetarderStalk(S32 pos);
+    /** Downhill speed control switched on (the vehicle's script holds the speed it was switched on at). */
+    bool retarderDsc() const { return mRetarderDsc; }
+    void setRetarderDsc(bool on);
+    /** AUT: the brake pedal brings the retarder in before the wheel brakes. Remembered (WolfDriveRetarderAut). */
+    bool retarderAut() const;
+    void setRetarderAut(bool on);
+    /** The 8th "in" parameter now (0 off the truck design). */
+    U32  retarderWord() const;
 
     // ---- the dashboard's own controls ----
     void setScreenSteer(F32 v, bool held);
@@ -233,7 +259,9 @@ public:
         S32   mIndicators = 0;       // 0 off, 1 left, 2 right, 3 hazard
         S32   mLights = 0;           // 0 off, 1 dipped, 2 main beam
         bool  mHandbrake = false;
-        S32   mRetarder = 0;
+        S32   mRetarder = 0;             // the stage braking now, the script's (the stalk is WolfDrive::retarderStalk)
+        bool  mHasDscSpeed = false;      // [WOLF RETARDER 2026-10-12] the script holds a downhill speed
+        F32   mDscSpeed = 0.f;           //   km/h, as sent (dsc_speed)
         bool  mCruise = false;
         F32   mDriveTime = 0.f;      // seconds driven since the last break
         F64   mOdoKm = 0.0;
@@ -315,6 +343,7 @@ private:
         bool   mHasLights = false;   S32 mLights = 0;
         bool   mHasHandbrake = false; bool mHandbrake = false;
         bool   mHasRetarder = false; S32 mRetarder = 0;
+        bool   mHasDscSpeed = false; F32 mDscSpeed = 0.f;   // [WOLF RETARDER 2026-10-12/]
         bool   mHasCruise = false;   bool mCruise = false;
         bool   mHasDriveTime = false; F32 mDriveTime = 0.f;
         bool   mHasOdo = false;      F64 mOdo = 0.0;
@@ -397,8 +426,12 @@ private:
     S32  mManualGear = 0;        // AUTO, in D / A: 0 the automatic; > 0 the driver took a gear (M)
     S32  mModelGear = 1;         // AUTO: the automatic's gear
     F64  mShiftAt = 0.0;         // AUTO: when it last shifted
-    U32  mButtons = 0;
-    U32  mPrevButtons = 0;
+    U32  mButtons = 0;           // the buttons held (BUTTON_MASK): the wire, the lamps
+    U32  mActionsHeld = 0;       // every action held (ACTION_MASK): the edges, the retarder's + / - held
+    U32  mPrevButtons = 0;       // last frame's mActionsHeld
+    // [WOLF RETARDER 2026-10-12] the stalk and the downhill switch: a new seat starts with both off
+    S32  mRetarderStalk = 0;
+    bool mRetarderDsc = false;
 
     // lever taps to the script: +1 PageUp, -1 PageDown (old Vehicle tab tapIdle)
     std::vector<S32> mTapQueue;

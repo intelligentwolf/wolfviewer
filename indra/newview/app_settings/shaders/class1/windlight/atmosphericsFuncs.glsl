@@ -42,6 +42,17 @@ uniform float sun_moon_glow_factor;
 uniform float sky_sunlight_scale;
 uniform float sky_ambient_scale;
 uniform int classic_mode;
+// [WOLF ENV 2026-10-12 physical] With the Wolf Environment's physical sky (WolfEnvironmentRender::skyActive,
+// set for every shader by LLSettingsVOSky::applySpecial) the scene is lit by the same atmosphere: the sun
+// at the camera / pi and the sky's diffuse light / pi, pre-exposed and linear, and the EEP haze is not
+// added (three-geospatial's aerial perspective, wolftk/compositeF.glsl, replaces it). 0 = today's EEP, exactly.
+// [WOLF ENV TAKRAM 2026-10-12] wolf_amb_up is the sky light probe's irradiance / pi and wolf_amb_down 0, so the mix
+// below is SkyLightProbe.ts:138-144's (1 + n.up) / 2 x the irradiance.
+uniform float wolf_phys;
+uniform vec3  wolf_sunlit;     // illuminance / pi x pre-exposure (Lambert: L = albedo x this x cos)
+uniform vec3  wolf_amb_up;     // the sky's diffuse illuminance / pi x pre-exposure (from above)
+uniform vec3  wolf_amb_down;   // the ground's bounce: its albedo x the illuminance on it / pi x pre-exposure (from below)
+uniform vec3  wolf_up;         // the world's up in eye space
 
 float getAmbientClamp() { return 1.0f; }
 
@@ -128,6 +139,22 @@ void calcAtmosphericVars(vec3 inPositionEye, vec3 light_dir, float ambFactor, ou
 
     // sanity clamp haze contribution
     additive = min(additive, vec3(10));
+
+    if (wolf_phys > 0.5)
+    {
+        sunlit = wolf_sunlit;
+        amblit = wolf_amb_up;
+        // [WolfViewer 2026-10-14] wolf_phys 2 = an EEP drives the native sky (llsettingsvo.cpp): the EEP's own stock haze is
+        // KEPT, so the stock haze pass (hazeF.glsl) hazes the opaque scene and every forward shader (alphaF: tree foliage,
+        // water, fullbright) hazes itself exactly as with WE off. Before, every haze here was zeroed: the ground got the EEP
+        // haze from the native cloud pass alone and the foliage got the physical aerial perspective instead - Paul's Iceland
+        // trees "unaffected by the haze" against a hazed ground. wolf_phys 1 (the physical sky) has no EEP haze.
+        if (wolf_phys < 1.5)
+        {
+            additive = vec3(0.0);
+            atten = vec3(1.0);
+        }
+    }
 }
 
 vec3 srgb_to_linear(vec3 col);
@@ -148,6 +175,14 @@ void calcAtmosphericVarsLinear(vec3 inPositionEye, vec3 norm, vec3 light_dir, ou
                          out vec3 atten)
 {
     calcAtmosphericVars(inPositionEye, light_dir, 1.0, sunlit, amblit, additive, atten);
+
+    if (wolf_phys > 0.5)
+    {
+        // hemispheric light: the sky from above, the ground's bounce from below, by the normal's tilt
+        float up = clamp(dot(normalize(norm), normalize(wolf_up)) * 0.5 + 0.5, 0.0, 1.0);
+        amblit = mix(wolf_amb_down, wolf_amb_up, up);
+        return;   // already linear, in the frame's units: no srgb conversion, no sky scale
+    }
 
     amblit *= ambientLighting(norm, light_dir);
 

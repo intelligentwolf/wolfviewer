@@ -455,7 +455,13 @@ bool LLGLSLShader::createShader()
         vector< pair<string, GLenum> >::iterator fileIter = mShaderFiles.begin();
         for (; fileIter != mShaderFiles.end(); fileIter++)
         {
-            GLuint shaderhandle = LLShaderMgr::instance()->loadShaderFile((*fileIter).first, mShaderLevel, (*fileIter).second, &mDefines, mFeatures.mIndexedTextureChannels);
+            // [WOLF ENV TAKRAM 2026-10-12] the native sky's units (wolftk/, e.g. atmosphereLibF.glsl linked into the alpha
+            // programs) get no indexed-texture prelude: loadShaderFile prepends a diffuseLookup() body to every fragment
+            // unit it is given channels for, so a second unit in an indexed program would define it twice (NVIDIA:
+            // error C1013 "function diffuseLookup is already defined"; Mesa accepted it)
+            const bool wolf_unit = (*fileIter).first.compare(0, 7, "wolftk/") == 0;
+            GLuint shaderhandle = LLShaderMgr::instance()->loadShaderFile((*fileIter).first, mShaderLevel, (*fileIter).second, &mDefines,
+                                                                          wolf_unit ? 0 : mFeatures.mIndexedTextureChannels);
             LL_DEBUGS("ShaderLoading") << "SHADER FILE: " << (*fileIter).first << " mShaderLevel=" << mShaderLevel << LL_ENDL;
             if (shaderhandle)
             {
@@ -821,7 +827,8 @@ GLint LLGLSLShader::mapUniformTextureChannel(GLint location, GLenum type, GLint 
 
     if ((type >= GL_SAMPLER_1D && type <= GL_SAMPLER_2D_RECT_SHADOW) ||
         type == GL_SAMPLER_2D_MULTISAMPLE ||
-        type == GL_SAMPLER_CUBE_MAP_ARRAY)
+        type == GL_SAMPLER_CUBE_MAP_ARRAY ||
+        type == GL_SAMPLER_2D_ARRAY)   // [WOLF ENV TAKRAM 2026-10-12] the clouds' shadow map (sampler2DArray shadowBuffer)
     {   //this here is a texture
         GLint ret = mActiveTextureChannels;
         if (size == 1)

@@ -58,6 +58,8 @@
 #include "llvowater.h"
 #include "m3math.h"
 #include "pipeline.h"
+#include "wolfcave.h"   // [WOLF CAVE 2026-10-12]
+#include "llfloaterreg.h"
 #include "wolfgrid.h"
 #include "wolfnearbyregions.h"
 
@@ -1126,8 +1128,9 @@ bool WolfTerrainPaint::canEditAll() const
     return gAgent.canManageEstate();
 }
 
-// Source: php/terrain_paint.php paint_brush_on_own_land — the square of half-side w/2 around
-// the point (centre, four axis points, four corners) must be the agent's own parcel tiles.
+// Source: php/terrain_paint.php paint_brush_on_own_land — every land tile the square of half-side w/2
+// around the point touches must be the agent's own. [2026-10-12] was nine sample points (centre, axis
+// points, corners): a brush is up to 64 m across, so those stepped over whole 4 m tiles inside it.
 bool WolfTerrainPaint::canPaintAt(F32 x, F32 y, F32 w) const
 {
     if (canEditAll()) return true;
@@ -1135,12 +1138,17 @@ bool WolfTerrainPaint::canPaintAt(F32 x, F32 y, F32 w) const
     LLViewerParcelOverlay* overlay = rgn ? rgn->getParcelOverlay() : nullptr;
     if (!overlay) return false;
     const F32 h = clampWidth(w) * 0.5f;
-    const F32 xs[9] = { x, x - h, x + h, x,     x,     x - h, x + h, x - h, x + h };
-    const F32 ys[9] = { y, y,     y,     y - h, y + h, y - h, y - h, y + h, y + h };
-    for (S32 i = 0; i < 9; ++i)
+    const F32 U = 4.f;   // php/grid_rights.php WT_LAND_UNIT_M (OpenSim Constants.LandUnit)
+    const S32 tx0 = (S32)floorf((x - h) / U), tx1 = (S32)floorf((x + h) / U);
+    const S32 ty0 = (S32)floorf((y - h) / U), ty1 = (S32)floorf((y + h) / U);
+    for (S32 ty = ty0; ty <= ty1; ++ty)
     {
-        if (xs[i] < 0.f || ys[i] < 0.f || xs[i] >= rgn->getWidth() || ys[i] >= rgn->getWidth()) return false;
-        if (!overlay->isOwnedSelf(LLVector3(xs[i], ys[i], 0.f))) return false;
+        for (S32 tx = tx0; tx <= tx1; ++tx)
+        {
+            const F32 cx = ((F32)tx + 0.5f) * U, cy = ((F32)ty + 0.5f) * U;   // the tile's centre
+            if (cx < 0.f || cy < 0.f || cx >= rgn->getWidth() || cy >= rgn->getWidth()) return false;
+            if (!overlay->isOwnedSelf(LLVector3(cx, cy, 0.f))) return false;
+        }
     }
     return true;
 }
@@ -1758,6 +1766,19 @@ bool WolfPanelTerrainPaint::postBuild()
     mTransparency = getChild<LLSliderCtrl>("paint_transparency");
     mErase        = getChild<LLCheckBoxCtrl>("paint_erase");
     mArm          = getChild<LLButton>("paint_arm");
+    // [WOLF CAVE 2026-10-12] The Cave Builder (wolfcave.cpp), Wolf Territories only.
+    mCaves        = getChild<LLButton>("paint_caves");
+    mCavesLabel   = getChild<LLTextBox>("paint_caves_lbl");
+    mCaves->setCommitCallback([this](LLUICtrl*, const LLSD&)
+    {
+        if (!WolfCaves::onWolf()) { setStatus("Sorry, this function is only available on Wolf Territories Grid.", true); return; }
+        if (armed())
+        {
+            LLToolset* ts = LLToolMgr::getInstance()->getCurrentToolset();
+            if (ts) ts->selectTool(LLToolCompTranslate::getInstance());
+        }
+        LLFloaterReg::showInstance("wolf_caves");
+    });
     mEnabled      = getChild<LLCheckBoxCtrl>("paint_enabled");
     mUndo         = getChild<LLButton>("paint_undo");
     mClear        = getChild<LLButton>("paint_clear");
@@ -1795,6 +1816,12 @@ void WolfPanelTerrainPaint::draw()
     // guaranteed to be inside its floater by the time it is being drawn, and the guard needs the
     // parent to do its work. See WolfGrid::fitFloaterToContents for what this prevents.
     if (!mFitted) { mFitted = true; WolfGrid::fitFloaterToContents(this); }
+    // [WOLF CAVE 2026-10-12] Gone (not greyed) wherever the cave builder cannot work.
+    {
+        const bool caves = WolfCaves::onWolf();
+        if (mCaves) mCaves->setVisible(caves);
+        if (mCavesLabel) mCavesLabel->setVisible(caves);
+    }
     // <WolfViewer 2026-09-22> Off-grid the panel now fetches nothing (WolfTerrainPaint::refresh),
     // so say why rather than sit there looking broken. Same wording as every other gate.
     if (!WolfGrid::isOnWolfTerritories())

@@ -1333,6 +1333,8 @@ void settings_setup_listeners()
     setting_setup_signal_listener(gSavedSettings, "OctreeAlphaDistanceFactor", handleRepartition);
     setting_setup_signal_listener(gSavedSettings, "OctreeAttachmentSizeFactor", handleRepartition);
     setting_setup_signal_listener(gSavedSettings, "RenderMaxTextureIndex", handleSetShaderChanged);
+    // [WOLF ENV TAKRAM 2026-10-12] the native sky's programs (and its unit in the stock ones) exist only while it is on
+    setting_setup_signal_listener(gSavedSettings, "WolfEnvironmentNativeSky", handleSetShaderChanged);
     setting_setup_signal_listener(gSavedSettings, "RenderUIBuffer", handleWindowResized);
     setting_setup_signal_listener(gSavedSettings, "RenderDepthOfField", handleReleaseGLBufferChanged);
     setting_setup_signal_listener(gSavedSettings, "RenderFSAAType", handleReleaseGLBufferChanged);

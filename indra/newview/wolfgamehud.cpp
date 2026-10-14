@@ -16,6 +16,7 @@
 
 #include "llviewerprecompiledheaders.h"
 
+#include "wolfhudscale.h"
 #include "wolfgamehud.h"
 
 #include <cmath>
@@ -1497,6 +1498,9 @@ bool WolfGameHUD::handleMouseDown(S32 x, S32 y, MASK mask)
         case H_PANEL_BG:
             gSavedSettings.setBOOL("WolfGameHudBackground", !gSavedSettings.getBOOL("WolfGameHudBackground"));
             break;
+        case H_INVENTORY:
+            WolfHud::toggleInventory();   // [HUD INVENTORY 2026-10-12/]
+            break;
         case H_GAMEMODE_SW:
             // The same command as World > Game Mode and the console's switch (llviewermenu.cpp
             // WolfGame.ToggleGameMode), so its refusals say why; a forced region refuses it there.
@@ -1567,6 +1571,7 @@ bool WolfGameHUD::handleHover(S32 x, S32 y, MASK mask)
         {
         case H_ACTION: case H_CAST_CANCEL: case H_TARGET_CLEAR: case H_WEAPON: case H_PORTRAIT: case H_ORB:
         case H_BAG: case H_WALLET: case H_PAGE: case H_PANEL_BG: case H_GUIDE_OK: case H_GUIDE_HELP: case H_GAMEMODE_SW:
+        case H_INVENTORY:
             clickable = true;
             break;
         default: break;
@@ -2014,6 +2019,8 @@ void WolfGameHUD::drawBottomHud(const LLRect& r)
         { "Game",      WolfGameConsole::PAGE_GAME,   "This game: who runs it, the rules, Leave this game" },
         { "Look",      WolfGameConsole::PAGE_LOOK,   "The Roleplay window's background picture" },
         { "Help",      WolfGameConsole::PAGE_HELP,   "How to play, and the credits" },
+        // [HUD INVENTORY 2026-10-12] Paul: "add an inventory button to every hud"
+        { "Inventory", -3,                           "" },
         { "Panel",     -1,                           "" },
         // Paul 2026-10-09: "add a game on off button on the panel to show whether it's on or off"
         { "Game Mode", -2,                           "" },
@@ -2032,10 +2039,12 @@ void WolfGameHUD::drawBottomHud(const LLRect& r)
         const F32 l = tx - w;
         const bool sw = t.page == -2;
         const bool panel = t.page == -1;
+        const bool inv = t.page == -3;
         const bool mode_on = g.gameModeShownOn();
-        const S32 id = sw ? H_GAMEMODE_SW : panel ? H_PANEL_BG : H_PAGE;
+        const S32 id = sw ? H_GAMEMODE_SW : panel ? H_PANEL_BG : inv ? H_INVENTORY : H_PAGE;
         const bool hover = mCombatHits.isHover(id, t.page);
-        const bool active = sw ? mode_on : panel ? (bool)show_bg : WolfFloaterRoleplay::showingPage((WolfGameConsole::EPage)t.page);
+        const bool active = sw ? mode_on : panel ? (bool)show_bg : inv ? WolfHud::inventoryOpen()
+                                                                       : WolfFloaterRoleplay::showingPage((WolfGameConsole::EPage)t.page);
         tabShape(l, top, tx, top + th, tcut, p, hover, (!panel || sw) && active);
         // PANEL off: the word dims and the tooltip says so (never colour alone)
         textL(tf, label, (l + tx) * 0.5f, top + th * 0.5f, panel && !active ? p.mDim : (hover || active ? p.mAccent : p.mText),
@@ -2044,6 +2053,7 @@ void WolfGameHUD::drawBottomHud(const LLRect& r)
         if (sw) tip = g.forced() ? "Game Mode: LOCKED ON - " + g.forcedText()
                                  : (active ? "Game Mode: ON - click to switch it off (the game HUD goes)" : "Game Mode: OFF - click to switch it on");
         else if (panel) tip = show_bg ? "Panel: on - click to hide the panel behind the HUD (the pieces stay)" : "Panel: off - click to show the panel behind the HUD";
+        else if (inv) tip = WolfHud::inventoryTip();
         else tip += active ? "\nOpen now - click to close it" : "\nOpens the Roleplay window on this page";
         mCombatHits.add(l, top, tx, top + th, id, t.page, tip);
         tx = l - floorf(0.08f * S);

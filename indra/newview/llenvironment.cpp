@@ -70,6 +70,7 @@
 #include "llviewernetwork.h"
 #include "llhttpnode.h"   // <WolfViewer 2026-10-08/> WindLightRefresh
 #include "wolfgrid.h"
+#include "wolfenvironmentrender.h"   // [WolfViewer round 15] one sun and moon under the native sky
 
 //=========================================================================
 namespace
@@ -835,6 +836,13 @@ namespace
     F64 sWolfPendingTransition = 0.0;
     F64 sWolfPendingTransitionAt = -1000.0;
 
+    // <WolfViewer 2026-10-13> a teleport arrival: instant, and a weather fade sent just before is not carried into it
+    LLSettingsBase::Seconds wolf_arrival_transition()
+    {
+        sWolfPendingTransition = 0.0;
+        return LLSettingsBase::Seconds(0.0);
+    }
+
     LLSettingsBase::Seconds wolf_region_transition(LLSettingsBase::Seconds dflt)
     {
         if (sWolfPendingTransition > 0.0
@@ -1061,6 +1069,9 @@ bool LLEnvironment::canEdit() const
 
 LLSettingsSky::ptr_t LLEnvironment::getCurrentSky() const
 {
+    // <WolfViewer 2026-10-13> crash 11:46 BST (coredump: getCurrentWater <- WolfBoatRock::seaNow during a region
+    // crossing, "environment is not properly set"): mCurrentEnvironment can be empty mid-crossing
+    if (!mCurrentEnvironment) return LLSettingsSky::ptr_t();
     LLSettingsSky::ptr_t psky = mCurrentEnvironment->getSky();
 
     if (!psky && mCurrentEnvironment->getEnvironmentSelection() >= ENV_EDIT)
@@ -1079,6 +1090,7 @@ LLSettingsSky::ptr_t LLEnvironment::getCurrentSky() const
 
 LLSettingsWater::ptr_t LLEnvironment::getCurrentWater() const
 {
+    if (!mCurrentEnvironment) return LLSettingsWater::ptr_t();   // <WolfViewer 2026-10-13/> see getCurrentSky
     LLSettingsWater::ptr_t pwater = mCurrentEnvironment->getWater();
 
     if (!pwater && mCurrentEnvironment->getEnvironmentSelection() >= ENV_EDIT)
@@ -1139,8 +1151,19 @@ bool LLEnvironment::isInventoryEnabled() const
            !gAgent.getRegionCapability("UpdateSettingsTaskInventory").empty();
 }
 
+// <WolfViewer 2026-10-13> Paul: "I'd rather you tp to the new region and get the new environment, not fading". A teleport
+// arrival applies the new region's sky at once; a pending Wolf weather fade (wolf_region_transition) is for weather that
+// changes while the avatar stays, not for arriving.
+namespace
+{
+    F64 sWolfTeleportArrivalAt = -1000.0;
+    // the region and parcel fetches that follow a teleport (capabilities can come seconds after the arrival)
+    bool wolf_in_teleport_arrival() { return LLFrameTimer::getElapsedSeconds() - sWolfTeleportArrivalAt < 15.0; }
+}
+
 void LLEnvironment::onRegionChange()
 {
+    if (LLViewerParcelMgr::getInstance()->getTeleportInProgress()) sWolfTeleportArrivalAt = LLFrameTimer::getElapsedSeconds();
 //     if (gAgent.getRegionCapability("ExperienceQuery").empty())
 //     {
 //     // for now environmental experiences do not survive region crossings
@@ -1196,14 +1219,29 @@ F32 LLEnvironment::getWaterHeight() const
     return cur_region ? cur_region->getWaterHeight() : DEFAULT_WATER_HEIGHT;
 }
 
+// [WolfViewer 2026-10-13 round 15] Paul: night "completely black" with the meter exposing for 33 klux. Under the native sky the
+// renderer's sun and moon (WolfEnvironmentRender::bodyDirections, from the document: the EEP's in REAL mode, its own when
+// FIXED / ORBIT) are THE sun and moon - for the scene's light direction and sun shadows (pipeline.cpp mSunDir, LIGHTNORM),
+// the meter, the dome and the aurora alike. Before, LL's light and shadows came from the EEP sky here while the native sky
+// lit and metered by the document's bodies: two suns whenever they differ.
+namespace
+{
+    bool wolfNativeBodies(LLVector3& sun, LLVector3& moon)
+    {
+        return WolfEnvironmentRender::skyActive() && WolfEnvironmentRender::bodyDirections(sun, moon);
+    }
+}
+
 bool LLEnvironment::getIsSunUp() const
 {
+    { LLVector3 s, m; if (wolfNativeBodies(s, m)) return s.mV[2] >= 0.0f; }   // llsettingssky.cpp:1324-1328's rule
     auto sky = mCurrentEnvironment ? mCurrentEnvironment->getSky() : nullptr;
     return sky && sky->getIsSunUp();
 }
 
 bool LLEnvironment::getIsMoonUp() const
 {
+    { LLVector3 s, m; if (wolfNativeBodies(s, m)) return m.mV[2] >= 0.0f; }   // llsettingssky.cpp:1330-1334's rule
     auto sky = mCurrentEnvironment ? mCurrentEnvironment->getSky() : nullptr;
     return sky && sky->getIsMoonUp();
 }
@@ -1575,6 +1613,24 @@ LLSettingsDay::Seconds LLEnvironment::getEnvironmentDayOffset(EnvSelection_t env
     return LLSettingsDay::Seconds(0);
 }
 
+// [WOLF BUILDER 2026-10-13] see llenvironment.h. Source: the getEnvironmentDay* getters above - the same
+// range check and the same instance lookup; DayInstance::getFlags (llenvironment.h) is the value.
+U32 LLEnvironment::getEnvironmentAnimateFlags(EnvSelection_t env)
+{
+    if ((env < ENV_EDIT) || (env > ENV_DEFAULT))
+    {
+        LL_WARNS("ENVIRONMENT") << "Attempt to retrieve invalid environment selection (" << env_selection_to_string(env) << ")." << LL_ENDL;
+        return 0;
+    }
+
+    if (DayInstance::ptr_t environment = getEnvironmentInstance(env))
+    {
+        return environment->getFlags();
+    }
+
+    return 0;
+}
+
 
 LLEnvironment::fixedEnvironment_t LLEnvironment::getEnvironmentFixed(LLEnvironment::EnvSelection_t env, bool resolve)
 {
@@ -1717,6 +1773,11 @@ LLVector4 LLEnvironment::toLightNorm(const LLVector3 vec) const
 
 LLVector3 LLEnvironment::getLightDirection() const
 {
+    {
+        // llsettingssky.cpp:1353-1370 getLightDirection's rule on the native bodies: the sun if up, else the moon if up
+        LLVector3 s, m;
+        if (wolfNativeBodies(s, m)) return s.mV[2] >= 0.0f ? s : (m.mV[2] >= 0.0f ? m : LLVector3::z_axis_neg);
+    }
     LLSettingsSky::ptr_t psky = mCurrentEnvironment->getSky();
     if (!psky)
     {
@@ -1727,6 +1788,7 @@ LLVector3 LLEnvironment::getLightDirection() const
 
 LLVector3 LLEnvironment::getSunDirection() const
 {
+    { LLVector3 s, m; if (wolfNativeBodies(s, m)) return s; }
     LLSettingsSky::ptr_t psky = mCurrentEnvironment->getSky();
     if (!psky)
     {
@@ -1737,6 +1799,7 @@ LLVector3 LLEnvironment::getSunDirection() const
 
 LLVector3 LLEnvironment::getMoonDirection() const
 {
+    { LLVector3 s, m; if (wolfNativeBodies(s, m)) return m; }
     LLSettingsSky::ptr_t psky = mCurrentEnvironment->getSky();
     if (!psky)
     {
@@ -2066,10 +2129,11 @@ void LLEnvironment::requestParcel(S32 parcel_id, environment_apply_fn cb)
             if (!cb)
             {
                 LLSettingsBase::Seconds transition = LLViewerParcelMgr::getInstance()->getTeleportInProgress() ? TRANSITION_FAST : TRANSITION_DEFAULT;
-                cb = [this, transition](S32 pid, EnvironmentInfo::ptr_t envinfo)
+                const bool arrival = wolf_in_teleport_arrival();   // <WolfViewer 2026-10-13/>
+                cb = [this, transition, arrival](S32 pid, EnvironmentInfo::ptr_t envinfo)
                 {
                     clearEnvironment(ENV_PARCEL);
-                    recordEnvironment(pid, envinfo, wolf_region_transition(transition));   // <WolfViewer 2026-10-08/>
+                    recordEnvironment(pid, envinfo, arrival ? wolf_arrival_transition() : wolf_region_transition(transition));   // <WolfViewer 2026-10-08/>
                 };
             }
 
@@ -2087,7 +2151,8 @@ void LLEnvironment::requestParcel(S32 parcel_id, environment_apply_fn cb)
     {
         LLSettingsBase::Seconds transition = LLViewerParcelMgr::getInstance()->getTeleportInProgress() ? TRANSITION_FAST : TRANSITION_DEFAULT;
         // <WolfViewer 2026-10-08/> the script's own fade when WolfSim sent one (wolf_region_transition)
-        cb = [this, transition](S32 pid, EnvironmentInfo::ptr_t envinfo) { recordEnvironment(pid, envinfo, wolf_region_transition(transition)); };
+        const bool arrival = wolf_in_teleport_arrival();   // <WolfViewer 2026-10-13/> a teleport arrival: the new sky at once
+        cb = [this, transition, arrival](S32 pid, EnvironmentInfo::ptr_t envinfo) { recordEnvironment(pid, envinfo, arrival ? wolf_arrival_transition() : wolf_region_transition(transition)); };
     }
 
     LLCoros::instance().launch("LLEnvironment::coroRequestEnvironment",

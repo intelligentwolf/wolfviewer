@@ -123,13 +123,15 @@
   <!-- WolfViewer 2026-09-18: the aurora's colour (WolfWeatherProfile::mAuroraColor), beside Reset -
        the only 20 px of free width left in the column. -->
   <combo_box layout="topleft" follows="left|top" height="20" left_pad="8" top_delta="0" width="120" name="weather_aurora_color"
-             tool_tip="Northern Lights colour. Green is what the sky usually shows; Multi-coloured cycles through all of them.">
-    <combo_box.item label="Green" value="green" />
+             tool_tip="Northern Lights colour. Green (natural) is the real light of the aurora, seen as the eye sees it. Real sky follows tonight's live space weather (NOAA SWPC) at the region's real place and ignores the slider. The others are your own colours.">
+    <combo_box.item label="Green (natural)" value="green" />
     <combo_box.item label="Red" value="red" />
     <combo_box.item label="Purple" value="purple" />
     <combo_box.item label="Blue" value="blue" />
     <combo_box.item label="Pink" value="pink" />
     <combo_box.item label="Multi-coloured" value="multi" />
+    <!-- WolfViewer 2026-10-12 [WOLF AURORA]: the live aurora at the region's real place -->
+    <combo_box.item label="Real sky (live)" value="real" />
   </combo_box>
   <!-- WolfViewer 2026-09-18: fog (WolfWeatherProfile::mFog, 0..100), independent of the weather
        type. The right column is the only one with room: Reset ends at 274, the status text starts

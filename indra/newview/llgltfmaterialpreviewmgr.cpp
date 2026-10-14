@@ -26,6 +26,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "llgltfmaterialpreviewmgr.h"
+#include "wolfenvironmentrender.h"   // [WOLF ENV TAKRAM 2026-10-12]
 
 #include <memory>
 #include <vector>
@@ -504,6 +505,7 @@ bool LLGLTFPreviewTexture::render()
 
         LLGLSLShader& shader = gDeferredPBRAlphaProgram;
 
+        WolfEnvironmentRender::ScopedScenePreview wolf_preview;   // [WOLF ENV TAKRAM 2026-10-12] no world cloud shadow on the preview
         gPipeline.bindDeferredShader(shader);
         fixup_shader_constants(shader);
 

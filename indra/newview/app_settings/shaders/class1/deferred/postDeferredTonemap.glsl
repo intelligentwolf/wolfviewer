@@ -50,22 +50,36 @@ vec3 legacyGamma(vec3 color)
 }
 #endif
 
+// [WOLF ENV TAKRAM 2026-10-12] Under the native Wolf sky (wolf_phys) the frame is pre-exposed luminance
+// (Filament's physically based camera, WolfExposure: exposure compensation from RenderExposure is already in
+// its EV100), so it is tone mapped with Filament's AgX (wolftk/filamentAgx.glsl: Rec.2020 grading space,
+// AgX, back to sRGB, clamped) and then takes the sRGB OETF below like every other frame.
+uniform float wolf_phys;
+#wolf_include "wolftk/filamentAgx.glsl"
+
 void main()
 {
     //this is the one of the rare spots where diffuseRect contains linear color values (not sRGB)
     vec4 diff = texture(diffuseRect, vary_fragcoord);
 
+    if (wolf_phys > 0.5)
+    {
+        diff.rgb = wolfFilamentAgx(diff.rgb);
+    }
+    else
+    {
 #ifndef NO_POST
     diff.rgb = toneMap(diff.rgb);
 #else
     diff.rgb = clamp(diff.rgb, vec3(0.0), vec3(1.0));
 #endif
+    }
 
 #ifdef GAMMA_CORRECT
     diff.rgb = linear_to_srgb(diff.rgb);
 
 #ifdef LEGACY_GAMMA
-    diff.rgb = legacyGamma(diff.rgb);
+    if (wolf_phys < 0.5) diff.rgb = legacyGamma(diff.rgb);
 #endif
 
 #endif

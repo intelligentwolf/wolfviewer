@@ -52,6 +52,19 @@ vec4 applySkyAndWaterFog(vec3 pos, vec3 additive, vec3 atten, vec4 color);
 
 void mirrorClip(vec3 pos);
 
+// [WOLF ENV 2026-10-12 physical] Under the Wolf Environment's physical sky a fullbright surface is a light
+// source of its own: its colour x the luminance of a lit display, 300 cd/m2 (an LCD monitor's typical
+// brightness), x the frame's pre-exposure (WolfEnvironmentRender: wolf_fullbright). HUDs are untouched.
+uniform float wolf_phys;
+uniform float wolf_fullbright;
+// [WOLF ENV TAKRAM 2026-10-12] wolftk/atmosphereLibF.glsl, linked as a second unit when WOLF_TK_LIB is defined
+// (llviewershadermgr.cpp wolf_tk_attach): three-geospatial's aerial perspective (aerialPerspectiveEffect.frag
+// applyTransmittanceInscatter) and the clouds' Beer-shadow-map transmittance (:354-358), at an eye-space position.
+#ifdef WOLF_TK_LIB
+vec3 wolfTkAerialPerspective(vec3 eyePos, vec3 radiance);
+float wolfTkCloudShadow(vec3 eyePos);
+#endif
+
 void main()
 {
     mirrorClip(vary_position);
@@ -81,6 +94,7 @@ void main()
     color.a = final_alpha;
 #ifndef IS_HUD
     color.rgb = srgb_to_linear(color.rgb);
+    if (wolf_phys > 0.5) color.rgb *= wolf_fullbright;
 #ifdef IS_ALPHA
 
     vec3 sunlit;
@@ -90,6 +104,11 @@ void main()
     calcAtmosphericVars(pos.xyz, vec3(0), 1.0, sunlit, amblit, additive, atten);
 
     color.rgb = applySkyAndWaterFog(pos, additive, atten, color).rgb;
+#ifdef WOLF_TK_LIB
+    // [WOLF ENV TAKRAM 2026-10-12] decision D14: the aerial perspective on a transparent surface, as the composite gives the
+    // opaque frame (aerialPerspectiveEffect.frag:381-383); the blend (SRC_ALPHA, ONE_MINUS_SRC_ALPHA) then lays it over that
+    if (wolf_phys > 0.5 && wolf_phys < 1.5) color.rgb = wolfTkAerialPerspective(pos, color.rgb);
+#endif
 
 #endif
 

@@ -66,6 +66,8 @@ uniform mat4 inv_proj;
 
 void calcHalfVectors(vec3 lv, vec3 n, vec3 v, out vec3 h, out vec3 l, out float nh, out float nl, out float nv, out float vh, out float lightDist);
 float calcLegacyDistanceAttenuation(float distance, float falloff);
+uniform float wolf_phys;
+float wolfPunctualAtten(float d, float r);
 bool clipProjectedLightVars(vec3 center, vec3 pos, out float dist, out float l_dist, out vec3 lv, out vec4 proj_tc );
 vec4 getNorm(vec2 screenpos);
 vec3 getProjectedLightAmbiance(float amb_da, float attenuation, float lit, float nl, float noise, vec2 projected_uv);
@@ -135,6 +137,10 @@ void main()
     vec3  h, l, v = -normalize(pos);
     float nh, nl, nv, vh, lightDist;
     calcHalfVectors(lv, n, v, h, l, nh, nl, nv, vh, lightDist);
+    // [WOLF ENV 2026-10-12 physical] deferredUtil.glsl wolfPunctualAtten (candela -> lux); no balance
+    // factors; Lambert's 1 / pi for the legacy (non-PBR) materials
+    float pbrK = 3.25, legK = 1.0;
+    // [WolfViewer 2026-10-13] LL lights keep LL's own falloff under the native sky (WolfEnvironmentRender::physicalLightColor)
 
     vec3 diffuse = gb.albedo.rgb;
     vec4 spec    = gb.specular;
@@ -173,14 +179,14 @@ void main()
 
                 dlit = getProjectedLightDiffuseColor( l_dist, proj_tc.xy );
 
-                vec3 intensity = dist_atten * dlit * 3.25 * shadow; // Legacy attenuation, magic number to balance with legacy materials
+                vec3 intensity = dist_atten * dlit * pbrK * shadow; // Legacy attenuation, magic number to balance with legacy materials
 
                 pbrPunctual(diffuseColor, specularColor, perceptualRoughness, metallic, n.xyz, v, normalize(lv), nl, diffPunc, specPunc);
 
                 final_color += intensity * clamp(nl * (diffPunc + specPunc), vec3(0), vec3(10));
             }
 
-            amb_rgb = getProjectedLightAmbiance( amb_da, dist_atten, lit, nl, 1.0, proj_tc.xy ) * 3.25; //magic number to balance with legacy ambiance
+            amb_rgb = getProjectedLightAmbiance( amb_da, dist_atten, lit, nl, 1.0, proj_tc.xy ) * pbrK; //magic number to balance with legacy ambiance
             pbrPunctual(diffuseColor, specularColor, perceptualRoughness, metallic, n.xyz, v, normalize(lv), nl, diffPunc, specPunc);
 
             final_color += amb_rgb * clamp(nl * (diffPunc + specPunc), vec3(0), vec3(10));
@@ -204,7 +210,7 @@ void main()
 
             if (nl > 0.0)
             {
-                lit = nl * dist_atten;
+                lit = nl * dist_atten * legK;
 
                 dlit = getProjectedLightDiffuseColor( l_dist, proj_tc.xy );
 
@@ -220,7 +226,7 @@ void main()
 
         if (spec.a > 0.0)
         {
-            dlit *= min(nl*6.0, 1.0) * dist_atten;
+            dlit *= min(nl*6.0, 1.0) * dist_atten * legK;
 
             float fres = pow(1 - vh, 5)*0.4+0.5;
 

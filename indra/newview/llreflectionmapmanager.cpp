@@ -131,6 +131,12 @@ static U32 sUpdateCount = 0;
 //defined in llvertexbuffer.cpp
 extern U32 nhpo2(U32 v);
 
+// [WOLF ENV TAKRAM 2026-10-12] (WolfEnvironmentRender::renderSkyDome)
+bool LLReflectionMapManager::defaultProbeReady() const
+{
+    return mTexture.notNull() && mDefaultProbe.notNull() && mDefaultProbe->mComplete;
+}
+
 static void touch_default_probe(LLReflectionMap* probe)
 {
     if (LLViewerCamera::getInstance())

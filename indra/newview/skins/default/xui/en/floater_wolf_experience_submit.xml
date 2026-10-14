@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WolfViewer 2026-10-14] Wolf Experiences builder tools (wolffloaterexperiences.cpp
+     WolfFloaterExperienceSubmit; contract wolfstorm/tools/EXPERIENCES_V1.md "Builder tools - Add your
+     experience (v1.1)"). Opened by "Add your experience" in the Wolf Experiences window.
+     Three sections switched by sec_add / sec_mine / sec_review along the top; the code shows the
+     controls whose names start add_, mine_ or review_ for the section in use. sec_review stays hidden
+     unless the site answers GET ?review=1 (admins). Every control sits straight on the floater so
+     Escape closes it. Fixed size: every section fits; the lists scroll. -->
+<floater
+ can_close="true"
+ can_minimize="true"
+ can_resize="false"
+ height="508"
+ layout="topleft"
+ name="wolf_experience_submit"
+ help_topic="wolf_experience_submit"
+ save_rect="true"
+ single_instance="true"
+ title="Add your experience"
+ width="520">
+    <button follows="left|top" height="24" is_toggle="true" label="Add" layout="topleft" left="12" name="sec_add" top="26" width="70"
+     tool_tip="Fill in a card for a place you made." />
+    <button follows="left|top" height="24" is_toggle="true" label="My experiences" layout="topleft" left="86" name="sec_mine" top="26" width="130"
+     tool_tip="The experiences you sent: waiting, live or not approved." />
+    <button follows="left|top" height="24" is_toggle="true" label="Waiting for review" layout="topleft" left="220" name="sec_review" top="26" visible="false" width="190"
+     tool_tip="Grid admins: experiences residents sent, to visit and approve or reject." />
+
+    <!-- ===== Add ===== -->
+    <text follows="left|top" height="32" layout="topleft" left="12" name="add_intro" top="58" width="496" wrap="true">Stand where people should arrive and fill in the card. A grid admin checks it before new residents see it in Wolf Experiences.</text>
+
+    <text follows="left|top" height="16" layout="topleft" left="12" name="add_region_lbl" top="98" width="118">Region</text>
+    <line_editor follows="left|top" height="20" layout="topleft" left="134" max_length_chars="64" name="add_region" top="96" width="374"
+     tool_tip="The region where people arrive, exactly as the grid names it." />
+
+    <text follows="left|top" height="16" layout="topleft" left="12" name="add_pos_lbl" top="124" width="118">Arrive at</text>
+    <spinner follows="left|top" height="20" label="X" label_width="14" layout="topleft" left="134" name="add_x" top="122" width="80"
+     min_val="0" max_val="256" increment="1" initial_value="128" decimal_digits="1" tool_tip="East-west position in the region, metres." />
+    <spinner follows="left|top" height="20" label="Y" label_width="14" layout="topleft" left="218" name="add_y" top="122" width="80"
+     min_val="0" max_val="256" increment="1" initial_value="128" decimal_digits="1" tool_tip="North-south position in the region, metres." />
+    <spinner follows="left|top" height="20" label="Z" label_width="14" layout="topleft" left="302" name="add_z" top="122" width="80"
+     min_val="0" max_val="4096" increment="1" initial_value="0" decimal_digits="1" tool_tip="Height, metres. 0 = on the ground." />
+    <button follows="left|top" height="22" label="Use where I stand" layout="topleft" left="388" name="add_here" top="121" width="120"
+     tool_tip="Fill in the region, position and parcel picture from where you stand now." />
+
+    <text follows="left|top" height="16" layout="topleft" left="12" name="add_title_lbl" top="152" width="118">What will people do?</text>
+    <line_editor follows="left|top" height="20" layout="topleft" left="134" max_length_chars="40" name="add_title" top="150" width="374"
+     tool_tip="The card's title: an activity, up to 40 characters." />
+    <text follows="left|top" font="SansSerifSmall" height="16" layout="topleft" left="134" name="add_title_hint" text_color="LtGray_50" top="172" width="374">An activity, e.g. "Ride the coast train" (up to 40 characters).</text>
+
+    <text follows="left|top" height="16" layout="topleft" left="12" name="add_blurb_lbl" top="196" width="118">Description</text>
+    <line_editor follows="left|top" height="20" layout="topleft" left="134" max_length_chars="140" name="add_blurb" top="194" width="374"
+     tool_tip="One sentence about it, up to 140 characters." />
+    <text follows="left|top" font="SansSerifSmall" height="16" layout="topleft" left="134" name="add_blurb_hint" text_color="LtGray_50" top="216" width="374">One sentence about it (up to 140 characters).</text>
+
+    <text follows="left|top" height="16" layout="topleft" left="12" name="add_arrive_lbl" top="240" width="118">When you arrive</text>
+    <line_editor follows="left|top" height="20" layout="topleft" left="134" max_length_chars="140" name="add_arrive" top="238" width="374"
+     tool_tip="Shown to people when they land: the first thing to do, up to 140 characters." />
+    <text follows="left|top" font="SansSerifSmall" height="16" layout="topleft" left="134" name="add_arrive_hint" text_color="LtGray_50" top="260" width="374">The first thing to do, e.g. "Take a seat at gate 1" (up to 140).</text>
+
+    <text follows="left|top" height="16" layout="topleft" left="12" name="add_category_lbl" top="288" width="118">Category</text>
+    <combo_box follows="left|top" height="20" layout="topleft" left="134" name="add_category" top="286" width="200"
+     tool_tip="Where it is listed in Wolf Experiences." />
+
+    <text follows="left|top" height="16" layout="topleft" left="12" name="add_picture_lbl" top="318" width="118">Picture</text>
+    <texture_picker follows="left|top" height="112" layout="topleft" left="134" name="add_picture" top="316" width="128"
+     allow_no_texture="true" can_apply_immediately="false"
+     tool_tip="The card's picture. Click to choose another." />
+    <text follows="left|top" height="64" layout="topleft" left="272" name="add_picture_hint" text_color="LtGray_50" top="318" width="236" wrap="true">Starts as this parcel's snapshot. Click the picture to choose another; None shows the category's icon. Or upload your own:</text>
+    <!-- [WolfViewer 2026-10-14] Paul: "users should be able to upload their own texture for experiences".
+         The standard texture upload (into Textures); the picture becomes the new texture when it is done. -->
+    <button follows="left|top" height="22" label="Upload a picture&#8230;" layout="topleft" left="272" name="add_upload" top="392" width="160"
+     tool_tip="Upload an image from your computer (PNG, JPEG, TGA or BMP) as the card's picture. It is saved in your Textures folder; the grid's usual upload fee applies." />
+
+    <text follows="left|top" height="32" layout="topleft" left="12" name="add_status" top="436" width="496" wrap="true" />
+
+    <button follows="left|top" height="24" label="Cancel" layout="topleft" left="274" name="add_cancel" top="474" width="96"
+     tool_tip="Close without sending. What you typed is kept for next time." />
+    <button follows="left|top" height="24" label="Submit for review" layout="topleft" left="378" name="add_submit" top="474" width="130"
+     tool_tip="Send the card to the grid admins. You can follow it under My experiences." />
+
+    <!-- ===== My experiences ===== -->
+    <scroll_list follows="left|top" height="230" layout="topleft" left="12" name="mine_list" top="58" width="496"
+     commit_on_selection_change="true" draw_heading="true" multi_select="false" tool_tip="The experiences you sent">
+        <scroll_list.columns label="Experience" name="title" width="250" />
+        <scroll_list.columns label="Status" name="status" width="242" />
+    </scroll_list>
+    <text follows="left|top" height="80" layout="topleft" left="12" name="mine_detail" top="296" width="496" wrap="true" />
+    <text follows="left|top" height="40" layout="topleft" left="12" name="mine_status" top="384" width="496" wrap="true" />
+    <button follows="left|top" height="24" label="Refresh" layout="topleft" left="12" name="mine_refresh" top="474" width="96"
+     tool_tip="Ask the grid for your experiences' status again." />
+    <button follows="left|top" height="24" label="Withdraw" layout="topleft" left="378" name="mine_withdraw" top="474" width="130"
+     tool_tip="Take the chosen experience out of review, or out of Wolf Experiences if it is live." />
+
+    <!-- ===== Waiting for review (admins) ===== -->
+    <scroll_list follows="left|top" height="160" layout="topleft" left="12" name="review_list" top="58" width="496"
+     commit_on_selection_change="true" draw_heading="true" multi_select="false" tool_tip="Experiences waiting for review">
+        <scroll_list.columns label="Experience" name="title" width="200" />
+        <scroll_list.columns label="By" name="by" width="140" />
+        <scroll_list.columns label="Region" name="region" width="152" />
+    </scroll_list>
+    <icon follows="left|top" height="96" layout="topleft" left="12" mouse_opaque="false" name="review_picture" scale_image="true" top="226" visible="false" width="128" />
+    <text follows="left|top" height="112" layout="topleft" left="148" name="review_detail" parse_urls="false" top="226" width="360" wrap="true" />
+    <text follows="left|top" height="16" layout="topleft" left="12" name="review_note_lbl" top="346" width="132">Note to the builder</text>
+    <line_editor follows="left|top" height="20" layout="topleft" left="148" max_length_chars="200" name="review_note" top="344" width="360"
+     tool_tip="Optional. The builder sees it under My experiences - say why when you reject." />
+    <text follows="left|top" height="40" layout="topleft" left="12" name="review_status" top="376" width="496" wrap="true" />
+    <button follows="left|top" height="24" label="Refresh" layout="topleft" left="12" name="review_refresh" top="474" width="80"
+     tool_tip="Ask the grid for the waiting list again." />
+    <button follows="left|top" height="24" label="Go" layout="topleft" left="96" name="review_go" top="474" width="80"
+     tool_tip="Teleport to the chosen experience to see it before deciding." />
+    <button follows="left|top" height="24" label="Reject" layout="topleft" left="268" name="review_reject" top="474" width="100"
+     tool_tip="Do not show it. Your note goes to the builder." />
+    <button follows="left|top" height="24" label="Approve" layout="topleft" left="378" name="review_approve" top="474" width="130"
+     tool_tip="Show it in Wolf Experiences now." />
+</floater>

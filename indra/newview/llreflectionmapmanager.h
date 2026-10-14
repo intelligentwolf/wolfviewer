@@ -163,6 +163,9 @@ public:
     U32 probeCount();
     U32 probeMemory();
 
+    // [WOLF ENV TAKRAM 2026-10-12] the default probe (cube index 0) has been rendered: the native sky's sea mirrors it
+    bool defaultProbeReady() const;
+
 private:
     friend class LLPipeline;
     friend class LLHeroProbeManager;

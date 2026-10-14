@@ -30,6 +30,8 @@
 #include "wolfwaterfield.h"
 #include "wolfwavezones.h"
 #include "llsettingsvo.h"   // wolfLitWaterFogColor
+#include "wolfenvironmentrender.h"
+#include "v3colorutil.h"   // componentMult
 
 #include <cmath>
 #include <map>
@@ -371,8 +373,26 @@ void WolfSurfCurl::render(F32 surf_h, F32 surf_set, F32 surf_len, F32 phase_time
     sh.uniform1f(s_surf_path_k0, fld->mSurfK0);
     sh.uniform2f(s_region_origin, origin.mV[VX], origin.mV[VY]);
     // The sea's fog colour and the sun, in linear light like waterF.glsl's own terms.
-    const LLColor3 fog_linear = linearColor3(LLSettingsVOWater::wolfLitWaterFogColor());   // <WolfViewer 2026-10-05/> lit, as waterF's fog
-    const LLColor3 sun_linear = linearColor3(light_diffuse);
+    LLColor3 fog_linear = linearColor3(LLSettingsVOWater::wolfLitWaterFogColor());   // <WolfViewer 2026-10-05/> lit, as waterF's fog
+    LLColor3 sun_linear = linearColor3(light_diffuse);
+    if (WolfEnvironmentRender::skyActive())
+    {
+        // [WOLF ENV 2026-10-12 physical] the frame is pre-exposed luminance: the sea's body colour lit by the
+        // light on the water (as waterFogF.glsl, wolf_light_h) and the sun as the scene shaders take it
+        // (wolf_sunlit), not the EEP's display-unit colours
+        fog_linear = componentMult(fog_linear, WolfEnvironmentRender::sceneLightH());
+        sun_linear = WolfEnvironmentRender::sceneSunlit();
+    }
+    // [WOLF ENV TAKRAM 2026-10-12] the native sky's switch, the light on the water and the atmosphere / cloud shadow
+    // (wolfsurfcurlF.glsl)
+    {
+        static LLStaticHashedString s_lh("curlLightH");
+        const bool phys = WolfEnvironmentRender::skyActive();
+        sh.uniform1f(LLShaderMgr::WOLF_PHYS, phys ? 1.f : 0.f);
+        const LLColor3 lh = phys ? WolfEnvironmentRender::sceneLightH() : LLColor3::white;
+        sh.uniform3fv(s_lh, 1, lh.mV);
+        if (phys) WolfEnvironmentRender::bindSceneUniforms(sh);
+    }
     sh.uniform3fv(s_water_color, 1, fog_linear.mV);
     sh.uniform3fv(s_sun_color, 1, sun_linear.mV);
     sh.uniform3fv(LLShaderMgr::WATER_LIGHT_DIR, 1, light_dir.mV);

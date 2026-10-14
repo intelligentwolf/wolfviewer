@@ -1,0 +1,285 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLF ENV 2026-10-12] World > Wolf World > Wolf Environment. Code: wolffloaterenvironment.cpp.
+     Service: wolfstorm php/wolf_environment.php (format: php/wolf_env_lib.php). Our own layout (Paul
+     10-03: new features do not copy Firestorm's look): what to change on the left, the value on the
+     right, one spacing grid of 4 px rows of 24, the scope above the tabs and the one primary action
+     (Save for everyone) bottom right, away from Remove at the bottom left.
+     Basics is what most owners need; Sky and Suns & moons are the advanced section for fantasy and
+     alien skies; Zones are local areas. -->
+<floater
+ legacy_header_height="18"
+ can_resize="false"
+ height="744"
+ layout="topleft"
+ name="wolf_environment"
+ help_topic="wolf_environment"
+ save_rect="true"
+ single_instance="true"
+ title="Wolf Environment (Experimental)"
+ width="520">
+  <floater.string name="str_loading">Reading this region's Wolf Environment...</floater.string>
+  <floater.string name="str_read_failed">Could not read the Wolf Environment:</floater.string>
+  <floater.string name="str_unsaved">Changed. Preview it, or Save for everyone.</floater.string>
+  <floater.string name="str_saving">Saving...</floater.string>
+  <floater.string name="str_saved">Saved. The sky changes for everyone in the region within a minute.</floater.string>
+  <floater.string name="str_removed">Removed. The sky goes back to what it was before within a minute.</floater.string>
+  <floater.string name="str_save_failed">Could not save:</floater.string>
+  <floater.string name="str_conflict">Someone else changed these settings, so they have been reloaded. Your changes are still shown: press Save again to keep them.</floater.string>
+  <floater.string name="str_fix">Some settings need fixing (marked in red):</floater.string>
+  <floater.string name="str_previewing">Preview: only you see this sky. Save for everyone to keep it, or Stop preview.</floater.string>
+  <floater.string name="str_preview_failed">Could not preview:</floater.string>
+  <floater.string name="str_preview_no_cap">This region cannot preview yet (it has not got the Wolf Environment update). You can still save.</floater.string>
+  <floater.string name="str_can_region">You can change this region's Wolf Environment.</floater.string>
+  <floater.string name="str_can_parcel">You can change this parcel's Wolf Environment.</floater.string>
+  <floater.string name="str_cannot_region">Only the region's owner, its estate owner or an estate manager can change the region's Wolf Environment. You are seeing it read-only.</floater.string>
+  <floater.string name="str_cannot_parcel">Only this parcel's owner (or, on group land, a member allowed to change the environment) can change it. You are seeing it read-only.</floater.string>
+  <floater.string name="str_no_parcel_env">This estate does not show parcel environments, so a parcel's Wolf Environment (and area zones) will not be seen until "Allow parcel environment override" is on (Region / Estate > Environment).</floater.string>
+  <floater.string name="str_none_yet">Nothing set here yet: these are the starting settings. Save to switch it on.</floater.string>
+  <floater.string name="str_search_short">Type at least two letters of a place name.</floater.string>
+  <floater.string name="str_searching">Searching...</floater.string>
+  <floater.string name="str_search_failed">Search failed:</floater.string>
+  <floater.string name="str_none_found">No places found with that name.</floater.string>
+  <floater.string name="str_pick">Pick a place from the list.</floater.string>
+  <floater.string name="str_remove_ask">Remove the Wolf Environment from [WHAT]? Its settings are deleted and the sky goes back to what it was before Wolf. (To keep the settings for later, choose Off and Save instead.)</floater.string>
+
+  <!-- the scope and who may change it -->
+  <text follows="left|top" height="16" layout="topleft" left="12" top="26" width="60" name="scope_lbl">Change</text>
+  <combo_box follows="left|top" height="22" layout="topleft" left="72" top="23" width="436" name="scope"
+             tool_tip="The whole region's sky, or only the parcel you are standing on." />
+  <text follows="left|top" height="30" layout="topleft" left="12" top="50" width="496" name="who" word_wrap="true" />
+
+  <tab_container follows="left|top" height="520" layout="topleft" left="4" top="82" width="512"
+                 name="tabs" tab_position="top" halign="center">
+
+    <!-- ═══════════════════ BASICS ═══════════════════ -->
+    <panel label="Basics" name="tab_basics" layout="topleft" follows="all" height="496" width="512">
+      <text follows="left|top" height="16" layout="topleft" left="8" top="6" width="490" name="mode_hdr" text_color="EmphasisColor">How Wolf shapes the sky</text>
+      <radio_group follows="left|top" height="64" layout="topleft" left="8" top="24" width="490" name="mode">
+        <radio_item follows="left|top" height="20" layout="topleft" left="0" top="0" width="490" name="mode_wolf"
+                    label="Wolf Environment: Wolf draws the whole sky" />
+        <radio_item follows="left|top" height="20" layout="topleft" left="0" top="21" width="490" name="mode_ontop"
+                    label="On top: keep my own sky, Wolf adds weather, cloud, haze and light" />
+        <radio_item follows="left|top" height="20" layout="topleft" left="0" top="42" width="490" name="mode_off"
+                    label="Off: my own sky only (the settings are kept for later)" />
+      </radio_group>
+
+      <text follows="left|top" height="16" layout="topleft" left="8" top="98" width="80" name="preset_lbl">Look</text>
+      <combo_box follows="left|top" height="22" layout="topleft" left="92" top="95" width="200" name="preset"
+                 tool_tip="A ready-made sky. Earth is the real sky; the others are fantasy worlds. Fine-tune them on the Sky and Suns &amp; moons tabs." />
+      <text follows="left|top" height="30" layout="topleft" left="300" top="94" width="200" name="preset_note" word_wrap="true" text_color="LabelDisabledColor">Fine-tune on the Sky and Suns &amp; moons tabs.</text>
+
+      <text follows="left|top" height="16" layout="topleft" left="8" top="126" width="490" name="place_hdr" text_color="EmphasisColor">Place</text>
+      <combo_box follows="left|top" height="22" layout="topleft" left="92" top="124" width="200" name="place_kind" />
+      <line_editor follows="left|top" height="22" layout="topleft" left="8" top="150" width="400" name="place_search"
+                   max_length_bytes="120" label="Search for a town or city..." commit_on_focus_lost="false" />
+      <button follows="left|top" height="22" layout="topleft" left="414" top="150" width="90" name="place_search_btn" label="Search" />
+      <scroll_list follows="left|top" height="44" layout="topleft" left="8" top="176" width="496" name="place_results"
+                   multi_select="false" draw_heading="false" />
+      <text follows="left|top" height="16" layout="topleft" left="8" top="227" width="80" name="place_name_lbl">Name</text>
+      <line_editor follows="left|top" height="22" layout="topleft" left="92" top="224" width="412" name="place_name" max_length_bytes="200" />
+      <spinner follows="left|top" height="22" layout="topleft" left="8" top="250" width="230" name="place_lat" label="Latitude"
+               label_width="84" decimal_digits="4" increment="0.0001" min_val="-90" max_val="90"
+               tool_tip="North is positive. For a fictional world this sets the sun's path (0 = equator)." />
+      <spinner follows="left|top" height="22" layout="topleft" left="260" top="250" width="244" name="place_lon" label="Longitude"
+               label_width="84" decimal_digits="4" increment="0.0001" min_val="-180" max_val="180" />
+
+      <text follows="left|top" height="16" layout="topleft" left="8" top="282" width="80" name="time_hdr" text_color="EmphasisColor">Time</text>
+      <combo_box follows="left|top" height="22" layout="topleft" left="92" top="279" width="200" name="time_mode" />
+      <combo_box follows="left|top" height="22" layout="topleft" left="300" top="279" width="204" name="time_zone" max_chars="64" />
+      <line_editor follows="left|top" height="22" layout="topleft" left="300" top="305" width="204" name="time_zone_search"
+                   max_length_bytes="40" label="Search zones..." commit_on_focus_lost="false" />
+      <slider follows="left|top" height="20" layout="topleft" left="92" top="306" width="200" name="time_hour" label=""
+              min_val="0" max_val="23.75" increment="0.25" initial_value="12" decimal_digits="2" show_text="false" can_edit_text="false"
+              tool_tip="The sky always shows this time of day." />
+      <text follows="left|top" height="16" layout="topleft" left="300" top="308" width="200" name="time_hour_text" />
+      <spinner follows="left|top" height="22" layout="topleft" left="92" top="305" width="200" name="time_day_hours"
+               label="Day lasts (h)" label_width="96" decimal_digits="1" increment="0.5" min_val="4" max_val="168"
+               tool_tip="A whole day and night every this many hours (4 to 168, the range EEP itself uses)." />
+
+      <text follows="left|top" height="16" layout="topleft" left="8" top="338" width="80" name="weather_hdr" text_color="EmphasisColor">Weather</text>
+      <combo_box follows="left|top" height="22" layout="topleft" left="92" top="335" width="200" name="weather_source" />
+      <combo_box follows="left|top" height="22" layout="topleft" left="300" top="335" width="204" name="weather_pattern" />
+      <combo_box follows="left|top" height="22" layout="topleft" left="300" top="335" width="204" name="weather_type" />
+
+      <check_box follows="left|top" height="18" layout="topleft" left="8" top="366" width="210" name="clouds_auto" label="Cloud cover from the weather" />
+      <slider follows="left|top" height="20" layout="topleft" left="220" top="365" width="284" name="clouds" label="Cover" label_width="44"
+              min_val="0" max_val="100" increment="1" initial_value="50" decimal_digits="0" />
+      <slider follows="left|top" height="20" layout="topleft" left="8" top="392" width="300" name="haze" label="Extra haze" label_width="84"
+              min_val="0" max_val="100" increment="1" initial_value="0" decimal_digits="0"
+              tool_tip="Mist in the air on top of what the weather brings. 0 = none added." />
+      <text follows="left|top" height="16" layout="topleft" left="320" top="394" width="44" name="water_lbl">Water</text>
+      <combo_box follows="left|top" height="22" layout="topleft" left="368" top="390" width="136" name="water" />
+      <text follows="left|top" height="16" layout="topleft" left="8" top="422" width="80" name="mood_lbl">Colour mood</text>
+      <combo_box follows="left|top" height="22" layout="topleft" left="92" top="419" width="110" name="mood_tint" />
+      <color_swatch follows="left|top" height="22" layout="topleft" left="208" top="419" width="36" label_height="0" name="mood_color"
+                    can_apply_immediately="true" tool_tip="The custom mood colour" />
+      <slider follows="left|top" height="20" layout="topleft" left="252" top="420" width="252" name="mood_strength" label="Strength" label_width="60"
+              min_val="0" max_val="100" increment="1" initial_value="0" decimal_digits="0" />
+      <text follows="left|top" height="40" layout="topleft" left="8" top="450" width="496" name="now" word_wrap="true" text_color="LabelDisabledColor" />
+    </panel>
+
+    <!-- ═══════════════════ SKY (advanced) ═══════════════════ -->
+    <panel label="Sky" name="tab_sky" layout="topleft" follows="all" height="496" width="512">
+      <text follows="left|top" height="16" layout="topleft" left="8" top="6" width="490" name="atmos_hdr" text_color="EmphasisColor">Atmosphere</text>
+      <text follows="left|top" height="16" layout="topleft" left="8" top="30" width="96" name="ray_lbl">Sky colour</text>
+      <check_box follows="left|top" height="18" layout="topleft" left="104" top="28" width="74" name="ray_nat" label="Natural" />
+      <color_swatch follows="left|top" height="22" layout="topleft" left="180" top="26" width="36" label_height="0" name="ray_color" can_apply_immediately="true" />
+      <slider follows="left|top" height="20" layout="topleft" left="224" top="27" width="280" name="ray_density" label="Thickness %" label_width="80"
+              min_val="0" max_val="400" increment="5" initial_value="100" decimal_digits="0" />
+      <text follows="left|top" height="16" layout="topleft" left="8" top="56" width="96" name="mie_lbl">Haze colour</text>
+      <check_box follows="left|top" height="18" layout="topleft" left="104" top="54" width="74" name="mie_nat" label="Natural" />
+      <color_swatch follows="left|top" height="22" layout="topleft" left="180" top="52" width="36" label_height="0" name="mie_color" can_apply_immediately="true" />
+      <slider follows="left|top" height="20" layout="topleft" left="224" top="53" width="280" name="mie_density" label="Thickness %" label_width="80"
+              min_val="0" max_val="400" increment="5" initial_value="100" decimal_digits="0" />
+      <text follows="left|top" height="16" layout="topleft" left="8" top="82" width="96" name="ozone_lbl">Air absorbs</text>
+      <check_box follows="left|top" height="18" layout="topleft" left="104" top="80" width="74" name="ozone_nat" label="Natural" />
+      <color_swatch follows="left|top" height="22" layout="topleft" left="180" top="78" width="36" label_height="0" name="ozone_color" can_apply_immediately="true" />
+      <slider follows="left|top" height="20" layout="topleft" left="224" top="79" width="280" name="ozone_density" label="Strength %" label_width="80"
+              min_val="0" max_val="400" increment="5" initial_value="100" decimal_digits="0" />
+      <slider follows="left|top" height="20" layout="topleft" left="8" top="106" width="300" name="mie_glow" label="Glow round the sun %" label_width="132"
+              min_val="0" max_val="95" increment="1" initial_value="80" decimal_digits="0" />
+      <spinner follows="left|top" height="22" layout="topleft" left="8" top="132" width="240" name="planet_km" label="Planet radius km" label_width="120"
+               decimal_digits="0" increment="100" min_val="1000" max_val="32000" />
+      <spinner follows="left|top" height="22" layout="topleft" left="264" top="132" width="240" name="atmos_km" label="Air height km" label_width="120"
+               decimal_digits="0" increment="5" min_val="10" max_val="500" />
+
+      <text follows="left|top" height="16" layout="topleft" left="8" top="166" width="490" name="night_hdr" text_color="EmphasisColor">Night sky</text>
+      <slider follows="left|top" height="20" layout="topleft" left="8" top="186" width="300" name="stars" label="Stars %" label_width="84"
+              min_val="0" max_val="400" increment="5" initial_value="100" decimal_digits="0" />
+      <check_box follows="left|top" height="18" layout="topleft" left="320" top="187" width="130" name="star_nat" label="Natural colour" />
+      <color_swatch follows="left|top" height="22" layout="topleft" left="456" top="185" width="36" label_height="0" name="star_color" can_apply_immediately="true" />
+      <slider follows="left|top" height="20" layout="topleft" left="8" top="212" width="300" name="nebula" label="Nebula %" label_width="84"
+              min_val="0" max_val="100" increment="1" initial_value="0" decimal_digits="0" />
+      <color_swatch follows="left|top" height="22" layout="topleft" left="456" top="211" width="36" label_height="0" name="nebula_color" can_apply_immediately="true" />
+
+      <text follows="left|top" height="16" layout="topleft" left="8" top="244" width="300" name="cloud_hdr" text_color="EmphasisColor">Clouds</text>
+      <text follows="left|top" height="16" layout="topleft" left="8" top="268" width="96" name="cloud_color_lbl">Colour</text>
+      <check_box follows="left|top" height="18" layout="topleft" left="104" top="266" width="74" name="cloud_nat" label="Natural" />
+      <color_swatch follows="left|top" height="22" layout="topleft" left="180" top="264" width="36" label_height="0" name="cloud_color" can_apply_immediately="true" />
+      <slider follows="left|top" height="20" layout="topleft" left="8" top="294" width="300" name="cloud_glow" label="Glow %" label_width="84"
+              min_val="0" max_val="100" increment="1" initial_value="0" decimal_digits="0" />
+      <text follows="left|top" height="16" layout="topleft" left="8" top="322" width="96" name="cloud_style_lbl">Shape</text>
+      <combo_box follows="left|top" height="22" layout="topleft" left="104" top="319" width="204" name="cloud_style" />
+      <texture_picker follows="left|top" height="96" layout="topleft" left="400" top="244" width="96" name="cloud_texture"
+                      label="Cloud texture" allow_no_texture="true" default_image_name="None"
+                      tool_tip="A cloud texture of your own. None = the weather's own clouds." />
+
+      <text follows="left|top" height="16" layout="topleft" left="8" top="352" width="490" name="light_hdr" text_color="EmphasisColor">Fog and light</text>
+      <text follows="left|top" height="16" layout="topleft" left="8" top="376" width="96" name="fog_lbl">Fog colour</text>
+      <check_box follows="left|top" height="18" layout="topleft" left="104" top="374" width="74" name="fog_nat" label="Natural" />
+      <color_swatch follows="left|top" height="22" layout="topleft" left="180" top="372" width="36" label_height="0" name="fog_color" can_apply_immediately="true" />
+      <slider follows="left|top" height="20" layout="topleft" left="224" top="373" width="280" name="fog_glow" label="Glow %" label_width="80"
+              min_val="0" max_val="100" increment="1" initial_value="0" decimal_digits="0" />
+      <text follows="left|top" height="16" layout="topleft" left="8" top="402" width="96" name="sunlight_lbl">Sunlight</text>
+      <check_box follows="left|top" height="18" layout="topleft" left="104" top="400" width="74" name="sunlight_nat" label="Natural" />
+      <color_swatch follows="left|top" height="22" layout="topleft" left="180" top="398" width="36" label_height="0" name="sunlight_color" can_apply_immediately="true" />
+      <text follows="left|top" height="16" layout="topleft" left="232" top="402" width="80" name="ambient_lbl">Shadows</text>
+      <check_box follows="left|top" height="18" layout="topleft" left="300" top="400" width="74" name="ambient_nat" label="Natural" />
+      <color_swatch follows="left|top" height="22" layout="topleft" left="376" top="398" width="36" label_height="0" name="ambient_color" can_apply_immediately="true" />
+      <slider follows="left|top" height="20" layout="topleft" left="8" top="428" width="300" name="light_strength" label="Light %" label_width="84"
+              min_val="25" max_val="400" increment="5" initial_value="100" decimal_digits="0" />
+      <text follows="left|top" height="40" layout="topleft" left="8" top="454" width="496" name="sky_note" word_wrap="true" text_color="LabelDisabledColor">Other viewers see the closest standard sky. Only WolfViewer shows a second sun or moon, planets, rings, nebulae, star colour and glowing clouds or fog.</text>
+    </panel>
+
+    <!-- ═══════════════════ SUNS AND MOONS ═══════════════════ -->
+    <panel label="Suns &amp; moons" name="tab_bodies" layout="topleft" follows="all" height="496" width="512">
+      <scroll_list follows="left|top" height="96" layout="topleft" left="8" top="6" width="380" name="bodies" multi_select="false" draw_heading="false" />
+      <button follows="left|top" height="22" layout="topleft" left="396" top="6" width="108" name="add_sun" label="Add a sun" />
+      <button follows="left|top" height="22" layout="topleft" left="396" top="30" width="108" name="add_moon" label="Add a moon" />
+      <button follows="left|top" height="22" layout="topleft" left="396" top="54" width="108" name="add_planet" label="Add a planet" />
+      <button follows="left|top" height="22" layout="topleft" left="396" top="80" width="108" name="remove_body" label="Remove" />
+
+      <text follows="left|top" height="16" layout="topleft" left="8" top="112" width="490" name="body_hdr" text_color="EmphasisColor">The one picked above</text>
+      <text follows="left|top" height="16" layout="topleft" left="8" top="136" width="96" name="body_color_lbl">Colour</text>
+      <check_box follows="left|top" height="18" layout="topleft" left="104" top="134" width="74" name="body_nat" label="Natural" />
+      <color_swatch follows="left|top" height="22" layout="topleft" left="180" top="132" width="36" label_height="0" name="body_color" can_apply_immediately="true" />
+      <slider follows="left|top" height="20" layout="topleft" left="8" top="162" width="300" name="body_size" label="Size %" label_width="84"
+              min_val="25" max_val="2000" increment="5" initial_value="100" decimal_digits="0" />
+      <slider follows="left|top" height="20" layout="topleft" left="8" top="188" width="300" name="body_brightness" label="Brightness %" label_width="84"
+              min_val="0" max_val="400" increment="5" initial_value="100" decimal_digits="0" />
+      <texture_picker follows="left|top" height="96" layout="topleft" left="400" top="112" width="96" name="body_texture"
+                      label="Texture" allow_no_texture="true" default_image_name="None" tool_tip="A sun or moon texture of your own. None = the standard one." />
+      <text follows="left|top" height="16" layout="topleft" left="8" top="218" width="96" name="body_pos_lbl">Position</text>
+      <combo_box follows="left|top" height="22" layout="topleft" left="104" top="215" width="204" name="body_position" />
+      <spinner follows="left|top" height="22" layout="topleft" left="8" top="243" width="240" name="body_az" label="Bearing (N=0, E=90)" label_width="140"
+               decimal_digits="0" increment="1" min_val="0" max_val="360" />
+      <spinner follows="left|top" height="22" layout="topleft" left="264" top="243" width="240" name="body_el" label="Height (degrees)" label_width="140"
+               decimal_digits="0" increment="1" min_val="-90" max_val="90" />
+      <spinner follows="left|top" height="22" layout="topleft" left="8" top="269" width="240" name="body_period" label="Once round (hours)" label_width="140"
+               decimal_digits="1" increment="0.5" min_val="0.5" max_val="1000" />
+      <spinner follows="left|top" height="22" layout="topleft" left="264" top="269" width="240" name="body_tilt" label="Lower path by (deg)" label_width="140"
+               decimal_digits="0" increment="1" min_val="0" max_val="90" />
+      <spinner follows="left|top" height="22" layout="topleft" left="8" top="295" width="240" name="body_phase" label="Starting point (deg)" label_width="140"
+               decimal_digits="0" increment="5" min_val="0" max_val="360" />
+      <check_box follows="left|top" height="18" layout="topleft" left="8" top="326" width="220" name="body_lit_auto" label="Moon phase from its position" />
+      <slider follows="left|top" height="20" layout="topleft" left="230" top="325" width="274" name="body_lit" label="Lit %" label_width="40"
+              min_val="0" max_val="100" increment="1" initial_value="50" decimal_digits="0" />
+      <check_box follows="left|top" height="18" layout="topleft" left="8" top="352" width="100" name="body_rings" label="Rings" />
+      <color_swatch follows="left|top" height="22" layout="topleft" left="110" top="350" width="36" label_height="0" name="body_ring_color" can_apply_immediately="true" />
+      <text follows="left|top" height="80" layout="topleft" left="8" top="384" width="496" name="body_note" word_wrap="true" text_color="LabelDisabledColor">The first sun and the first moon may follow the real sky for the place; the others go round on their own path (rising east, highest in the south, setting west). Other viewers see only the first sun and the first moon, without its colour; WolfViewer draws them all.</text>
+    </panel>
+
+    <!-- ═══════════════════ ZONES ═══════════════════ -->
+    <panel label="Zones" name="tab_zones" layout="topleft" follows="all" height="496" width="512">
+      <scroll_list follows="left|top" height="80" layout="topleft" left="8" top="6" width="380" name="zones" multi_select="false" draw_heading="false" />
+      <button follows="left|top" height="22" layout="topleft" left="396" top="6" width="108" name="zone_add" label="Add a zone" />
+      <button follows="left|top" height="22" layout="topleft" left="396" top="62" width="108" name="zone_remove" label="Remove" />
+      <text follows="left|top" height="16" layout="topleft" left="8" top="96" width="60" name="zone_name_lbl">Name</text>
+      <line_editor follows="left|top" height="22" layout="topleft" left="70" top="93" width="200" name="zone_name" max_length_bytes="60" />
+      <combo_box follows="left|top" height="22" layout="topleft" left="280" top="93" width="224" name="zone_shape" />
+      <spinner follows="left|top" height="22" layout="topleft" left="8" top="120" width="160" name="zone_x" label="East (m)" label_width="70" decimal_digits="1" increment="1" min_val="0" max_val="100000" />
+      <spinner follows="left|top" height="22" layout="topleft" left="176" top="120" width="160" name="zone_y" label="North (m)" label_width="70" decimal_digits="1" increment="1" min_val="0" max_val="100000" />
+      <spinner follows="left|top" height="22" layout="topleft" left="344" top="120" width="160" name="zone_radius" label="Radius (m)" label_width="74" decimal_digits="1" increment="1" min_val="0.1" max_val="100000" />
+      <spinner follows="left|top" height="22" layout="topleft" left="8" top="146" width="160" name="zone_x2" label="to East (m)" label_width="70" decimal_digits="1" increment="1" min_val="0" max_val="100000" />
+      <spinner follows="left|top" height="22" layout="topleft" left="176" top="146" width="160" name="zone_y2" label="to North (m)" label_width="70" decimal_digits="1" increment="1" min_val="0" max_val="100000" />
+      <spinner follows="left|top" height="22" layout="topleft" left="8" top="120" width="240" name="zone_alt" label="Starts at height (m)" label_width="140" decimal_digits="0" increment="10" min_val="100" max_val="4000" />
+      <button follows="left|top" height="22" layout="topleft" left="344" top="146" width="160" name="zone_here" label="Centre on where I am" />
+      <spinner follows="left|top" height="22" layout="topleft" left="8" top="172" width="240" name="zone_edge" label="Soft edge (m)" label_width="140" decimal_digits="0" increment="1" min_val="0" max_val="256" />
+
+      <text follows="left|top" height="16" layout="topleft" left="8" top="204" width="490" name="zone_set_hdr" text_color="EmphasisColor">Inside this zone</text>
+      <check_box follows="left|top" height="18" layout="topleft" left="8" top="228" width="120" name="zone_weather_on" label="Weather" />
+      <combo_box follows="left|top" height="22" layout="topleft" left="130" top="226" width="178" name="zone_weather" />
+      <check_box follows="left|top" height="18" layout="topleft" left="8" top="254" width="120" name="zone_clouds_on" label="Cloud cover" />
+      <slider follows="left|top" height="20" layout="topleft" left="130" top="253" width="374" name="zone_clouds" label="" min_val="0" max_val="100" increment="1" initial_value="50" decimal_digits="0" />
+      <check_box follows="left|top" height="18" layout="topleft" left="8" top="280" width="120" name="zone_haze_on" label="Haze" />
+      <slider follows="left|top" height="20" layout="topleft" left="130" top="279" width="374" name="zone_haze" label="" min_val="0" max_val="100" increment="1" initial_value="50" decimal_digits="0" />
+      <check_box follows="left|top" height="18" layout="topleft" left="8" top="306" width="120" name="zone_fog_on" label="Fog colour" />
+      <color_swatch follows="left|top" height="22" layout="topleft" left="130" top="304" width="36" label_height="0" name="zone_fog" can_apply_immediately="true" />
+      <check_box follows="left|top" height="18" layout="topleft" left="180" top="306" width="90" name="zone_fogglow_on" label="Fog glow" />
+      <slider follows="left|top" height="20" layout="topleft" left="270" top="305" width="234" name="zone_fog_glow" label="" min_val="0" max_val="100" increment="1" initial_value="20" decimal_digits="0" />
+      <check_box follows="left|top" height="18" layout="topleft" left="8" top="332" width="120" name="zone_light_on" label="Light colour" />
+      <color_swatch follows="left|top" height="22" layout="topleft" left="130" top="330" width="36" label_height="0" name="zone_light" can_apply_immediately="true" />
+      <check_box follows="left|top" height="18" layout="topleft" left="180" top="332" width="90" name="zone_lightstr_on" label="Light %" />
+      <slider follows="left|top" height="20" layout="topleft" left="270" top="331" width="234" name="zone_light_strength" label="" min_val="0" max_val="400" increment="5" initial_value="100" decimal_digits="0" />
+      <check_box follows="left|top" height="18" layout="topleft" left="8" top="358" width="120" name="zone_mood_on" label="Colour mood" />
+      <combo_box follows="left|top" height="22" layout="topleft" left="130" top="356" width="100" name="zone_mood_tint" />
+      <color_swatch follows="left|top" height="22" layout="topleft" left="236" top="356" width="36" label_height="0" name="zone_mood_color" can_apply_immediately="true" />
+      <slider follows="left|top" height="20" layout="topleft" left="280" top="357" width="224" name="zone_mood_strength" label="" min_val="0" max_val="100" increment="1" initial_value="50" decimal_digits="0" />
+      <text follows="left|top" height="90" layout="topleft" left="8" top="390" width="496" name="zone_note" word_wrap="true" text_color="LabelDisabledColor">"Above a height" zones are seen by every viewer (EEP's three sky heights). An area zone (circle or rectangle) is seen by other viewers as the sky of each parcel it mostly covers, when the estate allows parcel environments. The soft edge, and finer shapes, are WolfViewer's own.</text>
+    </panel>
+  </tab_container>
+
+  <!-- [WOLF ENV 2026-10-12] the test slider: the sky later today, on this screen only (as Jimmy's tab:
+       panel_region_auto_environment.xml ae_preview_on / ae_preview / ae_preview_time) -->
+  <check_box follows="left|top" height="18" layout="topleft" left="12" top="608" width="200" name="time_preview_on"
+             label="Preview time (only you see it)"
+             tool_tip="Run this sky ahead to any time in the next day, on your screen only. Works with Preview too (your draft at that time). Nothing is saved; it ends when this window closes." />
+  <slider follows="left|top" height="18" layout="topleft" left="216" top="608" width="292" name="time_preview"
+          min_val="0" max_val="23.75" increment="0.25" initial_value="0" decimal_digits="2" show_text="false" can_edit_text="false" />
+  <text follows="left|top" height="14" layout="topleft" left="32" top="628" width="476" name="time_preview_text" text_color="EmphasisColor" />
+
+  <!-- what happened, and the actions -->
+  <!-- [WolfViewer round 13] Paul: "Use Wolf Environment on all regions" - viewer-only, default off, persisted
+       (settings.xml WolfEnvironmentAllRegions; wolfenvironmentstate.cpp active()). -->
+  <check_box follows="left|top" height="18" layout="topleft" left="12" top="650" width="300" name="all_regions"
+   control_name="WolfEnvironmentAllRegions" label="Use Wolf Environment on all regions"
+   tool_tip="Only in your viewer: regions without a Wolf Environment of their own get the native sky too, made from their ordinary EEP sky (its cloud cover, haze and cloud size). Needs the native sky test mode (WolfEnvironmentNativeSky) on." />
+  <text follows="left|top" height="14" layout="topleft" left="316" top="652" width="192" name="all_regions_note" text_color="LabelDisabledColor">Only you see this.</text>
+  <text follows="left|top" height="38" layout="topleft" left="12" top="670" width="496" name="status" word_wrap="true" />
+  <button follows="left|top" height="24" layout="topleft" left="12" top="712" width="120" name="remove" label="Remove..."
+          tool_tip="Delete the Wolf Environment here: the sky goes back to what it was before Wolf." />
+  <button follows="left|top" height="24" layout="topleft" left="196" top="712" width="110" name="preview" label="Preview" is_toggle="true"
+          tool_tip="See these settings on your own screen only, before saving." />
+  <button follows="left|top" height="24" layout="topleft" left="312" top="712" width="70" name="revert" label="Revert" />
+  <button follows="left|top" height="24" layout="topleft" left="388" top="712" width="120" name="save" label="Save for everyone" />
+</floater>

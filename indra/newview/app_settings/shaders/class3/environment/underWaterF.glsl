@@ -45,6 +45,8 @@ uniform vec4 waterPlane;
 uniform vec3 eyeVec;
 uniform vec4 waterFogColor;
 uniform vec3 waterFogColorLinear;
+uniform float wolf_phys;      // [WOLF ENV 2026-10-12 physical] the body colour lit by the light on the water
+uniform vec3  wolf_light_h;   // (the horizontal illuminance / pi, pre-exposed), as waterFogF.glsl
 uniform float waterFogKS;
 uniform vec2 screenRes;
 
@@ -79,7 +81,7 @@ void main()
 #ifdef TRANSPARENT_WATER
     vec4 fb = texture(screenTex, distort);
 #else
-    vec4 fb = vec4(waterFogColorLinear, 0.0);
+    vec4 fb = vec4(waterFogColorLinear * (wolf_phys > 0.5 ? wolf_light_h : vec3(1.0)), 0.0);
 #endif
 
     // <WolfViewer 2026-09-06> SNELL'S WINDOW. From under water the world above is visible
@@ -100,7 +102,7 @@ void main()
         float window = 1.0 - smoothstep(0.72, 0.78, sinI);
         const float R0 = 0.02;
         float fres = R0 + (1.0 - R0) * pow(1.0 - cosI, 5.0);
-        vec4 body = vec4(waterFogColorLinear * 0.85, fb.a);
+        vec4 body = vec4(waterFogColorLinear * (wolf_phys > 0.5 ? wolf_light_h : vec3(1.0)) * 0.85, fb.a);
         float rim = window * (1.0 - smoothstep(0.02, 0.18, cosI)) * 0.6;
         fb = mix(mix(fb, body, fres), body, 1.0 - window);
         fb.rgb += specular * rim * 0.25;

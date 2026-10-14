@@ -19,10 +19,12 @@
 
 #include <cmath>
 
+#include "llagent.h"
 #include "llagentcamera.h"
 #include "llframetimer.h"
 #include "llrand.h"
 #include "llviewercontrol.h"
+#include "llviewerregion.h"
 #include "llvoavatarself.h"
 #include "wolfflight.h"
 
@@ -32,6 +34,14 @@ namespace
     const F32 BLEND_SECONDS = 0.5f;       // chase camera in / out
     const F32 ROT_HALF_LIFE = 0.12f;      // the aircraft's rotation, smoothed (seconds to half way)
     const F32 MAX_SHAKE = 3.f;            // metres: a shake never throws the camera further
+    const F32 MAX_ROLL_SECONDS = 30.f;    // WolfFXModule.Roll holds seconds to 0..30
+    const F32 LEAVE_ROLL_SECONDS = 0.5f;  // levelling when the avatar leaves the roll's region
+
+    LLUUID agent_region_id()
+    {
+        LLViewerRegion* region = gAgent.getRegion();
+        return region ? region->getRegionID() : LLUUID::null;
+    }
 
     /** The aircraft the avatar sits on (the linkset's root), or null. */
     LLViewerObject* seated_vehicle()
@@ -55,6 +65,7 @@ void WolfCameraFX::apply(LLVector3& position, LLVector3& focus, LLVector3& up, U
     mLastTime = t;
     chase(position, focus, up, camera_mode, focus_on_avatar, dt);
     applyShake(position, focus, dt);
+    applyRoll(position, focus, up, dt);
 }
 
 void WolfCameraFX::chase(LLVector3& position, LLVector3& focus, LLVector3& up, U32 camera_mode, bool focus_on_avatar, F32 dt)
@@ -148,4 +159,69 @@ void WolfCameraFX::applyShake(LLVector3& position, LLVector3& focus, F32 dt)
     if (offset.length() > MAX_SHAKE) offset *= MAX_SHAKE / offset.length();
     position += offset;
     focus += offset * 0.6f;     // the view also tilts a little, not only slides
+}
+
+void WolfCameraFX::roll(F32 degrees, F32 seconds)
+{
+    if (!std::isfinite(degrees) || !std::isfinite(seconds)) return;
+    mRollFrom = mRollNow;           // from wherever it is now, mid-roll included
+    mRollStartVel = mRollVel;       // ... and at the speed it is turning
+    mRollTo = llclamp(degrees, -180.f, 180.f);
+    mRollSeconds = llclamp(seconds, 0.f, MAX_ROLL_SECONDS);
+    mRollAge = 0.f;
+    mRollRegion = agent_region_id();
+    mRollSeated = isAgentAvatarValid() && gAgentAvatarp->isSitting();
+}
+
+// Eased from the angle it had to the new one, arriving at rest: a cubic Hermite curve that starts at the
+// turn's current speed and ends at zero speed (with no speed to carry it is the smoothstep, 3t^2 - 2t^3).
+// The up vector is turned about the line of sight. A positive angle turns "up" towards the camera's right:
+// the view rolls right, as a plane banking right (LLQuaternion(angle, axis) turns by the right-hand rule,
+// llquaternion.cpp setAngleAxis; LLVector3 * LLQuaternion, llquaternion.cpp:571).
+void WolfCameraFX::applyRoll(const LLVector3& position, const LLVector3& focus, LLVector3& up, F32 dt)
+{
+    static LLCachedControl<bool> shake_on(gSavedSettings, "WolfFXCameraShake", true);
+    if (!shake_on)
+    {
+        mRollFrom = mRollTo = mRollNow = 0.f;
+        mRollVel = mRollStartVel = 0.f;
+        return;
+    }
+    if (mRollTo != 0.f)
+    {
+        // level out: left the roll's region, teleporting (inside the region too), or stood up from the seat
+        const bool stood = mRollSeated && !(isAgentAvatarValid() && gAgentAvatarp->isSitting());
+        if (mRollRegion != agent_region_id() || gAgent.getTeleportState() != LLAgent::TELEPORT_NONE || stood)
+        {
+            roll(0.f, LEAVE_ROLL_SECONDS);
+        }
+    }
+    if (mRollTo == 0.f && mRollNow == 0.f)
+    {
+        mRollVel = 0.f;
+        return;
+    }
+
+    mRollAge += dt;
+    const F32 T = mRollSeconds;
+    const F32 t = T > 0.f ? llclamp(mRollAge / T, 0.f, 1.f) : 1.f;
+    if (t >= 1.f)
+    {
+        mRollNow = mRollTo;
+        mRollVel = 0.f;
+    }
+    else
+    {
+        // p(t) = p0 + (p1 - p0)(3t^2 - 2t^3) + v0 T (t^3 - 2t^2 + t); p'(t) / T for degrees a second
+        const F32 d = mRollTo - mRollFrom, v0 = mRollStartVel;
+        mRollNow = mRollFrom + d * t * t * (3.f - 2.f * t) + v0 * T * t * (1.f - t) * (1.f - t);
+        mRollVel = d * 6.f * t * (1.f - t) / T + v0 * (1.f - t) * (1.f - 3.f * t);
+    }
+    if (mRollNow == 0.f) return;
+
+    LLVector3 look = focus - position;
+    if (look.normalize() < 0.001f) return;
+    LLVector3 u = up * LLQuaternion(mRollNow * DEG_TO_RAD, look);
+    if (u.normalize() < 0.001f) return;
+    up = u;
 }

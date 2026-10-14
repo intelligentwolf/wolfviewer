@@ -13425,6 +13425,17 @@ Change of this parameter will affect the layout of buttons in notification toast
       <key>Value</key>
       <real>12.0</real>
     </map>
+    <key>WolfCavePassageWidth</key>
+    <map>
+      <key>Comment</key>
+      <string>[WOLF CAVE 2026-10-12] Cave Builder: width in metres of the next passage drawn.</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>F32</string>
+      <key>Value</key>
+      <real>4.0</real>
+    </map>
     <key>WolfTerrainPaintWaterLevel</key>
     <map>
       <key>Comment</key>
@@ -19792,6 +19803,17 @@ Change of this parameter will affect the layout of buttons in notification toast
 			<key>Value</key>
 			<integer>0</integer>
 		</map>
+		<key>WolfExperiencesNoShowOnArrive</key>
+		<map>
+			<key>Comment</key>
+			<string>[WolfViewer 2026-10-14] Experiences: do not open the chooser by itself after login (the "Don't show this when I arrive" box). Wolf World &gt; Experiences... always opens it.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
 		<key>WolfWatchWolfMineOnly</key>
 		<map>
 			<key>Comment</key>
@@ -19956,6 +19978,98 @@ Change of this parameter will affect the layout of buttons in notification toast
 			<string>Boolean</string>
 			<key>Value</key>
 			<integer>0</integer>
+		</map>
+		<key>WolfBuildersMode</key>
+		<map>
+			<key>Comment</key>
+			<string>Build floater &gt; Builders Mode (llfloatertools.cpp, wolfbuilder.cpp): a Midday sky on the local environment for as long as the Build floater is open, exactly as World &gt; Environment &gt; Midday sets it; the sky that was there comes back when the floater closes or the box is unticked. Remembered between sessions. Paul 2026-10-13.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfBuilderGrid</key>
+		<map>
+			<key>Comment</key>
+			<string>Wolf Builder (wolfbuilder.cpp renderGroundGrid): draw the snap grid on the ground (the land height) around the selection (or the avatar) while the Build or the Wolf Builder floater is open, not only while dragging. Spacing GridResolution, extent GridDrawSize, opacity GridOpacity.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfBuilderObjectGrid</key>
+		<map>
+			<key>Comment</key>
+			<string>Wolf Builder (wolfbuilder.cpp renderObjectGrid): draw the snap grid on the selected object's bounding box (its bottom face), in the Build floater's ruler frame (World, Local or Reference grid), following the selection live; nothing when nothing is selected. Paul 2026-10-13: "show grid on object".</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfBuilderObjectGridAllFaces</key>
+		<map>
+			<key>Comment</key>
+			<string>Wolf Builder: with WolfBuilderObjectGrid, draw the grid on all six faces of the selection's bounding box, not only the bottom one.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfBuilderSnapOrigin</key>
+		<map>
+			<key>Comment</key>
+			<string>Wolf Builder (llselectmgr.cpp getGrid, world grid): snap to, and draw the grid from, WolfBuilderGridOrigin instead of the region's south-west corner.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfBuilderGridOrigin</key>
+		<map>
+			<key>Comment</key>
+			<string>Wolf Builder: the builder's own grid origin, metres from the corner of the region the avatar is in (X, Y, Z). Used when WolfBuilderSnapOrigin is on.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Vector3</string>
+			<key>Value</key>
+			<array>
+				<real>0.0</real>
+				<real>0.0</real>
+				<real>0.0</real>
+			</array>
+		</map>
+		<key>WolfBuilderNames</key>
+		<map>
+			<key>Comment</key>
+			<string>Wolf Builder (wolfbuilder.cpp idle): float each in-world root prim's name above it within WolfBuilderNamesRadius of the avatar (hover-text machinery, LLHUDText). Objects only, never avatars. Off removes them all.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfBuilderNamesRadius</key>
+		<map>
+			<key>Comment</key>
+			<string>Wolf Builder: how far from the avatar, in metres, object names are floated (5 to 96).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>F32</string>
+			<key>Value</key>
+			<real>20.0</real>
 		</map>
 		<key>WolfDashboardHelpSpaceship</key>
 		<map>
@@ -20352,6 +20466,83 @@ Change of this parameter will affect the layout of buttons in notification toast
 			<string>S32</string>
 			<key>Value</key>
 			<integer>-1</integer>
+		</map>
+		<key>WolfDriveButtonRetarderUp</key>
+		<map>
+			<key>Comment</key>
+			<string>Driving Controls: the controller button for the truck retarder stalk, one stage more (-1 none, 0-15). [WOLF RETARDER 2026-10-12]</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>-1</integer>
+		</map>
+		<key>WolfDriveButtonRetarderDown</key>
+		<map>
+			<key>Comment</key>
+			<string>Driving Controls: the controller button for the truck retarder stalk, one stage less (-1 none, 0-15). [WOLF RETARDER 2026-10-12]</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>-1</integer>
+		</map>
+		<key>WolfDriveButtonRetarderDsc</key>
+		<map>
+			<key>Comment</key>
+			<string>Driving Controls: the controller button for downhill speed control on / off (-1 none, 0-15). [WOLF RETARDER 2026-10-12]</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>-1</integer>
+		</map>
+		<key>WolfDriveButtonRetarderDscUp</key>
+		<map>
+			<key>Comment</key>
+			<string>Driving Controls: the controller button for downhill speed control set speed + (held) (-1 none, 0-15). [WOLF RETARDER 2026-10-12]</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>-1</integer>
+		</map>
+		<key>WolfDriveButtonRetarderDscDown</key>
+		<map>
+			<key>Comment</key>
+			<string>Driving Controls: the controller button for downhill speed control set speed - (held) (-1 none, 0-15). [WOLF RETARDER 2026-10-12]</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>-1</integer>
+		</map>
+		<key>WolfDriveButtonRetarderAut</key>
+		<map>
+			<key>Comment</key>
+			<string>Driving Controls: the controller button for the retarder AUT switch (brake pedal) (-1 none, 0-15). [WOLF RETARDER 2026-10-12]</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>-1</integer>
+		</map>
+		<key>WolfDriveRetarderAut</key>
+		<map>
+			<key>Comment</key>
+			<string>Truck dashboard: AUT - the brake pedal brings the retarder in before the wheel brakes (Scania's AUT switch). Sent to the truck's script as part of the 8th "in" value. [WOLF RETARDER 2026-10-12]</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>1</integer>
 		</map>
 		<key>WolfDriveActions</key>
 		<map>
@@ -21158,6 +21349,72 @@ Change of this parameter will affect the layout of buttons in notification toast
 			<string>F32</string>
 			<key>Value</key>
 			<real>1.0</real>
+		</map>
+		<key>WolfAuroraPhotographic</key>
+		<map>
+			<key>Comment</key>
+			<string>[WOLF AURORA 2026-10-12] Show the natural northern lights as a long-exposure photograph shows them (full colour, metered on the display) instead of as the dark-adapted eye sees them (pale, greyish when faint: rod vision). wolfaurora.cpp.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfEnvironmentQuality</key>
+		<map>
+			<key>Comment</key>
+			<string>[WOLF ENV 2026-10-12] How much of the Wolf Environment WolfViewer draws itself (wolfenvironmentrender.h): 0 the region's EEP only (exactly as before), 1 the physically based sky with extra suns, moons and planets, height fog and zones, 2 also volumetric clouds and their shadows, 3 also finer clouds and aerial perspective. -1 follows the graphics quality level (RenderQualityPerformance); choosing a graphics preset sets it from the feature tables.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>S32</string>
+			<key>Value</key>
+			<integer>-1</integer>
+		</map>
+		<key>WolfEnvironmentTrace</key>
+    <map>
+      <key>Comment</key>
+      <string>Wolf native sky: log every input that moves the clouds four times a second (#WolfEnvTrace# lines in the log), for diagnosing cloud motion. Off by default.</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>Boolean</string>
+      <key>Value</key>
+      <integer>0</integer>
+    </map>
+    <key>WolfEnvironmentNativeSky</key>
+		<map>
+			<key>Comment</key>
+			<string>[WOLF ENV 2026-10-12] Opt-in test mode: TRUE lets WolfViewer draw the Wolf Environment's physically based native sky, clouds, exposure and photometric lights itself (at the WolfEnvironmentQuality tier). FALSE (the default) draws the region's EEP exactly as before - the native renderer, its post pass, its exposure and tone mapping and every scene-shader change made for it stay off.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>1</integer>
+		</map>
+		<key>WolfEnvironmentAllRegions</key>
+		<map>
+			<key>Comment</key>
+			<string>[WolfViewer round 13] With WolfEnvironmentNativeSky on: TRUE draws the native sky on every Wolf Territories region, a region without a Wolf Environment document of its own made from its ordinary EEP sky (cloud_shadow, haze, cloud_scale, its sun and moon). FALSE: only where a document says mode wolf. Default TRUE since w66 Smiling Frog (Paul 10-13: "default to WE on on wolf territories grid"); nothing is drawn off Wolf Territories.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>1</integer>
+		</map>
+		<key>WolfEnvironmentDebugCapture</key>
+		<map>
+			<key>Comment</key>
+			<string>[WOLF ENV 2026-10-12] Set to TRUE to write one frame of the Wolf Environment renderer to the logs folder: every target (the frame before and after its post pass, the G-buffer, the composite layer, the sky look-up tables, the exposure probe, the clouds) as wolfenv_*.png, with min / max / mean / NaN / Inf per channel in the log (#WolfEnvDebug). Turns itself off after that frame.</string>
+			<key>Persist</key>
+			<integer>0</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
 		</map>
 		<key>WolfViewerWaterGodRays</key>
 		<map>
@@ -28618,6 +28875,28 @@ Change of this parameter will affect the layout of buttons in notification toast
       <string>Boolean</string>
       <key>Value</key>
       <integer>0</integer>
+    </map>
+    <key>WolfDashboardScale</key>
+    <map>
+      <key>Comment</key>
+      <string>Size of the vehicle dashboard (car / truck / bike / speedboat / spaceship / submarine), 0.4 to 1.0 of its full size. Drag its top edge to change it; double-click the edge for the default.</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>F32</string>
+      <key>Value</key>
+      <real>1.0</real>
+    </map>
+    <key>WolfFlightDeckScale</key>
+    <map>
+      <key>Comment</key>
+      <string>Size of the Flight and Sailing Mode deck, 0.4 to 1.0 of its full size. Drag its top edge to change it; double-click the edge for the default.</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>F32</string>
+      <key>Value</key>
+      <real>1.0</real>
     </map>
     <key>WolfSpanAllScreens</key>
     <map>

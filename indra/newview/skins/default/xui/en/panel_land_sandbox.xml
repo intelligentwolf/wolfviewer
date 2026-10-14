@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- <WolfViewer 2026-10-13> About Land > Sandbox (wolflandsandbox.cpp; the region side is WolfSim
+     WolfSandboxModule.cs). Every child has an explicit left/top: LLPanel::initPanelXML creates
+     filename children before their parent's layout (panel_weather_controls.xml, llui/llpanel.cpp:529-552).
+     Size: the 386-pixel About Land content area (panel_weather_controls.xml header). -->
+<panel border="true" follows="all" height="386" width="480" label="Sandbox"
+       layout="topleft" name="panel_land_sandbox">
+  <panel.string name="asking">Asking the region…</panel.string>
+  <panel.string name="saving">Saving…</panel.string>
+  <panel.string name="saved_on">Saved. Sandbox mode is on.</panel.string>
+  <panel.string name="saved_off">Saved. Sandbox mode is off.</panel.string>
+  <panel.string name="failed">The region could not save Sandbox mode. Nothing was changed.</panel.string>
+  <panel.string name="no_answer_set">The region did not answer, so Sandbox mode may not have been saved. Open this tab again to see what the region has.</panel.string>
+  <panel.string name="unsupported">This region does not offer Sandbox mode yet. It is available on Wolf Territories regions once they have restarted with the new WolfSim.</panel.string>
+  <panel.string name="wolf_only">Sandbox mode is only available on Wolf Territories regions.</panel.string>
+  <panel.string name="no_region">This parcel's region is out of reach. Select the parcel again and retry.</panel.string>
+  <panel.string name="need_max_prims">Enter how many prims each person may have (1 or more).</panel.string>
+  <panel.string name="need_minutes">Enter after how many minutes objects are returned (1 or more).</panel.string>
+  <panel.string name="fix_fields">Sandbox mode was not saved. Fix the field marked in red.</panel.string>
+  <panel.string name="yours_off">Sandbox mode is off on this parcel.</panel.string>
+  <panel.string name="yours_on">This parcel is a sandbox: each person may have up to [MAX] prims here and objects are returned after [MINUTES] minutes. You have [COUNT] prims here.</panel.string>
+  <panel.string name="yours_on_no_return">This parcel is a sandbox: each person may have up to [MAX] prims here. Auto return is off (About Land > Objects). You have [COUNT] prims here.</panel.string>
+  <panel.string name="yours_on_unlimited">This parcel is a sandbox. You manage it, so the limit does not apply to you (you have [COUNT] prims here).</panel.string>
+
+  <text layout="topleft" follows="left|top" height="14" left="10" top="8" width="460"
+        name="sandbox_title" text_color="EmphasisColor">Sandbox mode</text>
+  <text layout="topleft" follows="left|top" height="58" left="10" top="26" width="460"
+        word_wrap="true" name="sandbox_intro">
+Lets people build here within limits: each person may have only so many prims on this parcel, and their objects are returned to them after the minutes you set. A rez that would go over the limit is refused, and the person is told why. You, members of the parcel's group with the Land Options power, and estate managers are not limited.
+  </text>
+
+  <check_box layout="topleft" follows="left|top" height="16" left="10" top="92" width="300"
+             label="Sandbox mode on this parcel" name="sandbox_enabled"
+             tool_tip="Limit each person's prims on this parcel and return their objects after a set time." />
+
+  <text layout="topleft" follows="left|top" height="20" left="10" top="120" width="230"
+        name="sandbox_max_prims_label">Most prims per person:</text>
+  <line_editor layout="topleft" follows="left|top" border_style="line" border_thickness="1"
+               height="23" left="240" top="116" width="60" max_length_bytes="6"
+               name="sandbox_max_prims"
+               tool_tip="The most prims one person may have on this parcel at a time." />
+  <text layout="topleft" follows="left|top" height="16" left="310" top="120" width="160"
+        word_wrap="true" visible="false"
+        name="sandbox_max_prims_error" />
+
+  <text layout="topleft" follows="left|top" height="20" left="10" top="150" width="230"
+        name="sandbox_return_minutes_label">Return objects after (minutes):</text>
+  <line_editor layout="topleft" follows="left|top" border_style="line" border_thickness="1"
+               height="23" left="240" top="146" width="60" max_length_bytes="6"
+               name="sandbox_return_minutes"
+               tool_tip="Other people's objects go back to their Lost and Found after this many minutes. This is the parcel's auto return (also shown on the Objects tab)." />
+  <text layout="topleft" follows="left|top" height="16" left="310" top="150" width="160"
+        word_wrap="true" visible="false"
+        name="sandbox_return_minutes_error" />
+
+  <text layout="topleft" follows="left|top" height="44" left="10" top="182" width="460"
+        word_wrap="true" text_color="AlertCautionTextColor" visible="false"
+        name="sandbox_build_hint">
+Only you and your group can build here now. To open the sandbox to everyone, tick "Everyone" under Build on the Options tab.
+  </text>
+
+  <button layout="topleft" follows="left|top" height="23" left="10" top="232" width="100"
+          label="Apply" name="sandbox_apply" />
+  <button layout="topleft" follows="left|top" height="23" left="116" top="232" width="100"
+          label="Revert" name="sandbox_revert" />
+
+  <text layout="topleft" follows="left|top" height="46" left="10" top="266" width="460"
+        word_wrap="true" name="sandbox_yours" />
+  <text layout="topleft" follows="left|top" height="58" left="10" top="318" width="460"
+        word_wrap="true" name="sandbox_status" />
+</panel>

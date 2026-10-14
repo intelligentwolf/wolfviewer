@@ -147,6 +147,8 @@
 #include "wolffarground.h"   // <WolfViewer 2026-10-07/> map tiles for regions not connected
 #include "wolffarterrain.h"   // <WolfViewer 2026-10-08/> elevation tiles beyond the terrain received
 #include "wolfaltitudesky.h"  // <WolfViewer 2026-10-07/> the cloud layer to fly through
+#include "wolfenvironmentrender.h"   // [WOLF ENV 2026-10-12/] the Wolf Environment's clouds, fog and zones
+#include "wolfaurora.h"   // [WOLF AURORA 2026-10-12/]
 
 extern bool gSnapshot;
 bool gShiftFrame = false;
@@ -754,6 +756,7 @@ void LLPipeline::cleanup()
     mWaterExclusionPool = nullptr;
 
     releaseGLBuffers();
+    WolfEnvironmentRender::destroyGL();   // [WOLF ENV TAKRAM 2026-10-12] the atmosphere's tables as well
 
     mFaceSelectImagep = NULL;
 
@@ -783,6 +786,7 @@ void LLPipeline::destroyGL()
     resetDrawOrders();
 
     releaseGLBuffers();
+    WolfEnvironmentRender::destroyGL();   // [WOLF ENV TAKRAM 2026-10-12] the context goes: the atmosphere's tables as well
 
     if (mMeshDirtyQueryObject)
     {
@@ -1326,6 +1330,8 @@ void LLPipeline::releaseGLBuffers()
     }
 
     releaseLUTBuffers();
+    WolfEnvironmentRender::releaseGL();   // [WOLF ENV 2026-10-12/]
+    WolfAurora::releaseGL();   // [WOLF AURORA 2026-10-12/] the aurora's direction table
 
     mWaterDis.release();
 
@@ -6518,6 +6524,12 @@ void LLPipeline::setupHWLights()
 
             //send linear light color to shader
             LLColor4  light_color = light->getLightLinearColor() * light_scale;
+            // [WOLF ENV 2026-10-12 physical] candela x pre-exposure under the physical sky (wolfenvironmentrender.h)
+            if (WolfEnvironmentRender::skyActive())
+            {
+                const LLColor3 c = WolfEnvironmentRender::physicalLightColor(LLColor3(light_color.mV), light->isLightSpotlight());
+                light_color.setVec(c.mV[0], c.mV[1], c.mV[2], 0.f);
+            }
             light_color.mV[3] = 0.0f;
 
             F32 fade = iter->fade;
@@ -7854,7 +7866,14 @@ void LLPipeline::generateExposure(LLRenderTarget* src, LLRenderTarget* dst, bool
 
         static LLCachedControl<bool> use_exposure_sky_settings(gSavedSettings, "RenderUseExposureSkySettings", false);
 
-        if (use_exposure_sky_settings)
+        if (WolfEnvironmentRender::agxDisplay())
+        {
+            // [WOLF ENV 2026-10-12 physical] the frame is already pre-exposed (WolfEnvironmentRender::exposure); [2026-10-13]
+            // with an EEP driving the native sky the stock exposure range applies, as the frame is in the EEP's own units
+            exp_min = 1.f;
+            exp_max = 1.f;
+        }
+        else if (use_exposure_sky_settings)
         {
             if (dynamic_exposure_enabled)
             {
@@ -7917,11 +7936,17 @@ void LLPipeline::tonemap(LLRenderTarget* src, LLRenderTarget* dst, bool gamma_co
 
         LLSettingsSky::ptr_t psky = LLEnvironment::instance().getCurrentSky();
 
-        bool no_post = gSnapshotNoPost || psky->getReflectionProbeAmbiance(should_auto_adjust) == 0.f || (buildNoPost && gFloaterTools && gFloaterTools->isAvailable());
+        // [WOLF ENV 2026-10-12 physical] the Wolf sky's frame takes the post path with its own operator
+        // (postDeferredTonemap.glsl: Filament's AgX), never the legacy gamma
+        // [WolfViewer 2026-10-13] with an EEP driving the native sky the frame is in the EEP's own linear units
+        // (WolfEnvironmentRender: exposure set so the EEP's surfaces come out at the stock values) and takes the stock
+        // display chain - no_post / legacy gamma / tone map exactly as the EEP would (wolfeepreference.h); AgX only without one
+        const bool wolf_phys = WolfEnvironmentRender::agxDisplay();
+        bool no_post = !wolf_phys && (gSnapshotNoPost || psky->getReflectionProbeAmbiance(should_auto_adjust) == 0.f || (buildNoPost && gFloaterTools && gFloaterTools->isAvailable()));
         LLGLSLShader* shader = nullptr;
         if(gamma_correct)
         {
-            bool legacy_gamma = psky->getReflectionProbeAmbiance(should_auto_adjust) == 0.f;
+            bool legacy_gamma = !wolf_phys && psky->getReflectionProbeAmbiance(should_auto_adjust) == 0.f;
             if(legacy_gamma)
             {
                 shader = no_post ? &gNoPostTonemapLegacyGammaCorrectProgram : &gDeferredPostTonemapLegacyGammaCorrectProgram;
@@ -7959,6 +7984,16 @@ void LLPipeline::tonemap(LLRenderTarget* src, LLRenderTarget* dst, bool gamma_co
         static LLCachedControl<U32> tonemap_type_setting(gSavedSettings, "RenderTonemapType", 0U);
         shader->uniform1i(tonemap_type, tonemap_type_setting);
         shader->uniform1f(tonemap_mix, psky->getTonemapMix(should_auto_adjust()));
+        shader->uniform1f(LLShaderMgr::WOLF_PHYS, wolf_phys ? 1.f : 0.f);   // postDeferredTonemap.glsl: Filament AgX under the native sky
+        {   // [WOLF ENV TAKRAM 2026-10-12] wolftk/filamentAgx.glsl: the daylight white balance (Bruneton demo.cc:327-340)
+            static LLStaticHashedString s_wp("wolf_white_point"), s_tc("wolf_tone_contrast"), s_ts("wolf_tone_sat"), s_tp("wolf_tone_pivot");
+            const LLColor3 wp = wolf_phys ? WolfEnvironmentRender::whitePoint() : LLColor3::black;
+            shader->uniform3f(s_wp, wp.mV[0], wp.mV[1], wp.mV[2]);
+            // [WolfViewer 2026-10-13] the look before the curve (wolfToneLook)
+            shader->uniform1f(s_tc, WolfEnvironmentRender::toneContrast());
+            shader->uniform1f(s_ts, WolfEnvironmentRender::toneSaturation());
+            shader->uniform1f(s_tp, WolfEnvironmentRender::tonePivot());
+        }
 
         mScreenTriangleVB->setBuffer();
         mScreenTriangleVB->drawArrays(LLRender::TRIANGLES, 0, 3);
@@ -7982,10 +8017,21 @@ void LLPipeline::gammaCorrect(LLRenderTarget* src, LLRenderTarget* dst)
         static LLCachedControl<bool> should_auto_adjust(gSavedSettings, "RenderSkyAutoAdjustLegacy", false);
 
         LLSettingsSky::ptr_t psky = LLEnvironment::instance().getCurrentSky();
-        LLGLSLShader& shader = psky->getReflectionProbeAmbiance(should_auto_adjust) == 0.f ? gLegacyPostGammaCorrectProgram :
+        const bool wolf_phys = WolfEnvironmentRender::agxDisplay();   // [WOLF ENV 2026-10-12 physical; 2026-10-13 EEP: stock chain]
+        LLGLSLShader& shader = (!wolf_phys && psky->getReflectionProbeAmbiance(should_auto_adjust) == 0.f) ? gLegacyPostGammaCorrectProgram :
             gDeferredPostGammaCorrectProgram;
 
         shader.bind();
+        shader.uniform1f(LLShaderMgr::WOLF_PHYS, wolf_phys ? 1.f : 0.f);   // postDeferredGammaCorrect.glsl: Filament AgX under the native sky
+        {   // [WOLF ENV TAKRAM 2026-10-12] wolftk/filamentAgx.glsl: the daylight white balance (Bruneton demo.cc:327-340)
+            static LLStaticHashedString s_wp("wolf_white_point"), s_tc("wolf_tone_contrast"), s_ts("wolf_tone_sat"), s_tp("wolf_tone_pivot");
+            const LLColor3 wp = wolf_phys ? WolfEnvironmentRender::whitePoint() : LLColor3::black;
+            shader.uniform3f(s_wp, wp.mV[0], wp.mV[1], wp.mV[2]);
+            // [WolfViewer 2026-10-13] the look before the curve (wolfToneLook)
+            shader.uniform1f(s_tc, WolfEnvironmentRender::toneContrast());
+            shader.uniform1f(s_ts, WolfEnvironmentRender::toneSaturation());
+            shader.uniform1f(s_tp, WolfEnvironmentRender::tonePivot());
+        }
         shader.bindTexture(LLShaderMgr::DEFERRED_DIFFUSE, src, false, LLTexUnit::TFO_POINT);
         shader.uniform2f(LLShaderMgr::DEFERRED_SCREEN_RES, (GLfloat)src->getWidth(), (GLfloat)src->getHeight());
 
@@ -8016,7 +8062,8 @@ void LLPipeline::wolfCloudDeck()
     // mRT->deferredLight exists only with HDR, shadows, SSAO or depth of field (allocateScreenBuffer):
     // on the lowest settings there is no layer to march into, so no clouds.
     if (gCubeSnapshot || !gWolfCloudDeckProgram.isComplete() || !gCopyProgram.isComplete()
-        || !mRT->deferredLight.isComplete() || !WolfAltitudeSky::cloudDeck(deck))
+        || !mRT->deferredLight.isComplete() || WolfEnvironmentRender::volumetricActive()   // [WOLF ENV 2026-10-12/] its clouds replace the deck
+        || !WolfAltitudeSky::cloudDeck(deck))
     {
         return;
     }
@@ -8349,7 +8396,7 @@ void LLPipeline::applyCAS(LLRenderTarget* src, LLRenderTarget* dst)
     static LLCachedControl<bool> should_auto_adjust(gSavedSettings, "RenderSkyAutoAdjustLegacy", false);
 
     LLSettingsSky::ptr_t psky = LLEnvironment::instance().getCurrentSky();
-    bool legacy_gamma = psky->getReflectionProbeAmbiance(should_auto_adjust) == 0.f;
+    bool legacy_gamma = !WolfEnvironmentRender::agxDisplay() && psky->getReflectionProbeAmbiance(should_auto_adjust) == 0.f;   // [WOLF ENV 2026-10-12 physical; 2026-10-13 EEP: stock chain]
     if(legacy_gamma)
     {
         sharpen_shader = &gCASLegacyGammaProgram;
@@ -9250,6 +9297,8 @@ void LLPipeline::renderFinalize()
     glClearColor(0, 0, 0, 0);
 
     wolfCloudDeck();   // <WolfViewer 2026-10-07/> into the lit HDR frame, before the tone mapping
+    WolfEnvironmentRender::zonePass();   // [WOLF ENV 2026-10-12/] a zone's light over the finished frame (the clouds and fog: renderDeferredLighting)
+    WolfEnvironmentRender::captureFinal();   // [WOLF ENV TAKRAM 2026-10-12/] the debug capture's finished frame
 
     static LLCachedControl<bool> has_hdr(gSavedSettings, "RenderHDREnabled", true);
     bool hdr = gGLManager.mGLVersion > 4.05f && has_hdr();
@@ -9276,6 +9325,7 @@ void LLPipeline::renderFinalize()
     {
         gammaCorrect(&mRT->screen, &mPostPingMap);
     }
+    WolfEnvironmentRender::verifyFrame(&mPostPingMap, &mRT->deferredScreen);   // [WolfViewer 2026-10-13] the EEP reference vs the screen (trace only)
 
     LLVertexBuffer::unbind();
 
@@ -9455,6 +9505,10 @@ void LLPipeline::bindLightFunc(LLGLSLShader& shader)
 
 void LLPipeline::bindShadowMaps(LLGLSLShader& shader)
 {
+    // [WOLF ENV TAKRAM 2026-10-12] the native sky's atmosphere and cloud shadow on programs that carry
+    // wolftk/atmosphereLibF.glsl (both bindDeferredShader paths come through here; nothing otherwise)
+    WolfEnvironmentRender::bindSceneUniforms(shader);
+
     for (U32 i = 0; i < 4; i++)
     {
         LLRenderTarget* shadow_target = getSunShadowTarget(i);
@@ -9991,6 +10045,8 @@ void LLPipeline::renderDeferredLighting()
                     // </FS:Beq>
                     // send light color to shader in linear space
                     LLColor3 col = volume->getLightLinearColor() * light_scale;
+                    // [WOLF ENV 2026-10-12 physical] candela x pre-exposure under the physical sky (wolfenvironmentrender.h)
+                    if (WolfEnvironmentRender::skyActive()) col = WolfEnvironmentRender::physicalLightColor(col, volume->isLightSpotlight());
 
                     if (col.magVecSquared() < 0.001f)
                     {
@@ -10026,7 +10082,7 @@ void LLPipeline::renderDeferredLighting()
                         gDeferredLightProgram.uniform1f(LLShaderMgr::LIGHT_SIZE, s);
                         gDeferredLightProgram.uniform3fv(LLShaderMgr::DIFFUSE_COLOR, 1, col.mV);
                         gDeferredLightProgram.uniform1f(LLShaderMgr::LIGHT_FALLOFF, volume->getLightFalloff(DEFERRED_LIGHT_FALLOFF));
-                        gDeferredLightProgram.uniform1i(LLShaderMgr::CLASSIC_MODE, (psky->canAutoAdjust()) ? 1 : 0);
+                        gDeferredLightProgram.uniform1i(LLShaderMgr::CLASSIC_MODE, (psky->canAutoAdjust() && !WolfEnvironmentRender::skyActive()) ? 1 : 0);
 
                         gGL.syncMatrices();
 
@@ -10083,12 +10139,14 @@ void LLPipeline::renderDeferredLighting()
 
                     // send light color to shader in linear space
                     LLColor3 col = volume->getLightLinearColor() * light_scale;
+                    // [WOLF ENV 2026-10-12 physical] candela x pre-exposure under the physical sky (wolfenvironmentrender.h)
+                    if (WolfEnvironmentRender::skyActive()) col = WolfEnvironmentRender::physicalLightColor(col, volume->isLightSpotlight());
 
                     gDeferredSpotLightProgram.uniform3fv(LLShaderMgr::LIGHT_CENTER, 1, c);
                     gDeferredSpotLightProgram.uniform1f(LLShaderMgr::LIGHT_SIZE, s);
                     gDeferredSpotLightProgram.uniform3fv(LLShaderMgr::DIFFUSE_COLOR, 1, col.mV);
                     gDeferredSpotLightProgram.uniform1f(LLShaderMgr::LIGHT_FALLOFF, volume->getLightFalloff(DEFERRED_LIGHT_FALLOFF));
-                    gDeferredSpotLightProgram.uniform1i(LLShaderMgr::CLASSIC_MODE, (psky->canAutoAdjust()) ? 1 : 0);
+                    gDeferredSpotLightProgram.uniform1i(LLShaderMgr::CLASSIC_MODE, (psky->canAutoAdjust() && !WolfEnvironmentRender::skyActive()) ? 1 : 0);
 
                     gGL.syncMatrices();
 
@@ -10128,7 +10186,7 @@ void LLPipeline::renderDeferredLighting()
                         gDeferredMultiLightProgram[idx].uniform4fv(LLShaderMgr::MULTI_LIGHT, count, (GLfloat*)light);
                         gDeferredMultiLightProgram[idx].uniform4fv(LLShaderMgr::MULTI_LIGHT_COL, count, (GLfloat*)col);
                         gDeferredMultiLightProgram[idx].uniform1f(LLShaderMgr::MULTI_LIGHT_FAR_Z, far_z);
-                        gDeferredMultiLightProgram[idx].uniform1i(LLShaderMgr::CLASSIC_MODE, (psky->canAutoAdjust()) ? 1 : 0);
+                        gDeferredMultiLightProgram[idx].uniform1i(LLShaderMgr::CLASSIC_MODE, (psky->canAutoAdjust() && !WolfEnvironmentRender::skyActive()) ? 1 : 0);
                         far_z = 0.f;
                         count = 0;
                         mScreenTriangleVB->setBuffer();
@@ -10160,12 +10218,14 @@ void LLPipeline::renderDeferredLighting()
 
                     // send light color to shader in linear space
                     LLColor3 col = volume->getLightLinearColor() * light_scale;
+                    // [WOLF ENV 2026-10-12 physical] candela x pre-exposure under the physical sky (wolfenvironmentrender.h)
+                    if (WolfEnvironmentRender::skyActive()) col = WolfEnvironmentRender::physicalLightColor(col, volume->isLightSpotlight());
 
                     gDeferredMultiSpotLightProgram.uniform3fv(LLShaderMgr::LIGHT_CENTER, 1, glm::value_ptr(tc));
                     gDeferredMultiSpotLightProgram.uniform1f(LLShaderMgr::LIGHT_SIZE, light_size_final);
                     gDeferredMultiSpotLightProgram.uniform3fv(LLShaderMgr::DIFFUSE_COLOR, 1, col.mV);
                     gDeferredMultiSpotLightProgram.uniform1f(LLShaderMgr::LIGHT_FALLOFF, light_falloff_final);
-                    gDeferredMultiSpotLightProgram.uniform1i(LLShaderMgr::CLASSIC_MODE, (psky->canAutoAdjust()) ? 1 : 0);
+                    gDeferredMultiSpotLightProgram.uniform1i(LLShaderMgr::CLASSIC_MODE, (psky->canAutoAdjust() && !WolfEnvironmentRender::skyActive()) ? 1 : 0);
 
                     mScreenTriangleVB->drawArrays(LLRender::TRIANGLES, 0, 3);
                 }
@@ -10176,6 +10236,17 @@ void LLPipeline::renderDeferredLighting()
         }
 
         gGL.setColorMask(true, true);
+    }
+
+    // [WOLF ENV TAKRAM 2026-10-12] the native sky's clouds and aerial perspective over the opaque frame, before the
+    // water and the transparent geometry are drawn over it - where the EEP sky and clouds sit (nothing when inactive).
+    // Also in reflection-probe faces, so the probes' ambient and reflections see the clouds (Paul's decision D2b).
+    static LLCachedControl<bool> wolf_env_capture(gSavedSettings, "WolfEnvironmentDebugCapture", false);
+    if (WolfEnvironmentRender::skyActive() || (wolf_env_capture && WolfEnvironmentRender::tier() > 0))
+    {
+        screen_target->flush();
+        WolfEnvironmentRender::postPass();
+        screen_target->bindTarget();
     }
 
     {  // render non-deferred geometry (alpha, fullbright, glow)

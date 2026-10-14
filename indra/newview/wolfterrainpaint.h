@@ -408,6 +408,8 @@ private:
     LLButton*       mUndo = nullptr;
     LLButton*       mClear = nullptr;
     LLButton*       mSave = nullptr;
+    LLButton*       mCaves = nullptr;        // [WOLF CAVE 2026-10-12] Caves... (Wolf only)
+    LLTextBox*      mCavesLabel = nullptr;
     U64  mShownHandle = 0;
     S32  mShownVersion = -1;
     U32  mShownRev = 0xffffffff;

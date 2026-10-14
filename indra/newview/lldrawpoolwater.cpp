@@ -61,6 +61,8 @@
 #include "wolfsurfcurl.h"    // [SURF 2026-09-07 phase 2]
 #include "wolfgrid.h"        // <WolfViewer 2026-09-22/> Wolf Territories only
 #include "wolfaltitudesky.h"  // <WolfViewer 2026-10-07/> the sky's ocean to the horizon
+#include <map>   // [WolfViewer round 15] the per-region field fade
+#include "llframetimer.h"
 // </WolfViewer>
 
 bool LLDrawPoolWater::sSkipScreenCopy = false;
@@ -589,16 +591,27 @@ void LLDrawPoolWater::pushWaterPlanes(int pass)
             // pointer but lie elsewhere, and bounded / stream surfaces have their own rules.
             // Source: wolfstorm terrain_manager.js — fields are per region water mesh.
             LLViewerRegion* rgn = water->getRegion();
+            // [WolfViewer 2026-10-13 round 13, round 15] Tears between regions (Paul's 10-13 screenshot: black seams along region
+            // borders between two swell crests several metres apart). A NEIGHBOURING region's own plane rolled its swell toward
+            // ITS centre (wolfSwellCentre below) while the agent region's plane and the hole / edge planes rolled toward the
+            // agent's: two swell phases met at the shared border. Every plain water plane of another region now rolls toward the
+            // agent region's centre, so the crests run on across a border. Each region keeps its own fields (below).
+            LLViewerRegion* agent_rgn = gAgent.getRegion();
+            const bool neighbour_plane = rgn && agent_rgn && rgn != agent_rgn && !water->getIsEdgePatch()
+                                      && water->getBoundedWaterDepth() <= 0.f && !water->hasConformingMesh()
+                                      && water->getWaterfall() <= 0.f && water->getStreamFlow() <= 0.f
+                                      && rgn->getLand().getWaterObj() == water;
+            LLViewerRegion* wave_rgn = neighbour_plane ? agent_rgn : rgn;
             // <WolfViewer 2026-09-26> The swell converges on the centre of the region this
             // water belongs to (waterV.glsl wolfSwellCentre). Hole and edge planes carry the
             // agent region's pointer (llworld.cpp updateWaterObjects), so they roll in toward it.
             {
                 static LLStaticHashedString s_swell_centre("wolfSwellCentre");
                 static LLStaticHashedString s_swell_half("wolfSwellHalf");
-                if (rgn)
+                if (wave_rgn)
                 {
-                    const LLVector3 o = rgn->getOriginAgent();
-                    const F32 half = rgn->getWidth() * 0.5f;
+                    const LLVector3 o = wave_rgn->getOriginAgent();
+                    const F32 half = wave_rgn->getWidth() * 0.5f;
                     cur_shader->uniform2f(s_swell_centre, o.mV[VX] + half, o.mV[VY] + half);
                     cur_shader->uniform1f(s_swell_half, half);
                 }
@@ -617,7 +630,32 @@ void LLDrawPoolWater::pushWaterPlanes(int pass)
             const bool span_plane = !own_plane && rgn && rgn == gAgent.getRegion()
                                  && water->getBoundedWaterDepth() <= 0.f && !water->hasConformingMesh()
                                  && water->getWaterfall() <= 0.f && water->getStreamFlow() <= 0.f;
+            // [WolfViewer round 15] the fields stay each region's OWN (its land shelters its lakes and rivers; round 13 gave a
+            // neighbour the agent's, whose span may not cover it - "1.0 (open sea) outside its span", wolfwaterfield.h - and
+            // so carried ocean swell onto a sheltered river: Paul's wall of water, 2026-10-13 images/24.png); only the swell
+            // CENTRE is shared across a border (wave_rgn above), which is what put the crests out of phase there.
             const WolfWaterField::Field* fld = (own_plane || span_plane) ? WolfWaterField::instance().get(rgn) : nullptr;
+            // [WolfViewer round 15] before a region's own fields are known its water is FLAT, then the swell fades in over
+            // FIELD_FADE_S: without them every vertex counted as open sea at the shader's maximum scale (the note above,
+            // 2026-09-13) - right after a teleport or crossing a river stood up as a wall until the fields arrived
+            {
+                static const F64 FIELD_FADE_S = 5.0;
+                static std::map<const LLViewerRegion*, F64> s_fieldSince;
+                F32 fade = 1.f;
+                if ((own_plane || span_plane) && rgn)
+                {
+                    if (!fld) { s_fieldSince.erase(rgn); fade = 0.f; }
+                    else
+                    {
+                        const F64 now = LLFrameTimer::getElapsedSeconds();
+                        auto it = s_fieldSince.find(rgn);
+                        if (it == s_fieldSince.end()) it = s_fieldSince.emplace(rgn, now).first;
+                        fade = (F32)llclamp((now - it->second) / FIELD_FADE_S, 0.0, 1.0);
+                    }
+                    if (s_fieldSince.size() > 64) s_fieldSince.clear();   // regions come and go; a stale pointer only restarts a fade
+                }
+                cur_shader->uniform1f(LLShaderMgr::WATER_WAVE_AMPLITUDE, no_swell ? 0.f : amplitude * fade);
+            }
             if (fld)
             {
                 S32 ch = cur_shader->enableTexture(LLShaderMgr::WOLF_DEPTH_FIELD);

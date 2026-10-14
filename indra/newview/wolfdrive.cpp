@@ -215,6 +215,8 @@ namespace
         "WolfDriveButtonStage", "WolfDriveButtonBoost", "WolfDriveButtonAnchor", "WolfDriveButtonAssist",   // <WolfViewer 2026-10-11/> w65
         "WolfDriveButtonLandingGear", "WolfDriveButtonEngine",
         "WolfDriveButtonDive", "WolfDriveButtonSurface", "WolfDriveButtonPeriscope", "WolfDriveButtonSonar",
+        "WolfDriveButtonRetarderUp", "WolfDriveButtonRetarderDown", "WolfDriveButtonRetarderDsc",   // [WOLF RETARDER 2026-10-12/]
+        "WolfDriveButtonRetarderDscUp", "WolfDriveButtonRetarderDscDown", "WolfDriveButtonRetarderAut",
     };
     const char* const ACTION_LABELS[WolfDrive::ACTION_COUNT] =
     {
@@ -222,12 +224,15 @@ namespace
         "Hazard lights", "Cruise control",
         "Stage (rocket)", "Boost (held)", "Anchor", "Flight assist", "Landing gear", "Engine",   // <WolfViewer 2026-10-11/> w65
         "Dive (held)", "Surface (held)", "Periscope", "Sonar ping",
+        "Retarder: more", "Retarder: less", "Downhill speed control", "Downhill speed +",   // [WOLF RETARDER 2026-10-12/]
+        "Downhill speed -", "Retarder AUT (pedal)",
     };
     const char* const ACTION_IDS[WolfDrive::ACTION_COUNT] =
     {
         "gear_up", "gear_down", "horn", "lights", "ind_left", "ind_right", "handbrake", "hazards", "cruise",
         "stage", "boost", "anchor", "assist", "landing_gear", "engine",   // <WolfViewer 2026-10-11/> w65
         "dive", "surface", "periscope", "sonar",
+        "retarder_up", "retarder_down", "retarder_dsc", "retarder_dsc_up", "retarder_dsc_down", "retarder_aut",   // [WOLF RETARDER 2026-10-12/]
     };
     // The keys an action has until the driver changes it: letters no viewer binding uses unmodified
     // (app_settings/key_bindings.xml binds W A S D E C F R T) - the viewer's own choice. Gear up /
@@ -235,11 +240,20 @@ namespace
     // <WolfViewer 2026-10-11> w65: J (jettison) stage, Y boost, N anchor, O flight assist, G landing gear, I ignition;
     // the submarine M dive, U surface (up), P periscope, Q sonar - the last letters key_bindings.xml leaves unbound
     // unmodified (the viewer's own choice, changeable in Driving Controls).
+    // [WOLF RETARDER 2026-10-12] Every letter is taken by now (the actions above, and key_bindings.xml's W A S D E C
+    // F R T), so the retarder's keys are punctuation that neither app_settings/key_bindings.xml nor Firestorm's own
+    // (viewercode/phoenix-firestorm-master/indra/newview/app_settings/key_bindings.xml) nor menu_viewer.xml binds
+    // unmodified, and that every platform's keyboard maps to itself (llkeyboardsdl2.cpp:94-102, llkeyboardwin32.cpp
+    // VK_OEM_1 / COMMA / PERIOD / 4 / 6, llkeyboardmacosx.cpp 0x1e / 0x21 / 0x29 / 0x2b / 0x2f) and keyFromString
+    // accepts (llkeyboard.cpp:324-329): ] one stage more, [ one stage less (the stalk), ; downhill speed control,
+    // . / , its set speed up / down. AUT is a switch left alone for a whole journey: no key until the driver gives it
+    // one (a stray press would take the retarder off the brake pedal).
     const char* const ACTION_DEFAULT_KEYS[WolfDrive::ACTION_COUNT] =
     {
         "", "", "H", "L", "Z", "X", "B", "V", "K",
         "J", "Y", "N", "O", "G", "I",
         "M", "U", "P", "Q",
+        "]", "[", ";", ".", ",", "",
     };
     const char* const OUT_LABELS[WolfDrive::OUT_COUNT] =
     {
@@ -265,6 +279,7 @@ namespace
         "adblue", "air", "door", "esp",
         "shield", "hull", "heat", "stage", "boost", "anchor", "depth",   // <WolfViewer 2026-10-11/> PROTOCOL.md "New warnings words"
         "oxygen", "battery", "leak",
+        "retarder",   // [WOLF RETARDER 2026-10-12/] WolfDriveModule.cs DASH_KEYS warnings: held back by heat
     };
     const size_t WARNING_COUNT = sizeof(WARNING_NAMES) / sizeof(WARNING_NAMES[0]);
 
@@ -869,6 +884,12 @@ void WolfDrive::doAction(S32 action)
     // (settings.xml UISndTrackerBeacon, changeable in Preferences > Sounds; llui.cpp find_ui_sound plays it
     // without a PlayMode switch). The submarine's script acts on the bit.
     case ACT_SONAR:        if (mType == TYPE_SUBMARINE) make_ui_sound("UISndTrackerBeacon"); break;
+    // [WOLF RETARDER 2026-10-12] the truck's stalk and switches (the other designs have no retarder: only what
+    // the driver set the action to send, below). Downhill speed + / - act while held (retarderWord).
+    case ACT_RETARDER_UP:   if (mType == TYPE_TRUCK) setRetarderStalk(mRetarderStalk + 1); break;
+    case ACT_RETARDER_DOWN: if (mType == TYPE_TRUCK) setRetarderStalk(mRetarderStalk - 1); break;
+    case ACT_RETARDER_DSC:  if (mType == TYPE_TRUCK) setRetarderDsc(!mRetarderDsc); break;
+    case ACT_RETARDER_AUT:  if (mType == TYPE_TRUCK) setRetarderAut(!retarderAut()); break;
     default: break;   // the horn: the script makes the sound; stage, boost, dive, surface: the script acts on the bit
     }
     if (!mSeated)
@@ -904,6 +925,66 @@ void WolfDrive::doAction(S32 action)
         break;
     default: break;
     }
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════
+// [WOLF RETARDER 2026-10-12] Paul: "fix the truck please add retarder control to the hud make it 100% proper".
+// THE REAL ONE the truck design is modelled on (a Scania R; read 2026-10-12):
+//   Scania "Retarder - Function description" 10:2288 (1 712 020, 10:05-07 issue 2, Scania CV AB 1999):
+//     - "The hand lever has six positions. The five brake positions each give a fixed braking torque: 500, 1000,
+//       1500, 2000, 3000 Nm." Position 0 is off. (Volvo's RET-TH fact sheet, a Voith retarder: "a lever next to the
+//       steering wheel" - drawn here beside the wheel, between it and the cluster.)
+//     - "The switch on the top of the lever is for manual activation of downhill speed control."
+//     - "Actuating the accelerator pedal interrupts retarder braking when the clutch pedal is in the released
+//       position." / "If ... the clutch pedal is in depressed position, retarder braking continues."
+//     - "The AUT switch is used to make it possible for the retarder and downhill speed control to be activated
+//       automatically using the brake pedal" - "the retarder braking which takes place at the beginning of brake
+//       pedal travel ... before the wheel brakes are applied".
+//     - The stop light comes on above 450 Nm (900 Nm from downhill speed control) and goes out below 300 Nm.
+//     - "Limiting at high temperatures": braking power falls when the cooling cannot keep up, "directly
+//       proportional to the engine speed", and is regained gradually as the coolant cools.
+//   Scania Next Gen "Quick Guide" (UK brochure): the lever "has 5 positions"; moved down "the braking effect
+//     increases gradually"; left out of 0 it "will start to brake again as soon as you release the accelerator
+//     pedal". Downhill speed control: "Press + or - to change the set speed at which the vehicle will begin to
+//     brake. Press 0 to disengage". "Automatic retarder: ... you depress the brake pedal, the retarder and wheel
+//     brakes work together".
+// THE VIEWER'S PART: the stalk (0..5), the downhill switch and its + / -, and AUT, sent to the vehicle's script as
+// the 8th "in" parameter; the script does the braking and sends back the stage braking now ("retarder"), the set
+// speed ("dsc_speed") and the "retarder" warning (region-terrain-work/wolfvehicles/PROTOCOL.md). Truck design only.
+
+void WolfDrive::setRetarderStalk(S32 pos)
+{
+    mRetarderStalk = llclamp(pos, 0, RETARDER_STALK_MAX);
+}
+
+void WolfDrive::setRetarderDsc(bool on)
+{
+    mRetarderDsc = on && onWolf();   // [WOLF ONLY]
+}
+
+bool WolfDrive::retarderAut() const
+{
+    static LLCachedControl<bool> aut(gSavedSettings, "WolfDriveRetarderAut", true);
+    return aut;
+}
+
+void WolfDrive::setRetarderAut(bool on)
+{
+    gSavedSettings.setBOOL("WolfDriveRetarderAut", on);
+}
+
+U32 WolfDrive::retarderWord() const
+{
+    if (mType != TYPE_TRUCK)
+    {
+        return 0;   // no retarder on the other designs: the stalk, the switches and AUT all off
+    }
+    U32 w = (U32)llclamp(mRetarderStalk, 0, RETARDER_STALK_MAX);
+    if (mRetarderDsc) w |= RETARDER_W_DSC;
+    if (retarderAut()) w |= RETARDER_W_AUT;
+    if (actionHeld(ACT_RETARDER_DSC_UP)) w |= RETARDER_W_DSC_UP;
+    if (actionHeld(ACT_RETARDER_DSC_DOWN)) w |= RETARDER_W_DSC_DOWN;
+    return w;
 }
 
 void WolfDrive::edgeButtons(U32 held)
@@ -948,9 +1029,12 @@ void WolfDrive::combine(F32 dt)
         // a held key is scanned every frame; a lost key-up clears after KEY_STALE_SECONDS
         if ((mKeyButtons & (1u << a)) && t - mKeySeen[a] < KEY_STALE_SECONDS) keys |= (1u << a);
     }
-    mButtons = (mHwButtons | mScreenButtons | mScreenLatched | keys) & BUTTON_MASK;
+    // [WOLF RETARDER 2026-10-12] the edges are taken over EVERY action: the retarder's six (bits 19..24) are past
+    // BUTTON_MASK, which used to be applied first and swallowed them. Only the buttons go on the wire.
+    mActionsHeld = (mHwButtons | mScreenButtons | mScreenLatched | keys) & ACTION_MASK;
+    mButtons = mActionsHeld & BUTTON_MASK;
     mScreenLatched = 0;
-    edgeButtons(mButtons);
+    edgeButtons(mActionsHeld);
 }
 
 // The on-screen pedals and wheel drive through the same LLAgent calls the old Vehicle tab used
@@ -997,8 +1081,11 @@ void WolfDrive::sendAnalogue()
         if (mWasSending && mSeated && gAgent.getRegion() && canSend())
         {
             // Let go: one last message with nothing pressed, so a script stops at once.
+            // [WOLF RETARDER 2026-10-12] the stalk and switches stay where they were set (levers, not presses);
+            // only the downhill + / - (held) let go
             send_generic_message(METHOD_TO_SIM, { "in", "0.000", "0.000", "0.000", "0.000",
-                                                  llformat("%d", mSelector), "0" });
+                                                  llformat("%d", mSelector), "0",
+                                                  llformat("%u", retarderWord() & ~(RETARDER_W_DSC_UP | RETARDER_W_DSC_DOWN)) });
         }
         mWasSending = false;
         mLastSentKey.clear();
@@ -1015,6 +1102,9 @@ void WolfDrive::sendAnalogue()
         llformat("%.3f", llclamp(mClutch, 0.f, 1.f)),
         llformat("%d", gear),
         llformat("%u", mButtons & BUTTON_MASK),
+        // [WOLF RETARDER 2026-10-12] the 8th (WolfDriveModule.cs RETARDER_*): a region from before it reads only
+        // the first 7 (it returned on args.Length < 7 and parsed args[1..6])
+        llformat("%u", retarderWord()),
     };
     std::string key;
     for (const std::string& p : params) key += p + "|";
@@ -1102,6 +1192,7 @@ void WolfDrive::receiveDashboard(const LLUUID& invoice, const std::vector<std::s
         else if (k == "lights")     { mScript.mHasLights = true; mScript.mLights = (S32)llclamp(n, 0.0, 2.0); }
         else if (k == "handbrake")  { mScript.mHasHandbrake = true; mScript.mHandbrake = n >= 0.5; }
         else if (k == "retarder")   { mScript.mHasRetarder = true; mScript.mRetarder = (S32)llclamp(n, 0.0, 5.0); }
+        else if (k == "dsc_speed")  { mScript.mHasDscSpeed = true; mScript.mDscSpeed = (F32)llclamp(n, 0.0, 200.0); }   // [WOLF RETARDER 2026-10-12/]
         else if (k == "cruise")     { mScript.mHasCruise = true; mScript.mCruise = n >= 0.5; }
         else if (k == "drive_time") { mScript.mHasDriveTime = true; mScript.mDriveTime = (F32)llclamp(n, 0.0, 86400.0); }
         else if (k == "odo")        { mScript.mHasOdo = true; mScript.mOdo = llclamp(n, 0.0, 9999999.0); }
@@ -1387,7 +1478,10 @@ void WolfDrive::goInert()
     for (F32& v : mHw) v = 0.f;
     mHwButtons = 0;
     mButtons = 0;
+    mActionsHeld = 0;
     mPrevButtons = 0;
+    mRetarderStalk = 0;     // [WOLF RETARDER 2026-10-12/]
+    mRetarderDsc = false;
     mTapQueue.clear();
     mTapDir = 0;
 }
@@ -1505,6 +1599,8 @@ void WolfDrive::watchSeat()
         mChatStep = -1;
         mChatStepSeat.setNull();
         mPrevButtons = 0;
+        mRetarderStalk = 0;     // [WOLF RETARDER 2026-10-12] a new seat: the stalk at 0, downhill control off
+        mRetarderDsc = false;   // (AUT is the driver's own setting and stays)
         resetTrip();
         if (!mSeated)
         {
@@ -1773,6 +1869,8 @@ void WolfDrive::model(F32 dt)
     s.mLights = use && sc.mHasLights ? sc.mLights : mOwnLights;
     s.mHandbrake = use && sc.mHasHandbrake ? sc.mHandbrake : mOwnHandbrake;
     s.mRetarder = use && sc.mHasRetarder ? sc.mRetarder : 0;
+    s.mHasDscSpeed = use && sc.mHasDscSpeed && sc.mDscSpeed > 0.f;   // [WOLF RETARDER 2026-10-12/] 0: none held
+    s.mDscSpeed = s.mHasDscSpeed ? sc.mDscSpeed : 0.f;
     s.mCruise = use && sc.mHasCruise ? sc.mCruise : mOwnCruise;
     s.mDriveTime = use && sc.mHasDriveTime ? sc.mDriveTime : mDriving;
     s.mOdoKm = use && sc.mHasOdo ? sc.mOdo : mOdoKm;

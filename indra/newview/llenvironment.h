@@ -164,6 +164,11 @@ public:
     LLSettingsDay::ptr_t        getEnvironmentDay(EnvSelection_t env);
     LLSettingsDay::Seconds      getEnvironmentDayLength(EnvSelection_t env);
     LLSettingsDay::Seconds      getEnvironmentDayOffset(EnvSelection_t env);
+    // [WOLF BUILDER 2026-10-13] the instance's animate flags (DayInstance::NO_ANIMATE_SKY / _WATER), 0
+    // when there is no instance. A fixed sky chosen over a day cycle keeps that day (setEnvironment
+    // fixed clones the instance), so the day and sky getters alone cannot tell the two apart; the
+    // flags can. Read by WolfBuilder before it puts Midday on ENV_LOCAL, so it can put back the right one.
+    U32                         getEnvironmentAnimateFlags(EnvSelection_t env);
     fixedEnvironment_t          getEnvironmentFixed(EnvSelection_t env, bool resolve = false);
     LLSettingsSky::ptr_t        getEnvironmentFixedSky(EnvSelection_t env, bool resolve = false)      { return getEnvironmentFixed(env, resolve).first; };
     LLSettingsWater::ptr_t      getEnvironmentFixedWater(EnvSelection_t env, bool resolve = false)    { return getEnvironmentFixed(env, resolve).second; };

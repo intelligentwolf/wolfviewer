@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WolfViewer 2026-10-14] One Experiences card (wolffloaterexperiences.cpp buildCards): picture,
+     title, blurb, where it is, and the primary action, Go. The code sets every rect (featured cards
+     are taller with a bigger picture); this file holds the looks.
+     [WolfViewer 2026-10-14] "when" is used by What's on's event cards only (buildEventCards shows it and
+     sets its words and colour: LIVE NOW in AccentColor); experience cards leave it hidden. -->
+<panel
+ background_opaque="false"
+ background_visible="true"
+ bg_alpha_color="DkGray2"
+ bg_opaque_color="DkGray2"
+ follows="left|top"
+ height="108"
+ layout="topleft"
+ left="0"
+ name="experience_card"
+ top="0"
+ width="500">
+    <icon follows="left|top" height="96" layout="topleft" left="6" mouse_opaque="false" name="picture" scale_image="true" top="6" width="128" />
+    <text follows="left|top" font="SansSerifBold" height="18" layout="topleft" left="144" name="title" parse_urls="false" text_color="White" top="6" use_ellipses="true" width="268" />
+    <text follows="left|top" font="SansSerifSmall" height="16" layout="topleft" left="144" name="when" parse_urls="false" text_color="LtGray" top="26" use_ellipses="true" visible="false" width="344" />
+    <text follows="left|top" height="48" layout="topleft" left="144" name="blurb" parse_urls="false" top="26" use_ellipses="true" width="268" wrap="true" />
+    <text follows="left|top" font="SansSerifSmall" height="16" layout="topleft" left="144" name="where" parse_urls="false" text_color="LtGray_50" top="86" use_ellipses="true" width="268" />
+    <button follows="left|top" height="28" label="Go" layout="topleft" left="424" name="go" top="40" width="70" />
+</panel>

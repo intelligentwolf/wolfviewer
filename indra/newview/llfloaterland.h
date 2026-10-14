@@ -71,6 +71,7 @@ class LLParcel;
 class LLPanelLandExperiences;
 class LLPanelLandEnvironment;
 class WolfPanelLandWeather; // <WolfViewer 2026-09-12> About Land > Weather (wolfregionweather.h)
+class WolfPanelLandSandbox; // <WolfViewer 2026-10-13> About Land > Sandbox (wolflandsandbox.h)
 
 class LLFloaterLand
 :   public LLFloater
@@ -109,6 +110,7 @@ protected:
     static void* createPanelLandExperiences(void* data);
     static void* createPanelLandEnvironment(void* data);
     static void* createPanelLandWeather(void* data);   // <WolfViewer 2026-09-12>
+    static void* createPanelLandSandbox(void* data);   // <WolfViewer 2026-10-13>
     static void* createPanelLandBan(void* data);
 
 
@@ -127,6 +129,7 @@ protected:
     LLPanelLandExperiences* mPanelExperiences;
     LLPanelLandEnvironment *mPanelEnvironment;
     WolfPanelLandWeather   *mPanelWeather = nullptr;   // <WolfViewer 2026-09-12>
+    WolfPanelLandSandbox   *mPanelSandbox = nullptr;   // <WolfViewer 2026-10-13>
 
     LLSafeHandle<LLParcelSelection> mParcel;
 

@@ -254,7 +254,8 @@ private:
         H_PAGE,           // a button that opens a Roleplay window page (arg: WolfGameConsole::EPage)
         H_PANEL_BG,       // PANEL: the HUD's background on / off
         H_GUIDE_OK, H_GUIDE_HELP, H_GUIDE_CARD,
-        H_GAMEMODE_SW     // [2026-10-09] the Game Mode on / off switch on the top edge
+        H_GAMEMODE_SW,    // [2026-10-09] the Game Mode on / off switch on the top edge
+        H_INVENTORY       // [HUD INVENTORY 2026-10-12] the toolbar's Inventory (WolfHud::toggleInventory)
     };
     WolfGameHits mCombatHits;
     struct NoticeHit { LLRect mRect, mClose; U32 mSerial; };

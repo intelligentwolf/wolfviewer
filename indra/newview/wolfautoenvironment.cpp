@@ -27,6 +27,7 @@
 #include "llcorehttputil.h"
 #include "llcoros.h"
 #include "llenvironment.h"
+#include "llfloaterreg.h"
 #include "llframetimer.h"
 #include "llhttpconstants.h"
 #include "lllineeditor.h"
@@ -153,6 +154,8 @@ bool WolfPanelRegionAutoEnvironment::postBuild()
     childSetAction("ae_search_btn", [this](LLUICtrl*, const LLSD&) { onSearch(); });
     childSetAction("ae_apply",      [this](LLUICtrl*, const LLSD&) { onApply(); });
     childSetAction("ae_revert",     [this](LLUICtrl*, const LLSD&) { onRevert(); });
+    // [WOLF ENV 2026-10-12] the window that now holds all of this
+    childSetAction("ae_open_wolf_env", [](LLUICtrl*, const LLSD&) { LLFloaterReg::showInstance("wolf_environment"); });
     writeControls();
     return true;
 }
@@ -255,7 +258,12 @@ void WolfPanelRegionAutoEnvironment::writeControls()
         WolfRegionWeather::instance().setAutoEnvPreview(false, 0.0);
     }
 
-    const bool editable = canEdit() && !mBusy;
+    // [WOLF ENV 2026-10-12] A region with a Wolf Environment is described by it (auto_env_lib.php
+    // ae_config wolfEnvironment); this tab only shows it, and auto_environment.php refuses a save.
+    const bool wolfEnv = have && mConfig["wolfEnvironment"].asBoolean();
+    if (LLView* b = findChild<LLView>("ae_open_wolf_env")) b->setVisible(WolfGrid::isOnWolfTerritories());
+    if (wolfEnv && mStatus && mStatus->getText().empty()) setStatus(getString("str_wolf_env"), false);
+    const bool editable = canEdit() && !mBusy && !wolfEnv;
     for (const char* name : { "ae_enabled", "ae_sky", "ae_weather", "ae_search", "ae_search_btn",
                               "ae_results", "ae_place", "ae_lat", "ae_lon", "ae_clock", "ae_clock_search", "ae_apply" })
     {

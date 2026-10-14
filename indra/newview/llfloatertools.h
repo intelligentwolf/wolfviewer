@@ -127,10 +127,15 @@ public:
     void onClickBtnCopyKeys();
     void onClickExpand();
 
+    // [WOLF BUILDER 2026-10-13] the Builders Mode check box and the Wolf Builder... button (wolfbuilder.cpp)
+    void onCommitWolfBuildersMode();
+    void onClickWolfBuilder();
+
 private:
     void refresh();
     static void setObjectType( LLPCode pcode );
     void onClickGridOptions();
+    void applyWolfBuildersMode();   // [WOLF BUILDER 2026-10-13] Midday if the setting is on; tells the user when it cannot
 
     // <FS:Ansariel> FIRE-7802: Grass and tree selection in build tool
     void buildTreeGrassCombo();
@@ -172,6 +177,7 @@ public:
     LLCheckBoxCtrl* mCheckShowHighlight; //Phoenix:KC
     LLCheckBoxCtrl* mCheckActualRoot; //Phoenix:KC
     LLCheckBoxCtrl* mCheckSelectProbes; // <FS:PP>
+    LLCheckBoxCtrl* mCheckWolfBuildersMode = nullptr;   // [WOLF BUILDER 2026-10-13/]
 
     // Ansariel: Reverted the hack because then when clicking the label it
     //           doesn't check the checkbox anymore!

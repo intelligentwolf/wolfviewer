@@ -84,6 +84,14 @@ vec3 linear_to_srgb(vec3 c);
 
 void calcAtmosphericVarsLinear(vec3 inPositionEye, vec3 norm, vec3 light_dir, out vec3 sunlit, out vec3 amblit, out vec3 atten, out vec3 additive);
 vec4 applySkyAndWaterFog(vec3 pos, vec3 additive, vec3 atten, vec4 color);
+uniform float wolf_phys;   // [WOLF ENV TAKRAM 2026-10-12] atmosphericsFuncs.glsl
+// [WOLF ENV TAKRAM 2026-10-12] wolftk/atmosphereLibF.glsl, linked as a second unit when WOLF_TK_LIB is defined
+// (llviewershadermgr.cpp wolf_tk_attach): three-geospatial's aerial perspective (aerialPerspectiveEffect.frag
+// applyTransmittanceInscatter) and the clouds' Beer-shadow-map transmittance (:354-358), at an eye-space position.
+#ifdef WOLF_TK_LIB
+vec3 wolfTkAerialPerspective(vec3 eyePos, vec3 radiance);
+float wolfTkCloudShadow(vec3 eyePos);
+#endif
 
 void calcHalfVectors(vec3 lv, vec3 n, vec3 v, out vec3 h, out vec3 l, out float nh, out float nl, out float nv, out float vh, out float lightDist);
 float calcLegacyDistanceAttenuation(float distance, float falloff);
@@ -170,6 +178,11 @@ void main()
 #ifdef HAS_SUN_SHADOW
     scol = sampleDirectionalShadow(pos.xyz, norm.xyz, frag);
 #endif
+#ifdef WOLF_TK_LIB
+    // [WOLF ENV TAKRAM 2026-10-12] decision D2: the clouds' shadow on the sun term - an adaptation of three-geospatial
+    // aerialPerspectiveEffect.frag:116-118 (sunIrradiance *= sunTransmittance, its post-process lighting) to LL's own lighting
+    if (wolf_phys > 0.5) scol *= wolfTkCloudShadow(pos.xyz);
+#endif
 
     vec3 orm = texture(specularMap, metallic_roughness_texcoord.xy).rgb; //orm is packed into "emissiveRect" to keep the data in linear color space
 
@@ -212,6 +225,11 @@ void main()
     color.rgb += light.rgb;
 
     color.rgb = applySkyAndWaterFog(pos.xyz, additive, atten, vec4(color, 1.0)).rgb;
+#ifdef WOLF_TK_LIB
+    // [WOLF ENV TAKRAM 2026-10-12] decision D14: the aerial perspective on a transparent surface, as the composite gives the
+    // opaque frame (aerialPerspectiveEffect.frag:381-383); the blend (SRC_ALPHA, ONE_MINUS_SRC_ALPHA) then lays it over that
+    if (wolf_phys > 0.5 && wolf_phys < 1.5) color.rgb = wolfTkAerialPerspective(pos.xyz, color.rgb);
+#endif
 
     float a = basecolor.a*vertex_color.a;
     float final_scale = 1;

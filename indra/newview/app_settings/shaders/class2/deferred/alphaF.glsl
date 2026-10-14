@@ -81,6 +81,16 @@ void mirrorClip(vec3 pos);
 void sampleReflectionProbesLegacy(inout vec3 ambenv, inout vec3 glossenv, inout vec3 legacyenv,
         vec2 tc, vec3 pos, vec3 norm, float glossiness, float envIntensity, bool transparent, vec3 amblit_linear);
 
+uniform float wolf_phys;   // [WOLF ENV 2026-10-12 physical] deferredUtil.glsl
+// [WOLF ENV TAKRAM 2026-10-12] wolftk/atmosphereLibF.glsl, linked as a second unit when WOLF_TK_LIB is defined
+// (llviewershadermgr.cpp wolf_tk_attach): three-geospatial's aerial perspective (aerialPerspectiveEffect.frag
+// applyTransmittanceInscatter) and the clouds' Beer-shadow-map transmittance (:354-358), at an eye-space position.
+#ifdef WOLF_TK_LIB
+vec3 wolfTkAerialPerspective(vec3 eyePos, vec3 radiance);
+float wolfTkCloudShadow(vec3 eyePos);
+#endif
+float wolfPunctualAtten(float d, float r);
+
 vec3 calcPointLightOrSpotLight(vec3 light_col, vec3 diffuse, vec3 v, vec3 n, vec4 lp, vec3 ln, float la, float fa, float is_pointlight, float ambiance)
 {
     // SL-14895 inverted attenuation work-around
@@ -126,9 +136,11 @@ vec3 calcPointLightOrSpotLight(vec3 light_col, vec3 diffuse, vec3 v, vec3 n, vec
         lv = normalize(lv);
 
         //distance attenuation
+        float dist_atten_wolf = wolfPunctualAtten(dist * inverted_la, inverted_la / 1.5) / 3.14159265;   // [WOLF ENV 2026-10-12 physical] candela -> lux, Lambert's 1 / pi
         float dist_atten = clamp(1.0-(dist-1.0*(1.0-fa))/fa, 0.0, 1.0);
         dist_atten *= dist_atten;
         dist_atten *= 2.0f;
+        if (wolf_phys > 0.5) dist_atten = dist_atten_wolf;
 
         if (dist_atten <= 0.0)
         {
@@ -148,7 +160,7 @@ vec3 calcPointLightOrSpotLight(vec3 light_col, vec3 diffuse, vec3 v, vec3 n, vec
         float amb_da = 0.0;//ambiance;
         if (da > 0)
         {
-            lit = clamp(da * dist_atten, 0.0, 1.0);
+            lit = wolf_phys > 0.5 ? da * dist_atten : clamp(da * dist_atten, 0.0, 1.0);
             col = lit * light_col * diffuse;
             amb_da += (da*0.5+0.5) * ambiance;
         }
@@ -185,6 +197,11 @@ void main()
 
 #ifdef HAS_SUN_SHADOW
     shadow = sampleDirectionalShadow(pos.xyz, norm.xyz, frag);
+#endif
+#ifdef WOLF_TK_LIB
+    // [WOLF ENV TAKRAM 2026-10-12] decision D2: the clouds' shadow on the sun term - an adaptation of three-geospatial
+    // aerialPerspectiveEffect.frag:116-118 (sunIrradiance *= sunTransmittance, its post-process lighting) to LL's own lighting
+    if (wolf_phys > 0.5) shadow *= wolfTkCloudShadow(pos.xyz);
 #endif
 
 #ifdef USE_DIFFUSE_TEX
@@ -303,6 +320,11 @@ void main()
     color.rgb += light.rgb;
 
     color.rgb = applySkyAndWaterFog(pos.xyz, additive, atten, color).rgb;
+#ifdef WOLF_TK_LIB
+    // [WOLF ENV TAKRAM 2026-10-12] decision D14: the aerial perspective on a transparent surface, as the composite gives the
+    // opaque frame (aerialPerspectiveEffect.frag:381-383); the blend (SRC_ALPHA, ONE_MINUS_SRC_ALPHA) then lays it over that
+    if (wolf_phys > 0.5 && wolf_phys < 1.5) color.rgb = wolfTkAerialPerspective(pos.xyz, color.rgb);
+#endif
 
 #endif // #else // FOR_IMPOSTOR
     float final_scale = 1;

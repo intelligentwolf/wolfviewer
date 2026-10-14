@@ -215,7 +215,7 @@ namespace
         FrustumCorners cameraFrustum;
         std::vector<FrustumCorners> frusta;
         std::vector<F64> splits;
-        F64 far = 0.0;
+        F64 farDist = 0.0;   // [w66 CI 2026-10-14] was "far", a macro on Windows (minwindef.h)
 
         void setCascadeCount(S32 n) { cascades.resize(n, Cascade{ glm::dvec2(0.0), glm::dmat4(1.0), glm::dmat4(1.0), glm::dmat4(1.0), glm::dmat4(1.0), glm::dmat4(1.0), glm::dmat4(1.0) }); }
 
@@ -223,8 +223,8 @@ namespace
         void updateIntervals(const glm::dmat4& projInv, F64 nearv)
         {
             const S32 count = (S32)cascades.size();
-            splitPractical(count, nearv, far, splitLambda, splits);
-            cameraFrustum.setFromCamera(projInv, far);
+            splitPractical(count, nearv, farDist, splitLambda, splits);
+            cameraFrustum.setFromCamera(projInv, farDist);
             cameraFrustum.split(splits, frusta);
             for (S32 i = 0; i < count; ++i)
             {
@@ -238,8 +238,8 @@ namespace
             F64 diagonalLength = std::max(glm::distance(frustum.farc[0], frustum.farc[2]), glm::distance(frustum.farc[0], frustum.nearc[2]));
             if (fade)
             {
-                const F64 distance = frustum.farc[0].z / (far - nearv);
-                diagonalLength += 0.25 * distance * distance * (far - nearv);
+                const F64 distance = frustum.farc[0].z / (farDist - nearv);
+                diagonalLength += 0.25 * distance * distance * (farDist - nearv);
             }
             return diagonalLength * 0.5;
         }
@@ -289,7 +289,7 @@ namespace
         void update(const glm::dmat4& projInv, const glm::dmat4& matrixWorld, F64 nearv, F64 cameraFar, const glm::dvec3& sunDirection, F64 distance,
                     const glm::dvec3& up)
         {
-            far = maxFar >= 0.0 ? std::min(maxFar, cameraFar * farScale) : cameraFar * farScale;
+            farDist = maxFar >= 0.0 ? std::min(maxFar, cameraFar * farScale) : cameraFar * farScale;
             updateIntervals(projInv, nearv);
             updateMatrices(matrixWorld, nearv, sunDirection, distance, up);
             for (Cascade& c : cascades)
@@ -978,7 +978,7 @@ struct Clouds::Impl
         }
         u2fv(sh, "shadowIntervals", intervals, n);
         umat4v(sh, "shadowMatrices", matrices, n);
-        u1f(sh, "shadowFar", (F32)shadowMaps.far);
+        u1f(sh, "shadowFar", (F32)shadowMaps.farDist);
     }
 
     const Tex& shadowOutput() const { return shadowHistoryTex; }
@@ -1333,7 +1333,7 @@ LLVector2 Clouds::shadowMapSize() const { return LLVector2((F32)mImpl->shadowMap
 const F32* Clouds::shadowIntervals() const { return mImpl->intervals; }
 const F32* Clouds::shadowMatrices() const { return mImpl->matrices; }
 const F32* Clouds::inverseShadowMatrices() const { return mImpl->inverseMatrices; }
-F32 Clouds::shadowFar() const { return (F32)mImpl->shadowMaps.far; }
+F32 Clouds::shadowFar() const { return (F32)mImpl->shadowMaps.farDist; }
 F32 Clouds::shadowTopHeight() const { return mImpl->topHeight; }
 F32 Clouds::shadowBottomHeight() const { return mImpl->bottomHeight; }
 bool Clouds::lightShafts() const { return mImpl->cLightShafts; }

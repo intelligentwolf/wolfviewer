@@ -691,7 +691,7 @@ LLSD WolfCaves::meshRequest(const Cave& cave, const LLSD& terrain) const
         // Source: wolfstorm js/world/wolf_caves.js:257-270 _meshRequest near().
         const F32 bx0 = (F32)terrain["x0"].asInteger(), by0 = (F32)terrain["y0"].asInteger();
         const F32 bx1 = bx0 + (F32)terrain["nx"].asInteger(), by1 = by0 + (F32)terrain["ny"].asInteger();
-        auto near = [&](const WolfTerrainPaint::Stroke& s)
+        auto nearBox = [&](const WolfTerrainPaint::Stroke& s)   // [w66 CI] "near" is a macro on Windows (minwindef.h)
         {
             const F32 r = s.mWidth * 0.5f;
             for (size_t k = 0; k + 1 < s.mPoints.size(); k += 2)
@@ -703,7 +703,7 @@ LLSD WolfCaves::meshRequest(const Cave& cave, const LLSD& terrain) const
         for (const WolfTerrainPaint::Stroke& s : rec->mStrokes)
         {
             if (s.mSlot < -1) continue;   // water is not ground paint
-            if (!near(s)) continue;
+            if (!nearBox(s)) continue;
             LLSD p = LLSD::emptyArray();
             for (F32 v : s.mPoints) p.append(v);
             st.append(LLSD().with("t", s.mSlot).with("w", s.mWidth).with("p", p));

@@ -386,11 +386,11 @@ void WolfSurfCurl::render(F32 surf_h, F32 surf_set, F32 surf_len, F32 phase_time
     // [WOLF ENV TAKRAM 2026-10-12] the native sky's switch, the light on the water and the atmosphere / cloud shadow
     // (wolfsurfcurlF.glsl)
     {
-        static LLStaticHashedString s_lh("curlLightH");
+        static LLStaticHashedString s_curlLightH("curlLightH");   // [w66 CI] "s_lh" is a winsock macro
         const bool phys = WolfEnvironmentRender::skyActive();
         sh.uniform1f(LLShaderMgr::WOLF_PHYS, phys ? 1.f : 0.f);
         const LLColor3 lh = phys ? WolfEnvironmentRender::sceneLightH() : LLColor3::white;
-        sh.uniform3fv(s_lh, 1, lh.mV);
+        sh.uniform3fv(s_curlLightH, 1, lh.mV);
         if (phys) WolfEnvironmentRender::bindSceneUniforms(sh);
     }
     sh.uniform3fv(s_water_color, 1, fog_linear.mV);

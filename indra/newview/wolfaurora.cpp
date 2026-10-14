@@ -139,7 +139,10 @@ namespace
     };
     constexpr F64 E0_QUIET = 1.5476;      // Source: wolf_aurora.js E0_QUIET (Whiter et al. 2023 green peak)
     constexpr F64 E0_TYPEB = 9.0102;      // Source: wolf_aurora.js E0_TYPEB (type-B lower border, 85 km)
-    constexpr F64 DEG = M_PI / 180.0;
+    // [w66 CI 2026-10-14] M_PI is not defined by MSVC's <cmath> unless _USE_MATH_DEFINES is set first (windows64 failed
+    // with C2065); pi to double precision, the value glibc's math.h gives M_PI.
+    constexpr F64 WA_PI = 3.14159265358979323846;
+    constexpr F64 DEG = WA_PI / 180.0;
     constexpr F64 R_E = 6371.0;
     constexpr F64 SIG_ENV = 7.644, SIG_FIL = 0.4247, W_FIL = 0.75;   // wolfAuroraF.glsl WA_SIG_ENV / WA_SIG_FIL / WA_W_FIL
     constexpr F64 DIFFUSE = 0.15;
@@ -239,15 +242,15 @@ namespace
         const F64 spread = std::max(10.0, (a.pos[2] - a.pos[0]) / 2.0);
         const F64 A = std::min(20.0, 0.25 * spread);
         const F64 v = 0.1 + 0.5 * act;
-        const F64 period = 2.0 * M_PI * A / v;
-        for (S32 k = 0; k < 3; ++k) a.pos[k] += A * sin(2.0 * M_PI * t / (period * (1.0 + 0.37 * k)) + 2.1 * k);
+        const F64 period = 2.0 * WA_PI * A / v;
+        for (S32 k = 0; k < 3; ++k) a.pos[k] += A * sin(2.0 * WA_PI * t / (period * (1.0 + 0.37 * k)) + 2.1 * k);
         return a;
     }
 
     // Source: wolf_aurora.js brightestKR
     F64 brightestKR(const F64* band, F64 first, F64 step, const Arcs& a, F64 E0)
     {
-        const F64 nFil = W_FIL / (SIG_FIL * sqrt(2.0 * M_PI)), nEnv = (1.0 - W_FIL) / (SIG_ENV * sqrt(2.0 * M_PI));
+        const F64 nFil = W_FIL / (SIG_FIL * sqrt(2.0 * WA_PI)), nEnv = (1.0 - W_FIL) / (SIG_ENV * sqrt(2.0 * WA_PI));
         F64 best = 0.0;
         for (S32 k = 0; k < 3; ++k) best = std::max(best, DIFFUSE * bandAt(band, first, step, a.pos[k]) + a.w[k] * (nFil + nEnv));
         return best * yieldAt(YIELD[0], 2.0 * E0);

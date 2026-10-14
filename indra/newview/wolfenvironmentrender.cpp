@@ -2268,12 +2268,17 @@ void WolfEnvironmentRender::renderStockCloudProbe(const std::function<void()>& d
 // and every logged state is right. The driver says why in words through GL debug output; while WolfEnvironmentTrace is on,
 // one sky pass every 10 s runs with it switched on (synchronous, so each message comes from the call that caused it) and
 // every message is logged here. Linux LL installs no callback of its own (llrender.cpp init: Windows + gDebugGL only).
+// [w66 CI 2026-10-14] GL debug output is compiled out on macOS (no glDebugMessageCallback there: the macos64 link
+// failed) and gated on gGLManager.mHasDebugOutput elsewhere (llgl.cpp:1472 sets it for GL >= 4.3; Windows loads the
+// pointers at llgl.cpp:2173-2175, Linux links the real functions, so testing their address is always true).
+#if !LL_DARWIN
 static void APIENTRY wolfSkyGLDebug(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, const GLchar* message, const void*)
 {
     LL_WARNS("WolfEnv") << "sky pass GL message: source 0x" << std::hex << source << " type 0x" << type << " id 0x" << id
                         << " severity 0x" << severity << std::dec << ": " << (message ? std::string(message, length > 0 ? (size_t)length : strlen(message)) : std::string())
                         << LL_ENDL;
 }
+#endif
 
 bool WolfEnvironmentRender::renderSkyDome()
 {
@@ -2283,17 +2288,24 @@ bool WolfEnvironmentRender::renderSkyDome()
     // the driver's own messages for this whole pass (wolfSkyGLDebug), trace only, once every 10 s, the main view only
     static LLCachedControl<bool> glMsgTrace(gSavedSettings, "WolfEnvironmentTrace", false);
     static F64 s_glMsgNext = 0.0;
-    const bool glMsg = glMsgTrace && !gCubeSnapshot && glDebugMessageCallback && LLFrameTimer::getElapsedSeconds() >= s_glMsgNext;
+#if LL_DARWIN
+    const bool glMsg = false;
+    (void)glMsgTrace; (void)s_glMsgNext;
+#else
+    const bool glMsg = glMsgTrace && !gCubeSnapshot && gGLManager.mHasDebugOutput && LLFrameTimer::getElapsedSeconds() >= s_glMsgNext;
+#endif
+#if !LL_DARWIN
     if (glMsg)
     {
         s_glMsgNext = LLFrameTimer::getElapsedSeconds() + 10.0;
         while (glGetError() != GL_NO_ERROR) {}
         glDebugMessageCallback((GLDEBUGPROC)wolfSkyGLDebug, nullptr);
-        if (glDebugMessageControl) glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DONT_CARE, 0, nullptr, GL_TRUE);
+        glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DONT_CARE, 0, nullptr, GL_TRUE);
         glEnable(GL_DEBUG_OUTPUT);
         glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
         LL_INFOS("WolfEnv") << "sky pass: GL debug output on for this pass" << LL_ENDL;
     }
+#endif
     timerStamp(SEC_SKY, 0);
     sh.bind();
     // [WolfViewer 2026-10-14] THE MAGENTA SKY. LL gives a texture unit only to its reserved sampler names (llglslshader.cpp
@@ -2828,6 +2840,7 @@ bool WolfEnvironmentRender::renderSkyDome()
     WolfTk::unbindUnit(shaftUnit, GL_TEXTURE_2D);
     sh.unbind();
     timerStamp(SEC_SKY, 1);
+#if !LL_DARWIN
     if (glMsg)
     {
         glDisable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
@@ -2835,6 +2848,7 @@ bool WolfEnvironmentRender::renderSkyDome()
         glDebugMessageCallback(nullptr, nullptr);
         LL_INFOS("WolfEnv") << "sky pass: GL debug output off" << LL_ENDL;
     }
+#endif
     return true;
 }
 

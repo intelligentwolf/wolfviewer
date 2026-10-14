@@ -76,8 +76,16 @@ namespace
 
     std::string currentRegionId()
     {
-        LLViewerRegion* rgn = gAgent.getRegion();
+        // <WolfViewer 2026-10-14/> the region underneath past the agent region's edge (open sea, visiting land), as the sky
+        LLViewerRegion* rgn = LLEnvironment::wolfEnvironmentRegion();
         return rgn ? rgn->getRegionID().asString() : std::string();
+    }
+
+    // <WolfViewer 2026-10-14/> over another region than the agent's (its parcels are not the agent parcel manager's)
+    bool visitingAnotherRegion()
+    {
+        LLViewerRegion* agent_region = gAgent.getRegion();
+        return agent_region && LLEnvironment::wolfEnvironmentRegion() != agent_region;
     }
 }
 
@@ -285,6 +293,25 @@ void WolfRegionWeather::idle()
     if (!WolfGrid::showsWolfRegionWeather()) return;   // <WolfViewer 2026-10-08/> hypergrid visitors too
     const std::string id = currentRegionId();
     if (id.empty()) return;
+    // <WolfViewer 2026-10-14> flying on from region to region past the agent region's edge (no region change, so no
+    // onRegionChanged): each region underneath gets its own row, as a crossing would. A real region change is left to the
+    // region-changed callback (doing it twice would drop the destination's parcel read).
+    {
+        static std::string s_lastId, s_lastAgent;
+        LLViewerRegion* agent_region = gAgent.getRegion();
+        const std::string agent_id = agent_region ? agent_region->getRegionID().asString() : std::string();
+        if (!s_lastId.empty() && id != s_lastId && agent_id == s_lastAgent)
+        {
+            onRegionChanged();
+            // back over the agent's own region: its parcel is already known, so the parcel row may be read at once
+            LLParcel* parcel = LLViewerParcelMgr::getInstance()->getAgentParcel();
+            if (!visitingAnotherRegion() && agent_region && parcel && parcel->getRegionID() == agent_region->getRegionID())
+                mAwaitingParcel = false;
+        }
+        s_lastId = id;
+        s_lastAgent = agent_id;
+    }
+    // </WolfViewer>
     // Source: LLFrameTimer and the 60-second weather polling contract above. An attempted target
     // owns the retry clock even when its first request failed; successful-target state is kept
     // separately in mFetchedFor.
@@ -306,7 +333,7 @@ void WolfRegionWeather::refresh(bool force)
         mNextPoll = (F32)LLFrameTimer::getElapsedSeconds() + POLL_SECS;
         return;
     }
-    bool include_parcel = !mAwaitingParcel;
+    bool include_parcel = !mAwaitingParcel && !visitingAnotherRegion();   // <WolfViewer 2026-10-14/> no agent parcel below
     F32 x = 0.f, y = 0.f;
     if (include_parcel)
     {

@@ -45,6 +45,7 @@
 //-------------------------------------------------------------------------
 class LLViewerCamera;
 class LLParcel;
+class LLViewerRegion;   // <WolfViewer 2026-10-14/> wolfEnvironmentRegion
 
 //-------------------------------------------------------------------------
 class LLEnvironment : public LLSimpleton<LLEnvironment>
@@ -121,6 +122,10 @@ public:
     bool                        canEdit() const;
     bool                        isExtendedEnvironmentEnabled() const;
     bool                        isInventoryEnabled() const;
+    // <WolfViewer 2026-10-14> the region whose sky is shown: the agent's region, or - flying past its edge over open sea or
+    // visiting land (WolfVisitingLand.cs; the agent stays on its region for kilometres) - the region underneath
+    static LLViewerRegion*      wolfEnvironmentRegion();
+    // </WolfViewer>
     bool                        canAgentUpdateParcelEnvironment() const;
     bool                        canAgentUpdateParcelEnvironment(LLParcel *parcel) const;
     bool                        canAgentUpdateRegionEnvironment() const;
@@ -425,6 +430,12 @@ private:
 
     void                        onRegionChange();
     void                        onParcelChange();
+    // <WolfViewer 2026-10-14> follow wolfEnvironmentRegion() while the agent region stays the same (update, once a second)
+    void                        wolfFollowEnvironmentRegion();
+    void                        wolfCoroRequestVisited(std::string url, LLUUID region_id);
+    LLUUID                      mWolfEnvRegionId;       // the region whose sky was last requested
+    F64                         mWolfNextFollow = 0.0;
+    // </WolfViewer>
 
     bool                        mShowSunBeacon;
     bool                        mShowMoonBeacon;

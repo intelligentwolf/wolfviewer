@@ -22,6 +22,7 @@
 #include <boost/json.hpp>
 
 #include "llagent.h"
+#include "llenvironment.h"   // [2026-10-14] wolfEnvironmentRegion
 #include "llviewercontrol.h"
 #include "llcorehttputil.h"
 #include "llcoros.h"
@@ -316,7 +317,9 @@ void WolfEnvironmentState::idle()
         }
         return;
     }
-    LLViewerRegion* region = gAgent.getRegion();
+    // [WolfViewer 2026-10-14] the region underneath when flying past the agent region's edge (open sea, visiting land), as
+    // the EEP sky (LLEnvironment::wolfEnvironmentRegion): Paul, "the environment didnt change as i went over each region"
+    LLViewerRegion* region = LLEnvironment::wolfEnvironmentRegion();
     if (!region || mBusy) return;
     const std::string id = region->getRegionID().asString();
     LLParcel* parcel = LLViewerParcelMgr::getInstance()->getAgentParcel();
@@ -334,9 +337,12 @@ void WolfEnvironmentState::idle()
     mFetchedFor = id;
     mParcelLocalId = local;
     mNextFetch = now + REFETCH_SECS;
-    const LLVector3 at = gAgent.getPositionAgent();
+    const LLVector3 at = region->getPosRegionFromGlobal(gAgent.getPositionGlobal());   // [2026-10-14] in that region (was agent coords)
+    // held inside the region: over open sea with no region below, the position is kilometres outside it and the server
+    // answered 400 Bad Request every 20 s (Paul's log 10-14 12:45-12:48, y 4735 .. 10791)
+    const F32 edge = llmax(region->getWidth() - 0.01f, 0.f);
     const std::string url = llformat("%s?region=%s&x=%.2f&y=%.2f", WolfFloaterEnvironment::API_URL, id.c_str(),
-                                     llmax(0.f, at.mV[VX]), llmax(0.f, at.mV[VY]));
+                                     llclamp(at.mV[VX], 0.f, edge), llclamp(at.mV[VY], 0.f, edge));
     mBusy = true;
     const U64 serial = ++mSerial;
     LLCoros::instance().launch("WolfEnvState", [url, id, serial]() { WolfEnvironmentState::fetchCoro(url, id, serial); });
@@ -380,7 +386,7 @@ void WolfEnvironmentState::fetchCoro(std::string url, std::string region_id, U64
 void WolfEnvironmentState::applyReply(const LLSD& reply, const std::string& region_id)
 {
     // the agent may have moved on while this was in flight: a reply for another region is dropped
-    LLViewerRegion* now = gAgent.getRegion();
+    LLViewerRegion* now = LLEnvironment::wolfEnvironmentRegion();   // [2026-10-14] the region underneath, as idle()
     if (region_id != mFetchedFor || !now || now->getRegionID().asString() != region_id) return;
     mRegion = reply["regionEnv"].isMap() ? WolfEnvDoc::fromEntry(reply["regionEnv"]) : WolfEnvDoc();
     mParcel = reply["parcel"].isMap() && reply["parcel"]["env"].isMap() ? WolfEnvDoc::fromEntry(reply["parcel"]["env"]) : WolfEnvDoc();

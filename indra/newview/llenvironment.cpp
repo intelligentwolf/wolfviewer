@@ -33,6 +33,7 @@
 #include "llagent.h"
 #include "llviewercontrol.h" // for gSavedSettings
 #include "llviewerregion.h"
+#include "llworld.h"         // <WolfViewer 2026-10-14/> wolfEnvironmentRegion: the region underneath
 #include "llviewernetwork.h" // <FS:Beq/> for LLGridManager
 #include "llwlhandlers.h"
 #include "lltrans.h"
@@ -1175,6 +1176,7 @@ void LLEnvironment::onRegionChange()
     {
         return;
     }
+    mWolfEnvRegionId = cur_region->getRegionID();   // <WolfViewer 2026-10-14/> the sky asked for below (wolfFollowEnvironmentRegion)
     if (!cur_region->capabilitiesReceived())
     {
 // <FS:PR-Aleric> GCC13 warning: maybe-uninitialized - probably bogus
@@ -1196,6 +1198,13 @@ void LLEnvironment::onRegionChange()
 
 void LLEnvironment::onParcelChange()
 {
+    // <WolfViewer 2026-10-14> over another region (wolfFollowEnvironmentRegion) the agent's parcel is its own region's edge
+    // parcel, not the ground below: its sky must not cover the visited region's. It is asked for again on the way back.
+    if (LLViewerRegion* agent_region = gAgent.getRegion())
+    {
+        if (mWolfEnvRegionId.notNull() && mWolfEnvRegionId != agent_region->getRegionID()) return;
+    }
+    // </WolfViewer>
     S32 parcel_id(INVALID_PARCEL_ID);
 
     if (LLParcel* parcel = LLViewerParcelMgr::instance().getAgentParcel())
@@ -1205,6 +1214,84 @@ void LLEnvironment::onParcelChange()
 
     requestParcel(parcel_id);
 }
+
+// <WolfViewer 2026-10-14> Paul: "i flew from region to region and the environment didnt change as i went over each region".
+// Flying past a region's edge over open sea or visiting land (WolfVisitingLand.cs; region->getWolfOpenSeaMeters() > 0) the agent
+// stays on its region for kilometres - Paul's log 10-14 12:45-12:48: the agent region stayed d87eb383 while its position went
+// from y 4735 to 10791 m - so no region change happens and onRegionChange never asks for the next sky. The location bar already
+// names the region underneath (llagentui.cpp buildLocationString, the same test); the sky now follows it too.
+// static
+LLViewerRegion* LLEnvironment::wolfEnvironmentRegion()
+{
+    LLViewerRegion* region = gAgent.getRegion();
+    if (!region || region->getWolfOpenSeaMeters() <= 0.f) return region;
+    const LLVector3d pos = gAgent.getPositionGlobal();
+    if (region->pointInRegionGlobal(pos)) return region;
+    LLViewerRegion* under = LLWorld::getInstance()->getRegionFromPosGlobal(pos);
+    return under ? under : region;   // open sea with no region below: the sky of the region behind, as before
+}
+
+void LLEnvironment::wolfFollowEnvironmentRegion()
+{
+    const F64 now = LLFrameTimer::getElapsedSeconds();
+    if (now < mWolfNextFollow) return;
+    mWolfNextFollow = now + 1.0;
+    LLViewerRegion* agent_region = gAgent.getRegion();
+    LLViewerRegion* region = wolfEnvironmentRegion();
+    if (!agent_region || !region || mWolfEnvRegionId.isNull() || region->getRegionID() == mWolfEnvRegionId) return;
+    if (region == agent_region)
+    {
+        // back over the agent's own region: its sky and its parcel's, as on arriving there
+        mWolfEnvRegionId = region->getRegionID();
+        LL_INFOS("ENVIRONMENT") << "sky back to the agent's region " << region->getName() << LL_ENDL;
+        requestRegion();
+        onParcelChange();
+        return;
+    }
+    // the neighbour's own ExtEnvironment capability (OpenSim EnvironmentModule.OnRegisterCaps registers it for child agents
+    // too; GetExtEnvironmentSettings answers with that region's environment); asked again next second until it has caps
+    if (!region->capabilitiesReceived()) return;
+    const std::string url = region->getCapability("ExtEnvironment");
+    if (url.empty()) return;
+    const LLUUID id = region->getRegionID();
+    mWolfEnvRegionId = id;
+    LL_INFOS("ENVIRONMENT") << "sky follows the region underneath: " << region->getName() << LL_ENDL;
+    LLCoros::instance().launch("LLEnvironment::wolfCoroRequestVisited", [this, url, id]() { wolfCoroRequestVisited(url, id); });
+}
+
+void LLEnvironment::wolfCoroRequestVisited(std::string url, LLUUID region_id)
+{
+    LLCoreHttpUtil::HttpCoroutineAdapter::ptr_t httpAdapter =
+        std::make_shared<LLCoreHttpUtil::HttpCoroutineAdapter>("WolfVisitedEnvironment", LLCore::HttpRequest::DEFAULT_POLICY_ID);
+    LLCore::HttpRequest::ptr_t httpRequest = std::make_shared<LLCore::HttpRequest>();
+    LLSD result = httpAdapter->getAndSuspend(httpRequest, url);
+    LLCore::HttpStatus status = LLCoreHttpUtil::HttpCoroutineAdapter::getStatusFromLLSD(result["http_result"]);
+    if (LLApp::isExiting() || gDisconnected) return;
+    if (!status)
+    {
+        LL_WARNS("ENVIRONMENT") << "Couldn't retrieve the environment of the region underneath " << region_id << LL_ENDL;
+        // asked again in 10 s: the region in force is forgotten, so wolfFollowEnvironmentRegion sees the change again
+        LLAppViewer::instance()->postToMainCoro([this, region_id]()
+            {
+                LLViewerRegion* agent_region = gAgent.getRegion();
+                if (mWolfEnvRegionId != region_id || !agent_region) return;
+                mWolfEnvRegionId = agent_region->getRegionID();
+                mWolfNextFollow = LLFrameTimer::getElapsedSeconds() + 10.0;
+            });
+        return;
+    }
+    LLSD environment = result[KEY_ENVIRONMENT];
+    if (!environment.isDefined()) return;
+    LLAppViewer::instance()->postToMainCoro([this, environment, region_id]()
+        {
+            if (mWolfEnvRegionId != region_id) return;   // flown on meanwhile
+            EnvironmentInfo::ptr_t envinfo = LLEnvironment::EnvironmentInfo::extract(environment);
+            if (!envinfo) return;
+            clearEnvironment(ENV_PARCEL);   // the agent region's parcel sky is not the ground below
+            recordEnvironment(INVALID_PARCEL_ID, envinfo, TRANSITION_DEFAULT);
+        });
+}
+// </WolfViewer>
 
 //-------------------------------------------------------------------------
 F32 LLEnvironment::getCamHeight() const
@@ -1875,6 +1962,7 @@ void LLEnvironment::update(const LLViewerCamera * cam)
     //F32Seconds now(LLDate::now().secondsSinceEpoch());
     if (!gCubeSnapshot)
     {
+        wolfFollowEnvironmentRegion();   // <WolfViewer 2026-10-14/> the sky of the region underneath (open sea, visiting land)
         static LLFrameTimer timer;
 
         F32Seconds delta(timer.getElapsedTimeAndResetF32());
@@ -1991,11 +2079,21 @@ void LLEnvironment::recordEnvironment(S32 parcel_id, LLEnvironment::EnvironmentI
         return;
     }
     // mRegionId id can be null, no specification as to why and if it's valid so check valid ids only
-    if (gAgent.getRegion()->getRegionID() != envinfo->mRegionId && envinfo->mRegionId.notNull())
+    // <WolfViewer 2026-10-14/> or the region underneath whose sky was asked for (wolfFollowEnvironmentRegion)
+    if (gAgent.getRegion()->getRegionID() != envinfo->mRegionId && envinfo->mRegionId.notNull()
+        && envinfo->mRegionId != mWolfEnvRegionId)
     {
         LL_INFOS("ENVIRONMENT") << "Requested environmend region id: " << envinfo->mRegionId << " agent is on: " << gAgent.getRegion()->getRegionID() << LL_ENDL;
         return;
     }
+    // <WolfViewer 2026-10-14> while the sky is the region underneath's, a late reply for the agent's own region (asked before
+    // leaving it) must not put that sky back
+    if (mWolfEnvRegionId.notNull() && mWolfEnvRegionId != gAgent.getRegion()->getRegionID()
+        && envinfo->mRegionId.notNull() && envinfo->mRegionId != mWolfEnvRegionId)
+    {
+        return;
+    }
+    // </WolfViewer>
 
     if (envinfo->mParcelId == INVALID_PARCEL_ID)
     {

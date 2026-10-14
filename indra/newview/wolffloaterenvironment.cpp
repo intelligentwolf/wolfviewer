@@ -661,7 +661,7 @@ void WolfFloaterEnvironment::writeControls()
     const LLSD& t = d["time"];
     child<LLComboBox>(this, "time_mode")->setValue(LLSD(t["mode"].asString().empty() ? std::string("real") : t["mode"].asString()));
     if (t["mode"].asString() == "zone") { fillTimeZones(); child<LLComboBox>(this, "time_zone")->setValue(t["zone"]); }
-    child<LLSliderCtrl>(this, "time_hour")->setValue(t.has("hour") ? t["hour"].asReal() : 12.0);
+    child<LLSliderCtrl>(this, "time_hour")->setValue((F32)(t.has("hour") ? t["hour"].asReal() : 12.0));
     child<LLSpinCtrl>(this, "time_day_hours")->setValue(t.has("dayHours") ? t["dayHours"].asReal() : 4.0);
     const LLSD& w = d["weather"];
     child<LLComboBox>(this, "weather_source")->setValue(LLSD(w["source"].asString().empty() ? std::string("live") : w["source"].asString()));
@@ -669,12 +669,12 @@ void WolfFloaterEnvironment::writeControls()
     child<LLComboBox>(this, "weather_type")->setValue(LLSD(w.has("type") ? w["type"].asString() : std::string("fair")));
     const bool autoCloud = !d.has("clouds") || d["clouds"].isUndefined();
     child<LLCheckBoxCtrl>(this, "clouds_auto")->set(autoCloud);
-    child<LLSliderCtrl>(this, "clouds")->setValue(autoCloud ? 50.0 : d["clouds"].asReal());
-    child<LLSliderCtrl>(this, "haze")->setValue(d["haze"].asReal());
+    child<LLSliderCtrl>(this, "clouds")->setValue((F32)(autoCloud ? 50.0 : d["clouds"].asReal()));
+    child<LLSliderCtrl>(this, "haze")->setValue((F32)(d["haze"].asReal()));
     child<LLComboBox>(this, "water")->setValue(LLSD(d["water"]["look"].asString().empty() ? std::string("natural") : d["water"]["look"].asString()));
     child<LLComboBox>(this, "mood_tint")->setValue(LLSD(d["mood"]["tint"].asString().empty() ? std::string("neutral") : d["mood"]["tint"].asString()));
     child<LLColorSwatchCtrl>(this, "mood_color")->set(hex_to_color(d["mood"]["color"]));
-    child<LLSliderCtrl>(this, "mood_strength")->setValue(d["mood"]["strength"].asReal());
+    child<LLSliderCtrl>(this, "mood_strength")->setValue((F32)(d["mood"]["strength"].asReal()));
 
     // the sky block
     const LLSD& s = d["sky"];
@@ -687,27 +687,27 @@ void WolfFloaterEnvironment::writeControls()
     natural("ray_nat", "ray_color", a["rayleigh"]);
     natural("mie_nat", "mie_color", a["mie"]);
     natural("ozone_nat", "ozone_color", a["ozone"]);
-    child<LLSliderCtrl>(this, "ray_density")->setValue(a.has("rayleighDensity") ? a["rayleighDensity"].asReal() : 100.0);
-    child<LLSliderCtrl>(this, "mie_density")->setValue(a.has("mieDensity") ? a["mieDensity"].asReal() : 100.0);
-    child<LLSliderCtrl>(this, "ozone_density")->setValue(a.has("ozoneDensity") ? a["ozoneDensity"].asReal() : 100.0);
-    child<LLSliderCtrl>(this, "mie_glow")->setValue(a.has("mieAnisotropy") ? a["mieAnisotropy"].asReal() : 80.0);
+    child<LLSliderCtrl>(this, "ray_density")->setValue((F32)(a.has("rayleighDensity") ? a["rayleighDensity"].asReal() : 100.0));
+    child<LLSliderCtrl>(this, "mie_density")->setValue((F32)(a.has("mieDensity") ? a["mieDensity"].asReal() : 100.0));
+    child<LLSliderCtrl>(this, "ozone_density")->setValue((F32)(a.has("ozoneDensity") ? a["ozoneDensity"].asReal() : 100.0));
+    child<LLSliderCtrl>(this, "mie_glow")->setValue((F32)(a.has("mieAnisotropy") ? a["mieAnisotropy"].asReal() : 80.0));
     child<LLSpinCtrl>(this, "planet_km")->setValue(a.has("planetRadiusKm") ? a["planetRadiusKm"].asReal() : 6360.0);
     child<LLSpinCtrl>(this, "atmos_km")->setValue(a.has("atmosphereKm") ? a["atmosphereKm"].asReal() : 60.0);
     const LLSD& n = s["night"];
-    child<LLSliderCtrl>(this, "stars")->setValue(n.has("stars") ? n["stars"].asReal() : 100.0);
+    child<LLSliderCtrl>(this, "stars")->setValue((F32)(n.has("stars") ? n["stars"].asReal() : 100.0));
     natural("star_nat", "star_color", n["starColor"]);
-    child<LLSliderCtrl>(this, "nebula")->setValue(n["nebula"].asReal());
+    child<LLSliderCtrl>(this, "nebula")->setValue((F32)(n["nebula"].asReal()));
     child<LLColorSwatchCtrl>(this, "nebula_color")->set(hex_to_color(n.has("nebulaColor") ? n["nebulaColor"] : LLSD("#6040a0")));
     const LLSD& c = s["clouds"];
     natural("cloud_nat", "cloud_color", c["color"]);
-    child<LLSliderCtrl>(this, "cloud_glow")->setValue(c["emission"].asReal());
+    child<LLSliderCtrl>(this, "cloud_glow")->setValue((F32)(c["emission"].asReal()));
     child<LLComboBox>(this, "cloud_style")->setValue(LLSD(c["style"].asString().empty() ? std::string("natural") : c["style"].asString()));
     child<LLTextureCtrl>(this, "cloud_texture")->setImageAssetID(c["texture"].isUndefined() ? LLUUID::null : c["texture"].asUUID());
     natural("fog_nat", "fog_color", s["fog"]["color"]);
-    child<LLSliderCtrl>(this, "fog_glow")->setValue(s["fog"]["glow"].asReal());
+    child<LLSliderCtrl>(this, "fog_glow")->setValue((F32)(s["fog"]["glow"].asReal()));
     natural("sunlight_nat", "sunlight_color", s["light"]["sun"]);
     natural("ambient_nat", "ambient_color", s["light"]["ambient"]);
-    child<LLSliderCtrl>(this, "light_strength")->setValue(s["light"].has("strength") ? s["light"]["strength"].asReal() : 100.0);
+    child<LLSliderCtrl>(this, "light_strength")->setValue((F32)(s["light"].has("strength") ? s["light"]["strength"].asReal() : 100.0));
     mWriting = false;
 
     fillBodies();
@@ -773,8 +773,8 @@ void WolfFloaterEnvironment::writeBody()
     LLSliderCtrl* size = child<LLSliderCtrl>(this, "body_size");
     size->setMinValue(planet ? 1.f : 25.f);
     size->setMaxValue(planet ? 400.f : 2000.f);
-    size->setValue(b.has("size") ? b["size"].asReal() : 100.0);
-    child<LLSliderCtrl>(this, "body_brightness")->setValue(b.has("brightness") ? b["brightness"].asReal() : 100.0);
+    size->setValue((F32)(b.has("size") ? b["size"].asReal() : 100.0));
+    child<LLSliderCtrl>(this, "body_brightness")->setValue((F32)(b.has("brightness") ? b["brightness"].asReal() : 100.0));
     child<LLTextureCtrl>(this, "body_texture")->setImageAssetID(b["texture"].isUndefined() ? LLUUID::null : b["texture"].asUUID());
     const LLSD& pos = b["position"];
     const std::string pmode = planet ? std::string("fixed") : (pos["mode"].asString().empty() ? std::string("real") : pos["mode"].asString());
@@ -785,7 +785,7 @@ void WolfFloaterEnvironment::writeBody()
     child<LLSpinCtrl>(this, "body_tilt")->setValue(pos["tilt"].asReal());
     child<LLSpinCtrl>(this, "body_phase")->setValue(pos["phase"].asReal());
     child<LLCheckBoxCtrl>(this, "body_lit_auto")->set(b["phase"].isUndefined());
-    child<LLSliderCtrl>(this, "body_lit")->setValue(b["phase"].isUndefined() ? 50.0 : b["phase"].asReal());
+    child<LLSliderCtrl>(this, "body_lit")->setValue((F32)(b["phase"].isUndefined() ? 50.0 : b["phase"].asReal()));
     child<LLCheckBoxCtrl>(this, "body_rings")->set(b["rings"].asBoolean());
     child<LLColorSwatchCtrl>(this, "body_ring_color")->set(hex_to_color(b.has("ringColor") ? b["ringColor"] : LLSD("#d0c0a0")));
     mWriting = false;
@@ -830,21 +830,21 @@ void WolfFloaterEnvironment::writeZone()
     child<LLCheckBoxCtrl>(this, "zone_weather_on")->set(set.has("weather"));
     child<LLComboBox>(this, "zone_weather")->setValue(LLSD(set.has("weather") ? set["weather"]["type"].asString() : std::string("fog")));
     child<LLCheckBoxCtrl>(this, "zone_clouds_on")->set(set.has("clouds"));
-    child<LLSliderCtrl>(this, "zone_clouds")->setValue(set.has("clouds") ? set["clouds"].asReal() : 50.0);
+    child<LLSliderCtrl>(this, "zone_clouds")->setValue((F32)(set.has("clouds") ? set["clouds"].asReal() : 50.0));
     child<LLCheckBoxCtrl>(this, "zone_haze_on")->set(set.has("haze"));
-    child<LLSliderCtrl>(this, "zone_haze")->setValue(set.has("haze") ? set["haze"].asReal() : 50.0);
+    child<LLSliderCtrl>(this, "zone_haze")->setValue((F32)(set.has("haze") ? set["haze"].asReal() : 50.0));
     child<LLCheckBoxCtrl>(this, "zone_fog_on")->set(set.has("fogColor"));
     child<LLColorSwatchCtrl>(this, "zone_fog")->set(hex_to_color(set.has("fogColor") ? set["fogColor"] : LLSD("#8090a0")));
     child<LLCheckBoxCtrl>(this, "zone_fogglow_on")->set(set.has("fogGlow"));
-    child<LLSliderCtrl>(this, "zone_fog_glow")->setValue(set.has("fogGlow") ? set["fogGlow"].asReal() : 20.0);
+    child<LLSliderCtrl>(this, "zone_fog_glow")->setValue((F32)(set.has("fogGlow") ? set["fogGlow"].asReal() : 20.0));
     child<LLCheckBoxCtrl>(this, "zone_light_on")->set(set.has("light"));
     child<LLColorSwatchCtrl>(this, "zone_light")->set(hex_to_color(set.has("light") ? set["light"] : LLSD("#ffd0a0")));
     child<LLCheckBoxCtrl>(this, "zone_lightstr_on")->set(set.has("lightStrength"));
-    child<LLSliderCtrl>(this, "zone_light_strength")->setValue(set.has("lightStrength") ? set["lightStrength"].asReal() : 100.0);
+    child<LLSliderCtrl>(this, "zone_light_strength")->setValue((F32)(set.has("lightStrength") ? set["lightStrength"].asReal() : 100.0));
     child<LLCheckBoxCtrl>(this, "zone_mood_on")->set(set.has("mood"));
     child<LLComboBox>(this, "zone_mood_tint")->setValue(LLSD(set.has("mood") ? set["mood"]["tint"].asString() : std::string("cool")));
     child<LLColorSwatchCtrl>(this, "zone_mood_color")->set(hex_to_color(set.has("mood") ? set["mood"]["color"] : LLSD("#ffffff")));
-    child<LLSliderCtrl>(this, "zone_mood_strength")->setValue(set.has("mood") ? set["mood"]["strength"].asReal() : 50.0);
+    child<LLSliderCtrl>(this, "zone_mood_strength")->setValue((F32)(set.has("mood") ? set["mood"]["strength"].asReal() : 50.0));
     mWriting = false;
     updateVisibility();
 }

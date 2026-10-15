@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "llagent.h"
 #include "llagentcamera.h"
 #include "lldate.h"
 #include "llenvironment.h"
@@ -34,6 +35,7 @@
 #include "llrendertarget.h"
 #include "llviewercontrol.h"
 #include "llviewershadermgr.h"
+#include "llstartup.h"
 #include "pipeline.h"
 #include "wolfweather.h"
 #include "wolfenvironmentrender.h"
@@ -343,7 +345,7 @@ namespace
         F64 amount = clampd(p.mAurora, 0, 100) / 100.0;
         // [WolfViewer 2026-10-15] Paul: "a setting wolfForceAurora ... force the aurora whatever the day time or weather" -
         // a test switch (the w66 Windows aurora crash hunt): night sun, clear air, and an aurora even with no live data
-        static LLCachedControl<bool> force(gSavedSettings, "WolfForceAurora", false);
+        const bool force = WolfAurora::forced();
         const S32 mode = colorMode(p.mAuroraColor);
         const F64 t = fmod(LLDate::now().secondsSinceEpoch(), 86400.0);
         const WolfWeatherProfile::AuroraLive& live_in = p.mAuroraLive;
@@ -561,6 +563,39 @@ void WolfAurora::bindUniforms(LLGLSLShader* shader)
     shader->uniform4fv(s_w, 1, sState.arcW);
     shader->uniform4fv(s_eye, 1, sState.eye);
     if (on) shader->bindTexture(LLShaderMgr::WOLF_AURORA_LUT, &sLut);
+}
+
+// static
+bool WolfAurora::forced()
+{
+    static LLCachedControl<bool> force(gSavedSettings, "WolfForceAurora", false);
+    return force;
+}
+
+// static
+void WolfAurora::idle()
+{
+    // Paul 2026-10-15: "if force aurora is on force the viewer to night so we can see it". The same calls as the World >
+    // Environment menu (llviewermenu.cpp:12358-12374, "midnight" and "region"), made once each time the switch changes
+    // (and once after login when it was left on), never every frame - so the person can still pick another sky meanwhile.
+    static bool s_applied = false;
+    if (LLStartUp::getStartupState() < STATE_STARTED || !gAgent.getRegion()) return;
+    const bool force = forced();
+    if (force == s_applied) return;
+    s_applied = force;
+    if (force)
+    {
+        LLEnvironment::instance().setManualEnvironment(LLEnvironment::ENV_LOCAL, LLEnvironment::KNOWN_SKY_MIDNIGHT);
+        LLEnvironment::instance().setSelectedEnvironment(LLEnvironment::ENV_LOCAL);
+        LL_INFOS("WolfAurora") << "WolfForceAurora on: this viewer's sky set to Midnight" << LL_ENDL;
+    }
+    else
+    {
+        gPipeline.mReflectionMapManager.reset();   // as the menu's "region" (shared environment)
+        LLEnvironment::instance().clearEnvironment(LLEnvironment::ENV_LOCAL);
+        LLEnvironment::instance().setSelectedEnvironment(LLEnvironment::ENV_LOCAL, LLEnvironment::TRANSITION_INSTANT);
+        LL_INFOS("WolfAurora") << "WolfForceAurora off: back to the shared sky" << LL_ENDL;
+    }
 }
 
 // static

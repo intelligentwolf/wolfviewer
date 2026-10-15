@@ -96,6 +96,7 @@
 #include "wolfweather.h" // <WolfViewer> rain and snow // <WolfViewer> share focus/zoom follow-up
 #include "wolffx.h"   // <WolfViewer 2026-10-10/>
 #include "wolfspanscreens.h"   // <WolfViewer 2026-10-10/>
+#include "wolfaurora.h"   // <WolfViewer 2026-10-15/> WolfForceAurora: WolfAurora::idle
 #include "llviewerdisplay.h"
 #include "llviewermedia.h"
 #include "llviewerparcelaskplay.h"
@@ -6264,6 +6265,7 @@ void LLAppViewer::idle()
     WolfWeather::instance().idle();   // <WolfViewer 2026-09-10> rain / snow, menu or parcel prims
     WolfFX::instance().idle();
     WolfInvisible::idle();            // <WolfViewer 2026-10-11/> Invisible Mode: the region arrived in, or the switch changed
+    WolfAurora::idle();               // [WolfViewer 2026-10-15/] WolfForceAurora: this viewer's sky to Midnight while it is on
     WolfExperiences::idle();          // [WolfViewer 2026-10-14/] Experiences: open after a new account's login; the arrive notice after Go
     WolfSuitcase::idle();             // [SUITCASE 2026-10-10/] hypergrid trips: what arrived in My Suitcase comes home        // <WolfViewer 2026-10-10/> wolfEffect explosions, fire, smoke (wolffx.h)
     // </WolfViewer>

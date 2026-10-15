@@ -2620,7 +2620,7 @@ bool WolfEnvironmentRender::renderSkyDome()
         sh.uniform4fv(s_mc, 2, c);
     }
     WolfAurora::bindUniforms(&sh);
-    if (eepDriven())
+    if (eepDriven() && !WolfAurora::forced())   // [2026-10-15] WolfForceAurora: shown under an EEP sky too
     {
         // [WolfViewer 2026-10-13] an EEP sky has no aurora - the stock renderer draws none - and the dome is measured against
         // the stock sky only at its 36 probes, so an aurora between them showed as a blue-green band the EEP does not have

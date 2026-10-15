@@ -42,6 +42,11 @@ public:
      *  and the table (LLShaderMgr::WOLF_AURORA_LUT). 0 in a reflection-probe capture. */
     static void bindUniforms(LLGLSLShader* shader);
     static void releaseGL();
+    /** [WolfViewer 2026-10-15] WolfForceAurora (a test switch): the aurora whatever the time or weather. */
+    static bool forced();
+    /** [WolfViewer 2026-10-15] Once a frame from LLAppViewer::idle: while WolfForceAurora is on, this viewer's own sky is
+     *  World > Environment > Midnight (so the aurora is seen at night, WE on or off); off again, the shared sky. */
+    static void idle();
 };
 
 #endif

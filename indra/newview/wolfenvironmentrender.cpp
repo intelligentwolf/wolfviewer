@@ -1678,9 +1678,13 @@ void WolfEnvironmentRender::frameUpdate()
         // rebuild must not cost the flight its frame rate).
         const F64 budget = sAtmos->ready() ? 0.004 : 0.025;
         LLTimer stepTimer;
+        // [WolfViewer 2026-10-15] the budget is GPU time: each step is waited for (glFinish). It was only the CPU's time to
+        // SUBMIT the steps, so a weak GPU was handed the whole precompute in a frame or two (the scattering-density passes,
+        // 512 directions a texel) - a long stall, or a Windows driver timeout. Only while the tables build.
         do
         {
             sAtmos->precomputeStep();
+            glFinish();
         } while (sAtmos->building() && !sAtmos->failed() && stepTimer.getElapsedTimeF64() < budget);
         if (sAtmos->failed()) fail("the atmosphere tables could not be built");
     }

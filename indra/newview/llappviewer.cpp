@@ -5801,6 +5801,35 @@ void LLAppViewer::idle()
     LL_PROFILE_ZONE_SCOPED_CATEGORY_APP;
     pingMainloopTimeout("Main:Idle");
 
+    // [WolfViewer 2026-10-15] one shader reload for any number of graphics setting changes (llviewercontrol.cpp
+    // handleSetShaderChanged), after one frame drawn with a "Compiling shaders" note - the main thread is busy for the
+    // whole compile, so the note stays up until it is done (Paul: "display a message somewhere ... so the user knows")
+    {
+        extern S32 gWolfShaderReloadStage;
+        static bool s_shown = false;
+        if (gWolfShaderReloadStage == 2)
+        {
+            gWolfShaderReloadStage = 1;
+            if (gViewerWindow && LLStartUp::getStartupState() >= STATE_STARTED
+                && gAgent.getTeleportState() == LLAgent::TELEPORT_NONE && !gViewerWindow->getShowProgress())
+            {
+                gViewerWindow->setProgressString("Compiling shaders... this can take a minute on some graphics cards");
+                gViewerWindow->setShowProgress(true, false);
+                s_shown = true;
+            }
+        }
+        else if (gWolfShaderReloadStage == 1)
+        {
+            gWolfShaderReloadStage = 0;
+            LLViewerShaderMgr::instance()->setShaders();
+            if (s_shown && gViewerWindow && gAgent.getTeleportState() == LLAgent::TELEPORT_NONE)
+            {
+                gViewerWindow->setShowProgress(false, false);
+            }
+            s_shown = false;
+        }
+    }
+
     // Update frame timers
     static LLTimer idle_timer;
 

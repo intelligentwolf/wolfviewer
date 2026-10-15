@@ -258,6 +258,7 @@ static bool handleAvatarHoverOffsetChanged(const LLSD& newvalue)
 
 // <FS:Ansariel> Expose handleSetShaderChanged()
 //static bool handleSetShaderChanged(const LLSD& newvalue)
+S32 gWolfShaderReloadStage = 0;   // [WolfViewer 2026-10-15/] 2: show "Compiling shaders" this frame; 1: reload now
 bool handleSetShaderChanged(const LLSD& newvalue)
 // </FS:Ansariel>
 {
@@ -272,6 +273,15 @@ bool handleSetShaderChanged(const LLSD& newvalue)
     }
 
     // else, leave terrain detail as is
+    // [WolfViewer 2026-10-15] wolfdisplay (Intel Alder Lake-N) 10-15: choosing High changed a dozen settings, each one a
+    // full shader reload of 20-30 s on the main thread - minutes frozen, until the region dropped the agent ("You have been
+    // logged out ... This region may be experiencing trouble"). Once the pipeline exists, a change only asks for a reload;
+    // LLAppViewer::idle does it once (gWolfShaderReloadStage), after a frame showing "Compiling shaders".
+    if (gPipeline.isInit())
+    {
+        if (gWolfShaderReloadStage == 0) gWolfShaderReloadStage = 2;
+        return true;
+    }
     LLViewerShaderMgr::instance()->setShaders();
     return true;
 }

@@ -1251,6 +1251,10 @@ void LLShaderMgr::persistShaderCacheMetadata()
     }
 
     std::string meta_out_path = gDirUtilp->add(mShaderCacheDir, "shaderdata.llsd");
+    // [WolfViewer 2026-10-15] clearShaderCache() rmdirs the folder and nothing made it again until the next
+    // initShaderCache, so every save failed ("Unable to save shader cache", wolfdisplay 10-15) and every start and every
+    // graphics change compiled every shader from nothing - minutes on a weak GPU. Make it before writing.
+    LLFile::mkdir(mShaderCacheDir);
     llofstream outstream(meta_out_path, std::ios_base::out | std::ios_base::binary);
     if (!outstream.is_open())
     {
@@ -1325,6 +1329,7 @@ bool LLShaderMgr::saveCachedProgramBinary(LLGLSLShader* shader)
         if (error == GL_NO_ERROR)
         {
             std::string out_path = gDirUtilp->add(mShaderCacheDir, shader->mShaderHash.asString() + ".shaderbin");
+            LLFile::mkdir(mShaderCacheDir);   // [WolfViewer 2026-10-15/] see persistShaderCacheMetadata
             LLUniqueFile outfile = LLFile::fopen(out_path, "wb");
             if (outfile)
             {

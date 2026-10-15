@@ -21386,13 +21386,13 @@ Change of this parameter will affect the layout of buttons in notification toast
     <key>WolfEnvironmentNativeSky</key>
 		<map>
 			<key>Comment</key>
-			<string>[WOLF ENV 2026-10-12] Opt-in test mode: TRUE lets WolfViewer draw the Wolf Environment's physically based native sky, clouds, exposure and photometric lights itself (at the WolfEnvironmentQuality tier). FALSE (the default) draws the region's EEP exactly as before - the native renderer, its post pass, its exposure and tone mapping and every scene-shader change made for it stay off.</string>
+			<string>[WOLF ENV 2026-10-12] Opt-in test mode: TRUE lets WolfViewer draw the Wolf Environment's physically based native sky, clouds, exposure and photometric lights itself (at the WolfEnvironmentQuality tier). FALSE (the default) draws the region's EEP exactly as before - the native renderer, its post pass, its exposure and tone mapping and every scene-shader change made for it stay off. Default FALSE again from w67 (Paul 10-15: w66 Smiling Frog users crashed on login and teleport and saw a wonky sky on their graphics cards; the WE button turns it on).</string>
 			<key>Persist</key>
 			<integer>1</integer>
 			<key>Type</key>
 			<string>Boolean</string>
 			<key>Value</key>
-			<integer>1</integer>
+			<integer>0</integer>
 		</map>
 		<key>WolfEnvironmentAllRegions</key>
 		<map>

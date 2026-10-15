@@ -366,7 +366,9 @@ void WolfRegionWeather::fetchCoro(std::string region_id, bool include_parcel, F3
 {
     // Source: weather.php:311-351. Coordinates are sent only after the agent-parcel callback;
     // %.9g round-trips the captured F32 without selecting or inventing a parcel identifier.
-    std::string url = std::string(API_URL) + "?region=" + region_id;
+    // [WolfViewer 2026-10-15] aurora=2: this viewer draws the aurora safely on Windows (glBlendColor fetched at runtime,
+    // wolfaurora.cpp). weather.php sends aurora - live or the owner's - only to viewers that say so: w66/w67 crashed with it.
+    std::string url = std::string(API_URL) + "?aurora=2&region=" + region_id;
     if (include_parcel) url += "&x=" + llformat("%.9g", (double)x) + "&y=" + llformat("%.9g", (double)y);
     LLCoreHttpUtil::HttpCoroutineAdapter::ptr_t adapter =
         std::make_shared<LLCoreHttpUtil::HttpCoroutineAdapter>("WolfRegionWeather", LLCore::HttpRequest::DEFAULT_POLICY_ID);
@@ -705,7 +707,7 @@ void WolfRegionWeather::saveCoro(std::string body, std::string scope, std::strin
     LLCore::BufferArray::ptr_t raw(new LLCore::BufferArray());
     raw->append(body.data(), body.size());
 
-    LLSD result = adapter->postRawAndSuspend(request, API_URL, raw, options, headers);
+    LLSD result = adapter->postRawAndSuspend(request, std::string(API_URL) + "?aurora=2", raw, options, headers);   // [2026-10-15/] as the GET
     LLSD httpResults = result[LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS];
     LLCore::HttpStatus status = LLCoreHttpUtil::HttpCoroutineAdapter::getStatusFromLLSD(httpResults);
     LLSD reply;

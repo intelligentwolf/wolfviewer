@@ -139,6 +139,8 @@ namespace
     };
     constexpr F64 E0_QUIET = 1.5476;      // Source: wolf_aurora.js E0_QUIET (Whiter et al. 2023 green peak)
     constexpr F64 E0_TYPEB = 9.0102;      // Source: wolf_aurora.js E0_TYPEB (type-B lower border, 85 km)
+    // [WolfViewer 2026-10-15] WolfForceAurora with no live data: the owner's slider at half way (10^1.5 = 32 kR at the brightest arc)
+    constexpr F64 FORCE_AMOUNT = 0.5;
     // [w66 CI 2026-10-14] M_PI is not defined by MSVC's <cmath> unless _USE_MATH_DEFINES is set first (windows64 failed
     // with C2065); pi to double precision, the value glibc's math.h gives M_PI.
     constexpr F64 WA_PI = 3.14159265358979323846;
@@ -338,11 +340,18 @@ namespace
         const WolfWeatherProfile& p = WolfWeather::instance().activeProfile();
         LLSettingsSky::ptr_t sky = LLEnvironment::instance().getCurrentSky();
         if (!sky) return;
-        const F64 amount = clampd(p.mAurora, 0, 100) / 100.0;
+        F64 amount = clampd(p.mAurora, 0, 100) / 100.0;
+        // [WolfViewer 2026-10-15] Paul: "a setting wolfForceAurora ... force the aurora whatever the day time or weather" -
+        // a test switch (the w66 Windows aurora crash hunt): night sun, clear air, and an aurora even with no live data
+        static LLCachedControl<bool> force(gSavedSettings, "WolfForceAurora", false);
         const S32 mode = colorMode(p.mAuroraColor);
         const F64 t = fmod(LLDate::now().secondsSinceEpoch(), 86400.0);
         const WolfWeatherProfile::AuroraLive& live_in = p.mAuroraLive;
-        const bool live = mode == 6 && live_in.mValid;
+        // forced, live data that is all zeros (no oval over this place tonight) counts as none
+        bool live_flux = false;
+        for (S32 i = 0; i < 24; ++i) live_flux = live_flux || live_in.mFlux[i] > 0.f;
+        const bool live = mode == 6 && live_in.mValid && (!force || live_flux);
+        if (force && !live) amount = std::max(amount, FORCE_AMOUNT);   // the region's live data when it has some
 
         LLVector3 sun = sky->getSunDirection(); sun.normalize();
         LLVector3 moon = sky->getMoonDirection(); moon.normalize();
@@ -354,13 +363,14 @@ namespace
             LLVector3 ns, nm;
             if (WolfEnvironmentRender::bodyDirections(ns, nm)) { sun = ns; sun.normalize(); moon = nm; moon.normalize(); }
         }
+        if (force) sun = LLVector3(0.f, 0.f, -1.f);   // [2026-10-15] WolfForceAurora: the sun straight down (night gate, night eye)
         const F64 elev = asin(clampd(sun.mV[VZ], -1.0, 1.0)) / DEG;
         // [WolfViewer round 13] in from civil twilight's end to nautical twilight's end (the sun 6 to 12 deg under, AMS Glossary
         // "civil twilight" / "nautical twilight"): until the sky is dark the aurora is drawn on top of it at its display level
         // (the stock dome: wolfAuroraDisplay is display-referred) and read as daylight decoration. Was -1 .. -4 deg.
         const F64 sn = clampd((-6.0 - elev) / 6.0, 0.0, 1.0);
         const F64 night = sn * sn * (3.0 - 2.0 * sn);
-        const F64 clear_air = 1.0 - clampd(p.mFog, 0, 100) / 100.0;
+        const F64 clear_air = force ? 1.0 : 1.0 - clampd(p.mFog, 0, 100) / 100.0;   // [2026-10-15] WolfForceAurora: no fog
 
         F64 band[24];
         F64 first, step, act, bearing = 0.0, mlat = MANUAL_MLAT, E0, kR;

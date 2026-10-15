@@ -634,7 +634,8 @@ void LLDrawPoolWLSky::renderDeferred(S32 pass)
             renderStarsDeferred(origin);
         }
 
-        if (!gCubeSnapshot || gPipeline.mReflectionMapManager.isRadiancePass()) // don't draw clouds in irradiance maps to avoid popping
+        // [WolfViewer 2026-10-15] WolfForceAurora (a test switch): no clouds in front of the forced aurora, whatever the weather
+        if ((!gCubeSnapshot || gPipeline.mReflectionMapManager.isRadiancePass()) && !WolfAurora::forced()) // don't draw clouds in irradiance maps to avoid popping
         {
             renderSkyCloudsDeferred(origin, camHeightLocal, cloud_shader);
         }

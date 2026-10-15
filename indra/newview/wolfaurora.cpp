@@ -579,9 +579,21 @@ void WolfAurora::idle()
     // Environment menu (llviewermenu.cpp:12358-12374, "midnight" and "region"), made once each time the switch changes
     // (and once after login when it was left on), never every frame - so the person can still pick another sky meanwhile.
     static bool s_applied = false;
+    static F64 s_next_check = 0.0;
     if (LLStartUp::getStartupState() < STATE_STARTED || !gAgent.getRegion()) return;
     const bool force = forced();
-    if (force == s_applied) return;
+    // Paul 2026-10-15: "it all dissappeared to a blue day" - arriving on a region puts the shared sky back
+    // (wolfregionweather.cpp wolf_use_shared_environment clears ENV_LOCAL, as does the auto-environment preview's end),
+    // so while forced, an emptied personal sky gets Midnight again (checked once a second; a sky the person picks
+    // meanwhile is not empty, so it stays)
+    bool reapply = false;
+    if (force && s_applied && LLFrameTimer::getElapsedSeconds() >= s_next_check)
+    {
+        s_next_check = LLFrameTimer::getElapsedSeconds() + 1.0;
+        LLEnvironment& env = LLEnvironment::instance();
+        reapply = !env.getEnvironmentFixedSky(LLEnvironment::ENV_LOCAL) && !env.getEnvironmentDay(LLEnvironment::ENV_LOCAL);
+    }
+    if (force == s_applied && !reapply) return;
     s_applied = force;
     if (force)
     {

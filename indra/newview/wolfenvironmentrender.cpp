@@ -780,6 +780,7 @@ namespace
             const F32 tau = closedLoop ? 30.f : GENUS_TAU;   // [2026-10-14] 30 s (was 5): a settle or re-settle shows as slow change, never as shapes re-forming
             s_cover = (s_cover < 0.f || dt <= 0.f || s_cut) ? coverTarget : s_cover + (coverTarget - s_cover) * (1.f - expf(-dt / tau));
             sNext.cover = s_cover;
+            if (WolfAurora::forced()) sNext.cover = 0.f;   // [2026-10-15] WolfForceAurora: no clouds in front of the forced aurora
         }
         // [WolfViewer step 3] the cloud genera from the weather (wolfcloudgenus.cpp, BEAUTY_RESEARCH.md section 9.4): the
         // three fractions read as three layers (+ a fog / pannus slab), each a genus with its base, extinction and

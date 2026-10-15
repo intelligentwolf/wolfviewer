@@ -21353,7 +21353,7 @@ Change of this parameter will affect the layout of buttons in notification toast
 		<key>WolfForceAurora</key>
 		<map>
 			<key>Comment</key>
-			<string>[WolfViewer 2026-10-15] Test switch: show the northern lights whatever the time of day or the weather - the aurora treats the sun as straight down and the air as clear, and uses the region's live aurora data when it has some (else half strength). While on, this viewer's own sky is World &gt; Environment &gt; Midnight (back to the shared sky when switched off), and the aurora also shows under the native Wolf sky on an EEP region. Paul: "force the aurora whatever the day time or weather". wolfaurora.cpp computeState.</string>
+			<string>[WolfViewer 2026-10-15] Test switch: show the northern lights whatever the time of day or the weather - the aurora treats the sun as straight down and the air as clear, and shows a storm-strength aurora (1000 kR) high in the poleward sky instead of the region's own or live aurora. While on, this viewer's own sky is World &gt; Environment &gt; Midnight (back to the shared sky when switched off), and the aurora also shows under the native Wolf sky on an EEP region. Paul: "force the aurora whatever the day time or weather". wolfaurora.cpp computeState.</string>
 			<key>Persist</key>
 			<integer>1</integer>
 			<key>Type</key>

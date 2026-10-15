@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <vector>
 
 #include "llagent.h"
 #include "llagentcamera.h"
@@ -141,8 +142,12 @@ namespace
     };
     constexpr F64 E0_QUIET = 1.5476;      // Source: wolf_aurora.js E0_QUIET (Whiter et al. 2023 green peak)
     constexpr F64 E0_TYPEB = 9.0102;      // Source: wolf_aurora.js E0_TYPEB (type-B lower border, 85 km)
-    // [WolfViewer 2026-10-15] WolfForceAurora with no live data: the owner's slider at half way (10^1.5 = 32 kR at the brightest arc)
-    constexpr F64 FORCE_AMOUNT = 0.5;
+    // [WolfViewer 2026-10-15] WolfForceAurora: the owner's slider at full (10^3 = 1000 kR at the brightest arc, a storm). Paul at
+    // Tafelberg 10-15: the live data (Kp 0, 20 kR = 0.004 cd/m2 in the table) was there and drawn, but the night eye's display
+    // of it was ~3 % - invisible. The test switch has to be seen.
+    constexpr F64 FORCE_AMOUNT = 1.0;
+    // [WolfViewer 2026-10-15] WolfForceAurora: the middle arc's footpoint this far poleward (km) - about 30 deg up for a 110 km lower border
+    constexpr F64 FORCE_ARC_KM = 200.0;
     // [w66 CI 2026-10-14] M_PI is not defined by MSVC's <cmath> unless _USE_MATH_DEFINES is set first (windows64 failed
     // with C2065); pi to double precision, the value glibc's math.h gives M_PI.
     constexpr F64 WA_PI = 3.14159265358979323846;
@@ -349,11 +354,8 @@ namespace
         const S32 mode = colorMode(p.mAuroraColor);
         const F64 t = fmod(LLDate::now().secondsSinceEpoch(), 86400.0);
         const WolfWeatherProfile::AuroraLive& live_in = p.mAuroraLive;
-        // forced, live data that is all zeros (no oval over this place tonight) counts as none
-        bool live_flux = false;
-        for (S32 i = 0; i < 24; ++i) live_flux = live_flux || live_in.mFlux[i] > 0.f;
-        const bool live = mode == 6 && live_in.mValid && (!force || live_flux);
-        if (force && !live) amount = std::max(amount, FORCE_AMOUNT);   // the region's live data when it has some
+        const bool live = mode == 6 && live_in.mValid && !force;   // forced: always the storm below, never tonight's real oval
+        if (force) amount = std::max(amount, FORCE_AMOUNT);   // forced: a storm, whatever the region's own data
 
         LLVector3 sun = sky->getSunDirection(); sun.normalize();
         LLVector3 moon = sky->getMoonDirection(); moon.normalize();
@@ -407,6 +409,16 @@ namespace
             for (S32 i = 0; i < 24; ++i) band[i] *= F;
             for (S32 k = 0; k < 3; ++k) arcs.w[k] *= F;
         }
+        // [WolfViewer 2026-10-15] WolfForceAurora: overhead, not where tonight's oval really is. Paul at Tafelberg saw nothing
+        // with gate 1, live data and 20 kR: the arcs were 1675-1962 km poleward (Knightwood's real place at Kp 0), so even
+        // the 300 km tops are under the horizon. The whole picture (the band and the arcs, both measured from `first`) moves
+        // so the middle arc is FORCE_ARC_KM poleward of the viewer - high in the poleward sky.
+        if (force && arcs.total > 0.0)
+        {
+            const F64 shift = arcs.pos[1] - FORCE_ARC_KM;
+            first -= shift;
+            for (S32 k = 0; k < 3; ++k) arcs.pos[k] -= shift;
+        }
         const bool on = live ? arcs.total > 0.0 : amount > 0.0;
         S32 lo = 0, hi = -1;
         for (S32 i = 0; i < 24; ++i) if (band[i] > 0.0) { if (hi < lo) lo = i; hi = i; }
@@ -427,7 +439,15 @@ namespace
             key = 0.18;
         }
 
-        s.gate = on ? (F32)(night * clear_air * clear_air) : 0.f;
+        // [WolfViewer 2026-10-15] Paul: "thats probably a problem on a lot of regions" - most real places are at mid
+        // latitudes, where tonight's oval is under the horizon (Knightwood: arcs 1675-1962 km poleward at Kp 0), yet the
+        // aurora's table was marched every night frame. Nothing of it can be seen when all of it - the band's support and
+        // the arcs - is farther than the 400 km tops' horizon (wolfAuroraF.glsl WA_H0 + WA_HSPAN): R acos(R / (R + 400)).
+        const F64 d_vis = R_E * acos(R_E / (R_E + 400.0));
+        F64 near_lo = sup_min, near_hi = sup_max;
+        for (S32 k = 0; k < 3; ++k) { near_lo = std::min(near_lo, arcs.pos[k]); near_hi = std::max(near_hi, arcs.pos[k]); }
+        const bool in_sight = near_lo <= d_vis && near_hi >= -d_vis;
+        s.gate = (on && in_sight) ? (F32)(night * clear_air * clear_air) : 0.f;
         // [WolfViewer 2026-10-15] WolfForceAurora: why it does or does not show, every 5 s (Paul: "still no aurora")
         if (force)
         {
@@ -435,7 +455,7 @@ namespace
             if (LLFrameTimer::getElapsedSeconds() >= s_next_log)
             {
                 s_next_log = LLFrameTimer::getElapsedSeconds() + 5.0;
-                LL_INFOS("WolfAurora") << "forced: gate " << s.gate << " on " << on << " live " << live << " colour " << mode
+                LL_INFOS("WolfAurora") << "forced: gate " << s.gate << " on " << on << " in sight " << in_sight << " live " << live << " colour " << mode
                                        << " amount " << amount << " night " << night << " sun z " << sun.mV[VZ]
                                        << " arcs total " << arcs.total << " pos " << arcs.pos[0] << "/" << arcs.pos[1] << "/" << arcs.pos[2]
                                        << " km first " << first << " step " << step << " kR " << kR << " eye Y " << Y
@@ -560,6 +580,37 @@ void WolfAurora::frameUpdate()
     }
     sLut.flush();
     sState.tableFresh = true;
+    // [WolfViewer 2026-10-15] WolfForceAurora: is the marched table empty, or full and drawn too dim? (Paul: "still no
+    // aurora" with gate 1, in sight, 20 kR) - its largest value and lit texels, every 5 s, a synchronous read (test only)
+    if (forced())
+    {
+        static F64 s_next_read = 0.0;
+        if (LLFrameTimer::getElapsedSeconds() >= s_next_read)
+        {
+            s_next_read = LLFrameTimer::getElapsedSeconds() + 5.0;
+            std::vector<F32> px((size_t)w * h * 4, 0.f);
+            sLut.bindTarget();
+            glReadPixels(0, 0, (GLsizei)w, (GLsizei)h, GL_RGBA, GL_FLOAT, px.data());
+            sLut.flush();
+            F32 mx[4] = { 0.f, 0.f, 0.f, 0.f };
+            size_t lit = 0, bad = 0;
+            for (size_t i = 0; i < px.size(); i += 4)
+            {
+                bool any = false;
+                for (S32 c = 0; c < 4; ++c)
+                {
+                    const F32 v = px[i + c];
+                    if (!std::isfinite(v)) { ++bad; continue; }
+                    mx[c] = llmax(mx[c], v);
+                    any = any || v > 0.f;
+                }
+                if (any) ++lit;
+            }
+            LL_INFOS("WolfAurora") << "forced: table " << w << "x" << h << " max rgba " << mx[0] << "," << mx[1] << "," << mx[2] << ","
+                                   << mx[3] << " lit texels " << lit << " non-finite " << bad << " sweep " << sState.sweep
+                                   << " eye key " << sState.eye[1] << " gate " << sState.gate << LL_ENDL;
+        }
+    }
 }
 
 // static

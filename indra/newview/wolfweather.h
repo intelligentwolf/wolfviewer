@@ -266,6 +266,12 @@ public:
      * @return "parcel", "region" or "" — never "preview", which is the editor's own doing.
      */
     std::string overriddenBy() const;
+    /** [WolfViewer 2026-10-15] the resident chose weather, fog or aurora from the menu (it outranks the land in this viewer). */
+    bool hasOwnChoice() const { return menuChoice(); }
+    /** [WolfViewer 2026-10-15] Paul: "make it default to regions weather when they land on the region to start with or
+     *  parcels weather" - arriving on a region forgets the resident's own menu choice (rain/snow, fog, aurora); the land's
+     *  weather applies again when its row arrives (WolfRegionWeather -> onRegionWeatherChanged). */
+    void forgetOwnChoice() { mUser = Mode::NONE; mUserFog = 0; mUserAurora = 0; }
     /** Kept for callers that only ask "is the menu locked out". */
     bool forced() const { return !overriddenBy().empty(); }
     static Mode modeOf(WolfWeatherProfile::Kind k)

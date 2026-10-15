@@ -428,6 +428,21 @@ namespace
         }
 
         s.gate = on ? (F32)(night * clear_air * clear_air) : 0.f;
+        // [WolfViewer 2026-10-15] WolfForceAurora: why it does or does not show, every 5 s (Paul: "still no aurora")
+        if (force)
+        {
+            static F64 s_next_log = 0.0;
+            if (LLFrameTimer::getElapsedSeconds() >= s_next_log)
+            {
+                s_next_log = LLFrameTimer::getElapsedSeconds() + 5.0;
+                LL_INFOS("WolfAurora") << "forced: gate " << s.gate << " on " << on << " live " << live << " colour " << mode
+                                       << " amount " << amount << " night " << night << " sun z " << sun.mV[VZ]
+                                       << " arcs total " << arcs.total << " pos " << arcs.pos[0] << "/" << arcs.pos[1] << "/" << arcs.pos[2]
+                                       << " km first " << first << " step " << step << " kR " << kR << " eye Y " << Y
+                                       << " LUT program " << gWolfAuroraLUTProgram.isComplete() << " skyActive " << WolfEnvironmentRender::skyActive()
+                                       << LL_ENDL;
+            }
+        }
         s.time = (F32)t;
         s.color = mode;
         for (S32 i = 0; i < 24; ++i) s.band[i] = (F32)band[i];

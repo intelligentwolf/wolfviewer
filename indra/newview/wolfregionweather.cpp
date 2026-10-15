@@ -233,6 +233,7 @@ void WolfRegionWeather::onRegionChanged()
     mHaveRow = false;
     setAutoEnvPreview(false, 0.0);   // <WolfViewer 2026-10-03/> a preview belongs to the region it was made in
     wolf_use_shared_environment();   // <WolfViewer 2026-10-12/>
+    if (WolfWeather::instanceExists()) WolfWeather::instance().forgetOwnChoice();   // [2026-10-15/] the land's weather on arrival
     readAutoEnv(LLSD());
     mProfile = WolfWeatherProfile();
     mKind.clear();

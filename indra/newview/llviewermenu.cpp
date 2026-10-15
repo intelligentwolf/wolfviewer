@@ -607,14 +607,9 @@ class WolfWeatherToggle : public view_listener_t
         if (!wolf_grid_tools_allowed()) return true;
         // [WEATHER 2026-09-12] A parcel prim OR the region setting can outrank the menu, and
         // the user is told which — "nothing happened" is the worst possible answer to a click.
-        const std::string by = WolfWeather::instance().overriddenBy();
-        if (!by.empty())
-        {
-            LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE",
-                by == "parcel" ? "The weather here is set by this parcel."
-                               : "The weather here is set for the whole region."));
-            return true;
-        }
+        // [WolfViewer 2026-10-15] Paul: "i want the user to be able to override the weather settings in the weather menu" -
+        // the choice is the resident's own and outranks the region and parcel in this viewer (wolfweatherstate.h `personal`,
+        // Paul 10-04); Clear Weather hands the weather back to the land. Was refused with "set for the whole region".
         WolfWeather::instance().toggle(wolf_weather_mode(userdata.asString()));
         return true;
     }
@@ -660,14 +655,9 @@ class WolfWeatherSetLevel : public view_listener_t
         if (!wolf_grid_tools_allowed()) return true;
         // [WEATHER 2026-09-12] A parcel prim OR the region setting can outrank the menu, and
         // the user is told which — "nothing happened" is the worst possible answer to a click.
-        const std::string by = WolfWeather::instance().overriddenBy();
-        if (!by.empty())
-        {
-            LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE",
-                by == "parcel" ? "The weather here is set by this parcel."
-                               : "The weather here is set for the whole region."));
-            return true;
-        }
+        // [WolfViewer 2026-10-15] Paul: "i want the user to be able to override the weather settings in the weather menu" -
+        // the choice is the resident's own and outranks the region and parcel in this viewer (wolfweatherstate.h `personal`,
+        // Paul 10-04); Clear Weather hands the weather back to the land. Was refused with "set for the whole region".
         WolfWeather::Mode mode; S32 level;
         wolf_weather_split(userdata.asString(), mode, level);
         WolfWeather::instance().setLevel(mode, level);
@@ -719,40 +709,30 @@ class WolfPhotoIsStrength : public view_listener_t
 };
 // </WolfViewer>
 // <WolfViewer 2026-09-18> World > Weather > Fog. Source: menu_handler.js setWeatherFog - the same
-// gate and the same refusal as the rain and snow levels: your own fog applies only when nothing
-// else is deciding the weather, and the menu says who is rather than silently doing nothing.
+// gate as the rain and snow levels: your own fog, which since 2026-10-15 outranks the land as they do (Clear
+// Weather hands it back to the land).
 class WolfWeatherSetFog : public view_listener_t
 {
     bool handleEvent(const LLSD& userdata)
     {
         if (!wolf_grid_tools_allowed()) return true;
-        const std::string by = WolfWeather::instance().overriddenBy();
-        if (!by.empty())
-        {
-            LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE",
-                by == "parcel" ? "The weather here is set by this parcel."
-                               : "The weather here is set for the whole region."));
-            return true;
-        }
+        // [WolfViewer 2026-10-15] Paul: "i want the user to be able to override the weather settings in the weather menu" -
+        // the choice is the resident's own and outranks the region and parcel in this viewer (wolfweatherstate.h `personal`,
+        // Paul 10-04); Clear Weather hands the weather back to the land. Was refused with "set for the whole region".
         WolfWeather::instance().setUserFog((S32)userdata.asInteger());
         return true;
     }
 };
-// Source: menu_handler.js setWeatherAurora - the same gate and refusal; and the hint that it
+// Source: menu_handler.js setWeatherAurora - the same gate (no refusal since 2026-10-15); and the hint that it
 // is a night sky, so choosing it at noon does not look like nothing happened.
 class WolfWeatherSetAurora : public view_listener_t
 {
     bool handleEvent(const LLSD& userdata)
     {
         if (!wolf_grid_tools_allowed()) return true;
-        const std::string by = WolfWeather::instance().overriddenBy();
-        if (!by.empty())
-        {
-            LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE",
-                by == "parcel" ? "The weather here is set by this parcel."
-                               : "The weather here is set for the whole region."));
-            return true;
-        }
+        // [WolfViewer 2026-10-15] Paul: "i want the user to be able to override the weather settings in the weather menu" -
+        // the choice is the resident's own and outranks the region and parcel in this viewer (wolfweatherstate.h `personal`,
+        // Paul 10-04); Clear Weather hands the weather back to the land. Was refused with "set for the whole region".
         const S32 percent = (S32)userdata.asInteger();
         WolfWeather::instance().setUserAurora(percent);
         if (percent > 0 && WolfWeather::auroraAmount() <= 0.f)
@@ -780,15 +760,16 @@ class WolfWeatherIsFog : public view_listener_t
 static void wolf_weather_clear()
 {
     if (!wolf_grid_tools_allowed()) return;
+    // [WolfViewer 2026-10-15] clearing the resident's own choice hands the weather back to the land (it no longer refuses)
+    const bool had_choice = WolfWeather::instance().hasOwnChoice();
+    WolfWeather::instance().clear();
     const std::string by = WolfWeather::instance().overriddenBy();
-    if (!by.empty())
+    if (had_choice && !by.empty())
     {
         LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE",
-            by == "parcel" ? "The weather here is set by this parcel."
-                           : "The weather here is set for the whole region."));
-        return;
+            by == "parcel" ? "Your own weather is cleared: this parcel's weather shows again."
+                           : "Your own weather is cleared: this region's weather shows again."));
     }
-    WolfWeather::instance().clear();
 }
 
 static bool wolf_is_eep()

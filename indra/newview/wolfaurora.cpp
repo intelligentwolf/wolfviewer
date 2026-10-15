@@ -546,7 +546,18 @@ void WolfAurora::frameUpdate()
     // one strip of rows this frame (a whole pass over the table costs `parts` times this)
     const U32 parts = (U32)llmax(sState.parts, 1);
     const U32 part = sState.part % parts;
-    const bool accumulate = sState.sweep > 0;   // the first sweep writes the table, the later ones blend
+    // [WolfViewer 2026-10-15] THE WINDOWS AURORA CRASH: glBlendColor is OpenGL 1.4 and LL's loader (llgl.cpp initExtensions,
+    // the GL_VERSION_1_4 block) never fetches it - LL itself never calls it. On Linux libGL exports it; on Windows the call
+    // bound to some other export at link time, so it crashed the moment the first sweep was done and blending began
+    // (GTX 1650 / driver 457.34 and Hydra's RTX 3060, ~1 s after the gate opened). It is fetched here as LL fetches the
+    // rest of 1.4 (wglGetProcAddress, what GLH_EXT_GET_PROC_ADDRESS is on Windows: glh_genext.h); without it the table is rewritten instead of blended.
+    static PFNGLBLENDCOLORPROC s_blendColor =
+#if LL_WINDOWS
+        (PFNGLBLENDCOLORPROC)wglGetProcAddress("glBlendColor");
+#else
+        glBlendColor;
+#endif
+    const bool accumulate = sState.sweep > 0 && s_blendColor;   // the first sweep writes the table, the later ones blend
     if (++sState.part % parts == 0) ++sState.sweep;
     const U32 y0 = part * h / parts, y1 = (part + 1) * h / parts;
     glViewport(0, (GLint)y0, (GLsizei)w, (GLsizei)(y1 - y0));
@@ -564,7 +575,7 @@ void WolfAurora::frameUpdate()
         glGetIntegerv(GL_BLEND_SRC_ALPHA, &src_a); glGetIntegerv(GL_BLEND_DST_ALPHA, &dst_a);
         glGetFloatv(GL_BLEND_COLOR, blend_col);
         glEnable(GL_BLEND);
-        glBlendColor(0.f, 0.f, 0.f, ACCUMULATE);
+        s_blendColor(0.f, 0.f, 0.f, ACCUMULATE);
         glBlendFunc(GL_CONSTANT_ALPHA, GL_ONE_MINUS_CONSTANT_ALPHA);
     }
     gWolfAuroraLUTProgram.bind();
@@ -575,7 +586,7 @@ void WolfAurora::frameUpdate()
     if (accumulate)
     {
         glBlendFuncSeparate(src_rgb, dst_rgb, src_a, dst_a);
-        glBlendColor(blend_col[0], blend_col[1], blend_col[2], blend_col[3]);
+        s_blendColor(blend_col[0], blend_col[1], blend_col[2], blend_col[3]);
         if (!was_blend) glDisable(GL_BLEND);
     }
     sLut.flush();

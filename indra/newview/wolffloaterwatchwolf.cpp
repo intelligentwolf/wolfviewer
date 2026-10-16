@@ -29,6 +29,8 @@
 #include "llframetimer.h"
 #include "lllineeditor.h"
 #include "llnotificationsutil.h"
+#include "llscrolllistcell.h"
+#include "llscrolllistcolumn.h"
 #include "llscrolllistctrl.h"
 #include "llscrolllistitem.h"
 #include "llsdjson.h"
@@ -43,6 +45,9 @@ namespace
 {
     const char* API_URL = "https://www.wolf-grid.com/wolfstorm/php/watchwolf.php";
     const F64 REFRESH_SECONDS = 20.0;
+    // <WolfViewer 2026-10-16> a visitor from another grid (hypergrid): amber name and status, the same
+    // #ffc46b WolfStorm's floater_wolf_watchwolf.js uses (above 4.5:1 on the list's dark background).
+    const LLColor4 FOREIGN_COLOR(1.f, 196.f / 255.f, 107.f / 255.f, 1.f);
 
     LLCore::HttpHeaders::ptr_t identity_headers(bool form)
     {
@@ -73,6 +78,7 @@ bool WolfFloaterWatchWolf::postBuild()
     mList = getChild<LLScrollListCtrl>("people");
     mFilter = getChild<LLLineEditor>("filter");
     mNpc = getChild<LLCheckBoxCtrl>("show_npcs");
+    mForeign = getChild<LLCheckBoxCtrl>("foreign_only");
     mMine = getChild<LLCheckBoxCtrl>("mine_only");
     mMine->set(gSavedSettings.getBOOL("WolfWatchWolfMineOnly"));
     mMine->setCommitCallback([this](LLUICtrl* c, const LLSD&)
@@ -99,6 +105,7 @@ bool WolfFloaterWatchWolf::postBuild()
     mFilter->setCommitCallback([this](LLUICtrl*, const LLSD&) { mPage = 1; fetch(); });
     mFilter->setCommitOnFocusLost(true);
     mNpc->setCommitCallback([this](LLUICtrl*, const LLSD&) { mPage = 1; fetch(); });
+    mForeign->setCommitCallback([this](LLUICtrl*, const LLSD&) { mPage = 1; fetch(); });
     mPer->setCommitCallback([this](LLUICtrl*, const LLSD&) { mPage = 1; fetch(); });
     mPrev->setCommitCallback([this](LLUICtrl*, const LLSD&) { if (mPage > 1) { --mPage; fetch(); } });
     mNext->setCommitCallback([this](LLUICtrl*, const LLSD&) { if (mPage < mPages) { ++mPage; fetch(); } });
@@ -143,9 +150,10 @@ void WolfFloaterWatchWolf::fetch()
         return;
     }
     mBusy = true;
-    const std::string query = llformat("action=list&page=%d&per=%d&sort=%s&dir=%s&npc=%d&mine=%d&q=", mPage,
+    const std::string query = llformat("action=list&page=%d&per=%d&sort=%s&dir=%s&npc=%d&mine=%d&foreign=%d&q=", mPage,
                                        mPer->getValue().asInteger() > 0 ? mPer->getValue().asInteger() : 50,
-                                       mSort.c_str(), mDesc ? "desc" : "asc", mNpc->get() ? 1 : 0, mMine->get() ? 1 : 0)
+                                       mSort.c_str(), mDesc ? "desc" : "asc", mNpc->get() ? 1 : 0, mMine->get() ? 1 : 0,
+                                       mForeign->get() ? 1 : 0)
                               + LLURI::escape(mFilter->getText());
     const LLHandle<LLFloater> h = getHandle();
     const U64 serial = ++mSerial;
@@ -193,11 +201,31 @@ void WolfFloaterWatchWolf::show(const LLSD& reply)
         row["columns"][1]["value"] = r["region"];
         row["columns"][2]["column"] = "estate";
         row["columns"][2]["value"] = r["estate"];
+        // <WolfViewer 2026-10-16> Paul: foreign-grid visitors "are the people that need ejecting/banning" -
+        // the site marks a hypergrid visitor foreign, with the grid they come from (watchwolf.php ww_foreign_grid).
+        const bool foreign = r["foreign"].asBoolean();
+        const bool sitting = r["sitting"].asBoolean();
         row["columns"][3]["column"] = "status";
-        row["columns"][3]["value"] = r["npc"].asBoolean() ? std::string("NPC") : (r["sitting"].asBoolean() ? std::string("sitting") : std::string("here"));
+        row["columns"][3]["value"] = r["npc"].asBoolean() ? std::string("NPC")
+                                   : foreign ? std::string(sitting ? "Foreign, sitting" : "Foreign")
+                                   : std::string(sitting ? "sitting" : "here");
         row["columns"][4]["column"] = "position";
         row["columns"][4]["value"] = llformat("%d, %d, %d", r["x"].asInteger(), r["y"].asInteger(), r["z"].asInteger());
-        mList->addElement(row);
+        LLScrollListItem* item = mList->addElement(row);
+        if (item && foreign)
+        {
+            const LLScrollListColumn* name_col = mList->getColumn("name");
+            const LLScrollListColumn* status_col = mList->getColumn("status");
+            LLScrollListCell* name_cell = name_col ? item->getColumn(name_col->mIndex) : nullptr;
+            LLScrollListCell* status_cell = status_col ? item->getColumn(status_col->mIndex) : nullptr;
+            if (name_cell) name_cell->setColor(FOREIGN_COLOR);
+            if (status_cell)
+            {
+                status_cell->setColor(FOREIGN_COLOR);
+                status_cell->setToolTip("Visitor from another grid: " + r["grid"].asString());
+                if (LLScrollListText* text = dynamic_cast<LLScrollListText*>(status_cell)) text->setFontStyle(LLFontGL::BOLD);
+            }
+        }
     }
     // the list shows the site's order (it sorted the whole list, not just this page)
     mList->clearSortOrder();
@@ -206,8 +234,10 @@ void WolfFloaterWatchWolf::show(const LLSD& reply)
     mMine->setVisible(reply["isGod"].asBoolean());
     mPrev->setEnabled(mPage > 1);
     mNext->setEnabled(mPage < mPages);
-    mSummary->setText(llformat("%d people on the %d regions you own or manage%s", reply["peopleOnThem"].asInteger(),
-                               reply["regionsHeld"].asInteger(), mNpc->get() ? llformat(" (%d shown with NPCs)", reply["total"].asInteger()).c_str() : ""));
+    const S32 foreign = reply["foreignOnThem"].asInteger();
+    mSummary->setText(llformat("%d people on the %d regions you own or manage%s%s", reply["peopleOnThem"].asInteger(),
+                               reply["regionsHeld"].asInteger(), foreign > 0 ? llformat(", %d from other grids", foreign).c_str() : "",
+                               mNpc->get() ? llformat(" (%d shown with NPCs)", reply["total"].asInteger()).c_str() : ""));
     setStatus(mRows.size() == 0 ? std::string("Nobody here matches.") : std::string(), false);
     onSelection();
 }
@@ -283,9 +313,12 @@ void WolfFloaterWatchWolf::act(const std::string& action)
     if (r["self"].asBoolean()) return;
     const LLUUID region = r["regionId"].asUUID();
     const std::string name = r["name"].asString();
+    // <WolfViewer 2026-10-16> a hypergrid visitor's home is on their own grid (OpenSim HGEntityTransferModule
+    // TeleportHome sends a user who is not local to the HomeURI in their circuit)
+    const std::string home = r["foreign"].asBoolean() ? "send them home to their own grid (" + r["grid"].asString() + ")" : std::string("send them home");
     const std::string msg = action == "ban"
-        ? "Ban " + name + " from the estate \"" + r["estate"].asString() + "\" (every region in it) and send them home now?"
-        : "Eject " + name + " from " + r["region"].asString() + " - send them home now?";
+        ? "Ban " + name + " from the estate \"" + r["estate"].asString() + "\" (every region in it) and " + home + " now?"
+        : "Eject " + name + " from " + r["region"].asString() + " - " + home + " now?";
     const LLHandle<LLFloater> h = getHandle();
     LLNotificationsUtil::add("GenericAlertYesCancel", LLSD().with("MESSAGE", msg), LLSD(),
         [h, action, avatar, region, name](const LLSD& n, const LLSD& resp)

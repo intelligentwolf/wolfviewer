@@ -55,6 +55,7 @@
 #include "lltooldraganddrop.h"
 #include "lltoolmgr.h"
 #include "lltoolpie.h"
+#include "llviewercamera.h"
 #include "llviewercontrol.h"
 #include "llviewerinventory.h"
 #include "llviewerobjectlist.h"
@@ -81,11 +82,16 @@ namespace
     constexpr U8 ACTION_FLATTEN = 0;
     constexpr F32 HEIGHT_TOLERANCE = 0.06f;
     // [WolfViewer 2026-10-14 v2] Ground sampled round the rotated box footprint, every tunnel band
-    // and every door, in metres (CAVE_DESIGN_V2.md: "the rock margin, plus the mound skirt").
-    // Why 30: settled with caves.php and the generator on 2026-10-14 - the mound and its skirt reach
-    // at most 26 m beyond the interior, and caves.php checks land out to 4 m (CAVE_REACH_M) + 26 m
-    // = 30 m. The sample must cover at least that; widen it here (the one place) if the skirt grows.
-    constexpr F32 CAVE_SAMPLE_MARGIN_M = 30.f;
+    // and every door. [WolfViewer 2026-10-15 v3] Source: CAVE_DESIGN_V3.md "/cave_mesh request":
+    // "The terrain sample the clients send covers the box footprint, every tunnel and door, plus
+    // CAVE_REACH_M + CAVE_MOUND_SKIRT_M, clipped to the region" (CAVE_DESIGN_V3.md "Rights":
+    // CAVE_REACH_M (4), CAVE_MOUND_SKIRT_M (26)). Caverns lie inside the box.
+    constexpr F32 CAVE_REACH_M = 4.f;
+    constexpr F32 CAVE_MOUND_SKIRT_M = 26.f;
+    constexpr F32 CAVE_SAMPLE_MARGIN_M = CAVE_REACH_M + CAVE_MOUND_SKIRT_M;
+    // [WolfViewer 2026-10-15 v3] A box handle is picked within this many screen pixels (the task
+    // brief for the v3 handles: "pick radius ~10 px").
+    constexpr F32 HANDLE_PICK_PX = 10.f;
     // Source: rust_proxy/src/wolfcave.rs:88 MAX_GRID_POINTS = 512 * 512 — the sampled grid's limit.
     constexpr S32 MAX_GRID_SIDE = 512;
     // Source: RenderTerrainScale default (app_settings/settings.xml, 12.0): the texgen the shell's
@@ -245,7 +251,7 @@ namespace
         return sqrtf(ex * ex + ey * ey);
     }
 
-    /** Distance from x,y to the box's wall line, inside or outside (CAVE_DESIGN_V2.md doors). */
+    /** Distance from x,y to the box's wall line, inside or outside (CAVE_DESIGN_V3.md doors). */
     F32 wallDist(const WolfCaves::Box& b, F32 x, F32 y)
     {
         const F32 a = b.mRot * DEG_TO_RAD, c = cosf(a), s = sinf(a);
@@ -263,6 +269,29 @@ namespace
         F32 best = 1e9f;
         for (size_t k = 0; k + 3 < t.mP.size(); k += 2) best = llmin(best, segDist(x, y, t.mP[k], t.mP[k + 1], t.mP[k + 2], t.mP[k + 3]));
         return best;
+    }
+
+    /** [WolfViewer 2026-10-15 v3] The index of the tunnel x,y lies on (within its half-width,
+     *  CAVE_DESIGN_V3.md caverns), the nearest one when several; -1 = none. */
+    S32 tunnelUnder(const WolfCaves::Design& d, F32 x, F32 y)
+    {
+        S32 best = -1;
+        F32 best_off = 0.f;
+        for (size_t i = 0; i < d.mTunnels.size(); ++i)
+        {
+            const F32 off = tunnelDist(d.mTunnels[i], x, y) - d.mTunnels[i].mW * 0.5f;
+            if (off <= 0.f && (best < 0 || off < best_off)) { best = (S32)i; best_off = off; }
+        }
+        return best;
+    }
+
+    /** [WolfViewer 2026-10-15 v3] 0 <= rot < 360, also after rounding to 0.01. */
+    F32 normRot(F32 rot)
+    {
+        rot = fmodf(rot, 360.f);
+        if (rot < 0.f) rot += 360.f;
+        if (r2(rot) >= 360.f) rot = 0.f;
+        return rot;
     }
 }
 
@@ -289,24 +318,24 @@ WolfCaves::Cave WolfCaves::newCave()
     c.mId = id.asString();
     c.mDesign.mSeed = (S32)(ll_frand() * 2147483000.f);
     c.mDesign.mRock = terrainRockId();   // [WolfViewer 2026-10-14 v2] Paul: "default to a cave texture"
-    return c;
+    return c;   // [WolfViewer 2026-10-15 v3] Box::mH defaults to 8 (CAVE_DESIGN_V3.md)
 }
 
-// Source: CAVE_DESIGN_V2.md "rock" — OpenSim RegionSettings.cs:116 DEFAULT_TERRAIN_TEXTURE_4.
+// Source: CAVE_DESIGN_V3.md "rock" (as v2) — OpenSim RegionSettings.cs:116 DEFAULT_TERRAIN_TEXTURE_4.
 const LLUUID& WolfCaves::terrainRockId()
 {
     static const LLUUID id("beb169c7-11ea-fff2-efe5-0f24dc881df2");
     return id;
 }
 
-// Source: CAVE_DESIGN_V2.md "rock" — OpenSim library TexturesAssetSet.xml "rocks".
+// Source: CAVE_DESIGN_V3.md "rock" (as v2) — OpenSim library TexturesAssetSet.xml "rocks".
 const LLUUID& WolfCaves::rocksId()
 {
     static const LLUUID id("00000000-0000-1111-9999-000000000003");
     return id;
 }
 
-// Source: CAVE_DESIGN_V2.md "box" — w along the box's own x, d along its own y, rot degrees
+// Source: CAVE_DESIGN_V3.md "box" — w along the box's own x, d along its own y, rot degrees
 // counter-clockwise from east about the centre.
 void WolfCaves::boxCorners(const Box& b, F32 out[8])
 {
@@ -320,56 +349,109 @@ void WolfCaves::boxCorners(const Box& b, F32 out[8])
     }
 }
 
-// Source: CAVE_DESIGN_V2.md "doors" — within (tunnel half-width + 1 m) of a tunnel, or within 1 m
-// of the box wall (outside or inside).
+// [WolfViewer 2026-10-15 v3] Source: CAVE_DESIGN_V3.md "box" — sb, the box signed distance:
+// positive inside (to the nearest wall), negative outside (minus the distance to the footprint).
+F32 WolfCaves::boxSigned(const Box& b, F32 x, F32 y)
+{
+    const F32 w = wallDist(b, x, y);
+    const F32 a = b.mRot * DEG_TO_RAD, c = cosf(a), s = sinf(a);
+    const F32 dx = x - b.mX, dy = y - b.mY;
+    const bool inside = fabsf(dx * c + dy * s) <= b.mW * 0.5f && fabsf(-dx * s + dy * c) <= b.mD * 0.5f;
+    return inside ? w : -w;
+}
+
+// [WolfViewer 2026-10-15 v3] Source: CAVE_DESIGN_V3.md "doors" — each must be within 1 m of the box
+// wall (inside or outside) AND within (w / 2 + 1 m) of a tunnel.
 std::string WolfCaves::doorProblem(const Design& d, F32 x, F32 y)
 {
-    if (!d.mHasBox) return "Draw the cave box first (step 1).";
-    F32 off = wallDist(d.mBox, x, y) - DOOR_REACH_M;
-    if (off <= 0.f) return std::string();
+    if (!d.mHasBox) return "Draw the rock box first (step 1).";
+    const F32 wall_off = wallDist(d.mBox, x, y) - DOOR_REACH_M;
+    if (wall_off > 0.f)
+        return llformat("A doorway goes where a tunnel comes out of the rock box - that spot is %.1f m too far from the box wall. Click on the wall where a tunnel meets it.", wall_off);
+    if (d.mTunnels.empty()) return "A doorway goes where a tunnel meets the box wall - draw a tunnel to the wall first (step 2).";
+    F32 off = 1e9f;
     for (const Tunnel& t : d.mTunnels)
     {
         const F32 o = tunnelDist(t, x, y) - t.mW * 0.5f - DOOR_REACH_M;
         if (o <= 0.f) return std::string();
         off = llmin(off, o);
     }
-    return llformat("A doorway goes on the box wall or on a tunnel - that spot is %.1f m too far from both. Click nearer the box's edge or a tunnel.", off);
+    return llformat("A doorway goes where a tunnel meets the box wall - that spot is on the wall but %.1f m too far from a tunnel. Click where a tunnel reaches the wall.", off);
 }
 
-// [WolfViewer 2026-10-14 v2] Every limit of CAVE_DESIGN_V2.md "Stored design", checked here so the
-// window can say in words why Generate cannot be pressed (the generator and caves.php refuse the
-// same things, but only after a round trip).
+// [WolfViewer 2026-10-15 v3] Source: CAVE_DESIGN_V3.md "caverns" — r in [2, 30]; the centre lies on a
+// tunnel (distance to its polyline <= w / 2); the whole disc lies inside the box (sb >= r).
+std::string WolfCaves::cavernProblem(const Design& d, F32 x, F32 y, F32 r)
+{
+    if (!d.mHasBox) return "Draw the rock box first (step 1).";
+    if (d.mTunnels.empty()) return "A cavern is a chamber on a tunnel - draw a tunnel first (step 2).";
+    if (tunnelUnder(d, x, y) < 0) return "A cavern starts on a tunnel - press inside a tunnel's width, then drag outwards.";
+    if (r < CAVERN_R_MIN - 0.005f || r > CAVERN_R_MAX + 0.005f)
+        return llformat("A cavern's radius must be %d to %d m.", (S32)CAVERN_R_MIN, (S32)CAVERN_R_MAX);
+    const F32 sb = boxSigned(d.mBox, x, y);
+    if (sb < r - 0.005f)
+    {
+        if (sb < CAVERN_R_MIN) return llformat("A cavern must lie wholly inside the rock box - that spot is too near the box wall for even a %d m cavern. Start it further in, or make the box bigger.", (S32)CAVERN_R_MIN);
+        return llformat("A cavern must lie wholly inside the rock box - there it can be at most %.1f m across the radius. Make it smaller or the box bigger.", sb);
+    }
+    return std::string();
+}
+
+// [WolfViewer 2026-10-14 v2] Every limit of the stored design, checked here so the window can say
+// in words why Generate cannot be pressed (the generator and caves.php refuse the same things, but
+// only after a round trip). [WolfViewer 2026-10-15 v3] Source: CAVE_DESIGN_V3.md "Stored design".
 std::string WolfCaves::designProblem(const Design& d, F32 region_w)
 {
-    if (!d.mHasBox) return "Draw the cave box first: step 1, press Draw the box, then drag on the ground.";
+    if (!d.mHasBox) return "Draw the rock box first: step 1, press Draw the box, then drag on the ground.";
     const Box& b = d.mBox;
     if (b.mW < BOX_SIDE_MIN || b.mW > BOX_SIDE_MAX || b.mD < BOX_SIDE_MIN || b.mD > BOX_SIDE_MAX)
         return llformat("The box must be %d to %d m wide and deep.", (S32)BOX_SIDE_MIN, (S32)BOX_SIDE_MAX);
-    if (b.mH < BOX_H_MIN || b.mH > BOX_H_MAX) return "The box height must be 2.5 to 20 m.";
+    if (b.mH < BOX_H_MIN || b.mH > BOX_H_MAX) return llformat("The box height must be %d to %d m.", (S32)BOX_H_MIN, (S32)BOX_H_MAX);
     if (b.mZ < BOX_Z_MIN || b.mZ > BOX_Z_MAX) return "The floor height must be between -200 and 4096 m.";
     F32 c[8];
     boxCorners(b, c);
     for (S32 i = 0; i < 4; ++i)
     {
         if (c[2 * i] < 0.f || c[2 * i] > region_w || c[2 * i + 1] < 0.f || c[2 * i + 1] > region_w)
-            return "Part of the box is outside this region - draw it again further in, or change its size or turn.";
+            return "Part of the box is outside this region - move it further in, or change its size or turn.";
     }
+    if (d.mRoof < ROOF_MIN || d.mRoof > ROOF_MAX) return "The rock above must be 0.5 to 6 m thick.";
+    // Source: CAVE_DESIGN_V3.md box — the contract's own words.
+    if (b.mH - d.mRoof < ROOM_UNDER_ROOF_M) return "The rock box is too low for its roof — make it taller or the roof thinner.";
+    if (d.mRockScale < ROCK_SCALE_MIN || d.mRockScale > ROCK_SCALE_MAX) return "The rock texture scale must be 0.5 to 64.";
+    if (d.mRoughness < 0.f || d.mRoughness > 1.f) return "Rough walls must be 0 to 1.";
+    if (d.mTunnels.empty()) return "Draw at least one tunnel: step 2, press Draw a tunnel, then click points inside the box. The box is solid rock - the tunnels are the way in.";
     if ((S32)d.mTunnels.size() > MAX_TUNNELS) return llformat("At most %d tunnels - press Undo to take one back.", MAX_TUNNELS);
     S32 all = 0;
-    for (const Tunnel& t : d.mTunnels)
+    for (size_t i = 0; i < d.mTunnels.size(); ++i)
     {
+        const Tunnel& t = d.mTunnels[i];
         const S32 n = (S32)t.mP.size() / 2;
         all += n;
         if (n < 2 || n > MAX_TUNNEL_POINTS) return llformat("A tunnel needs 2 to %d points.", MAX_TUNNEL_POINTS);
         if (t.mW < TUNNEL_W_MIN || t.mW > TUNNEL_W_MAX) return "A tunnel must be 2 to 40 m wide.";
+        for (S32 k = 0; k < n; ++k)
+        {
+            // CAVE_DESIGN_V3.md: every point inside the footprint or at most TUNNEL_OUTSIDE_M outside it.
+            if (boxSigned(b, t.mP[2 * k], t.mP[2 * k + 1]) < -TUNNEL_OUTSIDE_M)
+                return llformat("Tunnel %d goes more than 1 m outside the rock box. Tunnels are carved through the box - make the box bigger (drag its handles) or press Undo.", (S32)i + 1);
+        }
     }
     if (all > MAX_ALL_TUNNEL_POINTS) return llformat("The tunnels have more than %d points in all - press Undo to take one back.", MAX_ALL_TUNNEL_POINTS);
-    if (d.mDoors.empty()) return "Add at least one doorway: step 3, press Add doorways, then click on the box wall or a tunnel.";
+    if ((S32)d.mCaverns.size() > MAX_CAVERNS) return llformat("At most %d caverns - press Undo to take one back.", MAX_CAVERNS);
+    for (size_t i = 0; i < d.mCaverns.size(); ++i)
+    {
+        const Cavern& cv = d.mCaverns[i];
+        if (cv.mH < CAVERN_H_MIN || cv.mH > CAVERN_H_MAX) return llformat("Cavern %d must be 2.5 to 20 m high.", (S32)i + 1);
+        const std::string why = cavernProblem(d, cv.mX, cv.mY, cv.mR);
+        if (!why.empty()) return llformat("Cavern %d: ", (S32)i + 1) + why;
+    }
+    if (d.mDoors.empty()) return "Add at least one doorway: step 4, press Add doorways, then click where a tunnel meets the box wall.";
     if ((S32)d.mDoors.size() > MAX_DOORS) return llformat("At most %d doorways - press Undo to take one back.", MAX_DOORS);
     for (size_t i = 0; i < d.mDoors.size(); ++i)
     {
         if (!doorProblem(d, d.mDoors[i].mX, d.mDoors[i].mY).empty())
-            return llformat("Doorway %d is no longer on the box wall or a tunnel (the box was changed). Put the box back, or press Undo until that doorway goes.", (S32)i + 1);
+            return llformat("Doorway %d is no longer where a tunnel meets the box wall (the box or a tunnel was changed). Put it back, or press Undo until that doorway goes.", (S32)i + 1);
     }
     return std::string();
 }
@@ -383,22 +465,24 @@ const WolfCaves::Cave* WolfCaves::find(const std::string& id) const
 // Source: php/caves.php header — the stored CAVE shape.
 LLSD WolfCaves::toLLSD(const Cave& c)
 {
+    // [WolfViewer 2026-10-15 v3] Source: CAVE_DESIGN_V3.md "Caves from the old builder" — an old
+    // cave goes back exactly as it was received ("WolfViewer keeps the cave's raw LLSD").
+    if (c.mOld) return c.mRaw;
     LLSD out;
     out["id"] = c.mId;
     out["name"] = c.mName;
     out["light"] = c.mLight;   // php/caves.php CAVE_LIGHTS
     if (c.mOwner.isDefined()) out["owner"] = c.mOwner;
-    // [WolfViewer 2026-10-14 v2] Source: CAVE_DESIGN_V2.md "Stored design" (schema v 2), field
-    // for field; the same object is the /cave_mesh `cave` (meshRequest).
+    // [WolfViewer 2026-10-15 v3] Source: CAVE_DESIGN_V3.md "Stored design" (schema v 3), field
+    // for field; the same object is the /cave_mesh `cave` (meshRequest). `dig` is caves.php's own
+    // field and is never sent from here.
     const Design& dz = c.mDesign;
     LLSD d;
-    d["v"] = 2;
+    d["v"] = 3;
     if (dz.mHasBox)
     {
         const Box& b = dz.mBox;
-        F32 rot = fmodf(b.mRot, 360.f);
-        if (rot < 0.f) rot += 360.f;
-        if (r2(rot) >= 360.f) rot = 0.f;   // 0 <= rot < 360 after rounding too
+        const F32 rot = normRot(b.mRot);   // 0 <= rot < 360 after rounding too
         d["box"] = LLSD().with("x", r2(b.mX)).with("y", r2(b.mY)).with("w", r2(b.mW)).with("d", r2(b.mD))
                          .with("rot", r2(rot)).with("z", r2(b.mZ)).with("h", r2(b.mH));
     }
@@ -409,9 +493,12 @@ LLSD WolfCaves::toLLSD(const Cave& c)
         for (F32 v : t.mP) pp.append(r2(v));
         ts.append(LLSD().with("p", pp).with("w", r2(t.mW)));
     }
+    LLSD cs = LLSD::emptyArray();
+    for (const Cavern& cv : dz.mCaverns) cs.append(LLSD().with("x", r2(cv.mX)).with("y", r2(cv.mY)).with("r", r2(cv.mR)).with("h", r2(cv.mH)));
     LLSD ds = LLSD::emptyArray();
     for (const Door& e : dz.mDoors) ds.append(LLSD().with("x", r2(e.mX)).with("y", r2(e.mY)));
     d["tunnels"] = ts;
+    d["caverns"] = cs;
     d["doors"] = ds;
     d["roof"] = r2(dz.mRoof);
     d["rock"] = (dz.mRock.notNull() ? dz.mRock : terrainRockId()).asString();
@@ -430,10 +517,15 @@ WolfCaves::Cave WolfCaves::fromLLSD(const LLSD& in)
     c.mId = in["id"].asString();
     c.mName = in["name"].asString();
     c.mOwner = in["owner"];
-    // [WolfViewer 2026-10-14 v2] Source: CAVE_DESIGN_V2.md "Stored design". v1 designs are not
-    // accepted any more (the table was created empty); one without a box loads with none, and
-    // the window then asks for the box first.
+    // [WolfViewer 2026-10-15 v3] Source: CAVE_DESIGN_V3.md "Fields caves.php sets" — per cave, next
+    // to owner; a stored cave without it counts as false.
+    c.mDig = in.has("dig") && in["dig"].asBoolean();
     const LLSD& d = in["design"];
+    // [WolfViewer 2026-10-15 v3] Source: CAVE_DESIGN_V3.md "Caves from the old builder": anything not
+    // v 3 is kept byte for byte (mRaw) and only listed and removable. Its box and built record are
+    // still read below, for the list and for Remove (findRock, the ground to put back).
+    c.mOld = d["v"].asInteger() != 3;
+    if (c.mOld) c.mRaw = in;
     Design& dz = c.mDesign;
     if (d.has("box") && d["box"].isMap())
     {
@@ -448,6 +540,10 @@ WolfCaves::Cave WolfCaves::fromLLSD(const LLSD& in)
         for (const LLSD& v : llsd::inArray(t["p"])) tt.mP.push_back((F32)v.asReal());
         tt.mW = (F32)t["w"].asReal();
         if (tt.mP.size() >= 4 && !(tt.mP.size() & 1)) dz.mTunnels.push_back(tt);
+    }
+    for (const LLSD& cv : llsd::inArray(d["caverns"]))
+    {
+        dz.mCaverns.push_back(Cavern{ (F32)cv["x"].asReal(), (F32)cv["y"].asReal(), (F32)cv["r"].asReal(), (F32)cv["h"].asReal() });
     }
     for (const LLSD& e : llsd::inArray(d["doors"]))
     {
@@ -472,7 +568,8 @@ void WolfCaves::refresh()
     LLCoros::instance().launch("WolfCaves fetch", []() { WolfCaves::instance().fetchCoro(); });
 }
 
-// Source: wolf_caves.js refresh — GET ?region=<uuid>.
+// Source: wolf_caves.js refresh — GET ?region=<uuid>. [WolfViewer 2026-10-15 v3] + &rights=1 for the
+// region's dig hint (CAVE_DESIGN_V3.md "Dig hint for the clients"; this GET carries the session).
 void WolfCaves::fetchCoro()
 {
     const WolfTerrainPaint::Record* r = WolfTerrainPaint::instance().current();
@@ -487,9 +584,10 @@ void WolfCaves::fetchCoro()
         mRegionUuid.clear();
         mHandle = 0;
         mVersion = 0;
+        mDigHint.clear();
         clearPreview();
     }
-    LLSD result = wolfRequest(std::string(API_URL) + "?region=" + uuid, nullptr, 20.f);
+    LLSD result = wolfRequest(std::string(API_URL) + "?region=" + uuid + "&rights=1", nullptr, 20.f);
     mFetching = false;
     LLSD reply;
     std::string transport;
@@ -503,6 +601,10 @@ void WolfCaves::fetchCoro()
     mRegionUuid = uuid;
     mHandle = handle;
     mVersion = reg["version"].asInteger();
+    // "region" | "parcels" | "none"; absent (an older caves.php, or not proven) counts as "none".
+    const std::string hint = reg["dig"].asString();
+    if (hint != mDigHint) clearPreview();   // a preview made with the other dig no longer applies
+    mDigHint = hint;
     mCaves.clear();
     for (const LLSD& c : llsd::inArray(reg["layout"]["caves"])) mCaves.push_back(fromLLSD(c));
 }
@@ -599,14 +701,17 @@ bool WolfCaves::sampleGround(const Design& d, LLSD& terrain, std::string& error)
     LLViewerRegion* rgn = gAgent.getRegion();
     if (!rgn) { error = "You are not in a region."; return false; }
     // [WolfViewer 2026-10-14 v2] The box is the cave: without it there is nothing to sample.
-    if (!d.mHasBox) { error = "Draw the cave box first (step 1)."; return false; }
+    if (!d.mHasBox) { error = "Draw the rock box first (step 1)."; return false; }
     F32 x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
     auto grow = [&](F32 x, F32 y, F32 r) { x0 = llmin(x0, x - r); y0 = llmin(y0, y - r); x1 = llmax(x1, x + r); y1 = llmax(y1, y + r); };
-    // CAVE_DESIGN_V2.md: the sample covers the ROTATED box footprint, every tunnel and every door.
+    // CAVE_DESIGN_V3.md: the sample covers the ROTATED box footprint, every tunnel and every door
+    // (plus CAVE_SAMPLE_MARGIN_M below). Caverns lie inside the box; they are grown in as well so
+    // the sample can never be short of one, whatever the design.
     F32 corners[8];
     boxCorners(d.mBox, corners);
     for (S32 i = 0; i < 4; ++i) grow(corners[2 * i], corners[2 * i + 1], 0.f);
     for (const Tunnel& t : d.mTunnels) for (size_t k = 0; k + 1 < t.mP.size(); k += 2) grow(t.mP[k], t.mP[k + 1], t.mW * 0.5f);
+    for (const Cavern& cv : d.mCaverns) grow(cv.mX, cv.mY, cv.mR);
     for (const Door& e : d.mDoors) grow(e.mX, e.mY, DOOR_REACH_M);
     const S32 size = (S32)rgn->getWidth();
     const S32 bx0 = llmax(0, (S32)floorf(x0 - CAVE_SAMPLE_MARGIN_M)), by0 = llmax(0, (S32)floorf(y0 - CAVE_SAMPLE_MARGIN_M));
@@ -666,7 +771,7 @@ bool WolfCaves::sampleGround(const Design& d, LLSD& terrain, std::string& error)
 }
 
 // Source: wolf_caves.js _meshRequest (rust_proxy wolfcave.rs CaveRequest).
-LLSD WolfCaves::meshRequest(const Cave& cave, const LLSD& terrain) const
+LLSD WolfCaves::meshRequest(const Cave& cave, const LLSD& terrain, bool dig) const
 {
     LLViewerRegion* rgn = gAgent.getRegion();
     LLSD body;
@@ -712,9 +817,11 @@ LLSD WolfCaves::meshRequest(const Cave& cave, const LLSD& terrain) const
         paint["strokes"] = st;
         body["paint"] = paint;
     }
-    // [WolfViewer 2026-10-14 v2] Source: CAVE_DESIGN_V2.md "/cave_mesh request" — `cave` is the
-    // stored design itself (same fields, same rounding), so the proxy's build gate, which compares
-    // it with the saved record, sees exactly what was saved.
+    // [WolfViewer 2026-10-14 v2] `cave` is the stored design itself (same fields, same rounding), so
+    // the proxy's build gate, which compares it with the saved record, sees exactly what was saved.
+    // [WolfViewer 2026-10-15 v3] Source: CAVE_DESIGN_V3.md "/cave_mesh request" — new top-level
+    // `dig` (bool): a preview sends the region hint's answer, a build the stored cave's `dig`.
+    body["dig"] = dig;
     body["cave"] = toLLSD(cave)["design"];
     return body;
 }
@@ -740,7 +847,9 @@ void WolfCaves::requestPreview(const Cave& cave)
 {
     if (!onWolf()) return;
     const U32 req = ++mPreviewRequest;
-    LLCoros::instance().launch("WolfCaves preview", [cave, req]()
+    // [WolfViewer 2026-10-15 v3] CAVE_DESIGN_V3.md "Dig hint": dig = the hint is "region" or "parcels".
+    const bool dig = previewDig();
+    LLCoros::instance().launch("WolfCaves preview", [cave, req, dig]()
     {
         WolfCaves& wc = WolfCaves::instance();
         LLSD terrain, reply;
@@ -748,7 +857,7 @@ void WolfCaves::requestPreview(const Cave& cave)
         // [WolfViewer 2026-10-14] Only against the region the record belongs to: after a crossing
         // (or a failed fetch) a preview would sample one region's ground for another's design.
         if (!wc.recordHere()) err = "this region's caves have not loaded yet - wait a moment, or reopen the window.";
-        if (!err.empty() || !wc.sampleGround(cave.mDesign, terrain, err) || !wc.postMesh("preview", wc.meshRequest(cave, terrain), reply, err))
+        if (!err.empty() || !wc.sampleGround(cave.mDesign, terrain, err) || !wc.postMesh("preview", wc.meshRequest(cave, terrain, dig), reply, err))
         {
             if (req != wc.mPreviewRequest) return;
             wc.mPreview = Preview();
@@ -761,6 +870,9 @@ void WolfCaves::requestPreview(const Cave& cave)
         p.mReady = true;
         p.mLi = reply["li"].asInteger();
         p.mTargets = (S32)reply["targets"].size() / 4;
+        // [WolfViewer 2026-10-15 v3] CAVE_DESIGN_V3.md: the summary echoes "dig". A generator from
+        // before v3 does not; then what was asked for is what it did.
+        p.mDig = reply.has("dig") ? reply["dig"].asBoolean() : dig;
         for (const LLSD& w : llsd::inArray(reply["warnings"])) p.mWarnings.push_back(w.asString());
         for (const LLSD& prim : llsd::inArray(reply["prims"]))
         {
@@ -786,8 +898,8 @@ void WolfCaves::requestPreview(const Cave& cave)
 
 // Source: wolf_caves.js _zone — the Wolf Environment zone schema + kind + z.
 // [WolfViewer 2026-10-14 v2] The zone spans the rotated box and the tunnels; its height is the
-// box's own floor to ceiling (CAVE_DESIGN_V2.md: the floor is z everywhere inside, tunnels are
-// lower than the room), so it no longer needs the generator's reply.
+// box's floor to its top (CAVE_DESIGN_V3.md: the floor is z everywhere inside, and no tunnel or
+// cavern reaches above z + h - roof), so it does not need the generator's reply.
 LLSD WolfCaves::zoneFor(const Cave& cave) const
 {
     F32 x1 = 1e9f, y1 = 1e9f, x2 = -1e9f, y2 = -1e9f;
@@ -1086,7 +1198,11 @@ void WolfCaves::buildCoro(Cave cave)
         mBusy = false;
         return;
     }
-    LLSD body = meshRequest(cave, terrain);
+    // [WolfViewer 2026-10-15 v3] Source: CAVE_DESIGN_V3.md "Dig hint": "After the save, a build sends
+    // the cave's stored `dig`" — the record caves.php answered the save above with.
+    const Cave* saved = find(cave.mId);
+    const bool dig = saved && saved->mDig;
+    LLSD body = meshRequest(cave, terrain, dig);
     body["name"] = cave.mName;
     body["cave_id"] = cave.mId;
     body["folder_id"] = folder.asString();
@@ -1129,8 +1245,18 @@ void WolfCaves::buildCoro(Cave cave)
         mBusy = false;
         return;
     }
-    mStatus = llformat("Step 4 of 5: digging the ground (%d points)…", (S32)reply["targets"].size() / 4);
-    const std::vector<LLSD> limited = shape(reply["targets"], true, "Step 4 of 5: digging the ground");
+    // [WolfViewer 2026-10-15 v3] dig = false (CAVE_DESIGN_V3.md): no terrain targets at all, the
+    // ground is left as it is.
+    std::vector<LLSD> limited;
+    if (reply["targets"].size() >= 4)
+    {
+        mStatus = llformat("Step 4 of 5: digging the ground (%d points)…", (S32)reply["targets"].size() / 4);
+        limited = shape(reply["targets"], true, "Step 4 of 5: digging the ground");
+    }
+    else
+    {
+        mStatus = "Step 4 of 5: no ground to change.";
+    }
     // [WolfViewer 2026-10-14] Stopped part way: the record saved just above already says the rock
     // is rezzed and the ground NOT finished ("dug" false, every point's old and new height), so
     // Rebuild can dig it all again and Remove can put it all back - nothing more to save.
@@ -1188,7 +1314,19 @@ bool WolfCaves::removeOne(const Cave& cave, bool forget, std::string& error)
         error = "the cave's rock is not in view from here. Stand nearer the cave and try again (or choose to forget it and leave the rock).";
         return false;
     }
-    if (cave.mBuilt.isMap())
+    // [WolfViewer 2026-10-15 v3] A cave from the old builder goes back to caves.php only exactly as
+    // stored (toLLSD sends mRaw; CAVE_DESIGN_V3.md "Caves from the old builder": "Changing one is
+    // refused"), so the saves below cannot mark its progress or check the rights. Its record is
+    // dropped FIRST instead - that removal is the rights check - and the rock and the ground are
+    // then dealt with from this copy.
+    const bool old = cave.mOld;
+    if (old && cave.mBuilt.isMap())
+    {
+        mStatus = "Checking your rights…";
+        if (!dropCave(cave.mId, error)) return false;
+        rock = findRock(cave);   // the save suspended: the world may have moved on
+    }
+    else if (cave.mBuilt.isMap())
     {
         // The rights check FIRST: this save is refused unless the cave is the caller's to change,
         // and nothing has been touched yet. It also marks the ground as not finished, so a restore
@@ -1246,11 +1384,14 @@ bool WolfCaves::removeOne(const Cave& cave, bool forget, std::string& error)
         // put-back that stops (Stop, leaving the region) leaves a record Remove can finish from:
         // the ground's old heights are still all there, and putting back is safe to repeat. Not
         // fatal if refused: the cave is dropped at the end either way.
-        Cave gone = cave;
-        gone.mBuilt["dug"] = false;
-        gone.mBuilt["objects"] = LLSD::emptyArray();
-        std::string ignored;
-        if (!putCave(gone, ignored)) LL_WARNS("WolfCaves") << "could not record the rock as taken away: " << ignored << LL_ENDL;
+        if (!old)
+        {
+            Cave gone = cave;
+            gone.mBuilt["dug"] = false;
+            gone.mBuilt["objects"] = LLSD::emptyArray();
+            std::string ignored;
+            if (!putCave(gone, ignored)) LL_WARNS("WolfCaves") << "could not record the rock as taken away: " << ignored << LL_ENDL;
+        }
     }
     else if (rock)
     {
@@ -1267,17 +1408,19 @@ bool WolfCaves::removeOne(const Cave& cave, bool forget, std::string& error)
         if (mCancel)
         {
             error = std::string("stopped as you asked: ") + (took_rock ? "the rock is taken away and " : "")
-                  + "the ground is only partly put back. The cave is kept - press Remove again to finish putting the ground back.";
+                  + (old ? "the ground is only partly put back. This cave was drawn with the old Cave Builder and its record is already gone, so the rest of the ground must be put back by hand."
+                         : "the ground is only partly put back. The cave is kept - press Remove again to finish putting the ground back.");
             return false;
         }
         if (!sendOk())
         {
-            error = "you left the region while the ground was being put back; the cave is kept so Remove can finish it.";
+            error = old ? "you left the region while the ground was being put back. This cave was drawn with the old Cave Builder and its record is already gone, so the rest of the ground must be put back by hand."
+                        : "you left the region while the ground was being put back; the cave is kept so Remove can finish it.";
             return false;
         }
     }
     mStatus = "Forgetting the cave…";
-    if (!dropCave(cave.mId, error)) return false;
+    if (!(old && cave.mBuilt.isMap()) && !dropCave(cave.mId, error)) return false;
     if (!limited.empty())
     {
         fail(llformat("The cave is removed, but %d ground point%s could not be put back exactly - a terrain limit stopped them.",
@@ -1323,11 +1466,20 @@ WolfToolCave::WolfToolCave() : LLTool(std::string("WolfCave")) {}
 
 // [WolfViewer 2026-10-14 v2] The width of the next tunnel. The setting keeps its v1 name
 // (app_settings/settings.xml:13428 WolfCavePassageWidth) so a width people chose carries over.
-// Source: CAVE_DESIGN_V2.md tunnels "w in [2, 40]".
+// Source: CAVE_DESIGN_V3.md tunnels "w in [2, 40]".
 F32 WolfToolCave::tunnelWidth()
 {
     static LLCachedControl<F32> width(gSavedSettings, "WolfCavePassageWidth", 4.f);
     return llclamp((F32)width, WolfCaves::TUNNEL_W_MIN, WolfCaves::TUNNEL_W_MAX);
+}
+
+// [WolfViewer 2026-10-15 v3] The height of the next cavern, kept like the tunnel width
+// (app_settings/settings.xml WolfCaveCavernHeight, default 5). Source: CAVE_DESIGN_V3.md caverns
+// "h in [2.5, 20]".
+F32 WolfToolCave::cavernHeight()
+{
+    static LLCachedControl<F32> height(gSavedSettings, "WolfCaveCavernHeight", 5.f);
+    return llclamp((F32)height, WolfCaves::CAVERN_H_MIN, WolfCaves::CAVERN_H_MAX);
 }
 
 // Source: wolfterrainpaint.cpp WolfToolTerrainPaint::hit — the ground under the pointer, in the agent region.
@@ -1342,6 +1494,62 @@ bool WolfToolCave::hit(S32 x, S32 y, F32& rx, F32& ry) const
     rx = r2(pos.mV[VX]);
     ry = r2(pos.mV[VY]);
     return true;
+}
+
+// [WolfViewer 2026-10-15 v3] The pointer on the level plane at height z: the box handles sit at the
+// box floor, which need not be the ground (the floor can be typed), so a handle drag follows that
+// plane rather than the terrain. Source: llviewerwindow.h:455 mousePointOnPlaneGlobal(point, x, y,
+// plane_point, plane_normal); llviewerwindow.cpp:5738-5765 returns false when the plane is behind
+// the camera. llviewerregion.h:339-342 getPosRegionFromGlobal / getPosGlobalFromRegion.
+bool WolfToolCave::planeHit(S32 x, S32 y, F32 z, F32& rx, F32& ry) const
+{
+    LLViewerRegion* rgn = gAgent.getRegion();
+    if (!rgn) return false;
+    LLVector3d spot;
+    if (!gViewerWindow->mousePointOnPlaneGlobal(spot, x, y, rgn->getPosGlobalFromRegion(LLVector3(0.f, 0.f, z)), LLVector3::z_axis)) return false;
+    const LLVector3 pos = rgn->getPosRegionFromGlobal(spot);
+    // Near the horizon the plane is met kilometres away: no use for dragging a box in this region.
+    const F32 w = rgn->getWidth();
+    if (pos.mV[VX] < -w || pos.mV[VY] < -w || pos.mV[VX] > 2.f * w || pos.mV[VY] > 2.f * w) return false;
+    rx = pos.mV[VX];
+    ry = pos.mV[VY];
+    return true;
+}
+
+// [WolfViewer 2026-10-15 v3] CAVE_DESIGN_V3.md "Box resize": corners and side middles at the floor,
+// the top handle over the centre at z + h. Sides: k = 0..3 between corner k and k + 1 (boxCorners
+// order (-w/2,-d/2), (w/2,-d/2), (w/2,d/2), (-w/2,d/2)), so 4 = -y, 5 = +x, 6 = +y, 7 = -x.
+LLVector3 WolfToolCave::handlePos(const WolfCaves::Box& b, S32 i)
+{
+    if (i == HANDLE_TOP) return LLVector3(b.mX, b.mY, b.mZ + b.mH);
+    F32 c[8];
+    WolfCaves::boxCorners(b, c);
+    if (i < 4) return LLVector3(c[2 * i], c[2 * i + 1], b.mZ);
+    const S32 k = i - 4, j = (k + 1) % 4;
+    return LLVector3((c[2 * k] + c[2 * j]) * 0.5f, (c[2 * k + 1] + c[2 * j + 1]) * 0.5f, b.mZ);
+}
+
+// [WolfViewer 2026-10-15 v3] Screen-space pick, the nearest handle within HANDLE_PICK_PX.
+// Source: llviewercamera.h:75 projectPosAgentToScreen(const LLVector3& pos_agent, LLCoordGL& out_point,
+// const bool clamp = true) — false when the point is behind the camera or (clamped) off the world
+// view; llviewercamera.cpp:428-497 gives the point in the scaled UI coordinates the tool's mouse
+// x, y are in (lltoolgrab.cpp:1073 compares them the same way in its handleHover).
+S32 WolfToolCave::pickHandle(S32 x, S32 y) const
+{
+    LLViewerRegion* rgn = gAgent.getRegion();
+    if (!mEdit || !mEdit->mDesign.mHasBox || !rgn) return -1;
+    LLViewerCamera* cam = LLViewerCamera::getInstance();
+    S32 best = -1;
+    F32 best_px = HANDLE_PICK_PX;
+    for (S32 i = 0; i < HANDLE_COUNT; ++i)
+    {
+        LLCoordGL sp;
+        if (!cam->projectPosAgentToScreen(rgn->getPosAgentFromRegion(handlePos(mEdit->mDesign.mBox, i)), sp, true)) continue;
+        const F32 dx = (F32)(sp.mX - x), dy = (F32)(sp.mY - y);
+        const F32 px = sqrtf(dx * dx + dy * dy);
+        if (px <= best_px) { best = i; best_px = px; }
+    }
+    return best;
 }
 
 bool WolfToolCave::handleAnyMouseClick(S32 x, S32 y, MASK mask, EMouseClickType clicktype, bool down)
@@ -1365,11 +1573,88 @@ bool WolfToolCave::handleToolTip(S32 x, S32 y, MASK mask)
     return mDrawing ? false : LLToolPie::getInstance()->handleToolTip(x, y, mask);
 }
 
-// [WolfViewer 2026-10-14 v2] Box: press-drag the footprint. Tunnel: click points. Doorway: click on
-// the box wall or a tunnel (CAVE_DESIGN_V2.md Flow 1-3).
+// [WolfViewer 2026-10-14 v2] Box: press-drag the footprint. Tunnel: click points. Doorway: click
+// where a tunnel meets the box wall. [WolfViewer 2026-10-15 v3] Box pen on an existing box: a handle
+// resizes or raises it, a press inside the footprint moves it; Cavern: press on a tunnel and drag
+// outwards (CAVE_DESIGN_V3.md Flow 1-4).
 bool WolfToolCave::handleMouseDown(S32 x, S32 y, MASK mask)
 {
     if (!mDrawing || !mEdit || !WolfCaves::onWolf()) return false;
+    WolfCaves::Design& d = mEdit->mDesign;
+    if (mPen == PEN_BOX && d.mHasBox)
+    {
+        const S32 handle = pickHandle(x, y);
+        F32 px = 0.f, py = 0.f;
+        const bool inside = handle < 0 && planeHit(x, y, d.mBox.mZ, px, py) && WolfCaves::boxSigned(d.mBox, px, py) >= 0.f;
+        if (handle >= 0 || inside)
+        {
+            mDragStart = WolfCaves::BoxUndo();
+            mDragStart.mHadBox = true;
+            mDragStart.mBox = d.mBox;
+            mHandle = handle;
+            if (handle == HANDLE_TOP)
+            {
+                // Metres per pixel: the handle and a point 1 m above it (or, when that one does not
+                // project, 1 m below) on screen. If neither pair projects, or the view is straight
+                // down the vertical, it comes from the camera instead: at distance dist a metre is
+                // view_height_px / (2 * dist * tan(fov / 2)) pixels (llcamera.h:161-162 getView =
+                // vertical FOV in radians, getViewHeightInPixels), in the UI's scaled coordinates
+                // the mouse is in (llviewerwindow.h:467 getDisplayScale).
+                LLViewerRegion* rgn = gAgent.getRegion();
+                LLViewerCamera* cam = LLViewerCamera::getInstance();
+                const LLVector3 top = handlePos(d.mBox, HANDLE_TOP);
+                F32 px_per_m = 0.f;
+                if (rgn)
+                {
+                    LLCoordGL s0, s1;
+                    const LLVector3 top_agent = rgn->getPosAgentFromRegion(top);
+                    if (cam->projectPosAgentToScreen(top_agent, s0, false))
+                    {
+                        for (const F32 dz : { 1.f, -1.f })
+                        {
+                            if (cam->projectPosAgentToScreen(top_agent + LLVector3(0.f, 0.f, dz), s1, false))
+                            {
+                                px_per_m = fabsf((F32)(s1.mY - s0.mY));
+                                break;
+                            }
+                        }
+                    }
+                    if (px_per_m < 2.f)
+                    {
+                        const F32 dist = llmax(dist_vec(cam->getOrigin(), top_agent), 0.5f);
+                        const F32 scale_y = llmax(gViewerWindow->getDisplayScale().mV[VY], 0.01f);
+                        px_per_m = (F32)cam->getViewHeightInPixels() / (2.f * dist * tanf(cam->getView() * 0.5f)) / scale_y;
+                    }
+                }
+                // 1 cm to 0.5 m of height per pixel: never a jump of metres for one pixel.
+                mMetresPerPixel = llclamp(1.f / llmax(px_per_m, 0.01f), 0.01f, 0.5f);
+                mPressY = y;
+                mDrag = DRAG_TOP;
+            }
+            else if (handle >= 4)
+            {
+                mDrag = DRAG_SIDE;
+            }
+            else if (handle >= 0)
+            {
+                mDrag = DRAG_CORNER;
+            }
+            else
+            {
+                // A move carries everything inside along: Undo needs them as they were.
+                mDragStart.mMoved = true;
+                mDragStart.mTunnels = d.mTunnels;
+                mDragStart.mCaverns = d.mCaverns;
+                mDragStart.mDoors = d.mDoors;
+                mGrabX = px;
+                mGrabY = py;
+                mDrag = DRAG_MOVE;
+            }
+            mHover = handle;
+            setMouseCapture(true);
+            return true;
+        }
+    }
     F32 rx, ry;
     if (!hit(x, y, rx, ry))
     {
@@ -1377,10 +1662,11 @@ bool WolfToolCave::handleMouseDown(S32 x, S32 y, MASK mask)
         mMessage = "Click on the ground inside this region.";
         return true;
     }
-    WolfCaves::Design& d = mEdit->mDesign;
     if (mPen == PEN_BOX)
     {
-        mDragging = true;
+        // Off the box and off its handles: a new box is drawn (it replaces the old one; Undo puts
+        // the old one back).
+        mDrag = DRAG_NEW_BOX;
         mAX = mBX = rx;
         mAY = mBY = ry;
         setMouseCapture(true);
@@ -1388,7 +1674,7 @@ bool WolfToolCave::handleMouseDown(S32 x, S32 y, MASK mask)
     }
     if (!d.mHasBox)
     {
-        mMessage = "Draw the cave box first (step 1).";
+        mMessage = "Draw the rock box first (step 1).";
         return true;
     }
     if (mPen == PEN_TUNNEL)
@@ -1396,6 +1682,13 @@ bool WolfToolCave::handleMouseDown(S32 x, S32 y, MASK mask)
         if (mLive.empty() && (S32)d.mTunnels.size() >= WolfCaves::MAX_TUNNELS)
         {
             mMessage = llformat("A cave has at most %d tunnels - press Undo to take one back.", WolfCaves::MAX_TUNNELS);
+            return true;
+        }
+        // [WolfViewer 2026-10-15 v3] CAVE_DESIGN_V3.md tunnels: every point inside the box or at most
+        // TUNNEL_OUTSIDE_M outside it.
+        if (WolfCaves::boxSigned(d.mBox, rx, ry) < -WolfCaves::TUNNEL_OUTSIDE_M)
+        {
+            mMessage = "Tunnels are carved through the rock box: click inside the box (or at most 1 m outside its wall). To reach further, make the box bigger with its handles (step 1).";
             return true;
         }
         S32 all = (S32)mLive.size() / 2;
@@ -1413,6 +1706,37 @@ bool WolfToolCave::handleMouseDown(S32 x, S32 y, MASK mask)
             finishTunnel();
             mMessage = llformat("A tunnel has at most %d points, so this one is finished - click to start another.", WolfCaves::MAX_TUNNEL_POINTS);
         }
+        return true;
+    }
+    if (mPen == PEN_CAVERN)
+    {
+        if ((S32)d.mCaverns.size() >= WolfCaves::MAX_CAVERNS)
+        {
+            mMessage = llformat("A cave has at most %d caverns - press Undo to take one back.", WolfCaves::MAX_CAVERNS);
+            return true;
+        }
+        const std::string why = WolfCaves::cavernProblem(d, rx, ry, WolfCaves::CAVERN_R_MIN);
+        if (!why.empty())
+        {
+            mMessage = why;
+            return true;
+        }
+        for (const WolfCaves::Cavern& cv : d.mCaverns)
+        {
+            // A double-click lands twice on one spot: one cavern is meant.
+            if (fabsf(cv.mX - rx) < 0.5f && fabsf(cv.mY - ry) < 0.5f)
+            {
+                mMessage = "There is already a cavern there.";
+                return true;
+            }
+        }
+        mCavX = rx;
+        mCavY = ry;
+        mCavR = WolfCaves::CAVERN_R_MIN;
+        // The whole disc inside the box (sb >= r), to the centimetre below, as caves.php checks it.
+        mCavMaxR = llmin(WolfCaves::CAVERN_R_MAX, floorf(WolfCaves::boxSigned(d.mBox, rx, ry) * 100.f) / 100.f);
+        mDrag = DRAG_CAVERN;
+        setMouseCapture(true);
         return true;
     }
     // PEN_DOOR
@@ -1442,43 +1766,228 @@ bool WolfToolCave::handleMouseDown(S32 x, S32 y, MASK mask)
     return true;
 }
 
+// [WolfViewer 2026-10-15 v3] One step of a box handle drag (CAVE_DESIGN_V3.md "Box resize"). Always
+// worked out from the box as it was at the press, so the drag never drifts; a step that would put
+// part of the footprint outside the region is not taken (the box stays at its last good place).
+void WolfToolCave::dragBox(S32 x, S32 y)
+{
+    LLViewerRegion* rgn = gAgent.getRegion();
+    if (!mEdit || !rgn) return;
+    WolfCaves::Design& d = mEdit->mDesign;
+    const WolfCaves::Box& b0 = mDragStart.mBox;
+    const F32 region_w = rgn->getWidth();
+    WolfCaves::Box b = b0;
+    if (mDrag == DRAG_TOP)
+    {
+        // Height limits (CAVE_DESIGN_V3.md h in [3, 30]), and never so low that the roof leaves less
+        // than 2.5 m under it (h - roof >= 2.5) while the roof allows it.
+        const F32 lo = llclamp(d.mRoof + WolfCaves::ROOM_UNDER_ROOF_M, WolfCaves::BOX_H_MIN, WolfCaves::BOX_H_MAX);
+        b.mH = r2(llclamp(b0.mH + (F32)(y - mPressY) * mMetresPerPixel, lo, WolfCaves::BOX_H_MAX));
+        d.mBox = b;
+        return;
+    }
+    F32 px, py;
+    if (!planeHit(x, y, b0.mZ, px, py)) return;   // pointing above the horizon: keep the last place
+    if (mDrag == DRAG_MOVE)
+    {
+        // The box and everything in it move by one offset, held so all of it stays in the region.
+        F32 lo_x = 1e9f, lo_y = 1e9f, hi_x = -1e9f, hi_y = -1e9f;
+        auto span = [&](F32 sx, F32 sy, F32 r) { lo_x = llmin(lo_x, sx - r); lo_y = llmin(lo_y, sy - r); hi_x = llmax(hi_x, sx + r); hi_y = llmax(hi_y, sy + r); };
+        F32 c[8];
+        WolfCaves::boxCorners(b0, c);
+        for (S32 i = 0; i < 4; ++i) span(c[2 * i], c[2 * i + 1], 0.f);
+        for (const WolfCaves::Tunnel& t : mDragStart.mTunnels) for (size_t k = 0; k + 1 < t.mP.size(); k += 2) span(t.mP[k], t.mP[k + 1], 0.f);
+        for (const WolfCaves::Cavern& cv : mDragStart.mCaverns) span(cv.mX, cv.mY, 0.f);
+        for (const WolfCaves::Door& e : mDragStart.mDoors) span(e.mX, e.mY, 0.f);
+        // If something already lay outside, it may stay where it is but not go further out.
+        F32 dx = px - mGrabX, dy = py - mGrabY;
+        dx = llmin(llmax(dx, llmin(0.f, -lo_x)), llmax(0.f, region_w - hi_x));
+        dy = llmin(llmax(dy, llmin(0.f, -lo_y)), llmax(0.f, region_w - hi_y));
+        dx = r2(dx);
+        dy = r2(dy);
+        b.mX = r2(b0.mX + dx);
+        b.mY = r2(b0.mY + dy);
+        d.mBox = b;
+        d.mTunnels = mDragStart.mTunnels;
+        for (WolfCaves::Tunnel& t : d.mTunnels)
+        {
+            for (size_t k = 0; k + 1 < t.mP.size(); k += 2) { t.mP[k] = r2(t.mP[k] + dx); t.mP[k + 1] = r2(t.mP[k + 1] + dy); }
+        }
+        d.mCaverns = mDragStart.mCaverns;
+        for (WolfCaves::Cavern& cv : d.mCaverns) { cv.mX = r2(cv.mX + dx); cv.mY = r2(cv.mY + dy); }
+        d.mDoors = mDragStart.mDoors;
+        for (WolfCaves::Door& e : d.mDoors) { e.mX = r2(e.mX + dx); e.mY = r2(e.mY + dy); }
+        return;
+    }
+    // Corner or side, in the box's own (turned) frame at the press: the pointer's local x, y.
+    const F32 a = b0.mRot * DEG_TO_RAD, c = cosf(a), s = sinf(a);
+    const F32 lx = (px - b0.mX) * c + (py - b0.mY) * s, ly = -(px - b0.mX) * s + (py - b0.mY) * c;
+    const F32 hw = b0.mW * 0.5f, hd = b0.mD * 0.5f;
+    F32 w = b0.mW, dd = b0.mD, cxl = 0.f, cyl = 0.f;
+    // One axis: the edge at `fixed` stays, the other follows the pointer; size clamped to the limits.
+    auto axis = [](F32 p, F32 fixed, F32& size, F32& centre)
+    {
+        const F32 sp = p - fixed;
+        size = r2(llclamp(fabsf(sp), WolfCaves::BOX_SIDE_MIN, WolfCaves::BOX_SIDE_MAX));
+        centre = fixed + (sp >= 0.f ? 0.5f : -0.5f) * size;
+    };
+    if (mDrag == DRAG_CORNER)
+    {
+        // The opposite corner stays: corner i is at (sx[i] * w/2, sy[i] * d/2).
+        static const F32 sx[4] = { -1.f, 1.f, 1.f, -1.f }, sy[4] = { -1.f, -1.f, 1.f, 1.f };
+        axis(lx, -sx[mHandle] * hw, w, cxl);
+        axis(ly, -sy[mHandle] * hd, dd, cyl);
+    }
+    else
+    {
+        // That side moves along its normal; the opposite side stays.
+        switch (mHandle)
+        {
+            case 4:  axis(ly, hd, dd, cyl); break;    // -y side; +y side stays
+            case 5:  axis(lx, -hw, w, cxl); break;    // +x side; -x side stays
+            case 6:  axis(ly, -hd, dd, cyl); break;   // +y side; -y side stays
+            default: axis(lx, hw, w, cxl); break;     // 7: -x side; +x side stays
+        }
+    }
+    b.mW = w;
+    b.mD = dd;
+    b.mX = r2(b0.mX + cxl * c - cyl * s);
+    b.mY = r2(b0.mY + cxl * s + cyl * c);
+    F32 cc[8];
+    WolfCaves::boxCorners(b, cc);
+    for (S32 i = 0; i < 4; ++i)
+    {
+        if (cc[2 * i] < 0.f || cc[2 * i] > region_w || cc[2 * i + 1] < 0.f || cc[2 * i + 1] > region_w)
+        {
+            mMessage = "The box stops at the region edge.";
+            return;
+        }
+    }
+    d.mBox = b;
+}
+
 bool WolfToolCave::handleHover(S32 x, S32 y, MASK mask)
 {
     if (!mDrawing) return LLToolPie::getInstance()->handleHover(x, y, mask);
-    gViewerWindow->setCursor(UI_CURSOR_TOOLLAND);
     F32 rx, ry;
     mHaveCursor = hit(x, y, rx, ry);
     if (mHaveCursor)
     {
         mCursorX = rx;
         mCursorY = ry;
-        if (mDragging) { mBX = rx; mBY = ry; }
     }
+    ECursorType cursor = UI_CURSOR_TOOLLAND;
+    switch (mDrag)
+    {
+        case DRAG_NEW_BOX:
+            if (mHaveCursor) { mBX = rx; mBY = ry; }
+            break;
+        case DRAG_CAVERN:
+            if (mHaveCursor)
+            {
+                const F32 dx = rx - mCavX, dy = ry - mCavY;
+                // Down to the centimetre, so the stored disc never pokes past the box wall.
+                mCavR = floorf(llclamp(sqrtf(dx * dx + dy * dy), WolfCaves::CAVERN_R_MIN, llmax(WolfCaves::CAVERN_R_MIN, mCavMaxR)) * 100.f) / 100.f;
+            }
+            break;
+        case DRAG_CORNER:
+        case DRAG_SIDE:
+            dragBox(x, y);
+            cursor = UI_CURSOR_SIZEALL;
+            break;
+        case DRAG_TOP:
+            dragBox(x, y);
+            cursor = UI_CURSOR_SIZENS;
+            break;
+        case DRAG_MOVE:
+            dragBox(x, y);
+            cursor = UI_CURSOR_TOOLTRANSLATE;
+            break;
+        case DRAG_NONE:
+            // Hover shows which handle a press would take (CAVE_DESIGN_V3.md "Box resize").
+            mHover = (mPen == PEN_BOX && mEdit && mEdit->mDesign.mHasBox) ? pickHandle(x, y) : -1;
+            if (mHover == HANDLE_TOP) cursor = UI_CURSOR_SIZENS;
+            else if (mHover >= 0) cursor = UI_CURSOR_SIZEALL;
+            else if (mPen == PEN_BOX && mEdit && mEdit->mDesign.mHasBox)
+            {
+                F32 px, py;
+                if (planeHit(x, y, mEdit->mDesign.mBox.mZ, px, py) && WolfCaves::boxSigned(mEdit->mDesign.mBox, px, py) >= 0.f) cursor = UI_CURSOR_TOOLTRANSLATE;
+            }
+            break;
+    }
+    // Source: llcursortypes.h:37-55 UI_CURSOR_SIZEALL / UI_CURSOR_SIZENS / UI_CURSOR_TOOLTRANSLATE.
+    gViewerWindow->setCursor(cursor);
     return true;
 }
 
 bool WolfToolCave::handleMouseUp(S32 x, S32 y, MASK mask)
 {
-    // Read the drag first: letting go of the capture calls onMouseCaptureLost, which clears it.
+    // Read the drag first: letting go of the capture calls onMouseCaptureLost, which drops it.
     // The capture is let go even when the drag was dropped meanwhile (the pen put down from the
     // window mid-drag), so the mouse is never left captured.
-    const bool dragged = mDragging;
-    mDragging = false;
+    const EDrag drag = mDrag;
+    mDrag = DRAG_NONE;
     const bool had_capture = hasMouseCapture();
     if (had_capture) setMouseCapture(false);
-    if (!dragged) return had_capture;
-    finishBox();
+    switch (drag)
+    {
+        case DRAG_NONE:     return had_capture;
+        case DRAG_NEW_BOX:  finishBox(); break;
+        case DRAG_CAVERN:   finishCavern(); break;
+        case DRAG_CORNER:
+        case DRAG_SIDE:
+        case DRAG_MOVE:
+        case DRAG_TOP:      finishHandleDrag(); break;
+    }
+    mHandle = -1;
     return true;
 }
 
+// [WolfViewer 2026-10-15 v3] Every drag in progress is dropped, not finished half way; a box handle
+// drag puts the box (and, for a move, what it carried) back as it was at the press.
+void WolfToolCave::dropDrag()
+{
+    if (boxDragging() && mEdit)
+    {
+        WolfCaves::Design& d = mEdit->mDesign;
+        d.mBox = mDragStart.mBox;
+        if (mDragStart.mMoved)
+        {
+            d.mTunnels = mDragStart.mTunnels;
+            d.mCaverns = mDragStart.mCaverns;
+            d.mDoors = mDragStart.mDoors;
+        }
+    }
+    mDrag = DRAG_NONE;
+    mHandle = -1;
+    if (hasMouseCapture()) setMouseCapture(false);
+}
+
 // A drag that loses the mouse (another window took it) is dropped, not finished half way.
+// (handleMouseUp clears mDrag before it lets go, so a finished drag is not undone here.)
 void WolfToolCave::onMouseCaptureLost()
 {
-    mDragging = false;
+    dropDrag();
+}
+
+// [WolfViewer 2026-10-15 v3] A finished handle drag is one Undo step (CAVE_DESIGN_V3.md: "Undo removes
+// the last thing added ... box"): the box before it, and for a move what moved with it.
+void WolfToolCave::finishHandleDrag()
+{
+    if (!mEdit) return;
+    WolfCaves::Design& d = mEdit->mDesign;
+    const WolfCaves::Box& a = mDragStart.mBox;
+    const WolfCaves::Box& b = d.mBox;
+    if (a.mX == b.mX && a.mY == b.mY && a.mW == b.mW && a.mD == b.mD && a.mRot == b.mRot && a.mZ == b.mZ && a.mH == b.mH) return;
+    d.mBoxUndo.push_back(mDragStart);
+    d.mOrder.push_back('b');
+    mDragStart = WolfCaves::BoxUndo();
+    mChanged = true;
 }
 
 // [WolfViewer 2026-10-14 v2] The dragged rectangle becomes the box: axis-aligned to the drag (the
-// turn is set in the window), floor at the ground height at its centre (CAVE_DESIGN_V2.md Flow 1).
+// turn is set in the window), floor at the ground height at its centre (CAVE_DESIGN_V3.md Flow 1:
+// "A redrawn box keeps the last height").
 void WolfToolCave::finishBox()
 {
     LLViewerRegion* rgn = gAgent.getRegion();
@@ -1489,8 +1998,8 @@ void WolfToolCave::finishBox()
     F32 cx = (mAX + mBX) * 0.5f, cy = (mAY + mBY) * 0.5f;
     if (dw < 1.f && dd < 1.f)
     {
-        // A click, not a drag: a room of the contract's example size centred there.
-        // Source: CAVE_DESIGN_V2.md example box w 12, d 8.
+        // A click, not a drag: a box of the contract's example size centred there.
+        // Source: CAVE_DESIGN_V2.md example box w 12, d 8 (Box defaults).
         b.mW = 12.f;
         b.mD = 8.f;
         cx = mAX;
@@ -1515,10 +2024,35 @@ void WolfToolCave::finishBox()
     b.mD = r2(b.mD);
     b.mRot = 0.f;
     b.mZ = r2(rgn->getLand().resolveHeightRegion(llclamp(cx, 0.f, w - 0.01f), llclamp(cy, 0.f, w - 0.01f)));
-    d.mBoxUndo.emplace_back(d.mHasBox, d.mBox);
+    WolfCaves::BoxUndo before;
+    before.mHadBox = d.mHasBox;
+    before.mBox = d.mBox;
+    d.mBoxUndo.push_back(before);
     d.mHasBox = true;
     d.mBox = b;
     d.mOrder.push_back('b');
+    mChanged = true;
+}
+
+// [WolfViewer 2026-10-15 v3] The dragged-out cavern is added with the window's cavern height
+// (CAVE_DESIGN_V3.md Flow 3), or refused in words.
+void WolfToolCave::finishCavern()
+{
+    if (!mEdit) return;
+    WolfCaves::Design& d = mEdit->mDesign;
+    if ((S32)d.mCaverns.size() >= WolfCaves::MAX_CAVERNS)
+    {
+        mMessage = llformat("A cave has at most %d caverns - press Undo to take one back.", WolfCaves::MAX_CAVERNS);
+        return;
+    }
+    const std::string why = WolfCaves::cavernProblem(d, mCavX, mCavY, mCavR);
+    if (!why.empty())
+    {
+        mMessage = why;
+        return;
+    }
+    d.mCaverns.push_back(WolfCaves::Cavern{ mCavX, mCavY, mCavR, r2(cavernHeight()) });
+    d.mOrder.push_back('c');
     mChanged = true;
 }
 
@@ -1530,22 +2064,35 @@ bool WolfToolCave::handleDoubleClick(S32 x, S32 y, MASK mask)
 }
 
 // Source: wolf_caves floater _finishPassage — a double-click adds its own point twice: dropped.
-void WolfToolCave::finishTunnel()
+// [WolfViewer 2026-10-15 v3] Split out of finishTunnel so the window can judge Generate with the
+// tunnel still being drawn counted in (CAVE_DESIGN_V3.md Flow 2: Generate finishes it).
+bool WolfToolCave::liveTunnel(WolfCaves::Tunnel& out) const
 {
-    if (mLive.empty() || !mEdit) { mLive.clear(); return; }
+    if (mLive.size() < 2) return false;
     std::vector<F32> pts{ mLive[0], mLive[1] };
     for (size_t k = 2; k + 1 < mLive.size(); k += 2)
     {
         const F32 dx = mLive[k] - pts[pts.size() - 2], dy = mLive[k + 1] - pts[pts.size() - 1];
         if (sqrtf(dx * dx + dy * dy) >= 0.5f) { pts.push_back(mLive[k]); pts.push_back(mLive[k + 1]); }
     }
+    if (pts.size() < 4) return false;
+    out.mP = pts;
+    out.mW = tunnelWidth();
+    return true;
+}
+
+void WolfToolCave::finishTunnel()
+{
+    if (mLive.empty() || !mEdit) { mLive.clear(); return; }
+    WolfCaves::Tunnel t;
+    const bool keep = liveTunnel(t);
     mLive.clear();
-    if (pts.size() < 4)
+    if (!keep)
     {
-        mMessage = "A tunnel needs at least two points - click from the box outwards, then double-click.";
+        mMessage = "A tunnel needs at least two points - click points inside the box, then double-click.";
         return;
     }
-    mEdit->mDesign.mTunnels.push_back(WolfCaves::Tunnel{ pts, tunnelWidth() });
+    mEdit->mDesign.mTunnels.push_back(t);
     mEdit->mDesign.mOrder.push_back('t');
     mChanged = true;
 }
@@ -1560,8 +2107,8 @@ bool WolfToolCave::handleKey(KEY key, MASK mask)
     if (key == KEY_ESCAPE)
     {
         finishTunnel();
-        mDragging = false;
-        if (hasMouseCapture()) setMouseCapture(false);
+        dropDrag();
+        mHover = -1;
         mDrawing = false;
         return true;
     }
@@ -1572,6 +2119,7 @@ void WolfToolCave::handleDeselect()
 {
     finishTunnel();
     mDrawing = false;
+    mHover = -1;
     dropDrag();
 }
 
@@ -1581,6 +2129,7 @@ void WolfToolCave::handleDeselect()
 // the gGL immediate-mode calls (begin/vertex3fv/end, LINES and TRIANGLES); llrender.h:477
 // setLineWidth (used as fsmaniprotatejoint.cpp:614-648 does, reset to 1 after); llglstates.h:39
 // LLGLDepthTest(enabled, write, func); llmaniptranslate.cpp:1126 LLGLDisable(GL_CULL_FACE).
+// [WolfViewer 2026-10-15 v3] + the box handles, the caverns as domes, tunnels at their v3 clear height.
 void WolfToolCave::render()
 {
     if (!mEdit || !WolfCaves::onWolf()) return;
@@ -1612,7 +2161,7 @@ void WolfToolCave::render()
     // The box to show: the one being dragged out, else the design's.
     bool have_box = d.mHasBox;
     WolfCaves::Box b = d.mBox;
-    if (mDragging)
+    if (mDrag == DRAG_NEW_BOX)
     {
         have_box = true;
         b.mX = (mAX + mBX) * 0.5f;
@@ -1623,9 +2172,9 @@ void WolfToolCave::render()
         b.mZ = land.resolveHeightRegion(llclamp(b.mX, 0.f, w - 0.01f), llclamp(b.mY, 0.f, w - 0.01f));
         if (!d.mHasBox) b.mH = WolfCaves::Box().mH;
     }
-    if (!have_box) return;   // tunnels and doorways need the box (their floor is its floor)
+    if (!have_box) return;   // tunnels, caverns and doorways need the box (their floor is its floor)
 
-    std::vector<LLVector3> box_lines, box_fill, tunnel_lines, door_lines;
+    std::vector<LLVector3> box_lines, box_fill, tunnel_lines, cavern_lines, door_lines, handle_lines, hot_lines;
     auto seg = [](std::vector<LLVector3>& v, const LLVector3& a, const LLVector3& c) { v.push_back(a); v.push_back(c); };
     {
         F32 c[8];
@@ -1644,12 +2193,32 @@ void WolfToolCave::render()
         box_fill.insert(box_fill.end(), { lo[0], lo[1], lo[2], lo[0], lo[2], lo[3] });
         box_fill.insert(box_fill.end(), { hi[0], hi[1], hi[2], hi[0], hi[2], hi[3] });
     }
-    // A tunnel: both edges at the floor and at its ceiling, posts at every point, closed ends.
+    // The box handles while the box pen is down on a box (CAVE_DESIGN_V3.md "Box resize"): a small
+    // wire cube at each, about the same size on screen at any distance; the one under the pointer
+    // (or being dragged) larger and bright.
+    if (mDrawing && mPen == PEN_BOX && d.mHasBox && mDrag != DRAG_NEW_BOX)
+    {
+        const LLVector3 eye = LLViewerCamera::getInstance()->getOrigin();   // agent frame (llcoordframe.h:102)
+        const S32 hot = mDrag == DRAG_NONE ? mHover : mHandle;
+        for (S32 i = 0; i < HANDLE_COUNT; ++i)
+        {
+            const LLVector3 h = rgn->getPosAgentFromRegion(handlePos(b, i));
+            F32 r = llclamp(dist_vec(eye, h) * 0.012f, 0.12f, 3.f);
+            if (i == hot) r *= 1.6f;
+            std::vector<LLVector3>& out = i == hot ? hot_lines : handle_lines;
+            LLVector3 v[8];
+            for (S32 k = 0; k < 8; ++k) v[k] = h + LLVector3((k & 1) ? r : -r, (k & 2) ? r : -r, (k & 4) ? r : -r);
+            static const S32 edges[12][2] = { {0,1},{2,3},{4,5},{6,7},{0,2},{1,3},{4,6},{5,7},{0,4},{1,5},{2,6},{3,7} };
+            for (const auto& e : edges) seg(out, v[e[0]], v[e[1]]);
+        }
+    }
+    // A tunnel: both edges at the floor and at its v3 clear height min(w * 0.9 + 1, h - roof)
+    // (CAVE_DESIGN_V3.md tunnels), posts at every point, closed ends.
     auto tunnel = [&](const std::vector<F32>& p, F32 tw)
     {
         const size_t n = p.size() / 2;
         if (n < 2) return;
-        const F32 top = b.mZ + WolfCaves::tunnelCeiling(b, tw);
+        const F32 top = b.mZ + llmax(0.1f, llmin(tw * 0.9f + 1.f, b.mH - d.mRoof));
         std::vector<LLVector3> el, er, tl, tr;
         for (size_t i = 0; i < n; ++i)
         {
@@ -1678,6 +2247,35 @@ void WolfToolCave::render()
         if (mHaveCursor) { lp.push_back(mCursorX); lp.push_back(mCursorY); }
         tunnel(lp, tunnelWidth());
     }
+    // [WolfViewer 2026-10-15 v3] A cavern as a dome wireframe: a ring at the floor, a ring partway up
+    // and one near its clear height min(h, box.h - roof) (CAVE_DESIGN_V3.md caverns), and arcs from
+    // the floor to the top.
+    auto dome = [&](F32 cx, F32 cy, F32 r, F32 ch)
+    {
+        constexpr S32 RING = 36, ARC = 8, MERIDIANS = 8;
+        ch = llmax(0.1f, ch);
+        for (const F32 f : { 0.f, 0.6f, 0.95f })
+        {
+            const F32 rr = r * sqrtf(1.f - f * f), z = b.mZ + (f > 0.f ? ch * f : 0.05f);
+            for (S32 i = 0; i < RING; ++i)
+            {
+                const F32 a0 = (F32)i / RING * F_TWO_PI, a1 = (F32)(i + 1) / RING * F_TWO_PI;
+                seg(cavern_lines, P(cx + cosf(a0) * rr, cy + sinf(a0) * rr, z), P(cx + cosf(a1) * rr, cy + sinf(a1) * rr, z));
+            }
+        }
+        for (S32 m = 0; m < MERIDIANS; ++m)
+        {
+            const F32 a = (F32)m / MERIDIANS * F_TWO_PI;
+            for (S32 k = 0; k < ARC; ++k)
+            {
+                const F32 p0 = (F32)k / ARC * F_PI_BY_TWO, p1 = (F32)(k + 1) / ARC * F_PI_BY_TWO;
+                seg(cavern_lines, P(cx + cosf(a) * r * cosf(p0), cy + sinf(a) * r * cosf(p0), b.mZ + ch * sinf(p0)),
+                                  P(cx + cosf(a) * r * cosf(p1), cy + sinf(a) * r * cosf(p1), b.mZ + ch * sinf(p1)));
+            }
+        }
+    };
+    for (const WolfCaves::Cavern& cv : d.mCaverns) dome(cv.mX, cv.mY, cv.mR, llmin(cv.mH, b.mH - d.mRoof));
+    if (mDrag == DRAG_CAVERN) dome(mCavX, mCavY, mCavR, llmin(cavernHeight(), b.mH - d.mRoof));
     // A doorway: a post from the floor and a ring on the floor where people walk in.
     for (const WolfCaves::Door& e : d.mDoors)
     {
@@ -1712,6 +2310,8 @@ void WolfToolCave::render()
         gGL.color4f(1.f, 0.70f, 0.28f, 0.35f);
         draw(box_lines, LLRender::LINES);
         draw(tunnel_lines, LLRender::LINES);
+        gGL.color4f(0.55f, 0.80f, 1.f, 0.35f);
+        draw(cavern_lines, LLRender::LINES);
         gGL.color4f(0.37f, 0.83f, 0.37f, 0.35f);
         draw(door_lines, LLRender::LINES);
     }
@@ -1722,8 +2322,21 @@ void WolfToolCave::render()
         draw(box_lines, LLRender::LINES);
         gGL.color4f(1.f, 0.85f, 0.55f, 1.f);
         draw(tunnel_lines, LLRender::LINES);
+        gGL.color4f(0.55f, 0.80f, 1.f, 1.f);
+        draw(cavern_lines, LLRender::LINES);
         gGL.color4f(0.37f, 0.83f, 0.37f, 1.f);
         draw(door_lines, LLRender::LINES);
+        gGL.setLineWidth(1.f);
+    }
+    // The handles last and never hidden: they must be findable wherever the ground is.
+    {
+        LLGLDepthTest depth(GL_FALSE);
+        gGL.setLineWidth(2.f);
+        gGL.color4f(1.f, 1.f, 1.f, 0.9f);
+        draw(handle_lines, LLRender::LINES);
+        gGL.setLineWidth(3.f);
+        gGL.color4f(1.f, 1.f, 0.3f, 1.f);
+        draw(hot_lines, LLRender::LINES);
         gGL.setLineWidth(1.f);
     }
 }
@@ -1739,8 +2352,9 @@ WolfFloaterCaves::~WolfFloaterCaves()
     if (WolfToolCave::instanceExists()) WolfToolCave::getInstance()->setEdit(nullptr);
 }
 
-// [WolfViewer 2026-10-14 v2] The window follows the five steps of CAVE_DESIGN_V2.md Flow, one
-// primary action per step: Draw the box / Draw a tunnel / Add doorways / (look) / Generate.
+// [WolfViewer 2026-10-14 v2] The window follows the steps of the Flow, one primary action per step.
+// [WolfViewer 2026-10-15 v3] CAVE_DESIGN_V3.md Flow: Draw the box / Draw a tunnel / Add caverns /
+// Add doorways / (look) / Generate.
 bool WolfFloaterCaves::postBuild()
 {
     mList = getChild<LLScrollListCtrl>("cave_list");
@@ -1753,6 +2367,7 @@ bool WolfFloaterCaves::postBuild()
     mCancel = getChild<LLButton>("cave_cancel");
     mPenBox = getChild<LLButton>("cave_pen_box");
     mPenTunnel = getChild<LLButton>("cave_pen_tunnel");
+    mPenCavern = getChild<LLButton>("cave_pen_cavern");
     mPenDoor = getChild<LLButton>("cave_pen_door");
     mName = getChild<LLLineEditor>("cave_name");
     mBoxW = getChild<LLSpinCtrl>("cave_box_w");
@@ -1761,6 +2376,7 @@ bool WolfFloaterCaves::postBuild()
     mBoxTurn = getChild<LLSpinCtrl>("cave_box_turn");
     mBoxFloor = getChild<LLSpinCtrl>("cave_box_floor");
     mWidth = getChild<LLSliderCtrl>("cave_width");
+    mCavernH = getChild<LLSliderCtrl>("cave_cavern_h");
     mRoof = getChild<LLSliderCtrl>("cave_roof");
     mRough = getChild<LLSliderCtrl>("cave_rough");
     mRock = getChild<LLComboBox>("cave_rock");
@@ -1768,6 +2384,7 @@ bool WolfFloaterCaves::postBuild()
     mLight = getChild<LLComboBox>("cave_light");
     mCounts = getChild<LLTextBox>("cave_counts");
     mStats = getChild<LLTextBox>("cave_stats");
+    mDig = getChild<LLTextBox>("cave_dig");
     mStatus = getChild<LLTextBox>("cave_status");
     mWhy = getChild<LLTextBox>("cave_why");
 
@@ -1780,11 +2397,15 @@ bool WolfFloaterCaves::postBuild()
     mCancel->setCommitCallback([this](LLUICtrl*, const LLSD&) { onCancel(); });
     mPenBox->setCommitCallback([this](LLUICtrl*, const LLSD&) { onPen(WolfToolCave::PEN_BOX); });
     mPenTunnel->setCommitCallback([this](LLUICtrl*, const LLSD&) { onPen(WolfToolCave::PEN_TUNNEL); });
+    mPenCavern->setCommitCallback([this](LLUICtrl*, const LLSD&) { onPen(WolfToolCave::PEN_CAVERN); });
+    mList->setCommitCallback([this](LLUICtrl*, const LLSD&) { onListPick(); });
     mPenDoor->setCommitCallback([this](LLUICtrl*, const LLSD&) { onPen(WolfToolCave::PEN_DOOR); });
     auto changed = [this](LLUICtrl*, const LLSD&) { readControls(); schedulePreview(); };
     // The box spinners edit the box live: the wireframe follows at once, the rock after the preview.
     for (LLSpinCtrl* s : { mBoxW, mBoxD, mBoxH, mBoxTurn, mBoxFloor }) s->setCommitCallback(changed);
     mWidth->setCommitCallback([](LLUICtrl* c, const LLSD&) { gSavedSettings.setF32("WolfCavePassageWidth", (F32)c->getValue().asReal()); });
+    // [WolfViewer 2026-10-15 v3] The height of the next cavern (app_settings/settings.xml WolfCaveCavernHeight).
+    mCavernH->setCommitCallback([](LLUICtrl* c, const LLSD&) { gSavedSettings.setF32("WolfCaveCavernHeight", (F32)c->getValue().asReal()); });
     mRoof->setCommitCallback(changed);
     mRough->setCommitCallback(changed);
     mRock->setCommitCallback([this](LLUICtrl*, const LLSD&) { onRockCombo(); });
@@ -1795,6 +2416,7 @@ bool WolfFloaterCaves::postBuild()
     mLight->setCommitCallback([this](LLUICtrl*, const LLSD&) { mCave.mLight = mLight->getValue().asString(); });
     mName->setCommitCallback([this](LLUICtrl*, const LLSD&) { readControls(); });
     mWidth->setValue(WolfToolCave::tunnelWidth());
+    mCavernH->setValue(WolfToolCave::cavernHeight());
     showEditor();
     return true;
 }
@@ -1863,7 +2485,9 @@ void WolfFloaterCaves::rebuildList()
     for (const WolfCaves::Cave& c : WolfCaves::instance().caves())
     {
         std::string st;
-        if (!c.mBuilt.isMap()) st = "Not built yet";
+        // [WolfViewer 2026-10-15 v3] CAVE_DESIGN_V3.md "Caves from the old builder".
+        if (c.mOld) st = "Old design - remove and draw again";
+        else if (!c.mBuilt.isMap()) st = "Not built yet";
         else if (!rockRecorded(c)) st = "Rock gone, ground not put back - Remove to finish";
         else if (!c.mBuilt["dug"].asBoolean()) st = "Rock rezzed, ground not finished";
         else
@@ -1888,8 +2512,8 @@ void WolfFloaterCaves::rebuildList()
 void WolfFloaterCaves::showEditor()
 {
     const WolfCaves::Design& d = mCave.mDesign;
-    for (LLUICtrl* c : std::initializer_list<LLUICtrl*>{ mName, mPenBox, mPenTunnel, mPenDoor, mWidth, mRoof, mRough, mRock, mRockTex, mLight,
-                                                         mUndo, mBack })
+    for (LLUICtrl* c : std::initializer_list<LLUICtrl*>{ mName, mPenBox, mPenTunnel, mPenCavern, mPenDoor, mWidth, mCavernH, mRoof, mRough,
+                                                         mRock, mRockTex, mLight, mUndo, mBack })
     {
         c->setEnabled(mEditing);
     }
@@ -1898,6 +2522,8 @@ void WolfFloaterCaves::showEditor()
     if (!mEditing)
     {
         mStats->setText(LLStringUtil::null);
+        mDig->setText(LLStringUtil::null);
+        mShownDig = "-";
         return;
     }
     mName->setText(mCave.mName);
@@ -1930,7 +2556,7 @@ void WolfFloaterCaves::readBox()
 {
     WolfCaves::Design& d = mCave.mDesign;
     if (!mEditing || !d.mHasBox) return;
-    // Source: CAVE_DESIGN_V2.md box limits (the spinners carry the same min/max in the XML).
+    // Source: CAVE_DESIGN_V3.md box limits (the spinners carry the same min/max in the XML).
     d.mBox.mW = llclamp(mBoxW->get(), WolfCaves::BOX_SIDE_MIN, WolfCaves::BOX_SIDE_MAX);
     d.mBox.mD = llclamp(mBoxD->get(), WolfCaves::BOX_SIDE_MIN, WolfCaves::BOX_SIDE_MAX);
     d.mBox.mH = llclamp(mBoxH->get(), WolfCaves::BOX_H_MIN, WolfCaves::BOX_H_MAX);
@@ -1972,6 +2598,7 @@ void WolfFloaterCaves::schedulePreview()
 {
     WolfCaves::instance().clearPreview();
     mPreviewAt = LLFrameTimer::getElapsedSeconds() + 0.6;
+    mGenerateWhenReady = false;   // a change after Generate: the user presses it again
 }
 
 // [WolfViewer 2026-10-14 v2] Paul: "the build button is not available ... it was also not clear".
@@ -1982,7 +2609,19 @@ std::string WolfFloaterCaves::whyNotGenerate() const
     const WolfCaves& wc = WolfCaves::instance();
     if (wc.busy()) return getString("str_busy");
     LLViewerRegion* rgn = gAgent.getRegion();
-    const std::string problem = WolfCaves::designProblem(mCave.mDesign, rgn ? rgn->getWidth() : 256.f);
+    const F32 region_w = rgn ? rgn->getWidth() : 256.f;
+    // [WolfViewer 2026-10-15 v3] CAVE_DESIGN_V3.md Flow 2: pressing Generate finishes a tunnel still
+    // being drawn instead of dropping it, so Generate is judged with that tunnel in. (Paul's first
+    // tunnel was often still being drawn when he pressed Generate.) onBuild finishes it, works the
+    // rock out again and goes on by itself.
+    WolfCaves::Tunnel live;
+    if (WolfToolCave::instanceExists() && WolfToolCave::getInstance()->liveTunnel(live))
+    {
+        WolfCaves::Design with = mCave.mDesign;
+        with.mTunnels.push_back(live);
+        return WolfCaves::designProblem(with, region_w);
+    }
+    const std::string problem = WolfCaves::designProblem(mCave.mDesign, region_w);
     if (!problem.empty()) return problem;
     const WolfCaves::Preview& p = wc.preview();
     if (!wc.previewError().empty()) return "The cave cannot be made like this: " + wc.previewError();
@@ -1995,6 +2634,7 @@ void WolfFloaterCaves::onNew()
 {
     mCave = WolfCaves::newCave();
     mEditing = true;
+    mGenerateWhenReady = false;   // [WolfViewer 2026-10-15 v3] a Generate pending for another drawing
     WolfToolCave::getInstance()->setEdit(&mCave);
     showTool();
     WolfCaves::instance().clearPreview();
@@ -2003,12 +2643,28 @@ void WolfFloaterCaves::onNew()
     onPen(WolfToolCave::PEN_BOX);
 }
 
+// [WolfViewer 2026-10-15 v3] The cave picked in the list.
+const WolfCaves::Cave* WolfFloaterCaves::picked() const
+{
+    return mList->getFirstSelected() ? WolfCaves::instance().find(mList->getSelectedValue().asString()) : nullptr;
+}
+
+// [WolfViewer 2026-10-15 v3] Picking an old-design cave says why Change is greyed out
+// (CAVE_DESIGN_V3.md "Caves from the old builder": Remove only).
+void WolfFloaterCaves::onListPick()
+{
+    const WolfCaves::Cave* c = picked();
+    if (c && c->mOld) setStatus(getString("str_old_design"), false);
+}
+
 void WolfFloaterCaves::onEdit()
 {
     const WolfCaves::Cave* c = WolfCaves::instance().find(mList->getSelectedValue().asString());
     if (!c) { setStatus(getString("str_pick_one"), true); return; }
+    if (c->mOld) { setStatus(getString("str_old_design"), true); return; }
     mCave = *c;
     mEditing = true;
+    mGenerateWhenReady = false;   // [WolfViewer 2026-10-15 v3]
     WolfToolCave::getInstance()->setEdit(&mCave);
     showTool();
     showEditor();
@@ -2019,6 +2675,7 @@ void WolfFloaterCaves::onBack()
 {
     stopTool();
     mEditing = false;
+    mGenerateWhenReady = false;   // [WolfViewer 2026-10-15 v3]
     WolfToolCave::getInstance()->setEdit(nullptr);
     WolfCaves::instance().clearPreview();
     showEditor();
@@ -2041,14 +2698,25 @@ void WolfFloaterCaves::onPen(WolfToolCave::EPen p)
     if (!ts) { setStatus(getString("str_no_toolset"), true); return; }
     if (p != WolfToolCave::PEN_BOX && !mCave.mDesign.mHasBox) { setStatus(getString("str_box_first"), true); return; }
     showTool();
+    // CAVE_DESIGN_V3.md Flow 2: another pen finishes a tunnel still being drawn (setPen), so a
+    // cavern can go on the tunnel just drawn.
     tool->setPen(p);
+    if (p == WolfToolCave::PEN_CAVERN && mCave.mDesign.mTunnels.empty())
+    {
+        // setPen kept any tunnel being drawn, so none exists at all: no pen is left down.
+        tool->setDrawing(false);
+        setStatus(getString("str_tunnel_first"), true);
+        return;
+    }
     tool->setDrawing(true);
-    setStatus(getString(p == WolfToolCave::PEN_BOX ? "str_pen_box" : p == WolfToolCave::PEN_TUNNEL ? "str_pen_tunnel" : "str_pen_door"), false);
+    setStatus(getString(p == WolfToolCave::PEN_BOX ? "str_pen_box" : p == WolfToolCave::PEN_TUNNEL ? "str_pen_tunnel"
+                        : p == WolfToolCave::PEN_CAVERN ? "str_pen_cavern" : "str_pen_door"), false);
 }
 
-// Undo takes back the last thing added (CAVE_DESIGN_V2.md Flow): a doorway, a tunnel, or the last
-// box drawn (the box before it comes back). A cave loaded from the list has no history: doorways
-// go first, then tunnels, then the box.
+// Undo takes back the last thing added (CAVE_DESIGN_V3.md Flow): a doorway, a cavern, a tunnel, or
+// the last box drawn or handle drag (the box before it comes back, and for a move everything it
+// carried). A cave loaded from the list has no history: doorways go first, then caverns, then
+// tunnels, then the box.
 void WolfFloaterCaves::onUndo()
 {
     // A tunnel still being drawn is the last thing added: Undo takes that back on its own.
@@ -2060,12 +2728,27 @@ void WolfFloaterCaves::onUndo()
     WolfCaves::Design& d = mCave.mDesign;
     char last = d.mOrder.empty() ? 0 : d.mOrder.back();
     if (!d.mOrder.empty()) d.mOrder.pop_back();
-    if (!last) last = !d.mDoors.empty() ? 'd' : (!d.mTunnels.empty() ? 't' : (d.mHasBox ? 'b' : 0));
+    if (!last) last = !d.mDoors.empty() ? 'd' : (!d.mCaverns.empty() ? 'c' : (!d.mTunnels.empty() ? 't' : (d.mHasBox ? 'b' : 0)));
     if (last == 'd' && !d.mDoors.empty()) d.mDoors.pop_back();
+    else if (last == 'c' && !d.mCaverns.empty()) d.mCaverns.pop_back();
     else if (last == 't' && !d.mTunnels.empty()) d.mTunnels.pop_back();
     else if (last == 'b')
     {
-        if (!d.mBoxUndo.empty()) { d.mHasBox = d.mBoxUndo.back().first; d.mBox = d.mBoxUndo.back().second; d.mBoxUndo.pop_back(); }
+        if (!d.mBoxUndo.empty())
+        {
+            const WolfCaves::BoxUndo& u = d.mBoxUndo.back();
+            d.mHasBox = u.mHadBox;
+            d.mBox = u.mBox;
+            if (u.mMoved)
+            {
+                // [WolfViewer 2026-10-15 v3] Undo is last-in first-out, so what the move carried is
+                // exactly what is here now: it goes back to where it was before the move.
+                d.mTunnels = u.mTunnels;
+                d.mCaverns = u.mCaverns;
+                d.mDoors = u.mDoors;
+            }
+            d.mBoxUndo.pop_back();
+        }
         else d.mHasBox = false;
     }
     else { setStatus(getString("str_nothing_to_undo"), false); return; }
@@ -2084,6 +2767,24 @@ void WolfFloaterCaves::onCancel()
 
 void WolfFloaterCaves::onBuild()
 {
+    // [WolfViewer 2026-10-15 v3] CAVE_DESIGN_V3.md Flow 2: Generate finishes a tunnel still being drawn
+    // instead of dropping it. The rock then has to be worked out again; Generate goes on by itself
+    // once the new preview is ready (draw(), mGenerateWhenReady).
+    if (mEditing)
+    {
+        WolfToolCave* tool = WolfToolCave::getInstance();
+        tool->finishTunnel();
+        const std::string tm = tool->takeMessage();   // e.g. a one-point tunnel could not be kept
+        if (tool->takeChanged())
+        {
+            showBox();
+            schedulePreview();
+            mGenerateWhenReady = true;
+            setStatus(getString("str_finished_tunnel"), false);
+            return;
+        }
+        if (!tm.empty()) { setStatus(tm, true); return; }
+    }
     readControls();
     // [WolfViewer 2026-10-14] Say why Generate did nothing.
     const std::string why = whyNotGenerate();
@@ -2099,9 +2800,13 @@ void WolfFloaterCaves::onBuild()
         return;
     }
     std::string msg = rebuild ? "The old rock is taken away and its ground put back first. Then " : std::string();
-    msg += llformat("\"%s\" will rez a %d-prim rock mound owned by you (land impact %d on the parcel under the cave's middle) "
-                    "and lower %d points of ground to the cave floor (%.2f m). Remove puts the ground back later.",
-                    mCave.mName.c_str(), p.mLi, p.mLi, p.mTargets, mCave.mDesign.mBox.mZ);
+    msg += llformat("\"%s\" will rez a %d-prim rock object owned by you (land impact %d on the parcel under the cave's middle) ",
+                    mCave.mName.c_str(), p.mLi, p.mLi);
+    // [WolfViewer 2026-10-15 v3] CAVE_DESIGN_V3.md "dig = false": no terrain targets at all.
+    if (p.mDig)
+        msg += llformat("and lower %d points of ground to the cave floor (%.2f m). Remove puts the ground back later.", p.mTargets, mCave.mDesign.mBox.mZ);
+    else
+        msg += "and change no ground: you can't change the ground here, so the cave stands on the ground as it is.";
     const WolfCaves::Cave cave = mCave;
     LLNotificationsUtil::add("GenericAlertYesCancel", LLSD().with("MESSAGE", msg), LLSD(),
         [cave](const LLSD& notification, const LLSD& response)
@@ -2195,7 +2900,9 @@ void WolfFloaterCaves::draw()
     mWasBusy = wc.busy();
     mCancel->setEnabled(wc.busy() && !wc.cancelling());
     mRemove->setEnabled(!wc.busy() && mList->getFirstSelected() != nullptr);
-    mEdit->setEnabled(!wc.busy() && !mEditing && mList->getFirstSelected() != nullptr);
+    // [WolfViewer 2026-10-15 v3] An old-design cave can only be removed (CAVE_DESIGN_V3.md "Caves from the old builder").
+    const WolfCaves::Cave* sel = picked();
+    mEdit->setEnabled(!wc.busy() && !mEditing && sel && !sel->mOld);
     const std::string err = wc.takeError();
     if (!err.empty())
     {
@@ -2215,20 +2922,36 @@ void WolfFloaterCaves::draw()
             schedulePreview();
             if (tool->pen() == WolfToolCave::PEN_BOX) setStatus(getString("str_box_placed"), false);
         }
+        // [WolfViewer 2026-10-15 v3] The spinners follow a box handle drag live (set() fires no commit).
+        else if (tool->boxDragging())
+        {
+            showBox();
+        }
+        // [WolfViewer 2026-10-15 v3] The dig hint arrived or changed (fetchCoro cleared the preview made
+        // with the other dig): work the rock out again with the new one.
+        if (wc.digHint() != mShownHint)
+        {
+            mShownHint = wc.digHint();
+            schedulePreview();
+        }
         const std::string tm = tool->takeMessage();
         if (!tm.empty()) setStatus(tm, true);
         // Each step's button shows whether its pen is down.
         const bool on = tool->drawing() && LLToolMgr::getInstance()->getCurrentTool() == tool;
+        const WolfCaves::Design& d = mCave.mDesign;
         mPenBox->setToggleState(on && tool->pen() == WolfToolCave::PEN_BOX);
         mPenTunnel->setToggleState(on && tool->pen() == WolfToolCave::PEN_TUNNEL);
+        mPenCavern->setToggleState(on && tool->pen() == WolfToolCave::PEN_CAVERN);
         mPenDoor->setToggleState(on && tool->pen() == WolfToolCave::PEN_DOOR);
-        mPenBox->setLabel(getString(mPenBox->getToggleState() ? "str_stop" : "str_draw_box"));
+        // [WolfViewer 2026-10-15 v3] With a box, the box pen is the handles (CAVE_DESIGN_V3.md "Box resize").
+        mPenBox->setLabel(getString(mPenBox->getToggleState() ? "str_stop" : (d.mHasBox ? "str_change_box" : "str_draw_box")));
         mPenTunnel->setLabel(getString(mPenTunnel->getToggleState() ? "str_stop" : "str_draw_tunnel"));
+        mPenCavern->setLabel(getString(mPenCavern->getToggleState() ? "str_stop" : "str_add_caverns"));
         mPenDoor->setLabel(getString(mPenDoor->getToggleState() ? "str_stop" : "str_add_doors"));
-        const WolfCaves::Design& d = mCave.mDesign;
-        mCounts->setText(llformat("%d tunnel%s, %d doorway%s", (S32)d.mTunnels.size(), d.mTunnels.size() == 1 ? "" : "s",
+        mCounts->setText(llformat("%d tunnel%s, %d cavern%s, %d doorway%s", (S32)d.mTunnels.size(), d.mTunnels.size() == 1 ? "" : "s",
+                                  (S32)d.mCaverns.size(), d.mCaverns.size() == 1 ? "" : "s",
                                   (S32)d.mDoors.size(), d.mDoors.size() == 1 ? "" : "s"));
-        mUndo->setEnabled(d.mHasBox || !d.mTunnels.empty() || !d.mDoors.empty());
+        mUndo->setEnabled(d.mHasBox || !d.mTunnels.empty() || !d.mCaverns.empty() || !d.mDoors.empty());
         const F64 now = LLFrameTimer::getElapsedSeconds();
         if (mPreviewAt > 0.0 && now >= mPreviewAt)
         {
@@ -2243,14 +2966,47 @@ void WolfFloaterCaves::draw()
             const WolfCaves::Preview& p = wc.preview();
             if (p.mReady)
             {
-                std::string s = llformat("Land impact: %d prim%s - counted on the parcel under the cave's middle. %d ground points lowered to the floor (%.2f m).",
-                                         p.mLi, p.mLi == 1 ? "" : "s", p.mTargets, d.mBox.mZ);
+                // [WolfViewer 2026-10-15 v3] CAVE_DESIGN_V3.md "dig = false": nothing on the ground changes.
+                std::string s = llformat("Land impact: %d prim%s - counted on the parcel under the cave's middle. ", p.mLi, p.mLi == 1 ? "" : "s")
+                    + (p.mDig ? llformat("%d ground points lowered to the floor (%.2f m).", p.mTargets, d.mBox.mZ)
+                              : llformat("No ground changed; floor %.2f m.", d.mBox.mZ));
                 for (const std::string& w : p.mWarnings) s += "\n! " + w;
                 mStats->setText(s);
             }
             else
             {
                 mStats->setText(getString("str_stats_empty"));
+            }
+        }
+        // [WolfViewer 2026-10-15 v3] Whether the ground will be dug (CAVE_DESIGN_V3.md "Rights: rezzers
+        // build, owners dig"): what the last preview did, else the region's dig hint from caves.php.
+        std::string dig;
+        const WolfCaves::Preview& pv = wc.preview();
+        if (pv.mReady) dig = getString(pv.mDig ? "str_dig_yes" : "str_dig_no");
+        else if (wc.digHint() == "region") dig = getString("str_hint_region");
+        else if (wc.digHint() == "parcels") dig = getString("str_hint_parcels");
+        else if (wc.digHint() == "none") dig = getString("str_hint_none");
+        if (dig != mShownDig)
+        {
+            mShownDig = dig;
+            mDig->setText(dig);
+        }
+        // [WolfViewer 2026-10-15 v3] Generate finished a tunnel still being drawn (onBuild): once the
+        // rock for the finished design is worked out, Generate goes on by itself; if it cannot be
+        // made, the reason is said instead.
+        if (mGenerateWhenReady && mPreviewAt == 0.0 && !wc.busy())
+        {
+            LLViewerRegion* rgn = gAgent.getRegion();
+            const std::string problem = WolfCaves::designProblem(d, rgn ? rgn->getWidth() : 256.f);
+            if (!problem.empty() || !wc.previewError().empty())
+            {
+                mGenerateWhenReady = false;
+                setStatus(problem.empty() ? "The cave cannot be made like this: " + wc.previewError() : problem, true);
+            }
+            else if (pv.mReady)
+            {
+                mGenerateWhenReady = false;
+                onBuild();
             }
         }
     }

@@ -25,6 +25,8 @@
 
 #include "llviewerprecompiledheaders.h"
 #include "llfloaterperformance.h"
+#include "llviewerdisplay.h"   // [WolfViewer 2026-10-16] wolf_real_fps
+#include "wolfenvironmentrender.h"   // [WolfViewer 2026-10-16] skyActive
 
 #include "llagent.h"
 #include "llagentcamera.h"
@@ -515,6 +517,12 @@ void LLFloaterPerformance::setFPSText()
 {
     const S32 NUM_PERIODS = 50;
     S32 current_fps = (S32)llround(LLTrace::get_frame_recording().getPeriodMedianPerSec(LLStatViewer::FPS, NUM_PERIODS));
+    // [WolfViewer 2026-10-16] Paul: "make the performance floaters show the correct figures as well if on wolf environment":
+    // under the Wolf sky the frames actually shown per second, the status bar's figure (llviewerdisplay.cpp wolf_real_fps)
+    if (WolfEnvironmentRender::skyActive() && wolf_real_fps() > 0.f)
+    {
+        current_fps = ll_round(wolf_real_fps());
+    }
     mTextFPSValue->setValue(current_fps);
 
     std::string fps_text = getString("fps_text");

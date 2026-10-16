@@ -1420,6 +1420,17 @@
   <color
      name="FpsDisplayVSyncLimitReachedColor"
      reference="Green" />
+  <!-- WolfViewer 2026-10-16: the status bar's real frame rate (LLStatusBar::refresh) - 30 fps and over, 15 to 30, under 15;
+       light enough to read on the dark status bar -->
+  <color
+     name="WolfFpsDisplayGoodColor"
+     value="0.4 0.9 0.4 1" />
+  <color
+     name="WolfFpsDisplayFairColor"
+     value="1 0.75 0.25 1" />
+  <color
+     name="WolfFpsDisplayPoorColor"
+     value="1 0.4 0.4 1" />
   <color
    name="ChatMentionFont"
    value="0.633 0.882 0.250 1" />

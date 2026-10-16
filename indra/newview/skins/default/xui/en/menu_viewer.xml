@@ -1856,6 +1856,18 @@
              function="Floater.Show"
              parameter="wolf_graphics_helper" />
         </menu_item_call>
+        <!-- [WOLF COMPASS 2026-10-16] wolffloatercompass.cpp: a Victorian compass showing North
+             and the way you are moving. Every grid. Paul: "anything wolf viewer should be under wolf world". -->
+        <menu_item_check
+         label="Compass"
+         name="WolfCompass">
+            <menu_item_check.on_check
+             function="Floater.Visible"
+             parameter="wolf_compass" />
+            <menu_item_check.on_click
+             function="Floater.Toggle"
+             parameter="wolf_compass" />
+        </menu_item_check>
         <!-- [SPAN SCREENS 2026-10-10] wolfspanscreens.cpp: Paul, "an option to make the viewer spread
              across all available screens" - every grid, every system ("make sure everyone gets the
              feature"). Remembered (WolfSpanAllScreens) and put back at the next start. -->
@@ -2157,6 +2169,37 @@
             <menu_item_call.on_click
              function="Floater.Show"
              parameter="wolf_builder" />
+        </menu_item_call>
+        <!-- [WolfViewer 2026-10-16] Paul: "anything wolf viewer should be under wolf world". The Wolf building and
+             land tools are here as well as under Build, with the same Wolf Territories gates as their Build items. -->
+        <menu_item_call
+         label="Paint the Ground..."
+         name="WolfWorldTerrainPaint">
+            <menu_item_call.on_click
+             function="Floater.Show"
+             parameter="wolf_terrain_paint" />
+            <menu_item_call.on_visible
+             function="WolfGrid.IsWolfTerritories" />
+        </menu_item_call>
+        <menu_item_call
+         label="Make Caves..."
+         name="WolfWorldMakeCaves">
+            <menu_item_call.on_click
+             function="Floater.Show"
+             parameter="wolf_caves" />
+            <menu_item_call.on_visible
+             function="WolfGrid.IsOnWolfTerritories" />
+        </menu_item_call>
+        <!-- [WOLF TERRAIN TEXTURES 2026-10-16] wolfterrainlayers.cpp: eight terrain textures up to 4096 m for this
+             region (read-only for anyone who doesn't hold it). Also Region / Estate > Terrain. -->
+        <menu_item_call
+         label="Wolf Terrain Textures..."
+         name="WolfWorldTerrainTextures">
+            <menu_item_call.on_click
+             function="Floater.Show"
+             parameter="wolf_terrain_textures" />
+            <menu_item_call.on_visible
+             function="WolfGrid.IsOnWolfTerritories" />
         </menu_item_call>
         <!-- [WATCHWOLF 2026-10-10] who is on the regions you own or manage (wolffloaterwatchwolf.cpp) -->
         <menu_item_call

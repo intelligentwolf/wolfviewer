@@ -244,6 +244,110 @@ vec3 wolfTerrainPaint(vec3 ground, vec2 region_xy)
 }
 // </WolfViewer>
 
+// <WolfViewer 2026-10-16> WOLF TERRAIN TEXTURES (wolfterrainlayers.cpp; Paul: "goes up to 4096
+// metres so wolfviewer and wolfstorm people can see on high mountains"). With wolf_layers_on the
+// ground colour comes from the region's eight Wolf layers instead of the four detail textures; the
+// paint, the look's AO and snow line, the settled snow and the caustics below apply as before.
+// The record and the band model are documented in wolfstorm php/terrain_paint.php; the same maths
+// is in WolfStorm terrain_manager.js wsWolfLayers — keep them in step:
+//   hz = height - bilinear(corner offsets SW, SE, NW, NE; x east, y north) + noise * 2 * amplitude
+//   (noise: wsTerrainNoise at 25 m / 6 m / 2 m, weights 0.6 / 0.25 / 0.15, centred, -0.5..0.5);
+//   layer 0 is the ground from the bottom; each later present layer i covers what is below it by
+//   t_i = smoothstep(h_i - b_i/2, h_i + b_i/2, hz) (a nested mix: the weights sum to 1);
+//   steep faces (1 - n.z from 0.22 to 0.40, about 39 to 53 degrees) turn to the cliff layer.
+// Each layer tiles on the world grid at its own tile size, phased by the region's global origin
+// (wolf_layer_off) so it is seamless across region borders; with the Enhanced terrain look the
+// layers are also dual-scale and triplanar like the detail textures above. All eight textures are
+// ONE sampler2DArray (one texture unit). SAMPLER COUNT: with it this program declares 16 samplers, so it is only compiled in above 16 units (the guard below)
+// (detail_0-3, alpha_ramp, wolfCausticTex0/1, wolfPaintMap, wolfPaintTex0-5, wolfShelterMap,
+// wolfTerrainLayers) — exactly the 16 an Apple GPU has; anything more here needs a texture array
+// elsewhere first. The derivatives are taken in uniform control flow and the taps use textureGrad
+// (dFdx in a divergent branch is undefined).
+// [2026-10-16 MAC GUARD] Paul: "protect the mac version". The layers are compiled in only where the GPU reports more
+// than 16 texture image units (llviewershadermgr.cpp WOLF_TERRAIN_LAYERS permutation, WolfTerrainLayers::supported:
+// GL_MAX_TEXTURE_IMAGE_UNITS > 16, never on macOS). Without it this program declares no extra sampler at all - the
+// 15 it had before - and wolf_layers_on is a constant 0, so the branch in main() is compiled away.
+#ifdef WOLF_TERRAIN_LAYERS
+uniform sampler2DArray wolfTerrainLayers;
+uniform float wolf_layers_on;
+uniform vec4  wolf_layer[8];         // start m, blend m, tile m, present (0/1)
+uniform vec2  wolf_layer_off[8];     // region origin mod tile, metres
+uniform vec4  wolf_layer_corner;     // band offsets at SW, SE, NW, NE, metres
+uniform float wolf_layer_noise;      // band-edge noise amplitude, metres
+uniform float wolf_layer_cliff;      // layer for steep faces, -1 = none
+uniform vec2  wolf_layer_size;       // region width, height (m)
+uniform vec2  wolf_layer_noise_off;  // region origin mod 1024 m
+vec4 wolfLayerTap(float layer, vec2 uv, vec2 gx, vec2 gy, float farB)
+{
+    vec4 c = textureGrad(wolfTerrainLayers, vec3(uv, layer), gx, gy);
+    if (farB > 0.0)
+    {
+        c = mix(c, textureGrad(wolfTerrainLayers, vec3(uv * 0.23, layer), gx * 0.23, gy * 0.23), farB);
+    }
+    return c;
+}
+vec4 wolfLayerGround(vec3 region_pos, vec3 rn, float farB, bool look)
+{
+    vec2 rxy = region_pos.xy;
+    float z = region_pos.z;
+    vec2 f = clamp(rxy / max(wolf_layer_size, vec2(1.0)), 0.0, 1.0);
+    float corner = mix(mix(wolf_layer_corner.x, wolf_layer_corner.y, f.x),
+                       mix(wolf_layer_corner.z, wolf_layer_corner.w, f.x), f.y);
+    vec2 nxy = rxy + wolf_layer_noise_off;
+    float n = (wsTerrainNoise(nxy * 0.04) - 0.5) * 0.6 + (wsTerrainNoise(nxy * 0.17 + 7.3) - 0.5) * 0.25
+            + (wsTerrainNoise(nxy * 0.55 + 3.1) - 0.5) * 0.15;
+    float hz = z - corner + n * 2.0 * wolf_layer_noise;
+    float w[8];
+    w[0] = 1.0;
+    for (int i = 1; i < 8; i++)
+    {
+        w[i] = 0.0;
+        vec4 L = wolf_layer[i];
+        if (L.w < 0.5) continue;
+        float t = smoothstep(L.x - 0.5 * L.y, L.x + 0.5 * L.y, hz);
+        for (int j = 0; j < i; j++) w[j] *= 1.0 - t;
+        w[i] = t;
+    }
+    if (wolf_layer_cliff > -0.5)
+    {
+        float cw = smoothstep(0.22, 0.40, 1.0 - clamp(rn.z, 0.0, 1.0));
+        int ci = int(wolf_layer_cliff + 0.5);
+        for (int j = 0; j < 8; j++) w[j] *= 1.0 - cw;
+        w[ci] += cw;
+    }
+    vec2 dX = dFdx(rxy), dY = dFdy(rxy);
+    float dzX = dFdx(z), dzY = dFdy(z);
+    vec3 tw = vec3(0.0, 0.0, 1.0);
+    if (look)
+    {
+        tw = pow(abs(rn), vec3(6.0));
+        tw /= (tw.x + tw.y + tw.z);
+    }
+    vec4 c = vec4(0.0);
+    float ws = 0.0;
+    for (int i = 0; i < 8; i++)
+    {
+        if (w[i] < 0.002) continue;
+        float s = max(wolf_layer[i].z, 0.01);
+        vec2 off = wolf_layer_off[i];
+        float layer = float(i);
+        vec4 col = wolfLayerTap(layer, (rxy + off) / s, dX / s, dY / s, farB) * tw.z;
+        if (tw.x + tw.y > 0.002)
+        {
+            col += wolfLayerTap(layer, vec2(rxy.y + off.y, z) / s, vec2(dX.y, dzX) / s, vec2(dY.y, dzY) / s, farB) * tw.x;
+            col += wolfLayerTap(layer, vec2(rxy.x + off.x, z) / s, vec2(dX.x, dzX) / s, vec2(dY.x, dzY) / s, farB) * tw.y;
+        }
+        c += col * w[i];
+        ws += w[i];
+    }
+    return c / max(ws, 1e-4);
+}
+#else // WOLF_TERRAIN_LAYERS
+const float wolf_layers_on = 0.0;
+vec4 wolfLayerGround(vec3 region_pos, vec3 rn, float farB, bool look) { return vec4(0.0); }   // never reached: wolf_layers_on is 0
+#endif // WOLF_TERRAIN_LAYERS
+// </WolfViewer>
+
 void mirrorClip(vec3 position);
 vec4 encodeNormal(vec3 n, float env, float gbuffer_flag);
 
@@ -252,6 +356,15 @@ void main()
     mirrorClip(pos);
     /// Note: This should duplicate the blending functionality currently used for the terrain rendering.
 
+    vec4 outColor;
+    if (wolf_layers_on > 0.5)
+    {
+        // <WolfViewer 2026-10-16> the eight Wolf layers (wolfLayerGround above)
+        float farB = wolf_terrain_look > 0.5 ? smoothstep(30.0, 140.0, length(pos)) * 0.65 : 0.0;
+        outColor = wolfLayerGround(vary_region_pos, normalize(vary_region_normal), farB, wolf_terrain_look > 0.5);
+    }
+    else
+    {
     vec4 color0, color1, color2, color3;
     if (wolf_terrain_look > 0.5)
     {
@@ -277,7 +390,6 @@ void main()
         color3 = texture(detail_3, vary_texcoord0.xy);
     }
 
-    vec4 outColor;
     if (wolf_terrain_look > 0.5)
     {
         // <WolfViewer> terrain look, step 1c: composition per pixel, then height blend.
@@ -346,6 +458,7 @@ void main()
         float alphaFinal = texture(alpha_ramp, vary_texcoord1.zw).a;
         outColor = mix( mix(color3, color2, alpha2), mix(color1, color0, alpha1), alphaFinal );
     }
+    }   // <WolfViewer 2026-10-16/> end of the stock four-texture path (wolf_layers_on == 0)
 
     // <WolfViewer 2026-09-10> painted roads/tracks: over the composition blend, under the
     // enhanced look's AO / snow (a road lies in its hollow and is snowed on like the ground).

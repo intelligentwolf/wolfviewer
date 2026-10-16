@@ -92,6 +92,7 @@
 #include "wolfautoenvironment.h"
 #include "wolfregionweather.h"
 #include "wolfwavezones.h"
+#include "wolfgrid.h"   // [WOLF TERRAIN TEXTURES 2026-10-16] the Terrain tab's Wolf button
 #include "lltrans.h"
 #include "llagentui.h"
 #include "llmeshrepository.h"
@@ -2063,6 +2064,13 @@ bool LLPanelRegionTerrainInfo::refreshFromRegion(LLViewerRegion* region)
     getChildView("download_raw_btn")->setEnabled(owner_or_god);
     getChildView("upload_raw_btn")->setEnabled(owner_or_god);
     getChildView("bake_terrain_btn")->setEnabled(owner_or_god);
+    // <WolfViewer 2026-10-16> Wolf terrain textures (wolfterrainlayers.cpp): eight layers up to 4096 m,
+    // Wolf Territories only, for whoever holds the region (the floater opens read-only for anyone else).
+    if (LLView* wolf_btn = findChildView("wolf_terrain_textures_btn"))
+    {
+        wolf_btn->setVisible(WolfGrid::isOnWolfTerritories());
+        wolf_btn->setEnabled(true);
+    }
 
     return LLPanelRegionInfo::refreshFromRegion(region);
 }

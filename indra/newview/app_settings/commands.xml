@@ -160,6 +160,18 @@
            is_running_function="Floater.IsOpen"
            is_running_parameters="mini_map"
            />
+  <!-- [WOLF COMPASS 2026-10-16] Victorian compass (wolffloatercompass.cpp): North and the way you
+       are moving. In the toybox for any toolbar, every grid; lit while it is open. -->
+  <command name="wolf_compass"
+           available_in_toybox="true"
+           icon="Command_WolfCompass_Icon"
+           label_ref="Command_WolfCompass_Label"
+           tooltip_ref="Command_WolfCompass_Tooltip"
+           execute_function="Floater.ToggleOrBringToFront"
+           execute_parameters="wolf_compass"
+           is_running_function="Floater.IsOpen"
+           is_running_parameters="wolf_compass"
+           />
   <command name="move"
            available_in_toybox="true"
            icon="Command_Move_Icon"

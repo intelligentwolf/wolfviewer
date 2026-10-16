@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLF TERRAIN TEXTURES 2026-10-16] Paul: "Terrain textures - the standard ones only go up to 500m can we have a
+     Wolf Environment Terrain Textures instead that adds another 4 and goes up to 4096 metres". Eight ground layers
+     (WolfFloaterTerrainLayers, wolfterrainlayers.cpp), stored in the region's terrain paint record
+     (wolfstorm.app php/terrain_paint.php, layout.wolfTextures). Opened from Region / Estate > Terrain on Wolf
+     Territories only; region holders edit, anyone else sees it read-only. WolfStorm has the same editor in
+     Paint the Ground (build_paint_tab.js). -->
+<floater
+ can_close="true"
+ can_minimize="true"
+ can_resize="false"
+ height="604"
+ layout="topleft"
+ name="wolf_terrain_textures"
+ save_rect="true"
+ single_instance="true"
+ title="Wolf Terrain Textures"
+ width="484">
+    <text follows="left|top" layout="topleft" left="8" top="24" width="468" height="56" word_wrap="true" font="SansSerifSmall" name="wolf_layers_note">Wolf terrain textures</text>
+    <check_box follows="left|top" layout="topleft" left="8" top="86" width="400" height="16" name="wolf_layers_on" label="Use Wolf terrain textures on this region" tool_tip="Off: the region's standard four terrain textures, as every viewer shows them" />
+    <text follows="left|top" layout="topleft" left="8" top="108" width="468" height="16" font="SansSerifSmall" name="wolf_layers_hint">Lowest layer first. Each takes over from the one below at its From height.</text>
+    <text follows="left|top" layout="topleft" left="8" top="138" width="14" height="16" name="wolf_layer_num_0">1</text>
+    <texture_picker follows="left|top" layout="topleft" left="24" top="128" width="36" height="36" name="wolf_layer_tex_0" allow_no_texture="false" can_apply_immediately="false" tool_tip="Layer 1: click to choose its texture from your inventory" />
+    <text follows="left|top" layout="topleft" left="66" top="138" width="92" height="16" font="SansSerifSmall" name="wolf_layer_state_0"></text>
+    <spinner follows="left|top" layout="topleft" left="160" top="136" width="100" height="20" name="wolf_layer_h_0" label="From" label_width="32" min_val="-100" max_val="4096" increment="10" initial_value="0" decimal_digits="1" tool_tip="Layer 1 is the ground from the bottom up" />
+    <spinner follows="left|top" layout="topleft" left="264" top="136" width="96" height="20" name="wolf_layer_b_0" label="Blend" label_width="34" min_val="0.5" max_val="1024" increment="5" initial_value="10" decimal_digits="1" tool_tip="Metres over which this layer fades in over the one below" />
+    <spinner follows="left|top" layout="topleft" left="364" top="136" width="80" height="20" name="wolf_layer_s_0" label="Tile" label_width="24" min_val="1" max_val="256" increment="1" initial_value="12" decimal_digits="1" tool_tip="Metres one repeat of the texture covers" />
+    <button follows="left|top" layout="topleft" left="450" top="136" width="22" height="20" name="wolf_layer_clear_0" label="x" tool_tip="Layer 1 is always used" />
+    <text follows="left|top" layout="topleft" left="8" top="180" width="14" height="16" name="wolf_layer_num_1">2</text>
+    <texture_picker follows="left|top" layout="topleft" left="24" top="170" width="36" height="36" name="wolf_layer_tex_1" allow_no_texture="true" can_apply_immediately="false" tool_tip="Layer 2: click to choose its texture from your inventory" />
+    <text follows="left|top" layout="topleft" left="66" top="180" width="92" height="16" font="SansSerifSmall" name="wolf_layer_state_1"></text>
+    <spinner follows="left|top" layout="topleft" left="160" top="178" width="100" height="20" name="wolf_layer_h_1" label="From" label_width="32" min_val="-100" max_val="4096" increment="10" initial_value="0" decimal_digits="1" tool_tip="Height in metres where this layer takes over from the one below (the middle of its blend)" />
+    <spinner follows="left|top" layout="topleft" left="264" top="178" width="96" height="20" name="wolf_layer_b_1" label="Blend" label_width="34" min_val="0.5" max_val="1024" increment="5" initial_value="10" decimal_digits="1" tool_tip="Metres over which this layer fades in over the one below" />
+    <spinner follows="left|top" layout="topleft" left="364" top="178" width="80" height="20" name="wolf_layer_s_1" label="Tile" label_width="24" min_val="1" max_val="256" increment="1" initial_value="12" decimal_digits="1" tool_tip="Metres one repeat of the texture covers" />
+    <button follows="left|top" layout="topleft" left="450" top="178" width="22" height="20" name="wolf_layer_clear_1" label="x" tool_tip="Do not use layer 2" />
+    <text follows="left|top" layout="topleft" left="8" top="222" width="14" height="16" name="wolf_layer_num_2">3</text>
+    <texture_picker follows="left|top" layout="topleft" left="24" top="212" width="36" height="36" name="wolf_layer_tex_2" allow_no_texture="true" can_apply_immediately="false" tool_tip="Layer 3: click to choose its texture from your inventory" />
+    <text follows="left|top" layout="topleft" left="66" top="222" width="92" height="16" font="SansSerifSmall" name="wolf_layer_state_2"></text>
+    <spinner follows="left|top" layout="topleft" left="160" top="220" width="100" height="20" name="wolf_layer_h_2" label="From" label_width="32" min_val="-100" max_val="4096" increment="10" initial_value="0" decimal_digits="1" tool_tip="Height in metres where this layer takes over from the one below (the middle of its blend)" />
+    <spinner follows="left|top" layout="topleft" left="264" top="220" width="96" height="20" name="wolf_layer_b_2" label="Blend" label_width="34" min_val="0.5" max_val="1024" increment="5" initial_value="10" decimal_digits="1" tool_tip="Metres over which this layer fades in over the one below" />
+    <spinner follows="left|top" layout="topleft" left="364" top="220" width="80" height="20" name="wolf_layer_s_2" label="Tile" label_width="24" min_val="1" max_val="256" increment="1" initial_value="12" decimal_digits="1" tool_tip="Metres one repeat of the texture covers" />
+    <button follows="left|top" layout="topleft" left="450" top="220" width="22" height="20" name="wolf_layer_clear_2" label="x" tool_tip="Do not use layer 3" />
+    <text follows="left|top" layout="topleft" left="8" top="264" width="14" height="16" name="wolf_layer_num_3">4</text>
+    <texture_picker follows="left|top" layout="topleft" left="24" top="254" width="36" height="36" name="wolf_layer_tex_3" allow_no_texture="true" can_apply_immediately="false" tool_tip="Layer 4: click to choose its texture from your inventory" />
+    <text follows="left|top" layout="topleft" left="66" top="264" width="92" height="16" font="SansSerifSmall" name="wolf_layer_state_3"></text>
+    <spinner follows="left|top" layout="topleft" left="160" top="262" width="100" height="20" name="wolf_layer_h_3" label="From" label_width="32" min_val="-100" max_val="4096" increment="10" initial_value="0" decimal_digits="1" tool_tip="Height in metres where this layer takes over from the one below (the middle of its blend)" />
+    <spinner follows="left|top" layout="topleft" left="264" top="262" width="96" height="20" name="wolf_layer_b_3" label="Blend" label_width="34" min_val="0.5" max_val="1024" increment="5" initial_value="10" decimal_digits="1" tool_tip="Metres over which this layer fades in over the one below" />
+    <spinner follows="left|top" layout="topleft" left="364" top="262" width="80" height="20" name="wolf_layer_s_3" label="Tile" label_width="24" min_val="1" max_val="256" increment="1" initial_value="12" decimal_digits="1" tool_tip="Metres one repeat of the texture covers" />
+    <button follows="left|top" layout="topleft" left="450" top="262" width="22" height="20" name="wolf_layer_clear_3" label="x" tool_tip="Do not use layer 4" />
+    <text follows="left|top" layout="topleft" left="8" top="306" width="14" height="16" name="wolf_layer_num_4">5</text>
+    <texture_picker follows="left|top" layout="topleft" left="24" top="296" width="36" height="36" name="wolf_layer_tex_4" allow_no_texture="true" can_apply_immediately="false" tool_tip="Layer 5: click to choose its texture from your inventory" />
+    <text follows="left|top" layout="topleft" left="66" top="306" width="92" height="16" font="SansSerifSmall" name="wolf_layer_state_4"></text>
+    <spinner follows="left|top" layout="topleft" left="160" top="304" width="100" height="20" name="wolf_layer_h_4" label="From" label_width="32" min_val="-100" max_val="4096" increment="10" initial_value="0" decimal_digits="1" tool_tip="Height in metres where this layer takes over from the one below (the middle of its blend)" />
+    <spinner follows="left|top" layout="topleft" left="264" top="304" width="96" height="20" name="wolf_layer_b_4" label="Blend" label_width="34" min_val="0.5" max_val="1024" increment="5" initial_value="10" decimal_digits="1" tool_tip="Metres over which this layer fades in over the one below" />
+    <spinner follows="left|top" layout="topleft" left="364" top="304" width="80" height="20" name="wolf_layer_s_4" label="Tile" label_width="24" min_val="1" max_val="256" increment="1" initial_value="12" decimal_digits="1" tool_tip="Metres one repeat of the texture covers" />
+    <button follows="left|top" layout="topleft" left="450" top="304" width="22" height="20" name="wolf_layer_clear_4" label="x" tool_tip="Do not use layer 5" />
+    <text follows="left|top" layout="topleft" left="8" top="348" width="14" height="16" name="wolf_layer_num_5">6</text>
+    <texture_picker follows="left|top" layout="topleft" left="24" top="338" width="36" height="36" name="wolf_layer_tex_5" allow_no_texture="true" can_apply_immediately="false" tool_tip="Layer 6: click to choose its texture from your inventory" />
+    <text follows="left|top" layout="topleft" left="66" top="348" width="92" height="16" font="SansSerifSmall" name="wolf_layer_state_5"></text>
+    <spinner follows="left|top" layout="topleft" left="160" top="346" width="100" height="20" name="wolf_layer_h_5" label="From" label_width="32" min_val="-100" max_val="4096" increment="10" initial_value="0" decimal_digits="1" tool_tip="Height in metres where this layer takes over from the one below (the middle of its blend)" />
+    <spinner follows="left|top" layout="topleft" left="264" top="346" width="96" height="20" name="wolf_layer_b_5" label="Blend" label_width="34" min_val="0.5" max_val="1024" increment="5" initial_value="10" decimal_digits="1" tool_tip="Metres over which this layer fades in over the one below" />
+    <spinner follows="left|top" layout="topleft" left="364" top="346" width="80" height="20" name="wolf_layer_s_5" label="Tile" label_width="24" min_val="1" max_val="256" increment="1" initial_value="12" decimal_digits="1" tool_tip="Metres one repeat of the texture covers" />
+    <button follows="left|top" layout="topleft" left="450" top="346" width="22" height="20" name="wolf_layer_clear_5" label="x" tool_tip="Do not use layer 6" />
+    <text follows="left|top" layout="topleft" left="8" top="390" width="14" height="16" name="wolf_layer_num_6">7</text>
+    <texture_picker follows="left|top" layout="topleft" left="24" top="380" width="36" height="36" name="wolf_layer_tex_6" allow_no_texture="true" can_apply_immediately="false" tool_tip="Layer 7: click to choose its texture from your inventory" />
+    <text follows="left|top" layout="topleft" left="66" top="390" width="92" height="16" font="SansSerifSmall" name="wolf_layer_state_6"></text>
+    <spinner follows="left|top" layout="topleft" left="160" top="388" width="100" height="20" name="wolf_layer_h_6" label="From" label_width="32" min_val="-100" max_val="4096" increment="10" initial_value="0" decimal_digits="1" tool_tip="Height in metres where this layer takes over from the one below (the middle of its blend)" />
+    <spinner follows="left|top" layout="topleft" left="264" top="388" width="96" height="20" name="wolf_layer_b_6" label="Blend" label_width="34" min_val="0.5" max_val="1024" increment="5" initial_value="10" decimal_digits="1" tool_tip="Metres over which this layer fades in over the one below" />
+    <spinner follows="left|top" layout="topleft" left="364" top="388" width="80" height="20" name="wolf_layer_s_6" label="Tile" label_width="24" min_val="1" max_val="256" increment="1" initial_value="12" decimal_digits="1" tool_tip="Metres one repeat of the texture covers" />
+    <button follows="left|top" layout="topleft" left="450" top="388" width="22" height="20" name="wolf_layer_clear_6" label="x" tool_tip="Do not use layer 7" />
+    <text follows="left|top" layout="topleft" left="8" top="432" width="14" height="16" name="wolf_layer_num_7">8</text>
+    <texture_picker follows="left|top" layout="topleft" left="24" top="422" width="36" height="36" name="wolf_layer_tex_7" allow_no_texture="true" can_apply_immediately="false" tool_tip="Layer 8: click to choose its texture from your inventory" />
+    <text follows="left|top" layout="topleft" left="66" top="432" width="92" height="16" font="SansSerifSmall" name="wolf_layer_state_7"></text>
+    <spinner follows="left|top" layout="topleft" left="160" top="430" width="100" height="20" name="wolf_layer_h_7" label="From" label_width="32" min_val="-100" max_val="4096" increment="10" initial_value="0" decimal_digits="1" tool_tip="Height in metres where this layer takes over from the one below (the middle of its blend)" />
+    <spinner follows="left|top" layout="topleft" left="264" top="430" width="96" height="20" name="wolf_layer_b_7" label="Blend" label_width="34" min_val="0.5" max_val="1024" increment="5" initial_value="10" decimal_digits="1" tool_tip="Metres over which this layer fades in over the one below" />
+    <spinner follows="left|top" layout="topleft" left="364" top="430" width="80" height="20" name="wolf_layer_s_7" label="Tile" label_width="24" min_val="1" max_val="256" increment="1" initial_value="12" decimal_digits="1" tool_tip="Metres one repeat of the texture covers" />
+    <button follows="left|top" layout="topleft" left="450" top="430" width="22" height="20" name="wolf_layer_clear_7" label="x" tool_tip="Do not use layer 8" />
+    <text follows="left|top" layout="topleft" left="8" top="472" width="150" height="16" font="SansSerifSmall" name="wolf_corner_lbl">Move the bands at the corners:</text>
+    <spinner follows="left|top" layout="topleft" left="160" top="470" width="76" height="20" name="wolf_corner_sw" label="SW" label_width="22" min_val="-1024" max_val="1024" increment="10" initial_value="0" decimal_digits="0" tool_tip="Metres the bands move up at the south-west corner (negative = down)" />
+    <spinner follows="left|top" layout="topleft" left="240" top="470" width="76" height="20" name="wolf_corner_se" label="SE" label_width="22" min_val="-1024" max_val="1024" increment="10" initial_value="0" decimal_digits="0" tool_tip="Metres the bands move up at the south-east corner (negative = down)" />
+    <spinner follows="left|top" layout="topleft" left="320" top="470" width="76" height="20" name="wolf_corner_nw" label="NW" label_width="22" min_val="-1024" max_val="1024" increment="10" initial_value="0" decimal_digits="0" tool_tip="Metres the bands move up at the north-west corner (negative = down)" />
+    <spinner follows="left|top" layout="topleft" left="400" top="470" width="76" height="20" name="wolf_corner_ne" label="NE" label_width="22" min_val="-1024" max_val="1024" increment="10" initial_value="0" decimal_digits="0" tool_tip="Metres the bands move up at the north-east corner (negative = down)" />
+    <spinner follows="left|top" layout="topleft" left="8" top="498" width="150" height="20" name="wolf_noise" label="Edge noise (m)" label_width="90" min_val="0" max_val="64" increment="1" initial_value="12" decimal_digits="0" tool_tip="How far the band edges wander, so they are not straight lines" />
+    <text follows="left|top" layout="topleft" left="172" top="500" width="40" height="16" name="wolf_cliff_lbl">Cliffs</text>
+    <combo_box follows="left|top" layout="topleft" left="214" top="498" width="100" height="20" name="wolf_cliff" tool_tip="The layer steep faces (from about 40 degrees) turn to" />
+    <text follows="left|top" layout="topleft" left="8" top="524" width="468" height="16" word_wrap="true" font="SansSerifSmall" name="wolf_layers_error"></text>
+    <text follows="left|top" layout="topleft" left="8" top="542" width="468" height="28" word_wrap="true" font="SansSerifSmall" name="wolf_layers_status"></text>
+    <button follows="left|top" layout="topleft" left="8" top="574" width="80" height="22" name="wolf_layers_defaults" label="Defaults" tool_tip="High-mountain defaults: this region's four textures, then rock, alpine scree, granite and snow up to 4096 m" />
+    <button follows="left|top" layout="topleft" left_pad="6" top_delta="0" width="70" height="22" name="wolf_layers_revert" label="Revert" />
+    <button follows="left|top" layout="topleft" left_pad="6" top_delta="0" width="150" height="22" name="wolf_layers_save" label="Save Wolf textures" />
+</floater>

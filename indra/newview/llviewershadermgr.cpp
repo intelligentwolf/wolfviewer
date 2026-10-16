@@ -53,6 +53,7 @@
 #include "llnotificationsutil.h"
 #include "llcallbacklist.h"
 #include "wolfenvironmentrender.h"   // [WOLF ENV TAKRAM 2026-10-12] the native sky's programs
+#include "wolfterrainlayers.h"   // [WOLF TERRAIN TEXTURES 2026-10-16] WolfTerrainLayers::supported
 
 static LLStaticHashedString sTexture0("texture0");
 static LLStaticHashedString sTexture1("texture1");
@@ -2787,6 +2788,12 @@ bool LLViewerShaderMgr::loadShadersDeferred()
         gDeferredTerrainProgram.mShaderFiles.push_back(make_pair("deferred/terrainF.glsl", GL_FRAGMENT_SHADER));
 
         add_common_permutations(&gDeferredTerrainProgram);
+        // [WOLF TERRAIN TEXTURES 2026-10-16] the eight Wolf layers' sampler only where the GPU has room for it
+        // (terrainF.glsl MAC GUARD, wolfterrainlayers.cpp supported)
+        if (WolfTerrainLayers::supported())
+        {
+            gDeferredTerrainProgram.addPermutation("WOLF_TERRAIN_LAYERS", "1");
+        }
 
         gDeferredTerrainProgram.mShaderLevel = mShaderLevel[SHADER_DEFERRED];
         success = gDeferredTerrainProgram.createShader();

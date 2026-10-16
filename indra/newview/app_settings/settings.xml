@@ -13436,6 +13436,17 @@ Change of this parameter will affect the layout of buttons in notification toast
       <key>Value</key>
       <real>4.0</real>
     </map>
+    <key>WolfCaveCavernHeight</key>
+    <map>
+      <key>Comment</key>
+      <string>[WolfViewer 2026-10-15 v3] Cave Builder: height in metres of the next cavern (2.5 to 20, CAVE_DESIGN_V3.md caverns).</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>F32</string>
+      <key>Value</key>
+      <real>5.0</real>
+    </map>
     <key>WolfTerrainPaintWaterLevel</key>
     <map>
       <key>Comment</key>
@@ -23504,6 +23515,17 @@ Change of this parameter will affect the layout of buttons in notification toast
     <string>Boolean</string>
     <key>Value</key>
     <integer>0</integer>
+  </map>
+  <key>WolfTeleportBeaconSeconds</key>
+  <map>
+    <key>Comment</key>
+    <string>Seconds after arriving from a teleport before the destination beacon (the beam from the ground to the map or landmark spot you teleported to) is removed. 0 keeps the beacon until you walk to it.</string>
+    <key>Persist</key>
+    <integer>1</integer>
+    <key>Type</key>
+    <string>F32</string>
+    <key>Value</key>
+    <real>30.0</real>
   </map>
   <key>FSShowStatsBarInMouselook</key>
   <map>

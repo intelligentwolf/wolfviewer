@@ -135,6 +135,53 @@ LLFrameTimer gPostTeleportFinishKillObjectDelayTimer;
 
 bool gForceRenderLandFence = false;
 bool gDisplaySwapBuffers = false;
+U64 gPresentedFrameCount = 0;   // [WolfViewer 2026-10-16] see llviewerdisplay.h
+
+// [WolfViewer 2026-10-16] Paul: "WolfViewer needs to show its REAL frame rate in the top right, when it's running wolf
+// environments". The viewer's FPS stat is the MEDIAN of single-frame rates (LLStatViewer::FPS through
+// get_frame_recording().getPeriodMedianPerSec, a period per frame, lltracerecording.h:581 / .cpp:924): a median throws
+// the slow frames away, and the Wolf sky's work comes in slow frames - the EEP probe and its readback every half second,
+// the cloud readback every two, the atmosphere tables built against a glFinish'd budget (wolfenvironmentrender.cpp
+// frameUpdate / probeSky). Frames of 10, 10 and 40 ms read 100 fps where 50 were shown. This is the frames actually
+// swapped (every swapBuffers below) over the wall-clock time they took: half-second buckets, the last two shown.
+namespace
+{
+    LLTimer sFpsBucketTimer;
+    U64 sFpsBucketStartFrames = 0;
+    F64 sFpsPrevBucketFrames = 0.0;
+    F64 sFpsPrevBucketSecs = 0.0;
+    F32 sRealFps = 0.f;
+
+    void wolf_frame_presented()
+    {
+        ++gPresentedFrameCount;
+        const F64 bucket_secs = sFpsBucketTimer.getElapsedTimeF64();
+        if (bucket_secs < 0.5)
+        {
+            return;
+        }
+        const F64 bucket_frames = (F64)(gPresentedFrameCount - sFpsBucketStartFrames);
+        sFpsBucketTimer.reset();
+        sFpsBucketStartFrames = gPresentedFrameCount;
+        // a bucket far longer than half a second (a long stall, a minimised window) stands alone and is not carried on
+        const bool usual_bucket = bucket_secs < 2.0;
+        F64 frames = bucket_frames;
+        F64 secs = bucket_secs;
+        if (usual_bucket && sFpsPrevBucketSecs > 0.0)
+        {
+            frames += sFpsPrevBucketFrames;
+            secs += sFpsPrevBucketSecs;
+        }
+        sFpsPrevBucketFrames = bucket_frames;
+        sFpsPrevBucketSecs = usual_bucket ? bucket_secs : 0.0;
+        sRealFps = (F32)(frames / secs);   // secs >= 0.5 here
+    }
+}
+
+F32 wolf_real_fps()
+{
+    return sRealFps;
+}
 bool gDepthDirty = false;
 bool gResizeScreenTexture = false;
 bool gResizeShadowTexture = false;
@@ -220,7 +267,10 @@ void display_startup()
     LLGLState::checkStates();
 
     if (gViewerWindow && gViewerWindow->getWindow())
-    gViewerWindow->getWindow()->swapBuffers();
+    {
+        gViewerWindow->getWindow()->swapBuffers();
+        wolf_frame_presented();   // [WolfViewer 2026-10-16]
+    }
 
     glClear(GL_DEPTH_BUFFER_BIT);
 }
@@ -529,6 +579,7 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
         gGL.flush();
         glClear(GL_COLOR_BUFFER_BIT);
         gViewerWindow->getWindow()->swapBuffers();
+        wolf_frame_presented();   // [WolfViewer 2026-10-16]
         LLPipeline::refreshCachedSettings();
         gPipeline.resizeScreenTexture();
         gResizeScreenTexture = false;
@@ -1771,6 +1822,7 @@ void swap()
     if (gDisplaySwapBuffers)
     {
         gViewerWindow->getWindow()->swapBuffers();
+        wolf_frame_presented();   // [WolfViewer 2026-10-16] a snapshot's render (gDisplaySwapBuffers false) is not shown
     }
     gDisplaySwapBuffers = true;
 }

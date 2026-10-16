@@ -61,6 +61,7 @@
 #include "llviewerstats.h"
 #include "llviewerwindow.h"
 #include "llframetimer.h"
+#include "llviewerdisplay.h"   // <WolfViewer 2026-10-16/> wolf_real_fps: the real frame rate
 #include "llvoavatarself.h"
 #include "llresmgr.h"
 #include "llworld.h"
@@ -614,29 +615,30 @@ void LLStatusBar::refresh()
     }
 
     // <FS:Ansariel> FIRE-14482: Show FPS in status bar
+    // [WolfViewer 2026-10-16] Paul: "WolfViewer needs to show its REAL frame rate in the top right, when it's running wolf
+    // environments": the frames actually shown per second (llviewerdisplay.cpp wolf_real_fps, which says why the
+    // viewer's own median FPS stat under-reports the slow frames), refreshed twice a second. One measure always - it is
+    // what a frame rate means, sky or no sky.
     static LLCachedControl<bool> fsStatusBarShowFPS(gSavedSettings, "FSStatusBarShowFPS");
-    if (fsStatusBarShowFPS && mFPSUpdateTimer.getElapsedTimeF32() > 1.f)
+    if (fsStatusBarShowFPS && mFPSUpdateTimer.getElapsedTimeF32() >= 0.5f)
     {
         static LLCachedControl<bool> fsStatusBarShowFPSColors(gSavedSettings, "FSStatusBarShowFPSColors");
-        static LLCachedControl<U32>  max_fps(gSavedSettings, "FramePerSecondLimit");
-        static LLCachedControl<bool> limit_fps_enabled(gSavedSettings, "FSLimitFramerate");
-        static LLCachedControl<bool> vsync_enabled(gSavedSettings, "RenderVSyncEnable");
 
-        static const auto fps_below_limit_color     = LLUIColorTable::instance().getColor("FpsDisplayBelowLimitColor");
-        static const auto fps_limit_reached_color   = LLUIColorTable::instance().getColor("FpsDisplayFpsLimitReachedColor");
-        static const auto vsync_limit_reached_color = LLUIColorTable::instance().getColor("FpsDisplayVSyncLimitReachedColor");
         static const auto fps_uncapped_color        = LLUIColorTable::instance().getColor("FpsDisplayUncappedColor");
         static const auto fps_unfocussed_color      = LLUIColorTable::instance().getColor("FpsDisplayUnfocussedColor");
+        static const auto fps_good_color            = LLUIColorTable::instance().getColor("WolfFpsDisplayGoodColor");
+        static const auto fps_fair_color            = LLUIColorTable::instance().getColor("WolfFpsDisplayFairColor");
+        static const auto fps_poor_color            = LLUIColorTable::instance().getColor("WolfFpsDisplayPoorColor");
         static auto       current_fps_color         = fps_uncapped_color;
 
         mFPSUpdateTimer.reset();
-        const auto fps = LLTrace::get_frame_recording().getPeriodMedianPerSec(LLStatViewer::FPS);
-        mFPSText->setText(llformat("%.1f", fps));
+        const F32 fps = wolf_real_fps();
+        mFPSText->setText(llformat("%d", ll_round(fps)));
 
         auto fps_color{ fps_uncapped_color };
         if (fsStatusBarShowFPSColors)
         {
-            // if background, go grey, else go white unless we have a cap (checked next)
+            // background: grey (Firestorm's); otherwise by the real rate - green 30 and over, amber 15 to 30, red under 15
             auto window = gViewerWindow ? gViewerWindow->getWindow() : nullptr;
             if ((window && !window->getVisible()) || !gFocusMgr.getAppHasFocus())
             {
@@ -644,21 +646,7 @@ void LLStatusBar::refresh()
             }
             else
             {
-                S32 vsync_freq{ -1 };
-                if (window)
-                {
-                    vsync_freq = window->getRefreshRate();
-                }
-
-                if (limit_fps_enabled && max_fps > 0)
-                {
-                    fps_color = (fps >= max_fps - 1) ? fps_limit_reached_color : fps_below_limit_color;
-                }
-                // use vsync if enabled and the freq is lower than the max_fps
-                if (vsync_enabled && vsync_freq > 0 && (!limit_fps_enabled || vsync_freq < (S32)max_fps))
-                {
-                    fps_color = (fps >= vsync_freq - 1) ? vsync_limit_reached_color : fps_below_limit_color;
-                }
+                fps_color = fps >= 30.f ? fps_good_color : (fps >= 15.f ? fps_fair_color : fps_poor_color);
             }
         }
 

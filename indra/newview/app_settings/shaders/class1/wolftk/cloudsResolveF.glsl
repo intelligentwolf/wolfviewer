@@ -51,31 +51,46 @@ uniform float varianceGamma;
 uniform float temporalAlpha;
 uniform vec2 jitterOffset;
 
-// [WolfViewer round 13] the trails round objects when the camera moves (Paul, 2026-10-13). temporalUpscale below keeps
-// a pixel's cloud history for 15 frames of 16 and rejects it only off screen (cloudsResolve.frag:63-118); a pixel an
-// object now covers keeps the cloud it showed when it was sky, clipped only against its 3 x 3 low-res neighbourhood
-// (varianceClipping, gamma 2), which at a silhouette holds both. The full-resolution scene depth says which surface a
-// pixel shows; the clouds pass now stores the surface its texel's ray stopped at (depthVelocity.a, 0 = the sky). A
-// pixel whose own texel saw another surface takes the first texel of its 3 x 3 ring that saw its own, and no history
-// (the history carried the other surface's clouds). WolfViewer's own rule; takram has no depth rejection here.
+// [WolfViewer 2026-10-16] THE WHITE BORDER ROUND OBJECTS (Paul: "sometimes we see like a white border round objects but i
+// think it might be clouds"; the trails round objects of round 13, 2026-10-13, are the same fault). The clouds are marched
+// at 1/4 x 1/4 of the pixels and temporalUpscale below rebuilds the full frame: each pixel takes a new value one frame in
+// 16 (its Bayer slot) and otherwise its reprojected history, clipped against the 5-tap neighbourhood of the low-res frame
+// (cloudsResolve.frag:63-118, varianceClipping gamma 2). That neighbourhood is +-1 low-res texel = +-4 screen pixels, so
+// at a silhouette it holds both the bright cloud/sky texels and the object's dark ones; a pixel an object now covers (the
+// object or the camera moved, an avatar sways) keeps the white it showed as sky, and the bilinear history fetch smears it
+// one more pixel in each frame of motion, until its own slot comes round 16 frames later. Over an object the clouds'
+// overlay should be ~0 (the march stops at the scene, cloudsF.glsl getRayDistanceToScene), so the leak is a white rim.
+// takram has no depth test here (stock Firestorm has no volumetric clouds: its 2D layer is drawn in the sky before the scene).
+//
+// The fix: which surface a pixel shows is known exactly from the full-resolution depth, and which surface each low-res
+// texel's ray stopped at this frame is in depthVelocity.a (cloudsF.glsl: the scene's view depth as a negative number, or
+// >= 0 over the sky). Where the 3 x 3 low-res neighbourhood shows only this pixel's surface, takram's resolve runs
+// unchanged. Where it straddles an edge, the clip box and the reprojection velocity come from the texels of this pixel's
+// own surface only, so the other surface's colour can neither be kept from the history nor pulled in by the clip.
+// (Round 13's attempt, switched off the same day, dropped the history outright wherever the pixel's own texel disagreed,
+// and its last form classed the sky by its own rule - anything past 0.95 x far - where the clouds pass calls only depth
+// >= 1 - 1e-7 the sky, so pixels the two classed differently lost their history every frame and the clouds re-formed
+// (Paul: "the clouds are STILL running very very fast"). Here the history is never dropped, only clipped, and both sides
+// use the clouds pass's own test, cloudsF.glsl getRayDistanceToScene.)
 uniform sampler2D depthBuffer;
 uniform float cameraNear;
 uniform float cameraFar;
 #wolf_include "wolftk/coreDepth.glsl"
-float wolfSceneDistance(const ivec2 coord) {
+// the view depth of the surface a full-resolution pixel shows, 0 = the sky (the clouds pass's test and depth read: DEPTH_PACKING
+// 3200 = .r, no log depth)
+float wolfSceneDepth(const ivec2 coord) {
   ivec2 size = textureSize(depthBuffer, 0);
   float depth = texelFetch(depthBuffer, clamp(coord, ivec2(0), size - ivec2(1)), 0).r;
-  if (depth >= 1.0 - 1e-7) return 0.0;   // nothing there: the sky
-  float d = linearizeDepth(reverseLogDepth(depth, cameraNear, cameraFar), cameraNear, cameraFar);
-  // [WolfViewer 2026-10-13] the viewer's sky is drawn AT the far clip, not at depth 1.0 exactly (the harness clears to
-  // 1.0), so a sky pixel read as a surface ~far away, every sky texel failed wolfSameSurface against the clouds' "0 = sky",
-  // and the history was dropped on every sky pixel every frame: the clouds were rebuilt from 1/16 of the pixels each
-  // frame and dissolved and re-formed in ~0.5 s (Paul's video 09:53). Anything at the far clip is the sky.
-  if (d >= 0.95 * cameraFar) return 0.0;
-  return d;
+  if (depth >= 1.0 - 1e-7) return 0.0;   // cloudsF.glsl getRayDistanceToScene: depth < 1 - 1e-7 is a surface
+  return linearizeDepth(reverseLogDepth(depth, cameraNear, cameraFar), cameraNear, cameraFar);
+}
+// the view depth of the surface a low-res texel's ray stopped at this frame, 0 = the sky (cloudsF.glsl outputDepthVelocity.a)
+float wolfTexelDepth(const vec4 depthVelocity) {
+  return max(-depthVelocity.a, 0.0);
 }
 bool wolfSameSurface(const float a, const float b) {
-  // both the sky, or both a surface within a factor of 2 (a ray distance against a view distance: a cosine apart)
+  // both the sky, or both a surface within a factor of 2 of each other's view depth: an avatar against the wall or ground
+  // just behind it is one surface here (the clouds' overlay over both is the same, ~0); an object against far land is not
   if (a <= 0.0 || b <= 0.0) return (a <= 0.0) == (b <= 0.0);
   return max(a, b) <= 2.0 * min(a, b);
 }
@@ -162,6 +177,7 @@ vec4 getClosestFragment(const ivec2 coord) {
 }
 
 // Source: three-geospatial packages/clouds/src/shaders/cloudsResolve.frag:63-118 temporalUpscale
+// [WolfViewer 2026-10-16] with the depth-aware neighbourhood at edges (the note above wolfSceneDepth)
 void temporalUpscale(
   const ivec2 coord,
   const ivec2 lowResCoord,
@@ -169,27 +185,15 @@ void temporalUpscale(
   out vec4 outputColor,
   out float outputShadowLength
 ) {
-  // [WolfViewer round 13] the depth-consistent texel (wolfSceneDistance above)
-  float sceneD = wolfSceneDistance(coord);
-  ivec2 dvSize = textureSize(depthVelocityBuffer, 0);
-  ivec2 pick = lowResCoord;
-  // [WolfViewer 2026-10-13] the round-13 depth rejection is OFF: in the viewer it dropped the cloud history on sky
-  // pixels and the clouds re-formed every frame (Paul: "the clouds are STILL running very very fast"). takram's own
-  // resolve (cloudsResolve.frag:63-118) has no depth rejection; back to it.
-  bool ownOk = true;
-  if (!ownOk) {
-    for (int i = 0; i < 9; ++i) {
-      ivec2 c = clamp(lowResCoord + neighborOffsets[i], ivec2(0), dvSize - ivec2(1));
-      if (wolfSameSurface(max(-texelFetch(depthVelocityBuffer, c, 0).a, 0.0), sceneD)) { pick = c; break; }   // .a: -(scene distance), or >= 0 over the sky (cloudsF.glsl)
-    }
-  }
-  vec4 currentColor = texelFetch(colorBuffer, pick, 0);
+  vec4 currentColor = texelFetch(colorBuffer, lowResCoord, 0);
   #ifdef SHADOW_LENGTH
-  vec4 currentShadowLength = vec4(texelFetch(shadowLengthBuffer, pick, 0).rgb, 1.0);
+  vec4 currentShadowLength = vec4(texelFetch(shadowLengthBuffer, lowResCoord, 0).rgb, 1.0);
   #endif // SHADOW_LENGTH
 
-  if (currentFrame || !ownOk) {
+  if (currentFrame) {
     // Use the texel just rendered without any accumulation.
+    // [WolfViewer] this frame the texel's ray went through this very pixel (the jitter, CloudsMaterial temporalJitter, puts
+    // it on the pixel whose Bayer slot this is), so it saw this pixel's own surface
     outputColor = currentColor;
     #ifdef SHADOW_LENGTH
     outputShadowLength = currentShadowLength.r;
@@ -197,13 +201,103 @@ void temporalUpscale(
     return;
   }
 
-  vec4 depthVelocity = getClosestFragment(lowResCoord);
+  // [WolfViewer 2026-10-16] which of the 3 x 3 texels saw this pixel's surface; the closest fragment (getClosestFragment,
+  // takram's smallest front depth) over all of them and over those alone. The fetches are clamped to the low-res frame where
+  // getClosestFragment's texelFetchOffset ran off it on the outermost ring (undefined there; most drivers return 0)
+  float sceneDepth = wolfSceneDepth(coord);
+  ivec2 lowResMax = textureSize(depthVelocityBuffer, 0) - ivec2(1);
+  vec4 closestAll = vec4(1e7, 0.0, 0.0, 0.0);
+  vec4 closestSame = vec4(1e7, 0.0, 0.0, 0.0);
+  int sameMask = 0;
+  int sameCount = 0;
+  for (int i = 0; i < 9; ++i) {
+    vec4 neighbor = texelFetch(depthVelocityBuffer, clamp(lowResCoord + neighborOffsets[i], ivec2(0), lowResMax), 0);
+    if (neighbor.r < closestAll.r) {
+      closestAll = neighbor;
+    }
+    if (wolfSameSurface(wolfTexelDepth(neighbor), sceneDepth)) {
+      sameMask |= 1 << i;
+      ++sameCount;
+      if (neighbor.r < closestSame.r) {
+        closestSame = neighbor;
+      }
+    }
+  }
+  // [WolfViewer 2026-10-16] THIN FEATURES: a surface thinner than the 4-pixel texels that no texel landed on this frame (a
+  // mast, rigging, a thin prim frame) has nothing of its own here - all 9 texels saw the sky or a far surface behind it.
+  // takram's resolve then gives it that other surface's clouds and haze (the overlay carries the EEP haze too, cloudsF.glsl
+  // wolfLLHaze), which paints sky-bright cloud over the mast in dashes, changing every frame as the Bayer slots come round.
+  // Paul 10-16: "the masts are flickering" (ship masts cut into dashes against the sky); Elisa Porter 10-15: thin prims
+  // "look glitched ... only on shared environment" (bright lines along stage frames). A NEAR surface has no cloud in front
+  // of it and next to no haze, so it gets no overlay at all. Within WOLF_THIN_NEAR_M (a design value: at 256 m the
+  // EEP/physical haze in front of an object is a few per cent, against the full sky value takram would give it); beyond
+  // that takram's resolve keeps running, so far thin objects still fade into the haze. The pixel's own Bayer slot (the
+  // currentFrame branch above) still takes its texel as it is, since that frame's ray went through this very pixel.
+  const float WOLF_THIN_NEAR_M = 256.0;
+  if (sameCount == 0 && sceneDepth > 0.0 && sceneDepth < WOLF_THIN_NEAR_M) {
+    outputColor = vec4(0.0);
+    #ifdef SHADOW_LENGTH
+    outputShadowLength = 0.0;
+    #endif // SHADOW_LENGTH
+    return;
+  }
+
+  // an edge: some texels saw this pixel's surface and some another. With none (a far feature thinner than the 4-pixel
+  // texels that no texel landed on this frame) there is nothing of this surface to clip to, and takram's resolve runs as it is.
+  bool edge = sameCount > 0 && sameCount < 9;
+
+  // the clip box of this pixel's surface at an edge: the mean and deviation of its own texels (varianceClipping's moments,
+  // texelFetch'd as cloudsResolve.frag's getClosestFragment fetches); its mean is also this surface's current value, the
+  // nearest-surface upsample used where takram uses the pixel's own texel
+  vec4 sameMean = currentColor;
+  vec4 sameMin = currentColor;
+  vec4 sameMax = currentColor;
+  #ifdef SHADOW_LENGTH
+  vec4 sameShadowMean = currentShadowLength;
+  vec4 sameShadowMin = currentShadowLength;
+  vec4 sameShadowMax = currentShadowLength;
+  #endif // SHADOW_LENGTH
+  if (edge) {
+    vec4 moment1 = vec4(0.0);
+    vec4 moment2 = vec4(0.0);
+    #ifdef SHADOW_LENGTH
+    vec4 shadowMoment1 = vec4(0.0);
+    vec4 shadowMoment2 = vec4(0.0);
+    #endif // SHADOW_LENGTH
+    for (int i = 0; i < 9; ++i) {
+      if ((sameMask & (1 << i)) != 0) {
+        ivec2 c = clamp(lowResCoord + neighborOffsets[i], ivec2(0), lowResMax);
+        vec4 neighbor = texelFetch(colorBuffer, c, 0);
+        moment1 += neighbor;
+        moment2 += neighbor * neighbor;
+        #ifdef SHADOW_LENGTH
+        vec4 shadowNeighbor = vec4(texelFetch(shadowLengthBuffer, c, 0).rgb, 1.0);
+        shadowMoment1 += shadowNeighbor;
+        shadowMoment2 += shadowNeighbor * shadowNeighbor;
+        #endif // SHADOW_LENGTH
+      }
+    }
+    // Source: three-geospatial packages/clouds/src/shaders/varianceClipping.glsl:42-68 varianceClipping (the box from the moments)
+    float N = float(sameCount);
+    sameMean = moment1 / N;
+    vec4 deviation = sqrt(max(moment2 / N - sameMean * sameMean, 0.0)) * varianceGamma;
+    sameMin = sameMean - deviation;
+    sameMax = sameMean + deviation;
+    #ifdef SHADOW_LENGTH
+    sameShadowMean = shadowMoment1 / N;
+    vec4 shadowDeviation = sqrt(max(shadowMoment2 / N - sameShadowMean * sameShadowMean, 0.0)) * varianceGamma;
+    sameShadowMin = sameShadowMean - shadowDeviation;
+    sameShadowMax = sameShadowMean + shadowDeviation;
+    #endif // SHADOW_LENGTH
+  }
+
+  vec4 depthVelocity = edge ? closestSame : closestAll;
   vec2 velocity = depthVelocity.gb;
   vec2 prevUv = vUv - velocity;
   if (prevUv.x < 0.0 || prevUv.x > 1.0 || prevUv.y < 0.0 || prevUv.y > 1.0) {
-    outputColor = currentColor;
+    outputColor = edge ? sameMean : currentColor;
     #ifdef SHADOW_LENGTH
-    outputShadowLength = currentShadowLength.r;
+    outputShadowLength = edge ? sameShadowMean.r : currentShadowLength.r;
     #endif // SHADOW_LENGTH
     return; // Rejection
   }
@@ -213,8 +307,12 @@ void temporalUpscale(
   // clouds.
   // vec4 historyColor = textureCatmullRom(colorHistoryBuffer, prevUv);
   vec4 historyColor = texture(colorHistoryBuffer, prevUv);
-  vec4 clippedColor = varianceClipping(colorBuffer, vUv, currentColor, historyColor, varianceGamma);
-  outputColor = clippedColor;
+  if (edge) {
+    // Source: varianceClipping.glsl:42-68 (its last line, with this surface's box)
+    outputColor = clipAABB(clamp(sameMean, sameMin, sameMax), historyColor, sameMin, sameMax);
+  } else {
+    outputColor = varianceClipping(colorBuffer, vUv, currentColor, historyColor, varianceGamma);
+  }
 
   #ifdef SHADOW_LENGTH
   // Sampling the shadow length history using scene depth doesn't make much
@@ -222,13 +320,18 @@ void temporalUpscale(
   // resolves the edges of scene objects.
   // vec4 historyShadowLength = vec4(textureCatmullRom(shadowLengthHistoryBuffer, prevUv).rgb, 1.0);
   vec4 historyShadowLength = vec4(texture(shadowLengthHistoryBuffer, prevUv).rgb, 1.0);
-  vec4 clippedShadowLength = varianceClipping(
-    shadowLengthBuffer,
-    vUv,
-    currentShadowLength,
-    historyShadowLength,
-    varianceGamma
-  );
+  vec4 clippedShadowLength;
+  if (edge) {
+    clippedShadowLength = clipAABB(clamp(sameShadowMean, sameShadowMin, sameShadowMax), historyShadowLength, sameShadowMin, sameShadowMax);
+  } else {
+    clippedShadowLength = varianceClipping(
+      shadowLengthBuffer,
+      vUv,
+      currentShadowLength,
+      historyShadowLength,
+      varianceGamma
+    );
+  }
   outputShadowLength = clippedShadowLength.r;
   #endif // SHADOW_LENGTH
 }

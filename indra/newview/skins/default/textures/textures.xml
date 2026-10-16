@@ -181,6 +181,7 @@ with the same filename but different name
   <texture name="Command_MktListings_Icon"  file_name="toolbar_icons/mktlistings.png"  preload="true" />
   <texture name="Command_MiniCart_Icon"     file_name="toolbar_icons/mini_cart.png"    preload="true" />
   <texture name="Command_MiniMap_Icon"      file_name="toolbar_icons/mini_map.png"     preload="true" />
+  <texture name="Command_WolfCompass_Icon"  file_name="toolbar_icons/wolf_compass.png" preload="true" />   <!-- [WOLF COMPASS 2026-10-16] compass rose -->
   <texture name="Command_Move_Icon"         file_name="toolbar_icons/move.png"         preload="true" />
   <texture name="Command_Environments_Icon" file_name="toolbar_icons/environments.png" preload="true" />
   <texture name="Command_Omnifilter_Icon"   file_name="toolbar_icons/omnifilter.png"   preload="true" />     <!-- FS:Zi: Omnifilter -->

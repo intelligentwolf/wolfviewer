@@ -23,13 +23,16 @@
      tool_tip="Type part of a name, region or estate and press Enter." />
     <check_box follows="left|top" height="18" label="Show NPCs" layout="topleft" left="280" name="show_npcs" top="74" width="100"
      tool_tip="NPCs (bots, greeters) are hidden unless this is ticked." />
+    <!-- [WATCHWOLF 2026-10-16] Paul: foreign-grid visitors "are the people that need ejecting/banning". -->
+    <check_box follows="left|top" height="18" label="Foreign only" layout="topleft" left="520" name="foreign_only" top="74" width="92"
+     tool_tip="Show only visitors from other grids (hypergrid). They are marked Foreign, in amber." />
     <text follows="left|top" height="16" layout="topleft" left="390" name="per_label" top="76" width="60">Per page</text>
     <combo_box follows="left|top" height="22" layout="topleft" left="450" name="per_page" top="72" width="60">
         <combo_box.item label="25" name="p25" value="25" />
         <combo_box.item label="50" name="p50" value="50" />
         <combo_box.item label="100" name="p100" value="100" />
     </combo_box>
-    <button follows="right|top" height="22" label="Refresh" layout="topleft" left="610" name="refresh" top="72" width="80" tool_tip="Look again now (it also refreshes every 20 seconds)." />
+    <button follows="right|top" height="22" label="Refresh" layout="topleft" left="616" name="refresh" top="72" width="74" tool_tip="Look again now (it also refreshes every 20 seconds)." />
     <!-- [WATCHWOLF 2026-10-10] gods only (shown when the site says isGod): Paul "watchwolf though is showing all
          regions not just my estates" -> "yes i'd like that". Setting WolfWatchWolfMineOnly. -->
     <check_box follows="left|top" height="18" label="Only regions I own or manage" layout="topleft" left="520" name="mine_only" top="48" visible="false" width="170"

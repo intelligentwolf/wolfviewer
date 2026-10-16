@@ -172,7 +172,7 @@ in GroundIrradiance vGroundIrradiance;
 in CloudsIrradiance vCloudsIrradiance;
 
 layout(location = 0) out vec4 outputColor;
-layout(location = 1) out vec4 outputDepthVelocity;   // [WolfViewer round 13] .a = the scene distance the ray stopped at (0 = sky)
+layout(location = 1) out vec4 outputDepthVelocity;   // [WolfViewer round 13 / 2026-10-16] .a = the view Z of the surface the ray stopped at (< 0), or >= 0 over the sky (main)
 #ifdef SHADOW_LENGTH
 layout(location = 2) out float outputShadowLength;
 #endif // SHADOW_LENGTH
@@ -1429,7 +1429,7 @@ void main() {
       prevClip /= prevClip.w;
       vec2 prevUv = prevClip.xy * 0.5 + 0.5;
       vec2 velocity = vUv - prevUv;
-      depthVelocity = vec4(frontDepth, velocity, rayDistanceToScene > 0.0 ? -rayDistanceToScene : wolfCloudAlpha);   // [WolfViewer round 13 / 2026-10-13: .a = -(the scene's distance), or the clouds' own opacity over the sky (wolfenvironmentrender.cpp measureCloudCover)]
+      depthVelocity = vec4(frontDepth, velocity, rayDistanceToScene > 0.0 ? sceneViewZ : wolfCloudAlpha);   // [WolfViewer round 13 / 2026-10-13 / 2026-10-16: .a = the scene's view Z (negative: -(view depth), the quantity cloudsResolveF.glsl wolfSceneDepth reads from the full-res depth), or the clouds' own opacity over the sky (wolfenvironmentrender.cpp measureCloudCover)]
     }
   }
 
@@ -1453,7 +1453,7 @@ void main() {
     prevClip /= prevClip.w;
     vec2 prevUv = prevClip.xy * 0.5 + 0.5;
     vec2 velocity = vUv - prevUv;
-    depthVelocity = vec4(frontDepth, velocity, rayDistanceToScene > 0.0 ? -rayDistanceToScene : wolfCloudAlpha);   // [WolfViewer round 13 / 2026-10-13: .a = -(the scene's distance), or the clouds' own opacity over the sky (wolfenvironmentrender.cpp measureCloudCover)]
+    depthVelocity = vec4(frontDepth, velocity, rayDistanceToScene > 0.0 ? sceneViewZ : wolfCloudAlpha);   // [WolfViewer round 13 / 2026-10-13 / 2026-10-16: .a = the scene's view Z (negative: -(view depth), the quantity cloudsResolveF.glsl wolfSceneDepth reads from the full-res depth), or the clouds' own opacity over the sky (wolfenvironmentrender.cpp measureCloudCover)]
   }
 
   #ifdef DEBUG_SHOW_FRONT_DEPTH

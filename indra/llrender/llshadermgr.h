@@ -406,6 +406,7 @@ public:
         WOLF_LIGHT_H,                       // "wolf_light_h" the horizontal illuminance / pi, pre-exposed
         WOLF_TK_HIGHER_ORDER_TEX,           // "higher_order_scattering_texture" [WOLF ENV TAKRAM 2026-10-12] three-geospatial AtmosphereMaterialBase.ts:95
         WOLF_TK_SHADOW_BUFFER,              // "shadowBuffer" three-geospatial aerialPerspectiveEffect.frag:59 / clouds.frag:73 (sampler2DArray)
+        WOLF_TERRAIN_LAYERS,                // "wolfTerrainLayers" [WOLF TERRAIN TEXTURES 2026-10-16] wolfterrainlayers.cpp (sampler2DArray)
         // </WolfViewer>
         END_RESERVED_UNIFORMS
     } eGLSLReservedUniforms;

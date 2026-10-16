@@ -508,4 +508,19 @@
      name="apply_btn"
      top="430"
      width="100" />
+<!-- <WolfViewer 2026-10-16> Wolf terrain textures: eight layers up to 4096 m (wolfterrainlayers.cpp,
+     floater_wolf_terrain_textures.xml). Shown on Wolf Territories only (LLPanelRegionTerrainInfo::refreshFromRegion). -->
+    <button
+     follows="left|top"
+     height="20"
+     label="Wolf terrain textures..."
+     layout="topleft"
+     left="10"
+     name="wolf_terrain_textures_btn"
+     tool_tip="Eight terrain textures up to 4096 m for WolfViewer and WolfStorm, for high mountains (other viewers keep the four above)"
+     top="430"
+     visible="false"
+     width="180">
+        <button.commit_callback function="Floater.Show" parameter="wolf_terrain_textures" />
+    </button>
 </panel>

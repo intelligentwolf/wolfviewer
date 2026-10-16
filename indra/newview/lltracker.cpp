@@ -61,6 +61,12 @@
 #include "llworld.h"
 #include "llworldmapview.h"
 #include "llviewercontrol.h"
+// <WolfViewer 2026-10-16> teleport beacon timeout
+#include "llframetimer.h"
+#include "llviewerparcelmgr.h"
+#include "llviewerregion.h"
+#include "llworldmap.h"
+// </WolfViewer>
 
 
 const F32 DESTINATION_REACHED_RADIUS    = 3.0f;
@@ -90,12 +96,21 @@ LLTracker::LLTracker()
     mLandmarkHasBeenVisited(false),
     mTrackedLocationName( "" ),
     mIsTrackingLocation(false),
-    mHasReachedLocation(false)
+    mHasReachedLocation(false),
+    // <WolfViewer 2026-10-16> teleport beacon timeout
+    mTeleportBeaconArmed(false),
+    mTeleportBeaconDeadline(0.0),
+    mTeleportBeaconStatus(TRACKING_NOTHING),
+    mTeleportBeaconLocationType(LOCATION_NOTHING),
+    mTeleportBeaconRegionCheckPending(false)
+    // </WolfViewer>
 { }
 
 
 LLTracker::~LLTracker()
 {
+    // <WolfViewer 2026-10-16/> safe even if LLViewerParcelMgr (the signal owner) is already gone
+    mTeleportFinishedConnection.disconnect();
     purgeBeaconText();
 }
 
@@ -113,6 +128,12 @@ void LLTracker::drawHUDArrow()
     if (!LLWorld::instanceExists())
     {
         return;
+    }
+
+    // <WolfViewer 2026-10-16/> Also checked here so the HUD arrow goes with the beam.
+    if (sTrackerp)
+    {
+        sTrackerp->checkTeleportBeaconTimeout();
     }
 
     static LLCachedControl<bool> render_beacon(gSavedSettings, "RenderTrackerBeacon", true);
@@ -173,6 +194,8 @@ void LLTracker::render3D()
     //           and also use LLCachedControl instead of the slow
     //           gSavedSettings.getBOOL() call.
     static LLCachedControl<bool> renderTrackerBeacon(gSavedSettings, "RenderTrackerBeacon");
+    // <WolfViewer 2026-10-16/> Remove a teleport's leftover beacon once its time is up.
+    instance()->checkTeleportBeaconTimeout();
     if (!instance()->isTracking(NULL) || !gFloaterWorldMap || !renderTrackerBeacon)
     {
         return;
@@ -339,6 +362,7 @@ void LLTracker::trackAvatar( const LLUUID& avatar_id, const std::string& name )
     instance()->mTrackingStatus = TRACKING_AVATAR;
     instance()->mLabel = name;
     instance()->mToolTip = "";
+    instance()->disarmTeleportBeaconIfRetargeted();   // <WolfViewer 2026-10-16/>
 }
 
 
@@ -355,6 +379,10 @@ void LLTracker::trackLandmark( const LLUUID& asset_id, const LLUUID& item_id, co
     instance()->mTrackingStatus = TRACKING_LANDMARK;
     instance()->mLabel = name;
     instance()->mToolTip = "";
+    // <WolfViewer 2026-10-16>
+    instance()->disarmTeleportBeaconIfRetargeted();
+    instance()->connectTeleportFinished();
+    // </WolfViewer>
 }
 
 
@@ -371,6 +399,10 @@ void LLTracker::trackLocation(const LLVector3d& pos_global, const std::string& f
     instance()->mTrackingLocationType = location_type;
     instance()->mLabel = full_name;
     instance()->mToolTip = tooltip;
+    // <WolfViewer 2026-10-16>
+    instance()->disarmTeleportBeaconIfRetargeted();
+    instance()->connectTeleportFinished();
+    // </WolfViewer>
 }
 
 
@@ -767,6 +799,11 @@ void LLTracker::stopTrackingAvatar(bool clear_ui)
 
 void LLTracker::stopTrackingLandmark(bool clear_ui)
 {
+    // <WolfViewer 2026-10-16/> a stopped landmark beacon no longer has a countdown
+    if (mTeleportBeaconStatus == TRACKING_LANDMARK)
+    {
+        mTeleportBeaconArmed = false;
+    }
     purgeBeaconText();
     mTrackedLandmarkAssetID.setNull();
     mTrackedLandmarkItemID.setNull();
@@ -782,6 +819,11 @@ void LLTracker::stopTrackingLandmark(bool clear_ui)
 
 void LLTracker::stopTrackingLocation(bool clear_ui, bool dest_reached)
 {
+    // <WolfViewer 2026-10-16/> a stopped location beacon no longer has a countdown
+    if (mTeleportBeaconStatus == TRACKING_LOCATION)
+    {
+        mTeleportBeaconArmed = false;
+    }
     purgeBeaconText();
     mTrackedLocationName.assign("");
     mIsTrackingLocation = false;
@@ -982,3 +1024,158 @@ void LLTracker::purgeBeaconText()
     }
 }
 
+// <WolfViewer 2026-10-16> Teleport beacon timeout.
+//
+// Which beam: a map / SLURL / landmark teleport tracks its destination with trackLocation()
+// or trackLandmark() BEFORE the teleport (LLFloaterWorldMap::teleport() teleports to the
+// tracked position; LLURLDispatcherImpl::regionHandleCallback() and the "teleport" LLSD
+// handler call trackLocation() right after teleportViaLocation()). render3D() keeps drawing
+// that beacon until the avatar comes within DESTINATION_REACHED_RADIUS of it, and
+// process_agent_movement_complete() only drops it if the arrival is within 5 m. On OpenSim the
+// region's landing point / telehub usually puts you further away than that, so the beam
+// stays standing on the ground indefinitely.
+//
+// What counts as the teleport's beacon: whatever location (map, SLURL or event) or landmark
+// beacon is tracked at the moment a teleport finishes, provided its target lies in the region
+// we arrived in. A beacon tracked in some other region was set for something else and is
+// left alone, as are avatar tracking and object (LOCATION_ITEM / LOCATION_AVATAR) beacons,
+// which follow a thing rather than mark a destination. Tracking anything different after
+// arriving (or stopping the beacon) cancels the countdown, so a beacon the user sets from the
+// map after arriving is never timed out. The same target being re-tracked (the world map
+// re-tracks the landmark on every inventory change) keeps the countdown. Known edge: a beacon
+// the user sets from the map while the teleport is still in progress is tracked at arrival
+// and so is timed out like the teleport's own (accepted: a window of a few seconds).
+
+void LLTracker::connectTeleportFinished()
+{
+    if (mTeleportFinishedConnection.connected())
+    {
+        return;
+    }
+    // Source: llviewerparcelmgr.cpp LLViewerParcelMgr::onTeleportFinished() / processParcelProperties()
+    // - the signal fires once the teleport has finished (local and inter-region alike), the same
+    // signal LLAgent::handleTeleportFinished() uses (llagent.cpp).
+    mTeleportFinishedConnection = LLViewerParcelMgr::getInstance()->setTeleportFinishedCallback(
+        [](const LLVector3d&, const bool&)
+        {
+            if (sTrackerp)
+            {
+                sTrackerp->onTeleportFinished();
+            }
+        });
+}
+
+void LLTracker::onTeleportFinished()
+{
+    mTeleportBeaconArmed = false;
+
+    static LLCachedControl<F32> beacon_seconds(gSavedSettings, "WolfTeleportBeaconSeconds", 30.f);
+    const F32 seconds = beacon_seconds;
+    if (seconds <= 0.f)
+    {
+        return;     // 0 = old behaviour: the beacon stays until you reach it
+    }
+
+    bool has_target_pos = false;
+    if (mTrackingStatus == TRACKING_LOCATION && mIsTrackingLocation
+        && (mTrackingLocationType == LOCATION_NOTHING || mTrackingLocationType == LOCATION_EVENT))
+    {
+        has_target_pos = true;
+    }
+    else if (mTrackingStatus == TRACKING_LANDMARK && mTrackedLandmarkAssetID.notNull())
+    {
+        // Before the landmark asset arrives the position is not known yet (cacheLandmarkPosition());
+        // the beacon is not drawn then, but it would be once the asset lands. It is armed now and
+        // the region check is done by checkTeleportBeaconTimeout() as soon as the position is known.
+        has_target_pos = mHasLandmarkPosition;
+    }
+    else
+    {
+        return;
+    }
+
+    if (has_target_pos)
+    {
+        LLViewerRegion* regionp = gAgent.getRegion();
+        if (!regionp || !regionp->pointInRegionGlobal(mTrackedPositionGlobal))
+        {
+            return;     // a beacon somewhere else - not this teleport's destination
+        }
+    }
+
+    mTeleportBeaconStatus       = mTrackingStatus;
+    mTeleportBeaconLocationType = mTrackingLocationType;
+    mTeleportBeaconPosGlobal    = mTrackedPositionGlobal;
+    mTeleportBeaconLandmarkID   = mTrackedLandmarkAssetID;
+    mTeleportBeaconDeadline     = LLFrameTimer::getTotalSeconds() + (F64)seconds;
+    mTeleportBeaconRegionCheckPending = !has_target_pos;
+    mTeleportBeaconArmed        = true;
+}
+
+bool LLTracker::trackingTeleportBeaconTarget() const
+{
+    if (mTrackingStatus != mTeleportBeaconStatus)
+    {
+        return false;
+    }
+    if (mTrackingStatus == TRACKING_LOCATION)
+    {
+        // X/Y only: drawHUDArrow() rewrites the tracked Z every frame (clamped to land + 1.5 m),
+        // so an exact LLVector3d compare would fail for the very beacon that was armed.
+        return mIsTrackingLocation
+            && mTrackingLocationType == mTeleportBeaconLocationType
+            && mTrackedPositionGlobal.mdV[VX] == mTeleportBeaconPosGlobal.mdV[VX]
+            && mTrackedPositionGlobal.mdV[VY] == mTeleportBeaconPosGlobal.mdV[VY];
+    }
+    if (mTrackingStatus == TRACKING_LANDMARK)
+    {
+        return mTrackedLandmarkAssetID == mTeleportBeaconLandmarkID;
+    }
+    return false;
+}
+
+void LLTracker::disarmTeleportBeaconIfRetargeted()
+{
+    if (mTeleportBeaconArmed && !trackingTeleportBeaconTarget())
+    {
+        mTeleportBeaconArmed = false;
+    }
+}
+
+void LLTracker::checkTeleportBeaconTimeout()
+{
+    if (!mTeleportBeaconArmed)
+    {
+        return;
+    }
+    // A landmark whose position was not known at arrival: once it is, keep the countdown only
+    // if the landmark is in the region we arrived in (same rule as onTeleportFinished()).
+    if (mTeleportBeaconRegionCheckPending && mTeleportBeaconStatus == TRACKING_LANDMARK
+        && mTrackingStatus == TRACKING_LANDMARK && mHasLandmarkPosition)
+    {
+        mTeleportBeaconRegionCheckPending = false;
+        LLViewerRegion* regionp = gAgent.getRegion();
+        if (!regionp || !regionp->pointInRegionGlobal(mTrackedPositionGlobal))
+        {
+            mTeleportBeaconArmed = false;
+            return;
+        }
+    }
+    if (LLFrameTimer::getTotalSeconds() < mTeleportBeaconDeadline)
+    {
+        return;
+    }
+    if (!gFloaterWorldMap)
+    {
+        return;     // stopTracking*() need the world map floater; try again next frame
+    }
+    mTeleportBeaconArmed = false;
+    if (trackingTeleportBeaconTarget())
+    {
+        // Same calls as FSDisableBeaconAfterTeleport (llviewermessage.cpp
+        // process_agent_movement_complete()), only WolfTeleportBeaconSeconds later, not at once.
+        stopTrackingAll(true);
+        LLWorldMap::getInstance()->cancelTracking();
+    }
+}
+// </WolfViewer>

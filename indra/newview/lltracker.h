@@ -38,6 +38,8 @@
 #include "lluuid.h"
 #include "v3dmath.h"
 
+#include <boost/signals2/connection.hpp>   // <WolfViewer 2026-10-16/> teleport beacon timeout
+
 class LLHUDText;
 
 
@@ -129,6 +131,15 @@ protected:
     void cacheLandmarkPosition();
     void purgeBeaconText();
 
+    // <WolfViewer 2026-10-16> Teleport beacon timeout: the beacon a teleport leaves behind
+    // (map / SLURL / landmark destination) is removed WolfTeleportBeaconSeconds after arrival.
+    void connectTeleportFinished();
+    void onTeleportFinished();
+    void disarmTeleportBeaconIfRetargeted();
+    bool trackingTeleportBeaconTarget() const;
+    void checkTeleportBeaconTimeout();
+    // </WolfViewer>
+
 protected:
     ETrackingStatus         mTrackingStatus;
     ETrackingLocationType   mTrackingLocationType;
@@ -153,6 +164,17 @@ protected:
     std::string             mTrackedLocationName;
     bool                    mIsTrackingLocation;
     bool                    mHasReachedLocation;
+
+    // <WolfViewer 2026-10-16> Teleport beacon timeout (see onTeleportFinished()).
+    boost::signals2::connection mTeleportFinishedConnection;
+    bool                    mTeleportBeaconArmed;
+    F64                     mTeleportBeaconDeadline;    // LLFrameTimer::getTotalSeconds() time
+    ETrackingStatus         mTeleportBeaconStatus;      // TRACKING_LOCATION or TRACKING_LANDMARK
+    ETrackingLocationType   mTeleportBeaconLocationType;
+    LLVector3d              mTeleportBeaconPosGlobal;   // location target
+    LLUUID                  mTeleportBeaconLandmarkID;  // landmark target (asset id)
+    bool                    mTeleportBeaconRegionCheckPending; // landmark position unknown at arrival
+    // </WolfViewer>
 };
 
 

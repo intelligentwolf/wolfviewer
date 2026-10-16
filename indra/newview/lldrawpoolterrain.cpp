@@ -67,6 +67,7 @@ static LLGLSLShader* sShader = NULL;
 #include "llenvironment.h"
 #include "wolfoceanfft.h"
 #include "wolfterrainpaint.h"   // [TERRAIN PAINT 2026-09-10]
+#include "wolfterrainlayers.h"  // [WOLF TERRAIN TEXTURES 2026-10-16]
 #include "wolfweather.h"   // <WolfViewer 2026-09-18/> snow cover on the terrain
 extern bool gCubeSnapshot;   // Source: lldrawpoolwater.cpp:56 — the same extern the water pool uses
 static void wolf_bind_caustics(LLGLSLShader* shader, LLViewerRegion* regionp)
@@ -389,7 +390,11 @@ void LLDrawPoolTerrain::renderFullShader()
     // Hack! Get the region that this draw pool is rendering from!
     LLViewerRegion *regionp = mDrawFace[0]->getDrawable()->getVObj()->getRegion();
     LLVLComposition *compp = regionp->getComposition();
-    const bool use_textures = !use_local_materials && (compp->getMaterialType() == LLTerrainMaterials::Type::TEXTURE);
+    // <WolfViewer 2026-10-16> A region with Wolf terrain textures (wolfterrainlayers.cpp) draws through
+    // the texture shader, whose wolfLayerGround() takes the ground from its eight layers, whatever
+    // the region's own terrain type. The local-materials debug override still wins.
+    const bool wolf_layers = !use_local_materials && WolfTerrainLayers::instance().activeFor(regionp);
+    const bool use_textures = wolf_layers || (!use_local_materials && (compp->getMaterialType() == LLTerrainMaterials::Type::TEXTURE));
 
     if (use_textures)
     {
@@ -484,6 +489,7 @@ void LLDrawPoolTerrain::renderFullShaderTextures()
     }
     wolf_bind_caustics(shader, regionp);   // <WolfViewer 2026-09-06>
     WolfTerrainPaint::instance().bind(shader, regionp);
+    WolfTerrainLayers::instance().bind(shader, regionp);   // <WolfViewer 2026-10-16/> the eight Wolf layers, or wolf_layers_on = 0
     WolfWeather::instance().bindSnowCover(shader, regionp);   // <WolfViewer 2026-09-18/> snow on the ground   // [TERRAIN PAINT 2026-09-10] painted roads/tracks
     // </WolfViewer>
 
@@ -523,6 +529,7 @@ void LLDrawPoolTerrain::renderFullShaderTextures()
     drawLoop();
 
     WolfTerrainPaint::instance().unbind(sShader);
+    WolfTerrainLayers::instance().unbind(sShader);   // <WolfViewer 2026-10-16/>
     WolfWeather::instance().unbindSnowCover(sShader);   // <WolfViewer 2026-09-18/>   // [TERRAIN PAINT 2026-09-10]
     // Disable multitexture
     sShader->disableTexture(LLViewerShaderMgr::TERRAIN_ALPHARAMP);

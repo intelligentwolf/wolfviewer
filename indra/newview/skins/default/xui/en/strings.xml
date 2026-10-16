@@ -2741,6 +2741,8 @@ name="Command_360_Capture_Label">360° Snapshot</string>
   <string name="Command_Marketplace_Label">Marketplace</string>
   <string name="Command_MarketplaceListings_Label">Marketplace</string>
   <string name="Command_MiniMap_Label">Mini-map</string>
+  <!-- [WOLF COMPASS 2026-10-16] -->
+  <string name="Command_WolfCompass_Label">Compass</string>
   <string name="Command_Move_Label">Walk / run / fly</string>
   <string name="Command_People_Label">People</string>
   <string name="Command_Performance_Label">Graphics speed</string>
@@ -2834,6 +2836,7 @@ name="Command_360_Capture_Label">360° Snapshot</string>
   <string name="Command_Marketplace_Tooltip">Go shopping</string>
   <string name="Command_MarketplaceListings_Tooltip">Sell your creation</string>
   <string name="Command_MiniMap_Tooltip">Show nearby people (CTRL+SHIFT+M)</string>
+  <string name="Command_WolfCompass_Tooltip">Compass: which way is North, and which way you are moving</string>
   <string name="Command_Move_Tooltip">Moving your avatar</string>
   <string name="Command_People_Tooltip">Friends, groups, and nearby people (CTRL+SHIFT+A)</string>
   <string name="Command_Performance_Tooltip">Tune graphics settings</string>

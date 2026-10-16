@@ -921,6 +921,7 @@ set(viewer_SOURCE_FILES
     wolfobjectprops.cpp
     wolffloatermeshupload.cpp
     wolffloaterlagdetector.cpp
+    wolffloatercompass.cpp   # [WOLF COMPASS 2026-10-16]
     wolfdjaudio.cpp
     wolfcamerafx.cpp
     wolffx.cpp
@@ -974,6 +975,7 @@ set(viewer_SOURCE_FILES
     wolfairports.cpp
     wolflslcomplete.cpp
     wolfterrainpaint.cpp
+    wolfterrainlayers.cpp
     wolfcave.cpp
     wolfsurfcurl.cpp
     wolfmapglobe.cpp
@@ -1858,6 +1860,7 @@ set(viewer_HEADER_FILES
     wolfobjectprops.h
     wolffloatermeshupload.h
     wolffloaterlagdetector.h
+    wolffloatercompass.h   # [WOLF COMPASS 2026-10-16]
     wolfdjaudio.h
     wolfdjcapture.h
     wolfcamerafx.h
@@ -1914,6 +1917,7 @@ set(viewer_HEADER_FILES
     wolfairports.h
     wolflslcomplete.h
     wolfterrainpaint.h
+    wolfterrainlayers.h
     wolfcave.h
     wolfsurfcurl.h
     wolfmapglobe.h

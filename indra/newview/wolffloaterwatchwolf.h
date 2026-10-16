@@ -63,6 +63,7 @@ private:
     LLLineEditor* mFilter = nullptr;
     LLCheckBoxCtrl* mNpc = nullptr;
     LLCheckBoxCtrl* mMine = nullptr;    // gods only: their own regions, not the whole grid
+    LLCheckBoxCtrl* mForeign = nullptr; // <WolfViewer 2026-10-16/> only visitors from other grids (hypergrid)
     LLComboBox* mPer = nullptr;
     LLButton* mPrev = nullptr;
     LLButton* mNext = nullptr;

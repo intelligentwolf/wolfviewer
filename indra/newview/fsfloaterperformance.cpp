@@ -25,6 +25,8 @@
 
 #include "llviewerprecompiledheaders.h"
 #include "fsfloaterperformance.h"
+#include "llviewerdisplay.h"   // [WolfViewer 2026-10-16] wolf_real_fps
+#include "wolfenvironmentrender.h"   // [WolfViewer 2026-10-16] skyActive
 
 #include "llagent.h"
 #include "llagentcamera.h"
@@ -244,6 +246,12 @@ void FSFloaterPerformance::draw()
         LLStringUtil::format_map_t args;
 
         auto fps = LLTrace::get_frame_recording().getPeriodMedianPerSec(LLStatViewer::FPS, NUM_PERIODS);
+        // [WolfViewer 2026-10-16] Paul: "make the performance floaters show the correct figures as well if on wolf
+        // environment": under the Wolf sky the frames actually shown per second (llviewerdisplay.cpp wolf_real_fps)
+        if (WolfEnvironmentRender::skyActive() && wolf_real_fps() > 0.f)
+        {
+            fps = wolf_real_fps();
+        }
         getChild<LLTextBox>("fps_value")->setValue((S32)llround(fps));
 
         auto target_frame_time_ns = NANOS/(targetFPS==0?1:targetFPS);

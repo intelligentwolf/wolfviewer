@@ -27,6 +27,8 @@
 #ifndef LL_LLVIEWERDISPLAY_H
 #define LL_LLVIEWERDISPLAY_H
 
+#include "stdtypes.h"   // U64 gPresentedFrameCount (WolfViewer 2026-10-16)
+
 class LLPostProcess;
 
 void display_startup();
@@ -35,6 +37,12 @@ void display_cleanup();
 void display(bool rebuild = true, F32 zoom_factor = 1.f, int subfield = 0, bool for_snapshot = false);
 
 extern bool gDisplaySwapBuffers;
+// [WolfViewer 2026-10-16] frames actually presented (every swapBuffers in llviewerdisplay.cpp)
+extern U64 gPresentedFrameCount;
+// [WolfViewer 2026-10-16] the REAL frame rate: frames presented over the wall-clock time they took, the last ~1 s,
+// updated twice a second (0 until the first half second). The status bar shows it always; the performance floaters
+// show it under the Wolf environment (Paul: "make the performance floaters show the correct figures as well").
+F32 wolf_real_fps();
 extern bool gDepthDirty;
 extern bool gTeleportDisplay;
 extern LLFrameTimer gTeleportDisplayTimer;

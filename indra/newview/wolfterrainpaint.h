@@ -26,6 +26,7 @@
 #include "llpointer.h"
 #include "llsingleton.h"
 #include "lltool.h"
+#include "wolfterrainlayers.h"   // [WOLF TERRAIN TEXTURES 2026-10-16] Record::mWolf
 
 class LLButton;
 class LLCheckBoxCtrl;
@@ -128,6 +129,10 @@ public:
         bool mStored = false;
         Slot mTextures[SLOTS];
         std::vector<Stroke> mStrokes;
+        // [WOLF TERRAIN TEXTURES 2026-10-16] layout.wolfTextures (php/terrain_paint.php header),
+        // parsed by WolfTerrainLayers::parse; mHasWolf false = the region's own four textures.
+        bool mHasWolf = false;
+        WolfTerrainLayerSet mWolf;
     };
     /** The Build > Paint working copy of the agent region's record. */
     struct Edit
@@ -162,6 +167,10 @@ public:
     void idle();
     void refresh();
     const Record* current() const;
+    /** [WOLF TERRAIN TEXTURES 2026-10-16] The fetched record of any region in the world by handle, or null. */
+    const Record* recordFor(U64 handle) const;
+    /** [WOLF TERRAIN TEXTURES 2026-10-16] Store a region payload the service returned (WolfTerrainLayers save). */
+    void acceptRecord(const LLSD& region_payload);
     bool onGrid() const { return current() != nullptr; }
     bool fetching() const { return mFetching; }
     U64  fetchedFor() const { return mFetchedForHandle; }

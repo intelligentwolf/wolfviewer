@@ -346,8 +346,28 @@ WolfTerrainPaint::Record WolfTerrainPaint::parseRecord(const LLSD& r)
             Stroke st = parseStroke(s, ok);
             if (ok) rec.mStrokes.push_back(st);
         }
+        // [WOLF TERRAIN TEXTURES 2026-10-16] a stored value that does not parse is treated as
+        // absent, as php/terrain_paint.php wolf_textures_stored does.
+        if (r["layout"].has("wolfTextures"))
+        {
+            std::string err;
+            bool has = false;
+            if (WolfTerrainLayers::parse(r["layout"]["wolfTextures"], has, rec.mWolf, err)) rec.mHasWolf = has;
+        }
     }
     return rec;
+}
+
+const WolfTerrainPaint::Record* WolfTerrainPaint::recordFor(U64 handle) const
+{
+    auto it = mByHandle.find(handle);
+    return it == mByHandle.end() ? nullptr : &it->second;
+}
+
+void WolfTerrainPaint::acceptRecord(const LLSD& region_payload)
+{
+    Record rec = parseRecord(region_payload);
+    if (rec.mHandle) mByHandle[rec.mHandle] = rec;
 }
 
 // Source: wolfwavezones.cpp fetchCoro — the same adapter shape (getRawAndSuspend, JSON body).
@@ -418,6 +438,7 @@ void WolfTerrainPaint::fetchCoro(std::vector<U64> handles)
         mLiveStroke = false;
         mEdit.reset();
     }
+    WolfTerrainLayers::instance().onRecordsFetched(mFetchedForHandle);   // [WOLF TERRAIN TEXTURES 2026-10-16]
     mLastError.clear();
     mLastFetchAt = LLFrameTimer::getElapsedSeconds();
     LL_INFOS("WolfTerrainPaint") << "paint records for " << mByHandle.size() << " regions" << LL_ENDL;

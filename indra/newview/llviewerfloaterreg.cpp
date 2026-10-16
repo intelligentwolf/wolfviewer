@@ -108,11 +108,13 @@
 #include "wolffloatermeshupload.h"
 #include "wolffloaterphotoeffects.h"   // [PAINTERS 2026-09-20/]
 #include "wolffloaterlagdetector.h"   // [LAG DETECTOR 2026-09-29/]
+#include "wolffloatercompass.h"   // [WOLF COMPASS 2026-10-16/]
 #include "wolffloaterdrivecontrols.h"   // [WOLF DRIVE 2026-10-09/]
 #include "wolffloaterdj.h"            // [WOLF DJ 2026-10-04/]
 #include "wolffloaterdjplaylist.h"    // [WOLF DJ 2026-10-04/]
 #include "wolffloaterweatherreport.h"   // [JIMMY V9C 2026-10-10/]
 #include "wolfcave.h"                   // [WOLF CAVE 2026-10-12/] the Cave Builder
+#include "wolfterrainlayers.h"          // [WOLF TERRAIN TEXTURES 2026-10-16/]
 #include "wolffloatergraphicshelper.h"   // [GRAPHICS HELPER 2026-10-11/]
 #include "wolffloaterbuilder.h"   // [WOLF BUILDER 2026-10-13/]
 #include "wolffloaterenvironment.h"   // [WOLF ENV 2026-10-12/]
@@ -661,6 +663,7 @@ void LLViewerFloaterReg::registerFloaters()
     LLFloaterReg::add("wolf_mesh_upload", "floater_wolf_mesh_upload.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterMeshUpload>);
     LLFloaterReg::add("wolf_photo_effects", "floater_wolf_photo_effects.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterPhotoEffects>);   // [PAINTERS 2026-09-20/]
     LLFloaterReg::add("wolf_lag_detector", "floater_wolf_lag_detector.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterLagDetector>);   // [LAG DETECTOR 2026-09-29/]
+    LLFloaterReg::add("wolf_compass", "floater_wolf_compass.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterCompass>);   // [WOLF COMPASS 2026-10-16/] Victorian compass: North + course
     LLFloaterReg::add("wolf_drive_controls", "floater_wolf_drive_controls.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterDriveControls>);   // [WOLF DRIVE 2026-10-09/] wheel / pedal / gamepad setup
     LLFloaterReg::add("wolf_dj", "floater_wolf_dj.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterDJ>);   // [WOLF DJ 2026-10-04/]
     LLFloaterReg::add("wolf_dj_playlist", "floater_wolf_dj_playlist.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterDJPlaylist>);   // [WOLF DJ 2026-10-04/]
@@ -685,6 +688,7 @@ void LLViewerFloaterReg::registerFloaters()
     // the work, so the generic host is enough (the pattern at :581).
     LLFloaterReg::add("wolf_terrain_paint", "floater_wolf_terrain_paint.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<LLFloater>);
     LLFloaterReg::add("wolf_caves", "floater_wolf_caves.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterCaves>);   // [WOLF CAVE 2026-10-12/] Paint > Caves...
+    LLFloaterReg::add("wolf_terrain_textures", "floater_wolf_terrain_textures.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterTerrainLayers>);   // [WOLF TERRAIN TEXTURES 2026-10-16/] Region / Estate > Terrain
     LLFloaterReg::add("wolf_ai", "floater_wolf_ai.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<LLFloater>);
     // [AUTOCOMPLETE 2026-09-11] The LSL completion popup, driven by WolfLSLComplete.
     LLFloaterReg::add("wolf_lsl_complete", "floater_wolf_lsl_complete.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterLSLComplete>);

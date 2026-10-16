@@ -551,11 +551,13 @@ void WolfAurora::frameUpdate()
     // bound to some other export at link time, so it crashed the moment the first sweep was done and blending began
     // (GTX 1650 / driver 457.34 and Hydra's RTX 3060, ~1 s after the gate opened). It is fetched here as LL fetches the
     // rest of 1.4 (wglGetProcAddress, what GLH_EXT_GET_PROC_ADDRESS is on Windows: glh_genext.h); without it the table is rewritten instead of blended.
-    static PFNGLBLENDCOLORPROC s_blendColor =
+    // [2026-10-16] the pointer TYPE is per platform too: macOS builds with Apple's OpenGL/gl.h + LL's old GL/glext.h
+    // (llglheaders.h LL_DARWIN), which has no PFNGLBLENDCOLORPROC ("unknown type name" - the Mac CI build since
+    // 3725952c4d), while gl.h declares glBlendColor itself; so off Windows the type is glBlendColor's own.
 #if LL_WINDOWS
-        (PFNGLBLENDCOLORPROC)wglGetProcAddress("glBlendColor");
+    static PFNGLBLENDCOLORPROC s_blendColor = (PFNGLBLENDCOLORPROC)wglGetProcAddress("glBlendColor");
 #else
-        glBlendColor;
+    static decltype(&glBlendColor) s_blendColor = &glBlendColor;
 #endif
     const bool accumulate = sState.sweep > 0 && s_blendColor;   // the first sweep writes the table, the later ones blend
     if (++sState.part % parts == 0) ++sState.sweep;

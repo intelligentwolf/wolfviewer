@@ -972,6 +972,7 @@ void WolfFloaterTerrainLayers::onLayerTexture(S32 i)
         L.mS = 16.f;
     }
     L.mId = id;
+    turnOnForEdit(ed);
     WolfTerrainLayers::instance().editChanged();
     show();
     setStatus(llformat("Layer %d set — loading it for the ground.", i + 1), false);
@@ -986,6 +987,7 @@ void WolfFloaterTerrainLayers::onLayerValue(S32 i)
     L.mH = llclamp(mH[i]->get(), WolfTerrainLayers::MIN_H, WolfTerrainLayers::MAX_H);
     L.mB = llclamp(mB[i]->get(), WolfTerrainLayers::MIN_BLEND, WolfTerrainLayers::MAX_BLEND);
     L.mS = llclamp(mS[i]->get(), WolfTerrainLayers::MIN_TILE, WolfTerrainLayers::MAX_TILE);
+    turnOnForEdit(ed);
     WolfTerrainLayers::instance().editChanged();
     showValidation();
 }
@@ -997,6 +999,7 @@ void WolfFloaterTerrainLayers::onClearLayer(S32 i)
     if (!ed) return;
     ed->mSet.mLayers[i] = WolfTerrainLayerSet::Layer();
     if (ed->mSet.mCliff == i) ed->mSet.mCliff = -1;
+    turnOnForEdit(ed);
     WolfTerrainLayers::instance().editChanged();
     show();
     setStatus(llformat("Layer %d is not used now.", i + 1), false);
@@ -1010,6 +1013,7 @@ void WolfFloaterTerrainLayers::onCorner()
     {
         ed->mSet.mCorners[k] = llclamp(mCorner[k]->get(), -WolfTerrainLayers::MAX_CORNER, WolfTerrainLayers::MAX_CORNER);
     }
+    turnOnForEdit(ed);
     WolfTerrainLayers::instance().editChanged();
 }
 
@@ -1018,6 +1022,7 @@ void WolfFloaterTerrainLayers::onNoise()
     WolfTerrainLayers::Edit* ed = WolfTerrainLayers::instance().beginEdit();
     if (!ed) return;
     ed->mSet.mNoise = llclamp(mNoise->get(), 0.f, WolfTerrainLayers::MAX_NOISE);
+    turnOnForEdit(ed);
     WolfTerrainLayers::instance().editChanged();
 }
 
@@ -1026,8 +1031,21 @@ void WolfFloaterTerrainLayers::onCliff()
     WolfTerrainLayers::Edit* ed = WolfTerrainLayers::instance().beginEdit();
     if (!ed) return;
     ed->mSet.mCliff = mCliff->getValue().asInteger();
+    turnOnForEdit(ed);
     WolfTerrainLayers::instance().editChanged();
     showValidation();
+}
+
+// [2026-10-16] Paul saved Jotunheim's eight layers and got "JOTUNHEIM is back on its standard four terrain textures": a region
+// with no Wolf set opens with the box unticked while the window shows the eight defaults, so Save stored "off". Editing a
+// layer, or pressing Defaults, means "I want these": tick the box.
+void WolfFloaterTerrainLayers::turnOnForEdit(WolfTerrainLayers::Edit* ed)
+{
+    if (ed && !ed->mOn)
+    {
+        ed->mOn = true;
+        mOn->set(true);
+    }
 }
 
 void WolfFloaterTerrainLayers::onOn()
@@ -1045,6 +1063,7 @@ void WolfFloaterTerrainLayers::onDefaults()
     WolfTerrainLayers::Edit* ed = WolfTerrainLayers::instance().beginEdit();
     if (!ed) return;
     ed->mSet = WolfTerrainLayers::defaults(gAgent.getRegion());
+    turnOnForEdit(ed);
     WolfTerrainLayers::instance().editChanged();
     show();
     setStatus("High-mountain defaults filled in — previewing. Save to keep them.", false);
@@ -1063,6 +1082,12 @@ void WolfFloaterTerrainLayers::onSave()
     WolfTerrainLayers& wl = WolfTerrainLayers::instance();
     WolfTerrainLayers::Edit* ed = wl.edit();
     if (!ed) { setStatus("Nothing to save.", true); return; }
+    if (!ed->mOn && !ed->mHasBase)
+    {
+        // nothing stored and nothing to store: saying "back on its standard four" would only mislead
+        setStatus("Not saved: tick \"Use Wolf terrain textures on this region\" to turn them on.", true);
+        return;
+    }
     if (ed->mOn)
     {
         WolfTerrainLayers::Set v;

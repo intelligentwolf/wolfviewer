@@ -204,6 +204,7 @@ private:
     void onCorner();
     void onNoise();
     void onCliff();
+    void turnOnForEdit(WolfTerrainLayers::Edit* ed);
     void onOn();
     void onDefaults();
     void onRevert();

@@ -125,6 +125,35 @@
         "$ref": "#/$defs/ending"
       }
     },
+    "flow": {
+      "description": "The Studio's story map (WolfViewer page 3): where the author dragged each box, in chart units (its top left, x right, y down). Keyed \"b:<beat id>\" or \"e:<ending id>\"; a box with no entry is laid out automatically. Kept at the top level so a moved box does not count as an author's change of the beat itself (was_hash).",
+      "type": "object",
+      "maxProperties": 600,
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[be]:[a-z][a-z0-9_-]{0,47}$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "x",
+          "y"
+        ],
+        "properties": {
+          "x": {
+            "type": "number",
+            "minimum": -100000,
+            "maximum": 100000
+          },
+          "y": {
+            "type": "number",
+            "minimum": -100000,
+            "maximum": 100000
+          }
+        }
+      }
+    },
     "imports": {
       "description": "Where this pack came from, for the Studio's 'imported from' line. Never read by the runtime.",
       "type": "array",
@@ -1126,12 +1155,18 @@
           "$ref": "#/$defs/uuidOrEmpty"
         },
         "look": {
-          "description": "appearance: a notecard ASSET holding the LLSD-XML appearance that osNpcSaveAppearance writes (OSSL_Api.cs:2950-2964 reads it with OSDParser.DeserializeLLSDXml + AvatarAppearance.Unpack). Empty = the default avatar (NPCModule).",
+          "description": "appearance: a notecard ASSET holding the LLSD-XML appearance that osNpcSaveAppearance writes (OSSL_Api.cs:2950-2964 reads it with OSDParser.DeserializeLLSDXml + AvatarAppearance.Unpack). Empty = the grid's standard look (the region hands: hello defaultAppearance, else the NPC module's default avatar). dressedBy: the display name of whoever last gave this character their look through a look pad or 'Use what I'm wearing' (written by the brain). standard: true while the character wears the standard look (written by the brain when the region spawns it with no appearance; cleared when a look is given).",
           "type": "object",
           "additionalProperties": false,
           "properties": {
             "appearance": {
               "$ref": "#/$defs/uuidOrEmpty"
+            },
+            "dressedBy": {
+              "$ref": "#/$defs/text64"
+            },
+            "standard": {
+              "type": "boolean"
             }
           }
         },
@@ -3604,6 +3639,12 @@
             },
             "appearance": {
               "$ref": "#/$defs/uuidOrEmpty"
+            },
+            "dressedBy": {
+              "$ref": "#/$defs/text64"
+            },
+            "standard": {
+              "type": "boolean"
             },
             "cast": {
               "$ref": "#/$defs/id"

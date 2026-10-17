@@ -23,7 +23,6 @@
 #include "lllocalcliprect.h"
 #include "llrender.h"
 #include "lltooltip.h"
-#include "llviewercontrol.h"
 #include "llviewerwindow.h"
 #include "llweb.h"
 #include "wolffloateradventurestudio.h"
@@ -36,7 +35,6 @@ using namespace WolfGameDraw;
 
 namespace
 {
-    const LLColor4 OK_INK(0.290f, 0.871f, 0.502f, 1.f);       // #4ade80, as the Studio
     LLColor4 fade(const LLColor4& c, F32 a) { return LLColor4(c.mV[VRED], c.mV[VGREEN], c.mV[VBLUE], c.mV[VALPHA] * a); }
 
     // The website guide (gridmanager/wolfstoryguide.php ?p=<slug>; the slugs are wsg_pages() in wolfstoryguide_lib.php).
@@ -105,17 +103,23 @@ namespace
           "The assistant gives you ideas only you see.", "Paste a short story, 3 acts, Get a quote.", "import-export" },
         { "Run", "Run it live: take control from the AI Director, pause, and hand it back.", "Take control, start the showdown, hand it back.",
           "run-live" },
-        // [WOLF STORY FIRST 2026-10-17] SP_WIZARD (its steps have their own help above) and SP_HELPER
-        { "Start here", "A checklist that goes step by step, with no AI.", "Step 1: what kind of adventure.", "first-adventure" },
-        { "Your game", "Tell me your story or an idea, and we'll build it together. You can walk your land with me to set each scene. "
-          "Write a line or paste a story and press Build it: the helper makes a first game with characters, choices and endings, shown "
-          "as a flowchart. Click a box and say what happens there; Walk with me brings the helper into the world beside you. Every change "
-          "shows at once, and Undo that puts the last one back. Test Play and Publish are at the top; the old pages are under Advanced editing.",
-          "\"The sheriff stops them here and asks for the gold; if they lie he draws his gun.\"", "first-adventure" } };
+        // [WOLF STORY FIRST 2026-10-17] SP_WIZARD (its steps have their own help above); [SIMPLE STUDIO 2026-10-17] the three pages
+        { "Start here", "The step-by-step pages, with no AI.", "Step 1: what kind of adventure.", "first-adventure" },
+        { "Your story", "Type an idea, paste a story, or load a book, then press Build my game. You see what it costs before anything is charged.",
+          "\"A Wild West bank robbery where the players can side with the outlaws or the sheriff.\"", "first-adventure" },
+        { "Your characters", "Check each character's name, who they are and the first thing they say. Use what I'm wearing gives them your look; "
+          "pick a voice and press Hear them.", "Ma Dalton, \"Runs the saloon\": \"Howdy, stranger. Heard about the gold?\"", "characters" },
+        { "Gameplay", "Each box is one moment of your story. Press Next place, walk to where it happens and press Place it here, then tell "
+          "the helper what happens there. When every box is placed, press Play it now.", "Walk to the old well, press Place it here, type "
+          "\"the sheriff is waiting here\".", "places-triggers" } };
     const S32 PAGE_HELP_COUNT = (S32)(sizeof(PAGE_HELP) / sizeof(PAGE_HELP[0]));
 
-    const char* STEP_NAMES[WolfAdventureStudioView::W_COUNT] = { "Name it", "Where", "The story", "Characters", "Places", "How it ends", "The look",
-                                                                  "Test Play", "Publish" };
+    // [SIMPLE STUDIO 2026-10-17] the three steps (SIMPLE_STUDIO_SPEC.md), as the Guide shows them
+    struct Step { const char* mTitle; const char* mLine; };
+    const Step STEPS[3] = {
+        { "Your story", "Type an idea, paste a story or load a book, then press Build my game." },
+        { "Your characters", "Check their names and what they say; dress them in what you wear." },
+        { "Gameplay", "Walk your land: Next place, Place it here, say what happens, then Play it now." } };
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -162,23 +166,54 @@ void WolfAdventureGuideView::draw()
         {
             for (const std::string& line : wrap(f, text, r - l, 40)) { textL(f, line, l, y, c); y -= (F32)f->getLineHeight(); }
         };
-        // ---- this page or step ----
+        // ---- the three steps ----
+        textL(display(18.f), "Three steps to your game", l, y, p.mAccent, LLFontGL::LEFT, LLFontGL::TOP, r - l);
+        y -= (F32)display(18.f)->getLineHeight() + 8.f;
+        if (!sv) paraL("Open the Adventure Studio (Wolf World > Adventure Studio) to see where you are.", p.mDim, small);
+        const S32 here = sv ? sv->simpleStep() : -1;
+        for (S32 i = 0; i < 3; ++i)
+        {
+            const std::vector<std::string> lines = wrap(small, STEPS[i].mLine, r - l - 36.f, 3);
+            const F32 rh = 8.f + slh + (F32)lines.size() * slh + 8.f;
+            const bool is_here = here == i;
+            if (is_here) rect(l, y - rh, r, y, fade(p.mAccent, 0.22f));
+            else if (mHits.isHover(GH_STEP, i)) rect(l, y - rh, r, y, fade(p.mAccent, 0.12f));
+            // the number in a ring, the step's name, its one line; "you are here" in words (never colour alone)
+            disc(l + 12.f, y - 8.f - slh * 0.5f, 9.f, is_here ? p.mAccent : fade(p.mDim, 0.6f));
+            textL(bold, llformat("%d", i + 1), l + 12.f, y - 8.f - slh * 0.5f, p.mBaseTop, LLFontGL::HCENTER, LLFontGL::VCENTER);
+            textL(is_here ? bold : small, STEPS[i].mTitle, l + 30.f, y - 8.f, is_here ? p.mAccent : p.mText, LLFontGL::LEFT, LLFontGL::TOP, r - l - 110.f);
+            if (is_here) textL(small, "you are here", r - 4.f, y - 8.f, p.mAccent, LLFontGL::RIGHT, LLFontGL::TOP);
+            F32 ly = y - 8.f - slh;
+            for (const std::string& ln : lines) { textL(small, ln, l + 30.f, ly, p.mDim); ly -= slh; }
+            const bool can = sv && sv->simpleCanGo(i);
+            mHits.add(l, llmax(y - rh, (F32)bottom), r, llmin(y, top), GH_STEP, i, can ? llformat("Go to %s", STEPS[i].mTitle) : std::string("Build your game first (Your story)"), true, can);
+            if (mKeyboardNav && hasFocus() && mHits.isFocused(GH_STEP, i)) focusRing(l, y - rh, r, y, p);
+            y -= rh + 4.f;
+        }
+        y -= 8.f;
+        // ---- this page: its help (every page has some; the three pages' is short, an expert page's says what it is for) ----
         const S32 step = sv ? sv->guideStep() : -1;
         const S32 page = sv ? sv->guidePage() : 0;
         const Help* h = step >= 0 && step < WolfAdventureStudioView::W_COUNT ? &STEP_HELP[step]
                       : (page >= 0 && page < PAGE_HELP_COUNT ? &PAGE_HELP[page] : &PAGE_HELP[0]);
-        textL(display(18.f), h->mTitle, l, y, p.mAccent, LLFontGL::LEFT, LLFontGL::TOP, r - l);
-        y -= (F32)display(18.f)->getLineHeight() + 6.f;
-        paraL(h->mText, p.mText, LLFontGL::getFontSansSerif());
-        y -= 8.f;
+        if (sv)
         {
-            const std::vector<std::string> lines = wrap(small, h->mExample, r - l - 20.f, 4);
-            const F32 eh = 10.f + slh + (F32)lines.size() * slh + 8.f;
-            card(l, y - eh, r, y, p, 4.f);
-            textL(bold, "EXAMPLE", l + 10.f, y - 8.f, p.mAccent);
-            F32 ey = y - 8.f - slh;
-            for (const std::string& ln : lines) { textL(small, ln, l + 10.f, ey, p.mText); ey -= slh; }
-            y -= eh + 10.f;
+            textL(bold, caps("This page"), l, y, p.mAccent);
+            rect(l, y - slh - 3.f, r, y - slh - 2.f, fade(p.mAccent, 0.3f));
+            y -= slh + 10.f;
+            textL(display(18.f), h->mTitle, l, y, p.mText, LLFontGL::LEFT, LLFontGL::TOP, r - l);
+            y -= (F32)display(18.f)->getLineHeight() + 6.f;
+            paraL(h->mText, p.mText, LLFontGL::getFontSansSerif());
+            y -= 8.f;
+            {
+                const std::vector<std::string> lines = wrap(small, h->mExample, r - l - 20.f, 4);
+                const F32 eh = 10.f + slh + (F32)lines.size() * slh + 8.f;
+                card(l, y - eh, r, y, p, 4.f);
+                textL(bold, "EXAMPLE", l + 10.f, y - 8.f, p.mAccent);
+                F32 ey = y - 8.f - slh;
+                for (const std::string& ln : lines) { textL(small, ln, l + 10.f, ey, p.mText); ey -= slh; }
+                y -= eh + 10.f;
+            }
         }
         {
             const std::string lab = "Read more on the website";
@@ -188,36 +223,6 @@ void WolfAdventureGuideView::draw()
                    | (mKeyboardNav && hasFocus() && mHits.isFocused(GH_WEB, 0) ? BTN_FOCUS : 0));
             mHits.add(l, y - 28.f, l + bw, y, GH_WEB, 0, "Opens " + url + " in your web browser");
             y -= 40.f;
-        }
-        // ---- What do I do next? ----
-        textL(bold, caps("What do I do next?"), l, y, p.mAccent);
-        rect(l, y - slh - 3.f, r, y - slh - 2.f, fade(p.mAccent, 0.3f));
-        y -= slh + 10.f;
-        const std::vector<bool> done = sv ? sv->wizardChecks() : std::vector<bool>((size_t)WolfAdventureStudioView::W_COUNT, false);
-        if (!sv) paraL("Open the Adventure Studio (Wolf World > Games & Stories > Adventure Studio) to see where you are.", p.mDim, small);
-        else if (!sv->guideHasAdventure()) paraL("Start with step 1: press Start here in the Studio, or open one of your adventures on Home.", p.mDim, small);
-        S32 next = -1;
-        for (S32 i = 0; i < WolfAdventureStudioView::W_COUNT; ++i) if (!done[i] && i != WolfAdventureStudioView::W_LOOK) { next = i; break; }
-        y -= 4.f;
-        for (S32 i = 0; sv && i < WolfAdventureStudioView::W_COUNT; ++i)
-        {
-            const F32 rh = 26.f;
-            const bool is_next = i == next;
-            const bool here = step == i;
-            if (here) rect(l, y - rh, r, y, fade(p.mAccent, 0.22f));
-            else if (mHits.isHover(GH_STEP, i)) rect(l, y - rh, r, y, fade(p.mAccent, 0.12f));
-            // a box with a tick AND the word "done"; the next one says "next" (never colour alone)
-            chamferEdge(l + 2.f, y - 20.f, l + 18.f, y - 4.f, 2.f, 1.5f, p.mText);
-            if (done[i]) { lineW(l + 5.f, y - 12.f, l + 9.f, y - 17.f, 2.f, OK_INK); lineW(l + 9.f, y - 17.f, l + 16.f, y - 7.f, 2.f, OK_INK); }
-            std::string text = llformat("%d. %s", i + 1, STEP_NAMES[i]);
-            if (i == WolfAdventureStudioView::W_LOOK && !done[i]) text += " (optional)";
-            textL(is_next ? bold : small, text, l + 26.f, y - rh * 0.5f, is_next ? p.mAccent : p.mText, LLFontGL::LEFT, LLFontGL::VCENTER, r - l - 90.f);
-            if (done[i]) textL(small, "done", r - 4.f, y - rh * 0.5f, OK_INK, LLFontGL::RIGHT, LLFontGL::VCENTER);
-            else if (is_next) textL(bold, "next", r - 4.f, y - rh * 0.5f, p.mAccent, LLFontGL::RIGHT, LLFontGL::VCENTER);
-            const bool can = i == 0 || sv->guideHasAdventure();
-            mHits.add(l, llmax(y - rh, (F32)bottom), r, llmin(y, top), GH_STEP, i, can ? llformat("Go to step %d: %s", i + 1, STEP_NAMES[i]) : std::string("Make the adventure first (step 1)"), true, can);
-            if (mKeyboardNav && hasFocus() && mHits.isFocused(GH_STEP, i)) focusRing(l, y - rh, r, y, p);
-            y -= rh + 2.f;
         }
     }
     mContentH = top + mScroll - y + 8.f;
@@ -232,8 +237,7 @@ void WolfAdventureGuideView::press(S32 id, S32 arg)
     switch (id)
     {
     case GH_CLOSE:
-        // hidden on purpose: remembered, so the Studio does not bring it back until its Guide button is pressed
-        gSavedSettings.setBOOL("WolfAdventureGuideOpen", false);
+        // [SIMPLE STUDIO 2026-10-17] shut until the Studio's Guide button is pressed again (nothing remembered)
         if (LLFloater* f = getParentByType<LLFloater>()) f->closeFloater();
         break;
     case GH_WEB:
@@ -247,7 +251,7 @@ void WolfAdventureGuideView::press(S32 id, S32 arg)
         break;
     }
     case GH_STEP:
-        if (WolfAdventureStudioView* sv = studio()) sv->openWizardStep(arg);
+        if (WolfAdventureStudioView* sv = studio()) sv->goSimple(arg);
         break;
     default:
         break;

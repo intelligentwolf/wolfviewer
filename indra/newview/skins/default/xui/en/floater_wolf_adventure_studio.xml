@@ -3,11 +3,18 @@
      Lite": Home, Import, Publish). Drawn in the wolfGame family by WolfAdventureStudioView
      (wolffloateradventurestudio.cpp): the pages on a left rail, the page in the centre, the problems
      and help in a right drawer, a status line at the foot. §1 "The minimum is 900 x 600 UI units".
-     The 34 px drag strip lies under the drawn title band. -->
+     The 34 px drag strip lies under the drawn title band.
+     [MINIMIZE 2026-10-17] can_minimize: the band's "-" calls LLFloater::setMinimized (llfloater.cpp:1383); the viewer's
+     standard minimized bar then shows the title and its Restore button (llfloater.cpp:2225-2231 draws the buttons and the
+     drag handle; handleMouseDown :1832 offers the click to BUTTON_RESTORE). The floater's own minimize button is hidden
+     by WolfFloaterAdventureStudio::updateTitleButtons.
+     [START POSITION 2026-10-17] positioning="centered": the first open is centred (llfloater.cpp applyPositioning :1109-1116);
+     save_rect="true" keeps the rect across sessions (applyRectControl :1002-1050; the "floater" settings group is
+     gSavedSettings, llappviewer.cpp:1054), and onOpen clamps it into the floater area (adjustToFitScreen :3242). -->
 <floater
  can_close="false"
  can_drag_on_left="false"
- can_minimize="false"
+ can_minimize="true"
  can_resize="true"
  header_height="34"
  height="680"
@@ -16,10 +23,11 @@
  min_height="600"
  min_width="900"
  name="wolf_adventure_studio"
+ positioning="centered"
  save_rect="true"
  show_title="false"
  single_instance="true"
- title="Adventure Studio"
+ title="Adventure Studio (Experimental)"
  width="980">
     <wolf_adventure_studio_view
      follows="all"

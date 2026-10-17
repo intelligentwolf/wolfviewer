@@ -46,8 +46,6 @@ namespace WolfAdvStudio
     LLColor4 inkOn(const LLColor4& bg);
     /** [M4 2026-10-17] The pack schema this viewer carries has a top-level list `key` (enemies, battles arrived with M4). */
     bool packHas(const std::string& key);
-    /** [FRONT DOOR 2026-10-17] the helper's first-run line (the coordinator's words; WolfStorm says the same). */
-    inline const char* greeting() { return "Tell me your story or an idea, and we'll build it together. You can walk your land with me to set each scene."; }
 }
 
 #endif // WOLF_ADVENTURE_STUDIO_UTIL_H

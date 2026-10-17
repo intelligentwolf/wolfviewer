@@ -893,7 +893,7 @@ F32 WolfAdventureStudioView::wizStory(F32 l, F32 r, F32 top, const Palette& p)
         // "reach a place" here would add a way round the choice
         if (ti < 0 && b["decisions"].isArray() && b["decisions"].size() > 0)
         {
-            y = para(l + 150.f, r, y, "This step ends with a choice the players make. Change the choice on the full Story page (Open the full Outline page, select the step, Open).",
+            y = para(l + 150.f, r, y, "This step ends with a choice the players make. Change the choice under Advanced editing > Story (Outline, select the step, Open).",
                      p.mDim, true) - 10.f;
             continue;
         }
@@ -914,9 +914,9 @@ F32 WolfAdventureStudioView::wizStory(F32 l, F32 r, F32 top, const Palette& p)
                 x += bw + 4.f;
             }
             y = yy - ROW - 6.f;
-            // a known type that is none of the four (an expert's trigger): said in words, edited on the Story page
+            // a known type that is none of the four (an expert's trigger): said in words, edited under Advanced editing > Story
             if (!on.empty() && on != "arrive" && on != "talk" && on != "touch" && on != "ready")
-                y = para(cl, r, y, "Set on the Story page (\"" + on + "\"); choose one of these to replace it.", p.mDim, true) - 4.f;
+                y = para(cl, r, y, "Set under Advanced editing > Story (\"" + on + "\"); choose one of these to replace it.", p.mDim, true) - 4.f;
         }
         if (ti >= 0)
         {
@@ -1016,7 +1016,7 @@ F32 WolfAdventureStudioView::wizStory(F32 l, F32 r, F32 top, const Palette& p)
                 btn(l + 150.f, y - ROW, l + 150.f + btnW(lab), y, lab, SH_E, il, "The step before stops ending the story and goes on to this one", p, true, BTN_PRIMARY);
                 y -= ROW + 6.f;
             }
-            else y = para(l + 150.f, r, y, llformat("Make step %d go on to this one: choose its done-when, then on the full Story page set Then go to.", (S32)i), p.mDim, true) - 4.f;
+            else y = para(l + 150.f, r, y, llformat("Make step %d go on to this one: choose its done-when, then under Advanced editing > Story set Then go to.", (S32)i), p.mDim, true) - 4.f;
         }
         // where it goes next, in words
         if (ti >= 0)

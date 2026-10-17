@@ -17,7 +17,7 @@
  help_topic="wolf_environment"
  save_rect="true"
  single_instance="true"
- title="Wolf Environment (Experimental)"
+ title="Wolf Environment"
  width="536">
   <floater.string name="str_loading">Reading this region's Wolf Environment...</floater.string>
   <floater.string name="str_read_failed">Could not read the Wolf Environment:</floater.string>

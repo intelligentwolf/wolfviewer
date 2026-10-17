@@ -47,6 +47,7 @@
 #include "wolffloateradventurestudio.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cerrno>
 #include <cmath>
 #include <fstream>
@@ -789,12 +790,13 @@ void WolfAdventureStudioView::docDuplicate(S32 doc, const std::string& arrPtr, S
     }) && !mDraftJson.empty()) setStatus(STALE, true);
 }
 
-void WolfAdventureStudioView::askDelete(S32 doc, const std::string& ptr, const std::string& what)
+void WolfAdventureStudioView::askDelete(S32 doc, const std::string& ptr, const std::string& what, bool remove)
 {
     // STUDIO §1 "Destructive actions ... ask inside the window, with the safe button focused"
     mDeletePtr = ptr;
     mDeleteDoc = doc;
     mConfirmKeyA = what;
+    mConfirmKeyB = remove ? "remove" : "";   // [SIMPLE STUDIO 2026-10-17] page 2 says Remove / Keep, the expert pages Delete / Cancel
     ask(SC_EDIT_DELETE, 0);
 }
 
@@ -981,6 +983,15 @@ namespace
         auto it = B.find(key);
         return it != B.end() ? it->second : (key.empty() ? std::string("item") : key);
     }
+
+    /** The words after "Add " on a list's add button: plain words where the list's label would read oddly
+     *  ("Add Secrets - never revealed" -> "Add a secret"), else the list's singular (idBase). [TIDY FORM 2026-10-17] */
+    std::string addWordsFor(const std::string& key)
+    {
+        static const std::map<std::string, std::string> A = { { "neverReveal", "a secret" }, { "neverSay", "a line they never say" }, { "idle", "an idle line" } };
+        auto it = A.find(key);
+        return it != A.end() ? it->second : labelFor(idBase(key));
+    }
 }
 
 /** A row: the label in the left column (wrapped); `cl` gets the control's left edge. */
@@ -1016,7 +1027,18 @@ F32 WolfAdventureStudioView::fText(F32 l, F32 r, F32 top, const std::string& lab
     const LLFontGL* small = LLFontGL::getFontSansSerifSmall();
     const F32 lh = (F32)f->getLineHeight();
     F32 cl = l;
-    if (!label.empty()) fRow(l, r, top, label, cl);
+    F32 ctop = top;   // the box's top: under the label when labels sit above (mLabelsAbove), else `top` beside it
+    if (!label.empty())
+    {
+        if (mLabelsAbove)
+        {
+            // [TIDY FORM 2026-10-17] the label above the box, left-aligned; the box takes the whole width (one column of boxes)
+            const LLFontGL* lb = LLFontGL::getFontSansSerifSmallBold();
+            textL(lb, label, l, top, p.mText, LLFontGL::LEFT, LLFontGL::TOP, r - l);
+            ctop = top - (F32)lb->getLineHeight() - 3.f;
+        }
+        else fRow(l, r, top, label, cl);
+    }
     const S32 idx = textAct(ptr, doc, capn, type, optional, mn, mx);
     const bool editing = mField == F_EDIT && mEditPtr == ptr && mEditDoc == doc;
     const bool focused = editing && hasFocus();
@@ -1030,14 +1052,14 @@ F32 WolfAdventureStudioView::fText(F32 l, F32 r, F32 top, const std::string& lab
         lines = wrap(f, text, w - 16.f, 0);
         h = llmax(3.f, (F32)lines.size()) * lh + 10.f;
     }
-    const F32 b = top - h;
+    const F32 b = ctop - h;
     const std::string err = mEditErrorPtr == ptr && !mEditError.empty() ? mEditError : problemAt(ptr);
     const bool invalid = !err.empty();
-    box(cl, b, r, top, focused, invalid, p);
-    F32 caret_x = cl + 8.f, caret_y = (b + top) * 0.5f;
+    box(cl, b, r, ctop, focused, invalid, p);
+    F32 caret_x = cl + 8.f, caret_y = (b + ctop) * 0.5f;
     if (multi)
     {
-        F32 y = top - 5.f;
+        F32 y = ctop - 5.f;
         if (text.empty()) textL(f, optional ? "(empty)" : "Type here", cl + 8.f, y, p.mDim);
         for (const std::string& line : lines)
         {
@@ -1057,11 +1079,11 @@ F32 WolfAdventureStudioView::fText(F32 l, F32 r, F32 top, const std::string& lab
         else caret_x = textL(f, text, cl + 8.f, caret_y, p.mText, LLFontGL::LEFT, LLFontGL::VCENTER, w - 16.f);
     }
     if (focused && fmod(now(), 1.0) < 0.6) rect(caret_x + 1.f, caret_y - lh * 0.45f, caret_x + 2.f, caret_y + lh * 0.45f, p.mText);
-    if (mKeyboardNav && hasFocus() && mHits.isFocused(SH_E_TEXT, idx) && !editing) focusRing(cl, b, r, top, p);
+    if (mKeyboardNav && hasFocus() && mHits.isFocused(SH_E_TEXT, idx) && !editing) focusRing(cl, b, r, ctop, p);
     std::string full_tip = tip.empty() ? label : tip;
     if (capn > 0 && (type == 's' || type == 'w')) full_tip += llformat(" (up to %d characters)", (S32)capn);
     if ((type == 'i' || type == 'n') && mn > -1e17 && mx < 1e17) full_tip += " (" + valueText(LLSD(mn)) + " to " + valueText(LLSD(mx)) + ")";
-    hit(cl, b, r, top, SH_E_TEXT, idx, full_tip);
+    hit(cl, b, r, ctop, SH_E_TEXT, idx, full_tip);
     F32 y = b - 2.f;
     // the length counter (STUDIO §2.3 "persona (counter: 2000)", §2.5 "a counter of 240")
     if (capn > 0 && (type == 's') && (multi || focused))
@@ -1921,7 +1943,7 @@ F32 WolfAdventureStudioView::fArray(F32 l, F32 r, F32 top, const std::string& pt
             docAppend(doc, ptr, makeDefault(*rp, *ip, key, mDraftJson, region, cur.isArray() ? (S32)cur.size() : 0));
             mOpen.insert(next);
         });
-        const std::string add = "Add " + (lkind.empty() ? labelFor(idBase(key)) : std::string("from the list..."));
+        const std::string add = "Add " + (lkind.empty() ? addWordsFor(key) : std::string("from the list..."));
         btn(l + 10.f, y - ROW_H, l + 10.f + btnW(add, 150.f), y, add, SH_E, idx,
             add + (n >= (S32)maxItems ? " (the most this list can hold)" : std::string()), p, n < (S32)maxItems);
         y -= ROW_H + 8.f;
@@ -2383,7 +2405,7 @@ F32 WolfAdventureStudioView::pageOutline(F32 l, F32 r, F32 top, const Palette& p
     const LLFontGL* small = LLFontGL::getFontSansSerifSmall();
     const LLFontGL* bold = LLFontGL::getFontSansSerifSmallBold();
     F32 y = head(l, r, conflictBanner(l, r, top, p), "The story", p);
-    y = para(l, r, y, "Acts hold scenes, scenes hold beats (the step the players are on). Select one to work on it; Open edits it on the Story page.", p.mDim, true) - 4.f;
+    y = para(l, r, y, "Acts hold scenes, scenes hold beats (the step the players are on). Select one to work on it; Open edits it on Advanced editing > Story.", p.mDim, true) - 4.f;
     const LLSD& acts = std::as_const(mDraftPack)["acts"];
     if (mSel.empty() && acts.isArray() && acts.size() > 0) mSel = "/acts/0";
     // the tree (§2.2), each node with its problem count (an icon and a number)
@@ -2456,7 +2478,7 @@ F32 WolfAdventureStudioView::pageOutline(F32 l, F32 r, F32 top, const Palette& p
              [this, sel]() { addStoryItem(2, sel); }, true);
     if (level >= 0)
     {
-        tool("Open", "Edit it on the Story page", [this]() { mPage = SP_STORY; mScroll[SP_STORY] = 0.f; }, true, BTN_PRIMARY);
+        tool("Open", "Edit it on Advanced editing > Story", [this]() { mPage = SP_STORY; mScroll[SP_STORY] = 0.f; }, true, BTN_PRIMARY);
         if (level == 2)
         {
             // §2.7 "Play from this beat (on the Outline, Beat and Cast pages)"
@@ -2558,7 +2580,7 @@ F32 WolfAdventureStudioView::pageOutline(F32 l, F32 r, F32 top, const Palette& p
             if (dead) textL(bold, "dead end - nothing leads on from here", l + 16.f, yy, DANGER_INK);
             for (const std::string& o : outs) { textL(small, o, l + 16.f, yy, p.mDim, LLFontGL::LEFT, LLFontGL::TOP, r - l - 24.f); yy -= lh; }
             const S32 idx = act([this, bp]() { mSel = bp; mPage = SP_STORY; mScroll[SP_STORY] = 0.f; });
-            hit(l, y - bh, r, y, SH_E, idx, "Open this beat on the Story page");
+            hit(l, y - bh, r, y, SH_E, idx, "Open this beat on Advanced editing > Story");
             if (mKeyboardNav && hasFocus() && mHits.isFocused(SH_E, idx)) focusRing(l, y - bh, r, y, p);
             y -= bh + 4.f;
         }
@@ -2578,7 +2600,7 @@ F32 WolfAdventureStudioView::pageOutline(F32 l, F32 r, F32 top, const Palette& p
             const S32 idx = act([this, rid, rname]()
             {
                 docAppend(0, "/adventure/regions", boost::json::object{ { "region", rid }, { "name", cap(rname, 64) } });
-                setStatus("Added " + rname + ". Request it on the Publish page.", false);
+                setStatus("Added " + rname + ". Request it on Advanced editing > Publish.", false);
             });
             btn(l, y - ROW_H, l + 260.f, y, "Add " + cap(rname, 24) + " (the region you are on)", SH_E, idx, "Add the region you are on to the adventure's regions", p, !listed);
             y -= ROW_H + 6.f;
@@ -2688,7 +2710,7 @@ namespace
             if (dv->is_array() && !dv->as_array().empty())
             {
                 if (!firstEnding.empty()) ready("do", boost::json::array{ boost::json::object{ { "end", firstEnding } } });
-                return "Nothing leads here yet: the beat before ends with a choice, so on the Story page make one of its options go to this beat.";
+                return "Nothing leads here yet: the beat before ends with a choice, so on Advanced editing > Story make one of its options go to this beat.";
             }
         pt.push_back(boost::json::object{ { "id", newTriggerId() }, { "on", "ready" }, { "next", nid } });
         if (!firstEnding.empty()) ready("do", boost::json::array{ boost::json::object{ { "end", firstEnding } } });
@@ -2779,7 +2801,7 @@ void WolfAdventureStudioView::addStoryItem(S32 what, const std::string& sel)
     // select what was made (its own pointer), so the next Add goes after it
     mSel = ptrIndex(arrPtr, at);
     static const char* WHAT[3] = { "Added an act.", "Added a scene.", "Added a beat." };
-    setStatus(std::string(WHAT[llclamp(what, 0, 2)]) + " " + said + " Give it a title and objective, and choose what finishes it (it starts as \"When everyone is ready\", which only a party can press), on the Story page (Open).", false);
+    setStatus(std::string(WHAT[llclamp(what, 0, 2)]) + " " + said + " Give it a title and objective, and choose what finishes it (it starts as \"When everyone is ready\", which only a party can press), on Advanced editing > Story (Open).", false);
 }
 
 F32 WolfAdventureStudioView::pageStory(F32 l, F32 r, F32 top, const Palette& p)
@@ -2856,7 +2878,7 @@ F32 WolfAdventureStudioView::pageStory(F32 l, F32 r, F32 top, const Palette& p)
     return y - ROW_H - 8.f;
 }
 
-std::string WolfAdventureStudioView::castUses(const std::string& cid) const
+std::vector<std::string> WolfAdventureStudioView::castUsesList(const std::string& cid) const
 {
     // every place a character is named (ADVENTURE_PACK_V1.md §15 cross-references), apart from its own sheet
     std::vector<std::string> uses;
@@ -2878,6 +2900,12 @@ std::string WolfAdventureStudioView::castUses(const std::string& cid) const
         else if (v.isArray()) for (size_t i = 0; i < (size_t)v.size(); ++i) walk(v[(LLSD::Integer)i], ptrIndex(ptr, (S32)i));
     };
     for (const auto& kv : llsd::inMap(mDraftPack)) if (kv.first != "cast") walk(kv.second, "/" + kv.first);
+    return uses;
+}
+
+std::string WolfAdventureStudioView::castUses(const std::string& cid) const
+{
+    const std::vector<std::string> uses = castUsesList(cid);
     if (uses.empty()) return std::string();
     std::string s = llformat("used in %d place%s: ", (S32)uses.size(), uses.size() == 1 ? "" : "s");
     for (size_t i = 0; i < uses.size() && i < 4; ++i) s += (i ? ", " : "") + uses[i];
@@ -2912,10 +2940,7 @@ F32 WolfAdventureStudioView::pageCastEd(F32 l, F32 r, F32 top, const Palette& p)
     }
     {
         F32 x = l;
-        const std::string region = std::as_const(mDraftPack)["adventure"]["regions"][0]["region"].asString();
-        const boost::json::value* rp = &root;
-        const boost::json::value* csp = &cs;
-        const S32 ia = act([this, rp, csp, region, n]() { docAppend(0, "/cast", makeDefault(*rp, *csp, "cast", mDraftJson, region)); mCastSel2 = n; });
+        const S32 ia = act([this]() { addCastMember(); });
         btn(x, y - ROW_H, x + 90.f, y, "Add", SH_E, ia, "Add a character", p, n < 100);
         x += 94.f;
         const S32 id = act([this]() { docDuplicate(0, "/cast", mCastSel2); });
@@ -2970,56 +2995,7 @@ F32 WolfAdventureStudioView::pageCastEd(F32 l, F32 r, F32 top, const Palette& p)
     y = fObject(l, r, y, cp, cs, c, 0, p, { "idle", "barks" });
     // Voice: the voice list from the brain (WOLF_MIND §8.2), premium voices in their own group (off by default)
     y = head(l, r, y, "Voice", p);
-    {
-        if (!mVoicesLoaded) loadVoices();
-        F32 cl = l;
-        fRow(l, r, y, "Voice", cl);
-        const std::string cur = c["voice"]["id"].asString();
-        std::string shown = cur.empty() ? std::string("(none - text only)") : cur;
-        for (const LLSD& vo : llsd::inArray(mVoices)) if (vo["id"].asString() == cur) shown = cap(vo["label"].asString(), 60) + (vo["premium"].asBoolean() ? " (premium)" : "");
-        const std::string vp = ptrJoin(cp, "voice");
-        bool cur_premium = false, any_premium = false;
-        for (const LLSD& vo : llsd::inArray(mVoices))
-        {
-            if (!vo["premium"].asBoolean()) continue;
-            any_premium = true;
-            cur_premium = cur_premium || vo["id"].asString() == cur;
-        }
-        const bool show_premium = mShowPremium || cur_premium;
-        const S32 ci = mCastSel2;
-        const S32 iv = act([this, ci, show_premium]()
-        {
-            std::vector<std::pair<std::string, std::string>> opts;
-            opts.push_back({ "~none", "(none - text only)" });
-            for (const LLSD& vo : llsd::inArray(mVoices))
-                if (!vo["premium"].asBoolean()) opts.push_back({ vo["id"].asString(), cap(vo["label"].asString(), 60) + " - free" });
-            // premium voices only when their group is switched on (off by default, as on Cast talk)
-            bool hdr = false;
-            for (const LLSD& vo : llsd::inArray(mVoices))
-            {
-                if (!show_premium || !vo["premium"].asBoolean()) continue;
-                if (!hdr) { opts.push_back({ "~hdr", "Premium voice (ElevenLabs) - charged per character spoken" }); hdr = true; }
-                // credits = micro / 10000 (WOLF_MIND §7.1); per 100 characters
-                const F64 per100 = vo["price"]["microPerChar"].asReal() * 100.0 / 10000.0;
-                opts.push_back({ vo["id"].asString(), "   " + cap(vo["label"].asString(), 50) + llformat(" - %.2f credits per 100 characters", per100) });
-            }
-            openPicker("Voice", opts, [this, ci](const std::string& id)
-            {
-                if (id.empty() || id == "~hdr") return;
-                pickVoice(ci, id == "~none" ? std::string() : id);
-            }, "The voice list has not loaded - try again in a moment.");
-        });
-        const F32 tw = any_premium ? 250.f : 0.f;
-        btn(cl, y - ROW_H, r - tw - (tw > 0.f ? 6.f : 0.f), y, shown, SH_E, iv, "Choose this character's voice (free piper voices cost nothing)", p);
-        if (any_premium)
-        {
-            const S32 it = act([this]() { mShowPremium = !mShowPremium; });
-            btn(r - tw, y - ROW_H, r, y, show_premium ? "Premium voices - hide" : "Premium voices (ElevenLabs) - show", SH_E, it,
-                "Premium voices are charged per character spoken, from your WolfCredits", p, !cur_premium);
-        }
-        y -= ROW_H + 6.f;
-        if (c["voice"].isMap()) y = fValue(l, r, y, ptrJoin(vp, "rate"), "rate", prop(prop(cs, "voice"), "rate"), c["voice"]["rate"], true, 0, p, "Speed (0.5 to 2)");
-    }
+    y = voiceRow(l, r, y, mCastSel2, true, p);
     // Day
     y = scheduleRibbon(l, r, y, ptrJoin(cp, "schedule"), c["schedule"], p);
     // May do: the allowed actions with a line each (§2.3), and the AI triggers
@@ -3084,6 +3060,488 @@ F32 WolfAdventureStudioView::pageCastEd(F32 l, F32 r, F32 top, const Palette& p)
         y -= ROW_H + 8.f;
     }
     return y;
+}
+
+F32 WolfAdventureStudioView::voiceRow(F32 l, F32 r, F32 top, S32 ci, bool rate, const Palette& p)
+{
+    // [SIMPLE STUDIO 2026-10-17] the voice picker of one character, for the Cast page and page 2 (written once)
+    const LLSD& cast = std::as_const(mDraftPack)["cast"];
+    if (!cast.isArray() || ci < 0 || ci >= (S32)cast.size()) return top;
+    const LLSD& c = cast[ci];
+    const std::string cp = ptrIndex("/cast", ci);
+    const boost::json::value& cs = def(packSchema(), "castSheet");
+    F32 y = top;
+    if (!mVoicesLoaded) loadVoices();
+    F32 cl = l;
+    fRow(l, r, y, "Voice", cl);
+    const std::string cur = c["voice"]["id"].asString();
+    std::string shown = cur.empty() ? std::string("(none - text only)") : cur;
+    for (const LLSD& vo : llsd::inArray(mVoices)) if (vo["id"].asString() == cur) shown = cap(vo["label"].asString(), 60) + (vo["premium"].asBoolean() ? " (premium)" : "");
+    const std::string vp = ptrJoin(cp, "voice");
+    bool cur_premium = false, any_premium = false;
+    for (const LLSD& vo : llsd::inArray(mVoices))
+    {
+        if (!vo["premium"].asBoolean()) continue;
+        any_premium = true;
+        cur_premium = cur_premium || vo["id"].asString() == cur;
+    }
+    const bool show_premium = mShowPremium || cur_premium;
+    const S32 iv = act([this, ci, show_premium]()
+    {
+        std::vector<std::pair<std::string, std::string>> opts;
+        opts.push_back({ "~none", "(none - text only)" });
+        for (const LLSD& vo : llsd::inArray(mVoices))
+            if (!vo["premium"].asBoolean()) opts.push_back({ vo["id"].asString(), cap(vo["label"].asString(), 60) + " - free" });
+        // premium voices only when their group is switched on (off by default, as on Cast talk)
+        bool hdr = false;
+        for (const LLSD& vo : llsd::inArray(mVoices))
+        {
+            if (!show_premium || !vo["premium"].asBoolean()) continue;
+            if (!hdr) { opts.push_back({ "~hdr", "Premium voice (ElevenLabs) - charged per character spoken" }); hdr = true; }
+            // credits = micro / 10000 (WOLF_MIND §7.1); per 100 characters
+            const F64 per100 = vo["price"]["microPerChar"].asReal() * 100.0 / 10000.0;
+            opts.push_back({ vo["id"].asString(), "   " + cap(vo["label"].asString(), 50) + llformat(" - %.2f credits per 100 characters", per100) });
+        }
+        openPicker("Voice", opts, [this, ci](const std::string& id)
+        {
+            if (id.empty() || id == "~hdr") return;
+            pickVoice(ci, id == "~none" ? std::string() : id);
+        }, "The voice list has not loaded - try again in a moment.");
+    });
+    const F32 tw = any_premium ? 250.f : 0.f;
+    btn(cl, y - ROW_H, r - tw - (tw > 0.f ? 6.f : 0.f), y, shown, SH_E, iv, "Choose this character's voice (free piper voices cost nothing)", p);
+    if (any_premium)
+    {
+        const S32 it = act([this]() { mShowPremium = !mShowPremium; });
+        btn(r - tw, y - ROW_H, r, y, show_premium ? "Premium voices - hide" : "Premium voices (ElevenLabs) - show", SH_E, it,
+            "Premium voices are charged per character spoken, from your WolfCredits", p, !cur_premium);
+    }
+    y -= ROW_H + 6.f;
+    if (rate && c["voice"].isMap()) y = fValue(l, r, y, ptrJoin(vp, "rate"), "rate", prop(prop(cs, "voice"), "rate"), c["voice"]["rate"], true, 0, p, "Speed (0.5 to 2)");
+    return y;
+}
+
+void WolfAdventureStudioView::addCastMember()
+{
+    const S32 n = std::as_const(mDraftPack)["cast"].isArray() ? (S32)std::as_const(mDraftPack)["cast"].size() : 0;
+    if (n >= 100) { setStatus("A game holds at most 100 characters.", true); return; }
+    const boost::json::value& root = packSchema();
+    const std::string region = std::as_const(mDraftPack)["adventure"]["regions"][0]["region"].asString();
+    docAppend(0, "/cast", makeDefault(root, def(root, "castSheet"), "cast", mDraftJson, region));
+    mCastSel2 = n;
+    // [CHARACTER GALLERY 2026-10-17] on page 2 the new one's page opens (editDoc has already put them into mDraftPack)
+    const LLSD& cast = std::as_const(mDraftPack)["cast"];
+    if (mPage == SP_CHARS && cast.isArray() && (S32)cast.size() == n + 1)
+    {
+        mCharsWho = "c:" + cast[n]["id"].asString();
+        mScroll[SP_CHARS] = 0.f;
+    }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+// [CHARACTER GALLERY 2026-10-17] page 2 "Your characters": a gallery of picture cards, and one character's page
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+// Paul: "the characters page is a mess - I would rather have pictures for each character, then you click through to work with
+// that character". The gallery shows one card per character (the enemies under their own head): a square picture, the name,
+// one line (their role) and a look badge. A card opens that one's page: the big picture with Set picture..., and the fields
+// of the old card in the old order (First name, Last name, Who they are, How they think and talk, First thing they say, What
+// they never tell), the look row, the voice row, Hear them, Remove. Everything saves as before (fValue on /cast/N/...; the
+// portrait through chooseTexture, as the cover); look_pad, look_pads_clear, owner_settings, save_look and previewVoice are
+// the same calls. The 8-second pad re-read (padsTick) runs on both the gallery and the page (mPage stays SP_CHARS).
+
+namespace
+{
+    const F32 CARD_W = 170.f;      // a gallery card: the picture (150) with 10 px each side
+    const F32 CARD_PIC = 150.f;    // the card's picture, square
+    const F32 CARD_GAP = 14.f;
+    const F32 DETAIL_PIC = 200.f;  // the page's big picture, square
+
+    /** The first letter of each of up to two words, upper-cased ("Jesse James" -> "JJ"; "" -> "?"). */
+    std::string initialsOf(const std::string& a, const std::string& b)
+    {
+        std::string out;
+        for (const std::string* w : { &a, &b })
+        {
+            for (unsigned char ch : *w)
+            {
+                if (isalnum(ch)) { out += (char)toupper(ch); break; }
+            }
+        }
+        return out.empty() ? std::string("?") : out;
+    }
+}
+
+// static
+LLColor4 WolfAdventureStudioView::idColour(const std::string& id)
+{
+    // FNV-1a 32-bit (Fowler-Noll-Vo: offset 2166136261, prime 16777619) over the id's bytes picks the hue, so the same
+    // character gets the same colour in every session and on both viewers (the web page uses the same hash)
+    U32 h = 2166136261u;
+    for (unsigned char ch : id) { h ^= ch; h *= 16777619u; }
+    const F32 hue = (F32)(h % 360u);
+    // HSL(hue, 45 %, 28 %) -> RGB (the standard conversion: C = (1 - |2L - 1|) S, X = C (1 - |(H / 60) mod 2 - 1|), m = L - C / 2).
+    // 28 % lightness at 45 % saturation keeps the plate dark enough for the palettes' light text at every hue: the worst case,
+    // hue 60 = rgb(104, 104, 39), relative luminance 0.13, is 4.9:1 against #e6ebf5 and 5.2:1 against #f2f2f2.
+    const F32 S = 0.45f, L = 0.28f;
+    const F32 C = (1.f - fabsf(2.f * L - 1.f)) * S;
+    const F32 hp = hue / 60.f;
+    const F32 X = C * (1.f - fabsf(fmodf(hp, 2.f) - 1.f));
+    const F32 m = L - C * 0.5f;
+    F32 r = 0.f, g = 0.f, b = 0.f;
+    if (hp < 1.f) { r = C; g = X; }
+    else if (hp < 2.f) { r = X; g = C; }
+    else if (hp < 3.f) { g = C; b = X; }
+    else if (hp < 4.f) { g = X; b = C; }
+    else if (hp < 5.f) { r = X; b = C; }
+    else { r = C; b = X; }
+    return LLColor4(r + m, g + m, b + m, 1.f);
+}
+
+bool WolfAdventureStudioView::hasBoxes() const
+{
+    // a box is a beat: /acts/a/scenes/s/beats/b (adventure_pack_v1.schema.json "acts" :112 > "scenes" :1965 > "beats" :2053; the
+    // flowchart's nodes). Read from the pack itself so the tabs are right before flowLayout has run on this draft.
+    for (const LLSD& a : llsd::inArray(std::as_const(mDraftPack)["acts"]))
+        for (const LLSD& sc : llsd::inArray(a["scenes"]))
+            if (sc["beats"].isArray() && sc["beats"].size() > 0) return true;
+    return false;
+}
+
+std::string WolfAdventureStudioView::charsPortraitId(const LLSD& sheet, bool enemy) const
+{
+    // Source: adventure_pack_v1.schema.json $defs castSheet "portrait": uuidOrEmpty (the cast sheet's picture); $defs enemy
+    // "look": kind npc | cast | object, with "cast" naming the character the enemy looks like - their portrait is used then
+    if (!enemy) return sheet["portrait"].asString();
+    if (sheet["look"]["kind"].asString() != "cast") return std::string();
+    const std::string cid = sheet["look"]["cast"].asString();
+    for (const LLSD& c : llsd::inArray(std::as_const(mDraftPack)["cast"])) if (c["id"].asString() == cid) return c["portrait"].asString();
+    return std::string();
+}
+
+std::string WolfAdventureStudioView::enemyLookWords(const LLSD& e) const
+{
+    const std::string kind = e["look"]["kind"].asString();
+    if (kind == "cast")
+    {
+        const std::string cid = e["look"]["cast"].asString();
+        for (const LLSD& c : llsd::inArray(std::as_const(mDraftPack)["cast"]))
+            if (c["id"].asString() == cid) return "Looks like " + cap(c["first"].asString() + " " + c["last"].asString(), 40);
+        return "Looks like a character who is no longer in the story";
+    }
+    if (kind == "object") return "An object from a chest";
+    return lookWords(e);   // an NPC: look.standard / look.appearance / look.dressedBy, as a character
+}
+
+void WolfAdventureStudioView::charsPortrait(F32 l, F32 b, F32 sz, const LLSD& sheet, bool enemy, const Palette& p)
+{
+    const std::string cur = charsPortraitId(sheet, enemy);
+    LLUUID id;
+    const bool has = !cur.empty() && LLUUID::validate(cur) && id.set(cur, false) && id.notNull();
+    if (has)
+    {
+        // Source: fTexture (this file) - a portrait is drawn from the texture fetch like any UI image
+        chamfer(l, b, l + sz, b + sz, 4.f, p.mCard, p.mCard);
+        LLViewerFetchedTexture* tex = LLViewerTextureManager::getFetchedTexture(id, FTT_DEFAULT, MIPMAP_YES, LLGLTexture::BOOST_UI);
+        if (tex)
+        {
+            tex->addTextureStats((F32)(sz * sz));
+            gl_draw_scaled_image((S32)l + 2, (S32)b + 2, (S32)sz - 4, (S32)sz - 4, tex);
+        }
+        chamferEdge(l, b, l + sz, b + sz, 4.f, 1.f, p.mDim);
+        return;
+    }
+    // no picture: a plate in the colour of their id, a silhouette outline (head and shoulders) and their initials, large
+    const LLColor4 plate = idColour(sheet["id"].asString());
+    chamfer(l, b, l + sz, b + sz, 4.f, plate, plate);
+    const LLColor4 line = fade(p.mText, 0.28f);
+    const F32 cx = l + sz * 0.5f;
+    arc(cx, b + sz * 0.68f, sz * 0.15f, 1.5f, 0.f, F_TWO_PI, line);
+    chamferEdge(l + sz * 0.2f, b + sz * 0.06f, l + sz * 0.8f, b + sz * 0.46f, sz * 0.14f, 1.5f, line);
+    const std::string ini = enemy ? initialsOf(sheet["name"].asString(), std::string()) : initialsOf(sheet["first"].asString(), sheet["last"].asString());
+    textL(display(sz * 0.4f), ini, cx, b + sz * 0.5f, p.mText, LLFontGL::HCENTER, LLFontGL::VCENTER);
+    chamferEdge(l, b, l + sz, b + sz, 4.f, 1.f, p.mDim);
+}
+
+F32 WolfAdventureStudioView::charsCard(F32 l, F32 top, F32 cw, const LLSD& sheet, bool enemy, const Palette& p)
+{
+    const LLFontGL* bold = LLFontGL::getFontSansSerifBold();
+    const LLFontGL* small = LLFontGL::getFontSansSerifSmall();
+    const F32 lh = (F32)bold->getLineHeight(), sh = (F32)small->getLineHeight();
+    const F32 ch = 8.f + CARD_PIC + 6.f + lh + 2.f + sh + 6.f + 20.f + 8.f;   // picture, name, one line, badge
+    const F32 b = top - ch, r = l + cw;
+    const std::string id = sheet["id"].asString();
+    const std::string name = enemy ? cap(sheet["name"].asString(), 32) : cap(sheet["first"].asString() + " " + sheet["last"].asString(), 40);
+    const std::string shown = name.size() > 1 ? name : std::string(enemy ? "New enemy" : "New character");
+    // one line under the name: their role (the cast sheet's role; an enemy's first line of description, else "Enemy")
+    std::string line = enemy ? WolfGame::cleanText(sheet["description"].asString(), 80) : WolfGame::cleanText(sheet["role"].asString(), 80);
+    if (enemy && line.empty()) line = "Enemy";
+    // the look badge: words and colour (never colour alone) from look.standard / look.appearance / look.dressedBy
+    const std::string words = enemy ? enemyLookWords(sheet) : lookWords(sheet);
+    const bool dressed = words.rfind("Dressed", 0) == 0;
+    std::string badge = dressed ? "Dressed" : "Standard look";
+    if (enemy && words.rfind("Looks like", 0) == 0) badge = "Looks like a character";
+    else if (enemy && words.rfind("An object", 0) == 0) badge = "An object";
+    const S32 idx = act([this, id, enemy]() { mCharsWho = (enemy ? "e:" : "c:") + id; mScroll[SP_CHARS] = 0.f; });
+    const bool hover = mHits.isHover(SH_E, idx);
+    card(l, b, r, top, p, 6.f);
+    if (hover) chamferEdge(l + 0.5f, b + 0.5f, r - 0.5f, top - 0.5f, 6.f, 2.f, p.mAccent);
+    charsPortrait(l + (cw - CARD_PIC) * 0.5f, top - 8.f - CARD_PIC, CARD_PIC, sheet, enemy, p);
+    F32 y = top - 8.f - CARD_PIC - 6.f;
+    textL(bold, shown, l + cw * 0.5f, y, hover ? p.mAccent : p.mText, LLFontGL::HCENTER, LLFontGL::TOP, cw - 12.f);
+    y -= lh + 2.f;
+    textL(small, line, l + cw * 0.5f, y, p.mDim, LLFontGL::HCENTER, LLFontGL::TOP, cw - 12.f);
+    y -= sh + 6.f;
+    {
+        const F32 bw = llmin(cw - 12.f, (F32)small->getWidthF32(badge) + 16.f), bl = l + (cw - bw) * 0.5f;
+        const LLColor4 ink = dressed ? OK_INK : p.mDim;
+        chamferEdge(bl, y - 20.f, bl + bw, y, 3.f, 1.f, ink);
+        textL(small, badge, l + cw * 0.5f, y - 10.f, ink, LLFontGL::HCENTER, LLFontGL::VCENTER, bw - 8.f);
+    }
+    hit(l, b, r, top, SH_E, idx, "Open " + shown + ": " + (line.empty() ? words : line + ". " + words));
+    if (mKeyboardNav && hasFocus() && mHits.isFocused(SH_E, idx)) focusRing(l, b, r, top, p);
+    return ch;
+}
+
+F32 WolfAdventureStudioView::charsGallery(F32 l, F32 r, F32 top, const Palette& p)
+{
+    const LLSD& cast = std::as_const(mDraftPack)["cast"];
+    const LLSD& enemies = std::as_const(mDraftPack)["enemies"];
+    const S32 n = cast.isArray() ? (S32)cast.size() : 0;
+    const S32 ne = enemies.isArray() ? (S32)enemies.size() : 0;
+    F32 y = top;
+    textL(display(28.f), "Your characters", l, y, p.mAccent, LLFontGL::LEFT, LLFontGL::TOP, r - l);
+    y -= (F32)display(28.f)->getLineHeight() + 8.f;
+    y = para(l, r, y, "These are the people in your story - click someone to check their name, what they say and how they look.", p.mText) - 10.f;
+    {
+        const S32 ia = act([this]() { mCharsError.clear(); addCastMember(); });
+        btn(l, y - ROW_H, l + btnW("Add someone"), y, "Add someone", SH_E, ia, "A blank card for you to fill in", p, n < 100);
+        // [IN-WORLD STUFF 2026-10-17] every look pad of the game off the land (look_pads_clear)
+        const S32 ic = act([this]() { lookPadsClear(); });
+        const F32 cx = l + btnW("Add someone") + 8.f;
+        btn(cx, y - ROW_H, cx + btnW("Take the pads away"), y, "Take the pads away", SH_E, ic, "Every look pad this game put on the land goes", p, !mPadBusy);
+        y -= ROW_H + 10.f;
+    }
+    y = lookPadsHead(l, r, y, p);   // [IN-WORLD STUFF 2026-10-17] "Anyone can help dress my characters" (small, when the brain has it)
+    if (!mCharsError.empty()) y = para(l, r, y, mCharsError, DANGER_INK) - 6.f;
+    if (n == 0) y = para(l, r, y, "No characters yet. Press Add someone, or go back to Your story and press Build my game.", p.mDim, true) - 8.f;
+    // the grid: 3 to 4 cards per row where the page is wide enough, 2 on a narrow page (Paul: "pictures for each character")
+    const S32 cols = llclamp((S32)floorf((r - l + CARD_GAP) / (CARD_W + CARD_GAP)), 2, 4);
+    auto grid = [&](const LLSD& list, S32 count, bool enemy)
+    {
+        F32 row_h = 0.f;
+        for (S32 i = 0; i < count; ++i)
+        {
+            const S32 col = i % cols;
+            if (col == 0 && i > 0) { y -= row_h + CARD_GAP; row_h = 0.f; }
+            row_h = llmax(row_h, charsCard(l + (F32)col * (CARD_W + CARD_GAP), y, CARD_W, list[i], enemy, p));
+        }
+        if (count > 0) y -= row_h + CARD_GAP;
+    };
+    grid(cast, n, false);
+    if (ne > 0)
+    {
+        // Source: adventure_pack_v1.schema.json "enemies" (the people and things the players fight), under their own head
+        y = head(l, r, y - 4.f, "Enemies", p);
+        grid(enemies, ne, true);
+    }
+    // [FIXED FOOT 2026-10-17] "Your story" and "Next: set up your places" are in the fixed bar under the page (drawFootBar)
+    return y;
+}
+
+F32 WolfAdventureStudioView::charsDetail(F32 l, F32 r, F32 top, S32 at, bool enemy, const Palette& p)
+{
+    const boost::json::value& root = packSchema();
+    const boost::json::value& cs = def(root, enemy ? "enemy" : "castSheet");
+    const LLSD& list = std::as_const(mDraftPack)[enemy ? "enemies" : "cast"];
+    const S32 n = list.isArray() ? (S32)list.size() : 0;
+    const LLSD& c = list[at];
+    const std::string cp = ptrIndex(enemy ? "/enemies" : "/cast", at);
+    const std::string cid = c["id"].asString();
+    const std::string nm = enemy ? cap(c["name"].asString(), 32) : cap(c["first"].asString() + " " + c["last"].asString(), 40);
+    const std::string shown = nm.size() > 1 ? nm : std::string(enemy ? "New enemy" : "New character");
+    F32 y = top;
+    {
+        // the way back, and Previous / Next through the same list (the characters, or the enemies)
+        const S32 ib = act([this]() { mCharsWho.clear(); mScroll[SP_CHARS] = 0.f; });
+        const std::string back = "\xE2\x97\x82 All characters";
+        btn(l, y - ROW_H, l + btnW(back), y, back, SH_E, ib, "Back to the gallery of your characters", p);
+        const std::string prev = "\xE2\x97\x82 Previous", next = enemy ? "Next enemy \xE2\x96\xB8" : "Next character \xE2\x96\xB8";
+        const F32 nw = btnW(next), pw = btnW(prev);
+        // the neighbours' ids, taken now (the draft may be read again before the press)
+        const std::string prev_id = at > 0 ? list[at - 1]["id"].asString() : std::string();
+        const std::string next_id = at + 1 < n ? list[at + 1]["id"].asString() : std::string();
+        const std::string tag = enemy ? "e:" : "c:";
+        const S32 ip = act([this, tag, prev_id]() { if (!prev_id.empty()) { mCharsWho = tag + prev_id; mScroll[SP_CHARS] = 0.f; } });
+        const S32 in = act([this, tag, next_id]() { if (!next_id.empty()) { mCharsWho = tag + next_id; mScroll[SP_CHARS] = 0.f; } });
+        btn(r - nw - 8.f - pw, y - ROW_H, r - nw - 8.f, y, prev, SH_E, ip, at > 0 ? "The one before this" : "This is the first", p, at > 0);
+        btn(r - nw, y - ROW_H, r, y, next, SH_E, in, at + 1 < n ? "The one after this" : "This is the last", p, at + 1 < n);
+        y -= ROW_H + 10.f;
+    }
+    textL(display(28.f), shown, l, y, p.mAccent, LLFontGL::LEFT, LLFontGL::TOP, r - l);
+    y -= (F32)display(28.f)->getLineHeight() + 8.f;
+    if (!mCharsError.empty()) y = para(l, r, y, mCharsError, DANGER_INK) - 6.f;
+    y -= 10.f;
+    // the left column: the big picture, Set picture... / No picture (a character's portrait, written as the cover is: chooseTexture
+    // -> LLFloaterTexturePicker, docSet on /cast/N/portrait; a texture dragged from inventory onto it does the same, editDrop)
+    const F32 pl = l + 12.f;
+    charsPortrait(pl, y - DETAIL_PIC, DETAIL_PIC, c, enemy, p);
+    F32 py = y - DETAIL_PIC - 8.f;
+    if (!enemy)
+    {
+        const std::string pp = ptrJoin(cp, "portrait");
+        mDrops.push_back({ LLRect((S32)pl, (S32)y, (S32)(pl + DETAIL_PIC), (S32)(y - DETAIL_PIC)), pp });
+        const S32 ic = act([this, pp]() { chooseTexture(pp); });
+        btn(pl, py - ROW_H, pl + DETAIL_PIC, py, "Set picture...", SH_E, ic, "Choose a picture from your inventory (or drag a texture onto the picture)", p);
+        py -= ROW_H + 6.f;
+        if (!c["portrait"].asString().empty())
+        {
+            const S32 ix = act([this, pp]() { docErase(0, pp); });
+            btn(pl, py - ROW_H, pl + DETAIL_PIC, py, "No picture", SH_E, ix, "Take the picture away (their initials show instead)", p, true, BTN_DANGER);
+            py -= ROW_H + 6.f;
+        }
+    }
+    else
+    {
+        py = para(pl, pl + DETAIL_PIC, py, "An enemy that looks like one of your characters uses their picture.", p.mDim, true) - 6.f;
+    }
+    // the right column: the fields, in the old order
+    const F32 fl = pl + DETAIL_PIC + 20.f, fr = r - 12.f;
+    if (!enemy)
+    {
+        // [TIDY FORM 2026-10-17] Paul: "tidy up the form a bit" - labels above one column of boxes of the same width (mLabelsAbove),
+        // in two groups, "Who they are" and "What they say", then one "Look and voice" row; Remove alone at the bottom right.
+        // Source: adventure_pack_v1.schema.json castSheet: first, last (one word each), role (240), persona (2000), greeting (500),
+        // neverReveal (up to 30 lines of 240) - the schema's caps apply through fValue, the same draft edit path as before
+        const F32 gl = fl + 10.f, gr = fr - 10.f;
+        auto group = [&](const std::string& title, const std::function<void()>& fields)
+        {
+            const F32 gt = y;
+            y = head(gl, gr, y - 8.f, title, p) - 2.f;
+            mLabelsAbove = true;
+            fields();
+            mLabelsAbove = false;
+            y -= 4.f;
+            chamferEdge(fl, y, fr, gt, 6.f, 1.f, fade(p.mDim, 0.6f));
+            y -= 10.f;
+        };
+        group("Who they are", [&]()
+        {
+            y = fValue(gl, gr, y, ptrJoin(cp, "first"), "first", prop(cs, "first"), c["first"], false, 0, p, "First name");
+            y = fValue(gl, gr, y, ptrJoin(cp, "last"), "last", prop(cs, "last"), c["last"], false, 0, p, "Last name");
+            y = fValue(gl, gr, y, ptrJoin(cp, "role"), "role", prop(cs, "role"), c["role"], false, 0, p, "Who they are, in a few words");
+            y = fValue(gl, gr, y, ptrJoin(cp, "persona"), "persona", prop(cs, "persona"), c["persona"], true, 0, p, "How they think and talk");
+        });
+        group("What they say", [&]()
+        {
+            y = fValue(gl, gr, y, ptrJoin(cp, "greeting"), "greeting", prop(cs, "greeting"), c["greeting"], true, 0, p, "First thing they say");
+            y = fValue(gl, gr, y, ptrJoin(cp, "neverReveal"), "neverReveal", prop(cs, "neverReveal"), c["neverReveal"], true, 0, p, "What they never tell");
+        });
+        {
+            // [IN-WORLD STUFF 2026-10-17] the look (the same calls: look_pad, save_look) and the voice (voiceRow: the Cast page's
+            // picker and premium group; previewVoice), as one row
+            const F32 gt = y;
+            y = head(gl, gr, y - 8.f, "Look and voice", p) - 2.f;
+            const std::string words = mLookCast == cid ? std::string("Saving what you are wearing...") : lookWords(c);
+            const bool dressed = mLookCast != cid && words.rfind("Dressed", 0) == 0;
+            y = para(gl, gr, y, words, dressed ? OK_INK : p.mDim, true) - 6.f;
+            const S32 ip = act([this, cid, shown]() { lookPad(cid, shown); });
+            const F32 pw = btnW("Put a look pad on the land") + 8.f;
+            btn(gl, y - ROW_H, gl + pw, y, "Put a look pad on the land", SH_E, ip,
+                "A round pad with their name appears at your feet; whoever clicks it wearing an outfit gives " + shown + " that look", p, mLookCast.empty() && !mPadBusy);
+            const S32 iw = act([this, cid]() { saveLook(cid); });
+            const F32 ww = btnW("Use what I'm wearing") + 8.f;
+            btn(gl + pw + 6.f, y - ROW_H, gl + pw + 6.f + ww, y, "Use what I'm wearing", SH_E, iw,
+                "Save your current outfit as this character's look (stand on the land this game runs on)", p, mLookCast.empty() && !mPadBusy);
+            y -= ROW_H + 8.f;
+            const bool has_voice = !c["voice"]["id"].asString().empty();
+            const F32 hw = btnW("Hear them") + 8.f, vy = y;
+            y = voiceRow(gl, gr - hw - 6.f, y, at, false, p);
+            const S32 ih = act([this, at]() { previewVoice(at); });
+            btn(gr - hw, vy - ROW_H, gr, vy, "Hear them", SH_E, ih, has_voice ? std::string("Hear them say their first line (only you)") : std::string("Choose a voice first"), p, has_voice && mBusy == 0);
+            y -= 4.f;
+            chamferEdge(fl, y, fr, gt, 6.f, 1.f, fade(p.mDim, 0.6f));
+            y -= 10.f;
+        }
+    }
+    else
+    {
+        // Source: adventure_pack_v1.schema.json $defs enemy: name (1 to 32, required; also the NPC's name tag), description (text500)
+        y = fValue(fl, fr, y, ptrJoin(cp, "name"), "name", prop(cs, "name"), c["name"], false, 0, p, "Name");
+        y = fValue(fl, fr, y, ptrJoin(cp, "description"), "description", prop(cs, "description"), c["description"], true, 0, p, "Who or what they are");
+        const std::string words = enemyLookWords(c);
+        const bool dressed = words.rfind("Dressed", 0) == 0;
+        F32 cl = fl;
+        fRow(fl, fr, y, "Look", cl);
+        y = para(cl, fr, y - 6.f, words, dressed ? OK_INK : p.mDim, true) - 6.f;
+        y = para(fl, fr, y, "How they fight, and what they look like, is set in Advanced editing.", p.mDim, true) - 6.f;
+    }
+    y = llmin(y, py);
+    y -= 6.f;
+    if (!enemy)
+    {
+        // Remove, bottom right: asks first (SC_EDIT_DELETE); refused while the story uses them, with how many boxes name them
+        const S32 ix = act([this, cp, cid, shown]()
+        {
+            // [SIMPLE STUDIO 2026-10-17] plain words: how many boxes name them (distinct "/acts/a/scenes/s/beats/b" pointers; a
+            // use outside a box - a part's stage - counts as one), never the pointers themselves
+            const std::vector<std::string> uses = castUsesList(cid);
+            if (!uses.empty())
+            {
+                std::set<std::string> boxes;
+                for (const std::string& u : uses)
+                {
+                    const size_t bp = u.find("/beats/");
+                    if (bp == std::string::npos) { boxes.insert(u); continue; }
+                    const size_t end = u.find('/', bp + 7);
+                    boxes.insert(end == std::string::npos ? u : u.substr(0, end));
+                }
+                const S32 nb = (S32)boxes.size();
+                mCharsError = shown + llformat(" is in %d box%s of the story, so they stay. Change %s first.", nb, nb == 1 ? "" : "es", nb == 1 ? "that box" : "those boxes");
+                return;
+            }
+            mCharsError.clear();
+            askDelete(0, cp, shown, true);
+        });
+        btn(r - 12.f - btnW("Remove"), y - ROW_H, r - 12.f, y, "Remove", SH_E, ix, "Take this character out of the game (asks first)", p, true, BTN_DANGER);
+        y -= ROW_H + 6.f;
+    }
+    y -= 6.f;
+    // [FIXED FOOT 2026-10-17] "Your story" and "Next: set up your places" are in the fixed bar under the page (drawFootBar)
+    return y;
+}
+
+F32 WolfAdventureStudioView::pageChars(F32 l, F32 r, F32 top, const Palette& p)
+{
+    // [SIMPLE STUDIO 2026-10-17] page 2 "Your characters" (SIMPLE_STUDIO_SPEC.md); [CHARACTER GALLERY 2026-10-17] a gallery of
+    // picture cards (charsGallery), and a card opens that one's page (charsDetail). Ids, home, manner, idle lines, barks, cards,
+    // may do, fights and never says stay on the Cast page (Advanced editing).
+    if (mOpenId.empty())
+    {
+        F32 y = para(l, r, top, "Make your game first: go to Your story and press Build my game.", p.mDim) - 8.f;
+        const S32 ib = act([this]() { press(SH_PAGE, (S32)SP_HELPER); });
+        btn(l, y - 30.f, l + btnW("\xE2\x97\x82 Your story"), y, "\xE2\x97\x82 Your story", SH_E, ib, "Page 1", p, true, BTN_PRIMARY);
+        return y - 38.f;
+    }
+    if (!openIsOwner())
+    {
+        F32 y = para(l, r, top, "Only the game's owner sets up its characters. As a game master or teacher, use Publish to see it and Run to run it.", p.mDim) - 8.f;
+        const S32 ip = act([this]() { press(SH_PAGE, (S32)SP_PUBLISH); });
+        btn(l, y - 30.f, l + btnW("Publish"), y, "Publish", SH_E, ip, "See the game and where it runs", p);
+        return y - 38.f;
+    }
+    if (mDraftJson.empty()) return waiting(l, r, top, "Opening your game...", p);
+    const F32 y = conflictBanner(l, r, top, p) - 10.f;
+    if (mCharsWho.size() > 2)
+    {
+        // one character's (or enemy's) page; gone from the draft (removed, or the helper rewrote the cast) -> the gallery
+        const bool enemy = mCharsWho[0] == 'e';
+        const std::string id = mCharsWho.substr(2);
+        const LLSD& list = std::as_const(mDraftPack)[enemy ? "enemies" : "cast"];
+        for (S32 i = 0; list.isArray() && i < (S32)list.size(); ++i)
+            if (list[i]["id"].asString() == id) return charsDetail(l, r, y, i, enemy, p);
+        mCharsWho.clear();
+    }
+    return charsGallery(l, r, y, p);
 }
 
 bool WolfAdventureStudioView::placesPageShown() const
@@ -4001,7 +4459,7 @@ void WolfAdventureStudioView::importQti()
 // test play (§2.7)
 // ═════════════════════════════════════════════════════════════════════════════════════════════════════════
 
-void WolfAdventureStudioView::testStart(const std::string& beat_in)
+void WolfAdventureStudioView::testStart(const std::string& beat_in, std::function<void()> then)
 {
     std::string beat = beat_in;
     if (beat.empty())
@@ -4009,12 +4467,12 @@ void WolfAdventureStudioView::testStart(const std::string& beat_in)
         const auto beats = draftBeats();
         if (!beats.empty()) beat = beats.front().first;
     }
-    if (beat.empty()) { mTestError = "Add a beat first (Outline page)."; return; }
+    if (beat.empty()) { mTestError = "There is no box to play yet: build your game first."; return; }
     // the draft as it is now: an unsaved change is saved first so the test plays what the author sees
     if (mDirtyAt > 0.0 || mSaving)
     {
         if (!mSaving) saveDraftNow();
-        mTestError = "Saving your last changes first - press Start test again in a moment.";
+        mTestError = "Saving your last changes first - press Play it now again in a moment.";
         return;
     }
     mTestBeat = beat;
@@ -4029,7 +4487,7 @@ void WolfAdventureStudioView::testStart(const std::string& beat_in)
     LLHandle<WolfAdventureStudioView> handle = getDerivedHandle<WolfAdventureStudioView>();
     // BRAIN_API_V1.md §5.5 test_start {adventure, beat, ai} -> {session, region, regionName, here}; refused with the
     // readable reason (and the problems when the draft has errors)
-    WolfAdventure::api("test_start", body, [handle, adv](bool ok, const LLSD& reply, const std::string& error)
+    WolfAdventure::api("test_start", body, [handle, adv, then](bool ok, const LLSD& reply, const std::string& error)
     {
         if (handle.isDead()) return;
         WolfAdventureStudioView* self = handle.get();
@@ -4046,7 +4504,8 @@ void WolfAdventureStudioView::testStart(const std::string& beat_in)
         self->mTestRegionName = cap(reply["regionName"].asString(), 64);
         self->mTestState = LLSD();
         self->mTestFlags = LLSD::emptyMap();
-        self->setStatus("Test started on the draft - only you are in it.", false);
+        self->setStatus("Test started - only you are in it.", false);
+        if (then) then();   // [SIMPLE STUDIO 2026-10-17] page 3's Play it now opens the test page (self is alive: the handle said so)
         self->pollTest(true);
         // §2.7 "when the scene's region is elsewhere it asks to teleport"
         if (reply["here"].asInteger() == 0 && !self->mTestRegionName.empty())
@@ -4078,9 +4537,9 @@ void WolfAdventureStudioView::testOp(const std::string& action, const LLSD& extr
             self->setStatus("Test ended. Nothing it did was real: no rewards were given.", false);
             return;
         }
-        if (action == "test_reset") self->setStatus("Test reset to its first beat.", false);
+        if (action == "test_reset") self->setStatus("Test reset to its first box.", false);
         else if (action == "test_fire")
-            self->setStatus(lg["fired"].asInteger() ? "Fired \"" + lg["trigger"].asString() + "\"; the beat is now " + lg["beat"].asString() + "."
+            self->setStatus(lg["fired"].asInteger() ? "Fired \"" + lg["trigger"].asString() + "\"; the box is now " + lg["beat"].asString() + "."
                                                     : "\"" + lg["trigger"].asString() + "\" did not fire (its Only if is not met, or it fires once and already has).", false);
         else if (action == "test_set") self->setStatus(lg["flag"].asString() + " is now " + valueText(lg["value"]) + ".", false);
         self->pollTest(true);
@@ -4119,8 +4578,8 @@ void WolfAdventureStudioView::pollTest(bool force)
 
 F32 WolfAdventureStudioView::pageTest(F32 l, F32 r, F32 top, const Palette& p)
 {
-    if (!openIsOwner()) return waiting(l, r, top, "Only the adventure's owner test-plays its draft.", p);
-    if (mDraftJson.empty()) return waiting(l, r, top, "Opening the draft...", p);
+    if (!openIsOwner()) return waiting(l, r, top, "Only the game's owner can play it to test it.", p);
+    if (mDraftJson.empty()) return waiting(l, r, top, "Opening your game...", p);
     const LLFontGL* small = LLFontGL::getFontSansSerifSmall();
     const LLFontGL* bold = LLFontGL::getFontSansSerifSmallBold();
     const F32 slh = (F32)small->getLineHeight();
@@ -4128,18 +4587,18 @@ F32 WolfAdventureStudioView::pageTest(F32 l, F32 r, F32 top, const Palette& p)
     // the controls on the left, the debug overlay plate on the right (§2.7 "a plate at the right")
     const F32 split = l + llmax(220.f, (r - l) * 0.36f);
     F32 ly = head(l, split - 10.f, y, "Test Play", p);
-    ly = para(l, split - 10.f, ly, "Plays the draft for you alone, from the beat you choose, with the stage set on your region. Test sessions never give real rewards.", p.mDim, true) - 6.f;
+    ly = para(l, split - 10.f, ly, "Plays your game for you alone, from the box you choose, with its characters on your land. Test games never give real rewards.", p.mDim, true) - 6.f;
     {
         std::string label = mTestBeat;
         for (const auto& b : draftBeats()) if (b.first == mTestBeat) label = b.second;
-        if (label.empty()) label = "(the first beat)";
-        textL(small, "From the beat", l, ly - 4.f, p.mText);
+        if (label.empty()) label = "(the first box)";
+        textL(small, "From the box", l, ly - 4.f, p.mText);
         ly -= slh + 4.f;
         const S32 ib = act([this]()
         {
-            openPicker("Play from the beat", draftBeats(), [this](const std::string& v) { if (!v.empty()) mTestBeat = v; }, "Add a beat on the Outline page first.");
+            openPicker("Play from the box", draftBeats(), [this](const std::string& v) { if (!v.empty()) mTestBeat = v; }, "There is no box yet: build your game first.");
         });
-        btn(l, ly - ROW_H, split - 10.f, ly, cap(label, 40), SH_E, ib, "Choose the beat the test starts at", p);
+        btn(l, ly - ROW_H, split - 10.f, ly, cap(label, 40), SH_E, ib, "Choose the box the test starts at", p);
         ly -= ROW_H + 8.f;
     }
     {
@@ -4155,10 +4614,10 @@ F32 WolfAdventureStudioView::pageTest(F32 l, F32 r, F32 top, const Palette& p)
     {
         const bool running = !mTestSession.empty();
         const S32 is = act([this]() { testStart(mTestBeat); });
-        btn(l, ly - ROW_H, split - 10.f, ly, running ? "Start again from this beat" : "Start test", SH_E, is, "Start a test session on the draft (the service ends your earlier test of this adventure first)", p, mBusy == 0, BTN_PRIMARY);
+        btn(l, ly - ROW_H, split - 10.f, ly, running ? "Start again from this box" : "Start test", SH_E, is, "Start playing your game to test it (your earlier test of this game ends first)", p, mBusy == 0, BTN_PRIMARY);
         ly -= ROW_H + 6.f;
         const S32 ir = act([this]() { testOp("test_reset", LLSD::emptyMap(), "Resetting the test..."); });
-        btn(l, ly - ROW_H, split - 10.f, ly, "Reset test", SH_E, ir, "Clear the test's flags and go back to its first beat", p, running);
+        btn(l, ly - ROW_H, split - 10.f, ly, "Reset test", SH_E, ir, "Clear the test's flags and go back to its first box", p, running);
         ly -= ROW_H + 6.f;
         const S32 ie = act([this]() { testOp("test_end", LLSD::emptyMap(), "Ending the test..."); });
         btn(l, ly - ROW_H, split - 10.f, ly, "End test", SH_E, ie, "End the test: its characters leave and its state is cleared", p, running, BTN_DANGER);
@@ -4168,7 +4627,7 @@ F32 WolfAdventureStudioView::pageTest(F32 l, F32 r, F32 top, const Palette& p)
             LLViewerRegion* rgn = gAgent.getRegion();
             if (!rgn || rgn->getName() != mTestRegionName)
             {
-                ly = para(l, split - 10.f, ly, "The scene is on " + mTestRegionName + ".", p.mDim, true);
+                ly = para(l, split - 10.f, ly, "This part plays on " + mTestRegionName + ".", p.mDim, true);
                 const S32 itp = act([this]() { mConfirmKeyA = mTestRegionName; ask(SC_TEST_TELEPORT, 0); });
                 btn(l, ly - ROW_H, split - 10.f, ly, "Teleport there...", SH_E, itp, "Teleport to " + mTestRegionName + " (asks first)", p);
                 ly -= ROW_H + 8.f;
@@ -4185,7 +4644,7 @@ F32 WolfAdventureStudioView::pageTest(F32 l, F32 r, F32 top, const Palette& p)
     F32 py = y;
     if (mTestSession.empty())
     {
-        py = para(pl + 10.f, pr - 10.f, py - 10.f, "Start a test to see the debug overlay: where the story is, its flags (change them here), the triggers armed now with Fire buttons, the last 20 events, the timers, and the AI meter.", p.mDim, true);
+        py = para(pl + 10.f, pr - 10.f, py - 10.f, "Start a test to see what is going on: where the story is, its flags (change them here), what can happen now with Fire buttons, the last 20 events, the timers, and the AI meter.", p.mDim, true);
         return llmin(ly, py) - 8.f;
     }
     const F32 plate_top = py;
@@ -4195,7 +4654,7 @@ F32 WolfAdventureStudioView::pageTest(F32 l, F32 r, F32 top, const Palette& p)
     if (!st.isMap()) py = para(pl + 10.f, pr - 10.f, py, mTestLoading ? "Reading the test..." : "Waiting for the test's state...", p.mDim, true);
     else
     {
-        py = para(pl + 10.f, pr - 10.f, py, "Act " + st["act"].asString() + "  >  Scene " + st["scene"].asString() + "  >  Beat " + st["beat"].asString(), p.mText, true);
+        py = para(pl + 10.f, pr - 10.f, py, "Part " + st["act"].asString() + ", " + st["scene"].asString() + "  >  Box " + st["beat"].asString(), p.mText, true);
         if (!st["objective"].asString().empty()) py = para(pl + 10.f, pr - 10.f, py, "Objective: " + cap(st["objective"].asString(), 240), p.mDim, true);
         if (!st["ending"].asString().empty()) py = para(pl + 10.f, pr - 10.f, py, "Ended: " + st["ending"].asString(), WARN_INK, true);
         py -= 6.f;
@@ -4226,8 +4685,8 @@ F32 WolfAdventureStudioView::pageTest(F32 l, F32 r, F32 top, const Palette& p)
         }
         py -= 4.f;
         // triggers armed on this beat, with Fire
-        py = head(pl + 10.f, pr - 10.f, py, "Triggers on this beat", p);
-        if (!st["triggers"].isArray() || st["triggers"].size() == 0) py = para(pl + 10.f, pr - 10.f, py, "No triggers on this beat.", p.mDim, true);
+        py = head(pl + 10.f, pr - 10.f, py, "What can happen in this box", p);
+        if (!st["triggers"].isArray() || st["triggers"].size() == 0) py = para(pl + 10.f, pr - 10.f, py, "Nothing is set to happen in this box yet.", p.mDim, true);
         for (const LLSD& t : llsd::inArray(st["triggers"]))
         {
             const std::string tid = t["id"].asString();
@@ -4566,13 +5025,17 @@ void WolfAdventureStudioView::editTick()
             if (!mHelperWalkRegion.empty() && here != mHelperWalkRegion && mHelperWalkFailedRegion.empty()) helperWalk(true);
         }
     // [review] the walking state read again now and then: the brain removes a helper nobody used for 30 minutes
-    if (mPage == SP_HELPER && mHelperWalking && !mOpenId.empty() && t >= mHelperWalkCheckAt)
+    if (mPage == SP_MAP && mHelperWalking && !mOpenId.empty() && t >= mHelperWalkCheckAt)
     {
         mHelperWalkCheckAt = t + 60.0;
         mHelperLoaded = false;
         helperHistory();
     }
     if (mLookReloadAt > 0.0 && t >= mLookReloadAt) lookReload();
+    // [IN-WORLD STUFF 2026-10-17] a pad clicked in the world, a thing being made, and whether the brain has Clean up the land
+    padsTick();
+    meshTick();
+    landCleanupTick();
     if (mFocusScroll && t - mFocusAt > 1.5) mFocusScroll = false;   // a problem whose field is not drawn as one
     if (!mDraftJson.empty()) loadPreset();
     // the place tool belongs to the Places page only; while it is out, its nudges are written after a pause
@@ -4781,9 +5244,10 @@ bool WolfAdventureStudioView::editConfirmText(S32 what, std::string& title, std:
     switch (what)
     {
     case SC_EDIT_DELETE:
-        title = "Delete " + mConfirmKeyA + "?";
-        body = "It is taken out of the draft. Anything that still refers to it shows as a problem until you change it.";
-        yes = "Delete";
+        // [SIMPLE STUDIO 2026-10-17] page 2's Remove (askDelete remove = true): "Remove <name>?" / Remove / Keep (drawConfirm)
+        title = (mConfirmKeyB == "remove" ? "Remove " : "Delete ") + mConfirmKeyA + "?";
+        body = "They are taken out of your game. Anything that still refers to them shows as a problem until you change it.";
+        yes = mConfirmKeyB == "remove" ? "Remove" : "Delete";
         danger = true;
         return true;
     case SC_TEST_TELEPORT:
@@ -4820,6 +5284,21 @@ bool WolfAdventureStudioView::editConfirmText(S32 what, std::string& title, std:
             ? std::string("Every stat and check this pack uses is in ") + mConfirmKeyA + ". Your changes to the rules are kept."
             : mConfirmKeyA + " does not have these, which the pack uses: " + mConfirmKeyB + ". They show as problems until you change them. Your changes to the rules are kept.";
         yes = "Use " + mConfirmKeyA;
+        return true;
+    case SC_MESH_CANCEL:
+        // [IN-WORLD STUFF 2026-10-17] Stop on a thing being made (the build's own words, wolffloateradventurestudio.cpp SC_JOB_CANCEL)
+        title = "Stop making " + mMeshName + "?";
+        body = "What has been spent so far is not given back.";
+        yes = "Stop";
+        danger = true;
+        return true;
+    case SC_LAND_CLEANUP:
+        // [IN-WORLD STUFF 2026-10-17] Paul's words; the game's name typed into the field (drawConfirm typedConfirm)
+        title = "Clean up the land?";
+        body = "This takes every character, look pad and object the game put on " + mConfirmKeyA + " off the land. Your own objects stay. "
+               "Type the game's name to confirm:";
+        yes = "Clean up";
+        danger = true;
         return true;
     default:
         return false;
@@ -4894,6 +5373,27 @@ void WolfAdventureStudioView::editAnswer(S32 what)
         mRulesGen = 0;
         setStatus("The rules are now " + mConfirmKeyA + ".", false);
         break;
+    case SC_MESH_CANCEL:   // [IN-WORLD STUFF 2026-10-17]
+    {
+        if (mMeshJobId.empty()) break;
+        LLSD body;
+        body["job"] = mMeshJobId;
+        mMeshBusy = true;
+        const std::string job = mMeshJobId;
+        LLHandle<WolfAdventureStudioView> handle = getDerivedHandle<WolfAdventureStudioView>();
+        // wolfmind_lib.php wa_api_job_cancel: queued / running -> cancelled; the next poll says so (meshPoll)
+        WolfAdventure::api("job_cancel", body, [handle, job](bool ok, const LLSD&, const std::string& error)
+        {
+            if (handle.isDead()) return;
+            WolfAdventureStudioView* self = handle.get();
+            self->mMeshBusy = false;
+            if (self->mMeshJobId != job) return;
+            if (!ok) { self->mMeshError = "Not stopped: " + error; return; }
+            self->mMeshPollAt = now();
+        });
+        break;
+    }
+    case SC_LAND_CLEANUP: landCleanup(); break;   // [IN-WORLD STUFF 2026-10-17]
     default:
         break;
     }
@@ -5040,6 +5540,13 @@ void WolfAdventureStudioView::editClosed(bool app_quitting)
     if (LLFloater* fp = mTexPicker.get()) fp->closeFloater();
     if (mField == F_EDIT) commitEdit();
     mField = F_NONE;
+    // [SIMPLE STUDIO 2026-10-17] closed during the cost question, or on the way to it: as pressing No - the quoted job is dropped
+    // and the game this attempt made goes again (no stray card, nothing charged); from "Yes, build it" on the build carries on
+    if (mBuildStep >= B_CREATING && mBuildStep < B_STARTING)
+    {
+        if (mBuildStep == B_QUOTED) buildNo();
+        else { mBuildStep = B_NONE; mBuildError.clear(); buildUnmake(); }
+    }
     writeRecovery();
     if (app_quitting) return;
     if (mDirtyAt > 0.0 && !mSaving && !mConflict) saveDraftNow();
@@ -5086,4 +5593,530 @@ namespace WolfAdvStudio
         const LLColor4 white(1.f, 1.f, 1.f, 1.f), black(0.f, 0.f, 0.f, 1.f);
         return contrast(white, bg) >= contrast(black, bg) ? white : black;
     }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// [IN-WORLD STUFF 2026-10-17] IN_WORLD_STUFF_PLAN.md: look pads (page 2), the things a box needs and "Make it for me"
+// (page 3's box panel), "Clean up the land" (page 3). Brain contracts (the coordinator's, 2026-10-17; the PHP was not
+// there yet when this was written - field names as the contract gives them):
+//   look_pad {adventure, cast, here} / look_pads_clear {adventure}; owner_settings {lookPadsAnyone}
+//   box_things {adventure, box} -> {things: [{id, name, why, script, done}]}
+//   mesh_quote {adventure, thing, prompt} -> {job, quote{credits}}; mesh_start {job, confirm:true}; job {job} as a build's
+//   land_cleanup {adventure, region, confirm} (confirm = the game's exact title)
+// A brain without an action answers "unknown action" (wolfadventure_lib.php:5002): that button is then not shown.
+// ═══════════════════════════════════════════════════════════════════════════════════════
+
+namespace
+{
+    bool unknownAction(const std::string& error) { return error.find("unknown action") != std::string::npos; }
+}
+
+std::string WolfAdventureStudioView::lookWords(const LLSD& c)
+{
+    // Paul (2026-10-17): characters get a STANDARD look until they are dressed - the cast sheet carries look.standard = true until a
+    // pad touch or Use what I'm wearing sets look.appearance (and the brain writes look.dressedBy = who clicked the pad)
+    const LLSD& look = c["look"];
+    const bool standard = look["standard"].isBoolean() && look["standard"].asBoolean();
+    const std::string appearance = look["appearance"].asString(), by = WolfGame::cleanText(look["dressedBy"].asString(), 60);
+    if (standard || appearance.empty()) return "Standard look until you dress them: put a look pad on the land and click it wearing their outfit.";
+    if (!by.empty()) return "Dressed like " + by;
+    return "Dressed in what you were wearing";
+}
+
+F32 WolfAdventureStudioView::lookPadsHead(F32 l, F32 r, F32 top, const Palette& p)
+{
+    // the owner setting, read with the other owner settings (owner_settings {} -> settings); shown only once the brain reports
+    // lookPadsAnyone (an older brain does not: nothing is drawn, never a switch that does nothing)
+    if (!mOwnerLoaded) { loadOwnerSettings(); return top; }
+    if (!mOwner.isMap() || !mOwner.has("lookPadsAnyone")) return top;
+    const bool on = mOwner["lookPadsAnyone"].asBoolean();
+    const std::string label = "Anyone can help dress my characters";
+    const S32 ia = act([this, on]() { lookPadsAnyone(!on); });
+    toggle(l, top, btnW(label + ": Off") + 12.f, label, on, SH_E, ia,
+           "Off: only you can click a look pad. On: anyone on the land can click one to give a character their outfit", p, !mAnyoneBusy);
+    textL(LLFontGL::getFontSansSerifSmall(), "A look pad is a round pad with the character's name: whoever clicks it, wearing an outfit, gives them that look.",
+          l, top - 26.f - 2.f, p.mDim, LLFontGL::LEFT, LLFontGL::TOP, r - l);
+    return top - 26.f - 2.f - (F32)LLFontGL::getFontSansSerifSmall()->getLineHeight() - 8.f;
+}
+
+void WolfAdventureStudioView::lookPad(const std::string& cid, const std::string& name)
+{
+    if (mOpenId.empty() || mPadBusy || !mLookCast.empty()) return;
+    if (mDirtyAt > 0.0 || mSaving)
+    {
+        // the brain names the pad from the saved draft: unsaved changes (a new character, a new name) go first
+        if (!mSaving) saveDraftNow();
+        setStatus("Saving your last changes first - press Put a look pad on the land again in a moment.", false);
+        return;
+    }
+    const LLSD here = helperHere();   // {region, pos}, exactly as helper_do sends it
+    if (!here.isMap()) { mCharsError = "Stand in the world first: the pad appears at your feet."; return; }
+    LLSD body;
+    body["adventure"] = mOpenId;
+    body["cast"] = cid;
+    body["here"] = here;
+    mPadBusy = true;
+    mCharsError.clear();
+    const std::string adv = mOpenId;
+    LLHandle<WolfAdventureStudioView> handle = getDerivedHandle<WolfAdventureStudioView>();
+    // Source: wolfadventure_studio_lib.php wa_api_look_pad (433-456) -> {queued, region, regionName, pos, note, say}; `note` says when
+    // the position came from the Studio because the live map could not see the author
+    WolfAdventure::api("look_pad", body, [handle, adv, name](bool ok, const LLSD& reply, const std::string& error)
+    {
+        if (handle.isDead()) return;
+        WolfAdventureStudioView* self = handle.get();
+        self->mPadBusy = false;
+        if (self->mOpenId != adv) return;
+        if (!ok)
+        {
+            self->mCharsError = unknownAction(error) ? std::string("Look pads need the latest adventure service, which this grid does not have yet.")
+                                                     : "The pad was not put down: " + error;
+            return;
+        }
+        const std::string note = WolfGame::cleanText(reply["note"].asString(), 200);
+        self->setStatus("A pad for " + name + " is at your feet. Wear the look you want and click it." + (note.empty() ? std::string() : " " + note), false);
+        self->mPadsOut = true;
+        self->mPadPollAt = now() + 8.0;
+    });
+}
+
+void WolfAdventureStudioView::lookPadsClear()
+{
+    if (mOpenId.empty() || mPadBusy) return;
+    LLSD body;
+    body["adventure"] = mOpenId;
+    mPadBusy = true;
+    mCharsError.clear();
+    const std::string adv = mOpenId;
+    LLHandle<WolfAdventureStudioView> handle = getDerivedHandle<WolfAdventureStudioView>();
+    WolfAdventure::api("look_pads_clear", body, [handle, adv](bool ok, const LLSD& reply, const std::string& error)
+    {
+        if (handle.isDead()) return;
+        WolfAdventureStudioView* self = handle.get();
+        self->mPadBusy = false;
+        if (self->mOpenId != adv) return;
+        if (!ok)
+        {
+            self->mCharsError = unknownAction(error) ? std::string("Look pads need the latest adventure service, which this grid does not have yet.")
+                                                     : "The pads were not taken away: " + error;
+            return;
+        }
+        self->mPadsOut = false;
+        self->mPadPollAt = 0.0;
+        const std::string say = WolfGame::cleanText(reply["say"].asString(), 300);
+        self->setStatus(say.empty() ? std::string("The look pads are gone.") : say, false);
+    });
+}
+
+void WolfAdventureStudioView::lookPadsAnyone(bool on)
+{
+    if (mAnyoneBusy || !mOwnerLoaded) return;
+    LLSD body;
+    body["lookPadsAnyone"] = on;
+    mAnyoneBusy = true;
+    LLHandle<WolfAdventureStudioView> handle = getDerivedHandle<WolfAdventureStudioView>();
+    // owner_settings with a field writes it and answers with every setting (wolfmind_lib.php wa_api_owner_settings)
+    WolfAdventure::api("owner_settings", body, [handle, on](bool ok, const LLSD& reply, const std::string& error)
+    {
+        if (handle.isDead()) return;
+        WolfAdventureStudioView* self = handle.get();
+        self->mAnyoneBusy = false;
+        if (!ok) { self->mCharsError = "That was not saved: " + error; return; }
+        if (reply["settings"].isMap()) self->mOwner = reply["settings"];
+        self->mCharsError.clear();
+        self->setStatus(on ? "Saved: anyone on the land can click a look pad to dress your characters." : "Saved: only you can click a look pad.", false);
+    });
+}
+
+void WolfAdventureStudioView::padsTick()
+{
+    // a pad clicked in the world: the brain writes the look into the saved draft (look_touch, the save_look path) - while pads are
+    // out and page 2 shows, the draft is read every 8 s and the looks taken (nothing else of the author's is touched)
+    if (!mPadsOut || mPage != SP_CHARS || mPadPolling || mOpenId.empty() || mDraftJson.empty() || !mLookCast.empty()) return;
+    if (mPadPollAt <= 0.0 || now() < mPadPollAt) return;
+    mPadPolling = true;
+    LLSD body;
+    body["adventure"] = mOpenId;
+    const std::string adv = mOpenId;
+    LLHandle<WolfAdventureStudioView> handle = getDerivedHandle<WolfAdventureStudioView>();
+    WolfAdventure::api("get_draft", body, [handle, adv](bool ok, const LLSD& reply, const std::string&)
+    {
+        if (handle.isDead()) return;
+        WolfAdventureStudioView* self = handle.get();
+        self->mPadPolling = false;
+        self->mPadPollAt = now() + 8.0;
+        if (self->mOpenId != adv || !ok || !reply["pack"]["cast"].isArray()) return;
+        // which characters' looks changed, by id
+        std::vector<std::pair<S32, LLSD>> changed;   // index in the open draft, the new look
+        const LLSD& mine = std::as_const(self->mDraftPack)["cast"];
+        for (const LLSD& c : llsd::inArray(reply["pack"]["cast"]))
+        {
+            for (S32 i = 0; mine.isArray() && i < (S32)mine.size(); ++i)
+            {
+                if (mine[i]["id"].asString() != c["id"].asString()) continue;
+                const LLSD& a = mine[i]["look"];
+                const LLSD& b = c["look"];
+                if (a["appearance"].asString() != b["appearance"].asString() || a["dressedBy"].asString() != b["dressedBy"].asString()
+                    || (a["standard"].isBoolean() && a["standard"].asBoolean()) != (b["standard"].isBoolean() && b["standard"].asBoolean()))
+                    changed.push_back({ i, b });
+            }
+        }
+        if (changed.empty()) return;
+        if (self->mDirtyAt > 0.0 || self->mSaving)
+        {
+            // changes made meanwhile: keep them, take the brain's etag, and write the looks into them (as lookReload does)
+            self->mEtag = reply["etag"].asString();
+            for (const auto& ch : changed) self->docSet(0, llformat("/cast/%d/look", ch.first), LlsdToJson(ch.second));
+        }
+        else
+        {
+            self->setDraftText(reply["pack_json"].asString(), reply["pack"]);
+            self->mEtag = reply["etag"].asString();
+            self->setProblems(reply["problems"]);
+            self->mRulesGen = 0;
+        }
+        for (const auto& ch : changed)
+        {
+            const std::string by = WolfGame::cleanText(ch.second["dressedBy"].asString(), 60);
+            const LLSD& c = std::as_const(self->mDraftPack)["cast"][ch.first];
+            const std::string nm = WolfGame::cleanText(c["first"].asString() + " " + c["last"].asString(), 60);
+            if (!by.empty()) self->setStatus(nm + " now looks like " + by + ".", false);
+        }
+    });
+}
+
+// ---- page 3: the things a box needs ----
+
+void WolfAdventureStudioView::loadBoxThings(const std::string& beat_id)
+{
+    if (mOpenId.empty() || mThingsLoading || mThingsMissing) return;
+    mThingsLoading = true;
+    mThingsFor = beat_id;
+    mThingsGen = mDraftGen;
+    mThingsError.clear();
+    LLSD body;
+    body["adventure"] = mOpenId;
+    body["box"] = beat_id;
+    const std::string adv = mOpenId;
+    LLHandle<WolfAdventureStudioView> handle = getDerivedHandle<WolfAdventureStudioView>();
+    // box_things {adventure, box} -> {things: [{id, name, why, script, done}]}
+    WolfAdventure::api("box_things", body, [handle, adv, beat_id](bool ok, const LLSD& reply, const std::string& error)
+    {
+        if (handle.isDead()) return;
+        WolfAdventureStudioView* self = handle.get();
+        self->mThingsLoading = false;
+        if (self->mOpenId != adv || self->mThingsFor != beat_id) return;
+        if (!ok)
+        {
+            if (unknownAction(error)) { self->mThingsMissing = true; return; }   // an older brain: the section is not drawn
+            self->mThingsError = "What this box needs could not be read: " + error;
+            self->mThings = LLSD::emptyArray();
+            return;
+        }
+        self->mThings = reply["things"].isArray() ? reply["things"] : LLSD::emptyArray();
+    });
+}
+
+F32 WolfAdventureStudioView::boxThings(F32 l, F32 r, F32 top, const std::string& beat_id, const Palette& p)
+{
+    if (mThingsMissing || beat_id.empty()) return top;
+    if ((mThingsFor != beat_id || mThingsGen != mDraftGen) && !mThingsLoading && !mMeshBusy) loadBoxThings(beat_id);
+    const LLFontGL* small = LLFontGL::getFontSansSerifSmall();
+    const LLFontGL* f = LLFontGL::getFontSansSerif();
+    const F32 slh = (F32)small->getLineHeight();
+    F32 y = head(l, r, top, "Things to build here", p);
+    if (mThingsLoading && (mThingsFor != beat_id || !mThings.isArray())) return para(l, r, y, "Looking at what this box needs...", p.mDim, true) - 8.f;
+    if (!mThingsError.empty())
+    {
+        y = para(l, r, y, mThingsError, DANGER_INK) - 4.f;
+        const S32 it = act([this, beat_id]() { mThingsFor.clear(); loadBoxThings(beat_id); });
+        btn(l, y - ROW_H, l + btnW("Try again"), y, "Try again", SH_E, it, "Ask again what this box needs", p, !mThingsLoading);
+        return y - ROW_H - 8.f;
+    }
+    const S32 n = mThings.isArray() ? (S32)mThings.size() : 0;
+    if (n == 0) return para(l, r, y, "This box needs nothing built. Place it and move on.", p.mDim, true) - 8.f;
+    for (S32 i = 0; i < n; ++i)
+    {
+        const LLSD& t = std::as_const(mThings)[i];
+        // Source: wolfadventure_things_lib.php wat_box_things (130-217): {id "<box>/<kind>:<name>", kind, name, why, how, script (""
+        // for an item inside a chest), done (a chest bound in-world), doneText}
+        const std::string id = t["id"].asString(), name = WolfGame::cleanText(t["name"].asString(), 60), why = WolfGame::cleanText(t["why"].asString(), 200);
+        const bool done = t["done"].asBoolean();
+        const std::string script = t["script"].asString();
+        const std::string how = WolfGame::cleanText(t["how"].asString(), 300), doneText = WolfGame::cleanText(t["doneText"].asString(), 120);
+        // the line: "<name> - <why>", ticked when an object is linked to this box already (the tick and the word, not colour alone)
+        y = para(l, r, y, (done ? "\xE2\x9C\x93 " : "") + name + (why.empty() ? std::string() : " - " + why) + (done ? " (done)" : ""), done ? OK_INK : p.mText) - 2.f;
+        if (!how.empty()) y = para(l + 12.f, r, y, how + (doneText.empty() ? std::string() : " " + doneText), p.mDim, true) - 4.f;
+        F32 x = l + 12.f;
+        {
+            const S32 ic = act([this, script, name]()
+            {
+                if (script.empty()) { mMeshError = "The brain gave no script for " + name + "."; return; }
+                const LLWString w = utf8str_to_wstring(script);
+                LLClipboard::instance().copyToClipboard(w, 0, (S32)w.size());
+                setStatus("The script for " + name + " is on the clipboard: paste it into a New Script in your object.", false);
+            });
+            const F32 bw = btnW("Copy the script");
+            btn(x, y - ROW_H, x + bw, y, "Copy the script", SH_E, ic, "Put the whole script on the clipboard", p, !script.empty());
+            x += bw + 6.f;
+        }
+        if (!mMeshMissing)
+        {
+            // "Make it for me (Meshy)": the cost is quoted first (mesh_quote), then asked inline; nothing is charged before Yes
+            std::string lab = "Make it for me (Meshy)";
+            if (t["credits"].isDefined() && t["credits"].asReal() > 0.0) lab += llformat(" - about %d credits", (S32)ceil(t["credits"].asReal()));
+            const bool making = !mMeshJobId.empty();
+            const S32 im = act([this, id, name]() { meshQuote(id, name); });
+            const F32 bw = btnW(lab);
+            if (x + bw > r) { x = l + 12.f; y -= ROW_H + 4.f; }
+            btn(x, y - ROW_H, x + bw, y, lab, SH_E, im, making ? std::string("One thing at a time: wait until the one being made is done")
+                                                             : "Meshy makes a 3D model of " + name + " and puts it in your inventory. You see the cost first.",
+                p, !mMeshBusy && !making && !done);
+        }
+        y -= ROW_H + 6.f;
+        // the inline question for this thing (mesh_quote answered)
+        if (mMeshQuote.isMap() && mMeshQuote["thing"].asString() == id)
+        {
+            const S32 credits = mMeshQuote["credits"].asInteger();
+            y = para(l + 12.f, r, y, llformat("Making %s costs about %d credits (US $%.2f). Make it?", name.c_str(), credits, (F64)credits / 100.0), p.mText) - 4.f;
+            const S32 iy = act([this]() { meshStart(); });
+            const S32 in_ = act([this]() { meshNo(); });
+            btn(l + 12.f, y - ROW_H, l + 12.f + btnW("Yes, make it") + 12.f, y, "Yes, make it", SH_E, iy, llformat("Charges about %d credits to your WolfCredits", credits), p, !mMeshBusy, BTN_PRIMARY);
+            btn(l + 12.f + btnW("Yes, make it") + 20.f, y - ROW_H, l + 12.f + btnW("Yes, make it") + 20.f + btnW("No"), y, "No", SH_E, in_, "Nothing is charged", p, !mMeshBusy);
+            y -= ROW_H + 8.f;
+        }
+        // the progress card for this thing (the build's pattern: what is happening, the brain's step, the spend, Stop)
+        if (!mMeshJobId.empty() && mMeshThing == id)
+        {
+            const std::string state = std::as_const(mMeshJob)["state"].asString();
+            const std::string pr = WolfGame::cleanText(std::as_const(mMeshJob)["progress"].asString(), 120);
+            const S64 el = mMeshRunAt > 0 ? llmax((S64)0, (S64)(time(nullptr) - mMeshRunAt)) : 0;
+            const std::string clock = el >= 60 ? llformat("Working for %d min %d s", (S32)(el / 60), (S32)(el % 60)) : llformat("Working for %d s", (S32)el);
+            std::string spent;
+            if (std::as_const(mMeshJob)["cost"].isMap()) spent = llformat("Spent so far: %.0f credits.", std::as_const(mMeshJob)["cost"]["credits"].asReal());
+            const F32 lh = (F32)f->getLineHeight();
+            const F32 bh = 10.f + lh + 4.f + lh + 4.f + 6.f + 8.f + lh + (spent.empty() ? 0.f : slh + 2.f) + 8.f + 30.f + 10.f;
+            card(l, y - bh, r, y, p, 8.f);
+            F32 cy = y - 10.f;
+            textL(LLFontGL::getFontSansSerifBold(), "Making " + name + "...", l + 12.f, cy, p.mAccent, LLFontGL::LEFT, LLFontGL::TOP, r - l - 24.f); cy -= lh + 4.f;
+            textL(f, "Step: " + (pr.empty() ? (state == "queued" ? std::string("Waiting to start") : std::string("Making the model...")) : pr), l + 12.f, cy, p.mText, LLFontGL::LEFT, LLFontGL::TOP, r - l - 24.f);
+            cy -= lh + 4.f;
+            {
+                // the moving bar, as page 1's progress card
+                const F32 bl = l + 12.f, br = r - 12.f;
+                rect(bl, cy - 6.f, br, cy, fade(p.mDim, 0.3f));
+                const F32 tt = (F32)fmod(LLFrameTimer::getTotalSeconds(), 2.4) / 2.4f;
+                const F32 u = tt < 0.5f ? tt * 2.f : (1.f - tt) * 2.f;
+                const F32 hw = (br - bl) * 0.22f;
+                rect(bl + u * (br - bl - hw), cy - 6.f, bl + u * (br - bl - hw) + hw, cy, p.mAccent);
+                cy -= 6.f + 8.f;
+            }
+            textL(f, clock, l + 12.f, cy, p.mDim); cy -= lh;
+            if (!spent.empty()) { textL(small, spent, l + 12.f, cy, p.mDim); cy -= slh + 2.f; }
+            cy -= 8.f;
+            const S32 is = act([this]() { ask(SC_MESH_CANCEL, 0); });
+            btn(l + 12.f, cy - 30.f, l + 12.f + btnW("Stop", 100.f), cy, "Stop", SH_E, is, "Stop making it (asks first); what has been spent so far is not given back", p,
+                !mMeshBusy && (state == "queued" || state == "running"), BTN_DANGER);
+            y -= bh + 8.f;
+        }
+    }
+    y = para(l, r, y, "Build or get the object, put the script in it, then touch it once to link it to this box.", p.mDim, true) - 4.f;
+    if (!mMeshDone.empty()) y = para(l, r, y, mMeshDone, OK_INK) - 4.f;
+    if (!mMeshError.empty()) y = para(l, r, y, mMeshError, DANGER_INK) - 4.f;
+    return y - 6.f;
+}
+
+void WolfAdventureStudioView::meshQuote(const std::string& thing_id, const std::string& name)
+{
+    if (mOpenId.empty() || mMeshBusy || mMeshMissing || !mMeshJobId.empty()) return;
+    mMeshError.clear();
+    mMeshDone.clear();
+    if (mMeshQuote.isMap() && !mMeshQuote["job"].asString().empty()) meshNo(false);   // an earlier question not answered: its job is dropped
+    // the prompt: the thing's name, in the style of the story (its title)
+    const std::string title = WolfGame::cleanText(std::as_const(mDraftPack)["adventure"]["title"].asString().empty() ? mOpenTitle
+                                                  : std::as_const(mDraftPack)["adventure"]["title"].asString(), 80);
+    LLSD body;
+    body["adventure"] = mOpenId;
+    body["thing"] = thing_id;
+    body["prompt"] = name + (title.empty() ? std::string() : " in the style of " + title);
+    mMeshBusy = true;
+    const std::string adv = mOpenId;
+    LLHandle<WolfAdventureStudioView> handle = getDerivedHandle<WolfAdventureStudioView>();
+    // mesh_quote {adventure, thing, prompt} -> {job, quote{credits}}: nothing is charged until mesh_start
+    WolfAdventure::api("mesh_quote", body, [handle, adv, thing_id, name](bool ok, const LLSD& reply, const std::string& error)
+    {
+        if (handle.isDead()) return;
+        WolfAdventureStudioView* self = handle.get();
+        self->mMeshBusy = false;
+        if (self->mOpenId != adv) return;
+        if (!ok)
+        {
+            if (unknownAction(error)) { self->mMeshMissing = true; self->setStatus("Make it for me needs the latest adventure service, which this grid does not have yet.", true); return; }
+            self->mMeshError = "The cost could not be worked out: " + error;
+            return;
+        }
+        const std::string job = reply["job"].asString();
+        if (job.empty()) { self->mMeshError = "The cost could not be worked out: the brain gave no job back."; return; }
+        LLSD q;
+        q["job"] = job;
+        q["credits"] = (S32)ceil(reply["quote"]["credits"].asReal());
+        q["thing"] = thing_id;
+        q["name"] = name;
+        self->mMeshQuote = q;
+    });
+}
+
+void WolfAdventureStudioView::meshStart()
+{
+    if (mOpenId.empty() || mMeshBusy || !mMeshQuote.isMap()) return;
+    LLSD body;
+    body["job"] = mMeshQuote["job"].asString();
+    body["confirm"] = true;
+    mMeshBusy = true;
+    const std::string adv = mOpenId, thing = mMeshQuote["thing"].asString(), name = mMeshQuote["name"].asString(), job = mMeshQuote["job"].asString();
+    LLHandle<WolfAdventureStudioView> handle = getDerivedHandle<WolfAdventureStudioView>();
+    // mesh_start {job, confirm:true}: the quoted job runs (text-to-3D, the GLB into the author's inventory)
+    WolfAdventure::api("mesh_start", body, [handle, adv, thing, name, job](bool ok, const LLSD& reply, const std::string& error)
+    {
+        if (handle.isDead()) return;
+        WolfAdventureStudioView* self = handle.get();
+        self->mMeshBusy = false;
+        if (self->mOpenId != adv) return;
+        self->mMeshQuote = LLSD();
+        if (!ok) { self->mMeshError = "Making " + name + " was not started: " + error; return; }
+        self->mMeshJobId = reply["job"].asString().empty() ? job : reply["job"].asString();
+        self->mMeshThing = thing;
+        self->mMeshName = name;
+        self->mMeshJob = LLSD::emptyMap();
+        self->mMeshJob["state"] = "queued";
+        self->mMeshRunAt = time(nullptr);
+        self->mMeshPollAt = now();
+    });
+}
+
+void WolfAdventureStudioView::meshNo(bool say)
+{
+    if (!mMeshQuote.isMap()) return;
+    LLSD body;
+    body["job"] = mMeshQuote["job"].asString();
+    mMeshQuote = LLSD();
+    // the quoted job is dropped (wolfmind_lib.php wa_api_job_cancel: quoting -> cancelled); nothing was charged
+    WolfAdventure::api("job_cancel", body, nullptr);
+    if (say) setStatus("Not made. Nothing was charged.", false);
+}
+
+void WolfAdventureStudioView::meshTick()
+{
+    if (mMeshJobId.empty() || mMeshPollAt <= 0.0 || now() < mMeshPollAt) return;
+    meshPoll();
+}
+
+void WolfAdventureStudioView::meshPoll()
+{
+    mMeshPollAt = 0.0;
+    if (mMeshJobId.empty()) return;
+    LLSD body;
+    body["job"] = mMeshJobId;
+    const std::string job = mMeshJobId;
+    LLHandle<WolfAdventureStudioView> handle = getDerivedHandle<WolfAdventureStudioView>();
+    // job {job} -> {state, progress, cost, error} (wolfmind_lib.php wm_job_out), the states a build has
+    WolfAdventure::api("job", body, [handle, job](bool ok, const LLSD& reply, const std::string& error)
+    {
+        if (handle.isDead()) return;
+        WolfAdventureStudioView* self = handle.get();
+        if (self->mMeshJobId != job) return;
+        if (!ok) { self->mMeshError = "The job could not be read: " + error + " - trying again."; self->mMeshPollAt = now() + 9.0; return; }
+        self->mMeshJob = reply;
+        const std::string state = reply["state"].asString();
+        const std::string name = self->mMeshName;
+        if (state == "queued" || state == "running") { self->mMeshPollAt = now() + 3.0; return; }
+        self->mMeshJobId.clear();
+        self->mMeshThing.clear();
+        if (state == "done" || state == "applied")
+        {
+            self->mMeshError.clear();
+            // wolfmind_lib.php wm_mesh_job: the done report's cost line ("Quoted: N credits. Charged: N credits.") and, when the charge
+            // could not be taken now, that line too - the author sees what was charged
+            std::string cost;
+            for (const LLSD& line : llsd::inArray(reply["report"]))
+            {
+                const std::string t = WolfGame::cleanText(line.asString(), 300);
+                if (t.rfind("Quoted:", 0) == 0 || t.rfind("The charge", 0) == 0) cost += " " + t;
+            }
+            self->mMeshDone = name + " is in your inventory, in the Wolf Adventure folder: rez it on your land." + cost;
+            self->setStatus(self->mMeshDone, false);
+            self->mThingsFor.clear();   // read again: the thing may be marked done
+        }
+        else if (state == "cancelled") self->mMeshError = "Making " + name + " was stopped before it finished.";
+        else self->mMeshError = "Making " + name + " stopped: " + (reply["error"].asString().empty() ? std::string("it did not say why.") : WolfGame::cleanText(reply["error"].asString(), 240));
+    });
+}
+
+// ---- page 3: Clean up the land ----
+
+void WolfAdventureStudioView::landCleanupTick()
+{
+    // asked once per game, on page 3: an empty confirm never matches a title and an empty region names no land, so the brain can
+    // only refuse - "unknown action" from an older brain hides the button, any other answer shows it
+    if (mPage != SP_MAP || mOpenId.empty() || !openIsOwner() || mCleanupBusy || mCleanupFor == mOpenId) return;
+    mCleanupFor = mOpenId;
+    mCleanupKnown = 0;
+    LLSD body;
+    body["adventure"] = mOpenId;
+    body["region"] = "";
+    body["confirm"] = "";
+    const std::string adv = mOpenId;
+    LLHandle<WolfAdventureStudioView> handle = getDerivedHandle<WolfAdventureStudioView>();
+    WolfAdventure::api("land_cleanup", body, [handle, adv](bool ok, const LLSD&, const std::string& error)
+    {
+        if (handle.isDead()) return;
+        WolfAdventureStudioView* self = handle.get();
+        if (self->mCleanupFor != adv) return;
+        self->mCleanupKnown = (!ok && unknownAction(error)) ? -1 : 1;
+    });
+}
+
+void WolfAdventureStudioView::landCleanupAsk()
+{
+    if (mOpenId.empty() || mCleanupBusy) return;
+    LLViewerRegion* rgn = gAgent.getRegion();
+    if (!rgn) { setStatus("Stand on the land first: Clean up the land works where you are standing.", true); return; }
+    // the game's exact title, as the brain stores it (the list's title; the draft's when the list has not loaded)
+    const LLSD* a = listed(mOpenId);
+    const std::string title = a ? (*a)["title"].asString() : std::as_const(mDraftPack)["adventure"]["title"].asString();
+    if (title.empty()) { setStatus("The game's name is not known yet - try again in a moment.", true); return; }
+    mDeleteTitle = title;
+    mDeleteTyped.clear();
+    mConfirmKeyA = rgn->getName();
+    ask(SC_LAND_CLEANUP, 0);
+}
+
+void WolfAdventureStudioView::landCleanup()
+{
+    if (mOpenId.empty() || mCleanupBusy) return;
+    LLViewerRegion* rgn = gAgent.getRegion();
+    if (!rgn) { setStatus("Stand on the land first: Clean up the land works where you are standing.", true); return; }
+    LLSD body;
+    body["adventure"] = mOpenId;
+    body["region"] = rgn->getRegionID().asString();
+    body["confirm"] = mDeleteTyped;
+    mDeleteTyped.clear();
+    mCleanupBusy = true;
+    const std::string adv = mOpenId;
+    LLHandle<WolfAdventureStudioView> handle = getDerivedHandle<WolfAdventureStudioView>();
+    // land_cleanup {adventure, region, confirm} -> what went: characters, pads, objects (the brain's counts)
+    WolfAdventure::api("land_cleanup", body, [handle, adv](bool ok, const LLSD& reply, const std::string& error)
+    {
+        if (handle.isDead()) return;
+        WolfAdventureStudioView* self = handle.get();
+        self->mCleanupBusy = false;
+        if (self->mOpenId != adv) return;
+        if (!ok) { self->setStatus("Not cleaned up: " + error, true); return; }
+        self->mPadsOut = false;
+        // Source: wolfadventure_studio_lib.php wa_api_land_cleanup (600-669) -> {characters, pads, objects, removed, regions, pending, say}:
+        // a region that has not answered yet is `pending` and cleans up when it next talks to the brain (its `say` says so)
+        std::string words = llformat("Cleaned up: %d characters, %d pads, %d objects.", reply["characters"].asInteger(), reply["pads"].asInteger(), reply["objects"].asInteger());
+        if (reply["pending"].asInteger() > 0) words += " " + WolfGame::cleanText(reply["say"].asString(), 300);
+        self->setStatus(words, false);
+    });
 }

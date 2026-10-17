@@ -1287,7 +1287,7 @@ void WolfAdventureGmView::face(F32 W, F32 H, F32 top, F32 bottom, const Palette&
         {
             t = para(l, r - 10.f, t, mAdvs.isArray() && mAdvs.size() > 0
                      ? "No open session for this adventure. A session opens by itself when the first player joins; you can also start a scheduled one with the button above."
-                     : "Nothing to run yet. Publish an adventure in the Adventure Studio, or ask its owner to make you a game master (Publish page, \"Game masters and teachers\").", p.mDim);
+                     : "Nothing to run yet. Publish an adventure in the Adventure Studio, or ask its owner to make you a game master (Advanced editing > Publish, \"Game masters and teachers\").", p.mDim);
         }
         else if (!mStateError.empty())
         {

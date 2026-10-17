@@ -1848,7 +1848,7 @@
             <!-- [WOLF ADVENTURE P1 2026-10-16] STUDIO_AND_CONSOLE_V1.md §2 (P1: Studio Lite - Home, Import,
              Publish): make, import and publish adventures. Building group, next to Wolf Builder (§3.12).
              [WOLF GRID GATE] gone (not greyed) off Wolf Territories. -->
-            <menu_item_call label="Adventure Studio..." name="WolfAdventureStudio">
+            <menu_item_call label="Adventure Studio (Experimental)..." name="WolfAdventureStudio">
                 <menu_item_call.on_click function="Floater.Show" parameter="wolf_adventure_studio" />
                 <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
             </menu_item_call>

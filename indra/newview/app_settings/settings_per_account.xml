@@ -963,6 +963,21 @@
 			<map>
 			</map>
 	</map>
+	<!-- [SIMPLE STUDIO 2026-10-17] Adventure Studio page 1: the build jobs already dealt with once after a relaunch - a failed
+	     one whose words were shown, a finished one the Studio already picked up (job id -> when), so the next opening is not
+	     pulled back to them again (WolfAdventureStudioView::resumeBuild / jobMarkSeen). -->
+	<key>WolfAdventureJobsSeen</key>
+	<map>
+		<key>Comment</key>
+			<string>Adventure Studio build jobs already dealt with once after a relaunch: shown as failed, or picked up when finished (job id to time)</string>
+		<key>Persist</key>
+			<integer>1</integer>
+		<key>Type</key>
+			<string>LLSD</string>
+		<key>Value</key>
+			<map>
+			</map>
+	</map>
 	<key>WolfSuitcaseArrivals</key>
 	<map>
 		<key>Comment</key>
@@ -1042,28 +1057,6 @@
 			<string>F32</string>
 		<key>Value</key>
 			<real>1.0</real>
-	</map>
-	<key>WolfAdventureAdvancedOpen</key>
-	<map>
-		<key>Comment</key>
-			<string>[WOLF STORY FIRST FRONT DOOR 2026-10-17] Adventure Studio: the "Advanced editing" pages shown in the rail (default shut: the story-first screen is the way in)</string>
-		<key>Persist</key>
-			<integer>1</integer>
-		<key>Type</key>
-			<string>Boolean</string>
-		<key>Value</key>
-			<integer>0</integer>
-	</map>
-	<key>WolfAdventureStudioWelcomed</key>
-	<map>
-		<key>Comment</key>
-			<string>[WOLF STORY FIRST FRONT DOOR 2026-10-17] Adventure Studio: the first-run greeting has been shown (the Guide opens beside it the first time)</string>
-		<key>Persist</key>
-			<integer>1</integer>
-		<key>Type</key>
-			<string>Boolean</string>
-		<key>Value</key>
-			<integer>0</integer>
 	</map>
 	<key>WolfAdventureShowAiTag</key>
 	<map>

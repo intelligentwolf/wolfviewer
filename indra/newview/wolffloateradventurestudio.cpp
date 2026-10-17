@@ -26,6 +26,8 @@
 
 #include "llagent.h"
 #include "llassetstorage.h"
+#include "llbutton.h"
+#include "lldraghandle.h"
 #include "llclipboard.h"
 #include "llfilepicker.h"
 #include "llfilesystem.h"
@@ -118,10 +120,12 @@ namespace
 
     std::string statusWord(const std::string& status, S32 revision)
     {
-        // BRAIN_API_V1.md §5.1: draft | published | disabled
-        if (status == "published") return llformat("Published rev %d", revision);
+        // BRAIN_API_V1.md §5.1: draft | published | disabled - in the simple pages' words (SIMPLE_STUDIO_SPEC.md: no "draft",
+        // no "revision"); the same words on the expert Adventures page's rows - the revision history lives on Publish (`revisions`)
+        (void)revision;
+        if (status == "published") return "Live";
         if (status == "disabled") return "Disabled";
-        return "Draft";
+        return "Not published yet";
     }
 
     std::string stateWord(const std::string& state)
@@ -189,32 +193,29 @@ WolfAdventureStudioView::WolfAdventureStudioView(const Params& p)
 {
 }
 
-bool WolfAdventureStudioView::advancedOpen()
+bool WolfAdventureStudioView::simpleCanGo(S32 step) const
 {
-    if (mAdvancedState < 0) mAdvancedState = gSavedPerAccountSettings.getBOOL("WolfAdventureAdvancedOpen") ? 1 : 0;
-    return mAdvancedState == 1;
+    if (step <= 0) return true;
+    // a build in progress keeps the Studio on page 1: leaving mid-build would abandon a paid job (closeOpenAdventure cancels it)
+    if (mBuildStep != B_NONE) return false;
+    return !mOpenId.empty() && openIsOwner() && !mDraftJson.empty();
 }
 
-void WolfAdventureStudioView::setAdvancedOpen(bool on)
+void WolfAdventureStudioView::goSimple(S32 step)
 {
-    mAdvancedState = on ? 1 : 0;
-    gSavedPerAccountSettings.setBOOL("WolfAdventureAdvancedOpen", on);
+    if (!simpleCanGo(step) || mConfirm != SC_NONE || mPicker.mOn) return;   // a question or a list open in the Studio comes first
+    press(SH_PAGE, step == 0 ? (S32)SP_HELPER : step == 1 ? (S32)SP_CHARS : (S32)SP_MAP);
 }
 
 void WolfAdventureStudioView::onOpened(const LLSD& key)
 {
+    // [SIMPLE STUDIO 2026-10-17] Paul: "let it pick up where i left off" - once the list is in (it names the game and says it is
+    // the author's), a build left running or finished while the Studio was closed is picked up (resumeBuild)
+    mResumeOnList = mBuildStep == B_NONE;
     loadList();
     loadRequests();
-    // [FRONT DOOR 2026-10-17] the first time anyone opens the new Studio: the helper's greeting (frontDoor / helperColumn show it
-    // while nothing is said yet) and the Guide beside it, saying the same
-    if (!gSavedPerAccountSettings.getBOOL("WolfAdventureStudioWelcomed"))
-    {
-        gSavedPerAccountSettings.setBOOL("WolfAdventureStudioWelcomed", TRUE);
-        gSavedSettings.setBOOL("WolfAdventureGuideOpen", TRUE);
-        mPage = SP_HELPER;
-    }
-    // the story box has the keyboard on the front door: type at once (the persona's 10 seconds)
-    if (mPage == SP_HELPER && mOpenId.empty()) { mField = F_HELPER; mHits.setFocus(SH_FIELD, F_HELPER); }
+    // [SIMPLE STUDIO 2026-10-17] on page 1 the story box has the keyboard: type at once (the persona's two minutes)
+    if (mPage == SP_HELPER) { mField = F_STORY; mHits.setFocus(SH_FIELD, F_STORY); }
     // [WOLF ADVENTURE P2 2026-10-16] Wolf World > GM Console...: the Run page
     if (key.isString() && key.asString() == "run")
     {
@@ -302,6 +303,7 @@ std::string& WolfAdventureStudioView::fieldText(EField which)
     case F_BOOK_TITLE: return mBookTitle;
     case F_BOOK_AUTHOR: return mBookAuthor;
     case F_HELPER: return mHelperBox;          // [WOLF STORY FIRST 2026-10-17/]
+    case F_STORY: return mStoryBox;            // [SIMPLE STUDIO 2026-10-17/]
     default: return mNewTitle;
     }
 }
@@ -320,6 +322,8 @@ size_t WolfAdventureStudioView::fieldCap(EField which)
     // [WOLF STORY FIRST 2026-10-17] a first message may be a whole story (kept as adventure.story, at most 20,000 characters);
     // later turns at most 2,000 (helperSend says so) - STORY_FIRST_DESIGN.md §5
     case F_HELPER: return 20000;
+    // [SIMPLE STUDIO 2026-10-17] page 1's story box: adventure.story.text maxLength 20000 (adventure_pack_v1.schema.json)
+    case F_STORY: return 20000;
     default: return TITLE_MAX;
     }
 }
@@ -423,6 +427,9 @@ void WolfAdventureStudioView::loadList()
         self->mListLoaded = true;
         self->loadHomeSpend();   // [WOLF ADVENTURE P2 2026-10-16/] §2.1 "today's AI spend" on each card
         if (const LLSD* a = self->listed(self->mOpenId)) self->mOpenTitle = cap((*a)["title"].asString(), TITLE_MAX);
+        if (!self->mOpenId.empty() && self->openIsOwner()) self->landNoteFromList();   // the list arrived after the game opened
+        // [SIMPLE STUDIO 2026-10-17] the Studio just opened: a build left running or finished is picked up (resumeBuild)
+        if (self->mResumeOnList) { self->mResumeOnList = false; self->resumeBuild(); }
     }, std::string());
 }
 
@@ -462,9 +469,15 @@ void WolfAdventureStudioView::openAdventure(const std::string& id)
             mWizAuto = false;
         }
     }
-    // [WOLF STORY FIRST 2026-10-17] the main way to build is the helper (STORY_FIRST_DESIGN.md principle); Start here stays
-    mPage = owner ? SP_HELPER : SP_PUBLISH;
+    // [SIMPLE STUDIO 2026-10-17] the owner lands on the story map once the draft has loaded (page 1 when it has no boxes yet:
+    // loadOpen); a game master or teacher, who cannot edit, on Publish (B8)
+    mPage = owner ? SP_MAP : SP_PUBLISH;
+    mLandPending = owner;
     mScroll[mPage] = 0.f;
+    if (mStoryFor != id) { mStoryBox.clear(); mStoryFor.clear(); }   // this game's story shows once its draft is read
+    mLandNote.clear();
+    mCharsError.clear();
+    mBoxMore = false;
     mFlowSel.clear();
     mFlowGen = 0;
     mHelperQuestion.clear();
@@ -472,19 +485,20 @@ void WolfAdventureStudioView::openAdventure(const std::string& id)
     mHelperScript.clear();                     // [M6] a script for the last adventure is not offered for this one
     mLivePreview = LLSD();                     // [M7] nor its live-update preview
     mLiveMoves.clear();
-    mHelperTodo = LLSD::emptyArray();          // [review] nothing of the last adventure's conversation shows
-    mHelperTodayCredits = -1.0;
-    mHelperLastCredits = 0.0;
-    mHelperPending = false;
+    mHelperTodayCredits = -1.0;                // [review] nothing of the last adventure's conversation shows
     mFlowPanX = mFlowPanY = 0.f;
     mFlowZoom = 1.f;
     mHelperWalking = false;                    // [M3] read again from helper_history.walk
     mHelperWalkRegion.clear();
-    mHelperLookFrom.clear();
     mHelperNext = LLSD();
     loadOpen();
     if (owner) helperHistory();
     if (mPage == SP_WIZARD && (mWizStep == W_CAST || mWizStep == W_TEST)) loadBudget();   // [review] the cost line's estimate
+    // [SIMPLE STUDIO 2026-10-17] a game opened from a card: a build of it left running or finished is picked up (resumeBuild does
+    // nothing while a build is in hand - buildCreate opens the new game at B_CREATING, resumeBuild itself at B_RUNNING)
+    if (owner && mBuildStep == B_NONE) resumeBuild();
+    // the "This land belongs to someone else..." line for a game opened from a card (create's reply set it for a new one)
+    if (owner) landNoteFromList();
 }
 
 void WolfAdventureStudioView::closeOpenAdventure()
@@ -507,8 +521,26 @@ void WolfAdventureStudioView::closeOpenAdventure()
     mHelperScript.clear();
     mLivePreview = LLSD();
     mLiveMoves.clear();
-    mHelperMissing = false;    // [review] asked again with the next adventure's history; the front door's Build it never stays dead
-    mField = F_HELPER;         // back on the front door the story box has the keyboard
+    mHelperMissing = false;    // [review] asked again with the next adventure's history; page 1's Build my game never stays dead
+    // [SIMPLE STUDIO 2026-10-17] page 1 starts afresh: an empty box, no book, no note about the last game's land
+    if (mBuildStep == B_QUOTED || mBuildStep == B_STARTING || mBuildStep == B_RUNNING)
+    {
+        // Source: wolfmind_lib.php wa_api_job_cancel (3086-3090): cancels a job in quoting, queued or running - the quoted or
+        // started job is not left to run and charge for a game nobody is waiting on (B_STARTING: the confirm may or may not have
+        // landed; either state is cancelled, and a confirm landing afterwards finds the job no longer quoting and changes nothing)
+        LLSD cancel;
+        cancel["job"] = mJobId;
+        WolfAdventure::api("job_cancel", cancel, nullptr);
+    }
+    if (mBuildStep != B_NONE) buildFail("The game was closed before it was built.");
+    mStoryBox.clear();
+    mStoryFor.clear();
+    mBookText.clear();
+    mBookName.clear();
+    mBookRights = false;
+    mLandNote.clear();
+    mLandPending = false;
+    mField = F_STORY;          // back on page 1 the story box has the keyboard
 }
 
 void WolfAdventureStudioView::loadOpen()
@@ -536,6 +568,23 @@ void WolfAdventureStudioView::loadOpen()
             else if (fixed > 0)
                 self->setStatus(llformat("We tidied %d blank title%s left by an older version of the Studio: they now say what to write.", fixed, fixed == 1 ? "" : "s"), false);
             self->checkRecovery();   // [WOLF ADVENTURE P3 2026-10-16/] unsaved changes from the last time, offered back
+            // [SIMPLE STUDIO 2026-10-17] page 1's box shows this game's story (adventure.story.text) unless it was typed for it
+            if (self->mStoryFor != id)
+            {
+                self->mStoryBox = std::as_const(self->mDraftPack)["adventure"]["story"]["text"].asString();
+                self->mStoryFor = id;
+            }
+            // a game with boxes opens on its story map; one with none yet on Your story (nothing to walk yet)
+            if (self->mLandPending)
+            {
+                self->mLandPending = false;
+                self->flowLayout();
+                const bool boxes = !self->mFlowNodes.empty();
+                // a build already in this game (resumeBuild, mLandChars): its characters when it has no boxes yet, never page 1
+                const S32 land = boxes ? (S32)SP_MAP : (self->mLandChars ? (S32)SP_CHARS : (S32)SP_HELPER);
+                if (self->mPage == SP_MAP || self->mPage == SP_HELPER) self->press(SH_PAGE, land);
+            }
+            self->mLandChars = false;
         }, std::string());
     }
     // §5.1 revisions, §5.3 grants (owner or GM)
@@ -678,6 +727,41 @@ void WolfAdventureStudioView::deleteAdventure()
         self->setStatus("Deleted \"" + title + "\".", false);
     }, "Deleting...");
     mDeleteTyped.clear();
+}
+
+// [SIMPLE STUDIO 2026-10-17] Paul: "i should be able to delete games" - page 1's cards, after the plain Delete / Keep it question
+void WolfAdventureStudioView::deleteGame(const std::string& id, const std::string& title)
+{
+    if (id.empty()) return;
+    mCardsError.clear();
+    if (mOpenId == id)
+    {
+        // the open game goes: closed first (nothing of it is worth saving on the way out), page 1 afresh
+        mDirtyAt = 0.0;
+        closeOpenAdventure();
+        mPage = SP_HELPER;
+        mScroll[SP_HELPER] = 0.f;
+    }
+    LLSD body;
+    body["adventure"] = id;
+    body["confirm"] = title;   // the title exactly as list_mine gave it (the stored one, wolfadventure_lib.php:5078)
+    const std::string shown = cap(title, TITLE_MAX);
+    LLHandle<WolfAdventureStudioView> handle = getDerivedHandle<WolfAdventureStudioView>();
+    ++mBusy;
+    setStatus("Deleting...", false);
+    // Source: wolfadventure_lib.php WA_API_P1 'delete' (4906, dispatched at 5002), wa_api_delete (5331-5364) {adventure, confirm}: the
+    // owner only (5333); 'confirm' must equal the stored title exactly (5334); refused while a session of it is open (5335-5337,
+    // "the adventure is still running - unpublish it first"). A refusal is red text under the cards that stays (mCardsError).
+    WolfAdventure::api("delete", body, [handle, id, shown](bool ok, const LLSD&, const std::string& error)
+    {
+        if (handle.isDead()) return;
+        WolfAdventureStudioView* self = handle.get();
+        self->mBusy = llmax(0, self->mBusy - 1);
+        self->loadList();
+        if (ok) { self->setStatus("Deleted \"" + shown + "\".", false); return; }
+        self->mCardsError = "\"" + shown + "\" could not be deleted: " + error;
+        self->setStatus(self->mCardsError, true);
+    });
 }
 
 void WolfAdventureStudioView::publish(S32 republish_revision)
@@ -1124,8 +1208,10 @@ void WolfAdventureStudioView::layoutAndDraw()
     F32 x = M + 2.f;
     const F32 ty = H - 10.f;
     crescent(x + 7.f, ty - 9.f, 7.f, p.mText, p.mBaseTop);
-    x = textL(bold, "ADVENTURE STUDIO", x + 20.f, ty - 2.f, p.mDim) + 10.f;
-    textL(display(17.f), mOpenId.empty() ? std::string(mPage == SP_HELPER ? "Make a game" : "Adventures") : mOpenTitle, x, ty, p.mAccent, LLFontGL::LEFT, LLFontGL::TOP, W - x - 170.f);   // room for Guide and Close
+    x = textL(bold, "ADVENTURE STUDIO (EXPERIMENTAL)", x + 20.f, ty - 2.f, p.mDim) + 10.f;   // Paul 2026-10-17: experimental at this stage
+    textL(display(17.f), mOpenId.empty() ? std::string(mPage == SP_HELPER ? "Make a game" : "Adventures") : mOpenTitle, x, ty, p.mAccent, LLFontGL::LEFT, LLFontGL::TOP, W - x - 206.f);   // room for Guide, Minimize and Close
+    // [SIMPLE STUDIO 2026-10-17] the simple three pages: no rail, no drawer; the expert pages keep both (the rail is the way back)
+    const bool simplePage = mPage == SP_HELPER || mPage == SP_CHARS || mPage == SP_MAP;
     {
         const F32 xc = W - M - 8.f, yc = ty - 9.f;
         closeX(xc, yc, 5.f, mHits.isHover(SH_CLOSE, 0) ? p.mAccent : p.mText);
@@ -1133,13 +1219,49 @@ void WolfAdventureStudioView::layoutAndDraw()
         hit(xc - 11.f, yc - 11.f, xc + 11.f, yc + 11.f, SH_CLOSE, 0, "Close the Studio (Escape)");
     }
     {
+        // [MINIMIZE 2026-10-17] Paul: "it needs a minimize button on the floater" - "-" left of the x, the Guide button's size and
+        // style, a drawn dash for its glyph (never colour alone: the tooltip and its focus ring say what it is). Pressing it minimizes
+        // the floater (press SH_MINIMIZE -> LLFloater::setMinimized); the viewer's standard minimized bar restores it.
+        const F32 mw = 28.f, mr = W - M - 26.f;
+        btn(mr - mw, H - 32.f, mr, H - 8.f, std::string(), SH_MINIMIZE, 0, "Minimize", p);
+        lineW(mr - mw * 0.5f - 5.f, H - 20.f, mr - mw * 0.5f + 5.f, H - 20.f, 2.f, mHits.isHover(SH_MINIMIZE, 0) ? p.mAccent : p.mText);
         // [WOLF ADVENTURE AUDIT 2026-10-17] the Guide (help and "What do I do next?") beside the Studio, shown or hidden
         const bool shown = WolfFloaterAdventureStudio::guideShown();
         const std::string lab = shown ? "Hide guide" : "Guide";
-        const F32 gw = (F32)bold->getWidthF32(lab) + 24.f, gr = W - M - 26.f;
+        const F32 gw = (F32)bold->getWidthF32(lab) + 24.f, gr = mr - mw - 8.f;
         btn(gr - gw, H - 32.f, gr, H - 8.f, lab, SH_GUIDE, 0, shown ? "Hide the Guide beside the Studio" : "Show the Guide: what each page and step is for, and what to do next", p);
     }
-    const F32 top = H - 40.f;
+    F32 top = H - 40.f;
+    // [TABS 2026-10-17] Paul: "have tabs across the top: Characters, Gameplay" - the three simple pages as tabs under the title band,
+    // above the page: Story | Characters | Gameplay. The current one is lit; Characters and Gameplay wait until a game with boxes is
+    // open ("Build your game first"). A tab is the page switch (press SH_PAGE), nothing more.
+    if (simplePage)
+    {
+        static const char* TAB[3] = { "Story", "Characters", "Gameplay" };
+        static const EPage TABPAGE[3] = { SP_HELPER, SP_CHARS, SP_MAP };
+        const bool built = simpleCanGo(1) && hasBoxes();
+        F32 x = M + 4.f;
+        for (S32 i = 0; i < 3; ++i)
+        {
+            const bool cur = mPage == TABPAGE[i];
+            const bool can = i == 0 || built;
+            const F32 w = WolfAdvStudio::btnW(TAB[i]) + 20.f;
+            const EPage pg = TABPAGE[i];
+            const S32 ia = act([this, pg]() { press(SH_PAGE, (S32)pg); mScroll[pg] = 0.f; });
+            btn(x, top - 28.f, x + w, top, TAB[i], SH_E, ia,
+                cur ? std::string(TAB[i]) + " - this page" : can ? "Go to " + std::string(TAB[i]) : std::string("Build your game first"),
+                p, cur || can, cur ? BTN_ACTIVE : 0);
+            x += w + 6.f;
+        }
+        rect(M + 4.f, top - 30.f, W - M - 4.f, top - 29.f, fade(p.mDim, 0.35f));
+        top -= 38.f;
+    }
+    // [SIMPLE STUDIO 2026-10-17] the land is someone else's (create's region.state not enabled): one plain line, kept on every page
+    if (!mLandNote.empty() && !mOpenId.empty())
+    {
+        const F32 nh = (F32)para(M + 4.f, W - M - 4.f, top - 2.f, mLandNote, WARN_INK, true);
+        top = nh - 6.f;
+    }
     // ---- the status line along the foot ----
     F32 bottom = 10.f;
     if (!mStatus.empty() && mStatusUntil > 0.0 && now() > mStatusUntil) mStatus.clear();
@@ -1166,19 +1288,17 @@ void WolfAdventureStudioView::layoutAndDraw()
         textL(small, text, M + 24.f, cy, mStatusError ? DANGER_INK : p.mText, LLFontGL::LEFT, LLFontGL::VCENTER, W - 2.f * M - 30.f);
         bottom += sh + 6.f;
     }
-    // ---- the left rail: the pages ----
-    // [WOLF STORY FIRST FRONT DOOR 2026-10-17] Paul: "the viewer set up looks the same?" - the story-first screen (SP_HELPER) is
-    // the front door and uses the whole width; the rail shows only on the other pages, or when "Advanced editing" is open.
-    // Persona: a resident with a story idea opens the Studio and is talking to the helper within 10 seconds (Hick's Law: one
-    // primary action on the front door; the 12 expert pages behind one disclosure, NN/G progressive disclosure).
-    // a game master or teacher has no main screen of their own (pageHelper says so): the rail stays, with Publish and Run
-    const bool showRail = mPage != SP_HELPER || advancedOpen() || (!mOpenId.empty() && !openIsOwner());
+    // ---- the left rail: the expert pages, with the way back to the three simple pages ----
+    // [SIMPLE STUDIO 2026-10-17] SIMPLE_STUDIO_SPEC.md: "Expert pages stay, reachable by ONE quiet 'Advanced editing' link at the
+    // bottom of page 3 (and the toolbar on expert pages to get back). It is never remembered open across sessions." The three
+    // simple pages use the whole width; every expert page shows this rail.
+    const bool showRail = !simplePage;
     const F32 rail_r = showRail ? M + 140.f : M - 14.f;
     if (showRail)
     {
         static const char* NAMES[SP_COUNT] = { "Adventures", "Import", "Outline", "Cast", "Places", "Story", "Rules", "Lore", "Test Play",
                                                "Publish", "AI and voice", "Cast talk", "Book and assist", "Run", "Start here",
-                                               "Your game" };
+                                               "Your story", "Your characters", "Gameplay" };
         static const char* TIPS[SP_COUNT] = { "All your adventures (duplicate, delete, quick make) and requests for your regions",
                                                "Bring in a Wolf Story (STORY v1) or a pack JSON file as a draft",
                                                "Acts, scenes and beats: add, reorder, the flow of each scene, endings",
@@ -1187,47 +1307,43 @@ void WolfAdventureStudioView::layoutAndDraw()
                                                "Edit a scene or a beat: its stage, triggers, decisions and hints",
                                                "The rules preset and your changes to it; the wolfGame link; flags and reputation",
                                                "Story and source cards, encounters, rewards, handouts, learning and quizzes",
-                                               "Play the draft from any beat with the debug overlay",
+                                               "Play the draft from any box with the debug overlay",
                                                "Checks, regions, game masters and teachers, history, publish, update the live game",
                                                "AI characters or written lines only, the daily caps, voices, and today's spend",
                                                "Each character's voice, and Talk to them now",
                                                "Give it a book: draft an adventure from a text; ask the assistant for ideas",
                                                "Run it live: take control from the AI Director, pause, and hand it back",
                                                "Make an adventure step by step, with no AI",
-                                               "Your story, the flowchart and the helper: the main screen" };
-        // the main three, then "Advanced editing" (a disclosure: shut, it is one row) holding the expert pages
-        const bool adv = advancedOpen();
-        const bool inAdvPage = mPage != SP_HELPER && mPage != SP_TEST && mPage != SP_PUBLISH && mPage != SP_WIZARD;
-        const bool advRows = adv || inAdvPage;
-        static const S32 MAIN[] = { SP_HELPER, SP_TEST, SP_PUBLISH };
-        static const S32 ADV[] = { SP_HOME, SP_OUTLINE, SP_CASTED, SP_PLACES, SP_STORY, SP_RULES, SP_LORE, SP_IMPORT, SP_BOOK, SP_AI, SP_CAST, SP_RUN };
+                                               "Page 1: your story, Build my game, your games", "Page 2: your characters", "Page 3: Gameplay - your story map and the helper" };
+        // [SIMPLE STUDIO 2026-10-17] Start here (the no-AI, step-by-step builder) lives here now: page 1 is the one box + Build my game
+        static const S32 ADV[] = { SP_TEST, SP_PUBLISH, SP_HOME, SP_WIZARD, SP_OUTLINE, SP_CASTED, SP_PLACES, SP_STORY, SP_RULES, SP_LORE, SP_IMPORT, SP_BOOK, SP_AI, SP_CAST, SP_RUN };
         F32 y = top;
+        {
+            // the way back: the story map of the open game (its owner), else page 1
+            const bool mine = !mOpenId.empty() && openIsOwner();
+            const S32 back = mine ? (S32)SP_MAP : (S32)SP_HELPER;
+            const std::string lab = mine ? "\xE2\x97\x82 Gameplay" : "\xE2\x97\x82 Your story";
+            button(M, y - 25.f, rail_r, y, lab, p, flagsFor(SH_PAGE, back, true) | BTN_PRIMARY);
+            hit(M, y - 25.f, rail_r, y, SH_PAGE, back, mine ? "Back to Gameplay, your story map (page 3)" : "Back to Your story (page 1)", true, true);
+            y -= 35.f;
+        }
         auto row = [&](S32 i)
         {
-            const bool can = i == SP_HOME || i == SP_IMPORT || i == SP_WIZARD || i == SP_HELPER || !mOpenId.empty();
-            const std::string tip = can ? std::string(TIPS[i]) : std::string("Open a game first (Your game), or make one from a story");
+            const bool can = i == SP_HOME || i == SP_IMPORT || i == SP_WIZARD || !mOpenId.empty();
+            const std::string tip = can ? std::string(TIPS[i]) : std::string("Open a game first (Your story), or make one from a story");
             button(M, y - 25.f, rail_r, y, NAMES[i], p, flagsFor(SH_PAGE, i, can) | (mPage == i ? BTN_ACTIVE : 0));
             hit(M, y - 25.f, rail_r, y, SH_PAGE, i, tip, true, can);
             y -= 27.f;
         };
-        for (S32 i : MAIN) row(i);
-        y -= 8.f;
-        {
-            const std::string lab = advRows ? "Advanced editing \xE2\x96\xBE" : "Advanced editing \xE2\x96\xB8";   // the triangle AND the word
-            // shut while on an expert page: back to your game (the rows go with it)
-            const S32 ia = act([this, adv, advRows]() { if (advRows && !adv) { mPage = SP_HELPER; } else setAdvancedOpen(!adv); if (!advancedOpen() && mPage != SP_TEST && mPage != SP_PUBLISH) mPage = SP_HELPER; });
-            btn(M, y - 25.f, rail_r, y, lab, SH_E, ia, advRows ? "Hide the expert pages" : "Show the expert pages: outline, cast, places, story, rules, lore and more", p, true, advRows ? BTN_ACTIVE : 0);
-            y -= 29.f;
-        }
-        if (advRows) for (S32 i : ADV) row(i);
-        if (mPage == SP_WIZARD) row(SP_WIZARD);   // reached from "Make it box by box (no AI)": shown while it is open
+        for (S32 i : ADV) row(i);
     }
-    // ---- the right drawer: problems and help ----
-    // [WOLF STORY FIRST 2026-10-17] the helper page uses the whole width (its problems sit on the flowchart's boxes)
-    const F32 drawer_l = mPage == SP_HELPER ? W - M + 14.f : W - M - 230.f;
-    if (mPage != SP_HELPER) drawDrawer(drawer_l, bottom, W - M, top, p);
+    // ---- the right drawer: problems and help (the expert pages; the simple pages' problems sit on the flowchart's boxes) ----
+    const F32 drawer_l = simplePage ? W - M + 14.f : W - M - 230.f;
+    if (!simplePage) drawDrawer(drawer_l, bottom, W - M, top, p);
     // ---- the page ----
-    const F32 l = rail_r + 14.f, r = drawer_l - 14.f, b = bottom, t = top;
+    // [FIXED FOOT 2026-10-17] the page's way-on buttons sit in a fixed bar under the scrolled page (footBarHeight / drawFootBar)
+    const F32 foot = footBarHeight();
+    const F32 l = rail_r + 14.f, r = drawer_l - 14.f, b = bottom + foot, t = top;
     mPageRect = LLRect((S32)l, (S32)t, (S32)r, (S32)b);
     F32& scroll = mScroll[mPage];
     F32 low = 0.f;
@@ -1253,7 +1369,9 @@ void WolfAdventureStudioView::layoutAndDraw()
         case SP_LORE: low = pageLore(l, cr, pt, p); break;
         case SP_TEST: low = pageTest(l, cr, pt, p); break;
         case SP_WIZARD: low = pageWizard(l, cr, pt, p); break;   // [WOLF ADVENTURE AUDIT 2026-10-17/]
-        case SP_HELPER: low = pageHelper(l, cr, pt, p); break;   // [WOLF STORY FIRST 2026-10-17/]
+        case SP_HELPER: low = pageYourStory(l, cr, pt, p); break;   // [SIMPLE STUDIO 2026-10-17/] page 1
+        case SP_CHARS: low = pageChars(l, cr, pt, p); break;        // page 2
+        case SP_MAP: low = pageMap(l, cr, pt, p); break;            // page 3
         default: break;
         }
         mInPage = false;
@@ -1268,6 +1386,7 @@ void WolfAdventureStudioView::layoutAndDraw()
         rect(r - 6.f, tyy - th, r, tyy, mHits.isHover(SH_SCROLL, 0) || mDraggingScroll ? p.mAccent : fade(p.mDim, 0.8f));
         mHits.add(r - 9.f, b, r + 3.f, t, SH_SCROLL, 0, "Drag to scroll (or the mouse wheel)", false);
     }
+    if (foot > 0.f) drawFootBar(l, bottom, r, b, p);   // after the page and its scroll bar: on top, and its hits win
     if (now() < mDragOverUntil)
     {
         chamferEdge(4.f, 4.f, W - 4.f, H - 4.f, 12.f, 3.f, p.mAccent);
@@ -1663,6 +1782,22 @@ F32 WolfAdventureStudioView::pageImport(F32 l, F32 r, F32 top, const Palette& p)
     return y;
 }
 
+F32 WolfAdventureStudioView::experimentalNote(F32 l, F32 r, F32 top, const Palette& p)
+{
+    // [W69 2026-10-17] Paul's words, exactly; a soft amber plate (the warn ink at a whisper) with the words in the body ink, so it
+    // reads as a note and not as an error; shown always on the Story tab and at the top of the expert Publish page
+    const LLFontGL* f = LLFontGL::getFontSansSerif();
+    const std::string words = "Please get in touch with Lone Wolf if you wish to use this feature, it's still experimental. (But you are welcome to give it a go.)";
+    const std::vector<std::string> lines = wrap(f, words, r - l - 24.f, 6);
+    const F32 h = (F32)lines.size() * (F32)f->getLineHeight() + 16.f;
+    chamfer(l, top - h, r, top, 4.f, fade(WARN_INK, 0.14f), fade(WARN_INK, 0.10f));
+    chamferEdge(l + 0.5f, top - h + 0.5f, r - 0.5f, top - 0.5f, 4.f, 1.f, fade(WARN_INK, 0.6f));
+    rect(l + 2.f, top - h + 4.f, l + 5.f, top - 4.f, WARN_INK);   // the amber bar at the left says "note" as well as the colour
+    F32 y = top - 8.f;
+    for (const std::string& line : lines) { textL(f, line, l + 12.f, y, p.mText); y -= (F32)f->getLineHeight(); }
+    return top - h - 10.f;
+}
+
 F32 WolfAdventureStudioView::pagePublish(F32 l, F32 r, F32 top, const Palette& p)
 {
     const LLFontGL* small = LLFontGL::getFontSansSerifSmall();
@@ -1671,7 +1806,7 @@ F32 WolfAdventureStudioView::pagePublish(F32 l, F32 r, F32 top, const Palette& p
     const bool idle = mBusy == 0;
     const LLSD* a = listed(mOpenId);
     const bool owner = !a || (*a)["role"].asString().empty();
-    F32 y = top;
+    F32 y = experimentalNote(l, r, top, p);   // [W69 2026-10-17] at the top of the expert Publish page
     if (!owner)
     {
         y = para(l, r, y, "You hold a role in this adventure; only its owner can publish it, change its regions or its roles.", p.mDim) - 8.f;
@@ -1826,63 +1961,18 @@ void WolfAdventureStudioView::fieldMulti(F32 l, F32 b, F32 r, F32 t, const std::
             textL(LLFontGL::getFontSansSerifSmall(), llformat("%d characters - the end shows", (S32)all.size()), r - 10.f, b + 4.f, p.mDim, LLFontGL::RIGHT, LLFontGL::BOTTOM);
         if (focused && fmod(now(), 1.0) < 0.6) rect(x + 1.f, y + lh * 0.1f, x + 2.f, y + lh, p.mText);
     }
-    hit(l, b, r, t, SH_FIELD, (S32)which, which == F_HELPER && mOpenId.empty() ? std::string("Your idea or your whole story (Enter builds it; Ctrl+V pastes; up to 20,000 characters)")
-                                                                                : std::string("Tell the helper what happens, or ask it anything (Enter sends; Ctrl+V pastes)"));
+    hit(l, b, r, t, SH_FIELD, (S32)which, which == F_STORY ? std::string("Your idea, or your whole story (Enter starts a new line; Ctrl+V pastes; up to 20,000 characters)")
+                                                            : std::string("Tell the helper what happens, or ask it anything (Enter sends; Ctrl+V pastes)"));
 }
 
-F32 WolfAdventureStudioView::frontDoor(F32 l, F32 r, F32 top, const Palette& p)
+F32 WolfAdventureStudioView::continueCards(F32 cl, F32 cr, F32 top, const Palette& p)
 {
-    // Persona: a resident with a story idea opens the Studio and is talking to the helper within 10 seconds.
-    // Flow: type or paste -> Build it (the first line makes the game and goes to the helper) -> the main screen. One primary
-    // action (Build it); the games to continue below it; the no-AI way quiet and last.
+    // [SIMPLE STUDIO 2026-10-17] page 1's "Continue a game" cards (the open game marked); a build in progress keeps them still
     const LLFontGL* small = LLFontGL::getFontSansSerifSmall();
     const LLFontGL* bold = LLFontGL::getFontSansSerifSmallBold();
-    const F32 slh = (F32)small->getLineHeight();
-    const F32 colW = llmin(780.f, r - l), cl = l + ((r - l) - colW) * 0.5f, cr = cl + colW;
-    F32 y = top - 18.f;
-    textL(display(28.f), "Make a game from a story", (cl + cr) * 0.5f, y, p.mAccent, LLFontGL::HCENTER, LLFontGL::TOP, colW);
-    y -= (F32)display(28.f)->getLineHeight() + 14.f;
-    // the helper speaks first (the greeting; the first time, the Guide beside the Studio says the same)
-    {
-        const std::vector<std::string> gl = wrap(LLFontGL::getFontSansSerif(), WolfAdvStudio::greeting(), colW - 90.f, 4);
-        const F32 gh = 16.f + slh + (F32)gl.size() * (F32)LLFontGL::getFontSansSerif()->getLineHeight();
-        card(cl, y - gh, cr, y, p, 10.f);
-        crescent(cl + 24.f, y - 22.f, 10.f, p.mAccent, p.mBaseTop);
-        textL(bold, "YOUR HELPER", cl + 44.f, y - 8.f, p.mAccent);
-        F32 gy = y - 8.f - slh;
-        for (const std::string& ln : gl) { textL(LLFontGL::getFontSansSerif(), ln, cl + 44.f, gy, p.mText); gy -= (F32)LLFontGL::getFontSansSerif()->getLineHeight(); }
-        y -= gh + 12.f;
-    }
-    if (mHelperMissing)
-        y = para(cl, cr, y, "The helper is not on this grid yet. You can still make a game box by box, with no AI.", WARN_INK, true) - 6.f;
-    // the story box: large, ready for a line or a whole pasted story
-    fieldMulti(cl, y - 150.f, cr, y, mHelperBox, "Your idea in one line, or paste your whole story...\n\nExample: \"A Wild West bank robbery where the players "
-                                                 "can side with the outlaws or the sheriff.\"", F_HELPER, p);
-    y -= 160.f;
-    if (!mHelperError.empty()) y = para(cl, cr, y, mHelperError, DANGER_INK, true) - 6.f;
-    {
-        F32 x = cl;
-        const std::string go = mHelperBusy ? "Making your game..." : "Build it";
-        const F32 gw = llmax(180.f, WolfAdvStudio::btnW(go) + 30.f);
-        const S32 ig = act([this]() { helperSend(); });
-        btn(x, y - 44.f, x + gw, y, go, SH_E, ig, "Make the game from your idea or story: characters, choices and endings, then we talk it through (Enter)",
-            p, !mHelperBusy && !mHelperMissing && !mHelperBox.empty(), BTN_PRIMARY);
-        x += gw + 10.f;
-        const S32 ib = act([this]()
-        {
-            std::string t = mHelperBox;
-            LLStringUtil::trim(t);
-            helperCreate(t.empty() ? std::string("My adventure") : t, true);
-        });
-        btn(x, y - 44.f, x + WolfAdvStudio::btnW("Load a book") + 20.f, y, "Load a book", SH_E, ib,
-            "Read a whole book in and build from it (a quote first). The box above is its title.", p, !mHelperBusy && !mHelperMissing);
-        // the no-AI way, quiet and furthest from the primary (Fitts: distance between unlike actions)
-        const std::string na = "Make it box by box (no AI)";
-        const S32 iw = act([this]() { openWizardStep(W_KIND); });
-        btn(cr - WolfAdvStudio::btnW(na) - 10.f, y - 44.f, cr, y, na, SH_E, iw, "The step-by-step pages, with no AI", p);
-        y -= 56.f;
-    }
-    // the games to continue, as cards
+    const F32 colW = cr - cl;
+    F32 y = top;
+    const bool building = mBuildStep != B_NONE;
     std::vector<S32> mine;
     for (S32 i = 0; mList.isArray() && i < (S32)mList.size(); ++i) mine.push_back(i);
     if (!mListLoaded) y = para(cl, cr, y, "Loading your games...", p.mDim, true) - 6.f;
@@ -1897,34 +1987,48 @@ F32 WolfAdventureStudioView::frontDoor(F32 l, F32 r, F32 top, const Palette& p)
             const F32 x0 = cl + (F32)(k % per) * (cw + gap);
             const F32 y0 = y - (F32)(k / per) * (ch + gap);
             const std::string id = a["id"].asString(), title = cap(a["title"].asString(), TITLE_MAX);
+            const bool open = id == mOpenId;
             std::string words = statusWord(a["status"].asString(), a["revision"].asInteger());
             const std::string when = whenText(a["updated"]);
             if (!when.empty()) words += " \xC2\xB7 " + when;
             if (!a["role"].asString().empty()) words += a["role"].asString() == "teacher" ? " \xC2\xB7 teacher" : " \xC2\xB7 game master";
-            const S32 io = act([this, id]() { openAdventure(id); });
-            btn(x0, y0 - ch, x0 + cw, y0, std::string(), SH_E, io, "Continue " + title, p);
+            // the open game's card goes to its story map; another game's opens it (then lands on its map, or here when it has no boxes).
+            // While a build runs the game being built keeps its card alive: it only shows the progress card above (never
+            // interrupting the build - Paul: "clicking it should just show the progress"); the other cards wait
+            const S32 io = act([this, id, open, building]()
+            {
+                if (building) { if (open) mScroll[SP_HELPER] = 0.f; return; }
+                if (open) press(SH_PAGE, (S32)SP_MAP); else openAdventure(id);
+            });
+            btn(x0, y0 - ch, x0 + cw, y0, std::string(), SH_E, io,
+                building && open ? std::string("Being built now - its progress is above") : open ? std::string("Open now - go to its story map") : "Continue " + title,
+                p, !building || open, open ? BTN_ACTIVE : 0);
             textL(display(17.f), title, x0 + 12.f, y0 - 10.f, p.mText, LLFontGL::LEFT, LLFontGL::TOP, cw - 24.f);
             textL(small, words, x0 + 12.f, y0 - 14.f - (F32)display(17.f)->getLineHeight(), p.mDim, LLFontGL::LEFT, LLFontGL::TOP, cw - 24.f);
-            textL(bold, "Continue \xE2\x96\xB8", x0 + 12.f, y0 - ch + 10.f, p.mAccent, LLFontGL::LEFT, LLFontGL::BOTTOM);
+            textL(bold, open ? "Open now \xE2\x96\xB8" : "Continue \xE2\x96\xB8", x0 + 12.f, y0 - ch + 10.f, p.mAccent, LLFontGL::LEFT, LLFontGL::BOTTOM);
+            // [SIMPLE STUDIO 2026-10-17] Paul: "i should be able to delete games" - a small Delete at the card's bottom right, the
+            // width of the card away from Continue (Fitts); the author's own games only (the brain deletes for the owner alone);
+            // added after the card's hit, so it is on top of it (WolfGameHits::at: the last added wins)
+            if (a["role"].asString().empty())
+            {
+                const std::string stored = a["title"].asString();   // the title as stored: the delete action's exact confirm
+                const S32 idel = act([this, id, stored]() { mDeleteId = id; mDeleteTitle = stored; mDeleteTyped.clear(); mCardsError.clear(); ask(SC_DELETE_GAME, 0); });
+                const F32 dw = WolfAdvStudio::btnW("Delete", 64.f);
+                btn(x0 + cw - 10.f - dw, y0 - ch + 8.f, x0 + cw - 10.f, y0 - ch + 28.f, "Delete", SH_E, idel, "Delete " + title + " and everything in it (asks first)", p, !building);
+            }
         }
         y -= (F32)((llmin((S32)mine.size(), 12) + per - 1) / per) * (ch + gap) + 4.f;
         if (mine.size() > 12) y = para(cl, cr, y, llformat("%d more under Advanced editing > Adventures.", (S32)mine.size() - 12), p.mDim, true) - 4.f;
     }
+    // a delete the brain refused (people are playing it): red under the cards, and it stays
+    if (!mCardsError.empty()) y = para(cl, cr, y, mCardsError, DANGER_INK) - 6.f;
     // requests to run adventures on the author's regions wait on the Adventures page (Advanced editing): said here
     if (mRequests.isArray() && mRequests.size() > 0)
     {
         const S32 n = (S32)mRequests.size();
-        const std::string lab = llformat("%d request%s to run adventures on your regions", n, n == 1 ? "" : "s");
-        const S32 ir = act([this]() { mPage = SP_HOME; mScroll[SP_HOME] = 0.f; loadList(); loadRequests(); });
-        btn(cl, y - 30.f, cl + WolfAdvStudio::btnW(lab + " \xE2\x96\xB8") + 10.f, y, lab + " \xE2\x96\xB8", SH_E, ir, "Allow or refuse them on the Adventures page", p, true, BTN_ACTIVE);
-        y -= 38.f;
-    }
-    // the expert way in, last
-    {
-        const bool adv = advancedOpen();
-        const std::string lab = adv ? "Advanced editing \xE2\x96\xBE" : "Advanced editing \xE2\x96\xB8";
-        const S32 ia = act([this, adv]() { setAdvancedOpen(!adv); });
-        btn(cl, y - 30.f, cl + WolfAdvStudio::btnW(lab) + 10.f, y, lab, SH_E, ia, "The expert pages (import a pack, outline, rules and more) in the rail", p, true, adv ? BTN_ACTIVE : 0);
+        const std::string lab = llformat("%d request%s to run games on your land", n, n == 1 ? "" : "s");
+        const S32 ir = act([this]() { press(SH_PAGE, (S32)SP_HOME); mScroll[SP_HOME] = 0.f; });
+        btn(cl, y - 30.f, cl + WolfAdvStudio::btnW(lab + " \xE2\x96\xB8") + 10.f, y, lab + " \xE2\x96\xB8", SH_E, ir, "Allow or refuse them on the Adventures page", p, !building, BTN_ACTIVE);
         y -= 38.f;
     }
     return y;
@@ -2140,10 +2244,36 @@ void WolfAdventureStudioView::drawConfirm(const Palette& p)
         break;
     }
     case SC_JOB_CANCEL:
-        title = "Stop drafting?";
-        body = "What it has done so far stays paid for; the rest is not done.";
-        yes = "Stop";
+        if (mBuildStep != B_NONE)
+        {
+            // [SIMPLE STUDIO 2026-10-17] page 1's "Stop the build" (the progress card)
+            title = "Stop building?";
+            body = "What has been spent so far is not given back.";
+            yes = "Stop the build";
+            no = "Keep building";
+        }
+        else
+        {
+            title = "Stop drafting?";
+            body = "What it has done so far stays paid for; the rest is not done.";
+            yes = "Stop";
+        }
         danger = true;
+        break;
+    case SC_DELETE_GAME:
+        // [SIMPLE STUDIO 2026-10-17] page 1's cards: plain words, no typed title (Paul: "i should be able to delete games")
+        title = "Delete this game?";
+        body = "\"" + mDeleteTitle + "\" is deleted with everything in it. This cannot be undone.";
+        yes = "Delete";
+        no = "Keep it";
+        danger = true;
+        break;
+    case SC_FLOW_TIDY:
+        // [SIMPLE STUDIO 2026-10-17] page 3's Tidy up: the boxes the author moved go back to their automatic places
+        title = "Tidy up the map?";
+        body = "Every box goes back to its automatic place. The boxes you moved lose their positions; nothing else changes.";
+        yes = "Tidy up";
+        no = "Keep it";
         break;
     case SC_TAKE:
         title = "Take control of this session?";
@@ -2158,12 +2288,15 @@ void WolfAdventureStudioView::drawConfirm(const Palette& p)
     default:
         // [WOLF ADVENTURE P3 2026-10-16] the editors' questions (wolffloateradventurestudioedit.cpp)
         if (!editConfirmText(mConfirm, title, body, yes, danger)) return;
+        if (mConfirm == SC_EDIT_DELETE && mConfirmKeyB == "remove") no = "Keep";   // page 2's Remove: Remove / Keep
         break;
     }
     const F32 cw = llmin(W - 40.f, 440.f);
     const LLFontGL* f = LLFontGL::getFontSansSerif();
     const std::vector<std::string> lines = wrap(f, body, cw - 28.f, 6);
-    const F32 field_h = mConfirm == SC_DELETE ? 40.f : 0.f;
+    // [IN-WORLD STUFF 2026-10-17] "Clean up the land" is answered by typing the game's name too (typedConfirm)
+    if (typedConfirm()) yes_enabled = mDeleteTyped == mDeleteTitle;
+    const F32 field_h = typedConfirm() ? 40.f : 0.f;
     const F32 ch = 16.f + (F32)display(18.f)->getLineHeight() + 6.f + (F32)lines.size() * (F32)f->getLineHeight() + 12.f + field_h + 30.f + 14.f;
     const F32 cl = (W - cw) * 0.5f, ct = (H + ch) * 0.5f, cb = ct - ch;
     frame(cl, cb, cl + cw, ct, p, 1.f, 10.f);
@@ -2176,7 +2309,7 @@ void WolfAdventureStudioView::drawConfirm(const Palette& p)
         y -= (F32)f->getLineHeight();
     }
     y -= 8.f;
-    if (mConfirm == SC_DELETE)
+    if (typedConfirm())
     {
         field(cl + 14.f, y - 30.f, cl + cw - 14.f, y, mDeleteTyped, mDeleteTitle, F_DELETE, p);
     }
@@ -2196,8 +2329,9 @@ void WolfAdventureStudioView::ask(EConfirm what, S32 arg)
     mConfirm = what;
     mConfirmArg = arg;
     // the safe answer has the focus (W3C APG alertdialog); the delete question starts in its field
-    mField = what == SC_DELETE ? F_DELETE : F_NONE;
-    mHits.setFocus(what == SC_DELETE ? (S32)SH_FIELD : (S32)SH_NO, what == SC_DELETE ? (S32)F_DELETE : 0);
+    const bool typed = what == SC_DELETE || what == SC_LAND_CLEANUP;   // [IN-WORLD STUFF 2026-10-17] typedConfirm, before mConfirm is read
+    mField = typed ? F_DELETE : F_NONE;
+    mHits.setFocus(typed ? (S32)SH_FIELD : (S32)SH_NO, typed ? (S32)F_DELETE : 0);
     mKeyboardNav = true;
     setFocus(true);
 }
@@ -2217,6 +2351,8 @@ void WolfAdventureStudioView::answer(bool yes)
     switch (what)
     {
     case SC_DELETE: deleteAdventure(); break;
+    case SC_DELETE_GAME: deleteGame(mDeleteId, mDeleteTitle); break;   // [SIMPLE STUDIO 2026-10-17] mDeleteTitle = the stored title
+    case SC_FLOW_TIDY: flowTidy(); break;
     case SC_PUBLISH: publish(-1); break;
     case SC_UNPUBLISH: unpublish(); break;
     case SC_REPUBLISH: publish(arg); break;
@@ -2230,7 +2366,8 @@ void WolfAdventureStudioView::answer(bool yes)
         body["job"] = mJobId;
         call("job_cancel", body, [](WolfAdventureStudioView* self, const LLSD&)
         {
-            self->setStatus("Drafting stopped.", false);
+            // page 1's build: the next poll finds it cancelled and says so in red (pollJob -> buildFail)
+            self->setStatus(self->mBuildStep != B_NONE ? "The build is stopping..." : "Drafting stopped.", false);
             self->pollJob();
         }, "Stopping...");
         break;
@@ -2258,8 +2395,12 @@ void WolfAdventureStudioView::press(S32 id, S32 arg)
         if (WolfFloaterAdventureStudio* f = dynamic_cast<WolfFloaterAdventureStudio*>(getParentByType<LLFloater>()))
             f->showGuide(!WolfFloaterAdventureStudio::guideShown());
         break;
+    case SH_MINIMIZE:   // [MINIMIZE 2026-10-17] the band's "-": the floater's standard minimize (WolfFloaterAdventureStudio::setMinimized)
+        if (LLFloater* f = getParentByType<LLFloater>()) f->setMinimized(true);
+        break;
     case SH_PAGE:
         mPage = (EPage)llclamp(arg, 0, (S32)SP_COUNT - 1);
+        if (mPage == SP_CHARS) mCharsWho.clear();   // [CHARACTER GALLERY 2026-10-17] page 2 opens as the gallery
         if (mPage == SP_HOME) { loadList(); loadRequests(); }
         // [WOLF ADVENTURE P2 2026-10-16] each page loads what it shows (a failed load is asked again
         // when the page is chosen again, never every frame)
@@ -2271,7 +2412,9 @@ void WolfAdventureStudioView::press(S32 id, S32 arg)
         if (mPage == SP_RUN) loadSessions();
         if (mPage == SP_CASTED) loadVoices();            // [WOLF ADVENTURE P3 2026-10-16]
         if (mPage == SP_RULES) mGameLinksFor.clear();    // the link status read again
-        if (mPage == SP_HELPER) { helperHistory(); if (mOpenId.empty()) loadTemplates(); }   // [WOLF STORY FIRST 2026-10-17]
+        // [SIMPLE STUDIO 2026-10-17] the story map and the characters need the helper's notes and the voice list
+        if (mPage == SP_MAP || mPage == SP_CHARS) { helperHistory(); loadVoices(); }
+        if (mPage == SP_HELPER) { mField = F_STORY; mHits.setFocus(SH_FIELD, F_STORY); }
         // [WOLF ADVENTURE AUDIT 2026-10-17] Start here: with nothing open it starts at "What kind"; the starter list loads
         if (mPage == SP_WIZARD)
         {
@@ -2474,6 +2617,8 @@ void WolfAdventureStudioView::onMouseCaptureLost()
     mDraggingScroll = false;
     mFlowPanning = false;      // [WOLF STORY FIRST 2026-10-17/]
     mFlowConnectFrom = -1;
+    mFlowDragKey.clear();      // [SIMPLE STUDIO 2026-10-17] a box being moved stays where it was dragged to, unsaved
+    mFlowDragMoved = false;
 }
 
 bool WolfAdventureStudioView::handleHover(S32 x, S32 y, MASK mask)
@@ -2545,6 +2690,12 @@ bool WolfAdventureStudioView::handleKeyHere(KEY key, MASK mask)
         }
         if (key == KEY_RETURN && mask == MASK_NONE)
         {
+            // [SIMPLE STUDIO 2026-10-17] the story box is several lines: Enter starts a new line (Build my game is the button)
+            if (mField == F_STORY)
+            {
+                if (utf8str_to_wstring(text).size() < fieldCap(F_STORY)) text += '\n';
+                return true;
+            }
             // [WOLF ADVENTURE AUDIT 2026-10-17] on Start here, Enter in the name is the step's Next (Make it)
             if (mField == F_TITLE && mBusy == 0 && mPage == SP_WIZARD) wizNext();
             else if (mField == F_TITLE && mBusy == 0) createAdventure();   // one request at a time, as the button
@@ -2557,7 +2708,17 @@ bool WolfAdventureStudioView::handleKeyHere(KEY key, MASK mask)
         if (key == 'V' && (mask & MASK_CONTROL))
         {
             LLWString pasted;
-            if (LLClipboard::instance().pasteFromClipboard(pasted)) text = cap(text + wstring_to_utf8str(pasted), fieldCap(mField));
+            if (LLClipboard::instance().pasteFromClipboard(pasted))
+            {
+                // [SIMPLE STUDIO 2026-10-17] the story box takes a whole pasted book: too long for the box = it is the book
+                if (mField == F_STORY && utf8str_to_wstring(text).size() + pasted.size() > fieldCap(F_STORY))
+                {
+                    mBuildError = bookFromText(text + wstring_to_utf8str(pasted));
+                    if (mBuildError.empty()) mStoryBox.clear();
+                    return true;
+                }
+                text = cap(text + wstring_to_utf8str(pasted), fieldCap(mField));
+            }
             return true;
         }
     }
@@ -2686,13 +2847,49 @@ void WolfFloaterAdventureStudio::onOpen(const LLSD& key)
         closeFloater();
         return;
     }
+    // [START POSITION 2026-10-17] Paul: "make sure the floater starts in the right place". Source: llfloater.cpp:705-766 openFloater -
+    // applyControlsAndPosition (:984-999) runs before onOpen: a saved rect is applied (save_rect="true": applyRectControl :1002-1050;
+    // the "floater" settings group is gSavedSettings, llappviewer.cpp:1054, so the rect is remembered per viewer settings), else the
+    // xml's positioning="centered" centres it (applyPositioning :1109-1116 -> center :969). Larger than the floater area: the top-left
+    // goes to 60/60 of the area and adjustToFitScreen (:3242-3300; allow_partial_outside false -> min_overlap S32_MAX, so it is
+    // shrunk to the area where needed and brought wholly inside by fitWithDependentsOnScreen) keeps it from ever being partly off-screen.
+    if (!isMinimized())
+    {
+        const LLRect snap = gFloaterView->getSnapRect();
+        if (getRect().getWidth() > snap.getWidth() || getRect().getHeight() > snap.getHeight())
+            setOrigin(snap.mLeft + 60, snap.mTop - 60 - getRect().getHeight());
+        gFloaterView->adjustToFitScreen(this, false);
+    }
     if (mView)
     {
         mView->onOpened(key);
         mView->setFocus(true);
     }
-    // [WOLF ADVENTURE AUDIT 2026-10-17] the Guide beside it, unless its owner hid it
-    if (gSavedSettings.getBOOL("WolfAdventureGuideOpen")) showGuide(true);
+    // [SIMPLE STUDIO 2026-10-17] the Guide never opens on its own (SIMPLE_STUDIO_SPEC.md): the Guide button shows it
+}
+
+// [MINIMIZE 2026-10-17] Source: llfloater.cpp:1383-1500 setMinimized - minimizing keeps the expanded rect (mExpandedRect), moves
+// the floater to the minimize position, enables BUTTON_RESTORE (since BUTTON_MINIMIZE was enabled at construction: can_minimize
+// true, llfloater.cpp:347-350), hides or minimizes the dependents (the Guide, the texture picker), releases focus and reshapes to
+// UIMinimizedWidth x header_height; restoring puts it back at mExpandedRect and shows the dependents again. While minimized
+// LLFloater::draw (:2225-2231) draws only the title buttons and the drag handle, so the Studio's view is hidden too (its stale
+// hit rectangles would otherwise answer hover and tooltips), and the drag handle's title - hidden by show_title="false"
+// (llfloater.cpp:3719-3722) - is shown on the minimized bar so the bar reads "Adventure Studio (Experimental)".
+void WolfFloaterAdventureStudio::setMinimized(bool minimize)
+{
+    LLFloater::setMinimized(minimize);
+    if (mView) mView->setVisible(!minimize);
+    if (LLDragHandle* h = getDragHandle()) h->setTitleVisible(minimize);
+    if (!minimize && mView) mView->setFocus(true);
+}
+
+// [MINIMIZE 2026-10-17] Source: llfloater.cpp:2353-2440 updateTitleButtons - lays out every enabled title button at the top right,
+// which would put the standard minimize icon over the drawn band's x. The band draws its own "-" (SH_MINIMIZE), so the standard
+// minimize button is kept hidden; the Restore button of the minimized bar is left as the base laid it out.
+void WolfFloaterAdventureStudio::updateTitleButtons()
+{
+    LLFloater::updateTitleButtons();
+    if (mButtons[BUTTON_MINIMIZE]) mButtons[BUTTON_MINIMIZE]->setVisible(false);
 }
 
 // static
@@ -2703,7 +2900,6 @@ bool WolfFloaterAdventureStudio::guideShown()
 
 void WolfFloaterAdventureStudio::showGuide(bool on)
 {
-    gSavedSettings.setBOOL("WolfAdventureGuideOpen", on);
     if (!on)
     {
         if (LLFloater* g = LLFloaterReg::findInstance("wolf_adventure_guide")) g->closeFloater();

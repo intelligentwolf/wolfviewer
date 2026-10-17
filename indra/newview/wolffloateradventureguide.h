@@ -23,11 +23,12 @@
 class WolfAdventureStudioView;
 
 /**
- * [WOLF ADVENTURE AUDIT 2026-10-17] Paul 2026-10-17: "maybe a full tutorial in a floater next to it". It explains the
- * Studio page (or Start here step) on screen in plain words with an example, links to the matching page of the
- * website guide (https://www.wolf-grid.com/story-guide?p=<slug>, the slugs of gridmanager/wolfstoryguide_lib.php
- * wsg_pages), and shows "What do I do next?": the nine steps of making an adventure, ticked from the draft itself,
- * each one a way to that step. Drawn in the wolfGame family like the Studio.
+ * [WOLF ADVENTURE AUDIT 2026-10-17] Paul 2026-10-17: "maybe a full tutorial in a floater next to it".
+ * [SIMPLE STUDIO 2026-10-17] SIMPLE_STUDIO_SPEC.md: it never opens on its own; opened by hand (the Studio's Guide button) it
+ * shows the three pages as three short steps - Your story, Your characters, Your story map - the one on screen marked, each
+ * a way to that page. On an expert page (Advanced editing) or a Start here step it adds that page's help in plain words with
+ * an example and a link to the matching page of the website guide (https://www.wolf-grid.com/story-guide?p=<slug>, the slugs
+ * of gridmanager/wolfstoryguide_lib.php wsg_pages). Drawn in the wolfGame family like the Studio.
  */
 class WolfAdventureGuideView : public LLUICtrl
 {

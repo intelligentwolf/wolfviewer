@@ -518,6 +518,25 @@ void FSPanelLogin::giveFocus()
     }
 }
 
+// [2026-10-17] The web page the login panel shows for the grid picked on the login screen.
+// Paul: "the What you are missing page needs to show on every grid except Wolf". Wolf
+// Territories keeps its own login_page (fsgridhandler.cpp:151 DEFAULT_LOGIN_PAGE /
+// get_grid_info <welcome>); every other grid - Second Life, its beta grid, any OpenSim grid
+// someone added - shows https://www.wolf-grid.com/what-you-are-missing (gridmanager
+// whatyouaremissing.php: a brochure of what Wolf offers, naming no other grid). The grid is
+// recognised with WolfGrid::isWolfTerritories() (wolfgrid.h:68: grid id "wolfterritories" or
+// a login host under wolfterritories.org), which reads the grid manager's current choice -
+// setGridChoice() (fsgridhandler.cpp:1041) runs before updateServer() calls loadLoginPage()
+// below. ForceLoginURL in loadLoginPage() still wins.
+static std::string wolfLoginPageForGrid()
+{
+    if (!WolfGrid::isWolfTerritories())
+    {
+        return "https://www.wolf-grid.com/what-you-are-missing";
+    }
+    return LLGridManager::getInstance()->getLoginPage();
+}
+
 // static
 void FSPanelLogin::showLoginWidgets()
 {
@@ -529,7 +548,7 @@ void FSPanelLogin::showLoginWidgets()
         LLMediaCtrl* web_browser = sInstance->getChild<LLMediaCtrl>("login_html");
 
         // *TODO: Append all the usual login parameters, like first_login=Y etc.
-        std::string splash_screen_url = LLGridManager::getInstance()->getLoginPage();
+        std::string splash_screen_url = wolfLoginPageForGrid();   // [2026-10-17] SL -> "What you are missing..."
         web_browser->navigateTo( splash_screen_url, HTTP_CONTENT_TEXT_HTML );
         LLUICtrl* username_combo = sInstance->getChild<LLUICtrl>("username_combo");
         username_combo->setFocus(true);
@@ -935,7 +954,7 @@ void FSPanelLogin::loadLoginPage()
 {
     if (!sInstance) return;
 
-    LLURI login_page = LLURI(LLGridManager::getInstance()->getLoginPage());
+    LLURI login_page = LLURI(wolfLoginPageForGrid());   // [2026-10-17] SL -> "What you are missing..."
     LLSD params(login_page.queryMap());
 
     LL_DEBUGS("AppInit") << "login_page: " << login_page << LL_ENDL;

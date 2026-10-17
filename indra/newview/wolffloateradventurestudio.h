@@ -76,12 +76,15 @@ private:
     // Take control / Hand back, Pause, AI on, the meter, the log and Assist).
     // [WOLF ADVENTURE P3 2026-10-16] the full Studio (STUDIO §2.2-2.9): Outline, Cast, Places, Story,
     // Rules, Lore and Test Play, between Import and Publish (wolffloateradventurestudioedit.cpp).
-    // [WOLF ADVENTURE AUDIT 2026-10-17] SP_WIZARD ("Start here") is last in the enum (the other values are unchanged).
-    // [FRONT DOOR 2026-10-17] SP_HELPER is the main screen; the rail (layoutAndDraw MAIN / ADV) shows the expert pages under
-    // "Advanced editing"; the wizard is reached from the front door's "Make it box by box (no AI)".
+    // [WOLF ADVENTURE AUDIT 2026-10-17] SP_WIZARD ("Start here") is last of the expert pages (the other values are unchanged).
+    // [SIMPLE STUDIO 2026-10-17] SIMPLE_STUDIO_SPEC.md: the default path is THREE pages - SP_HELPER "Your story" (page 1),
+    // SP_CHARS "Your characters" (page 2), SP_MAP "Your story map" (page 3). The expert pages stay behind "Advanced editing"
+    // on page 3 (never remembered open); the wizard is reached from page 1's "Make it box by box, with no AI".
     enum EPage { SP_HOME = 0, SP_IMPORT, SP_OUTLINE, SP_CASTED, SP_PLACES, SP_STORY, SP_RULES, SP_LORE, SP_TEST,
                  SP_PUBLISH, SP_AI, SP_CAST, SP_BOOK, SP_RUN, SP_WIZARD,
-                 SP_HELPER,   // [WOLF STORY FIRST 2026-10-17] "Talk to your helper": the conversation and the flowchart
+                 SP_HELPER,   // page 1 "Your story": the story box, Load a book file, Build my game, the games to continue
+                 SP_CHARS,    // page 2 "Your characters": one simple card per character
+                 SP_MAP,      // page 3 "Your story map": the flowchart, the box panel, the guided walk, the helper
                  SP_COUNT };
 public:
     /** [WOLF ADVENTURE AUDIT 2026-10-17] The "Start here" wizard's steps (AUDIT_2026-10-17.md §5.4), in order. */
@@ -89,11 +92,16 @@ public:
     /** What the guide floater shows: the page on screen, and the wizard step when it is Start here. */
     S32 guidePage() const { return (S32)mPage; }
     S32 guideStep() const { return mPage == SP_WIZARD ? (S32)mWizStep : -1; }
-    bool guideHasAdventure() const { return !mOpenId.empty(); }
-    /** The "What do I do next?" checklist: one entry per wizard step, done or not, read from the draft itself. */
-    std::vector<bool> wizardChecks() const;
-    /** The guide's checklist was clicked: open the wizard at that step. */
-    void openWizardStep(S32 step);
+    /** [SIMPLE STUDIO 2026-10-17] The simple step on screen: 0 Your story, 1 Your characters, 2 Your story map; -1 on an expert page. */
+    S32 simpleStep() const { return mPage == SP_HELPER ? 0 : mPage == SP_CHARS ? 1 : mPage == SP_MAP ? 2 : -1; }
+    /** Whether that step can be shown now (pages 2 and 3 need a game of the author's own, open and loaded). */
+    bool simpleCanGo(S32 step) const;
+    /** [W69 2026-10-17] The experimental notice (Paul's exact words), as a soft amber note card - not an error. Returns the y under it. */
+    F32 experimentalNote(F32 l, F32 r, F32 top, const WolfGameDraw::Palette& p);
+    /** [TABS 2026-10-17] The open draft has at least one box (a beat under acts > scenes): the Characters and Gameplay tabs open. */
+    bool hasBoxes() const;
+    /** The Guide's step was clicked: show that page. */
+    void goSimple(S32 step);
 private:
     enum EHit
     {
@@ -125,16 +133,24 @@ private:
         // describes, SH_PROBLEM opens the field of the drawer's problem `arg`
         SH_E, SH_E_TEXT, SH_PROBLEM,
         SH_GUIDE,   // [WOLF ADVENTURE AUDIT 2026-10-17] show / hide the Guide beside the Studio
+        SH_MINIMIZE,   // [MINIMIZE 2026-10-17] Paul: "it needs a minimize button on the floater" - the band's "-" (LLFloater::setMinimized)
         // [WOLF STORY FIRST 2026-10-17] the flowchart: its empty ground (pan), a box (select; arg = node), a box's handle (drag to connect)
         SH_FLOW_BG, SH_FLOW_BOX, SH_FLOW_HANDLE
     };
     enum EConfirm { SC_NONE = 0, SC_DELETE, SC_PUBLISH, SC_UNPUBLISH, SC_REPUBLISH, SC_REVOKE, SC_REFUSE, SC_REPLACE,
                     SC_JOB_START, SC_JOB_CANCEL, SC_TAKE,
                     SC_EDIT_DELETE, SC_TEST_TELEPORT, SC_PLACE_TELEPORT, SC_PRESET,     // [WOLF ADVENTURE P3 2026-10-16]
-                    SC_RECOVER, SC_PREMIUM, SC_COND_REPLACE };
+                    SC_RECOVER, SC_PREMIUM, SC_COND_REPLACE,
+                    SC_DELETE_GAME,     // [SIMPLE STUDIO 2026-10-17] page 1's cards: a plain Delete / Keep it (no typed title)
+                    SC_FLOW_TIDY,       // page 3's "Tidy up": every box back to its automatic place (the saved positions go)
+                    SC_MESH_CANCEL,     // [IN-WORLD STUFF 2026-10-17] "Stop" on a thing being made (Meshy): job_cancel, asked first
+                    SC_LAND_CLEANUP };  // [IN-WORLD STUFF 2026-10-17] "Clean up the land": the game's name typed, then land_cleanup
+    /** [IN-WORLD STUFF 2026-10-17] The questions answered by typing the game's name (the field F_DELETE, mDeleteTyped == mDeleteTitle). */
+    bool typedConfirm() const { return mConfirm == SC_DELETE || mConfirm == SC_LAND_CLEANUP; }
     enum EField { F_NONE = 0, F_TITLE, F_DELETE, F_FILTER, F_TALK, F_ASSIST, F_BOOK_TITLE, F_BOOK_AUTHOR,
                   F_EDIT,     // [WOLF ADVENTURE P3 2026-10-16] an editor field (mEditPtr)
-                  F_HELPER }; // [WOLF STORY FIRST 2026-10-17] what the author says to the helper   // [WOLF ADVENTURE P3 2026-10-16] an editor field (mEditPtr)
+                  F_HELPER,   // [WOLF STORY FIRST 2026-10-17] what the author says to the helper
+                  F_STORY };  // [SIMPLE STUDIO 2026-10-17] page 1's story box (the game's story, up to 20,000 characters)
 
     // drawing
     void layoutAndDraw();
@@ -147,6 +163,11 @@ private:
     void livePreview(bool undo, const std::string& why = std::string());
     void liveApply();
     void drawDrawer(F32 l, F32 b, F32 r, F32 t, const WolfGameDraw::Palette& p);
+    /** [FIXED FOOT 2026-10-17] Paul: "keep the buttons at the bottom visible please" - the page's way-on buttons sit in a bar
+     *  under the scrolled page, inside the floater, never scrolled away: page 2 "Your story" / "Next: set up your places";
+     *  page 3 "Your characters", "My games", "Rebuild my game" / "Advanced editing", "Publish". 0 = the page has no bar. */
+    F32 footBarHeight() const;
+    void drawFootBar(F32 l, F32 b, F32 r, F32 t, const WolfGameDraw::Palette& p);
     void drawConfirm(const WolfGameDraw::Palette& p);
     F32 head(F32 l, F32 r, F32 top, const std::string& text, const WolfGameDraw::Palette& p);
     F32 para(F32 l, F32 r, F32 top, const std::string& text, const LLColor4& colour, bool small = false);
@@ -231,6 +252,40 @@ private:
     void bookStart();
     void pollJob();
     void loadJobs();
+    // ---- [SIMPLE STUDIO 2026-10-17] page 1's one builder (SIMPLE_STUDIO_SPEC.md "Build my game"), wolffloateradventurestudioai.cpp ----
+    /** The steps of one build, in order; B_NONE between builds. Every step that can fail ends in buildFail (red text on page 1). */
+    enum EBuild { B_NONE = 0, B_CREATING, B_WRITE, B_SAVING, B_BUDGET, B_QUOTING, B_QUOTED, B_STARTING, B_RUNNING, B_APPLYING };
+    /** "Build my game": checks the words or the book and its rights tick, makes the game when none is open, then buildTick goes on. */
+    void buildStart();
+    void buildCreate(const std::string& name);
+    /** Each frame: the draft loaded -> the story written and saved -> the balance read -> the quote asked (then the inline question). */
+    void buildTick();
+    void buildBudget();
+    void buildQuote(S32 max_credits, bool balance_known);
+    /** "Yes, build it" / "No" on the inline question. */
+    void buildYes();
+    void buildNo();
+    void buildFail(const std::string& why);
+    /** [SIMPLE STUDIO 2026-10-17] Paul: "it shouldn't save the game until the user has approved payment". The game this build
+     *  attempt made (mBuildMadeId) is deleted again (the brain's delete action) when the attempt ends before "Yes, build it". */
+    void buildDiscard(const std::string& id, const std::string& title);
+    /** The game this attempt made closed (page 1 keeps the words and the book) and discarded. */
+    void buildUnmake();
+    /** Paul: "please let it pick up where i left off": the author's drafting jobs asked for (jobs); a queued or running build of
+     *  the open game (or, with nothing open, of the newest game built) is polled again, a done one put in, an applied one opened. */
+    void resumeBuild();
+    /** A done job whose output is already in the draft (one of its boxes is there): an older brain never marked it applied. */
+    bool jobOutputIn(const LLSD& job) const;
+    /** The failed or stopped jobs whose words page 1 already showed once (WolfAdventureJobsSeen, per account). */
+    bool jobSeen(const std::string& job) const;
+    void jobMarkSeen(const std::string& job);
+    /** Page 1's cards: the brain's delete action for one game (the exact title as its confirm), the list read again. */
+    void deleteGame(const std::string& id, const std::string& title);
+    /** The clipboard's text as the book; "" when it was taken, else why not. */
+    std::string bookFromClipboard();
+    std::string bookFromText(const std::string& text);   // a pasted text too long for the story box becomes the book
+    /** The book file's name without its extension (the game's name, the brain's `title`). */
+    std::string bookStem() const;
     void assistRun();
     void loadSessions();
     void pollGmState(bool force);
@@ -241,7 +296,7 @@ private:
     std::string sceneOfBeat(const std::string& beat) const;
 
     WolfGameHits mHits;
-    EPage mPage = SP_HELPER;   // [WOLF STORY FIRST FRONT DOOR 2026-10-17] the Studio opens on the story-first screen
+    EPage mPage = SP_HELPER;   // [SIMPLE STUDIO 2026-10-17] the Studio opens on page 1, "Your story"
     F32 mScroll[SP_COUNT] = { 0.f, 0.f, 0.f };
     F32 mContentH = 0.f;
     LLRect mPageRect;
@@ -333,6 +388,27 @@ private:
     LLSD mJob;                      // job {job}
     LLSD mJobs;                     // jobs
     F64 mJobPollAt = 0.0;
+    // [SIMPLE STUDIO 2026-10-17] page 1
+    std::string mStoryBox;          // the story box (F_STORY); the open game's story once its draft has loaded (mStoryFor)
+    std::string mStoryFor;          // the game mStoryBox was read from (or typed for)
+    EBuild mBuildStep = B_NONE;
+    S32 mBuildMax = 0;              // the most credits this build may spend (sent as maxCredits)
+    std::string mBuildError;        // page 1's red text; stays until the next Build my game
+    bool mBuildNeedCredits = false; // the last failure was credits: page 1 shows Buy credits... (Paul 10-17: no link to buy them)
+    std::string mBuildBuyUrl;       // ai_budget's buyurl (wolfmind_lib.php WM_BUY_URL), for that button
+    std::string mLandNote;          // "This land belongs to someone else..." (create's region.state not enabled), kept on every page
+    bool mLandPending = false;      // openAdventure: once the draft loads, land on page 3 when it has boxes, else page 1
+    std::string mBuildMadeId;       // the game THIS build attempt made (buildCreate), gone again if the attempt ends before Yes
+    std::string mBuildMadeTitle;    // its title as the brain stored it (create's reply): the delete action's confirm
+    time_t mBuildRunAt = 0;         // when the build began running (Yes pressed, or the job's created time when picked up): the card's clock
+    S32 mBuildActs = 0;             // how many acts the brain is writing, once its progress says "Act k of N" (0 = not known yet)
+    S32 mBuildKind = 0;             // what is being built: 1 a typed story, 2 a loaded book, 0 not known (picked up after a relaunch)
+    std::string mCardsError;        // red text under the Continue cards (a delete the brain refused); stays
+    bool mResumeOnList = false;     // onOpened: once the list has loaded, resumeBuild() (the list names the game to open)
+    bool mLandChars = false;        // resumeBuild: a build already in the game - land on the characters when it has no boxes
+    std::string mCharsError;        // page 2's red text
+    std::string mCharsWho;          // [CHARACTER GALLERY 2026-10-17] page 2: "" the gallery, "c:<id>" a character's page, "e:<id>" an enemy's page
+    bool mLabelsAbove = false;      // [TIDY FORM 2026-10-17] fText draws its label above the box (one column of boxes of the same width)
     // Assist (Studio, on the draft)
     S32 mAssistAsk = 0;             // 0 next, 1 boxed, 2 reply
     std::string mAssistBox;
@@ -415,6 +491,32 @@ private:
     F32 fColour(F32 l, F32 r, F32 top, const std::string& label, const std::string& ptr, const LLSD& v, S32 doc, bool optional,
                 const WolfGameDraw::Palette& p);
     F32 pageCastEd(F32 l, F32 r, F32 top, const WolfGameDraw::Palette& p);
+    /** [SIMPLE STUDIO 2026-10-17] page 2 "Your characters": one simple card per character (SIMPLE_STUDIO_SPEC.md). */
+    F32 pageChars(F32 l, F32 r, F32 top, const WolfGameDraw::Palette& p);
+    // [CHARACTER GALLERY 2026-10-17] Paul: "I would rather have pictures for each character, then you click through to work with
+    // that character" - page 2 is a gallery of picture cards (one per character, the enemies under their own head), and a card
+    // opens that one's page with the fields. mCharsWho says which is shown.
+    /** The gallery: the intro line, Add someone, Take the pads away, the owner tick, the cards, the Enemies cards. */
+    F32 charsGallery(F32 l, F32 r, F32 top, const WolfGameDraw::Palette& p);
+    /** One card of the gallery, `cw` wide, its top-left at (l, top): the picture, the name, one line, the look badge. Returns its height. */
+    F32 charsCard(F32 l, F32 top, F32 cw, const LLSD& sheet, bool enemy, const WolfGameDraw::Palette& p);
+    /** One character's (or enemy's) page: All characters / Previous / Next, the big picture with Set picture..., the fields. */
+    F32 charsDetail(F32 l, F32 r, F32 top, S32 at, bool enemy, const WolfGameDraw::Palette& p);
+    /** The picture of a character or enemy, `sz` square with its bottom-left at (l, b): the portrait texture when there is one,
+     *  else a plate in the colour of their id with their initials and a silhouette outline (so every card has a picture). */
+    void charsPortrait(F32 l, F32 b, F32 sz, const LLSD& sheet, bool enemy, const WolfGameDraw::Palette& p);
+    /** The portrait texture of a character (castSheet.portrait), or of an enemy that looks like one (enemy.look.kind "cast": that
+     *  character's portrait); "" when there is none. */
+    std::string charsPortraitId(const LLSD& sheet, bool enemy) const;
+    /** A plate colour from an id: FNV-1a over the id picks the hue; 45 % saturation, 28 % lightness, so the palette's light text
+     *  reads on it at 4.5:1 or better whatever the hue. */
+    static LLColor4 idColour(const std::string& id);
+    /** An enemy's look in words: as lookWords for an NPC, "Looks like <character>" for look.kind "cast", "An object from a chest" for "object". */
+    std::string enemyLookWords(const LLSD& e) const;
+    /** The voice row of a character (the picker, premium voices shown on request; `rate` adds the speed field), for Cast and page 2. */
+    F32 voiceRow(F32 l, F32 r, F32 top, S32 cast_index, bool rate, const WolfGameDraw::Palette& p);
+    /** A new character from the schema's defaults, appended to the cast and selected on the Cast page. */
+    void addCastMember();
     F32 pagePlaces(F32 l, F32 r, F32 top, const WolfGameDraw::Palette& p);
     F32 pageStory(F32 l, F32 r, F32 top, const WolfGameDraw::Palette& p);
     F32 pageRules(F32 l, F32 r, F32 top, const WolfGameDraw::Palette& p);
@@ -462,7 +564,8 @@ private:
     void docAppend(S32 doc, const std::string& ptr, const boost::json::value& v);
     void docMove(S32 doc, const std::string& arrPtr, S32 index, S32 by);
     void docDuplicate(S32 doc, const std::string& arrPtr, S32 index);
-    void askDelete(S32 doc, const std::string& ptr, const std::string& what);
+    /** `remove`: page 2's words ("Remove <name>?" / Remove / Keep) instead of the expert pages' Delete. */
+    void askDelete(S32 doc, const std::string& ptr, const std::string& what, bool remove = false);
     /** Write the open field. A new map id and a test flag are written only with Enter (`enter`). */
     void commitEdit(bool enter = false);
     void startEdit(S32 act_index);
@@ -471,6 +574,10 @@ private:
     void pickRef(const std::string& title, const std::string& ptr, const std::string& kind, S32 doc, bool optional);
     std::vector<std::pair<std::string, std::string>> refOptions(const std::string& kind, const std::string& ptr) const;
     std::string castUses(const std::string& cast_id) const;
+    /** Every pointer that names the character (outside its own sheet). */
+    std::vector<std::string> castUsesList(const std::string& cast_id) const;
+    /** The land note from the list's regions[].state (enabled = the holder said yes), for a game opened from a card. */
+    void landNoteFromList();
     void gotoProblem(const std::string& path);
     S32 problemsUnder(const std::string& ptr) const;
     std::string problemAt(const std::string& ptr) const;
@@ -479,7 +586,8 @@ private:
     void rulesSet(const std::string& ptr, const boost::json::value* v);
     bool rulesOverridden(const std::string& ptr) const;
     // test play
-    void testStart(const std::string& beat);
+    /** A test from `beat` ("" = the first box); `then` runs once the brain has started it (page 3's "Play it now" opens the test page). */
+    void testStart(const std::string& beat, std::function<void()> then = std::function<void()>());
     void testOp(const std::string& action, const LLSD& extra, const std::string& doing);
     void pollTest(bool force);
     // place tool
@@ -499,6 +607,37 @@ private:
     void saveLook(const std::string& cast_id);
     void lookReload();
 
+    // ---- [IN-WORLD STUFF 2026-10-17] IN_WORLD_STUFF_PLAN.md: look pads (page 2), the things a box needs and "Make it for me"
+    //      (page 3's box panel), "Clean up the land" (page 3): wolffloateradventurestudioedit.cpp ----
+    /** Page 2's top: "Anyone can help dress my characters" (the owner setting lookPadsAnyone), shown once the brain reports it. */
+    F32 lookPadsHead(F32 l, F32 r, F32 top, const WolfGameDraw::Palette& p);
+    /** The card's look line: "Standard look until you dress them..." / "Dressed like <who>" / "Dressed in what you were wearing". */
+    static std::string lookWords(const LLSD& c);
+    /** look_pad {adventure, cast, here}: a pad for the character at the author's feet (clicked wearing an outfit, it becomes their look). */
+    void lookPad(const std::string& cast_id, const std::string& name);
+    /** look_pads_clear {adventure}: every pad of the game goes. */
+    void lookPadsClear();
+    /** owner_settings {lookPadsAnyone}: whether anyone (not only the author) may click a pad to dress a character. */
+    void lookPadsAnyone(bool on);
+    /** While pads are out: the draft read again now and then, so a pad clicked in the world shows on the card. */
+    void padsTick();
+    /** Page 3's box panel: "Things to build here" (box_things), each with Copy the script and Make it for me (Meshy). */
+    F32 boxThings(F32 l, F32 r, F32 top, const std::string& beat_id, const WolfGameDraw::Palette& p);
+    void loadBoxThings(const std::string& beat_id);
+    /** mesh_quote {adventure, thing, prompt}: the cost of making the thing, then the inline question. */
+    void meshQuote(const std::string& thing_id, const std::string& name);
+    /** "Yes, make it": mesh_start {job, confirm:true}; "No": the quoted job is cancelled (nothing charged). */
+    void meshStart();
+    void meshNo(bool say = true);
+    void meshPoll();
+    void meshTick();
+    /** land_cleanup: asked once per game whether the brain has it (an empty confirm never cleans anything); the button shows only then. */
+    void landCleanupTick();
+    /** "Clean up the land": the typed question (the game's name), then land_cleanup {adventure, region, confirm}. */
+    void landCleanupAsk();
+    void landCleanup();
+    bool landCleanupShown() const { return mCleanupKnown == 1 && !mOpenId.empty() && openIsOwner(); }
+
     // ---- [WOLF ADVENTURE AUDIT 2026-10-17] the "Start here" wizard: wolffloateradventurestudiowizard.cpp ----
     F32 pageWizard(F32 l, F32 r, F32 top, const WolfGameDraw::Palette& p);
     F32 wizKind(F32 l, F32 r, F32 top, const WolfGameDraw::Palette& p);
@@ -513,6 +652,10 @@ private:
     std::string wizCheck(S32 step) const;
     void wizGo(S32 step);
     void wizNext();
+    /** One entry per wizard step, done or not, read from the draft itself (the wizard's own summary). */
+    std::vector<bool> wizardChecks() const;
+    /** Open the wizard at that step (page 1's "Make it box by box, with no AI"). */
+    void openWizardStep(S32 step);
     void loadTemplates();
     void wizCreate();
     /** A beat's "done when" trigger: the first of its triggers that leads on (next, or a goto / end step); -1 when none. */
@@ -523,20 +666,17 @@ private:
     std::string newPackId(const std::string& base) const;
     void rememberWizStep();
 
-    // ---- [WOLF STORY FIRST 2026-10-17] the helper and the flowchart: wolffloateradventurestudioflow.cpp ----
-    F32 pageHelper(F32 l, F32 r, F32 top, const WolfGameDraw::Palette& p);
-    /** [FRONT DOOR 2026-10-17] nothing open: the story box, Build it, and the games to continue (wolffloateradventurestudio.cpp). */
-    F32 frontDoor(F32 l, F32 r, F32 top, const WolfGameDraw::Palette& p);
-    /** [FRONT DOOR] the main screen's columns: the story (left) and the helper conversation (right). */
-    F32 storyColumn(F32 l, F32 r, F32 top, const WolfGameDraw::Palette& p);
+    // ---- [SIMPLE STUDIO 2026-10-17] pages 1 and 3, the helper and the flowchart: wolffloateradventurestudioflow.cpp ----
+    /** Page 1 "Your story": the story box or the loaded book, Build my game, its inline cost question and progress, the games to continue. */
+    F32 pageYourStory(F32 l, F32 r, F32 top, const WolfGameDraw::Palette& p);
+    /** Page 3 "Your story map": the instruction band (Next place, Walk with me, Play it now), the flowchart, the box panel, the helper. */
+    F32 pageMap(F32 l, F32 r, F32 top, const WolfGameDraw::Palette& p);
+    /** The games to continue, as cards (page 1). */
+    F32 continueCards(F32 l, F32 r, F32 top, const WolfGameDraw::Palette& p);
+    /** The slim helper column of page 3: the last lines, the box (when no flowchart box is selected), Send, Undo that, today's cost. */
     F32 helperColumn(F32 l, F32 r, F32 top, const WolfGameDraw::Palette& p);
-    /** [FRONT DOOR] a text field several lines high: the text wrapped, its last lines shown, the caret at the end. */
+    /** A text field several lines high: the text wrapped, its last lines shown, the caret at the end. */
     void fieldMulti(F32 l, F32 b, F32 r, F32 t, const std::string& text, const std::string& placeholder, EField which, const WolfGameDraw::Palette& p);
-    /** [FRONT DOOR] "Advanced editing": the old pages in the rail, open or shut, remembered per account. */
-    bool advancedOpen();
-    void setAdvancedOpen(bool on);
-    /** [FRONT DOOR] the first line makes the adventure (create), then the line goes to the helper, or Load a book opens. */
-    void helperCreate(const std::string& text, bool then_book);
     F32 drawFlow(F32 l, F32 r, F32 top, F32 h, const WolfGameDraw::Palette& p);
     F32 flowBoxPanel(F32 l, F32 r, F32 top, const WolfGameDraw::Palette& p);
     void flowLayout();
@@ -544,13 +684,11 @@ private:
     void helperUndo();
     void helperHistory();
     void helperApply(const LLSD& reply);
-    /** STORY_FIRST_DESIGN.md §4: "Build it" from the saved story (draft_start fromStory), and a finished job merged into the
-     *  draft (job_apply, never destroying the author's own work). */
-    void storyQuote();
-    void jobApply();
+    /** STORY_FIRST_DESIGN.md §4: a finished build merged into the draft (job_apply, never destroying the author's own work);
+     *  false when it could not be sent now (a save still out). Done, the Studio goes to page 2. */
+    bool jobApply();
     /** §9: the helper NPC walks with the author (helper_walk, with where they stand), or goes. */
     void helperWalk(bool on);
-    void helperLook(const std::string& from, const std::string& asset);
     /** The box the author clicked, told to the brain (helper_focus): what they say to the helper in the world is about it. */
     void helperFocus(const std::string& node);
     /** The non-AI checklist: the next box that needs something (helper_next), and one of its buttons done (helper_do). */
@@ -579,15 +717,26 @@ private:
     bool flowHover(S32 x, S32 y);
     bool flowMouseUp(S32 x, S32 y);
     bool flowWheel(S32 x, S32 y, S32 clicks);
+    // [SIMPLE STUDIO 2026-10-17] Paul: "i can't read the text on the box it's tiny - i need to be able to move the boxes around"
+    /** The chart zoomed by `factor` with the view point (x, y) staying put (the wheel's point, or the frame's middle for + / -). */
+    void flowZoomAt(F32 factor, S32 x, S32 y);
+    /** Boxes at their natural size (zoom 1, never smaller: the small font stays readable), the chart's top left in view. */
+    void flowFit();
+    /** A box's dragged position written into the draft (top-level `flow` map, adventure_pack_v1.schema.json) - one save per drag. */
+    void flowSavePos(const std::string& key, F32 x, F32 y);
+    /** "Tidy up": every saved position goes, the boxes are laid out automatically again. */
+    void flowTidy();
     struct FlowNode
     {
         std::string mPtr, mId, mTitle, mPlace;   // a beat's pointer and id, or an ending's (mEnding)
+        std::string mWhere;                      // [SIMPLE STUDIO] the story's own hint of where it happens (the scene's gmNotes "Where: ...")
         bool mEnding = false, mPlaced = false, mStart = false;
         std::string mFight, mFightId;            // [M4 2026-10-17] the box starts a fight: its label and battle id (onEnter battle)
         S32 mLayer = 0, mRow = 0;
         F32 mX = 0.f, mY = 0.f;                  // the box's top left in chart units (before pan and zoom)
     };
-    struct FlowEdge { S32 mFrom = -1, mTo = -1; std::string mLabel; bool mDashed = false; };
+    // mLabel = the arrow's words on the map (short, cut with "..."); mFull = the same words whole, for the box panel's "Leads to"
+    struct FlowEdge { S32 mFrom = -1, mTo = -1; std::string mLabel, mFull; bool mDashed = false; };
     /** A box's key: "b:<beat id>" or "e:<ending id>" (ids, never positions: the draft may change under a drag or a list). */
     static std::string flowKey(const FlowNode& n) { return (n.mEnding ? "e:" : "b:") + n.mId; }
 
@@ -601,25 +750,27 @@ private:
     F32 mFlowGrabPanX = 0.f, mFlowGrabPanY = 0.f;
     S32 mFlowConnectFrom = -1;                   // dragging from this box's handle (this frame's index, checked against the key)
     std::string mFlowConnectKey;                 // ... and that box's key
+    std::string mFlowDragKey;                    // [SIMPLE STUDIO] a box being dragged to move it (its key; "" = none)
+    S32 mFlowDragX = 0, mFlowDragY = 0;          // where the mouse went down on it
+    F32 mFlowDragOrigX = 0.f, mFlowDragOrigY = 0.f;   // the box's chart position then
+    bool mFlowDragMoved = false;                 // it moved (3 px or more): a drag, not a click
     S32 mFlowMouseX = 0, mFlowMouseY = 0;
-    bool mFlowOnlyHere = false;
+    U32 mFlowFitGen = 0;                         // [SIMPLE STUDIO] the chart is fitted to its frame whenever its boxes or its frame change
+    F32 mFlowFitW = 0.f, mFlowFitH = 0.f;
+    bool mBoxMore = false;                       // [SIMPLE STUDIO] the box panel's "More...": the full box tools shown
     std::string mFlowSel;                        // the box the author clicked: its beat id (the helper's `node`)
     std::string mHelperBox;                      // what the author is typing to the helper
     LLSD mHelperLog;                             // [{who: "you"|"helper", text}]
-    LLSD mHelperTodo;                            // the "still to decide" list
     std::string mHelperQuestion, mHelperError;
     std::string mHelperScript;
     LLSD mLivePreview;                                  // [M7] the last update_preview reply (undefined: none shown)
     bool mLiveUndo = false, mLiveBusy = false;          // [M7] the preview is of "Undo the last update"; a call is out
     std::map<std::string, std::string> mLiveMoves;      // [M7] removed box id -> the box its players go to (author's pick)   // [M6 2026-10-17] LSL the helper wrote on request (reply `script`), for the author to copy
-    F64 mHelperTodayCredits = -1.0, mHelperCap = 0.0, mHelperLastCredits = 0.0;
+    F64 mHelperTodayCredits = -1.0;              // today's helper cost in credits (-1: not read yet), page 3's one cost line
     bool mHelperBusy = false, mHelperLoaded = false, mHelperMissing = false;
-    bool mHelperPending = false;                 // the first line waits for the new adventure's draft to load
-    S32 mAdvancedState = -1;                     // [FRONT DOOR] -1 not read yet from WolfAdventureAdvancedOpen, else 0 / 1
     // [WOLF STORY FIRST M3 2026-10-17] the helper in the world (STORY_FIRST_DESIGN.md §9, §9.1)
     bool mHelperWalking = false;                 // helper_walk on, as the brain last said
     std::string mHelperWalkRegion;               // the region it walks on (a region change re-sends helper_walk)
-    std::string mHelperLookFrom;                 // wearing | notecard | default
     bool mHelperWalkBusy = false;
     std::string mHelperWalkFailedRegion;         // a region that refused the helper: not asked again until the author moves on
     F64 mHelperWalkCheckAt = 0.0;                // when the walking state is read again (the brain's 30-minute sweep may end it)
@@ -696,6 +847,29 @@ private:
     std::string mLookCast, mLookBefore;
     S32 mLookTries = 0;
     bool mShowPremium = false;      // Cast talk: the premium (ElevenLabs) voice group, off by default (lead's P3 voices contract)
+    // ---- [IN-WORLD STUFF 2026-10-17] ----
+    bool mPadBusy = false;          // look_pad / look_pads_clear out
+    bool mPadsOut = false;          // a pad was put down from this Studio: the draft is read again now and then (padsTick)
+    F64 mPadPollAt = 0.0;
+    bool mPadPolling = false;
+    bool mAnyoneBusy = false;       // the owner setting lookPadsAnyone is being saved
+    std::string mThingsFor;         // the box mThings were read for ("" = none)
+    U32 mThingsGen = 0;             // the draft generation they were read at (a changed draft reads them again)
+    LLSD mThings;                   // box_things things[{id, name, why, script, done}]
+    std::string mThingsError;       // red text in the section; stays until the next read
+    bool mThingsLoading = false, mThingsMissing = false;
+    bool mMeshMissing = false;      // mesh_quote answered "unknown action": no Make it for me buttons (never a dead button)
+    bool mMeshBusy = false;         // mesh_quote / mesh_start / job_cancel out
+    std::string mMeshError;         // red text in the section; stays until the next Make it for me
+    LLSD mMeshQuote;                // {job, credits, thing, name}: the inline question (undefined = none)
+    std::string mMeshJobId, mMeshThing, mMeshName;   // the thing being made
+    LLSD mMeshJob;                  // job {job} reply for mMeshJobId
+    F64 mMeshPollAt = 0.0;
+    time_t mMeshRunAt = 0;          // when it began (the card's clock)
+    std::string mMeshDone;          // "<name> is in your inventory..." (green), until the next Make it for me
+    S32 mCleanupKnown = 0;          // land_cleanup: 0 not asked yet, 1 the brain has it, -1 "unknown action" (the button is not shown)
+    std::string mCleanupFor;        // the game the probe was sent for
+    bool mCleanupBusy = false;
 };
 
 class WolfFloaterAdventureStudio : public LLFloater
@@ -708,9 +882,17 @@ public:
     void draw() override;
     /** [WOLF ADVENTURE AUDIT 2026-10-17] The Studio's face, for the Guide (it shows help for the page on screen). */
     WolfAdventureStudioView* view() const { return mView; }
-    /** Show the Guide docked beside the Studio (a dependent floater that moves with it), or hide it; remembered. */
+    /** Show the Guide docked beside the Studio (a dependent floater that moves with it), or hide it. [SIMPLE STUDIO 2026-10-17]
+     *  only by hand (the Studio's Guide button): it never opens on its own, and nothing is remembered. */
     void showGuide(bool on);
     static bool guideShown();
+    /** [MINIMIZE 2026-10-17] Minimized to the viewer's standard bar (its title and Restore button); the Studio's face is hidden
+     *  meanwhile and comes back exactly as it was (nothing of the view is touched). */
+    void setMinimized(bool minimize) override;
+
+protected:
+    /** The floater's own minimize button is never shown: the drawn band has its own "-" (same style as Guide and x). */
+    void updateTitleButtons() override;
 
 private:
     WolfAdventureStudioView* mView = nullptr;

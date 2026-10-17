@@ -352,7 +352,7 @@ namespace
         const std::vector<LLVector2> pts = roundedOutline(rect, rad, 0.f);
         const F32 h = llmax(1.f, (F32)rect.getHeight());
         auto colourAt = [&](F32 y) { return lerpColour(bottom, top, llclamp((y - rect.mBottom) / h, 0.f, 1.f)); };
-        const F32 cx = rect.getCenterX(), cy = rect.getCenterY();
+        const F32 cx = (F32)rect.getCenterX(), cy = (F32)rect.getCenterY();
         const LLColor4 cc = colourAt(cy);
         gGL.begin(LLRender::TRIANGLES);
         for (size_t i = 0; i < pts.size(); ++i)
@@ -370,7 +370,7 @@ namespace
     void fillRoundedGlow(const LLRect& rect, const Radii& rad, const LLColor4& centre, const LLColor4& rim)
     {
         const std::vector<LLVector2> pts = roundedOutline(rect, rad, 0.f);
-        const F32 cx = rect.getCenterX(), cy = rect.getCenterY();
+        const F32 cx = (F32)rect.getCenterX(), cy = (F32)rect.getCenterY();
         gGL.begin(LLRender::TRIANGLES);
         for (size_t i = 0; i < pts.size(); ++i)
         {

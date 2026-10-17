@@ -699,7 +699,7 @@ void WolfToolAdventurePlace::draw()
             const F32 tw = (F32)f->getWidthF32(l.mText);
             WolfGameDraw::rect((F32)sp.mX - tw * 0.5f - 4.f, (F32)sp.mY - 2.f, (F32)sp.mX + tw * 0.5f + 4.f, (F32)sp.mY + (F32)f->getLineHeight() + 2.f,
                                LLColor4(0.f, 0.f, 0.f, 0.7f));
-            f->renderUTF8(l.mText, 0, (F32)sp.mX, (F32)sp.mY, LLColor4::white, LLFontGL::HCENTER, LLFontGL::BOTTOM);
+            f->renderUTF8(l.mText, 0, (F32)sp.mX, (F32)sp.mY, LLColor4::white, LLFontGL::HCENTER, LLFontGL::BOTTOM, LLFontGL::NORMAL, LLFontGL::NO_SHADOW);
         }
     }
     if (mMode != M_NONE)
@@ -709,6 +709,6 @@ void WolfToolAdventurePlace::draw()
         const F32 tw = (F32)f->getWidthF32(h);
         const F32 cx = (F32)gViewerWindow->getWorldViewWidthScaled() * 0.5f, ty = (F32)gViewerWindow->getWorldViewHeightScaled() - 60.f;
         WolfGameDraw::rect(cx - tw * 0.5f - 8.f, ty - 4.f, cx + tw * 0.5f + 8.f, ty + (F32)f->getLineHeight() + 4.f, LLColor4(0.f, 0.f, 0.f, 0.75f));
-        f->renderUTF8(h, 0, cx, ty, LLColor4::white, LLFontGL::HCENTER, LLFontGL::BOTTOM);
+        f->renderUTF8(h, 0, cx, ty, LLColor4::white, LLFontGL::HCENTER, LLFontGL::BOTTOM, LLFontGL::NORMAL, LLFontGL::NO_SHADOW);
     }
 }

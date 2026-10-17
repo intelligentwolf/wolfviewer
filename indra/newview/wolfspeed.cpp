@@ -461,7 +461,8 @@ namespace
           LLColor4(0.40f, 1.00f, 0.55f, 1.f), LLColor4(0.14f, 0.36f, 0.20f, 1.f) },
     };
     const S32 PALETTE_COUNT = 3;
-    const LLColor4 TEXT(0.93f, 0.95f, 0.97f, 1.f);
+    // [w69 CI fix] not "TEXT": windows.h defines TEXT() as a macro (MSVC C2143 at this line on the 10-17 build)
+    const LLColor4 TEXT_INK(0.93f, 0.95f, 0.97f, 1.f);
     const LLColor4 TEXT_DIM(0.66f, 0.71f, 0.76f, 1.f);
     const LLColor4 AMBER(1.00f, 0.76f, 0.30f, 1.f);
     const LLColor4 RED(1.00f, 0.54f, 0.50f, 1.f);
@@ -871,7 +872,7 @@ void WolfFloaterSpeed::drawButton(EHit h, const std::string& label, const std::s
         rectG(l, b, rt, t, hot ? lerp(BUTTON_TOP, p.mAccentDim, 0.5f) : BUTTON_TOP, BUTTON_BOTTOM);
     }
     frame(l, b, rt, t, hot ? 2.f : 1.f, hot ? p.mAccent : EDGE);
-    const LLColor4 ink = !enabled ? alpha(TEXT_DIM, 0.6f) : lit ? DARK_TEXT : TEXT;
+    const LLColor4 ink = !enabled ? alpha(TEXT_DIM, 0.6f) : lit ? DARK_TEXT : TEXT_INK;
     const LLFontGL* big = LLFontGL::getFontSansSerifBold();
     const LLFontGL* small = LLFontGL::getFontSansSerifSmall();
     const F32 cx = (l + rt) * 0.5f, cy = (b + t) * 0.5f;
@@ -926,11 +927,11 @@ void WolfFloaterSpeed::drawDial(F32 cx, F32 cy, F32 R)
         const bool major = (i % 2) == 0;
         const F32 ti = major ? R * 0.68f : R * 0.73f;
         line(cx + ti * cosf(a), cy + ti * sinf(a), cx + R * 0.77f * cosf(a), cy + R * 0.77f * sinf(a), major ? 2.5f : 1.2f,
-             v <= maxv ? TEXT : alpha(TEXT_DIM, 0.6f));
+             v <= maxv ? TEXT_INK : alpha(TEXT_DIM, 0.6f));
         if (major)
         {
             const F32 tr = R * 0.56f;
-            text(nf, llformat("%d", (S32)v), cx + tr * cosf(a), cy + tr * sinf(a), v <= maxv ? TEXT : TEXT_DIM);
+            text(nf, llformat("%d", (S32)v), cx + tr * cosf(a), cy + tr * sinf(a), v <= maxv ? TEXT_INK : TEXT_DIM);
         }
     }
     // the needle
@@ -951,7 +952,7 @@ void WolfFloaterSpeed::drawDial(F32 cx, F32 cy, F32 R)
         return;
     }
     const F32 x = mDragging ? mDragValue : ws.inForce();
-    text(bigf, times(x), cx, cy - R * 0.28f, TEXT);
+    text(bigf, times(x), cx, cy - R * 0.28f, TEXT_INK);
     std::string word = ws.paused() && ws.speed() > 1.f ? "PAUSED" : (ws.inForce() > 1.f ? "ON" : "OFF");
     const LLColor4 wc = word == "PAUSED" ? AMBER : word == "ON" ? GREEN : TEXT_DIM;
     text(LLFontGL::getFontSansSerifBold(), word, cx, cy - R * 0.52f, wc);
@@ -1022,7 +1023,7 @@ void WolfFloaterSpeed::draw()
         drawButton(H_REGION_SAVE, "SAVE", "", mEditDirty, mEditDirty);
         const F32 capx = (mHit[H_CAP_DOWN].mRight + mHit[H_CAP_UP].mLeft) * 0.5f;
         text(small, "MOST HERE", capx, (F32)(y + rh) - small->getLineHeight() * 0.6f, TEXT_DIM);
-        text(bold, mEditCap > 0.f ? times(mEditCap) : "NO CAP", capx, (F32)y + rh * 0.35f, mEditAllow ? TEXT : TEXT_DIM);
+        text(bold, mEditCap > 0.f ? times(mEditCap) : "NO CAP", capx, (F32)y + rh * 0.35f, mEditAllow ? TEXT_INK : TEXT_DIM);
         y += rh + M / 2;
         text(small, "REGION SETTINGS (you manage this region)", (F32)(left + M), (F32)y + small->getLineHeight() * 0.5f, TEXT_DIM, LLFontGL::LEFT);
         y += small->getLineHeight() + M;
@@ -1092,13 +1093,13 @@ void WolfFloaterSpeed::draw()
         }
         if (!lines.empty())
         {
-            text(body, lines[0], tx + word_w, ty, TEXT, LLFontGL::LEFT);
+            text(body, lines[0], tx + word_w, ty, TEXT_INK, LLFontGL::LEFT);
         }
         LLStringUtil::trim(rest);
         for (const std::string& l : wrap(body, rest, text_w, 2))
         {
             ty -= body->getLineHeight();
-            text(body, l, tx, ty, TEXT, LLFontGL::LEFT);
+            text(body, l, tx, ty, TEXT_INK, LLFontGL::LEFT);
         }
         y += msg_h + M;
     }

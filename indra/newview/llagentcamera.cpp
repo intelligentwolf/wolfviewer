@@ -111,7 +111,9 @@ const F32 OBJECT_EXTENTS_PADDING = 0.5f;
 static bool isDisableCameraConstraints()
 {
     static LLCachedControl<bool> sDisableCameraConstraints(gSavedSettings, "DisableCameraConstraints", false);
-    return sDisableCameraConstraints;
+    // <WolfViewer 2026-10-17> or the GM Console's director camera, for this session only (llagentcamera.h)
+    return sDisableCameraConstraints || gAgentCamera.constraintsLiftedForSession();
+    // </WolfViewer>
 }
 
 // The agent instance.
@@ -2344,7 +2346,8 @@ F32 LLAgentCamera::getCameraMaxZoomDistance(bool allow_disabled_constraints /* =
     // Ignore "DisableCameraConstraints", we don't want to be out of draw range when we focus onto objects or avatars
     // Freeing the camera movement some more... ok, a lot -KC
     static LLCachedControl<bool> disable_constraints(gSavedSettings,"DisableCameraConstraints");
-    return (allow_disabled_constraints && disable_constraints) ? INT_MAX : llmin(MAX_CAMERA_DISTANCE_FROM_OBJECT,
+    // <WolfViewer 2026-10-17/> the director camera's session-only lift counts as the setting (llagentcamera.h)
+    return (allow_disabled_constraints && (disable_constraints || mConstraintsLiftedForSession)) ? INT_MAX : llmin(MAX_CAMERA_DISTANCE_FROM_OBJECT,
                  mDrawDistance - 1, // convenience, don't hit draw limit when focusing on something
                  LLWorld::getInstance()->getRegionWidthInMeters() - CAMERA_FUDGE_FROM_OBJECT);
 }

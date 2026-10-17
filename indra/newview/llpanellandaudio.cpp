@@ -57,6 +57,7 @@
 #include "llfloaterreg.h"
 #include "llnotificationsutil.h"
 #include "wolfradiostations.h"
+#include "wolfgrid.h"   // [WOLF GRID GATE 2026-10-17/] the Wolf stations: Wolf login only
 
 // Values for the parcel voice settings radio group
 enum
@@ -110,6 +111,11 @@ bool LLPanelLandAudio::postBuild()
     mBtnClearMusic->setCommitCallback(boost::bind(&LLPanelLandAudio::onBtnClearMusic, this));
     mBtnRadioStations = getChild<LLButton>("radio_stations_btn");
     mBtnRadioStations->setCommitCallback([](LLUICtrl*, const LLSD&) { LLFloaterReg::showInstance("wolf_radio"); });
+    // [WOLF GRID GATE 2026-10-17] the Radio Stations floater and the Wolf Territories stations come from Wolf's own
+    // service (wolfradiostations.cpp STATIONS_URL): gone (not greyed) off a Wolf login. The presets stay.
+    const bool wolf = WolfGrid::isWolfTerritories();
+    mBtnRadioStations->setVisible(wolf);
+    getChildView("wolf_stations_title")->setVisible(wolf);
 
     migrateSavedStreams();
     for (S32 i = 0; i < ROWS; ++i)
@@ -302,6 +308,7 @@ void LLPanelLandAudio::refreshStations()
     for (S32 i = 0; i < ROWS; ++i)
     {
         const bool have = st.isLoaded() && i < (S32)featured.size();
+        mWolfStationName[i]->setVisible(WolfGrid::isWolfTerritories());   // [WOLF GRID GATE 2026-10-17] see postBuild
         std::string label;
         if (have) label = featured[i]["name"].asString();
         else if (i == 0) label = st.isLoading() ? "Loading stations..." : st.lastError();

@@ -86,6 +86,7 @@
 #include "wolfboatrock.h" // <WolfViewer> client-side buoyancy for boats
 #include "wolfflight.h"   // <WolfViewer 2026-10-06/> Flight Mode
 #include "wolfgame.h"     // [WOLF GAME 2026-10-09/] Wolf Roleplay
+#include "wolfspeed.h"    // [WOLFSPEED 2026-10-17/] Xenon's WolfSpeed
 #include "wolfdrive.h"    // <WolfViewer 2026-10-09/> driving: wheel / pedals, dashboard
 #include "wolffarground.h"   // <WolfViewer 2026-10-07/> map tiles for regions not connected
 #include "wolffarterrain.h"   // <WolfViewer 2026-10-08/> elevation tiles beyond the terrain received
@@ -4069,7 +4070,7 @@ LLSD LLAppViewer::getViewerInfo() const
 // [/RLVa:KB]
             LLVector3d pos = gAgent.getPositionGlobal();
             info["POSITION"] = ll_sd_from_vector3d(pos);
-            info["POSITION_LOCAL"] = ll_sd_from_vector3(gAgent.getPosAgentFromGlobal(pos));
+            info["POSITION_LOCAL"] = ll_sd_from_vector3(region->getPosRegionFromGlobal(pos));   // <WolfViewer> shown as "You are at ... in [REGION]"; agent frame may be rebased
             info["REGION"] = region->getName();
             boost::regex regex("\\.(secondlife|lindenlab)\\..*");
             info["HOSTNAME"] = boost::regex_replace(region->getSimHostName(), regex, "");
@@ -6249,6 +6250,8 @@ void LLAppViewer::idle()
     // [WOLF GAME 2026-10-09] Wolf Roleplay: timers, markers, effects, and the tags under the name
     // tags - after gObjectList.update() above has placed this frame's name tags.
     WolfGame::instance().idle();
+    // [WOLFSPEED 2026-10-17] Xenon's WolfSpeed: the Wolf gate, the region's hello, picks waiting to go (wolfspeed.cpp)
+    WolfSpeed::instance().idle();
     {
         LL_PROFILE_ZONE_NAMED_CATEGORY_APP("world update"); //LL_RECORD_BLOCK_TIME(FTM_WORLD_UPDATE);
         gPipeline.updateMove();
@@ -7313,7 +7316,7 @@ void LLAppViewer::updateDiscordActivity()
         activity.SetDetails(gDiscordActivityDetails);
     }
 
-    auto agent_pos_region = gAgent.getPositionAgent();
+    auto agent_pos_region = gAgent.getPositionRegion();   // <WolfViewer> region coordinates; agent frame may be rebased
     S32 pos_x = S32(agent_pos_region.mV[VX] + 0.5f);
     S32 pos_y = S32(agent_pos_region.mV[VY] + 0.5f);
     S32 pos_z = S32(agent_pos_region.mV[VZ] + 0.5f);

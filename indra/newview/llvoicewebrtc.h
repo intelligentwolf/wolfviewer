@@ -495,6 +495,8 @@ private:
     sessionStatePtr_t mPreviousSession;
     connectionPtr_t   mWolfMovingConnection; // a wolf_move in flight (one at a time)
     LLFrameTimer      mWolfSwitchTimer;      // running while an old session is kept for a switch
+    LLFrameTimer      mWolfFeaturesWait;     // [WOLF GRID GATE 2026-10-17] how long wolf_move has waited for a region's features
+    LLUUID            mWolfFeaturesWaitRegion;   // ...and for which region
     LLFrameTimer      mWolfParcelHoldTimer;  // running while the agent parcel is still another region's
     bool wolfSwitchSpatialSession(const std::string& channelID, S32 parcel_local_id,
                                   const std::function<sessionStatePtr_t(bool)>& make_session);

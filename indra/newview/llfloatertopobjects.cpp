@@ -546,8 +546,12 @@ void LLFloaterTopObjects::showBeacon()
     S32 matched = sscanf(pos_string.c_str(), "<%g,%g,%g>", &x, &y, &z);
     if (matched != 3) return;
 
-    LLVector3 pos_agent(x, y, z);
-    LLVector3d pos_global = gAgent.getPosGlobalFromAgent(pos_agent);
+    // <WolfViewer> LandStatReply Location is region-local (the agent's region, onRefresh); the
+    // agent frame may be rebased on a huge region (llagent.h), so go through the region
+    LLVector3 pos_region(x, y, z);
+    LLVector3d pos_global = gAgent.getRegion() ? gAgent.getRegion()->getPosGlobalFromRegion(pos_region)
+                                               : gAgent.getPosGlobalFromAgent(pos_region);
+    // </WolfViewer>
     std::string tooltip("");
     LLTracker::trackLocation(pos_global, name, tooltip, LLTracker::LOCATION_ITEM);
 }
@@ -608,8 +612,12 @@ void LLFloaterTopObjects::onTeleportToObject()
     S32 matched = sscanf(pos_string.c_str(), "<%g,%g,%g>", &x, &y, &z);
     if (matched != 3) return;
 
-    LLVector3 pos_agent(x, y, z);
-    LLVector3d pos_global = gAgent.getPosGlobalFromAgent(pos_agent);
+    // <WolfViewer> LandStatReply Location is region-local (the agent's region, onRefresh); the
+    // agent frame may be rebased on a huge region (llagent.h), so go through the region
+    LLVector3 pos_region(x, y, z);
+    LLVector3d pos_global = gAgent.getRegion() ? gAgent.getRegion()->getPosGlobalFromRegion(pos_region)
+                                               : gAgent.getPosGlobalFromAgent(pos_region);
+    // </WolfViewer>
 
     gAgent.teleportViaLocation(pos_global);
 }

@@ -1760,7 +1760,9 @@ void cmdline_tp2name(std::string_view target)
 
 void cmdline_rezplat(bool use_saved_value, F32 visual_radius) //cmdline_rezplat() will still work... just will use the saved value
 {
-    LLVector3 agentPos = gAgent.getPositionAgent() + (gAgent.getVelocity() * 0.333f);
+    // <WolfViewer> ObjectAdd RayStart/RayEnd below are region-local; the agent frame may be rebased
+    LLVector3 agentPos = gAgent.getPositionRegion() + (gAgent.getVelocity() * 0.333f);
+    // </WolfViewer>
     LLMessageSystem* msg = gMessageSystem;
     msg->newMessageFast(_PREHASH_ObjectAdd);
     msg->nextBlockFast(_PREHASH_AgentData);

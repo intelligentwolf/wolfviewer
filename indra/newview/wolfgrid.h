@@ -26,6 +26,9 @@
 
 #include "llfloater.h"
 #include "llpanel.h"
+#include "fscommon.h"   // [WOLF GRID GATE 2026-10-17/] noteWolfOnly
+#include "lltabcontainer.h"   // [WOLF GRID GATE 2026-10-17/] showWolfTabs
+#include <initializer_list>
 
 // The features that talk to Wolf Territories' OWN servers — speech to text, text to speech,
 // screen sharing — are offered on Wolf Territories only. Every one of them checks here, so a
@@ -152,8 +155,25 @@ namespace WolfGrid
         {
             return false;
         }
-        const std::string region_grid = LFSimFeatureHandler::instance().hyperGridURL();
-        return !region_grid.empty() && isWolfHost(region_grid);
+        // [WOLF GRID GATE 2026-10-17] only the region's OWN GridURL counts (as isOnWolfTerritories): a foreign region that
+        // sends none had the login grid's gatekeeper filled in (lfsimfeaturehandler.cpp fallback), which for a Wolf login
+        // made it a "Wolf region" - its weather polled and its WindLightRefresh fades obeyed.
+        const LFSimFeatureHandler& f = LFSimFeatureHandler::instance();
+        const std::string region_grid = f.hyperGridURL();
+        return f.gridURLFromRegion() && !region_grid.empty() && isWolfHost(region_grid);
+    }
+
+    // [WOLF GRID GATE 2026-10-17] isOnWolfRegion, and the features it read are THIS region's (the previous region's answer
+    // stands until the new one's arrive, lfsimfeaturehandler.cpp handleRegionChange). For anything sent or accepted on
+    // behalf of the region underfoot when a hypergrid visitor may be the one standing there.
+    inline bool isOnWolfRegionConfirmed()
+    {
+        if (!LFSimFeatureHandler::instanceExists())
+        {
+            return false;
+        }
+        const LLViewerRegion* region = gAgent.getRegion();
+        return region && region->getRegionID() == LFSimFeatureHandler::instance().featuresRegionID() && isOnWolfRegion();
     }
 
     // What the region's weather and sky follow: logged in here and on one of our regions, or a
@@ -163,6 +183,41 @@ namespace WolfGrid
         return isOnWolfTerritories() || isOnWolfRegion();
     }
     // </WolfViewer 2026-10-08>
+
+    // [WOLF GRID GATE 2026-10-17] The short visible note a Wolf-only window gives when it is opened off Wolf (an
+    // app/openfloater link, a saved toolbar) and closes again at once - one line in nearby chat, as wolfborder.cpp's
+    // notes, so a click is never answered with nothing.
+    inline void noteWolfOnly(const std::string& feature)
+    {
+        FSCommon::report_to_nearby_chat(feature + " works on Wolf Territories only.");
+    }
+
+    // [WOLF GRID GATE 2026-10-17] Wolf-only tabs (About Land, Region / Estate) gone (not greyed) off Wolf, back on Wolf.
+    // LLTabContainer::setTabVisibility selects the FIRST visible tab every time it is called (lltabcontainer.cpp), so it is
+    // only called when the answer changes (shown_state: -1 = not yet, then 0 / 1) and the tab the user was on is put back
+    // when it is still there.
+    inline void showWolfTabs(LLTabContainer* tabs, std::initializer_list<LLPanel*> panels, bool wolf, S32& shown_state)
+    {
+        if (!tabs || shown_state == (wolf ? 1 : 0))
+        {
+            return;
+        }
+        shown_state = wolf ? 1 : 0;
+        LLPanel* current = tabs->getCurrentPanel();
+        bool current_hidden = false;
+        for (LLPanel* panel : panels)
+        {
+            if (panel)
+            {
+                tabs->setTabVisibility(panel, wolf);
+                current_hidden = current_hidden || (!wolf && panel == current);
+            }
+        }
+        if (current && !current_hidden)
+        {
+            tabs->selectTabPanel(current);
+        }
+    }
 
     // <WolfViewer 2026-09-27> Options for every request to a Wolf service (and the other fixed
     // third-party hosts this viewer calls). Those requests carry X-Wolf-Agent/X-Wolf-Session --

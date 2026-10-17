@@ -949,6 +949,20 @@
 			<map>
 			</map>
 	</map>
+	<!-- [WOLFSPEED 2026-10-17] the Xenon's WolfSpeed toolbar button removed while off Wolf Territories (toolbar, rank),
+	     put back on the next arrival on Wolf, then cleared (WolfSpeed::gateToolbar, as WolfDashboardToolbarHidden). -->
+	<key>WolfSpeedToolbarHidden</key>
+	<map>
+		<key>Comment</key>
+			<string>Xenon's WolfSpeed toolbar button removed while off Wolf Territories (toolbar and rank), to restore on return</string>
+		<key>Persist</key>
+			<integer>1</integer>
+		<key>Type</key>
+			<string>LLSD</string>
+		<key>Value</key>
+			<map>
+			</map>
+	</map>
 	<key>WolfSuitcaseArrivals</key>
 	<map>
 		<key>Comment</key>
@@ -995,6 +1009,94 @@
 		<key>Value</key>
 			<array>
 			</array>
+	</map>
+	<key>WolfAdventureStoryCamera</key>
+	<map>
+		<key>Comment</key>
+			<string>[WOLF ADVENTURE 2026-10-16] Story camera: an adventure's stage cue may turn the camera for a moment (HUD_MESSAGES_V1.md §2.6, §5.6); any input gives it back</string>
+		<key>Persist</key>
+			<integer>1</integer>
+		<key>Type</key>
+			<string>Boolean</string>
+		<key>Value</key>
+			<integer>1</integer>
+	</map>
+	<key>WolfAdventureReduceMotion</key>
+	<map>
+		<key>Comment</key>
+			<string>[WOLF ADVENTURE 2026-10-16] Reduce motion: adventure bars and titles appear without sliding, camera cues jump straight to the view (HUD_MESSAGES_V1.md §2.6, §5.6)</string>
+		<key>Persist</key>
+			<integer>1</integer>
+		<key>Type</key>
+			<string>Boolean</string>
+		<key>Value</key>
+			<integer>0</integer>
+	</map>
+	<key>WolfAdventureVoiceVolume</key>
+	<map>
+		<key>Comment</key>
+			<string>[WOLF ADVENTURE P4 2026-10-16] Character voices: the volume of story characters' spoken lines played by this viewer, 0..1 (HUD_MESSAGES_V1.md §5.6)</string>
+		<key>Persist</key>
+			<integer>1</integer>
+		<key>Type</key>
+			<string>F32</string>
+		<key>Value</key>
+			<real>1.0</real>
+	</map>
+	<key>WolfAdventureAdvancedOpen</key>
+	<map>
+		<key>Comment</key>
+			<string>[WOLF STORY FIRST FRONT DOOR 2026-10-17] Adventure Studio: the "Advanced editing" pages shown in the rail (default shut: the story-first screen is the way in)</string>
+		<key>Persist</key>
+			<integer>1</integer>
+		<key>Type</key>
+			<string>Boolean</string>
+		<key>Value</key>
+			<integer>0</integer>
+	</map>
+	<key>WolfAdventureStudioWelcomed</key>
+	<map>
+		<key>Comment</key>
+			<string>[WOLF STORY FIRST FRONT DOOR 2026-10-17] Adventure Studio: the first-run greeting has been shown (the Guide opens beside it the first time)</string>
+		<key>Persist</key>
+			<integer>1</integer>
+		<key>Type</key>
+			<string>Boolean</string>
+		<key>Value</key>
+			<integer>0</integer>
+	</map>
+	<key>WolfAdventureShowAiTag</key>
+	<map>
+		<key>Comment</key>
+			<string>[WOLF ADVENTURE P4 2026-10-16] Show the AI tag on lines written by AI (HUD_MESSAGES_V1.md §5.6: default on; it cannot be hidden in class play)</string>
+		<key>Persist</key>
+			<integer>1</integer>
+		<key>Type</key>
+			<string>Boolean</string>
+		<key>Value</key>
+			<integer>1</integer>
+	</map>
+	<key>WolfAdventureClassCodes</key>
+	<map>
+		<key>Comment</key>
+			<string>[WOLF ADVENTURE 2026-10-16] The class code typed for each adventure, remembered (HUD_MESSAGES_V1.md §6 3.3.7)</string>
+		<key>Persist</key>
+			<integer>1</integer>
+		<key>Type</key>
+			<string>LLSD</string>
+		<key>Value</key>
+			<map/>
+	</map>
+	<key>WolfAdventureTeacher</key>
+	<map>
+		<key>Comment</key>
+			<string>[WOLF ADVENTURE P4 2026-10-16] The Teacher Console's classes and LRS connections made in this viewer ({classes:[{class,name,code,adventure}], lrs:[{lrs,endpoint}]}); the service has no list of them (STUDIO_AND_CONSOLE_V1.md §4)</string>
+		<key>Persist</key>
+			<integer>1</integer>
+		<key>Type</key>
+			<string>LLSD</string>
+		<key>Value</key>
+			<map/>
 	</map>
 	<!-- [WOLF GAME 2026-10-09] The Roleplay window's background (wolffloaterroleplay.cpp
 	     WolfGameBackground, the Look page). Paul: "users can set the background image". -->

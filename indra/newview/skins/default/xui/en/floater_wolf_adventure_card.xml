@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLF ADVENTURE P1 2026-10-16] A vignette card (HUD_MESSAGES_V1.md §2.3, §3.3; wolfadventurehud.cpp
+     WolfFloaterAdventureCard): the top card of the stack, drawn in the game's theme (parchment in
+     "wolves", steel in "plain") by WolfAdventureCardView - title, image, text, the options one per row,
+     the timer and "More time". Centred in the upper third, at most 560 wide; its height follows the
+     card. Not modal and it never takes the keyboard by itself; the title band drags it. -->
+<floater
+ can_close="false"
+ can_drag_on_left="false"
+ can_minimize="false"
+ can_resize="false"
+ header_height="24"
+ height="240"
+ layout="topleft"
+ legacy_header_height="24"
+ name="wolf_adventure_card"
+ save_rect="false"
+ show_title="false"
+ single_instance="true"
+ title="Story"
+ width="560">
+    <wolf_adventure_card_view
+     follows="all"
+     height="240"
+     layout="topleft"
+     left="0"
+     mouse_opaque="false"
+     name="view"
+     tab_stop="true"
+     top="0"
+     width="560" />
+</floater>

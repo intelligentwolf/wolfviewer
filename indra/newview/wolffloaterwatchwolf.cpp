@@ -143,7 +143,9 @@ void WolfFloaterWatchWolf::setStatus(const std::string& text, bool error)
 void WolfFloaterWatchWolf::fetch()
 {
     mNextFetch = LLFrameTimer::getTotalSeconds() + REFRESH_SECONDS;
-    if (!WolfGrid::isWolfTerritories())
+    // [WOLF GRID GATE 2026-10-17] isOnWolfTerritories (wolfgrid.h), as its menu item: after a hypergrid jump the login
+    // grid is still Wolf, and an open WatchWolf kept sending this login's ids every 20 s from the foreign region.
+    if (!WolfGrid::isOnWolfTerritories())
     {
         // [WOLF ONLY] the request carries this login's agent and session: only ever to Wolf's own site.
         setStatus("WatchWolf is for Wolf Territories.", true);
@@ -285,6 +287,12 @@ void WolfFloaterWatchWolf::onSelection()
 // The region's own rules still apply: a ban, an access list or a telehub decides where you land.
 void WolfFloaterWatchWolf::teleportTo()
 {
+    // [WOLF GRID GATE 2026-10-17] a Wolf region name means nothing on a foreign grid (hypergrid jump)
+    if (!WolfGrid::isOnWolfTerritories())
+    {
+        setStatus("WatchWolf is for Wolf Territories.", true);
+        return;
+    }
     const LLSD r = selectedRow();
     if (!r.isMap() || r["self"].asBoolean()) return;
     const std::string region = r["region"].asString();
@@ -297,6 +305,12 @@ void WolfFloaterWatchWolf::teleportTo()
 
 void WolfFloaterWatchWolf::act(const std::string& action)
 {
+    // [WOLF GRID GATE 2026-10-17] eject / ban post this login's ids to Wolf's own site: on Wolf only
+    if (!WolfGrid::isOnWolfTerritories())
+    {
+        setStatus("WatchWolf is for Wolf Territories.", true);
+        return;
+    }
     const LLSD r = selectedRow();
     if (!r.isMap() || r["npc"].asBoolean()) return;
     const LLUUID avatar = r["id"].asUUID();

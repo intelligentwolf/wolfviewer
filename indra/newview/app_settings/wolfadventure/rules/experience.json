@@ -1,0 +1,19 @@
+{
+  "format": "wolf-adventure-rules",
+  "formatVersion": 1,
+  "id": "experience",
+  "version": 1,
+  "title": "Experience",
+  "summary": "No stats at all: walk in, talk to people, watch the town live. For living-town packs and drop-in stories.",
+  "status": "complete",
+  "attribution": [],
+  "label": "Experience",
+  "dice": { "sides": [6], "maxDice": 1, "showRolls": "public" },
+  "stats": {},
+  "checks": {},
+  "difficulties": {},
+  "conditions": {},
+  "combat": { "enabled": false },
+  "progression": { "mode": "none", "levels": [], "tables": {} },
+  "creation": { "method": "none" }
+}

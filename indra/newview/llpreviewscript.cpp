@@ -986,7 +986,7 @@ void LLScriptEdCore::refreshWolfAIButton()
     // Ask (or re-use a recent answer); the button appears when the reply arrives, which is
     // why draw() calls this every frame rather than relying on postBuild alone.
     WolfAI::instance().refresh();
-    btn->setVisible(true);
+    btn->setVisible(WolfGrid::isOnWolfTerritories());   // [WOLF GRID GATE 2026-10-17/] was always shown: gone off Wolf, as the menu item
 }
 
 void LLScriptEdCore::onBtnWolfAI()

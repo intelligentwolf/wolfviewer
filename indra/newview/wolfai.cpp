@@ -242,7 +242,9 @@ void WolfAI::refresh(bool force)
     syncSession();
     if (mFetching) return;
     if (!force && mAvail.mAsked && LLFrameTimer::getElapsedSeconds() < mNextRefresh) return;
-    if (!WolfGrid::isWolfTerritories()) { mAvail = Avail(); mAvail.mAsked = true; return; }
+    // [WOLF GRID GATE 2026-10-17] isOnWolfTerritories, not the login grid: a hypergrid jump away stops the 120 s poll (it
+    // carries this login's session) and the AI shows as unavailable until the way back.
+    if (!WolfGrid::isOnWolfTerritories()) { mAvail = Avail(); mAvail.mAsked = true; mNextRefresh = 0.0; return; }
     if (gAgentID.isNull() || gAgentSessionID.isNull()) return;   // not logged in yet
     mFetching = true;
     mNextRefresh = LLFrameTimer::getElapsedSeconds() + AVAIL_CACHE_SECS;
@@ -261,7 +263,9 @@ void WolfAI::availCoro(Session auth)
     self.mFetching = false;
     Avail a;
     a.mAsked = true;
-    if (code == 200 && reply.isMap() && reply["success"].asBoolean())
+    // [WOLF GRID GATE 2026-10-17] an answer that lands after a hypergrid jump away is not kept (refresh() would have said
+    // unavailable): a.mAsked only, the rest default
+    if (code == 200 && reply.isMap() && reply["success"].asBoolean() && WolfGrid::isOnWolfTerritories())
     {
         a.mEnabled   = reply["enabled"].asBoolean();
         a.mAllowed   = reply["allowed"].asBoolean();

@@ -4,7 +4,10 @@
      be like the airplane and sailing interfaces ... model it on REAL games". Its whole face is the
      drawn game console (WolfGameConsole): hero, Game Mode switch, wallet, the Stats / Combat / Bag /
      Pets / Game / Look / Help pages, the game's buttons and the footer. The floater gives only the
-     window: the 34 px drag strip lies under the console's title band, so the title band moves it. -->
+     window: the 34 px drag strip lies under the console's title band, so the title band moves it.
+     [WOLF ADVENTURE P1 2026-10-16] min_width 480 -> 540: the tab strip divides the width by the page
+     count (wolffloaterroleplay.cpp drawTabs), and with Journal there are eight: at 480 a tab would be
+     56 units, at 540 it is 64 (HUD_MESSAGES_V1.md §3.1 asks P1 to keep the labels whole). -->
 <floater
  can_close="false"
  can_drag_on_left="false"
@@ -15,7 +18,7 @@
  layout="topleft"
  legacy_header_height="34"
  min_height="560"
- min_width="480"
+ min_width="540"
  name="wolf_roleplay"
  save_rect="true"
  show_title="false"

@@ -922,6 +922,7 @@ set(viewer_SOURCE_FILES
     wolffloatermeshupload.cpp
     wolffloaterlagdetector.cpp
     wolffloatercompass.cpp   # [WOLF COMPASS 2026-10-16]
+    wolfspeed.cpp   # [WOLFSPEED 2026-10-17] Xenon's WolfSpeed
     wolfdjaudio.cpp
     wolfcamerafx.cpp
     wolffx.cpp
@@ -929,6 +930,7 @@ set(viewer_SOURCE_FILES
     wolfdjplayer.cpp
     wolffloaterdj.cpp
     wolffloaterdjplaylist.cpp
+    wolffloaterdjshows.cpp         # [WOLF DJ 2026-10-16] My Shows: listener history
     wolffloaterweatherreport.cpp
     wolffloatergraphicshelper.cpp
     wolfbuilder.cpp
@@ -968,6 +970,20 @@ set(viewer_SOURCE_FILES
     wolffloaterroleplay.cpp
     wolfgame.cpp
     wolfgamehud.cpp
+    wolfadventure.cpp              # [WOLF ADVENTURE P1 2026-10-16] adventure messages, verbs, stage
+    wolfadventureconsole.cpp       # [WOLF ADVENTURE P1 2026-10-16] the Journal page, honour, settings
+    wolfadventurehud.cpp           # [WOLF ADVENTURE P1 2026-10-16] stage, objective line, cards, handouts
+    wolfadventuretalk.cpp          # [WOLF ADVENTURE P2 2026-10-16] the talk panel
+    wolfadventureplay.cpp          # [WOLF ADVENTURE P4 2026-10-16] rolls, dice, turns, quiz, gm overlays
+    wolffloateradventurestudio.cpp # [WOLF ADVENTURE P1 2026-10-16] Adventure Studio Lite
+    wolffloateradventurestudioai.cpp # [WOLF ADVENTURE P2 2026-10-16] Studio: AI and voice, cast talk, book, run
+    wolffloateradventurestudioedit.cpp # [WOLF ADVENTURE P3 2026-10-16] Studio: outline, cast, places, story, rules, lore, test play
+    wolftooladventureplace.cpp # [WOLF ADVENTURE P3 2026-10-16] Studio: the in-world place tool
+    wolffloateradventurestudiowizard.cpp # [WOLF ADVENTURE AUDIT 2026-10-17] Studio: the "Start here" wizard
+    wolffloateradventurestudioflow.cpp # [WOLF STORY FIRST 2026-10-17] Studio: the helper conversation and the flowchart
+    wolffloateradventureguide.cpp # [WOLF ADVENTURE AUDIT 2026-10-17] the Guide docked beside the Studio
+    wolffloateradventuregm.cpp     # [WOLF ADVENTURE P4 2026-10-16] GM Console
+    wolffloateradventureteacher.cpp # [WOLF ADVENTURE P4 2026-10-16] Teacher Console
     wolfwavezones.cpp
     wolfweatherprofile.cpp
     wolfweathersound.cpp
@@ -981,6 +997,7 @@ set(viewer_SOURCE_FILES
     wolfmapglobe.cpp
     wolfmapoverlays.cpp
     wolfdrive.cpp
+    wolfborder.cpp   # [BORDER GUARD 2026-10-16]
     wolfdashboard.cpp
     wolfhudscale.cpp
     wolfvehiclerez.cpp
@@ -1861,6 +1878,7 @@ set(viewer_HEADER_FILES
     wolffloatermeshupload.h
     wolffloaterlagdetector.h
     wolffloatercompass.h   # [WOLF COMPASS 2026-10-16]
+    wolfspeed.h   # [WOLFSPEED 2026-10-17] Xenon's WolfSpeed
     wolfdjaudio.h
     wolfdjcapture.h
     wolfcamerafx.h
@@ -1869,6 +1887,7 @@ set(viewer_HEADER_FILES
     wolfdjplayer.h
     wolffloaterdj.h
     wolffloaterdjplaylist.h
+    wolffloaterdjshows.h           # [WOLF DJ 2026-10-16]
     wolffloaterweatherreport.h
     wolffloatergraphicshelper.h
     wolfbuilder.h
@@ -1910,6 +1929,15 @@ set(viewer_HEADER_FILES
     wolffloaterroleplay.h
     wolfgame.h
     wolfgamehud.h
+    wolfadventure.h                # [WOLF ADVENTURE P1 2026-10-16]
+    wolfadventurehud.h             # [WOLF ADVENTURE P1 2026-10-16]
+    wolfadventureplay.h            # [WOLF ADVENTURE P4 2026-10-16]
+    wolffloateradventuregm.h       # [WOLF ADVENTURE P4 2026-10-16]
+    wolffloateradventureteacher.h  # [WOLF ADVENTURE P4 2026-10-16]
+    wolffloateradventurestudio.h   # [WOLF ADVENTURE P1 2026-10-16]
+    wolftooladventureplace.h   # [WOLF ADVENTURE P3 2026-10-16]
+    wolfadventurestudioutil.h  # [WOLF ADVENTURE AUDIT 2026-10-17]
+    wolffloateradventureguide.h # [WOLF ADVENTURE AUDIT 2026-10-17]
     wolfwavezones.h
     wolfweatherprofile.h
     wolfweathersound.h
@@ -1923,6 +1951,7 @@ set(viewer_HEADER_FILES
     wolfmapglobe.h
     wolfmapoverlays.h
     wolfdrive.h
+    wolfborder.h   # [BORDER GUARD 2026-10-16]
     wolfdashboard.h
     wolfhudscale.h
     wolfvehiclerez.h

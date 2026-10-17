@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLF ADVENTURE P4 2026-10-16] Wolf World > Teacher Console... (STUDIO_AND_CONSOLE_V1.md §4). Drawn in the
+     wolfGame family by WolfAdventureTeacherView (wolffloateradventureteacher.cpp): the class picker, the page
+     tabs (Classes, Live, Answers, Report, Connections), a status line at the foot. §1 "The minimum is 900 x 600
+     UI units". The 34 px drag strip lies under the drawn title band. -->
+<floater
+ can_close="false"
+ can_drag_on_left="false"
+ can_minimize="false"
+ can_resize="true"
+ header_height="34"
+ height="660"
+ layout="topleft"
+ legacy_header_height="34"
+ min_height="600"
+ min_width="900"
+ name="wolf_adventure_teacher"
+ save_rect="true"
+ show_title="false"
+ single_instance="true"
+ title="Teacher Console"
+ width="980">
+    <wolf_adventure_teacher_view
+     follows="all"
+     height="660"
+     layout="topleft"
+     left="0"
+     mouse_opaque="false"
+     name="teacher"
+     tab_stop="true"
+     top="0"
+     width="980" />
+</floater>

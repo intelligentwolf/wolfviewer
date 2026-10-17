@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLF ADVENTURE AUDIT 2026-10-17] The Adventure Guide, docked beside the Adventure Studio (a dependent floater:
+     WolfFloaterAdventureStudio::showGuide places it beside the Studio, as tall as it, and it moves and closes with it).
+     Drawn in the wolfGame family by WolfAdventureGuideView (wolffloateradventureguide.cpp): help for the page or
+     Start here step on screen, an example, a link to the website guide, and "What do I do next?".
+     The 34 px drag strip lies under the drawn title band. -->
+<floater
+ can_close="false"
+ can_drag_on_left="false"
+ can_minimize="false"
+ can_resize="true"
+ header_height="34"
+ height="680"
+ layout="topleft"
+ legacy_header_height="34"
+ min_height="400"
+ min_width="280"
+ name="wolf_adventure_guide"
+ save_rect="false"
+ show_title="false"
+ single_instance="true"
+ title="Adventure Guide"
+ width="320">
+    <wolf_adventure_guide_view
+     follows="all"
+     height="680"
+     layout="topleft"
+     left="0"
+     mouse_opaque="false"
+     name="guide"
+     tab_stop="true"
+     top="0"
+     width="320" />
+</floater>

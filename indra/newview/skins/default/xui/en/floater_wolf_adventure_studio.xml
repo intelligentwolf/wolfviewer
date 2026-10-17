@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLF ADVENTURE P1 2026-10-16] Wolf World > Adventure Studio... (STUDIO_AND_CONSOLE_V1.md §2, P1 "Studio
+     Lite": Home, Import, Publish). Drawn in the wolfGame family by WolfAdventureStudioView
+     (wolffloateradventurestudio.cpp): the pages on a left rail, the page in the centre, the problems
+     and help in a right drawer, a status line at the foot. §1 "The minimum is 900 x 600 UI units".
+     The 34 px drag strip lies under the drawn title band. -->
+<floater
+ can_close="false"
+ can_drag_on_left="false"
+ can_minimize="false"
+ can_resize="true"
+ header_height="34"
+ height="680"
+ layout="topleft"
+ legacy_header_height="34"
+ min_height="600"
+ min_width="900"
+ name="wolf_adventure_studio"
+ save_rect="true"
+ show_title="false"
+ single_instance="true"
+ title="Adventure Studio"
+ width="980">
+    <wolf_adventure_studio_view
+     follows="all"
+     height="680"
+     layout="topleft"
+     left="0"
+     mouse_opaque="false"
+     name="studio"
+     tab_stop="true"
+     top="0"
+     width="980" />
+</floater>

@@ -93,8 +93,11 @@ void LLAgentUI::buildSLURL(LLSLURL& slurl, const bool escaped /*= true*/)
 //static
 bool LLAgentUI::checkAgentDistance(const LLVector3& pole, F32 radius)
 {
-    F32 delta_x = gAgent.getPositionAgent().mV[VX] - pole.mV[VX];
-    F32 delta_y = gAgent.getPositionAgent().mV[VY] - pole.mV[VY];
+    // <WolfViewer> pole is a region position (llpanelplaceprofile mPosRegion); agent frame may be rebased
+    const LLVector3 pos_region = gAgent.getPositionRegion();
+    F32 delta_x = pos_region.mV[VX] - pole.mV[VX];
+    F32 delta_y = pos_region.mV[VY] - pole.mV[VY];
+    // </WolfViewer>
 
     return  sqrt( delta_x* delta_x + delta_y* delta_y ) < radius;
 }

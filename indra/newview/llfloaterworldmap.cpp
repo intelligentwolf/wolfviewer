@@ -605,6 +605,7 @@ namespace
 void LLFloaterWorldMap::onOpen(const LLSD& key)
 {
     wolf_update_buy_land(this);   // <WolfViewer 2026-10-05/>
+    mWolfBuyLandFor = WolfGrid::isOnWolfTerritories() ? 1 : 0;   // [WOLF GRID GATE 2026-10-17/] draw() redoes it on a change
     mTeleportFinishConnection = LLViewerParcelMgr::getInstance()->
         setTeleportFinishedCallback(boost::bind(&LLFloaterWorldMap::onTeleportFinished, this));
 
@@ -718,6 +719,16 @@ void LLFloaterWorldMap::draw()
 {
     // <FS:Ansariel> Performance improvement
     static LLButton* track_region_btn     = getChild<LLButton>("track_region");
+    // [WOLF GRID GATE 2026-10-17] Buy Land (wolf_update_buy_land) was only decided on open: a hypergrid jump with the map
+    // open left Wolf's button on another grid's map.
+    {
+        const S32 wolf = WolfGrid::isOnWolfTerritories() ? 1 : 0;
+        if (wolf != mWolfBuyLandFor)
+        {
+            mWolfBuyLandFor = wolf;
+            wolf_update_buy_land(this);   // hides it off Wolf; on Wolf asks again whether this region may be bought
+        }
+    }
 
     static LLUIColor map_track_color = LLUIColorTable::instance().getColor("MapTrackColor", LLColor4::white);
     static LLUIColor map_track_disabled_color = LLUIColorTable::instance().getColor("MapTrackDisabledColor", LLColor4::white);

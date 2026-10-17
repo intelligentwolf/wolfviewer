@@ -486,7 +486,12 @@ namespace
         ZoneMix z;
         z.haze = d.mHaze;
         z.hasClouds = d.mHasClouds; z.clouds = d.mClouds;
-        const LLVector3 cam = LLViewerCamera::getInstance()->getOrigin();
+        // <WolfViewer> WolfEnvZone::strengthAt takes a region position (zone shapes are region metres);
+        // the agent frame may be rebased on a huge region (llagent.h)
+        const LLViewerRegion* rgn = gAgent.getRegion();
+        const LLVector3 cam_agent = LLViewerCamera::getInstance()->getOrigin();
+        const LLVector3 cam = rgn ? rgn->getPosRegionFromAgent(cam_agent) : cam_agent;
+        // </WolfViewer>
         for (const WolfEnvZone& zn : d.mZones)
         {
             const F32 w = zn.strengthAt(cam);
@@ -849,7 +854,8 @@ namespace
                 }
             }
             LLViewerRegion* rgn = gAgent.getRegion();
-            w.land = rgn ? (rgn->getLandHeightRegion(LLViewerCamera::getInstance()->getOrigin()) > rgn->getWaterHeight()) : true;
+            // <WolfViewer> getLandHeightRegion takes a region position; the agent frame may be rebased (llagent.h)
+            w.land = rgn ? (rgn->getLandHeightRegion(rgn->getPosRegionFromAgent(LLViewerCamera::getInstance()->getOrigin())) > rgn->getWaterHeight()) : true;
             const WolfCloudGenus::Result target = WolfCloudGenus::map(w);
             if (!sGenusValid) { sGenus = target; sGenusValid = true; }
             else WolfCloudGenus::approach(sGenus, target, dt, GENUS_TAU);

@@ -1,0 +1,19 @@
+{
+  "format": "wolf-adventure-rules",
+  "formatVersion": 1,
+  "id": "education",
+  "version": 1,
+  "title": "Education",
+  "summary": "No combat and no dice: progress comes from talking, finding and answering. Learning goals and quizzes live in the pack.",
+  "status": "complete",
+  "attribution": [],
+  "label": "Education",
+  "dice": { "sides": [6], "maxDice": 1, "showRolls": "public" },
+  "stats": {},
+  "checks": {},
+  "difficulties": {},
+  "conditions": {},
+  "combat": { "enabled": false },
+  "progression": { "mode": "milestone", "levels": [], "tables": {} },
+  "creation": { "method": "none" }
+}

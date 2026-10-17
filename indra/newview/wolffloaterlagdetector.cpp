@@ -561,7 +561,12 @@ void WolfFloaterLagDetector::onBeacon()
     const Row* row = selectedRow();
     if (!row || row->mObjectID.isNull())
         return;
-    LLTracker::trackLocation(gAgent.getPosGlobalFromAgent(row->mPos), row->mObjectName, std::string(), LLTracker::LOCATION_ITEM);
+    // <WolfViewer> mPos is the LandStatReply region-local Location (agent region); the agent frame may be rebased
+    LLViewerRegion* region = gAgent.getRegion();
+    if (!region)
+        return;
+    LLTracker::trackLocation(region->getPosGlobalFromRegion(row->mPos), row->mObjectName, std::string(), LLTracker::LOCATION_ITEM);
+    // </WolfViewer>
 }
 
 // Source: llfloatertopobjects.cpp onTeleportToObject().
@@ -570,7 +575,12 @@ void WolfFloaterLagDetector::onTeleport()
     const Row* row = selectedRow();
     if (!row || row->mObjectID.isNull())
         return;
-    gAgent.teleportViaLocation(gAgent.getPosGlobalFromAgent(row->mPos));
+    // <WolfViewer> mPos is the LandStatReply region-local Location (agent region); the agent frame may be rebased
+    LLViewerRegion* region = gAgent.getRegion();
+    if (!region)
+        return;
+    gAgent.teleportViaLocation(region->getPosGlobalFromRegion(row->mPos));
+    // </WolfViewer>
 }
 
 void WolfFloaterLagDetector::onReturn()

@@ -1303,6 +1303,23 @@ bool LLWebRTCVoiceClient::wolfSwitchSpatialSession(const std::string& channelID,
             {
                 return true; // the move goes through this region's cap; wait for it
             }
+            // [WOLF GRID GATE 2026-10-17] and for its features: wolfRequestMove only moves into a region whose own
+            // GridURL says Wolf, so waiting here keeps a teleport whose features come after its caps on the move path.
+            // Not for ever: features that never come (no cap, the fetch gave up) go on after 10 s, wolfRequestMove then
+            // refuses (no Wolf GridURL) and the stock reconnect runs.
+            if (!regionp->simulatorFeaturesReceived())
+            {
+                if (mWolfFeaturesWaitRegion != regionp->getRegionID())
+                {
+                    mWolfFeaturesWaitRegion = regionp->getRegionID();
+                    mWolfFeaturesWait.start();
+                }
+                if (mWolfFeaturesWait.getElapsedTimeF32() < 10.f)
+                {
+                    return true;
+                }
+            }
+            mWolfFeaturesWaitRegion.setNull();   // the next wait, even for this region again, starts afresh
             deleteSession(mNextSession);
             mWolfMovingConnection = connection;
             sessionState::wptr_t from = mSession;
@@ -4008,7 +4025,19 @@ void LLVoiceWebRTCSpatialConnection::wolfRequestMove(const LLUUID& region_id, S3
                                                                             : std::string();
             // the session id the server gave us is the whole key; without it there is nothing to move
             bool have_session = connection->mViewerSession.isString() && !connection->mViewerSession.asString().empty();
-            if (!LLWebRTCVoiceClient::isShuttingDown() && !url.empty() && have_session)
+            // [WOLF GRID GATE 2026-10-17] wolfMoveAllowed() answers for the region the agent WAS on until the new one's
+            // features arrive, so right after a hypergrid teleport the move (with our voice session) could go to a foreign
+            // region's cap. The region it is sent to must itself say it is Wolf (its own OpenSimExtras GridURL, as
+            // wolfgrid.h isOnWolfTerritories reads it); otherwise the stock reconnect is used (moved stays false).
+            bool wolf_target = false;
+            if (regionp && regionp->simulatorFeaturesReceived())
+            {
+                LLSD features;
+                regionp->getSimulatorFeatures(features);
+                wolf_target = features.has("OpenSimExtras") && features["OpenSimExtras"].has("GridURL")
+                    && WolfGrid::isWolfHost(features["OpenSimExtras"]["GridURL"].asString());
+            }
+            if (!LLWebRTCVoiceClient::isShuttingDown() && !url.empty() && have_session && wolf_target)
             {
                 LLSD body;
                 body["voice_server_type"] = WEBRTC_VOICE_SERVER_TYPE;

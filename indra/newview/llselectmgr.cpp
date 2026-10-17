@@ -1572,6 +1572,13 @@ void LLSelectMgr::getGrid(LLVector3& origin, LLQuaternion &rotation, LLVector3 &
             {
                 mGridOrigin = WolfBuilder::snapOriginAgent();
             }
+            // <WolfViewer> the region corner is agent (0,0,0) only until a huge-region origin rebase
+            // (LLAgent::rebaseOrigin); snap from the agent region's real corner. Zero on a normal grid.
+            else if (gAgent.getRegion())
+            {
+                mGridOrigin = gAgent.getRegion()->getOriginAgent();
+            }
+            // </WolfViewer>
             break;
         }
     }
@@ -9047,7 +9054,11 @@ bool LLSelectMgr::selectionMove(const LLVector3& displ,
         for (LLObjectSelection::root_iterator it = getSelection()->root_begin();
              it != getSelection()->root_end(); ++it)
         {
-            obj_pos = (*it)->getObject()->getPositionEdit();
+            // <WolfViewer> compared with the camera origin, which is agent space; getPositionEdit is
+            // region-local and the agent frame may be rebased on a huge region (LLAgent::rebaseOrigin).
+            // Only the nudge step scales by this distance.
+            obj_pos = (*it)->getObject()->getPositionAgent();
+            // </WolfViewer>
 
             F32 obj_dist_squared = dist_vec_squared(obj_pos, LLViewerCamera::getInstance()->getOrigin());
             if (obj_dist_squared < min_dist_squared)

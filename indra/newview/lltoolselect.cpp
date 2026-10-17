@@ -104,7 +104,9 @@ LLObjectSelectionHandle LLToolSelect::handleObjectSelection(const LLPickInfo& pi
             float nFartouchDistSq = s_nFartouchDist * s_nFartouchDist;
 
             // User is allowed to edit/select this object if it's within their current fartouch distance
-            if (dist_vec_squared(gAgent.getPositionAgent(), object->getPositionRegion()) > nFartouchDistSq)
+            // <WolfViewer> both in agent space (region-local differs from agent space once a huge region
+            // rebases, LLAgent::rebaseOrigin; this also holds for objects in a neighbouring region)
+            if (dist_vec_squared(gAgent.getPositionAgent(), object->getPositionAgent()) > nFartouchDistSq)
             {
                 // The object is out of range but we'll still allow them a temporary select (e.g. context menu) if the surface point is within range
                 if (dist_vec_squared(gAgent.getPositionAgent(), pick.mIntersection) > 1.5f * 1.5f)

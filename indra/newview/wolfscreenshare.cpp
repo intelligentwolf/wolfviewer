@@ -122,9 +122,16 @@ void WolfScreenShare::toggle()
 // needs a TARGET — the selected face — before anything else happens.
 void WolfScreenShare::start()
 {
-    if (!isAvailable())
+    // [WOLF GRID GATE 2026-10-17] and standing on a Wolf region that has said so: the share is put on a face in the
+    // region underfoot, which after a hypergrid jump would be another grid's object showing a wolfstorm.app page.
+    if (!isAvailable() || !WolfGrid::isOnWolfTerritories())
     {
         alert("Screen sharing is available on Wolf Territories only.");
+        return;
+    }
+    if (!WolfGrid::isOnWolfTerritoriesConfirmed())
+    {
+        alert("This region is still connecting. Try screen sharing again in a moment.");
         return;
     }
     if (mSharing || mMinting)
@@ -144,7 +151,10 @@ void WolfScreenShare::start()
     share_id.erase(std::remove(share_id.begin(), share_id.end(), '-'), share_id.end());
 
     mMinting = true;
-    LLCoros::instance().launch("WolfScreenShare mint", [target, share_id]() { mintCoro(target, share_id); });
+    mShareAgentId = gAgentID;            // [WOLF GRID GATE 2026-10-17/] mint and revoke both send these two
+    mShareSessionId = gAgentSessionID;
+    const LLUUID agent_id = mShareAgentId, session_id = mShareSessionId;
+    LLCoros::instance().launch("WolfScreenShare mint", [target, share_id, agent_id, session_id]() { mintCoro(target, share_id, agent_id, session_id); });
 }
 
 // Source: screen_share.js stop() — de-register the share server-side so the link stops
@@ -162,7 +172,8 @@ void WolfScreenShare::stop()
     mShareId.clear();
     mRoom.clear();
     mUrl.clear();
-    LLCoros::instance().launch("WolfScreenShare revoke", [share_id]() { revokeCoro(share_id); });
+    const LLUUID agent_id = mShareAgentId, session_id = mShareSessionId;
+    LLCoros::instance().launch("WolfScreenShare revoke", [share_id, agent_id, session_id]() { revokeCoro(share_id, agent_id, session_id); });
     // Media off the face: selectionSetMedia(0, LLSD()) removes it, the same call llpanelface
     // makes for "remove media" (llpanelface.cpp / fspanelface.cpp).
     applyFaceMedia(target, LLSD());
@@ -176,6 +187,13 @@ void WolfScreenShare::stop()
 // rotated by the render rotation — the pick normal a click would have supplied.
 void WolfScreenShare::idle()
 {
+    // [WOLF GRID GATE 2026-10-17] a share does not outlive Wolf: a hypergrid jump away or a relog to another grid ends it
+    // (and revokes it with the ids that made it, so the link stops working).
+    if (mSharing && !WolfGrid::isOnWolfTerritories())
+    {
+        stop();
+        return;
+    }
     if (mFocusUntil <= 0.0 || !mSharing)
     {
         return;
@@ -287,13 +305,13 @@ LLSD WolfScreenShare::mediaEntryFor(const std::string& url)
 }
 
 // static
-void WolfScreenShare::mintCoro(Target target, std::string share_id)
+void WolfScreenShare::mintCoro(Target target, std::string share_id, LLUUID agent_id, LLUUID session_id)
 {
     // Source: screen_share.js start(): POST {token, share_id}; here the viewer's identity
     // fields instead of a token (screen_token.php, [WOLFVIEWER 2026-09-06]).
     LLSD body;
-    body["agent_id"] = gAgentID.asString();
-    body["session_id"] = gAgentSessionID.asString();
+    body["agent_id"] = agent_id.asString();
+    body["session_id"] = session_id.asString();
     body["share_id"] = share_id;
     LLSD reply;
     std::string error;
@@ -302,13 +320,13 @@ void WolfScreenShare::mintCoro(Target target, std::string share_id)
 }
 
 // static
-void WolfScreenShare::revokeCoro(std::string share_id)
+void WolfScreenShare::revokeCoro(std::string share_id, LLUUID agent_id, LLUUID session_id)
 {
     // Source: screen_share.js stop(): POST {action:'revoke', share_id, token}.
     LLSD body;
     body["action"] = "revoke";
-    body["agent_id"] = gAgentID.asString();
-    body["session_id"] = gAgentSessionID.asString();
+    body["agent_id"] = agent_id.asString();
+    body["session_id"] = session_id.asString();
     body["share_id"] = share_id;
     LLSD reply;
     std::string error;

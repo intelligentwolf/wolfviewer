@@ -171,6 +171,13 @@ void WolfPanelLandSandbox::onVisibilityChange(bool visible)
 
 void WolfPanelLandSandbox::draw()
 {
+    // [WOLF GRID GATE 2026-10-17] a parcel read refused only because the new region's features had not arrived yet (a
+    // teleport) is asked again as soon as they say Wolf, instead of showing "Wolf only" until another parcel is picked
+    if (mAwaitingGrid && WolfGrid::isOnWolfTerritoriesConfirmed())
+    {
+        mUnsupported = false;
+        request();
+    }
     if ((mGetPending || mSetPending) && mPendingTimer.getElapsedTimeF32() > ANSWER_TIMEOUT_S)
     {
         const bool was_set = mSetPending;
@@ -192,6 +199,11 @@ void WolfPanelLandSandbox::draw()
 
 bool WolfPanelLandSandbox::sendToRegion(const std::vector<std::string>& params)
 {
+    // [WOLF GRID GATE 2026-10-17] every send (get and set) only to a region that has said it is Wolf (wolfgrid.h)
+    if (!WolfGrid::isOnWolfTerritoriesConfirmed())
+    {
+        return false;
+    }
     LLViewerRegion* region = LLViewerParcelMgr::getInstance()->getSelectionRegion();
     if (!region || region->getRegionID() != mRegionId)
     {
@@ -228,9 +240,11 @@ void WolfPanelLandSandbox::request()
     if (!WolfGrid::isOnWolfTerritoriesConfirmed())
     {
         mUnsupported = true;
+        mAwaitingGrid = true;   // [WOLF GRID GATE 2026-10-17/] draw() asks again once this region has said it is Wolf
         setStatus(getString("wolf_only"), true);
         return;
     }
+    mAwaitingGrid = false;
     if (sendToRegion({ "get", llformat("%d", mLocalId) }))
     {
         mGetPending = true;
@@ -318,10 +332,12 @@ void WolfPanelLandSandbox::onApply()
 // static
 void WolfPanelLandSandbox::receive(const LLUUID& region_id, const std::vector<std::string>& strings)
 {
-    if (sInstance)
+    // [WOLF GRID GATE 2026-10-17] a "WolfSandbox" from a region that is not Wolf, or one nobody asked for, is ignored
+    if (!WolfGrid::isOnWolfTerritoriesConfirmed() || !sInstance || !(sInstance->mGetPending || sInstance->mSetPending))
     {
-        sInstance->handleReply(region_id, strings);
+        return;
     }
+    sInstance->handleReply(region_id, strings);
 }
 
 void WolfPanelLandSandbox::handleReply(const LLUUID& region_id, const std::vector<std::string>& strings)

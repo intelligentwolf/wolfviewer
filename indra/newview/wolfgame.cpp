@@ -46,6 +46,7 @@
 #include "llstartup.h"
 #include "llviewercontrol.h"
 #include "wolfgrid.h"
+#include "wolfadventure.h"   // [WOLF ADVENTURE 2026-10-16/]
 #include "lltoolbarview.h"
 #include "wolffloaterroleplay.h"
 #include "wolfgamehud.h"
@@ -351,7 +352,11 @@ void WolfGame::receivePacket(const LLUUID& invoice, const std::vector<std::strin
 {
     // [WOLF GRID GATE 2026-10-09] Wolf Roleplay exists only on Wolf Territories (the same gate as
     // Flight Mode, wolfgrid.h isOnWolfTerritories): elsewhere these messages are ignored.
-    if (!WolfGrid::isOnWolfTerritories()) return;
+    // [WOLF GRID GATE 2026-10-17] isOnWolfTerritoriesConfirmed: the lenient answer keeps the previous Wolf region's
+    // "yes" until a new region's features arrive, so right after a hypergrid jump a foreign region's "WolfGame" could
+    // drive the HUD and open web pages. A real Wolf region resends its state on the hello, which waits for the same
+    // confirmation (idle, mHelloAt).
+    if (!WolfGrid::isOnWolfTerritoriesConfirmed()) return;
     LLViewerRegion* rgn = gAgent.getRegion();
     // VIEWER_SPEC.md §1: drop any message whose Invoice is not the agent's current region.
     if (!rgn || rgn->getRegionID() != invoice)
@@ -479,6 +484,9 @@ void WolfGame::apply(const LLSD& m)
         else mBuffs.erase(std::remove_if(mBuffs.begin(), mBuffs.end(), [&](const Buff& b) { return b.mId == id; }), mBuffs.end());
     }
     else if (t == "ctext") applyCombatText(m);
+    // [WOLF ADVENTURE 2026-10-16] HUD_MESSAGES_V1.md §2: the adventure's own types come on this
+    // channel too; their state lives in WolfAdventure, which a region change here does not clear.
+    else if (WolfAdventure::instance().apply(t, m)) {}
     else
     {
         LL_DEBUGS("WolfGame") << "unknown WolfGame message '" << t << "'" << LL_ENDL;
@@ -823,6 +831,28 @@ void WolfGame::applyNotify(const LLSD& m)
         mGameModePending = false;
         updateGameModeButtons();
     }
+}
+
+void WolfGame::addNotice(const std::string& title, const std::string& text, ENoticeKind kind)
+{
+    // The stack and timings of applyNotify (§3.4), without its game side effects: a viewer notice
+    // never ends a pending equip or a Game Mode switch.
+    Notice n;
+    n.mSerial = ++mNoticeSerial;
+    n.mTitle = capText(title, CAP_TITLE);
+    n.mText = capText(text, CAP_TEXT, true);
+    n.mKind = kind;
+    n.mStart = now();
+    n.mExpires = n.mKind == NOTICE_DANGER ? 0.0 : n.mStart + (n.mKind == NOTICE_WARNING ? NOTICE_LIFE_WARNING : NOTICE_LIFE_SHORT);
+    mNotices.push_back(n);
+    while (mNotices.size() > NOTICE_MAX) mNotices.pop_front();
+    ++mGeneration;
+}
+
+// static
+std::string WolfGame::cleanText(const std::string& in, size_t max, bool lines)
+{
+    return capText(in, max, lines);
 }
 
 void WolfGame::closeNotice(U32 serial)
@@ -1258,7 +1288,9 @@ void WolfGame::gateToolbar(bool on_wolf)
     if (!on_wolf)
     {
         bool changed = false;
-        for (const char* name : { "wolf_gamemode", "wolf_roleplay" })
+        // [WOLF GRID GATE 2026-10-17] wolf_experiences (wolffloaterexperiences.cpp) rides along: a Wolf-only button that
+        // was only greyed on a toolbar off Wolf (commands.xml is_enabled_function), now gone and put back the same way.
+        for (const char* name : { "wolf_gamemode", "wolf_roleplay", "wolf_experiences" })
         {
             int rank = LLToolBar::RANK_NONE;
             const S32 where = gToolBarView->removeCommand(LLCommandId(name), rank);
@@ -1281,7 +1313,7 @@ void WolfGame::gateToolbar(bool on_wolf)
     {
         const LLSD& e = hidden[i];
         const std::string name = e["name"].asString();
-        if (name != "wolf_gamemode" && name != "wolf_roleplay") continue;   // only ours, ever
+        if (name != "wolf_gamemode" && name != "wolf_roleplay" && name != "wolf_experiences") continue;   // only ours, ever
         const S32 where = e["toolbar"].asInteger();
         if (where < LLToolBarEnums::TOOLBAR_FIRST || where > LLToolBarEnums::TOOLBAR_LAST) continue;
         const LLCommandId id(name);
@@ -1291,6 +1323,26 @@ void WolfGame::gateToolbar(bool on_wolf)
         }
     }
     gSavedPerAccountSettings.setLLSD("WolfGameToolbarHidden", LLSD::emptyArray());
+}
+
+/**
+ * [WOLF GRID GATE 2026-10-17] Wolf World > Games & Stories: every item in it is Wolf Territories only (menu_viewer.xml
+ * on_visible WolfGrid.IsOnWolfTerritories), but a submenu has no on_visible of its own (llmenugl.h: only call, check and
+ * separator items take one), so off Wolf it was left as an EMPTY submenu. Shown or hidden here with the toolbar gate
+ * (Paul: "the menu needs to adjust itself").
+ */
+static void gate_games_menu(bool on_wolf)
+{
+    // the answer last applied (and to which menu bar), so the menu is touched only when it changes
+    static S32 s_applied = -1;
+    static const LLView* s_bar = nullptr;
+    if (!gMenuBarView || (s_bar == gMenuBarView && s_applied == (on_wolf ? 1 : 0))) return;
+    if (LLMenuGL* wolf_world = gMenuBarView->findChildMenuByName("WolfWorld", true))
+    {
+        wolf_world->setItemVisible("WolfGroupGames", on_wolf);
+        s_bar = gMenuBarView;   // recorded only once applied, so a menu not found yet is tried again
+        s_applied = on_wolf ? 1 : 0;
+    }
 }
 
 bool WolfGame::toggleReady() const
@@ -1484,9 +1536,17 @@ bool WolfGame::handleEscape()
     if (WolfFloaterGameWeb::closeOverlayIfFocusAllows()) return true;
     if (WolfFloaterGameDialog::closeFocused()) return true;
     if (WolfFloaterGameWebPrompt::closeFocused()) return true;
+    // [WOLF ADVENTURE 2026-10-16] HUD_MESSAGES_V1.md §5.5 Escape order: a game dialog or web
+    // prompt, then a vignette card (here: the card window when it has the keyboard)...
+    if (WolfAdventure::instance().handleEscape(WolfAdventure::ESC_FOCUSED_CARD)) return true;
+    // ...the stage effects, never blocked (not even by a text field), when no card is up...
+    if (WolfAdventure::instance().handleEscape(WolfAdventure::ESC_STAGE_FIRST)) return true;
     // A text field keeps its own Escape (chat, a notecard).
     LLUICtrl* focus = dynamic_cast<LLUICtrl*>(gFocusMgr.getKeyboardFocus());
     if (focus && focus->acceptsTextInput()) return false;
+    // [WOLF ADVENTURE 2026-10-16] ...then the top card, then the stage effects (a title, the bars,
+    // a fade, the camera cue) if a card held them back, before this game's own screen effects.
+    if (WolfAdventure::instance().handleEscape(WolfAdventure::ESC_CARD_THEN_STAGE)) return true;
     // The screen effects and the downed overlay: the player's way out of a blackout or blur is
     // never blocked, not even by the Roleplay window having the keyboard (the review,
     // 2026-10-09: its "Clear screen effects" button says Escape does it too).
@@ -1518,6 +1578,10 @@ bool WolfGame::handleEscape()
 
 void WolfGame::idle()
 {
+    // [WOLF ADVENTURE 2026-10-16] The adventure's own frame first: it keeps its own Wolf gate,
+    // logout and region change (HUD_MESSAGES_V1.md §5), and drives a stage camera cue before the
+    // camera updates (llappviewer.cpp calls this ahead of gAgentCamera.updateCamera).
+    WolfAdventure::instance().idle();
     // [2026-10-09] A Game Mode switch that could not go at once goes as soon as the region can take
     // it - or is dropped when the region already says what was wanted.
     if (mQueuedMode >= 0 && !mGameModePending)
@@ -1563,6 +1627,7 @@ void WolfGame::idle()
             {
                 mLastGridGate = now();
                 gateToolbar(wolf);
+                gate_games_menu(wolf);   // [WOLF GRID GATE 2026-10-17/]
             }
             else if (was_known)
             {
@@ -1575,6 +1640,7 @@ void WolfGame::idle()
         {
             mLastGridGate = now();
             gateToolbar(wolf);
+            gate_games_menu(wolf);   // [WOLF GRID GATE 2026-10-17/]
         }
         if (!wolf)
         {

@@ -568,7 +568,10 @@ void QToolAlign::align()
         LLVector3 original_position = object->getPositionAgent();
         LLVector3 new_position = original_position + delta;
 
-        object->setPosition(new_position);
+        // <WolfViewer> new_position is agent space and setPosition takes region-local for a root; the agent
+        // frame may be rebased on a huge region (LLAgent::rebaseOrigin). setPositionAgent converts per region.
+        object->setPositionAgent(new_position);
+        // </WolfViewer>
     }
 
     select_mgr->sendMultipleUpdate(UPD_POSITION);

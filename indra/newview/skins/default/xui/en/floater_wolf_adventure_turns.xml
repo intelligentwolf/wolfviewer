@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLF ADVENTURE P4 2026-10-16] the turn tracker (HUD_MESSAGES_V1.md §2.10, §3.10), drawn in the game's theme by WolfAdventurePlayView
+     (wolfadventureplay.cpp). Not modal, never takes the keyboard by itself; it stands where the spec puts
+     it and sizes itself to its content each frame (it is not dragged). -->
+<floater
+ can_close="false"
+ can_drag_on_left="false"
+ can_minimize="false"
+ can_resize="false"
+ header_height="0"
+ height="160"
+ layout="topleft"
+ legacy_header_height="0"
+ name="wolf_adventure_turns"
+ save_rect="false"
+ show_title="false"
+ single_instance="true"
+ title="Turn order"
+ width="360">
+    <wolf_adventure_play_view
+     follows="all"
+     height="160"
+     layout="topleft"
+     left="0"
+     mouse_opaque="false"
+     name="view"
+     tab_stop="true"
+     top="0"
+     width="360" />
+</floater>

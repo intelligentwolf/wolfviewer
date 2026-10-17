@@ -408,7 +408,7 @@ void LLFlickrPhotoPanel::sendPhoto()
             description = description + "\n\n" + slurl_string;
 
         // Also add special "machine tags" with location metadata
-        const LLVector3& agent_pos_region = gAgent.getPositionAgent();
+        const LLVector3 agent_pos_region = gAgent.getPositionRegion();   // <WolfViewer> region coordinates; agent frame may be rebased
         LLViewerRegion* region = gAgent.getRegion();
         LLParcel* parcel = LLViewerParcelMgr::getInstance()->getAgentParcel();
         if (region && parcel)

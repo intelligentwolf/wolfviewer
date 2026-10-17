@@ -309,7 +309,7 @@ void WolfEnvironmentState::idle()
 {
     if (!WolfGrid::isOnWolfTerritories())
     {
-        if (mRegion.mValid || mParcel.mValid || mPreview.mValid)
+        if (mRegion.mValid || mParcel.mValid || mPreview.mValid || mAuto.mValid)   // [WOLF GRID GATE 2026-10-17/] the auto sky too
         {
             // [WOLF GRID GATE] off Wolf nothing of it stays (a hypergrid jump away)
             mRegion = mParcel = mPreview = mAuto = WolfEnvDoc();
@@ -320,6 +320,9 @@ void WolfEnvironmentState::idle()
     }
     // [WolfViewer 2026-10-14] the region underneath when flying past the agent region's edge (open sea, visiting land), as
     // the EEP sky (LLEnvironment::wolfEnvironmentRegion): Paul, "the environment didnt change as i went over each region"
+    // [WOLF GRID GATE 2026-10-17] the read below names the region and where we stand: not on the last region's answer in
+    // the moments after a hypergrid jump - only once this region has said it is Wolf
+    if (!WolfGrid::isOnWolfTerritoriesConfirmed()) return;
     LLViewerRegion* region = LLEnvironment::wolfEnvironmentRegion();
     if (!region) return;
     const std::string id = region->getRegionID().asString();

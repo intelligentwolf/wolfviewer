@@ -5030,7 +5030,10 @@ void LLViewerObject::setPositionGlobal(const LLVector3d &pos_global, bool damped
     {
         if (isRootEdit())
         {
-            LLVector3 newPos = mRegionp->getPosRegionFromGlobal(pos_global);
+            // <WolfViewer> the attachment point's world position is agent space, so take pos_global into
+            // agent space too; the agent frame may be rebased off the region origin (LLAgent::rebaseOrigin)
+            LLVector3 newPos = gAgent.getPosAgentFromGlobal(pos_global);
+            // </WolfViewer>
             newPos = newPos - mDrawable->mXform.getParent()->getWorldPosition();
 
             LLQuaternion invWorldRotation = mDrawable->mXform.getParent()->getWorldRotation();
@@ -5042,7 +5045,10 @@ void LLViewerObject::setPositionGlobal(const LLVector3d &pos_global, bool damped
         else
         {
             // assumes parent is root editable (root of attachment)
-            LLVector3 newPos = mRegionp->getPosRegionFromGlobal(pos_global);
+            // <WolfViewer> the attachment point's world position is agent space, so take pos_global into
+            // agent space too; the agent frame may be rebased off the region origin (LLAgent::rebaseOrigin)
+            LLVector3 newPos = gAgent.getPosAgentFromGlobal(pos_global);
+            // </WolfViewer>
             newPos = newPos - mDrawable->mXform.getParent()->getWorldPosition();
             LLVector3 delta_pos = newPos - getPosition();
 

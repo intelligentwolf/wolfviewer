@@ -103,10 +103,20 @@ void WolfFloaterWeatherReport::fetch()
 {
     LLViewerRegion* region = gAgent.getRegion();
     if (!region) return;
-    if (!WolfGrid::isOnWolfTerritories())
+    // [WOLF GRID GATE 2026-10-17] Confirmed: right after a region change the lenient answer is still the last region's, so
+    // nothing is sent until this region has said it is Wolf - draw() comes back next frame (mFetchedFor is left alone).
+    // Off Wolf the refusal is recorded for this region (asked again at the next refresh) and the old report goes too.
+    if (!WolfGrid::isOnWolfTerritoriesConfirmed())
     {
-        // The request carries this login's agent and session: only ever to Wolf's own site.
-        mStatus->setText(std::string("The weather report is for Wolf Territories regions."));
+        if (!WolfGrid::isOnWolfTerritories())
+        {
+            // The request carries this login's agent and session: only ever to Wolf's own site.
+            mStatus->setText(std::string("The weather report is for Wolf Territories regions."));
+            mReply = LLSD();
+            mReport->setText(LLStringUtil::null);
+            mSky->setText(LLStringUtil::null);
+            mFetchedFor = region->getRegionID().asString();
+        }
         return;
     }
     mBusy = true;

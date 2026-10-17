@@ -491,6 +491,13 @@ namespace
             finish("Your " + niceName(s.mType) + " can't be rezzed now: you are not in a region yet.");
             return;
         }
+        // [WOLF GRID GATE 2026-10-17] rez() checked the grid when the button was pressed; the RezObject goes from here,
+        // after the inventory search, so a hypergrid teleport in between would have rezzed it on the foreign region.
+        if (!WolfGrid::isOnWolfTerritoriesConfirmed())
+        {
+            finish("Your free Wolf " + niceName(s.mType) + " is for Wolf Territories regions, so it was not rezzed here.");
+            return;
+        }
         Spot spot;
         if (!findSpot(s.mType, s.mHeading, spot))
         {

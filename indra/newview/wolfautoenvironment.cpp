@@ -192,7 +192,9 @@ void WolfPanelRegionAutoEnvironment::refresh()
 
 void WolfPanelRegionAutoEnvironment::draw()
 {
-    if (!WolfGrid::isOnWolfTerritories())
+    // [WOLF GRID GATE 2026-10-17] Confirmed: the reads below carry our session, and right after a hypergrid jump the
+    // lenient answer is still the last region's
+    if (!WolfGrid::isOnWolfTerritoriesConfirmed())
     {
         setStatus("Sorry, this function is only available on Wolf Territories Grid.", true);
         LLPanel::draw();

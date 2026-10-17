@@ -542,7 +542,10 @@ void LLFloaterPathfindingObjects::teleportToSelectedObject()
         {
             // If we cannot find the object in the viewer list, teleport to the last reported position
             const LLPathfindingObjectPtr objectPtr = mObjectList->find(selectedItem->getUUID().asString());
-            teleportLocation = gAgent.getPosGlobalFromAgent(objectPtr->getLocation());
+            // <WolfViewer> the pathfinding location is region-local (agent region); the agent frame may be rebased
+            teleportLocation = gAgent.getRegion() ? gAgent.getRegion()->getPosGlobalFromRegion(objectPtr->getLocation())
+                                                  : gAgent.getPosGlobalFromAgent(objectPtr->getLocation());
+            // </WolfViewer>
         }
         else
         {

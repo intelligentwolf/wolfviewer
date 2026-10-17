@@ -31,6 +31,7 @@
 #include "llweb.h"
 #include "wolfairports.h"
 #include "wolfflight.h"
+#include "wolfgrid.h"   // [WOLF GRID GATE 2026-10-17/]
 
 namespace
 {
@@ -77,6 +78,14 @@ bool WolfFloaterAirports::postBuild()
 void WolfFloaterAirports::onOpen(const LLSD& key)
 {
     LLFloater::onOpen(key);
+    // [WOLF GRID GATE 2026-10-17] the directory, the map positions and the teleports are Wolf Territories': off Wolf (an
+    // app/openfloater link, a hypergrid visitor elsewhere) the window says so and closes, asking nothing.
+    if (!WolfGrid::isOnWolfTerritories())
+    {
+        WolfGrid::noteWolfOnly("Airports");
+        closeFloater();
+        return;
+    }
     // <WolfViewer 2026-10-11> Paul: "refresh the airports window every time it opens" - a new list from the
     // website each time (draw() fills again when it arrives), the one held meanwhile
     WolfAirports::instance().refreshNow();
@@ -86,6 +95,12 @@ void WolfFloaterAirports::onOpen(const LLSD& key)
 
 void WolfFloaterAirports::draw()
 {
+    // [WOLF GRID GATE 2026-10-17] a hypergrid jump away closes it: its teleports are to Wolf coordinates
+    if (!WolfGrid::isOnWolfTerritories())
+    {
+        closeFloater();
+        return;
+    }
     // The directory arrives a moment after the window opens: fill the list again then.
     WolfAirports& airports = WolfAirports::instance();
     airports.refresh();

@@ -1,0 +1,263 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wolfterritories.org/schemas/wolf-adventure/rules_preset_v1.schema.json",
+  "title": "Wolf Adventure rules preset, format 1",
+  "description": "Contract: RULES_PRESETS_V1.md. Every collection is an OBJECT keyed by id (never an array) so RFC 7396 merge patches (creator overrides) can change or delete one entry by id.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "formatVersion", "id", "version", "title", "dice", "stats", "checks", "difficulties", "conditions", "combat", "progression", "creation"],
+  "properties": {
+    "format": { "const": "wolf-adventure-rules" },
+    "formatVersion": { "const": 1 },
+    "id": { "enum": ["wild-west", "mystery", "education", "experience", "5e-srd-5.2"] },
+    "version": { "description": "Bumped on every change to the shipped file; packs pin it (adventure_pack rules.presetVersion).", "type": "integer", "minimum": 1 },
+    "title": { "type": "string", "maxLength": 64 },
+    "summary": { "type": "string", "maxLength": 500 },
+    "status": {
+      "description": "complete, or skeleton: the format is final but the data tables are filled in a later phase (5e: P5, from the SRD 5.2.1 PDF).",
+      "enum": ["complete", "skeleton"]
+    },
+    "attribution": {
+      "description": "Shown in the rules screen and appended to every pack using this preset; creators cannot remove or edit it (overrides may not touch this key).",
+      "type": "array", "maxItems": 4,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["work", "licence", "text"],
+        "properties": {
+          "work": { "type": "string", "maxLength": 240 },
+          "licence": { "type": "string", "maxLength": 40 },
+          "url": { "type": "string", "maxLength": 1024 },
+          "text": { "type": "string", "maxLength": 1000 }
+        }
+      }
+    },
+    "label": {
+      "description": "The mode's display name. 5e: must be 'compatible with fifth edition' / '5E compatible' wording (SRD 5.2.1 Legal Information, p.1).",
+      "type": "string", "maxLength": 64
+    },
+    "dice": {
+      "type": "object", "additionalProperties": false,
+      "required": ["sides"],
+      "properties": {
+        "sides": {
+          "description": "Die sizes allowed in notation.",
+          "type": "array", "minItems": 1, "maxItems": 8, "uniqueItems": true,
+          "items": { "enum": [2, 3, 4, 6, 8, 10, 12, 20, 100] }
+        },
+        "maxDice": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 },
+        "showRolls": { "description": "public: everyone in the party sees each roll; private: only the roller and GMs.", "enum": ["public", "private"], "default": "public" }
+      }
+    },
+    "stats": {
+      "type": "object", "maxProperties": 40,
+      "propertyNames": { "pattern": "^[a-z0-9_]{1,24}$" },
+      "additionalProperties": { "$ref": "#/$defs/stat" }
+    },
+    "checks": {
+      "type": "object", "maxProperties": 60,
+      "propertyNames": { "pattern": "^[a-z0-9_]{1,24}$" },
+      "additionalProperties": { "$ref": "#/$defs/check" }
+    },
+    "difficulties": {
+      "description": "Named DCs (labels for the Studio and GM Console).",
+      "type": "object", "maxProperties": 10,
+      "propertyNames": { "pattern": "^[a-z0-9_]{1,24}$" },
+      "additionalProperties": {
+        "type": "object", "additionalProperties": false,
+        "required": ["label", "dc"],
+        "properties": {
+          "label": { "type": "string", "maxLength": 32 },
+          "dc": { "type": "integer", "minimum": 0, "maximum": 100 }
+        }
+      }
+    },
+    "conditions": {
+      "type": "object", "maxProperties": 40,
+      "propertyNames": { "pattern": "^[a-z0-9_]{1,24}$" },
+      "additionalProperties": { "$ref": "#/$defs/condition" }
+    },
+    "combat": { "$ref": "#/$defs/combat" },
+    "progression": {
+      "type": "object", "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": { "enum": ["none", "xp", "milestone"] },
+        "xpStat": { "type": "string", "pattern": "^[a-z0-9_]{1,24}$" },
+        "levelStat": { "type": "string", "pattern": "^[a-z0-9_]{1,24}$" },
+        "levels": {
+          "description": "XP needed for level 2, 3, ... in order.",
+          "type": "array", "maxItems": 100,
+          "items": { "type": "integer", "minimum": 0 }
+        },
+        "tables": {
+          "description": "Named lookup tables by level (index 0 = level 1), e.g. proficiency bonus.",
+          "type": "object", "maxProperties": 10,
+          "additionalProperties": { "type": "array", "maxItems": 100, "items": { "type": "integer" } }
+        }
+      }
+    },
+    "creation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["method"],
+      "properties": {
+        "method": { "enum": ["none", "preset", "pointBuy", "standardArray", "roll"] },
+        "stats": { "type": "array", "maxItems": 12, "items": { "type": "string", "pattern": "^[a-z0-9_]{1,24}$" } },
+        "points": { "type": "integer", "minimum": 0, "maximum": 200 },
+        "costs": { "type": "object", "maxProperties": 40, "additionalProperties": { "type": "integer", "minimum": 0, "maximum": 100 } },
+        "array": { "type": "array", "maxItems": 12, "items": { "type": "integer" } },
+        "roll": { "$ref": "#/$defs/dice" },
+        "choose": {
+          "description": "Data lists the player picks from (5e: class, species, background).",
+          "type": "array", "maxItems": 6, "uniqueItems": true,
+          "items": { "enum": ["classes", "species", "backgrounds"] }
+        }
+      }
+    },
+    "data": {
+      "description": "Large rule data (5e: classes, species, backgrounds, feats, spells, monsters, items, equipment). Each entry carries its SRD provenance.",
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "classes": { "$ref": "#/$defs/dataSet" },
+        "species": { "$ref": "#/$defs/dataSet" },
+        "backgrounds": { "$ref": "#/$defs/dataSet" },
+        "feats": { "$ref": "#/$defs/dataSet" },
+        "spells": { "$ref": "#/$defs/dataSet" },
+        "monsters": { "$ref": "#/$defs/dataSet" },
+        "items": { "$ref": "#/$defs/dataSet" },
+        "equipment": { "$ref": "#/$defs/dataSet" }
+      }
+    }
+  },
+  "$defs": {
+    "dice": {
+      "description": "Dice notation: NdS, NdS+K, NdS-K, 'NdSkhM' (keep highest M, e.g. 4d6kh3). Grammar in RULES_PRESETS_V1.md section 4.",
+      "type": "string", "pattern": "^[1-9][0-9]?d(2|3|4|6|8|10|12|20|100)(kh[1-9][0-9]?|kl[1-9][0-9]?)?([+-][0-9]{1,3})?$"
+    },
+    "formula": {
+      "description": "A JSON formula: an integer, or one operator object. RULES_PRESETS_V1.md section 5.",
+      "oneOf": [
+        { "type": "integer", "minimum": -1000000, "maximum": 1000000 },
+        {
+          "type": "object", "additionalProperties": false, "minProperties": 1, "maxProperties": 2,
+          "properties": {
+            "stat": { "type": "string", "pattern": "^[a-z0-9_]{1,24}$" },
+            "mod5e": { "type": "string", "pattern": "^[a-z0-9_]{1,24}$" },
+            "add": { "type": "array", "minItems": 1, "maxItems": 8, "items": { "$ref": "#/$defs/formula" } },
+            "sub": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "$ref": "#/$defs/formula" } },
+            "mul": { "type": "array", "minItems": 2, "maxItems": 4, "items": { "$ref": "#/$defs/formula" } },
+            "floorDiv": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "$ref": "#/$defs/formula" } },
+            "min": { "type": "array", "minItems": 2, "maxItems": 8, "items": { "$ref": "#/$defs/formula" } },
+            "max": { "type": "array", "minItems": 2, "maxItems": 8, "items": { "$ref": "#/$defs/formula" } },
+            "table": { "type": "string", "pattern": "^[a-z0-9_]{1,24}$" },
+            "by": { "$ref": "#/$defs/formula" },
+            "ifProficient": { "type": "string", "pattern": "^[a-z0-9_]{1,24}$" },
+            "then": { "$ref": "#/$defs/formula" }
+          }
+        }
+      ]
+    },
+    "stat": {
+      "type": "object", "additionalProperties": false,
+      "required": ["label", "kind"],
+      "properties": {
+        "label": { "type": "string", "maxLength": 32 },
+        "short": { "type": "string", "maxLength": 4 },
+        "kind": { "enum": ["ability", "resource", "skill", "derived", "save"] },
+        "min": { "type": "integer", "minimum": -1000000, "maximum": 1000000 },
+        "max": { "type": "integer", "minimum": -1000000, "maximum": 1000000 },
+        "default": { "type": "integer", "minimum": -1000000, "maximum": 1000000 },
+        "formula": { "description": "derived / skill / save: computed, never stored.", "$ref": "#/$defs/formula" },
+        "wolfGame": {
+          "description": "The wolfGame stat this is kept in (resource stats: health, stamina...). Empty = kept by the brain in the player's sheet.",
+          "type": "string", "pattern": "^([a-z0-9_]{1,24})?$"
+        },
+        "hud": { "description": "Shown on the HUD (orb/bar for resources, sheet row otherwise).", "type": "boolean", "default": false },
+        "colour": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+        "icon": { "type": "string", "maxLength": 36 },
+        "order": { "type": "integer", "minimum": 0, "maximum": 1000, "default": 0 }
+      }
+    },
+    "check": {
+      "type": "object", "additionalProperties": false,
+      "required": ["label", "roll"],
+      "properties": {
+        "label": { "type": "string", "maxLength": 32 },
+        "roll": { "$ref": "#/$defs/dice" },
+        "add": { "$ref": "#/$defs/formula" },
+        "vs": { "description": "dc: against a number; opposed: against another check's total; auto: no roll, success if add >= dc.", "enum": ["dc", "opposed", "auto"], "default": "dc" },
+        "defaultDc": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "critical": { "description": "Natural die result that is a critical (e.g. 20). 0 = none.", "type": "integer", "minimum": 0, "maximum": 100, "default": 0 },
+        "fumble": { "description": "Natural die result that is a fumble (e.g. 1). 0 = none.", "type": "integer", "minimum": 0, "maximum": 100, "default": 0 },
+        "advantage": { "description": "Advantage = roll twice keep higher; disadvantage = lower; both cancel (5e).", "type": "boolean", "default": false },
+        "kind": { "enum": ["check", "save", "attack", "initiative", "skill"], "default": "check" }
+      }
+    },
+    "condition": {
+      "type": "object", "additionalProperties": false,
+      "required": ["label", "good"],
+      "properties": {
+        "label": { "type": "string", "maxLength": 32 },
+        "good": { "type": "boolean" },
+        "icon": { "type": "string", "maxLength": 36 },
+        "text": { "type": "string", "maxLength": 128 },
+        "effects": {
+          "type": "array", "maxItems": 8,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["on", "mode"],
+            "properties": {
+              "on": { "description": "Check id, or check kind prefixed 'kind:' (kind:attack), or '*' for all.", "type": "string", "maxLength": 32 },
+              "mode": { "enum": ["advantage", "disadvantage", "autoFail", "autoSucceed", "bonus"] },
+              "amount": { "type": "integer", "minimum": -100, "maximum": 100 },
+              "against": { "description": "The effect applies to rolls made AGAINST the bearer (5e attack rolls against).", "type": "boolean", "default": false }
+            }
+          }
+        },
+        "speed": { "description": "Movement factor while held (wolfGameSetSpeed range 0..1).", "type": "number", "minimum": 0, "maximum": 1 },
+        "endsOn": { "enum": ["time", "turnEnd", "save", "rest", "manual"], "default": "manual" }
+      }
+    },
+    "combat": {
+      "type": "object", "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "mode": { "description": "realtime: wolfGame abilities and cooldowns; turns: initiative order run by the brain.", "enum": ["realtime", "turns"], "default": "realtime" },
+        "hpStat": { "type": "string", "pattern": "^[a-z0-9_]{1,24}$" },
+        "acStat": { "type": "string", "pattern": "^[a-z0-9_]{1,24}$" },
+        "initiative": { "description": "Check id used for initiative.", "type": "string", "pattern": "^[a-z0-9_]{1,24}$" },
+        "turnSeconds": { "description": "Auto mode: a player's turn times out after this (then Dodge/pass).", "type": "integer", "minimum": 10, "maximum": 600, "default": 60 },
+        "actions": {
+          "description": "Per-turn economy, e.g. {action:1, bonus:1, reaction:1, move:30}.",
+          "type": "object", "maxProperties": 8,
+          "additionalProperties": { "type": "integer", "minimum": 0, "maximum": 1000 }
+        },
+        "damageTypes": { "type": "array", "maxItems": 20, "uniqueItems": true, "items": { "type": "string", "pattern": "^[a-z0-9_]{1,24}$" } },
+        "death": {
+          "description": "downed: wolfGame downed state then revive; deathSaves: 5e death saving throws (Rules Glossary); respawn: the wolfGame game's own respawn.",
+          "enum": ["downed", "deathSaves", "respawn", "none"], "default": "downed"
+        }
+      }
+    },
+    "dataSet": {
+      "type": "object", "maxProperties": 2000,
+      "propertyNames": { "pattern": "^[a-z0-9_-]{1,48}$" },
+      "additionalProperties": {
+        "type": "object",
+        "required": ["name", "srd"],
+        "properties": {
+          "name": { "type": "string", "maxLength": 64 },
+          "srd": {
+            "description": "Provenance: the document and printed page the entry was transcribed from.",
+            "type": "object", "additionalProperties": false,
+            "required": ["doc", "page"],
+            "properties": {
+              "doc": { "enum": ["SRD 5.2.1", "homebrew"] },
+              "page": { "type": "integer", "minimum": 0, "maximum": 400 }
+            }
+          }
+        }
+      }
+    }
+  }
+}

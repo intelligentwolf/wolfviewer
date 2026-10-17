@@ -51,6 +51,16 @@ namespace
 {
     const char* STRIP_KEYS[CH_COUNT] = { "voice", "mic", "music_a", "music_b", "music_c", "music_d" };
     const char* GRID_STREAM_API = "https://www.wolf-grid.com/gridstream.php";   // gridmanager/gridstream.php
+    // [WOLF DJ 2026-10-16] The real audience of a Wolf stream (gridmanager/streamlisteners.php).
+    // Icecast's own count for /radio/<name> missed everyone hearing the show on WTGR (/stream,
+    // the parcel music on Lone Wolf's land and the WTGR page) and counted WTGR's Liquidsoap as a
+    // listener: Paul's 10-16 show read "2 listeners" with 15 people listening.
+    const char* STREAM_LISTENERS_API = "https://www.wolf-grid.com/streamlisteners.php";
+    // The host and mount prefix of the grid's own streams (gridmanager/regionstreamlib.php
+    // rsPublicHost(), RS_MOUNT_PREFIX).
+    const char* WOLF_CAST_HOST = "cast.wolfterritories.org";
+    const char* WOLF_CAST_IP = "116.202.127.19";   // what cast.wolfterritories.org resolves to (helperserver /etc/hosts, DNS)
+    const char* WOLF_MOUNT_PREFIX = "/radio/";
     const char* PROTECTED_TYPE = "wolf_dj";
 
     // A show in progress: what to put back afterwards. Survives the floater being closed.
@@ -200,6 +210,10 @@ bool WolfFloaterDJ::postBuild()
     getChild<LLButton>("send_title")->setCommitCallback([this](LLUICtrl*, const LLSD&) { onSendTitle(); });
     mLiveBtn->setCommitCallback([this](LLUICtrl*, const LLSD&) { onGoLive(); });
     getChild<LLButton>("open_playlist")->setCommitCallback([](LLUICtrl*, const LLSD&) { LLFloaterReg::showInstance("wolf_dj_playlist"); });
+    // [WOLF DJ 2026-10-16] My Shows: the numbers come from wolf-grid.com, so only on Wolf Territories (onOpen).
+    mMyShows = getChild<LLButton>("my_shows");
+    mStatusGap = mStatus->getRect().mLeft - mMyShows->getRect().mRight;
+    mMyShows->setCommitCallback([](LLUICtrl*, const LLSD&) { LLFloaterReg::showInstance("wolf_dj_shows"); });
     getChild<LLCheckBoxCtrl>("play_on_land")->setCommitCallback([](LLUICtrl* c, const LLSD&)
     {
         gSavedSettings.setBOOL("WolfDJPlayOnLand", c->getValue().asBoolean());
@@ -214,6 +228,23 @@ void WolfFloaterDJ::onOpen(const LLSD& key)
     mix.setWindowOpen(true);
     mix.startEngine();
     loadLevels();
+
+    // My Shows on each open (the grid is known by then, not always at postBuild); without it the status line
+    // starts where the button would have been, so no gap is left (status_text follows left|right).
+    const bool wolf = WolfGrid::isWolfTerritories();
+    mMyShows->setVisible(wolf);
+    LLRect status = mStatus->getRect();
+    status.mLeft = wolf ? mMyShows->getRect().mRight + mStatusGap : mMyShows->getRect().mLeft;
+    mStatus->setShape(status);
+    // [WOLF GRID GATE 2026-10-17] Grid Stream asks Wolf's own site (onGridStream): gone (not greyed) off a Wolf login, the
+    // address line taking its place; the address line's tip names wolf-grid.com only where that is where it comes from.
+    LLButton* grid_stream = getChild<LLButton>("get_stream");
+    grid_stream->setVisible(wolf);
+    LLRect url_rect = mUrl->getRect();
+    url_rect.mRight = wolf ? grid_stream->getRect().mLeft - 4 : grid_stream->getRect().mRight;
+    mUrl->setShape(url_rect);
+    if (mUrlWolfTip.empty()) mUrlWolfTip = mUrl->getToolTip();
+    mUrl->setToolTip(wolf ? mUrlWolfTip : std::string("Your Icecast stream's address, e.g. http://your-server:8000/your-mount"));
 
     mUrl->setValue(gSavedPerAccountSettings.getString("WolfDJStreamURL"));
     std::string station = gSavedPerAccountSettings.getString("WolfDJStationName");
@@ -472,7 +503,7 @@ void WolfFloaterDJ::onGoLive()
         return;
     }
     cfg.mStationName = mStation->getValue().asString();
-    cfg.mDescription = "Live from Wolf Territories with WolfViewer";
+    cfg.mDescription = WolfGrid::isWolfTerritories() ? "Live from Wolf Territories with WolfViewer" : "Live with WolfViewer";   // [WOLF GRID GATE 2026-10-17/] no Wolf claim on another grid
     gSavedPerAccountSettings.setString("WolfDJStreamURL", mUrl->getValue().asString());
     gSavedPerAccountSettings.setString("WolfDJStationName", cfg.mStationName);
     save_password(cfg.mPassword);
@@ -507,7 +538,7 @@ void WolfFloaterDJ::onGoLive()
     }
     mix.setNowPlaying(mArtist->getValue().asString(), mTitle->getValue().asString());
     mix.goLive(cfg);
-    mListeners = -1;
+    mAudience = Audience();
     mNextListeners = mClock.getElapsedTimeF32() + 10.f;
     getChild<LLTextBox>("land_note")->setText(land_note);
 }
@@ -749,31 +780,68 @@ void WolfFloaterDJ::requestListeners()
 {
     if (mListenersBusy || sShow.mStatusHost.empty()) return;
     mListenersBusy = true;
-    const std::string url = "http://" + sShow.mStatusHost + ":" + std::to_string(sShow.mStatusPort) + "/status-json.xsl";
     const std::string mount = sShow.mMount;
+    // A Wolf stream asks GridManager, which knows what WTGR is playing; any other Icecast is
+    // asked for its own figure for the mount.
+    const bool wolf = WolfGrid::isWolfTerritories()
+        && (LLStringUtil::compareInsensitive(sShow.mStatusHost, std::string(WOLF_CAST_HOST)) == 0
+            || sShow.mStatusHost == WOLF_CAST_IP)
+        && mount.compare(0, strlen(WOLF_MOUNT_PREFIX), WOLF_MOUNT_PREFIX) == 0;
+    const std::string url = wolf
+        ? std::string(STREAM_LISTENERS_API) + "?mount=" + LLURI::escape(mount)
+        : "http://" + sShow.mStatusHost + ":" + std::to_string(sShow.mStatusPort) + "/status-json.xsl";
     LLHandle<LLFloater> handle = getHandle();
-    LLCoros::instance().launch("WolfDJListeners", [handle, url, mount]()
+    LLCoros::instance().launch("WolfDJListeners", [handle, url, mount, wolf]()
     {
         LLCoreHttpUtil::HttpCoroutineAdapter::ptr_t adapter =
             std::make_shared<LLCoreHttpUtil::HttpCoroutineAdapter>("WolfDJ", LLCore::HttpRequest::DEFAULT_POLICY_ID);
         LLCore::HttpRequest::ptr_t request = std::make_shared<LLCore::HttpRequest>();
-        LLCore::HttpOptions::ptr_t opts = std::make_shared<LLCore::HttpOptions>();
+        // Wolf's own site: the same verified https options as Grid Stream (gridStreamCoro).
+        LLCore::HttpOptions::ptr_t opts = wolf ? WolfGrid::makeVerifiedHttpOptions() : std::make_shared<LLCore::HttpOptions>();
         opts->setTimeout(10);
         opts->setRetries(0);
         LLSD result = adapter->getRawAndSuspend(request, url, opts);
-        S32 listeners = -1;
+        Audience audience;
+        bool answered = false;  // a readable answer; a failed poll keeps the last count on screen
         if (result.has(LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS_RAW))
         {
-            // Icecast 2.4 status-json.xsl: {"icestats":{"source": {...} or [{...}, ...]}}, each
-            // source with "listenurl" and "listeners".
             const LLSD::Binary& raw = result[LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS_RAW].asBinary();
             boost::system::error_code ec;
             boost::json::value root = boost::json::parse(std::string(raw.begin(), raw.end()), ec);
-            if (!ec && root.is_object())
+            auto as_s32 = [](const boost::json::value* v, S32 fallback)
             {
+                if (!v) return fallback;
+                if (v->is_int64()) return (S32)v->as_int64();
+                if (v->is_uint64()) return (S32)v->as_uint64();
+                return fallback;
+            };
+            if (!ec && root.is_object() && wolf)
+            {
+                // streamlisteners.php: {success, mount, live, listeners, direct, wtgr, onWtgr, grid, web, other}
+                // or {success: false, error}. Not live yet (the first seconds on air) reads as unknown.
+                const boost::json::object& o = root.as_object();
+                const boost::json::value* ok = o.if_contains("success");
+                const boost::json::value* live = o.if_contains("live");
+                answered = ok && ok->is_bool() && ok->as_bool();
+                if (answered && live && live->is_bool() && live->as_bool())
+                {
+                    audience.mTotal = as_s32(o.if_contains("listeners"), -1);
+                    audience.mGrid = as_s32(o.if_contains("grid"), -1);
+                    audience.mWeb = as_s32(o.if_contains("web"), -1);
+                    audience.mOther = as_s32(o.if_contains("other"), -1);
+                    audience.mWtgr = as_s32(o.if_contains("wtgr"), 0);
+                    const boost::json::value* on = o.if_contains("onWtgr");
+                    audience.mOnWtgr = on && on->is_bool() && on->as_bool();
+                }
+            }
+            else if (!ec && root.is_object())
+            {
+                // Icecast 2.4 status-json.xsl: {"icestats":{"source": {...} or [{...}, ...]}}, each
+                // source with "listenurl" and "listeners".
                 const boost::json::object& top = root.as_object();
                 const boost::json::value* stats = top.if_contains("icestats");
                 const boost::json::value* sources = stats && stats->is_object() ? stats->as_object().if_contains("source") : nullptr;
+                answered = stats && stats->is_object();
                 auto check = [&](const boost::json::value& v)
                 {
                     if (!v.is_object()) return;
@@ -784,7 +852,7 @@ void WolfFloaterDJ::requestListeners()
                     const std::string listen(lu->as_string().c_str());
                     if (listen.size() >= mount.size() && listen.compare(listen.size() - mount.size(), mount.size(), mount) == 0)
                     {
-                        listeners = ls->is_int64() ? (S32)ls->as_int64() : (ls->is_uint64() ? (S32)ls->as_uint64() : listeners);
+                        audience.mTotal = as_s32(ls, audience.mTotal);
                     }
                 };
                 if (sources && sources->is_array())
@@ -800,7 +868,7 @@ void WolfFloaterDJ::requestListeners()
         if (!handle.isDead())
         {
             WolfFloaterDJ* self = static_cast<WolfFloaterDJ*>(handle.get());
-            self->mListeners = listeners;
+            if (answered) self->mAudience = audience;
             self->mListenersBusy = false;
         }
     });
@@ -847,9 +915,20 @@ void WolfFloaterDJ::updateStatus()
         {
             const S32 secs = (S32)mix.onAirSeconds();
             text = llformat("ON AIR  %d:%02d:%02d", secs / 3600, (secs / 60) % 60, secs % 60);
-            if (mListeners >= 0)
+            if (mAudience.mTotal >= 0)
             {
-                text += llformat("  ·  %d listener%s", mListeners, mListeners == 1 ? "" : "s");
+                const Audience& a = mAudience;
+                text += llformat("  ·  %d listener%s", a.mTotal, a.mTotal == 1 ? "" : "s");
+                if (a.mTotal > 0 && a.mGrid >= 0 && a.mWeb >= 0)
+                {
+                    text += llformat(" (%d in-world, %d web", a.mGrid, a.mWeb);
+                    if (a.mOther > 0) text += llformat(", %d other", a.mOther);
+                    text += ")";
+                }
+                if (a.mOnWtgr)
+                {
+                    text += llformat("  ·  on WTGR (%d)", a.mWtgr);
+                }
             }
             break;
         }

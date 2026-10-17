@@ -140,6 +140,15 @@ bool WolfSpeech::canCapture()
 
 void WolfSpeech::idle()
 {
+    // [WOLF GRID GATE 2026-10-17] dictation was only ever switched off by its own toggle, so after a relog to another grid
+    // it kept listening and posting the audio, with THAT grid's agent and session ids, to wolfstorm.app. Off a Wolf login
+    // it stops (the toolbar button and menu item are gone there too).
+    if (mDictating && !isAvailable())
+    {
+        closeCapture();
+        mDictating = false;
+        resetUtterance();
+    }
     if (mDictating)
     {
         pollCapture();
@@ -346,6 +355,10 @@ void WolfSpeech::resetUtterance()
 // queue of stale sentences.
 void WolfSpeech::flushUtterance()
 {
+    if (!isAvailable())   // [WOLF GRID GATE 2026-10-17/] never to Wolf's service from another grid's session (see idle)
+    {
+        return;
+    }
     if (mInflight >= MAX_INFLIGHT)
     {
         LL_INFOS("WolfSpeech") << "dictation: " << MAX_INFLIGHT << " transcriptions already in flight, utterance dropped" << LL_ENDL;

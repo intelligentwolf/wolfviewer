@@ -41,6 +41,7 @@
 #include "lltoolmgr.h"
 #include "llviewerobject.h"
 #include "llviewerobjectlist.h"
+#include "llviewerregion.h"
 #include "lluictrlfactory.h"
 
 LLFloaterTelehub::LLFloaterTelehub(const LLSD& key)
@@ -146,8 +147,14 @@ void LLFloaterTelehub::addBeacons()
         hub_pos_region = obj->getPositionRegion();
         hub_rot = obj->getRotationRegion();
     }
+    // <WolfViewer> addDebugBeacon takes an agent position; hub_pos_region is region-local and the agent
+    // frame may be rebased on a huge region (LLAgent::rebaseOrigin)
+    LLViewerRegion* hub_region = obj ? obj->getRegion() : gAgent.getRegion();
+    if (!hub_region)
+        return;
+    // </WolfViewer>
     // Draw nice thick 3-pixel lines.
-    gObjectList.addDebugBeacon(hub_pos_region, "", LLColor4::yellow, LLColor4::white, 4);
+    gObjectList.addDebugBeacon(hub_region->getPosAgentFromRegion(hub_pos_region), "", LLColor4::yellow, LLColor4::white, 4);
 
     LLScrollListCtrl* list = floater->getChild<LLScrollListCtrl>("spawn_points_list");
     if (list)
@@ -156,7 +163,7 @@ void LLFloaterTelehub::addBeacons()
         if (spawn_index >= 0)
         {
             LLVector3 spawn_pos = hub_pos_region  + (floater->mSpawnPointPos[spawn_index] * hub_rot);
-            gObjectList.addDebugBeacon(spawn_pos, "", LLColor4::orange, LLColor4::white, 4);
+            gObjectList.addDebugBeacon(hub_region->getPosAgentFromRegion(spawn_pos), "", LLColor4::orange, LLColor4::white, 4);   // <WolfViewer> agent position
         }
     }
 }

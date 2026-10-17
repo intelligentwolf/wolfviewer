@@ -787,6 +787,15 @@ void LLFloaterRegionInfo::refresh()
     if (mWavesPanel) mWavesPanel->refresh();
 }
 
+// [WOLF GRID GATE 2026-10-17] Weather, Automatic Environment and Waves are Wolf Territories' own (their panels said
+// "Sorry, this function is only available..." elsewhere): gone (not greyed) off Wolf, back on Wolf. Checked each frame,
+// not on the region change, because the new region's grid is only known once its features arrive.
+void LLFloaterRegionInfo::draw()
+{
+    WolfGrid::showWolfTabs(mTab, { mWeatherPanel, mAutoEnvPanel, mWavesPanel }, WolfGrid::isOnWolfTerritories(), mWolfTabsShown);
+    LLFloater::draw();
+}
+
 void LLFloaterRegionInfo::enableTopButtons()
 {
     getChildView("top_colliders_btn")->setEnabled(true);

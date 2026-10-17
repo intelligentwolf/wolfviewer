@@ -867,7 +867,7 @@ public:
                 LLViewerRegion *region = LLWorld::getInstance()->getRegionFromPosAgent(chat.mPosAgent);
                 if(region)
                 {
-                    LLSLURL region_slurl(region->getName(), chat.mPosAgent);
+                    LLSLURL region_slurl(region->getName(), region->getPosRegionFromAgent(chat.mPosAgent));   // <WolfViewer> the SLURL takes a region position; agent frame may be rebased
                     slurl = region_slurl.getLocationString();
                 }
             }

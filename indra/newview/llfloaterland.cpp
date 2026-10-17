@@ -360,6 +360,7 @@ bool LLFloaterLand::postBuild()
 
     // Source: WolfPanelLandWaves/Weather show a visible grid restriction on their tabs.
     // Keep the tabs reachable so residents can read why these controls are unavailable.
+    // [WOLF GRID GATE 2026-10-17] no longer: Paul's rule is gone (not greyed) off Wolf - draw() hides them there.
     if (tab)
     {
         tab->selectTab(sLastTab);
@@ -378,6 +379,18 @@ LLFloaterLand::~LLFloaterLand()
 }
 
 // public
+// [WOLF GRID GATE 2026-10-17] Weather, Sandbox and Water are Wolf Territories' own: gone (not greyed) off Wolf, back on
+// Wolf. Checked each frame, not on the parcel change, because the new region's grid is known only once its features arrive.
+void LLFloaterLand::draw()
+{
+    const bool wolf = WolfGrid::isOnWolfTerritories();
+    if ((wolf ? 1 : 0) != mWolfTabsShown)   // the Water tab is found by name only when the answer changes
+    {
+        WolfGrid::showWolfTabs(mTabLand, { mPanelWeather, mPanelSandbox, findChild<LLPanel>("land_water_panel") }, wolf, mWolfTabsShown);
+    }
+    LLFloater::draw();
+}
+
 void LLFloaterLand::refresh()
 {
     mPanelGeneral->refresh();
@@ -2627,7 +2640,10 @@ void LLPanelLandOptions::onClickSet(void* userdata)
         return;
     }
 
-    LLVector3 pos_region = gAgent.getPositionAgent();
+    // <WolfViewer> UserLocation is region-local (sendParcelPropertiesUpdate); on a huge region the
+    // agent frame may be rebased (LLAgent::rebaseOrigin), so agent space is not region space.
+    LLVector3 pos_region = gAgent.getPositionRegion();
+    // </WolfViewer>
     selected_parcel->setUserLocation(pos_region);
     selected_parcel->setUserLookAt(gAgent.getFrameAgent().getAtAxis());
 

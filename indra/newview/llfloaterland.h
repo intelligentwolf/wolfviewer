@@ -99,6 +99,7 @@ private:
 protected:
 
     /*virtual*/ void refresh();
+    /*virtual*/ void draw();   // [WOLF GRID GATE 2026-10-17/] the Wolf tabs follow the grid
 
     static void* createPanelLandGeneral(void* data);
     static void* createPanelLandCovenant(void* data);
@@ -130,6 +131,7 @@ protected:
     LLPanelLandEnvironment *mPanelEnvironment;
     WolfPanelLandWeather   *mPanelWeather = nullptr;   // <WolfViewer 2026-09-12>
     WolfPanelLandSandbox   *mPanelSandbox = nullptr;   // <WolfViewer 2026-10-13>
+    S32                     mWolfTabsShown = -1;       // [WOLF GRID GATE 2026-10-17/] WolfGrid::showWolfTabs
 
     LLSafeHandle<LLParcelSelection> mParcel;
 

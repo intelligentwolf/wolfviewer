@@ -52,6 +52,7 @@
 #include "wolfgame.h"
 #include "wolfgamehud.h"
 #include "wolfgrid.h"
+#include "wolfadventure.h"   // [WOLF ADVENTURE 2026-10-16/]
 
 static LLDefaultChildRegistry::Register<WolfGameConsole> r_wolf_game_console("wolf_game_console");
 static LLDefaultChildRegistry::Register<WolfGameDialogView> r_wolf_game_dialog_view("wolf_game_dialog_view");
@@ -98,9 +99,11 @@ namespace
     }
 
     // In WolfGameConsole::EPage order.
-    const char* const PAGE_NAMES[] = { "Stats", "Combat", "Bag", "Pets", "Game", "Look", "Help" };
+    const char* const PAGE_NAMES[] = { "Stats", "Journal", "Combat", "Bag", "Pets", "Game", "Look", "Help" };
     const char* const PAGE_TIPS[] = {
-        "Your stats as gauges, the game's own information, and markers on other regions",
+        "Your stats as gauges, your honour, the game's own information, and markers on other regions",
+        // [WOLF ADVENTURE 2026-10-16] HUD_MESSAGES_V1.md §3.1
+        "Your adventures: what to do next, chapters, clues and handouts - and the adventures on this region",
         "Your weapons, armour, abilities and the effects on you",
         "Your bag: everything you hold in this game, and what the game has that you have not",
         "Your pets and how they are doing",
@@ -467,6 +470,7 @@ void WolfGameConsole::showPage(EPage page)
     mPage = page;
     mConfirm = CONFIRM_NONE;
     mHits.setFocus(H_TAB, page);
+    if (page == PAGE_JOURNAL) onJournalOpened();   // [WOLF ADVENTURE 2026-10-16/] §4 hello when the Journal opens
 }
 
 void WolfGameConsole::setStatus(const std::string& text, bool error)
@@ -826,6 +830,7 @@ void WolfGameConsole::drawPage(F32 l, F32 b, F32 r, F32 t, const Palette& p)
         switch (mPage)
         {
         case PAGE_STATS:  bottom = pageStats(l, cr, top, p); break;
+        case PAGE_JOURNAL: bottom = pageJournal(l, cr, top, p); break;   // [WOLF ADVENTURE 2026-10-16/]
         case PAGE_COMBAT: bottom = pageCombat(l, cr, top, p); break;
         case PAGE_BAG:    bottom = pageBag(l, cr, top, p); break;
         case PAGE_PETS:   bottom = pagePets(l, cr, top, p); break;
@@ -909,6 +914,8 @@ F32 WolfGameConsole::pageStats(F32 l, F32 r, F32 top, const Palette& p)
     const LLFontGL* small = LLFontGL::getFontSansSerifSmall();
     const LLFontGL* body = LLFontGL::getFontSansSerif();
     F32 y = top;
+    // [WOLF ADVENTURE 2026-10-16] HUD_MESSAGES_V1.md §3.5: the honour bar, above the stat rings.
+    y = honourSection(l, r, y, p);
     if (g.stats().empty())
     {
         y = emptyCard(l, r, y, "No stats yet",
@@ -1496,7 +1503,9 @@ F32 WolfGameConsole::pageLook(F32 l, F32 r, F32 top, const Palette& p)
             std::string(WolfGameBackground::tintName(i)) + " tint" + (on ? " (in use)" : ""));
     }
     y -= 26.f + (F32)small->getLineHeight() + 12.f;
-    return paragraph(l, r, y, "Saved for this account. A dark veil over the picture keeps the text readable, however bright the picture.", p.mDim, small);
+    y = paragraph(l, r, y, "Saved for this account. A dark veil over the picture keeps the text readable, however bright the picture.", p.mDim, small);
+    // [WOLF ADVENTURE 2026-10-16] HUD_MESSAGES_V1.md §5.6: Story camera and Reduce motion.
+    return adventureLookSection(l, r, y - 14.f, p);
 }
 
 // ---- Help (the flight deck's HELP pattern: opens by itself the first time, the tab reopens it) ----
@@ -1534,7 +1543,8 @@ void WolfGameConsole::drawConfirm(const Palette& p)
     const F32 W = (F32)getRect().getWidth(), H = (F32)getRect().getHeight();
     rect(0.f, 0.f, W, H, LLColor4(0.f, 0.f, 0.f, 0.55f));
     std::string title, body, yes, no;
-    if (mConfirm == CONFIRM_LEAVE)
+    if (adventureConfirmText(title, body, yes, no)) {}   // [WOLF ADVENTURE 2026-10-16/]
+    else if (mConfirm == CONFIRM_LEAVE)
     {
         title = "Leave " + g.game().mName + "?";
         body = "Your stats are kept. Game Mode stays on; you can join again later.";
@@ -1564,7 +1574,7 @@ void WolfGameConsole::drawConfirm(const Palette& p)
     }
     // the consequential answer on the left, apart from the safe one on the right (NN/G)
     const F32 bw = 120.f, bb = cb + 14.f;
-    button(cl + 14.f, bb, cl + 14.f + bw, bb + 30.f, yes, p, flagsFor(H_CONFIRM_YES, 0) | (mConfirm == CONFIRM_LEAVE ? BTN_DANGER : 0));
+    button(cl + 14.f, bb, cl + 14.f + bw, bb + 30.f, yes, p, flagsFor(H_CONFIRM_YES, 0) | (mConfirm == CONFIRM_LEAVE || mConfirm == CONFIRM_ADV_LEAVE || mConfirm == CONFIRM_ADV_CONVO_DEL || mConfirm == CONFIRM_ADV_FORGET ? BTN_DANGER : 0));
     mHits.add(cl + 14.f, bb, cl + 14.f + bw, bb + 30.f, H_CONFIRM_YES, 0, yes);
     button(cl + cw - 14.f - bw, bb, cl + cw - 14.f, bb + 30.f, no, p, flagsFor(H_CONFIRM_NO, 0) | BTN_PRIMARY);
     mHits.add(cl + cw - 14.f - bw, bb, cl + cw - 14.f, bb + 30.f, H_CONFIRM_NO, 0, no + " (Escape)");
@@ -1663,6 +1673,7 @@ bool WolfGameConsole::handleToolTip(S32 x, S32 y, MASK mask)
 
 bool WolfGameConsole::handleKeyHere(KEY key, MASK mask)
 {
+    if (adventureKey(key, mask)) return true;   // [WOLF ADVENTURE 2026-10-16/] the class code field
     if (key == KEY_TAB && (mask == MASK_NONE || mask == MASK_SHIFT))
     {
         mKeyboardNav = true;
@@ -1718,6 +1729,7 @@ void WolfGameConsole::escape()
 
 bool WolfGameConsole::handleUnicodeCharHere(llwchar uni_char)
 {
+    if (adventureChar(uni_char)) return true;   // [WOLF ADVENTURE 2026-10-16/] the class code field
     if (uni_char != ' ') return false;
     const WolfGameHits::Hit* f = mHits.focused();
     if (f && f->mEnabled)
@@ -1806,6 +1818,10 @@ void WolfGameConsole::press(S32 id, S32 arg)
         {
             showMarkerOnMap(mConfirmMarker);
         }
+        else
+        {
+            confirmAdventure(what);   // [WOLF ADVENTURE 2026-10-16/]
+        }
         break;
     }
     case H_CONFIRM_NO: mConfirm = CONFIRM_NONE; break;
@@ -1840,6 +1856,7 @@ void WolfGameConsole::press(S32 id, S32 arg)
         }
         break;
     default:
+        pressAdventure(id, arg);   // [WOLF ADVENTURE 2026-10-16/] the Journal's and the Look page's own
         break;
     }
 }
@@ -2005,6 +2022,18 @@ void WolfFloaterRoleplay::showPage(WolfGameConsole::EPage page, bool toggle)
     WolfFloaterRoleplay* f = LLFloaterReg::showTypedInstance<WolfFloaterRoleplay>("wolf_roleplay");
     sOpenQuietly = false;
     if (f && f->mConsole) f->mConsole->showPage(page);
+}
+
+void WolfFloaterRoleplay::showAdventures()
+{
+    if (!WolfGrid::isOnWolfTerritories()) return;
+    // From the menu: the window takes the keyboard (the player asked for it).
+    WolfFloaterRoleplay* f = LLFloaterReg::showTypedInstance<WolfFloaterRoleplay>("wolf_roleplay");
+    if (f && f->mConsole)
+    {
+        f->mConsole->showPage(WolfGameConsole::PAGE_JOURNAL);
+        f->mConsole->showAdventuresHere();
+    }
 }
 
 bool WolfFloaterRoleplay::showingPage(WolfGameConsole::EPage page)

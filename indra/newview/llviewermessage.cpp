@@ -27,6 +27,7 @@
 #include "llviewerprecompiledheaders.h"
 #include "llviewermessage.h"
 #include "wolfflight.h"   // <WolfViewer 2026-10-10/> crossing refusals -> go round
+#include "wolfborder.h"   // [BORDER GUARD 2026-10-16/] refused crossings -> the border banner
 #include "wolfdrive.h"    // <WolfViewer 2026-10-11/> the speedboat helm hears its boat's "Speed = N"
 #include "wolfsuitcase.h" // <WolfViewer 2026-10-12/> an accepted offer abroad -> look at My Suitcase again
 
@@ -3117,7 +3118,7 @@ void process_chat_from_simulator(LLMessageSystem *msg, void **user_data)
 
                 const LLViewerRegion* pRegion = LLWorld::getInstance()->getRegionFromPosAgent(chat.mPosAgent);
                 if (pRegion)
-                    sdQuery["slurl"] = LLSLURL(pRegion->getName(), chat.mPosAgent).getLocationString();
+                    sdQuery["slurl"] = LLSLURL(pRegion->getName(), pRegion->getPosRegionFromAgent(chat.mPosAgent)).getLocationString();   // <WolfViewer> region position; agent frame may be rebased
 
                 chat.mURL = LLSLURL("objectim", from_id, LLURI::mapToQueryString(sdQuery)).getSLURLString();
             }
@@ -6823,6 +6824,11 @@ void process_alert_core(const std::string& message, bool modal)
     // <WolfViewer 2026-10-10> A region refusing the crossing repeats its alert at every try (Chad's screen: six
     // "Denied access to private region little ST.Lucia"). The flight deck goes round it (wolfflight.cpp
     // onCrossingRefused), and the first alert is shown, not the repeats.
+    // [BORDER GUARD 2026-10-16] wolfborder.cpp: a refused crossing, for the border banner (it never swallows the alert)
+    if (WolfBorder::instanceExists())
+    {
+        WolfBorder::instance().onAlert(message);
+    }
     if (WolfFlight::instanceExists() && WolfFlight::instance().onCrossingRefused(message))
     {
         return;
@@ -8012,7 +8018,10 @@ void process_teleport_local(LLMessageSystem *msg,void**)
     // Let the interested parties know we've teleported.
     // Vadim *HACK: Agent position seems to get reset (to render position?)
     //              on each frame, so we have to pass the new position manually.
-    LLViewerParcelMgr::getInstance()->onTeleportFinished(true, gAgent.getPosGlobalFromAgent(pos));
+    // <WolfViewer> pos is region-local (see setPositionAgent above); the agent frame may be rebased
+    LLViewerParcelMgr::getInstance()->onTeleportFinished(true, gAgent.getRegion() ? gAgent.getRegion()->getPosGlobalFromRegion(pos)
+                                                                                  : gAgent.getPosGlobalFromAgent(pos));
+    // </WolfViewer>
 }
 
 void send_simple_im(const LLUUID& to_id,
@@ -8306,7 +8315,7 @@ void send_improved_im(const LLUUID& to_id,
         id,
         0,
         LLUUID::null,
-        gAgent.getPositionAgent(),
+        gAgent.getPositionRegion(),   // <WolfViewer> IM Position is region-local (as llimview.cpp); agent frame may be rebased
         timestamp,
         binary_bucket,
         binary_bucket_size);

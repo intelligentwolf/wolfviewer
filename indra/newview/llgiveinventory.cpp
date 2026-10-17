@@ -461,7 +461,7 @@ bool LLGiveInventory::commitGiveInventoryItem(const LLUUID& to_agent,
         transaction_id,
         0,
         LLUUID::null,
-        gAgent.getPositionAgent(),
+        gAgent.getPositionRegion(),   // <WolfViewer> IM Position is region-local (as llimview.cpp); agent frame may be rebased
         NO_TIMESTAMP,
         bucket,
         BUCKET_SIZE);
@@ -661,7 +661,7 @@ bool LLGiveInventory::commitGiveInventoryCategory(const LLUUID& to_agent,
             transaction_id,
             0,
             LLUUID::null,
-            gAgent.getPositionAgent(),
+            gAgent.getPositionRegion(),   // <WolfViewer> IM Position is region-local (as llimview.cpp); agent frame may be rebased
             NO_TIMESTAMP,
             bucket,
             bucket_size);

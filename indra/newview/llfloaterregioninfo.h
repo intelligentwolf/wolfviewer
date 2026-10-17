@@ -111,6 +111,7 @@ public:
 
     // from LLPanel
     void refresh() override;
+    void draw() override;   // [WOLF GRID GATE 2026-10-17/] the Wolf tabs follow the grid
 
     void onRegionChanged();
     void requestRegionInfo();
@@ -136,6 +137,7 @@ protected:
     WolfPanelRegionWeather *mWeatherPanel = nullptr;
     WolfPanelRegionAutoEnvironment *mAutoEnvPanel = nullptr;   // <WolfViewer 2026-10-03/>
     WolfPanelLandWaves *mWavesPanel = nullptr;
+    S32 mWolfTabsShown = -1;   // [WOLF GRID GATE 2026-10-17/] WolfGrid::showWolfTabs
     //static S32 sRequestSerial;    // serial # of last EstateOwnerRequest
     static LLUUID sRequestInvoice;
 

@@ -1,0 +1,52 @@
+{
+  "format": "wolf-adventure-rules",
+  "formatVersion": 1,
+  "id": "wild-west",
+  "version": 1,
+  "title": "Wild West",
+  "summary": "Light western rules on top of wolfGame: Health and Stamina from the game, four skills rated 0-5, checks on 2d6.",
+  "status": "complete",
+  "attribution": [],
+  "label": "Wild West",
+  "dice": { "sides": [6], "maxDice": 6, "showRolls": "public" },
+  "stats": {
+    "health":   { "label": "Health", "kind": "resource", "min": 0, "max": 100, "default": 100, "wolfGame": "health", "hud": true, "colour": "#ef4444", "order": 0 },
+    "stamina":  { "label": "Stamina", "kind": "resource", "min": 0, "max": 100, "default": 100, "wolfGame": "stamina", "hud": true, "colour": "#f5a524", "order": 1 },
+    "grit":     { "label": "Grit", "short": "GRT", "kind": "skill", "min": 0, "max": 5, "default": 1, "order": 10 },
+    "draw":     { "label": "Draw", "short": "DRW", "kind": "skill", "min": 0, "max": 5, "default": 1, "order": 11 },
+    "ride":     { "label": "Ride", "short": "RID", "kind": "skill", "min": 0, "max": 5, "default": 1, "order": 12 },
+    "persuade": { "label": "Persuade", "short": "PER", "kind": "skill", "min": 0, "max": 5, "default": 1, "order": 13 },
+    "xp":       { "label": "Experience", "kind": "resource", "min": 0, "max": 1000000, "default": 0, "wolfGame": "xp", "hud": false, "order": 20 },
+    "level":    { "label": "Level", "kind": "derived", "formula": { "add": [1, { "floorDiv": [{ "stat": "xp" }, 500] }] }, "order": 21 }
+  },
+  "checks": {
+    "grit":     { "label": "Grit", "roll": "2d6", "add": { "stat": "grit" }, "vs": "dc", "defaultDc": 8, "critical": 0, "fumble": 0, "kind": "check" },
+    "draw":     { "label": "Quick draw", "roll": "2d6", "add": { "stat": "draw" }, "vs": "opposed", "kind": "check" },
+    "ride":     { "label": "Ride", "roll": "2d6", "add": { "stat": "ride" }, "vs": "dc", "defaultDc": 8, "kind": "check" },
+    "persuade": { "label": "Persuade", "roll": "2d6", "add": { "stat": "persuade" }, "vs": "dc", "defaultDc": 8, "kind": "check" },
+    "shoot":    { "label": "Shoot", "roll": "2d6", "add": { "stat": "draw" }, "vs": "dc", "defaultDc": 8, "kind": "attack" }
+  },
+  "difficulties": {
+    "easy":     { "label": "Easy", "dc": 6 },
+    "normal":   { "label": "Normal", "dc": 8 },
+    "hard":     { "label": "Hard", "dc": 10 },
+    "deadly":   { "label": "Deadly", "dc": 12 }
+  },
+  "conditions": {
+    "winded":   { "label": "Winded", "good": false, "text": "Out of breath: rides and draws are harder.", "effects": [ { "on": "ride", "mode": "bonus", "amount": -1 }, { "on": "draw", "mode": "bonus", "amount": -1 } ], "speed": 0.75, "endsOn": "time" },
+    "drunk":    { "label": "Drunk", "good": false, "text": "Brave and clumsy.", "effects": [ { "on": "grit", "mode": "bonus", "amount": 1 }, { "on": "shoot", "mode": "bonus", "amount": -2 } ], "endsOn": "time" },
+    "steady":   { "label": "Steady hand", "good": true, "text": "Your next shot is surer.", "effects": [ { "on": "shoot", "mode": "bonus", "amount": 2 } ], "endsOn": "time" }
+  },
+  "combat": {
+    "enabled": true,
+    "mode": "realtime",
+    "hpStat": "health",
+    "initiative": "draw",
+    "turnSeconds": 30,
+    "actions": { "action": 1, "move": 10 },
+    "damageTypes": ["gunshot", "blunt", "fall"],
+    "death": "downed"
+  },
+  "progression": { "mode": "xp", "xpStat": "xp", "levelStat": "level", "levels": [], "tables": {} },
+  "creation": { "method": "pointBuy", "stats": ["grit", "draw", "ride", "persuade"], "points": 6, "costs": { "1": 0, "2": 1, "3": 2, "4": 3, "5": 5 } }
+}

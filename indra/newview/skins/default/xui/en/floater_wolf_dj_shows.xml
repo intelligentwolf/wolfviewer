@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLF DJ 2026-10-16] Wolf World > Wolf DJ: My Shows... and the mixer's My Shows button
+     (wolffloaterdjshows.cpp). Paul: "can we have that somewhere in the viewer?" - the DJ's own past
+     shows with how many people listened. The table (wolf_dj_shows_table) is drawn by the code; the
+     note line under it turns into the error, which stays until Retry works. -->
+<floater
+ can_close="true"
+ can_minimize="true"
+ can_resize="true"
+ height="440"
+ layout="topleft"
+ min_height="260"
+ min_width="560"
+ name="wolf_dj_shows"
+ help_topic="wolf_dj_shows"
+ save_rect="true"
+ title="WOLF DJ: MY SHOWS"
+ width="720">
+    <text follows="left|right|top" font="SansSerifBold" height="20" layout="topleft" left="10" name="summary" top="8" width="700" use_ellipses="true" />
+    <wolf_dj_shows_table follows="all" height="334" layout="topleft" left="10" name="shows_table" top="32" width="700" tab_stop="true" />
+    <text follows="left|right|bottom" height="42" layout="topleft" left="10" name="note" top="372" width="590" wrap="true" text_color="LtGray_50" />
+    <button follows="right|bottom" height="26" label="Retry" layout="topleft" left="610" name="retry" top="376" width="100" tool_tip="Load your shows again." />
+</floater>

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLF ADVENTURE P1 2026-10-16] The handout viewer (HUD_MESSAGES_V1.md §3.4; wolfadventurehud.cpp
+     WolfFloaterAdventureHandout): a handout's picture at the largest size that fits, its title and
+     text, and Close (it stays in the Journal). Opened from the Journal's Handouts. Resizable; Escape closes. -->
+<floater
+ can_close="false"
+ can_drag_on_left="false"
+ can_minimize="false"
+ can_resize="true"
+ header_height="34"
+ height="560"
+ layout="topleft"
+ legacy_header_height="34"
+ min_height="300"
+ min_width="360"
+ name="wolf_adventure_handout"
+ save_rect="true"
+ show_title="false"
+ single_instance="true"
+ title="Handout"
+ width="520">
+    <wolf_adventure_handout_view
+     follows="all"
+     height="560"
+     layout="topleft"
+     left="0"
+     mouse_opaque="false"
+     name="view"
+     tab_stop="true"
+     top="0"
+     width="520" />
+</floater>

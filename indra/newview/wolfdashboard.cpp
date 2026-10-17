@@ -803,7 +803,7 @@ namespace
         const bool boat = ty == WolfDrive::TYPE_SPEEDBOAT || ty == WolfDrive::TYPE_SUBMARINE, ship = ty == WolfDrive::TYPE_SPACESHIP;
         std::vector<B> bs =
         {
-            { 30.f, "X", false, WolfDashboard::H_CLOSE, "Close the dashboard. Wolf World > Car Dashboard / Speedboat Helm / Spaceship HUD (or the toolbar icons) bring it back." },
+            { 30.f, "X", false, WolfDashboard::H_CLOSE, "Close the dashboard. Wolf World > Vehicles & Travel > Car Dashboard / Speedboat Helm / Spaceship HUD (or the toolbar icons) bring it back." },
             { 70.f, "MINI", false, WolfDashboard::H_MINI, "Shrink the dashboard to one small bar; FULL on it brings it back" },
             { 70.f, "HELP", false, WolfDashboard::H_HELP, "How the dashboard works, setting up a wheel and keys, and wolfDashboard for vehicle makers" },
             { 120.f, "CONTROLS", false, WolfDashboard::H_CONTROLS, "Driving Controls: a steering wheel, pedals or gamepad, and the keys for the horn, lamps, gears and the boat / spaceship buttons" },
@@ -2377,7 +2377,7 @@ namespace
     {
         { 0, "THE SPEEDBOAT HELM" },
         { 1, "Opens by itself when a boat's script asks for it, or from" },
-        { 2, "Wolf World > Speedboat Helm, or its icon beside the boat icon." },
+        { 2, "Wolf World > Vehicles & Travel > Speedboat Helm, or its icon beside the boat icon." },
         { 1, "Left: the rev counter (green: the engine's full-throttle band)." },
         { 1, "Right: the speed in knots (KNOTS above: km/h, mph)." },
         { 1, "Centre: compass and heading (COG: where you are going)," },
@@ -2415,7 +2415,7 @@ namespace
     {
         { 0, "THE SPACESHIP HUD" },
         { 1, "Opens by itself when a craft's script asks for it, or from" },
-        { 2, "Wolf World > Spaceship HUD, or its icon beside the plane icon." },
+        { 2, "Wolf World > Vehicles & Travel > Spaceship HUD, or its icon beside the plane icon." },
         { 1, "Top: heading. Centre: the pitch ladder; the W is your nose," },
         { 2, "the circle is where you are really going (flight path)." },
         { 1, "Left: speed and throttle; fuel, boost, shield, hull, heat." },
@@ -2458,7 +2458,7 @@ void WolfDashboard::drawHelp(F32 top)
     {
         { 0, "THE SUBMARINE HELM" },
         { 1, "Opens by itself when a submarine's script asks for it, or from" },
-        { 2, "Wolf World > Submarine Helm, or its icon beside the speedboat's." },
+        { 2, "Wolf World > Vehicles & Travel > Submarine Helm, or its icon beside the speedboat's." },
         { 1, "Left: DEPTH below the surface (red past the safe depth), how" },
         { 2, "fast it changes, the ballast tanks and the dive planes." },
         { 1, "Centre: heading and the SONAR - objects (green), avatars" },

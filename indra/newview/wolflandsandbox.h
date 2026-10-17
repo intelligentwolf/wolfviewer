@@ -76,6 +76,7 @@ private:
     bool mGetPending = false;
     bool mSetPending = false;
     bool mUnsupported = false;           ///< the region never answered: no WolfSandboxModule there
+    bool mAwaitingGrid = false;          ///< [WOLF GRID GATE 2026-10-17] request() refused: this region's grid not known yet
     LLFrameTimer mPendingTimer;
 
     LLCheckBoxCtrl* mEnabled = nullptr;

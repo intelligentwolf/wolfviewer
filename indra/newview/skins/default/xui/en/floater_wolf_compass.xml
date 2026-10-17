@@ -16,7 +16,7 @@
  save_rect="true"
  save_visibility="true"
  single_instance="true"
- title="Compass"
+ title="Tessa's Compass"
  width="260">
     <!-- the 16 points of the compass, clockwise from North, comma separated (the first, fifth,
          ninth and thirteenth are lettered large on the card) -->

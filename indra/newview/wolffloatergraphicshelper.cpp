@@ -270,7 +270,7 @@ namespace
         }
         if (gSavedSettings.getS32("WolfViewerPhotoFilter") != 0)
         {
-            out.push_back("A photo effect is on (Wolf World > Photo Effects): it changes the colours of everything. Switch it off below.");
+            out.push_back("A photo effect is on (Wolf World > Tools > Photo Effects): it changes the colours of everything. Switch it off below.");
         }
         const F32 exposure = gSavedSettings.getF32(EXPOSURE);
         if (fabsf(exposure - 1.f) > 0.05f)

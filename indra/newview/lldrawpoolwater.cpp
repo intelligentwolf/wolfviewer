@@ -243,7 +243,10 @@ void LLDrawPoolWater::renderPostDeferred(S32 pass)
         }
         // </WolfViewer>
         // <WolfViewer 2026-10-01/> not gated on Transparent Water: opaque water swells too (llvowater.cpp)
-        if (!gCubeSnapshot && !gPipeline.mHeroProbeManager.isMirrorPass() && !mBasicWater)
+        // [WOLF GRID GATE 2026-10-17] the FFT cascades and the wake are the Wolf sea too (see no_swell below): their
+        // normals, foam and wash were still drawn on every grid, since the shader gates them on fftReady / wakeReady, not
+        // on waveAmplitude. Off Wolf they are neither updated nor bound.
+        if (!gCubeSnapshot && !gPipeline.mHeroProbeManager.isMirrorPass() && !mBasicWater && WolfGrid::isOnWolfTerritories())
         {
             if (fft_on)
             {
@@ -419,7 +422,7 @@ void LLDrawPoolWater::renderPostDeferred(S32 pass)
             mSurfLength = surf_len;
         }
         WolfOceanFFT& fft = WolfOceanFFT::instance();
-        if (fft.isReady())
+        if (fft.isReady() && WolfGrid::isOnWolfTerritories())   // [WOLF GRID GATE 2026-10-17/] see the update above
         {
             shader->bindTexture(LLShaderMgr::WOLF_FFT_DISP0, fft.finalTarget(0), false, LLTexUnit::TFO_TRILINEAR, 0);
             shader->bindTexture(LLShaderMgr::WOLF_FFT_DERIV0, fft.finalTarget(0), false, LLTexUnit::TFO_TRILINEAR, 1);
@@ -688,7 +691,8 @@ void LLDrawPoolWater::pushWaterPlanes(int pass)
                 cur_shader->uniform1f(s_zone_ready, 0.f);
                 cur_shader->uniform1f(s_surf_path_k0, 0.f);   // <WolfViewer 2026-09-21/>
             }
-            const bool wake_here = own_plane && rgn == gAgent.getRegion() && WolfWakeField::instance().isReady();
+            const bool wake_here = own_plane && rgn == gAgent.getRegion() && WolfWakeField::instance().isReady()
+                                && WolfGrid::isOnWolfTerritories();   // [WOLF GRID GATE 2026-10-17/] as no_swell
             cur_shader->uniform1f(s_wake_ready, wake_here ? 1.f : 0.f);
             // </WolfViewer>
             static LLStaticHashedString s_wolf_waterfall("wolfWaterfall");

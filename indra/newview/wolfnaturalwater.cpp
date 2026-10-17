@@ -85,7 +85,16 @@ void WolfNaturalWater::idle()
     // <WolfViewer 2026-09-22> Wolf Territories only (Paul 09-22: "I don't want people from
     // other grids getting a free ride on what we have created"). Off-grid this whole
     // subsystem is inert, which also saves the work it would otherwise do for nothing.
-    if (!WolfGrid::isOnWolfTerritories()) return;
+    // [WOLF GRID GATE 2026-10-17] and what it built goes: it is kept by region HANDLE, which a foreign grid's region can
+    // share, so after a hypergrid jump the last Wolf fields would have stayed on that grid's water.
+    if (!WolfGrid::isOnWolfTerritories())
+    {
+        if (!mRegions.empty())
+        {
+            reset();
+        }
+        return;
+    }
     static LLCachedControl<bool> enabled(gSavedSettings, "WolfTerrainWater", true);
     static LLCachedControl<F32> catchment(gSavedSettings, "WolfTerrainWaterCatchment", 5000.f);
     if (!enabled)

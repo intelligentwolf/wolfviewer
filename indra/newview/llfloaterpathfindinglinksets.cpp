@@ -231,7 +231,7 @@ void LLFloaterPathfindingLinksets::buildObjectsScrollList(const LLPathfindingObj
     bool isFilteringDescription = !descriptionFilter.empty();
     bool isFilteringLinksetUse = (linksetUseFilter != LLPathfindingLinkset::kUnknown);
 
-    const LLVector3& avatarPosition = gAgent.getPositionAgent();
+    const LLVector3 avatarPosition = gAgent.getPositionRegion();   // <WolfViewer> linkset locations are region-local; agent frame may be rebased
 
     if (isFilteringName || isFilteringDescription || isFilteringLinksetUse)
     {

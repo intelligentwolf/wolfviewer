@@ -735,7 +735,11 @@ void WolfFloaterCompass::drawCompass(F32 cx, F32 cy, F32 R) const
     }
 
     // ---- lettering on the card: upright so it reads at any heading ----
-    const LLFontGL* cardinal_font = displayFont(R * 0.115f);
+    // [2026-10-17] Larger N/E/S/W (a resident with low vision asked for them bigger; was R * 0.115).
+    // displayFont() fits the line height, which LLFontGL::getLineHeight (llfontgl.cpp:479-482) makes
+    // ascender + descender: Cinzel-Bold 976 + 372 = 1.348 em, capitals 700 = 0.52 of the line. A 0.20 R
+    // line gives 0.104 R capitals, centred on 0.68 R: 0.628..0.732, inside the 0.615..0.745 band.
+    const LLFontGL* cardinal_font = displayFont(R * 0.20f);
     const LLFontGL* small_font = displayFont(R * 0.07f);
     const LLFontGL* numeral_font = displayFont(R * 0.06f);
     const F32 letter_r = R * 0.68f;

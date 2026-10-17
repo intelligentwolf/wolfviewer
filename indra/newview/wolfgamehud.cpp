@@ -47,6 +47,7 @@
 #include "llviewercontrol.h"
 #include "llvoavatarself.h"
 #include "wolfgrid.h"
+#include "wolfadventurehud.h"   // [WOLF ADVENTURE 2026-10-16/]
 
 static LLDefaultChildRegistry::Register<WolfGameHUD> r_wolf_game_hud("wolf_game_hud");
 
@@ -1227,7 +1228,19 @@ void WolfGameHUD::draw()
 
     drawEffects(r);
     drawDowned(r);
+    // [WOLF ADVENTURE 2026-10-16] HUD_MESSAGES_V1.md §3.6: the stage (bars, fade, chapter title) is
+    // over the world and under the HUD, the talk panel and dialogs - drawn here, before them.
+    {
+        LLRect title_rect;
+        WolfAdventureUI::drawStage(r, title_rect);
+        if (title_rect.notEmpty())
+        {
+            mCombatHits.add((F32)title_rect.mLeft, (F32)title_rect.mBottom, (F32)title_rect.mRight, (F32)title_rect.mTop,
+                            H_ADV_TITLE, 0, "Skip the chapter title (Escape)", false);
+        }
+    }
     drawMarkers(r);
+    WolfAdventureUI::drawGmOverlay(this, r);   // [WOLF ADVENTURE P4 2026-10-16] STUDIO §3 Overlays, only while the GM Console is open
 
     // Clear of the navigation bar (llscriptfloater.cpp LLScriptFloaterManager::getTopPad, the
     // same pad script dialogs use) and of the right-hand toolbar when it has buttons.
@@ -1251,6 +1264,7 @@ void WolfGameHUD::draw()
     // buffs above its action bar); hidden by the player, or while the flight deck or the car
     // dashboard has the bottom, it is not drawn and the game keeps running. §5.5 the target frame
     // top-centre and §5.4 a refused press in the upper third stay where they were.
+    mHudTop = mHudRight = 0.f;
     if (g.hudShowing()) drawBottomHud(r);
     // [FIX 2026-10-09] Paul: a target frame appeared (and would not go) while the game HUD was not up
     // - Game Mode stays on at the region from the last session while the HUD starts hidden. The
@@ -1258,7 +1272,52 @@ void WolfGameHUD::draw()
     if (g.target().mOn && g.hudShowing()) drawTarget(r, top_pad);
     if (!g.combatError().empty()) drawCombatError(r);
     drawNotices(r, top_pad, right_pad);
+    drawAdventure(r, top_pad, right_pad);
     LLUICtrl::draw();
+}
+
+void WolfGameHUD::drawAdventure(const LLRect& r, S32 top_pad, S32 right_pad)
+{
+    // Source: HUD_MESSAGES_V1.md §3.1 - above the game HUD's right half; with the HUD hidden or
+    // Game Mode off, bottom right above the toolbar; when the bottom belongs to the flight deck or
+    // the car dashboard (WolfGame::bottomTaken), top right under the notice stack. Drawn whether
+    // or not Game Mode is on: adventures need no game.
+    LLRect obj;
+    bool drawn = false;
+    if (mHudTop > 0.f)
+    {
+        drawn = WolfAdventureUI::drawObjective(mHudRight, mHudTop + 6.f, false, obj);
+    }
+    else if (WolfGame::bottomTaken())
+    {
+        drawn = WolfAdventureUI::drawObjective((F32)(r.mRight - right_pad - MARGIN), mNoticesBottom - 2.f, true, obj);
+    }
+    else
+    {
+        drawn = WolfAdventureUI::drawObjective((F32)(r.mRight - right_pad - MARGIN), bottomPad() + 8.f, false, obj);
+    }
+    if (drawn)
+    {
+        mCombatHits.add((F32)obj.mLeft, (F32)obj.mBottom, (F32)obj.mRight, (F32)obj.mTop, H_ADV_OBJECTIVE, 0, WolfAdventureUI::objectiveTip());
+    }
+    // [WOLF ADVENTURE P2 2026-10-16] where the talk panel stands (HUD_MESSAGES_V1.md §3.2 Where):
+    // on the same line as the objective (above the HUD, or above the toolbar), left of it; or, when
+    // the bottom belongs to the flight deck or the car, top right under the objective line.
+    S32 sx = 0, sy = 0;
+    if (WolfGame::bottomTaken())
+    {
+        const S32 x = r.mRight - right_pad - MARGIN;
+        const S32 y = drawn ? obj.mBottom - 8 : (S32)(mNoticesBottom - 2.f);
+        localPointToScreen(x, y, &sx, &sy);
+        WolfAdventureUI::setTalkAnchor(true, sx, sy);
+    }
+    else
+    {
+        const S32 x = drawn ? obj.mLeft - 8 : r.mRight - right_pad - MARGIN;
+        const S32 y = (S32)(mHudTop > 0.f ? mHudTop + 6.f : bottomPad() + 8.f);
+        localPointToScreen(x, y, &sx, &sy);
+        WolfAdventureUI::setTalkAnchor(false, sx, sy);
+    }
 }
 
 void WolfGameHUD::drawEffects(const LLRect& r)
@@ -1379,6 +1438,7 @@ void WolfGameHUD::drawNotices(const LLRect& r, S32 top_pad, S32 right_pad)
 {
     using namespace WolfGameDraw;
     WolfGame& g = WolfGame::instance();
+    mNoticesBottom = (F32)(r.mTop - top_pad - MARGIN);   // [WOLF ADVENTURE 2026-10-16/] under the stack
     if (g.notices().empty()) return;
     const LLFontGL* font = LLFontGL::getFontSansSerifSmall();
     const LLFontGL* bold = LLFontGL::getFontSansSerifSmallBold();
@@ -1449,6 +1509,7 @@ void WolfGameHUD::drawNotices(const LLRect& r, S32 top_pad, S32 right_pad)
         mNoticeHits.push_back(hit);
         top = bottom - 8.f;
     }
+    mNoticesBottom = top;   // [WOLF ADVENTURE 2026-10-16/]
 }
 
 bool WolfGameHUD::handleMouseDown(S32 x, S32 y, MASK mask)
@@ -1516,6 +1577,14 @@ bool WolfGameHUD::handleMouseDown(S32 x, S32 y, MASK mask)
             g.dismissGuide();
             WolfFloaterRoleplay::showPage(WolfGameConsole::PAGE_HELP, false);
             break;
+        // [WOLF ADVENTURE 2026-10-16] §3.1 "A click opens the Roleplay console on Journal"; §2.6 a
+        // click skips a chapter title.
+        case H_ADV_OBJECTIVE:
+            WolfFloaterRoleplay::showPage(WolfGameConsole::PAGE_JOURNAL, false);
+            break;
+        case H_ADV_TITLE:
+            WolfAdventure::instance().skipTitle();
+            break;
         default: break;   // buffs, empty slots, the target frame, the panel, the guide's card: tooltips only
         }
         if (!sent)
@@ -1571,7 +1640,7 @@ bool WolfGameHUD::handleHover(S32 x, S32 y, MASK mask)
         {
         case H_ACTION: case H_CAST_CANCEL: case H_TARGET_CLEAR: case H_WEAPON: case H_PORTRAIT: case H_ORB:
         case H_BAG: case H_WALLET: case H_PAGE: case H_PANEL_BG: case H_GUIDE_OK: case H_GUIDE_HELP: case H_GAMEMODE_SW:
-        case H_INVENTORY:
+        case H_INVENTORY: case H_ADV_OBJECTIVE: case H_ADV_TITLE:
             clickable = true;
             break;
         default: break;
@@ -2013,6 +2082,8 @@ void WolfGameHUD::drawBottomHud(const LLRect& r)
     struct Tab { const char* label; S32 page; const char* tip; };
     static const Tab TABS[] = {
         { "Character", WolfGameConsole::PAGE_STATS,  "Your character: every stat, your level and the game's panel" },
+        // [WOLF ADVENTURE 2026-10-16] HUD_MESSAGES_V1.md §3.1 - after Character
+        { "Journal",   WolfGameConsole::PAGE_JOURNAL, "Your adventures: what to do next, clues, handouts, and the adventures here" },
         { "Combat",    WolfGameConsole::PAGE_COMBAT, "Your weapons, armour and abilities" },
         { "Bag",       WolfGameConsole::PAGE_BAG,    "Everything you carry, and your money" },
         { "Pets",      WolfGameConsole::PAGE_PETS,   "Your pets" },
@@ -2058,6 +2129,9 @@ void WolfGameHUD::drawBottomHud(const LLRect& r)
         mCombatHits.add(l, top, tx, top + th, id, t.page, tip);
         tx = l - floorf(0.08f * S);
     }
+    // [WOLF ADVENTURE 2026-10-16] the objective line stands on the tabs' top, at the HUD's right margin
+    mHudTop = top + th;
+    mHudRight = W - m;
     if (wide)
     {
         // Name, level and XP (wide only: a narrow window has no room beside the buttons; the

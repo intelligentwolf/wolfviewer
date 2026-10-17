@@ -8,15 +8,17 @@
      alien skies; Zones are local areas. -->
 <floater
  legacy_header_height="18"
- can_resize="false"
- height="744"
+ can_resize="true"
+ height="748"
+ min_height="300"
+ min_width="536"
  layout="topleft"
  name="wolf_environment"
  help_topic="wolf_environment"
  save_rect="true"
  single_instance="true"
  title="Wolf Environment (Experimental)"
- width="520">
+ width="536">
   <floater.string name="str_loading">Reading this region's Wolf Environment...</floater.string>
   <floater.string name="str_read_failed">Could not read the Wolf Environment:</floater.string>
   <floater.string name="str_unsaved">Changed. Preview it, or Save for everyone.</floater.string>
@@ -42,13 +44,24 @@
   <floater.string name="str_pick">Pick a place from the list.</floater.string>
   <floater.string name="str_remove_ask">Remove the Wolf Environment from [WHAT]? Its settings are deleted and the sky goes back to what it was before Wolf. (To keep the settings for later, choose Off and Save instead.)</floater.string>
 
-  <!-- the scope and who may change it -->
-  <text follows="left|top" height="16" layout="topleft" left="12" top="26" width="60" name="scope_lbl">Change</text>
-  <combo_box follows="left|top" height="22" layout="topleft" left="72" top="23" width="436" name="scope"
-             tool_tip="The whole region's sky, or only the parcel you are standing on." />
-  <text follows="left|top" height="30" layout="topleft" left="12" top="50" width="496" name="who" word_wrap="true" />
+  <!-- [WOLF ENV 2026-10-16] A user on a smaller screen could not see Save / Preview: the window was a fixed
+       744 px and ran off the bottom (it only fitted full screen). Now everything above the status line
+       scrolls, the status and buttons are pinned to the bottom, and the window is resizable, so
+       LLFloaterView::adjustToFitScreen (llfloater.cpp) shrinks it to fit the screen - it only resizes
+       resizable floaters. The window is 16 px wider than the content for the 15 px scroll bar
+       (settings.xml UIScrollbarSize). -->
+  <scroll_container follows="all" height="652" layout="topleft" left="0" top="20" width="536"
+                    name="body_scroll" opaque="false" reserve_scroll_corner="false">
+  <panel follows="left|top" height="652" layout="topleft" left="0" top="0" width="520"
+         name="body_panel" background_visible="false" border="false">
 
-  <tab_container follows="left|top" height="520" layout="topleft" left="4" top="82" width="512"
+  <!-- the scope and who may change it -->
+  <text follows="left|top" height="16" layout="topleft" left="12" top="6" width="60" name="scope_lbl">Change</text>
+  <combo_box follows="left|top" height="22" layout="topleft" left="72" top="3" width="436" name="scope"
+             tool_tip="The whole region's sky, or only the parcel you are standing on." />
+  <text follows="left|top" height="30" layout="topleft" left="12" top="30" width="496" name="who" word_wrap="true" />
+
+  <tab_container follows="left|top" height="520" layout="topleft" left="4" top="62" width="512"
                  name="tabs" tab_position="top" halign="center">
 
     <!-- ═══════════════════ BASICS ═══════════════════ -->
@@ -261,25 +274,29 @@
 
   <!-- [WOLF ENV 2026-10-12] the test slider: the sky later today, on this screen only (as Jimmy's tab:
        panel_region_auto_environment.xml ae_preview_on / ae_preview / ae_preview_time) -->
-  <check_box follows="left|top" height="18" layout="topleft" left="12" top="608" width="200" name="time_preview_on"
+  <check_box follows="left|top" height="18" layout="topleft" left="12" top="588" width="200" name="time_preview_on"
              label="Preview time (only you see it)"
              tool_tip="Run this sky ahead to any time in the next day, on your screen only. Works with Preview too (your draft at that time). Nothing is saved; it ends when this window closes." />
-  <slider follows="left|top" height="18" layout="topleft" left="216" top="608" width="292" name="time_preview"
+  <slider follows="left|top" height="18" layout="topleft" left="216" top="588" width="292" name="time_preview"
           min_val="0" max_val="23.75" increment="0.25" initial_value="0" decimal_digits="2" show_text="false" can_edit_text="false" />
-  <text follows="left|top" height="14" layout="topleft" left="32" top="628" width="476" name="time_preview_text" text_color="EmphasisColor" />
+  <text follows="left|top" height="14" layout="topleft" left="32" top="608" width="476" name="time_preview_text" text_color="EmphasisColor" />
 
   <!-- what happened, and the actions -->
   <!-- [WolfViewer round 13] Paul: "Use Wolf Environment on all regions" - viewer-only, default off, persisted
        (settings.xml WolfEnvironmentAllRegions; wolfenvironmentstate.cpp active()). -->
-  <check_box follows="left|top" height="18" layout="topleft" left="12" top="650" width="300" name="all_regions"
+  <check_box follows="left|top" height="18" layout="topleft" left="12" top="630" width="300" name="all_regions"
    control_name="WolfEnvironmentAllRegions" label="Use Wolf Environment on all regions"
    tool_tip="Only in your viewer: regions without a Wolf Environment of their own get the native sky too, made from their ordinary EEP sky (its cloud cover, haze and cloud size). Needs the native sky test mode (WolfEnvironmentNativeSky) on." />
-  <text follows="left|top" height="14" layout="topleft" left="316" top="652" width="192" name="all_regions_note" text_color="LabelDisabledColor">Only you see this.</text>
-  <text follows="left|top" height="38" layout="topleft" left="12" top="670" width="496" name="status" word_wrap="true" />
-  <button follows="left|top" height="24" layout="topleft" left="12" top="712" width="120" name="remove" label="Remove..."
+  <text follows="left|top" height="14" layout="topleft" left="316" top="632" width="192" name="all_regions_note" text_color="LabelDisabledColor">Only you see this.</text>
+  </panel>
+  </scroll_container>
+
+  <!-- pinned to the bottom: always on screen however small the window -->
+  <text follows="left|bottom" height="38" layout="topleft" left="12" top="674" width="496" name="status" word_wrap="true" />
+  <button follows="left|bottom" height="24" layout="topleft" left="12" top="716" width="120" name="remove" label="Remove..."
           tool_tip="Delete the Wolf Environment here: the sky goes back to what it was before Wolf." />
-  <button follows="left|top" height="24" layout="topleft" left="196" top="712" width="110" name="preview" label="Preview" is_toggle="true"
+  <button follows="left|bottom" height="24" layout="topleft" left="196" top="716" width="110" name="preview" label="Preview" is_toggle="true"
           tool_tip="See these settings on your own screen only, before saving." />
-  <button follows="left|top" height="24" layout="topleft" left="312" top="712" width="70" name="revert" label="Revert" />
-  <button follows="left|top" height="24" layout="topleft" left="388" top="712" width="120" name="save" label="Save for everyone" />
+  <button follows="left|bottom" height="24" layout="topleft" left="312" top="716" width="70" name="revert" label="Revert" />
+  <button follows="left|bottom" height="24" layout="topleft" left="388" top="716" width="120" name="save" label="Save for everyone" />
 </floater>

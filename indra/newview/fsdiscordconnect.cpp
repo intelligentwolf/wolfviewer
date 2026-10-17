@@ -188,7 +188,7 @@ void FSDiscordConnect::updateRichPresence() const
     {
         region_name = gAgent.getRegion()->getName();
         region_name += " ";
-        LLVector3 pos = gAgent.getPositionAgent();
+        LLVector3 pos = gAgent.getPositionRegion();   // <WolfViewer> shown as region coordinates; agent frame may be rebased
 
         region_name += llformat("(%.0f, %.0f, %.0f)", pos.mV[VX], pos.mV[VY], pos.mV[VZ]);
     }

@@ -102,6 +102,17 @@
                           mouse_opaque="false"
                           tab_stop="false"
                           name="wolf_car_dashboard"/>
+      <!-- [BORDER GUARD 2026-10-16] wolfborder.cpp: "Ahead: <region> ..." - what the region ahead will do to you and
+           your vehicle, over the world under the floaters. Draws nothing until there is something to say; only its
+           teleport button takes clicks. -->
+      <wolf_border_banner follows="all"
+                          left="0"
+                          top="0"
+                          height="500"
+                          width="1024"
+                          mouse_opaque="false"
+                          tab_stop="false"
+                          name="wolf_border_banner"/>
       <!-- [WOLF GAME 2026-10-09] wolfgamehud.cpp: Wolf Roleplay on the world view - the stat panel,
            notices, markers, the downed overlay and the screen effects. Under the floaters and the
            toolbars, so the UI stays usable over every overlay. Clicks pass through to the world

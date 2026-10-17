@@ -2702,7 +2702,7 @@ LLMeshUploadThread::LLMeshUploadThread(LLMeshUploadThread::instance_list_t& data
     mPendingUploads = 0;
     mFinished = false;
     mTextureDataMissing = false;   // <FS:Wolf/>
-    mOrigin = gAgent.getPositionAgent();
+    mOrigin = gAgent.getPositionRegion();   // <WolfViewer> instance "position" is read as region-local (BunchOfCaps rootPos); agent frame may be rebased
     mHost = gAgent.getRegionHost();
 
     mWholeModelFeeCapability = gAgent.getRegionCapability("NewFileAgentInventory");

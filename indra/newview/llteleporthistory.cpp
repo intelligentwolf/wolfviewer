@@ -242,7 +242,7 @@ void LLTeleportHistory::updateCurrentLocation(const LLVector3d& new_pos)
         if (!gRlvHandler.hasBehaviour(RLV_BHVR_SHOWLOC))
         {
 // [/RLVa:KB]
-            LLVector3 new_pos_local = gAgent.getPosAgentFromGlobal(new_pos);
+            LLVector3 new_pos_local = gAgent.getRegion()->getPosRegionFromGlobal(new_pos);   // <WolfViewer> buildLocationString takes a region position; agent frame may be rebased
             mItems[mCurrentItem].mFullTitle = getCurrentLocationTitle(true, new_pos_local);
             mItems[mCurrentItem].mTitle = getCurrentLocationTitle(false, new_pos_local);
             mItems[mCurrentItem].mGlobalPos = new_pos;
@@ -263,7 +263,7 @@ void LLTeleportHistory::updateCurrentLocation(const LLVector3d& new_pos)
             auto regionp = gAgent.getRegion();
             if (regionp)
             {
-                LLVector3 new_pos_local = gAgent.getPosAgentFromGlobal(new_pos);
+                LLVector3 new_pos_local = regionp->getPosRegionFromGlobal(new_pos);   // <WolfViewer> the SLURL takes a region position; agent frame may be rebased
                 LLSLURL slurl = LLSLURL(LFSimFeatureHandler::instance().hyperGridURL(), regionp->getName(), new_pos_local);
                 mItems[mCurrentItem].mSLURL = slurl;
             }

@@ -139,6 +139,9 @@ namespace WolfGameDraw
      * in skins/default/textures/wolfgame/CREDITS.txt), loaded on first use; null until it has.
      */
     LLViewerTexture* photo(const std::string& name);
+    /** [WOLF ADVENTURE 2026-10-16] A texture by UUID, fetched once and kept (bounded; released with
+     *  releaseTextures) - for pictures that are not square icons (a card's image, a handout). */
+    LLViewerTexture* iconTexture(const std::string& id);
     /** Shutdown: let go of every texture the game UI holds, before the texture list goes. */
     void releaseTextures();
     /** The wallet's coin: the game's currency icon when it has one, else the drawn coin. */
@@ -255,8 +258,15 @@ private:
         H_PANEL_BG,       // PANEL: the HUD's background on / off
         H_GUIDE_OK, H_GUIDE_HELP, H_GUIDE_CARD,
         H_GAMEMODE_SW,    // [2026-10-09] the Game Mode on / off switch on the top edge
-        H_INVENTORY       // [HUD INVENTORY 2026-10-12] the toolbar's Inventory (WolfHud::toggleInventory)
+        H_INVENTORY,      // [HUD INVENTORY 2026-10-12] the toolbar's Inventory (WolfHud::toggleInventory)
+        H_ADV_OBJECTIVE,  // [WOLF ADVENTURE 2026-10-16] the objective line: opens the Journal
+        H_ADV_TITLE       // [WOLF ADVENTURE 2026-10-16] a chapter title: a click skips it
     };
+    // [WOLF ADVENTURE 2026-10-16] Where the objective line goes (HUD_MESSAGES_V1.md §3.1): above the
+    // HUD's right half (its top edge and right margin, from drawBottomHud), or under the notices.
+    void drawAdventure(const LLRect& r, S32 top_pad, S32 right_pad);
+    F32 mHudTop = 0.f, mHudRight = 0.f;   // 0 = the HUD is not drawn this frame
+    F32 mNoticesBottom = 0.f;
     WolfGameHits mCombatHits;
     struct NoticeHit { LLRect mRect, mClose; U32 mSerial; };
     std::vector<NoticeHit> mNoticeHits;

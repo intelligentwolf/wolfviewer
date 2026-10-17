@@ -203,6 +203,7 @@ private:
     bool               mFetchPending = false;
     bool               mFetchPendingForce = false;
     bool               mAwaitingParcel = true;
+    bool               mSharedEnvPending = false;   // [WOLF GRID GATE 2026-10-17] wolf_use_shared_environment waits for this region's own word (idle)
     bool               mSavingRegion = false;
     bool               mSavingParcel = false;
     std::string        mLastError;

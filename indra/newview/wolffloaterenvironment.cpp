@@ -322,7 +322,7 @@ bool WolfFloaterEnvironment::postBuild()
             if (!used) break;
         }
         // A new zone: a 20 m circle where the agent stands.
-        const LLVector3 at = gAgent.getPositionAgent();
+        const LLVector3 at = gAgent.getPositionRegion();   // <WolfViewer> zone x/y are region coordinates; agent frame may be rebased
         LLSD shape;
         shape["type"] = "circle";
         shape["x"] = LLSD::Real(llmax(0.f, at.mV[VX]));
@@ -352,7 +352,7 @@ bool WolfFloaterEnvironment::postBuild()
     });
     childSetAction("zone_here", [this](LLUICtrl*, const LLSD&)
     {
-        const LLVector3 at = gAgent.getPositionAgent();
+        const LLVector3 at = gAgent.getPositionRegion();   // <WolfViewer> zone x/y are region coordinates; agent frame may be rebased
         mWriting = true;
         child<LLSpinCtrl>(this, "zone_x")->setValue(llmax(0.f, at.mV[VX]));
         child<LLSpinCtrl>(this, "zone_y")->setValue(llmax(0.f, at.mV[VY]));
@@ -377,6 +377,7 @@ void WolfFloaterEnvironment::onOpen(const LLSD& key)
     // [WOLF GRID GATE] Wolf only: anywhere else the window does not open (the menu item is gone too).
     if (!WolfGrid::isOnWolfTerritories())
     {
+        WolfGrid::noteWolfOnly("Wolf Environment");   // [WOLF GRID GATE 2026-10-17/]
         closeFloater();
         return;
     }
@@ -447,7 +448,9 @@ void WolfFloaterEnvironment::draw()
     const std::string id = regionId();
     LLParcel* parcel = LLViewerParcelMgr::getInstance()->getAgentParcel();
     const S32 local = parcel ? parcel->getLocalID() : -1;
-    if (!mBusy && !id.empty())
+    // [WOLF GRID GATE 2026-10-17] fetch() waits for this region's own word; until then the reset below must not run (it
+    // would run every frame and wipe what is being edited)
+    if (!mBusy && !id.empty() && WolfGrid::isOnWolfTerritoriesConfirmed())
     {
         if (id != mFetchedFor)
         {
@@ -487,12 +490,14 @@ void WolfFloaterEnvironment::draw()
 
 void WolfFloaterEnvironment::fetch()
 {
+    // [WOLF GRID GATE 2026-10-17] carries our session: only once this region has said it is Wolf (draw() tries again)
+    if (!WolfGrid::isOnWolfTerritoriesConfirmed()) return;
     const std::string id = regionId();
     if (id.empty()) return;
     mFetchedFor = id;
     LLParcel* parcel = LLViewerParcelMgr::getInstance()->getAgentParcel();
     mParcelLocalId = parcel ? parcel->getLocalID() : -1;
-    const LLVector3 at = gAgent.getPositionAgent();
+    const LLVector3 at = gAgent.getPositionRegion();   // <WolfViewer> zone x/y are region coordinates; agent frame may be rebased
     mAtX = llmax(0.f, at.mV[VX]);
     mAtY = llmax(0.f, at.mV[VY]);
     if (!mHave) setStatus(getString("str_loading"), false);

@@ -1,0 +1,1056 @@
+{
+  "format": "wolf-adventure-rules",
+  "formatVersion": 1,
+  "id": "5e-srd-5.2",
+  "version": 1,
+  "title": "5E compatible (SRD 5.2.1)",
+  "summary": "Fifth-edition compatible rules from the System Reference Document 5.2.1. SKELETON: the format is final; the SRD tables and data are transcribed in P5 (RULES_PRESETS_V1.md section 6).",
+  "status": "skeleton",
+  "attribution": [
+    {
+      "work": "System Reference Document 5.2.1",
+      "licence": "CC-BY-4.0",
+      "url": "https://www.dndbeyond.com/srd",
+      "text": "This work includes material from the System Reference Document 5.2.1 (“SRD 5.2.1”) by Wizards of the Coast LLC, available at https://www.dndbeyond.com/srd. The SRD 5.2.1 is licensed under the Creative Commons Attribution 4.0 International License, available at https://creativecommons.org/licenses/by/4.0/legalcode."
+    }
+  ],
+  "label": "5E compatible",
+  "dice": {
+    "sides": [
+      4,
+      6,
+      8,
+      10,
+      12,
+      20,
+      100
+    ],
+    "maxDice": 20,
+    "showRolls": "public"
+  },
+  "stats": {
+    "strength": {
+      "label": "Strength",
+      "short": "STR",
+      "kind": "ability",
+      "min": 1,
+      "max": 30,
+      "default": 10,
+      "order": 0
+    },
+    "dexterity": {
+      "label": "Dexterity",
+      "short": "DEX",
+      "kind": "ability",
+      "min": 1,
+      "max": 30,
+      "default": 10,
+      "order": 1
+    },
+    "constitution": {
+      "label": "Constitution",
+      "short": "CON",
+      "kind": "ability",
+      "min": 1,
+      "max": 30,
+      "default": 10,
+      "order": 2
+    },
+    "intelligence": {
+      "label": "Intelligence",
+      "short": "INT",
+      "kind": "ability",
+      "min": 1,
+      "max": 30,
+      "default": 10,
+      "order": 3
+    },
+    "wisdom": {
+      "label": "Wisdom",
+      "short": "WIS",
+      "kind": "ability",
+      "min": 1,
+      "max": 30,
+      "default": 10,
+      "order": 4
+    },
+    "charisma": {
+      "label": "Charisma",
+      "short": "CHA",
+      "kind": "ability",
+      "min": 1,
+      "max": 30,
+      "default": 10,
+      "order": 5
+    },
+    "hp": {
+      "label": "Hit Points",
+      "short": "HP",
+      "kind": "resource",
+      "min": 0,
+      "max": 1000000,
+      "default": 1,
+      "wolfGame": "health",
+      "hud": true,
+      "colour": "#ef4444",
+      "order": 10
+    },
+    "ac": {
+      "label": "Armor Class",
+      "short": "AC",
+      "kind": "derived",
+      "formula": {
+        "add": [
+          10,
+          {
+            "mod5e": "dexterity"
+          }
+        ]
+      },
+      "order": 11
+    },
+    "level": {
+      "label": "Level",
+      "kind": "resource",
+      "min": 1,
+      "max": 20,
+      "default": 1,
+      "order": 12
+    },
+    "xp": {
+      "label": "Experience Points",
+      "short": "XP",
+      "kind": "resource",
+      "min": 0,
+      "max": 1000000,
+      "default": 0,
+      "wolfGame": "xp",
+      "order": 13
+    }
+  },
+  "checks": {
+    "strength": {
+      "label": "Strength check",
+      "roll": "1d20",
+      "add": {
+        "mod5e": "strength"
+      },
+      "vs": "dc",
+      "critical": 0,
+      "fumble": 0,
+      "advantage": true,
+      "kind": "check"
+    },
+    "strength_save": {
+      "label": "Strength saving throw",
+      "roll": "1d20",
+      "add": {
+        "add": [
+          {
+            "mod5e": "strength"
+          },
+          {
+            "ifProficient": "strength_save",
+            "then": {
+              "table": "proficiency",
+              "by": {
+                "stat": "level"
+              }
+            }
+          }
+        ]
+      },
+      "vs": "dc",
+      "advantage": true,
+      "kind": "save"
+    },
+    "dexterity": {
+      "label": "Dexterity check",
+      "roll": "1d20",
+      "add": {
+        "mod5e": "dexterity"
+      },
+      "vs": "dc",
+      "critical": 0,
+      "fumble": 0,
+      "advantage": true,
+      "kind": "check"
+    },
+    "dexterity_save": {
+      "label": "Dexterity saving throw",
+      "roll": "1d20",
+      "add": {
+        "add": [
+          {
+            "mod5e": "dexterity"
+          },
+          {
+            "ifProficient": "dexterity_save",
+            "then": {
+              "table": "proficiency",
+              "by": {
+                "stat": "level"
+              }
+            }
+          }
+        ]
+      },
+      "vs": "dc",
+      "advantage": true,
+      "kind": "save"
+    },
+    "constitution": {
+      "label": "Constitution check",
+      "roll": "1d20",
+      "add": {
+        "mod5e": "constitution"
+      },
+      "vs": "dc",
+      "critical": 0,
+      "fumble": 0,
+      "advantage": true,
+      "kind": "check"
+    },
+    "constitution_save": {
+      "label": "Constitution saving throw",
+      "roll": "1d20",
+      "add": {
+        "add": [
+          {
+            "mod5e": "constitution"
+          },
+          {
+            "ifProficient": "constitution_save",
+            "then": {
+              "table": "proficiency",
+              "by": {
+                "stat": "level"
+              }
+            }
+          }
+        ]
+      },
+      "vs": "dc",
+      "advantage": true,
+      "kind": "save"
+    },
+    "intelligence": {
+      "label": "Intelligence check",
+      "roll": "1d20",
+      "add": {
+        "mod5e": "intelligence"
+      },
+      "vs": "dc",
+      "critical": 0,
+      "fumble": 0,
+      "advantage": true,
+      "kind": "check"
+    },
+    "intelligence_save": {
+      "label": "Intelligence saving throw",
+      "roll": "1d20",
+      "add": {
+        "add": [
+          {
+            "mod5e": "intelligence"
+          },
+          {
+            "ifProficient": "intelligence_save",
+            "then": {
+              "table": "proficiency",
+              "by": {
+                "stat": "level"
+              }
+            }
+          }
+        ]
+      },
+      "vs": "dc",
+      "advantage": true,
+      "kind": "save"
+    },
+    "wisdom": {
+      "label": "Wisdom check",
+      "roll": "1d20",
+      "add": {
+        "mod5e": "wisdom"
+      },
+      "vs": "dc",
+      "critical": 0,
+      "fumble": 0,
+      "advantage": true,
+      "kind": "check"
+    },
+    "wisdom_save": {
+      "label": "Wisdom saving throw",
+      "roll": "1d20",
+      "add": {
+        "add": [
+          {
+            "mod5e": "wisdom"
+          },
+          {
+            "ifProficient": "wisdom_save",
+            "then": {
+              "table": "proficiency",
+              "by": {
+                "stat": "level"
+              }
+            }
+          }
+        ]
+      },
+      "vs": "dc",
+      "advantage": true,
+      "kind": "save"
+    },
+    "charisma": {
+      "label": "Charisma check",
+      "roll": "1d20",
+      "add": {
+        "mod5e": "charisma"
+      },
+      "vs": "dc",
+      "critical": 0,
+      "fumble": 0,
+      "advantage": true,
+      "kind": "check"
+    },
+    "charisma_save": {
+      "label": "Charisma saving throw",
+      "roll": "1d20",
+      "add": {
+        "add": [
+          {
+            "mod5e": "charisma"
+          },
+          {
+            "ifProficient": "charisma_save",
+            "then": {
+              "table": "proficiency",
+              "by": {
+                "stat": "level"
+              }
+            }
+          }
+        ]
+      },
+      "vs": "dc",
+      "advantage": true,
+      "kind": "save"
+    },
+    "initiative": {
+      "label": "Initiative",
+      "roll": "1d20",
+      "add": {
+        "mod5e": "dexterity"
+      },
+      "vs": "auto",
+      "advantage": true,
+      "kind": "initiative"
+    },
+    "attack": {
+      "label": "Attack roll",
+      "roll": "1d20",
+      "add": 0,
+      "vs": "dc",
+      "critical": 20,
+      "fumble": 1,
+      "advantage": true,
+      "kind": "attack"
+    }
+  },
+  "difficulties": {},
+  "conditions": {},
+  "combat": {
+    "enabled": true,
+    "mode": "turns",
+    "hpStat": "hp",
+    "acStat": "ac",
+    "initiative": "initiative",
+    "turnSeconds": 60,
+    "actions": {
+      "action": 1,
+      "bonus": 1,
+      "reaction": 1
+    },
+    "damageTypes": [],
+    "death": "deathSaves"
+  },
+  "progression": {
+    "mode": "xp",
+    "xpStat": "xp",
+    "levelStat": "level",
+    "levels": [],
+    "tables": {
+      "proficiency": []
+    }
+  },
+  "creation": {
+    "method": "standardArray",
+    "stats": [
+      "strength",
+      "dexterity",
+      "constitution",
+      "intelligence",
+      "wisdom",
+      "charisma"
+    ],
+    "array": [],
+    "choose": [
+      "classes",
+      "species",
+      "backgrounds"
+    ]
+  },
+  "data": {
+    "classes": {},
+    "species": {},
+    "backgrounds": {},
+    "feats": {},
+    "spells": {},
+    "monsters": {
+      "bandit": {
+        "name": "Bandit",
+        "srd": {
+          "doc": "SRD 5.2.1",
+          "page": 261
+        },
+        "size": "Medium or Small",
+        "type": "Humanoid",
+        "ac": 12,
+        "hp": {
+          "average": 11,
+          "dice": "2d8+2"
+        },
+        "initiative": 1,
+        "speed": "30 ft.",
+        "abilities": {
+          "str": 11,
+          "dex": 12,
+          "con": 12,
+          "int": 10,
+          "wis": 10,
+          "cha": 10
+        },
+        "cr": "1/8",
+        "xp": 25,
+        "attacks": 1,
+        "action": {
+          "name": "Scimitar",
+          "kind": "melee",
+          "bonus": 3,
+          "damage": "1d6+1",
+          "average": 4,
+          "damageType": "Slashing"
+        }
+      },
+      "bandit-captain": {
+        "name": "Bandit Captain",
+        "srd": {
+          "doc": "SRD 5.2.1",
+          "page": 261
+        },
+        "size": "Medium or Small",
+        "type": "Humanoid",
+        "ac": 15,
+        "hp": {
+          "average": 52,
+          "dice": "8d8+16"
+        },
+        "initiative": 3,
+        "speed": "30 ft.",
+        "abilities": {
+          "str": 15,
+          "dex": 16,
+          "con": 14,
+          "int": 14,
+          "wis": 11,
+          "cha": 14
+        },
+        "cr": "2",
+        "xp": 450,
+        "attacks": 2,
+        "action": {
+          "name": "Scimitar",
+          "kind": "melee",
+          "bonus": 5,
+          "damage": "1d6+3",
+          "average": 6,
+          "damageType": "Slashing"
+        }
+      },
+      "cultist": {
+        "name": "Cultist",
+        "srd": {
+          "doc": "SRD 5.2.1",
+          "page": 278
+        },
+        "size": "Medium or Small",
+        "type": "Humanoid",
+        "ac": 12,
+        "hp": {
+          "average": 9,
+          "dice": "2d8"
+        },
+        "initiative": 1,
+        "speed": "30 ft.",
+        "abilities": {
+          "str": 11,
+          "dex": 12,
+          "con": 10,
+          "int": 10,
+          "wis": 11,
+          "cha": 10
+        },
+        "cr": "1/8",
+        "xp": 25,
+        "attacks": 1,
+        "action": {
+          "name": "Ritual Sickle",
+          "kind": "melee",
+          "bonus": 3,
+          "damage": "1d4+1",
+          "average": 3,
+          "damageType": "Slashing",
+          "extra": {
+            "flat": 1,
+            "damageType": "Necrotic"
+          }
+        }
+      },
+      "goblin-minion": {
+        "name": "Goblin Minion",
+        "srd": {
+          "doc": "SRD 5.2.1",
+          "page": 290
+        },
+        "size": "Small",
+        "type": "Fey (Goblinoid)",
+        "ac": 12,
+        "hp": {
+          "average": 7,
+          "dice": "2d6"
+        },
+        "initiative": 2,
+        "speed": "30 ft.",
+        "abilities": {
+          "str": 8,
+          "dex": 15,
+          "con": 10,
+          "int": 10,
+          "wis": 8,
+          "cha": 8
+        },
+        "cr": "1/8",
+        "xp": 25,
+        "attacks": 1,
+        "action": {
+          "name": "Dagger",
+          "kind": "melee or ranged",
+          "bonus": 4,
+          "damage": "1d4+2",
+          "average": 4,
+          "damageType": "Piercing"
+        }
+      },
+      "goblin-warrior": {
+        "name": "Goblin Warrior",
+        "srd": {
+          "doc": "SRD 5.2.1",
+          "page": 290
+        },
+        "size": "Small",
+        "type": "Fey (Goblinoid)",
+        "ac": 15,
+        "hp": {
+          "average": 10,
+          "dice": "3d6"
+        },
+        "initiative": 2,
+        "speed": "30 ft.",
+        "abilities": {
+          "str": 8,
+          "dex": 15,
+          "con": 10,
+          "int": 10,
+          "wis": 8,
+          "cha": 8
+        },
+        "cr": "1/4",
+        "xp": 50,
+        "attacks": 1,
+        "action": {
+          "name": "Scimitar",
+          "kind": "melee",
+          "bonus": 4,
+          "damage": "1d6+2",
+          "average": 5,
+          "damageType": "Slashing"
+        }
+      },
+      "goblin-boss": {
+        "name": "Goblin Boss",
+        "srd": {
+          "doc": "SRD 5.2.1",
+          "page": 290
+        },
+        "size": "Small",
+        "type": "Fey (Goblinoid)",
+        "ac": 17,
+        "hp": {
+          "average": 21,
+          "dice": "6d6"
+        },
+        "initiative": 2,
+        "speed": "30 ft.",
+        "abilities": {
+          "str": 10,
+          "dex": 15,
+          "con": 10,
+          "int": 10,
+          "wis": 8,
+          "cha": 10
+        },
+        "cr": "1",
+        "xp": 200,
+        "attacks": 2,
+        "action": {
+          "name": "Scimitar",
+          "kind": "melee",
+          "bonus": 4,
+          "damage": "1d6+2",
+          "average": 5,
+          "damageType": "Slashing"
+        }
+      },
+      "guard": {
+        "name": "Guard",
+        "srd": {
+          "doc": "SRD 5.2.1",
+          "page": 296
+        },
+        "size": "Medium or Small",
+        "type": "Humanoid",
+        "ac": 16,
+        "hp": {
+          "average": 11,
+          "dice": "2d8+2"
+        },
+        "initiative": 1,
+        "speed": "30 ft.",
+        "abilities": {
+          "str": 13,
+          "dex": 12,
+          "con": 12,
+          "int": 10,
+          "wis": 11,
+          "cha": 10
+        },
+        "cr": "1/8",
+        "xp": 25,
+        "attacks": 1,
+        "action": {
+          "name": "Spear",
+          "kind": "melee or ranged",
+          "bonus": 3,
+          "damage": "1d6+1",
+          "average": 4,
+          "damageType": "Piercing"
+        }
+      },
+      "kobold-warrior": {
+        "name": "Kobold Warrior",
+        "srd": {
+          "doc": "SRD 5.2.1",
+          "page": 302
+        },
+        "size": "Small",
+        "type": "Dragon",
+        "ac": 14,
+        "hp": {
+          "average": 7,
+          "dice": "3d6-3"
+        },
+        "initiative": 2,
+        "speed": "30 ft.",
+        "abilities": {
+          "str": 7,
+          "dex": 15,
+          "con": 9,
+          "int": 8,
+          "wis": 7,
+          "cha": 8
+        },
+        "cr": "1/8",
+        "xp": 25,
+        "attacks": 1,
+        "action": {
+          "name": "Dagger",
+          "kind": "melee or ranged",
+          "bonus": 4,
+          "damage": "1d4+2",
+          "average": 4,
+          "damageType": "Piercing"
+        }
+      },
+      "skeleton": {
+        "name": "Skeleton",
+        "srd": {
+          "doc": "SRD 5.2.1",
+          "page": 325
+        },
+        "size": "Medium",
+        "type": "Undead",
+        "ac": 14,
+        "hp": {
+          "average": 13,
+          "dice": "2d8+4"
+        },
+        "initiative": 3,
+        "speed": "30 ft.",
+        "abilities": {
+          "str": 10,
+          "dex": 16,
+          "con": 15,
+          "int": 6,
+          "wis": 8,
+          "cha": 5
+        },
+        "cr": "1/4",
+        "xp": 50,
+        "attacks": 1,
+        "action": {
+          "name": "Shortsword",
+          "kind": "melee",
+          "bonus": 5,
+          "damage": "1d6+3",
+          "average": 6,
+          "damageType": "Piercing"
+        }
+      },
+      "zombie": {
+        "name": "Zombie",
+        "srd": {
+          "doc": "SRD 5.2.1",
+          "page": 343
+        },
+        "size": "Medium",
+        "type": "Undead",
+        "ac": 8,
+        "hp": {
+          "average": 15,
+          "dice": "2d8+6"
+        },
+        "initiative": -2,
+        "speed": "20 ft.",
+        "abilities": {
+          "str": 13,
+          "dex": 6,
+          "con": 16,
+          "int": 3,
+          "wis": 6,
+          "cha": 5
+        },
+        "cr": "1/4",
+        "xp": 50,
+        "attacks": 1,
+        "action": {
+          "name": "Slam",
+          "kind": "melee",
+          "bonus": 3,
+          "damage": "1d8+1",
+          "average": 5,
+          "damageType": "Bludgeoning"
+        }
+      },
+      "warrior-infantry": {
+        "name": "Warrior Infantry",
+        "srd": {
+          "doc": "SRD 5.2.1",
+          "page": 336
+        },
+        "size": "Medium or Small",
+        "type": "Humanoid",
+        "ac": 13,
+        "hp": {
+          "average": 9,
+          "dice": "2d8"
+        },
+        "initiative": 0,
+        "speed": "30 ft.",
+        "abilities": {
+          "str": 13,
+          "dex": 11,
+          "con": 11,
+          "int": 8,
+          "wis": 11,
+          "cha": 8
+        },
+        "cr": "1/8",
+        "xp": 25,
+        "attacks": 1,
+        "action": {
+          "name": "Spear",
+          "kind": "melee or ranged",
+          "bonus": 3,
+          "damage": "1d6+1",
+          "average": 4,
+          "damageType": "Piercing"
+        }
+      },
+      "ogre": {
+        "name": "Ogre",
+        "srd": {
+          "doc": "SRD 5.2.1",
+          "page": 312
+        },
+        "size": "Large",
+        "type": "Giant",
+        "ac": 11,
+        "hp": {
+          "average": 68,
+          "dice": "8d10+24"
+        },
+        "initiative": -1,
+        "speed": "40 ft.",
+        "abilities": {
+          "str": 19,
+          "dex": 8,
+          "con": 16,
+          "int": 5,
+          "wis": 7,
+          "cha": 7
+        },
+        "cr": "2",
+        "xp": 450,
+        "attacks": 1,
+        "action": {
+          "name": "Greatclub",
+          "kind": "melee",
+          "bonus": 6,
+          "damage": "2d8+4",
+          "average": 13,
+          "damageType": "Bludgeoning"
+        }
+      },
+      "black-bear": {
+        "name": "Black Bear",
+        "srd": {
+          "doc": "SRD 5.2.1",
+          "page": 345
+        },
+        "size": "Medium",
+        "type": "Beast",
+        "ac": 11,
+        "hp": {
+          "average": 19,
+          "dice": "3d8+6"
+        },
+        "initiative": 1,
+        "speed": "30 ft., Climb 30 ft., Swim 30 ft.",
+        "abilities": {
+          "str": 15,
+          "dex": 12,
+          "con": 14,
+          "int": 2,
+          "wis": 12,
+          "cha": 7
+        },
+        "cr": "1/2",
+        "xp": 100,
+        "attacks": 2,
+        "action": {
+          "name": "Rend",
+          "kind": "melee",
+          "bonus": 4,
+          "damage": "1d6+2",
+          "average": 5,
+          "damageType": "Slashing"
+        }
+      },
+      "boar": {
+        "name": "Boar",
+        "srd": {
+          "doc": "SRD 5.2.1",
+          "page": 346
+        },
+        "size": "Medium",
+        "type": "Beast",
+        "ac": 11,
+        "hp": {
+          "average": 13,
+          "dice": "2d8+4"
+        },
+        "initiative": 0,
+        "speed": "40 ft.",
+        "abilities": {
+          "str": 13,
+          "dex": 11,
+          "con": 14,
+          "int": 2,
+          "wis": 9,
+          "cha": 5
+        },
+        "cr": "1/4",
+        "xp": 50,
+        "attacks": 1,
+        "action": {
+          "name": "Gore",
+          "kind": "melee",
+          "bonus": 3,
+          "damage": "1d6+1",
+          "average": 4,
+          "damageType": "Piercing"
+        }
+      },
+      "dire-wolf": {
+        "name": "Dire Wolf",
+        "srd": {
+          "doc": "SRD 5.2.1",
+          "page": 347
+        },
+        "size": "Large",
+        "type": "Beast",
+        "ac": 14,
+        "hp": {
+          "average": 22,
+          "dice": "3d10+6"
+        },
+        "initiative": 2,
+        "speed": "50 ft.",
+        "abilities": {
+          "str": 17,
+          "dex": 15,
+          "con": 15,
+          "int": 3,
+          "wis": 12,
+          "cha": 7
+        },
+        "cr": "1",
+        "xp": 200,
+        "attacks": 1,
+        "action": {
+          "name": "Bite",
+          "kind": "melee",
+          "bonus": 5,
+          "damage": "1d10+3",
+          "average": 8,
+          "damageType": "Piercing"
+        }
+      },
+      "giant-rat": {
+        "name": "Giant Rat",
+        "srd": {
+          "doc": "SRD 5.2.1",
+          "page": 353
+        },
+        "size": "Small",
+        "type": "Beast",
+        "ac": 13,
+        "hp": {
+          "average": 7,
+          "dice": "2d6"
+        },
+        "initiative": 3,
+        "speed": "30 ft., Climb 30 ft.",
+        "abilities": {
+          "str": 7,
+          "dex": 16,
+          "con": 11,
+          "int": 2,
+          "wis": 10,
+          "cha": 4
+        },
+        "cr": "1/8",
+        "xp": 25,
+        "attacks": 1,
+        "action": {
+          "name": "Bite",
+          "kind": "melee",
+          "bonus": 5,
+          "damage": "1d4+3",
+          "average": 5,
+          "damageType": "Piercing"
+        }
+      },
+      "giant-spider": {
+        "name": "Giant Spider",
+        "srd": {
+          "doc": "SRD 5.2.1",
+          "page": 353
+        },
+        "size": "Large",
+        "type": "Beast",
+        "ac": 14,
+        "hp": {
+          "average": 26,
+          "dice": "4d10+4"
+        },
+        "initiative": 3,
+        "speed": "30 ft., Climb 30 ft.",
+        "abilities": {
+          "str": 14,
+          "dex": 16,
+          "con": 12,
+          "int": 2,
+          "wis": 11,
+          "cha": 4
+        },
+        "cr": "1",
+        "xp": 200,
+        "attacks": 1,
+        "action": {
+          "name": "Bite",
+          "kind": "melee",
+          "bonus": 5,
+          "damage": "1d8+3",
+          "average": 7,
+          "damageType": "Piercing",
+          "extra": {
+            "dice": "2d6",
+            "average": 7,
+            "damageType": "Poison"
+          }
+        }
+      },
+      "wolf": {
+        "name": "Wolf",
+        "srd": {
+          "doc": "SRD 5.2.1",
+          "page": 364
+        },
+        "size": "Medium",
+        "type": "Beast",
+        "ac": 12,
+        "hp": {
+          "average": 11,
+          "dice": "2d8+2"
+        },
+        "initiative": 2,
+        "speed": "40 ft.",
+        "abilities": {
+          "str": 14,
+          "dex": 15,
+          "con": 12,
+          "int": 3,
+          "wis": 12,
+          "cha": 6
+        },
+        "cr": "1/4",
+        "xp": 50,
+        "attacks": 1,
+        "action": {
+          "name": "Bite",
+          "kind": "melee",
+          "bonus": 4,
+          "damage": "1d6+2",
+          "average": 5,
+          "damageType": "Piercing"
+        }
+      }
+    },
+    "items": {},
+    "equipment": {}
+  }
+}

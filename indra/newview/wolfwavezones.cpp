@@ -279,6 +279,9 @@ void WolfWaveZones::idle()
 
 void WolfWaveZones::refresh()
 {
+    // [WOLF GRID GATE 2026-10-17] the read carries the region handles and our session: only once the region underfoot has
+    // said it is Wolf, not on the previous region's answer right after a hypergrid jump (idle() asks again every frame).
+    if (!WolfGrid::isOnWolfTerritoriesConfirmed()) return;
     if (mFetching) return;
     const LLViewerRegion* region = gAgent.getRegion();
     if (!region) return;
@@ -427,6 +430,9 @@ void WolfWaveZones::fetchCoro(std::vector<U64> handles, U64 requested_handle, U6
 
 const WolfWaveZones::Region* WolfWaveZones::current() const
 {
+    // [WOLF GRID GATE 2026-10-17] layouts are keyed by region HANDLE, which a foreign grid's region can share: off Wolf
+    // there is none (the water shader and the editors then use the automatic layout)
+    if (!WolfGrid::isOnWolfTerritories()) return nullptr;
     LLViewerRegion* rgn = gAgent.getRegion();
     if (!rgn) return nullptr;
     auto it = mByHandle.find(rgn->getHandle());

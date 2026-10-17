@@ -252,7 +252,14 @@ public:
     void            setObjectTracking(bool track)   { mTrackFocusObject = track; }
     const LLVector3d &getFocusGlobal() const        { return mFocusGlobal; }
     const LLVector3d &getFocusTargetGlobal() const  { return mFocusTargetGlobal; }
+    // <WolfViewer 2026-10-17> The GM Console's director camera lifts the camera constraints while it is on, as
+    // DisableCameraConstraints does, without touching that setting: it is persisted (settings.xml), so a crash while
+    // the director camera was on would have left the user's constraints off for good. This is never saved.
+    void            setConstraintsLiftedForSession(bool lifted) { mConstraintsLiftedForSession = lifted; }
+    bool            constraintsLiftedForSession() const         { return mConstraintsLiftedForSession; }
+    // </WolfViewer>
 private:
+    bool            mConstraintsLiftedForSession = false;   // <WolfViewer 2026-10-17/> setConstraintsLiftedForSession
     LLVector3d      mCameraFocusOffset;             // Offset from focus point in build mode
     LLVector3d      mCameraFocusOffsetTarget;       // Target towards which we are lerping the camera's focus offset
     bool            mFocusOnAvatar;

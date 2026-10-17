@@ -255,7 +255,9 @@ void WolfTerrainPaint::refresh()
     // region handles to the Wolf Territories service. Region handles identify a specific
     // region on a specific grid; we have no business logging Second Life's. wolfwavezones.cpp
     // and wolfregionweather.cpp already gate their panel paths — this one did not.
-    if (!WolfGrid::isOnWolfTerritories()) return;
+    // [WOLF GRID GATE 2026-10-17] Confirmed: the lenient answer still says yes for a foreign region in the moments after
+    // a hypergrid jump, and this request carries its handles and our session. idle() asks again until it is confirmed.
+    if (!WolfGrid::isOnWolfTerritoriesConfirmed()) return;
     if (mFetching) return;
     std::vector<U64> handles = neighbourHandles();
     if (handles.empty()) return;
@@ -374,7 +376,7 @@ void WolfTerrainPaint::acceptRecord(const LLSD& region_payload)
 void WolfTerrainPaint::fetchCoro(std::vector<U64> handles)
 {
     // <WolfViewer 2026-09-22/> belt and braces: nothing reaches the service off-grid
-    if (!WolfGrid::isOnWolfTerritories()) return;
+    if (!WolfGrid::isOnWolfTerritoriesConfirmed()) return;   // [WOLF GRID GATE 2026-10-17/] as refresh()
     std::string url = std::string(API_URL) + "?handles=";
     for (size_t i = 0; i < handles.size(); ++i)
     {
@@ -446,6 +448,8 @@ void WolfTerrainPaint::fetchCoro(std::vector<U64> handles)
 
 const WolfTerrainPaint::Record* WolfTerrainPaint::current() const
 {
+    // [WOLF GRID GATE 2026-10-17] records are keyed by region HANDLE, which a foreign grid's region can share: none off Wolf
+    if (!WolfGrid::isOnWolfTerritories()) return nullptr;
     LLViewerRegion* rgn = gAgent.getRegion();
     if (!rgn) return nullptr;
     auto it = mByHandle.find(rgn->getHandle());
@@ -1005,7 +1009,9 @@ void WolfTerrainPaint::bind(LLGLSLShader* shader, LLViewerRegion* regionp)
     if (!shader || !regionp) return;
     auto it = mLayers.find(regionp->getHandle());
     Layer* L = it == mLayers.end() ? nullptr : &it->second;
-    if (!L || !layerReady(*L, regionp))
+    // [WOLF GRID GATE 2026-10-17] a layer is keyed by region HANDLE, which a foreign grid's region can share: off Wolf no
+    // paint is drawn (as wolfterrainlayers.cpp bind), whatever is still cached
+    if (!L || !WolfGrid::isOnWolfTerritories() || !layerReady(*L, regionp))
     {
         shader->uniform1f(s_on, 0.f);
         return;
@@ -1060,7 +1066,14 @@ void WolfTerrainPaint::unbind(LLGLSLShader* shader)
 
 void WolfTerrainPaint::idle()
 {
-    if (!WolfGrid::isOnWolfTerritories()) return;
+    if (!WolfGrid::isOnWolfTerritories())
+    {
+        // [WOLF GRID GATE 2026-10-17] leaving Wolf lets the baked layers go (their GL buffers too); the records and any
+        // unsaved draft are kept for the way back, where the loop below rebuilds the layers.
+        for (auto& kv : mLayers) releaseLayer(kv.second);
+        mLayers.clear();
+        return;
+    }
     LLViewerRegion* agent_rgn = gAgent.getRegion();
     if (!agent_rgn) return;
     const F64 now = LLFrameTimer::getElapsedSeconds();
@@ -1436,6 +1449,9 @@ const WolfTerrainPaint::Stroke* WolfTerrainPaint::endStroke()
 
 void WolfTerrainPaint::save()
 {
+    // [WOLF GRID GATE 2026-10-17] the save posts this login's session to Wolf's paint service: only from a region that has
+    // said it is Wolf (the panel is open off Wolf to say why it is empty)
+    if (!WolfGrid::isOnWolfTerritoriesConfirmed()) { notify("Sorry, this function is only available on Wolf Territories Grid."); return; }
     if (!mEdit) { notify("Nothing to save."); return; }
     const Record* r = current();
     if (!r || r->mHandle != mEdit->mHandle) { notify("You have left the region this paint belongs to."); return; }

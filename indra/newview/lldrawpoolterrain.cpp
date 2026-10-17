@@ -68,6 +68,7 @@ static LLGLSLShader* sShader = NULL;
 #include "wolfoceanfft.h"
 #include "wolfterrainpaint.h"   // [TERRAIN PAINT 2026-09-10]
 #include "wolfterrainlayers.h"  // [WOLF TERRAIN TEXTURES 2026-10-16]
+#include "wolfgrid.h"           // [WOLF GRID GATE 2026-10-17/] caustics on Wolf only
 #include "wolfweather.h"   // <WolfViewer 2026-09-18/> snow cover on the terrain
 extern bool gCubeSnapshot;   // Source: lldrawpoolwater.cpp:56 — the same extern the water pool uses
 static void wolf_bind_caustics(LLGLSLShader* shader, LLViewerRegion* regionp)
@@ -88,7 +89,8 @@ static void wolf_bind_caustics(LLGLSLShader* shader, LLViewerRegion* regionp)
     F32 strength = 0.f;
     LLVector3 light = env.getLightDirection();
     light.normalize();
-    if (caustics_on && t0 && t1 && pwater && env.getIsSunUp() && !gCubeSnapshot)
+    // [WOLF GRID GATE 2026-10-17] the caustics come from the Wolf sea's FFT cascades (lldrawpoolwater.cpp): Wolf only
+    if (caustics_on && t0 && t1 && pwater && env.getIsSunUp() && !gCubeSnapshot && WolfGrid::isOnWolfTerritories())
     {
         // Sunlight only; the same dawn ramp the water uses.
         strength = llclamp((light.mV[VZ] - 0.02f) / 0.23f, 0.f, 1.f) * 0.9f;

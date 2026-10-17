@@ -71,9 +71,25 @@ private:
     LLLineEditor* mTitle = nullptr;
     LLButton* mLiveBtn = nullptr;
     LLTextBox* mStatus = nullptr;
+    LLButton* mMyShows = nullptr;      // [WOLF DJ 2026-10-16] Wolf Territories only (onOpen)
+    S32 mStatusGap = 0;                // floater_wolf_dj.xml: between My Shows and status_text
+    std::string mUrlWolfTip;           // [WOLF GRID GATE 2026-10-17/] stream_url's XUI tip (names wolf-grid.com), kept for Wolf
     LLFrameTimer mClock;
     F32 mNextListeners = 0.f;
-    S32 mListeners = -1;
+    // [WOLF DJ 2026-10-16] Who is listening. On Wolf Territories the count comes from
+    // gridmanager/streamlisteners.php: the mount's own listeners plus everyone on WTGR while
+    // WTGR plays the show, with WTGR's Liquidsoap feed left out. Elsewhere, Icecast's figure
+    // for the mount; the breakdown is then unknown (-1).
+    struct Audience
+    {
+        S32 mTotal = -1;        // -1 = not known yet
+        S32 mGrid = -1;         // in-world players (viewers, WolfStorm)
+        S32 mWeb = -1;          // browsers
+        S32 mOther = -1;
+        S32 mWtgr = 0;          // of mTotal, listening through WTGR
+        bool mOnWtgr = false;   // WTGR is playing this show now
+    };
+    Audience mAudience;
     bool mListenersBusy = false;
     int mShownTrack = -1;       // the playlist track whose title the Now playing fields show
     // [WOLF DJ 2026-10-05] jingle pads (WolfDJJingles)

@@ -33,6 +33,7 @@
 
 #include "llviewermenu.h"
 #include "wolfgame.h"   // [WOLF GAME 2026-10-09/] Game Mode
+#include "wolffloaterroleplay.h"   // [WOLF ADVENTURE P1 2026-10-16/] Wolf World > Adventures...
 #include "wolfdrive.h"   // [WOLF DRIVE 2026-10-09/] the Car Dashboard toolbar button
 // <WolfViewer 2026-09-06> Wolf Territories-only features
 #include "wolfgrid.h"
@@ -41,6 +42,7 @@
 #include "wolfscreenshare.h"
 #include "wolfweather.h"  // <WolfViewer> World > Weather
 #include "wolfspanscreens.h"  // <WolfViewer 2026-10-10/> Wolf World > Spread Across All Screens
+#include "wolfborder.h"   // [BORDER GUARD 2026-10-16/] Wolf World > Teleport Across the Border Ahead
 // </WolfViewer>
 
 // linden library includes
@@ -623,7 +625,9 @@ class WolfWeatherToggleEnabled : public view_listener_t
 {
     bool handleEvent(const LLSD&)
     {
-        if (!wolf_grid_tools_allowed()) return true;
+        // [WOLF GRID GATE 2026-10-17] every grid: a local opt-out that sends nothing (WolfWeather::toggleEnabled sets
+        // WolfWeatherEnabled), and a parcel's wolfrain / wolfsnow prims can bring weather on any grid - so the switch
+        // that turns it off must work there too. Choosing the weather stays Wolf only (wolf_grid_tools_allowed).
         WolfWeather::instance().toggleEnabled();
         return true;
     }
@@ -6268,8 +6272,11 @@ void handle_claim_public_land()
     LLVector3d west_south_global;
     LLVector3d east_north_global;
     LLViewerParcelMgr::getInstance()->getSelection(west_south_global, east_north_global);
-    LLVector3 west_south = gAgent.getPosAgentFromGlobal(west_south_global);
-    LLVector3 east_north = gAgent.getPosAgentFromGlobal(east_north_global);
+    // <WolfViewer> claimpublicland takes region coordinates; the agent frame may be rebased (LLAgent::rebaseOrigin)
+    LLViewerRegion* claim_region = gAgent.getRegion();
+    LLVector3 west_south = claim_region ? claim_region->getPosRegionFromGlobal(west_south_global) : gAgent.getPosAgentFromGlobal(west_south_global);
+    LLVector3 east_north = claim_region ? claim_region->getPosRegionFromGlobal(east_north_global) : gAgent.getPosAgentFromGlobal(east_north_global);
+    // </WolfViewer>
 
     LLMessageSystem* msg = gMessageSystem;
     msg->newMessage("GodlikeMessage");
@@ -12972,6 +12979,8 @@ void initialize_menus()
     // [WOLF GRID GATE 2026-10-09] Standing on a Wolf Territories region now (logged in there too):
     // World > Game Mode / Roleplay and their toolbar buttons (wolfgrid.h, the Flight Mode gate).
     enable.add("WolfGrid.IsOnWolfTerritories", boost::bind(&WolfGrid::isOnWolfTerritories));
+    // [WOLF GRID GATE 2026-10-17] what follows a Wolf region's own sky (Show Astronomy), a hypergrid visitor on one too
+    enable.add("WolfGrid.ShowsWolfRegionWeather", boost::bind(&WolfGrid::showsWolfRegionWeather));
     // [FLOATER SPLIT 2026-09-11] Build > Create a Model with AI is hidden unless this account
     // may actually use it: Wolf Territories AND the service says so (WolfAI reads the account
     // level from the grid). The service re-checks on every call, so this only decides whether
@@ -12980,7 +12989,9 @@ void initialize_menus()
     {
         // Source: build_http.rs keeps owned results accessible during provider/credit outages.
         // Opening off-grid shows the explicit restriction in WolfPanelAI; it sends no request.
-        return true;
+        // [WOLF GRID GATE 2026-10-17] was always true, so the item showed on every grid: gone (not greyed) off Wolf -
+        // isOnWolfTerritories, since what it makes is uploaded through and rezzed in the region underfoot.
+        return WolfGrid::isOnWolfTerritories();
     });
     commit.add("WolfSpeech.ToggleDictation", boost::bind(&wolf_toggle_dictation));
     enable.add("WolfSpeech.IsDictating", boost::bind(&wolf_is_dictating));
@@ -13000,6 +13011,15 @@ void initialize_menus()
     enable.add("WolfGame.IsGameMode", [](LLUICtrl*, const LLSD&) -> bool
     {
         return WolfGame::instance().gameModeShownOn();
+    });
+    // [WOLF ADVENTURE P1 2026-10-16] Wolf World > Adventures...: the Roleplay window on Journal >
+    // Adventures here (HUD_MESSAGES_V1.md §3.12).
+    commit.add("WolfAdventure.ShowAdventures", [](LLUICtrl*, const LLSD&) { WolfFloaterRoleplay::showAdventures(); });
+    // [BORDER GUARD 2026-10-16] Wolf World > Teleport Across the Border Ahead: the border banner's button (wolfborder.cpp)
+    commit.add("WolfBorder.TeleportAcross", [](LLUICtrl*, const LLSD&) { WolfBorder::instance().teleportAcross(); });
+    enable.add("WolfBorder.CanTeleportAcross", [](LLUICtrl*, const LLSD&) -> bool
+    {
+        return WolfBorder::instanceExists() && WolfBorder::instance().canTeleportAcross();
     });
     // [SPAN SCREENS 2026-10-10] Wolf World > Spread Across All Screens (wolfspanscreens.cpp)
     commit.add("Wolf.SpanScreensToggle", [](LLUICtrl*, const LLSD&) { WolfSpanScreens::toggle(); });

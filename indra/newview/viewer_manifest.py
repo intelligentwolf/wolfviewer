@@ -102,6 +102,9 @@ class ViewerManifest(LLManifest,FSViewerManifest):
                 # <WolfViewer 2026-10-03> the real star map (llvowlsky.cpp loadStarCatalogue)
                 self.path("wolf_stars.txt")
                 self.path("wolf_constellations.txt")
+                # <WolfViewer 2026-10-16> Wolf Adventure Studio (P3): the pack schema and the rules presets it edits,
+                # copied from region-terrain-work/wolf-story/spec/ (wolffloateradventurestudioedit.cpp)
+                self.path("wolfadventure")
 
                 # include the entire shaders directory recursively
                 self.path("shaders")

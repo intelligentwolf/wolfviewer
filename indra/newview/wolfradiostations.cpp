@@ -34,6 +34,15 @@ std::string WolfRadioStations::sPreviewURL;
 void WolfRadioStations::load()
 {
     if (mLoaded || mLoading) return;
+    // [WOLF GRID GATE 2026-10-17] the lists are Wolf's own service (STATIONS_URL on wolfstorm.app): asked for from a
+    // Wolf Territories login only (wolfgrid.h isWolfTerritories - the list is the same on every Wolf region, so a
+    // hypergrid trip away from a Wolf login keeps it). On any other grid nothing is requested; the user's own presets
+    // and the land's music URL (About Land > Sound) still work there.
+    if (!WolfGrid::isWolfTerritories())
+    {
+        mLastError = "The radio stations are for Wolf Territories.";
+        return;
+    }
     mLoading = true;
     mLastError.clear();
     LLCoros::instance().launch("WolfRadioStations::load", []() { WolfRadioStations::loadCoro(); });
@@ -127,8 +136,13 @@ bool WolfRadioStations::addPreset(const std::string& url, bool* already_there)
 // static
 LLParcel* WolfRadioStations::editableParcel()
 {
+    // The parcel selected in About Land when the radio was opened from there; [2026-10-17] otherwise (opened from
+    // Wolf World > Music & Radio, nothing selected - Paul: "doesn't allow me to on land I own") the parcel the agent
+    // stands on. Its region id is set when the sim sends it (llviewerparcelmgr.cpp:1566 mAgentParcel, :1638), which is
+    // what sendParcelPropertiesUpdate routes by (:1272).
     LLParcelSelectionHandle sel = LLViewerParcelMgr::getInstance()->getFloatingParcelSelection();
     LLParcel* parcel = sel ? sel->getParcel() : nullptr;
+    if (!parcel || parcel->getLocalID() == INVALID_PARCEL_ID) parcel = LLViewerParcelMgr::getInstance()->getAgentParcel();
     if (!parcel || !LLViewerParcelMgr::isParcelModifiableByAgent(parcel, GP_LAND_CHANGE_MEDIA)) return nullptr;
     return parcel;
 }

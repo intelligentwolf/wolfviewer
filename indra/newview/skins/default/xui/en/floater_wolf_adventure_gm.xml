@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLF ADVENTURE P4 2026-10-16] Wolf World > GM Console... (STUDIO_AND_CONSOLE_V1.md §3). Drawn in the
+     wolfGame family by WolfAdventureGmView (wolffloateradventuregm.cpp): the top bar, the parties on the left,
+     the tabs in the centre, the log drawer on the right, a status line at the foot. §1 sets a 900 x 600
+     minimum; the eight tabs and the right drawer need 1100 to keep their labels whole. The 34 px drag strip
+     lies under the drawn title band. -->
+<floater
+ can_close="false"
+ can_drag_on_left="false"
+ can_minimize="false"
+ can_resize="true"
+ header_height="34"
+ height="720"
+ layout="topleft"
+ legacy_header_height="34"
+ min_height="600"
+ min_width="1100"
+ name="wolf_adventure_gm"
+ save_rect="true"
+ show_title="false"
+ single_instance="true"
+ title="GM Console"
+ width="1200">
+    <wolf_adventure_gm_view
+     follows="all"
+     height="720"
+     layout="topleft"
+     left="0"
+     mouse_opaque="false"
+     name="gm"
+     tab_stop="true"
+     top="0"
+     width="1200" />
+</floater>

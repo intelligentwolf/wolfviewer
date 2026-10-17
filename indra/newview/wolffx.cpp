@@ -33,6 +33,7 @@
 #include "llvoavatar.h"           // LLViewerPartSource holds an LLPointer<LLVOAvatar> (as wolflightning.cpp)
 #include "llworld.h"
 #include "wolfcamerafx.h"
+#include "wolfgrid.h"   // [WOLF GRID GATE 2026-10-17/] WolfFX from Wolf regions only
 
 namespace
 {
@@ -86,6 +87,10 @@ namespace
     public:
         bool operator()(const LLDispatcher*, const std::string&, const LLUUID& invoice, const sparam_t& strings) override
         {
+            // [WOLF GRID GATE 2026-10-17] "WolfFX" is WolfSim's (WolfFXModule): drawn only while standing on a Wolf region
+            // that has said so itself (a hypergrid visitor there too). The switches stay on every grid; a foreign region's
+            // message is ignored.
+            if (!WolfGrid::isOnWolfRegionConfirmed()) return true;
             WolfFX::instance().receive(invoice, strings);
             return true;
         }

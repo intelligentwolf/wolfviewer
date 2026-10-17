@@ -109,9 +109,11 @@
 #include "wolffloaterphotoeffects.h"   // [PAINTERS 2026-09-20/]
 #include "wolffloaterlagdetector.h"   // [LAG DETECTOR 2026-09-29/]
 #include "wolffloatercompass.h"   // [WOLF COMPASS 2026-10-16/]
+#include "wolfspeed.h"   // [WOLFSPEED 2026-10-17/] Xenon's WolfSpeed
 #include "wolffloaterdrivecontrols.h"   // [WOLF DRIVE 2026-10-09/]
 #include "wolffloaterdj.h"            // [WOLF DJ 2026-10-04/]
 #include "wolffloaterdjplaylist.h"    // [WOLF DJ 2026-10-04/]
+#include "wolffloaterdjshows.h"       // [WOLF DJ 2026-10-16/] My Shows
 #include "wolffloaterweatherreport.h"   // [JIMMY V9C 2026-10-10/]
 #include "wolfcave.h"                   // [WOLF CAVE 2026-10-12/] the Cave Builder
 #include "wolfterrainlayers.h"          // [WOLF TERRAIN TEXTURES 2026-10-16/]
@@ -123,6 +125,12 @@
 #include "wolffloaterairports.h"   // [AIRPORTS 2026-10-10/]
 #include "wolffloaterradio.h"   // [RADIO 2026-10-05/]
 #include "wolffloaterroleplay.h"   // [WOLF GAME 2026-10-09/]
+#include "wolfadventurehud.h"            // [WOLF ADVENTURE P1 2026-10-16/] cards, handouts
+#include "wolffloateradventurestudio.h"  // [WOLF ADVENTURE P1 2026-10-16/] Studio Lite
+#include "wolffloateradventureguide.h"   // [WOLF ADVENTURE AUDIT 2026-10-17/] the Guide beside the Studio
+#include "wolfadventureplay.h"            // [WOLF ADVENTURE P4 2026-10-16/] roll, turns, quiz
+#include "wolffloateradventuregm.h"      // [WOLF ADVENTURE P4 2026-10-16/] GM Console
+#include "wolffloateradventureteacher.h" // [WOLF ADVENTURE P4 2026-10-16/] Teacher Console
 #include "wolflslcomplete.h" // <FS:Wolf/>
 #include "llfloatermyscripts.h"
 #include "llfloatermyenvironment.h"
@@ -664,9 +672,11 @@ void LLViewerFloaterReg::registerFloaters()
     LLFloaterReg::add("wolf_photo_effects", "floater_wolf_photo_effects.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterPhotoEffects>);   // [PAINTERS 2026-09-20/]
     LLFloaterReg::add("wolf_lag_detector", "floater_wolf_lag_detector.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterLagDetector>);   // [LAG DETECTOR 2026-09-29/]
     LLFloaterReg::add("wolf_compass", "floater_wolf_compass.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterCompass>);   // [WOLF COMPASS 2026-10-16/] Victorian compass: North + course
+    LLFloaterReg::add("wolf_speed", "floater_wolf_speed.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterSpeed>);   // [WOLFSPEED 2026-10-17/] Xenon's WolfSpeed
     LLFloaterReg::add("wolf_drive_controls", "floater_wolf_drive_controls.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterDriveControls>);   // [WOLF DRIVE 2026-10-09/] wheel / pedal / gamepad setup
     LLFloaterReg::add("wolf_dj", "floater_wolf_dj.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterDJ>);   // [WOLF DJ 2026-10-04/]
     LLFloaterReg::add("wolf_dj_playlist", "floater_wolf_dj_playlist.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterDJPlaylist>);   // [WOLF DJ 2026-10-04/]
+    LLFloaterReg::add("wolf_dj_shows", "floater_wolf_dj_shows.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterDJShows>);   // [WOLF DJ 2026-10-16/] My Shows
     LLFloaterReg::add("wolf_weather_report", "floater_wolf_weather_report.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterWeatherReport>);   // [JIMMY V9C 2026-10-10/]
     LLFloaterReg::add("wolf_graphics_helper", "floater_wolf_graphics_helper.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterGraphicsHelper>);   // [GRAPHICS HELPER 2026-10-11/]
     LLFloaterReg::add("wolf_builder", "floater_wolf_builder.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterBuilder>);   // [WOLF BUILDER 2026-10-13/] grid, snap origin, names, selection card
@@ -682,6 +692,20 @@ void LLViewerFloaterReg::registerFloaters()
     LLFloaterReg::add("wolf_game_web", "floater_wolf_game_web.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterGameWeb>);
     LLFloaterReg::add("wolf_game_web_overlay", "floater_wolf_game_web_overlay.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterGameWeb>);
     LLFloaterReg::add("wolf_game_web_prompt", "floater_wolf_game_web_prompt.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterGameWebPrompt>);   // [SECURITY 2026-10-09/]
+    // [WOLF ADVENTURE P1 2026-10-16] HUD_MESSAGES_V1.md §3.3 vignette cards, §3.4 the handout viewer;
+    // STUDIO_AND_CONSOLE_V1.md §2 the Adventure Studio (P1: Lite).
+    LLFloaterReg::add("wolf_adventure_card", "floater_wolf_adventure_card.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterAdventureCard>);
+    LLFloaterReg::add("wolf_adventure_handout", "floater_wolf_adventure_handout.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterAdventureHandout>);
+    LLFloaterReg::add("wolf_adventure_talk", "floater_wolf_adventure_talk.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterAdventureTalk>);   // [WOLF ADVENTURE P2 2026-10-16/]
+    LLFloaterReg::add("wolf_adventure_studio", "floater_wolf_adventure_studio.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterAdventureStudio>);
+    LLFloaterReg::add("wolf_adventure_guide", "floater_wolf_adventure_guide.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterAdventureGuide>);   // [WOLF ADVENTURE AUDIT 2026-10-17/]
+    // [WOLF ADVENTURE P4 2026-10-16] the player's roll / dice, turn tracker and quiz (HUD_MESSAGES_V1.md §3.9-3.11);
+    // the GM and Teacher Consoles (STUDIO_AND_CONSOLE_V1.md §3, §4).
+    LLFloaterReg::add("wolf_adventure_roll", "floater_wolf_adventure_roll.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterAdventurePlay>);
+    LLFloaterReg::add("wolf_adventure_turns", "floater_wolf_adventure_turns.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterAdventurePlay>);
+    LLFloaterReg::add("wolf_adventure_quiz", "floater_wolf_adventure_quiz.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterAdventurePlay>);
+    LLFloaterReg::add("wolf_adventure_gm", "floater_wolf_adventure_gm.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterAdventureGm>);
+    LLFloaterReg::add("wolf_adventure_teacher", "floater_wolf_adventure_teacher.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterAdventureTeacher>);
     LLFloaterReg::add("wolf_radio", "floater_wolf_radio.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterRadio>);   // [RADIO 2026-10-05/] About Land > Sound > Radio Stations
     // [FLOATER SPLIT 2026-09-11] Ground painting and AI model creation, each its own window
     // instead of a tab in the build floater. No custom floater class: the panel inside does all

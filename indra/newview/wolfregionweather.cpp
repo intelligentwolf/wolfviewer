@@ -107,7 +107,9 @@ public:
         if (strings.empty()) return true;
         LLViewerRegion* rgn = gAgent.getRegion();
         // Only the region the agent is actually in may change this agent's weather.
-        if (!rgn || rgn->getRegionID() != invoice)
+        // [WOLF GRID GATE 2026-10-17] and only a Wolf region that has said so itself: a foreign region's "WolfWeather"
+        // could otherwise impose rain, fog and aurora (hypergrid visitors on a Wolf region still get it).
+        if (!rgn || rgn->getRegionID() != invoice || !WolfGrid::isOnWolfRegionConfirmed())
         {
             LL_DEBUGS("WolfWeather") << "ignoring a weather push for another region" << LL_ENDL;
             return true;
@@ -232,7 +234,11 @@ void WolfRegionWeather::onRegionChanged()
     // both prevents the previous sky being applied while the destination requests are in flight.
     mHaveRow = false;
     setAutoEnvPreview(false, 0.0);   // <WolfViewer 2026-10-03/> a preview belongs to the region it was made in
-    wolf_use_shared_environment();   // <WolfViewer 2026-10-12/>
+    // <WolfViewer 2026-10-12/> wolf_use_shared_environment
+    // [WOLF GRID GATE 2026-10-17] not here: the new region's features have not arrived yet, so the grid test answered for
+    // the region just left (a personal sky cleared on arriving on another grid, kept on arriving on Wolf). idle() does it
+    // once this region has said it is Wolf.
+    mSharedEnvPending = true;
     if (WolfWeather::instanceExists()) WolfWeather::instance().forgetOwnChoice();   // [2026-10-15/] the land's weather on arrival
     readAutoEnv(LLSD());
     mProfile = WolfWeatherProfile();
@@ -291,6 +297,11 @@ bool WolfRegionWeather::parcelForcedProfile(WolfWeatherProfile& out) const
 
 void WolfRegionWeather::idle()
 {
+    if (mSharedEnvPending && WolfGrid::isOnWolfTerritoriesConfirmed())   // [WOLF GRID GATE 2026-10-17] see onRegionChanged
+    {
+        mSharedEnvPending = false;
+        wolf_use_shared_environment();
+    }
     if (!WolfGrid::showsWolfRegionWeather()) return;   // <WolfViewer 2026-10-08/> hypergrid visitors too
     const std::string id = currentRegionId();
     if (id.empty()) return;
@@ -323,6 +334,9 @@ void WolfRegionWeather::idle()
 void WolfRegionWeather::refresh(bool force)
 {
     if (!WolfGrid::showsWolfRegionWeather()) return;   // <WolfViewer 2026-10-08/> hypergrid visitors too
+    // [WOLF GRID GATE 2026-10-17] the poll asks weather.php about the region underfoot: only once that region has said it
+    // is Wolf, not on the previous region's answer in the moments after a hypergrid jump.
+    if (!WolfGrid::isOnWolfRegionConfirmed()) return;
     const std::string id = currentRegionId();
     if (id.empty()) return;
     if (!force && id == mAttemptedFor && LLFrameTimer::getElapsedSeconds() < mNextPoll) return;
@@ -387,7 +401,7 @@ void WolfRegionWeather::fetchCoro(std::string region_id, bool include_parcel, F3
     // them. Enforcing before then would break every older viewer ON our own grid.
     // <WolfViewer 2026-10-08> Only for our own residents: a hypergrid visitor's session belongs to
     // another grid and is not ours to send anywhere; the read is anonymous for them.
-    if (WolfGrid::isOnWolfTerritories())
+    if (WolfGrid::isOnWolfTerritoriesConfirmed())   // [WOLF GRID GATE 2026-10-17/] this region's own word, not the last one's
     {
         headers->append("X-Wolf-Agent", gAgentID.asString());
         headers->append("X-Wolf-Session", gAgentSessionID.asString());

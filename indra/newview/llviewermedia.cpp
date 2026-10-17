@@ -2508,7 +2508,7 @@ void LLViewerMediaImpl::updateJavascriptObject()
         if ( logged_in )
         {
             // current location within a region
-            LLVector3 agent_pos = gAgent.getPositionAgent();
+            LLVector3 agent_pos = gAgent.getPositionRegion();   // <WolfViewer> "location within a region"; agent frame may be rebased
             double x = agent_pos.mV[ VX ];
             double y = agent_pos.mV[ VY ];
             double z = agent_pos.mV[ VZ ];

@@ -805,8 +805,12 @@ void LLPanelScriptLimitsRegionMemory::showBeacon()
     S32 matched = sscanf(pos_string.c_str(), "<%g,%g,%g>", &x, &y, &z);
     if (matched != 3) return;
 
-    LLVector3 pos_agent(x, y, z);
-    LLVector3d pos_global = gAgent.getPosGlobalFromAgent(pos_agent);
+    // <WolfViewer> the "location" column is region-local (the agent region: requests are only made when the
+    // selection region is the agent region); the agent frame may be rebased
+    LLVector3 pos_region(x, y, z);
+    LLViewerRegion* region = gAgent.getRegion();
+    LLVector3d pos_global = region ? region->getPosGlobalFromRegion(pos_region) : gAgent.getPosGlobalFromAgent(pos_region);
+    // </WolfViewer>
 
     std::string tooltip("");
     LLTracker::trackLocation(pos_global, name, tooltip, LLTracker::LOCATION_ITEM);

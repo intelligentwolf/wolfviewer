@@ -438,7 +438,8 @@ void LLFloaterModelPreview::initModelPreview()
 //static
 void LLFloaterModelPreview::showModelPreview(const LLUUID& dest_folder)
 {
-    if (WolfGrid::isWolfTerritories())
+    // [WOLF GRID GATE 2026-10-17] isOnWolfTerritories: a hypergrid visitor elsewhere gets that grid's own uploader
+    if (WolfGrid::isOnWolfTerritories())
     {
         LLSD key;
         if (dest_folder.notNull())

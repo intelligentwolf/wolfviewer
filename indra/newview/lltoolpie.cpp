@@ -82,6 +82,7 @@
 // [/RLVa:KB]
 
 #include "llviewernetwork.h"    // <FS:CR> For prim equivilance hiding
+#include "wolfadventure.h"   // [WOLF ADVENTURE P2 2026-10-16/] click-to-talk
 
 extern bool gDebugClicks;
 
@@ -299,6 +300,18 @@ bool LLToolPie::handleLeftClickPick()
     if (handleMediaClick(mPick))
     {
         return true;
+    }
+
+    // [WOLF ADVENTURE P2 2026-10-16] HUD_MESSAGES_V1.md §3.2 Opening: a left click on a story character
+    // of an adventure the player is in (the quest message's cast) starts a talk. Its attachments count
+    // as it (WolfGameHUD::pickTarget's rule). Any other avatar is left to the usual click.
+    if (object && WolfAdventure::instanceExists())
+    {
+        LLViewerObject* who = object->isAttachment() ? (LLViewerObject*)object->getAvatar() : object;
+        if (who && who->isAvatar() && who != (LLViewerObject*)gAgentAvatarp && WolfAdventure::instance().talkTo(who->getID()))
+        {
+            return true;
+        }
     }
 
     // If it's a left-click, and we have a special action, do it.

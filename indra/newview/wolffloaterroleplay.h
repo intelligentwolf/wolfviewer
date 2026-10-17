@@ -18,6 +18,8 @@
 #define WOLF_FLOATER_ROLEPLAY_H
 
 #include <functional>
+#include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -141,8 +143,12 @@ public:
                            EAcceptance* accept, std::string& tooltip_msg) override;
     void onMouseCaptureLost() override;
 
-    enum EPage { PAGE_STATS = 0, PAGE_COMBAT, PAGE_BAG, PAGE_PETS, PAGE_GAME, PAGE_LOOK, PAGE_HELP, PAGE_COUNT };
+    // [WOLF ADVENTURE 2026-10-16] PAGE_JOURNAL after PAGE_STATS (HUD_MESSAGES_V1.md §3.1). Every
+    // caller uses the names and no setting stores the number, so the later pages moving up is safe.
+    enum EPage { PAGE_STATS = 0, PAGE_JOURNAL, PAGE_COMBAT, PAGE_BAG, PAGE_PETS, PAGE_GAME, PAGE_LOOK, PAGE_HELP, PAGE_COUNT };
     void showPage(EPage page);
+    /** [WOLF ADVENTURE 2026-10-16] The Journal on "Adventures here" (Wolf World > Adventures...). */
+    void showAdventuresHere();
     EPage page() const { return mPage; }
     /** Escape: the question inside the window takes it (its safe answer), else the window closes. */
     void escape();
@@ -155,9 +161,20 @@ private:
     {
         H_NONE = 0, H_CLOSE, H_GAMEMODE, H_TAB, H_ACTION, H_LEAVE, H_CLEARFX, H_MARKER_MAP, H_WEBSITE,
         H_BG_FILE, H_BG_RESET, H_BG_OPACITY, H_BG_TINT, H_CONFIRM_YES, H_CONFIRM_NO, H_SLOT, H_PET, H_SCROLLBAR,
-        H_EQUIP, H_UNEQUIP, H_RELOAD, H_ABILITY, H_GEAR, H_INFO
+        H_EQUIP, H_UNEQUIP, H_RELOAD, H_ABILITY, H_GEAR, H_INFO,
+        // [WOLF ADVENTURE 2026-10-16] the Journal page (wolfadventureconsole.cpp)
+        H_ADV_TAB, H_ADV_READY, H_ADV_MAP, H_ADV_TP, H_ADV_CARD, H_ADV_CHAPTER, H_ADV_FILTER, H_ADV_PAGE,
+        H_ADV_HANDOUT, H_ADV_JOIN, H_ADV_LEAVE, H_ADV_CODE, H_ADV_CLASSJOIN, H_ADV_REFRESH, H_ADV_STORYCAM,
+        H_ADV_MOTION, H_ADV_OPEN,
+        // [WOLF ADVENTURE P2 2026-10-16] the Journal's Conversations (HUD_MESSAGES_V1.md §2.2, §3.1 item 7)
+        H_ADV_CONVO, H_ADV_CONVO_DEL, H_ADV_FORGET, H_ADV_REPORT,
+        // [WOLF ADVENTURE P4 2026-10-16] HUD_MESSAGES_V1.md §5.6 Character voices volume, Show AI tag
+        H_ADV_VOICEVOL, H_ADV_AITAG,
+        // [WOLF ADVENTURE AUDIT 2026-10-17] an open quiz row opens the quiz again
+        H_ADV_QUIZ
     };
-    enum EConfirm { CONFIRM_NONE = 0, CONFIRM_LEAVE, CONFIRM_MAP };
+    enum EConfirm { CONFIRM_NONE = 0, CONFIRM_LEAVE, CONFIRM_MAP, CONFIRM_ADV_MAP, CONFIRM_ADV_TP, CONFIRM_ADV_LEAVE,
+                    CONFIRM_ADV_CONVO_DEL, CONFIRM_ADV_FORGET, CONFIRM_ADV_REPORT };
 
     void layoutAndDraw();
     F32 drawHero(F32 l, F32 r, F32 top, const WolfGameDraw::Palette& p);
@@ -177,6 +194,28 @@ private:
     F32 pageGame(F32 l, F32 r, F32 top, const WolfGameDraw::Palette& p);
     F32 pageLook(F32 l, F32 r, F32 top, const WolfGameDraw::Palette& p);
     F32 emptyCard(F32 l, F32 r, F32 top, const std::string& head, const std::string& body, const WolfGameDraw::Palette& p);
+    // ---- [WOLF ADVENTURE 2026-10-16] wolfadventureconsole.cpp (HUD_MESSAGES_V1.md §3.1, §3.5, §5.6) ----
+    F32 pageJournal(F32 l, F32 r, F32 top, const WolfGameDraw::Palette& p);
+    F32 journalAdventure(F32 l, F32 r, F32 top, const std::string& adv, const WolfGameDraw::Palette& p);
+    F32 journalHere(F32 l, F32 r, F32 top, const WolfGameDraw::Palette& p);
+    /** Stats page: the honour bar and reputation, above the stat rings (§3.5). */
+    F32 honourSection(F32 l, F32 r, F32 top, const WolfGameDraw::Palette& p);
+    /** Look page: Story camera and Reduce motion (§5.6). */
+    F32 adventureLookSection(F32 l, F32 r, F32 top, const WolfGameDraw::Palette& p);
+    /** A drawn one-line text field (the class code); the keyboard reaches it through adventureChar. */
+    void textField(F32 l, F32 b, F32 r, F32 t, const std::string& text, const std::string& placeholder, S32 id, S32 arg,
+                   const WolfGameDraw::Palette& p);
+    bool pressAdventure(S32 id, S32 arg);
+    /** The words of an adventure question (CONFIRM_ADV_*); false for any other. */
+    bool adventureConfirmText(std::string& title, std::string& body, std::string& yes, std::string& no) const;
+    void confirmAdventure(EConfirm what);
+    bool adventureKey(KEY key, MASK mask);
+    bool adventureChar(llwchar c);
+    void onJournalOpened();
+    void joinAdventure(const std::string& adv, const std::string& party, const std::string& code, const std::string& title);
+    /** [WOLF ADVENTURE P2 2026-10-16] The player's own conversations in an adventure (chatlog {adventure}). */
+    void loadConversations(const std::string& adv);
+    F32 conversationsSection(F32 l, F32 r, F32 top, const std::string& adv, const WolfGameDraw::Palette& p);
     F32 sectionHead(F32 l, F32 r, F32 top, const std::string& text, const WolfGameDraw::Palette& p);
     void drawConfirm(const WolfGameDraw::Palette& p);
     void drawBackground(F32 W, F32 H, F32 cut, F32 alpha, const WolfGameDraw::Palette& p);
@@ -197,7 +236,7 @@ private:
 
     WolfGameHits mHits;
     EPage mPage = PAGE_STATS;
-    F32 mScroll[PAGE_COUNT] = { 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f };
+    F32 mScroll[PAGE_COUNT] = { 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f };
     F32 mContentH = 0.f;
     LLRect mPageRect;              // where the page shows (local)
     bool mInPage = false;          // hits being added belong to the page (clip them)
@@ -213,6 +252,31 @@ private:
     bool mStatusError = false;
     F64 mStatusUntil = 0.0;
     std::vector<std::string> mMarkerIds;   // the markers listed on the Stats page, by row
+    // [WOLF ADVENTURE 2026-10-16] the Journal's own state (by id, so it survives every rebuild)
+    std::string mJournalAdv;               // the adventure shown; "" = Adventures here
+    bool mJournalHere = false;             // Adventures here was chosen
+    F64 mJournalHelloAt = -100.0;          // the Journal's last hello (onJournalOpened sends at most one in 3 s)
+    std::string mEntryFilter;              // "" all, else clue | note | lore | done
+    std::set<std::string> mOpenChapters;   // done chapters expanded, by act
+    std::vector<std::string> mJournalTabs; // the selector's adventures, by hit arg
+    std::vector<std::pair<std::string, std::string>> mWaitingIds;  // cards waiting for a choice (adventure, card id), by hit arg
+    std::vector<std::pair<std::string, std::string>> mQuizRowIds;  // [WOLF ADVENTURE AUDIT 2026-10-17] open quizzes (adventure, quiz id), by hit arg
+    std::vector<std::string> mChapterActs; // chapters, by hit arg
+    std::vector<std::string> mHandoutIds;  // handouts, by hit arg
+    std::vector<std::string> mHereIds;     // Adventures here rows, by hit arg
+    std::map<std::string, std::string> mClassCodes;   // per adventure (§6 3.3.7: remembered)
+    bool mClassCodesLoaded = false;
+    std::string mCodeAdv;                  // the adventure whose class code field has the keyboard
+    std::string mConfirmAdv;               // the adventure an adventure question is about
+    bool mJoinBusy = false;
+    // [WOLF ADVENTURE P2 2026-10-16] Conversations
+    std::string mConvoAdv;                 // the adventure whose conversations are open ("" = closed)
+    LLSD mConvo;                           // chatlog lines, newest first
+    bool mConvoLoading = false;
+    std::string mConvoError;
+    U32 mConvoSerial = 0;
+    std::vector<S64> mConvoLineIds;        // the Report buttons' lines, by hit arg
+    S64 mConfirmLine = 0;                  // the line a Report question is about
 };
 
 /**
@@ -232,6 +296,8 @@ public:
      * (WoW's character / bag keys).
      */
     static void showPage(WolfGameConsole::EPage page, bool toggle);
+    /** [WOLF ADVENTURE 2026-10-16] Wolf World > Adventures...: the Journal on "Adventures here". */
+    static void showAdventures();
     /** The window is open on `page`. */
     static bool showingPage(WolfGameConsole::EPage page);
     /** Escape while this window has the keyboard (WolfGame::handleEscape): WolfGameConsole::escape. */

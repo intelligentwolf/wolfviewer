@@ -654,6 +654,8 @@ void WolfTerrainLayers::onRecordsFetched(U64 agent_handle)
 
 void WolfTerrainLayers::save()
 {
+    // [WOLF GRID GATE 2026-10-17] the save posts this login's session to Wolf's service: only from a confirmed Wolf region
+    if (!WolfGrid::isOnWolfTerritoriesConfirmed()) { mLastError = "Sorry, this function is only available on Wolf Territories Grid."; mSaveResult = -1; return; }
     if (!mEdit) { mLastError = "Nothing to save."; mSaveResult = -1; return; }
     const WolfTerrainPaint::Record* r = WolfTerrainPaint::instance().current();
     if (!r || r->mHandle != mEdit->mHandle) { mLastError = "You have left the region these textures belong to."; mSaveResult = -1; return; }
@@ -793,6 +795,7 @@ void WolfFloaterTerrainLayers::onOpen(const LLSD& key)
 {
     if (!WolfGrid::isOnWolfTerritories())
     {
+        WolfGrid::noteWolfOnly("Wolf Terrain Textures");   // [WOLF GRID GATE 2026-10-17/]
         closeFloater();
         return;
     }
@@ -805,7 +808,7 @@ void WolfFloaterTerrainLayers::onOpen(const LLSD& key)
 void WolfFloaterTerrainLayers::onClose(bool app_quitting)
 {
     const WolfTerrainLayers::Edit* ed = WolfTerrainLayers::instance().edit();
-    if (!app_quitting && ed && ed->mDirty)
+    if (!app_quitting && ed && ed->mDirty && WolfGrid::isOnWolfTerritories())   // [WOLF GRID GATE 2026-10-17/] off Wolf nothing previews and the way back in is hidden
     {
         // Kept, like the paint editor's working copy, but said so: the ground still shows the draft.
         notify("Your unsaved Wolf terrain textures are still previewing on your ground. Reopen Region / Estate > Terrain > Wolf terrain textures... to save or revert them.");

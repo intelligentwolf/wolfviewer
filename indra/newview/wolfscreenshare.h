@@ -79,8 +79,8 @@ private:
     /** Source: screen_share.js _mediaEntry(url). */
     static LLSD mediaEntryFor(const std::string& url);
     /** Coroutine: mint the share, then hand the reply back on the main thread. */
-    static void mintCoro(Target target, std::string share_id);
-    static void revokeCoro(std::string share_id);
+    static void mintCoro(Target target, std::string share_id, LLUUID agent_id, LLUUID session_id);
+    static void revokeCoro(std::string share_id, LLUUID agent_id, LLUUID session_id);
     void onMinted(const Target& target, const std::string& share_id, bool ok, const LLSD& reply, const std::string& error);
     void applyFaceMedia(const Target& target, const LLSD& media);
     static void alert(const std::string& message);
@@ -90,6 +90,10 @@ private:
     bool        mMinting = false;
     Target      mTarget;
     std::string mShareId;
+    // [WOLF GRID GATE 2026-10-17] the login that made the share: a revoke after a relog must carry that one (Wolf's own
+    // ids, to Wolf's own service), never the live session of whatever grid this viewer is on by then.
+    LLUUID      mShareAgentId;
+    LLUUID      mShareSessionId;
     std::string mRoom;
     std::string mUrl;
     /** While > 0: keep trying to focus + zoom the shared face until this time. */

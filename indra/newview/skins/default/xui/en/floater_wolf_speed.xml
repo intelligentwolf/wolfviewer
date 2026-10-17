@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLFSPEED 2026-10-17] Wolf World > Xenon's WolfSpeed (wolfspeed.cpp WolfFloaterSpeed). Drawn in code, like the
+     flight deck and the car dashboard: a speed dial (1x to the region's most), Walk / Run / Fast / Super, Off, what is
+     in force and why, and for region owners the region's own switch and cap. Resizable; everything scales with the
+     window. Wolf Territories only. -->
+<floater
+ can_close="true"
+ can_minimize="true"
+ can_resize="true"
+ height="520"
+ layout="topleft"
+ min_height="440"
+ min_width="300"
+ name="wolf_speed"
+ help_topic="wolf_speed"
+ save_rect="true"
+ single_instance="true"
+ title="Xenon's WolfSpeed"
+ width="340">
+</floater>

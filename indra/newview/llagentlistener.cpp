@@ -414,7 +414,7 @@ void LLAgentListener::getPosition(const LLSD& event_data) const
     reply["euler"]["roll"] = roll;
     reply["euler"]["pitch"] = pitch;
     reply["euler"]["yaw"] = yaw;
-    reply["region"] = ll_sd_from_vector3(mAgent.getPositionAgent());
+    reply["region"] = ll_sd_from_vector3(mAgent.getPositionRegion());   // <WolfViewer> region frame; agent frame may be rebased
     reply["global"] = ll_sd_from_vector3d(mAgent.getPositionGlobal());
 
     sendReply(reply, event_data);
@@ -492,7 +492,7 @@ void LLAgentListener::getAutoPilot(const LLSD& event_data) const
         LLViewerObject * target = gObjectList.findObject(mFollowTarget);
         if (target)
         {   // Found the target AV, return the actual distance to them as well as their ID
-            LLVector3 difference = target->getPositionRegion() - mAgent.getPositionAgent();
+            LLVector3 difference = target->getPositionRegion() - mAgent.getPositionRegion();   // <WolfViewer> both region frame; agent frame may be rebased
             reply["target_distance"] = difference.length();
             reply["leader_id"] = mFollowTarget;
         }
@@ -777,9 +777,10 @@ void LLAgentListener::getNearbyAvatarsList(LLSD const& event_data)
             {
                 LLAvatarName av_name;
                 LLAvatarNameCache::get(avatar->getID(), &av_name);
-                LLVector3 region_pos = avatar->getCharacterPosition();
+                LLVector3 region_pos = avatar->getCharacterPosition();   // agent space
                 response["result"].append(llsd::map("id", avatar->getID(), "global_pos", ll_sd_from_vector3d(avatar->getPosGlobalFromAgent(region_pos)),
-                                                    "region_pos", ll_sd_from_vector3(region_pos), "name", av_name.getUserName(), "region_id", avatar->getRegion()->getRegionID()));
+                                                    "region_pos", ll_sd_from_vector3(avatar->getRegion()->getPosRegionFromAgent(region_pos)),   // <WolfViewer> agent frame may be rebased
+                                                    "name", av_name.getUserName(), "region_id", avatar->getRegion()->getRegionID()));
             }
         }
     }

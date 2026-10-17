@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLF ADVENTURE P2 2026-10-16] The talk panel (HUD_MESSAGES_V1.md §2.4, §3.2; wolfadventuretalk.cpp
+     WolfFloaterAdventureTalk): a conversation with a story character, drawn in the game's theme by
+     WolfAdventureTalkView - the portrait with its mood, the line, numbered replies in two columns, a
+     text box when the character takes free text, Give, and the X. About 46% of the window wide,
+     above the game HUD left of centre; its height follows the content. Not modal and it never takes
+     the keyboard by itself; it stands where the HUD says each frame (it is not dragged). -->
+<floater
+ can_close="false"
+ can_drag_on_left="false"
+ can_minimize="false"
+ can_resize="false"
+ header_height="0"
+ height="200"
+ layout="topleft"
+ legacy_header_height="0"
+ name="wolf_adventure_talk"
+ save_rect="false"
+ show_title="false"
+ single_instance="true"
+ title="Conversation"
+ width="560">
+    <wolf_adventure_talk_view
+     follows="all"
+     height="200"
+     layout="topleft"
+     left="0"
+     mouse_opaque="false"
+     name="view"
+     tab_stop="true"
+     top="0"
+     width="560" />
+</floater>

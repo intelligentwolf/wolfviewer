@@ -1,0 +1,3764 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wolfterritories.org/schemas/wolf-adventure/adventure_pack_v1.schema.json",
+  "title": "Wolf Adventure Pack, format 1",
+  "description": "The whole of one adventure as data. Contract: ADVENTURE_PACK_V1.md. The brain (BRAIN_API_V1.md) is the one validator: this schema checks shape; wolfadventure_lib.php wa_validate_pack() also checks every cross-reference (ADVENTURE_PACK_V1.md section 'Cross-reference rules').",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "formatVersion",
+    "adventure",
+    "rules",
+    "state",
+    "places",
+    "cast",
+    "acts",
+    "endings"
+  ],
+  "properties": {
+    "format": {
+      "const": "wolf-adventure-pack"
+    },
+    "formatVersion": {
+      "const": 1
+    },
+    "revision": {
+      "description": "Set by the brain on publish (wolfadv_pack_revisions.revision). Ignored on upload.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "adventure": {
+      "$ref": "#/$defs/adventure"
+    },
+    "rules": {
+      "$ref": "#/$defs/rulesRef"
+    },
+    "ai": {
+      "$ref": "#/$defs/ai"
+    },
+    "state": {
+      "$ref": "#/$defs/state"
+    },
+    "places": {
+      "$ref": "#/$defs/places"
+    },
+    "cast": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "$ref": "#/$defs/castSheet"
+      }
+    },
+    "storyCards": {
+      "type": "array",
+      "maxItems": 500,
+      "items": {
+        "$ref": "#/$defs/storyCard"
+      }
+    },
+    "sourceCards": {
+      "type": "array",
+      "maxItems": 500,
+      "items": {
+        "$ref": "#/$defs/sourceCard"
+      }
+    },
+    "encounters": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "$ref": "#/$defs/encounter"
+      }
+    },
+    "enemies": {
+      "description": "[M4] Enemies (COMBAT_V1.md).",
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "$ref": "#/$defs/enemy"
+      }
+    },
+    "battles": {
+      "description": "[M4] Battles (COMBAT_V1.md).",
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "$ref": "#/$defs/battle"
+      }
+    },
+    "parcels": {
+      "description": "Loot and reward bundles ('parcels' in the GM sense, not land parcels).",
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "$ref": "#/$defs/rewardParcel"
+      }
+    },
+    "handouts": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "$ref": "#/$defs/handout"
+      }
+    },
+    "quizzes": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "$ref": "#/$defs/quiz"
+      }
+    },
+    "acts": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "items": {
+        "$ref": "#/$defs/act"
+      }
+    },
+    "endings": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": {
+        "$ref": "#/$defs/ending"
+      }
+    },
+    "imports": {
+      "description": "Where this pack came from, for the Studio's 'imported from' line. Never read by the runtime.",
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "at"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "story-v1",
+              "twee3",
+              "ink-json",
+              "yarn",
+              "chara-card-v2",
+              "chara-card-v3",
+              "qti3",
+              "book-draft"
+            ]
+          },
+          "name": {
+            "$ref": "#/$defs/text64"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "notes": {
+            "$ref": "#/$defs/text500"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "id": {
+      "description": "A pack-local id: lower case letter first, then letters, digits, _ or -. Unique within its own list (cross-reference rules).",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]{0,47}$"
+    },
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "uuidOrEmpty": {
+      "type": "string",
+      "pattern": "^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$"
+    },
+    "colour": {
+      "type": "string",
+      "pattern": "^#[0-9a-fA-F]{6}$"
+    },
+    "text24": {
+      "type": "string",
+      "maxLength": 24
+    },
+    "text32": {
+      "type": "string",
+      "maxLength": 32
+    },
+    "text64": {
+      "type": "string",
+      "maxLength": 64
+    },
+    "text240": {
+      "type": "string",
+      "maxLength": 240
+    },
+    "text500": {
+      "type": "string",
+      "maxLength": 500
+    },
+    "text1000": {
+      "type": "string",
+      "maxLength": 1000
+    },
+    "text2000": {
+      "type": "string",
+      "maxLength": 2000
+    },
+    "text4000": {
+      "type": "string",
+      "maxLength": 4000
+    },
+    "vec3": {
+      "description": "Region metres <x, y, z>. z 0 means 'on the ground or floor under x, y' (the STORY v1 rule, wolf_storyteller.lsl standAt).",
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "number",
+        "minimum": -10000,
+        "maximum": 10000
+      }
+    },
+    "vec2": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "number",
+        "minimum": -10000,
+        "maximum": 10000
+      }
+    },
+    "adventure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "purpose",
+        "rating",
+        "regions",
+        "party",
+        "run",
+        "start"
+      ],
+      "properties": {
+        "id": {
+          "description": "Set by the brain (wolfadv_adventures.adventure_uuid). Ignored on upload.",
+          "$ref": "#/$defs/uuid"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "summary": {
+          "$ref": "#/$defs/text500"
+        },
+        "purpose": {
+          "enum": [
+            "adventure",
+            "education",
+            "experience",
+            "event"
+          ]
+        },
+        "rating": {
+          "description": "General, Moderate or Adult; must not be above any listed region's maturity (RegionSettings.Maturity 0/1/2, Util.ConvertMaturityToAccessLevel). Education packs must be general.",
+          "enum": [
+            "general",
+            "moderate",
+            "adult"
+          ]
+        },
+        "language": {
+          "description": "BCP 47 tag of the pack's own text, e.g. en-GB.",
+          "type": "string",
+          "pattern": "^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*$"
+        },
+        "tags": {
+          "type": "array",
+          "maxItems": 12,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/text24"
+          }
+        },
+        "story": {
+          "description": "The story the author keeps and builds the game from (STORY_FIRST_DESIGN.md section 4): their own written story, or a book's AI summary. Never read by the runtime; the Studio's \"Build it\" and the helper read it.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "text"
+          ],
+          "properties": {
+            "text": {
+              "type": "string",
+              "maxLength": 20000
+            },
+            "source": {
+              "enum": [
+                "written",
+                "book"
+              ],
+              "default": "written"
+            },
+            "title": {
+              "$ref": "#/$defs/text240"
+            },
+            "author": {
+              "$ref": "#/$defs/text240"
+            },
+            "updated": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        },
+        "cover": {
+          "description": "Texture UUID for the Studio / Experiences card.",
+          "$ref": "#/$defs/uuidOrEmpty"
+        },
+        "look": {
+          "description": "The adventure's look for players (AUDIT_2026-10-17 section 5.3): a logo for the Adventures list and the HUD, the HUD and talk panel colours, and a title card shown when a player starts. Every texture must exist on the grid's asset service as a texture; accent on panel must be at least 4.5:1 (WCAG 1.4.3). Checked by the brain.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "logo": {
+              "description": "A square texture shown in the Adventures list and on the HUD's objective plate.",
+              "$ref": "#/$defs/uuidOrEmpty"
+            },
+            "accent": {
+              "description": "The HUD and talk panel accent (titles, rims, the chosen button).",
+              "$ref": "#/$defs/colour"
+            },
+            "panel": {
+              "description": "The HUD and talk panel background. Text on it is white or black, whichever reads better.",
+              "$ref": "#/$defs/colour"
+            },
+            "titleCard": {
+              "description": "Shown to a player when they start the adventure (a stage 'title' cue with an image).",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "image": {
+                  "$ref": "#/$defs/uuidOrEmpty"
+                },
+                "title": {
+                  "description": "The card's big line; empty = the adventure's title.",
+                  "$ref": "#/$defs/text64"
+                },
+                "sub": {
+                  "$ref": "#/$defs/text64"
+                },
+                "seconds": {
+                  "type": "integer",
+                  "minimum": 2,
+                  "maximum": 10,
+                  "default": 5
+                }
+              }
+            }
+          }
+        },
+        "regions": {
+          "description": "The regions this adventure runs on. A region is ENABLED only after its holder approves it (BRAIN_API_V1.md enable_region).",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "region"
+            ],
+            "properties": {
+              "region": {
+                "$ref": "#/$defs/uuid"
+              },
+              "name": {
+                "$ref": "#/$defs/text64"
+              },
+              "npcBudget": {
+                "description": "Most Director NPCs this adventure may have on this region at once. Clamped by the region's own budget (REGION_HANDS_V1.md 'NPC budget').",
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 40
+              }
+            }
+          }
+        },
+        "party": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ],
+          "properties": {
+            "mode": {
+              "description": "party: separate progress per party; shared: one story for everyone on the region; both: a shared world (scenes marked shared) with per-party quests. Plan section 7.3.",
+              "enum": [
+                "party",
+                "shared",
+                "both"
+              ]
+            },
+            "minSize": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16,
+              "default": 1
+            },
+            "maxSize": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16,
+              "default": 6
+            },
+            "join": {
+              "description": "open: anyone may start or join; invite: the party leader invites; class: only members of a class session (education).",
+              "enum": [
+                "open",
+                "invite",
+                "class"
+              ],
+              "default": "open"
+            },
+            "repeat": {
+              "description": "May a player start again after an ending? Rewards marked once stay once (STORY v1 repeat:).",
+              "type": "boolean",
+              "default": false
+            }
+          }
+        },
+        "run": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "auto"
+          ],
+          "properties": {
+            "auto": {
+              "description": "Runs by itself with the AI Director (or rules only in non-AI mode) whenever no GM is in charge. Plan section 4a: true by default.",
+              "type": "boolean",
+              "default": true
+            },
+            "liveGm": {
+              "description": "A granted GM may take over.",
+              "type": "boolean",
+              "default": true
+            },
+            "callGm": {
+              "description": "Players may ask for a GM; online GMs get a ping.",
+              "type": "boolean",
+              "default": false
+            },
+            "schedule": {
+              "description": "Booked GM sessions (Wolf Experiences / events). Outside them the adventure runs in Auto.",
+              "type": "array",
+              "maxItems": 50,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "start",
+                  "minutes"
+                ],
+                "properties": {
+                  "start": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "minutes": {
+                    "type": "integer",
+                    "minimum": 15,
+                    "maximum": 720
+                  },
+                  "title": {
+                    "$ref": "#/$defs/text64"
+                  },
+                  "places": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100
+                  }
+                }
+              }
+            }
+          }
+        },
+        "start": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "beat"
+          ],
+          "properties": {
+            "beat": {
+              "description": "The beat a new party starts on.",
+              "$ref": "#/$defs/id"
+            },
+            "trigger": {
+              "description": "How a player starts: talking to a cast member (RDR2 'missions start from conversation'), arriving in an area, or from the HUD's Adventures list.",
+              "enum": [
+                "talk",
+                "arrive",
+                "hud"
+              ],
+              "default": "hud"
+            },
+            "cast": {
+              "$ref": "#/$defs/id"
+            },
+            "area": {
+              "$ref": "#/$defs/id"
+            },
+            "intro": {
+              "$ref": "#/$defs/text500"
+            }
+          }
+        },
+        "experiences": {
+          "description": "List it in Wolf Experiences (php/experiences.php submissions).",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "list": {
+              "type": "boolean",
+              "default": false
+            },
+            "category": {
+              "$ref": "#/$defs/text32"
+            },
+            "nowLine": {
+              "description": "The 'what's happening now' line, refreshed by the brain.",
+              "type": "boolean",
+              "default": true
+            }
+          }
+        },
+        "credits": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "role",
+              "name"
+            ],
+            "properties": {
+              "role": {
+                "$ref": "#/$defs/text32"
+              },
+              "name": {
+                "$ref": "#/$defs/text64"
+              },
+              "url": {
+                "type": "string",
+                "maxLength": 1024,
+                "pattern": "^https://"
+              }
+            }
+          }
+        },
+        "attribution": {
+          "description": "Third-party works this pack uses. The brain ADDS the rules preset's own attribution (RULES_PRESETS_V1.md) on publish; a pack cannot remove it.",
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "work",
+              "licence",
+              "text"
+            ],
+            "properties": {
+              "work": {
+                "$ref": "#/$defs/text240"
+              },
+              "author": {
+                "$ref": "#/$defs/text240"
+              },
+              "licence": {
+                "description": "SPDX licence id (e.g. CC-BY-4.0, CC0-1.0) or 'public-domain'.",
+                "type": "string",
+                "pattern": "^([A-Za-z0-9.+-]{1,40}|public-domain)$"
+              },
+              "url": {
+                "type": "string",
+                "maxLength": 1024,
+                "pattern": "^https://"
+              },
+              "text": {
+                "description": "Shown exactly as written.",
+                "$ref": "#/$defs/text1000"
+              }
+            }
+          }
+        },
+        "learning": {
+          "description": "Education: what the whole adventure teaches.",
+          "$ref": "#/$defs/learning"
+        }
+      }
+    },
+    "rulesRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "preset"
+      ],
+      "properties": {
+        "preset": {
+          "enum": [
+            "wild-west",
+            "mystery",
+            "education",
+            "experience",
+            "5e-srd-5.2"
+          ]
+        },
+        "presetVersion": {
+          "description": "Pinned on publish to the preset file's version (RULES_PRESETS_V1.md).",
+          "type": "integer",
+          "minimum": 1
+        },
+        "overrides": {
+          "description": "An RFC 7396 JSON Merge Patch applied to the preset (RULES_PRESETS_V1.md 'Creator overrides'). The merged result must validate against rules_preset_v1.schema.json.",
+          "type": "object"
+        },
+        "game": {
+          "description": "The wolfGame game whose stats, items and money rewards use. Empty = the region's own game. Value moves only when the adventure owner owns that game or the game owner linked this adventure (BRAIN_API_V1.md 'Value through wolfGame').",
+          "$ref": "#/$defs/uuidOrEmpty"
+        }
+      }
+    },
+    "ai": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode"
+      ],
+      "properties": {
+        "mode": {
+          "description": "ai: Wolf Mind talks and the AI Director runs, paid by the owner. none: written lines and rules only, costs nothing (plan 7.4). An 'ai' adventure falls back to 'none' by itself when the owner's credits or cap run out.",
+          "enum": [
+            "ai",
+            "none"
+          ]
+        },
+        "dailyCapCredits": {
+          "description": "Most WolfCredits this adventure may spend per UTC day (1 credit = 1 US cent of provider cost, rust_proxy build_jobs.rs:301-306). Default 100.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5000,
+          "default": 100
+        },
+        "playerDailyTurns": {
+          "description": "AI talk turns per player per UTC day in this adventure.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2000,
+          "default": 200
+        },
+        "freeChat": {
+          "description": "Players may type freely to AI characters. false = quick replies only (education default).",
+          "type": "boolean",
+          "default": true
+        },
+        "accuracy": {
+          "description": "Accuracy mode (education): characters answer only from sourceCards and say they do not know otherwise (WOLF_MIND_V1.md).",
+          "type": "boolean",
+          "default": false
+        },
+        "improvise": {
+          "description": "The AI Director may write new narration lines within a beat's rules. false = it only picks authored options.",
+          "type": "boolean",
+          "default": false
+        },
+        "translate": {
+          "description": "Characters answer in the session's language when it differs from the pack's (education 'Languages').",
+          "type": "boolean",
+          "default": false
+        },
+        "voice": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "dailyChars": {
+              "description": "Most characters spoken aloud per UTC day (CPU and cost guard).",
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000000,
+              "default": 50000
+            }
+          }
+        }
+      }
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "flags"
+      ],
+      "properties": {
+        "flags": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "$ref": "#/$defs/flag"
+          }
+        },
+        "factions": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "name"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/id"
+              },
+              "name": {
+                "$ref": "#/$defs/text32"
+              },
+              "min": {
+                "type": "integer",
+                "minimum": -1000,
+                "maximum": 0,
+                "default": -100
+              },
+              "max": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000,
+                "default": 100
+              },
+              "start": {
+                "type": "integer",
+                "minimum": -1000,
+                "maximum": 1000,
+                "default": 0
+              },
+              "bands": {
+                "$ref": "#/$defs/bands"
+              }
+            }
+          }
+        },
+        "npcReputation": {
+          "description": "Track each cast member's opinion of each player (-100..100).",
+          "type": "boolean",
+          "default": true
+        },
+        "honour": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "label": {
+              "$ref": "#/$defs/text24"
+            },
+            "min": {
+              "type": "integer",
+              "minimum": -1000,
+              "maximum": 0,
+              "default": -100
+            },
+            "max": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000,
+              "default": 100
+            },
+            "start": {
+              "type": "integer",
+              "minimum": -1000,
+              "maximum": 1000,
+              "default": 0
+            },
+            "bands": {
+              "$ref": "#/$defs/bands"
+            }
+          }
+        }
+      }
+    },
+    "bands": {
+      "description": "Named ranges, low to high, e.g. Outlaw / Drifter / Upstanding. Used by conditions ('band') and shown on the honour bar.",
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "label",
+          "from"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/id"
+          },
+          "label": {
+            "$ref": "#/$defs/text24"
+          },
+          "from": {
+            "type": "integer",
+            "minimum": -1000,
+            "maximum": 1000
+          },
+          "colour": {
+            "$ref": "#/$defs/colour"
+          }
+        }
+      }
+    },
+    "flag": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "scope"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "enum": [
+            "bool",
+            "int",
+            "text"
+          ]
+        },
+        "scope": {
+          "description": "player: one value per player; party: one per party; world: one per region for this adventure (the 'shared world').",
+          "enum": [
+            "player",
+            "party",
+            "world"
+          ]
+        },
+        "default": {
+          "type": [
+            "boolean",
+            "integer",
+            "string"
+          ]
+        },
+        "min": {
+          "type": "integer",
+          "minimum": -1000000,
+          "maximum": 1000000
+        },
+        "max": {
+          "type": "integer",
+          "minimum": -1000000,
+          "maximum": 1000000
+        },
+        "maxLength": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 240,
+          "default": 64
+        },
+        "scriptRead": {
+          "description": "wolfAdventureGetFlag may read it.",
+          "type": "boolean",
+          "default": false
+        },
+        "scriptWrite": {
+          "description": "wolfAdventureSetFlag may write it.",
+          "type": "boolean",
+          "default": false
+        },
+        "journal": {
+          "description": "Shown to the player on the Journal page with this label.",
+          "$ref": "#/$defs/text32"
+        }
+      }
+    },
+    "places": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "spots": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "region",
+              "pos"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/id"
+              },
+              "label": {
+                "$ref": "#/$defs/text32"
+              },
+              "region": {
+                "$ref": "#/$defs/uuid"
+              },
+              "pos": {
+                "$ref": "#/$defs/vec3"
+              },
+              "facing": {
+                "description": "Degrees, 0 = east, 90 = north (STORY v1 facing:, wolf_storyteller.lsl facingDeg).",
+                "type": "number",
+                "minimum": 0,
+                "maximum": 360,
+                "default": 0
+              }
+            }
+          }
+        },
+        "areas": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "region",
+              "shape"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/id"
+              },
+              "label": {
+                "$ref": "#/$defs/text32"
+              },
+              "region": {
+                "$ref": "#/$defs/uuid"
+              },
+              "shape": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "circle"
+                    ],
+                    "properties": {
+                      "circle": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "centre",
+                          "radius"
+                        ],
+                        "properties": {
+                          "centre": {
+                            "$ref": "#/$defs/vec2"
+                          },
+                          "radius": {
+                            "type": "number",
+                            "exclusiveMinimum": 0,
+                            "maximum": 512
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "polygon"
+                    ],
+                    "properties": {
+                      "polygon": {
+                        "type": "array",
+                        "minItems": 3,
+                        "maxItems": 64,
+                        "items": {
+                          "$ref": "#/$defs/vec2"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              "zMin": {
+                "type": "number",
+                "default": -10000
+              },
+              "zMax": {
+                "type": "number",
+                "default": 10000
+              }
+            }
+          }
+        },
+        "paths": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "region",
+              "points"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/id"
+              },
+              "label": {
+                "$ref": "#/$defs/text32"
+              },
+              "region": {
+                "$ref": "#/$defs/uuid"
+              },
+              "points": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 64,
+                "items": {
+                  "$ref": "#/$defs/vec3"
+                }
+              },
+              "loop": {
+                "type": "boolean",
+                "default": false
+              },
+              "gait": {
+                "enum": [
+                  "walk",
+                  "run",
+                  "fly"
+                ],
+                "default": "walk"
+              },
+              "pause": {
+                "description": "Seconds to wait at each point.",
+                "type": "number",
+                "minimum": 0,
+                "maximum": 600,
+                "default": 0
+              }
+            }
+          }
+        },
+        "chests": {
+          "description": "Objects whose contents rewards may hand out (effect give_inventory). Bound in-world with wolfAdventureChest (REGION_HANDS_V1.md).",
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "region"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/id"
+              },
+              "region": {
+                "$ref": "#/$defs/uuid"
+              },
+              "label": {
+                "$ref": "#/$defs/text32"
+              }
+            }
+          }
+        }
+      }
+    },
+    "castSheet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "first",
+        "last",
+        "role"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "first": {
+          "description": "NPC first name (INPCModule.CreateNPC firstname). One word.",
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9'-]{0,30}$"
+        },
+        "last": {
+          "description": "NPC last name (INPCModule.CreateNPC lastname). One word.",
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9'-]{0,30}$"
+        },
+        "title": {
+          "description": "Shown above the name on the talk panel, e.g. 'Sheriff'.",
+          "$ref": "#/$defs/text24"
+        },
+        "portrait": {
+          "$ref": "#/$defs/uuidOrEmpty"
+        },
+        "look": {
+          "description": "appearance: a notecard ASSET holding the LLSD-XML appearance that osNpcSaveAppearance writes (OSSL_Api.cs:2950-2964 reads it with OSDParser.DeserializeLLSDXml + AvatarAppearance.Unpack). Empty = the default avatar (NPCModule).",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "appearance": {
+              "$ref": "#/$defs/uuidOrEmpty"
+            }
+          }
+        },
+        "home": {
+          "description": "Spot id where the character stands when nothing else says.",
+          "$ref": "#/$defs/id"
+        },
+        "role": {
+          "$ref": "#/$defs/text240"
+        },
+        "persona": {
+          "description": "Who they are, how they speak. Read by Wolf Mind.",
+          "$ref": "#/$defs/text2000"
+        },
+        "manner": {
+          "description": "Voice and manner for the writer and for TTS pacing.",
+          "$ref": "#/$defs/text240"
+        },
+        "knows": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/$defs/text500"
+          }
+        },
+        "neverReveal": {
+          "description": "Secrets. Checked on every AI reply (WOLF_MIND_V1.md 'Output checks').",
+          "type": "array",
+          "maxItems": 30,
+          "items": {
+            "$ref": "#/$defs/text240"
+          }
+        },
+        "neverSay": {
+          "description": "Words or phrases the character never uses (substring match, case-insensitive).",
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/$defs/text64"
+          }
+        },
+        "cards": {
+          "description": "Story card ids this character may know about (empty = every card not restricted to other cast).",
+          "type": "array",
+          "maxItems": 100,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/id"
+          }
+        },
+        "greeting": {
+          "$ref": "#/$defs/text500"
+        },
+        "idle": {
+          "description": "Written lines for 'not part of your current beat' (STORY v1 idle:). Picked in turn; also the non-AI fallback.",
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "$ref": "#/$defs/line"
+          }
+        },
+        "barks": {
+          "description": "Short scripted lines for crowds and moments (no AI).",
+          "type": "array",
+          "maxItems": 40,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "when",
+              "line"
+            ],
+            "properties": {
+              "when": {
+                "enum": [
+                  "near",
+                  "greet",
+                  "farewell",
+                  "hurt",
+                  "defeated",
+                  "victory",
+                  "night",
+                  "rain",
+                  "idle"
+                ]
+              },
+              "line": {
+                "$ref": "#/$defs/line"
+              },
+              "chance": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "default": 1
+              }
+            }
+          }
+        },
+        "voice": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "description": "A voice id from the brain's voice list (WOLF_MIND_V1.md 'Voices'), e.g. piper:en_GB-alan-medium.",
+              "type": "string",
+              "pattern": "^[a-z]+:[A-Za-z0-9_.-]{1,64}$"
+            },
+            "rate": {
+              "type": "number",
+              "minimum": 0.5,
+              "maximum": 2.0,
+              "default": 1.0
+            }
+          }
+        },
+        "schedule": {
+          "description": "Where they are by time of day (region time, hours 0-24). First matching entry wins; none = home.",
+          "type": "array",
+          "maxItems": 12,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "from",
+              "to"
+            ],
+            "properties": {
+              "from": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 24
+              },
+              "to": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 24
+              },
+              "spot": {
+                "$ref": "#/$defs/id"
+              },
+              "path": {
+                "$ref": "#/$defs/id"
+              },
+              "anim": {
+                "$ref": "#/$defs/anim"
+              },
+              "absent": {
+                "description": "Not in the world at all during this time.",
+                "type": "boolean",
+                "default": false
+              }
+            }
+          }
+        },
+        "anim": {
+          "$ref": "#/$defs/anim"
+        },
+        "actions": {
+          "description": "The allow-list of actions Wolf Mind may propose for this character (WOLF_MIND_V1.md 'Actions'). Empty = say/emote only.",
+          "type": "array",
+          "maxItems": 10,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "give_hint",
+              "offer_choice",
+              "fire_trigger",
+              "refuse",
+              "call_gm",
+              "follow",
+              "stop_following",
+              "attack",
+              "flee",
+              "end_talk"
+            ]
+          }
+        },
+        "triggerIds": {
+          "description": "For fire_trigger: the ONLY trigger ids (type ai) this character may fire.",
+          "type": "array",
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/id"
+          }
+        },
+        "actor": {
+          "description": "This character is a wolfGame actor: targetable, has health, may be fought (REGION_HANDS_V1.md 'Director NPCs as wolfGame actors').",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "health"
+          ],
+          "properties": {
+            "health": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000000
+            },
+            "level": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000,
+              "default": 0
+            },
+            "hostility": {
+              "enum": [
+                "hostile",
+                "neutral",
+                "friendly"
+              ],
+              "default": "neutral"
+            },
+            "sub": {
+              "$ref": "#/$defs/text32"
+            },
+            "icon": {
+              "type": "string",
+              "maxLength": 36
+            },
+            "loot": {
+              "$ref": "#/$defs/id"
+            },
+            "statBlock": {
+              "description": "5e preset: a monster or NPC stat block id in the preset's data (RULES_PRESETS_V1.md). Other presets: a stat map.",
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/id"
+                },
+                {
+                  "type": "object",
+                  "maxProperties": 32,
+                  "additionalProperties": {
+                    "type": "integer",
+                    "minimum": -1000000,
+                    "maximum": 1000000
+                  }
+                }
+              ]
+            },
+            "respawn": {
+              "description": "Seconds after defeat before it may be spawned again; 0 = only by the story.",
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 86400,
+              "default": 0
+            }
+          }
+        },
+        "source": {
+          "description": "Imported from a Character Card (V2/V3): kept for the Studio's provenance line.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "spec": {
+              "enum": [
+                "chara_card_v2",
+                "chara_card_v3"
+              ]
+            },
+            "creator": {
+              "$ref": "#/$defs/text64"
+            },
+            "version": {
+              "$ref": "#/$defs/text32"
+            }
+          }
+        }
+      }
+    },
+    "anim": {
+      "description": "An animation: a built-in name (e.g. stand, sit, dance1 - the viewer's default animations) or an animation asset UUID.",
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^([a-z0-9_]{1,32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$"
+    },
+    "line": {
+      "description": "A written line. 'audio' is a sound asset UUID (pre-recorded, played at the speaker, no AI cost).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "text"
+      ],
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "emote": {
+          "$ref": "#/$defs/anim"
+        },
+        "audio": {
+          "$ref": "#/$defs/uuidOrEmpty"
+        },
+        "if": {
+          "$ref": "#/$defs/condition"
+        }
+      }
+    },
+    "storyCard": {
+      "description": "Lore read by Wolf Mind only when a key appears in the conversation (AI Dungeon / Character Card character_book pattern).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "keys",
+        "text"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "title": {
+          "$ref": "#/$defs/text64"
+        },
+        "keys": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48
+          }
+        },
+        "text": {
+          "$ref": "#/$defs/text1000"
+        },
+        "always": {
+          "description": "Always included (Character Card 'constant').",
+          "type": "boolean",
+          "default": false
+        },
+        "priority": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "default": 50
+        },
+        "cast": {
+          "description": "Only these characters know it (empty = all).",
+          "type": "array",
+          "maxItems": 100,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/id"
+          }
+        },
+        "gmOnly": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "sourceCard": {
+      "description": "A cited fact for accuracy mode. Every reply that uses one shows its citation.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "keys",
+        "text",
+        "citation"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "keys": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48
+          }
+        },
+        "text": {
+          "$ref": "#/$defs/text1000"
+        },
+        "citation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "title"
+          ],
+          "properties": {
+            "title": {
+              "$ref": "#/$defs/text240"
+            },
+            "author": {
+              "$ref": "#/$defs/text240"
+            },
+            "date": {
+              "description": "Free text: 1912, 1857-09-11, c. 1850.",
+              "$ref": "#/$defs/text32"
+            },
+            "where": {
+              "description": "Page, chapter, paragraph.",
+              "$ref": "#/$defs/text64"
+            },
+            "url": {
+              "type": "string",
+              "maxLength": 1024,
+              "pattern": "^https://"
+            },
+            "licence": {
+              "type": "string",
+              "pattern": "^([A-Za-z0-9.+-]{1,40}|public-domain|fair-quote)$"
+            }
+          }
+        },
+        "era": {
+          "description": "For the anachronism check: the latest year this card may speak about.",
+          "type": "integer",
+          "minimum": -10000,
+          "maximum": 3000
+        },
+        "cast": {
+          "type": "array",
+          "maxItems": 100,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/id"
+          }
+        }
+      }
+    },
+    "encounter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "members"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "label": {
+          "$ref": "#/$defs/text32"
+        },
+        "at": {
+          "description": "Spot id the group is placed round.",
+          "$ref": "#/$defs/id"
+        },
+        "members": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "cast"
+            ],
+            "properties": {
+              "cast": {
+                "$ref": "#/$defs/id"
+              },
+              "count": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10,
+                "default": 1
+              },
+              "offset": {
+                "$ref": "#/$defs/vec3"
+              },
+              "path": {
+                "$ref": "#/$defs/id"
+              }
+            }
+          }
+        },
+        "props": {
+          "description": "Inventory objects the hands rez from a bound chest (REGION_HANDS_V1.md 'Props').",
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "chest",
+              "item",
+              "pos"
+            ],
+            "properties": {
+              "chest": {
+                "$ref": "#/$defs/id"
+              },
+              "item": {
+                "$ref": "#/$defs/text64"
+              },
+              "pos": {
+                "$ref": "#/$defs/vec3"
+              },
+              "rot": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 360,
+                "default": 0
+              }
+            }
+          }
+        },
+        "despawnAfter": {
+          "description": "Seconds with no player within 64 m before it is removed.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 86400,
+          "default": 300
+        },
+        "combat": {
+          "description": "Start initiative/turn order when it spawns (rules preset combat.mode turns).",
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "rewardParcel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "label": {
+          "$ref": "#/$defs/text32"
+        },
+        "items": {
+          "description": "wolfGame items (IWolfGameModule.ItemAdd names, a-z0-9_ up to 24).",
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "item",
+              "qty"
+            ],
+            "properties": {
+              "item": {
+                "type": "string",
+                "pattern": "^[a-z0-9_]{1,24}$"
+              },
+              "qty": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1000000
+              }
+            }
+          }
+        },
+        "money": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000000
+        },
+        "stats": {
+          "description": "wolfGame stat deltas, e.g. {\"xp\": 50}.",
+          "type": "object",
+          "maxProperties": 16,
+          "propertyNames": {
+            "pattern": "^[a-z0-9_]{1,24}$"
+          },
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": -1000000,
+            "maximum": 1000000
+          }
+        },
+        "inventory": {
+          "description": "Second Life-style inventory items given from a bound chest (STORY v1 give steps).",
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "chest",
+              "item"
+            ],
+            "properties": {
+              "chest": {
+                "$ref": "#/$defs/id"
+              },
+              "item": {
+                "$ref": "#/$defs/text64"
+              }
+            }
+          }
+        },
+        "once": {
+          "description": "Given once per player per adventure, ever (STORY v1: 'rewards are still given only once').",
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "handout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "title"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "kind": {
+          "enum": [
+            "image",
+            "letter",
+            "map",
+            "note"
+          ]
+        },
+        "title": {
+          "$ref": "#/$defs/text64"
+        },
+        "texture": {
+          "$ref": "#/$defs/uuidOrEmpty"
+        },
+        "text": {
+          "$ref": "#/$defs/text4000"
+        },
+        "marker": {
+          "description": "A map handout's marker spot.",
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "learning": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "goals": {
+          "type": "array",
+          "maxItems": 12,
+          "items": {
+            "$ref": "#/$defs/text240"
+          }
+        },
+        "keyFacts": {
+          "description": "Source card ids the scene must cover.",
+          "type": "array",
+          "maxItems": 30,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/id"
+          }
+        },
+        "quiz": {
+          "$ref": "#/$defs/id"
+        },
+        "xapiActivity": {
+          "description": "IRI for this scene/adventure as an xAPI Activity. Empty = the brain's default (BRAIN_API_V1.md 'xAPI').",
+          "type": "string",
+          "maxLength": 1024,
+          "pattern": "^(https://.*)?$"
+        }
+      }
+    },
+    "quiz": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "items"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "title": {
+          "$ref": "#/$defs/text64"
+        },
+        "passMark": {
+          "description": "0..1 of the points (cmi5 masteryScore range).",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.6
+        },
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "type",
+              "prompt"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/id"
+              },
+              "type": {
+                "description": "choice = QTI qti-choice-interaction; text = qti-text-entry-interaction (auto-marked against 'accept'); essay = qti-extended-text-interaction (teacher marks).",
+                "enum": [
+                  "choice",
+                  "text",
+                  "essay"
+                ]
+              },
+              "prompt": {
+                "$ref": "#/$defs/text500"
+              },
+              "choices": {
+                "type": "array",
+                "maxItems": 6,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "id",
+                    "label"
+                  ],
+                  "properties": {
+                    "id": {
+                      "$ref": "#/$defs/id"
+                    },
+                    "label": {
+                      "$ref": "#/$defs/text240"
+                    }
+                  }
+                }
+              },
+              "maxChoices": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 6,
+                "default": 1
+              },
+              "correct": {
+                "type": "array",
+                "maxItems": 6,
+                "uniqueItems": true,
+                "items": {
+                  "$ref": "#/$defs/id"
+                }
+              },
+              "accept": {
+                "description": "text items: accepted answers, compared trimmed and case-insensitive.",
+                "type": "array",
+                "maxItems": 10,
+                "items": {
+                  "$ref": "#/$defs/text64"
+                }
+              },
+              "points": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100,
+                "default": 1
+              },
+              "source": {
+                "$ref": "#/$defs/id"
+              }
+            }
+          }
+        }
+      }
+    },
+    "act": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "scenes"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "title": {
+          "$ref": "#/$defs/text64"
+        },
+        "titleCard": {
+          "description": "Shown as a chapter card (stage 'title') when the act starts.",
+          "type": "boolean",
+          "default": true
+        },
+        "scenes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/$defs/scene"
+          }
+        }
+      }
+    },
+    "scene": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "region",
+        "beats"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "title": {
+          "$ref": "#/$defs/text64"
+        },
+        "region": {
+          "$ref": "#/$defs/uuid"
+        },
+        "area": {
+          "$ref": "#/$defs/id"
+        },
+        "shared": {
+          "description": "party mode 'both': this scene's world state (cast placement, props, world flags) is shared by every party on the region; per-party otherwise.",
+          "type": "boolean",
+          "default": false
+        },
+        "stage": {
+          "$ref": "#/$defs/stage"
+        },
+        "boxed": {
+          "description": "Read-aloud text, shown as a vignette on entering the scene.",
+          "$ref": "#/$defs/text2000"
+        },
+        "gmNotes": {
+          "$ref": "#/$defs/text4000"
+        },
+        "handouts": {
+          "type": "array",
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/id"
+          }
+        },
+        "entry": {
+          "description": "May the party enter this scene? Checked on goto_scene.",
+          "$ref": "#/$defs/condition"
+        },
+        "onEnter": {
+          "$ref": "#/$defs/effects"
+        },
+        "exits": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "to"
+            ],
+            "properties": {
+              "to": {
+                "description": "Scene id.",
+                "$ref": "#/$defs/id"
+              },
+              "if": {
+                "$ref": "#/$defs/condition"
+              },
+              "label": {
+                "$ref": "#/$defs/text32"
+              }
+            }
+          }
+        },
+        "learning": {
+          "$ref": "#/$defs/learning"
+        },
+        "beats": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/$defs/beat"
+          }
+        }
+      }
+    },
+    "stage": {
+      "description": "The stage bundle applied all at once when the scene starts (plan lesson 3).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cast": {
+          "type": "array",
+          "maxItems": 40,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "cast"
+            ],
+            "properties": {
+              "cast": {
+                "$ref": "#/$defs/id"
+              },
+              "spot": {
+                "$ref": "#/$defs/id"
+              },
+              "path": {
+                "$ref": "#/$defs/id"
+              },
+              "anim": {
+                "$ref": "#/$defs/anim"
+              },
+              "followSchedule": {
+                "type": "boolean",
+                "default": false
+              }
+            }
+          }
+        },
+        "dismiss": {
+          "description": "Cast ids removed when the scene starts.",
+          "type": "array",
+          "maxItems": 40,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/id"
+          }
+        },
+        "encounters": {
+          "description": "Encounter ids spawned with the scene (others are fired by effects or the GM).",
+          "type": "array",
+          "maxItems": 10,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/id"
+          }
+        },
+        "ambience": {
+          "$ref": "#/$defs/ambience"
+        },
+        "intro": {
+          "description": "Opening staging for the players in the scene.",
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/stageCue"
+          }
+        }
+      }
+    },
+    "ambience": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "environment": {
+          "description": "A PARTIAL Wolf Environment document (format 1, wolfstorm php/wolf_env_lib.php; the same patch wolfEnvironmentSet sends). Applied to the scene's area scope by the brain through wolf_environment.php. Checked by we_normalise.",
+          "type": "object"
+        },
+        "scope": {
+          "description": "Where 'environment' is written: the whole region, or the parcel at the scene area's centre. Needs the region holder's environment approval (BRAIN_API_V1.md enable_region). Music and sounds always reach only the party.",
+          "enum": [
+            "region",
+            "parcel"
+          ],
+          "default": "region"
+        },
+        "music": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "url": {
+              "description": "A stream or file for the party's viewers (the HUD 'stage' music cue).",
+              "type": "string",
+              "maxLength": 1024,
+              "pattern": "^https://"
+            },
+            "volume": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "default": 0.6
+            },
+            "loop": {
+              "type": "boolean",
+              "default": true
+            }
+          }
+        },
+        "sounds": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "sound"
+            ],
+            "properties": {
+              "sound": {
+                "$ref": "#/$defs/uuid"
+              },
+              "at": {
+                "$ref": "#/$defs/id"
+              },
+              "volume": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "default": 1
+              },
+              "every": {
+                "description": "Repeat every N seconds (0 = once).",
+                "type": "number",
+                "minimum": 0,
+                "maximum": 3600,
+                "default": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    "stageCue": {
+      "description": "One HUD 'stage' cue (HUD_MESSAGES_V1.md 'stage').",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cue"
+      ],
+      "properties": {
+        "cue": {
+          "enum": [
+            "letterbox",
+            "fade",
+            "title",
+            "look",
+            "pan",
+            "music",
+            "clear"
+          ]
+        },
+        "on": {
+          "type": "boolean"
+        },
+        "to": {
+          "description": "fade: 'black' or 'clear'.",
+          "enum": [
+            "black",
+            "clear"
+          ]
+        },
+        "sec": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 30
+        },
+        "text": {
+          "$ref": "#/$defs/text64"
+        },
+        "sub": {
+          "$ref": "#/$defs/text64"
+        },
+        "spot": {
+          "$ref": "#/$defs/id"
+        },
+        "from": {
+          "$ref": "#/$defs/id"
+        },
+        "url": {
+          "type": "string",
+          "maxLength": 1024,
+          "pattern": "^https://"
+        }
+      }
+    },
+    "beat": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "objective",
+        "triggers"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "title": {
+          "$ref": "#/$defs/text64"
+        },
+        "objective": {
+          "description": "The journal's current objective line.",
+          "$ref": "#/$defs/text240"
+        },
+        "marker": {
+          "description": "Spot id for the map / world marker.",
+          "$ref": "#/$defs/id"
+        },
+        "onDuty": {
+          "description": "Characters with a job in this beat, and what each wants (Wolf Mind's beat layer).",
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "cast"
+            ],
+            "properties": {
+              "cast": {
+                "$ref": "#/$defs/id"
+              },
+              "goal": {
+                "$ref": "#/$defs/text500"
+              },
+              "lines": {
+                "description": "Written lines for this beat (non-AI mode speaks these; AI mode may use them).",
+                "type": "array",
+                "maxItems": 20,
+                "items": {
+                  "$ref": "#/$defs/line"
+                }
+              },
+              "replies": {
+                "description": "Quick replies shown on the talk panel.",
+                "type": "array",
+                "maxItems": 6,
+                "items": {
+                  "$ref": "#/$defs/quickReply"
+                }
+              }
+            }
+          }
+        },
+        "onEnter": {
+          "$ref": "#/$defs/effects"
+        },
+        "decisions": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/decision"
+          }
+        },
+        "triggers": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/trigger"
+          }
+        },
+        "hints": {
+          "description": "Shown when the party has not moved on for 'after' seconds (the rules-only recovery; the AI Director adds more in ai mode).",
+          "type": "array",
+          "maxItems": 6,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "after",
+              "text"
+            ],
+            "properties": {
+              "after": {
+                "type": "integer",
+                "minimum": 10,
+                "maximum": 86400
+              },
+              "text": {
+                "$ref": "#/$defs/text240"
+              },
+              "by": {
+                "description": "Cast id who says it (else the narrator).",
+                "$ref": "#/$defs/id"
+              }
+            }
+          }
+        },
+        "recover": {
+          "description": "If the party leaves the scene's area for this long, run these effects (send someone to fetch them, re-stage) - never fail them (plan lesson 8).",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "after",
+            "do"
+          ],
+          "properties": {
+            "after": {
+              "type": "integer",
+              "minimum": 30,
+              "maximum": 86400
+            },
+            "do": {
+              "$ref": "#/$defs/effects"
+            }
+          }
+        },
+        "aiNotes": {
+          "description": "Private guidance for the AI Director in this beat.",
+          "$ref": "#/$defs/text1000"
+        }
+      }
+    },
+    "quickReply": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "label": {
+          "description": "Button text (STORY v1 option buttons: 24).",
+          "$ref": "#/$defs/text24"
+        },
+        "say": {
+          "description": "What the player says (default = label).",
+          "$ref": "#/$defs/text240"
+        },
+        "if": {
+          "$ref": "#/$defs/condition"
+        }
+      }
+    },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "prompt",
+        "options"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "prompt": {
+          "$ref": "#/$defs/text500"
+        },
+        "by": {
+          "description": "Cast id who asks (else the narrator). Shown as a vignette.",
+          "$ref": "#/$defs/id"
+        },
+        "image": {
+          "$ref": "#/$defs/uuidOrEmpty"
+        },
+        "who": {
+          "description": "player: each player chooses for themself; leader: the party leader chooses for the party; vote: majority of party members within 'sec'.",
+          "enum": [
+            "player",
+            "leader",
+            "vote"
+          ],
+          "default": "player"
+        },
+        "sec": {
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 600,
+          "default": 60
+        },
+        "options": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 6,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "label"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/id"
+              },
+              "label": {
+                "$ref": "#/$defs/text24"
+              },
+              "detail": {
+                "$ref": "#/$defs/text240"
+              },
+              "if": {
+                "$ref": "#/$defs/condition"
+              },
+              "do": {
+                "$ref": "#/$defs/effects"
+              }
+            }
+          }
+        }
+      }
+    },
+    "trigger": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "on"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "on": {
+          "description": "Every trigger type. The fields each type needs are in ADVENTURE_PACK_V1.md 'Triggers' and are checked by the brain.",
+          "enum": [
+            "arrive",
+            "leave",
+            "touch",
+            "talk",
+            "say",
+            "choose",
+            "give",
+            "defeat",
+            "timer",
+            "flag",
+            "gm",
+            "script",
+            "roll",
+            "item",
+            "sit",
+            "time",
+            "quiz",
+            "ready",
+            "ai",
+            "scene",
+            "won",
+            "lost"
+          ]
+        },
+        "cast": {
+          "$ref": "#/$defs/id"
+        },
+        "area": {
+          "$ref": "#/$defs/id"
+        },
+        "object": {
+          "description": "touch/sit: the object NAME; touch also matches an object whose root description is 'touch: <name>' (STORY v1 spots, REGION_HANDS_V1.md section 7).",
+          "$ref": "#/$defs/text64"
+        },
+        "decision": {
+          "$ref": "#/$defs/id"
+        },
+        "option": {
+          "$ref": "#/$defs/id"
+        },
+        "reply": {
+          "description": "talk: a quick reply id.",
+          "$ref": "#/$defs/id"
+        },
+        "intent": {
+          "description": "say: words that count (any of them, whole words, case-insensitive), matched by the brain without AI; in ai mode Wolf Mind may also report an intent id equal to this trigger's id.",
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48
+          }
+        },
+        "item": {
+          "type": "string",
+          "pattern": "^[a-z0-9_]{1,24}$"
+        },
+        "qty": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000,
+          "default": 1
+        },
+        "sec": {
+          "description": "timer: seconds since the beat started.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400
+        },
+        "hours": {
+          "description": "time: region hours [from, to].",
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 24
+          }
+        },
+        "check": {
+          "description": "roll: a check id from the rules preset.",
+          "$ref": "#/$defs/id"
+        },
+        "dc": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "result": {
+          "description": "roll: which outcome fires this trigger.",
+          "enum": [
+            "success",
+            "failure",
+            "critical",
+            "fumble"
+          ]
+        },
+        "quiz": {
+          "$ref": "#/$defs/id"
+        },
+        "passed": {
+          "type": "boolean"
+        },
+        "scene": {
+          "description": "scene: fires when the party enters this scene.",
+          "$ref": "#/$defs/id"
+        },
+        "battle": {
+          "description": "won / lost: the battle.",
+          "$ref": "#/$defs/id"
+        },
+        "if": {
+          "$ref": "#/$defs/condition"
+        },
+        "who": {
+          "description": "any: one player is enough; all: every party member present; leader: the party leader.",
+          "enum": [
+            "any",
+            "all",
+            "leader"
+          ],
+          "default": "any"
+        },
+        "once": {
+          "type": "boolean",
+          "default": true
+        },
+        "do": {
+          "$ref": "#/$defs/effects"
+        },
+        "next": {
+          "description": "Beat id to move the party to after 'do' (same scene or another).",
+          "$ref": "#/$defs/id"
+        },
+        "label": {
+          "description": "GM Console button text for 'gm' triggers.",
+          "$ref": "#/$defs/text24"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "on": {
+                "const": "arrive"
+              }
+            },
+            "required": [
+              "on"
+            ]
+          },
+          "then": {
+            "required": [
+              "area"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "on": {
+                "const": "leave"
+              }
+            },
+            "required": [
+              "on"
+            ]
+          },
+          "then": {
+            "required": [
+              "area"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "on": {
+                "const": "touch"
+              }
+            },
+            "required": [
+              "on"
+            ]
+          },
+          "then": {
+            "required": [
+              "object"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "on": {
+                "const": "talk"
+              }
+            },
+            "required": [
+              "on"
+            ]
+          },
+          "then": {
+            "required": [
+              "cast"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "on": {
+                "const": "say"
+              }
+            },
+            "required": [
+              "on"
+            ]
+          },
+          "then": {
+            "required": [
+              "cast",
+              "intent"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "on": {
+                "const": "choose"
+              }
+            },
+            "required": [
+              "on"
+            ]
+          },
+          "then": {
+            "required": [
+              "decision"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "on": {
+                "const": "give"
+              }
+            },
+            "required": [
+              "on"
+            ]
+          },
+          "then": {
+            "required": [
+              "cast",
+              "item"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "on": {
+                "const": "defeat"
+              }
+            },
+            "required": [
+              "on"
+            ]
+          },
+          "then": {
+            "required": [
+              "cast"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "on": {
+                "const": "timer"
+              }
+            },
+            "required": [
+              "on"
+            ]
+          },
+          "then": {
+            "required": [
+              "sec"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "on": {
+                "const": "flag"
+              }
+            },
+            "required": [
+              "on"
+            ]
+          },
+          "then": {
+            "required": [
+              "if"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "on": {
+                "const": "gm"
+              }
+            },
+            "required": [
+              "on"
+            ]
+          },
+          "then": {
+            "required": [
+              "label"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "on": {
+                "const": "roll"
+              }
+            },
+            "required": [
+              "on"
+            ]
+          },
+          "then": {
+            "required": [
+              "check",
+              "result"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "on": {
+                "const": "item"
+              }
+            },
+            "required": [
+              "on"
+            ]
+          },
+          "then": {
+            "required": [
+              "item"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "on": {
+                "const": "sit"
+              }
+            },
+            "required": [
+              "on"
+            ]
+          },
+          "then": {
+            "required": [
+              "object"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "on": {
+                "const": "time"
+              }
+            },
+            "required": [
+              "on"
+            ]
+          },
+          "then": {
+            "required": [
+              "hours"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "on": {
+                "const": "quiz"
+              }
+            },
+            "required": [
+              "on"
+            ]
+          },
+          "then": {
+            "required": [
+              "quiz"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "on": {
+                "const": "ai"
+              }
+            },
+            "required": [
+              "on"
+            ]
+          },
+          "then": {
+            "required": [
+              "cast"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "on": {
+                "const": "scene"
+              }
+            },
+            "required": [
+              "on"
+            ]
+          },
+          "then": {
+            "required": [
+              "scene"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "on": {
+                "const": "won"
+              }
+            },
+            "required": [
+              "on"
+            ]
+          },
+          "then": {
+            "required": [
+              "battle"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "on": {
+                "const": "lost"
+              }
+            },
+            "required": [
+              "on"
+            ]
+          },
+          "then": {
+            "required": [
+              "battle"
+            ]
+          }
+        }
+      ]
+    },
+    "effects": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "$ref": "#/$defs/effect"
+      }
+    },
+    "effect": {
+      "description": "One step. Exactly one operation key. Run in order; 'wait' pauses the rest (the brain schedules them).",
+      "type": "object",
+      "anyOf": [
+        {
+          "required": [
+            "if"
+          ],
+          "minProperties": 2,
+          "maxProperties": 2
+        },
+        {
+          "not": {
+            "required": [
+              "if"
+            ]
+          },
+          "minProperties": 1,
+          "maxProperties": 1
+        }
+      ],
+      "properties": {
+        "if": {
+          "$ref": "#/$defs/condition"
+        },
+        "set": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "flag",
+            "value"
+          ],
+          "properties": {
+            "flag": {
+              "$ref": "#/$defs/id"
+            },
+            "value": {
+              "type": [
+                "boolean",
+                "integer",
+                "string"
+              ]
+            }
+          }
+        },
+        "add": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "flag",
+            "by"
+          ],
+          "properties": {
+            "flag": {
+              "$ref": "#/$defs/id"
+            },
+            "by": {
+              "type": "integer",
+              "minimum": -1000000,
+              "maximum": 1000000
+            }
+          }
+        },
+        "rep": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "by"
+          ],
+          "properties": {
+            "faction": {
+              "$ref": "#/$defs/id"
+            },
+            "cast": {
+              "$ref": "#/$defs/id"
+            },
+            "by": {
+              "type": "integer",
+              "minimum": -1000,
+              "maximum": 1000
+            },
+            "why": {
+              "$ref": "#/$defs/text64"
+            }
+          }
+        },
+        "honour": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "by"
+          ],
+          "properties": {
+            "by": {
+              "type": "integer",
+              "minimum": -1000,
+              "maximum": 1000
+            },
+            "why": {
+              "$ref": "#/$defs/text64"
+            }
+          }
+        },
+        "goto": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "beat": {
+              "$ref": "#/$defs/id"
+            },
+            "scene": {
+              "$ref": "#/$defs/id"
+            }
+          }
+        },
+        "end": {
+          "description": "Ending id.",
+          "$ref": "#/$defs/id"
+        },
+        "reward": {
+          "description": "Reward parcel id.",
+          "$ref": "#/$defs/id"
+        },
+        "take": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "item",
+            "qty"
+          ],
+          "properties": {
+            "item": {
+              "type": "string",
+              "pattern": "^[a-z0-9_]{1,24}$"
+            },
+            "qty": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000000
+            }
+          }
+        },
+        "journal": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "text"
+          ],
+          "properties": {
+            "text": {
+              "$ref": "#/$defs/text240"
+            },
+            "kind": {
+              "enum": [
+                "note",
+                "clue",
+                "done",
+                "lore"
+              ],
+              "default": "note"
+            }
+          }
+        },
+        "vignette": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "text"
+          ],
+          "properties": {
+            "title": {
+              "$ref": "#/$defs/text64"
+            },
+            "text": {
+              "$ref": "#/$defs/text2000"
+            },
+            "image": {
+              "$ref": "#/$defs/uuidOrEmpty"
+            },
+            "decision": {
+              "description": "Show this decision's options on the card.",
+              "$ref": "#/$defs/id"
+            }
+          }
+        },
+        "say": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "text"
+          ],
+          "properties": {
+            "cast": {
+              "description": "Cast id; empty = narrator.",
+              "$ref": "#/$defs/id"
+            },
+            "text": {
+              "$ref": "#/$defs/text500"
+            },
+            "to": {
+              "enum": [
+                "player",
+                "party",
+                "near"
+              ],
+              "default": "party"
+            },
+            "audio": {
+              "$ref": "#/$defs/uuidOrEmpty"
+            }
+          }
+        },
+        "spawn": {
+          "description": "Encounter id.",
+          "$ref": "#/$defs/id"
+        },
+        "despawn": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "encounter": {
+              "$ref": "#/$defs/id"
+            },
+            "cast": {
+              "$ref": "#/$defs/id"
+            }
+          }
+        },
+        "move": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "cast"
+          ],
+          "properties": {
+            "cast": {
+              "$ref": "#/$defs/id"
+            },
+            "spot": {
+              "$ref": "#/$defs/id"
+            },
+            "path": {
+              "$ref": "#/$defs/id"
+            },
+            "follow": {
+              "description": "Follow the triggering player (or stop following with false).",
+              "type": "boolean"
+            },
+            "gait": {
+              "enum": [
+                "walk",
+                "run",
+                "fly"
+              ]
+            }
+          }
+        },
+        "anim": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "cast",
+            "anim"
+          ],
+          "properties": {
+            "cast": {
+              "$ref": "#/$defs/id"
+            },
+            "anim": {
+              "$ref": "#/$defs/anim"
+            },
+            "stop": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        },
+        "stage": {
+          "$ref": "#/$defs/stageCue"
+        },
+        "ambience": {
+          "$ref": "#/$defs/ambience"
+        },
+        "sound": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sound"
+          ],
+          "properties": {
+            "sound": {
+              "$ref": "#/$defs/uuid"
+            },
+            "at": {
+              "$ref": "#/$defs/id"
+            },
+            "volume": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "default": 1
+            }
+          }
+        },
+        "marker": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "spot": {
+              "$ref": "#/$defs/id"
+            },
+            "label": {
+              "$ref": "#/$defs/text32"
+            },
+            "clear": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        },
+        "notify": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "text"
+          ],
+          "properties": {
+            "title": {
+              "$ref": "#/$defs/text64"
+            },
+            "text": {
+              "$ref": "#/$defs/text500"
+            },
+            "kind": {
+              "enum": [
+                "info",
+                "success",
+                "warning",
+                "danger"
+              ],
+              "default": "info"
+            }
+          }
+        },
+        "handout": {
+          "description": "Handout id given to the party (Journal > Handouts).",
+          "$ref": "#/$defs/id"
+        },
+        "roll": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "check"
+          ],
+          "properties": {
+            "check": {
+              "$ref": "#/$defs/id"
+            },
+            "dc": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "who": {
+              "enum": [
+                "player",
+                "each",
+                "leader"
+              ],
+              "default": "player"
+            },
+            "public": {
+              "type": "boolean",
+              "default": true
+            },
+            "label": {
+              "$ref": "#/$defs/text64"
+            }
+          }
+        },
+        "combat": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "on"
+          ],
+          "properties": {
+            "on": {
+              "type": "boolean"
+            },
+            "encounter": {
+              "$ref": "#/$defs/id"
+            }
+          }
+        },
+        "hint": {
+          "$ref": "#/$defs/text240"
+        },
+        "callGm": {
+          "$ref": "#/$defs/text240"
+        },
+        "quiz": {
+          "description": "Quiz id shown to the player(s).",
+          "$ref": "#/$defs/id"
+        },
+        "wait": {
+          "description": "Seconds before the next effect.",
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 600
+        },
+        "join": {
+          "description": "A companion (STORY_FIRST_DESIGN.md section 9): the character walks with the players from here, following the triggering player or the party's leader, until the beat `until` (if given) or a `leave`. At most 2 per party.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "cast",
+            "follow"
+          ],
+          "properties": {
+            "cast": {
+              "$ref": "#/$defs/id"
+            },
+            "follow": {
+              "enum": [
+                "player",
+                "party"
+              ]
+            },
+            "until": {
+              "description": "Beat id: the companion leaves by itself when the party enters it.",
+              "$ref": "#/$defs/id"
+            }
+          }
+        },
+        "leave": {
+          "description": "A companion stops walking with the players and goes.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "cast"
+          ],
+          "properties": {
+            "cast": {
+              "$ref": "#/$defs/id"
+            }
+          }
+        },
+        "battle": {
+          "description": "[M4] Battle id: the fight starts (COMBAT_V1.md section 1.3).",
+          "$ref": "#/$defs/id"
+        },
+        "signal": {
+          "description": "[M6] A signal to the adventure's listening scripts (STORY_FIRST_DESIGN.md section 6): the event line signal|<agent>|<adventure>|<name>|<data> (REGION_HANDS_V1.md section 8), for the triggering player, else each of the party. data: at most 240 bytes.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name"
+          ],
+          "properties": {
+            "name": {
+              "$ref": "#/$defs/id"
+            },
+            "data": {
+              "$ref": "#/$defs/text240"
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "condition": {
+      "description": "A JSON condition tree (no string expressions). ADVENTURE_PACK_V1.md 'Conditions'.",
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 3,
+      "additionalProperties": false,
+      "properties": {
+        "all": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/condition"
+          }
+        },
+        "any": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/condition"
+          }
+        },
+        "not": {
+          "$ref": "#/$defs/condition"
+        },
+        "flag": {
+          "$ref": "#/$defs/id"
+        },
+        "rep": {
+          "description": "Faction id.",
+          "$ref": "#/$defs/id"
+        },
+        "castRep": {
+          "description": "Cast id (that character's opinion of the player).",
+          "$ref": "#/$defs/id"
+        },
+        "honour": {
+          "const": true
+        },
+        "band": {
+          "description": "with rep/honour: in this band id.",
+          "$ref": "#/$defs/id"
+        },
+        "visited": {
+          "description": "Beat or scene id: visit count (Ink-style).",
+          "$ref": "#/$defs/id"
+        },
+        "item": {
+          "type": "string",
+          "pattern": "^[a-z0-9_]{1,24}$"
+        },
+        "stat": {
+          "type": "string",
+          "pattern": "^[a-z0-9_]{1,24}$"
+        },
+        "partySize": {
+          "const": true
+        },
+        "hour": {
+          "description": "Region hours [from, to], wrapping past midnight when from > to.",
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 24
+          }
+        },
+        "gmPresent": {
+          "type": "boolean"
+        },
+        "aiMode": {
+          "enum": [
+            "ai",
+            "none"
+          ]
+        },
+        "chance": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "eq": {
+          "type": [
+            "boolean",
+            "integer",
+            "string"
+          ]
+        },
+        "ne": {
+          "type": [
+            "boolean",
+            "integer",
+            "string"
+          ]
+        },
+        "gte": {
+          "type": "integer"
+        },
+        "lte": {
+          "type": "integer"
+        },
+        "gt": {
+          "type": "integer"
+        },
+        "lt": {
+          "type": "integer"
+        }
+      }
+    },
+    "ending": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "text"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "title": {
+          "$ref": "#/$defs/text64"
+        },
+        "text": {
+          "$ref": "#/$defs/text2000"
+        },
+        "if": {
+          "description": "Reached automatically when true at a beat boundary (else only by an 'end' effect).",
+          "$ref": "#/$defs/condition"
+        },
+        "reward": {
+          "$ref": "#/$defs/id"
+        },
+        "outcome": {
+          "description": "For xAPI/LTI: completed only, passed or failed (education).",
+          "enum": [
+            "completed",
+            "passed",
+            "failed"
+          ],
+          "default": "completed"
+        },
+        "image": {
+          "$ref": "#/$defs/uuidOrEmpty"
+        }
+      }
+    },
+    "enemy": {
+      "description": "[M4] An enemy: anything or anyone the players fight (COMBAT_V1.md section 1.1). Only a name is needed: every number has a default (the ready-made enemy of the same name, else an ordinary foe of the rules preset).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "name": {
+          "description": "Also the NPC's name tag: the first word is the first name, the second (or 'Enemy') the last name.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "description": {
+          "$ref": "#/$defs/text500"
+        },
+        "look": {
+          "description": "npc: an NPC wearing an appearance notecard ('' = the default avatar); cast: a character of the story turns on them; object: an object rezzed from a bound chest.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "npc",
+                "cast",
+                "object"
+              ]
+            },
+            "appearance": {
+              "$ref": "#/$defs/uuidOrEmpty"
+            },
+            "cast": {
+              "$ref": "#/$defs/id"
+            },
+            "chest": {
+              "$ref": "#/$defs/id"
+            },
+            "item": {
+              "$ref": "#/$defs/text64"
+            }
+          }
+        },
+        "template": {
+          "description": "The ready-made enemy its numbers came from (enemy_templates), for the Studio.",
+          "$ref": "#/$defs/text64"
+        },
+        "stats": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "hp": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            },
+            "defence": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 60
+            },
+            "attack": {
+              "type": "integer",
+              "minimum": -10,
+              "maximum": 30
+            },
+            "damage": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]?d(2|3|4|6|8|10|12|20|100)(kh[1-9][0-9]?|kl[1-9][0-9]?)?([+-][0-9]{1,3})?$",
+              "description": "Dice, e.g. 1d6+1 (at most 20 dice)."
+            },
+            "initiative": {
+              "type": "integer",
+              "minimum": -10,
+              "maximum": 30
+            }
+          }
+        },
+        "behaviour": {
+          "enum": [
+            "aggressive",
+            "defensive",
+            "flees"
+          ],
+          "default": "aggressive"
+        },
+        "fleeAt": {
+          "description": "flees: runs off at or below this per cent of its health.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 90,
+          "default": 25
+        },
+        "loot": {
+          "description": "A reward parcel given when it is beaten.",
+          "$ref": "#/$defs/id"
+        },
+        "level": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000,
+          "default": 1
+        }
+      }
+    },
+    "battle": {
+      "description": "[M4] A battle: a box whose ways on are 'if they win' (won) and 'if they lose' (lost) (COMBAT_V1.md section 1.2). Started by the effect battle.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "enemies"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "label": {
+          "$ref": "#/$defs/text32"
+        },
+        "enemies": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "enemy"
+            ],
+            "properties": {
+              "enemy": {
+                "$ref": "#/$defs/id"
+              },
+              "count": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10,
+                "default": 1
+              }
+            }
+          }
+        },
+        "at": {
+          "description": "Spot id the enemies appear round (else the box's marker, else beside the party leader).",
+          "$ref": "#/$defs/id"
+        },
+        "spread": {
+          "description": "Metres between the enemies.",
+          "type": "number",
+          "minimum": 1,
+          "maximum": 20,
+          "default": 4
+        },
+        "mayFlee": {
+          "type": "boolean",
+          "default": true
+        },
+        "onLoss": {
+          "description": "retry: everyone back to full health, it starts again after 10 s; continue: the lost way on decides.",
+          "enum": [
+            "retry",
+            "continue"
+          ],
+          "default": "retry"
+        },
+        "reward": {
+          "description": "A reward parcel for every player there at the victory.",
+          "$ref": "#/$defs/id"
+        },
+        "share": {
+          "description": "Who gets an enemy's loot: each player there, or the one who beat it.",
+          "enum": [
+            "each",
+            "killer"
+          ],
+          "default": "each"
+        },
+        "draughts": {
+          "description": "Healing draughts each player has in this battle.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5,
+          "default": 2
+        }
+      }
+    }
+  }
+}

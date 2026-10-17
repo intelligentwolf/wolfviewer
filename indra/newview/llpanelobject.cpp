@@ -2288,7 +2288,9 @@ void LLPanelObject::sendPosition(bool btn_down)
         // Grass is always drawn on the ground, so clamp its position to the ground
         if (mObject->getPCode() == LL_PCODE_LEGACY_GRASS)
         {
-            mCtrlPosZ->set(LLWorld::getInstance()->resolveLandHeightAgent(newpos) + 1.f);
+            // <WolfViewer> newpos is the region-local spinner value; the agent frame may be rebased (LLAgent::rebaseOrigin)
+            mCtrlPosZ->set(LLWorld::getInstance()->resolveLandHeightGlobal(regionp->getPosGlobalFromRegion(newpos)) + 1.f);
+            // </WolfViewer>
         }
         // Make sure new position is in a valid region, so the object
         // won't get dumped by the simulator.

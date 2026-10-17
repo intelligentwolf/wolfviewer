@@ -230,7 +230,7 @@ namespace
                 //                     << '/' << loc.mV[0]
                 //                     << '/' << loc.mV[1]
                 //                     << '/' << loc.mV[2])));
-                const LLVector3 loc = gAgent.getPositionAgent();
+                const LLVector3 loc = gAgent.getPositionRegion();   // <WolfViewer> region coordinates; agent frame may be rebased
                 const auto & fullLocation = STRINGIZE(gAgent.getRegion()->getName()
                                     << '/' << loc.mV[0]
                                     << '/' << loc.mV[1]

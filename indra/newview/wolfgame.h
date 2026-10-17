@@ -322,6 +322,13 @@ public:
 
     const std::deque<Notice>& notices() const { return mNotices; }
     void closeNotice(U32 serial);
+    /** [WOLF ADVENTURE 2026-10-16] A notice the viewer itself raises (an honour change, "The story
+     *  is paused"): the sim's own kind, not rate limited, drawn in the stack as §3.4. */
+    void addNotice(const std::string& title, const std::string& text, ENoticeKind kind);
+    /** [WOLF ADVENTURE 2026-10-16] The capping every message on this channel gets (at most `max`
+     *  code points, control characters out, a newline kept only with `lines`): the adventure
+     *  messages (wolfadventure.cpp) arrive on the same channel and are held to the same rule. */
+    static std::string cleanText(const std::string& in, size_t max, bool lines = false);
 
     const std::map<std::string, Marker>& markers() const { return mMarkers; }
 

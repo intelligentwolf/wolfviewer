@@ -179,7 +179,10 @@ bool isSupportedExtension(const std::string& extension)
 
 bool isAvailable()
 {
-    if (!WolfGrid::isWolfTerritories())
+    // [WOLF GRID GATE 2026-10-17] isOnWolfTerritoriesConfirmed, not the login grid: the textures go to the CURRENT
+    // region's NewFileAgentInventory cap, so after a hypergrid jump they were uploaded (and charged) on the foreign grid
+    // while the mesh went into Wolf's inventory pointing at them.
+    if (!WolfGrid::isOnWolfTerritoriesConfirmed())
     {
         return false;
     }

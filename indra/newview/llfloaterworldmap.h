@@ -196,6 +196,7 @@ protected:
 
 private:
     LLWorldMapView* mMapView; // Panel displaying the map
+    S32 mWolfBuyLandFor = -1;  // [WOLF GRID GATE 2026-10-17/] the grid answer Buy Land was last decided on (draw)
 
     // update display of teleport destination coordinates - pos is in global coordinates
     void updateTeleportCoordsDisplay( const LLVector3d& pos );

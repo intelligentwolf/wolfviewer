@@ -4380,7 +4380,7 @@ bool LLStartUp::dispatchURL()
 
         // If we started with a location, but we're already
         // at that location, don't pop dialogs open.
-        LLVector3 pos = gAgent.getPositionAgent();
+        LLVector3 pos = gAgent.getPositionRegion();   // <WolfViewer> compared with the SLURL's region position; agent frame may be rebased
         LLVector3 slurlpos = getStartSLURL().getPosition();
         F32 dx = pos.mV[VX] - slurlpos.mV[VX];
         F32 dy = pos.mV[VY] - slurlpos.mV[VY];

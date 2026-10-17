@@ -1128,7 +1128,9 @@ void WolfDrive::sendAnalogue()
 void WolfDrive::receiveDashboard(const LLUUID& invoice, const std::vector<std::string>& strings)
 {
     // Wolf Territories only, from the region the agent is in, while sitting on something.
-    if (!onWolf()) return;
+    // [WOLF GRID GATE 2026-10-17] canSend (confirmed), not onWolf: the lenient answer still says yes for a foreign
+    // region in the moments after a hypergrid jump, and a "WolfDashboard" from it could fill and open the dashboard.
+    if (!canSend()) return;
     LLViewerRegion* rgn = gAgent.getRegion();
     if (!rgn || rgn->getRegionID() != invoice) return;
     LLViewerObject* root = seatRoot();

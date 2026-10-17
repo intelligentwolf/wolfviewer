@@ -1,0 +1,35 @@
+{
+  "format": "wolf-adventure-rules",
+  "formatVersion": 1,
+  "id": "mystery",
+  "version": 1,
+  "title": "Mystery / investigation",
+  "summary": "Few stats, many clues: three traits rated 0-3, checks on 1d6, no combat.",
+  "status": "complete",
+  "attribution": [],
+  "label": "Mystery",
+  "dice": { "sides": [6], "maxDice": 3, "showRolls": "private" },
+  "stats": {
+    "wits":  { "label": "Wits", "short": "WIT", "kind": "skill", "min": 0, "max": 3, "default": 1, "order": 0 },
+    "nerve": { "label": "Nerve", "short": "NRV", "kind": "skill", "min": 0, "max": 3, "default": 1, "order": 1 },
+    "charm": { "label": "Charm", "short": "CHM", "kind": "skill", "min": 0, "max": 3, "default": 1, "order": 2 }
+  },
+  "checks": {
+    "notice":   { "label": "Notice", "roll": "1d6", "add": { "stat": "wits" }, "vs": "dc", "defaultDc": 4, "kind": "check" },
+    "deduce":   { "label": "Deduce", "roll": "1d6", "add": { "stat": "wits" }, "vs": "dc", "defaultDc": 5, "kind": "check" },
+    "hold":     { "label": "Hold your nerve", "roll": "1d6", "add": { "stat": "nerve" }, "vs": "dc", "defaultDc": 4, "kind": "check" },
+    "persuade": { "label": "Persuade", "roll": "1d6", "add": { "stat": "charm" }, "vs": "dc", "defaultDc": 4, "kind": "check" }
+  },
+  "difficulties": {
+    "easy":   { "label": "Easy", "dc": 3 },
+    "normal": { "label": "Normal", "dc": 4 },
+    "hard":   { "label": "Hard", "dc": 6 }
+  },
+  "conditions": {
+    "rattled": { "label": "Rattled", "good": false, "text": "Your nerve is shaken.", "effects": [ { "on": "hold", "mode": "bonus", "amount": -1 } ], "endsOn": "rest" },
+    "hunch":   { "label": "Hunch", "good": true, "text": "Something doesn't add up.", "effects": [ { "on": "deduce", "mode": "bonus", "amount": 1 } ], "endsOn": "manual" }
+  },
+  "combat": { "enabled": false },
+  "progression": { "mode": "milestone", "levels": [], "tables": {} },
+  "creation": { "method": "pointBuy", "stats": ["wits", "nerve", "charm"], "points": 3, "costs": { "0": 0, "1": 0, "2": 1, "3": 2 } }
+}

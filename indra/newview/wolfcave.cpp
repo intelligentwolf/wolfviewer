@@ -573,7 +573,9 @@ void WolfCaves::refresh()
 void WolfCaves::fetchCoro()
 {
     const WolfTerrainPaint::Record* r = WolfTerrainPaint::instance().current();
-    if (!onWolf() || !r) { mFetching = false; return; }
+    // [WOLF GRID GATE 2026-10-17] Confirmed, as sendOk: this GET carries the session, and the paint record is found by
+    // region handle, which right after a hypergrid jump can be a foreign region's
+    if (!onWolf() || !WolfGrid::isOnWolfTerritoriesConfirmed() || !r) { mFetching = false; return; }
     const std::string uuid = r->mUuid;
     const U64 handle = r->mHandle;
     // [WolfViewer 2026-10-14] Another region: forget the old one's caves NOW, so a failed fetch
@@ -2425,6 +2427,7 @@ void WolfFloaterCaves::onOpen(const LLSD& key)
 {
     if (!WolfCaves::onWolf())
     {
+        WolfGrid::noteWolfOnly("Make Caves");   // [WOLF GRID GATE 2026-10-17/]
         closeFloater();
         return;
     }

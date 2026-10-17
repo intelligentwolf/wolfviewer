@@ -91,13 +91,19 @@ void LLFloaterToybox::fillCommands()
 
         // <WolfViewer 2026-09-07> the Wolf Territories-only commands (app_settings/commands.xml
         // wolf_*) do not exist on any other grid: not offered here, not on a toolbar.
-        if (command->name().rfind("wolf_", 0) == 0 && !WolfGrid::isWolfTerritories())
+        // [WOLF GRID GATE 2026-10-17] except the every-grid ones (commands.xml: the compass, the EEP and weather switches).
+        const std::string& cmd = command->name();
+        const bool every_grid = cmd == "wolf_compass" || cmd == "wolf_eep" || cmd == "wolf_weather";
+        if (!every_grid && cmd.rfind("wolf_", 0) == 0 && !WolfGrid::isWolfTerritories())
         {
             continue;
         }
         // <WolfViewer 2026-10-09> the car dashboard: not on a foreign region either, a hypergrid
         // trip included (Paul: "other grids can't use these interfaces they are only for wolf").
-        if (command->name() == "wolf_dashboard" && !WolfGrid::isOnWolfTerritories())
+        // [WOLF GRID GATE 2026-10-17] every region-tied Wolf button the same way (Game Mode, Roleplay, Experiences,
+        // WolfSpeed, the dashboard); only the login's own Wolf services (speech, screen share) follow the login grid.
+        const bool login_service = cmd == "wolf_dictate" || cmd == "wolf_readaloud" || cmd == "wolf_sharescreen";
+        if (!every_grid && !login_service && cmd.rfind("wolf_", 0) == 0 && !WolfGrid::isOnWolfTerritories())
         {
             continue;
         }

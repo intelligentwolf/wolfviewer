@@ -160,7 +160,7 @@ void LLFloaterCreateLandmark::setLandmarkInfo(const LLUUID &folder_id)
     LLViewerParcelMgr* parcel_mgr = LLViewerParcelMgr::getInstance();
     LLParcel* parcel = parcel_mgr->getAgentParcel();
     std::string name = parcel->getName();
-    LLVector3 agent_pos = gAgent.getPositionAgent();
+    LLVector3 agent_pos = gAgent.getPositionRegion();   // <WolfViewer> landmark name/description use region coordinates; agent frame may be rebased
 
     if (name.empty())
     {

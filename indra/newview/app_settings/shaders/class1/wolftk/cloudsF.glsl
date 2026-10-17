@@ -1420,12 +1420,26 @@ void main() {
       #endif // HAZE
 
       // Apply aerial perspective.
-      vec3 frontPosition = cameraPosition + frontDepth * rayDirection;
       applyAerialPerspective(cameraPosition, rayDirection, frontDepth, shadowLength, color);
 
       // Velocity for temporal resolution.
-      vec3 frontPositionWorld = ecefToWorld(frontPosition);
-      vec4 prevClip = reprojectionMatrix * vec4(frontPositionWorld, 1.0);
+      // [WolfViewer 2026-10-16] IN VIEW SPACE, as takram's own scene branch below (if (!hitClouds)) does "for greatly
+      // reducing the precision errors". takram reprojects the cloud front from ECEF: cameraPosition + frontDepth x rayDirection,
+      // then ecefToWorld - 32-bit floats about the planet's centre, whose step at the 6,360 km bottom radius
+      // (wolfenvironmentrender.cpp Frame::bottomRadius) is 0.5 m, cancelled by ecefToWorldMatrix's translation. Clouds a km
+      // away barely notice (under a pixel); a front a few metres to ~150 m away - mountains that rise into the cloud deck
+      // (JOTUNHEIM 10-16: summits ~956 m above its water, and the viewer's own cloudsFrame log line there read "L0 Sc alt 600
+      // h 900"), a camera inside the clouds - gets a velocity wrong by about 2 px (front 150 m) to 50 px (front 5 m) on a
+      // 690 px tall view (a float32 emulation of these lines with placeOnPlanet's matrices), different for every low-res
+      // texel and every jitter, even with the camera still. The resolve
+      // (cloudsResolveF.glsl temporalUpscale) then fetches each texel's history from the wrong place and clips it to that
+      // texel's box, so the 1/4-resolution clouds never refine: 4 x 4 pixel blocks over the ground, the frame's own Bayer
+      // pixel a dot in each (the "pixelation on the terrain"). The front's view-space position is the view ray
+      // (vViewPosition: inverseProjectionMatrix x the far-plane vertex, cloudsV.glsl main; its direction is rayDirection's,
+      // the world-to-ECEF map being a rigid rotation) times the distance along it; viewReprojectionMatrix is
+      // reprojectionMatrix x inverseView, built in double (wolftkclouds.cpp cameraUniforms).
+      vec3 frontView = normalize(vViewPosition) * frontDepth;
+      vec4 prevClip = viewReprojectionMatrix * vec4(frontView, 1.0);
       prevClip /= prevClip.w;
       vec2 prevUv = prevClip.xy * 0.5 + 0.5;
       vec2 velocity = vUv - prevUv;

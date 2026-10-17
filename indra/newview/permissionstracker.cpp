@@ -168,7 +168,7 @@ void PermissionsTracker::warnFollowcam()
                 {
                     if (LLViewerRegion* region = LLWorld::instance().getRegionFromPosAgent(gAgentAvatarp->getPositionAgent()); region)
                     {
-                        LLSLURL region_slurl(region->getName(), gAgentAvatarp->getPositionAgent());
+                        LLSLURL region_slurl(region->getName(), region->getPosRegionFromAgent(gAgentAvatarp->getPositionAgent()));   // <WolfViewer> the SLURL takes a region position; agent frame may be rebased
                         slurl = region_slurl.getLocationString();
                     }
                 }

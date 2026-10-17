@@ -209,8 +209,8 @@ bool WolfBuilder::snapOriginEnabled()
 
 // static
 // Source: llviewerregion.h:341 getPosAgentFromRegion - region metres to agent metres. The world grid's
-// own origin is the agent region's corner (llselectmgr.cpp:1541 mGridOrigin.clearVec()), which is
-// agent (0,0,0); so with no region the builder's origin is used as it is.
+// own origin is the agent region's corner (llselectmgr.cpp getGrid, region->getOriginAgent(): agent
+// (0,0,0) unless a huge-region rebase moved agent space); so with no region the builder's origin is used as it is.
 LLVector3 WolfBuilder::snapOriginAgent()
 {
     const LLVector3 origin = gSavedSettings.getVector3("WolfBuilderGridOrigin");
@@ -416,7 +416,9 @@ void WolfBuilder::renderGroundGrid(U32 tex, F32 alpha)
     }
     center.mV[VZ] = LLWorld::getInstance()->resolveLandHeightAgent(center) + GROUND_LIFT;
 
-    LLVector3 origin(0.f, 0.f, 0.f);
+    // <WolfViewer> the region corner, which is agent (0,0,0) only until a huge-region origin rebase (llagent.h)
+    LLVector3 origin = gAgent.getRegion() ? gAgent.getRegion()->getOriginAgent() : LLVector3::zero;
+    // </WolfViewer>
     if (snapOriginEnabled())
     {
         origin = snapOriginAgent();

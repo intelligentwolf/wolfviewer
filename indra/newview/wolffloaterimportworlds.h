@@ -44,7 +44,7 @@ public:
     void draw() override;
 
 private:
-    void refresh();
+    void refresh() override;   // LLPanel::refresh (llpanel.h:126); Apple clang -Winconsistent-missing-override is fatal
     void onPrimary();
     void onCancel();
     void onSetUp();

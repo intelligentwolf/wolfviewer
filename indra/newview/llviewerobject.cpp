@@ -2351,6 +2351,26 @@ U32 LLViewerObject::processUpdateMessage(LLMessageSystem *mesgsys,
     F32 vel_mag_sq = getVelocity().magVecSquared();
     F32 accel_mag_sq = getAcceleration().magVecSquared();
 
+    // <WolfViewer 2026-10-18> OWN VEHICLE SNAP, Elisa Porter's w68 report: a scripted mover she sat on
+    // "won't reposition when commanded" and jumped to its destination only when she stood up. The blend
+    // below is eased out in idleUpdate, and idleUpdate only runs for objects on the active list, which
+    // is !mStatic (LLVOVolume::isActive), and mStatic is set further down from these same magnitudes.
+    // A mover placed with llSetPos arrives with zero velocity: static, never eased, drawn at the old
+    // place for as long as she sat. So: only blend for an object this update leaves moving, and when an
+    // update makes the object static while a blend is still pending, finish the blend here and now.
+    const bool wolf_moving_after_update = vel_mag_sq > F_APPROXIMATELY_ZERO
+                                       || accel_mag_sq > F_APPROXIMATELY_ZERO
+                                       || getAngularVelocity().magVecSquared() > F_APPROXIMATELY_ZERO;
+    if (sWolfSnapObject == mID && !wolf_moving_after_update && !sWolfSnapBlend.isExactlyZero())
+    {
+        setPositionParent(getPosition() - sWolfSnapBlend);
+        test_pos_parent = getPosition();
+        sWolfSnapBlend.clear();
+        sWolfSnapObject.setNull();
+        setChanged(MOVED | SILHOUETTE);
+    }
+    // </WolfViewer>
+
     if (  ((b_changed_status)||(test_pos_parent != new_pos_parent))
         ||(  (!isSelected())
            &&(  (vel_mag_sq != 0.f)
@@ -2375,6 +2395,7 @@ U32 LLViewerObject::processUpdateMessage(LLMessageSystem *mesgsys,
             static const F32 WOLF_SNAP_BLEND_MAX_M = 600.f;
             if (!mParent && isAgentAvatarValid() && gAgentAvatarp->isSitting()
                 && gAgentAvatarp->getRoot() == this
+                && wolf_moving_after_update   // [2026-10-18] static objects get no idleUpdate to ease it out
                 && mag_sqr > WOLF_SNAP_BLEND_MIN_M * WOLF_SNAP_BLEND_MIN_M
                 && mag_sqr < WOLF_SNAP_BLEND_MAX_M * WOLF_SNAP_BLEND_MAX_M)
             {

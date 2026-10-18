@@ -935,6 +935,8 @@ set(viewer_SOURCE_FILES
     wolffloatergraphicshelper.cpp
     wolfbuilder.cpp
     wolffloaterbuilder.cpp
+    wolffloaterimportworlds.cpp # [IMPORT WORLDS 2026-10-18] Build > Import worlds...
+    wolfimportflow.cpp # [IMPORT WORLDS 2026-10-18] the import flow shared with the Adventure Studio
     wolffloaterenvironment.cpp
     wolfenvironmentstate.cpp
     wolfenvironmentrender.cpp
@@ -998,6 +1000,7 @@ set(viewer_SOURCE_FILES
     wolfmapoverlays.cpp
     wolfdrive.cpp
     wolfborder.cpp   # [BORDER GUARD 2026-10-16]
+    wolfloadingnotice.cpp   # [WOLF VISITOR SEES 2026-10-18]
     wolfdashboard.cpp
     wolfhudscale.cpp
     wolfvehiclerez.cpp
@@ -1892,6 +1895,8 @@ set(viewer_HEADER_FILES
     wolffloatergraphicshelper.h
     wolfbuilder.h
     wolffloaterbuilder.h
+    wolffloaterimportworlds.h
+    wolfimportflow.h
     wolffloaterenvironment.h
     wolfenvironmentstate.h
     wolfenvironmentrender.h
@@ -1952,6 +1957,7 @@ set(viewer_HEADER_FILES
     wolfmapoverlays.h
     wolfdrive.h
     wolfborder.h   # [BORDER GUARD 2026-10-16]
+    wolfloadingnotice.h   # [WOLF VISITOR SEES 2026-10-18]
     wolfdashboard.h
     wolfhudscale.h
     wolfvehiclerez.h

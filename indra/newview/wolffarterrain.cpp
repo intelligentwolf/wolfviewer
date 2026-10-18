@@ -88,7 +88,7 @@ namespace
 bool WolfFarTerrain::enabled()
 {
     static LLCachedControl<bool> on(gSavedSettings, "WolfViewerFarTerrain", true);
-    return on && WolfGrid::isOnWolfTerritories();
+    return on && WolfGrid::showsWolfRegion();   // [WOLF VISITOR SEES 2026-10-18/] visitors on a Wolf region too; elev.php is read without a session
 }
 
 WolfFarTerrain::WolfFarTerrain()

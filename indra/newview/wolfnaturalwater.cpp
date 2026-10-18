@@ -87,7 +87,7 @@ void WolfNaturalWater::idle()
     // subsystem is inert, which also saves the work it would otherwise do for nothing.
     // [WOLF GRID GATE 2026-10-17] and what it built goes: it is kept by region HANDLE, which a foreign grid's region can
     // share, so after a hypergrid jump the last Wolf fields would have stayed on that grid's water.
-    if (!WolfGrid::isOnWolfTerritories())
+    if (!WolfGrid::showsWolfRegion())   // [WOLF VISITOR SEES 2026-10-18/] the region underfoot: visitors on a Wolf region too
     {
         if (!mRegions.empty())
         {
@@ -1188,7 +1188,7 @@ void WolfNaturalWater::apply(std::shared_ptr<Result> result)
     }
     // Switched off while this was computing: reset() has already cleared everything.
     static LLCachedControl<bool> enabled(gSavedSettings, "WolfTerrainWater", true);
-    if (!enabled || !WolfGrid::isOnWolfTerritories())
+    if (!enabled || !WolfGrid::showsWolfRegion())
     {
         return;
     }

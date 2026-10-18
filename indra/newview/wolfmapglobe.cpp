@@ -137,7 +137,7 @@ namespace
 bool WolfMapGlobe::active() const
 {
     static LLCachedControl<bool> on(gSavedSettings, "WolfMapGlobe", true);
-    return on && WolfGrid::isOnWolfTerritories();   // <WolfViewer 2026-10-06/> the stock map off Wolf Territories (hypergrid)
+    return on && WolfGrid::showsWolfRegion();   // <WolfViewer 2026-10-06/> the stock map off Wolf Territories (hypergrid) [WOLF VISITOR SEES 2026-10-18/] visitors on a Wolf region see the globe
 }
 
 // ── the map's box ────────────────────────────────────────────────────────────────────────

@@ -122,6 +122,23 @@
 		</button>
           <!-- end of About Land Button -->
 
+          <!-- [WolfViewer 2026-10-13] WE: Wolf Environment (the native sky) on / off; ported from
+               skins/default panel_navigation_bar.xml so this skin has it too. Lit while on; Wolf Territories
+               only (llnavigationbar.cpp shows it on that grid alone). It replaces the Lighting button, which
+               is hidden below exactly as in the default skin. -->
+	    <button
+	     follows="left|top"
+	     height="23"
+	     layout="topleft"
+	     left_pad="7"
+	     name="WolfEnvironmentBtn"
+	     label="WE"
+	     is_toggle="true"
+	     control_name="WolfEnvironmentNativeSky"
+	     tool_tip="Wolf Environment (Experimental): Wolf Territories' own physical sky, clouds you can fly through, and weather. Click to switch it on or off."
+	     top_delta="0"
+	     width="32" />
+
           <!-- Windlight Button here -->  
 	    <button
 	     follows="left|top"
@@ -130,6 +147,7 @@
 	     layout="topleft"
 	     left_pad="7"
 	     name="PersonalLighting"
+	     visible="false"
 	     label="Lighting"
 	     tool_tip="Opens the Personal Lighting window"
 	     top_delta="0"

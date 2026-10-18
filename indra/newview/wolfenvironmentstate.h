@@ -129,6 +129,9 @@ public:
     /** The editor's draft while it is previewed (wolffloaterenvironment.cpp); an undefined entry ends it. */
     void setPreviewEntry(const LLSD& entry);
     bool previewing() const { return mPreview.mValid; }
+    /** [WOLF VISITOR SEES 2026-10-18] This region's read has come back (success or failure): its documents, or none, are in
+     *  force - not the region left behind's. wolfloadingnotice.cpp says "Loading Wolf sky..." until then. */
+    bool documentsReadFor(const std::string& region_id) const { return !region_id.empty() && mDocsFor == region_id; }
 
     /** [WOLF ENV 2026-10-12] How far ahead the Wolf window's time slider shows the sky (seconds, 0 = now),
      *  for what the native renderer places by the clock itself (fixed / orbiting bodies). */

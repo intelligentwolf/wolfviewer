@@ -241,6 +241,16 @@ WolfWaveZones::~WolfWaveZones()
     if (mRegionChangedConnection.connected()) mRegionChangedConnection.disconnect();
 }
 
+// [WOLF VISITOR SEES 2026-10-18] The records are keyed by region HANDLE, and a foreign grid's region can have the same
+// handle: in the moment after a hypergrid jump, before the new region's features say whose it is, the lenient grid gates
+// (wolfgrid.h showsWolfRegion) still answer for the region left behind. A record counts only for the live region it was
+// read for (its UUID), so a Wolf layout is never drawn on another grid's region.
+static bool wolf_record_is_live_region(const std::string& uuid, U64 handle)
+{
+    const LLViewerRegion* region = LLWorld::getInstance()->getRegionFromHandle(handle);
+    return region && LLUUID(uuid) == region->getRegionID();
+}
+
 // ── fetch ──────────────────────────────────────────────────────────────────────────────
 
 std::vector<U64> WolfWaveZones::neighbourHandles() const
@@ -255,7 +265,8 @@ std::vector<U64> WolfWaveZones::neighbourHandles() const
 void WolfWaveZones::idle()
 {
     // Other grids get the automatic layout: nothing is asked of the Wolf Territories service.
-    if (!WolfGrid::isOnWolfTerritories()) return;
+    // [WOLF VISITOR SEES 2026-10-18/] a hypergrid visitor on a Wolf region reads the region's saved waves too (wolfgrid.h)
+    if (!WolfGrid::showsWolfRegion()) return;
     LLViewerRegion* rgn = gAgent.getRegion();
     if (!rgn) return;
     const F64 now = LLFrameTimer::getElapsedSeconds();
@@ -281,7 +292,9 @@ void WolfWaveZones::refresh()
 {
     // [WOLF GRID GATE 2026-10-17] the read carries the region handles and our session: only once the region underfoot has
     // said it is Wolf, not on the previous region's answer right after a hypergrid jump (idle() asks again every frame).
-    if (!WolfGrid::isOnWolfTerritoriesConfirmed()) return;
+    // [WOLF VISITOR SEES 2026-10-18] the region's own word that it is Wolf, whoever's viewer this is: the read is public
+    // (php/waves.php "READS are public and cacheable"); fetchCoro adds our session only for our own residents.
+    if (!WolfGrid::isOnWolfRegionConfirmed()) return;
     if (mFetching) return;
     const LLViewerRegion* region = gAgent.getRegion();
     if (!region) return;
@@ -334,8 +347,13 @@ void WolfWaveZones::fetchCoro(std::vector<U64> handles, U64 requested_handle, U6
     // Sending them now costs nothing -- the service ignores headers it does not require
     // -- and is what lets the service START requiring them once enough viewers carry
     // them. Enforcing before then would break every older viewer ON our own grid.
-    headers->append("X-Wolf-Agent", gAgentID.asString());
-    headers->append("X-Wolf-Session", gAgentSessionID.asString());
+    // [WOLF VISITOR SEES 2026-10-18] Only for our own residents: a hypergrid visitor's session belongs to another grid and is
+    // not ours to send anywhere; the read is anonymous for them (as WolfRegionWeather::fetchCoro).
+    if (WolfGrid::isOnWolfTerritoriesConfirmed())
+    {
+        headers->append("X-Wolf-Agent", gAgentID.asString());
+        headers->append("X-Wolf-Session", gAgentSessionID.asString());
+    }
 
     LLSD result = adapter->getRawAndSuspend(request, url, options, headers);
     LLSD httpResults = result[LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS];
@@ -432,11 +450,13 @@ const WolfWaveZones::Region* WolfWaveZones::current() const
 {
     // [WOLF GRID GATE 2026-10-17] layouts are keyed by region HANDLE, which a foreign grid's region can share: off Wolf
     // there is none (the water shader and the editors then use the automatic layout)
-    if (!WolfGrid::isOnWolfTerritories()) return nullptr;
+    // [WOLF VISITOR SEES 2026-10-18/] off a Wolf REGION (wolfgrid.h showsWolfRegion): a visitor on one sees its layout
+    if (!WolfGrid::showsWolfRegion()) return nullptr;
     LLViewerRegion* rgn = gAgent.getRegion();
     if (!rgn) return nullptr;
     auto it = mByHandle.find(rgn->getHandle());
-    return it == mByHandle.end() ? nullptr : &it->second;
+    if (it == mByHandle.end() || !wolf_record_is_live_region(it->second.mUuid, it->first)) return nullptr;   // [WOLF VISITOR SEES 2026-10-18/]
+    return &it->second;
 }
 
 const WolfWaveZones::Tiles* WolfWaveZones::paintedFor(const Region& r) const
@@ -600,6 +620,7 @@ void WolfWaveZones::fill(LLViewerRegion* regionp, F32 x0, F32 y0, F32 sx, F32 sy
     for (const auto& kv : mByHandle)
     {
         const Region& r = kv.second;
+        if (!wolf_record_is_live_region(r.mUuid, r.mHandle)) continue;   // [WOLF VISITOR SEES 2026-10-18/] see the helper
         S32 ax, ay;
         handle_xy(r.mHandle, ax, ay);
         spans.push_back({ (F32)(ax - bx), (F32)(ay - by), (F32)r.mSizeX, (F32)r.mSizeY, sourceFor(r) });

@@ -585,7 +585,7 @@ F32 WolfAdventureStudioView::pageWizard(F32 l, F32 r, F32 top, const Palette& p)
     const LLFontGL* bold = LLFontGL::getFontSansSerifSmallBold();
     const F32 slh = (F32)small->getLineHeight();
     if (!mOpenId.empty() && !openIsOwner())
-        return para(l, r, top, "Only the adventure's owner can change it. As a game master or teacher, use Publish to see it and Run to run it.", p.mDim);
+        return para(l, r, top, "Only the adventure's owner can change it. As a host or teacher, use Publish to see it and Run to run it.", p.mDim);
     if (mOpenId.empty() && mWizStep != W_KIND) mWizStep = W_KIND;
     if (!mOpenId.empty() && mDraftJson.empty()) return para(l, r, top, "Opening the draft...", p.mDim);
     // came back to an adventure with no step remembered: the first step not done yet
@@ -1128,7 +1128,7 @@ F32 WolfAdventureStudioView::wizCast(F32 l, F32 r, F32 top, const Palette& p)
         const F32 gap = 8.f, cw = (r - l - gap) * 0.5f, chh = 54.f;
         struct Mode { const char* mLabel; const char* mLine; bool mOn; const char* mMode; };
         const Mode modes[2] = { { "Written lines", "Free. They say what you wrote.", !ai_on, "none" },
-                                { "AI characters", "They talk freely, in character. Paid from your WolfCredits.", ai_on, "ai" } };
+                                { "AI characters", "They talk freely, in character. Paid from your credits.", ai_on, "ai" } };
         for (S32 i = 0; i < 2; ++i)
         {
             const F32 cl = l + (F32)i * (cw + gap);

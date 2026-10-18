@@ -2,7 +2,7 @@
 <floater
  positioning="none"
  legacy_header_height="18"
- height="638"
+ height="658"
  layout="topleft"
  name="toolbox floater"
  help_topic="toolbox_floater"
@@ -824,7 +824,7 @@
      height="10"
      follows="left|top"
      layout="topleft"
-     top_pad="28"
+     top_pad="48"
      left="10"
      name="link_num_obj_count"
 	 tool_tip="Link number may not be accurate."
@@ -887,6 +887,42 @@
 	  width="280">
 	 [CAPACITY_STRING] [secondlife:///app/openfloater/object_weights More info]
 	</text>
+    <!-- [WOLF BUILDER 2026-10-13] Paul: "on the build floater add a Builders Mode that will set the EEP
+         to midday so it's easy to see". The row sits under every tool's own controls (the land tool's
+         Apply button ends at 151, the create tool's tree combo at 144) and above the selection text;
+         the floater grew 20 px for it (height, cost_text_border, the tabs, link_num_obj_count's pad);
+         the edit tool's link buttons end at 164, so the row starts there.
+         Tick: the sky goes to Midday for as long as the Build floater is open, and comes back when it
+         closes or the box is unticked (llfloatertools.cpp onCommitWolfBuildersMode / onOpen / onClose,
+         wolfbuilder.cpp). The button opens the Wolf Builder helper (floater_wolf_builder.xml).
+         Bound to WolfBuildersMode so it and the Wolf Builder floater's own Builders Mode box always agree. -->
+    <check_box
+     follows="left|top"
+     height="17"
+     label="Builders Mode"
+     layout="topleft"
+     left="10"
+     name="checkbox wolf builders mode"
+     control_name="WolfBuildersMode"
+     tool_tip="A Midday sky while you build, so everything is easy to see, and the Wolf Builder grids. Your own sky comes back when the Build floater closes."
+     top="166"
+     width="120">
+      <check_box.commit_callback
+       function="BuildTool.WolfBuildersMode"/>
+    </check_box>
+    <button
+     follows="left|top"
+     height="20"
+     label="Wolf Builder..."
+     layout="topleft"
+     left="140"
+     name="wolf_builder_btn"
+     tool_tip="The builder's helper: a grid on the ground, snapping to your own grid origin, floating object names, and a card with the selection's prims and the parcel's room."
+     top="164"
+     width="145">
+      <button.commit_callback
+       function="BuildTool.WolfBuilder"/>
+    </button>
     <view_border
     bevel_style="none"
     follows="top|left"
@@ -894,7 +930,7 @@
     layout="topleft"
     left="6"
     name="cost_text_border"
-    top="165"
+    top="185"
     width="282"/>
     <tab_container
      follows="left|top"
@@ -907,7 +943,7 @@
      tab_position="top"
      tab_height="20"
      open_tabs_on_drag_and_drop="true"
-     top="203"
+     top="223"
      width="295">
 	
 <panel

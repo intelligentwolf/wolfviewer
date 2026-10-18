@@ -504,7 +504,7 @@ F32 WolfAdventureTalkView::layout(F32 W, F32 H, bool draw) const
         if (held.empty())
         {
             const std::string none = WolfGame::instance().items().empty()
-                ? "Your bag is empty. (Items are kept while Game Mode is on.)"
+                ? "You aren't carrying anything. Things you pick up show in your Bag (in the Roleplay window)."   // [WORDING 2026-10-18] as the web HUD
                 : "Nothing in your bag can be given.";
             if (draw) textL(small, none, PAD, y, p.mDim, LLFontGL::LEFT, LLFontGL::TOP, W - 2.f * PAD);
             y -= slh + 6.f;

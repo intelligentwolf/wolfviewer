@@ -26,6 +26,8 @@
 #include "lluictrl.h"
 #include "wolffloaterroleplay.h"
 #include "wolfadventure.h"
+#include "wolfimportflow.h"   // [IMPORT WORLDS 2026-10-18/]
+#include <memory>
 
 #include <map>
 #include <set>
@@ -96,8 +98,6 @@ public:
     S32 simpleStep() const { return mPage == SP_HELPER ? 0 : mPage == SP_CHARS ? 1 : mPage == SP_MAP ? 2 : -1; }
     /** Whether that step can be shown now (pages 2 and 3 need a game of the author's own, open and loaded). */
     bool simpleCanGo(S32 step) const;
-    /** [W69 2026-10-17] The experimental notice (Paul's exact words), as a soft amber note card - not an error. Returns the y under it. */
-    F32 experimentalNote(F32 l, F32 r, F32 top, const WolfGameDraw::Palette& p);
     /** [TABS 2026-10-17] The open draft has at least one box (a beat under acts > scenes): the Characters and Gameplay tabs open. */
     bool hasBoxes() const;
     /** The Guide's step was clicked: show that page. */
@@ -144,13 +144,18 @@ private:
                     SC_DELETE_GAME,     // [SIMPLE STUDIO 2026-10-17] page 1's cards: a plain Delete / Keep it (no typed title)
                     SC_FLOW_TIDY,       // page 3's "Tidy up": every box back to its automatic place (the saved positions go)
                     SC_MESH_CANCEL,     // [IN-WORLD STUFF 2026-10-17] "Stop" on a thing being made (Meshy): job_cancel, asked first
-                    SC_LAND_CLEANUP };  // [IN-WORLD STUFF 2026-10-17] "Clean up the land": the game's name typed, then land_cleanup
+                    SC_LAND_CLEANUP,    // [IN-WORLD STUFF 2026-10-17] "Clean up the land": the game's name typed, then land_cleanup
+                    SC_READY_GAME,      // [GAME CARD 2026-10-18] a ready game picked while page 1 has words or a book: asked first
+                    SC_CHAPTER,         // [WORDING 2026-10-18] "Add the next chapter - N credits": asked first, with US $ (as page 1)
+                    SC_SETUP_CLEAN };   // [SETUP WALK 2026-10-18] the walk's "Clean up": asked first, then setup_clean
     /** [IN-WORLD STUFF 2026-10-17] The questions answered by typing the game's name (the field F_DELETE, mDeleteTyped == mDeleteTitle). */
     bool typedConfirm() const { return mConfirm == SC_DELETE || mConfirm == SC_LAND_CLEANUP; }
     enum EField { F_NONE = 0, F_TITLE, F_DELETE, F_FILTER, F_TALK, F_ASSIST, F_BOOK_TITLE, F_BOOK_AUTHOR,
                   F_EDIT,     // [WOLF ADVENTURE P3 2026-10-16] an editor field (mEditPtr)
                   F_HELPER,   // [WOLF STORY FIRST 2026-10-17] what the author says to the helper
-                  F_STORY };  // [SIMPLE STUDIO 2026-10-17] page 1's story box (the game's story, up to 20,000 characters)
+                  F_STORY,    // [SIMPLE STUDIO 2026-10-17] page 1's story box (the game's story, up to 20,000 characters)
+                  F_PLAN_YOU, // [GAME CARD 2026-10-18] "Choose your game": Who are you? (the card's youAre, 240)
+                  F_PLAN_WIN };  //   ... How do you win? (the card's win, 240)
 
     // drawing
     void layoutAndDraw();
@@ -617,6 +622,22 @@ private:
     void lookPad(const std::string& cast_id, const std::string& name);
     /** look_pads_clear {adventure}: every pad of the game goes. */
     void lookPadsClear();
+    // ---- [SETUP WALK 2026-10-18] "Let's set up your game!" (GAME_CARD_SPINE_SPEC.md "Change (Paul, ~14:30Z)" and "Change (brain,
+    //      setup walk, ~15:00Z)"): get_draft.setup and the setup / setup_rez / setup_skip / setup_undo / setup_clean actions ----
+    /** The walk is on: the owner's open game has a setup list that is not complete. */
+    bool setupActive() const;
+    /** The walk has steps and none is left (the web's _setupOf `complete`). */
+    bool setupComplete() const;
+    /** The walk's card at the top of Gameplay: Step n of m, the step's words, waiting, the red line, its button, Skip, Back, Clean up. */
+    F32 setupCard(F32 l, F32 r, F32 top, const WolfGameDraw::Palette& p);
+    /** One walk action; the reply's setup replaces the list, its pack + etag become the draft, its say goes to the status line. */
+    void setupDo(const std::string& action, const LLSD& extra, const std::string& step_key, const std::string& busy_word);
+    /** While a step is being put down or waits in the inventory, `setup` is asked again every few seconds (Gameplay showing). */
+    void setupPollTick();
+    /** After a game is made: `setup` read, then Gameplay with the walk when it has one to do, else `or_page`; `made` starts the words. */
+    void setupAfterMade(const std::string& adv, S32 or_page, const std::string& made);
+    /** [WORDING 2026-10-18] get_draft read once for its `pads` (the brain's own count of the pads standing), after pads change. */
+    void padsRefresh();
     /** owner_settings {lookPadsAnyone}: whether anyone (not only the author) may click a pad to dress a character. */
     void lookPadsAnyone(bool on);
     /** While pads are out: the draft read again now and then, so a pad clicked in the world shows on the card. */
@@ -726,17 +747,59 @@ private:
     void flowSavePos(const std::string& key, F32 x, F32 y);
     /** "Tidy up": every saved position goes, the boxes are laid out automatically again. */
     void flowTidy();
+    // ---- [GAME CARD 2026-10-18] GAME_CARD_SPINE_SPEC.md sections 4-5: the game card, the main quest, ready games, imports ----
+    /** The open game is "Just roleplay" (adventure.card.shape roleplay): no goal to win, no main quest, no Win / Lose lines. */
+    bool isRoleplay() const;
+    /** The game card at the top of pages 2 and 3: You are / Goal (What it's about) / Win / Lose / how long / players / kind of
+     *  story, each written into adventure.card as it is typed (the usual draft save). Returns the y under it. */
+    F32 gameCard(F32 l, F32 r, F32 top, const WolfGameDraw::Palette& p);
+    /** Page 1: "Or start from a ready game" - one card per starter (templates), click = create from it (free) -> page 2. */
+    F32 readyGames(F32 l, F32 r, F32 top, const WolfGameDraw::Palette& p);
+    void startFromTemplate(const std::string& id, const std::string& title);
+    /** Page 1: "Start from something you built" - the two imports, their cost question and their progress card. */
+    F32 importSection(F32 l, F32 r, F32 top, const WolfGameDraw::Palette& p);
+    /** Page 1, a build whose job asks (state "asking", output.plan): the shape cards, three questions, Build chapter 1. */
+    F32 choosePanel(F32 l, F32 r, F32 top, const WolfGameDraw::Palette& p);
+    void choosePick(const LLSD& plan, const std::string& shape_id);
+    void chooseAnswer(bool you_choose, S32 max_credits = 0);
+    /** Page 3: the chapters not built yet (acts[].built false), the next one's quote, then its build (one act pass). */
+    std::string nextUnbuiltChapter(std::string* title = nullptr) const;
+    S32 unbuiltChapters() const;
+    void chapterQuote();
+    void chapterStart();
+    /** Page 3's Publish: the check first (validate), the problems in plain words with Show me, else on to the Publish page. */
+    void publishCheck();
+    F32 publishCheckCard(F32 l, F32 r, F32 top, const WolfGameDraw::Palette& p);
+    /** "Show me": the box a problem's path is on selected on the map (its side paths opened), else its field opened. */
+    void flowShowMe(const std::string& path);
+    /** The drawn kind icon (place, character, challenge, item, gate) centred on (cx, cy), `s` across. */
+    static void kindIcon(const std::string& kind, F32 cx, F32 cy, F32 s, const LLColor4& c);
+    static std::string kindWord(const std::string& kind);
+    /** A box's kind when the beat names none: the brain's wa_beat_kind rule (GAME_CARD_SPINE_SPEC.md section 1), for drawing only. */
+    static std::string beatKind(const LLSD& beat);
+    /** [WORDING 2026-10-18] A way on (trigger) and a condition in plain words, as the web Studio's triggerWords / condWords. */
+public:
+    static std::string triggerWords(const LLSD& t, const LLSD& pk);
+    static std::string condWords(const LLSD& c, const LLSD& pk, S32 depth = 0);
+private:
     struct FlowNode
     {
         std::string mPtr, mId, mTitle, mPlace;   // a beat's pointer and id, or an ending's (mEnding)
         std::string mWhere;                      // [SIMPLE STUDIO] the story's own hint of where it happens (the scene's gmNotes "Where: ...")
         bool mEnding = false, mPlaced = false, mStart = false;
+        // [GAME CARD 2026-10-18] beat main / kind, ending kind, acts[].built (GAME_CARD_SPINE_SPEC.md section 1)
+        bool mMain = false, mBuilt = true, mHidden = false;
+        S32 mStep = 0;                           // a main quest step's number (1..m), 0 for a side box or an ending
+        S32 mOwner = 0;                          // a side box: the main step whose "+N side paths" it is under (1..m), 0 none
+        S32 mSides = 0;                          // a main step: how many side boxes are under it
+        std::string mKind;                       // place | character | challenge | item | gate; an ending: win | lose | other
+        std::string mObjective;                  // a main step's objective, drawn under it
         std::string mFight, mFightId;            // [M4 2026-10-17] the box starts a fight: its label and battle id (onEnter battle)
         S32 mLayer = 0, mRow = 0;
         F32 mX = 0.f, mY = 0.f;                  // the box's top left in chart units (before pan and zoom)
     };
     // mLabel = the arrow's words on the map (short, cut with "..."); mFull = the same words whole, for the box panel's "Leads to"
-    struct FlowEdge { S32 mFrom = -1, mTo = -1; std::string mLabel, mFull; bool mDashed = false; };
+    struct FlowEdge { S32 mFrom = -1, mTo = -1; std::string mLabel, mFull, mCond; bool mDashed = false; };   // mCond: [WORDING 2026-10-18] "Only if" words
     /** A box's key: "b:<beat id>" or "e:<ending id>" (ids, never positions: the draft may change under a drag or a list). */
     static std::string flowKey(const FlowNode& n) { return (n.mEnding ? "e:" : "b:") + n.mId; }
 
@@ -758,6 +821,41 @@ private:
     U32 mFlowFitGen = 0;                         // [SIMPLE STUDIO] the chart is fitted to its frame whenever its boxes or its frame change
     F32 mFlowFitW = 0.f, mFlowFitH = 0.f;
     bool mBoxMore = false;                       // [SIMPLE STUDIO] the box panel's "More...": the full box tools shown
+    // ---- [GAME CARD 2026-10-18] ----
+    bool mFlowMainMode = false;                  // the draft has main quest steps: the thick line, side paths hidden behind "+N"
+    bool mFlowShowAll = false;                   // "Show everything": every side path shown
+    std::set<std::string> mFlowOpenSteps;        // the main steps (beat ids) whose side paths are open
+    std::string mFlowSelEnd;                     // an ending the author clicked (its id): the ending's small panel
+    LLSD mPublishCheck;                          // the last check's problems shown on page 3 (undefined = none shown)
+    bool mPublishChecking = false;
+    std::string mPublishCheckError;              // the check itself failed: red text in the card
+    std::string mChapterFor;                     // "<game>|<act id>|<draft gen>" the quote below was asked for
+    std::string mChapterJob;                     // the quoted chapter build (draft_start {adventure, chapter}), state quoting
+    S32 mChapterCredits = -1;                    // its quote, rounded up (-1: not known)
+    bool mChapterBusy = false;
+    std::string mChapterError;                   // red text in the band; stays until the next try
+    bool mBuildChapter = false;                  // the running build is one chapter: it lands on the story map, not page 2
+    std::string mBuildChapterTitle;              // that chapter's title (the progress card)
+    // "Choose your game" (the job's plan)
+    std::string mPlanFor;                        // the job the answers below were filled for
+    std::string mPlanShape;                      // the chosen card's id ("" none chosen yet)
+    std::string mPlanYouAre, mPlanWin, mPlanLength;
+    bool mAnswerBusy = false;
+    std::string mAnswerError;
+    S32 mAnswerRequote = 0;
+    bool mAnswerYouChoose = false;               // the last answer was "Let us pick" (a requote re-sends it as it was)
+    std::string mAnswerSentFor;                  // the job answered last (a poll still saying "asking" for it is an older reply)
+    std::string mFlowAutoOpenedFor;              // the selected box whose side paths were opened for it (once, so Hide works)
+    U32 mPublishCheckGen = 0;                    // the draft generation the check above was made for
+    S32 mJobPollFails = 0;                       // reads of the build's progress that failed in a row (5: given up, said)                    // reads of the import's progress that failed in a row                      // job_answer refused with requote {credits}: the whole build's new most-credits to send
+    bool mChapterNeedBook = false;
+    std::string mChapterApplyJob;                // a chapter built (and paid for) but not put in: "Put it into my game" tries again               // the chapter quote was refused with needBook: the book must be loaded again (page 1)
+    // ready games
+    std::string mTemplateMaking;                 // a starter being made (its id), the card says so
+    std::string mReadyError;                     // red text under the ready games; stays until the next click
+    // imports (GAME_CARD_SPINE_SPEC.md section 7). [IMPORT WORLDS 2026-10-18] the flow itself is shared with the Import worlds
+    // window (wolfimportflow.cpp); the Studio only draws it. Made in the constructor; an obstacle course makes a game by default here.
+    std::shared_ptr<WolfImportFlow> mImportFlow;
     std::string mFlowSel;                        // the box the author clicked: its beat id (the helper's `node`)
     std::string mHelperBox;                      // what the author is typing to the helper
     LLSD mHelperLog;                             // [{who: "you"|"helper", text}]
@@ -849,7 +947,20 @@ private:
     bool mShowPremium = false;      // Cast talk: the premium (ElevenLabs) voice group, off by default (lead's P3 voices contract)
     // ---- [IN-WORLD STUFF 2026-10-17] ----
     bool mPadBusy = false;          // look_pad / look_pads_clear out
-    bool mPadsOut = false;          // a pad was put down from this Studio: the draft is read again now and then (padsTick)
+    bool mPadsOut = false;
+    S32 mPadCount = 0;
+    LLSD mSetup;                    // [SETUP WALK 2026-10-18] get_draft / setup*'s `setup` for the open game (undefined: none)
+    std::string mSetupBusy;         // "rez" | "skip" | "undo" | "clean" while an action is out ("" none)
+    std::string mSetupError, mSetupErrorFor;   // the brain's refusal (red, until the next press) and the step it is about
+    F64 mSetupPollAt = 0.0;
+    bool mSetupPolling = false;
+    std::string mSetupWaitKey;      // the step whose piece is being waited for, and since when (a long wait gets a hint)
+    F64 mSetupWaitSince = 0.0;
+    U32 mSetupSeq = 0;              // bumped by every walk action: a poll sent before one is not taken after it
+    S32 mSetupPollFails = 0;        // polls that failed in a row (5: said in red, the poll stops)
+    bool mSetupReloadPending = false;   // the walk changed the game while an edit was unsaved: read again once it is saved
+    std::string mSetupJustDone;
+    F64 mDoneShownAt = 0.0;         // when doneText first showed (it shows for 20 s, then the usual band)     // the game whose walk has just finished: its doneText shows once on Gameplay              // [WORDING 2026-10-18] get_draft `pads`: the look pads this game has standing ("Take the pads away" only then)          // a pad was put down from this Studio: the draft is read again now and then (padsTick)
     F64 mPadPollAt = 0.0;
     bool mPadPolling = false;
     bool mAnyoneBusy = false;       // the owner setting lookPadsAnyone is being saved

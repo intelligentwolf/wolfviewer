@@ -77,7 +77,7 @@ namespace
         { "adventure",  "Adventure",  "A story to play: parties, honour and rewards.", 0 },
         { "education",  "Education",  "For classes: joined with a class code, no free chat, answers kept accurate, rated General.", 2 },
         { "experience", "Experience", "A place to visit and explore, with no stats.", 3 },
-        { "event",      "Event",      "Runs like an adventure, for one-off happenings.", 0 },
+        { "event",      "Event",      "A live event your hosts run at set times.", 0 },   // [WORDING 2026-10-18]
     };
     const S32 PURPOSE_COUNT = (S32)(sizeof(PURPOSES) / sizeof(PURPOSES[0]));
     // Source: ADVENTURE_PACK_V1.md §3 rules.preset; the 5E name as STUDIO_AND_CONSOLE_V1.md §2.6.
@@ -191,6 +191,12 @@ std::string WolfAdventureStudioView::problemWords(const LLSD& pr)
 WolfAdventureStudioView::WolfAdventureStudioView(const Params& p)
 :   LLUICtrl(p)
 {
+    // [IMPORT WORLDS 2026-10-18] the Story page's imports run the shared flow (wolfimportflow.cpp). As before, an obstacle course
+    // also makes a game unless the author switches it off, and a finished import reloads the list (it may name a game it made).
+    mImportFlow = WolfImportFlow::create();
+    mImportFlow->setMakeGame(true);
+    LLHandle<WolfAdventureStudioView> handle = getDerivedHandle<WolfAdventureStudioView>();
+    mImportFlow->setOnDone([handle]() { if (!handle.isDead()) handle.get()->loadList(); });
 }
 
 bool WolfAdventureStudioView::simpleCanGo(S32 step) const
@@ -212,6 +218,7 @@ void WolfAdventureStudioView::onOpened(const LLSD& key)
     // [SIMPLE STUDIO 2026-10-17] Paul: "let it pick up where i left off" - once the list is in (it names the game and says it is
     // the author's), a build left running or finished while the Studio was closed is picked up (resumeBuild)
     mResumeOnList = mBuildStep == B_NONE;
+    if (mImportFlow) mImportFlow->checkAllowed();   // [IMPORT OWNERS 2026-10-18/] the Story page's import buttons: region owners only
     loadList();
     loadRequests();
     // [SIMPLE STUDIO 2026-10-17] on page 1 the story box has the keyboard: type at once (the persona's two minutes)
@@ -221,6 +228,27 @@ void WolfAdventureStudioView::onOpened(const LLSD& key)
     {
         mPage = SP_RUN;
         loadSessions();
+    }
+    // [IMPORT WORLDS 2026-10-18] Build > Import worlds... "Set up your game" (GAME_CARD_SPINE_SPEC.md, the 15:20Z change): the
+    // game a course import made is opened like a game from its card (openAdventure: the owner lands on Gameplay, the story map,
+    // once its draft is read - the course game has boxes). Another game open now is saved and let go first (leaveOpen).
+    if (key.isMap() && !key["adventure"].asString().empty())
+    {
+        const std::string adv = key["adventure"].asString();
+        if (mBuildStep != B_NONE)   // a build in progress keeps the Studio on page 1 (simpleCanGo): said, not dropped
+            setStatus("Your game from the import is ready, but a build is running here. When it finishes, open your game from the list.", true);
+        else if (adv == mOpenId)
+        {
+            // [SETUP WALK 2026-10-18] {adventure, setup: true}: Gameplay with the walk on top (setup read again: the import made it)
+            mPage = SP_MAP;
+            mScroll[mPage] = 0.f;
+            if (key["setup"].asBoolean())
+            {
+                if (mDirtyAt <= 0.0 && !mSaving) loadOpen();   // the import may have changed this game: read again (as the web's openGame)
+                setupAfterMade(adv, (S32)SP_MAP, "Your game from the import is ready.");
+            }
+        }
+        else openAdventure(adv);   // the owner lands on Gameplay (its boxes), where the walk is the first thing (get_draft setup)
     }
     // §6 3.3.7: the last-used region is offered as the default - here, the region you stand on
     if (mImportRegion.empty())
@@ -304,6 +332,8 @@ std::string& WolfAdventureStudioView::fieldText(EField which)
     case F_BOOK_AUTHOR: return mBookAuthor;
     case F_HELPER: return mHelperBox;          // [WOLF STORY FIRST 2026-10-17/]
     case F_STORY: return mStoryBox;            // [SIMPLE STUDIO 2026-10-17/]
+    case F_PLAN_YOU: return mPlanYouAre;       // [GAME CARD 2026-10-18/]
+    case F_PLAN_WIN: return mPlanWin;
     default: return mNewTitle;
     }
 }
@@ -324,6 +354,9 @@ size_t WolfAdventureStudioView::fieldCap(EField which)
     case F_HELPER: return 20000;
     // [SIMPLE STUDIO 2026-10-17] page 1's story box: adventure.story.text maxLength 20000 (adventure_pack_v1.schema.json)
     case F_STORY: return 20000;
+    // [GAME CARD 2026-10-18] GAME_CARD_SPINE_SPEC.md section 1: adventure.card youAre / goal / win are text240
+    case F_PLAN_YOU:
+    case F_PLAN_WIN: return 240;
     default: return TITLE_MAX;
     }
 }
@@ -349,7 +382,7 @@ void WolfAdventureStudioView::saveJson(const std::string& name, const std::strin
 {
     if (json.empty())
     {
-        setStatus("There is nothing to save yet - wait for the draft to load.", true);
+        setStatus("There is nothing to save yet - wait for your game to load.", true);
         return;
     }
     std::string file = name;
@@ -480,6 +513,43 @@ void WolfAdventureStudioView::openAdventure(const std::string& id)
     mBoxMore = false;
     mFlowSel.clear();
     mFlowGen = 0;
+    // [GAME CARD 2026-10-18] nothing of the last game's map, publish check or chapter quote shows for this one
+    mFlowSelEnd.clear();
+    mFlowShowAll = false;
+    mFlowOpenSteps.clear();
+    mPublishCheck = LLSD();
+    mPublishCheckError.clear();
+    mChapterFor.clear();
+    if (!mChapterJob.empty())
+    {
+        // the last game's chapter quote was never confirmed: dropped (wolfmind_lib.php wa_api_job_cancel; nothing was charged)
+        LLSD dropq;
+        dropq["job"] = mChapterJob;
+        WolfAdventure::api("job_cancel", dropq, nullptr);
+    }
+    mChapterJob.clear();
+    mChapterCredits = -1;
+    mChapterError.clear();
+    mChapterNeedBook = false;
+    mFlowAutoOpenedFor.clear();
+    mSetup = LLSD();           // [SETUP WALK 2026-10-18] the last game's walk is not this one's
+    mSetupError.clear();
+    mSetupErrorFor.clear();
+    mSetupBusy.clear();
+    mSetupPollFails = 0;
+    mSetupReloadPending = false;
+    mSetupJustDone.clear();
+    mDoneShownAt = 0.0;
+    ++mSetupSeq;
+    mChapterApplyJob.clear();
+    mPadsOut = false;          // [WORDING 2026-10-18] the last game's pads are not this one's
+    mPadCount = 0;
+    mPlanFor.clear();
+    mPlanShape.clear();
+    mAnswerRequote = 0;
+    mAnswerError.clear();
+    mAnswerSentFor.clear();
+    mReadyError.clear();
     mHelperQuestion.clear();
     mHelperError.clear();
     mHelperScript.clear();                     // [M6] a script for the last adventure is not offered for this one
@@ -516,6 +586,42 @@ void WolfAdventureStudioView::closeOpenAdventure()
     mWizError.clear();
     mFlowSel.clear();          // [WOLF STORY FIRST 2026-10-17/]
     mFlowGen = 0;
+    mFlowSelEnd.clear();       // [GAME CARD 2026-10-18/]
+    mFlowShowAll = false;
+    mFlowOpenSteps.clear();
+    mPublishCheck = LLSD();
+    mPublishCheckError.clear();
+    mChapterFor.clear();
+    if (!mChapterJob.empty())
+    {
+        // the last game's chapter quote was never confirmed: dropped (wolfmind_lib.php wa_api_job_cancel; nothing was charged)
+        LLSD dropq;
+        dropq["job"] = mChapterJob;
+        WolfAdventure::api("job_cancel", dropq, nullptr);
+    }
+    mChapterJob.clear();
+    mChapterCredits = -1;
+    mChapterError.clear();
+    mChapterNeedBook = false;
+    mFlowAutoOpenedFor.clear();
+    mSetup = LLSD();           // [SETUP WALK 2026-10-18] the last game's walk is not this one's
+    mSetupError.clear();
+    mSetupErrorFor.clear();
+    mSetupBusy.clear();
+    mSetupPollFails = 0;
+    mSetupReloadPending = false;
+    mSetupJustDone.clear();
+    mDoneShownAt = 0.0;
+    ++mSetupSeq;
+    mChapterApplyJob.clear();
+    mPadsOut = false;          // [WORDING 2026-10-18] the last game's pads are not this one's
+    mPadCount = 0;
+    mPlanFor.clear();
+    mPlanShape.clear();
+    mAnswerRequote = 0;
+    mAnswerError.clear();
+    mAnswerSentFor.clear();
+    mReadyError.clear();
     mHelperQuestion.clear();
     mHelperError.clear();
     mHelperScript.clear();
@@ -561,6 +667,10 @@ void WolfAdventureStudioView::loadOpen()
             self->setDraftText(reply["pack_json"].asString(), reply["pack"]);
             self->mEtag = reply["etag"].asString();
             self->setProblems(reply["problems"]);
+            // Source: GAME_CARD_SPINE_SPEC.md "Change (brain, 2026-10-18, for the viewer agent)": get_draft `pads`, the pads standing
+            self->mPadCount = llmax(0, reply["pads"].asInteger());
+            // [SETUP WALK 2026-10-18] get_draft `setup` (wsu_view): the walk, when the brain has one for this game
+            self->mSetup = reply.has("setup") ? reply["setup"] : LLSD();
             // [WOLF ADVENTURE AUDIT 2026-10-17] a draft the old Studio saved with {} where text belongs: the brain tidies it on
             // get_draft and says so (`tidied`); an older brain did not, so the viewer tidies what is left and saves it
             const S32 fixed = self->repairLegacyDraft();
@@ -706,7 +816,7 @@ void WolfAdventureStudioView::saveDraftTo(const std::string& adv, const std::str
             self->setStatus(errors ? "Saved as the draft of \"" + title + "\" - " + plural(errors, "problem", "problems") + " to fix before publishing."
                                    : "Saved as the draft of \"" + title + "\".", false);
         }, std::string());
-    }, "Saving the draft...");
+    }, "Saving your game...");
 }
 
 void WolfAdventureStudioView::deleteAdventure()
@@ -808,7 +918,7 @@ void WolfAdventureStudioView::publish(S32 republish_revision)
                 do_publish(self, saved["etag"].asString());
             }, std::string());
         }, std::string());
-    }, "Bringing the old revision back...");
+    }, "Bringing the old version back...");
 }
 
 void WolfAdventureStudioView::unpublish()
@@ -893,7 +1003,7 @@ void WolfAdventureStudioView::grant(const std::string& role, const LLUUID& agent
     const S64 secs = EXPIRIES[llclamp(mGrantExpiry, 0, EXPIRY_COUNT - 1)].mSeconds;
     // BRAIN_API_V1.md §5.3 note: unix seconds, an integer (fits LLSD's 32 bits until 2038)
     if (secs > 0) body["expires"] = (LLSD::Integer)((S64)time(nullptr) + secs);
-    const std::string what = role == "teacher" ? "teacher" : "game master";
+    const std::string what = role == "teacher" ? "teacher" : "host";
     // §5.3 grant {adventure, agent, role, region?, expires?}
     call("grant", body, [name, what](WolfAdventureStudioView* self, const LLSD&)
     {
@@ -1178,6 +1288,8 @@ void WolfAdventureStudioView::field(F32 l, F32 b, F32 r, F32 t, const std::strin
     case F_BOOK_TITLE: tip = "The book's title (it goes into the draft's attribution)"; break;
     case F_BOOK_AUTHOR: tip = "The book's author (it goes into the draft's attribution)"; break;
     case F_HELPER: tip = "Tell the helper what happens, or ask it anything (Enter sends; Ctrl+V pastes)"; break;
+    case F_PLAN_YOU: tip = "Who the players are in this game, e.g. \"A deputy new in town\" (up to 240 characters)"; break;
+    case F_PLAN_WIN: tip = "What the players must do to win (up to 240 characters)"; break;
     default: tip = "Type to narrow the list"; break;
     }
     hit(l, b, r, t, SH_FIELD, (S32)which, tip);
@@ -1308,7 +1420,7 @@ void WolfAdventureStudioView::layoutAndDraw()
                                                "The rules preset and your changes to it; the wolfGame link; flags and reputation",
                                                "Story and source cards, encounters, rewards, handouts, learning and quizzes",
                                                "Play the draft from any box with the debug overlay",
-                                               "Checks, regions, game masters and teachers, history, publish, update the live game",
+                                               "Checks, regions, hosts and teachers, history, publish, update the live game",
                                                "AI characters or written lines only, the daily caps, voices, and today's spend",
                                                "Each character's voice, and Talk to them now",
                                                "Give it a book: draft an adventure from a text; ask the assistant for ideas",
@@ -1324,13 +1436,13 @@ void WolfAdventureStudioView::layoutAndDraw()
             const S32 back = mine ? (S32)SP_MAP : (S32)SP_HELPER;
             const std::string lab = mine ? "\xE2\x97\x82 Gameplay" : "\xE2\x97\x82 Your story";
             button(M, y - 25.f, rail_r, y, lab, p, flagsFor(SH_PAGE, back, true) | BTN_PRIMARY);
-            hit(M, y - 25.f, rail_r, y, SH_PAGE, back, mine ? "Back to Gameplay, your story map (page 3)" : "Back to Your story (page 1)", true, true);
+            hit(M, y - 25.f, rail_r, y, SH_PAGE, back, mine ? "Back to Gameplay" : "Back to Story", true, true);
             y -= 35.f;
         }
         auto row = [&](S32 i)
         {
             const bool can = i == SP_HOME || i == SP_IMPORT || i == SP_WIZARD || !mOpenId.empty();
-            const std::string tip = can ? std::string(TIPS[i]) : std::string("Open a game first (Your story), or make one from a story");
+            const std::string tip = can ? std::string(TIPS[i]) : std::string("Open a game first (on Story), or make one from a story");
             button(M, y - 25.f, rail_r, y, NAMES[i], p, flagsFor(SH_PAGE, i, can) | (mPage == i ? BTN_ACTIVE : 0));
             hit(M, y - 25.f, rail_r, y, SH_PAGE, i, tip, true, can);
             y -= 27.f;
@@ -1444,7 +1556,7 @@ void WolfAdventureStudioView::drawDrawer(F32 l, F32 b, F32 r, F32 t, const Palet
     y = head(l + 10.f, r - 10.f, y, "Help", p);
     const char* help = mPage == SP_AI
         ? "AI characters talk freely in character and the AI Director keeps the story moving; you pay for what they use from "
-          "your WolfCredits. Written lines only costs nothing. When the day's cap or your credits run out, the adventure "
+          "your credits. Written lines only costs nothing. When the day's cap or your credits run out, the adventure "
           "carries on with written lines by itself. Changes save by themselves two seconds after your last change."
         : mPage == SP_CAST
         ? "Give each character a voice, then try them out with Talk to them now on any beat. Each AI turn is paid like a "
@@ -1512,7 +1624,7 @@ F32 WolfAdventureStudioView::pageHome(F32 l, F32 r, F32 top, const Palette& p)
         std::string words = statusWord(a["status"].asString(), a["revision"].asInteger());
         for (const Purpose& pu : PURPOSES) if (a["purpose"].asString() == pu.mId) words = std::string(pu.mLabel) + " \xC2\xB7 " + words;
         words += " \xC2\xB7 " + aiWord(a["aiMode"].asString());
-        if (!owner) words += role == "teacher" ? " \xC2\xB7 You are a teacher here" : " \xC2\xB7 You are a game master here";
+        if (!owner) words += role == "teacher" ? " \xC2\xB7 You are a teacher here" : " \xC2\xB7 You are a host here";
         {
             const auto sp = mHomeSpend.find(a["id"].asString());   // [WOLF ADVENTURE P2 2026-10-16/]
             if (sp != mHomeSpend.end()) words += " \xC2\xB7 " + sp->second;
@@ -1782,22 +1894,6 @@ F32 WolfAdventureStudioView::pageImport(F32 l, F32 r, F32 top, const Palette& p)
     return y;
 }
 
-F32 WolfAdventureStudioView::experimentalNote(F32 l, F32 r, F32 top, const Palette& p)
-{
-    // [W69 2026-10-17] Paul's words, exactly; a soft amber plate (the warn ink at a whisper) with the words in the body ink, so it
-    // reads as a note and not as an error; shown always on the Story tab and at the top of the expert Publish page
-    const LLFontGL* f = LLFontGL::getFontSansSerif();
-    const std::string words = "Please get in touch with Lone Wolf if you wish to use this feature, it's still experimental. (But you are welcome to give it a go.)";
-    const std::vector<std::string> lines = wrap(f, words, r - l - 24.f, 6);
-    const F32 h = (F32)lines.size() * (F32)f->getLineHeight() + 16.f;
-    chamfer(l, top - h, r, top, 4.f, fade(WARN_INK, 0.14f), fade(WARN_INK, 0.10f));
-    chamferEdge(l + 0.5f, top - h + 0.5f, r - 0.5f, top - 0.5f, 4.f, 1.f, fade(WARN_INK, 0.6f));
-    rect(l + 2.f, top - h + 4.f, l + 5.f, top - 4.f, WARN_INK);   // the amber bar at the left says "note" as well as the colour
-    F32 y = top - 8.f;
-    for (const std::string& line : lines) { textL(f, line, l + 12.f, y, p.mText); y -= (F32)f->getLineHeight(); }
-    return top - h - 10.f;
-}
-
 F32 WolfAdventureStudioView::pagePublish(F32 l, F32 r, F32 top, const Palette& p)
 {
     const LLFontGL* small = LLFontGL::getFontSansSerifSmall();
@@ -1806,14 +1902,15 @@ F32 WolfAdventureStudioView::pagePublish(F32 l, F32 r, F32 top, const Palette& p
     const bool idle = mBusy == 0;
     const LLSD* a = listed(mOpenId);
     const bool owner = !a || (*a)["role"].asString().empty();
-    F32 y = experimentalNote(l, r, top, p);   // [W69 2026-10-17] at the top of the expert Publish page
+    F32 y = top;   // [WORDING 2026-10-18] no experimental notice on the Studio pages any more (the band's label stays)
     if (!owner)
     {
-        y = para(l, r, y, "You hold a role in this adventure; only its owner can publish it, change its regions or its roles.", p.mDim) - 8.f;
+        // [WORDING 2026-10-18] as the web Studio
+        y = para(l, r, y, std::string("You hold the ") + ((*a)["role"].asString() == "teacher" ? "teacher" : "host") + " role in this game; only its owner changes it.", p.mDim) - 8.f;
     }
     // ---- Checks ----
     y = head(l, r - 120.f, y, "Checks", p);
-    btn(r - 110.f, y + slh + 10.f - 24.f, r, y + slh + 10.f, "Check again", SH_CHECK, 0, "Ask the grid to check the draft", p, idle && owner);
+    btn(r - 110.f, y + slh + 10.f - 24.f, r, y + slh + 10.f, "Check again", SH_CHECK, 0, "Check your game again", p, idle && owner);
     const S32 errors = countProblems(mProblems, "error"), warnings = countProblems(mProblems, "warning");
     if (owner)
     {
@@ -1863,12 +1960,12 @@ F32 WolfAdventureStudioView::pagePublish(F32 l, F32 r, F32 top, const Palette& p
     }
     y -= 6.f;
     // ---- Roles (§2.11 grant or revoke GM and teacher, with an expiry) ----
-    y = head(l, r, y, "Game masters and teachers", p);
+    y = head(l, r, y, "Hosts and teachers", p);
     if (!mGrants.isArray() || mGrants.size() == 0) y = para(l, r, y, "Nobody yet.", p.mDim, true) - 4.f;
     for (size_t k = 0; mGrants.isArray() && k < (size_t)mGrants.size(); ++k)
     {
         const LLSD& g = mGrants[(LLSD::Integer)k];
-        std::string line = cap(g["name"].asString(), 64) + " - " + (g["role"].asString() == "teacher" ? "teacher" : "game master");
+        std::string line = cap(g["name"].asString(), 64) + " - " + (g["role"].asString() == "teacher" ? "teacher" : "host");
         if (!g["region"].asString().empty()) line += " (one region)";
         const std::string until = whenText(g["expires"]);
         if (!until.empty()) line += " - until " + until;
@@ -1889,7 +1986,7 @@ F32 WolfAdventureStudioView::pagePublish(F32 l, F32 r, F32 top, const Palette& p
             x += w + 6.f;
         }
         y -= 32.f;
-        btn(l, y - 28.f, l + 190.f, y, "Add a game master...", SH_GRANT, 0, "Pick a resident to run this adventure as its game master", p, idle);
+        btn(l, y - 28.f, l + 190.f, y, "Add a host...", SH_GRANT, 0, "Pick a resident to run this adventure as its host", p, idle);
         btn(l + 198.f, y - 28.f, l + 360.f, y, "Add a teacher...", SH_GRANT, 1, "Pick a resident to run classes with it", p, idle);
         y -= 40.f;
     }
@@ -1905,8 +2002,8 @@ F32 WolfAdventureStudioView::pagePublish(F32 l, F32 r, F32 top, const Palette& p
             const std::string line = llformat("Revision %d", rv["revision"].asInteger()) + " - " + whenText(rv["at"]);
             textL(small, line, l, y - 4.f, p.mText, LLFontGL::LEFT, LLFontGL::TOP, r - l - 310.f);
             // "Open (read-only)" is a download in Studio Lite (no editor to open it in; as WolfStorm)
-            btn(r - 300.f, y - 24.f, r - 196.f, y, "Download", SH_DOWNLOAD, rv["revision"].asInteger(), "Save this revision as a pack file (read-only copy)", p, idle);
-            btn(r - 190.f, y - 24.f, r, y, "Republish this revision", SH_REPUBLISH, rv["revision"].asInteger(), "It becomes the next revision (asks first)", p, idle && owner);
+            btn(r - 300.f, y - 24.f, r - 196.f, y, "Download", SH_DOWNLOAD, rv["revision"].asInteger(), "Save this version as a game file (a copy to keep)", p, idle);
+            btn(r - 190.f, y - 24.f, r, y, "Republish this revision", SH_REPUBLISH, rv["revision"].asInteger(), "Publish this version again as the newest one (asks first)", p, idle && owner);
             y -= 30.f;
         }
         y -= 6.f;
@@ -1917,11 +2014,11 @@ F32 WolfAdventureStudioView::pagePublish(F32 l, F32 r, F32 top, const Palette& p
         y = head(l, r, y, "Publish", p);
         const bool can = idle && errors == 0 && !mEtag.empty();
         btn(l, y - 32.f, l + 160.f, y, "Publish...", SH_PUBLISH, 0,
-            errors ? "Fix the errors first (listed on the right)" : std::string("Make the draft live (asks first)"), p, can);
+            errors ? "Fix the errors first (listed on the right)" : std::string("Make your game live (asks first)"), p, can);
         if (errors) textL(small, plural(errors, "error stops", "errors stop") + " publishing", l, y - 40.f, DANGER_INK, LLFontGL::LEFT, LLFontGL::TOP);
         if (errors) y -= slh + 4.f;
-        btn(l + 168.f, y - 32.f, l + 368.f, y, "Download the draft (.json)", SH_DOWNLOAD, -1,
-            "Save the draft as a pack file, to fix by hand and import again", p, !mDraftJson.empty());
+        btn(l + 168.f, y - 32.f, l + 368.f, y, "Download your game (.json)", SH_DOWNLOAD, -1,
+            "Save your game as a game file to change and bring in again", p, !mDraftJson.empty());
         const bool published = a && (*a)["status"].asString() == "published";
         if (published) btn(r - 140.f, y - 32.f, r, y, "Unpublish...", SH_UNPUBLISH, 0, "Take it off every region (asks first)", p, idle, BTN_DANGER);
         y -= 44.f;
@@ -1991,7 +2088,7 @@ F32 WolfAdventureStudioView::continueCards(F32 cl, F32 cr, F32 top, const Palett
             std::string words = statusWord(a["status"].asString(), a["revision"].asInteger());
             const std::string when = whenText(a["updated"]);
             if (!when.empty()) words += " \xC2\xB7 " + when;
-            if (!a["role"].asString().empty()) words += a["role"].asString() == "teacher" ? " \xC2\xB7 teacher" : " \xC2\xB7 game master";
+            if (!a["role"].asString().empty()) words += a["role"].asString() == "teacher" ? " \xC2\xB7 teacher" : " \xC2\xB7 host";
             // the open game's card goes to its story map; another game's opens it (then lands on its map, or here when it has no boxes).
             // While a build runs the game being built keeps its card alive: it only shows the progress card above (never
             // interrupting the build - Paul: "clicking it should just show the progress"); the other cards wait
@@ -2001,7 +2098,7 @@ F32 WolfAdventureStudioView::continueCards(F32 cl, F32 cr, F32 top, const Palett
                 if (open) press(SH_PAGE, (S32)SP_MAP); else openAdventure(id);
             });
             btn(x0, y0 - ch, x0 + cw, y0, std::string(), SH_E, io,
-                building && open ? std::string("Being built now - its progress is above") : open ? std::string("Open now - go to its story map") : "Continue " + title,
+                building && open ? std::string("Being built now - its progress is above") : open ? std::string("Open now - go to Gameplay") : "Continue " + title,
                 p, !building || open, open ? BTN_ACTIVE : 0);
             textL(display(17.f), title, x0 + 12.f, y0 - 10.f, p.mText, LLFontGL::LEFT, LLFontGL::TOP, cw - 24.f);
             textL(small, words, x0 + 12.f, y0 - 14.f - (F32)display(17.f)->getLineHeight(), p.mDim, LLFontGL::LEFT, LLFontGL::TOP, cw - 24.f);
@@ -2205,7 +2302,7 @@ void WolfAdventureStudioView::drawConfirm(const Palette& p)
         const S32 next = (a ? (*a)["revision"].asInteger() : 0) + 1;
         // Source: STUDIO_AND_CONSOLE_V1.md §2.11
         title = llformat("Publish revision %d?", next);
-        body = "Players in progress move to it at their next beat.";
+        body = "Players already playing move to it at their next box.";
         yes = "Publish";
         break;
     }
@@ -2217,7 +2314,7 @@ void WolfAdventureStudioView::drawConfirm(const Palette& p)
         break;
     case SC_REPUBLISH:
         title = llformat("Republish revision %d?", mConfirmArg);
-        body = "It replaces the draft and becomes the next revision. Players in progress move to it at their next beat.";
+        body = "It replaces the game you are working on and is published as the newest version. Players already playing move to it at their next box.";
         yes = "Republish";
         break;
     case SC_REVOKE:
@@ -2238,7 +2335,7 @@ void WolfAdventureStudioView::drawConfirm(const Palette& p)
         const S32 quote = (S32)ceil(mJob["quote"]["credits"].asReal());
         title = "Draft an adventure from \"" + (mBookTitle.empty() ? mBookName : mBookTitle) + "\"?";
         body = llformat("The quote is about %d credits (%s tokens of text). It stops before spending more than %d credits. "
-                        "Each part is charged to your WolfCredits as it finishes. Nothing goes live: the result is a draft.",
+                        "Each part is charged to your credits as it finishes. Nothing goes live: the result is a draft.",
                         quote, thousands((S64)mJob["quote"]["tokens"].asReal()).c_str(), mBookMax);
         yes = "Start drafting";
         break;
@@ -2260,6 +2357,28 @@ void WolfAdventureStudioView::drawConfirm(const Palette& p)
         }
         danger = true;
         break;
+    case SC_SETUP_CLEAN:
+        // [SETUP WALK 2026-10-18] as the web Studio's _suClean question
+        title = "Clean up the land?";
+        body = "Everything this game put on the land is taken away, and the setup starts again from the start board.";
+        yes = "Clean up";
+        no = "Keep it";
+        danger = true;
+        break;
+    case SC_CHAPTER:
+        // [WORDING 2026-10-18] GAME_CARD_SPINE_SPEC.md "Wording" appended block (1 credit = 1 US cent, WOLF_MIND_V1.md §7.1)
+        title = "Build the next chapter?";
+        body = llformat("This builds the next chapter of your game for about %d credits (US $%.2f). Build it?", mChapterCredits, (F64)mChapterCredits / 100.0);
+        yes = "Yes, build it";
+        no = "No";
+        break;
+    case SC_READY_GAME:
+        // [GAME CARD 2026-10-18] as the web Studio's _s1FromTemplate question
+        title = "Start from a ready game?";
+        body = "\"" + mConfirmKeyB + "\" becomes a new game. What you typed or loaded in the story box is not used.";
+        yes = "Start from it";
+        no = "Keep my story";
+        break;
     case SC_DELETE_GAME:
         // [SIMPLE STUDIO 2026-10-17] page 1's cards: plain words, no typed title (Paul: "i should be able to delete games")
         title = "Delete this game?";
@@ -2276,10 +2395,22 @@ void WolfAdventureStudioView::drawConfirm(const Palette& p)
         no = "Keep it";
         break;
     case SC_TAKE:
-        title = "Take control of this session?";
-        body = "The AI Director stands back while you run it. Characters still talk unless you switch AI off. Hand it back any time.";
+    {
+        // [WORDING 2026-10-18] another host running it live: as the web Studio's _gmOp question
+        const LLSD& ss = std::as_const(mGm)["session"];
+        if (ss["control"].asString() == "live" && ss["gm"].asString() != gAgentID.asString())
+        {
+            title = "Take control from the other host?";
+            body = "They stop running it and you take over.";
+        }
+        else
+        {
+            title = "Take control of this session?";
+            body = "The AI Director stands back while you run it. Characters still talk unless you switch AI off. Hand it back any time.";
+        }
         yes = "Take control";
         break;
+    }
     case SC_REPLACE:
         title = "Replace the draft of \"" + mOpenTitle + "\"?";
         body = "The imported pack becomes its draft. What is published now stays live until you publish again.";
@@ -2351,6 +2482,19 @@ void WolfAdventureStudioView::answer(bool yes)
     switch (what)
     {
     case SC_DELETE: deleteAdventure(); break;
+    case SC_READY_GAME: startFromTemplate(mConfirmKeyA, mConfirmKeyB); break;   // [GAME CARD 2026-10-18/]
+    case SC_CHAPTER: chapterStart(); break;   // [WORDING 2026-10-18/]
+    case SC_SETUP_CLEAN:
+    {
+        // [SETUP WALK 2026-10-18] setup_clean {adventure, confirm: the game's exact title} (the stored title, as the delete's confirm)
+        const LLSD* a = listed(mOpenId);
+        std::string t = a ? (*a)["title"].asString() : std::string();
+        if (t.empty()) t = std::as_const(mDraftPack)["adventure"]["title"].asString();
+        LLSD extra;
+        extra["confirm"] = t;
+        setupDo("setup_clean", extra, std::as_const(mSetup)["next"].asString(), "clean");
+        break;
+    }
     case SC_DELETE_GAME: deleteGame(mDeleteId, mDeleteTitle); break;   // [SIMPLE STUDIO 2026-10-17] mDeleteTitle = the stored title
     case SC_FLOW_TIDY: flowTidy(); break;
     case SC_PUBLISH: publish(-1); break;

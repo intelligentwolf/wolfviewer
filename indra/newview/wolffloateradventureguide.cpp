@@ -55,7 +55,7 @@ namespace
           "one the story ends.", "Step 1: Find the old well - done when they reach a place (the well).", "plan" },
         { "4. Characters", "Characters stand in the world and talk. Give each a name (two words), say who they are, and write what they "
           "say. With written lines they say exactly that, for free. With AI they talk freely in character, and each talk turn costs a "
-          "little from your WolfCredits, up to a daily cap you set.", "Ma Dalton, \"Runs the saloon\": \"Howdy, stranger. Heard about the gold?\"",
+          "little from your credits, up to a daily cap you set.", "Ma Dalton, \"Runs the saloon\": \"Howdy, stranger. Heard about the gold?\"",
           "characters" },
         { "5. Places", "Every place the story uses must be put in the world. Walk to it and press Use my position; for a place players "
           "reach, set how big the circle is. While this step is open the places are drawn in the world so you can check them.",
@@ -94,7 +94,7 @@ namespace
           "quizzes.", "A handout: the treasure map picture.", "quests-rewards" },
         { "Test Play", "Play the draft from any beat, alone. The overlay shows where the story is, its flags, and Fire buttons for every "
           "trigger.", "Start from \"Find the map\", fire \"talked to Ma\".", "test-play" },
-        { "Publish", "Checks, regions, game masters and teachers, history, and Publish.", "Request Sandbox, then Publish.", "publish" },
+        { "Publish", "Checks, regions, hosts and teachers, history, and Publish.", "Request Sandbox, then Publish.", "publish" },
         { "AI and voice", "AI characters or written lines only, the daily caps, voices, and what was spent today.",
           "AI characters, at most 100 credits a day.", "characters" },
         { "Cast talk", "Give each character a voice and talk to them now, on any beat, to hear how they sound.",
@@ -110,7 +110,7 @@ namespace
         { "Your characters", "Check each character's name, who they are and the first thing they say. Use what I'm wearing gives them your look; "
           "pick a voice and press Hear them.", "Ma Dalton, \"Runs the saloon\": \"Howdy, stranger. Heard about the gold?\"", "characters" },
         { "Gameplay", "Each box is one moment of your story. Press Next place, walk to where it happens and press Place it here, then tell "
-          "the helper what happens there. When every box is placed, press Play it now.", "Walk to the old well, press Place it here, type "
+          "the helper what happens there. When every box is placed, press Play from the start.", "Walk to the old well, press Place it here, type "
           "\"the sheriff is waiting here\".", "places-triggers" } };
     const S32 PAGE_HELP_COUNT = (S32)(sizeof(PAGE_HELP) / sizeof(PAGE_HELP[0]));
 
@@ -119,7 +119,7 @@ namespace
     const Step STEPS[3] = {
         { "Your story", "Type an idea, paste a story or load a book, then press Build my game." },
         { "Your characters", "Check their names and what they say; dress them in what you wear." },
-        { "Gameplay", "Walk your land: Next place, Place it here, say what happens, then Play it now." } };
+        { "Gameplay", "Walk your land: Next place, Place it here, say what happens, then Play from the start." } };
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════════════

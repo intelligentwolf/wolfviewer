@@ -119,11 +119,12 @@
     },
     "endings": {
       "type": "array",
-      "minItems": 1,
+      "minItems": 0,
       "maxItems": 32,
       "items": {
         "$ref": "#/$defs/ending"
-      }
+      },
+      "description": "[GAME CARD 2026-10-18] At least one, except a roleplay game (adventure.card.shape \"roleplay\"), which may have none."
     },
     "flow": {
       "description": "The Studio's story map (WolfViewer page 3): where the author dragged each box, in chart units (its top left, x right, y down). Keyed \"b:<beat id>\" or \"e:<ending id>\"; a box with no entry is laid out automatically. Kept at the top level so a moved box does not count as an author's change of the beat itself (was_hash).",
@@ -345,6 +346,61 @@
             "updated": {
               "type": "string",
               "format": "date-time"
+            }
+          }
+        },
+        "card": {
+          "description": "[GAME CARD 2026-10-18] The game card (GAME_CARD_SPINE_SPEC.md section 1): who the player is, the one-line goal, how they win and lose, the shape, length, players and genre. Shown at the top of the Studio pages and on the HUD (goal). For shape \"roleplay\" there is no win or lose and `goal` is what the game is about.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "youAre": {
+              "description": "\"You are ...\" - who the player is.",
+              "$ref": "#/$defs/text240"
+            },
+            "goal": {
+              "description": "The one-line goal (for roleplay: what it is about).",
+              "$ref": "#/$defs/text240"
+            },
+            "win": {
+              "description": "How you win.",
+              "$ref": "#/$defs/text240"
+            },
+            "lose": {
+              "description": "How you lose (\"\" = you cannot lose, you keep trying).",
+              "$ref": "#/$defs/text240"
+            },
+            "shape": {
+              "enum": [
+                "escape",
+                "mystery",
+                "quest",
+                "rescue",
+                "treasure",
+                "rivalry",
+                "survive",
+                "race",
+                "roleplay",
+                "other"
+              ]
+            },
+            "length": {
+              "description": "short = about 15 minutes, medium = about 45 minutes, long = 2 hours or more.",
+              "enum": [
+                "short",
+                "medium",
+                "long"
+              ]
+            },
+            "players": {
+              "enum": [
+                "solo",
+                "party",
+                "either"
+              ]
+            },
+            "genre": {
+              "$ref": "#/$defs/text64"
             }
           }
         },
@@ -1962,6 +2018,10 @@
           "type": "boolean",
           "default": true
         },
+        "built": {
+          "description": "[GAME CARD 2026-10-18] false = a chapter in the outline that is not built yet (its beats are the outline's, each with its objective and a \"Still to decide\" way on). Absent = true.",
+          "type": "boolean"
+        },
         "scenes": {
           "type": "array",
           "minItems": 1,
@@ -2268,6 +2328,20 @@
         "objective": {
           "description": "The journal's current objective line.",
           "$ref": "#/$defs/text240"
+        },
+        "main": {
+          "description": "[GAME CARD 2026-10-18] This beat is a step of the main quest. Main steps are in pack order (act, scene, beat).",
+          "type": "boolean"
+        },
+        "kind": {
+          "description": "[GAME CARD 2026-10-18] The box's icon on the story map. Filled in by the brain when absent (wa_beat_kind); an author's own choice is kept.",
+          "enum": [
+            "place",
+            "character",
+            "challenge",
+            "item",
+            "gate"
+          ]
         },
         "marker": {
           "description": "Spot id for the map / world marker.",
@@ -3579,6 +3653,14 @@
         },
         "text": {
           "$ref": "#/$defs/text2000"
+        },
+        "kind": {
+          "description": "[GAME CARD 2026-10-18] win, lose or other (absent = other).",
+          "enum": [
+            "win",
+            "lose",
+            "other"
+          ]
         },
         "if": {
           "description": "Reached automatically when true at a beat boundary (else only by an 'end' effect).",

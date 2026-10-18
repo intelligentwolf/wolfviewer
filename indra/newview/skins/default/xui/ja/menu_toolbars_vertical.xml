@@ -9,4 +9,6 @@
   <menu_item_check label="アイコンのみ" name="icons_only"/>
   <menu_item_check label="ラベルのみ" name="text_only"/>
   <menu_item_check label="ロック" name="toolbars_locked"/>
+  <menu_item_check label="ボタンサイズ自動" name="layout_style_none"/>
+  <menu_item_check label="バー全体にボタンを配置" name="layout_style_fill"/>
 </context_menu>

@@ -44,7 +44,8 @@ namespace
         static LLCachedControl<bool> on(gSavedSettings, "WolfViewerAltitudeSky", true);
         // <WolfViewer 2026-10-10/> ON a Wolf region, not only logged in to Wolf: after a hypergrid jump Paul at 610 m on
         // OSFest saw its sky thinned to space (black, a white glare at the horizon) - isWolfTerritories() is the login grid
-        return on && WolfGrid::isOnWolfTerritories();
+        // [WOLF VISITOR SEES 2026-10-18/] the region underfoot (WolfGrid::showsWolfRegion): hypergrid visitors on a Wolf region too, as every gate in this file
+        return on && WolfGrid::showsWolfRegion();
     }
 
     // Camera height above the water, which is sea level on the grid.
@@ -91,7 +92,7 @@ F32 WolfAltitudeSky::spaceStarAlpha()
 F32 WolfAltitudeSky::farClipExtra()
 {
     static LLCachedControl<bool> on(gSavedSettings, "WolfViewerFarClipFollowsHeight", true);
-    if (!on || !WolfGrid::isOnWolfTerritories())
+    if (!on || !WolfGrid::showsWolfRegion())
     {
         return 0.f;
     }
@@ -103,7 +104,7 @@ F32 WolfAltitudeSky::horizonSeaHeight()
     static LLCachedControl<bool> on(gSavedSettings, "WolfViewerHorizonSea", true);
     // (2026-10-11: leaving the sea out of reflection-probe captures for Timmy's dark interiors was tried and REVERTED -
     // over the ocean the sea IS what is below, and without it Paul's whole scene came out washed white at 550 m.)
-    if (!on || !WolfGrid::isOnWolfTerritories())
+    if (!on || !WolfGrid::showsWolfRegion())
     {
         return -1.f;
     }
@@ -114,7 +115,7 @@ F32 WolfAltitudeSky::horizonSeaHeight()
 bool WolfAltitudeSky::cloudDeck(CloudDeck& out)
 {
     static LLCachedControl<bool> on(gSavedSettings, "WolfViewerFlyClouds", false);   // <WolfViewer 2026-10-11/> off by default - Paul: "get rid of that horrible bright cloud"
-    if (!on || !WolfGrid::isOnWolfTerritories() || !WolfWeather::instanceExists() || !WolfWeather::enabled())
+    if (!on || !WolfGrid::showsWolfRegion() || !WolfWeather::instanceExists() || !WolfWeather::enabled())
     {
         return false;
     }

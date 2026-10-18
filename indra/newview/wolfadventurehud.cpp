@@ -232,6 +232,7 @@ namespace WolfAdventureUI
         LLFloaterReg::hideInstance("wolf_adventure_talk");   // [WOLF ADVENTURE P2 2026-10-16/]
         LLFloaterReg::hideInstance("wolf_adventure_handout");
         LLFloaterReg::hideInstance("wolf_adventure_studio");
+        LLFloaterReg::hideInstance("wolf_import_worlds");   // [IMPORT WORLDS 2026-10-18/] Wolf Territories only, like the Studio
     }
 
     void focusCard()
@@ -344,12 +345,23 @@ namespace WolfAdventureUI
         const bool logo = !q.mLook.mLogo.empty();
         const F32 LOGO = 36.f, logo_w = logo ? LOGO + 8.f : 0.f;
         std::string objective = q.mObjective;
-        if (q.mEnded.mOn) objective = "Complete: " + (q.mEnded.mTitle.empty() ? q.mSrc : q.mEnded.mTitle);
-        else if (objective.empty()) objective = "Nothing to do right now - the story will tell you.";
+        // [WORDING 2026-10-18] as the web HUD (wolf_adventure_hud.js): an ended story says how it ended on the title line (You won /
+        // You lost / The end - never "Complete:"), its ending's title below; else the objective, or a line saying the story leads on
+        if (q.mEnded.mOn) objective = q.mEnded.mTitle.empty() ? std::string("This adventure has ended") : q.mEnded.mTitle;
+        else if (objective.empty()) objective = "Keep going - the story will show you what comes next.";
         const std::vector<std::string> lines = wrap(body, objective, W - 2.f * PAD - 6.f - logo_w, 2);
+        // [GAME CARD 2026-10-18] GAME_CARD_SPINE_SPEC.md section 4 (and the roleplay change): under the title, "Goal: <goal>" (a roleplay
+        // game: "About: <goal>"; none when empty) and "Main quest <step>/<of>: <title>" (none when the game has no main quest)
+        std::vector<std::string> spine;   // each wrapped to two lines at most (the whole words are in the tooltip and the Journal)
+        const F32 spine_w = W - 2.f * PAD - 6.f - logo_w;
+        if (!q.mGoal.empty() && !q.mEnded.mOn) for (const std::string& w : wrap(small, (q.mShape == "roleplay" ? "About: " : "Goal: ") + q.mGoal, spine_w, 2)) spine.push_back(w);
+        if (q.mMainOf > 0 && !q.mEnded.mOn && q.mShape != "roleplay")
+            for (const std::string& w : wrap(small, llformat("Main quest %d/%d", q.mMainStep, q.mMainOf) + (q.mMainTitle.empty() ? std::string() : ": " + q.mMainTitle), spine_w, 2))
+                spine.push_back(w);
         const size_t waiting = wa.waitingCards().size();
-        const bool status = (q.mPaused && !q.mEnded.mOn) || q.mGm || waiting > 0;
-        const F32 h = llmax(PAD + slh + 3.f + lh * (F32)lines.size() + (status ? slh + 5.f : 0.f) + PAD, logo ? LOGO + 2.f * PAD : 0.f);
+        const bool status = (q.mPaused && !q.mEnded.mOn) || (q.mGm && !q.mEnded.mOn) || waiting > 0;   // [WORDING 2026-10-18] as the web HUD
+        const F32 h = llmax(PAD + slh + 3.f + (F32)spine.size() * (slh + 1.f) + (spine.empty() ? 0.f : 3.f) + lh * (F32)lines.size() + (status ? slh + 5.f : 0.f) + PAD,
+                            logo ? LOGO + 2.f * PAD : 0.f);
         const F32 b = from_top ? y - h : y, t = b + h;
         frame(l, b, right, t, p, 1.f, 8.f);
         // a gold rule down the left: the RDR2 objective line's mark
@@ -363,10 +375,17 @@ namespace WolfAdventureUI
         const F32 metres = WolfAdventure::markerDistance(q);
         if (metres >= 0.f) dist = thousands((S64)llround(metres)) + " m";
         const F32 dist_w = dist.empty() ? 0.f : bold->getWidthF32(dist) + 8.f;
-        const std::string head = !q.mChapter.empty() ? q.mChapter : (!q.mSrc.empty() ? q.mSrc : std::string("Adventure"));
+        std::string head = !q.mChapter.empty() ? q.mChapter : (!q.mSrc.empty() ? q.mSrc : std::string("Adventure"));
+        if (q.mEnded.mOn) head = q.mEnded.mKind == "win" ? "You won" : q.mEnded.mKind == "lose" ? "You lost" : "The end";
         textL(bold, caps(head), tl, ty, p.mDim, LLFontGL::LEFT, LLFontGL::TOP, right - PAD - tl - dist_w);
         if (!dist.empty()) textL(bold, dist, right - PAD, ty, p.mAccent, LLFontGL::RIGHT, LLFontGL::TOP);
         ty -= slh + 3.f;
+        for (const std::string& sp : spine)
+        {
+            textL(small, sp, tl, ty, p.mAccent, LLFontGL::LEFT, LLFontGL::TOP, right - PAD - tl);
+            ty -= slh + 1.f;
+        }
+        if (!spine.empty()) ty -= 3.f;
         for (const std::string& line : lines)
         {
             textL(body, line, tl, ty, p.mText, LLFontGL::LEFT, LLFontGL::TOP, right - PAD - tl);
@@ -381,11 +400,11 @@ namespace WolfAdventureUI
                 pauseGlyph(x + 5.f, ty - slh * 0.5f, 9.f, p.mAccent);
                 x = textL(bold, "Paused", x + 14.f, ty, p.mAccent) + 12.f;
             }
-            if (q.mGm)
+            if (q.mGm && !q.mEnded.mOn)
             {
-                const F32 gw = bold->getWidthF32("GM") + 10.f;
+                const F32 gw = bold->getWidthF32("Host") + 10.f;
                 chamferEdge(x, ty - slh, x + gw, ty, 3.f, 1.f, p.mAccent);
-                textL(bold, "GM", x + gw * 0.5f, ty - slh * 0.5f, p.mText, LLFontGL::HCENTER, LLFontGL::VCENTER);
+                textL(bold, "Host", x + gw * 0.5f, ty - slh * 0.5f, p.mText, LLFontGL::HCENTER, LLFontGL::VCENTER);
                 x += gw + 10.f;
             }
             if (waiting > 0)
@@ -405,9 +424,11 @@ namespace WolfAdventureUI
         const WolfAdventure::Quest& q = a->mQuest;
         std::string tip = q.mSrc.empty() ? std::string("Adventure") : q.mSrc;
         if (!q.mChapter.empty()) tip += " - " + q.mChapter;
+        if (!q.mGoal.empty()) tip += (q.mShape == "roleplay" ? "\nAbout: " : "\nGoal: ") + q.mGoal;   // [GAME CARD 2026-10-18/]
+        if (q.mMainOf > 0) tip += llformat("\nMain quest %d/%d", q.mMainStep, q.mMainOf) + (q.mMainTitle.empty() ? std::string() : ": " + q.mMainTitle);
         if (!q.mObjective.empty()) tip += "\n" + q.mObjective;
         if (q.mPaused) tip += "\n" + (q.mPausedText.empty() ? std::string("The story is paused.") : q.mPausedText);
-        if (q.mGm) tip += "\nA game master is running this story.";
+        if (q.mGm) tip += "\nA host is running this story live.";
         return tip + "\nClick for the Journal";
     }
 
@@ -654,6 +675,12 @@ F32 WolfAdventureCardView::layout(F32 W, F32 H, bool draw) const
             // §2.3 mayChoose 0: the options without buttons
             const std::string who = c->mWho == "vote" ? "Waiting for the vote" : "Waiting for the leader to choose";
             textL(bold, who, PAD, y, p.mDim, LLFontGL::LEFT, LLFontGL::TOP, cw);
+            y -= slh + 6.f;
+        }
+        else if (c->mWho == "vote")
+        {
+            // [WORDING 2026-10-18] as the web HUD's card state line
+            textL(bold, "Your group votes - choose one", PAD, y, p.mDim, LLFontGL::LEFT, LLFontGL::TOP, cw);
             y -= slh + 6.f;
         }
         // §3.3 note: when the timer reaches 0 the options are disabled until the brain's close

@@ -113,6 +113,16 @@
                           mouse_opaque="false"
                           tab_stop="false"
                           name="wolf_border_banner"/>
+      <!-- [WOLF VISITOR SEES 2026-10-18] wolfloadingnotice.cpp: "Loading Wolf water..." / "Loading Wolf sky..." at the bottom
+           left of the world view while they are on their way on a Wolf region (20 s at most). Takes no clicks. -->
+      <wolf_loading_notice follows="all"
+                           left="0"
+                           top="0"
+                           height="500"
+                           width="1024"
+                           mouse_opaque="false"
+                           tab_stop="false"
+                           name="wolf_loading_notice"/>
       <!-- [WOLF GAME 2026-10-09] wolfgamehud.cpp: Wolf Roleplay on the world view - the stat panel,
            notices, markers, the downed overlay and the screen effects. Under the floaters and the
            toolbars, so the UI stays usable over every overlay. Clicks pass through to the world

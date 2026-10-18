@@ -9,4 +9,6 @@
   <menu_item_check label="Tylko ikony" name="icons_only" />
   <menu_item_check label="Tylko etykiety" name="text_only" />
   <menu_item_check label="Zablokowane" name="toolbars_locked" />
+  <menu_item_check label="Automatycznie dopasuj przyciski" name="layout_style_none" />
+  <menu_item_check label="Przyciski wypełniają pasek" name="layout_style_fill" />
 </context_menu>

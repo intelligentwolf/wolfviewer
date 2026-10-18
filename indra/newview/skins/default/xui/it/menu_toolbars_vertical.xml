@@ -9,4 +9,6 @@
   <menu_item_check label="Solo icone" name="icons_only" />
   <menu_item_check label="Solo testo" name="text_only" />
   <menu_item_check label="Blocca" name="toolbars_locked"/>
+  <menu_item_check label="Autodimensione pulsanti" name="layout_style_none" />
+  <menu_item_check label="I pulsanti si adattano alla barra" name="layout_style_fill" />
 </context_menu>

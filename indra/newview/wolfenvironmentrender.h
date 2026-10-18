@@ -53,6 +53,9 @@ public:
 
     /** The quality tier in force now (0..3), after the setting, the GPU and any failure. */
     static S32  tier();
+    /** [WOLF VISITOR SEES 2026-10-18] The tier the last world frame latched, without latching one (tier() does): for UI
+     *  that only reports on the sky (wolfloadingnotice.cpp), so it can never move the frame's latch. 0 before any frame. */
+    static S32  tierLatched();
 private:
     static S32  tierNow();
 public:

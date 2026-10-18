@@ -1,0 +1,246 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<!--
+ [IMPORT WORLDS 2026-10-18] Build > Import worlds... and Wolf World > Build & Land > Import worlds...
+ (wolffloaterimportworlds.cpp). GAME_CARD_SPINE_SPEC.md "Change (Paul, 2026-10-18 ~15:20Z)": three big choices with their
+ file types and where to get the file, the trademark line, the legal line, then what is happening, the report and the
+ one primary button bottom right (the cost is on it). Red failures stay in "error" until the next file.
+ Wolf Territories only: the menu items are gated by WolfGrid.IsOnWolfTerritories and onOpen closes it anywhere else.
+-->
+<floater
+ legacy_header_height="18"
+ can_close="true"
+ can_minimize="true"
+ can_resize="false"
+ height="632"
+ layout="topleft"
+ name="wolf_import_worlds"
+ help_topic="wolf_import_worlds"
+ positioning="centered"
+ save_rect="true"
+ single_instance="true"
+ title="Import worlds (Experimental)"
+ width="560">
+
+  <!-- [IMPORT WORLDS 2026-10-18] Paul (via the coordinator): this line directly under the title, normal text (not dim) -->
+  <text
+   type="string"
+   length="1"
+   follows="left|top"
+   height="18"
+   layout="topleft"
+   left="12"
+   name="converted"
+   top="26"
+   width="536"
+   word_wrap="true">
+    Worlds are converted to mesh and prims when imported into the Wolf Territories Grid.
+  </text>
+  <text
+   type="string"
+   length="1"
+   follows="left|top"
+   height="32"
+   layout="topleft"
+   left="12"
+   name="intro"
+   top_pad="4"
+   width="536"
+   word_wrap="true">
+    Bring in something you built somewhere else. It comes into your inventory as a box of pieces that you rez on your land.
+  </text>
+
+  <button
+   follows="left|top"
+   height="44"
+   label="Minecraft build"
+   layout="topleft"
+   left="12"
+   name="choice_minecraft"
+   tool_tip="Choose a .schem or .litematic file (at most 20 MB)"
+   top_pad="8"
+   width="170" />
+  <text
+   type="string"
+   length="1"
+   follows="left|top"
+   height="62"
+   layout="topleft"
+   left_pad="12"
+   name="minecraft_how"
+   top_delta="0"
+   width="354"
+   word_wrap="true">
+    .schem (WorldEdit / Sponge), .litematic (Litematica). Save your build with WorldEdit (//copy then //schem save) or Litematica, then pick the file. Small builds, up to 256 x 256 x 256 blocks.
+  </text>
+
+  <button
+   follows="left|top"
+   height="44"
+   label="Roblox place"
+   layout="topleft"
+   left="12"
+   name="choice_roblox"
+   tool_tip="Choose a .rbxl or .rbxlx file (at most 20 MB)"
+   top_pad="4"
+   width="170" />
+  <text
+   type="string"
+   length="1"
+   follows="left|top"
+   height="62"
+   layout="topleft"
+   left_pad="12"
+   name="roblox_how"
+   top_delta="0"
+   width="354"
+   word_wrap="true">
+    .rbxl / .rbxlx. In Roblox Studio: File > Download a Copy. Plain parts come across; meshes, terrain and scripts don't - checkpoints, finish lines and danger parts get our own scripts.
+  </text>
+
+  <button
+   follows="left|top"
+   height="44"
+   label="MagicaVoxel model"
+   layout="topleft"
+   left="12"
+   name="choice_voxel"
+   tool_tip="Choose a .vox file (at most 20 MB)"
+   top_pad="4"
+   width="170" />
+  <text
+   type="string"
+   length="1"
+   follows="left|top"
+   height="48"
+   layout="topleft"
+   left_pad="12"
+   name="voxel_how"
+   top_delta="0"
+   width="354"
+   word_wrap="true">
+    .vox. Each voxel becomes a 1 m block in the model's own colours.
+  </text>
+
+  <text
+   type="string"
+   length="1"
+   follows="left|top"
+   height="30"
+   layout="topleft"
+   left="12"
+   name="trademarks"
+   text_color="LtGray_50"
+   top_pad="2"
+   width="536"
+   word_wrap="true">
+    Minecraft and Roblox are trademarks of their owners; Wolf Territories is not affiliated with them.
+  </text>
+  <text
+   type="string"
+   length="1"
+   follows="left|top"
+   height="18"
+   layout="topleft"
+   left="12"
+   name="legal"
+   text_color="LtGray_50"
+   top_pad="0"
+   width="536"
+   word_wrap="true">
+    Only import builds you made yourself. That's your responsibility under our terms.
+  </text>
+
+  <view_border
+   bevel_style="none"
+   follows="left|top"
+   height="0"
+   layout="topleft"
+   left="12"
+   name="divider"
+   top_pad="6"
+   width="536" />
+
+  <text
+   type="string"
+   length="1"
+   follows="left|top"
+   height="46"
+   layout="topleft"
+   left="12"
+   name="status"
+   top_pad="8"
+   width="536"
+   word_wrap="true" />
+
+  <check_box
+   follows="left|top"
+   height="16"
+   initial_value="false"
+   label="Also make it a game (checkpoints and a finish)"
+   layout="topleft"
+   left="12"
+   name="make_game"
+   tool_tip="Each checkpoint becomes a step of the main quest and the finish line wins. Be in-world on the region the game is for."
+   top_pad="2"
+   visible="false"
+   width="536" />
+
+  <text_editor
+   enabled="true"
+   follows="left|top"
+   height="118"
+   layout="topleft"
+   left="12"
+   max_length="65536"
+   name="report"
+   read_only="true"
+   top_pad="6"
+   visible="false"
+   width="536"
+   word_wrap="true" />
+
+  <text
+   type="string"
+   length="1"
+   follows="left|top"
+   height="48"
+   layout="topleft"
+   left="12"
+   name="error"
+   top_pad="6"
+   width="536"
+   word_wrap="true" />
+
+  <button
+   follows="left|bottom"
+   height="26"
+   label="Buy credits..."
+   layout="topleft"
+   left="12"
+   name="buy_btn"
+   tool_tip="Opens the Wolf Territories credits page in your browser"
+   top="596"
+   visible="false"
+   width="120" />
+  <button
+   follows="right|bottom"
+   height="26"
+   label="Cancel"
+   layout="topleft"
+   left="250"
+   name="cancel_btn"
+   tool_tip="Nothing is sent or charged"
+   top="596"
+   visible="false"
+   width="100" />
+  <button
+   follows="right|bottom"
+   height="26"
+   label="Import it"
+   layout="topleft"
+   left="358"
+   name="primary_btn"
+   top="596"
+   width="190" />
+
+</floater>

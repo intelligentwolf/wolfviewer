@@ -28,6 +28,7 @@
 #include <boost/json.hpp>
 
 #include "llagent.h"
+#include "llbase64.h"
 #include "llclipboard.h"
 #include "llfilepicker.h"
 #include "llfontgl.h"
@@ -227,17 +228,27 @@ namespace
     std::string sourceWord(const std::string& s)
     {
         // BRAIN_API_V1.md §2 wolfadv_events.source: region | gm | director | brain | lsl
-        if (s == "gm") return "GM";
+        if (s == "gm") return "Host";
         if (s == "director") return "Director";
         if (s == "region") return "Region";
         if (s == "lsl") return "Script";
         return "Story";
     }
 
+    /** [WORDING 2026-10-18] Source: GAME_CARD_SPINE_SPEC.md "Change (brain, 2026-10-18, for the viewer agent)": a refusal for too few
+     *  credits has code `credits_short` (and `buyurl`); `credits_unread` (the balance could not be read) has no buy link. The older
+     *  text check stays for a brain without codes. */
+    bool creditsShort(const LLSD& reply, const std::string& error)
+    {
+        if (reply.isMap() && reply["code"].asString() == "credits_unread") return false;
+        if (reply.isMap() && (reply["code"].asString() == "credits_short" || reply.has("buyurl"))) return true;
+        return error.find("WolfCredits") != std::string::npos;
+    }
+
     std::string controlWords(const std::string& control, const std::string& gm_name, bool mine)
     {
         // BRAIN_API_V1.md §2 wolfadv_sessions.control: auto | live | paused (STUDIO §3 "as a word")
-        if (control == "live") return mine ? std::string("You are running it") : (gm_name.empty() ? std::string("A game master is running it") : gm_name + " is running it");
+        if (control == "live") return mine ? std::string("You are running it") : (gm_name.empty() ? std::string("A host is running it") : gm_name + " is running it");
         if (control == "paused") return "Paused";
         return "AI Director running";
     }
@@ -327,7 +338,7 @@ bool WolfAdventureStudioView::editDoc(const std::function<bool(boost::json::valu
 {
     if (mDraftJson.empty() || !openIsOwner())
     {
-        setStatus("The draft has not loaded yet - wait a moment and try again.", true);
+        setStatus("Your game has not loaded yet - wait a moment and try again.", true);
         return false;
     }
     if (mHelperBusy)
@@ -343,7 +354,7 @@ bool WolfAdventureStudioView::editDoc(const std::function<bool(boost::json::valu
         if (ec || !mDraftDoc.is_object())
         {
             mDraftDoc = nullptr;
-            setStatus("The draft could not be read - reopen the adventure.", true);
+            setStatus("Your game could not be read - open it again.", true);
             return false;
         }
     }
@@ -373,6 +384,8 @@ void WolfAdventureStudioView::autosaveTick()
     if (mJobPollAt > 0.0 && t >= mJobPollAt) pollJob();
     if (mPage == SP_RUN && !mRunSession.empty() && !mGmLoading && t >= mGmPollAt) pollGmState(false);
     buildTick();   // [SIMPLE STUDIO 2026-10-17/] page 1's build goes on once the draft has loaded and the story is saved
+    setupPollTick();   // [SETUP WALK 2026-10-18/] a piece waiting to be put down
+    if (mImportFlow) mImportFlow->tick();   // [GAME CARD 2026-10-18/] an import being made ([IMPORT WORLDS 2026-10-18/] the shared flow)
 }
 
 void WolfAdventureStudioView::saveDraftNow(bool keep_mine)
@@ -398,6 +411,10 @@ void WolfAdventureStudioView::saveDraftNow(bool keep_mine)
         {
             self->mEtag = reply["etag"].asString();
             self->mConflict = false;
+            // [GAME CARD 2026-10-18] GAME_CARD_SPINE_SPEC.md "Change (brain)": save_draft sends `pack` back when it filled in box kinds
+            // (wa_fill_kinds) - that is the draft now, unless the author changed something while the save was out (then the next
+            // save carries their change, and the brain fills the kinds in again)
+            if (!reply["pack_json"].asString().empty() && self->mDirtyAt <= 0.0) self->setDraftText(reply["pack_json"].asString(), reply["pack"]);
             self->setProblems(reply["problems"]);
             self->setStatus("Saved.", false);
             return;
@@ -408,7 +425,7 @@ void WolfAdventureStudioView::saveDraftNow(bool keep_mine)
             self->mConflict = true;
             self->mConflictEtag = reply["etag"].asString();
             self->mDirtyAt = now();
-            self->setStatus("This draft was changed in another window. Choose Reload (theirs) or Keep mine.", true);
+            self->setStatus("Your game was changed in another window. Choose Reload (theirs) or Keep mine.", true);
             return;
         }
         self->mDirtyAt = now() + SAVE_RETRY_SEC;
@@ -546,8 +563,8 @@ F32 WolfAdventureStudioView::pageAi(F32 l, F32 r, F32 top, const Palette& p)
     if (!mOwnerLoaded && owner) loadOwnerSettings();
     if (mConflict)
     {
-        y = para(l, r, y, "This draft was changed in another window.", DANGER_INK) - 4.f;
-        btn(l, y - 26.f, l + 130.f, y, "Reload", SH_CONFLICT_RELOAD, 0, "Throw your changes away and load the other window's draft", p);
+        y = para(l, r, y, "Your game was changed in another window.", DANGER_INK) - 4.f;
+        btn(l, y - 26.f, l + 130.f, y, "Reload", SH_CONFLICT_RELOAD, 0, "Throw your changes away and load the other window's version", p);
         btn(l + 140.f, y - 26.f, l + 270.f, y, "Keep mine", SH_CONFLICT_KEEP, 0, "Save your changes over the other window's", p);
         y -= 36.f;
     }
@@ -563,7 +580,7 @@ F32 WolfAdventureStudioView::pageAi(F32 l, F32 r, F32 top, const Palette& p)
     {
         const F32 gap = 8.f, cw = (r - l - gap) * 0.5f, chh = 54.f;
         struct Mode { const char* mLabel; const char* mLine; bool mOn; };
-        const Mode modes[2] = { { "AI characters", "You pay per conversation from your WolfCredits.", ai_on },
+        const Mode modes[2] = { { "AI characters", "You pay per conversation from your credits.", ai_on },
                                 { "Written lines only", "Free.", !ai_on } };
         for (S32 i = 0; i < 2; ++i)
         {
@@ -665,7 +682,7 @@ F32 WolfAdventureStudioView::pageAi(F32 l, F32 r, F32 top, const Palette& p)
         // the balance, Buy credits (the money moves only on the website, §2.12)
         const LLSD& bal = b["balance"];
         const std::string balance = bal.isUndefined() ? std::string("not known right now") : thousands(bal.asInteger()) + " credits";
-        textL(small, "Your WolfCredits: " + balance + (b["unbilledCredits"].asReal() > 0.0 ? " (" + creditsText(b["unbilledCredits"].asReal()) + " used, not charged yet)" : std::string()),
+        textL(small, "Your credits: " + balance + (b["unbilledCredits"].asReal() > 0.0 ? " (" + creditsText(b["unbilledCredits"].asReal()) + " used, not charged yet)" : std::string()),
               l, y - 4.f, p.mText, LLFontGL::LEFT, LLFontGL::TOP, r - l - 150.f);
         btn(r - 140.f, y - 24.f, r, y, "Buy credits...", SH_AI_BUY, 0, "Opens the Wolf Territories website's credits page in your browser", p,
             !b["buyurl"].asString().empty());
@@ -674,7 +691,7 @@ F32 WolfAdventureStudioView::pageAi(F32 l, F32 r, F32 top, const Palette& p)
         textL(small, "All your adventures today: " + creditsText(b["owner"]["todayCredits"].asReal()),
               l, y, p.mText, LLFontGL::LEFT, LLFontGL::TOP, r - l);
         y -= slh + 2.f;
-        textL(small, "GM assistant today: " + creditsText(b["assist"]["todayCredits"].asReal()) + llformat(" of %d", b["assist"]["cap"].asInteger()),
+        textL(small, "Host assistant today: " + creditsText(b["assist"]["todayCredits"].asReal()) + llformat(" of %d", b["assist"]["cap"].asInteger()),
               l, y, p.mText, LLFontGL::LEFT, LLFontGL::TOP, r - l);
         y -= slh + 2.f;
         textL(small, "Voice today: " + thousands(b["voice"]["todayChars"].asInteger()) + " of " + thousands(b["voice"]["cap"].asInteger()) + " characters",
@@ -693,14 +710,14 @@ F32 WolfAdventureStudioView::pageAi(F32 l, F32 r, F32 top, const Palette& p)
         // [NO CEILING 2026-10-17] the "All my adventures, a day" stepper is gone with the brain's daily ceiling
         const S32 assist = mOwner["assistCapCredits"].asInteger();
         const S32 money = mOwner["gmRewardMoney"].asInteger(), xp = mOwner["gmRewardXp"].asInteger();
-        stepper(l, y, 240.f, "GM assistant, a day", llformat("%d credits", assist), SH_OWNER_STEP, 1, assist > 0, assist < CAP_MAX,
-                "the most the GM assistant spends a day", p);
+        stepper(l, y, 240.f, "Host assistant, a day", llformat("%d credits", assist), SH_OWNER_STEP, 1, assist > 0, assist < CAP_MAX,
+                "the most the host assistant spends a day", p);
         y -= 32.f;
-        stepper(l, y, 240.f, "GM money rewards a session", thousands(money), SH_OWNER_STEP, 2, money > 0, money < 1000000,
-                "money a game master may hand out in one session", p);
+        stepper(l, y, 240.f, "Host money rewards a session", thousands(money), SH_OWNER_STEP, 2, money > 0, money < 1000000,
+                "money a host may hand out in one session", p);
         y -= 32.f;
-        stepper(l, y, 240.f, "GM XP rewards a session", thousands(xp), SH_OWNER_STEP, 3, xp > 0, xp < 100000,
-                "XP a game master may hand out in one session", p);
+        stepper(l, y, 240.f, "Host XP rewards a session", thousands(xp), SH_OWNER_STEP, 3, xp > 0, xp < 100000,
+                "XP a host may hand out in one session", p);
         y -= 34.f;
         btn(l, y - 28.f, l + 160.f, y, "Save limits", SH_OWNER_SAVE, 0, "Save your account limits", p, mOwnerDirty && mBusy == 0);
         if (mOwnerDirty) textL(small, "Not saved yet", l + 170.f, y - 14.f, WARN_INK, LLFontGL::LEFT, LLFontGL::VCENTER);
@@ -779,7 +796,7 @@ F32 WolfAdventureStudioView::pageCast(F32 l, F32 r, F32 top, const Palette& p)
                 const bool shown = mShowPremium || premium_in_use;
                 const S32 it = act([this]() { mShowPremium = !mShowPremium; });
                 btn(x, y - 24.f, x + 330.f, y, shown ? "Premium voice (ElevenLabs) - hide" : "Premium voice (ElevenLabs) - show",
-                    SH_E, it, "Premium voices are charged per character spoken, from your WolfCredits; the free voices cost nothing", p, !premium_in_use);
+                    SH_E, it, "Premium voices are charged per character spoken, from your credits; the free voices cost nothing", p, !premium_in_use);
                 if (!shown) break;
                 y -= 30.f;
             }
@@ -881,7 +898,7 @@ F32 WolfAdventureStudioView::pageCast(F32 l, F32 r, F32 top, const Palette& p)
     if (mBudget.isMap() && mBudgetFor == mOpenId) costs += " \xC2\xB7 This adventure today: " + creditsText(mBudget["today"]["credits"].asReal());
     textL(small, costs, l, y, p.mDim, LLFontGL::LEFT, LLFontGL::TOP, r - l);
     y -= slh + 4.f;
-    y = para(l, r, y, mTestAi ? "AI turns here are paid like players' (as a test) from your WolfCredits." : "Written lines only: nothing is charged.", p.mDim, true);
+    y = para(l, r, y, mTestAi ? "AI turns here are paid like players' (as a test) from your credits." : "Written lines only: nothing is charged.", p.mDim, true);
     return y - 8.f;
 }
 
@@ -1190,7 +1207,7 @@ F32 WolfAdventureStudioView::pageBook(F32 l, F32 r, F32 top, const Palette& p)
 
     // ---- the assistant (WOLF_MIND_V1.md §11, on the draft) ----
     y = head(l, r, y, "Ask the assistant", p);
-    y = para(l, r, y, "Ideas for you only: players never see them. Each answer is charged to your WolfCredits and counts against your assistant cap.", p.mDim, true) - 6.f;
+    y = para(l, r, y, "Ideas for you only: players never see them. Each answer is charged to your credits and counts against your assistant cap.", p.mDim, true) - 6.f;
     {
         static const char* ASKS[3] = { "What could happen next?", "Write boxed text for this scene", "Suggest a reply for..." };
         F32 x = l;
@@ -1352,13 +1369,33 @@ void WolfAdventureStudioView::pollJob()
         if (self->mJobId != id) return;
         if (!ok)
         {
-            self->setStatus("The drafting job could not be read: " + error, true);
+            // [GAME CARD 2026-10-18] as the web Studio: five failed reads in a row and it gives up, saying so (the build itself may
+            // still finish in the brain; opening the game again picks it up, resumeBuild)
+            if (++self->mJobPollFails >= 5)
+            {
+                self->mJobPollFails = 0;
+                if (self->mBuildStep == B_RUNNING)
+                    self->buildFail("How your build is going could not be read (" + error + "). It may still finish: open the game again in a few minutes.");
+                else self->setStatus("The build could not be read: " + error, true);
+                return;
+            }
+            self->setStatus("How your build is going could not be read: " + error, true);
             self->mJobPollAt = now() + JOB_POLL_SEC * 3.0;   // try again, more slowly
             return;
         }
+        self->mJobPollFails = 0;
         self->mJob = reply;
         const std::string state = reply["state"].asString();
         const bool building = self->mBuildStep == B_RUNNING;
+        // [GAME CARD 2026-10-18] wolfmind_lib.php wm_job_out 'mode' build | chapter: a chapter picked up after a relaunch lands on the map too
+        if (building && reply["mode"].asString() == "chapter") self->mBuildChapter = true;
+        // an answer just sent (or being sent): a poll that left before it still says "asking" - not shown again; read once more soon
+        if (state == "asking" && (self->mAnswerBusy || self->mAnswerSentFor == id))
+        {
+            self->mJob["state"] = "queued";
+            self->mJobPollAt = now() + JOB_POLL_SEC;
+            return;
+        }
         // a build picked up after a relaunch (resumeBuild) learns its cap here: wm_job_out 'maxCredits' => max_credits (wolfmind_lib.php:2991)
         if (building && reply["maxCredits"].asInteger() > 0) self->mBuildMax = reply["maxCredits"].asInteger();
         // the acts the brain is writing: its progress "Act k of N" (wolfmind_lib.php:2608 'Act ' . k . ' of ' . count($outline['acts']));
@@ -1369,10 +1406,14 @@ void WolfAdventureStudioView::pollJob()
             if (sscanf(reply["progress"].asString().c_str(), "Act %d of %d", &k, &n) == 2 && n > 0 && n <= 12) self->mBuildActs = n;
         }
         if (state == "queued" || state == "running") self->mJobPollAt = now() + JOB_POLL_SEC;
+        // [GAME CARD 2026-10-18] GAME_CARD_SPINE_SPEC.md section 3.1: after the plan pass the job waits for the author's choice
+        // (state "asking", output {plan}); page 1 shows "Choose your game". Read again now and then (answered in another window,
+        // or the brain's 24 h give-up turning it "failed")
+        else if (state == "asking") self->mJobPollAt = now() + JOB_POLL_SEC * 5.0;
         else if (state == "done")
         {
             // [SIMPLE STUDIO 2026-10-17] page 1's build: put into the game at once (job_apply); not sent yet (a save out) - asked again
-            if (!building) self->setStatus("The draft is ready: read the report, then Use as draft.", false);
+            if (!building) self->setStatus("It is built: read the report, then Use as draft.", false);
             else if (self->mDraftJson.empty())
             {
                 // the draft (and its etag) still loading: asked again; its load failed (no call out, nothing came): said in red, as
@@ -1386,6 +1427,7 @@ void WolfAdventureStudioView::pollJob()
                 // box the author removed back) - the game opens as it is, and this job is not picked up again (jobSeen)
                 self->jobMarkSeen(id);
                 self->mBuildStep = B_NONE;
+                self->mBuildChapter = false;   // [GAME CARD 2026-10-18/]
                 self->setStatus("Your last build is already in this game.", false);
                 self->flowLayout();
                 self->press(SH_PAGE, self->mFlowNodes.empty() ? (S32)SP_CHARS : (S32)SP_MAP);
@@ -1400,11 +1442,12 @@ void WolfAdventureStudioView::pollJob()
             if (building)
             {
                 self->mBuildStep = B_NONE;
+                self->mBuildChapter = false;   // [GAME CARD 2026-10-18/]
                 self->setStatus("Your last build is already in this game.", false);
                 self->flowLayout();
                 self->press(SH_PAGE, self->mFlowNodes.empty() ? (S32)SP_CHARS : (S32)SP_MAP);
             }
-            else self->setStatus("This draft is already in the game.", false);
+            else self->setStatus("This build is already in the game.", false);
         }
         else if (state == "failed")
         {
@@ -1459,7 +1502,7 @@ void WolfAdventureStudioView::resumeBuild()
                 });
                 return;
             }
-            if (state != "queued" && state != "running" && state != "done" && state != "applied") continue;
+            if (state != "queued" && state != "running" && state != "asking" && state != "done" && state != "applied") continue;   // [GAME CARD 2026-10-18] asking: its choice is still to make
             // a finished build is picked up ONCE (jobSeen): the next opening of the Studio is not pulled back to it every time
             if ((state == "done" || state == "applied") && self->jobSeen(job)) continue;
             if (state == "applied") self->jobMarkSeen(job);
@@ -1508,38 +1551,35 @@ bool WolfAdventureStudioView::jobOutputIn(const LLSD& job) const
     // Source: wolfmind_lib.php wm_job_out (2992-2994): 'output' is the built pack when the job is done. Its boxes keep their ids when
     // put in (was_replace keeps the built items; was_merge copies them by id, wolfadventure_story_lib.php:186-232), so one of
     // its beat ids in the draft means it was put in.
+    // [GAME CARD 2026-10-18] GAME_CARD_SPINE_SPEC.md section 3: a build now makes chapter 1 and outlines the rest (acts[].built false),
+    // and "Add the next chapter" builds one more - its output holds the chapters already in the draft too. So it counts as put in
+    // only when every chapter it BUILT (built absent or true) is built in the draft as well (same act id, built there, a shared box).
     const LLSD& out = job["output"];
     if (!out.isMap()) return false;
-    std::set<std::string> mine;
-    const LLSD& dacts = std::as_const(mDraftPack)["acts"];
-    for (S32 a = 0; dacts.isArray() && a < (S32)dacts.size(); ++a)
+    auto built = [](const LLSD& act) { return !(act["built"].isBoolean() && !act["built"].asBoolean()); };
+    std::map<std::string, std::set<std::string>> mine;   // a built act of the draft -> its beat ids
+    for (const LLSD& a : llsd::inArray(std::as_const(mDraftPack)["acts"]))
     {
-        const LLSD& scenes = dacts[a]["scenes"];
-        for (S32 s = 0; scenes.isArray() && s < (S32)scenes.size(); ++s)
-        {
-            const LLSD& beats = scenes[s]["beats"];
-            for (S32 b = 0; beats.isArray() && b < (S32)beats.size(); ++b)
-            {
-                const std::string id = beats[b]["id"].asString();
-                if (!id.empty()) mine.insert(id);
-            }
-        }
+        if (!built(a)) continue;
+        std::set<std::string>& ids = mine[a["id"].asString()];
+        for (const LLSD& sc : llsd::inArray(a["scenes"]))
+            for (const LLSD& b : llsd::inArray(sc["beats"]))
+                if (!b["id"].asString().empty()) ids.insert(b["id"].asString());
     }
-    const LLSD& jacts = out["acts"];
-    for (S32 a = 0; jacts.isArray() && a < (S32)jacts.size(); ++a)
+    bool any = false;
+    for (const LLSD& a : llsd::inArray(out["acts"]))
     {
-        const LLSD& scenes = jacts[a]["scenes"];
-        for (S32 s = 0; scenes.isArray() && s < (S32)scenes.size(); ++s)
-        {
-            const LLSD& beats = scenes[s]["beats"];
-            for (S32 b = 0; beats.isArray() && b < (S32)beats.size(); ++b)
-            {
-                const std::string id = beats[b]["id"].asString();
-                if (!id.empty() && mine.count(id)) return true;
-            }
-        }
+        if (!built(a)) continue;
+        auto it = mine.find(a["id"].asString());
+        if (it == mine.end()) return false;
+        bool shared = false;
+        for (const LLSD& sc : llsd::inArray(a["scenes"]))
+            for (const LLSD& b : llsd::inArray(sc["beats"]))
+                if (it->second.count(b["id"].asString())) shared = true;
+        if (!shared) return false;
+        any = true;
     }
-    return false;
+    return any;
 }
 
 bool WolfAdventureStudioView::jobSeen(const std::string& job) const
@@ -1575,7 +1615,7 @@ void WolfAdventureStudioView::loadJobs()
         if (handle.isDead()) return;
         WolfAdventureStudioView* self = handle.get();
         if (ok) self->mJobs = reply["jobs"].isArray() ? reply["jobs"] : LLSD::emptyArray();
-        else self->setStatus("Your drafting jobs could not be listed: " + error, true);
+        else self->setStatus("Your builds could not be listed: " + error, true);
     });
 }
 
@@ -1640,8 +1680,11 @@ std::string WolfAdventureStudioView::bookStem() const
 void WolfAdventureStudioView::buildFail(const std::string& why)
 {
     const EBuild was = mBuildStep;
-    mBuildError = why;
+    // [GAME CARD 2026-10-18] a chapter's build says why on the story map (its band), where it was asked for; page 1 keeps its own
+    if (mBuildChapter) mChapterError = why; else mBuildError = why;
     mBuildStep = B_NONE;
+    mBuildChapter = false;   // [GAME CARD 2026-10-18/]
+    mBuildChapterTitle.clear();
     // [SIMPLE STUDIO 2026-10-17] Paul: "it shouldn't save the game until the user has approved payment on the front screen" - the
     // attempt ended before "Yes, build it" (B_STARTING on): the game this attempt made goes again. From B_STARTING on the author
     // said yes: the game stays (the build may have cost something and is theirs to continue or delete from its card).
@@ -1850,7 +1893,7 @@ void WolfAdventureStudioView::buildBudget()
         if (known)
         {
             const S32 spend = (S32)floor(reply["balance"].asReal() - reply["unbilledCredits"].asReal());
-            if (spend < 1) { self->mBuildNeedCredits = true; self->buildFail("You have no WolfCredits yet. Buy some, then press Build my game."); return; }
+            if (spend < 1) { self->mBuildNeedCredits = true; self->buildFail("You have no credits yet. Buy some, then press Build my game."); return; }
             max = llmin(max, spend);
         }
         self->buildQuote(max, known);
@@ -1867,6 +1910,9 @@ void WolfAdventureStudioView::buildQuote(S32 max_credits, bool balance_known)
     // for a typed story and a loaded book alike
     body["rights"] = true;
     body["maxCredits"] = max_credits;   // wolfmind_lib.php:3052 - 1 to WM_MAX_SPEND_CREDITS
+    // [GAME CARD 2026-10-18] this Studio answers "Choose your game": the brain parks the job in `asking` only when told so (an older
+    // viewer, which cannot answer, gets the first shape chosen for it)
+    body["ask"] = true;
     if (book)
     {
         body["text"] = mBookText;       // wolfmind_lib.php:3046 - at least 200 characters
@@ -1896,7 +1942,7 @@ void WolfAdventureStudioView::buildQuote(S32 max_credits, bool balance_known)
         if (self->mBuildStep != B_QUOTING || self->mOpenId != adv) return;
         if (!ok) { self->buildFail("The cost could not be worked out: " + error); return; }
         const std::string job = reply["job"].asString();
-        if (job.empty()) { self->buildFail("The cost could not be worked out: the brain gave no job back."); return; }
+        if (job.empty()) { self->buildFail("The cost could not be worked out: something went wrong on our side, and nothing was charged. Press Build my game to try again."); return; }
         const S32 credits = (S32)ceil(reply["quote"]["credits"].asReal());
         if (credits > max_credits)
         {
@@ -1940,6 +1986,7 @@ void WolfAdventureStudioView::buildYes()
     body["job"] = mJobId;
     body["confirm"] = true;
     body["maxCredits"] = credits;
+    body["ask"] = true;   // [GAME CARD 2026-10-18] wolfmind_lib.php draft_start confirm also takes ask:true (marks the job to ask)
     const std::string job = mJobId;
     LLHandle<WolfAdventureStudioView> handle = getDerivedHandle<WolfAdventureStudioView>();
     // Source: wolfmind_lib.php wa_api_draft_start (3009-3031) {job, confirm:true, maxCredits} -> {job, state:"queued"}; refused in words
@@ -1955,7 +2002,7 @@ void WolfAdventureStudioView::buildYes()
             // build (you have B)' with extra {buyurl: WM_BUY_URL}) gets the Buy credits... button under the red text (pageYourStory)
             self->mBuildStep = B_QUOTED;
             self->mBuildError = "It did not start: " + error;
-            if ((reply.isMap() && reply.has("buyurl")) || error.find("WolfCredits") != std::string::npos)
+            if (creditsShort(reply, error))
             {
                 self->mBuildNeedCredits = true;
                 if (reply.isMap() && !reply["buyurl"].asString().empty()) self->mBuildBuyUrl = reply["buyurl"].asString();
@@ -1992,6 +2039,264 @@ void WolfAdventureStudioView::buildNo()
     // [SIMPLE STUDIO 2026-10-17] No: the game this attempt made goes again (the words and the book stay on page 1)
     buildUnmake();
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// [GAME CARD 2026-10-18] GAME_CARD_SPINE_SPEC.md: "Choose your game" (3.1-3.2), chapters (3.4-3.6), ready games (5, 6), imports (7)
+// ═══════════════════════════════════════════════════════════════════════════════════════
+
+void WolfAdventureStudioView::choosePick(const LLSD& plan, const std::string& shape_id)
+{
+    // Source: GAME_CARD_SPINE_SPEC.md section 3.1: plan {shapes:[{id, shape, title, pitch, youAre, goal, win, lose, genre}], length,
+    // players}. The three questions are filled from the chosen card (the author may change them); How long from the plan's own.
+    mPlanShape = shape_id;
+    for (const LLSD& sh : llsd::inArray(plan["shapes"]))
+        if (sh["id"].asString() == shape_id)
+        {
+            mPlanYouAre = cap(sh["youAre"].asString(), 240);
+            mPlanWin = cap(sh["win"].asString(), 240);
+        }
+    const std::string len = plan["length"].asString();
+    if (mPlanLength.empty()) mPlanLength = len == "short" || len == "medium" || len == "long" ? len : std::string("short");
+    mAnswerError.clear();
+}
+
+void WolfAdventureStudioView::chooseAnswer(bool you_choose, S32 max_credits)
+{
+    if (mJobId.empty() || mAnswerBusy) return;
+    LLSD body;
+    body["job"] = mJobId;
+    // Source: GAME_CARD_SPINE_SPEC.md section 3.2: job_answer {job, shape: <shape id> | "" ("you choose" = the first), youAre?, win?,
+    // length?} -> the answers become adventure.card and the job goes back to queued
+    body["shape"] = you_choose ? std::string() : mPlanShape;
+    if (!you_choose)
+    {
+        std::string you = mPlanYouAre, win = mPlanWin;
+        LLStringUtil::trim(you);
+        LLStringUtil::trim(win);
+        if (!you.empty()) body["youAre"] = you;
+        // a roleplay card has no win (GAME_CARD_SPINE_SPEC.md "Change (Paul, 2026-10-18)")
+        bool rp = false;
+        for (const LLSD& sh : llsd::inArray(std::as_const(mJob)["output"]["plan"]["shapes"]))
+            if (sh["id"].asString() == mPlanShape) rp = sh["shape"].asString() == "roleplay";
+        if (!win.empty() && !rp) body["win"] = win;
+        if (!mPlanLength.empty()) body["length"] = mPlanLength;
+    }
+    // Source: wolfmind_lib.php wa_api_job_answer: after about an hour the book is read again at the write price; it refuses with
+    // requote {credits} (the whole build's new most) until maxCredits covers it - sent only when the author said yes to that
+    if (max_credits > 0) body["maxCredits"] = max_credits;
+    mAnswerYouChoose = you_choose;
+    mAnswerBusy = true;
+    mAnswerError.clear();
+    mAnswerRequote = 0;
+    mBuildNeedCredits = false;
+    const std::string job = mJobId;
+    LLHandle<WolfAdventureStudioView> handle = getDerivedHandle<WolfAdventureStudioView>();
+    WolfAdventure::api("job_answer", body, [handle, job](bool ok, const LLSD& reply, const std::string& error)
+    {
+        if (handle.isDead()) return;
+        WolfAdventureStudioView* self = handle.get();
+        self->mAnswerBusy = false;
+        if (self->mJobId != job) return;
+        if (!ok)
+        {
+            self->mAnswerError = "Your choice did not go through: " + error;
+            if (reply.isMap() && reply["requote"]["credits"].asInteger() > 0) self->mAnswerRequote = reply["requote"]["credits"].asInteger();
+            if (creditsShort(reply, error)) { self->mBuildNeedCredits = true; if (!reply["buyurl"].asString().empty()) self->mBuildBuyUrl = reply["buyurl"].asString(); }
+            return;
+        }
+        if (reply["maxCredits"].asInteger() > 0) self->mBuildMax = reply["maxCredits"].asInteger();   // wa_api_job_answer 'maxCredits'
+        // on its way again: the progress card shows, polled as before
+        self->mJob["state"] = reply["state"].asString().empty() ? std::string("queued") : reply["state"].asString();
+        self->mJob["progress"] = reply["progress"].asString().empty() ? std::string("Waiting to start") : reply["progress"].asString();
+        self->mPlanFor.clear();
+        self->mAnswerSentFor = job;
+        self->mJobPollAt = now() + JOB_POLL_SEC;
+    });
+}
+
+S32 WolfAdventureStudioView::unbuiltChapters() const
+{
+    // Source: GAME_CARD_SPINE_SPEC.md section 1: acts[].built (absent = true); false = in the outline, not built yet
+    S32 n = 0;
+    for (const LLSD& a : llsd::inArray(std::as_const(mDraftPack)["acts"])) if (a["built"].isBoolean() && !a["built"].asBoolean()) ++n;
+    return n;
+}
+
+std::string WolfAdventureStudioView::nextUnbuiltChapter(std::string* title) const
+{
+    for (const LLSD& a : llsd::inArray(std::as_const(mDraftPack)["acts"]))
+        if (a["built"].isBoolean() && !a["built"].asBoolean())
+        {
+            if (title) *title = a["title"].asString();
+            return a["id"].asString();
+        }
+    if (title) title->clear();
+    return std::string();
+}
+
+void WolfAdventureStudioView::chapterQuote()
+{
+    const std::string chapter = nextUnbuiltChapter();
+    if (mOpenId.empty() || chapter.empty() || mChapterBusy || !openIsOwner()) return;
+    mChapterFor = mOpenId + "|" + chapter;
+    if (!mChapterJob.empty())
+    {
+        // the last quote (for an older draft) is dropped: nothing was charged for it
+        LLSD dropq;
+        dropq["job"] = mChapterJob;
+        WolfAdventure::api("job_cancel", dropq, nullptr);
+        mChapterJob.clear();
+    }
+    mChapterCredits = -1;
+    mChapterError.clear();
+    mChapterNeedBook = false;
+    mBuildNeedCredits = false;   // a Buy credits... button is shown only for this try's own refusal
+    mChapterBusy = true;
+    LLSD body;
+    body["adventure"] = mOpenId;
+    body["chapter"] = chapter;
+    // Source: wolfmind_lib.php wa_api_draft_start: rights must be true (Paul 2026-10-17: the author's responsibility under the Terms,
+    // as page 1's build) and maxCredits 1..WM_MAX_SPEND_CREDITS to quote; the cap is set to the quote itself on confirm (chapterStart)
+    body["rights"] = true;
+    body["maxCredits"] = BRAIN_MAX_CREDITS;
+    body["ask"] = true;   // as page 1's builds (a chapter has no choice to make; harmless)
+    const std::string adv = mOpenId, key = mChapterFor;
+    LLHandle<WolfAdventureStudioView> handle = getDerivedHandle<WolfAdventureStudioView>();
+    // GAME_CARD_SPINE_SPEC.md section 3.6: draft_start {adventure, chapter: <act id>} quotes ONE act pass (state quoting, nothing charged)
+    WolfAdventure::api("draft_start", body, [handle, adv, key](bool ok, const LLSD& reply, const std::string& error)
+    {
+        if (handle.isDead()) return;
+        WolfAdventureStudioView* self = handle.get();
+        self->mChapterBusy = false;
+        if (self->mOpenId != adv || self->mChapterFor != key)
+        {
+            if (ok && !reply["job"].asString().empty()) { LLSD c; c["job"] = reply["job"]; WolfAdventure::api("job_cancel", c, nullptr); }
+            return;
+        }
+        if (!ok)
+        {
+            self->mChapterError = "The next chapter's cost could not be worked out: " + error;
+            // Source: wolfmind_lib.php wm_chapter_start: refused with needBook when the book is no longer kept (30 days)
+            self->mChapterNeedBook = reply.isMap() && reply["needBook"].asBoolean();
+            return;
+        }
+        const std::string job = reply["job"].asString();
+        if (job.empty()) { self->mChapterError = "The next chapter's cost could not be worked out: something went wrong on our side. Press the button to try again."; return; }
+        self->mChapterJob = job;
+        self->mChapterCredits = llmax(1, (S32)ceil(reply["quote"]["credits"].asReal()));
+    });
+}
+
+void WolfAdventureStudioView::chapterStart()
+{
+    if (mChapterJob.empty() || mChapterCredits < 0 || mChapterBusy || mBuildStep != B_NONE) return;
+    std::string title;
+    nextUnbuiltChapter(&title);
+    const S32 credits = llclamp(mChapterCredits, 1, BRAIN_MAX_CREDITS);
+    LLSD body;
+    body["job"] = mChapterJob;
+    body["confirm"] = true;
+    body["maxCredits"] = credits;   // the cap is the quote on the button (as page 1's Yes, buildYes)
+    mChapterBusy = true;
+    mChapterError.clear();
+    mBuildNeedCredits = false;
+    const std::string job = mChapterJob, adv = mOpenId;
+    LLHandle<WolfAdventureStudioView> handle = getDerivedHandle<WolfAdventureStudioView>();
+    // Source: wolfmind_lib.php wa_api_draft_start confirm {job, confirm:true, maxCredits} -> {job, state:"queued"}; refused in words
+    // (credits: extra {buyurl})
+    WolfAdventure::api("draft_start", body, [handle, job, adv, credits, title](bool ok, const LLSD& reply, const std::string& error)
+    {
+        if (handle.isDead()) return;
+        WolfAdventureStudioView* self = handle.get();
+        self->mChapterBusy = false;
+        if (self->mOpenId != adv || self->mChapterJob != job) return;
+        if (ok && self->mBuildStep != B_NONE)
+        {
+            // another build began meanwhile (page 1): this one runs on and is picked up later (resumeBuild); nothing is overwritten
+            self->mChapterJob.clear();
+            self->mChapterCredits = -1;
+            self->mChapterFor.clear();
+            self->setStatus("The next chapter is building; it goes into your game when your other build is done.", false);
+            return;
+        }
+        if (!ok)
+        {
+            self->mChapterError = "The next chapter did not start: " + error;
+            if (creditsShort(reply, error))
+            {
+                self->mBuildNeedCredits = true;
+                if (reply.isMap() && !reply["buyurl"].asString().empty()) self->mBuildBuyUrl = reply["buyurl"].asString();
+            }
+            return;
+        }
+        // the build runs as page 1's does (its progress card, polled, then put in), and lands back on the story map
+        self->mChapterJob.clear();
+        self->mChapterCredits = -1;
+        self->mJobId = job;
+        self->mJob = LLSD::emptyMap();
+        self->mJob["state"] = reply["state"].asString().empty() ? std::string("queued") : reply["state"].asString();
+        self->mBuildError.clear();
+        self->mBuildMax = credits;
+        self->mBuildRunAt = time(nullptr);
+        self->mBuildActs = 0;
+        self->mBuildKind = 0;
+        self->mBuildChapter = true;
+        self->mBuildChapterTitle = cap(title, 64);
+        self->mBuildStep = B_RUNNING;   // as page 1's build (polled, then put in), shown in the story map's band (as the web Studio)
+        self->mChapterApplyJob.clear();
+        self->mJobPollAt = now() + JOB_POLL_SEC;
+        self->setStatus("Building the next chapter...", false);
+    });
+}
+
+void WolfAdventureStudioView::startFromTemplate(const std::string& id, const std::string& title)
+{
+    if (!mTemplateMaking.empty() || mBuildStep != B_NONE) return;
+    LLViewerRegion* rgn = gAgent.getRegion();
+    if (!rgn) { mReadyError = "Stand in the world first: the game is made where you stand."; return; }
+    mReadyError.clear();
+    // Source: wolfadventure_lib.php wa_api_create (5030-5090) {title 1..64, purpose, template, region, here:[x,y,z]} - the starter's
+    // pack laid out round where the author stands (wa_template_pack); no AI, nothing charged. The purpose is the template's own
+    // (wa_template_pack sets it: 5061-5062), so "adventure" is only the request's default.
+    LLSD body;
+    body["title"] = cap(title.empty() ? id : title, TITLE_MAX);
+    body["purpose"] = "adventure";
+    body["template"] = id;
+    body["region"] = rgn->getRegionID().asString();
+    const LLVector3 pos = rgn->getPosRegionFromAgent(gAgent.getPositionAgent());
+    if (std::isfinite(pos.mV[VX]) && std::isfinite(pos.mV[VY]) && std::isfinite(pos.mV[VZ]))
+    {
+        LLSD here = LLSD::emptyArray();
+        here.append((F64)pos.mV[VX]);
+        here.append((F64)pos.mV[VY]);
+        here.append((F64)pos.mV[VZ]);
+        body["here"] = here;
+    }
+    for (const LLSD& t : llsd::inArray(mTemplates)) if (t["id"].asString() == id && !t["purpose"].asString().empty()) body["purpose"] = t["purpose"];
+    mTemplateMaking = id;
+    LLHandle<WolfAdventureStudioView> handle = getDerivedHandle<WolfAdventureStudioView>();
+    WolfAdventure::api("create", body, [handle](bool ok, const LLSD& made, const std::string& error)
+    {
+        if (handle.isDead()) return;
+        WolfAdventureStudioView* self = handle.get();
+        self->mTemplateMaking.clear();
+        const std::string aid = ok ? made["adventure"]["id"].asString() : std::string();
+        if (aid.empty()) { self->mReadyError = ok ? std::string("The game could not be made - try again.") : "The game could not be made: " + error; return; }
+        self->loadList();
+        self->openAdventure(aid);
+        // page 2 at once (it shows "Opening your game..." until its draft has loaded); [SETUP WALK 2026-10-18] then Gameplay with the
+        // walk when the game has one to do (setupAfterMade), as the web Studio's _suAfterMade(id, 2, "<title> is yours.")
+        self->mLandPending = false;
+        self->mCharsWho.clear();
+        self->mPage = SP_CHARS;
+        self->mScroll[SP_CHARS] = 0.f;
+        self->mLandNote = made["region"]["state"].asString() == "enabled" ? std::string() : std::string(LAND_NOTE);
+        self->setupAfterMade(aid, (S32)SP_CHARS, made["adventure"]["title"].asString() + " is yours.");
+    });
+}
+
+// [IMPORT WORLDS 2026-10-18] importPick / importStart / importPoll moved to wolfimportflow.cpp (WolfImportFlow::pick / start / poll),
+// shared with the Build > Import worlds... window; the Story page draws mImportFlow (importSection, wolffloateradventurestudioflow.cpp).
 
 void WolfAdventureStudioView::assistRun()
 {
@@ -2140,7 +2445,7 @@ F32 WolfAdventureStudioView::pageRun(F32 l, F32 r, F32 top, const Palette& p)
     const LLFontGL* bold = LLFontGL::getFontSansSerifSmallBold();
     const F32 slh = (F32)small->getLineHeight();
     F32 y = top;
-    if (mOpenId.empty()) return para(l, r, y, "Open an adventure on Home first. You can run the adventures you own or are a game master of.", p.mDim);
+    if (mOpenId.empty()) return para(l, r, y, "Open an adventure on Home first. You can run the adventures you own or are a host of.", p.mDim);
     const bool idle = mBusy == 0;
     y = head(l, r - 100.f, y, "Sessions", p);
     btn(r - 90.f, y + slh + 10.f - 24.f, r, y + slh + 10.f, "Refresh", SH_RUN_REFRESH, 0, "Look for sessions again", p, idle);
@@ -2339,7 +2644,7 @@ bool WolfAdventureStudioView::pressP2(S32 id, S32 arg)
         mConflict = false;
         mDirtyAt = 0.0;
         loadOpen();
-        setStatus("Reloaded the other window's draft.", false);
+        setStatus("Your game was changed in another window, so we loaded it again.", false);
         return true;
     case SH_CONFLICT_KEEP:
         mConflict = false;

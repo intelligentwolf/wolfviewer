@@ -72,8 +72,9 @@ namespace
         // Source: HUD_MESSAGES_V1.md §3.9 "the outcome as a word (Success / Failure / Critical / Fumble)".
         if (o == "success") return "Success";
         if (o == "failure") return "Failure";
-        if (o == "critical") return "Critical";
-        if (o == "fumble") return "Fumble";
+        // [WORDING 2026-10-18] plain words, as the web HUD's OUTCOME_WORD
+        if (o == "critical") return "Brilliant!";
+        if (o == "fumble") return "Disaster!";
         return std::string();
     }
 
@@ -391,8 +392,9 @@ F32 WolfAdventurePlayView::faceRoll(F32 W, F32 H, bool draw, const Palette& p)
         y -= die + slh + 8.f;
         if (!tumbling)
         {
-            std::string sum = (dc.mMod != 0 ? llformat("Modifier %+d \xC2\xB7 ", dc.mMod) : std::string()) + llformat("Total %d", dc.mTotal);
-            if (dc.mHasDc) sum += llformat(" \xC2\xB7 DC %d", dc.mDc);
+            // [WORDING 2026-10-18] as the web HUD: "+2 = 15 - you needed 12"
+            std::string sum = (dc.mMod != 0 ? llformat("%+d = ", dc.mMod) : std::string("= ")) + llformat("%d", dc.mTotal);
+            if (dc.mHasDc) sum += llformat(" - you needed %d", dc.mDc);
             if (draw) textL(body, sum, PAD, y, p.mText, LLFontGL::LEFT, LLFontGL::TOP, W - 2.f * PAD);
             y -= lh + 4.f;
             const std::string word = outcomeWord(dc.mOutcome);
@@ -417,8 +419,7 @@ F32 WolfAdventurePlayView::faceRoll(F32 W, F32 H, bool draw, const Palette& p)
                     y -= slh;
                 }
             }
-            if (!dc.mPublic && draw) textL(small, "Private roll: only you and the game masters see it.", PAD, y, p.mDim);
-            if (!dc.mPublic) y -= slh;
+            // [WORDING 2026-10-18] the result card says nothing of who sees it (the roll prompt did), as the web HUD
         }
         return H - y + PAD;
     }
@@ -429,10 +430,11 @@ F32 WolfAdventurePlayView::faceRoll(F32 W, F32 H, bool draw, const Palette& p)
     if (draw) textL(title, rl.mLabel.empty() ? std::string("Roll") : rl.mLabel, PAD, y, p.mAccent, LLFontGL::LEFT, LLFontGL::TOP, W - 2.f * PAD);
     y -= (F32)title->getLineHeight() + 4.f;
     std::string what = rl.mDice.empty() ? std::string("1d20") : rl.mDice;
-    if (rl.mAdvantage > 0) what += " with advantage";
-    else if (rl.mAdvantage < 0) what += " with disadvantage";
-    what += rl.mHasDc ? llformat(" \xC2\xB7 DC %d", rl.mDc) : std::string(" \xC2\xB7 DC hidden");
-    if (!rl.mPublic) what += " \xC2\xB7 private";
+    // [WORDING 2026-10-18] the roll in plain words (no "advantage", "DC"), as the web HUD
+    if (rl.mAdvantage > 0) what += " \xC2\xB7 roll twice, keep the best";
+    else if (rl.mAdvantage < 0) what += " \xC2\xB7 roll twice, keep the worst";
+    what += rl.mHasDc ? llformat(" \xC2\xB7 you need %d or more", rl.mDc) : std::string(" \xC2\xB7 the number you need is secret");
+    if (!rl.mPublic) what += " \xC2\xB7 only you see it";
     if (draw) textL(body, what, PAD, y, p.mText, LLFontGL::LEFT, LLFontGL::TOP, W - 2.f * PAD);
     y -= lh + 6.f;
     if (rl.mEndsAt > 0.0 && rl.mSec > 0.f)
@@ -523,7 +525,7 @@ F32 WolfAdventurePlayView::faceTurns(F32 W, F32 H, bool draw, const Palette& p)
             const std::string sw = r.mSide == "enemy" ? "Enemy" : (r.mSide == "party" ? (r.mYou ? "You" : "Party") : "Neutral");
             // [M4] a fighter who is out of it says so in words (down / ran off), as well as the dimmed bar
             const std::string st = r.mState == "down" ? " \xC2\xB7 down" : r.mState == "beaten" ? " \xC2\xB7 beaten" : r.mState == "fled" ? " \xC2\xB7 ran off" : r.mState == "defending" ? " \xC2\xB7 defending" : std::string();
-            textL(small, sw + llformat(" \xC2\xB7 init %d", r.mInit) + st, x + 6.f, ty, r.mState == "down" || r.mState == "beaten" || r.mState == "fled" ? WARN_INK : p.mDim, LLFontGL::LEFT, LLFontGL::TOP, w - 12.f);
+            textL(small, sw + llformat(" \xC2\xB7 Order roll %d", r.mInit) + st, x + 6.f, ty, r.mState == "down" || r.mState == "beaten" || r.mState == "fled" ? WARN_INK : p.mDim, LLFontGL::LEFT, LLFontGL::TOP, w - 12.f);
             ty -= slh;
             if (r.mHasHp)
             {
@@ -532,7 +534,7 @@ F32 WolfAdventurePlayView::faceTurns(F32 W, F32 H, bool draw, const Palette& p)
                 rect(x + 6.f, ty - 6.f, x + w - 6.f, ty - 2.f, p.mTrack);
                 rect(x + 6.f, ty - 6.f, x + 6.f + (w - 12.f) * frac, ty - 2.f, frac > 0.5f ? OK_INK : (frac > 0.2f ? WARN_INK : DANGER_INK));
                 ty -= 8.f;
-                textL(small, llformat("HP %d/%d", r.mHp, r.mHpMax), x + 6.f, ty, p.mText);
+                textL(small, llformat("Health %d of %d", r.mHp, r.mHpMax), x + 6.f, ty, p.mText);
                 ty -= slh;
             }
             if (!r.mCond.empty())

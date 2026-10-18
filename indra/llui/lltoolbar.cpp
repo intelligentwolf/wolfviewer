@@ -194,13 +194,16 @@ void LLToolBar::createContextMenu()
         if(orientation == LLView::HORIZONTAL)
         {
             menu_xml_name="menu_toolbars_horizontal.xml";
-            commit_reg.add("Toolbars.SetLayoutStyle", boost::bind(&LLToolBar::onLayoutStyleChanged, this, _2));
-            enable_reg.add("Toolbars.CheckLayoutStyle", boost::bind(&LLToolBar::isLayoutStyle, this, _2));
         }
         else
         {
             menu_xml_name="menu_toolbars_vertical.xml";
         }
+        // <WolfViewer 2026-10-18> Registered for the side bars too: their menu now offers
+        // Autosize Buttons / Buttons Fill Bar (menu_toolbars_vertical.xml, updateLayoutAsNeeded).
+        commit_reg.add("Toolbars.SetLayoutStyle", boost::bind(&LLToolBar::onLayoutStyleChanged, this, _2));
+        enable_reg.add("Toolbars.CheckLayoutStyle", boost::bind(&LLToolBar::isLayoutStyle, this, _2));
+        // </WolfViewer>
         commit_reg.add("Toolbars.SetAlignment", boost::bind(&LLToolBar::onAlignmentChanged, this, _2));
         enable_reg.add("Toolbars.CheckAlignment", boost::bind(&LLToolBar::isAlignment, this, _2));
         // </FS:Zi>
@@ -773,11 +776,54 @@ void LLToolBar::updateLayoutAsNeeded()
     S32 full_screen_width = max_length;
     S32 equalized_width = 0;
 
+    // <WolfViewer 2026-10-18> Exact row count, worked out here (it was below) because the fill
+    // layout now needs it too. Splitting by COUNT rather than by width is what makes the number
+    // of rows predictable: a width budget of total/rows is a greedy bin-pack, and greedy
+    // overflows into an extra row whenever the items do not divide evenly (three 5s into a
+    // budget of 8 gives three rows, not two). Buttons keep their natural widths, so a row is
+    // only as wide as what is on it.
+    S32 buttons_per_row = 0;
+    if (mRows > 1 && orientation == LLLayoutStack::HORIZONTAL && !mButtons.empty())
+    {
+        buttons_per_row = llceil((F32)mButtons.size() / (F32)mRows);
+    }
+    // Height each button gets in a VERTICAL bar set to "Buttons Fill Bar"; 0 = not stretching.
+    S32 fill_length = 0;
+    // </WolfViewer>
+
     if (mLayoutStyle == LAYOUT_STYLE_FILL)
     {
         if (mButtons.size())
         {
-            equalized_width = (full_screen_width - mPadBetween * (static_cast<S32>(mButtons.size()) + 1)) / static_cast<S32>(mButtons.size());
+            // <WolfViewer 2026-10-18> "Buttons Fill Bar" with the two-row bottom bar (Hydra Knight:
+            // "have them resize so that, no matter how many buttons you have, it takes up the whole
+            // of the line"). Stock fill shares the width among ALL the buttons and never wraps, so
+            // the two-row bar collapsed into one squeezed line. Share it among one ROW's buttons
+            // instead and let the rows wrap by count below: every row then runs edge to edge.
+            // equalized_width = (full_screen_width - mPadBetween * (static_cast<S32>(mButtons.size()) + 1)) / static_cast<S32>(mButtons.size());
+            if (orientation == LLLayoutStack::HORIZONTAL)
+            {
+                const S32 per_row = (buttons_per_row > 0) ? buttons_per_row : static_cast<S32>(mButtons.size());
+                equalized_width = (full_screen_width - mPadBetween * (per_row + 1)) / per_row;
+            }
+            else
+            {
+                // A side bar stretches its buttons DOWN the bar, the length being the height.
+                // (Stock applied the height share to the button WIDTHS here, which only made the
+                // column wider.) Stretch only: when the buttons would have to shrink below the
+                // height they were drawn at, the bar is laid out as Autosize and wraps as usual.
+                const S32 count = static_cast<S32>(mButtons.size());
+                fill_length = (full_screen_width - mPadBetween * (count + 1)) / count;
+                for (LLToolBarButton* button : mButtons)
+                {
+                    if (fill_length < button->mDesiredHeight)
+                    {
+                        fill_length = 0;
+                        break;
+                    }
+                }
+            }
+            // </WolfViewer>
         }
     }
     else if (mLayoutStyle == LAYOUT_STYLE_EQUALIZE)
@@ -800,16 +846,7 @@ void LLToolBar::updateLayoutAsNeeded()
     }
     // </FS:Zi>
 
-    // <WolfViewer 2026-09-08> Exact row count. Splitting by COUNT rather than by width is
-    // what makes the number of rows predictable: a width budget of total/rows is a greedy
-    // bin-pack, and greedy overflows into an extra row whenever the items do not divide
-    // evenly (three 5s into a budget of 8 gives three rows, not two). Buttons keep their
-    // natural widths, so a row is only as wide as what is on it.
-    S32 buttons_per_row = 0;
-    if (mRows > 1 && orientation == LLLayoutStack::HORIZONTAL && !mButtons.empty())
-    {
-        buttons_per_row = llceil((F32)mButtons.size() / (F32)mRows);
-    }
+    // <WolfViewer 2026-09-08> Exact row count: buttons_per_row, worked out above.
     // [2026-09-10] Every row placed, for the spread below (Paul: "there's a big space
     // underneath camera controls ... make it spread out so it looks right").
     std::vector<std::vector<LLToolBarButton*> > wolf_rows;
@@ -833,7 +870,10 @@ void LLToolBar::updateLayoutAsNeeded()
         }
         else
         {
-            button->reshape(button->mWidthRange.getMin(), button->mDesiredHeight);
+            // <WolfViewer 2026-10-18> a side bar on "Buttons Fill Bar" gets its stretched height.
+            // button->reshape(button->mWidthRange.getMin(), button->mDesiredHeight);
+            button->reshape(button->mWidthRange.getMin(), fill_length > 0 ? fill_length : button->mDesiredHeight);
+            // </WolfViewer>
         }
         // </FS:Zi>
         button->autoResize();
@@ -865,11 +905,17 @@ void LLToolBar::updateLayoutAsNeeded()
         // a third row than buttons off the edge of the screen.
         const bool row_is_full = (buttons_per_row > 0)
                                  && ((S32)buttons_in_row.size() >= buttons_per_row);
+        // [2026-10-18] A filling bar never wraps on width (FS:Zi: its buttons are sized to fit
+        // the line), but it does wrap once a row holds its share, so a two-row bar fills both
+        // rows. A side bar that could not be stretched (fill_length 0) wraps like Autosize.
+        const bool filling = (mLayoutStyle == LAYOUT_STYLE_FILL)
+                             && (orientation == LLLayoutStack::HORIZONTAL || fill_length > 0);
         // </WolfViewer>
         if (mWrap
-            && mLayoutStyle != LAYOUT_STYLE_FILL        // <FS:Zi> Don't wrap in fill layout mode
+            // && mLayoutStyle != LAYOUT_STYLE_FILL        // <FS:Zi> Don't wrap in fill layout mode
             && (row_is_full                                     // <WolfViewer> row's share is placed...
-                || row_running_length + button_length > max_length) // ...or out of room...
+                || (!filling                                    // ...or, unless filling the bar,
+                    && row_running_length + button_length > max_length)) // ...out of room...
             && cur_start != row_pad_start)                      // ...and not first button in row
         {
             if (orientation == LLLayoutStack::VERTICAL)
@@ -1609,7 +1655,18 @@ LLToolBarEnums::LayoutStyle LLToolBar::getLayoutStyle() const
 // <FS:Zi> Sets the layout style for this panel when loading the XML settings
 void LLToolBar::setLayoutStyle(LLToolBarEnums::LayoutStyle layout_style)
 {
+    // <WolfViewer 2026-10-18> Rebuild the buttons when the style changes, as setButtonType does.
+    // The fill and equalize layouts overwrite each button's mWidthRange (updateLayoutAsNeeded),
+    // and nothing put it back, so after "Buttons Fill Bar" an "Autosize Buttons" bar kept the
+    // stretched maximum (or a squeezed minimum) until the next restart. New buttons start from
+    // the button_width the toolbar was built with.
+    const bool regenerate_buttons = (mLayoutStyle != layout_style);
     mLayoutStyle = layout_style;
+    if (regenerate_buttons)
+    {
+        createButtons();
+    }
+    // </WolfViewer>
     mNeedsLayout = true;
 }
 

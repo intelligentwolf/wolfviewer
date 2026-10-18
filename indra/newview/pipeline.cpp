@@ -8226,7 +8226,7 @@ void LLPipeline::wolfGodRays(LLRenderTarget* dst)
         sh.uniform3f(s_uColor, sc.mV[0] * 0.55f + fc.mV[0] * 1.2f, sc.mV[1] * 0.6f + fc.mV[1] * 1.2f, sc.mV[2] * 0.65f + fc.mV[2] * 1.2f);
         WolfOceanFFT& fft = WolfOceanFFT::instance();
         LLRenderTarget* t1 = fft.finalTarget(1);
-        if (t1 && fft.isReady() && WolfGrid::isOnWolfTerritories())   // [WOLF GRID GATE 2026-10-17/] the FFT is not updated off Wolf (lldrawpoolwater.cpp)
+        if (t1 && fft.isReady() && WolfGrid::showsWolfRegion())   // [WOLF GRID GATE 2026-10-17/] the FFT is not updated off Wolf (lldrawpoolwater.cpp)
         {
             sh.bindTexture(LLShaderMgr::WOLF_CAUSTIC_TEX1, t1, false, LLTexUnit::TFO_TRILINEAR, 1);
             sh.uniform1f(s_uCausticOn, 1.f);

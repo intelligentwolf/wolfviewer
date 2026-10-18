@@ -2136,7 +2136,8 @@
             <!-- [WOLF WORLD 2026-10-10] Jimmy's Weather Report (wolffloaterweatherreport.cpp) -->
             <menu_item_call label="Jimmy's Weather Report..." name="WolfWeatherReport">
                 <menu_item_call.on_click function="Floater.Show" parameter="wolf_weather_report" />
-                <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
+                <!-- [WOLF VISITOR SEES 2026-10-18] the region's report: hypergrid visitors on a Wolf region too -->
+                <menu_item_call.on_visible function="WolfGrid.ShowsWolfRegionWeather" />
             </menu_item_call>
             <!-- [ASTRONOMY 2026-10-03] Paul: "show atronomy, where it would show and label the star groups
              like orion". Constellation figures and names over the real star map (llvowlsky.cpp), on
@@ -2153,6 +2154,13 @@
              and the parcel's room. Every grid (also under Build). -->
             <menu_item_call label="Wolf Builder..." name="WolfBuilder">
                 <menu_item_call.on_click function="Floater.Show" parameter="wolf_builder" />
+            </menu_item_call>
+            <!-- [IMPORT WORLDS 2026-10-18] GAME_CARD_SPINE_SPEC.md (Paul ~15:20Z): bring in a Minecraft build, a Roblox place or a
+             MagicaVoxel model (wolffloaterimportworlds.cpp). Also under Build. [WOLF GRID GATE] gone (not greyed) off Wolf: the
+             import runs on Wolf's own service. -->
+            <menu_item_call label="Import worlds (Experimental)..." name="WolfWorldImportWorlds">
+                <menu_item_call.on_click function="Floater.Show" parameter="wolf_import_worlds" />
+                <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
             </menu_item_call>
             <!-- [WolfViewer 2026-10-16] Paul: "anything wolf viewer should be under wolf world". The Wolf building and
              land tools are here as well as under Build, with the same Wolf Territories gates as their Build items. -->
@@ -2312,6 +2320,18 @@
          <menu_item_call.on_click
           function="Floater.Show"
           parameter="wolf_builder" />
+       </menu_item_call>
+       <!-- [IMPORT WORLDS 2026-10-18] Paul: "Build -> import worlds -> floater Import Minecraft, Roblox etc"
+            (GAME_CARD_SPINE_SPEC.md ~15:20Z; wolffloaterimportworlds.cpp). Wolf Territories only, the same region gate as
+            Make Caves: gone (not greyed) off Wolf. Also in Wolf World > Build & Land. -->
+       <menu_item_call
+        label="Import worlds (Experimental)..."
+        name="WolfImportWorlds">
+         <menu_item_call.on_click
+          function="Floater.Show"
+          parameter="wolf_import_worlds" />
+         <menu_item_call.on_visible
+          function="WolfGrid.IsOnWolfTerritories" />
        </menu_item_call>
        <menu
           create_jump_keys="true"

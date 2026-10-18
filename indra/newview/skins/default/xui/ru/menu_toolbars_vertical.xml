@@ -9,4 +9,6 @@
   <menu_item_check label="Только значки" name="icons_only" />
   <menu_item_check label="Только подписи" name="text_only" />
   <menu_item_check label="Заблокированое" name="toolbars_locked" />
+  <menu_item_check label="Автоматическая настройка кнопок" name="layout_style_none" />
+  <menu_item_check label="Кнопки заполняют панель" name="layout_style_fill" />
 </context_menu>

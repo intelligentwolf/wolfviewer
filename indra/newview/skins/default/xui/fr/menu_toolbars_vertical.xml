@@ -9,4 +9,6 @@
 	<menu_item_check label="Icônes uniquement" name="icons_only"/>
 	<menu_item_check label="Libellés uniquement" name="text_only"/>
 	<menu_item_check label="Verrouillé" name="toolbars_locked"/>
+	<menu_item_check label="Taille automatique" name="layout_style_none"/>
+	<menu_item_check label="Ajuster à la longueur de la barre" name="layout_style_fill"/>
 </context_menu>

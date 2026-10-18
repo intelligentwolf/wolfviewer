@@ -68,6 +68,26 @@
               parameter="text_only" />
   </menu_item_check>
   <menu_item_separator layout="topleft" />
+  <!-- WolfViewer 2026-10-18: the side bars can fill their length too, as the bottom bar's
+       "Buttons Fill Bar" fills its width (lltoolbar.cpp updateLayoutAsNeeded). "Fixed Size
+       Buttons" is left out: a side bar's buttons already share one width. -->
+  <menu_item_check label="Autosize Buttons"
+                   layout="topleft"
+                   name="layout_style_none">
+    <on_click function="Toolbars.SetLayoutStyle"
+              parameter="none" />
+    <on_check function="Toolbars.CheckLayoutStyle"
+              parameter="none" />
+  </menu_item_check>
+  <menu_item_check label="Buttons Fill Bar"
+                   layout="topleft"
+                   name="layout_style_fill">
+    <on_click function="Toolbars.SetLayoutStyle"
+              parameter="fill" />
+    <on_check function="Toolbars.CheckLayoutStyle"
+              parameter="fill" />
+  </menu_item_check>
+  <menu_item_separator layout="topleft" />
   <menu_item_check label="Locked"
                    layout="topleft"
                    name="toolbars_locked">

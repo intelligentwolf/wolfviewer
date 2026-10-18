@@ -176,11 +176,28 @@ namespace WolfGrid
         return region && region->getRegionID() == LFSimFeatureHandler::instance().featuresRegionID() && isOnWolfRegion();
     }
 
+    // [WOLF VISITOR SEES 2026-10-18] What a person SEES on a Wolf region follows the region underfoot, not the login
+    // grid. Paul 10-18: "someone who is NOT from wolf grid who has wolfviewer and comes to wolf grid should instantly see
+    // everything obvs not the wolf tools because we can't map their avatar to them" (Frank Hurt, a hypergrid visitor on w70,
+    // had a flat Firestorm sea on a Wolf region: every sea gate tested isOnWolfTerritories(), the LOGIN grid).
+    // True when logged in here and on one of our regions (isOnWolfTerritories, with its keep-the-last-answer rule while a
+    // new region's features are on their way) or when a visitor stands on one of our regions (isOnWolfRegion).
+    // For DRAWING and for reading what the region itself sends only. A read from a Wolf service for what is drawn must
+    // also wait for isOnWolfRegionConfirmed() (this region's own word), and carries X-Wolf-Agent / X-Wolf-Session only when
+    // isOnWolfTerritoriesConfirmed(): a visitor's session belongs to another grid and is never sent (the read is
+    // anonymous for them; the reads used this way are public - php/waves.php, terrain_paint.php, map_overlays.php ...).
+    // The Wolf TOOLS (anything that writes, or acts as the avatar on a Wolf service) stay on isOnWolfTerritories /
+    // isOnWolfTerritoriesConfirmed.
+    inline bool showsWolfRegion()
+    {
+        return isOnWolfTerritories() || isOnWolfRegion();
+    }
+
     // What the region's weather and sky follow: logged in here and on one of our regions, or a
     // visitor on one of our regions. Reading only - a visitor sends no session (see the callers).
     inline bool showsWolfRegionWeather()
     {
-        return isOnWolfTerritories() || isOnWolfRegion();
+        return showsWolfRegion();   // [WOLF VISITOR SEES 2026-10-18/] the same rule as everything else drawn
     }
     // </WolfViewer 2026-10-08>
 

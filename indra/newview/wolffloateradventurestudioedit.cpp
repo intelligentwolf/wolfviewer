@@ -350,8 +350,8 @@ namespace
             { "id", "Id" }, { "title", "Title" }, { "summary", "Summary" }, { "purpose", "Purpose" }, { "rating", "Rating" },
             { "language", "Language" }, { "tags", "Tags" }, { "regions", "Regions" }, { "region", "Region" }, { "npcBudget", "Characters at once (budget)" },
             { "party", "Party" }, { "mode", "Mode" }, { "minSize", "Fewest players" }, { "maxSize", "Most players" }, { "join", "Who may join" },
-            { "repeat", "May play again" }, { "run", "Running" }, { "auto", "Runs by itself" }, { "liveGm", "A GM may take over" },
-            { "callGm", "Players may call a GM" }, { "schedule", "Schedule" }, { "start", "How it starts" }, { "beat", "Beat" },
+            { "repeat", "May play again" }, { "run", "Running" }, { "auto", "Runs by itself" }, { "liveGm", "A host may take over" },
+            { "callGm", "Players may call a host" }, { "schedule", "Schedule" }, { "start", "How it starts" }, { "beat", "Beat" },
             { "trigger", "Started by" }, { "cast", "Character" }, { "area", "Area" }, { "intro", "Intro" }, { "experiences", "Wolf Experiences listing" },
             { "list", "List it" }, { "category", "Category" }, { "nowLine", "Show what is happening now" }, { "credits", "Credits" },
             { "role", "Role" }, { "name", "Name" }, { "attribution", "Attribution" }, { "work", "Work" }, { "text", "Text" },
@@ -373,14 +373,14 @@ namespace
             { "aiNotes", "Notes for the AI Director" }, { "shared", "Shared world" }, { "stage", "Stage" }, { "dismiss", "Dismiss" },
             { "encounters", "Encounters" }, { "ambience", "Ambience" }, { "environment", "Environment (Wolf Environment patch, JSON)" },
             { "scope", "Scope" }, { "music", "Music" }, { "volume", "Volume" }, { "sounds", "Sounds" }, { "every", "Repeat every (s)" },
-            { "sound", "Sound" }, { "boxed", "Boxed text (read aloud)" }, { "gmNotes", "GM notes" }, { "handouts", "Handouts" },
+            { "sound", "Sound" }, { "boxed", "Boxed text (read aloud)" }, { "gmNotes", "Host notes" }, { "handouts", "Handouts" },
             { "entry", "Entry rule" }, { "exits", "Exits" }, { "to", "To" }, { "if", "Only if" }, { "prompt", "Prompt" }, { "image", "Image (texture)" },
             { "who", "Who" }, { "sec", "Seconds" }, { "options", "Options" }, { "detail", "Detail" }, { "once", "Once" }, { "next", "Then go to" },
             { "intent", "Words that count" }, { "object", "Object name" }, { "decision", "Decision" }, { "option", "Option" },
             { "reply", "Quick reply" }, { "item", "Item" }, { "qty", "How many" }, { "hours", "Hours (from, to)" }, { "check", "Check" },
             { "dc", "Difficulty (DC)" }, { "result", "Outcome" }, { "passed", "Passed" }, { "scene", "Scene" }, { "titleCard", "Chapter card" },
             { "scenes", "Scenes" }, { "beats", "Beats" }, { "outcome", "Outcome" }, { "reward", "Reward" }, { "keys", "Keys" },
-            { "always", "Always included" }, { "priority", "Priority" }, { "gmOnly", "GM only" }, { "citation", "Citation" }, { "date", "Date" },
+            { "always", "Always included" }, { "priority", "Priority" }, { "gmOnly", "Hosts only" }, { "citation", "Citation" }, { "date", "Date" },
             { "where", "Where (page, chapter)" }, { "era", "Latest year it speaks about" }, { "members", "Members" }, { "count", "Copies" },
             { "offset", "Offset (x, y, z)" }, { "props", "Props" }, { "chest", "Chest" }, { "rot", "Turn (degrees)" }, { "despawnAfter", "Remove after (s)" },
             { "combat", "Turn-based combat" }, { "items", "Items" }, { "money", "Money" }, { "stats", "Stats" }, { "inventory", "Inventory items" },
@@ -467,7 +467,7 @@ namespace
         { "move", "Move a character" }, { "anim", "Play an animation" }, { "stage", "A stage cue (fade, title, camera)" },
         { "ambience", "Change the ambience" }, { "sound", "Play a sound at a spot" }, { "marker", "Set or clear the map marker" },
         { "notify", "Show a notice" }, { "handout", "Give a handout" }, { "roll", "Ask for a roll" }, { "combat", "Start or stop turn-based combat" },
-        { "hint", "Give a hint" }, { "callGm", "Call a game master" }, { "quiz", "Show a quiz" }, { "wait", "Wait some seconds" },
+        { "hint", "Give a hint" }, { "callGm", "Call a host" }, { "quiz", "Show a quiz" }, { "wait", "Wait some seconds" },
         { "battle", "Start a battle" } };   // [WOLF ADVENTURE COMBAT 2026-10-17] COMBAT_V1.md §1.3
     const char* opSentence(const std::string& op)
     {
@@ -489,7 +489,7 @@ namespace
         { "defeat", "When... is defeated", "cast" },
         { "timer", "After... seconds", "sec" },
         { "flag", "When... becomes true", "" },
-        { "gm", "When the GM presses...", "label" },
+        { "gm", "When the host presses...", "label" },
         { "script", "When a script fires...", "" },
         { "roll", "When a roll for... succeeds or fails", "check,dc,result" },
         { "item", "When a player holds... of...", "item,qty" },
@@ -1972,7 +1972,7 @@ namespace
         { "stat", "A stat is at least ...", "{\"stat\":\"\",\"gte\":0}" },
         { "partySize", "The party has at least ... present", "{\"partySize\":true,\"gte\":1}" },
         { "hour", "Between ... and ... o'clock", "{\"hour\":[8,18]}" },
-        { "gmPresent", "A GM is present", "{\"gmPresent\":true}" },
+        { "gmPresent", "A host is there", "{\"gmPresent\":true}" },
         { "aiMode", "AI is on / off", "{\"aiMode\":\"ai\"}" },
         { "chance", "With chance ...%", "{\"chance\":0.5}" } };
     std::string condKind(const LLSD& v)
@@ -2075,7 +2075,7 @@ F32 WolfAdventureStudioView::fCondition(F32 l, F32 r, F32 top, const std::string
         y = fValue(l, r, y, ptrJoin(ptr, "hour"), "hour", prop(cs, "hour"), v["hour"], false, 0, p, "Region hours (from, to)");
         return y;
     }
-    else if (kind == "gmPresent") return fBool(l, r, y, "A GM is present", ptrJoin(ptr, "gmPresent"), v["gmPresent"], true, 0, p);
+    else if (kind == "gmPresent") return fBool(l, r, y, "A host is there", ptrJoin(ptr, "gmPresent"), v["gmPresent"], true, 0, p);
     else if (kind == "aiMode") return fEnum(l, r, y, "AI mode in force", ptrJoin(ptr, "aiMode"), { "ai", "none" }, v["aiMode"], "ai", 0, false, p);
     else if (kind == "chance")
     {
@@ -2520,7 +2520,7 @@ F32 WolfAdventureStudioView::pageOutline(F32 l, F32 r, F32 top, const Palette& p
                     if (!moved) { setStatus(STALE, true); return; }
                     stopPlacing();
                     mSel = ptrIndex(dp, (S32)sdAt(mDraftPack, dp).size() - 1);
-                    setStatus("Moved. A scene needs at least one beat: the brain says so if one is left empty.", false);
+                    setStatus("Moved. A part needs at least one box: the checks say so if one is left empty.", false);
                 }, std::string());
             }, true);
         }
@@ -3004,7 +3004,7 @@ F32 WolfAdventureStudioView::pageCastEd(F32 l, F32 r, F32 top, const Palette& p)
         static const char* ACTS[][2] = {
             { "give_hint", "Give the player a hint" }, { "offer_choice", "Offer one of the beat's decisions" },
             { "fire_trigger", "Make a story moment happen (the AI triggers below)" }, { "refuse", "Refuse what the player asks" },
-            { "call_gm", "Call a human game master" }, { "follow", "Start following the player" }, { "stop_following", "Stop following" },
+            { "call_gm", "Call a host (a person)" }, { "follow", "Start following the player" }, { "stop_following", "Stop following" },
             { "attack", "Turn hostile and fight (needs Fights)" }, { "flee", "Run away home" }, { "end_talk", "End the conversation" } };
         const LLSD& cur = c["actions"];
         for (const auto& a : ACTS)
@@ -3114,7 +3114,7 @@ F32 WolfAdventureStudioView::voiceRow(F32 l, F32 r, F32 top, S32 ci, bool rate, 
     {
         const S32 it = act([this]() { mShowPremium = !mShowPremium; });
         btn(r - tw, y - ROW_H, r, y, show_premium ? "Premium voices - hide" : "Premium voices (ElevenLabs) - show", SH_E, it,
-            "Premium voices are charged per character spoken, from your WolfCredits", p, !cur_premium);
+            "Premium voices are charged per character spoken, from your credits", p, !cur_premium);
     }
     y -= ROW_H + 6.f;
     if (rate && c["voice"].isMap()) y = fValue(l, r, y, ptrJoin(vp, "rate"), "rate", prop(prop(cs, "voice"), "rate"), c["voice"]["rate"], true, 0, p, "Speed (0.5 to 2)");
@@ -3315,15 +3315,19 @@ F32 WolfAdventureStudioView::charsGallery(F32 l, F32 r, F32 top, const Palette& 
     {
         const S32 ia = act([this]() { mCharsError.clear(); addCastMember(); });
         btn(l, y - ROW_H, l + btnW("Add someone"), y, "Add someone", SH_E, ia, "A blank card for you to fill in", p, n < 100);
-        // [IN-WORLD STUFF 2026-10-17] every look pad of the game off the land (look_pads_clear)
-        const S32 ic = act([this]() { lookPadsClear(); });
-        const F32 cx = l + btnW("Add someone") + 8.f;
-        btn(cx, y - ROW_H, cx + btnW("Take the pads away"), y, "Take the pads away", SH_E, ic, "Every look pad this game put on the land goes", p, !mPadBusy);
+        // [IN-WORLD STUFF 2026-10-17] every look pad of the game off the land (look_pads_clear). [WORDING 2026-10-18] shown only while
+        // the game has pads standing (get_draft `pads`, counted here as pads are put down and taken away)
+        if (mPadCount > 0)
+        {
+            const S32 ic = act([this]() { lookPadsClear(); });
+            const F32 cx = l + btnW("Add someone") + 8.f;
+            btn(cx, y - ROW_H, cx + btnW("Take the pads away"), y, "Take the pads away", SH_E, ic, "Every look pad this game put on the land goes", p, !mPadBusy);
+        }
         y -= ROW_H + 10.f;
     }
     y = lookPadsHead(l, r, y, p);   // [IN-WORLD STUFF 2026-10-17] "Anyone can help dress my characters" (small, when the brain has it)
     if (!mCharsError.empty()) y = para(l, r, y, mCharsError, DANGER_INK) - 6.f;
-    if (n == 0) y = para(l, r, y, "No characters yet. Press Add someone, or go back to Your story and press Build my game.", p.mDim, true) - 8.f;
+    if (n == 0) y = para(l, r, y, "No characters yet. Press Add someone, or go back to Story and press Build my game.", p.mDim, true) - 8.f;
     // the grid: 3 to 4 cards per row where the page is wide enough, 2 on a narrow page (Paul: "pictures for each character")
     const S32 cols = llclamp((S32)floorf((r - l + CARD_GAP) / (CARD_W + CARD_GAP)), 2, 4);
     auto grid = [&](const LLSD& list, S32 count, bool enemy)
@@ -3473,7 +3477,7 @@ F32 WolfAdventureStudioView::charsDetail(F32 l, F32 r, F32 top, S32 at, bool ene
         F32 cl = fl;
         fRow(fl, fr, y, "Look", cl);
         y = para(cl, fr, y - 6.f, words, dressed ? OK_INK : p.mDim, true) - 6.f;
-        y = para(fl, fr, y, "How they fight, and what they look like, is set in Advanced editing.", p.mDim, true) - 6.f;
+        y = para(fl, fr, y, "How tough they are and what they look like is set in Advanced editing, on the Enemies step.", p.mDim, true) - 6.f;
     }
     y = llmin(y, py);
     y -= 6.f;
@@ -3496,7 +3500,19 @@ F32 WolfAdventureStudioView::charsDetail(F32 l, F32 r, F32 top, S32 at, bool ene
                     boxes.insert(end == std::string::npos ? u : u.substr(0, end));
                 }
                 const S32 nb = (S32)boxes.size();
-                mCharsError = shown + llformat(" is in %d box%s of the story, so they stay. Change %s first.", nb, nb == 1 ? "" : "es", nb == 1 ? "that box" : "those boxes");
+                // [WORDING 2026-10-18] the web Studio's words, then which boxes (by their titles) so the author can find them
+                std::string which;
+                S32 listed = 0;
+                for (const std::string& bx : boxes)
+                {
+                    if (listed++ >= 6) { which += ", ..."; break; }
+                    const LLSD& node = sdAt(mDraftPack, bx);
+                    std::string t = node["title"].asString().empty() ? node["objective"].asString() : node["title"].asString();
+                    if (t.empty()) t = bx.find("/beats/") == std::string::npos ? std::string("the start of a part") : std::string("a box with no words yet");
+                    which += (which.empty() ? "" : ", ") + ("\"" + WolfGame::cleanText(t, 48) + "\"");
+                }
+                mCharsError = shown + llformat(" is in %d box%s of your story, so they can't be removed. Take them out of %s first: ", nb, nb == 1 ? "" : "es",
+                                               nb == 1 ? "that box" : "those boxes") + which + ".";
                 return;
             }
             mCharsError.clear();
@@ -3517,20 +3533,21 @@ F32 WolfAdventureStudioView::pageChars(F32 l, F32 r, F32 top, const Palette& p)
     // may do, fights and never says stay on the Cast page (Advanced editing).
     if (mOpenId.empty())
     {
-        F32 y = para(l, r, top, "Make your game first: go to Your story and press Build my game.", p.mDim) - 8.f;
+        F32 y = para(l, r, top, "Make your game first: go to Story and press Build my game.", p.mDim) - 8.f;
         const S32 ib = act([this]() { press(SH_PAGE, (S32)SP_HELPER); });
-        btn(l, y - 30.f, l + btnW("\xE2\x97\x82 Your story"), y, "\xE2\x97\x82 Your story", SH_E, ib, "Page 1", p, true, BTN_PRIMARY);
+        btn(l, y - 30.f, l + btnW("\xE2\x97\x82 Story"), y, "\xE2\x97\x82 Story", SH_E, ib, "Back to Story", p, true, BTN_PRIMARY);
         return y - 38.f;
     }
     if (!openIsOwner())
     {
-        F32 y = para(l, r, top, "Only the game's owner sets up its characters. As a game master or teacher, use Publish to see it and Run to run it.", p.mDim) - 8.f;
+        F32 y = para(l, r, top, "Only the game's owner sets up its characters. As a host or teacher, use Publish to see it and Run to run it live.", p.mDim) - 8.f;
         const S32 ip = act([this]() { press(SH_PAGE, (S32)SP_PUBLISH); });
         btn(l, y - 30.f, l + btnW("Publish"), y, "Publish", SH_E, ip, "See the game and where it runs", p);
         return y - 38.f;
     }
     if (mDraftJson.empty()) return waiting(l, r, top, "Opening your game...", p);
-    const F32 y = conflictBanner(l, r, top, p) - 10.f;
+    // [GAME CARD 2026-10-18] GAME_CARD_SPINE_SPEC.md section 5: the game card at the top of page 2, always
+    const F32 y = gameCard(l, r, conflictBanner(l, r, top, p), p);
     if (mCharsWho.size() > 2)
     {
         // one character's (or enemy's) page; gone from the draft (removed, or the helper rewrote the cast) -> the gallery
@@ -4472,7 +4489,7 @@ void WolfAdventureStudioView::testStart(const std::string& beat_in, std::functio
     if (mDirtyAt > 0.0 || mSaving)
     {
         if (!mSaving) saveDraftNow();
-        mTestError = "Saving your last changes first - press Play it now again in a moment.";
+        mTestError = "Saving your last changes first - press Play from the start again in a moment.";
         return;
     }
     mTestBeat = beat;
@@ -4656,7 +4673,15 @@ F32 WolfAdventureStudioView::pageTest(F32 l, F32 r, F32 top, const Palette& p)
     {
         py = para(pl + 10.f, pr - 10.f, py, "Part " + st["act"].asString() + ", " + st["scene"].asString() + "  >  Box " + st["beat"].asString(), p.mText, true);
         if (!st["objective"].asString().empty()) py = para(pl + 10.f, pr - 10.f, py, "Objective: " + cap(st["objective"].asString(), 240), p.mDim, true);
-        if (!st["ending"].asString().empty()) py = para(pl + 10.f, pr - 10.f, py, "Ended: " + st["ending"].asString(), WARN_INK, true);
+        // [GAME CARD 2026-10-18] the ending's kind (adventure_pack_v1 ending.kind win | lose | other) says how it ended, as the web Studio
+        const std::string endId = st["ending"].isMap() ? st["ending"]["id"].asString() : st["ending"].asString();
+        if (!endId.empty())
+        {
+            std::string kind;
+            for (const LLSD& e : llsd::inArray(std::as_const(mDraftPack)["endings"])) if (e["id"].asString() == endId) kind = e["kind"].asString();
+            py = para(pl + 10.f, pr - 10.f, py, kind == "win" ? std::string("The story has ended: you won.") : kind == "lose" ? std::string("The story has ended: you lost.")
+                                                                                                               : std::string("The story has ended."), kind == "win" ? OK_INK : WARN_INK, true);
+        }
         py -= 6.f;
         // flags, editable (doc 2: test_set)
         py = head(pl + 10.f, pr - 10.f, py, "Flags", p);
@@ -4699,8 +4724,15 @@ F32 WolfAdventureStudioView::pageTest(F32 l, F32 r, F32 top, const Palette& p)
                 extra["trigger"] = tid;
                 testOp("test_fire", extra, "Firing " + tid + "...");
             });
-            textL(small, text, pl + 10.f, py - ROW_H * 0.5f, p.mText, LLFontGL::LEFT, LLFontGL::VCENTER, pr - pl - 110.f);
-            btn(pr - 90.f, py - ROW_H, pr - 10.f, py, "Fire", SH_E, idx, "Fire \"" + tid + "\" as if it happened", p, !(t["fired"].asInteger() && t["once"].asInteger()));
+            textL(small, text, pl + 10.f, py - ROW_H * 0.5f, p.mText, LLFontGL::LEFT, LLFontGL::VCENTER, (pr - pl) * 0.45f);
+            // [WORDING 2026-10-18] the button says what it makes happen, as the web Studio's test play (never the trigger's code)
+            static const std::map<std::string, std::string> WORD = { { "arrive", "Arrive at the place" }, { "talk", "Talk to the character" },
+                { "touch", "Touch the object" }, { "say", "Say the words" }, { "choose", "Make the choice" }, { "timer", "Wait out the timer" },
+                { "flag", "Something comes true" }, { "ready", "Everyone is ready" } };
+            const auto wit = WORD.find(t["on"].asString());
+            const std::string fw = wit != WORD.end() ? wit->second : "Make it happen: " + triggerWords(t, mDraftPack);
+            const F32 fbw = llmin((pr - pl) * 0.5f, btnW(fw));
+            btn(pr - 10.f - fbw, py - ROW_H, pr - 10.f, py, fw, SH_E, idx, "Make \"" + tid + "\" happen without walking there", p, !(t["fired"].asInteger() && t["once"].asInteger()));
             py -= ROW_H + 4.f;
         }
         py -= 4.f;
@@ -5004,8 +5036,8 @@ F32 WolfAdventureStudioView::conflictBanner(F32 l, F32 r, F32 top, const Palette
 {
     // STUDIO §1 "Changed in another window: Reload / Keep mine", on every page that edits the draft
     if (!mConflict) return top;
-    F32 y = para(l, r, top, "This draft was changed in another window.", DANGER_INK) - 4.f;
-    btn(l, y - 26.f, l + 130.f, y, "Reload", SH_CONFLICT_RELOAD, 0, "Throw your changes away and load the other window's draft", p);
+    F32 y = para(l, r, top, "Your game was changed in another window.", DANGER_INK) - 4.f;
+    btn(l, y - 26.f, l + 130.f, y, "Reload", SH_CONFLICT_RELOAD, 0, "Throw your changes away and load the other window's version", p);
     btn(l + 140.f, y - 26.f, l + 270.f, y, "Keep mine", SH_CONFLICT_KEEP, 0, "Save your changes over the other window's", p);
     return y - 36.f;
 }
@@ -5073,7 +5105,9 @@ bool WolfAdventureStudioView::editPress(S32 id, S32 arg)
     case SH_FLOW_BOX:
         if (arg >= 0 && arg < (S32)mFlowNodes.size())
         {
-            if (mFlowNodes[arg].mEnding) { gotoProblem(mFlowNodes[arg].mPtr + "/title"); return true; }
+            // [GAME CARD 2026-10-18] an ending opens its small panel under the map (win / lose / neither, and its full editor)
+            if (mFlowNodes[arg].mEnding) { mFlowSelEnd = mFlowNodes[arg].mId; mFlowSel.clear(); return true; }
+            mFlowSelEnd.clear();
             mFlowSel = mFlowNodes[arg].mId;
             helperFocus(mFlowSel);   // [M3] what the author says to the helper in the world is about this box
             mField = F_HELPER;   // ready to say what happens here
@@ -5268,8 +5302,8 @@ bool WolfAdventureStudioView::editConfirmText(S32 what, std::string& title, std:
         return true;
     case SC_PREMIUM:
         title = "Use a premium voice?";
-        body = mConfirmKeyA + " is an ElevenLabs voice: every line spoken costs " + mConfirmKeyB + " credits per 100 characters from your "
-               "WolfCredits. The free voices cost nothing. You are asked once in this Studio.";
+        body = mConfirmKeyA + " is an ElevenLabs voice: every line spoken costs " + mConfirmKeyB + " credits per 100 characters "
+               "from your credits. The free voices cost nothing. You are asked once in this Studio.";
         yes = "Use it";
         return true;
     case SC_COND_REPLACE:
@@ -5676,7 +5710,27 @@ void WolfAdventureStudioView::lookPad(const std::string& cid, const std::string&
         const std::string note = WolfGame::cleanText(reply["note"].asString(), 200);
         self->setStatus("A pad for " + name + " is at your feet. Wear the look you want and click it." + (note.empty() ? std::string() : " " + note), false);
         self->mPadsOut = true;
+        self->mPadCount = llmax(1, self->mPadCount);   // at least this one until the brain's count comes back
+        self->padsRefresh();
         self->mPadPollAt = now() + 8.0;
+    });
+}
+
+void WolfAdventureStudioView::padsRefresh()
+{
+    if (mOpenId.empty()) return;
+    LLSD body;
+    body["adventure"] = mOpenId;
+    const std::string adv = mOpenId;
+    LLHandle<WolfAdventureStudioView> handle = getDerivedHandle<WolfAdventureStudioView>();
+    // Source: GAME_CARD_SPINE_SPEC.md "Change (brain, 2026-10-18, for the viewer agent)": get_draft `pads`. Quiet: the button simply
+    // keeps its last state when the read fails (nothing the author asked for depends on it)
+    WolfAdventure::api("get_draft", body, [handle, adv](bool ok, const LLSD& reply, const std::string&)
+    {
+        if (handle.isDead() || !ok) return;
+        WolfAdventureStudioView* self = handle.get();
+        if (self->mOpenId != adv || !reply.has("pads")) return;
+        self->mPadCount = llmax(0, reply["pads"].asInteger());
     });
 }
 
@@ -5702,6 +5756,8 @@ void WolfAdventureStudioView::lookPadsClear()
             return;
         }
         self->mPadsOut = false;
+        self->mPadCount = 0;
+        self->padsRefresh();   // the brain's own count (pads on regions that have not answered yet still count)
         self->mPadPollAt = 0.0;
         const std::string say = WolfGame::cleanText(reply["say"].asString(), 300);
         self->setStatus(say.empty() ? std::string("The look pads are gone.") : say, false);
@@ -5746,6 +5802,7 @@ void WolfAdventureStudioView::padsTick()
         self->mPadPolling = false;
         self->mPadPollAt = now() + 8.0;
         if (self->mOpenId != adv || !ok || !reply["pack"]["cast"].isArray()) return;
+        if (reply.has("pads")) self->mPadCount = llmax(0, reply["pads"].asInteger());
         // which characters' looks changed, by id
         std::vector<std::pair<S32, LLSD>> changed;   // index in the open draft, the new look
         const LLSD& mine = std::as_const(self->mDraftPack)["cast"];
@@ -5851,7 +5908,7 @@ F32 WolfAdventureStudioView::boxThings(F32 l, F32 r, F32 top, const std::string&
         {
             const S32 ic = act([this, script, name]()
             {
-                if (script.empty()) { mMeshError = "The brain gave no script for " + name + "."; return; }
+                if (script.empty()) { mMeshError = "No script came back for " + name + " - something went wrong on our side. Try again."; return; }
                 const LLWString w = utf8str_to_wstring(script);
                 LLClipboard::instance().copyToClipboard(w, 0, (S32)w.size());
                 setStatus("The script for " + name + " is on the clipboard: paste it into a New Script in your object.", false);
@@ -5881,7 +5938,7 @@ F32 WolfAdventureStudioView::boxThings(F32 l, F32 r, F32 top, const std::string&
             y = para(l + 12.f, r, y, llformat("Making %s costs about %d credits (US $%.2f). Make it?", name.c_str(), credits, (F64)credits / 100.0), p.mText) - 4.f;
             const S32 iy = act([this]() { meshStart(); });
             const S32 in_ = act([this]() { meshNo(); });
-            btn(l + 12.f, y - ROW_H, l + 12.f + btnW("Yes, make it") + 12.f, y, "Yes, make it", SH_E, iy, llformat("Charges about %d credits to your WolfCredits", credits), p, !mMeshBusy, BTN_PRIMARY);
+            btn(l + 12.f, y - ROW_H, l + 12.f + btnW("Yes, make it") + 12.f, y, "Yes, make it", SH_E, iy, llformat("Charges about %d credits", credits), p, !mMeshBusy);   // [WORDING 2026-10-18] page 3's one primary is the band's
             btn(l + 12.f + btnW("Yes, make it") + 20.f, y - ROW_H, l + 12.f + btnW("Yes, make it") + 20.f + btnW("No"), y, "No", SH_E, in_, "Nothing is charged", p, !mMeshBusy);
             y -= ROW_H + 8.f;
         }
@@ -5956,7 +6013,7 @@ void WolfAdventureStudioView::meshQuote(const std::string& thing_id, const std::
             return;
         }
         const std::string job = reply["job"].asString();
-        if (job.empty()) { self->mMeshError = "The cost could not be worked out: the brain gave no job back."; return; }
+        if (job.empty()) { self->mMeshError = "The cost could not be worked out: something went wrong on our side, and nothing was charged. Try again."; return; }
         LLSD q;
         q["job"] = job;
         q["credits"] = (S32)ceil(reply["quote"]["credits"].asReal());
@@ -6025,7 +6082,7 @@ void WolfAdventureStudioView::meshPoll()
         if (handle.isDead()) return;
         WolfAdventureStudioView* self = handle.get();
         if (self->mMeshJobId != job) return;
-        if (!ok) { self->mMeshError = "The job could not be read: " + error + " - trying again."; self->mMeshPollAt = now() + 9.0; return; }
+        if (!ok) { self->mMeshError = "How it is going could not be read: " + error + " - trying again."; self->mMeshPollAt = now() + 9.0; return; }
         self->mMeshJob = reply;
         const std::string state = reply["state"].asString();
         const std::string name = self->mMeshName;
@@ -6113,6 +6170,7 @@ void WolfAdventureStudioView::landCleanup()
         if (self->mOpenId != adv) return;
         if (!ok) { self->setStatus("Not cleaned up: " + error, true); return; }
         self->mPadsOut = false;
+        self->padsRefresh();   // pads on other regions stay: the brain's own count, read again
         // Source: wolfadventure_studio_lib.php wa_api_land_cleanup (600-669) -> {characters, pads, objects, removed, regions, pending, say}:
         // a region that has not answered yet is `pending` and cleans up when it next talks to the brain (its `say` says so)
         std::string words = llformat("Cleaned up: %d characters, %d pads, %d objects.", reply["characters"].asInteger(), reply["pads"].asInteger(), reply["objects"].asInteger());

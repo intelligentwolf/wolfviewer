@@ -8,4 +8,6 @@
 	<menu_item_check label="Iconos y etiquetas" name="icons_with_text"/>
 	<menu_item_check label="Sólo iconos" name="icons_only"/>
 	<menu_item_check label="Sólo etiquetas" name="text_only"/>
+	<menu_item_check label="Tamaño automático de botones" name="layout_style_none"/>
+	<menu_item_check label="Los botones llenan la barra" name="layout_style_fill"/>
 </context_menu>

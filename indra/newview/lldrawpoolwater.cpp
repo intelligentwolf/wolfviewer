@@ -246,7 +246,9 @@ void LLDrawPoolWater::renderPostDeferred(S32 pass)
         // [WOLF GRID GATE 2026-10-17] the FFT cascades and the wake are the Wolf sea too (see no_swell below): their
         // normals, foam and wash were still drawn on every grid, since the shader gates them on fftReady / wakeReady, not
         // on waveAmplitude. Off Wolf they are neither updated nor bound.
-        if (!gCubeSnapshot && !gPipeline.mHeroProbeManager.isMirrorPass() && !mBasicWater && WolfGrid::isOnWolfTerritories())
+        // [WOLF VISITOR SEES 2026-10-18] "Wolf" here is the region underfoot (WolfGrid::showsWolfRegion): a hypergrid visitor on
+        // a Wolf region gets the Wolf sea too (Frank Hurt, w70: a flat Firestorm sea on a Wolf region); still none off Wolf.
+        if (!gCubeSnapshot && !gPipeline.mHeroProbeManager.isMirrorPass() && !mBasicWater && WolfGrid::showsWolfRegion())
         {
             if (fft_on)
             {
@@ -422,7 +424,7 @@ void LLDrawPoolWater::renderPostDeferred(S32 pass)
             mSurfLength = surf_len;
         }
         WolfOceanFFT& fft = WolfOceanFFT::instance();
-        if (fft.isReady() && WolfGrid::isOnWolfTerritories())   // [WOLF GRID GATE 2026-10-17/] see the update above
+        if (fft.isReady() && WolfGrid::showsWolfRegion())   // [WOLF GRID GATE 2026-10-17/] see the update above
         {
             shader->bindTexture(LLShaderMgr::WOLF_FFT_DISP0, fft.finalTarget(0), false, LLTexUnit::TFO_TRILINEAR, 0);
             shader->bindTexture(LLShaderMgr::WOLF_FFT_DERIV0, fft.finalTarget(0), false, LLTexUnit::TFO_TRILINEAR, 1);
@@ -585,7 +587,7 @@ void LLDrawPoolWater::pushWaterPlanes(int pass)
             // The same one line therefore switches the whole feature off cleanly.
             const bool no_swell = water->getWaterfall() > 0.f || water->getStreamFlow() > 0.f || water->getStillWater()
                                || !LLViewerShaderMgr::wolfWaterFull()
-                               || !WolfGrid::isOnWolfTerritories()
+                               || !WolfGrid::showsWolfRegion()   // [WOLF VISITOR SEES 2026-10-18/] hypergrid visitors on a Wolf region too (wolfgrid.h)
                                || mBasicWater;   // <WolfViewer 2026-10-07/> basic water from up high
             cur_shader->uniform1f(LLShaderMgr::WATER_WAVE_AMPLITUDE, no_swell ? 0.f : amplitude);
 
@@ -644,10 +646,16 @@ void LLDrawPoolWater::pushWaterPlanes(int pass)
             {
                 static const F64 FIELD_FADE_S = 5.0;
                 static std::map<const LLViewerRegion*, F64> s_fieldSince;
+                // [WOLF VISITOR SEES 2026-10-18] With the shore field switched off (WolfViewerWaterShoreField) no field ever
+                // comes (WolfWaterField::idle resets them), so waiting for one held the swell flat for good. Then the swell
+                // fades in on the same FIELD_FADE_S timer from the moment the plane is first drawn, as open sea everywhere -
+                // which is what the setting asks for (no calming toward shores). With the field on nothing changes: flat until
+                // the region's own fields are known (the round-15 wall-of-water fix above).
+                static LLCachedControl<bool> shore_field_on(gSavedSettings, "WolfViewerWaterShoreField", true);
                 F32 fade = 1.f;
                 if ((own_plane || span_plane) && rgn)
                 {
-                    if (!fld) { s_fieldSince.erase(rgn); fade = 0.f; }
+                    if (!fld && shore_field_on) { s_fieldSince.erase(rgn); fade = 0.f; }
                     else
                     {
                         const F64 now = LLFrameTimer::getElapsedSeconds();
@@ -692,7 +700,7 @@ void LLDrawPoolWater::pushWaterPlanes(int pass)
                 cur_shader->uniform1f(s_surf_path_k0, 0.f);   // <WolfViewer 2026-09-21/>
             }
             const bool wake_here = own_plane && rgn == gAgent.getRegion() && WolfWakeField::instance().isReady()
-                                && WolfGrid::isOnWolfTerritories();   // [WOLF GRID GATE 2026-10-17/] as no_swell
+                                && WolfGrid::showsWolfRegion();   // [WOLF GRID GATE 2026-10-17/] as no_swell
             cur_shader->uniform1f(s_wake_ready, wake_here ? 1.f : 0.f);
             // </WolfViewer>
             static LLStaticHashedString s_wolf_waterfall("wolfWaterfall");

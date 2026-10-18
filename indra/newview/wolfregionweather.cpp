@@ -220,7 +220,7 @@ void WolfRegionWeather::invalidateParcel()
 // and never against RLV's @setenv (RlvActions::canChangeEnvironment, as the switch honours it).
 static void wolf_use_shared_environment()
 {
-    if (!WolfGrid::isOnWolfTerritories() || !RlvActions::canChangeEnvironment()) return;
+    if (!WolfGrid::showsWolfRegion() || !RlvActions::canChangeEnvironment()) return;   // [WOLF VISITOR SEES 2026-10-18/] visitors too: the region's own sky on arrival
     LLEnvironment& env = LLEnvironment::instance();
     if (!env.getEnvironmentFixedSky(LLEnvironment::ENV_LOCAL) && !env.getEnvironmentDay(LLEnvironment::ENV_LOCAL)) return;
     gPipeline.mReflectionMapManager.reset();
@@ -297,7 +297,7 @@ bool WolfRegionWeather::parcelForcedProfile(WolfWeatherProfile& out) const
 
 void WolfRegionWeather::idle()
 {
-    if (mSharedEnvPending && WolfGrid::isOnWolfTerritoriesConfirmed())   // [WOLF GRID GATE 2026-10-17] see onRegionChanged
+    if (mSharedEnvPending && WolfGrid::isOnWolfRegionConfirmed())   // [WOLF GRID GATE 2026-10-17] see onRegionChanged [WOLF VISITOR SEES 2026-10-18/] a visitor's too
     {
         mSharedEnvPending = false;
         wolf_use_shared_environment();

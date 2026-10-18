@@ -106,11 +106,13 @@ void WolfFloaterWeatherReport::fetch()
     // [WOLF GRID GATE 2026-10-17] Confirmed: right after a region change the lenient answer is still the last region's, so
     // nothing is sent until this region has said it is Wolf - draw() comes back next frame (mFetchedFor is left alone).
     // Off Wolf the refusal is recorded for this region (asked again at the next refresh) and the old report goes too.
-    if (!WolfGrid::isOnWolfTerritoriesConfirmed())
+    // [WOLF VISITOR SEES 2026-10-18] the report is the REGION's: a hypergrid visitor on a Wolf region reads it too, without a
+    // session (auto_environment.php answers a GET for anyone; fetchCoro adds ours only for our own residents)
+    if (!WolfGrid::isOnWolfRegionConfirmed())
     {
-        if (!WolfGrid::isOnWolfTerritories())
+        if (!WolfGrid::showsWolfRegion())
         {
-            // The request carries this login's agent and session: only ever to Wolf's own site.
+            // Nothing is asked off Wolf regions.
             mStatus->setText(std::string("The weather report is for Wolf Territories regions."));
             mReply = LLSD();
             mReport->setText(LLStringUtil::null);
@@ -137,8 +139,13 @@ void WolfFloaterWeatherReport::fetchCoro(LLHandle<LLFloater> handle, std::string
     options->setTimeout(20);
     LLCore::HttpHeaders::ptr_t headers = std::make_shared<LLCore::HttpHeaders>();
     headers->append(HTTP_OUT_HEADER_ACCEPT, "application/json");
-    headers->append("X-Wolf-Agent", gAgentID.asString());
-    headers->append("X-Wolf-Session", gAgentSessionID.asString());
+    // [WOLF VISITOR SEES 2026-10-18] Only for our own residents: a hypergrid visitor's session belongs to another grid and is
+    // not ours to send anywhere; the read is anonymous for them (as WolfRegionWeather::fetchCoro).
+    if (WolfGrid::isOnWolfTerritoriesConfirmed())
+    {
+        headers->append("X-Wolf-Agent", gAgentID.asString());
+        headers->append("X-Wolf-Session", gAgentSessionID.asString());
+    }
     LLSD result = adapter->getRawAndSuspend(request, std::string(API_URL) + "?region=" + region_id, options, headers);
     LLCore::HttpStatus status = LLCoreHttpUtil::HttpCoroutineAdapter::getStatusFromLLSD(
         result[LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS]);

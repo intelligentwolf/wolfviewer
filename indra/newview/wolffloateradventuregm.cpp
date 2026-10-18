@@ -93,13 +93,13 @@ namespace
         {
             if (LLUUID(sess["gm"].asString()) == gAgentID) return "You are running it";
             const std::string n = cap(sess["gmName"].asString(), 64);
-            return (n.empty() ? std::string("A game master") : n) + " is running it";
+            return (n.empty() ? std::string("A host") : n) + " is running it";
         }
         return "AI Director running";
     }
 
     // The log drawer's filters (STUDIO §3 Log: story, players, AI, Director, GM, rolls, rewards).
-    const char* const LOG_FILTERS[] = { "All", "Story", "Players", "AI", "Director", "GM", "Rolls", "Rewards" };
+    const char* const LOG_FILTERS[] = { "All", "Story", "Players", "AI", "Director", "Host", "Rolls", "Rewards" };
     const S32 LOG_FILTER_COUNT = 8;
 
     bool logMatches(S32 filter, const LLSD& e)
@@ -880,7 +880,7 @@ void WolfAdventureGmView::loadAdventures()
         }
         self->mAdvSel = 0;
         self->mOverlayDirty = true;
-        if (self->mAdvs.size() == 0) self->setStatus("No published adventure where you are the owner or a game master.", false);
+        if (self->mAdvs.size() == 0) self->setStatus("No published adventure where you are the owner or a host.", false);
         self->loadSessions();
     }, "Loading your adventures...");
 }
@@ -1287,7 +1287,7 @@ void WolfAdventureGmView::face(F32 W, F32 H, F32 top, F32 bottom, const Palette&
         {
             t = para(l, r - 10.f, t, mAdvs.isArray() && mAdvs.size() > 0
                      ? "No open session for this adventure. A session opens by itself when the first player joins; you can also start a scheduled one with the button above."
-                     : "Nothing to run yet. Publish an adventure in the Adventure Studio, or ask its owner to make you a game master (Advanced editing > Publish, \"Game masters and teachers\").", p.mDim);
+                     : "Nothing to run yet. Publish an adventure in the Adventure Studio, or ask its owner to make you a host (Advanced editing > Publish, \"Hosts and teachers\").", p.mDim);
         }
         else if (!mStateError.empty())
         {
@@ -1321,7 +1321,7 @@ F32 WolfAdventureGmView::drawTopBar(F32 l, F32 r, F32 top, const Palette& p)
     {
         std::string adv = "Adventure: " + titleText();
         if (mAdvs.isArray() && mAdvs.size() > 1) adv += llformat("  (%d of %d)", mAdvSel + 1, (S32)mAdvs.size());
-        btn(l, y - 28.f, l + 300.f, y, adv, H_ADV, 0, "The next of your adventures (owner or game master)", p, mAdvs.isArray() && mAdvs.size() > 1);
+        btn(l, y - 28.f, l + 300.f, y, adv, H_ADV, 0, "The next of your adventures (owner or host)", p, mAdvs.isArray() && mAdvs.size() > 1);
         std::string sw = "Session: none open";
         S32 si = -1;
         for (size_t i = 0; mSessions.isArray() && i < (size_t)mSessions.size(); ++i)
@@ -1356,7 +1356,7 @@ F32 WolfAdventureGmView::drawTopBar(F32 l, F32 r, F32 top, const Palette& p)
         x += 116.f;
         const bool paused = have && sess["control"].asString() == "paused";
         if (paused) btn(x, y - 28.f, x + 90.f, y, "Resume", H_RESUME, 0, "Resume timers, hints and the Director for every party", p, have);
-        else btn(x, y - 28.f, x + 90.f, y, "Pause", H_PAUSE, 0, "Pause timers, hints and the Director; players see \"Paused by the GM\"", p, have);
+        else btn(x, y - 28.f, x + 90.f, y, "Pause", H_PAUSE, 0, "Pause timers, hints and the Director; players see that it is paused", p, have);
         x += 96.f;
         const bool ai_on = have && sess["aiPaused"].asInteger() == 0;
         btn(x, y - 28.f, x + 90.f, y, ai_on ? "AI: On" : "AI: Off", H_AI, 0, ai_on ? "AI characters talk. Click to pause all AI (written lines only)" : "All AI is paused. Click to let AI characters talk again", p, have, ai_on ? BTN_ACTIVE : 0);
@@ -1572,7 +1572,7 @@ F32 WolfAdventureGmView::tabStory(F32 l, F32 r, F32 top, const Palette& p)
     y = para(l, r, y, "Objective: " + cap((*party)["objective"].asString(), 240), p.mDim) - 6.f;
     btn(l, y - 28.f, l + 120.f, y, "Advance", H_ADVANCE, 0, "Go to the beat's first trigger's next, or the next beat in the scene", p, idle, BTN_PRIMARY);
     y -= 36.f;
-    if (mPackFor.empty()) return para(l, r, y, mPackLoading ? "Reading the adventure..." : "The story's beats, triggers and flags are shown to the owner and adventure-wide game masters only. Advance and the other tabs still work.", p.mDim);
+    if (mPackFor.empty()) return para(l, r, y, mPackLoading ? "Reading the adventure..." : "The story's beats, triggers and flags are shown to the owner and adventure-wide hosts only. Advance and the other tabs still work.", p.mDim);
     // the beat's triggers, each with Fire; the gm buttons are the triggers with on: gm (ADVENTURE_PACK §11.1)
     y = head(l, r, y, "Triggers of this beat", p);
     const LLSD& trig = beat ? (*beat)["triggers"] : LLSD();
@@ -1581,7 +1581,7 @@ F32 WolfAdventureGmView::tabStory(F32 l, F32 r, F32 top, const Palette& p)
     {
         const LLSD& tr = trig[(LLSD::Integer)i];
         const bool gm = tr["on"].asString() == "gm";
-        std::string label = gm ? "GM button: " + cap(tr["label"].asString(), 24) : cap(tr["id"].asString(), 48) + " (on " + cap(tr["on"].asString(), 12) + ")";
+        std::string label = gm ? "Host button: " + cap(tr["label"].asString(), 24) : cap(tr["id"].asString(), 48) + " (on " + cap(tr["on"].asString(), 12) + ")";
         if (tr.has("next")) label += " \xE2\x86\x92 " + cap(tr["next"].isString() ? tr["next"].asString() : std::string("move"), 48);
         textL(LLFontGL::getFontSansSerif(), label, l, y - 14.f, p.mText, LLFontGL::LEFT, LLFontGL::VCENTER, r - l - 90.f);
         btn(r - 80.f, y - 26.f, r, y, gm ? "Press" : "Fire", H_FIRE, (S32)i, "Fire this trigger now, as if its event happened", p, idle, gm ? BTN_PRIMARY : 0);
@@ -1702,7 +1702,7 @@ F32 WolfAdventureGmView::tabCast(F32 l, F32 r, F32 top, const Palette& p)
         const std::string handle = cap(n["handle"].asString(), 128);
         const std::string who = cap(n["possessedBy"].asString(), 36);
         std::string line = n["name"].asString() + " \xC2\xB7 " + handle;
-        if (!who.empty()) line += LLUUID(who) == gAgentID ? " \xC2\xB7 you have it" : " \xC2\xB7 possessed by a GM";
+        if (!who.empty()) line += LLUUID(who) == gAgentID ? " \xC2\xB7 you have it" : " \xC2\xB7 played by a host";
         textL(LLFontGL::getFontSansSerif(), line, l, y - 14.f, p.mText, LLFontGL::LEFT, LLFontGL::VCENTER, r - l - 330.f);
         const bool mine = !who.empty() && LLUUID(who) == gAgentID;
         if (mine) btn(r - 320.f, y - 26.f, r - 240.f, y, "Release", H_RELEASE, (S32)i, "Give it back to its AI", p, idle);
@@ -1832,7 +1832,7 @@ F32 WolfAdventureGmView::tabRewards(F32 l, F32 r, F32 top, const Palette& p)
     if (left.has("gmMoneyLeft") || left.has("gmXpLeft"))
         y = para(l, r, y, llformat("Left this session: %d money, %d XP (the owner's limit).", left["gmMoneyLeft"].asInteger(), left["gmXpLeft"].asInteger()), p.mDim, true);
     else
-        y = para(l, r, y, "A game master's rewards are capped per session by the adventure owner's limit (Studio, AI and voice).", p.mDim, true);
+        y = para(l, r, y, "A host's rewards are capped per session by the adventure owner's limit (Studio, AI and voice).", p.mDim, true);
     y -= 4.f;
     const F32 c3 = (r - l) / 3.f;
     field(l, y - 30.f, l + c3 - 6.f, y, F_REWARD_XP, "XP", "Experience points (a whole number)", p);
@@ -2156,7 +2156,7 @@ void WolfAdventureGmView::press(S32 id, S32 arg)
             const LLSD& s = spots[(LLSD::Integer)i];
             if (s["id"].asString() != "gm-booth" || s["region"].asString() != rgn->getRegionID().asString() || !s["pos"].isArray()) continue;
             dest = rgn->getPosGlobalFromRegion(LLVector3((F32)s["pos"][0].asReal(), (F32)s["pos"][1].asReal(), (F32)s["pos"][2].asReal()));
-            where = "the adventure's GM booth";
+            where = "the adventure's host booth";
         }
         ask("Park your avatar?", "You will be teleported to " + where + ", out of the players' way.", "Teleport", false, [dest]() { gAgent.teleportViaLocation(dest); });
         return;
@@ -2459,7 +2459,7 @@ void WolfAdventureGmView::press(S32 id, S32 arg)
         LLSD f;
         f["party"] = party_id;
         f["title"] = "Ready?";
-        f["text"] = "Your game master asks: are you ready to go on?";
+        f["text"] = "Your host asks: are you ready to go on?";
         LLSD opts = LLSD::emptyArray();
         LLSD a; a["id"] = "ready"; a["label"] = "Ready"; opts.append(a);
         LLSD b; b["id"] = "notyet"; b["label"] = "Not yet"; opts.append(b);

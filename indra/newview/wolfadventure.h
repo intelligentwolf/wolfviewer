@@ -68,6 +68,7 @@ public:
     {
         bool mOn = false;
         std::string mId, mTitle, mText;
+        std::string mKind;   // [WORDING 2026-10-18] win | lose | other ("" when the brain does not say)
     };
     /** [WOLF ADVENTURE P2 2026-10-16] §2.1 `cast`: a story character on the player's region, for
      *  click-to-talk (§3.2). Its agent key is fixed per character (REGION_HANDS_V1.md §4.1). */
@@ -89,6 +90,10 @@ public:
         bool mPaused = false, mGm = false, mAi = true;
         Ending mEnded;
         std::vector<CastRef> mCast;          // P2: the talk panel's click-to-talk list
+        // [GAME CARD 2026-10-18] GAME_CARD_SPINE_SPEC.md section 4: the game card's goal (its shape: roleplay reads it as "About"),
+        // and the main quest {step, of, title} (mMainOf 0 = the game has no main quest)
+        std::string mGoal, mShape, mMainTitle;
+        S32 mMainStep = 0, mMainOf = 0;
     };
 
     // ---- [WOLF ADVENTURE P2 2026-10-16] §2.4 talk: the conversation panel's state ----
@@ -135,6 +140,14 @@ public:
         std::vector<Row> mCredits;        // role, name
         std::vector<Row> mAttribution;    // work, text
         bool mConversations = false;
+        // [GAME CARD 2026-10-18] section 4: the journal's goal, main and card {youAre, goal, win, lose, shape} (mHasCard false = none)
+        std::string mGoal, mMainTitle;
+        S32 mMainStep = 0, mMainOf = 0;
+        bool mHasCard = false;
+        std::string mYouAre, mWin, mLose, mShape;
+        std::string mEndedKind;           // [WORDING 2026-10-18] journal `ended` {id, title, text, kind}: its kind ("" while playing)
+        bool mEndedOn = false;            // ... and whether it is there, with its title and text (the Journal falls back to it)
+        std::string mEndedTitle, mEndedText;
     };
 
     // ---- §2.5 rep ----

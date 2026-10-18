@@ -373,7 +373,8 @@ void WolfAdventure::applyQuest(const LLSD& m)
         // Only the quest's own fields merge (HUD_MESSAGES_V1.md §2.1, the ones parseQuest reads, and `class`,
         // aiTagShown): anything else a patch carries would only grow the kept copy. `adv` found the copy.
         static const char* const PATCHABLE[] = { "src", "chapter", "act", "scene", "sceneTitle", "beat", "objective",
-            "marker", "done", "party", "paused", "pausedText", "gm", "ai", "ended", "cast", "class", "look" };
+            "marker", "done", "party", "paused", "pausedText", "gm", "ai", "ended", "cast", "class", "look",
+            "goal", "shape", "main" };   // [GAME CARD 2026-10-18] GAME_CARD_SPINE_SPEC.md section 4
         for (const char* key : PATCHABLE)
         {
             if (m.has(key)) a->mQuestRaw[key] = m[key];
@@ -424,6 +425,19 @@ void WolfAdventure::parseQuest(const LLSD& m, Quest& q) const
     q.mSceneTitle = str(m, "sceneTitle", CAP_TITLE);
     q.mBeat = idOf(m, "beat");
     q.mObjective = str(m, "objective", CAP_OBJECTIVE, true);
+    // [GAME CARD 2026-10-18] Source: wolfadventure_lib.php quest message 'goal' (adventure.card.goal, cut to 240), 'shape' (the
+    // card's shape), 'main' (wa_main_msg: {step, of, title} or null when the pack has no main steps)
+    q.mGoal = str(m, "goal", CAP_OBJECTIVE, true);
+    q.mShape = str(m, "shape", CAP_LABEL);
+    {
+        const LLSD& mn = m["main"];
+        if (mn.isMap())
+        {
+            q.mMainOf = llclamp(num32(mn, "of"), 0, 1000);
+            q.mMainStep = llclamp(num32(mn, "step"), 0, q.mMainOf);
+            q.mMainTitle = str(mn, "title", CAP_OBJECTIVE, true);
+        }
+    }
     // [WOLF ADVENTURE AUDIT 2026-10-17] §2.1 look: a texture uuid only (§1.3), and both colours or neither
     const LLSD& lk = m["look"];
     if (lk.isMap())
@@ -472,6 +486,7 @@ void WolfAdventure::parseQuest(const LLSD& m, Quest& q) const
         q.mEnded.mId = idOf(ended, "id");
         q.mEnded.mTitle = str(ended, "title", CAP_TITLE);
         q.mEnded.mText = str(ended, "text", CAP_VIGNETTE, true);
+        q.mEnded.mKind = str(ended, "kind", CAP_LABEL);   // [WORDING 2026-10-18] the ending's kind, when the brain sends it
     }
     // [WOLF ADVENTURE P2 2026-10-16] `cast` (§2.1): the story characters on the player's region,
     // the talk panel's click-to-talk list (§3.2). Only well-formed, non-null agent keys.
@@ -922,6 +937,36 @@ void WolfAdventure::applyJournal(const LLSD& m)
     each(m["credits"], MAX_LIST, [&](const LLSD& c) { j.mCredits.push_back({ str(c, "role", CAP_TITLE), str(c, "name", CAP_NAME) }); });
     each(m["attribution"], MAX_LIST, [&](const LLSD& a) { j.mAttribution.push_back({ str(a, "work", CAP_TITLE), str(a, "text", CAP_VIGNETTE, true) }); });   // §1.3 note: 2000
     j.mConversations = num(m, "conversations") != 0;
+    // [GAME CARD 2026-10-18] Source: wolfadventure_lib.php wa_journal_card: goal, main ({step, of, title} | null), card ({youAre, goal,
+    // win, lose, shape} | null)
+    j.mGoal = str(m, "goal", CAP_OBJECTIVE, true);
+    {
+        const LLSD& mn = m["main"];
+        if (mn.isMap())
+        {
+            j.mMainOf = llclamp(num32(mn, "of"), 0, 1000);
+            j.mMainStep = llclamp(num32(mn, "step"), 0, j.mMainOf);
+            j.mMainTitle = str(mn, "title", CAP_OBJECTIVE, true);
+        }
+        const LLSD& cd = m["card"];
+        if (cd.isMap())
+        {
+            j.mHasCard = true;
+            j.mYouAre = str(cd, "youAre", CAP_OBJECTIVE, true);
+            j.mWin = str(cd, "win", CAP_OBJECTIVE, true);
+            j.mLose = str(cd, "lose", CAP_OBJECTIVE, true);
+            j.mShape = str(cd, "shape", CAP_LABEL);
+            if (j.mGoal.empty()) j.mGoal = str(cd, "goal", CAP_OBJECTIVE, true);
+        }
+        // Source: GAME_CARD_SPINE_SPEC.md "Change (brain, 2026-10-18, for the viewer agent)": journal `ended` (null while playing)
+        if (m["ended"].isMap())
+        {
+            j.mEndedOn = true;
+            j.mEndedKind = str(m["ended"], "kind", CAP_LABEL);
+            j.mEndedTitle = str(m["ended"], "title", CAP_TITLE);
+            j.mEndedText = str(m["ended"], "text", CAP_VIGNETTE, true);
+        }
+    }
     adventure(adv).mJournal = j;
 }
 
@@ -1858,7 +1903,8 @@ void WolfAdventure::api(const std::string& action, const LLSD& body, api_callbac
     const std::string text = boost::json::serialize(jv);
     // [WOLF STORY FIRST 2026-10-17] the helper's turns wait for the AI: the brain allows up to 600 s for a drafting turn and
     // 90 s for an edit (wolfadventure_story_lib.php:52-53), job_apply merges a whole pack; every other call keeps 60 s
-    const S32 timeout_sec = action == "helper_chat" ? 660 : (action == "job_apply" || action == "helper_undo"
+    // [GAME CARD 2026-10-18] import_start carries the whole file (at most 20 MB, as base64): 300 s for the upload
+    const S32 timeout_sec = action == "helper_chat" ? 660 : action == "import_start" ? 300 : (action == "job_apply" || action == "helper_undo"
                                                                       || action == "update_preview" || action == "update_live" || action == "update_undo") ? 120 : 60;   // [M7] the preview may ask the helper (WAL_HELPER_TIMEOUT 45 s)
     LLCoros::instance().launch("WolfAdventure " + action, [text, done, timeout_sec]()
     {

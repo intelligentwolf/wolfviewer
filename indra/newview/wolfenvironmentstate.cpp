@@ -257,7 +257,7 @@ WolfEnvironmentState::~WolfEnvironmentState() = default;
 
 const WolfEnvDoc& WolfEnvironmentState::active() const
 {
-    if (!WolfGrid::isOnWolfTerritories()) return mNone;
+    if (!WolfGrid::showsWolfRegion()) return mNone;   // [WOLF VISITOR SEES 2026-10-18/] visitors on a Wolf region too (wolfgrid.h)
     if (mPreview.mValid) return mPreview;
     if (mUseParcel && mParcel.mValid && mParcel.mMode != WolfEnvDoc::OFF) return mParcel;
     if (mRegion.mValid && mRegion.mMode != WolfEnvDoc::OFF) return mRegion;
@@ -307,7 +307,7 @@ void WolfEnvironmentState::refresh()
 
 void WolfEnvironmentState::idle()
 {
-    if (!WolfGrid::isOnWolfTerritories())
+    if (!WolfGrid::showsWolfRegion())   // [WOLF VISITOR SEES 2026-10-18/] the region underfoot, a visitor's too
     {
         if (mRegion.mValid || mParcel.mValid || mPreview.mValid || mAuto.mValid)   // [WOLF GRID GATE 2026-10-17/] the auto sky too
         {
@@ -322,7 +322,9 @@ void WolfEnvironmentState::idle()
     // the EEP sky (LLEnvironment::wolfEnvironmentRegion): Paul, "the environment didnt change as i went over each region"
     // [WOLF GRID GATE 2026-10-17] the read below names the region and where we stand: not on the last region's answer in
     // the moments after a hypergrid jump - only once this region has said it is Wolf
-    if (!WolfGrid::isOnWolfTerritoriesConfirmed()) return;
+    // [WOLF VISITOR SEES 2026-10-18] whoever's viewer this is: the read carries no session (fetchCoro) and
+    // wolf_environment.php answers a GET without one (we_has_identity() false -> no agent)
+    if (!WolfGrid::isOnWolfRegionConfirmed()) return;
     LLViewerRegion* region = LLEnvironment::wolfEnvironmentRegion();
     if (!region) return;
     const std::string id = region->getRegionID().asString();

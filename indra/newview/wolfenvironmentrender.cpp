@@ -1414,6 +1414,12 @@ namespace
 S32 WolfEnvironmentRender::sScenePreview = 0;
 
 // static
+S32 WolfEnvironmentRender::tierLatched()
+{
+    return sGpu.tierValue;   // [WOLF VISITOR SEES 2026-10-18/] see the header
+}
+
+// static
 S32 WolfEnvironmentRender::tier()
 {
     if (sGpu.tierFrame == (S32)LLFrameTimer::getFrameCount()) return sGpu.tierValue;
@@ -1437,7 +1443,7 @@ S32 WolfEnvironmentRender::tierNow()
     // shader) and the EEP draws exactly as before.
     static LLCachedControl<bool> native_sky(gSavedSettings, "WolfEnvironmentNativeSky", false);
     if (!native_sky) return 0;
-    if (sGpu.failed || !WolfGrid::isOnWolfTerritories()) return 0;
+    if (sGpu.failed || !WolfGrid::showsWolfRegion()) return 0;   // [WOLF VISITOR SEES 2026-10-18/] visitors on a Wolf region too
     if (gGLManager.mGLVersion < 3.29f) return 0;
     if (!programsReady()) return 0;
     // the native sky's pipeline (HDR and its targets) exists only with mRT->deferredLight

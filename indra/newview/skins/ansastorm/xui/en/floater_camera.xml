@@ -104,7 +104,7 @@
               quadrant="left"
               sound_flags="3"
               visible="true"
-              tool_tip="Orbit camera around focus"
+              tool_tip="Orbit camera around focus: push to swing the camera, tap the centre to reset"
               top="25"
               width="78" />
 <!-- <FS:Chanayane> Camera roll (from Alchemy) -->
@@ -146,6 +146,7 @@
               layout="topleft"
               left_pad="4" 
               name="zoom_plus_btn"
+              tool_tip="Zoom camera towards focus"
               width="18"
               top="23">
              <commit_callback
@@ -173,6 +174,7 @@
               image_unselected="MinusItem_Off"
               layout="topleft"
               name="zoom_minus_btn"
+              tool_tip="Zoom camera away from focus"
               top_pad="0"
               width="18">
              <commit_callback
@@ -192,7 +194,7 @@
          quadrant="left"
          scale_image="false"
          sound_flags="3"
-         tool_tip="Move camera up and down, left and right"
+         tool_tip="Move camera up and down, left and right: push to slide it, tap the centre to reset"
          top="25"
          width="78"/>
         </panel>

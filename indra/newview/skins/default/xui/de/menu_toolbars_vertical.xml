@@ -9,4 +9,6 @@
 	<menu_item_check label="Nur Symbole" name="icons_only"/>
 	<menu_item_check label="Nur Beschriftungen" name="text_only"/>
 	<menu_item_check label="Gesperrt" name="toolbars_locked"/>
+	<menu_item_check label="Buttons mit automatische Breite" name="layout_style_none"/>
+	<menu_item_check label="Buttons füllen Buttonleiste" name="layout_style_fill"/>
 </context_menu>

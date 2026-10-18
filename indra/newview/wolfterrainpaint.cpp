@@ -257,7 +257,10 @@ void WolfTerrainPaint::refresh()
     // and wolfregionweather.cpp already gate their panel paths — this one did not.
     // [WOLF GRID GATE 2026-10-17] Confirmed: the lenient answer still says yes for a foreign region in the moments after
     // a hypergrid jump, and this request carries its handles and our session. idle() asks again until it is confirmed.
-    if (!WolfGrid::isOnWolfTerritoriesConfirmed()) return;
+    // [WOLF VISITOR SEES 2026-10-18] the REGION's own word, whoever's viewer this is: a hypergrid visitor on a Wolf region
+    // sees its paint too. The read is public (php/terrain_paint.php "READS are public"); fetchCoro adds our session only
+    // for our own residents.
+    if (!WolfGrid::isOnWolfRegionConfirmed()) return;
     if (mFetching) return;
     std::vector<U64> handles = neighbourHandles();
     if (handles.empty()) return;
@@ -376,7 +379,7 @@ void WolfTerrainPaint::acceptRecord(const LLSD& region_payload)
 void WolfTerrainPaint::fetchCoro(std::vector<U64> handles)
 {
     // <WolfViewer 2026-09-22/> belt and braces: nothing reaches the service off-grid
-    if (!WolfGrid::isOnWolfTerritoriesConfirmed()) return;   // [WOLF GRID GATE 2026-10-17/] as refresh()
+    if (!WolfGrid::isOnWolfRegionConfirmed()) return;   // [WOLF GRID GATE 2026-10-17/] as refresh() [WOLF VISITOR SEES 2026-10-18/]
     std::string url = std::string(API_URL) + "?handles=";
     for (size_t i = 0; i < handles.size(); ++i)
     {
@@ -398,8 +401,13 @@ void WolfTerrainPaint::fetchCoro(std::vector<U64> handles)
     // Sending them now costs nothing -- the service ignores headers it does not require
     // -- and is what lets the service START requiring them once enough viewers carry
     // them. Enforcing before then would break every older viewer ON our own grid.
-    headers->append("X-Wolf-Agent", gAgentID.asString());
-    headers->append("X-Wolf-Session", gAgentSessionID.asString());
+    // [WOLF VISITOR SEES 2026-10-18] Only for our own residents: a hypergrid visitor's session belongs to another grid and is
+    // not ours to send anywhere; the read is anonymous for them (as WolfRegionWeather::fetchCoro).
+    if (WolfGrid::isOnWolfTerritoriesConfirmed())
+    {
+        headers->append("X-Wolf-Agent", gAgentID.asString());
+        headers->append("X-Wolf-Session", gAgentSessionID.asString());
+    }
 
     LLSD result = adapter->getRawAndSuspend(request, url, options, headers);
     LLSD httpResults = result[LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS];
@@ -446,14 +454,26 @@ void WolfTerrainPaint::fetchCoro(std::vector<U64> handles)
     LL_INFOS("WolfTerrainPaint") << "paint records for " << mByHandle.size() << " regions" << LL_ENDL;
 }
 
+// [WOLF VISITOR SEES 2026-10-18] The records are keyed by region HANDLE, and a foreign grid's region can have the same
+// handle: in the moment after a hypergrid jump, before the new region's features say whose it is, the lenient grid gates
+// (wolfgrid.h showsWolfRegion) still answer for the region left behind. A record counts only for the live region it was
+// read for (its UUID), so a Wolf layout is never drawn on another grid's region.
+static bool wolf_record_is_live_region(const std::string& uuid, U64 handle)
+{
+    const LLViewerRegion* region = LLWorld::getInstance()->getRegionFromHandle(handle);
+    return region && LLUUID(uuid) == region->getRegionID();
+}
+
 const WolfTerrainPaint::Record* WolfTerrainPaint::current() const
 {
     // [WOLF GRID GATE 2026-10-17] records are keyed by region HANDLE, which a foreign grid's region can share: none off Wolf
-    if (!WolfGrid::isOnWolfTerritories()) return nullptr;
+    // [WOLF VISITOR SEES 2026-10-18/] off a Wolf REGION (wolfgrid.h showsWolfRegion): a visitor on one sees its paint
+    if (!WolfGrid::showsWolfRegion()) return nullptr;
     LLViewerRegion* rgn = gAgent.getRegion();
     if (!rgn) return nullptr;
     auto it = mByHandle.find(rgn->getHandle());
-    return it == mByHandle.end() ? nullptr : &it->second;
+    if (it == mByHandle.end() || !wolf_record_is_live_region(it->second.mUuid, it->first)) return nullptr;   // [WOLF VISITOR SEES 2026-10-18/]
+    return &it->second;
 }
 
 // ── layers ─────────────────────────────────────────────────────────────────────────────
@@ -469,7 +489,8 @@ bool WolfTerrainPaint::layoutFor(U64 handle, const Slot*& textures, const std::v
         return true;
     }
     auto it = mByHandle.find(handle);
-    if (it == mByHandle.end()) { key = "none"; return false; }
+    // [WOLF VISITOR SEES 2026-10-18/] a record only for the live region it was read for (wolf_record_is_live_region)
+    if (it == mByHandle.end() || !wolf_record_is_live_region(it->second.mUuid, handle)) { key = "none"; return false; }
     const Record& r = it->second;
     key = llformat("v:%d:%d", r.mVersion, r.mEnabled ? 1 : 0);
     if (!r.mStored || !r.mEnabled || r.mStrokes.empty()) return false;
@@ -1011,7 +1032,7 @@ void WolfTerrainPaint::bind(LLGLSLShader* shader, LLViewerRegion* regionp)
     Layer* L = it == mLayers.end() ? nullptr : &it->second;
     // [WOLF GRID GATE 2026-10-17] a layer is keyed by region HANDLE, which a foreign grid's region can share: off Wolf no
     // paint is drawn (as wolfterrainlayers.cpp bind), whatever is still cached
-    if (!L || !WolfGrid::isOnWolfTerritories() || !layerReady(*L, regionp))
+    if (!L || !WolfGrid::showsWolfRegion() || !layerReady(*L, regionp))   // [WOLF VISITOR SEES 2026-10-18/] visitors too
     {
         shader->uniform1f(s_on, 0.f);
         return;
@@ -1066,7 +1087,7 @@ void WolfTerrainPaint::unbind(LLGLSLShader* shader)
 
 void WolfTerrainPaint::idle()
 {
-    if (!WolfGrid::isOnWolfTerritories())
+    if (!WolfGrid::showsWolfRegion())   // [WOLF VISITOR SEES 2026-10-18/] the region underfoot: visitors on a Wolf region too
     {
         // [WOLF GRID GATE 2026-10-17] leaving Wolf lets the baked layers go (their GL buffers too); the records and any
         // unsaved draft are kept for the way back, where the loop below rebuilds the layers.

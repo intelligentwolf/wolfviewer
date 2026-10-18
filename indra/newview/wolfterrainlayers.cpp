@@ -470,7 +470,7 @@ bool WolfTerrainLayers::supported()
 
 bool WolfTerrainLayers::activeFor(LLViewerRegion* regionp)
 {
-    if (!regionp || !supported() || !WolfGrid::isOnWolfTerritories()) return false;
+    if (!regionp || !supported() || !WolfGrid::showsWolfRegion()) return false;   // [WOLF VISITOR SEES 2026-10-18/] visitors on a Wolf region too
     const F64 now = LLFrameTimer::getElapsedSeconds();
     // Arrays no region has drawn for a while (a set changed, a neighbour left) are released.
     if (now >= mNextPrune)
@@ -534,7 +534,7 @@ void WolfTerrainLayers::bind(LLGLSLShader* shader, LLViewerRegion* regionp)
     // Exactly what activeFor decided to draw for this region this frame.
     const Shown* sh = nullptr;
     Array* a = nullptr;
-    if (regionp && WolfGrid::isOnWolfTerritories())
+    if (regionp && WolfGrid::showsWolfRegion())   // [WOLF VISITOR SEES 2026-10-18/] as activeFor
     {
         auto sit = mShown.find(regionp->getHandle());
         if (sit != mShown.end())

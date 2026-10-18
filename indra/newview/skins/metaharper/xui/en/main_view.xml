@@ -92,6 +92,16 @@
              mouse_opaque="false"
              name="login_panel_holder"
              width="1024"/>
+      <!-- [FLIGHT MODE 2026-10-06] wolfflightdeck.cpp: the flight deck, under the floaters and the
+           toolbars, over the world. Draws nothing and takes no clicks until World > Flight Mode. -->
+      <wolf_flight_deck follows="all"
+                        left="0"
+                        top="0"
+                        height="500"
+                        width="1024"
+                        mouse_opaque="false"
+                        tab_stop="false"
+                        name="wolf_flight_deck"/>
       <!-- [WOLF DRIVE 2026-10-09] wolfdashboard.cpp: the car / truck / bike dashboard, under the
            floaters and the toolbars, over the world. Draws nothing and takes no clicks until World >
            Car Dashboard (Wolf Territories only); with its PANEL off only its controls take clicks. -->
@@ -103,6 +113,27 @@
                           mouse_opaque="false"
                           tab_stop="false"
                           name="wolf_car_dashboard"/>
+      <!-- [BORDER GUARD 2026-10-16] wolfborder.cpp: "Ahead: <region> ..." - what the region ahead will do to you and
+           your vehicle, over the world under the floaters. Draws nothing until there is something to say; only its
+           teleport button takes clicks. -->
+      <wolf_border_banner follows="all"
+                          left="0"
+                          top="0"
+                          height="500"
+                          width="1024"
+                          mouse_opaque="false"
+                          tab_stop="false"
+                          name="wolf_border_banner"/>
+      <!-- [WOLF VISITOR SEES 2026-10-18] wolfloadingnotice.cpp: "Loading Wolf water..." / "Loading Wolf sky..." at the bottom
+           left of the world view while they are on their way on a Wolf region (20 s at most). Takes no clicks. -->
+      <wolf_loading_notice follows="all"
+                           left="0"
+                           top="0"
+                           height="500"
+                           width="1024"
+                           mouse_opaque="false"
+                           tab_stop="false"
+                           name="wolf_loading_notice"/>
       <!-- [WOLF GAME 2026-10-09] wolfgamehud.cpp: Wolf Roleplay on the world view - the stat panel,
            notices, markers, the downed overlay and the screen effects. Under the floaters and the
            toolbars, so the UI stays usable over every overlay. Clicks pass through to the world

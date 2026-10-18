@@ -9,4 +9,6 @@
 	<menu_item_check label="僅圖示" name="icons_only" />
 	<menu_item_check label="僅文字" name="text_only" />
 	<menu_item_check label="鎖定" name="toolbars_locked" />
+	<menu_item_check label="按鈕自動調整寬度" name="layout_style_none" />
+	<menu_item_check label="按鈕填充工具列" name="layout_style_fill" />
 </context_menu>

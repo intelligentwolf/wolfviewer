@@ -58,6 +58,7 @@
 #include "llworldmapmessage.h"
 #include "llappviewer.h"
 #include "llviewercontrol.h"
+#include "llcallbacklist.h"   // [WOLF VISITOR SEES 2026-10-18/] gIdleCallbacks: the WE button
 #include "wolfgrid.h"   // [WolfViewer 2026-10-13] the WE button, Wolf Territories only
 #include "llweb.h"
 #include "llhints.h"
@@ -336,10 +337,27 @@ void LLNavigationBar::setupPanel()
     mView->getChild<LLButton>("PersonalLighting")->setCommitCallback(boost::bind(&LLNavigationBar::onClickedLightingBtn, this)); // <FS:CR> FIRE-11847
     // [WolfViewer 2026-10-13] the WE button (panel_navigation_bar.xml WolfEnvironmentBtn, bound to WolfEnvironmentNativeSky by
     // control_name): shown on Wolf Territories only, checked again on every region change (login included).
+    // [WOLF VISITOR SEES 2026-10-18] the sky is drawn for a hypergrid visitor on a Wolf region too (WolfGrid::showsWolfRegion),
+    // so its switch is theirs as well. Checked every frame, not on the region change: a visitor's new region says it is Wolf
+    // only when its features arrive, after the region-changed callback has run.
     if (LLButton* we = mView->findChild<LLButton>("WolfEnvironmentBtn"))
     {
-        we->setVisible(WolfGrid::isOnWolfTerritories());
-        gAgent.addRegionChangedCallback([we]() { we->setVisible(WolfGrid::isOnWolfTerritories()); });
+        static LLHandle<LLView> s_we;
+        s_we = we->getHandle();
+        we->setVisible(WolfGrid::showsWolfRegion());
+        static bool s_idle_added = false;
+        if (!s_idle_added)
+        {
+            s_idle_added = true;
+            gIdleCallbacks.addFunction([](void*)
+            {
+                if (LLView* b = s_we.get())
+                {
+                    const bool wolf = WolfGrid::showsWolfRegion();
+                    if (b->getVisible() != wolf) b->setVisible(wolf);
+                }
+            }, nullptr);
+        }
     }
     // </FS:Zi>
 

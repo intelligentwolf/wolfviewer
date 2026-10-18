@@ -111,13 +111,15 @@ WolfMapOverlays::~WolfMapOverlays() {}
 bool WolfMapOverlays::active() const
 {
     // Always drawn on the grid — Paul 09-25: "make sure everyone can always see map textures".
-    return WolfGrid::isOnWolfTerritories();
+    // [WOLF VISITOR SEES 2026-10-18/] hypergrid visitors on a Wolf region too (the read carries no session, map_overlays.php
+    // "READS are public"); the editing stays with our own residents (editMode, post)
+    return WolfGrid::showsWolfRegion();
 }
 
 bool WolfMapOverlays::editMode() const
 {
     static LLCachedControl<bool> edit(gSavedSettings, "WolfMapEditImages", false);
-    return edit && active();
+    return edit && active() && WolfGrid::isOnWolfTerritories();   // [WOLF VISITOR SEES 2026-10-18/] editing: our own residents only
 }
 
 WolfMapOverlays::Overlay* WolfMapOverlays::find(S32 id)
@@ -175,7 +177,8 @@ void WolfMapOverlays::draw(LLWorldMapView& view)
 {
     if (!active()) return;
 
-    if (mOwns < 0) askOwner();
+    // [WOLF VISITOR SEES 2026-10-18/] the owner check posts our session: our own residents only (a visitor just sees the images)
+    if (mOwns < 0 && WolfGrid::isOnWolfTerritories()) askOwner();
     const bool edit = editMode();
     if (edit != mLastEditMode)
     {
@@ -640,7 +643,7 @@ void WolfMapOverlays::ensureFetched(LLWorldMapView& view)
 // Source: wolfterrainpaint.cpp fetchCoro — the same adapter shape (getRawAndSuspend, JSON body).
 void WolfMapOverlays::fetchCoro(F64 x0, F64 y0, F64 x1, F64 y1)
 {
-    if (!WolfGrid::isOnWolfTerritories()) { mFetching = false; return; }
+    if (!WolfGrid::showsWolfRegion()) { mFetching = false; return; }   // [WOLF VISITOR SEES 2026-10-18/] as active()
     const std::string url = std::string(API_URL) + llformat("?x0=%.0f&y0=%.0f&x1=%.0f&y1=%.0f", x0, y0, x1, y1);
     LLCoreHttpUtil::HttpCoroutineAdapter::ptr_t adapter =
         std::make_shared<LLCoreHttpUtil::HttpCoroutineAdapter>("WolfMapOverlays", LLCore::HttpRequest::DEFAULT_POLICY_ID);

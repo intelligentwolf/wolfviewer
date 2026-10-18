@@ -346,16 +346,40 @@ F32 WolfGameConsole::journalAdventure(F32 l, F32 r, F32 top, const std::string& 
     {
         std::string state;
         if (q.mPaused) state = q.mPausedText.empty() ? std::string("Paused: the story is paused.") : "Paused: " + q.mPausedText;
-        if (q.mGm) state += (state.empty() ? std::string() : std::string("  ")) + "A game master is running this story.";
+        if (q.mGm) state += (state.empty() ? std::string() : std::string("  ")) + "A host is running this story live.";
         y = paragraph(l, r, y, state, p.mAccent, bold) - 4.f;
     }
-    if (q.mEnded.mOn)
+    if (j.mEndedOn || q.mEnded.mOn)
     {
-        y = paragraph(l, r, y, "Finished: " + (q.mEnded.mTitle.empty() ? title : q.mEnded.mTitle), OK_INK, bold);
-        if (!q.mEnded.mText.empty()) y = paragraph(l, r, y, q.mEnded.mText, p.mText);
+        // [WORDING 2026-10-18] how it ended: the journal's own `ended`, else the quest's (as the web Journal, j.ended || q.ended);
+        // never "Finished" on a loss
+        const bool fromJ = j.mEndedOn;
+        const std::string ek = fromJ ? j.mEndedKind : q.mEnded.mKind;
+        const std::string et = fromJ ? j.mEndedTitle : q.mEnded.mTitle, ex = fromJ ? j.mEndedText : q.mEnded.mText;
+        y = paragraph(l, r, y, (ek == "win" ? "You won: " : ek == "lose" ? "You lost: " : "The end: ") + (et.empty() ? title : et),
+                      ek == "lose" ? DANGER_INK : OK_INK, bold);
+        if (!ex.empty()) y = paragraph(l, r, y, ex, p.mText);
         y -= 4.f;
     }
     y -= 6.f;
+
+    // ---- [GAME CARD 2026-10-18] GAME_CARD_SPINE_SPEC.md section 4: the game card and the main quest (journal goal, main, card) ----
+    {
+        const bool rp = j.mShape == "roleplay" || q.mShape == "roleplay";
+        const std::string goal = !j.mGoal.empty() ? j.mGoal : q.mGoal;
+        const S32 of = j.mMainOf > 0 ? j.mMainOf : q.mMainOf, step = j.mMainOf > 0 ? j.mMainStep : q.mMainStep;
+        const std::string mainTitle = j.mMainOf > 0 ? j.mMainTitle : q.mMainTitle;
+        if (j.mHasCard || !goal.empty() || of > 0)
+        {
+            y = sectionHead(l, r, y, rp ? "Your part" : "Your game", p);
+            if (!j.mYouAre.empty()) y = paragraph(l, r, y, "You are: " + j.mYouAre, p.mText) - 2.f;
+            if (!goal.empty()) y = paragraph(l, r, y, (rp ? "About: " : "Goal: ") + goal, p.mText) - 2.f;
+            if (!rp && !j.mWin.empty()) y = paragraph(l, r, y, "You win when: " + j.mWin, p.mText) - 2.f;
+            if (!rp && j.mHasCard) y = paragraph(l, r, y, j.mLose.empty() ? std::string("You can't lose - just keep trying.") : "You lose when: " + j.mLose, p.mText) - 2.f;
+            if (of > 0) y = paragraph(l, r, y, llformat("Main quest %d/%d", step, of) + (mainTitle.empty() ? std::string() : ": " + mainTitle), p.mAccent, bold) - 2.f;
+            y -= 6.f;
+        }
+    }
 
     // ---- 2. Now: the objective card, Show on map / Teleport, the cards waiting for a choice ----
     y = sectionHead(l, r, y, "Now", p);
@@ -441,7 +465,8 @@ F32 WolfGameConsole::journalAdventure(F32 l, F32 r, F32 top, const std::string& 
             // (the optional `act`, an additive change); without it there is nothing to put under it.
             const bool expandable = done && has_acts;
             const bool open = expandable && mOpenChapters.count(c.mAct) > 0;
-            textL(cur ? bold : body, c.mTitle.empty() ? c.mAct : c.mTitle, l + 24.f, y - 2.f, done || cur ? p.mText : p.mDim,
+            // [WORDING 2026-10-18] a chapter with no title is "Chapter N", never its raw id (as the web Journal)
+            textL(cur ? bold : body, c.mTitle.empty() ? llformat("Chapter %d", (S32)i + 1) : c.mTitle, l + 24.f, y - 2.f, done || cur ? p.mText : p.mDim,
                   LLFontGL::LEFT, LLFontGL::TOP, r - l - 120.f);
             textL(small, word, r - (expandable ? 20.f : 0.f), y - 3.f, cur ? p.mAccent : p.mDim, LLFontGL::RIGHT, LLFontGL::TOP);
             if (expandable) chevron(r - 8.f, y - 9.f, !open, p.mText);
@@ -567,7 +592,7 @@ F32 WolfGameConsole::journalAdventure(F32 l, F32 r, F32 top, const std::string& 
     if (j.mConversations || mConvoAdv == adv) y = conversationsSection(l, r, y, adv, p);
     if (!j.mCredits.empty())
     {
-        y = sectionHead(l, r, y, "Credits", p);
+        y = sectionHead(l, r, y, "Made by", p);   // [WORDING 2026-10-18] "credits" is money now
         for (const WolfAdventure::Row& c : j.mCredits)
         {
             textL(small, c.mLabel, l, y, p.mDim, LLFontGL::LEFT, LLFontGL::TOP, (r - l) * 0.4f);
@@ -578,7 +603,7 @@ F32 WolfGameConsole::journalAdventure(F32 l, F32 r, F32 top, const std::string& 
     }
     if (!j.mAttribution.empty())
     {
-        y = sectionHead(l, r, y, "Attribution", p);
+        y = sectionHead(l, r, y, "Based on", p);   // [WORDING 2026-10-18]
         for (const WolfAdventure::Row& at : j.mAttribution)
         {
             if (!at.mLabel.empty())
@@ -801,7 +826,7 @@ F32 WolfGameConsole::conversationsSection(F32 l, F32 r, F32 top, const std::stri
         hit(l, y - 26.f, l + bw, y, H_ADV_CONVO, 0, open ? "Hide what you and the characters said" : "Read what you and the characters said in this adventure", true, !mConvoLoading);
         y -= 34.f;
     }
-    y = paragraph(l, r, y, "Characters may be AI. Conversations are kept for 30 days; this adventure's game masters (and your teacher in a class) can read them.",
+    y = paragraph(l, r, y, "Characters may be AI. Conversations are kept for 30 days; this adventure's hosts (and your teacher in a class) can read them.",
                   p.mDim, small) - 6.f;
     if (!open) return y - 4.f;
     if (mConvoLoading) return paragraph(l, r, y, "Loading your conversations...", p.mDim) - 8.f;
@@ -834,7 +859,7 @@ F32 WolfGameConsole::conversationsSection(F32 l, F32 r, F32 top, const std::stri
                 const LLSD& ln = mConvo[i];
                 const std::string kind = ln["who"].asString();
                 const bool mine = kind == "player";
-                const std::string speaker = mine ? std::string("You") : (kind == "gm" ? who + " (game master)" : (kind == "system" ? std::string("Story") : who));
+                const std::string speaker = mine ? std::string("You") : (kind == "gm" ? who + " (host)" : (kind == "system" ? std::string("Story") : who));
                 const std::string text = WolfGame::cleanText(ln["text"].asString(), 1000, true);
                 const F32 rep_w = mine ? 0.f : 70.f;
                 textL(bold, speaker, l, y, mine ? p.mText : p.mAccent, LLFontGL::LEFT, LLFontGL::TOP, 140.f);

@@ -21452,7 +21452,7 @@ Change of this parameter will affect the layout of buttons in notification toast
     <key>WolfEnvironmentNativeSky</key>
 		<map>
 			<key>Comment</key>
-			<string>[WOLF ENV 2026-10-12] Opt-in test mode: TRUE lets WolfViewer draw the Wolf Environment's physically based native sky, clouds, exposure and photometric lights itself (at the WolfEnvironmentQuality tier). FALSE (the default) draws the region's EEP exactly as before - the native renderer, its post pass, its exposure and tone mapping and every scene-shader change made for it stay off.</string>
+			<string>[WOLF ENV 2026-10-12] Opt-in test mode: TRUE lets WolfViewer draw the Wolf Environment's physically based native sky, clouds, exposure and photometric lights itself (at the WolfEnvironmentQuality tier). FALSE draws the region's EEP exactly as before - the native renderer, its post pass, its exposure and tone mapping and every scene-shader change made for it stay off. Default TRUE since w66 Smiling Frog (Paul 10-13); the WE button in the navigation bar toggles it. [BASIC WOLF SKY 2026-10-19] drawn on every OpenSim grid (WolfGrid::showsBasicWolfSky), off Wolf from the region's own EEP alone; never on Second Life.</string>
 			<key>Persist</key>
 			<integer>1</integer>
 			<key>Type</key>
@@ -21463,7 +21463,7 @@ Change of this parameter will affect the layout of buttons in notification toast
 		<key>WolfEnvironmentAllRegions</key>
 		<map>
 			<key>Comment</key>
-			<string>[WolfViewer round 13] With WolfEnvironmentNativeSky on: TRUE draws the native sky on every Wolf Territories region, a region without a Wolf Environment document of its own made from its ordinary EEP sky (cloud_shadow, haze, cloud_scale, its sun and moon). FALSE: only where a document says mode wolf. Default TRUE since w66 Smiling Frog (Paul 10-13: "default to WE on on wolf territories grid"); nothing is drawn off Wolf Territories.</string>
+			<string>[WolfViewer round 13] With WolfEnvironmentNativeSky on: TRUE draws the native sky on every Wolf Territories region, a region without a Wolf Environment document of its own made from its ordinary EEP sky (cloud_shadow, haze, cloud_scale, its sun and moon). FALSE: only where a document says mode wolf. Default TRUE since w66 Smiling Frog (Paul 10-13: "default to WE on on wolf territories grid"). [BASIC WOLF SKY 2026-10-19] on any other OpenSim grid this is the only source there is (no Wolf documents are read there), so with it off the native sky is off there; never on Second Life.</string>
 			<key>Persist</key>
 			<integer>1</integer>
 			<key>Type</key>

@@ -156,6 +156,10 @@ namespace WolfTk
         GLuint     depth_tex = 0;       // the scene depth (GL depth texture, [0,1])
         F32        pre_exposure = 1.f;
         bool       reset_history = false;
+        // [WolfViewer 2026-10-19] a cut (a teleport): the weather and shape offsets start again at this phase (0..1 of a
+        // repeat) instead of carrying on from wherever the session's drift had taken them - see wolfenvironmentrender.cpp
+        bool       reseed = false;
+        F32        seed_phase[2] = { 0.f, 0.f };
     };
 
     class Clouds

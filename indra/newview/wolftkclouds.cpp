@@ -1103,6 +1103,16 @@ bool Clouds::render(const Atmosphere& atmosphere, const CloudsFrame& f)
     if (f.reset_history) m.havePrev = false;   // as setSize's invalidation (CloudsMaterial.ts:418-421)
 
     ++m.frame;
+    // [WolfViewer 2026-10-19] a cut: the offsets restart at the frame's seed phase (wolfenvironmentrender.cpp cloudsFrame, from
+    // the region and the hour), so the same region shows the same cloud field on every visit; from here they drift with the
+    // wind as before. The evolution (the shapes' vertical drift) restarts too.
+    if (f.reseed)
+    {
+        m.localWeatherOffset = m.localWeatherOffsetTurned = glm::vec2(f.seed_phase[0], f.seed_phase[1]);
+        m.shapeOffset = glm::vec3(f.seed_phase[0], f.seed_phase[1], 0.5f * (f.seed_phase[0] + f.seed_phase[1]));
+        m.shapeDetailOffset = glm::vec3(f.seed_phase[1], f.seed_phase[0], 0.f);
+        m.cloudEvolution = 0.0;
+    }
     // updateSharedUniforms (:345-397): offsets += velocity x deltaTime
     m.localWeatherOffset += glm::vec2(f.local_weather_velocity.mV[0], f.local_weather_velocity.mV[1]) * f.dt;
     // [WolfViewer 2026-10-14] wrapped into 0..1: the weather texture repeats, so a whole step is no change, and the float keeps

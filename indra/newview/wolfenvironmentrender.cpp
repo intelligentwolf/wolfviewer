@@ -168,10 +168,9 @@ namespace
     Frame sNext;
     Frame sFrame;
 
-    // [WolfViewer 2026-10-13] the EEP's cloud cover, closed-loop (measureCloudCover): the takram coverage that makes the clouds
-    // over the sky cover the share the EEP's clouds cover in the stock renderer, as measured; its last measurement for the log
-    bool sCoverCtlValid = false;
-    F32  sCoverScale = 3.5f;   // takram coverage / the stock share (measureCloudCover learns it; Iceland 10-13: 0.36 - 0.40 for 0.108)
+    // [WolfViewer 2026-10-13] the EEP's cloud cover: measureCloudCover's last measurement of the native clouds, for the log
+    // [WolfViewer 2026-10-19] the coverage itself is no longer learned from the screen (coverFromShare below); the readings
+    // drive the thinning and the clouds' colour only
     F32  sCoverMeasured = -1.f;
     S32  sCoverSamples = 0;
     // .. and the clouds' colour, closed-loop the same way (measureCloudCover): the gain on the clouds' light (wolfEepCloudTint)
@@ -188,16 +187,16 @@ namespace
     size_t sStockPboBytes = 0;
     bool sStockPending = false;
     S32  sStockPW = 0, sStockPH = 0;
-    bool sStockValid = false;          // the coverage and the thinning below come from the stock layer
-    F32  sCoverAbs = -1.f;             // the takram coverage, learned from the stock layer
-    // [WolfViewer 2026-10-14] Paul at Lampert Highlands: "the cloud changing is way too fast". The coverage (and thinning) loop
-    // stepped up to 5 % every reading toward a measurement that moves with the view and the drifting clouds, so it never settled
-    // (cover 0.42 -> 0.14 -> 0.20 -> 0.16 in a minute), and every step re-formed the cloud shapes. Now it settles once, then
-    // LOCKS: 3 readings in a row within 15 % of the stock share lock it; only a change of the EEP's own cloud share (> 15 %), a
-    // teleport or a sky switch unlocks it.
+    bool sStockValid = false;          // the thinning below comes from the stock layer
+    // [WolfViewer 2026-10-14] Paul at Lampert Highlands: "the cloud changing is way too fast". A loop that stepped every reading
+    // toward a measurement that moves with the view and the drifting clouds never settled, and every step re-formed the cloud
+    // shapes. The thinning settles once, then LOCKS: 3 readings in a row within 0.05 of each other lock it; only a change of the
+    // EEP's own cloud share (> 15 %), a teleport or a sky switch unlocks it.
     bool sCoverLocked = false;
     S32  sCoverSettled = 0;
     F32  sCoverLockTarget = -1.f;
+    // [WolfViewer 2026-10-19] a cut (updateLight): the next cloudsFrame restarts the cloud field at the region's seed phase
+    bool sCloudReseed = false;
     F32  sThin = 0.f, sThinTarget = 0.f;   // the clouds' thinning (cloudsF.glsl wolfEepCloudThin)
     F32  sStockShare = -1.f, sNativeShare = -1.f, sStockOpacity = -1.f, sNativeOpacity = -1.f;   // the last reading, for the log
     LLColor3 sCloudMeasured, sCloudTarget;
@@ -309,6 +308,10 @@ namespace
             if (env.getEnvironmentDay(e) || env.getEnvironmentFixedSky(e)) return false;
         }
         if (WolfRegionWeather::instance().autoEnvPreviewOn()) return true;
+        // [BASIC WOLF SKY 2026-10-19] off Wolf a personal sky or day cycle (ENV_LOCAL) is expressed too - Paul: "pick up their
+        // current environment settings and express it"; nothing there puts the shared one back on arrival (wolf_use_shared_environment
+        // is Wolf-only), so a person with a preset of their own would otherwise never see the native sky
+        if (!WolfGrid::showsWolfRegion()) return true;
         return !env.getEnvironmentDay(LLEnvironment::ENV_LOCAL) && !env.getEnvironmentFixedSky(LLEnvironment::ENV_LOCAL);
     }
 
@@ -602,6 +605,31 @@ namespace
     }
 
     /**
+     * [WolfViewer 2026-10-19] THE COVERAGE IS A FUNCTION OF THE EEP, nothing else. Paul at ICELAND: "i went to iceland and it
+     * looked amazing, went to sandbox for 10 minutes, went back to iceland, it looks amazing but completely different clouds ...
+     * a different type ... thats a bug". The two arrivals (log 08:05:26Z and 08:08:56Z, the same EEP share 0.108133, the same
+     * weather) started at takram coverage 0.379 and 0.210, because the start was share x sCoverScale and that scale was LEARNED
+     * from whatever the camera happened to look at, on every region visited in between (1 % a reading, carried across regions:
+     * 3.5 at the first arrival, 4.76 at Sandbox, 1.94 at the second); and each visit then tuned the coverage against the stock
+     * layer drawn for the current VIEW (its veiled share read 0.66 of one view and 0.97 of the other, for one and the same EEP).
+     * At coverage 0.21 only the densest weather texels of takram's four default layers pass the cut (cloudsCommon.glsl:167-172),
+     * at 0.38 far more do - a different sky, not a different amount. Now the coverage is this fixed curve of the stock share
+     * (WolfEepReference::cloudCoveredFraction, view-independent), through the points that were measured:
+     *   share 0        -> 0      (no clouds: audit S9, 2026-10-14)
+     *   share 0.108    -> 0.38   (Iceland 10-13 and 10-19: the loop's own settle, scale 3.3 - 3.7, memory w66 round 7)
+     *   share 1        -> 0.60   (a total overcast keeps its shapes: 10-19 TROMSO, gaps at drawn 0.534 in one view, the whole
+     *                             sky veiled from 0.486 in another, one featureless sheet from 0.72 - SCREEN verify 07:29-07:30Z)
+     * The screen readings (measureCloudCover) now set the thinning and the clouds' colour only.
+     */
+    F32 coverFromShare(F32 share)
+    {
+        share = llclamp(share, 0.f, 1.f);
+        if (share <= 0.f) return 0.f;
+        if (share <= 0.108f) return share * (0.38f / 0.108f);
+        return 0.38f + (share - 0.108f) * ((0.60f - 0.38f) / (1.f - 0.108f));
+    }
+
+    /**
      * The frame's light at the camera and the exposure (absolute values):
      *   sun        three-geospatial getSunLightColor (getSunLightColor.ts:48-103): transmittance to the sun x the
      *              solar irradiance x the sun's spectral-radiance-to-luminance factor (WolfTk::Atmosphere)
@@ -625,6 +653,9 @@ namespace
             s_cut = s_haveCam && (cam - s_lastCam).magVec() > 300.0;
             s_lastCam = cam; s_haveCam = true;
             if (s_cut) sGenusValid = false;
+            // [2026-10-19] the cloud field restarts at the region's seed phase (cloudsFrame): on a cut, and once at the start
+            static bool s_seeded = false;
+            if (s_cut || !s_seeded) { sCloudReseed = true; s_seeded = true; }
         }
         LLSettingsSky::ptr_t psky = LLEnvironment::instance().getCurrentSky();
         const F64 now = skyNow();
@@ -771,18 +802,16 @@ namespace
             // [WolfViewer 2026-10-14] audit S9: an EEP with no clouds at all means no clouds, at once - the learned coverage
             // (measureCloudCover) only moves 5 % a reading and is held at 0.02 or more, so a clear region reached by a crossing
             // kept a thin veil for a minute and never cleared
+            // [WolfViewer 2026-10-19] a fixed curve of the stock share (coverFromShare): the same on every visit, whichever way the
+            // camera faces; the screen readings no longer move it
             const F32 eepShareNow = psky ? WolfEepReference::cloudCoveredFraction(psky) : 0.f;
-            const F32 eepCover = (!psky || eepShareNow <= 0.f) ? 0.f : (sStockValid && sCoverAbs >= 0.f) ? sCoverAbs
-                                 : llclamp(eepShareNow * sCoverScale, 0.f, 1.f);
+            const F32 eepCover = coverFromShare(eepShareNow);
             const F32 coverTarget = llclamp(z.hasClouds ? z.clouds : (psky ? eepCover : weatherCover(d)), 0.f, 1.f);
             // [WolfViewer round 17] the EEP's cloud_shadow steps (a region's 120 s sky transition, a day cycle's keyframes, a
             // crossing): the clouds' coverage follows over GENUS_TAU (20 s, as the genus layers do) instead of jumping -
             // Paul's log showed cover 1.00 -> 0.37 between minute lines while "the clouds are moving very very fast"
             static F32 s_cover = -1.f;
-            // [WolfViewer 2026-10-13] the measured EEP cover (measureCloudCover) is a closed loop with its own pace: taken as it is
-            // (eased over 5 s: the measured loop's own readings must never show as the clouds growing and shrinking)
-            const bool closedLoop = psky && sCoverCtlValid && !z.hasClouds;
-            const F32 tau = closedLoop ? 30.f : GENUS_TAU;   // [2026-10-14] 30 s (was 5): a settle or re-settle shows as slow change, never as shapes re-forming
+            const F32 tau = GENUS_TAU;
             s_cover = (s_cover < 0.f || dt <= 0.f || s_cut) ? coverTarget : s_cover + (coverTarget - s_cover) * (1.f - expf(-dt / tau));
             sNext.cover = s_cover;
             if (WolfAurora::forced()) sNext.cover = 0.f;   // [2026-10-15] WolfForceAurora: no clouds in front of the forced aurora
@@ -1174,7 +1203,8 @@ namespace
                   << " rot " << f.weather_rotation_deg << " stretch " << f.weather_stretch
                   << " lstretch " << f.weather_layer_stretched[0] << "," << f.weather_layer_stretched[1] << "," << f.weather_layer_stretched[2] << "," << f.weather_layer_stretched[3]
                   << " repeat " << f.weather_repeat_scale
-                  << " pivot " << f.weather_pivot.mV[0] << "," << f.weather_pivot.mV[1] << " genus " << (sGenusValid ? 1 : 0);
+                  << " pivot " << f.weather_pivot.mV[0] << "," << f.weather_pivot.mV[1] << " genus " << (sGenusValid ? 1 : 0)
+                  << (sGenusValid ? "" : " (takram default layers; the genus below is stale)");   // [2026-10-19] the trace misled: it printed the last region's genus
                 for (S32 i = 0; i < 4; ++i)
                     o << " L" << i << " " << sGenus.layer[i].genus << " alt " << sGenus.layer[i].altitude << " h " << sGenus.layer[i].height
                       << " cov " << sGenus.layer[i].coverage;
@@ -1194,6 +1224,24 @@ namespace
         f.depth_tex = gPipeline.mRT->deferredScreen.getDepth();
         f.pre_exposure = sFrame.exposure;
         f.reset_history = gSnapshot;
+        // [WolfViewer 2026-10-19] a cut (updateLight sCloudReseed): the cloud field's offsets restart at a phase made from the
+        // region's id and the UTC hour (wolftkclouds.cpp), so two arrivals on one region in the same hour show the same field,
+        // drifted by the wind in between; a session's accumulated drift no longer decides what a region looks like on arrival
+        f.reseed = !probe && sCloudReseed;
+        if (f.reseed)
+        {
+            sCloudReseed = false;
+            const LLViewerRegion* rgn = gAgent.getRegion();
+            const LLUUID id = rgn ? rgn->getRegionID() : LLUUID::null;
+            const U32 hour = (U32)(time(nullptr) / 3600);
+            U32 a = hour * 2654435761u, b = (hour ^ 0x9e3779b9u) * 2246822519u;   // Knuth's and xxHash's multiplicative constants
+            for (S32 i = 0; i < 16; ++i)
+            {
+                if (i & 1) b = (b ^ (U32)id.mData[i]) * 2246822519u; else a = (a ^ (U32)id.mData[i]) * 2654435761u;
+            }
+            f.seed_phase[0] = (F32)(a >> 8) / 16777216.f;   // 24 bits -> 0..1
+            f.seed_phase[1] = (F32)(b >> 8) / 16777216.f;
+        }
         return f;
     }
 
@@ -1443,7 +1491,8 @@ S32 WolfEnvironmentRender::tierNow()
     // shader) and the EEP draws exactly as before.
     static LLCachedControl<bool> native_sky(gSavedSettings, "WolfEnvironmentNativeSky", false);
     if (!native_sky) return 0;
-    if (sGpu.failed || !WolfGrid::showsWolfRegion()) return 0;   // [WOLF VISITOR SEES 2026-10-18/] visitors on a Wolf region too
+    // [WOLF VISITOR SEES 2026-10-18/] visitors on a Wolf region too; [BASIC WOLF SKY 2026-10-19/] every OpenSim grid (wolfgrid.h)
+    if (sGpu.failed || !WolfGrid::showsBasicWolfSky()) return 0;
     if (gGLManager.mGLVersion < 3.29f) return 0;
     if (!programsReady()) return 0;
     // the native sky's pipeline (HDR and its targets) exists only with mRT->deferredLight
@@ -1873,7 +1922,7 @@ namespace
             if (sStockValid)
                 o << "\n  clouds (stock layer drawn, same view)  veils (opacity >= 0.2) " << sStockShare << " of the sky, mean opacity there "
                   << sStockOpacity << "  native veils " << sNativeShare << ", marched opacity " << sNativeOpacity << " thinned x "
-                  << (1.f - sThin) << "  (learned coverage " << sCoverAbs << ")";
+                  << (1.f - sThin) << "  (coverage from the EEP share " << sFrame.cover << (sCoverLocked ? ", thinning locked)" : ")");
             o << "\n  cloud colour   EEP " << d8(WolfEepReference::display(path, sCloudTarget)) << "  native measured "
               << d8(WolfEepReference::display(path, sCloudMeasured)) << "  (mean over the covered texels, per-direction gains "
               << (sCloudGainValid ? "on" : "off") << ")";
@@ -1924,9 +1973,8 @@ namespace
         LLSettingsSky::ptr_t psky = LLEnvironment::instance().getCurrentSky();
         if (!psky || !WolfEnvironmentRender::eepDriven())
         {
-            sCoverCtlValid = false;
             if (sCloudGainValid) { sCloudGainValid = false; LLColor3 white[NPROBE]; for (S32 i = 0; i < NPROBE; ++i) white[i] = LLColor3::white; sAtmos->setEepCloudGains(white, false); }
-            if (sStockValid || sThin != 0.f) { sStockValid = false; sCoverAbs = -1.f; sThin = sThinTarget = 0.f; sAtmos->setEepCloudThin(0.f); }
+            if (sStockValid || sThin != 0.f) { sStockValid = false; sThin = sThinTarget = 0.f; sAtmos->setEepCloudThin(0.f); }
             sCoverLocked = false; sCoverSettled = 0; sCoverLockTarget = -1.f;
             return;
         }
@@ -1945,15 +1993,12 @@ namespace
         if (s_haveCam && (cam - s_lastCam).magVec() > 300.0)
         {
             // a teleport: start again, the clouds' gains off until the new place is measured
-            sCoverCtlValid = false;
             if (sCloudGainValid) { sCloudGainValid = false; LLColor3 white[NPROBE]; for (S32 i = 0; i < NPROBE; ++i) white[i] = LLColor3::white; sAtmos->setEepCloudGains(white, false); }
-            if (sStockValid || sThin != 0.f) { sStockValid = false; sCoverAbs = -1.f; sThin = sThinTarget = 0.f; sAtmos->setEepCloudThin(0.f); }
+            if (sStockValid || sThin != 0.f) { sStockValid = false; sThin = sThinTarget = 0.f; sAtmos->setEepCloudThin(0.f); }
             sCoverLocked = false; sCoverSettled = 0; sCoverLockTarget = -1.f;
         }
         s_lastCam = cam; s_haveCam = true;
         const F32 target = WolfEepReference::cloudCoveredFraction(psky);
-        // takram's coverage is a threshold, so it runs well above the stock share: the share x the learned scale (updateLight)
-        sCoverCtlValid = true;
         const F64 t = LLFrameTimer::getElapsedSeconds();
         // the colour gains glide toward their targets every frame (3 s)
         if (sCloudGainValid)
@@ -2140,35 +2185,28 @@ namespace
             sStockShare = (F32)sVeil / (F32)n; sNativeShare = (F32)nVeil / (F32)n;
             sStockOpacity = sVeil > 0 ? (F32)(sOpSum / sVeil) : 0.f;
             sNativeOpacity = nOpN > 0 ? (F32)(nOpSum / nOpN) : -1.f;
-            if (sCoverAbs < 0.f) sCoverAbs = llclamp(target * sCoverScale, 0.02f, 1.f);   // from the cover in use
-            // the EEP's own cloud share moved (a sky transition, a day-cycle keyframe): settle again
-            if (sCoverLocked && sCoverLockTarget > 0.f && fabsf(target - sCoverLockTarget) > 0.15f * llmax(sCoverLockTarget, 0.05f))
+            // the EEP's own cloud share moved (a sky transition, a day-cycle keyframe, a crossing): settle again
+            // [WolfViewer 2026-10-19] any lock (>= 0; -1 = none) releases - a lock taken on a clear EEP (share 0) never did
+            if (sCoverLocked && sCoverLockTarget >= 0.f && fabsf(target - sCoverLockTarget) > 0.15f * llmax(sCoverLockTarget, 0.05f))
             {
                 sCoverLocked = false; sCoverSettled = 0;
-                LL_INFOS("WolfEnv") << "clouds: EEP cloud share " << sCoverLockTarget << " -> " << target << ", coverage settling again" << LL_ENDL;
+                LL_INFOS("WolfEnv") << "clouds: EEP cloud share " << sCoverLockTarget << " -> " << target << ", thinning settling again" << LL_ENDL;
             }
-            const F32 err = (sStockShare - sNativeShare) / llmax(sStockShare, 0.05f);
+            // [WolfViewer 2026-10-19] the readings set the THINNING only (the coverage is coverFromShare, updateLight): the stock
+            // mean opacity over its veil against the native one, before the thinning; settled = three readings within 0.05
             if (!sCoverLocked)
             {
-                sCoverAbs = llclamp(sCoverAbs * (1.f + llclamp(0.3f * err, -0.05f, 0.05f)), 0.02f, 1.f);
+                const F32 before = sThinTarget;
                 if (nOpN >= 50 && sVeil >= 50) sThinTarget = llclamp(1.f - sStockOpacity / sNativeOpacity, 0.f, 0.8f);
                 else if (sVeil == 0) sThinTarget = 0.f;
-                sCoverSettled = fabsf(err) < 0.15f ? sCoverSettled + 1 : 0;
+                sCoverSettled = fabsf(sThinTarget - before) < 0.05f ? sCoverSettled + 1 : 0;
                 if (sCoverSettled >= 3)
                 {
                     sCoverLocked = true; sCoverLockTarget = target;
-                    LL_INFOS("WolfEnv") << "clouds: coverage settled at " << sCoverAbs << " (thinning " << sThinTarget << "), locked" << LL_ENDL;
+                    LL_INFOS("WolfEnv") << "clouds: thinning settled at " << sThinTarget << " (coverage " << sFrame.cover << " from the EEP share " << target << "), locked" << LL_ENDL;
                 }
             }
             sStockValid = true;
-        }
-        // a proportional step each reading: 0.3 x the error, held to 0.03 a step so the clouds grow and shrink gently; at least
-        // 0.03 while none show at all (takram draws nothing below its weather threshold, so a measured 0 says little)
-        // learn the scale: at most 1 % a reading, and only from a reading with plenty of sky
-        if (n >= 2000 && target > 0.01f)
-        {
-            const F32 err = (target - sCoverMeasured) / target;
-            sCoverScale = llclamp(sCoverScale * (1.f + llclamp(0.05f * err, -0.01f, 0.01f)), 1.f, 10.f);
         }
         // the clouds' colour: each node seen (8 texels or more) moves its gain halfway (in log) to the ratio of the stock
         // colour to the measured one, per channel, held to 0.25 .. 4 x; nodes not in view take the mean of those that were

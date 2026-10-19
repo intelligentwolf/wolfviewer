@@ -211,6 +211,17 @@ namespace WolfGrid
     {
         return showsWolfRegion() || LLGridManager::getInstance()->isInOpenSim();
     }
+    // [BASIC WOLF SKY 2026-10-19] The Wolf environment (the native sky: atmosphere, volumetric clouds, exposure, the
+    // altitude sky) everywhere on OpenSim, the same rule as the basic sea. Paul 2026-10-19: "can we allow people using our
+    // viewer NOT on wolf grid to have our environment, obvs they wont be able to change anything but it could pick up their
+    // current environment settings and express it". Off Wolf it is made from the region's own EEP alone
+    // (WolfEnvironmentState::active, the EEP-only document): no Wolf Environment document, no automatic environment and no
+    // weather are read (wolfenvironmentstate.cpp idle / wolfregionweather.cpp stay on showsWolfRegion), and the Wolf menus,
+    // tools and editors stay on isOnWolfTerritories. Never Second Life (isInOpenSim, as the sea).
+    inline bool showsBasicWolfSky()
+    {
+        return showsWolfRegion() || LLGridManager::getInstance()->isInOpenSim();
+    }
 
     // What the region's weather and sky follow: logged in here and on one of our regions, or a
     // visitor on one of our regions. Reading only - a visitor sends no session (see the callers).

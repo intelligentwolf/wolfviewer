@@ -45,7 +45,8 @@ namespace
         // <WolfViewer 2026-10-10/> ON a Wolf region, not only logged in to Wolf: after a hypergrid jump Paul at 610 m on
         // OSFest saw its sky thinned to space (black, a white glare at the horizon) - isWolfTerritories() is the login grid
         // [WOLF VISITOR SEES 2026-10-18/] the region underfoot (WolfGrid::showsWolfRegion): hypergrid visitors on a Wolf region too, as every gate in this file
-        return on && WolfGrid::showsWolfRegion();
+        // [BASIC WOLF SKY 2026-10-19/] and every OpenSim grid, with the native sky it belongs to (WolfGrid::showsBasicWolfSky)
+        return on && WolfGrid::showsBasicWolfSky();
     }
 
     // Camera height above the water, which is sea level on the grid.
@@ -92,7 +93,7 @@ F32 WolfAltitudeSky::spaceStarAlpha()
 F32 WolfAltitudeSky::farClipExtra()
 {
     static LLCachedControl<bool> on(gSavedSettings, "WolfViewerFarClipFollowsHeight", true);
-    if (!on || !WolfGrid::showsWolfRegion())
+    if (!on || !WolfGrid::showsBasicWolfSky())   // [BASIC WOLF SKY 2026-10-19/] with the altitude sky
     {
         return 0.f;
     }
@@ -104,7 +105,7 @@ F32 WolfAltitudeSky::horizonSeaHeight()
     static LLCachedControl<bool> on(gSavedSettings, "WolfViewerHorizonSea", true);
     // (2026-10-11: leaving the sea out of reflection-probe captures for Timmy's dark interiors was tried and REVERTED -
     // over the ocean the sea IS what is below, and without it Paul's whole scene came out washed white at 550 m.)
-    if (!on || !WolfGrid::showsWolfRegion())
+    if (!on || !WolfGrid::showsBasicWolfSea())   // [BASIC WOLF SKY 2026-10-19/] the horizon sea goes with the basic sea (lldrawpoolwater.cpp)
     {
         return -1.f;
     }

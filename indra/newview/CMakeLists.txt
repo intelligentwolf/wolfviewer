@@ -959,6 +959,7 @@ set(viewer_SOURCE_FILES
     wolffloaterairports.cpp
     wolfsuitcase.cpp
     wolfinvisible.cpp
+    wolfviewerkey.cpp
     wolflandsandbox.cpp
     wolflightning.cpp
     wolfspeech.cpp
@@ -1920,6 +1921,7 @@ set(viewer_HEADER_FILES
     wolffloaterairports.h
     wolfsuitcase.h
     wolfinvisible.h
+    wolfviewerkey.h
     wolflandsandbox.h
     wolflightning.h
     wolfspeech.h

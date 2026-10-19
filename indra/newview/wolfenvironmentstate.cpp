@@ -257,7 +257,10 @@ WolfEnvironmentState::~WolfEnvironmentState() = default;
 
 const WolfEnvDoc& WolfEnvironmentState::active() const
 {
-    if (!WolfGrid::showsWolfRegion()) return mNone;   // [WOLF VISITOR SEES 2026-10-18/] visitors on a Wolf region too (wolfgrid.h)
+    // [WOLF VISITOR SEES 2026-10-18/] visitors on a Wolf region too (wolfgrid.h)
+    // [BASIC WOLF SKY 2026-10-19] and every OpenSim grid (WolfGrid::showsBasicWolfSky): off Wolf the documents below are
+    // never read (idle clears them), so the EEP-only document at the end is what an OpenSim region gets
+    if (!WolfGrid::showsBasicWolfSky()) return mNone;
     if (mPreview.mValid) return mPreview;
     if (mUseParcel && mParcel.mValid && mParcel.mMode != WolfEnvDoc::OFF) return mParcel;
     if (mRegion.mValid && mRegion.mMode != WolfEnvDoc::OFF) return mRegion;
@@ -270,7 +273,7 @@ const WolfEnvDoc& WolfEnvironmentState::active() const
     // Environment floater): a region with no document of its own and no automatic one is drawn natively from its ordinary
     // EEP sky alone - the round-9 mapping reads its cloud_shadow, haze and cloud_scale (wolfenvironmentrender.cpp
     // updateLight), the sun and moon are the EEP's (REAL), no weather (takram's default layers under the EEP's coverage).
-    // Wolf Territories only, as the rest of the native sky (tierNow).
+    // Wolf Territories and, since [BASIC WOLF SKY 2026-10-19], every OpenSim grid (WolfGrid::showsBasicWolfSky, as tierNow).
     static LLCachedControl<bool> all_regions(gSavedSettings, "WolfEnvironmentAllRegions", false);
     if (native_sky && all_regions)
     {

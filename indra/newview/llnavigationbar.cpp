@@ -344,7 +344,7 @@ void LLNavigationBar::setupPanel()
     {
         static LLHandle<LLView> s_we;
         s_we = we->getHandle();
-        we->setVisible(WolfGrid::showsWolfRegion());
+        we->setVisible(WolfGrid::showsBasicWolfSky());   // [BASIC WOLF SKY 2026-10-19/] every OpenSim grid, as the sky itself (tierNow)
         static bool s_idle_added = false;
         if (!s_idle_added)
         {
@@ -353,7 +353,7 @@ void LLNavigationBar::setupPanel()
             {
                 if (LLView* b = s_we.get())
                 {
-                    const bool wolf = WolfGrid::showsWolfRegion();
+                    const bool wolf = WolfGrid::showsBasicWolfSky();   // [BASIC WOLF SKY 2026-10-19/]
                     if (b->getVisible() != wolf) b->setVisible(wolf);
                 }
             }, nullptr);

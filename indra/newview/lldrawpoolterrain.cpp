@@ -91,7 +91,8 @@ static void wolf_bind_caustics(LLGLSLShader* shader, LLViewerRegion* regionp)
     light.normalize();
     // [WOLF GRID GATE 2026-10-17] the caustics come from the Wolf sea's FFT cascades (lldrawpoolwater.cpp): Wolf only
     // [WOLF VISITOR SEES 2026-10-18/] the region underfoot decides (WolfGrid::showsWolfRegion): visitors on a Wolf region too
-    if (caustics_on && t0 && t1 && pwater && env.getIsSunUp() && !gCubeSnapshot && WolfGrid::showsWolfRegion())
+    // [BASIC WOLF SEA 2026-10-19/] the cascades now run on every OpenSim grid (wolfgrid.h showsBasicWolfSea), so their caustics do too
+    if (caustics_on && t0 && t1 && pwater && env.getIsSunUp() && !gCubeSnapshot && WolfGrid::showsBasicWolfSea())
     {
         // Sunlight only; the same dawn ramp the water uses.
         strength = llclamp((light.mV[VZ] - 0.02f) / 0.23f, 0.f, 1.f) * 0.9f;

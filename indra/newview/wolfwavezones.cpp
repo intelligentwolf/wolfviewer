@@ -825,7 +825,9 @@ const LLSD& WolfWaveZones::params() const
 {
     static const LLSD none;
     LLViewerRegion* region = gAgent.getRegion();
-    if (region && region->getHandle() == mPreviewParamsFor && mPreviewParams.isMap()) return mPreviewParams;
+    // [BASIC WOLF SEA 2026-10-19/] a preview is keyed by handle like the records: only on a Wolf region (the boat rocker reads
+    // this on every OpenSim grid now, wolfboatrock.cpp), so a Wolf preview never shapes another grid's region of the same handle
+    if (WolfGrid::showsWolfRegion() && region && region->getHandle() == mPreviewParamsFor && mPreviewParams.isMap()) return mPreviewParams;
     const Region* r = current();
     return r ? r->mParams : none;
 }

@@ -296,7 +296,8 @@ const WolfWaterField::Field* WolfWaterField::get(const LLViewerRegion* regionp) 
         return nullptr;
     }
     auto it = mFields.find(regionp->getHandle());
-    if (it == mFields.end() || !it->second.mReady)
+    // [BASIC WOLF SEA 2026-10-19/] keyed by handle, which another grid's region can share: only the region it was baked for
+    if (it == mFields.end() || !it->second.mReady || it->second.mRegionID != regionp->getRegionID())
     {
         return nullptr;
     }
@@ -371,7 +372,13 @@ void WolfWaterField::idle()
     // subsystem is inert, which also saves the work it would otherwise do for nothing.
     // [WOLF GRID GATE 2026-10-17] and what it built goes: it is kept by region HANDLE, which a foreign grid's region can
     // share, so after a hypergrid jump the last Wolf fields would have stayed on that grid's water.
-    if (!WolfGrid::showsWolfRegion())   // [WOLF VISITOR SEES 2026-10-18/] the region underfoot: visitors on a Wolf region too
+    // [BASIC WOLF SEA 2026-10-19] Now on every OpenSim grid (wolfgrid.h showsBasicWolfSea; Frank Hurt, Paul 2026-10-19): the depth
+    // and exposure fields are baked here from the region's OWN terrain and water height (bake), nothing is read from a Wolf
+    // service for them, and without them the swell either stays flat (the round-15 wait in lldrawpoolwater.cpp) or runs as open
+    // sea up every river. The painted zones baked alongside stay Wolf only: WolfWaveZones::idle / fill read nothing off a Wolf
+    // region (wolfwavezones.cpp), so off Wolf the zone texture is uniform open sea and there is no surf train.
+    // The handle reuse above is covered per region instead: a field counts only for the region it was baked for (mRegionID).
+    if (!WolfGrid::showsBasicWolfSea())
     {
         if (!mFields.empty())
         {
@@ -516,9 +523,11 @@ void WolfWaterField::idle()
         // <WolfViewer 2026-10-02> No timed re-bake: every input now has its own trigger — this
         // region's and its neighbours' terrain (the stamp), the water level, the window, and the
         // painted zones (WolfWaveZones calls invalidate()).
-        const bool stale = !f.mReady || terrain_changed
+        // [BASIC WOLF SEA 2026-10-19/] a field baked for another region of the same handle (a hypergrid jump) is no field at all
+        const bool other_region = f.mReady && f.mRegionID != regionp->getRegionID();
+        const bool stale = !f.mReady || other_region || terrain_changed
                         || f.mWaterLevel != regionp->getWaterHeight() || moved;
-        if (stale && (!f.mReady || now - f.mBakedAt >= MIN_REBAKE_SECS))
+        if (stale && (!f.mReady || other_region || now - f.mBakedAt >= MIN_REBAKE_SECS))
         {
             pick = regionp;
             f.mStamp = stamp;
@@ -610,6 +619,7 @@ void WolfWaterField::bake(LLViewerRegion* regionp, Field& f)
     fieldWindow(regionp, f.mReady ? &f : nullptr, ox, oy, sx, sy);
     f.mX0 = ox;
     f.mY0 = oy;
+    f.mRegionID = regionp->getRegionID();   // [BASIC WOLF SEA 2026-10-19/] see get()
     const F32 water_level = regionp->getWaterHeight();
     const LLSurface& land = regionp->getLand();
 

@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "llmath.h"
+#include "lluuid.h"   // [BASIC WOLF SEA 2026-10-19/] Field::mRegionID
 
 class LLViewerRegion;
 
@@ -71,6 +72,7 @@ public:
         F64 mPendingSince = 0.0;
         F64 mBakedAt = 0.0;
         bool mReady = false;
+        LLUUID mRegionID;   // [BASIC WOLF SEA 2026-10-19/] the region baked for (handles repeat across grids; WolfWaterField::get)
         // CPU copies of the two bakes, for the boat rocker's wave sampler (wolfboatrock.cpp
         // mirrors the vertex stage on the CPU and needs the same fields). RES*RES*4 and
         // ERES*ERES floats — 1.3 MB per region.

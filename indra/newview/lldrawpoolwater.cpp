@@ -248,7 +248,10 @@ void LLDrawPoolWater::renderPostDeferred(S32 pass)
         // on waveAmplitude. Off Wolf they are neither updated nor bound.
         // [WOLF VISITOR SEES 2026-10-18] "Wolf" here is the region underfoot (WolfGrid::showsWolfRegion): a hypergrid visitor on
         // a Wolf region gets the Wolf sea too (Frank Hurt, w70: a flat Firestorm sea on a Wolf region); still none off Wolf.
-        if (!gCubeSnapshot && !gPipeline.mHeroProbeManager.isMirrorPass() && !mBasicWater && WolfGrid::showsWolfRegion())
+        // [BASIC WOLF SEA 2026-10-19] ...and on every other OpenSim grid, the basic wind-driven sea (wolfgrid.h showsBasicWolfSea):
+        // the cascades and the wake are computed here from mSeaState (the region's EEP water or the manual height), nothing
+        // from a Wolf service. Frank Hurt's report; Paul 2026-10-19. Never on Second Life.
+        if (!gCubeSnapshot && !gPipeline.mHeroProbeManager.isMirrorPass() && !mBasicWater && WolfGrid::showsBasicWolfSea())
         {
             if (fft_on)
             {
@@ -424,7 +427,7 @@ void LLDrawPoolWater::renderPostDeferred(S32 pass)
             mSurfLength = surf_len;
         }
         WolfOceanFFT& fft = WolfOceanFFT::instance();
-        if (fft.isReady() && WolfGrid::showsWolfRegion())   // [WOLF GRID GATE 2026-10-17/] see the update above
+        if (fft.isReady() && WolfGrid::showsBasicWolfSea())   // [WOLF GRID GATE 2026-10-17/] see the update above [BASIC WOLF SEA 2026-10-19/] updated on every OpenSim grid now
         {
             shader->bindTexture(LLShaderMgr::WOLF_FFT_DISP0, fft.finalTarget(0), false, LLTexUnit::TFO_TRILINEAR, 0);
             shader->bindTexture(LLShaderMgr::WOLF_FFT_DERIV0, fft.finalTarget(0), false, LLTexUnit::TFO_TRILINEAR, 1);
@@ -587,7 +590,7 @@ void LLDrawPoolWater::pushWaterPlanes(int pass)
             // The same one line therefore switches the whole feature off cleanly.
             const bool no_swell = water->getWaterfall() > 0.f || water->getStreamFlow() > 0.f || water->getStillWater()
                                || !LLViewerShaderMgr::wolfWaterFull()
-                               || !WolfGrid::showsWolfRegion()   // [WOLF VISITOR SEES 2026-10-18/] hypergrid visitors on a Wolf region too (wolfgrid.h)
+                               || !WolfGrid::showsBasicWolfSea()   // [BASIC WOLF SEA 2026-10-19/] every OpenSim grid, never Second Life (wolfgrid.h; the 09-22 note above)
                                || mBasicWater;   // <WolfViewer 2026-10-07/> basic water from up high
             cur_shader->uniform1f(LLShaderMgr::WATER_WAVE_AMPLITUDE, no_swell ? 0.f : amplitude);
 
@@ -700,7 +703,7 @@ void LLDrawPoolWater::pushWaterPlanes(int pass)
                 cur_shader->uniform1f(s_surf_path_k0, 0.f);   // <WolfViewer 2026-09-21/>
             }
             const bool wake_here = own_plane && rgn == gAgent.getRegion() && WolfWakeField::instance().isReady()
-                                && WolfGrid::showsWolfRegion();   // [WOLF GRID GATE 2026-10-17/] as no_swell
+                                && WolfGrid::showsBasicWolfSea();   // [WOLF GRID GATE 2026-10-17/] as no_swell [BASIC WOLF SEA 2026-10-19/]
             cur_shader->uniform1f(s_wake_ready, wake_here ? 1.f : 0.f);
             // </WolfViewer>
             static LLStaticHashedString s_wolf_waterfall("wolfWaterfall");

@@ -193,6 +193,25 @@ namespace WolfGrid
         return isOnWolfTerritories() || isOnWolfRegion();
     }
 
+    // [BASIC WOLF SEA 2026-10-19] The basic, wind-driven Wolf sea everywhere on OpenSim. Frank Hurt (Discord, w71 Bobby Bat):
+    // waves on Wolf Territories but nowhere else on the hypergrid since w69, whose WOLF GRID GATE (2026-10-17) took the FFT
+    // cascades and the wake off every other grid; he builds his Second Fiddle islands around the swell (land 20-23 m over a
+    // 20 m sea gets wet - his swamps). Paul 2026-10-19: "can we give non wt-users basic wolf water - obviously without
+    // customisation just wind driven".
+    // What it covers is computed here from the region's OWN data: the swell (amplitude from the region's EEP water,
+    // WolfSeaState::fromWater - its wave direction speed is the wind - or the user's manual height), the FFT cascades,
+    // the wake, the caustics drawn from the cascades, the shore depth / exposure field baked from the region's terrain
+    // (wolfwaterfield.cpp) and boats rocking on that sea. What stays on showsWolfRegion: the painted wave zones and their
+    // editor, the surf train and curls they set, natural streams and pools, and every read from a Wolf service.
+    // Never Second Life (Paul 09-22: "someone told me they were using the water stuff on second life, these features are
+    // for wolf territories grid only"): LLGridManager::isInOpenSim is GP_OPENSIM or GP_AURORA (fsgridhandler.cpp:1259),
+    // set from the login URI in updateIsInProductionGrid (fsgridhandler.cpp:1188-1238); any lindenlab.com login is
+    // GP_SLMAIN / GP_SLBETA and GP_NOTSET (no login URI) is neither, so both stay plain Firestorm water.
+    inline bool showsBasicWolfSea()
+    {
+        return showsWolfRegion() || LLGridManager::getInstance()->isInOpenSim();
+    }
+
     // What the region's weather and sky follow: logged in here and on one of our regions, or a
     // visitor on one of our regions. Reading only - a visitor sends no session (see the callers).
     inline bool showsWolfRegionWeather()

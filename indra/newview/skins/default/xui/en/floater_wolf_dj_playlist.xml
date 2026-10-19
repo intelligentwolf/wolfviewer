@@ -7,9 +7,9 @@
  can_close="true"
  can_minimize="true"
  can_resize="true"
- height="462"
+ height="506"
  layout="topleft"
- min_height="362"
+ min_height="406"
  min_width="560"
  name="wolf_dj_playlist"
  help_topic="wolf_dj_playlist"
@@ -38,22 +38,29 @@
     <button follows="left|bottom" height="20" label="Add" layout="topleft" left="10" name="add_files" top="344" width="90" tool_tip="Add the selected songs to the playlist." />
     <button follows="left|bottom" height="20" label="Add folder" layout="topleft" left="104" name="add_folder" top="344" width="100" tool_tip="Add every song in this folder to the playlist." />
 
-    <!-- Right: the playlist and the transport -->
-    <button follows="left|top" height="24" label="|&lt;" layout="topleft" left="324" name="prev" top="22" width="40" tool_tip="Previous song (or back to the start of this one)." />
-    <button follows="left|top" height="24" label="Play" layout="topleft" left="368" name="play" top="22" width="64" tool_tip="Play / pause." />
-    <button follows="left|top" height="24" label="&gt;|" layout="topleft" left="436" name="next" top="22" width="40" tool_tip="Next song." />
-    <button follows="left|top" height="24" label="Stop" layout="topleft" left="480" name="stop" top="22" width="54" />
-    <text follows="left|top|right" font="SansSerifBold" height="16" layout="topleft" left="324" name="now_playing" top="52" width="326" use_ellipses="true">Nothing playing</text>
-    <text follows="left|top|right" height="16" layout="topleft" left="324" name="time_text" top="68" width="326" text_color="LtGray_50" />
+    <!-- Right: which playlist, the transport and the playlist.
+         [WOLF DJ 2026-10-19] Paul: "allow the user to add multiple playlists" (wolffloaterdjplaylist.cpp loadLists). -->
+    <text follows="left|top" height="16" layout="topleft" left="324" name="playlist_label" top="25" width="52">Playlist</text>
+    <combo_box follows="left|top|right" height="22" layout="topleft" left="378" name="playlist_select" top="21" width="214" tool_tip="The playlist the player plays. Switching while a song plays lets that song finish, then plays the new playlist from its first song." />
+    <button follows="top|right" height="22" label="Delete" layout="topleft" left="596" name="playlist_delete" top="21" width="54" tool_tip="Delete this playlist (only the list - your music files are not touched)." />
+    <line_editor follows="left|top|right" height="20" label="New playlist name" layout="topleft" left="324" max_length_bytes="64" name="playlist_name" top="48" width="204" />
+    <button follows="top|right" height="20" label="New" layout="topleft" left="532" name="playlist_new" top="48" width="50" tool_tip="Start a new, empty playlist with the name typed on the left." />
+    <button follows="top|right" height="20" label="Rename" layout="topleft" left="586" name="playlist_rename" top="48" width="64" tool_tip="Give this playlist the name typed on the left." />
+    <button follows="left|top" height="24" label="|&lt;" layout="topleft" left="324" name="prev" top="74" width="40" tool_tip="Previous song (or back to the start of this one)." />
+    <button follows="left|top" height="24" label="Play" layout="topleft" left="368" name="play" top="74" width="64" tool_tip="Play / pause." />
+    <button follows="left|top" height="24" label="&gt;|" layout="topleft" left="436" name="next" top="74" width="40" tool_tip="Next song." />
+    <button follows="left|top" height="24" label="Stop" layout="topleft" left="480" name="stop" top="74" width="54" />
+    <text follows="left|top|right" font="SansSerifBold" height="16" layout="topleft" left="324" name="now_playing" top="102" width="326" use_ellipses="true">Nothing playing</text>
+    <text follows="left|top|right" height="16" layout="topleft" left="324" name="time_text" top="118" width="326" text_color="LtGray_50" />
     <scroll_list
      draw_heading="false"
      follows="all"
-     height="252"
+     height="202"
      layout="topleft"
      left="324"
      multi_select="true"
      name="playlist"
-     top="86"
+     top="136"
      tool_tip="Double-click a song to play it."
      width="326">
         <scroll_list.columns label="" name="mark" width="22" />
@@ -79,4 +86,9 @@
     <button follows="left|bottom" height="22" label="7" layout="topleft" left="252" name="set_jingle_6" top="430" width="26" tool_tip="Put the selected song on jingle pad 7 (it plays from the pads in the mixer). Pick another song to replace it." />
     <button follows="left|bottom" height="22" label="8" layout="topleft" left="280" name="set_jingle_7" top="430" width="26" tool_tip="Put the selected song on jingle pad 8 (it plays from the pads in the mixer). Pick another song to replace it." />
     <text follows="left|right|bottom" height="16" layout="topleft" left="316" name="jingle_note" top="434" width="334" text_color="LtGray_50" use_ellipses="true">Pick a song, then press a pad to put it there.</text>
+    <!-- [WOLF DJ 2026-10-19] Chat control (wolfdjchatcontrol.h). Elisa Porter: start, pause and stop the playlist
+         from chat commands or the DJ's own scripts, for automated shows. -->
+    <check_box follows="left|bottom" height="16" label="Enable Chat Control" layout="topleft" left="10" name="chat_control" top="462" width="200" tool_tip="Let you, and objects you own, run the playlist with chat commands on the channel on the right." />
+    <spinner follows="left|bottom" height="20" label="Command channel" label_width="110" layout="topleft" left="324" name="chat_channel" top="460" width="190" decimal_digits="0" increment="1" min_val="1" max_val="999999" tool_tip="Type /channel play (or pause, stop ...) in nearby chat. Your own scripts send the same line with llOwnerSay." />
+    <text follows="left|right|bottom" height="16" layout="topleft" left="10" name="chat_control_note" top="484" width="640" text_color="LtGray_50" use_ellipses="true" />
 </floater>

@@ -29,6 +29,7 @@
 #include "wolfflight.h"   // <WolfViewer 2026-10-10/> crossing refusals -> go round
 #include "wolfborder.h"   // [BORDER GUARD 2026-10-16/] refused crossings -> the border banner
 #include "wolfdrive.h"    // <WolfViewer 2026-10-11/> the speedboat helm hears its boat's "Speed = N"
+#include "wolfdjchatcontrol.h"   // <WolfViewer 2026-10-19/> Wolf DJ chat control
 #include "wolfsuitcase.h" // <WolfViewer 2026-10-12/> an accepted offer abroad -> look at My Suitcase again
 
 // Linden libraries
@@ -3000,6 +3001,15 @@ void process_chat_from_simulator(LLMessageSystem *msg, void **user_data)
         if (chat.mSourceType == CHAT_SOURCE_OBJECT && WolfDrive::instanceExists())
         {
             WolfDrive::instance().noteObjectChat(from_id, chat.mChatType, mesg);
+        }
+        // </WolfViewer>
+
+        // <WolfViewer 2026-10-19> Wolf DJ chat control (wolfdjchatcontrol.h): "/89 play" said to the DJ by one of
+        // their OWN objects (llOwnerSay / llRegionSayTo) runs the playlist and is not shown.
+        if (chat.mSourceType == CHAT_SOURCE_OBJECT
+            && WolfDJChatControl::onObjectChat(mesg, (U8)chat.mChatType, owner_id))
+        {
+            return;
         }
         // </WolfViewer>
 

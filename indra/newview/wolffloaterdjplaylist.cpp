@@ -17,7 +17,11 @@
 
 #include "llbutton.h"
 #include "llcheckboxctrl.h"
+#include "llcombobox.h"
+#include "lllineeditor.h"
+#include "llnotificationsutil.h"
 #include "llscrolllistctrl.h"
+#include "llspinctrl.h"
 #include "llscrolllistitem.h"
 #include "lltextbox.h"
 #include "llviewercontrol.h"
@@ -84,6 +88,12 @@ bool WolfFloaterDJPlaylist::postBuild()
     mError = getChild<LLTextBox>("error_text");
     mPlay = getChild<LLButton>("play");
     mJingleNote = getChild<LLTextBox>("jingle_note");
+    mLists = getChild<LLComboBox>("playlist_select");
+    mListName = getChild<LLLineEditor>("playlist_name");
+    mLists->setCommitCallback([this](LLUICtrl*, const LLSD&) { selectList(mLists->getValue().asString()); });
+    getChild<LLButton>("playlist_new")->setCommitCallback([this](LLUICtrl*, const LLSD&) { newList(); });
+    getChild<LLButton>("playlist_rename")->setCommitCallback([this](LLUICtrl*, const LLSD&) { renameList(); });
+    getChild<LLButton>("playlist_delete")->setCommitCallback([this](LLUICtrl*, const LLSD&) { deleteList(); });
 
     mBrowser->setDoubleClickCallback([this]() { onBrowserDoubleClick(); });
     mPlaylist->setDoubleClickCallback([this]()
@@ -137,7 +147,32 @@ bool WolfFloaterDJPlaylist::postBuild()
     {
         gSavedSettings.setBOOL("WolfDJPlaylistTitles", c->getValue().asBoolean());
     });
+    // [WOLF DJ 2026-10-19] chat control (wolfdjchatcontrol.h)
+    LLCheckBoxCtrl* chat = getChild<LLCheckBoxCtrl>("chat_control");
+    chat->setValue(gSavedSettings.getBOOL("WolfDJChatControl"));
+    chat->setCommitCallback([this](LLUICtrl* c, const LLSD&)
+    {
+        gSavedSettings.setBOOL("WolfDJChatControl", c->getValue().asBoolean());
+        refreshChatControlNote();
+    });
+    LLSpinCtrl* channel = getChild<LLSpinCtrl>("chat_channel");
+    channel->setValue(gSavedSettings.getS32("WolfDJChatChannel"));
+    channel->setCommitCallback([this](LLUICtrl* c, const LLSD&)
+    {
+        gSavedSettings.setS32("WolfDJChatChannel", llclamp(c->getValue().asInteger(), 1, 999999));
+        refreshChatControlNote();
+    });
+    refreshChatControlNote();
     return true;
+}
+
+void WolfFloaterDJPlaylist::refreshChatControlNote()
+{
+    const S32 channel = gSavedSettings.getS32("WolfDJChatChannel");
+    getChild<LLUICtrl>("chat_channel")->setEnabled(gSavedSettings.getBOOL("WolfDJChatControl"));
+    getChild<LLTextBox>("chat_control_note")->setText(gSavedSettings.getBOOL("WolfDJChatControl")
+        ? llformat("Listening on /%d to you and your own objects (llOwnerSay \"/%d play\"): play, play <n>, pause, resume, stop, next, prev, jingle <1-8>, playlist <name>, status.", channel, channel)
+        : std::string("Chat Control is off. The playlist and the broadcast work as usual."));
 }
 
 void WolfFloaterDJPlaylist::onOpen(const LLSD& key)
@@ -145,6 +180,7 @@ void WolfFloaterDJPlaylist::onOpen(const LLSD& key)
     LLFloater::onOpen(key);
     getChild<LLCheckBoxCtrl>("send_titles")->set(gSavedSettings.getBOOL("WolfDJPlaylistTitles"));
     WolfDJPlayer::instance().loadSaved();      // the playlist saved last time
+    loadLists();
     std::string folder = gSavedSettings.getString("WolfDJPlaylistFolder");
     std::error_code ec;
     if (folder.empty() || !fs::is_directory(to_path(folder), ec))
@@ -235,11 +271,11 @@ void WolfFloaterDJPlaylist::setJinglePad(int pad)
     }
     if (path.empty())
     {
-        mError->setText(llformat("Pick a song first (on the left, or in the playlist), then press pad %d.", pad + 1));
+        showError(llformat("Pick a song first (on the left, or in the playlist), then press pad %d.", pad + 1));
         return;
     }
     WolfDJJingles::instance().setPad(pad, path);
-    mError->setText(std::string());
+    showError(std::string());
     mJingleNote->setText(llformat("Pad %d: %s", pad + 1, WolfDJJingles::padLabel(path).c_str()));
 }
 
@@ -277,9 +313,140 @@ void WolfFloaterDJPlaylist::savePlaylist(const std::vector<std::string>& files)
     WolfDJPlayer::instance().setFiles(files);
     LLSD arr = LLSD::emptyArray();
     for (const std::string& f : files) arr.append(f);
-    gSavedSettings.setLLSD("WolfDJPlaylist", arr);
+    gSavedSettings.setLLSD("WolfDJPlaylist", arr);     // the playing list, read by WolfDJPlayer::loadSaved
+    if (!mCurrentList.empty())
+    {
+        mPlaylists[mCurrentList] = arr;
+        gSavedSettings.setLLSD("WolfDJPlaylists", mPlaylists);
+    }
+    showError(std::string());
     mShownCurrent = -2;
     rebuildPlaylist();
+}
+
+// [WOLF DJ 2026-10-19] Named playlists. The first time, the one playlist there was (WolfDJPlaylist)
+// becomes "Playlist 1", so nobody loses their list.
+void WolfFloaterDJPlaylist::loadLists()
+{
+    mPlaylists = gSavedSettings.getLLSD("WolfDJPlaylists");
+    if (!mPlaylists.isMap() || mPlaylists.size() == 0)
+    {
+        mPlaylists = LLSD::emptyMap();
+        const LLSD old = gSavedSettings.getLLSD("WolfDJPlaylist");
+        mPlaylists["Playlist 1"] = old.isArray() ? old : LLSD::emptyArray();
+        gSavedSettings.setLLSD("WolfDJPlaylists", mPlaylists);
+    }
+    mCurrentList = gSavedSettings.getString("WolfDJPlaylistCurrent");
+    if (!mPlaylists.has(mCurrentList))
+    {
+        mCurrentList = mPlaylists.beginMap()->first;
+        gSavedSettings.setString("WolfDJPlaylistCurrent", mCurrentList);
+    }
+    refreshListCombo();
+}
+
+void WolfFloaterDJPlaylist::refreshListCombo()
+{
+    mLists->removeall();
+    for (LLSD::map_const_iterator it = mPlaylists.beginMap(); it != mPlaylists.endMap(); ++it)
+    {
+        const S32 n = it->second.isArray() ? (S32)it->second.size() : 0;
+        mLists->add(llformat("%s  (%d)", it->first.c_str(), n), LLSD(it->first));
+    }
+    mLists->selectByValue(LLSD(mCurrentList));
+    getChild<LLButton>("playlist_delete")->setEnabled(mPlaylists.size() > 1);
+}
+
+void WolfFloaterDJPlaylist::selectList(const std::string& name)
+{
+    if (name.empty() || !mPlaylists.has(name)) return;
+    mCurrentList = name;
+    gSavedSettings.setString("WolfDJPlaylistCurrent", name);
+    std::vector<std::string> files;
+    for (const LLSD& f : llsd::inArray(mPlaylists[name]))
+    {
+        if (f.isString()) files.push_back(f.asString());
+    }
+    savePlaylist(files);        // the player takes it; a song playing now finishes first
+    refreshListCombo();
+}
+
+void WolfFloaterDJPlaylist::newList()
+{
+    std::string name = mListName->getText();
+    LLStringUtil::trim(name);
+    if (name.empty())
+    {
+        for (int i = (int)mPlaylists.size() + 1; ; ++i)
+        {
+            name = llformat("Playlist %d", i);
+            if (!mPlaylists.has(name)) break;
+        }
+    }
+    if (mPlaylists.has(name))
+    {
+        showError(llformat("There is already a playlist called \"%s\".", name.c_str()));
+        return;
+    }
+    mPlaylists[name] = LLSD::emptyArray();
+    gSavedSettings.setLLSD("WolfDJPlaylists", mPlaylists);
+    mListName->clear();
+    selectList(name);
+}
+
+void WolfFloaterDJPlaylist::renameList()
+{
+    std::string name = mListName->getText();
+    LLStringUtil::trim(name);
+    if (name.empty())
+    {
+        showError(std::string("Type the new name in the box first, then press Rename."));
+        return;
+    }
+    if (name == mCurrentList) return;
+    if (mPlaylists.has(name))
+    {
+        showError(llformat("There is already a playlist called \"%s\".", name.c_str()));
+        return;
+    }
+    mPlaylists[name] = mPlaylists[mCurrentList];
+    mPlaylists.erase(mCurrentList);
+    mCurrentList = name;
+    gSavedSettings.setLLSD("WolfDJPlaylists", mPlaylists);
+    gSavedSettings.setString("WolfDJPlaylistCurrent", name);
+    mListName->clear();
+    showError(std::string());
+    refreshListCombo();
+}
+
+void WolfFloaterDJPlaylist::deleteList()
+{
+    if (mPlaylists.size() <= 1)
+    {
+        showError(std::string("This is your only playlist - use Clear to empty it."));
+        return;
+    }
+    const std::string doomed = mCurrentList;
+    LLSD args;
+    args["MESSAGE"] = llformat("Delete the playlist \"%s\"? Only the list goes - your music files are not touched.", doomed.c_str());
+    // The window may be closed before the question is answered: reach it through its handle (as wolffloaterdj.cpp does).
+    LLHandle<LLFloater> h = getHandle();
+    LLNotificationsUtil::add("GenericAlertYesCancel", args, LLSD(), [h, doomed](const LLSD& notification, const LLSD& response)
+    {
+        if (LLNotificationsUtil::getSelectedOption(notification, response) != 0) return false;
+        WolfFloaterDJPlaylist* f = static_cast<WolfFloaterDJPlaylist*>(h.get());
+        if (!f || !f->mPlaylists.has(doomed) || f->mPlaylists.size() <= 1) return false;
+        f->mPlaylists.erase(doomed);
+        gSavedSettings.setLLSD("WolfDJPlaylists", f->mPlaylists);
+        if (f->mCurrentList == doomed) f->selectList(f->mPlaylists.beginMap()->first);
+        else f->refreshListCombo();
+        return false;
+    });
+}
+
+void WolfFloaterDJPlaylist::showError(const std::string& text)
+{
+    mUiError = text;
 }
 
 void WolfFloaterDJPlaylist::moveSelected(int dir)
@@ -374,6 +541,7 @@ void WolfFloaterDJPlaylist::draw()
         mTime->setText(std::string());
     }
     mPlay->setLabel(player.isPlaying() && !player.isPaused() ? std::string("Pause") : std::string("Play"));
-    mError->setText(player.lastError());
+    // [WOLF DJ 2026-10-19] This window's own messages first (they used to be overwritten here on the next frame).
+    mError->setText(mUiError.empty() ? player.lastError() : mUiError);
     LLFloater::draw();
 }

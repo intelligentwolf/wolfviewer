@@ -6732,6 +6732,50 @@
     <key>Value</key>
     <array />
   </map>
+  <key>WolfDJPlaylists</key>
+  <map>
+    <key>Comment</key>
+    <string>Wolf DJ named playlists: playlist name -> its files, in order. The one in WolfDJPlaylistCurrent is the one playing (also kept in WolfDJPlaylist).</string>
+    <key>Persist</key>
+    <integer>1</integer>
+    <key>Type</key>
+    <string>LLSD</string>
+    <key>Value</key>
+    <map />
+  </map>
+  <key>WolfDJChatControl</key>
+  <map>
+    <key>Comment</key>
+    <string>Wolf DJ chat control: the DJ (typing "/channel play") and the DJ's own objects (llOwnerSay "/channel play") can run the playlist. Channel in WolfDJChatChannel.</string>
+    <key>Persist</key>
+    <integer>1</integer>
+    <key>Type</key>
+    <string>Boolean</string>
+    <key>Value</key>
+    <integer>0</integer>
+  </map>
+  <key>WolfDJChatChannel</key>
+  <map>
+    <key>Comment</key>
+    <string>Wolf DJ chat control: the chat channel the playlist commands are on (1 to 999999).</string>
+    <key>Persist</key>
+    <integer>1</integer>
+    <key>Type</key>
+    <string>S32</string>
+    <key>Value</key>
+    <integer>89</integer>
+  </map>
+  <key>WolfDJPlaylistCurrent</key>
+  <map>
+    <key>Comment</key>
+    <string>Wolf DJ: the name of the playlist picked in the playlist window (a key of WolfDJPlaylists).</string>
+    <key>Persist</key>
+    <integer>1</integer>
+    <key>Type</key>
+    <string>String</string>
+    <key>Value</key>
+    <string />
+  </map>
   <key>JoystickDeviceUUID</key>
   <map>
     <key>Comment</key>

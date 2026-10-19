@@ -927,6 +927,7 @@ set(viewer_SOURCE_FILES
     wolfcamerafx.cpp
     wolffx.cpp
     wolfdjdesk.cpp
+    wolfdjchatcontrol.cpp
     wolfdjplayer.cpp
     wolffloaterdj.cpp
     wolffloaterdjplaylist.cpp
@@ -1888,6 +1889,7 @@ set(viewer_HEADER_FILES
     wolfcamerafx.h
     wolffx.h
     wolfdjdesk.h
+    wolfdjchatcontrol.h
     wolfdjplayer.h
     wolffloaterdj.h
     wolffloaterdjplaylist.h

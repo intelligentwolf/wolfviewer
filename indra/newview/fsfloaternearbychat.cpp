@@ -85,6 +85,7 @@
 #include "NACLantispam.h"
 // </FS:TS> FIRE-23123
 #include "lfsimfeaturehandler.h"
+#include "wolfdjchatcontrol.h"    // [WOLF DJ 2026-10-19] chat control
 
 S32 FSFloaterNearbyChat::sLastSpecialChatChannel = 0;
 
@@ -944,6 +945,7 @@ void FSFloaterNearbyChat::sendChat( EChatType type )
 
             if (!utf8_revised_text.empty() && cmd_line_chat(utf8_revised_text, type))
             {
+                WolfDJChatControl::TypedChat typed;     // [WOLF DJ 2026-10-19] this is the DJ's own typing
                 // Chat with animation
                 sendChatFromViewer(utf8_revised_text, type, gSavedSettings.getBOOL("PlayChatAnim"));
             }

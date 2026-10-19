@@ -4024,7 +4024,12 @@ void LLVoiceWebRTCSpatialConnection::wolfRequestMove(const LLUUID& region_id, S3
             std::string url = (regionp && regionp->capabilitiesReceived()) ? regionp->getCapability("ProvisionVoiceAccountRequest")
                                                                             : std::string();
             // the session id the server gave us is the whole key; without it there is nothing to move
-            bool have_session = connection->mViewerSession.isString() && !connection->mViewerSession.asString().empty();
+            // [WOLF VOICE 2026-10-19] wolfvoice hands out a plain uuid, which the provision answer above stores as an LLSD
+            // UUID - so the old isString() test was false every time and no wolf_move was ever sent (every crossing fell
+            // back to make-before-break, 10-16 finding). Either form counts; the relay reads it with OSD.AsString()
+            // (WebRtcVoiceServiceModule.cs ProvisionVoiceAccountRequest), the same lowercase uuid wolfvoice issued.
+            const LLSD& session = connection->mViewerSession;
+            bool have_session = session.isUUID() ? session.asUUID().notNull() : (session.isString() && !session.asString().empty());
             // [WOLF GRID GATE 2026-10-17] wolfMoveAllowed() answers for the region the agent WAS on until the new one's
             // features arrive, so right after a hypergrid teleport the move (with our voice session) could go to a foreign
             // region's cap. The region it is sent to must itself say it is Wolf (its own OpenSimExtras GridURL, as
@@ -4065,6 +4070,13 @@ void LLVoiceWebRTCSpatialConnection::wolfRequestMove(const LLUUID& region_id, S3
                 moved = status && result.has("wolf_moved") && result["wolf_moved"].asBoolean() && !result.has("error");
                 LL_INFOS("Voice") << "wolf_move to region " << region_id << " parcel " << parcel_local_id << ": "
                                   << (moved ? std::string("moved") : (status ? std::string("refused") : status.toString())) << LL_ENDL;
+            }
+            else if (!LLWebRTCVoiceClient::isShuttingDown())
+            {
+                // [WOLF VOICE 2026-10-19] say why no move was sent, so a crossing that reconnects the stock way is explained
+                LL_INFOS("Voice") << "wolf_move to region " << region_id << " not sent:"
+                                  << (url.empty() ? " no voice cap yet" : "") << (!have_session ? " no voice session" : "")
+                                  << (!wolf_target ? " not a Wolf region" : "") << LL_ENDL;
             }
             connection->mOutstandingRequests--;
             connection->mWolfMoving = false;

@@ -48,6 +48,7 @@
 #include "llworld.h"
 #include "rlvactions.h"
 #include "rlvhandler.h"
+#include "wolfdjchatcontrol.h"    // [WOLF DJ 2026-10-19] chat control
 
 constexpr U32 NAME_PREDICTION_MINIMUM_LENGTH = 3;
 
@@ -147,6 +148,14 @@ void send_chat_from_viewer(std::string utf8_out_text, EChatType type, S32 channe
                 }
             }
         }
+    }
+
+    // [WOLF DJ 2026-10-19] Wolf DJ chat control (wolfdjchatcontrol.h): the DJ's own TYPED "/89 play" (only inside
+    // a TypedChat scope - not app/chat links or gestures) runs the playlist here, after RLV has had its say; the
+    // line is still sent, so the DJ's scripts on 89 hear it.
+    if ((CHAT_TYPE_WHISPER == type) || (CHAT_TYPE_NORMAL == type) || (CHAT_TYPE_SHOUT == type))
+    {
+        WolfDJChatControl::onOwnChat(utf8_out_text, channel);
     }
 
     size_t split = MAX_MSG_BUF_SIZE - 1;
@@ -293,6 +302,7 @@ void FSNearbyChat::sendChat(LLWString text, EChatType type)
 
         if (!utf8_revised_text.empty() && cmd_line_chat(utf8_revised_text, type))
         {
+            WolfDJChatControl::TypedChat typed;     // [WOLF DJ 2026-10-19] this is the DJ's own typing
             // Chat with animation
             sendChatFromViewer(utf8_revised_text, type, gSavedSettings.getBOOL("PlayChatAnim"));
         }

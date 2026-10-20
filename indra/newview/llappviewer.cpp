@@ -99,6 +99,7 @@
 #include "wolffx.h"   // <WolfViewer 2026-10-10/>
 #include "wolfspanscreens.h"   // <WolfViewer 2026-10-10/>
 #include "wolfaurora.h"   // <WolfViewer 2026-10-15/> WolfForceAurora: WolfAurora::idle
+#include "wolfswim.h"    // [WOLF SWIM 2026-10-20/] WolfSwim::beforeAgentUpdate
 #include "llviewerdisplay.h"
 #include "llviewermedia.h"
 #include "llviewerparcelaskplay.h"
@@ -5954,6 +5955,11 @@ void LLAppViewer::idle()
             gAgent.autoPilot(&yaw);
         }
 
+        // [WOLF SWIM 2026-10-20] swimming: its fly state, the slow STOP flag and the keys it takes away (no swimming up out
+        // of the water, no landing on the bottom) must be in place before this frame's AgentUpdate, after the key handlers
+        // set theirs (wolfswim.h)
+        WolfSwim::beforeAgentUpdate();
+        // [/WOLF SWIM]
         send_agent_update(false);
 
         // After calling send_agent_update() in the mainloop we always clear

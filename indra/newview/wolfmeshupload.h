@@ -132,6 +132,9 @@ namespace WolfMeshUpload
 
         const std::vector<Prim>& prims() const { return mPrims; }
         const LLVector3& overallScale() const { return mScale; }
+        /** [BLUEPRINT LOOK 2026-10-20] The triangles the file had when finalise() simplified it, 0 when it was not
+         *  simplified (read by the floater's spec sheet; summary() says the same in words). */
+        size_t simplifiedFromTris() const { return mSimplifiedFromTris; }
 
     private:
         bool loadObj(const std::string& path, std::string& error);

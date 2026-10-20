@@ -318,6 +318,14 @@ public:
     // Methods used in loading and saving toolbar settings
     void setButtonType(LLToolBarEnums::ButtonType button_type);
     LLToolBarEnums::ButtonType getButtonType() const { return mButtonType; }
+    // <WolfViewer 2026-10-20> Single bar (Paul: "add a single bar mode for the toolbar at the bottom of the
+    // screen"). A DISPLAY override only: while it is on the bar is drawn as one row of icon-only buttons,
+    // whatever its row count and saved button type. mButtonType, the command list, the alignment and the
+    // layout style are not touched, so getButtonType() - which saveToolbars() writes - still returns the
+    // user's own choice, and turning it off draws exactly what they had (Paul: "DO NOT CHANGE PEOPLES
+    // BUTTONS"). The viewer drives it from WolfViewerToolbarSingleBar (LLToolBarView::draw).
+    void setWolfSingleRow(bool single_row);
+    // </WolfViewer>
     command_id_list_t& getCommandsList() { return mButtonCommands; }
     void clearCommandsList();
 
@@ -358,6 +366,12 @@ private:
     // <FS:Ansariel> FIRE-5137: Fix fixed size button layout
     const S32                       mMaxRows;
     const S32                       mRows;      // <WolfViewer> exact row count, 0 = off
+    bool                            mWolfSingleRow = false; // <WolfViewer 2026-10-20> single bar display override
+    // <WolfViewer 2026-10-20> the button type the buttons are BUILT with: icons only in single bar, else mButtonType
+    LLToolBarEnums::ButtonType displayButtonType() const
+    {
+        return mWolfSingleRow ? LLToolBarEnums::BTNTYPE_ICONS_ONLY : mButtonType;
+    }
 
     // drag and drop state
     tool_startdrag_callback_t       mStartDragItemCallback;

@@ -581,6 +581,25 @@ void LLToolBar::setButtonType(LLToolBarEnums::ButtonType button_type)
     }
 }
 
+// <WolfViewer 2026-10-20> Single bar: see lltoolbar.h. The buttons are rebuilt because the button type they
+// are built with changes (createButton reads displayButtonType()); mButtonType itself is left alone, so the
+// saved layout is not changed by switching the mode on or off.
+void LLToolBar::setWolfSingleRow(bool single_row)
+{
+    if (mWolfSingleRow == single_row)
+    {
+        return;
+    }
+    const bool regenerate_buttons = (displayButtonType() != (single_row ? LLToolBarEnums::BTNTYPE_ICONS_ONLY : mButtonType));
+    mWolfSingleRow = single_row;
+    if (regenerate_buttons)
+    {
+        createButtons();
+    }
+    mNeedsLayout = true;
+}
+// </WolfViewer>
+
 void LLToolBar::resizeButtonsInRow(std::vector<LLToolBarButton*>& buttons_in_row, S32 max_row_girth)
 {
     // make buttons in current row all same girth
@@ -783,7 +802,9 @@ void LLToolBar::updateLayoutAsNeeded()
     // budget of 8 gives three rows, not two). Buttons keep their natural widths, so a row is
     // only as wide as what is on it.
     S32 buttons_per_row = 0;
-    if (mRows > 1 && orientation == LLLayoutStack::HORIZONTAL && !mButtons.empty())
+    // [2026-10-20] ...but not in single bar (setWolfSingleRow): one row, wrapping only on width like stock, so a
+    // window too narrow for every button gets a second row rather than buttons off the edge of the screen.
+    if (mRows > 1 && !mWolfSingleRow && orientation == LLLayoutStack::HORIZONTAL && !mButtons.empty())
     {
         buttons_per_row = llceil((F32)mButtons.size() / (F32)mRows);
     }
@@ -838,9 +859,11 @@ void LLToolBar::updateLayoutAsNeeded()
         }
 
         S32 total_button_width = static_cast<S32>(mButtons.size()) * equalized_width + (static_cast<S32>(mButtons.size()) + 1) * mPadBetween;
-        if (mMaxRows > 0 && orientation == LLLayoutStack::HORIZONTAL && total_button_width > full_screen_width)
+        // <WolfViewer 2026-10-20> single bar: the fixed-size buttons shrink to share ONE row (max_rows 1)
+        const S32 max_rows = (mWolfSingleRow && mMaxRows > 0) ? 1 : mMaxRows;
+        if (max_rows > 0 && orientation == LLLayoutStack::HORIZONTAL && total_button_width > full_screen_width)
         {
-            S32 buttons_per_row = llceil((F32)mButtons.size() / (F32)mMaxRows);
+            S32 buttons_per_row = llceil((F32)mButtons.size() / (F32)max_rows);
             equalized_width = (full_screen_width - mPadBetween * (buttons_per_row + 1)) / buttons_per_row;
         }
     }
@@ -1240,13 +1263,14 @@ LLToolBarButton* LLToolBar::createButton(const LLCommandId& id)
 
     // <FS:Zi> Do not add an icon if we are using text only buttons
     // button_p.image_overlay = LLUI::getUIImage(commandp->icon());
-    if (mButtonType != BTNTYPE_TEXT_ONLY)
+    // <WolfViewer 2026-10-20> displayButtonType(): icons only in single bar, else mButtonType (lltoolbar.h)
+    if (displayButtonType() != BTNTYPE_TEXT_ONLY)
     {
         button_p.image_overlay = LLUI::getUIImage(commandp->icon());
     }
     // </FS:Zi>
     button_p.button_flash_enable = commandp->isFlashingAllowed();
-    button_p.overwriteFrom(mButtonParams[mButtonType]);
+    button_p.overwriteFrom(mButtonParams[displayButtonType()]);   // <WolfViewer 2026-10-20> was mButtonType
     LLToolBarButton* button = LLUICtrlFactory::create<LLToolBarButton>(button_p);
 
     if (!mReadOnly)

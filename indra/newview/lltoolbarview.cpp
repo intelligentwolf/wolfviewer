@@ -264,6 +264,76 @@ S32 LLToolBarView::removeCommand(const LLCommandId& commandId, int& rank)
     return command_location;
 }
 
+// <WolfViewer 2026-10-20> Paul: "DO NOT CHANGE PEOPLES BUTTONS they should be saved i'm getting complaints from people
+// the buttons are all moved around". The Wolf-only buttons used to be removed off Wolf Territories and put back by rank,
+// each gate on its own: a rank taken while another gated button was missing pointed somewhere else once it was back, three
+// were put back at the END of the bar (loadToolbars), and saveToolbars (also at exit) wrote the stripped bar, so every trip
+// off Wolf moved buttons. Now one gate here: a button is remembered by its neighbours and saved in its place.
+
+// Where a gated button goes in `list`: after the last of the buttons that were before it, else before the first of those
+// that were after it, else at its old rank (or the end).
+// static
+size_t LLToolBarView::wolfGatedIndex(const std::vector<LLCommandId>& list, const WolfGated& g)
+{
+    for (size_t i = list.size(); i-- > 0;)
+    {
+        if (std::find(g.before.begin(), g.before.end(), list[i].uuid()) != g.before.end()) return i + 1;
+    }
+    for (size_t i = 0; i < list.size(); ++i)
+    {
+        if (std::find(g.after.begin(), g.after.end(), list[i].uuid()) != g.after.end()) return i;
+    }
+    return (g.rank >= 0 && (size_t)g.rank < list.size()) ? (size_t)g.rank : list.size();
+}
+
+void LLToolBarView::wolfWithGated(S32 toolbar, std::vector<LLCommandId>& list) const
+{
+    // one pass per gated button: each anchors on the buttons (shown or already put back) next to it
+    for (const auto& it : mWolfGated)
+    {
+        if (it.second.second.toolbar != toolbar) continue;
+        if (std::find(list.begin(), list.end(), it.second.first) != list.end()) continue;
+        list.insert(list.begin() + wolfGatedIndex(list, it.second.second), it.second.first);
+    }
+}
+
+void LLToolBarView::setCommandGated(const LLCommandId& commandId, bool gated)
+{
+    const auto found = mWolfGated.find(commandId.uuid());
+    if (gated)
+    {
+        const S32 where = hasCommand(commandId);
+        if (where == LLToolBarEnums::TOOLBAR_NONE || !mToolbars[where]) return;   // not on a toolbar (or already gated)
+        // its neighbours in the FULL layout - the bar as shown plus the buttons gated earlier, in their places - so two
+        // gated side by side come back in their order whichever comes back first
+        const command_id_list_t& cur = mToolbars[where]->getCommandsList();
+        std::vector<LLCommandId> full(cur.begin(), cur.end());
+        wolfWithGated(where, full);
+        WolfGated g;
+        g.toolbar = where;
+        bool seen = false;
+        int rank = 0;
+        for (const LLCommandId& c : full)
+        {
+            if (c == commandId) { seen = true; g.rank = rank; continue; }
+            (seen ? g.after : g.before).push_back(c.uuid());
+            ++rank;
+        }
+        mToolbars[where]->removeCommand(commandId);
+        mWolfGated.insert_or_assign(commandId.uuid(), std::make_pair(commandId, g));   // LLCommandId has no default constructor
+        return;
+    }
+    if (found == mWolfGated.end()) return;
+    const WolfGated g = found->second.second;
+    mWolfGated.erase(found);
+    if (hasCommand(commandId) != LLToolBarEnums::TOOLBAR_NONE) return;            // the person put it back themselves
+    if (g.toolbar < LLToolBarEnums::TOOLBAR_FIRST || g.toolbar > LLToolBarEnums::TOOLBAR_LAST || !mToolbars[g.toolbar]) return;
+    const command_id_list_t& cur = mToolbars[g.toolbar]->getCommandsList();
+    const std::vector<LLCommandId> list(cur.begin(), cur.end());
+    mToolbars[g.toolbar]->addCommand(commandId, (int)wolfGatedIndex(list, g));
+}
+// </WolfViewer>
+
 S32 LLToolBarView::enableCommand(const LLCommandId& commandId, bool enabled)
 {
     S32 command_location = hasCommand(commandId);
@@ -375,6 +445,7 @@ bool LLToolBarView::loadToolbars(bool force_default)
         return loadToolbars(true);
     }
 
+    mWolfGated.clear();   // <WolfViewer 2026-10-20/> a fresh layout: the grid gates gate it again within a second
     // Clear the toolbars now before adding the loaded commands and settings
     for (S32 i = LLToolBarEnums::TOOLBAR_FIRST; i <= LLToolBarEnums::TOOLBAR_LAST; i++)
     {
@@ -498,23 +569,19 @@ bool LLToolBarView::loadToolbars(bool force_default)
         // layout is not saved here, so they come back on the next Wolf Territories login —
         // the flag is cleared so that login re-adds them even if a save on this grid dropped
         // them from the per-account file).
+        // <WolfViewer 2026-10-20> gated, not removed: they stay in the saved layout in their places (setCommandGated), and
+        // the "added once" flag is left alone - clearing it put them back at the END of the bar on the next Wolf login
         bool removed = false;
         for (const char* name : { "wolf_sharescreen", "wolf_readaloud", "wolf_dictate" })
         {
             const LLCommandId id(name);
-            for (S32 i = LLToolBarEnums::TOOLBAR_FIRST; i <= LLToolBarEnums::TOOLBAR_LAST; i++)
-            {
-                if (mToolbars[i] && mToolbars[i]->hasCommand(id))
-                {
-                    mToolbars[i]->removeCommand(id);
-                    removed = true;
-                }
-            }
+            if (hasCommand(id) == LLToolBarEnums::TOOLBAR_NONE) continue;
+            setCommandGated(id, true);
+            removed = true;
         }
         if (removed)
         {
-            gSavedSettings.setBOOL("WolfViewerToolbarButtonsAdded", false);
-            LL_INFOS() << "WolfViewer: not on Wolf Territories, the Wolf Territories buttons are hidden" << LL_ENDL;
+            LL_INFOS() << "WolfViewer: not on Wolf Territories, the Wolf Territories buttons are hidden (kept in the layout)" << LL_ENDL;
         }
     }
     else if (mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM]
@@ -780,21 +847,36 @@ void LLToolBarView::saveToolbars() const
         toolbar_set.left_toolbar.button_display_mode = mToolbars[LLToolBarEnums::TOOLBAR_LEFT]->getButtonType();
         toolbar_set.left_toolbar.button_alignment = mToolbars[LLToolBarEnums::TOOLBAR_LEFT]->getAlignment();    // <FS_Zi>
         toolbar_set.left_toolbar.button_layout_style = mToolbars[LLToolBarEnums::TOOLBAR_LEFT]->getLayoutStyle();   // <FS_Zi>
-        addToToolset(mToolbars[LLToolBarEnums::TOOLBAR_LEFT]->getCommandsList(), toolbar_set.left_toolbar);
+        // <WolfViewer 2026-10-20> with its gated (Wolf-only, off Wolf) buttons in their places: never saved without them
+        const command_id_list_t& shown_left = mToolbars[LLToolBarEnums::TOOLBAR_LEFT]->getCommandsList();
+        std::vector<LLCommandId> full_left(shown_left.begin(), shown_left.end());
+        wolfWithGated(LLToolBarEnums::TOOLBAR_LEFT, full_left);
+        command_id_list_t save_left(full_left.begin(), full_left.end());
+        addToToolset(save_left, toolbar_set.left_toolbar);
     }
     if (mToolbars[LLToolBarEnums::TOOLBAR_RIGHT])
     {
         toolbar_set.right_toolbar.button_display_mode = mToolbars[LLToolBarEnums::TOOLBAR_RIGHT]->getButtonType();
         toolbar_set.right_toolbar.button_alignment = mToolbars[LLToolBarEnums::TOOLBAR_RIGHT]->getAlignment();  // <FS_Zi>
         toolbar_set.right_toolbar.button_layout_style = mToolbars[LLToolBarEnums::TOOLBAR_RIGHT]->getLayoutStyle(); // <FS_Zi>
-        addToToolset(mToolbars[LLToolBarEnums::TOOLBAR_RIGHT]->getCommandsList(), toolbar_set.right_toolbar);
+        // <WolfViewer 2026-10-20> with its gated (Wolf-only, off Wolf) buttons in their places: never saved without them
+        const command_id_list_t& shown_right = mToolbars[LLToolBarEnums::TOOLBAR_RIGHT]->getCommandsList();
+        std::vector<LLCommandId> full_right(shown_right.begin(), shown_right.end());
+        wolfWithGated(LLToolBarEnums::TOOLBAR_RIGHT, full_right);
+        command_id_list_t save_right(full_right.begin(), full_right.end());
+        addToToolset(save_right, toolbar_set.right_toolbar);
     }
     if (mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM])
     {
         toolbar_set.bottom_toolbar.button_display_mode = mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM]->getButtonType();
         toolbar_set.bottom_toolbar.button_alignment = mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM]->getAlignment();    // <FS_Zi>
         toolbar_set.bottom_toolbar.button_layout_style = mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM]->getLayoutStyle();   // <FS_Zi>
-        addToToolset(mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM]->getCommandsList(), toolbar_set.bottom_toolbar);
+        // <WolfViewer 2026-10-20> with its gated (Wolf-only, off Wolf) buttons in their places: never saved without them
+        const command_id_list_t& shown_bottom = mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM]->getCommandsList();
+        std::vector<LLCommandId> full_bottom(shown_bottom.begin(), shown_bottom.end());
+        wolfWithGated(LLToolBarEnums::TOOLBAR_BOTTOM, full_bottom);
+        command_id_list_t save_bottom(full_bottom.begin(), full_bottom.end());
+        addToToolset(save_bottom, toolbar_set.bottom_toolbar);
     }
 
     // Serialize the parameter tree
@@ -1020,16 +1102,21 @@ void LLToolBarView::refreshChatStripWidth()
 // bottom_toolbar_panel shrinks to a strip just tall enough for the arrow (setTargetDim is how
 // refreshChatStripWidth above resizes a layout panel; the stack relayouts itself). The chat
 // bar, which shares this panel, goes with it — press the arrow again to have both back.
+// The hidden bar's strip: the toggle icons (22 px) and a margin. [2026-10-20] Also the least the single bar stands
+// at (bottomShownDim), so the icons always fit.
+static const S32 WOLF_BOTTOM_STRIP_DIM = 26;
+
 void LLToolBarView::applyBottomToolbarHidden(bool hidden)
 {
-    static const S32 HIDDEN_DIM = 26;   // the three toggle icons (22 px) and a margin
+    static const S32 HIDDEN_DIM = WOLF_BOTTOM_STRIP_DIM;
     if (mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM])
     {
         mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM]->setVisible(!hidden);
     }
     if (LLLayoutPanel* panel = dynamic_cast<LLLayoutPanel*>(mBottomToolbarPanel))
     {
-        panel->setTargetDim(hidden ? HIDDEN_DIM : mBottomToolbarShownDim);
+        // <WolfViewer 2026-10-20> bottomShownDim(): the skin's height, or one row's in single bar
+        panel->setTargetDim(hidden ? HIDDEN_DIM : bottomShownDim());
     }
     if (mWolfToolbarToggle)
     {
@@ -1044,6 +1131,52 @@ void LLToolBarView::toggleBottomToolbar()
     const bool hidden = !gSavedSettings.getBOOL("WolfViewerBottomToolbarHidden");
     gSavedSettings.setBOOL("WolfViewerBottomToolbarHidden", hidden);
     applyBottomToolbarHidden(hidden);
+}
+// </WolfViewer>
+
+// <WolfViewer 2026-10-20> SINGLE BAR (Paul: "add a single bar mode for the toolbar at the bottom of the screen";
+// setting WolfViewerToolbarSingleBar, Wolf World menu and the toolbar's right-click menu). The bottom of the
+// screen is normally 90 px tall (panel_toolbar_view.xml bottom_toolbar_panel): the two-row toolbar (rows="2",
+// 87 px) with the chat bar strip on its left and the Wolf show / hide icons on its right. In single bar the
+// toolbar is drawn as ONE row of icon-only buttons (LLToolBar::setWolfSingleRow - a display override; the
+// saved layout is never touched) and the panel stands only as tall as what is showing needs:
+//   - the toolbar as laid out (one row; a second only when the window is too narrow for every button, because
+//     LLToolBar wraps on width rather than push buttons off the screen),
+//   - the chat bar, plus the Stand / Stop Flying buttons stacked above it while they show (they live in
+//     stand_fly_layout_panel over chat_bar_layout_panel and cannot be drawn anywhere else -
+//     refreshChatStripWidth),
+//   - the Wolf icons' strip.
+// Off: the skin's own height, exactly as before.
+S32 LLToolBarView::bottomShownDim() const
+{
+    static LLCachedControl<bool> single_bar(gSavedSettings, "WolfViewerToolbarSingleBar", false);
+    if (!single_bar)
+    {
+        return mBottomToolbarShownDim;
+    }
+
+    S32 dim = WOLF_BOTTOM_STRIP_DIM;
+    if (const LLToolBar* bar = mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM])
+    {
+        dim = llmax(dim, bar->getRect().getHeight());
+    }
+
+    // The chat column. chat_bar_layout_panel is collapsed by hiding it (FSNearbyChat::showDefaultChatBar), and its
+    // target dim is its own fixed height (auto_resize="false"); state_management_buttons_container holds the
+    // Stand / Stop Flying panel, found by name in the view tree for the reason refreshChatStripWidth gives.
+    S32 column = 0;
+    const LLLayoutPanel* chat = dynamic_cast<const LLLayoutPanel*>(findChildView("chat_bar_layout_panel", true));
+    if (chat && chat->getVisible())
+    {
+        column += chat->getTargetDim();
+    }
+    const LLView* ssf = findChildView("panel_stand_stop_flying", true);
+    if (ssf && ssf->getVisible())
+    {
+        const LLView* box = findChildView("state_management_buttons_container", true);
+        column += box ? box->getRect().getHeight() : ssf->getRect().getHeight();
+    }
+    return llmax(dim, column);
 }
 // </WolfViewer>
 
@@ -1064,6 +1197,33 @@ void LLToolBarView::draw()
     // <WolfViewer 2026-10-11> WolfHideToolbarIcons: every bottom-right Wolf icon hidden (see below, where the toolbar is
     // made safe)
     static LLCachedControl<bool> hide_icons(gSavedSettings, "WolfHideToolbarIcons", false);
+    // <WolfViewer 2026-10-20> SINGLE BAR (bottomShownDim above). The bar gets the display override when the setting
+    // changes; while it is on, the panel follows what is showing (the chat bar, Stand / Stop Flying, a wrapped row)
+    // every frame. Turning it off puts the skin's height back. Nothing here is saved to toolbars.xml.
+    {
+        static LLCachedControl<bool> single_bar(gSavedSettings, "WolfViewerToolbarSingleBar", false);
+        LLToolBar* bottom_bar = mToolbars[LLToolBarEnums::TOOLBAR_BOTTOM];
+        LLLayoutPanel* bottom_panel = dynamic_cast<LLLayoutPanel*>(mBottomToolbarPanel);
+        const bool single = single_bar;
+        if (bottom_bar && single != mWolfSingleBarApplied)
+        {
+            mWolfSingleBarApplied = single;
+            bottom_bar->setWolfSingleRow(single);
+            if (!single && bottom_panel && !bottom_hidden)
+            {
+                bottom_panel->setTargetDim(mBottomToolbarShownDim);
+            }
+        }
+        if (mWolfSingleBarApplied && bottom_panel && !bottom_hidden)
+        {
+            const S32 want = bottomShownDim();
+            if (bottom_panel->getTargetDim() != want)
+            {
+                bottom_panel->setTargetDim(want);
+            }
+        }
+    }
+    // </WolfViewer>
     // <WolfViewer 2026-10-06> the Plane / Boat icons lit while their deck shows
     {
         const WolfFlight& wf = WolfFlight::instance();

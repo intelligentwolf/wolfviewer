@@ -197,19 +197,8 @@ void WolfSpeed::gateToolbar(bool wolf)
     const LLCommandId id(FLOATER);
     if (!wolf)
     {
-        if (gToolBarView->hasCommand(id) == LLToolBarEnums::TOOLBAR_NONE)
-        {
-            return;
-        }
-        int rank = LLToolBar::RANK_NONE;
-        const S32 where = gToolBarView->removeCommand(id, rank);
-        if (where != LLToolBarEnums::TOOLBAR_NONE)
-        {
-            LLSD hidden = LLSD::emptyMap();
-            hidden["toolbar"] = (LLSD::Integer)where;
-            hidden["rank"] = (LLSD::Integer)rank;
-            gSavedPerAccountSettings.setLLSD("WolfSpeedToolbarHidden", hidden);
-        }
+        // [2026-10-20] Paul: "DO NOT CHANGE PEOPLES BUTTONS" - the toolbar view's gate keeps it in the saved layout
+        gToolBarView->setCommandGated(id, true);
         return;
     }
     if (now() - mLastGate < 1.0 || !gToolBarView->getVisible())
@@ -217,6 +206,8 @@ void WolfSpeed::gateToolbar(bool wolf)
         return;
     }
     mLastGate = now();
+    gToolBarView->setCommandGated(id, false);
+    // a place kept by the old gate (before 2026-10-20) for a layout saved while off Wolf: put back once, then forgotten
     LLSD hidden = gSavedPerAccountSettings.getLLSD("WolfSpeedToolbarHidden");
     if (!hidden.isMap() || !hidden.has("toolbar"))
     {

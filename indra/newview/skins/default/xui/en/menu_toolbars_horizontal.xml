@@ -93,6 +93,16 @@
               parameter="fill" />
   </menu_item_check>
   <menu_item_separator layout="topleft" />
+  <!-- WolfViewer 2026-10-20: single bar (WolfViewerToolbarSingleBar, also Wolf World > Display & Effects). One row of
+       icon-only buttons; a display mode only - the buttons, their order and the choices above are kept as they are
+       and come back unchanged when it is switched off. -->
+  <menu_item_check label="Single Bar"
+                   layout="topleft"
+                   name="wolf_single_bar">
+    <on_check control="WolfViewerToolbarSingleBar" />
+    <on_click function="ToggleControl"
+              parameter="WolfViewerToolbarSingleBar" />
+  </menu_item_check>
   <menu_item_check label="Locked"
                    layout="topleft"
                    name="toolbars_locked">

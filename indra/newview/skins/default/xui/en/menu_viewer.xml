@@ -1830,6 +1830,15 @@
             <menu_item_check.on_click function="Floater.Toggle" parameter="wolf_speed" />
             <menu_item_check.on_visible function="WolfGrid.IsOnWolfTerritories" />
         </menu_item_check>
+        <!-- [WOLF SWIM 2026-10-20] Paul: "implement swimming when an avatar is all the way in the water and is not sitting"
+             (wolfswim.cpp): swim under the water, slower than flying, never up out of it; swim animations everyone sees,
+             a four-legged avatar paddles with its own walk. On by default (WolfSwimming). Wolf regions only - a visitor's
+             too (the swim animations are Wolf grid assets): gone (not greyed) elsewhere. -->
+        <menu_item_check label="Swimming" name="WolfSwimming">
+            <menu_item_check.on_check function="CheckControl" parameter="WolfSwimming" />
+            <menu_item_check.on_click function="ToggleControl" parameter="WolfSwimming" />
+            <menu_item_check.on_visible function="WolfGrid.ShowsWolfRegionWeather" />
+        </menu_item_check>
         <!-- [WOLF COMPASS 2026-10-16] wolffloatercompass.cpp: a Victorian compass showing North
              and the way you are moving. Every grid. Paul: "anything wolf viewer should be under wolf world". -->
         <menu_item_check label="Tessa's Compass" name="WolfCompass">
@@ -2252,6 +2261,14 @@
             <menu_item_check label="Show Wolf Icons (bottom right)" name="WolfShowToolbarIcons">
                 <menu_item_check.on_check function="Wolf.ToolbarIconsShown" />
                 <menu_item_check.on_click function="Wolf.ToggleToolbarIcons" />
+            </menu_item_check>
+            <!-- [SINGLE BAR 2026-10-20] Paul: "add a single bar mode for the toolbar at the bottom of the screen". The bottom
+             toolbar becomes one row of icon-only buttons beside the chat bar (WolfViewerToolbarSingleBar,
+             lltoolbarview.cpp bottomShownDim / LLToolBar::setWolfSingleRow). Display only: nobody's saved buttons change.
+             Also on the toolbar's right-click menu (menu_toolbars_horizontal.xml). Every grid. -->
+            <menu_item_check label="Single Bar Toolbar" name="WolfToolbarSingleBar">
+                <menu_item_check.on_check function="CheckControl" parameter="WolfViewerToolbarSingleBar" />
+                <menu_item_check.on_click function="ToggleControl" parameter="WolfViewerToolbarSingleBar" />
             </menu_item_check>
             <menu_item_separator />
             <!-- [WOLF FX 2026-10-10] script effects and camera shake (wolffx.cpp, wolfcamerafx.cpp) -->

@@ -106,6 +106,14 @@ public:
     void checkSitCancel();
     void checkBelowWater(bool check_underwater);
 
+    // [WOLF SWIM 2026-10-20] wolfswim.cpp: what this AO does in the water. hasWolfSwimStates: on, with animations in one
+    // of its own main swim states (Floating / Swimming Forward) - it swims already (checkBelowWater). Walking:
+    // on, with animations in its Walking state. setWolfSwimPaddle(true): a quadruped swims - its fly and hover motions
+    // play the Walking state (a paddle) instead of the flying ones, until set false.
+    bool hasWolfSwimStates() const;
+    bool hasWalkingAnimations() const;
+    void setWolfSwimPaddle(bool paddle);
+
     bool importNotecard(const LLInventoryItem* item);
     void processImport(bool from_timer);
 
@@ -197,6 +205,7 @@ protected:
     bool mEnabledStands;
     bool mInMouselook;
     bool mUnderWater;
+    bool mWolfSwimPaddle;   // [WOLF SWIM 2026-10-20/] setWolfSwimPaddle
 
     LLUUID mAOFolder;
     LLUUID mLastMotion;

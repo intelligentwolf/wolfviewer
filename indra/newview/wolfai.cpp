@@ -51,6 +51,7 @@
 #include "lluri.h"         // LLURI::escape (lluri.h:144)
 #include "wolfgrid.h"
 #include "wolfmeshupload.h"
+#include "wolfpaint.h"
 
 namespace
 {
@@ -814,6 +815,21 @@ public:
     }
 };
 
+/**
+ * [FORGE LOOK 2026-10-20] The view behind every control of the AI panel that paints the forge (WolfPanelAI::drawForge). It
+ * covers the whole panel and is not mouse-opaque. Source: llfloaterwolfavatars.cpp:845 WolfAvatarsBackdrop
+ * (wolffloaterradio.cpp:499 WolfRadioBackdrop).
+ */
+class WolfAIForge : public LLView
+{
+public:
+    struct Params : public LLInitParam::Block<Params, LLView::Params> { Params() {} };
+    WolfAIForge(const Params& p, WolfPanelAI* owner) : LLView(p), mOwner(owner) {}
+    void draw() override { mOwner->drawForge(); }
+private:
+    WolfPanelAI* mOwner;
+};
+
 static LLPanelInjector<WolfPanelAI> t_wolf_panel_ai("wolf_panel_ai");
 WolfPanelAI::WolfPanelAI() : LLPanel() {}
 // Source: original WolfPanelAI::postBuild and LLUICtrlFactory::create; reuse one copy of every control.
@@ -853,6 +869,11 @@ bool WolfPanelAI::postBuild()
     getChild<LLButton>("ai_view_next")->setCommitCallback([this](LLUICtrl*, const LLSD&) { onView(1); });
     mPrompt->setMaxTextLength(WolfAI::MAX_PROMPT_CHARS);
     mPrompt->setKeystrokeCallback([this](LLTextEditor*) { saveDraft(); });
+    // [FORGE LOOK] the painted forge goes behind every control of this panel (it is not mouse-opaque, so clicks reach the
+    // floater beneath). Source: llfloaterwolfavatars.cpp:1014-1024 (wolffloaterradio.cpp:630-643)
+    WolfAIForge::Params fp; fp.name("wolf_ai_forge"); fp.rect(getLocalRect()); fp.follows.flags(FOLLOWS_ALL); fp.mouse_opaque(false);
+    mForge = new WolfAIForge(fp, this); addChild(mForge); sendChildToBack(mForge);
+    mError->setVisible(false);
     mBuilt = true;
     WolfAI& ai = WolfAI::instance(); ai.syncSession(); mSession = WolfAI::Session::capture();
     mPrompt->setText(ai.mDraft); mName->setText(ai.mDraftName); mMode->setValue(ai.mDraftMode);
@@ -936,7 +957,7 @@ void WolfPanelAI::refresh()
     {
         ai.error("grid", "Sorry, this function is only available on Wolf Territories Grid.");
         mBuild->setEnabled(false); mCollect->setEnabled(false); mResume->setEnabled(false);
-        mError->setText(ai.errors()); return;
+        showErrors(ai.errors()); return;
     }
     ai.refresh();
     const auto& a = ai.avail();
@@ -998,7 +1019,7 @@ void WolfPanelAI::refresh()
         ai.error("grounding:" + ai.mSelected.asString(), mGrounding->failure); mGrounding->failure.clear();
     }
     const std::string errors = ai.errors();
-    if (mError->getText() != errors) mError->setText(errors);
+    showErrors(errors);
     if (!isInVisibleChain() || !auth.current()) return;
     if (mNeedList && !mListPending) { onReload(); return; }
     const auto* selected = ai.job(ai.mSelected);
@@ -1108,7 +1129,12 @@ void WolfPanelAI::onBuyCredits()
 void WolfPanelAI::setStatus(const std::string& message, bool failure)
 {
     if (failure) WolfAI::instance().error("action", message); else mStatus->setText(message);
-    mError->setText(WolfAI::instance().errors());
+    showErrors(WolfAI::instance().errors());
+}
+void WolfPanelAI::showErrors(const std::string& errors)
+{
+    if (mError->getText() != errors) mError->setText(errors);
+    mError->setVisible(!errors.empty());
 }
 void WolfPanelAI::onBuild()
 {
@@ -1244,4 +1270,427 @@ void WolfPanelAI::loadPresentation()
         p->getChild<LLTextBox>("ai_grounding_note")->setText(std::string("Search suggestions · source links below"));
         WolfAI::instance().error(key, ""); p->refresh();
     });
+}
+
+// ─────────────────────────── the forge ([FORGE LOOK 2026-10-20]) ───────────────────────────
+// Painted under the AI panel's controls by WolfAIForge (floater_wolf_ai.xml says what is drawn where). Look only.
+
+namespace
+{
+    using namespace WolfPaint;
+
+    // ---- palette: the smithy at night ----
+    // Fixed colours, not the skin's: a painted scene (as the radio and WolfAvatars), every line of text on a fixed ground.
+    // Contrast (WCAG 2.x relative luminance), against the lightest ground each text colour sits on:
+    //   FG_INK #f7eee6 on the window #1c1410 15.8:1, on an iron plate's top #2e221c 13.5:1, on FG_INPUT #140e0b 16.7:1;
+    //     on the ember glow at its strongest (about #3f2010) 12.8:1
+    //   FG_DIM #d4c2b2 on the window 10.5:1, on iron 8.9:1, on the glow 8.5:1
+    //   FG_TITLE #ffe2b8 on the window 14.5:1, on iron 12.4:1;  FG_EMBER #ffb36b (credits, the current ember's word) on the
+    //     window 10.3:1, on FG_INPUT 10.9:1;  FG_LATER #b4a294 (a later ember's word) on the window 7.4:1
+    //   FG_INGOT_INK #2a0e02 on the ingot (#ffd27a 12.7:1 .. #f07a2e 6.5:1);  FG_INK on a quiet button (#4a382e 9.7:1)
+    //   a disabled label #c9b8aa on FG_BTN_OFF #2a201b 8.3:1;  the error text #ffc9c2 on #3d1418 11.0:1 (the XUI's colours)
+    const LLColor4 FG_INK(0.969f, 0.933f, 0.902f, 1.f);
+    const LLColor4 FG_DIM(0.831f, 0.761f, 0.698f, 1.f);
+    const LLColor4 FG_TITLE(1.f, 0.886f, 0.722f, 1.f);
+    const LLColor4 FG_EMBER(1.f, 0.702f, 0.420f, 1.f);
+    const LLColor4 FG_LATER(0.706f, 0.635f, 0.580f, 1.f);
+    const LLColor4 FG_BG_TOP(0.110f, 0.078f, 0.063f, 1.f);
+    const LLColor4 FG_BG_BOTTOM(0.071f, 0.047f, 0.035f, 1.f);
+    const LLColor4 FG_GLOW(1.f, 0.44f, 0.16f, 1.f);
+    const LLColor4 FG_SPARK(1.f, 0.824f, 0.478f, 1.f);
+    const LLColor4 FG_IRON_TOP(0.180f, 0.133f, 0.110f, 1.f);
+    const LLColor4 FG_IRON_BOTTOM(0.129f, 0.094f, 0.075f, 1.f);
+    const LLColor4 FG_EDGE(1.f, 0.702f, 0.420f, 0.38f);
+    const LLColor4 FG_INPUT(0.078f, 0.055f, 0.043f, 1.f);
+    const LLColor4 FG_INGOT_TOP(1.f, 0.824f, 0.478f, 1.f);
+    const LLColor4 FG_INGOT_BOTTOM(0.941f, 0.478f, 0.180f, 1.f);
+    const LLColor4 FG_INGOT_INK(0.165f, 0.055f, 0.008f, 1.f);
+    const LLColor4 FG_BTN_TOP(0.290f, 0.220f, 0.180f, 1.f);
+    const LLColor4 FG_BTN(0.247f, 0.184f, 0.149f, 1.f);
+    const LLColor4 FG_BTN_EDGE(0.541f, 0.416f, 0.333f, 1.f);
+    const LLColor4 FG_BTN_OFF(0.165f, 0.125f, 0.106f, 1.f);
+    const LLColor4 FG_ERR_PLATE(0.239f, 0.078f, 0.094f, 1.f);
+    const LLColor4 FG_ERR_EDGE(1.f, 0.498f, 0.431f, 1.f);
+    const LLColor4 FG_OK(0.651f, 0.937f, 0.741f, 1.f);
+    const LLColor4 FG_ANVIL(0.290f, 0.227f, 0.192f, 1.f);
+    const LLColor4 FG_HAMMER(0.788f, 0.694f, 0.612f, 1.f);
+    const LLColor4 FG_SHADOW(0.f, 0.f, 0.f, 0.40f);
+    const LLColor4 FG_CLEAR(0.f, 0.f, 0.f, 0.f);
+    // Source: WolfAI::meshCoro's finish (above): the status a small model is left with when it reached the Objects folder
+    const char* const FG_DELIVERED = "Model delivered to your Objects folder.";
+
+    std::vector<std::string> forgeList(const std::string& s)
+    {
+        std::vector<std::string> out;
+        std::string::size_type start = 0;
+        while (start <= s.size())
+        {
+            const std::string::size_type comma = s.find(',', start);
+            const std::string::size_type end = comma == std::string::npos ? s.size() : comma;
+            out.push_back(s.substr(start, end - start));
+            if (comma == std::string::npos) break;
+            start = comma + 1;
+        }
+        return out;
+    }
+
+    /** An iron plate: the ground the fields and lines of text sit on. */
+    void forgeIron(const LLRect& r, F32 rad)
+    {
+        LLRect shadow = r;
+        shadow.translate(2, -4);
+        fillRounded(shadow, allCorners(rad), FG_SHADOW, FG_SHADOW);
+        fillRounded(r, allCorners(rad), FG_IRON_TOP, FG_IRON_BOTTOM);
+        strokeRounded(r, allCorners(rad), 0.f, 1.f, FG_EDGE, withAlpha(FG_EDGE, 0.6f));
+        box((F32)r.mLeft + rad, (F32)r.mTop - 1.f, (F32)r.mRight - rad, (F32)r.mTop - 2.f, LLColor4(1.f, 0.86f, 0.70f, 0.12f), LLColor4(1.f, 0.86f, 0.70f, 0.12f));
+    }
+
+    /** The anvil with its hammer, in a 120 x 80 drawing space (y down) whose top left is (x, y), u px a unit. The face
+     *  glows by `heat` 0..1. Built from convex pieces in one colour, so where they overlap nothing shows. */
+    void forgeAnvil(F32 x, F32 y, F32 u, F32 heat, F32 t)
+    {
+        auto X = [&](F32 v) { return x + v * u; };
+        auto Y = [&](F32 v) { return y - v * u; };
+        const LLColor4& c = FG_ANVIL;
+        quad(X(10), Y(22), X(86), Y(22), X(84), Y(36), X(16), Y(36), c);          // the face block
+        quad(X(86), Y(22), X(117), Y(30), X(104), Y(34), X(84), Y(36), c);        // the horn
+        quad(X(84), Y(36), X(104), Y(34), X(90), Y(40), X(80), Y(42), c);
+        quad(X(30), Y(36), X(80), Y(36), X(70), Y(54), X(40), Y(54), c);          // the waist
+        quad(X(48), Y(54), X(64), Y(54), X(66), Y(62), X(46), Y(62), c);
+        quad(X(34), Y(62), X(80), Y(62), X(88), Y(72), X(28), Y(72), c);          // the foot
+        // the face, hot
+        quad(X(10), Y(22), X(86), Y(22), X(85), Y(25), X(11), Y(25), lerpColour(FG_BTN_EDGE, LLColor4(1.f, 0.54f, 0.24f, 1.f), heat));
+        if (heat > 0.f) ellipse(X(48), Y(23), 40.f * u, 6.f * u, withAlpha(FG_GLOW, 0.35f * heat), FG_CLEAR);
+        // the hammer, resting on the face
+        quad(X(55), Y(9), X(58), Y(2), X(80), Y(10), X(77), Y(17), FG_HAMMER);
+        quad(X(66), Y(13), X(72), Y(15), X(64), Y(40), X(58), Y(38), withAlpha(FG_HAMMER, 0.85f));
+        // sparks off the face
+        if (heat > 0.f)
+        {
+            for (S32 i = 0; i < 6; ++i)
+            {
+                const F32 h1 = hash01((F32)i * 3.7f + 0.4f), h2 = hash01((F32)i * 5.3f + 2.2f);
+                const F32 k = fmodf(t * (0.5f + 0.6f * h2) + h1, 1.f);
+                const F32 sx = X(30.f + 60.f * h1) + (h1 - 0.5f) * 20.f * u * k, sy = Y(20.f - 18.f * k);
+                sparkle(sx, sy, llmax(0.8f, 1.4f * u), withAlpha(FG_SPARK, heat * (1.f - k)));
+            }
+        }
+    }
+
+    /** A vase (the Small model tile's picture), standing on base, h px tall. */
+    void forgeVase(F32 cx, F32 base, F32 h, const LLColor4& c, const LLColor4& groove)
+    {
+        ellipse(cx, base + h * 0.40f, h * 0.36f, h * 0.36f, c, c);                         // the belly
+        quad(cx - h * 0.13f, base + h * 0.70f, cx + h * 0.13f, base + h * 0.70f,          // the neck
+             cx + h * 0.10f, base + h * 0.90f, cx - h * 0.10f, base + h * 0.90f, c);
+        box(cx - h * 0.15f, base + h, cx + h * 0.15f, base + h * 0.90f, c, c);              // the lip
+        box(cx - h * 0.16f, base + h * 0.08f, cx + h * 0.16f, base, c, c);                 // the foot
+        line(cx - h * 0.30f, base + h * 0.46f, cx + h * 0.30f, base + h * 0.46f, llmax(1.5f, h * 0.035f), groove);
+        line(cx - h * 0.27f, base + h * 0.32f, cx + h * 0.27f, base + h * 0.32f, llmax(1.5f, h * 0.035f), groove);
+    }
+
+    /** A button's face, at r (the button's rectangle in the forge's coordinates): the main action a glowing ingot
+     *  (FG_INGOT_INK on it 6.5:1 or more), the others dark iron; dim iron while it cannot be pressed. */
+    void forgeButton(LLButton* b, const LLRect& r, bool main, F32 t)
+    {
+        if (!b || !b->isInVisibleChain() || r.getWidth() < 8) return;
+        const bool enabled = b->isInEnabledChain();
+        const bool pressed = b->hasMouseCapture() && mouseOver(b);
+        const bool hover = enabled && !pressed && mouseOver(b);
+        const F32 rad = main ? 7.f : 5.f;
+        LLRect shadow = r;
+        shadow.translate(0, -3);
+        fillRounded(shadow, allCorners(rad), LLColor4(0.05f, 0.03f, 0.02f, 1.f), LLColor4(0.05f, 0.03f, 0.02f, 1.f));
+        if (!enabled)
+        {
+            fillRounded(r, allCorners(rad), FG_BTN_OFF, FG_BTN_OFF);
+            strokeRounded(r, allCorners(rad), 0.f, 1.f, withAlpha(FG_BTN_EDGE, 0.6f), withAlpha(FG_BTN_EDGE, 0.6f));
+            return;
+        }
+        if (main)
+        {
+            halo(r, rad, 10, withAlpha(FG_GLOW, 0.65f + 0.25f * sinf(t * 2.2f)));
+            LLColor4 top = FG_INGOT_TOP, bottom = FG_INGOT_BOTTOM;
+            if (hover) { top = lighten(top, 0.04f); bottom = lighten(bottom, 0.05f); }
+            if (pressed) { top = lighten(top, -0.07f); bottom = lighten(bottom, -0.06f); }
+            fillRounded(r, allCorners(rad), top, bottom);
+            strokeRounded(r, allCorners(rad), 0.f, 1.f, FG_TITLE, withAlpha(FG_TITLE, 0.7f));
+            // a sheen across the upper half
+            const LLRect sheen(r.mLeft + 4, r.mTop - 2, r.mRight - 4, r.getCenterY());
+            fillRounded(sheen, Radii{ rad - 2.f, rad - 2.f, 0.f, 0.f }, withAlpha(LLColor4::white, 0.30f), withAlpha(LLColor4::white, 0.f));
+            return;
+        }
+        LLColor4 top = FG_BTN_TOP, bottom = FG_BTN;
+        if (hover) { top = lighten(top, 0.04f); bottom = lighten(bottom, 0.03f); }
+        if (pressed) { top = lighten(top, -0.04f); bottom = lighten(bottom, -0.03f); }
+        fillRounded(r, allCorners(rad), top, bottom);
+        strokeRounded(r, allCorners(rad), 0.f, 1.f, hover ? FG_EMBER : FG_BTN_EDGE, hover ? FG_EMBER : FG_BTN_EDGE);
+    }
+
+    void forgeWarning(F32 x, F32 y, F32 r)
+    {
+        disc(x, y, r, FG_ERR_EDGE, FG_ERR_EDGE);
+        line(x, y + r * 0.55f, x, y - r * 0.15f, llmax(1.5f, r * 0.28f), FG_ERR_PLATE);
+        disc(x, y - r * 0.50f, llmax(1.f, r * 0.15f), FG_ERR_PLATE, FG_ERR_PLATE);
+    }
+}
+
+using namespace WolfPaint;
+
+void WolfPanelAI::drawForge()
+{
+    if (!mBuilt || !mForge) return;
+    const S32 W = getRect().getWidth(), H = getRect().getHeight();
+    if (W < 200 || H < 200) return;
+    const F32 t = animSeconds();
+    LLGLSUIDefault ui;
+    untextured();
+    // the smithy: warm charcoal, an ember glow from below, sparks rising and fading
+    box(0.f, (F32)H, (F32)W, 0.f, FG_BG_TOP, FG_BG_BOTTOM);
+    ellipse((F32)W * 0.5f, 0.f, (F32)W * 0.75f, (F32)H * 0.42f, withAlpha(FG_GLOW, 0.20f), FG_CLEAR);
+    ellipse((F32)W * 0.85f, (F32)H, (F32)W * 0.45f, (F32)H * 0.30f, withAlpha(FG_TITLE, 0.05f), FG_CLEAR);
+    constexpr S32 SPARKS = 14;
+    for (S32 i = 0; i < SPARKS; ++i)
+    {
+        const F32 h1 = hash01((F32)i * 3.11f + 0.7f), h2 = hash01((F32)i * 7.31f + 1.9f);
+        const F32 rise = (F32)H * 0.75f;
+        const F32 y = fmodf(t * (14.f + 26.f * h2) + h1 * rise, rise);
+        const F32 x = (F32)W * (0.06f + 0.88f * h1) + 8.f * sinf(t * 1.3f + (F32)i);
+        const F32 a = 1.f - y / rise;
+        disc(x, y, 4.f, withAlpha(FG_GLOW, 0.18f * a), FG_CLEAR);
+        sparkle(x, y, 0.9f + 1.1f * h2, withAlpha(FG_SPARK, 0.65f * a));
+    }
+    drawForgeHero(t);
+    drawForgeEmbers();
+    drawForgeStep(t);
+    // the error plate with its warning mark, while there is an error (the words are the read-only editor's own)
+    if (mError && mError->getVisible())
+    {
+        const LLRect e = rectIn(mError, mForge);
+        const LLRect plate(e.mLeft - 34, e.mTop + 4, e.mRight + 4, e.mBottom - 4);
+        untextured();
+        fillRounded(plate, allCorners(6.f), FG_ERR_PLATE, FG_ERR_PLATE);
+        strokeRounded(plate, allCorners(6.f), 0.f, 1.5f, FG_ERR_EDGE, withAlpha(FG_ERR_EDGE, 0.75f));
+        forgeWarning((F32)plate.mLeft + 17.f, (F32)plate.mTop - 18.f, 9.f);
+    }
+    untextured();
+}
+
+void WolfPanelAI::drawForgeHero(F32 t) const
+{
+    const S32 W = getRect().getWidth(), H = getRect().getHeight();
+    // the anvil and hammer, top left, its face hot
+    forgeAnvil(14.f, (F32)H - 6.f, 0.88f, 0.75f + 0.25f * sinf(t * 1.7f), t);
+    // the title plate: iron, an ember line inside its rim, the name glowing in Cinzel, the line under it
+    const LLRect p(130, H - 10, W - 16, H - 88);
+    untextured();
+    halo(p, 8.f, 8, withAlpha(FG_GLOW, 0.30f));
+    forgeIron(p, 8.f);
+    strokeRounded(p, allCorners(8.f), 4.f, 5.f, withAlpha(FG_EMBER, 0.35f), withAlpha(FG_EMBER, 0.15f));
+    const std::string title = getString("forge_title"), sub = getString("forge_sub");
+    const LLFontGL* tf = fitDisplayFont((F32)p.getHeight() * 0.50f, (F32)p.getWidth() - 36.f, { title }, 4);
+    const F32 tx = (F32)p.mLeft + 18.f, ty = (F32)p.mTop - (F32)p.getHeight() * 0.38f;
+    static const F32 OFFSETS[6][2] = { { -2.f, 0.f }, { 2.f, 0.f }, { 0.f, -2.f }, { 0.f, 2.f }, { -1.5f, -1.5f }, { 1.5f, 1.5f } };
+    for (const auto& o : OFFSETS) text(tf, title, tx + o[0], ty + o[1], withAlpha(FG_GLOW, 0.22f), LLFontGL::LEFT);
+    text(tf, title, tx + 0.5f, ty - 1.f, LLColor4(0.f, 0.f, 0.f, 0.6f), LLFontGL::LEFT);
+    text(tf, title, tx, ty, FG_TITLE, LLFontGL::LEFT);   // FG_TITLE on iron 12.4:1
+    text(LLFontGL::getFontSansSerif(), sub, tx, (F32)p.mBottom + 16.f, FG_DIM, LLFontGL::LEFT, (F32)p.getWidth() - 36.f);
+}
+
+void WolfPanelAI::drawForgeEmbers() const
+{
+    const S32 W = getRect().getWidth(), H = getRect().getHeight();
+    // which list and which step: Choose / Describe / then Forge - Delivered for a small model, Confirm - Build for a large
+    const bool mesh = mMode->getValue().asString() == "mesh";
+    const bool small_working = mStep == Step::Working && !getChildView("ai_scroll")->getVisible();
+    const WolfAI& ai = WolfAI::instance();
+    const bool delivered = small_working && !ai.generating() && ai.mMeshItem.notNull() && ai.mMeshStatus == FG_DELIVERED;
+    const std::vector<std::string> words = forgeList(getString(mStep == Step::Choose ? "steps_choose"
+                                                              : (mesh || small_working) ? "steps_small" : "steps_large"));
+    if (words.size() < 4) return;
+    S32 cur = 0;
+    switch (mStep)
+    {
+    case Step::Choose:  cur = 0; break;
+    case Step::Form:    cur = 1; break;
+    case Step::Confirm: cur = 2; break;
+    case Step::Working: cur = small_working ? (delivered ? 3 : 2) : 3; break;
+    }
+    const LLRect band(16, H - 100, W - 16, H - 136);
+    untextured();
+    fillRounded(band, allCorners(10.f), LLColor4(0.04f, 0.024f, 0.016f, 0.6f), LLColor4(0.04f, 0.024f, 0.016f, 0.6f));
+    strokeRounded(band, allCorners(10.f), 0.f, 1.f, withAlpha(FG_EDGE, 0.55f), withAlpha(FG_EDGE, 0.55f));
+    const F32 slot = (F32)band.getWidth() / 4.f;
+    const F32 ey = (F32)band.mTop - 12.f, wy = (F32)band.mBottom + 9.f;
+    const F32 t = animSeconds();
+    const LLFontGL* f = LLFontGL::getFontSansSerifSmallBold();
+    for (S32 i = 0; i + 1 < 4; ++i)
+    {
+        const F32 x0 = (F32)band.mLeft + slot * ((F32)i + 0.5f), x1 = x0 + slot;
+        const bool walked = i < cur;
+        line(x0 + 10.f, ey, x1 - 10.f, ey, 2.f, walked ? FG_EMBER : FG_ANVIL);
+    }
+    for (S32 i = 0; i < 4; ++i)
+    {
+        const F32 x = (F32)band.mLeft + slot * ((F32)i + 0.5f);
+        const bool now = i == cur, done = i < cur;
+        untextured();
+        if (now)
+        {
+            const F32 pulse = 0.75f + 0.25f * sinf(t * 2.4f);
+            disc(x, ey, 16.f, withAlpha(FG_GLOW, 0.45f * pulse), FG_CLEAR);
+            disc(x, ey, 9.f, LLColor4(1.f, 0.945f, 0.79f, 1.f), FG_INGOT_BOTTOM);
+            ring(x, ey, 9.f, 10.5f, withAlpha(FG_TITLE, 0.8f));
+        }
+        else if (done)
+        {
+            disc(x, ey, 7.5f, FG_TITLE, LLColor4(1.f, 0.604f, 0.29f, 1.f));
+            checkMark(x, ey, 7.f, 1.6f, FG_INGOT_INK);
+        }
+        else
+        {
+            disc(x, ey, 7.5f, FG_IRON_TOP, FG_IRON_TOP);
+            ring(x, ey, 6.f, 7.5f, FG_BTN_EDGE);
+        }
+        // the word (FG_EMBER now, FG_DIM done, FG_LATER later); the current one underlined as well as lit
+        const LLColor4 ink = now ? FG_EMBER : done ? FG_DIM : FG_LATER;
+        text(f, words[(size_t)i], x, wy, ink, LLFontGL::HCENTER, slot - 6.f);
+        if (now)
+        {
+            untextured();
+            const F32 uw = llmin(f->getWidthF32(words[(size_t)i]), slot - 6.f) * 0.5f;
+            line(x - uw, wy - 7.f, x + uw, wy - 7.f, 1.f, FG_EMBER);
+        }
+    }
+}
+
+void WolfPanelAI::drawForgeStep(F32 t)
+{
+    const LLView* me = mForge;
+    auto at = [me](const LLView* v) { return rectIn(v, me); };
+    switch (mStep)
+    {
+    case Step::Choose:
+    {
+        // the generator tiles: iron, an ember rim, the vase in a pool of firelight on the left
+        for (const char* name : { "ai_choose_small", "ai_choose_large" })
+        {
+            LLButton* b = getChild<LLButton>(name);
+            if (!b->isInVisibleChain()) continue;
+            const LLRect r = at(b);
+            const bool hover = b->isInEnabledChain() && mouseOver(b);
+            untextured();
+            if (hover || b->hasFocus()) halo(r, 12.f, 12, withAlpha(FG_GLOW, 0.8f));
+            LLRect shadow = r;
+            shadow.translate(3, -4);
+            fillRounded(shadow, allCorners(12.f), FG_SHADOW, FG_SHADOW);
+            fillRounded(r, allCorners(12.f), lighten(FG_IRON_TOP, hover ? 0.03f : 0.f), FG_IRON_BOTTOM);
+            strokeRounded(r, allCorners(12.f), 0.f, hover ? 2.f : 1.5f, hover ? FG_EMBER : withAlpha(FG_EMBER, 0.65f), withAlpha(FG_EMBER, 0.35f));
+            const F32 cx = (F32)r.mLeft + 62.f, cy = (F32)r.getCenterY();
+            disc(cx, cy, 46.f, withAlpha(FG_GLOW, hover ? 0.30f : 0.18f), FG_CLEAR);
+            ellipse(cx, cy - 34.f, 30.f, 4.f, withAlpha(LLColor4::black, 0.5f), FG_CLEAR);
+            forgeVase(cx, cy - 34.f, 70.f, hover ? FG_EMBER : FG_BTN_EDGE, FG_IRON_BOTTOM);
+        }
+        break;
+    }
+    case Step::Form:
+    {
+        // the ledger behind the credits row
+        LLRect ledger = at(getChildView("ai_back"));
+        ledger.unionWith(at(getChildView("ai_buy")));
+        ledger = LLRect(16, ledger.mTop + 5, getRect().getWidth() - 16, ledger.mBottom - 5);
+        untextured();
+        fillRounded(ledger, allCorners(8.f), LLColor4(0.04f, 0.024f, 0.016f, 0.6f), LLColor4(0.04f, 0.024f, 0.016f, 0.6f));
+        strokeRounded(ledger, allCorners(8.f), 0.f, 1.f, withAlpha(FG_EDGE, 0.6f), withAlpha(FG_EDGE, 0.6f));
+        // the iron plate under the description, from the note to the Build ingot
+        const LLRect note = at(mNote), build = at(mBuild);
+        forgeIron(LLRect(16, note.mTop + 10, getRect().getWidth() - 16, build.mBottom - 12), 10.f);
+        // the saved builds (large builds only)
+        if (mJobs->getVisible())
+        {
+            const LLRect title = at(getChildView("ai_saved_title")), list = at(mJobs);
+            forgeIron(LLRect(16, title.mTop + 8, getRect().getWidth() - 16, list.mBottom - 6), 8.f);
+        }
+        for (const char* name : { "ai_back", "ai_update", "ai_buy", "ai_jobs_reload" })
+        {
+            LLButton* b = getChild<LLButton>(name);
+            forgeButton(b, at(b), false, t);
+        }
+        forgeButton(mBuild, at(mBuild), true, t);
+        break;
+    }
+    case Step::Confirm:
+    {
+        untextured();
+        forgeIron(grown(at(mConfirmText), 12), 10.f);
+        LLButton* start = getChild<LLButton>("ai_confirm_start");
+        forgeButton(start, at(start), true, t);
+        LLButton* back = getChild<LLButton>("ai_confirm_back");
+        forgeButton(back, at(back), false, t);
+        break;
+    }
+    case Step::Working:
+    {
+        // a small model: the crucible ring in ai_scroll's place (a large build shows its preview there)
+        LLView* scroll = getChildView("ai_scroll");
+        if (!scroll->getVisible()) drawCrucible(at(scroll), t);
+        // the stage words on their plate
+        if (!mStatus->getText().empty())
+        {
+            const WolfAI& ai = WolfAI::instance();
+            const bool delivered = !scroll->getVisible() && !ai.generating() && ai.mMeshItem.notNull() && ai.mMeshStatus == FG_DELIVERED;
+            const LLRect s = grown(at(mStatus), 6);
+            untextured();
+            fillRounded(s, allCorners(8.f), FG_INPUT, FG_INPUT);
+            strokeRounded(s, allCorners(8.f), 0.f, 1.5f, delivered ? FG_OK : FG_BTN_EDGE, delivered ? withAlpha(FG_OK, 0.7f) : withAlpha(FG_BTN_EDGE, 0.7f));
+        }
+        forgeButton(mCollect, at(mCollect), true, t);
+        forgeButton(mResume, at(mResume), false, t);
+        LLButton* done = getChild<LLButton>("ai_working_done");
+        forgeButton(done, at(done), false, t);
+        break;
+    }
+    }
+}
+
+void WolfPanelAI::drawCrucible(const LLRect& area, F32 t) const
+{
+    if (area.getWidth() < 60 || area.getHeight() < 60) return;
+    const WolfAI& ai = WolfAI::instance();
+    const bool working = ai.generating();
+    const bool delivered = !working && ai.mMeshItem.notNull() && ai.mMeshStatus == FG_DELIVERED;
+    const bool failed = !working && !delivered && !mError->getText().empty();
+    const F32 cx = (F32)area.getCenterX(), cy = (F32)area.getCenterY();
+    const F32 r = (F32)llmin(area.getWidth(), area.getHeight()) * 0.46f;
+    untextured();
+    // the firelight on the floor, the stone ring, the dark well inside
+    disc(cx, cy, r * 1.25f, withAlpha(delivered ? FG_OK : FG_GLOW, working ? 0.20f : 0.10f), FG_CLEAR);
+    ring(cx, cy, r * 0.80f, r, failed ? FG_ERR_PLATE : FG_IRON_TOP);
+    ring(cx, cy, r * 0.985f, r * 1.005f, withAlpha(FG_BTN_EDGE, 0.8f));
+    ring(cx, cy, r * 0.80f, r * 0.815f, withAlpha(FG_BTN_EDGE, 0.6f));
+    disc(cx, cy, r * 0.80f, LLColor4(0.12f, 0.07f, 0.04f, 1.f), FG_INPUT);
+    // the marks round the stone, every third longer
+    for (S32 k = 0; k < 24; ++k)
+    {
+        const F32 a = F_TWO_PI * (F32)k / 24.f;
+        const F32 r0 = r * 0.84f, r1 = r * (k % 3 == 0 ? 0.95f : 0.90f);
+        line(cx + r0 * sinf(a), cy + r0 * cosf(a), cx + r1 * sinf(a), cy + r1 * cosf(a), 1.5f, withAlpha(FG_BTN_EDGE, 0.8f));
+    }
+    if (delivered)
+    {
+        // done: the ring all green, a big tick in the middle (with the stage words, delivered says it three ways)
+        ring(cx, cy, r * 0.82f, r * 0.98f, FG_OK);
+        checkMark(cx, cy, r * 0.62f, llmax(3.f, r * 0.10f), FG_OK);
+        return;
+    }
+    if (working)
+    {
+        // no percentage comes back from the generator, so an ember arc turns while it works (the words say the stage)
+        const F32 a0 = fmodf(t * 3.9f, F_TWO_PI);
+        arcBand(cx, cy, r * 0.83f, r * 0.97f, a0, a0 + 1.4f, withAlpha(FG_INGOT_BOTTOM, 0.f), lighten(FG_INGOT_BOTTOM, 0.08f));
+        disc(cx + r * 0.90f * sinf(a0 + 1.4f), cy + r * 0.90f * cosf(a0 + 1.4f), r * 0.09f, withAlpha(FG_SPARK, 0.85f), FG_CLEAR);
+    }
+    // the anvil in the well, hot while it works
+    const F32 u = r * 1.2f / 120.f;
+    forgeAnvil(cx - 60.f * u, cy + 42.f * u, u, working ? 0.8f + 0.2f * sinf(t * 2.f) : 0.f, t);
 }

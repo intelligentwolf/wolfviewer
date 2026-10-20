@@ -923,6 +923,7 @@ set(viewer_SOURCE_FILES
     wolffloaterlagdetector.cpp
     wolffloatercompass.cpp   # [WOLF COMPASS 2026-10-16]
     wolfspeed.cpp   # [WOLFSPEED 2026-10-17] Xenon's WolfSpeed
+    wolfswim.cpp   # [WOLF SWIM 2026-10-20] swimming under the water
     wolfdjaudio.cpp
     wolfcamerafx.cpp
     wolffx.cpp
@@ -1885,6 +1886,7 @@ set(viewer_HEADER_FILES
     wolffloaterlagdetector.h
     wolffloatercompass.h   # [WOLF COMPASS 2026-10-16]
     wolfspeed.h   # [WOLFSPEED 2026-10-17] Xenon's WolfSpeed
+    wolfswim.h   # [WOLF SWIM 2026-10-20] swimming under the water
     wolfdjaudio.h
     wolfdjcapture.h
     wolfcamerafx.h
@@ -1953,6 +1955,7 @@ set(viewer_HEADER_FILES
     wolfweatherprofile.h
     wolfweathersound.h
     wolfai.h
+    wolfpaint.h  # [LOOK 2026-10-20] the painting kit of the Upload Model and Create with AI windows
     wolfairports.h
     wolflslcomplete.h
     wolfterrainpaint.h

@@ -77,6 +77,12 @@ public:
     S32 hasCommand(const LLCommandId& commandId) const;
     S32 addCommand(const LLCommandId& commandId, LLToolBarEnums::EToolBarLocation toolbar, int rank = LLToolBar::RANK_NONE);
     S32 removeCommand(const LLCommandId& commandId, int& rank); // Sets the rank the removed command was at, RANK_NONE if not found
+    // <WolfViewer 2026-10-20> Paul: "DO NOT CHANGE PEOPLES BUTTONS they should be saved". A Wolf-only button is taken off
+    // its toolbar off Wolf Territories (a toolbar lays out hidden buttons too) WITHOUT leaving the person's layout: where
+    // it was is remembered by its neighbours, it goes back there however many others come and go, and saveToolbars
+    // writes it in its place. Idempotent - the grid gates call it every frame / second.
+    void setCommandGated(const LLCommandId& commandId, bool gated);
+    // </WolfViewer>
     S32 enableCommand(const LLCommandId& commandId, bool enabled);
     S32 stopCommandInProgress(const LLCommandId& commandId);
     S32 flashCommand(const LLCommandId& commandId, bool flash, bool force_flashing = false);
@@ -114,6 +120,10 @@ public:
     void toggleBottomToolbar();
     void applyBottomToolbarHidden(bool hidden);
     // </WolfViewer>
+    // <WolfViewer 2026-10-20> Single bar (WolfViewerToolbarSingleBar): the height bottom_toolbar_panel stands
+    // at while the bar shows - the skin's own height normally, just what one row needs in single bar.
+    S32 bottomShownDim() const;
+    // </WolfViewer>
 
     // <FS:Ansariel> Added to determine if toolbar gets hidden when empty
     void setHideBottomOnEmpty(bool hideBottomOnEmpty) { mHideBottomOnEmpty = hideBottomOnEmpty; }
@@ -125,6 +135,12 @@ protected:
     void initFromParams(const Params&);
 
 private:
+    // <WolfViewer 2026-10-20> a gated button: its toolbar, the buttons before and after it there when it was taken off
+    struct WolfGated { S32 toolbar = 0; int rank = -1; std::vector<LLUUID> before, after; };
+    std::map<LLUUID, std::pair<LLCommandId, WolfGated>> mWolfGated;
+    static size_t wolfGatedIndex(const std::vector<LLCommandId>& list, const WolfGated& g);
+    void wolfWithGated(S32 toolbar, std::vector<LLCommandId>& list) const;   // the list with its gated buttons back in place
+    // </WolfViewer>
     void    saveToolbars() const;
     bool    addCommandInternal(const LLCommandId& commandId, LLToolBar* toolbar);
     void    addToToolset(command_id_list_t& command_list, Toolbar& toolbar) const;
@@ -143,6 +159,7 @@ private:
     LLView*             mBottomToolbarPanel;
     LLButton*           mWolfToolbarToggle = nullptr;   // <WolfViewer 2026-09-10>
     S32                 mBottomToolbarShownDim = 90;    // <WolfViewer 2026-10-06> the skin's own bottom_toolbar_panel height
+    bool                mWolfSingleBarApplied = false;  // <WolfViewer 2026-10-20> single bar state last given to the bar
     LLButton*           mWolfPlaneToggle = nullptr;     // <WolfViewer 2026-10-06> Flight Mode deck
     LLButton*           mWolfBoatToggle = nullptr;      // <WolfViewer 2026-10-06> Sailing Mode deck
     LLButton*           mWolfGameToggle = nullptr;      // <WolfViewer 2026-10-09> Game Mode

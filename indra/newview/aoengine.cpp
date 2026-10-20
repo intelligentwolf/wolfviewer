@@ -55,6 +55,7 @@ AOEngine::AOEngine() :
     mEnabledStands(false),
     mInMouselook(false),
     mUnderWater(false),
+    mWolfSwimPaddle(false),
     mImportSet(nullptr),
     mAOFolder(LLUUID::null),
     mLastMotion(ANIM_AGENT_STAND),
@@ -358,10 +359,82 @@ void AOEngine::checkBelowWater(bool check_underwater)
     gAgent.sendAnimationRequest(id, ANIM_REQUEST_START);
 }
 
+// [WOLF SWIM 2026-10-20] see aoengine.h
+bool AOEngine::hasWolfSwimStates() const
+{
+    if (!mEnabled || !mCurrentSet)
+    {
+        return false;
+    }
+    // the two that cover most of a swim (still / moving); Up or Down alone would leave the rest on the flying states
+    for (S32 state : { AOSet::Floating, AOSet::SwimmingForward })
+    {
+        const AOSet::AOState* s = mCurrentSet->getState(state);
+        if (s && !s->mAnimations.empty())
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool AOEngine::hasWalkingAnimations() const
+{
+    if (!mEnabled || !mCurrentSet)
+    {
+        return false;
+    }
+    const AOSet::AOState* walking = mCurrentSet->getState(AOSet::Walking);
+    return walking && !walking->mAnimations.empty();
+}
+
+// The switch, as checkBelowWater: the animation playing for the last motion stops and the one for the new mapping
+// starts. Only this AO's own animations are stopped and started: never the built-in motion (a STOP for the region's
+// own movement animation resets it to STAND - OpenSim AnimationSet.Remove(id, false) -> ResetDefaultAnimation).
+void AOEngine::setWolfSwimPaddle(bool paddle)
+{
+    if (mWolfSwimPaddle == paddle)
+    {
+        return;
+    }
+    const bool fly_motion = mLastMotion == ANIM_AGENT_FLY || mLastMotion == ANIM_AGENT_FLYSLOW || mLastMotion == ANIM_AGENT_HOVER
+        || mLastMotion == ANIM_AGENT_HOVER_UP || mLastMotion == ANIM_AGENT_HOVER_DOWN;
+    if (!mEnabled || !mCurrentSet || !fly_motion)
+    {
+        mWolfSwimPaddle = paddle;
+        return;
+    }
+    LLUUID id = override(mLastMotion, false);
+    if (id.notNull())
+    {
+        gAgent.sendAnimationRequest(id, ANIM_REQUEST_STOP);
+    }
+    mWolfSwimPaddle = paddle;
+    id = override(mLastMotion, true);
+    if (id.notNull())
+    {
+        gAgent.sendAnimationRequest(id, ANIM_REQUEST_START);
+    }
+}
+// [/WOLF SWIM]
+
 // find the correct animation state for the requested motion, mapping flying to
 // swimming where necessary
 AOSet::AOState* AOEngine::getStateForMotion(const LLUUID& motion) const
 {
+    // [WOLF SWIM 2026-10-20] a quadruped swimming: its fly / hover motions (the ones the region plays while flying,
+    // WolfSim ScenePresenceAnimator.cs: FLY / FLYSLOW, HOVER_UP, HOVER_DOWN, HOVER) paddle with the Walking state
+    if (mWolfSwimPaddle && (motion == ANIM_AGENT_FLY || motion == ANIM_AGENT_FLYSLOW || motion == ANIM_AGENT_HOVER
+                            || motion == ANIM_AGENT_HOVER_UP || motion == ANIM_AGENT_HOVER_DOWN))
+    {
+        AOSet::AOState* walking = mCurrentSet->getState(AOSet::Walking);
+        if (walking && !walking->mAnimations.empty())
+        {
+            return walking;
+        }
+    }
+    // [/WOLF SWIM]
+
     // get default state for this motion
     AOSet::AOState* defaultState = mCurrentSet->getStateByRemapID(motion);
     if (!mUnderWater)

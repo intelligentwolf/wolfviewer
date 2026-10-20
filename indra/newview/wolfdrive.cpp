@@ -1524,22 +1524,15 @@ void WolfDrive::refreshDashGate()
     const char* name = "wolf_dashboard";
     if (!wolf)
     {
-        // every frame (one lookup): a saved button never shows off Wolf, even for a moment
-        if (gToolBarView->hasCommand(LLCommandId(name)) == LLToolBarEnums::TOOLBAR_NONE) return;
-        LLSD hidden = gSavedPerAccountSettings.getLLSD("WolfDashboardToolbarHidden");
-        if (!hidden.isMap()) hidden = LLSD::emptyMap();
-        int rank = LLToolBar::RANK_NONE;
-        const S32 where = gToolBarView->removeCommand(LLCommandId(name), rank);
-        if (where != LLToolBarEnums::TOOLBAR_NONE)
-        {
-            hidden["toolbar"] = (LLSD::Integer)where;
-            hidden["rank"] = (LLSD::Integer)rank;
-            gSavedPerAccountSettings.setLLSD("WolfDashboardToolbarHidden", hidden);
-        }
+        // every frame (one lookup): a saved button never shows off Wolf, even for a moment. [2026-10-20] Paul: "DO NOT
+        // CHANGE PEOPLES BUTTONS" - the toolbar view's gate keeps it in the saved layout, in its place
+        gToolBarView->setCommandGated(LLCommandId(name), true);
         return;
     }
     if (now() - mLastGate < 1.0 || !gToolBarView->getVisible()) return;
     mLastGate = now();
+    gToolBarView->setCommandGated(LLCommandId(name), false);
+    // a place kept by the old gate (before 2026-10-20) for a layout saved while off Wolf: put back once, then forgotten
     LLSD hidden = gSavedPerAccountSettings.getLLSD("WolfDashboardToolbarHidden");
     if (!hidden.isMap()) hidden = LLSD::emptyMap();
     if (!hidden.has("toolbar")) return;

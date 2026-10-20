@@ -117,6 +117,7 @@
 #include "fslslbridge.h"
 #include "llpresetsmanager.h"
 #include "NACLantispam.h"
+#include "wolfswim.h"   // [WOLF SWIM 2026-10-20/] no auto-land while swimming (propagate)
 
 using namespace LLAvatarAppearanceDefines;
 
@@ -2556,7 +2557,8 @@ void LLAgent::propagate(const F32 dt)
         if (!in_air
             && gAgentCamera.getUpKey() < 0
             && land_vel.magVecSquared() < MAX_VELOCITY_AUTO_LAND_SQUARED
-            && gSavedSettings.getBOOL("AutomaticFly"))
+            && gSavedSettings.getBOOL("AutomaticFly")
+            && !WolfSwim::isSwimming())   // [WOLF SWIM 2026-10-20/] a swimmer on the sea bed does not land (wolfswim.h)
         {
             // land automatically
             setFlying(false);

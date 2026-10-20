@@ -108,8 +108,18 @@ private:
     std::map<std::string, std::string> mErrors;
 };
 
+class WolfAIForge;
+/**
+ * [FORGE LOOK 2026-10-20] Paul: "our standard object ai generator just make them look as nice as the new avatar and
+ * clothing generator but not the same". "The Forge": a smithy at night painted behind the controls by WolfAIForge
+ * (wolfai.cpp; the technique of the radio and WolfAvatars, the primitives in wolfpaint.h) - see floater_wolf_ai.xml for
+ * what is drawn where. Look only: the steps, calls, prices and words are as they were.
+ * Who and why: a resident with no 3D skills wants to describe an object in words and find it in their Objects folder a
+ * few minutes later, knowing the cost before anything is charged.
+ */
 class WolfPanelAI : public LLPanel
 {
+    friend class WolfAIForge;   // the view behind the controls that paints the forge
 public:
     WolfPanelAI();
     bool postBuild() override;
@@ -140,6 +150,15 @@ private:
     void saveDraft();
     void setStatus(const std::string& message, bool error);
     bool accepts(const WolfAI::Session& auth, U64 generation) const;
+    /** [FORGE LOOK] the error box shows only while there is an error (its red plate would otherwise sit there empty). */
+    void showErrors(const std::string& errors);
+    // [FORGE LOOK] painted by WolfAIForge::draw() under the widgets (panel-local coordinates)
+    void drawForge();
+    void drawForgeHero(F32 t) const;
+    void drawForgeEmbers() const;
+    void drawForgeStep(F32 t);
+    void drawCrucible(const LLRect& area, F32 t) const;
+    WolfAIForge* mForge = nullptr;
     class LLTextEditor *mPrompt = nullptr, *mError = nullptr, *mResult = nullptr, *mSources = nullptr;
     class LLLineEditor* mName = nullptr;
     class LLButton *mBuild = nullptr, *mCollect = nullptr, *mResume = nullptr;

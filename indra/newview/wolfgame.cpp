@@ -1285,28 +1285,15 @@ void WolfGame::gateToolbar(bool on_wolf)
     // setting - across relaunches - and only cleared once it is back on a toolbar.
     LLSD hidden = gSavedPerAccountSettings.getLLSD("WolfGameToolbarHidden");
     if (!hidden.isArray()) hidden = LLSD::emptyArray();
-    if (!on_wolf)
+    // [WOLF GRID GATE 2026-10-20] Paul: "DO NOT CHANGE PEOPLES BUTTONS". Through the toolbar view's own gate
+    // (LLToolBarView::setCommandGated): hidden off Wolf, never out of the saved layout, back in its own place.
+    // wolf_experiences (wolffloaterexperiences.cpp) rides along: a Wolf-only button.
+    for (const char* name : { "wolf_gamemode", "wolf_roleplay", "wolf_experiences" })
     {
-        bool changed = false;
-        // [WOLF GRID GATE 2026-10-17] wolf_experiences (wolffloaterexperiences.cpp) rides along: a Wolf-only button that
-        // was only greyed on a toolbar off Wolf (commands.xml is_enabled_function), now gone and put back the same way.
-        for (const char* name : { "wolf_gamemode", "wolf_roleplay", "wolf_experiences" })
-        {
-            int rank = LLToolBar::RANK_NONE;
-            const S32 where = gToolBarView->removeCommand(LLCommandId(name), rank);
-            if (where != LLToolBarEnums::TOOLBAR_NONE)
-            {
-                LLSD entry;
-                entry["name"] = name;
-                entry["toolbar"] = (LLSD::Integer)where;
-                entry["rank"] = (LLSD::Integer)rank;
-                hidden.append(entry);
-                changed = true;
-            }
-        }
-        if (changed) gSavedPerAccountSettings.setLLSD("WolfGameToolbarHidden", hidden);
-        return;
+        gToolBarView->setCommandGated(LLCommandId(name), !on_wolf);
     }
+    if (!on_wolf) return;
+    // places kept by the old gate (before 2026-10-20) for a layout saved while off Wolf: put back once, then forgotten
     if (hidden.size() == 0) return;
     // Back in reverse order, so each goes in at the rank it was taken from.
     for (S32 i = (S32)hidden.size() - 1; i >= 0; --i)

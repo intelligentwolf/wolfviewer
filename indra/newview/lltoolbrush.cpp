@@ -82,6 +82,17 @@ const LLColor4 OVERLAY_COLOR(1.0f, 1.0f, 1.0f, 1.0f);
 /// Class LLToolBrushLand
 ///============================================================================
 
+// [WolfViewer 2026-10-20] Paul: "jimmy olsen ... has a 20x20 region ... its a tiny touch on his huge region can we add a 2x
+// 4x 8x 10x buttons to alter the scale of the area he is modifying". The brush is the Build floater's size (LandBrushSize,
+// slider 1-11) times WolfLandBrushScale (the 1x / 2x / 4x / 8x / 10x buttons). Everything below uses mBrushSize - the
+// size sent to the region (ModifyBlockExtended.BrushSize; OpenSim TerrainModule.cs client_OnModifyTerrain paints
+// +-brushSize around the point, clipped to the region and to land the user may terraform) and the outline drawn on the
+// ground (renderOverlay) - so both grow together.
+static F32 wolf_land_brush_size()
+{
+    return gSavedSettings.getF32("LandBrushSize") * llclamp(gSavedSettings.getF32("WolfLandBrushScale"), 1.f, 10.f);
+}
+
 // constructor
 LLToolBrushLand::LLToolBrushLand()
 :   LLTool(std::string("Land")),
@@ -91,7 +102,7 @@ LLToolBrushLand::LLToolBrushLand()
     mGotHover(false),
     mBrushSelected(false)
 {
-    mBrushSize = gSavedSettings.getF32("LandBrushSize");
+    mBrushSize = wolf_land_brush_size();
 }
 
 
@@ -480,7 +491,7 @@ void LLToolBrushLand::render()
             spot.mdV[VX] = floor( spot.mdV[VX] + 0.5 );
             spot.mdV[VY] = floor( spot.mdV[VY] + 0.5 );
 
-            mBrushSize = gSavedSettings.getF32("LandBrushSize");
+            mBrushSize = wolf_land_brush_size();
 
             region_list_t regions;
             determineAffectedRegions(regions, spot);

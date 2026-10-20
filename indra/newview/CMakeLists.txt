@@ -937,6 +937,7 @@ set(viewer_SOURCE_FILES
     wolfbuilder.cpp
     wolffloaterbuilder.cpp
     wolffloaterimportworlds.cpp # [IMPORT WORLDS 2026-10-18] Build > Import worlds...
+    llfloaterwolfavatars.cpp # [WOLFAVATARS 2026-10-20] Wolf World > WolfAvatars...
     wolfimportflow.cpp # [IMPORT WORLDS 2026-10-18] the import flow shared with the Adventure Studio
     wolffloaterenvironment.cpp
     wolfenvironmentstate.cpp
@@ -1899,6 +1900,7 @@ set(viewer_HEADER_FILES
     wolfbuilder.h
     wolffloaterbuilder.h
     wolffloaterimportworlds.h
+    llfloaterwolfavatars.h
     wolfimportflow.h
     wolffloaterenvironment.h
     wolfenvironmentstate.h

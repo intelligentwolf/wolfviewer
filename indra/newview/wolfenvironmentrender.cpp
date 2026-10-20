@@ -2383,7 +2383,9 @@ bool WolfEnvironmentRender::renderSkyDome()
     setFrameUniforms(sh, true);
     {
         // [WolfViewer 2026-10-13] the dome takes the EEP gains on its whole colour (skyF.glsl wolfEepDomeGain), so the runtime's
-        // own gain on the air's in-scatter is off for this program - the probe measures exactly what is corrected
+        // own gain on the air's in-scatter is off for this program - the probe measures exactly what is corrected. [2026-10-20]
+        // On for the reflection-probe faces too: the probes hold the corrected sky, so the dome's sea takes no gain on what it
+        // mirrors from them, only on the air in front of it (skyF.glsl domeGain; Miss Zenn's white night sea)
         static LLStaticHashedString s_gon("wolfEepGainOn"), s_dgain("wolfEepDomeGain");
         sh.uniform1f(s_gon, 0.f);
         sh.uniform1f(s_dgain, sGainValid ? 1.f : 0.f);

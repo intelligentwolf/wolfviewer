@@ -348,6 +348,32 @@ bool    LLFloaterTools::postBuild()
     mTextBulldozer = getChild<LLTextBox>("Bulldozer:");
     mTextDozerSize = getChild<LLTextBox>("Dozer Size:");
     mTextDozerStrength = getChild<LLTextBox>("Strength:");
+    // [WolfViewer 2026-10-20] the land brush multiplier (lltoolbrush.cpp wolf_land_brush_size): each button sets
+    // WolfLandBrushScale. findChild, so a skin without them still builds the floater.
+    mWolfBrushScaleText = findChild<LLTextBox>("wolf_brush_scale_label");
+    for (F32 scale : { 1.f, 2.f, 4.f, 8.f, 10.f })
+    {
+        if (LLButton* btn = findChild<LLButton>(llformat("wolf_brush_scale_%d", (S32)scale)))
+        {
+            btn->setCommitCallback([this, scale](LLUICtrl*, const LLSD&)
+            {
+                gSavedSettings.setF32("WolfLandBrushScale", scale);
+                wolfSyncBrushScale();
+            });
+            mWolfBrushScaleBtns.emplace_back(scale, btn);
+        }
+    }
+    wolfSyncBrushScale();
+    // [WolfViewer 2026-10-20] Paul: "the wolf builder button is on top of the size x1 buttons". The Builders Mode row
+    // sits at a fixed top (floater_tools.xml, 164-184) under every tool's own controls; the land tool's brush multiplier
+    // row ends lower than that. While the land tool is up the row moves down by the overlap (+4 px) into the free space
+    // above the land info panel (which starts with the tabs, top 223); every other tool keeps the row where it was.
+    mWolfBuilderBtn = findChild<LLButton>("wolf_builder_btn");
+    if (mWolfBuilderBtn && mCheckWolfBuildersMode && !mWolfBrushScaleBtns.empty())
+    {
+        const S32 row_top = llmax(mWolfBuilderBtn->getRect().mTop, mCheckWolfBuildersMode->getRect().mTop);
+        mWolfBuildersRowLandShift = llmax(0, row_top - mWolfBrushScaleBtns.front().second->getRect().mBottom + 4);
+    }
     mSliderZoom = getChild<LLSlider>("slider zoom");
 
     mTextSelectionCount = getChild<LLTextBox>("selection_count");
@@ -1153,6 +1179,18 @@ void LLFloaterTools::updatePopup(LLCoordGL center, MASK mask)
         mSliderDozerForce->setVisible( land_visible );
         mTextDozerStrength->setVisible( land_visible);
     }
+    // [WolfViewer 2026-10-20] the brush multiplier row shows with the other land controls
+    if (mWolfBrushScaleText) mWolfBrushScaleText->setVisible(land_visible);
+    for (auto& entry : mWolfBrushScaleBtns) entry.second->setVisible(land_visible);
+    if (land_visible) wolfSyncBrushScale();
+    // [WolfViewer 2026-10-20] the Builders Mode row clears the brush multiplier row while the land tool is up (postBuild)
+    if (mWolfBuildersRowLandShift > 0 && land_visible != mWolfBuildersRowShifted)
+    {
+        const S32 dy = land_visible ? -mWolfBuildersRowLandShift : mWolfBuildersRowLandShift;   // UI y grows upward
+        mWolfBuilderBtn->translate(0, dy);
+        mCheckWolfBuildersMode->translate(0, dy);
+        mWolfBuildersRowShifted = land_visible;
+    }
 
     // <FS>
     static LLCachedControl<bool> sFSToolboxExpanded(gSavedSettings,  "FSToolboxExpanded", true);
@@ -1803,3 +1841,17 @@ LLMaterialPtr LLFloaterTools::createDefaultMaterial(LLMaterialPtr old_mat)
     return nullptr; // invalid
 }
 // </FS:Zi>
+
+// [WolfViewer 2026-10-20] The multiplier in use is the pressed button (toggle state, not colour alone: the label says it too).
+void LLFloaterTools::wolfSyncBrushScale()
+{
+    const F32 scale = llclamp(gSavedSettings.getF32("WolfLandBrushScale"), 1.f, 10.f);
+    for (auto& entry : mWolfBrushScaleBtns)
+    {
+        entry.second->setToggleState(entry.first == scale);
+    }
+    if (mWolfBrushScaleText)
+    {
+        mWolfBrushScaleText->setText(llformat("Size x%d (big regions)", (S32)scale));
+    }
+}

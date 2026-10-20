@@ -214,6 +214,13 @@ public:
     // Land buttons
     LLRadioGroup*   mRadioGroupLand = nullptr;
     LLSlider        *mSliderDozerSize = nullptr;
+    // [WolfViewer 2026-10-20] the land brush multiplier buttons (1x 2x 4x 8x 10x) and their label; optional in a skin
+    std::vector<std::pair<F32, LLButton*>> mWolfBrushScaleBtns;
+    LLTextBox*      mWolfBrushScaleText = nullptr;
+    LLButton*       mWolfBuilderBtn = nullptr;          // [WolfViewer 2026-10-20] moved clear of the brush row on the land tool
+    S32             mWolfBuildersRowLandShift = 0;
+    bool            mWolfBuildersRowShifted = false;
+    void            wolfSyncBrushScale();
     LLSlider        *mSliderDozerForce = nullptr;
     LLTextBox*      mTextBulldozer = nullptr;
     LLTextBox*      mTextDozerSize = nullptr;

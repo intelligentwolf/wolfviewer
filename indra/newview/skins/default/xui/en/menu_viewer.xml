@@ -1816,6 +1816,13 @@
             <menu_item_call.on_click function="Floater.Show" parameter="wolf_experiences" />
             <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
         </menu_item_call>
+        <!-- [WOLFAVATARS 2026-10-20] Paul: "WolfAvatars" (release "Character Colin"): describe a character, pick one of four
+             pictures, and a wearable avatar arrives in your inventory (llfloaterwolfavatars.cpp, WOLFAVATARS_API.md "Screen").
+             Wolf residents with credits only: [WOLF GRID GATE] gone (not greyed) off Wolf Territories. -->
+        <menu_item_call label="WolfAvatars..." name="WolfAvatars">
+            <menu_item_call.on_click function="Floater.Show" parameter="wolf_avatars" />
+            <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
+        </menu_item_call>
         <!-- [WOLFSPEED 2026-10-17] Xenon's WolfSpeed (wolfspeed.cpp): walk, run and fly faster, as fast as the region
              allows (WolfSim WolfSpeedModule). [WOLF GRID GATE] gone (not greyed) off Wolf Territories. -->
         <menu_item_check label="Xenon's WolfSpeed" name="WolfSpeed">

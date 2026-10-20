@@ -61,6 +61,20 @@ namespace WolfMeshUpload
     constexpr U32 MAX_VERTS = 65532;
     /** Source: rust_proxy/src/main.rs:2011-2015 — the proxy's own bound on linkset size. */
     constexpr U32 MAX_PRIMS = 32;
+    /** Source: rust_proxy/src/main.rs:4616 — POST /upload_mesh reads the body through
+     *  read_body_capped(..., 128 * 1024 * 1024) and answers HTTP 400 "Failed to read body:
+     *  request body larger than 131072 KB" past it. Keep the two in step. */
+    constexpr size_t MAX_REQUEST_BYTES = (size_t)128 * 1024 * 1024;
+    /** The most triangles one upload sends; a model over it is simplified automatically
+     *  (Model::finalise) and the floater says so. This is a CHOSEN budget, not a format limit:
+     *  300,000 is the top of Meshy's own remesher range (rust_proxy/src/main.rs:5904,
+     *  "target_polycount ... accepts 100..300000") and the same ceiling the proxy puts on an AI
+     *  build scene (rust_proxy/src/wolfbuild_scene.rs:93). It keeps the request far below
+     *  MAX_REQUEST_BYTES: 3,557,410 triangles made a 234,958,064-byte body (WolfViewer.log
+     *  2026-10-20 09:07:23 "POST /upload_mesh, 234958064 bytes"), ~66 bytes a triangle, so
+     *  300,000 is ~20 MB. This uploader makes no LODs, so every triangle is drawn at every
+     *  distance by every viewer that sees the object. */
+    constexpr size_t MAX_TRIANGLES = 300000;
 
     /** One material's geometry, in SL space (metres, Z-up), before normalisation. */
     struct Submesh
@@ -129,6 +143,11 @@ namespace WolfMeshUpload
         /** Images the parser found but could not use, so "no textures" can say why. */
         std::vector<std::string> mTextureErrors;
         bool                 mFinalised = false;
+        /** Set by finalise() when the model was over MAX_TRIANGLES and was simplified: the
+         *  triangle count the file had, and the simplifier's worst relative error (fraction of
+         *  the mesh extent, meshopt_simplify result_error). 0 = not simplified. */
+        size_t               mSimplifiedFromTris = 0;
+        F32                  mSimplifyError = 0.f;
     };
 
     typedef std::shared_ptr<Model> model_ptr_t;

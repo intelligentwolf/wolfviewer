@@ -120,6 +120,7 @@
 #include "wolffloatergraphicshelper.h"   // [GRAPHICS HELPER 2026-10-11/]
 #include "wolffloaterbuilder.h"   // [WOLF BUILDER 2026-10-13/]
 #include "wolffloaterimportworlds.h"   // [IMPORT WORLDS 2026-10-18/]
+#include "llfloaterwolfavatars.h"   // [WOLFAVATARS 2026-10-20/] Wolf World > WolfAvatars...
 #include "wolffloaterenvironment.h"   // [WOLF ENV 2026-10-12/]
 #include "wolffloaterwatchwolf.h"       // [WATCHWOLF 2026-10-10/]
 #include "wolffloaterexperiences.h"   // [WolfViewer 2026-10-14/] Experiences welcome chooser
@@ -682,6 +683,7 @@ void LLViewerFloaterReg::registerFloaters()
     LLFloaterReg::add("wolf_graphics_helper", "floater_wolf_graphics_helper.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterGraphicsHelper>);   // [GRAPHICS HELPER 2026-10-11/]
     LLFloaterReg::add("wolf_builder", "floater_wolf_builder.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterBuilder>);   // [WOLF BUILDER 2026-10-13/] grid, snap origin, names, selection card
     LLFloaterReg::add("wolf_import_worlds", "floater_wolf_import_worlds.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterImportWorlds>);   // [IMPORT WORLDS 2026-10-18/] Build > Import worlds...
+    LLFloaterReg::add("wolf_avatars", "floater_wolfavatars.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<LLFloaterWolfAvatars>);   // [WOLFAVATARS 2026-10-20/] Wolf World > WolfAvatars... (release "Character Colin")
     LLFloaterReg::add("wolf_environment", "floater_wolf_environment.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterEnvironment>);   // [WOLF ENV 2026-10-12/]
     LLFloaterReg::add("wolf_watchwolf", "floater_wolf_watchwolf.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterWatchWolf>);   // [WATCHWOLF 2026-10-10/]
     LLFloaterReg::add("wolf_experiences", "floater_wolf_experiences.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterExperiences>);   // [WolfViewer 2026-10-14/] Experiences welcome chooser

@@ -1,0 +1,301 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<!--
+ [WOLFAVATARS 2026-10-20] Wolf World > WolfAvatars... (llfloaterwolfavatars.cpp). Paul: the feature is WolfAvatars; it ships
+ in the release "Character Colin". The screen is WOLFAVATARS_API.md "Screen (both viewers)": Person / Animal, a name,
+ "Describe your character" (600 at most), the height (optional for animals), the tips line, the price and Start, the
+ progress card (the % from progress, the words), the four pictures with Pick and More pictures, and the done card
+ with the report lines and Open my inventory. One step panel shows at a time; every failure shows in "error" (it stays),
+ with Buy credits... after a credits_short refusal. Stop asks first (stop_panel).
+ Wolf Territories only: the menu item is gated by WolfGrid.IsOnWolfTerritories and onOpen closes it anywhere else.
+
+ [2026-10-20] "The Summoning Circle" (Paul: "make it much more exciting like our radio, mixer etc"). The moonlit den - sky,
+ moon, ridge and howling wolf, title plate, step stones, the Person / Animal tiles, the rune ring, the gilt picture frames,
+ the plates every line of text sits on, and every button's face - is drawn in code behind these controls
+ (LLFloaterWolfAvatars::drawDen()), the way the radio is (floater_wolf_radio.xml). LLFloaterWolfAvatars::layoutWidgets()
+ places every control below on every resize and step change, so the positions here are only a starting point. The step
+ panels cover the whole window and are not mouse-opaque, so their coordinates are the window's and empty night still drags
+ the window. The buttons draw no skin image (image_color 0 alpha, as the radio's keys): the den paints them as glowing seals
+ (the step's main action) and moonstones (the others) underneath; their labels, keyboard focus border and tooltips are the
+ buttons' own. Text colours are fixed, not the skin's, because the text sits on fixed drawn plates (contrast of each pair in
+ llfloaterwolfavatars.cpp, all at least 4.5:1).
+-->
+<floater
+ legacy_header_height="18"
+ can_close="true"
+ can_minimize="true"
+ can_resize="true"
+ height="740"
+ layout="topleft"
+ min_height="720"
+ min_width="720"
+ name="wolf_avatars"
+ help_topic="wolf_avatars"
+ positioning="centered"
+ save_rect="true"
+ single_instance="true"
+ title="WolfAvatars"
+ width="800">
+  <!-- lettering drawn on the den (not widgets) -->
+  <floater.string name="title">WolfAvatars</floater.string>
+  <floater.string name="subtitle">wolf-grid.com</floater.string>
+  <!-- the five step stones, left to right, comma separated -->
+  <floater.string name="stones">Describe,Pictures,Pick,Build,Done</floater.string>
+  <floater.string name="person_word">Person</floater.string>
+  <floater.string name="person_detail">two legs</floater.string>
+  <floater.string name="animal_word">Animal</floater.string>
+  <floater.string name="animal_detail">four legs</floater.string>
+  <floater.string name="chosen">chosen</floater.string>
+  <floater.string name="picked">picked</floater.string>
+  <!-- [BASE BODY 2026-10-20] the two clothes choices (people only), drawn as two chips on the slate; base_short is said on
+       the price plaque (WOLFAVATARS_API.md Flow 1 clothes: "dressed" | "base") -->
+  <floater.string name="dressed_word">Dressed as described</floater.string>
+  <floater.string name="base_word">Base body - no clothes, to dress later</floater.string>
+  <floater.string name="base_short">Base body</floater.string>
+  <!-- [CLOTHING 2026-10-20] Paul: "could we make the clothes seperately". The third tile, and its words in place of a
+       character's (WOLFAVATARS_API.md Flow 1 "Clothing": kind "clothing", garment required, no height, no clothes choice) -->
+  <floater.string name="clothing_word">Clothing</floater.string>
+  <floater.string name="clothing_detail">a garment alone</floater.string>
+  <floater.string name="intro_clothing">Describe a garment, pick one of four pictures, and it arrives in your inventory, made to fit the WolfAvatars base body.</floater.string>
+  <floater.string name="prompt_clothing">Describe the garment</floater.string>
+  <floater.string name="prompt_tip_clothing">What the garment looks like: its cut, colours, fabric and pattern (600 characters at most)</floater.string>
+  <!-- wolfavatars_lib.php WCH_PROMPT_GARMENT: a ghost-mannequin picture from the front, as if worn in a T-pose -->
+  <floater.string name="tips_clothing">One garment - the pictures show it from the front on an invisible mannequin, as if worn in a T-pose.</floater.string>
+  <floater.string name="done_clothing">Your clothes are ready</floater.string>
+  <floater.string name="name_clothing">My clothes</floater.string>
+  <!-- the garment chips, in the order of WOLFAVATARS_API.md "Garment types" (top, dress, trousers, skirt, shoes, hat, cape,
+       gown), comma separated; a garment_detail_<value> string, where there is one, is said on the Garment line -->
+  <floater.string name="garment_words">Top,Dress,Trousers,Skirt,Shoes,Hat,Cape,Gown</floater.string>
+  <floater.string name="garment_label">Garment</floater.string>
+  <floater.string name="garment_detail_top">shirts, jackets, jumpers</floater.string>
+  <floater.string name="garment_detail_trousers">also shorts</floater.string>
+  <!-- [FIGURE 2026-10-20] WOLFAVATARS_API.md "Figure": female | male - a base body's standard, or the body clothing is made for -->
+  <floater.string name="figure_label">Figure</floater.string>
+  <floater.string name="made_for_label">Made for</floater.string>
+  <floater.string name="woman_word">Woman</floater.string>
+  <floater.string name="man_word">Man</floater.string>
+
+  <!-- ===== checking for a character already being made (jobs {kind: character}) ===== -->
+  <panel follows="left|top" height="740" layout="topleft" left="0" mouse_opaque="false" name="loading_panel" top="0" visible="true" width="800">
+    <text type="string" length="1" follows="left|top" font="SansSerifBold" halign="center" height="32" layout="topleft" left="12"
+     name="loading_text" text_color="0.95 0.92 0.84 1" top="400" width="436" word_wrap="true">
+      Checking for a character you were already making...
+    </text>
+  </panel>
+
+  <!-- ===== 1. describe ===== -->
+  <panel follows="left|top" height="740" layout="topleft" left="0" mouse_opaque="false" name="describe_panel" top="0" visible="false" width="800">
+    <text type="string" length="1" follows="left|top" height="32" layout="topleft" left="12" name="intro"
+     text_color="0.95 0.92 0.84 1" top="200" width="436" word_wrap="true">
+      Describe a character, pick one of four pictures, and a wearable avatar arrives in your inventory.
+    </text>
+    <text type="string" length="1" follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="12" name="kind_label"
+     text_color="0.95 0.92 0.84 1" top="240" width="200">
+      What is it?
+    </text>
+    <button follows="left|top" height="150" is_toggle="true" label="" layout="topleft" left="12" name="person_btn" top="260" width="180"
+     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false"
+     tool_tip="Person: stands on two legs. The pictures show it in a T-pose." />
+    <button follows="left|top" height="150" is_toggle="true" label="" layout="topleft" left="12" name="animal_btn" top="420" width="180"
+     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false"
+     tool_tip="Animal: walks on four legs. The pictures show it side-on." />
+    <!-- [CLOTHING 2026-10-20] the third tile: a garment alone, made to fit the WolfAvatars base body -->
+    <button follows="left|top" height="100" is_toggle="true" label="" layout="topleft" left="12" name="clothing_btn" top="580" width="180"
+     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false"
+     tool_tip="Clothing: one garment alone, made to fit the WolfAvatars base body. Wear it (Add) over a base body." />
+    <text type="string" length="1" follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="220" name="name_label"
+     text_color="0.95 0.92 0.84 1" top="240" width="436">
+      Name
+    </text>
+    <line_editor follows="left|top" height="22" layout="topleft" left="220" max_length_chars="48" name="name"
+     tool_tip="The name of the folder it arrives in (48 characters at most)" top="258" width="436" />
+    <text type="string" length="1" follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="220" name="prompt_label"
+     text_color="0.95 0.92 0.84 1" top="288" width="436">
+      Describe your character
+    </text>
+    <text_editor follows="left|top" height="130" layout="topleft" left="220" max_length="600" name="prompt"
+     tool_tip="What it looks like: its body, face, hair or fur, and clothes (600 characters at most)" top="306" width="436" word_wrap="true" />
+    <!-- [BASE BODY 2026-10-20] people only: dressed as described (the default) or a base body to dress later. Drawn by the
+         den (drawClothes) like the Person / Animal tiles; toggle buttons so the keyboard reaches them, one always chosen. -->
+    <button follows="left|top" height="22" is_toggle="true" label="" layout="topleft" left="220" name="dressed_btn" top="400" width="200"
+     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false"
+     tool_tip="Dressed as described: the clothes in your words are part of the avatar" />
+    <button follows="left|top" height="22" is_toggle="true" label="" layout="topleft" left="428" name="base_btn" top="400" width="228"
+     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false"
+     tool_tip="Base body: plain underwear only, barefoot, no accessories - add your own clothes in-world" />
+    <!-- [FIGURE 2026-10-20] Woman / Man: for a base body ("Figure") and for clothing ("Made for"); two drawn chips -->
+    <text type="string" length="1" follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="220" name="figure_label"
+     text_color="0.95 0.92 0.84 1" top="400" width="80">
+      Figure
+    </text>
+    <button follows="left|top" height="22" is_toggle="true" label="" layout="topleft" left="300" name="woman_btn" top="400" width="100"
+     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false"
+     tool_tip="Woman: fitted to the standard female body" />
+    <button follows="left|top" height="22" is_toggle="true" label="" layout="topleft" left="408" name="man_btn" top="400" width="100"
+     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false"
+     tool_tip="Man: fitted to the standard male body" />
+    <!-- [CLOTHING 2026-10-20] the garment: eight drawn chips, two rows of four, one always chosen -->
+    <text type="string" length="1" follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="220" name="garment_label"
+     text_color="0.95 0.92 0.84 1" top="430" width="436" use_ellipses="true">
+      Garment
+    </text>
+    <button follows="left|top" height="22" is_toggle="true" label="" layout="topleft" left="220" name="garment_top_btn" top="450" width="104"
+     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false"
+     tool_tip="Top: shirts, jackets, jumpers - made to fit the WolfAvatars base body" />
+    <button follows="left|top" height="22" is_toggle="true" label="" layout="topleft" left="330" name="garment_dress_btn" top="450" width="104"
+     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false"
+     tool_tip="Dress - made to fit the WolfAvatars base body" />
+    <button follows="left|top" height="22" is_toggle="true" label="" layout="topleft" left="440" name="garment_trousers_btn" top="450" width="104"
+     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false"
+     tool_tip="Trousers (also shorts) - made to fit the WolfAvatars base body" />
+    <button follows="left|top" height="22" is_toggle="true" label="" layout="topleft" left="550" name="garment_skirt_btn" top="450" width="104"
+     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false"
+     tool_tip="Skirt - made to fit the WolfAvatars base body" />
+    <button follows="left|top" height="22" is_toggle="true" label="" layout="topleft" left="220" name="garment_shoes_btn" top="478" width="104"
+     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false"
+     tool_tip="Shoes - made to fit the WolfAvatars base body" />
+    <button follows="left|top" height="22" is_toggle="true" label="" layout="topleft" left="330" name="garment_hat_btn" top="478" width="104"
+     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false"
+     tool_tip="Hat - made to fit the WolfAvatars base body" />
+    <button follows="left|top" height="22" is_toggle="true" label="" layout="topleft" left="440" name="garment_cape_btn" top="478" width="104"
+     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false"
+     tool_tip="Cape - made to fit the WolfAvatars base body" />
+    <button follows="left|top" height="22" is_toggle="true" label="" layout="topleft" left="550" name="garment_gown_btn" top="478" width="104"
+     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false"
+     tool_tip="Gown - made to fit the WolfAvatars base body" />
+    <text type="string" length="1" follows="left|top" font="SansSerifSmall" height="14" layout="topleft" left="220" name="garment_hint"
+     text_color="0.78 0.78 0.86 1" top="510" width="436" use_ellipses="true">
+      Made to fit the WolfAvatars base body - wear it (Add) over a base body.
+    </text>
+    <text type="string" length="1" follows="left|top" font="SansSerifSmall" height="14" layout="topleft" left="220" name="clothes_hint"
+     text_color="0.78 0.78 0.86 1" top="424" width="436" use_ellipses="true">
+      Plain underwear, barefoot - add your own clothes in-world.
+    </text>
+    <text type="string" length="1" follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="220" name="height_label"
+     text_color="0.95 0.92 0.84 1" top="444" width="436">
+      Height
+    </text>
+    <line_editor follows="left|top" height="22" layout="topleft" left="220" max_length_bytes="8" name="height"
+     tool_tip="Height in metres, 0.3 to 4" top="462" width="70" />
+    <text type="string" length="1" follows="left|top" height="32" layout="topleft" left="298" name="height_note"
+     text_color="0.78 0.78 0.86 1" top="464" width="358" word_wrap="true" />
+    <text type="string" length="1" follows="left|top" height="44" layout="topleft" left="220" name="tips"
+     text_color="0.78 0.78 0.86 1" top="500" width="436" word_wrap="true">
+      One character, simple clothes, no long skirts or capes - the pictures show it in a T-pose (people) or side-on (animals).
+    </text>
+    <text type="string" length="1" follows="left|top" height="32" layout="topleft" left="220" name="form_error"
+     text_color="1 0.70 0.52 1" top="548" width="436" word_wrap="true" />
+    <button follows="left|top" height="40" label="Get the price" layout="topleft" left="560" name="price_btn" top="690" width="220"
+     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" use_ellipses="true"
+     label_color="0.16 0.08 0.02 1" label_color_selected="0.16 0.08 0.02 1" label_color_disabled="0.72 0.72 0.80 1" label_color_disabled_selected="0.72 0.72 0.80 1"
+     tool_tip="Nothing is charged yet" />
+  </panel>
+
+  <!-- ===== 2. the price and Start ===== -->
+  <panel follows="left|top" height="740" layout="topleft" left="0" mouse_opaque="false" name="price_panel" top="0" visible="false" width="800">
+    <text type="string" length="1" follows="left|top" font="SansSerifLargeBold" height="22" layout="topleft" left="420" name="price_title"
+     text_color="0.12 0.07 0.03 1" top="220" width="340">
+      The price
+    </text>
+    <text type="string" length="1" follows="left|top" font="SansSerifBold" height="60" layout="topleft" left="420" name="price_text"
+     text_color="0.12 0.07 0.03 1" top="248" width="340" word_wrap="true" />
+    <text type="string" length="1" follows="left|top" height="80" layout="topleft" left="420" name="price_how"
+     text_color="0.78 0.78 0.86 1" top="340" width="340" word_wrap="true">
+      Nothing is charged until you press Start. The 4 pictures are charged once they are drawn; the build is charged when your avatar is made. If a step fails, you are not charged for it.
+    </text>
+    <button follows="left|top" height="34" label="Back" layout="topleft" left="20" name="back_btn" top="693" width="120"
+     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" use_ellipses="true"
+     label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.72 0.72 0.80 1" label_color_disabled_selected="0.72 0.72 0.80 1"
+     tool_tip="Change the description. Nothing is charged." />
+    <button follows="left|top" height="40" label="Start" layout="topleft" left="560" name="start_btn" top="690" width="220"
+     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" use_ellipses="true"
+     label_color="0.16 0.08 0.02 1" label_color_selected="0.16 0.08 0.02 1" label_color_disabled="0.72 0.72 0.80 1" label_color_disabled_selected="0.72 0.72 0.80 1"
+     tool_tip="Start: the 4 pictures are drawn first, then you pick one" />
+  </panel>
+
+  <!-- ===== 3. working: the rune ring is the progress card ===== -->
+  <panel follows="left|top" height="740" layout="topleft" left="0" mouse_opaque="false" name="working_panel" top="0" visible="false" width="800">
+    <text type="string" length="1" follows="left|top" font="SansSerifLargeBold" halign="center" height="36" layout="topleft" left="12"
+     name="work_title" text_color="0.95 0.92 0.84 1" top="200" width="436" word_wrap="true" />
+    <text type="string" length="1" follows="left|top" font="SansSerifBold" halign="center" height="40" layout="topleft" left="12"
+     name="work_words" text_color="1 0.74 0.32 1" top="560" width="436" word_wrap="true" />
+    <text type="string" length="1" follows="left|top" halign="center" height="36" layout="topleft" left="12" name="work_note"
+     text_color="0.78 0.78 0.86 1" top="604" width="436" word_wrap="true">
+      You can close this window: it carries on. Open WolfAvatars again to see how it is going.
+    </text>
+    <button follows="left|top" height="34" label="Stop..." layout="topleft" left="20" name="work_stop_btn" top="693" width="120"
+     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" use_ellipses="true"
+     label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.72 0.72 0.80 1" label_color_disabled_selected="0.72 0.72 0.80 1"
+     tool_tip="Stop making this character (you are asked first)" />
+  </panel>
+
+  <!-- ===== 4-5. the pictures: four gilt frames beside the circle, Pick, More pictures ===== -->
+  <panel follows="left|top" height="740" layout="topleft" left="0" mouse_opaque="false" name="pictures_panel" top="0" visible="false" width="800">
+    <text type="string" length="1" follows="left|top" font="SansSerifBold" halign="center" height="20" layout="topleft" left="12"
+     name="pic_title" text_color="0.95 0.92 0.84 1" top="200" width="436" word_wrap="true" />
+    <text type="string" length="1" follows="left|top" height="32" layout="topleft" left="12" name="pic_error"
+     text_color="1 0.70 0.52 1" top="224" width="436" word_wrap="true" />
+    <panel follows="left|top" height="180" layout="topleft" left="42" name="pic_0" top="260" width="180" />
+    <panel follows="left|top" height="180" layout="topleft" left="230" name="pic_1" top="260" width="180" />
+    <panel follows="left|top" height="180" layout="topleft" left="42" name="pic_2" top="450" width="180" />
+    <panel follows="left|top" height="180" layout="topleft" left="230" name="pic_3" top="450" width="180" />
+    <button follows="left|top" height="34" label="Stop..." layout="topleft" left="20" name="pic_stop_btn" top="693" width="120"
+     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" use_ellipses="true"
+     label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.72 0.72 0.80 1" label_color_disabled_selected="0.72 0.72 0.80 1"
+     tool_tip="Stop making this character (you are asked first)" />
+    <button follows="left|top" height="34" label="More pictures" layout="topleft" left="300" name="more_btn" top="693" width="220"
+     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" use_ellipses="true"
+     label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.72 0.72 0.80 1" label_color_disabled_selected="0.72 0.72 0.80 1"
+     tool_tip="Draw 4 new pictures from the same words" />
+    <button follows="left|top" height="40" label="Pick a picture first" layout="topleft" left="560" name="pick_btn" top="690" width="220"
+     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" use_ellipses="true"
+     label_color="0.16 0.08 0.02 1" label_color_selected="0.16 0.08 0.02 1" label_color_disabled="0.72 0.72 0.80 1" label_color_disabled_selected="0.72 0.72 0.80 1"
+     tool_tip="Make the picked picture into your avatar (3 to 6 minutes)" />
+  </panel>
+
+  <!-- ===== 6. done ===== -->
+  <panel follows="left|top" height="740" layout="topleft" left="0" mouse_opaque="false" name="done_panel" top="0" visible="false" width="800">
+    <text type="string" length="1" follows="left|top" font="SansSerifLargeBold" height="22" layout="topleft" left="420" name="done_title"
+     text_color="1 0.74 0.32 1" top="220" width="340">
+      Your avatar is ready
+    </text>
+    <text_editor enabled="true" follows="left|top" height="300" layout="topleft" left="420" max_length="65536" name="report"
+     read_only="true" top="248" width="340" word_wrap="true" />
+    <text type="string" length="1" follows="left|top" height="44" layout="topleft" left="420" name="done_note"
+     text_color="0.78 0.78 0.86 1" top="560" width="340" word_wrap="true">
+      If the folder is not in your inventory yet, relog or refresh your inventory.
+    </text>
+    <button follows="left|top" height="34" label="Make another" layout="topleft" left="20" name="another_btn" top="693" width="160"
+     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" use_ellipses="true"
+     label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.72 0.72 0.80 1" label_color_disabled_selected="0.72 0.72 0.80 1"
+     tool_tip="Describe a new character" />
+    <button follows="left|top" height="40" label="Open my inventory" layout="topleft" left="560" name="inventory_btn" top="690" width="220"
+     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" use_ellipses="true"
+     label_color="0.16 0.08 0.02 1" label_color_selected="0.16 0.08 0.02 1" label_color_disabled="0.72 0.72 0.80 1" label_color_disabled_selected="0.72 0.72 0.80 1"
+     tool_tip="Show the avatar's folder in your inventory (Objects)" />
+  </panel>
+
+  <!-- ===== Stop: asked first ===== -->
+  <panel follows="left|top" height="740" layout="topleft" left="0" mouse_opaque="false" name="stop_panel" top="0" visible="false" width="800">
+    <text type="string" length="1" follows="left|top" font="SansSerifBold" height="28" layout="topleft" left="12" name="stop_text"
+     text_color="0.95 0.92 0.84 1" top="600" width="436" word_wrap="true">
+      Stop making this character? Pictures already drawn stay paid for; nothing more is charged.
+    </text>
+    <button follows="left|top" height="30" label="Keep going" layout="topleft" left="12" name="stop_no_btn" top="630" width="140"
+     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" use_ellipses="true"
+     label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.72 0.72 0.80 1" label_color_disabled_selected="0.72 0.72 0.80 1"
+     tool_tip="Carry on making it" />
+    <button follows="left|top" height="30" label="Stop it" layout="topleft" left="328" name="stop_yes_btn" top="630" width="140"
+     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" use_ellipses="true"
+     label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.72 0.72 0.80 1" label_color_disabled_selected="0.72 0.72 0.80 1"
+     tool_tip="Stop making this character" />
+  </panel>
+
+  <!-- failures, until the next action, on their own plate -->
+  <text type="string" length="1" follows="left|top" font="SansSerifBold" height="44" layout="topleft" left="12" name="error"
+   text_color="1 0.70 0.52 1" top="640" width="436" word_wrap="true" />
+  <button follows="left|top" height="28" label="Buy credits..." layout="topleft" left="460" name="buy_btn" top="644" visible="false" width="130"
+   image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" use_ellipses="true"
+   label_color="0.16 0.08 0.02 1" label_color_selected="0.16 0.08 0.02 1" label_color_disabled="0.72 0.72 0.80 1" label_color_disabled_selected="0.72 0.72 0.80 1"
+   tool_tip="Opens the Wolf Territories credits page in your browser" />
+
+</floater>

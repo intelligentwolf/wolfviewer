@@ -818,13 +818,89 @@
 	  <button.commit_callback
 	     function="BuildTool.applyToSelection"/>
     </button>
+    <!-- [WolfViewer 2026-10-20] land brush multiplier for big regions (lltoolbrush.cpp wolf_land_brush_size,
+         llfloatertools.cpp wolfSyncBrushScale): the row takes 39 px of the 48 below Apply, so link_num_obj_count's
+         top_pad drops from 48 to 9 and nothing under it moves. -->
+    <text
+     type="string"
+     length="1"
+     follows="left|top"
+     font="SansSerifSmall"
+     height="12"
+     layout="topleft"
+     left="135"
+     name="wolf_brush_scale_label"
+     top_pad="5"
+     width="155">
+        Size x1 (big regions)
+    </text>
+    <button
+     follows="left|top"
+     height="19"
+     is_toggle="true"
+     label="1x"
+     label_selected="1x"
+     layout="topleft"
+     left="135"
+     top_pad="3"
+     name="wolf_brush_scale_1"
+     tool_tip="Normal brush size (for big regions)"
+     width="28" />
+    <button
+     follows="left|top"
+     height="19"
+     is_toggle="true"
+     label="2x"
+     label_selected="2x"
+     layout="topleft"
+     left_pad="4"
+     top_delta="0"
+     name="wolf_brush_scale_2"
+     tool_tip="Brush twice as big (for big regions)"
+     width="28" />
+    <button
+     follows="left|top"
+     height="19"
+     is_toggle="true"
+     label="4x"
+     label_selected="4x"
+     layout="topleft"
+     left_pad="4"
+     top_delta="0"
+     name="wolf_brush_scale_4"
+     tool_tip="Brush four times as big (for big regions)"
+     width="28" />
+    <button
+     follows="left|top"
+     height="19"
+     is_toggle="true"
+     label="8x"
+     label_selected="8x"
+     layout="topleft"
+     left_pad="4"
+     top_delta="0"
+     name="wolf_brush_scale_8"
+     tool_tip="Brush eight times as big (for big regions)"
+     width="28" />
+    <button
+     follows="left|top"
+     height="19"
+     is_toggle="true"
+     label="10x"
+     label_selected="10x"
+     layout="topleft"
+     left_pad="4"
+     top_delta="0"
+     name="wolf_brush_scale_10"
+     tool_tip="Brush ten times as big (for big regions)"
+     width="28" />
     <text
      type="string"
      length="1"
      height="10"
      follows="left|top"
      layout="topleft"
-     top_pad="48"
+     top_pad="9"
      left="10"
      name="link_num_obj_count"
 	 tool_tip="Link number may not be accurate."

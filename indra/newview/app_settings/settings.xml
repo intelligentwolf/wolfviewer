@@ -19891,6 +19891,17 @@ Change of this parameter will affect the layout of buttons in notification toast
 			<key>Value</key>
 			<integer>1</integer>
 		</map>
+		<key>WolfLandBrushScale</key>
+		<map>
+			<key>Comment</key>
+			<string>[WolfViewer 2026-10-20] Multiplies the terraform brush (Build > Land, LandBrushSize) for big regions: 1, 2, 4, 8 or 10 (Paul: Jimmy Olsen's 20x20 region). The region uses the size the viewer sends (OpenSim TerrainModule client_OnModifyTerrain, ModifyBlockExtended.BrushSize).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>F32</string>
+			<key>Value</key>
+			<real>1.0</real>
+		</map>
 		<key>WolfFXEnabled</key>
 		<map>
 			<key>Comment</key>

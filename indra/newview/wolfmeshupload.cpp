@@ -49,7 +49,9 @@
 #include "llfloaterperms.h"
 #include "llhttpconstants.h"
 #include "llinventorymodel.h"
+#include "llmeshoptimizer.h"
 #include "llprimitive.h"
+#include "llvector4a.h"
 #include "llsdjson.h"
 #include "llviewerassetupload.h"
 #include "llviewerinventory.h"
@@ -1243,6 +1245,129 @@ bool Model::load(const std::string& path, std::string& error)
 
 namespace
 {
+    size_t triangleCount(const std::vector<WolfMeshUpload::Submesh>& subs)
+    {
+        size_t tris = 0;
+        for (const WolfMeshUpload::Submesh& s : subs)
+        {
+            tris += s.mIndices.size() / 3;
+        }
+        return tris;
+    }
+
+    /** 1234567 -> "1,234,567", for the numbers the floater shows the user. */
+    std::string withCommas(size_t n)
+    {
+        std::string digits = llformat("%llu", (unsigned long long)n);
+        std::string out;
+        const size_t len = digits.size();
+        for (size_t i = 0; i < len; ++i)
+        {
+            if (i && (len - i) % 3 == 0)
+            {
+                out += ',';
+            }
+            out += digits[i];
+        }
+        return out;
+    }
+
+    /**
+     * Bring a model over MAX_TRIANGLES down to the budget, every material in proportion to its
+     * own triangle count, so no material is dropped or starved.
+     *
+     * The simplifier is the one the viewer's own LOD generator uses: LLMeshOptimizer::simplifyU32
+     * (llmeshoptimizer.cpp:259-298), called the way llmodelpreview.cpp:2246-2256 calls it, with
+     * LLVector4a positions and the non-sloppy (topology-preserving) mode. Non-sloppy matters for
+     * a textured model: meshopt_simplify "tries to preserve mesh topology" (meshoptimizer.h:441)
+     * and treats the index buffer's vertex identity as the attribute split — the header asks for
+     * a reindex WITHOUT unneeded attributes for exactly that reason (meshoptimizer.h:442) — so
+     * UV seams survive; simplifySloppy "can affect UVs significantly" (llmodelpreview.cpp:2208).
+     *
+     * target_error is 1.0, i.e. "no error ceiling", because the goal is the triangle budget, not
+     * a quality threshold; meshopt_simplify stops at target_index_count
+     * (meshoptimizer.h:441, :450) and reports the error it actually reached. MEASURED on the
+     * 2026-10-20 Meshy crossroad GLB (3,557,410 tris, 1,930,371 verts): 299,984 tris,
+     * 218,449 verts, result_error 0.00037 (0.037% of the model's size), 3.8 s.
+     *
+     * The simplified index list references the ORIGINAL vertex array (meshoptimizer.h:445), so
+     * each submesh is then compacted to the vertices still in use, normals and UVs alongside.
+     * A submesh the simplifier would empty keeps its original triangles rather than vanishing;
+     * finalise() then reports honestly if the total is still over budget.
+     */
+    void simplifyToBudget(std::vector<WolfMeshUpload::Submesh>& subs, size_t total_tris, size_t budget,
+                          F32& worst_error)
+    {
+        worst_error = 0.f;
+        for (WolfMeshUpload::Submesh& s : subs)
+        {
+            const size_t tris = s.mIndices.size() / 3;
+            if (tris == 0 || s.mPositions.empty())
+            {
+                continue;
+            }
+            // Proportional share of the budget, at least one triangle. U64 so tris * budget
+            // cannot overflow (3.5M x 300k is ~1e12).
+            const U64 share = llmax((U64)1, (U64)tris * (U64)budget / (U64)total_tris);
+            if (share >= tris)
+            {
+                continue;
+            }
+
+            std::vector<LLVector4a> pos4(s.mPositions.size());
+            for (size_t i = 0; i < s.mPositions.size(); ++i)
+            {
+                pos4[i].set(s.mPositions[i].mV[VX], s.mPositions[i].mV[VY], s.mPositions[i].mV[VZ], 0.f);
+            }
+            // meshoptimizer.h:448 — destination must hold index_count, not target_index_count.
+            std::vector<U32> simplified(s.mIndices.size());
+            F32 result_error = 0.f;
+            const U64 kept = LLMeshOptimizer::simplifyU32(
+                simplified.data(), s.mIndices.data(), s.mIndices.size(),
+                pos4.data(), pos4.size(), sizeof(LLVector4a),
+                share * 3, 1.f, false, &result_error);
+            if (kept < 3 || kept > s.mIndices.size())
+            {
+                LL_WARNS("WolfMeshUpload") << "simplify left \"" << s.mMaterialName << "\" with " << kept
+                    << " indices; keeping its " << tris << " original triangles" << LL_ENDL;
+                continue;
+            }
+            simplified.resize((size_t)(kept - kept % 3));
+            worst_error = llmax(worst_error, result_error);
+
+            // Compact to the vertices the simplified triangles still use.
+            const bool has_normals = (s.mNormals.size() == s.mPositions.size());
+            const bool has_uvs = (s.mTexCoords.size() == s.mPositions.size());
+            std::vector<U32> remap(s.mPositions.size(), U32_MAX);
+            std::vector<LLVector3> positions, normals;
+            std::vector<LLVector2> uvs;
+            for (U32& index : simplified)
+            {
+                if (remap[index] == U32_MAX)
+                {
+                    remap[index] = (U32)positions.size();
+                    positions.push_back(s.mPositions[index]);
+                    if (has_normals)
+                    {
+                        normals.push_back(s.mNormals[index]);
+                    }
+                    if (has_uvs)
+                    {
+                        uvs.push_back(s.mTexCoords[index]);
+                    }
+                }
+                index = remap[index];
+            }
+            LL_INFOS("WolfMeshUpload") << "simplified \"" << s.mMaterialName << "\" from " << tris
+                << " to " << simplified.size() / 3 << " tris (" << s.mPositions.size() << " -> "
+                << positions.size() << " verts), error " << result_error << LL_ENDL;
+            s.mPositions = std::move(positions);
+            s.mNormals = std::move(normals);
+            s.mTexCoords = std::move(uvs);
+            s.mIndices = std::move(simplified);
+        }
+    }
+
     /**
      * Split any material whose vertex count exceeds the mesh format's 16-bit index limit into
      * several faces, re-indexed so each one stands alone.
@@ -1408,6 +1533,30 @@ bool Model::finalise(std::string& error)
     {
         return true;
     }
+
+    // OVER THE TRIANGLE BUDGET IS SIMPLIFIED HERE, BEFORE SPLITTING, AND SAID SO.
+    // 2026-10-20: a 3,557,410-triangle Meshy GLB built a 234,958,064-byte request, past the
+    // proxy's 128 MiB body cap (rust_proxy/src/main.rs:4616), and every attempt came back
+    // "HTTP 400". Simplifying the whole materials first (U32 indices, before the 65,532-vertex
+    // split) lets the simplifier see each surface whole, so no seams appear between chunks.
+    mSimplifiedFromTris = 0;
+    mSimplifyError = 0.f;
+    const size_t file_tris = triangleCount(mSubmeshes);
+    if (file_tris > MAX_TRIANGLES)
+    {
+        simplifyToBudget(mSubmeshes, file_tris, MAX_TRIANGLES, mSimplifyError);
+        const size_t now_tris = triangleCount(mSubmeshes);
+        if (now_tris > MAX_TRIANGLES)
+        {
+            error = "This model has " + withCommas(file_tris) + " triangles. Uploads are limited to "
+                  + withCommas(MAX_TRIANGLES) + ", and simplifying it automatically only got it down to "
+                  + withCommas(now_tris) + ". Reduce the polygon count in the program that made it "
+                    "(decimate or remesh), then choose the file again.";
+            return false;
+        }
+        mSimplifiedFromTris = file_tris;
+    }
+
     mSubmeshes = splitOversized(mSubmeshes);
 
     if (mSubmeshes.empty())
@@ -1566,6 +1715,16 @@ std::string Model::summary(bool include_textures) const
         o << " — rezzes as a linkset of " << mPrims.size() << " prims";
     }
     o << "\n";
+
+    if (mSimplifiedFromTris)
+    {
+        // Said every time the panel is drawn, not once in a log: the user must know the object
+        // they get is not the file they chose, by how much, and what to do for full detail.
+        o << "Simplified automatically: the file has " << withCommas(mSimplifiedFromTris)
+          << " triangles and uploads are limited to " << withCommas(MAX_TRIANGLES) << ", so it was reduced to "
+          << withCommas(tris) << llformat(" (shape kept within %.2f%% of its size). ", mSimplifyError * 100.f)
+          << "For more detail, reduce it yourself in the program that made it.\n";
+    }
 
     const U32 distinct = distinctTextureCount();
     if (textured)
@@ -1915,14 +2074,25 @@ namespace
         {
             reply = result[LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS_RAW].asBinary();
         }
+        else if (!status && http_results.has("error_body"))
+        {
+            // On a failure status the raw handler never fills HTTP_RESULTS_RAW (its
+            // handleSuccess is not called); the body the server sent is kept as
+            // http_result["error_body"] instead (llcorehttputil.cpp:310-322). The proxy puts
+            // its reason there — e.g. main.rs:4621 "Failed to read body: ..." — so read it, or
+            // the user only ever sees "HTTP 400".
+            const std::string error_body = http_results["error_body"].asString();
+            reply.assign(error_body.begin(), error_body.end());
+        }
         error = status ? std::string() : status.toString();
         return status.getType();
     }
 
     /** Parse the proxy's reply. Source: main.rs:3910-3917 — success and failure are BOTH
      *  HTTP 200; `success` is the field that decides. */
-    bool parseReply(const LLSD::Binary& bytes, LLUUID& item_id, std::string& error)
+    bool parseReply(const LLSD::Binary& bytes, LLUUID& item_id, std::string& error, bool& server_gave_reason)
     {
+        server_gave_reason = false;
         const std::string text(bytes.begin(), bytes.end());
         boost::system::error_code ec;
         boost::json::value v = boost::json::parse(text, ec);
@@ -1934,7 +2104,18 @@ namespace
         LLSD sd = LlsdFromJson(v);
         if (!sd["success"].asBoolean())
         {
-            error = sd.has("error") ? sd["error"].asString() : std::string("upload failed");
+            // The proxy names the reason "error" on /upload_mesh (main.rs:4601-4653) and
+            // "message" on its catch-all 404 (main.rs:4656).
+            const char* key = sd.has("error") ? "error" : (sd.has("message") ? "message" : NULL);
+            if (key && !sd[key].asString().empty())
+            {
+                error = sd[key].asString();
+                server_gave_reason = true;
+            }
+            else
+            {
+                error = "upload failed";
+            }
             return false;
         }
         item_id = sd["item_id"].asUUID();
@@ -2054,6 +2235,39 @@ namespace
         {
             done(false, "Your Objects inventory folder has not loaded yet. Open Inventory and try again.", LLUUID::null);
             return;
+        }
+
+        // SIZE CHECK BEFORE ANYTHING IS UPLOADED. The proxy refuses a body over its cap with
+        // HTTP 400 (main.rs:4616), and by then every texture has already gone into the user's
+        // inventory — on 2026-10-20 three attempts left three orphaned texture items. So build
+        // the body now with a stand-in UUID per distinct texture (a UUID is fixed-size, so the
+        // TextureEntry comes out the same length as the real one) and stop here if it is over.
+        {
+            std::map<std::string, LLUUID> stand_in;
+            if (options.mIncludeTextures)
+            {
+                for (const WolfMeshUpload::Prim& prim : model->prims())
+                {
+                    for (const WolfMeshUpload::Submesh& f : prim.mFaces)
+                    {
+                        if (!f.mTextureKey.empty() && !stand_in.count(f.mTextureKey))
+                        {
+                            stand_in[f.mTextureKey] = LLUUID::generateNewID();
+                        }
+                    }
+                }
+            }
+            const size_t projected = buildRequestBody(*model, options, folder_id, stand_in).size();
+            if (projected > WolfMeshUpload::MAX_REQUEST_BYTES)
+            {
+                done(false, llformat("Not uploaded: this model would be a %.1f MB upload and the mesh service "
+                                     "accepts at most %.0f MB. Nothing was sent or charged. Reduce the "
+                                     "polygon count in the program that made it, then try again.",
+                                     (F64)projected / (1024.0 * 1024.0),
+                                     (F64)WolfMeshUpload::MAX_REQUEST_BYTES / (1024.0 * 1024.0)),
+                     LLUUID::null);
+                return;
+            }
         }
 
         std::map<std::string, LLUUID> uuid_by_key;
@@ -2177,6 +2391,22 @@ namespace
         const std::string body = buildRequestBody(*model, options, folder_id, uuid_by_key);
         LL_INFOS("WolfMeshUpload") << "POST /upload_mesh, " << body.size() << " bytes, "
             << model->prims().size() << " prim(s), " << uuid_by_key.size() << " texture(s)" << LL_ENDL;
+        if (body.size() > WolfMeshUpload::MAX_REQUEST_BYTES)
+        {
+            // The pre-check above measured the same body with stand-in UUIDs, so this should not
+            // trip; if it ever does, say the real reason instead of letting the proxy answer 400.
+            std::string msg = llformat("Not uploaded: this model is a %.1f MB upload and the mesh service accepts at "
+                                       "most %.0f MB.",
+                                       (F64)body.size() / (1024.0 * 1024.0),
+                                       (F64)WolfMeshUpload::MAX_REQUEST_BYTES / (1024.0 * 1024.0));
+            if (!uuid_by_key.empty())
+            {
+                msg += llformat(" Its %u texture(s) were already uploaded and are in your Textures folder.",
+                                (U32)uuid_by_key.size());
+            }
+            done(false, msg, LLUUID::null);
+            return;
+        }
 
         LLSD::Binary reply;
         std::string transport_error;
@@ -2188,17 +2418,26 @@ namespace
         // failure with no usable body falls back to describing the status code.
         LLUUID item_id;
         std::string error;
-        const bool body_says_ok = parseReply(reply, item_id, error);
+        bool server_gave_reason = false;
+        const bool body_says_ok = parseReply(reply, item_id, error, server_gave_reason);
         if (!body_says_ok)
         {
-            // A transport failure has no useful body to explain itself, so name the status
-            // instead of reporting "reply was not JSON".
             if (status < 200 || status >= 300)
             {
-                error = llformat("the mesh service returned HTTP %d", status);
-                if (!transport_error.empty())
+                if (server_gave_reason)
                 {
-                    error += " (" + transport_error + ")";
+                    // The server's own words, with the status beside them.
+                    error = llformat("the mesh service returned HTTP %d: ", status) + error;
+                }
+                else
+                {
+                    // A transport failure has no useful body to explain itself, so name the
+                    // status instead of reporting "reply was not JSON".
+                    error = llformat("the mesh service returned HTTP %d", status);
+                    if (!transport_error.empty())
+                    {
+                        error += " (" + transport_error + ")";
+                    }
                 }
             }
             done(false, "Upload failed: " + error, LLUUID::null);

@@ -26,6 +26,7 @@
 #include "llsd.h"
 
 class LLButton;
+class LLComboBox;
 class LLFontGL;
 class LLLineEditor;
 class LLPanel;
@@ -168,6 +169,9 @@ private:
     void onPictureClicked(S32 n);
 
     void resume();
+    void loadAvatars();                 // [MADE FOR 2026-10-20] jobs -> avatars: the "This clothing is for" list
+    void takeAvatars(const LLSD& reply);
+    void fillForCombo();
     void poll();
     /** A job {job} reply (or the job a resume found): the step and every widget follow its state. */
     void applyJob(const LLSD& job);
@@ -203,6 +207,12 @@ private:
     EKind mKind = KIND_PERSON;          // Person (two legs), Animal (four legs) or Clothing: the three drawn tiles
     S32 mGarment = 0;                   // [CLOTHING 2026-10-20] index into GARMENT_IDS (llfloaterwolfavatars.cpp), Top first
     bool mMale = false;                 // [FIGURE 2026-10-20] figure "male" (true) or "female" (false, the default)
+    // [MADE FOR 2026-10-20] clothing: "" not chosen yet, "female" / "male" a standard body, or the job of one of the
+    // resident's avatars (jobs: avatars [{job, name}], wolfavatars_bodies); mAvatarsRead false until that list is read
+    std::string mForWho;
+    std::vector<std::pair<std::string, std::string>> mAvatars;
+    bool mAvatarsRead = false;
+    U32 mAvatarsSerial = 0;
     // [BASE BODY 2026-10-20] Paul: "make sure we can make avatars without clothing so people can add clothing later".
     // char_quote clothes "base" (true) or "dressed" (false, the default); people only (wolfavatars_lib.php wa_api_char_quote)
     bool mBase = false;
@@ -224,6 +234,7 @@ private:
     LLTextBox* mFigureLabel = nullptr;
     LLButton* mWomanBtn = nullptr;
     LLButton* mManBtn = nullptr;
+    LLComboBox* mForCombo = nullptr;    // [MADE FOR 2026-10-20] "This clothing is for" (clothing only)
     // the XUI's own words for a person or an animal, put back when Clothing is let go of
     std::string mIntroText, mPromptLabelText, mPromptTip, mTipsText, mDoneTitleText;
     LLTextBox* mLoadingText = nullptr;
@@ -260,6 +271,11 @@ private:
     LLTextBox* mPicTitle = nullptr;
     LLTextBox* mPicError = nullptr;
     WolfAvatarPicture* mPic[PICTURES] = { nullptr, nullptr, nullptr, nullptr };
+    // [BIG PICTURE 2026-10-20] Paul: "when i get an image can i click on it to make it bigger" - "sometimes they are a bit
+    // small": a clicked picture is shown large over the four (the four frames' area), with Pick and Back to all four
+    WolfAvatarPicture* mPicBig = nullptr;
+    LLButton* mZoomBackBtn = nullptr;
+    bool mZoom = false;
     LLButton* mPickBtn = nullptr;
     LLButton* mMoreBtn = nullptr;
     LLButton* mPicStop = nullptr;

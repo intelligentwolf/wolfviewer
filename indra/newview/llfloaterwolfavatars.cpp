@@ -23,6 +23,7 @@
 
 #include "apr_base64.h"
 #include "llbutton.h"
+#include "llcombobox.h"
 #include "lldraghandle.h"
 #include "llfloaterreg.h"
 #include "llfontgl.h"
@@ -902,6 +903,14 @@ bool LLFloaterWolfAvatars::postBuild()
     mWomanBtn->setCommitCallback([this](LLUICtrl*, const LLSD&) { setFigure(false); });
     mManBtn = getChild<LLButton>("man_btn");
     mManBtn->setCommitCallback([this](LLUICtrl*, const LLSD&) { setFigure(true); });
+    // [MADE FOR 2026-10-20] "This clothing is for": one of the resident's avatars or a standard body
+    mForCombo = getChild<LLComboBox>("for_combo");
+    mForCombo->setCommitCallback([this](LLUICtrl*, const LLSD&)
+    {
+        mForWho = mForCombo->getValue().asString();
+        if (mForWho == "female" || mForWho == "male") mMale = mForWho == "male";
+        clearError();
+    });
     mLoadingText = getChild<LLTextBox>("loading_text");
     mIntro = getChild<LLTextBox>("intro");
     mKindLabel = getChild<LLTextBox>("kind_label");
@@ -956,6 +965,23 @@ bool LLFloaterWolfAvatars::postBuild()
         mPic[i]->mNumber = i + 1;
         mPic[i]->mPickedWord = getString("picked");
     }
+    {
+        // [BIG PICTURE] one more picture view over the four frames' area (placed by the layout), shown for a clicked picture
+        LLUICtrl::Params pp;
+        pp.name = "pic_view_big";
+        pp.rect = LLRect(0, 370, 368, 0);
+        pp.follows.flags = FOLLOWS_NONE;
+        pp.tab_stop = true;
+        pp.mouse_opaque = true;
+        pp.tool_tip = "Click to go back to all four pictures";
+        mPicBig = LLUICtrlFactory::create<WolfAvatarPicture>(pp);
+        mPanels[4]->addChild(mPicBig);
+        mPicBig->mOnPick = [this]() { mZoom = false; refreshPictures(); };
+        mPicBig->mPickedWord = getString("picked");
+        mPicBig->setVisible(false);
+    }
+    mZoomBackBtn = getChild<LLButton>("zoom_back_btn");
+    mZoomBackBtn->setCommitCallback([this](LLUICtrl*, const LLSD&) { mZoom = false; refreshPictures(); });
     mPickBtn = getChild<LLButton>("pick_btn");
     mPickBtn->setCommitCallback([this](LLUICtrl*, const LLSD&) { onPick(); });
     mMoreBtn = getChild<LLButton>("more_btn");
@@ -1068,8 +1094,67 @@ void LLFloaterWolfAvatars::refreshClothes()
     mWomanBtn->setToggleState(!mMale);
     mManBtn->setToggleState(mMale);
     mFigureLabel->setVisible(figure);
-    mWomanBtn->setVisible(figure);
-    mManBtn->setVisible(figure);
+    // [MADE FOR 2026-10-20] clothing chooses its body in "This clothing is for"; Woman / Man stay for a base body
+    mWomanBtn->setVisible(figure && !clothing);
+    mManBtn->setVisible(figure && !clothing);
+    mForCombo->setVisible(clothing);
+}
+
+// [MADE FOR 2026-10-20] Paul: "with clothing as well its important it takes note of what its for" ... "maybbe we should have a
+// dropdown 'This clothing is for <dropdown avatars>'". Source: wolfmind_lib.php wa_api_jobs - jobs {kind: "character"} ->
+// avatars [{job, name}] (wolfavatars_lib.php wch_bodies_of: the resident's avatars clothing can be fitted to, newest first).
+// Read on every open, so an avatar finished since is in the list.
+void LLFloaterWolfAvatars::loadAvatars()
+{
+    LLSD body;
+    body["kind"] = "character";
+    const U32 serial = ++mAvatarsSerial;
+    LLHandle<LLFloater> h = handle();
+    WolfAdventure::api("jobs", body, [h, serial](bool ok, const LLSD& reply, const std::string& error)
+    {
+        LLFloaterWolfAvatars* self = dynamic_cast<LLFloaterWolfAvatars*>(h.get());
+        if (!self || serial != self->mAvatarsSerial) return;
+        if (!ok)
+        {
+            // only the standard bodies are offered, and the window says why (never only in the log)
+            self->mAvatars.clear();
+            self->mAvatarsRead = true;
+            self->fillForCombo();
+            if (self->isClothing()) self->setError("Your avatars could not be listed, so only the standard bodies are offered: " + error, reply);
+            return;
+        }
+        self->takeAvatars(reply);
+    });
+}
+
+void LLFloaterWolfAvatars::takeAvatars(const LLSD& reply)
+{
+    mAvatars.clear();
+    for (const LLSD& a : llsd::inArray(reply["avatars"]))
+    {
+        const std::string job = a["job"].asString();
+        if (job.empty() || mAvatars.size() >= 50) continue;
+        mAvatars.emplace_back(job, cap(a["name"].asString(), 48));
+    }
+    mAvatarsRead = true;
+    fillForCombo();
+}
+
+/** The list's choices: "Choose..." (while they have avatars and none is chosen), their avatars, then Woman / Man. With no
+ *  avatars the standard woman is already chosen, as the figure was before. */
+void LLFloaterWolfAvatars::fillForCombo()
+{
+    if (!mForCombo) return;
+    bool known = mForWho == "female" || mForWho == "male";
+    for (const auto& a : mAvatars) known = known || a.first == mForWho;
+    if (!known && mAvatarsRead) mForWho = mAvatars.empty() ? "female" : "";   // not read yet: kept until the list says
+    mForCombo->removeall();
+    if (!mAvatarsRead) mForCombo->add(getString("for_listing"), LLSD(""));
+    else if (!mAvatars.empty()) mForCombo->add(getString("for_choose"), LLSD(""));
+    for (const auto& a : mAvatars) mForCombo->add(a.second.empty() ? std::string("Unnamed avatar") : a.second, LLSD(a.first));
+    mForCombo->add(getString("for_woman"), LLSD("female"));
+    mForCombo->add(getString("for_man"), LLSD("male"));
+    mForCombo->selectByValue(LLSD(mForWho));
 }
 
 void LLFloaterWolfAvatars::onOpen(const LLSD& key)
@@ -1083,6 +1168,7 @@ void LLFloaterWolfAvatars::onOpen(const LLSD& key)
     }
     // a job already on screen (the window was only hidden) carries on; otherwise look for one to take up again
     if (mJob.empty() && mStep != STEP_DESCRIBE) resume();
+    else loadAvatars();   // [MADE FOR] resume reads the list itself
 }
 
 void LLFloaterWolfAvatars::onClose(bool app_quitting)
@@ -1209,6 +1295,7 @@ void LLFloaterWolfAvatars::onGetPrice()
         if (!LLStringUtil::convertToF64(height, metres)) bad = "The height is a number of metres, like 1.8.";
         else if (metres < HEIGHT_MIN || metres > HEIGHT_MAX) bad = "The height is from 0.3 to 4 metres.";
     }
+    if (bad.empty() && clothing && mForWho.empty()) bad = getString("for_missing");   // [MADE FOR] chosen, never assumed
     if (!bad.empty())
     {
         mFormError->setText(bad);
@@ -1226,8 +1313,14 @@ void LLFloaterWolfAvatars::onGetPrice()
     if (!clothing) body["clothes"] = (person && mBase) ? "base" : "dressed";
     // [CLOTHING 2026-10-20] Flow 1 - garment top | dress | trousers | skirt | shoes | hat | cape | gown, required for clothing
     if (clothing) body["garment"] = GARMENT_IDS[mGarment];
-    // [FIGURE 2026-10-20] Flow 1 "Figure" - female | male, sent for a base body and for clothing only
-    if (figureShown()) body["figure"] = mMale ? "male" : "female";
+    // [FIGURE 2026-10-20] Flow 1 "Figure" - female | male, sent for a base body; clothing sends `for` (wa_api_char_quote:
+    // one of their avatars' jobs, or "" = a standard body - then the figure - and the words are not searched for a name)
+    if (clothing)
+    {
+        if (mForWho == "female" || mForWho == "male") { body["for"] = ""; body["figure"] = mForWho; }
+        else body["for"] = mForWho;
+    }
+    else if (figureShown()) body["figure"] = mMale ? "male" : "female";
     setBusy(true);
     mPriceBtn->setLabel(std::string("Working out the price..."));
     const U32 serial = ++mSerial;
@@ -1265,7 +1358,9 @@ void LLFloaterWolfAvatars::onGetPrice()
             what.push_back(i < (S32)words.size() ? words[i] : garment);
         }
         const std::string figure = reply["figure"].asString();
-        if (figure == "female") what.push_back(self->getString("woman_word"));
+        const std::string for_name = reply["forName"].asString();   // [MADE FOR] the avatar it is fitted to
+        if (!for_name.empty()) what.push_back("for " + cap(for_name, 48));
+        else if (figure == "female") what.push_back(self->getString("woman_word"));
         else if (figure == "male") what.push_back(self->getString("man_word"));
         std::string base;
         for (const std::string& w : what) base += (base.empty() ? " (" : ", ") + w;
@@ -1367,6 +1462,8 @@ void LLFloaterWolfAvatars::applyJob(const LLSD& job)
         for (S32 i = 0; i < GARMENTS; ++i) if (job["garment"].asString() == GARMENT_IDS[i]) mGarment = i;
     }
     if (job["figure"].isString()) mMale = job["figure"].asString() == "male";
+    if (job["for"].isString() && !job["for"].asString().empty()) { mForWho = job["for"].asString(); fillForCombo(); }   // [MADE FOR]
+    else if (job["figure"].isString() && job["characterKind"].asString() == "clothing") { mForWho = job["figure"].asString(); fillForCombo(); }
     if (job.has("characterKind"))
     {
         const std::string ck = job["characterKind"].asString();
@@ -1493,6 +1590,7 @@ void LLFloaterWolfAvatars::resume()
             self->setError("Could not check for a character you were already making: " + error, reply);
             return;
         }
+        self->takeAvatars(reply);   // [MADE FOR] the same reply lists the avatars clothing can be made for
         // the newest unfinished one: queued or running (being made) or asking (waiting for a picture to be picked)
         for (const LLSD& j : llsd::inArray(reply["jobs"]))
         {
@@ -1523,6 +1621,7 @@ void LLFloaterWolfAvatars::loadPictures(S32 count, S32 round)
     mPicRound = round;
     mPicCount = count;
     mPicked = -1;
+    mZoom = false;
     for (S32 i = 0; i < PICTURES; ++i)
     {
         mPic[i]->mTexture = nullptr;
@@ -1597,8 +1696,25 @@ void LLFloaterWolfAvatars::refreshPictures()
         mPic[i]->setVisible(i < mPicCount);
     }
     const bool shown = mPicked >= 0 && mPicked < mPicCount && mPic[mPicked]->mState == WolfAvatarPicture::S_SHOWN;
+    // [BIG PICTURE] the clicked picture large over the four, until Back to all four (or a click on it)
+    const bool zoom = mZoom && shown;
+    for (S32 i = 0; i < PICTURES; ++i) mPicSlot[i]->setVisible(!zoom);
+    if (mPicBig)
+    {
+        mPicBig->setVisible(zoom);
+        if (zoom)
+        {
+            mPicBig->mTexture = mPic[mPicked]->mTexture;
+            mPicBig->mState = WolfAvatarPicture::S_SHOWN;
+            mPicBig->mNumber = mPicked + 1;
+            mPicBig->mSelected = true;
+            mPicBig->setEnabled(!mBusy);
+        }
+    }
+    if (mZoomBackBtn) { mZoomBackBtn->setVisible(zoom); mZoomBackBtn->setEnabled(!mBusy); }
+    mMoreBtn->setVisible(!zoom);
     mPickBtn->setEnabled(!mBusy && shown);
-    mPickBtn->setLabel(mPicked >= 0 ? llformat("Make picture %d", mPicked + 1) : std::string("Pick a picture first"));
+    mPickBtn->setLabel(zoom ? std::string("Pick this one") : mPicked >= 0 ? llformat("Make picture %d", mPicked + 1) : std::string("Pick a picture first"));
     mMoreBtn->setEnabled(!mBusy && mMoreCredits >= 0);
     mMoreBtn->setLabel(mMoreCredits >= 0 ? llformat("More pictures (%d credits)", mMoreCredits) : std::string("More pictures"));
 }
@@ -1609,6 +1725,7 @@ void LLFloaterWolfAvatars::onPictureClicked(S32 n)
     if (mPic[n]->mState == WolfAvatarPicture::S_FAILED) { loadPicture(n); refreshPictures(); return; }
     if (mPic[n]->mState != WolfAvatarPicture::S_SHOWN) return;
     mPicked = n;
+    mZoom = true;                       // [BIG PICTURE] shown large to look at before picking
     refreshPictures();
 }
 
@@ -1616,6 +1733,7 @@ void LLFloaterWolfAvatars::onPick()
 {
     if (mBusy || mJob.empty() || mPicked < 0) return;
     clearError();
+    mZoom = false;
     // Source: WOLFAVATARS_API.md Flow 5 - char_pick {job, n} -> {job, state: "queued"}; back to polling (phase build)
     LLSD body;
     body["job"] = mJob;
@@ -1735,6 +1853,7 @@ void LLFloaterWolfAvatars::onMakeAnother()
     mPicRound = -1;
     mPicCount = 0;
     mPicked = -1;
+    mZoom = false;
     mMoreFor.clear();
     mMoreCredits = -1;
     mPrompt->setText(LLStringUtil::null);
@@ -1936,6 +2055,7 @@ void LLFloaterWolfAvatars::layoutWidgets()
         fitButton(mPicStop, { "Stop..." }, false);
         fitButton(mAnotherBtn, { "Make another" }, false);
         fitButton(mMoreBtn, { "More pictures", "More pictures (999 credits)" }, false);
+        mZoomBackBtn->setShape(mMoreBtn->getRect());          // [BIG PICTURE] in More pictures' place (after its fit) while one is shown large
     }
 
     // ---- the error line, and Buy credits... beside it when a refusal carries the link ----
@@ -2028,7 +2148,7 @@ void LLFloaterWolfAvatars::layoutWidgets()
         if (figureShown())
         {
             const LLFontGL* lf = LLFontGL::getFontSansSerifBold();   // the label's font (XUI figure_label)
-            const S32 lw = llmax(lf->getWidth(getString("figure_label")), lf->getWidth(getString("made_for_label"))) + 10;
+            const S32 lw = lf->getWidth(getString(isClothing() ? "made_for_label" : "figure_label")) + 10;   // the label in use
             mFigureLabel->setShape(LLRect(x0, yb + CHIP_H - 3, x0 + lw, yb + 3));
             const std::string words[2] = { getString("woman_word"), getString("man_word") };
             const S32 cl = x0 + lw;
@@ -2041,6 +2161,13 @@ void LLFloaterWolfAvatars::layoutWidgets()
             L.figure[1] = LLRect(cl + w + CHIP_GAP, yb + CHIP_H, cl + 2 * w + CHIP_GAP, yb);
             mWomanBtn->setShape(L.figure[0]);
             mManBtn->setShape(L.figure[1]);
+            if (isClothing())
+            {
+                // [MADE FOR 2026-10-20] "This clothing is for" and its list across the row; no Woman / Man chips drawn
+                L.figure[0] = L.figure[1] = LLRect();
+                L.figure_font = nullptr;
+                mForCombo->setShape(LLRect(cl, yb + CHIP_H, x1, yb));
+            }
             yb += CHIP_H + ROW_GAP;
         }
         // [BASE BODY 2026-10-20] people only: the two clothes chips side by side
@@ -2149,6 +2276,7 @@ void LLFloaterWolfAvatars::layoutWidgets()
         L.pic[2] = LLRect(lx, bt - s - GAP_V, lx + s, bt - 2 * s - GAP_V);
         L.pic[3] = LLRect(rx, bt - s - GAP_V, rx + s, bt - 2 * s - GAP_V);
         for (S32 i = 0; i < PICTURES; ++i) mPicSlot[i]->setShape(L.pic[i]);
+        if (mPicBig) { LLRect u = L.pic[0]; u.unionWith(L.pic[3]); mPicBig->setShape(u); }   // [BIG PICTURE] the four frames' area
     }
 
     // ---- 6. done: the picture in its light burst on the left, the report on a slate on the right ----
@@ -2686,7 +2814,7 @@ void LLFloaterWolfAvatars::drawPictures(F32 t) const
     const Layout& L = mLayout;
     const bool picked = mPicked >= 0 && mPicked < mPicCount;
     drawCircle(L.ring_x, L.ring_y, L.ring_r, t, -1, false, picked ? 1.f : 0.7f, true);
-    if (!picked) return;
+    if (!picked || mZoom) return;      // [BIG PICTURE] the large view covers the frames, the ring and the beam
 
     // the chosen frame glows, and a beam of light runs from it into the circle with a pulse travelling along it
     const LLRect& f = L.pic[mPicked];
@@ -2852,6 +2980,6 @@ void LLFloaterWolfAvatars::drawButtons(F32 t) const
         box(r.mLeft + 8.f, r.mTop - 2.f, r.mRight - 8.f, r.mTop - 3.f, withAlpha(LLColor4::white, 0.22f), withAlpha(LLColor4::white, 0.10f));
     };
     for (LLButton* b : { mPriceBtn, mStartBtn, mPickBtn, mInvBtn, mBuyBtn }) seal(b);
-    for (LLButton* b : { mBackBtn, mMoreBtn, mAnotherBtn, mStopNo }) stone(b, false);
+    for (LLButton* b : { mBackBtn, mMoreBtn, mZoomBackBtn, mAnotherBtn, mStopNo }) stone(b, false);
     for (LLButton* b : { mWorkStop, mPicStop, mStopYes }) stone(b, true);
 }

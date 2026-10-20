@@ -70,7 +70,13 @@
   <floater.string name="garment_detail_trousers">also shorts</floater.string>
   <!-- [FIGURE 2026-10-20] WOLFAVATARS_API.md "Figure": female | male - a base body's standard, or the body clothing is made for -->
   <floater.string name="figure_label">Figure</floater.string>
-  <floater.string name="made_for_label">Made for</floater.string>
+  <floater.string name="made_for_label">This clothing is for</floater.string>
+  <!-- [MADE FOR 2026-10-20] the "This clothing is for" list: the resident's avatars (jobs: avatars), then the standard bodies -->
+  <floater.string name="for_choose">Choose who it is for...</floater.string>
+  <floater.string name="for_listing">Listing your avatars...</floater.string>
+  <floater.string name="for_woman">Woman (a standard body, fits Athena shapes)</floater.string>
+  <floater.string name="for_man">Man (a standard body, fits Ares shapes)</floater.string>
+  <floater.string name="for_missing">Choose who the clothing is for: one of your avatars, or a standard body.</floater.string>
   <floater.string name="woman_word">Woman</floater.string>
   <floater.string name="man_word">Man</floater.string>
 
@@ -133,6 +139,10 @@
     <button follows="left|top" height="22" is_toggle="true" label="" layout="topleft" left="408" name="man_btn" top="400" width="100"
      image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false"
      tool_tip="Man: fitted to the standard male body" />
+    <!-- [MADE FOR 2026-10-20] Paul: "This clothing is for <dropdown avatars>" - clothing made for one of your avatars is
+         fitted to that avatar's own body; laid out on the figure row (layoutWidgets) -->
+    <combo_box follows="left|top" layout="topleft" left="300" top="400" width="356" height="22" name="for_combo"
+     tool_tip="Made for one of your avatars, the clothing is fitted to that avatar's own body (a wolf's cloak clears the tail and the fur). A standard body fits Athena or Ares shaped bodies." />
     <!-- [CLOTHING 2026-10-20] the garment: eight drawn chips, two rows of four, one always chosen -->
     <text type="string" length="1" follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="220" name="garment_label"
      text_color="0.95 0.92 0.84 1" top="430" width="436" use_ellipses="true">
@@ -164,7 +174,7 @@
      tool_tip="Gown - made to fit the WolfAvatars base body" />
     <text type="string" length="1" follows="left|top" font="SansSerifSmall" height="14" layout="topleft" left="220" name="garment_hint"
      text_color="0.78 0.78 0.86 1" top="510" width="436" use_ellipses="true">
-      Made to fit the WolfAvatars base body - wear it (Add) over a base body.
+      Made to fit the body you choose below - wear it (Add) over that avatar.
     </text>
     <text type="string" length="1" follows="left|top" font="SansSerifSmall" height="14" layout="topleft" left="220" name="clothes_hint"
      text_color="0.78 0.78 0.86 1" top="424" width="436" use_ellipses="true">
@@ -246,6 +256,11 @@
      image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" use_ellipses="true"
      label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.72 0.72 0.80 1" label_color_disabled_selected="0.72 0.72 0.80 1"
      tool_tip="Draw 4 new pictures from the same words" />
+    <!-- [BIG PICTURE 2026-10-20] shown instead of More pictures while one picture is shown large -->
+    <button follows="left|top" height="34" label="Back to all four" layout="topleft" left="300" name="zoom_back_btn" top="693" width="220"
+     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" use_ellipses="true" visible="false"
+     label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.72 0.72 0.80 1" label_color_disabled_selected="0.72 0.72 0.80 1"
+     tool_tip="Back to all four pictures" />
     <button follows="left|top" height="40" label="Pick a picture first" layout="topleft" left="560" name="pick_btn" top="690" width="220"
      image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" use_ellipses="true"
      label_color="0.16 0.08 0.02 1" label_color_selected="0.16 0.08 0.02 1" label_color_disabled="0.72 0.72 0.80 1" label_color_disabled_selected="0.72 0.72 0.80 1"

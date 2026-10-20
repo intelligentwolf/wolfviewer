@@ -850,7 +850,10 @@ bool join_group_response(const LLSD& notification, const LLSD& response)
     {
         // check for promotion or demotion.
         S32 max_groups = LLAgentBenefitsMgr::current().getGroupMembershipLimit();
-        if(gAgent.isInGroup(group_id)) ++max_groups;
+        // [WOLF GROUPS 2026-10-20] 0 = no limit (llagent.cpp canJoinGroups). Counting the group you
+        // are already in on top of 0 made it a limit of 1, so with no limit a role change in a group
+        // you belong to was refused as "too many groups" whenever you were in one or more groups.
+        if (max_groups > 0 && gAgent.isInGroup(group_id)) ++max_groups;
 
         // [CR] FIRE-12229
         //if(gAgent.mGroups.size() < max_groups)

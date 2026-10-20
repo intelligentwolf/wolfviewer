@@ -121,6 +121,7 @@
 #include "wolffloaterbuilder.h"   // [WOLF BUILDER 2026-10-13/]
 #include "wolffloaterimportworlds.h"   // [IMPORT WORLDS 2026-10-18/]
 #include "llfloaterwolfavatars.h"   // [WOLFAVATARS 2026-10-20/] Wolf World > WolfAvatars...
+#include "wolffloaterchat.h"        // [WOLF CHAT 2026-10-20/] Wolf World > Wolf Chat...
 #include "wolffloaterenvironment.h"   // [WOLF ENV 2026-10-12/]
 #include "wolffloaterwatchwolf.h"       // [WATCHWOLF 2026-10-10/]
 #include "wolffloaterexperiences.h"   // [WolfViewer 2026-10-14/] Experiences welcome chooser
@@ -684,6 +685,8 @@ void LLViewerFloaterReg::registerFloaters()
     LLFloaterReg::add("wolf_builder", "floater_wolf_builder.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterBuilder>);   // [WOLF BUILDER 2026-10-13/] grid, snap origin, names, selection card
     LLFloaterReg::add("wolf_import_worlds", "floater_wolf_import_worlds.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterImportWorlds>);   // [IMPORT WORLDS 2026-10-18/] Build > Import worlds...
     LLFloaterReg::add("wolf_avatars", "floater_wolfavatars.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<LLFloaterWolfAvatars>);   // [WOLFAVATARS 2026-10-20/] Wolf World > WolfAvatars... (release "Character Colin")
+    LLFloaterReg::add("wolf_chat", "floater_wolf_chat.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterChat>);   // [WOLF CHAT 2026-10-20/] Wolf World > Wolf Chat...
+    LLFloaterReg::add("wolf_chat_image", "floater_wolf_chat_image.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterChatImage>);   // [WOLF CHAT 2026-10-20/] a posted picture, big
     LLFloaterReg::add("wolf_environment", "floater_wolf_environment.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterEnvironment>);   // [WOLF ENV 2026-10-12/]
     LLFloaterReg::add("wolf_watchwolf", "floater_wolf_watchwolf.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterWatchWolf>);   // [WATCHWOLF 2026-10-10/]
     LLFloaterReg::add("wolf_experiences", "floater_wolf_experiences.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterExperiences>);   // [WolfViewer 2026-10-14/] Experiences welcome chooser

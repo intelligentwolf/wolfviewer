@@ -1365,8 +1365,14 @@ void LLFloaterWolfAvatars::onGetPrice()
         std::string base;
         for (const std::string& w : what) base += (base.empty() ? " (" : ", ") + w;
         if (!base.empty()) base += ")";
-        self->mPriceText->setText(llformat("\"%s\"%s costs about %d credits: %d for 4 pictures, %d to build the one you pick.",
-                                           cap(reply["name"].asString(), 48).c_str(), base.c_str(), self->mQuoteCredits, self->mQuotePictures, self->mQuoteBuild));
+        // [2026-10-20] a base body (and a garment from the resident's own picture) has no pictures to draw: the brain quotes
+        // pictures 0 (wolfavatars_lib.php wch_route) - said so, not "0 for 4 pictures"
+        if (self->mQuotePictures <= 0)
+            self->mPriceText->setText(llformat("\"%s\"%s costs about %d credits. No pictures to draw - it is made straight away.",
+                                               cap(reply["name"].asString(), 48).c_str(), base.c_str(), self->mQuoteCredits));
+        else
+            self->mPriceText->setText(llformat("\"%s\"%s costs about %d credits: %d for 4 pictures, %d to build the one you pick.",
+                                               cap(reply["name"].asString(), 48).c_str(), base.c_str(), self->mQuoteCredits, self->mQuotePictures, self->mQuoteBuild));
         self->showStep(STEP_PRICE);
     });
 }

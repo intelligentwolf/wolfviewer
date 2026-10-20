@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLF CHAT 2026-10-20] A picture posted in Wolf Chat, big (wolffloaterchat.cpp WolfFloaterChatImage). Opened by
+     clicking the picture in the channel; one window per picture (the key is the texture). The picture is drawn
+     by the code to fit the window, keeping its shape. -->
+<floater
+ can_close="true"
+ can_minimize="false"
+ can_resize="true"
+ height="560"
+ layout="topleft"
+ min_height="200"
+ min_width="240"
+ name="wolf_chat_image"
+ single_instance="false"
+ title="PICTURE"
+ width="720" />

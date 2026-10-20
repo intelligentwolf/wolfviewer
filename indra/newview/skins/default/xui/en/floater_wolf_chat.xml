@@ -1,0 +1,338 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLF CHAT 2026-10-20] Wolf World > Wolf Chat (wolffloaterchat.cpp). Paul: "group calls should be like
+     discord [screenshot] text chat, images from inventory". Laid out as his "WOLF VIEWER" mockup:
+       left    the group picker, TEXT CHANNELS / VOICE CHANNELS (wolf_chat_sidebar, drawn by the code: who is in
+               each voice room with their mic and speaker state), the room you are in (Leave / Invite People),
+               and you (Mic / Deafen / Voice settings)
+       centre  the channel's name, Search, @ Mentions, Users, ?; its messages; the line that says what went wrong
+               (it stays until the next action works); Emoji, Picture (from inventory), the message, Send
+       right   USERS ONLINE (hidden and shown by Users)
+     Persona: a group member who wants to see which group friends are on, read and post in the group's channels
+     (with a picture from inventory), and hop into a voice room and see who is talking. -->
+<floater
+ can_close="true"
+ can_minimize="true"
+ can_resize="true"
+ height="620"
+ layout="topleft"
+ min_height="420"
+ min_width="760"
+ name="wolf_chat"
+ help_topic="wolf_chat"
+ save_rect="true"
+ save_visibility="false"
+ title="WOLF CHAT"
+ width="1040">
+    <layout_stack
+     follows="all"
+     height="598"
+     layout="topleft"
+     left="0"
+     name="columns"
+     orientation="horizontal"
+     top="20"
+     width="1040">
+
+        <!-- ═══ left: group, channels, voice room, you ═══ -->
+        <layout_panel
+         auto_resize="false"
+         height="598"
+         name="left_column"
+         user_resize="false"
+         width="248">
+            <combo_box
+             follows="left|top|right"
+             height="24"
+             layout="topleft"
+             left="8"
+             name="group_combo"
+             tool_tip="The group whose channels you see. Every group you belong to is here."
+             top="4"
+             width="232" />
+            <wolf_chat_sidebar
+             follows="all"
+             height="414"
+             layout="topleft"
+             left="8"
+             name="sidebar"
+             tab_stop="true"
+             top="32"
+             width="232" />
+            <text
+             follows="left|right|bottom"
+             font="SansSerifBold"
+             height="34"
+             layout="topleft"
+             left="10"
+             name="voice_status"
+             top="450"
+             use_ellipses="true"
+             width="228"
+             wrap="true"
+             value="Not in a voice room. Click a voice channel to join it." />
+            <button
+             follows="left|bottom"
+             height="24"
+             label="Leave Call"
+             layout="topleft"
+             left="8"
+             name="leave_call_btn"
+             tool_tip="Leave the voice room. You go back to the voice of the place you are standing."
+             top="486"
+             width="112" />
+            <button
+             follows="left|bottom"
+             height="24"
+             label="Invite People"
+             layout="topleft"
+             left="126"
+             name="invite_btn"
+             tool_tip="Send people a message with a link that opens this voice room. They need to be in the group to join."
+             top="486"
+             width="114" />
+            <text
+             follows="left|right|bottom"
+             height="20"
+             layout="topleft"
+             left="10"
+             name="me_name"
+             top="520"
+             use_ellipses="true"
+             width="228" />
+            <button
+             follows="left|bottom"
+             height="28"
+             is_toggle="true"
+             label="Mic off"
+             layout="topleft"
+             left="8"
+             name="mic_btn"
+             tool_tip="Turn your microphone on or off in voice."
+             top="544"
+             width="76" />
+            <button
+             follows="left|bottom"
+             height="28"
+             is_toggle="true"
+             label="Deafen"
+             layout="topleft"
+             left="88"
+             name="deafen_btn"
+             tool_tip="Hear no voice at all (and send none). Press again to hear people."
+             top="544"
+             width="76" />
+            <button
+             follows="left|bottom"
+             height="28"
+             label="Settings"
+             layout="topleft"
+             left="168"
+             name="settings_btn"
+             tool_tip="Voice and sound settings: microphone, speakers and volumes."
+             top="544"
+             width="72" />
+        </layout_panel>
+
+        <!-- ═══ centre: the channel ═══ -->
+        <layout_panel
+         auto_resize="true"
+         height="598"
+         name="centre_column"
+         user_resize="false"
+         width="560">
+            <text
+             follows="left|top|right"
+             font="SansSerifBold"
+             height="22"
+             layout="topleft"
+             left="4"
+             name="channel_title"
+             top="6"
+             use_ellipses="true"
+             width="250"
+             value="Wolf Chat" />
+            <line_editor
+             follows="right|top"
+             height="22"
+             label="Search this group"
+             layout="topleft"
+             left="262"
+             max_length_chars="64"
+             name="search_editor"
+             tool_tip="Type at least 3 letters and press Enter to find messages in all this group's channels."
+             top="4"
+             width="170" />
+            <button
+             follows="right|top"
+             height="22"
+             label="@ Mentions"
+             layout="topleft"
+             left="436"
+             name="mentions_btn"
+             tool_tip="Messages in this group that mention you by name."
+             top="4"
+             width="80" />
+            <button
+             follows="right|top"
+             height="22"
+             is_toggle="true"
+             label="Users"
+             layout="topleft"
+             left="520"
+             name="members_btn"
+             tool_tip="Show or hide the group members who are online."
+             top="4"
+             width="50" />
+            <button
+             follows="right|top"
+             height="22"
+             label="?"
+             layout="topleft"
+             left="574"
+             name="help_btn"
+             tool_tip="How Wolf Chat works."
+             top="4"
+             width="22" />
+            <button
+             follows="left|top"
+             height="22"
+             label="Load older messages"
+             layout="topleft"
+             left="4"
+             name="older_btn"
+             top="32"
+             width="150" />
+            <button
+             follows="left|top"
+             height="22"
+             label="Back to the channel"
+             layout="topleft"
+             left="4"
+             name="back_btn"
+             top="32"
+             visible="false"
+             width="150" />
+            <button
+             follows="right|top"
+             height="22"
+             label="Rename"
+             layout="topleft"
+             left="430"
+             name="rename_btn"
+             tool_tip="Rename this channel (group moderators)."
+             top="32"
+             width="80" />
+            <button
+             follows="right|top"
+             height="22"
+             label="Delete"
+             layout="topleft"
+             left="514"
+             name="delete_btn"
+             tool_tip="Delete this channel and all its messages (group moderators)."
+             top="32"
+             width="82" />
+            <text_editor
+             bg_readonly_color="0.075 0.082 0.098 1"
+             follows="all"
+             height="436"
+             layout="topleft"
+             left="4"
+             max_length="2147483647"
+             name="message_log"
+             parse_urls="true"
+             read_only="true"
+             show_context_menu="true"
+             text_readonly_color="0.93 0.94 0.96 1"
+             top="58"
+             track_end="true"
+             width="592"
+             wrap="true" />
+            <text
+             follows="left|right|bottom"
+             height="30"
+             layout="topleft"
+             left="6"
+             name="status_text"
+             top="498"
+             width="588"
+             wrap="true" />
+            <button
+             follows="left|bottom"
+             height="28"
+             image_overlay="Emoji_Picker_Icon"
+             layout="topleft"
+             left="4"
+             name="emoji_btn"
+             tool_tip="Add an emoji."
+             top="532"
+             width="30" />
+            <button
+             follows="left|bottom"
+             height="28"
+             image_overlay="Inv_Texture"
+             layout="topleft"
+             left="38"
+             name="image_btn"
+             tool_tip="Post a picture: choose a texture or snapshot from your inventory (or drag one onto this window). It must be copy and transfer."
+             top="532"
+             width="30" />
+            <chat_editor
+             expand_lines_count="4"
+             follows="left|right|bottom"
+             font="SansSerif"
+             height="28"
+             is_expandable="false"
+             layout="topleft"
+             left="72"
+             max_length="2000"
+             name="message_input"
+             spellcheck="true"
+             text_tentative_color="TextFgTentativeColor"
+             top="532"
+             width="446"
+             wrap="true" />
+            <button
+             follows="right|bottom"
+             height="28"
+             label="Send"
+             layout="topleft"
+             left="522"
+             name="send_btn"
+             tool_tip="Post your message (or press Enter)."
+             top="532"
+             width="74" />
+        </layout_panel>
+
+        <!-- ═══ right: who is online ═══ -->
+        <layout_panel
+         auto_resize="false"
+         height="598"
+         name="members_column"
+         user_resize="false"
+         width="224">
+            <text
+             follows="left|top|right"
+             font="SansSerifBold"
+             height="22"
+             layout="topleft"
+             left="6"
+             name="online_title"
+             top="6"
+             width="212"
+             value="USERS ONLINE" />
+            <scroll_list
+             draw_heading="false"
+             follows="all"
+             height="550"
+             layout="topleft"
+             left="6"
+             name="online_list"
+             tool_tip="Double-click someone to see their profile."
+             top="32"
+             width="212">
+                <scroll_list.columns name="name" relative_width="1" />
+            </scroll_list>
+        </layout_panel>
+    </layout_stack>
+</floater>

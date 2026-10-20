@@ -6724,6 +6724,29 @@ Are you sure you want to quit?
     </form>
   </notification>
 
+  <!-- [WOLF CHAT 2026-10-20] wolffloaterchat.cpp: the name of a new channel, or a channel's new name (group
+       moderators). The typed text is response["message"] (llpaneloutfitsinventory.cpp:221 onSaveCommit). Not on the
+       lltoastalertpanel.cpp prevalidate list: a channel name may be any language. -->
+  <notification
+   icon="alertmodal.tga"
+   name="WolfChatChannelName"
+   type="alertmodal">
+[PROMPT]
+    <tag>confirm</tag>
+    <form name="form">
+      <input name="message" type="text" default="true" width="300"/>
+      <button
+       default="true"
+       index="0"
+       name="OK"
+       text="OK"/>
+      <button
+       index="1"
+       name="Cancel"
+       text="Cancel"/>
+    </form>
+  </notification>
+
   <!-- [UPDATER 2026-10-02] wolfupdate.cpp. One release offered per run; "Skip this version"
        stores WolfViewerUpdateSkipped. Failures are alertmodal and stay until dismissed. -->
   <notification

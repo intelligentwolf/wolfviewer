@@ -5244,6 +5244,12 @@ bool process_login_success_response(U32 &first_sim_size_x, U32 &first_sim_size_y
                 : max_agent_groups = response["max-agent-groups"].asString();
 
             gMaxAgentGroups = atoi(max_agent_groups.c_str());
+            // [WOLF GROUPS 2026-10-20] A negative limit means "no limit" (the OpenRegionSettings
+            // tooltip says -1 = unlimited, panel_region_open_region_settings.xml), but only 0 is
+            // treated as unlimited everywhere: canJoinGroups (llagent.cpp) compared size < -1 and
+            // blocked every join, while the invite path (llviewermessage.cpp) let it through.
+            // Store 0 so every check agrees.
+            if (gMaxAgentGroups < 0) gMaxAgentGroups = 0;
             LL_INFOS("LLStartup") << "gMaxAgentGroups read from login.cgi: "
                 << gMaxAgentGroups << LL_ENDL;
         }

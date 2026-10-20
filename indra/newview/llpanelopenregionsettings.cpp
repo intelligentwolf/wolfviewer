@@ -195,6 +195,7 @@ class OpenRegionInfoUpdate : public LLHTTPNode
         if ( body.has("MaxGroups") )
         {
             gMaxAgentGroups = body["MaxGroups"].asInteger();
+            if (gMaxAgentGroups < 0) gMaxAgentGroups = 0;   // [WOLF GROUPS 2026-10-20] negative = no limit (llstartup.cpp)
         }
         if ( body.has("AllowParcelWindLight") )
         {

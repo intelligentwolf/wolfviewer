@@ -1168,9 +1168,11 @@ void LLFloaterWolfAvatars::onKindChanged()
     mPersonBtn->setToggleState(person);
     mAnimalBtn->setToggleState(mKind == KIND_ANIMAL);
     mClothingBtn->setToggleState(clothing);
-    if (person && mHeight->getText().empty()) mHeight->setText(std::string("1.8"));
-    if (!person && mHeight->getText() == "1.8") mHeight->setText(LLStringUtil::null);
-    mHeightNote->setText(person ? std::string("Metres, 0.3 to 4. Leave it at 1.8 if you are not sure.")
+    // [HEIGHT 2026-10-20] no 1.8 filled in: 1.8 m to the top of the model counted ears, horns and hats as height and made
+    // animal-headed people short (Paul's Wolf King). Left empty, the brain stands a person's head where a standard SL
+    // avatar's is (build_avatar.py, sl_skeleton.json mHead 1.683).
+    if (mHeight->getText() == "1.8") mHeight->setText(LLStringUtil::null);
+    mHeightNote->setText(person ? std::string("Optional. Metres, 0.3 to 4. Left empty, as tall as a standard avatar (ears and hats not counted).")
                                 : std::string("Optional. Metres, 0.3 to 4. Left empty, the animal keeps its own size."));
     // the name the brain gives one left empty (wolfavatars_lib.php wa_api_char_quote: My character / My animal / My clothes)
     mName->setLabel(person ? std::string("My character") : clothing ? getString("name_clothing") : std::string("My animal"));

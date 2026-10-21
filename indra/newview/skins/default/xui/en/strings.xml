@@ -2743,6 +2743,7 @@ name="Command_360_Capture_Label">360° Snapshot</string>
   <string name="Command_MiniMap_Label">Mini-map</string>
   <!-- [WOLF COMPASS 2026-10-16] -->
   <string name="Command_WolfCompass_Label">Tessa's Compass</string>
+  <string name="Command_WolfChat_Label">Wolf Chat</string>
   <string name="Command_WolfSpeed_Label">Xenon's WolfSpeed</string>
   <string name="Command_Move_Label">Walk / run / fly</string>
   <string name="Command_People_Label">People</string>
@@ -2838,6 +2839,7 @@ name="Command_360_Capture_Label">360° Snapshot</string>
   <string name="Command_MarketplaceListings_Tooltip">Sell your creation</string>
   <string name="Command_MiniMap_Tooltip">Show nearby people (CTRL+SHIFT+M)</string>
   <string name="Command_WolfCompass_Tooltip">Tessa's Compass: which way is North, and which way you are moving</string>
+  <string name="Command_WolfChat_Tooltip">Wolf Chat: your groups' channels, voice rooms and who is online, all in one window</string>
   <string name="Command_WolfSpeed_Tooltip">Xenon's WolfSpeed: walk, run and fly faster, as fast as the region allows</string>
   <string name="Command_Move_Tooltip">Moving your avatar</string>
   <string name="Command_People_Tooltip">Friends, groups, and nearby people (CTRL+SHIFT+A)</string>

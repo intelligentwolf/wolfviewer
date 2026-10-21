@@ -1829,6 +1829,12 @@
             <menu_item_call.on_click function="Floater.Show" parameter="wolf_chat" />
             <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
         </menu_item_call>
+        <!-- [WOLF TUNNELS 2026-10-21] Paul: "the goal of this is to allow tunneling under terrains we need to add a tool"
+             (wolffloatertunnels.cpp). [WOLF GRID GATE] gone (not greyed) off Wolf Territories. -->
+        <menu_item_call label="Tunnels..." name="WolfTunnels">
+            <menu_item_call.on_click function="Floater.Show" parameter="wolf_tunnels" />
+            <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
+        </menu_item_call>
         <!-- [WOLFSPEED 2026-10-17] Xenon's WolfSpeed (wolfspeed.cpp): walk, run and fly faster, as fast as the region
              allows (WolfSim WolfSpeedModule). [WOLF GRID GATE] gone (not greyed) off Wolf Territories. -->
         <menu_item_check label="Xenon's WolfSpeed" name="WolfSpeed">

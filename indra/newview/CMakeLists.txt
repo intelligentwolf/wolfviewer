@@ -986,6 +986,7 @@ set(viewer_SOURCE_FILES
     wolffloateradventurestudioai.cpp # [WOLF ADVENTURE P2 2026-10-16] Studio: AI and voice, cast talk, book, run
     wolffloateradventurestudioedit.cpp # [WOLF ADVENTURE P3 2026-10-16] Studio: outline, cast, places, story, rules, lore, test play
     wolftooladventureplace.cpp # [WOLF ADVENTURE P3 2026-10-16] Studio: the in-world place tool
+    wolffloatertunnels.cpp # [WOLF TUNNELS 2026-10-21] the Tunnel tool: walkable spaces under the terrain
     wolffloateradventurestudiowizard.cpp # [WOLF ADVENTURE AUDIT 2026-10-17] Studio: the "Start here" wizard
     wolffloateradventurestudioflow.cpp # [WOLF STORY FIRST 2026-10-17] Studio: the helper conversation and the flowchart
     wolffloateradventureguide.cpp # [WOLF ADVENTURE AUDIT 2026-10-17] the Guide docked beside the Studio
@@ -1951,6 +1952,7 @@ set(viewer_HEADER_FILES
     wolffloateradventureteacher.h  # [WOLF ADVENTURE P4 2026-10-16]
     wolffloateradventurestudio.h   # [WOLF ADVENTURE P1 2026-10-16]
     wolftooladventureplace.h   # [WOLF ADVENTURE P3 2026-10-16]
+    wolffloatertunnels.h   # [WOLF TUNNELS 2026-10-21]
     wolfadventurestudioutil.h  # [WOLF ADVENTURE AUDIT 2026-10-17]
     wolffloateradventureguide.h # [WOLF ADVENTURE AUDIT 2026-10-17]
     wolfwavezones.h

@@ -135,6 +135,7 @@
 #include "wolffloateradventuregm.h"      // [WOLF ADVENTURE P4 2026-10-16/] GM Console
 #include "wolffloateradventureteacher.h" // [WOLF ADVENTURE P4 2026-10-16/] Teacher Console
 #include "wolflslcomplete.h" // <FS:Wolf/>
+#include "wolffloatertunnels.h" // [WOLF TUNNELS 2026-10-21/] the Tunnel tool
 #include "llfloatermyscripts.h"
 #include "llfloatermyenvironment.h"
 #include "llfloaternamedesc.h"
@@ -676,6 +677,7 @@ void LLViewerFloaterReg::registerFloaters()
     LLFloaterReg::add("wolf_lag_detector", "floater_wolf_lag_detector.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterLagDetector>);   // [LAG DETECTOR 2026-09-29/]
     LLFloaterReg::add("wolf_compass", "floater_wolf_compass.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterCompass>);   // [WOLF COMPASS 2026-10-16/] Victorian compass: North + course
     LLFloaterReg::add("wolf_speed", "floater_wolf_speed.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterSpeed>);   // [WOLFSPEED 2026-10-17/] Xenon's WolfSpeed
+    LLFloaterReg::add("wolf_tunnels", "floater_wolf_tunnels.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterTunnels>);   // [WOLF TUNNELS 2026-10-21/] walkable spaces under the terrain
     LLFloaterReg::add("wolf_drive_controls", "floater_wolf_drive_controls.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterDriveControls>);   // [WOLF DRIVE 2026-10-09/] wheel / pedal / gamepad setup
     LLFloaterReg::add("wolf_dj", "floater_wolf_dj.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterDJ>);   // [WOLF DJ 2026-10-04/]
     LLFloaterReg::add("wolf_dj_playlist", "floater_wolf_dj_playlist.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterDJPlaylist>);   // [WOLF DJ 2026-10-04/]

@@ -1181,6 +1181,8 @@ void LLFloaterTools::updatePopup(LLCoordGL center, MASK mask)
     }
     // [WolfViewer 2026-10-20] the brush multiplier row shows with the other land controls
     if (mWolfBrushScaleText) mWolfBrushScaleText->setVisible(land_visible);
+    // [WOLF TUNNELS 2026-10-21] the Tunnel tool beside the land tools, Wolf Territories only
+    if (LLView* tunnels = findChild<LLView>("wolf_tunnels_btn")) tunnels->setVisible(land_visible && WolfGrid::isOnWolfTerritories());
     for (auto& entry : mWolfBrushScaleBtns) entry.second->setVisible(land_visible);
     if (land_visible) wolfSyncBrushScale();
     // [WolfViewer 2026-10-20] the Builders Mode row clears the brush multiplier row while the land tool is up (postBuild)

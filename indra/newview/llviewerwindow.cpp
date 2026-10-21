@@ -27,6 +27,7 @@
 #include "llviewerprecompiledheaders.h"
 #include "llviewerwindow.h"
 #include "wolftooladventureplace.h"   // <WolfViewer 2026-10-16/> the Adventure Studio place overlay
+#include "wolffloatertunnels.h"   // <WolfViewer 2026-10-21/> the Tunnel tool's outlines
 #include "wolfgame.h"   // [WOLF GAME 2026-10-09/] Escape for the game's overlay, dialogs, effects
 #include "wolfspanscreens.h"   // <WolfViewer 2026-10-10/> spread across all screens: do not save that size
 
@@ -3044,6 +3045,7 @@ void LLViewerWindow::draw()
         // Draw tool specific overlay on world
         LLToolMgr::getInstance()->getCurrentTool()->draw();
         WolfToolAdventurePlace::drawIdle();   // <WolfViewer 2026-10-16/> the Adventure Studio's places, its Places page open
+        WolfToolTunnel::drawIdle();   // <WolfViewer 2026-10-21/> the Tunnel tool (only while drawing)
 
         // <exodus> Draw HUD stuff.
         bool inMouselook = gAgentCamera.cameraMouselook();
@@ -5164,6 +5166,7 @@ void LLViewerWindow::renderSelections( bool for_gl_pick, bool pick_parcel_walls,
     // <WolfViewer 2026-10-16/> the Adventure Studio's places while its Places page shows (the place tool is
     // the current tool only while a shape is being drawn; then it renders below as the current tool)
     if (!for_hud && !for_gl_pick) WolfToolAdventurePlace::renderIdle();
+    if (!for_hud && !for_gl_pick) WolfToolTunnel::renderIdle();   // <WolfViewer 2026-10-21/> the tunnel boxes while the Tunnels window is open
 
     // Draw fence around land selections
     if (for_gl_pick)

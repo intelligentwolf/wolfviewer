@@ -677,6 +677,21 @@
       <combo_box.commit_callback
        function="BuildTool.TreeGrass"/>
     </combo_box>
+    <!-- [WOLF TUNNELS 2026-10-21] the Tunnel tool beside the land tools (wolffloatertunnels.cpp); shown with them, on Wolf
+         Territories only (llfloatertools.cpp updatePopup) -->
+    <button
+     follows="left|top"
+     height="19"
+     label="Tunnels..."
+     layout="topleft"
+     left="4"
+     name="wolf_tunnels_btn"
+     tool_tip="Tunnels: make spaces under the ground walkable (estate owners and managers)"
+     top="164"
+     visible="false"
+     width="114">
+        <button.commit_callback function="Floater.Show" parameter="wolf_tunnels" />
+    </button>
     <radio_group
      height="105"
      layout="topleft"

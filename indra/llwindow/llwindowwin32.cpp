@@ -4112,7 +4112,9 @@ namespace
                 POINT src = { 0, 0 }, dst = { x, y };
                 SIZE size = { w, h };
                 BLENDFUNCTION blend = { AC_SRC_OVER, 0, alpha, AC_SRC_ALPHA };
-                UpdateLayeredWindow(hwnd, screen, &dst, &size, mem, &src, 0, &blend, ULW_ALPHA);
+                // the position only on the first frame: after that NULL keeps where it is, so dragging it (WM_NCHITTEST
+                // HTCAPTION) is not undone 30 times a second (UpdateLayeredWindow: pptDst NULL = current position)
+                UpdateLayeredWindow(hwnd, screen, shown ? NULL : &dst, &size, mem, &src, 0, &blend, ULW_ALPHA);
             }
             if (!shown)
             {
@@ -4147,6 +4149,7 @@ LLSplashScreenWin32::~LLSplashScreenWin32()
 
 void LLSplashScreenWin32::showImpl()
 {
+    if (mState) return;   // one splash thread per object (a second would orphan the first's joinable std::thread)
     mState = std::make_shared<State>();
     WolfSplashConfig cfg = WolfSplash::getConfig();
     mState->status = cfg.status;

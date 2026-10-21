@@ -460,6 +460,8 @@ bool WolfSplashChild::start(const std::string& exe_path)
     // our end must not leak into other children (plugins, voice): they would keep the helper's stdin open
     fcntl(sv[0], F_SETFD, FD_CLOEXEC);
     fcntl(sv[1], F_SETFD, FD_CLOEXEC);
+    // the viewer never blocks on the splash: a helper that stopped reading only costs it its status lines
+    fcntl(sv[0], F_SETFL, fcntl(sv[0], F_GETFL) | O_NONBLOCK);
 #ifdef SO_NOSIGPIPE
     int one = 1;
     setsockopt(sv[0], SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));

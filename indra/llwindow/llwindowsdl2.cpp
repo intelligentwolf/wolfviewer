@@ -2991,6 +2991,7 @@ int wolf_splash_helper_main(int argc, char** argv)
     // a compositor that resizes the window anyway (a tiling one) gets the picture letterboxed, never stretched
     SDL_RenderSetLogicalSize(ren, pw, ph);
     SDL_Texture* tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, pw, ph);
+    if (!tex) { SDL_DestroyRenderer(ren); SDL_DestroyWindow(win); SDL_Quit(); return 1; }
     WolfSplashRenderer renderer;
     renderer.init(cfg, pw, ph, scale, false);   // SDL2 windows cannot be per-pixel transparent: square corners
     std::vector<uint32_t> pixels(size_t(pw) * ph);

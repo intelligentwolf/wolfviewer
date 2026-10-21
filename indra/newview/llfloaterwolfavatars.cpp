@@ -1864,6 +1864,9 @@ void LLFloaterWolfAvatars::onMakeAnother()
     mMoreCredits = -1;
     mPrompt->setText(LLStringUtil::null);
     mName->setText(LLStringUtil::null);
+    // [2026-10-21] Paul made a "wolf king" and got a plain man: Base body was still chosen from the last build (applyJob
+    // restores it). A new avatar starts dressed as described, the default (llfloaterwolfavatars.h mBase = false).
+    setClothes(false);
     clearError();
     showStep(STEP_DESCRIBE);
 }

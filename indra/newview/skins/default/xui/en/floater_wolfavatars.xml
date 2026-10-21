@@ -41,9 +41,12 @@
   <!-- the five step stones, left to right, comma separated -->
   <floater.string name="stones">Describe,Pictures,Pick,Build,Done</floater.string>
   <floater.string name="person_word">Person</floater.string>
-  <floater.string name="person_detail">two legs</floater.string>
-  <floater.string name="animal_word">Animal</floater.string>
-  <floater.string name="animal_detail">four legs</floater.string>
+  <floater.string name="person_detail">a human</floater.string>
+  <!-- [FURRY 2026-10-21] Paul: "FURRY standing or FURRY quad" - the animal tile is Furry - four legs -->
+  <floater.string name="furry_word">Furry - standing</floater.string>
+  <floater.string name="furry_detail">animal head, fur and tail</floater.string>
+  <floater.string name="animal_word">Furry - four legs</floater.string>
+  <floater.string name="animal_detail">a real animal on all fours</floater.string>
   <floater.string name="chosen">chosen</floater.string>
   <floater.string name="picked">picked</floater.string>
   <!-- [BASE BODY 2026-10-20] the two clothes choices (people only), drawn as two chips on the slate; base_short is said on
@@ -100,10 +103,14 @@
     </text>
     <button follows="left|top" height="150" is_toggle="true" label="" layout="topleft" left="12" name="person_btn" top="260" width="180"
      image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false"
-     tool_tip="Person: stands on two legs. The pictures show it in a T-pose." />
+     tool_tip="Person: a human on two legs. The pictures show it in a T-pose." />
+    <!-- [FURRY 2026-10-21] an animal standing as a person; placed by layoutWidgets in EKind order -->
+    <button follows="left|top" height="150" is_toggle="true" label="" layout="topleft" left="12" name="furry_btn" top="420" width="180"
+     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false"
+     tool_tip="Furry - standing: an animal standing upright as a person - its head, fur and tail on two legs. Name the animal in your description (a wolf if you name none)." />
     <button follows="left|top" height="150" is_toggle="true" label="" layout="topleft" left="12" name="animal_btn" top="420" width="180"
      image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false"
-     tool_tip="Animal: walks on four legs. The pictures show it side-on." />
+     tool_tip="Furry - four legs: a real animal that walks on all fours. The pictures show it side-on." />
     <!-- [CLOTHING 2026-10-20] the third tile: a garment alone, made to fit the WolfAvatars base body -->
     <button follows="left|top" height="100" is_toggle="true" label="" layout="topleft" left="12" name="clothing_btn" top="580" width="180"
      image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false"

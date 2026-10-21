@@ -526,6 +526,21 @@ namespace
         box(cx + h * 0.04f, base + h * 0.04f, cx + h * 0.13f, base, c, c);
     }
 
+    /** [FURRY 2026-10-21] A furry standing: the person (scaled so the ears fit in h), pointed ears on the head and a tail
+     *  curving out from the hips to one side. */
+    void drawFurry(F32 cx, F32 base, F32 h, const LLColor4& c)
+    {
+        const F32 p = h * 0.92f;                                        // the person's height; the ears take the rest
+        drawPerson(cx, base, p, c);
+        const F32 hy = base + p * 0.91f, hr = p * 0.085f;              // drawPerson's head centre and radius
+        tri(cx - hr * 0.95f, hy + hr * 0.35f, cx - hr * 0.15f, hy + hr * 0.85f, cx - hr * 0.60f, base + h, c);   // ears
+        tri(cx + hr * 0.95f, hy + hr * 0.35f, cx + hr * 0.15f, hy + hr * 0.85f, cx + hr * 0.60f, base + h, c);
+        const F32 tw = p * 0.05f;                                       // the tail, thick at the root, out to the right
+        limb(cx + p * 0.08f, base + p * 0.52f, cx + p * 0.22f, base + p * 0.40f, tw, c);
+        limb(cx + p * 0.22f, base + p * 0.40f, cx + p * 0.32f, base + p * 0.46f, tw * 0.8f, c);
+        limb(cx + p * 0.32f, base + p * 0.46f, cx + p * 0.36f, base + p * 0.57f, tw * 0.6f, c);
+    }
+
     /** [CLOTHING 2026-10-20] A shirt hanging on a coat hanger, h px from the hem (base) to the top of the hook, about 0.74 h
      *  across the sleeves: the hook and the hanger's arms in thin limbs, the shirt in convex pieces over them. */
     void drawShirtOnHanger(F32 cx, F32 base, F32 h, const LLColor4& c)
@@ -881,6 +896,8 @@ bool LLFloaterWolfAvatars::postBuild()
     mPersonBtn->setCommitCallback([this](LLUICtrl*, const LLSD&) { setKind(KIND_PERSON); });
     mAnimalBtn = getChild<LLButton>("animal_btn");
     mAnimalBtn->setCommitCallback([this](LLUICtrl*, const LLSD&) { setKind(KIND_ANIMAL); });
+    mFurryBtn = getChild<LLButton>("furry_btn");   // [FURRY 2026-10-21]
+    mFurryBtn->setCommitCallback([this](LLUICtrl*, const LLSD&) { setKind(KIND_FURRY); });
     // [BASE BODY 2026-10-20] people only: dressed as described / base body, two drawn chips (toggle buttons, as the tiles)
     mDressedBtn = getChild<LLButton>("dressed_btn");
     mDressedBtn->setCommitCallback([this](LLUICtrl*, const LLSD&) { setClothes(false); });
@@ -1064,7 +1081,7 @@ void LLFloaterWolfAvatars::refreshClothes()
 {
     // Source: WOLFAVATARS_API.md Flow 1 - clothes is for people only (wolfavatars_lib.php wa_api_char_quote: an animal is
     // always "dressed"), so the choice shows only while Person is chosen. One chip is always pressed in, as the tiles.
-    const bool person = isPerson();
+    const bool person = basesShown();   // [FURRY 2026-10-21] a plain person only
     mDressedBtn->setToggleState(!mBase);
     mBaseBtn->setToggleState(mBase);
     mDressedBtn->setVisible(person);
@@ -1251,7 +1268,8 @@ void LLFloaterWolfAvatars::onKindChanged()
     const bool person = isPerson();
     const bool clothing = isClothing();
     // the three tiles show the choice: one is always pressed in (a toggle button pressed again would let go of it)
-    mPersonBtn->setToggleState(person);
+    mPersonBtn->setToggleState(mKind == KIND_PERSON);
+    mFurryBtn->setToggleState(mKind == KIND_FURRY);
     mAnimalBtn->setToggleState(mKind == KIND_ANIMAL);
     mClothingBtn->setToggleState(clothing);
     // [HEIGHT 2026-10-20] no 1.8 filled in: 1.8 m to the top of the model counted ears, horns and hats as height and made
@@ -1310,7 +1328,9 @@ void LLFloaterWolfAvatars::onGetPrice()
     if (!height.empty()) body["height"] = metres;
     // [BASE BODY 2026-10-20] people only; an animal says "dressed", which the brain stores for it anyway
     // (wolfavatars_lib.php wa_api_char_quote: if ($kind !== 'person') $clothes = 'dressed')
-    if (!clothing) body["clothes"] = (person && mBase) ? "base" : "dressed";
+    if (!clothing) body["clothes"] = (basesShown() && mBase) ? "base" : "dressed";
+    // [FURRY 2026-10-21] wolfavatars_lib.php wa_api_char_quote: furry (people only) - an animal standing as a person
+    if (isFurry()) body["furry"] = true;
     // [CLOTHING 2026-10-20] Flow 1 - garment top | dress | trousers | skirt | shoes | hat | cape | gown, required for clothing
     if (clothing) body["garment"] = GARMENT_IDS[mGarment];
     // [FIGURE 2026-10-20] Flow 1 "Figure" - female | male, sent for a base body; clothing sends `for` (wa_api_char_quote:
@@ -1473,7 +1493,8 @@ void LLFloaterWolfAvatars::applyJob(const LLSD& job)
     if (job.has("characterKind"))
     {
         const std::string ck = job["characterKind"].asString();
-        mKind = ck == "animal" ? KIND_ANIMAL : ck == "clothing" ? KIND_CLOTHING : KIND_PERSON;
+        // [FURRY 2026-10-21] wch_job_out furry: a person made as a furry
+        mKind = ck == "animal" ? KIND_ANIMAL : ck == "clothing" ? KIND_CLOTHING : job["furry"].asBoolean() ? KIND_FURRY : KIND_PERSON;
         if (job["height"].isReal() || job["height"].isInteger()) mHeight->setText(llformat("%.2f", job["height"].asReal()));
         else if (job["characterKind"].asString() == "animal") mHeight->setText(LLStringUtil::null);
         onKindChanged();
@@ -2099,9 +2120,9 @@ void LLFloaterWolfAvatars::layoutWidgets()
         // right) when it is too short for the figure above its words
         const S32 tiles_top = below - 22;
         constexpr S32 TILE_GAP = 10;
-        const S32 tile_h = llmax(40, (tiles_top - C.mBottom - 2 * TILE_GAP) / 3);
-        LLButton* tiles[3] = { mPersonBtn, mAnimalBtn, mClothingBtn };
-        for (S32 k = 0; k < 3; ++k)
+        const S32 tile_h = llmax(40, (tiles_top - C.mBottom - (KINDS - 1) * TILE_GAP) / KINDS);
+        LLButton* tiles[KINDS] = { mPersonBtn, mFurryBtn, mAnimalBtn, mClothingBtn };   // EKind order
+        for (S32 k = 0; k < KINDS; ++k)
         {
             const S32 top = tiles_top - k * (tile_h + TILE_GAP);
             L.tile[k] = LLRect(C.mLeft, top, C.mLeft + tw, top - tile_h);
@@ -2129,7 +2150,7 @@ void LLFloaterWolfAvatars::layoutWidgets()
         yb += 42;
         mTips->setShape(LLRect(x0, yb + 34, x1, yb));
         yb += 38;
-        const bool person = isPerson();
+        const bool person = basesShown();   // [FURRY 2026-10-21] the Dressed / Base body row: a plain person only
         const bool clothing = isClothing();
         if (!clothing)
         {
@@ -2582,6 +2603,10 @@ void LLFloaterWolfAvatars::drawFigure(F32 cx, F32 cy, F32 size, const LLColor4& 
     {
         drawPerson(cx, cy - size * 0.5f, size, colour);
     }
+    else if (mKind == KIND_FURRY)
+    {
+        drawFurry(cx, cy - size * 0.5f, size, colour);
+    }
     else if (mKind == KIND_CLOTHING)
     {
         drawShirtOnHanger(cx, cy - size * 0.46f, size * 0.92f, colour);   // the hook's top at 0.92 size: centred like the person
@@ -2596,16 +2621,17 @@ void LLFloaterWolfAvatars::drawFigure(F32 cx, F32 cy, F32 size, const LLColor4& 
 void LLFloaterWolfAvatars::drawDescribe(F32 t) const
 {
     const Layout& L = mLayout;
-    const std::string words[3] = { getString("person_word"), getString("animal_word"), getString("clothing_word") };
-    const std::string details[3] = { getString("person_detail"), getString("animal_detail"), getString("clothing_detail") };
+    // EKind order (Person, Furry - standing, Furry - four legs, Clothing)
+    const std::string words[KINDS] = { getString("person_word"), getString("furry_word"), getString("animal_word"), getString("clothing_word") };
+    const std::string details[KINDS] = { getString("person_detail"), getString("furry_detail"), getString("animal_detail"), getString("clothing_detail") };
     const std::string chosen_word = getString("chosen");
-    LLButton* buttons[3] = { mPersonBtn, mAnimalBtn, mClothingBtn };
+    LLButton* buttons[KINDS] = { mPersonBtn, mFurryBtn, mAnimalBtn, mClothingBtn };
     // [CLOTHING 2026-10-20] a tile at least TALL px high has its figure above its words (the tiles as they were with two);
     // a shorter one - three tiles stacked in all but a very tall window - is laid out side-on: the figure on the left, the
     // word, what it means and "chosen" on the right. 136 px is the two-tile height at the old smallest window, where the
     // figure and the "chosen" line were last seen clear of each other.
     constexpr S32 TALL = 136;
-    for (S32 k = 0; k < 3; ++k)
+    for (S32 k = 0; k < KINDS; ++k)
     {
         const LLRect& r = L.tile[k];
         if (r.getWidth() < 40 || r.getHeight() < 40) continue;
@@ -2631,11 +2657,15 @@ void LLFloaterWolfAvatars::drawDescribe(F32 t) const
         disc(fx, base + fig_h * 0.55f, llmin(box_w, (F32)r.getHeight()) * (tall ? 0.32f : 0.42f), withAlpha(chosen ? AMBER : MOON_GLOW, chosen ? 0.24f : 0.12f), CLEAR);
         ellipse(fx, base, box_w * (tall ? 0.24f : 0.36f), 3.5f, withAlpha(LLColor4::black, 0.45f), CLEAR);
         const LLColor4 fig = chosen ? lerpColour(TILE_ON_TOP, MOON_LIGHT, 0.92f) : lerpColour(TILE_TOP, SPIRIT, 0.75f);
-        if (k == 0)
+        if (k == KIND_PERSON)
         {
             drawPerson(fx, base, fig_h, fig);
         }
-        else if (k == 1)
+        else if (k == KIND_FURRY)
+        {
+            drawFurry(fx, base, fig_h, fig);
+        }
+        else if (k == KIND_ANIMAL)
         {
             // the wolf is 0.95 u from tail to nose and about 0.68 u tall (drawWolf)
             const F32 u = llmin(box_w * (tall ? 0.80f : 1.f / 0.95f), fig_h / 0.68f);
@@ -2652,9 +2682,9 @@ void LLFloaterWolfAvatars::drawDescribe(F32 t) const
         if (tall)
         {
             const F32 cx = (F32)r.getCenterX();
-            const LLFontGL* wf = fitFont(r.getHeight() * 0.14f, (F32)r.getWidth() - 20.f, { words[0], words[1], words[2] }, 2);
+            const LLFontGL* wf = fitFont(r.getHeight() * 0.14f, (F32)r.getWidth() - 20.f, { words[0], words[1], words[2], words[3] }, 2);
             engraved(wf, words[k], cx, r.mBottom + r.getHeight() * 0.19f, chosen ? AMBER : CREAM, LLFontGL::HCENTER, (F32)r.getWidth() - 12.f);
-            const LLFontGL* df = fitFont(llmax(10.f, r.getHeight() * 0.09f), (F32)r.getWidth() - 20.f, { details[0], details[1], details[2], chosen_word }, 0);
+            const LLFontGL* df = fitFont(llmax(10.f, r.getHeight() * 0.09f), (F32)r.getWidth() - 20.f, { details[0], details[1], details[2], details[3], chosen_word }, 0);
             text(df, details[k], cx, r.mBottom + r.getHeight() * 0.08f, MUTED, LLFontGL::HCENTER, (F32)r.getWidth() - 12.f);
             if (chosen) text(df, chosen_word, r.mLeft + 12.f, by, AMBER, LLFontGL::LEFT, (F32)r.getWidth() - 50.f);
         }
@@ -2663,9 +2693,9 @@ void LLFloaterWolfAvatars::drawDescribe(F32 t) const
             // the words column, clear of the badge in the top right corner
             const F32 tx = r.mLeft + 8.f + box_w + 8.f;
             const F32 tw = llmax(10.f, r.mRight - 8.f - tx);
-            const LLFontGL* wf = fitFont(r.getHeight() * 0.26f, tw - badge * 2.f, { words[0], words[1], words[2] }, 2);
+            const LLFontGL* wf = fitFont(r.getHeight() * 0.26f, tw - badge * 2.f, { words[0], words[1], words[2], words[3] }, 2);
             engraved(wf, words[k], tx, r.mBottom + r.getHeight() * 0.66f, chosen ? AMBER : CREAM, LLFontGL::LEFT, tw - badge * 2.f);
-            const LLFontGL* df = fitFont(llmax(10.f, r.getHeight() * 0.17f), tw, { details[0], details[1], details[2], chosen_word }, 0);
+            const LLFontGL* df = fitFont(llmax(10.f, r.getHeight() * 0.17f), tw, { details[0], details[1], details[2], details[3], chosen_word }, 0);
             text(df, details[k], tx, r.mBottom + r.getHeight() * 0.40f, MUTED, LLFontGL::LEFT, tw);
             if (chosen) text(df, chosen_word, tx, r.mBottom + r.getHeight() * 0.17f, AMBER, LLFontGL::LEFT, tw);
         }
@@ -2683,7 +2713,7 @@ void LLFloaterWolfAvatars::drawChips() const
     // [BASE BODY / CLOTHING / FIGURE 2026-10-20] each set only while its buttons show (refreshClothes)
     const Layout& L = mLayout;
     const std::string chosen_word = getString("chosen");
-    if (isPerson() && L.clothes_font)
+    if (basesShown() && L.clothes_font)
     {
         drawChip(L.clothes[0], mDressedBtn, !mBase, getString("dressed_word"), chosen_word, L.clothes_font, true);
         drawChip(L.clothes[1], mBaseBtn, mBase, getString("base_word"), chosen_word, L.clothes_font, true);

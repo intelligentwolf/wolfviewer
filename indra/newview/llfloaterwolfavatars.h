@@ -93,7 +93,7 @@ private:
         LLRect error_plate;     // the plate the error line sits on (drawn while there is an error)
         LLRect stop_plate;      // "Stop making this character?" (drawn while it is asked)
         // describe
-        LLRect tile[3];         // Person, Animal, Clothing
+        LLRect tile[4];         // Person, Furry - standing, Furry - four legs, Clothing (EKind order; KINDS below)
         LLRect clothes[2];      // Dressed as described, Base body (people only; empty otherwise)
         const LLFontGL* clothes_font = nullptr;   // the font both clothes labels fit in
         // [CLOTHING 2026-10-20] the garment chips, two rows of four (Clothing only; empty otherwise)
@@ -137,12 +137,19 @@ private:
     S32 currentStone() const;   // 0..4 (Describe .. Done), -1 while it is not known yet
 
     // [CLOTHING 2026-10-20] what is made: char_quote kind "person" | "animal" | "clothing" (wolfavatars_lib.php WCH_KINDS)
-    enum EKind { KIND_PERSON = 0, KIND_ANIMAL, KIND_CLOTHING };
+    // [FURRY 2026-10-21] Paul: "i want to be able to specify FURRY standing or FURRY quad": Furry - standing is a person
+    // (kind "person" + furry: true); Furry - four legs is the animal. The value is the tile's place, top to bottom.
+    enum EKind { KIND_PERSON = 0, KIND_FURRY, KIND_ANIMAL, KIND_CLOTHING };
+    static const S32 KINDS = 4;
+    static_assert(sizeof(Layout::tile) / sizeof(LLRect) == 4, "one tile per kind");
     static const S32 GARMENTS = 8;      // WOLFAVATARS_API.md "Garment types": top, dress, trousers, skirt, shoes, hat, cape, gown
-    bool isPerson() const { return mKind == KIND_PERSON; }
+    bool isPerson() const { return mKind == KIND_PERSON || mKind == KIND_FURRY; }   // made as a person (two legs)
+    bool isFurry() const { return mKind == KIND_FURRY; }
+    /** Dressed / Base body: a plain person only (a base body is the human WolfAvatars body; a furry is always dressed). */
+    bool basesShown() const { return mKind == KIND_PERSON; }
     bool isClothing() const { return mKind == KIND_CLOTHING; }
     /** Woman / Man shows (and figure is sent) for a base body or for clothing (WOLFAVATARS_API.md "Figure"). */
-    bool figureShown() const { return isClothing() || (isPerson() && mBase); }
+    bool figureShown() const { return isClothing() || (basesShown() && mBase); }
     void setKind(EKind kind);
     void setClothes(bool base);
     void setGarment(S32 n);
@@ -224,6 +231,7 @@ private:
 
     LLButton* mPersonBtn = nullptr;
     LLButton* mAnimalBtn = nullptr;
+    LLButton* mFurryBtn = nullptr;      // [FURRY 2026-10-21]
     LLButton* mDressedBtn = nullptr;
     LLButton* mBaseBtn = nullptr;
     LLTextBox* mClothesHint = nullptr;

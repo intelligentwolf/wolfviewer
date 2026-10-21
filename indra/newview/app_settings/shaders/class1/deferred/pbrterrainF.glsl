@@ -294,6 +294,28 @@ in vec4[10] vary_coords;
 in vec4[2] vary_coords;
 #endif
 
+// <WolfViewer 2026-10-21> TUNNELS (wolffloatertunnels.cpp WolfTunnels::bindTerrain): no ground is drawn inside a region's
+// tunnel boxes where the ground passes through them, so a tunnel's mouth is an open hole and the build inside shows (Paul on
+// Moonfold: "there is no hole in the terrain"). Each box: centre (region metres) + turn about +Z in radians, half sizes. Only
+// the visible surface and its depth are cut; the terrain's shadow pass is unchanged, so the hill still shades the mouth.
+#define WOLF_TUNNELS_MAX 32
+uniform int  wolf_tunnel_count;                    // 0 off a region with tunnels (no array is read then)
+uniform vec4 wolf_tunnel_cy[WOLF_TUNNELS_MAX];     // xyz centre, w yaw
+uniform vec4 wolf_tunnel_hs[WOLF_TUNNELS_MAX];     // xyz half sizes
+void wolfTunnelClip(vec3 rp)
+{
+    for (int i = 0; i < WOLF_TUNNELS_MAX; ++i)
+    {
+        if (i >= wolf_tunnel_count) break;
+        vec3 d = rp - wolf_tunnel_cy[i].xyz;
+        float c = cos(wolf_tunnel_cy[i].w), s = sin(wolf_tunnel_cy[i].w);
+        // local = R(-yaw) * d, as WolfTunnels inBox / WolfSim WolfUndergroundVolumes
+        vec3 l = vec3(c * d.x + s * d.y, -s * d.x + c * d.y, d.z);
+        if (all(lessThanEqual(abs(l), wolf_tunnel_hs[i].xyz))) discard;
+    }
+}
+// </WolfViewer>
+
 void mirrorClip(vec3 position);
 vec4 encodeNormal(vec3 n, float env, float gbuffer_flag);
 
@@ -318,6 +340,7 @@ void main()
 {
     // Make sure we clip the terrain if we're in a mirror.
     mirrorClip(vary_position);
+    wolfTunnelClip(vary_region_pos);   // <WolfViewer 2026-10-21/>
 
     TerrainMix tm;
 #if TERRAIN_PAINT_TYPE == TERRAIN_PAINT_TYPE_HEIGHTMAP_WITH_NOISE

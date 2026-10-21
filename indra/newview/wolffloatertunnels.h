@@ -26,6 +26,8 @@
 
 class LLButton;
 class LLCheckBoxCtrl;
+class LLGLSLShader;
+class LLViewerRegion;
 class LLScrollListCtrl;
 class LLSpinCtrl;
 class LLTextBox;
@@ -57,6 +59,24 @@ namespace WolfTunnels
     const std::vector<Box>& boxes();
     LLUUID boxesRegion();
     S32 selectedId();
+
+    // [WOLF TUNNELS 2026-10-21] Paul in-world on Moonfold: "there is no hole in the terrain" and "when i walk the terrain
+    // flashes". The boxes are now read on every arrival in a region that has the capability (not only while the window is
+    // open), the terrain is not drawn inside them, and the camera of an avatar standing in one stays in the tunnel.
+
+    /** Once, at start-up (llstartup.cpp): reads the boxes on each region change once that region's capabilities are in. */
+    void init();
+    /** Replace the stored boxes with a WolfTunnels answer ({tunnels:[{id,c,s,yaw}]}) for that region. */
+    void setFromAnswer(const LLSD& answer, const LLUUID& region);
+    /** Is this region position (agent's region) inside one of the boxes? */
+    bool contains(const LLVector3& region_pos);
+    /**
+     * The avatar's head (agent frame) is in a tunnel: pull the wanted camera position (agent frame) back along the line from
+     * the head so it stays inside the boxes. False (camera untouched) when the head is in no box.
+     */
+    bool keepCameraInside(const LLVector3& head_agent, LLVector3& camera_agent);
+    /** Terrain shaders (lldrawpoolterrain.cpp): the boxes near the camera that reach the ground, or none for this region. */
+    void bindTerrain(LLGLSLShader* shader, LLViewerRegion* regionp);
 }
 
 class WolfFloaterTunnels : public LLFloater

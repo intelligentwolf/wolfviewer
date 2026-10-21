@@ -57,6 +57,7 @@
 // [/RLVa:KB]
 #include "fscommon.h"
 #include "wolfcamerafx.h"   // <WolfViewer 2026-10-10/>
+#include "wolffloatertunnels.h"   // <WolfViewer 2026-10-21/> WolfTunnels: the camera in a tunnel
 #include "lltrans.h"
 
 using namespace LLAvatarAppearanceDefines;
@@ -2201,6 +2202,29 @@ LLVector3d LLAgentCamera::calcCameraPositionTargetGlobal(bool *hit_limit)
     }
 // [/RLVa:KB]
 
+    // <WolfViewer 2026-10-21> TUNNELS (wolffloatertunnels.cpp): Paul on Moonfold, walking in a tunnel under the mountain:
+    // "the terrain flashes". The land floor below lifted the camera out of the hill to the ground ABOVE the avatar
+    // (resolveLandHeightGlobal is the surface, not the tunnel floor), and as the ground above changed with each step the
+    // camera jumped between inside the hill and above it. With the avatar's head in a tunnel box, the camera that follows
+    // the avatar stays in the tunnel instead (pulled back along the line from the head to where the boxes end), and a camera
+    // that is itself inside a box is never lifted to the surface.
+    bool wolf_in_tunnel = false;
+    {
+        LLVector3 cam_agent = gAgent.getPosAgentFromGlobal(camera_position_global);
+        const LLVector3 head = isAgentAvatarValid() ? gAgentAvatarp->mHeadp->getWorldPosition() : gAgent.getPositionAgent();
+        const bool following = mFocusOnAvatar && (CAMERA_MODE_THIRD_PERSON == getCameraMode() || CAMERA_MODE_FOLLOW == getCameraMode()
+                                                  || CAMERA_MODE_MOUSELOOK == getCameraMode());
+        if (following && WolfTunnels::keepCameraInside(head, cam_agent))
+        {
+            camera_position_global = gAgent.getPosGlobalFromAgent(cam_agent);
+            wolf_in_tunnel = true;
+        }
+        else if (LLViewerRegion* rgn = gAgent.getRegion())
+        {
+            wolf_in_tunnel = WolfTunnels::contains(rgn->getPosRegionFromAgent(cam_agent));
+        }
+    }
+    // </WolfViewer>
     // Don't let camera go underground if constrained
     // If not constrained, permit going 1000m below 0, use case: retrieving objects
     F32 camera_min_off_ground = getCameraMinOffGround(); // checks isDisableCameraConstraints
@@ -2221,7 +2245,7 @@ LLVector3d LLAgentCamera::calcCameraPositionTargetGlobal(bool *hit_limit)
     }
     // </WolfViewer>
     F32 minZ = camera_land_height + camera_min_off_ground;
-    if (camera_position_global.mdV[VZ] < minZ)
+    if (!wolf_in_tunnel && camera_position_global.mdV[VZ] < minZ)   // <WolfViewer 2026-10-21/> not out of a tunnel
     {
         camera_position_global.mdV[VZ] = minZ;
         isConstrained = true;

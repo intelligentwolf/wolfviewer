@@ -27,6 +27,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "lldrawpoolterrain.h"
+#include "wolffloatertunnels.h"   // <WolfViewer 2026-10-21/> WolfTunnels::bindTerrain
 
 #include <algorithm>   // <WolfViewer 2026-09-26/> std::is_sorted / std::stable_sort (block order)
 
@@ -492,6 +493,7 @@ void LLDrawPoolTerrain::renderFullShaderTextures()
         shader->uniform1f(s_wolf_region_width, regionp->getWidth());
     }
     wolf_bind_caustics(shader, regionp);   // <WolfViewer 2026-09-06>
+    WolfTunnels::bindTerrain(shader, regionp);   // <WolfViewer 2026-10-21/> no ground drawn inside tunnel boxes
     WolfTerrainPaint::instance().bind(shader, regionp);
     WolfTerrainLayers::instance().bind(shader, regionp);   // <WolfViewer 2026-10-16/> the eight Wolf layers, or wolf_layers_on = 0
     WolfWeather::instance().bindSnowCover(shader, regionp);   // <WolfViewer 2026-09-18/> snow on the ground   // [TERRAIN PAINT 2026-09-10] painted roads/tracks
@@ -753,6 +755,7 @@ void LLDrawPoolTerrain::renderFullShaderPBR(bool use_local_materials)
     }
     // [TERRAIN PAINT 2026-09-10] For BOTH paint types: bind() also resets wolf_paint_on when
     // this region has nothing, so a value left by the previous region cannot leak.
+    WolfTunnels::bindTerrain(shader, regionp);   // <WolfViewer 2026-10-21/> no ground drawn inside tunnel boxes
     WolfTerrainPaint::instance().bind(shader, regionp);
     WolfWeather::instance().bindSnowCover(shader, regionp);   // <WolfViewer 2026-09-18/> snow on the ground
 

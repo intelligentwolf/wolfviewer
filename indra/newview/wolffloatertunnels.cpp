@@ -17,9 +17,13 @@
 
 #include "wolffloatertunnels.h"
 
+#include <algorithm>
 #include <cmath>
 
 #include "llagent.h"
+#include "llframetimer.h"
+#include "llglslshader.h"
+#include "llsurface.h"
 #include "llbutton.h"
 #include "llcheckboxctrl.h"
 #include "llcorehttputil.h"
@@ -95,6 +99,231 @@ namespace
 const std::vector<WolfTunnels::Box>& WolfTunnels::boxes() { return s_boxes; }
 LLUUID WolfTunnels::boxesRegion() { return s_boxesRegion; }
 S32 WolfTunnels::selectedId() { return s_selected; }
+
+// =====================================================================================================================
+// [WOLF TUNNELS 2026-10-21] the store outside the window: read on arrival, holes in the terrain, the camera underground
+// =====================================================================================================================
+
+namespace
+{
+    // Source: lldrawpoolterrain.cpp / terrainF.glsl + pbrterrainF.glsl WOLF_TUNNELS_MAX (the uniform arrays' length).
+    const S32 TERRAIN_MAX = 32;
+    // How often the "does this box reach the ground" flags are worked out again, seconds (only on a region that has
+    // boxes; the terrain streams in after arrival - llsurface.cpp reportTerrainDiagnostics shows ~20 s - and can be edited).
+    const F64 SURFACE_EVERY = 2.0;
+    // Margin round a box when testing the ground against it, metres.
+    const F32 SURFACE_MARGIN = 0.5f;
+    // The camera is held this far inside the boxes, metres (llagentcamera.cpp CAMERA_COLLIDE_EPSILON is 0.1).
+    const F32 CAMERA_INSET = 0.25f;
+    // Steps along the head-to-camera line when finding where it leaves the boxes, metres.
+    const F32 CAMERA_STEP = 0.2f;
+
+    std::vector<bool> s_touches;       // per s_boxes entry: the ground passes through it (so the terrain is cut there)
+    F64 s_touchesAt = -1.0;
+    LLUUID s_touchesRegion;
+    boost::signals2::connection s_capsConn;
+    LLUUID s_fetching;
+
+    /** Is p (region metres) inside b? */
+    bool inBox(const WolfTunnels::Box& b, const LLVector3& p, F32 grow = 0.f)
+    {
+        const F32 a = b.mYawDeg * DEG_TO_RAD, c = cosf(a), s = sinf(a);
+        const F32 dx = p.mV[VX] - b.mCentre.mV[VX], dy = p.mV[VY] - b.mCentre.mV[VY];
+        // the inverse of boxEdges' turn: local = R(-yaw) * (p - c)
+        const F32 lx = c * dx + s * dy, ly = -s * dx + c * dy, lz = p.mV[VZ] - b.mCentre.mV[VZ];
+        return fabsf(lx) <= b.mSize.mV[VX] * 0.5f + grow && fabsf(ly) <= b.mSize.mV[VY] * 0.5f + grow
+            && fabsf(lz) <= b.mSize.mV[VZ] * 0.5f + grow;
+    }
+
+    /** Which boxes the ground passes through: sampled on a grid over each footprint (LLSurface::resolveHeightRegion). */
+    void refreshTouches(LLViewerRegion* rgn)
+    {
+        s_touches.assign(s_boxes.size(), false);
+        s_touchesAt = LLFrameTimer::getElapsedSeconds();
+        s_touchesRegion = rgn->getRegionID();
+        const LLSurface& land = rgn->getLand();
+        for (size_t i = 0; i < s_boxes.size(); ++i)
+        {
+            const WolfTunnels::Box& b = s_boxes[i];
+            const F32 a = b.mYawDeg * DEG_TO_RAD, c = cosf(a), s = sinf(a);
+            const F32 hx = b.mSize.mV[VX] * 0.5f + SURFACE_MARGIN, hy = b.mSize.mV[VY] * 0.5f + SURFACE_MARGIN;
+            const F32 z0 = b.mCentre.mV[VZ] - b.mSize.mV[VZ] * 0.5f - SURFACE_MARGIN;
+            const F32 z1 = b.mCentre.mV[VZ] + b.mSize.mV[VZ] * 0.5f + SURFACE_MARGIN;
+            // up to 9 x 9 samples, at least every 2 m along a short side
+            const S32 nx = llclamp((S32)ceilf(hx), 2, 8), ny = llclamp((S32)ceilf(hy), 2, 8);
+            for (S32 ix = 0; ix <= nx && !s_touches[i]; ++ix)
+            {
+                for (S32 iy = 0; iy <= ny; ++iy)
+                {
+                    const F32 lx = -hx + 2.f * hx * ix / nx, ly = -hy + 2.f * hy * iy / ny;
+                    const F32 x = b.mCentre.mV[VX] + c * lx - s * ly, y = b.mCentre.mV[VY] + s * lx + c * ly;
+                    const F32 h = land.resolveHeightRegion(x, y);
+                    if (h >= z0 && h <= z1) { s_touches[i] = true; break; }
+                }
+            }
+        }
+    }
+
+    void fetchCoro(std::string url, LLUUID region)
+    {
+        auto adapter = std::make_shared<LLCoreHttpUtil::HttpCoroutineAdapter>("WolfTunnels", LLCore::HttpRequest::DEFAULT_POLICY_ID);
+        LLCore::HttpRequest::ptr_t request = std::make_shared<LLCore::HttpRequest>();
+        LLSD result = adapter->getAndSuspend(request, url);
+        LLCore::HttpStatus status = LLCoreHttpUtil::HttpCoroutineAdapter::getStatusFromLLSD(result[LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS]);
+        if (s_fetching == region) s_fetching.setNull();
+        LLViewerRegion* rgn = gAgent.getRegion();
+        if (!rgn || rgn->getRegionID() != region) return;   // moved on meanwhile: that region's turn has its own fetch
+        if (!status)
+        {
+            LL_WARNS("WolfTunnels") << "reading the tunnels of " << rgn->getName() << " failed: " << status.toString() << LL_ENDL;
+            return;
+        }
+        WolfTunnels::setFromAnswer(result, region);
+        LL_INFOS("WolfTunnels") << rgn->getName() << ": " << s_boxes.size() << " tunnel box(es)" << LL_ENDL;
+    }
+
+    void fetchFor(LLViewerRegion* rgn)
+    {
+        if (!rgn || rgn != gAgent.getRegion()) return;
+        const std::string url = rgn->getCapability(CAP);
+        if (url.empty()) return;   // no WolfTunnelsModule there (any other grid or sim): nothing to read, nothing to cut
+        const LLUUID region = rgn->getRegionID();
+        if (s_fetching == region) return;
+        s_fetching = region;
+        LLCoros::instance().launch("WolfTunnelsArrive", [url, region]() { fetchCoro(url, region); });
+    }
+
+    void onRegionChanged()
+    {
+        s_capsConn.disconnect();
+        LLViewerRegion* rgn = gAgent.getRegion();
+        // the boxes belong to the region they were read from: never drawn or used on another
+        if (!rgn || rgn->getRegionID() != s_boxesRegion)
+        {
+            s_boxes.clear();
+            s_touches.clear();
+            s_boxesRegion.setNull();
+            s_selected = 0;
+        }
+        if (!rgn) return;
+        if (rgn->capabilitiesReceived()) fetchFor(rgn);
+        else s_capsConn = rgn->setCapabilitiesReceivedCallback([](const LLUUID&, LLViewerRegion* r) { fetchFor(r); });
+    }
+}
+
+void WolfTunnels::init()
+{
+    static bool s_done = false;
+    if (s_done) return;
+    s_done = true;
+    // Source: llagent.h:300-318 addRegionChangedCallback (the documented pattern with setCapabilitiesReceivedCallback).
+    gAgent.addRegionChangedCallback(&onRegionChanged);
+}
+
+void WolfTunnels::setFromAnswer(const LLSD& answer, const LLUUID& region)
+{
+    s_boxes.clear();
+    s_boxesRegion = region;
+    const LLSD& list = answer["tunnels"];
+    for (LLSD::array_const_iterator it = list.beginArray(); it != list.endArray(); ++it)
+    {
+        const LLSD& t = *it;
+        if (!t.isMap() || t["c"].size() != 3 || t["s"].size() != 3) continue;
+        WolfTunnels::Box b;
+        b.mId = t["id"].asInteger();
+        for (S32 i = 0; i < 3; ++i) { b.mCentre.mV[i] = (F32)t["c"][i].asReal(); b.mSize.mV[i] = (F32)t["s"][i].asReal(); }
+        b.mYawDeg = (F32)t["yaw"].asReal();
+        if (finite3(b.mCentre) && finite3(b.mSize) && std::isfinite(b.mYawDeg)) s_boxes.push_back(b);
+    }
+    s_touches.clear();
+    s_touchesAt = -1.0;   // worked out again at the next terrain draw
+}
+
+bool WolfTunnels::contains(const LLVector3& region_pos)
+{
+    LLViewerRegion* rgn = gAgent.getRegion();
+    if (s_boxes.empty() || !rgn || rgn->getRegionID() != s_boxesRegion) return false;
+    for (const Box& b : s_boxes)
+        if (inBox(b, region_pos)) return true;
+    return false;
+}
+
+bool WolfTunnels::keepCameraInside(const LLVector3& head_agent, LLVector3& camera_agent)
+{
+    LLViewerRegion* rgn = gAgent.getRegion();
+    if (s_boxes.empty() || !rgn || rgn->getRegionID() != s_boxesRegion) return false;
+    const LLVector3 head = rgn->getPosRegionFromAgent(head_agent);
+    const LLVector3 dir = camera_agent - head_agent;
+    const F32 len = dir.magVec();
+    // only the boxes the line can reach (a tunnel is a chain of boxes; Moonfold has 356)
+    std::vector<const Box*> near;
+    bool head_in = false;
+    for (const Box& b : s_boxes)
+    {
+        if (dist_vec(b.mCentre, head) > len + b.mSize.magVec() * 0.5f + 1.f) continue;
+        near.push_back(&b);
+        if (inBox(b, head)) head_in = true;
+    }
+    if (!head_in) return false;
+    if (len < 0.001f) return true;
+    // a point the camera may be at: in a box, or out in the open air above the ground (at a tunnel's mouth the camera may
+    // stay outside, behind the avatar walking in; only rock is out of bounds)
+    const LLSurface& land = rgn->getLand();
+    auto inside = [&](const LLVector3& p)
+    {
+        for (const Box* b : near) if (inBox(*b, p, -CAMERA_INSET)) return true;
+        return p.mV[VZ] > land.resolveHeightRegion(p.mV[VX], p.mV[VY]) + CAMERA_INSET;
+    };
+    // walk out from the head; the camera stops at the last point still allowed (the boxes overlap along a tunnel)
+    F32 keep = 0.f;
+    const S32 steps = llmax(1, (S32)ceilf(len / CAMERA_STEP));
+    for (S32 i = 1; i <= steps; ++i)
+    {
+        const F32 t = (F32)i / steps;
+        if (!inside(head + dir * t)) break;
+        keep = t;
+    }
+    camera_agent = head_agent + dir * keep;
+    return true;
+}
+
+void WolfTunnels::bindTerrain(LLGLSLShader* shader, LLViewerRegion* regionp)
+{
+    static LLStaticHashedString s_count("wolf_tunnel_count");
+    static LLStaticHashedString s_cy("wolf_tunnel_cy");
+    static LLStaticHashedString s_hs("wolf_tunnel_hs");
+    if (!shader || !regionp) return;
+    // LLGLSLShader caches a single value per location (llglslshader.cpp uniform1i), so 0 again costs no GL call
+    if (s_boxes.empty() || regionp->getRegionID() != s_boxesRegion)
+    {
+        shader->uniform1i(s_count, 0);
+        return;
+    }
+    const F64 now = LLFrameTimer::getElapsedSeconds();
+    if (s_touches.size() != s_boxes.size() || s_touchesRegion != regionp->getRegionID() || now - s_touchesAt > SURFACE_EVERY)
+        refreshTouches(regionp);
+    // the boxes the ground passes through, nearest the camera first
+    const LLVector3 cam = regionp->getPosRegionFromAgent(LLViewerCamera::getInstance()->getOrigin());
+    std::vector<std::pair<F32, size_t>> pick;
+    for (size_t i = 0; i < s_boxes.size(); ++i)
+        if (s_touches[i]) pick.emplace_back(dist_vec_squared(s_boxes[i].mCentre, cam), i);
+    const S32 n = llmin((S32)pick.size(), TERRAIN_MAX);
+    std::partial_sort(pick.begin(), pick.begin() + n, pick.end());
+    F32 cy[TERRAIN_MAX * 4] = {}, hs[TERRAIN_MAX * 4] = {};
+    for (S32 k = 0; k < n; ++k)
+    {
+        const Box& b = s_boxes[pick[k].second];
+        cy[k * 4 + 0] = b.mCentre.mV[VX]; cy[k * 4 + 1] = b.mCentre.mV[VY]; cy[k * 4 + 2] = b.mCentre.mV[VZ];
+        cy[k * 4 + 3] = b.mYawDeg * DEG_TO_RAD;
+        hs[k * 4 + 0] = b.mSize.mV[VX] * 0.5f; hs[k * 4 + 1] = b.mSize.mV[VY] * 0.5f; hs[k * 4 + 2] = b.mSize.mV[VZ] * 0.5f;
+    }
+    shader->uniform1i(s_count, n);
+    if (n > 0)
+    {
+        shader->uniform4fv(s_cy, n, cy);
+        shader->uniform4fv(s_hs, n, hs);
+    }
+}
 
 // =====================================================================================================================
 // the window
@@ -261,19 +490,7 @@ void WolfFloaterTunnels::apply(const LLSD& answer, bool from_post)
     const S32 before = (S32)s_boxes.size();
     mEdit = answer["edit"].asBoolean();
     mMax = answer["max"].asInteger();
-    s_boxes.clear();
-    s_boxesRegion = mRegionAtFetch;
-    const LLSD& list = answer["tunnels"];
-    for (LLSD::array_const_iterator it = list.beginArray(); it != list.endArray(); ++it)
-    {
-        const LLSD& t = *it;
-        if (!t.isMap() || t["c"].size() != 3 || t["s"].size() != 3) continue;
-        WolfTunnels::Box b;
-        b.mId = t["id"].asInteger();
-        for (S32 i = 0; i < 3; ++i) { b.mCentre.mV[i] = (F32)t["c"][i].asReal(); b.mSize.mV[i] = (F32)t["s"][i].asReal(); }
-        b.mYawDeg = (F32)t["yaw"].asReal();
-        if (finite3(b.mCentre) && finite3(b.mSize) && std::isfinite(b.mYawDeg)) s_boxes.push_back(b);
-    }
+    WolfTunnels::setFromAnswer(answer, mRegionAtFetch);   // the same store the terrain and the camera read
     // a new box is selected at once, so it can be fine-tuned
     if (from_post && (S32)s_boxes.size() == before + 1 && !s_boxes.empty()) s_selected = s_boxes.back().mId;
     fillList();

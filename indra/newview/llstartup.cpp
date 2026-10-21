@@ -28,6 +28,7 @@
 
 #include "llappviewer.h"
 #include "llstartup.h"
+#include "wolffloatertunnels.h"   // <WolfViewer 2026-10-21/> WolfTunnels::init
 
 #if LL_VELOPACK && LL_WINDOWS
 #include "llvelopack.h"
@@ -2317,6 +2318,7 @@ bool idle_startup()
 
         // <FS:Ansariel> OpenSim support: Init with defaults - we get the OpenSimExtras later during login
         LFSimFeatureHandler::instance();
+        WolfTunnels::init();   // <WolfViewer 2026-10-21/> tunnel boxes read on each region arrival (wolffloatertunnels.cpp)
 
         // create a container's instance for start a controlling conversation windows
         // by the voice's events

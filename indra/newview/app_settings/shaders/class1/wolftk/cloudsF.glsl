@@ -1039,6 +1039,13 @@ vec4 marchClouds(
   return vec4(radianceIntegral, remapClamped(transmittanceIntegral, 1.0, minTransmittance));
 }
 
+// [WolfViewer 2026-10-21] Maximus Lear (AMD Radeon RX 7800 XT, driver 26.10.1, High 5/7): the Wolf sky's dome went black
+// a moment after login and the clouds had black blotches - skyF.glsl turns a NaN / inf sky colour into black, so the dome's
+// inputs were not finite on his GPU. A NaN written here would be read by every later pass (the LUTs by every sky pixel, the
+// clouds' history by the next frame), so nothing that is not finite leaves this pass. Finite values are unchanged.
+vec4 wolfFiniteOrZero(vec4 v) { return mix(v, vec4(0.0), greaterThan(vec4(isnan(v)) + vec4(isinf(v)), vec4(0.0))); }
+vec3 wolfFiniteOrZero(vec3 v) { return mix(v, vec3(0.0), greaterThan(vec3(isnan(v)) + vec3(isinf(v)), vec3(0.0))); }
+
 #ifdef SHADOW_LENGTH
 
 // Source: three-geospatial packages/clouds/src/shaders/clouds.frag:622-648 marchShadowLength
@@ -1489,10 +1496,10 @@ void main() {
     // stock haze (atmosphericsFuncs.glsl), so the stock haze pass (pipeline.cpp doAtmospherics, hazeF.glsl) has already laid
     // the EEP's haze on every opaque surface, exactly as with WE off, and the forward shaders theirs; laying wolfLLHaze here
     // too would haze the ground twice. The composite still leaves its aerial perspective off (wolfEepNoAerial).
-    outputColor = color;
+    outputColor = clamp(wolfFiniteOrZero(color), vec4(-65504.0), vec4(65504.0));
     outputDepthVelocity = depthVelocity;
     #ifdef SHADOW_LENGTH
-    outputShadowLength = shadowLength * METER_TO_LENGTH_UNIT;
+    outputShadowLength = clamp(wolfFiniteOrZero(vec4(shadowLength * METER_TO_LENGTH_UNIT)).r, 0.0, 65504.0);
     #endif // SHADOW_LENGTH
     return;
   }
@@ -1514,10 +1521,10 @@ void main() {
         color.a = 1.0 - (1.0 - color.a) * (1.0 - llh.a);
       }
     }
-    outputColor = color;
+    outputColor = clamp(wolfFiniteOrZero(color), vec4(-65504.0), vec4(65504.0));
     outputDepthVelocity = depthVelocity;
     #ifdef SHADOW_LENGTH
-    outputShadowLength = shadowLength * METER_TO_LENGTH_UNIT;
+    outputShadowLength = clamp(wolfFiniteOrZero(vec4(shadowLength * METER_TO_LENGTH_UNIT)).r, 0.0, 65504.0);
     #endif // SHADOW_LENGTH
     return;
   }
@@ -1535,9 +1542,9 @@ void main() {
   color.a = color.a * (1.0 - haze.a) + haze.a;
   #endif // HAZE
 
-  outputColor = color;
+  outputColor = clamp(wolfFiniteOrZero(color), vec4(-65504.0), vec4(65504.0));
   outputDepthVelocity = depthVelocity;
   #ifdef SHADOW_LENGTH
-  outputShadowLength = shadowLength * METER_TO_LENGTH_UNIT;
+  outputShadowLength = clamp(wolfFiniteOrZero(vec4(shadowLength * METER_TO_LENGTH_UNIT)).r, 0.0, 65504.0);
   #endif // SHADOW_LENGTH
 }

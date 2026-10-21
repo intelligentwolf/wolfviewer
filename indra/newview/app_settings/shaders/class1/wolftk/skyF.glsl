@@ -472,6 +472,10 @@ void main()
     float shadowLength = 0.0;
 #ifdef HAS_SHADOW_LENGTH
     if (uProbe < 0.5) shadowLength = texture(shadowLengthBuffer, (gl_FragCoord.xy - viewportOrigin) / resolution).r;
+    // [WolfViewer 2026-10-21] Maximus Lear's black dome (AMD RX 7800 XT): every sky pixel reads this; a NaN or inf in it makes
+    // GetSkyRadiance's shadow-length branch (brunetonRuntime.glsl ClampRadius(sqrt(d*d + ...)) with d = shadow length) NaN
+    // and the guard below paints the pixel black. Not finite or negative: no shaft here.
+    if (isnan(shadowLength) || isinf(shadowLength) || shadowLength < 0.0) shadowLength = 0.0;
 #endif
 
     // Source: sky.vert:48-50 (world -> ECEF, km) and sky.frag:50-54

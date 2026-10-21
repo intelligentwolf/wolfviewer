@@ -371,6 +371,13 @@ void temporalAntialiasing(const ivec2 coord, out vec4 outputColor, out float out
   #endif // SHADOW_LENGTH
 }
 
+// [WolfViewer 2026-10-21] Maximus Lear (AMD Radeon RX 7800 XT, driver 26.10.1, High 5/7): the Wolf sky's dome went black
+// a moment after login and the clouds had black blotches - skyF.glsl turns a NaN / inf sky colour into black, so the dome's
+// inputs were not finite on his GPU. A NaN written here would be read by every later pass (the LUTs by every sky pixel, the
+// clouds' history by the next frame), so nothing that is not finite leaves this pass. Finite values are unchanged.
+vec4 wolfFiniteOrZero(vec4 v) { return mix(v, vec4(0.0), greaterThan(vec4(isnan(v)) + vec4(isinf(v)), vec4(0.0))); }
+vec3 wolfFiniteOrZero(vec3 v) { return mix(v, vec3(0.0), greaterThan(vec3(isnan(v)) + vec3(isinf(v)), vec3(0.0))); }
+
 // Source: three-geospatial packages/clouds/src/shaders/cloudsResolve.frag:154-177 main
 void main() {
   ivec2 coord = ivec2(gl_FragCoord.xy);
@@ -387,6 +394,12 @@ void main() {
   #else // TEMPORAL_UPSCALE
   temporalAntialiasing(coord, outputColor, outputShadowLength);
   #endif // TEMPORAL_UPSCALE
+  // [WolfViewer 2026-10-21] this pass's output is next frame's history: one NaN here would spread through the clipping
+  // (mean / variance of the neighbourhood) frame after frame - the black blotches. fp16 holds 65504.
+  outputColor = clamp(wolfFiniteOrZero(outputColor), vec4(-65504.0), vec4(65504.0));
+  #ifdef SHADOW_LENGTH
+  outputShadowLength = clamp(wolfFiniteOrZero(vec4(outputShadowLength)).r, 0.0, 65504.0);
+  #endif // SHADOW_LENGTH
 
   #if defined(SHADOW_LENGTH) && defined(DEBUG_SHOW_SHADOW_LENGTH)
   outputColor = vec4(turbo(outputShadowLength * 0.05), 1.0);

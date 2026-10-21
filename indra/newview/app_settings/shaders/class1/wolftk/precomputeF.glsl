@@ -50,6 +50,13 @@ precision highp sampler3D;
 // Source: three-geospatial packages/atmosphere/src/shaders/precompute/*.frag:8 (every pass)
 uniform AtmosphereParameters ATMOSPHERE;
 
+// [WolfViewer 2026-10-21] Maximus Lear (AMD Radeon RX 7800 XT, driver 26.10.1, High 5/7): the Wolf sky's dome went black
+// a moment after login and the clouds had black blotches - skyF.glsl turns a NaN / inf sky colour into black, so the dome's
+// inputs were not finite on his GPU. A NaN written here would be read by every later pass (the LUTs by every sky pixel, the
+// clouds' history by the next frame), so nothing that is not finite leaves this pass. Finite values are unchanged.
+vec4 wolfFiniteOrZero(vec4 v) { return mix(v, vec4(0.0), greaterThan(vec4(isnan(v)) + vec4(isinf(v)), vec4(0.0))); }
+vec3 wolfFiniteOrZero(vec3 v) { return mix(v, vec3(0.0), greaterThan(vec3(isnan(v)) + vec3(isinf(v)), vec3(0.0))); }
+
 #if WOLF_TK_PRECOMPUTE == 1
 // Source: three-geospatial packages/atmosphere/src/shaders/precompute/transmittance.frag:9-18
 
@@ -61,6 +68,7 @@ void main() {
     ATMOSPHERE,
     gl_FragCoord.xy
   );
+  transmittance.rgb = wolfFiniteOrZero(transmittance.rgb);
   transmittance.a = 1.0;
 }
 #endif // WOLF_TK_PRECOMPUTE == 1
@@ -82,7 +90,7 @@ void main() {
     gl_FragCoord.xy
   );
   irradiance = vec3(0.0);
-  outputColor = vec4(OUTPUT, 1.0);
+  outputColor = wolfFiniteOrZero(vec4(OUTPUT, 1.0));
 }
 #endif // WOLF_TK_PRECOMPUTE == 2
 
@@ -116,7 +124,7 @@ void main() {
   );
   singleMieScattering.rgb = luminanceFromRadiance * deltaMie.rgb;
   singleMieScattering.a = 1.0;
-  outputColor = OUTPUT;
+  outputColor = wolfFiniteOrZero(OUTPUT);
 }
 #endif // WOLF_TK_PRECOMPUTE == 3
 
@@ -145,6 +153,7 @@ void main() {
     vec3(gl_FragCoord.xy, float(layer) + 0.5),
     scatteringOrder
   );
+  scatteringDensity.rgb = wolfFiniteOrZero(scatteringDensity.rgb);
   scatteringDensity.a = 1.0;
 }
 #endif // WOLF_TK_PRECOMPUTE == 4
@@ -173,7 +182,7 @@ void main() {
     scatteringOrder
   );
   irradiance = luminanceFromRadiance * deltaIrradiance;
-  outputColor = vec4(OUTPUT, 1.0);
+  outputColor = wolfFiniteOrZero(vec4(OUTPUT, 1.0));
 }
 #endif // WOLF_TK_PRECOMPUTE == 5
 
@@ -204,7 +213,7 @@ void main() {
     luminanceFromRadiance * deltaMultipleScattering.rgb / RayleighPhaseFunction(nu),
     0.0
   );
-  outputColor = OUTPUT;
+  outputColor = wolfFiniteOrZero(OUTPUT);
 }
 #endif // WOLF_TK_PRECOMPUTE == 6
 

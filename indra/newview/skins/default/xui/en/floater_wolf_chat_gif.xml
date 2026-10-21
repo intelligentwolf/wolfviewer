@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLF CHAT 2026-10-21] The GIF picker of Wolf Chat (wolffloaterchat.cpp WolfFloaterChatGif). Paul's mockup has a
+     GIF button by the message box; Paul: "we can just get an api key" - GIPHY, asked through php/wolfchat.php only
+     (the key stays on the grid's server, and residents' addresses never reach GIPHY).
+     Persona: a group member who wants to answer with a GIF in a few seconds, by mouse or keyboard.
+     Flow: it opens on what is trending, with the search box focused -> type, Enter -> click a GIF (or arrows + Enter)
+     -> it is posted in the channel and this closes. "Powered by GIPHY" is GIPHY's attribution requirement. -->
+<floater
+ can_close="true"
+ can_minimize="false"
+ can_resize="false"
+ height="526"
+ layout="topleft"
+ name="wolf_chat_gif"
+ help_topic="wolf_chat_gif"
+ save_rect="true"
+ single_instance="true"
+ title="POST A GIF"
+ width="520">
+    <line_editor
+     follows="left|top|right"
+     height="24"
+     label="Search GIPHY"
+     layout="topleft"
+     left="8"
+     max_length_chars="50"
+     name="gif_search_editor"
+     tool_tip="Words to look for, then Enter. Leave it empty for what is trending."
+     top="26"
+     width="400" />
+    <button
+     follows="right|top"
+     height="24"
+     label="Search"
+     layout="topleft"
+     left="412"
+     name="gif_search_btn"
+     top="26"
+     width="100" />
+    <text
+     follows="left|top|right"
+     font="SansSerifBold"
+     height="18"
+     layout="topleft"
+     left="10"
+     name="results_title"
+     top="56"
+     use_ellipses="true"
+     width="500"
+     value="Trending GIFs" />
+    <wolf_chat_gif_grid
+     follows="all"
+     height="376"
+     layout="topleft"
+     left="8"
+     name="gif_grid"
+     tab_stop="true"
+     tool_tip="Click a GIF to post it. With the keyboard: arrow keys, then Enter."
+     top="76"
+     width="504" />
+    <text
+     follows="left|right|bottom"
+     height="32"
+     layout="topleft"
+     left="10"
+     name="gif_status"
+     top="456"
+     width="500"
+     wrap="true" />
+    <button
+     follows="left|bottom"
+     height="24"
+     label="Previous"
+     layout="topleft"
+     left="8"
+     name="prev_btn"
+     tool_tip="The previous page of GIFs."
+     top="492"
+     width="90" />
+    <button
+     follows="left|bottom"
+     height="24"
+     label="More GIFs"
+     layout="topleft"
+     left="102"
+     name="next_btn"
+     tool_tip="The next page of GIFs."
+     top="492"
+     width="100" />
+    <text
+     follows="right|bottom"
+     font="SansSerifBold"
+     halign="right"
+     height="18"
+     layout="topleft"
+     left="312"
+     name="giphy_attribution"
+     top="496"
+     width="200"
+     value="Powered by GIPHY" />
+</floater>

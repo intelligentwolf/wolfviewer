@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLF CHAT 2026-10-21] Right-click on a group in Wolf Chat's server rail (wolffloaterchat.cpp
+     WolfFloaterChat::showServerMenu). Remove takes the group out of Wolf Chat only: you stay in the group. -->
+<context_menu
+ layout="topleft"
+ name="Wolf Chat Server Menu">
+    <menu_item_call
+     label="Move up"
+     layout="topleft"
+     name="move_up">
+        <menu_item_call.on_click
+         function="WolfChatServer.Action"
+         parameter="up" />
+        <menu_item_call.on_enable
+         function="WolfChatServer.Enable"
+         parameter="up" />
+    </menu_item_call>
+    <menu_item_call
+     label="Move down"
+     layout="topleft"
+     name="move_down">
+        <menu_item_call.on_click
+         function="WolfChatServer.Action"
+         parameter="down" />
+        <menu_item_call.on_enable
+         function="WolfChatServer.Enable"
+         parameter="down" />
+    </menu_item_call>
+    <menu_item_separator
+     layout="topleft" />
+    <menu_item_call
+     label="Remove from Wolf Chat (stay in the group)"
+     layout="topleft"
+     name="remove">
+        <menu_item_call.on_click
+         function="WolfChatServer.Action"
+         parameter="remove" />
+    </menu_item_call>
+</context_menu>

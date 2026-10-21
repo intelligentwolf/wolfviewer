@@ -39,11 +39,11 @@ namespace
     // ---- palette: the blueprint sheet ([BLUEPRINT LOOK 2026-10-20]) ----
     // Fixed colours, not the skin's: a painted sheet (as the radio and WolfAvatars), every line of text on fixed paper.
     // Contrast (WCAG 2.x relative luminance), against the lightest ground each text colour sits on:
-    //   INK #f0f7ff on the paper's top #12396e 10.6:1, on a card's top #0b2347 14.5:1, on INPUT #061a36 16.1:1
+    //   INK #f0f7ff on the paper's top #12396e 10.6:1, on a card's top #0b2347 14.5:1, on INPUT_BG #061a36 16.1:1
     //   DIM #bcd2ec on the paper 7.4:1, on a card 10.1:1;  CYAN #8fdcff on the paper 7.5:1, on a card 10.3:1
     //   NAVY_INK #04203f on the primary button (#eaf7ff 15.0:1 .. #a3dcff 11.1:1), on the cyan stamp 10.8:1, on a done
     //     stamp #d6ecff 13.5:1;  INK on a quiet button #143d70 10.1:1;  OFF_INK #a9bdd6 on a disabled button #0d2a50 7.5:1
-    //   ERR_INK #ffd0c8 on ERR_PLATE #3d1222 11.6:1;  OK #a8f5c8 on INPUT 13.7:1
+    //   ERR_INK #ffd0c8 on ERR_PLATE #3d1222 11.6:1;  OK #a8f5c8 on INPUT_BG 13.7:1
     const LLColor4 INK(0.941f, 0.969f, 1.f, 1.f);
     const LLColor4 DIM(0.737f, 0.824f, 0.925f, 1.f);
     const LLColor4 CYAN(0.561f, 0.863f, 1.f, 1.f);
@@ -60,7 +60,7 @@ namespace
     const LLColor4 CARD_TOP(0.043f, 0.137f, 0.278f, 1.f);
     const LLColor4 CARD_BOTTOM(0.031f, 0.106f, 0.220f, 1.f);
     const LLColor4 EDGE(0.667f, 0.839f, 1.f, 0.42f);
-    const LLColor4 INPUT(0.024f, 0.102f, 0.212f, 1.f);
+    const LLColor4 INPUT_BG(0.024f, 0.102f, 0.212f, 1.f);
     const LLColor4 BTN(0.078f, 0.239f, 0.439f, 1.f);
     const LLColor4 BTN_OFF(0.051f, 0.165f, 0.314f, 1.f);
     const LLColor4 PRIMARY_TOP(0.918f, 0.969f, 1.f, 1.f);
@@ -874,7 +874,7 @@ void WolfFloaterMeshUpload::drawCells() const
         const S32 tp = L.cells.mTop - row * (ch + GAP);
         const LLRect r(l, tp, col + span == 3 ? L.cells.mRight : l + span * cw + (span - 1) * GAP, tp - ch);
         untextured();
-        fillRounded(r, allCorners(2.f), INPUT, INPUT);
+        fillRounded(r, allCorners(2.f), INPUT_BG, INPUT_BG);
         strokeRounded(r, allCorners(2.f), 0.f, 1.f, withAlpha(EDGE, 0.85f), withAlpha(EDGE, 0.85f));
         box((F32)r.mLeft, (F32)r.mTop, (F32)r.mRight, (F32)r.mTop - 2.f, CYAN, CYAN);
         const F32 maxw = (F32)r.getWidth() - 16.f;
@@ -905,7 +905,7 @@ void WolfFloaterMeshUpload::drawStatus(F32 t) const
         return;
     }
     const bool done = mStage == STAGE_DONE;
-    fillRounded(p, allCorners(3.f), INPUT, INPUT);
+    fillRounded(p, allCorners(3.f), INPUT_BG, INPUT_BG);
     strokeRounded(p, allCorners(3.f), 0.f, 1.f, done ? withAlpha(OK, 0.7f) : EDGE, done ? withAlpha(OK, 0.7f) : EDGE);
     if (done)
     {

@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLF CHAT 2026-10-21] Owners: who can see a Wolf Chat channel (wolffloaterchat.cpp WolfFloaterChatChannelRoles).
+     Paul: "group admins should be able to ... hide channels from users", "assign channels to users - like ADMINS only".
+     Persona: a group owner who wants an "officers" channel only officers see.
+     Flow: Everyone in the group (default) | Only members with these roles -> tick the roles (one checkbox per role,
+     made by the code; Owners always ticked) -> Save (bottom right). Members without a ticked role do not see the
+     channel at all; owners always do. Failures stay in the line above the buttons. -->
+<floater
+ can_close="true"
+ can_minimize="false"
+ can_resize="true"
+ height="400"
+ layout="topleft"
+ min_height="300"
+ min_width="320"
+ name="wolf_chat_channel_roles"
+ help_topic="wolf_chat_channel_roles"
+ save_rect="true"
+ single_instance="true"
+ title="WHO CAN SEE THIS CHANNEL"
+ width="360">
+    <text
+     follows="left|top|right"
+     font="SansSerifBold"
+     height="20"
+     layout="topleft"
+     left="10"
+     name="roles_title"
+     top="26"
+     use_ellipses="true"
+     width="340"
+     value="Who can see this channel?" />
+    <radio_group
+     follows="left|top"
+     height="44"
+     layout="topleft"
+     left="10"
+     name="who"
+     top="50"
+     width="340">
+        <radio_item
+         height="20"
+         label="Everyone in the group"
+         layout="topleft"
+         left="0"
+         name="everyone"
+         top="0"
+         value="everyone"
+         width="330" />
+        <radio_item
+         height="20"
+         label="Only members with these roles:"
+         layout="topleft"
+         left="0"
+         name="roles"
+         top="22"
+         value="roles"
+         width="330" />
+    </radio_group>
+    <scroll_container
+     follows="all"
+     height="190"
+     layout="topleft"
+     left="24"
+     name="roles_scroll"
+     reserve_scroll_corner="false"
+     top="98"
+     width="326">
+        <panel
+         background_visible="false"
+         follows="left|top"
+         height="190"
+         layout="topleft"
+         left="0"
+         name="roles_panel"
+         top="0"
+         width="306" />
+    </scroll_container>
+    <text
+     follows="left|right|bottom"
+     height="18"
+     layout="topleft"
+     left="10"
+     name="owners_note"
+     top="292"
+     width="340"
+     value="Owners always see every channel." />
+    <text
+     follows="left|right|bottom"
+     height="32"
+     layout="topleft"
+     left="10"
+     name="roles_status"
+     top="312"
+     width="340"
+     wrap="true" />
+    <button
+     follows="right|bottom"
+     height="26"
+     label="Cancel"
+     layout="topleft"
+     left="160"
+     name="cancel_btn"
+     top="362"
+     width="90" />
+    <button
+     follows="right|bottom"
+     height="26"
+     label="Save"
+     layout="topleft"
+     left="260"
+     name="save_btn"
+     top="362"
+     width="90" />
+</floater>

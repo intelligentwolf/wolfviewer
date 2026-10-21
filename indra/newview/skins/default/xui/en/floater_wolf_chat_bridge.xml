@@ -1,0 +1,169 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLF CHAT 2026-10-21] Owners: bridge a Wolf Chat text channel to a Discord channel (wolffloaterchat.cpp
+     WolfFloaterChatBridge; php/wolfbridge.php link_code). Persona: a group owner who wants the group's Discord and its
+     Wolf Chat channel to see each other's messages, set up in a minute.
+     Flow: the window opens with a fresh one-time code (10 minutes) -> 1. add Wolf-Bot to the Discord server (button /
+     link) -> 2. in that Discord channel type the command (Copy) -> 3. done, messages go both ways. Failures (already
+     linked, too many codes ...) stay in the status line; "New code" makes another. -->
+<floater
+ can_close="true"
+ can_minimize="false"
+ can_resize="false"
+ height="420"
+ layout="topleft"
+ name="wolf_chat_bridge"
+ help_topic="wolf_chat_bridge"
+ save_rect="true"
+ single_instance="true"
+ title="BRIDGE TO DISCORD"
+ width="460">
+    <text
+     follows="left|top|right"
+     font="SansSerifBold"
+     height="20"
+     layout="topleft"
+     left="12"
+     name="bridge_title"
+     top="26"
+     use_ellipses="true"
+     width="436"
+     value="Bridge this channel to Discord" />
+    <text
+     follows="left|top|right"
+     height="32"
+     layout="topleft"
+     left="12"
+     name="restricted_warning"
+     text_color="1 0.56 0.52 1"
+     top="48"
+     visible="false"
+     width="436"
+     wrap="true"
+     value="This channel is limited to some roles. Bridged, its messages can be read by everyone in the Discord channel." />
+    <text
+     follows="left|top"
+     height="18"
+     layout="topleft"
+     left="12"
+     name="code_label"
+     top="84"
+     width="200"
+     value="Link code:" />
+    <line_editor
+     enabled="true"
+     follows="left|top|right"
+     font="SansSerifHuge"
+     height="36"
+     layout="topleft"
+     left="12"
+     max_length_chars="32"
+     name="bridge_code"
+     tool_tip="The one-time link code."
+     top="104"
+     width="330" />
+    <button
+     follows="right|top"
+     height="36"
+     label="Copy"
+     layout="topleft"
+     left="350"
+     name="copy_code_btn"
+     tool_tip="Copy the code."
+     top="104"
+     width="98" />
+    <text
+     follows="left|top"
+     height="18"
+     layout="topleft"
+     left="12"
+     name="command_label"
+     top="148"
+     width="300"
+     value="Command to type in the Discord channel:" />
+    <line_editor
+     follows="left|top|right"
+     height="24"
+     layout="topleft"
+     left="12"
+     max_length_chars="64"
+     name="bridge_command"
+     tool_tip="The exact command for the Discord channel."
+     top="168"
+     width="330" />
+    <button
+     follows="right|top"
+     height="24"
+     label="Copy"
+     layout="topleft"
+     left="350"
+     name="copy_command_btn"
+     tool_tip="Copy the command."
+     top="168"
+     width="98" />
+    <text
+     follows="left|top|right"
+     height="18"
+     layout="topleft"
+     left="12"
+     name="bridge_countdown"
+     top="198"
+     width="436" />
+    <text
+     follows="left|top|right"
+     height="60"
+     layout="topleft"
+     left="12"
+     name="bridge_steps"
+     top="222"
+     width="436"
+     wrap="true"
+     value="1. Add Wolf-Bot to your Discord server (button below; you need Manage Server there).&#10;2. In the Discord channel, type the command above.&#10;3. Done - messages go both ways." />
+    <button
+     follows="left|top"
+     height="26"
+     label="Add Wolf-Bot to Discord..."
+     layout="topleft"
+     left="12"
+     name="invite_btn"
+     tool_tip="Opens Discord's page that adds Wolf-Bot to a server you manage."
+     top="286"
+     width="200" />
+    <text
+     follows="left|top|right"
+     height="30"
+     layout="topleft"
+     left="12"
+     name="invite_link"
+     parse_urls="true"
+     top="316"
+     width="436"
+     wrap="true" />
+    <text
+     follows="left|right|bottom"
+     height="32"
+     layout="topleft"
+     left="12"
+     name="bridge_status"
+     top="348"
+     width="436"
+     wrap="true" />
+    <button
+     follows="left|bottom"
+     height="26"
+     label="New code"
+     layout="topleft"
+     left="12"
+     name="new_code_btn"
+     tool_tip="Make a new code (the old one stops working)."
+     top="384"
+     width="100" />
+    <button
+     follows="right|bottom"
+     height="26"
+     label="Close"
+     layout="topleft"
+     left="358"
+     name="close_btn"
+     top="384"
+     width="90" />
+</floater>

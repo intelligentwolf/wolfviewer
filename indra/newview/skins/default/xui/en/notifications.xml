@@ -6747,6 +6747,75 @@ Are you sure you want to quit?
     </form>
   </notification>
 
+  <!-- [WOLF CHAT 2026-10-21] wolffloaterchat.cpp onNotifySetting: the bell of a text channel (Paul's mockup). The
+       choice is stored by php/wolfchat.php notify_set; index 0 all, 1 mentions, 2 none, 3 cancel. -->
+  <notification
+   icon="alertmodal.tga"
+   name="WolfChatNotifySetting"
+   type="alertmodal">
+Notifications for #[CHANNEL] in [GROUP] - now: [NOW].
+
+While the Wolf Chat window is closed, Wolf Chat can tell you about new messages in this channel:
+    <tag>confirm</tag>
+    <form name="form">
+      <button
+       index="0"
+       name="All"
+       text="All messages"/>
+      <button
+       default="true"
+       index="1"
+       name="Mentions"
+       text="Only @mentions"/>
+      <button
+       index="2"
+       name="None"
+       text="Nothing"/>
+      <button
+       index="3"
+       name="Cancel"
+       text="Cancel"/>
+    </form>
+  </notification>
+
+  <!-- [WOLF CHAT 2026-10-21] wolffloaterchat.cpp WolfChatNotifier: a new message in a channel whose bell lets it
+       through, while Wolf Chat is closed (or shows another channel). A notify toast: it fades, then waits in the
+       notification well; Open shows the channel. -->
+  <!-- [WOLF CHAT 2026-10-21] llgroupactions.cpp startIM off Wolf Territories, once per Wolf group per session
+       (WolfChat::noteGroupChatElsewhere): why a Wolf group's chat opens as the standard group chat here. -->
+  <notification
+   icon="notifytip.tga"
+   name="WolfChatGroupChatElsewhere"
+   log_to_chat="false"
+   type="notifytip">
+[GROUP] is a Wolf Territories group: its chat opens here as the standard group chat, not Wolf Chat. [WHY].
+  </notification>
+
+  <notification
+   icon="notify.tga"
+   name="WolfChatMessage"
+   log_to_chat="false"
+   type="notify">
+Wolf Chat - [FROM] in [WHERE]:
+[TEXT]
+    <usetemplate
+     name="okcancelbuttons"
+     yestext="Open"
+     notext="Close"/>
+  </notification>
+  <notification
+   icon="notify.tga"
+   name="WolfChatMessages"
+   log_to_chat="false"
+   type="notify">
+Wolf Chat - [COUNT] new messages in [WHERE]. The newest, from [FROM]:
+[TEXT]
+    <usetemplate
+     name="okcancelbuttons"
+     yestext="Open"
+     notext="Close"/>
+  </notification>
+
   <!-- [UPDATER 2026-10-02] wolfupdate.cpp. One release offered per run; "Skip this version"
        stores WolfViewerUpdateSkipped. Failures are alertmodal and stay until dismissed. -->
   <notification

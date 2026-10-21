@@ -1825,12 +1825,10 @@
         </menu_item_call>
         <!-- [WOLF CHAT 2026-10-20] Paul: "group calls should be like discord" - a group's text channels, voice rooms and
              who is online in one window (wolffloaterchat.cpp). [WOLF GRID GATE] gone (not greyed) off Wolf Territories. -->
-        <!-- [WOLF CHAT] held out of w75 (2026-10-20): its brain (php/wolfchat.php, migrate_wolfchat.php) is not deployed and
-             the window has not been seen running yet - put this entry back with the deploy (region-terrain-work/voice-groups-plan/DEPLOY.md)
         <menu_item_call label="Wolf Chat..." name="WolfChat">
             <menu_item_call.on_click function="Floater.Show" parameter="wolf_chat" />
             <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
-        </menu_item_call> -->
+        </menu_item_call>
         <!-- [WOLFSPEED 2026-10-17] Xenon's WolfSpeed (wolfspeed.cpp): walk, run and fly faster, as fast as the region
              allows (WolfSim WolfSpeedModule). [WOLF GRID GATE] gone (not greyed) off Wolf Territories. -->
         <menu_item_check label="Xenon's WolfSpeed" name="WolfSpeed">

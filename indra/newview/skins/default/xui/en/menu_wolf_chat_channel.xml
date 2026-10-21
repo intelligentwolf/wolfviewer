@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLF CHAT 2026-10-21] Right-click on a channel in Wolf Chat's sidebar - the group's OWNERS only
+     (wolffloaterchat.cpp WolfFloaterChat::showChannelMenu; php/wolfchat.php refuses anyone else). Never shown for
+     #group-chat (the group's own chat). Delete asks first; it is placed apart from the others. [2026-10-21] The
+     Discord items show for text channels only: Bridge when not linked (or the link stopped), Unlink when linked. -->
+<context_menu
+ layout="topleft"
+ name="Wolf Chat Channel Menu">
+    <menu_item_call
+     label="Rename..."
+     layout="topleft"
+     name="rename">
+        <menu_item_call.on_click
+         function="WolfChatChannel.Action"
+         parameter="rename" />
+    </menu_item_call>
+    <menu_item_call
+     label="Who can see this channel..."
+     layout="topleft"
+     name="roles">
+        <menu_item_call.on_click
+         function="WolfChatChannel.Action"
+         parameter="roles" />
+    </menu_item_call>
+    <menu_item_call
+     label="Bridge to Discord..."
+     layout="topleft"
+     name="bridge">
+        <menu_item_call.on_click
+         function="WolfChatChannel.Action"
+         parameter="bridge" />
+        <menu_item_call.on_visible
+         function="WolfChatChannel.Visible"
+         parameter="bridge" />
+    </menu_item_call>
+    <menu_item_call
+     label="Unlink from Discord..."
+     layout="topleft"
+     name="unbridge">
+        <menu_item_call.on_click
+         function="WolfChatChannel.Action"
+         parameter="unbridge" />
+        <menu_item_call.on_visible
+         function="WolfChatChannel.Visible"
+         parameter="unbridge" />
+    </menu_item_call>
+    <menu_item_separator
+     layout="topleft" />
+    <menu_item_call
+     label="Delete channel..."
+     layout="topleft"
+     name="delete">
+        <menu_item_call.on_click
+         function="WolfChatChannel.Action"
+         parameter="delete" />
+    </menu_item_call>
+</context_menu>

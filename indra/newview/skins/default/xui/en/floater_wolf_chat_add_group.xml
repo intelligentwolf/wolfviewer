@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLF CHAT 2026-10-21] Add groups to Wolf Chat's server rail (wolffloaterchat.cpp WolfFloaterChatAddGroup).
+     Paul: "+add group which adds my wolf groups that i'm a member of but only the ones i choose".
+     Persona: a resident in many groups picking the two or three they chat in.
+     Flow: the list shows your groups not yet in Wolf Chat (loading: "Loading your groups...") -> click one, or
+     Ctrl/Shift-click several (or double-click one) -> "Add to Wolf Chat" (bottom right) -> they appear on the rail and
+     the first one opens. Nothing to add: the list says why. Failures stay in the line above the buttons. -->
+<floater
+ can_close="true"
+ can_minimize="false"
+ can_resize="true"
+ height="440"
+ layout="topleft"
+ min_height="300"
+ min_width="320"
+ name="wolf_chat_add_group"
+ help_topic="wolf_chat_add_group"
+ save_rect="true"
+ single_instance="true"
+ title="ADD GROUPS TO WOLF CHAT"
+ width="380">
+    <text
+     follows="left|top|right"
+     height="34"
+     layout="topleft"
+     left="10"
+     name="add_help"
+     top="24"
+     width="360"
+     wrap="true"
+     value="Your groups not in Wolf Chat yet. Choose one, or hold Ctrl (or Shift) to choose several." />
+    <scroll_list
+     draw_heading="false"
+     follows="all"
+     height="290"
+     layout="topleft"
+     left="10"
+     multi_select="true"
+     name="group_list"
+     tool_tip="Click to choose, Ctrl-click or Shift-click for several, double-click to add one at once."
+     top="62"
+     width="360">
+        <scroll_list.columns name="name" relative_width="1" />
+    </scroll_list>
+    <text
+     follows="left|right|bottom"
+     height="32"
+     layout="topleft"
+     left="10"
+     name="add_status"
+     top="358"
+     width="360"
+     wrap="true" />
+    <button
+     follows="right|bottom"
+     height="26"
+     label="Cancel"
+     layout="topleft"
+     left="134"
+     name="cancel_btn"
+     top="402"
+     width="90" />
+    <button
+     follows="right|bottom"
+     height="26"
+     label="Add to Wolf Chat"
+     layout="topleft"
+     left="240"
+     name="add_btn"
+     top="402"
+     width="130" />
+</floater>

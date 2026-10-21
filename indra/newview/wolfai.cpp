@@ -1001,14 +1001,14 @@ void WolfPanelAI::refresh()
     // The working screen: title, note and the "another" button follow the generator.
     {
         const auto* sel = ai.job(ai.mSelected);
-        const bool small = mesh || (ai.generating() && !sel);
-        std::string who = small ? (ai.mDraftName.empty() ? std::string("Your model") : ai.mDraftName) : (sel ? sel->name : std::string("Your building"));
-        mWorkingTitle->setText((small ? "Building “" : "Designing “") + who + "”");
-        mWorkingNote->setText(std::string(small
+        const bool smallJob = mesh || (ai.generating() && !sel);
+        std::string who = smallJob ? (ai.mDraftName.empty() ? std::string("Your model") : ai.mDraftName) : (sel ? sel->name : std::string("Your building"));
+        mWorkingTitle->setText((smallJob ? "Building “" : "Designing “") + who + "”");
+        mWorkingNote->setText(std::string(smallJob
             ? "You can close this window. The model keeps building and is delivered to your Objects folder shortly."
             : "You can close this window. The building keeps being designed on the grid. When it is ready it is put into your Objects folder and charged automatically the next time this viewer sees it."));
-        getChild<LLButton>("ai_working_done")->setLabel(small ? "Make another" : "Start another");
-        getChildView("ai_scroll")->setVisible(!small);
+        getChild<LLButton>("ai_working_done")->setLabel(smallJob ? "Make another" : "Start another");
+        getChildView("ai_scroll")->setVisible(!smallJob);
         if (mStep != Step::Working && ai.generating()) setStep(Step::Working);
     }
     mBuild->setEnabled(auth.current() && (mesh ? a.mMesh && !ai.generating() : a.mBuild && quote.valid && !ai.pending("start")));

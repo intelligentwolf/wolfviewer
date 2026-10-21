@@ -687,6 +687,10 @@ void LLViewerFloaterReg::registerFloaters()
     LLFloaterReg::add("wolf_avatars", "floater_wolfavatars.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<LLFloaterWolfAvatars>);   // [WOLFAVATARS 2026-10-20/] Wolf World > WolfAvatars... (release "Character Colin")
     LLFloaterReg::add("wolf_chat", "floater_wolf_chat.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterChat>);   // [WOLF CHAT 2026-10-20/] Wolf World > Wolf Chat...
     LLFloaterReg::add("wolf_chat_image", "floater_wolf_chat_image.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterChatImage>);   // [WOLF CHAT 2026-10-20/] a posted picture, big
+    LLFloaterReg::add("wolf_chat_gif", "floater_wolf_chat_gif.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterChatGif>);   // [WOLF CHAT 2026-10-21/] the GIF picker (GIPHY)
+    LLFloaterReg::add("wolf_chat_add_group", "floater_wolf_chat_add_group.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterChatAddGroup>);   // [WOLF CHAT 2026-10-21/] add groups to the server rail
+    LLFloaterReg::add("wolf_chat_channel_roles", "floater_wolf_chat_channel_roles.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterChatChannelRoles>);   // [WOLF CHAT 2026-10-21/] owners: who can see a channel
+    LLFloaterReg::add("wolf_chat_bridge", "floater_wolf_chat_bridge.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterChatBridge>);   // [WOLF CHAT 2026-10-21/] owners: bridge a channel to Discord
     LLFloaterReg::add("wolf_environment", "floater_wolf_environment.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterEnvironment>);   // [WOLF ENV 2026-10-12/]
     LLFloaterReg::add("wolf_watchwolf", "floater_wolf_watchwolf.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterWatchWolf>);   // [WATCHWOLF 2026-10-10/]
     LLFloaterReg::add("wolf_experiences", "floater_wolf_experiences.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterExperiences>);   // [WolfViewer 2026-10-14/] Experiences welcome chooser

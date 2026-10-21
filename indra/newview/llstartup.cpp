@@ -263,6 +263,7 @@
 #include "streamtitledisplay.h"
 #include "wolfalbumart.h"
 #include "wolfupdate.h"
+#include "wolffloaterchat.h"   // [WOLF CHAT 2026-10-21/] WolfChat::startNotifier
 #include "tea.h"
 
 //
@@ -3391,6 +3392,10 @@ bool idle_startup()
         // in-world, and a dialog here is seen rather than lost behind the login screen.
         // <WolfViewer 2026-10-02/> It now fetches and installs on request (wolfupdate.h).
         WolfUpdate::checkOnce();
+
+        // [WOLF CHAT 2026-10-21] The channel bells: a background check for new Wolf Chat messages, which does nothing
+        // until this account has used Wolf Chat and only asks while on Wolf Territories (wolffloaterchat.cpp).
+        WolfChat::startNotifier();
 
         // <FS:Ansariel> Draw Distance stepping; originally based on SpeedRez by Henri Beauchamp, licensed under LGPL
         if (gSavedSettings.getBOOL("FSRenderFarClipStepping"))

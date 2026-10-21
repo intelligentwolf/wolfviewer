@@ -8,7 +8,31 @@
                (it stays until the next action works); Emoji, Picture (from inventory), the message, Send
        right   USERS ONLINE (hidden and shown by Users)
      Persona: a group member who wants to see which group friends are on, read and post in the group's channels
-     (with a picture from inventory), and hop into a voice room and see who is talking. -->
+     (with a picture from inventory), and hop into a voice room and see who is talking.
+     [2026-10-21] The centre column is laid out 600 wide (its controls reach x 596): it was declared 560, so the
+     right-hand header buttons, log and Send sat under USERS ONLINE (Paul's screenshot). 248 + 600 + 224 + the
+     stack's gaps = 1080; min_width 1020 keeps the header row (title + Notify..? = ~540) from overlapping itself.
+     [2026-10-21] The rest of the mockup's header and input: Notify (the bell, a label that names its setting), Pins,
+     GIF (hidden unless the grid has GIFs), and the grid's cards (wolf_chat_cards) above the status line - hidden
+     unless the grid defines some; the code moves the message box / log to make room (setGifsAvailable /
+     setCardsShown). Persona: a member of a busy group who wants to hear only when someone says their name, find
+     the group's pinned rules, and answer with a GIF.
+     [2026-10-21] Paul: "groups = servers i should have +add group which adds my wolf groups that i'm a member of but
+     only the ones i choose then inside each server on the right i have my online and offline people and then the
+     channels apply there". Persona: a resident in dozens of groups who wants Wolf Chat to show only the few groups
+     they actually talk in, switch between them in one click, and see who in that group is on.
+     Flow: first open -> the centre explains Wolf Chat and offers "Add a group" -> pick one or several of your groups
+     -> each becomes a tile on the SERVER RAIL (far left, wolf_chat_server_rail: insignia or initials, unread dot,
+     red @ count, "+" = Add a group) -> click a tile = its channels on the left, its members ONLINE / OFFLINE on the
+     right. Right-click a tile (or keyboard: Alt+Up / Alt+Down, Delete) = Move up / Move down / Remove from Wolf Chat
+     (you stay in the group). The group picker (combo) is gone: the rail replaces it. Stack: 64 + 248 + 600 + 224 +
+     gaps = 1148; min_width 1088.
+     [2026-10-21] Paul: "if on wolf grid and you click the chat on a group it should open the new interface, add the group
+     every chat in the new interface should automatically have a #group-chat channel linked to the standard group
+     chat". Every server's first text channel is #group-chat = the standard group IM session (shown from the viewer's
+     IM model, sent through the normal group IM path); on Wolf Territories a group's "Group chat" button opens it here
+     and adds the group to the rail. single_instance: a link or a toast's Open reuses this window
+     (llfloater.h:354 matchesKey) instead of opening a second one. -->
 <floater
  can_close="true"
  can_minimize="true"
@@ -16,13 +40,14 @@
  height="620"
  layout="topleft"
  min_height="420"
- min_width="760"
+ min_width="1088"
  name="wolf_chat"
  help_topic="wolf_chat"
  save_rect="true"
  save_visibility="false"
+ single_instance="true"
  title="WOLF CHAT"
- width="1040">
+ width="1148">
     <layout_stack
      follows="all"
      height="598"
@@ -31,24 +56,45 @@
      name="columns"
      orientation="horizontal"
      top="20"
-     width="1040">
+     width="1148">
 
-        <!-- ═══ left: group, channels, voice room, you ═══ -->
+        <!-- ═══ far left: the server rail (the groups you added, then "+") ═══ -->
+        <layout_panel
+         auto_resize="false"
+         height="598"
+         name="rail_column"
+         user_resize="false"
+         width="64">
+            <wolf_chat_server_rail
+             follows="all"
+             height="590"
+             layout="topleft"
+             left="4"
+             name="server_rail"
+             tab_stop="true"
+             tool_tip="Your Wolf Chat groups. Click one to open it; + adds groups. Right-click a group (or Alt+Up / Alt+Down / Delete) to move or remove it."
+             top="4"
+             width="56" />
+        </layout_panel>
+
+        <!-- ═══ left: the server's name, channels, voice room, you ═══ -->
         <layout_panel
          auto_resize="false"
          height="598"
          name="left_column"
          user_resize="false"
          width="248">
-            <combo_box
+            <text
              follows="left|top|right"
+             font="SansSerifBold"
              height="24"
              layout="topleft"
-             left="8"
-             name="group_combo"
-             tool_tip="The group whose channels you see. Every group you belong to is here."
-             top="4"
-             width="232" />
+             left="10"
+             name="server_name"
+             top="8"
+             use_ellipses="true"
+             width="228"
+             value="" />
             <wolf_chat_sidebar
              follows="all"
              height="414"
@@ -139,7 +185,7 @@
          height="598"
          name="centre_column"
          user_resize="false"
-         width="560">
+         width="600">
             <text
              follows="left|top|right"
              font="SansSerifBold"
@@ -149,40 +195,61 @@
              name="channel_title"
              top="6"
              use_ellipses="true"
-             width="250"
+             width="150"
              value="Wolf Chat" />
-            <line_editor
-             follows="right|top"
-             height="22"
-             label="Search this group"
-             layout="topleft"
-             left="262"
-             max_length_chars="64"
-             name="search_editor"
-             tool_tip="Type at least 3 letters and press Enter to find messages in all this group's channels."
-             top="4"
-             width="170" />
             <button
              follows="right|top"
              height="22"
-             label="@ Mentions"
+             label="Notify: @"
              layout="topleft"
-             left="436"
-             name="mentions_btn"
-             tool_tip="Messages in this group that mention you by name."
+             left="158"
+             name="notify_btn"
+             tool_tip="Notifications for this channel while Wolf Chat is closed. Click to change."
              top="4"
-             width="80" />
+             width="84" />
+            <button
+             follows="right|top"
+             height="22"
+             is_toggle="true"
+             label="Pins"
+             layout="topleft"
+             left="246"
+             name="pins_btn"
+             tool_tip="This channel's pinned messages."
+             top="4"
+             width="44" />
             <button
              follows="right|top"
              height="22"
              is_toggle="true"
              label="Users"
              layout="topleft"
-             left="520"
+             left="294"
              name="members_btn"
              tool_tip="Show or hide the group members who are online."
              top="4"
              width="50" />
+            <line_editor
+             follows="right|top"
+             height="22"
+             label="Search this group"
+             layout="topleft"
+             left="348"
+             max_length_chars="64"
+             name="search_editor"
+             tool_tip="Type at least 3 letters and press Enter to find messages in all this group's channels."
+             top="4"
+             width="140" />
+            <button
+             follows="right|top"
+             height="22"
+             label="@ Mentions"
+             layout="topleft"
+             left="492"
+             name="mentions_btn"
+             tool_tip="Messages in this group that mention you by name."
+             top="4"
+             width="78" />
             <button
              follows="right|top"
              height="22"
@@ -212,6 +279,29 @@
              top="32"
              visible="false"
              width="150" />
+            <!-- [2026-10-21] The Discord bridge's line for a bridged channel (everyone), and "Link again" for owners when
+                 the bridge has stopped (wolffloaterchat.cpp updateHeader). -->
+            <text
+             follows="left|top|right"
+             height="20"
+             layout="topleft"
+             left="158"
+             name="bridge_notice"
+             top="35"
+             use_ellipses="true"
+             visible="false"
+             width="192" />
+            <button
+             follows="right|top"
+             height="22"
+             label="Link again"
+             layout="topleft"
+             left="354"
+             name="relink_btn"
+             tool_tip="Make a new Discord link code for this channel (group owners)."
+             top="32"
+             visible="false"
+             width="72" />
             <button
              follows="right|top"
              height="22"
@@ -219,7 +309,7 @@
              layout="topleft"
              left="430"
              name="rename_btn"
-             tool_tip="Rename this channel (group moderators)."
+             tool_tip="Rename this channel (group owners)."
              top="32"
              width="80" />
             <button
@@ -229,7 +319,7 @@
              layout="topleft"
              left="514"
              name="delete_btn"
-             tool_tip="Delete this channel and all its messages (group moderators)."
+             tool_tip="Delete this channel and all its messages (group owners)."
              top="32"
              width="82" />
             <text_editor
@@ -248,6 +338,61 @@
              track_end="true"
              width="592"
              wrap="true" />
+            <!-- [2026-10-21] Empty state: no groups in the rail yet (shown over the log by the code). -->
+            <panel
+             background_visible="true"
+             bg_alpha_color="0.075 0.082 0.098 1"
+             follows="all"
+             height="436"
+             layout="topleft"
+             left="4"
+             name="empty_state"
+             top="58"
+             visible="false"
+             width="592">
+                <text
+                 follows="left|top|right"
+                 font="SansSerifHuge"
+                 halign="center"
+                 height="34"
+                 layout="topleft"
+                 left="20"
+                 name="empty_title"
+                 top="110"
+                 width="552"
+                 value="Your groups, like Discord servers" />
+                <text
+                 follows="left|top|right"
+                 halign="center"
+                 height="64"
+                 layout="topleft"
+                 left="40"
+                 name="empty_body"
+                 top="152"
+                 width="512"
+                 wrap="true"
+                 value="Add the groups you want to chat in. Each one gets its own text channels, voice rooms and member list, down the left of this window. Only the groups you add are shown, and only they can notify you." />
+                <button
+                 follows="top"
+                 height="36"
+                 label="Add a group"
+                 layout="topleft"
+                 left="196"
+                 name="add_group_big_btn"
+                 tool_tip="Choose which of your groups to add to Wolf Chat."
+                 top="232"
+                 width="200" />
+            </panel>
+            <wolf_chat_cards
+             follows="left|right|bottom"
+             height="44"
+             layout="topleft"
+             left="4"
+             name="cards"
+             tab_stop="true"
+             top="450"
+             visible="false"
+             width="592" />
             <text
              follows="left|right|bottom"
              height="30"
@@ -277,6 +422,17 @@
              tool_tip="Post a picture: choose a texture or snapshot from your inventory (or drag one onto this window). It must be copy and transfer."
              top="532"
              width="30" />
+            <button
+             follows="left|bottom"
+             height="28"
+             label="GIF"
+             layout="topleft"
+             left="72"
+             name="gif_btn"
+             tool_tip="Post a GIF: search GIPHY."
+             top="532"
+             visible="false"
+             width="34" />
             <chat_editor
              expand_lines_count="4"
              follows="left|right|bottom"
@@ -320,7 +476,7 @@
              name="online_title"
              top="6"
              width="212"
-             value="USERS ONLINE" />
+             value="MEMBERS" />
             <scroll_list
              draw_heading="false"
              follows="all"
@@ -328,7 +484,7 @@
              layout="topleft"
              left="6"
              name="online_list"
-             tool_tip="Double-click someone to see their profile."
+             tool_tip="Members of this group: online first, then offline. Double-click someone to see their profile."
              top="32"
              width="212">
                 <scroll_list.columns name="name" relative_width="1" />

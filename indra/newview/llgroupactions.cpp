@@ -28,6 +28,8 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "llgroupactions.h"
+#include "wolffloaterchat.h"   // [WOLF CHAT 2026-10-21/] WolfChat::openGroupChat
+#include "wolfgrid.h"
 
 #include "message.h"
 
@@ -662,10 +664,24 @@ LLUUID LLGroupActions::startIM(const LLUUID& group_id)
             group_id);
         if (session_id != LLUUID::null)
         {
+            // [WOLF CHAT 2026-10-21] Paul: "if on wolf grid and you click the chat on a group it should open the new
+            // interface, add the group". On Wolf Territories every "group chat" button (they all come here) opens Wolf
+            // Chat on the group's #group-chat - this same session - and adds the group to its rail. Elsewhere, as before.
+            if (WolfGrid::isOnWolfTerritories())
+            {
+                WolfChat::openGroupChat(group_id);
+            }
+            else
+            {
+            // [WOLF CHAT 2026-10-21] Paul: "on another grid - if it opens a WOLF group it should open the chat". Off Wolf
+            // Territories Wolf Chat cannot sign anyone in (WolfChat::noteGroupChatElsewhere says why), so a Wolf group's
+            // chat opens here as the standard group chat - which works over the hypergrid - with a one-line note.
+            if (WolfChat::isWolfGroup(group_data.mName)) WolfChat::noteGroupChatElsewhere(group_id, group_data.mName);
             // <FS:Ansariel> [FS communication UI]
             //LLFloaterIMContainer::getInstance()->showConversation(session_id);
             FSFloaterIM::show(session_id);
             // </FS:Ansariel> [FS communication UI]
+            }
         }
         make_ui_sound("UISndStartIM");
         return session_id;

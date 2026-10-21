@@ -55,6 +55,7 @@
 
 #include "llaudiosourcevo.h"
 #include "llagent.h"
+#include "wolffloatertunnels.h"   // <WolfViewer 2026-10-21/> WolfTunnels::contains (interpolateLinearMotion)
 #include "llagentcamera.h"
 #include "llagentwearables.h"
 #include "llbbox.h"
@@ -2746,6 +2747,17 @@ void LLViewerObject::interpolateLinearMotion(const F64SecondsImplicit& frame_tim
         {   // Make a better guess about AVs not going underground
             min_height = LLWorld::getInstance()->resolveLandHeightGlobal(new_pos_global);
             min_height += (0.5f * getScale().mV[VZ]);
+            // <WolfViewer 2026-10-21> TUNNELS (wolffloatertunnels.cpp): Paul on Moonfold, "when i move through the tunnel it
+            // flashes to the terrain above". Between server updates a MOVING avatar was put on the land surface above the
+            // tunnel (this clamp), and the next update put it back down: the avatar, and the camera following it, jumped
+            // between the tunnel and the hill top every few frames while walking. Inside a tunnel box the region does not
+            // push avatars up (WolfSim WolfUndergroundVolumes), so neither does the guess here.
+            if (mRegionp == gAgent.getRegion()
+                && (WolfTunnels::contains(new_pos) || WolfTunnels::contains(getPositionRegion())))
+            {
+                min_height = new_pos.mV[VZ];
+            }
+            // </WolfViewer>
         }
         else
         {   // This will put the object underground, but we can't tell if it will stop

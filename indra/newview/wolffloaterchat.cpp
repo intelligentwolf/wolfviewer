@@ -3098,7 +3098,10 @@ void WolfFloaterChat::joinVoice(const LLUUID& channel)
             self->setStatus("Could not join " + name + ": " + error, true);
             return;
         }
-        self->setStatus("You joined " + name + ". Your mic is " + (WolfChat::micOn() ? "on" : "off - press Mic to talk") + ".", false);
+        // [2026-10-21] Paul: "you should default the mic to on" - joining a voice room means you came to talk (Jimmy
+        // was in a room with his mic off). The same Speak toggle as the Mic button (WolfChat::setMic); Mic turns it off.
+        WolfChat::setMic(true);
+        self->setStatus("You joined " + name + ". Your mic is " + (WolfChat::micOn() ? "on - press Mic to mute it" : "off - press Mic to talk") + ".", false);
         self->mNextChannels = 0.0;     // show yourself in the room at once
         self->updateVoiceBar();
     });

@@ -29,6 +29,7 @@
 	<string name="StartupClearingCache">Clearing cache...</string>
 	<string name="StartupClearingTextureCache">Clearing texture cache...</string>
 	<string name="StartupInitializingTextureCache">Initializing texture cache...</string>
+	<string name="StartupPreparingShaders">Preparing shaders... the first start after an update can take a minute</string>
 	<string name="StartupRequireDriverUpdate">Graphics initialization failed. Please update your graphics driver!</string>
 
 	<!-- about dialog/support string-->

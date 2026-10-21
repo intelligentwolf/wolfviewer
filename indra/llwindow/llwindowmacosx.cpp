@@ -27,6 +27,9 @@
 #include "linden_common.h"
 
 #include "llwindowmacosx.h"
+#include <mach-o/dyld.h>   // [WOLF SPLASH 2026-10-21/] _NSGetExecutablePath
+#include <climits>
+#include <cstdlib>
 
 #include "llkeyboardmacosx.h"
 #include "llwindowcallbacks.h"
@@ -889,6 +892,13 @@ LLWindowMacOSX::~LLWindowMacOSX()
 
 void LLWindowMacOSX::show()
 {
+    // [WOLF SPLASH 2026-10-21] the main window is no longer visible at launch (WolfViewer.xib visibleAtLaunch="NO"): it
+    // stayed blank over everything while the viewer started. It comes in front here, at the hand-over (llstartup.cpp),
+    // as the splash fades out.
+    if (mWindow)
+    {
+        makeWindowOrderFront(mWindow);
+    }
 }
 
 void LLWindowMacOSX::hide()
@@ -1897,29 +1907,38 @@ void LLWindowMacOSX::setTitle(const std::string &title)
 //
 LLSplashScreenMacOSX::LLSplashScreenMacOSX()
 {
-    mWindow = NULL;
 }
 
 LLSplashScreenMacOSX::~LLSplashScreenMacOSX()
 {
+    hideImpl();
 }
 
+// [WOLF SPLASH 2026-10-21] the WolfViewer splash on macOS (wolfsplash.h): a helper process, this same executable with
+// --wolf-splash (llappviewermacosx.cpp main), because AppKit windows belong to the main thread and the viewer's main
+// thread is busy compiling shaders. Its window is llwindowmacosx-splash.mm.
 void LLSplashScreenMacOSX::showImpl()
 {
-    // This code _could_ be used to display a spash screen...
+    if (mChild.running() || !WolfSplash::hasConfig()) return;
+    char exe[PATH_MAX] = {};
+    uint32_t size = sizeof(exe);
+    if (_NSGetExecutablePath(exe, &size) != 0) return;
+    char real[PATH_MAX] = {};
+    if (!realpath(exe, real)) return;
+    if (!mChild.start(real))
+    {
+        LL_WARNS("Window") << "Splash helper could not start" << LL_ENDL;
+    }
 }
 
 void LLSplashScreenMacOSX::updateImpl(const std::string& mesg)
 {
+    mChild.status(mesg);
 }
-
 
 void LLSplashScreenMacOSX::hideImpl()
 {
-    if(mWindow != NULL)
-    {
-        mWindow = NULL;
-    }
+    mChild.stop();   // fades out on its own; the viewer does not wait
 }
 
 S32 OSMessageBoxMacOSX(const std::string& text, const std::string& caption, U32 type)

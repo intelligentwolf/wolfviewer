@@ -18,6 +18,8 @@ include(LLWindow)
 include(UI)
 include(ViewerMiscLibs)
 include(GLM)
+include(FreeType)   # [WOLF SPLASH 2026-10-21/] wolfsplash.cpp draws its type with FreeType
+include(JPEG)       # [WOLF SPLASH 2026-10-21/] and its photograph with libjpeg
 
 set(llwindow_SOURCE_FILES
     llcursortypes.cpp
@@ -40,12 +42,14 @@ set(llwindow_HEADER_FILES
 
 set(viewer_SOURCE_FILES
     llmousehandler.cpp
+    wolfsplash.cpp
     )
 
 set(viewer_HEADER_FILES
     llwindow.h
     llpreeditor.h
     llmousehandler.h
+    wolfsplash.h
     )
 
 set(llwindow_LINK_LIBRARIES
@@ -58,6 +62,8 @@ set(llwindow_LINK_LIBRARIES
         ll::glm
         ll::glext
         ll::uilibraries
+        ll::freetype
+        ll::libjpeg
         ll::SDL
         )
 
@@ -107,6 +113,7 @@ if (DARWIN)
     llkeyboardmacosx.cpp
     llwindowmacosx.cpp
     llwindowmacosx-objc.mm
+    llwindowmacosx-splash.mm
     llopenglview-objc.mm
     )
   list(APPEND llwindow_HEADER_FILES

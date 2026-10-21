@@ -350,8 +350,10 @@ bool LLSplashScreen::isVisible()
 // static
 LLSplashScreen *LLSplashScreen::create()
 {
-#if LL_MESA_HEADLESS || LL_SDL  // !!! *FIX: (?)
+#if LL_MESA_HEADLESS  // !!! *FIX: (?)
     return 0;
+#elif LL_SDL
+    return new LLSplashScreenSDL;   // [WOLF SPLASH 2026-10-21/] llwindowsdl2.cpp
 #elif LL_WINDOWS
     return new LLSplashScreenWin32;
 #elif LL_DARWIN
@@ -371,6 +373,8 @@ void LLSplashScreen::show()
         gSplashScreenp = new LLSplashScreenWin32;
 #elif LL_DARWIN
         gSplashScreenp = new LLSplashScreenMacOSX;
+#elif LL_SDL && !LL_MESA_HEADLESS
+        gSplashScreenp = new LLSplashScreenSDL;   // [WOLF SPLASH 2026-10-21/] llwindowsdl2.cpp
 #endif
         if (gSplashScreenp)
         {

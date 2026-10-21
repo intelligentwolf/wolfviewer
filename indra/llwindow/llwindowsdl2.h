@@ -279,6 +279,8 @@ private:
 };
 
 
+#include "wolfsplash.h"
+// [WOLF SPLASH 2026-10-21] the WolfViewer splash (wolfsplash.h), shown by a helper process (llwindowsdl2.cpp)
 class LLSplashScreenSDL : public LLSplashScreen
 {
 public:
@@ -288,7 +290,13 @@ public:
     /*virtual*/ void showImpl();
     /*virtual*/ void updateImpl(const std::string& mesg);
     /*virtual*/ void hideImpl();
+
+private:
+    WolfSplashChild mChild;   // the --wolf-splash helper process (wolfsplash.h)
 };
+
+// The --wolf-splash helper process's whole life (called from main before anything of the viewer starts).
+int wolf_splash_helper_main(int argc, char** argv);
 
 S32 OSMessageBoxSDL(const std::string& text, const std::string& caption, U32 type);
 

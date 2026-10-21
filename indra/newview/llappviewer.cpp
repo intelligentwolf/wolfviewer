@@ -31,6 +31,7 @@
 #include "wolfviewerkey.h"  // [COPYBOT EXEMPT 2026-10-19/] the per-login key for the regions' copybot guard
 #include "wolffloaterexperiences.h"  // [WolfViewer 2026-10-14/] Experiences: auto-open after a new account's login, arrival notice
 #include "llappviewer.h"
+#include "wolfsplash.h"   // [WOLF SPLASH 2026-10-21/]
 
 // Viewer includes
 #include "llversioninfo.h"
@@ -3574,6 +3575,26 @@ bool LLAppViewer::initConfiguration()
     args["[APP_NAME]"] =  LLTrans::getString("APP_NAME");
     //<FS:AW set the APP_NAME to Firestorm instead of the grid connected to>
     splash_msg = LLTrans::getString("StartupLoading", args);
+    // [WOLF SPLASH 2026-10-21] Paul: "i'd rather just display a really posh splash screen" - what the splash shows
+    // (llwindow/wolfsplash.h): the game screens' howling wolf, the viewer's own fonts, the release name and version,
+    // on the monitor the viewer's window was last on
+    {
+        WolfSplashConfig cfg;
+        const std::string ro = gDirUtilp->getAppRODataDir();
+        cfg.art_path = gDirUtilp->add(ro, "skins", "default", "textures", "wolfgame", "wolfgame_background.jpg");
+        const std::string fonts = gDirUtilp->add(ro, "fonts");
+        cfg.title_font = gDirUtilp->add(fonts, "Cinzel-Bold.ttf");
+        cfg.italic_font = gDirUtilp->add(fonts, "DroidSerif-Italic.ttf");
+        cfg.ui_font = gDirUtilp->add(fonts, "DejaVuSans.ttf");
+        cfg.title = "WOLFVIEWER";
+        cfg.subtitle = LLVersionInfo::getInstance()->getReleaseName();
+        cfg.version = "Version " + LLVersionInfo::getInstance()->getVersion();
+        cfg.status = splash_msg;
+        cfg.hint_x = gSavedSettings.getS32("WindowX") + 40;
+        cfg.hint_y = gSavedSettings.getS32("WindowY") + 40;
+        cfg.has_hint = true;
+        WolfSplash::setConfig(cfg);
+    }
     LLSplashScreen::show();
     LLSplashScreen::update(splash_msg);
 

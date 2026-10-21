@@ -29,6 +29,10 @@
 #if LL_WINDOWS && !LL_MESA_HEADLESS
 
 #include "llwindowwin32.h"
+#include "wolfsplash.h"   // [WOLF SPLASH 2026-10-21/]
+#include <atomic>
+#include <mutex>
+#include <thread>
 
 // LLWindow library includes
 #include "llkeyboardwin32.h"
@@ -957,7 +961,17 @@ LLWindowWin32::~LLWindowWin32()
 void LLWindowWin32::show()
 {
     LL_DEBUGS("Window") << "Setting window to show" << LL_ENDL;
-    ShowWindow(mWindowHandle, SW_SHOW);
+    // [WOLF SPLASH 2026-10-21] a maximize asked for while hidden (see maximize) is applied now, in the same call that
+    // shows the window, so it never appears at its normal size first
+    if (mMaximizeOnShow && !IsWindowVisible(mWindowHandle))
+    {
+        mMaximizeOnShow = false;
+        ShowWindow(mWindowHandle, SW_SHOWMAXIMIZED);
+    }
+    else
+    {
+        ShowWindow(mWindowHandle, SW_SHOW);
+    }
     SetForegroundWindow(mWindowHandle);
     SetFocus(mWindowHandle);
 }
@@ -1101,6 +1115,15 @@ bool LLWindowWin32::maximize()
 {
     bool success = false;
     if (!mWindowHandle) return success;
+
+    // [WOLF SPLASH 2026-10-21] LLAppViewer::initWindow maximizes the window while it is still hidden under the splash;
+    // SetWindowPlacement(SW_MAXIMIZE) would show it there (a big blank window over the splash), so it is remembered
+    // and done by show() at the hand-over (llstartup.cpp)
+    if (!IsWindowVisible(mWindowHandle))
+    {
+        mMaximizeOnShow = true;
+        return true;
+    }
 
     mWindowThread->post([=]
         {
@@ -3952,73 +3975,208 @@ void LLWindowWin32::swapBuffers()
 //
 // LLSplashScreenImp
 //
+// [WOLF SPLASH 2026-10-21] the WolfViewer splash on Windows (wolfsplash.h has why). The stock dialog (res/viewerRes.rc
+// SPLASHSCREEN) was created on the main thread, which then compiled shaders without pumping its messages, and the
+// maximized main window covered it. This window lives on its own thread with its own message loop: it keeps painting,
+// Windows never sees it hang, and it stays topmost until the main window is shown, then fades out.
+struct LLSplashScreenWin32::State
+{
+    std::mutex mutex;
+    std::string status;
+    bool status_dirty = false;
+    std::atomic<bool> fade{ false };
+    std::thread thread;
+};
+
+namespace
+{
+    const wchar_t* const WOLF_SPLASH_CLASS = L"WolfViewerSplash";
+
+    // Per-monitor DPI on this thread only (Windows 10 1607+, looked up so older Windows still runs)
+    void wolfSplashDpiAware()
+    {
+        typedef HANDLE (WINAPI* SetCtx)(HANDLE);
+        if (HMODULE user32 = GetModuleHandleW(L"user32.dll"))
+        {
+            if (SetCtx set = (SetCtx)GetProcAddress(user32, "SetThreadDpiAwarenessContext"))
+            {
+                set((HANDLE)-4);   // DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 (WinUser.h)
+            }
+        }
+    }
+
+    UINT wolfSplashDpi(HMONITOR monitor)
+    {
+        typedef HRESULT (WINAPI* GetDpi)(HMONITOR, int, UINT*, UINT*);
+        static HMODULE shcore = LoadLibraryW(L"Shcore.dll");
+        if (shcore)
+        {
+            if (GetDpi get = (GetDpi)GetProcAddress(shcore, "GetDpiForMonitor"))
+            {
+                UINT x = 96, y = 96;
+                if (SUCCEEDED(get(monitor, 0 /* MDT_EFFECTIVE_DPI */, &x, &y)) && x > 0) return x;
+            }
+        }
+        HDC dc = GetDC(NULL);
+        const UINT dpi = (UINT)GetDeviceCaps(dc, LOGPIXELSX);
+        ReleaseDC(NULL, dc);
+        return dpi > 0 ? dpi : 96;
+    }
+
+    void wolfSplashThread(std::shared_ptr<LLSplashScreenWin32::State> state, WolfSplashConfig cfg)
+    {
+        wolfSplashDpiAware();
+        HINSTANCE hinst = GetModuleHandle(NULL);
+
+        WNDCLASSEXW wc = {};
+        wc.cbSize = sizeof(wc);
+        wc.lpfnWndProc = (WNDPROC)LLSplashScreenWin32::windowProc;
+        wc.hInstance = hinst;
+        wc.hIcon = LoadIcon(hinst, gIconResource);
+        wc.hCursor = LoadCursor(NULL, IDC_APPSTARTING);
+        wc.lpszClassName = WOLF_SPLASH_CLASS;
+        if (!RegisterClassExW(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
+        {
+            LL_WARNS("Window") << "Splash: RegisterClassEx failed " << GetLastError() << LL_ENDL;
+            return;
+        }
+
+        // the monitor the viewer will open on (the saved window position), else the primary
+        POINT pt = { cfg.hint_x, cfg.hint_y };
+        HMONITOR monitor = cfg.has_hint ? MonitorFromPoint(pt, MONITOR_DEFAULTTOPRIMARY)
+                                        : MonitorFromPoint(POINT{ 0, 0 }, MONITOR_DEFAULTTOPRIMARY);
+        MONITORINFO mi = {};
+        mi.cbSize = sizeof(mi);
+        GetMonitorInfo(monitor, &mi);
+        const float scale = float(wolfSplashDpi(monitor)) / 96.f;
+        const int w = (int)lround(WolfSplash::LOGICAL_W * scale), h = (int)lround(WolfSplash::LOGICAL_H * scale);
+        const RECT& wa = mi.rcWork;
+        const int x = wa.left + ((wa.right - wa.left) - w) / 2, y = wa.top + ((wa.bottom - wa.top) - h) / 2;
+
+        HWND hwnd = CreateWindowExW(WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_APPWINDOW, WOLF_SPLASH_CLASS,
+                                    ll_convert<std::wstring>(std::string("WolfViewer")).c_str(), WS_POPUP,
+                                    x, y, w, h, NULL, NULL, hinst, NULL);
+        if (!hwnd)
+        {
+            LL_WARNS("Window") << "Splash: CreateWindowEx failed " << GetLastError() << LL_ENDL;
+            return;
+        }
+
+        WolfSplashRenderer renderer;
+        renderer.init(cfg, w, h, scale, true);
+
+        BITMAPINFO bmi = {};
+        bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        bmi.bmiHeader.biWidth = w;
+        bmi.bmiHeader.biHeight = -h;    // top-down, as the renderer writes it
+        bmi.bmiHeader.biPlanes = 1;
+        bmi.bmiHeader.biBitCount = 32;
+        bmi.bmiHeader.biCompression = BI_RGB;
+        void* bits = nullptr;
+        HDC screen = GetDC(NULL);
+        HDC mem = CreateCompatibleDC(screen);
+        HBITMAP dib = CreateDIBSection(screen, &bmi, DIB_RGB_COLORS, &bits, NULL, 0);
+        HGDIOBJ old = dib ? SelectObject(mem, dib) : NULL;
+
+        const ULONGLONG start = GetTickCount64();
+        ULONGLONG fade_start = 0;
+        bool shown = false;
+        for (;;)
+        {
+            MSG msg;
+            while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+            {
+                TranslateMessage(&msg);
+                DispatchMessage(&msg);
+            }
+            {
+                std::lock_guard<std::mutex> lock(state->mutex);
+                if (state->status_dirty)
+                {
+                    renderer.setStatus(state->status);
+                    state->status_dirty = false;
+                }
+            }
+            const ULONGLONG now = GetTickCount64();
+            BYTE alpha = 255;
+            if (state->fade.load())
+            {
+                if (!fade_start) fade_start = now;
+                const double f = double(now - fade_start) / 280.0;
+                if (f >= 1.0) break;
+                alpha = (BYTE)lround(255.0 * (1.0 - f));
+            }
+            if (bits)
+            {
+                renderer.render((uint32_t*)bits, double(now - start) / 1000.0);
+                POINT src = { 0, 0 }, dst = { x, y };
+                SIZE size = { w, h };
+                BLENDFUNCTION blend = { AC_SRC_OVER, 0, alpha, AC_SRC_ALPHA };
+                UpdateLayeredWindow(hwnd, screen, &dst, &size, mem, &src, 0, &blend, ULW_ALPHA);
+            }
+            if (!shown)
+            {
+                ShowWindow(hwnd, SW_SHOW);
+                shown = true;
+            }
+            // ~30 frames a second, waking at once for any message
+            MsgWaitForMultipleObjects(0, NULL, FALSE, 33, QS_ALLINPUT);
+        }
+
+        if (old) SelectObject(mem, old);
+        if (dib) DeleteObject(dib);
+        DeleteDC(mem);
+        ReleaseDC(NULL, screen);
+        DestroyWindow(hwnd);
+    }
+}
+
 LLSplashScreenWin32::LLSplashScreenWin32()
-:   mWindow(NULL)
 {
 }
 
 LLSplashScreenWin32::~LLSplashScreenWin32()
 {
+    // the thread fades the window out and ends by itself; it holds its own reference to the state
+    if (mState)
+    {
+        mState->fade = true;
+        if (mState->thread.joinable()) mState->thread.detach();
+    }
 }
 
 void LLSplashScreenWin32::showImpl()
 {
-    // This appears to work.  ???
-    HINSTANCE hinst = GetModuleHandle(NULL);
-
-    mWindow = CreateDialog(hinst,
-        TEXT("SPLASHSCREEN"),
-        NULL,   // no parent
-        (DLGPROC) LLSplashScreenWin32::windowProc);
-    ShowWindow(mWindow, SW_SHOW);
-
-    // Should set taskbar text without creating a header for the window (caption)
-    //SetWindowText(mWindow, TEXT("Second Life"));
-    SetWindowText(mWindow, ll_convert<std::wstring>(APP_NAME).c_str());
+    mState = std::make_shared<State>();
+    WolfSplashConfig cfg = WolfSplash::getConfig();
+    mState->status = cfg.status;
+    mState->thread = std::thread(wolfSplashThread, mState, cfg);
 }
-
 
 void LLSplashScreenWin32::updateImpl(const std::string& mesg)
 {
-    if (!mWindow) return;
-
-    int output_str_len = MultiByteToWideChar(CP_UTF8, 0, mesg.c_str(), static_cast<int>(mesg.length()), NULL, 0);
-    if( output_str_len>1024 )
-        return;
-
-    WCHAR w_mesg[1025];//big enought to keep null terminatos
-
-    MultiByteToWideChar (CP_UTF8, 0, mesg.c_str(), static_cast<int>(mesg.length()), w_mesg, output_str_len);
-
-    //looks like MultiByteToWideChar didn't add null terminator to converted string, see EXT-4858
-    w_mesg[output_str_len] = 0;
-
-    SendDlgItemMessage(mWindow,
-        666,        // HACK: text id
-        WM_SETTEXT,
-        FALSE,
-        (LPARAM)w_mesg);
+    if (!mState) return;
+    std::lock_guard<std::mutex> lock(mState->mutex);
+    mState->status = mesg;
+    mState->status_dirty = true;
 }
-
 
 void LLSplashScreenWin32::hideImpl()
 {
-    if (mWindow)
+    if (mState)
     {
-        if (!destroy_window_handler(mWindow))
-        {
-            LL_WARNS("Window") << "Failed to properly close splash screen window!" << LL_ENDL;
-        }
-        mWindow = NULL;
+        mState->fade = true;   // fades out over 280 ms on its own thread; the main thread does not wait
     }
 }
-
 
 // static
 LRESULT CALLBACK LLSplashScreenWin32::windowProc(HWND h_wnd, UINT u_msg,
                                             WPARAM w_param, LPARAM l_param)
 {
-    // Just give it to windows
+    if (u_msg == WM_NCHITTEST)
+    {
+        return HTCAPTION;   // it can be dragged out of the way
+    }
     return DefWindowProc(h_wnd, u_msg, w_param, l_param);
 }
 

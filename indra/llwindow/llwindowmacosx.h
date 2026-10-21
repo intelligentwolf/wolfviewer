@@ -28,6 +28,7 @@
 #define LL_LLWINDOWMACOSX_H
 
 #include "llwindow.h"
+#include "wolfsplash.h"   // [WOLF SPLASH 2026-10-21/]
 #include "llwindowcallbacks.h"
 #include "llwindowmacosx-objc.h"
 
@@ -249,6 +250,7 @@ public:
 };
 
 
+// [WOLF SPLASH 2026-10-21] the WolfViewer splash (wolfsplash.h), shown by a helper process (llwindowmacosx.cpp)
 class LLSplashScreenMacOSX : public LLSplashScreen
 {
 public:
@@ -260,8 +262,11 @@ public:
     void hideImpl();
 
 private:
-    WindowRef   mWindow;
+    WolfSplashChild mChild;   // the --wolf-splash helper process
 };
+
+// The --wolf-splash helper process's whole life (llwindowmacosx-splash.mm; called from main before the viewer starts).
+int wolf_splash_helper_main(int argc, char** argv);
 
 S32 OSMessageBoxMacOSX(const std::string& text, const std::string& caption, U32 type);
 

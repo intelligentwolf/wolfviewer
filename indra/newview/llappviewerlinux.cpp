@@ -115,6 +115,13 @@ static void exceptionTerminateHandler()
 
 int main( int argc, char **argv )
 {
+    // [WOLF SPLASH 2026-10-21] this same executable, started by LLSplashScreenSDL (llwindowsdl2.cpp) to show the splash
+    // while the viewer itself starts: nothing of the viewer runs in it
+    if (argc > 1 && !strcmp(argv[1], "--wolf-splash"))
+    {
+        return wolf_splash_helper_main(argc, argv);
+    }
+
     // Call Tracy first thing to have it allocate memory
     // https://github.com/wolfpld/tracy/issues/196
     LL_PROFILER_FRAME_END;

@@ -32,6 +32,12 @@
 #include "llwindowsdl.h"
 
 #include "llwindowcallbacks.h"
+#include "wolfsplash.h"   // [WOLF SPLASH 2026-10-21/]
+#include <unistd.h>
+#include "SDL2/SDL_syswm.h"
+#if LL_X11
+# include <X11/Xatom.h>
+#endif
 #include "llkeyboardsdl.h"
 
 #include "llerror.h"
@@ -847,6 +853,13 @@ bool LLWindowSDL::createContext(int x, int y, int width, int height, int bits, b
         tryFindFullscreenSize( width, height );
     }
 
+    // [WOLF SPLASH 2026-10-21] while the splash is up the window is created hidden: it was shown at once and stayed blank
+    // over everything until the login screen (shaders compile in between); show() maps it at the hand-over
+    if (LLSplashScreen::isVisible())
+    {
+        sdlflags |= SDL_WINDOW_HIDDEN;
+    }
+
     mSDLFlags = sdlflags;
 
     GLint redBits{8}, greenBits{8}, blueBits{8}, alphaBits{8};
@@ -1147,7 +1160,12 @@ LLWindowSDL::~LLWindowSDL()
 
 void LLWindowSDL::show()
 {
-    // *FIX: What to do with SDL?
+    // [WOLF SPLASH 2026-10-21] the window was created hidden under the splash (createContext); map it now
+    if (mWindow && (SDL_GetWindowFlags(mWindow) & SDL_WINDOW_HIDDEN))
+    {
+        SDL_ShowWindow(mWindow);
+        SDL_RaiseWindow(mWindow);
+    }
 }
 
 void LLWindowSDL::hide()
@@ -2817,8 +2835,11 @@ void LLWindowSDL::hideCursorUntilMouseMove()
 }
 
 //
-// LLSplashScreenSDL - I don't think we'll bother to implement this; it's
-// fairly obsolete at this point.
+// [WOLF SPLASH 2026-10-21] LLSplashScreenSDL - the WolfViewer splash on Linux (wolfsplash.h). Stock Firestorm had none
+// here (this class was empty and LLSplashScreen::show had no SDL branch). SDL's video calls belong to one thread, and
+// the viewer's main thread is busy compiling shaders, so the splash is a small helper process: this same executable
+// started with --wolf-splash (llappviewerlinux.cpp main hands it to wolf_splash_helper_main). Lines over a socket:
+// "S <status>" sets the status, "F" fades it out; the socket closing (the viewer quit or crashed) ends it too.
 //
 LLSplashScreenSDL::LLSplashScreenSDL()
 {
@@ -2826,18 +2847,194 @@ LLSplashScreenSDL::LLSplashScreenSDL()
 
 LLSplashScreenSDL::~LLSplashScreenSDL()
 {
+    hideImpl();
 }
 
 void LLSplashScreenSDL::showImpl()
 {
+    if (mChild.running() || !WolfSplash::hasConfig()) return;
+    char exe[PATH_MAX] = {};
+    const ssize_t len = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+    if (len <= 0) return;
+    exe[len] = 0;
+    if (!mChild.start(exe))
+    {
+        LL_WARNS("Window") << "Splash helper could not start" << LL_ENDL;
+    }
 }
 
 void LLSplashScreenSDL::updateImpl(const std::string& mesg)
 {
+    mChild.status(mesg);
 }
 
 void LLSplashScreenSDL::hideImpl()
 {
+    mChild.stop();   // fades out on its own; the viewer does not wait
+}
+
+// ---- the helper's window, on every Linux desktop (tested 2026-10-21 on Hyprland, both paths): SDL 2.28's own Wayland
+// windows cannot keep a fixed size on a tiling compositor, and a HiDPI one that is hidden then resized there dies of a
+// protocol error ("wp_viewport ... Box doesn't fit"). An X11 window marked as a splash (EWMH _NET_WM_WINDOW_TYPE_SPLASH)
+// is floated, undecorated and kept above by X11 window managers and by every Wayland desktop's XWayland (GNOME, KDE,
+// Sway, Hyprland), so the splash uses X11 whenever there is an X display, and native Wayland (no HiDPI flag, letterboxed
+// if the compositor resizes it) only where there is none.
+namespace
+{
+#if LL_X11
+    // the desktop's scale on plain X11: Xft.dpi (what GTK and Qt read), else GDK_SCALE
+    float wolfX11Scale(Display* dpy)
+    {
+        if (const char* res = dpy ? XResourceManagerString(dpy) : nullptr)
+        {
+            if (const char* d = strstr(res, "Xft.dpi:"))
+            {
+                const float dpi = float(atof(d + 8));
+                if (dpi > 100.f) return dpi / 96.f;
+            }
+        }
+        const char* gdk = getenv("GDK_SCALE");
+        const int g = gdk ? atoi(gdk) : 1;
+        return g > 1 && g <= 4 ? float(g) : 1.f;
+    }
+#endif
+}
+
+// The helper process: shows the splash until told to fade, or until the viewer goes away.
+int wolf_splash_helper_main(int argc, char** argv)
+{
+    WolfSplashConfig cfg;
+    if (!WolfSplash::fromArgs(argc, argv, 2, cfg)) return 1;
+
+    // X11 when there is an X display (a desktop's XWayland included), else native Wayland; SDL_VIDEODRIVER wins
+    const char* forced = getenv("SDL_VIDEODRIVER");
+    const char* x11 = getenv("DISPLAY");
+    const char* wl = getenv("WAYLAND_DISPLAY");
+    if (!forced || !*forced)
+    {
+        SDL_SetHint(SDL_HINT_VIDEODRIVER, (x11 && *x11) ? "x11,wayland" : (wl && *wl) ? "wayland,x11" : "x11");
+    }
+    SDL_SetHint(SDL_HINT_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR, "0");
+    if (SDL_Init(SDL_INIT_VIDEO) != 0) return 1;
+
+    // the display holding the viewer's saved window position, else the first
+    int display = 0;
+    if (cfg.has_hint)
+    {
+        for (int i = 0; i < SDL_GetNumVideoDisplays(); ++i)
+        {
+            SDL_Rect b;
+            if (SDL_GetDisplayBounds(i, &b) == 0 && cfg.hint_x >= b.x && cfg.hint_x < b.x + b.w
+                && cfg.hint_y >= b.y && cfg.hint_y < b.y + b.h)
+            {
+                display = i;
+                break;
+            }
+        }
+    }
+    const int lw = WolfSplash::LOGICAL_W, lh = WolfSplash::LOGICAL_H;
+    const char* driver = SDL_GetCurrentVideoDriver();
+    const bool wayland = driver && !strcmp(driver, "wayland");
+    // Wayland: shown at once and without the HiDPI flag - hidden + HiDPI is the combination that dies when a compositor
+    // resizes the window (see above); X11: hidden until the first frame is drawn, then mapped as a splash
+    SDL_Window* win = SDL_CreateWindow("WolfViewer", SDL_WINDOWPOS_CENTERED_DISPLAY(display),
+                                       SDL_WINDOWPOS_CENTERED_DISPLAY(display), lw, lh,
+                                       SDL_WINDOW_BORDERLESS | SDL_WINDOW_ALWAYS_ON_TOP
+                                       | (wayland ? 0 : SDL_WINDOW_HIDDEN));
+    if (!win) { SDL_Quit(); return 1; }
+    // a fixed size, so tiling window managers float it
+    SDL_SetWindowMinimumSize(win, lw, lh);
+    SDL_SetWindowMaximumSize(win, lw, lh);
+    SDL_SetWindowResizable(win, SDL_FALSE);
+#if LL_X11
+    {
+        // X11: say it is a splash screen (EWMH _NET_WM_WINDOW_TYPE_SPLASH) - centred, undecorated, kept above
+        SDL_SysWMinfo info;
+        SDL_VERSION(&info.version);
+        if (SDL_GetWindowWMInfo(win, &info) && info.subsystem == SDL_SYSWM_X11)
+        {
+            Display* dpy = info.info.x11.display;
+            Atom type = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE", False);
+            Atom splash = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE_SPLASH", False);
+            XChangeProperty(dpy, info.info.x11.window, type, XA_ATOM, 32, PropModeReplace, (unsigned char*)&splash, 1);
+        }
+    }
+#endif
+    SDL_Renderer* ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    if (!ren) ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE);
+    if (!ren) { SDL_DestroyWindow(win); SDL_Quit(); return 1; }
+
+    // pixel size: the renderer's output; on X11 the window is in X pixels, so it is made bigger by the desktop's own
+    // scale (Xft.dpi / GDK_SCALE - what GTK and Qt apps use there)
+    int pw = lw, ph = lh;
+    SDL_GetRendererOutputSize(ren, &pw, &ph);
+    float scale = float(pw) / float(lw);
+    if (pw == lw)
+    {
+        float xs = 1.f;
+#if LL_X11
+        SDL_SysWMinfo wi;
+        SDL_VERSION(&wi.version);
+        if (SDL_GetWindowWMInfo(win, &wi) && wi.subsystem == SDL_SYSWM_X11) xs = wolfX11Scale(wi.info.x11.display);
+#endif
+        if (xs > 1.01f && xs <= 4.f)
+        {
+            scale = xs;
+            pw = int(lw * xs + 0.5f);
+            ph = int(lh * xs + 0.5f);
+            SDL_SetWindowMinimumSize(win, pw, ph);
+            SDL_SetWindowMaximumSize(win, pw, ph);
+            SDL_SetWindowSize(win, pw, ph);
+            SDL_SetWindowPosition(win, SDL_WINDOWPOS_CENTERED_DISPLAY(display), SDL_WINDOWPOS_CENTERED_DISPLAY(display));
+        }
+    }
+    // a compositor that resizes the window anyway (a tiling one) gets the picture letterboxed, never stretched
+    SDL_RenderSetLogicalSize(ren, pw, ph);
+    SDL_Texture* tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, pw, ph);
+    WolfSplashRenderer renderer;
+    renderer.init(cfg, pw, ph, scale, false);   // SDL2 windows cannot be per-pixel transparent: square corners
+    std::vector<uint32_t> pixels(size_t(pw) * ph);
+
+    std::string inbuf, status;
+    bool fading = false, shown = false;
+    Uint32 fade_start = 0;
+    const Uint32 start = SDL_GetTicks();
+    for (;;)
+    {
+        SDL_Event ev;
+        while (SDL_PollEvent(&ev)) { }   // keeps the window answering the compositor; closing it is up to the viewer
+
+        bool changed = false;
+        WolfSplashChild::readCommands(inbuf, status, changed, fading);
+        if (changed) renderer.setStatus(status);
+
+        const Uint32 now = SDL_GetTicks();
+        if (fading)
+        {
+            if (!fade_start) fade_start = now;
+            const float f = float(now - fade_start) / 280.f;
+            if (f >= 1.f || !shown) break;
+            if (SDL_SetWindowOpacity(win, 1.f - f) != 0) break;   // no opacity here (e.g. Wayland): just close
+        }
+
+        renderer.render(pixels.data(), double(now - start) / 1000.0);
+        SDL_UpdateTexture(tex, nullptr, pixels.data(), pw * 4);
+        SDL_RenderClear(ren);
+        SDL_RenderCopy(ren, tex, nullptr, nullptr);
+        SDL_RenderPresent(ren);
+        if (!shown)
+        {
+            SDL_ShowWindow(win);
+            SDL_RaiseWindow(win);
+            shown = true;
+        }
+        SDL_Delay(16);
+    }
+    SDL_DestroyTexture(tex);
+    SDL_DestroyRenderer(ren);
+    SDL_DestroyWindow(win);
+    SDL_Quit();
+    return 0;
 }
 
 S32 OSMessageBoxSDL(const std::string& text, const std::string& caption, U32 type)

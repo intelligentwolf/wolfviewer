@@ -1387,11 +1387,11 @@ bool idle_startup()
 
         show_debug_menus();
 
-        // Hide the splash screen
-        LL_DEBUGS("AppInit") << "Hide the splash screen and show window" << LL_ENDL;
-        LLSplashScreen::hide();
-        // Push our window frontmost
+        // [WOLF SPLASH 2026-10-21] the window first, then the splash fades out over it (wolfsplash.h): the other way
+        // round left a moment with nothing on screen. The splash fades on its own thread / process; nothing waits.
+        LL_DEBUGS("AppInit") << "Show window and fade out the splash screen" << LL_ENDL;
         gViewerWindow->getWindow()->show();
+        LLSplashScreen::hide();
 
         // DEV-16927.  The following code removes errant keystrokes that happen while the window is being
         // first made visible.

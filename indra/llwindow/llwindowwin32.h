@@ -191,6 +191,9 @@ protected:
     WCHAR       *mWindowClassName;
 
     HWND        mWindowHandle = 0;  // window handle
+    // [WOLF SPLASH 2026-10-21] maximize() before the first show() (LLAppViewer::initWindow, under the splash) only
+    // remembers it: SetWindowPlacement(SW_MAXIMIZE) would also SHOW the window, a big blank one over the splash
+    bool        mMaximizeOnShow = false;
     // <WolfViewer 2026-10-10> spanAllScreens: the style and place to go back to (window thread only)
     LONG_PTR        mSpanSavedStyle = 0;
     WINDOWPLACEMENT mSpanSavedPlacement = {};
@@ -279,6 +282,9 @@ public:
 // </FS:ND>
 };
 
+// [WOLF SPLASH 2026-10-21] the WolfViewer splash (wolfsplash.h): a borderless, topmost, per-pixel-alpha (layered)
+// window with its own thread and message loop, so it keeps painting and answering Windows while the main thread
+// compiles shaders. Replaces the stock "SPLASHSCREEN" dialog, which lived on the main thread.
 class LLSplashScreenWin32 : public LLSplashScreen
 {
 public:
@@ -292,11 +298,12 @@ public:
 #if LL_WINDOWS
     static LRESULT CALLBACK windowProc(HWND h_wnd, UINT u_msg,
         WPARAM w_param, LPARAM l_param);
+    struct State;
 #endif
 
 private:
 #if LL_WINDOWS
-    HWND mWindow;
+    std::shared_ptr<State> mState;
 #endif
 };
 

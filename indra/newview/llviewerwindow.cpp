@@ -2065,6 +2065,16 @@ LLViewerWindow::LLViewerWindow(const Params& p)
     {
         //immediately initialize shaders
         LLViewerShaderMgr::sInitialized = true;
+        {
+            // [WOLF SPLASH 2026-10-21] the long wait, said on the splash; plain English if a skin or language lacks the
+            // string (LLTrans::getString would put "MissingString(...)" on the splash)
+            std::string msg;
+            if (!LLTrans::findString(msg, "StartupPreparingShaders") || msg.empty())
+            {
+                msg = "Preparing shaders... the first start after an update can take a minute";
+            }
+            LLSplashScreen::update(msg);
+        }
         LLViewerShaderMgr::instance()->setShaders();
     }
 

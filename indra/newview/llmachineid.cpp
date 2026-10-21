@@ -27,6 +27,7 @@
 #include "llviewerprecompiledheaders.h"
 #include "lluuid.h"
 #include "llmachineid.h"
+#include "llmd5.h"   // <WolfViewer 2026-10-21/> Linux: the machine id is hashed (init)
 #if LL_WINDOWS
 #define _WIN32_DCOM
 #include <iostream>
@@ -466,10 +467,48 @@ S32 LLMachineID::init()
         }
     }
 #else
-    unsigned char * staticPtr = (unsigned char *)(&static_unique_id[0]);
-    ret_code = LLUUID::getNodeID(staticPtr);
-    has_static_unique_id = true;
-    has_static_legacy_id = false;
+    // <WolfViewer 2026-10-21> A resident: the viewer forgets the saved login "every time they switched networks". The key
+    // was the MAC address LLUUID::getNodeID returns: the FIRST interface SIOCGIFCONF lists (lluuid.cpp getNodeID), and
+    // that list only holds interfaces that are up with an address, so Wi-Fi <-> cable, a dock or a USB adapter changed it
+    // and the stored data (llsechandler_basic.cpp _readProtectedData) no longer decrypted. The unique id is now taken
+    // from the systemd/D-Bus machine id (stable for the life of the install; machine-id(5)), and the MAC stays the
+    // legacy id, so a store saved with it is still read (_readProtectedData retries with getLegacyID) and is written
+    // back with the new id at the next save (_writeProtectedData uses getUniqueID) - the same two-id scheme as Windows.
+    {
+        unsigned char * legacyPtr = (unsigned char *)(&static_legacy_id[0]);
+        ret_code = LLUUID::getNodeID(legacyPtr);
+        has_static_legacy_id = true;
+    }
+    for (const char* path : { "/etc/machine-id", "/var/lib/dbus/machine-id" })
+    {
+        llifstream file(path);
+        std::string line;
+        if (!file.is_open() || !std::getline(file, line))
+        {
+            continue;
+        }
+        LLStringUtil::trim(line);
+        if (line.size() < 32)
+        {
+            continue;
+        }
+        // 32 hex digits (machine-id(5)); an MD5 of them (llmd5.h) spreads the id over every byte kept
+        LLMD5 md5((const unsigned char*)line.c_str(), (unsigned int)line.size());
+        unsigned char digest[16];
+        md5.raw_digest(digest);
+        memcpy(static_unique_id, digest, llmin(len, sizeof(digest)));
+        has_static_unique_id = true;
+        LL_DEBUGS("AppInit") << "Using machine-id as unique id" << LL_ENDL;
+        break;
+    }
+    if (!has_static_unique_id)
+    {
+        // no machine id: the MAC as before, and no separate legacy id to retry with
+        memcpy(static_unique_id, static_legacy_id, len);
+        has_static_unique_id = true;
+        has_static_legacy_id = false;
+    }
+    // </WolfViewer>
 #endif
 
         LL_INFOS("AppInit") << "UniqueID: 0x";

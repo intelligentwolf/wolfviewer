@@ -43,10 +43,11 @@
   <floater.string name="person_word">Person</floater.string>
   <floater.string name="person_detail">a human</floater.string>
   <!-- [FURRY 2026-10-21] Paul: "FURRY standing or FURRY quad" - the animal tile is Furry - four legs -->
-  <floater.string name="furry_word">Furry - standing</floater.string>
-  <floater.string name="furry_detail">animal head, fur and tail</floater.string>
-  <floater.string name="animal_word">Furry - four legs</floater.string>
-  <floater.string name="animal_detail">a real animal on all fours</floater.string>
+  <!-- the tile word is short: the tiles are 170-240 px wide and a longer word was cut ("FURRY - STA...", Paul 10-21) -->
+  <floater.string name="furry_word">Furry</floater.string>
+  <floater.string name="furry_detail">on two legs</floater.string>
+  <floater.string name="animal_word">Furry</floater.string>
+  <floater.string name="animal_detail">on four legs</floater.string>
   <floater.string name="chosen">chosen</floater.string>
   <floater.string name="picked">picked</floater.string>
   <!-- [BASE BODY 2026-10-20] the two clothes choices (people only), drawn as two chips on the slate; base_short is said on

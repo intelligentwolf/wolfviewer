@@ -1903,7 +1903,7 @@ bool WolfFloaterTunnels::postBuild()
     mPointAutoBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { onPointAuto(); });
     mUndoRoomBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { onUndoRoom(); });
     // The box is not saved (on each time the window opens); the amount is (WolfTunnelSeeThrough, a share 0.25..0.75 = 25..75 %).
-    mSeeThroughAmount->setValue(llround(llclamp(gSavedSettings.getF32("WolfTunnelSeeThrough"), 0.25f, 0.75f) * 100.f));
+    mSeeThroughAmount->setValue((F32)ll_round(llclamp(gSavedSettings.getF32("WolfTunnelSeeThrough"), 0.25f, 0.75f) * 100.f));
     mSeeThrough->setCommitCallback([this](LLUICtrl*, const LLSD&) { applySeeThrough(); });
     mSeeThroughAmount->setCommitCallback([this](LLUICtrl*, const LLSD&)
     {

@@ -223,7 +223,7 @@ public:
 
 private:
     // the region's walkable boxes (Expert)
-    void refresh();                 // GET the WolfTunnels capability and the tunnel records
+    void refresh() override;        // GET the WolfTunnels capability and the tunnel records
     void post(const LLSD& body);    // POST to the capability, then show the answer
     void apply(const LLSD& answer, bool from_post);
     void fillBoxList();

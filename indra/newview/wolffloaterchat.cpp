@@ -784,7 +784,7 @@ void WolfChat::setVoiceDebug(bool on, std::function<void(bool ok, const std::str
 {
     LLSD b;
     b["on"] = on ? 1 : 0;
-    api("voice_debug_set", b, [on, done](bool ok, const LLSD& reply, const std::string& error)
+    api("voice_debug_set", b, [done](bool ok, const LLSD& reply, const std::string& error)
     {
         if (ok) WolfVoiceDiag::setEnabled(reply["on"].asBoolean());
         if (done) done(ok, error);

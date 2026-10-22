@@ -302,6 +302,11 @@ namespace
 WolfCaves::WolfCaves() {}
 WolfCaves::~WolfCaves() {}
 
+// [WOLF TUNNELS 2026-10-22] See wolfcave.h: the shared service helpers, unchanged, for the Tunnel tool.
+LLSD WolfCaves::serviceRequest(const std::string& url, const std::string* body, F32 timeout) { return wolfRequest(url, body, timeout); }
+S32 WolfCaves::serviceReply(const LLSD& result, LLSD& reply, std::string& transport) { return replyOf(result, reply, transport); }
+std::string WolfCaves::meshServiceError(S32 status, const LLSD& reply, const std::string& transport) { return caveMeshError(status, reply, transport); }
+
 // Source: wolf_caves.js onWolf — Wolf Territories (WolfGrid::isOnWolfTerritories, the region's
 // own grid, so a hypergrid jump turns it off) and the region known to the grid's database.
 bool WolfCaves::onWolf()

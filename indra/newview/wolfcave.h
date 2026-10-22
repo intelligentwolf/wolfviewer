@@ -162,6 +162,15 @@ public:
 
     /** Wolf Territories AND the region known to the grid's own database (the Paint record). */
     static bool onWolf();
+    // [WOLF TUNNELS 2026-10-22] The cave builder's own service calls, shared with the Tunnel tool
+    // (wolffloatertunnels.cpp) so both talk to the Wolf services the same way. Each only forwards to
+    // the helper the cave builder itself uses (wolfcave.cpp wolfRequest / replyOf / caveMeshError).
+    /** A request to a Wolf service carrying the session pair (GET when body is null, else JSON POST, no retry). */
+    static LLSD serviceRequest(const std::string& url, const std::string* body, F32 timeout);
+    /** HTTP status of a serviceRequest result, its JSON body in `reply`, the transport error in `transport`. */
+    static S32 serviceReply(const LLSD& result, LLSD& reply, std::string& transport);
+    /** The words for a failed mesh-generator answer (success:false words verbatim, a line per status otherwise). */
+    static std::string meshServiceError(S32 status, const LLSD& reply, const std::string& transport);
     static Cave newCave();
 
     void refresh();

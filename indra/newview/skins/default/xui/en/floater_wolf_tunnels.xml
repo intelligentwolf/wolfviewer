@@ -1,159 +1,146 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes" ?>
-<!-- [WOLF TUNNELS 2026-10-21] The Tunnel tool (wolffloatertunnels.cpp). Paul: "the goal of this is to allow tunneling under
-     terrains we need to add a tool". Persona: a region owner who wants to carve a walkable tunnel under their hill without
-     scripting. Flow: Draw walking / rail tunnel -> press on the ground at the tunnel's mouth, drag along where it runs, release
-     (saved to the region at once) -> pick it in the list -> fine-tune its numbers -> Save changes (bottom right). Go inside
-     teleports into it; Delete asks first. Messages stay in the status line under the list; failures are shown in the caution
-     colour and stay until the next action. Only estate owners and managers can change tunnels; others see them read-only. -->
+<!-- [WOLF TUNNELS 2026-10-22] The Tunnel tool (wolffloatertunnels.cpp). Paul: "make the tunneling work like the cave builder ...
+     users should be able to 'Draw' the tunnel and it creates the mesh with caverns", and "offer smooth tunnels (like railways)
+     or rough tunnels like someone would explore".
+     Persona: a region owner who wants a railway tunnel through their mountain, or a cave passage to explore, without building
+     it prim by prim. Flow: New tunnel -> 1. Draw the route (click points on the ground, double-click or Finish) -> 2. Shape it
+     (type, style, floor heights, caverns, portals; the preview follows every change) -> 3. Build (saved, built, rezzed, made
+     walkable). Messages stay in the status line; failures are in the caution colour and stay until the next action.
+     The region's walkable boxes (the old box list) are under Advanced, closed by default. -->
 <floater
  can_close="true"
  can_minimize="true"
  can_resize="false"
- height="452"
+ height="676"
  layout="topleft"
  name="wolf_tunnels"
  help_topic="wolf_tunnels"
  save_rect="true"
  single_instance="true"
  title="Tunnels"
- width="470">
-    <text
-     follows="left|top|right"
-     height="30"
-     layout="topleft"
-     left="10"
-     name="intro"
-     top="24"
-     width="450"
-     wrap="true">
-        A tunnel box makes the space inside it walkable below the ground. Build the tunnel itself with mesh or prims; draw the box where it runs.
+ width="480">
+    <floater.string name="str_draw">Click points on the ground from one mouth to the other. Double-click or press Finish (Enter) on the last one. Backspace or Undo point takes the last one back; Esc stops drawing.</floater.string>
+    <floater.string name="str_cavern">Click on the tunnel's route to put a cavern there (its size: the Cavern size slider). Esc stops.</floater.string>
+    <floater.string name="str_need_cap">This region cannot make tunnels walkable yet (it needs the WolfSim tunnels update). Ask the region owner.</floater.string>
+    <floater.string name="str_need_rights">You can see this region's tunnels; only the region owner, the estate owner and estate managers can make them.</floater.string>
+
+    <text follows="left|top|right" height="28" layout="topleft" left="10" name="intro" top="24" width="460" word_wrap="true">
+        Draw a tunnel under the ground. It is built as rock you can walk through, with caverns along the way, and the ground opens at its mouths.
     </text>
-    <scroll_list
-     draw_heading="true"
-     follows="left|top|right"
-     height="140"
-     layout="topleft"
-     left="10"
-     name="tunnel_list"
-     tool_tip="This region's tunnel boxes. Pick one to see its numbers and change them."
-     top="60"
-     width="450">
-        <scroll_list.columns label="Box" name="id" width="50" />
-        <scroll_list.columns label="Centre (m)" name="centre" width="150" />
-        <scroll_list.columns label="Length x width x height" name="size" width="170" />
-        <scroll_list.columns label="Turn" name="turn" width="60" />
+    <scroll_list draw_heading="true" follows="left|top|right" height="92" layout="topleft" left="10" name="tun_list" top="56" width="460"
+     tool_tip="This region's tunnels. Pick one to change it, delete it or go inside.">
+        <scroll_list.columns label="Tunnel" name="name" width="170" />
+        <scroll_list.columns label="Style" name="style" width="70" />
+        <scroll_list.columns label="Length" name="length" width="70" />
+        <scroll_list.columns label="Built" name="built" width="140" />
     </scroll_list>
-    <text
-     follows="left|top"
-     height="14"
-     layout="topleft"
-     left="10"
-     name="info"
-     top="204"
-     width="200" />
-    <button
-     follows="left|top"
-     height="23"
-     label="Refresh"
-     layout="topleft"
-     left="380"
-     name="refresh_btn"
-     tool_tip="Read this region's tunnels again"
-     top="200"
-     width="80" />
-    <button
-     follows="left|top"
-     height="23"
-     label="Draw walking tunnel"
-     layout="topleft"
-     left="10"
-     name="draw_walk_btn"
-     tool_tip="A box 4 m wide and 3.5 m high: press on the ground at the tunnel's mouth and drag along where it runs"
-     top="230"
-     width="220" />
-    <button
-     follows="left|top"
-     height="23"
-     label="Draw rail tunnel"
-     layout="topleft"
-     left="240"
-     name="draw_rail_btn"
-     tool_tip="A box 6 m wide and 6 m high, for trains: press on the ground at the tunnel's mouth and drag along where it runs"
-     top="230"
-     width="220" />
-    <text
-     follows="left|top"
-     font="SansSerifBold"
-     height="14"
-     layout="topleft"
-     left="10"
-     name="picked_label"
-     top="264"
-     width="450">
-        The picked box
+    <button follows="left|top" height="22" label="New tunnel" layout="topleft" left="10" name="new_btn" top="154" width="110"
+     tool_tip="Start drawing a new tunnel" />
+    <button follows="left|top" height="22" label="Change" layout="topleft" left="126" name="edit_btn" top="154" width="90"
+     tool_tip="Change the tunnel picked in the list, then build it again" />
+    <button follows="left|top" height="22" label="Go inside" layout="topleft" left="222" name="go_tunnel_btn" top="154" width="100"
+     tool_tip="Teleport to the floor just inside the picked tunnel's first mouth" />
+    <button follows="left|top" height="22" label="Delete" layout="topleft" left="380" name="delete_tunnel_btn" top="154" width="90"
+     tool_tip="Take the picked tunnel away: its rock, its walkable boxes and its record (asks first)" />
+
+    <text follows="left|top" height="16" layout="topleft" left="10" name="name_lbl" top="186" width="50">Name</text>
+    <line_editor follows="left|top" height="20" layout="topleft" left="60" max_length_bytes="63" name="tun_name" top="184" width="410"
+     tool_tip="The tunnel's name (also the rock object's name)" />
+
+    <!-- 1. Draw the route -->
+    <text follows="left|top" font.style="BOLD" height="16" layout="topleft" left="10" name="step1_lbl" top="212" width="460">1. Draw the route</text>
+    <text follows="left|top" font="SansSerifSmall" height="28" layout="topleft" left="10" name="step1_help" top="228" width="460" word_wrap="true">
+        Click points on the ground from one mouth to the other: start where people walk in, end where they come out.
     </text>
-    <spinner decimal_digits="1" follows="left|top" height="19" increment="0.5" label="Centre X" label_width="60" layout="topleft"
-     left="10" max_val="4112" min_val="-16" name="centre_x" top="282" width="145" />
-    <spinner decimal_digits="1" follows="left|top" height="19" increment="0.5" label="Y" label_width="20" layout="topleft"
-     left="165" max_val="4112" min_val="-16" name="centre_y" top="282" width="105" />
-    <spinner decimal_digits="1" follows="left|top" height="19" increment="0.5" label="Z" label_width="20" layout="topleft"
-     left="280" max_val="4096" min_val="-100" name="centre_z" top="282" width="105" />
-    <spinner decimal_digits="1" follows="left|top" height="19" increment="0.5" label="Length" label_width="60" layout="topleft"
-     left="10" max_val="512" min_val="0.5" name="size_l" top="306" width="145" />
-    <spinner decimal_digits="1" follows="left|top" height="19" increment="0.5" label="Width" label_width="40" layout="topleft"
-     left="165" max_val="512" min_val="0.5" name="size_w" top="306" width="125" />
-    <spinner decimal_digits="1" follows="left|top" height="19" increment="0.5" label="Height" label_width="45" layout="topleft"
-     left="300" max_val="512" min_val="0.5" name="size_h" top="306" width="130" />
-    <spinner decimal_digits="0" follows="left|top" height="19" increment="5" label="Turn" label_width="60" layout="topleft"
-     left="10" max_val="360" min_val="0" name="turn" top="330" width="145" />
-    <check_box
-     follows="left|top"
-     height="16"
-     initial_value="true"
-     label="Show the boxes in the world"
-     layout="topleft"
-     left="165"
-     name="show_outlines"
-     tool_tip="Outlines of the tunnel boxes, drawn through the ground, while this window is open"
-     top="331"
-     width="250" />
-    <text
-     follows="left|top|right"
-     height="44"
-     layout="topleft"
-     left="10"
-     name="status"
-     top="358"
-     width="450"
-     wrap="true" />
-    <button
-     follows="left|bottom"
-     height="23"
-     label="Delete"
-     layout="topleft"
-     left="10"
-     name="delete_btn"
-     tool_tip="Remove the picked box from the region (asks first)"
-     top="416"
-     width="90" />
-    <button
-     follows="left|bottom"
-     height="23"
-     label="Go inside"
-     layout="topleft"
-     left="200"
-     name="go_btn"
-     tool_tip="Teleport to the floor of the picked box"
-     top="416"
-     width="110" />
-    <button
-     follows="right|bottom"
-     height="23"
-     label="Save changes"
-     layout="topleft"
-     left="320"
-     name="save_btn"
-     tool_tip="Save the picked box's new numbers to the region"
-     top="416"
-     width="140" />
+    <button follows="left|top" height="22" is_toggle="true" label="Draw route" layout="topleft" left="10" name="draw_route_btn" top="258" width="120"
+     tool_tip="Put the pen down to click the route's points on the ground (press again to stop)" />
+    <button follows="left|top" height="22" label="Undo point" layout="topleft" left="136" name="undo_point_btn" top="258" width="100"
+     tool_tip="Take the last point of the route back (Backspace)" />
+    <button follows="left|top" height="22" label="Finish" layout="topleft" left="242" name="finish_btn" top="258" width="80"
+     tool_tip="The last point is the far mouth (or double-click it, or press Enter)" />
+    <text follows="left|top" font="SansSerifSmall" height="16" layout="topleft" left="330" name="route_info" top="261" width="140" />
+
+    <!-- 2. Shape it -->
+    <text follows="left|top" font.style="BOLD" height="16" layout="topleft" left="10" name="step2_lbl" top="290" width="460">2. Shape it</text>
+    <text follows="left|top" height="16" layout="topleft" left="10" name="kind_lbl" top="310" width="40">Type</text>
+    <combo_box follows="left|top" height="20" layout="topleft" left="50" name="tun_kind" top="308" width="150"
+     tool_tip="The tunnel's size. Walking: 4 m wide, 3.5 m high. Wide: 6 x 4.5 m. Rail: 6 x 6 m, for trains. Custom: your own.">
+        <combo_box.item label="Walking (4 m)" name="walk" value="walk" />
+        <combo_box.item label="Wide (6 m)" name="wide" value="wide" />
+        <combo_box.item label="Rail (6 x 6 m)" name="rail" value="rail" />
+        <combo_box.item label="Custom" name="custom" value="custom" />
+    </combo_box>
+    <spinner decimal_digits="1" follows="left|top" height="19" increment="0.5" label="Width" label_width="40" layout="topleft" left="210"
+     max_val="20" min_val="2" name="tun_w" top="309" width="120" tool_tip="Width, metres (2 to 20)" />
+    <spinner decimal_digits="1" follows="left|top" height="19" increment="0.5" label="Height" label_width="44" layout="topleft" left="340"
+     max_val="15" min_val="2.5" name="tun_h" top="309" width="130" tool_tip="Clear height inside, metres (2.5 to 15)" />
+    <text follows="left|top" height="16" layout="topleft" left="10" name="style_lbl" top="336" width="40">Style</text>
+    <radio_group follows="left|top" height="40" layout="topleft" left="50" name="tun_style" top="334" width="420">
+        <radio_item height="20" label="Smooth - engineered: straight walls, level floor, arched roof (railways, roads)" layout="topleft" left="0"
+         name="smooth" top="0" value="smooth" width="420" />
+        <radio_item height="20" label="Rough - natural cave: uneven rock, changing width, bumpy roof (for exploring)" layout="topleft" left="0"
+         name="rough" top="20" value="rough" width="420" />
+    </radio_group>
+    <spinner decimal_digits="2" follows="left|top" height="19" increment="0.25" label="Floor at start" label_width="80" layout="topleft" left="10"
+     max_val="4000" min_val="-90" name="tun_z0" top="382" width="170" tool_tip="Height of the floor at the first mouth, metres (it starts at the ground there)" />
+    <spinner decimal_digits="2" follows="left|top" height="19" increment="0.25" label="at end" label_width="44" layout="topleft" left="190"
+     max_val="4000" min_val="-90" name="tun_z1" top="382" width="134" tool_tip="Height of the floor at the far mouth, metres" />
+    <button follows="left|top" height="20" label="To the ground" layout="topleft" left="334" name="ground_btn" top="381" width="136"
+     tool_tip="Put both mouths' floors back on the ground where they are" />
+    <text follows="left|top" font="SansSerifSmall" height="16" layout="topleft" left="10" name="grade_info" top="406" width="460"
+     tool_tip="The floor runs in one smooth grade from mouth to mouth" />
+    <button follows="left|top" height="22" is_toggle="true" label="Add cavern" layout="topleft" left="10" name="cavern_btn" top="426" width="120"
+     tool_tip="Put the pen down to click caverns onto the route (press again to stop)" />
+    <slider decimal_digits="0" follows="left|top" height="16" increment="1" initial_value="8" label="Cavern size" label_width="70" layout="topleft"
+     left="138" max_val="30" min_val="3" name="cavern_r" show_text="true" top="429" width="210" tool_tip="Radius of the next cavern, metres (3 to 30)" />
+    <button follows="left|top" height="22" label="Undo cavern" layout="topleft" left="354" name="undo_cavern_btn" top="426" width="116"
+     tool_tip="Take the last cavern back" />
+    <check_box follows="left|top" height="16" initial_value="true" label="Stone arches at the mouths" layout="topleft" left="10" name="tun_portals"
+     top="454" width="300" tool_tip="A stone portal round each mouth" />
+
+    <!-- 3. Build -->
+    <text follows="left|top" font.style="BOLD" height="16" layout="topleft" left="10" name="step3_lbl" top="480" width="460">3. Build</text>
+    <text follows="left|top|right" height="58" layout="topleft" left="10" name="tun_warnings" top="498" width="460" word_wrap="true" />
+    <button follows="left|top" height="24" label="Build" layout="topleft" left="10" name="build_btn" top="560" width="150"
+     tool_tip="Save the tunnel, make its rock, rez it and make it walkable (an old build of it is taken away first)" />
+    <button follows="left|top" height="24" label="Stop editing" layout="topleft" left="166" name="cancel_edit_btn" top="560" width="120"
+     tool_tip="Put the drawing away without building it" />
+    <text follows="left|top|right" height="44" layout="topleft" left="10" name="status" top="590" width="460" word_wrap="true" />
+
+    <check_box follows="left|top" height="16" initial_value="false" label="Advanced: the region's walkable boxes" layout="topleft" left="10"
+     name="advanced_check" top="640" width="400" tool_tip="Every walkable box in this region, with its numbers" />
+    <panel follows="left|top" height="228" layout="topleft" left="0" name="advanced_panel" top="660" visible="false" width="480">
+        <scroll_list draw_heading="true" follows="left|top|right" height="104" layout="topleft" left="10" name="box_list" top="0" width="460"
+         tool_tip="This region's walkable boxes. Pick one to see its numbers and change them.">
+            <scroll_list.columns label="Box" name="id" width="50" />
+            <scroll_list.columns label="Centre (m)" name="centre" width="150" />
+            <scroll_list.columns label="Length x width x height" name="size" width="170" />
+            <scroll_list.columns label="Turn" name="turn" width="60" />
+        </scroll_list>
+        <text follows="left|top" height="14" layout="topleft" left="10" name="info" top="108" width="200" />
+        <button follows="left|top" height="20" label="Refresh" layout="topleft" left="390" name="refresh_btn" top="106" width="80"
+         tool_tip="Read this region's tunnels and boxes again" />
+        <spinner decimal_digits="1" follows="left|top" height="19" increment="0.5" label="Centre X" label_width="60" layout="topleft"
+         left="10" max_val="4112" min_val="-16" name="centre_x" top="132" width="145" />
+        <spinner decimal_digits="1" follows="left|top" height="19" increment="0.5" label="Y" label_width="20" layout="topleft"
+         left="165" max_val="4112" min_val="-16" name="centre_y" top="132" width="105" />
+        <spinner decimal_digits="1" follows="left|top" height="19" increment="0.5" label="Z" label_width="20" layout="topleft"
+         left="280" max_val="4096" min_val="-100" name="centre_z" top="132" width="105" />
+        <spinner decimal_digits="1" follows="left|top" height="19" increment="0.5" label="Length" label_width="60" layout="topleft"
+         left="10" max_val="512" min_val="0.5" name="size_l" top="156" width="145" />
+        <spinner decimal_digits="1" follows="left|top" height="19" increment="0.5" label="Width" label_width="40" layout="topleft"
+         left="165" max_val="512" min_val="0.5" name="size_w" top="156" width="125" />
+        <spinner decimal_digits="1" follows="left|top" height="19" increment="0.5" label="Height" label_width="45" layout="topleft"
+         left="300" max_val="512" min_val="0.5" name="size_h" top="156" width="130" />
+        <spinner decimal_digits="0" follows="left|top" height="19" increment="5" label="Turn" label_width="60" layout="topleft"
+         left="10" max_val="360" min_val="0" name="turn" top="180" width="145" />
+        <check_box follows="left|top" height="16" initial_value="true" label="Show the boxes in the world" layout="topleft" left="165"
+         name="show_outlines" top="181" width="250" tool_tip="Outlines of the walkable boxes, drawn through the ground, while this window is open" />
+        <button follows="left|top" height="22" label="Delete box" layout="topleft" left="10" name="delete_btn" top="204" width="100"
+         tool_tip="Remove the picked box from the region (asks first)" />
+        <button follows="left|top" height="22" label="Go inside" layout="topleft" left="200" name="go_btn" top="204" width="110"
+         tool_tip="Teleport to the floor of the picked box" />
+        <button follows="left|top" height="22" label="Save changes" layout="topleft" left="330" name="save_btn" top="204" width="140"
+         tool_tip="Save the picked box's new numbers to the region" />
+    </panel>
 </floater>

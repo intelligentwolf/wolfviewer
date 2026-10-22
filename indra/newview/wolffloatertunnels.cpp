@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <map>
 #include <set>
 #include <boost/json.hpp>
 
@@ -40,6 +41,7 @@
 #include "llrand.h"
 #include "llsdjson.h"
 #include "llsdutil.h"
+#include "llselectmgr.h"
 #include "llsliderctrl.h"
 #include "llsurfacepatch.h"
 #include "lltooldraganddrop.h"
@@ -418,6 +420,11 @@ namespace
     const F32 ROUGH_FLOOR_M = 0.08f, ROUGH_FLOOR_CELL_M = 2.f, ROUGH_EDGE_RISE_M = 0.2f, ROUGH_EDGE_M = 1.f;
     const F32 ROUGH_CAVERN = 0.15f, ROUGH_CAVERN_MAX_M = 2.f;
     const F32 CLEAR_MIN_M = 0.05f;
+    // [2026-10-22 crossroads] wolftunnel.rs WALL_T, WALL_TOL_SMOOTH / _ROUGH, LINING_T (= WALL_T), LINING_CORNER_MAX,
+    // STATION_M, LOCAL_K, LEVEL_STEP_M, LEVEL_TOL_M, LEVEL_ROUNDS: the same numbers, so levelRoute levels as `level` does.
+    const F32 WALL_T = 0.4f, WALL_TOL_SMOOTH = 0.08f, WALL_TOL_ROUGH = 0.45f, LINING_T = WALL_T, LINING_CORNER_MAX = 2.f;
+    const F32 STATION_M = 0.52f, LOCAL_K = 1.41421356f, LEVEL_STEP_M = 0.15f, LEVEL_TOL_M = 0.005f;
+    const S32 LEVEL_ROUNDS = 64;
     const F32 MOUTH_M = 8.f;
     const F32 WALK_GRADE_WARN = 0.25f, RAIL_GRADE_WARN = 0.04f;
     // The window's own: the kinds' sizes (Paul's brief: walking 4 m, wide 6 m, rail 6 x 6), the warnings' thin cover (the
@@ -543,8 +550,39 @@ namespace
         bool rough;
         U32 seed;
         F32 hw;
-        explicit Air(const WolfTunnels::Design& des) : d(des), route(des.mP), rough(des.mStyle == "rough"), seed((U32)des.mSeed), hw(des.mW * 0.5f) {}
+        bool fill = false;  // [crossroads] wolftunnel.rs Air::fill: the rock between parts of the route that meet is air
+        explicit Air(const WolfTunnels::Design& des, bool with_fill = false)
+            : d(des), route(des.mP), rough(des.mStyle == "rough"), seed((U32)des.mSeed), hw(des.mW * 0.5f), fill(with_fill) {}
         F32 ro() const { return rough ? 1.f : 0.f; }
+        /** Source: wolftunnel.rs Air::join_gap: the least rock between two parts of the route (the shell's thickest corner or
+         *  a wall box and its set-back). */
+        F32 joinGap() const { return llmax(LINING_T * LINING_CORNER_MAX, WALL_T + (rough ? WALL_TOL_ROUGH : WALL_TOL_SMOOTH)); }
+        F32 cavernReach(const WolfTunnels::Cavern& c) const { return c.mR + ro() * llmin(ROUGH_CAVERN * c.mR, ROUGH_CAVERN_MAX_M); }
+        /** Source: wolftunnel.rs Air::near: Route::nearest, the distance shortened (with fill) between parts of the route that
+         *  meet and face each other across rock thinner than joinGap. */
+        std::pair<F32, F32> near(F32 x, F32 y) const
+        {
+            const std::pair<F32, F32> best = route.nearest(x, y);
+            if (!fill) return best;
+            LLVector2 bp, bu;
+            route.at(best.second, bp, bu);
+            const F32 half = joinGap() * 0.5f, rch = reach();
+            F32 dist = best.first;
+            for (size_t k = 1; k < route.mPts.size(); ++k)
+            {
+                const LLVector2 a = route.mPts[k - 1], v = route.mPts[k] - route.mPts[k - 1];
+                const F32 l2 = v.lengthSquared();
+                const F32 u = l2 > 1e-9f ? llclamp(((x - a.mV[0]) * v.mV[0] + (y - a.mV[1]) * v.mV[1]) / l2, 0.f, 1.f) : 0.f;
+                const F32 fx = a.mV[0] + u * v.mV[0], fy = a.mV[1] + u * v.mV[1];
+                const F32 dk = sqrtf((x - fx) * (x - fx) + (y - fy) * (y - fy));
+                if (dk >= rch + half) continue;
+                const F32 tk = route.mCum[k - 1] + u * sqrtf(l2);
+                const F32 apart = sqrtf((fx - bp.mV[0]) * (fx - bp.mV[0]) + (fy - bp.mV[1]) * (fy - bp.mV[1]));
+                const bool facing = (fx - x) * (bp.mV[0] - x) + (fy - y) * (bp.mV[1] - y) < 0.f;
+                if (facing && fabsf(tk - best.second) > LOCAL_K * apart + 1e-3f) dist = llmin(dist, llmax(dk, best.first) - half);
+            }
+            return std::make_pair(dist, best.second);
+        }
         F32 floorT(F32 t) const { return floorOn(t); }
         /** Source: wolftunnel.rs Air::floor_t / piece_at (v2): straight between the heights of the two points round t. */
         F32 floorOn(F32 t) const
@@ -573,7 +611,7 @@ namespace
         }
         Field eval(F32 x, F32 y) const
         {
-            const std::pair<F32, F32> nt = route.nearest(x, y);
+            const std::pair<F32, F32> nt = near(x, y);
             const F32 dist = nt.first, t = nt.second, h = d.mH;
             F32 s, v;
             if (rough)
@@ -804,6 +842,50 @@ namespace
         return true;
     }
 
+    /** How far the rezzed root may be from the asked-for height before it is moved (the generator's numbers are kept to the
+     *  centimetre, wolftunnel.rs summary_string). */
+    const F32 ROOT_TOL_M = 0.02f;
+
+    /** Move a just-rezzed tunnel's whole linkset so its root is at `root`, and wait until the region says it is there.
+     *  Source: wolfvehiclerez.cpp sendRotation (llselectmgr.cpp:4932-4953 packMultipleUpdate: the position first, 12 bytes
+     *  MVT_LLVector3), with UPD_POSITION | UPD_LINKED_SETS (llselectmgr.h:60, :63) - OpenSim LLClientView.cs
+     *  HandleMultipleObjUpdate "case 9: group position" -> SceneObjectGroup.cs UpdateGroupPosition (no ground clamp). */
+    bool moveRoot(LLViewerObject* obj, const LLVector3& root, const LLUUID& region, std::string& error)
+    {
+        const LLUUID id = obj->getID();
+        LLViewerRegion* rgn = obj->getRegion();
+        if (!rgn) { error = "You left the region while the tunnel was being put at its height."; return false; }
+        LLMessageSystem* msg = gMessageSystem;
+        msg->newMessageFast(_PREHASH_MultipleObjectUpdate);
+        msg->nextBlockFast(_PREHASH_AgentData);
+        msg->addUUIDFast(_PREHASH_AgentID, gAgent.getID());
+        msg->addUUIDFast(_PREHASH_SessionID, gAgent.getSessionID());
+        msg->nextBlockFast(_PREHASH_ObjectData);
+        msg->addU32Fast(_PREHASH_ObjectLocalID, obj->getLocalID());
+        msg->addU8Fast(_PREHASH_Type, UPD_POSITION | UPD_LINKED_SETS);
+        U8 data[12];
+        htolememcpy(data, root.mV, MVT_LLVector3, 12);
+        msg->addBinaryDataFast(_PREHASH_Data, data, 12);
+        msg->sendReliable(rgn->getHost());
+        F32 off = dist_vec(obj->getPositionRegion(), root);
+        for (S32 t = 0; t < 40; ++t)
+        {
+            llcoro::suspendUntilTimeout(0.25f);
+            if (!gAgent.getRegion() || gAgent.getRegion()->getRegionID() != region)
+            {
+                error = "You left the region while the tunnel was being put at its height.";
+                return false;
+            }
+            LLViewerObject* o = gObjectList.findObject(id);
+            if (!o || o->isDead()) { error = "The tunnel's rock went away while it was being put at its height."; return false; }
+            off = dist_vec(o->getPositionRegion(), root);
+            if (off <= ROOT_TOL_M) return true;
+        }
+        error = llformat("The region put the tunnel %.1f m away from where it belongs and did not let it be moved there. Delete it "
+                         "and press Build again.", off);
+        return false;
+    }
+
     /** Source: wolfcave.cpp WolfCaves::rezExact (the same RezObject, placed exactly; the item is fetched until it shows). */
     bool rezTunnel(const LLUUID& item_id, const LLUUID& folder_id, const LLVector3& ray_end, const LLVector3& root, const LLUUID& region,
                    S32 prims, LLUUID& object, std::string& error)
@@ -870,10 +952,20 @@ namespace
             {
                 LLViewerObject* o = gObjectList.getObject(i);
                 if (!o || o->isDead() || !o->isRoot() || before.count(o->getID()) || o->getRegion() != gAgent.getRegion()) continue;
-                if (dist_vec(o->getPositionRegion(), root) > 1.f) continue;
+                // [2026-10-22 rez height] Matched across the ground only: on Sandbox (2026-10-22 11:27Z, "Tunnel 1") the region
+                // stored the rock 4.17 m above the height wolftunnel.rs generate() gives that design's root, at the right x/y, so
+                // a 3D match never found it and the walkable boxes (which cut the ground) were never made. The region's rez maths
+                // (InventoryAccessModule.cs RezObject + Scene.cs GetNewRezLocation + SceneObjectGroup.cs
+                // GetAxisAlignedBoundingBox) give RayEnd - minZ, the asked-for height, so where the lift comes from is not known;
+                // the height is put right below and logged.
+                const LLVector3 at = o->getPositionRegion();
+                if (dist_vec(LLVector2(at.mV[VX], at.mV[VY]), LLVector2(root.mV[VX], root.mV[VY])) > 1.f) continue;
                 if (!o->permYouOwner()) continue;
                 object = o->getID();
-                return true;
+                if (fabsf(at.mV[VZ] - root.mV[VZ]) <= ROOT_TOL_M) return true;
+                LL_WARNS("WolfTunnels") << "the region rezzed the tunnel's root at " << at << ", asked for " << root
+                                        << "; moving it to the asked-for height" << LL_ENDL;
+                return moveRoot(o, root, region, error);
             }
         }
         // [2026-10-22 simple] Say why in plain words when the land's numbers show it: OpenSim PrimLimitsModule.cs DoCommonChecks
@@ -1048,7 +1140,10 @@ namespace
         if (!rezTunnel(reply["item_id"].asUUID(), folder, ray, root, region, li, object, err)) { stop(err); return; }
         LLSD built;
         built["item"] = reply["item_id"].asString();
-        built["objects"] = LLSD::emptyArray().with(0, object.asString());
+        // [2026-10-22] append, not with(0, ...): LLSD::with(Integer) inserts, and on an empty array ImplArray::insert
+        // (llsd.cpp:680-691) first resizes to index + 1 - the id plus a stray null, which tunnels.php refused as "a bad id".
+        built["objects"] = LLSD::emptyArray();
+        built["objects"].append(object.asString());
         built["volumes"] = LLSD::emptyArray();
         built["at"] = (S32)LLDate::now().secondsSinceEpoch();
         auto record = [&](const char* when)
@@ -1156,6 +1251,31 @@ std::string WolfTunnels::designProblem(const Design& d, F32 region_w)
         if (k == 1) first = l;
         last = l;
     }
+    // [2026-10-22 crossroads] Source: wolftunnel.rs validate_design / straight_run: the straight run from each mouth, through
+    // points on its line (the floor's own points and levelRoute's).
+    auto straight_run = [](const std::vector<LLVector2>& pts) -> F32
+    {
+        F32 run = 0.f;
+        for (size_t k = 1; k < pts.size(); ++k)
+        {
+            const LLVector2 a = pts[0], b = pts[k], v = b - a;
+            const F32 l = v.length();
+            if (l < 1e-6f) break;
+            bool on = true;
+            for (size_t j = 1; j < k && on; ++j)
+            {
+                const LLVector2 q = pts[j] - a;
+                const F32 u = (q * v) / (l * l);
+                on = u >= 0.f && u <= 1.f && fabsf(q.mV[0] * v.mV[1] - q.mV[1] * v.mV[0]) / l <= BEND_TOL_M;
+            }
+            if (!on) break;
+            run = l;
+        }
+        return run;
+    };
+    std::vector<LLVector2> rev(route.mPts.rbegin(), route.mPts.rend());
+    first = llmax(first, straight_run(route.mPts));
+    last = llmax(last, straight_run(rev));
     if (first < d.mW)
         return llformat("The way in needs %.0f m of straight tunnel before the first bend - drag that bend further in.", d.mW);
     if (last < d.mW)
@@ -1366,6 +1486,265 @@ namespace
             out.z.push_back(r2(clampZ(F[j])));
             last_t = T[j];
         }
+    }
+
+    /** What levelRoute made of the design. */
+    struct Levelled
+    {
+        bool meets = false;         // the route meets itself somewhere (the preview's Air fills the rock between)
+        S32 places = 0;             // places made level, and the most a floor was lowered there
+        F32 lowered = 0.f;
+        std::string problem;        // the refusal (wolftunnel.rs level's words), empty = none
+        bool bad_end = false;       // it is about the way out (its marker is drawn red)
+    };
+
+    /** Source: wolftunnel.rs level() (union-find over the route's stations, its `Groups`). */
+    struct Groups
+    {
+        std::vector<size_t> up;
+        explicit Groups(size_t m) : up(m) { for (size_t i = 0; i < m; ++i) up[i] = i; }
+        size_t root(size_t i) { while (up[i] != i) { up[i] = up[up[i]]; i = up[i]; } return i; }
+        void join(size_t a, size_t b) { const size_t ra = root(a), rb = root(b); if (ra != rb) up[llmax(ra, rb)] = llmin(ra, rb); }
+    };
+
+    /**
+     * [2026-10-22 crossroads] Paul: "if they double back just put in a cross roads". Source: wolftunnel.rs level() and
+     * TUNNEL_DESIGN_V1.md "Crossroads" - the same steps and numbers, so the design saved here is the one the generator builds
+     * (its `level` finds nothing more to do). Wherever the route meets itself (a hairpin, a crossing, a run beside itself, a bend
+     * sharper than 90 degrees) the floor is made level at the lowest floor there, a bend up to 90 degrees that would leave a step
+     * over LEVEL_STEP_M is levelled too, the floor beside comes down at the kind's slope and climbs to a mouth (which keeps its
+     * height) as steeply as it must, up to GRADE_MAX. The route keeps every point; the levelled floor adds points between them.
+     */
+    Levelled levelRoute(WolfTunnels::Design& d)
+    {
+        Levelled out;
+        const size_t n = d.mP.size() / 2;
+        if (n < 2 || d.mZ.size() != n) return out;
+        const Air air(d);
+        const Route& route = air.route;
+        for (size_t k = 1; k < n; ++k) if (route.mCum[k] - route.mCum[k - 1] < 1e-4f) return out;   // designProblem says why
+        // stations
+        std::vector<F32> st_t;
+        std::vector<size_t> first;
+        for (size_t k = 0; k + 1 < n; ++k)
+        {
+            first.push_back(st_t.size());
+            const F32 seg = route.mCum[k + 1] - route.mCum[k];
+            const S32 parts = llmax(1, (S32)floorf(seg / STATION_M));
+            for (S32 i = 0; i < parts; ++i) st_t.push_back(route.mCum[k] + seg * (F32)i / (F32)parts);
+        }
+        first.push_back(st_t.size());
+        st_t.push_back(route.mLen);
+        const size_t m = st_t.size();
+        std::vector<LLVector2> pos(m);
+        std::vector<F32> f0(m);
+        for (size_t i = 0; i < m; ++i) { LLVector2 u; route.at(st_t[i], pos[i], u); f0[i] = air.floorOn(st_t[i]); }
+        auto station_at = [&](F32 t) -> size_t
+        {
+            return llmin((size_t)(std::lower_bound(st_t.begin(), st_t.end(), t) - st_t.begin()), m - 1);
+        };
+        // where the route meets itself
+        const F32 gap = air.joinGap(), rch = air.reach(), meet = 2.f * rch + gap;
+        std::map<std::pair<S32, S32>, std::vector<size_t>> grid;
+        auto cell = [&](const LLVector2& p) { return std::make_pair((S32)floorf(p.mV[0] / meet), (S32)floorf(p.mV[1] / meet)); };
+        for (size_t i = 0; i < m; ++i) grid[cell(pos[i])].push_back(i);
+        Groups base(m);
+        std::vector<char> met(m, 0);
+        for (size_t i = 0; i < m; ++i)
+        {
+            const std::pair<S32, S32> c = cell(pos[i]);
+            for (S32 di = -1; di <= 1; ++di) for (S32 dj = -1; dj <= 1; ++dj)
+            {
+                auto it = grid.find(std::make_pair(c.first + di, c.second + dj));
+                if (it == grid.end()) continue;
+                for (size_t j : it->second)
+                {
+                    if (j <= i) continue;
+                    const F32 a = dist_vec(pos[i], pos[j]);
+                    if (a < meet && st_t[j] - st_t[i] > LOCAL_K * a + 1e-3f) { base.join(i, j); out.meets = true; met[i] = met[j] = 1; }
+                }
+            }
+        }
+        for (const WolfTunnels::Cavern& c : d.mCaverns)
+        {
+            const F32 tc = route.nearest(c.mX, c.mY).second;
+            LLVector2 cp, cu;
+            route.at(tc, cp, cu);
+            const F32 near_m = air.cavernReach(c) + rch + gap;
+            const size_t ic = station_at(tc);
+            for (size_t i = 0; i < m; ++i)
+            {
+                if (dist_vec(pos[i], LLVector2(c.mX, c.mY)) >= near_m) continue;
+                if (fabsf(st_t[i] - tc) > LOCAL_K * dist_vec(pos[i], cp) + 1e-3f) { base.join(i, ic); out.meets = true; met[i] = met[ic] = 1; }
+            }
+        }
+        // level, round after round
+        const F32 grade = kindGrade(d), rs = rch + WALL_T;
+        std::vector<F32> f = f0;
+        bool settled = false;
+        for (S32 round = 0; round < LEVEL_ROUNDS; ++round)
+        {
+            Groups groups = base;
+            for (size_t k = 1; k + 1 < n; ++k)
+            {
+                const LLVector2 a = route.dir(k - 1), b = route.dir(k);
+                const F32 turn = acosf(llclamp(a * b, -1.f, 1.f));
+                if (turn < 1e-3f) continue;
+                const size_t iv = first[k];
+                F32 reach_l;
+                if (turn > F_PI_BY_TWO) reach_l = rs;   // the pieces meet (above) everywhere but at the bend point itself
+                else
+                {
+                    // Source: wolftunnel.rs level(): the floors' step across the slab inside the bend, and each piece's slab
+                    // over the other piece's floor out to l, at l from the slopes beside the bend and at every station within l.
+                    const F32 g1 = (f[iv] - f[iv - 1]) / llmax(1e-6f, st_t[iv] - st_t[iv - 1]);
+                    const F32 g2 = (f[iv + 1] - f[iv]) / llmax(1e-6f, st_t[iv + 1] - st_t[iv]);
+                    const F32 l = llmin(rs * tanf(turn * 0.5f) / llmax(1e-6f, cosf(turn)), rs / llmax(1e-6f, sinf(turn)));
+                    const F32 across = rs * tanf(turn * 0.5f);
+                    const F32 tv = st_t[iv], fv = f[iv];
+                    F32 step = llmax(l * (g1 * cosf(turn) - g2), l * (g1 - g2 * cosf(turn)));
+                    for (size_t i = station_at(tv - l); i < m; ++i)
+                    {
+                        const F32 a = st_t[i] - tv;
+                        if (a > l) break;
+                        if (a > 0.f) step = llmax(step, fv + g1 * a * cosf(turn) - f[i]);
+                        if (a < 0.f) step = llmax(step, fv + g2 * a * cosf(turn) - f[i]);
+                        if (a > 0.f && a <= across) step = llmax(step, fabsf(f[i] - f[station_at(tv - a)]));
+                    }
+                    if (step <= LEVEL_STEP_M) continue;
+                    reach_l = l + 2.f * STATION_M;   // out to the first station past l, so it is level all the way to l
+                }
+                const F32 tv = st_t[iv];
+                for (size_t i = station_at(tv - reach_l); i < m && st_t[i] <= tv + reach_l; ++i) groups.join(i, iv);
+            }
+            // Source: wolftunnel.rs level(): a cavern's square floor slab reaches out to its corners; unless every station that
+            // far from its centre lies on one straight, evenly sloping run, the floor there is made level.
+            for (const WolfTunnels::Cavern& c : d.mCaverns)
+            {
+                const F32 reach_c = (air.cavernReach(c) + WALL_T) * 1.41421356f + rs;
+                std::vector<size_t> under;
+                for (size_t i = 0; i < m; ++i) if (dist_vec(pos[i], LLVector2(c.mX, c.mY)) <= reach_c) under.push_back(i);
+                if (under.empty()) continue;
+                const size_t a = under.front(), b = under.back();
+                bool one_run = b - a + 1 == under.size();
+                for (size_t k = 1; k + 1 < n && one_run; ++k)
+                    if (route.mCum[k] > st_t[a] && route.mCum[k] < st_t[b] && route.dir(k - 1) * route.dir(k) < 1.f - 1e-6f) one_run = false;
+                for (size_t i = a; i <= b && one_run; ++i)
+                {
+                    const F32 u = (st_t[i] - st_t[a]) / llmax(1e-6f, st_t[b] - st_t[a]);
+                    if (fabsf(f[i] - (f[a] + (f[b] - f[a]) * u)) > 0.01f) one_run = false;
+                }
+                bool level_now = true;
+                for (size_t i : under) if (fabsf(f[i] - f[a]) > 1e-4f) level_now = false;
+                if (!one_run && !level_now) for (size_t i : under) groups.join(i, a);
+            }
+            std::map<size_t, std::vector<size_t>> members;
+            for (size_t i = 0; i < m; ++i) members[groups.root(i)].push_back(i);
+            std::vector<F32> next = f;
+            std::vector<char> lowered_here(m, 0);
+            bool changed = false;
+            for (const auto& g : members)
+            {
+                if (g.second.size() < 2) continue;
+                F32 h = 1e30f;
+                for (size_t i : g.second) h = llmin(h, f[i]);
+                for (size_t i : g.second) if (f[i] - h > 1e-4f) { next[i] = h; lowered_here[i] = 1; changed = true; }
+            }
+            const size_t mouths[2] = { 0, m - 1 };
+            for (S32 e = 0; e < 2; ++e)
+            {
+                // a mouth opens onto the ground: one that meets another part, or lies in a junction that needs it lower, is refused
+                if (met[mouths[e]] || f[mouths[e]] - next[mouths[e]] > 1e-4f)
+                {
+                    out.problem = llformat("The %s runs into another part of the tunnel, so it cannot reach the ground there - %s the route at least %.0f m away from the rest of the tunnel.",
+                                           e ? "way out" : "way in", e ? "end" : "start", meet);
+                    out.bad_end = e == 1;
+                    return out;
+                }
+            }
+            if (!changed) { settled = true; break; }
+            std::vector<F32> cone(m, 1e30f);
+            for (size_t i = 0; i < m; ++i) if (lowered_here[i]) cone[i] = next[i];
+            for (size_t i = 1; i < m; ++i) cone[i] = llmin(cone[i], cone[i - 1] + grade * (st_t[i] - st_t[i - 1]));
+            for (size_t i = m - 1; i-- > 0;) cone[i] = llmin(cone[i], cone[i + 1] + grade * (st_t[i + 1] - st_t[i]));
+            for (size_t i = 0; i < m; ++i) if (lowered_here[i]) next[i] = llmin(next[i], cone[i]);
+            struct Line { F32 t, z, slope; };
+            std::vector<Line> lines;
+            for (S32 e = 0; e < 2; ++e)
+            {
+                const size_t mo = mouths[e];
+                if (cone[mo] >= f[mo] - 1e-4f) continue;
+                F32 slope = grade;
+                for (size_t i = 0; i < m; ++i) if (lowered_here[i]) slope = llmax(slope, (f[mo] - next[i]) / llmax(1e-6f, fabsf(st_t[i] - st_t[mo])));
+                if (slope > GRADE_MAX)
+                {
+                    const char* name = e ? "way out" : "way in";
+                    out.problem = llformat("Where the tunnel meets itself or turns sharply it is made level, and from there it cannot climb to the %s at 45 degrees or less - move that place further from the %s.",
+                                           name, name);
+                    out.bad_end = e == 1;
+                    return out;
+                }
+                lines.push_back({ st_t[mo], f[mo], slope });
+            }
+            for (size_t i = 0; i < m; ++i)
+            {
+                if (lowered_here[i]) continue;
+                F32 c = cone[i];
+                for (const Line& l : lines) c = llmax(c, l.z - l.slope * fabsf(st_t[i] - l.t));
+                next[i] = llmin(f[i], c);
+            }
+            for (F32 z : next)
+            {
+                if (z < Z_MIN)
+                {
+                    out.problem = llformat("Levelling the place where the tunnel meets itself would take the floor below %.0f m - draw that part under higher ground.", Z_MIN);
+                    return out;
+                }
+            }
+            f = next;
+        }
+        if (!settled) { out.problem = "The route meets itself in too many places close together - spread the crossings and bends out."; return out; }
+        for (size_t i = 0; i < m; ++i)
+        {
+            out.lowered = llmax(out.lowered, f0[i] - f[i]);
+            if (f0[i] - f[i] > 1e-3f && (i == 0 || f0[i - 1] - f[i - 1] <= 1e-3f)) ++out.places;
+        }
+        if (out.lowered <= 1e-4f) { out.lowered = 0.f; out.places = 0; return out; }
+        // back to a route: every point kept, the floor's own bends between
+        std::vector<char> keep(m, 0);
+        for (size_t k = 0; k < n; ++k) keep[first[k]] = 1;
+        std::vector<std::pair<size_t, size_t>> todo;
+        for (size_t k = 0; k + 1 < n; ++k) todo.emplace_back(first[k], first[k + 1]);
+        while (!todo.empty())
+        {
+            const std::pair<size_t, size_t> r = todo.back();
+            todo.pop_back();
+            if (r.second <= r.first + 1) continue;
+            F32 worst = LEVEL_TOL_M;
+            size_t wi = 0;
+            for (size_t i = r.first + 1; i < r.second; ++i)
+            {
+                const F32 u = (st_t[i] - st_t[r.first]) / llmax(1e-6f, st_t[r.second] - st_t[r.first]);
+                const F32 e = fabsf(f[i] - (f[r.first] + (f[r.second] - f[r.first]) * u));
+                if (e > worst) { worst = e; wi = i; }
+            }
+            if (!wi) continue;
+            keep[wi] = 1;
+            todo.emplace_back(r.first, wi);
+            todo.emplace_back(wi, r.second);
+        }
+        std::vector<F32> p, z;
+        size_t k = 0;
+        for (size_t i = 0; i < m; ++i)
+        {
+            if (!keep[i]) continue;
+            if (k < n && first[k] == i) { p.push_back(route.mPts[k].mV[0]); p.push_back(route.mPts[k].mV[1]); ++k; }
+            else { p.push_back(pos[i].mV[0]); p.push_back(pos[i].mV[1]); }
+            z.push_back(f[i]);
+        }
+        d.mP = p;
+        d.mZ = z;
+        return out;
     }
 
     /** The points of a stored route the user clicked: the ends, and every point that is off the straight line between its
@@ -2152,6 +2531,14 @@ void WolfFloaterTunnels::designChanged()
     mFitProblem = fit.problem;
     mBadEnd = fit.bad_end;
     fitRooms();
+    // [2026-10-22 crossroads] Where the route meets itself or turns sharply, one level junction (wolftunnel.rs level, the same
+    // floor the generator builds); its refusal is the drawing's one refusal when the floor itself had none.
+    const Levelled lv = levelRoute(mDesign);
+    if (mFitProblem.empty() && !lv.problem.empty())
+    {
+        mFitProblem = lv.problem;
+        mBadEnd = lv.bad_end;
+    }
     const size_t n = mDesign.mP.size() / 2;
     const F32 len = WolfTunnels::routeLength(mDesign);
     mRouteInfo->setText(mClicks.empty() ? std::string() : mClicks.size() == 1 ? std::string("Way in placed")
@@ -2173,7 +2560,7 @@ void WolfFloaterTunnels::designChanged()
     }
     if (n >= 2 && rgn)
     {
-        const Air air(mDesign);
+        const Air air(mDesign, lv.meets);
         F32 lo = mDesign.mZ[0], hi = mDesign.mZ[0], steep = 0.f;
         for (size_t k = 0; k < n; ++k) { lo = llmin(lo, mDesign.mZ[k]); hi = llmax(hi, mDesign.mZ[k]); }
         for (size_t k = 0; k + 1 < n; ++k) steep = llmax(steep, fabsf(air.pieceGrade(k)));
@@ -2293,6 +2680,10 @@ void WolfFloaterTunnels::designChanged()
                 if (g - z > air.top()) mPreview.mWarnings.push_back(llformat("The %s is buried: the ground there is %.1f m above its floor (Mouths at ground level is off in Expert).", name, g - z));
             }
             if (wet) mPreview.mWarnings.push_back("Part of the tunnel runs under the water - it stays dry inside.");
+            // Source: wolftunnel.rs generate() - the same note the build gives.
+            if (lv.places > 0)
+                mPreview.mWarnings.push_back(llformat("The floor is made level in %d place%s where the tunnel meets itself or turns sharply, so the way through stays open; next to %s the floor is up to %.1f m lower than drawn.",
+                                                      lv.places, lv.places == 1 ? "" : "s", lv.places == 1 ? "it" : "them", lv.lowered));
         }
     }
     else

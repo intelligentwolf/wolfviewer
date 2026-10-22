@@ -1236,7 +1236,10 @@ void WolfCaves::buildCoro(Cave cave)
     }
     LLSD built;
     built["item"] = reply["item_id"].asString();
-    built["objects"] = LLSD::emptyArray().with(0, rock.asString());
+    // [2026-10-22] append, not with(0, ...): LLSD::with(Integer) inserts, and on an empty array ImplArray::insert
+    // (llsd.cpp:680-691) first resizes to index + 1 - the id plus a stray null, which caves.php refuses (objects must be ids).
+    built["objects"] = LLSD::emptyArray();
+    built["objects"].append(rock.asString());
     built["li"] = li;
     built["root"] = rp;
     built["terrain"] = reply["targets"];

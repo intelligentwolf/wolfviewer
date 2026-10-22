@@ -355,7 +355,20 @@ vec4 wolfLayerGround(vec3 region_pos, vec3 rn, float farB, bool look) { return v
 #define WOLF_TUNNELS_MAX 32
 uniform int  wolf_tunnel_count;                    // 0 off a region with tunnels (no array is read then)
 uniform vec4 wolf_tunnel_cy[WOLF_TUNNELS_MAX];     // xyz centre, w yaw
-uniform vec4 wolf_tunnel_hs[WOLF_TUNNELS_MAX];     // xyz half sizes
+uniform vec4 wolf_tunnel_hs[WOLF_TUNNELS_MAX];     // xyz half sizes, w: 0 = a hole (no ground), > 0 = see-through ground
+// [WOLF TUNNELS 2026-10-22] The Tunnels window's see-through ground (WolfTunnels::setSeeThrough, Paul: "the ground needs to be SEMI
+// TRANSPARENT so you can see where it is but also see where your tunnel is going"): one more box, the last, whose w is the share of
+// the ground's pixels left out in a 4 x 4 ordered (Bayer) pattern - a fine screen the deferred lighting lights as usual, through
+// which what is under the ground shows. Read only inside a box, so a region with no box and no see-through pays nothing more.
+float wolfBayer4()
+{
+    ivec2 q = ivec2(gl_FragCoord.xy) & 3;
+    int i = q.x + 4 * q.y;
+    // the 4 x 4 Bayer matrix, row by row: 0 8 2 10 / 12 4 14 6 / 3 11 1 9 / 15 7 13 5
+    int m = (i == 0) ? 0 : (i == 1) ? 8 : (i == 2) ? 2 : (i == 3) ? 10 : (i == 4) ? 12 : (i == 5) ? 4 : (i == 6) ? 14 : (i == 7) ? 6
+          : (i == 8) ? 3 : (i == 9) ? 11 : (i == 10) ? 1 : (i == 11) ? 9 : (i == 12) ? 15 : (i == 13) ? 7 : (i == 14) ? 13 : 5;
+    return (float(m) + 0.5) / 16.0;
+}
 void wolfTunnelClip(vec3 rp)
 {
     for (int i = 0; i < WOLF_TUNNELS_MAX; ++i)
@@ -365,7 +378,12 @@ void wolfTunnelClip(vec3 rp)
         float c = cos(wolf_tunnel_cy[i].w), s = sin(wolf_tunnel_cy[i].w);
         // local = R(-yaw) * d, as WolfTunnels inBox / WolfSim WolfUndergroundVolumes
         vec3 l = vec3(c * d.x + s * d.y, -s * d.x + c * d.y, d.z);
-        if (all(lessThanEqual(abs(l), wolf_tunnel_hs[i].xyz))) discard;
+        if (all(lessThanEqual(abs(l), wolf_tunnel_hs[i].xyz)))
+        {
+            // the first box the point is in decides: a hole drops it, the see-through box drops its share of the screen
+            if (wolf_tunnel_hs[i].w <= 0.0 || wolfBayer4() < wolf_tunnel_hs[i].w) discard;
+            return;
+        }
     }
 }
 // </WolfViewer>

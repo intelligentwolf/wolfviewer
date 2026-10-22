@@ -3,15 +3,15 @@
      users should be able to 'Draw' the tunnel and it creates the mesh with caverns", and "offer smooth tunnels (like railways)
      or rough tunnels like someone would explore".
      Persona: a region owner who wants a railway tunnel through their mountain, or a cave passage to explore, without building
-     it prim by prim. Flow: New tunnel -> 1. Draw the route (click points on the ground, double-click or Finish) -> 2. Shape it
-     (type, style, floor heights, caverns, portals; the preview follows every change) -> 3. Build (saved, built, rezzed, made
+     it prim by prim. Flow: New tunnel -> 1. Draw the route (click points on the ground, each goes in at the chosen depth below;
+     drag their handles to move them; double-click or Finish) -> 2. Shape it (type, style, caverns, portals; the preview follows every change) -> 3. Build (saved, built, rezzed, made
      walkable). Messages stay in the status line; failures are in the caution colour and stay until the next action.
      The region's walkable boxes (the old box list) are under Advanced, closed by default. -->
 <floater
  can_close="true"
  can_minimize="true"
  can_resize="false"
- height="676"
+ height="730"
  layout="topleft"
  name="wolf_tunnels"
  help_topic="wolf_tunnels"
@@ -19,7 +19,7 @@
  single_instance="true"
  title="Tunnels"
  width="480">
-    <floater.string name="str_draw">Click points on the ground from one mouth to the other. Double-click or press Finish (Enter) on the last one. Backspace or Undo point takes the last one back; Esc stops drawing.</floater.string>
+    <floater.string name="str_draw">Click the ground where the tunnel runs: each point goes in at the depth below. Drag a point's white box to move it, its yellow box to raise or lower it. Double-click or Finish (Enter) on the last one; Backspace undoes; Esc stops.</floater.string>
     <floater.string name="str_cavern">Click on the tunnel's route to put a cavern there (its size: the Cavern size slider). Esc stops.</floater.string>
     <floater.string name="str_need_cap">This region cannot make tunnels walkable yet (it needs the WolfSim tunnels update). Ask the region owner.</floater.string>
     <floater.string name="str_need_rights">You can see this region's tunnels; only the region owner, the estate owner and estate managers can make them.</floater.string>
@@ -47,23 +47,47 @@
     <line_editor follows="left|top" height="20" layout="topleft" left="60" max_length_bytes="63" name="tun_name" top="184" width="410"
      tool_tip="The tunnel's name (also the rock object's name)" />
 
-    <!-- 1. Draw the route -->
+    <!-- 1. Draw the route. [2026-10-22] Paul: "want to draw underground - points only land on top of the ground; you want to see
+         and draw the route inside the hill, at the depth you choose". Each point has its own depth: new points go in at "Depth
+         below ground" under where you click (the ground is half see-through while this window is open), and a point's handles drag it
+         sideways or up and down, like the cave builder's box handles. -->
     <text follows="left|top" font.style="BOLD" height="16" layout="topleft" left="10" name="step1_lbl" top="212" width="460">1. Draw the route</text>
-    <text follows="left|top" font="SansSerifSmall" height="28" layout="topleft" left="10" name="step1_help" top="228" width="460" word_wrap="true">
-        Click points on the ground from one mouth to the other: start where people walk in, end where they come out.
+    <text follows="left|top" font="SansSerifSmall" height="42" layout="topleft" left="10" name="step1_help" top="228" width="460" word_wrap="true">
+        Click the ground where the tunnel runs, mouth to mouth: each point goes in at the depth below, under where you click (the ground is half see-through while this window is open). Drag a point's white box to move it, its yellow box to raise or lower it.
     </text>
-    <button follows="left|top" height="22" is_toggle="true" label="Draw route" layout="topleft" left="10" name="draw_route_btn" top="258" width="120"
-     tool_tip="Put the pen down to click the route's points on the ground (press again to stop)" />
-    <button follows="left|top" height="22" label="Undo point" layout="topleft" left="136" name="undo_point_btn" top="258" width="100"
+    <button follows="left|top" height="22" is_toggle="true" label="Draw / move points" layout="topleft" left="10" name="draw_route_btn" top="272" width="140"
+     tool_tip="Put the pen down: click the ground to add points, drag a point's boxes to move it (press again to stop)" />
+    <button follows="left|top" height="22" label="Undo point" layout="topleft" left="156" name="undo_point_btn" top="272" width="96"
      tool_tip="Take the last point of the route back (Backspace)" />
-    <button follows="left|top" height="22" label="Finish" layout="topleft" left="242" name="finish_btn" top="258" width="80"
+    <button follows="left|top" height="22" label="Finish" layout="topleft" left="258" name="finish_btn" top="272" width="70"
      tool_tip="The last point is the far mouth (or double-click it, or press Enter)" />
-    <text follows="left|top" font="SansSerifSmall" height="16" layout="topleft" left="330" name="route_info" top="261" width="140" />
+    <text follows="left|top" font="SansSerifSmall" height="16" layout="topleft" left="334" name="route_info" top="275" width="136" />
+    <spinner decimal_digits="1" follows="left|top" height="19" increment="0.5" label="Depth below ground (m)" label_width="140" layout="topleft"
+     left="10" max_val="300" min_val="0" name="tun_depth" top="300" width="220"
+     tool_tip="How deep the floor of each new point goes under the ground where you click, metres. The roof is the tunnel's height above the floor, so keep the depth more than the height to stay inside the hill." />
+    <check_box follows="left|top" height="16" initial_value="true" label="Mouths at ground level" layout="topleft" left="244" name="tun_mouths"
+     top="301" width="226" tool_tip="The first and last points sit on the ground so people can walk in; the points between go in at the depth" />
+    <text follows="left|top" height="16" layout="topleft" left="10" name="pt_lbl" top="326" width="100">No point picked</text>
+    <spinner decimal_digits="2" follows="left|top" height="19" increment="0.25" label="Depth" label_width="40" layout="topleft" left="110"
+     max_val="300" min_val="-50" name="pt_depth" top="325" width="130"
+     tool_tip="How far the picked point's floor is below the ground there, metres (less than 0: above the ground)" />
+    <button follows="left|top" height="20" label="To ground level" layout="topleft" left="246" name="pt_ground" top="324" width="112"
+     tool_tip="Put the picked point's floor on the ground" />
+    <button follows="left|top" height="20" label="Remove point" layout="topleft" left="364" name="pt_remove" top="324" width="106"
+     tool_tip="Take the picked point out of the route (Delete)" />
 
     <!-- 2. Shape it -->
-    <text follows="left|top" font.style="BOLD" height="16" layout="topleft" left="10" name="step2_lbl" top="290" width="460">2. Shape it</text>
-    <text follows="left|top" height="16" layout="topleft" left="10" name="kind_lbl" top="310" width="40">Type</text>
-    <combo_box follows="left|top" height="20" layout="topleft" left="50" name="tun_kind" top="308" width="150"
+    <!-- [WOLF TUNNELS 2026-10-22] Paul: "the ground needs to be SEMI TRANSPARENT so you can see where it is but also see where
+         your tunnel is going". On while this window is open (WolfTunnels::setSeeThrough); never fully clear or fully solid. -->
+    <check_box follows="left|top" height="16" initial_value="true" label="See through the ground" layout="topleft" left="10"
+     name="see_through" top="352" width="170" tool_tip="While this window is open the ground is half see-through, so the route and the tunnels inside the hill show. It goes back to normal when the window closes." />
+    <slider decimal_digits="0" follows="left|top" height="16" increment="5" initial_value="50" label="How much (%)" label_width="80" layout="topleft"
+     left="190" max_val="75" min_val="25" name="see_through_amount" show_text="true" top="352" width="280"
+     tool_tip="How see-through the ground is: 25% (mostly solid) to 75% (mostly clear). It never goes fully clear, so you still see where the ground is." />
+
+    <text follows="left|top" font.style="BOLD" height="16" layout="topleft" left="10" name="step2_lbl" top="374" width="460">2. Shape it</text>
+    <text follows="left|top" height="16" layout="topleft" left="10" name="kind_lbl" top="394" width="40">Type</text>
+    <combo_box follows="left|top" height="20" layout="topleft" left="50" name="tun_kind" top="392" width="150"
      tool_tip="The tunnel's size. Walking: 4 m wide, 3.5 m high. Wide: 6 x 4.5 m. Rail: 6 x 6 m, for trains. Custom: your own.">
         <combo_box.item label="Walking (4 m)" name="walk" value="walk" />
         <combo_box.item label="Wide (6 m)" name="wide" value="wide" />
@@ -71,45 +95,39 @@
         <combo_box.item label="Custom" name="custom" value="custom" />
     </combo_box>
     <spinner decimal_digits="1" follows="left|top" height="19" increment="0.5" label="Width" label_width="40" layout="topleft" left="210"
-     max_val="20" min_val="2" name="tun_w" top="309" width="120" tool_tip="Width, metres (2 to 20)" />
+     max_val="20" min_val="2" name="tun_w" top="393" width="120" tool_tip="Width, metres (2 to 20)" />
     <spinner decimal_digits="1" follows="left|top" height="19" increment="0.5" label="Height" label_width="44" layout="topleft" left="340"
-     max_val="15" min_val="2.5" name="tun_h" top="309" width="130" tool_tip="Clear height inside, metres (2.5 to 15)" />
-    <text follows="left|top" height="16" layout="topleft" left="10" name="style_lbl" top="336" width="40">Style</text>
-    <radio_group follows="left|top" height="40" layout="topleft" left="50" name="tun_style" top="334" width="420">
+     max_val="15" min_val="2.5" name="tun_h" top="393" width="130" tool_tip="Clear height inside, metres (2.5 to 15)" />
+    <text follows="left|top" height="16" layout="topleft" left="10" name="style_lbl" top="420" width="40">Style</text>
+    <radio_group follows="left|top" height="40" layout="topleft" left="50" name="tun_style" top="418" width="420">
         <radio_item height="20" label="Smooth - engineered: straight walls, level floor, arched roof (railways, roads)" layout="topleft" left="0"
          name="smooth" top="0" value="smooth" width="420" />
         <radio_item height="20" label="Rough - natural cave: uneven rock, changing width, bumpy roof (for exploring)" layout="topleft" left="0"
          name="rough" top="20" value="rough" width="420" />
     </radio_group>
-    <spinner decimal_digits="2" follows="left|top" height="19" increment="0.25" label="Floor at start" label_width="80" layout="topleft" left="10"
-     max_val="4000" min_val="-90" name="tun_z0" top="382" width="170" tool_tip="Height of the floor at the first mouth, metres (it starts at the ground there)" />
-    <spinner decimal_digits="2" follows="left|top" height="19" increment="0.25" label="at end" label_width="44" layout="topleft" left="190"
-     max_val="4000" min_val="-90" name="tun_z1" top="382" width="134" tool_tip="Height of the floor at the far mouth, metres" />
-    <button follows="left|top" height="20" label="To the ground" layout="topleft" left="334" name="ground_btn" top="381" width="136"
-     tool_tip="Put both mouths' floors back on the ground where they are" />
-    <text follows="left|top" font="SansSerifSmall" height="16" layout="topleft" left="10" name="grade_info" top="406" width="460"
-     tool_tip="The floor runs in one smooth grade from mouth to mouth" />
-    <button follows="left|top" height="22" is_toggle="true" label="Add cavern" layout="topleft" left="10" name="cavern_btn" top="426" width="120"
+    <text follows="left|top" font="SansSerifSmall" height="16" layout="topleft" left="10" name="grade_info" top="462" width="460"
+     tool_tip="The floor runs straight from each point to the next, at each point's own depth" />
+    <button follows="left|top" height="22" is_toggle="true" label="Add cavern" layout="topleft" left="10" name="cavern_btn" top="482" width="120"
      tool_tip="Put the pen down to click caverns onto the route (press again to stop)" />
     <slider decimal_digits="0" follows="left|top" height="16" increment="1" initial_value="8" label="Cavern size" label_width="70" layout="topleft"
-     left="138" max_val="30" min_val="3" name="cavern_r" show_text="true" top="429" width="210" tool_tip="Radius of the next cavern, metres (3 to 30)" />
-    <button follows="left|top" height="22" label="Undo cavern" layout="topleft" left="354" name="undo_cavern_btn" top="426" width="116"
+     left="138" max_val="30" min_val="3" name="cavern_r" show_text="true" top="485" width="210" tool_tip="Radius of the next cavern, metres (3 to 30)" />
+    <button follows="left|top" height="22" label="Undo cavern" layout="topleft" left="354" name="undo_cavern_btn" top="482" width="116"
      tool_tip="Take the last cavern back" />
     <check_box follows="left|top" height="16" initial_value="true" label="Stone arches at the mouths" layout="topleft" left="10" name="tun_portals"
-     top="454" width="300" tool_tip="A stone portal round each mouth" />
+     top="510" width="300" tool_tip="A stone portal round each mouth" />
 
     <!-- 3. Build -->
-    <text follows="left|top" font.style="BOLD" height="16" layout="topleft" left="10" name="step3_lbl" top="480" width="460">3. Build</text>
-    <text follows="left|top|right" height="58" layout="topleft" left="10" name="tun_warnings" top="498" width="460" word_wrap="true" />
-    <button follows="left|top" height="24" label="Build" layout="topleft" left="10" name="build_btn" top="560" width="150"
+    <text follows="left|top" font.style="BOLD" height="16" layout="topleft" left="10" name="step3_lbl" top="536" width="460">3. Build</text>
+    <text follows="left|top|right" height="58" layout="topleft" left="10" name="tun_warnings" top="554" width="460" word_wrap="true" />
+    <button follows="left|top" height="24" label="Build" layout="topleft" left="10" name="build_btn" top="616" width="150"
      tool_tip="Save the tunnel, make its rock, rez it and make it walkable (an old build of it is taken away first)" />
-    <button follows="left|top" height="24" label="Stop editing" layout="topleft" left="166" name="cancel_edit_btn" top="560" width="120"
+    <button follows="left|top" height="24" label="Stop editing" layout="topleft" left="166" name="cancel_edit_btn" top="616" width="120"
      tool_tip="Put the drawing away without building it" />
-    <text follows="left|top|right" height="44" layout="topleft" left="10" name="status" top="590" width="460" word_wrap="true" />
+    <text follows="left|top|right" height="44" layout="topleft" left="10" name="status" top="646" width="460" word_wrap="true" />
 
     <check_box follows="left|top" height="16" initial_value="false" label="Advanced: the region's walkable boxes" layout="topleft" left="10"
-     name="advanced_check" top="640" width="400" tool_tip="Every walkable box in this region, with its numbers" />
-    <panel follows="left|top" height="228" layout="topleft" left="0" name="advanced_panel" top="660" visible="false" width="480">
+     name="advanced_check" top="696" width="400" tool_tip="Every walkable box in this region, with its numbers" />
+    <panel follows="left|top" height="228" layout="topleft" left="0" name="advanced_panel" top="716" visible="false" width="480">
         <scroll_list draw_heading="true" follows="left|top|right" height="104" layout="topleft" left="10" name="box_list" top="0" width="460"
          tool_tip="This region's walkable boxes. Pick one to see its numbers and change them.">
             <scroll_list.columns label="Box" name="id" width="50" />

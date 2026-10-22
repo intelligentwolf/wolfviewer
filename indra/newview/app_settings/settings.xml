@@ -13524,6 +13524,39 @@ Change of this parameter will affect the layout of buttons in notification toast
       <key>Value</key>
       <string>walk</string>
     </map>
+    <key>WolfTunnelDepth</key>
+    <map>
+      <key>Comment</key>
+      <string>[WOLF TUNNELS 2026-10-22] Tunnel tool: how far below the ground a new route point's floor goes, metres (Paul: "draw the route inside the hill, at the depth you choose").</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>F32</string>
+      <key>Value</key>
+      <real>8.0</real>
+    </map>
+    <key>WolfTunnelMouthsAtGround</key>
+    <map>
+      <key>Comment</key>
+      <string>[WOLF TUNNELS 2026-10-22] Tunnel tool: the route's first and last points (the mouths) sit on the ground; the points between go in at WolfTunnelDepth.</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>Boolean</string>
+      <key>Value</key>
+      <integer>1</integer>
+    </map>
+    <key>WolfTunnelSeeThrough</key>
+    <map>
+      <key>Comment</key>
+      <string>[WOLF TUNNELS 2026-10-22] Tunnel tool: how see-through the ground is while the Tunnels window is open (the share of its pixels left out, 0.25 to 0.75). Only the amount is kept; the see-through ground itself is never saved on.</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>F32</string>
+      <key>Value</key>
+      <real>0.5</real>
+    </map>
     <key>WolfTerrainPaintWaterLevel</key>
     <map>
       <key>Comment</key>

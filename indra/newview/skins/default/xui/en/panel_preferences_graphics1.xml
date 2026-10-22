@@ -1253,6 +1253,27 @@ If you do not understand the distinction then leave this control alone."
      follows="all"
      label="Rendering"
      name="Rendering" >
+      <!-- <WolfViewer 2026-10-22> The Wolf rows (sea, lights, snow line...) made this tab taller than the window: at UI
+           scale 1.2 the snow line, sharpening and tone mapping rows were cut off with no way to reach them (Indi, Discord).
+           The tab's rows now scroll; the pattern is panel_classified_info.xml's scroll_container + content panel. -->
+      <scroll_container
+       follows="all"
+       layout="topleft"
+       left="0"
+       top="0"
+       height="450"
+       width="537"
+       name="rendering_scroll"
+       reserve_scroll_corner="false">
+      <panel
+       follows="left|top"
+       layout="topleft"
+       left="0"
+       top="0"
+       height="610"
+       width="520"
+       background_visible="false"
+       name="rendering_scroll_content">
       <!-- world pauser -->
       <text
          type="string"
@@ -1841,6 +1862,9 @@ If you do not understand the distinction then leave this control alone."
          top_pad="5"
          width="310"/>
         <!-- End of Tone Mapping Settings-->
+      </panel>
+      </scroll_container>
+      <!-- </WolfViewer> -->
     </panel>
 
 <!--Depth of Field-->

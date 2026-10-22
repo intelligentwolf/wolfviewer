@@ -38,7 +38,7 @@ env:
   # stays because it has to — viewerRes.rc:145 FILEVERSION must be numeric, and wolfupdate.cpp
   # compares it with the signed latest.json's "revision" — but it is no longer the thing anyone is
   # asked to quote. Tags stay v7.2.4-wN (w52 and older viewers read the GitHub tag).
-  release_name: "Tunneling Mole"
+  release_name: "Hawk Eye"
   # [2026-09-29] Windows code signing (Azure Artifact Signing, account in Paul's Azure subscription,
   # resource group wolfviewer-signing). None of these are secrets. The endpoint must be the one for
   # the account's region, North Europe (how-to-signing-integrations endpoint table), and the

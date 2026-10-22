@@ -70,6 +70,14 @@ class LLTextBox;
  * grid instead) -> drag a point's white box to move it sideways, its yellow box to raise or lower it, or pick it and type its
  * depth -> Finish. "Mouths at ground level" keeps the first and last points on the ground. The floor runs straight from point
  * to point (design v2, a floor height per point); labels at the points give their depth below the ground.
+ *
+ * [WOLF TUNNELS 2026-10-22 easy] Paul on Sandbox: "the tunnel builder was bad, I couldn't do it :-( I tried drawing the points,
+ * part of the floater I can't see, but I don't get the Build button enabled. Can we make it easier?"
+ * Persona: a region owner who has never built a tunnel and wants one through their hill in a couple of minutes.
+ * Flow: New tunnel -> click where it starts -> click the bends and the far end (the route shows live; the ends are the
+ * mouths on the ground, the points between go down gently to the depth) -> Build tunnel (enabled from two points; when it
+ * cannot be pressed the line under it says why and what to do). No Finish step: Enter / double-click only puts the pen
+ * away. Depth, per-point depth, style, size, caverns, portals and see-through are under "More options", closed.
  */
 namespace WolfTunnels
 {
@@ -160,10 +168,11 @@ public:
     void setStatus(const std::string& text, bool error);
 
     // The pens (WolfToolTunnel) call these.
-    /** A new route point at (x, y) with its floor at z (region metres). */
-    void addRoutePoint(F32 x, F32 y, F32 z);
-    /** Where a new point's floor goes under ground height `ground` (the mouths' rule and the depth). */
-    F32 newPointFloor(F32 ground) const;
+    /** A new route point at (x, y) with its floor at z (region metres); `on_plane` = clicked on the drawing plane underground
+     *  (the point goes in exactly there and is never a mouth). */
+    void addRoutePoint(F32 x, F32 y, F32 z, bool on_plane);
+    /** Where a new point at (x, y) puts its floor under ground height `ground` (the mouths' rule, the depth, the gentle slope). */
+    F32 newPointFloor(F32 x, F32 y, F32 ground) const;
     /** The height of the drawing plane a click lands on when the camera is under the ground: the picked point's floor, else the
      *  last point's, else under the avatar. */
     F32 planeHeight() const;
@@ -232,6 +241,16 @@ private:
     void onUndoCavern();
     void onPen(S32 pen);
     void onAdvanced();
+    /** [2026-10-22 easy] Show or hide "More options" and the walkable boxes, size the window to what shows, keep it on screen. */
+    void relayout();
+    /** Why Build cannot be pressed now, in plain words (rights, the region, a build running, the design); empty = it can. */
+    std::string buildBlocker() const;
+    /** The one-line hint at the top: what to do next. */
+    std::string nextStep() const;
+    /** The slope the drawing keeps new points to (the generator's own "steep" warning for this type). */
+    F32 easeGrade() const;
+    /** `target` kept within easeGrade() of the floor `from_z` over the level distance `len`. */
+    F32 eased(F32 target, F32 from_z, F32 len) const;
     void showDesign();
     void designChanged();
     void updateButtons();
@@ -240,7 +259,10 @@ private:
     LLScrollListCtrl* mTunList = nullptr;
     LLButton *mNewBtn = nullptr, *mEditBtn = nullptr, *mGoTunBtn = nullptr, *mDelTunBtn = nullptr;
     LLLineEditor* mName = nullptr;
-    LLButton *mDrawBtn = nullptr, *mUndoPointBtn = nullptr, *mFinishBtn = nullptr;
+    LLButton *mDrawBtn = nullptr, *mUndoPointBtn = nullptr;
+    LLTextBox* mHint = nullptr;                 // what to do next (nextStep)
+    LLCheckBoxCtrl* mMoreCheck = nullptr;       // "More options", closed by default
+    LLPanel* mMore = nullptr;
     LLSpinCtrl *mDepth = nullptr, *mPointDepth = nullptr;
     LLCheckBoxCtrl* mMouths = nullptr;
     LLCheckBoxCtrl* mSeeThrough = nullptr;
@@ -277,11 +299,12 @@ private:
     WolfTunnels::Design mDesign;
     bool mRouteOpen = false;        // the route pen is still adding points
     S32 mPicked = -1;               // the point picked by its handle (the Point row edits it), or -1
-    bool mEndIsMouth = false;       // the last point was put on the ground as a mouth (a new point after it sends it to the depth)
+    bool mEndIsMouth = false;       // the last point is the far mouth on the ground (a new point after it sends it to the depth)
     bool mPreviewDirty = false;     // a handle drag changed the design; the preview follows at most every PREVIEW_DRAG_S
     F64 mPreviewAt = 0.0;
     Preview mPreview;
     std::string mProblem;           // why Build cannot be pressed (designProblem), shown in the warnings
+    std::string mLoggedBlock;       // the last blocker written to the log (written once per change)
     U32 mShownJob = 0;              // the tunnel job serial the window last showed
     U32 mShownRecords = 0;          // the records serial the list was filled from
 };

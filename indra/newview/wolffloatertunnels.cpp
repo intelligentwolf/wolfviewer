@@ -1054,31 +1054,38 @@ namespace
 F32 WolfTunnels::routeLength(const Design& d) { return Route(d.mP).mLen; }
 F32 WolfTunnels::floorAt(const Design& d, F32 t) { return Air(d).floorOn(t); }
 
-// Source: wolftunnel.rs validate_design - the same checks and the same words, so Build is only offered for what will build.
+// Source: wolftunnel.rs validate_design - the same checks, so Build is only offered for what will build.
+// [2026-10-22 easy] The words name the points and say what to do (Paul could not tell why Build stayed grey).
 std::string WolfTunnels::designProblem(const Design& d, F32 region_w)
 {
     const size_t n = d.mP.size() / 2;
-    if (n < 2) return "Draw the route: at least two points, one at each mouth.";
-    if (d.mW < W_MIN || d.mW > W_MAX) return llformat("The tunnel must be %.0f to %.0f m wide.", W_MIN, W_MAX);
-    if (d.mH < H_MIN || d.mH > H_MAX) return llformat("The tunnel must be %.1f to %.0f m high.", H_MIN, H_MAX);
-    for (F32 v : d.mP) if (v < 0.f || v > region_w) return "The route leaves the region - keep every point inside it.";
+    if (n < 2) return n == 0 ? "Click on the ground where the tunnel starts." : "Click where the tunnel ends (a tunnel needs two points at least).";
+    if (d.mW < W_MIN || d.mW > W_MAX) return llformat("The tunnel must be %.0f to %.0f m wide (More options).", W_MIN, W_MAX);
+    if (d.mH < H_MIN || d.mH > H_MAX) return llformat("The tunnel must be %.1f to %.0f m high (More options).", H_MIN, H_MAX);
+    for (size_t k = 0; k < n; ++k)
+        if (d.mP[2 * k] < 0.f || d.mP[2 * k] > region_w || d.mP[2 * k + 1] < 0.f || d.mP[2 * k + 1] > region_w)
+            return llformat("Point %d is outside this region - drag it back in.", (S32)k + 1);
     const Route route(d.mP);
     F32 first = 0.f, last = 0.f;
     for (size_t k = 1; k < n; ++k)
     {
         const F32 l = route.mCum[k] - route.mCum[k - 1];
-        if (l < SEG_MIN_M) return "Two points of the route are less than 0.5 m apart - undo one of them.";
+        if (l < SEG_MIN_M) return llformat("Points %d and %d are less than 0.5 m apart - press Undo point or drag one away.", (S32)k, (S32)k + 1);
         if (k == 1) first = l;
         last = l;
     }
-    if (first < d.mW || last < d.mW) return llformat("Make the first and last piece of the route at least as long as the tunnel is wide (%.1f m).", d.mW);
+    if (first < d.mW)
+        return llformat("The first piece (points 1 to 2) is %.1f m; it must be at least %.1f m, as wide as the tunnel. Drag point 2 further away.", first, d.mW);
+    if (last < d.mW)
+        return llformat("The last piece (points %d to %d) is %.1f m; it must be at least %.1f m, as wide as the tunnel. Click further on, or drag point %d further out.",
+                        (S32)n - 1, (S32)n, last, d.mW, (S32)n);
     // Source: wolftunnel.rs validate_design (v2): a height per point, each in range, no piece steeper than 1 in 1.
     if (d.mZ.size() != n) return "Every point of the route needs its floor height - draw it again.";
     for (F32 z : d.mZ) if (!std::isfinite(z) || z < Z_MIN || z > Z_MAX) return "The floor heights must be -90 to 4000 m.";
     for (size_t k = 1; k < n; ++k)
     {
         if (fabsf(d.mZ[k] - d.mZ[k - 1]) / llmax(1e-6f, route.mCum[k] - route.mCum[k - 1]) > GRADE_MAX)
-            return llformat("Between points %d and %d the floor is steeper than 1 in 1 (45 degrees) - move them apart or bring their depths closer.", (S32)k, (S32)k + 1);
+            return llformat("Too steep between points %d and %d (more than 1 in 1) - drag them further apart, or bring their depths closer (More options).", (S32)k, (S32)k + 1);
     }
     for (size_t i = 0; i < d.mCaverns.size(); ++i)
     {
@@ -1086,7 +1093,7 @@ std::string WolfTunnels::designProblem(const Design& d, F32 region_w)
         if (c.mR < CAVERN_R_MIN || c.mR > CAVERN_R_MAX) return llformat("Cavern %d's radius must be 3 to 30 m.", (S32)i + 1);
         if (c.mH < CAVERN_H_MIN || c.mH > CAVERN_H_MAX) return llformat("Cavern %d's height must be 3 to 25 m.", (S32)i + 1);
         const std::pair<F32, F32> nt = route.nearest(c.mX, c.mY);
-        if (nt.first > d.mW * 0.5f) return llformat("Cavern %d is not on the route - put it on the tunnel.", (S32)i + 1);
+        if (nt.first > d.mW * 0.5f) return llformat("Cavern %d is not on the route - Undo cavern and put it on the tunnel.", (S32)i + 1);
         if (nt.second < c.mR + ROUGH_CAVERN_MAX_M || nt.second > route.mLen - c.mR - ROUGH_CAVERN_MAX_M)
             return llformat("Cavern %d is too near a mouth - move it further in or make it smaller.", (S32)i + 1);
         if (c.mX - c.mR < 0.f || c.mY - c.mR < 0.f || c.mX + c.mR > region_w || c.mY + c.mR > region_w)
@@ -1124,7 +1131,9 @@ bool WolfFloaterTunnels::postBuild()
     mName = getChild<LLLineEditor>("tun_name");
     mDrawBtn = getChild<LLButton>("draw_route_btn");
     mUndoPointBtn = getChild<LLButton>("undo_point_btn");
-    mFinishBtn = getChild<LLButton>("finish_btn");
+    mHint = getChild<LLTextBox>("hint");
+    mMoreCheck = getChild<LLCheckBoxCtrl>("more_check");
+    mMore = getChild<LLPanel>("more_panel");
     mDepth = getChild<LLSpinCtrl>("tun_depth");
     mMouths = getChild<LLCheckBoxCtrl>("tun_mouths");
     mSeeThrough = getChild<LLCheckBoxCtrl>("see_through");
@@ -1157,7 +1166,6 @@ bool WolfFloaterTunnels::postBuild()
     mDrawBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { onPen(WolfToolTunnel::PEN_ROUTE); });
     mCavernBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { onPen(WolfToolTunnel::PEN_CAVERN); });
     mUndoPointBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { undoPoint(); });
-    mFinishBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { finishRoute(); });
     mDepth->setValue(llclamp(gSavedSettings.getF32("WolfTunnelDepth"), 0.f, 300.f));
     mDepth->setCommitCallback([this](LLUICtrl*, const LLSD&) { onDepth(); });
     mMouths->set(gSavedSettings.getBOOL("WolfTunnelMouthsAtGround"));
@@ -1182,6 +1190,7 @@ bool WolfFloaterTunnels::postBuild()
     mStyle->setCommitCallback([this](LLUICtrl*, const LLSD&) { onStyle(); });
     mPortals->setCommitCallback([this](LLUICtrl*, const LLSD&) { mDesign.mPortals = mPortals->get(); designChanged(); });
     mAdvancedCheck->setCommitCallback([this](LLUICtrl*, const LLSD&) { onAdvanced(); });
+    mMoreCheck->setCommitCallback([this](LLUICtrl*, const LLSD&) { relayout(); });
 
     // the walkable boxes (Advanced)
     mBoxList = getChild<LLScrollListCtrl>("box_list");
@@ -1199,7 +1208,7 @@ bool WolfFloaterTunnels::postBuild()
     mGoBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { onGoInsideBox(); });
     mRefreshBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { refresh(); });
     setEditing(false);
-    onAdvanced();
+    relayout();
     return true;
 }
 
@@ -1280,15 +1289,39 @@ void WolfFloaterTunnels::setStatus(const std::string& text, bool error)
 
 void WolfFloaterTunnels::onAdvanced()
 {
-    // floater_wolf_tunnels.xml: the window is 730 high with Advanced closed; the Advanced panel adds its 228.
-    const bool on = mAdvancedCheck->get();
-    const S32 want = on ? 730 + 228 : 730;
-    if (mAdvanced->getVisible() == on && getRect().getHeight() == want) return;
-    mAdvanced->setVisible(on);
-    // Grow or shrink downwards, keeping the window's top where it is.
-    LLRect r = getRect();
-    r.mBottom = r.mTop - want;
-    setShape(r);
+    relayout();
+}
+
+// [2026-10-22 easy] Paul: "part of the floater I can't see". The window was 730 high (958 with Advanced). Now: 364 with More
+// options closed, + 200 with it open, + 228 with the walkable boxes (floater_wolf_tunnels.xml: floater height, more_panel top
+// 362 height 200, advanced_panel top 562 height 228). Build tunnel sits above More options, so opening it never moves Build.
+void WolfFloaterTunnels::relayout()
+{
+    const S32 BASE_H = 364, MORE_H = 200, BOXES_H = 228;
+    const bool more = mMoreCheck->get();
+    const bool boxes = more && mAdvancedCheck->get();
+    mMore->setVisible(more);
+    mAdvanced->setVisible(boxes);
+    const S32 want = BASE_H + (more ? MORE_H : 0) + (boxes ? BOXES_H : 0);
+    if (getRect().getHeight() != want)
+    {
+        // Grow or shrink downwards, keeping the window's top where it is.
+        LLRect r = getRect();
+        r.mBottom = r.mTop - want;
+        setShape(r);
+    }
+    // Keep it on screen: when the bottom went below the floaters' area (llfloater.h LLFloaterView::getSnapRect, in the same
+    // coordinates as this window's rect), lift it, but never the title bar above that area's top.
+    if (gFloaterView && getParent() == gFloaterView)
+    {
+        const LLRect snap = gFloaterView->getSnapRect();
+        const LLRect r = getRect();
+        if (r.mBottom < snap.mBottom)
+        {
+            const S32 up = llmin(snap.mBottom - r.mBottom, llmax(0, snap.mTop - r.mTop));
+            if (up > 0) translate(0, up);
+        }
+    }
 }
 
 // ── the tunnels ─────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -1442,12 +1475,35 @@ void WolfFloaterTunnels::onDepth()
     gSavedSettings.setF32("WolfTunnelDepth", llclamp((F32)mDepth->getValueF32(), 0.f, 300.f));
 }
 
-F32 WolfFloaterTunnels::newPointFloor(F32 ground) const
+// [2026-10-22 easy] Why Paul's Build stayed grey: every new point went straight to the full depth (WolfTunnelDepth, 8 m) under
+// a mouth on the ground, so a second point closer than the depth made a piece steeper than 1 in 1 (designProblem, wolftunnel.rs
+// validate_design GRADE_MAX), and the reason was only in a text box he could not see. Now the drawing keeps each new point
+// within the generator's own "steep" slope of the point before (wolftunnel.rs warnings(): RAIL_GRADE_WARN for rail, else
+// WALK_GRADE_WARN), so a drawn route never trips that check; the depth is how deep it goes at most. Points moved by hand
+// (handles, the point's depth) are not eased: what the user sets is kept, and the line under Build says if it is too steep.
+F32 WolfFloaterTunnels::easeGrade() const
+{
+    // Source: wolftunnel.rs warnings() `let limit = if rail { RAIL_GRADE_WARN } else { WALK_GRADE_WARN };`
+    return mDesign.mKind == "rail" ? RAIL_GRADE_WARN : WALK_GRADE_WARN;
+}
+
+F32 WolfFloaterTunnels::eased(F32 target, F32 from_z, F32 len) const
+{
+    const F32 most = easeGrade() * llmax(0.f, len);
+    return llclamp(target, from_z - most, from_z + most);
+}
+
+F32 WolfFloaterTunnels::newPointFloor(F32 x, F32 y, F32 ground) const
 {
     const F32 depth = llclamp((F32)mDepth->getValueF32(), 0.f, 300.f);
-    // The first point is the near mouth: on the ground when the mouths are (the far one is put there when the route is finished).
-    if (mDesign.mP.empty() && mMouths->get()) return r2(ground);
-    return r2(llclamp(ground - depth, Z_MIN, Z_MAX));
+    // With the mouths on the ground every new point is the far mouth, on the ground; the point before it goes down to the depth
+    // when it is added (addRoutePoint). The first point is the near mouth.
+    if (mMouths->get()) return r2(ground);
+    const size_t n = mDesign.mP.size() / 2;
+    F32 z = ground - depth;
+    if (n > 0 && mDesign.mZ.size() == n)
+        z = eased(z, mDesign.mZ[n - 1], sqrtf(powf(x - mDesign.mP[2 * n - 2], 2.f) + powf(y - mDesign.mP[2 * n - 1], 2.f)));
+    return r2(llclamp(z, Z_MIN, Z_MAX));
 }
 
 F32 WolfFloaterTunnels::planeHeight() const
@@ -1470,13 +1526,19 @@ void WolfFloaterTunnels::applyMouths(bool end)
     auto put = [&](size_t k) { mDesign.mZ[k] = r2(llclamp(land.resolveHeightRegion(mDesign.mP[2 * k], mDesign.mP[2 * k + 1]) - depth, Z_MIN, Z_MAX)); };
     put(0);
     if (end && n >= 2) { put(n - 1); mEndIsMouth = mMouths->get(); }
+    // The point before a far mouth on the ground keeps a gentle slope up to it (as addRoutePoint does).
+    if (end && n >= 3 && mMouths->get())
+    {
+        const F32 len = sqrtf(powf(mDesign.mP[2 * n - 2] - mDesign.mP[2 * n - 4], 2.f) + powf(mDesign.mP[2 * n - 1] - mDesign.mP[2 * n - 3], 2.f));
+        mDesign.mZ[n - 2] = r2(llclamp(eased(mDesign.mZ[n - 2], mDesign.mZ[n - 1], len), Z_MIN, Z_MAX));
+    }
 }
 
 void WolfFloaterTunnels::onMouths()
 {
     gSavedSettings.setBOOL("WolfTunnelMouthsAtGround", mMouths->get());
     if (!mEditing) return;
-    applyMouths(!mRouteOpen);
+    applyMouths(true);   // [2026-10-22 easy] the far end is always the last point (there is no Finish step any more)
     designChanged();
 }
 
@@ -1558,7 +1620,8 @@ void WolfFloaterTunnels::onPen(S32 pen)
     if (pen == WolfToolTunnel::PEN_CAVERN && mDesign.mP.size() < 4) { setStatus("Draw the route first: caverns sit on it.", true); return; }
     t->begin(getHandle(), (WolfToolTunnel::EPen)pen);   // (stops any other pen first, which closes the route)
     if (pen == WolfToolTunnel::PEN_ROUTE) mRouteOpen = true;
-    setStatus(getString(pen == WolfToolTunnel::PEN_ROUTE ? "str_draw" : "str_cavern"), false);
+    // [2026-10-22 easy] the hint line at the top says what to click (nextStep); the status line is for what happened
+    setStatus(pen == WolfToolTunnel::PEN_CAVERN ? std::string("Click on the tunnel's route to put a cavern there. Esc stops.") : std::string(), false);
     updateButtons();
 }
 
@@ -1568,24 +1631,39 @@ void WolfFloaterTunnels::penStopped()
     updateButtons();
 }
 
-void WolfFloaterTunnels::addRoutePoint(F32 x, F32 y, F32 z)
+void WolfFloaterTunnels::addRoutePoint(F32 x, F32 y, F32 z, bool on_plane)
 {
     if (!mEditing) return;
     const size_t n = mDesign.mP.size() / 2;
-    if (n > 0 && sqrtf(powf(x - mDesign.mP[2 * n - 2], 2.f) + powf(y - mDesign.mP[2 * n - 1], 2.f)) < SEG_MIN_M) return;   // a double-click's second press
+    const F32 len = n > 0 ? sqrtf(powf(x - mDesign.mP[2 * n - 2], 2.f) + powf(y - mDesign.mP[2 * n - 1], 2.f)) : 0.f;
+    if (n > 0 && len < SEG_MIN_M) return;   // a double-click's second press
+    // [2026-10-22 easy] designProblem refuses a first piece shorter than the tunnel is wide (wolftunnel.rs validate_design):
+    // say so at the click, where it can be put right, instead of greying Build later.
+    if (n == 1 && len < mDesign.mW)
+    {
+        setStatus(llformat("Click a little further from point 1: the first piece must be at least %.1f m long (the tunnel is %.1f m wide). It is %.1f m.",
+                           mDesign.mW, mDesign.mW, len), true);
+        return;
+    }
     if (mDesign.mZ.size() != n) mDesign.mZ.resize(n, z);
-    // Drawing on from a finished route: its far mouth becomes a point inside, at the depth.
+    const F32 new_z = r2(llclamp(z, Z_MIN, Z_MAX));
+    // The far mouth so far becomes a point inside: down to the depth, gently from the point before it and up to the new point.
     LLViewerRegion* rgn = gAgent.getRegion();
     if (mEndIsMouth && n >= 2 && rgn)
     {
         const F32 g = rgn->getLand().resolveHeightRegion(mDesign.mP[2 * n - 2], mDesign.mP[2 * n - 1]);
-        mDesign.mZ[n - 1] = r2(llclamp(g - llclamp((F32)mDepth->getValueF32(), 0.f, 300.f), Z_MIN, Z_MAX));
+        const F32 back = sqrtf(powf(mDesign.mP[2 * n - 2] - mDesign.mP[2 * n - 4], 2.f) + powf(mDesign.mP[2 * n - 1] - mDesign.mP[2 * n - 3], 2.f));
+        F32 zi = eased(g - llclamp((F32)mDepth->getValueF32(), 0.f, 300.f), mDesign.mZ[n - 2], back);
+        zi = eased(zi, new_z, len);
+        mDesign.mZ[n - 1] = r2(llclamp(zi, Z_MIN, Z_MAX));
     }
-    mEndIsMouth = false;
+    // The new point is the far mouth when the mouths are on the ground (not a click on the drawing plane underground).
+    mEndIsMouth = n >= 1 && mMouths->get() && !on_plane;
     mDesign.mP.push_back(r2(x));
     mDesign.mP.push_back(r2(y));
-    mDesign.mZ.push_back(r2(llclamp(z, Z_MIN, Z_MAX)));
+    mDesign.mZ.push_back(new_z);
     mPicked = (S32)n;   // the new point is the picked one (its depth shows in the Point row)
+    setStatus(std::string(), false);
     designChanged();
 }
 
@@ -1593,13 +1671,10 @@ void WolfFloaterTunnels::finishRoute()
 {
     if (WolfToolTunnel::instanceExists() && WolfToolTunnel::getInstance()->pen() == WolfToolTunnel::PEN_ROUTE) WolfToolTunnel::getInstance()->cancel();
     mRouteOpen = false;
-    if (mDesign.mP.size() < 4) setStatus("A route needs two points at least: click one at each mouth.", true);
-    else
-    {
-        // The far mouth on the ground (the near one was put there when it was clicked), when the mouths are.
-        if (mMouths->get()) applyMouths(true);
-        setStatus("Route finished. Shape it in step 2, then Build.", false);
-    }
+    // [2026-10-22 easy] Nothing to finish any more: the last point already is the far mouth (addRoutePoint). This only puts the
+    // pen away (Enter, a double-click, or the Draw button again).
+    if (mDesign.mP.size() < 4) setStatus("A tunnel needs two points at least: click where it starts and where it ends.", true);
+    else setStatus("Pen put away. Press Build tunnel, or Draw / move points to change the route.", false);
     designChanged();
 }
 
@@ -1610,7 +1685,7 @@ void WolfFloaterTunnels::undoPoint()
     mDesign.mZ.resize(mDesign.mP.size() / 2);
     mEndIsMouth = false;
     // A finished route keeps a far mouth: the point now last goes on the ground when the mouths are.
-    if (!mRouteOpen && mMouths->get() && mDesign.mP.size() >= 4) applyMouths(true);
+    if (mMouths->get() && mDesign.mP.size() >= 4) applyMouths(true);   // [2026-10-22 easy] the far end is always the last point
     if (mPicked >= (S32)(mDesign.mP.size() / 2)) mPicked = -1;
     designChanged();
 }
@@ -1669,7 +1744,13 @@ void WolfFloaterTunnels::designChanged()
         mGradeInfo->setText(fabsf(steep) < 1e-4f ? llformat("%.0f m long, level floor at %.1f m", len, lo)
                             : llformat("%.0f m long, floor %.1f to %.1f m; steepest %.1f%% (1 in %.0f) between points %d and %d", len, lo, hi,
                                        fabsf(steep) * 100.f, 1.f / fabsf(steep), (S32)steep_k + 1, (S32)steep_k + 2));
-        if (mProblem.empty() || mProblem.find("Cavern") == 0 || mProblem.find("first and last") != std::string::npos)
+        // The preview is drawn for any route the shape can be worked out for: every piece 0.5 m or more, the size in range
+        // (the checks before the pieces' lengths in designProblem); a too-short end piece, a steep piece or a cavern is drawn.
+        bool previewable = mDesign.mW >= W_MIN && mDesign.mW <= W_MAX && mDesign.mH >= H_MIN && mDesign.mH <= H_MAX;
+        for (size_t k = 1; k < n && previewable; ++k)
+            if (air.route.mCum[k] - air.route.mCum[k - 1] < SEG_MIN_M) previewable = false;
+        for (F32 v : mDesign.mP) if (v < 0.f || v > rgn->getWidth()) previewable = false;   // (inside the region only)
+        if (previewable)
         {
             // Cross-sections along the route: from the route outwards to where the air ends, the floor and the roof at
             // PREVIEW_ACROSS points across. Source: wolftunnel.rs Air::eval (the same shape the generator builds).
@@ -1785,22 +1866,15 @@ void WolfFloaterTunnels::designChanged()
     {
         mGradeInfo->setText(std::string());
     }
-    std::string w;
-    if (!mProblem.empty() && mEditing) w = mProblem;
-    for (const std::string& s : mPreview.mWarnings) w += (w.empty() ? "" : "\n") + s;
-    if (w.empty() && mEditing && n >= 2) w = "Ready to build. The see-through preview shows the tunnel in the ground.";
-    mWarnings->setText(w);
-    mWarnings->setColor(LLUIColorTable::instance().getColor(!mProblem.empty() || !mPreview.mWarnings.empty() ? "AlertCautionTextColor" : "LabelTextColor"));
-    updateButtons();
+    updateButtons();   // the line under Build tunnel (the blocker or the warnings) and the hint follow
 }
 
 void WolfFloaterTunnels::onBuild()
 {
     if (!mEditing || s_jobBusy) return;
     LLViewerRegion* rgn = gAgent.getRegion();
-    if (!rgn || !mProblem.empty()) { setStatus(mProblem.empty() ? "You are not in a region." : mProblem, true); return; }
-    if (mCapUrl.empty() || mRegionAtFetch != rgn->getRegionID()) { setStatus(getString("str_need_cap"), true); return; }
-    if (!mEdit) { setStatus(getString("str_need_rights"), true); return; }
+    const std::string block = buildBlocker();
+    if (!rgn || !block.empty()) { setStatus("Cannot build yet: " + block, true); return; }
     const std::string uuid = regionUuid();
     if (uuid.empty() || !WolfGrid::isOnWolfTerritoriesConfirmed()) { setStatus("This region's record is not loaded yet - wait a moment and try again.", true); return; }
     if (WolfToolTunnel::instanceExists()) WolfToolTunnel::getInstance()->cancel();
@@ -1863,9 +1937,44 @@ void WolfFloaterTunnels::onGoInsideTunnel()
     setStatus("Going inside \"" + r->mName + "\".", false);
 }
 
+// [2026-10-22 easy] Every condition that greys Build tunnel, in the order the user can do something about it (onBuild checks
+// the same before it starts).
+std::string WolfFloaterTunnels::buildBlocker() const
+{
+    if (!mEditing) return "Press New tunnel first.";
+    if (s_jobBusy) return "A build is running - wait for it to finish.";
+    LLViewerRegion* rgn = gAgent.getRegion();
+    if (!rgn) return "You are not in a region.";
+    if (mBusy && mRegionAtFetch.isNull()) return "Reading this region's tunnels - a moment.";
+    if (mCapUrl.empty() || mRegionAtFetch != rgn->getRegionID()) return getString("str_need_cap");
+    if (!mEdit) return getString("str_need_rights");
+    return mProblem;
+}
+
+std::string WolfFloaterTunnels::nextStep() const
+{
+    if (!mEditing)
+    {
+        if (s_jobBusy) return "Building - see the line below.";
+        const bool here = mRegionAtFetch.notNull() && !mCapUrl.empty();
+        if (mBusy && !here) return "Reading this region's tunnels...";
+        if (!here) return "Tunnels cannot be made on this region - the reason is below.";
+        if (!mEdit) return "You can look at this region's tunnels; only the region owner and estate managers can make them.";
+        return s_records.empty() ? "Press New tunnel, then click on the ground where the tunnel starts."
+                                 : "Press New tunnel to draw one, or pick a tunnel in the list.";
+    }
+    const size_t n = mDesign.mP.size() / 2;
+    const bool pen = WolfToolTunnel::instanceExists() && WolfToolTunnel::getInstance()->pen() == WolfToolTunnel::PEN_ROUTE;
+    if (!pen && n < 2) return "Press Draw / move points, then click on the ground where the tunnel starts.";
+    if (n == 0) return "Click on the ground where the tunnel starts.";
+    if (n == 1) return "Now click where it ends (or where it bends first).";
+    if (pen) return "Click to add more bends, drag a point's box to move it. When it looks right, press Build tunnel.";
+    return "Press Build tunnel. To change the route, press Draw / move points.";
+}
+
 void WolfFloaterTunnels::updateButtons()
 {
-    if (!mNewBtn) return;
+    if (!mNewBtn || !mHint) return;
     const bool here = mRegionAtFetch.notNull() && !mCapUrl.empty();
     const bool can = here && mEdit && !s_jobBusy;
     const WolfTunnels::Record* picked = pickedTunnel();
@@ -1882,13 +1991,38 @@ void WolfFloaterTunnels::updateButtons()
     mPointDepth->setEnabled(picked_pt);
     mPointGroundBtn->setEnabled(picked_pt);
     mPointRemoveBtn->setEnabled(picked_pt);
-    mFinishBtn->setEnabled(ed && mRouteOpen);
     mCavernBtn->setEnabled(ed && mDesign.mP.size() >= 4);
     mUndoCavernBtn->setEnabled(ed && !mDesign.mCaverns.empty());
     mDrawBtn->setToggleState(pen == WolfToolTunnel::PEN_ROUTE);
     mCavernBtn->setToggleState(pen == WolfToolTunnel::PEN_CAVERN);
-    mBuildBtn->setEnabled(ed && can && mProblem.empty());
-    mBuildBtn->setLabel(!mEditId.empty() && findRecord(mEditId) && findRecord(mEditId)->mBuilt.isMap() ? std::string("Build again") : std::string("Build"));
+    // [2026-10-22 easy] Build tunnel is always shown; when it cannot be pressed the line under it says why (buildBlocker), in
+    // the caution colour. When it can, the line gives the preview's warnings (which do not stop a build), or "Ready".
+    const std::string block = buildBlocker();
+    mBuildBtn->setEnabled(mEditing && block.empty());
+    mBuildBtn->setLabel(!mEditId.empty() && findRecord(mEditId) && findRecord(mEditId)->mBuilt.isMap() ? std::string("Build again") : std::string("Build tunnel"));
+    std::string line;
+    bool caution = false;
+    if (mEditing && !block.empty()) { line = "Cannot build yet: " + block; caution = true; }
+    else if (mEditing && !mPreview.mWarnings.empty())
+    {
+        // two at most, so the line never runs out of its box (the red marks in the world show the places)
+        const size_t shown = llmin((size_t)2, mPreview.mWarnings.size());
+        for (size_t i = 0; i < shown; ++i) line += (line.empty() ? "" : "\n") + mPreview.mWarnings[i];
+        if (mPreview.mWarnings.size() > shown) line += llformat(" (and %d more)", (S32)(mPreview.mWarnings.size() - shown));
+        caution = true;
+    }
+    else if (mEditing) line = "Ready: press Build tunnel. The see-through preview shows it in the ground.";
+    if (mWarnings->getText() != line) mWarnings->setText(line);
+    mWarnings->setColor(LLUIColorTable::instance().getColor(caution ? "AlertCautionTextColor" : "LabelTextColor"));
+    const std::string hint = nextStep();
+    if (mHint->getText() != hint) mHint->setText(hint);
+    // the reason Build is grey goes to the log once per change (Paul's 10-22 test left no trace of it)
+    const std::string logged = mEditing ? block : std::string();
+    if (logged != mLoggedBlock)
+    {
+        mLoggedBlock = logged;
+        if (!logged.empty()) LL_INFOS("WolfTunnels") << "Build tunnel not available: " << logged << LL_ENDL;
+    }
 
     // Advanced: the boxes
     const bool canBox = mEdit && !mBusy && mRegionAtFetch.notNull() && !s_jobBusy;
@@ -1953,7 +2087,7 @@ void WolfFloaterTunnels::getCoro(LLHandle<LLFloater> h, std::string url, LLUUID 
     self->mBusy = false;
     if (!status)
     {
-        self->setStatus("The region did not answer (" + status.toString() + "). Press Refresh (under Advanced) to try again.", true);
+        self->setStatus("The region did not answer (" + status.toString() + "). Close this window and open it again to try again.", true);
         self->updateButtons();
         return;
     }
@@ -1998,9 +2132,7 @@ void WolfFloaterTunnels::apply(const LLSD& answer, bool from_post)
     else if (from_post)
         setStatus("Saved to the region. " + std::to_string(s_boxes.size()) + " walkable box(es) here.", false);
     else if (!mEditing && !s_jobBusy)
-        setStatus(mEdit ? (s_records.empty() ? "No tunnels here yet. Press New tunnel and click its route on the ground."
-                                             : "Pick a tunnel to change it, or press New tunnel.")
-                        : getString("str_need_rights"), !mEdit);
+        setStatus(mEdit ? std::string() : getString("str_need_rights"), !mEdit);   // (the hint line says what to do next)
     updateButtons();
 }
 
@@ -2222,7 +2354,7 @@ bool WolfToolTunnel::place(S32 x, S32 y, LLVector3& floor, LLVector3& ground, bo
     if (!surface(x, y, p)) return false;
     on_plane = false;
     ground = p;
-    floor.set(p.mV[VX], p.mV[VY], f->newPointFloor(p.mV[VZ]));
+    floor.set(p.mV[VX], p.mV[VY], f->newPointFloor(p.mV[VX], p.mV[VY], p.mV[VZ]));
     return true;
 }
 
@@ -2326,7 +2458,7 @@ bool WolfToolTunnel::handleMouseDown(S32 x, S32 y, MASK mask)
         f->setStatus(cameraUnderground() ? "Point at the drawing plane (the grid) inside this region." : "Click on this region's ground.", true);
         return true;
     }
-    if (mPen == PEN_ROUTE) f->addRoutePoint(floor.mV[VX], floor.mV[VY], floor.mV[VZ]);
+    if (mPen == PEN_ROUTE) f->addRoutePoint(floor.mV[VX], floor.mV[VY], floor.mV[VZ], on_plane);
     else if (mPen == PEN_CAVERN) f->addCavernAt(floor.mV[VX], floor.mV[VY]);
     return true;
 }
@@ -2378,7 +2510,7 @@ bool WolfToolTunnel::handleDoubleClick(S32 x, S32 y, MASK mask)
         // The double-click's point (dropped when it is the point the first click just added), then the route is finished.
         LLVector3 floor, ground;
         bool on_plane = false;
-        if (pickHandle(x, y) < 0 && place(x, y, floor, ground, on_plane)) f->addRoutePoint(floor.mV[VX], floor.mV[VY], floor.mV[VZ]);
+        if (pickHandle(x, y) < 0 && place(x, y, floor, ground, on_plane)) f->addRoutePoint(floor.mV[VX], floor.mV[VY], floor.mV[VZ], on_plane);
         f->finishRoute();
     }
     return true;
@@ -2698,8 +2830,11 @@ void WolfToolTunnel::draw()
         if (mActive && mPen == PEN_ROUTE && mHaveCursor && mDrag == DRAG_NONE && mHover < 0 && f->routeOpen())
         {
             LLCoordGL sp;
+            // [2026-10-22 easy] with the mouths on the ground a new point is the far end (the one before it goes down)
+            const bool mouth = !mOnPlane && n > 0 && fabsf(land.resolveHeightRegion(mGhost.mV[VX], mGhost.mV[VY]) - mGhost.mV[VZ]) < 0.05f;
             if (cam->projectPosAgentToScreen(rgn->getPosAgentFromRegion(mGhost), sp, false))
-                font->renderUTF8(std::string("new point: ") + depthText(land.resolveHeightRegion(mGhost.mV[VX], mGhost.mV[VY]), mGhost.mV[VZ]),
+                font->renderUTF8(mouth ? std::string("new end (a mouth, on the ground)")
+                                       : std::string("new point: ") + depthText(land.resolveHeightRegion(mGhost.mV[VX], mGhost.mV[VY]), mGhost.mV[VZ]),
                                  0, (F32)sp.mX + 12.f, (F32)sp.mY + 6.f, LLColor4(1.f, 1.f, 0.4f, 1.f), LLFontGL::LEFT, LLFontGL::BOTTOM,
                                  LLFontGL::NORMAL, LLFontGL::DROP_SHADOW);
         }
@@ -2713,9 +2848,13 @@ void WolfToolTunnel::draw()
     else if (mHover >= 0) lines.push_back(mHover % 2 ? "Drag up or down: raise or lower this point." : "Drag: move this point sideways (it keeps its height).");
     else
     {
-        lines.push_back(mOnPlane && mHaveCursor ? "You are under the ground: click on the grid to put a point there, at the grid's depth."
-                                                : "Click the ground: the point goes in at the depth below.");
-        lines.push_back("Drag a white box to move a point, a yellow box to raise or lower it. Double-click / Enter finishes; Backspace undoes; Delete removes the picked point; Esc stops.");
+        // [2026-10-22 easy] what to click next, then the keys (no Finish step: Enter / double-click only put the pen away)
+        const size_t n = f ? f->design().mP.size() / 2 : 0;   // (f: the window editing a tunnel, above)
+        lines.push_back(mOnPlane && mHaveCursor ? std::string("You are under the ground: click on the grid to put a point there, at the grid's depth.")
+                        : n == 0 ? std::string("Click on the ground where the tunnel starts.")
+                        : n == 1 ? std::string("Click where the tunnel ends (or where it bends first).")
+                                 : std::string("Click to add a bend or a new end. Then press Build tunnel in the Tunnels window."));
+        lines.push_back("Drag a white box to move a point, a yellow box to raise or lower it. Backspace: undo. Enter or Esc: put the pen away.");
     }
     const F32 cx = (F32)gViewerWindow->getWorldViewWidthScaled() * 0.5f;
     F32 ty = (F32)gViewerWindow->getWorldViewHeightScaled() - 60.f;

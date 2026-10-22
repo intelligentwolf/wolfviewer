@@ -25,6 +25,7 @@
  */
 
 #include "llvoiceclient.h"
+#include "wolfvoicediag.h"     // <WolfViewer 2026-10-22/> voice debug mode
 #include "llvoicevivox.h"
 #include "llvoicewebrtc.h"
 #include "llviewernetwork.h"
@@ -840,6 +841,7 @@ void LLVoiceClient::setUserPTTState(bool ptt)
     {
         LLUIUsage::instance().logCommand("Agent.EnableMicrophone");
     }
+    WolfVoiceDiag::note(std::string("mic ") + (ptt ? "on" : "off") + (ptt == mUserPTTState ? " (unchanged)" : ""));  // <WolfViewer 2026-10-22/>
     mUserPTTState = ptt;
     updateMicMuteLogic();
     mMicroChangedSignal();

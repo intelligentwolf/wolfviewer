@@ -940,6 +940,7 @@ set(viewer_SOURCE_FILES
     wolffloaterimportworlds.cpp # [IMPORT WORLDS 2026-10-18] Build > Import worlds...
     llfloaterwolfavatars.cpp # [WOLFAVATARS 2026-10-20] Wolf World > WolfAvatars...
     wolffloaterchat.cpp      # [WOLF CHAT 2026-10-20] Wolf World > Wolf Chat: group text + voice channels
+    wolfvoicediag.cpp        # [2026-10-22] voice debug mode (Wolf Chat room reports)
     wolfimportflow.cpp # [IMPORT WORLDS 2026-10-18] the import flow shared with the Adventure Studio
     wolffloaterenvironment.cpp
     wolfenvironmentstate.cpp
@@ -1906,6 +1907,7 @@ set(viewer_HEADER_FILES
     wolffloaterimportworlds.h
     llfloaterwolfavatars.h
     wolffloaterchat.h        # [WOLF CHAT 2026-10-20]
+    wolfvoicediag.h          # [2026-10-22]
     wolfimportflow.h
     wolffloaterenvironment.h
     wolfenvironmentstate.h

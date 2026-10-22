@@ -80,15 +80,27 @@ namespace WolfChat
     /** Asks the region for this room's credential and joins it; `done` says how it went. */
     void joinRoom(const LLUUID& group, const LLUUID& channel, const std::string& name,
                   std::function<void(bool ok, const std::string& error)> done);
-    void leaveRoom();
+    /** [2026-10-22] The same, with the mic as given (a rejoin keeps the resident's last choice; a join turns it on). */
+    void joinRoomKeepingMic(const LLUUID& group, const LLUUID& channel, const std::string& name, bool mic,
+                            std::function<void(bool ok, const std::string& error)> done);
+    /** Leaves the room. `by_resident`: the resident pressed Leave (a debug-mode summary goes); false for our own leaves. */
+    void leaveRoom(bool by_resident = true);
+    /** [2026-10-22] The self-check gave up on the room: the bar offers Reconnect (reconnectRoom). */
+    bool roomGaveUp();
+    void reconnectRoom();
+    /** [2026-10-22] Voice debug mode (wolfvoicediag.h): ask the service whether it is on; switch it for yourself; send a
+     *  room report while it is on (nothing is sent while it is off). */
+    void refreshVoiceDebug();
+    void setVoiceDebug(bool on, std::function<void(bool ok, const std::string& error)> done);
+    void sendVoiceReport(const std::string& kind);
+    /** The microphone (input) or speakers (output) in use, by name. */
+    std::string voiceDeviceName(bool input);
     /** [2026-10-21] In the room AND the voice connection is up (the channel's STATE_CONNECTED). */
     bool roomConnected();
     /** [2026-10-21] Why you are not (or no longer) connected, for the window; empty when all is well. */
     std::string roomNote();
     bool micOn();
     void setMic(bool on);
-    /** [2026-10-22] The room just joined turns the mic on when its call comes up (WolfChatVoiceChannel::handleStatusChange). */
-    void micOnWhenJoined();
     bool deafened();
     void setDeafened(bool deaf);
 
@@ -134,12 +146,14 @@ public:
     WolfChatVoiceChannel(const LLUUID& channel, const LLUUID& group, const std::string& name);
     void requestChannelInfo() override;
     void handleStatusChange(EStatusType status) override;
-    /** [2026-10-22] The next time the call comes up, the mic goes on (you joined the room to talk). */
-    void micOnWhenJoined() { mMicOnJoin = true; }
+    void handleError(EStatusType status) override;
+    void activate() override;
+    /** [2026-10-22] The mic when the call next comes up (on for a join, the resident's last choice for a rejoin). */
+    void setMicAtJoin(bool on) { mMicAtJoin = on ? 1 : 0; }
 
 private:
     LLUUID mGroup;
-    bool mMicOnJoin = false;
+    S32 mMicAtJoin = -1;    // -1: keep the mic as it is
 };
 
 /** The left column: group channels, voice rooms with the people in them. Drawn by this control. */
@@ -638,6 +652,7 @@ private:
     LLButton* mDeafenBtn = nullptr;
     LLButton* mLeaveBtn = nullptr;
     LLButton* mInviteBtn = nullptr;
+    LLCheckBoxCtrl* mVoiceDebug = nullptr;     // [2026-10-22] voice debug mode
     LLButton* mOlderBtn = nullptr;
     LLButton* mBackBtn = nullptr;
     LLButton* mRenameBtn = nullptr;

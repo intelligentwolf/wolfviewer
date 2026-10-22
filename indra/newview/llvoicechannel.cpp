@@ -36,6 +36,7 @@
 #include "llviewercontrol.h"
 #include "llviewerregion.h"
 #include "llvoicechannel.h"
+#include "wolfvoicediag.h"     // <WolfViewer 2026-10-22/> voice debug mode
 #include "llcorehttputil.h"
 
 LLVoiceChannel::voice_channel_map_t LLVoiceChannel::sVoiceChannelMap;
@@ -202,6 +203,7 @@ bool LLVoiceChannel::callStarted() const
 
 void LLVoiceChannel::deactivate()
 {
+    WolfVoiceDiag::note("channel deactivate '" + mSessionName + "' state " + std::to_string((int)mState));  // <WolfViewer 2026-10-22/>
     if (mState >= STATE_RINGING)
     {
         // ignore session leave event
@@ -237,6 +239,7 @@ void LLVoiceChannel::activate()
     {
         return;
     }
+    WolfVoiceDiag::note("channel activate '" + mSessionName + "' state " + std::to_string((int)mState));  // <WolfViewer 2026-10-22/>
 
     // deactivate old channel and mark ourselves as the active one
     if (sCurrentVoiceChannel != this)
@@ -355,6 +358,7 @@ void LLVoiceChannel::suspend()
 {
     if (!sSuspended)
     {
+        WolfVoiceDiag::note("voice suspended (voice device settings open)");  // <WolfViewer 2026-10-22/>
         sSuspendedVoiceChannel = sCurrentVoiceChannel;
         sSuspended = true;
 
@@ -367,6 +371,7 @@ void LLVoiceChannel::resume()
 {
     if (sSuspended)
     {
+        WolfVoiceDiag::note("voice resumed (voice device settings closed)");  // <WolfViewer 2026-10-22/>
         sSuspended = false; // needs to be before activate() so that observers will be able to read state
         if (LLVoiceClient::getInstance()->voiceEnabled())
         {

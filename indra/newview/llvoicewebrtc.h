@@ -316,6 +316,7 @@ public:
         void wolfDetachConnection(const connectionPtr_t& connection);
         connectionPtr_t wolfMovableConnection(const LLUUID& agent_region);
         bool wolfOwnsConnection(const connectionPtr_t& connection);
+        bool wolfAnyConnectionUp();     // [2026-10-22] a connection in VOICE_STATE_SESSION_UP (join sent)
         // </WolfViewer>
 
         virtual bool isSpatial() = 0;
@@ -511,6 +512,10 @@ private:
     bool wolfMoveAllowed() const;
     // Estate (neighbour) path: a teleport moves the primary connection instead of rebuilding it.
     bool wolfStartEstateMove(const connectionPtr_t& connection, const LLUUID& region_id);
+    // [2026-10-22] Wolf Chat's self-check: the current session is this channel and a connection of it has sent its
+    // join (VOICE_STATE_SESSION_UP) - more than the channel's STATE_CONNECTED, which STATUS_JOINED sets from
+    // OnConnectionEstablished before the data channel opens and the join goes.
+    bool wolfChannelUp(const std::string& channel_uri);
   private:
     // </WolfViewer>
 
@@ -712,6 +717,7 @@ class LLVoiceWebRTCConnection :
         if (new_voice_connection_state & VOICE_STATE_SESSION_STOPPING)
         {
             // the new state is shutdown or restart.
+            wolfNoteState(new_voice_connection_state);  // <WolfViewer 2026-10-22/> voice debug mode
             mVoiceConnectionState = new_voice_connection_state;
             return;
         }
@@ -722,8 +728,12 @@ class LLVoiceWebRTCConnection :
             return;
         }
 
+        wolfNoteState(new_voice_connection_state);  // <WolfViewer 2026-10-22/> voice debug mode
         mVoiceConnectionState = new_voice_connection_state;
     }
+    // <WolfViewer 2026-10-22> voice debug mode (wolfvoicediag.h): a room connection's state changes.
+    void wolfNoteState(EVoiceConnectionState new_state);
+    // </WolfViewer>
     EVoiceConnectionState getVoiceConnectionState()
     {
         return mVoiceConnectionState;

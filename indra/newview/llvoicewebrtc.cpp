@@ -25,6 +25,7 @@
  */
 #include <algorithm>
 #include "llvoicewebrtc.h"
+#include "wolfvoicediag.h"     // <WolfViewer 2026-10-22/> voice debug mode
 #include "wolfgrid.h"   // [WOLF GRID GATE 2026-10-09/] wolf_move on Wolf Territories only
 
 #include "llsdutil.h"
@@ -1057,6 +1058,7 @@ void LLWebRTCVoiceClient::OnConnectionEstablished(const std::string &channelID, 
 {
     LL_PROFILE_ZONE_SCOPED_CATEGORY_VOICE;
 
+    WolfVoiceDiag::note("connection established " + channelID);  // <WolfViewer 2026-10-22/>
     if (gAgent.getRegion()->getRegionID() == regionID)
     {
         if (mNextSession && mNextSession->mChannelID == channelID)
@@ -1123,6 +1125,7 @@ void LLWebRTCVoiceClient::OnConnectionFailure(const std::string                 
                                               LLVoiceClientStatusObserver::EStatusType status_type)
 {
     LL_DEBUGS("Voice") << "A connection failed.  channel:" << channelID << LL_ENDL;
+    WolfVoiceDiag::note("connection failed " + channelID + ": " + LLVoiceClientStatusObserver::status2string(status_type));  // <WolfViewer 2026-10-22/>
     if (gAgent.getRegion()->getRegionID() == regionID)
     {
         if (mNextSession && mNextSession->mChannelID == channelID)
@@ -2525,6 +2528,21 @@ void LLWebRTCVoiceClient::sessionState::wolfDetachConnection(const connectionPtr
 bool LLWebRTCVoiceClient::sessionState::wolfOwnsConnection(const connectionPtr_t& connection)
 {
     return std::find(mWebRTCConnections.begin(), mWebRTCConnections.end(), connection) != mWebRTCConnections.end();
+}
+
+// [2026-10-22]
+bool LLWebRTCVoiceClient::sessionState::wolfAnyConnectionUp()
+{
+    for (const connectionPtr_t& c : mWebRTCConnections)
+    {
+        if (c && c->wolfIsUp()) return true;
+    }
+    return false;
+}
+
+bool LLWebRTCVoiceClient::wolfChannelUp(const std::string& channel_uri)
+{
+    return mSession && !mSession->mShuttingDown && mSession->mChannelID == channel_uri && mSession->wolfAnyConnectionUp();
 }
 
 // The connection a channel change would otherwise rebuild: this session's joined connection to
@@ -3939,6 +3957,7 @@ void LLVoiceWebRTCConnection::OnDataChannelReady(llwebrtc::LLWebRTCDataInterface
             {
                 connection->mWebRTCDataInterface = data_interface;
                 connection->mWebRTCDataInterface->setDataObserver(connection.get());
+                if (!connection->isSpatial()) WolfVoiceDiag::note("room data channel ready");  // <WolfViewer 2026-10-22/>
             }
         });
 }
@@ -3966,7 +3985,36 @@ void LLVoiceWebRTCConnection::sendJoin()
     root["j"]             = join_obj;
     std::string json_data = boost::json::serialize(root);
     mWebRTCDataInterface->sendData(json_data, false);
+    if (!isSpatial()) WolfVoiceDiag::note("room join sent " + mChannelID);  // <WolfViewer 2026-10-22/>
 }
+
+// <WolfViewer 2026-10-22> voice debug mode: a room (non-spatial) connection's state changes. Spatial connections
+// change state far more often (neighbours, crossings) and are not what the reports are about.
+void LLVoiceWebRTCConnection::wolfNoteState(EVoiceConnectionState new_state)
+{
+    if (!WolfVoiceDiag::enabled() || isSpatial() || new_state == mVoiceConnectionState) return;
+    const char* name = "?";
+    switch (new_state)
+    {
+    case VOICE_STATE_ERROR: name = "ERROR"; break;
+    case VOICE_STATE_START_SESSION: name = "START_SESSION"; break;
+    case VOICE_STATE_WAIT_FOR_SESSION_START: name = "WAIT_FOR_SESSION_START"; break;
+    case VOICE_STATE_REQUEST_CONNECTION: name = "REQUEST_CONNECTION"; break;
+    case VOICE_STATE_CONNECTION_WAIT: name = "CONNECTION_WAIT"; break;
+    case VOICE_STATE_SESSION_ESTABLISHED: name = "SESSION_ESTABLISHED"; break;
+    case VOICE_STATE_WAIT_FOR_DATA_CHANNEL: name = "WAIT_FOR_DATA_CHANNEL"; break;
+    case VOICE_STATE_SESSION_UP: name = "SESSION_UP"; break;
+    case VOICE_STATE_SESSION_RETRY: name = "SESSION_RETRY"; break;
+    case VOICE_STATE_DISCONNECT: name = "DISCONNECT"; break;
+    case VOICE_STATE_WAIT_FOR_EXIT: name = "WAIT_FOR_EXIT"; break;
+    case VOICE_STATE_SESSION_EXIT: name = "SESSION_EXIT"; break;
+    case VOICE_STATE_WAIT_FOR_CLOSE: name = "WAIT_FOR_CLOSE"; break;
+    case VOICE_STATE_CLOSED: name = "CLOSED"; break;
+    default: break;
+    }
+    WolfVoiceDiag::note(std::string("room connection ") + name + (mShutDown ? " (shutting down)" : ""));
+}
+// </WolfViewer>
 
 /////////////////////////////
 // WebRTC Spatial Connection

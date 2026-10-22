@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <ctime>
+#include <deque>
 
 #include <boost/json.hpp>
 
@@ -46,6 +47,7 @@
 #include "lllineeditor.h"
 #include "lllocalcliprect.h"
 #include "llnotificationsutil.h"
+#include "lloutputmonitorctrl.h"  // [2026-10-22] your mic level in the voice bar
 #include "llrender.h"
 #include "llrender2dutils.h"
 #include "llscrolllistctrl.h"
@@ -65,6 +67,11 @@
 #include "llviewermenu.h"
 #include "llviewertexture.h"
 #include "llvoiceclient.h"
+#include "llvoicewebrtc.h"   // [2026-10-22] wolfChannelUp (the room self-check)
+#include "llversioninfo.h"  // [2026-10-22] voice debug reports
+#include "llsys.h"          // [2026-10-22] LLOSInfo for voice debug reports
+#include "llviewerparcelmgr.h"
+#include "wolfvoicediag.h"   // [2026-10-22] voice debug mode
 #include "llweb.h"
 #include "llwindow.h"
 #include "wolfgrid.h"
@@ -170,13 +177,6 @@ namespace
         return buf;
     }
 
-    std::string myName()
-    {
-        LLAvatarName av;
-        if (LLAvatarNameCache::get(gAgentID, &av)) return av.getCompleteName();
-        return std::string();
-    }
-
     // ---- the voice room ------------------------------------------------------------------------------------------
     WolfChatVoiceChannel* sRoom = nullptr;      // the room joined last
     // [review] Every room object ever made this session, by channel - never deleted: FSFloaterVoiceControls and
@@ -194,72 +194,120 @@ namespace
     // [2026-10-21] Paul: "it thought i was in the room but when i did my settings it disconnected me". The room follows
     // the REAL voice state: the channel's own state (llvoicechannel.h:40-49 EState; STATE_CONNECTED is set when the voice
     // client reports STATUS_JOINED, llvoicechannel.cpp:174-178) and whether it is still the current channel
-    // (llvoicechannel.h:100 getCurrentVoiceChannel). Opening voice device settings suspends the call
-    // (llpanelvoicedevicesettings.cpp:342 LLVoiceChannel::suspend) and closing them resumes it, which - stock Firestorm -
-    // re-activates the same group channel (llvoicechannel.cpp:366-395 resume: STATE_READY then activate) and so starts a
-    // fresh ad-hoc connection (llvoicechannel.cpp:457 setNonSpatialChannel -> llvoicewebrtc.cpp:1852-1862
-    // startAdHocSession, which leaves the current session first). Paul's log 10-21 06:17:40: that reconnection never
-    // came back. So: while you want to be in a room, a room that is not connected within ROOM_CONNECT_WAIT seconds
-    // (not counting a suspension) is joined again once with fresh credentials; if that fails too, it is left and the
-    // window says so. A call that takes over (another channel becomes current) leaves the room.
+    // (llvoicechannel.h:100 getCurrentVoiceChannel).
+    // [2026-10-22] The self-check. A room is UP when its channel is STATE_CONNECTED AND the voice client's current session
+    // is this room with a connection that has sent its join (LLWebRTCVoiceClient::wolfChannelUp, VOICE_STATE_SESSION_UP):
+    // STATUS_JOINED comes from OnConnectionEstablished, before the data channel opens, so CONNECTED alone let a room
+    // whose join never went (wolfvoice journal 10-22 04:13:00, Jimmy) look joined. A room not up for ROOM_UP_WAIT seconds
+    // (not counting a voice-settings suspension) is joined again with fresh credentials, up to ROOM_AUTO_RETRIES times
+    // in a row; then it is left and the bar offers Reconnect. A rejoin or Reconnect keeps the mic as the resident last
+    // had it in the room (Paul 10-22: only the resident turns the mic off).
     const F32 ROOM_WATCH_PERIOD = 2.f;
-    const F64 ROOM_CONNECT_WAIT = 20.0;
+    const F64 ROOM_UP_WAIT = 15.0;
+    const S32 ROOM_AUTO_RETRIES = 3;
+    const F64 ROOM_DROP_WINDOW = 300.0;     // more than ROOM_DROP_REPORT drops in this long sends a debug report
+    const size_t ROOM_DROP_REPORT = 2;
     bool sWantRoom = false;                 // you joined a room and have not left it
-    bool sRejoinTried = false;              // the one automatic rejoin for this drop
+    S32 sRetries = 0;                       // automatic rejoins since the room was last up
     bool sRejoining = false;
-    F64 sNotConnectedSince = 0.0;
+    bool sWasUp = false;
+    bool sGaveUp = false;                   // the automatic rejoins ran out: the bar offers Reconnect
+    bool sMicChoice = true;                 // the mic as the resident last had it while the room was up
+    F64 sNotUpSince = 0.0;
+    F64 sJoinedAt = 0.0;                    // when the current join was asked for (for the debug report)
+    std::deque<F64> sDrops;                 // when the room went down after being up
+    std::string sRoomUri;                   // the room's channel_uri (its credentials) - what the voice client calls it
     std::string sRoomNote;                  // what the window says about the room when it is not connected
+
+    bool roomUp()
+    {
+        return sRoom && LLVoiceChannel::getCurrentVoiceChannel() == sRoom
+            && sRoom->getState() == LLVoiceChannel::STATE_CONNECTED
+            && LLWebRTCVoiceClient::getInstance()->wolfChannelUp(sRoomUri);
+    }
+
+    void rejoinRoom(bool automatic)
+    {
+        const LLUUID group = sRoomGroup, channel = sRoomChannel;
+        const std::string name = sRoomName;
+        sRejoining = true;
+        sGaveUp = false;
+        sRoomNote = "Can't reach voice - trying again...";
+        WolfVoiceDiag::note(std::string(automatic ? "self-check: rejoining " : "Reconnect pressed: rejoining ") + name);
+        WolfChat::joinRoomKeepingMic(group, channel, name, sMicChoice, [name](bool ok, const std::string& error)
+        {
+            sRejoining = false;
+            if (!ok)
+            {
+                WolfVoiceDiag::note("rejoin refused: " + error);
+                sWantRoom = false;
+                sGaveUp = true;
+                sRoomNote = "Can't reach voice: " + error + " Press Reconnect to try again.";
+                WolfChat::sendVoiceReport("rejoin_refused");
+            }
+        });
+    }
 
     void roomWatch()
     {
         if (!sRoom || !sWantRoom || sRejoining) return;
         if (LLVoiceChannel::isSuspended())  // llvoicechannel.h:106 - settings open: wait, do not count
         {
-            sNotConnectedSince = 0.0;
+            sNotUpSince = 0.0;
             return;
         }
         if (LLVoiceChannel::getCurrentVoiceChannel() != sRoom)
         {
             sWantRoom = false;
-            sRoomNote = "You left " + sRoomName + ": another voice call or channel took over.";
+            sWasUp = false;
+            sRoomNote = "You left " + sRoomName + ": another voice call took over.";
+            WolfVoiceDiag::note("room no longer the current channel: " + sRoomName);
+            WolfChat::sendVoiceReport("taken_over");
             return;                          // the heartbeat tells the service (inRoom() is false now)
         }
-        if (sRoom->getState() == LLVoiceChannel::STATE_CONNECTED)
+        const F64 now = LLFrameTimer::getElapsedSeconds();
+        if (roomUp())
         {
-            sNotConnectedSince = 0.0;
-            sRejoinTried = false;
+            if (!sWasUp)
+            {
+                sWasUp = true;
+                WolfVoiceDiag::note(llformat("room up after %.1f s", now - sJoinedAt));
+                WolfChat::sendVoiceReport(sRetries == 0 ? "joined" : "rejoined");
+            }
+            sMicChoice = WolfChat::micOn();
+            sNotUpSince = 0.0;
+            sRetries = 0;
             sRoomNote.clear();
             return;
         }
-        const F64 now = LLFrameTimer::getElapsedSeconds();
-        if (sNotConnectedSince <= 0.0)
+        if (sWasUp)
         {
-            sNotConnectedSince = now;
+            sWasUp = false;
+            sDrops.push_back(now);
+            while (!sDrops.empty() && now - sDrops.front() > ROOM_DROP_WINDOW) sDrops.pop_front();
+            WolfVoiceDiag::note("room went down");
+            if (sDrops.size() > ROOM_DROP_REPORT) WolfChat::sendVoiceReport("drops");
+        }
+        if (sNotUpSince <= 0.0)
+        {
+            sNotUpSince = now;
             return;
         }
-        if (now - sNotConnectedSince < ROOM_CONNECT_WAIT) return;
-        sNotConnectedSince = 0.0;
-        const LLUUID group = sRoomGroup, channel = sRoomChannel;
-        const std::string name = sRoomName;
-        if (sRejoinTried)
+        if (now - sNotUpSince < ROOM_UP_WAIT) return;
+        sNotUpSince = 0.0;
+        if (sRetries >= ROOM_AUTO_RETRIES)
         {
-            WolfChat::leaveRoom();
-            sRoomNote = "Voice dropped - click " + name + " to rejoin.";
+            WolfVoiceDiag::note("self-check: giving up after automatic rejoins");
+            WolfChat::sendVoiceReport("gave_up");
+            WolfChat::leaveRoom(false);
+            sGaveUp = true;
+            sRoomNote = "Can't reach voice. Press Reconnect to try again.";
             return;
         }
-        sRejoinTried = true;
-        sRejoining = true;
-        sRoomNote = "Voice dropped - rejoining " + name + "...";
-        LL_INFOS("WolfChat") << "Voice room " << name << " not connected for " << ROOM_CONNECT_WAIT << " s - rejoining once" << LL_ENDL;
-        WolfChat::joinRoom(group, channel, name, [name](bool ok, const std::string& error)
-        {
-            sRejoining = false;
-            if (!ok)
-            {
-                sWantRoom = false;
-                sRoomNote = "Voice dropped - click " + name + " to rejoin. (" + error + ")";
-            }
-        });
+        ++sRetries;
+        LL_INFOS("WolfChat") << "Voice room " << sRoomName << " not up for " << ROOM_UP_WAIT << " s - rejoining (" << sRetries
+                             << "/" << ROOM_AUTO_RETRIES << ")" << LL_ENDL;
+        rejoinRoom(true);
     }
 
     class WolfChatHeartbeat : public LLEventTimer
@@ -602,6 +650,13 @@ std::string WolfChat::roomName() { return inRoom() ? sRoomName : std::string(); 
 void WolfChat::joinRoom(const LLUUID& group, const LLUUID& channel, const std::string& name,
                         std::function<void(bool ok, const std::string& error)> done)
 {
+    // [2026-10-22] Paul: joining a voice room means you came to talk - the mic goes on.
+    joinRoomKeepingMic(group, channel, name, true, done);
+}
+
+void WolfChat::joinRoomKeepingMic(const LLUUID& group, const LLUUID& channel, const std::string& name, bool mic,
+                                  std::function<void(bool ok, const std::string& error)> done)
+{
     if (!WolfGrid::isOnWolfTerritoriesConfirmed())
     {
         done(false, "Voice rooms work on Wolf Territories only (or you are moving between regions - try again in a moment).");
@@ -612,35 +667,49 @@ void WolfChat::joinRoom(const LLUUID& group, const LLUUID& channel, const std::s
         done(false, "Voice is turned off in your preferences (Sound & Media > Voice). Turn it on to join a room.");
         return;
     }
-    requestRoomCredentials(group, channel, [group, channel, name, done](bool ok, const LLSD& creds, const std::string& error)
+    refreshVoiceDebug();
+    WolfVoiceDiag::note("joining room " + name + (mic ? " (mic on)" : " (mic off)"));
+    requestRoomCredentials(group, channel, [group, channel, name, mic, done](bool ok, const LLSD& creds, const std::string& error)
     {
         if (!ok)
         {
+            WolfVoiceDiag::note("room credentials refused: " + error);
             done(false, error);
             return;
         }
-        leaveRoom();
+        const bool gave_up = sGaveUp;
+        leaveRoom(false);
+        sGaveUp = gave_up;
         WolfChatVoiceChannel*& room = sRooms[channel];
         if (!room) room = new WolfChatVoiceChannel(channel, group, name);
         sRoom = room;
         sRoomGroup = group;
         sRoomChannel = channel;
         sRoomName = name;
+        sRoomUri = creds["channel_uri"].asString();
         // Fresh credentials: back to NO_CHANNEL_INFO (resetChannelInfo), then setChannelInfo (-> READY,
         // llvoicechannel.cpp LLVoiceChannelGroup::setChannelInfo), so activate() starts the call at once instead of
         // asking again (LLVoiceChannel::activate).
         sRoom->resetChannelInfo();
         sRoom->setChannelInfo(creds);
+        // [2026-10-22] The mic: leaveRoom's deactivate may have switched it off (AutoDisengageMic,
+        // llvoicechannel.cpp:216-222), and the call coming up switches it off again (WolfChatVoiceChannel::handleStatusChange).
+        sRoom->setMicAtJoin(mic);
+        sMicChoice = mic;
+        if (LLVoiceClient::getInstance()->getUserPTTState() != mic) LLVoiceClient::getInstance()->setUserPTTState(mic);
         sRoom->activate();
         if (!sHeartbeat) sHeartbeat = new WolfChatHeartbeat();
         LLSD b;
         b["channel"] = channel;
-        b["muted"] = micOn() ? 0 : 1;
+        b["muted"] = mic ? 0 : 1;
         b["deafened"] = deafened() ? 1 : 0;
         api("voice_here", b, nullptr);
         sRoomTold = true;
         sWantRoom = true;               // [2026-10-21] watched from now on (roomWatch)
-        sNotConnectedSince = 0.0;
+        sWasUp = false;
+        sNotUpSince = 0.0;
+        sJoinedAt = LLFrameTimer::getElapsedSeconds();
+        sGaveUp = false;
         sRoomNote.clear();
         done(true, std::string());
     });
@@ -648,7 +717,7 @@ void WolfChat::joinRoom(const LLUUID& group, const LLUUID& channel, const std::s
 
 bool WolfChat::roomConnected()
 {
-    return inRoom() && sRoom->getState() == LLVoiceChannel::STATE_CONNECTED;
+    return inRoom() && roomUp();    // [2026-10-22] up = connected AND the join went (roomUp)
 }
 
 std::string WolfChat::roomNote()
@@ -656,9 +725,28 @@ std::string WolfChat::roomNote()
     return sRoomNote;
 }
 
-void WolfChat::leaveRoom()
+bool WolfChat::roomGaveUp()
 {
+    return sGaveUp && !sWantRoom && sRoomChannel.notNull();
+}
+
+void WolfChat::reconnectRoom()
+{
+    if (sRoomChannel.isNull() || sRejoining) return;
+    sRetries = 0;
+    rejoinRoom(false);
+}
+
+void WolfChat::leaveRoom(bool by_resident)
+{
+    if (by_resident && sWantRoom)
+    {
+        WolfVoiceDiag::note("Leave pressed: " + sRoomName);
+        sendVoiceReport("left");
+    }
     sWantRoom = false;      // [2026-10-21] left on purpose (or by roomWatch): no automatic rejoin
+    sWasUp = false;
+    sGaveUp = false;
     if (sRoom && LLVoiceChannel::getCurrentVoiceChannel() == sRoom)
     {
         sRoom->deactivate();    // back to the voice of the place you stand (LLVoiceChannel::deactivate)
@@ -668,6 +756,83 @@ void WolfChat::leaveRoom()
         api("voice_leave", LLSD::emptyMap(), nullptr);
         sRoomTold = false;
     }
+}
+
+// ---- [2026-10-22] voice debug mode ----------------------------------------------------------------------------------
+// Off for every resident unless php/wolfchat.php says this avatar has it on (wolfchat_voice_debug: ticked by the
+// resident with setVoiceDebug, or switched on for them by us). While off nothing is kept (WolfVoiceDiag::note returns
+// at once) and nothing is sent; the service refuses reports from avatars without it.
+
+void WolfChat::refreshVoiceDebug()
+{
+    static F64 last = -1000.0;
+    const F64 now = LLFrameTimer::getElapsedSeconds();
+    if (now - last < 60.0) return;      // asked at most once a minute (Wolf Chat start, each room join)
+    last = now;
+    api("voice_debug", LLSD::emptyMap(), [](bool ok, const LLSD& reply, const std::string&)
+    {
+        if (ok) WolfVoiceDiag::setEnabled(reply["on"].asBoolean());
+    });
+}
+
+void WolfChat::setVoiceDebug(bool on, std::function<void(bool ok, const std::string& error)> done)
+{
+    LLSD b;
+    b["on"] = on ? 1 : 0;
+    api("voice_debug_set", b, [on, done](bool ok, const LLSD& reply, const std::string& error)
+    {
+        if (ok) WolfVoiceDiag::setEnabled(reply["on"].asBoolean());
+        if (done) done(ok, error);
+    });
+}
+
+void WolfChat::sendVoiceReport(const std::string& kind)
+{
+    if (!WolfVoiceDiag::enabled()) return;
+    // At most one report every 10 s, and the same kind not twice within a minute (a flapping room says so once).
+    static F64 last_any = -1000.0;
+    static std::map<std::string, F64> last_kind;
+    const F64 now = LLFrameTimer::getElapsedSeconds();
+    if (now - last_any < 10.0) return;
+    auto it = last_kind.find(kind);
+    if (it != last_kind.end() && now - it->second < 60.0) return;
+    last_any = now;
+    last_kind[kind] = now;
+
+    LLSD b;
+    b["kind"] = kind;
+    b["events"] = WolfVoiceDiag::events();
+    b["platform"] = LLOSInfo::instance().getOSStringSimple();
+    b["version"] = LLVersionInfo::instance().getChannelAndVersion();
+    b["room"] = sRoomChannel;
+    b["mic"] = micOn() ? 1 : 0;
+    b["deafened"] = deafened() ? 1 : 0;
+    b["retries"] = sRetries;
+    b["drops"] = (S32)sDrops.size();
+    b["input"] = voiceDeviceName(true);
+    b["output"] = voiceDeviceName(false);
+    if (LLViewerRegion* region = gAgent.getRegion())
+    {
+        b["region"] = region->getName();
+        if (LLParcel* parcel = LLViewerParcelMgr::getInstance()->getAgentParcel()) b["parcel"] = parcel->getLocalID();
+    }
+    WolfVoiceDiag::clear();
+    api("voice_diag", b, nullptr);
+}
+
+std::string WolfChat::voiceDeviceName(bool input)
+{
+    // The saved choice (llpanelvoicedevicesettings.cpp saves VoiceInputAudioDevice / VoiceOutputAudioDevice), shown
+    // by its friendly name from the voice client's device list (LLVoiceDevice::display_name).
+    const std::string id = gSavedSettings.getString(input ? "VoiceInputAudioDevice" : "VoiceOutputAudioDevice");
+    if (id.empty() || id == "Default") return "Default";
+    const LLVoiceDeviceList& list = input ? LLVoiceClient::getInstance()->getCaptureDevices()
+                                          : LLVoiceClient::getInstance()->getRenderDevices();
+    for (const LLVoiceDevice& d : list)
+    {
+        if (d.full_name == id) return d.display_name;
+    }
+    return id;
 }
 
 // [2026-10-21] -------------------------------------------------------------------------------------------------------
@@ -753,11 +918,6 @@ void WolfChat::setMic(bool on)
     LLVoiceClient::getInstance()->setUserPTTState(on);
 }
 
-void WolfChat::micOnWhenJoined()
-{
-    if (sRoom) sRoom->micOnWhenJoined();
-}
-
 bool WolfChat::deafened()
 {
     // The viewer's own voice mute (llvieweraudio.cpp audio_update_volume: MuteVoice -> voice volume and mic gain 0),
@@ -782,23 +942,61 @@ WolfChatVoiceChannel::WolfChatVoiceChannel(const LLUUID& channel, const LLUUID& 
 
 // [2026-10-22] Stock group calls switch the mic OFF every time the call comes up: LLVoiceChannelGroup::handleStatusChange
 // STATUS_JOINED calls setUserPTTState(mIsP2P) (llvoicechannel.cpp:544-549), and a room is not p2p. STATUS_JOINED arrives
-// when the ad-hoc connection is established (llvoicewebrtc.cpp:1098-1101 OnConnectionEstablished), i.e. AFTER joinVoice
-// turned the mic on, and again after every reconnection (settings resume, roomWatch rejoin) - so a resident who joined
-// to talk, or who was talking before a reconnect, was silently muted. A room keeps the mic as it was, and turns it on
-// on the first join (micOnWhenJoined).
+// when the ad-hoc connection is established (llvoicewebrtc.cpp OnConnectionEstablished), i.e. AFTER the join turned the
+// mic on, and again after every reconnection - so a resident who joined to talk was silently muted. Paul 10-22: in a
+// room the mic is on and only the resident turns it off. So: the mic the join asked for (setMicAtJoin), else the mic
+// as it was before the status change.
 void WolfChatVoiceChannel::handleStatusChange(EStatusType status)
 {
     const bool mic_before = LLVoiceClient::getInstance()->getUserPTTState();
     LLVoiceChannelGroup::handleStatusChange(status);
     if (status == STATUS_JOINED)
     {
-        const bool mic = mMicOnJoin || mic_before;
-        mMicOnJoin = false;
+        const bool mic = mMicAtJoin >= 0 ? (mMicAtJoin != 0) : mic_before;
+        mMicAtJoin = -1;
         if (LLVoiceClient::getInstance()->getUserPTTState() != mic)
         {
+            WolfVoiceDiag::note(std::string("room call up: mic kept ") + (mic ? "on" : "off"));
             LLVoiceClient::getInstance()->setUserPTTState(mic);
         }
     }
+}
+
+// [2026-10-22] The churn, part 1. A connection retry (llvoicewebrtc.cpp VOICE_STATE_SESSION_RETRY ->
+// OnConnectionFailure -> notifyStatusObservers) reaches a group channel as an error, and LLVoiceChannel::handleError
+// deactivates it (llvoicechannel.cpp:186-190): the room was left, the voice of the place you stand came back
+// (wolfvoice journal 10-22 04:13-04:18: a room session logged out and a parcel session provisioned in the same
+// second) - although the connection was about to reconnect by itself (SESSION_RETRY -> DISCONNECT -> ... -> CLOSED ->
+// START_SESSION while not shut down, llvoicewebrtc.cpp:3743-3746). A room stays the current channel through that; if
+// it does not come back, the self-check (roomWatch) rejoins with fresh credentials. A full or locked channel is final.
+void WolfChatVoiceChannel::handleError(EStatusType status)
+{
+    WolfVoiceDiag::note("room error " + LLVoiceClientStatusObserver::status2string(status));
+    if (status != ERROR_CHANNEL_FULL && status != ERROR_CHANNEL_LOCKED && callStarted())
+    {
+        if (getState() > STATE_CALL_STARTED) setState(STATE_CALL_STARTED);   // reconnecting
+        return;
+    }
+    LLVoiceChannelGroup::handleError(status);
+}
+
+// [2026-10-22] The churn, part 2. Closing voice device settings resumes the suspended channel (llvoicechannel.cpp:366-395
+// resume: STATE_READY, then activate), and for a group channel activate() starts a NEW call
+// (LLVoiceChannelGroup::activate -> setNonSpatialChannel -> startAdHocSession, which leaves the current session first,
+// llvoicewebrtc.cpp:1852-1862). The room's call never went down while the settings were open (suspend only records the
+// channel, llvoicechannel.cpp:354-363; the devices are switched under the live connection, llwebrtc.cpp
+// workerDeployDevices), so a room that is still the voice client's current session just carries on.
+void WolfChatVoiceChannel::activate()
+{
+    if (callStarted()) return;
+    if (getCurrentVoiceChannel() == this && LLVoiceClient::getInstance()->isCurrentChannel(mChannelInfo))
+    {
+        WolfVoiceDiag::note("room resumed without a new call");
+        LLVoiceChannel::activate();     // STATE_CALL_STARTED, the observer and the channel-changed signal again
+        if (callStarted()) setState(STATE_CONNECTED);
+        return;
+    }
+    LLVoiceChannelGroup::activate();
 }
 
 void WolfChatVoiceChannel::requestChannelInfo()
@@ -2009,6 +2207,14 @@ bool WolfFloaterChat::postBuild()
     mDeafenBtn = getChild<LLButton>("deafen_btn");
     mLeaveBtn = getChild<LLButton>("leave_call_btn");
     mInviteBtn = getChild<LLButton>("invite_btn");
+    mVoiceDebug = getChild<LLCheckBoxCtrl>("voice_debug");      // [2026-10-22]
+    // [2026-10-22] Your own microphone level (the same indicator as the nearby chat bar's, lloutputmonitorctrl.cpp:136-146:
+    // your level, lit while your mic is on).
+    if (LLOutputMonitorCtrl* level = getChild<LLOutputMonitorCtrl>("mic_level"))
+    {
+        level->setSpeakerId(gAgentID);
+        level->setIsAgentControl(true);
+    }
     mOlderBtn = getChild<LLButton>("older_btn");
     mBackBtn = getChild<LLButton>("back_btn");
     mRenameBtn = getChild<LLButton>("rename_btn");
@@ -2059,6 +2265,22 @@ bool WolfFloaterChat::postBuild()
     mDeafenBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { onDeafen(); });
     mLeaveBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { onLeaveCall(); });
     mInviteBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { onInvitePeople(); });
+    // [2026-10-22] Voice debug mode for yourself (php/wolfchat.php voice_debug_set); the box shows what the service says.
+    mVoiceDebug->setCommitCallback([this](LLUICtrl*, const LLSD&)
+    {
+        const bool on = mVoiceDebug->get();
+        LLHandle<LLFloater> h = getHandle();
+        WolfChat::setVoiceDebug(on, [h, on](bool ok, const std::string& error)
+        {
+            WolfFloaterChat* self = static_cast<WolfFloaterChat*>(h.get());
+            if (!self) return;
+            self->setStatus(ok ? (on ? std::string("Voice debug is on: when you use a voice room, a short report of what voice did "
+                                                   "(no chat, no audio) goes to Wolf Territories to help us fix problems.")
+                                     : std::string("Voice debug is off: nothing is sent."))
+                               : "Could not change voice debug: " + error, !ok);
+        });
+    });
+    WolfChat::refreshVoiceDebug();
     mOlderBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { loadOlder(); });
     mBackBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { onBackToChannel(); });
     mRenameBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { onRenameChannel(mChannel); });
@@ -2103,7 +2325,6 @@ bool WolfFloaterChat::postBuild()
     getChild<LLButton>("members_btn")->setToggleState(true);
     mGifBtn->setVisible(false);         // shown when the grid says it has GIFs (setGifsAvailable)
     mCards->setVisible(false);
-    mMeName->setText(myName());
     updateHeader();
     updateVoiceBar();
     return true;
@@ -3053,17 +3274,27 @@ void WolfFloaterChat::refreshSidebar()
 
 void WolfFloaterChat::updateVoiceBar()
 {
-    // [2026-10-21] The real state: connected, connecting (or reconnecting), or why not (WolfChat::roomNote).
+    // [2026-10-22] Plain words (Paul: "we need to make it VERY easy"): connecting, in and heard, muted, deafened, trying
+    // again, or can't reach voice with Reconnect.
     const bool in = WolfChat::inRoom();
     const bool connected = WolfChat::roomConnected();
+    const bool gave_up = !in && WolfChat::roomGaveUp();
     const std::string note = WolfChat::roomNote();
+    const bool mic = WolfChat::micOn();
+    const bool deaf = WolfChat::deafened();
     std::string where;
     LLColor4 colour = C_DIM;
     if (connected)
     {
-        where = "Voice connected: " + WolfChat::roomName();
-        if (WolfChat::roomGroup() != mGroup) where += " (another group)";
+        const std::string room = WolfChat::roomName() + (WolfChat::roomGroup() != mGroup ? " (another group)" : "");
+        if (deaf) where = "You're in " + room + ", deafened - you hear nobody. Press Deafen to hear people.";
+        else if (mic) where = "You're in " + room + " - people can hear you.";
+        else where = "You're in " + room + ". Your mic is muted - press Mic to talk.";
         colour = C_OK;
+    }
+    else if (in && LLVoiceChannel::isSuspended())
+    {
+        where = "Voice paused while voice settings are open.";
     }
     else if (!note.empty())
     {
@@ -3072,8 +3303,7 @@ void WolfFloaterChat::updateVoiceBar()
     }
     else if (in)
     {
-        where = LLVoiceChannel::isSuspended() ? "Voice paused while voice settings are open: " + WolfChat::roomName()
-                                               : "Connecting to " + WolfChat::roomName() + "...";
+        where = "Connecting to " + WolfChat::roomName() + "...";
     }
     else
     {
@@ -3081,14 +3311,27 @@ void WolfFloaterChat::updateVoiceBar()
     }
     mVoiceStatus->setText(where);
     mVoiceStatus->setColor(colour);
-    mLeaveBtn->setEnabled(in);
+    // Leave while in a room; Reconnect when the self-check gave up on it.
+    mLeaveBtn->setEnabled(in || gave_up);
+    mLeaveBtn->setLabel(gave_up ? LLStringExplicit("Reconnect") : LLStringExplicit("Leave Call"));
+    mLeaveBtn->setToolTip(gave_up ? std::string("Try to connect to the voice room again.")
+                                  : std::string("Leave the voice room. You go back to the voice of the place you are standing."));
     mInviteBtn->setEnabled(in || mGroup.notNull());   // [2026-10-22] from a text channel too (onInvitePeople)
-    const bool mic = WolfChat::micOn();
     mMicBtn->setToggleState(mic);
     mMicBtn->setLabel(mic ? LLStringExplicit("Mic on") : LLStringExplicit("Mic off"));
-    const bool deaf = WolfChat::deafened();
     mDeafenBtn->setToggleState(deaf);
     mDeafenBtn->setLabel(deaf ? LLStringExplicit("Deafened") : LLStringExplicit("Deafen"));
+    // [2026-10-22] Which microphone and speakers voice is using - a wrong "Default" device is a common reason nobody hears
+    // you. Settings opens the device choice.
+    const std::string input = WolfChat::voiceDeviceName(true), output = WolfChat::voiceDeviceName(false);
+    const std::string devices = "Mic: " + input + "   Speakers: " + output;
+    if (mMeName->getText() != devices)
+    {
+        mMeName->setText(devices);
+        mMeName->setToolTip("Microphone: " + input + "\nSpeakers: " + output + "\nPress Settings to choose others. The icon on the right "
+                            "moves when your microphone hears you.");
+    }
+    mVoiceDebug->set(WolfVoiceDiag::enabled());
 }
 
 void WolfFloaterChat::draw()
@@ -3149,10 +3392,12 @@ void WolfFloaterChat::onSidebarClick(WolfChatSidebar::EHit hit, const LLUUID& id
 
 void WolfFloaterChat::joinVoice(const LLUUID& channel)
 {
-    // [2026-10-21] Only when the connection is really up; a room you seem to be in but is not connected is joined again.
-    if (WolfChat::roomChannel() == channel && WolfChat::roomConnected())
+    // [2026-10-22] Clicking the room you are in never starts it again: a second click while it was still connecting
+    // logged the connecting session out and started another (wolfvoice journal 10-22 04:12:57-58, two room sessions in
+    // one second). A room that is not coming up is rejoined by the self-check (roomWatch).
+    if (WolfChat::roomChannel() == channel)
     {
-        setStatus("You are already in this voice room.", false);
+        setStatus(WolfChat::roomConnected() ? "You are already in this voice room." : "Still connecting to this voice room...", false);
         return;
     }
     std::string name;
@@ -3174,9 +3419,8 @@ void WolfFloaterChat::joinVoice(const LLUUID& channel)
         }
         // [2026-10-21] Paul: "you should default the mic to on" - joining a voice room means you came to talk (Jimmy
         // was in a room with his mic off). The same Speak toggle as the Mic button (WolfChat::setMic); Mic turns it off.
-        WolfChat::setMic(true);
-        WolfChat::micOnWhenJoined();    // [2026-10-22] and keep it on when the call comes up (WolfChatVoiceChannel)
-        self->setStatus("You joined " + name + ". Your mic is " + (WolfChat::micOn() ? "on - press Mic to mute it" : "off - press Mic to talk") + ".", false);
+        // [2026-10-22] The mic is on (WolfChat::joinRoom) and stays on when the call comes up (WolfChatVoiceChannel).
+        self->setStatus("Joining " + name + " - your mic is on. Press Mic to mute it.", false);
         self->mNextChannels = 0.0;     // show yourself in the room at once
         self->updateVoiceBar();
     });
@@ -3461,6 +3705,12 @@ void WolfFloaterChat::onVoiceSettings()
 
 void WolfFloaterChat::onLeaveCall()
 {
+    if (!WolfChat::inRoom() && WolfChat::roomGaveUp())     // [2026-10-22] the button says Reconnect
+    {
+        WolfChat::reconnectRoom();
+        updateVoiceBar();
+        return;
+    }
     WolfChat::leaveRoom();
     setStatus("You left the voice room.", false);
     mNextChannels = 0.0;

@@ -144,7 +144,20 @@
              name="me_name"
              top="520"
              use_ellipses="true"
-             width="228" />
+             width="200" />
+            <output_monitor
+             auto_update="true"
+             draw_border="false"
+             follows="right|bottom"
+             height="16"
+             layout="topleft"
+             left="216"
+             mouse_opaque="true"
+             name="mic_level"
+             tool_tip="Your microphone: this moves when it hears you. If it never moves, check the microphone in Settings."
+             top="520"
+             visible="true"
+             width="20" />
             <button
              follows="left|bottom"
              height="28"
@@ -177,6 +190,16 @@
              tool_tip="Voice and sound settings: microphone, speakers and volumes."
              top="544"
              width="72" />
+            <check_box
+             follows="left|bottom"
+             height="18"
+             label="Voice debug reports"
+             layout="topleft"
+             left="8"
+             name="voice_debug"
+             tool_tip="Help us fix voice problems: while this is on, each time you use a voice room a short report of what voice did (connections, joins, mic on/off, which devices - no chat and no audio) is sent to Wolf Territories. Off by default."
+             top="576"
+             width="228" />
         </layout_panel>
 
         <!-- ═══ centre: the channel ═══ -->

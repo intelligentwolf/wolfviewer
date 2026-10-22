@@ -133,7 +133,7 @@
              layout="topleft"
              left="126"
              name="invite_btn"
-             tool_tip="Send people a message with a link that opens this voice room. They need to be in the group to join."
+             tool_tip="Send people a message with a link that opens this voice room, or the channel you are in. They need to be in the group to join."
              top="486"
              width="114" />
             <text

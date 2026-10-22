@@ -2221,12 +2221,15 @@ void WolfFloaterChat::setServers(const LLSD& servers)
     }
     pushRail();
     mRail->setSelected(mGroup);
+    const std::string hint = newGroupHint();
     if (mServers.empty() && (first || mGroup.isNull()) && !(first && mGroup.notNull()))
     {
         // No groups yet: say what this is, and offer the one thing to do (no group is added for you).
         showEmpty(true);
+        if (!hint.empty()) setStatus(hint, false);
         return;
     }
+    if (!hint.empty()) setStatus(hint, false);
     if (first)
     {
         showEmpty(false);
@@ -2243,6 +2246,51 @@ void WolfFloaterChat::setServers(const LLSD& servers)
         mGroup.setNull();       // so selectGroup loads it
         selectGroup(want);
     }
+}
+
+std::string WolfFloaterChat::newGroupHint()
+{
+    // [2026-10-22] Jimmy Olsen: "when i sent invitation of group to xenon.. and then she opened the wolf chat.. she couldnt
+    // see the group at all". She had joined (os_groups_membership has her in ONLINE FRIENDS) but the rail only shows
+    // groups added with + (Paul: "+add group which adds ... only the ones i choose"), and nothing said so. A Wolf group
+    // that appears in the viewer's own group list (gAgent.mGroups, filled by AgentGroupDataUpdate) since the last look
+    // and is not in the rail is named here. Runs where the rail is already refreshed (setServers): no extra polling.
+    // the group list arrives after login (AgentGroupDataUpdate): an empty one is "not known yet", never "no groups" - it
+    // would otherwise be saved and make every group look new next time
+    if (gAgent.mGroups.empty()) return std::string();
+    if (!mGroupsSeen)
+    {
+        // what was seen last time, across sessions (settings_per_account.xml WolfChatSeenGroups); none saved yet = the
+        // first look ever, which only records (every group would otherwise be "new")
+        const LLSD saved = gSavedPerAccountSettings.getLLSD("WolfChatSeenGroups");
+        if (saved.isArray() && saved.size() > 0)
+        {
+            for (const LLSD& id : llsd::inArray(saved)) mSeenGroups.insert(id.asUUID());
+            mGroupsSeen = true;
+        }
+    }
+    std::set<LLUUID> now;
+    std::string newest;
+    for (const LLGroupData& gd : gAgent.mGroups)
+    {
+        if (!WolfChat::isWolfGroup(gd.mName)) continue;
+        now.insert(gd.mID);
+        bool in_rail = false;
+        for (const WolfChatServerRail::Server& sv : mServers)
+        {
+            if (sv.mId == gd.mID) in_rail = true;
+        }
+        if (!in_rail && mGroupsSeen && !mSeenGroups.count(gd.mID)) newest = gd.mName;
+    }
+    if (now != mSeenGroups || !mGroupsSeen)
+    {
+        LLSD save = LLSD::emptyArray();
+        for (const LLUUID& id : now) save.append(id);
+        gSavedPerAccountSettings.setLLSD("WolfChatSeenGroups", save);
+    }
+    mSeenGroups = now;
+    mGroupsSeen = true;
+    return newest.empty() ? std::string() : "You joined " + newest + ". Press + (Add a group) to add it to Wolf Chat.";
 }
 
 void WolfFloaterChat::showEmpty(bool empty)
@@ -3008,7 +3056,7 @@ void WolfFloaterChat::updateVoiceBar()
     mVoiceStatus->setText(where);
     mVoiceStatus->setColor(colour);
     mLeaveBtn->setEnabled(in);
-    mInviteBtn->setEnabled(in);
+    mInviteBtn->setEnabled(in || mGroup.notNull());   // [2026-10-22] from a text channel too (onInvitePeople)
     const bool mic = WolfChat::micOn();
     mMicBtn->setToggleState(mic);
     mMicBtn->setLabel(mic ? LLStringExplicit("Mic on") : LLStringExplicit("Mic off"));
@@ -3394,21 +3442,32 @@ void WolfFloaterChat::onLeaveCall()
 
 void WolfFloaterChat::onInvitePeople()
 {
-    if (!WolfChat::inRoom())
+    // [2026-10-22] Jimmy: inviting only worked from inside a voice room ("only way to add her was joining a voice room
+    // 1st"). In a voice room the link opens that room; otherwise it opens the channel shown. The link opens the group in
+    // Wolf Chat even when it is not in the rail yet (onOpen key "group").
+    const bool in_room = WolfChat::inRoom();
+    if (!in_room && mGroup.isNull())
     {
-        setStatus("Join a voice room first, then invite people to it.", true);
+        setStatus("Open a group's channel (or join a voice room) first, then invite people to it.", true);
         return;
     }
-    const LLUUID group = WolfChat::roomGroup();
-    const LLUUID channel = WolfChat::roomChannel();
-    const std::string room = WolfChat::roomName();
+    const LLUUID group = in_room ? WolfChat::roomGroup() : mGroup;
+    const LLUUID channel = in_room ? WolfChat::roomChannel() : mChannel;
+    std::string room = in_room ? WolfChat::roomName() : mGroupName;
+    if (!in_room)
+    {
+        for (const WolfChatSidebar::Channel& c : mChannels)
+        {
+            if (c.mId == channel) room = "#" + c.mName + " (" + mGroupName + ")";
+        }
+    }
     LLHandle<LLFloater> h = getHandle();
     LLFloaterAvatarPicker* picker = LLFloaterAvatarPicker::show(
-        [h, group, channel, room](const uuid_vec_t& ids, const std::vector<LLAvatarName>& names)
+        [h, group, channel, room, in_room](const uuid_vec_t& ids, const std::vector<LLAvatarName>& names)
         {
             // A private IM to each with a link that opens the room (the "wolfchat" handler below).
             const std::string link = "secondlife:///app/wolfchat/" + group.asString() + "/" + channel.asString();
-            const std::string text = "Join me in the Wolf Chat voice room " + room + ": " + link;
+            const std::string text = std::string(in_room ? "Join me in the Wolf Chat voice room " : "Join me in Wolf Chat: ") + room + ": " + link;
             for (size_t i = 0; i < ids.size(); ++i)
             {
                 const std::string name = i < names.size() ? names[i].getCompleteName() : std::string();

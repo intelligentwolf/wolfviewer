@@ -1,5 +1,16 @@
 <llsd>
     <map>
+    <key>WolfChatSeenGroups</key>
+    <map>
+      <key>Comment</key>
+      <string>Wolf Chat: the Wolf groups this account was in when Wolf Chat last looked, so a group joined since (even with Wolf Chat closed) is named: "You joined X - press + to add it".</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>LLSD</string>
+      <key>Value</key>
+      <array />
+    </map>
     <key>WolfChatUsed</key>
     <map>
       <key>Comment</key>

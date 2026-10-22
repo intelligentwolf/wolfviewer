@@ -674,6 +674,11 @@ private:
     LLSD mCardData;                     // [2026-10-21] the cards shown, as php/wolfchat.php answered them
     std::vector<WolfChatServerRail::Server> mServers;   // [2026-10-21] the rail, in its order
     bool mServersLoaded = false;
+    // [2026-10-22] Jimmy/Xenon: a group joined while Wolf Chat is open is not in the rail (only groups added with + are),
+    // so it seemed missing. The viewer's own group list (gAgent.mGroups) as last seen, to say "You joined X - press +".
+    std::set<LLUUID> mSeenGroups;
+    bool mGroupsSeen = false;
+    std::string newGroupHint();
     bool mCanModerate = false;          // [2026-10-21] ModerateChat: delete others' messages, pins (channels = owners)
     struct BridgeLink
     {

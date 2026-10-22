@@ -753,6 +753,11 @@ void WolfChat::setMic(bool on)
     LLVoiceClient::getInstance()->setUserPTTState(on);
 }
 
+void WolfChat::micOnWhenJoined()
+{
+    if (sRoom) sRoom->micOnWhenJoined();
+}
+
 bool WolfChat::deafened()
 {
     // The viewer's own voice mute (llvieweraudio.cpp audio_update_volume: MuteVoice -> voice volume and mic gain 0),
@@ -773,6 +778,27 @@ WolfChatVoiceChannel::WolfChatVoiceChannel(const LLUUID& channel, const LLUUID& 
 :   LLVoiceChannelGroup(channel, name, false),
     mGroup(group)
 {
+}
+
+// [2026-10-22] Stock group calls switch the mic OFF every time the call comes up: LLVoiceChannelGroup::handleStatusChange
+// STATUS_JOINED calls setUserPTTState(mIsP2P) (llvoicechannel.cpp:544-549), and a room is not p2p. STATUS_JOINED arrives
+// when the ad-hoc connection is established (llvoicewebrtc.cpp:1098-1101 OnConnectionEstablished), i.e. AFTER joinVoice
+// turned the mic on, and again after every reconnection (settings resume, roomWatch rejoin) - so a resident who joined
+// to talk, or who was talking before a reconnect, was silently muted. A room keeps the mic as it was, and turns it on
+// on the first join (micOnWhenJoined).
+void WolfChatVoiceChannel::handleStatusChange(EStatusType status)
+{
+    const bool mic_before = LLVoiceClient::getInstance()->getUserPTTState();
+    LLVoiceChannelGroup::handleStatusChange(status);
+    if (status == STATUS_JOINED)
+    {
+        const bool mic = mMicOnJoin || mic_before;
+        mMicOnJoin = false;
+        if (LLVoiceClient::getInstance()->getUserPTTState() != mic)
+        {
+            LLVoiceClient::getInstance()->setUserPTTState(mic);
+        }
+    }
 }
 
 void WolfChatVoiceChannel::requestChannelInfo()
@@ -3149,6 +3175,7 @@ void WolfFloaterChat::joinVoice(const LLUUID& channel)
         // [2026-10-21] Paul: "you should default the mic to on" - joining a voice room means you came to talk (Jimmy
         // was in a room with his mic off). The same Speak toggle as the Mic button (WolfChat::setMic); Mic turns it off.
         WolfChat::setMic(true);
+        WolfChat::micOnWhenJoined();    // [2026-10-22] and keep it on when the call comes up (WolfChatVoiceChannel)
         self->setStatus("You joined " + name + ". Your mic is " + (WolfChat::micOn() ? "on - press Mic to mute it" : "off - press Mic to talk") + ".", false);
         self->mNextChannels = 0.0;     // show yourself in the room at once
         self->updateVoiceBar();

@@ -87,6 +87,8 @@ namespace WolfChat
     std::string roomNote();
     bool micOn();
     void setMic(bool on);
+    /** [2026-10-22] The room just joined turns the mic on when its call comes up (WolfChatVoiceChannel::handleStatusChange). */
+    void micOnWhenJoined();
     bool deafened();
     void setDeafened(bool deaf);
 
@@ -131,9 +133,13 @@ class WolfChatVoiceChannel : public LLVoiceChannelGroup
 public:
     WolfChatVoiceChannel(const LLUUID& channel, const LLUUID& group, const std::string& name);
     void requestChannelInfo() override;
+    void handleStatusChange(EStatusType status) override;
+    /** [2026-10-22] The next time the call comes up, the mic goes on (you joined the room to talk). */
+    void micOnWhenJoined() { mMicOnJoin = true; }
 
 private:
     LLUUID mGroup;
+    bool mMicOnJoin = false;
 };
 
 /** The left column: group channels, voice rooms with the people in them. Drawn by this control. */

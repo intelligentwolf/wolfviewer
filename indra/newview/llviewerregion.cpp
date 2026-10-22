@@ -853,7 +853,18 @@ const LLUUID& LLViewerRegion::getRegionID() const
 
 void LLViewerRegion::setRegionID(const LLUUID& region_id)
 {
+    // <WolfViewer 2026-10-22> On a direct login the region's SimulatorFeatures can arrive before its RegionHandshake
+    // (log 11:54:48 setRegion with a null id, 11:54:50 features for region "" - the name comes with the handshake,
+    // unpackRegionHandshake). LFSimFeatureHandler then recorded them for the null id, so featuresRegionID never matched
+    // this region and WolfGrid::isOnWolfTerritoriesConfirmed said no for the whole session (Paul: "This region's record
+    // is not loaded yet" in Tunnels on Sandbox). Read them again now the id is known.
+    const bool learned = mImpl->mRegionID != region_id;
     mImpl->mRegionID = region_id;
+    if (learned && simulatorFeaturesReceived() && this == gAgent.getRegion() && LFSimFeatureHandler::instanceExists())
+    {
+        LFSimFeatureHandler::instance().setSupportedFeatures();
+    }
+    // </WolfViewer 2026-10-22>
 }
 
 void LLViewerRegion::loadObjectCache()

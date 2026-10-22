@@ -90,7 +90,12 @@ namespace
     // same session headers as wolfchat.php.
     const char* const BRIDGE_URL = "https://wolfstorm.app/php/wolfbridge.php";
     // Wolf-Bot's invite (the bridge's Discord application; given with the contract 2026-10-21).
-    const char* const DISCORD_BOT_INVITE = "https://discord.com/oauth2/authorize?client_id=1151805124855992403&scope=bot+applications.commands&permissions=536988672";
+    // [DISCORD VOICE 2026-10-22] permissions 573688832 = the text bridge's 536988672 + Connect (1<<20) + Speak (1<<21) +
+    // Use Voice Activity (1<<25) - wolfbridge/src/rest.rs BOT_PERMISSIONS.
+    const char* const DISCORD_BOT_INVITE = "https://discord.com/oauth2/authorize?client_id=1151805124855992403&scope=bot+applications.commands&permissions=573688832";
+    // [DISCORD VOICE 2026-10-22] The Discord bridge's participant in a voice room: php/wolfbridge.php WBR_BRIDGE_AGENT
+    // (no grid account has it). php/wolfchat.php reports it in the room as "Discord: <names>".
+    const LLUUID WOLF_DISCORD_AGENT("3969a614-e4fe-3501-b9f6-25ef34ec9de5");
 
     // How often the open window asks for news (seconds). Messages of the channel you look at, the channels with
     // who is in which voice room, the members online; the voice heartbeat matches php/wolfchat.php WCH_VOICE_FRESH.
@@ -1135,7 +1140,19 @@ void WolfChatSidebar::draw()
             if (c.mVoice)
             {
                 icon("Command_Voice_Icon", PAD + 2, bottom + (ROW_H - ICON) / 2, ICON, selected ? C_ACCENT : C_DIM);
-                if (c.mRestricted) icon("Lock", w - PAD - ICON - 2, bottom + (ROW_H - ICON) / 2, ICON, C_DIM);
+                S32 vright = w - PAD - 2;
+                if (c.mRestricted)
+                {
+                    icon("Lock", vright - ICON, bottom + (ROW_H - ICON) / 2, ICON, C_DIM);
+                    vright -= ICON + 4;
+                }
+                if (c.mBridged)
+                {
+                    // [DISCORD VOICE 2026-10-22] Linked to a Discord voice channel, as the text channels' badge (a stopped
+                    // link in red with a "!", not colour alone).
+                    icon("Command_Discord_Icon", vright - ICON, bottom + (ROW_H - ICON) / 2, ICON, c.mBridgeBroken ? C_ERROR : C_DIM);
+                    if (c.mBridgeBroken) text(fontBold(), "!", (F32)(vright - ICON - 5), cy, C_ERROR, LLFontGL::HCENTER);
+                }
                 text(selected ? fontBold() : font(), c.mName, (F32)(PAD + ICON + 8), cy, selected ? C_ACCENT : C_TEXT,
                      LLFontGL::LEFT, w - PAD * 3 - ICON);
             }
@@ -1274,7 +1291,9 @@ bool WolfChatSidebar::handleToolTip(S32 x, S32 y, MASK mask)
     {
         const Channel& c = mChannels[r->mChannel];
         if (c.mVoice) tip = std::string("Join this voice room") + (c.mRestricted ? " (only some roles can see it)" : "")
-                            + (mCanManage ? " - right-click to rename, delete or choose who can see it" : "");
+                            + (c.mBridged ? (c.mBridgeBroken ? " - its Discord voice link has stopped"
+                                                             : " - linked to Discord voice: heard in the Discord channel, live, not recorded") : "")
+                            + (mCanManage ? " - right-click to rename, delete, choose who can see it or link it to Discord voice" : "");
         else if (c.mGroupChat)
         {
             tip = "This group's own group chat - the same chat everyone in the group sees in any viewer";
@@ -3233,6 +3252,11 @@ void WolfFloaterChat::refreshSidebar()
             c.mBridgeBroken = c.mBridged && bl->second.mState == "broken";
             continue;
         }
+        {
+            auto bl = mBridges.find(c.mId);       // [DISCORD VOICE 2026-10-22] voice rooms linked to Discord voice
+            c.mBridged = bl != mBridges.end();
+            c.mBridgeBroken = c.mBridged && bl->second.mState == "broken";
+        }
         if (c.mId != room) continue;
         // The room you are in: who is there and their state comes from the voice connection itself, not the
         // service's 20 s heartbeat (LLVoiceClient participant list of the current channel).
@@ -3246,7 +3270,9 @@ void WolfFloaterChat::refreshSidebar()
             WolfChatSidebar::Person p;
             p.mId = id;
             LLAvatarName av;
-            if (LLAvatarNameCache::get(id, &av)) p.mName = av.getCompleteName();
+            // [DISCORD VOICE 2026-10-22] The Discord bridge has no avatar: its name is the Discord people php reports.
+            if (id == WOLF_DISCORD_AGENT) p.mName = reported.count(id) ? reported[id].mName : std::string("Discord");
+            else if (LLAvatarNameCache::get(id, &av)) p.mName = av.getCompleteName();
             else if (reported.count(id)) p.mName = reported[id].mName;
             // Source: llvoicewebrtc.cpp:2179-2190 getIsSpeaking / :2207-2223 getCurrentPower - the current session's
             // participants (the room while you are in it): remote ones from the voice server's "v"/"p" updates
@@ -3290,6 +3316,10 @@ void WolfFloaterChat::updateVoiceBar()
         if (deaf) where = "You're in " + room + ", deafened - you hear nobody. Press Deafen to hear people.";
         else if (mic) where = "You're in " + room + " - people can hear you.";
         else where = "You're in " + room + ". Your mic is muted - press Mic to talk.";
+        // [DISCORD VOICE 2026-10-22] Everyone in a linked room is told: what is said is heard on Discord.
+        auto bl = mBridges.find(WolfChat::roomChannel());
+        if (bl != mBridges.end() && bl->second.mState == "active" && bl->second.mVoice)
+            where += " Linked to Discord voice (" + bl->second.mGuild + "): relayed live, not recorded.";
         colour = C_OK;
     }
     else if (in && LLVoiceChannel::isSuspended())
@@ -4074,22 +4104,27 @@ void WolfFloaterChat::showChannelMenu(const LLUUID& channel, S32 x, S32 y)
             if (what == "rename") onRenameChannel(mMenuChannel);
             else if (what == "roles") onChannelRoles(mMenuChannel);
             else if (what == "delete") onDeleteChannel(mMenuChannel);
-            else if (what == "bridge") onBridge(mMenuChannel);
-            else if (what == "unbridge") onUnbridge(mMenuChannel);
+            else if (what == "bridge" || what == "bridge_voice") onBridge(mMenuChannel);
+            else if (what == "unbridge" || what == "unbridge_voice") onUnbridge(mMenuChannel);
         });
-        // [2026-10-21] The Discord items only for text channels: "Bridge" when not linked (or the link stopped), "Unlink"
-        // when linked.
+        // [2026-10-21] The Discord items: "Bridge" when not linked (or the link stopped), "Unlink" when linked - text
+        // channels. [DISCORD VOICE 2026-10-22] The same for voice rooms as "Bridge to Discord voice..." / "Unlink
+        // Discord voice..." (bridge_voice / unbridge_voice).
         LLUICtrl::EnableCallbackRegistry::ScopedRegistrar visible_registrar;
         visible_registrar.add("WolfChatChannel.Visible", [this](LLUICtrl*, const LLSD& param)
         {
-            bool text_channel = false;
+            bool text_channel = false, voice_room = false;
             for (const WolfChatSidebar::Channel& c : mChannels)
             {
-                if (c.mId == mMenuChannel) text_channel = !c.mVoice && !c.mGroupChat;
+                if (c.mId != mMenuChannel || c.mGroupChat) continue;
+                text_channel = !c.mVoice;
+                voice_room = c.mVoice;
             }
-            if (!text_channel) return false;
+            const std::string what = param.asString();
+            const bool voice_item = what == "bridge_voice" || what == "unbridge_voice";
+            if (voice_item ? !voice_room : !text_channel) return false;
             auto bl = mBridges.find(mMenuChannel);
-            if (param.asString() == "bridge") return bl == mBridges.end() || bl->second.mState == "broken";
+            if (what == "bridge" || what == "bridge_voice") return bl == mBridges.end() || bl->second.mState == "broken";
             return bl != mBridges.end();
         });
         menu = LLUICtrlFactory::getInstance()->createFromFile<LLContextMenu>("menu_wolf_chat_channel.xml",
@@ -4300,6 +4335,7 @@ void WolfFloaterChat::loadBridges()
             link.mReason = l["reason"].asString();
             link.mGuild = l["guild_name"].asString();
             link.mDiscordChannel = l["discord_channel_name"].asString();
+            link.mVoice = l["kind"].asString() == "voice";        // [DISCORD VOICE 2026-10-22]
             const LLUUID channel = l["channel"].asUUID();
             if (channel.notNull()) self->mBridges[channel] = link;
         }
@@ -4312,25 +4348,22 @@ void WolfFloaterChat::loadBridges()
 void WolfFloaterChat::onBridge(const LLUUID& channel)
 {
     if (!mCanManage || channel.isNull() || channel == mGroup) return;
-    bool restricted = false, text_channel = false;
+    bool restricted = false, found = false, voice = false;
     for (const WolfChatSidebar::Channel& c : mChannels)
     {
-        if (c.mId != channel) continue;
+        if (c.mId != channel || c.mGroupChat) continue;
         restricted = c.mRestricted;
-        text_channel = !c.mVoice;
+        found = true;
+        voice = c.mVoice;       // [DISCORD VOICE 2026-10-22] voice rooms go to Discord voice channels
     }
-    if (!text_channel)
-    {
-        setStatus("Only text channels can be bridged to Discord.", true);
-        return;
-    }
+    if (!found) return;
     WolfFloaterChatBridge* f = LLFloaterReg::getTypedInstance<WolfFloaterChatBridge>("wolf_chat_bridge");
     if (!f) return;
     LLHandle<LLFloater> h = getHandle();
-    f->setup(channel, "#" + channelName(channel), restricted, [h]()
+    f->setup(channel, voice ? "the voice room " + channelName(channel) : "#" + channelName(channel), restricted, [h]()
     {
         if (WolfFloaterChat* self = static_cast<WolfFloaterChat*>(h.get())) self->mNextBridges = 0.0;
-    });
+    }, voice);
     addDependentFloater(f->getHandle());
     f->openFloater();
     f->setFocus(true);
@@ -4339,10 +4372,16 @@ void WolfFloaterChat::onBridge(const LLUUID& channel)
 void WolfFloaterChat::onUnbridge(const LLUUID& channel)
 {
     if (!mCanManage || channel.isNull()) return;
-    const std::string name = channelName(channel);
+    bool voice = false;
+    for (const WolfChatSidebar::Channel& c : mChannels)
+    {
+        if (c.mId == channel) voice = c.mVoice;
+    }
+    // [DISCORD VOICE 2026-10-22] a voice room is named as one, and what stops is voice.
+    const std::string name = voice ? "the voice room " + channelName(channel) : "#" + channelName(channel);
     LLHandle<LLFloater> h = getHandle();
     LLNotificationsUtil::add("GenericAlertYesCancel",
-        LLSD().with("MESSAGE", "Stop bridging #" + name + " to Discord? Messages stop going between the two. You can link it again later."),
+        LLSD().with("MESSAGE", "Stop bridging " + name + " to Discord? " + std::string(voice ? "Voices stop going between the room and the Discord voice channel." : "Messages stop going between the two.") + " You can link it again later."),
         LLSD(), [h, channel, name](const LLSD& n, const LLSD& r)
     {
         if (LLNotificationsUtil::getSelectedOption(n, r) != 0) return false;
@@ -4352,8 +4391,8 @@ void WolfFloaterChat::onUnbridge(const LLUUID& channel)
         {
             WolfFloaterChat* self = static_cast<WolfFloaterChat*>(h.get());
             if (!self) return;
-            if (!ok) { self->setStatus("#" + name + " was not unlinked: " + error, true); return; }
-            self->setStatus("#" + name + " is no longer bridged to Discord.", false);
+            if (!ok) { self->setStatus(name + " was not unlinked: " + error, true); return; }
+            self->setStatus(name + " is no longer bridged to Discord.", false);
             self->mNextBridges = 0.0;
         });
         return false;
@@ -4389,19 +4428,26 @@ bool WolfFloaterChatBridge::postBuild()
     return true;
 }
 
-void WolfFloaterChatBridge::setup(const LLUUID& channel, const std::string& name, bool restricted, std::function<void()> made)
+void WolfFloaterChatBridge::setup(const LLUUID& channel, const std::string& name, bool restricted, std::function<void()> made, bool voice)
 {
     mChannelId = channel;
     mChannelName = name;
     mRestricted = restricted;
     mMade = made;
+    mVoice = voice;
 }
 
 void WolfFloaterChatBridge::onOpen(const LLSD& key)
 {
-    getChild<LLTextBox>("bridge_title")->setText("Bridge " + mChannelName + " to Discord");
+    getChild<LLTextBox>("bridge_title")->setText("Bridge " + mChannelName + (mVoice ? " to Discord voice" : " to Discord"));
     // A channel only some roles can see would be readable by everyone in the Discord channel: say so before linking.
-    getChild<LLView>("restricted_warning")->setVisible(mRestricted);
+    // [DISCORD VOICE 2026-10-22] A voice room: the steps name the voice channel's chat, and the owner is told voices are
+    // relayed live and not recorded (the same words Discord's channel gets, wolfbridge/src/voice.rs NOTICE).
+    LLTextBox* warning = getChild<LLTextBox>("restricted_warning");
+    warning->setText(mVoice ? getString(mRestricted ? "voice_restricted" : "voice_notice") : getString("text_restricted"));
+    warning->setVisible(mRestricted || mVoice);
+    getChild<LLTextBox>("command_label")->setText(getString(mVoice ? "voice_command_label" : "text_command_label"));
+    getChild<LLTextBox>("bridge_steps")->setText(getString(mVoice ? "voice_steps" : "text_steps"));
     requestCode();
 }
 

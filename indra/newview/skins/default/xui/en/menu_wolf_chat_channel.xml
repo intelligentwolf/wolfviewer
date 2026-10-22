@@ -2,7 +2,8 @@
 <!-- [WOLF CHAT 2026-10-21] Right-click on a channel in Wolf Chat's sidebar - the group's OWNERS only
      (wolffloaterchat.cpp WolfFloaterChat::showChannelMenu; php/wolfchat.php refuses anyone else). Never shown for
      #group-chat (the group's own chat). Delete asks first; it is placed apart from the others. [2026-10-21] The
-     Discord items show for text channels only: Bridge when not linked (or the link stopped), Unlink when linked. -->
+     Discord items show for text channels only: Bridge when not linked (or the link stopped), Unlink when linked.
+     [DISCORD VOICE 2026-10-22] Voice rooms get the voice pair instead: Bridge to Discord voice / Unlink Discord voice. -->
 <context_menu
  layout="topleft"
  name="Wolf Chat Channel Menu">
@@ -43,6 +44,28 @@
         <menu_item_call.on_visible
          function="WolfChatChannel.Visible"
          parameter="unbridge" />
+    </menu_item_call>
+    <menu_item_call
+     label="Bridge to Discord voice..."
+     layout="topleft"
+     name="bridge_voice">
+        <menu_item_call.on_click
+         function="WolfChatChannel.Action"
+         parameter="bridge_voice" />
+        <menu_item_call.on_visible
+         function="WolfChatChannel.Visible"
+         parameter="bridge_voice" />
+    </menu_item_call>
+    <menu_item_call
+     label="Unlink Discord voice..."
+     layout="topleft"
+     name="unbridge_voice">
+        <menu_item_call.on_click
+         function="WolfChatChannel.Action"
+         parameter="unbridge_voice" />
+        <menu_item_call.on_visible
+         function="WolfChatChannel.Visible"
+         parameter="unbridge_voice" />
     </menu_item_call>
     <menu_item_separator
      layout="topleft" />

@@ -17,6 +17,14 @@
  single_instance="true"
  title="BRIDGE TO DISCORD"
  width="460">
+    <!-- [DISCORD VOICE 2026-10-22] The words for a text channel and for a voice room (WolfFloaterChatBridge::onOpen). -->
+    <string name="text_restricted">This channel is limited to some roles. Bridged, its messages can be read by everyone in the Discord channel.</string>
+    <string name="voice_notice">Voices are relayed live between this room and the Discord voice channel, never recorded. Both sides are told.</string>
+    <string name="voice_restricted">This room is limited to some roles. Bridged, everyone in the Discord voice channel hears it - relayed live, never recorded.</string>
+    <string name="text_command_label">Command to type in the Discord channel:</string>
+    <string name="voice_command_label">Command to type in the Discord voice channel's chat:</string>
+    <string name="text_steps">1. Add Wolf-Bot to your Discord server (button below; you need Manage Server there).&#10;2. In the Discord channel, type the command above.&#10;3. Done - messages go both ways.</string>
+    <string name="voice_steps">1. Add Wolf-Bot to your Discord server (button below; you need Manage Server there).&#10;2. Open the Discord voice channel's chat and type the command above.&#10;3. Done - Wolf-Bot joins while anyone is in the room or the channel.</string>
     <text
      follows="left|top|right"
      font="SansSerifBold"

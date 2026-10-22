@@ -304,7 +304,7 @@ public:
     bool postBuild() override;
     void onOpen(const LLSD& key) override;
     void draw() override;
-    void setup(const LLUUID& channel, const std::string& name, bool restricted, std::function<void()> made);
+    void setup(const LLUUID& channel, const std::string& name, bool restricted, std::function<void()> made, bool voice = false);
 
 private:
     void requestCode();
@@ -313,6 +313,7 @@ private:
     LLUUID mChannelId;
     std::string mChannelName;
     bool mRestricted = false;
+    bool mVoice = false;                // [DISCORD VOICE 2026-10-22] a voice room to a Discord voice channel
     std::function<void()> mMade;
     LLLineEditor* mCode = nullptr;
     LLLineEditor* mCommand = nullptr;
@@ -707,6 +708,7 @@ private:
         std::string mReason;
         std::string mGuild;
         std::string mDiscordChannel;
+        bool mVoice = false;            // [DISCORD VOICE 2026-10-22] a voice room linked to a Discord voice channel
     };
     std::map<LLUUID, BridgeLink> mBridges;      // [2026-10-21] by Wolf Chat channel
     std::string mBridgeNotice;

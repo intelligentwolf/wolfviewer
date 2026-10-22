@@ -230,6 +230,7 @@ private:
     void onSelectBox();
     void onSaveBox();
     void onDeleteBox();
+    void onRemoveLeftovers();   // [2026-10-22] walkable parts no tunnel record owns
     void onGoInsideBox();
     void selectBox(S32 id);
     static void getCoro(LLHandle<LLFloater> h, std::string url, LLUUID region);
@@ -313,6 +314,7 @@ private:
     LLButton* mDeleteBtn = nullptr;
     LLButton* mGoBtn = nullptr;
     LLButton* mRefreshBtn = nullptr;
+    LLButton* mLeftoversBtn = nullptr;
     LLCheckBoxCtrl* mShowCheck = nullptr;
     LLTextBox* mInfo = nullptr;
     bool mEdit = false;             // the capability says this agent may change boxes here

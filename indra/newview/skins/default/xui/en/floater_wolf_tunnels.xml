@@ -124,6 +124,8 @@
             <scroll_list.columns label="Turn" name="turn" width="60" />
         </scroll_list>
         <text follows="left|top" height="14" layout="topleft" left="10" name="info" top="108" width="200" />
+        <button follows="left|top" height="20" label="Remove leftovers" layout="topleft" left="225" name="leftovers_btn" top="106" width="155"
+         tool_tip="Remove the walkable parts no tunnel in this region's list owns - the holes left after a tunnel's rock was deleted by hand (asks first)" />
         <button follows="left|top" height="20" label="Refresh" layout="topleft" left="390" name="refresh_btn" top="106" width="80"
          tool_tip="Read this region's tunnels and boxes again" />
         <spinner decimal_digits="1" follows="left|top" height="19" increment="0.5" label="Centre X" label_width="60" layout="topleft"

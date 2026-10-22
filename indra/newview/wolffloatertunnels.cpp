@@ -1226,6 +1226,38 @@ namespace
         s_jobBusy = false;
         ++s_jobSerial;
     }
+
+    /** The walkable boxes no tunnel record lists (a rock deleted by hand, or a build whose record was never saved):
+     *  removed one at a time, as takeAway does. */
+    std::vector<S32> leftoverBoxes()
+    {
+        std::set<S32> owned;
+        for (const WolfTunnels::Record& r : s_records)
+            if (r.mBuilt.isMap())
+                for (const LLSD& id : llsd::inArray(r.mBuilt["volumes"])) owned.insert(id.asInteger());
+        std::vector<S32> out;
+        for (const WolfTunnels::Box& b : s_boxes) if (!owned.count(b.mId)) out.push_back(b.mId);
+        return out;
+    }
+
+    void leftoversCoro(std::vector<S32> ids, std::string cap, LLUUID region)
+    {
+        S32 n = 0;
+        for (S32 id : ids)
+        {
+            if (!gAgent.getRegion() || gAgent.getRegion()->getRegionID() != region) { jobFail("Stopped: you left the region."); break; }
+            s_jobStatus = llformat("Removing leftover walkable parts (%d of %d)...", ++n, (S32)ids.size());
+            LLSD answer;
+            std::string err;
+            const bool ok = capPostRetry(cap, LLSD().with("op", "remove").with("id", id), answer, err);
+            // "that tunnel is not here any more" (WolfTunnelsModule.cs Apply remove): already gone, which is what we want.
+            if (!ok && err.find("not here any more") == std::string::npos) { jobFail("A walkable part could not be removed: " + err); break; }
+            if (answer.has("tunnels")) WolfTunnels::setFromAnswer(answer, region);
+        }
+        if (s_jobErrors.empty()) s_jobStatus = llformat("%d leftover walkable part(s) removed - the ground is whole again there.", n);
+        s_jobBusy = false;
+        ++s_jobSerial;
+    }
 }
 
 F32 WolfTunnels::routeLength(const Design& d) { return Route(d.mP).mLen; }
@@ -1901,6 +1933,8 @@ bool WolfFloaterTunnels::postBuild()
     mDeleteBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { onDeleteBox(); });
     mGoBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { onGoInsideBox(); });
     mRefreshBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { refresh(); });
+    mLeftoversBtn = getChild<LLButton>("leftovers_btn");
+    mLeftoversBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { onRemoveLeftovers(); });
     relayout();
     return true;
 }
@@ -2047,7 +2081,13 @@ void WolfFloaterTunnels::relayout()
     mExpert->setVisible(expert);
     mAdvanced->setVisible(boxes);
     mListPanel->setVisible(list);
-    const S32 want = BASE_H + (expert ? EXPERT_H : 0) + (boxes ? BOXES_H : 0) + (list ? LIST_H : 0);
+    // [2026-10-22] The part always shown ends under the Expert / tunnels-list ticks, measured where they really are: on Paul's
+    // screen every row sat about 30 px lower than BASE_H allows, the ticks were drawn below the window's edge and could not
+    // be clicked, so the tunnels list (Change / Delete) could not be opened. The rows follow the window's top, so their
+    // distance from the top is the window's height less a row's bottom.
+    const S32 ticks_bottom = getRect().getHeight() - llmin(mExpertCheck->getRect().mBottom, mListCheck->getRect().mBottom);
+    const S32 base = llmax(BASE_H, ticks_bottom + 4);
+    const S32 want = base + (expert ? EXPERT_H : 0) + (boxes ? BOXES_H : 0) + (list ? LIST_H : 0);
     if (getRect().getHeight() != want)
     {
         // Grow or shrink downwards, keeping the window's top where it is.
@@ -2056,7 +2096,7 @@ void WolfFloaterTunnels::relayout()
         setShape(r);
     }
     // The open sections one under the other, from the top (a child's origin is its bottom left in the window's frame).
-    S32 top = BASE_H;
+    S32 top = base;
     auto place = [&](LLPanel* p, bool shown, S32 h)
     {
         if (!shown) return;
@@ -2835,6 +2875,7 @@ void WolfFloaterTunnels::updateButtons()
     for (LLSpinCtrl* s : mSpin) s->setEnabled(canBox && s_selected != 0);
     mGoBtn->setEnabled(s_selected != 0 && !mBusy);
     mRefreshBtn->setEnabled(!mBusy);
+    mLeftoversBtn->setEnabled(canBox && !mCapUrl.empty() && !leftoverBoxes().empty());
 }
 
 // ── the region's tunnels ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -3146,6 +3187,35 @@ void WolfFloaterTunnels::onDeleteBox()
         s_selected = 0;
         self->setStatus(llformat("Deleting walkable box #%d...", id), false);
         self->post(body);
+    });
+}
+
+// [2026-10-22] Paul: "if you delete a tunnel mesh you're left with holes in the terrain". Delete in the tunnels list takes a
+// tunnel's walkable parts away even when its rock is gone; this clears the parts no tunnel record lists at all.
+void WolfFloaterTunnels::onRemoveLeftovers()
+{
+    LLViewerRegion* rgn = gAgent.getRegion();
+    if (!rgn || s_jobBusy || mCapUrl.empty()) return;
+    const std::vector<S32> ids = leftoverBoxes();
+    if (ids.empty()) { setStatus("No leftover walkable parts here: every one belongs to a tunnel in the list.", false); return; }
+    LLSD args;
+    args["MESSAGE"] = llformat("Remove %d walkable part(s) that no tunnel in this region's list owns? They are what leaves holes in the "
+                               "ground after a tunnel's rock is deleted by hand. A tunnel whose record never saved its parts (built "
+                               "before 22 Oct) loses them too: build it again. Anyone standing in one below the ground is lifted to the surface.",
+                               (S32)ids.size());
+    LLHandle<LLFloater> h = getHandle();
+    const std::string cap = mCapUrl;
+    const LLUUID region = rgn->getRegionID();
+    LLNotificationsUtil::add("GenericAlertYesCancel", args, LLSD(), [h, ids, cap, region](const LLSD& n, const LLSD& r)
+    {
+        if (LLNotificationsUtil::getSelectedOption(n, r) != 0 || s_jobBusy) return;
+        s_jobBusy = true;
+        s_jobOk = false;
+        s_jobErrors.clear();
+        s_jobStatus = "Removing leftover walkable parts...";
+        ++s_jobSerial;
+        LLCoros::instance().launch("WolfTunnelsLeftovers", [ids, cap, region]() { leftoversCoro(ids, cap, region); });
+        if (WolfFloaterTunnels* self = static_cast<WolfFloaterTunnels*>(h.get())) self->updateButtons();
     });
 }
 

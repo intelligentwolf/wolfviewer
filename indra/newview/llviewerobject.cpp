@@ -2763,6 +2763,19 @@ void LLViewerObject::interpolateLinearMotion(const F64SecondsImplicit& frame_tim
         {   // This will put the object underground, but we can't tell if it will stop
             // at ground level or not
             min_height = LLWorld::getInstance()->getMinAllowedZ(this, new_pos_global);
+            // <WolfViewer 2026-10-22> TUNNELS (wolffloatertunnels.cpp): Paul riding the Moonfold Upper Line train, "its not
+            // going through the tunnel just up in the air" (05:45Z: engine in the hillside, coaches over the valley). The
+            // keyframed train runs in its bore up to 425 m under the mountain; between server updates this clamp (land height
+            // minus half the prim's diagonal, LLWorld::getMinAllowedZ) lifted the predicted position towards the mountain
+            // surface, and for the vehicle you sit on the OWN VEHICLE SNAP in processUpdateMessage then kept drawing it there
+            // (WolfSnap log: "server put it 400 m from the prediction"). Inside a tunnel box the region keeps things below the
+            // ground, so the guess does too - the exemption avatars get above. Agent's region only (the boxes are read for it).
+            if (mRegionp == gAgent.getRegion()
+                && (WolfTunnels::contains(new_pos) || WolfTunnels::contains(getPositionRegion())))
+            {
+                min_height = llmin(min_height, new_pos.mV[VZ]);
+            }
+            // </WolfViewer>
             // Cap maximum height
             static LLCachedControl<bool> no_fly_height_limit(gSavedSettings, "FSRemoveFlyHeightLimit");
             if(!no_fly_height_limit)

@@ -54,6 +54,7 @@
 #include "llvoavatar.h"
 #include "llvocache.h"
 #include "llvowater.h"
+#include "wolffloatertunnels.h"   // <WolfViewer 2026-10-22/> WolfTunnels::contains (resolveStepHeightGlobal)
 #include "message.h"
 #include "pipeline.h"
 #include "llappviewer.h"        // for do_disconnect()
@@ -1006,9 +1007,26 @@ F32 LLWorld::resolveStepHeightGlobal(const LLVOAvatar* avatarp, const LLVector3d
     F32 normalized_land_distance;
 
     land_intersection.mdV[VZ] = regionp->getLand().resolveHeightGlobal(point_a);
+    // <WolfViewer 2026-10-22> TUNNELS (wolffloatertunnels.cpp): Paul on Moonfold, in a tunnel under the terrain: "my avatars
+    // legs are going up in the air when i stop walking". The stand motion (llkeyframestandmotion.cpp:268-279) and keyframe
+    // ground constraints (llkeyframemotion.cpp:883) put the feet where LLVOAvatar::getGround() says, which is this function.
+    // Under the terrain the land surface is ABOVE point_a, so normalized_land_distance is negative and the foot plane (the
+    // tunnel floor the region reports; clamped to 0..1 below) can never be nearer: the IK pulled the feet up to the hill top.
+    // Inside a tunnel box (where the region does not push avatars up - WolfSim WolfUndergroundVolumes) land above the probe
+    // start is not ground: it counts as no land within the probe (its far end, level), so the foot plane decides as it does
+    // on a prim floor. Avatar probes only, agent's region only (the boxes are read for it), land above point_a only.
+    bool wolf_land_above_in_tunnel = avatarp
+        && land_intersection.mdV[VZ] > point_a.mdV[VZ]
+        && regionp == gAgent.getRegion()
+        && WolfTunnels::contains(regionp->getPosRegionFromGlobal(point_a));
+    if (wolf_land_above_in_tunnel)
+    {
+        land_intersection = point_b;
+    }
+    // </WolfViewer>
     normalized_land_distance = (F32)(point_a.mdV[VZ] - land_intersection.mdV[VZ]) / segment_length;
     intersection = land_intersection;
-    intersection_normal = resolveLandNormalGlobal(land_intersection);
+    intersection_normal = wolf_land_above_in_tunnel ? LLVector3::z_axis : resolveLandNormalGlobal(land_intersection);   // <WolfViewer 2026-10-22/>
 
     if (avatarp && !avatarp->mFootPlane.isExactlyClear())
     {
@@ -1028,7 +1046,7 @@ F32 LLWorld::resolveStepHeightGlobal(const LLVOAvatar* avatarp, const LLVector3d
         else
         {
             intersection = land_intersection;
-            intersection_normal = resolveLandNormalGlobal(land_intersection);
+            intersection_normal = wolf_land_above_in_tunnel ? LLVector3::z_axis : resolveLandNormalGlobal(land_intersection);   // <WolfViewer 2026-10-22/>
         }
     }
 

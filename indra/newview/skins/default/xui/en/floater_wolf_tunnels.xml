@@ -2,22 +2,21 @@
 <!-- [WOLF TUNNELS 2026-10-22] The Tunnel tool (wolffloatertunnels.cpp). Paul: "make the tunneling work like the cave builder ...
      users should be able to 'Draw' the tunnel and it creates the mesh with caverns", and "offer smooth tunnels (like railways)
      or rough tunnels like someone would explore".
-     [2026-10-22 easy] Paul on Sandbox: "the tunnel builder was bad, I couldn't do it :-( I tried drawing the points, part of the
-     floater I can't see, but I don't get the Build button enabled. Can we make it easier?" The window was 730 high (958 with
-     Advanced) with its warnings and status in fixed boxes that cut long text off, and Build was greyed with the reason printed
-     only in that box.
-     Persona: a region owner who has never built a tunnel and wants one through their hill in a couple of minutes.
-     Flow: New tunnel -> click where it starts -> click the bends and the far end (the route shows live; the ends are the mouths on
-     the ground, the points between go down gently) -> Build tunnel. The hint line says the next step; Build tunnel is enabled
-     from two points, and when it is not the line under it says why and what to do. Everything else (depth, a point's depth,
-     style, size, caverns, portals, see-through, the region's walkable boxes) is under More options, closed by default.
-     Layout: 364 high closed, 562 with More options (Build tunnel is always above More options, so it never moves off screen);
-     the walkable boxes add 228. Heights below must match WolfFloaterTunnels::relayout. -->
+     [2026-10-22 simple] Paul still could not make one (wolfstorm/tools/TUNNEL_STRANGER_ASSESSMENT.md), and: "when I first show
+     it, I just draw the tunnel, and it doesn't require me to create a new tunnel first."
+     Persona: a region owner who has never built a tunnel and wants one through their hill in two minutes.
+     Story: "I click where the tunnel goes in and where it comes out. It goes under the hill by itself, and I press Build."
+     Flow: the window opens drawing (camera from above, pen on) -> 1. click In, bends, Out -> 2. what it is for (Path / Road /
+     Railway) and its walls (Built / Natural) -> 3. Build tunnel -> Walk in. The hint line at the top says the next step; the
+     line under Build says why it cannot be pressed, else the one note about the drawing. Expert (closed) holds the numbers; the
+     region's tunnels (closed) hold Change, Walk in and Delete for tunnels built before.
+     Layout: 320 high with both sections closed; Expert 214, its walkable boxes 228, the tunnels list 90 (heights must match
+     WolfFloaterTunnels::relayout, which places the panels under each other). Build is in the part that is always shown. -->
 <floater
  can_close="true"
  can_minimize="true"
  can_resize="false"
- height="364"
+ height="320"
  layout="topleft"
  name="wolf_tunnels"
  help_topic="wolf_tunnels"
@@ -26,105 +25,97 @@
  title="Tunnels"
  width="480">
     <floater.string name="str_need_cap">This region cannot make tunnels yet (it needs the WolfSim tunnels update). Ask the region owner.</floater.string>
-    <floater.string name="str_need_rights">Only the region owner, the estate owner and estate managers can make tunnels here.</floater.string>
-
-    <scroll_list draw_heading="true" follows="left|top|right" height="66" layout="topleft" left="10" name="tun_list" top="24" width="460"
-     tool_tip="This region's tunnels. Pick one to change it, delete it or go inside.">
-        <scroll_list.columns label="Tunnel" name="name" width="170" />
-        <scroll_list.columns label="Style" name="style" width="70" />
-        <scroll_list.columns label="Length" name="length" width="70" />
-        <scroll_list.columns label="Built" name="built" width="140" />
-    </scroll_list>
-    <button follows="left|top" height="22" label="New tunnel" layout="topleft" left="10" name="new_btn" top="96" width="110"
-     tool_tip="Start drawing a new tunnel" />
-    <button follows="left|top" height="22" label="Change" layout="topleft" left="126" name="edit_btn" top="96" width="80"
-     tool_tip="Change the tunnel picked in the list, then build it again" />
-    <button follows="left|top" height="22" label="Go inside" layout="topleft" left="212" name="go_tunnel_btn" top="96" width="90"
-     tool_tip="Teleport to the floor just inside the picked tunnel's first mouth" />
-    <button follows="left|top" height="22" label="Delete" layout="topleft" left="380" name="delete_tunnel_btn" top="96" width="90"
-     tool_tip="Take the picked tunnel away: its rock, its walkable boxes and its record (asks first)" />
+    <floater.string name="str_need_rights">Only the region's estate owner and estate managers can make tunnels here.</floater.string>
 
     <!-- what to do next (WolfFloaterTunnels::nextStep) -->
-    <text follows="left|top|right" font.style="BOLD" height="34" layout="topleft" left="10" name="hint" top="126" width="460" word_wrap="true" />
+    <text follows="left|top|right" font.style="BOLD" height="36" layout="topleft" left="10" name="hint" top="22" width="460" word_wrap="true" />
 
-    <text follows="left|top" height="16" layout="topleft" left="10" name="name_lbl" top="168" width="40">Name</text>
-    <line_editor follows="left|top" height="20" layout="topleft" left="52" max_length_bytes="63" name="tun_name" top="166" width="210"
-     tool_tip="The tunnel's name (also the rock object's name)" />
-    <text follows="left|top" height="16" layout="topleft" left="272" name="kind_lbl" top="168" width="36">Type</text>
-    <combo_box follows="left|top" height="20" layout="topleft" left="310" name="tun_kind" top="166" width="160"
-     tool_tip="The tunnel's size. Walking: 4 m wide, 3.5 m high. Wide: 6 x 4.5 m. Rail: 6 x 6 m, for trains. Custom: your own (More options).">
-        <combo_box.item label="Walking (4 m)" name="walk" value="walk" />
-        <combo_box.item label="Wide (6 m)" name="wide" value="wide" />
-        <combo_box.item label="Rail (6 x 6 m)" name="rail" value="rail" />
-        <combo_box.item label="Custom" name="custom" value="custom" />
-    </combo_box>
+    <!-- 1. Where -->
+    <button follows="left|top" height="24" label="Undo last point" layout="topleft" left="10" name="undo_point_btn" top="62" width="122"
+     tool_tip="Take the last point you clicked back (Backspace)" />
+    <button follows="left|top" height="24" label="Start over" layout="topleft" left="138" name="start_over_btn" top="62" width="96"
+     tool_tip="Clear the drawing and draw a new tunnel (asks first)" />
+    <button follows="left|top" height="24" label="Look from above" layout="topleft" left="240" name="top_view_btn" top="62" width="122"
+     tool_tip="Turn the camera to look straight down on the drawing, so a click lands exactly where you point" />
+    <text follows="left|top" font="SansSerifSmall" height="16" layout="topleft" left="368" name="route_info" top="67" width="102" />
+    <!-- Start over's question, in the window (never a modal box) -->
+    <text follows="left|top" height="18" layout="topleft" left="10" name="confirm_text" top="66" visible="false" width="246">Clear the drawing and start again?</text>
+    <button follows="left|top" height="24" label="Keep it" layout="topleft" left="262" name="confirm_no" top="62" visible="false" width="90"
+     tool_tip="Keep the drawing" />
+    <button follows="left|top" height="24" label="Clear it" layout="topleft" left="380" name="confirm_yes" top="62" visible="false" width="90"
+     tool_tip="Clear the drawing" />
 
-    <button follows="left|top" height="22" is_toggle="true" label="Draw / move points" layout="topleft" left="10" name="draw_route_btn" top="194" width="150"
-     tool_tip="Put the pen down: click the ground to add points, drag a point's boxes to move it (press again, Enter or Esc to stop)" />
-    <button follows="left|top" height="22" label="Undo point" layout="topleft" left="166" name="undo_point_btn" top="194" width="96"
-     tool_tip="Take the last point of the route back (Backspace)" />
-    <text follows="left|top" font="SansSerifSmall" height="16" layout="topleft" left="272" name="route_info" top="198" width="198" />
+    <!-- 2. What -->
+    <text follows="left|top" height="16" layout="topleft" left="10" name="kind_lbl" top="98" width="56">For</text>
+    <radio_group follows="left|top" height="18" layout="topleft" left="66" name="tun_kind" top="97" width="404"
+     tool_tip="What the tunnel is for. Path: walking, 4 m wide. Road: 6 m wide. Railway: 6 m wide and high, with a gentle slope for trains.">
+        <radio_item height="18" label="Path (walking)" layout="topleft" left="0" name="walk" top="0" value="walk" width="130" />
+        <radio_item height="18" label="Road (wide)" layout="topleft" left="134" name="wide" top="0" value="wide" width="120" />
+        <radio_item height="18" label="Railway" layout="topleft" left="258" name="rail" top="0" value="rail" width="120" />
+    </radio_group>
+    <text follows="left|top" height="16" layout="topleft" left="10" name="style_lbl" top="122" width="56">Walls</text>
+    <radio_group follows="left|top" height="18" layout="topleft" left="66" name="tun_style" top="121" width="290"
+     tool_tip="Built: straight walls, a level floor and an arched roof. Natural: rough rock, like a cave to explore.">
+        <radio_item height="18" label="Built (smooth)" layout="topleft" left="0" name="smooth" top="0" value="smooth" width="130" />
+        <radio_item height="18" label="Natural (rough)" layout="topleft" left="134" name="rough" top="0" value="rough" width="150" />
+    </radio_group>
+    <button follows="left|top" height="22" is_toggle="true" label="Add a room" layout="topleft" left="360" name="room_btn" top="118" width="110"
+     tool_tip="Then click on the tunnel's line: a round room (a cavern) goes there. Its size is in Expert." />
 
-    <!-- the one main action, and the plain reason under it whenever it cannot be pressed -->
-    <button follows="left|top" height="28" label="Build tunnel" layout="topleft" left="10" name="build_btn" top="226" width="170"
-     tool_tip="Save the tunnel, make its rock, rez it and make it walkable (an old build of it is taken away first)" />
-    <button follows="left|top" height="22" label="Stop editing" layout="topleft" left="350" name="cancel_edit_btn" top="229" width="120"
-     tool_tip="Put the drawing away without building it" />
-    <text follows="left|top|right" font="SansSerifSmall" height="44" layout="topleft" left="10" name="tun_warnings" top="258" width="460" word_wrap="true" />
-    <text follows="left|top|right" font="SansSerifSmall" height="30" layout="topleft" left="10" name="status" top="304" width="460" word_wrap="true" />
+    <!-- 3. Build: the one main action, and the plain reason under it whenever it cannot be pressed -->
+    <button follows="left|top" height="32" label="Build tunnel" layout="topleft" left="10" name="build_btn" top="150" width="220"
+     tool_tip="Save the tunnel, make its rock, put it here and make it walkable (an old build of it is taken away first)" />
+    <button follows="left|top" height="32" label="Walk in" layout="topleft" left="240" name="walk_in_btn" top="150" visible="false" width="120"
+     tool_tip="Go to the floor just inside the way in" />
+    <text follows="left|top|right" height="46" layout="topleft" left="10" name="tun_warnings" top="188" width="460" word_wrap="true" />
+    <progress_bar color_bar="0.3 0.85 0.4 1" follows="left|top" height="10" layout="topleft" left="10" name="build_progress" top="238" visible="false" width="460" />
+    <text follows="left|top|right" height="44" layout="topleft" left="10" name="status" top="252" width="460" word_wrap="true" />
 
-    <check_box follows="left|top" height="16" initial_value="false" label="More options (depth, style, size, caverns, see-through)" layout="topleft"
-     left="10" name="more_check" top="340" width="460" tool_tip="Show the settings most tunnels do not need" />
+    <check_box follows="left|top" height="16" initial_value="false" label="Expert" layout="topleft" left="10" name="expert_check" top="298" width="200"
+     tool_tip="Size, depth, a point's depth by hand, rooms' size, the see-through ground, the walkable parts. Most tunnels need none of it." />
+    <check_box follows="left|top" height="16" initial_value="false" label="This region's tunnels" layout="topleft" left="220" name="list_check" top="298" width="250"
+     tool_tip="Tunnels built here before: change one, walk in or delete it" />
 
-    <!-- More options: 200 high, closed by default -->
-    <panel follows="left|top" height="200" layout="topleft" left="0" name="more_panel" top="362" visible="false" width="480">
-        <!-- [2026-10-22] Paul: "want to draw underground ... the route inside the hill, at the depth you choose". -->
-        <spinner decimal_digits="1" follows="left|top" height="19" increment="0.5" label="Depth below ground (m)" label_width="140" layout="topleft"
-         left="10" max_val="300" min_val="0" name="tun_depth" top="0" width="230"
-         tool_tip="How deep the points between the mouths go under the ground, at most, metres. The floor slopes down to it gently, so short tunnels stay shallower." />
-        <check_box follows="left|top" height="16" initial_value="true" label="Mouths at ground level" layout="topleft" left="250" name="tun_mouths"
-         top="1" width="220" tool_tip="The first and last points sit on the ground so people can walk in; the points between go in at the depth" />
-        <text follows="left|top" height="16" layout="topleft" left="10" name="pt_lbl" top="28" width="100">No point picked</text>
-        <spinner decimal_digits="2" follows="left|top" height="19" increment="0.25" label="Depth" label_width="40" layout="topleft" left="110"
-         max_val="300" min_val="-50" name="pt_depth" top="26" width="130"
-         tool_tip="How far the picked point's floor is below the ground there, metres (less than 0: above the ground)" />
-        <button follows="left|top" height="20" label="To ground level" layout="topleft" left="246" name="pt_ground" top="25" width="112"
-         tool_tip="Put the picked point's floor on the ground" />
-        <button follows="left|top" height="20" label="Remove point" layout="topleft" left="364" name="pt_remove" top="25" width="106"
-         tool_tip="Take the picked point out of the route (Delete)" />
-        <text follows="left|top" height="16" layout="topleft" left="10" name="style_lbl" top="54" width="40">Style</text>
-        <radio_group follows="left|top" height="18" layout="topleft" left="50" name="tun_style" top="53" width="420"
-         tool_tip="Smooth: engineered, straight walls, level floor, arched roof (railways, roads). Rough: a natural cave, uneven rock, changing width, bumpy roof.">
-            <radio_item height="18" label="Smooth (railways, roads)" layout="topleft" left="0" name="smooth" top="0" value="smooth" width="200" />
-            <radio_item height="18" label="Rough (a cave to explore)" layout="topleft" left="210" name="rough" top="0" value="rough" width="200" />
-        </radio_group>
+    <!-- Expert: 214 high, closed by default -->
+    <panel follows="left|top" height="214" layout="topleft" left="0" name="expert_panel" top="320" visible="false" width="480">
+        <text follows="left|top" height="16" layout="topleft" left="10" name="name_lbl" top="4" width="40">Name</text>
+        <line_editor follows="left|top" height="20" layout="topleft" left="52" max_length_bytes="63" name="tun_name" top="2" width="200"
+         tool_tip="The tunnel's name (also the rock object's name)" />
+        <check_box follows="left|top" height="16" initial_value="true" label="Stone arches at the ends" layout="topleft" left="264" name="tun_portals"
+         top="4" width="206" tool_tip="A stone arch round the way in and the way out" />
         <spinner decimal_digits="1" follows="left|top" height="19" increment="0.5" label="Width" label_width="40" layout="topleft" left="10"
-         max_val="20" min_val="2" name="tun_w" top="78" width="120" tool_tip="Width, metres (2 to 20)" />
-        <spinner decimal_digits="1" follows="left|top" height="19" increment="0.5" label="Height" label_width="44" layout="topleft" left="140"
-         max_val="15" min_val="2.5" name="tun_h" top="78" width="130" tool_tip="Clear height inside, metres (2.5 to 15)" />
-        <check_box follows="left|top" height="16" initial_value="true" label="Stone arches at the mouths" layout="topleft" left="284" name="tun_portals"
-         top="79" width="186" tool_tip="A stone portal round each mouth" />
-        <text follows="left|top" font="SansSerifSmall" height="16" layout="topleft" left="10" name="grade_info" top="102" width="460"
-         tool_tip="The floor runs straight from each point to the next, at each point's own depth" />
-        <button follows="left|top" height="22" is_toggle="true" label="Add cavern" layout="topleft" left="10" name="cavern_btn" top="124" width="110"
-         tool_tip="Put the pen down to click caverns onto the route (press again to stop)" />
-        <slider decimal_digits="0" follows="left|top" height="16" increment="1" initial_value="8" label="Cavern size" label_width="70" layout="topleft"
-         left="128" max_val="30" min_val="3" name="cavern_r" show_text="true" top="127" width="220" tool_tip="Radius of the next cavern, metres (3 to 30)" />
-        <button follows="left|top" height="22" label="Undo cavern" layout="topleft" left="354" name="undo_cavern_btn" top="124" width="116"
-         tool_tip="Take the last cavern back" />
+         max_val="20" min_val="2" name="tun_w" top="30" width="110" tool_tip="Width, metres (2 to 20). Path, Road and Railway set it; this changes it." />
+        <spinner decimal_digits="1" follows="left|top" height="19" increment="0.5" label="Height" label_width="44" layout="topleft" left="128"
+         max_val="15" min_val="2.5" name="tun_h" top="30" width="116" tool_tip="Clear height inside, metres (2.5 to 15)" />
+        <spinner decimal_digits="1" follows="left|top" height="19" increment="0.5" label="Rock over the roof" label_width="112" layout="topleft" left="254"
+         max_val="100" min_val="0" name="tun_cover" top="30" width="190" tool_tip="Inside the hill the floor goes deep enough to keep at least this much ground over the roof, metres (2 each time the window opens)" />
+        <check_box follows="left|top" height="16" initial_value="true" label="Ways in and out at ground level" layout="topleft" left="10" name="tun_mouths"
+         top="56" width="460" tool_tip="On: the two ends open on the ground so people can walk in. Off: the ends are as deep as the inside (for a tunnel joining another underground)." />
+        <text follows="left|top" height="16" layout="topleft" left="10" name="pt_lbl" top="82" width="40">Point</text>
+        <spinner decimal_digits="0" follows="left|top" height="19" increment="1" label="" label_width="0" layout="topleft" left="50"
+         max_val="2" min_val="1" name="pt_num" top="80" width="60" tool_tip="Which point: 1 is the way in, the highest is the way out (its marker shows amber)" />
+        <spinner decimal_digits="2" follows="left|top" height="19" increment="0.25" label="Depth (m)" label_width="62" layout="topleft" left="120"
+         max_val="300" min_val="-50" name="pt_depth" top="80" width="160" tool_tip="How far that point's floor is under the ground. Changing it sets it by hand; the rest of the floor is worked out round it." />
+        <button follows="left|top" height="20" label="(worked out)" layout="topleft" left="290" name="pt_auto" top="79" width="120"
+         tool_tip="Let the tool work this point's depth out again" />
+        <slider decimal_digits="0" follows="left|top" height="16" increment="1" initial_value="8" label="Room size (m)" label_width="90" layout="topleft"
+         left="10" max_val="30" min_val="3" name="room_r" show_text="true" top="108" width="260" tool_tip="From the middle of the next room to its wall, metres (3 to 30)" />
+        <button follows="left|top" height="22" label="Undo room" layout="topleft" left="290" name="undo_room_btn" top="105" width="120"
+         tool_tip="Take the last room back" />
         <!-- [WOLF TUNNELS 2026-10-22] Paul: "the ground needs to be SEMI TRANSPARENT so you can see where it is but also see where
              your tunnel is going". On while this window is open (WolfTunnels::setSeeThrough); never fully clear or fully solid. -->
         <check_box follows="left|top" height="16" initial_value="true" label="See through the ground" layout="topleft" left="10"
-         name="see_through" top="154" width="170" tool_tip="While this window is open the ground is half see-through, so the route and the tunnels inside the hill show. It goes back to normal when the window closes." />
+         name="see_through" top="134" width="170" tool_tip="While this window is open the ground is half see-through, so the tunnel inside the hill shows. It goes back to normal when the window closes." />
         <slider decimal_digits="0" follows="left|top" height="16" increment="5" initial_value="50" label="How much (%)" label_width="80" layout="topleft"
-         left="190" max_val="75" min_val="25" name="see_through_amount" show_text="true" top="154" width="280"
-         tool_tip="How see-through the ground is: 25% (mostly solid) to 75% (mostly clear). It never goes fully clear, so you still see where the ground is." />
-        <check_box follows="left|top" height="16" initial_value="false" label="The region's walkable boxes (expert)" layout="topleft" left="10"
-         name="advanced_check" top="178" width="400" tool_tip="Every walkable box in this region, with its numbers" />
+         left="190" max_val="75" min_val="25" name="see_through_amount" show_text="true" top="134" width="280"
+         tool_tip="How see-through the ground is: 25% (mostly solid) to 75% (mostly clear)." />
+        <text follows="left|top" font="SansSerifSmall" height="16" layout="topleft" left="10" name="grade_info" top="160" width="460" />
+        <check_box follows="left|top" height="16" initial_value="false" label="The region's walkable parts (for checking)" layout="topleft" left="10"
+         name="advanced_check" top="184" width="400" tool_tip="Every walkable box in this region, with its numbers" />
     </panel>
 
-    <!-- the region's walkable boxes: 228 high, under More options -->
-    <panel follows="left|top" height="228" layout="topleft" left="0" name="advanced_panel" top="562" visible="false" width="480">
+    <!-- the region's walkable boxes: 228 high, inside Expert -->
+    <panel follows="left|top" height="228" layout="topleft" left="0" name="advanced_panel" top="534" visible="false" width="480">
         <scroll_list draw_heading="true" follows="left|top|right" height="104" layout="topleft" left="10" name="box_list" top="0" width="460"
          tool_tip="This region's walkable boxes. Pick one to see its numbers and change them.">
             <scroll_list.columns label="Box" name="id" width="50" />
@@ -157,5 +148,22 @@
          tool_tip="Teleport to the floor of the picked box" />
         <button follows="left|top" height="22" label="Save changes" layout="topleft" left="330" name="save_btn" top="204" width="140"
          tool_tip="Save the picked box's new numbers to the region" />
+    </panel>
+
+    <!-- the region's tunnels: 90 high, closed by default -->
+    <panel follows="left|top" height="90" layout="topleft" left="0" name="list_panel" top="762" visible="false" width="480">
+        <scroll_list draw_heading="true" follows="left|top|right" height="58" layout="topleft" left="10" name="tun_list" top="0" width="460"
+         tool_tip="This region's tunnels. Pick one to change it, walk in or delete it.">
+            <scroll_list.columns label="Tunnel" name="name" width="200" />
+            <scroll_list.columns label="Walls" name="style" width="80" />
+            <scroll_list.columns label="Length" name="length" width="80" />
+            <scroll_list.columns label="" name="built" width="100" />
+        </scroll_list>
+        <button follows="left|top" height="22" label="Change" layout="topleft" left="10" name="edit_btn" top="64" width="100"
+         tool_tip="Draw the picked tunnel again (its route comes back), then Build again" />
+        <button follows="left|top" height="22" label="Walk in" layout="topleft" left="116" name="go_tunnel_btn" top="64" width="100"
+         tool_tip="Go to the floor just inside the picked tunnel's way in" />
+        <button follows="left|top" height="22" label="Delete" layout="topleft" left="370" name="delete_tunnel_btn" top="64" width="100"
+         tool_tip="Take the picked tunnel away: its rock, its walkable parts and its record (asks first)" />
     </panel>
 </floater>

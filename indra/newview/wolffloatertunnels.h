@@ -27,9 +27,9 @@
 
 class LLButton;
 class LLCheckBoxCtrl;
-class LLComboBox;
 class LLLineEditor;
 class LLPanel;
+class LLProgressBar;
 class LLRadioGroup;
 class LLSliderCtrl;
 class LLGLSLShader;
@@ -78,6 +78,22 @@ class LLTextBox;
  * mouths on the ground, the points between go down gently to the depth) -> Build tunnel (enabled from two points; when it
  * cannot be pressed the line under it says why and what to do). No Finish step: Enter / double-click only puts the pen
  * away. Depth, per-point depth, style, size, caverns, portals and see-through are under "More options", closed.
+ *
+ * [WOLF TUNNELS 2026-10-22 simple] Paul still could not make a tunnel (firestorm/wolfstorm/tools/TUNNEL_STRANGER_ASSESSMENT.md:
+ * every try hit "too steep" or "piece too short", from where his clicks landed on the near face of the hill and from rules
+ * applied after the clicks), and: "when I first show it, I just draw the tunnel, and it doesn't require me to create a new
+ * tunnel first."
+ * Persona: a region owner who has never built a tunnel and wants one through their hill in two minutes; they do not know the
+ * words grade, box, rail, mouth or LSL.
+ * Story: "I click where the tunnel goes in and where it comes out. It goes under the hill by itself, and I press Build."
+ * Flow: 1. WHERE - the window opens drawing: the camera looks down on the avatar's area (given back on close), the pen is on,
+ * the first click is the way In, then bends, the last click is the way Out; Backspace / Undo last point, Start over asks
+ * first (in the window, never a modal box). 2. WHAT - Path / Road / Railway and Built / Natural, Path + Built every time the
+ * window opens. 3. BUILD - one button, a progress bar, then Walk in.
+ * Automatic: the floor (fitRoute): both ends on the ground, inside the hill a profile with at least COVER_M (2 m, Expert can
+ * change it) of rock over the roof, never steeper than the kind's slope; a click too close to the one before is moved out to the shortest
+ * piece the generator takes. The one refusal left: ends too far apart in height for the distance between them (the Out
+ * marker turns red). Everything else is under Expert (closed); the region's tunnels list is under its own closed section.
  */
 namespace WolfTunnels
 {
@@ -167,44 +183,46 @@ public:
     /** Status line: confirmations quietly, failures in the caution colour and kept until the next action. */
     void setStatus(const std::string& text, bool error);
 
-    // The pens (WolfToolTunnel) call these.
-    /** A new route point at (x, y) with its floor at z (region metres); `on_plane` = clicked on the drawing plane underground
-     *  (the point goes in exactly there and is never a mouth). */
-    void addRoutePoint(F32 x, F32 y, F32 z, bool on_plane);
-    /** Where a new point at (x, y) puts its floor under ground height `ground` (the mouths' rule, the depth, the gentle slope). */
-    F32 newPointFloor(F32 x, F32 y, F32 ground) const;
-    /** The height of the drawing plane a click lands on when the camera is under the ground: the picked point's floor, else the
-     *  last point's, else under the avatar. */
-    F32 planeHeight() const;
-    /** Point k moved (by its handles); `done` = the drag ended (the preview is worked out again at once, else at most 10 times
-     *  a second while dragging). */
-    void setPoint(S32 k, F32 x, F32 y, F32 z, bool done);
-    S32 pickedPoint() const { return mPicked; }
-    void pickPoint(S32 k);
-    void removePickedPoint();
-    void finishRoute();
+    // The pen (WolfToolTunnel) calls these.
+    /** A click on the ground at (x, y), region metres: the room pen puts a room on the route there; else a new last point (the
+     *  way Out), moved out to the shortest piece the generator takes when it is too close to the point before. */
+    void clickAt(F32 x, F32 y);
+    /** Clicked point k moved to (x, y) by its marker; `done` = the drag ended (the floor is worked out again at once, else at most
+     *  10 times a second while dragging). */
+    void moveClick(S32 k, F32 x, F32 y, bool done);
     void undoPoint();
-    void addCavernAt(F32 x, F32 y);
+    /** The pen was put down (by the window, another tool, the Build window): the window re-arms it while drawing is wanted. */
     void penStopped();
+    /** The floor's height at the last clicked point (the level plane a click lands on when the camera is under the ground). */
+    F32 planeHeight() const;
 
-    /** The open window that is editing a tunnel, or null (the tool draws its design and preview). */
+    /** The open window that is drawing a tunnel, or null (the tool draws its markers and preview). */
     static WolfFloaterTunnels* editing();
     const WolfTunnels::Design& design() const { return mDesign; }
-    bool routeOpen() const { return mRouteOpen; }
+    /** The points the user clicked (the way In, the bends, the way Out); the design has these plus the floor's own points. */
+    const std::vector<LLVector2>& clicks() const { return mClicks; }
+    /** The ends are too far apart in height for the distance: the Out marker is drawn red. */
+    bool badEnd() const { return mBadEnd; }
+    /** The point Expert's "Point" row edits (0-based), or -1 when Expert is closed. */
+    S32 expertPoint() const;
+    /** The one sentence about the drawing (the refusal, else the most important note), for the 3D view; empty = none. */
+    const std::string& note() const { return mNote; }
+    bool noteIsError() const { return mNoteError; }
+    std::string nextStep() const;
 
     /** The local preview, worked out from the design and the ground this viewer has (no server call). */
     struct Preview
     {
         std::vector<LLVector3> mRoof, mFloor;   // triangles, region metres
-        std::vector<LLVector3> mPosts;          // depth posts: ground, roof pairs
+        std::vector<LLVector3> mPosts;          // depth posts: ground, roof pairs (Expert)
         std::vector<std::string> mPostLabels;   // one per post
         std::vector<LLVector3> mBreakouts;      // where the roof is out of the ground
-        std::vector<std::string> mWarnings;
+        std::vector<std::string> mWarnings;     // plain words, most important first
     };
     const Preview& preview() const { return mPreview; }
 
 private:
-    // the region's walkable boxes (Advanced)
+    // the region's walkable boxes (Expert)
     void refresh();                 // GET the WolfTunnels capability and the tunnel records
     void post(const LLSD& body);    // POST to the capability, then show the answer
     void apply(const LLSD& answer, bool from_post);
@@ -217,66 +235,77 @@ private:
     static void getCoro(LLHandle<LLFloater> h, std::string url, LLUUID region);
     static void postCoro(LLHandle<LLFloater> h, std::string url, LLSD body, LLUUID region);
 
-    // the tunnels
+    // the region's tunnels (their own closed section)
     void fillTunnelList();
     const WolfTunnels::Record* pickedTunnel() const;
-    void onNewTunnel();
     void onEditTunnel();
     void onDeleteTunnel();
-    void onGoInsideTunnel();
+    void walkInto(const WolfTunnels::Record& r);
+
+    // the drawing
+    /** A new, empty drawing: Path + Built, Expert's numbers at their defaults (never remembered from last time). */
+    void newDrawing();
+    void onStartOver();
+    void onStartOverAnswer(bool yes);
     void onBuild();
-    void onStopEditing();
     void onKind();
     void onStyle();
     void onSize();
-    void onDepth();
-    void onMouths();
+    void onExpertPoint();
+    void onPointDepth();
+    void onPointAuto();
+    void onRoomPen();
+    void onUndoRoom();
     /** The "See through the ground" box and its amount: WolfTunnels::setSeeThrough while this window is open. */
     void applySeeThrough();
-    void onPointDepth();
-    void onPointGround();
-    void showPoint();
-    /** Put the mouths' floors on the ground (on) or at the depth (off); `end` too when the route is finished. */
-    void applyMouths(bool end);
-    void onUndoCavern();
-    void onPen(S32 pen);
-    void onAdvanced();
-    /** [2026-10-22 easy] Show or hide "More options" and the walkable boxes, size the window to what shows, keep it on screen. */
+    /** Show or hide Expert, the walkable boxes and the tunnels list, size the window to what shows, keep it on screen. */
     void relayout();
-    /** Why Build cannot be pressed now, in plain words (rights, the region, a build running, the design); empty = it can. */
+    /** Why Build cannot be pressed now, in plain words; empty = it can. */
     std::string buildBlocker() const;
-    /** The one-line hint at the top: what to do next. */
-    std::string nextStep() const;
-    /** The slope the drawing keeps new points to (the generator's own "steep" warning for this type). */
-    F32 easeGrade() const;
-    /** `target` kept within easeGrade() of the floor `from_z` over the level distance `len`. */
-    F32 eased(F32 target, F32 from_z, F32 len) const;
-    void showDesign();
+    /** Work the floor out again (fitRoute), then the preview, the note and the buttons. */
     void designChanged();
+    /** Rooms the route no longer passes are snapped back onto it and made to fit, or taken away (said in the status line). */
+    void fitRooms();
+    /** The first and last pieces at least the tunnel's width (wolftunnel.rs validate_design): the second / last point is moved out
+     *  along its piece; false when the region's edge is in the way. */
+    bool keepEndsLongEnough();
     void updateButtons();
-    void setEditing(bool on);
+    void showDesign();
+    /** May the pen be down now (on a Wolf region that can make tunnels, the right to, no build running, the window shown)? */
+    bool penAllowed() const;
+    /** Put the pen down when drawing is wanted and nothing else holds the mouse (the Build window's focus drops it:
+     *  llfloatertools.cpp:1619-1621 onFocusReceived -> lltoolmgr.cpp:190-195 setCurrentTool clears the transient tool). */
+    void keepPen();
+    // the camera: looking down on the drawing while the window is open, given back on close
+    void lookFromAbove();
+    void lookAtWayIn();
+    void giveCameraBack();
+    /** Keep an unbuilt drawing for the next time the window opens on this region (the window is destroyed on close). */
+    void keepDrawing();
+    bool restoreDrawing();
 
-    LLScrollListCtrl* mTunList = nullptr;
-    LLButton *mNewBtn = nullptr, *mEditBtn = nullptr, *mGoTunBtn = nullptr, *mDelTunBtn = nullptr;
-    LLLineEditor* mName = nullptr;
-    LLButton *mDrawBtn = nullptr, *mUndoPointBtn = nullptr;
     LLTextBox* mHint = nullptr;                 // what to do next (nextStep)
-    LLCheckBoxCtrl* mMoreCheck = nullptr;       // "More options", closed by default
-    LLPanel* mMore = nullptr;
-    LLSpinCtrl *mDepth = nullptr, *mPointDepth = nullptr;
-    LLCheckBoxCtrl* mMouths = nullptr;
-    LLCheckBoxCtrl* mSeeThrough = nullptr;
-    LLSliderCtrl* mSeeThroughAmount = nullptr;
-    LLTextBox* mPointLbl = nullptr;
-    LLButton *mPointGroundBtn = nullptr, *mPointRemoveBtn = nullptr;
-    LLButton *mCavernBtn = nullptr, *mUndoCavernBtn = nullptr, *mBuildBtn = nullptr, *mStopBtn = nullptr;
-    LLComboBox* mKind = nullptr;
-    LLSpinCtrl *mW = nullptr, *mH = nullptr;
-    LLRadioGroup* mStyle = nullptr;
-    LLSliderCtrl* mCavernR = nullptr;
-    LLCheckBoxCtrl *mPortals = nullptr, *mAdvancedCheck = nullptr;
-    LLTextBox *mRouteInfo = nullptr, *mGradeInfo = nullptr, *mWarnings = nullptr;
-    LLPanel* mAdvanced = nullptr;
+    LLButton *mUndoPointBtn = nullptr, *mStartOverBtn = nullptr, *mTopViewBtn = nullptr;
+    LLTextBox* mConfirmText = nullptr;          // Start over's question, in the window (a modal box would hold quitting up:
+    LLButton *mConfirmYes = nullptr, *mConfirmNo = nullptr;   // llappviewer.cpp idleShutdown waits for every modal dialog)
+    LLTextBox* mRouteInfo = nullptr;
+    LLRadioGroup *mKind = nullptr, *mStyle = nullptr;
+    LLButton* mRoomBtn = nullptr;
+    LLButton *mBuildBtn = nullptr, *mWalkInBtn = nullptr;
+    LLTextBox *mWarnings = nullptr, *mStatus = nullptr;
+    LLProgressBar* mProgress = nullptr;
+    LLCheckBoxCtrl *mExpertCheck = nullptr, *mListCheck = nullptr;
+    LLPanel *mExpert = nullptr, *mAdvanced = nullptr, *mListPanel = nullptr;
+    // Expert
+    LLLineEditor* mName = nullptr;
+    LLCheckBoxCtrl *mPortals = nullptr, *mMouths = nullptr, *mSeeThrough = nullptr, *mAdvancedCheck = nullptr;
+    LLSpinCtrl *mW = nullptr, *mH = nullptr, *mCover = nullptr, *mPointNum = nullptr, *mPointDepth = nullptr;
+    LLButton *mPointAutoBtn = nullptr, *mUndoRoomBtn = nullptr;
+    LLSliderCtrl *mRoomR = nullptr, *mSeeThroughAmount = nullptr;
+    LLTextBox* mGradeInfo = nullptr;
+    // the region's tunnels
+    LLScrollListCtrl* mTunList = nullptr;
+    LLButton *mEditBtn = nullptr, *mGoTunBtn = nullptr, *mDelTunBtn = nullptr;
 
     LLScrollListCtrl* mBoxList = nullptr;
     LLSpinCtrl* mSpin[7] = { nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr };   // cx cy cz length width height turn
@@ -285,7 +314,6 @@ private:
     LLButton* mGoBtn = nullptr;
     LLButton* mRefreshBtn = nullptr;
     LLCheckBoxCtrl* mShowCheck = nullptr;
-    LLTextBox* mStatus = nullptr;
     LLTextBox* mInfo = nullptr;
     bool mEdit = false;             // the capability says this agent may change boxes here
     bool mBusy = false;             // a capability request is out
@@ -294,36 +322,54 @@ private:
     std::string mCapUrl;
 
     // the tunnel being drawn
-    bool mEditing = false;
+    bool mEditing = false;          // a drawing is in the window
+    bool mPenWanted = false;        // drawing: the window keeps the pen down (keepPen) until Build, or the window closes
+    bool mStartPending = false;     // onOpen ran: the Build window is closed and the camera turned in the first draw()
+    bool mLookPending = false;      // ... and the camera turned to look down (the first show only)
+    bool mOpened = false;           // onOpen has run for this window (it runs again on every show of an open window)
+    bool mConfirming = false;       // Start over is asking
+    bool mJustBuilt = false;        // the last build of this drawing finished (Walk in shows)
+    bool mBuilding = false;         // this window started the build that is running (its end is shown here)
     std::string mEditId;            // empty until saved once
-    WolfTunnels::Design mDesign;
-    bool mRouteOpen = false;        // the route pen is still adding points
-    S32 mPicked = -1;               // the point picked by its handle (the Point row edits it), or -1
-    bool mEndIsMouth = false;       // the last point is the far mouth on the ground (a new point after it sends it to the depth)
-    bool mPreviewDirty = false;     // a handle drag changed the design; the preview follows at most every PREVIEW_DRAG_S
+    std::vector<LLVector2> mClicks; // the way In, the bends, the way Out (region metres)
+    std::vector<F32> mPins;         // per click: Expert's depth below the ground for its floor, or NaN (worked out)
+    WolfTunnels::Design mDesign;    // the clicks plus the floor's own points, as the generator takes it
+    bool mBadEnd = false;
+    std::string mFitProblem;        // the one refusal left (fitRoute), shown first
+    std::string mNote;              // the sentence shown under Build and in the 3D view
+    bool mNoteError = false;
+    bool mPreviewDirty = false;     // a marker drag changed the clicks; the floor follows at most every PREVIEW_DRAG_S
     F64 mPreviewAt = 0.0;
     Preview mPreview;
-    std::string mProblem;           // why Build cannot be pressed (designProblem), shown in the warnings
+    std::string mProblem;           // designProblem, after the fit
     std::string mLoggedBlock;       // the last blocker written to the log (written once per change)
     U32 mShownJob = 0;              // the tunnel job serial the window last showed
     U32 mShownRecords = 0;          // the records serial the list was filled from
+    // the camera before the window turned it (giveCameraBack)
+    bool mCamSaved = false, mCamWasOnAvatar = true;
+    LLVector3d mCamPos, mCamFocus, mCamFocusSet;
 };
 
-/** The pens of the Tunnel tool: route points and caverns on the ground (transient over the pie, as WolfToolAdventurePlace),
+/** The pen of the Tunnel tool: route points (and a room) on the ground (transient over the pie, as WolfToolAdventurePlace),
  *  and the drawing of the design, its preview and the region's boxes while the Tunnels window is open.
- *  [WOLF TUNNELS 2026-10-22] Drawing underground: a click puts the point at the chosen depth under the ground it lands on (from
- *  under the ground - the camera in a tunnel - on a level drawing plane instead); while the window is open the ground is drawn
- *  half see-through (WolfTunnels::setSeeThrough / bindTerrain); every point has two handles as the cave builder's box (wolfcave.cpp
- *  WolfToolCave pickHandle / dragBox): the white one at the floor moves it sideways on the level plane at its floor, the yellow
- *  one at its roof raises or lowers it. */
+ *  [2026-10-22 simple] A click always adds a point. A press on a marker drags it sideways only after the pointer has moved
+ *  DRAG_START_PX while held (TUNNEL_STRANGER_ASSESSMENT.md: a shaky click used to grab a point and move it by metres). Alt-clicks
+ *  go to the camera (lltool.cpp:193-209 getOverrideTool), the wheel and other buttons to the pie. Double-click and Enter never
+ *  put the pen away; Escape only drops a drag (or the room pen). */
 class WolfToolTunnel : public LLTool, public LLSingleton<WolfToolTunnel>
 {
     LLSINGLETON(WolfToolTunnel);
 public:
-    enum EPen { PEN_NONE = 0, PEN_ROUTE = 1, PEN_CAVERN = 2 };
+    enum EPen { PEN_NONE = 0, PEN_ROUTE = 1, PEN_ROOM = 2 };
     void begin(LLHandle<LLFloater> floater, EPen pen);
     void cancel();
+    /** Switch between the route and the room pen while it is down. */
+    void setPen(EPen pen);
+    /** The window is going away: forget it first, so nothing calls back into it, then put the pen away. */
+    void detach();
     EPen pen() const { return mActive ? mPen : PEN_NONE; }
+    /** The pen is down and LLToolMgr still has it (another tool may have taken over without telling it). */
+    bool current() const;
 
     /** The drawing while the Tunnels window is open and this tool is not the current one. */
     static void renderIdle();
@@ -342,17 +388,16 @@ public:
     void onMouseCaptureLost() override;
 
 private:
-    enum EDrag { DRAG_NONE, DRAG_MOVE, DRAG_UP };
+    enum EDrag { DRAG_NONE, DRAG_PENDING, DRAG_MOVE };
     bool surface(S32 x, S32 y, LLVector3& out) const;
     /** The pointer on the level plane at height z, region metres (wolfcave.cpp WolfToolCave::planeHit). */
     bool planeHit(S32 x, S32 y, F32 z, F32& rx, F32& ry) const;
     /** Is the camera under the ground of the agent's region? */
     static bool cameraUnderground();
-    /** Where a click at (x, y) puts a point: its floor (region metres), the ground spot above it, and whether it came from the
-     *  drawing plane (camera underground). */
-    bool place(S32 x, S32 y, LLVector3& floor, LLVector3& ground, bool& on_plane) const;
-    /** The handle under the pointer: point * 2 + 0 (floor: move) or + 1 (roof: up and down), or -1. */
-    S32 pickHandle(S32 x, S32 y) const;
+    /** Where a click at (x, y) lands on the ground (or on the level plane when the camera is underground), region metres. */
+    bool place(S32 x, S32 y, LLVector3& ground) const;
+    /** The clicked point whose marker is under the pointer, or -1. */
+    S32 pickMarker(S32 x, S32 y) const;
     void dropDrag();
     bool shown() const;
 
@@ -361,15 +406,12 @@ private:
     bool mActive = false;
     bool mHaveCursor = false;
     LLVector3 mCursor;              // the ground spot under the pointer (or on the plane)
-    LLVector3 mGhost;               // where a click would put the point's floor
-    bool mOnPlane = false;
-    S32 mHover = -1;                // pickHandle under the pointer
+    S32 mHover = -1;                // pickMarker under the pointer
     EDrag mDrag = DRAG_NONE;
     S32 mDragPoint = -1;
-    LLVector3 mDragStart;           // the point as it was at the press (put back if the drag is dropped)
+    S32 mPressX = 0, mPressY = 0;   // where the press on a marker was (screen)
+    LLVector2 mDragStart;           // the point as it was at the press (put back if the drag is dropped)
     F32 mGrabDX = 0.f, mGrabDY = 0.f;
-    S32 mPressY = 0;
-    F32 mMetresPerPixel = 0.05f;
 };
 
 #endif // WOLF_FLOATER_TUNNELS_H

@@ -37,7 +37,7 @@
     CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
     CGDataProviderRef dp = CGDataProviderCreateWithData(NULL, pixels->data(), pixels->size() * 4, NULL);
     CGImageRef img = CGImageCreate(pw, ph, 8, 32, pw * 4, cs,
-                                   kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little, dp, NULL, false,
+                                   (CGBitmapInfo)kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little, dp, NULL, false,   // CGBitmapInfo cast: Xcode 16 -Werror,-Wdeprecated-enum-enum-conversion
                                    kCGRenderingIntentDefault);
     CGContextRef ctx = [[NSGraphicsContext currentContext] CGContext];
     CGContextClearRect(ctx, NSRectToCGRect([self bounds]));

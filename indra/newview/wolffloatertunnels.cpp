@@ -312,12 +312,12 @@ bool WolfTunnels::keepCameraInside(const LLVector3& head_agent, LLVector3& camer
     const LLVector3 dir = camera_agent - head_agent;
     const F32 len = dir.magVec();
     // only the boxes the line can reach (a tunnel is a chain of boxes; Moonfold has 356)
-    std::vector<const Box*> near;
+    std::vector<const Box*> nearby;   // not "near": windef.h defines near (and far) as nothing
     bool head_in = false;
     for (const Box& b : s_boxes)
     {
         if (dist_vec(b.mCentre, head) > len + b.mSize.magVec() * 0.5f + 1.f) continue;
-        near.push_back(&b);
+        nearby.push_back(&b);
         if (inBox(b, head)) head_in = true;
     }
     if (!head_in) return false;
@@ -327,7 +327,7 @@ bool WolfTunnels::keepCameraInside(const LLVector3& head_agent, LLVector3& camer
     const LLSurface& land = rgn->getLand();
     auto inside = [&](const LLVector3& p)
     {
-        for (const Box* b : near) if (inBox(*b, p, -CAMERA_INSET)) return true;
+        for (const Box* b : nearby) if (inBox(*b, p, -CAMERA_INSET)) return true;
         return p.mV[VZ] > land.resolveHeightRegion(p.mV[VX], p.mV[VY]) + CAMERA_INSET;
     };
     // walk out from the head; the camera stops at the last point still allowed (the boxes overlap along a tunnel)
@@ -560,7 +560,7 @@ namespace
         F32 cavernReach(const WolfTunnels::Cavern& c) const { return c.mR + ro() * llmin(ROUGH_CAVERN * c.mR, ROUGH_CAVERN_MAX_M); }
         /** Source: wolftunnel.rs Air::near: Route::nearest, the distance shortened (with fill) between parts of the route that
          *  meet and face each other across rock thinner than joinGap. */
-        std::pair<F32, F32> near(F32 x, F32 y) const
+        std::pair<F32, F32> nearJoined(F32 x, F32 y) const   // wolftunnel.rs Air::near ("near" is a windef.h macro)
         {
             const std::pair<F32, F32> best = route.nearest(x, y);
             if (!fill) return best;
@@ -611,7 +611,7 @@ namespace
         }
         Field eval(F32 x, F32 y) const
         {
-            const std::pair<F32, F32> nt = near(x, y);
+            const std::pair<F32, F32> nt = nearJoined(x, y);
             const F32 dist = nt.first, t = nt.second, h = d.mH;
             F32 s, v;
             if (rough)

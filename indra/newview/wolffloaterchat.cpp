@@ -96,8 +96,9 @@ namespace
     const char* const BRIDGE_URL = "https://wolfstorm.app/php/wolfbridge.php";
     // Wolf-Bot's invite (the bridge's Discord application; given with the contract 2026-10-21).
     // [DISCORD VOICE 2026-10-22] permissions 573688832 = the text bridge's 536988672 + Connect (1<<20) + Speak (1<<21) +
-    // Use Voice Activity (1<<25) - wolfbridge/src/rest.rs BOT_PERMISSIONS.
-    const char* const DISCORD_BOT_INVITE = "https://discord.com/oauth2/authorize?client_id=1151805124855992403&scope=bot+applications.commands&permissions=573688832";
+    // Use Voice Activity (1<<25); [2026-10-23] + Set Voice Channel Status (1<<48, the "In Wolf: ..." status) = 281475550399488
+    // - wolfbridge/src/rest.rs BOT_PERMISSIONS.
+    const char* const DISCORD_BOT_INVITE = "https://discord.com/oauth2/authorize?client_id=1151805124855992403&scope=bot+applications.commands&permissions=281475550399488";
     // [DISCORD VOICE 2026-10-22] The Discord bridge's participant in a voice room: php/wolfbridge.php WBR_BRIDGE_AGENT
     // (no grid account has it). php/wolfchat.php reports it in the room as "Discord: <names>".
     const LLUUID WOLF_DISCORD_AGENT("3969a614-e4fe-3501-b9f6-25ef34ec9de5");

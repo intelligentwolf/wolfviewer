@@ -13502,6 +13502,28 @@ Change of this parameter will affect the layout of buttons in notification toast
       <key>Value</key>
       <real>5.0</real>
     </map>
+    <key>WolfCaveLightStyle</key>
+    <map>
+      <key>Comment</key>
+      <string>[WOLF CAVE LIGHTS 2026-10-23] Light up (Cave Builder and Tunnel tool): the lamp style last chosen - torches, lamps, lanterns, crystals or hidden. Empty = none chosen yet (the style follows the walls: torches for natural, wall lamps for built).</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>String</string>
+      <key>Value</key>
+      <string></string>
+    </map>
+    <key>WolfCaveLightTone</key>
+    <map>
+      <key>Comment</key>
+      <string>[WOLF CAVE LIGHTS 2026-10-23] Light up: the light colour last chosen - warm or cool.</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>String</string>
+      <key>Value</key>
+      <string>warm</string>
+    </map>
     <key>WolfTunnelSeeThrough</key>
     <map>
       <key>Comment</key>

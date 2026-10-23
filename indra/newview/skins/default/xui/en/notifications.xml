@@ -179,6 +179,20 @@ No tutorial is currently available.
      yestext="Yes"/>
   </notification>
 
+  <!-- [WOLF CAVE LIGHTS 2026-10-23] Light up / Remove lights when some of a cave's stored lamp parts are not in view
+       (wolfcavelights.cpp): keep them listed so a later Remove lights finds them, or forget them. -->
+  <notification
+   icon="alertmodal.tga"
+   name="WolfCaveLightsUnseen"
+   type="alertmodal">
+[MESSAGE]
+    <usetemplate
+     name="yesnocancelbuttons"
+     yestext="Keep them listed"
+     notext="Forget them"
+     canceltext="Cancel"/>
+  </notification>
+
   <notification
    icon="alertmodal.tga"
    name="GenericAlertOK"

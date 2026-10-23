@@ -24,6 +24,7 @@
 #include "llsingleton.h"
 #include "lltool.h"
 #include "v3math.h"
+#include "wolfcavelights.h"
 
 class LLButton;
 class LLComboBox;
@@ -145,6 +146,9 @@ public:
         // to caves.php exactly as it came (mRaw, the cave's LLSD as received).
         bool mOld = false;
         LLSD mRaw;
+        // [WOLF CAVE LIGHTS 2026-10-23] undefined = no lights; {style, tone, objects:[every part of every lamp], at}
+        // (php/caves.php "lights", wolfcavelights.cpp)
+        LLSD mLights;
     };
     /** One face of the ghost, in REGION metres. */
     struct GhostFace { bool mRock = false; std::vector<LLVector3> mTris; };
@@ -198,6 +202,11 @@ public:
     /** `forget`: the user agreed to forget a built cave whose rock this viewer cannot see. */
     void remove(const std::string& id, bool forget);
     bool busy() const { return mBusy; }
+    /** [WOLF CAVE LIGHTS 2026-10-23] Where a built cave's lamps go (its tunnels, caverns and air, CAVE_DESIGN_V3.md "Generator
+     *  rules" as wolfcave.rs Interior::at). */
+    static std::vector<WolfCaveLights::Lamp> caveLamps(const Cave& cave, WolfCaveLights::EStyle style);
+    /** [WOLF CAVE LIGHTS 2026-10-23] Light up (`lamps` placed, the old ones replaced) or Remove lights (`remove`). One job at a time. */
+    void lights(const std::string& id, bool remove, std::vector<WolfCaveLights::Lamp> lamps, WolfCaveLights::EStyle style, bool warm, bool keep_unseen);
     /** [WolfViewer 2026-10-14] The cave the running (or last) job is about, so the window only
      *  leaves the editor when the job was about the cave being drawn. */
     const std::string& jobCave() const { return mJobCave; }
@@ -230,6 +239,7 @@ private:
     LLSD zoneFor(const Cave& cave) const;
     void buildCoro(Cave cave);
     void removeCoro(std::string id, bool then_build, Cave next, bool forget);
+    void lightsCoro(std::string id, bool remove, std::vector<WolfCaveLights::Lamp> lamps, WolfCaveLights::EStyle style, bool warm, bool keep_unseen);
     bool removeOne(const Cave& cave, bool forget, std::string& error);
     bool dropCave(const std::string& id, std::string& error);
     static LLSD toLLSD(const Cave& c);
@@ -368,6 +378,11 @@ private:
     void onEdit();
     void onRemove();
     void onListPick();
+    // [WOLF CAVE LIGHTS 2026-10-23]
+    void onLightUp();
+    void onRemoveLights();
+    /** The light choice for the picked cave: its own lights' style, else the last choice, else torches (natural rock). */
+    void showLightChoice();
     /** [WolfViewer 2026-10-15 v3] The cave picked in the list, or null. */
     const WolfCaves::Cave* picked() const;
     void onBuild();
@@ -387,6 +402,9 @@ private:
     LLSpinCtrl *mBoxW = nullptr, *mBoxD = nullptr, *mBoxH = nullptr, *mBoxTurn = nullptr, *mBoxFloor = nullptr;
     LLSliderCtrl *mWidth = nullptr, *mCavernH = nullptr, *mRoof = nullptr, *mRough = nullptr;
     LLComboBox *mRock = nullptr, *mLight = nullptr;
+    LLComboBox *mLightsStyle = nullptr, *mLightsTone = nullptr;   // [WOLF CAVE LIGHTS 2026-10-23]
+    LLButton *mLightsUp = nullptr, *mLightsOff = nullptr;
+    std::string mLightPickShown;
     LLTextureCtrl* mRockTex = nullptr;
     LLTextBox *mCounts = nullptr, *mStats = nullptr, *mDig = nullptr, *mStatus = nullptr, *mWhy = nullptr;
     bool mEditing = false;

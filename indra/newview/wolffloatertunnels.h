@@ -26,6 +26,7 @@
 #include "v3math.h"
 
 class LLButton;
+class LLComboBox;
 class LLCheckBoxCtrl;
 class LLLineEditor;
 class LLPanel;
@@ -167,6 +168,9 @@ namespace WolfTunnels
         std::string mId, mName, mOwner;
         Design mDesign;
         LLSD mBuilt;                     // undefined = not built; {item, objects:[...], volumes:[...], at}
+        // [WOLF CAVE LIGHTS 2026-10-23] undefined = no lights; {style, tone, objects:[every part of every lamp], at}
+        // (php/tunnels.php "lights", wolfcavelights.cpp)
+        LLSD mLights;
     };
     /** Why the design cannot be built, in plain words (the generator's own limits); empty = it can. */
     std::string designProblem(const Design& d, F32 region_w);
@@ -247,6 +251,10 @@ private:
     const WolfTunnels::Record* pickedTunnel() const;
     void onEditTunnel();
     void onDeleteTunnel();
+    // [WOLF CAVE LIGHTS 2026-10-23] Light up / Remove lights for the picked tunnel (wolfcavelights.cpp).
+    void onPickTunnel();
+    void onLightUp();
+    void onRemoveLights();
     void walkInto(const WolfTunnels::Record& r);
 
     // the drawing
@@ -313,6 +321,9 @@ private:
     // the region's tunnels
     LLScrollListCtrl* mTunList = nullptr;
     LLButton *mEditBtn = nullptr, *mGoTunBtn = nullptr, *mDelTunBtn = nullptr;
+    LLComboBox *mLightStyle = nullptr, *mLightTone = nullptr;   // [WOLF CAVE LIGHTS 2026-10-23]
+    LLButton *mLightUpBtn = nullptr, *mUnlightBtn = nullptr;
+    std::string mLightPickShown;   // the tunnel whose light choice the combos show
 
     LLScrollListCtrl* mBoxList = nullptr;
     LLSpinCtrl* mSpin[7] = { nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr };   // cx cy cz length width height turn

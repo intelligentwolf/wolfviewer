@@ -513,6 +513,7 @@ LLSD WolfCaves::toLLSD(const Cave& c)
     out["design"] = d;
     out["built"] = c.mBuilt;
     out["zone"] = c.mZone;
+    out["lights"] = c.mLights;   // [WOLF CAVE LIGHTS 2026-10-23] php/caves.php "lights" (undefined = null = none)
     return out;
 }
 
@@ -563,6 +564,7 @@ WolfCaves::Cave WolfCaves::fromLLSD(const LLSD& in)
     c.mBuilt = in["built"];
     c.mZone = in["zone"];
     c.mLight = in.has("light") ? in["light"].asString() : lightOf(c.mZone);
+    c.mLights = in["lights"].isMap() ? in["lights"] : LLSD();   // [WOLF CAVE LIGHTS 2026-10-23]
     return c;
 }
 
@@ -1171,6 +1173,9 @@ void WolfCaves::buildCoro(Cave cave)
 {
     std::string err;
     mStatus = "Step 1 of 5: checking your rights and saving the cave…";
+    // [WOLF CAVE LIGHTS 2026-10-23] A (re)built cave has no lamps: a rebuild's old ones were taken away with the old rock
+    // (removeOne), and lamps placed for the old rock would hang in the new one.
+    cave.mLights = LLSD();
     Cave draft = cave;
     draft.mBuilt = LLSD();
     draft.mZone = LLSD();
@@ -1357,6 +1362,22 @@ bool WolfCaves::removeOne(const Cave& cave, bool forget, std::string& error)
             error = "the cave's rock went out of view. Stand nearer the cave and try again.";
             return false;
         }
+        // [WOLF CAVE LIGHTS 2026-10-23] Paul: deleting the cave also deletes its lights (and a rebuild's lamps would hang in
+        // the new rock). The lamps in view go; parts not in view are said and left, and the record forgets them.
+        if (cave.mLights.isMap() && cave.mLights["objects"].size() > 0)
+        {
+            mStatus = "Taking the cave's lights away…";
+            const LLSD unseen = WolfCaveLights::takeAwayFor(cave.mLights);
+            if (unseen.size() > 0)
+                fail(llformat("%d light part%s of \"%s\" %s not in view, so %s left where %s: delete %s by hand if %s still there.",
+                              (S32)unseen.size(), unseen.size() == 1 ? "" : "s", cave.mName.c_str(), unseen.size() == 1 ? "was" : "were",
+                              unseen.size() == 1 ? "it is" : "they are", unseen.size() == 1 ? "it is" : "they are",
+                              unseen.size() == 1 ? "it" : "them", unseen.size() == 1 ? "it is" : "they are"));
+            Cave unlit = marked;
+            unlit.mLights = LLSD();
+            if (!putCave(unlit, error)) return false;
+            rock = findRock(cave);   // the save suspended
+        }
     }
     LLViewerRegion* rgn = rock ? rock->getRegion() : nullptr;
     // [WolfViewer 2026-10-14] `rock` is not touched after the next suspend (it may be deleted by
@@ -1441,6 +1462,102 @@ bool WolfCaves::removeOne(const Cave& cave, bool forget, std::string& error)
         fail("\"" + cave.mName + "\" is forgotten and its ground put back. Its rock is still there: delete it by hand.");
     }
     return true;
+}
+
+// ── [WOLF CAVE LIGHTS 2026-10-23] Light up / Remove lights ──────────────────────────────────────────────────────────────
+namespace
+{
+    F32 caveArch(F32 q)
+    {
+        // Source: wolfcave.rs arch (the cave builder's vault profile): sqrt(1 - (1 - q)^2), q held to 1.
+        q = llmin(q, 1.f);
+        return sqrtf(llmax(0.f, 1.f - (1.f - q) * (1.f - q)));
+    }
+}
+
+std::vector<WolfCaveLights::Lamp> WolfCaves::caveLamps(const Cave& cave, WolfCaveLights::EStyle style)
+{
+    const Design& d = cave.mDesign;
+    if (!d.mHasBox || d.mTunnels.empty()) return {};
+    // Source: wolfcave.rs Interior (new: clear = box.h - roof; s_at; at: tunnel_ceiling = min(w * 0.9 + 1, clear) * arch(s / r)
+    // over tunnels, cavern_ceiling = min(h, clear) * arch(s / r) over caverns, the highest) and generate's ceiling noise
+    // (rough_amp = roughness * min(0.15 * clear, 1), taken off here so a lamp is never put where the noise lowers the roof).
+    const F32 clear = d.mBox.mH - d.mRoof;
+    const F32 rough_amp = d.mRoughness * llmin(0.15f * clear, 1.f);
+    const F32 floor = d.mBox.mZ;
+    auto field = [&d, clear, rough_amp, floor](F32 x, F32 y, F32& s, F32& fl, F32& cl)
+    {
+        s = -1e30f;
+        F32 v = 0.f;
+        for (const Tunnel& t : d.mTunnels)
+        {
+            const F32 r = t.mW * 0.5f;
+            const F32 st = r - tunnelDist(t, x, y);
+            s = llmax(s, st);
+            if (st > 0.f) v = llmax(v, llmin(t.mW * 0.9f + 1.f, clear) * caveArch(st / r));
+        }
+        for (const Cavern& k : d.mCaverns)
+        {
+            const F32 sk = k.mR - sqrtf((x - k.mX) * (x - k.mX) + (y - k.mY) * (y - k.mY));
+            s = llmax(s, sk);
+            if (sk > 0.f) v = llmax(v, llmin(k.mH, clear) * caveArch(sk / k.mR));
+        }
+        fl = floor;
+        cl = v - rough_amp;
+        return true;
+    };
+    std::vector<WolfCaveLights::Route> routes;
+    for (const Tunnel& t : d.mTunnels)
+    {
+        WolfCaveLights::Route r;
+        for (size_t k = 0; k + 1 < t.mP.size(); k += 2) r.mPts.emplace_back(t.mP[k], t.mP[k + 1]);
+        r.mHalfW = t.mW * 0.5f;
+        routes.push_back(r);
+    }
+    std::vector<WolfCaveLights::Room> rooms;
+    for (const Cavern& k : d.mCaverns) rooms.push_back(WolfCaveLights::Room{ LLVector2(k.mX, k.mY), k.mR });
+    return WolfCaveLights::plan(routes, rooms, field, style, false);
+}
+
+void WolfCaves::lights(const std::string& id, bool remove, std::vector<WolfCaveLights::Lamp> lamps, WolfCaveLights::EStyle style, bool warm, bool keep_unseen)
+{
+    if (!onWolf()) { alertOK("Cave lights can only be placed on Wolf Territories, in a region the grid knows."); return; }
+    if (mBusy) { fail("Another cave job is still running - wait for it to finish (or press Stop), then try again."); return; }
+    if (!sendOk()) { fail("Stopped: this region's caves are not loaded here (did you just move?) - reopen the Cave Builder and try again."); return; }
+    mBusy = true;
+    mCancel = false;
+    mErrors.clear();
+    mJobCave = id;
+    LLCoros::instance().launch("WolfCaves lights", [id, remove, lamps, style, warm, keep_unseen]()
+    {
+        WolfCaves::instance().lightsCoro(id, remove, lamps, style, warm, keep_unseen);
+    });
+}
+
+void WolfCaves::lightsCoro(std::string id, bool remove, std::vector<WolfCaveLights::Lamp> lamps, WolfCaveLights::EStyle style, bool warm, bool keep_unseen)
+{
+    const Cave* c = find(id);
+    if (!c) { fail("That cave is not here any more."); mResult = RESULT_FAILED; mBusy = false; return; }
+    const Cave start = *c;
+    const LLViewerRegion* rgn = gAgent.getRegion();
+    const LLUUID region = rgn ? rgn->getRegionID() : LLUUID::null;
+    // each save is the cave as stored now with only its lights changed (the rights rules of caves.php apply to the change)
+    auto save = [this, id](const LLSD& l, std::string& e)
+    {
+        const Cave* now = find(id);
+        if (!now) { e = "the cave is not here any more."; return false; }
+        Cave next = *now;
+        next.mLights = l;
+        return putCave(next, e);
+    };
+    auto progress = [this](const std::string& line, F32) { mStatus = line; };
+    std::string done, err;
+    const bool ok = WolfCaveLights::run(start.mLights, keep_unseen, remove ? nullptr : &lamps, style, warm, start.mName, region, save,
+                                        progress, [this]() { return mCancel; }, done, err);
+    if (ok) mStatus = done;
+    else fail((remove ? "Removing the lights stopped: " : "Lighting up stopped: ") + err);
+    mResult = ok ? RESULT_NONE : RESULT_FAILED;
+    mBusy = false;
 }
 
 void WolfCaves::removeCoro(std::string id, bool then_build, Cave next, bool forget)
@@ -2392,6 +2509,10 @@ bool WolfFloaterCaves::postBuild()
     mRock = getChild<LLComboBox>("cave_rock");
     mRockTex = getChild<LLTextureCtrl>("cave_rock_tex");
     mLight = getChild<LLComboBox>("cave_light");
+    mLightsStyle = getChild<LLComboBox>("cave_lights_style");
+    mLightsTone = getChild<LLComboBox>("cave_lights_tone");
+    mLightsUp = getChild<LLButton>("cave_lights_up");
+    mLightsOff = getChild<LLButton>("cave_lights_off");
     mCounts = getChild<LLTextBox>("cave_counts");
     mStats = getChild<LLTextBox>("cave_stats");
     mDig = getChild<LLTextBox>("cave_dig");
@@ -2425,6 +2546,18 @@ bool WolfFloaterCaves::postBuild()
     mRockTex->setOnCancelCallback([this](LLUICtrl*, const LLSD&) { if (mEditing) showEditor(); });
     mLight->setCommitCallback([this](LLUICtrl*, const LLSD&) { mCave.mLight = mLight->getValue().asString(); });
     mName->setCommitCallback([this](LLUICtrl*, const LLSD&) { readControls(); });
+    // [WOLF CAVE LIGHTS 2026-10-23] Paul: "let them choose the light style rather than forcing it" - the last choice is kept.
+    auto keep_choice = [this](LLUICtrl*, const LLSD&)
+    {
+        WolfCaveLights::saveChoice(WolfCaveLights::styleFrom(mLightsStyle->getValue().asString(), WolfCaveLights::STYLE_TORCHES),
+                                   mLightsTone->getValue().asString() != "cool");
+    };
+    mLightsStyle->setCommitCallback(keep_choice);
+    mLightsTone->setCommitCallback(keep_choice);
+    mLightsUp->setCommitCallback([this](LLUICtrl*, const LLSD&) { onLightUp(); });
+    mLightsOff->setCommitCallback([this](LLUICtrl*, const LLSD&) { onRemoveLights(); });
+    mLightsStyle->setValue(WolfCaveLights::styleKey(WolfCaveLights::savedStyle(WolfCaveLights::styleForWalls(true))));
+    mLightsTone->setValue(WolfCaveLights::savedWarm() ? "warm" : "cool");
     mWidth->setValue(WolfToolCave::tunnelWidth());
     mCavernH->setValue(WolfToolCave::cavernHeight());
     showEditor();
@@ -2505,6 +2638,8 @@ void WolfFloaterCaves::rebuildList()
         {
             st = llformat("Built, land impact %d", c.mBuilt["li"].asInteger());
             if (c.mBuilt["limited"].asInteger() > 0) st += llformat(", %d points held by a limit", c.mBuilt["limited"].asInteger());
+            const std::string lit = WolfCaveLights::summary(c.mLights);   // [WOLF CAVE LIGHTS 2026-10-23]
+            if (!lit.empty()) st += ", " + lit;
         }
         LLSD row;
         row["value"] = c.mId;
@@ -2666,6 +2801,50 @@ void WolfFloaterCaves::onListPick()
 {
     const WolfCaves::Cave* c = picked();
     if (c && c->mOld) setStatus(getString("str_old_design"), false);
+    showLightChoice();
+}
+
+// [WOLF CAVE LIGHTS 2026-10-23] The picked cave's own light style and colour when it has lights; else the last choice; else
+// torches (a cave's walls are natural rock).
+void WolfFloaterCaves::showLightChoice()
+{
+    const WolfCaves::Cave* c = picked();
+    const std::string id = c ? c->mId : std::string();
+    if (id == mLightPickShown) return;
+    mLightPickShown = id;
+    if (!c || !c->mLights.isMap() || !c->mLights.has("style")) return;
+    mLightsStyle->setValue(WolfCaveLights::styleKey(WolfCaveLights::styleFrom(c->mLights["style"].asString(), WolfCaveLights::STYLE_TORCHES)));
+    mLightsTone->setValue(c->mLights["tone"].asString() == "cool" ? "cool" : "warm");
+}
+
+void WolfFloaterCaves::onLightUp()
+{
+    const WolfCaves::Cave* c = picked();
+    if (!c) { setStatus(getString("str_pick_one"), true); return; }
+    if (WolfCaves::instance().busy()) { setStatus(getString("str_busy"), true); return; }
+    if (c->mOld || !c->mBuilt.isMap()) { setStatus("Generate the cave first, then light it up.", true); return; }
+    const WolfCaveLights::EStyle style = WolfCaveLights::styleFrom(mLightsStyle->getValue().asString(), WolfCaveLights::STYLE_TORCHES);
+    const bool warm = mLightsTone->getValue().asString() != "cool";
+    const std::vector<WolfCaveLights::Lamp> lamps = WolfCaves::caveLamps(*c, style);
+    if (lamps.empty()) { setStatus("No place for a lamp was found in \"" + c->mName + "\".", true); return; }
+    const std::string id = c->mId;
+    WolfCaveLights::confirmLightUp(c->mName, style, (S32)lamps.size(), c->mLights, [id, lamps, style, warm](bool keep)
+    {
+        // lights() itself says why it cannot start (busy, off Wolf, moved region)
+        WolfCaves::instance().lights(id, false, lamps, style, warm, keep);
+    });
+}
+
+void WolfFloaterCaves::onRemoveLights()
+{
+    const WolfCaves::Cave* c = picked();
+    if (!c) { setStatus(getString("str_pick_one"), true); return; }
+    if (WolfCaves::instance().busy()) { setStatus(getString("str_busy"), true); return; }
+    const std::string id = c->mId;
+    WolfCaveLights::confirmRemove(c->mName, c->mLights, [id](bool keep)
+    {
+        WolfCaves::instance().lights(id, true, {}, WolfCaveLights::STYLE_HIDDEN, true, keep);
+    });
 }
 
 void WolfFloaterCaves::onEdit()
@@ -2858,6 +3037,18 @@ void WolfFloaterCaves::onRemove()
     {
         msg = "This cave was never built; only its drawing is deleted. ";
     }
+    // [WOLF CAVE LIGHTS 2026-10-23] its lamps go too; any not in view are said
+    if (c->mLights.isMap() && c->mLights["objects"].size() > 0 && !c->mOld)
+    {
+        std::vector<LLUUID> roots;
+        LLSD unseen;
+        WolfCaveLights::find(c->mLights["objects"], roots, unseen);
+        msg += "Its " + WolfCaveLights::summary(c->mLights) + " are taken away too"
+             + (unseen.size() > 0 ? llformat(" (%d light part%s not in view from here stay%s where %s: delete %s by hand). ",
+                                            (S32)unseen.size(), unseen.size() == 1 ? "" : "s", unseen.size() == 1 ? "s" : "",
+                                            unseen.size() == 1 ? "it is" : "they are", unseen.size() == 1 ? "it" : "them")
+                                  : std::string(". "));
+    }
     msg = "Remove \"" + c->mName + "\"? " + msg + "This cannot be undone.";
     const std::string id = c->mId;
     LLNotificationsUtil::add("GenericAlertYesCancel", LLSD().with("MESSAGE", msg), LLSD(),
@@ -2911,6 +3102,16 @@ void WolfFloaterCaves::draw()
     mWasBusy = wc.busy();
     mCancel->setEnabled(wc.busy() && !wc.cancelling());
     mRemove->setEnabled(!wc.busy() && mList->getFirstSelected() != nullptr);
+    // [WOLF CAVE LIGHTS 2026-10-23] a built cave can be lit; one with lights listed can have them taken away
+    {
+        const WolfCaves::Cave* pc = picked();
+        const bool can_light = !wc.busy() && pc && !pc->mOld && pc->mBuilt.isMap();
+        mLightsUp->setEnabled(can_light);
+        mLightsStyle->setEnabled(can_light);
+        mLightsTone->setEnabled(can_light);
+        mLightsOff->setEnabled(!wc.busy() && pc && pc->mLights.isMap() && pc->mLights["objects"].size() > 0);
+        showLightChoice();
+    }
     // [WolfViewer 2026-10-15 v3] An old-design cave can only be removed (CAVE_DESIGN_V3.md "Caves from the old builder").
     const WolfCaves::Cave* sel = picked();
     mEdit->setEnabled(!wc.busy() && !mEditing && sel && !sel->mOld);

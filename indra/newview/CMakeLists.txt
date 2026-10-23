@@ -1002,6 +1002,7 @@ set(viewer_SOURCE_FILES
     wolfterrainpaint.cpp
     wolfterrainlayers.cpp
     wolfcave.cpp
+    wolfcavelights.cpp # [WOLF CAVE LIGHTS 2026-10-23] Light up: lamps through caves and tunnels
     wolfsurfcurl.cpp
     wolfmapglobe.cpp
     wolfmapoverlays.cpp
@@ -1967,6 +1968,7 @@ set(viewer_HEADER_FILES
     wolfterrainpaint.h
     wolfterrainlayers.h
     wolfcave.h
+    wolfcavelights.h
     wolfsurfcurl.h
     wolfmapglobe.h
     wolfmapoverlays.h

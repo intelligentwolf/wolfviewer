@@ -153,7 +153,7 @@
     </panel>
 
     <!-- the region's tunnels: 90 high, closed by default -->
-    <panel follows="left|top" height="90" layout="topleft" left="0" name="list_panel" top="762" visible="false" width="480">
+    <panel follows="left|top" height="118" layout="topleft" left="0" name="list_panel" top="762" visible="false" width="480">
         <scroll_list draw_heading="true" follows="left|top|right" height="58" layout="topleft" left="10" name="tun_list" top="0" width="460"
          tool_tip="This region's tunnels. Pick one to change it, walk in or delete it.">
             <scroll_list.columns label="Tunnel" name="name" width="200" />
@@ -166,6 +166,25 @@
         <button follows="left|top" height="22" label="Walk in" layout="topleft" left="116" name="go_tunnel_btn" top="64" width="100"
          tool_tip="Go to the floor just inside the picked tunnel's way in" />
         <button follows="left|top" height="22" label="Delete" layout="topleft" left="370" name="delete_tunnel_btn" top="64" width="100"
-         tool_tip="Take the picked tunnel away: its rock, its walkable parts and its record (asks first)" />
+         tool_tip="Take the picked tunnel away: its rock, its walkable parts, its lights and its record (asks first)" />
+        <!-- [WOLF CAVE LIGHTS 2026-10-23] Paul: "light up cave" ... "but they have to be able to remove them as well", "let them
+             choose the light style". Light up asks first (how many lamps, how many prims); wolfcavelights.cpp places them. -->
+        <combo_box follows="left|top" height="22" layout="topleft" left="10" name="lights_style" top="92" width="124"
+         tool_tip="What the lamps look like. Torches suit natural rock, wall lamps built tunnels; hidden lights light the tunnel with nothing to see.">
+            <combo_box.item label="Torches" name="torches" value="torches" />
+            <combo_box.item label="Wall lamps" name="lamps" value="lamps" />
+            <combo_box.item label="Lanterns" name="lanterns" value="lanterns" />
+            <combo_box.item label="Crystals" name="crystals" value="crystals" />
+            <combo_box.item label="Hidden lights" name="hidden" value="hidden" />
+        </combo_box>
+        <combo_box follows="left|top" height="22" layout="topleft" left="140" name="lights_tone" top="92" width="104"
+         tool_tip="The colour of the light">
+            <combo_box.item label="Warm light" name="warm" value="warm" />
+            <combo_box.item label="Cool light" name="cool" value="cool" />
+        </combo_box>
+        <button follows="left|top" height="22" label="Light up" layout="topleft" left="250" name="lights_btn" top="92" width="100"
+         tool_tip="Put lamps through the picked tunnel: on the walls every 9 m, one in each room and at each crossroads (asks first, with the number of prims). Again: the lamps are replaced." />
+        <button follows="left|top" height="22" label="Remove lights" layout="topleft" left="356" name="unlights_btn" top="92" width="114"
+         tool_tip="Take away exactly the lamps Light up placed in the picked tunnel (asks first)" />
     </panel>
 </floater>

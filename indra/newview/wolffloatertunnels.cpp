@@ -51,6 +51,8 @@
 #include "llviewerparcelmgr.h"
 #include "message.h"
 #include "wolfcave.h"
+#include "wolfcavelights.h"
+#include "llcombobox.h"
 #include "wolfterrainpaint.h"
 #include "llframetimer.h"
 #include "llglslshader.h"
@@ -778,6 +780,7 @@ namespace
             r.mOwner = t["owner"].asString();
             r.mDesign = designFromLLSD(t["design"]);
             r.mBuilt = t["built"].isMap() ? t["built"] : LLSD();
+            r.mLights = t["lights"].isMap() ? t["lights"] : LLSD();   // [WOLF CAVE LIGHTS 2026-10-23]
             s_records.push_back(r);
         }
         s_recordsRegion = region["uuid"].asString();
@@ -1047,6 +1050,24 @@ namespace
      *  user chose to leave it. */
     bool takeAway(const WolfTunnels::Record& rec, const std::string& cap, const LLUUID& region, bool forget, std::string& error)
     {
+        // [WOLF CAVE LIGHTS 2026-10-23] Paul: deleting the cave or tunnel also deletes its lights (a rebuilt tunnel's lamps would
+        // hang in the rock). The lamps in view go; parts not in view are said and left, and the record forgets them.
+        if (rec.mLights.isMap() && rec.mLights["objects"].size() > 0)
+        {
+            s_jobStatus = "Taking the tunnel's lights away...";
+            const LLSD unseen = WolfCaveLights::takeAwayFor(rec.mLights);
+            if (unseen.size() > 0)
+                jobFail(llformat("%d light part%s of \"%s\" %s not in view, so %s left where %s: delete %s by hand if %s still there.",
+                                 (S32)unseen.size(), unseen.size() == 1 ? "" : "s", rec.mName.c_str(), unseen.size() == 1 ? "was" : "were",
+                                 unseen.size() == 1 ? "it is" : "they are", unseen.size() == 1 ? "it is" : "they are",
+                                 unseen.size() == 1 ? "it" : "them", unseen.size() == 1 ? "it is" : "they are"));
+            std::string e2;
+            if (!putRecord(LLSD().with("region", s_recordsRegion).with("op", "lights").with("id", rec.mId).with("lights", LLSD()), e2))
+            {
+                error = "the tunnel's lights were taken away, but its record could not be updated: " + e2;
+                return false;
+            }
+        }
         if (!rec.mBuilt.isMap()) return true;
         LLViewerObject* obj = findTunnelObject(rec.mBuilt);
         if (!obj && rec.mBuilt["objects"].size() > 0 && !forget)
@@ -1271,6 +1292,47 @@ namespace
             if (answer.has("tunnels")) WolfTunnels::setFromAnswer(answer, region);
         }
         if (s_jobErrors.empty()) s_jobStatus = llformat("%d leftover walkable part(s) removed - the ground is whole again there.", n);
+        s_jobBusy = false;
+        ++s_jobSerial;
+    }
+
+    // ── [WOLF CAVE LIGHTS 2026-10-23] Light up / Remove lights ────────────────────────────────────────────────────────
+    /** Where a tunnel's lamps go: its route, its rooms, and the air of the same formulas the generator built it from (Air::eval:
+     *  inside distance, floor and clear height; the open mouths count as the end of the air). */
+    std::vector<WolfCaveLights::Lamp> tunnelLamps(const WolfTunnels::Design& d, WolfCaveLights::EStyle style)
+    {
+        const Air air(d, true);
+        WolfCaveLights::Route r;
+        for (size_t k = 0; k + 1 < d.mP.size(); k += 2) r.mPts.emplace_back(d.mP[k], d.mP[k + 1]);
+        r.mHalfW = d.mW * 0.5f;
+        std::vector<WolfCaveLights::Room> rooms;
+        for (const WolfTunnels::Cavern& c : d.mCaverns) rooms.push_back(WolfCaveLights::Room{ LLVector2(c.mX, c.mY), c.mR });
+        auto field = [&air](F32 x, F32 y, F32& s, F32& fl, F32& cl)
+        {
+            const Field f = air.eval(x, y);
+            s = llmin(f.s, f.e);
+            fl = f.f;
+            cl = f.v;
+            return true;
+        };
+        return WolfCaveLights::plan({ r }, rooms, field, style, d.mKind == "rail");
+    }
+
+    /** `lamps` empty with `remove` = Remove lights. The record's lights are saved through tunnels.php op "lights". */
+    void lightsCoro(WolfTunnels::Record rec, std::vector<WolfCaveLights::Lamp> lamps, bool remove, WolfCaveLights::EStyle style,
+                    bool warm, bool keep_unseen, LLUUID region, std::string region_uuid)
+    {
+        auto save = [&](const LLSD& lights, std::string& e)
+        {
+            return putRecord(LLSD().with("region", region_uuid).with("op", "lights").with("id", rec.mId).with("lights", lights), e);
+        };
+        auto progress = [](const std::string& line, F32 f) { s_jobStatus = line; s_jobProgress = f; };
+        std::string done, err;
+        const bool ok = WolfCaveLights::run(rec.mLights, keep_unseen, remove ? nullptr : &lamps, style, warm, rec.mName, region,
+                                            save, progress, []() { return false; }, done, err);
+        if (ok) { s_jobStatus = done; s_jobOk = true; }
+        else { s_jobStatus.clear(); jobFail((remove ? "Removing the lights stopped: " : "Lighting up stopped: ") + err); s_jobOk = false; }
+        s_jobProgress = 0.f;
         s_jobBusy = false;
         ++s_jobSerial;
     }
@@ -1892,6 +1954,10 @@ bool WolfFloaterTunnels::postBuild()
     mEditBtn = getChild<LLButton>("edit_btn");
     mGoTunBtn = getChild<LLButton>("go_tunnel_btn");
     mDelTunBtn = getChild<LLButton>("delete_tunnel_btn");
+    mLightStyle = getChild<LLComboBox>("lights_style");
+    mLightTone = getChild<LLComboBox>("lights_tone");
+    mLightUpBtn = getChild<LLButton>("lights_btn");
+    mUnlightBtn = getChild<LLButton>("unlights_btn");
 
     mUndoPointBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { undoPoint(); });
     mStartOverBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { onStartOver(); });
@@ -1926,13 +1992,24 @@ bool WolfFloaterTunnels::postBuild()
         gSavedSettings.setF32("WolfTunnelSeeThrough", llclamp((F32)mSeeThroughAmount->getValueF32() / 100.f, 0.25f, 0.75f));
         applySeeThrough();
     });
-    mTunList->setCommitCallback([this](LLUICtrl*, const LLSD&) { updateButtons(); });
+    mTunList->setCommitCallback([this](LLUICtrl*, const LLSD&) { onPickTunnel(); updateButtons(); });
     mEditBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { onEditTunnel(); });
     mGoTunBtn->setClickedCallback([this](LLUICtrl*, const LLSD&)
     {
         if (const WolfTunnels::Record* r = pickedTunnel()) walkInto(*r);
     });
     mDelTunBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { onDeleteTunnel(); });
+    // [WOLF CAVE LIGHTS 2026-10-23] Paul: "let them choose the light style rather than forcing it" - the last choice is kept
+    // (WolfCaveLightStyle / WolfCaveLightTone).
+    auto keep_choice = [this](LLUICtrl*, const LLSD&)
+    {
+        WolfCaveLights::saveChoice(WolfCaveLights::styleFrom(mLightStyle->getValue().asString(), WolfCaveLights::STYLE_LAMPS),
+                                   mLightTone->getValue().asString() != "cool");
+    };
+    mLightStyle->setCommitCallback(keep_choice);
+    mLightTone->setCommitCallback(keep_choice);
+    mLightUpBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { onLightUp(); });
+    mUnlightBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { onRemoveLights(); });
 
     // the walkable boxes (Expert)
     mBoxList = getChild<LLScrollListCtrl>("box_list");
@@ -2090,7 +2167,7 @@ void WolfFloaterTunnels::setStatus(const std::string& text, bool error)
 // 1558 at UI scale 1.35 = 1896 x 1154 UI pixels, TUNNEL_STRANGER_ASSESSMENT.md) everything open is 852: it fits with room.
 void WolfFloaterTunnels::relayout()
 {
-    const S32 BASE_H = 320, EXPERT_H = 214, BOXES_H = 228, LIST_H = 90;
+    const S32 BASE_H = 320, EXPERT_H = 214, BOXES_H = 228, LIST_H = 118;   // [2026-10-23] + the Light up row
     const bool expert = mExpertCheck->get();
     const bool boxes = expert && mAdvancedCheck->get();
     const bool list = mListCheck->get();
@@ -2883,6 +2960,12 @@ void WolfFloaterTunnels::updateButtons()
     mEditBtn->setEnabled(can && picked);
     mDelTunBtn->setEnabled(can && picked);
     mGoTunBtn->setEnabled(picked != nullptr && !s_jobBusy);
+    // [WOLF CAVE LIGHTS 2026-10-23] a built tunnel can be lit; one with lights listed can have them taken away
+    const bool lit = picked && picked->mLights.isMap() && picked->mLights["objects"].size() > 0;
+    mLightUpBtn->setEnabled(can && picked && picked->mBuilt.isMap());
+    mUnlightBtn->setEnabled(can && lit);
+    mLightStyle->setEnabled(can && picked && picked->mBuilt.isMap());
+    mLightTone->setEnabled(can && picked && picked->mBuilt.isMap());
     mListCheck->setLabel(llformat("This region's tunnels (%d)", (S32)s_records.size()));
     // Expert: the boxes
     const bool canBox = mEdit && !mBusy && mRegionAtFetch.notNull() && !s_jobBusy;
@@ -2919,11 +3002,85 @@ void WolfFloaterTunnels::fillTunnelList()
         cell("name", r.mName);
         cell("style", r.mDesign.mStyle == "rough" ? "Natural" : "Built");
         cell("length", llformat("%.0f m", WolfTunnels::routeLength(r.mDesign)));
-        cell("built", r.mBuilt.isMap() ? std::string("built") : std::string("not built"));
+        const std::string lights = WolfCaveLights::summary(r.mLights);   // [WOLF CAVE LIGHTS 2026-10-23]
+        cell("built", r.mBuilt.isMap() ? (lights.empty() ? std::string("built") : "built, " + lights) : std::string("not built"));
         mTunList->addRow(rp);
     }
     if (!keep.empty()) mTunList->selectByValue(LLSD(keep));
+    onPickTunnel();
     updateButtons();
+}
+
+// [WOLF CAVE LIGHTS 2026-10-23] The light choice for the picked tunnel: its own lights' style and colour when it has some; else
+// the last choice made; else what suits its walls (Paul: torches for natural walls, wall lamps for built ones).
+void WolfFloaterTunnels::onPickTunnel()
+{
+    const WolfTunnels::Record* r = pickedTunnel();
+    const std::string id = r ? r->mId : std::string();
+    if (id == mLightPickShown) return;
+    mLightPickShown = id;
+    if (!r) return;
+    const WolfCaveLights::EStyle walls = WolfCaveLights::styleForWalls(r->mDesign.mStyle == "rough");
+    const bool lit = r->mLights.isMap() && r->mLights.has("style");
+    const WolfCaveLights::EStyle st = lit ? WolfCaveLights::styleFrom(r->mLights["style"].asString(), walls) : WolfCaveLights::savedStyle(walls);
+    const bool warm = lit ? r->mLights["tone"].asString() != "cool" : WolfCaveLights::savedWarm();
+    mLightStyle->setValue(WolfCaveLights::styleKey(st));
+    mLightTone->setValue(warm ? "warm" : "cool");
+}
+
+void WolfFloaterTunnels::onLightUp()
+{
+    const WolfTunnels::Record* r = pickedTunnel();
+    LLViewerRegion* rgn = gAgent.getRegion();
+    if (!r || !rgn || s_jobBusy) return;
+    if (!r->mBuilt.isMap()) { setStatus("Build the tunnel first, then light it up.", true); return; }
+    const WolfCaveLights::EStyle style = WolfCaveLights::styleFrom(mLightStyle->getValue().asString(), WolfCaveLights::STYLE_LAMPS);
+    const bool warm = mLightTone->getValue().asString() != "cool";
+    const std::vector<WolfCaveLights::Lamp> lamps = tunnelLamps(r->mDesign, style);
+    if (lamps.empty()) { setStatus("No place for a lamp was found in \"" + r->mName + "\" (is it built and long enough?).", true); return; }
+    const WolfTunnels::Record rec = *r;
+    const LLUUID region = rgn->getRegionID();
+    const std::string uuid = regionUuid();
+    if (uuid.empty()) { setStatus("This region's tunnels are not loaded here - press Refresh.", true); return; }
+    WolfCaveLights::confirmLightUp(rec.mName, style, (S32)lamps.size(), rec.mLights, [rec, lamps, style, warm, region, uuid](bool keep)
+    {
+        if (s_jobBusy) return;
+        if (!gAgent.getRegion() || gAgent.getRegion()->getRegionID() != region) return;
+        s_jobBusy = true;
+        s_jobOk = false;
+        s_jobErrors.clear();
+        s_jobStatus = "Lighting up \"" + rec.mName + "\"...";
+        ++s_jobSerial;
+        LLCoros::instance().launch("WolfTunnelsLights", [rec, lamps, style, warm, keep, region, uuid]()
+        {
+            lightsCoro(rec, lamps, false, style, warm, keep, region, uuid);
+        });
+    });
+}
+
+void WolfFloaterTunnels::onRemoveLights()
+{
+    const WolfTunnels::Record* r = pickedTunnel();
+    LLViewerRegion* rgn = gAgent.getRegion();
+    if (!r || !rgn || s_jobBusy) return;
+    const WolfTunnels::Record rec = *r;
+    const LLUUID region = rgn->getRegionID();
+    const std::string uuid = regionUuid();
+    if (uuid.empty()) { setStatus("This region's tunnels are not loaded here - press Refresh.", true); return; }
+    WolfCaveLights::confirmRemove(rec.mName, rec.mLights, [rec, region, uuid](bool keep)
+    {
+        if (s_jobBusy) return;
+        if (!gAgent.getRegion() || gAgent.getRegion()->getRegionID() != region) return;
+        s_jobBusy = true;
+        s_jobOk = false;
+        s_jobErrors.clear();
+        s_jobStatus = "Taking the lights of \"" + rec.mName + "\" away...";
+        ++s_jobSerial;
+        LLCoros::instance().launch("WolfTunnelsUnlight", [rec, keep, region, uuid]()
+        {
+            lightsCoro(rec, {}, true, WolfCaveLights::STYLE_HIDDEN, true, keep, region, uuid);
+        });
+    });
 }
 
 const WolfTunnels::Record* WolfFloaterTunnels::pickedTunnel() const
@@ -2974,6 +3131,19 @@ void WolfFloaterTunnels::onDeleteTunnel()
     args["MESSAGE"] = unseen
         ? "\"" + rec.mName + "\"'s rock is not in view from here. Delete the tunnel anyway, leaving the rock where it is (you can delete it by hand)? Its walkable parts are removed."
         : "Delete \"" + rec.mName + "\"? Its rock and its walkable parts are taken away; anyone inside is lifted to the surface.";
+    // [WOLF CAVE LIGHTS 2026-10-23] its lamps go too; any not in view are said
+    if (rec.mLights.isMap() && rec.mLights["objects"].size() > 0)
+    {
+        std::vector<LLUUID> roots;
+        LLSD lights_unseen;
+        WolfCaveLights::find(rec.mLights["objects"], roots, lights_unseen);
+        args["MESSAGE"] = args["MESSAGE"].asString() + llformat(" Its %s %s taken away too", WolfCaveLights::summary(rec.mLights).c_str(),
+                                                                 WolfCaveLights::lampCount(rec.mLights) == 1 ? "is" : "are")
+            + (lights_unseen.size() > 0 ? llformat(" (%d light part%s not in view from here stay%s where %s: delete %s by hand).",
+                                                   (S32)lights_unseen.size(), lights_unseen.size() == 1 ? "" : "s", lights_unseen.size() == 1 ? "s" : "",
+                                                   lights_unseen.size() == 1 ? "it is" : "they are", lights_unseen.size() == 1 ? "it" : "them")
+                                        : std::string("."));
+    }
     LLHandle<LLFloater> h = getHandle();
     const std::string cap = mCapUrl;
     const LLUUID region = rgn->getRegionID();

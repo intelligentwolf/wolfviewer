@@ -16,17 +16,21 @@
 #ifndef WOLF_FLOATER_TUNNELS_H
 #define WOLF_FLOATER_TUNNELS_H
 
+#include <limits>
 #include <string>
 #include <vector>
 
 #include "llfloater.h"
+#include "llformat.h"
 #include "llsingleton.h"
 #include "lltool.h"
 #include "lluuid.h"
+#include "v2math.h"
 #include "v3math.h"
 
 class LLButton;
 class LLComboBox;
+class WolfDigProgress;
 class LLCheckBoxCtrl;
 class LLLineEditor;
 class LLPanel;
@@ -129,6 +133,7 @@ namespace WolfTunnels
     /**
      * The avatar's head (agent frame) is in a tunnel: pull the wanted camera position (agent frame) back along the line from
      * the head so it stays inside the boxes. False (camera untouched) when the head is in no box.
+     * [2026-10-23] The boxes' joins no longer stop it and the distance kept is eased between frames (wolftunnelcamera.h).
      */
     bool keepCameraInside(const LLVector3& head_agent, LLVector3& camera_agent);
     /** Terrain shaders (lldrawpoolterrain.cpp): the boxes near the camera that reach the ground, or none for this region. */
@@ -146,6 +151,9 @@ namespace WolfTunnels
     // tunnel and it creates the mesh with caverns". The drawn tunnel: firestorm/wolfstorm/tools/TUNNEL_DESIGN_V1.md "Stored
     // design" (the contract with php/tunnels.php and rust_proxy/src/wolftunnel.rs, which builds it).
     struct Cavern { F32 mX = 0.f, mY = 0.f, mR = 8.f, mH = 6.f; };
+    /** [2026-10-23 subway] A way up to the surface (wolftunnel.rs TExit): its line x0, y0, x1, y1, ... (the first point inside
+     *  the tunnel, the last its mouth on the ground), a floor per point, its width, and the room it starts in (-1 = the line). */
+    struct Exit { std::vector<F32> mP, mZ; F32 mW = 3.f; S32 mRoom = -1; };
     struct Design
     {
         std::string mStyle = "smooth";   // "smooth" | "rough"
@@ -161,6 +169,10 @@ namespace WolfTunnels
         LLUUID mRock;
         F32 mRockScale = 4.f;
         S32 mSeed = 0;
+        // [2026-10-23 subway] Paul: "add an option to tunneling to keep the tunnel flat, i.e. like a subway" - level between its
+        // two ramps (the floor is worked out so, fitRoute) - and "with a subway they do need paths to the surface as well".
+        bool mFlat = false;
+        std::vector<Exit> mExits;
     };
     /** One record of php/tunnels.php. */
     struct Record
@@ -178,9 +190,57 @@ namespace WolfTunnels
     F32 routeLength(const Design& d);
     /** The floor height at arc length t along the route (straight between the points' heights). */
     F32 floorAt(const Design& d, F32 t);
+    /** [WOLF TERRAFORM 2026-10-23] A walking slope steeper than this (rise over run) is warned about. Source: wolfstorm
+     *  rust_proxy/src/wolftunnel.rs:212 WALK_GRADE_WARN (the generator's own warning; was in wolffloatertunnels.cpp's constants). */
+    constexpr F32 WALK_GRADE_WARN = 0.25f;
 }
 
-class WolfFloaterTunnels : public LLFloater
+/**
+ * [WOLF TERRAFORM 2026-10-23] The window a route pen (WolfToolTunnel) draws for. DESIGN.md 3.2: the Terraform window's Road, River
+ * and the box and two-point tools reuse the Tunnel tool's point drawing (clicks, dragging a marker, Ctrl+click to take a point
+ * out or put one in, Backspace, drawing from under the ground) rather than a second pen. The Tunnels window is one; the
+ * Terraform window (wolffloaterterraform.cpp) the other.
+ */
+class WolfRouteHost
+{
+public:
+    virtual ~WolfRouteHost() = default;
+    /** A click on the ground at (x, y), region metres. */
+    virtual void clickAt(F32 x, F32 y) = 0;
+    /** Clicked point k moved to (x, y) by its marker; `done` = the drag ended. */
+    virtual void moveClick(S32 k, F32 x, F32 y, bool done) = 0;
+    virtual void undoPoint() = 0;
+    /** Ctrl+click on a marker / on the line. */
+    virtual void removeClick(S32 k) = 0;
+    virtual void insertClickNear(F32 x, F32 y) = 0;
+    virtual void setStatus(const std::string& text, bool error) = 0;
+    /** The pen was put down (by the window, another tool, the Build window). */
+    virtual void penStopped() = 0;
+    /** The level a click lands on when the camera is under the ground, region metres. */
+    virtual F32 planeHeight() const = 0;
+    /** The points clicked so far, region metres. */
+    virtual const std::vector<LLVector2>& clicks() const = 0;
+    /** A route is being drawn in the window now (only then are its markers picked and dragged). */
+    virtual bool routeEditing() const = 0;
+    /** What the window says when a click found no ground (`underground`: the camera is under it), and on Escape. */
+    virtual std::string noGroundText(bool underground) const = 0;
+    virtual std::string escapeText() const = 0;
+    // For a window other than the Tunnels one, which the pen draws itself (WolfToolTunnel::render / draw):
+    /** The ring under the pointer, metres. */
+    virtual F32 cursorRadius() const { return 0.5f; }
+    /** Marker k's name in the world view. */
+    virtual std::string markerLabel(size_t k) const { return llformat("%d", (S32)k + 1); }
+    /** What to do next, at the top of the world view. */
+    virtual std::string routeHint() const { return std::string(); }
+    /** The window's own drawing in the world (its preview), before the pen's markers. */
+    virtual void renderRouteExtras(LLViewerRegion* /*rgn*/) {}
+    /** Markers can be picked and dragged now (false: every click is a plain click, e.g. Terraform's "From the ground"). */
+    virtual bool markersMovable() const { return true; }
+    /** Join the clicks into a line (a route), or only mark them (two corners of a box). */
+    virtual bool joinClicks() const { return true; }
+};
+
+class WolfFloaterTunnels : public LLFloater, public WolfRouteHost
 {
 public:
     explicit WolfFloaterTunnels(const LLSD& key);
@@ -191,26 +251,45 @@ public:
     void draw() override;
 
     /** Status line: confirmations quietly, failures in the caution colour and kept until the next action. */
-    void setStatus(const std::string& text, bool error);
+    void setStatus(const std::string& text, bool error) override;
 
     // The pen (WolfToolTunnel) calls these.
     /** A click on the ground at (x, y), region metres: the room pen puts a room on the route there; else a new last point (the
      *  way Out), moved out to the shortest piece the generator takes when it is too close to the point before. */
-    void clickAt(F32 x, F32 y);
+    void clickAt(F32 x, F32 y) override;
     /** Clicked point k moved to (x, y) by its marker; `done` = the drag ended (the floor is worked out again at once, else at most
      *  10 times a second while dragging). */
-    void moveClick(S32 k, F32 x, F32 y, bool done);
-    void undoPoint();
+    void moveClick(S32 k, F32 x, F32 y, bool done) override;
+    void undoPoint() override;
+    // [WOLF TUNNELS 2026-10-23] Paul: "make it so you can edit an existing tunnel". Ctrl+click on a marker takes that bend out;
+    // Ctrl+click on the line puts a new bend there (between the two points round it).
+    void removeClick(S32 k) override;
+    void insertClickNear(F32 x, F32 y) override;
+    /** Editing a tunnel that is built (Build becomes Rebuild tunnel; Start over becomes Cancel edit, which leaves it as it is). */
+    bool editingBuilt() const;
+    // [2026-10-23 subway] Keep it level, and the ways up (the Add a way up pen: a click on the tunnel's line adds one there, a
+    // click on one takes it away, a click in a room opens or closes that room's way up).
+    void onFlat();
+    void onExitPen();
+    void exitClickAt(F32 x, F32 y);
+    void onLevel();
+    void onLevelAuto();
+    /** Work the ways up out for the design's floor (designChanged): the rooms' (unless closed) and the ones added on the line. */
+    void placeExits();
     /** The pen was put down (by the window, another tool, the Build window): the window re-arms it while drawing is wanted. */
-    void penStopped();
+    void penStopped() override;
     /** The floor's height at the last clicked point (the level plane a click lands on when the camera is under the ground). */
-    F32 planeHeight() const;
+    F32 planeHeight() const override;
+    // [WOLF TERRAFORM 2026-10-23] WolfRouteHost: the pen's words, unchanged
+    bool routeEditing() const override { return editing() == this; }
+    std::string noGroundText(bool underground) const override;
+    std::string escapeText() const override;
 
     /** The open window that is drawing a tunnel, or null (the tool draws its markers and preview). */
     static WolfFloaterTunnels* editing();
     const WolfTunnels::Design& design() const { return mDesign; }
     /** The points the user clicked (the way In, the bends, the way Out); the design has these plus the floor's own points. */
-    const std::vector<LLVector2>& clicks() const { return mClicks; }
+    const std::vector<LLVector2>& clicks() const override { return mClicks; }
     /** The ends are too far apart in height for the distance: the Out marker is drawn red. */
     bool badEnd() const { return mBadEnd; }
     /** The point Expert's "Point" row edits (0-based), or -1 when Expert is closed. */
@@ -324,6 +403,20 @@ private:
     LLComboBox *mLightStyle = nullptr, *mLightTone = nullptr;   // [WOLF CAVE LIGHTS 2026-10-23]
     LLButton *mLightUpBtn = nullptr, *mUnlightBtn = nullptr;
     std::string mLightPickShown;   // the tunnel whose light choice the combos show
+    // [WOLF BURROW 2026-10-23] the painted window (wolfburrow.cpp): the sheet behind the controls runs paintBurrow
+    void paintBurrow();
+    LLView *mKindLbl = nullptr, *mStyleLbl = nullptr;
+    // [2026-10-23 subway]
+    LLCheckBoxCtrl* mFlat = nullptr;
+    LLButton* mExitBtn = nullptr;
+    LLSpinCtrl* mLevel = nullptr;
+    LLButton* mLevelAuto = nullptr;
+    F32 mLevelSet = std::numeric_limits<F32>::quiet_NaN();   // a level set by hand in Expert (NaN: worked out)
+    std::vector<F32> mExitAt;                                // the ways up added on the line: arc lengths along the route
+    std::vector<LLVector2> mClosedRooms;                     // rooms whose way up was taken away (a point inside each)
+    std::vector<std::string> mExitNotes;                     // why a way up could not be placed
+    bool mDigSawJob = false;           // a job ran while this window was open (only then is "Done!" shown)
+    WolfDigProgress* mDig = nullptr;   // [2026-10-23] the painted working plate over the status lines (wolfdigprogress.cpp)
 
     LLScrollListCtrl* mBoxList = nullptr;
     LLSpinCtrl* mSpin[7] = { nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr };   // cx cy cz length width height turn
@@ -379,7 +472,7 @@ class WolfToolTunnel : public LLTool, public LLSingleton<WolfToolTunnel>
 {
     LLSINGLETON(WolfToolTunnel);
 public:
-    enum EPen { PEN_NONE = 0, PEN_ROUTE = 1, PEN_ROOM = 2 };
+    enum EPen { PEN_NONE = 0, PEN_ROUTE = 1, PEN_ROOM = 2, PEN_EXIT = 3 };   // [2026-10-23 subway] PEN_EXIT: a way up
     void begin(LLHandle<LLFloater> floater, EPen pen);
     void cancel();
     /** Switch between the route and the room pen while it is down. */
@@ -389,6 +482,8 @@ public:
     EPen pen() const { return mActive ? mPen : PEN_NONE; }
     /** The pen is down and LLToolMgr still has it (another tool may have taken over without telling it). */
     bool current() const;
+    /** [WOLF TERRAFORM 2026-10-23] The pen was last put down for this window (it keeps drawing that window's markers). */
+    bool hostIs(const LLFloater* f) const { return f && mFloater.get() == f; }
 
     /** The drawing while the Tunnels window is open and this tool is not the current one. */
     static void renderIdle();
@@ -419,6 +514,8 @@ private:
     S32 pickMarker(S32 x, S32 y) const;
     void dropDrag();
     bool shown() const;
+    /** [WOLF TERRAFORM 2026-10-23] The window the pen is down for (the Tunnels or the Terraform window), or null. */
+    WolfRouteHost* host() const;
 
     LLHandle<LLFloater> mFloater;
     EPen mPen = PEN_NONE;

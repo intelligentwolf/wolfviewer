@@ -9,11 +9,16 @@
      box is SOLID ROCK, the air is the tunnels and caverns carved through it - 1 Rock box (drawn, then
      resized / moved / raised with in-world handles), 2 Tunnels, 3 Caverns, 4 Doorways, 5 Look,
      6 Generate (bottom right). -->
+<!-- [WOLF BURROW 2026-10-23] Paul: "you know we could make the build floaters all look way nicer ... the plain ones are boring".
+     The burrow look of the Tunnel tool (wolfburrow.cpp): a painted header with the mole (the top 46 px), each step on its own dark
+     plate (6 px between them), the step headings in amber, painted button faces (Generate and Light up amber; Remove, Remove lights
+     and Stop with a red rule). Buttons draw no skin image (image_color 0 alpha); every text colour is fixed because it sits on the
+     fixed paint (contrast: region-terrain-work/cave-lights/check/burrow_contrast.py). Same names, callbacks and behaviour. -->
 <floater
  can_close="true"
  can_minimize="true"
  can_resize="false"
- height="836"
+ height="930"
  layout="topleft"
  name="wolf_caves"
  save_rect="true"
@@ -62,76 +67,76 @@
     <floater.string name="str_rebuild_far">Generating again needs the old rock in view, to take it away first. Stand nearer the cave and press Generate again.</floater.string>
 
     <!-- The region's caves -->
-    <text follows="left|top" layout="topleft" left="10" top="24" width="360" height="16" font.style="BOLD" name="cave_list_lbl">Caves here</text>
-    <scroll_list follows="left|top" layout="topleft" left="10" top="42" width="360" height="56" name="cave_list" draw_heading="true" multi_select="false" tool_tip="This region's caves">
+    <text text_color="1 0.74 0.32 1" follows="left|top" layout="topleft" left="10" top="70" width="360" height="16" font.style="BOLD" name="cave_list_lbl">Caves here</text>
+    <scroll_list follows="left|top" layout="topleft" left="10" top="88" width="360" height="56" name="cave_list" draw_heading="true" multi_select="false" tool_tip="This region's caves">
         <scroll_list.columns name="name" label="Cave" width="150" />
         <scroll_list.columns name="state" label="State" width="206" />
     </scroll_list>
-    <button follows="left|top" layout="topleft" left="10" top="104" width="90" height="22" name="cave_new" label="New cave" tool_tip="Start a new cave: draw its rock box on the ground" />
-    <button follows="left|top" layout="topleft" left="106" top="104" width="80" height="22" name="cave_edit" label="Change" tool_tip="Open the picked cave to change it and generate it again" />
-    <button follows="left|top" layout="topleft" left="270" top="104" width="100" height="22" name="cave_remove" label="Remove..." tool_tip="Take the picked cave away and put the ground back; its lights go too (asks first)" />
+    <button label_color_disabled_selected="0.7 0.66 0.6 1" label_color_disabled="0.7 0.66 0.6 1" label_color_selected="0.95 0.92 0.84 1" label_color="0.95 0.92 0.84 1" label_shadow="false" hover_glow_amount="0" image_color_disabled="0 0 0 0" image_color="0 0 0 0" follows="left|top" layout="topleft" left="10" top="150" width="90" height="22" name="cave_new" label="New cave" tool_tip="Start a new cave: draw its rock box on the ground" />
+    <button label_color_disabled_selected="0.7 0.66 0.6 1" label_color_disabled="0.7 0.66 0.6 1" label_color_selected="0.95 0.92 0.84 1" label_color="0.95 0.92 0.84 1" label_shadow="false" hover_glow_amount="0" image_color_disabled="0 0 0 0" image_color="0 0 0 0" follows="left|top" layout="topleft" left="106" top="150" width="80" height="22" name="cave_edit" label="Change" tool_tip="Open the picked cave to change it and generate it again" />
+    <button label_color_disabled_selected="0.7 0.66 0.6 1" label_color_disabled="0.7 0.66 0.6 1" label_color_selected="0.95 0.92 0.84 1" label_color="0.95 0.92 0.84 1" label_shadow="false" hover_glow_amount="0" image_color_disabled="0 0 0 0" image_color="0 0 0 0" follows="left|top" layout="topleft" left="270" top="150" width="100" height="22" name="cave_remove" label="Remove..." tool_tip="Take the picked cave away and put the ground back; its lights go too (asks first)" />
     <!-- [WOLF CAVE LIGHTS 2026-10-23] Paul: "light up cave" ... "but they have to be able to remove them as well", "let them
          choose the light style". For the picked (built) cave; Light up asks first (how many lamps, how many prims). -->
-    <combo_box follows="left|top" layout="topleft" left="10" top="132" width="104" height="22" name="cave_lights_style" tool_tip="What the lamps look like. Torches suit natural rock; hidden lights light the cave with nothing to see.">
+    <combo_box follows="left|top" layout="topleft" left="10" top="178" width="104" height="22" name="cave_lights_style" tool_tip="What the lamps look like. Torches suit natural rock; hidden lights light the cave with nothing to see.">
         <combo_box.item label="Torches" name="torches" value="torches" />
         <combo_box.item label="Wall lamps" name="lamps" value="lamps" />
         <combo_box.item label="Lanterns" name="lanterns" value="lanterns" />
         <combo_box.item label="Crystals" name="crystals" value="crystals" />
         <combo_box.item label="Hidden lights" name="hidden" value="hidden" />
     </combo_box>
-    <combo_box follows="left|top" layout="topleft" left="118" top="132" width="84" height="22" name="cave_lights_tone" tool_tip="The colour of the light">
+    <combo_box follows="left|top" layout="topleft" left="118" top="178" width="84" height="22" name="cave_lights_tone" tool_tip="The colour of the light">
         <combo_box.item label="Warm" name="warm" value="warm" />
         <combo_box.item label="Cool" name="cool" value="cool" />
     </combo_box>
-    <button follows="left|top" layout="topleft" left="206" top="132" width="70" height="22" name="cave_lights_up" label="Light up" tool_tip="Put lamps through the picked cave: on the walls every 9 m, one in each cavern and at each crossroads (asks first, with the number of prims). Again: the lamps are replaced." />
-    <button follows="left|top" layout="topleft" left="280" top="132" width="90" height="22" name="cave_lights_off" label="Remove lights" tool_tip="Take away exactly the lamps Light up placed in the picked cave (asks first)" />
+    <button font="SansSerifBold" label_color_disabled_selected="0.7 0.66 0.6 1" label_color_disabled="0.7 0.66 0.6 1" label_color_selected="0.12 0.07 0.03 1" label_color="0.12 0.07 0.03 1" label_shadow="false" hover_glow_amount="0" image_color_disabled="0 0 0 0" image_color="0 0 0 0" follows="left|top" layout="topleft" left="206" top="178" width="70" height="22" name="cave_lights_up" label="Light up" tool_tip="Put lamps through the picked cave: on the walls every 9 m, one in each cavern and at each crossroads (asks first, with the number of prims). Again: the lamps are replaced." />
+    <button label_color_disabled_selected="0.7 0.66 0.6 1" label_color_disabled="0.7 0.66 0.6 1" label_color_selected="0.95 0.92 0.84 1" label_color="0.95 0.92 0.84 1" label_shadow="false" hover_glow_amount="0" image_color_disabled="0 0 0 0" image_color="0 0 0 0" follows="left|top" layout="topleft" left="280" top="178" width="90" height="22" name="cave_lights_off" label="Remove lights" tool_tip="Take away exactly the lamps Light up placed in the picked cave (asks first)" />
 
-    <text follows="left|top" layout="topleft" left="10" top="164" width="48" height="16" name="cave_name_lbl">Name</text>
-    <line_editor follows="left|top" layout="topleft" left="60" top="162" width="310" height="20" max_length_bytes="63" name="cave_name" tool_tip="The cave's name (also the rock object's name)" />
+    <text text_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" left="10" top="216" width="48" height="16" name="cave_name_lbl">Name</text>
+    <line_editor follows="left|top" layout="topleft" left="60" top="214" width="310" height="20" max_length_bytes="63" name="cave_name" tool_tip="The cave's name (also the rock object's name)" />
 
     <!-- 1. Rock box -->
-    <text follows="left|top" layout="topleft" left="10" top="190" width="360" height="16" font.style="BOLD" name="cave_step1_lbl">1. Rock box</text>
-    <text follows="left|top" layout="topleft" left="10" top="206" width="360" height="28" word_wrap="true" font="SansSerifSmall" name="cave_step1_help">Solid rock the cave is carved from. Drag on the ground to draw it; drag its handles to size, move (inside) or raise (top) it.</text>
-    <button follows="left|top" layout="topleft" left="10" top="236" width="150" height="22" name="cave_pen_box" label="Draw the rock box" is_toggle="true" tool_tip="Put the pen down to draw the rock box or drag its handles (press again to stop)" />
-    <spinner follows="left|top" layout="topleft" left="10" top="262" width="116" height="20" label="Width" label_width="44" name="cave_box_w" min_val="3" max_val="128" increment="0.5" initial_value="12" decimal_digits="1" tool_tip="Box width along its own x, metres (3 to 128)" />
-    <spinner follows="left|top" layout="topleft" left="132" top="262" width="116" height="20" label="Depth" label_width="44" name="cave_box_d" min_val="3" max_val="128" increment="0.5" initial_value="8" decimal_digits="1" tool_tip="Box depth along its own y, metres (3 to 128)" />
-    <spinner follows="left|top" layout="topleft" left="254" top="262" width="116" height="20" label="Rock" label_width="40" name="cave_box_h" min_val="3" max_val="30" increment="0.5" initial_value="8" decimal_digits="1" tool_tip="Rock height above the cave floor, metres (3 to 30): the top of the rocky hill" />
-    <spinner follows="left|top" layout="topleft" left="10" top="286" width="116" height="20" label="Turn" label_width="44" name="cave_box_turn" min_val="0" max_val="359" increment="5" initial_value="0" decimal_digits="0" tool_tip="Turn of the box, degrees counter-clockwise from east" />
-    <spinner follows="left|top" layout="topleft" left="132" top="286" width="170" height="20" label="Floor height" label_width="78" name="cave_box_floor" min_val="-200" max_val="4096" increment="0.5" initial_value="20" decimal_digits="2" tool_tip="Cave floor, region metres (every tunnel and cavern). Set to the ground height at the box centre when you draw the box." />
+    <text text_color="1 0.74 0.32 1" follows="left|top" layout="topleft" left="10" top="248" width="360" height="16" font.style="BOLD" name="cave_step1_lbl">1. Rock box</text>
+    <text text_color="0.82 0.76 0.66 1" follows="left|top" layout="topleft" left="10" top="264" width="360" height="28" word_wrap="true" font="SansSerifSmall" name="cave_step1_help">Solid rock the cave is carved from. Drag on the ground to draw it; drag its handles to size, move (inside) or raise (top) it.</text>
+    <button label_color_disabled_selected="0.7 0.66 0.6 1" label_color_disabled="0.7 0.66 0.6 1" label_color_selected="0.95 0.92 0.84 1" label_color="0.95 0.92 0.84 1" label_shadow="false" hover_glow_amount="0" image_color_disabled="0 0 0 0" image_color="0 0 0 0" follows="left|top" layout="topleft" left="10" top="294" width="150" height="22" name="cave_pen_box" label="Draw the rock box" is_toggle="true" tool_tip="Put the pen down to draw the rock box or drag its handles (press again to stop)" />
+    <spinner text_disabled_color="0.7 0.66 0.6 1" text_enabled_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" left="10" top="320" width="116" height="20" label="Width" label_width="44" name="cave_box_w" min_val="3" max_val="128" increment="0.5" initial_value="12" decimal_digits="1" tool_tip="Box width along its own x, metres (3 to 128)" />
+    <spinner text_disabled_color="0.7 0.66 0.6 1" text_enabled_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" left="132" top="320" width="116" height="20" label="Depth" label_width="44" name="cave_box_d" min_val="3" max_val="128" increment="0.5" initial_value="8" decimal_digits="1" tool_tip="Box depth along its own y, metres (3 to 128)" />
+    <spinner text_disabled_color="0.7 0.66 0.6 1" text_enabled_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" left="254" top="320" width="116" height="20" label="Rock" label_width="40" name="cave_box_h" min_val="3" max_val="30" increment="0.5" initial_value="8" decimal_digits="1" tool_tip="Rock height above the cave floor, metres (3 to 30): the top of the rocky hill" />
+    <spinner text_disabled_color="0.7 0.66 0.6 1" text_enabled_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" left="10" top="344" width="116" height="20" label="Turn" label_width="44" name="cave_box_turn" min_val="0" max_val="359" increment="5" initial_value="0" decimal_digits="0" tool_tip="Turn of the box, degrees counter-clockwise from east" />
+    <spinner text_disabled_color="0.7 0.66 0.6 1" text_enabled_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" left="132" top="344" width="170" height="20" label="Floor height" label_width="78" name="cave_box_floor" min_val="-200" max_val="4096" increment="0.5" initial_value="20" decimal_digits="2" tool_tip="Cave floor, region metres (every tunnel and cavern). Set to the ground height at the box centre when you draw the box." />
 
     <!-- 2. Tunnels -->
-    <text follows="left|top" layout="topleft" left="10" top="316" width="360" height="16" font.style="BOLD" name="cave_step2_lbl">2. Tunnels (at least one)</text>
-    <text follows="left|top" layout="topleft" left="10" top="332" width="360" height="16" word_wrap="true" font="SansSerifSmall" name="cave_step2_help">Click points inside the box; double-click or Enter finishes.</text>
-    <button follows="left|top" layout="topleft" left="10" top="350" width="150" height="22" name="cave_pen_tunnel" label="Draw a tunnel" is_toggle="true" tool_tip="Put the pen down to draw a tunnel (press again to stop)" />
-    <slider follows="left|top" layout="topleft" left="168" top="353" width="202" height="16" label="Tunnel width" label_width="76" name="cave_width" min_val="2" max_val="40" increment="0.5" initial_value="3" decimal_digits="1" show_text="true" tool_tip="Width of the next tunnel you draw, metres (2 to 40)" />
+    <text text_color="1 0.74 0.32 1" follows="left|top" layout="topleft" left="10" top="380" width="360" height="16" font.style="BOLD" name="cave_step2_lbl">2. Tunnels (at least one)</text>
+    <text text_color="0.82 0.76 0.66 1" follows="left|top" layout="topleft" left="10" top="396" width="360" height="16" word_wrap="true" font="SansSerifSmall" name="cave_step2_help">Click points inside the box; double-click or Enter finishes.</text>
+    <button label_color_disabled_selected="0.7 0.66 0.6 1" label_color_disabled="0.7 0.66 0.6 1" label_color_selected="0.95 0.92 0.84 1" label_color="0.95 0.92 0.84 1" label_shadow="false" hover_glow_amount="0" image_color_disabled="0 0 0 0" image_color="0 0 0 0" follows="left|top" layout="topleft" left="10" top="414" width="150" height="22" name="cave_pen_tunnel" label="Draw a tunnel" is_toggle="true" tool_tip="Put the pen down to draw a tunnel (press again to stop)" />
+    <slider text_disabled_color="0.7 0.66 0.6 1" text_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" left="168" top="417" width="202" height="16" label="Tunnel width" label_width="76" name="cave_width" min_val="2" max_val="40" increment="0.5" initial_value="3" decimal_digits="1" show_text="true" tool_tip="Width of the next tunnel you draw, metres (2 to 40)" />
 
     <!-- 3. Caverns -->
-    <text follows="left|top" layout="topleft" left="10" top="382" width="360" height="16" font.style="BOLD" name="cave_step3_lbl">3. Caverns (optional)</text>
-    <text follows="left|top" layout="topleft" left="10" top="398" width="360" height="16" word_wrap="true" font="SansSerifSmall" name="cave_step3_help">Press on a tunnel and drag outwards to size a cavern.</text>
-    <button follows="left|top" layout="topleft" left="10" top="416" width="150" height="22" name="cave_pen_cavern" label="Add caverns" is_toggle="true" tool_tip="Put the pen down to add caverns on the tunnels (press again to stop)" />
-    <slider follows="left|top" layout="topleft" left="168" top="419" width="202" height="16" label="Cavern height" label_width="80" name="cave_cavern_h" min_val="2.5" max_val="20" increment="0.5" initial_value="5" decimal_digits="1" show_text="true" tool_tip="Height of the next cavern, metres (2.5 to 20); never taller than the rock box leaves room for under the rock above" />
+    <text text_color="1 0.74 0.32 1" follows="left|top" layout="topleft" left="10" top="452" width="360" height="16" font.style="BOLD" name="cave_step3_lbl">3. Caverns (optional)</text>
+    <text text_color="0.82 0.76 0.66 1" follows="left|top" layout="topleft" left="10" top="468" width="360" height="16" word_wrap="true" font="SansSerifSmall" name="cave_step3_help">Press on a tunnel and drag outwards to size a cavern.</text>
+    <button label_color_disabled_selected="0.7 0.66 0.6 1" label_color_disabled="0.7 0.66 0.6 1" label_color_selected="0.95 0.92 0.84 1" label_color="0.95 0.92 0.84 1" label_shadow="false" hover_glow_amount="0" image_color_disabled="0 0 0 0" image_color="0 0 0 0" follows="left|top" layout="topleft" left="10" top="486" width="150" height="22" name="cave_pen_cavern" label="Add caverns" is_toggle="true" tool_tip="Put the pen down to add caverns on the tunnels (press again to stop)" />
+    <slider text_disabled_color="0.7 0.66 0.6 1" text_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" left="168" top="489" width="202" height="16" label="Cavern height" label_width="80" name="cave_cavern_h" min_val="2.5" max_val="20" increment="0.5" initial_value="5" decimal_digits="1" show_text="true" tool_tip="Height of the next cavern, metres (2.5 to 20); never taller than the rock box leaves room for under the rock above" />
 
     <!-- 4. Doorways -->
-    <text follows="left|top" layout="topleft" left="10" top="448" width="360" height="16" font.style="BOLD" name="cave_step4_lbl">4. Doorways (at least one)</text>
-    <text follows="left|top" layout="topleft" left="10" top="464" width="360" height="16" word_wrap="true" font="SansSerifSmall" name="cave_step4_help">Click where a tunnel meets the box wall: the rock opens.</text>
-    <button follows="left|top" layout="topleft" left="10" top="482" width="150" height="22" name="cave_pen_door" label="Add doorways" is_toggle="true" tool_tip="Put the pen down to add doorways (press again to stop)" />
-    <text follows="left|top" layout="topleft" left="168" top="485" width="202" height="16" font="SansSerifSmall" name="cave_counts">0 tunnels, 0 caverns, 0 doorways</text>
+    <text text_color="1 0.74 0.32 1" follows="left|top" layout="topleft" left="10" top="524" width="360" height="16" font.style="BOLD" name="cave_step4_lbl">4. Doorways (at least one)</text>
+    <text text_color="0.82 0.76 0.66 1" follows="left|top" layout="topleft" left="10" top="540" width="360" height="16" word_wrap="true" font="SansSerifSmall" name="cave_step4_help">Click where a tunnel meets the box wall: the rock opens.</text>
+    <button label_color_disabled_selected="0.7 0.66 0.6 1" label_color_disabled="0.7 0.66 0.6 1" label_color_selected="0.95 0.92 0.84 1" label_color="0.95 0.92 0.84 1" label_shadow="false" hover_glow_amount="0" image_color_disabled="0 0 0 0" image_color="0 0 0 0" follows="left|top" layout="topleft" left="10" top="558" width="150" height="22" name="cave_pen_door" label="Add doorways" is_toggle="true" tool_tip="Put the pen down to add doorways (press again to stop)" />
+    <text text_color="0.82 0.76 0.66 1" follows="left|top" layout="topleft" left="168" top="561" width="202" height="16" font="SansSerifSmall" name="cave_counts">0 tunnels, 0 caverns, 0 doorways</text>
 
     <!-- 5. Look -->
-    <text follows="left|top" layout="topleft" left="10" top="514" width="360" height="16" font.style="BOLD" name="cave_step5_lbl">5. Look</text>
-    <text follows="left|top" layout="topleft" left="10" top="534" width="96" height="16" name="cave_rock_lbl">Rock texture</text>
-    <combo_box follows="left|top" layout="topleft" left="110" top="532" width="180" height="20" name="cave_rock" tool_tip="The rock of the cave, inside and out">
+    <text text_color="1 0.74 0.32 1" follows="left|top" layout="topleft" left="10" top="596" width="360" height="16" font.style="BOLD" name="cave_step5_lbl">5. Look</text>
+    <text text_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" left="10" top="616" width="96" height="16" name="cave_rock_lbl">Rock texture</text>
+    <combo_box follows="left|top" layout="topleft" left="110" top="614" width="180" height="20" name="cave_rock" tool_tip="The rock of the cave, inside and out">
         <combo_box.item label="Terrain Rock (default)" name="terrain_rock" value="terrain_rock" />
         <combo_box.item label="Rocks" name="rocks" value="rocks" />
         <combo_box.item label="Choose texture..." name="custom" value="custom" />
     </combo_box>
-    <texture_picker follows="left|top" layout="topleft" left="300" top="524" width="40" height="40" name="cave_rock_tex" allow_no_texture="false" can_apply_immediately="false" tool_tip="The texture chosen for the rock (click to choose another)" />
-    <text follows="left|top" layout="topleft" left="10" top="558" width="96" height="16" name="cave_roof_lbl">Rock above</text>
-    <slider follows="left|top" layout="topleft" left="110" top="558" width="180" height="16" name="cave_roof" min_val="0.5" max_val="6" increment="0.5" initial_value="1.5" decimal_digits="1" show_text="true" tool_tip="Rock thickness over every ceiling, metres (0.5 to 6); the rock box must leave 2.5 m under it" />
-    <text follows="left|top" layout="topleft" left="10" top="578" width="96" height="16" name="cave_rough_lbl">Rough walls</text>
-    <slider follows="left|top" layout="topleft" left="110" top="578" width="180" height="16" name="cave_rough" min_val="0" max_val="1" increment="0.1" initial_value="0.5" decimal_digits="1" show_text="true" tool_tip="0 = smooth walls, 1 = rough rock" />
-    <text follows="left|top" layout="topleft" left="10" top="598" width="96" height="16" name="cave_light_lbl">Inside light</text>
-    <combo_box follows="left|top" layout="topleft" left="110" top="596" width="180" height="20" name="cave_light" tool_tip="Stored as a Wolf Environment cave zone; shown once the Wolf Environment draws local zones">
+    <texture_picker follows="left|top" layout="topleft" left="300" top="606" width="40" height="40" name="cave_rock_tex" allow_no_texture="false" can_apply_immediately="false" tool_tip="The texture chosen for the rock (click to choose another)" />
+    <text text_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" left="10" top="640" width="96" height="16" name="cave_roof_lbl">Rock above</text>
+    <slider text_disabled_color="0.7 0.66 0.6 1" text_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" left="110" top="640" width="180" height="16" name="cave_roof" min_val="0.5" max_val="6" increment="0.5" initial_value="1.5" decimal_digits="1" show_text="true" tool_tip="Rock thickness over every ceiling, metres (0.5 to 6); the rock box must leave 2.5 m under it" />
+    <text text_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" left="10" top="660" width="96" height="16" name="cave_rough_lbl">Rough walls</text>
+    <slider text_disabled_color="0.7 0.66 0.6 1" text_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" left="110" top="660" width="180" height="16" name="cave_rough" min_val="0" max_val="1" increment="0.1" initial_value="0.5" decimal_digits="1" show_text="true" tool_tip="0 = smooth walls, 1 = rough rock" />
+    <text text_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" left="10" top="680" width="96" height="16" name="cave_light_lbl">Inside light</text>
+    <combo_box follows="left|top" layout="topleft" left="110" top="678" width="180" height="20" name="cave_light" tool_tip="Stored as a Wolf Environment cave zone; shown once the Wolf Environment draws local zones">
         <combo_box.item label="Dark" name="dark" value="dark" />
         <combo_box.item label="Dim" name="dim" value="dim" />
         <combo_box.item label="Torch-lit (warm)" name="torch" value="torch" />
@@ -139,13 +144,13 @@
     </combo_box>
 
     <!-- 6. Generate -->
-    <text follows="left|top" layout="topleft" left="10" top="626" width="360" height="16" font.style="BOLD" name="cave_step6_lbl">6. Generate</text>
-    <text follows="left|top" layout="topleft" left="10" top="642" width="360" height="44" word_wrap="true" font="SansSerifSmall" name="cave_stats">The land impact shows here once the cave has a rock box, a tunnel and a doorway.</text>
-    <text follows="left|top" layout="topleft" left="10" top="688" width="360" height="28" word_wrap="true" font="SansSerifSmall" name="cave_dig"></text>
-    <text follows="left|top" layout="topleft" left="10" top="718" width="360" height="42" word_wrap="true" font="SansSerifSmall" name="cave_status"></text>
-    <text follows="left|top" layout="topleft" left="10" top="762" width="360" height="42" word_wrap="true" font.style="BOLD" name="cave_why">Press New cave to make one, or pick a cave in the list and press Change.</text>
-    <button follows="left|top" layout="topleft" left="10" top="808" width="96" height="22" name="cave_back" label="Back to list" tool_tip="Put the drawing away and go back to the list" />
-    <button follows="left|top" layout="topleft" left="112" top="808" width="76" height="22" name="cave_undo" label="Undo last" tool_tip="Take back the last box change, tunnel, cavern or doorway" />
-    <button follows="left|top" layout="topleft" left="194" top="808" width="60" height="22" name="cave_cancel" label="Stop" enabled="false" tool_tip="Stop the running build or removal between two ground changes; what was done so far is kept in the cave's record so Generate again or Remove can finish it" />
-    <button follows="left|top" layout="topleft" left="266" top="808" width="104" height="22" name="cave_build" label="Generate..." tool_tip="Asks first: it rezzes the rock and digs the ground where you may change it" />
+    <text text_color="1 0.74 0.32 1" follows="left|top" layout="topleft" left="10" top="714" width="360" height="16" font.style="BOLD" name="cave_step6_lbl">6. Generate</text>
+    <text text_color="0.82 0.76 0.66 1" follows="left|top" layout="topleft" left="10" top="730" width="360" height="44" word_wrap="true" font="SansSerifSmall" name="cave_stats">The land impact shows here once the cave has a rock box, a tunnel and a doorway.</text>
+    <text text_color="0.82 0.76 0.66 1" follows="left|top" layout="topleft" left="10" top="776" width="360" height="28" word_wrap="true" font="SansSerifSmall" name="cave_dig"></text>
+    <text text_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" left="10" top="806" width="360" height="42" word_wrap="true" font="SansSerifSmall" name="cave_status"></text>
+    <text text_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" left="10" top="850" width="360" height="42" word_wrap="true" font.style="BOLD" name="cave_why">Press New cave to make one, or pick a cave in the list and press Change.</text>
+    <button label_color_disabled_selected="0.7 0.66 0.6 1" label_color_disabled="0.7 0.66 0.6 1" label_color_selected="0.95 0.92 0.84 1" label_color="0.95 0.92 0.84 1" label_shadow="false" hover_glow_amount="0" image_color_disabled="0 0 0 0" image_color="0 0 0 0" follows="left|top" layout="topleft" left="10" top="902" width="96" height="22" name="cave_back" label="Back to list" tool_tip="Put the drawing away and go back to the list" />
+    <button label_color_disabled_selected="0.7 0.66 0.6 1" label_color_disabled="0.7 0.66 0.6 1" label_color_selected="0.95 0.92 0.84 1" label_color="0.95 0.92 0.84 1" label_shadow="false" hover_glow_amount="0" image_color_disabled="0 0 0 0" image_color="0 0 0 0" follows="left|top" layout="topleft" left="112" top="902" width="76" height="22" name="cave_undo" label="Undo last" tool_tip="Take back the last box change, tunnel, cavern or doorway" />
+    <button label_color_disabled_selected="0.7 0.66 0.6 1" label_color_disabled="0.7 0.66 0.6 1" label_color_selected="0.95 0.92 0.84 1" label_color="0.95 0.92 0.84 1" label_shadow="false" hover_glow_amount="0" image_color_disabled="0 0 0 0" image_color="0 0 0 0" follows="left|top" layout="topleft" left="194" top="902" width="60" height="22" name="cave_cancel" label="Stop" enabled="false" tool_tip="Stop the running build or removal between two ground changes; what was done so far is kept in the cave's record so Generate again or Remove can finish it" />
+    <button font="SansSerifBold" label_color_disabled_selected="0.7 0.66 0.6 1" label_color_disabled="0.7 0.66 0.6 1" label_color_selected="0.12 0.07 0.03 1" label_color="0.12 0.07 0.03 1" label_shadow="false" hover_glow_amount="0" image_color_disabled="0 0 0 0" image_color="0 0 0 0" follows="left|top" layout="topleft" left="266" top="902" width="104" height="22" name="cave_build" label="Generate..." tool_tip="Asks first: it rezzes the rock and digs the ground where you may change it" />
 </floater>

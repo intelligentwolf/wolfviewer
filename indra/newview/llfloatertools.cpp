@@ -28,6 +28,7 @@
 
 #include "llfloatertools.h"
 #include "wolfbuilder.h"   // [WOLF BUILDER 2026-10-13/] Builders Mode
+#include "wolfburrow.h"    // <WolfViewer 2026-10-23/> [WOLF BURROW] the painted Wolf row
 
 #include "llfontgl.h"
 #include "llcoord.h"
@@ -369,10 +370,28 @@ bool    LLFloaterTools::postBuild()
     // row ends lower than that. While the land tool is up the row moves down by the overlap (+4 px) into the free space
     // above the land info panel (which starts with the tabs, top 223); every other tool keeps the row where it was.
     mWolfBuilderBtn = findChild<LLButton>("wolf_builder_btn");
+    // [WOLF TERRAFORM 2026-10-23] Flatten's "Level to" row (WolfLandLevelUse / WolfLandLevelHeight, bound in the XML) and its
+    // Pick (lltoolbrush.cpp startLevelPick): the land tool and Flatten are chosen, then the next click on the ground gives it.
+    mWolfLevelUse = findChild<LLView>("wolf_level_use");
+    mWolfLevelHeight = findChild<LLView>("wolf_level_height");
+    mWolfLevelPick = findChild<LLButton>("wolf_level_pick");
+    if (mWolfLevelPick)
+    {
+        mWolfLevelPick->setCommitCallback([](LLUICtrl*, const LLSD&)
+        {
+            gSavedSettings.setS32("RadioLandBrushAction", 0);   // Flatten (lltoolbrush.cpp radioAction 0 = E_LAND_LEVEL)
+            LLFloaterTools::setEditTool(LLToolBrushLand::getInstance());
+            LLToolBrushLand::getInstance()->startLevelPick();
+        });
+    }
     if (mWolfBuilderBtn && mCheckWolfBuildersMode && !mWolfBrushScaleBtns.empty())
     {
         const S32 row_top = llmax(mWolfBuilderBtn->getRect().mTop, mCheckWolfBuildersMode->getRect().mTop);
-        mWolfBuildersRowLandShift = llmax(0, row_top - mWolfBrushScaleBtns.front().second->getRect().mBottom + 4);
+        // [WOLF TERRAFORM 2026-10-23] below the Level to row when the skin has it (it is under the brush size buttons), so the
+        // row ends at the land panel's top (floater_tools.xml: Level to 181-200, the row 203-223, the tabs from 223)
+        const S32 lowest = mWolfLevelHeight ? llmin(mWolfLevelHeight->getRect().mBottom, mWolfBrushScaleBtns.front().second->getRect().mBottom)
+                                            : mWolfBrushScaleBtns.front().second->getRect().mBottom;
+        mWolfBuildersRowLandShift = llmax(0, row_top - lowest + (mWolfLevelHeight ? 3 : 4));
     }
     mSliderZoom = getChild<LLSlider>("slider zoom");
 
@@ -442,6 +461,87 @@ bool    LLFloaterTools::postBuild()
     mTextLinkNumObjCount = getChild<LLTextBox>("link_num_obj_count");
     mBtnCopyKeys         = getChild<LLButton>("btnCopyKeys");
     mTextMoreInfoLabel   = getChild<LLTextBox>("more info label");
+
+    // <WolfViewer 2026-10-23> [WOLF BURROW] Paul: "we were going to rebuild the whole build floater to make it look better".
+    // Who and why: a builder who lives in this window wants to find each thing at a glance - which tool, which part of the
+    // object, which settings belong together. Painted behind the controls (no control moved, renamed or removed): a header band
+    // behind the tool row, and every group of controls - the tool's own options, the Wolf row, each tab's sections (General:
+    // name, ownership, click and sale, permissions; Object: flags, position, size, rotation, shape, mesh; Features: flexible,
+    // light, reflection probe, physics; the texture panel's own sub-panels; Land: parcel, modify, transactions) - on its own plate.
+    // Everything is in the SKIN's own named colours (WolfBuild*, colors.xml of every skin and theme), so the skin's text keeps its
+    // contrast; the section headings are WolfBuildHeading (floater_tools.xml, panel_fs_tools_texture.xml).
+    {
+        auto v = [this](const char* n) -> LLView* { return findChild<LLView>(n); };
+        mWolfBuildTools = { v("button focus"), v("button move"), v("button edit"), v("button create"), v("button land") };
+        mWolfBuildGroups = {
+            // the tools' own options (only the shown tool's are visible, so the plate fits it)
+            { v("focus_radio_group"), v("slider zoom"), v("move_radio_group"), v("edit_radio_group"), v("checkbox edit linked parts"),
+              v("prev_part_btn"), v("next_part_btn"), v("link_btn"), v("unlink_btn"), v("combobox grid mode"), v("checkbox uniform"),
+              v("checkbox stretch textures"), v("checkbox snap to grid"), v("checkbox actual root"), v("checkbox show highlight"),
+              v("checkbox select probes"), v("Options..."), v("ToolCube"), v("ToolPrism"), v("ToolPyramid"), v("ToolTetrahedron"),
+              v("ToolCylinder"), v("ToolHemiCylinder"), v("ToolCone"), v("ToolHemiCone"), v("ToolSphere"), v("ToolHemiSphere"),
+              v("ToolTorus"), v("ToolTube"), v("ToolRing"), v("ToolTree"), v("ToolGrass"), v("checkbox sticky"),
+              v("checkbox copy selection"), v("checkbox copy centers"), v("checkbox copy rotates"), v("tree_grass_combo"),
+              v("land_radio_group"), v("Bulldozer:"), v("Dozer Size:"), v("slider brush size"), v("Strength:"), v("slider force"),
+              v("button apply to selection"), v("wolf_brush_scale_label"), v("wolf_brush_scale_1"), v("wolf_brush_scale_2"),
+              v("wolf_brush_scale_4"), v("wolf_brush_scale_8"), v("wolf_brush_scale_10"), v("wolf_level_use"), v("wolf_level_height"),
+              v("wolf_level_pick") },
+            // the Wolf row
+            { v("checkbox wolf builders mode"), v("wolf_builder_btn"), v("wolf_tunnels_btn"), v("wolf_terraform_btn") },
+            // General
+            { v("Name:"), v("Object Name"), v("Description:"), v("Object Description") },
+            { v("Creator:"), v("Creator Name"), v("Owner:"), v("Owner Name"), v("Last Owner:"), v("Last Owner Name"), v("Group:"),
+              v("Group Name"), v("button set group"), v("checkbox share with group"), v("button deed") },
+            { v("label click action"), v("clickaction"), v("checkbox for sale"), v("sale type"), v("Edit Cost"), v("button mark for sale"),
+              v("btnCopyKeys"), v("search_check") },
+            { v("perms_build") },
+            { v("pathfinding_attrs_panel") },
+            // Object
+            { v("checkbox locked"), v("Physical Checkbox Ctrl"), v("Temporary Checkbox Ctrl"), v("Phantom Checkbox Ctrl") },
+            { v("label position"), v("Pos X"), v("Pos Y"), v("Pos Z"), v("copy_pos_btn"), v("paste_pos_btn"), v("paste_pos_clip_btn") },
+            { v("label size"), v("Scale X"), v("Scale Y"), v("Scale Z"), v("copy_size_btn"), v("paste_size_btn"), v("paste_size_clip_btn") },
+            { v("label rotation"), v("Rot X"), v("Rot Y"), v("Rot Z"), v("copy_rot_btn"), v("paste_rot_btn"), v("paste_rot_clip_btn") },
+            { v("copy_params_btn"), v("paste_params_btn"), v("comboBaseType"), v("text cut"), v("cut begin"), v("cut end"), v("text hollow"),
+              v("text skew"), v("Scale 1"), v("Skew"), v("Hollow Shape"), v("hole"), v("text twist"), v("Twist Begin"), v("Twist End"),
+              v("scale_taper"), v("scale_hole"), v("Taper Scale X"), v("Taper Scale Y"), v("text topshear"), v("Shear X"), v("Shear Y"),
+              v("advanced_cut"), v("advanced_dimple"), v("advanced_slice"), v("Path Limit Begin"), v("Path Limit End"), v("text taper2"),
+              v("Taper X"), v("Taper Y"), v("text radius delta"), v("text revolutions"), v("Radius Offset"), v("Revolutions"),
+              v("sculpt texture control"), v("sculpt mirror control"), v("sculpt invert control"), v("label sculpt type"),
+              v("sculpt type control") },
+            { v("mesh_info_label"), v("lod_label"), v("lod_num_tris"), v("mesh_lod_label"), v("mesh_lod_num_tris"), v("LOD_show_combo"),
+              v("ObjectLODbehaviourLabel"), v("object_radius"), v("object_radius_value"), v("LOD_swap_factors_label"),
+              v("LOD_swap_defaults_label"), v("LOD_swap_usr_label"), v("LOD_swap_label"), v("LOD_swap_ll_default"), v("LOD_swap_fs_default"),
+              v("LOD_swap_usr_current"), v("LOD_swap_LOD_Change_label"), v("LOD_swap_ll_values"), v("LOD_swap_fs_values"),
+              v("LOD_swap_usr_values"), v("LODSwapTableDscriptionsText") },
+            // Features
+            { v("edit_object"), v("Animated Mesh Checkbox Ctrl"), v("Flexible1D Checkbox Ctrl"), v("copy_features_btn"), v("paste_features_btn"),
+              v("FlexNumSections"), v("FlexGravity"), v("FlexFriction"), v("FlexWind"), v("FlexTension"), v("FlexForceX"), v("FlexForceY"),
+              v("FlexForceZ") },
+            { v("Light Checkbox Ctrl"), v("colorswatch"), v("light texture control"), v("Light Intensity"), v("Light FOV"), v("Light Radius"),
+              v("Light Focus"), v("Light Falloff"), v("Light Ambiance") },
+            { v("Reflection Probe"), v("Probe Volume Type"), v("Probe Dynamic"), v("Probe Update Label"), v("Probe Update Type"),
+              v("Probe Ambiance"), v("Probe Near Clip") },
+            { v("label physicsshapetype"), v("Physics Shape Type Combo Ctrl"), v("PhysicsViewToggle"), v("material"), v("Physics Gravity"),
+              v("Physics Friction"), v("Physics Density"), v("Physics Restitution") },
+            // Land
+            { v("label_parcel_info"), v("label_area_price"), v("label_area"), v("button about land"), v("checkbox show owners") },
+            { v("label_parcel_modify"), v("button subdivide land"), v("button join land") },
+            { v("label_parcel_trans"), v("button buy land"), v("button abandon land") } };
+        // the texture panel's own sub-panels (panel_fs_tools_texture.xml), each a plate of its own
+        for (const char* n : { "panel_material_maps", "panel_material_parameters", "panel_blinn_phong_maps", "panel_blinn_phong_options",
+                               "panel_face_params", "pbr_transforms_all_scale", "pbr_transforms_all_offset", "pbr_transforms_all_rotation",
+                               "pbr_transforms_base_color_scale", "pbr_transforms_base_color_offset", "pbr_transforms_base_color_rotation",
+                               "pbr_transforms_normal_scale", "pbr_transforms_normal_offset", "pbr_transforms_normal_rotation",
+                               "pbr_transforms_orm_scale", "pbr_transforms_orm_offset", "pbr_transforms_orm_rotation",
+                               "pbr_transforms_emissive_scale", "pbr_transforms_emissive_offset", "pbr_transforms_emissive_rotation",
+                               "transforms_diffuse_scale", "transforms_diffuse_offset", "transforms_diffuse_rotation",
+                               "transforms_normal_scale", "transforms_normal_offset", "transforms_normal_rotation",
+                               "transforms_specular_scale", "transforms_specular_offset", "transforms_specular_rotation" })
+            mWolfBuildGroups.push_back({ v(n) });
+        WolfBurrow::Sheet::add(this, [this]() { paintBuild(); });
+        if (getDragHandle()) sendChildToBack(getDragHandle());   // empty space still drags the window
+    }
+    // </WolfViewer>
 
     return true;
 }
@@ -1183,6 +1283,10 @@ void LLFloaterTools::updatePopup(LLCoordGL center, MASK mask)
     if (mWolfBrushScaleText) mWolfBrushScaleText->setVisible(land_visible);
     // [WOLF TUNNELS 2026-10-21] the Tunnel tool beside the land tools, Wolf Territories only
     if (LLView* tunnels = findChild<LLView>("wolf_tunnels_btn")) tunnels->setVisible(land_visible && WolfGrid::isOnWolfTerritories());
+    // [WOLF TERRAFORM 2026-10-23] the Terraform window, Wolf Territories only (the same gate as Tunnels and Make Caves); Flatten's
+    // Level to row on any grid (it is the region's own ModifyLand)
+    if (LLView* terraform = findChild<LLView>("wolf_terraform_btn")) terraform->setVisible(land_visible && WolfGrid::isOnWolfTerritories());
+    for (LLView* v : { mWolfLevelUse, mWolfLevelHeight, (LLView*)mWolfLevelPick }) if (v) v->setVisible(land_visible);
     for (auto& entry : mWolfBrushScaleBtns) entry.second->setVisible(land_visible);
     if (land_visible) wolfSyncBrushScale();
     // [WolfViewer 2026-10-20] the Builders Mode row clears the brush multiplier row while the land tool is up (postBuild)
@@ -1857,3 +1961,27 @@ void LLFloaterTools::wolfSyncBrushScale()
         mWolfBrushScaleText->setText(llformat("Size x%d (big regions)", (S32)scale));
     }
 }
+
+// <WolfViewer 2026-10-23> [WOLF BURROW] The Build floater's paint (see postBuild): the header band behind the tool row, then each
+// group's plate over the visible controls of it (a hidden tab's and a hidden tool's controls give no plate), in the skin's own
+// WolfBuild* colours.
+void LLFloaterTools::paintBuild()
+{
+    const S32 w = getRect().getWidth();
+    LLRect tools = WolfBurrow::around(mWolfBuildTools, this, 4, 0);
+    if (!tools.isEmpty())
+    {
+        tools.mLeft = 2;
+        tools.mRight = w - 2;
+        WolfBurrow::drawBuildHeader(tools);
+    }
+    for (const std::vector<LLView*>& g : mWolfBuildGroups)
+    {
+        LLRect r = WolfBurrow::around(g, this, 2, 0);
+        if (r.isEmpty()) continue;
+        r.mLeft = llmax(2, r.mLeft - 2);
+        r.mRight = llmin(w - 2, r.mRight + 2);
+        WolfBurrow::drawBuildPlate(r);
+    }
+}
+// </WolfViewer>

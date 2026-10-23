@@ -37,6 +37,7 @@
 
 #include "llagent.h"
 #include "llcallbacklist.h"
+#include "llframetimer.h"
 #include "llviewercontrol.h"
 #include "llfloatertools.h"
 #include "llregionposition.h"
@@ -93,6 +94,25 @@ static F32 wolf_land_brush_size()
     return gSavedSettings.getF32("LandBrushSize") * llclamp(gSavedSettings.getF32("WolfLandBrushScale"), 1.f, 10.f);
 }
 
+// [WOLF TERRAFORM 2026-10-23] DESIGN.md 3.1 A "Pace the dabs". A dab used to go every rendered frame with Seconds = (1 / fps) *
+// LandBrushForce, but the region drops any ModifyLand that comes within 20 ms of the last one (TerrainModule.cs:1792-1794
+// client_OnModifyTerrain returns while now < NextModifyTerrainTime; :1946 sets it to now + 0.02 after each), so above about
+// 50 fps dabs were lost and a stroke's strength depended on the frame rate. Now a dab goes at most every DAB_SECS (50 ms, well
+// clear of the 20 ms cooldown) and carries the time since the last one, so a second of brushing is LandBrushForce at any frame
+// rate. The time is capped at DAB_MAX_SECS: the viewer's own cap on a frame's time (llappviewer.cpp:5898 MIN_FRAME_RATE = 1, so
+// the old 1 / gFPSClamped never passed 1 s either).
+static constexpr F64 DAB_SECS = 0.05;
+static constexpr F64 DAB_MAX_SECS = 1.0;
+
+// [WOLF TERRAFORM 2026-10-23] DESIGN.md 3.1 A "Level to height": Flatten aims at a typed (or picked) height when "Level to" is on
+// (WolfLandLevelUse / WolfLandLevelHeight, the Build window's land tool), else at the ground where the stroke began (mStartingZ,
+// as before). The region blends toward the Height the viewer sends (FlattenSphere.cs PaintEffect rz; FlattenArea.cs height).
+static F32 wolf_flatten_height(S32 radio_action, F32 starting_z)
+{
+    if (radio_action == 0 && gSavedSettings.getBOOL("WolfLandLevelUse")) return gSavedSettings.getF32("WolfLandLevelHeight");
+    return starting_z;
+}
+
 // constructor
 LLToolBrushLand::LLToolBrushLand()
 :   LLTool(std::string("Land")),
@@ -123,7 +143,7 @@ U8 LLToolBrushLand::getBrushIndex()
 }
 
 void LLToolBrushLand::modifyLandAtPointGlobal(const LLVector3d &pos_global,
-                                              MASK mask)
+                                              MASK mask, F32 dab_seconds)
 {
     S32 radioAction = gSavedSettings.getS32("RadioLandBrushAction");
 
@@ -177,7 +197,8 @@ void LLToolBrushLand::modifyLandAtPointGlobal(const LLVector3d &pos_global,
         regionp->forceUpdate();
 
         // tell the simulator what we've done
-        F32 seconds = (1.0f / gFPSClamped) * gSavedSettings.getF32("LandBrushForce");
+        // [WOLF TERRAFORM 2026-10-23] the time since the last dab, not one frame's (see DAB_SECS)
+        F32 seconds = dab_seconds * gSavedSettings.getF32("LandBrushForce");
         F32 x_pos = (F32)pos_region.mV[VX];
         F32 y_pos = (F32)pos_region.mV[VY];
         LLMessageSystem* msg = gMessageSystem;
@@ -189,7 +210,7 @@ void LLToolBrushLand::modifyLandAtPointGlobal(const LLVector3d &pos_global,
         msg->addU8Fast(_PREHASH_Action, (U8)action);
         msg->addU8Fast(_PREHASH_BrushSize, getBrushIndex());
         msg->addF32Fast(_PREHASH_Seconds, seconds);
-        msg->addF32Fast(_PREHASH_Height, mStartingZ);
+        msg->addF32Fast(_PREHASH_Height, wolf_flatten_height(radioAction, mStartingZ));   // [WOLF TERRAFORM 2026-10-23/] Level to
         msg->nextBlockFast(_PREHASH_ParcelData);
         msg->addS32Fast(_PREHASH_LocalID, -1);
         msg->addF32Fast(_PREHASH_West, x_pos );
@@ -327,7 +348,7 @@ void LLToolBrushLand::modifyLandInSelectionGlobal()
         msg->addU8Fast(_PREHASH_Action, (U8)action);
         msg->addU8Fast(_PREHASH_BrushSize, getBrushIndex());
         msg->addF32Fast(_PREHASH_Seconds, seconds);
-        msg->addF32Fast(_PREHASH_Height, mStartingZ);
+        msg->addF32Fast(_PREHASH_Height, wolf_flatten_height(radioAction, mStartingZ));   // [WOLF TERRAFORM 2026-10-23/] Level to
 
         bool parcel_selected = LLViewerParcelMgr::getInstance()->getParcelSelection()->getWholeParcelSelected();
         LLParcel* selected_parcel = LLViewerParcelMgr::getInstance()->getParcelSelection()->getParcel();
@@ -360,6 +381,11 @@ void LLToolBrushLand::modifyLandInSelectionGlobal()
 
 void LLToolBrushLand::brush( void )
 {
+    // [WOLF TERRAFORM 2026-10-23] at most one dab every DAB_SECS, carrying the time since the last (see DAB_SECS)
+    const F64 now = LLFrameTimer::getElapsedSeconds();
+    if (now - mLastDabAt < DAB_SECS) return;
+    const F32 dab_seconds = (F32)llmin(now - mLastDabAt, DAB_MAX_SECS);
+    mLastDabAt = now;
     LLVector3d spot;
     if( gViewerWindow->mousePointOnLandGlobal( mMouseX, mMouseY, &spot ) )
     {
@@ -367,8 +393,15 @@ void LLToolBrushLand::brush( void )
         spot.mdV[VX] = floor( spot.mdV[VX] + 0.5 );
         spot.mdV[VY] = floor( spot.mdV[VY] + 0.5 );
 
-        modifyLandAtPointGlobal(spot, gKeyboard->currentMask(true));
+        modifyLandAtPointGlobal(spot, gKeyboard->currentMask(true), dab_seconds);
     }
+}
+
+// [WOLF TERRAFORM 2026-10-23] "Pick": the next click on the ground gives Flatten's "Level to" height instead of brushing.
+void LLToolBrushLand::startLevelPick()
+{
+    mPickLevel = true;
+    if (gFloaterTools) gFloaterTools->setStatusText("Click on the ground to take its height for Level to.");
 }
 
 bool LLToolBrushLand::handleMouseDown(S32 x, S32 y, MASK mask)
@@ -385,6 +418,17 @@ bool LLToolBrushLand::handleMouseDown(S32 x, S32 y, MASK mask)
 
         LLRegionPosition region_position( spot );
         LLViewerRegion* regionp = region_position.getRegion();
+
+        // [WOLF TERRAFORM 2026-10-23] Pick: the ground's height under the click becomes the Level to height; nothing is changed
+        if (mPickLevel && regionp)
+        {
+            mPickLevel = false;
+            const F32 z = regionp->getLand().resolveHeightRegion(region_position.getPositionRegion());
+            gSavedSettings.setF32("WolfLandLevelHeight", ll_round(z * 100.f) / 100.f);
+            gSavedSettings.setBOOL("WolfLandLevelUse", true);
+            if (gFloaterTools) gFloaterTools->setStatusText(llformat("Flatten now levels to %.2f m (the ground you clicked).", z));
+            return true;
+        }
 
         if (!canTerraformRegion(regionp))
         {
@@ -404,6 +448,7 @@ bool LLToolBrushLand::handleMouseDown(S32 x, S32 y, MASK mask)
         mStartingZ = regionp->getLand().getZ(i, j);
         mMouseX = x;
         mMouseY = y;
+        mLastDabAt = LLFrameTimer::getElapsedSeconds() - DAB_SECS;   // [WOLF TERRAFORM 2026-10-23/] the first dab on the next frame
         gIdleCallbacks.addFunction( &LLToolBrushLand::onIdle, (void*)this );
         setMouseCapture( true );
 
@@ -471,6 +516,7 @@ void LLToolBrushLand::handleSelect()
 
 void LLToolBrushLand::handleDeselect()
 {
+    mPickLevel = false;   // [WOLF TERRAFORM 2026-10-23/] a pick is for this tool only
     if( gEditMenuHandler == this )
     {
         gEditMenuHandler = NULL;
@@ -649,20 +695,9 @@ void LLToolBrushLand::onMouseCaptureLost()
     gIdleCallbacks.deleteFunction(&LLToolBrushLand::onIdle, this);
 }
 
-// static
-void LLToolBrushLand::undo()
-{
-    for(region_list_t::iterator iter = mLastAffectedRegions.begin();
-        iter != mLastAffectedRegions.end(); ++iter)
-    {
-        LLViewerRegion* regionp = *iter;
-        gMessageSystem->newMessageFast(_PREHASH_UndoLand);
-        gMessageSystem->nextBlockFast(_PREHASH_AgentData);
-        gMessageSystem->addUUIDFast(_PREHASH_AgentID, gAgent.getID() );
-        gMessageSystem->addUUIDFast(_PREHASH_SessionID, gAgent.getSessionID());
-        gMessageSystem->sendMessage(regionp->getHost());
-    }
-}
+// [WOLF TERRAFORM 2026-10-23] DESIGN.md 0 / 1.3: "Undo does nothing" - the viewer sent UndoLand, and OpenSim's handler is empty
+// (TerrainModule.cs:1491-1493 client_OnLandUndo, :1998-2000 StoreUndoState). Edit > Undo is greyed for the land brush now
+// (lltoolbrush.h canUndo), and the Build window's land status says why; the Terraform window keeps its own steps with Undo.
 
 // static
 /*
@@ -679,6 +714,27 @@ void LLToolBrushLand::redo()
         gMessageSystem->sendMessage(regionp->getHost());
     }
 }*/
+
+// [WOLF TERRAFORM 2026-10-23 Phase 3] Edit > Undo where the agent's region has the WolfTerraform module (wolfterraincap.h CAP): its
+// UndoLand puts back the agent's last brush stroke or flood there, never a Terraform window job. The message is the one the old
+// undo() sent (git HEAD lltoolbrush.cpp, removed above), to that region only - mLastAffectedRegions is cleared on mouse-up
+// (handleMouseUp), so it never named the region after a stroke. A refusal comes back as the region's alert.
+bool LLToolBrushLand::canUndo() const
+{
+    LLViewerRegion* regionp = gAgent.getRegion();
+    return regionp && !regionp->getCapability("WolfTerraform").empty();
+}
+
+void LLToolBrushLand::undo()
+{
+    LLViewerRegion* regionp = gAgent.getRegion();
+    if (!regionp || regionp->getCapability("WolfTerraform").empty()) return;
+    gMessageSystem->newMessageFast(_PREHASH_UndoLand);
+    gMessageSystem->nextBlockFast(_PREHASH_AgentData);
+    gMessageSystem->addUUIDFast(_PREHASH_AgentID, gAgent.getID() );
+    gMessageSystem->addUUIDFast(_PREHASH_SessionID, gAgent.getSessionID());
+    gMessageSystem->sendMessage(regionp->getHost());
+}
 
 // static
 bool LLToolBrushLand::canTerraformRegion(LLViewerRegion* regionp) const

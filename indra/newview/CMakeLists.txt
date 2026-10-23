@@ -1003,6 +1003,12 @@ set(viewer_SOURCE_FILES
     wolfterrainlayers.cpp
     wolfcave.cpp
     wolfcavelights.cpp # [WOLF CAVE LIGHTS 2026-10-23] Light up: lamps through caves and tunnels
+    wolfdigprogress.cpp # [2026-10-23] the painted working plate (mole, step words, real progress) of the Tunnel tool and Cave Builder
+    wolfburrow.cpp # [WOLF BURROW 2026-10-23] the painted look of the Tunnel tool, the Cave Builder and the Build window strip
+    wolfterrainwriter.cpp # [WOLF TERRAFORM 2026-10-23] the exact-height terrain writer shared by the Cave Builder and Terraform
+    wolfterraincap.cpp # [WOLF TERRAFORM 2026-10-23 Phase 3] the writer's fast route, the region's WolfTerraform capability
+    wolfterraform.cpp # [WOLF TERRAFORM 2026-10-23] the Terraform tools: plans, history (Undo / Redo), jobs
+    wolffloaterterraform.cpp # [WOLF TERRAFORM 2026-10-23] the Terraform window
     wolfsurfcurl.cpp
     wolfmapglobe.cpp
     wolfmapoverlays.cpp
@@ -1969,6 +1975,14 @@ set(viewer_HEADER_FILES
     wolfterrainlayers.h
     wolfcave.h
     wolfcavelights.h
+    wolfdigprogress.h
+    wolfburrow.h
+    wolfterraformmath.h   # [WOLF TERRAFORM 2026-10-23] pure maths (tests/wolfterraformmath_test.cpp)
+    wolfterrainwriter.h
+    wolfterraincap.h
+    wolfterraincapmath.h   # [WOLF TERRAFORM 2026-10-23 Phase 3] pure batching (tests/wolfterraincapmath_test.cpp)
+    wolfterraform.h
+    wolffloaterterraform.h
     wolfsurfcurl.h
     wolfmapglobe.h
     wolfmapoverlays.h

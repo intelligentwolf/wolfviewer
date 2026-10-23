@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLF BURROW 2026-10-23] Paul: "we were going to rebuild the whole build floater to make it look better". The painted
+     header behind the tool row, the tool buttons wider (46 px), every group of controls on its own plate and the group
+     headings in WolfBuildHeading (llfloatertools.cpp paintBuild; the WolfBuild* colours are every skin's own, worked out and
+     contrast-checked by region-terrain-work/cave-lights/check/build_colors.py). No control moved, renamed or removed. -->
 <floater
  positioning="none"
  legacy_header_height="18"
@@ -97,7 +101,7 @@
      left="10"
      name="button focus"
      tool_tip="Focus"
-     width="35">
+     width="46">
 	  <button.commit_callback
 	     function="BuildTool.setTool"
 	     parameter="Focus" />
@@ -109,10 +113,10 @@
      image_overlay="Tool_Grab"
      image_selected="PushButton_Selected_Press"
      layout="topleft"
-     left_pad="10"
+     left_pad="7"
      name="button move"
      tool_tip="Move"
-     width="35">
+     width="46">
 	  <button.commit_callback
 	     function="BuildTool.setTool"
 	     parameter="Move" />
@@ -124,10 +128,10 @@
      image_overlay="Tool_Face"
      image_selected="PushButton_Selected_Press"
      layout="topleft"
-     left_pad="10"
+     left_pad="7"
      name="button edit"
      tool_tip="Edit"
-     width="35">
+     width="46">
 	  <button.commit_callback
 	     function="BuildTool.setTool"
 	     parameter="Edit" />
@@ -139,10 +143,10 @@
      image_overlay="Tool_Create"
      image_selected="PushButton_Selected_Press"
      layout="topleft"
-     left_pad="10"
+     left_pad="7"
      name="button create"
      tool_tip="Create"
-     width="35">
+     width="46">
 	  <button.commit_callback
 	     function="BuildTool.setTool"
 	     parameter="Create" />
@@ -154,10 +158,10 @@
      image_overlay="Tool_Dozer"
      image_selected="PushButton_Selected_Press"
      layout="topleft"
-     left_pad="10"
+     left_pad="7"
      name="button land"
      tool_tip="Land"
-     width="35">
+     width="46">
 	  <button.commit_callback
 	     function="BuildTool.setTool"
 	     parameter="Land" />
@@ -742,7 +746,7 @@
 		 <radio_group.commit_callback
 	     function="BuildTool.commitRadioLand"/>
     </radio_group>
-    <text
+    <text text_color="WolfBuildHeading"
      type="string"
      length="1"
      follows="left|top"
@@ -1277,7 +1281,7 @@
 			 top_delta="-1"
              tool_tip="Deeding gives this item away with next owner permissions. Group shared objects can be deeded by a group officer."
              width="80" />
-            <text
+            <text text_color="WolfBuildHeading"
              type="string"
              length="1"
              follows="left|top"
@@ -1609,7 +1613,7 @@ even though the user gets a free copy.
          top_pad="0"
          height="25"
          width="290">
-      <text
+      <text text_color="WolfBuildHeading"
          type="string"
          follows="left|top"
          name="pathfinding_attributes_label"
@@ -1687,7 +1691,7 @@ Paste Rotation
              tool_tip="Causes object to not collide with other objects or avatars"
              top_pad="0"
              width="123" />
-        <text
+        <text text_color="WolfBuildHeading"
              type="string"
              length="1"
              follows="left|top"
@@ -1775,7 +1779,7 @@ Paste Rotation
              name="paste_pos_clip_btn"
              tool_tip="Try pasting Position from Clipboard"
              width="20" />
-            <text
+            <text text_color="WolfBuildHeading"
              type="string"
              length="1"
              follows="left|top"
@@ -1863,7 +1867,7 @@ Paste Rotation
              name="paste_size_clip_btn"
              tool_tip="Try pasting Size from Clipboard"
              width="20" />
-            <text
+            <text text_color="WolfBuildHeading"
              type="string"
              length="1"
              follows="left|top"
@@ -2580,7 +2584,7 @@ Paste Rotation
                  value="4" />
               </combo_box>
         <!-- FS:Beq adding Mesh Info support to Object panel-->
-        <text
+        <text text_color="WolfBuildHeading"
           type="string"
           length="1"
           follows="left|top"
@@ -2888,7 +2892,7 @@ Low ↔ Lwst
              width="270">
                 Select only one primitive to edit features.
             </text>
-            <text
+            <text text_color="WolfBuildHeading"
              type="string"
              length="1"
              follows="left|top"
@@ -3268,7 +3272,7 @@ Low ↔ Lwst
                    mouse_opaque="true"
                    name="Probe Near Clip"
                    width="120" />
-          <text
+          <text text_color="WolfBuildHeading"
              type="string"
              length="1"
              follows="left|top"
@@ -3484,7 +3488,7 @@ Low ↔ Lwst
      name="land info panel"
      top_delta="0"
      width="295">
-    <text
+    <text text_color="WolfBuildHeading"
          type="string"
          length="1"
          font="SansSerifBig"
@@ -3541,7 +3545,7 @@ Low ↔ Lwst
          tool_tip="Colorize the parcels according to the type of owner: &#10;&#10;Green = Your land &#10;Aqua = Your group&apos;s land &#10;Red = Owned by others &#10;Yellow = For sale &#10;Purple = For auction &#10;Grey = Public"
          top_pad="8"
          width="205" />
-        <text
+        <text text_color="WolfBuildHeading"
          type="string"
          length="1"
          font="SansSerifBig"
@@ -3574,7 +3578,7 @@ Low ↔ Lwst
          name="button join land"
          top_pad="4"
          width="125" />
-        <text
+        <text text_color="WolfBuildHeading"
          type="string"
          length="1"
          font="SansSerifBig"

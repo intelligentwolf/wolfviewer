@@ -12,6 +12,7 @@
 #include "wolffloaterchat.h"
 
 #include <algorithm>
+#include <cmath>
 #include <ctime>
 #include <deque>
 
@@ -34,6 +35,8 @@
 #include "llfloateravatarpicker.h"
 #include "llfloaterreg.h"
 #include "llfontgl.h"
+#include "llemojihelper.h"   // [2026-10-23] the emoji picker for a channel's emoji
+#include "llgroupactions.h"  // [2026-10-23] the banner opens the group's profile
 #include "llgltexture.h"
 #include "llhttpconstants.h"
 #include "llimview.h"
@@ -80,6 +83,8 @@ static LLDefaultChildRegistry::Register<WolfChatSidebar> r_wolf_chat_sidebar("wo
 static LLDefaultChildRegistry::Register<WolfChatCards> r_wolf_chat_cards("wolf_chat_cards");          // [2026-10-21]
 static LLDefaultChildRegistry::Register<WolfChatGifGrid> r_wolf_chat_gif_grid("wolf_chat_gif_grid");  // [2026-10-21]
 static LLDefaultChildRegistry::Register<WolfChatServerRail> r_wolf_chat_server_rail("wolf_chat_server_rail");  // [2026-10-21]
+static LLDefaultChildRegistry::Register<WolfChatBannerPreview> r_wolf_chat_banner_preview("wolf_chat_banner_preview");  // [2026-10-23]
+static LLDefaultChildRegistry::Register<WolfChatUrlIcon> r_wolf_chat_url_icon("wolf_chat_url_icon");  // [DISCORD SYNC 2026-10-23]
 
 namespace
 {
@@ -423,7 +428,9 @@ namespace
                 const LLSD& newest = list.back();
                 LLSD args;
                 args["FROM"] = newest["name"].asString().empty() ? std::string("someone") : newest["name"].asString();
-                args["WHERE"] = "#" + newest["channel_name"].asString() + " (" + newest["group_name"].asString() + ")";
+                // [2026-10-23] with the channel's emoji (php/wolfchat.php notify channel_emoji)
+                args["WHERE"] = "#" + WolfChat::channelLabel(newest["channel_emoji"].asString(), newest["channel_name"].asString())
+                                + " (" + newest["group_name"].asString() + ")";
                 args["TEXT"] = newest["text"].asString();
                 args["COUNT"] = llformat("%d", (S32)list.size());
                 LLSD payload;
@@ -1032,21 +1039,149 @@ WolfChatSidebar::WolfChatSidebar(const Params& p)
 {
 }
 
+WolfChatSidebar::~WolfChatSidebar()
+{
+    // BOOST_PREVIEW pins the texture (NO_DELETE); released the way LLTextureCtrl does (lltexturectrl.cpp:1936-1939).
+    if (mBannerTexture.notNull()) mBannerTexture->forceActive();
+}
+
 void WolfChatSidebar::setChannels(const std::vector<Channel>& channels, bool can_manage)
 {
     mChannels = channels;
     mCanManage = can_manage;
     mLoading = false;
     layout();
+    // [FIX 2026-10-23] Never scrolled past the end (a group with fewer channels, a folded category), and the selected
+    // channel brought into view when it changes (a link, a toast, a search result) - not on every refresh.
+    mScroll = llclamp(mScroll, 0, maxScroll());
+    if (mSelected != mShownSelected)
+    {
+        mShownSelected = mSelected;
+        for (const Row& r : mRows)
+        {
+            if (r.mHit != HIT_CHANNEL || r.mId != mSelected) continue;
+            const S32 h = getRect().getHeight();
+            if (r.mTop < mScroll) mScroll = r.mTop;
+            else if (r.mTop + r.mHeight > mScroll + h) mScroll = r.mTop + r.mHeight - h;
+            mScroll = llclamp(mScroll, 0, maxScroll());
+            break;
+        }
+    }
+}
+
+namespace
+{
+    const S32 SCROLLBAR_W = 6;      // drawn at the right edge, clear of the badges (they end PAD + 2 from the edge)
+    const S32 THUMB_MIN = 24;
+}
+
+S32 WolfChatSidebar::contentHeight() const
+{
+    return mRows.empty() ? 0 : mRows.back().mTop + mRows.back().mHeight + 6;
+}
+
+S32 WolfChatSidebar::maxScroll() const
+{
+    return std::max(0, contentHeight() - getRect().getHeight());
+}
+
+LLRect WolfChatSidebar::thumbRect() const
+{
+    const S32 w = getRect().getWidth(), h = getRect().getHeight();
+    const S32 content = std::max(1, contentHeight());
+    const S32 th = llclamp(h * h / content, THUMB_MIN, h);
+    const S32 range = std::max(1, maxScroll());
+    const S32 top = h - (h - th) * mScroll / range;
+    return LLRect(w - SCROLLBAR_W, top, w, top - th);
+}
+
+void WolfChatSidebar::scrollFromThumb(S32 y)
+{
+    // y: where the mouse is; the thumb's top follows it, less where the thumb was taken.
+    const S32 h = getRect().getHeight();
+    const S32 th = thumbRect().getHeight();
+    const S32 travel = std::max(1, h - th);
+    const S32 top_from_top = llclamp(h - (y + mDragGrab), 0, travel);
+    mScroll = maxScroll() * top_from_top / travel;
+}
+
+void WolfChatSidebar::setBanner(const Banner& banner)
+{
+    // [2026-10-23] The picture is fetched once per change of picture (not on every channel-list answer) and kept while
+    // shown; the texture cache keeps it between sessions.
+    const LLUUID shown = mBanner.mShown ? mBanner.mAsset : LLUUID::null;
+    const LLUUID want = banner.mShown ? banner.mAsset : LLUUID::null;
+    if (want != shown || (want.notNull() && mBannerTexture.isNull()))
+    {
+        if (mBannerTexture.notNull()) mBannerTexture->forceActive();
+        mBannerTexture = WolfChat::fetchBanner(want);
+    }
+    mBanner = banner;
+}
+
+void WolfChatSidebar::addChannelRows(S32 index, S32& y)
+{
+    const Channel& c = mChannels[index];
+    Row r;
+    r.mHit = HIT_CHANNEL;
+    r.mId = c.mId;
+    r.mChannel = index;
+    r.mTop = y;
+    r.mHeight = ROW_H;
+    mRows.push_back(r);
+    y += ROW_H;
+    if (!c.mVoice) return;
+    for (S32 k = 0; k < (S32)c.mPeople.size(); ++k)
+    {
+        Row pr;
+        pr.mHit = HIT_PERSON;
+        pr.mId = c.mPeople[k].mId;
+        pr.mChannel = index;
+        pr.mPerson = k;
+        pr.mTop = y;
+        pr.mHeight = PERSON_H;
+        mRows.push_back(pr);
+        y += PERSON_H;
+    }
 }
 
 void WolfChatSidebar::layout()
 {
+    // [2026-10-23] Discord's order: the banner, then the channels in no category (TEXT CHANNELS, then VOICE CHANNELS, as
+    // before - a group without categories looks as it did), then each category (php/wolfchat.php sends the channels in
+    // that order: inside a category text above voice, by position). A folded category keeps only the channel you read
+    // and the room you are in. With categories, an empty TEXT / VOICE heading is left out for members (owners keep its +).
     mRows.clear();
     S32 y = 0;
+    if (mBanner.mShown)
+    {
+        Row b;
+        b.mHit = HIT_BANNER;
+        b.mTop = 0;
+        b.mHeight = mBanner.mAsset.notNull() ? std::max(48, getRect().getWidth() * 2 / 5) : 52;   // 5:2, as Discord's
+        mRows.push_back(b);
+        y += b.mHeight + 4;
+    }
+    if (!mSyncLine.empty())
+    {
+        // [DISCORD SYNC 2026-10-23] "Synced with Discord: <server>" - click for the sync window.
+        Row r;
+        r.mHit = HIT_SYNC;
+        r.mTop = y;
+        r.mHeight = PERSON_H;
+        mRows.push_back(r);
+        y += PERSON_H + 2;
+    }
+    const bool has_categories = !mCategories.empty();
+    std::set<LLUUID> known;
+    for (const Category& k : mCategories) known.insert(k.mId);
+    auto in_no_category = [&](const Channel& c) { return c.mCategory.isNull() || !known.count(c.mCategory); };
     for (S32 pass = 0; pass < 2; ++pass)
     {
         const bool voice = pass == 1;
+        bool any = false;
+        for (const Channel& c : mChannels) any = any || (c.mVoice == voice && in_no_category(c));
+        if (has_categories && !any && !mCanManage) continue;
         Row head;
         head.mHeader = true;
         head.mVoiceHeader = voice;
@@ -1057,28 +1192,29 @@ void WolfChatSidebar::layout()
         y += HEAD_H;
         for (S32 i = 0; i < (S32)mChannels.size(); ++i)
         {
-            const Channel& c = mChannels[i];
-            if (c.mVoice != voice) continue;
-            Row r;
-            r.mHit = HIT_CHANNEL;
-            r.mId = c.mId;
-            r.mChannel = i;
-            r.mTop = y;
-            r.mHeight = ROW_H;
-            mRows.push_back(r);
-            y += ROW_H;
-            if (!voice) continue;
-            for (S32 k = 0; k < (S32)c.mPeople.size(); ++k)
+            if (mChannels[i].mVoice == voice && in_no_category(mChannels[i])) addChannelRows(i, y);
+        }
+        y += 6;
+    }
+    for (S32 ki = 0; ki < (S32)mCategories.size(); ++ki)
+    {
+        const Category& k = mCategories[ki];
+        Row head;
+        head.mHit = HIT_CATEGORY;
+        head.mId = k.mId;
+        head.mCategory = ki;
+        head.mTop = y;
+        head.mHeight = HEAD_H;
+        mRows.push_back(head);
+        y += HEAD_H;
+        for (S32 pass = 0; pass < 2; ++pass)
+        {
+            for (S32 i = 0; i < (S32)mChannels.size(); ++i)
             {
-                Row pr;
-                pr.mHit = HIT_PERSON;
-                pr.mId = c.mPeople[k].mId;
-                pr.mChannel = i;
-                pr.mPerson = k;
-                pr.mTop = y;
-                pr.mHeight = PERSON_H;
-                mRows.push_back(pr);
-                y += PERSON_H;
+                const Channel& c = mChannels[i];
+                if (c.mCategory != k.mId || c.mVoice != (pass == 1)) continue;
+                if (k.mCollapsed && !(c.mVoice ? c.mId == mJoined : c.mId == mSelected)) continue;
+                addChannelRows(i, y);
             }
         }
         y += 6;
@@ -1121,6 +1257,32 @@ void WolfChatSidebar::draw()
         const S32 bottom = top - r.mHeight;
         if (bottom > h || top < 0) continue;
         const F32 cy = (F32)(top - r.mHeight / 2);
+        if (r.mHit == HIT_BANNER)
+        {
+            WolfChat::drawBanner(LLRect(0, top, w, bottom), mBannerTexture.get(), mBanner);
+            if (mHover == i) gl_rect_2d(0, top, w, bottom, LLColor4(1.f, 1.f, 1.f, 0.6f), false);
+            continue;
+        }
+        if (r.mHit == HIT_SYNC)
+        {
+            if (mHover == i) gl_rect_2d(PAD / 2, top, w - PAD / 2, bottom, C_ROW_HOVER, true);
+            icon("Command_Discord_Icon", PAD, bottom + (PERSON_H - ICON) / 2, ICON, C_DISCORD);
+            text(fontSmall(), mSyncLine, (F32)(PAD + ICON + 6), cy, C_DISCORD, LLFontGL::LEFT, w - PAD * 2 - ICON - 6);
+            continue;
+        }
+        if (r.mHit == HIT_CATEGORY)
+        {
+            // [2026-10-23] A category heading: a caret that says folded or open, the name in capitals; owners' + menu.
+            const Category& k = mCategories[r.mCategory];
+            const bool hover = mHover == i;
+            LLWString name = utf8str_to_wstring(k.mName);
+            LLWStringUtil::toUpper(name);
+            text(fontSmall(), k.mCollapsed ? "\xE2\x96\xB8" : "\xE2\x96\xBE", (F32)(PAD), cy, hover ? C_TEXT : C_DIM);   // U+25B8 / U+25BE
+            text(fontSmall(), wstring_to_utf8str(name), (F32)(PAD + 12), cy, hover ? C_TEXT : C_DIM, LLFontGL::LEFT,
+                 w - PAD * 2 - 12 - (mCanManage ? 18 : 0));
+            if (mCanManage) text(fontBold(), "+", (F32)(w - PAD - 4), cy, hover && mHoverAdd ? C_ACCENT : C_DIM, LLFontGL::HCENTER);
+            continue;
+        }
         if (r.mHeader)
         {
             text(fontSmall(), r.mVoiceHeader ? "VOICE CHANNELS" : "TEXT CHANNELS", (F32)PAD, cy, C_DIM);
@@ -1137,6 +1299,13 @@ void WolfChatSidebar::draw()
             const bool selected = (!c.mVoice && c.mId == mSelected) || (c.mVoice && c.mId == mJoined);
             if (selected) gl_rect_2d(PAD / 2, top, w - PAD / 2, bottom, C_ROW_SELECTED, true);
             else if (mHover == i) gl_rect_2d(PAD / 2, top, w - PAD / 2, bottom, C_ROW_HOVER, true);
+            // [2026-10-23] The channel's emoji before its name (the default font's emoji fallback, fonts.xml TwemojiSVG).
+            S32 name_x = PAD + ICON + 8;
+            if (!c.mEmoji.empty())
+            {
+                text(font(), c.mEmoji, (F32)name_x, cy, C_TEXT);
+                name_x += font()->getWidth(c.mEmoji) + 4;
+            }
             if (c.mVoice)
             {
                 icon("Command_Voice_Icon", PAD + 2, bottom + (ROW_H - ICON) / 2, ICON, selected ? C_ACCENT : C_DIM);
@@ -1153,8 +1322,8 @@ void WolfChatSidebar::draw()
                     icon("Command_Discord_Icon", vright - ICON, bottom + (ROW_H - ICON) / 2, ICON, c.mBridgeBroken ? C_ERROR : C_DIM);
                     if (c.mBridgeBroken) text(fontBold(), "!", (F32)(vright - ICON - 5), cy, C_ERROR, LLFontGL::HCENTER);
                 }
-                text(selected ? fontBold() : font(), c.mName, (F32)(PAD + ICON + 8), cy, selected ? C_ACCENT : C_TEXT,
-                     LLFontGL::LEFT, w - PAD * 3 - ICON);
+                text(selected ? fontBold() : font(), c.mName, (F32)name_x, cy, selected ? C_ACCENT : C_TEXT,
+                     LLFontGL::LEFT, std::max(16, w - PAD * 2 - name_x));
             }
             else
             {
@@ -1196,8 +1365,15 @@ void WolfChatSidebar::draw()
                     text(fontSmall(), "muted", (F32)(right - mw), cy, C_DIM);
                     right -= mw + 4;
                 }
-                text(bold ? fontBold() : font(), c.mName, (F32)(PAD + ICON + 8), cy, (selected || c.mUnread) ? C_TEXT : C_DIM,
-                     LLFontGL::LEFT, std::max(16, right - (PAD + ICON + 8) - 4));
+                if (c.mArchived)
+                {
+                    // [DISCORD SYNC 2026-10-23] deleted on Discord, kept read only - in words
+                    const S32 aw = fontSmall()->getWidth(std::string("archived"));
+                    text(fontSmall(), "archived", (F32)(right - aw), cy, C_DIM);
+                    right -= aw + 4;
+                }
+                text(bold ? fontBold() : font(), c.mName, (F32)name_x, cy, (selected || c.mUnread) ? C_TEXT : C_DIM,
+                     LLFontGL::LEFT, std::max(16, right - name_x - 4));
             }
             continue;
         }
@@ -1237,17 +1413,51 @@ void WolfChatSidebar::draw()
             continue;
         }
     }
+    drawScrollBar();        // [FIX 2026-10-23] over the rows, at the right edge
+}
+
+void WolfChatSidebar::drawScrollBar()
+{
+    if (!scrollBarShown()) return;
+    const S32 w = getRect().getWidth(), h = getRect().getHeight();
+    gl_rect_2d(w - SCROLLBAR_W, h, w, 0, C_ROW_HOVER, true);
+    gl_rect_2d(thumbRect(), mDragThumb ? C_TEXT : C_DIM, true);
 }
 
 bool WolfChatSidebar::handleMouseDown(S32 x, S32 y, MASK mask)
 {
     setFocus(true);
+    // [FIX 2026-10-23] The scroll bar: drag the thumb, or click above / below it for a page.
+    if (scrollBarShown() && x >= getRect().getWidth() - SCROLLBAR_W - 2)
+    {
+        const LLRect t = thumbRect();
+        if (y <= t.mTop && y >= t.mBottom)
+        {
+            mDragThumb = true;
+            mDragGrab = t.mTop - y;
+            gFocusMgr.setMouseCapture(this);
+        }
+        else
+        {
+            const S32 page = std::max(ROW_H, getRect().getHeight() - ROW_H);
+            mScroll = llclamp(mScroll + (y > t.mTop ? -page : page), 0, maxScroll());
+        }
+        return true;
+    }
     const Row* r = rowAt(x, y);
     if (!r || !mClick) return true;
+    const bool plus_zone = x >= getRect().getWidth() - PAD - 18;
+    if (r->mHit == HIT_CATEGORY)
+    {
+        // [2026-10-23] The + of a category opens its menu (owners); anywhere else on the heading folds / unfolds it.
+        if (mCanManage && plus_zone && mCategoryMenu) mCategoryMenu(r->mId, x, y);
+        else mClick(HIT_CATEGORY, r->mId);
+        return true;
+    }
     if (r->mHeader)
     {
         // The "+" is the right-hand end of the header.
-        if (mCanManage && x >= getRect().getWidth() - PAD - 18) mClick(r->mHit, LLUUID::null);
+        if (mCanManage && plus_zone) mClick(r->mHit, LLUUID::null);
         return true;
     }
     mClick(r->mHit, r->mId);
@@ -1257,20 +1467,53 @@ bool WolfChatSidebar::handleMouseDown(S32 x, S32 y, MASK mask)
 bool WolfChatSidebar::handleRightMouseDown(S32 x, S32 y, MASK mask)
 {
     // [2026-10-21] Owners: the channel's menu (Rename / Who can see / Delete). Never for #group-chat.
+    // [2026-10-23] A category heading: its menu; the banner or a TEXT / VOICE heading: the group menu (null id).
     const Row* r = rowAt(x, y);
-    if (!r || r->mHit != HIT_CHANNEL || !mCanManage || !mMenu) return true;
+    if (!r || !mCanManage) return true;
+    if (r->mHit == HIT_CATEGORY || r->mHit == HIT_BANNER || r->mHeader)
+    {
+        setFocus(true);
+        if (mCategoryMenu) mCategoryMenu(r->mHit == HIT_CATEGORY ? r->mId : LLUUID::null, x, y);
+        return true;
+    }
+    if (r->mHit != HIT_CHANNEL || !mMenu) return true;
     if (mChannels[r->mChannel].mGroupChat) return true;
     setFocus(true);
     mMenu(r->mId, x, y);
     return true;
 }
 
+bool WolfChatSidebar::handleMouseUp(S32 x, S32 y, MASK mask)
+{
+    if (mDragThumb)
+    {
+        mDragThumb = false;
+        gFocusMgr.setMouseCapture(nullptr);
+        return true;
+    }
+    return LLUICtrl::handleMouseUp(x, y, mask);
+}
+
 bool WolfChatSidebar::handleHover(S32 x, S32 y, MASK mask)
 {
+    if (mDragThumb && hasMouseCapture())
+    {
+        scrollFromThumb(y);
+        getWindow()->setCursor(UI_CURSOR_ARROW);
+        return true;
+    }
+    if (scrollBarShown() && x >= getRect().getWidth() - SCROLLBAR_W - 2)
+    {
+        mHover = -1;
+        getWindow()->setCursor(UI_CURSOR_ARROW);
+        return true;
+    }
     const Row* r = rowAt(x, y);
     mHover = r ? (S32)(r - &mRows[0]) : -1;
-    const bool clickable = r && (r->mHit == HIT_CHANNEL || r->mHit == HIT_PERSON
-                                 || (r->mHeader && mCanManage && x >= getRect().getWidth() - PAD - 18));
+    const bool plus_zone = x >= getRect().getWidth() - PAD - 18;
+    mHoverAdd = plus_zone;
+    const bool clickable = r && (r->mHit == HIT_CHANNEL || r->mHit == HIT_PERSON || r->mHit == HIT_BANNER || r->mHit == HIT_CATEGORY || r->mHit == HIT_SYNC
+                                 || (r->mHeader && mCanManage && plus_zone));
     getWindow()->setCursor(clickable ? UI_CURSOR_HAND : UI_CURSOR_ARROW);
     return true;
 }
@@ -1286,14 +1529,31 @@ bool WolfChatSidebar::handleToolTip(S32 x, S32 y, MASK mask)
     const Row* r = rowAt(x, y);
     if (!r) return false;
     std::string tip;
-    if (r->mHeader && mCanManage) tip = r->mVoiceHeader ? "Make a voice channel" : "Make a text channel";
+    if (r->mHit == HIT_BANNER)
+    {
+        tip = mBanner.mName + (mBanner.mTagline.empty() ? std::string() : " - " + mBanner.mTagline) + ". Click to see the group."
+              + (mCanManage ? " Right-click for the group settings (categories, new channels, the banner)." : "");
+    }
+    else if (r->mHit == HIT_SYNC)
+    {
+        tip = "This group's channels are kept in step with a Discord server. Click for the sync (last sync, Sync now"
+              + std::string(mCanManage ? ", private channels, Unlink)." : ").");
+    }
+    else if (r->mHit == HIT_CATEGORY)
+    {
+        const Category& k = mCategories[r->mCategory];
+        tip = std::string(k.mCollapsed ? "Show" : "Hide") + " the channels in " + k.mName
+              + (mCanManage ? " - right-click (or +) to make a channel here, rename, move or delete the category" : "");
+    }
+    else if (r->mHeader && mCanManage) tip = std::string(r->mVoiceHeader ? "Make a voice channel" : "Make a text channel")
+                                             + " - right-click for the group settings (categories, the banner)";
     else if (r->mHit == HIT_CHANNEL)
     {
         const Channel& c = mChannels[r->mChannel];
         if (c.mVoice) tip = std::string("Join this voice room") + (c.mRestricted ? " (only some roles can see it)" : "")
                             + (c.mBridged ? (c.mBridgeBroken ? " - its Discord voice link has stopped"
                                                              : " - linked to Discord voice: heard in the Discord channel, live, not recorded") : "")
-                            + (mCanManage ? " - right-click to rename, delete, choose who can see it or link it to Discord voice" : "");
+                            + (mCanManage ? " - right-click to edit, move, delete, choose who can see it or link it to Discord voice" : "");
         else if (c.mGroupChat)
         {
             tip = "This group's own group chat - the same chat everyone in the group sees in any viewer";
@@ -1304,10 +1564,12 @@ bool WolfChatSidebar::handleToolTip(S32 x, S32 y, MASK mask)
             tip = "Read this channel";
             if (c.mRestricted) tip += " (only some roles can see it)";
             if (c.mBridged) tip += c.mBridgeBroken ? " - its Discord bridge has stopped" : " - bridged to Discord: visible outside the grid";
-            if (mCanManage) tip += " - right-click to rename, delete, choose who can see it or bridge it to Discord";
+            if (mCanManage) tip += " - right-click to edit, move, delete, choose who can see it or bridge it to Discord";
             if (c.mUnreadCount > 0) tip += " - " + countText(c.mUnreadCount) + " unread";
             if (c.mMentions > 0) tip += ", " + countText(c.mMentions) + " mentioning you";
             if (c.mMuted) tip += " (notifications: Nothing)";
+            if (c.mArchived) tip += " - archived: deleted on Discord, kept here read only";
+            if (!c.mTopic.empty()) tip += "\n" + c.mTopic;
         }
     }
     else if (r->mHit == HIT_PERSON)
@@ -1323,10 +1585,147 @@ bool WolfChatSidebar::handleToolTip(S32 x, S32 y, MASK mask)
 
 bool WolfChatSidebar::handleScrollWheel(S32 x, S32 y, S32 clicks)
 {
-    S32 content = 0;
-    if (!mRows.empty()) content = mRows.back().mTop + mRows.back().mHeight + 6;
-    mScroll = llclamp(mScroll + clicks * ROW_H, 0, std::max(0, content - getRect().getHeight()));
+    mScroll = llclamp(mScroll + clicks * ROW_H, 0, maxScroll());
     return true;
+}
+
+// =====================================================================================================================
+// [2026-10-23] the banner, channel emoji
+// =====================================================================================================================
+
+LLPointer<LLViewerFetchedTexture> WolfChat::fetchBanner(const LLUUID& asset)
+{
+    if (asset.isNull()) return nullptr;
+    // Source: lltexturectrl.cpp:2507-2508 - fetched at BOOST_NONE, then raised to BOOST_PREVIEW (as WolfChatImage::setGif).
+    LLPointer<LLViewerFetchedTexture> t = LLViewerTextureManager::getFetchedTexture(asset, FTT_DEFAULT, true, LLGLTexture::BOOST_NONE,
+                                                                                  LLViewerTexture::LOD_TEXTURE);
+    if (t.notNull()) t->setBoostLevel(LLGLTexture::BOOST_PREVIEW);
+    return t;
+}
+
+void WolfChat::drawBanner(const LLRect& rect, LLViewerFetchedTexture* texture, const WolfChatSidebar::Banner& banner)
+{
+    const S32 w = rect.getWidth(), h = rect.getHeight();
+    if (w <= 0 || h <= 0) return;
+    gl_rect_2d(rect, C_CARD, true);
+    const bool picture = banner.mAsset.notNull() && texture;
+    if (picture)
+    {
+        texture->addTextureStats((F32)(w * h * 4));
+        const S32 iw = texture->getFullWidth(), ih = texture->getFullHeight();
+        if (texture->hasGLTexture() && iw > 0 && ih > 0)
+        {
+            // Cover: scaled until it fills the banner, the overflow cut off - across from the middle, up and down from
+            // the part the owners chose (v = 1 is the top of the picture, as GifSheet::frameUV).
+            const F32 s = std::max((F32)w / (F32)iw, (F32)h / (F32)ih);
+            const F32 uw = std::min(1.f, (F32)w / s / (F32)iw);
+            const F32 vh = std::min(1.f, (F32)h / s / (F32)ih);
+            const F32 u0 = (1.f - uw) * 0.5f;
+            F32 v0 = (1.f - vh) * 0.5f;                     // bottom edge of the part shown
+            if (banner.mFocus == "top") v0 = 1.f - vh;
+            else if (banner.mFocus == "bottom") v0 = 0.f;
+            gl_draw_scaled_image(rect.mLeft, rect.mBottom, w, h, texture, UI_VERTEX_COLOR, LLRectf(u0, v0 + vh, u0 + uw, v0));
+        }
+        // [2026-10-23] The shimmer: a soft band of light crossing every 7 s, under the shade (so the text keeps its
+        // contrast); not drawn when the resident asked for less motion (WolfAdventureReduceMotion).
+        static LLCachedControl<bool> reduce_motion(gSavedPerAccountSettings, "WolfAdventureReduceMotion", false);
+        if (banner.mShimmer && !reduce_motion)
+        {
+            const F64 t = fmod(LLFrameTimer::getElapsedSeconds(), 7.0) / 7.0;
+            if (t < 0.55)
+            {
+                const F32 cx = (F32)rect.mLeft - 0.3f * w + (F32)(t / 0.55) * 1.6f * w;
+                const S32 band = std::max(8, w / 8);
+                for (S32 k = -3; k <= 3; ++k)
+                {
+                    const F32 a = 0.07f * (1.f - (F32)std::abs(k) / 4.f);
+                    const S32 x0 = (S32)cx + k * band / 3;
+                    LLRect b(llclamp(x0, rect.mLeft, rect.mRight), rect.mTop, llclamp(x0 + band / 3, rect.mLeft, rect.mRight), rect.mBottom);
+                    if (b.getWidth() > 0) gl_rect_2d(b, LLColor4(1.f, 1.f, 1.f, a), true);
+                }
+            }
+        }
+        // The shade (as WolfStorm's): 88% black at the bottom, 72% at 35%, 60% at 60%, nothing at 95% of the height. The
+        // text sits in the lower 45%, over at least 60% black: white on the lightest result (#666) is 5.7:1.
+        const S32 bands = 24;
+        for (S32 i = 0; i < bands; ++i)
+        {
+            const F32 f0 = (F32)i / bands, f1 = (F32)(i + 1) / bands;
+            const F32 f = (f0 + f1) * 0.5f;
+            F32 a = 0.f;
+            if (f < 0.35f) a = 0.88f - (0.88f - 0.72f) * (f / 0.35f);
+            else if (f < 0.60f) a = 0.72f - (0.72f - 0.60f) * ((f - 0.35f) / 0.25f);
+            else if (f < 0.95f) a = 0.60f * (1.f - (f - 0.60f) / 0.35f);
+            const S32 b0 = rect.mBottom + (S32)(f0 * h), b1 = rect.mBottom + (S32)(f1 * h);
+            if (a > 0.f && b1 > b0) gl_rect_2d(rect.mLeft, b1, rect.mRight, b0, LLColor4(0.f, 0.f, 0.f, a), true);
+        }
+    }
+    const S32 max_px = w - PAD * 2 - 28;     // room for the owners' menu button in the top right corner
+    const F32 x = (F32)(rect.mLeft + PAD);
+    const bool tag = !banner.mTagline.empty();
+    const F32 name_y = (F32)(rect.mBottom + (tag ? 30 : 14));
+    LLColor4 white = LLColor4::white;
+    fontBold()->renderUTF8(banner.mName, 0, x, name_y, white, LLFontGL::LEFT, LLFontGL::VCENTER, LLFontGL::NORMAL,
+                           picture ? LLFontGL::DROP_SHADOW_SOFT : LLFontGL::NO_SHADOW, S32_MAX, max_px, nullptr, true);
+    if (tag)
+    {
+        fontSmall()->renderUTF8(banner.mTagline, 0, x, (F32)(rect.mBottom + 12), picture ? white : C_DIM, LLFontGL::LEFT,
+                                LLFontGL::VCENTER, LLFontGL::NORMAL, picture ? LLFontGL::DROP_SHADOW_SOFT : LLFontGL::NO_SHADOW,
+                                S32_MAX, max_px, nullptr, true);
+    }
+}
+
+bool WolfChat::isOneEmoji(const std::string& utf8)
+{
+    // A quick check before asking php/wolfchat.php (which decides, wch_emoji_in): at most 16 code points and none of the
+    // things that are surely not an emoji - letters, digits (but a keycap: 0-9 # * U+FE0F U+20E3), spaces, < > &.
+    const LLWString w = utf8str_to_wstring(utf8);
+    if (w.empty() || w.size() > 16) return false;
+    const bool keycap = w.size() >= 2 && w.back() == 0x20E3;
+    for (llwchar c : w)
+    {
+        if (c < 0x80)
+        {
+            if (keycap && (LLStringOps::isDigit(c) || c == '#' || c == '*')) continue;
+            return false;
+        }
+        if (LLStringOps::isSpace(c)) return false;
+    }
+    return true;
+}
+
+std::string WolfChat::channelLabel(const std::string& emoji, const std::string& name)
+{
+    return emoji.empty() ? name : emoji + " " + name;
+}
+
+WolfChatBannerPreview::WolfChatBannerPreview(const Params& p)
+:   LLUICtrl(p)
+{
+}
+
+WolfChatBannerPreview::~WolfChatBannerPreview()
+{
+    if (mTexture.notNull()) mTexture->forceActive();
+}
+
+void WolfChatBannerPreview::setBanner(const WolfChatSidebar::Banner& banner)
+{
+    if (banner.mAsset != mBanner.mAsset || (banner.mAsset.notNull() && mTexture.isNull()))
+    {
+        if (mTexture.notNull()) mTexture->forceActive();
+        mTexture = WolfChat::fetchBanner(banner.mAsset);
+    }
+    mBanner = banner;
+}
+
+void WolfChatBannerPreview::draw()
+{
+    // The banner's own shape (5:2) at this control's width, from its top.
+    const S32 w = getRect().getWidth(), h = getRect().getHeight();
+    gl_rect_2d(0, h, w, 0, C_BG, true);
+    const S32 bh = std::min(h, mBanner.mAsset.notNull() ? w * 2 / 5 : 52);
+    WolfChat::drawBanner(LLRect(0, h, w, h - bh), mTexture.get(), mBanner);
 }
 
 // =====================================================================================================================
@@ -2202,6 +2601,14 @@ WolfFloaterChat::~WolfFloaterChat()
         menu->die();
         mChannelMenu.markDead();
     }
+    for (LLHandle<LLView>* h : { &mCategoryMenu, &mGroupMenu })     // [2026-10-23]
+    {
+        if (LLView* menu = h->get())
+        {
+            menu->die();
+            h->markDead();
+        }
+    }
 }
 
 bool WolfFloaterChat::postBuild()
@@ -2246,6 +2653,18 @@ bool WolfFloaterChat::postBuild()
     mPinsBtn = getChild<LLButton>("pins_btn");
     mGifBtn = getChild<LLButton>("gif_btn");
     mCards = getChild<WolfChatCards>("cards");
+    // [2026-10-23] Owners' group menu; the sidebar's category / banner / heading right-clicks.
+    mServerMenuBtn = getChild<LLButton>("server_menu_btn");
+    mServerMenuBtn->setClickedCallback([this](LLUICtrl*, const LLSD&)
+    {
+        const LLRect r = mServerMenuBtn->getRect();
+        showGroupMenu(r.mLeft, r.mBottom, mServerMenuBtn->getParent());
+    });
+    mSidebar->setCategoryMenuCallback([this](const LLUUID& category, S32 x, S32 y)
+    {
+        if (category.isNull()) showGroupMenu(x, y, mSidebar);
+        else showCategoryMenu(category, x, y);
+    });
 
     // [2026-10-21] The server rail replaces the group combo box.
     mRail->setSelectCallback([this](const LLUUID& g) { selectGroup(g); });
@@ -2302,7 +2721,7 @@ bool WolfFloaterChat::postBuild()
     WolfChat::refreshVoiceDebug();
     mOlderBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { loadOlder(); });
     mBackBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { onBackToChannel(); });
-    mRenameBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { onRenameChannel(mChannel); });
+    mRenameBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { onEditChannel(mChannel); });     // [2026-10-23] Edit
     mDeleteBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { onDeleteChannel(mChannel); });
     mSidebar->setMenuCallback([this](const LLUUID& c, S32 x, S32 y) { showChannelMenu(c, x, y); });     // [2026-10-21]
     mNotifyBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { onNotifySetting(); });
@@ -2700,6 +3119,7 @@ void WolfFloaterChat::selectGroup(const LLUUID& group)
         mView = VIEW_CHANNEL;
         ++mGeneration;
         mSidebar->setLoading(true);
+        mSidebar->resetScroll();        // [FIX 2026-10-23] another group: its channels from the top
         mLog->clear();
         mOnlineList->deleteAllItems();
     }
@@ -2731,6 +3151,37 @@ void WolfFloaterChat::loadChannels()
         self->mCanPost = reply["can_post"].asInteger() != 0;
         self->mCanManage = reply["can_manage"].asInteger() != 0;          // [2026-10-21] the group's owners
         self->mCanModerate = reply["can_moderate"].asInteger() != 0;      // ModerateChat (messages, pins)
+        // [2026-10-23] Categories in order and the group's banner, on the channel list the window already asks for
+        // (php/wolfchat.php channels: categories [{id, name}], banner {asset, focus, tagline, shimmer} | null).
+        self->mCategories.clear();
+        for (const LLSD& k : llsd::inArray(reply["categories"]))
+        {
+            WolfChatSidebar::Category cat;
+            cat.mId = k["id"].asUUID();
+            cat.mName = k["name"].asString();
+            if (cat.mId.notNull()) self->mCategories.push_back(cat);
+        }
+        {
+            const LLSD& b = reply["banner"];
+            WolfChatSidebar::Banner banner;
+            banner.mShown = b.isMap();
+            if (banner.mShown)
+            {
+                banner.mAsset = b["asset"].asUUID();
+                const std::string focus = b["focus"].asString();
+                banner.mFocus = (focus == "top" || focus == "bottom") ? focus : std::string("center");
+                banner.mTagline = b["tagline"].asString();
+                banner.mShimmer = b["shimmer"].asInteger() != 0;
+            }
+            self->mBanner = banner;
+        }
+        {
+            // [DISCORD SYNC 2026-10-23] the group's Discord server sync (php/wolfchat.php channels `discord_sync`)
+            const LLSD& ds = reply["discord_sync"];
+            self->mSyncGuild = ds.isMap() ? ds["guild_name"].asString() : std::string();
+            if (ds.isMap() && self->mSyncGuild.empty()) self->mSyncGuild = "Discord";
+            self->mSyncing = ds.isMap() && ds["syncing"].asInteger() != 0;
+        }
         self->mChannels.clear();
         {
             // [2026-10-21] Paul: "every chat in the new interface should automatically have a #group-chat channel linked
@@ -2748,6 +3199,10 @@ void WolfFloaterChat::loadChannels()
             ch.mName = c["name"].asString();
             ch.mVoice = c["kind"].asString() == "voice";
             ch.mRestricted = c["roles"].isArray() && c["roles"].size() > 0;     // owners get "roles" (php channels)
+            ch.mCategory = c["category"].asUUID();          // [2026-10-23] null = in no category
+            ch.mEmoji = c["emoji"].asString();              // php/wolfchat.php wch_emoji_in checked it
+            ch.mTopic = c["topic"].asString();              // [DISCORD SYNC 2026-10-23]
+            ch.mArchived = c["archived"].asInteger() != 0;
             if (!ch.mVoice)
             {
                 self->mLastId[ch.mId] = c["last_id"].asInteger();
@@ -2981,6 +3436,8 @@ void WolfFloaterChat::showChannel(const LLUUID& channel)
 void WolfFloaterChat::rebuildLog()
 {
     mLog->clear();
+    mSpans.clear();         // [2026-10-23]
+    mHoverSpan = -1;
     const std::vector<Message>& list = mView == VIEW_CHANNEL ? mMessages : mResults;
     if (list.empty())
     {
@@ -3008,6 +3465,14 @@ void WolfFloaterChat::appendToLog(const Message& m)
 {
     if (mView == VIEW_CHANNEL && mMessages.size() == 1 && mLog->getLength() > 0) mLog->clear();   // the "No messages yet" line
     const bool first = mLog->getLength() == 0;
+    // [2026-10-23] This message's place in the log and its hover-only buttons (updateMessageActions).
+    if (first)
+    {
+        mSpans.clear();
+        mHoverSpan = -1;
+    }
+    MessageSpan span;
+    span.mStart = mLog->getLength();
 
     // Name and time.
     LLStyle::Params name;
@@ -3033,7 +3498,7 @@ void WolfFloaterChat::appendToLog(const Message& m)
     {
         for (const WolfChatSidebar::Channel& c : mChannels)
         {
-            if (c.mId == m.mChannel) who += "  in #" + c.mName;
+            if (c.mId == m.mChannel) who += "  in # " + WolfChat::channelLabel(c.mEmoji, c.mName);
         }
     }
     mLog->appendText(who, !first, name);
@@ -3054,6 +3519,8 @@ void WolfFloaterChat::appendToLog(const Message& m)
         bp.rect(LLRect(0, 16, 46, 0));
         bp.tool_tip(mine ? "Delete your message" : "Delete this message (group moderator)");
         LLButton* del = LLUICtrlFactory::create<LLButton>(bp);
+        del->setVisible(false);                 // [2026-10-23] shown while the mouse is over this message
+        span.mButtons.push_back(del->getHandle());
         const S32 id = m.mId;
         LLHandle<LLFloater> h = getHandle();
         del->setClickedCallback([h, id, mine](LLUICtrl*, const LLSD&)
@@ -3083,6 +3550,11 @@ void WolfFloaterChat::appendToLog(const Message& m)
                          : (m.mPinned ? "Take this message off the channel's pinned list (group moderator)"
                                       : "Pin this message to the channel so everyone can find it (group moderator)"));
         LLButton* btn = LLUICtrlFactory::create<LLButton>(bp);
+        if (!jump)
+        {
+            btn->setVisible(false);             // [2026-10-23] Pin / Unpin: shown while the mouse is over this message
+            span.mButtons.push_back(btn->getHandle());
+        }
         const S32 id = m.mId;
         const bool pinned = m.mPinned;
         const LLUUID channel = mChannel;
@@ -3151,6 +3623,8 @@ void WolfFloaterChat::appendToLog(const Message& m)
         ip.bottom_pad = 4;
         mLog->appendWidget(ip, "\n", false);
     }
+    span.mEnd = mLog->getLength();
+    if (!span.mButtons.empty()) mSpans.push_back(span);
 }
 
 void WolfFloaterChat::updateHeader()
@@ -3163,18 +3637,24 @@ void WolfFloaterChat::updateHeader()
         title = "Pinned";
         for (const WolfChatSidebar::Channel& c : mChannels)
         {
-            if (c.mId == mChannel) title = "Pinned in # " + c.mName;
+            if (c.mId == mChannel) title = "Pinned in # " + WolfChat::channelLabel(c.mEmoji, c.mName);
         }
     }
     else
     {
         for (const WolfChatSidebar::Channel& c : mChannels)
         {
-            if (c.mId == mChannel) title = "# " + c.mName;
+            if (c.mId == mChannel) title = "# " + WolfChat::channelLabel(c.mEmoji, c.mName) + (c.mTopic.empty() ? std::string() : "   |   " + c.mTopic);
         }
     }
     mChannelTitle->setText(title);
+    mChannelTitle->setToolTip(title);
     const bool channel_view = mView == VIEW_CHANNEL && mChannel.notNull();
+    bool archived = false;          // [DISCORD SYNC 2026-10-23] deleted on Discord: read only
+    for (const WolfChatSidebar::Channel& c : mChannels)
+    {
+        if (c.mId == mChannel) archived = c.mArchived;
+    }
     // [2026-10-21] #group-chat is the standard group chat: no rename / delete / pins / bell / pictures / GIFs / search
     // here (the status line says why when it opens).
     const bool gc = mGroupChatShown;
@@ -3185,7 +3665,7 @@ void WolfFloaterChat::updateHeader()
     mImageBtn->setVisible(!gc);
     mGifBtn->setVisible(mGifsAvailable && !gc);
     mSearchEditor->setVisible(!gc);
-    const bool can_write = channel_view && mCanPost;
+    const bool can_write = channel_view && mCanPost && !archived;
     mInput->setEnabled(can_write);
     mSendBtn->setEnabled(can_write);
     mImageBtn->setEnabled(can_write);
@@ -3221,12 +3701,14 @@ void WolfFloaterChat::updateHeader()
         mBridgeText->setVisible(false);
         mRelinkBtn->setVisible(false);
     }
-    if (channel_view && !mCanPost)
+    if (archived)
+        mInput->setLabel(LLStringExplicit("Archived: this channel was deleted on Discord. Its history is kept here, read only."));
+    else if (channel_view && !mCanPost)
         mInput->setLabel(LLStringExplicit("Your group role does not allow posting in this group's chat."));
     else if (gc)
         mInput->setLabel(LLStringExplicit("Message the group chat (everyone in the group sees it)..."));
     else
-        mInput->setLabel(LLStringExplicit(mChannel.notNull() ? "Message in #" + title.substr(std::min<size_t>(2, title.size())) + "..." : std::string()));
+        mInput->setLabel(LLStringExplicit(mChannel.notNull() ? "Message in #" + channelLabel(mChannel) + "..." : std::string()));
 }
 
 void WolfFloaterChat::refreshSidebar()
@@ -3246,7 +3728,11 @@ void WolfFloaterChat::refreshSidebar()
             // [2026-10-21] The channel being read has nothing unread (php/wolfchat.php marks it read as it is shown).
             const bool shown = c.mId == mChannel && mView == VIEW_CHANNEL && !mHistory;
             if (shown) { c.mUnreadCount = 0; c.mMentions = 0; }
-            c.mUnread = !shown && c.mId != mChannel && (c.mUnreadCount > 0 || mLastId[c.mId] > mSeen[c.mId]);
+            // [FIX 2026-10-23] Paul: "when they first connect they all show the new messages * but they dont need to".
+            // The server's count decides (php/wolfchat.php: from the member's read mark, system notices left out); this
+            // window's own tally only adds a channel it has shown this session that has had a newer message since.
+            auto seen = mSeen.find(c.mId);
+            c.mUnread = !shown && c.mId != mChannel && (c.mUnreadCount > 0 || (seen != mSeen.end() && mLastId[c.mId] > seen->second));
             auto bl = mBridges.find(c.mId);       // [2026-10-21] php/wolfbridge.php links
             c.mBridged = bl != mBridges.end();
             c.mBridgeBroken = c.mBridged && bl->second.mState == "broken";
@@ -3295,6 +3781,26 @@ void WolfFloaterChat::refreshSidebar()
     }
     mSidebar->setSelected(mView == VIEW_CHANNEL ? mChannel : LLUUID::null);
     mSidebar->setJoined(room);
+    // [2026-10-23] Categories with this account's folded ones, and the banner (with the group's name on it - the name
+    // line above the list then goes, and the list moves up into its place; the owners' menu button sits on the banner).
+    if (!mCollapsedLoaded)
+    {
+        mCollapsedLoaded = true;
+        for (const LLSD& id : llsd::inArray(gSavedPerAccountSettings.getLLSD("WolfChatCollapsedCategories"))) mCollapsed.insert(id.asUUID());
+    }
+    std::vector<WolfChatSidebar::Category> cats = mCategories;
+    for (WolfChatSidebar::Category& k : cats) k.mCollapsed = mCollapsed.count(k.mId) > 0;
+    mSidebar->setCategories(cats);
+    WolfChatSidebar::Banner banner = mGroup.notNull() ? mBanner : WolfChatSidebar::Banner();
+    banner.mName = mGroupName;
+    mSidebar->setBanner(banner);
+    mSidebar->setSyncLine(mSyncGuild.empty() ? std::string() : (mSyncing ? "Syncing with Discord: " : "Synced with Discord: ") + mSyncGuild);
+    const bool banner_top = banner.mShown;
+    mServerName->setVisible(!banner_top);
+    LLRect sr = mSidebar->getRect();      // the window may have been resized: only the top edge moves
+    sr.mTop = banner_top ? mServerName->getRect().mTop : mServerName->getRect().mBottom;
+    if (mSidebar->getRect() != sr) mSidebar->setShape(sr);
+    mServerMenuBtn->setVisible(mGroup.notNull() && mCanManage);
     mSidebar->setChannels(shown, mCanManage);
 }
 
@@ -3395,6 +3901,7 @@ void WolfFloaterChat::draw()
         updateVoiceBar();
         if (WolfChat::inRoom()) refreshSidebar();
     }
+    updateMessageActions();     // [2026-10-23] Delete / Pin under the mouse only
     LLFloater::draw();
 }
 
@@ -3407,7 +3914,12 @@ void WolfFloaterChat::onSidebarClick(WolfChatSidebar::EHit hit, const LLUUID& id
     case WolfChatSidebar::HIT_ADD_TEXT: askNewChannel(false); return;
     case WolfChatSidebar::HIT_ADD_VOICE: askNewChannel(true); return;
     case WolfChatSidebar::HIT_PERSON: LLAvatarActions::showProfile(id); return;
+    case WolfChatSidebar::HIT_BANNER: openGroupProfile(); return;          // [2026-10-23]
+    case WolfChatSidebar::HIT_CATEGORY: toggleCategory(id); return;        // [2026-10-23] fold / unfold
+    case WolfChatSidebar::HIT_SYNC: onSync(); return;                      // [DISCORD SYNC 2026-10-23]
     case WolfChatSidebar::HIT_CHANNEL:
+        // [FIX 2026-10-23] This label was lost in the categories change, which left the code below unreachable: no
+        // channel opened when clicked (Paul, after syncing his Discord server).
         for (const WolfChatSidebar::Channel& c : mChannels)
         {
             if (c.mId != id) continue;
@@ -3705,9 +4217,19 @@ void WolfFloaterChat::onHelp()
         "inventory onto the window (it must be copy and transfer).\n"
         "- Voice channels: click one to join the voice room. Mic turns your microphone on and off; Deafen stops all "
         "voice; Leave Call takes you back to the voice where you stand; Invite People sends a link to the room.\n"
-        "- The group's owners add channels (+), and right-click a channel to rename it, delete it or choose who can "
-        "see it (everyone, or only some roles - a lock marks those). #group-chat is always there for everyone.\n"
-        "- Group moderators (roles with \"Moderate group chat\") delete messages and pin them.\n"
+        "- The group's owners add channels (+), and right-click a channel to edit it (name, emoji, category), move it, "
+        "delete it or choose who can see it (everyone, or only some roles - a lock marks those). #group-chat is always "
+        "there for everyone.\n"
+        "- Categories: owners use the arrow beside the group's name (or right-click a heading or the banner) for New "
+        "category, and right-click a category (or its +) to make a channel in it, rename, move or delete it - deleting "
+        "a category keeps its channels. Click a category's heading to fold it away (Wolf Chat remembers it).\n"
+        "- Banner: owners choose a picture from inventory, the part of it to keep, a tagline and a shimmer (Banner and "
+        "tagline in the same menu). Click the banner to see the group's profile.\n"
+        "- Group moderators (roles with \"Moderate group chat\") delete messages and pin them: point at a message to "
+        "see its Delete and Pin.\n"
+        "- Discord: owners can sync the whole group with a Discord server (Sync with a Discord server, in the same "
+        "menu): its categories and public channels come in and stay in step, and messages go both ways. A channel "
+        "deleted on Discord is kept here, read only (archived).\n"
         "- Notify (the bell): what Wolf Chat tells you about from this channel while its window is closed - all "
         "messages, only messages that mention you (the start), or nothing. Numbers on the left are unread messages; "
         "@ numbers mention you.\n"
@@ -3765,7 +4287,7 @@ void WolfFloaterChat::onInvitePeople()
     {
         for (const WolfChatSidebar::Channel& c : mChannels)
         {
-            if (c.mId == channel) room = "#" + c.mName + " (" + mGroupName + ")";
+            if (c.mId == channel) room = "#" + WolfChat::channelLabel(c.mEmoji, c.mName) + " (" + mGroupName + ")";
         }
     }
     LLHandle<LLFloater> h = getHandle();
@@ -3790,41 +4312,24 @@ void WolfFloaterChat::onInvitePeople()
     if (picker) addDependentFloater(picker);
 }
 
-void WolfFloaterChat::askNewChannel(bool voice)
+void WolfFloaterChat::askNewChannel(bool voice, const LLUUID& category)
 {
-    if (!mCanManage) return;
+    // [2026-10-23] A new channel is made in the channel dialog (name, emoji, category) - the + of a heading, the group
+    // menu or a category's menu (which puts it in that category).
+    if (!mCanManage || mGroup.isNull()) return;
+    WolfFloaterChatChannelEdit* f = LLFloaterReg::getTypedInstance<WolfFloaterChatChannelEdit>("wolf_chat_channel_edit");
+    if (!f) return;
     LLHandle<LLFloater> h = getHandle();
-    const LLUUID group = mGroup;
-    LLNotificationsUtil::add("WolfChatChannelName",
-        LLSD().with("PROMPT", voice ? std::string("Name the new voice channel:") : std::string("Name the new text channel:")),
-        LLSD(), [h, group, voice](const LLSD& n, const LLSD& r)
+    f->setup(mGroup, LLUUID::null, voice, std::string(), std::string(), category, mCategories, [h, voice](const LLUUID& made)
     {
-        if (LLNotificationsUtil::getSelectedOption(n, r) != 0) return false;
-        std::string name = r["message"].asString();
-        LLStringUtil::trim(name);
-        WolfFloaterChat* self = static_cast<WolfFloaterChat*>(h.get());
-        if (!self) return false;
-        if (name.empty())
-        {
-            self->setStatus("The channel was not made: give it a name.", true);
-            return false;
-        }
-        LLSD b;
-        b["group"] = group;
-        b["kind"] = voice ? "voice" : "text";
-        b["name"] = name;
-        WolfChat::api("channel_create", b, [h, voice](bool ok, const LLSD& reply, const std::string& error)
-        {
-            WolfFloaterChat* s = static_cast<WolfFloaterChat*>(h.get());
-            if (!s) return;
-            if (!ok) { s->setStatus("The channel was not made: " + error, true); return; }
-            s->setStatus("Made " + std::string(voice ? "voice channel " : "#") + reply["channel"]["name"].asString() + ".", false);
-            if (!voice) s->mPendingChannel = reply["channel"]["id"].asUUID();
-            s->mBusyChannels = false;
-            s->loadChannels();
-        });
-        return false;
-    });
+        WolfFloaterChat* s = static_cast<WolfFloaterChat*>(h.get());
+        if (!s) return;
+        if (!voice) s->mPendingChannel = made;      // a new text channel opens
+        s->reloadChannels();
+    }, !mSyncGuild.empty());
+    addDependentFloater(f->getHandle());
+    f->openFloater();
+    f->setFocus(true);
 }
 
 std::string WolfFloaterChat::channelName(const LLUUID& channel) const
@@ -3836,49 +4341,342 @@ std::string WolfFloaterChat::channelName(const LLUUID& channel) const
     return std::string();
 }
 
-void WolfFloaterChat::onRenameChannel(const LLUUID& channel)
+std::string WolfFloaterChat::channelLabel(const LLUUID& channel) const
 {
-    // [2026-10-21] Paul: "i can't rename channels" - only the header's Rename existed, for the text channel shown; voice
-    // channels could not be renamed at all and an empty name was dropped silently. Now any channel (owners' right-click
-    // menu or the header button), and an empty name says so.
-    if (!mCanManage || channel.isNull() || channel == mGroup) return;
-    std::string what = "this channel";
     for (const WolfChatSidebar::Channel& c : mChannels)
     {
-        if (c.mId == channel) what = c.mVoice ? "the voice channel " + c.mName : "#" + c.mName;
+        if (c.mId == channel) return WolfChat::channelLabel(c.mEmoji, c.mName);
     }
+    return std::string();
+}
+
+std::string WolfFloaterChat::categoryName(const LLUUID& category) const
+{
+    for (const WolfChatSidebar::Category& k : mCategories)
+    {
+        if (k.mId == category) return k.mName;
+    }
+    return std::string();
+}
+
+void WolfFloaterChat::reloadChannels()
+{
+    mBusyChannels = false;
+    loadChannels();
+}
+
+void WolfFloaterChat::onEditChannel(const LLUUID& channel)
+{
+    // [2026-10-23] Replaces Rename (Paul 10-21: "i can't rename channels" - any channel, from the header's Edit or the
+    // owners' right-click menu): the name, the emoji and the category in one dialog.
+    if (!mCanManage || channel.isNull() || channel == mGroup) return;
+    const WolfChatSidebar::Channel* found = nullptr;
+    for (const WolfChatSidebar::Channel& c : mChannels)
+    {
+        if (c.mId == channel) found = &c;
+    }
+    if (!found) return;
+    WolfFloaterChatChannelEdit* f = LLFloaterReg::getTypedInstance<WolfFloaterChatChannelEdit>("wolf_chat_channel_edit");
+    if (!f) return;
     LLHandle<LLFloater> h = getHandle();
-    LLNotificationsUtil::add("WolfChatChannelName", LLSD().with("PROMPT", "New name for " + what + ":"), LLSD(),
-        [h, channel](const LLSD& n, const LLSD& r)
+    f->setup(mGroup, channel, found->mVoice, found->mName, found->mEmoji, found->mCategory, mCategories, [h](const LLUUID&)
+    {
+        WolfFloaterChat* s = static_cast<WolfFloaterChat*>(h.get());
+        if (!s) return;
+        s->setStatus("Channel saved.", false);
+        s->reloadChannels();
+    });
+    addDependentFloater(f->getHandle());
+    f->openFloater();
+    f->setFocus(true);
+}
+
+void WolfFloaterChat::moveChannel(const LLUUID& channel, bool up)
+{
+    LLHandle<LLFloater> h = getHandle();
+    LLSD b;
+    b["channel"] = channel;
+    b["dir"] = up ? "up" : "down";
+    WolfChat::api("channel_move", b, [h](bool ok, const LLSD&, const std::string& error)
+    {
+        WolfFloaterChat* s = static_cast<WolfFloaterChat*>(h.get());
+        if (!s) return;
+        if (!ok) { s->setStatus("The channel was not moved: " + error, true); return; }
+        s->reloadChannels();
+    });
+}
+
+void WolfFloaterChat::toggleCategory(const LLUUID& category)
+{
+    // [2026-10-23] Folded categories are this account's own (settings_per_account.xml WolfChatCollapsedCategories); the
+    // list keeps the newest 500.
+    if (mCollapsed.count(category)) mCollapsed.erase(category);
+    else mCollapsed.insert(category);
+    LLSD save = LLSD::emptyArray();
+    for (const LLUUID& id : mCollapsed)
+    {
+        if (save.size() >= 500) break;
+        save.append(id);
+    }
+    gSavedPerAccountSettings.setLLSD("WolfChatCollapsedCategories", save);
+    refreshSidebar();
+}
+
+void WolfFloaterChat::openGroupProfile()
+{
+    // [2026-10-23] Clicking the banner opens the group's profile (llgroupactions.h:60 LLGroupActions::show).
+    if (mGroup.notNull()) LLGroupActions::show(mGroup);
+}
+
+void WolfFloaterChat::showGroupMenu(S32 x, S32 y, LLView* from)
+{
+    if (!mCanManage || mGroup.isNull() || !from) return;
+    LLContextMenu* menu = static_cast<LLContextMenu*>(mGroupMenu.get());
+    if (!menu)
+    {
+        // Source: llchiclet.cpp:252-275 LLIMWellChiclet::createMenu, as showServerMenu.
+        LLUICtrl::CommitCallbackRegistry::ScopedRegistrar registrar;
+        registrar.add("WolfChatGroup.Action", [this](LLUICtrl*, const LLSD& param)
+        {
+            const std::string what = param.asString();
+            if (what == "new_category") onNewCategory();
+            else if (what == "new_text") askNewChannel(false);
+            else if (what == "new_voice") askNewChannel(true);
+            else if (what == "banner") onBanner();
+            else if (what == "sync") onSync();
+        });
+        menu = LLUICtrlFactory::getInstance()->createFromFile<LLContextMenu>("menu_wolf_chat_group.xml",
+                    LLMenuGL::sMenuContainer, LLViewerMenuHolderGL::child_registry_t::instance());
+        if (!menu) return;
+        mGroupMenu = menu->getHandle();
+    }
+    menu->show(x, y);
+    LLMenuGL::showPopup(from, menu, x, y);
+}
+
+void WolfFloaterChat::showCategoryMenu(const LLUUID& category, S32 x, S32 y)
+{
+    if (!mCanManage || category.isNull()) return;
+    mMenuCategory = category;
+    LLContextMenu* menu = static_cast<LLContextMenu*>(mCategoryMenu.get());
+    if (!menu)
+    {
+        LLUICtrl::CommitCallbackRegistry::ScopedRegistrar registrar;
+        registrar.add("WolfChatCategory.Action", [this](LLUICtrl*, const LLSD& param)
+        {
+            const std::string what = param.asString();
+            if (what == "new_text") askNewChannel(false, mMenuCategory);
+            else if (what == "new_voice") askNewChannel(true, mMenuCategory);
+            else if (what == "rename") onRenameCategory(mMenuCategory);
+            else if (what == "up") moveCategory(mMenuCategory, true);
+            else if (what == "down") moveCategory(mMenuCategory, false);
+            else if (what == "delete") onDeleteCategory(mMenuCategory);
+        });
+        LLUICtrl::EnableCallbackRegistry::ScopedRegistrar enable_registrar;
+        enable_registrar.add("WolfChatCategory.Enable", [this](LLUICtrl*, const LLSD& param)
+        {
+            S32 at = -1;
+            for (S32 i = 0; i < (S32)mCategories.size(); ++i)
+            {
+                if (mCategories[i].mId == mMenuCategory) at = i;
+            }
+            if (param.asString() == "up") return at > 0;
+            return at >= 0 && at < (S32)mCategories.size() - 1;
+        });
+        menu = LLUICtrlFactory::getInstance()->createFromFile<LLContextMenu>("menu_wolf_chat_category.xml",
+                    LLMenuGL::sMenuContainer, LLViewerMenuHolderGL::child_registry_t::instance());
+        if (!menu) return;
+        mCategoryMenu = menu->getHandle();
+    }
+    menu->show(x, y);
+    LLMenuGL::showPopup(mSidebar, menu, x, y);
+}
+
+void WolfFloaterChat::onNewCategory()
+{
+    if (!mCanManage) return;
+    LLHandle<LLFloater> h = getHandle();
+    const LLUUID group = mGroup;
+    LLNotificationsUtil::add("WolfChatChannelName",
+        LLSD().with("PROMPT", std::string("Name the new category (then put channels in it: right-click a channel, Edit channel):")),
+        LLSD(), [h, group](const LLSD& n, const LLSD& r)
+    {
+        if (LLNotificationsUtil::getSelectedOption(n, r) != 0) return false;
+        std::string name = r["message"].asString();
+        LLStringUtil::trim(name);
+        WolfFloaterChat* self = static_cast<WolfFloaterChat*>(h.get());
+        if (!self) return false;
+        if (name.empty())
+        {
+            self->setStatus("The category was not made: give it a name.", true);
+            return false;
+        }
+        LLSD b;
+        b["group"] = group;
+        b["name"] = name;
+        WolfChat::api("category_create", b, [h](bool ok, const LLSD& reply, const std::string& error)
+        {
+            WolfFloaterChat* s = static_cast<WolfFloaterChat*>(h.get());
+            if (!s) return;
+            if (!ok) { s->setStatus("The category was not made: " + error, true); return; }
+            s->setStatus("Made the category " + reply["category"]["name"].asString() + ".", false);
+            s->reloadChannels();
+        });
+        return false;
+    });
+}
+
+void WolfFloaterChat::onRenameCategory(const LLUUID& category)
+{
+    if (!mCanManage || category.isNull()) return;
+    LLHandle<LLFloater> h = getHandle();
+    LLNotificationsUtil::add("WolfChatChannelName", LLSD().with("PROMPT", "New name for the category " + categoryName(category) + ":"),
+        LLSD(), [h, category](const LLSD& n, const LLSD& r)
     {
         if (LLNotificationsUtil::getSelectedOption(n, r) != 0) return false;
         std::string name = r["message"].asString();
         LLStringUtil::trim(name);
         if (name.empty())
         {
-            if (WolfFloaterChat* s = static_cast<WolfFloaterChat*>(h.get())) s->setStatus("The channel was not renamed: give it a name.", true);
+            if (WolfFloaterChat* s = static_cast<WolfFloaterChat*>(h.get())) s->setStatus("The category was not renamed: give it a name.", true);
             return false;
         }
         LLSD b;
-        b["channel"] = channel;
+        b["category"] = category;
         b["name"] = name;
-        WolfChat::api("channel_rename", b, [h](bool ok, const LLSD&, const std::string& error)
+        WolfChat::api("category_rename", b, [h](bool ok, const LLSD&, const std::string& error)
         {
             WolfFloaterChat* s = static_cast<WolfFloaterChat*>(h.get());
             if (!s) return;
-            if (!ok) { s->setStatus("The channel was not renamed: " + error, true); return; }
-            s->setStatus("Channel renamed.", false);
-            s->mBusyChannels = false;
-            s->loadChannels();
+            if (!ok) { s->setStatus("The category was not renamed: " + error, true); return; }
+            s->setStatus("Category renamed.", false);
+            s->reloadChannels();
         });
         return false;
     });
 }
 
+void WolfFloaterChat::onDeleteCategory(const LLUUID& category)
+{
+    if (!mCanManage || category.isNull()) return;
+    S32 n = 0;
+    for (const WolfChatSidebar::Channel& c : mChannels)
+    {
+        if (c.mCategory == category) ++n;
+    }
+    const std::string name = categoryName(category);
+    std::string msg = "Delete the category " + name + "?";
+    if (n > 0) msg += llformat(" Its %d %s kept and %s to the top, in no category.", n, n == 1 ? "channel is" : "channels are", n == 1 ? "moves" : "move");
+    msg += " No channel or message is deleted.";
+    LLHandle<LLFloater> h = getHandle();
+    LLNotificationsUtil::add("GenericAlertYesCancel", LLSD().with("MESSAGE", msg), LLSD(), [h, category, name](const LLSD& nn, const LLSD& r)
+    {
+        if (LLNotificationsUtil::getSelectedOption(nn, r) != 0) return false;
+        LLSD b;
+        b["category"] = category;
+        WolfChat::api("category_delete", b, [h, name](bool ok, const LLSD& reply, const std::string& error)
+        {
+            WolfFloaterChat* s = static_cast<WolfFloaterChat*>(h.get());
+            if (!s) return;
+            if (!ok) { s->setStatus("The category was not deleted: " + error, true); return; }
+            const S32 moved = reply["moved"].asInteger();
+            s->setStatus("Deleted the category " + name + (moved > 0 ? llformat("; its %d %s now at the top.", moved, moved == 1 ? "channel is" : "channels are")
+                                                                     : std::string(".")), false);
+            s->reloadChannels();
+        });
+        return false;
+    });
+}
+
+void WolfFloaterChat::moveCategory(const LLUUID& category, bool up)
+{
+    LLHandle<LLFloater> h = getHandle();
+    LLSD b;
+    b["category"] = category;
+    b["dir"] = up ? "up" : "down";
+    WolfChat::api("category_move", b, [h](bool ok, const LLSD&, const std::string& error)
+    {
+        WolfFloaterChat* s = static_cast<WolfFloaterChat*>(h.get());
+        if (!s) return;
+        if (!ok) { s->setStatus("The category was not moved: " + error, true); return; }
+        s->reloadChannels();
+    });
+}
+
+void WolfFloaterChat::onBanner()
+{
+    if (!mCanManage || mGroup.isNull()) return;
+    WolfFloaterChatBanner* f = LLFloaterReg::getTypedInstance<WolfFloaterChatBanner>("wolf_chat_banner");
+    if (!f) return;
+    LLHandle<LLFloater> h = getHandle();
+    WolfChatSidebar::Banner b = mBanner;
+    b.mName = mGroupName;
+    f->setup(mGroup, b, [h]()
+    {
+        WolfFloaterChat* s = static_cast<WolfFloaterChat*>(h.get());
+        if (!s) return;
+        s->reloadChannels();
+    });
+    addDependentFloater(f->getHandle());
+    f->openFloater();
+    f->setFocus(true);
+}
+
+void WolfFloaterChat::onSync()
+{
+    // [DISCORD SYNC 2026-10-23] Any member may look; the window offers the owners' actions to owners only (the service
+    // checks again).
+    if (mGroup.isNull()) return;
+    WolfFloaterChatSync* f = LLFloaterReg::getTypedInstance<WolfFloaterChatSync>("wolf_chat_sync");
+    if (!f) return;
+    LLHandle<LLFloater> h = getHandle();
+    f->setup(mGroup, [h]()
+    {
+        if (WolfFloaterChat* s = static_cast<WolfFloaterChat*>(h.get())) s->reloadChannels();
+    });
+    addDependentFloater(f->getHandle());
+    f->openFloater();
+    f->setFocus(true);
+}
+
+void WolfFloaterChat::updateMessageActions()
+{
+    // [2026-10-23] Paul: "for admin hide Pin and Delete on every message unless i mouse over the message". The message
+    // under the mouse (its place in the log: LLTextBase::getDocIndexFromLocalCoord) shows its Delete / Pin; every other
+    // message's are hidden (they keep their room, so nothing moves). Jump in the pinned list is how that list works and
+    // stays shown. The right-click menus are not involved (the log has none of its own).
+    S32 hover = -1;
+    if (isInVisibleChain() && !isMinimized() && !mSpans.empty() && mLog->getVisible())
+    {
+        S32 lx = 0, ly = 0;
+        LLUI::getInstance()->getMousePositionLocal(mLog, &lx, &ly);
+        if (mLog->pointInView(lx, ly))
+        {
+            const S32 pos = mLog->getDocIndexFromLocalCoord(lx, ly, false, true);
+            for (S32 i = 0; i < (S32)mSpans.size(); ++i)
+            {
+                if (pos >= mSpans[i].mStart && pos < mSpans[i].mEnd) { hover = i; break; }
+            }
+        }
+    }
+    if (hover == mHoverSpan) return;
+    auto show = [this](S32 i, bool on)
+    {
+        if (i < 0 || i >= (S32)mSpans.size()) return;
+        for (LLHandle<LLView>& b : mSpans[i].mButtons)
+        {
+            if (LLView* v = b.get()) v->setVisible(on);
+        }
+    };
+    show(mHoverSpan, false);
+    show(hover, true);
+    mHoverSpan = hover;
+}
+
 void WolfFloaterChat::onDeleteChannel(const LLUUID& channel)
 {
     if (!mCanManage || channel.isNull() || channel == mGroup) return;
-    const std::string name = channelName(channel);
+    const std::string name = channelLabel(channel);
     LLHandle<LLFloater> h = getHandle();
     LLNotificationsUtil::add("GenericAlertYesCancel",
         LLSD().with("MESSAGE", "Delete #" + name + " and every message in it? This cannot be undone."), LLSD(),
@@ -4101,11 +4899,32 @@ void WolfFloaterChat::showChannelMenu(const LLUUID& channel, S32 x, S32 y)
         registrar.add("WolfChatChannel.Action", [this](LLUICtrl*, const LLSD& param)
         {
             const std::string what = param.asString();
-            if (what == "rename") onRenameChannel(mMenuChannel);
+            if (what == "edit") onEditChannel(mMenuChannel);                // [2026-10-23] name, emoji, category
+            else if (what == "up") moveChannel(mMenuChannel, true);
+            else if (what == "down") moveChannel(mMenuChannel, false);
             else if (what == "roles") onChannelRoles(mMenuChannel);
             else if (what == "delete") onDeleteChannel(mMenuChannel);
             else if (what == "bridge" || what == "bridge_voice") onBridge(mMenuChannel);
             else if (what == "unbridge" || what == "unbridge_voice") onUnbridge(mMenuChannel);
+        });
+        // [2026-10-23] Move up / down: within the channels of the same kind in the same category (php channel_move).
+        LLUICtrl::EnableCallbackRegistry::ScopedRegistrar enable_registrar;
+        enable_registrar.add("WolfChatChannel.Enable", [this](LLUICtrl*, const LLSD& param)
+        {
+            const WolfChatSidebar::Channel* me = nullptr;
+            for (const WolfChatSidebar::Channel& c : mChannels)
+            {
+                if (c.mId == mMenuChannel) me = &c;
+            }
+            if (!me) return false;
+            std::vector<LLUUID> same;
+            for (const WolfChatSidebar::Channel& c : mChannels)
+            {
+                if (!c.mGroupChat && c.mVoice == me->mVoice && c.mCategory == me->mCategory) same.push_back(c.mId);
+            }
+            const S32 at = (S32)(std::find(same.begin(), same.end(), mMenuChannel) - same.begin());
+            if (param.asString() == "up") return at > 0 && at < (S32)same.size();
+            return at < (S32)same.size() - 1;
         });
         // [2026-10-21] The Discord items: "Bridge" when not linked (or the link stopped), "Unlink" when linked - text
         // channels. [DISCORD VOICE 2026-10-22] The same for voice rooms as "Bridge to Discord voice..." / "Unlink
@@ -4142,7 +4961,7 @@ void WolfFloaterChat::onChannelRoles(const LLUUID& channel)
     WolfFloaterChatChannelRoles* f = LLFloaterReg::getTypedInstance<WolfFloaterChatChannelRoles>("wolf_chat_channel_roles");
     if (!f) return;
     LLHandle<LLFloater> h = getHandle();
-    std::string name = channelName(channel);
+    std::string name = channelLabel(channel);
     for (const WolfChatSidebar::Channel& c : mChannels)
     {
         if (c.mId == channel && !c.mVoice) name = "#" + name;
@@ -4360,7 +5179,7 @@ void WolfFloaterChat::onBridge(const LLUUID& channel)
     WolfFloaterChatBridge* f = LLFloaterReg::getTypedInstance<WolfFloaterChatBridge>("wolf_chat_bridge");
     if (!f) return;
     LLHandle<LLFloater> h = getHandle();
-    f->setup(channel, voice ? "the voice room " + channelName(channel) : "#" + channelName(channel), restricted, [h]()
+    f->setup(channel, voice ? "the voice room " + channelLabel(channel) : "#" + channelLabel(channel), restricted, [h]()
     {
         if (WolfFloaterChat* self = static_cast<WolfFloaterChat*>(h.get())) self->mNextBridges = 0.0;
     }, voice);
@@ -4378,7 +5197,7 @@ void WolfFloaterChat::onUnbridge(const LLUUID& channel)
         if (c.mId == channel) voice = c.mVoice;
     }
     // [DISCORD VOICE 2026-10-22] a voice room is named as one, and what stops is voice.
-    const std::string name = voice ? "the voice room " + channelName(channel) : "#" + channelName(channel);
+    const std::string name = voice ? "the voice room " + channelLabel(channel) : "#" + channelLabel(channel);
     LLHandle<LLFloater> h = getHandle();
     LLNotificationsUtil::add("GenericAlertYesCancel",
         LLSD().with("MESSAGE", "Stop bridging " + name + " to Discord? " + std::string(voice ? "Voices stop going between the room and the Discord voice channel." : "Messages stop going between the two.") + " You can link it again later."),
@@ -4751,6 +5570,616 @@ void WolfFloaterChat::setGifsAvailable(bool available)
     LLRect r = mInput->getRect();
     r.mLeft += available ? room : -room;
     mInput->setShape(r);
+}
+
+// =====================================================================================================================
+// [2026-10-23] owners: a channel's name, emoji and category
+// =====================================================================================================================
+
+namespace
+{
+    // Popular channel emoji for the grid in the channel dialog (php/wolfchat.php checks whatever is sent is one emoji).
+    // UTF-8 bytes, so no compiler reads them in another code page.
+    const char* const CHANNEL_EMOJI[] = {
+        "\xF0\x9F\x93\xA2", "\xF0\x9F\x93\x8C", "\xF0\x9F\x92\xAC", "\xF0\x9F\x91\x8B", "\xE2\x9D\x93",
+        "\xF0\x9F\x93\x9C", "\xF0\x9F\x93\x85", "\xF0\x9F\x93\x9A", "\xF0\x9F\x92\xA1", "\xF0\x9F\x9B\xA0\xEF\xB8\x8F",
+        "\xF0\x9F\x8E\xAE", "\xF0\x9F\x8E\xB5", "\xF0\x9F\x8E\xA4", "\xF0\x9F\x8E\xA7", "\xF0\x9F\x8E\xA8",
+        "\xF0\x9F\x93\xB7", "\xF0\x9F\x8F\x86", "\xF0\x9F\x8E\x89", "\xF0\x9F\x9A\x80", "\xF0\x9F\x8C\x8D",
+        "\xF0\x9F\x90\xBA", "\xF0\x9F\x90\xBE", "\xF0\x9F\x8C\x99", "\xF0\x9F\x94\xA5", "\xE2\xAD\x90",
+        "\xE2\x9D\xA4\xEF\xB8\x8F", "\xF0\x9F\x8F\xA0", "\xF0\x9F\x97\xBA\xEF\xB8\x8F", "\xF0\x9F\x8D\x95", "\xE2\x98\x95"
+    };
+    const S32 EMOJI_CELL = 36;
+}
+
+WolfFloaterChatChannelEdit::WolfFloaterChatChannelEdit(const LLSD& key)
+:   LLFloater(key)
+{
+}
+
+bool WolfFloaterChatChannelEdit::postBuild()
+{
+    mName = getChild<LLLineEditor>("channel_name");
+    mEmoji = getChild<LLLineEditor>("channel_emoji");
+    mCategory = getChild<LLComboBox>("channel_category");
+    mDiscord = getChild<LLCheckBoxCtrl>("also_discord");        // [DISCORD SYNC 2026-10-23]
+    mStatus = getChild<LLTextBox>("edit_status");
+    mSaveBtn = getChild<LLButton>("save_btn");
+    mSaveBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { save(); });
+    getChild<LLButton>("cancel_btn")->setClickedCallback([this](LLUICtrl*, const LLSD&) { closeFloater(); });
+    getChild<LLButton>("no_emoji_btn")->setClickedCallback([this](LLUICtrl*, const LLSD&) { mEmoji->setText(LLStringUtil::null); });
+    getChild<LLButton>("more_emoji_btn")->setClickedCallback([this](LLUICtrl*, const LLSD&) { onPickEmoji(); });
+    mName->setCommitOnFocusLost(false);
+    mName->setCommitCallback([this](LLUICtrl*, const LLSD&) { save(); });     // Enter saves
+    // The grid of popular emoji: 10 a row, each a button in the emoji font (as fsfloaterim.cpp:1040 sets its emoji
+    // button's font).
+    LLView* grid = getChild<LLView>("emoji_grid");
+    const S32 cols = 10;
+    const S32 gh = grid->getRect().getHeight();
+    S32 i = 0;
+    for (const char* e : CHANNEL_EMOJI)
+    {
+        LLButton::Params bp;
+        bp.name(llformat("emoji_%d", i));
+        bp.label(std::string(e));
+        bp.font(LLFontGL::getFontEmojiMedium());
+        const S32 col = i % cols, row = i / cols;
+        bp.rect(LLRect(col * EMOJI_CELL, gh - row * (EMOJI_CELL - 4) - 2, (col + 1) * EMOJI_CELL - 2, gh - (row + 1) * (EMOJI_CELL - 4)));
+        bp.tool_tip("Use this emoji");
+        LLButton* b = LLUICtrlFactory::create<LLButton>(bp);
+        const std::string pick = e;
+        b->setClickedCallback([this, pick](LLUICtrl*, const LLSD&) { mEmoji->setText(pick); });
+        grid->addChild(b);
+        ++i;
+    }
+    return true;
+}
+
+void WolfFloaterChatChannelEdit::setup(const LLUUID& group, const LLUUID& channel, bool voice, const std::string& name,
+                                       const std::string& emoji, const LLUUID& category,
+                                       const std::vector<WolfChatSidebar::Category>& categories, std::function<void(const LLUUID&)> saved,
+                                       bool synced)
+{
+    mDiscord->set(false);
+    mDiscord->setVisible(synced && channel.isNull());     // [DISCORD SYNC 2026-10-23] a new channel of a synced group
+    mGroup = group;
+    mChannel = channel;
+    mVoice = voice;
+    mOrigName = name;
+    mOrigEmoji = emoji;
+    mOrigCategory = category;
+    mSaved = saved;
+    mBusy = false;
+    setTitle(channel.isNull() ? (voice ? "NEW VOICE CHANNEL" : "NEW TEXT CHANNEL")
+                              : (voice ? "EDIT VOICE ROOM " : "EDIT #") + name);
+    mName->setText(name);
+    mEmoji->setText(emoji);
+    mCategory->removeall();
+    mCategory->add("(no category - shown at the top)", LLSD(LLUUID::null));
+    bool found = category.isNull();
+    for (const WolfChatSidebar::Category& k : categories)
+    {
+        mCategory->add(k.mName, LLSD(k.mId));
+        found = found || k.mId == category;
+    }
+    mCategory->setValue(LLSD(found ? category : LLUUID::null));
+    setStatus(std::string(), false);
+    mSaveBtn->setEnabled(true);
+    mName->setFocus(true);
+}
+
+void WolfFloaterChatChannelEdit::setStatus(const std::string& msg, bool error)
+{
+    mStatus->setText(msg);
+    mStatus->setColor(error ? C_ERROR : C_DIM);
+}
+
+void WolfFloaterChatChannelEdit::onPickEmoji()
+{
+    // The viewer's own emoji picker (the one Wolf Chat's Emoji button opens, LLEmojiHelper - lltexteditor.cpp:1368-1376
+    // showEmojiHelper): the emoji picked replaces what is in the box (a channel has one).
+    LLHandle<LLFloater> h = getHandle();
+    const LLRect r = mEmoji->getLocalRect();
+    LLEmojiHelper::instance().showHelper(mEmoji, r.mLeft, r.mBottom, LLStringUtil::null, [h](llwchar emoji)
+    {
+        WolfFloaterChatChannelEdit* self = static_cast<WolfFloaterChatChannelEdit*>(h.get());
+        if (self) self->mEmoji->setText(wstring_to_utf8str(LLWString(1, emoji)));
+    });
+}
+
+void WolfFloaterChatChannelEdit::save()
+{
+    if (mBusy) return;
+    std::string name = mName->getText();
+    LLStringUtil::trim(name);
+    std::string emoji = mEmoji->getText();
+    LLStringUtil::trim(emoji);
+    const LLUUID category = mCategory->getValue().asUUID();
+    if (name.empty())
+    {
+        setStatus("Give the channel a name.", true);
+        mName->setFocus(true);
+        return;
+    }
+    if (!emoji.empty() && !WolfChat::isOneEmoji(emoji))
+    {
+        setStatus("The emoji box takes one emoji only - no letters, and not two emoji.", true);
+        mEmoji->setFocus(true);
+        return;
+    }
+    LLSD b;
+    std::string action;
+    if (mChannel.isNull())
+    {
+        action = "channel_create";
+        b["group"] = mGroup;
+        b["kind"] = mVoice ? "voice" : "text";
+        b["name"] = name;
+        if (!emoji.empty()) b["emoji"] = emoji;
+        if (category.notNull()) b["category"] = category;
+        if (mDiscord->getVisible() && mDiscord->get()) b["discord"] = 1;     // [DISCORD SYNC 2026-10-23]
+    }
+    else
+    {
+        // Only what changed is sent (php/wolfchat.php channel_set changes the fields it is given).
+        action = "channel_set";
+        b["channel"] = mChannel;
+        if (name != mOrigName) b["name"] = name;
+        if (emoji != mOrigEmoji) b["emoji"] = emoji;
+        if (category != mOrigCategory) b["category"] = category.isNull() ? std::string() : category.asString();
+        if (b.size() == 1)
+        {
+            closeFloater();
+            return;
+        }
+    }
+    mBusy = true;
+    mSaveBtn->setEnabled(false);
+    setStatus("Saving...", false);
+    LLHandle<LLFloater> h = getHandle();
+    WolfChat::api(action, b, [h](bool ok, const LLSD& reply, const std::string& error)
+    {
+        WolfFloaterChatChannelEdit* self = static_cast<WolfFloaterChatChannelEdit*>(h.get());
+        if (!self) return;
+        self->mBusy = false;
+        self->mSaveBtn->setEnabled(true);
+        if (!ok)
+        {
+            // Stays until the next Save; says what to change (the service names the field: emoji / name).
+            self->setStatus("Not saved: " + error, true);
+            return;
+        }
+        if (self->mSaved) self->mSaved(reply["channel"]["id"].asUUID());
+        self->closeFloater();
+    });
+}
+
+// =====================================================================================================================
+// [2026-10-23] owners: the group's banner
+// =====================================================================================================================
+
+WolfFloaterChatBanner::WolfFloaterChatBanner(const LLSD& key)
+:   LLFloater(key)
+{
+}
+
+WolfFloaterChatBanner::~WolfFloaterChatBanner()
+{
+    if (LLFloater* p = mPicker.get()) p->closeFloater();
+}
+
+bool WolfFloaterChatBanner::postBuild()
+{
+    mPreview = getChild<WolfChatBannerPreview>("banner_preview");
+    mFocus = getChild<LLRadioGroup>("banner_focus");
+    mTagline = getChild<LLLineEditor>("banner_tagline");
+    mShimmer = getChild<LLCheckBoxCtrl>("banner_shimmer");
+    mStatus = getChild<LLTextBox>("banner_status");
+    mSaveBtn = getChild<LLButton>("save_btn");
+    mSaveBtn->setClickedCallback([this](LLUICtrl*, const LLSD&) { save(); });
+    getChild<LLButton>("cancel_btn")->setClickedCallback([this](LLUICtrl*, const LLSD&) { closeFloater(); });
+    getChild<LLButton>("pick_btn")->setClickedCallback([this](LLUICtrl*, const LLSD&) { onPick(); });
+    getChild<LLButton>("remove_btn")->setClickedCallback([this](LLUICtrl*, const LLSD&)
+    {
+        mBanner.mAsset.setNull();
+        mItem.setNull();
+        mRemoveImage = true;
+        refreshPreview();
+    });
+    mFocus->setCommitCallback([this](LLUICtrl*, const LLSD&) { refreshPreview(); });
+    mShimmer->setCommitCallback([this](LLUICtrl*, const LLSD&) { refreshPreview(); });
+    mTagline->setKeystrokeCallback([](LLLineEditor* ed, void* data)
+    {
+        static_cast<WolfFloaterChatBanner*>(data)->refreshPreview();
+    }, this);
+    mTagline->setCommitOnFocusLost(false);
+    return true;
+}
+
+void WolfFloaterChatBanner::setup(const LLUUID& group, const WolfChatSidebar::Banner& banner, std::function<void()> saved)
+{
+    mGroup = group;
+    mBanner = banner;
+    mBanner.mShown = true;
+    mItem.setNull();
+    mRemoveImage = false;
+    mSaved = saved;
+    mBusy = false;
+    mFocus->setValue(LLSD(banner.mFocus.empty() ? std::string("center") : banner.mFocus));
+    mTagline->setText(banner.mTagline);
+    mShimmer->set(banner.mShimmer);
+    setStatus(std::string(), false);
+    mSaveBtn->setEnabled(true);
+    refreshPreview();
+}
+
+void WolfFloaterChatBanner::refreshPreview()
+{
+    mBanner.mFocus = mFocus->getValue().asString();
+    mBanner.mTagline = mTagline->getText();
+    mBanner.mShimmer = mShimmer->get();
+    mPreview->setBanner(mBanner);
+    getChild<LLButton>("remove_btn")->setEnabled(mBanner.mAsset.notNull());
+}
+
+void WolfFloaterChatBanner::setStatus(const std::string& msg, bool error)
+{
+    mStatus->setText(msg);
+    mStatus->setColor(error ? C_ERROR : C_DIM);
+}
+
+void WolfFloaterChatBanner::onPick()
+{
+    // Source: WolfFloaterChat::onPickImage - the viewer's texture picker; the inventory item is what php/wolfchat.php
+    // checks (copy and transfer, as a posted picture), and the preview shows the asset at once.
+    if (LLFloater* old = mPicker.get()) old->closeFloater();
+    LLFloaterTexturePicker* fp = new LLFloaterTexturePicker(this, LLUUID::null, LLUUID::null, LLUUID::null, false, false,
+                                                            "CHOOSE THE BANNER PICTURE", PERM_NONE, PERM_NONE, false, NULL, PICK_TEXTURE);
+    mPicker = fp->getHandle();
+    LLHandle<LLFloater> h = getHandle();
+    fp->setOnFloaterCommitCallback([h](LLTextureCtrl::ETexturePickOp op, LLPickerSource source, const LLUUID& asset_id,
+                                       const LLUUID& inventory_id, const LLUUID&)
+    {
+        WolfFloaterChatBanner* self = static_cast<WolfFloaterChatBanner*>(h.get());
+        if (!self || op != LLTextureCtrl::TEXTURE_SELECT) return;
+        if (inventory_id.isNull())
+        {
+            self->setStatus("Pick the picture on the Inventory tab of the picker (a texture or snapshot you own).", true);
+            return;
+        }
+        if (LLViewerInventoryItem* item = gInventory.getItem(inventory_id))
+        {
+            const LLPermissions& perm = item->getPermissions();
+            if (item->getType() != LLAssetType::AT_TEXTURE)
+            {
+                self->setStatus("Only textures and snapshots can be a banner.", true);
+                return;
+            }
+            if (!perm.allowCopyBy(gAgentID) || !perm.allowOperationBy(PERM_TRANSFER, gAgentID))
+            {
+                self->setStatus("\"" + item->getName() + "\" is not copy and transfer, so it cannot be shown to the group.", true);
+                return;
+            }
+        }
+        self->mItem = inventory_id;
+        self->mBanner.mAsset = asset_id;
+        self->mRemoveImage = false;
+        self->setStatus("Press Save to show it to the group.", false);
+        self->refreshPreview();
+    });
+    fp->setLocalTextureEnabled(false);
+    fp->setBakeTextureEnabled(false);
+    fp->setCanApply(false, true, false);
+    addDependentFloater(mPicker);
+    fp->openFloater();
+    fp->setFocus(true);
+}
+
+void WolfFloaterChatBanner::save()
+{
+    if (mBusy) return;
+    std::string tagline = mTagline->getText();
+    LLStringUtil::trim(tagline);
+    LLSD b;
+    b["group"] = mGroup;
+    b["focus"] = mFocus->getValue().asString();
+    b["tagline"] = tagline;
+    b["shimmer"] = mShimmer->get() ? 1 : 0;
+    if (mItem.notNull()) b["item"] = mItem;
+    else if (mRemoveImage) b["remove_image"] = 1;
+    mBusy = true;
+    mSaveBtn->setEnabled(false);
+    setStatus("Saving...", false);
+    LLHandle<LLFloater> h = getHandle();
+    WolfChat::api("banner_set", b, [h](bool ok, const LLSD&, const std::string& error)
+    {
+        WolfFloaterChatBanner* self = static_cast<WolfFloaterChatBanner*>(h.get());
+        if (!self) return;
+        self->mBusy = false;
+        self->mSaveBtn->setEnabled(true);
+        if (!ok)
+        {
+            self->setStatus("Not saved: " + error, true);
+            return;
+        }
+        if (self->mSaved) self->mSaved();
+        self->closeFloater();
+    });
+}
+
+// =====================================================================================================================
+// [DISCORD SYNC 2026-10-23] a whole Discord server <-> this group
+// =====================================================================================================================
+
+WolfChatUrlIcon::WolfChatUrlIcon(const Params& p)
+:   LLUICtrl(p)
+{
+}
+
+WolfChatUrlIcon::~WolfChatUrlIcon()
+{
+    if (mTexture.notNull()) mTexture->forceActive();
+}
+
+void WolfChatUrlIcon::setUrl(const std::string& url)
+{
+    if (url == mUrl) return;
+    mUrl = url;
+    if (mTexture.notNull()) mTexture->forceActive();
+    mTexture = nullptr;
+    // Source: wolfalbumart.cpp setArt - FTT_MAP_TILE fetches the address as it is and decodes by its extension (the
+    // address ends in .png: php/wolfbridge.php wbr_guild_icon_url), then BOOST_PREVIEW.
+    if (!url.empty())
+    {
+        mTexture = LLViewerTextureManager::getFetchedTextureFromUrl(url, FTT_MAP_TILE, true, LLGLTexture::BOOST_NONE);
+        if (mTexture.notNull()) mTexture->setBoostLevel(LLGLTexture::BOOST_PREVIEW);
+    }
+}
+
+void WolfChatUrlIcon::draw()
+{
+    const S32 w = getRect().getWidth(), h = getRect().getHeight();
+    gl_rect_2d(0, h, w, 0, C_SKELETON, true);
+    if (mTexture.notNull())
+    {
+        mTexture->addTextureStats((F32)(w * h));
+        if (mTexture->hasGLTexture()) gl_draw_scaled_image(0, 0, w, h, mTexture);
+    }
+}
+
+WolfFloaterChatSync::WolfFloaterChatSync(const LLSD& key)
+:   LLFloater(key)
+{
+}
+
+bool WolfFloaterChatSync::postBuild()
+{
+    getChild<LLButton>("close_btn")->setClickedCallback([this](LLUICtrl*, const LLSD&) { closeFloater(); });
+    getChild<LLButton>("add_bot_btn")->setClickedCallback([this](LLUICtrl*, const LLSD&)
+    {
+        LLWeb::loadURLExternal(mInvite.empty() ? std::string(DISCORD_BOT_INVITE) : mInvite);
+    });
+    getChild<LLButton>("code_btn")->setClickedCallback([this](LLUICtrl*, const LLSD&) { getCode(); });
+    getChild<LLButton>("copy_btn")->setClickedCallback([this](LLUICtrl*, const LLSD&)
+    {
+        const std::string cmd = getChild<LLLineEditor>("sync_command")->getText();
+        LLClipboard::instance().copyToClipboard(utf8str_to_wstring(cmd), 0, (S32)utf8str_to_wstring(cmd).size());
+        setStatus("Copied - paste it in any channel of your Discord server.", false);
+    });
+    getChild<LLButton>("check_btn")->setClickedCallback([this](LLUICtrl*, const LLSD&) { load(); });
+    getChild<LLButton>("sync_now_btn")->setClickedCallback([this](LLUICtrl*, const LLSD&) { syncNow(); });
+    getChild<LLButton>("unlink_btn")->setClickedCallback([this](LLUICtrl*, const LLSD&) { unlink(); });
+    getChild<LLButton>("private_apply_btn")->setClickedCallback([this](LLUICtrl*, const LLSD&) { applyPrivate(); });
+    getChild<LLLineEditor>("sync_command")->setEnabled(false);
+    LLScrollListCtrl* list = getChild<LLScrollListCtrl>("private_list");
+    list->setCommitCallback([this, list](LLUICtrl*, const LLSD&)
+    {
+        // The selected private channel's role in the box below.
+        LLScrollListItem* it = list->getFirstSelected();
+        if (!it) return;
+        for (const LLSD& p : llsd::inArray(mPrivate))
+        {
+            if (p["id"].asString() == it->getValue().asString()) getChild<LLComboBox>("private_role")->setValue(LLSD(p["role"].asString()));
+        }
+    });
+    return true;
+}
+
+void WolfFloaterChatSync::setup(const LLUUID& group, std::function<void()> changed)
+{
+    mGroup = group;
+    mChanged = changed;
+    getChild<LLLineEditor>("sync_command")->setText(LLStringUtil::null);
+    load();
+}
+
+void WolfFloaterChatSync::setStatus(const std::string& msg, bool error)
+{
+    LLTextBox* t = getChild<LLTextBox>("sync_status");
+    t->setText(msg);
+    t->setColor(error ? C_ERROR : C_DIM);
+}
+
+void WolfFloaterChatSync::load()
+{
+    setStatus("Loading...", false);
+    LLHandle<LLFloater> h = getHandle();
+    LLSD b;
+    b["group"] = mGroup;
+    WolfChat::bridgeApi("sync_state", b, [h](bool ok, const LLSD& reply, const std::string& error)
+    {
+        WolfFloaterChatSync* self = static_cast<WolfFloaterChatSync*>(h.get());
+        if (!self) return;
+        if (!ok)
+        {
+            self->setStatus("The sync could not be loaded: " + error, true);
+            return;
+        }
+        self->setStatus(std::string(), false);
+        self->showState(reply);
+    });
+}
+
+void WolfFloaterChatSync::showState(const LLSD& reply)
+{
+    // Source: php/wolfbridge.php sync_state - {sync: null | {...}, can_manage, invite}.
+    mInvite = reply["invite"].asString();
+    const bool owner = reply["can_manage"].asInteger() != 0;
+    const LLSD& sy = reply["sync"];
+    const bool synced = sy.isMap();
+    getChild<LLView>("code_btn")->setVisible(!synced && owner);
+    getChild<LLView>("add_bot_btn")->setVisible(owner);
+    getChild<LLButton>("add_bot_btn")->setLabel(synced ? LLStringExplicit("Add Wolf-Bot again") : LLStringExplicit("Add Wolf-Bot to Discord"));
+    const bool code_shown = !getChild<LLLineEditor>("sync_command")->getText().empty();
+    for (const char* n : { "sync_command", "copy_btn", "check_btn" }) getChild<LLView>(n)->setVisible(!synced && owner && code_shown);
+    getChild<LLView>("sync_now_btn")->setVisible(synced && owner);
+    getChild<LLView>("unlink_btn")->setVisible(synced && owner);
+    WolfChatUrlIcon* icon = getChild<WolfChatUrlIcon>("sync_icon");
+    if (!synced)
+    {
+        icon->setUrl(std::string());
+        getChild<LLTextBox>("sync_name")->setText(LLStringExplicit("Not synced with a Discord server"));
+        getChild<LLTextBox>("sync_when")->setText(LLStringUtil::null);
+        getChild<LLTextBox>("sync_note")->setText(LLStringExplicit("Bring a whole Discord server into this group: its categories and public channels appear in "
+                                                                   "Wolf Chat, messages go both ways, and new, renamed or deleted Discord channels follow by themselves. "
+                                                                   "Private Discord channels stay private."));
+        getChild<LLTextBox>("sync_help")->setText(owner ? LLStringExplicit("1. Add Wolf-Bot to your Discord server (you need Manage Server there). 2. Get a code "
+                                                                           "(it works once, for 10 minutes). 3. Type the /wolfsync command in any channel of the server.")
+                                                        : LLStringExplicit("Only the group's owners can sync it with a Discord server."));
+        for (const char* n : { "private_label", "private_list", "private_role", "private_apply_btn" }) getChild<LLView>(n)->setVisible(false);
+        mPrivate = LLSD::emptyArray();
+        return;
+    }
+    mGuildName = sy["guild_name"].asString();
+    icon->setUrl(sy["guild_icon"].asString());
+    getChild<LLTextBox>("sync_name")->setText(mGuildName.empty() ? std::string("Discord server") : mGuildName);
+    const S32 when = sy["last_sync_at"].asInteger();
+    getChild<LLTextBox>("sync_when")->setText(sy["requested"].asInteger() != 0 ? std::string("Syncing now...")
+                                              : (when > 0 ? "Last synced " + clockText(when) : std::string("Not synced yet - Wolf-Bot starts in a moment")));
+    std::string note = sy["note"].asString();
+    note = note.empty() ? llformat("%d channels synced.", sy["channels"].asInteger()) : note + ".";
+    if (sy["archived"].asInteger() > 0) note += llformat(" %d archived: deleted on Discord, kept here read only.", sy["archived"].asInteger());
+    note += llformat(" At most %d channels of a server are brought in.", sy["max"].asInteger());
+    getChild<LLTextBox>("sync_note")->setText(note);
+    getChild<LLTextBox>("sync_help")->setText(!owner ? std::string()
+        : (sy["can_manage_channels"].asInteger() != 0 ? std::string("Wolf-Bot may make channels there: new channels can be made on Discord too (tick \"Also create on Discord\").")
+                                                      : std::string("To make Wolf Chat channels on Discord too, give Wolf-Bot Manage Channels there (Server Settings > Roles), or add it again.")));
+    mPrivate = sy["private"].isArray() ? sy["private"] : LLSD::emptyArray();
+    const bool has_private = owner && mPrivate.size() > 0;
+    for (const char* n : { "private_label", "private_list", "private_role", "private_apply_btn" }) getChild<LLView>(n)->setVisible(has_private);
+    if (!has_private) return;
+    std::map<std::string, std::string> role_names;
+    LLComboBox* combo = getChild<LLComboBox>("private_role");
+    combo->removeall();
+    combo->add("Keep out of Wolf Chat", LLSD(std::string()));
+    for (const LLSD& r : llsd::inArray(sy["roles"]))
+    {
+        role_names[r["id"].asString()] = r["name"].asString();
+        combo->add("Show to: " + r["name"].asString(), LLSD(r["id"].asString()));
+    }
+    combo->setValue(LLSD(std::string()));
+    LLScrollListCtrl* list = getChild<LLScrollListCtrl>("private_list");
+    list->deleteAllItems();
+    for (const LLSD& p : llsd::inArray(mPrivate))
+    {
+        const std::string role = p["role"].asString();
+        LLSD row;
+        row["value"] = p["id"].asString();
+        row["columns"][0]["column"] = "name";
+        row["columns"][0]["value"] = (p["kind"].asString() == "voice" ? std::string("(voice) ") : std::string("#")) + p["name"].asString();
+        row["columns"][1]["column"] = "role";
+        row["columns"][1]["value"] = role.empty() ? std::string("nobody (kept out)") : (role_names.count(role) ? role_names[role] : std::string("a role"));
+        list->addElement(row);
+    }
+}
+
+void WolfFloaterChatSync::getCode()
+{
+    if (mBusy) return;
+    mBusy = true;
+    setStatus("Making a code...", false);
+    LLHandle<LLFloater> h = getHandle();
+    LLSD b;
+    b["group"] = mGroup;
+    WolfChat::bridgeApi("sync_code", b, [h](bool ok, const LLSD& reply, const std::string& error)
+    {
+        WolfFloaterChatSync* self = static_cast<WolfFloaterChatSync*>(h.get());
+        if (!self) return;
+        self->mBusy = false;
+        if (!ok)
+        {
+            self->setStatus("No code: " + error, true);
+            return;
+        }
+        self->getChild<LLLineEditor>("sync_command")->setText(reply["command"].asString());
+        for (const char* n : { "sync_command", "copy_btn", "check_btn" }) self->getChild<LLView>(n)->setVisible(true);
+        self->setStatus(llformat("Works for %d minutes. Copy the command and type it in any channel of your Discord server, then press \"I typed it - check\".",
+                                 reply["expires_in"].asInteger() / 60), false);
+    });
+}
+
+void WolfFloaterChatSync::syncNow()
+{
+    LLHandle<LLFloater> h = getHandle();
+    LLSD b;
+    b["group"] = mGroup;
+    WolfChat::bridgeApi("sync_now", b, [h](bool ok, const LLSD&, const std::string& error)
+    {
+        WolfFloaterChatSync* self = static_cast<WolfFloaterChatSync*>(h.get());
+        if (!self) return;
+        if (!ok) { self->setStatus("Not asked for: " + error, true); return; }
+        self->setStatus("Syncing now - the channel list updates within a minute.", false);
+        if (self->mChanged) self->mChanged();
+    });
+}
+
+void WolfFloaterChatSync::unlink()
+{
+    LLHandle<LLFloater> h = getHandle();
+    const LLUUID group = mGroup;
+    LLNotificationsUtil::add("GenericAlertYesCancel",
+        LLSD().with("MESSAGE", "Stop syncing this group with \"" + (mGuildName.empty() ? std::string("the Discord server") : mGuildName)
+                               + "\"? The channels stay in Wolf Chat with their history, but messages stop going to and from Discord."),
+        LLSD(), [h, group](const LLSD& n, const LLSD& r)
+    {
+        if (LLNotificationsUtil::getSelectedOption(n, r) != 0) return false;
+        LLSD b;
+        b["group"] = group;
+        WolfChat::bridgeApi("sync_unlink", b, [h](bool ok, const LLSD&, const std::string& error)
+        {
+            WolfFloaterChatSync* self = static_cast<WolfFloaterChatSync*>(h.get());
+            if (!self) return;
+            if (!ok) { self->setStatus("Not unlinked: " + error, true); return; }
+            self->setStatus("Unlinked from Discord.", false);
+            if (self->mChanged) self->mChanged();
+            self->load();
+        });
+        return false;
+    });
+}
+
+void WolfFloaterChatSync::applyPrivate()
+{
+    LLScrollListItem* it = getChild<LLScrollListCtrl>("private_list")->getFirstSelected();
+    if (!it)
+    {
+        setStatus("Select a private channel in the list first.", true);
+        return;
+    }
+    const std::string channel = it->getValue().asString();
+    const std::string role = getChild<LLComboBox>("private_role")->getValue().asString();
+    LLHandle<LLFloater> h = getHandle();
+    LLSD b;
+    b["group"] = mGroup;
+    b["discord_id"] = channel;
+    b["role"] = role;
+    WolfChat::bridgeApi("sync_private_role", b, [h, role](bool ok, const LLSD&, const std::string& error)
+    {
+        WolfFloaterChatSync* self = static_cast<WolfFloaterChatSync*>(h.get());
+        if (!self) return;
+        if (!ok) { self->setStatus("Not changed: " + error, true); return; }
+        self->setStatus(role.empty() ? std::string("Kept out of Wolf Chat.") : std::string("It will be shown to that role at the next sync (in a moment)."), false);
+        self->load();
+    });
 }
 
 // =====================================================================================================================

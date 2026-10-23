@@ -16,6 +16,13 @@
  * the window is closed - WolfChatNotifier), pinned messages, the GIF button (GIPHY through php/wolfchat.php; a GIF
  * arrives as an animated sprite-sheet texture, WolfChat::GifSheet) and the grid's announcement cards above the
  * message box (WolfChatCards).
+ *
+ * [2026-10-23] Paul: "allow us to set up categories ... and assign an emoji to each channel", "a banner like you have on
+ * discord that appears above the chat channels (lets beat discord at their own game)" and "for admin hide Pin and Delete
+ * on every message unless i mouse over the message". Categories fold away (remembered per account,
+ * WolfChatCollapsedCategories); a channel's emoji shows before its name everywhere; the group's banner (picture cropped
+ * to 5:2 around the part the owners chose, name and tagline over a dark shade, an optional shimmer) tops the channel
+ * list; the owners manage them (WolfFloaterChatChannelEdit, WolfFloaterChatBanner, the group / category menus).
  */
 
 #ifndef WOLF_FLOATERCHAT_H
@@ -35,6 +42,7 @@
 
 class LLButton;
 class LLChatEntry;
+class LLScrollContainer;
 class LLCheckBoxCtrl;
 class LLRadioGroup;
 class LLViewerFetchedTexture;
@@ -189,14 +197,45 @@ public:
         bool mRestricted = false;   // [2026-10-21] only some roles can see it (owners are told with a lock)
         bool mBridged = false;      // [2026-10-21] linked to a Discord channel (php/wolfbridge.php links)
         bool mBridgeBroken = false; // that link has stopped (the reason is in the window's header)
+        LLUUID mCategory;           // [2026-10-23] null = in no category (shown at the top)
+        std::string mEmoji;         // [2026-10-23] '' = none; drawn before the name
+        std::string mTopic;         // [DISCORD SYNC 2026-10-23] a synced Discord channel's topic
+        bool mArchived = false;     // [DISCORD SYNC 2026-10-23] deleted on Discord: kept read only
         std::vector<Person> mPeople;
     };
-    enum EHit { HIT_NONE, HIT_CHANNEL, HIT_ADD_TEXT, HIT_ADD_VOICE, HIT_PERSON };
+    /** [2026-10-23] A category heading, in the group's order. */
+    struct Category
+    {
+        LLUUID mId;
+        std::string mName;
+        bool mCollapsed = false;    // folded away (per account)
+    };
+    /** [2026-10-23] The group's banner (php/wolfchat.php channels `banner`). */
+    struct Banner
+    {
+        bool mShown = false;
+        LLUUID mAsset;              // null = no picture (only the tagline, on the panel colour)
+        std::string mFocus = "center";     // top | center | bottom: the part kept when the picture is cropped
+        std::string mTagline;
+        bool mShimmer = false;
+        std::string mName;          // the group's name, drawn over it
+    };
+    enum EHit { HIT_NONE, HIT_CHANNEL, HIT_ADD_TEXT, HIT_ADD_VOICE, HIT_PERSON, HIT_BANNER, HIT_CATEGORY, HIT_CATEGORY_ADD, HIT_SYNC };
 
     void setChannels(const std::vector<Channel>& channels, bool can_manage);
+    /** [2026-10-23] Categories (in order) and the banner; call before setChannels (which lays the list out). */
+    void setCategories(const std::vector<Category>& categories) { mCategories = categories; }
+    void setBanner(const Banner& banner);
+    /** [DISCORD SYNC 2026-10-23] "Synced with Discord: <server>" under the banner ('' = not synced); click = the sync window. */
+    void setSyncLine(const std::string& line) { mSyncLine = line; }
+    /** [2026-10-23] Right-click on a category heading (owners), or on the banner / a TEXT or VOICE heading (null id). */
+    void setCategoryMenuCallback(std::function<void(const LLUUID&, S32 x, S32 y)> cb) { mCategoryMenu = cb; }
     void setSelected(const LLUUID& text_channel) { mSelected = text_channel; }
     void setJoined(const LLUUID& voice_channel) { mJoined = voice_channel; }
     void setLoading(bool loading) { mLoading = loading; }
+    /** [FIX 2026-10-23] Back to the top (another group was opened - Paul: "when i click a different group the channels
+     *  should scroll to the top"). */
+    void resetScroll() { mScroll = 0; mShownSelected.setNull(); }
     void setClickCallback(std::function<void(EHit, const LLUUID&)> cb) { mClick = cb; }
     /** [2026-10-21] Right-click on a channel row (owners' channel menu); x, y are this control's. */
     void setMenuCallback(std::function<void(const LLUUID&, S32 x, S32 y)> cb) { mMenu = cb; }
@@ -219,11 +258,25 @@ private:
         S32 mPerson = -1;   // index into that channel's people
         bool mHeader = false;
         bool mVoiceHeader = false;
+        S32 mCategory = -1;     // [2026-10-23] index into mCategories (HIT_CATEGORY rows)
     };
     void layout();
     const Row* rowAt(S32 x, S32 y) const;
+    void addChannelRows(S32 index, S32& y);
+    // [FIX 2026-10-23] Paul: "we need a scroll bar on the channels window for when its longer than the window".
+    S32 contentHeight() const;
+    S32 maxScroll() const;
+    bool scrollBarShown() const { return maxScroll() > 0; }
+    LLRect thumbRect() const;
+    void scrollFromThumb(S32 y);
+    void drawScrollBar();
 
     std::vector<Channel> mChannels;
+    std::vector<Category> mCategories;      // [2026-10-23]
+    Banner mBanner;                         // [2026-10-23]
+    std::string mSyncLine;                  // [DISCORD SYNC 2026-10-23]
+    LLPointer<LLViewerFetchedTexture> mBannerTexture;
+    std::function<void(const LLUUID&, S32, S32)> mCategoryMenu;
     std::vector<Row> mRows;
     bool mCanManage = false;
     bool mLoading = true;
@@ -231,10 +284,157 @@ private:
     LLUUID mJoined;
     S32 mScroll = 0;
     S32 mHover = -1;
+    bool mHoverAdd = false;                 // [2026-10-23] the mouse is on the + end of a heading
+    bool mDragThumb = false;                // [FIX 2026-10-23] the scroll bar's thumb is being dragged
+    S32 mDragGrab = 0;                      // where on the thumb it was taken (pixels from its top)
+    LLUUID mShownSelected;                  // the selected channel last scrolled into view
     std::function<void(EHit, const LLUUID&)> mClick;
     std::function<void(const LLUUID&, S32, S32)> mMenu;
 public:
     bool handleRightMouseDown(S32 x, S32 y, MASK mask) override;
+    bool handleMouseUp(S32 x, S32 y, MASK mask) override;      // [FIX 2026-10-23] the scroll bar
+    ~WolfChatSidebar() override;
+};
+
+namespace WolfChat
+{
+    /** [2026-10-23] Draws a group banner in `rect` (this view's coordinates): the picture cover-fitted to the rect and
+     *  cropped around `focus`, an optional shimmer, the dark shade that keeps the text readable, the name and tagline.
+     *  The texture is the caller's (fetched with fetchBanner, kept while shown). */
+    void drawBanner(const LLRect& rect, LLViewerFetchedTexture* texture, const WolfChatSidebar::Banner& banner);
+    /** The banner picture through the normal texture fetch (lltexturectrl.cpp:2507-2508), or null for none. */
+    LLPointer<LLViewerFetchedTexture> fetchBanner(const LLUUID& asset);
+    /** [2026-10-23] Exactly one emoji, as php/wolfchat.php wch_emoji_in decides (a quick check before asking it). */
+    bool isOneEmoji(const std::string& utf8);
+    /** [2026-10-23] A channel's emoji and name as lists, headers and toasts show it. */
+    std::string channelLabel(const std::string& emoji, const std::string& name);
+}
+
+/** [2026-10-23] The banner preview in WolfFloaterChatBanner (the same drawing as the channel list's). */
+class WolfChatBannerPreview : public LLUICtrl
+{
+public:
+    struct Params : public LLInitParam::Block<Params, LLUICtrl::Params>
+    {
+        Params() {}
+    };
+    WolfChatBannerPreview(const Params& p);
+    ~WolfChatBannerPreview() override;
+    void setBanner(const WolfChatSidebar::Banner& banner);
+    void draw() override;
+
+private:
+    WolfChatSidebar::Banner mBanner;
+    LLPointer<LLViewerFetchedTexture> mTexture;
+};
+
+/** [DISCORD SYNC 2026-10-23] A small picture fetched from a web address (the synced Discord server's icon, served by
+ *  php/wolfbridge.php so viewers never contact Discord) through the viewer's URL texture fetch (wolfalbumart.cpp). */
+class WolfChatUrlIcon : public LLUICtrl
+{
+public:
+    struct Params : public LLInitParam::Block<Params, LLUICtrl::Params>
+    {
+        Params() {}
+    };
+    WolfChatUrlIcon(const Params& p);
+    ~WolfChatUrlIcon() override;
+    void setUrl(const std::string& url);
+    void draw() override;
+
+private:
+    std::string mUrl;
+    LLPointer<LLViewerFetchedTexture> mTexture;
+};
+
+/** [DISCORD SYNC 2026-10-23] A whole Discord server <-> this group (php/wolfbridge.php sync_*). Owners link, sync now,
+ *  choose who sees private Discord channels and unlink; members see the state. */
+class WolfFloaterChatSync : public LLFloater
+{
+public:
+    WolfFloaterChatSync(const LLSD& key);
+    bool postBuild() override;
+    void setup(const LLUUID& group, std::function<void()> changed);
+
+private:
+    void load();
+    void showState(const LLSD& reply);
+    void getCode();
+    void syncNow();
+    void unlink();
+    void applyPrivate();
+    void setStatus(const std::string& text, bool error);
+
+    LLUUID mGroup;
+    std::string mInvite;
+    std::string mGuildName;
+    std::function<void()> mChanged;
+    LLSD mPrivate;
+    bool mBusy = false;
+};
+
+/** [2026-10-23] Owners: a new channel, or an existing one's name, emoji and category (php/wolfchat.php channel_create /
+ *  channel_set). Persona: a group owner tidying a busy group into Discord-like categories with an emoji on each channel. */
+class WolfFloaterChatChannelEdit : public LLFloater
+{
+public:
+    WolfFloaterChatChannelEdit(const LLSD& key);
+    bool postBuild() override;
+    /** channel null = a new channel of the kind given in `group`; `categories` = the group's, in order. */
+    void setup(const LLUUID& group, const LLUUID& channel, bool voice, const std::string& name, const std::string& emoji,
+               const LLUUID& category, const std::vector<WolfChatSidebar::Category>& categories,
+               std::function<void(const LLUUID& made)> saved, bool synced = false);
+
+private:
+    void save();
+    void setStatus(const std::string& text, bool error);
+    void onPickEmoji();
+
+    LLUUID mGroup;
+    LLUUID mChannel;
+    bool mVoice = false;
+    std::string mOrigName;
+    std::string mOrigEmoji;
+    LLUUID mOrigCategory;
+    std::function<void(const LLUUID&)> mSaved;
+    LLLineEditor* mName = nullptr;
+    LLLineEditor* mEmoji = nullptr;
+    LLComboBox* mCategory = nullptr;
+    LLCheckBoxCtrl* mDiscord = nullptr;     // [DISCORD SYNC 2026-10-23] "Also create on Discord"
+    LLTextBox* mStatus = nullptr;
+    LLButton* mSaveBtn = nullptr;
+    bool mBusy = false;
+};
+
+/** [2026-10-23] Owners: the group's banner - a picture from inventory (copy and transfer), the part kept when it is
+ *  cropped, a tagline and the shimmer (php/wolfchat.php banner_set). */
+class WolfFloaterChatBanner : public LLFloater
+{
+public:
+    WolfFloaterChatBanner(const LLSD& key);
+    ~WolfFloaterChatBanner() override;
+    bool postBuild() override;
+    void setup(const LLUUID& group, const WolfChatSidebar::Banner& banner, std::function<void()> saved);
+
+private:
+    void onPick();
+    void save();
+    void refreshPreview();
+    void setStatus(const std::string& text, bool error);
+
+    LLUUID mGroup;
+    WolfChatSidebar::Banner mBanner;
+    LLUUID mItem;                       // the inventory item picked (null = keep the picture as it is)
+    bool mRemoveImage = false;
+    std::function<void()> mSaved;
+    WolfChatBannerPreview* mPreview = nullptr;
+    LLRadioGroup* mFocus = nullptr;
+    LLLineEditor* mTagline = nullptr;
+    LLCheckBoxCtrl* mShimmer = nullptr;
+    LLTextBox* mStatus = nullptr;
+    LLButton* mSaveBtn = nullptr;
+    LLHandle<LLFloater> mPicker;
+    bool mBusy = false;
 };
 
 /** [2026-10-21] Paul: "groups = servers". The far-left rail of the groups the resident added to Wolf Chat (php/wolfchat.php
@@ -612,7 +812,6 @@ private:
     void onVoiceSettings();
     void onLeaveCall();
     void onInvitePeople();
-    void onRenameChannel(const LLUUID& channel);
     void onDeleteChannel(const LLUUID& channel);
     // [2026-10-21] owners: the channel menu and "Who can see this channel"
     void showChannelMenu(const LLUUID& channel, S32 x, S32 y);
@@ -630,8 +829,25 @@ private:
     void setCards(const LLSD& cards);
     void setCardsShown(bool shown);
     void setGifsAvailable(bool available);
-    void askNewChannel(bool voice);
+    void askNewChannel(bool voice, const LLUUID& category = LLUUID::null);
     void joinVoice(const LLUUID& channel);
+    // [2026-10-23] categories, channel emoji, the banner (owners); hover-only message buttons
+    void onEditChannel(const LLUUID& channel);
+    void moveChannel(const LLUUID& channel, bool up);
+    void showCategoryMenu(const LLUUID& category, S32 x, S32 y);
+    void showGroupMenu(S32 x, S32 y, LLView* from);
+    void onNewCategory();
+    void onRenameCategory(const LLUUID& category);
+    void onDeleteCategory(const LLUUID& category);
+    void moveCategory(const LLUUID& category, bool up);
+    void toggleCategory(const LLUUID& category);
+    void onBanner();
+    void onSync();                              // [DISCORD SYNC 2026-10-23]
+    void openGroupProfile();
+    std::string channelLabel(const LLUUID& channel) const;
+    std::string categoryName(const LLUUID& category) const;
+    void reloadChannels();
+    void updateMessageActions();
 
     WolfChatServerRail* mRail = nullptr;    // [2026-10-21] replaces the group combo box
     LLTextBox* mServerName = nullptr;
@@ -718,6 +934,26 @@ private:
     LLButton* mRelinkBtn = nullptr;
     LLHandle<LLView> mChannelMenu;
     LLUUID mMenuChannel;
+    // [2026-10-23]
+    std::vector<WolfChatSidebar::Category> mCategories;
+    WolfChatSidebar::Banner mBanner;
+    std::string mSyncGuild;                     // [DISCORD SYNC 2026-10-23] the synced Discord server ('' = none)
+    bool mSyncing = false;
+    std::set<LLUUID> mCollapsed;                // folded categories (WolfChatCollapsedCategories, per account)
+    bool mCollapsedLoaded = false;
+    LLHandle<LLView> mCategoryMenu;
+    LLUUID mMenuCategory;
+    LLHandle<LLView> mGroupMenu;
+    LLButton* mServerMenuBtn = nullptr;
+    /** Each message's place in the log and its hover-only buttons (Delete, Pin), so only the one under the mouse shows them. */
+    struct MessageSpan
+    {
+        S32 mStart = 0;
+        S32 mEnd = 0;
+        std::vector<LLHandle<LLView> > mButtons;
+    };
+    std::vector<MessageSpan> mSpans;
+    S32 mHoverSpan = -1;
     F64 mNextVoiceUi = 0.0;             // [2026-10-21] the voice bar and speaking rings refresh
     bool mBusyServers = false;
     F64 mNextServers = 0.0;

@@ -136,6 +136,7 @@
 #include "wolffloateradventureteacher.h" // [WOLF ADVENTURE P4 2026-10-16/] Teacher Console
 #include "wolflslcomplete.h" // <FS:Wolf/>
 #include "wolffloatertunnels.h" // [WOLF TUNNELS 2026-10-21/] the Tunnel tool
+#include "wolffloaterterraform.h" // [WOLF TERRAFORM 2026-10-23/] the Terraform window
 #include "llfloatermyscripts.h"
 #include "llfloatermyenvironment.h"
 #include "llfloaternamedesc.h"
@@ -678,6 +679,7 @@ void LLViewerFloaterReg::registerFloaters()
     LLFloaterReg::add("wolf_compass", "floater_wolf_compass.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterCompass>);   // [WOLF COMPASS 2026-10-16/] Victorian compass: North + course
     LLFloaterReg::add("wolf_speed", "floater_wolf_speed.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterSpeed>);   // [WOLFSPEED 2026-10-17/] Xenon's WolfSpeed
     LLFloaterReg::add("wolf_tunnels", "floater_wolf_tunnels.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterTunnels>);   // [WOLF TUNNELS 2026-10-21/] walkable spaces under the terrain
+    LLFloaterReg::add("wolf_terraform", "floater_wolf_terraform.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterTerraform>);   // [WOLF TERRAFORM 2026-10-23/] Level, Ramp, Terrace, Smooth, Road, River, Beach + Undo
     LLFloaterReg::add("wolf_drive_controls", "floater_wolf_drive_controls.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterDriveControls>);   // [WOLF DRIVE 2026-10-09/] wheel / pedal / gamepad setup
     LLFloaterReg::add("wolf_dj", "floater_wolf_dj.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterDJ>);   // [WOLF DJ 2026-10-04/]
     LLFloaterReg::add("wolf_dj_playlist", "floater_wolf_dj_playlist.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterDJPlaylist>);   // [WOLF DJ 2026-10-04/]
@@ -693,6 +695,9 @@ void LLViewerFloaterReg::registerFloaters()
     LLFloaterReg::add("wolf_chat_add_group", "floater_wolf_chat_add_group.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterChatAddGroup>);   // [WOLF CHAT 2026-10-21/] add groups to the server rail
     LLFloaterReg::add("wolf_chat_channel_roles", "floater_wolf_chat_channel_roles.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterChatChannelRoles>);   // [WOLF CHAT 2026-10-21/] owners: who can see a channel
     LLFloaterReg::add("wolf_chat_bridge", "floater_wolf_chat_bridge.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterChatBridge>);   // [WOLF CHAT 2026-10-21/] owners: bridge a channel to Discord
+    LLFloaterReg::add("wolf_chat_channel_edit", "floater_wolf_chat_channel_edit.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterChatChannelEdit>);   // [WOLF CHAT 2026-10-23/] owners: a channel's name, emoji, category
+    LLFloaterReg::add("wolf_chat_banner", "floater_wolf_chat_banner.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterChatBanner>);   // [WOLF CHAT 2026-10-23/] owners: the group's banner
+    LLFloaterReg::add("wolf_chat_sync", "floater_wolf_chat_sync.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterChatSync>);   // [DISCORD SYNC 2026-10-23/] a Discord server <-> the group
     LLFloaterReg::add("wolf_environment", "floater_wolf_environment.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterEnvironment>);   // [WOLF ENV 2026-10-12/]
     LLFloaterReg::add("wolf_watchwolf", "floater_wolf_watchwolf.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterWatchWolf>);   // [WATCHWOLF 2026-10-10/]
     LLFloaterReg::add("wolf_experiences", "floater_wolf_experiences.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterExperiences>);   // [WolfViewer 2026-10-14/] Experiences welcome chooser

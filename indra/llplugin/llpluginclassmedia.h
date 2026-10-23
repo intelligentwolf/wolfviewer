@@ -496,6 +496,18 @@ private:
     std::string mArtist;
     std::string mTitle;
     // </FS:ND>
+#if LL_LINUX
+    // <WolfViewer 2026-10-23> why parcel music cannot play (LLStreamingAudio_MediaPlugins reads these)
+public:
+    // what GStreamer plugin a stream failed for ("wolf_gst_missing_plugin"); empty = none
+    std::string const& getWolfMissingGstPlugin() const { return mWolfMissingGstPlugin; }
+    // the plugin process never got as far as running (pluginLaunchFailed())
+    bool getWolfPluginLaunchFailed() const { return mWolfPluginLaunchFailed; }
+private:
+    std::string mWolfMissingGstPlugin;
+    bool mWolfPluginLaunchFailed = false;
+    // </WolfViewer>
+#endif
     //<FS:ND> Special settings for CEF
 public:
     void setFlipY( bool );

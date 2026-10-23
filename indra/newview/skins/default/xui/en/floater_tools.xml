@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<!-- [WOLF BURROW 2026-10-23] Paul: "we were going to rebuild the whole build floater to make it look better". The painted
+     header behind the tool row, the tool buttons wider (46 px), every group of controls on its own plate and the group
+     headings in WolfBuildHeading (llfloatertools.cpp paintBuild; the WolfBuild* colours are every skin's own, worked out and
+     contrast-checked by region-terrain-work/cave-lights/check/build_colors.py). No control moved, renamed or removed. -->
 <floater
  positioning="none"
  legacy_header_height="18"
@@ -48,7 +52,7 @@
     </floater.string>
     <floater.string
      name="status_modifyland">
-        Click and hold to modify land
+        Click and hold to modify land. Edit > Undo takes back your last stroke where the region supports it (Wolf regions); the Terraform... tools can undo anywhere.
     </floater.string>
     <floater.string
      name="status_camera">
@@ -96,7 +100,7 @@
      left="10"
      name="button focus"
      tool_tip="Focus"
-     width="35">
+     width="46">
 	  <button.commit_callback
 	     function="BuildTool.setTool"
 	     parameter="Focus" />
@@ -108,10 +112,10 @@
      image_overlay="Tool_Grab"
      image_selected="PushButton_Selected_Press"
      layout="topleft"
-     left_pad="10"
+     left_pad="7"
      name="button move"
      tool_tip="Move"
-     width="35">
+     width="46">
 	  <button.commit_callback
 	     function="BuildTool.setTool"
 	     parameter="Move" />
@@ -123,10 +127,10 @@
      image_overlay="Tool_Face"
      image_selected="PushButton_Selected_Press"
      layout="topleft"
-     left_pad="10"
+     left_pad="7"
      name="button edit"
      tool_tip="Edit"
-     width="35">
+     width="46">
 	  <button.commit_callback
 	     function="BuildTool.setTool"
 	     parameter="Edit" />
@@ -138,10 +142,10 @@
      image_overlay="Tool_Create"
      image_selected="PushButton_Selected_Press"
      layout="topleft"
-     left_pad="10"
+     left_pad="7"
      name="button create"
      tool_tip="Create"
-     width="35">
+     width="46">
 	  <button.commit_callback
 	     function="BuildTool.setTool"
 	     parameter="Create" />
@@ -153,10 +157,10 @@
      image_overlay="Tool_Dozer"
      image_selected="PushButton_Selected_Press"
      layout="topleft"
-     left_pad="10"
+     left_pad="7"
      name="button land"
      tool_tip="Land"
-     width="35">
+     width="46">
 	  <button.commit_callback
 	     function="BuildTool.setTool"
 	     parameter="Land" />
@@ -692,6 +696,64 @@
      width="114">
         <button.commit_callback function="Floater.Show" parameter="wolf_tunnels" />
     </button>
+    <!-- [WOLF TERRAFORM 2026-10-23] Paul: "where is the extra terraforming tools". The Terraform window (wolffloaterterraform.cpp)
+         under Tunnels..., and Flatten's "Level to" height under the brush size buttons (lltoolbrush.cpp wolf_flatten_height:
+         ticked, Flatten aims at this height; Pick takes it from the ground). Absolute tops, placed here (before the radio group,
+         which has its own top) so no top_pad below moves. Shown with the land tools (llfloatertools.cpp updatePopup); the
+         Builders Mode row moves below the Level to row while the land tool is up (postBuild, mWolfBuildersRowLandShift). -->
+    <button
+     follows="left|top"
+     height="19"
+     label="Terraform..."
+     layout="topleft"
+     left="4"
+     name="wolf_terraform_btn"
+     tool_tip="Terraform: level a pad, make a ramp, terraces, a wide smooth, a road, a river or a beach - with a preview and Undo"
+     top="185"
+     visible="false"
+     width="114">
+        <button.commit_callback function="Floater.Show" parameter="wolf_terraform" />
+    </button>
+    <check_box
+     control_name="WolfLandLevelUse"
+     follows="left|top"
+     height="16"
+     label="Level to"
+     layout="topleft"
+     left="135"
+     name="wolf_level_use"
+     tool_tip="Flatten levels the ground to this height (metres) instead of the height where you first click"
+     top="183"
+     visible="false"
+     width="62" />
+    <spinner
+     control_name="WolfLandLevelHeight"
+     decimal_digits="2"
+     follows="left|top"
+     height="19"
+     increment="0.5"
+     label=""
+     label_width="0"
+     layout="topleft"
+     left="197"
+     max_val="4000"
+     min_val="-100"
+     name="wolf_level_height"
+     tool_tip="The height Flatten levels to, metres (-100 to 4000, the region's own limits)"
+     top="181"
+     visible="false"
+     width="56" />
+    <button
+     follows="left|top"
+     height="19"
+     label="Pick"
+     layout="topleft"
+     left="255"
+     name="wolf_level_pick"
+     tool_tip="Then click on the ground: Flatten levels to that ground's height"
+     top="181"
+     visible="false"
+     width="36" />
     <radio_group
      height="105"
      layout="topleft"
@@ -758,7 +820,7 @@
 		 <radio_group.commit_callback
 	     function="BuildTool.commitRadioLand"/>
     </radio_group>
-    <text
+    <text text_color="WolfBuildHeading"
      type="string"
      length="1"
      follows="left|top"
@@ -1293,7 +1355,7 @@
 			 top_delta="-1"
              tool_tip="Deeding gives this item away with next owner permissions. Group shared objects can be deeded by a group officer."
              width="80" />
-            <text
+            <text text_color="WolfBuildHeading"
              type="string"
              length="1"
              follows="left|top"
@@ -1625,7 +1687,7 @@ even though the user gets a free copy.
          top_pad="0"
          height="25"
          width="290">
-      <text
+      <text text_color="WolfBuildHeading"
          type="string"
          follows="left|top"
          name="pathfinding_attributes_label"
@@ -1703,7 +1765,7 @@ Paste Rotation
              tool_tip="Causes object to not collide with other objects or avatars"
              top_pad="0"
              width="123" />
-        <text
+        <text text_color="WolfBuildHeading"
              type="string"
              length="1"
              follows="left|top"
@@ -1791,7 +1853,7 @@ Paste Rotation
              name="paste_pos_clip_btn"
              tool_tip="Try pasting Position from Clipboard"
              width="20" />
-            <text
+            <text text_color="WolfBuildHeading"
              type="string"
              length="1"
              follows="left|top"
@@ -1879,7 +1941,7 @@ Paste Rotation
              name="paste_size_clip_btn"
              tool_tip="Try pasting Size from Clipboard"
              width="20" />
-            <text
+            <text text_color="WolfBuildHeading"
              type="string"
              length="1"
              follows="left|top"
@@ -2596,7 +2658,7 @@ Paste Rotation
                  value="4" />
               </combo_box>
         <!-- FS:Beq adding Mesh Info support to Object panel-->
-        <text
+        <text text_color="WolfBuildHeading"
           type="string"
           length="1"
           follows="left|top"
@@ -2904,7 +2966,7 @@ Low ↔ Lwst
              width="270">
                 Select only one primitive to edit features.
             </text>
-            <text
+            <text text_color="WolfBuildHeading"
              type="string"
              length="1"
              follows="left|top"
@@ -3284,7 +3346,7 @@ Low ↔ Lwst
                    mouse_opaque="true"
                    name="Probe Near Clip"
                    width="120" />
-          <text
+          <text text_color="WolfBuildHeading"
              type="string"
              length="1"
              follows="left|top"
@@ -3505,7 +3567,7 @@ Low ↔ Lwst
      name="land info panel"
      top_delta="0"
      width="295">
-    <text
+    <text text_color="WolfBuildHeading"
          type="string"
          length="1"
          font="SansSerifBig"
@@ -3562,7 +3624,7 @@ Low ↔ Lwst
          tool_tip="Colorize the parcels according to the type of owner: &#10;&#10;Green = Your land &#10;Aqua = Your group&apos;s land &#10;Red = Owned by others &#10;Yellow = For sale &#10;Purple = For auction &#10;Grey = Public"
          top_pad="8"
          width="205" />
-        <text
+        <text text_color="WolfBuildHeading"
          type="string"
          length="1"
          font="SansSerifBig"
@@ -3595,7 +3657,7 @@ Low ↔ Lwst
          name="button join land"
          top_pad="4"
          width="125" />
-        <text
+        <text text_color="WolfBuildHeading"
          type="string"
          length="1"
          font="SansSerifBig"

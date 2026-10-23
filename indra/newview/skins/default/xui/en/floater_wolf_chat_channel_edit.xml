@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLF CHAT 2026-10-23] Owners: a new channel, or an existing one's name, emoji and category
+     (wolffloaterchat.cpp WolfFloaterChatChannelEdit; php/wolfchat.php channel_create / channel_set).
+     Paul: "allow us to set up categories we are so cool and assign an emoji to each channel if we want".
+     Persona: a group owner tidying a busy group into Discord-like categories, an emoji on each channel, in under a minute.
+     Flow: right-click a channel (Edit channel), or + / the group menu (a new one) -> name -> pick an emoji from the grid
+     (the code adds 30 popular ones), More emoji... (the viewer's emoji picker) or paste one; No emoji takes it off ->
+     category -> Save (bottom right). What went wrong stays in the line above the buttons. -->
+<floater
+ can_close="true"
+ can_minimize="false"
+ can_resize="false"
+ height="396"
+ layout="topleft"
+ name="wolf_chat_channel_edit"
+ help_topic="wolf_chat_channel_edit"
+ save_rect="true"
+ single_instance="true"
+ title="CHANNEL"
+ width="380">
+    <text
+     follows="left|top"
+     font="SansSerifBold"
+     height="18"
+     layout="topleft"
+     left="10"
+     name="name_label"
+     top="26"
+     width="360"
+     value="Name" />
+    <line_editor
+     follows="left|top|right"
+     height="24"
+     layout="topleft"
+     left="10"
+     max_length_chars="32"
+     name="channel_name"
+     tool_tip="Up to 32 letters. Text channel names are written in lower case with dashes, as on Discord."
+     top="46"
+     width="360" />
+    <text
+     follows="left|top"
+     font="SansSerifBold"
+     height="18"
+     layout="topleft"
+     left="10"
+     name="emoji_label"
+     top="78"
+     width="360"
+     value="Emoji (optional) - shown before the name everywhere" />
+    <line_editor
+     follows="left|top"
+     height="26"
+     layout="topleft"
+     left="10"
+     max_length_chars="16"
+     name="channel_emoji"
+     tool_tip="One emoji. Pick one below, use More emoji..., or paste one."
+     top="98"
+     width="70" />
+    <button
+     follows="left|top"
+     height="24"
+     label="More emoji..."
+     layout="topleft"
+     left="88"
+     name="more_emoji_btn"
+     tool_tip="The viewer's emoji picker"
+     top="99"
+     width="110" />
+    <button
+     follows="left|top"
+     height="24"
+     label="No emoji"
+     layout="topleft"
+     left="206"
+     name="no_emoji_btn"
+     tool_tip="Take the emoji off this channel"
+     top="99"
+     width="90" />
+    <panel
+     background_visible="true"
+     bg_alpha_color="0.055 0.06 0.07 1"
+     follows="left|top"
+     height="98"
+     layout="topleft"
+     left="10"
+     name="emoji_grid"
+     top="132"
+     width="360" />
+    <text
+     follows="left|top"
+     font="SansSerifBold"
+     height="18"
+     layout="topleft"
+     left="10"
+     name="category_label"
+     top="238"
+     width="360"
+     value="Category" />
+    <combo_box
+     follows="left|top|right"
+     height="22"
+     layout="topleft"
+     left="10"
+     name="channel_category"
+     tool_tip="Channels in no category show at the top."
+     top="258"
+     width="360" />
+    <!-- [DISCORD SYNC 2026-10-23] shown for a new channel of a group synced with a Discord server -->
+    <check_box
+     follows="left|top"
+     height="20"
+     label="Also create on Discord (and keep it synced)"
+     layout="topleft"
+     left="10"
+     name="also_discord"
+     tool_tip="Wolf-Bot makes this channel on the synced Discord server too and links it. It needs Manage Channels there."
+     top="288"
+     visible="false"
+     width="360" />
+    <text
+     follows="left|right|bottom"
+     height="32"
+     layout="topleft"
+     left="10"
+     name="edit_status"
+     top="314"
+     width="360"
+     wrap="true" />
+    <button
+     follows="right|bottom"
+     height="26"
+     label="Cancel"
+     layout="topleft"
+     left="180"
+     name="cancel_btn"
+     top="358"
+     width="90" />
+    <button
+     follows="right|bottom"
+     height="26"
+     label="Save"
+     layout="topleft"
+     left="280"
+     name="save_btn"
+     top="358"
+     width="90" />
+</floater>

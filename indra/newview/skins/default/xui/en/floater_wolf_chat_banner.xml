@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLF CHAT 2026-10-23] Owners: the group's banner above its channels (wolffloaterchat.cpp WolfFloaterChatBanner;
+     php/wolfchat.php banner_set). Paul: "can we set a banner like you have on discord that appears above the chat channels
+     (lets beat discord at their own game)".
+     Persona: a group owner making their group's Wolf Chat look like home.
+     Flow: Choose picture... (a texture or snapshot from inventory, copy and transfer) -> which part to keep when it is
+     cropped to the banner's 5:2 shape -> a tagline (message of the day) -> the shimmer -> Save (bottom right). The preview
+     is drawn exactly as the channel list draws it. Remove picture leaves only the tagline. -->
+<floater
+ can_close="true"
+ can_minimize="false"
+ can_resize="false"
+ height="452"
+ layout="topleft"
+ name="wolf_chat_banner"
+ help_topic="wolf_chat_banner"
+ save_rect="true"
+ single_instance="true"
+ title="GROUP BANNER"
+ width="400">
+    <text
+     follows="left|top"
+     height="32"
+     layout="topleft"
+     left="10"
+     name="banner_intro"
+     top="26"
+     width="380"
+     wrap="true"
+     value="The banner shows above this group's channels for everyone in it, with the group's name over it. Click it to see the group." />
+    <wolf_chat_banner_preview
+     follows="left|top"
+     height="152"
+     layout="topleft"
+     left="10"
+     name="banner_preview"
+     top="62"
+     width="380" />
+    <button
+     follows="left|top"
+     height="24"
+     label="Choose picture..."
+     layout="topleft"
+     left="10"
+     name="pick_btn"
+     tool_tip="Choose a texture or snapshot from your inventory. It must be copy and transfer (everyone in the group sees it)."
+     top="222"
+     width="150" />
+    <button
+     follows="left|top"
+     height="24"
+     label="Remove picture"
+     layout="topleft"
+     left="168"
+     name="remove_btn"
+     tool_tip="No picture: only the tagline (if any) shows."
+     top="222"
+     width="130" />
+    <text
+     follows="left|top"
+     font="SansSerifBold"
+     height="18"
+     layout="topleft"
+     left="10"
+     name="focus_label"
+     top="254"
+     width="380"
+     value="Keep this part of the picture" />
+    <radio_group
+     follows="left|top"
+     height="20"
+     layout="topleft"
+     left="10"
+     name="banner_focus"
+     top="274"
+     width="380">
+        <radio_item
+         height="20"
+         label="Top"
+         layout="topleft"
+         left="0"
+         name="top"
+         top="0"
+         value="top"
+         width="80" />
+        <radio_item
+         height="20"
+         label="Middle"
+         layout="topleft"
+         left="90"
+         name="center"
+         top="0"
+         value="center"
+         width="90" />
+        <radio_item
+         height="20"
+         label="Bottom"
+         layout="topleft"
+         left="190"
+         name="bottom"
+         top="0"
+         value="bottom"
+         width="90" />
+    </radio_group>
+    <text
+     follows="left|top"
+     font="SansSerifBold"
+     height="18"
+     layout="topleft"
+     left="10"
+     name="tagline_label"
+     top="300"
+     width="380"
+     value="Tagline or message of the day (optional, plain text)" />
+    <line_editor
+     follows="left|top|right"
+     height="24"
+     layout="topleft"
+     left="10"
+     max_length_chars="100"
+     name="banner_tagline"
+     tool_tip="Up to 100 characters, shown under the group's name."
+     top="320"
+     width="380" />
+    <check_box
+     follows="left|top"
+     height="20"
+     label="A slow shimmer across the banner"
+     layout="topleft"
+     left="10"
+     name="banner_shimmer"
+     tool_tip="Not shown to people who turned on Reduce motion (in the Wolf Adventure console)."
+     top="350"
+     width="380" />
+    <text
+     follows="left|right|bottom"
+     height="32"
+     layout="topleft"
+     left="10"
+     name="banner_status"
+     top="374"
+     width="380"
+     wrap="true" />
+    <button
+     follows="right|bottom"
+     height="26"
+     label="Cancel"
+     layout="topleft"
+     left="200"
+     name="cancel_btn"
+     top="414"
+     width="90" />
+    <button
+     follows="right|bottom"
+     height="26"
+     label="Save"
+     layout="topleft"
+     left="300"
+     name="save_btn"
+     top="414"
+     width="90" />
+</floater>

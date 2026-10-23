@@ -68,20 +68,26 @@ public:
     void onMouseCaptureLost() override;
 
     void modifyLandInSelectionGlobal();
+    // [WOLF TERRAFORM 2026-10-23] Greyed: the region's UndoLand does nothing (TerrainModule.cs:1491-1493), so Edit > Undo would
+    // silently do nothing. The land tool's status line says so (floater_tools.xml status_modifyland).
+    // [WOLF TERRAFORM 2026-10-23 Phase 3] ...except in a region with the WolfTerraform module, whose UndoLand puts back the agent's
+    // last brush stroke or flood (TerrainModule.WolfTerraform.cs client_OnLandUndo): there it is offered and sends UndoLand.
     virtual void    undo() override;
-    virtual bool    canUndo() const  override { return true; }
+    virtual bool    canUndo() const  override;
+    /** [WOLF TERRAFORM 2026-10-23] The next click on the ground sets Flatten's "Level to" height (WolfLandLevelHeight). */
+    void startLevelPick();
+
+    // Does region allow terraform, or are we a god? [WOLF TERRAFORM 2026-10-23] public: the Terraform window asks the same.
+    bool canTerraformRegion(LLViewerRegion* regionp) const;
 
 protected:
     void brush( void );
-    void modifyLandAtPointGlobal( const LLVector3d &spot, MASK mask );
+    void modifyLandAtPointGlobal( const LLVector3d &spot, MASK mask, F32 dab_seconds );
 
     void determineAffectedRegions(region_list_t& regions,
                                   const LLVector3d& spot) const;
     void renderOverlay(LLSurface& land, const LLVector3& pos_region,
                        const LLVector3& pos_world);
-
-    // Does region allow terraform, or are we a god?
-    bool canTerraformRegion(LLViewerRegion* regionp) const;
 
     bool canTerraformParcel(LLViewerRegion* regionp) const;
 
@@ -97,6 +103,8 @@ protected:
     F32 mBrushSize;
     bool mGotHover;
     bool mBrushSelected;
+    F64 mLastDabAt = 0.0;     // [WOLF TERRAFORM 2026-10-23] when the last dab went (lltoolbrush.cpp DAB_SECS)
+    bool mPickLevel = false;  // [WOLF TERRAFORM 2026-10-23] the next click picks the Level to height
     // Order doesn't matter and we do check for existance of regions, so use a set
     region_list_t mLastAffectedRegions;
 

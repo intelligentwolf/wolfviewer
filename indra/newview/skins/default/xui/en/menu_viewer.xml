@@ -2200,6 +2200,13 @@
                 <menu_item_call.on_click function="Floater.Show" parameter="wolf_caves" />
                 <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
             </menu_item_call>
+            <!-- [WOLF TERRAFORM 2026-10-23] Paul: "where is the extra terraforming tools". The Terraform window
+             (wolffloaterterraform.cpp): level, ramp, terraces, smooth, road, river, beach, with a preview and Undo. Also Build >
+             Terraform... and the Build window's land tools. Wolf Territories only (the same gate as Make Caves). -->
+            <menu_item_call label="Terraform..." name="WolfWorldTerraform">
+                <menu_item_call.on_click function="Floater.Show" parameter="wolf_terraform" />
+                <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
+            </menu_item_call>
             <!-- [WOLF TERRAIN TEXTURES 2026-10-16] wolfterrainlayers.cpp: eight terrain textures up to 4096 m for this
              region (read-only for anyone who doesn't hold it). Also Region / Estate > Terrain. -->
             <menu_item_call label="Wolf Terrain Textures..." name="WolfWorldTerrainTextures">
@@ -2234,6 +2241,17 @@
             </menu_item_call>
         </menu>
         <menu create_jump_keys="true" label="Tools" name="WolfGroupTools" tear_off="true">
+            <!-- [WOLF TUNNELS 2026-10-23] Paul: "can we add tunnels and caves to the tools menu please at the top". The same
+                 floaters and the same Wolf Territories gate as Wolf World > Tunnels... and Build & Land > Make Caves... (kept). -->
+            <menu_item_call label="Tunnels..." name="WolfToolsTunnels">
+                <menu_item_call.on_click function="Floater.Show" parameter="wolf_tunnels" />
+                <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
+            </menu_item_call>
+            <menu_item_call label="Cave Builder..." name="WolfToolsCaveBuilder">
+                <menu_item_call.on_click function="Floater.Show" parameter="wolf_caves" />
+                <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
+            </menu_item_call>
+            <menu_item_separator name="WolfToolsTunnelsSep" />
             <!-- [WATCHWOLF 2026-10-10] who is on the regions you own or manage (wolffloaterwatchwolf.cpp) -->
             <menu_item_call label="WatchWolf..." name="WolfWatchWolf">
                 <menu_item_call.on_click function="Floater.Show" parameter="wolf_watchwolf" />
@@ -2318,12 +2336,23 @@
             service will serve, which is WolfAI.CanUse. Hiding a menu item is courtesy — the
             proxy and the paint service check on every call. -->
        <menu_item_call
-        label="Paint the Ground..."
-        name="WolfTerrainPaint">
+        label="Create a Model with AI..."
+        name="WolfAIModel">
          <menu_item_call.on_click
           function="Floater.Show"
-          parameter="wolf_terrain_paint" />
-         <!-- [WOLF GRID GATE 2026-10-17] IsOnWolfTerritories: the paint is for the region underfoot (was the login grid) -->
+          parameter="wolf_ai" />
+         <menu_item_call.on_visible
+          function="WolfAI.CanUse" />
+       </menu_item_call>
+       <!-- [IMPORT WORLDS 2026-10-18] Paul: "Build -> import worlds -> floater Import Minecraft, Roblox etc"
+            (GAME_CARD_SPINE_SPEC.md ~15:20Z; wolffloaterimportworlds.cpp). Wolf Territories only, the same region gate as
+            Make Caves: gone (not greyed) off Wolf. Also in Wolf World > Build & Land. -->
+       <menu_item_call
+        label="Import worlds (Experimental)..."
+        name="WolfImportWorlds">
+         <menu_item_call.on_click
+          function="Floater.Show"
+          parameter="wolf_import_worlds" />
          <menu_item_call.on_visible
           function="WolfGrid.IsOnWolfTerritories" />
        </menu_item_call>
@@ -2339,14 +2368,38 @@
          <menu_item_call.on_visible
           function="WolfGrid.IsOnWolfTerritories" />
        </menu_item_call>
+       <!-- [WolfViewer 2026-10-23] Paul: "add the TUNNEL builder to the build menu the tools specifically to us are at the
+            top, sort them and add it there". Same window and gate as Wolf World > Tunnels... and the Build floater's Tunnels...
+            button (wolffloatertunnels.cpp). The Wolf items here are kept in alphabetical order. -->
        <menu_item_call
-        label="Create a Model with AI..."
-        name="WolfAIModel">
+        label="Make Tunnels..."
+        name="WolfMakeTunnels">
          <menu_item_call.on_click
           function="Floater.Show"
-          parameter="wolf_ai" />
+          parameter="wolf_tunnels" />
          <menu_item_call.on_visible
-          function="WolfAI.CanUse" />
+          function="WolfGrid.IsOnWolfTerritories" />
+       </menu_item_call>
+       <menu_item_call
+        label="Paint the Ground..."
+        name="WolfTerrainPaint">
+         <menu_item_call.on_click
+          function="Floater.Show"
+          parameter="wolf_terrain_paint" />
+         <!-- [WOLF GRID GATE 2026-10-17] IsOnWolfTerritories: the paint is for the region underfoot (was the login grid) -->
+         <menu_item_call.on_visible
+          function="WolfGrid.IsOnWolfTerritories" />
+       </menu_item_call>
+       <!-- [WOLF TERRAFORM 2026-10-23] The Terraform window (wolffloaterterraform.cpp), in alphabetical order with the Wolf items
+            here (Make Caves, Make Tunnels, Paint the Ground, Terraform, Wolf Builder). Wolf Territories only, as Make Caves. -->
+       <menu_item_call
+        label="Terraform..."
+        name="WolfTerraform">
+         <menu_item_call.on_click
+          function="Floater.Show"
+          parameter="wolf_terraform" />
+         <menu_item_call.on_visible
+          function="WolfGrid.IsOnWolfTerritories" />
        </menu_item_call>
        <!-- [WOLF BUILDER 2026-10-13] wolffloaterbuilder.cpp: the builder's helper. Every grid: it asks
             nothing of the grid, it reads what the viewer already has. -->
@@ -2356,18 +2409,6 @@
          <menu_item_call.on_click
           function="Floater.Show"
           parameter="wolf_builder" />
-       </menu_item_call>
-       <!-- [IMPORT WORLDS 2026-10-18] Paul: "Build -> import worlds -> floater Import Minecraft, Roblox etc"
-            (GAME_CARD_SPINE_SPEC.md ~15:20Z; wolffloaterimportworlds.cpp). Wolf Territories only, the same region gate as
-            Make Caves: gone (not greyed) off Wolf. Also in Wolf World > Build & Land. -->
-       <menu_item_call
-        label="Import worlds (Experimental)..."
-        name="WolfImportWorlds">
-         <menu_item_call.on_click
-          function="Floater.Show"
-          parameter="wolf_import_worlds" />
-         <menu_item_call.on_visible
-          function="WolfGrid.IsOnWolfTerritories" />
        </menu_item_call>
        <menu
           create_jump_keys="true"

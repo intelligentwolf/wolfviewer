@@ -19935,6 +19935,39 @@ Change of this parameter will affect the layout of buttons in notification toast
 			<key>Value</key>
 			<real>1.0</real>
 		</map>
+		<key>WolfLandLevelUse</key>
+		<map>
+			<key>Comment</key>
+			<string>[WOLF TERRAFORM 2026-10-23] Build > Land, Flatten: level to WolfLandLevelHeight instead of the ground where the stroke began (lltoolbrush.cpp wolf_flatten_height).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfLandLevelHeight</key>
+		<map>
+			<key>Comment</key>
+			<string>[WOLF TERRAFORM 2026-10-23] Build > Land, Flatten's "Level to" height in metres (typed, or Pick from the ground). The region clamps heights to -100..4000 (OpenSim Constants.cs MinTerrainHeightmap / MaxTerrainHeightmap).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>F32</string>
+			<key>Value</key>
+			<real>20.0</real>
+		</map>
+		<key>WolfTerraformSecsPerFlood</key>
+		<map>
+			<key>Comment</key>
+			<string>[WOLF TERRAFORM 2026-10-23] Seconds one terrain-writer flood took on this viewer, measured by the last job of at least 20 floods (wolfterrainwriter.cpp); 0 = not measured yet. The Terraform window gives a time only from this.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>F32</string>
+			<key>Value</key>
+			<real>0.0</real>
+		</map>
 		<key>WolfFXEnabled</key>
 		<map>
 			<key>Comment</key>

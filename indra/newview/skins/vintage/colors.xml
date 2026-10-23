@@ -321,4 +321,24 @@
   <color
      name="NotecardCursorColor"
      reference="TextCursorColor" />
+	<!-- [WOLF BURROW 2026-10-23] the Build floater's plates, headings and header (build_colors.py worked these out from this
+	     skin's own background and label text; every text pair 4.5:1 or better). -->
+	<color
+	 name="WolfBuildPlate"
+	 value="0.425 0.425 0.425 1.000" />
+	<color
+	 name="WolfBuildPlateEdge"
+	 value="0.478 0.508 0.569 0.550" />
+	<color
+	 name="WolfBuildHeading"
+	 value="0.954 0.933 0.921 1.000" />
+	<color
+	 name="WolfBuildHeaderTop"
+	 value="0.430 0.422 0.418 1.000" />
+	<color
+	 name="WolfBuildHeaderBottom"
+	 value="0.383 0.383 0.383 1.000" />
+	<color
+	 name="WolfBuildAccent"
+	 value="0.560 0.360 0.250 1.000" />
 </colors>

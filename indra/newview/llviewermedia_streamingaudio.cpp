@@ -35,6 +35,183 @@
 #include "llmimetypes.h"
 #include "lldir.h"
 
+#if LL_LINUX
+#include <dlfcn.h>
+#include <fstream>
+#include <map>
+#include <set>
+#include <sstream>
+#include "llclipboard.h"
+#include "llnotificationsutil.h"
+
+// <WolfViewer 2026-10-23> Tell Linux users when parcel music cannot play because GStreamer, or
+// one of its plugins, is missing, and give them the exact command for their distribution.
+//
+// Parcel music goes through media_plugin_gstreamer (mime_types_linux.xml audio/*), which
+// dlopen()s GStreamer at run time (media_plugin_gstreamer10.cpp startup()). Two ways it fails:
+//  1. GStreamer itself cannot be loaded: init_media_plugin() returns -1 before the plugin is
+//     running, the child exits and LLPluginProcessParent reports pluginLaunchFailed(). The
+//     plugin cannot say why (its socket is closed with it), so the viewer loads the same two
+//     libraries the plugin needs to find out (wolf_missing_gst_library()).
+//  2. GStreamer runs but a stream needs a plugin that is not installed: the plugin sends
+//     "wolf_gst_missing_plugin" (MediaPluginGStreamer10::reportMissingPlugin()). It filters out
+//     bad parcel URLs (web pages, playlists), so a dead stream never shows this.
+namespace
+{
+    bool sWolfGstNoticeDone = false;    // shown, or decided against, once per session
+
+    // os-release(5): /etc/os-release, falling back to /usr/lib/os-release
+    std::map<std::string, std::string> wolf_read_os_release()
+    {
+        std::map<std::string, std::string> fields;
+        std::ifstream in("/etc/os-release");
+        if (!in.is_open())
+        {
+            in.open("/usr/lib/os-release");
+        }
+        std::string line;
+        while (std::getline(in, line))
+        {
+            const size_t eq = line.find('=');
+            if (line.empty() || line[0] == '#' || eq == std::string::npos)
+            {
+                continue;
+            }
+            std::string value = line.substr(eq + 1);
+            if (value.size() >= 2 && (value.front() == '"' || value.front() == '\'') && value.back() == value.front())
+            {
+                value = value.substr(1, value.size() - 2);
+            }
+            fields[line.substr(0, eq)] = value;
+        }
+        return fields;
+    }
+
+    // The install line for this distribution, from ID and ID_LIKE; empty = not one we know.
+    // Package names checked 2026-10-23: Debian 12 apt-cache, Fedora packages.fedoraproject.org,
+    // Arch pacman -Si, openSUSE Tumbleweed / Leap 15.6 / Leap 16.0 OSS repositories.
+    std::string wolf_gst_install_command(std::string &distro_out)
+    {
+        std::map<std::string, std::string> os = wolf_read_os_release();
+        std::set<std::string> ids;
+        std::string id = os["ID"];
+        LLStringUtil::toLower(id);
+        if (!id.empty())
+        {
+            ids.insert(id);
+        }
+        std::string like = os["ID_LIKE"];
+        LLStringUtil::toLower(like);
+        std::istringstream like_words(like);
+        std::string word;
+        while (like_words >> word)
+        {
+            ids.insert(word);
+        }
+        distro_out = id.empty() ? "unknown" : id;
+        auto is = [&ids](const char *name) { return ids.count(name) > 0; };
+
+        if (is("debian") || is("ubuntu"))
+        {
+            return "sudo apt install gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav";
+        }
+        // RHEL and its rebuilds name Fedora in ID_LIKE but do not carry these packages
+        if (is("fedora") && !is("rhel"))
+        {
+            return "sudo dnf install gstreamer1-plugins-base gstreamer1-plugins-good gstreamer1-plugins-bad-free gstreamer1-plugin-libav";
+        }
+        if (is("arch"))
+        {
+            return "sudo pacman -S gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-libav";
+        }
+        if (id.compare(0, 8, "opensuse") == 0 || is("opensuse"))
+        {
+            return "sudo zypper install gstreamer gstreamer-plugins-base gstreamer-plugins-good gstreamer-plugins-bad gstreamer-plugins-libav";
+        }
+        return std::string();
+    }
+
+    // The first GStreamer library the plugin needs that cannot be loaded, with the loader's
+    // reason; empty = both load. Same names as media_plugin_gstreamer10.cpp startup(), whose
+    // required symbols live in these two (libglib/libgobject are their own dependencies).
+    // GLib/GObject are already in the viewer (GIO), and all of them are NODELETE, so this
+    // leaves nothing behind that matters.
+    std::string wolf_missing_gst_library()
+    {
+        static const char *const libs[] = { "libgstreamer-1.0.so.0", "libgstapp-1.0.so.0" };
+        for (const char *lib : libs)
+        {
+            void *handle = dlopen(lib, RTLD_NOW | RTLD_LOCAL);
+            if (!handle)
+            {
+                const char *why = dlerror();
+                return std::string(lib) + " (" + (why ? why : "not found") + ")";
+            }
+            dlclose(handle);
+        }
+        return std::string();
+    }
+
+    void wolf_show_gst_notice()
+    {
+        std::string distro;
+        const std::string command = wolf_gst_install_command(distro);
+        LL_INFOS("StreamingAudio") << "GStreamer install help for distribution '" << distro << "': "
+                                   << (command.empty() ? std::string("generic advice") : command) << LL_ENDL;
+        if (command.empty())
+        {
+            LLNotificationsUtil::add("WolfGStreamerMissingGeneric");
+            return;
+        }
+        LLSD args;
+        args["COMMAND"] = command;
+        LLNotificationsUtil::add("WolfGStreamerMissing", args, LLSD(), [command](const LLSD& n, const LLSD& r)
+        {
+            // option 0 = "Copy command"; the default (and what an ignored notice answers) is OK
+            if (LLNotificationsUtil::getSelectedOption(n, r) == 0)
+            {
+                const LLWString text = utf8str_to_wstring(command);
+                LLClipboard::instance().copyToClipboard(text, 0, static_cast<S32>(text.size()));
+            }
+        });
+    }
+
+    void wolf_check_music_needs_gstreamer(const LLPluginClassMedia *plugin)
+    {
+        if (sWolfGstNoticeDone || !plugin)
+        {
+            return;
+        }
+        if (!plugin->getWolfMissingGstPlugin().empty())
+        {
+            sWolfGstNoticeDone = true;
+            LL_WARNS("StreamingAudio") << "Parcel music can't play: GStreamer is installed but missing a plugin ("
+                                       << plugin->getWolfMissingGstPlugin() << ")" << LL_ENDL;
+            wolf_show_gst_notice();
+        }
+        else if (plugin->getWolfPluginLaunchFailed())
+        {
+            sWolfGstNoticeDone = true;
+            if (getenv("LL_DISABLE_GSTREAMER"))
+            {
+                LL_INFOS("StreamingAudio") << "Parcel music is off: LL_DISABLE_GSTREAMER is set" << LL_ENDL;
+                return;
+            }
+            const std::string missing = wolf_missing_gst_library();
+            if (missing.empty())
+            {
+                LL_WARNS("StreamingAudio") << "The parcel music plugin failed to start, but the GStreamer libraries load; "
+                                           << "not a missing-GStreamer problem" << LL_ENDL;
+                return;
+            }
+            LL_WARNS("StreamingAudio") << "Parcel music can't play: GStreamer libraries are missing: " << missing << LL_ENDL;
+            wolf_show_gst_notice();
+        }
+    }
+}
+// </WolfViewer>
+#endif
+
 LLStreamingAudio_MediaPlugins::LLStreamingAudio_MediaPlugins() :
     mMediaPlugin(NULL),
     mGain(1.0)
@@ -125,6 +302,10 @@ void LLStreamingAudio_MediaPlugins::update()
 {
     if (mMediaPlugin)
         mMediaPlugin->idle();
+
+#if LL_LINUX
+    wolf_check_music_needs_gstreamer(mMediaPlugin);     // <WolfViewer 2026-10-23>
+#endif
 
     // <FS:Ansariel> Stream meta data display
     updateMetadata();

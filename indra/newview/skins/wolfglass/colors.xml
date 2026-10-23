@@ -1159,5 +1159,25 @@
 	<color
 	 name="FSLoginBackgroundColor"
 	 value="0.0627 0.1020 0.0392 1" />
+	<!-- [WOLF BURROW 2026-10-23] the Build floater's plates, headings and header (build_colors.py worked these out from this
+	     skin's own background and label text; every text pair 4.5:1 or better). -->
+	<color
+	 name="WolfBuildPlate"
+	 value="0.143 0.171 0.238 0.820" />
+	<color
+	 name="WolfBuildPlateEdge"
+	 value="0.353 0.374 0.422 0.550" />
+	<color
+	 name="WolfBuildHeading"
+	 value="0.773 0.932 0.691 1.000" />
+	<color
+	 name="WolfBuildHeaderTop"
+	 value="0.176 0.284 0.211 0.820" />
+	<color
+	 name="WolfBuildHeaderBottom"
+	 value="0.129 0.154 0.214 0.820" />
+	<color
+	 name="WolfBuildAccent"
+	 value="0.329 0.800 0.086 1.000" />
 </colors>
 

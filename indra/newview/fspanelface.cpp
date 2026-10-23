@@ -1026,7 +1026,11 @@ bool FSPanelFace::postBuild()
 
     changePrecision(gSavedSettings.getS32("FSBuildToolDecimalPrecision"));
 
-    selectMaterialType(MATMEDIA_PBR);
+    // <WolfViewer 2026-10-23> Paul: "in objects - make textures default to binn phong rather than pbr". The panel opens on
+    // the Blinn-Phong tab (was MATMEDIA_PBR); the PBR tab is one click away. The older texture panel (llpanelface.cpp:505)
+    // already starts on Textures.
+    selectMaterialType(MATMEDIA_MATERIAL);
+    // </WolfViewer>
     selectMatChannel(LLRender::DIFFUSE_MAP);
     selectPBRChannel(LLRender::NUM_TEXTURE_CHANNELS);
 

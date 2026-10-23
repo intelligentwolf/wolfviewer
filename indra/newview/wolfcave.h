@@ -34,6 +34,7 @@ class LLSliderCtrl;
 class LLSpinCtrl;
 class LLTextBox;
 class LLTextureCtrl;
+class WolfDigProgress;
 
 // [WOLF CAVE 2026-10-12] Paul: "i want to have a way to make caves with terrain could we do that
 // with the paint on terrain tool? expand it to make caves?". Port of wolfstorm
@@ -215,6 +216,9 @@ public:
     bool cancelling() const { return mBusy && mCancel; }
     /** The job's progress line, and every failure since the window last looked (kept until shown). */
     const std::string& status() const { return mStatus; }
+    /** [2026-10-23] How far the running job is, 0..1 from real counts (steps done, ground points flooded, lamps placed), or
+     *  below 0 while a step cannot be counted (the dig plate, wolfdigprogress.cpp, then sweeps instead of a number). */
+    F32 progress() const { return mProgress; }
     std::string takeError();
 
     /** The cave's rock in the agent's own region, if this viewer has it. */
@@ -257,6 +261,8 @@ private:
     bool mBusy = false;
     EResult mResult = RESULT_NONE;
     std::string mStatus;
+    F32 mProgress = -1.f;                 // [2026-10-23] see progress()
+    F32 mShapeBase = 0.f, mShapeSpan = 0.f;   // the share of the job a shape() call covers
     // [WolfViewer 2026-10-14] Every message of the job, not just the last (a later one used to
     // replace an earlier one before the window saw it). Cleared when a new job starts.
     std::vector<std::string> mErrors;
@@ -422,6 +428,12 @@ private:
     bool mGenerateWhenReady = false;
     std::string mShownDig = "-";   // [WolfViewer 2026-10-15 v3] the dig line last shown
     std::string mShownHint;        // [WolfViewer 2026-10-15 v3] the dig hint the last preview was asked with
+    // [WOLF BURROW 2026-10-23] the painted window (wolfburrow.cpp): the groups' plates (heading drawn by its own XUI text, so
+    // none here) and the buttons' faces by weight, worked out once in postBuild
+    void paintBurrow();
+    std::vector<std::vector<LLView*>> mBurrowGroups;
+    std::vector<std::pair<LLButton*, S32>> mBurrowButtons;
+    WolfDigProgress* mDigPlate = nullptr;   // [2026-10-23] the painted working plate over the status lines (wolfdigprogress.cpp)
 };
 
 #endif // WOLF_CAVE_H

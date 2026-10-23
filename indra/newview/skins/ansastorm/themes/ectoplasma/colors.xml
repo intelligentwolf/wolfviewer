@@ -1181,4 +1181,24 @@
   <color
     name="MentionFlashBgColor"
     reference="EmphasisColor" />
+	<!-- [WOLF BURROW 2026-10-23] the Build floater's plates, headings and header (build_colors.py worked these out from this
+	     skin's own background and label text; every text pair 4.5:1 or better). -->
+	<color
+	 name="WolfBuildPlate"
+	 value="0.122 0.122 0.122 1.000" />
+	<color
+	 name="WolfBuildPlateEdge"
+	 value="0.338 0.338 0.338 0.550" />
+	<color
+	 name="WolfBuildHeading"
+	 value="0.000 1.000 0.080 1.000" />
+	<color
+	 name="WolfBuildHeaderTop"
+	 value="0.100 0.280 0.114 1.000" />
+	<color
+	 name="WolfBuildHeaderBottom"
+	 value="0.109 0.109 0.109 1.000" />
+	<color
+	 name="WolfBuildAccent"
+	 value="0.000 1.000 0.080 1.000" />
 </colors>

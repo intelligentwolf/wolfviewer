@@ -218,6 +218,13 @@ public:
     std::vector<std::pair<F32, LLButton*>> mWolfBrushScaleBtns;
     LLTextBox*      mWolfBrushScaleText = nullptr;
     LLButton*       mWolfBuilderBtn = nullptr;          // [WolfViewer 2026-10-20] moved clear of the brush row on the land tool
+    LLView*         mWolfLevelUse = nullptr;            // [WOLF TERRAFORM 2026-10-23] Flatten's "Level to" row
+    LLView*         mWolfLevelHeight = nullptr;
+    LLButton*       mWolfLevelPick = nullptr;
+    // <WolfViewer 2026-10-23> [WOLF BURROW] the painted look: the tool row's buttons and every group's controls (postBuild)
+    void paintBuild();
+    std::vector<LLView*> mWolfBuildTools;
+    std::vector<std::vector<LLView*>> mWolfBuildGroups;
     S32             mWolfBuildersRowLandShift = 0;
     bool            mWolfBuildersRowShifted = false;
     void            wolfSyncBrushScale();

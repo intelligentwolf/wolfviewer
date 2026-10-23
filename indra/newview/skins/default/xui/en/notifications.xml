@@ -1971,6 +1971,53 @@ To try them back on, one at a time, open Wolf World &gt; Graphics Helper. If a s
      yestext="OK"/>
   </notification>
 
+  <!-- <WolfViewer 2026-10-23> Linux only (llviewermedia_streamingaudio.cpp wolf_show_gst_notice):
+       parcel music plays through GStreamer, which the .tar.xz download cannot install for you.
+       [COMMAND] is the install line for the user's distribution (from /etc/os-release).
+       "Copy command" is NOT the default button: an ignored notice answers with the default,
+       and that must never overwrite the user's clipboard. -->
+  <notification
+   icon="alert.tga"
+   name="WolfGStreamerMissing"
+   type="alert">
+Parcel music can't play: WolfViewer needs GStreamer, which isn't installed (or is missing its music plugins).
+
+To install it, open a terminal and run:
+
+[COMMAND]
+
+Then restart WolfViewer.
+    <tag>fail</tag>
+    <form name="form">
+      <button
+       index="0"
+       name="Copy"
+       text="Copy command"/>
+      <button
+       default="true"
+       index="1"
+       name="OK"
+       text="OK"/>
+      <ignore text="Parcel music can't play because GStreamer is missing"/>
+    </form>
+  </notification>
+
+  <notification
+   icon="alert.tga"
+   name="WolfGStreamerMissingGeneric"
+   type="alert">
+Parcel music can't play: WolfViewer needs GStreamer, which isn't installed (or is missing its music plugins).
+
+Install GStreamer 1.x with its base, good, bad and libav plugins using your system's package manager.
+
+Then restart WolfViewer.
+    <tag>fail</tag>
+    <usetemplate
+     ignoretext="Parcel music can't play because GStreamer is missing (other Linux systems)"
+     name="okignore"
+     yestext="OK"/>
+  </notification>
+
   <notification
    icon="alertmodal.tga"
    name="OldGPUDriver"

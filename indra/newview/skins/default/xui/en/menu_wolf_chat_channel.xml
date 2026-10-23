@@ -3,17 +3,40 @@
      (wolffloaterchat.cpp WolfFloaterChat::showChannelMenu; php/wolfchat.php refuses anyone else). Never shown for
      #group-chat (the group's own chat). Delete asks first; it is placed apart from the others. [2026-10-21] The
      Discord items show for text channels only: Bridge when not linked (or the link stopped), Unlink when linked.
-     [DISCORD VOICE 2026-10-22] Voice rooms get the voice pair instead: Bridge to Discord voice / Unlink Discord voice. -->
+     [DISCORD VOICE 2026-10-22] Voice rooms get the voice pair instead: Bridge to Discord voice / Unlink Discord voice.
+     [2026-10-23] Rename became Edit channel (name, emoji, category), with Move up / Move down inside its category. -->
 <context_menu
  layout="topleft"
  name="Wolf Chat Channel Menu">
     <menu_item_call
-     label="Rename..."
+     label="Edit channel (name, emoji, category)..."
      layout="topleft"
-     name="rename">
+     name="edit">
         <menu_item_call.on_click
          function="WolfChatChannel.Action"
-         parameter="rename" />
+         parameter="edit" />
+    </menu_item_call>
+    <menu_item_call
+     label="Move up"
+     layout="topleft"
+     name="up">
+        <menu_item_call.on_click
+         function="WolfChatChannel.Action"
+         parameter="up" />
+        <menu_item_call.on_enable
+         function="WolfChatChannel.Enable"
+         parameter="up" />
+    </menu_item_call>
+    <menu_item_call
+     label="Move down"
+     layout="topleft"
+     name="down">
+        <menu_item_call.on_click
+         function="WolfChatChannel.Action"
+         parameter="down" />
+        <menu_item_call.on_enable
+         function="WolfChatChannel.Enable"
+         parameter="down" />
     </menu_item_call>
     <menu_item_call
      label="Who can see this channel..."

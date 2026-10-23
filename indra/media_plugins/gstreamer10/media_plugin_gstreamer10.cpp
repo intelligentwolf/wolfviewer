@@ -88,6 +88,16 @@ private:
     std::string mLastMetaTitle;
     std::string mLastMetaArtist;
     // </WolfViewer>
+#if LL_LINUX
+    // <WolfViewer 2026-10-23> Tell the viewer when a stream fails because GStreamer is missing a
+    // plugin (no http source, no mp3/aac decoder, no audio sink, no playbin), so it can show the
+    // user how to install them. See noteMissingPlugin().
+    void noteMissingPlugin(GstMessage *message);
+    bool isMissingPluginError(const GError *err) const;
+    void reportMissingPlugin();
+    std::string mMissingPlugin;     // what is missing, e.g. "decoder for audio/mpeg"; empty = nothing
+    // </WolfViewer>
+#endif
 
     double MIN_LOOP_SEC = 1.0F;
     U32 INTERNAL_TEXTURE_SIZE = 1024;
@@ -202,6 +212,15 @@ gboolean MediaPluginGStreamer10::processGSTEvents(GstBus *bus, GstMessage *messa
             gchar *debug = NULL;
 
             llgst_message_parse_error (message, &err, &debug);
+#if LL_LINUX
+            // <WolfViewer 2026-10-23> playbin posts the "missing-plugin" element message just
+            // before this error (checked on GStreamer 1.28: core-error code 12 follows it)
+            if (err && !mMissingPlugin.empty() && isMissingPluginError(err))
+            {
+                reportMissingPlugin();
+            }
+            // </WolfViewer>
+#endif
             if (err)
                 llg_error_free (err);
             llg_free (debug);
@@ -254,6 +273,11 @@ gboolean MediaPluginGStreamer10::processGSTEvents(GstBus *bus, GstMessage *messa
             break;
         }
         // </WolfViewer>
+#if LL_LINUX
+        case GST_MESSAGE_ELEMENT:
+            noteMissingPlugin(message);     // <WolfViewer 2026-10-23>
+            break;
+#endif
         case GST_MESSAGE_EOS:
             /* end-of-stream */
             if (mIsLooping)
@@ -317,6 +341,10 @@ bool MediaPluginGStreamer10::navigateTo ( const std::string urlIn )
     mLastMetaTitle.clear();
     mLastMetaArtist.clear();
     // </WolfViewer>
+#if LL_LINUX
+    // <WolfViewer 2026-10-23> each stream reports its own missing plugin
+    mMissingPlugin.clear();
+#endif
 
     if (NULL == mPump ||  NULL == mPlaybin)
     {
@@ -504,6 +532,102 @@ void MediaPluginGStreamer10::updateStreamMetadata(GstTagList* tags)
 }
 // </WolfViewer>
 
+#if LL_LINUX
+// <WolfViewer 2026-10-23> Which GStreamer plugin a failing stream is missing.
+//
+// playbin posts an element message named "missing-plugin" (fields type, detail, name) and then
+// a gst-core-error MISSING_PLUGIN. Observed on GStreamer 1.28.6 with plugins taken away:
+//   no souphttpsrc  -> type "urisource", detail (string) "http" / "https"
+//   no mp3 decoder  -> type "decoder",   detail (caps)   "audio/mpeg, mpegversion=1, layer=3"
+//   no aac decoder  -> type "decoder",   detail (caps)   "audio/mpeg, mpegversion=4, ..."
+//   no audio sink   -> type "element",   detail (string) "autoaudiosink"
+// But a bad parcel URL produces the very same error: a web page gives decoder "text/html" and an
+// .m3u playlist decoder "text/uri-list". Installing plugins never fixes those, so only decoders
+// for music (and the http source, and missing elements) count.
+static bool wolf_is_music_media_type(const std::string &type)
+{
+    // playlist types: GStreamer has no decoder for them however much is installed
+    if (type == "audio/x-scpls" || type == "audio/x-mpegurl" || type == "audio/mpegurl")
+    {
+        return false;
+    }
+    return type.compare(0, 6, "audio/") == 0
+        || type == "application/x-icy"      // icydemux  (plugins-good) - gst-inspect sink caps
+        || type == "application/x-id3"      // id3demux  (plugins-good)
+        || type == "application/ogg"        // oggdemux  (plugins-base)
+        || type == "application/x-hls";     // hlsdemux  (plugins-bad)
+}
+
+void MediaPluginGStreamer10::noteMissingPlugin(GstMessage *message)
+{
+    if (!llgst_message_get_structure || !llgst_value_get_caps)
+    {
+        return;     // old libgstreamer: no way to read it
+    }
+    const GstStructure *s = llgst_message_get_structure(message);
+    const gchar *s_name = s ? llgst_structure_get_name(s) : NULL;
+    if (!s_name || std::string(s_name) != "missing-plugin")
+    {
+        return;
+    }
+    const GValue *type_value = llgst_structure_get_value(s, "type");
+    const GValue *detail_value = llgst_structure_get_value(s, "detail");
+    const gchar *type = type_value ? llg_value_get_string(type_value) : NULL;
+    if (!type || !detail_value)
+    {
+        return;
+    }
+    const std::string kind(type);
+    if (kind == "urisource" || kind == "element")
+    {
+        const gchar *detail = llg_value_get_string(detail_value);   // a string for these two kinds
+        if (!detail)
+        {
+            return;
+        }
+        const std::string what(detail);
+        if (kind == "element")
+        {
+            mMissingPlugin = "element " + what;
+        }
+        else if (what == "http" || what == "https")
+        {
+            mMissingPlugin = "source for " + what;
+        }
+    }
+    else if (kind == "decoder")
+    {
+        const GstCaps *caps = llgst_value_get_caps(detail_value);    // caps for decoders
+        const GstStructure *cs = caps ? llgst_caps_get_structure(caps, 0) : NULL;
+        const gchar *media = cs ? llgst_structure_get_name(cs) : NULL;
+        if (media && wolf_is_music_media_type(media))
+        {
+            mMissingPlugin = std::string("decoder for ") + media;
+        }
+    }
+}
+
+bool MediaPluginGStreamer10::isMissingPluginError(const GError *err) const
+{
+    if (!llgst_core_error_quark || !llgst_stream_error_quark)
+    {
+        return true;    // cannot check the domain; the missing-plugin message alone decides
+    }
+    return (err->domain == llgst_core_error_quark() && err->code == GST_CORE_ERROR_MISSING_PLUGIN)
+        || (err->domain == llgst_stream_error_quark() && err->code == GST_STREAM_ERROR_CODEC_NOT_FOUND);
+}
+
+void MediaPluginGStreamer10::reportMissingPlugin()
+{
+    // read by LLPluginClassMedia::receivePluginMessage, shown by LLStreamingAudio_MediaPlugins
+    LLPluginMessage message(LLPLUGIN_MESSAGE_CLASS_MEDIA, "wolf_gst_missing_plugin");
+    message.setValue("detail", mMissingPlugin);
+    sendMessage(message);
+    mMissingPlugin.clear();
+}
+// </WolfViewer>
+#endif
+
 bool MediaPluginGStreamer10::stop()
 {
     // todo: error-check this?
@@ -624,6 +748,9 @@ bool MediaPluginGStreamer10::load()
     mPlaybin = llgst_element_factory_make ("playbin", "");
     if (!mPlaybin)
     {
+#if LL_LINUX
+        mMissingPlugin = "element playbin";     // <WolfViewer 2026-10-23> plugins-base; sent after init_response
+#endif
         setStatus(STATUS_ERROR);
         return false; // error
     }
@@ -653,6 +780,9 @@ bool MediaPluginGStreamer10::load()
 
     if (!mAppSink)
     {
+#if LL_LINUX
+        mMissingPlugin = "element appsink";     // <WolfViewer 2026-10-23> plugins-base; sent after init_response
+#endif
         setStatus(STATUS_ERROR);
         return false;
     }
@@ -854,6 +984,14 @@ void MediaPluginGStreamer10::receiveMessage(const char *message_string)
 
                 message.setValue("plugin_version", getVersion());
                 sendMessage(message);
+#if LL_LINUX
+                // <WolfViewer 2026-10-23> load() could not make playbin/appsink: say so now the
+                // host is listening (it is running once init_response is through)
+                if (!mMissingPlugin.empty())
+                {
+                    reportMissingPlugin();
+                }
+#endif
             }
             else if(message_name == "idle")
             {

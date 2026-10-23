@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLF CHAT 2026-10-23] Right-click a category heading in Wolf Chat's channel list (or press its +) - the group's
+     OWNERS only (wolffloaterchat.cpp WolfFloaterChat::showCategoryMenu; php/wolfchat.php refuses anyone else). Delete
+     asks first and keeps the category's channels (they move to the top, in no category); it is set apart. -->
+<context_menu
+ layout="topleft"
+ name="Wolf Chat Category Menu">
+    <menu_item_call
+     label="New text channel here..."
+     layout="topleft"
+     name="new_text">
+        <menu_item_call.on_click
+         function="WolfChatCategory.Action"
+         parameter="new_text" />
+    </menu_item_call>
+    <menu_item_call
+     label="New voice channel here..."
+     layout="topleft"
+     name="new_voice">
+        <menu_item_call.on_click
+         function="WolfChatCategory.Action"
+         parameter="new_voice" />
+    </menu_item_call>
+    <menu_item_separator
+     layout="topleft" />
+    <menu_item_call
+     label="Rename category..."
+     layout="topleft"
+     name="rename">
+        <menu_item_call.on_click
+         function="WolfChatCategory.Action"
+         parameter="rename" />
+    </menu_item_call>
+    <menu_item_call
+     label="Move up"
+     layout="topleft"
+     name="up">
+        <menu_item_call.on_click
+         function="WolfChatCategory.Action"
+         parameter="up" />
+        <menu_item_call.on_enable
+         function="WolfChatCategory.Enable"
+         parameter="up" />
+    </menu_item_call>
+    <menu_item_call
+     label="Move down"
+     layout="topleft"
+     name="down">
+        <menu_item_call.on_click
+         function="WolfChatCategory.Action"
+         parameter="down" />
+        <menu_item_call.on_enable
+         function="WolfChatCategory.Enable"
+         parameter="down" />
+    </menu_item_call>
+    <menu_item_separator
+     layout="topleft" />
+    <menu_item_call
+     label="Delete category (keeps its channels)..."
+     layout="topleft"
+     name="delete">
+        <menu_item_call.on_click
+         function="WolfChatCategory.Action"
+         parameter="delete" />
+    </menu_item_call>
+</context_menu>

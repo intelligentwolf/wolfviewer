@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLF CHAT 2026-10-23] The group menu in Wolf Chat - the group's OWNERS only: the arrow beside the group's name, or a
+     right-click on the banner or a TEXT / VOICE CHANNELS heading (wolffloaterchat.cpp WolfFloaterChat::showGroupMenu). -->
+<context_menu
+ layout="topleft"
+ name="Wolf Chat Group Menu">
+    <menu_item_call
+     label="New category..."
+     layout="topleft"
+     name="new_category">
+        <menu_item_call.on_click
+         function="WolfChatGroup.Action"
+         parameter="new_category" />
+    </menu_item_call>
+    <menu_item_call
+     label="New text channel..."
+     layout="topleft"
+     name="new_text">
+        <menu_item_call.on_click
+         function="WolfChatGroup.Action"
+         parameter="new_text" />
+    </menu_item_call>
+    <menu_item_call
+     label="New voice channel..."
+     layout="topleft"
+     name="new_voice">
+        <menu_item_call.on_click
+         function="WolfChatGroup.Action"
+         parameter="new_voice" />
+    </menu_item_call>
+    <menu_item_separator
+     layout="topleft" />
+    <menu_item_call
+     label="Banner and tagline..."
+     layout="topleft"
+     name="banner">
+        <menu_item_call.on_click
+         function="WolfChatGroup.Action"
+         parameter="banner" />
+    </menu_item_call>
+    <menu_item_call
+     label="Sync with a Discord server..."
+     layout="topleft"
+     name="sync">
+        <menu_item_call.on_click
+         function="WolfChatGroup.Action"
+         parameter="sync" />
+    </menu_item_call>
+</context_menu>

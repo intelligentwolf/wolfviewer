@@ -64,7 +64,13 @@
 #include "llvlcomposition.h"
 #include "message.h"
 #include "wolfgrid.h"
+#include "wolfdigprogress.h"
+#include "wolfburrow.h"
+#include "wolfpaint.h"
+#include "lldraghandle.h"
 #include "wolfterrainpaint.h"
+#include "wolfterrainwriter.h"   // [WOLF TERRAFORM 2026-10-23] the shared exact-height writer
+#include "wolfterraform.h"
 
 const char* WolfCaves::API_URL = "https://wolfstorm.app/php/caves.php";
 
@@ -73,14 +79,8 @@ namespace
     // Source: wolfstorm/rust_proxy/src/main.rs — POST /cave_mesh routes to wolfcave.rs handle().
     std::string caveMeshUrl() { return std::string(WolfGrid::MESH_API_BASE) + "/cave_mesh"; }
 
-    // Source: TerrainModule.cs:1792-1798 / :1946 — one ModifyLand at most every 20 ms (a request
-    // inside the window is DROPPED, as is every ParcelData block after the first in a packet).
-    constexpr F32 MODIFY_GAP_SECS = 0.06f;
-    // Source: FlattenArea.cs FloodEffect — strength = seconds * 0.04; >= 0.999 sets it exactly.
-    constexpr F32 FLATTEN_SECONDS = 25.f;
-    // Source: TerrainModule.cs:61-69 StandardTerrainEffects.Flatten = 0.
-    constexpr U8 ACTION_FLATTEN = 0;
-    constexpr F32 HEIGHT_TOLERANCE = 0.06f;
+    // [WOLF TERRAFORM 2026-10-23] MODIFY_GAP_SECS, FLATTEN_SECONDS, ACTION_FLATTEN and HEIGHT_TOLERANCE moved with the floods to
+    // wolfterrainwriter.h (WolfTerrainWriter), unchanged.
     // [WolfViewer 2026-10-14 v2] Ground sampled round the rotated box footprint, every tunnel band
     // and every door. [WolfViewer 2026-10-15 v3] Source: CAVE_DESIGN_V3.md "/cave_mesh request":
     // "The terrain sample the clients send covers the box footprint, every tunnel and door, plus
@@ -1014,12 +1014,10 @@ bool WolfCaves::rezExact(const LLUUID& item_id, const LLUUID& folder_id, const L
 // take. Returns [x, y, wanted, got] for every point a limit or a right held.
 std::vector<LLSD> WolfCaves::shape(const LLSD& targets, bool to_target, const std::string& what)
 {
-    struct P { S32 x, y; F32 z; };
-    std::vector<P> pts;
-    for (S32 k = 0; k + 3 < (S32)targets.size(); k += 4)
-    {
-        pts.push_back(P{ targets[k].asInteger(), targets[k + 1].asInteger(), (F32)targets[to_target ? k + 3 : k + 2].asReal() });
-    }
+    // [WOLF TERRAFORM 2026-10-23] The floods, the read-back and the second pass are WolfTerrainWriter's now (DESIGN.md 3.1 B: one
+    // writer for caves and the Terraform tools), and the merge is WolfTerraformMath::caveRuns: both moved from here unchanged, so
+    // a cave sends exactly the floods it sent before (tests/wolfterraformmath_test.cpp checks the merge and every message field
+    // against the old code on 400 random caves).
     // [WolfViewer 2026-10-14] Put-back merges a run while its heights stay within a band and
     // floods it at the band's middle; before, every put-back point was its own flood (the
     // ground's heights all differ), 20-40 minutes for a big cave.
@@ -1032,90 +1030,36 @@ std::vector<LLSD> WolfCaves::shape(const LLSD& targets, bool to_target, const st
     // own LayerData samples). Digging is unchanged (wolf_caves.js _shape: same height as the
     // run's first point within 0.005, flooded at that height): the floor is level anyway.
     constexpr F32 PUT_BACK_BAND_M = 0.04f;
-    auto send = [&](const std::vector<P>& list) -> bool
+    std::vector<WolfTerraformMath::Point> pts;
+    for (S32 k = 0; k + 3 < (S32)targets.size(); k += 4)
     {
-        std::map<S32, std::vector<P>> cols;
-        for (const P& p : list) cols[p.x].push_back(p);
-        struct Run { S32 x, y0, y1; F32 z; };
-        std::vector<Run> runs;
-        for (auto& kv : cols)
-        {
-            std::vector<P>& col = kv.second;
-            std::sort(col.begin(), col.end(), [](const P& a, const P& b) { return a.y < b.y; });
-            size_t s = 0;
-            F32 lo = col.empty() ? 0.f : col[0].z, hi = lo;
-            for (size_t i = 1; i <= col.size(); ++i)
-            {
-                const bool same = i < col.size() && (to_target ? fabsf(col[i].z - col[s].z) < 0.005f
-                                                               : llmax(hi, col[i].z) - llmin(lo, col[i].z) <= PUT_BACK_BAND_M);
-                if (i < col.size() && col[i].y == col[i - 1].y + 1 && same)
-                {
-                    lo = llmin(lo, col[i].z);
-                    hi = llmax(hi, col[i].z);
-                    continue;
-                }
-                runs.push_back(Run{ kv.first, col[s].y, col[i - 1].y, to_target ? col[s].z : (lo + hi) * 0.5f });
-                s = i;
-                if (i < col.size()) lo = hi = col[i].z;
-            }
-        }
-        S32 n = 0;
-        for (const Run& r : runs)
-        {
-            // [WolfViewer 2026-10-14] Cancel stops between floods: every flood already sent is
-            // whole, and the caller records where the job stood.
-            if (mCancel) return false;
-            LLViewerRegion* rgn = gAgent.getRegion();
-            if (!rgn || !sendOk()) return false;
-            // Source: lltoolbrush.cpp:309-344 modifyLandInSelectionGlobal — the same message.
-            LLMessageSystem* msg = gMessageSystem;
-            msg->newMessageFast(_PREHASH_ModifyLand);
-            msg->nextBlockFast(_PREHASH_AgentData);
-            msg->addUUIDFast(_PREHASH_AgentID, gAgent.getID());
-            msg->addUUIDFast(_PREHASH_SessionID, gAgent.getSessionID());
-            msg->nextBlockFast(_PREHASH_ModifyBlock);
-            msg->addU8Fast(_PREHASH_Action, ACTION_FLATTEN);
-            msg->addU8Fast(_PREHASH_BrushSize, (U8)0);
-            msg->addF32Fast(_PREHASH_Seconds, FLATTEN_SECONDS);
-            msg->addF32Fast(_PREHASH_Height, r.z);
-            msg->nextBlockFast(_PREHASH_ParcelData);
-            msg->addS32Fast(_PREHASH_LocalID, -1);
-            msg->addF32Fast(_PREHASH_West, (F32)r.x);
-            msg->addF32Fast(_PREHASH_South, (F32)r.y0);
-            msg->addF32Fast(_PREHASH_East, (F32)r.x + 0.5f);
-            msg->addF32Fast(_PREHASH_North, (F32)r.y1 + 0.5f);
-            msg->nextBlock("ModifyBlockExtended");
-            msg->addF32("BrushSize", 1.f);
-            // Reliable (lltoolbrush.cpp sends a brush dab unreliably; a dropped flood here would be
-            // a hole in the cave floor that the read-back then has to find).
-            msg->sendReliable(rgn->getHost());
-            if (++n % 20 == 0) mStatus = llformat("%s — %d of %d…", what.c_str(), n, (S32)runs.size());
-            llcoro::suspendUntilTimeout(MODIFY_GAP_SECS);
-        }
-        return true;
-    };
-    auto misses = [&]() -> std::vector<P>
+        pts.push_back(WolfTerraformMath::Point{ targets[k].asInteger(), targets[k + 1].asInteger(), (F32)targets[to_target ? k + 3 : k + 2].asReal() });
+    }
+    WolfTerrainWriter::Hooks hooks;
+    hooks.cancelled = [this]() { return mCancel; };
+    hooks.sendRegion = [this]() -> LLViewerRegion* { LLViewerRegion* rgn = gAgent.getRegion(); return (rgn && sendOk()) ? rgn : nullptr; };
+    hooks.readRegion = []() { return gAgent.getRegion(); };
+    hooks.label = what;   // [WOLF TERRAFORM 2026-10-23 Phase 3/] the region's undo history names the step
+    hooks.sent = [this, what](S32 n, S32 total)
     {
-        llcoro::suspendUntilTimeout(3.f);   // LayerData for the changed patches
-        std::vector<P> left;
-        LLViewerRegion* rgn = gAgent.getRegion();
-        if (!rgn) return pts;
-        for (const P& p : pts)
-        {
-            if (fabsf(rgn->getLand().resolveHeightRegion((F32)p.x, (F32)p.y) - p.z) > HEIGHT_TOLERANCE) left.push_back(p);
-        }
-        return left;
+        if (n % 20 == 0) mStatus = llformat("%s — %d of %d…", what.c_str(), n, total);
+        mProgress = mShapeBase + mShapeSpan * (F32)n / (F32)llmax(1, total);   // [2026-10-23]
     };
+    const WolfTerrainWriter::Result res = WolfTerrainWriter::write(pts, [to_target](const std::vector<WolfTerraformMath::Point>& list)
+    {
+        return WolfTerraformMath::caveRuns(list, to_target, PUT_BACK_BAND_M);
+    }, hooks);
     std::vector<LLSD> out;
-    if (!send(pts))
+    if (res.stoppedFirst)
     {
-        for (const P& p : pts) out.push_back(LLSD().with(0, p.x).with(1, p.y).with(2, p.z).with(3, LLSD()));
+        for (const WolfTerraformMath::Point& p : pts) out.push_back(LLSD().with(0, p.x).with(1, p.y).with(2, p.z).with(3, LLSD()));
         return out;
     }
-    std::vector<P> left = misses();
-    if (!left.empty() && !mCancel && send(left)) left = misses();
+    // [WOLF TERRAFORM 2026-10-23 Phase 3] through the WolfTerraform cap the region says which land refused and why: its words reach
+    // the window with the job's other messages
+    if (res.viaCap && !res.reason.empty()) fail(what + ": the region says: " + res.reason);
     LLViewerRegion* rgn = gAgent.getRegion();
-    for (const P& p : left)
+    for (const WolfTerraformMath::Point& p : res.left)
     {
         LLSD e = LLSD::emptyArray();
         e.append(p.x); e.append(p.y); e.append(r2(p.z));
@@ -1138,10 +1082,13 @@ void WolfCaves::build(const Cave& cave)
     // the alert is the only place the words can go.
     if (!onWolf()) { alertOK("Caves can only be built on Wolf Territories, in a region the grid knows."); return; }
     if (mBusy) { fail("Another cave job is still running - wait for it to finish (or press Stop), then try again."); return; }
+    // [WOLF TERRAFORM 2026-10-23] the Terraform window writes the ground with the same floods: one writer at a time
+    if (WolfTerraform::Jobs::instance().busy()) { fail("The Terraform window is changing the ground right now - wait for it to finish (or press Stop there), then try again."); return; }
     if (!sendOk()) { fail("Building stopped: this region's caves are not loaded here (did you just move?) - reopen the Cave Builder and try again."); return; }
     mBusy = true;
     mCancel = false;
     mErrors.clear();
+    mProgress = -1.f;   // [2026-10-23] until a step can be counted
     mJobCave = cave.mId;
     const Cave* old = find(cave.mId);
     if (old && old->mBuilt.isMap())
@@ -1160,10 +1107,13 @@ void WolfCaves::remove(const std::string& id, bool forget)
     // [WolfViewer 2026-10-14] Never refuse silently (see build()).
     if (!onWolf()) { alertOK("Caves can only be removed on Wolf Territories, in a region the grid knows."); return; }
     if (mBusy) { fail("Another cave job is still running - wait for it to finish (or press Stop), then try again."); return; }
+    // [WOLF TERRAFORM 2026-10-23] the Terraform window writes the ground with the same floods: one writer at a time
+    if (WolfTerraform::Jobs::instance().busy()) { fail("The Terraform window is changing the ground right now - wait for it to finish (or press Stop there), then try again."); return; }
     if (!sendOk()) { fail("Removing stopped: this region's caves are not loaded here (did you just move?) - reopen the Cave Builder and try again."); return; }
     mBusy = true;
     mCancel = false;
     mErrors.clear();
+    mProgress = -1.f;   // [2026-10-23] until a step can be counted
     mJobCave = id;
     LLCoros::instance().launch("WolfCaves remove", [id, forget]() { WolfCaves::instance().removeCoro(id, false, Cave(), forget); });
 }
@@ -1173,6 +1123,7 @@ void WolfCaves::buildCoro(Cave cave)
 {
     std::string err;
     mStatus = "Step 1 of 5: checking your rights and saving the cave…";
+    mProgress = 0.f;   // [2026-10-23] steps done: 1 of 5 = 0, the rock 0.1, the rez 0.4, the digging 0.6 .. 0.9 by floods
     // [WOLF CAVE LIGHTS 2026-10-23] A (re)built cave has no lamps: a rebuild's old ones were taken away with the old rock
     // (removeOne), and lamps placed for the old rock would hang in the new one.
     cave.mLights = LLSD();
@@ -1196,6 +1147,7 @@ void WolfCaves::buildCoro(Cave cave)
         return;
     }
     mStatus = "Step 2 of 5: making the rock…";
+    mProgress = 0.1f;
     err.clear();   // a 409 that putCave retried past leaves its words here
     const LLUUID folder = gInventory.findCategoryUUIDForType(LLFolderType::FT_OBJECT);
     LLSD terrain, reply;
@@ -1227,6 +1179,7 @@ void WolfCaves::buildCoro(Cave cave)
     }
     const S32 li = reply["li"].asInteger();
     mStatus = llformat("Step 3 of 5: rezzing the rock (%d prim%s)…", li, li == 1 ? "" : "s");
+    mProgress = 0.4f;
     const LLSD& re = reply["rez_ray_end"];
     const LLSD& rp = reply["root_pos"];
     const LLVector3 ray((F32)re[0].asReal(), (F32)re[1].asReal(), (F32)re[2].asReal());
@@ -1266,6 +1219,9 @@ void WolfCaves::buildCoro(Cave cave)
     if (reply["targets"].size() >= 4)
     {
         mStatus = llformat("Step 4 of 5: digging the ground (%d points)…", (S32)reply["targets"].size() / 4);
+        mProgress = 0.6f;
+        mShapeBase = 0.6f;
+        mShapeSpan = 0.3f;
         limited = shape(reply["targets"], true, "Step 4 of 5: digging the ground");
     }
     else
@@ -1288,6 +1244,7 @@ void WolfCaves::buildCoro(Cave cave)
     cave.mBuilt["limited"] = (S32)limited.size();
     if (!putCave(cave, err)) fail("The cave is built, but its record could not be updated: " + err);
     mStatus = "Step 5 of 5: done.";
+    mProgress = 1.f;
     if (!limited.empty())
     {
         const LLSD& ex = limited.front();
@@ -1433,6 +1390,9 @@ bool WolfCaves::removeOne(const Cave& cave, bool forget, std::string& error)
     if (cave.mBuilt.isMap() && cave.mBuilt["terrain"].size() >= 4)
     {
         mStatus = llformat("Putting the ground back (%d points)…", (S32)cave.mBuilt["terrain"].size() / 4);
+        mProgress = 0.2f;   // [2026-10-23] the ground is most of a removal: 0.2 .. 0.9 by floods
+        mShapeBase = 0.2f;
+        mShapeSpan = 0.7f;
         limited = shape(cave.mBuilt["terrain"], false, "Putting the ground back");
         // [WolfViewer 2026-10-14] Stopped between floods: the record keeps every point's old
         // height, so Remove puts the rest back (and repeats the done ones harmlessly).
@@ -1451,6 +1411,7 @@ bool WolfCaves::removeOne(const Cave& cave, bool forget, std::string& error)
         }
     }
     mStatus = "Forgetting the cave…";
+    mProgress = 0.95f;
     if (!(old && cave.mBuilt.isMap()) && !dropCave(cave.mId, error)) return false;
     if (!limited.empty())
     {
@@ -1527,6 +1488,7 @@ void WolfCaves::lights(const std::string& id, bool remove, std::vector<WolfCaveL
     mBusy = true;
     mCancel = false;
     mErrors.clear();
+    mProgress = -1.f;   // [2026-10-23] until a step can be counted
     mJobCave = id;
     LLCoros::instance().launch("WolfCaves lights", [id, remove, lamps, style, warm, keep_unseen]()
     {
@@ -1550,7 +1512,7 @@ void WolfCaves::lightsCoro(std::string id, bool remove, std::vector<WolfCaveLigh
         next.mLights = l;
         return putCave(next, e);
     };
-    auto progress = [this](const std::string& line, F32) { mStatus = line; };
+    auto progress = [this](const std::string& line, F32 f) { mStatus = line; mProgress = f; };
     std::string done, err;
     const bool ok = WolfCaveLights::run(start.mLights, keep_unseen, remove ? nullptr : &lamps, style, warm, start.mName, region, save,
                                         progress, [this]() { return mCancel; }, done, err);
@@ -2560,6 +2522,34 @@ bool WolfFloaterCaves::postBuild()
     mLightsTone->setValue(WolfCaveLights::savedWarm() ? "warm" : "cool");
     mWidth->setValue(WolfToolCave::tunnelWidth());
     mCavernH->setValue(WolfToolCave::cavernHeight());
+    // [2026-10-23] Paul: "make the interface look much more fancy like our uploaders" - the painted working plate lies over the
+    // status and reason lines (floater_wolf_caves.xml cave_status, cave_why) while a job runs or after it stopped
+    {
+        LLRect area = mStatus->getRect();
+        area.unionWith(mWhy->getRect());
+        mDigPlate = WolfDigProgress::add(this, area);
+    }
+    // [WOLF BURROW 2026-10-23] the painted window behind every control: the groups by step (floater_wolf_caves.xml), the buttons
+    // by weight (0 primary, 1 secondary, 2 danger)
+    {
+        auto v = [this](const char* n) { return getChild<LLView>(n); };
+        mBurrowGroups = {
+            { v("cave_list_lbl"), v("cave_list"), v("cave_new"), v("cave_edit"), v("cave_remove"), v("cave_lights_style"), v("cave_lights_tone"),
+              v("cave_lights_up"), v("cave_lights_off") },
+            { v("cave_name_lbl"), v("cave_name") },
+            { v("cave_step1_lbl"), v("cave_step1_help"), v("cave_pen_box"), v("cave_box_w"), v("cave_box_d"), v("cave_box_h"), v("cave_box_turn"), v("cave_box_floor") },
+            { v("cave_step2_lbl"), v("cave_step2_help"), v("cave_pen_tunnel"), v("cave_width") },
+            { v("cave_step3_lbl"), v("cave_step3_help"), v("cave_pen_cavern"), v("cave_cavern_h") },
+            { v("cave_step4_lbl"), v("cave_step4_help"), v("cave_pen_door"), v("cave_counts") },
+            { v("cave_step5_lbl"), v("cave_rock_lbl"), v("cave_rock"), v("cave_rock_tex"), v("cave_roof_lbl"), v("cave_roof"), v("cave_rough_lbl"),
+              v("cave_rough"), v("cave_light_lbl"), v("cave_light") },
+            { v("cave_step6_lbl"), v("cave_stats"), v("cave_dig"), v("cave_status"), v("cave_why") },
+            { v("cave_back"), v("cave_undo"), v("cave_cancel"), v("cave_build") } };
+        mBurrowButtons = { { mBuild, 0 }, { mLightsUp, 0 }, { mNew, 1 }, { mEdit, 1 }, { mBack, 1 }, { mUndo, 1 }, { mPenBox, 1 },
+                           { mPenTunnel, 1 }, { mPenCavern, 1 }, { mPenDoor, 1 }, { mRemove, 2 }, { mLightsOff, 2 }, { mCancel, 2 } };
+        WolfBurrow::Sheet::add(this, [this]() { paintBurrow(); });
+        if (getDragHandle()) sendChildToBack(getDragHandle());   // empty paper still drags the window
+    }
     showEditor();
     return true;
 }
@@ -2595,6 +2585,30 @@ void WolfFloaterCaves::onClose(bool app_quitting)
     }
 }
 
+// [WOLF BURROW 2026-10-23] Who and why: a resident making a cave wants each step to read as its own place and the main action to
+// stand out. The paper, the header with the mole (digging while a job runs), a plate per step (its own amber heading text inside
+// it) and every button's face by weight.
+void WolfFloaterCaves::paintBurrow()
+{
+    using namespace WolfBurrow;
+    const LLRect all = getLocalRect();
+    const LLRect client(0, all.mTop - getHeaderHeight(), all.mRight, 0);
+    drawSheet(client);
+    const S32 L = 4, R = all.mRight - 4;
+    drawHeader(LLRect(L, client.mTop - 3, R, client.mTop - 43), "CAVE BUILDER", "Draw a rock box, carve tunnels and caverns, generate.",
+               WolfCaves::instance().busy() ? WolfPaint::animSeconds() : 0.f);
+    for (const std::vector<LLView*>& g : mBurrowGroups)
+    {
+        LLRect r = around(g, this, 3, 0);
+        if (r.isEmpty()) continue;
+        r.mLeft = L;
+        r.mRight = R;
+        drawSection(r, std::string());
+    }
+    for (const std::pair<LLButton*, S32>& b : mBurrowButtons)
+        drawButtonFace(b.first, this, b.second == 0 ? WEIGHT_PRIMARY : b.second == 2 ? WEIGHT_DANGER : WEIGHT_SECONDARY);
+}
+
 void WolfFloaterCaves::stopTool()
 {
     WolfToolCave* tool = WolfToolCave::getInstance();
@@ -2619,7 +2633,8 @@ void WolfFloaterCaves::showTool()
 void WolfFloaterCaves::setStatus(const std::string& msg, bool error)
 {
     mStatus->setText(msg);
-    mStatus->setColor(error ? LLColor4(1.f, 0.6f, 0.6f, 1.f) : LLColor4(0.78f, 0.82f, 0.88f, 1.f));
+    // [WOLF BURROW 2026-10-23] fixed colours on the painted plate
+    mStatus->setColor(error ? WolfBurrow::ERR_INK : WolfBurrow::CREAM);
 }
 
 void WolfFloaterCaves::rebuildList()
@@ -3087,6 +3102,7 @@ void WolfFloaterCaves::draw()
             if (had_drawing) setStatus(getString("str_moved"), false);
         }
     }
+    if (wc.busy() && mDigPlate) mDigPlate->showWork(wc.status(), wc.progress());
     if (mWasBusy && !wc.busy())
     {
         rebuildList();
@@ -3098,6 +3114,8 @@ void WolfFloaterCaves::draw()
         // was rebuilt just above).
         const WolfCaves::EResult r = wc.takeResult();
         if ((r == WolfCaves::RESULT_BUILT || r == WolfCaves::RESULT_REMOVED) && mEditing && wc.jobCave() == mCave.mId) onBack();
+        // [2026-10-23] a finished job's tick (a failure's words come through takeError just below, onto the red plate)
+        if (mDigPlate) { if (r != WolfCaves::RESULT_FAILED) mDigPlate->showDone(mLastStatus); else mDigPlate->hide(); }
     }
     mWasBusy = wc.busy();
     mCancel->setEnabled(wc.busy() && !wc.cancelling());
@@ -3119,7 +3137,10 @@ void WolfFloaterCaves::draw()
     if (!err.empty())
     {
         setStatus(err, true);
-        alertOK(err);   // a modal the user must acknowledge: failures never vanish by themselves
+        // [2026-10-23] on the red plate until OK, where its words can be selected and copied (it was a modal alert, which could
+        // not be copied); failures still never vanish by themselves
+        if (mDigPlate) mDigPlate->showFailed(err);
+        else alertOK(err);
     }
     else if (wc.busy() && !wc.cancelling() && wc.status() != mLastStatus)
     {
@@ -3230,7 +3251,7 @@ void WolfFloaterCaves::draw()
     {
         mShownWhy = why;
         mWhy->setText(why.empty() ? getString("str_ready") : why);
-        mWhy->setColor(why.empty() ? LLColor4(0.6f, 0.9f, 0.6f, 1.f) : LLColor4(1.f, 0.85f, 0.55f, 1.f));
+        mWhy->setColor(why.empty() ? LLColor4(0.45f, 0.85f, 0.55f, 1.f) : WolfBurrow::AMBER);   // [WOLF BURROW] 9.1:1 / 9.6:1 on the plate
     }
     LLFloater::draw();
 }

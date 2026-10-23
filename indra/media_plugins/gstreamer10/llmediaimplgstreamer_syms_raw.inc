@@ -40,6 +40,18 @@ LL_GST_SYM( true, gst_tag_list_get_value_index, const GValue *, const GstTagList
 // <WolfViewer 2026-09-05> stream titles (GST_MESSAGE_TAG) — optional so an old libgstreamer still loads
 LL_GST_SYM(false, gst_tag_list_get_string, gboolean, const GstTagList *, const gchar *, gchar **)
 
+#if LL_LINUX
+// <WolfViewer 2026-10-23> "missing-plugin" element messages and error domains, so the viewer can
+// tell the user which GStreamer plugin is missing (MediaPluginGStreamer10::noteMissingPlugin).
+// Optional: without them the plugin works exactly as before, it just cannot say why.
+// Signatures: gst/gstmessage.h gst_message_get_structure, gst/gstvalue.h gst_value_get_caps,
+// gst/gsterror.h gst_core_error_quark / gst_stream_error_quark.
+LL_GST_SYM(false, gst_message_get_structure, const GstStructure *, GstMessage *)
+LL_GST_SYM(false, gst_value_get_caps, const GstCaps *, const GValue *)
+LL_GST_SYM(false, gst_core_error_quark, GQuark, void)
+LL_GST_SYM(false, gst_stream_error_quark, GQuark, void)
+#endif
+
 LL_GST_SYM( true, gst_caps_new_simple, GstCaps*, const char *, const char*, ... )
 
 LL_GST_SYM( true, gst_sample_get_caps, GstCaps*, GstSample* )

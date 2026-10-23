@@ -1042,6 +1042,14 @@ void LLPluginClassMedia::receivePluginMessage(const LLPluginMessage &message)
             mArtist = message.getValue( "artist" );
         }
         else // </FS:ND>
+#if LL_LINUX
+        // <WolfViewer 2026-10-23> media_plugin_gstreamer10.cpp reportMissingPlugin()
+        if (message_name == "wolf_gst_missing_plugin")
+        {
+            mWolfMissingGstPlugin = message.getValue("detail");
+        }
+        else
+#endif
         if(message_name == "texture_params")
         {
             mRequestedTextureDepth = message.getValueS32("depth");
@@ -1397,6 +1405,9 @@ void LLPluginClassMedia::receivePluginMessage(const LLPluginMessage &message)
 /* virtual */
 void LLPluginClassMedia::pluginLaunchFailed()
 {
+#if LL_LINUX
+    mWolfPluginLaunchFailed = true;     // <WolfViewer 2026-10-23> polled by LLStreamingAudio_MediaPlugins (no owner)
+#endif
     mediaEvent(LLPluginClassMediaOwner::MEDIA_EVENT_PLUGIN_FAILED_LAUNCH);
 }
 

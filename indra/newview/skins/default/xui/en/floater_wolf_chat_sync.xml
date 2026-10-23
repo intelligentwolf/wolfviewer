@@ -1,0 +1,214 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [DISCORD SYNC 2026-10-23] Wolf Chat > group menu > Sync with a Discord server (wolffloaterchat.cpp WolfFloaterChatSync;
+     php/wolfbridge.php sync_code / sync_state / sync_now / sync_unlink / sync_private_role). Paul: "can we auto sync all
+     the channels on discord with wolfchat?".
+     Persona: a group owner whose community lives on Discord and in-world, who wants one set of channels for both.
+     Flow, not synced: 1. Add Wolf-Bot to Discord 2. Get a code 3. type the /wolfsync command (Copy) in any channel of the
+     server, then "I typed it - check". Synced: the server's icon and name, when it last synced and what it found, Sync
+     now, the private Discord channels with the Wolf role each is shown to (Keep out = not in Wolf Chat), and Unlink set
+     apart at the bottom left (it asks first). Members see the state only. The code makes both views; failures stay in
+     the line above the buttons. -->
+<floater
+ can_close="true"
+ can_minimize="false"
+ can_resize="false"
+ height="480"
+ layout="topleft"
+ name="wolf_chat_sync"
+ help_topic="wolf_chat_sync"
+ save_rect="true"
+ single_instance="true"
+ title="SYNC WITH A DISCORD SERVER"
+ width="440">
+    <wolf_chat_url_icon
+     follows="left|top"
+     height="40"
+     layout="topleft"
+     left="10"
+     name="sync_icon"
+     top="26"
+     width="40" />
+    <text
+     follows="left|top|right"
+     font="SansSerifBold"
+     height="20"
+     layout="topleft"
+     left="58"
+     name="sync_name"
+     top="26"
+     use_ellipses="true"
+     width="372"
+     value="Not synced" />
+    <text
+     follows="left|top|right"
+     height="18"
+     layout="topleft"
+     left="58"
+     name="sync_when"
+     top="46"
+     width="372"
+     value="" />
+    <text
+     follows="left|top|right"
+     height="36"
+     layout="topleft"
+     left="10"
+     name="sync_note"
+     top="72"
+     width="420"
+     wrap="true"
+     value="" />
+    <text
+     follows="left|top|right"
+     height="54"
+     layout="topleft"
+     left="10"
+     name="sync_help"
+     top="110"
+     width="420"
+     wrap="true"
+     value="" />
+    <button
+     follows="left|top"
+     height="24"
+     label="Add Wolf-Bot to Discord"
+     layout="topleft"
+     left="10"
+     name="add_bot_btn"
+     tool_tip="Opens Discord in your browser to add Wolf-Bot to a server you manage (with Manage Channels, for channels made in Wolf Chat)."
+     top="170"
+     width="172" />
+    <button
+     follows="left|top"
+     height="24"
+     label="Get a code"
+     layout="topleft"
+     left="190"
+     name="code_btn"
+     tool_tip="A one-time code for /wolfsync (10 minutes)."
+     top="170"
+     width="120" />
+    <button
+     follows="left|top"
+     height="24"
+     label="Sync now"
+     layout="topleft"
+     left="190"
+     name="sync_now_btn"
+     tool_tip="Bring the server in again now: new channels made, deleted ones archived."
+     top="170"
+     visible="false"
+     width="120" />
+    <line_editor
+     follows="left|top|right"
+     height="24"
+     layout="topleft"
+     left="10"
+     name="sync_command"
+     tool_tip="Type this in any channel of your Discord server."
+     top="202"
+     visible="false"
+     width="330" />
+    <button
+     follows="right|top"
+     height="24"
+     label="Copy"
+     layout="topleft"
+     left="346"
+     name="copy_btn"
+     tool_tip="Copy the command, then paste it in Discord."
+     top="202"
+     visible="false"
+     width="84" />
+    <button
+     follows="left|top"
+     height="24"
+     label="I typed it - check"
+     layout="topleft"
+     left="10"
+     name="check_btn"
+     tool_tip="Look again: shows the sync once Discord has it."
+     top="234"
+     visible="false"
+     width="160" />
+    <text
+     follows="left|top|right"
+     font="SansSerifBold"
+     height="18"
+     layout="topleft"
+     left="10"
+     name="private_label"
+     top="206"
+     visible="false"
+     width="420"
+     value="Private Discord channels (kept out of Wolf Chat unless shown to a role)" />
+    <scroll_list
+     column_padding="0"
+     draw_heading="true"
+     follows="all"
+     height="104"
+     layout="topleft"
+     left="10"
+     name="private_list"
+     top="226"
+     visible="false"
+     width="420">
+        <scroll_list.columns
+         label="Discord channel"
+         name="name"
+         width="220" />
+        <scroll_list.columns
+         label="Shown in Wolf Chat to"
+         name="role"
+         width="196" />
+    </scroll_list>
+    <combo_box
+     follows="left|bottom"
+     height="22"
+     layout="topleft"
+     left="10"
+     name="private_role"
+     tool_tip="Who sees the selected private channel in Wolf Chat. Owners always do."
+     top="336"
+     visible="false"
+     width="250" />
+    <button
+     follows="left|bottom"
+     height="22"
+     label="Apply to the selected"
+     layout="topleft"
+     left="268"
+     name="private_apply_btn"
+     top="336"
+     visible="false"
+     width="162" />
+    <text
+     follows="left|right|bottom"
+     height="40"
+     layout="topleft"
+     left="10"
+     name="sync_status"
+     top="366"
+     width="420"
+     wrap="true" />
+    <button
+     follows="left|bottom"
+     height="26"
+     label="Unlink from Discord..."
+     layout="topleft"
+     left="10"
+     name="unlink_btn"
+     tool_tip="Stop syncing. The channels stay in Wolf Chat with their history; their Discord links end."
+     top="444"
+     visible="false"
+     width="170" />
+    <button
+     follows="right|bottom"
+     height="26"
+     label="Close"
+     layout="topleft"
+     left="340"
+     name="close_btn"
+     top="444"
+     width="90" />
+</floater>

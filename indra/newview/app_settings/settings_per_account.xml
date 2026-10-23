@@ -1,5 +1,16 @@
 <llsd>
     <map>
+    <key>WolfChatCollapsedCategories</key>
+    <map>
+      <key>Comment</key>
+      <string>[WOLF CHAT 2026-10-23] Wolf Chat: the channel categories this account folded away (category ids, at most 500).</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>LLSD</string>
+      <key>Value</key>
+      <array />
+    </map>
     <key>WolfChatSeenGroups</key>
     <map>
       <key>Comment</key>

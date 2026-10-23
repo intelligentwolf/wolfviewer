@@ -27,6 +27,13 @@
      right. Right-click a tile (or keyboard: Alt+Up / Alt+Down, Delete) = Move up / Move down / Remove from Wolf Chat
      (you stay in the group). The group picker (combo) is gone: the rail replaces it. Stack: 64 + 248 + 600 + 224 +
      gaps = 1148; min_width 1088.
+     [2026-10-23] Paul: categories, an emoji per channel, a banner above the channels, Pin / Delete only under the mouse.
+     Persona: a group owner who wants their group to look and feel like home - channels in folding categories, an emoji
+     on each, the group's own picture and tagline on top - and members who see it tidy, with no buttons on every line.
+     Flow (owners): the arrow beside the group's name (or right-click the banner / a heading) -> New category / New text
+     or voice channel / Banner and tagline; right-click a channel -> Edit channel (name, emoji, category), Move up / down;
+     right-click a category (or its +) -> new channel here, rename, move, delete (its channels are kept). Everyone: click
+     a category heading to fold it; click the banner for the group's profile.
      [2026-10-21] Paul: "if on wolf grid and you click the chat on a group it should open the new interface, add the group
      every chat in the new interface should automatically have a #group-chat channel linked to the standard group
      chat". Every server's first text channel is #group-chat = the standard group IM session (shown from the viewer's
@@ -93,7 +100,7 @@
              name="server_name"
              top="8"
              use_ellipses="true"
-             width="228"
+             width="200"
              value="" />
             <wolf_chat_sidebar
              follows="all"
@@ -104,6 +111,19 @@
              tab_stop="true"
              top="32"
              width="232" />
+            <!-- [2026-10-23] Owners: the group menu (new category, new channels, the banner). Shown by the code for owners;
+                 after the sidebar so it draws over the banner's top right corner (the list moves up into the name's place). -->
+            <button
+             follows="right|top"
+             height="22"
+             label="&#x25BE;"
+             layout="topleft"
+             left="214"
+             name="server_menu_btn"
+             tool_tip="Group settings: new category, new channels, the banner (group owners)."
+             top="8"
+             visible="false"
+             width="26" />
             <text
              follows="left|right|bottom"
              font="SansSerifBold"
@@ -328,11 +348,11 @@
             <button
              follows="right|top"
              height="22"
-             label="Rename"
+             label="Edit"
              layout="topleft"
              left="430"
              name="rename_btn"
-             tool_tip="Rename this channel (group owners)."
+             tool_tip="Edit this channel: its name, emoji and category (group owners)."
              top="32"
              width="80" />
             <button

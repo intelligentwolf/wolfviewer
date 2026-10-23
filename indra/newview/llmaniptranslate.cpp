@@ -65,6 +65,8 @@
 // [RLVa:KB] - Checked: 2010-03-23 (RLVa-1.2.0a)
 #include "rlvhandler.h"
 // [/RLVa:KB]
+#include "llviewerregion.h"       // <WolfViewer 2026-10-23/> getPosRegionFromGlobal (objects moved inside a tunnel)
+#include "wolffloatertunnels.h"   // <WolfViewer 2026-10-23/> WolfTunnels::lowestBottom (objects moved inside a tunnel)
 
 const S32 NUM_AXES = 3;
 const S32 MOUSE_DRAG_SLOP = 2;       // pixels
@@ -748,6 +750,19 @@ bool LLManipTranslate::handleHover(S32 x, S32 y, MASK mask)
 
                     // Don't let object centers go too far underground
                     F64 min_height = LLWorld::getInstance()->getMinAllowedZ(object, object->getPositionGlobal());
+                    // <WolfViewer 2026-10-23> TUNNELS: moving INTO a tunnel box (from the rock beside it, or down from above its
+                    // roof) is allowed down to that box's floor too (LLWorld::getMinAllowedZ; the current position only covers a
+                    // move that starts in a box). A new position in no box keeps the stock limit.
+                    if (LLViewerRegion* new_region = LLWorld::getInstance()->getRegionFromPosGlobal(new_position_global))
+                    {
+                        F32 bottom_z = 0.f;
+                        if (new_region == gAgent.getRegion()
+                            && WolfTunnels::lowestBottom(new_region->getPosRegionFromGlobal(new_position_global), bottom_z))
+                        {
+                            min_height = llmin(min_height, (F64)LLWorld::getInstance()->getMinAllowedZ(object, new_position_global));
+                        }
+                    }
+                    // </WolfViewer>
                     if (new_position_global.mdV[VZ] < min_height)
                     {
                         new_position_global.mdV[VZ] = min_height;

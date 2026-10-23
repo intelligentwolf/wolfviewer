@@ -120,6 +120,12 @@ namespace WolfTunnels
     /** Is this region position (agent's region) inside one of the boxes? */
     bool contains(const LLVector3& region_pos);
     /**
+     * [WOLF TUNNELS 2026-10-23] Paul: "when they rez in a cave because it's under the ground they can only move left and right and
+     * not up and down". The lowest floor (box bottom, region metres) of the boxes this region position (agent's region) is in;
+     * false when it is in none. LLWorld::getMinAllowedZ lets an object down to it instead of the land surface above the tunnel.
+     */
+    bool lowestBottom(const LLVector3& region_pos, F32& bottom_z);
+    /**
      * The avatar's head (agent frame) is in a tunnel: pull the wanted camera position (agent frame) back along the line from
      * the head so it stays inside the boxes. False (camera untouched) when the head is in no box.
      */

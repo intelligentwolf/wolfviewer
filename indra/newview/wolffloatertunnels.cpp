@@ -304,6 +304,22 @@ bool WolfTunnels::contains(const LLVector3& region_pos)
     return false;
 }
 
+bool WolfTunnels::lowestBottom(const LLVector3& region_pos, F32& bottom_z)
+{
+    LLViewerRegion* rgn = gAgent.getRegion();
+    if (s_boxes.empty() || !rgn || rgn->getRegionID() != s_boxesRegion) return false;
+    bool found = false;
+    for (const Box& b : s_boxes)
+    {
+        if (!inBox(b, region_pos)) continue;
+        // boxes only turn about +Z (inBox: lz = p.z - c.z), so the bottom is level at c.z - s.z / 2
+        const F32 bottom = b.mCentre.mV[VZ] - b.mSize.mV[VZ] * 0.5f;
+        bottom_z = found ? llmin(bottom_z, bottom) : bottom;
+        found = true;
+    }
+    return found;
+}
+
 bool WolfTunnels::keepCameraInside(const LLVector3& head_agent, LLVector3& camera_agent)
 {
     LLViewerRegion* rgn = gAgent.getRegion();

@@ -914,6 +914,19 @@ F32 LLWorld::getMinAllowedZ(LLViewerObject* object, const LLVector3d &global_pos
 {
     F32 land_height = resolveLandHeightGlobal(global_pos);
     F32 radius = 0.5f * object->getScale().length();
+    // <WolfViewer 2026-10-23> TUNNELS (wolffloatertunnels.cpp): Paul, "when they rez in a cave because it's under the ground they
+    // can only move left and right and not up and down". The build arrows (llmaniptranslate.cpp) and the Z spinner
+    // (llpanelobject.cpp) clamp to this, the land surface over the tunnel, so an object on a tunnel floor could not be moved
+    // there in Z. Inside a tunnel box (the region keeps objects below the ground there, WolfSim WolfUndergroundVolumes) the
+    // limit is the box's floor instead. Agent's region only (the boxes are read for it).
+    LLViewerRegion* regionp = getRegionFromPosGlobal(global_pos);
+    F32 bottom_z = 0.f;
+    if (regionp && regionp == gAgent.getRegion()
+        && WolfTunnels::lowestBottom(regionp->getPosRegionFromGlobal(global_pos), bottom_z))
+    {
+        return llmin(land_height, bottom_z) - radius;
+    }
+    // </WolfViewer>
     return land_height - radius;
 }
 

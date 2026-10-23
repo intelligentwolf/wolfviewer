@@ -700,11 +700,11 @@ namespace WolfLayerData
      * Which of a patch's written cells the region took, judged from what this viewer decoded after the write (`decoded`).
      * `sent` = the height each written cell was sent (NaN: not written); `before` = what this viewer decoded for the patch
      * before the write. Two explanations are modelled - the region holds the sent heights ("took"), or it kept its old ones
-     * (estimated from `before`) - and each written cell goes to whichever its decoded height is nearer. A cell within `near`
+     * (estimated from `before`) - and each written cell goes to whichever its decoded height is nearer. A cell within `tol_near`
      * of its sent height counts as taken without the model (the writer's old test). A fixed tolerance cannot do this: a smooth
      * patch decodes within a few centimetres, a terraced one up to half a metre off (tests/wolfterraformmath_test.cpp).
      */
-    inline void judge(const float* decoded, const float* sent, const float* before, float near, bool* took)
+    inline void judge(const float* decoded, const float* sent, const float* before, float tol_near, bool* took)
     {
         bool fixed[256], none[256];
         float old_heights[256], h_took[256], h_kept[256], d_took[256], d_kept[256];
@@ -717,7 +717,7 @@ namespace WolfLayerData
         for (int k = 0; k < 256; ++k)
         {
             if (!fixed[k]) { took[k] = true; continue; }
-            took[k] = std::fabs(decoded[k] - sent[k]) <= near || std::fabs(decoded[k] - d_took[k]) <= std::fabs(decoded[k] - d_kept[k]);
+            took[k] = std::fabs(decoded[k] - sent[k]) <= tol_near || std::fabs(decoded[k] - d_took[k]) <= std::fabs(decoded[k] - d_kept[k]);
         }
     }
 }

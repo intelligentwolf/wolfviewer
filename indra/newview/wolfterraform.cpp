@@ -105,12 +105,12 @@ namespace WolfTerraform
         Box area{ 0, 0, -1, -1 };
         S32 margin = 1;   // the ground a cell past the area (sample() between cells)
         const F32 water = rgn->getWaterHeight();
-        Polyline line(std::vector<F32>{});
+        RouteLine line(std::vector<F32>{});
         if (isRouteTool(tool))
         {
             std::vector<F32> xy;
             for (const LLVector2& c : clicks) { xy.push_back(c.mV[0]); xy.push_back(c.mV[1]); }
-            line = Polyline(xy);
+            line = RouteLine(xy);
             if (!line.usable()) { plan.mError = "The points are all on one spot - click further along."; return plan; }
             const F32 reach = tool == TOOL_ROAD ? p.roadWidth * 0.5f + p.roadShoulder : p.riverWidth * 0.5f + p.riverBanks;
             area = line.bounds(reach);

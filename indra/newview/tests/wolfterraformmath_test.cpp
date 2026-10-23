@@ -216,7 +216,7 @@ namespace
     void roadBanking()
     {
         const Grid ground = hills(0, 0, 160, 160, 11);
-        const Polyline line({ 20.f, 20.f, 80.f, 40.f, 140.f, 120.f });
+        const RouteLine line({ 20.f, 20.f, 80.f, 40.f, 140.f, 120.f });
         assert(line.usable());
         Profile gp;
         assert(groundProfile(ground, line, gp));
@@ -249,7 +249,7 @@ namespace
     void riverProfile()
     {
         const Grid ground = hills(0, 0, 160, 160, 5);
-        const Polyline line({ 10.f, 80.f, 70.f, 60.f, 150.f, 100.f });
+        const RouteLine line({ 10.f, 80.f, 70.f, 60.f, 150.f, 100.f });
         Profile gp;
         assert(groundProfile(ground, line, gp));
         const Profile bed = riverBed(gp, 5.f, 1.5f, nan());
@@ -469,7 +469,7 @@ namespace
         assert(lv.x0 == x0 - 3 && lv.y0 == y0 - 3 && std::fabs(lv.at(x0 + 10, y0 + 10) - 45.f) < 1e-4f);
         const Grid rp = ramp(g, RampShape{ (float)x0, (float)y0 + 50.f, 40.f, (float)x0 + 60.f, (float)y0 + 50.f, 46.f, 6.f, 3.f }, W);
         assert(std::fabs(rp.at(x0 + 30, y0 + 50) - 43.f) < 1e-3f);
-        const Polyline line({ (float)x0 + 5.f, (float)y0 + 100.f, (float)x0 + 80.f, (float)y0 + 140.f, (float)x0 + 150.f, (float)y0 + 120.f });
+        const RouteLine line({ (float)x0 + 5.f, (float)y0 + 100.f, (float)x0 + 80.f, (float)y0 + 140.f, (float)x0 + 150.f, (float)y0 + 120.f });
         Profile gp;
         assert(line.usable() && groundProfile(g, line, gp));
         const Grid rd = road(g, line, roadProfile(gp, 6.f, true, 0.25f), 6.f, 4.f, W);

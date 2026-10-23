@@ -409,11 +409,11 @@ namespace WolfTerraformMath
 
     // ---- routes (Road / River): a line of clicked points ------------------------------------------------------------------
 
-    struct Polyline
+    struct RouteLine
     {
         std::vector<float> x, y, cum;   // the points and the length along the line to each
         float len = 0.f;
-        explicit Polyline(const std::vector<float>& xy)
+        explicit RouteLine(const std::vector<float>& xy)
         {
             for (size_t i = 0; i + 1 < xy.size(); i += 2)
             {
@@ -479,7 +479,7 @@ namespace WolfTerraformMath
     };
 
     /** The ground along the line, a sample about every metre; false when some of it is not known. */
-    inline bool groundProfile(const Grid& ground, const Polyline& line, Profile& out)
+    inline bool groundProfile(const Grid& ground, const RouteLine& line, Profile& out)
     {
         const int n = std::max(1, (int)std::ceil(line.len));
         out.len = line.len;
@@ -576,7 +576,7 @@ namespace WolfTerraformMath
     }
 
     /** The road across: flat on the strip, the banks eased from the road's height to the ground over `shoulder`. */
-    inline Grid road(const Grid& ground, const Polyline& line, const Profile& prof, float width, float shoulder, int region_w)
+    inline Grid road(const Grid& ground, const RouteLine& line, const Profile& prof, float width, float shoulder, int region_w)
     {
         const float half = width * 0.5f, reach = half + std::max(0.f, shoulder);
         Grid t = areaGrid(line.bounds(reach), 0, region_w);
@@ -602,7 +602,7 @@ namespace WolfTerraformMath
         else z = g + (bed + depth - g) * fall(banks > 0.f ? (d - half) / banks : 1.f);
         return std::min(z, g);
     }
-    inline Grid river(const Grid& ground, const Polyline& line, const Profile& bed, float width, float depth, float banks, int region_w)
+    inline Grid river(const Grid& ground, const RouteLine& line, const Profile& bed, float width, float depth, float banks, int region_w)
     {
         const float half = width * 0.5f, reach = half + std::max(0.f, banks);
         Grid t = areaGrid(line.bounds(reach), 0, region_w);

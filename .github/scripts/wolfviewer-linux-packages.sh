@@ -26,6 +26,22 @@
 # the owning packages become depends=().
 set -euo pipefail
 
+# [2026-10-23] Parcel music (streaming audio) on Linux plays through media_plugin_gstreamer
+# (mime_types_linux.xml audio/* -> media_plugin_gstreamer; llstartup.cpp:1148-1151, OpenAL has no
+# streaming impl). The plugin dlopen()s GStreamer at run time (media_plugin_gstreamer10.cpp:725-728),
+# so the ELF scans above never see it and the packages named nothing: a machine without GStreamer,
+# or without its http source and mp3/aac decoders, had sounds but no music (Binary Pulse, Linux Mint
+# 22.2). Required (Paul: "we should install it automatically"), so every package manager installs it
+# with the viewer - Recommends/optdepends were skipped by Arch and by apt/dnf with weak deps off.
+# Names checked against Debian 12 (apt-cache), Arch (pacman -Si) and packages.fedoraproject.org.
+DEB_GST="libgstreamer1.0-0, libgstreamer-plugins-base1.0-0, gstreamer1.0-plugins-base, gstreamer1.0-plugins-good, gstreamer1.0-plugins-bad, gstreamer1.0-libav"
+RPM_GST="Requires:       gstreamer1
+Requires:       gstreamer1-plugins-base
+Requires:       gstreamer1-plugins-good
+Requires:       gstreamer1-plugins-bad-free
+Requires:       gstreamer1-plugin-libav"
+ARCH_GST="'gstreamer' 'gst-plugins-base' 'gst-plugins-good' 'gst-plugins-bad' 'gst-libav'"
+
 KIND="${1:?deb|rpm|arch}"
 TARBALL="$(readlink -f "${2:?bundle tarball}")"
 VERSION="${3:?version}"
@@ -137,7 +153,7 @@ Section: net
 Priority: optional
 Homepage: https://www.wolf-grid.com/
 Installed-Size: ${SIZE_KB}
-Depends: ${DEPENDS}
+Depends: ${DEPENDS}, ${DEB_GST}
 Description: ${DESC_SHORT}
  ${DESC_LONG}
 EOF
@@ -173,6 +189,7 @@ Summary:        ${DESC_SHORT}
 License:        LGPL-2.1-only
 URL:            https://www.wolf-grid.com/
 ExclusiveArch:  x86_64
+${RPM_GST}
 
 %description
 ${DESC_LONG}
@@ -226,7 +243,7 @@ pkgdesc="${DESC_SHORT}"
 arch=('x86_64')
 url="https://www.wolf-grid.com/"
 license=('LGPL-2.1-only')
-depends=(${DEPS})
+depends=(${DEPS} ${ARCH_GST})
 # The tree is the released build as it is: nothing stripped, rebuilt or re-linked.
 options=('!strip' '!debug' '!lto' '!emptydirs')
 install=wolfviewer.install

@@ -34,8 +34,9 @@
                 <text text_color="0.95 0.92 0.84 1" follows="left|top" height="36" layout="topleft" left="36" name="start_how" top="54" width="514" halign="center" word_wrap="true">1. Choose a WolfAvatar.  2. Say what it says to visitors, or give it a personality.  3. Rez: it appears 2 m in front of you.</text>
                 <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" halign="left" pad_left="62" font="SansSerifBold" follows="left|top" height="72" label="Use my avatar" layout="topleft" left="16" name="use_mine_btn" top="110" width="180" tool_tip="Choose one of the WolfAvatars you have made" />
                 <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" halign="left" pad_left="62" font="SansSerifBold" follows="left|top" height="72" label="Create a new one" layout="topleft" left="206" name="create_new_btn" top="110" width="180" tool_tip="Make a new character in WolfAvatars; it comes back here to be rezzed" />
-                <!-- [ROUND C] the third card: a pet of your own that follows you (PROTOCOL.md §26) -->
-                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" halign="left" pad_left="62" font="SansSerifBold" follows="left|top" height="72" label="Make a pet" layout="topleft" left="396" name="make_pet_btn" top="110" width="180" tool_tip="One of your animals follows you about - across the grid if you like - and goes to your home when you log out" />
+                <!-- [ROUND C] the third card: a pet of your own that follows you (PROTOCOL.md §26); [WOLF PETS 2026-10-24] shown on every Wolf
+                     region, as Wear it (§29) needs nothing of the region -->
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" halign="left" pad_left="62" font="SansSerifBold" follows="left|top" height="72" label="Make a pet" layout="topleft" left="396" name="make_pet_btn" top="110" width="180" tool_tip="One of your animals as your pet: wear it and it walks beside you everywhere. Free." />
                 <text follows="left|top" height="48" layout="topleft" left="16" name="create_new_note" top="190" width="560" word_wrap="true" text_color="0.80 0.82 0.86 1">Create a new one opens WolfAvatars (it shows the price first); when it is made it comes back here. A pet follows you about, and goes home when you log out. Nothing here needs Game Mode.</text>
                 <text text_color="0.95 0.92 0.84 1" follows="left|top" height="64" layout="topleft" left="36" name="new_wait" top="250" width="520" word_wrap="true" />
                 <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="28" label="Rez it as an NPC" layout="topleft" left="36" name="new_rez_btn" top="320" width="250" visible="false" />
@@ -60,9 +61,36 @@
                 <line_editor follows="left|top" height="22" layout="topleft" left="70" max_length_chars="48" name="quick_name" top="56" width="300"
                  tool_tip="Shown in chat and in the list (1 to 48 characters)." />
                 <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="6" name="says_lbl" top="88" width="574">What does it say to visitors?</text>
-                <check_box follows="left|top" height="18" layout="topleft" left="6" name="quick_travel" top="90" width="574" label="Follow me everywhere (across the grid)" visible="false"
+                <check_box follows="left|top" height="18" layout="topleft" left="6" name="quick_travel" top="108" width="574" label="Follow me everywhere (across the grid)" visible="false"
                  tool_tip="It goes with you when you teleport or cross into another region, and to your home when you log out. One travelling pet per person." />
-                <text text_color="0.80 0.82 0.86 1" follows="left|top" height="32" layout="topleft" left="26" name="pet_note" top="110" width="554" word_wrap="true" visible="false">It follows you at about 2.5 m, sits when you sit and makes animal noises (free). Off: it stays round where you rez it.</text>
+                <text text_color="0.80 0.82 0.86 1" follows="left|top" height="28" layout="topleft" left="26" name="pet_note" top="126" width="554" word_wrap="true" visible="false">It follows you at about 2.5 m, sits when you sit and makes animal noises (free). Off: it stays round where you rez it.</text>
+                <!-- [WOLF PETS 2026-10-24] PROTOCOL.md §29.4 "Make a pet": the first choice, Wear it (the default) or Let it roam.
+                     Let it roam is the §26 create (the rows above) and is offered only where the region offers pets (its hello carries
+                     "rules"); elsewhere the choice is not shown and Make a pet is Wear it. Wear it calls the brain's wolfpet_make (§29.2):
+                     no region rights, no NPC, free. -->
+                <radio_group follows="left|top" height="18" layout="topleft" left="6" name="pet_how" top="86" width="574" visible="false"
+                 tool_tip="Wear it: an object you wear, so it goes everywhere you go. Let it roam: an NPC on this region that follows you about here.">
+                    <radio_item height="18" label="Wear it (it goes everywhere with you)" layout="topleft" left="0" name="wear" top="0" value="wear" width="290">
+<radio_item.label_text text_color="0.95 0.92 0.84 1" />
+</radio_item>
+                    <radio_item height="18" label="Let it roam (on this region)" layout="topleft" left="296" name="roam" top="0" value="roam" width="270">
+<radio_item.label_text text_color="0.95 0.92 0.84 1" />
+</radio_item>
+                </radio_group>
+                <panel follows="left|top" height="150" layout="topleft" left="0" name="wear_panel" top="110" width="592" visible="false" background_visible="false" border="false">
+                    <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="6" name="wear_side_lbl" top="3" width="60">Side</text>
+                    <combo_box follows="left|top" height="22" layout="topleft" left="70" name="wear_side" top="0" width="140"
+                     tool_tip="Where it walks: beside your left, beside your right, or behind you. You can change it later from its own menu (touch it).">
+                        <combo_box.item label="Left side" name="left" value="left" />
+                        <combo_box.item label="Right side" name="right" value="right" />
+                        <combo_box.item label="Behind me" name="behind" value="behind" />
+                    </combo_box>
+                    <spinner follows="left|top" height="22" layout="topleft" left="236" name="wear_distance" top="0" width="170" label="Distance (m)" label_width="84"
+                     min_val="1" max_val="1.5" increment="0.1" initial_value="1.2" decimal_digits="1"
+                     tool_tip="How far from you it walks: 1.0 to 1.5 metres" />
+                    <text follows="left|top" height="48" layout="topleft" left="6" name="wear_note" top="30" width="574" word_wrap="true" text_color="0.80 0.82 0.86 1">It is made as an object in your inventory (Objects &gt; WolfPets). Choose Add to wear it and it walks beside you on every region, through every teleport. Touch it for its menu: sit, noises, volume, position. Free: no Wolf Credits.</text>
+                    <text text_color="0.95 0.92 0.84 1" follows="left|top" height="64" layout="topleft" left="6" name="wear_result" top="82" width="574" word_wrap="true" />
+                </panel>
                 <line_editor follows="left|top" height="22" layout="topleft" left="6" max_length_chars="200" name="says" top="106" width="574"
                  label="Welcome to my land!" tool_tip="Said once a visit to anyone who comes within 8 m. Leave it empty for a quiet one." />
                 <text follows="left|top" height="16" layout="topleft" left="6" name="says_note" top="130" width="574" text_color="0.80 0.82 0.86 1">Said once a visit to anyone who comes within 8 m. Leave it empty for a quiet one.</text>

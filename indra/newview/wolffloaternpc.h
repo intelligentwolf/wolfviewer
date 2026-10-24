@@ -36,6 +36,7 @@ class LLCheckBoxCtrl;
 class LLComboBox;
 class LLLineEditor;
 class LLPanel;
+class LLRadioGroup;
 class LLScrollContainer;
 class LLScrollListCtrl;
 class LLSliderCtrl;
@@ -331,6 +332,11 @@ private:
     void showNewStep(ENewStep step);
     /** [ROUND C] "Make a pet": animals only, Follow me everywhere, Rez beside the owner. */
     void setPetMode(bool pet);
+    /** [WOLF PETS 2026-10-24] PROTOCOL.md §29.4 Make a pet's first choice: Wear it (true, the default) or Let it roam (the §26
+     *  create, offered only where petsSupported()). Shows the quick step's rows for that choice. */
+    void setWearPet(bool wear);
+    /** [WOLF PETS] Wear it: the brain's wolfpet_make {job, name, side, distance} (§29.2), the answer shown in the window. */
+    void onWearMake();
     /** [ROUND C GATE] the region's hello carries "rules" (PROTOCOL.md §26.5): pets, noises and their rules are offered. */
     bool petsSupported() const;
     void applyPetSupport();
@@ -404,6 +410,13 @@ private:
     LLButton* mRezBtn = nullptr;
     bool mPetMode = false;
     LLCheckBoxCtrl* mQuickTravel = nullptr;
+    // [WOLF PETS 2026-10-24] §29.4 Wear it / Let it roam
+    bool mWearPet = true;
+    LLRadioGroup* mPetHow = nullptr;
+    LLPanel* mWearPanel = nullptr;
+    LLComboBox* mWearSide = nullptr;
+    LLSpinCtrl* mWearDistance = nullptr;
+    LLTextBox* mWearResult = nullptr;
     LLButton* mSendHomeBtn = nullptr;
     std::map<std::string, bool> mTravelOf;   // NPC id -> its cfg.travel, as get said
     ENewStep mNewStep = NEW_START;

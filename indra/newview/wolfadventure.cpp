@@ -1935,7 +1935,8 @@ void WolfAdventure::api(const std::string& action, const LLSD& body, api_callbac
     // [WOLF STORY FIRST 2026-10-17] the helper's turns wait for the AI: the brain allows up to 600 s for a drafting turn and
     // 90 s for an edit (wolfadventure_story_lib.php:52-53), job_apply merges a whole pack; every other call keeps 60 s
     // [GAME CARD 2026-10-18] import_start carries the whole file (at most 20 MB, as base64): 300 s for the upload
-    const S32 timeout_sec = action == "helper_chat" ? 660 : action == "import_start" ? 300 : (action == "job_apply" || action == "helper_undo"
+    // [WOLF PETS 2026-10-24] wolfpet_make waits for wolfpet.py: WPET_WAIT 120 s (wolfstorm/php/wolfpet_lib.php:32), so 150 s here
+    const S32 timeout_sec = action == "helper_chat" ? 660 : action == "import_start" ? 300 : action == "wolfpet_make" ? 150 : (action == "job_apply" || action == "helper_undo"
                                                                       || action == "update_preview" || action == "update_live" || action == "update_undo") ? 120 : 60;   // [M7] the preview may ask the helper (WAL_HELPER_TIMEOUT 45 s)
     LLCoros::instance().launch("WolfAdventure " + action, [text, done, timeout_sec]()
     {

@@ -34,6 +34,7 @@
 #include "llimage.h"
 #include "lllineeditor.h"
 #include "llpanel.h"
+#include "llradiogroup.h"
 #include "llrender.h"
 #include "llrender2dutils.h"
 #include "llscrollcontainer.h"
@@ -240,7 +241,7 @@ namespace
     // Source: PROTOCOL.md section 6 "up to 16" reactions, "do (up to 6)", m 1-96, cooldown 0-86400, gap 1-1440
     const S32 MAX_RULES = 16, MAX_DO = 6;
     // Source: PROTOCOL.md section 3 - places up to 16, routine up to 12, name 1-48, pack 0-24, place names 1-24
-    const size_t MAX_PLACES = 16, MAX_ROUTINE = 12;
+    const size_t MAX_ROUTINE = 12;   // places: wolffloaternpcmind.cpp MAX_PLACES
     // Source: PROTOCOL.md section 10 "at `speed` (at most 20 m/s)"
     // Source: PROTOCOL.md section 8 - built-in animation names per kind (not the tail_* set)
     const char* const ANIMAL_ANIMS[] = { "animal_stand", "animal_walk", "animal_run", "animal_sit", "animal_lie", "avatar_talk",
@@ -1481,8 +1482,20 @@ bool WolfFloaterNPC::postBuild()
     mStartPanel->getChild<LLButton>("use_mine_btn")->setCommitCallback([this](LLUICtrl*, const LLSD&) { mHasSpot = false; setPetMode(false); showNewStep(NEW_PICK); });
     mStartPanel->getChild<LLButton>("create_new_btn")->setCommitCallback([this](LLUICtrl*, const LLSD&) { setPetMode(false); onCreateNew(); });
     // [ROUND C] Make a pet (PROTOCOL.md §26.1): an animal WolfAvatar, a name, Follow me everywhere, personality optional
+    // [WOLF PETS 2026-10-24] §29.4: Make a pet starts on Wear it (the default); Let it roam is the §26 create above
     mStartPanel->getChild<LLButton>("make_pet_btn")->setCommitCallback([this](LLUICtrl*, const LLSD&) { mHasSpot = false; setPetMode(true); showNewStep(NEW_PICK); });
     mQuickTravel = mQuickPanel->getChild<LLCheckBoxCtrl>("quick_travel");
+    mPetHow = mQuickPanel->getChild<LLRadioGroup>("pet_how");
+    mWearPanel = mQuickPanel->getChild<LLPanel>("wear_panel");
+    mWearSide = mWearPanel->getChild<LLComboBox>("wear_side");
+    mWearDistance = mWearPanel->getChild<LLSpinCtrl>("wear_distance");
+    mWearResult = mWearPanel->getChild<LLTextBox>("wear_result");
+    mPetHow->setCommitCallback([this](LLUICtrl*, const LLSD&)
+    {
+        clearStatus();
+        mWearResult->setText(LLStringUtil::null);
+        setWearPet(mPetHow->getSelectedValue().asString() != "roam");
+    });
     mNewWait = mStartPanel->getChild<LLTextBox>("new_wait");
     mNewRezBtn = mStartPanel->getChild<LLButton>("new_rez_btn");
     mNewRezBtn->setCommitCallback([this](LLUICtrl*, const LLSD&) { onNewRez(); });
@@ -1879,37 +1892,21 @@ void WolfFloaterNPC::applyPetSupport()
     const bool pets = petsSupported();
     LLButton* mine = mStartPanel->getChild<LLButton>("use_mine_btn");
     LLButton* fresh = mStartPanel->getChild<LLButton>("create_new_btn");
-    LLButton* pet = mStartPanel->getChild<LLButton>("make_pet_btn");
-    pet->setVisible(pets);
-    // two cards (rounds 4 + B) or three (round C): same places on the 36 / 306 grid, or the 16 / 206 / 396 one
-    auto place = [](LLButton* b, S32 left, S32 width)
-    {
-        const LLRect r = b->getRect();
-        b->setRect(LLRect(left, r.mTop, left + width, r.mBottom));
-    };
-    if (pets)
-    {
-        place(mine, 16, 180);
-        place(fresh, 206, 180);
-        mine->setLabel(std::string("Use my avatar"));
-        mine->setFont(LLFontGL::getFontSansSerifBold());
-        fresh->setFont(LLFontGL::getFontSansSerifBold());
-    }
-    else
-    {
-        place(mine, 36, 250);
-        place(fresh, 306, 250);
-        mine->setLabel(std::string("Use one of my avatars"));
-        mine->setFont(LLFontGL::getFontByName("SansSerifLarge"));
-        fresh->setFont(LLFontGL::getFontByName("SansSerifLarge"));
-    }
+    // [WOLF PETS 2026-10-24] the three cards on every Wolf region (the 16 / 206 / 396 grid, floater_wolf_npc.xml): Make a pet
+    // is Wear it (PROTOCOL.md §29) where the region has no pets, and needs nothing of the region
+    mine->setLabel(std::string("Use my avatar"));
+    mine->setFont(LLFontGL::getFontSansSerifBold());
+    fresh->setFont(LLFontGL::getFontSansSerifBold());
     mStartPanel->getChild<LLTextBox>("create_new_note")->setText(std::string(pets
-        ? "Create a new one opens WolfAvatars (it shows the price first); when it is made it comes back here. A pet follows you about, and goes home when you log out. Nothing here needs Game Mode."
-        : "Create a new one opens WolfAvatars (it shows the price first). When it is made, it comes back here to be rezzed where you stand now."));
-    if (!pets && mPetMode)
+        ? "Create a new one opens WolfAvatars (it shows the price first); when it is made it comes back here. Make a pet: wear one of your animals and it walks beside you everywhere, or let it roam here as an NPC that follows you about. Nothing here needs Game Mode."
+        : "Create a new one opens WolfAvatars (it shows the price first); when it is made it comes back here. Make a pet: wear one of your animals and it walks beside you everywhere you go. Nothing here needs Game Mode."));
+    if (mPetMode)
     {
-        setPetMode(false);
-        if (mNewStep != NEW_START) showNewStep(NEW_START);
+        // Let it roam is offered only while the region offers pets (setWearPet); a roaming pet begun on such a region becomes
+        // one to wear on a region without them
+        const bool was_roam = !mWearPet;
+        setWearPet(mWearPet);
+        if (was_roam && mWearPet) setDone("This region does not offer roaming pets, so your pet will be one you wear.");
     }
     // the region tab: the cards as tall as round 4's when there are no rules rows
     const LLRect sr = mCardScroll->getRect();
@@ -1929,12 +1926,45 @@ void WolfFloaterNPC::setPetMode(bool pet)
     mPetMode = pet;
     // the quick step: a pet has "Follow me everywhere" where a greeter has its welcome line
     for (const char* n : { "says_lbl", "says", "says_note" }) mQuickPanel->getChild<LLView>(n)->setVisible(!pet);
-    mQuickTravel->setVisible(pet);
-    mQuickPanel->getChild<LLView>("pet_note")->setVisible(pet);
     if (pet) mQuickTravel->set(true);
     mQuickPanel->getChild<LLTextBox>("step2_lbl")->setText(std::string(pet ? "2. Your pet" : "2. What does it do?"));
-    mRezBtn->setLabel(std::string(pet ? "Rez my pet" : "Rez"));
+    mWearResult->setText(LLStringUtil::null);
+    setWearPet(true);   // [WOLF PETS] PROTOCOL.md §29.4 "Wear it" (default); a greeter hides the pet rows
     buildGrid();
+}
+
+void WolfFloaterNPC::setWearPet(bool wear)
+{
+    // Source: PROTOCOL.md §29.4 "First choice: Wear it (default) or Let it roam ... Let it roam: the §26 create, as now".
+    // Let it roam only where the region offers pets: petsSupported() is hello "rules", which the region sends only while
+    // roaming pets are on (WolfNPCModule.Viewer.cs:318-324 NpcCfg.TravelAllowed); elsewhere the window keeps them hidden.
+    const bool roam_ok = petsSupported();
+    mWearPet = wear || !roam_ok;
+    const bool wearing = mPetMode && mWearPet, roaming = mPetMode && !mWearPet;
+    mPetHow->setVisible(mPetMode && roam_ok);
+    mPetHow->setValue(LLSD(mWearPet ? "wear" : "roam"));
+    // the wear rows take the choice's place when it is not shown (floater_wolf_npc.xml: pet_how top 86, wear_panel top 110)
+    const S32 ph = mQuickPanel->getRect().getHeight(), top = mPetHow->getVisible() ? 110 : 86;
+    const LLRect wr = mWearPanel->getRect();
+    mWearPanel->setRect(LLRect(wr.mLeft, ph - top, wr.mRight, ph - top - wr.getHeight()));
+    mWearPanel->setVisible(wearing);
+    mQuickTravel->setVisible(roaming);
+    mQuickPanel->getChild<LLView>("pet_note")->setVisible(roaming);
+    // a worn pet is no NPC (§29.4): no AI talk, no NPC settings, no region count
+    for (const char* n : { "quick_ai", "quick_personality", "quick_ai_line", "more_btn", "create_note" }) mQuickPanel->getChild<LLView>(n)->setVisible(!wearing);
+    if (wearing && mNewScroll->getVisible())
+    {
+        mNewScroll->setVisible(false);
+        mMoreBtn->setToggleState(false);
+        mMoreBtn->setLabel(std::string("\xE2\x96\xB8  More options"));
+    }
+    // Source: wolfpet_lib.php:34 WPET_NAME_CHARS = 40 (wolfpet.py:88 NAME_MAX: "<name> (wear me)" within 63 characters)
+    mQuickName->setMaxTextChars(wearing ? 40 : 48);
+    mQuickName->setToolTip(std::string(wearing ? "Your pet's name, 1 to 40 characters. In your inventory it is \"<name> (wear me)\"."
+                                               : "Shown in chat and in the list (1 to 48 characters)."));
+    mRezBtn->setLabel(std::string(wearing ? "Make my pet" : mPetMode ? "Rez my pet" : "Rez"));
+    if (mNewStep == NEW_QUICK && wearing) mRezBtn->setToolTip(std::string("It goes into your inventory: Objects > WolfPets. Free."));
+    else if (mNewStep == NEW_QUICK && roaming) mRezBtn->setToolTip(std::string("It appears beside you"));
 }
 
 void WolfFloaterNPC::showNewStep(ENewStep step)
@@ -1947,7 +1977,8 @@ void WolfFloaterNPC::showNewStep(ENewStep step)
     {
         const S32 i = mGrid->mSelected;
         if (i < 0 || i >= (S32)mGrid->mItems.size()) { showNewStep(NEW_PICK); return; }
-        if (mPetMode) mRezBtn->setToolTip(std::string("It appears beside you"));
+        if (mPetMode && mWearPet) mRezBtn->setToolTip(std::string("It goes into your inventory: Objects > WolfPets. Free."));
+        else if (mPetMode) mRezBtn->setToolTip(std::string("It appears beside you"));
         else if (mHasSpot) mRezBtn->setToolTip(std::string("It appears at the spot you chose before WolfAvatars made it"));
         else mRezBtn->setToolTip(std::string("It appears 2 m in front of you, facing you"));
         mQuickName->setFocus(true);
@@ -1958,6 +1989,28 @@ void WolfFloaterNPC::showNewStep(ENewStep step)
 void WolfFloaterNPC::onCreateNew()
 {
     clearStatus();
+    if (mPetMode && mWearPet)
+    {
+        // [WOLF PETS] a pet to wear needs no spot: the new animal comes back here to be made into the pet (§29.4)
+        LLHandle<LLFloater> h = getHandle();
+        ask("Make a new animal in WolfAvatars? It shows its price in Wolf Credits before anything is spent. When it is made, it comes back here to become your pet.",
+            "Make a new animal", [h]()
+        {
+            WolfFloaterNPC* self = dynamic_cast<WolfFloaterNPC*>(h.get());
+            if (!self) return;
+            self->mHasSpot = false;
+            self->mWaitingNew = true;
+            self->mNewJob.clear();
+            self->mKnownJobs.clear();
+            for (const LLSD& a : llsd::inArray(self->mAvatars)) self->mKnownJobs.insert(a["job"].asString());
+            self->mNewWait->setText(std::string("Making a new animal in the WolfAvatars window. Describe it, get the price, pick a picture - when it is made it comes back here to become your pet."));
+            self->mNewWait->setColor(normalText());
+            self->mNewRezBtn->setVisible(false);
+            self->mNewWaitStop->setVisible(true);
+            self->openWolfAvatars();
+        });
+        return;
+    }
     LLVector3 pos, agent;
     F32 facing = 0.f;
     if (!placeInFront(pos, facing, agent)) { setError("Your position is not known yet - try again in a moment."); return; }
@@ -2000,8 +2053,17 @@ void WolfFloaterNPC::onCharacterDone(const std::string& job, const std::string& 
     }
     mNewJob = job;
     mNewJobName = name.empty() ? std::string("Your new WolfAvatar") : name;
-    mNewWait->setText(mNewJobName + " is made and is now one of your WolfAvatars. Rez it as an NPC at the spot you chose, or choose it later from Use one of my avatars.");
-    mNewRezBtn->setLabel("Rez " + cap(mNewJobName, 30) + " as an NPC");
+    if (mPetMode && mWearPet)
+    {
+        // [WOLF PETS] §29.4 Wear it
+        mNewWait->setText(mNewJobName + " is made and is now one of your WolfAvatars. Make it your pet now, or later from Make a pet.");
+        mNewRezBtn->setLabel("Make " + cap(mNewJobName, 30) + " my pet");
+    }
+    else
+    {
+        mNewWait->setText(mNewJobName + " is made and is now one of your WolfAvatars. Rez it as an NPC at the spot you chose, or choose it later from Use one of my avatars.");
+        mNewRezBtn->setLabel("Rez " + cap(mNewJobName, 30) + " as an NPC");
+    }
     mNewRezBtn->setVisible(true);
     mNewWaitStop->setVisible(true);
     loadAvatars();   // it is in their list now (npc_avatars), for this and for later
@@ -2787,6 +2849,7 @@ void WolfFloaterNPC::onRez()
 {
     clearStatus();
     if (mCreating) return;
+    if (mPetMode && mWearPet) { onWearMake(); return; }   // [WOLF PETS] §29.4 Wear it: the brain makes it, nothing is rezzed
     const S32 i = mGrid->mSelected;
     if (i < 0 || i >= (S32)mGrid->mItems.size())
     {
@@ -2878,6 +2941,73 @@ void WolfFloaterNPC::onRez()
         return;
     }
     doCreate(fields, name);
+}
+
+void WolfFloaterNPC::onWearMake()
+{
+    // [WOLF PETS 2026-10-24] Wear it. Source: PROTOCOL.md §29.2 wolfpet_make {job, name?, side?, distance?} and §29.4 (what the
+    // window shows); wolfstorm/php/wolfpet_lib.php:108-153 wa_api_wolfpet_make (the brain's own checks, repeated here first)
+    mWearResult->setText(LLStringUtil::null);
+    const S32 i = mGrid->mSelected;
+    if (i < 0 || i >= (S32)mGrid->mItems.size())
+    {
+        setError(mGrid->mItems.empty() ? std::string("You have no animal WolfAvatars yet - make one first (Make a new animal).")
+                                       : std::string("Choose one of your animals first (step 1)."));
+        return;
+    }
+    const WolfNPCAvatarGrid::Item& it = mGrid->mItems[(size_t)i];
+    // Source: wolfpet_lib.php:110 - the brain's own words
+    if (it.mKind != "animal") { setError("Only WolfAvatars animals can be worn as pets."); return; }
+    // Source: wolfpet_lib.php:111-113 - at most WPET_NAME_CHARS (:34, 40) characters, '"' and '\' dropped, then "Give your pet a name."
+    std::string name = mQuickName->getText();
+    name.erase(std::remove_if(name.begin(), name.end(), [](char c) { return c == '"' || c == '\\'; }), name.end());
+    name = trimmed(name);
+    if (name.empty()) { setError("Give your pet a name."); mQuickName->setFocus(true); return; }
+    if (utf8Chars(name) > 40) { setError("Your pet's name is at most 40 characters."); mQuickName->setFocus(true); return; }
+    // Source: wolfpet_lib.php:35 WPET_SIDES left|right|behind (default left), :36-38 distance 1.0-1.5 m (default 1.2)
+    std::string side = mWearSide->getValue().asString();
+    if (side != "left" && side != "right" && side != "behind") side = "left";
+    const F64 distance = llclamp((F64)std::lround((F64)mWearDistance->get() * 10.0) / 10.0, 1.0, 1.5);
+    LLSD body;
+    body["job"] = it.mJob;
+    body["name"] = name;
+    body["side"] = side;
+    body["distance"] = distance;
+    mCreating = true;
+    mRezBtn->setEnabled(false);
+    setDone("Making " + name + "...");
+    mWearResult->setText("Making " + name + " from your WolfAvatar. This can take a minute or two - you can keep playing.");
+    mWearResult->setColor(normalText());
+    LLHandle<LLFloater> h = getHandle();
+    WolfAdventure::api("wolfpet_make", body, [h, name](bool ok, const LLSD& reply, const std::string& error)
+    {
+        WolfFloaterNPC* self = dynamic_cast<WolfFloaterNPC*>(h.get());
+        if (!self) return;
+        self->mCreating = false;
+        self->mRezBtn->setEnabled(true);
+        if (!ok)
+        {
+            // Source: PROTOCOL.md §29.2 "Refusals (success false, plain British English, shown as they are)"; §29.4 "its error"
+            const std::string why = error.empty() ? std::string("Your pet could not be made. Try again in a minute.") : cap(error, 500);
+            self->setError(why, reply);
+            self->mWearResult->setText(why);
+            self->mWearResult->setColor(caution());
+            return;
+        }
+        // Source: wolfpet_lib.php:149-153 {item, name, folder, folderName, ..., wearer {body, measured}}; the item is
+        // "<name> (wear me)" (wolfpet.py:785)
+        std::string pet = cap(reply["name"].asString(), 63);
+        const std::string tail(" (wear me)");
+        if (pet.size() > tail.size() && pet.compare(pet.size() - tail.size(), tail.size(), tail) == 0) pet.erase(pet.size() - tail.size());
+        if (pet.empty()) pet = name;
+        const std::string folder = reply["folderName"].asString().empty() ? std::string("WolfPets") : cap(reply["folderName"].asString(), 64);
+        // Source: PROTOCOL.md §29.4 - the words on success, and the height hint when wearer.measured is false
+        std::string words = pet + " is in your inventory: Objects > " + folder + ". Choose Add to wear it - it walks beside you everywhere.";
+        if (!reply["wearer"]["measured"].asBoolean()) words += " If its feet float or sink, touch it and use Position > Higher or Lower.";
+        self->setDone(pet + " is in your inventory: Objects > " + folder + ". Choose Add to wear it.");
+        self->mWearResult->setText(words);
+        self->mWearResult->setColor(normalText());
+    });
 }
 
 void WolfFloaterNPC::doCreate(const LLSD& fields, const std::string& name)

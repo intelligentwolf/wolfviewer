@@ -35,6 +35,11 @@ public:
     // [WOLF DJ 2026-10-19] public for chat control ("playlist <name>", wolfdjchatcontrol.cpp)
     void selectList(const std::string& name);
 
+    // [WOLF DJ 2026-10-24] Make the playlist called `wanted` (any case) the one that plays: through the window
+    // when it exists, so its list and combo stay right, otherwise the settings and the player directly. Used by
+    // chat control ("playlist <name>") and the mixer's playlist picker (wolffloaterdj.cpp). False: no such list.
+    static bool choosePlaylist(const std::string& wanted, std::string& chosen);
+
 private:
     struct Entry
     {
@@ -64,6 +69,7 @@ private:
     void renameList();
     void deleteList();
     void showError(const std::string& text);    // stays until the next action that works
+    void showNote(const std::string& text);     // [WOLF DJ 2026-10-24] the same line, not in red: what just worked
     void refreshChatControlNote();              // [WOLF DJ 2026-10-19] chat control's one-line help
 
     LLComboBox* mLists = nullptr;
@@ -71,6 +77,8 @@ private:
     LLSD mPlaylists;                // name -> array of files
     std::string mCurrentList;
     std::string mUiError;
+    bool mUiIsNote = false;         // mUiError is a note (showNote), not an error
+    bool mShownNote = false;        // error_text's colour now: false = red, as in the XML
 
     LLScrollListCtrl* mBrowser = nullptr;
     LLScrollListCtrl* mPlaylist = nullptr;

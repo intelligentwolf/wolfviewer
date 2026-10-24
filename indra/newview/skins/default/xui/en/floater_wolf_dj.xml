@@ -93,8 +93,11 @@
     <button follows="right|bottom" height="20" label="Send title" layout="topleft" left="684" name="send_title" top="642" width="88" tool_tip="Show this to listeners as the song playing now." />
     <button follows="left|bottom" height="28" image_color="ButtonImageColor" label="Go Live" layout="topleft" left="10" name="go_live" top="672" width="110" font="SansSerifBold" />
     <button follows="left|bottom" height="28" label="Playlist..." layout="topleft" left="126" name="open_playlist" top="672" width="90" tool_tip="Open the Wolf DJ playlist: pick songs from your computer and play them on a music channel." />
+    <!-- [WOLF DJ 2026-10-24] Paul: "i can't find playlists in the dj software part" - the named playlists were only
+         in the Playlist window. This picks which one plays, the same as the Playlist window's own list (wolffloaterdj.cpp). -->
+    <combo_box follows="left|bottom" height="22" layout="topleft" left="222" name="playlist_pick" top="675" width="150" tool_tip="Which playlist plays. Picking another while a song plays lets that song finish first. Make, rename and fill playlists in the Playlist... window." />
     <!-- [WOLF DJ 2026-10-16] My Shows (wolffloaterdjshows.cpp); hidden off Wolf Territories, status_text then moves left (wolffloaterdj.cpp onOpen). -->
-    <button follows="left|bottom" height="28" label="My Shows..." layout="topleft" left="222" name="my_shows" top="672" width="90" tool_tip="Your past shows and how many people listened to each." />
-    <text follows="left|right|bottom" font="SansSerifBold" height="34" layout="topleft" left="318" name="status_text" top="672" width="454" wrap="true">Off air.</text>
+    <button follows="left|bottom" height="28" label="My Shows..." layout="topleft" left="378" name="my_shows" top="672" width="90" tool_tip="Your past shows and how many people listened to each." />
+    <text follows="left|right|bottom" font="SansSerifBold" height="34" layout="topleft" left="474" name="status_text" top="672" width="298" wrap="true">Off air.</text>
     <text follows="left|right|bottom" height="32" layout="topleft" left="10" name="land_note" top="708" width="762" wrap="true" text_color="LtGray_50" />
 </floater>

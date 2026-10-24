@@ -54,43 +54,6 @@ namespace
                             : llformat("song %d of %d, %s", index + 1, count, name.c_str());
     }
 
-    // The same as picking the playlist in the window (WolfFloaterDJPlaylist::selectList): the window does it
-    // when it is open, so its list and combo stay right; otherwise the settings and the player directly.
-    bool choose_playlist(const std::string& wanted, std::string& chosen)
-    {
-        const LLSD lists = gSavedSettings.getLLSD("WolfDJPlaylists");
-        if (!lists.isMap())
-            return false;
-        for (LLSD::map_const_iterator it = lists.beginMap(); it != lists.endMap(); ++it)
-        {
-            std::string a = it->first, b = wanted;
-            LLStringUtil::toLower(a);
-            LLStringUtil::toLower(b);
-            if (a != b)
-                continue;
-            chosen = it->first;
-            if (WolfFloaterDJPlaylist* floater = LLFloaterReg::findTypedInstance<WolfFloaterDJPlaylist>("wolf_dj_playlist"))
-            {
-                floater->selectList(chosen);
-                return true;
-            }
-            std::vector<std::string> files;
-            LLSD arr = LLSD::emptyArray();
-            for (const LLSD& f : llsd::inArray(it->second))
-            {
-                if (f.isString())
-                {
-                    files.push_back(f.asString());
-                    arr.append(f);
-                }
-            }
-            gSavedSettings.setString("WolfDJPlaylistCurrent", chosen);
-            gSavedSettings.setLLSD("WolfDJPlaylist", arr);
-            WolfDJPlayer::instance().setFiles(files);   // a song playing now finishes first
-            return true;
-        }
-        return false;
-    }
 }
 
 bool WolfDJChatControl::sTyped = false;
@@ -231,7 +194,7 @@ void WolfDJChatControl::run(const std::string& command_in, bool quiet)
     else if (command == "playlist")
     {
         std::string chosen;
-        if (arg.empty() || !choose_playlist(arg, chosen))
+        if (arg.empty() || !WolfFloaterDJPlaylist::choosePlaylist(arg, chosen))
         {
             say(arg.empty() ? std::string("which playlist? (playlist <name>)")
                             : "there is no playlist called \"" + arg + "\".");

@@ -18,12 +18,14 @@
 #include "llbutton.h"
 #include "llcheckboxctrl.h"
 #include "llcombobox.h"
+#include "llfloaterreg.h"
 #include "lllineeditor.h"
 #include "llnotificationsutil.h"
 #include "llscrolllistctrl.h"
 #include "llspinctrl.h"
 #include "llscrolllistitem.h"
 #include "lltextbox.h"
+#include "lluicolortable.h"
 #include "llviewercontrol.h"
 
 #include <algorithm>
@@ -290,14 +292,67 @@ void WolfFloaterDJPlaylist::addSelected()
     addFiles(paths);
 }
 
+// [WOLF DJ 2026-10-24] Paul: "there is add a folder which doesn't do anything". It took only the songs lying
+// directly in the folder shown, so a Music folder of artist/album folders added nothing, and said nothing.
+// Now it takes the folder picked on the left (else the one shown) with every folder inside it, and says
+// what it did. Hidden folders are skipped and the walk is capped, so pressing it on Home cannot hang the viewer.
 void WolfFloaterDJPlaylist::addFolder()
 {
-    std::vector<std::string> paths;
-    for (const Entry& e : mEntries)
+    constexpr size_t MAX_SONGS = 2000;
+    constexpr size_t MAX_LOOKED_AT = 50000;
+    std::string folder = mFolder;
+    if (LLScrollListItem* item = mBrowser->getFirstSelected())
     {
-        if (!e.mDir) paths.push_back(e.mPath);
+        const S32 i = item->getValue().asInteger();
+        if (i >= 0 && i < (S32)mEntries.size() && mEntries[i].mDir) folder = mEntries[i].mPath;
     }
+    const std::string folder_name = display_name(folder).empty() ? folder : display_name(folder);
+    std::vector<std::string> paths;
+    bool too_many_songs = false, too_many_files = false;
+    size_t looked_at = 0;
+    std::error_code ec;
+    fs::recursive_directory_iterator it(to_path(folder), fs::directory_options::skip_permission_denied, ec), end;
+    if (ec)
+    {
+        showError(llformat("Cannot open the folder \"%s\".", folder_name.c_str()));
+        return;
+    }
+    for (; !ec && it != end; it.increment(ec))
+    {
+        if (++looked_at > MAX_LOOKED_AT)
+        {
+            too_many_files = true;
+            break;
+        }
+        const std::string name = from_path(it->path().filename());
+        std::error_code ec2;
+        const bool dir = it->is_directory(ec2);
+        if (name.empty() || name[0] == '.')
+        {
+            if (dir) it.disable_recursion_pending();
+            continue;
+        }
+        if (dir || !WolfDJPlayer::isAudioFile(name)) continue;
+        if (paths.size() >= MAX_SONGS)
+        {
+            too_many_songs = true;
+            break;
+        }
+        paths.push_back(from_path(it->path()));
+    }
+    if (paths.empty())
+    {
+        showError(too_many_files
+            ? llformat("No songs found in the first %d files of \"%s\" - pick a smaller folder.", (int)MAX_LOOKED_AT, folder_name.c_str())
+            : llformat("No songs in \"%s\" or the folders inside it.", folder_name.c_str()));
+        return;
+    }
+    std::sort(paths.begin(), paths.end(), less_nocase);    // folder by folder, each in name order
     addFiles(paths);
+    std::string note = llformat("Added %d songs from \"%s\".", (int)paths.size(), folder_name.c_str());
+    if (too_many_songs) note += llformat(" Stopped at %d - pick a smaller folder for the rest.", (int)MAX_SONGS);
+    else if (too_many_files) note += llformat(" Stopped looking after %d files - pick a smaller folder for the rest.", (int)MAX_LOOKED_AT);
+    showNote(note);
 }
 
 void WolfFloaterDJPlaylist::addFiles(const std::vector<std::string>& paths)
@@ -447,6 +502,51 @@ void WolfFloaterDJPlaylist::deleteList()
 void WolfFloaterDJPlaylist::showError(const std::string& text)
 {
     mUiError = text;
+    mUiIsNote = false;
+}
+
+void WolfFloaterDJPlaylist::showNote(const std::string& text)
+{
+    mUiError = text;
+    mUiIsNote = true;
+}
+
+// [WOLF DJ 2026-10-24] Moved here from wolfdjchatcontrol.cpp (choose_playlist) so the mixer's picker shares it.
+// static
+bool WolfFloaterDJPlaylist::choosePlaylist(const std::string& wanted, std::string& chosen)
+{
+    const LLSD lists = gSavedSettings.getLLSD("WolfDJPlaylists");
+    if (!lists.isMap())
+        return false;
+    for (LLSD::map_const_iterator it = lists.beginMap(); it != lists.endMap(); ++it)
+    {
+        std::string a = it->first, b = wanted;
+        LLStringUtil::toLower(a);
+        LLStringUtil::toLower(b);
+        if (a != b)
+            continue;
+        chosen = it->first;
+        if (WolfFloaterDJPlaylist* floater = LLFloaterReg::findTypedInstance<WolfFloaterDJPlaylist>("wolf_dj_playlist"))
+        {
+            floater->selectList(chosen);
+            return true;
+        }
+        std::vector<std::string> files;
+        LLSD arr = LLSD::emptyArray();
+        for (const LLSD& f : llsd::inArray(it->second))
+        {
+            if (f.isString())
+            {
+                files.push_back(f.asString());
+                arr.append(f);
+            }
+        }
+        gSavedSettings.setString("WolfDJPlaylistCurrent", chosen);
+        gSavedSettings.setLLSD("WolfDJPlaylist", arr);
+        WolfDJPlayer::instance().setFiles(files);   // a song playing now finishes first
+        return true;
+    }
+    return false;
 }
 
 void WolfFloaterDJPlaylist::moveSelected(int dir)
@@ -542,6 +642,12 @@ void WolfFloaterDJPlaylist::draw()
     }
     mPlay->setLabel(player.isPlaying() && !player.isPaused() ? std::string("Pause") : std::string("Play"));
     // [WOLF DJ 2026-10-19] This window's own messages first (they used to be overwritten here on the next frame).
+    const bool note = !mUiError.empty() && mUiIsNote;
+    if (note != mShownNote)
+    {
+        mError->setColor(LLUIColorTable::instance().getColor(note ? "LabelTextColor" : "Red"));
+        mShownNote = note;
+    }
     mError->setText(mUiError.empty() ? player.lastError() : mUiError);
     LLFloater::draw();
 }

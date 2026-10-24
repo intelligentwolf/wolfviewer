@@ -71,6 +71,10 @@ private:
     LLLineEditor* mTitle = nullptr;
     LLButton* mLiveBtn = nullptr;
     LLTextBox* mStatus = nullptr;
+    // [WOLF DJ 2026-10-24] Which named playlist plays (settings WolfDJPlaylists / WolfDJPlaylistCurrent).
+    void refreshPlaylistPick();
+    LLComboBox* mPlaylistPick = nullptr;
+    std::string mShownPlaylist;        // WolfDJPlaylistCurrent when mPlaylistPick was last filled (draw follows changes)
     LLButton* mMyShows = nullptr;      // [WOLF DJ 2026-10-16] Wolf Territories only (onOpen)
     S32 mStatusGap = 0;                // floater_wolf_dj.xml: between My Shows and status_text
     std::string mUrlWolfTip;           // [WOLF GRID GATE 2026-10-17/] stream_url's XUI tip (names wolf-grid.com), kept for Wolf

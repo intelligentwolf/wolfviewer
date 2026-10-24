@@ -15,6 +15,7 @@
 #include "wolfdjcapture.h"
 #include "wolfdjdesk.h"
 #include "wolfdjplayer.h"
+#include "wolffloaterdjplaylist.h"
 #include "wolfgrid.h"
 
 #include "llagent.h"
@@ -210,6 +211,15 @@ bool WolfFloaterDJ::postBuild()
     getChild<LLButton>("send_title")->setCommitCallback([this](LLUICtrl*, const LLSD&) { onSendTitle(); });
     mLiveBtn->setCommitCallback([this](LLUICtrl*, const LLSD&) { onGoLive(); });
     getChild<LLButton>("open_playlist")->setCommitCallback([](LLUICtrl*, const LLSD&) { LLFloaterReg::showInstance("wolf_dj_playlist"); });
+    mPlaylistPick = getChild<LLComboBox>("playlist_pick");
+    mPlaylistPick->setCommitCallback([this](LLUICtrl*, const LLSD&)
+    {
+        std::string chosen;
+        WolfFloaterDJPlaylist::choosePlaylist(mPlaylistPick->getValue().asString(), chosen);
+        refreshPlaylistPick();
+    });
+    // The song counts are filled again each time the list is opened (as the music sources are).
+    mPlaylistPick->setPrearrangeCallback([this](LLUICtrl*, const LLSD&) { refreshPlaylistPick(); });
     // [WOLF DJ 2026-10-16] My Shows: the numbers come from wolf-grid.com, so only on Wolf Territories (onOpen).
     mMyShows = getChild<LLButton>("my_shows");
     mStatusGap = mStatus->getRect().mLeft - mMyShows->getRect().mRight;
@@ -303,8 +313,35 @@ void WolfFloaterDJ::onOpen(const LLSD& key)
         }
     }
     WolfDJPlayer::instance().loadSaved();
+    refreshPlaylistPick();
     refreshApps();
     mClock.reset();
+}
+
+// [WOLF DJ 2026-10-24] The playlist names, each with its song count, and the one playing picked. Before the
+// Playlist window has ever been opened there may be no named lists yet (it makes "Playlist 1" from the old
+// single list, WolfFloaterDJPlaylist::loadLists), so the old list is shown under that name until then.
+void WolfFloaterDJ::refreshPlaylistPick()
+{
+    const LLSD lists = gSavedSettings.getLLSD("WolfDJPlaylists");
+    mShownPlaylist = gSavedSettings.getString("WolfDJPlaylistCurrent");
+    mPlaylistPick->removeall();
+    if (lists.isMap() && lists.size() > 0)
+    {
+        for (LLSD::map_const_iterator it = lists.beginMap(); it != lists.endMap(); ++it)
+        {
+            const S32 n = it->second.isArray() ? (S32)it->second.size() : 0;
+            mPlaylistPick->add(llformat("%s  (%d)", it->first.c_str(), n), LLSD(it->first));
+        }
+        mPlaylistPick->selectByValue(LLSD(mShownPlaylist));
+        mPlaylistPick->setEnabled(true);
+    }
+    else
+    {
+        mPlaylistPick->add(llformat("Playlist 1  (%d)", (S32)WolfDJPlayer::instance().files().size()), LLSD(std::string()));
+        mPlaylistPick->selectFirstItem();
+        mPlaylistPick->setEnabled(false);
+    }
 }
 
 void WolfFloaterDJ::onClose(bool app_quitting)
@@ -990,6 +1027,11 @@ void WolfFloaterDJ::updateStatus()
 
 void WolfFloaterDJ::draw()
 {
+    // [WOLF DJ 2026-10-24] Follow a playlist picked elsewhere (the Playlist window, chat control "playlist <name>").
+    if (gSavedSettings.getString("WolfDJPlaylistCurrent") != mShownPlaylist)
+    {
+        refreshPlaylistPick();
+    }
     updateStatus();
     updatePads();
     LLFloater::draw();

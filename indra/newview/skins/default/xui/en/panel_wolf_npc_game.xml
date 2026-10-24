@@ -1,0 +1,233 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLFNPC ROUND 3 2026-10-24] Edit > Game (wolffloaternpcgame.cpp WolfNPCGame): the game system's settings of ONE NPC, as
+     fill-in-the-boxes forms. Source for every key, limit and word: firestorm/region-terrain-work/wolfnpc-release/PROTOCOL.md
+     §12 (game NPC rule), §14 (touch, actions, dialogues), §15 (quests), §16 (traders), §17 (pets), §18 (events), §20
+     (handouts). Shown only when the NPC can fight in game mode or already has a game feature, or the owner asks for it
+     (Paul: simple and fun - beginners never see this unless they open it). Each part saves on its own (op update; quests,
+     dialogues and events by id, §14.1 merge rule). 586 x 496, the sub-tabs' content 470 high. -->
+<panel background_visible="false" border="false" follows="all" height="496" layout="topleft" left="0" name="npc_game" top="0" width="586">
+    <tab_container follows="all" height="494" layout="topleft" left="0" name="game_tabs" tab_position="top" halign="center" top="0" width="586">
+
+        <!-- ═══ Quests (§15) ═══ -->
+        <panel label="Quests" name="gtab_quests" layout="topleft" follows="all" height="470" width="586">
+            <scroll_list follows="left|top" height="66" layout="topleft" left="4" name="quests" top="4" width="578" multi_select="false" draw_heading="true" column_padding="4">
+                <scroll_list.columns name="id" label="Id" width="120" />
+                <scroll_list.columns name="title" label="Title" width="330" />
+                <scroll_list.columns name="steps" label="Steps" width="120" />
+            </scroll_list>
+            <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="4" name="quests_count" top="78" width="250" />
+            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="New quest" layout="topleft" left="270" name="quest_new" top="74" width="100" />
+            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Change" layout="topleft" left="374" name="quest_change" top="74" width="100" />
+            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Remove" layout="topleft" left="478" name="quest_remove" top="74" width="100" />
+            <panel follows="left|top" height="366" layout="topleft" left="4" name="quest_editor" top="102" width="578" visible="false" background_visible="false" border="false">
+                <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="0" name="q_id_lbl" top="3" width="40">Id</text>
+                <line_editor follows="left|top" height="22" layout="topleft" left="44" max_length_chars="16" name="q_id" top="0" width="140" label="martha_bread"
+                 tool_tip="a-z, 0-9, _ and -, up to 16. Unique in the region's game: players' progress is kept by it." />
+                <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="192" name="q_title_lbl" top="3" width="40">Title</text>
+                <line_editor follows="left|top" height="22" layout="topleft" left="236" max_length_chars="48" name="q_title" top="0" width="342" label="Martha's bread" />
+                <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="0" name="q_text_lbl" top="31" width="44">Offer</text>
+                <text_editor follows="left|top" height="40" layout="topleft" left="44" max_length="500" name="q_text" top="28" width="534" word_wrap="true"
+                 tool_tip="What it says when it offers the quest (1 to 500 characters)" />
+                <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="0" name="q_needs_lbl" top="75" width="44">Needs</text>
+                <line_editor follows="left|top" height="22" layout="topleft" left="44" max_length_chars="120" name="q_needs" top="72" width="320" label="empty = anyone playing; e.g. rep:me&gt;=0"
+                 tool_tip="Who may be offered it: the same words as a reaction's Who, e.g. rep:me&gt;=0, flag:met_martha, not:done:lost_pup" />
+                <check_box follows="left|top" height="18" layout="topleft" left="372" name="q_repeat" top="74" width="206" label="Can be done again" />
+                <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="0" name="q_steps_lbl" top="103" width="44">Steps</text>
+                <scroll_list follows="left|top" height="64" layout="topleft" left="44" name="q_steps" top="100" width="430" multi_select="false" draw_heading="false">
+                    <scroll_list.columns name="do" label="Do" width="60" />
+                    <scroll_list.columns name="what" label="What" width="180" />
+                    <scroll_list.columns name="text" label="Log line" width="186" />
+                </scroll_list>
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Remove step" layout="topleft" left="478" name="q_step_remove" top="100" width="100" />
+                <combo_box follows="left|top" height="22" layout="topleft" left="44" name="q_step_do" top="170" width="96" />
+                <line_editor follows="left|top" height="22" layout="topleft" left="144" max_length_chars="48" name="q_step_what" top="170" width="170" />
+                <line_editor follows="left|top" height="22" layout="topleft" left="318" max_length_chars="48" name="q_step_npc" top="170" width="140" label="NPC's name" />
+                <spinner follows="left|top" height="22" layout="topleft" left="462" name="q_step_n" top="170" width="116" label="How many" label_width="64"
+                 min_val="1" max_val="1000" increment="1" initial_value="1" decimal_digits="0" />
+                <line_editor follows="left|top" height="22" layout="topleft" left="44" max_length_chars="64" name="q_step_text" top="196" width="300" label="Quest log line, e.g. Bring Martha 5 wheat" />
+                <spinner follows="left|top" height="22" layout="topleft" left="348" name="q_step_r" top="196" width="110" label="Within m" label_width="60"
+                 min_val="1" max_val="50" increment="1" initial_value="5" decimal_digits="0" />
+                <line_editor follows="left|top" height="22" layout="topleft" left="462" max_length_chars="16" name="q_step_event" top="196" width="116" label="starts event"
+                 tool_tip="Optional: one of its events, started when this step begins" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Add step" layout="topleft" left="44" name="q_step_add" top="222" width="120" tool_tip="Up to 8 steps, done in order" />
+                <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="0" name="q_reward_lbl" top="255" width="44">Reward</text>
+                <spinner follows="left|top" height="22" layout="topleft" left="44" name="q_money" top="252" width="150" label="Money" label_width="44"
+                 min_val="0" max_val="1000000" increment="5" initial_value="0" decimal_digits="0" />
+                <spinner follows="left|top" height="22" layout="topleft" left="198" name="q_xp" top="252" width="120" label="XP" label_width="24"
+                 min_val="0" max_val="100000" increment="10" initial_value="0" decimal_digits="0" />
+                <line_editor follows="left|top" height="22" layout="topleft" left="322" max_length_chars="200" name="q_items" top="252" width="256" label="items, e.g. bread:2, cheese:1" />
+                <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="0" name="q_do_lbl" top="283" width="44">Also</text>
+                <line_editor follows="left|top" height="22" layout="topleft" left="44" max_length_chars="400" name="q_do" top="280" width="534" label="actions, separated by ; e.g. flag:martha_friend; rep:me:+10" />
+                <text follows="left|top" height="30" layout="topleft" left="0" name="q_error" top="306" width="578" word_wrap="true" text_color="1 0.70 0.52 1" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Cancel" layout="topleft" left="0" name="q_cancel" top="340" width="90" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Save quest" layout="topleft" left="458" name="q_save" top="340" width="120" />
+            </panel>
+        </panel>
+
+        <!-- ═══ Dialogues (§14.4) ═══ -->
+        <panel label="Dialogues" name="gtab_dialogues" layout="topleft" follows="all" height="470" width="586">
+            <scroll_list follows="left|top" height="58" layout="topleft" left="4" name="dialogues" top="4" width="578" multi_select="false" draw_heading="true" column_padding="4">
+                <scroll_list.columns name="id" label="Id" width="120" />
+                <scroll_list.columns name="title" label="Title" width="330" />
+                <scroll_list.columns name="nodes" label="Lines" width="120" />
+            </scroll_list>
+            <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="4" name="dialogues_count" top="70" width="250" />
+            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="New dialogue" layout="topleft" left="270" name="dlg_new" top="66" width="100" />
+            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Change" layout="topleft" left="374" name="dlg_change" top="66" width="100" />
+            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Remove" layout="topleft" left="478" name="dlg_remove" top="66" width="100" />
+            <panel follows="left|top" height="376" layout="topleft" left="4" name="dlg_editor" top="92" width="578" visible="false" background_visible="false" border="false">
+                <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="0" name="d_id_lbl" top="3" width="40">Id</text>
+                <line_editor follows="left|top" height="22" layout="topleft" left="44" max_length_chars="16" name="d_id" top="0" width="120" label="intro" />
+                <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="172" name="d_title_lbl" top="3" width="36">Title</text>
+                <line_editor follows="left|top" height="22" layout="topleft" left="212" max_length_chars="48" name="d_title" top="0" width="200" label="its name" />
+                <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="418" name="d_start_lbl" top="3" width="40">Starts</text>
+                <combo_box follows="left|top" height="22" layout="topleft" left="460" name="d_start" top="0" width="118" tool_tip="The line it says first" />
+                <scroll_list follows="left|top" height="58" layout="topleft" left="0" name="d_nodes" top="28" width="472" multi_select="false" draw_heading="false">
+                    <scroll_list.columns name="id" label="Line" width="90" />
+                    <scroll_list.columns name="text" label="Text" width="378" />
+                </scroll_list>
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="New line" layout="topleft" left="478" name="d_node_new" top="28" width="100" tool_tip="Up to 32 lines" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Remove line" layout="topleft" left="478" name="d_node_remove" top="56" width="100" />
+                <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="0" name="n_id_lbl" top="95" width="40">Line</text>
+                <line_editor follows="left|top" height="22" layout="topleft" left="44" max_length_chars="16" name="n_id" top="92" width="110" label="hello" />
+                <line_editor follows="left|top" height="22" layout="topleft" left="158" max_length_chars="400" name="n_do" top="92" width="420" label="actions when it is said, e.g. anim:HELLO (separated by ;)" />
+                <text_editor follows="left|top" height="38" layout="topleft" left="0" max_length="500" name="n_text" top="118" width="578" word_wrap="true"
+                 tool_tip="1 to 500 characters. {player} is the player's first name, {npc} its own name." />
+                <scroll_list follows="left|top" height="54" layout="topleft" left="0" name="n_choices" top="160" width="472" multi_select="false" draw_heading="true" column_padding="2">
+                    <scroll_list.columns name="label" label="Choice" width="100" />
+                    <scroll_list.columns name="next" label="Then" width="70" />
+                    <scroll_list.columns name="fail" label="If refused" width="70" />
+                    <scroll_list.columns name="if" label="Shown if" width="100" />
+                    <scroll_list.columns name="do" label="Does" width="124" />
+                </scroll_list>
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Remove choice" layout="topleft" left="478" name="c_remove" top="160" width="100" />
+                <line_editor follows="left|top" height="22" layout="topleft" left="0" max_length_chars="24" name="c_label" top="218" width="120" label="choice, e.g. Yes" />
+                <combo_box allow_text_entry="true" max_chars="16" follows="left|top" height="22" layout="topleft" left="124" name="c_next" top="218" width="110" tool_tip="The line it says next" />
+                <combo_box allow_text_entry="true" max_chars="16" follows="left|top" height="22" layout="topleft" left="238" name="c_fail" top="218" width="110" tool_tip="Said when a trade in it is refused (not enough meat, Bones...)" />
+                <line_editor follows="left|top" height="22" layout="topleft" left="352" max_length_chars="120" name="c_if" top="218" width="226" label="shown if, e.g. not:quest:martha_bread" />
+                <line_editor follows="left|top" height="22" layout="topleft" left="0" max_length_chars="400" name="c_do" top="244" width="472" label="does, e.g. accept:martha_bread; rep:me:+5 (separated by ;)" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Add choice" layout="topleft" left="478" name="c_add" top="244" width="100" tool_tip="Up to 10 a line" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Keep this line" layout="topleft" left="0" name="n_save" top="272" width="130" tool_tip="Puts this line (with its choices) into the dialogue" />
+                <text follows="left|top" height="30" layout="topleft" left="136" name="d_error" top="270" width="442" word_wrap="true" text_color="1 0.70 0.52 1" />
+                <text follows="left|top" height="32" layout="topleft" left="0" name="d_note" top="304" width="578" word_wrap="true" text_color="0.80 0.82 0.86 1">Choices with a game action or a game condition show only to game players. No choice shown: one OK button.</text>
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Cancel" layout="topleft" left="0" name="d_cancel" top="346" width="90" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Save dialogue" layout="topleft" left="458" name="d_save" top="346" width="120" />
+            </panel>
+        </panel>
+
+        <!-- ═══ Trader (§16) ═══ -->
+        <panel label="Trader" name="gtab_shop" layout="topleft" follows="all" height="470" width="586">
+            <check_box follows="left|top" height="18" layout="topleft" left="4" name="s_on" top="6" width="300" label="It trades with game players" />
+            <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="310" name="s_title_lbl" top="7" width="40">Title</text>
+            <line_editor follows="left|top" height="22" layout="topleft" left="352" max_length_chars="48" name="s_title" top="4" width="230" label="its name" />
+            <scroll_list follows="left|top" height="120" layout="topleft" left="4" name="s_lines" top="32" width="474" multi_select="false" draw_heading="true" column_padding="4">
+                <scroll_list.columns name="kind" label="It" width="56" />
+                <scroll_list.columns name="item" label="Item" width="130" />
+                <scroll_list.columns name="qty" label="Qty" width="50" />
+                <scroll_list.columns name="price" label="Price" width="80" />
+                <scroll_list.columns name="label" label="Button" width="130" />
+            </scroll_list>
+            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Remove line" layout="topleft" left="482" name="s_remove" top="32" width="100" />
+            <combo_box follows="left|top" height="22" layout="topleft" left="4" name="s_kind" top="158" width="90" />
+            <line_editor follows="left|top" height="22" layout="topleft" left="98" max_length_chars="24" name="s_item" top="158" width="130" label="item, e.g. meat" />
+            <spinner follows="left|top" height="22" layout="topleft" left="232" name="s_qty" top="158" width="90" label="Qty" label_width="28"
+             min_val="1" max_val="1000" increment="1" initial_value="1" decimal_digits="0" />
+            <spinner follows="left|top" height="22" layout="topleft" left="326" name="s_price" top="158" width="130" label="Price" label_width="36"
+             min_val="1" max_val="1000000" increment="1" initial_value="1" decimal_digits="0" />
+            <line_editor follows="left|top" height="22" layout="topleft" left="460" max_length_chars="16" name="s_label" top="158" width="122" label="button word" />
+            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Add line" layout="topleft" left="4" name="s_add" top="184" width="100" tool_tip="Up to 10 lines in all" />
+            <spinner follows="left|top" height="22" layout="topleft" left="4" name="s_friend" top="220" width="270" label="Friends from an opinion of" label_width="170"
+             min_val="-100" max_val="100" increment="5" initial_value="50" decimal_digits="0" />
+            <spinner follows="left|top" height="22" layout="topleft" left="290" name="s_discount" top="220" width="200" label="% better for friends" label_width="120"
+             min_val="0" max_val="90" increment="5" initial_value="10" decimal_digits="0" />
+            <spinner follows="left|top" height="22" layout="topleft" left="4" name="s_refuse" top="248" width="270" label="Refuses at an opinion of" label_width="170"
+             min_val="-100" max_val="100" increment="5" initial_value="-50" decimal_digits="0" />
+            <text follows="left|top" height="60" layout="topleft" left="4" name="s_note" top="280" width="578" word_wrap="true" text_color="0.80 0.82 0.86 1">Players click it (or a reaction or choice says shop) to trade. Each button is one trade, all or nothing, in the region game's money (Bones on Wolf Territories). Friends buy cheaper and sell dearer.</text>
+            <text follows="left|top" height="30" layout="topleft" left="4" name="s_error" top="344" width="450" word_wrap="true" text_color="1 0.70 0.52 1" />
+            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Save trader" layout="topleft" left="462" name="s_save" top="440" width="120" />
+        </panel>
+
+        <!-- ═══ Pet (§17) ═══ -->
+        <panel label="Pet" name="gtab_pet" layout="topleft" follows="all" height="470" width="586">
+            <text text_color="0.95 0.92 0.84 1" follows="left|top" height="48" layout="topleft" left="4" name="p_how" top="4" width="578" word_wrap="true">Link one of YOUR pets in the region's game: this NPC becomes it - it takes the pet's name, follows you, sleeps when tired and plays when you stand still near it.</text>
+            <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="4" name="p_key_lbl" top="59" width="120">Pet key</text>
+            <line_editor follows="left|top" height="22" layout="topleft" left="128" max_length_chars="64" name="p_key" top="56" width="300" label="the pet's key in the game" />
+            <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="4" name="p_play_lbl" top="87" width="120">Playing raises</text>
+            <line_editor follows="left|top" height="22" layout="topleft" left="128" max_length_chars="24" name="p_play" top="84" width="160" label="a stat, e.g. happiness" />
+            <spinner follows="left|top" height="22" layout="topleft" left="296" name="p_add" top="84" width="130" label="by" label_width="24"
+             min_val="1" max_val="20" increment="1" initial_value="2" decimal_digits="0" />
+            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Link pet" layout="topleft" left="128" name="p_link" top="116" width="120" />
+            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Unlink" layout="topleft" left="306" name="p_unlink" top="116" width="120" />
+            <text text_color="0.95 0.92 0.84 1" follows="left|top" height="140" layout="topleft" left="4" name="p_card" top="152" width="578" word_wrap="true" />
+        </panel>
+
+        <!-- ═══ Events (§18) ═══ -->
+        <panel label="Events" name="gtab_events" layout="topleft" follows="all" height="470" width="586">
+            <scroll_list follows="left|top" height="58" layout="topleft" left="4" name="events" top="4" width="578" multi_select="false" draw_heading="true" column_padding="4">
+                <scroll_list.columns name="id" label="Id" width="110" />
+                <scroll_list.columns name="title" label="Title" width="210" />
+                <scroll_list.columns name="when" label="When" width="120" />
+                <scroll_list.columns name="state" label="Now" width="130" />
+            </scroll_list>
+            <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="4" name="events_count" top="70" width="250" />
+            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="New event" layout="topleft" left="270" name="ev_new" top="66" width="100" />
+            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Change" layout="topleft" left="374" name="ev_change" top="66" width="100" />
+            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Remove" layout="topleft" left="478" name="ev_remove" top="66" width="100" />
+            <panel follows="left|top" height="376" layout="topleft" left="4" name="ev_editor" top="92" width="578" visible="false" background_visible="false" border="false">
+                <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="0" name="e_id_lbl" top="3" width="40">Id</text>
+                <line_editor follows="left|top" height="22" layout="topleft" left="44" max_length_chars="16" name="e_id" top="0" width="130" label="zombies" />
+                <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="182" name="e_title_lbl" top="3" width="36">Title</text>
+                <line_editor follows="left|top" height="22" layout="topleft" left="222" max_length_chars="48" name="e_title" top="0" width="356" label="Zombie night" />
+                <combo_box follows="left|top" height="22" layout="topleft" left="0" name="e_when" top="28" width="170" />
+                <line_editor follows="left|top" height="22" layout="topleft" left="174" max_length_chars="5" name="e_at" top="28" width="60" label="21:00" tool_tip="Grid time (Pacific), every day" />
+                <spinner follows="left|top" height="22" layout="topleft" left="240" name="e_duration" top="28" width="170" label="Lasts seconds" label_width="90"
+                 min_val="10" max_val="86400" increment="60" initial_value="1800" decimal_digits="0" />
+                <spinner follows="left|top" height="22" layout="topleft" left="414" name="e_cooldown" top="28" width="164" label="Rest seconds" label_width="84"
+                 min_val="0" max_val="86400" increment="60" initial_value="0" decimal_digits="0" tool_tip="The least time between two starts" />
+                <line_editor follows="left|top" height="22" layout="topleft" left="0" max_length_chars="300" name="e_say" top="56" width="578" label="It says at the start, e.g. They're coming!" />
+                <scroll_list follows="left|top" height="50" layout="topleft" left="0" name="e_spawn" top="84" width="472" multi_select="false" draw_heading="true" column_padding="4">
+                    <scroll_list.columns name="from" label="Copies of" width="150" />
+                    <scroll_list.columns name="count" label="How many" width="70" />
+                    <scroll_list.columns name="at" label="At" width="150" />
+                    <scroll_list.columns name="radius" label="Spread m" width="90" />
+                </scroll_list>
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Remove" layout="topleft" left="478" name="e_spawn_remove" top="84" width="100" />
+                <combo_box follows="left|top" height="22" layout="topleft" left="0" name="e_from" top="138" width="160" tool_tip="Copies of this NPC, or of another of your NPCs here" />
+                <spinner follows="left|top" height="22" layout="topleft" left="164" name="e_count" top="138" width="90" label="x" label_width="12"
+                 min_val="1" max_val="20" increment="1" initial_value="5" decimal_digits="0" />
+                <line_editor follows="left|top" height="22" layout="topleft" left="258" max_length_chars="48" name="e_spawn_at" top="138" width="120" label="home, a place, or x,y,z" />
+                <spinner follows="left|top" height="22" layout="topleft" left="382" name="e_radius" top="138" width="92" label="m" label_width="14"
+                 min_val="0" max_val="40" increment="1" initial_value="15" decimal_digits="0" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Add copies" layout="topleft" left="478" name="e_spawn_add" top="138" width="100" tool_tip="Up to 4 lines, 20 copies an event" />
+                <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="0" name="e_group_lbl" top="169" width="160">Your NPCs tagged</text>
+                <line_editor follows="left|top" height="22" layout="topleft" left="164" max_length_chars="24" name="e_group_tag" top="166" width="120" label="e.g. shop" />
+                <combo_box follows="left|top" height="22" layout="topleft" left="288" name="e_group_do" top="166" width="200" />
+                <line_editor follows="left|top" height="22" layout="topleft" left="0" max_length_chars="400" name="e_do" top="194" width="578" label="at the start it also does, e.g. sound:horn (separated by ;)" />
+                <line_editor follows="left|top" height="22" layout="topleft" left="0" max_length_chars="400" name="e_end" top="222" width="578" label="at the end it does, e.g. say:Dawn at last (separated by ;)" />
+                <check_box follows="left|top" height="18" layout="topleft" left="0" name="e_keep" top="250" width="578" label="Copies survive a region restart (until the event ends)" />
+                <text follows="left|top" height="30" layout="topleft" left="0" name="e_error" top="274" width="578" word_wrap="true" text_color="1 0.70 0.52 1" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Cancel" layout="topleft" left="0" name="e_cancel" top="346" width="90" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Save event" layout="topleft" left="458" name="e_save" top="346" width="120" />
+            </panel>
+        </panel>
+
+        <!-- ═══ Touch, faction and handouts (§14.2, §12.1, §20) ═══ -->
+        <panel label="Touch" name="gtab_touch" layout="topleft" follows="all" height="470" width="586">
+            <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="4" name="t_lbl" top="6" width="578">When someone clicks it (empty: its shop, else its quests, else nothing)</text>
+            <line_editor follows="left|top" height="22" layout="topleft" left="4" max_length_chars="600" name="t_do" top="24" width="578" label="actions, separated by ; e.g. dialog:intro   or   say:Hello!; handout:Welcome card" />
+            <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="4" name="t_faction_lbl" top="57" width="70">Faction</text>
+            <line_editor follows="left|top" height="22" layout="topleft" left="78" max_length_chars="24" name="t_faction" top="54" width="200" label="e.g. moonfang"
+             tool_tip="NPCs with the same faction share what players have earned with it (a-z, 0-9, _ -)" />
+            <text follows="left|top" height="16" layout="topleft" left="286" name="t_faction_note" top="57" width="296" text_color="0.80 0.82 0.86 1">Same faction: they share players' opinions.</text>
+            <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="4" name="t_hand_lbl" top="89" width="120">Hand out an item</text>
+            <line_editor follows="left|top" height="22" layout="topleft" left="128" max_length_chars="63" name="t_hand_name" top="86" width="300" label="its name in the NPC's contents" />
+            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Add to touch" layout="topleft" left="432" name="t_hand_add" top="86" width="150" />
+            <text follows="left|top" height="40" layout="topleft" left="4" name="t_hand_note" top="112" width="578" word_wrap="true" text_color="0.80 0.82 0.86 1">Put a notecard, texture or landmark in the NPC's contents (its root prim), then use handout:its name in any action. The same item goes to the same person at most once in 10 minutes. It works for everyone, not only players.</text>
+            <text follows="left|top" height="236" layout="topleft" left="4" name="t_help" top="156" width="578" word_wrap="true" text_color="0.80 0.82 0.86 1">Actions (separate with ;): say:text, anim:name, loop:name, stop:name, sound:name, face, follow, approach, flee, ai:instruction, intent:roam, goto:place, dialog:id, quest:id, accept:id, advance:id, drop:id, shop, handout:name, event:id, endevent:id, close.
+Game players only: flag:name, unflag:name, rep:me:+5 (or a faction), give:item:1, xp:50, money:+10. Only a player's own dialogue choice or a shop may take from them (take:item:1, money:-5).
+Who words for conditions: player, notplayer, owner, friend, stranger, flag:name, rep:me&gt;=50, quest:id, done:id, with not: in front to turn them round.</text>
+            <text follows="left|top" height="30" layout="topleft" left="4" name="t_error" top="400" width="450" word_wrap="true" text_color="1 0.70 0.52 1" />
+            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Save" layout="topleft" left="462" name="t_save" top="440" width="120" />
+        </panel>
+    </tab_container>
+</panel>

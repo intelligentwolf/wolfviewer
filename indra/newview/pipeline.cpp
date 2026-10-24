@@ -8806,7 +8806,7 @@ bool LLPipeline::wolfPhotoFilter(LLRenderTarget* src, LLRenderTarget* dst)
     static LLCachedControl<F32> filter_strength(gSavedSettings, "WolfViewerPhotoFilterStrength", 1.f);
     const S32 mode = filter_mode;
     // 1..8 are the looks wolfPhotoGrade() knows; anything else in the setting means off.
-    if (mode < 1 || mode > 15)   // [PAINTERS 2026-09-20/] 9..15 paint
+    if (mode < 1 || mode > 16)   // [PAINTERS 2026-09-20/] 9..15 paint; [WOLF ASCII 2026-10-24/] 16 ASCII Art
     {
         return false;
     }
@@ -8815,7 +8815,7 @@ bool LLPipeline::wolfPhotoFilter(LLRenderTarget* src, LLRenderTarget* dst)
 
 // [WOLF GAME 2026-10-09] The photo filter's pass, for any mode and strength: World > Photo Effects
 // above, and Wolf Roleplay's screen effects (VIEWER_SPEC.md §3.6) - "desaturate" is mode 2 (Black &
-// White) at the effect's strength, "blur" is mode 16 (wolfPhotoFilterF.glsl). Unchanged from
+// White) at the effect's strength, "blur" is mode 32 (wolfPhotoFilterF.glsl; it was 16 before ASCII Art took 16). Unchanged from
 // wolfPhotoFilter's body before the split.
 bool LLPipeline::wolfPhotoPass(LLRenderTarget* src, LLRenderTarget* dst, S32 mode, F32 strength)
 {
@@ -9400,7 +9400,7 @@ void LLPipeline::renderFinalize()
     {
         std::swap(auxActiveBuffer, auxTargetBuffer);
     }
-    if (WolfGame::sBlur > 0.f && wolfPhotoPass(auxActiveBuffer, auxTargetBuffer, 16, WolfGame::sBlur))
+    if (WolfGame::sBlur > 0.f && wolfPhotoPass(auxActiveBuffer, auxTargetBuffer, 32, WolfGame::sBlur))
     {
         std::swap(auxActiveBuffer, auxTargetBuffer);
     }

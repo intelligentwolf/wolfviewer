@@ -1,0 +1,287 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLFNPC 2026-10-24] Wolf World > WolfNPC... (wolffloaternpc.cpp). Contract: firestorm/region-terrain-work/wolfnpc-release/
+     PROTOCOL.md. Paul: "people can manage an NPC on their region through the viewer".
+     Persona / story: a Wolf region owner wants to put one of their own WolfAvatars on their land as a living NPC - a wolf that
+     roams, a bartender at the bar - in under two minutes, and later change or remove it, without scripting.
+     Flow: New NPC: 1. pick one of your WolfAvatars -> 2. name it, choose what it does (more in closed sections) -> Rez (bottom
+     right, the one primary action). On this region: the list, the actions for the selected one, Edit (Settings / Animations /
+     Reactions, Save bottom right). Scenes: pick a scene, Start, then "Step n of m" - stand there, press Rez.
+     One spacing grid (rows of 26-28 px, 6 px gutters). The status line under the tabs shows every failure (the region's or
+     the brain's own words, in the caution colour, until the next action) and every confirmation; a question (Delete, AI talk)
+     takes its place with the yes button far from Cancel. 600 x 748: the painted banner 64 high, the tabs' content 576, the status line 34. -->
+<floater
+ legacy_header_height="18"
+ can_close="true"
+ can_minimize="true"
+ can_resize="false"
+ height="748"
+ layout="topleft"
+ name="wolf_npc"
+ help_topic="wolf_npc"
+ save_rect="true"
+ single_instance="true"
+ title="WolfNPC"
+ width="600">
+    <tab_container follows="left|top" height="600" layout="topleft" left="4" name="tabs" tab_position="top" halign="center" top="84" width="592">
+
+        <!-- ═══════════════════ NEW NPC ═══════════════════ -->
+        <!-- [WOLFNPC ROUND 2 2026-10-24] Paul: simple and fun, progressive - "Make an NPC in 3 clicks". Three steps, one shown at a
+             time: start (Use one of my avatars / Create a new one) -> pick (the pictures) -> quick (what it says, or a personality
+             with AI talk; More options opens the full settings, closed until asked for) -> Rez bottom right. -->
+        <panel label="New NPC" name="tab_new" layout="topleft" follows="all" height="576" width="592">
+            <panel follows="all" height="576" layout="topleft" left="0" name="start_panel" top="0" width="592" background_visible="false" border="false">
+                <text text_color="0.95 0.92 0.84 1" follows="left|top" font="SansSerifHuge" height="30" layout="topleft" left="6" name="start_title" top="14" width="574" halign="center">Make a greeter in 3 clicks</text>
+                <text text_color="0.95 0.92 0.84 1" follows="left|top" height="36" layout="topleft" left="36" name="start_how" top="54" width="514" halign="center" word_wrap="true">1. Choose a WolfAvatar.  2. Say what it says to visitors, or give it a personality.  3. Rez: it appears 2 m in front of you.</text>
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" halign="left" pad_left="62" font="SansSerifBold" follows="left|top" height="72" label="Use my avatar" layout="topleft" left="16" name="use_mine_btn" top="110" width="180" tool_tip="Choose one of the WolfAvatars you have made" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" halign="left" pad_left="62" font="SansSerifBold" follows="left|top" height="72" label="Create a new one" layout="topleft" left="206" name="create_new_btn" top="110" width="180" tool_tip="Make a new character in WolfAvatars; it comes back here to be rezzed" />
+                <!-- [ROUND C] the third card: a pet of your own that follows you (PROTOCOL.md §26) -->
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" halign="left" pad_left="62" font="SansSerifBold" follows="left|top" height="72" label="Make a pet" layout="topleft" left="396" name="make_pet_btn" top="110" width="180" tool_tip="One of your animals follows you about - across the grid if you like - and goes to your home when you log out" />
+                <text follows="left|top" height="48" layout="topleft" left="16" name="create_new_note" top="190" width="560" word_wrap="true" text_color="0.80 0.82 0.86 1">Create a new one opens WolfAvatars (it shows the price first); when it is made it comes back here. A pet follows you about, and goes home when you log out. Nothing here needs Game Mode.</text>
+                <text text_color="0.95 0.92 0.84 1" follows="left|top" height="64" layout="topleft" left="36" name="new_wait" top="250" width="520" word_wrap="true" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="28" label="Rez it as an NPC" layout="topleft" left="36" name="new_rez_btn" top="320" width="250" visible="false" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Stop waiting" layout="topleft" left="456" name="new_wait_stop" top="322" width="100" visible="false" />
+            </panel>
+            <panel follows="all" height="576" layout="topleft" left="0" name="pick_panel" top="0" width="592" visible="false" background_visible="false" border="false">
+                <text text_color="0.95 0.92 0.84 1" follows="left|top" font.style="BOLD" height="16" layout="topleft" left="6" name="step1_lbl" top="6" width="400">1. Choose one of your WolfAvatars</text>
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Open WolfAvatars" layout="topleft" left="430" name="open_avatars" top="2" width="150"
+                 tool_tip="Make a new character in WolfAvatars" />
+                <scroll_container follows="left|top" height="500" layout="topleft" left="6" name="grid_scroll" opaque="false" reserve_scroll_corner="false" top="28" width="574">
+                    <panel follows="left|top" height="500" layout="topleft" left="0" name="grid_holder" top="0" width="558" background_visible="false" border="false" />
+                </scroll_container>
+                <text text_color="0.95 0.92 0.84 1" follows="left|top" halign="center" height="40" layout="topleft" left="16" name="avatars_note" top="120" width="556" word_wrap="true" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Make one in WolfAvatars" layout="topleft" left="194" name="avatars_make" top="166" width="200" visible="false" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Back" layout="topleft" left="6" name="pick_back" top="542" width="100" />
+            </panel>
+            <panel follows="all" height="576" layout="topleft" left="0" name="quick_panel" top="0" width="592" visible="false" background_visible="false" border="false">
+                <text text_color="0.95 0.92 0.84 1" follows="left|top" font.style="BOLD" height="16" layout="topleft" left="6" name="step2_lbl" top="6" width="400">2. What does it do?</text>
+                <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="6" name="chosen_text" top="30" width="460" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Change" layout="topleft" left="480" name="chosen_change" top="26" width="100" tool_tip="Choose another WolfAvatar" />
+                <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="6" name="quick_name_lbl" top="59" width="60">Name</text>
+                <line_editor follows="left|top" height="22" layout="topleft" left="70" max_length_chars="48" name="quick_name" top="56" width="300"
+                 tool_tip="Shown in chat and in the list (1 to 48 characters)." />
+                <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="6" name="says_lbl" top="88" width="574">What does it say to visitors?</text>
+                <check_box follows="left|top" height="18" layout="topleft" left="6" name="quick_travel" top="90" width="574" label="Follow me everywhere (across the grid)" visible="false"
+                 tool_tip="It goes with you when you teleport or cross into another region, and to your home when you log out. One travelling pet per person." />
+                <text text_color="0.80 0.82 0.86 1" follows="left|top" height="32" layout="topleft" left="26" name="pet_note" top="110" width="554" word_wrap="true" visible="false">It follows you at about 2.5 m, sits when you sit and makes animal noises (free). Off: it stays round where you rez it.</text>
+                <line_editor follows="left|top" height="22" layout="topleft" left="6" max_length_chars="200" name="says" top="106" width="574"
+                 label="Welcome to my land!" tool_tip="Said once a visit to anyone who comes within 8 m. Leave it empty for a quiet one." />
+                <text follows="left|top" height="16" layout="topleft" left="6" name="says_note" top="130" width="574" text_color="0.80 0.82 0.86 1">Said once a visit to anyone who comes within 8 m. Leave it empty for a quiet one.</text>
+                <check_box follows="left|top" height="18" layout="topleft" left="6" name="quick_ai" top="156" width="574" label="Or give it a personality - AI talk (uses your Wolf Credits)"
+                 tool_tip="It answers people who talk to it. Every reply is paid from YOUR Wolf Credits, never the speaker's." />
+                <text_editor follows="left|top" height="44" layout="topleft" left="26" max_length="1000" name="quick_personality" top="178" width="554" word_wrap="true"
+                 tool_tip="Who it is and how it talks, up to 1000 characters, e.g. A grumpy old bartender who loves gossip." />
+                <text follows="left|top" height="64" layout="topleft" left="26" name="quick_ai_line" top="226" width="554" word_wrap="true" text_color="0.80 0.82 0.86 1" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" is_toggle="true" label="More options" layout="topleft" left="6" name="more_btn" top="294" width="200"
+                 tool_tip="What it does, where it goes, its pack, the game, a vehicle, the voice..." />
+                <scroll_container follows="left|top" height="214" layout="topleft" left="6" name="new_scroll" opaque="false" reserve_scroll_corner="false" top="320" width="574" visible="false">
+                    <panel filename="panel_wolf_npc_settings.xml" follows="left|top" layout="topleft" left="0" name="new_settings" top="0" />
+                </scroll_container>
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Back" layout="topleft" left="6" name="quick_back" top="544" width="80" />
+                <text follows="left|top" height="32" layout="topleft" left="92" name="create_note" top="540" width="360" word_wrap="true" text_color="0.80 0.82 0.86 1" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="26" label="Rez" layout="topleft" left="460" name="rez_btn" top="542" width="120"
+                 tool_tip="It appears 2 m in front of you, facing you" />
+            </panel>
+        </panel>
+
+        <!-- ═══════════════════ ON THIS REGION ═══════════════════ -->
+        <panel label="On this region" name="tab_region" layout="topleft" follows="all" height="576" width="592">
+            <panel follows="all" height="576" layout="topleft" left="0" name="list_view" top="0" width="592" background_visible="false" border="false">
+                <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="6" name="count_text" top="6" width="470" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Refresh" layout="topleft" left="490" name="refresh_btn" top="2" width="90" />
+                <!-- [ROUND 4 LOOK] the region's NPCs as character cards (wolffloaternpc.cpp WolfNPCCardGrid), in a scroll container -->
+                <scroll_container follows="left|top" height="276" layout="topleft" left="6" name="npc_scroll" opaque="false" reserve_scroll_corner="false" top="28" width="574">
+                    <panel follows="left|top" height="276" layout="topleft" left="0" name="npc_holder" top="0" width="558" background_visible="false" border="false" />
+                </scroll_container>
+                <!-- [ROUND C] §26.5 visiting pets and NPC noises: the region's holders for the region, the parcel's owner for the parcel -->
+                <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="6" name="rules_region_lbl" top="311" width="110">This region:</text>
+                <check_box follows="left|top" height="18" layout="topleft" left="120" name="rules_region_pets" top="310" width="200" label="Visiting pets allowed" />
+                <check_box follows="left|top" height="18" layout="topleft" left="330" name="rules_region_noises" top="310" width="250" label="NPC noises allowed" />
+                <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="6" name="rules_parcel_lbl" top="337" width="110">This parcel:</text>
+                <check_box follows="left|top" height="18" layout="topleft" left="120" name="rules_parcel_pets" top="336" width="200" label="Visiting pets allowed" />
+                <check_box follows="left|top" height="18" layout="topleft" left="330" name="rules_parcel_noises" top="336" width="250" label="NPC noises allowed" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Edit..." layout="topleft" left="6" name="edit_btn" top="366" width="100"
+                 tool_tip="Its settings, animations and reactions" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Rename" layout="topleft" left="110" name="rename_btn" top="366" width="90" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Pause" layout="topleft" left="204" name="pause_btn" top="366" width="90"
+                 tool_tip="Stand still and do nothing until it is resumed" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Call home" layout="topleft" left="298" name="home_btn" top="366" width="100"
+                 tool_tip="It walks back to its home" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Make here its home" layout="topleft" left="402" name="here_btn" top="366" width="178"
+                 tool_tip="Where it stands now becomes its home" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Stop and stand" layout="topleft" left="6" name="stop_btn" top="394" width="140"
+                 tool_tip="It stands still and forgets what it was doing" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Send home" layout="topleft" left="152" name="sendhome_btn" top="394" width="110"
+                 tool_tip="A pet goes to its owner's home (its owner, the region's managers or this parcel's owner)" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Delete" layout="topleft" left="480" name="delete_btn" top="394" width="100"
+                 tool_tip="Remove it from the region (asks first)" />
+                <panel follows="left|top" height="26" layout="topleft" left="0" name="rename_row" top="426" width="592" visible="false" background_visible="false" border="false">
+                    <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="6" name="rename_lbl" top="5" width="80">New name</text>
+                    <line_editor follows="left|top" height="22" layout="topleft" left="90" max_length_chars="48" name="rename_name" top="2" width="300" />
+                    <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Save name" layout="topleft" left="396" name="rename_save" top="2" width="92" />
+                    <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Cancel" layout="topleft" left="492" name="rename_cancel" top="2" width="88" />
+                </panel>
+                <text follows="left|top" height="44" layout="topleft" left="6" name="sel_note" top="456" width="574" word_wrap="true" text_color="0.80 0.82 0.86 1" />
+                <text text_color="0.95 0.92 0.84 1" follows="left|top" height="32" layout="topleft" left="6" name="month_cost" top="502" width="440" word_wrap="true" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="See my AI costs" layout="topleft" left="452" name="costs_btn" top="504" width="128"
+                 tool_tip="Opens your AI costs page on wolf-grid.com" />
+                <text follows="left|top" height="36" layout="topleft" left="6" name="script_help" top="538" width="574" word_wrap="true" text_color="0.80 0.82 0.86 1">For builders: a script inside an NPC can drive it with wolfNPC(command, value), e.g. wolfNPC("SAY", "Hello"), and read it with wolfNPCInfo("STATE"). Reactions also send link_message -7600100.</text>
+            </panel>
+
+            <panel follows="all" height="576" layout="topleft" left="0" name="detail_view" top="0" width="592" visible="false" background_visible="false" border="false">
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Back to the list" layout="topleft" left="6" name="back_btn" top="2" width="130" />
+                <text text_color="0.95 0.92 0.84 1" follows="left|top" font.style="BOLD" height="16" layout="topleft" left="144" name="detail_title" top="6" width="436" />
+                <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="6" name="detail_state" top="32" width="282" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Send home" layout="topleft" left="294" name="detail_sendhome" top="28" width="94" visible="false"
+                 tool_tip="It goes to its owner's home" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Park" layout="topleft" left="392" name="park_btn" top="28" width="90"
+                 tool_tip="Stop the vehicle where it is" visible="false" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Leave vehicle" layout="topleft" left="486" name="exit_btn" top="28" width="94"
+                 tool_tip="It gets out and walks again" visible="false" />
+                <tab_container follows="left|top" height="520" layout="topleft" left="2" name="detail_tabs" tab_position="top" halign="center" top="54" width="586">
+                    <panel label="Settings" name="dtab_settings" layout="topleft" follows="all" height="496" width="586">
+                        <scroll_container follows="left|top" height="450" layout="topleft" left="4" name="edit_scroll" opaque="false" reserve_scroll_corner="false" top="4" width="574">
+                            <panel filename="panel_wolf_npc_settings.xml" follows="left|top" layout="topleft" left="0" name="edit_settings" top="0" />
+                        </scroll_container>
+                        <text follows="left|top" height="16" layout="topleft" left="6" name="save_note" top="466" width="440" text_color="0.80 0.82 0.86 1">Only what you change is sent.</text>
+                        <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="26" label="Save" layout="topleft" left="458" name="save_btn" top="462" width="120" />
+                    </panel>
+                    <panel label="Animations" name="dtab_anims" layout="topleft" follows="all" height="496" width="586">
+                        <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="6" name="anims_lbl" top="6" width="572">Its own animations first, then the standard ones.</text>
+                        <scroll_list follows="left|top" height="400" layout="topleft" left="6" name="anims" top="26" width="572" multi_select="false" draw_heading="false">
+                            <scroll_list.columns name="name" label="Animation" width="400" />
+                            <scroll_list.columns name="from" label="" width="168" />
+                        </scroll_list>
+                        <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Play once" layout="topleft" left="6" name="anim_play" top="434" width="110" />
+                        <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Loop" layout="topleft" left="120" name="anim_loop" top="434" width="110"
+                         tool_tip="Keeps playing over its movement until stopped" />
+                        <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Stop it" layout="topleft" left="234" name="anim_stop" top="434" width="110" />
+                    </panel>
+                    <!-- [ROUND 4] what it knows and can do (§5 npc_learn_* / npc_skill_*, §22.5), and its places and tools (§3, §23) -->
+                    <panel label="Learning" name="dtab_mind" layout="topleft" follows="all" height="496" width="586">
+                        <panel filename="panel_wolf_npc_mind.xml" follows="all" layout="topleft" left="0" name="mind_panel" top="0" />
+                    </panel>
+                    <panel label="Places" name="dtab_places" layout="topleft" follows="all" height="496" width="586">
+                        <panel filename="panel_wolf_npc_places.xml" follows="all" layout="topleft" left="0" name="places_panel" top="0" />
+                    </panel>
+                    <panel label="Game" name="dtab_game" layout="topleft" follows="all" height="496" width="586">
+                        <panel filename="panel_wolf_npc_game.xml" follows="all" layout="topleft" left="0" name="game_panel" top="0" />
+                    </panel>
+                    <!-- [ROUND 3] §19 live game master: the owner takes control for a hosted night -->
+                    <panel label="Game Master" name="dtab_gm" layout="topleft" follows="all" height="496" width="586">
+                        <text text_color="0.95 0.92 0.84 1" follows="left|top" font.style="BOLD" height="20" layout="topleft" left="6" name="gm_state" top="6" width="572" />
+                        <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="26" label="Take control" layout="topleft" left="6" name="gm_take" top="30" width="140"
+                         tool_tip="It stops making its own choices and does what you tell it" />
+                        <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="26" label="Release" layout="topleft" left="152" name="gm_release" top="30" width="120"
+                         tool_tip="Give it back its own life" />
+                        <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="6" name="gm_say_lbl" top="73" width="70">Say</text>
+                        <line_editor follows="left|top" height="22" layout="topleft" left="80" max_length_chars="1000" name="gm_say" top="70" width="400" label="what it says in local chat" />
+                        <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Say it" layout="topleft" left="486" name="gm_say_btn" top="70" width="92" />
+                        <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="6" name="gm_move_lbl" top="103" width="70">Move</text>
+                        <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Walk to where I click" layout="topleft" left="80" name="gm_click" top="100" width="170"
+                         tool_tip="Then click the ground (or an object) in the world; Escape cancels" />
+                        <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Walk to where I stand" layout="topleft" left="254" name="gm_here" top="100" width="170" />
+                        <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Face me" layout="topleft" left="428" name="gm_face_me" top="100" width="150" />
+                        <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="6" name="gm_who_lbl" top="133" width="70">Someone</text>
+                        <combo_box follows="left|top" height="22" layout="topleft" left="80" name="gm_who" top="130" width="250" />
+                        <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Find people near" layout="topleft" left="334" name="gm_people" top="130" width="130" />
+                        <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Follow" layout="topleft" left="80" name="gm_follow" top="156" width="100" />
+                        <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Face them" layout="topleft" left="184" name="gm_face" top="156" width="100" />
+                        <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Stop following" layout="topleft" left="288" name="gm_unfollow" top="156" width="130" />
+                        <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="6" name="gm_anim_lbl" top="189" width="70">Animation</text>
+                        <combo_box allow_text_entry="true" follows="left|top" height="22" layout="topleft" left="80" max_chars="64" name="gm_anim" top="186" width="250" />
+                        <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Once" layout="topleft" left="334" name="gm_anim_once" top="186" width="78" />
+                        <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Loop" layout="topleft" left="416" name="gm_anim_loop" top="186" width="78" />
+                        <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Stop" layout="topleft" left="498" name="gm_anim_stop" top="186" width="80" />
+                        <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="6" name="gm_event_lbl" top="219" width="70">Event</text>
+                        <combo_box follows="left|top" height="22" layout="topleft" left="80" name="gm_event" top="216" width="250" />
+                        <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Start it" layout="topleft" left="334" name="gm_event_start" top="216" width="110" />
+                        <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="End it" layout="topleft" left="448" name="gm_event_end" top="216" width="110" />
+                        <text follows="left|top" height="64" layout="topleft" left="6" name="gm_note" top="252" width="572" word_wrap="true" text_color="0.80 0.82 0.86 1">While you control it, it makes no choices of its own: no rules, routine, reactions, AI decisions or hunting. It does what you say, then stands. Control ends when you press Release, leave the region, or after 10 minutes without a command.</text>
+                    </panel>
+                    <panel label="Reactions" name="dtab_rules" layout="topleft" follows="all" height="496" width="586">
+                        <scroll_list follows="left|top" height="108" layout="topleft" left="6" name="rules" top="4" width="572" multi_select="false" draw_heading="true" column_padding="4">
+                            <scroll_list.columns name="when" label="When" width="70" />
+                            <scroll_list.columns name="who" label="Who" width="150" />
+                            <scroll_list.columns name="m" label="Within" width="50" />
+                            <scroll_list.columns name="do" label="Does" width="180" />
+                            <scroll_list.columns name="often" label="How often" width="112" />
+                        </scroll_list>
+                        <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="6" name="rules_count" top="120" width="250" />
+                        <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="New rule" layout="topleft" left="270" name="rule_new" top="116" width="100" />
+                        <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Change" layout="topleft" left="374" name="rule_change" top="116" width="100" />
+                        <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Remove" layout="topleft" left="478" name="rule_remove" top="116" width="100" />
+                        <panel follows="left|top" height="344" layout="topleft" left="0" name="rule_editor" top="146" width="586" visible="false" background_visible="false" border="false">
+                            <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="6" name="rule_when_lbl" top="7" width="70">When</text>
+                            <combo_box follows="left|top" height="22" layout="topleft" left="80" name="rule_when" top="4" width="170" />
+                            <slider follows="left|top" height="20" layout="topleft" left="258" name="rule_range" top="5" width="320" label="within metres" label_width="90"
+                             min_val="1" max_val="96" increment="1" initial_value="10" decimal_digits="0" />
+                            <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="6" name="rule_who_lbl" top="35" width="70">Who</text>
+                            <combo_box follows="left|top" height="22" layout="topleft" left="80" name="rule_who" top="32" width="250" />
+                            <check_box follows="left|top" height="18" layout="topleft" left="338" name="rule_not" top="34" width="240" label="NOT: everyone except them"
+                             tool_tip="Turns the choice round: it reacts to everyone who is NOT this" />
+                            <line_editor follows="left|top" height="22" layout="topleft" left="80" max_length_chars="48" name="rule_who_value" top="60" width="300" />
+                            <combo_box follows="left|top" height="22" layout="topleft" left="80" name="rule_person" top="60" width="300" />
+                            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Find people near" layout="topleft" left="386" name="rule_people" top="60" width="140"
+                             tool_tip="List the people and NPCs within 96 m of you" />
+                            <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="6" name="rule_do_lbl" top="91" width="70">Do</text>
+                            <combo_box follows="left|top" height="22" layout="topleft" left="80" name="rule_action" top="88" width="170" />
+                            <combo_box allow_text_entry="true" follows="left|top" height="22" layout="topleft" left="256" max_chars="200" name="rule_action_value" top="88" width="220" />
+                            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Add" layout="topleft" left="480" name="rule_add_action" top="88" width="98"
+                             tool_tip="Add this to what it does (up to 6)" />
+                            <scroll_list follows="left|top" height="70" layout="topleft" left="80" name="rule_actions" top="116" width="396" multi_select="false" draw_heading="false">
+                                <scroll_list.columns name="do" label="Does" width="392" />
+                            </scroll_list>
+                            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Remove" layout="topleft" left="480" name="rule_remove_action" top="116" width="98" />
+                            <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="6" name="rule_often_lbl" top="197" width="70">How often</text>
+                            <combo_box follows="left|top" height="22" layout="topleft" left="80" name="rule_often" top="194" width="200" />
+                            <spinner follows="left|top" height="22" layout="topleft" left="290" name="rule_cooldown" top="194" width="250" label="Waits seconds between" label_width="150"
+                             min_val="0" max_val="86400" increment="5" initial_value="0" decimal_digits="0" />
+                            <spinner follows="left|top" height="22" layout="topleft" left="290" name="rule_gap" top="194" width="250" label="Visit ends after minutes away" label_width="180"
+                             min_val="1" max_val="1440" increment="1" initial_value="10" decimal_digits="0" />
+                            <text follows="left|top" height="32" layout="topleft" left="6" name="rule_error" top="224" width="572" word_wrap="true" text_color="1 0.70 0.52 1" />
+                            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Cancel" layout="topleft" left="6" name="rule_cancel" top="260" width="100" />
+                            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Save rule" layout="topleft" left="458" name="rule_save" top="260" width="120" />
+                        </panel>
+                    </panel>
+                </tab_container>
+            </panel>
+        </panel>
+
+        <!-- ═══════════════════ SCENES ═══════════════════ -->
+        <panel label="Scenes" name="tab_scenes" layout="topleft" follows="all" height="576" width="592">
+            <text text_color="0.95 0.92 0.84 1" follows="left|top" height="32" layout="topleft" left="6" name="scenes_intro" top="4" width="574" word_wrap="true">Ready-made scenes. You place each NPC yourself: stand where it should be and press Rez. AI talk is off in every scene.</text>
+            <scroll_list follows="left|top" height="120" layout="topleft" left="6" name="scene_list" top="40" width="574" multi_select="false" draw_heading="true" column_padding="4">
+                <scroll_list.columns name="title" label="Scene" width="300" />
+                <scroll_list.columns name="npcs" label="NPCs" width="260" />
+            </scroll_list>
+            <text text_color="0.95 0.92 0.84 1" follows="left|top" height="48" layout="topleft" left="6" name="scene_blurb" top="166" width="574" word_wrap="true" />
+            <text follows="left|top" height="30" layout="topleft" left="6" name="scene_cost" top="214" width="428" word_wrap="true" text_color="0.80 0.82 0.86 1" />
+            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Start this scene" layout="topleft" left="440" name="scene_start" top="218" width="140" />
+            <panel follows="left|top" height="320" layout="topleft" left="0" name="scene_panel" top="250" width="592" visible="false" background_visible="false" border="false">
+                <text text_color="0.95 0.92 0.84 1" follows="left|top" font.style="BOLD" height="36" layout="topleft" left="6" name="scene_step" top="4" width="574" word_wrap="true" />
+                <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="6" name="scene_piece" top="44" width="574" />
+                <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="6" name="scene_avatar_lbl" top="71" width="120">Your WolfAvatar</text>
+                <combo_box follows="left|top" height="22" layout="topleft" left="130" name="scene_avatar" top="68" width="300" />
+                <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="6" name="scene_name_lbl" top="99" width="120">Name</text>
+                <line_editor follows="left|top" height="22" layout="topleft" left="130" max_length_chars="48" name="scene_name" top="96" width="300" />
+                <text text_color="0.95 0.92 0.84 1" follows="left|top" height="32" layout="topleft" left="6" name="scene_none" top="126" width="574" word_wrap="true" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Make one in WolfAvatars" layout="topleft" left="6" name="scene_make" top="160" width="200" visible="false" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Stop the scene" layout="topleft" left="6" name="scene_stop" top="200" width="130" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Skip this one" layout="topleft" left="300" name="scene_skip" top="200" width="130" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="26" label="Rez" layout="topleft" left="460" name="scene_rez" top="199" width="120"
+                 tool_tip="It appears 2 m in front of you; its home is where you stand" />
+            </panel>
+        </panel>
+    </tab_container>
+
+    <!-- the status line: every failure (caution colour, until the next action) and every confirmation -->
+    <text text_color="0.95 0.92 0.84 1" follows="left|top" height="34" layout="topleft" left="8" name="status" top="690" width="462" word_wrap="true" />
+    <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Buy credits..." layout="topleft" left="476" name="buy_btn" top="694" width="116" visible="false"
+     tool_tip="Opens the Wolf Credits page in your browser" />
+    <!-- a question in the window (Delete, AI talk): the yes button far from Cancel; Cancel has the keyboard; Escape is Cancel -->
+    <panel follows="left|top" height="62" layout="topleft" left="0" name="question" top="684" width="600" visible="false" background_visible="false" border="false">
+        <text follows="left|top" height="32" layout="topleft" left="8" name="question_text" top="2" width="584" word_wrap="true" text_color="1 0.70 0.52 1" />
+        <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Yes" layout="topleft" left="8" name="question_yes" top="34" width="220" />
+        <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Cancel" layout="topleft" left="492" name="question_no" top="34" width="100" />
+    </panel>
+</floater>

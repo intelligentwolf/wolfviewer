@@ -47,6 +47,7 @@
 #include "llviewertexture.h"
 #include "llweb.h"
 #include "wolfadventure.h"
+#include "wolfai.h"
 #include "wolfgame.h"
 #include "wolfgrid.h"
 
@@ -877,6 +878,17 @@ private:
     LLFloaterWolfAvatars* mOwner;
 };
 
+namespace
+{
+    LLFloaterWolfAvatars::character_done_fn sCharacterDone;   // [WOLFNPC 2026-10-24] the WolfNPC window's "Create a new one"
+}
+
+// static
+void LLFloaterWolfAvatars::setCharacterDoneListener(character_done_fn fn)
+{
+    sCharacterDone = fn;
+}
+
 LLFloaterWolfAvatars::LLFloaterWolfAvatars(const LLSD& key)
 :   LLFloater(key)
 {
@@ -1387,12 +1399,16 @@ void LLFloaterWolfAvatars::onGetPrice()
         if (!base.empty()) base += ")";
         // [2026-10-20] a base body (and a garment from the resident's own picture) has no pictures to draw: the brain quotes
         // pictures 0 (wolfavatars_lib.php wch_route) - said so, not "0 for 4 pictures"
+        // [WOLFNPC ROUND 2 2026-10-24] Paul: costs in credits AND pounds before anything that costs - the rate is the grid's own
+        // (WolfAI avail pence_per_credit, wolfai.cpp), never a fixed one; no rate known: credits only
+        const F64 ppc = WolfAI::instance().avail().mPencePerCredit;
+        const std::string gbp = ppc > 0.0 ? llformat(" (about \xC2\xA3%.2f)", (F64)self->mQuoteCredits * ppc / 100.0) : std::string();
         if (self->mQuotePictures <= 0)
-            self->mPriceText->setText(llformat("\"%s\"%s costs about %d credits. No pictures to draw - it is made straight away.",
-                                               cap(reply["name"].asString(), 48).c_str(), base.c_str(), self->mQuoteCredits));
+            self->mPriceText->setText(llformat("\"%s\"%s costs about %d credits%s. No pictures to draw - it is made straight away.",
+                                               cap(reply["name"].asString(), 48).c_str(), base.c_str(), self->mQuoteCredits, gbp.c_str()));
         else
-            self->mPriceText->setText(llformat("\"%s\"%s costs about %d credits: %d for 4 pictures, %d to build the one you pick.",
-                                               cap(reply["name"].asString(), 48).c_str(), base.c_str(), self->mQuoteCredits, self->mQuotePictures, self->mQuoteBuild));
+            self->mPriceText->setText(llformat("\"%s\"%s costs about %d credits%s: %d for 4 pictures, %d to build the one you pick.",
+                                               cap(reply["name"].asString(), 48).c_str(), base.c_str(), self->mQuoteCredits, gbp.c_str(), self->mQuotePictures, self->mQuoteBuild));
         self->showStep(STEP_PRICE);
     });
 }
@@ -1571,6 +1587,13 @@ void LLFloaterWolfAvatars::applyJob(const LLSD& job)
         }
         clearError();
         showStep(STEP_DONE);
+        // [WOLFNPC 2026-10-24] a person or an animal (never clothing) is ready: the WolfNPC window may be waiting for it
+        const std::string ck = job["characterKind"].asString();
+        if (sCharacterDone && (ck == "person" || ck == "animal"))
+        {
+            character_done_fn fn = sCharacterDone;   // a listener may set a new one
+            fn(job["job"].asString().empty() ? mJob : job["job"].asString(), ck, cap(job["name"].asString(), 48));
+        }
         return;
     }
     if (state == "failed" || state == "cancelled")

@@ -1326,7 +1326,7 @@ void WolfGameHUD::drawEffects(const LLRect& r)
     const bool real_pass = gWolfPhotoFilterProgram.isComplete();
     const F32 blur = g.effectNow(WolfGame::FX_BLUR);
     const F32 desat = g.effectNow(WolfGame::FX_DESATURATE);
-    // §3.6: blur and desaturate are real post passes (pipeline.cpp wolfPhotoPass, modes 16 and 2)
+    // §3.6: blur and desaturate are real post passes (pipeline.cpp wolfPhotoPass, modes 32 and 2)
     // when the photo filter shader built. Without it: a frosted / grey overlay instead.
     if (!real_pass && blur > 0.f)
     {

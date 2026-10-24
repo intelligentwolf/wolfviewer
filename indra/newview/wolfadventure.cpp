@@ -16,6 +16,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "wolfadventure.h"
+#include "wolfai.h"   // [WOLF AI CREDITS 2026-10-24/] note_credit_use
 
 #include <algorithm>
 #include <cmath>
@@ -1844,6 +1845,36 @@ namespace
     }
 }
 
+namespace
+{
+    // [WOLF AI CREDITS 2026-10-24] Paul: "use credits has to update the viewer". Every WolfAvatars, Adventure Studio and
+    // import call comes through api(), so its replies tell the status bar's "AI n" when credits were spent.
+    // Source: wolfmind_lib.php wm_job_out (:3607) and the jobs list (:3902) - {job, cost: {credits}} per job, the cost
+    // so far, sent again on every poll; was_cost (wolfadventure_story_lib.php:1184) and wm_suggest (:2188) - cost {credits}
+    // of that one call. A job counts only when its cost has grown since the last reply that showed it.
+    std::map<std::string, F64> sSeenJobCost;
+    const size_t SEEN_JOB_COST_MAX = 500;   // a long session's jobs; past it the map starts again (one extra ask at most)
+
+    bool cost_grew(const LLSD& item)
+    {
+        if (!item.isMap() || !item["cost"].isMap()) return false;
+        const F64 credits = item["cost"]["credits"].asReal();
+        if (!item["job"].isString() || item["job"].asString().empty()) return credits > 0.0;
+        if (sSeenJobCost.size() >= SEEN_JOB_COST_MAX) sSeenJobCost.clear();
+        F64& last = sSeenJobCost[item["job"].asString()];
+        const bool grew = credits > last;
+        last = credits;
+        return grew;
+    }
+
+    void note_credit_use(const LLSD& reply)
+    {
+        bool used = cost_grew(reply);
+        for (const LLSD& j : llsd::inArray(reply["jobs"])) used = cost_grew(j) || used;
+        if (used) WolfAI::instance().creditsUsed();
+    }
+}
+
 // static
 void WolfAdventure::api(const std::string& action, const LLSD& body, api_callback_t done)
 {
@@ -1976,6 +2007,7 @@ void WolfAdventure::api(const std::string& action, const LLSD& body, api_callbac
         {
             error = statusWords(status, st ? std::string() : st.toString());
         }
+        if (ok) note_credit_use(reply);   // [WOLF AI CREDITS 2026-10-24/] before done(): it may close the caller
         if (done) done(ok, reply, error);
     });
 }

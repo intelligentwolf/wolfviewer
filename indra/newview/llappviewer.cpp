@@ -89,6 +89,7 @@
 #include "wolfflight.h"   // <WolfViewer 2026-10-06/> Flight Mode
 #include "wolfgame.h"     // [WOLF GAME 2026-10-09/] Wolf Roleplay
 #include "wolfspeed.h"    // [WOLFSPEED 2026-10-17/] Xenon's WolfSpeed
+#include "wolfnpc.h"      // [WOLFNPC 2026-10-24/] the region link for the WolfNPC window and its credits pushes
 #include "wolfdrive.h"    // <WolfViewer 2026-10-09/> driving: wheel / pedals, dashboard
 #include "wolffarground.h"   // <WolfViewer 2026-10-07/> map tiles for regions not connected
 #include "wolffarterrain.h"   // <WolfViewer 2026-10-08/> elevation tiles beyond the terrain received
@@ -6280,6 +6281,9 @@ void LLAppViewer::idle()
     WolfGame::instance().idle();
     // [WOLFSPEED 2026-10-17] Xenon's WolfSpeed: the Wolf gate, the region's hello, picks waiting to go (wolfspeed.cpp)
     WolfSpeed::instance().idle();
+    // [WOLFNPC 2026-10-24] the WolfNPC region link: registers its "WolfNPC" handler (credits pushes reach WolfAI with the
+    // window closed), sends what waits for the region's rate, and fails requests that got no answer (wolfnpc.cpp)
+    WolfNPC::instance().idle();
     {
         LL_PROFILE_ZONE_NAMED_CATEGORY_APP("world update"); //LL_RECORD_BLOCK_TIME(FTM_WORLD_UPDATE);
         gPipeline.updateMove();

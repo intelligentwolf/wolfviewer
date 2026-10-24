@@ -229,6 +229,7 @@
 #include "rlveffects.h"
 #include "rlvhandler.h"
 // [/RLVa:KB]
+#include "wolfai.h"   // [WOLF AI CREDITS 2026-10-24/] handleFocus
 
 #if LL_WINDOWS
 #include <tchar.h> // For Unicode conversion methods
@@ -1643,6 +1644,13 @@ void LLViewerWindow::handleFocus(LLWindow *window)
     // resume foreground running timer
     // since we artifically limit framerate when not frontmost
     gForegroundTime.unpause();
+
+    // [WOLF AI CREDITS 2026-10-24] Credits are bought on the website: coming back to the viewer re-reads the balance
+    // so the status bar's "AI n" shows the purchase (at most one extra ask per 15 s of alt-tabbing).
+    if (WolfAI::instanceExists())
+    {
+        WolfAI::instance().refreshSoon(15.0);
+    }
 }
 
 // The top-level window has lost focus (e.g. via ALT-TAB)

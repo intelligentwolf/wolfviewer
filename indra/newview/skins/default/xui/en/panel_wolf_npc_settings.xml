@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLFNPC 2026-10-24] The WolfNPC settings form (wolffloaternpc.cpp WolfNPCForm), used twice in floater_wolf_npc.xml:
+     "New NPC" and "On this region" > Edit. Source for every field, range and word: firestorm/region-terrain-work/
+     wolfnpc-release/PROTOCOL.md section 3 (cfg), 4.1 (behaviours), 10 (vehicles).
+     Name and behaviour are always shown; the six sections below are closed until their heading is pressed (progressive
+     disclosure: most owners need only the first two rows). WolfNPCForm::relayout stacks the headings and open sections from
+     the top (heading 22 px, 4 px apart) and sets this panel's height, so the scroll container around it scrolls.
+     The section bodies' heights here are the ones relayout uses (Game: 46 closed, 46 + game_details when it can fight). -->
+<panel
+ background_visible="false"
+ border="false"
+ follows="left|top"
+ height="900"
+ layout="topleft"
+ left="0"
+ name="npc_settings"
+ top="0"
+ width="552">
+    <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="4" name="name_lbl" top="7" width="96">Name</text>
+    <line_editor follows="left|top" height="22" layout="topleft" left="104" max_length_chars="48" name="npc_name" top="4" width="300"
+     tool_tip="Shown in chat and in the list (1 to 48 characters)." />
+    <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="4" name="behaviour_lbl" top="35" width="96">What it does</text>
+    <combo_box follows="left|top" height="22" layout="topleft" left="104" name="behaviour" top="32" width="300"
+     tool_tip="How it lives on your land. The sections below fine-tune it." />
+    <text follows="left|top" height="30" layout="topleft" left="104" name="behaviour_note" top="58" width="440" word_wrap="true" text_color="0.80 0.82 0.86 1" />
+
+    <!-- the section headings (toggle buttons; WolfNPCForm puts the open/closed mark in front of the label) -->
+    <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" is_toggle="true" label="Where" layout="topleft" left="0" name="head_0" halign="left" top="92" width="548"
+     tool_tip="Its home, how far it wanders and whether it goes indoors" />
+    <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" is_toggle="true" label="Character" layout="topleft" left="0" name="head_1" halign="left" top="118" width="548"
+     tool_tip="How bold it is, how it treats visitors, and its pack or group" />
+    <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" is_toggle="true" label="Work and routine" layout="topleft" left="0" name="head_2" halign="left" top="144" width="548"
+     tool_tip="People only: a job, a daily routine and named places" />
+    <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" is_toggle="true" label="Game" layout="topleft" left="0" name="head_3" halign="left" top="170" width="548"
+     tool_tip="Whether it can fight in the region's game: be hunted, or hunt players" />
+    <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" is_toggle="true" label="AI talk" layout="topleft" left="0" name="head_4" halign="left" top="196" width="548"
+     tool_tip="Let it answer people with AI (uses your Wolf Credits)" />
+    <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" is_toggle="true" label="Vehicle" layout="topleft" left="0" name="head_5" halign="left" top="222" width="548"
+     tool_tip="Let it drive, or ride in, a vehicle" />
+
+    <!-- ═══ Where ═══ -->
+    <panel follows="left|top" height="128" layout="topleft" left="0" name="body_0" top="250" width="548" visible="false">
+        <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="12" name="home_lbl" top="6" width="88">Home</text>
+        <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="104" name="home_text" top="6" width="436" />
+        <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="12" name="area_lbl" top="31" width="88">Stays within</text>
+        <combo_box follows="left|top" height="22" layout="topleft" left="104" name="area_mode" top="28" width="180"
+         tool_tip="How far it may wander: a circle round its home, the parcel its home is on, or the whole region." />
+        <slider follows="left|top" height="20" layout="topleft" left="292" name="area_radius" top="29" width="248" label="Metres" label_width="48"
+         min_val="2" max_val="128" increment="1" initial_value="20" decimal_digits="0"
+         tool_tip="2 to 128 metres from its home" />
+        <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="12" name="indoors_lbl" top="58" width="88">Indoors</text>
+        <combo_box follows="left|top" height="22" layout="topleft" left="104" name="indoors" top="55" width="280"
+         tool_tip="Indoors means under a roof." />
+        <check_box follows="left|top" height="18" layout="topleft" left="104" name="swim" top="82" width="436" label="Can swim (an otter, a duck, a fish)"
+         tool_tip="Off: it never walks into water." />
+        <check_box follows="left|top" height="18" layout="topleft" left="104" name="travel" top="106" width="436" label="Follows me everywhere (across the grid)"
+         tool_tip="A pet only: it goes with you when you teleport or cross into another region, and goes to your home when you log out. One travelling pet per person." />
+    </panel>
+
+    <!-- ═══ Character ═══ -->
+    <panel follows="left|top" height="132" layout="topleft" left="0" name="body_1" top="340" width="548" visible="false">
+        <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="12" name="shy_lbl" top="6" width="88">Shyness</text>
+        <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="104" name="shy_bold" top="6" width="40">Bold</text>
+        <slider follows="left|top" height="20" layout="topleft" left="144" name="shy" top="4" width="260" label="" label_width="0"
+         min_val="0" max_val="1" increment="0.05" initial_value="0.3" decimal_digits="2" show_text="false"
+         tool_tip="Bold keeps close to people; timid keeps its distance and runs from someone rushing at it." />
+        <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="410" name="shy_timid" top="6" width="50">Timid</text>
+        <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="12" name="visitors_lbl" top="33" width="88">Visitors</text>
+        <combo_box follows="left|top" height="22" layout="topleft" left="104" name="visitors" top="30" width="200"
+         tool_tip="How it treats people it does not know." />
+        <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="12" name="pack_lbl" top="61" width="88">Pack</text>
+        <line_editor follows="left|top" height="22" layout="topleft" left="104" max_length_chars="24" name="pack" top="58" width="200"
+         tool_tip="Your NPCs with the same name here move together (up to 24 characters; empty = on its own)." />
+        <check_box follows="left|top" height="18" layout="topleft" left="314" name="leader" top="60" width="230" label="Leads its pack"
+         tool_tip="If none is chosen, the oldest one leads." />
+        <text follows="left|top" height="16" layout="topleft" left="104" name="pack_note" top="84" width="440" text_color="0.80 0.82 0.86 1">Your NPCs with the same name move together.</text>
+        <check_box follows="left|top" height="18" layout="topleft" left="12" name="noises" top="108" width="200" label="Makes animal noises"
+         tool_tip="Barks, meows, purrs, howls... free (no AI), heard within 25 m, never more than one every 8 seconds." />
+        <slider follows="left|top" height="20" layout="topleft" left="216" name="noise_volume" top="107" width="324" label="Volume" label_width="50"
+         min_val="0" max_val="1" increment="0.05" initial_value="0.7" decimal_digits="2" />
+    </panel>
+
+    <!-- ═══ Work and routine (people) ═══ -->
+    <panel follows="left|top" height="144" layout="topleft" left="0" name="body_2" top="450" width="548" visible="false">
+        <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="12" name="work_lbl" top="6" width="88">Job</text>
+        <combo_box follows="left|top" height="22" layout="topleft" left="104" name="work" top="3" width="160"
+         tool_tip="Used when what it does is Works (job)." />
+        <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="272" name="work_at_text" top="6" width="140" />
+        <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Where I stand" layout="topleft" left="416" name="work_at_here" top="3" width="128"
+         tool_tip="Its job is done where you are standing now (else at its home)" />
+        <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="12" name="routine_lbl" top="32" width="532">Routine: one a line, grid time (Pacific), e.g. 08:00 market</text>
+        <text_editor follows="left|top" height="52" layout="topleft" left="12" max_length="1200" name="routine" top="50" width="532" word_wrap="true"
+         tool_tip="Up to 12 lines: a time, then a place you saved below, or work, home, sit, roam or rest. For example: 08:00 market, 18:00 work, 23:00 home." />
+        <text follows="left|top" height="32" layout="topleft" left="12" name="places_note" top="108" width="532" word_wrap="true" text_color="0.80 0.82 0.86 1">A routine can go to its places: name them on the Places tab in Edit (after it is rezzed).</text>
+    </panel>
+
+    <!-- ═══ Game ═══ -->
+    <panel follows="left|top" height="90" layout="topleft" left="0" name="body_3" top="690" width="548" visible="false">
+        <check_box follows="left|top" height="18" layout="topleft" left="12" name="game_only" top="4" width="532" label="Game Mode only"
+         tool_tip="Only people playing in Game Mode can talk to or play with this character - everyone else just sees it." />
+        <text follows="left|top" height="20" layout="topleft" left="32" name="game_only_note" top="24" width="512" word_wrap="true" text_color="0.80 0.82 0.86 1">Only people playing in Game Mode can talk to or play with this character - everyone else just sees it.</text>
+        <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Quests, dialogues, trader..." layout="topleft" left="300" name="game_more" top="46" width="244"
+         tool_tip="Opens the Game tab: quests, dialogue choices, a trader, a pet, events and what a click does" />
+        <check_box follows="left|top" height="18" layout="topleft" left="12" name="fight" top="48" width="280" label="Can fight in game mode"
+         tool_tip="Only in the region's game (Game Mode): it can be hunted, and it can hunt players who are playing." />
+        <text follows="left|top" height="16" layout="topleft" left="12" name="game_note" top="70" width="532" text_color="0.80 0.82 0.86 1" />
+        <panel follows="left|top" height="160" layout="topleft" left="0" name="game_details" top="90" width="548" visible="false">
+            <check_box follows="left|top" height="18" layout="topleft" left="12" name="huntable" top="4" width="250" label="Can be hunted"
+             tool_tip="Players of the region's game can attack it. It needs a game with a health stat." />
+            <spinner follows="left|top" height="22" layout="topleft" left="270" name="health" top="2" width="130" label="Health" label_width="60"
+             min_val="1" max_val="10000" increment="10" initial_value="100" decimal_digits="0" />
+            <spinner follows="left|top" height="22" layout="topleft" left="404" name="respawn" top="2" width="140" label="Back after s" label_width="76"
+             min_val="10" max_val="86400" increment="10" initial_value="300" decimal_digits="0"
+             tool_tip="Seconds after it is defeated before it is back at home (10 to 86400)" />
+            <check_box follows="left|top" height="18" layout="topleft" left="12" name="hunt" top="30" width="250" label="Hunts game players"
+             tool_tip="Only players of the region's game (or someone who attacked it) are ever attacked." />
+            <spinner follows="left|top" height="22" layout="topleft" left="270" name="sight" top="28" width="130" label="Sight m" label_width="60"
+             min_val="2" max_val="64" increment="1" initial_value="20" decimal_digits="0" tool_tip="How far it sees a player (2 to 64 metres)" />
+            <spinner follows="left|top" height="22" layout="topleft" left="404" name="chase" top="28" width="140" label="Chase m/s" label_width="76"
+             min_val="0" max_val="20" increment="0.5" initial_value="0" decimal_digits="1" tool_tip="0 = the behaviour's own speed" />
+            <spinner follows="left|top" height="22" layout="topleft" left="12" name="cooldown" top="56" width="200" label="Seconds between hits" label_width="130"
+             min_val="0.5" max_val="30" increment="0.5" initial_value="2" decimal_digits="1" />
+            <spinner follows="left|top" height="22" layout="topleft" left="270" name="give_up" top="56" width="274" label="Gives up this far from home m" label_width="190"
+             min_val="5" max_val="128" increment="1" initial_value="40" decimal_digits="0" />
+            <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="12" name="damage_lbl" top="86" width="532">Damage a hit does (the game's stat names, e.g. health)</text>
+            <line_editor follows="left|top" height="22" layout="topleft" left="12" max_length_chars="32" name="dmg_stat_0" top="104" width="150" label="stat" />
+            <spinner follows="left|top" height="22" layout="topleft" left="166" name="dmg_amount_0" top="104" width="100" label="" label_width="0" min_val="1" max_val="1000" increment="1" initial_value="5" decimal_digits="0" />
+            <line_editor follows="left|top" height="22" layout="topleft" left="284" max_length_chars="32" name="dmg_stat_1" top="104" width="150" label="stat" />
+            <spinner follows="left|top" height="22" layout="topleft" left="438" name="dmg_amount_1" top="104" width="100" label="" label_width="0" min_val="1" max_val="1000" increment="1" initial_value="1" decimal_digits="0" />
+            <line_editor follows="left|top" height="22" layout="topleft" left="12" max_length_chars="32" name="dmg_stat_2" top="130" width="150" label="stat" />
+            <spinner follows="left|top" height="22" layout="topleft" left="166" name="dmg_amount_2" top="130" width="100" label="" label_width="0" min_val="1" max_val="1000" increment="1" initial_value="1" decimal_digits="0" />
+            <line_editor follows="left|top" height="22" layout="topleft" left="284" max_length_chars="32" name="dmg_stat_3" top="130" width="150" label="stat" />
+            <spinner follows="left|top" height="22" layout="topleft" left="438" name="dmg_amount_3" top="130" width="100" label="" label_width="0" min_val="1" max_val="1000" increment="1" initial_value="1" decimal_digits="0" />
+        </panel>
+    </panel>
+
+    <!-- ═══ AI talk ═══ -->
+    <panel follows="left|top" height="214" layout="topleft" left="0" name="body_4" top="740" width="548" visible="false">
+        <check_box follows="left|top" height="18" layout="topleft" left="12" name="ai_on" top="4" width="400" label="AI talk (uses your Wolf Credits)"
+         tool_tip="It answers people who talk to it. Every reply is paid from YOUR Wolf Credits, never the speaker's." />
+        <text follows="left|top" height="54" layout="topleft" left="12" name="ai_line" top="24" width="532" word_wrap="true" text_color="0.80 0.82 0.86 1" />
+        <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="12" name="personality_lbl" top="82" width="532">Personality (who it is, how it talks)</text>
+        <text_editor follows="left|top" height="48" layout="topleft" left="12" max_length="1000" name="personality" top="100" width="532" word_wrap="true"
+         tool_tip="Up to 1000 characters, e.g. A grumpy old bartender who loves gossip." />
+        <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="12" name="voice_lbl" top="157" width="88">Voice</text>
+        <combo_box follows="left|top" height="22" layout="topleft" left="104" name="voice" top="154" width="240"
+         tool_tip="Written only, or a spoken voice (a voice reply costs more)." />
+        <spinner follows="left|top" height="22" layout="topleft" left="12" name="daily_limit" top="182" width="330" label="Daily limit for this NPC (credits, 0 = none)" label_width="250"
+         min_val="0" max_val="100000" increment="10" initial_value="0" decimal_digits="0" />
+        <check_box follows="left|top" height="18" layout="topleft" left="350" name="npc_talk" top="184" width="194" label="Talks to other NPCs"
+         tool_tip="May answer other NPCs, only while a real person is within 20 m" />
+    </panel>
+
+    <!-- ═══ Vehicle ═══ -->
+    <panel follows="left|top" height="162" layout="topleft" left="0" name="body_5" top="958" width="548" visible="false">
+        <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="12" name="vehicle_lbl" top="6" width="88">Vehicle</text>
+        <combo_box follows="left|top" height="22" layout="topleft" left="104" name="vehicle" top="3" width="300"
+         tool_tip="A vehicle near you that it may drive: yours, or one whose description contains wolfnpc-driver." />
+        <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Find vehicles" layout="topleft" left="410" name="vehicle_find" top="3" width="134"
+         tool_tip="List the vehicles within 96 m of you that it may use" />
+        <check_box follows="left|top" height="18" layout="topleft" left="104" name="roads" top="32" width="200" label="Drive the region's roads"
+         tool_tip="Wanders the region's road network instead of following a route" />
+        <check_box follows="left|top" height="18" layout="topleft" left="310" name="loop" top="32" width="234" label="Go round the route again" />
+        <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="104" name="route_text" top="59" width="160" />
+        <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Add where I stand" layout="topleft" left="270" name="route_add" top="56" width="140"
+         tool_tip="Your position becomes the next point of its route" />
+        <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Clear route" layout="topleft" left="414" name="route_clear" top="56" width="130" />
+        <spinner follows="left|top" height="22" layout="topleft" left="104" name="vehicle_speed" top="84" width="200" label="Speed m/s" label_width="70"
+         min_val="1" max_val="20" increment="1" initial_value="8" decimal_digits="0" />
+        <check_box follows="left|top" height="18" layout="topleft" left="104" name="passenger" top="112" width="440" label="Rides as a passenger (does not drive)" />
+        <text follows="left|top" height="16" layout="topleft" left="104" name="passenger_note" top="113" width="440" text_color="0.80 0.82 0.86 1">Animals ride as passengers.</text>
+        <text follows="left|top" height="16" layout="topleft" left="12" name="vehicle_note" top="138" width="532" text_color="0.80 0.82 0.86 1">It stops for anyone within 8 m ahead. Park and Leave vehicle are in Edit.</text>
+    </panel>
+</panel>

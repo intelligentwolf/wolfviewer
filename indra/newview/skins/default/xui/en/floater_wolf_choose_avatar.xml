@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [STARTER AVATARS 2026-10-24] Choose an Avatar (wolffloaterchooseavatar.cpp): Avatar > Choose an Avatar... and
+     Wolf World > Choose an Avatar... Paul: "add the choice to the viewer and wolfstorm: pick an avatar like second life has".
+     Who and why: a resident (often brand new) wants to become a different starter look - a person, an animal or a
+     sci-fi character - in a few seconds, without losing what they wear now.
+     Flow: pick a group (People / Animals / Sci-fi), pick a picture, read what it is and that it replaces the outfit
+     (saved first), Wear (bottom right); "Changing to ... done" or why not stays in the status box. The cards are drawn in
+     code into the "cards" panel (3 x 2 a group); the painted backdrop sits behind every control. -->
+<floater
+ can_close="true"
+ can_minimize="true"
+ can_resize="false"
+ height="612"
+ layout="topleft"
+ name="wolf_choose_avatar"
+ help_topic="wolf_choose_avatar"
+ save_rect="true"
+ single_instance="true"
+ title="Choose an Avatar"
+ width="640">
+    <string name="picked">Chosen</string>
+    <string name="wear_label">Wear [NAME]</string>
+    <string name="wear_none">Wear this look</string>
+    <string name="note_replace">Wearing a look replaces what you have on now. Your current outfit is saved first, in My Outfits as "My outfit before [NAME]", so nothing is lost.</string>
+
+    <!-- [2026-10-24] Paul: "the moon on the choose avatar floater is going over the white writing" - the moon is drawn at
+         x w-96..w-44, y h-96..h-44 (wolffloaterchooseavatar.cpp drawBackdrop), so the intro stops 8 px short of it
+         (16 + 520 = 536 < 640 - 96) and the words are shortened to stay within its two lines -->
+    <text follows="left|top" height="34" layout="topleft" left="16" name="intro" top="26" width="520" wrap="true" text_color="White">Pick a look and press Wear. It goes into your Clothing folder, yours to keep. Choose again any time.</text>
+
+    <button follows="left|top" height="26" layout="topleft" left="16" name="kind_people" top="66" width="120" label="People" is_toggle="true" tool_tip="People: everyday and adventure looks" />
+    <button follows="left|top" height="26" layout="topleft" left="142" name="kind_animal" top="66" width="120" label="Animals" is_toggle="true" tool_tip="Animals on four legs, each with its own HUD" />
+    <button follows="left|top" height="26" layout="topleft" left="268" name="kind_scifi" top="66" width="120" label="Sci-fi" is_toggle="true" tool_tip="Explorers, androids and aliens" />
+
+    <panel follows="left|top" height="340" layout="topleft" left="16" name="cards" top="102" width="608" background_visible="false" mouse_opaque="false" />
+    <text follows="left|top" height="40" layout="topleft" left="16" name="cards_empty" top="250" width="608" halign="center" wrap="true" text_color="White" visible="false">Loading the looks...</text>
+
+    <text follows="left|top" font="SansSerifBold" height="18" layout="topleft" left="16" name="chosen_name" top="452" width="608" text_color="White"> </text>
+    <text follows="left|top" height="32" layout="topleft" left="16" name="chosen_blurb" top="470" width="608" wrap="true" text_color="White"> </text>
+    <text follows="left|top" height="32" layout="topleft" left="16" name="replace_note" top="502" width="608" wrap="true" text_color="LtGray"> </text>
+
+    <text_editor follows="left|top" height="40" layout="topleft" left="16" max_length="4096" name="status" top="536" width="608" word_wrap="true" read_only="true" show_context_menu="true" visible="false" />
+
+    <button follows="right|bottom" height="26" layout="topleft" left="444" name="wear_btn" top="580" width="180" label="Wear this look" />
+</floater>

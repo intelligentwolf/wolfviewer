@@ -86,6 +86,9 @@ with the same filename but different name
   <texture name="AudioMute_Over" file_name="icons/AudioMute_Over.png" preload="false" />
   <texture name="VoiceMute_Off" file_name="icons/VoiceMute_Off.png" preload="false" />
 
+  <!-- [WOLF BUG REPORT 2026-10-24] the status bar's bug icon (Report a Problem, wolffloaterbugreport.cpp), drawn like Audio_Off / Audio_Press -->
+  <texture name="WolfBug_Off" file_name="icons/wolf_bug_off.png" preload="true" />
+  <texture name="WolfBug_Press" file_name="icons/wolf_bug_press.png" preload="true" />
   <texture name="Audio_Off" file_name="icons/Audio_Off.png" preload="false" />
   <texture name="Audio_Press" file_name="icons/Audio_Press.png" preload="false" />
   <texture name="AudioMute_Press" file_name="icons/AudioMute_Press.png" preload="false" />
@@ -235,6 +238,8 @@ with the same filename but different name
   <texture name="WolfPhoto_lineart_Sel" file_name="wolf_photo/lineart_sel.png" preload="false" />
   <texture name="WolfPhoto_comic" file_name="wolf_photo/comic.png" preload="false" />
   <texture name="WolfPhoto_comic_Sel" file_name="wolf_photo/comic_sel.png" preload="false" />
+  <texture name="WolfPhoto_ascii" file_name="wolf_photo/ascii.png" preload="false" />
+  <texture name="WolfPhoto_ascii_Sel" file_name="wolf_photo/ascii_sel.png" preload="false" />
   <texture name="Command_WolfDictate_Icon"     file_name="toolbar_icons/wolf_dictate.png"     preload="true" />
   <texture name="Command_WolfGameMode_Icon"   file_name="toolbar_icons/wolf_gamemode.png"   preload="true" />   <!-- [WOLF GAME 2026-10-09] the paw -->
   <texture name="Wolf_WatchWolf_Icon"   file_name="toolbar_icons/wolf_watchwolf.png"   preload="true" />   <!-- [WATCHWOLF 2026-10-10] the wolf head (region-terrain-work/watchwolf/make_wolf_icon.py) -->

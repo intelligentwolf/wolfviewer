@@ -80,6 +80,11 @@
           image_unselected="WolfPhoto_comic" image_selected="WolfPhoto_comic_Sel" image_hover_unselected="WolfPhoto_comic" image_hover_selected="WolfPhoto_comic_Sel"
           image_pressed="WolfPhoto_comic_Sel" image_pressed_selected="WolfPhoto_comic_Sel" label="" tool_tip="Comic" />
   <text follows="left|top" layout="topleft" left="268" top="475" width="120" height="14" halign="center" font="SansSerifSmall" name="tile_15_label">Comic</text>
+  <!-- [WOLF ASCII 2026-10-24] Paul: "an ASCII ART mode? lols" - real characters (wolfPhotoFilterF.glsl mode 16) -->
+  <button follows="left|top" layout="topleft" left="396" top="406" width="120" height="67" name="tile_16" is_toggle="true" scale_image="true"
+          image_unselected="WolfPhoto_ascii" image_selected="WolfPhoto_ascii_Sel" image_hover_unselected="WolfPhoto_ascii" image_hover_selected="WolfPhoto_ascii_Sel"
+          image_pressed="WolfPhoto_ascii_Sel" image_pressed_selected="WolfPhoto_ascii_Sel" label="" tool_tip="ASCII Art" />
+  <text follows="left|top" layout="topleft" left="396" top="475" width="120" height="14" halign="center" font="SansSerifSmall" name="tile_16_label">ASCII Art</text>
   <text follows="left|top" layout="topleft" left="12" top="511" width="300" height="14" name="strength_label" font="SansSerifSmall">Strength (%)</text>
   <slider follows="left|top" layout="topleft" left="12" top="527" width="504" height="16" name="strength" min_val="0" max_val="100" increment="5" initial_value="100" decimal_digits="0" show_text="true" />
   <text follows="left|top" layout="topleft" left="12" top="551" width="504" height="28" word_wrap="true" name="status" font="SansSerifSmall">Applies to your own view only. Snapshots include it.</text>

@@ -193,7 +193,18 @@ private:
     // <WolfViewer 2026-10-05> "Wolf Grid" button: the website, left of the menu search / balance
     LLButton* mWolfGridBtn = nullptr;
     void updateWolfGridButtonPosition();
+    // [WOLF TOPBAR 2026-10-24] menu edge / bar width last laid out against (refresh() re-lays only when they change)
+    S32 mWolfLastMenuRight = -1, mWolfLastBarWidth = -1;
     // </WolfViewer>
+    // [WOLF BUG REPORT 2026-10-24] the bug icon left of the Wolf Grid button: Report a Problem (wolffloaterbugreport.cpp),
+    // shown on Wolf Territories only (the report is a Wolf ticket, sent with this login's session).
+    LLButton* mWolfBugBtn = nullptr;
+    void updateWolfBugButton();
+    // [WOLF AI CREDITS 2026-10-24] "AI 2304" left of the money in balance_bg, from WolfAI::avail() (its 120 s poll,
+    // refreshNow after the viewer's own AI charges, refreshSoon when the window gets focus back after buying).
+    void updateWolfAICredits();
+    LLTextBox* mWolfAICredits = nullptr;
+    std::string mWolfAIShown;          // the label last put in mWolfAICredits ("" = hidden)
 
     class LLParcelChangeObserver;
 

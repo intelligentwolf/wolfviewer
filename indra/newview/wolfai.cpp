@@ -242,15 +242,41 @@ void WolfAI::refresh(bool force)
 {
     syncSession();
     if (mFetching) return;
+    if (mBillingCheck > 0. && LLFrameTimer::getElapsedSeconds() >= mBillingCheck) { mBillingCheck = 0.; force = true; }
     if (!force && mAvail.mAsked && LLFrameTimer::getElapsedSeconds() < mNextRefresh) return;
     // [WOLF GRID GATE 2026-10-17] isOnWolfTerritories, not the login grid: a hypergrid jump away stops the 120 s poll (it
     // carries this login's session) and the AI shows as unavailable until the way back.
     if (!WolfGrid::isOnWolfTerritories()) { mAvail = Avail(); mAvail.mAsked = true; mNextRefresh = 0.0; return; }
     if (gAgentID.isNull() || gAgentSessionID.isNull()) return;   // not logged in yet
     mFetching = true;
-    mNextRefresh = LLFrameTimer::getElapsedSeconds() + AVAIL_CACHE_SECS;
+    mLastAsk = LLFrameTimer::getElapsedSeconds();
+    mNextRefresh = mLastAsk + AVAIL_CACHE_SECS;
     const Session auth = mSession;
     LLCoros::instance().launch("WolfAI avail", [auth]() { WolfAI::availCoro(auth); });
+}
+
+void WolfAI::refreshSoon(F64 min_age)
+{
+    if (LLFrameTimer::getElapsedSeconds() - mLastAsk >= min_age) mNextRefresh = 0.;   // refresh() from idle does the ask
+}
+
+void WolfAI::creditsUsed()
+{
+    // Source: wolfadventure_worker.php:57 WAW_BILLING_SEC = 60 - AI turns go on unbilled_micro and the billing run takes
+    // them off the balance up to a minute later (wolfmind_lib.php:466, wm_bill_owner); 75 s leaves the run time to finish.
+    const F64 BILLING_WAIT_SECS = 75.0;
+    refreshSoon(5.0);
+    mBillingCheck = LLFrameTimer::getElapsedSeconds() + BILLING_WAIT_SECS;
+}
+
+void WolfAI::openBuyPage()
+{
+    // The service's buy_url when it is a Wolf Territories page (llfloaterwolfavatars.cpp onBuyCredits does the same check),
+    // else the store's own address. Source: wolfmind_lib.php:81 WM_BUY_URL (gridmanager/wolfcreditslib.php:39 WC_SITE_URL).
+    const std::string& url = mAvail.mBuyUrl;
+    const bool wolf_page = url.find_first_of("\\\r\n\t ") == std::string::npos
+        && (url.rfind("https://www.wolf-grid.com/", 0) == 0 || url.rfind("https://wolf-grid.com/", 0) == 0);
+    LLWeb::loadURLExternal(wolf_page ? url : std::string("https://www.wolf-grid.com/index.php?f=credits"));
 }
 
 void WolfAI::availCoro(Session auth)
@@ -542,7 +568,7 @@ void WolfAI::syncSession()
     const Session auth = Session::capture();
     if (mSession == auth) return;
     mSession = auth;
-    mAvail = Avail(); mFetching = false; mGenerating = false; mNextRefresh = 0.;
+    mAvail = Avail(); mFetching = false; mGenerating = false; mNextRefresh = 0.; mBillingCheck = 0.;
     mJobs.clear(); mTasks.clear(); mErrors.clear();
     mDraft.clear(); mDraftName.clear(); mDraftMode = "structure";
     mSelected.setNull(); mLastStarted.setNull(); mMeshItem.setNull(); mMeshStatus.clear();
@@ -991,7 +1017,7 @@ void WolfPanelAI::refresh()
         const std::string balance = a.mBalanceKnown ? llformat("%d", a.mBalance) : "an unknown balance";
         getChild<LLTextBox>("ai_confirm_title")->setText("Before your " + kind + " is started");
         mConfirmText->setText(llformat(
-            "You will be charged up to %d Wolf Credits for this %s — the actual AI cost, taken when it is ready. You have %s.\n\n"
+            "You will be charged up to %d Wolf Credits for this %s — the actual AI cost plus 10%%, taken when it is ready. You have %s.\n\n"
             "It is designed in stages and then reviewed. Revisions use that allowance. When the allowance is used up, the %s is finished with what has been designed and the reviewer's remaining notes are kept with it — it is never abandoned part way.\n\n"
             "When it is ready it is delivered to your Objects folder and charged automatically. You can close this window while it builds.",
             quote.maxCredits, kind.c_str(), balance.c_str(), kind.c_str()));

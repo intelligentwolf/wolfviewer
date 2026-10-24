@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLFNPC ROUND 4 2026-10-24] Edit > Places (wolffloaternpcmind.cpp WolfNPCMind): its named places (PROTOCOL.md §3 places,
+     up to 16) and the objects it uses (§23.1 tools: whiteboard, seat, counter, vehicle, dispenser, place; at most 8; every
+     object must be its owner's). A tool's role also works as a place name. 586 x 496. Fixed text colours (painted window). -->
+<panel background_visible="false" border="false" follows="all" height="496" layout="topleft" left="0" name="npc_places" top="0" width="586">
+    <text follows="left|top" font.style="BOLD" height="16" layout="topleft" left="4" name="pl_lbl" top="6" width="578" text_color="0.95 0.92 0.84 1">Places it knows (for routines, skills and quests)</text>
+    <scroll_list follows="left|top" height="140" layout="topleft" left="4" name="pl_list" top="26" width="578" multi_select="false" draw_heading="true" column_padding="4">
+        <scroll_list.columns name="name" label="Name" width="200" />
+        <scroll_list.columns name="where" label="Where" width="250" />
+        <scroll_list.columns name="from" label="" width="110" />
+    </scroll_list>
+    <text follows="left|top" height="16" layout="topleft" left="4" name="pl_save_lbl" top="175" width="120" text_color="0.95 0.92 0.84 1">Save where I stand as</text>
+    <line_editor follows="left|top" height="22" layout="topleft" left="128" max_length_chars="24" name="pl_name" top="172" width="200" label="the bar, market, pier..." />
+    <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Save where I stand" layout="topleft" left="332" name="pl_save" top="172" width="146" />
+    <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Remove" layout="topleft" left="482" name="pl_remove" top="172" width="100" />
+
+    <text follows="left|top" font.style="BOLD" height="16" layout="topleft" left="4" name="tl_lbl" top="216" width="578" text_color="0.95 0.92 0.84 1">Things it uses (your own objects on this region)</text>
+    <scroll_list follows="left|top" height="110" layout="topleft" left="4" name="tl_list" top="236" width="578" multi_select="false" draw_heading="true" column_padding="4">
+        <scroll_list.columns name="type" label="It is a" width="100" />
+        <scroll_list.columns name="role" label="Called" width="130" />
+        <scroll_list.columns name="object" label="Object" width="250" />
+        <scroll_list.columns name="face" label="Face" width="70" />
+    </scroll_list>
+    <combo_box follows="left|top" height="22" layout="topleft" left="4" name="tl_type" top="352" width="130" />
+    <line_editor follows="left|top" height="22" layout="topleft" left="138" max_length_chars="24" name="tl_role" top="352" width="150" label="called, e.g. board" />
+    <spinner follows="left|top" height="22" layout="topleft" left="292" name="tl_face" top="352" width="110" label="Face" label_width="34"
+     min_val="-1" max_val="8" increment="1" initial_value="0" decimal_digits="0" tool_tip="Whiteboards: the face it writes on (-1 = all faces)" />
+    <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Link the selected object" layout="topleft" left="406" name="tl_link" top="352" width="176" />
+    <text follows="left|top" height="32" layout="topleft" left="4" name="tl_note" top="380" width="474" word_wrap="true" text_color="0.82 0.80 0.88 1">Select one of your objects in the world (right-click it and choose Edit), then press Link. Its name here becomes a place it can walk to.</text>
+    <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Unlink" layout="topleft" left="482" name="tl_unlink" top="380" width="100" />
+    <text follows="left|top" height="30" layout="topleft" left="4" name="pl_error" top="420" width="578" word_wrap="true" text_color="1 0.70 0.52 1" />
+</panel>

@@ -84,6 +84,30 @@
 #include "omnifilterengine.h"   // <FS:Zi> Omnifilter support
 #include "sound_ids.h"
 #include "NACLantispam.h"
+#include "wolfgrid.h"   // [WOLF HERALDS 2026-10-24/] wolf_herald_name
+
+namespace
+{
+    // [WOLF HERALDS 2026-10-24] Paul: "Wolf GAmes has given you, let's have fun with that "The Wolf Wizard has given you"
+    // kind of messages varied". Deliveries from the grid (WolfAvatars, AI objects, imports, setup boxes) are offered by
+    // the Wolf Games system account with a varied herald in the offer's from-name (wolfstorm/php/inventory_notify_lib.php
+    // wid_herald; WID_SENDER_ID). Stock Firestorm names the giver from the account link, so this viewer shows the herald
+    // instead - only for that account, only on Wolf Territories. "" = show the usual account link.
+    std::string wolf_herald_name(const LLOfferInfo* info)
+    {
+        static const LLUUID WOLF_GAMES_ID("7ede2bd7-5898-415e-8075-d1be6428a21a");
+        if (!info || info->mFromGroup || info->mFromObject || info->mFromID != WOLF_GAMES_ID || !WolfGrid::isOnWolfTerritories())
+        {
+            return std::string();
+        }
+        const std::string& name = info->mFromName;
+        if (name.empty() || name == "Wolf Games" || name.size() > 64 || name.find_first_of("[]\r\n") != std::string::npos)
+        {
+            return std::string();
+        }
+        return name;
+    }
+}
 
 extern void on_new_message(const LLSD& msg);
 
@@ -370,6 +394,13 @@ void inventory_offer_handler(LLOfferInfo* info)
         args["NAME_LABEL"] = LLSLURL("agent", info->mFromID, "completename").getSLURLString();
 // [/SL:KB]
         args["NAME_SLURL"] = LLSLURL("agent", info->mFromID, "about").getSLURLString();
+        // [WOLF HERALDS 2026-10-24] "The Wolf Wizard has given you ..." for the grid's own deliveries
+        const std::string herald = wolf_herald_name(info);
+        if (!herald.empty())
+        {
+            args["NAME_LABEL"] = herald;
+            args["NAME_SLURL"] = herald;
+        }
     }
     std::string verb = "select?name=" + LLURI::escape(msg);
     args["ITEM_SLURL"] = LLSLURL("inventory", info->mObjectID, verb.c_str()).getSLURLString();
@@ -498,6 +529,7 @@ void inventory_offer_handler(LLOfferInfo* info)
                     (RlvActions::canShowName(RlvActions::SNC_DEFAULT, info->mFromID)) || (!RlvUtil::isNearbyAgent(info->mFromID)) || (RlvUIEnabler::hasOpenIM(info->mFromID)) || (RlvUIEnabler::hasOpenProfile(info->mFromID));
 
                 std::string name_slurl = LLSLURL("agent", info->mFromID, (fRlvCanShowName ? "inspect" : "rlvanonym")).getSLURLString();
+                if (const std::string herald = wolf_herald_name(info); !herald.empty()) name_slurl = herald;   // [WOLF HERALDS 2026-10-24/]
 
                 chat_args["USER_NAME"] = name_slurl;
                 message_type = "InvOfferAutoAcceptUser";

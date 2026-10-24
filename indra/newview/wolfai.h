@@ -62,6 +62,15 @@ public:
     bool buildReady() const { return mAvail.mBuild; }
     void refresh(bool force = false);
     void refreshNow() { refresh(true); }
+    // [WOLF AI CREDITS 2026-10-24] ask again on the next idle unless the last ask is under min_age seconds old
+    // (LLViewerWindow::handleFocus: back from buying credits in the browser).
+    void refreshSoon(F64 min_age);
+    // [WOLF AI CREDITS 2026-10-24] a Wolf service reply showed credits being spent (WolfAdventure::api): ask now, and once
+    // more after the brain's billing run has taken them (wolfadventure_worker.php WAW_BILLING_SEC = 60).
+    void creditsUsed();
+    // [WOLF AI CREDITS 2026-10-24] the Wolf Credits store in the browser (status bar "AI n" click); the balance is read
+    // again when the viewer gets focus back (refreshSoon).
+    void openBuyPage();
     void syncSession();
     typedef std::function<void(bool, const std::string&)> script_fn;
     typedef std::function<void(const std::string&, bool)> progress_fn;
@@ -101,7 +110,7 @@ private:
     Session mSession;
     Avail mAvail;
     bool mFetching = false, mGenerating = false;
-    F64 mNextRefresh = 0.;
+    F64 mNextRefresh = 0., mLastAsk = -1.e9, mBillingCheck = 0.;   // mBillingCheck: creditsUsed()'s second ask (0 = none)
     U64 mMutation = 0, mRevision = 0;
     std::map<LLUUID, BuildJob> mJobs;
     std::set<std::string> mTasks;

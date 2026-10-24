@@ -17,6 +17,7 @@
 #ifndef LL_FLOATER_WOLF_AVATARS_H
 #define LL_FLOATER_WOLF_AVATARS_H
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -66,6 +67,11 @@ class LLFloaterWolfAvatars : public LLFloater
     friend class WolfAvatarsBackdrop;   // the view behind the controls that paints the den
 public:
     LLFloaterWolfAvatars(const LLSD& key);
+
+    /** [WOLFNPC 2026-10-24] Told when a person or animal (not clothing) is finished here (job, characterKind, name): the
+     *  WolfNPC window's "Create a new one" waits for it, to rez it as an NPC. One listener; nullptr removes it. */
+    typedef std::function<void(const std::string& job, const std::string& kind, const std::string& name)> character_done_fn;
+    static void setCharacterDoneListener(character_done_fn fn);
     ~LLFloaterWolfAvatars() override;
 
     bool postBuild() override;

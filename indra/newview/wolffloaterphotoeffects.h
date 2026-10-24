@@ -32,7 +32,7 @@ public:
     void onOpen(const LLSD& key) override;
     void onClose(bool app_quitting) override;
 
-    static constexpr S32 MODE_COUNT = 16;   // 0 Off .. 15 Comic (pipeline.cpp wolfPhotoFilter)
+    static constexpr S32 MODE_COUNT = 17;   // 0 Off .. 15 Comic, 16 ASCII Art (pipeline.cpp wolfPhotoFilter)
 
 private:
     void onTile(S32 mode);

@@ -1,0 +1,53 @@
+#!/usr/bin/env python3
+"""[WOLFLEAP 2026-10-24] Send one request to the running viewer through bridge.py's socket and print the JSON reply.
+  wolfctl '{"pump":"LLAgent","data":{"op":"getPosition"}}'
+  wolfctl apis                      # every event API the viewer offers (LLLeapListener getAPIs)
+  wolfctl api LLAgent               # one API's ops and their help text
+  wolfctl snapshot /path/file.png   # LLViewerWindow saveSnapshot
+  wolfctl pos | nearby | login
+"""
+import json, os, socket, sys
+
+SOCK = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or os.path.expanduser("~/.cache"), "wolfleap.sock")
+
+
+def call(req):
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.connect(SOCK)
+    s.sendall((json.dumps(req) + "\n").encode())
+    buf = b""
+    while not buf.endswith(b"\n"):
+        chunk = s.recv(65536)
+        if not chunk:
+            break
+        buf += chunk
+    return json.loads(buf)
+
+
+def main(a):
+    if not a:
+        print(__doc__)
+        return 2
+    cmd = a[0]
+    if cmd.startswith("{"):
+        req = json.loads(cmd)
+    elif cmd == "apis":
+        req = {"data": {"op": "getAPIs"}}
+    elif cmd == "api":
+        req = {"data": {"op": "getAPI", "api": a[1]}}
+    elif cmd == "snapshot":
+        req = {"pump": "LLViewerWindow", "data": {"op": "saveSnapshot", "filename": os.path.abspath(a[1])}, "timeout": 30}
+    elif cmd == "pos":
+        req = {"pump": "LLAgent", "data": {"op": "getPosition"}}
+    elif cmd == "nearby":
+        req = {"pump": "LLAgent", "data": {"op": "getNearbyAvatarsList"}}
+    elif cmd == "login":
+        req = {"pump": "LLPanelLogin", "data": {"op": "onClickConnect"}, "noreply": True}
+    else:
+        print("unknown command", cmd, file=sys.stderr)
+        return 2
+    print(json.dumps(call(req), indent=1))
+    return 0
+
+
+sys.exit(main(sys.argv[1:]))

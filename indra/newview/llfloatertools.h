@@ -224,7 +224,6 @@ public:
     // <WolfViewer 2026-10-23> [WOLF BURROW] the painted look: the tool row's buttons and every group's controls (postBuild)
     void paintBuild();
     std::vector<LLView*> mWolfBuildTools;
-    std::vector<std::vector<LLView*>> mWolfBuildGroups;
     S32             mWolfBuildersRowLandShift = 0;
     bool            mWolfBuildersRowShifted = false;
     void            wolfSyncBrushScale();

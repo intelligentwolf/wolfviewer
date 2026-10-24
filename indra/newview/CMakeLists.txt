@@ -922,6 +922,8 @@ set(viewer_SOURCE_FILES
     wolffloatermeshupload.cpp
     wolffloaterlagdetector.cpp
     wolffloatercompass.cpp   # [WOLF COMPASS 2026-10-16]
+    wolffloaterbugreport.cpp   # [WOLF BUG REPORT 2026-10-24] Report a Problem (ticket + viewer logs)
+    wolffloaterchooseavatar.cpp   # [STARTER AVATARS 2026-10-24] Choose an Avatar (the grid's starter looks)
     wolfspeed.cpp   # [WOLFSPEED 2026-10-17] Xenon's WolfSpeed
     wolfswim.cpp   # [WOLF SWIM 2026-10-20] swimming under the water
     wolfdjaudio.cpp
@@ -939,6 +941,10 @@ set(viewer_SOURCE_FILES
     wolffloaterbuilder.cpp
     wolffloaterimportworlds.cpp # [IMPORT WORLDS 2026-10-18] Build > Import worlds...
     llfloaterwolfavatars.cpp # [WOLFAVATARS 2026-10-20] Wolf World > WolfAvatars...
+    wolffloaternpc.cpp   # [WOLFNPC 2026-10-24] Wolf World > WolfNPC...
+    wolffloaternpcgame.cpp   # [WOLFNPC ROUND 3 2026-10-24] Edit > Game (quests, dialogues, trader, pet, events, touch)
+    wolffloaternpcmind.cpp   # [WOLFNPC ROUND 4 2026-10-24] Edit > Learning (knowledge, skills, changes) and Places (places, tools)
+    wolfnpc.cpp   # [WOLFNPC 2026-10-24] the region link (GenericMessage wolfnpc / WolfNPC)
     wolffloaterchat.cpp      # [WOLF CHAT 2026-10-20] Wolf World > Wolf Chat: group text + voice channels
     wolfvoicediag.cpp        # [2026-10-22] voice debug mode (Wolf Chat room reports)
     wolfimportflow.cpp # [IMPORT WORLDS 2026-10-18] the import flow shared with the Adventure Studio
@@ -1895,6 +1901,8 @@ set(viewer_HEADER_FILES
     wolffloatermeshupload.h
     wolffloaterlagdetector.h
     wolffloatercompass.h   # [WOLF COMPASS 2026-10-16]
+    wolffloaterbugreport.h   # [WOLF BUG REPORT 2026-10-24]
+    wolffloaterchooseavatar.h   # [STARTER AVATARS 2026-10-24]
     wolfspeed.h   # [WOLFSPEED 2026-10-17] Xenon's WolfSpeed
     wolfswim.h   # [WOLF SWIM 2026-10-20] swimming under the water
     wolfdjaudio.h
@@ -1913,6 +1921,10 @@ set(viewer_HEADER_FILES
     wolffloaterbuilder.h
     wolffloaterimportworlds.h
     llfloaterwolfavatars.h
+    wolffloaternpc.h   # [WOLFNPC 2026-10-24]
+    wolffloaternpcgame.h   # [WOLFNPC ROUND 3 2026-10-24]
+    wolffloaternpcmind.h   # [WOLFNPC ROUND 4 2026-10-24]
+    wolfnpc.h   # [WOLFNPC 2026-10-24]
     wolffloaterchat.h        # [WOLF CHAT 2026-10-20]
     wolfvoicediag.h          # [2026-10-22]
     wolfimportflow.h

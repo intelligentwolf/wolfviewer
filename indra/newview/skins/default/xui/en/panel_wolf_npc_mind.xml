@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLFNPC ROUND 4 2026-10-24] Edit > Learning (wolffloaternpcmind.cpp WolfNPCMind): what one NPC knows and can do, and what
+     people with authority changed by talking to it. Source: firestorm/region-terrain-work/wolfnpc-release/PROTOCOL.md §5
+     (npc_learn_*, npc_skill_*), §13 (authority, actions, skills: the step types), §22.5 (state.byChat / state.skills logs).
+     Its owner only (the brain refuses anyone else). 586 x 496, the sub-tabs' content 470 high. Text colours are fixed: the
+     window paints its own scene (wolffloaternpc.cpp WolfNPCBackdrop), so no skin may make them unreadable. -->
+<panel background_visible="false" border="false" follows="all" height="496" layout="topleft" left="0" name="npc_mind" top="0" width="586">
+    <tab_container follows="all" height="494" layout="topleft" left="0" name="mind_tabs" tab_position="top" halign="center" top="0" width="586">
+
+        <!-- ═══ Knowledge (npc_learn_*) ═══ -->
+        <panel label="Knowledge" name="mtab_know" layout="topleft" follows="all" height="470" width="586">
+            <text follows="left|top" height="16" layout="topleft" left="4" name="k_mode_lbl" top="7" width="150" text_color="0.95 0.92 0.84 1">Learning from talk</text>
+            <radio_group follows="left|top" height="18" layout="topleft" left="158" name="k_mode" top="6" width="424"
+             tool_tip="Off: it learns nothing from talk. Ask me first: what it learns waits for you to approve it. Automatic: kept at once.">
+                <radio_item height="18" label="Off" layout="topleft" left="0" name="off" top="0" value="off" width="70">
+<radio_item.label_text text_color="0.95 0.92 0.84 1" />
+</radio_item>
+                <radio_item height="18" label="Ask me first" layout="topleft" left="74" name="ask" top="0" value="ask" width="130">
+<radio_item.label_text text_color="0.95 0.92 0.84 1" />
+</radio_item>
+                <radio_item height="18" label="Automatic" layout="topleft" left="208" name="auto" top="0" value="auto" width="120">
+<radio_item.label_text text_color="0.95 0.92 0.84 1" />
+</radio_item>
+            </radio_group>
+            <text follows="left|top" height="16" layout="topleft" left="4" name="k_role_lbl" top="31" width="578" text_color="0.95 0.92 0.84 1">Its job, always the same (e.g. "Welcome visitors to the pub and tell them what is on")</text>
+            <text_editor follows="left|top" height="40" layout="topleft" left="4" max_length="500" name="k_role" top="49" width="470" word_wrap="true" />
+            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Save its job" layout="topleft" left="480" name="k_role_save" top="49" width="102" />
+            <line_editor follows="left|top" height="22" layout="topleft" left="4" max_length_chars="80" name="k_search" top="96" width="300" label="Search what it knows" />
+            <text follows="left|top" height="16" layout="topleft" left="312" name="k_count" top="99" width="270" text_color="0.82 0.80 0.88 1" />
+            <scroll_list follows="left|top" height="176" layout="topleft" left="4" name="k_items" top="122" width="578" multi_select="false" draw_heading="true" column_padding="4">
+                <scroll_list.columns name="status" label="" width="70" />
+                <scroll_list.columns name="kind" label="Kind" width="56" />
+                <scroll_list.columns name="text" label="What it knows" width="300" />
+                <scroll_list.columns name="from" label="From" width="100" />
+                <scroll_list.columns name="uses" label="Used" width="40" />
+            </scroll_list>
+            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Approve" layout="topleft" left="4" name="k_approve" top="302" width="96" tool_tip="Keep what it learned (it waits for you: Ask me first)" />
+            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Reject" layout="topleft" left="104" name="k_reject" top="302" width="96" />
+            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Show more" layout="topleft" left="204" name="k_more" top="302" width="110" />
+            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Delete" layout="topleft" left="486" name="k_delete" top="302" width="96" />
+            <line_editor follows="left|top" height="22" layout="topleft" left="4" max_length_chars="300" name="k_edit" top="330" width="470" label="select a line above to change its words" />
+            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Save change" layout="topleft" left="480" name="k_edit_save" top="330" width="102" />
+            <text follows="left|top" height="16" layout="topleft" left="4" name="k_teach_lbl" top="363" width="70" text_color="0.95 0.92 0.84 1">Teach it</text>
+            <line_editor follows="left|top" height="22" layout="topleft" left="78" max_length_chars="300" name="k_teach" top="360" width="300" label="e.g. The quiz night is on Fridays at 8" />
+            <combo_box follows="left|top" height="22" layout="topleft" left="382" name="k_teach_kind" top="360" width="94" />
+            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Teach it" layout="topleft" left="480" name="k_teach_btn" top="360" width="102" />
+            <text follows="left|top" height="32" layout="topleft" left="4" name="k_note" top="388" width="578" word_wrap="true" text_color="0.82 0.80 0.88 1" />
+            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Forget everything" layout="topleft" left="440" name="k_forget" top="440" width="142"
+             tool_tip="Every memory goes (its settings stay). Asks first." />
+        </panel>
+
+        <!-- ═══ Skills (npc_skill_*; step types §13.3) ═══ -->
+        <panel label="Skills" name="mtab_skills" layout="topleft" follows="all" height="470" width="586">
+            <scroll_list follows="left|top" height="110" layout="topleft" left="4" name="sk_list" top="4" width="578" multi_select="false" draw_heading="true" column_padding="4">
+                <scroll_list.columns name="name" label="Skill" width="170" />
+                <scroll_list.columns name="for" label="For" width="110" />
+                <scroll_list.columns name="status" label="State" width="140" />
+                <scroll_list.columns name="uses" label="Used" width="56" />
+                <scroll_list.columns name="asks" label="Asked" width="56" />
+            </scroll_list>
+            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="New skill" layout="topleft" left="4" name="sk_new" top="118" width="90" />
+            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Change" layout="topleft" left="98" name="sk_change" top="118" width="80" />
+            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Approve" layout="topleft" left="182" name="sk_approve" top="118" width="80" tool_tip="A visitor asked for it: let it use this one" />
+            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Offer to everyone" layout="topleft" left="266" name="sk_offer" top="118" width="140"
+             tool_tip="Sends it to Wolf Territories staff for review; once approved, every owner can use it" />
+            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Hide" layout="topleft" left="410" name="sk_hide" top="118" width="80" tool_tip="A shared skill: off (or back on) for all your NPCs" />
+            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Delete" layout="topleft" left="502" name="sk_delete" top="118" width="80" />
+            <text follows="left|top" height="16" layout="topleft" left="4" name="sk_count" top="145" width="578" text_color="0.82 0.80 0.88 1" />
+            <panel follows="left|top" height="306" layout="topleft" left="4" name="sk_editor" top="164" width="578" visible="false" background_visible="false" border="false">
+                <text follows="left|top" height="16" layout="topleft" left="0" name="sk_name_lbl" top="3" width="44" text_color="0.95 0.92 0.84 1">Name</text>
+                <line_editor follows="left|top" height="22" layout="topleft" left="48" max_length_chars="48" name="sk_name" top="0" width="250" label="e.g. Serve a drink" />
+                <text follows="left|top" height="16" layout="topleft" left="306" name="sk_scope_lbl" top="3" width="40" text_color="0.95 0.92 0.84 1">For</text>
+                <combo_box follows="left|top" height="22" layout="topleft" left="350" name="sk_scope" top="0" width="228" />
+                <text follows="left|top" height="16" layout="topleft" left="0" name="sk_when_lbl" top="31" width="44" text_color="0.95 0.92 0.84 1">When</text>
+                <line_editor follows="left|top" height="22" layout="topleft" left="48" max_length_chars="300" name="sk_when" top="28" width="530" label="when it should do this, e.g. someone asks for a drink" />
+                <scroll_list follows="left|top" height="80" layout="topleft" left="0" name="sk_steps" top="56" width="472" multi_select="false" draw_heading="false">
+                    <scroll_list.columns name="n" label="" width="24" />
+                    <scroll_list.columns name="step" label="Step" width="444" />
+                </scroll_list>
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Remove step" layout="topleft" left="478" name="sk_step_remove" top="56" width="100" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Move up" layout="topleft" left="478" name="sk_step_up" top="84" width="100" />
+                <combo_box follows="left|top" height="22" layout="topleft" left="0" name="sk_step_do" top="142" width="160" />
+                <line_editor follows="left|top" height="22" layout="topleft" left="164" max_length_chars="300" name="sk_step_a" top="142" width="210" />
+                <line_editor follows="left|top" height="22" layout="topleft" left="378" max_length_chars="300" name="sk_step_b" top="142" width="94" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Add step" layout="topleft" left="478" name="sk_step_add" top="142" width="100" tool_tip="Up to 12 steps" />
+                <line_editor follows="left|top" height="22" layout="topleft" left="0" max_length_chars="300" name="sk_step_then" top="168" width="234" label="then, e.g. say:Welcome back; wave" />
+                <line_editor follows="left|top" height="22" layout="topleft" left="238" max_length_chars="300" name="sk_step_else" top="168" width="234" label="otherwise, e.g. say:Hello stranger" />
+                <text follows="left|top" height="44" layout="topleft" left="0" name="sk_step_help" top="194" width="578" word_wrap="true" text_color="0.82 0.80 0.88 1" />
+                <text follows="left|top" height="30" layout="topleft" left="0" name="sk_error" top="240" width="578" word_wrap="true" text_color="1 0.70 0.52 1" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Cancel" layout="topleft" left="0" name="sk_cancel" top="278" width="90" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Save skill" layout="topleft" left="458" name="sk_save" top="278" width="120" />
+            </panel>
+        </panel>
+
+        <!-- ═══ Wished for (npc_skill_wished) and Find a skill (npc_skill_find) ═══ -->
+        <panel label="Asked for" name="mtab_wished" layout="topleft" follows="all" height="470" width="586">
+            <text follows="left|top" height="32" layout="topleft" left="4" name="w_how" top="4" width="578" word_wrap="true" text_color="0.95 0.92 0.84 1">What people asked it to do that its skills cannot do yet, most asked first. Make a skill for one, or remove it.</text>
+            <scroll_list follows="left|top" height="140" layout="topleft" left="4" name="w_list" top="40" width="578" multi_select="false" draw_heading="true" column_padding="4">
+                <scroll_list.columns name="text" label="They asked" width="380" />
+                <scroll_list.columns name="asks" label="Times" width="60" />
+                <scroll_list.columns name="last" label="Last" width="124" />
+            </scroll_list>
+            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Make a skill for this" layout="topleft" left="4" name="w_make" top="184" width="170" />
+            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Remove" layout="topleft" left="482" name="w_remove" top="184" width="100" />
+            <text follows="left|top" font.style="BOLD" height="16" layout="topleft" left="4" name="f_lbl" top="222" width="578" text_color="0.95 0.92 0.84 1">Find a skill in the shared library</text>
+            <line_editor follows="left|top" height="22" layout="topleft" left="4" max_length_chars="200" name="f_text" top="242" width="470" label="what it should do, e.g. pour a pint" />
+            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Find" layout="topleft" left="480" name="f_find" top="242" width="102" />
+            <text follows="left|top" height="16" layout="topleft" left="4" name="f_note" top="268" width="578" text_color="0.82 0.80 0.88 1" />
+            <scroll_list follows="left|top" height="130" layout="topleft" left="4" name="f_list" top="288" width="578" multi_select="false" draw_heading="true" column_padding="4">
+                <scroll_list.columns name="name" label="Skill" width="170" />
+                <scroll_list.columns name="when" label="When" width="300" />
+                <scroll_list.columns name="match" label="Match" width="90" />
+            </scroll_list>
+            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Use it for this NPC" layout="topleft" left="4" name="f_adopt" top="424" width="170" tool_tip="A copy of its steps becomes one of this NPC's own skills" />
+            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Hide for all my NPCs" layout="topleft" left="412" name="f_hide" top="424" width="170" />
+        </panel>
+
+
+        <!-- ═══ [ROUND B] Growing: look-ups, teaching, research, voices (PROTOCOL.md §5 round B) ═══ -->
+        <panel label="Growing" name="mtab_grow" layout="topleft" follows="all" height="470" width="586">
+            <check_box follows="left|top" height="18" layout="topleft" left="4" name="g_lookups" top="6" width="578" label="It may look things up on the web when it does not know"
+             tool_tip="Off by default. Each look-up costs Wolf Credits; what it finds is kept with its web source." />
+            <text text_color="0.80 0.82 0.86 1" follows="left|top" height="30" layout="topleft" left="26" name="g_lookups_cost" top="26" width="556" word_wrap="true" />
+            <check_box follows="left|top" height="18" layout="topleft" left="4" name="g_teacher" top="60" width="578" label="It teaches (lessons on its whiteboard, with questions)"
+             tool_tip="For a classroom: link a whiteboard on the Places tab." />
+            <text text_color="0.80 0.82 0.86 1" follows="left|top" height="30" layout="topleft" left="26" name="g_teacher_cost" top="80" width="556" word_wrap="true" />
+            <text text_color="0.95 0.92 0.84 1" follows="left|top" font.style="BOLD" height="16" layout="topleft" left="4" name="g_research_lbl" top="116" width="578">Read up on a topic (it learns from the web, in its own words)</text>
+            <line_editor follows="left|top" height="22" layout="topleft" left="4" max_length_chars="120" name="g_topic" top="136" width="430" label="e.g. the history of Galway" />
+            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Get the price" layout="topleft" left="440" name="g_quote" top="136" width="142" />
+            <text text_color="0.80 0.82 0.86 1" follows="left|top" height="30" layout="topleft" left="4" name="g_quote_text" top="162" width="578" word_wrap="true" />
+            <scroll_list follows="left|top" height="86" layout="topleft" left="4" name="g_jobs" top="194" width="474" multi_select="false" draw_heading="true" column_padding="4">
+                <scroll_list.columns name="topic" label="Topic" width="200" />
+                <scroll_list.columns name="status" label="State" width="140" />
+                <scroll_list.columns name="items" label="Learned" width="60" />
+                <scroll_list.columns name="charged" label="Cost" width="60" />
+            </scroll_list>
+            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Refresh" layout="topleft" left="482" name="g_jobs_refresh" top="194" width="100" />
+            <text text_color="0.80 0.82 0.86 1" follows="left|top" height="16" layout="topleft" left="4" name="g_jobs_note" top="284" width="578">What it learns waits for you on the Knowledge tab (unless its learning is Automatic).</text>
+            <text text_color="0.95 0.92 0.84 1" font.style="BOLD" follows="left|top" height="16" layout="topleft" left="4" name="g_styles_lbl" top="310" width="578">Its voice (how it speaks; at most 2)</text>
+            <scroll_list follows="left|top" height="110" layout="topleft" left="4" name="g_styles" top="330" width="474" multi_select="false" draw_heading="true" column_padding="4">
+                <scroll_list.columns name="on" label="" width="60" />
+                <scroll_list.columns name="name" label="Voice" width="150" />
+                <scroll_list.columns name="text" label="What it is like" width="250" />
+            </scroll_list>
+            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Use this voice" layout="topleft" left="482" name="g_style_on" top="330" width="100" />
+            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Stop using it" layout="topleft" left="482" name="g_style_off" top="358" width="100" />
+        </panel>
+        <!-- ═══ Changes by chat (§22.5 state.byChat, state.skills) ═══ -->
+        <panel label="Changes" name="mtab_changes" layout="topleft" follows="all" height="470" width="586">
+            <text follows="left|top" height="32" layout="topleft" left="4" name="c_how" top="4" width="578" word_wrap="true" text_color="0.95 0.92 0.84 1">What you, the region's managers or the parcel owner changed by talking to it (the last 20). Undo puts a setting back as it was when you opened it here.</text>
+            <scroll_list follows="left|top" height="190" layout="topleft" left="4" name="c_list" top="40" width="578" multi_select="false" draw_heading="true" column_padding="4">
+                <scroll_list.columns name="at" label="When" width="110" />
+                <scroll_list.columns name="who" label="Who" width="140" />
+                <scroll_list.columns name="what" label="What changed" width="320" />
+            </scroll_list>
+            <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Undo this change" layout="topleft" left="4" name="c_undo" top="234" width="150" />
+            <text follows="left|top" height="32" layout="topleft" left="160" name="c_undo_note" top="234" width="422" word_wrap="true" text_color="0.82 0.80 0.88 1" />
+            <text follows="left|top" font.style="BOLD" height="16" layout="topleft" left="4" name="c_skills_lbl" top="274" width="578" text_color="0.95 0.92 0.84 1">Skill steps it ran (the last 20)</text>
+            <scroll_list follows="left|top" height="170" layout="topleft" left="4" name="c_skills" top="294" width="578" multi_select="false" draw_heading="true" column_padding="4">
+                <scroll_list.columns name="at" label="When" width="110" />
+                <scroll_list.columns name="skill" label="Skill" width="140" />
+                <scroll_list.columns name="what" label="Step" width="250" />
+                <scroll_list.columns name="ok" label="" width="66" />
+            </scroll_list>
+        </panel>
+    </tab_container>
+</panel>

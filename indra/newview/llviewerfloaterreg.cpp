@@ -109,6 +109,8 @@
 #include "wolffloaterphotoeffects.h"   // [PAINTERS 2026-09-20/]
 #include "wolffloaterlagdetector.h"   // [LAG DETECTOR 2026-09-29/]
 #include "wolffloatercompass.h"   // [WOLF COMPASS 2026-10-16/]
+#include "wolffloaterbugreport.h"   // [WOLF BUG REPORT 2026-10-24/]
+#include "wolffloaterchooseavatar.h"   // [STARTER AVATARS 2026-10-24/]
 #include "wolfspeed.h"   // [WOLFSPEED 2026-10-17/] Xenon's WolfSpeed
 #include "wolffloaterdrivecontrols.h"   // [WOLF DRIVE 2026-10-09/]
 #include "wolffloaterdj.h"            // [WOLF DJ 2026-10-04/]
@@ -121,6 +123,7 @@
 #include "wolffloaterbuilder.h"   // [WOLF BUILDER 2026-10-13/]
 #include "wolffloaterimportworlds.h"   // [IMPORT WORLDS 2026-10-18/]
 #include "llfloaterwolfavatars.h"   // [WOLFAVATARS 2026-10-20/] Wolf World > WolfAvatars...
+#include "wolffloaternpc.h"   // [WOLFNPC 2026-10-24/] Wolf World > WolfNPC...
 #include "wolffloaterchat.h"        // [WOLF CHAT 2026-10-20/] Wolf World > Wolf Chat...
 #include "wolffloaterenvironment.h"   // [WOLF ENV 2026-10-12/]
 #include "wolffloaterwatchwolf.h"       // [WATCHWOLF 2026-10-10/]
@@ -677,6 +680,8 @@ void LLViewerFloaterReg::registerFloaters()
     LLFloaterReg::add("wolf_photo_effects", "floater_wolf_photo_effects.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterPhotoEffects>);   // [PAINTERS 2026-09-20/]
     LLFloaterReg::add("wolf_lag_detector", "floater_wolf_lag_detector.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterLagDetector>);   // [LAG DETECTOR 2026-09-29/]
     LLFloaterReg::add("wolf_compass", "floater_wolf_compass.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterCompass>);   // [WOLF COMPASS 2026-10-16/] Victorian compass: North + course
+    LLFloaterReg::add("wolf_bug_report", "floater_wolf_bug_report.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterBugReport>);   // [WOLF BUG REPORT 2026-10-24/] Report a Problem: ticket + viewer logs
+    LLFloaterReg::add("wolf_choose_avatar", "floater_wolf_choose_avatar.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterChooseAvatar>);   // [STARTER AVATARS 2026-10-24/] Choose an Avatar
     LLFloaterReg::add("wolf_speed", "floater_wolf_speed.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterSpeed>);   // [WOLFSPEED 2026-10-17/] Xenon's WolfSpeed
     LLFloaterReg::add("wolf_tunnels", "floater_wolf_tunnels.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterTunnels>);   // [WOLF TUNNELS 2026-10-21/] walkable spaces under the terrain
     LLFloaterReg::add("wolf_terraform", "floater_wolf_terraform.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterTerraform>);   // [WOLF TERRAFORM 2026-10-23/] Level, Ramp, Terrace, Smooth, Road, River, Beach + Undo
@@ -689,6 +694,7 @@ void LLViewerFloaterReg::registerFloaters()
     LLFloaterReg::add("wolf_builder", "floater_wolf_builder.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterBuilder>);   // [WOLF BUILDER 2026-10-13/] grid, snap origin, names, selection card
     LLFloaterReg::add("wolf_import_worlds", "floater_wolf_import_worlds.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterImportWorlds>);   // [IMPORT WORLDS 2026-10-18/] Build > Import worlds...
     LLFloaterReg::add("wolf_avatars", "floater_wolfavatars.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<LLFloaterWolfAvatars>);   // [WOLFAVATARS 2026-10-20/] Wolf World > WolfAvatars... (release "Character Colin")
+    LLFloaterReg::add("wolf_npc", "floater_wolf_npc.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterNPC>);   // [WOLFNPC 2026-10-24/] Wolf World > WolfNPC...
     LLFloaterReg::add("wolf_chat", "floater_wolf_chat.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterChat>);   // [WOLF CHAT 2026-10-20/] Wolf World > Wolf Chat...
     LLFloaterReg::add("wolf_chat_image", "floater_wolf_chat_image.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterChatImage>);   // [WOLF CHAT 2026-10-20/] a posted picture, big
     LLFloaterReg::add("wolf_chat_gif", "floater_wolf_chat_gif.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterChatGif>);   // [WOLF CHAT 2026-10-21/] the GIF picker (GIPHY)

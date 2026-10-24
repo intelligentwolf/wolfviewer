@@ -1021,9 +1021,10 @@ void LLScriptEdCore::onBtnWolfAI()
     const bool has_code = mEditor
         && mEditor->getText().find_first_not_of(" \t\r\n") != std::string::npos;
     // [AI CREDITS 2026-09-11] Paul: "nice to put the price on the form." Both figures come from
-    // the service, so what is quoted is what will be charged.
+    // the service. [AI MARGIN 2026-10-24] A script is now charged its real AI cost plus 10%, so
+    // script_cost (mScriptCost) is the most it can be (rust_proxy main.rs AI_SCRIPT_MAX_CREDITS).
     const WolfAI::Avail& av = WolfAI::instance().avail();
-    const std::string price = llformat("Costs %d Wolf Credit%s — you have %d.",
+    const std::string price = llformat("The AI cost plus 10%%, at most %d Wolf Credit%s (usually 1 to 3) — you have %d.",
                                        av.mScriptCost, av.mScriptCost == 1 ? "" : "s", av.mBalance);
     LLSD args;
     args["PROMPT"] = (has_code

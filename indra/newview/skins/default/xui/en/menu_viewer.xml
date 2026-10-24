@@ -135,6 +135,18 @@
             <menu_item_check.on_enable
              function="Edit.EnableCustomizeAvatar" />
         </menu_item_check>
+        <!-- [STARTER AVATARS 2026-10-24] Paul: "add the choice to the viewer ... pick an avatar like second life has":
+             the grid's starter looks (people, animals, sci-fi), worn in one click (wolffloaterchooseavatar.cpp).
+             [WOLF GRID GATE] gone (not greyed) when not logged in to Wolf Territories. -->
+        <menu_item_call
+         label="Choose an Avatar..."
+         name="WolfChooseAvatar">
+            <menu_item_call.on_click
+             function="Floater.Show"
+             parameter="wolf_choose_avatar" />
+            <menu_item_call.on_visible
+             function="WolfGrid.IsWolfTerritories" />
+        </menu_item_call>
 
       <menu
         label="Take off"
@@ -1810,17 +1822,14 @@
         <!-- [WolfViewer 2026-10-14] Paul: "organise the Wolf World menu ... group things together and put a line between
              them". Groups: you and your viewer / sky and weather / building and your land / fun and media / vehicles /
              effects. -->
+        <!-- [2026-10-24] Paul: "sort the wolf world menu please the top bit is a bit of a mess just the bit at the top".
+             The top now reads in four groups with a line between them: getting started (Experiences, Wolf Chat) / your
+             avatar and making things (Choose an Avatar, WolfAvatars, WolfNPC, Tunnels) / switches (WolfSpeed, Swimming,
+             Compass, Invisible Mode) / Report a Problem. Every item is unchanged; only its place moved. -->
         <!-- [WolfViewer 2026-10-14] Experiences: the welcome chooser - pick something to do and be taken there
              (wolffloaterexperiences.cpp). [WOLF GRID GATE] gone (not greyed) off Wolf Territories. -->
         <menu_item_call label="Wolf Experiences..." name="WolfExperiences">
             <menu_item_call.on_click function="Floater.Show" parameter="wolf_experiences" />
-            <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
-        </menu_item_call>
-        <!-- [WOLFAVATARS 2026-10-20] Paul: "WolfAvatars" (release "Character Colin"): describe a character, pick one of four
-             pictures, and a wearable avatar arrives in your inventory (llfloaterwolfavatars.cpp, WOLFAVATARS_API.md "Screen").
-             Wolf residents with credits only: [WOLF GRID GATE] gone (not greyed) off Wolf Territories. -->
-        <menu_item_call label="WolfAvatars..." name="WolfAvatars">
-            <menu_item_call.on_click function="Floater.Show" parameter="wolf_avatars" />
             <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
         </menu_item_call>
         <!-- [WOLF CHAT 2026-10-20] Paul: "group calls should be like discord" - a group's text channels, voice rooms and
@@ -1829,12 +1838,34 @@
             <menu_item_call.on_click function="Floater.Show" parameter="wolf_chat" />
             <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
         </menu_item_call>
+        <menu_item_separator />
+        <!-- [STARTER AVATARS 2026-10-24] Paul's rule: every Wolf feature also under Wolf World. Choose an Avatar (also in the
+             Avatar menu): wear one of the grid's starter looks. Wolf Territories logins only. -->
+        <menu_item_call label="Choose an Avatar..." name="WolfChooseAvatarWW">
+            <menu_item_call.on_click function="Floater.Show" parameter="wolf_choose_avatar" />
+            <menu_item_call.on_visible function="WolfGrid.IsWolfTerritories" />
+        </menu_item_call>
+        <!-- [WOLFAVATARS 2026-10-20] Paul: "WolfAvatars" (release "Character Colin"): describe a character, pick one of four
+             pictures, and a wearable avatar arrives in your inventory (llfloaterwolfavatars.cpp, WOLFAVATARS_API.md "Screen").
+             Wolf residents with credits only: [WOLF GRID GATE] gone (not greyed) off Wolf Territories. -->
+        <menu_item_call label="WolfAvatars..." name="WolfAvatars">
+            <menu_item_call.on_click function="Floater.Show" parameter="wolf_avatars" />
+            <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
+        </menu_item_call>
+        <!-- [WOLFNPC 2026-10-24] Paul: "people can manage an NPC on their region through the viewer" - put one of your
+             WolfAvatars on your land as a living NPC, change or remove the region's NPCs (wolffloaternpc.cpp,
+             region-terrain-work/wolfnpc-release/PROTOCOL.md). [WOLF GRID GATE] gone (not greyed) off Wolf Territories. -->
+        <menu_item_call label="WolfNPC..." name="WolfNPC">
+            <menu_item_call.on_click function="Floater.Show" parameter="wolf_npc" />
+            <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
+        </menu_item_call>
         <!-- [WOLF TUNNELS 2026-10-21] Paul: "the goal of this is to allow tunneling under terrains we need to add a tool"
              (wolffloatertunnels.cpp). [WOLF GRID GATE] gone (not greyed) off Wolf Territories. -->
         <menu_item_call label="Tunnels..." name="WolfTunnels">
             <menu_item_call.on_click function="Floater.Show" parameter="wolf_tunnels" />
             <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
         </menu_item_call>
+        <menu_item_separator />
         <!-- [WOLFSPEED 2026-10-17] Xenon's WolfSpeed (wolfspeed.cpp): walk, run and fly faster, as fast as the region
              allows (WolfSim WolfSpeedModule). [WOLF GRID GATE] gone (not greyed) off Wolf Territories. -->
         <menu_item_check label="Xenon's WolfSpeed" name="WolfSpeed">
@@ -1865,6 +1896,14 @@
             <menu_item_check.on_click function="ToggleControl" parameter="WolfInvisibleMode" />
             <menu_item_check.on_visible function="WolfGrid.IsOnWolfTerritories" />
         </menu_item_check>
+        <menu_item_separator />
+        <!-- [WOLF BUG REPORT 2026-10-24] Paul: "a little bug icon on the menu that links to tickets and allows them to upload
+             their logs" - the same window as the status bar's bug icon (wolffloaterbugreport.cpp). Paul 10-24 "only wolf
+             residents": shown for a Wolf Territories login wherever they are, gone for other grids' logins. -->
+        <menu_item_call label="Report a Problem..." name="WolfBugReport">
+            <menu_item_call.on_click function="Floater.Show" parameter="wolf_bug_report" />
+            <menu_item_call.on_visible function="WolfGrid.IsWolfTerritories" />
+        </menu_item_call>
         <menu_item_separator />
         <menu create_jump_keys="true" label="Games &amp; Stories" name="WolfGroupGames" tear_off="true">
             <!-- [WOLF ADVENTURE P1 2026-10-16] HUD_MESSAGES_V1.md §3.12: the Roleplay window on Journal >

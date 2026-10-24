@@ -215,6 +215,23 @@
 	 tool_tip="Open the Wolf Grid website (wolf-grid.com) in your browser"
 	 top="1"
 	 width="70" />
+	<!-- [WOLF BUG REPORT 2026-10-24] Paul: "a little bug icon on the menu that links to tickets and allows them
+	     to upload their logs". Opens Report a Problem (wolffloaterbugreport.cpp); llstatusbar.cpp places it left of
+	     the Wolf Grid button (updateWolfGridButtonPosition) and shows it on Wolf Territories only (updateWolfBugButton). -->
+	<button
+	 follows="right|top"
+	 height="16"
+	 image_pressed="WolfBug_Press"
+	 image_selected="WolfBug_Press"
+	 image_unselected="WolfBug_Off"
+	 label=""
+	 layout="topleft"
+	 left="-580"
+	 name="wolf_bug_btn"
+	 tool_tip="Report a problem to the Wolf Territories support team (you can send your viewer logs with it)"
+	 top="1"
+	 visible="false"
+	 width="16" />
 	<panel
 	 height="18"
 	 left="-604"
@@ -265,6 +282,22 @@
     visibility_control="FSShowCurrencyBalanceInStatusbar"
     background_opaque="false"
     background_visible="true">
+    <!-- [WOLF AI CREDITS 2026-10-24] Paul: the AI (Wolf Credits) balance next to the money, "AI 2304".
+         Placed and shown by LLStatusBar::updateWolfAICredits (Wolf Territories only). -->
+    <text
+     font="SansSerifSmall"
+     follows="left|top"
+     height="18"
+     left="0"
+     name="wolf_ai_credits"
+     text_color="CurrencyColor"
+     text_readonly_color="CurrencyColor"
+     tool_tip="Your Wolf Credits for the AI tools. Click to buy more."
+     top="4"
+     visible="false"
+     wrap="false"
+     value="AI ?"
+     width="40" />
     <text
      halign="center"
      font="SansSerifSmall"

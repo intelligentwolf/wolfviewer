@@ -111,6 +111,8 @@
 #endif // OPENSIM
 #include "llviewerparcelmedia.h"
 #include "llweb.h"   // <WolfViewer 2026-10-05/> Wolf Grid button
+#include "wolfai.h"   // [WOLF AI CREDITS 2026-10-24/] the AI balance beside the money
+#include "wolfgrid.h"
 #include "rlvhandler.h"
 
 //
@@ -279,6 +281,8 @@ LLStatusBar::~LLStatusBar()
 void LLStatusBar::draw()
 {
     refresh();
+    updateWolfAICredits();   // [WOLF AI CREDITS 2026-10-24/]
+    updateWolfBugButton();   // [WOLF BUG REPORT 2026-10-24/]
     updateParcelInfoText();
     updateHealth();
     LLPanel::draw();
@@ -454,6 +458,12 @@ bool LLStatusBar::postBuild()
         mWolfGridBtn->setCommitCallback([](LLUICtrl*, const LLSD&) { LLWeb::loadURLExternal("https://www.wolf-grid.com/"); });
     }
     // </WolfViewer>
+    // [WOLF BUG REPORT 2026-10-24] findChild: a skin without the icon simply has none (Wolf World > Report a Problem... still works)
+    mWolfBugBtn = findChild<LLButton>("wolf_bug_btn");
+    if (mWolfBugBtn)
+    {
+        mWolfBugBtn->setCommitCallback([](LLUICtrl*, const LLSD&) { LLFloaterReg::showInstance("wolf_bug_report"); });
+    }
 
     updateBalancePanelPosition();
 
@@ -496,6 +506,13 @@ bool LLStatusBar::postBuild()
     mBuyParcelBtn->setClickedCallback(boost::bind(&LLStatusBar::onBuyLandClicked, this));
 
     mBalancePanel = getChild<LLPanel>("balance_bg");
+    // [WOLF AI CREDITS 2026-10-24] findChild: a skin without it simply shows no AI figure. Paul: "click on ai credits ->
+    // takes you to purchase page"; coming back to the viewer re-reads the balance (LLViewerWindow::handleFocus).
+    mWolfAICredits = mBalancePanel->findChild<LLTextBox>("wolf_ai_credits");
+    if (mWolfAICredits)
+    {
+        mWolfAICredits->setClickedCallback([](void*) { WolfAI::instance().openBuyPage(); }, nullptr);
+    }
     mTimeMediaPanel = getChild<LLPanel>("time_and_media_bg");
     updateWolfGridButtonPosition();   // <WolfViewer 2026-10-05/> now that the balance panel is known
 
@@ -746,6 +763,11 @@ void LLStatusBar::refresh()
     {
         updateParcelPanel();
     }
+    // [WOLF TOPBAR 2026-10-24] the search box / Wolf Grid / bug icon give way to the menus (updateWolfGridButtonPosition)
+    if (MENU_RIGHT != mWolfLastMenuRight || getRect().getWidth() != mWolfLastBarWidth)
+    {
+        updateWolfGridButtonPosition();
+    }
 
     // <FS:Ansariel> This is done in LLStatusBar::updateNetstatVisibility()
     //mSGBandwidth->setVisible(net_stats_visible);
@@ -799,6 +821,10 @@ void LLStatusBar::setVisibleForMouselook(bool visible)
     mTextTime->setVisible(visible);
     mBalancePanel->setVisible(visible && gSavedSettings.getBOOL("FSShowCurrencyBalanceInStatusbar"));
     mBoxBalance->setVisible(visible);
+    if (mWolfAICredits)
+    {
+        mWolfAICredits->setVisible(visible && !mWolfAIShown.empty());   // [WOLF AI CREDITS 2026-10-24/]
+    }
     // <FS:PP> Option to hide volume controls (sounds, media, stream) in upper right
     // mBtnVolume->setVisible(visible);
     // mStreamToggle->setVisible(visible);      // ## Zi: Media/Stream separation
@@ -817,6 +843,7 @@ void LLStatusBar::setVisibleForMouselook(bool visible)
     setBackgroundVisible(visible);
     mIconPresetsCamera->setVisible(visible);
     mIconPresetsGraphic->setVisible(visible);
+    updateWolfGridButtonPosition();   // [WOLF TOPBAR 2026-10-24/] last: search / Wolf Grid / bug icon give way to the menus
 }
 
 void LLStatusBar::debitBalance(S32 debit)
@@ -1321,14 +1348,103 @@ void LLStatusBar::updateWolfGridButtonPosition()
         return;
     }
     const S32 HPAD = 8;
-    LLRect anchor = (mSearchPanel && mSearchPanel->getVisible()) ? mSearchPanel->getRect() : mBalancePanel->getRect();
-    LLRect r = mWolfGridBtn->getRect();
-    const S32 w = r.getWidth();
-    r.mRight = anchor.mLeft - HPAD;
-    r.mLeft = r.mRight - w;
-    mWolfGridBtn->setShape(r);
+    // [WOLF TOPBAR 2026-10-24] Paul's snapshot: on a narrow window the menu search box, the Wolf Grid button and the bug
+    // icon slid over the menus (Build / Advanced / Developer) once the balance grew ("AI n" beside the money). The group
+    // left of the balance now gives way when it would reach the menus' right edge (gMenuBarView->getRightmostMenuEdge(),
+    // as updateParcelPanel uses): first the menu search box, then the Wolf Grid button, then the bug icon - and each comes
+    // back when there is room again. What each is ALLOWED to show is unchanged: MenuSearch for the search box, a Wolf
+    // Territories login for the bug icon, and nothing of it in mouselook (setVisibleForMouselook).
+    const bool mouselook = gAgentCamera.cameraMouselook();
+    static LLCachedControl<bool> menu_search(gSavedSettings, "MenuSearch", true);
+    const bool search_allowed = mSearchPanel && menu_search && !mouselook;
+    const bool grid_allowed = !mouselook;
+    const bool bug_allowed = mWolfBugBtn && WolfGrid::isWolfTerritories() && !mouselook;
+    const S32 menu_right = gMenuBarView ? gMenuBarView->getRightmostMenuEdge() : 0;
+    const LLRect balance = mBalancePanel->getRect();
+
+    LLRect search_r = mSearchPanel ? mSearchPanel->getRect() : LLRect();
+    LLRect grid_r = mWolfGridBtn->getRect();
+    LLRect bug_r = mWolfBugBtn ? mWolfBugBtn->getRect() : LLRect();
+    bool show_search = search_allowed, show_grid = grid_allowed, show_bug = bug_allowed;
+    for (S32 level = 0; level < 4; ++level)
+    {
+        show_search = search_allowed && level < 1;
+        show_grid = grid_allowed && level < 2;
+        show_bug = bug_allowed && level < 3;
+        S32 left = balance.mLeft;
+        if (show_search)   // updateMenuSearchPosition's rule: 12 px left of the balance
+        {
+            const S32 sw = search_r.getWidth();
+            search_r.mLeft = balance.mLeft - sw - 12;
+            search_r.mRight = search_r.mLeft + sw;
+            left = search_r.mLeft;
+        }
+        if (show_grid)
+        {
+            const S32 gw = grid_r.getWidth();
+            grid_r.mRight = left - HPAD;
+            grid_r.mLeft = grid_r.mRight - gw;
+            left = grid_r.mLeft;
+        }
+        if (show_bug)   // [WOLF BUG REPORT 2026-10-24] the bug icon just left of the Wolf Grid button
+        {
+            const S32 bw = bug_r.getWidth();
+            bug_r.mRight = left - (show_grid ? HPAD / 2 : HPAD);
+            bug_r.mLeft = bug_r.mRight - bw;
+            left = bug_r.mLeft;
+        }
+        if (left >= menu_right + HPAD)
+        {
+            break;   // fits; at level 3 nothing is left to hide
+        }
+    }
+    if (mSearchPanel)
+    {
+        if (show_search)
+        {
+            mSearchPanel->setShape(search_r);
+        }
+        if (mSearchPanel->getVisible() != show_search)
+        {
+            mSearchPanel->setVisible(show_search);
+        }
+    }
+    mWolfGridBtn->setShape(grid_r);
+    if (mWolfGridBtn->getVisible() != show_grid)
+    {
+        mWolfGridBtn->setVisible(show_grid);
+    }
+    if (mWolfBugBtn)
+    {
+        mWolfBugBtn->setShape(bug_r);
+        if (mWolfBugBtn->getVisible() != show_bug)
+        {
+            mWolfBugBtn->setVisible(show_bug);
+        }
+    }
+    mWolfLastMenuRight = menu_right;
+    mWolfLastBarWidth = getRect().getWidth();
 }
 // </WolfViewer>
+
+// [WOLF BUG REPORT 2026-10-24] Paul: "only wolf residents" - shown to anyone LOGGED IN to Wolf Territories, wherever they
+// are (a crash on a hypergrid visit is still reported to Wolf); never to logins from other grids. The floater checks the
+// same before sending, so a foreign grid's session is never posted.
+void LLStatusBar::updateWolfBugButton()
+{
+    if (!mWolfBugBtn)
+    {
+        return;
+    }
+    const bool show = WolfGrid::isWolfTerritories();
+    if (show == mWolfBugBtn->getVisible())
+    {
+        return;
+    }
+    mWolfBugBtn->setVisible(show);
+    updateWolfGridButtonPosition();
+}
+// [/WOLF BUG REPORT]
 
 void LLStatusBar::updateBalancePanelPosition()
 {
@@ -1352,9 +1468,24 @@ void LLStatusBar::updateBalancePanelPosition()
     LLRect balance_bg_rect = balance_bg_view->getRect();
     // <FS:Ansariel> Not used in Firestorm
     //balance_bg_rect.mLeft = balance_bg_rect.mRight - (buy_rect.getWidth() + shop_rect.getWidth() + balance_rect.getWidth() + HPAD);
-    balance_bg_rect.mLeft = balance_bg_rect.mRight - (buy_rect.getWidth() + balance_rect.getWidth() + HPAD);
+    // [WOLF AI CREDITS 2026-10-24] room for "AI 2304" at the panel's left, the money text starting after it
+    const S32 AI_GAP = 8;
+    const S32 ai_width = (mWolfAICredits && !mWolfAIShown.empty())
+        ? mWolfAICredits->getTextBoundingRect().getWidth() + AI_GAP : 0;
+    balance_bg_rect.mLeft = balance_bg_rect.mRight - (buy_rect.getWidth() + balance_rect.getWidth() + HPAD + ai_width);
     // </FS:Ansariel>
     balance_bg_view->setShape(balance_bg_rect);
+    if (mWolfAICredits)
+    {
+        // balance follows="all": after the reshape its right edge is right, only its left moves past the AI figure
+        LLRect money = mBoxBalance->getRect();
+        money.mLeft = ai_width;
+        mBoxBalance->setShape(money);
+        LLRect ai = mWolfAICredits->getRect();
+        ai.setLeftTopAndSize(AI_GAP / 2, money.mTop, llmax(ai_width - AI_GAP / 2, 0), money.getHeight());
+        mWolfAICredits->setShape(ai);
+    }
+    // [/WOLF AI CREDITS]
     updateWolfGridButtonPosition();   // <WolfViewer 2026-10-05/>
 }
 
@@ -1362,6 +1493,44 @@ void LLStatusBar::setBalanceVisible(bool visible)
 {
     mBoxBalance->setVisible(visible);
 }
+
+// [WOLF AI CREDITS 2026-10-24] Paul: "people can't really see their ai wolf tokens on wolf territories grid it should
+// be next to the $WT money ... AI 2304 ... and decrease or increase with purchase and use".
+// Who and why: a resident using the AI tools wants to see what they hold at a glance, not open the AI window.
+// The figure is WolfAI's live answer (never a stored one - Paul 10-17); "AI ?" while it cannot be read, so a failed
+// read never looks like an empty balance. Hidden off Wolf Territories (WolfAI::refresh resets the answer there).
+void LLStatusBar::updateWolfAICredits()
+{
+    if (!mWolfAICredits)
+    {
+        return;
+    }
+    const WolfAI::Avail& a = WolfAI::instance().avail();
+    std::string label;
+    if (a.mAsked && WolfGrid::isOnWolfTerritories())
+    {
+        label = !a.mBalanceKnown ? std::string("AI ?") : mObscureBalance ? std::string("AI ****") : llformat("AI %d", a.mBalance);
+    }
+    if (label == mWolfAIShown)
+    {
+        return;
+    }
+    mWolfAIShown = label;
+    mWolfAICredits->setVisible(!label.empty() && mBoxBalance->getVisible());
+    if (!label.empty())
+    {
+        mWolfAICredits->setValue(label);
+        mWolfAICredits->setToolTip(a.mBalanceKnown
+            ? llformat("You have %d Wolf Credits for the AI tools. Click to buy more.", a.mBalance)
+            : std::string("Your Wolf Credits can't be read just now. Click to buy more."));
+    }
+    updateBalancePanelPosition();
+    if (mSearchPanel && mSearchPanel->getVisible())
+    {
+        updateMenuSearchPosition();
+    }
+}
+// [/WOLF AI CREDITS]
 //////////////////////////////////////////////////////////////////////////////
 // Firestorm methods
 
@@ -1486,6 +1655,9 @@ void LLStatusBar::setParcelInfoText(const std::string& new_text)
     // <WolfViewer 2026-10-05> and the Wolf Grid button is left of both
     if (mWolfGridBtn && mWolfGridBtn->getVisible())
         panelBalanceRect = mWolfGridBtn->getRect();
+    // [WOLF BUG REPORT 2026-10-24] and the bug icon left of that
+    if (mWolfBugBtn && mWolfBugBtn->getVisible())
+        panelBalanceRect = mWolfBugBtn->getRect();
 
     panelParcelInfoRect.mRight = panelParcelInfoRect.mLeft + rect.mRight;
     S32 borderRight = panelBalanceRect.mLeft - ParcelInfoSpacing;

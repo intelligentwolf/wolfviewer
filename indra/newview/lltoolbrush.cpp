@@ -583,9 +583,7 @@ void LLToolBrushLand::renderOverlay(LLSurface& land, const LLVector3& pos_region
 {
     gGL.matrixMode(LLRender::MM_MODELVIEW);
     gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
-    LLGLDepthTest mDepthTest(GL_TRUE);
     gGL.pushMatrix();
-    gGL.color4fv(OVERLAY_COLOR.mV);
     gGL.translatef(0.0f, 0.0f, 1.0f);
 
     S32 i = (S32) pos_region.mV[VX];
@@ -594,51 +592,70 @@ void LLToolBrushLand::renderOverlay(LLSurface& land, const LLVector3& pos_region
     S32 radioAction = gSavedSettings.getS32("RadioLandBrushAction");
     F32 force = gSavedSettings.getF32("LandBrushForce"); // .1 to 100?
 
-    gGL.begin(LLRender::LINES);
-    for(S32 di = -half_edge; di <= half_edge; di++)
+    // [WOLF TERRAFORM 2026-10-24] Jimmy (20x20): "sometimes when building and u see the bulldoze icon, u dont see the area to
+    // be terraformed at all". The lines start 1 m over the heightfield (the translate above), so a floor prim or mesh over the ground (or
+    // distant terrain drawn coarser than its heights) hid all of them behind the depth test. Paul agreed (10-24) it should show
+    // through - a faint pass with no depth test first, then the usual bright pass where nothing is in front.
+    // Source of the pass state: render_hud_elements (pipeline.cpp) LLGLSUIDefault - blending is on here.
+    const LLColor4 hidden_color(OVERLAY_COLOR.mV[VRED], OVERLAY_COLOR.mV[VGREEN], OVERLAY_COLOR.mV[VBLUE], 0.35f);
+    auto draw_lines = [&]()
     {
-        if((i+di) < 0 || (i+di) >= (S32)land.mGridsPerEdge) continue;
-        for(S32 dj = -half_edge; dj <= half_edge; dj++)
+        gGL.begin(LLRender::LINES);
+        for(S32 di = -half_edge; di <= half_edge; di++)
         {
-            if( (j+dj) < 0 || (j+dj) >= (S32)land.mGridsPerEdge ) continue;
-            const F32
-                wx = pos_world.mV[VX] + di,
-                wy = pos_world.mV[VY] + dj,
-                wz = land.getZ(i + di, j + dj),
-                norm_dist = sqrt((float)di*di + dj*dj) / half_edge,
-                force_scale = sqrt(2.f) - norm_dist, // 1 at center, 0 at corner
-                wz2 = wz + .2f + (.2f + force/100.f) * force_scale, // top vertex
-                tic = .075f; // arrowhead size
-            // vertical line
-            gGL.vertex3f(wx, wy, wz);
-            gGL.vertex3f(wx, wy, wz2);
-            if(radioAction == E_LAND_RAISE || radioAction == E_LAND_NOISE) // up arrow
+            if((i+di) < 0 || (i+di) >= (S32)land.mGridsPerEdge) continue;
+            for(S32 dj = -half_edge; dj <= half_edge; dj++)
             {
-                gGL.vertex3f(wx, wy, wz2);
-                gGL.vertex3f(wx+tic, wy, wz2-tic);
-                gGL.vertex3f(wx, wy, wz2);
-                gGL.vertex3f(wx-tic, wy, wz2-tic);
-            }
-            if(radioAction == E_LAND_LOWER || radioAction == E_LAND_NOISE) // down arrow
-            {
+                if( (j+dj) < 0 || (j+dj) >= (S32)land.mGridsPerEdge ) continue;
+                const F32
+                    wx = pos_world.mV[VX] + di,
+                    wy = pos_world.mV[VY] + dj,
+                    wz = land.getZ(i + di, j + dj),
+                    norm_dist = sqrt((float)di*di + dj*dj) / half_edge,
+                    force_scale = sqrt(2.f) - norm_dist, // 1 at center, 0 at corner
+                    wz2 = wz + .2f + (.2f + force/100.f) * force_scale, // top vertex
+                    tic = .075f; // arrowhead size
+                // vertical line
                 gGL.vertex3f(wx, wy, wz);
-                gGL.vertex3f(wx+tic, wy, wz+tic);
-                gGL.vertex3f(wx, wy, wz);
-                gGL.vertex3f(wx-tic, wy, wz+tic);
-            }
-            if(radioAction == E_LAND_REVERT || radioAction == E_LAND_SMOOTH) // flat top
-            {
-                gGL.vertex3f(wx-tic, wy, wz2);
-                gGL.vertex3f(wx+tic, wy, wz2);
-            }
-            if(radioAction == E_LAND_LEVEL || radioAction == E_LAND_SMOOTH) // flat bottom
-            {
-                gGL.vertex3f(wx-tic, wy, wz);
-                gGL.vertex3f(wx+tic, wy, wz);
+                gGL.vertex3f(wx, wy, wz2);
+                if(radioAction == E_LAND_RAISE || radioAction == E_LAND_NOISE) // up arrow
+                {
+                    gGL.vertex3f(wx, wy, wz2);
+                    gGL.vertex3f(wx+tic, wy, wz2-tic);
+                    gGL.vertex3f(wx, wy, wz2);
+                    gGL.vertex3f(wx-tic, wy, wz2-tic);
+                }
+                if(radioAction == E_LAND_LOWER || radioAction == E_LAND_NOISE) // down arrow
+                {
+                    gGL.vertex3f(wx, wy, wz);
+                    gGL.vertex3f(wx+tic, wy, wz+tic);
+                    gGL.vertex3f(wx, wy, wz);
+                    gGL.vertex3f(wx-tic, wy, wz+tic);
+                }
+                if(radioAction == E_LAND_REVERT || radioAction == E_LAND_SMOOTH) // flat top
+                {
+                    gGL.vertex3f(wx-tic, wy, wz2);
+                    gGL.vertex3f(wx+tic, wy, wz2);
+                }
+                if(radioAction == E_LAND_LEVEL || radioAction == E_LAND_SMOOTH) // flat bottom
+                {
+                    gGL.vertex3f(wx-tic, wy, wz);
+                    gGL.vertex3f(wx+tic, wy, wz);
+                }
             }
         }
+        gGL.end();
+    };
+    {
+        LLGLDepthTest no_depth(GL_FALSE);
+        gGL.color4fv(hidden_color.mV);
+        draw_lines();
     }
-    gGL.end();
+    {
+        LLGLDepthTest depth(GL_TRUE);
+        gGL.color4fv(OVERLAY_COLOR.mV);
+        draw_lines();
+    }
 
     gGL.popMatrix();
 }

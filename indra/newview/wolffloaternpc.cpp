@@ -142,6 +142,66 @@ namespace
         return s;
     }
 
+    // Source: WolfNPCConfig.cs:48 TAG = ^[a-z0-9-]{1,24}$ and :410-413 case "pack" (Trim, ToLowerInvariant, then TAG,
+    // else "a pack or group name is 1 to 24 letters, digits or dashes"). True when the region will take it as it is.
+    bool isPackTag(const std::string& s)
+    {
+        const std::string p = lower(trimmed(s));
+        if (p.empty() || p.size() > 24) return false;
+        for (const char c : p)
+            if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-')) return false;
+        return true;
+    }
+
+    // A pack/group name the region's TAG takes, made from any words ("Storytellers' pub" -> "storytellers-pub"): ASCII
+    // letters and digits kept (lower case), every run of anything else becomes one dash between words, at most 24.
+    // Empty when nothing usable is left.
+    std::string packTag(const std::string& s)
+    {
+        std::string out;
+        bool gap = false;
+        for (const char ch : s)
+        {
+            char c = ch;
+            if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+            if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'))) { gap = true; continue; }
+            const bool dash = gap && !out.empty();
+            if (out.size() + (dash ? 2 : 1) > 24) break;
+            if (dash) out += '-';
+            out += c;
+            gap = false;
+        }
+        return out;
+    }
+
+    // Which piece is step n of a scene (a piece of count 5 is 5 steps); k = which of its count. Undefined past the end.
+    LLSD scenePieceOf(const LLSD& scene, S32 n, S32& k)
+    {
+        k = 0;
+        for (const LLSD& p : llsd::inArray(scene["pieces"]))
+        {
+            const S32 c = llclamp(p["count"].asInteger(), 1, 50);
+            if (n < c) { k = n; return p; }
+            n -= c;
+        }
+        return LLSD();
+    }
+
+    // "Third pack (optional)" -> "Third pack": the label without its trailing note, for the Rez button
+    std::string shortLabel(const std::string& label)
+    {
+        const size_t paren = label.find(" (");
+        return trimmed(paren == std::string::npos ? label : label.substr(0, paren));
+    }
+
+    // a sentence that ends once ("... dashes" + "." but not "... again." + ".")
+    std::string sentence(const std::string& s)
+    {
+        if (s.empty()) return s;
+        const char last = s.back();
+        return (last == '.' || last == '!' || last == '?') ? s : s + ".";
+    }
+
     // Source: llfloaterwolfavatars.cpp:692-696 buyUrlOf - a credits_short refusal carries its buy link
     std::string buyUrlOf(const LLSD& reply)
     {
@@ -1232,6 +1292,13 @@ bool WolfNPCForm::cfg(LLSD& out, std::string& error) const
     out["visitors"] = mVisitors->getValue().asString();
     const std::string pack = trimmed(mPack->getText());
     if (utf8Chars(pack) > 24) { error = "The pack or group name can be at most 24 characters."; return false; }
+    // Source: WolfNPCConfig.cs:48,413 - the region takes only letters a-z, digits and dashes (no spaces): said here, in words
+    if (!pack.empty() && !isPackTag(pack))
+    {
+        error = "The pack or group name can only use letters a-z, digits and dashes, no spaces - for example \"" +
+                (packTag(pack).empty() ? std::string("my-pack") : packTag(pack)) + "\".";
+        return false;
+    }
     out["pack"] = pack;
     out["leader"] = mLeader->get();
 
@@ -1830,6 +1897,10 @@ bool WolfFloaterNPC::postBuild()
     mSceneNone = mScenePanel->getChild<LLTextBox>("scene_none");
     mSceneMakeBtn = mScenePanel->getChild<LLButton>("scene_make");
     mSceneMakeBtn->setCommitCallback([this](LLUICtrl*, const LLSD&) { openWolfAvatars(); });
+    mSceneHowto = mScenesTab->getChild<LLTextBox>("scene_howto");
+    mSceneInstr = mScenePanel->getChild<LLTextBox>("scene_instr");
+    mSceneProgress = mScenePanel->getChild<LLTextBox>("scene_progress");
+    mSceneResult = mScenePanel->getChild<LLTextBox>("scene_result");
     mSceneStartBtn->setEnabled(false);
 
     mRegionChangedConnection = gAgent.addRegionChangedCallback([this]() { onRegionChanged(); });
@@ -2552,7 +2623,9 @@ void WolfFloaterNPC::onTabChanged()
         sendHello();   // [ROUND C] the region's and parcel's pet / noise rules (hello rules, canSetRegionRules)
         if (!mDetailView->getVisible()) requestList();
     }
-    else if (p == mScenesTab) { if (!mScenesRead) loadScenes(); }
+    // Read again each time the tab is shown (not while a scene is being placed): a list kept from an earlier visit can be
+    // hours old, and a W79 window kept open across the 2026-10-25 scenes.json fix kept refusing "Living town" (Jimmy Olsen)
+    else if (p == mScenesTab) { if (!mScenesRead || mScene < 0) loadScenes(); }
 }
 
 void WolfFloaterNPC::onChangedPush(const std::string& id)
@@ -3019,6 +3092,7 @@ void WolfFloaterNPC::doCreate(const LLSD& fields, const std::string& name)
     LLHandle<LLFloater> h = getHandle();
     LLSD send = fields;
     send.erase("brain");   // the window's own note for after the create (PROTOCOL.md §7), not a create field
+    send.erase("sceneStep");   // the window's own note too: which scene step this is (onSceneRez)
     WolfNPC::instance().request("create", send, [h, name, fields](const LLSD& reply)
     {
         WolfFloaterNPC* self = dynamic_cast<WolfFloaterNPC*>(h.get());
@@ -3026,10 +3100,23 @@ void WolfFloaterNPC::doCreate(const LLSD& fields, const std::string& name)
         self->mCreating = false;
         self->mRezBtn->setEnabled(true);
         self->mSceneRezBtn->setEnabled(true);
+        // this create is the scene's current step only when it came from that step of this run of the scene
+        const bool sceneStep = fields.has("sceneStep") && self->mScene >= 0
+                               && (U32)fields["sceneStep"]["run"].asInteger() == self->mSceneRun
+                               && fields["sceneStep"]["n"].asInteger() == self->mSceneStepN;
         if (!reply["ok"].asBoolean())
         {
             // shown as is: e.g. "You already have a travelling pet: <name>." / "A travelling pet cannot be huntable" (§26)
-            self->setError(cap(reply["error"].asString(), 500), reply);
+            const std::string error = cap(reply["error"].asString(), 500);
+            self->setError(error, reply);
+            if (sceneStep)
+            {
+                // Jimmy Olsen 2026-10-25: the reason next to the Rez button, and Rez ready to press again
+                self->showSceneStep();
+                self->setSceneResult(name + " was not rezzed - " + (error.empty() ? std::string("the region did not say why.") : sentence(error))
+                                     + (self->mSceneSkipBtn->getVisible() ? " Press Rez to try again, or skip this one." : " Press Rez to try again."), true);
+                return;
+            }
             self->mCreateNote->setText(cap(reply["error"].asString(), 300));
             self->mCreateNote->setColor(caution());
             if (self->mScene >= 0) self->showSceneStep();
@@ -3040,15 +3127,22 @@ void WolfFloaterNPC::doCreate(const LLSD& fields, const std::string& name)
         self->setDone(made + " is on its way.");
         self->mHasSpot = false;   // a spot confirmed for "Create a new one" is used once
         self->sendHello();
-        if (self->mScene >= 0)
+        if (sceneStep)
         {
             // [ROUND B] a piece's "brain" {teacher?, lookups?, styles?: [keys]} is applied after the create, as the owner
             if (fields.has("brain") && !reply["id"].asString().empty()) self->queueBrain(reply["id"].asString(), made, fields["brain"]);
+            if (self->mSceneStepN >= 0 && self->mSceneStepN < (S32)self->mSceneMarks.size()) self->mSceneMarks[self->mSceneStepN] = 1;
             ++self->mSceneStepN;
             const bool more = self->mSceneStepN < self->mSceneSteps;
             self->showSceneStep();   // the last step says the scene is done
-            if (more) self->setDone(made + " is on its way.");
+            if (more)
+            {
+                self->setDone(made + " is on its way.");
+                self->setSceneResult("\xE2\x9C\x93 " + made + " is on its way. Next: step " + llformat("%d", self->mSceneStepN + 1) + ", "
+                                     + self->sceneStepLabel(self->mSceneStepN) + " - walk to its spot.", false);
+            }
         }
+        else if (self->mScene >= 0) self->showSceneStep();
     });
 }
 
@@ -3988,9 +4082,13 @@ void WolfFloaterNPC::requestVehicles(WolfNPCForm* form)
 void WolfFloaterNPC::loadScenes()
 {
     const U32 serial = ++mScenesSerial;
+    // the scene chosen before a re-read stays chosen (by its id) when it is still in the list
+    std::string chosen;
+    const S32 at = mSceneList->getFirstSelectedIndex();
+    if (at >= 0 && at < (S32)mScenes.size()) chosen = mScenes[at]["id"].asString();
     mSceneList->setCommentText("Reading the scenes...");
     LLHandle<LLFloater> h = getHandle();
-    WolfAdventure::api("npc_scenes", LLSD::emptyMap(), [h, serial](bool ok, const LLSD& reply, const std::string& error)
+    WolfAdventure::api("npc_scenes", LLSD::emptyMap(), [h, serial, chosen](bool ok, const LLSD& reply, const std::string& error)
     {
         WolfFloaterNPC* self = dynamic_cast<WolfFloaterNPC*>(h.get());
         if (!self || serial != self->mScenesSerial) return;
@@ -4021,14 +4119,29 @@ void WolfFloaterNPC::loadScenes()
             self->mSceneList->addElement(row);
         }
         if (self->mScenes.size() == 0) self->mSceneList->setCommentText("No ready-made scenes yet.");
+        S32 again = -1;
+        for (S32 k = 0; !chosen.empty() && k < (S32)self->mScenes.size(); ++k)
+            if (self->mScenes[k]["id"].asString() == chosen) { again = k; break; }
+        if (again >= 0) self->mSceneList->selectNthItem(again);
+        self->onSceneSelected();
     });
 }
 
 void WolfFloaterNPC::onSceneSelected()
 {
     const S32 i = mSceneList->getFirstSelectedIndex();
-    if (i < 0 || i >= (S32)mScenes.size()) { mSceneStartBtn->setEnabled(false); mSceneBlurb->setText(LLStringUtil::null); return; }
+    if (i < 0 || i >= (S32)mScenes.size())
+    {
+        mSceneStartBtn->setEnabled(false);
+        mSceneBlurb->setText(LLStringUtil::null);
+        mSceneHowto->setText(LLStringUtil::null);
+        return;
+    }
     mSceneBlurb->setText(cap(mScenes[i]["blurb"].asString(), 600));
+    // Jimmy Olsen 2026-10-25: say before Start that each character is placed by hand, and how many steps that is
+    S32 steps = 0;
+    for (const LLSD& p : llsd::inArray(mScenes[i]["pieces"])) steps += llclamp(p["count"].asInteger(), 1, 50);
+    mSceneHowto->setText(llformat("You place each character yourself: walk to the spot, then press Rez. %d step%s.", steps, steps == 1 ? "" : "s"));
     mSceneStartBtn->setEnabled(mScene < 0);
     showSceneCost();
 }
@@ -4254,18 +4367,38 @@ void WolfFloaterNPC::gmPeople()
     });
 }
 
+std::string WolfFloaterNPC::sceneStepLabel(S32 step) const
+{
+    if (mScene < 0 || mScene >= (S32)mScenes.size()) return std::string();
+    S32 k = 0;
+    const LLSD piece = scenePieceOf(mScenes[mScene], step, k);
+    if (!piece.isMap()) return std::string();
+    const S32 count = llclamp(piece["count"].asInteger(), 1, 50);
+    const std::string label = shortLabel(cap(piece["label"].asString(), 48));
+    return count > 1 ? label + llformat(" %d", k + 1) : label;
+}
+
+void WolfFloaterNPC::setSceneResult(const std::string& text, bool problem)
+{
+    mSceneResult->setText(text);
+    mSceneResult->setColor(problem ? caution() : normalText());
+}
+
 void WolfFloaterNPC::onSceneStart()
 {
     const S32 i = mSceneList->getFirstSelectedIndex();
     if (i < 0 || i >= (S32)mScenes.size()) return;
     clearStatus();
     mScene = i;
+    ++mSceneRun;
     mSceneStepN = 0;
     mSceneSteps = 0;
     for (const LLSD& p : llsd::inArray(mScenes[i]["pieces"])) mSceneSteps += llclamp(p["count"].asInteger(), 1, 50);
+    mSceneMarks.assign((size_t)mSceneSteps, 0);
     mSceneStartBtn->setEnabled(false);
     mSceneList->setEnabled(false);
     mScenePanel->setVisible(true);
+    setSceneResult(LLStringUtil::null, false);
     if (!mAvatarsRead) loadAvatars();
     showSceneStep();
 }
@@ -4274,15 +4407,8 @@ void WolfFloaterNPC::showSceneStep()
 {
     if (mScene < 0 || mScene >= (S32)mScenes.size()) return;
     const LLSD& scene = mScenes[mScene];
-    // which piece is step n (a piece of count 5 is 5 steps)
-    S32 n = mSceneStepN, k = 0;
-    LLSD piece;
-    for (const LLSD& p : llsd::inArray(scene["pieces"]))
-    {
-        const S32 c = llclamp(p["count"].asInteger(), 1, 50);
-        if (n < c) { piece = p; k = n; break; }
-        n -= c;
-    }
+    S32 k = 0;
+    const LLSD piece = scenePieceOf(scene, mSceneStepN, k);
     if (!piece.isMap())
     {
         const std::string title = cap(scene["title"].asString(), 64);
@@ -4292,9 +4418,39 @@ void WolfFloaterNPC::showSceneStep()
     }
     const S32 count = llclamp(piece["count"].asInteger(), 1, 50);
     const std::string kind = piece["kind"].asString() == "person" ? "person" : "animal";
-    mSceneStep->setText(llformat("Step %d of %d: ", mSceneStepN + 1, mSceneSteps) + cap(piece["step"].asString(), 300));
-    mScenePiece->setText(cap(piece["label"].asString(), 64) + (count > 1 ? llformat(" (%d of %d)", k + 1, count) : std::string())
-                         + (kind == "person" ? " - a person" : " - an animal"));
+    const std::string label = shortLabel(cap(piece["label"].asString(), 48));
+    // Jimmy Olsen 2026-10-25: the step as a header, the instruction under it, the Rez button saying what it does
+    mSceneStep->setText(llformat("Step %d of %d - ", mSceneStepN + 1, mSceneSteps) + sceneStepLabel(mSceneStepN));
+    mSceneInstr->setText(cap(piece["step"].asString(), 300));
+    std::string about = kind == "person" ? "A person" : "An animal";
+    if (count > 1) about += llformat(", %d of the %d %s", k + 1, count, label.c_str());
+    const bool optional = piece["optional"].asBoolean();
+    if (optional) about += " (optional - you may skip it)";
+    mScenePiece->setText(about + ".");
+    mSceneRezBtn->setLabel("Rez " + cap(label, 22) + " here");
+
+    // progress: one entry per piece - done ticked, this one marked, the rest still to come (words as well as marks)
+    std::string progress;
+    S32 first = 0;
+    for (const LLSD& p : llsd::inArray(scene["pieces"]))
+    {
+        const S32 c = llclamp(p["count"].asInteger(), 1, 50);
+        S32 made = 0, skipped = 0;
+        for (S32 s = first; s < first + c && s < (S32)mSceneMarks.size(); ++s)
+        {
+            if (mSceneMarks[s] == 1) ++made;
+            else if (mSceneMarks[s] == 2) ++skipped;
+        }
+        const std::string name = shortLabel(cap(p["label"].asString(), 48)) + (c > 1 ? llformat(" x%d", c) : std::string());
+        std::string entry;
+        if (made + skipped >= c) entry = (made > 0 ? "\xE2\x9C\x93 " : "- ") + name + (made == 0 ? " (skipped)" : skipped > 0 ? llformat(" (%d skipped)", skipped) : std::string());
+        else if (mSceneStepN >= first && mSceneStepN < first + c) entry = "\xE2\x96\xB6 " + name + (c > 1 ? llformat(" (%d placed)", made) : std::string()) + " - now";
+        else entry = "\xE2\x97\x8B " + name;
+        progress += (progress.empty() ? std::string() : std::string("    ")) + entry;
+        first += c;
+    }
+    mSceneProgress->setText(progress);
+
     const std::string was = mSceneAvatar->getValue().asString();
     mSceneAvatar->removeall();
     for (const LLSD& a : llsd::inArray(mAvatars))
@@ -4306,7 +4462,7 @@ void WolfFloaterNPC::showSceneStep()
     const bool none = mSceneAvatar->getItemCount() == 0;
     if (!none) selectOr(mSceneAvatar, was);
     mSceneAvatar->setEnabled(!none);
-    mSceneName->setText(cap(piece["label"].asString(), 44) + (count > 1 ? llformat(" %d", k + 1) : std::string()));
+    mSceneName->setText(cap(label, 44) + (count > 1 ? llformat(" %d", k + 1) : std::string()));   // "Third pack 1", not "Third pack (optional) 1"
     mSceneNone->setText(!mAvatarsRead ? std::string("Looking for your WolfAvatars...")
                         : none ? (kind == "person" ? std::string("You have no WolfAvatars that are people, so this one cannot be placed. Make one in WolfAvatars, or skip it.")
                                                    : std::string("You have no WolfAvatars that are animals, so this one cannot be placed. Make one in WolfAvatars, or skip it."))
@@ -4315,9 +4471,7 @@ void WolfFloaterNPC::showSceneStep()
     mSceneRezBtn->setEnabled(!none && !mCreating);
     // [ROUND 3] §7 "optional": true - the window offers Skip for it (and for a piece they have no avatar for, so they are
     // never stuck: Stop the scene is the other way out)
-    const bool optional = piece["optional"].asBoolean();
     mSceneSkipBtn->setVisible(optional || none);
-    if (optional) mScenePiece->setText(mScenePiece->getText() + " (optional - you may skip it)");
 }
 
 void WolfFloaterNPC::onSceneRez()
@@ -4325,32 +4479,36 @@ void WolfFloaterNPC::onSceneRez()
     clearStatus();
     if (mCreating || mScene < 0 || mScene >= (S32)mScenes.size()) return;
     const LLSD& scene = mScenes[mScene];
-    S32 n = mSceneStepN;
-    LLSD piece;
-    for (const LLSD& p : llsd::inArray(scene["pieces"]))
-    {
-        const S32 c = llclamp(p["count"].asInteger(), 1, 50);
-        if (n < c) { piece = p; break; }
-        n -= c;
-    }
+    S32 k = 0;
+    const LLSD piece = scenePieceOf(scene, mSceneStepN, k);
     if (!piece.isMap()) return;
+    // a refusal before sending: in the bottom bar as before, and next to the Rez button where they are looking
+    auto refuse = [this](const std::string& why) { setError(why); setSceneResult(why, true); };
     const std::string job = mSceneAvatar->getValue().asString();
-    if (job.empty()) { setError("Choose one of your WolfAvatars for it first."); return; }
+    if (job.empty()) { refuse("Choose one of your WolfAvatars for it first."); return; }
     const std::string name = trimmed(mSceneName->getText());
-    if (name.empty() || utf8Chars(name) > 48) { setError("Give it a name of 1 to 48 characters."); return; }
-    if (rlvBlocksRez()) { setError("It can't be rezzed now: an RLV restriction (rez) is on."); return; }
+    if (name.empty() || utf8Chars(name) > 48) { refuse("Give it a name of 1 to 48 characters."); return; }
+    if (rlvBlocksRez()) { refuse("It can't be rezzed now: an RLV restriction (rez) is on."); return; }
     LLVector3 pos, agent;
     F32 facing = 0.f;
-    if (!placeInFront(pos, facing, agent)) { setError("Your position is not known yet - try again in a moment."); return; }
+    if (!placeInFront(pos, facing, agent)) { refuse("Your position is not known yet - try again in a moment."); return; }
     // Source: PROTOCOL.md section 7 - "made by the normal create, with home = where they stand and pack = the scene's group
     // name. AI is off in every scene."
     LLSD cfg = piece["cfg"].isMap() ? piece["cfg"] : LLSD::emptyMap();
-    // a piece with its own pack keeps it (the survivor never joins the zombie horde); the others get the scene's group
-    std::string pack = cap(cfg["pack"].asString(), 24);
-    if (pack.empty()) pack = cap(scene["group"].asString(), 24);
-    if (pack.empty()) pack = cap(scene["title"].asString(), 24);
+    // a piece with its own pack keeps it (the survivor never joins the zombie horde); the others get the scene's group.
+    // Source: WolfNPCConfig.cs:48,413 - the region takes a pack only as ^[a-z0-9-]{1,24}$ after lower-casing. The scene's
+    // "group" (scenes.json), else its id ("living-town", already a tag), else its title made into one. The title alone
+    // ("Living town", "Storytellers' pub") was refused: "a pack or group name is 1 to 24 letters, digits or dashes"
+    // (Jimmy Olsen 2026-10-25, W79).
+    std::string pack;
+    for (const std::string& from : { cfg["pack"].asString(), scene["group"].asString(), scene["id"].asString(), scene["title"].asString() })
+    {
+        pack = packTag(from);
+        if (!pack.empty()) break;
+    }
     cfg["name"] = name;
-    cfg["pack"] = pack;
+    if (pack.empty()) cfg.erase("pack");
+    else cfg["pack"] = pack;
     cfg["home"] = wireVec(agent);
     cfg["facing"] = wireNum(facing);
     LLSD ai = cfg["ai"].isMap() ? cfg["ai"] : LLSD::emptyMap();
@@ -4363,6 +4521,13 @@ void WolfFloaterNPC::onSceneRez()
     fields["pos"] = wireVec(pos);
     fields["facing"] = wireNum(facing);
     if (piece["brain"].isMap()) fields["brain"] = piece["brain"];   // kept by the window only (doCreate strips it before sending)
+    // kept by the window only (doCreate strips it): which scene run and step this create is, so its answer moves that
+    // scene on - not a create from another tab, nor one answered after Stop or a new Start
+    LLSD step;
+    step["run"] = (S32)mSceneRun;
+    step["n"] = mSceneStepN;
+    fields["sceneStep"] = step;
+    setSceneResult("Rezzing " + name + "... this can take up to a minute.", false);
     doCreate(fields, name);
 }
 
@@ -4441,9 +4606,13 @@ void WolfFloaterNPC::applyBrain(size_t index)
 
 void WolfFloaterNPC::onSceneSkip()
 {
+    if (mCreating) return;   // its Rez is still being answered: that answer moves the scene on
     clearStatus();
+    const std::string skipped = sceneStepLabel(mSceneStepN);
+    if (mSceneStepN >= 0 && mSceneStepN < (S32)mSceneMarks.size()) mSceneMarks[mSceneStepN] = 2;
     ++mSceneStepN;
     showSceneStep();
+    if (mScene >= 0 && !skipped.empty()) setSceneResult("Skipped " + skipped + ". Next: step " + llformat("%d", mSceneStepN + 1) + ", " + sceneStepLabel(mSceneStepN) + ".", false);
 }
 
 void WolfFloaterNPC::onSceneStop()
@@ -4451,6 +4620,8 @@ void WolfFloaterNPC::onSceneStop()
     const bool was = mScene >= 0 && mSceneStepN < mSceneSteps;
     mScene = -1;
     mSceneStepN = mSceneSteps = 0;
+    mSceneMarks.clear();
+    setSceneResult(LLStringUtil::null, false);
     mScenePanel->setVisible(false);
     mSceneList->setEnabled(true);
     onSceneSelected();

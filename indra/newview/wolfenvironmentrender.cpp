@@ -132,6 +132,8 @@ namespace
         LLVector3 sunWorld = LLVector3::z_axis, moonWorld = -LLVector3::z_axis;
         LLVector3 sunECEF = LLVector3::z_axis;
         bool     sunUp = true;
+        F32      night = 0.f;                        // [2026-10-25] WolfEnvironmentRender::nightFactor
+        F32      nightS = 1.f;                       // [2026-10-25] the rods' saturation at the adaptation luminance (nightLight)
         LLColor3 sunNormal;                          // the sun's illuminance at the camera, perpendicular (lux)
         LLColor3 sunHorizontal, skyHorizontal;       // on a horizontal surface (lux)
         F32      moonTOA = 0.f;                      // Krisciunas & Schaefer, lux
@@ -647,6 +649,41 @@ namespace
         return LLColor3(w.mV[0] / llmax(h.mV[0], 1.0e-4f), w.mV[1] / llmax(h.mV[1], 1.0e-4f), w.mV[2] / llmax(h.mV[2], 1.0e-4f));
     }
 
+    /** [WolfViewer 2026-10-25] The rods' saturation s at adaptation luminance `y` (cd/m2): 0 below log10 y = -2, 3 t^2 - 2 t^3 with
+     *  t = (log10 y + 2) / 2.6 up to log10 y = 0.6, 1 above. Source: Jensen, Premoze, Shirley, Thompson, Ferwerda, Stark, "Night
+     *  Rendering", University of Utah UUCS-00-016 (2000), section 3.1 (wolftk/nightLight.glsl). */
+    F32 rodSaturation(F32 y)
+    {
+        if (!(y > 0.f)) return 0.f;
+        const F32 t = llclamp((log10f(y) + 2.f) / 2.6f, 0.f, 1.f);
+        return t * t * (3.f - 2.f * t);
+    }
+
+    /** [WolfViewer 2026-10-25] A light's colour as the eye sees it at night: wolftk/nightLight.glsl wolfNightLight, the same steps
+     *  (its source notes there), on a linear sRGB colour; `night` 0 = unchanged. Scale-invariant, so pre-exposed values go in as
+     *  they are. */
+    LLColor3 nightLightColour(const LLColor3& rgb, F32 night, F32 s)
+    {
+        if (!(night > 0.f)) return rgb;
+        // Source: Filament ColorSpaceUtils.h:49-53 sRGB_to_XYZ / :43-47 XYZ_to_sRGB (filamentAgx.glsl WOLF_AGX_*), row by row
+        const F32 r = llmax(rgb.mV[0], 0.f), g = llmax(rgb.mV[1], 0.f), b = llmax(rgb.mV[2], 0.f);
+        const F32 X = 0.4124560f * r + 0.3575760f * g + 0.1804380f * b;
+        const F32 Y = 0.2126730f * r + 0.7151520f * g + 0.0721750f * b;
+        const F32 Z = 0.0193339f * r + 0.1191920f * g + 0.9503040f * b;
+        const F32 W = X + Y + Z;
+        if (!(W > 0.f) || !(Y > 0.f)) return rgb;
+        s = llclamp(s, 0.f, 1.f);
+        const F32 V = llmax(Y * (1.33f * (1.f + (Y + Z) / llmax(X, 1e-6f * W)) - 1.68f), 0.f);   // Larson et al. 1997 eq. 13
+        const F32 x = 0.29f + (X / W - 0.29f) * s, y = 0.28f + (Y / W - 0.28f) * s;            // (xb, yb): the paintings' mean
+        const F32 Yn = 0.4468f * V + (Y - 0.4468f * V) * s;
+        const F32 Xn = x * Yn / y, Zn = (1.f - x - y) * Yn / y;
+        const LLColor3 n(llmax(3.2404542f * Xn - 1.5371385f * Yn - 0.4985314f * Zn, 0.f),
+                         llmax(-0.9692660f * Xn + 1.8760108f * Yn + 0.0415560f * Zn, 0.f),
+                         llmax(0.0556434f * Xn - 0.2040259f * Yn + 1.0572252f * Zn, 0.f));
+        night = llclamp(night, 0.f, 1.f);
+        return rgb * (1.f - night) + n * night;
+    }
+
     /** Per channel b / a (0 where a is 0): a transmittance from two illuminances. */
     LLColor3 ratio(const LLColor3& b, const LLColor3& a)
     {
@@ -727,6 +764,13 @@ namespace
         sNext.sunWorld = sun; sNext.moonWorld = moon;
         sNext.sunECEF = toECEF(sNext, sun);
         sNext.sunUp = sun.mV[VZ] > 0.f;
+        {
+            // [WolfViewer 2026-10-25] night: the sun 12 deg under (nautical twilight's end) -> 18 deg under (astronomical
+            // twilight's end), AMS Glossary of Meteorology "twilight"; smoothstep between, so nothing steps
+            const F32 alt = asinf(llclamp(sun.mV[VZ], -1.f, 1.f)) * RAD_TO_DEG;
+            const F32 t = llclamp((-12.f - alt) / 6.f, 0.f, 1.f);
+            sNext.night = t * t * (3.f - 2.f * t);
+        }
 
         const LLVector3 camKm = cameraECEFKm(sNext);
         LLColor3 sunH, skyH;
@@ -1039,6 +1083,14 @@ namespace
             const LLColor3 llAmb = lin(LLColor3(psky->getSunAmbient()));
             const LLColor3 physDirect = sNext.sunUp ? sNext.sunNormal : sNext.moonNormal;
             sNext.sunTint = hueSwap(llSun, physDirect);
+            // [WolfViewer 2026-10-25] Jimmy Olsen, Tromso at night: "make the light coming from moon white/bluish ... it's like
+            // having the light at the horizon instead". LL lights the moonlit scene with the EEP's sunlight_color ([S]
+            // llsettingssky.cpp:1684-1687 getMoonlightColor "moon and sun share light color"), and his night skies carry
+            // sunlight_color 0 (WolfAutoEnvironmentModule.cs JimmyLook band 0) - the EEP gives the moon NO light, and the scene
+            // was its ambient alone, from every side. By night (nightFactor) the moon's light is the physical moonlight
+            // (Krisciunas & Schaefer 1991 through the atmosphere's transmittance, moonNormal) in its own colour; the night
+            // vision in the display (postDeferredTonemap.glsl) then shows it as the eye sees it. Twilight and day: the EEP's.
+            if (!sNext.sunUp) sNext.sunTint = sNext.sunTint * (1.f - sNext.night) + LLColor3::white * sNext.night;
             sNext.ambTint = hueSwap(llAmb, sNext.skyHorizontal);
             // the clouds' brightness too: cloud_color's luminance over LL's default grey (llsettingssky.cpp:901 0.4099) - the
             // server darkens it for rain, snow and storms (WolfAutoEnvironmentModule.cs:849-853, WolfEnvironment.cs:1017-1021)
@@ -1085,6 +1137,14 @@ namespace
                 s_haveExp = true;
                 sNext.exposure = exp2f(s_logExp);
             }
+        }
+        {
+            // [WolfViewer 2026-10-25] the eye's adaptation at night (nightLight.glsl): the luminance of a white surface under the night's
+            // light - the moon's direct light, its clouds' share, and the sky - in cd/m2 (physical, before any exposure)
+            const LLColor3 direct = sNext.sunUp ? sNext.sunHorizontal : sNext.moonNormal * llmax(moon.mV[VZ], 0.f);
+            const LLColor3 white = (componentMult(direct, sNext.sunTint) * llclamp(1.f - sNext.cover, 0.f, 1.f)
+                                    + componentMult(sNext.skyHorizontal, sNext.ambTint)) * (1.f / F_PI);
+            sNext.nightS = rodSaturation(luminance(white));
         }
         sNext.valid = true;
     }
@@ -1527,6 +1587,7 @@ S32 WolfEnvironmentRender::tier()
     sFrame = sNext;
     // [WolfViewer 2026-10-25] the gain grids' light, in this frame's ECEF (the frame is rebuilt every frame: placeOnPlanet)
     if (sAtmos) sAtmos->setEepGainRefs(toECEF(sFrame, sEepSkyRefWorld), toECEF(sFrame, sEepCloudRefWorld));
+    if (sAtmos) sAtmos->setNightLight(sFrame.night, sFrame.nightS);   // [2026-10-25] wolftk/nightLight.glsl
     const WolfEnvDoc& d = WolfEnvironmentState::instance().active();
     sGpu.active = sGpu.tierValue >= 1 && d.mValid && d.mMode == WolfEnvDoc::WOLF && sharedSky() && sAtmos && sAtmos->ready() && sFrame.valid;
     return sGpu.tierValue;
@@ -1645,6 +1706,9 @@ void WolfEnvironmentRender::verifyFrame(LLRenderTarget* displayed, LLRenderTarge
 }
 
 // static
+F32 WolfEnvironmentRender::nightFactor() { return skyActive() ? sFrame.night : 0.f; }
+
+// static
 bool WolfEnvironmentRender::eepDriven() { return skyActive() && LLEnvironment::instance().getCurrentSky() != nullptr; }
 
 // static
@@ -1661,9 +1725,18 @@ LLColor3 WolfEnvironmentRender::sceneSunlit()
 {
     // the direct light in full (the clouds' shadow takes it away per pixel, wolfTkCloudShadow); Lambert: L =
     // albedo / pi x E (deferredUtil.glsl multiplies by pi under wolf_phys, pbrPunctual carries the 1 / pi)
-    if (sFrame.llLights) return sFrame.llSunlit;   // [WolfViewer 2026-10-13] the stock EEP's sun, per unit N.L (updateLight)
+    if (sFrame.llLights)
+    {
+        // [WolfViewer 2026-10-13] the stock EEP's sun, per unit N.L (updateLight); [2026-10-25] by night the physical moonlight
+        // (updateLight's sunTint note: an EEP's moon has the EEP's sunlight_color, 0 on Jimmy's night skies)
+        if (sFrame.sunUp || sFrame.night <= 0.f) return sFrame.llSunlit;
+        const LLColor3 moonLit = componentMult(sFrame.moonNormal, sFrame.sunTint) * (sFrame.exposure / F_PI);
+        // [2026-10-25] the moonlight as the eye sees it (nightLightColour: Jensen et al. 2000 / nightLight.glsl)
+        return sFrame.llSunlit * (1.f - sFrame.night) + nightLightColour(moonLit, 1.f, sFrame.nightS) * sFrame.night;
+    }
     const LLColor3 E = sFrame.sunUp ? sFrame.sunNormal : sFrame.moonNormal;
-    return componentMult(E, sFrame.sunTint) * (sFrame.exposure / F_PI);   // the EEP's sunlight_color hue (updateLight)
+    // the EEP's sunlight_color hue (updateLight); [2026-10-25] by night as the eye sees it (nightLightColour)
+    return nightLightColour(componentMult(E, sFrame.sunTint) * (sFrame.exposure / F_PI), sFrame.night, sFrame.nightS);
 }
 
 // static
@@ -1671,8 +1744,10 @@ LLColor3 WolfEnvironmentRender::sceneAmblit()
 {
     // Source: SkyLightProbe.ts:85-129: the irradiance at the camera, as the SH of (1 + n.up) / 2 x it
     // (atmosphericsFuncs.glsl mixes 0 -> this by n.up x 0.5 + 0.5: the same function)
-    if (sFrame.llLights) return sFrame.llAmblit;   // [WolfViewer 2026-10-13] the stock EEP's ambient (updateLight)
-    return componentMult(sFrame.skyHorizontal, sFrame.ambTint) * (sFrame.exposure / F_PI);   // the EEP's ambient hue (updateLight)
+    // [WolfViewer 2026-10-13] the stock EEP's ambient (updateLight); [2026-10-25] the sky's light by night as the eye sees it
+    // (nightLightColour), as the sky itself is drawn (nightLight.glsl)
+    if (sFrame.llLights) return nightLightColour(sFrame.llAmblit, sFrame.night, sFrame.nightS);
+    return nightLightColour(componentMult(sFrame.skyHorizontal, sFrame.ambTint) * (sFrame.exposure / F_PI), sFrame.night, sFrame.nightS);
 }
 
 // static
@@ -1682,8 +1757,9 @@ LLColor3 WolfEnvironmentRender::sceneAmbDown() { return LLColor3::black; }
 LLColor3 WolfEnvironmentRender::sceneLightH()
 {
     const LLColor3 direct = sFrame.sunUp ? sFrame.sunHorizontal : sFrame.moonNormal * llmax(sFrame.moonWorld.mV[VZ], 0.f);
-    return (componentMult(direct, sFrame.sunTint) * sFrame.cloudTransmittanceAtCamera + componentMult(sFrame.skyHorizontal, sFrame.ambTint))
-           * (sFrame.exposure / F_PI);
+    // [2026-10-25] by night as the eye sees it (nightLightColour), as the scene's own light
+    return nightLightColour((componentMult(direct, sFrame.sunTint) * sFrame.cloudTransmittanceAtCamera + componentMult(sFrame.skyHorizontal, sFrame.ambTint))
+           * (sFrame.exposure / F_PI), sFrame.night, sFrame.nightS);
 }
 
 // static
@@ -2612,6 +2688,34 @@ bool WolfEnvironmentRender::renderSkyDome()
             }
         }
         sh.uniform1f(s_eon, eepMoonOn ? 1.f : 0.f);
+        // [WolfViewer 2026-10-25] Jimmy Olsen, ticket #226 (Tromso, clear sky): "the moon keeps blinking or disappears". Which gate
+        // above left the moon out is logged when it changes (main view only; at most one line every 2 s, the flips in between
+        // counted), so his next log names the cause: a WolfEnv line per change, nothing while it is steady.
+        if (!gCubeSnapshot)
+        {
+            const char* why = eepMoonOn ? "drawn"
+                : !eep ? "not drawn: no EEP sky driving the native sky"
+                : gSky.mVOSkyp.isNull() ? "not drawn: no sky object"
+                : !eep->getIsMoonUp() ? "not drawn: the EEP moon is below the horizon"
+                : !gSky.mVOSkyp->getMoonTex() ? "not drawn: the EEP sky has no moon texture"
+                : "not drawn: the moon texture is not in GL yet (or the program has no wolfMoonMap)";
+            static const char* s_lastWhy = nullptr;
+            static F64 s_lastLog = -1.0;
+            static S32 s_flips = 0;
+            if (why != s_lastWhy)
+            {
+                ++s_flips;
+                const F64 now = LLFrameTimer::getElapsedSeconds();
+                if (s_lastLog < 0.0 || now - s_lastLog >= 2.0)
+                {
+                    LL_INFOS("WolfEnv") << "EEP moon " << why << " (real moon " << WolfRegionWeather::instance().autoEnvRealSky()
+                                        << ", changes since the last line " << s_flips << ")" << LL_ENDL;
+                    s_lastLog = now;
+                    s_flips = 0;
+                }
+                s_lastWhy = why;
+            }
+        }
     }
     sh.uniform1f(s_mon, (moonOn && !eepDriven()) ? 1.f : 0.f);
 
@@ -2728,9 +2832,10 @@ bool WolfEnvironmentRender::renderSkyDome()
         sh.uniform1f(s_fs, water ? water->getFresnelScale() : 0.4f);
         sh.uniform1f(s_fo, water ? water->getFresnelOffset() : 0.5f);
     }
-    static LLStaticHashedString s_mde("uMoonDirECEF"), s_mss("uMoonSkyScale");
+    static LLStaticHashedString s_mde("uMoonDirECEF"), s_mss("uMoonSkyScale"), s_unight("uNight");
     sh.uniform3fv(s_mde, 1, sFrame.moonECEF.mV);
     sh.uniform1f(s_mss, sFrame.moonSkyScale);
+    sh.uniform1f(s_unight, sFrame.night);   // [2026-10-25] skyF.glsl: the moon's aureole outside the EEP gains by night
     {
         // [WolfViewer 2026-10-14] the shooting stars (updateMeteors, skyF.glsl wolfMeteors); none in a reflection probe's faces
         static LLStaticHashedString s_ma("uMeteorA"), s_mb("uMeteorB"), s_mc("uMeteorC");

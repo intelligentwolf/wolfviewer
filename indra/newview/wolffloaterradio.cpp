@@ -22,6 +22,7 @@
 #include "llui.h"
 #include "llviewercontrol.h"
 #include "llwindow.h"
+#include "wolfgrid.h"
 #include "wolfradiostations.h"
 
 #include <cmath>
@@ -96,6 +97,16 @@ namespace
     constexpr F32 VOLUME_STEP = 0.05f;   // AudioLevelMusic is 0..1 (settings.xml, default 0.3)
     constexpr F32 KNOB_SWEEP = 135.f * DEG_TO_RAD;   // the Volume knob turns -135..+135 degrees
     constexpr S32 MIN_KEY_FONT = 1;      // Avionics1 (7 pt) - smaller than that is not readable on a key
+    // [WOLF STATIONS 2026-10-25] the genre keys wrap onto another row rather than go narrower than this: 7 keys a
+    // row up to w79 were 80 px at the default 640 px width (floater_wolf_radio.xml), and 16 keys (Wolf, Residents and
+    // 14 genres) still make two rows of 8 at the 540 px minimum width (inner width 498 px: 8 x 56 + 7 x 6 = 490).
+    constexpr S32 MIN_KEY_W = 56;
+    constexpr S32 KEY_GAP = 6;
+    constexpr S32 MAX_KEY_ROWS = 4;      // past this the keys narrow instead, so the station log keeps its rows
+    // the residents' key and the featured key in the WolfRadioGenre setting (no radio_stations.php genre id is either:
+    // wolf_radio_lib.php RS_GENRES)
+    constexpr const char* FEATURED_ID = "featured";
+    constexpr const char* RESIDENTS_ID = "wolf";
 
     LLColor4 withAlpha(const LLColor4& c, F32 a)
     {
@@ -600,11 +611,7 @@ WolfFloaterRadio::~WolfFloaterRadio()
 
 bool WolfFloaterRadio::postBuild()
 {
-    for (S32 i = 0; i < GENRE_BUTTONS; ++i)
-    {
-        mGenre[i] = getChild<LLButton>(llformat("genre_%d", i));
-        mGenre[i]->setCommitCallback([this, i](LLUICtrl*, const LLSD&) { showGenre(i); });
-    }
+    // [WOLF STATIONS 2026-10-25] the genre keys are made by refreshGenres(), as many as the feed has (makeKey()).
     mStations = getChild<LLScrollListCtrl>("stations");
     mStations->setCommitCallback([this](LLUICtrl*, const LLSD&) { onSelectStation(); });
     mStations->setDoubleClickCallback([this]() { if (!mListen->getToggleState()) { mListen->setToggleState(true); } onListen(); });
@@ -615,6 +622,12 @@ bool WolfFloaterRadio::postBuild()
     mSetLand->setCommitCallback([this](LLUICtrl*, const LLSD&) { onSetLand(); });
     mAddPreset = getChild<LLButton>("add_preset_btn");
     mAddPreset->setCommitCallback([this](LLUICtrl*, const LLSD&) { onAddPreset(); });
+    // [WOLF STATIONS 2026-10-25] the residents' page is a Wolf Territories login on wolf-grid.com: shown on a Wolf
+    // login only (the floater's other entry points are gated the same way: menu_viewer.xml WolfRadioStations,
+    // llpanellandaudio.cpp radio_stations_btn)
+    mAddStation = getChild<LLButton>("add_station_btn");
+    mAddStation->setCommitCallback([this](LLUICtrl*, const LLSD&) { onAddStation(); });
+    mAddStation->setVisible(WolfGrid::isWolfTerritories());
 
     mOnAirLabel = getString("on_air");
     mOffAirLabel = getString("off_air");
@@ -677,52 +690,127 @@ void WolfFloaterRadio::reshape(S32 width, S32 height, bool called_from_parent)
 const LLSD& WolfFloaterRadio::stationsOf(S32 index) const
 {
     static const LLSD none = LLSD::emptyArray();
+    if (index < 0 || index >= keyCount()) return none;
     WolfRadioStations& st = WolfRadioStations::instance();
-    if (index == 0) return st.featured();
+    const KeyInfo& k = mKeys[index];
+    if (k.kind == KeyKind::FEATURED) return st.featured();
+    if (k.kind == KeyKind::RESIDENTS) return st.wolf();
     const LLSD& genres = st.genres();
-    if (index - 1 < (S32)genres.size()) return genres[index - 1]["stations"];
+    if (k.genre >= 0 && k.genre < (S32)genres.size()) return genres[k.genre]["stations"];
     return none;
+}
+
+LLButton* WolfFloaterRadio::makeKey(S32 index)
+{
+    // The attributes floater_wolf_radio.xml gave genre_0..genre_12 up to w79: no skin image (the radio paints the key,
+    // drawButtons()), the label in key ink, dimmer when disabled.
+    const LLColor4 KEY_INK_DISABLED(0.45f, 0.38f, 0.30f, 1.f);
+    LLButton::Params bp;
+    bp.name(llformat("genre_%d", index));
+    bp.label(LLStringUtil::null);
+    bp.rect(LLRect(0, 26, 80, 0));
+    bp.follows.flags(FOLLOWS_LEFT | FOLLOWS_TOP);
+    bp.is_toggle(true);
+    bp.image_color(LLColor4(0.f, 0.f, 0.f, 0.f));
+    bp.image_color_disabled(LLColor4(0.f, 0.f, 0.f, 0.f));
+    bp.hover_glow_amount(0.f);
+    bp.label_shadow(false);
+    bp.use_ellipses(true);
+    bp.label_color(INK);
+    bp.label_color_selected(INK);
+    bp.label_color_disabled(KEY_INK_DISABLED);
+    bp.label_color_disabled_selected(KEY_INK_DISABLED);
+    LLButton* b = LLUICtrlFactory::create<LLButton>(bp);
+    b->setCommitCallback([this, index](LLUICtrl*, const LLSD&) { showGenre(index); });
+    addChild(b);
+    return b;
 }
 
 void WolfFloaterRadio::refreshGenres()
 {
     WolfRadioStations& st = WolfRadioStations::instance();
     const LLSD& genres = st.genres();
-    for (S32 i = 0; i < GENRE_BUTTONS; ++i)
+
+    // [WOLF STATIONS 2026-10-25] the keys, in order: Wolf (featured), Residents (the feed's "wolf" list; a feed from
+    // before 2026-10-25 has none, and then there is no key), then every genre the feed has.
+    mKeys.clear();
+    if (st.isLoaded())
     {
-        const bool have = st.isLoaded() && (i == 0 || i - 1 < (S32)genres.size());
+        mKeys.push_back(KeyInfo{ KeyKind::FEATURED, -1 });
+        if (st.hasWolf()) mKeys.push_back(KeyInfo{ KeyKind::RESIDENTS, -1 });
+        for (S32 g = 0; g < (S32)genres.size(); ++g) mKeys.push_back(KeyInfo{ KeyKind::GENRE, g });
+    }
+    const bool made_more = (S32)mGenre.size() < keyCount();
+    while ((S32)mGenre.size() < keyCount()) mGenre.push_back(makeKey((S32)mGenre.size()));
+    if (made_more)
+    {
+        // The keys go behind the other controls in the order the XUI had them (first key furthest back), so Tab
+        // still reaches them first; then the painted radio and the drag handle behind everything (postBuild).
+        for (S32 i = (S32)mGenre.size() - 1; i >= 0; --i) sendChildToBack(mGenre[i]);
+        sendChildToBack(mBackdrop);
+        if (getDragHandle()) sendChildToBack(getDragHandle());
+    }
+    for (S32 i = 0; i < (S32)mGenre.size(); ++i)
+    {
+        const bool have = i < keyCount();
         mGenre[i]->setVisible(have);
-        if (have) mGenre[i]->setLabel(i == 0 ? std::string("Wolf") : genres[i - 1]["name"].asString());
-        if (have && i > 0)
+        if (!have) continue;
+        const KeyInfo& k = mKeys[i];
+        if (k.kind == KeyKind::FEATURED)
         {
-            // the key may be too narrow for a long genre name; the tooltip always has all of it
+            mGenre[i]->setLabel(getString("featured_key"));
+            mGenre[i]->setToolTip(getString("featured_tip"));
+        }
+        else if (k.kind == KeyKind::RESIDENTS)
+        {
+            mGenre[i]->setLabel(getString("residents_key"));
+            mGenre[i]->setToolTip(getString("residents_tip"));
+        }
+        else
+        {
+            const std::string name = genres[k.genre]["name"].asString();
+            mGenre[i]->setLabel(name);
+            // the key may be too narrow for a long genre name ("Mixed / Various"); the tooltip always has all of it
             LLStringUtil::format_map_t args;
-            args["[GENRE]"] = genres[i - 1]["name"].asString();
+            args["[GENRE]"] = name;
             mGenre[i]->setToolTip(getString("genre_tip", args));
         }
     }
-    mGenre[0]->setToolTip(LLStringExplicit("The Wolf Territories stations, WTGR first"));
     layoutRadio();   // the keys are laid out by how many there are and how long their names are
     if (!st.isLoaded()) return;
 
-    // The genre picked last time (setting WolfRadioGenre, a radio_stations.php genre id).
+    // The key picked last time (setting WolfRadioGenre: a radio_stations.php genre id, FEATURED_ID or RESIDENTS_ID).
     const std::string last = gSavedSettings.getString("WolfRadioGenre");
     S32 index = 0;
-    for (S32 i = 0; i < (S32)genres.size() && i + 1 < GENRE_BUTTONS; ++i)
+    for (S32 i = 0; i < keyCount(); ++i)
     {
-        if (genres[i]["id"].asString() == last) index = i + 1;
+        const KeyInfo& k = mKeys[i];
+        if ((k.kind == KeyKind::RESIDENTS && last == RESIDENTS_ID) || (k.kind == KeyKind::GENRE && genres[k.genre]["id"].asString() == last))
+        {
+            index = i;
+        }
     }
     showGenre(index);
 }
 
 void WolfFloaterRadio::showGenre(S32 index)
 {
+    if (index < 0 || index >= keyCount()) index = 0;
     mGenreIndex = index;
-    for (S32 i = 0; i < GENRE_BUTTONS; ++i) mGenre[i]->setToggleState(i == index);
-    const LLSD& genres = WolfRadioStations::instance().genres();
-    gSavedSettings.setString("WolfRadioGenre", index == 0 ? std::string("featured") : genres[index - 1]["id"].asString());
+    for (S32 i = 0; i < (S32)mGenre.size(); ++i) mGenre[i]->setToggleState(i == index);
+    if (keyCount() > 0)
+    {
+        const KeyInfo& k = mKeys[index];
+        gSavedSettings.setString("WolfRadioGenre", k.kind == KeyKind::FEATURED ? std::string(FEATURED_ID)
+                                                   : k.kind == KeyKind::RESIDENTS ? std::string(RESIDENTS_ID)
+                                                   : WolfRadioStations::instance().genres()[k.genre]["id"].asString());
+    }
 
     mStations->deleteAllItems();
+    // [WOLF STATIONS 2026-10-25] an empty Residents list says so and how to be on it (shown while the list is empty:
+    // llscrolllistctrl.cpp comment_text, in the list's own ink); every other list has no comment.
+    const bool residents = keyCount() > 0 && mKeys[index].kind == KeyKind::RESIDENTS;
+    mStations->setCommentText(residents ? getString("residents_empty") : LLStringUtil::null);
     const LLSD& list = stationsOf(index);
     for (S32 i = 0; i < (S32)list.size(); ++i)
     {
@@ -761,7 +849,9 @@ void WolfFloaterRadio::updateDial()
     }
     const bool on_air = !WolfRadioStations::previewing().empty() && WolfRadioStations::previewing() == (*s)["url"].asString();
     mDialName = (on_air ? std::string("\xE2\x99\xAA ") : std::string()) + (*s)["name"].asString();
-    std::string genre = mGenreIndex == 0 ? (*s)["genre"].asString() : mGenre[mGenreIndex]->getLabelUnselected();
+    // featured and residents' stations carry their own genre's name (radio_stations.php rs_with_wolf; '' for none yet)
+    const bool own_genre = mGenreIndex < keyCount() && mKeys[mGenreIndex].kind != KeyKind::GENRE;
+    std::string genre = own_genre ? (*s)["genre"].asString() : mGenre[mGenreIndex]->getLabelUnselected();
     std::string detail = genre.empty() ? std::string("Wolf Territories") : genre;
     if (!(*s)["country"].asString().empty()) detail += "  \xC2\xB7  " + (*s)["country"].asString();
     if ((*s)["bitrate"].asInteger() > 0) detail += llformat("  \xC2\xB7  %d kbps", (*s)["bitrate"].asInteger());
@@ -836,6 +926,12 @@ void WolfFloaterRadio::onAddPreset()
     }
 }
 
+void WolfFloaterRadio::onAddStation()
+{
+    WolfRadioStations::openAddStationPage();
+    setStatus(getString("add_station_status"));
+}
+
 void WolfFloaterRadio::setStatus(const std::string& text, bool error)
 {
     mStatus->setText(text);
@@ -854,17 +950,12 @@ bool WolfFloaterRadio::onAir() const
 
 S32 WolfFloaterRadio::visibleGenres() const
 {
-    S32 n = 0;
-    for (S32 i = 0; i < GENRE_BUTTONS; ++i)
-    {
-        if (mGenre[i] && mGenre[i]->getVisible()) n = i + 1;   // refreshGenres() shows keys 0..n-1
-    }
-    return n;
+    return keyCount();   // refreshGenres() shows keys 0..keyCount()-1
 }
 
 void WolfFloaterRadio::layoutRadio()
 {
-    if (!mStations || !mStatus || !mListen || !mSetLand || !mAddPreset || !mGenre[GENRE_BUTTONS - 1])
+    if (!mStations || !mStatus || !mListen || !mSetLand || !mAddPreset || !mAddStation)
     {
         return;   // reshape() during construction, before postBuild()
     }
@@ -919,10 +1010,11 @@ void WolfFloaterRadio::layoutRadio()
         L.scale = LLRect(L.dial.mLeft + sp, L.dial.mTop - sp, L.dial.mRight - sp_right, L.dial.mTop - ll_round(L.dial.getHeight() * 0.56f));
     }
 
-    // the genre keys: two rows under the band
+    // the genre keys: as many rows under the band as they need (two until the lists load, as before)
     const S32 key_h = llclamp(ll_round(ch * 0.05f), 24, 32);
-    const LLRect keys(inner.mLeft, L.grille.mBottom - 14, inner.mRight, L.grille.mBottom - 14 - (2 * key_h + 6));
-    layoutKeys(keys);
+    const S32 key_rows = keyRows(iw);
+    const LLRect keys(inner.mLeft, L.grille.mBottom - 14, inner.mRight, L.grille.mBottom - 14 - (key_rows * key_h + (key_rows - 1) * KEY_GAP));
+    layoutKeys(keys, key_rows);
 
     // the bottom strip: knobs at the ends, the buttons and the status plate between them
     L.knob_r = (F32)llclamp(ll_round(ch * 0.045f), 20, 30);
@@ -967,27 +1059,43 @@ void WolfFloaterRadio::layoutRadio()
     // the station log card fills the rest
     L.card = LLRect(inner.mLeft, keys.mBottom - 14, inner.mRight, strip.mTop + 10);
     L.card_title = LLRect(L.card.mLeft + 10, L.card.mTop - 6, L.card.mRight - 10, L.card.mTop - 28);
+    {
+        // [WOLF STATIONS 2026-10-25] "Add your station..." at the right of the card's heading row: it adds to this log
+        const S32 h = L.card_title.getHeight() - 2;
+        const LLFontGL* f = fitFont((F32)h - 6.f, 1.e6f, { mAddStation->getLabelUnselected() }, MIN_KEY_FONT);
+        const S32 w = llmin(ll_round(f->getWidthF32(mAddStation->getLabelUnselected())) + 20, L.card_title.getWidth() / 3);
+        mAddStation->setFont(f);
+        mAddStation->setShape(LLRect(L.card_title.mRight - w, L.card_title.mTop, L.card_title.mRight, L.card_title.mTop - h));
+    }
     mStations->setShape(LLRect(L.card.mLeft + 10, L.card_title.mBottom - 4, L.card.mRight - 10, L.card.mBottom + 8));
 }
 
-void WolfFloaterRadio::layoutKeys(const LLRect& area)
+S32 WolfFloaterRadio::keyRows(S32 width) const
 {
     const S32 n = visibleGenres();
-    if (n <= 0) return;
-    constexpr S32 GAP = 6;
-    const S32 cols = (n + 1) / 2;
-    const S32 row_h = (area.getHeight() - GAP) / 2;
-    const S32 key_w = (area.getWidth() - (cols - 1) * GAP) / cols;
+    if (n <= 0) return 2;   // the space the keys will take once the lists load
+    const S32 fit = llmax(1, (width + KEY_GAP) / (MIN_KEY_W + KEY_GAP));   // keys a row can hold at MIN_KEY_W
+    return llclamp((n + fit - 1) / fit, 2, MAX_KEY_ROWS);   // never fewer than the two rows the radio always had
+}
+
+void WolfFloaterRadio::layoutKeys(const LLRect& area, S32 rows)
+{
+    const S32 n = visibleGenres();
+    if (n <= 0 || rows <= 0) return;
+    // the same number in every row but the last (n = 16 in 2 rows: 8 and 8; 13 in 2 rows: 7 and 6, as up to w79)
+    const S32 cols = (n + rows - 1) / rows;
+    const S32 row_h = (area.getHeight() - (rows - 1) * KEY_GAP) / rows;
+    const S32 key_w = (area.getWidth() - (cols - 1) * KEY_GAP) / cols;
     std::vector<std::string> labels;
     for (S32 i = 0; i < n; ++i)
     {
-        const S32 row = i < cols ? 0 : 1;
-        const S32 col = row == 0 ? i : i - cols;
-        const S32 in_row = row == 0 ? cols : n - cols;
-        // the second row is centred under the first
-        const S32 offset = (cols - in_row) * (key_w + GAP) / 2;
-        const S32 x = area.mLeft + offset + col * (key_w + GAP);
-        const S32 top = area.mTop - row * (row_h + GAP);
+        const S32 row = i / cols;
+        const S32 col = i % cols;
+        const S32 in_row = llmin(cols, n - row * cols);
+        // a shorter last row is centred under the ones above
+        const S32 offset = (cols - in_row) * (key_w + KEY_GAP) / 2;
+        const S32 x = area.mLeft + offset + col * (key_w + KEY_GAP);
+        const S32 top = area.mTop - row * (row_h + KEY_GAP);
         mGenre[i]->setShape(LLRect(x, top, x + key_w, top - row_h));
         labels.push_back(mGenre[i]->getLabelUnselected());
     }
@@ -1366,6 +1474,7 @@ void WolfFloaterRadio::drawButtons() const
     key(mListen, false);
     key(mSetLand, false);
     key(mAddPreset, false);
+    key(mAddStation, false);
 }
 
 void WolfFloaterRadio::drawCard() const
@@ -1384,12 +1493,14 @@ void WolfFloaterRadio::drawCard() const
     // the heading: "STATION LOG · ROCK"
     const LLRect& t = L.card_title;
     std::string title = mLogTitle;
-    if (mGenreIndex >= 0 && mGenreIndex < GENRE_BUTTONS && mGenre[mGenreIndex]->getVisible())
+    if (mGenreIndex >= 0 && mGenreIndex < keyCount())
     {
         title += "  \xC2\xB7  " + mGenre[mGenreIndex]->getLabelUnselected();
     }
     const LLFontGL* f = heightFont((F32)t.getHeight() - 2.f);
-    text(f, title, (F32)t.getCenterX(), (F32)t.getCenterY(), INK, LLFontGL::HCENTER, (F32)t.getWidth());
+    // centred on the card, clear of "Add your station..." at the right (and the same margin on the left)
+    const F32 clear = mAddStation->getVisible() ? (F32)(t.mRight - mAddStation->getRect().mLeft) + 8.f : 0.f;
+    text(f, title, (F32)t.getCenterX(), (F32)t.getCenterY(), INK, LLFontGL::HCENTER, llmax(20.f, (F32)t.getWidth() - 2.f * clear));
     untextured();
     line((F32)t.mLeft + 20.f, (F32)t.mBottom, (F32)t.mRight - 20.f, (F32)t.mBottom, 1.f, withAlpha(INK, 0.5f));
 }

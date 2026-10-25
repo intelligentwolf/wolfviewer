@@ -37,63 +37,21 @@
     <floater.string name="scale_unit">kHz</floater.string>
     <!-- tooltips for the drawn parts -->
     <floater.string name="genre_tip">Show the [GENRE] stations</floater.string>
+    <!-- [WOLF STATIONS 2026-10-25] the genre keys are made in code, one per key the station list has
+         (WolfFloaterRadio::refreshGenres(), makeKey()): Wolf, Residents, then every genre (14 from 2026-10-25, more may
+         come); they wrap onto more rows as needed (layoutKeys()). Residents is the residents' own stations, added at
+         wolf-grid.com/wolf-stations (radio_stations.php "wolf"); it is left out for a station list from before then. -->
+    <floater.string name="featured_key">Wolf</floater.string>
+    <floater.string name="featured_tip">The Wolf Territories stations: WTGR first, then stations run by our residents</floater.string>
+    <floater.string name="residents_key">Residents</floater.string>
+    <floater.string name="residents_tip">Every station run by a Wolf Territories resident that is on air now</floater.string>
+    <floater.string name="residents_empty">No resident stations are on air just now. Run an internet radio station? Press "Add your station..." above to put it on this radio.</floater.string>
+    <floater.string name="add_station_status">Opening wolf-grid.com/wolf-stations in your web browser. Sign in there with your Wolf Territories name; your station is listed once it passes the checks, and shows on this radio within the hour, from your next login.</floater.string>
     <floater.string name="eye_tip_on">Tuning eye: on air. You are listening to the station on the dial (only you hear it).</floater.string>
     <floater.string name="eye_tip_off">Tuning eye: off air. Press Listen, or double-click a station, to hear it.</floater.string>
     <floater.string name="volume_tip">Volume: [PERCENT]%. Click the right side or roll the wheel up to turn it up, the left side or wheel down to turn it down. This is the viewer's music volume.</floater.string>
     <floater.string name="volume_muted">Music is muted in the viewer's sound settings.</floater.string>
     <floater.string name="tuning_tip">Tuning: click the right side or roll the wheel up for the next station in the log, the left side or wheel down for the previous one.</floater.string>
-    <button follows="left|top" height="26" is_toggle="true" label="" layout="topleft" left="20" name="genre_0" top="230" width="80"
-     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" use_ellipses="true"
-     label_color="0.17 0.11 0.07 1" label_color_selected="0.17 0.11 0.07 1" label_color_disabled="0.45 0.38 0.30 1" label_color_disabled_selected="0.45 0.38 0.30 1"
-     tool_tip="Show this genre's stations" />
-    <button follows="left|top" height="26" is_toggle="true" label="" layout="topleft" left="106" name="genre_1" top="230" width="80"
-     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" use_ellipses="true"
-     label_color="0.17 0.11 0.07 1" label_color_selected="0.17 0.11 0.07 1" label_color_disabled="0.45 0.38 0.30 1" label_color_disabled_selected="0.45 0.38 0.30 1"
-     tool_tip="Show this genre's stations" />
-    <button follows="left|top" height="26" is_toggle="true" label="" layout="topleft" left="192" name="genre_2" top="230" width="80"
-     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" use_ellipses="true"
-     label_color="0.17 0.11 0.07 1" label_color_selected="0.17 0.11 0.07 1" label_color_disabled="0.45 0.38 0.30 1" label_color_disabled_selected="0.45 0.38 0.30 1"
-     tool_tip="Show this genre's stations" />
-    <button follows="left|top" height="26" is_toggle="true" label="" layout="topleft" left="278" name="genre_3" top="230" width="80"
-     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" use_ellipses="true"
-     label_color="0.17 0.11 0.07 1" label_color_selected="0.17 0.11 0.07 1" label_color_disabled="0.45 0.38 0.30 1" label_color_disabled_selected="0.45 0.38 0.30 1"
-     tool_tip="Show this genre's stations" />
-    <button follows="left|top" height="26" is_toggle="true" label="" layout="topleft" left="364" name="genre_4" top="230" width="80"
-     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" use_ellipses="true"
-     label_color="0.17 0.11 0.07 1" label_color_selected="0.17 0.11 0.07 1" label_color_disabled="0.45 0.38 0.30 1" label_color_disabled_selected="0.45 0.38 0.30 1"
-     tool_tip="Show this genre's stations" />
-    <button follows="left|top" height="26" is_toggle="true" label="" layout="topleft" left="450" name="genre_5" top="230" width="80"
-     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" use_ellipses="true"
-     label_color="0.17 0.11 0.07 1" label_color_selected="0.17 0.11 0.07 1" label_color_disabled="0.45 0.38 0.30 1" label_color_disabled_selected="0.45 0.38 0.30 1"
-     tool_tip="Show this genre's stations" />
-    <button follows="left|top" height="26" is_toggle="true" label="" layout="topleft" left="536" name="genre_6" top="230" width="80"
-     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" use_ellipses="true"
-     label_color="0.17 0.11 0.07 1" label_color_selected="0.17 0.11 0.07 1" label_color_disabled="0.45 0.38 0.30 1" label_color_disabled_selected="0.45 0.38 0.30 1"
-     tool_tip="Show this genre's stations" />
-    <button follows="left|top" height="26" is_toggle="true" label="" layout="topleft" left="20" name="genre_7" top="262" width="80"
-     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" use_ellipses="true"
-     label_color="0.17 0.11 0.07 1" label_color_selected="0.17 0.11 0.07 1" label_color_disabled="0.45 0.38 0.30 1" label_color_disabled_selected="0.45 0.38 0.30 1"
-     tool_tip="Show this genre's stations" />
-    <button follows="left|top" height="26" is_toggle="true" label="" layout="topleft" left="106" name="genre_8" top="262" width="80"
-     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" use_ellipses="true"
-     label_color="0.17 0.11 0.07 1" label_color_selected="0.17 0.11 0.07 1" label_color_disabled="0.45 0.38 0.30 1" label_color_disabled_selected="0.45 0.38 0.30 1"
-     tool_tip="Show this genre's stations" />
-    <button follows="left|top" height="26" is_toggle="true" label="" layout="topleft" left="192" name="genre_9" top="262" width="80"
-     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" use_ellipses="true"
-     label_color="0.17 0.11 0.07 1" label_color_selected="0.17 0.11 0.07 1" label_color_disabled="0.45 0.38 0.30 1" label_color_disabled_selected="0.45 0.38 0.30 1"
-     tool_tip="Show this genre's stations" />
-    <button follows="left|top" height="26" is_toggle="true" label="" layout="topleft" left="278" name="genre_10" top="262" width="80"
-     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" use_ellipses="true"
-     label_color="0.17 0.11 0.07 1" label_color_selected="0.17 0.11 0.07 1" label_color_disabled="0.45 0.38 0.30 1" label_color_disabled_selected="0.45 0.38 0.30 1"
-     tool_tip="Show this genre's stations" />
-    <button follows="left|top" height="26" is_toggle="true" label="" layout="topleft" left="364" name="genre_11" top="262" width="80"
-     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" use_ellipses="true"
-     label_color="0.17 0.11 0.07 1" label_color_selected="0.17 0.11 0.07 1" label_color_disabled="0.45 0.38 0.30 1" label_color_disabled_selected="0.45 0.38 0.30 1"
-     tool_tip="Show this genre's stations" />
-    <button follows="left|top" height="26" is_toggle="true" label="" layout="topleft" left="450" name="genre_12" top="262" width="80"
-     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" use_ellipses="true"
-     label_color="0.17 0.11 0.07 1" label_color_selected="0.17 0.11 0.07 1" label_color_disabled="0.45 0.38 0.30 1" label_color_disabled_selected="0.45 0.38 0.30 1"
-     tool_tip="Show this genre's stations" />
     <scroll_list column_padding="0" draw_heading="true" follows="left|top" height="200" layout="topleft" left="30" multi_select="false"
      name="stations" top="320" width="580" background_visible="false" draw_stripes="true" bg_stripe_color="0.17 0.11 0.07 0.07"
      fg_unselected_color="0.17 0.11 0.07 1" fg_selected_color="0.17 0.11 0.07 1" bg_selected_color="0.85 0.62 0.30 1"
@@ -115,7 +73,13 @@
      image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" use_ellipses="true"
      label_color="0.95 0.89 0.74 1" label_color_selected="0.95 0.89 0.74 1" label_color_disabled="0.62 0.54 0.42 1" label_color_disabled_selected="0.62 0.54 0.42 1"
      tool_tip="Keep this station in My presets on the Sound tab" />
+    <!-- [WOLF STATIONS 2026-10-25] at the right of the station log card's heading (layoutRadio() places it); Wolf
+         Territories logins only, as the page needs one (wolffloaterradio.cpp postBuild) -->
+    <button follows="left|top" height="20" label="Add your station..." layout="topleft" left="470" name="add_station_btn" top="290" width="140"
+     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" use_ellipses="true"
+     label_color="0.95 0.89 0.74 1" label_color_selected="0.95 0.89 0.74 1" label_color_disabled="0.62 0.54 0.42 1" label_color_disabled_selected="0.62 0.54 0.42 1"
+     tool_tip="Run an internet radio station? Add it to this radio at wolf-grid.com/wolf-stations (opens your web browser; sign in with your Wolf Territories name). It is listed once it passes the checks, and shows here within the hour, from your next login." />
     <text follows="left|top" height="36" layout="topleft" left="120" name="status" text_color="0.95 0.88 0.72 1" top="574" width="400" wrap="true">
-        Stations from Radio Browser (radio-browser.info), checked every 6 hours.
+        Stations from Wolf Territories residents and Radio Browser (radio-browser.info). Only stations on air are listed.
     </text>
 </floater>

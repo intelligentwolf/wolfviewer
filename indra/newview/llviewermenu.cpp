@@ -43,6 +43,7 @@
 #include "wolfweather.h"  // <WolfViewer> World > Weather
 #include "wolfspanscreens.h"  // <WolfViewer 2026-10-10/> Wolf World > Spread Across All Screens
 #include "wolfborder.h"   // [BORDER GUARD 2026-10-16/] Wolf World > Teleport Across the Border Ahead
+#include "wolfradiostations.h"   // [WOLF STATIONS 2026-10-25/] Wolf World > Music & Radio > Add Your Radio Station...
 // </WolfViewer>
 
 // linden library includes
@@ -13014,6 +13015,9 @@ void initialize_menus()
     });
     // [WOLF ADVENTURE P1 2026-10-16] Wolf World > Adventures...: the Roleplay window on Journal >
     // Adventures here (HUD_MESSAGES_V1.md §3.12).
+    // [WOLF STATIONS 2026-10-25] Wolf World > Music & Radio > Add Your Radio Station...: the residents' station page on
+    // wolf-grid.com in the web browser, as the Radio Stations floater's "Add your station..." (wolfradiostations.h).
+    commit.add("WolfRadio.AddStation", [](LLUICtrl*, const LLSD&) { WolfRadioStations::openAddStationPage(); });
     commit.add("WolfAdventure.ShowAdventures", [](LLUICtrl*, const LLSD&) { WolfFloaterRoleplay::showAdventures(); });
     // [BORDER GUARD 2026-10-16] Wolf World > Teleport Across the Border Ahead: the border banner's button (wolfborder.cpp)
     commit.add("WolfBorder.TeleportAcross", [](LLUICtrl*, const LLSD&) { WolfBorder::instance().teleportAcross(); });

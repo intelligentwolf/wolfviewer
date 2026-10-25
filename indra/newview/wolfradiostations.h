@@ -9,6 +9,10 @@
  * wolfstorm.app/php/radio_stations.php (built daily from Radio Browser, radio-browser.info):
  * 10 featured Wolf Territories stations (WTGR first) and 12 genres of 10 stations each.
  * The user's own 10 presets are the setting WolfMusicPresets.
+ *
+ * [WOLF STATIONS 2026-10-25] the feed also has "wolf": the residents' own stations (added at wolf-grid.com/wolf-stations,
+ * gridmanager wolfstations.php), approved and on air, oldest first (radio_stations.php rs_with_wolf). Featured is WTGR then
+ * at most one per resident, and the genres are any number (14 from 2026-10-25). A feed from before then has no "wolf".
  */
 
 #ifndef WOLF_RADIO_STATIONS_H
@@ -36,8 +40,18 @@ public:
 
     /// [{name, url, bitrate, country, homepage, genre}] — the 10 Wolf Territories stations.
     const LLSD& featured() const { return mFeatured; }
-    /// [{id, name, stations: [...]}]
+    /// [{id, name, stations: [...]}] - as many genres as the feed has
     const LLSD& genres() const { return mGenres; }
+    /// [{name, url, bitrate, country, homepage, genre, genre_id}] - the residents' own stations (may be empty).
+    const LLSD& wolf() const { return mWolf; }
+    /// The feed has a "wolf" list at all (false for a feed from before 2026-10-25).
+    bool hasWolf() const { return mHasWolf; }
+
+    /// Where residents add their own station (needs a Wolf Territories login on the site).
+    // Source: gridmanager/routes.php:62 "wolf-stations" => "wolfstations" (2026-10-25).
+    static constexpr const char* ADD_STATION_URL = "https://wolf-grid.com/wolf-stations";
+    /// Open ADD_STATION_URL in the web browser (asks first, as every external link does: llweb.cpp loadURLExternal).
+    static void openAddStationPage();
 
     /// Fired on the main loop when a load finishes (either way).
     boost::signals2::connection onChanged(const changed_signal_t::slot_type& cb) { return mChanged.connect(cb); }
@@ -65,6 +79,8 @@ private:
     std::string mLastError;
     LLSD mFeatured;
     LLSD mGenres;
+    LLSD mWolf;
+    bool mHasWolf = false;
     changed_signal_t mChanged;
     static std::string sPreviewURL;
 };

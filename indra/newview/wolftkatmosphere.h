@@ -128,6 +128,9 @@ namespace WolfTk
         /** [WolfViewer 2026-10-25] The directions (ECEF, this frame's) the sky's and the clouds' gain azimuths are measured from
          *  (brunetonRuntime.glsl wolfEepGainRef, cloudsF.glsl wolfEepCloudGainRef); set every frame (the ECEF frame moves). */
         void setEepGainRefs(const LLVector3& sky_ref_ecef, const LLVector3& cloud_ref_ecef) { mEepGainRef = sky_ref_ecef; mEepCloudGainRef = cloud_ref_ecef; }
+        /** [WolfViewer 2026-10-25] The night's light as the eye sees it (wolftk/nightLight.glsl wolfNight / wolfNightS): how far into
+         *  night (WolfEnvironmentRender::nightFactor, 0 = off) and the rods' saturation s at the frame's adaptation luminance. */
+        void setNightLight(F32 night, F32 s) { mNight = night; mNightS = s; }
         /** [WolfViewer 2026-10-13] The clouds' colour gains toward the EEP, the same grid (cloudsF.glsl wolfEepCloudGain[EEP_GAINS] /
          *  wolfEepCloudGainOn; wolfenvironmentrender.cpp measureCloudCover). */
         /** [WolfViewer round 16] the clouds' thinning (cloudsF.glsl wolfEepCloudThin): 0 = as marched, toward 1 more transparent */
@@ -200,6 +203,7 @@ namespace WolfTk
         LLColor3 mEepCloudGain[EEP_GAINS];   // read by the shaders only while mEepCloudGainOn
         bool     mEepCloudGainOn = false;
         LLVector3 mEepGainRef = LLVector3::z_axis, mEepCloudGainRef = LLVector3::z_axis;   // setEepGainRefs
+        F32      mNight = 0.f, mNightS = 1.f;   // setNightLight
         // [WolfViewer 2026-10-25] the WolfEepGains uniform block (brunetonRuntime.glsl; LLGLSLShader::UB_WOLF_EEP_GAINS): the sky's
         // gains, the clouds' gains and the probe directions, std140 vec4 each; uploaded when the gains change (bindEepBlock)
         mutable GLuint mEepBlock = 0;

@@ -64,6 +64,7 @@ uniform sampler3D higher_order_scattering_texture;
 #wolf_include "wolftk/cloudsParameters.glsl"   // takram: #include "parameters" (line 33)
 #wolf_include "wolftk/cloudsLight.glsl"   // [WolfViewer round 8] the sun or the moon as the clouds' light
 #wolf_include "wolftk/cloudsCommon.glsl"   // takram: #include "clouds" (line 34)
+#wolf_include "wolftk/nightLight.glsl"   // [WolfViewer 2026-10-25] the night's light as the eye sees it (Jimmy Olsen, #226)
 
 #if !defined(RECIPROCAL_PI4)
 #define RECIPROCAL_PI4 0.07957747154594767
@@ -1498,7 +1499,7 @@ void main() {
     // stock haze (atmosphericsFuncs.glsl), so the stock haze pass (pipeline.cpp doAtmospherics, hazeF.glsl) has already laid
     // the EEP's haze on every opaque surface, exactly as with WE off, and the forward shaders theirs; laying wolfLLHaze here
     // too would haze the ground twice. The composite still leaves its aerial perspective off (wolfEepNoAerial).
-    outputColor = clamp(wolfFiniteOrZero(color), vec4(-65504.0), vec4(65504.0));
+    outputColor = clamp(wolfFiniteOrZero(vec4(wolfNightLight(color.rgb), color.a)), vec4(-65504.0), vec4(65504.0));   // [2026-10-25] nightLight.glsl
     outputDepthVelocity = depthVelocity;
     #ifdef SHADOW_LENGTH
     outputShadowLength = clamp(wolfFiniteOrZero(vec4(shadowLength * METER_TO_LENGTH_UNIT)).r, 0.0, 65504.0);
@@ -1523,7 +1524,7 @@ void main() {
         color.a = 1.0 - (1.0 - color.a) * (1.0 - llh.a);
       }
     }
-    outputColor = clamp(wolfFiniteOrZero(color), vec4(-65504.0), vec4(65504.0));
+    outputColor = clamp(wolfFiniteOrZero(vec4(wolfNightLight(color.rgb), color.a)), vec4(-65504.0), vec4(65504.0));   // [2026-10-25] nightLight.glsl
     outputDepthVelocity = depthVelocity;
     #ifdef SHADOW_LENGTH
     outputShadowLength = clamp(wolfFiniteOrZero(vec4(shadowLength * METER_TO_LENGTH_UNIT)).r, 0.0, 65504.0);
@@ -1544,7 +1545,7 @@ void main() {
   color.a = color.a * (1.0 - haze.a) + haze.a;
   #endif // HAZE
 
-  outputColor = clamp(wolfFiniteOrZero(color), vec4(-65504.0), vec4(65504.0));
+  outputColor = clamp(wolfFiniteOrZero(vec4(wolfNightLight(color.rgb), color.a)), vec4(-65504.0), vec4(65504.0));   // [2026-10-25] nightLight.glsl
   outputDepthVelocity = depthVelocity;
   #ifdef SHADOW_LENGTH
   outputShadowLength = clamp(wolfFiniteOrZero(vec4(shadowLength * METER_TO_LENGTH_UNIT)).r, 0.0, 65504.0);

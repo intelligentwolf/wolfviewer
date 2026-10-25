@@ -278,25 +278,32 @@
         <!-- ═══════════════════ SCENES ═══════════════════ -->
         <panel label="Scenes" name="tab_scenes" layout="topleft" follows="all" height="576" width="592">
             <text text_color="0.95 0.92 0.84 1" follows="left|top" height="32" layout="topleft" left="6" name="scenes_intro" top="4" width="574" word_wrap="true">Ready-made scenes. You place each NPC yourself: stand where it should be and press Rez. AI talk is off in every scene.</text>
-            <scroll_list follows="left|top" height="120" layout="topleft" left="6" name="scene_list" top="40" width="574" multi_select="false" draw_heading="true" column_padding="4">
+            <scroll_list follows="left|top" height="104" layout="topleft" left="6" name="scene_list" top="40" width="574" multi_select="false" draw_heading="true" column_padding="4">
                 <scroll_list.columns name="title" label="Scene" width="300" />
                 <scroll_list.columns name="npcs" label="NPCs" width="260" />
             </scroll_list>
-            <text text_color="0.95 0.92 0.84 1" follows="left|top" height="48" layout="topleft" left="6" name="scene_blurb" top="166" width="574" word_wrap="true" />
+            <!-- before Start: each character is placed by hand, and how many steps that is (Jimmy Olsen 2026-10-25) -->
+            <text text_color="0.95 0.92 0.84 1" follows="left|top" font="SansSerifBold" height="18" layout="topleft" left="6" name="scene_howto" top="148" width="574" word_wrap="true" />
+            <text text_color="0.95 0.92 0.84 1" follows="left|top" height="46" layout="topleft" left="6" name="scene_blurb" top="168" width="574" word_wrap="true" />
             <text follows="left|top" height="30" layout="topleft" left="6" name="scene_cost" top="214" width="428" word_wrap="true" text_color="0.80 0.82 0.86 1" />
             <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Start this scene" layout="topleft" left="440" name="scene_start" top="218" width="140" />
             <panel follows="left|top" height="320" layout="topleft" left="0" name="scene_panel" top="250" width="592" visible="false" background_visible="false" border="false">
-                <text text_color="0.95 0.92 0.84 1" follows="left|top" font.style="BOLD" height="36" layout="topleft" left="6" name="scene_step" top="4" width="574" word_wrap="true" />
-                <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="6" name="scene_piece" top="44" width="574" />
-                <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="6" name="scene_avatar_lbl" top="71" width="120">Your WolfAvatar</text>
-                <combo_box follows="left|top" height="22" layout="topleft" left="130" name="scene_avatar" top="68" width="300" />
-                <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="6" name="scene_name_lbl" top="99" width="120">Name</text>
-                <line_editor follows="left|top" height="22" layout="topleft" left="130" max_length_chars="48" name="scene_name" top="96" width="300" />
-                <text text_color="0.95 0.92 0.84 1" follows="left|top" height="32" layout="topleft" left="6" name="scene_none" top="126" width="574" word_wrap="true" />
-                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Make one in WolfAvatars" layout="topleft" left="6" name="scene_make" top="160" width="200" visible="false" />
-                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Stop the scene" layout="topleft" left="6" name="scene_stop" top="200" width="130" />
-                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Skip this one" layout="topleft" left="300" name="scene_skip" top="200" width="130" />
-                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="26" label="Rez" layout="topleft" left="460" name="scene_rez" top="199" width="120"
+                <!-- the step: a header, its instruction, what it is, and the progress of every piece -->
+                <text text_color="0.95 0.92 0.84 1" follows="left|top" font="SansSerifLargeBold" height="22" layout="topleft" left="6" name="scene_step" top="4" width="574" />
+                <text text_color="0.95 0.92 0.84 1" follows="left|top" height="32" layout="topleft" left="6" name="scene_instr" top="28" width="574" word_wrap="true" />
+                <text text_color="0.80 0.82 0.86 1" follows="left|top" height="16" layout="topleft" left="6" name="scene_piece" top="62" width="574" />
+                <text text_color="0.80 0.82 0.86 1" follows="left|top" height="32" layout="topleft" left="6" name="scene_progress" top="82" width="574" word_wrap="true" />
+                <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="6" name="scene_avatar_lbl" top="125" width="120">Your WolfAvatar</text>
+                <combo_box follows="left|top" height="22" layout="topleft" left="130" name="scene_avatar" top="122" width="300" />
+                <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="6" name="scene_name_lbl" top="153" width="120">Name</text>
+                <line_editor follows="left|top" height="22" layout="topleft" left="130" max_length_chars="48" name="scene_name" top="150" width="300" />
+                <text text_color="0.95 0.92 0.84 1" follows="left|top" height="32" layout="topleft" left="6" name="scene_none" top="178" width="574" word_wrap="true" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Make one in WolfAvatars" layout="topleft" left="6" name="scene_make" top="210" width="200" visible="false" />
+                <!-- next to Rez: "Rezzing...", the confirmation, or why it was not rezzed (caution colour) -->
+                <text text_color="0.95 0.92 0.84 1" follows="left|top" height="34" layout="topleft" left="6" name="scene_result" top="240" width="574" word_wrap="true" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Stop the scene" layout="topleft" left="6" name="scene_stop" top="281" width="130" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Skip this one" layout="topleft" left="220" name="scene_skip" top="281" width="120" />
+                <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="26" label="Rez" layout="topleft" left="360" name="scene_rez" top="280" width="220"
                  tool_tip="It appears 2 m in front of you; its home is where you stand" />
             </panel>
         </panel>

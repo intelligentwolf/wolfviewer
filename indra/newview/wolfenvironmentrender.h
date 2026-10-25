@@ -123,6 +123,11 @@ public:
     /** The frame's pre-exposure (Filament Exposure::exposure(EV100)): everything the Wolf sky and the scene's
      *  light write is luminance (cd/m2) x this. */
     static F32 exposure();
+    /** [WolfViewer 2026-10-25] How far into night the frame is, 0..1: 0 with the sun 12 deg or less under the horizon (civil
+     *  and nautical twilight, AMS Glossary of Meteorology "twilight"), 1 from 18 deg under (astronomical night), smooth between.
+     *  Weights the night vision (postDeferredTonemap.glsl wolfNightVision), the moon's light on the scene and the moon's
+     *  aureole (skyF.glsl); 0 while the native sky is off. */
+    static F32 nightFactor();
     /** The direct light on the scene as the deferred shaders take it: the sun's illuminance at the camera
      *  (three-geospatial getSunLightColor) / pi, pre-exposed; the clouds' shadow takes it away per pixel
      *  (wolfTkCloudShadow in the scene shaders). */

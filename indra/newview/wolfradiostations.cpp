@@ -20,6 +20,7 @@
 #include "llviewercontrol.h"
 #include "llviewerparcelmgr.h"
 #include "llviewerregion.h"
+#include "llweb.h"
 #include "roles_constants.h"
 #include "wolfgrid.h"
 
@@ -78,9 +79,15 @@ void WolfRadioStations::loadCoro()
     {
         self.mFeatured = reply["featured"];
         self.mGenres = reply["genres"];
+        // [WOLF STATIONS 2026-10-25] radio_stations.php rs_with_wolf: "wolf" is always an array in a feed from
+        // 2026-10-25 on (empty when no resident station is on air); an older feed has no such key.
+        self.mHasWolf = reply["wolf"].isArray();
+        self.mWolf = self.mHasWolf ? reply["wolf"] : LLSD::emptyArray();
         self.mLoaded = true;
         LL_INFOS("WolfRadio") << "radio stations: " << self.mFeatured.size() << " featured, "
-                              << self.mGenres.size() << " genres (" << reply["updated"].asString() << ")" << LL_ENDL;
+                              << self.mGenres.size() << " genres, "
+                              << (self.mHasWolf ? llformat("%d", (S32)self.mWolf.size()) : std::string("no")) << " residents' ("
+                              << reply["updated"].asString() << ")" << LL_ENDL;
     }
     else
     {
@@ -89,6 +96,12 @@ void WolfRadioStations::loadCoro()
         LL_WARNS("WolfRadio") << "radio stations: " << self.mLastError << LL_ENDL;
     }
     self.mChanged();
+}
+
+// static
+void WolfRadioStations::openAddStationPage()
+{
+    LLWeb::loadURLExternal(ADD_STATION_URL);
 }
 
 // ---- presets -----------------------------------------------------------------------------

@@ -2270,6 +2270,14 @@
                 <menu_item_call.on_click function="Floater.Show" parameter="wolf_radio" />
                 <menu_item_call.on_visible function="WolfGrid.IsWolfTerritories" />
             </menu_item_call>
+            <!-- [WOLF STATIONS 2026-10-25] Paul's rule: every Wolf feature under Wolf World. Residents add their own station
+             to the radio at wolf-grid.com/wolf-stations (gridmanager wolfstations.php; the Radio Stations floater's
+             "Add your station..." opens the same page: wolfradiostations.cpp openAddStationPage). The page needs a Wolf
+             Territories login, so the item has the same gate as Radio Stations above. -->
+            <menu_item_call label="Add Your Radio Station..." name="WolfAddRadioStation">
+                <menu_item_call.on_click function="WolfRadio.AddStation" />
+                <menu_item_call.on_visible function="WolfGrid.IsWolfTerritories" />
+            </menu_item_call>
             <menu_item_separator>
                 <menu_item_separator.on_visible function="WolfGrid.IsWolfTerritories" />
             </menu_item_separator>

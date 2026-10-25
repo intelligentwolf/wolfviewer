@@ -65,6 +65,7 @@ uniform sampler3D higher_order_scattering_texture;
 #wolf_include "wolftk/brunetonRuntime.glsl"
 #wolf_include "wolftk/coreRaySphereIntersection.glsl"
 #wolf_include "wolftk/seaGlint.glsl"   // [WolfViewer round 11] the sun's glint on the open sea (Cox-Munk)
+#wolf_include "wolftk/nightLight.glsl"   // [WolfViewer 2026-10-25] the night's light as the eye sees it (Jimmy Olsen, #226)
 
 // Source: sky.frag:23-24; sky.vert:6-9 (camera, frame)
 uniform vec3 sunDirection;          // ECEF
@@ -115,6 +116,7 @@ uniform float uDrawSunDisc;         // 0 in reflection-probe faces: LL lights wi
 uniform float uSeaProbe;            // 1: the sea mirrors LL's default reflection probe (the sky and the clouds as the
 uniform samplerCubeArray reflectionProbes;   // world's water reflects them, llreflectionmapmanager.cpp probe 0)
 uniform float uMoonSkyScale;        // the moon's illuminance above the atmosphere / the sun's (0: not drawn)
+uniform float uNight;               // [2026-10-25] WolfEnvironmentRender::nightFactor (0 day and civil / nautical twilight)
 uniform float uNightSky;            // the natural night-sky background, cd/m2 x pre-exposure (0 = none)
 uniform float wolf_aurora;
 vec3 wolfAuroraRadiance(vec3 dir);  // wolfAuroraF.glsl: linear sRGB cd/m2 (east, north, up)
@@ -292,8 +294,19 @@ vec3 wolfTkSkyRadiance(
 // The sky in one direction with the Wolf Environment's additions (bodies, nebula, the natural night sky, the
 // aurora, the moon), all seen through the same transmittance: for the view ray and for the sea's mirrored ray.
 // `originKm` ECEF km, `rayDirection` ECEF, `dirWorld` the same direction in the world (east, north, up).
-vec3 wolfSkyWithBodies(vec3 originKm, vec3 rayDirection, vec3 dirWorld, float shadowLength, float fragmentAngle)
+//
+// [WolfViewer 2026-10-25] `aureole` (out): by night (uNight), the moon's aerosol (single-Mie) light - its forward lobe, the glow
+// round the moon - taken OUT of the returned colour, for the caller to add after the EEP gain. Jimmy Olsen (Tromso, the moon
+// up): "the moon itself is a small disc", no glow. The gains drive the sky to the stock EEP sky (probeSky), and the stock sky
+// has no glow at all by night: its haze glow is 0 whenever sun_moon_glow_factor < 1 ([S] class1/deferred/skyV.glsl,
+// wolfeepreference.cpp skyHaze), and that factor is moon_brightness x 0.25 while the moon lights it ([S] llsettingssky.cpp:
+// 1318-1322). So every gain node near the moon pressed the moon's aureole flat (the grid is dense round the light since the
+// 2026-10-25 seam fix). The probe now measures the sky without it and it is added outside the gain - the moon's scattered
+// light as the atmosphere gives it, in the frame's exposure - while the rest of the sky still matches the EEP. Day and twilight
+// (uNight 0): as before, every term under the gain.
+vec3 wolfSkyWithBodies(vec3 originKm, vec3 rayDirection, vec3 dirWorld, float shadowLength, float fragmentAngle, out vec3 aureole)
 {
+    aureole = vec3(0.0);
     vec3 transmittance;
     vec3 color = wolfTkSkyRadiance(originKm, rayDirection, shadowLength, sunDirection, fragmentAngle, transmittance);
     // [WolfViewer] the moonlit air: scattering is linear in its light source, and Bruneton's tables hold the sky
@@ -305,6 +318,11 @@ vec3 wolfSkyWithBodies(vec3 originKm, vec3 rayDirection, vec3 dirWorld, float sh
     {
         vec3 trMoon;
         color += GetSkyRadiance(originKm, rayDirection, 0.0, uMoonDirECEF, trMoon) * uMoonSkyScale;
+        if (uNight > 0.0)
+        {
+            aureole = wolfSkyMieLuminance(originKm, rayDirection, uMoonDirECEF) * (uMoonSkyScale * clamp(uNight, 0.0, 1.0));
+            color -= aureole;
+        }
     }
     float cover = 0.0;
     color += wolfBodies(dirWorld, transmittance, cover);
@@ -323,6 +341,7 @@ vec3 wolfSkyWithBodies(vec3 originKm, vec3 rayDirection, vec3 dirWorld, float sh
         vec3 tr2;
         vec3 air = GetSkyRadiance(originKm, rayDirection, shadowLength, sunDirection, tr2);
         color = mix(color, air + moon.rgb, moon.a);
+        aureole *= 1.0 - moon.a;   // behind the disc
     }
     return color;
 }
@@ -550,8 +569,10 @@ void main()
             // the sky the probe would hold: this program's sky in the mirrored direction with ITS gain (the sky branch below,
             // seen from the sea point), then the EEP's moon over the corrected sky, in the order the sky branch applies them
             vec3 seaPointKm = ATMOSPHERE.bottom_radius * surfaceNormal;
-            vec3 mirroredSky = wolfSkyWithBodies(seaPointKm, mirrorDir, mirrorWorld, 0.0, fragmentAngle);
+            vec3 mirroredAureole;
+            vec3 mirroredSky = wolfSkyWithBodies(seaPointKm, mirrorDir, mirrorWorld, 0.0, fragmentAngle, mirroredAureole);
             if (wolfEepDomeGain > 0.5) mirroredSky *= wolfEepGainDirCore(seaPointKm, mirrorDir);
+            mirroredSky += mirroredAureole;   // [2026-10-25] the moon's aureole outside the gain, as in the sky branch
             mirrored = wolfEepMoon(mirrorWorld, mirroredSky);
         }
         vec3 body = waterFogColorLinear * RECIPROCAL_PI * (sunIrradiance + skyIrradiance);
@@ -579,9 +600,16 @@ void main()
     }
     else
     {
-        color = wolfSkyWithBodies(vCameraPosition, rayDirection, dirWorld, shadowLength, fragmentAngle) * domeGain;
+        vec3 aureole;
+        color = wolfSkyWithBodies(vCameraPosition, rayDirection, dirWorld, shadowLength, fragmentAngle, aureole) * domeGain;
+        // [2026-10-25] the moon's aureole outside the gain (wolfSkyWithBodies); not in a probe pixel - the gains are measured without it
+        if (uProbe < 0.5) color += aureole;
     }
 
+    // [WolfViewer 2026-10-25] the sky and the sea are the night's light: as the eye sees it (nightLight.glsl); not in a probe pixel
+    // (the gains are measured against the stock sky as it is), and before the EEP's moon disc and the meteors, which are drawn as
+    // LL draws them
+    if (uProbe < 0.5) color = wolfNightLight(color);
     // the EEP's moon over the corrected sky (not in a probe: the probes measure the sky alone, as the reference is)
     if (uProbe < 0.5 && !(intersectsGround && distanceToGround >= 0.0)) color = wolfEepMoon(dirWorld, color);
     // the shooting stars, over the sky only (not in a probe, not on the sea)

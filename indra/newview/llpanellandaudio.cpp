@@ -101,6 +101,9 @@ bool LLPanelLandAudio::postBuild()
     // button to set on the land another button that says Radio Stations". The land's stream is a
     // plain line (Enter commits it), with copy and clear; below it the Radio Stations floater, the
     // 10 Wolf Territories stations and the user's own 10 presets (wolfradiostations.h).
+    // [WOLF STATIONS 2026-10-25] the 10 are the feed's "featured": WTGR, then at most one station per resident
+    // (radio_stations.php rs_with_wolf, never more than ROWS), then genre tops. The residents' full list and how to add
+    // a station are in the Radio Stations floater (its Residents key and "Add your station...").
     mMusicURLEdit = getChild<LLLineEditor>("music_url");
     mMusicURLEdit->setCommitOnFocusLost(false);
     childSetCommitCallback("music_url", onCommitAny, this);

@@ -640,6 +640,39 @@ Luminance3 GetSkyLuminance(
       transmittance) * SKY_SPECTRAL_RADIANCE_TO_LUMINANCE;
 }
 
+// [WolfViewer 2026-10-25] the single-Mie (aerosol) term of GetSkyLuminance alone, no light shafts: GetSkyRadiance's
+// single_mie_scattering x (1 + wolfEepMieScale) x MiePhaseFunction(g, nu) x the EEP gain, as that function computes it (the
+// same steps as GetSkyRadiance above, its shadow_length == 0 branch). The Cornette-Shanks phase with g = 0.8 is the forward
+// lobe - the aureole round its light (the moon's by night: skyF.glsl wolfSkyWithBodies).
+Luminance3 wolfSkyMieLuminance(Position camera, const Direction view_ray, const Direction sun_direction)
+{
+  Length r = length(camera);
+  Length rmu = dot(camera, view_ray);
+  vec3 eepGain = wolfEepGainDir(camera, view_ray);
+  Length distance_to_top_atmosphere_boundary = -rmu -
+      SafeSqrt(rmu * rmu - r * r + ATMOSPHERE.top_radius * ATMOSPHERE.top_radius);
+  if (distance_to_top_atmosphere_boundary > 0.0 * m) {
+    camera = camera + view_ray * distance_to_top_atmosphere_boundary;
+    r = ATMOSPHERE.top_radius;
+    rmu += distance_to_top_atmosphere_boundary;
+  } else if (r > ATMOSPHERE.top_radius) {
+    return Luminance3(0.0);
+  }
+  Number mu = rmu / r;
+  Number mu_s = dot(camera, sun_direction) / r;
+  Number nu = dot(view_ray, sun_direction);
+  #ifdef GROUND
+  bool ray_r_mu_intersects_ground = RayIntersectsGround(ATMOSPHERE, r, mu);
+  #else // GROUND
+  bool ray_r_mu_intersects_ground = false;
+  #endif // GROUND
+  IrradianceSpectrum single_mie_scattering;
+  GetCombinedScattering(ATMOSPHERE, scattering_texture, single_mie_scattering_texture,
+      r, mu, mu_s, nu, ray_r_mu_intersects_ground, single_mie_scattering);
+  return eepGain * single_mie_scattering * (1.0 + wolfEepMieScale) *
+      MiePhaseFunction(ATMOSPHERE.mie_phase_function_g, nu) * SKY_SPECTRAL_RADIANCE_TO_LUMINANCE;
+}
+
 // Source: three-geospatial packages/atmosphere/src/shaders/bruneton/runtime.glsl:427 GetSkyLuminanceToPoint
 Luminance3 GetSkyLuminanceToPoint(
     const Position camera, const Position point, const Length shadow_length,

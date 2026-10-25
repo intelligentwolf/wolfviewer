@@ -1115,6 +1115,11 @@ void Atmosphere::setRuntimeUniforms(LLGLSLShader& sh, F32 pre_exposure, bool uni
     if (lth >= 0) glUniform1f(lth, mEepCloudThin);
     const GLint lm = location(sh.mProgramObject, "wolfEepMieScale");
     if (lm >= 0) glUniform1f(lm, mEepMie - 1.f);
+    // [WolfViewer 2026-10-25] wolftk/nightLight.glsl (WolfEnvironmentRender: the night's light as the eye sees it)
+    const GLint ln = location(sh.mProgramObject, "wolfNight");
+    if (ln >= 0) glUniform1f(ln, mNight);
+    const GLint lns = location(sh.mProgramObject, "wolfNightS");
+    if (lns >= 0) glUniform1f(lns, mNightS);
     }
     bindEepBlock();   // [WolfViewer 2026-10-25] the gain grids' uniform block, for every program this is given to
     // AtmosphereMaterialBase.ts:140-144 the tables (single Mie: none, combined)

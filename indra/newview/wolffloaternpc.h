@@ -560,6 +560,14 @@ private:
     S32 mScene = -1;                // the scene being placed (-1 = none)
     S32 mSceneStepN = 0;            // 0-based step: one per NPC (a piece of count 5 is 5 steps)
     S32 mSceneSteps = 0;
+    LLTextBox* mSceneHowto = nullptr;     // before Start: "You place each character yourself... N steps."
+    LLTextBox* mSceneInstr = nullptr;     // the step's instruction ("Stand behind the shop counter, then press Rez")
+    LLTextBox* mSceneProgress = nullptr;  // every step: done ticked, this one marked, the rest still to come
+    LLTextBox* mSceneResult = nullptr;    // next to Rez: rezzing / the confirmation / why it was not rezzed
+    std::vector<U8> mSceneMarks;          // per step: 0 to do, 1 rezzed, 2 skipped
+    U32 mSceneRun = 0;                    // one per Start: a create answered after Stop or a new Start moves nothing on
+    void setSceneResult(const std::string& text, bool problem);
+    std::string sceneStepLabel(S32 step) const;   // "Townsfolk 2" (a piece of count 1: just its label)
 };
 
 #endif // WOLF_FLOATER_NPC_H

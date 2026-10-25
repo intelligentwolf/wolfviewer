@@ -19,6 +19,12 @@
  * The real controls (the genre keys, the station list, Listen, Set on land, Add to my presets, the
  * status line) stay ordinary XUI widgets laid over the drawing, so the keyboard, focus and
  * tooltips work as before; the drawing scales with the window, which is now resizable.
+ *
+ * [WOLF STATIONS 2026-10-25] Paul: residents add their own stations (wolf-grid.com/wolf-stations, gridmanager
+ * wolfstations.php) and the genres grow (radio_stations.php: 14 since "Mixed / Various" and "Talk"). The genre keys
+ * are made in code, one per key the feed gives (no fixed count): Wolf (featured), then Residents (the feed's "wolf"
+ * list, only when the feed has that key), then every genre; they wrap onto as many rows as they need. An
+ * "Add your station..." button on the station log card opens the residents' page in the web browser.
  */
 
 #ifndef WOLF_FLOATER_RADIO_H
@@ -50,9 +56,17 @@ public:
     void reshape(S32 width, S32 height, bool called_from_parent = true) override;
 
 private:
-    static constexpr S32 GENRE_BUTTONS = 13;     // the Wolf Territories stations + 12 genres
+    // What a genre key shows: the featured stations, the residents' stations, or one genre of the feed.
+    enum class KeyKind { FEATURED, RESIDENTS, GENRE };
+    struct KeyInfo
+    {
+        KeyKind kind = KeyKind::FEATURED;
+        S32 genre = -1;         // index into WolfRadioStations::genres() for KeyKind::GENRE
+    };
 
     void refreshGenres();
+    LLButton* makeKey(S32 index);      // a new ivory genre key (the XUI genre_N buttons up to w79, as code)
+    S32 keyCount() const { return (S32)mKeys.size(); }
     void showGenre(S32 index);
     const LLSD& stationsOf(S32 index) const;
     const LLSD* selectedStation() const;
@@ -60,6 +74,7 @@ private:
     void onListen();
     void onSetLand();
     void onAddPreset();
+    void onAddStation();
     void setStatus(const std::string& text, bool error = false);
     void updateDial();
 
@@ -78,7 +93,7 @@ private:
         LLRect dial;            // the dial glass, inside its chrome bezel
         LLRect scale;           // the LW / MW / SW scales on the glass (the needle's travel)
         LLRect card;            // the printed station log card
-        LLRect card_title;      // its printed heading
+        LLRect card_title;      // its printed heading (the row it sits in; the heading is centred clear of add_station)
         F32 knob_r = 0.f;
         F32 vol_x = 0.f, vol_y = 0.f;     // Volume knob centre
         F32 tune_x = 0.f, tune_y = 0.f;   // Tuning knob centre
@@ -86,7 +101,8 @@ private:
         LLRect status_plate;    // the dark maker's plate the status line sits on
     };
     void layoutRadio();
-    void layoutKeys(const LLRect& area);
+    void layoutKeys(const LLRect& area, S32 rows);
+    S32 keyRows(S32 width) const;      // how many rows of genre keys a key area this wide needs
 
     // Painted by WolfRadioBackdrop::draw() under the widgets (floater-local coordinates).
     void drawRadio();
@@ -110,12 +126,14 @@ private:
     LLRect knobRect(Knob knob) const;
     bool onAir() const;
 
-    LLButton* mGenre[GENRE_BUTTONS] = {};
+    std::vector<LLButton*> mGenre;     // the keys made so far (children of the floater); the first keyCount() show
+    std::vector<KeyInfo> mKeys;        // what each showing key is, from the last load
     LLScrollListCtrl* mStations = nullptr;
     LLTextBox* mStatus = nullptr;
     LLButton* mListen = nullptr;
     LLButton* mSetLand = nullptr;
     LLButton* mAddPreset = nullptr;
+    LLButton* mAddStation = nullptr;
     WolfRadioBackdrop* mBackdrop = nullptr;
     S32 mGenreIndex = 0;
     boost::signals2::scoped_connection mChanged;

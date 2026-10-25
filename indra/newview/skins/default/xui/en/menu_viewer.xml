@@ -1888,6 +1888,13 @@
             <menu_item_check.on_check function="Floater.Visible" parameter="wolf_compass" />
             <menu_item_check.on_click function="Floater.Toggle" parameter="wolf_compass" />
         </menu_item_check>
+        <!-- [SUITCASE 2026-10-25] Buzzy: a way to turn off moving things out of My Suitcase after a hypergrid trip
+             (wolfsuitcase.cpp bring_home, WolfSuitcaseBringHome, on by default). Every grid - the trip home happens on
+             whichever grid this viewer logged in to. -->
+        <menu_item_check label="Move Suitcase Arrivals Home" name="WolfSuitcaseBringHome">
+            <menu_item_check.on_check function="CheckControl" parameter="WolfSuitcaseBringHome" />
+            <menu_item_check.on_click function="ToggleControl" parameter="WolfSuitcaseBringHome" />
+        </menu_item_check>
         <!-- <WolfViewer 2026-10-11> Paul: Invisible Mode - appear offline to IMs and friend requests
              (wolfinvisible.cpp tells each Wolf region; the login screen's Wolf World menu has the same
              switch). [WOLF GRID GATE] gone (not greyed) off Wolf Territories. -->

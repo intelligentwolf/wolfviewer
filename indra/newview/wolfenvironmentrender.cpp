@@ -576,6 +576,55 @@ namespace
         return LLVector3(F.cameraECEF * 1.0e-3);
     }
 
+    // [WolfViewer 2026-10-25] THE EEP GAIN GRID (brunetonRuntime.glsl wolfGainGrid; Jimmy Olsen, W79: a dark seam from the zenith
+    // to the horizon, a yellowish patch, a white strip over the sea at dusk with the moon up). The stock sky is symmetric about
+    // its LIGHT's vertical, not the sun's, and its light is the moon while the sun is down; the grid was measured on one side of
+    // the sun and mirrored, and stopped 2 deg above the horizon. Now its azimuths run all the way round the stock light and its
+    // last row is the true horizon. The rows and columns are the shader's (brunetonRuntime.glsl E[] / A[]).
+    constexpr S32 EEP_GAIN_ROWS = WolfTk::Atmosphere::EEP_GAIN_ROWS, EEP_GAIN_COLS = WolfTk::Atmosphere::EEP_GAIN_COLS;
+    const F32 EEP_GAIN_ELEV_DEG[EEP_GAIN_ROWS - 1] = { 90.f, 40.f, 20.f, 10.f, 5.f, 2.f };   // and the horizon row (eepHorizonRowDeg)
+    // signed, counter-clockwise about the up (as the shader's atan(dot(cross(ref, view), up), dot(ref, view))); -180 is also +180
+    const F32 EEP_GAIN_AZ_DEG[EEP_GAIN_COLS] = { -180.f, -90.f, -50.f, -25.f, -10.f, -3.f, 3.f, 10.f, 25.f, 50.f, 90.f };
+    // the directions (world) the sky's and the clouds' gains were last measured round (probeSky / measureCloudCover)
+    LLVector3 sEepSkyRefWorld = LLVector3::z_axis, sEepCloudRefWorld = LLVector3::z_axis;
+
+    /** The stock sky's light, world (x east, y north, z up): what its dome is symmetric about. Source: [S] llsettingssky.cpp:1353-1368
+     *  getLightDirection (the sun while it is up, :1324-1328 z >= 0; else the moon while it is up; else straight down - no
+     *  azimuth, the sun's is used), as wolfeepreference.cpp lights() / lightDirDome read it. F.sunWorld / moonWorld are the EEP's
+     *  own (updateLight: getSunDirection / getMoonDirection). */
+    LLVector3 eepLightWorld(const LLSettingsSky::ptr_t& psky, const Frame& F)
+    {
+        if (psky && !psky->getIsSunUp() && psky->getIsMoonUp()) return F.moonWorld;
+        return F.sunWorld;
+    }
+
+    /** The grid's horizon row, degrees: 0.1 deg above the true horizon seen from the camera (the tangent to the sea sphere, dip =
+     *  asin(sqrt((r - R)(r + R)) / r), r = R + the camera's height: placeOnPlanet). brunetonRuntime.glsl wolfEepHorizonRowMu. */
+    F32 eepHorizonRowDeg(const Frame& F)
+    {
+        const F64 R = F.bottomRadius, r = R + llmax((F64)F.cameraHeight, 0.0);
+        const F64 dip = asin(llclamp(sqrt(llmax((r - R) * (r + R), 0.0)) / r, 0.0, 1.0));
+        return (F32)(0.1 - dip * (180.0 / F_PI));
+    }
+
+    /** The direction (world) of the grid's node (row, col) round the light `ref` (world). */
+    LLVector3 eepGainNodeDir(const LLVector3& ref, S32 row, S32 col, F32 horizonDeg)
+    {
+        // compass azimuth (from north, clockwise); the shader's azimuth runs the other way (counter-clockwise about the up)
+        const F32 refAz = (ref.mV[VX] * ref.mV[VX] + ref.mV[VY] * ref.mV[VY] > 1e-12f) ? atan2f(ref.mV[VX], ref.mV[VY]) : 0.f;
+        const F32 el = (row < EEP_GAIN_ROWS - 1 ? EEP_GAIN_ELEV_DEG[row] : horizonDeg) * DEG_TO_RAD;
+        const F32 az = refAz - EEP_GAIN_AZ_DEG[col] * DEG_TO_RAD;
+        return LLVector3(cosf(el) * sinf(az), cosf(el) * cosf(az), sinf(el));
+    }
+
+    /** A direction's signed azimuth from `ref` (world), degrees, -180 .. 180, counter-clockwise about the up (the shader's). */
+    F32 eepGainAzDeg(const LLVector3& ref, const LLVector3& dir)
+    {
+        const F32 rx = ref.mV[VX], ry = ref.mV[VY], vx = dir.mV[VX], vy = dir.mV[VY];
+        if (rx * rx + ry * ry <= 1e-12f || vx * vx + vy * vy <= 1e-12f) return 0.f;
+        return atan2f(rx * vy - ry * vx, rx * vx + ry * vy) * RAD_TO_DEG;   // (ref x dir) . up, ref . dir
+    }
+
     /**
      * [WolfViewer 2026-10-13] A colour's hue: scaled to unit luminance, each channel held to 3 x the luminance (then the
      * luminance made 1 again) so a saturated colour cannot throw one channel's light to infinity; black gives white.
@@ -1476,6 +1525,8 @@ S32 WolfEnvironmentRender::tier()
     // the frame's state, latched with the tier: everything this frame draws reads the same light and the same
     // answer to skyActive() (frameUpdate, mid-frame, prepares the next one in sNext)
     sFrame = sNext;
+    // [WolfViewer 2026-10-25] the gain grids' light, in this frame's ECEF (the frame is rebuilt every frame: placeOnPlanet)
+    if (sAtmos) sAtmos->setEepGainRefs(toECEF(sFrame, sEepSkyRefWorld), toECEF(sFrame, sEepCloudRefWorld));
     const WolfEnvDoc& d = WolfEnvironmentState::instance().active();
     sGpu.active = sGpu.tierValue >= 1 && d.mValid && d.mMode == WolfEnvDoc::WOLF && sharedSky() && sAtmos && sAtmos->ready() && sFrame.valid;
     return sGpu.tierValue;
@@ -1774,20 +1825,20 @@ namespace
 {
     // [WolfViewer 2026-10-13] THE EEP DRIVES THE SKY: the sky's gains toward the stock EEP sky (brunetonRuntime.glsl wolfEepGain),
     // and the last probe's numbers for the verification log (WolfEnvironmentTrace)
-    constexpr S32 NPROBE = WolfTk::Atmosphere::EEP_GAINS;   // 6 heights x 6 azimuths (brunetonRuntime.glsl wolfEepGainCore)
+    constexpr S32 NPROBE = WolfTk::Atmosphere::EEP_GAINS;   // 7 heights x 11 azimuths round the stock light (EEP_GAIN_ROWS / _COLS)
     LLColor3 sGain[NPROBE];   // set white before first use (probeSky)
     bool sGainValid = false;
     LLVector3 sProbeDir[NPROBE];
     LLColor3 sProbeRaw[NPROBE], sProbeTarget[NPROBE];
-    const F32 PROBE_ELEV_DEG[6] = { 90.f, 40.f, 20.f, 10.f, 5.f, 2.f };   // brunetonRuntime.glsl wolfEepGainCore E[]
-    const F32 PROBE_AZ_DEG[6] = { 3.f, 10.f, 25.f, 50.f, 90.f, 180.f };    // .. A[], from the sun's azimuth
+    F32 sProbeHorizonDeg = 0.f;   // the horizon row of the last reading (the verification log)
 
     /**
-     * Renders the native dome (the program `sh`, every uniform already set for this frame) at 36 directions with the
+     * Renders the native dome (the program `sh`, every uniform already set for this frame) at the grid's directions with the
      * gains off, reads them back, and sets each gain to the stock sky's value there (WolfEepReference::skyLinear) over the
      * native one, per channel - the frame is in the EEP's linear units (updateLight's exposure), so the two compare
-     * directly. The grid is dense round the sun (3 deg off it at the nearest, missing its disc). Four times a second; the
-     * gains ease over half a second in log space (a cut - teleport, a sky switched by hand - takes them at once).
+     * directly. The grid is dense round the stock sky's light on both sides (3 deg off it at the nearest, missing its disc;
+     * eepLightWorld) and reaches the true horizon. Twice a second; the gains ease over half a second in log space (a cut -
+     * teleport, a sky switched by hand, the stock light passing from the sun to the moon - takes them at once).
      */
     void probeSky(LLGLSLShader& sh)
     {
@@ -1810,20 +1861,15 @@ namespace
         static bool s_whiteInit = false;
         if (!s_whiteInit) { for (S32 i = 0; i < NPROBE; ++i) sGain[i] = LLColor3::white; s_whiteInit = true; }
 
-        // the 36 directions (world: x east, y north, z up)
-        const LLVector3 sun = sFrame.sunWorld;
-        const F32 sunAz = (fabsf(sun.mV[VX]) + fabsf(sun.mV[VY]) > 1e-4f) ? atan2f(sun.mV[VX], sun.mV[VY]) : 0.f;   // from north, clockwise
-        for (S32 r = 0; r < 6; ++r)
+        // the grid's directions (world: x east, y north, z up) round the stock sky's light, its last row on the true horizon
+        const LLVector3 ref = eepLightWorld(psky, sFrame);
+        const F32 horizonDeg = eepHorizonRowDeg(sFrame);
+        for (S32 r = 0; r < EEP_GAIN_ROWS; ++r)
         {
-            const F32 el = PROBE_ELEV_DEG[r] * DEG_TO_RAD;
-            for (S32 c = 0; c < 6; ++c)
-            {
-                const F32 az = sunAz + PROBE_AZ_DEG[c] * DEG_TO_RAD;
-                sProbeDir[r * 6 + c].set(cosf(el) * sinf(az), cosf(el) * cosf(az), sinf(el));
-            }
+            for (S32 c = 0; c < EEP_GAIN_COLS; ++c) sProbeDir[r * EEP_GAIN_COLS + c] = eepGainNodeDir(ref, r, c, horizonDeg);
         }
 
-        static LLStaticHashedString s_probe("uProbe"), s_pdir("uProbeDir"), s_dgain("wolfEepDomeGain");
+        static LLStaticHashedString s_probe("uProbe"), s_dgain("wolfEepDomeGain");
         // [WolfViewer 2026-10-13] Paul: "every time I move the cloud jerks" - a glReadPixels into client memory waits for the
         // GPU to finish the frame so far. The working probe is read into a pixel-pack buffer instead and mapped at the NEXT
         // probe, half a second later, when the copy is long done: no wait. (The verification render below, trace only, still
@@ -1831,6 +1877,8 @@ namespace
         static GLuint s_pbo = 0;
         static bool s_pending = false;
         static LLVector3 s_pendDir[NPROBE];
+        static LLVector3 s_pendRef = LLVector3::z_axis;   // the light the reading in flight was taken round
+        static F32 s_pendHorizon = 0.f;
         if (!s_pbo)
         {
             glGenBuffers(1, &s_pbo);
@@ -1841,7 +1889,7 @@ namespace
         auto render = [&](bool gainsOn, F32* out)   // out == nullptr: into the pack buffer
         {
             sh.uniform1f(s_probe, 1.f);
-            sh.uniform3fv(s_pdir, NPROBE, sProbeDir[0].mV);
+            sAtmos->setEepProbeDirs(sProbeDir);   // [2026-10-25] skyF.glsl wolfEepProbeDir, in the WolfEepGains uniform block
             sh.uniform1f(s_dgain, gainsOn ? 1.f : 0.f);   // the dome's gain is on its whole colour (skyF.glsl wolfEepDomeGain)
             GLint vp[4] = { 0, 0, 0, 0 };
             glGetIntegerv(GL_VIEWPORT, vp);   // flush() rebinds the frame's target at its full size: a snapshot tile's viewport is kept
@@ -1884,11 +1932,14 @@ namespace
         }
         LLVector3 readDir[NPROBE];
         for (S32 i = 0; i < NPROBE; ++i) readDir[i] = s_pendDir[i];
+        const LLVector3 readRef = s_pendRef;
+        const F32 readHorizon = s_pendHorizon;
         render(false, nullptr);
         for (S32 i = 0; i < NPROBE; ++i) s_pendDir[i] = sProbeDir[i];
+        s_pendRef = ref; s_pendHorizon = horizonDeg;
         s_pending = true;
 
-        // VERIFICATION (WolfEnvironmentTrace, every 15 s): the same 36 directions rendered WITH this frame's gains, through
+        // VERIFICATION (WolfEnvironmentTrace, every 15 s): the same grid directions rendered WITH this frame's gains, through
         // the stock display chain, against the stock sky's - what the screen shows, measured, not computed
         static LLCachedControl<bool> trace(gSavedSettings, "WolfEnvironmentTrace", false);
         static F64 s_nextVerify = 0.0;
@@ -1905,7 +1956,9 @@ namespace
             for (S32 i = 0; i < NPROBE; ++i)
             {
                 const LLColor3 measured(pv[i * 4 + 0], pv[i * 4 + 1], pv[i * 4 + 2]);
-                o << "\n  sky " << llformat("%2d deg up, %3d deg from the sun", (S32)PROBE_ELEV_DEG[i / 6], (S32)PROBE_AZ_DEG[i % 6])
+                const S32 row = i / EEP_GAIN_COLS;
+                const F32 elDeg = row < EEP_GAIN_ROWS - 1 ? EEP_GAIN_ELEV_DEG[row] : sProbeHorizonDeg;
+                o << "\n  sky " << llformat("%5.1f deg up, %4d deg from the light", elDeg, (S32)EEP_GAIN_AZ_DEG[i % EEP_GAIN_COLS])
                   << "  EEP " << d8(WolfEepReference::display(path, sProbeTarget[i]))
                   << "  native " << d8(WolfEepReference::display(path, measured))
                   << "  (physical before gain " << d8(WolfEepReference::display(path, sProbeRaw[i])) << ")";
@@ -1936,8 +1989,12 @@ namespace
         if (!haveReading) return;
         static LLVector3d s_lastCam; static bool s_haveCam = false;
         const LLVector3d cam = gAgent.getPosGlobalFromAgent(LLViewerCamera::getInstance()->getOrigin());
-        const bool cut = !sGainValid || dt <= 0.f || (s_haveCam && (cam - s_lastCam).magVec() > 300.0);
+        // the stock light passing from the sun to the moon (or back) moves the whole grid: a cut too (5 deg or more at once)
+        const bool refJump = readRef * sEepSkyRefWorld < cosf(5.f * DEG_TO_RAD);
+        const bool cut = !sGainValid || dt <= 0.f || refJump || (s_haveCam && (cam - s_lastCam).magVec() > 300.0);
         s_lastCam = cam; s_haveCam = true;
+        sEepSkyRefWorld = readRef;   // the gains below are this reading's: their azimuths are from its light
+        sProbeHorizonDeg = readHorizon;
         const F32 k = cut ? 1.f : 1.f - expf(-dt / 0.5f);
         for (S32 i = 0; i < NPROBE; ++i)
         {
@@ -2028,6 +2085,8 @@ namespace
         static S32 s_pw = 0, s_ph = 0;
         static U32 s_seq = 0;   // the reading in flight (the stock probe's read-back is matched to it)
         static glm::mat4 s_pinv(1.f);
+        static LLVector3 s_pref = LLVector3::z_axis;   // [2026-10-25] the stock light the reading in flight was taken round
+        static F32 s_phor = 0.f;                       // .. and its horizon row (eepHorizonRowDeg)
         const size_t bytes = (size_t)w * h * 4 * sizeof(F32);
         if (!s_pbo[0]) glGenBuffers(2, s_pbo);
         if (bytes != s_pboBytes)
@@ -2058,6 +2117,8 @@ namespace
             glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
             if (ok) { rw = s_pw; rh = s_ph; inv = s_pinv; }
         }
+        const LLVector3 readRef = s_pref;
+        const F32 readHorizon = s_phor;
         // [round 16] the stock layer drawn for that reading (renderStockCloudProbe), same size, same camera a frame later
         std::vector<F32> stock;
         if (rw > 0 && sStockPending && sStockSeqRead == s_seq && sStockPW == rw && sStockPH == rh && sStockPbo
@@ -2083,17 +2144,27 @@ namespace
         // ... and have the sky pass draw the stock layer for it (renderStockCloudProbe)
         ++s_seq; sStockSeqWanted = s_seq; sStockDue = true; sStockW = w; sStockH = h;
         s_pinv = glm::inverse(f.proj * f.view);   // clip -> the LL agent frame (z up), for that reading
+        s_pref = eepLightWorld(psky, sFrame); s_phor = eepHorizonRowDeg(sFrame);
         if (rw <= 0) return;
+        // [WolfViewer 2026-10-25] the stock light passing from the sun to the moon (or back, 5 deg or more at once) turns the whole
+        // grid: start again, as after a teleport (the first reading below sets every node). Slow motion is followed reading by reading.
+        if (sCloudGainValid && readRef * sEepCloudRefWorld < cosf(5.f * DEG_TO_RAD))
+        {
+            sCloudGainValid = false;
+            LLColor3 white[NPROBE]; for (S32 i = 0; i < NPROBE; ++i) white[i] = LLColor3::white;
+            sAtmos->setEepCloudGains(white, false);
+        }
+        sEepCloudRefWorld = readRef;
 
-        // [WolfViewer 2026-10-13] the clouds' colour per direction, on the sky's 6 x 6 grid (heights 90 40 20 10 5 2 deg x azimuths
-        // 3 10 25 50 90 180 deg from the sun): each covered texel 2 deg or more up counts to its nearest node; the stock cloud
-        // colour is taken once per node, at the node's own direction. (Coverage still counts only 20 deg and up.)
-        static const F32 GE[6] = { 90.f, 40.f, 20.f, 10.f, 5.f, 2.f }, GA[6] = { 3.f, 10.f, 25.f, 50.f, 90.f, 180.f };
-        const LLVector3 sun = sFrame.sunWorld;
-        const F32 sunAz = atan2f(sun.mV[VX], sun.mV[VY]);
+        // [WolfViewer 2026-10-13] the clouds' colour per direction, on the sky's grid: each covered texel counts to its nearest
+        // node; the stock cloud colour is taken once per node, at the node's own direction. (Coverage still counts only 20 deg
+        // and up.) [2026-10-25] The sky's 7 x 11 grid round the stock light (eepGainNodeDir; Jimmy Olsen's seam): texels from the
+        // horizon row up, azimuths signed and all the way round.
+        F32 GE[EEP_GAIN_ROWS];
+        for (S32 k = 0; k < EEP_GAIN_ROWS; ++k) GE[k] = k < EEP_GAIN_ROWS - 1 ? EEP_GAIN_ELEV_DEG[k] : readHorizon;
         LLColor3 nodeNative[NPROBE], nodeTarget[NPROBE]; S32 nodeCount[NPROBE] = {}; S8 nodeState[NPROBE] = {};
         LLColor3 nSum, tSum; S32 nCol = 0;
-        const F32 sin20 = sinf(20.f * DEG_TO_RAD), sin2 = sinf(2.f * DEG_TO_RAD);
+        const F32 sin20 = sinf(20.f * DEG_TO_RAD), sinLow = sinf(readHorizon * DEG_TO_RAD);
         S32 n = 0, covered = 0;
         // [WolfViewer 2026-10-13, round 16] Paul: "big gap in the clouds ... EEP is very different". The stock layer measured on the
         // screen (SCREEN verify, Iceland night, 13 readings) is a VEIL: opacity 0.2 - 0.6 over half the sky and more, never
@@ -2115,7 +2186,7 @@ namespace
                 const glm::vec2 ndc(2.f * (x + 0.5f) / rw - 1.f, 2.f * (y + 0.5f) / rh - 1.f);
                 glm::vec4 pn = inv * glm::vec4(ndc, -1.f, 1.f), pf = inv * glm::vec4(ndc, 1.f, 1.f);
                 const glm::vec3 dir = glm::normalize(glm::vec3(pf) / pf.w - glm::vec3(pn) / pn.w);
-                if (dir.z < sin2) continue;
+                if (dir.z < sinLow) continue;
                 const F32 sa = haveStock && llfinite(stock[q + 3]) ? llclamp(stock[q + 3], 0.f, 1.f) : 0.f;   // the stock alpha1
                 if (dir.z >= sin20)
                 {
@@ -2131,11 +2202,13 @@ namespace
                 const bool stockCloud = haveStock && sa >= VEIL && llfinite(stock[q]);
                 if (!nativeCloud && !stockCloud) continue;
                 const F32 el = asinf(llclamp(dir.z, -1.f, 1.f)) * RAD_TO_DEG;
-                F32 daz = fabsf(atan2f(dir.x, dir.y) - sunAz) * RAD_TO_DEG;
-                if (daz > 180.f) daz = 360.f - daz;
+                const F32 daz = eepGainAzDeg(readRef, LLVector3(dir.x, dir.y, dir.z));
+                // the nearest column round the circle (-180 is also +180)
+                auto around = [](F32 a, F32 b) { const F32 d = fabsf(a - b); return d > 180.f ? 360.f - d : d; };
                 S32 bi = 0, bj = 0;
-                for (S32 k = 1; k < 6; ++k) { if (fabsf(el - GE[k]) < fabsf(el - GE[bi])) bi = k; if (fabsf(daz - GA[k]) < fabsf(daz - GA[bj])) bj = k; }
-                const S32 node = bi * 6 + bj;
+                for (S32 k = 1; k < EEP_GAIN_ROWS; ++k) { if (fabsf(el - GE[k]) < fabsf(el - GE[bi])) bi = k; }
+                for (S32 k = 1; k < EEP_GAIN_COLS; ++k) { if (around(daz, EEP_GAIN_AZ_DEG[k]) < around(daz, EEP_GAIN_AZ_DEG[bj])) bj = k; }
+                const S32 node = bi * EEP_GAIN_COLS + bj;
                 if (stockCloud)
                 {
                     // the stock fragment's colour as its G-buffer holds it (the probe has the same formats), linearised
@@ -2153,8 +2226,7 @@ namespace
                 }
                 if (nodeState[node] == 0)
                 {
-                    const F32 ce = GE[bi] * DEG_TO_RAD, ca = sunAz + GA[bj] * DEG_TO_RAD;
-                    nodeState[node] = WolfEepReference::cloudColourLinear(psky, LLVector3(cosf(ce) * sinf(ca), cosf(ce) * cosf(ca), sinf(ce)), nodeTarget[node]) ? 1 : -1;
+                    nodeState[node] = WolfEepReference::cloudColourLinear(psky, eepGainNodeDir(readRef, bi, bj, readHorizon), nodeTarget[node]) ? 1 : -1;
                 }
                 if (nodeState[node] < 0) continue;
                 const LLColor3 own = LLColor3(col[q], col[q + 1], col[q + 2]) * (1.f / col[q + 3]);
@@ -2238,16 +2310,18 @@ namespace
             LLColor3 mean; for (S32 i = 0; i < NPROBE; ++i) mean += s_gridTarget[i];
             mean *= 1.f / NPROBE;
             LLColor3 smoothed[NPROBE];
-            for (S32 r = 0; r < 6; ++r)
+            // [2026-10-25] the columns go all the way round: each has a neighbour on both sides
+            constexpr S32 C = EEP_GAIN_COLS;
+            for (S32 r = 0; r < EEP_GAIN_ROWS; ++r)
             {
-                for (S32 cc = 0; cc < 6; ++cc)
+                for (S32 cc = 0; cc < C; ++cc)
                 {
                     LLColor3 nsum; S32 nn = 0;
-                    if (r > 0) { nsum += s_gridTarget[(r - 1) * 6 + cc]; ++nn; }
-                    if (r < 5) { nsum += s_gridTarget[(r + 1) * 6 + cc]; ++nn; }
-                    if (cc > 0) { nsum += s_gridTarget[r * 6 + cc - 1]; ++nn; }
-                    if (cc < 5) { nsum += s_gridTarget[r * 6 + cc + 1]; ++nn; }
-                    smoothed[r * 6 + cc] = s_gridTarget[r * 6 + cc] * 0.5f + nsum * (0.5f / nn);
+                    if (r > 0) { nsum += s_gridTarget[(r - 1) * C + cc]; ++nn; }
+                    if (r < EEP_GAIN_ROWS - 1) { nsum += s_gridTarget[(r + 1) * C + cc]; ++nn; }
+                    nsum += s_gridTarget[r * C + (cc + C - 1) % C]; ++nn;
+                    nsum += s_gridTarget[r * C + (cc + 1) % C]; ++nn;
+                    smoothed[r * C + cc] = s_gridTarget[r * C + cc] * 0.5f + nsum * (0.5f / nn);
                 }
             }
             for (S32 i = 0; i < NPROBE; ++i)

@@ -1014,6 +1014,7 @@ bool LLGLSLShader::mapUniforms()
         "GLTFJoints",       // UB_GLTF_JOINTS
         "GLTFNodes",        // UB_GLTF_NODES
         "GLTFMaterials",    // UB_GLTF_MATERIALS
+        "WolfEepGains",     // UB_WOLF_EEP_GAINS
     };
 
     llassert(LL_ARRAY_SIZE(ubo_names) == NUM_UNIFORM_BLOCKS);

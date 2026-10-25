@@ -328,9 +328,9 @@ vec3 wolfSkyWithBodies(vec3 originKm, vec3 rayDirection, vec3 dirWorld, float sh
 }
 
 // [WolfViewer 2026-10-13] probe mode (wolfenvironmentrender.cpp probeSky): pixel i of the probe target shows the sky toward
-// uProbeDir[i] (world: east, north, up), with no light shafts, written to every target the program writes
+// wolfEepProbeDir[i] (world: east, north, up; brunetonRuntime.glsl's WolfEepGains block since 2026-10-25), with no light
+// shafts, written to every target the program writes
 uniform float uProbe;
-uniform vec3 uProbeDir[36];
 // [WolfViewer 2026-10-13] the EEP gains on the dome's WHOLE colour (the air, the sun, the moon, the bodies, the night sky,
 // the aurora), not only the air's in-scatter: the verification table showed the zenith 60 % off its target with the gain
 // on the air alone - another term overhead was outside it. The C++ turns the runtime gain off for this program
@@ -460,7 +460,7 @@ void main()
 {
     // this pixel's direction from the camera's own matrices (the screen triangle, wolfEnvSkyV.glsl), or a probe's
     vec3 dirWorld;
-    if (uProbe > 0.5) dirWorld = normalize(uProbeDir[clamp(int(gl_FragCoord.x), 0, 35)]);
+    if (uProbe > 0.5) dirWorld = normalize(wolfEepProbeDir[clamp(int(gl_FragCoord.x), 0, WOLF_EEP_GAINS - 1)].xyz);
     else
     {
         vec2 ndc = (gl_FragCoord.xy - viewportOrigin) / resolution * 2.0 - 1.0;
@@ -487,7 +487,8 @@ void main()
     float fragmentAngle = length(dRDdx + dRDdy) / length(rayDirection);
 
     // [WolfViewer 2026-10-20] the EEP gain for this view ray (wolfEepDomeGain, above). It is measured on the SKY (probeSky in
-    // wolfenvironmentrender.cpp: stock sky / this dome's sky at 36 directions, every one 2 deg or more above the horizon), so
+    // wolfenvironmentrender.cpp: stock sky / this dome's sky on the grid round the stock light, brunetonRuntime.glsl
+    // wolfGainGrid - since 2026-10-25 down to 0.1 deg above the true horizon, every node still sky, not sea), so
     // it is applied once, to sky light only: the sky's whole colour below, and on the sea only the air's in-scatter in front
     // of it - as the world's water takes it (its aerial perspective gains the in-scatter alone: brunetonRuntime.glsl
     // wolfSkyRadianceToPointRel, eepGain x radiance; waterF.glsl wolfTkAerialPerspective). Miss Zenn's white sea (Hyena Hills,
@@ -495,7 +496,7 @@ void main()
     // whose faces this same program draws with the gain already on (renderSkyDome) - the reflected sky took the gain twice,
     // the sea's own body and glint (physically lit, in the frame's units like the world's water body) took it once with no
     // reason. At night the stock / physical ratio near the horizon is large, and its square clipped the sea to white.
-    vec3 domeGain = wolfEepDomeGain > 0.5 ? wolfEepGainDirCore(vCameraPosition, rayDirection, sunDirection) : vec3(1.0);
+    vec3 domeGain = wolfEepDomeGain > 0.5 ? wolfEepGainDirCore(vCameraPosition, rayDirection) : vec3(1.0);
 
     // ── the sea to the true horizon: sky.frag:56-86 (GROUND_ALBEDO) with a water surface; else the sky ──
     // Source: sky.frag:58-61 the ray meets the planet (the sea is the bottom of the atmosphere)
@@ -550,7 +551,7 @@ void main()
             // seen from the sea point), then the EEP's moon over the corrected sky, in the order the sky branch applies them
             vec3 seaPointKm = ATMOSPHERE.bottom_radius * surfaceNormal;
             vec3 mirroredSky = wolfSkyWithBodies(seaPointKm, mirrorDir, mirrorWorld, 0.0, fragmentAngle);
-            if (wolfEepDomeGain > 0.5) mirroredSky *= wolfEepGainDirCore(seaPointKm, mirrorDir, sunDirection);
+            if (wolfEepDomeGain > 0.5) mirroredSky *= wolfEepGainDirCore(seaPointKm, mirrorDir);
             mirrored = wolfEepMoon(mirrorWorld, mirroredSky);
         }
         vec3 body = waterFogColorLinear * RECIPROCAL_PI * (sunIrradiance + skyIrradiance);

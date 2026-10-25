@@ -174,52 +174,97 @@ IrradianceSpectrum GetScattering(
 // sky -> verify it is correct"). wolfenvironmentrender.cpp renders the dome at 36 probe directions with the gains off
 // (skyF.glsl uProbe), reads them back and compares each with the stock renderer's sky in the same direction
 // (wolfeepreference.cpp skyLinear: [S] skyV.glsl / skyF.glsl / softenLightF.glsl transcribed); the gain is their ratio, per
-// channel. The grid: six heights (90, 40, 20, 10, 5, 2 deg) x six azimuths from the sun's (3, 10, 25, 50, 90, 180 deg) -
-// dense round the sun, where the stock sky's glow (glow.x / glow.z) and the physical sky's own differ most (round 4: the
-// eight probes all 30 deg or more off the sun left that glow unmatched). Between the probes the physical sky's own shape
-// is kept and the gains are interpolated bilinearly in (sin elevation, azimuth from the sun); below 2 deg - the land's
-// haze, the air in front of the clouds - the 2 deg row. wolfEepGainOn 0 (a program the uniforms never reach, the probe
-// itself): untouched.
-uniform vec3 wolfEepGain[36];   // [height row x 6 + azimuth column]
-uniform float wolfEepGainOn;
-// the 6 x 6 grid interpolation shared by the sky's and the clouds' gains (cloudsF.glsl wolfEepCloudGain)
-vec3 wolfGainGrid(const vec3 G[36], const Number mu, const Number azDeg)
+// channel. Between the probes the physical sky's own shape is kept and the gains are interpolated bilinearly in (sin
+// elevation, azimuth). wolfEepGainOn 0 (a program the uniforms never reach, the probe itself): untouched.
+//
+// [WolfViewer 2026-10-25] Jimmy Olsen (W79, Wolf Territories welcome, dusk / night, the moon up): a dark seam from the zenith
+// to the horizon, a yellowish glow patch, and a hard white strip on the horizon over the sea. Three faults of the grid:
+//  - it was keyed to the SUN and folded: six azimuths 3 .. 180 deg measured on ONE side of the sun only (sunAz + az), and
+//    applied to both sides by |azimuth| (acos). The stock sky is symmetric about its LIGHT's vertical, and its light is the
+//    moon whenever the sun is down and the moon up ([S] llsettingssky.cpp:1353-1368 getLightDirection; the glow
+//    haze_glow = (1 - dot(n, lightnorm)) x glow.x ^ glow.z, [S] skyV.glsl, wolfeepreference.cpp skyHaze). With the moon on
+//    the measured side, the stock moon glow measured there was painted, mirrored, onto the other side of the sun (a patch
+//    with no moon in it); the gain's slope turned over at the sun's and the anti-sun's meridians (a crease from the zenith
+//    to the horizon), and within 3 deg of the sun's meridian it was held flat (a strip).
+//  - below the lowest row (2 deg) the 2 deg gain was held while the physical sky's in-scatter keeps rising to the horizon,
+//    and from above the sea further to the true horizon below the level (the limb). At night that gain is large (skyF.glsl
+//    domeGain: Miss Zenn's white sea), and it turned the last two degrees above the sea white.
+// Now: azimuths from the stock sky's light (wolfEepGainRef, ECEF: the sun while it is up, else the moon while it is up,
+// else the sun - wolfenvironmentrender.cpp eepLightWorld), signed, measured all the way round (-180 .. 180, eleven
+// columns, dense on BOTH sides of the light), and a seventh row on the true horizon (0.1 deg above the limb from where the
+// ray starts), so the gain is measured where it is used.
+#define WOLF_EEP_GAIN_ROWS 7
+#define WOLF_EEP_GAIN_COLS 11
+#define WOLF_EEP_GAINS 77
+// [WolfViewer 2026-10-25] the grids live in a uniform block, not the default block: three 77-entry arrays there cost 231 of
+// the 256 vec4 a fragment shader is only guaranteed (GL 4.1 core, MAX_FRAGMENT_UNIFORM_COMPONENTS 1024) and pushed skyF / cloudsF
+// past it. Bound to LLGLSLShader::UB_WOLF_EEP_GAINS at link (llglslshader.cpp, as ReflectionProbes - the Apple-safe way), filled
+// by wolftkatmosphere.cpp (std140: one vec4 per entry, .rgb used).
+layout (std140) uniform WolfEepGains
 {
-  const float E[6] = float[6](1.0, 0.6427876, 0.3420201, 0.1736482, 0.0871557, 0.0348995);   // sin 90, 40, 20, 10, 5, 2
-  const float A[6] = float[6](3.0, 10.0, 25.0, 50.0, 90.0, 180.0);
-  Number s = clamp(mu, E[5], 1.0);
+  vec4 wolfEepGain[WOLF_EEP_GAINS];        // the sky's gains [height row x WOLF_EEP_GAIN_COLS + azimuth column]
+  vec4 wolfEepCloudGain[WOLF_EEP_GAINS];   // the clouds' (cloudsF.glsl), the same grid
+  vec4 wolfEepProbeDir[WOLF_EEP_GAINS];    // the grid's directions while the sky is probed (skyF.glsl uProbe; world)
+};
+uniform float wolfEepGainOn;
+uniform vec3 wolfEepGainRef;   // the azimuth the sky's gains were measured from (ECEF unit vector)
+// The horizon row's sin elevation seen from p (Bruneton length units, as bottomRadius): 0.1 deg above the true horizon,
+// the tangent to the sea sphere (dip = asin(sqrt((r - R)(r + R)) / r)). The same row as wolfenvironmentrender.cpp
+// eepHorizonRowDeg; 0.1 deg keeps the probe ray off the tangent, where RayIntersectsGround and the ray-sphere test round
+// differently (skyF.glsl:505).
+Number wolfEepHorizonRowMu(const Position p, const Length bottomRadius)
+{
+  Length r = max(length(p), bottomRadius);
+  Number dip = asin(clamp(sqrt(max((r - bottomRadius) * (r + bottomRadius), 0.0)) / r, 0.0, 1.0));
+  return sin(radians(0.1) - dip);
+}
+// the 7 x 11 grid interpolation shared by the sky's and the clouds' gains (grid: WOLF_GRID_SKY or WOLF_GRID_CLOUDS).
+// ea: x sin elevation, y signed azimuth from the light in degrees (-180 .. 180, counter-clockwise about the up), z the
+// horizon row's sin elevation (wolfEepHorizonRowMu)
+#define WOLF_GRID_SKY 0
+#define WOLF_GRID_CLOUDS 1
+vec3 wolfGainAt(const int grid, const int i) { return grid == WOLF_GRID_SKY ? wolfEepGain[i].rgb : wolfEepCloudGain[i].rgb; }
+vec3 wolfGainGrid(const int grid, const vec3 ea)
+{
+  // rows: sin 90, 40, 20, 10, 5, 2 deg and the horizon (wolfenvironmentrender.cpp EEP_GAIN_ELEV_DEG + eepHorizonRowDeg)
+  float E[WOLF_EEP_GAIN_ROWS] = float[WOLF_EEP_GAIN_ROWS](1.0, 0.6427876, 0.3420201, 0.1736482, 0.0871557, 0.0348995, 0.0);
+  E[6] = min(ea.z, E[5] - 1e-4);
+  // columns: wolfenvironmentrender.cpp EEP_GAIN_AZ_DEG; column 0 (-180) is also +180, the column after 90
+  const float A[WOLF_EEP_GAIN_COLS] = float[WOLF_EEP_GAIN_COLS](-180.0, -90.0, -50.0, -25.0, -10.0, -3.0, 3.0, 10.0, 25.0, 50.0, 90.0);
+  Number s = clamp(ea.x, E[6], 1.0);
   int i = 0;
-  for (int k = 0; k < 5; ++k) { if (s <= E[k] && s >= E[k + 1]) { i = k; break; } }
+  for (int k = 0; k < WOLF_EEP_GAIN_ROWS - 1; ++k) { if (s <= E[k] && s >= E[k + 1]) { i = k; break; } }
   Number fe = (s - E[i + 1]) / (E[i] - E[i + 1]);   // 1 at row i, 0 at row i + 1
-  Number az = clamp(azDeg, A[0], A[5]);
-  int j = 0;
-  for (int k = 0; k < 5; ++k) { if (az >= A[k] && az <= A[k + 1]) { j = k; break; } }
-  Number fa = (az - A[j]) / (A[j + 1] - A[j]);       // 0 at column j, 1 at column j + 1
-  vec3 top = mix(G[i * 6 + j], G[i * 6 + j + 1], fa);
-  vec3 bottom = mix(G[(i + 1) * 6 + j], G[(i + 1) * 6 + j + 1], fa);
+  Number az = clamp(ea.y, -180.0, 180.0);
+  int j = WOLF_EEP_GAIN_COLS - 1;   // 90 .. 180: the last column and, wrapped round, the first
+  for (int k = 0; k < WOLF_EEP_GAIN_COLS - 1; ++k) { if (az >= A[k] && az <= A[k + 1]) { j = k; break; } }
+  int j1 = j + 1 < WOLF_EEP_GAIN_COLS ? j + 1 : 0;
+  Number a1 = j + 1 < WOLF_EEP_GAIN_COLS ? A[j + 1] : 180.0;
+  Number fa = (az - A[j]) / (a1 - A[j]);            // 0 at column j, 1 at column j1
+  vec3 top = mix(wolfGainAt(grid, i * WOLF_EEP_GAIN_COLS + j), wolfGainAt(grid, i * WOLF_EEP_GAIN_COLS + j1), fa);
+  vec3 bottom = mix(wolfGainAt(grid, (i + 1) * WOLF_EEP_GAIN_COLS + j), wolfGainAt(grid, (i + 1) * WOLF_EEP_GAIN_COLS + j1), fa);
   return mix(bottom, top, fe);
 }
-vec3 wolfEepGainCore(const Number mu, const Number azDeg) { return wolfGainGrid(wolfEepGain, mu, azDeg); }
-// a view ray's height (sin elevation) and its azimuth from the sun's, in degrees, seen from point p (ECEF)
-vec2 wolfElevAzFromSun(const Position p, const Direction view_ray, const Direction sun_direction)
+// a view ray's height (sin elevation), its signed azimuth from ref's in degrees (counter-clockwise about the up), and the
+// horizon row's height, seen from point p (ECEF, Bruneton length units: km)
+vec3 wolfGainElevAz(const Position p, const Direction view_ray, const Direction ref)
 {
   vec3 up = normalize(p);
   Number mu = dot(view_ray, up);
   vec3 vh = view_ray - up * mu;
-  vec3 sh = sun_direction - up * dot(sun_direction, up);
-  Number cosAz = (dot(vh, vh) > 1e-12 && dot(sh, sh) > 1e-12) ? dot(normalize(vh), normalize(sh)) : 1.0;
-  return vec2(mu, degrees(acos(clamp(cosAz, -1.0, 1.0))));
+  vec3 rh = ref - up * dot(ref, up);
+  Number az = (dot(vh, vh) > 1e-12 && dot(rh, rh) > 1e-12) ? degrees(atan(dot(cross(rh, vh), up), dot(rh, vh))) : 0.0;
+  return vec3(mu, az, wolfEepHorizonRowMu(p, ATMOSPHERE.bottom_radius));
 }
-// the gain for a view ray from a point (ECEF; up = the point's radial direction) with the sun along sun_direction, whether
-// the gains are on or not (skyF.glsl applies it to the dome's whole colour: wolfEepDomeGain)
-vec3 wolfEepGainDirCore(const Position p, const Direction view_ray, const Direction sun_direction)
+// the gain for a view ray from a point (ECEF km; up = the point's radial direction), whether the gains are on or not
+// (skyF.glsl applies it to the dome's whole colour: wolfEepDomeGain)
+vec3 wolfEepGainDirCore(const Position p, const Direction view_ray)
 {
-  vec2 ea = wolfElevAzFromSun(p, view_ray, sun_direction);
-  return wolfEepGainCore(ea.x, ea.y);
+  return wolfGainGrid(WOLF_GRID_SKY, wolfGainElevAz(p, view_ray, wolfEepGainRef));
 }
-vec3 wolfEepGainDir(const Position p, const Direction view_ray, const Direction sun_direction)
+vec3 wolfEepGainDir(const Position p, const Direction view_ray)
 {
-  return wolfEepGainOn > 0.5 ? wolfEepGainDirCore(p, view_ray, sun_direction) : vec3(1.0);
+  return wolfEepGainOn > 0.5 ? wolfEepGainDirCore(p, view_ray) : vec3(1.0);
 }
 
 // [WolfViewer 2026-10-13] the EEP's haze_horizon over LL's default (llsettingssky.cpp:1229 0.19), as scale - 1: LL adds its
@@ -241,7 +286,7 @@ RadianceSpectrum GetSkyRadiance(
   // the atmosphere).
   Length r = length(camera);
   Length rmu = dot(camera, view_ray);
-  vec3 eepGain = wolfEepGainDir(camera, view_ray, sun_direction);   // [WolfViewer] at the camera, before it moves
+  vec3 eepGain = wolfEepGainDir(camera, view_ray);   // [WolfViewer] at the camera, before it moves
   // @shotamatsuda: Use SafeSqrt instead.
   // See: https://github.com/takram-design-engineering/three-geospatial/pull/26
   Length distance_to_top_atmosphere_boundary = -rmu -
@@ -457,7 +502,7 @@ RadianceSpectrum wolfSkyRadianceToPointRel(
     return vec3(0.0);
   }
 
-  vec3 eepGain = wolfEepGainDir(camera, view_ray, sun_direction);   // [WolfViewer] as GetSkyRadiance
+  vec3 eepGain = wolfEepGainDir(camera, view_ray);   // [WolfViewer] as GetSkyRadiance
   Position camera_in = camera;
   Position point_in = point;
   if (ClipAtBottomAtmosphere(atmosphere, view_ray, camera, point)) {

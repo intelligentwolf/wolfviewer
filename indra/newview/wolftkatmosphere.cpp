@@ -1034,7 +1034,57 @@ void Atmosphere::readBack()
     gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
 }
 
-static_assert(sizeof(LLColor3) == 3 * sizeof(F32), "wolfEepGain is sent as a packed vec3 array");
+// [WolfViewer 2026-10-25] the WolfEepGains uniform block (brunetonRuntime.glsl): three std140 arrays of EEP_GAINS vec4 -
+// wolfEepGain, wolfEepCloudGain, wolfEepProbeDir - in that order. The gains are written when they change; the probe
+// directions only by setEepProbeDirs. Bound to LLGLSLShader::UB_WOLF_EEP_GAINS, the binding point every program's block was
+// given at link (llglslshader.cpp mapUniforms).
+namespace
+{
+    constexpr GLsizeiptr EEP_ARRAY_BYTES = Atmosphere::EEP_GAINS * 4 * sizeof(F32);
+    constexpr GLsizeiptr EEP_BLOCK_BYTES = 3 * EEP_ARRAY_BYTES;
+}
+
+void Atmosphere::bindEepBlock() const
+{
+    if (!mEepBlock)
+    {
+        glGenBuffers(1, &mEepBlock);
+        glBindBuffer(GL_UNIFORM_BUFFER, mEepBlock);
+        std::vector<F32> zero(EEP_BLOCK_BYTES / sizeof(F32), 0.f);
+        glBufferData(GL_UNIFORM_BUFFER, EEP_BLOCK_BYTES, zero.data(), GL_DYNAMIC_DRAW);
+        mEepBlockDirty = true;
+    }
+    if (mEepBlockDirty)
+    {
+        F32 data[2 * EEP_GAINS * 4];
+        for (S32 i = 0; i < EEP_GAINS; ++i)
+        {
+            for (S32 c = 0; c < 3; ++c)
+            {
+                data[i * 4 + c] = mEepGain[i].mV[c];
+                data[(EEP_GAINS + i) * 4 + c] = mEepCloudGain[i].mV[c];
+            }
+            data[i * 4 + 3] = 1.f;
+            data[(EEP_GAINS + i) * 4 + 3] = 1.f;
+        }
+        glBindBuffer(GL_UNIFORM_BUFFER, mEepBlock);
+        glBufferSubData(GL_UNIFORM_BUFFER, 0, 2 * EEP_ARRAY_BYTES, data);
+        mEepBlockDirty = false;
+    }
+    glBindBufferBase(GL_UNIFORM_BUFFER, LLGLSLShader::UB_WOLF_EEP_GAINS, mEepBlock);
+}
+
+void Atmosphere::setEepProbeDirs(const LLVector3 dirs[EEP_GAINS])
+{
+    bindEepBlock();   // creates it, writes the gains if they changed, binds it
+    F32 data[EEP_GAINS * 4];
+    for (S32 i = 0; i < EEP_GAINS; ++i)
+    {
+        data[i * 4 + 0] = dirs[i].mV[0]; data[i * 4 + 1] = dirs[i].mV[1]; data[i * 4 + 2] = dirs[i].mV[2]; data[i * 4 + 3] = 0.f;
+    }
+    glBindBuffer(GL_UNIFORM_BUFFER, mEepBlock);
+    glBufferSubData(GL_UNIFORM_BUFFER, 2 * EEP_ARRAY_BYTES, EEP_ARRAY_BYTES, data);
+}
 
 void Atmosphere::setRuntimeUniforms(LLGLSLShader& sh, F32 pre_exposure, bool uniforms) const
 {
@@ -1050,14 +1100,15 @@ void Atmosphere::setRuntimeUniforms(LLGLSLShader& sh, F32 pre_exposure, bool uni
     const GLint lk = location(sh.mProgramObject, "SKY_SPECTRAL_RADIANCE_TO_LUMINANCE");
     if (lk >= 0) glUniform3f(lk, mSkyK.mV[0] * pre_exposure, mSkyK.mV[1] * pre_exposure, mSkyK.mV[2] * pre_exposure);
     // [WolfViewer 2026-10-13] the EEP's colours (setEepColours); a program that never gets them reads 0: untouched
-    const GLint lg = location(sh.mProgramObject, "wolfEepGain");
-    if (lg >= 0) glUniform3fv(lg, EEP_GAINS, mEepGain[0].mV);
     const GLint lo = location(sh.mProgramObject, "wolfEepGainOn");
     if (lo >= 0) glUniform1f(lo, mEepGainOn ? 1.f : 0.f);
-    const GLint lcg = location(sh.mProgramObject, "wolfEepCloudGain");
-    if (lcg >= 0) glUniform3fv(lcg, EEP_GAINS, mEepCloudGain[0].mV);
     const GLint lco = location(sh.mProgramObject, "wolfEepCloudGainOn");
     if (lco >= 0) glUniform1f(lco, mEepCloudGainOn ? 1.f : 0.f);
+    // [WolfViewer 2026-10-25] the azimuths' reference: the stock sky's light (wolfenvironmentrender.cpp eepLightWorld)
+    const GLint lgr = location(sh.mProgramObject, "wolfEepGainRef");
+    if (lgr >= 0) glUniform3fv(lgr, 1, mEepGainRef.mV);
+    const GLint lcgr = location(sh.mProgramObject, "wolfEepCloudGainRef");
+    if (lcgr >= 0) glUniform3fv(lcgr, 1, mEepCloudGainRef.mV);
     const GLint lc = location(sh.mProgramObject, "wolfEepCloudTint");
     if (lc >= 0) glUniform3f(lc, mEepCloud.mV[0] - 1.f, mEepCloud.mV[1] - 1.f, mEepCloud.mV[2] - 1.f);
     const GLint lth = location(sh.mProgramObject, "wolfEepCloudThin");
@@ -1065,6 +1116,7 @@ void Atmosphere::setRuntimeUniforms(LLGLSLShader& sh, F32 pre_exposure, bool uni
     const GLint lm = location(sh.mProgramObject, "wolfEepMieScale");
     if (lm >= 0) glUniform1f(lm, mEepMie - 1.f);
     }
+    bindEepBlock();   // [WolfViewer 2026-10-25] the gain grids' uniform block, for every program this is given to
     // AtmosphereMaterialBase.ts:140-144 the tables (single Mie: none, combined)
     bindReserved(sh, LLShaderMgr::TRANSMITTANCE_TEX, GL_TEXTURE_2D, s.transmittance);
     bindReserved(sh, LLShaderMgr::SCATTER_TEX, GL_TEXTURE_3D, s.scattering);
@@ -1180,6 +1232,8 @@ void Atmosphere::release()
     mTransmittanceData.clear();
     mIrradianceData.clear();
     mLocations.clear();
+    if (mEepBlock) { glDeleteBuffers(1, &mEepBlock); mEepBlock = 0; }
+    mEepBlockDirty = true;
 }
 
 }   // namespace WolfTk

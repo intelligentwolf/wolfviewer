@@ -118,13 +118,21 @@ namespace WolfTk
         void setEepColours(const LLColor3& cloud, F32 mie_scale) { mEepCloud = cloud; mEepMie = mie_scale; }
         /** [WolfViewer 2026-10-13] The sky's gains toward the EEP (brunetonRuntime.glsl wolfEepGain[EEP_GAINS] / wolfEepGainOn;
          *  wolfenvironmentrender.cpp probeSky). on false: the physical sky as it is. */
-        static constexpr S32 EEP_GAINS = 36;
-        void setEepGains(const LLColor3 gains[EEP_GAINS], bool on) { for (S32 i = 0; i < EEP_GAINS; ++i) mEepGain[i] = gains[i]; mEepGainOn = on; }
+        /** [WolfViewer 2026-10-25] 7 heights (90 40 20 10 5 2 deg and the true horizon) x 11 azimuths all the way round the
+         *  stock sky's light (brunetonRuntime.glsl WOLF_EEP_GAIN_ROWS / _COLS / WOLF_EEP_GAINS: the same numbers). */
+        static constexpr S32 EEP_GAIN_ROWS = 7, EEP_GAIN_COLS = 11, EEP_GAINS = EEP_GAIN_ROWS * EEP_GAIN_COLS;
+        void setEepGains(const LLColor3 gains[EEP_GAINS], bool on) { for (S32 i = 0; i < EEP_GAINS; ++i) mEepGain[i] = gains[i]; mEepGainOn = on; mEepBlockDirty = true; }
+        /** [WolfViewer 2026-10-25] The directions (world) skyF.glsl's probe mode draws, pixel i toward dirs[i] (wolfEepProbeDir in the
+         *  WolfEepGains block): written into the block and bound at once, for the probe draw that follows (GL thread). */
+        void setEepProbeDirs(const LLVector3 dirs[EEP_GAINS]);
+        /** [WolfViewer 2026-10-25] The directions (ECEF, this frame's) the sky's and the clouds' gain azimuths are measured from
+         *  (brunetonRuntime.glsl wolfEepGainRef, cloudsF.glsl wolfEepCloudGainRef); set every frame (the ECEF frame moves). */
+        void setEepGainRefs(const LLVector3& sky_ref_ecef, const LLVector3& cloud_ref_ecef) { mEepGainRef = sky_ref_ecef; mEepCloudGainRef = cloud_ref_ecef; }
         /** [WolfViewer 2026-10-13] The clouds' colour gains toward the EEP, the same grid (cloudsF.glsl wolfEepCloudGain[EEP_GAINS] /
          *  wolfEepCloudGainOn; wolfenvironmentrender.cpp measureCloudCover). */
         /** [WolfViewer round 16] the clouds' thinning (cloudsF.glsl wolfEepCloudThin): 0 = as marched, toward 1 more transparent */
         void setEepCloudThin(F32 thin) { mEepCloudThin = thin; }
-        void setEepCloudGains(const LLColor3 gains[EEP_GAINS], bool on) { for (S32 i = 0; i < EEP_GAINS; ++i) mEepCloudGain[i] = gains[i]; mEepCloudGainOn = on; }
+        void setEepCloudGains(const LLColor3 gains[EEP_GAINS], bool on) { for (S32 i = 0; i < EEP_GAINS; ++i) mEepCloudGain[i] = gains[i]; mEepCloudGainOn = on; mEepBlockDirty = true; }
 
         GLuint transmittanceTexture() const;
         GLuint scatteringTexture() const;
@@ -191,6 +199,12 @@ namespace WolfTk
         bool     mEepGainOn = false;
         LLColor3 mEepCloudGain[EEP_GAINS];   // read by the shaders only while mEepCloudGainOn
         bool     mEepCloudGainOn = false;
+        LLVector3 mEepGainRef = LLVector3::z_axis, mEepCloudGainRef = LLVector3::z_axis;   // setEepGainRefs
+        // [WolfViewer 2026-10-25] the WolfEepGains uniform block (brunetonRuntime.glsl; LLGLSLShader::UB_WOLF_EEP_GAINS): the sky's
+        // gains, the clouds' gains and the probe directions, std140 vec4 each; uploaded when the gains change (bindEepBlock)
+        mutable GLuint mEepBlock = 0;
+        mutable bool   mEepBlockDirty = true;
+        void bindEepBlock() const;
         F32      mEepCloudThin = 0.f;
         F32      mEepMie = 1.f;   // the EEP's haze_horizon / 0.19 (brunetonRuntime.glsl wolfEepMieScale)
         bool mShadersLoaded = false;

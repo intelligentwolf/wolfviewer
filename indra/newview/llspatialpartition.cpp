@@ -1760,8 +1760,10 @@ void renderOctree(LLSpatialGroup* group)
                 if (!group->getSpatialPartition()->isBridge())
                 {
                     gGL.pushMatrix();
-                    LLVector3 trans = drawable->getRegion()->getOriginAgent();
-                    gGL.translatef(trans.mV[0], trans.mV[1], trans.mV[2]);
+                    // <WolfViewer 2026-10-25> static faces are group-relative (llspatialpartition.h
+                    // wolfStaticFaceMatrix); was a translation by the region origin alone
+                    gGL.multMatrix((F32*)group->wolfStaticFaceMatrix(drawable->getRegion()->mRenderMatrix).mMatrix);
+                    // </WolfViewer>
                 }
 
                 LLFace* face = drawable->getFace(0);

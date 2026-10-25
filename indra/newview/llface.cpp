@@ -578,7 +578,12 @@ void LLFace::renderSelected(LLViewerTexture *imagep, const LLColor4& color)
         }
         else
         {
-            gGL.multMatrix((GLfloat*)mDrawablep->getRegion()->mRenderMatrix.mMatrix);
+            // <WolfViewer 2026-10-25> the matrix registerFace draws this static face with: its
+            // vertices are relative to the group's origin (llspatialpartition.h mWolfOriginRegion),
+            // so the stock region matrix put the select-face highlight that far from the face.
+            const LLMatrix4& static_mat = mDrawablep->getSpatialGroup()->wolfStaticFaceMatrix(mDrawablep->getRegion()->mRenderMatrix);
+            gGL.multMatrix((GLfloat*)static_mat.mMatrix);
+            // </WolfViewer>
         }
 
         gGL.diffuseColor4fv(color.mV);

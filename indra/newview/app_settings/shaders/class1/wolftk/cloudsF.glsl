@@ -96,9 +96,12 @@ uniform vec3 wolfEepCloudTint;
 // [WolfViewer 2026-10-13, round 16] how much thinner than marched the clouds are drawn (0 = as marched): the stock EEP clouds' own
 // opacity, measured (wolfenvironmentrender.cpp measureCloudCover against renderStockCloudProbe)
 uniform float wolfEepCloudThin;
-// [WolfViewer 2026-10-13] the clouds' colour gains toward the stock EEP clouds, per direction (the sky's 6 x 6 grid,
+// [WolfViewer 2026-10-13] the clouds' colour gains toward the stock EEP clouds, per direction (the sky's grid,
 // brunetonRuntime.glsl wolfGainGrid; measured, wolfenvironmentrender.cpp measureCloudCover). Off: 1.
-uniform vec3 wolfEepCloudGain[36];
+// [WolfViewer 2026-10-25] the sky's 7 x 11 grid round the stock light (brunetonRuntime.glsl, Jimmy Olsen's seam), its azimuths
+// from wolfEepCloudGainRef (ECEF): the light the cloud gains were measured round
+// (wolfEepCloudGain itself: brunetonRuntime.glsl's WolfEepGains block)
+uniform vec3 wolfEepCloudGainRef;
 uniform float wolfEepCloudGainOn;
 uniform float wolfHazeAlways;   // [WolfViewer 2026-10-13] 1: the haze ignores the cloud cover (approximateHaze)
 // [WolfViewer 2026-10-13] the stock EEP haze pass, evaluated per pixel (wolfenvironmentrender.cpp cloudsFrame,
@@ -1387,8 +1390,7 @@ void main() {
 
     color.rgb *= vec3(1.0) + wolfEepCloudTint;   // [WolfViewer 2026-10-13] the EEP's cloud colour, before the air in front
     if (wolfEepCloudGainOn > 0.5) {
-      vec2 ea = wolfElevAzFromSun(cameraPosition, rayDirection, sunDirection);
-      color.rgb *= wolfGainGrid(wolfEepCloudGain, ea.x, ea.y);
+      color.rgb *= wolfGainGrid(WOLF_GRID_CLOUDS, wolfGainElevAz(cameraPosition * METER_TO_LENGTH_UNIT, rayDirection, wolfEepCloudGainRef));
     }
     wolfCloudAlpha = color.a;   // measured before the thinning below (measureCloudCover sets the thinning from it)
     color *= 1.0 - clamp(wolfEepCloudThin, 0.0, 0.95);   // premultiplied: the same light per unit of opacity, less of both
@@ -1537,7 +1539,7 @@ void main() {
   );
   // [WolfViewer 2026-10-13] the haze is the air's light too: the EEP's sky gains the aerial perspective gets
   // (brunetonRuntime.glsl wolfEepGainDir), for this ray
-  haze.rgb *= wolfEepGainDir(cameraPosition, rayDirection, sunDirection);
+  haze.rgb *= wolfEepGainDir(cameraPosition * METER_TO_LENGTH_UNIT, rayDirection);
   color.rgb = mix(color.rgb, haze.rgb, haze.a);
   color.a = color.a * (1.0 - haze.a) + haze.a;
   #endif // HAZE

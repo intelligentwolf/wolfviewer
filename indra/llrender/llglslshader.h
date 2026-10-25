@@ -154,6 +154,7 @@ public:
         UB_GLTF_JOINTS,         // "GLTFJoints"
         UB_GLTF_NODES,          // "GLTFNodes"
         UB_GLTF_MATERIALS,      // "GLTFMaterials"
+        UB_WOLF_EEP_GAINS,      // "WolfEepGains" [WolfViewer 2026-10-25] the native sky's EEP gain grids (wolftkatmosphere.cpp)
         NUM_UNIFORM_BLOCKS
     };
 

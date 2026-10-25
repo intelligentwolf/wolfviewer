@@ -342,6 +342,18 @@ public:
     void wolfSetOriginFromNode();      // at the start of a geometry rebuild (rebuildGeom)
     void wolfUpdateRenderMatrix();     // after every agent-origin change (shift)
     LLViewerRegion* wolfLiveRegion();  // this group's region, or null for a bridge / a dead region
+    // [2026-10-25 select-face highlight] The model matrix for drawing a STATIC face of this group
+    // straight from its vertex buffer outside the render pools (LLFace::renderSelected, the
+    // "render updates" debug view). Those callers used the region matrix (stock), which is right
+    // only while mWolfOriginRegion is zero; with a non-zero origin the vertices are group-relative
+    // and registerFace draws them with mWolfRenderMatrix, so these draws must use it too or they
+    // land mWolfOriginRegion away from the face (Jimmy 10-24/10-25, Build > Select Face).
+    // A zero origin (tree partition, bridges, groups not rebuilt by LLVolumeGeometryManager)
+    // keeps the stock region matrix.
+    const LLMatrix4& wolfStaticFaceMatrix(const LLMatrix4& region_render_matrix) const
+    {
+        return mWolfOriginRegion.isExactlyZero() ? region_render_matrix : mWolfRenderMatrix;
+    }
     // </WolfViewer>
 
      //LISTENER FUNCTIONS

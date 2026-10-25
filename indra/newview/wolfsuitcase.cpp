@@ -173,6 +173,15 @@ namespace
         {
             return;
         }
+        // [SUITCASE 2026-10-25] Buzzy (Discord): "is there a way to turn off the feature that moves items automatically out
+        // of 'My Suitcase'". Wolf World > Move Suitcase Arrivals Home (WolfSuitcaseBringHome) off: what arrived stays where
+        // it is, and the notes are let go so turning it back on later does not move this trip's things.
+        if (!gSavedSettings.getBOOL("WolfSuitcaseBringHome"))
+        {
+            LL_INFOS("WolfSuitcase") << "home: moving arrivals is switched off, " << list.size() << " left in My Suitcase" << LL_ENDL;
+            gSavedPerAccountSettings.setLLSD("WolfSuitcaseArrivals", LLSD::emptyArray());
+            return;
+        }
         // A list with no trip start was made by an older WolfViewer, which noted everything that loaded in the suitcase,
         // packed things too: nothing in it can be trusted, so it is dropped and the suitcase left as it is.
         const U32 trip_start = gSavedPerAccountSettings.getU32("WolfSuitcaseTripStart");

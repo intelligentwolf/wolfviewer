@@ -2088,7 +2088,7 @@ void WolfPanelAI::textLoadDefaults(const std::string& style)
         if (text_number(d["depth"])) mTextDepth->setValue(d["depth"].asReal());
         if (d["bevel"].isBoolean()) mTextBevel->set(d["bevel"].asBoolean());
         if (text_colour(d["colour"], c)) mTextColour->set(c);
-        if (text_number(d["glow"])) mTextGlow->setValue(d["glow"].asReal());
+        if (text_number(d["glow"])) mTextGlow->setValue((F32)d["glow"].asReal());
         if (d["fullbright"].isBoolean()) mTextFullbright->set(d["fullbright"].asBoolean());
         if (d["layout"].isString()) mTextLayout->selectByValue(d["layout"]);
         const LLSD& light = d["light"];
@@ -2096,7 +2096,7 @@ void WolfPanelAI::textLoadDefaults(const std::string& style)
         {
             if (light["mode"].isString()) mTextLight->selectByValue(light["mode"]);
             if (text_colour(light["colour"], c)) mTextLightColour->set(c);
-            if (text_number(light["intensity"])) mTextIntensity->setValue(light["intensity"].asReal());
+            if (text_number(light["intensity"])) mTextIntensity->setValue((F32)light["intensity"].asReal());
             if (text_number(light["radius"])) mTextRadius->setValue(light["radius"].asReal());
         }
     }

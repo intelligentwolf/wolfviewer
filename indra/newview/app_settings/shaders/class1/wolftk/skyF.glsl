@@ -304,6 +304,11 @@ vec3 wolfTkSkyRadiance(
 // 2026-10-25 seam fix). The probe now measures the sky without it and it is added outside the gain - the moon's scattered
 // light as the atmosphere gives it, in the frame's exposure - while the rest of the sky still matches the EEP. Day and twilight
 // (uNight 0): as before, every term under the gain.
+// [WolfViewer 2026-10-26] the aurora is in `aureole` too, day or night: the stock sky has none, so with it under the gain the
+// probe read every aurora as sky too bright and the gains darkened it toward the stock sky - and, a reading later, the curtains
+// and their pulsing patches (wolfAuroraF.glsl waPulse) had moved on from where the gain was set (Jimmy Olsen, ticket #238:
+// TROMSO, whose weather has northern lights 37, a band of light flashing along the horizon). `aureole` is now everything the
+// gains must not touch: the moon's aerosol lobe by night and the aurora, both added after the gain and left out of the probe.
 vec3 wolfSkyWithBodies(vec3 originKm, vec3 rayDirection, vec3 dirWorld, float shadowLength, float fragmentAngle, out vec3 aureole)
 {
     aureole = vec3(0.0);
@@ -332,7 +337,7 @@ vec3 wolfSkyWithBodies(vec3 originKm, vec3 rayDirection, vec3 dirWorld, float sh
     // the transmittance again; it is a ground observation, applied to the sky above the horizon
     // (transmittance > 0) only.
     if (uNightSky > 0.0 && any(greaterThan(transmittance, vec3(0.0)))) color += vec3(uNightSky) * (1.0 - cover);
-    if (wolf_aurora > 0.0) color += wolfAuroraRadiance(dirWorld) * uExposure * transmittance;
+    if (wolf_aurora > 0.0) aureole += wolfAuroraRadiance(dirWorld) * uExposure * transmittance;   // [2026-10-26] outside the gain (above)
     vec4 moon = wolfMoonDisc(dirWorld, transmittance);
     if (moon.a > 0.0)
     {
@@ -341,7 +346,7 @@ vec3 wolfSkyWithBodies(vec3 originKm, vec3 rayDirection, vec3 dirWorld, float sh
         vec3 tr2;
         vec3 air = GetSkyRadiance(originKm, rayDirection, shadowLength, sunDirection, tr2);
         color = mix(color, air + moon.rgb, moon.a);
-        aureole *= 1.0 - moon.a;   // behind the disc
+        aureole *= 1.0 - moon.a;   // behind the disc (the aurora behind it too, as it was hidden there before)
     }
     return color;
 }
@@ -479,7 +484,7 @@ void main()
 {
     // this pixel's direction from the camera's own matrices (the screen triangle, wolfEnvSkyV.glsl), or a probe's
     vec3 dirWorld;
-    if (uProbe > 0.5) dirWorld = normalize(wolfEepProbeDir[clamp(int(gl_FragCoord.x), 0, WOLF_EEP_GAINS - 1)].xyz);
+    if (uProbe > 0.5) dirWorld = normalize(wolfEepProbeDir[clamp(int(gl_FragCoord.x), 0, WOLF_EEP_PROBES - 1)].xyz);
     else
     {
         vec2 ndc = (gl_FragCoord.xy - viewportOrigin) / resolution * 2.0 - 1.0;
@@ -572,7 +577,7 @@ void main()
             vec3 mirroredAureole;
             vec3 mirroredSky = wolfSkyWithBodies(seaPointKm, mirrorDir, mirrorWorld, 0.0, fragmentAngle, mirroredAureole);
             if (wolfEepDomeGain > 0.5) mirroredSky *= wolfEepGainDirCore(seaPointKm, mirrorDir);
-            mirroredSky += mirroredAureole;   // [2026-10-25] the moon's aureole outside the gain, as in the sky branch
+            mirroredSky += mirroredAureole;   // [2026-10-25] the moon's aureole (and since 2026-10-26 the aurora) outside the gain, as in the sky branch
             mirrored = wolfEepMoon(mirrorWorld, mirroredSky);
         }
         vec3 body = waterFogColorLinear * RECIPROCAL_PI * (sunIrradiance + skyIrradiance);
@@ -602,7 +607,8 @@ void main()
     {
         vec3 aureole;
         color = wolfSkyWithBodies(vCameraPosition, rayDirection, dirWorld, shadowLength, fragmentAngle, aureole) * domeGain;
-        // [2026-10-25] the moon's aureole outside the gain (wolfSkyWithBodies); not in a probe pixel - the gains are measured without it
+        // [2026-10-25] the moon's aureole (and since 2026-10-26 the aurora) outside the gain (wolfSkyWithBodies); not in a probe
+        // pixel - the gains are measured without them
         if (uProbe < 0.5) color += aureole;
     }
 

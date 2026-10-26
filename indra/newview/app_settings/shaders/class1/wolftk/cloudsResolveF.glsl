@@ -190,16 +190,6 @@ void temporalUpscale(
   vec4 currentShadowLength = vec4(texelFetch(shadowLengthBuffer, lowResCoord, 0).rgb, 1.0);
   #endif // SHADOW_LENGTH
 
-  if (currentFrame) {
-    // Use the texel just rendered without any accumulation.
-    // [WolfViewer] this frame the texel's ray went through this very pixel (the jitter, CloudsMaterial temporalJitter, puts
-    // it on the pixel whose Bayer slot this is), so it saw this pixel's own surface
-    outputColor = currentColor;
-    #ifdef SHADOW_LENGTH
-    outputShadowLength = currentShadowLength.r;
-    #endif // SHADOW_LENGTH
-    return;
-  }
 
   // [WolfViewer 2026-10-16] which of the 3 x 3 texels saw this pixel's surface; the closest fragment (getClosestFragment,
   // takram's smallest front depth) over all of them and over those alone. The fetches are clamped to the low-res frame where
@@ -234,6 +224,34 @@ void temporalUpscale(
   // that takram's resolve keeps running, so far thin objects still fade into the haze. The pixel's own Bayer slot (the
   // currentFrame branch above) still takes its texel as it is, since that frame's ray went through this very pixel.
   const float WOLF_THIN_NEAR_M = 256.0;
+  // [WolfViewer 2026-10-26] THE PIXEL'S OWN BAYER SLOT, moved here from the top (takram's branch: "Use the texel just rendered without
+  // any accumulation"). This frame the texel's ray went through this very pixel (the jitter, CloudsMaterial temporalJitter, puts
+  // it on the pixel whose slot this is), so it saw this pixel's own surface. takram's resolve takes that ONE sample whole and then
+  // holds it (clipped) for the next 15 frames, so every pixel shows a single jittered march - its noise is never averaged. With
+  // takram's spatio-temporal blue noise that noise is meant to be invisible; ours is interleaved gradient noise (cloudsCommon.glsl
+  // getSTBN: STBN's licence excludes this product), whose diagonal pattern and speckle Paul saw on every cloud (Wolf Territories
+  // Home and ICELAND 10-26: "grainy"). So where the whole 3 x 3 neighbourhood is this pixel's surface and the history reprojects
+  // onto the screen, the new sample is blended into the clipped history: exponential accumulation within a neighbourhood clip
+  // box, the standard temporal supersampling (Karis 2014, "High Quality Temporal Supersampling", SIGGRAPH Advances in Real-Time
+  // Rendering), with WOLF_SLOT_ALPHA the new sample's share: the noise's variance falls to alpha / (2 - alpha) = 1/7 (its
+  // deviation to 0.38), and a change reaches 1 - 1/e in 1 / alpha = 4 samples, 64 frames - the clip box (this frame's
+  // neighbourhood, gamma 2) still bounds any lag. At an edge, on a thin near feature and off-screen history the sample is taken
+  // whole, as before (the edge and mast rules below). A design value, not a measurement.
+  const float WOLF_SLOT_ALPHA = 0.25;
+  if (currentFrame) {
+    vec2 slotPrevUv = vUv - texelFetch(depthVelocityBuffer, lowResCoord, 0).gb;
+    bool slotHistory = sameCount == 9 && slotPrevUv.x >= 0.0 && slotPrevUv.x <= 1.0 && slotPrevUv.y >= 0.0 && slotPrevUv.y <= 1.0;
+    if (slotHistory) {
+      vec4 slotHistoryColor = varianceClipping(colorBuffer, vUv, currentColor, texture(colorHistoryBuffer, slotPrevUv), varianceGamma);
+      outputColor = mix(slotHistoryColor, currentColor, WOLF_SLOT_ALPHA);
+    } else {
+      outputColor = currentColor;
+    }
+    #ifdef SHADOW_LENGTH
+    outputShadowLength = currentShadowLength.r;
+    #endif // SHADOW_LENGTH
+    return;
+  }
   if (sameCount == 0 && sceneDepth > 0.0 && sceneDepth < WOLF_THIN_NEAR_M) {
     outputColor = vec4(0.0);
     #ifdef SHADOW_LENGTH

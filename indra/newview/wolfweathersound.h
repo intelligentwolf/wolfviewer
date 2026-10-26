@@ -16,6 +16,7 @@
 #ifndef WOLF_WEATHER_SOUND_H
 #define WOLF_WEATHER_SOUND_H
 
+#include <map>
 #include <string>
 
 #include "lluuid.h"
@@ -23,15 +24,24 @@
 #include "wolfweatherprofile.h"
 
 /**
- * Two looping layers and an occasional thunder crack, exactly as the Weather tab's two Sound
- * Presets dropdowns describe:
+ * The Weather tab's two Sound Presets dropdowns, and an occasional thunder crack:
  *   AMBIENCE (mSoundPreset)  the bed  — thunderstorms, steady rain, wind, a distant storm
  *   NEAR     (mSoundLayer)   what the precipitation sounds like where you are standing
  *
- * SYNTHESISED, NOT SHIPPED AS ASSETS, and for the same reason as the web viewer's
- * weather_sound.js: a sampled rain loop is a large asset that has to be uploaded to the grid,
- * kept in step between the two viewers, and goes silent the day it is missing. Filtered noise
- * IS rain, it costs one buffer, and it can be generated on the machine that plays it.
+ * <WolfViewer 2026-10-26> RECORDED RAIN. Residents did not like the old rain: it was filtered
+ * noise in a 6 s mono loop that clicked at every wrap (region-terrain-work/rain-sound/README.md
+ * in the firestorm repo has the measurements). The rain is now real CC0 recordings shipped with
+ * the viewer in app_settings/wolfweather/ (SOURCES.md there: who, where, which file, its SHA-1):
+ *   - a bed of light, moderate and heavy rain, crossfaded by the intensity with equal power;
+ *   - a near layer (patter at a window, rain on leaves, rain on a roof);
+ *   - single drops landing round the listener in heavy rain;
+ *   - under a roof (WolfWeather::indoors) the open loops give way to low-passed copies;
+ *   - every level eases, so rain starts, stops and changes without a hard switch;
+ *   - each loop starts at a random point and wanders +-1.5 dB, so no repeat can be heard.
+ * Wind and the thunder cracks are still synthesised (they were not the complaint), and the
+ * synthesised voices remain the fallback if a recording is missing.
+ * Every number in the mix is in region-terrain-work/rain-sound/tools/rain_mix.py, which also
+ * renders the previews, and wolfstorm js/world/weather_sound.js carries the same numbers.
  *
  * HOW IT REACHES THE AUDIO ENGINE. The engine plays a sound by UUID, and before it asks the
  * asset server it looks for a decoded copy on disk:
@@ -39,9 +49,12 @@
  *                                                        hasLocalData + hasDecodedData
  *   LLAudioEngine::hasDecodedFile (:999)               — <LL_PATH_FS_SOUND_CACHE>/<uuid>.dsf
  *   LLAudioData::load (:1934)                          — mBufferp->loadWAV(that path)
- * So each layer has a FIXED UUID of ours, and the first time it is wanted a plain 16-bit mono
- * WAV is written to that path. Nothing is ever requested from the grid's asset service, and a
- * cleared cache simply means it is written again.
+ * So each sound has a FIXED UUID of ours, and a plain 16-bit WAV is written to that path:
+ * generated for the synthesised voices, decoded from the shipped Ogg Vorbis for the
+ * recordings. The engine's own Vorbis decoder is NOT used for the recordings: it writes a
+ * mono 44.1 kHz header whatever the file is and fades the first and last 128 samples to zero
+ * (llaudiodecodemgr.cpp:315-330 and finishDecode "FUDGECAKES"), a tick at every loop point.
+ * Nothing is ever requested from the grid's asset service.
  */
 class WolfWeatherSound : public LLSingleton<WolfWeatherSound>
 {
@@ -51,7 +64,7 @@ class WolfWeatherSound : public LLSingleton<WolfWeatherSound>
 public:
     /** The one entry point: wolfweather.cpp calls it after every precedence decision. */
     void apply(const WolfWeatherProfile& profile);
-    /** Every frame: keeps the loops on the listener. */
+    /** Every frame: levels, fades, the indoor muffle, drops. */
     void idle();
     /**
      * [LIGHTNING 2026-09-13] One thunder clap, now. WolfLightning calls this when the sound of a
@@ -60,13 +73,13 @@ public:
      * Does nothing while the weather sound is off, so a silent storm still forks silently.
      */
     void crack(bool distant);
-    /** Silence, and let the sources go. */
+    /** Fade everything out (the sources go once they are silent). */
     void stop();
 
     /** Sample rate and length of every generated loop. */
     static constexpr S32 SAMPLE_RATE = 22050;
     static constexpr S32 LOOP_SECS   = 6;
-    /** The loop's last CROSSFADE_SECS are mixed into its first, so the seam is inaudible. */
+    /** A generated loop's tail is folded into its head with equal power over this long. */
     static constexpr F32 CROSSFADE_SECS = 0.35f;
 
     /**
@@ -84,6 +97,22 @@ public:
         F32 mGain;        ///< the layer's own level before volume and intensity
     };
 
+    /** One shipped recording: the file in app_settings/wolfweather and the UUIDs it is played as. */
+    struct Recording
+    {
+        const char* mFile;
+        const char* mUuid;          ///< the recording as it is (stereo, 2D)
+        const char* mMuffledUuid;   ///< its under-a-roof copy (mono, low-passed); nullptr = none
+        bool        mLoop;          ///< a seamless loop (started at a random point) or a one-shot drop
+    };
+
+    /** <WolfViewer 2026-10-26/> Source: rain_mix.py — the same numbers in both viewers. */
+    static F32 intensity(const WolfWeatherProfile& p);
+    static void tierWeights(F32 intensity, F32 out[3]);
+    static F32 bedLevel(F32 vol, F32 intensity);
+    static F32 nearLevel(F32 vol, F32 intensity);
+    static F32 dripRate(F32 intensity);
+
 private:
     static const Voice* findVoice(const Voice* table, const std::string& id);
     static const Voice* ambience(const std::string& id);
@@ -93,18 +122,36 @@ private:
     static bool ensureSound(const Voice& v);
     static bool writeWav(const std::string& path, const Voice& v, bool oneShot);
 
-    /** Start (or re-target) one looping layer. Returns the audio-source id, null on failure. */
-    LLUUID startLoop(const Voice& v, F32 gain);
-    void   setLoopGain(const LLUUID& source_id, F32 gain);
-    void   stopLoop(LLUUID& source_id);
+    /** A recording's state this session: decoded and written once, off the main thread. */
+    enum class Prep { NONE, PENDING, READY, FAILED };
+    Prep prepare(const Recording& r);
+    void onPrepared(const std::string& file, bool ok);
 
+    /** One playing loop, eased towards its target level. */
+    struct Layer
+    {
+        LLUUID mSound;
+        LLUUID mSource;
+        bool   mStereo2D = true;     ///< recordings: 2D (stereo kept); synthesised: at the avatar
+        F32    mGain = 0.f;
+        F32    mTarget = 0.f;
+        bool   mSeen = false;        ///< given a target this frame
+        F32    mDriftDb = 0.f;
+        F32    mDriftTarget = 0.f;
+        F64    mDriftNext = 0.0;
+        F64    mRetryAt = 0.0;       ///< a source the engine would not start is retried, not spun on
+    };
+    void setTarget(const std::string& key, const LLUUID& sound, bool stereo2d, F32 target);
+    void updateLayer(Layer& l, F32 dt, F64 now);
+    void stopSource(Layer& l);
+    void maybeDrip(F64 now, F32 intensity, F32 indoors);
 
     WolfWeatherProfile mProfile;
-    bool   mPlaying = false;
-    LLUUID mAmbSource;          ///< the audio-source id of the ambience loop
-    LLUUID mNearSource;
-    std::string mAmbId;         ///< which voice each source is currently playing
-    std::string mNearId;
+    bool   mWant = false;            ///< apply() wants sound; false = everything fading out
+    std::map<std::string, Layer> mLayers;
+    std::map<std::string, Prep>  mPrep;
+    F64    mLastIdle = 0.0;
+    F64    mNextDrip = 0.0;
 };
 
 #endif // WOLF_WEATHER_SOUND_H

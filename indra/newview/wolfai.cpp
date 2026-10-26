@@ -12,6 +12,7 @@
 #include "wolfai.h"
 
 #include <boost/json.hpp>
+#include <algorithm>   // std::find (the 3D Text font groups)
 #include <fstream>
 #include <limits>
 #include <png.h>
@@ -52,6 +53,14 @@
 #include "wolfgrid.h"
 #include "wolfmeshupload.h"
 #include "wolfpaint.h"
+// [WOLF 3D TEXT 2026-10-26] the 3D Text form's controls and its calls (WolfAdventure::api)
+#include "apr_base64.h"
+#include "llcheckboxctrl.h"
+#include "llcolorswatch.h"
+#include "llsliderctrl.h"
+#include "llspinctrl.h"
+#include "lltexturectrl.h"
+#include "wolfadventure.h"
 
 namespace
 {
@@ -805,17 +814,55 @@ class WolfAIPreview : public LLPanel
 public:
     explicit WolfAIPreview(const LLPanel::Params& p) : LLPanel(p) {}
     LLPointer<LLViewerTexture> texture;
+    // [WOLF 3D TEXT 2026-10-26 round 2] the live preview on the 3D Text form: the sign by night beside `texture` (by day) when
+    // it is lit, which one shows, the picture dimmed while it is out of date, and a word over it ("Updating..."). A large
+    // build's preview leaves them as they are (night empty, not dimmed, no words).
+    LLPointer<LLViewerTexture> night;
+    bool showNight = false, dim = false;
+    std::string overlay;
     void draw() override
     {
         LLPanel::draw();
-        if (texture.isNull()) return;
-        const F32 scale = llmin(F32(getRect().getWidth()) / texture->getWidth(), F32(getRect().getHeight()) / texture->getHeight());
-        const S32 width = ll_round(texture->getWidth() * scale), height = ll_round(texture->getHeight() * scale);
+        const LLPointer<LLViewerTexture>& shown = showNight && night.notNull() ? night : texture;
         LLGLSUIDefault ui;
-        gGL.color4f(1.f, 1.f, 1.f, 1.f);
-        gl_draw_scaled_image((getRect().getWidth() - width) / 2, (getRect().getHeight() - height) / 2, width, height, texture);
+        const S32 W = getRect().getWidth(), H = getRect().getHeight();
+        if (shown.notNull())
+        {
+            const F32 scale = llmin(F32(W) / shown->getWidth(), F32(H) / shown->getHeight());
+            const S32 width = ll_round(shown->getWidth() * scale), height = ll_round(shown->getHeight() * scale);
+            gGL.color4f(1.f, 1.f, 1.f, 1.f);
+            gl_draw_scaled_image((W - width) / 2, (H - height) / 2, width, height, shown, LLColor4(1.f, 1.f, 1.f, dim ? 0.35f : 1.f));
+        }
+        if (overlay.empty()) return;
+        // the words on a dark band across the middle: the forge's ink #f7eee6 on #140e0b at 0.88 over the picture (the
+        // darkest the band can be lit through is about #2a2420: 13:1; with nothing behind it, 16.7:1 as FG_INK on FG_INPUT)
+        const LLFontGL* font = LLFontGL::getFontSansSerifBold();
+        const S32 band = llmin(H, font->getLineHeight() + 14), mid = H / 2;
+        gl_rect_2d(0, mid + band / 2, W, mid - band / 2, LLColor4(0.078f, 0.055f, 0.043f, 0.88f), true);
+        font->renderUTF8(overlay, 0, (F32)(W / 2), (F32)mid, LLColor4(0.969f, 0.933f, 0.902f, 1.f), LLFontGL::HCENTER,
+                         LLFontGL::VCENTER, LLFontGL::NORMAL, LLFontGL::NO_SHADOW, S32_MAX, W - 12, nullptr, true);
     }
 };
+// PNG bytes -> a texture, or false. Source: the decode WolfPanelAI::loadPresentation used inline (now shared with the 3D Text
+// preview). LLPngWrapper truncates dimensions to U16 before native decode; libpng's full-width header check prevents
+// oversized dimensions wrapping into a small allocation.
+static bool png_texture(const LLSD::Binary& bytes, LLPointer<LLViewerTexture>& out)
+{
+    out = nullptr;
+    LLPointer<WolfMemoryPNG> png = new WolfMemoryPNG;
+    LLPointer<LLImageRaw> raw = new LLImageRaw;
+    png_image header{}; header.version = PNG_IMAGE_VERSION;
+    bool ok = bytes.size() >= 8 && bytes.size() <= size_t(std::numeric_limits<S32>::max())
+        && png_image_begin_read_from_memory(&header, bytes.data(), bytes.size());
+    if (ok) ok = header.width > 0 && header.height > 0
+        && header.width <= std::numeric_limits<U16>::max() && header.height <= std::numeric_limits<U16>::max()
+        && U64(header.width) * header.height <= U64(8096) * 8096;
+    png_image_free(&header);
+    if (ok) ok = png->copyBytes(bytes) && png->updateData()
+        && (png->getComponents() == 3 || png->getComponents() == 4) && png->decode(raw, 0.f);
+    if (ok) out = LLViewerTextureManager::getLocalTexture(raw.get(), false);
+    return ok && out.notNull();
+}
 // Source: LLMediaCtrl::handleMediaEvent dispatches viewer schemes BEFORE LLWeb; intercept here.
 // This child never forwards untrusted navigation/auth/file/geometry events to that dispatcher.
 class WolfAIGrounding : public LLMediaCtrl
@@ -856,6 +903,126 @@ private:
     WolfPanelAI* mOwner;
 };
 
+// ─────────────────────────── [WOLF 3D TEXT 2026-10-26] helpers ───────────────────────────
+namespace
+{
+    // The options the form shows until text_options answers (or when it cannot): the lists and limits of
+    // region-terrain-work/wolf-text3d/PROTOCOL.md "text_options", and the defaults its SPEC table names. The hillside
+    // style's label here leaves out the trademark the protocol forbids us to write (the server's own label is shown as sent).
+    // text_options' own lists and defaults replace these as soon as it answers.
+    LLSD text_fallback_options()
+    {
+        LLSD o;
+        // Source: PROTOCOL.md "Changes 2026-10-26 (round 2)" 1 - the fallback list (id, label, group) and fontGroups in
+        // display order (the same as wolfstorm/python/text3d/outline.py GROUPS and FONTS)
+        const char* groups[] = { "Sans serif", "Condensed and wide", "Serif and slab", "Script and handwriting", "Display and fun" };
+        for (const char* g : groups) o["fontGroups"].append(g);
+        const char* fonts[][3] = {
+            { "sans", "Bold sans", "Sans serif" }, { "geometric", "Geometric sans", "Sans serif" },
+            { "humanist", "Humanist sans", "Sans serif" }, { "rounded", "Rounded sans", "Sans serif" },
+            { "condensed", "Condensed sans", "Condensed and wide" }, { "tall", "Tall capitals", "Condensed and wide" },
+            { "extended", "Wide sans", "Condensed and wide" },
+            { "slab", "Slab serif", "Serif and slab" }, { "classic", "Classic serif", "Serif and slab" },
+            { "serif", "Elegant serif", "Serif and slab" },
+            { "script", "Script", "Script and handwriting" }, { "elegant", "Elegant script", "Script and handwriting" },
+            { "marker", "Handwriting", "Script and handwriting" },
+            { "stencil", "Stencil", "Display and fun" }, { "pixel", "Pixel retro", "Display and fun" },
+            { "blackletter", "Gothic blackletter", "Display and fun" }, { "western", "Wild West", "Display and fun" },
+            { "scifi", "Sci-fi", "Display and fun" }, { "blocky", "Blocky display", "Display and fun" },
+            { "kids", "Fun and bouncy", "Display and fun" } };
+        for (const auto& f : fonts)
+        {
+            LLSD font; font["id"] = f[0]; font["label"] = f[1]; font["group"] = f[2];
+            o["fonts"].append(font);
+        }
+        // Source: PROTOCOL.md text_options "styles" (ids, and the labels apart from the hillside one; see above)
+        const char* styles[][2] = { { "plain", "Plain" }, { "bevel", "Bevelled" }, { "neon", "Neon" }, { "hillside", "Hillside Sign" } };
+        for (const auto& s : styles)
+        {
+            LLSD style; style["id"] = s[0]; style["label"] = s[1]; style["note"] = "";
+            o["styles"].append(style);
+        }
+        // Source: PROTOCOL.md text_options "limits"
+        LLSD& l = o["limits"];
+        l["lines"] = 3; l["lineChars"] = 24; l["heightMin"] = 0.1; l["heightMax"] = 30.0; l["depthMin"] = 0.01; l["depthMax"] = 5.0;
+        l["radiusMin"] = 0.5; l["radiusMax"] = 20.0; l["nameChars"] = 48;
+        o["credits"] = 0;
+        // Source: the server's defaults (wolf-text3d PROTOCOL.md, as sent by the 3D Text server 2026-10-26):
+        // id, font, height, depth, bevel, colour, glow, fullbright, layout, light mode, light colour, intensity, radius
+        struct Def { const char *id, *font; F64 height, depth; bool bevel; const char* colour; F64 glow; bool fullbright;
+                     const char *layout, *mode, *light; F64 intensity, radius; };
+        const Def defs[] = {
+            { "plain",    "sans",   1.0,  0.2,  false, "#e8e8e8", 0.0,  false, "one",     "off",  "#ffffff", 1.0, 4.0 },
+            { "bevel",    "serif",  1.0,  0.25, true,  "#d8b048", 0.0,  false, "one",     "off",  "#fff2d8", 1.0, 4.0 },
+            { "neon",     "script", 0.6,  0.05, false, "#ff3fb4", 0.35, true,  "one",     "on",   "#ff3fb4", 0.8, 3.0 },
+            { "hillside", "tall",   13.7, 0.34, false, "#f4f4f0", 0.04, true,  "letters", "auto", "#fff1dc", 1.0, 20.0 } };
+        for (const Def& f : defs)
+        {
+            LLSD d;
+            d["font"] = f.font; d["height"] = f.height; d["depth"] = f.depth; d["bevel"] = f.bevel; d["colour"] = f.colour;
+            d["glow"] = f.glow; d["fullbright"] = f.fullbright; d["layout"] = f.layout;
+            LLSD light;
+            light["mode"] = f.mode; light["colour"] = f.light; light["intensity"] = f.intensity; light["radius"] = f.radius;
+            d["light"] = light;
+            o["defaults"][f.id] = d;
+        }
+        return o;
+    }
+
+    bool text_list_ok(const LLSD& list)
+    {
+        if (!list.isArray() || list.size() == 0) return false;
+        for (const LLSD& e : llsd::inArray(list))
+            if (!e.isMap() || !e["id"].isString() || e["id"].asString().empty() || !e["label"].isString() || e["label"].asString().empty()) return false;
+        return true;
+    }
+
+    /** text_options' limit `key`, or the protocol's when the reply has no usable number for it. */
+    F64 text_limit(const LLSD& options, const char* key)
+    {
+        const LLSD& v = options["limits"][key];
+        if ((v.isReal() || v.isInteger()) && v.asReal() >= 0.) return v.asReal();
+        return text_fallback_options()["limits"][key].asReal();
+    }
+
+    // "#rrggbb" <-> a colour (the SPEC's colour format)
+    std::string text_hex(const LLColor4& c)
+    {
+        auto byte = [](F32 v) { return (S32)ll_round(llclamp(v, 0.f, 1.f) * 255.f); };
+        return llformat("#%02x%02x%02x", byte(c.mV[VRED]), byte(c.mV[VGREEN]), byte(c.mV[VBLUE]));
+    }
+    bool text_colour(const LLSD& v, LLColor4& out)
+    {
+        const std::string s = v.asString();
+        if (!v.isString() || s.size() != 7 || s[0] != '#' || s.find_first_not_of("0123456789abcdefABCDEF", 1) != std::string::npos) return false;
+        const U32 rgb = (U32)std::stoul(s.substr(1), nullptr, 16);
+        out = LLColor4(F32((rgb >> 16) & 0xff) / 255.f, F32((rgb >> 8) & 0xff) / 255.f, F32(rgb & 0xff) / 255.f, 1.f);
+        return true;
+    }
+
+    /** A number as the resident would write it ("0.1", "30"), for the messages by the fields. */
+    std::string text_num(F64 v)
+    {
+        std::string s = llformat("%.2f", v);
+        while (!s.empty() && s.back() == '0') s.pop_back();
+        if (!s.empty() && s.back() == '.') s.pop_back();
+        return s;
+    }
+
+    /** The control's value at 2 decimal places: an F32 such as 0.01f is a hair under 0.01 and would fail the server's range check. */
+    F64 text_round(F64 v) { return (F64)ll_round(v * 100.) / 100.; }
+
+    S32 text_chars(const std::string& s) { return (S32)utf8str_to_wstring(s).size(); }
+
+    const char* const TEXT_FIELD_ERRORS[] = { "ai_text_words_err", "ai_text_height_err", "ai_text_depth_err", "ai_text_radius_err", "ai_text_name_err" };
+
+    // Source: PROTOCOL.md "Changes 2026-10-26 (round 2)" 2 - "request a new preview 1.2 s after the last change"
+    const F64 TEXT_PREVIEW_DELAY = 1.2;
+    // a font group's heading in the font list: a row that cannot be chosen (LLComboBox::add enabled=false; LLScrollListCtrl
+    // skips disabled rows for the mouse, the arrow keys and type-ahead), its value never a font id
+    const char* const TEXT_GROUP_PREFIX = "group:";
+}
+
 static LLPanelInjector<WolfPanelAI> t_wolf_panel_ai("wolf_panel_ai");
 WolfPanelAI::WolfPanelAI() : LLPanel() {}
 // Source: original WolfPanelAI::postBuild and LLUICtrlFactory::create; reuse one copy of every control.
@@ -895,6 +1062,53 @@ bool WolfPanelAI::postBuild()
     getChild<LLButton>("ai_view_next")->setCommitCallback([this](LLUICtrl*, const LLSD&) { onView(1); });
     mPrompt->setMaxTextLength(WolfAI::MAX_PROMPT_CHARS);
     mPrompt->setKeystrokeCallback([this](LLTextEditor*) { saveDraft(); });
+    // [WOLF 3D TEXT 2026-10-26] the 3D Text tool's steps and controls (floater_wolf_ai.xml ai_step_text*)
+    mStepText = getChild<LLPanel>("ai_step_text"); mStepTextDone = getChild<LLPanel>("ai_step_text_done");
+    mTextPageLetters = getChild<LLPanel>("ai_text_page_letters"); mTextPageLights = getChild<LLPanel>("ai_text_page_lights");
+    mTextWords = getChild<LLTextEditor>("ai_text_words"); mTextReport = getChild<LLTextEditor>("ai_text_report");
+    mTextStyleBox = getChild<LLComboBox>("ai_text_style"); mTextFont = getChild<LLComboBox>("ai_text_font");
+    mTextLayout = getChild<LLComboBox>("ai_text_layout"); mTextLight = getChild<LLComboBox>("ai_text_light");
+    mTextHeight = getChild<LLSpinCtrl>("ai_text_height"); mTextDepth = getChild<LLSpinCtrl>("ai_text_depth");
+    mTextRadius = getChild<LLSpinCtrl>("ai_text_light_radius");
+    mTextGlow = getChild<LLSliderCtrl>("ai_text_glow"); mTextIntensity = getChild<LLSliderCtrl>("ai_text_light_intensity");
+    mTextBevel = getChild<LLCheckBoxCtrl>("ai_text_bevel"); mTextFullbright = getChild<LLCheckBoxCtrl>("ai_text_fullbright");
+    mTextColour = getChild<LLColorSwatchCtrl>("ai_text_colour"); mTextLightColour = getChild<LLColorSwatchCtrl>("ai_text_light_colour");
+    mTextTexture = getChild<LLTextureCtrl>("ai_text_texture"); mTextName = getChild<LLLineEditor>("ai_text_name");
+    mTextPreviewBtn = getChild<LLButton>("ai_text_preview"); mTextMakeBtn = getChild<LLButton>("ai_text_make");
+    mTextStatus = getChild<LLTextBox>("ai_text_status"); mTextNumbers = getChild<LLTextBox>("ai_text_numbers");
+    mTextDay = getChild<LLButton>("ai_text_day"); mTextNight = getChild<LLButton>("ai_text_night");
+    mTextTabLetters = getChild<LLButton>("ai_text_tab_letters"); mTextTabLights = getChild<LLButton>("ai_text_tab_lights");
+    {
+        LLPanel* picture = getChild<LLPanel>("ai_text_picture");
+        LLPanel::Params tp; tp.name = "ai_text_picture_image"; tp.rect = picture->getLocalRect(); tp.follows.flags = FOLLOWS_ALL;
+        mTextPicture = LLUICtrlFactory::create<WolfAIPreview>(tp); picture->addChild(mTextPicture);
+    }
+    mTextWords->setLabel(getString("text_placeholder"));
+    // the words change the picture; the inventory name does not (it is checked when the sign is made)
+    mTextWords->setKeystrokeCallback([this](LLTextEditor*) { mTextEdited = true; textQueuePreview(); });
+    mTextName->setKeystrokeCallback([this](LLLineEditor*, void*) { mTextEdited = true; }, nullptr);
+    getChild<LLButton>("ai_choose_text")->setCommitCallback([this](LLUICtrl*, const LLSD&) { textChoose(); });
+    // leaving the tool takes its error with it (the shared error box would otherwise show it on the Choose step)
+    getChild<LLButton>("ai_text_back")->setCommitCallback([this](LLUICtrl*, const LLSD&) { WolfAI::instance().error("text", ""); setStep(Step::Choose); });
+    getChild<LLButton>("ai_text_again")->setCommitCallback([this](LLUICtrl*, const LLSD&) { setStep(Step::TextForm); });
+    getChild<LLButton>("ai_text_finished")->setCommitCallback([this](LLUICtrl*, const LLSD&) { WolfAI::instance().error("text", ""); setStep(Step::Choose); });
+    getChild<LLButton>("ai_text_texture_clear")->setCommitCallback([this](LLUICtrl*, const LLSD&)
+    { mTextTexture->setImageAssetID(LLUUID::null); mTextEdited = true; textSyncControls(); textQueuePreview(); });
+    mTextPreviewBtn->setCommitCallback([this](LLUICtrl*, const LLSD&) { textPreview(true); });
+    mTextMakeBtn->setCommitCallback([this](LLUICtrl*, const LLSD&) { textMake(); });
+    mTextDay->setCommitCallback([this](LLUICtrl*, const LLSD&) { textShowNight(false); });
+    mTextNight->setCommitCallback([this](LLUICtrl*, const LLSD&) { textShowNight(true); });
+    mTextTabLetters->setCommitCallback([this](LLUICtrl*, const LLSD&) { textShowPage(false); });
+    mTextTabLights->setCommitCallback([this](LLUICtrl*, const LLSD&) { textShowPage(true); });
+    textShowPage(false);
+    textShowNight(false);
+    // PROTOCOL.md: "When the resident picks a style, load that style's defaults into the form (they can change them after)."
+    mTextStyleBox->setCommitCallback([this](LLUICtrl*, const LLSD&) { mTextEdited = true; textLoadDefaults(mTextStyleBox->getValue().asString()); });
+    auto edited = [this](LLUICtrl*, const LLSD&) { mTextEdited = true; textSyncControls(); textQueuePreview(); };
+    for (LLUICtrl* c : std::initializer_list<LLUICtrl*>{ mTextFont, mTextLayout, mTextLight, mTextHeight, mTextDepth, mTextRadius, mTextGlow,
+                                                         mTextIntensity, mTextBevel, mTextFullbright, mTextColour, mTextLightColour, mTextTexture })
+        c->setCommitCallback(edited);
+    textApplyOptions(text_fallback_options());
     // [FORGE LOOK] the painted forge goes behind every control of this panel (it is not mouse-opaque, so clicks reach the
     // floater beneath). Source: llfloaterwolfavatars.cpp:1014-1024 (wolffloaterradio.cpp:630-643)
     WolfAIForge::Params fp; fp.name("wolf_ai_forge"); fp.rect(getLocalRect()); fp.follows.flags(FOLLOWS_ALL); fp.mouse_opaque(false);
@@ -916,13 +1130,14 @@ void WolfPanelAI::setStep(Step step)
     mStep = step;
     mStepChoose->setVisible(step == Step::Choose); mStepForm->setVisible(step == Step::Form);
     mStepConfirm->setVisible(step == Step::Confirm); mStepWorking->setVisible(step == Step::Working);
+    mStepText->setVisible(step == Step::TextForm); mStepTextDone->setVisible(step == Step::TextDone);
     if (mBuilt) refresh();
 }
 void WolfPanelAI::onChoose(const std::string& mode)
 {
     WolfAI& ai = WolfAI::instance();
     // A fresh choice starts clean: an old error from the other generator must not follow it.
-    ai.error("action", ""); ai.error("mesh", "");
+    ai.error("action", ""); ai.error("mesh", ""); ai.error("text", "");
     ai.mDraftMode = mode; mMode->setValue(mode); saveDraft(); invalidateReads();
     setStep(Step::Form);
 }
@@ -957,7 +1172,8 @@ void WolfPanelAI::onVisibilityChange(bool visible)
     if (visible && mBuilt)
     {
         WolfAI& ai = WolfAI::instance(); const auto* selected = ai.job(ai.mSelected);
-        if (ai.generating() || (selected && (selected->active() || selected->collectable()))) setStep(Step::Working);
+        // [WOLF 3D TEXT 2026-10-26] a resident in the middle of a sign stays on it (a running model is still on Choose's way back)
+        if (!textStep() && (ai.generating() || (selected && (selected->active() || selected->collectable())))) setStep(Step::Working);
     }
     LLPanel::onVisibilityChange(visible);
 }
@@ -965,6 +1181,7 @@ void WolfPanelAI::draw()
 {
     if (mRefreshTimer.getElapsedTimeF32() >= 1.f)
     { mRefreshTimer.reset(); refresh(); }
+    textTick();   // [WOLF 3D TEXT round 2] the live preview's 1.2 s wait is finer than refresh()'s second
     LLPanel::draw();
 }
 void WolfPanelAI::refresh()
@@ -977,12 +1194,18 @@ void WolfPanelAI::refresh()
         invalidateReads(); mSession = auth; mNeedList = true;
         mPrompt->setText(ai.mDraft); mName->setText(ai.mDraftName); mMode->setValue(ai.mDraftMode);
         mShownRevision = ~U64(0); mView = 0;
+        // [WOLF 3D TEXT 2026-10-26] a call of the old session is never answered into this one; its options are asked again
+        ++mTextMakeSerial; ++mTextPreviewSerial; mTextMaking = false; mTextPreviewing = false;
+        mTextOptionsLive = false; mTextOptionsAsking = false; mTextPausedUntil = 0.; mTextHint.clear();
+        if (mTextDirtyAt > 0. || mTextStale) mTextDirtyAt = LLFrameTimer::getElapsedSeconds();
+        textSyncStatus();
     }
     const bool wolf = WolfGrid::isWolfTerritories();
     if (!wolf)
     {
         ai.error("grid", "Sorry, this function is only available on Wolf Territories Grid.");
         mBuild->setEnabled(false); mCollect->setEnabled(false); mResume->setEnabled(false);
+        for (LLButton* b : { mTextPreviewBtn, mTextMakeBtn }) b->setEnabled(false);
         showErrors(ai.errors()); return;
     }
     ai.refresh();
@@ -1035,8 +1258,9 @@ void WolfPanelAI::refresh()
             : "You can close this window. The building keeps being designed on the grid. When it is ready it is put into your Objects folder and charged automatically the next time this viewer sees it."));
         getChild<LLButton>("ai_working_done")->setLabel(smallJob ? "Make another" : "Start another");
         getChildView("ai_scroll")->setVisible(!smallJob);
-        if (mStep != Step::Working && ai.generating()) setStep(Step::Working);
+        if (mStep != Step::Working && !textStep() && ai.generating()) setStep(Step::Working);
     }
+    textSyncControls();
     mBuild->setEnabled(auth.current() && (mesh ? a.mMesh && !ai.generating() : a.mBuild && quote.valid && !ai.pending("start")));
     mPrompt->setEnabled(!(mesh ? ai.generating() : ai.pending("start"))); mName->setEnabled(!ai.generating());
     if (mShownRevision != ai.revision()) { renderJobs(); mShownRevision = ai.revision(); }
@@ -1253,20 +1477,9 @@ void WolfPanelAI::loadPresentation()
     {
         auto* p = panel(); if (!p) return;
         std::string failure = message;
-        LLPointer<WolfMemoryPNG> png = new WolfMemoryPNG;
-        LLPointer<LLImageRaw> raw = new LLImageRaw;
-        // Source: LLPngWrapper truncates dimensions to U16 before native decode. libpng's
-        // full-width header check prevents oversized dimensions wrapping into a small allocation.
-        png_image header{}; header.version = PNG_IMAGE_VERSION;
-        ok = ok && bytes.size() >= 8 && bytes.size() <= size_t(std::numeric_limits<S32>::max())
-            && png_image_begin_read_from_memory(&header, bytes.data(), bytes.size());
-        if (ok) ok = header.width > 0 && header.height > 0
-            && header.width <= std::numeric_limits<U16>::max() && header.height <= std::numeric_limits<U16>::max()
-            && U64(header.width) * header.height <= U64(8096) * 8096;
-        png_image_free(&header);
-        if (ok) ok = png->copyBytes(bytes) && png->updateData()
-            && (png->getComponents() == 3 || png->getComponents() == 4) && png->decode(raw, 0.f);
-        if (ok) p->mPreview->texture = LLViewerTextureManager::getLocalTexture(raw.get(), false);
+        LLPointer<LLViewerTexture> texture;
+        ok = ok && png_texture(bytes, texture);
+        if (ok) p->mPreview->texture = texture;
         else { p->mPreview->texture = nullptr; if (failure.empty()) failure = "The private preview is not a supported PNG. Select the build again to retry."; }
         WolfAI::instance().error("preview:" + id.asString(), ok ? "" : "Build " + id.asString() + ": " + failure);
         p->refresh();
@@ -1450,6 +1663,10 @@ namespace
         if (hover) { top = lighten(top, 0.04f); bottom = lighten(bottom, 0.03f); }
         if (pressed) { top = lighten(top, -0.04f); bottom = lighten(bottom, -0.03f); }
         fillRounded(r, allCorners(rad), top, bottom);
+        // [WOLF 3D TEXT round 2] the chosen side of a two-way switch (Letters / Colour and lights, Day / Night): a 2 px ember
+        // rim as well as its ember label (the XUI's label_color_selected, FG_EMBER on FG_BTN_TOP 6.3:1), so the choice is
+        // not shown by colour alone
+        if (b->getToggleState()) { strokeRounded(r, allCorners(rad), 0.f, 2.f, FG_EMBER, FG_EMBER); return; }
         strokeRounded(r, allCorners(rad), 0.f, 1.f, hover ? FG_EMBER : FG_BTN_EDGE, hover ? FG_EMBER : FG_BTN_EDGE);
     }
 
@@ -1531,7 +1748,7 @@ void WolfPanelAI::drawForgeEmbers() const
     const bool small_working = mStep == Step::Working && !getChildView("ai_scroll")->getVisible();
     const WolfAI& ai = WolfAI::instance();
     const bool delivered = small_working && !ai.generating() && ai.mMeshItem.notNull() && ai.mMeshStatus == FG_DELIVERED;
-    const std::vector<std::string> words = forgeList(getString(mStep == Step::Choose ? "steps_choose"
+    const std::vector<std::string> words = forgeList(getString(mStep == Step::Choose ? "steps_choose" : textStep() ? "steps_text"
                                                               : (mesh || small_working) ? "steps_small" : "steps_large"));
     if (words.size() < 4) return;
     S32 cur = 0;
@@ -1541,6 +1758,10 @@ void WolfPanelAI::drawForgeEmbers() const
     case Step::Form:    cur = 1; break;
     case Step::Confirm: cur = 2; break;
     case Step::Working: cur = small_working ? (delivered ? 3 : 2) : 3; break;
+    // [WOLF 3D TEXT 2026-10-26] Choose - Your words - Make it - Delivered (round 2: the preview is on the form; the third
+    // ember is lit while the sign is being made)
+    case Step::TextForm:    cur = mTextMaking ? 2 : 1; break;
+    case Step::TextDone:    cur = 3; break;
     }
     const LLRect band(16, H - 100, W - 16, H - 136);
     untextured();
@@ -1599,7 +1820,7 @@ void WolfPanelAI::drawForgeStep(F32 t)
     case Step::Choose:
     {
         // the generator tiles: iron, an ember rim, the vase in a pool of firelight on the left
-        for (const char* name : { "ai_choose_small", "ai_choose_large" })
+        for (const char* name : { "ai_choose_small", "ai_choose_large", "ai_choose_text" })
         {
             LLButton* b = getChild<LLButton>(name);
             if (!b->isInVisibleChain()) continue;
@@ -1615,10 +1836,23 @@ void WolfPanelAI::drawForgeStep(F32 t)
             const F32 cx = (F32)r.mLeft + 62.f, cy = (F32)r.getCenterY();
             disc(cx, cy, 46.f, withAlpha(FG_GLOW, hover ? 0.30f : 0.18f), FG_CLEAR);
             ellipse(cx, cy - 34.f, 30.f, 4.f, withAlpha(LLColor4::black, 0.5f), FG_CLEAR);
-            forgeVase(cx, cy - 34.f, 70.f, hover ? FG_EMBER : FG_BTN_EDGE, FG_IRON_BOTTOM);
+            if (std::string(name) != "ai_choose_text")
+            {
+                forgeVase(cx, cy - 34.f, 70.f, hover ? FG_EMBER : FG_BTN_EDGE, FG_IRON_BOTTOM);
+                continue;
+            }
+            // [WOLF 3D TEXT 2026-10-26] the 3D Text tile's picture: solid letters, their depth drawn as layers stepping back
+            const LLFontGL* f = fitDisplayFont(60.f, 96.f, { "Ab" });
+            const LLColor4 face = hover ? FG_EMBER : FG_HAMMER;
+            for (S32 k = 6; k >= 1; --k) text(f, "Ab", cx + (F32)k, cy - 4.f + (F32)k, lighten(FG_ANVIL, -0.02f * (F32)k), LLFontGL::HCENTER);
+            text(f, "Ab", cx, cy - 4.f, face, LLFontGL::HCENTER);
         }
         break;
     }
+    case Step::TextForm:
+    case Step::TextDone:
+        drawForgeText(t);
+        break;
     case Step::Form:
     {
         // the ledger behind the credits row
@@ -1719,4 +1953,606 @@ void WolfPanelAI::drawCrucible(const LLRect& area, F32 t) const
     // the anvil in the well, hot while it works
     const F32 u = r * 1.2f / 120.f;
     forgeAnvil(cx - 60.f * u, cy + 42.f * u, u, working ? 0.8f + 0.2f * sinf(t * 2.f) : 0.f, t);
+}
+
+// ─────────────────────────── the 3D Text tool ([WOLF 3D TEXT 2026-10-26]) ───────────────────────────
+// Source: region-terrain-work/wolf-text3d/PROTOCOL.md - text_options, text_preview and text_make through the brain API
+// (WolfAdventure::api, as WolfAvatars' char_quote and WolfPets' wolfpet_make). No AI call and no charge (credits 0).
+
+namespace
+{
+    // Source: PROTOCOL.md text_preview - PNGs of 1024 x 512 (data) and 512 x 512 (day, night); each base64 is refused far
+    // above that (never a huge allocation)
+    const size_t TEXT_PREVIEW_B64_MAX = 8u * 1024u * 1024u;
+    bool text_number(const LLSD& v) { return v.isReal() || v.isInteger(); }
+
+    /** A base64 PNG from text_preview -> a texture, or false. Read with apr_base64_decode_binary as llfloaterwolfavatars.cpp
+     *  pictureTexture does (LLBase64's decodeAsString stops at the first zero byte), decoded as the large builds' previews
+     *  (png_texture). */
+    bool text_picture(const LLSD& v, LLPointer<LLViewerTexture>& out)
+    {
+        out = nullptr;
+        const std::string b64 = v.asString();
+        if (!v.isString() || b64.empty() || b64.size() > TEXT_PREVIEW_B64_MAX) return false;
+        const int max_len = apr_base64_decode_len(b64.c_str());
+        if (max_len <= 0) return false;
+        LLSD::Binary bytes((size_t)max_len);
+        const int len = apr_base64_decode_binary(bytes.data(), b64.c_str());
+        if (len <= 0 || len > max_len) return false;
+        bytes.resize((size_t)len);
+        return png_texture(bytes, out);
+    }
+}
+
+void WolfPanelAI::textChoose()
+{
+    WolfAI& ai = WolfAI::instance();
+    // a fresh choice starts clean, as onChoose
+    ai.error("action", ""); ai.error("mesh", ""); ai.error("text", ""); mTextSummary = false;
+    textAskOptions();
+    textShowPage(false);
+    textShowNight(false);   // PROTOCOL.md round 2: the switch starts on Day
+    setStep(Step::TextForm);
+    mTextWords->setFocus(true);
+    // a picture of the form as it is: drawn again only when there is none yet or the form changed since the last one
+    if (mTextStale || mTextPicture->texture.isNull()) textQueuePreview();
+}
+
+void WolfPanelAI::textAskOptions()
+{
+    if (mTextOptionsLive || mTextOptionsAsking || !WolfGrid::isWolfTerritories()) return;
+    mTextOptionsAsking = true;
+    const auto auth = mSession; LLHandle<LLPanel> handle = getHandle();
+    // Source: PROTOCOL.md "text_options {} -> options". On failure the form keeps the protocol's own lists (said nowhere:
+    // only a failed Preview or Make tells the resident 3D Text is not available).
+    WolfAdventure::api("text_options", LLSD::emptyMap(), [handle, auth](bool ok, const LLSD& reply, const std::string& error)
+    {
+        auto* p = dynamic_cast<WolfPanelAI*>(handle.get());
+        if (!p || !auth.current() || !(p->mSession == auth)) return;
+        p->mTextOptionsAsking = false;
+        if (ok && reply.isMap() && text_list_ok(reply["fonts"]) && text_list_ok(reply["styles"]) && reply["defaults"].isMap())
+        {
+            p->textApplyOptions(reply);
+            p->mTextOptionsLive = true;
+        }
+        else LL_INFOS("WolfAI") << "3D Text: text_options unavailable (" << error << "); the form keeps the protocol's own lists" << LL_ENDL;
+    });
+}
+
+void WolfPanelAI::textApplyOptions(const LLSD& options)
+{
+    mTextOptions = options;
+    const LLSD& opts = mTextOptions;
+    const std::string style = mTextStyleBox->getValue().asString(), font = mTextFont->getValue().asString();
+    // the labels exactly as sent (PROTOCOL.md: "Show the style label EXACTLY as sent")
+    mTextStyleBox->removeall();
+    for (const LLSD& s : llsd::inArray(opts["styles"])) mTextStyleBox->add(s["label"].asString(), s["id"]);
+    // PROTOCOL.md round 2 (1): the fonts grouped by `group`, the groups in `fontGroups` order, each under a heading that
+    // cannot be chosen; a font whose group is missing or not listed still shows, after a separator below the groups
+    mTextFont->removeall();
+    std::vector<std::string> groups;
+    for (const LLSD& g : llsd::inArray(opts["fontGroups"]))
+        if (g.isString() && !g.asString().empty() && std::find(groups.begin(), groups.end(), g.asString()) == groups.end())
+            groups.push_back(g.asString());
+    std::string first_font;
+    auto add_font = [this, &first_font](const LLSD& f)
+    {
+        mTextFont->add(f["label"].asString(), f["id"]);
+        if (first_font.empty()) first_font = f["id"].asString();
+    };
+    for (const std::string& g : groups)
+    {
+        bool heading = false;
+        for (const LLSD& f : llsd::inArray(opts["fonts"]))
+        {
+            if (f["group"].asString() != g) continue;
+            if (!heading) { mTextFont->add("— " + g + " —", LLSD(TEXT_GROUP_PREFIX + g), ADD_BOTTOM, false); heading = true; }
+            add_font(f);
+        }
+    }
+    bool separated = groups.empty();
+    for (const LLSD& f : llsd::inArray(opts["fonts"]))
+    {
+        if (std::find(groups.begin(), groups.end(), f["group"].asString()) != groups.end()) continue;
+        if (!separated) { mTextFont->addSeparator(); separated = true; }
+        add_font(f);
+    }
+    if (font.empty() || !mTextFont->selectByValue(font)) mTextFont->selectByValue(first_font);
+    // the spinners take the server's limits (a value outside them is pulled in by the spinner itself)
+    mTextHeight->setMinValue((F32)text_limit(opts, "heightMin")); mTextHeight->setMaxValue((F32)text_limit(opts, "heightMax"));
+    mTextDepth->setMinValue((F32)text_limit(opts, "depthMin")); mTextDepth->setMaxValue((F32)text_limit(opts, "depthMax"));
+    mTextRadius->setMinValue((F32)text_limit(opts, "radiusMin")); mTextRadius->setMaxValue((F32)text_limit(opts, "radiusMax"));
+    mTextName->setMaxTextChars((S32)text_limit(opts, "nameChars"));
+    mTextWords->setToolTip(llformat("The words of your sign. Press Enter for a new line (%d lines at most, %d characters a line).",
+                                    (S32)text_limit(opts, "lines"), (S32)text_limit(opts, "lineChars")));
+    getChild<LLTextBox>("ai_text_words_hint")->setText(llformat("Up to %d lines, %d characters a line",
+                                                                (S32)text_limit(opts, "lines"), (S32)text_limit(opts, "lineChars")));
+    const bool known = !style.empty() && mTextStyleBox->selectByValue(style);
+    // untouched, the form takes the (new) defaults of its style; once the resident has changed something, it keeps theirs
+    if (!mTextEdited || !known) textLoadDefaults(known ? style : opts["styles"][0]["id"].asString());
+    else textSyncControls();
+}
+
+void WolfPanelAI::textLoadDefaults(const std::string& style)
+{
+    mTextStyleBox->selectByValue(style);
+    mTextStyle = style;
+    const LLSD& opts = mTextOptions;
+    const LLSD& d = opts["defaults"][style];
+    if (d.isMap())
+    {
+        // Source: PROTOCOL.md SPEC fields; a field the defaults leave out keeps what the form has
+        LLColor4 c;
+        if (d["font"].isString()) mTextFont->selectByValue(d["font"]);
+        if (text_number(d["height"])) mTextHeight->setValue(d["height"].asReal());
+        if (text_number(d["depth"])) mTextDepth->setValue(d["depth"].asReal());
+        if (d["bevel"].isBoolean()) mTextBevel->set(d["bevel"].asBoolean());
+        if (text_colour(d["colour"], c)) mTextColour->set(c);
+        if (text_number(d["glow"])) mTextGlow->setValue(d["glow"].asReal());
+        if (d["fullbright"].isBoolean()) mTextFullbright->set(d["fullbright"].asBoolean());
+        if (d["layout"].isString()) mTextLayout->selectByValue(d["layout"]);
+        const LLSD& light = d["light"];
+        if (light.isMap())
+        {
+            if (light["mode"].isString()) mTextLight->selectByValue(light["mode"]);
+            if (text_colour(light["colour"], c)) mTextLightColour->set(c);
+            if (text_number(light["intensity"])) mTextIntensity->setValue(light["intensity"].asReal());
+            if (text_number(light["radius"])) mTextRadius->setValue(light["radius"].asReal());
+        }
+    }
+    textSyncControls();
+    textQueuePreview();
+}
+
+void WolfPanelAI::textSyncControls()
+{
+    const LLSD& opts = mTextOptions;
+    const std::string style = mTextStyleBox->getValue().asString();
+    const bool hillside = style == "hillside", neon = style == "neon";
+    // Source: PROTOCOL.md SPEC - "Hillside is always letters"; depth "ignored by neon"
+    if (hillside && mTextLayout->getValue().asString() != "letters") mTextLayout->selectByValue("letters");
+    mTextLayout->setEnabled(!hillside);
+    mTextDepth->setEnabled(!neon);
+    const bool lights = mTextLight->getValue().asString() != "off";
+    mTextLightColour->setEnabled(lights); mTextIntensity->setEnabled(lights); mTextRadius->setEnabled(lights);
+    getChildView("ai_text_texture_clear")->setEnabled(mTextTexture->getImageAssetID().notNull());
+    std::string note;
+    for (const LLSD& s : llsd::inArray(opts["styles"]))
+        if (s["id"].asString() == style && s["note"].isString()) note = s["note"].asString();
+    if (hillside) note += (note.empty() ? "" : "\n") + std::string("Always one object per letter, in a rez box.");
+    if (neon) note += (note.empty() ? "" : "\n") + std::string("Depth is not used for neon letters.");
+    LLTextBox* note_box = getChild<LLTextBox>("ai_text_style_note");
+    // the server's note is its own words of unknown length: the whole of it is the tooltip as well
+    if (note_box->getText() != note) { note_box->setText(note); note_box->setToolTip(note); }
+    const bool can = WolfGrid::isWolfTerritories() && mSession.current();
+    mTextPreviewBtn->setEnabled(can);
+    mTextMakeBtn->setEnabled(can && !mTextMaking);
+    textSyncStatus();
+}
+
+void WolfPanelAI::textFieldError(const char* field, const std::string& message)
+{
+    LLTextBox* t = getChild<LLTextBox>(field);
+    t->setText(message);
+    t->setVisible(!message.empty());
+}
+
+bool WolfPanelAI::textFieldErrorsShown() const
+{
+    for (const char* f : TEXT_FIELD_ERRORS)
+        if (getChildView(f)->getVisible()) return true;
+    return false;
+}
+
+bool WolfPanelAI::textSpec(LLSD& spec, LLUICtrl*& first, std::string& why, bool show)
+{
+    first = nullptr;
+    why.clear();
+    if (show) for (const char* f : TEXT_FIELD_ERRORS) textFieldError(f, "");
+    const LLSD& opts = mTextOptions;
+    auto bad = [this, &first, &why, show](const char* field, LLUICtrl* ctrl, const std::string& message)
+    {
+        if (show) textFieldError(field, message);
+        if (!first) { first = ctrl; why = message; }
+    };
+    // Source: PROTOCOL.md SPEC text - "1-3 lines separated by \n, each at most 24 characters after trimming; not empty"
+    const S32 max_lines = (S32)text_limit(opts, "lines"), max_chars = (S32)text_limit(opts, "lineChars");
+    std::string all = mTextWords->getText();
+    LLStringUtil::trim(all);
+    std::vector<std::string> lines;
+    for (std::string::size_type start = 0;;)
+    {
+        const std::string::size_type nl = all.find('\n', start);
+        std::string line = all.substr(start, nl == std::string::npos ? std::string::npos : nl - start);
+        LLStringUtil::trim(line);
+        lines.push_back(line);
+        if (nl == std::string::npos) break;
+        start = nl + 1;
+    }
+    if (all.empty()) bad("ai_text_words_err", mTextWords, "Enter the words for your sign.");
+    else if ((S32)lines.size() > max_lines)
+        bad("ai_text_words_err", mTextWords, llformat("Use %d lines at most - there are %d.", max_lines, (S32)lines.size()));
+    else for (size_t i = 0; i < lines.size(); ++i)
+    {
+        if (lines[i].empty()) { bad("ai_text_words_err", mTextWords, "Take out the empty line, or put words on it."); break; }
+        const S32 n = text_chars(lines[i]);
+        if (n > max_chars)
+        {
+            bad("ai_text_words_err", mTextWords, llformat("Line %d is %d characters long - %d at most a line, spaces included.", (S32)i + 1, n, max_chars));
+            break;
+        }
+    }
+    std::string text;
+    for (const std::string& line : lines) text += (text.empty() ? "" : "\n") + line;
+    // Source: PROTOCOL.md SPEC height 0.1 - 30, depth 0.01 - 5, light radius 0.5 - 20 (text_options limits)
+    auto range = [&](LLSpinCtrl* c, const char* field, const char* lo, const char* hi)
+    {
+        const F64 v = text_round(c->getValue().asReal()), a = text_limit(opts, lo), b = text_limit(opts, hi);
+        if (c->getEnabled() && (v < a || v > b)) bad(field, c, "Enter " + text_num(a) + " to " + text_num(b));
+        return v;
+    };
+    const F64 height = range(mTextHeight, "ai_text_height_err", "heightMin", "heightMax");
+    const F64 depth = range(mTextDepth, "ai_text_depth_err", "depthMin", "depthMax");
+    const F64 radius = range(mTextRadius, "ai_text_radius_err", "radiusMin", "radiusMax");
+    // Source: PROTOCOL.md SPEC name - "at most 48 characters; "" = the first line of the text"
+    std::string name = mTextName->getText();
+    LLStringUtil::trim(name);
+    const S32 max_name = (S32)text_limit(opts, "nameChars");
+    if (text_chars(name) > max_name)
+        bad("ai_text_name_err", mTextName, llformat("Use %d characters at most - this name has %d.", max_name, text_chars(name)));
+    if (first) return false;
+
+    const std::string style = mTextStyleBox->getValue().asString();
+    spec = LLSD::emptyMap();
+    spec["text"] = text;
+    spec["style"] = style;
+    spec["font"] = mTextFont->getValue().asString();
+    spec["height"] = height;
+    spec["depth"] = depth;
+    spec["bevel"] = mTextBevel->get();
+    spec["colour"] = text_hex(mTextColour->get());
+    // Source: PROTOCOL.md SPEC texture - "uuid or "": a texture from the resident's inventory (item id or asset id)"; the
+    // picker knows the item when it was picked from inventory, else only the asset
+    const LLUUID item = mTextTexture->getImageItemID(), asset = mTextTexture->getImageAssetID();
+    spec["texture"] = item.notNull() ? item.asString() : asset.notNull() ? asset.asString() : std::string();
+    spec["glow"] = text_round(mTextGlow->getValue().asReal());
+    spec["fullbright"] = mTextFullbright->get();
+    spec["layout"] = style == "hillside" ? std::string("letters") : mTextLayout->getValue().asString();
+    LLSD light;
+    light["mode"] = mTextLight->getValue().asString();
+    light["colour"] = text_hex(mTextLightColour->get());
+    light["intensity"] = text_round(mTextIntensity->getValue().asReal());
+    light["radius"] = radius;
+    spec["light"] = light;
+    spec["name"] = name;
+    return true;
+}
+
+void WolfPanelAI::textSubmitFailed(LLUICtrl* first)
+{
+    // GOV.UK validation: the message by each field, a line saying so in the error box, and the first field focused - on its
+    // page, which is shown first; a message on the other page is named in the summary so it is not missed
+    WolfAI& ai = WolfAI::instance();
+    if (mStep != Step::TextForm) setStep(Step::TextForm);
+    if (first && first->hasAncestor(mTextPageLights)) textShowPage(true);
+    else if (first && first->hasAncestor(mTextPageLetters)) textShowPage(false);
+    bool other_letters = false, other_lights = false;
+    for (const char* f : TEXT_FIELD_ERRORS)
+    {
+        const LLView* e = getChildView(f);
+        if (!e->getVisible()) continue;
+        if (e->hasAncestor(mTextPageLights) && !mTextPageLights->getVisible()) other_lights = true;
+        if (e->hasAncestor(mTextPageLetters) && !mTextPageLetters->getVisible()) other_letters = true;
+    }
+    std::string summary = "Some of the sign's settings need changing - the message is by each one.";
+    if (other_letters) summary += " Look under Letters as well.";
+    if (other_lights) summary += " Look under Colour and lights as well.";
+    ai.error("text", summary);
+    mTextSummary = true;
+    showErrors(ai.errors());
+    if (first) first->setFocus(true);
+}
+
+void WolfPanelAI::textMake()
+{
+    if (mTextMaking) return;
+    WolfAI& ai = WolfAI::instance();
+    if (!WolfGrid::isWolfTerritories())
+    {
+        ai.error("text", "Sorry, this function is only available on Wolf Territories Grid.");
+        showErrors(ai.errors());
+        return;
+    }
+    LLSD spec;
+    LLUICtrl* first = nullptr;
+    std::string why;
+    if (!textSpec(spec, first, why, true)) { textSubmitFailed(first); return; }
+    ai.error("text", "");
+    mTextSummary = false;
+    showErrors(ai.errors());
+    mTextMaking = true;
+    const U64 serial = ++mTextMakeSerial;
+    textSyncControls();
+    const auto auth = mSession; LLHandle<LLPanel> handle = getHandle();
+    // Source: PROTOCOL.md "text_make SPEC -> delivered"; errors are the usual refusal (ok=false, error in plain words, maybe
+    // reason)
+    WolfAdventure::api("text_make", spec, [handle, auth, serial](bool ok, const LLSD& reply, const std::string& error)
+    {
+        auto* p = dynamic_cast<WolfPanelAI*>(handle.get());
+        if (!p || !auth.current() || !(p->mSession == auth) || serial != p->mTextMakeSerial) return;
+        p->mTextMaking = false;
+        WolfAI& ai = WolfAI::instance();
+        if (!ok)
+        {
+            // the service's own words when it refused; otherwise it could not be reached
+            const bool refused = reply.isMap() && reply["error"].isString() && !reply["error"].asString().empty();
+            const std::string reason = refused ? reply["reason"].asString() : std::string();
+            if (reason == "sexual" || reason == "words")
+            {
+                // PROTOCOL.md: the words check refused the text - say it is the text, by the text
+                if (!p->textElsewhere() && p->mStep != Step::TextForm) p->setStep(Step::TextForm);
+                p->textFieldError("ai_text_words_err", error);
+                ai.error("text", "Your words cannot be used: " + error);
+                p->mTextWords->setFocus(true);
+            }
+            else ai.error("text", refused ? error : "3D Text is not available right now (" + error + "). Please try again in a few minutes.");
+            p->refresh();
+            return;
+        }
+        p->textShowMade(reply);
+    });
+}
+
+void WolfPanelAI::textQueuePreview()
+{
+    mTextDirtyAt = LLFrameTimer::getElapsedSeconds();
+    mTextStale = true;
+    textSyncStatus();
+}
+
+void WolfPanelAI::textTick()
+{
+    // PROTOCOL.md round 2 (2): a new preview 1.2 s after the last change, one at a time, never inside the server's wait
+    if (mStep != Step::TextForm || mTextPreviewing || mTextDirtyAt <= 0.) return;
+    const F64 now = LLFrameTimer::getElapsedSeconds();
+    if (now < mTextDirtyAt + TEXT_PREVIEW_DELAY || now < mTextPausedUntil || !isInVisibleChain()) return;
+    textPreview(false);
+}
+
+void WolfPanelAI::textPreview(bool loud)
+{
+    WolfAI& ai = WolfAI::instance();
+    const F64 now = LLFrameTimer::getElapsedSeconds();
+    if (!WolfGrid::isWolfTerritories() || !mSession.current())
+    {
+        mTextDirtyAt = 0.;
+        if (loud) { ai.error("text", "Sorry, this function is only available on Wolf Territories Grid."); showErrors(ai.errors()); }
+        textSyncStatus();
+        return;
+    }
+    LLSD spec;
+    LLUICtrl* first = nullptr;
+    std::string why;
+    // quiet while typing (GOV.UK: validate on submit); once messages are showing they follow every change
+    if (!textSpec(spec, first, why, loud || textFieldErrorsShown()))
+    {
+        // the line under the picture says what the preview waits for; nothing is asked until the form passes its checks
+        mTextDirtyAt = 0.;
+        mTextHint = why;
+        if (loud) textSubmitFailed(first);
+        textSyncStatus();
+        return;
+    }
+    if (mTextSummary) { ai.error("text", ""); mTextSummary = false; showErrors(ai.errors()); }
+    mTextHint.clear();
+    if (mTextPreviewing || now < mTextPausedUntil)
+    {
+        // one at a time, and none inside the server's wait: this one is asked as soon as the other answers / the wait ends
+        mTextDirtyAt = now - TEXT_PREVIEW_DELAY;
+        textSyncStatus();
+        return;
+    }
+    mTextDirtyAt = 0.;
+    mTextPreviewing = true;
+    const U64 serial = ++mTextPreviewSerial;
+    textSyncStatus();
+    const auto auth = mSession; LLHandle<LLPanel> handle = getHandle();
+    // Source: PROTOCOL.md "text_preview SPEC -> picture + numbers" and round 2 (2): day, night, lit; the server's rate is 40
+    // at once then one every 5 s, refused with 429 {error: "too many previews - wait N s and try again", retry: N}
+    // (wolfstorm/php/wolfadventure_lib.php wa_rate_or_refuse; WolfAdventure::api reads a 4xx refusal's JSON body)
+    WolfAdventure::api("text_preview", spec, [handle, auth, serial](bool ok, const LLSD& reply, const std::string& error)
+    {
+        auto* p = dynamic_cast<WolfPanelAI*>(handle.get());
+        if (!p || !auth.current() || !(p->mSession == auth) || serial != p->mTextPreviewSerial) return;
+        p->mTextPreviewing = false;
+        if (ok) { p->textShowPreview(reply); return; }
+        const F64 at = LLFrameTimer::getElapsedSeconds();
+        if (reply.isMap() && text_number(reply["retry"]) && reply["retry"].asReal() > 0.)
+        {
+            // the last picture stays and the line under it counts the wait down quietly (not the error box); the form as it
+            // is then is asked for when the wait is over. The wait is held to 10 minutes whatever the reply says.
+            p->mTextPausedUntil = at + llmin(reply["retry"].asReal(), 600.);
+            p->mTextDirtyAt = at;
+        }
+        else
+        {
+            const bool refused = reply.isMap() && reply["error"].isString() && !reply["error"].asString().empty();
+            const std::string reason = refused ? reply["reason"].asString() : std::string();
+            if (reason == "sexual" || reason == "words")
+            {
+                // PROTOCOL.md: the words check refused the text - said by the words (and in the error box if Make is pressed)
+                p->textFieldError("ai_text_words_err", error);
+                p->mTextHint = "Your words cannot be used - the message is under them.";
+            }
+            else p->mTextHint = refused ? "No preview: " + error
+                                        : "The preview is not available right now (" + error + "). Change something or press Update preview to try again.";
+        }
+        p->textSyncStatus();
+    });
+}
+
+void WolfPanelAI::textSyncStatus()
+{
+    if (!mTextStatus || !mTextPicture || !mTextDay) return;
+    const F64 now = LLFrameTimer::getElapsedSeconds();
+    const bool paused = now < mTextPausedUntil;
+    std::string line;
+    if (mTextMaking) line = "Making your sign - up to two minutes. You can close this window; it goes to your Objects folder either way.";
+    else if (paused) line = llformat("Preview paused for %d s", (S32)ceil(mTextPausedUntil - now));
+    else line = mTextHint;
+    if (mTextStatus->getText() != line) { mTextStatus->setText(line); mTextStatus->setToolTip(line); }
+    // the picture: dimmed while it no longer shows the form, "Updating..." while a new one is on its way or due; with none
+    // yet, the well says what will appear in it
+    const bool picture = mTextPicture->texture.notNull();
+    const bool updating = mTextPreviewing || (mTextDirtyAt > 0. && !paused);
+    mTextPicture->dim = picture && (mTextStale || updating);
+    mTextPicture->overlay = updating ? std::string(picture ? "Updating…" : "Drawing the preview…")
+                                     : std::string(picture ? "" : "Your sign appears here");
+    // PROTOCOL.md round 2: the Day / Night switch only when the sign looks different at night (`lit`)
+    const bool lit = mTextPicture->night.notNull();
+    mTextDay->setVisible(lit);
+    mTextNight->setVisible(lit);
+}
+
+void WolfPanelAI::textShowPage(bool lights)
+{
+    mTextPageLetters->setVisible(!lights);
+    mTextPageLights->setVisible(lights);
+    mTextTabLetters->setToggleState(!lights);
+    mTextTabLights->setToggleState(lights);
+}
+
+void WolfPanelAI::textShowNight(bool night)
+{
+    mTextPicture->showNight = night;
+    mTextDay->setToggleState(!night);
+    mTextNight->setToggleState(night);
+}
+
+std::string WolfPanelAI::textNumbers(const LLSD& stats, const std::string& size_separator) const
+{
+    // Source: PROTOCOL.md UI shape - "Land impact 24, 16 objects, 8 lights"; stats {objects, landImpact, lights, size [x,y,z]}
+    if (!stats.isMap()) return std::string();
+    std::string s;
+    auto add = [&s](const std::string& part) { s += (s.empty() ? "" : ", ") + part; };
+    if (nonnegative(stats["landImpact"])) add(llformat("Land impact %d", stats["landImpact"].asInteger()));
+    if (nonnegative(stats["objects"]))
+    { const S32 n = stats["objects"].asInteger(); add(llformat("%d %s", n, n == 1 ? "object" : "objects")); }
+    if (nonnegative(stats["lights"]))
+    { const S32 n = stats["lights"].asInteger(); add(llformat("%d %s", n, n == 1 ? "light" : "lights")); }
+    const LLSD& size = stats["size"];
+    if (size.isArray() && size.size() == 3 && text_number(size[0]) && text_number(size[1]) && text_number(size[2]))
+        s += llformat("%sabout %.1f × %.1f × %.1f m", s.empty() ? "" : size_separator.c_str(), size[0].asReal(), size[1].asReal(), size[2].asReal());
+    return s;
+}
+
+void WolfPanelAI::textShowPreview(const LLSD& reply)
+{
+    // PROTOCOL.md round 2 (2): `day` and `night` (512 x 512 each) for the Day / Night switch, `night` only when `lit`; the
+    // older `data` (both side by side, 1024 x 512) when they are absent - then there is no switch, both halves show at once
+    LLPointer<LLViewerTexture> day, night;
+    const bool png = reply["mime"].asString() == "image/png";
+    bool shown = png && text_picture(reply["day"], day);
+    if (shown) { if (reply["lit"].asBoolean()) text_picture(reply["night"], night); }
+    else shown = png && text_picture(reply["data"], day);
+    if (!shown)
+    {
+        // the last picture stays; the line under it says this one could not be shown (the next change tries again)
+        mTextHint = "The new preview picture could not be shown. Change something or press Update preview to try again.";
+        textSyncStatus();
+        return;
+    }
+    mTextPicture->texture = day;
+    mTextPicture->night = night;
+    if (night.isNull()) textShowNight(false);
+    mTextStale = mTextDirtyAt > 0.;   // changed again while this one was drawn: the next one is already due
+    mTextHint.clear();
+    mTextNumbers->setText(textNumbers(reply["stats"], "\n"));
+    // the server's notes (how it comes, what the lights do) are the picture's tooltip; how to put it up is on the
+    // delivered screen
+    std::string notes;
+    for (const LLSD& n : llsd::inArray(reply["notes"]))
+        if (n.isString() && !n.asString().empty()) notes += (notes.empty() ? "" : "\n") + n.asString();
+    mTextPicture->setToolTip(notes);
+    textSyncStatus();
+}
+
+void WolfPanelAI::textShowMade(const LLSD& reply)
+{
+    // Source: PROTOCOL.md text_make reply {item, name, folder, folderName, kind: object|rezbox, stats, report, delivered},
+    // "In-world behaviour", and round 2 (3) - the wording of the rez box note
+    WolfAI::instance().error("text", "");
+    mTextSummary = false;
+    const std::string name = reply["name"].isString() && !reply["name"].asString().empty() ? reply["name"].asString() : std::string("Your sign");
+    const std::string folder = reply["folderName"].isString() && !reply["folderName"].asString().empty() ? reply["folderName"].asString() : std::string("Wolf 3D Text");
+    const bool box = reply["kind"].asString() == "rezbox";
+    getChild<LLTextBox>("ai_text_done_title")->setText("“" + name + "” is ready");
+    getChild<LLTextBox>("ai_text_done_where")->setText(reply["delivered"].asBoolean()
+        ? "It is in your inventory: Objects > " + folder + "."
+        : "It is in your inventory, in Objects > " + folder + ". If you cannot see it yet, open your inventory and look there.");
+    getChild<LLTextBox>("ai_text_done_numbers")->setText(textNumbers(reply["stats"], "  ·  "));
+    getChild<LLTextBox>("ai_text_done_how")->setText(std::string(box
+        ? "It comes as a rez box. Put the box where the middle of the sign goes, turn it the way the sign should face, touch "
+          "it and choose Rez sign. The letters follow the box. “Clear” takes them away again, and “Lights” sets Auto, On or "
+          "Off for the whole sign. Touch any letter for Lights or “Drop to ground”."
+        : "Rez it from your inventory and it is the sign. Touch it (as its owner) to set the lights: Auto, On or Off."));
+    std::string report;
+    for (const LLSD& line : llsd::inArray(reply["report"]))
+        if (line.isString() && !line.asString().empty()) report += (report.empty() ? "" : "\n") + line.asString();
+    mTextReport->setText(report);
+    mTextReport->setVisible(!report.empty());
+    if (!textElsewhere()) setStep(Step::TextDone); else refresh();
+}
+
+void WolfPanelAI::drawForgeText(F32 t)
+{
+    const LLView* me = mForge;
+    auto at = [me](const LLView* v) { return rectIn(v, me); };
+    untextured();
+    switch (mStep)
+    {
+    case Step::TextForm:
+    {
+        // the left column on one iron plate: the words, the two page tabs and the page showing under them
+        const LLRect words = at(getChildView("ai_text_words_lbl"));
+        const LLRect page = at(mTextPageLetters->getVisible() ? mTextPageLetters : mTextPageLights);
+        forgeIron(LLRect(16, words.mTop + 8, page.mRight, page.mBottom), 10.f);
+        // on the right the picture in a dark well on iron (WolfAIPreview draws the sign, dimmed and its words, over it)
+        const LLRect picture = at(getChildView("ai_text_picture"));
+        forgeIron(grown(picture, 8), 8.f);
+        untextured();
+        fillRounded(picture, allCorners(4.f), FG_INPUT, FG_INPUT);
+        if (!mTextStatus->getText().empty())
+        {
+            const LLRect s = grown(at(mTextStatus), 4);
+            untextured();
+            fillRounded(s, allCorners(8.f), FG_INPUT, FG_INPUT);
+            strokeRounded(s, allCorners(8.f), 0.f, 1.5f, FG_BTN_EDGE, withAlpha(FG_BTN_EDGE, 0.7f));
+        }
+        for (LLButton* b : { getChild<LLButton>("ai_text_back"), getChild<LLButton>("ai_text_texture_clear"), mTextTabLetters,
+                             mTextTabLights, mTextPreviewBtn, mTextDay, mTextNight })
+            forgeButton(b, at(b), false, t);
+        forgeButton(mTextMakeBtn, at(mTextMakeBtn), true, t);
+        break;
+    }
+    case Step::TextDone:
+    {
+        // delivered: a green tick in firelight on the left (the title says it in words as well)
+        const LLRect where = at(getChildView("ai_text_done_where"));
+        const F32 cx = 76.f, cy = (F32)where.mTop - 56.f, r = 46.f;
+        disc(cx, cy, r * 1.3f, withAlpha(FG_OK, 0.16f), FG_CLEAR);
+        disc(cx, cy, r, FG_INPUT, FG_INPUT);
+        ring(cx, cy, r * 0.84f, r, FG_OK);
+        checkMark(cx, cy, r * 0.62f, llmax(3.f, r * 0.10f), FG_OK);
+        if (mTextReport->getVisible()) forgeIron(grown(at(mTextReport), 8), 8.f);
+        for (const char* name : { "ai_text_again", "ai_text_finished" })
+        {
+            LLButton* b = getChild<LLButton>(name);
+            forgeButton(b, at(b), false, t);
+        }
+        break;
+    }
+    default:
+        break;
+    }
 }

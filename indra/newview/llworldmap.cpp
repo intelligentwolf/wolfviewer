@@ -40,6 +40,7 @@
 // <FS:CR> Aurora Sim
 #include "llappviewer.h"
 #include "lltexturecache.h"
+#include "wolfadultcontent.h"   // [ADULT CONTENT 2026-10-26/]
 // </FS:CR> Aurora Sim
 
 // Timers to temporise database requests
@@ -185,6 +186,17 @@ const S32 LLSimInfo::getAgentCount() const
         total_agent_count += it->getCount();
     }
     return total_agent_count;
+}
+
+// [ADULT CONTENT 2026-10-26] see llworldmap.h. Source: was LLViewerRegion::accessToString / getAccessIcon of mAccess.
+const std::string LLSimInfo::getAccessString() const
+{
+    return WolfAdultContent::accessString(static_cast<U8>(mAccess), WolfAdultContent::isAdultContentAt(mHandle));
+}
+
+const std::string LLSimInfo::getAccessIcon() const
+{
+    return WolfAdultContent::accessIcon(static_cast<U8>(mAccess), WolfAdultContent::isAdultContentAt(mHandle));
 }
 
 bool LLSimInfo::isName(const std::string& name) const

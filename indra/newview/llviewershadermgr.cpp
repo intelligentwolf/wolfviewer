@@ -1290,16 +1290,23 @@ bool LLViewerShaderMgr::loadShadersWater()
         // linker as "No definition of calcAtmospherics", which is a cascade, not the cause -- and
         // the viewer died in bind(). Spend within the measured budget, like the terrain clamp.
         {
+            // [OPEN SEA SHORES 2026-10-26] + 1: the waterline clearance field (wolfClearField) is read by the fragment stage
+            // too now, for the per-pixel land rule on open-sea beaches (wolfwaterfield.h WolfWaterClearance). Measured
+            // (glslangValidator link of the assembled program, every permutation, mirrors + SSR + spot shadows on): the
+            // ACTIVE fragment samplers are 10 / 14 stock (no / sun shadows), + 7 ours (was 6), + 5 with the native sky's
+            // aerial perspective (which wolf_tk_create drops by itself if a program will not link) - at most 26, inside the
+            // 32 every desktop driver reports. The counts below are the older, larger estimate and stay as the gate.
+            const S32 OURS = 7;
             const S32 before_ours = 13 + (use_sun_shadow ? 6 : 0);
             const S32 units = gGLManager.mNumTextureImageUnits;
-            sWolfWaterFull = units <= 0 || units >= before_ours + 6;
+            sWolfWaterFull = units <= 0 || units >= before_ours + OURS;
             if (sWolfWaterFull)
             {
                 gWaterProgram.addPermutation("WOLF_WATER_FULL", "1");
             }
             else
             {
-                LL_WARNS("ShaderLoading") << "Water: advanced water needs " << before_ours + 6
+                LL_WARNS("ShaderLoading") << "Water: advanced water needs " << before_ours + OURS
                                           << " texture image units, this GPU has " << units
                                           << " -- compiling the stock water instead" << LL_ENDL;
                 const std::string lost = "advanced water (waves, wakes and shore depth)";

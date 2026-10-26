@@ -118,13 +118,14 @@ namespace WolfTk
         void setEepColours(const LLColor3& cloud, F32 mie_scale) { mEepCloud = cloud; mEepMie = mie_scale; }
         /** [WolfViewer 2026-10-13] The sky's gains toward the EEP (brunetonRuntime.glsl wolfEepGain[EEP_GAINS] / wolfEepGainOn;
          *  wolfenvironmentrender.cpp probeSky). on false: the physical sky as it is. */
-        /** [WolfViewer 2026-10-25] 7 heights (90 40 20 10 5 2 deg and the true horizon) x 11 azimuths all the way round the
-         *  stock sky's light (brunetonRuntime.glsl WOLF_EEP_GAIN_ROWS / _COLS / WOLF_EEP_GAINS: the same numbers). */
-        static constexpr S32 EEP_GAIN_ROWS = 7, EEP_GAIN_COLS = 11, EEP_GAINS = EEP_GAIN_ROWS * EEP_GAIN_COLS;
+        /** [WolfViewer 2026-10-26] 7 heights (90 40 20 10 5 2 deg and the true horizon) x 6 angles to the stock sky's light (3 10 25
+         *  50 90 180 deg), each node probed on both sides of the light (brunetonRuntime.glsl WOLF_EEP_GAIN_ROWS / _COLS /
+         *  WOLF_EEP_GAINS / WOLF_EEP_PROBES: the same numbers). */
+        static constexpr S32 EEP_GAIN_ROWS = 7, EEP_GAIN_COLS = 6, EEP_GAINS = EEP_GAIN_ROWS * EEP_GAIN_COLS, EEP_PROBES = 2 * EEP_GAINS;
         void setEepGains(const LLColor3 gains[EEP_GAINS], bool on) { for (S32 i = 0; i < EEP_GAINS; ++i) mEepGain[i] = gains[i]; mEepGainOn = on; mEepBlockDirty = true; }
         /** [WolfViewer 2026-10-25] The directions (world) skyF.glsl's probe mode draws, pixel i toward dirs[i] (wolfEepProbeDir in the
          *  WolfEepGains block): written into the block and bound at once, for the probe draw that follows (GL thread). */
-        void setEepProbeDirs(const LLVector3 dirs[EEP_GAINS]);
+        void setEepProbeDirs(const LLVector3 dirs[EEP_PROBES]);
         /** [WolfViewer 2026-10-25] The directions (ECEF, this frame's) the sky's and the clouds' gain azimuths are measured from
          *  (brunetonRuntime.glsl wolfEepGainRef, cloudsF.glsl wolfEepCloudGainRef); set every frame (the ECEF frame moves). */
         void setEepGainRefs(const LLVector3& sky_ref_ecef, const LLVector3& cloud_ref_ecef) { mEepGainRef = sky_ref_ecef; mEepCloudGainRef = cloud_ref_ecef; }

@@ -93,6 +93,8 @@
 #include "wolfregionweather.h"
 #include "wolfwavezones.h"
 #include "wolfgrid.h"   // [WOLF TERRAIN TEXTURES 2026-10-16] the Terrain tab's Wolf button
+#include "wolfadultcontent.h"   // [ADULT CONTENT 2026-10-26] the Region tab's Adult Content line and link
+#include "llweb.h"   // [ADULT CONTENT 2026-10-26/] Region type on wolf-grid.com...
 #include "lltrans.h"
 #include "llagentui.h"
 #include "llmeshrepository.h"
@@ -464,6 +466,103 @@ void LLFloaterRegionInfo::processEstateOwnerRequest(LLMessageSystem* msg,void**)
 }
 
 
+// [ADULT CONTENT 2026-10-26] The Rating dropdown's "Adult Content" choice (Paul 2026-10-26, W81). It is a Wolf choice,
+// never a sim access value: the region keeps maturity Adult (42) underneath (PROTOCOL.md §1), and sendUpdate sends that.
+namespace
+{
+    const char* const WOLF_AC_VALUE = "wolf_adult_content";
+
+    bool wolf_ac_is_choice(const LLSD& value)
+    {
+        return value.isString() && value.asString() == WOLF_AC_VALUE;
+    }
+
+    // The item is there on Wolf Territories only (added at the top, above Adult, so it is item 0 when present), and the
+    // dropdown shows "Adult Content" while the region is one, else the region's own rating.
+    void wolf_ac_sync_combo(LLPanel* panel, bool wolf, bool adult_content, U8 sim_access)
+    {
+        LLComboBox* combo = panel->getChild<LLComboBox>("access_combo");
+        const bool present = combo->getItemByValue(LLSD(WOLF_AC_VALUE)) != nullptr;
+        if (wolf && !present)
+        {
+            // Source: panel_region_general.xml access_combo items (an icon column, then the label column - LLComboBox
+            // initFromParams adds the label as the last column); llfloaterworldmap.cpp the LLSD column form.
+            LLSD row;
+            row["value"] = WOLF_AC_VALUE;
+            row["columns"][0]["type"] = "icon";
+            row["columns"][0]["value"] = WolfAdultContent::ICON_LIGHT;
+            row["columns"][0]["width"] = 20;
+            row["columns"][0]["halign"] = "center";
+            row["columns"][1]["value"] = WolfAdultContent::typeName();
+            combo->addElement(row, ADD_TOP);
+        }
+        else if (!wolf && present)
+        {
+            combo->remove(0);
+        }
+        combo->setValue(adult_content ? LLSD(WOLF_AC_VALUE) : LLSD(sim_access));
+    }
+
+    // What sendUpdate sends for the dropdown: the Adult Content choice is the region's real access (Adult underneath).
+    LLSD wolf_ac_real_access(const LLSD& value)
+    {
+        if (wolf_ac_is_choice(value))
+        {
+            const LLViewerRegion* region = gAgent.getRegion();
+            return LLSD((S32)(region ? region->getSimAccess() : SIM_ACCESS_ADULT));
+        }
+        return value;
+    }
+
+    void wolf_ac_show_note(LLPanel* panel, const std::string& text)
+    {
+        LLTextBox* note = panel->getChild<LLTextBox>("wolf_region_type_note");
+        note->setText(text);
+        note->setVisible(true);
+    }
+
+    // A choice in the Rating dropdown. Returns true when it was an Adult Content move, handled here (the website does
+    // it, PROTOCOL.md §6/§7); false for an ordinary rating change, which arms Apply as before.
+    bool wolf_ac_on_access_commit(LLPanel* panel)
+    {
+        LLViewerRegion* region = gAgent.getRegion();
+        if (!region || !WolfGrid::isOnWolfTerritories())
+        {
+            return false;
+        }
+        LLComboBox* combo = panel->getChild<LLComboBox>("access_combo");
+        const bool chose_ac = wolf_ac_is_choice(combo->getValue());
+        const bool is_ac = WolfAdultContent::isAdultContentRegion(region);
+        if (chose_ac == is_ac)
+        {
+            return chose_ac;   // re-chose what it already is: nothing to do (and never Apply the Wolf choice)
+        }
+        // Back to the region's real type until the server reports the change (the plugin applies it within about
+        // 5 minutes, PROTOCOL.md §2; the list shows it within 5 more).
+        combo->setValue(is_ac ? LLSD(WOLF_AC_VALUE) : LLSD(region->getSimAccess()));
+        if (chose_ac && WolfAdultContent::instance().ageVerified() == WolfAdultContent::EVerified::NotVerified)
+        {
+            // Paul 2026-10-26: whoever sets Adult Content must have completed the age check (the website enforces it too).
+            const std::string url = WolfAdultContent::instance().ageCheckURL();
+            LLNotificationsUtil::add("WolfAdultContentOwnerVerify", LLSD(), LLSD(),
+                [url](const LLSD& notification, const LLSD& response)
+                {
+                    // notifications.xml WolfAdultContentOwnerVerify: index 0 "Verify my age", 1 "Close".
+                    if (LLNotificationsUtil::getSelectedOption(notification, response) == 0)
+                    {
+                        LLWeb::loadURLExternal(url);
+                    }
+                });
+            return true;
+        }
+        // Switching it off goes through the same page (it also stops the surcharge, PROTOCOL.md §7): lowering the rating
+        // in-world would only be put back by the region (§2).
+        LLWeb::loadURLExternal(WolfAdultContent::regionTypeURL(region->getRegionID()));
+        wolf_ac_show_note(panel, LLTrans::getString(chose_ac ? "WolfAdultContentSetOpened" : "WolfAdultContentOffOpened"));
+        return true;
+    }
+}
+
 // static
 void LLFloaterRegionInfo::processRegionInfo(LLMessageSystem* msg)
 {
@@ -588,6 +687,28 @@ void LLFloaterRegionInfo::processRegionInfo(LLMessageSystem* msg)
     bool teen_grid = (parent_estate_id == 5);  // *TODO add field to estate table and test that
     panel->getChildView("access_combo")->setEnabled(gAgent.isGodlike() || (region && region->canManageEstate() && !teen_grid));
     panel->setCtrlsEnabled(allow_modify);
+
+    // [ADULT CONTENT 2026-10-26] PROTOCOL.md §2/§7: Adult Content is set ONLY on wolf-grid.com by the region owner or the
+    // estate owner (their own age check, the Adult Content Region Agreement and the GBP 10 a month), never from the viewer.
+    // Paul 2026-10-26 (W81): "Adult Content" is a choice in the Rating dropdown on Wolf Territories; choosing it (or, while
+    // it is on, choosing another rating) opens that page for this region - see wolf_ac_on_access_commit. The dropdown
+    // shows the region's real type: "Adult Content" while it is one. Gone (not greyed) on every other grid.
+    {
+        const bool wolf = WolfGrid::isOnWolfTerritories();
+        const bool adult_content = wolf && WolfAdultContent::isAdultContentRegion(region);
+        wolf_ac_sync_combo(panel, wolf, adult_content, sim_access);
+        panel->getChildView("wolf_adult_content_icon")->setVisible(adult_content);
+        panel->getChildView("wolf_adult_content_text")->setVisible(adult_content);
+        LLView* region_type_btn = panel->getChildView("wolf_region_type_btn");
+        region_type_btn->setVisible(wolf);
+        region_type_btn->setEnabled(wolf);   // a link, for anyone: setCtrlsEnabled above greys it for non-managers
+        panel->getChildView("access_combo")->setToolTip(adult_content
+            ? LLTrans::getString("WolfAdultContentRatingTooltip") : LLStringUtil::null);
+        if (!wolf)
+        {
+            panel->getChildView("wolf_region_type_note")->setVisible(false);
+        }
+    }
 
     panel->getChild<LLLineEditor>("estate_id")->setValue((S32)region_info.mEstateID);
 
@@ -1043,6 +1164,15 @@ bool LLPanelRegionGeneralInfo::postBuild()
     initCtrl("agent_limit_spin");
     initCtrl("object_bonus_spin");
     initCtrl("access_combo");
+    // [ADULT CONTENT 2026-10-26] the dropdown's Adult Content moves go to the website (wolf_ac_on_access_commit); any
+    // other choice arms Apply as initCtrl's onChangeAnything does.
+    getChild<LLUICtrl>("access_combo")->setCommitCallback([this](LLUICtrl*, const LLSD&)
+    {
+        if (!wolf_ac_on_access_commit(this))
+        {
+            onChangeAnything();
+        }
+    });
     initCtrl("restrict_pushobject");
     initCtrl("block_parcel_search_check");
 
@@ -1056,6 +1186,14 @@ bool LLPanelRegionGeneralInfo::postBuild()
     {
         apply_btn->setCommitCallback(boost::bind(&LLPanelRegionGeneralInfo::onBtnSet, this));
     }
+
+    // [ADULT CONTENT 2026-10-26] the region type page for the region this floater shows (PROTOCOL.md §6
+    // "...?f=regiontype&region={REGION UUID}"); shown on Wolf Territories only (processRegionInfo).
+    getChild<LLUICtrl>("wolf_region_type_btn")->setCommitCallback([](LLUICtrl*, const LLSD&)
+    {
+        const LLViewerRegion* region = gAgent.getRegion();
+        LLWeb::loadURLExternal(WolfAdultContent::regionTypeURL(region ? region->getRegionID() : LLUUID::null));
+    });
 
     refresh();
     return true;
@@ -1226,7 +1364,8 @@ bool LLPanelRegionGeneralInfo::sendUpdate()
         body["allow_land_resell"] = getChild<LLUICtrl>("allow_land_resell_check")->getValue();
         body["agent_limit"] = getChild<LLUICtrl>("agent_limit_spin")->getValue();
         body["prim_bonus"] = getChild<LLUICtrl>("object_bonus_spin")->getValue();
-        body["sim_access"] = getChild<LLUICtrl>("access_combo")->getValue();
+        //body["sim_access"] = getChild<LLUICtrl>("access_combo")->getValue();
+        body["sim_access"] = wolf_ac_real_access(getChild<LLUICtrl>("access_combo")->getValue());   // [ADULT CONTENT 2026-10-26/]
         body["restrict_pushobject"] = getChild<LLUICtrl>("restrict_pushobject")->getValue();
         body["allow_parcel_changes"] = getChild<LLUICtrl>("allow_parcel_changes_check")->getValue();
         body["block_parcel_search"] = getChild<LLUICtrl>("block_parcel_search_check")->getValue();
@@ -1259,7 +1398,8 @@ bool LLPanelRegionGeneralInfo::sendUpdate()
         buffer = llformat("%f", value);
         strings.push_back(strings_t::value_type(buffer));
 
-        buffer = llformat("%d", getChild<LLUICtrl>("access_combo")->getValue().asInteger());
+        //buffer = llformat("%d", getChild<LLUICtrl>("access_combo")->getValue().asInteger());
+        buffer = llformat("%d", wolf_ac_real_access(getChild<LLUICtrl>("access_combo")->getValue()).asInteger());   // [ADULT CONTENT 2026-10-26/]
         strings.push_back(strings_t::value_type(buffer));
 
         buffer = llformat("%s", (getChild<LLUICtrl>("restrict_pushobject")->getValue().asBoolean() ? "Y" : "N"));
@@ -1274,7 +1414,8 @@ bool LLPanelRegionGeneralInfo::sendUpdate()
 
     // if we changed access levels, tell user about it
     LLViewerRegion* region = gAgent.getRegion();
-    if (region && (getChild<LLUICtrl>("access_combo")->getValue().asInteger() != region->getSimAccess()) )
+    //if (region && (getChild<LLUICtrl>("access_combo")->getValue().asInteger() != region->getSimAccess()) )
+    if (region && (wolf_ac_real_access(getChild<LLUICtrl>("access_combo")->getValue()).asInteger() != region->getSimAccess()) )   // [ADULT CONTENT 2026-10-26/]
     {
         LLNotificationsUtil::add("RegionMaturityChange");
     }
@@ -2890,7 +3031,10 @@ bool LLPanelEstateCovenant::refreshFromRegion(LLViewerRegion* region)
     LLTextBox* region_maturity = getChild<LLTextBox>("region_maturity_text");
     if (region_maturity)
     {
-        region_maturity->setText(region->getSimAccessString());
+        //region_maturity->setText(region->getSimAccessString());
+        // [ADULT CONTENT 2026-10-26] "Adult Content" for an Adult Content region (wolfadultcontent.h)
+        region_maturity->setText(WolfAdultContent::accessString(region->getSimAccess(),
+                                                                WolfAdultContent::isAdultContentRegion(region)));
     }
 
     LLTextBox* region_landtype = getChild<LLTextBox>("region_landtype_text");

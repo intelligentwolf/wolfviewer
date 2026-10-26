@@ -27,6 +27,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "llimprocessing.h"
+#include "wolfadultcontent.h"   // [ADULT CONTENT 2026-10-26/] teleport offers
 
 #include "llagent.h"
 #include "llappviewer.h"
@@ -2083,8 +2084,12 @@ void LLIMProcessing::processNewMessage(LLUUID from_id,
                 // Do not parse the (empty) lure bucket for TELEPORT_REQUEST
                 if (IM_TELEPORT_REQUEST != dialog && parse_lure_bucket(region_info, region_handle, pos, look_at, region_access))
                 {
-                    region_access_str = LLViewerRegion::accessToString(region_access);
-                    region_access_icn = LLViewerRegion::getAccessIcon(region_access);
+                    //region_access_str = LLViewerRegion::accessToString(region_access);
+                    //region_access_icn = LLViewerRegion::getAccessIcon(region_access);
+                    // [ADULT CONTENT 2026-10-26] "Adult Content" and its icon in the offer (wolfadultcontent.h)
+                    const bool adult_content = WolfAdultContent::isAdultContentAt(region_handle);
+                    region_access_str = WolfAdultContent::accessString(region_access, adult_content);
+                    region_access_icn = WolfAdultContent::accessIcon(region_access, adult_content);
                     region_access_lc = region_access_str;
                     LLStringUtil::toLower(region_access_lc);
 
@@ -2237,8 +2242,12 @@ void LLIMProcessing::processNewMessage(LLUUID from_id,
 
             if (parse_lure_bucket(region_info, region_handle, pos, look_at, region_access))
             {
-                region_access_str = LLViewerRegion::accessToString(region_access);
-                region_access_icn = LLViewerRegion::getAccessIcon(region_access);
+                //region_access_str = LLViewerRegion::accessToString(region_access);
+                //region_access_icn = LLViewerRegion::getAccessIcon(region_access);
+                // [ADULT CONTENT 2026-10-26] as the lure above
+                const bool adult_content = WolfAdultContent::isAdultContentAt(region_handle);
+                region_access_str = WolfAdultContent::accessString(region_access, adult_content);
+                region_access_icn = WolfAdultContent::accessIcon(region_access, adult_content);
                 region_access_lc = region_access_str;
                 LLStringUtil::toLower(region_access_lc);
 

@@ -27,6 +27,10 @@
   <string name="steps_choose">Choose,Describe,Make it,Delivered</string>
   <string name="steps_small">Choose,Describe,Forge,Delivered</string>
   <string name="steps_large">Choose,Describe,Confirm,Build</string>
+  <!-- [WOLF 3D TEXT 2026-10-26] the 3D Text tool's embers (round 2: the preview is on the form; the third ember is lit while
+       the sign is made), and the words box's placeholder (PROTOCOL.md: never a trademark) -->
+  <string name="steps_text">Choose,Your words,Make it,Delivered</string>
+  <string name="text_placeholder">WOLF TERRITORIES</string>
 
   <!-- Step 1: which generator. Nothing else on the screen, so neither choice can be missed. -->
   <panel name="ai_step_choose" follows="all" layout="topleft" left="0" top="140" width="680" height="432" border="false">
@@ -47,6 +51,154 @@
     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false"
     label_color="0.97 0.93 0.9 1" label_color_selected="0.97 0.93 0.9 1" label_color_disabled="0.79 0.72 0.67 1" label_color_disabled_selected="0.79 0.72 0.67 1" />
    <text visible="false" follows="left|right|top" layout="topleft" left="140" top="222" width="512" height="54" word_wrap="true" mouse_opaque="false" text_color="0.83 0.76 0.7 1" name="ai_choose_large_note">A building or a settlement, with structural interiors. Designed in stages; you can close this window and it is delivered to your Objects folder when it is ready.</text>
+   <!-- [WOLF 3D TEXT 2026-10-26] the 3D Text tile, in the hidden large tile's place: the forge draws its face and its picture
+        (solid letters) on the left; the words are the button's (PROTOCOL.md "UI shape") -->
+   <button follows="left|right|top" layout="topleft" left="16" top="168" width="648" height="116" name="ai_choose_text" label="2. 3D Text"
+    halign="left" pad_left="124" pad_bottom="26" font="SansSerifLarge"
+    image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false"
+    label_color="0.97 0.93 0.9 1" label_color_selected="0.97 0.93 0.9 1" label_color_disabled="0.79 0.72 0.67 1" label_color_disabled_selected="0.79 0.72 0.67 1"
+    tool_tip="Your words as a solid sign, put in your Objects folder. Free." />
+   <text follows="left|right|top" layout="topleft" left="140" top="222" width="512" height="54" word_wrap="true" mouse_opaque="false" text_color="0.83 0.76 0.7 1" name="ai_choose_text_note">Words in solid letters: plain, bevelled, neon, or a hillside sign. Free.</text>
+  </panel>
+
+  <!-- [WOLF 3D TEXT 2026-10-26] Step 2 of the 3D Text tool: the form (PROTOCOL.md SPEC) with its live preview beside it.
+       [ROUND 2 2026-10-26] Paul: "the 3d text is GREAT *but*" - "the text does overflow a bit on the floater". Who and why: a
+       resident wants their words as a solid sign and to see it change as they try styles and fonts, then make it (free).
+       Flow: type the words -> the picture follows (1.2 s after the last change) -> Make it - free.
+       Two columns, sized for the floater's minimum width (660; at the default 680 the right column moves 20 px right with
+       the edge, follows="right|top"):
+       - left, x 24-388 on one iron plate (16-396): the words (always in sight), then two page tabs and one page at a time
+         (Hick's law: about half the settings on screen at once) - "Letters" (style and its note, font, letter height and
+         depth, bevel, comes as, name) and "Colour and lights" (colour, texture, glow, full bright, lights, light colour,
+         brightness, reach). The pages are panels 396 x 248 at top 180; their controls are placed in the page's own
+         coordinates. Labels 96 px wide (the widest, "Letter height", is 85 px in SansSerifBold 8.6 pt; "Name in inventory",
+         119 px, wraps to two lines), controls from x 124.
+       - right, x 432-664 at 680 (412-644 at 660): Update preview and the Day / Night switch (shown only when the sign looks
+         different at night) on one row, the picture (232 x 232: a 512 x 512 day or night picture, or the older 1024 x 512
+         both-halves picture fitted in), its numbers (two lines), the quiet status line (three lines: "Updating" is drawn on
+         the picture itself; "Preview paused for N s", why the preview waits, or "Making your sign"), and Make it - free.
+       Every field error is written by its field (the *_err lines, the forge's error red #ff7f6e on iron 6.2:1); the shared
+       error box at the bottom says what failed. Text colours as the rest of this file (contrast in wolfai.cpp). -->
+  <panel name="ai_step_text" follows="all" layout="topleft" left="0" top="140" width="680" height="432" border="false" visible="false">
+   <button follows="left|top" layout="topleft" left="24" top="8" width="124" height="26" name="ai_text_back" label="← Start again"
+    image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false"
+    label_color="0.97 0.93 0.9 1" label_color_selected="0.97 0.93 0.9 1" label_color_disabled="0.79 0.72 0.67 1" label_color_disabled_selected="0.79 0.72 0.67 1" />
+   <text follows="left|top" layout="topleft" left="160" top="13" width="236" height="16" font="SansSerifBold" text_color="1 0.7 0.42 1" name="ai_text_free">Free - no Wolf Credits are used</text>
+   <!-- the words: always in sight, above the pages -->
+   <text follows="left|top" layout="topleft" left="24" top="44" width="90" height="16" font="SansSerifBold" text_color="0.97 0.93 0.9 1" name="ai_text_words_lbl">Your words</text>
+   <text follows="left|top" layout="topleft" left="120" top="45" width="268" height="16" halign="right" font="SansSerifSmall" text_color="0.83 0.76 0.7 1" name="ai_text_words_hint">Up to 3 lines, 24 characters a line</text>
+   <text_editor follows="left|top" layout="topleft" left="24" top="62" width="364" height="54" word_wrap="false" parse_urls="false" max_length="400" name="ai_text_words"
+    tool_tip="The words of your sign. Press Enter for a new line (3 lines at most, 24 characters a line)." />
+   <text visible="false" follows="left|top" layout="topleft" left="24" top="118" width="364" height="28" word_wrap="true" font="SansSerifSmall" text_color="1 0.498 0.431 1" name="ai_text_words_err" />
+   <!-- the two page tabs (the chosen one has an ember label and rim, painted by the forge) -->
+   <button follows="left|top" layout="topleft" left="24" top="150" width="110" height="24" name="ai_text_tab_letters" label="Letters"
+    tool_tip="The style, the font, the size and the name"
+    image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false"
+    label_color="0.97 0.93 0.9 1" label_color_selected="1 0.702 0.42 1" label_color_disabled="0.79 0.72 0.67 1" label_color_disabled_selected="0.79 0.72 0.67 1" />
+   <button follows="left|top" layout="topleft" left="140" top="150" width="150" height="24" name="ai_text_tab_lights" label="Colour and lights"
+    tool_tip="The colour, a texture, the glow and the lights"
+    image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false"
+    label_color="0.97 0.93 0.9 1" label_color_selected="1 0.702 0.42 1" label_color_disabled="0.79 0.72 0.67 1" label_color_disabled_selected="0.79 0.72 0.67 1" />
+   <!-- page 1: Letters -->
+   <panel name="ai_text_page_letters" follows="left|top" layout="topleft" left="0" top="180" width="396" height="248" border="false">
+    <text follows="left|top" layout="topleft" left="24" top="9" width="96" height="16" font="SansSerifBold" text_color="0.97 0.93 0.9 1" name="ai_text_style_lbl">Style</text>
+    <combo_box follows="left|top" layout="topleft" left="124" top="6" width="264" height="22" name="ai_text_style" tool_tip="How the letters look. Choosing a style fills in its own settings; you can change them after." />
+    <text follows="left|top" layout="topleft" left="24" top="32" width="364" height="40" word_wrap="true" font="SansSerifSmall" parse_urls="false" text_color="0.83 0.76 0.7 1" name="ai_text_style_note" />
+    <text follows="left|top" layout="topleft" left="24" top="79" width="96" height="16" font="SansSerifBold" text_color="0.97 0.93 0.9 1" name="ai_text_font_lbl">Font</text>
+    <combo_box follows="left|top" layout="topleft" left="124" top="76" width="264" height="22" name="ai_text_font" tool_tip="The lettering (open-licence fonts), in groups" />
+    <text follows="left|top" layout="topleft" left="24" top="107" width="96" height="16" font="SansSerifBold" text_color="0.97 0.93 0.9 1" name="ai_text_height_lbl">Letter height</text>
+    <spinner text_disabled_color="0.79 0.72 0.67 1" text_enabled_color="0.97 0.93 0.9 1" follows="left|top" layout="topleft" left="124" top="104" width="64" height="22" label="" label_width="0"
+     name="ai_text_height" min_val="0.1" max_val="30" increment="0.1" initial_value="1" decimal_digits="2" tool_tip="The height of a capital letter, in metres" />
+    <text follows="left|top" layout="topleft" left="192" top="107" width="14" height="16" text_color="0.83 0.76 0.7 1" name="ai_text_height_unit">m</text>
+    <text follows="left|top" layout="topleft" left="214" top="107" width="42" height="16" font="SansSerifBold" text_color="0.97 0.93 0.9 1" name="ai_text_depth_lbl">Depth</text>
+    <spinner text_disabled_color="0.79 0.72 0.67 1" text_enabled_color="0.97 0.93 0.9 1" follows="left|top" layout="topleft" left="258" top="104" width="64" height="22" label="" label_width="0"
+     name="ai_text_depth" min_val="0.01" max_val="5" increment="0.05" initial_value="0.2" decimal_digits="2" tool_tip="How thick the letters are, front to back, in metres" />
+    <text follows="left|top" layout="topleft" left="326" top="107" width="14" height="16" text_color="0.83 0.76 0.7 1" name="ai_text_depth_unit">m</text>
+    <text visible="false" follows="left|top" layout="topleft" left="24" top="128" width="186" height="16" font="SansSerifSmall" text_color="1 0.498 0.431 1" name="ai_text_height_err" />
+    <text visible="false" follows="left|top" layout="topleft" left="214" top="128" width="174" height="16" font="SansSerifSmall" text_color="1 0.498 0.431 1" name="ai_text_depth_err" />
+    <check_box follows="left|top" layout="topleft" left="24" top="146" width="140" height="18" name="ai_text_bevel" label="Bevelled edges" tool_tip="Rounded-off front edges">
+<check_box.label_text text_color="0.97 0.93 0.9 1" text_readonly_color="0.79 0.72 0.67 1" />
+</check_box>
+    <text follows="left|top" layout="topleft" left="24" top="173" width="96" height="16" font="SansSerifBold" text_color="0.97 0.93 0.9 1" name="ai_text_layout_lbl">Comes as</text>
+    <combo_box follows="left|top" layout="topleft" left="124" top="170" width="200" height="22" name="ai_text_layout" tool_tip="One object, or one object per letter in a rez box">
+     <combo_box.item label="One object" value="one" />
+     <combo_box.item label="One object per letter" value="letters" />
+    </combo_box>
+    <text follows="left|top" layout="topleft" left="24" top="196" width="96" height="30" word_wrap="true" font="SansSerifBold" text_color="0.97 0.93 0.9 1" name="ai_text_name_lbl">Name in inventory</text>
+    <line_editor follows="left|top" layout="topleft" left="124" top="198" width="264" height="24" max_length_chars="48" name="ai_text_name" label="The first line of your words"
+     tool_tip="What it is called in your inventory (48 characters at most). Left empty, it takes the first line of your words." />
+    <text visible="false" follows="left|top" layout="topleft" left="124" top="224" width="264" height="16" font="SansSerifSmall" text_color="1 0.498 0.431 1" name="ai_text_name_err" />
+   </panel>
+   <!-- page 2: Colour and lights -->
+   <panel name="ai_text_page_lights" follows="left|top" layout="topleft" left="0" top="180" width="396" height="248" border="false" visible="false">
+    <text follows="left|top" layout="topleft" left="24" top="7" width="96" height="16" font="SansSerifBold" text_color="0.97 0.93 0.9 1" name="ai_text_colour_lbl">Letter colour</text>
+    <color_swatch follows="left|top" layout="topleft" left="124" top="2" width="40" height="24" label_height="0" name="ai_text_colour" can_apply_immediately="true" tool_tip="The colour of the letters (click to choose)" />
+    <text follows="left|top" layout="topleft" left="24" top="36" width="96" height="16" font="SansSerifBold" text_color="0.97 0.93 0.9 1" name="ai_text_texture_lbl">Texture</text>
+    <text follows="left|top" layout="topleft" left="24" top="53" width="96" height="28" word_wrap="true" font="SansSerifSmall" text_color="0.83 0.76 0.7 1" name="ai_text_texture_hint">Optional, from your inventory</text>
+    <texture_picker follows="left|top" layout="topleft" left="124" top="32" width="52" height="52" name="ai_text_texture" allow_no_texture="true" can_apply_immediately="false" show_caption="false" label=""
+     tool_tip="A texture from your inventory for the letters (yours, or full permissions). Click to choose." />
+    <button follows="left|top" layout="topleft" left="186" top="47" width="96" height="22" name="ai_text_texture_clear" label="No texture"
+     image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false"
+     label_color="0.97 0.93 0.9 1" label_color_selected="0.97 0.93 0.9 1" label_color_disabled="0.79 0.72 0.67 1" label_color_disabled_selected="0.79 0.72 0.67 1" />
+    <text follows="left|top" layout="topleft" left="24" top="93" width="96" height="16" font="SansSerifBold" text_color="0.97 0.93 0.9 1" name="ai_text_glow_lbl">Glow</text>
+    <slider text_disabled_color="0.79 0.72 0.67 1" text_color="0.97 0.93 0.9 1" follows="left|top" layout="topleft" left="124" top="92" width="220" height="18" label="" label_width="0"
+     name="ai_text_glow" min_val="0" max_val="1" increment="0.05" initial_value="0" decimal_digits="2" show_text="true" can_edit_text="true" tool_tip="A soft glow round the letters, 0 to 1 (at night only while the lights are Auto)" />
+    <check_box follows="left|top" layout="topleft" left="24" top="116" width="160" height="18" name="ai_text_fullbright" label="Full bright" tool_tip="Letters that are never in shadow (at night only while the lights are Auto)">
+<check_box.label_text text_color="0.97 0.93 0.9 1" text_readonly_color="0.79 0.72 0.67 1" />
+</check_box>
+    <text follows="left|top" layout="topleft" left="24" top="143" width="96" height="16" font="SansSerifBold" text_color="0.97 0.93 0.9 1" name="ai_text_light_lbl">Lights</text>
+    <combo_box follows="left|top" layout="topleft" left="124" top="140" width="170" height="22" name="ai_text_light" tool_tip="Auto: the lights come on at night (the sign looks at the sun every 5 minutes)">
+     <combo_box.item label="Auto - on at night" value="auto" />
+     <combo_box.item label="Always on" value="on" />
+     <combo_box.item label="Off" value="off" />
+    </combo_box>
+    <text follows="left|top" layout="topleft" left="24" top="172" width="96" height="16" font="SansSerifBold" text_color="0.97 0.93 0.9 1" name="ai_text_light_colour_lbl">Light colour</text>
+    <color_swatch follows="left|top" layout="topleft" left="124" top="168" width="40" height="24" label_height="0" name="ai_text_light_colour" can_apply_immediately="true" tool_tip="The colour of the light the sign gives (click to choose)" />
+    <text follows="left|top" layout="topleft" left="24" top="199" width="96" height="16" font="SansSerifBold" text_color="0.97 0.93 0.9 1" name="ai_text_intensity_lbl">Brightness</text>
+    <slider text_disabled_color="0.79 0.72 0.67 1" text_color="0.97 0.93 0.9 1" follows="left|top" layout="topleft" left="124" top="198" width="220" height="18" label="" label_width="0"
+     name="ai_text_light_intensity" min_val="0" max_val="1" increment="0.05" initial_value="1" decimal_digits="2" show_text="true" can_edit_text="true" tool_tip="How bright the light is, 0 to 1" />
+    <text follows="left|top" layout="topleft" left="24" top="225" width="96" height="16" font="SansSerifBold" text_color="0.97 0.93 0.9 1" name="ai_text_radius_lbl">Reach</text>
+    <spinner text_disabled_color="0.79 0.72 0.67 1" text_enabled_color="0.97 0.93 0.9 1" follows="left|top" layout="topleft" left="124" top="222" width="64" height="22" label="" label_width="0"
+     name="ai_text_light_radius" min_val="0.5" max_val="20" increment="0.5" initial_value="10" decimal_digits="1" tool_tip="How far the light reaches, in metres" />
+    <text follows="left|top" layout="topleft" left="192" top="225" width="14" height="16" text_color="0.83 0.76 0.7 1" name="ai_text_radius_unit">m</text>
+    <text visible="false" follows="left|top" layout="topleft" left="214" top="226" width="174" height="16" font="SansSerifSmall" text_color="1 0.498 0.431 1" name="ai_text_radius_err" />
+   </panel>
+   <!-- the right column: the live preview and the main action -->
+   <button follows="right|top" layout="topleft" left="432" top="8" width="124" height="24" name="ai_text_preview" label="Update preview"
+    use_ellipses="true" tool_tip="Draw the preview again now (it also redraws by itself a moment after each change)"
+    image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false"
+    label_color="0.97 0.93 0.9 1" label_color_selected="0.97 0.93 0.9 1" label_color_disabled="0.79 0.72 0.67 1" label_color_disabled_selected="0.79 0.72 0.67 1" />
+   <button follows="right|top" layout="topleft" left="560" top="8" width="50" height="24" name="ai_text_day" label="Day" visible="false"
+    tool_tip="The sign by day"
+    image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false"
+    label_color="0.97 0.93 0.9 1" label_color_selected="1 0.702 0.42 1" label_color_disabled="0.79 0.72 0.67 1" label_color_disabled_selected="0.79 0.72 0.67 1" />
+   <button follows="right|top" layout="topleft" left="614" top="8" width="50" height="24" name="ai_text_night" label="Night" visible="false"
+    tool_tip="The sign at night, with its lights on"
+    image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false"
+    label_color="0.97 0.93 0.9 1" label_color_selected="1 0.702 0.42 1" label_color_disabled="0.79 0.72 0.67 1" label_color_disabled_selected="0.79 0.72 0.67 1" />
+   <panel follows="right|top" layout="topleft" left="432" top="44" width="232" height="232" name="ai_text_picture" border="false" />
+   <text follows="right|top" layout="topleft" left="432" top="288" width="232" height="28" halign="center" font="SansSerifSmall" parse_urls="false" text_color="0.97 0.93 0.9 1" name="ai_text_numbers" />
+   <text follows="right|top" layout="topleft" left="432" top="318" width="232" height="40" word_wrap="true" parse_urls="false" halign="center" font="SansSerifSmall" text_color="0.97 0.93 0.9 1" name="ai_text_status" />
+   <button follows="right|top" layout="topleft" left="432" top="368" width="232" height="44" name="ai_text_make" label="Make it - free"
+    font="SansSerifBold" use_ellipses="true" tool_tip="Make the sign and put it in your Objects folder"
+    image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false"
+    label_color="0.165 0.055 0.008 1" label_color_selected="0.165 0.055 0.008 1" label_color_disabled="0.79 0.72 0.67 1" label_color_disabled_selected="0.79 0.72 0.67 1" />
+  </panel>
+
+  <!-- [WOLF 3D TEXT 2026-10-26] Step 4: delivered (text_make) - where it is, how to put it up, and the server's report lines.
+       The forge draws a green tick on the left. -->
+  <panel name="ai_step_text_done" follows="all" layout="topleft" left="0" top="140" width="680" height="432" border="false" visible="false">
+   <text follows="left|right|top" layout="topleft" left="16" top="6" width="648" height="22" font="SansSerifLarge" text_color="1 0.89 0.72 1" name="ai_text_done_title" />
+   <text follows="left|right|top" layout="topleft" left="150" top="42" width="500" height="36" word_wrap="true" parse_urls="false" font="SansSerifBold" text_color="0.97 0.93 0.9 1" name="ai_text_done_where" />
+   <text follows="left|right|top" layout="topleft" left="150" top="82" width="500" height="18" parse_urls="false" text_color="1 0.7 0.42 1" name="ai_text_done_numbers" />
+   <text follows="left|right|top" layout="topleft" left="150" top="104" width="500" height="112" word_wrap="true" parse_urls="false" text_color="0.83 0.76 0.7 1" name="ai_text_done_how" />
+   <text_editor follows="left|right|top" layout="topleft" left="30" top="228" width="620" height="144" word_wrap="true" parse_urls="false" read_only="true" allow_scroll="true" name="ai_text_report" />
+   <button follows="left|top" layout="topleft" left="16" top="388" width="200" height="34" name="ai_text_again" label="← Change it, make another"
+    image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false"
+    label_color="0.97 0.93 0.9 1" label_color_selected="0.97 0.93 0.9 1" label_color_disabled="0.79 0.72 0.67 1" label_color_disabled_selected="0.79 0.72 0.67 1" />
+   <button follows="left|top" layout="topleft" left="496" top="388" width="168" height="34" name="ai_text_finished" label="Back to the start"
+    image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false"
+    label_color="0.97 0.93 0.9 1" label_color_selected="0.97 0.93 0.9 1" label_color_disabled="0.79 0.72 0.67 1" label_color_disabled_selected="0.79 0.72 0.67 1" />
   </panel>
 
   <!-- Step 2: the form for the chosen generator. -->

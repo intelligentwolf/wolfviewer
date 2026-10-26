@@ -42,6 +42,14 @@ uniform float fftReady;
 uniform float wakeReady;
 uniform float exposureReady;
 uniform float zoneReady;
+// [DRY BUILDS 2026-10-26] The waterline clearance field (wolfwaterfield.h WolfWaterClearance): LEVELS (3) camera-window
+// levels of N (256) texels stacked in rows, RGBA32F (R S_all, G D, B S_dry, A open weight - see wolfClearSample), then the
+// two terrain blocks waterF.glsl reads. wolfClearLevel[k] = (agent-space SW corner of block k's texel grid, texel metres, 0);
+// wolfClearMisc = (lowest source cap = lowest live water height, ready, 0, 0). Bound by lldrawpoolwater.cpp.
+uniform sampler2D wolfClearField;
+uniform vec4 wolfClearLevel[5];   // [OPEN SEA SHORES 2026-10-26/] + [3], [4]: the terrain blocks (waterF.glsl)
+uniform vec4 wolfClearMisc;
+#define WOLF_CLEAR_READY wolfClearMisc.y
 #define WOLF_TEX_WOLF_DEPTH_FIELD(uv) texture(wolfDepthField, uv)
 #define WOLF_TEX_WOLF_EXPOSURE_FIELD(uv) texture(wolfExposureField, uv)
 #define WOLF_TEX_WOLF_ZONE_FIELD(uv) texture(wolfZoneField, uv)
@@ -60,6 +68,7 @@ uniform float zoneReady;
 #define wakeReady 0.0
 #define exposureReady 0.0
 #define zoneReady 0.0
+#define WOLF_CLEAR_READY 0.0
 #endif
 
 uniform mat4 modelview_matrix;
@@ -169,6 +178,12 @@ uniform float surfPathK0;
 uniform float calmRipple;   // [WAVES 2026-09-07] the calm cells' ripple, metres (lldrawpoolwater.cpp)
 uniform float smallScale;   // [WAVES 2026-09-10] the small-wave cells' swell, fraction of the open sea (lldrawpoolwater.cpp)
 out vec4 vSurf;   // [SURF rev3] x crest (peak only), y breaking, z amplitude used (0 = no surf), w wash behind the crest
+// [OPEN SEA SHORES 2026-10-26] The automatic surf on open-sea beaches (lldrawpoolwater.cpp, from the sea state):
+// x = wave height at the break (m), y = set interval (s), z = deep-water wavelength (m), w = 1 on, 0 off.
+uniform vec4 wolfAutoSurf;
+// [DRY BUILDS 2026-10-26] For waterF.glsl's per-pixel land rule: xy = the DISPLACED agent-space position, z = the swash
+// band's ceiling over the water level here (0 = none), w = the final displacement along the surface normal.
+out vec4 vary_wolf_dry;
 uniform vec2 fftTile;
 uniform vec2 fftFade;
 uniform vec2 wakeRegionSize;
@@ -351,6 +366,106 @@ float wolfSurfShoal(float k0, float k, float h)
 }
 // </WolfViewer> ---------------------------------------------------------------------------
 
+// [DRY BUILDS 2026-10-26] ---------------------------------------------------------------------------------------------
+// "Water should not appear on land" (Paul 2026-10-26) and builds made for flat OpenSim water stay dry (Jupiter Rowland).
+// The proof of the bounds is in wolfwaterfield.h (WolfWaterClearance); the CPU twins are WolfWaterClearance::sample /
+// upwardRoom / softCap, used by wolfboatrock.cpp. KEEP IN STEP.
+const float WOLF_CLEAR_ALPHA = 0.195;   // 0.78 (McCowan) x 0.25 (SURF_REEF_SLOPE): the cap's rise per metre from a source
+const float WOLF_CLEAR_BETA = 0.1;      // the horizontal push allowed per metre from a source
+const float WOLF_CLEAR_EYE = 0.3;       // the camera guard: crests stay this far under the eye
+const float WOLF_CLEAR_N = 256.0;
+// The four channels of the clearance field at agent-space p (wolfwaterfield.h WolfWaterClearance):
+//   x = S_all (every source), y = D, z = S_dry (prims and inland land only), w = the open-sea weight.
+// x, y, z: the best of the levels whose inner box (the hull of the texel centres) holds p, each level's own value bounded
+// by what lies outside it (the lowest source cap + ALPHA x the distance out). Every one is a lower bound of the true
+// value, so the largest of them still is. -1e9 where no level holds p. w: the finest level holding p, faded in over 32 m
+// from that level's edge so the classification never switches at a window edge.
+vec4 wolfClearSample(vec2 p)
+{
+    vec4 best = vec4(-1e9, 0.0, -1e9, 0.0);
+#ifdef WOLF_WATER_FULL
+    for (int k = 2; k >= 0; --k)
+    {
+        vec4 L = wolfClearLevel[k];
+        if (L.z <= 0.0)
+        {
+            continue;
+        }
+        vec2 g = (p - L.xy) / L.z;   // texel units, centres at i + 0.5
+        const float lo = 0.5;
+        const float hi = WOLF_CLEAR_N - 0.5;
+        if (g.x < lo || g.y < lo || g.x > hi || g.y > hi)
+        {
+            continue;
+        }
+        float dEdge = min(min(g.x - lo, g.y - lo), min(hi - g.x, hi - g.y)) * L.z;
+        vec2 uv = vec2(g.x / WOLF_CLEAR_N, (float(k) * WOLF_CLEAR_N + g.y) / (5.0 * WOLF_CLEAR_N));
+        vec4 c = texture(wolfClearField, uv);
+        float outside = wolfClearMisc.x + WOLF_CLEAR_ALPHA * dEdge;
+        best.x = max(best.x, min(c.x, outside));
+        best.y = max(best.y, min(c.y, dEdge));
+        best.z = max(best.z, min(c.z, outside));
+        best.w = mix(best.w, c.w, smoothstep(0.0, 32.0, dEdge));
+    }
+#endif
+    return best;
+}
+// The soft cap up * tanh(dz / up): odd, so troughs calm with the crests and the mean stays put, strictly under up, and
+// the identity to first order where there is room. 0 where there is none.
+// tanh is written out: far from any source up is ~1e6 m and dz / up ~1e-7, where a driver's tanh built as
+// (e^2x - 1) / (e^2x + 1) loses every significant bit to cancellation; below 0.05 the series x - x^3 / 3 is exact
+// to 3e-8 relative, above it the exponential form has no cancellation to speak of.
+float wolfTanh(float x)
+{
+    float a = abs(x);
+    if (a < 0.05)
+    {
+        return x * (1.0 - x * x / 3.0);
+    }
+    float e = exp(-2.0 * min(a, 10.0));
+    return sign(x) * (1.0 - e) / (1.0 + e);
+}
+float wolfSoftCap(float dz, float up)
+{
+    return up > 0.0 ? up * wolfTanh(dz / up) : 0.0;
+}
+// [OPEN SEA SHORES 2026-10-26] The clearance cap's version: a crest is held under up as above, but a trough keeps at
+// least WOLF_TROUGH_KEEP of itself, fading to all of it as the room grows to calmRef - so water beside a dock still
+// moves instead of lying dead flat inside a line (Paul: "like there is a fixed edge"). Troughs cannot wet anything.
+// WolfWaterClearance::softCap same.
+const float WOLF_TROUGH_KEEP = 0.35;
+float wolfClearCap(float dz, float up, float calmRef)
+{
+    if (dz >= 0.0)
+    {
+        return wolfSoftCap(dz, up);
+    }
+    return dz * mix(WOLF_TROUGH_KEEP, 1.0, clamp(up / max(calmRef, 0.01), 0.0, 1.0));
+}
+const float WOLF_RUNUP_CAP = 0.5;   // WolfWaterClearance::RUNUP_CAP_M: the swash band's ceiling over the water level
+// [OPEN SEA SHORES 2026-10-26] How far this point is held per pixel (0..1): inside the hull of a terrain block's texel
+// centres by more than its dead zone + 32 m (so its whole displaced triangle is in the block waterF.glsl reads), blended in
+// over 32 m more; the best of the two blocks. WolfWaterClearance::pixelHeld same.
+float wolfPixelHeld(vec2 p, float dead)
+{
+    float held = 0.0;
+#ifdef WOLF_WATER_FULL
+    for (int b = 3; b < 5; ++b)
+    {
+        vec4 L = wolfClearLevel[b];
+        if (L.z <= 0.0)
+        {
+            continue;
+        }
+        vec2 g = (p - L.xy) / L.z;
+        float inner = min(min(g.x - 0.5, g.y - 0.5), min(WOLF_CLEAR_N - 0.5 - g.x, WOLF_CLEAR_N - 0.5 - g.y)) * L.z;
+        held = max(held, smoothstep(dead + 32.0, dead + 64.0, inner));
+    }
+#endif
+    return held;
+}
+// [DRY BUILDS 2026-10-26] ---------------------------------------------------------------------------------------------
+
 // Analytic slope of that wave's z component: dz/dxy = d * A * k * cos(f). MUST be called
 // with the same arguments as its matching gerstnerWave() or the lighting drifts off the
 // geometry it is supposed to describe.
@@ -416,6 +531,7 @@ void main()
         wave_pos.z += lift;
     }
     // </WolfViewer>
+    vec3 base_pos = wave_pos;   // [DRY BUILDS 2026-10-26/] the undisplaced surface point the caps below measure from
 
     // <WolfViewer 2026-09-06> Region-space position for the baked fields, and the
     // open-water exposure at this vertex: open sea rolls at 1.3x, water hugging any shore
@@ -481,6 +597,12 @@ void main()
     bool cascades = fftReady > 0.5 && boundedWaterDepth <= 0.0 && wolfStream <= 0.0 && wolfWaterfall <= 0.0;
     float chopKeep = cascades ? 0.0 : 1.0;
     // .w = shoreGate: the fragment gates the swash line with it (open sea and surf only).
+    // [OPEN SEA SHORES 2026-10-26] The clearance field once, here: its open-sea weight decides which shores get the
+    // breakers, the automatic surf and the swash (Paul: the outer edge of the region, "NOT RIVERS INSIDE or LAKES
+    // INSIDE"); its caps are applied last, below. Not ready: no open sea anywhere, and (below) no swell at all.
+    vec4 wclear = WOLF_CLEAR_READY > 0.5 ? wolfClearSample(position.xy) : vec4(-1e9, 0.0, -1e9, 0.0);
+    float openW = clamp(wclear.w, 0.0, 1.0);
+    shoreGate *= openW;
     vSwell = vec4(0.0, 1.0, swellScale, shoreGate);
     vShore = vec2(0.0);
     vWake = 0.0;
@@ -644,12 +766,39 @@ void main()
                         feed = WOLF_TEX_WOLF_EXPOSURE_FIELD( clamp(fuv, 0.0, 1.0)).r;
                     }
                     float bAmp = min(0.10 + waveAmplitude * 0.9, 0.5) * shoal * (0.35 + 0.65 * sqrt(feed));
+                    // [OPEN SEA SHORES 2026-10-26] Sets: the breakers come in groups, each a different height, so not
+                    // every wave reaches the same place - the automatic surf's set clock, offset along the coast.
+                    // wolfboatrock.cpp same.
+                    float bSet = 6.2831853 * time / max(wolfAutoSurf.y, 10.0) + dot(regionXY, vec2(0.013, 0.017));
+                    bAmp *= 0.45 + 0.55 * smoothstep(0.1, 1.0, 0.5 + 0.5 * sin(bSet));
                     float br = sin(phase);
-                    float lift = (br + 0.35 * br * br) * bAmp;
+                    // [DRY BUILDS 2026-10-26] re-centred on the water level: br^2 averages 0.5 over a period, so
+                    // (br + 0.35 br^2) stood 0.175 bAmp above it on average. wolfboatrock.cpp same.
+                    float lift = (br + 0.35 * (br * br - 0.5)) * bAmp;
                     wave_pos += surf_n * lift;
                     wave_h += lift;
                 }
             }
+        }
+    }
+
+    // [DRY BUILDS 2026-10-26] DEPTH-LIMITED HEIGHT. A wave in water h deep breaks once it is higher than about 0.78 h
+    // (McCowan's breaker index; Bosboom & Stive, Coastal Dynamics 5.2.5), so no crest stands more than 0.39 h above the
+    // mean: the swell, the cascades and the breakers die down to meet the beach instead of climbing it. The surf train
+    // below keeps its own reef-slope depth and McCowan limit (Paul 10-01: "if i specify 30m waves they should start at
+    // 30m"). Region water with a depth field only; wolfboatrock.cpp same.
+    if (depthReady > 0.5 && boundedWaterDepth <= 0.0 && wolfStream <= 0.0 && wolfWaterfall <= 0.0)
+    {
+        vec2 lduv = (regionXY - depthOrigin) / depthRegionSize;
+        if (lduv.x >= 0.0 && lduv.x <= 1.0 && lduv.y >= 0.0 && lduv.y <= 1.0)
+        {
+            float capH = 0.39 * max(depthWaterLevel - WOLF_TEX_WOLF_DEPTH_FIELD( lduv).r, 0.0);
+            float dn0 = dot(wave_pos - base_pos, surf_n);
+            float dn1 = wolfSoftCap(dn0, capH);
+            float sech = 1.0 / cosh(clamp(dn0 / max(capH, 1e-4), -10.0, 10.0));
+            wave_pos += surf_n * (dn1 - dn0);
+            wave_h = wolfSoftCap(wave_h, capH);
+            wave_slope *= capH > 0.0 ? sech * sech : 0.0;
         }
     }
 
@@ -661,14 +810,37 @@ void main()
     // lays foam on it, and a dissipation ramp to ZERO height by the waterline.
     // ============================================================
     vSurf = vec4(0.0);
-    if (surfHeight > 0.01 && zoneReady > 0.5 && shoreWavesEnabled > 0.5 && boundedWaterDepth <= 0.0 && exposureReady > 0.5)
+    // [OPEN SEA SHORES 2026-10-26] What the swash below needs from the surf train: its phase at this point, the set
+    // envelope, the height at the break, the deep-water wavelength and the beach slope. swHave = 0: no swash here.
+    float swHave = 0.0;
+    float swPhase = 0.0;
+    float swSetEnv = 1.0;
+    float swH = 0.0;
+    float swLambda = 36.0;
+    float swSlope = 0.05;
+    // [OPEN SEA SHORES 2026-10-26] THE AUTOMATIC SURF. Paul 2026-10-26: open-sea shores should behave like a coast -
+    // waves shoal, break with moving foam, run up and wash back, in sets. Where no surf is painted, every open-sea shore
+    // gets this surf train with the sea state's own height and wavelength (wolfAutoSurf, lldrawpoolwater.cpp), weighted
+    // by the open-sea weight. It runs on the REAL depth (no reef slope: an unpainted beach breaks where its own water
+    // says, McCowan below), and as the baked optical path belongs to the painted surf's wavelength, its phase is the
+    // open-sea distance plus the shoaling term below. Painted surf is untouched.
+    bool autoSurfOn = wolfAutoSurf.w > 0.5 && wolfAutoSurf.x > 0.01 && waveAmplitude > 0.001 && openW > 0.01;
+    if ((surfHeight > 0.01 || autoSurfOn) && shoreWavesEnabled > 0.5 && boundedWaterDepth <= 0.0 && exposureReady > 0.5)
     {
         // Surf ONLY where a designer painted it (Paul 09-07: "surf is a special thing"). Water.js same.
         // <WolfViewer 2026-10-01> From the surf WEIGHT, not the 3x3 energy: 0.55 + 0.45 w is
         // the energy a surf/open mix of that ratio has. w is 1 on every painted cell and fades
         // over half a wavelength outside the paint (Paul 10-01: 20 m surf on a 48 m strip was
         // jagged walls; "if i specify 30m waves they should start at 30m").
-        float surfZone = smoothstep(0.62, 0.95, 0.55 + 0.45 * surfW);
+        float surfZone = (surfHeight > 0.01 && zoneReady > 0.5) ? smoothstep(0.62, 0.95, 0.55 + 0.45 * surfW) : 0.0;
+        bool autoS = surfZone <= 0.01 && autoSurfOn;
+        float sH = autoS ? wolfAutoSurf.x : surfHeight;
+        float sSet = autoS ? wolfAutoSurf.y : surfSetInterval;
+        float sLen = autoS ? wolfAutoSurf.z : surfLength;
+        if (autoS)
+        {
+            surfZone = openW;
+        }
         vec2 euv = (regionXY - exposureOrigin) / exposureSize;
         if (surfZone > 0.01 && euv.x >= 0.0 && euv.x <= 1.0 && euv.y >= 0.0 && euv.y <= 1.0)
         {
@@ -705,7 +877,7 @@ void main()
             vec4 eXm = WOLF_TEX_WOLF_EXPOSURE_FIELD( clamp(euv - vec2(dW.x, 0.0), 0.0, 1.0));
             vec4 eYp = WOLF_TEX_WOLF_EXPOSURE_FIELD( clamp(euv + vec2(0.0, dW.y), 0.0, 1.0));
             vec4 eYm = WOLF_TEX_WOLF_EXPOSURE_FIELD( clamp(euv - vec2(0.0, dW.y), 0.0, 1.0));
-            bool havePath = surfPathK0 > 0.0 && eC.b < 3000.0;
+            bool havePath = surfPathK0 > 0.0 && eC.b < 3000.0 && !autoS;
             vec2 pgrad = vec2(eXp.a - eXm.a, eYp.a - eYm.a);
             float pl = length(pgrad);
             havePath = havePath && pl > 1.0;
@@ -726,6 +898,13 @@ void main()
             // deep-water wavelength: no shoaling, but a clean train rather than a mess.
             float coord = haveOpen ? openS : (haveLand ? -distS : dot(regionXY, dir));
             float path = havePath ? eC.a : coord;
+            // [OPEN SEA SHORES 2026-10-26] The automatic surf is the swell meeting the coast: it rises over the last
+            // 200 m to land (where the exposure has already calmed the open-sea swell, 150 m down to 6 m), not a second
+            // wave train over the whole sea. wolfboatrock.cpp same.
+            if (autoS)
+            {
+                surfZone *= 1.0 - smoothstep(80.0, 200.0, dist);
+            }
             float h = 30.0;
             if (depthReady > 0.5)
             {
@@ -745,7 +924,11 @@ void main()
             // long before the beach; on this slope it keeps its height to 5.1 H out, plunges,
             // and runs in as a bore that shrinks to nothing at the waterline. Water.js same.
             const float SURF_REEF_SLOPE = 0.25;
-            h = max(h, SURF_REEF_SLOPE * dist);
+            float hReal = h;
+            if (!autoS)
+            {
+                h = max(h, SURF_REEF_SLOPE * dist);
+            }
             // <WolfViewer 2026-09-21> k0 is the DEEP-water wavenumber and omega0 its
             // deep-water frequency. omega0 is the same number everywhere in the field: in a
             // shoaling wave train the FREQUENCY is what is conserved, the wavelength is what
@@ -754,12 +937,34 @@ void main()
             // step every 11 s — after an hour of uptime they were 300 crests apart, which is
             // the "mess" in Paul's screenshot. k is the local wavenumber (Guo 2002).
             const float g = 9.81;
-            float lambda = max(surfLength, 12.0 * surfHeight);
-            float k0 = surfPathK0 > 0.0 ? surfPathK0 : 6.2831853 / max(lambda, 8.0);
+            float lambda = max(sLen, 12.0 * sH);
+            float k0 = (surfPathK0 > 0.0 && !autoS) ? surfPathK0 : 6.2831853 / max(lambda, 8.0);
+            // [OPEN SEA SHORES 2026-10-26] The beach slope, along the travel direction, from the smoothed depth field.
+            float beachSlope = 0.05;
+            if (depthReady > 0.5)
+            {
+                vec2 sdu = dir * 4.0 / depthRegionSize;
+                vec2 suv0 = clamp((regionXY - depthOrigin) / depthRegionSize, 0.0, 1.0);
+                float aP = WOLF_TEX_WOLF_DEPTH_FIELD( clamp(suv0 + sdu, 0.0, 1.0)).a;
+                float aM = WOLF_TEX_WOLF_DEPTH_FIELD( clamp(suv0 - sdu, 0.0, 1.0)).a;
+                beachSlope = clamp(abs(aP - aM) / 8.0, 0.01, 1.0);
+            }
+            // [OPEN SEA SHORES 2026-10-26] SHOALING FOR THE AUTOMATIC SURF. The phase of a wave train is the integral of
+            // its local wavenumber along the ray (WKB; the optical path the painted surf bakes). On a beach of slope s, in
+            // the shallow-water limit k = sqrt(k0 / h) (omega^2 = g k0 conserved, k = omega / sqrt(g h)), the extra path
+            // past the deep-water one from depth 1 / k0 in to depth h is
+            //     (1 / s) * integral_h^(1/k0) ( 1 / sqrt(k0 h') - 1 ) dh' = (1 / s) (1 / k0 - 2 sqrt(h / k0) + h),
+            // whose gradient across the beach is exactly sqrt(k0 / h): the crests close up and slow as the water
+            // shallows. Constant at the waterline and on the beach, where the swash takes over.
+            if (autoS)
+            {
+                float hs = min(max(hReal, 0.0), 1.0 / k0);
+                path += (1.0 / k0 - 2.0 * sqrt(hs / k0) + hs) / beachSlope;
+            }
             float omega0 = sqrt(g * k0);
             float k = wolfSurfK(k0, h);
             vec2 across = vec2(-dir.y, dir.x);
-            float setPh = 6.2831853 * (time * surfSpeed / max(surfSetInterval, 10.0)) - path * (0.22 / lambda);
+            float setPh = 6.2831853 * (time * surfSpeed / max(sSet, 10.0)) - path * (0.22 / lambda);
             float setEnv = 0.30 + 0.70 * smoothstep(0.15, 1.0, 0.5 + 0.5 * sin(setPh));
             float crestVar = 0.85 + 0.15 * sin(dot(regionXY, across) * (1.1 / lambda) + time * 0.1);
             // <WolfViewer 2026-10-01> Floor 1 (was 0.8). Green's law dips to 0.915 at intermediate
@@ -768,7 +973,14 @@ void main()
             // the set height is the least a wave carries before it breaks; it still grows as it
             // stands up at the break. Water.js, wolfsurfcurlV.glsl, wolfboatrock.cpp same.
             float ksh = clamp(wolfSurfShoal(k0, k, h), 1.0, 1.8);
-            float crestH = min(surfHeight * surfZone * setEnv * ksh * crestVar, surfHeight * 1.15);
+            float crestH = min(sH * surfZone * setEnv * ksh * crestVar, sH * 1.15);
+            // [OPEN SEA SHORES 2026-10-26] for the swash below
+            swHave = 1.0;
+            swPhase = k0 * path - omega0 * time * surfSpeed;
+            swSetEnv = setEnv * crestVar;
+            swH = sH;
+            swLambda = lambda;
+            swSlope = beachSlope;
             // <WolfViewer 2026-10-01> McCowan on the surf depth h above (real or reef). It was
             // 0.78 (h + 0.8 surfHeight): 16 m of pretend depth EVERYWHERE at a 20 m surf, right up
             // to the waterline, so 7-16 m crests stood over the bank (Paul 10-01, Wolf
@@ -778,7 +990,7 @@ void main()
             float Hmax = 0.78 * h;
             float breakF = smoothstep(0.7, 1.15, crestH / max(Hmax, 0.01));
             crestH = min(crestH, Hmax);
-            crestH *= smoothstep(0.2, 0.6 + 0.5 * surfHeight, h);
+            crestH *= smoothstep(0.2, 0.6 + 0.5 * sH, h);
             if (crestH > 0.01)
             {
                 // <WolfViewer 2026-09-21> BAND LIMIT — the crest can only be as sharp as the
@@ -876,6 +1088,42 @@ void main()
         }
     }
 
+    // [OPEN SEA SHORES 2026-10-26] THE SWASH. Paul 2026-10-26: "a natural swash run-up and backwash ... a moving,
+    // irregular water edge that advances and retreats with each wave instead of a fixed line".
+    // Run-up height: Hunt (1959), R = xi H with the Iribarren number xi = tan(beta) / sqrt(H / L0) (Battjes 1974), H the
+    // wave's height at the break and L0 its deep-water wavelength, capped at WOLF_RUNUP_CAP (Paul: "a small swash band")
+    // and scaled by the open-sea weight (no swash on a lake or a river). Each wave of a set carries its own H, so each
+    // reaches its own height; an alongshore noise breaks the edge up.
+    // Motion: over the band - from just offshore (depth under half the break height) up to a little past the run-up
+    // limit - the surface is drawn to the swash level R * eta, eta rising fast as the bore arrives (the uprush, a third
+    // of the wave period) and draining slowly (the backwash), on the surf train's own phase. The water edge is where that
+    // level meets the beach, so it advances and retreats with the terrain's own shape. waterF.glsl holds the band:
+    // nothing over land above the water level + Rcap, and nothing at all over land higher than that.
+    float Rcap = 0.0;
+    if (swHave > 0.5 && depthReady > 0.5 && openW > 0.01)
+    {
+        vec2 swuv = (regionXY - depthOrigin) / depthRegionSize;
+        if (swuv.x >= 0.0 && swuv.x <= 1.0 && swuv.y >= 0.0 && swuv.y <= 1.0)
+        {
+            float elev = WOLF_TEX_WOLF_DEPTH_FIELD( swuv).r - depthWaterLevel;   // terrain over the water level here
+            float L0 = max(swLambda, 1.0);
+            float xiMax = swSlope / sqrt(max(swH, 0.01) / L0);
+            float Hw = max(swH * swSetEnv, 0.01);
+            float xi = swSlope / sqrt(Hw / L0);
+            Rcap = min(xiMax * swH, WOLF_RUNUP_CAP) * openW;
+            float R = min(xi * Hw, WOLF_RUNUP_CAP) * openW * (0.8 + 0.2 * snoise(regionXY * 0.07 + vec2(time * 0.03, 0.0)));
+            R = clamp(R, 0.0, Rcap);
+            float u = fract(swPhase / 6.2831853);
+            float eta = u < 0.33 ? smoothstep(0.0, 0.33, u) : 1.0 - smoothstep(0.33, 1.0, u);
+            float wsw = (1.0 - smoothstep(0.0, 0.5 * swH + 0.1, -elev))
+                      * (1.0 - smoothstep(1.2 * Rcap, 1.2 * Rcap + 0.3, elev));
+            float dnNow = dot(wave_pos - base_pos, surf_n);
+            wave_pos += surf_n * ((mix(dnNow, R * eta, wsw)) - dnNow);
+            wave_h = mix(wave_h, R * eta, wsw);
+            wave_slope *= 1.0 - wsw;
+        }
+    }
+
     // Boat wash displacement (Water.js [WAKE 2026-08-21]): the Kelvin arms lift the
     // surface and the churn astern depresses it (G lift, B dip, differenced at read).
     if (wakeReady > 0.5 && wakeStrength > 0.0)
@@ -890,8 +1138,64 @@ void main()
     }
     // </WolfViewer>
 
+    // [DRY BUILDS 2026-10-26] THE CLEARANCE CAP, last, over everything above (swell, cascades, breakers, surf, swash,
+    // wake). Region, hole, edge and neighbour planes; not a wolfwater prim surface (the owner's own water), a stream or
+    // a fall.
+    //   up   = S - ALPHA * deadZone - plane: the room to rise; the dead zone is what holds the cap between vertices
+    //          (wolfwaterfield.h) - 1.5 x the lattice step here (wolfLatticeStep, the triangle's longest edge with 6 %
+    //          spare) over 1 - 3 BETA, the vertices' own horizontal travel;
+    //   S    = [OPEN SEA SHORES 2026-10-26] S_all (prims and every land texel) where this plane has no depth field to
+    //          hold the land per pixel, S_dry (prims and the land of INLAND water only) where it has, blended over 32 m
+    //          inside the field's edge (pixelHeld). Prims are in both, so docks and decks are held exactly as before;
+    //          an open-sea beach is held per pixel by waterF.glsl instead, so the waves can run up it with no calm band;
+    //   hcap = BETA * D: the horizontal push, so no vertex is carried onto land or a deck;
+    //   the camera guard: no crest closer than WOLF_CLEAR_EYE under the eye (LLViewerCamera::cameraUnderWater() tests
+    //          the flat water level, so a crest over the eye was drawn from below with the above-water shader).
+    // Until the field is ready there is no room at all: the sea is flat, never wet.
+    if (boundedWaterDepth <= 0.0 && wolfStream <= 0.0 && wolfWaterfall <= 0.0)
+    {
+        vec3 disp = wave_pos - base_pos;
+        float dn = dot(disp, surf_n);
+        vec3 dtan = disp - dn * surf_n;
+        float up = -1.0;
+        float hcap = 0.0;
+        if (WOLF_CLEAR_READY > 0.5)
+        {
+            float lstep = wolfLatticeStep(position.xy);
+            float dead = 1.5 * (lstep > 0.0 ? lstep : 128.0) / (1.0 - 3.0 * WOLF_CLEAR_BETA);
+            // [OPEN SEA SHORES 2026-10-26] camera-centred terrain blocks, so every region gets it near the camera,
+            // whatever its size (Paul's var regions run to 3072 m and more).
+            float pixelHeld = wolfPixelHeld(position.xy, dead);
+            up = mix(wclear.x, wclear.z, pixelHeld) - WOLF_CLEAR_ALPHA * dead - position.z;
+            if (eyeVec.z > position.z)
+            {
+                up = min(up, eyeVec.z - WOLF_CLEAR_EYE - position.z
+                             + WOLF_CLEAR_ALPHA * (length(position.xy - eyeVec.xy) - dead));
+            }
+            hcap = WOLF_CLEAR_BETA * wclear.y;
+        }
+        float hl = length(dtan);
+        if (hl > hcap)
+        {
+            dtan *= hcap / max(hl, 1e-6);
+        }
+        float calmRef = max(maxWaveHeight, 0.1);
+        float dnc = wolfClearCap(dn, up, calmRef);
+        float sech = 1.0 / cosh(clamp(dn / max(up, 1e-4), -10.0, 10.0));
+        wave_pos = base_pos + dtan + dnc * surf_n;
+        wave_h = wolfClearCap(wave_h, up, calmRef);
+        wave_slope *= dn >= 0.0 ? (up > 0.0 ? sech * sech : 0.0) : mix(WOLF_TROUGH_KEEP, 1.0, clamp(up / calmRef, 0.0, 1.0));
+        // The fragment's breaker and surf foam follow the geometry: none where the cap has flattened it.
+        float calm = up > 0.0 ? clamp(up / max(max(maxWaveHeight, vSurf.z), 0.1), 0.0, 1.0) : 0.0;
+        vShore.y *= calm;
+        vSurf.x *= calm;
+        vSurf.w *= calm;
+    }
+    // [DRY BUILDS 2026-10-26/]
+
     vary_wave_slope = wave_slope;
     vary_wave_height = wave_h;
+    vary_wolf_dry = vec4(wave_pos.xy, Rcap, dot(wave_pos - base_pos, surf_n));   // [DRY BUILDS 2026-10-26/] waterF.glsl
 
     // <WolfViewer> Falling water from the geometry. rise/run of the surface at this
     // vertex; steeper than about 1:3 (17 degrees) starts to break white, past 0.8 (39

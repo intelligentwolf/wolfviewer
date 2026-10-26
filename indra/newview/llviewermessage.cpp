@@ -161,6 +161,7 @@
 #include "permissionstracker.h"     // <FS:Zi> Permissions Tracker
 #include "tea.h" // <FS:AW opensim currency support>
 #include "NACLantispam.h"
+#include "wolfadultcontent.h"   // [ADULT CONTENT 2026-10-26/] refusal dialogs
 #include "chatbar_as_cmdline.h"
 
 extern void on_new_message(const LLSD& msg);
@@ -6847,6 +6848,13 @@ void process_alert_core(const std::string& message, bool modal)
         return;
     }
     // </WolfViewer>
+    // [ADULT CONTENT 2026-10-26] a crossing refused at an Adult Content border (EntityTransferModule.cs:1687
+    // SendAlertMessage(failureReason)) or the "you have been taken somewhere else" agent alert (PROTOCOL.md §5): the
+    // Adult Content dialog instead of the plain alert. One at a time (notifications.xml <unique/>).
+    if (WolfAdultContent::showRefusal(message))
+    {
+        return;
+    }
 
     if (message.find(ALERT_PREFIX) == 0)
     {
@@ -7948,7 +7956,12 @@ void process_teleport_failed(LLMessageSystem *msg, void**)
     if (!FSLSLBridge::instance().canUseBridge() ||
         (message_id != "Could not teleport closer to destination"))
     {
+        // [ADULT CONTENT 2026-10-26] a refusal into an Adult Content region (PROTOCOL.md §5) gets its own dialog: the
+        // server's words, plus "Verify my age" for a Wolf resident (none for a hypergrid visitor). Anything else, as before.
+        if (!WolfAdultContent::showRefusal(args["REASON"].asString()))
+        {
         LLNotificationsUtil::add("CouldNotTeleportReason", args);
+        }
     }
 
     if( gAgent.getTeleportState() != LLAgent::TELEPORT_NONE )

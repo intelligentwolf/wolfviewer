@@ -264,6 +264,7 @@
 #include "streamtitledisplay.h"
 #include "wolfalbumart.h"
 #include "wolfupdate.h"
+#include "wolfadultcontent.h"   // [ADULT CONTENT 2026-10-26/] login refused at an Adult Content region
 #include "wolffloaterchat.h"   // [WOLF CHAT 2026-10-21/] WolfChat::startNotifier
 #include "tea.h"
 
@@ -1959,6 +1960,14 @@ bool idle_startup()
                     else if (reason_response == "BadType")
                     {
                         LLNotificationsUtil::add("LoginFailedToParse", LLSD(), LLSD(), login_alert_done);
+                    }
+                    // [ADULT CONTENT 2026-10-26] login to an Adult Content region refused (PROTOCOL.md §5): the Adult
+                    // Content dialog ("Verify my age" for a Wolf resident); closing it goes back to the login screen as
+                    // the ErrorMessage below does (login_alert_done).
+                    else if (!message.empty()
+                             && WolfAdultContent::showRefusal(message, []() { login_alert_done(LLSD(), LLSD()); }))
+                    {
+                        LL_INFOS("LLStartUp") << "Login refused: Adult Content region" << LL_ENDL;
                     }
                     else if (!message.empty())
                     {

@@ -71,6 +71,17 @@ namespace
     // Source: three-geospatial clouds/src/LocalWeather.ts:12 (size 512), Turbulence.ts:12 (size 128)
     constexpr S32 LOCAL_WEATHER_SIZE = 512;
     constexpr S32 TURBULENCE_SIZE = 128;
+    // [WolfViewer 2026-10-26] the flow fields' evolution period (cloudsCommon.glsl WOLF_FLOW_M: whole cycles per period), 6 h
+    constexpr F64 FLOW_EVOLUTION_PERIOD = 6.0 * 3600.0;
+    // [CLOUDS CLEAR OF BUILDS 2026-10-26] the build clearance field's unit (sharedUniforms; unbound after each pass)
+    constexpr S32 BUILD_FIELD_UNIT = 13;
+    // [WolfViewer 2026-10-26] the cirrus fibres' noise periods (cloudsCommon.glsl sampleMedia): the 32^3 detail noise has 2 to 16
+    // Worley cells per period (cloudShapeDetailF.glsl cellCount 2 .. x8), so across the wind 2 km gives filaments of ~1 km down to
+    // ~125 m, along it 20 km makes them ten times longer than wide, and 4 km of height lets them change through a 2 km layer. Modelling
+    // numbers read off the reference photographs (BEAUTY_RESEARCH.md 8.2 #14 Ci uncinus, #15 Ci fibratus) - measured filament widths
+    // were not found (CLOUD_SHAPE_PLAN.md section 5.3).
+    // FIBRE_PERIOD_ACROSS_M / ALONG_M / VERTICAL_M: [2026-10-26] now WolfCloudGenus::table().fibrePeriod* (app_settings/wolf_clouds.xml;
+    // 2,000 / 20,000 / 4,000 m shipped)
     // Source: three-geospatial clouds/src/bayer.ts:4-9 bayerIndices
     const S32 BAYER_INDICES[16] = { 0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5 };
 
@@ -572,6 +583,14 @@ struct Clouds::Impl
     // CloudsEffect.ts:199-201 velocities (shape / detail: 0; the weather's from the frame)
     glm::vec3 shapeVelocity = glm::vec3(0.f), shapeDetailVelocity = glm::vec3(0.f);
     F64 cloudEvolution = 0.0;   // [WolfViewer round 17] metres, the shapes' drift ([2026-10-14] F64: it is no longer wrapped)
+    // [WolfViewer 2026-10-26] the cirrus lookup's drift with the upper wind (cloudsCommon.glsl wolfWeatherOffsetUpper), wrapped as
+    // localWeatherOffset; the two flow fields' drift in globe uv (wolfFlowDrift, wrapped: the modes are whole cycles per uv) and
+    // their evolution clock (wolfFlowState.x, seconds, wrapped at FLOW_EVOLUTION_PERIOD: the modes are whole cycles per period)
+    glm::vec2 localWeatherOffsetUpper = glm::vec2(0.f);
+    glm::dvec4 flowDrift = glm::dvec4(0.0);
+    F64 flowTime = 0.0;
+    // [WolfViewer 2026-10-26] the fibre noise's mean, 2 x its deviation, the mean of its clamped normalised value (measureFibreNoise)
+    glm::vec3 fibreShape = glm::vec3(0.f);
     S32 lastQuality = -1;
     // the main view's camera (the probe faces select shadow cascades with it)
     glm::mat4 mainView = glm::mat4(1.f);
@@ -742,7 +761,37 @@ struct Clouds::Impl
             return false;
         }
         proceduralDone = true;
+        measureFibreNoise();
         return true;
+    }
+
+    /** [WolfViewer 2026-10-26] The fibres' statistics, from the detail noise itself (cloudsCommon.glsl sampleMedia wolfFibreShape):
+     *  its mean mu, 2 x its standard deviation, and the mean of c = clamp((v - mu) / (2 sigma), -1, 1) over the whole texture,
+     *  which the shader subtracts so the fibre factor 1 + a (c - E[c]) has a mean of exactly 1 (each ice layer keeps its mean
+     *  optical depth). Read back once (32^3 R8, 128 KB as floats), after the texture is made. */
+    void measureFibreNoise()
+    {
+        const S32 n = CLOUD_SHAPE_DETAIL_TEXTURE_SIZE;
+        std::vector<F32> v((size_t)n * n * n, 0.f);
+        gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
+        gGL.getTexUnit(0)->activate();
+        glBindTexture(GL_TEXTURE_3D, shapeDetailTex.id);
+        glGetTexImage(GL_TEXTURE_3D, 0, GL_RED, GL_FLOAT, v.data());
+        glBindTexture(GL_TEXTURE_3D, 0);
+        F64 sum = 0.0, sum2 = 0.0;
+        for (F32 x : v) { sum += x; sum2 += (F64)x * x; }
+        const F64 mu = sum / (F64)v.size();
+        const F64 sigma = std::sqrt(llmax(sum2 / (F64)v.size() - mu * mu, 0.0));
+        if (!(sigma > 1e-4))
+        {
+            fibreShape = glm::vec3(0.f);   // a flat texture (a failed read): no fibres (the shader skips them at y = 0)
+            LL_WARNS("WolfEnv") << "the fibre noise read back flat (mean " << mu << ", sd " << sigma << "); cirrus fibres off" << LL_ENDL;
+            return;
+        }
+        F64 sumC = 0.0;
+        for (F32 x : v) sumC += llclamp(((F64)x - mu) / (2.0 * sigma), -1.0, 1.0);
+        fibreShape = glm::vec3((F32)mu, (F32)(2.0 * sigma), (F32)(sumC / (F64)v.size()));
+        LL_INFOS("WolfEnv") << "cirrus fibre noise: mean " << fibreShape.x << " 2sd " << fibreShape.y << " E[c] " << fibreShape.z << LL_ENDL;
     }
 
     /** The parameter, layer and atmosphere uniforms both materials share
@@ -791,6 +840,21 @@ struct Clouds::Impl
         u4f(sh, "wolfLayerAbsorption", L[0].absorption, L[1].absorption, L[2].absorption, L[3].absorption);
         u4f(sh, "wolfLayerIce", L[0].ice, L[1].ice, L[2].ice, L[3].ice);
         u4f(sh, "wolfLayerPowder", L[0].powder, L[1].powder, L[2].powder, L[3].powder);   // [WolfViewer round 16c]
+        u4f(sh, "wolfLayerFibre", L[0].fibre, L[1].fibre, L[2].fibre, L[3].fibre);       // [WolfViewer 2026-10-26]
+        u4f(sh, "wolfLayerRepeat", L[0].repeat, L[1].repeat, L[2].repeat, L[3].repeat);   // [WolfViewer 2026-10-26] the genus's own cell size
+        // [CLOUDS CLEAR OF BUILDS 2026-10-26] the build clearance field on named unit 13 (wolftkgl.h: 8..15; the clouds program's
+        // 8..12 and the shadow program's 8..11 are taken). Every one of the three programs that calls this reads it.
+        u4f(sh, "wolfLayerBuildFade", L[0].buildFade, L[1].buildFade, L[2].buildFade, L[3].buildFade);
+        {
+            const bool on = f.build_tex != 0;
+            u4f(sh, "wolfBuildParams", on ? 1.f : 0.f, f.build_sea, f.build_z_limit, 0.f);
+            u2f(sh, "wolfBuildFade", f.build_fade.mV[0], f.build_fade.mV[1]);   // [2026-10-26] M0, W from the cloud table
+            const F32 lv[12] = { f.build_level[0][0], f.build_level[0][1], f.build_level[0][2], 0.f,
+                                 f.build_level[1][0], f.build_level[1][1], f.build_level[1][2], 0.f,
+                                 f.build_level[2][0], f.build_level[2][1], f.build_level[2][2], 0.f };
+            sh.uniform4fv(LLStaticHashedString("wolfBuildLevel"), 3, lv);
+            WolfTk::bindNamed(sh, "wolfBuildField", BUILD_FIELD_UNIT, GL_TEXTURE_2D, f.build_tex);
+        }
         {
             const F32 a = f.weather_rotation_deg * DEG_TO_RAD, ca = cosf(a), sa = sinf(a), inv = 1.f / llmax(f.weather_stretch, 1e-3f);
             const F32 m[4] = { inv * ca, sa, -inv * sa, ca };   // columns: (S R)[.,0], (S R)[.,1] with S = diag(1/stretch, 1)
@@ -808,6 +872,29 @@ struct Clouds::Impl
                 f.weather_layer_stretched[2], f.weather_layer_stretched[3]);
             u2f(sh, "wolfWeatherOffsetTurned", localWeatherOffsetTurned.x, localWeatherOffsetTurned.y);
             u4f(sh, "wolfLayerTower", f.weather_layer_tower[0], f.weather_layer_tower[1], f.weather_layer_tower[2], f.weather_layer_tower[3]);
+            // [WolfViewer 2026-10-26] the cirrus lookup (kind 2): S R_upper, R_upper the upper wind's turn, the same S (column-major as above)
+            const F32 au = f.weather_upper_rotation_deg * DEG_TO_RAD, cu = cosf(au), su = sinf(au);
+            const F32 mu[4] = { inv * cu, su, -inv * su, cu };
+            static LLStaticHashedString s_rotUp("wolfWeatherRotationUpper");
+            const S32 uloc = sh.getUniformLocation(s_rotUp);
+            if (uloc >= 0) glUniformMatrix2fv(uloc, 1, GL_FALSE, mu);
+            u2f(sh, "wolfWeatherOffsetUpper", localWeatherOffsetUpper.x, localWeatherOffsetUpper.y);
+            // [10-26 third pass] the cirrus lookup's own repeat: its measured dimensions, not the EEP's cloud_scale
+            const WolfCloudGenus::Table& ct = WolfCloudGenus::table();   // [2026-10-26] the cloud table
+            const F32 upperRepeat = (bottomRadius * F_PI * 0.5f) / ct.cirrusTileM;
+            u2f(sh, "wolfUpperRepeat", upperRepeat, upperRepeat);
+            // the curved flow (cloudsCommon.glsl wolfFlowWarp)
+            u4f(sh, "wolfFlowDrift", (F32)flowDrift.x, (F32)flowDrift.y, (F32)flowDrift.z, (F32)flowDrift.w);
+            u4f(sh, "wolfFlowState", (F32)(flowTime / FLOW_EVOLUTION_PERIOD), f.flow_bend_low, f.flow_bend_upper, 0.f);
+            // the fibres (cloudsCommon.glsl sampleMedia): whole cycles of the detail noise per texture unit of the cirrus lookup, so
+            // its offsets' wraps (whole units) never move a fibre. One unit spans T metres across the wind and stretch x T along it
+            // (S divides the along-wind axis by the stretch), T = the cirrus lookup's tile, CIRRUS_TILE_M ([10-26 third pass]: was
+            // the EEP-scaled tile).
+            const F32 tileM = ct.cirrusTileM;
+            const F32 fx = llmax(1.f, (F32)ll_round(llmax(f.weather_stretch, 1.f) * tileM / ct.fibrePeriodAlongM));
+            const F32 fy = llmax(1.f, (F32)ll_round(tileM / ct.fibrePeriodAcrossM));
+            u3f(sh, "wolfFibreScale", fx, fy, 1.f / ct.fibrePeriodVerticalM);
+            u3f(sh, "wolfFibreShape", fibreShape.x, fibreShape.y, fibreShape.z);
         }
         u4f(sh, "densityProfile.expTerms", L[0].densityProfile.expTerm, L[1].densityProfile.expTerm, L[2].densityProfile.expTerm, L[3].densityProfile.expTerm);
         u4f(sh, "densityProfile.exponents", L[0].densityProfile.exponent, L[1].densityProfile.exponent, L[2].densityProfile.exponent, L[3].densityProfile.exponent);
@@ -1108,7 +1195,10 @@ bool Clouds::render(const Atmosphere& atmosphere, const CloudsFrame& f)
     // wind as before. The evolution (the shapes' vertical drift) restarts too.
     if (f.reseed)
     {
-        m.localWeatherOffset = m.localWeatherOffsetTurned = glm::vec2(f.seed_phase[0], f.seed_phase[1]);
+        m.localWeatherOffset = m.localWeatherOffsetTurned = m.localWeatherOffsetUpper = glm::vec2(f.seed_phase[0], f.seed_phase[1]);
+        // [WolfViewer 2026-10-26] the flow fields from the same seed (a region shows the same curves on every visit)
+        m.flowDrift = glm::dvec4(f.seed_phase[0], f.seed_phase[1], f.seed_phase[1], f.seed_phase[0]);
+        m.flowTime = 0.0;
         m.shapeOffset = glm::vec3(f.seed_phase[0], f.seed_phase[1], 0.5f * (f.seed_phase[0] + f.seed_phase[1]));
         m.shapeDetailOffset = glm::vec3(f.seed_phase[1], f.seed_phase[0], 0.f);
         m.cloudEvolution = 0.0;
@@ -1121,6 +1211,13 @@ bool Clouds::render(const Atmosphere& atmosphere, const CloudsFrame& f)
     m.localWeatherOffset -= glm::floor(m.localWeatherOffset);
     m.localWeatherOffsetTurned += glm::vec2(f.local_weather_velocity_turned.mV[0], f.local_weather_velocity_turned.mV[1]) * f.dt;
     m.localWeatherOffsetTurned -= glm::floor(m.localWeatherOffsetTurned);
+    // [WolfViewer 2026-10-26] the cirrus lookup's drift with the upper wind, and the two flow fields carried by their winds (the
+    // lookups and their fields move together, so the clouds translate rigidly: cloudsCommon.glsl wolfFlowWarp)
+    m.localWeatherOffsetUpper += glm::vec2(f.local_weather_velocity_upper.mV[0], f.local_weather_velocity_upper.mV[1]) * f.dt;
+    m.localWeatherOffsetUpper -= glm::floor(m.localWeatherOffsetUpper);
+    m.flowDrift += glm::dvec4(f.flow_velocity_low.mV[0], f.flow_velocity_low.mV[1], f.flow_velocity_upper.mV[0], f.flow_velocity_upper.mV[1]) * (F64)f.dt;
+    m.flowDrift -= glm::floor(m.flowDrift);
+    m.flowTime = std::fmod(m.flowTime + (F64)f.dt, FLOW_EVOLUTION_PERIOD);
     // [WolfViewer round 17] the shapes' vertical drift in metres (cloudsCommon.glsl wolfCloudEvolution): takram's ratio of drift to
     // cloud motion, 2e4 x the offset of its repeat-100 texture (clouds.glsl:120-121), 0.2.
     // [WolfViewer 2026-10-14] NOT wrapped any more: it moves the shape lookup along the surface normal (cloudsCommon.glsl
@@ -1188,6 +1285,7 @@ bool Clouds::render(const Atmosphere& atmosphere, const CloudsFrame& f)
         drawScreen(p.mapSize, p.mapSize);
         sh.unbind();
         for (S32 u = 8; u <= 11; ++u) WolfTk::unbindUnit(u, u == 9 || u == 10 ? GL_TEXTURE_3D : GL_TEXTURE_2D);
+        WolfTk::unbindUnit(BUILD_FIELD_UNIT, GL_TEXTURE_2D);   // [2026-10-26]
     }
     {
         // the resolve (ShadowResolveMaterial: varianceGamma 1, temporalAlpha 0.01, ShadowResolveMaterial.ts:51-62)
@@ -1239,6 +1337,7 @@ bool Clouds::render(const Atmosphere& atmosphere, const CloudsFrame& f)
         sh.unbind();
         for (S32 u = 8; u <= 12; ++u) WolfTk::unbindUnit(u, u == 9 || u == 10 ? GL_TEXTURE_3D : GL_TEXTURE_2D);
         WolfTk::unbindUnit(sh.getTextureChannel(LLShaderMgr::WOLF_TK_SHADOW_BUFFER), GL_TEXTURE_2D_ARRAY);
+        WolfTk::unbindUnit(BUILD_FIELD_UNIT, GL_TEXTURE_2D);   // [2026-10-26]
     }
     {
         // the resolve (CloudsResolveMaterial: varianceGamma 2, temporalAlpha 0.1, CloudsResolveMaterial.ts:68-79)
@@ -1325,6 +1424,7 @@ bool Clouds::renderProbe(const Atmosphere& atmosphere, const CloudsFrame& f)
     sh.unbind();
     for (S32 u = 8; u <= 12; ++u) WolfTk::unbindUnit(u, u == 9 || u == 10 ? GL_TEXTURE_3D : GL_TEXTURE_2D);
     WolfTk::unbindUnit(sh.getTextureChannel(LLShaderMgr::WOLF_TK_SHADOW_BUFFER), GL_TEXTURE_2D_ARRAY);
+    WolfTk::unbindUnit(BUILD_FIELD_UNIT, GL_TEXTURE_2D);   // [2026-10-26]
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glViewport(vp[0], vp[1], vp[2], vp[3]);
     return true;

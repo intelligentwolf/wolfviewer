@@ -76,6 +76,8 @@ public:
      */
     void removeApplied(const LLViewerObject* objectp, LLVector3& pos, LLQuaternion& rot) const;
     void apply(const LLViewerObject* objectp, LLVector3& pos, LLQuaternion& rot);
+    /** [DRY BUILDS 2026-10-26/] Is this ROOT prim's linkset being floated? (WolfWaterClearance: a floater is not a source.) */
+    bool isRocking(const LLViewerObject* root) const { return mRockers.find(root) != mRockers.end(); }
 
     // Source: terrain_manager.js updateFloaters() — 2.5 s sweep, 48 rockers, 256 m.
     static constexpr F64 SWEEP_INTERVAL_SECS = 2.5;
@@ -123,6 +125,10 @@ private:
         F32       mSurfH = 0.f;
         F32       mSurfSet = 90.f;
         F32       mSurfLen = 36.f;
+        // [OPEN SEA SHORES 2026-10-26] the automatic open-sea surf (lldrawpoolwater.cpp wolfAutoSurf, same formula)
+        F32       mAutoH = 0.f;
+        F32       mAutoLen = 36.f;
+        bool      mAutoOn = false;
     };
     struct Rocker
     {

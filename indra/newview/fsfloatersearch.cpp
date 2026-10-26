@@ -28,6 +28,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "fsfloatersearch.h"
+#include "wolfadultcontent.h"   // [ADULT CONTENT 2026-10-26/] the details' maturity badge
 
 #include "fsavatarsearchmenu.h"
 #include "fsdispatchclassifiedclickthrough.h"
@@ -462,6 +463,13 @@ void FSFloaterSearch::displayParcelDetails(const LLParcelData& parcel_data)
     {
         mDetailMaturity->setValue("Parcel_PG_Dark");
     }
+    // [ADULT CONTENT 2026-10-26] its own badge (wolfadultcontent.h). PROTOCOL.md v2 §9: the live regions have no places
+    // search backend, and one added later must leave Adult Content regions out, so this is only for a result whose
+    // region became Adult Content after it was listed (or a grid search that does list it).
+    if (WolfAdultContent::isAdultContentAtGlobal(LLVector3d(parcel_data.global_x, parcel_data.global_y, 0.0)))
+    {
+        mDetailMaturity->setValue(WolfAdultContent::ICON_DARK);
+    }
 
     LLStringUtil::format_map_t map;
     map["DWELL"] = llformat("%.0f", (F64)parcel_data.dwell);
@@ -548,6 +556,10 @@ void FSFloaterSearch::displayClassifiedDetails(LLAvatarClassifiedInfo*& c_info)
         {
             mDetailMaturity->setValue("Parcel_PG_Dark");
         }
+        if (WolfAdultContent::isAdultContentAtGlobal(c_info->pos_global))   // [ADULT CONTENT 2026-10-26/] as parcels
+        {
+            mDetailMaturity->setValue(WolfAdultContent::ICON_DARK);
+        }
 
         LLStringUtil::format_map_t map;
         map["LISTING_PRICE"] = llformat("L$%d", c_info->price_for_listing);
@@ -584,6 +596,10 @@ bool FSFloaterSearch::displayEventDetails(LLEventInfo event)
         default:
             mDetailMaturity->setValue("Parcel_PG_Dark");
             break;
+    }
+    if (WolfAdultContent::isAdultContentAtGlobal(event.mPosGlobal))   // [ADULT CONTENT 2026-10-26/] as parcels
+    {
+        mDetailMaturity->setValue(WolfAdultContent::ICON_DARK);
     }
 
     S32 region_x;

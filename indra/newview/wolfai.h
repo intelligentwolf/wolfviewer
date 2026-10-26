@@ -137,7 +137,14 @@ public:
     void onVisibilityChange(bool visible) override;
 private:
     // [2026-09-12] The wizard, matching WolfStorm: choose -> form -> (large) confirm -> working.
-    enum class Step { Choose, Form, Confirm, Working };
+    // [WOLF 3D TEXT 2026-10-26] and the 3D Text tool: choose -> words (with the live preview beside them) -> delivered
+    // (TextForm, TextDone; region-terrain-work/wolf-text3d/PROTOCOL.md "UI shape" and "Changes 2026-10-26 (round 2)": the
+    // preview is on the form, so the separate preview step is gone).
+    enum class Step { Choose, Form, Confirm, Working, TextForm, TextDone };
+    bool textStep() const { return mStep == Step::TextForm || mStep == Step::TextDone; }
+    /** The resident has gone on to the small model / large build steps: a late 3D Text reply fills its screens without
+     *  taking them away from what they are doing (the sign is in their inventory either way). */
+    bool textElsewhere() const { return mStep == Step::Form || mStep == Step::Confirm || mStep == Step::Working; }
     void setStep(Step step);
     void onChoose(const std::string& mode);
     void onBack();
@@ -167,6 +174,64 @@ private:
     void drawForgeEmbers() const;
     void drawForgeStep(F32 t);
     void drawCrucible(const LLRect& area, F32 t) const;
+    void drawForgeText(F32 t);
+
+    // ---- [WOLF 3D TEXT 2026-10-26] the 3D Text tool (PROTOCOL.md: text_options, text_preview, text_make; free, no AI) ----
+    // Who and why: a resident wants their words standing in-world as a solid sign - plain, bevelled, neon or a hillside
+    // sign - and to find it in their inventory a minute later, without paying or learning to build.
+    void textChoose();
+    void textAskOptions();
+    void textApplyOptions(const LLSD& options);
+    void textLoadDefaults(const std::string& style);
+    void textSyncControls();
+    /** The SPEC from the form, checked as PROTOCOL.md says the server checks it; false when it is not, with `first` the
+     *  first field to put right and `why` its message. `show`: write each message by its field (a submit, or messages
+     *  already showing); otherwise the live preview checks quietly (GOV.UK: validate on submit, not while typing). */
+    bool textSpec(LLSD& spec, class LLUICtrl*& first, std::string& why, bool show);
+    bool textFieldErrorsShown() const;
+    /** The form, after a press of Make or Update preview, failed its checks: the summary in the error box, the page that
+     *  holds the first bad field shown, and that field focused. */
+    void textSubmitFailed(class LLUICtrl* first);
+    void textMake();
+    /** Ask text_preview for the form as it is now (loud: the Update preview button, which shows field messages). */
+    void textPreview(bool loud);
+    /** The form changed: a new preview TEXT_PREVIEW_DELAY after the last change (textTick, from draw). */
+    void textQueuePreview();
+    void textTick();
+    /** The quiet line under the picture and the picture's own state (dimmed, "Updating..."), from the flags below. */
+    void textSyncStatus();
+    void textShowPage(bool lights);
+    void textShowNight(bool night);
+    void textShowPreview(const LLSD& reply);
+    void textShowMade(const LLSD& reply);
+    void textFieldError(const char* field, const std::string& message);
+    std::string textNumbers(const LLSD& stats, const std::string& size_separator) const;
+    LLSD mTextOptions;                  // text_options' reply, or the protocol's fallback until it comes
+    std::string mTextStyle;             // the style whose defaults the form last took
+    bool mTextOptionsLive = false, mTextOptionsAsking = false, mTextEdited = false;
+    bool mTextMaking = false;           // a text_make is on its way (Make is disabled until it answers)
+    bool mTextPreviewing = false;       // a text_preview is on its way (one at a time; a change meanwhile waits for it)
+    bool mTextStale = false;            // the picture no longer shows the form as it is
+    bool mTextSummary = false;          // the error box holds the "settings need changing" summary of a failed submit
+    F64 mTextDirtyAt = 0.;              // when the form last changed with a preview still to ask for (0: none waiting)
+    F64 mTextPausedUntil = 0.;          // the server's "too many previews - wait N s": no preview asked before this
+    std::string mTextHint;              // the quiet line: why the preview waits, or why it could not be drawn
+    // a reply is used only when it answers the latest call of its kind in this session (a new session bumps both)
+    U64 mTextMakeSerial = 0, mTextPreviewSerial = 0;
+    LLPanel *mStepText = nullptr, *mStepTextDone = nullptr, *mTextPageLetters = nullptr, *mTextPageLights = nullptr;
+    class LLTextEditor *mTextWords = nullptr, *mTextReport = nullptr;
+    class LLComboBox *mTextStyleBox = nullptr, *mTextFont = nullptr, *mTextLayout = nullptr, *mTextLight = nullptr;
+    class LLSpinCtrl *mTextHeight = nullptr, *mTextDepth = nullptr, *mTextRadius = nullptr;
+    class LLSliderCtrl *mTextGlow = nullptr, *mTextIntensity = nullptr;
+    class LLCheckBoxCtrl *mTextBevel = nullptr, *mTextFullbright = nullptr;
+    class LLColorSwatchCtrl *mTextColour = nullptr, *mTextLightColour = nullptr;
+    class LLTextureCtrl* mTextTexture = nullptr;
+    class LLLineEditor* mTextName = nullptr;
+    class LLButton *mTextPreviewBtn = nullptr, *mTextMakeBtn = nullptr, *mTextDay = nullptr, *mTextNight = nullptr;
+    class LLButton *mTextTabLetters = nullptr, *mTextTabLights = nullptr;
+    class LLTextBox *mTextStatus = nullptr, *mTextNumbers = nullptr;
+    class WolfAIPreview* mTextPicture = nullptr;
+
     WolfAIForge* mForge = nullptr;
     class LLTextEditor *mPrompt = nullptr, *mError = nullptr, *mResult = nullptr, *mSources = nullptr;
     class LLLineEditor* mName = nullptr;

@@ -120,7 +120,7 @@ vec4 marchClouds(
 
     // Sample rough weather.
     vec2 uv = getGlobeUv(position);
-    WeatherSample weather = sampleWeather(uv, height, mipLevel);
+    WeatherSample weather = sampleWeather(uv, height, mipLevel, position);
 
     if (any(greaterThan(weather.density, vec4(minDensity)))) {
       // Sample detailed participating media.

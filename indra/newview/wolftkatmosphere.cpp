@@ -1034,14 +1034,15 @@ void Atmosphere::readBack()
     gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
 }
 
-// [WolfViewer 2026-10-25] the WolfEepGains uniform block (brunetonRuntime.glsl): three std140 arrays of EEP_GAINS vec4 -
-// wolfEepGain, wolfEepCloudGain, wolfEepProbeDir - in that order. The gains are written when they change; the probe
+// [WolfViewer 2026-10-25] the WolfEepGains uniform block (brunetonRuntime.glsl): std140 vec4 arrays - wolfEepGain and
+// wolfEepCloudGain (EEP_GAINS each), wolfEepProbeDir (EEP_PROBES) - in that order. The gains are written when they change; the probe
 // directions only by setEepProbeDirs. Bound to LLGLSLShader::UB_WOLF_EEP_GAINS, the binding point every program's block was
 // given at link (llglslshader.cpp mapUniforms).
 namespace
 {
     constexpr GLsizeiptr EEP_ARRAY_BYTES = Atmosphere::EEP_GAINS * 4 * sizeof(F32);
-    constexpr GLsizeiptr EEP_BLOCK_BYTES = 3 * EEP_ARRAY_BYTES;
+    constexpr GLsizeiptr EEP_PROBE_BYTES = Atmosphere::EEP_PROBES * 4 * sizeof(F32);
+    constexpr GLsizeiptr EEP_BLOCK_BYTES = 2 * EEP_ARRAY_BYTES + EEP_PROBE_BYTES;
 }
 
 void Atmosphere::bindEepBlock() const
@@ -1074,16 +1075,16 @@ void Atmosphere::bindEepBlock() const
     glBindBufferBase(GL_UNIFORM_BUFFER, LLGLSLShader::UB_WOLF_EEP_GAINS, mEepBlock);
 }
 
-void Atmosphere::setEepProbeDirs(const LLVector3 dirs[EEP_GAINS])
+void Atmosphere::setEepProbeDirs(const LLVector3 dirs[EEP_PROBES])
 {
     bindEepBlock();   // creates it, writes the gains if they changed, binds it
-    F32 data[EEP_GAINS * 4];
-    for (S32 i = 0; i < EEP_GAINS; ++i)
+    F32 data[EEP_PROBES * 4];
+    for (S32 i = 0; i < EEP_PROBES; ++i)
     {
         data[i * 4 + 0] = dirs[i].mV[0]; data[i * 4 + 1] = dirs[i].mV[1]; data[i * 4 + 2] = dirs[i].mV[2]; data[i * 4 + 3] = 0.f;
     }
     glBindBuffer(GL_UNIFORM_BUFFER, mEepBlock);
-    glBufferSubData(GL_UNIFORM_BUFFER, 2 * EEP_ARRAY_BYTES, EEP_ARRAY_BYTES, data);
+    glBufferSubData(GL_UNIFORM_BUFFER, 2 * EEP_ARRAY_BYTES, EEP_PROBE_BYTES, data);
 }
 
 void Atmosphere::setRuntimeUniforms(LLGLSLShader& sh, F32 pre_exposure, bool uniforms) const

@@ -29,6 +29,7 @@
 #include "wolfsuitcase.h"   // [SUITCASE 2026-10-10/] landmarks into My Suitcase on a hypergrid trip
 #include "wolfinvisible.h"  // <WolfViewer 2026-10-11/> Invisible Mode: tell each Wolf region
 #include "wolfviewerkey.h"  // [COPYBOT EXEMPT 2026-10-19/] the per-login key for the regions' copybot guard
+#include "wolffloaterdob.h"  // [DOB IN THE VIEWER 2026-10-26/] ask for a date of birth after login when the account has none
 #include "wolffloaterexperiences.h"  // [WolfViewer 2026-10-14/] Experiences: auto-open after a new account's login, arrival notice
 #include "llappviewer.h"
 #include "wolfsplash.h"   // [WOLF SPLASH 2026-10-21/]
@@ -6330,6 +6331,7 @@ void LLAppViewer::idle()
     WolfFX::instance().idle();
     WolfInvisible::idle();            // <WolfViewer 2026-10-11/> Invisible Mode: the region arrived in, or the switch changed
     WolfViewerKey::idle();            // [COPYBOT EXEMPT 2026-10-19/] fetch / renew the key, hand it to each Wolf region
+    WolfDob::idle();                  // [DOB IN THE VIEWER 2026-10-26/] once per Wolf login: no date of birth -> the Date of Birth window
     WolfAurora::idle();               // [WolfViewer 2026-10-15/] WolfForceAurora: this viewer's sky to Midnight while it is on
     WolfExperiences::idle();          // [WolfViewer 2026-10-14/] Experiences: open after a new account's login; the arrive notice after Go
     WolfSuitcase::idle();             // [SUITCASE 2026-10-10/] hypergrid trips: what arrived in My Suitcase comes home        // <WolfViewer 2026-10-10/> wolfEffect explosions, fire, smoke (wolffx.h)

@@ -278,6 +278,56 @@
              width="20"/>
         </icons_combo_box.item>
     </icons_combo_box>
+    <!-- [ADULT CONTENT 2026-10-26] llfloaterregioninfo.cpp processRegionInfo. Who and why: a region owner wants to see
+         whether the region is Adult Content and find where that is set, in one click. Adult Content is set only on
+         wolf-grid.com (region-terrain-work/adult-content/PROTOCOL.md §7), never from here; the icon and text show
+         beside the rating when it is on, the link button on Wolf Territories only. -->
+    <icon
+     follows="left|top"
+     height="16"
+     image_name="Parcel_AC_Light"
+     layout="topleft"
+     left="222"
+     name="wolf_adult_content_icon"
+     top="312"
+     visible="false"
+     width="18" />
+    <text
+     follows="left|top"
+     height="20"
+     layout="topleft"
+     left="244"
+     name="wolf_adult_content_text"
+     tool_tip="Only residents who have completed an age check can enter this region. Hypergrid visitors can't enter."
+     top="312"
+     visible="false"
+     width="226">
+        Adult Content
+    </text>
+    <button
+     follows="left|top"
+     height="20"
+     label="Region type on wolf-grid.com..."
+     layout="topleft"
+     left="222"
+     name="wolf_region_type_btn"
+     tool_tip="Open this region's type on wolf-grid.com in your browser. Adult Content is set there by the region owner or the estate owner, never from the viewer."
+     top="340"
+     visible="false"
+     width="230" />
+    <!-- [ADULT CONTENT 2026-10-26] W81: shown after the Rating dropdown's Adult Content choice (or another rating while it
+         is one) opened wolf-grid.com - llfloaterregioninfo.cpp wolf_ac_on_access_commit. Right of the Teleport Home
+         buttons, which end at x 260. -->
+    <text
+     follows="left|top"
+     height="64"
+     layout="topleft"
+     left="270"
+     name="wolf_region_type_note"
+     top="368"
+     visible="false"
+     width="200"
+     wrap="true" />
     <button
      enabled="false"
      follows="left|top"

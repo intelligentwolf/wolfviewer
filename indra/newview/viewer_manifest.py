@@ -105,6 +105,8 @@ class ViewerManifest(LLManifest,FSViewerManifest):
                 # <WolfViewer 2026-10-16> Wolf Adventure Studio (P3): the pack schema and the rules presets it edits,
                 # copied from region-terrain-work/wolf-story/spec/ (wolffloateradventurestudioedit.cpp)
                 self.path("wolfadventure")
+                # <WolfViewer 2026-10-26> the recorded rain (wolfweathersound.cpp) + SOURCES.md
+                self.path("wolfweather")
 
                 # include the entire shaders directory recursively
                 self.path("shaders")

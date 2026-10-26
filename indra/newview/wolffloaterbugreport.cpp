@@ -33,6 +33,7 @@
 #include "indra_constants.h"   // APP_NAME
 #include "llgl.h"
 #include "lllineeditor.h"
+#include "llradiogroup.h"   // [FLEA REPORT 2026-10-26/] "Something's broken" / "I have an idea"
 #include "llsdjson.h"
 #include "llsys.h"
 #include "lltextbox.h"
@@ -80,6 +81,14 @@ namespace
         { "abuse", "Abuse report" },
         { "other", "Something else" },
     };
+    // [FLEA REPORT 2026-10-26] Paul: a flea report is also for new features and ideas. "I have an idea" sends this
+    // ticketlib.php tkCategories() key (label "Idea / feature request"); it is not in the "Something's broken" list.
+    const char* const IDEA_CATEGORY[2] = { "idea", "Idea / feature request" };
+
+    bool is_idea(const LLFloater* f)
+    {
+        return f->getChild<LLRadioGroup>("kind")->getSelectedIndex() == 1;
+    }
 
     std::string size_text(S64 n)
     {
@@ -288,13 +297,41 @@ bool WolfFloaterBugReport::postBuild()
     mSend = getChild<LLButton>("send");
     mOpenTicket = getChild<LLButton>("open_ticket");
 
-    mCategory->add("Choose one...", LLSD(std::string()));
-    for (const auto& c : CATEGORIES)
+    // [FLEA REPORT 2026-10-26] The choice at the top sets up the form for a problem or an idea. An idea has its own
+    // category (IDEA_CATEGORY) and its logs are off by default (the box can still be ticked); a problem keeps them on.
+    // Switching kind empties nothing the resident typed.
+    auto apply_kind = [this](bool idea, bool refresh_logs)
     {
-        mCategory->add(c[1], LLSD(std::string(c[0])));
-    }
-    mCategory->selectFirstItem();
-    mBody->setLabel(std::string("What you were doing, what you expected, and what happened instead."));
+        mCategory->clearRows();
+        if (idea)
+        {
+            mCategory->add(IDEA_CATEGORY[1], LLSD(std::string(IDEA_CATEGORY[0])));
+        }
+        else
+        {
+            mCategory->add("Choose one...", LLSD(std::string()));
+            for (const auto& c : CATEGORIES)
+            {
+                mCategory->add(c[1], LLSD(std::string(c[0])));
+            }
+        }
+        mCategory->selectFirstItem();
+        mCategory->setEnabled(!idea);
+        getChild<LLTextBox>("body_label")->setText(idea ? std::string("What is your idea?") : std::string("What happened?"));
+        mBody->setLabel(idea ? std::string("What you would like, and how you would use it.")
+                             : std::string("What you were doing, what you expected, and what happened instead."));
+        mSubject->setLabel(idea ? std::string("For example: let me save my favourite camera views")
+                                : std::string("For example: the viewer froze when I teleported"));
+        mAttach->set(!idea);
+        if (refresh_logs) findLogs();
+    };
+    LLRadioGroup* kind = getChild<LLRadioGroup>("kind");
+    kind->setSelectedIndex(0);
+    kind->setCommitCallback([apply_kind](LLUICtrl* ctrl, const LLSD&)
+    {
+        apply_kind(static_cast<LLRadioGroup*>(ctrl)->getSelectedIndex() == 1, true);
+    });
+    apply_kind(false, false);   // onOpen lists the logs
 
     mSend->setCommitCallback([this](LLUICtrl*, const LLSD&) { onSend(); });
     getChild<LLButton>("my_tickets")->setCommitCallback([](LLUICtrl*, const LLSD&) { LLWeb::loadURLExternal(TICKETS_URL); });
@@ -312,7 +349,7 @@ void WolfFloaterBugReport::onOpen(const LLSD& key)
     findLogs();
     if (!mSending && !WolfGrid::isWolfTerritories())   // Paul 10-24: "only wolf residents" (a Wolf login, wherever they are)
     {
-        setStatus("Report a Problem is for Wolf Territories residents. To report a problem on another grid, "
+        setStatus("Flea reports are for Wolf Territories residents. To report a problem on another grid, "   // [FLEA REPORT 2026-10-26/]
                   "use that grid's own support.", EStatus::ERR);
     }
 }
@@ -432,26 +469,27 @@ void WolfFloaterBugReport::onSend()
     LLStringUtil::trim(body);
     if (category.empty())
     {
-        setStatus("Not sent: please choose what the problem is about.", EStatus::ERR);
+        setStatus("Not sent: please choose what the flea report is about.", EStatus::ERR);
         mCategory->setFocus(true);
         return;
     }
     if (subject.empty())
     {
-        setStatus("Not sent: please give the report a short subject.", EStatus::ERR);
+        setStatus("Not sent: please give the flea report a short subject.", EStatus::ERR);
         mSubject->setFocus(true);
         return;
     }
     if (body.empty())
     {
-        setStatus("Not sent: please say what happened, so we know what to look at.", EStatus::ERR);
+        setStatus(is_idea(this) ? std::string("Not sent: please describe your idea.")   // [FLEA REPORT 2026-10-26/]
+                                : std::string("Not sent: please say what happened, so we know what to look at."), EStatus::ERR);
         mBody->setFocus(true);
         return;
     }
     // The request carries this login's agent and session ids: only a Wolf Territories login, only to Wolf's own site.
     if (!WolfGrid::isWolfTerritories())
     {
-        setStatus("Not sent: Report a Problem is for Wolf Territories residents.", EStatus::ERR);
+        setStatus("Not sent: flea reports are for Wolf Territories residents.", EStatus::ERR);
         return;
     }
 
@@ -476,7 +514,7 @@ void WolfFloaterBugReport::onSend()
     const LLHandle<LLFloater> handle = getHandle();
     if (!mAttach->get() || mLogs.empty())
     {
-        setStatus("Sending your report...", EStatus::INFO);
+        setStatus("Sending your flea report...", EStatus::INFO);
         LLCoros::instance().launch("WolfBugReport", [handle, fields]() { sendCoro(handle, fields, {}); });
         return;
     }
@@ -490,7 +528,7 @@ void WolfFloaterBugReport::onSend()
     {
         if (WolfFloaterBugReport* self = static_cast<WolfFloaterBugReport*>(handle.get()))
         {
-            self->setStatus("Sending your report and logs...", EStatus::INFO);
+            self->setStatus("Sending your flea report and logs...", EStatus::INFO);
         }
         LLCoros::instance().launch("WolfBugReport", [handle, fields, parts]() { sendCoro(handle, fields, parts); });
     };
@@ -574,7 +612,10 @@ void WolfFloaterBugReport::onSent(const LLSD& reply, const std::string& error)
     }
     const S32 ticket = reply["ticket"].asInteger();
     mTicketUrl = json_string(reply, "url");
-    std::string t = llformat("Sent. Your ticket number is #%d. We will reply on wolf-grid.com and by email.", ticket);
+    // [FLEA REPORT 2026-10-26/]
+    std::string t = llformat(is_idea(this) ? "Sent - thanks for the idea! Your ticket number is #%d. We will reply on wolf-grid.com and by email."
+                                           : "Sent - thanks for catching that flea! Your ticket number is #%d. We will reply on wolf-grid.com and by email.",
+                             ticket);
     const S32 stored = reply["logsStored"].asInteger();
     if (stored > 0) t += llformat(" %d log file%s attached.", stored, stored == 1 ? "" : "s");
     const LLSD& refused = reply["logsRefused"];

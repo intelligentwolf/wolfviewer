@@ -1,0 +1,273 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  WolfViewer: THE CLOUD TABLE of the native Wolf sky (IntelligentWolf Ltd, 2026-10-26).
+
+  Every tunable number of the cloud renderer that used to live in C++. Read at start and again whenever the shaders are
+  rebuilt (Advanced > Rendering > Reload Vertex Shaders, or any graphics change): edit, reload, look - no viewer build.
+  Reader: indra/newview/wolfcloudgenus.cpp loadTable(). A value left out keeps the compiled default (the same numbers as
+  shipped here); a file that does not parse or fails a check is logged (WolfEnv warning, with the reason) and the previous
+  table is kept. The citations are carried as comments beside each number; the long versions are in the C++ comments and in
+  region-terrain-work/wolf-environment-render/BEAUTY_RESEARCH.md (sections 8.1, 8.4, 9.3, 9.4) and CLOUD_SHAPE_PLAN.md.
+
+  genera.<name>: one row per WMO genus the rules use (all 14 required)
+    shape        takram shapeAmount: how much the 3D shape noise erodes the layer (1 = fully, 0.2 = a veil)
+    detail       takram shapeDetailAmount (the 32^3 Worley detail)
+    exponent     takram weatherExponent: the weather value to this power (> 1 = separate elements)
+    bias         takram shapeAlteringBias: the height profile's rounding (0.25 flat tops .. 0.9 a sheet)
+    filter       takram coverageFilterWidth: the softness of the coverage cut (0.2 hard .. 0.7 soft)
+    profile      takram density profile [expTerm, exponent, linearTerm, constantTerm] over the height fraction
+    lwc_g_m3     liquid (or ice, ice = 1) water content, g/m3: the extinction sigma = 3 LWC / (2 rho r_e), r_e 10 um water /
+                 30 um ice (Stephens 1978; Wood eq. 2)
+    ice          0 water droplets .. 1 ice crystals (the phase function, no powder)
+    absorption   per unit density (precipitation darkening, Schneider 2015 p. 69)
+    shadow       in the cloud shadow map
+    fibre        0..1: the ice fibres carved into the weather value before the coverage cut (streak layers only)
+    repeat       a whole number: the weather texture's repeat x this for the genus - its cells' size (turned lookup only)
+    streaks      true: drawn through the upper-wind streak lookup (stretched, bent, fibre-carved) - cirrus; false: a veil / grains
+
+  heights.<rule>: the rule's base and top above the sea (m); depth instead of top for the cumulus rules, whose base is the
+    lifted condensation level (Espy: 125 m x (T - Td), held between cu_base_min_m and cu_base_max_m).
+-->
+<llsd>
+<map>
+  <key>version</key><integer>1</integer>
+
+  <key>constants</key>
+  <map>
+    <!-- The low and middle layers' tile (m): one repeat of the weather texture. Measured cumulus: the cloud size distribution is
+         a power law up to a scale break of 400 - 1,250 m and clouds of about that size carry most of the cloud fraction (Neggers,
+         Jonker and Siebesma 2003, J. Atmos. Sci. 60:1060-1074, Table 2: BOMEX 700 m, SCMS 1,050 m, ARM 400 - 1,250 m). Over 32 km
+         the low channel's Worley cells (16 .. 128 per tile) are 2 km down to 250 m. Used with WolfCloudPhysicalScale on. -->
+    <key>low_mid_tile_m</key><real>160000</real>
+    <!-- [2026-10-26 18:00Z, tuned in the viewer] 32 km made the weather map's cells (2 km - 250 m) the size of single clouds, so each
+         cloud was the 2D coverage mask extruded upright (sampleWeather: only the semicircle heightScale rounds a column top and
+         bottom) - Paul: "a long weird shape", seen from below as fingers pointing to the zenith. As takram designs it
+         (shapeRepeat 0.0003 = 3.3 km shape noise, wolftkclouds.cpp:578), the weather map holds the macro coverage (cells
+         10 - 1.25 km at 160 km) and the 3D shape noise sculpts each cloud. Checked at ICELAND (dusk, Sc/As) and Lampert
+         Highlands (day cumulus); Paul: "those clouds are amazing". -->
+    <!-- The cirrus streak lookup's tile (m): generating cells ~1 km organised in mesoscale uncinus complexes up to ~120 km across
+         (Sassen et al., FIRE cirrus lidar, NTRS 19910001165); fall streaks up to ~60 km (Ann. Geophys. 20:711, 2002). -->
+    <key>cirrus_tile_m</key><real>120000</real>
+    <!-- The streets' and the cirrus' elongation along the wind (a modelling number, genus.py). -->
+    <key>stretch</key><real>4</real>
+    <!-- How strongly the curved flow bends the streets (a third: rolls stay "parallel to the mean wind", horizontal convective
+         rolls) and the cirrus (in full); cloudsCommon.glsl wolfFlowWarp: Kraichnan 1970, Bridson et al. 2007, CLOUD_SHAPE_PLAN 5.1. -->
+    <key>flow_bend_streets</key><real>0.3333333</real>
+    <key>flow_bend_upper</key><real>1.0</real>
+    <!-- The genera's easing time (s): nothing pops (Nubis 2017 transitions over 10-30 s). -->
+    <key>genus_tau_s</key><real>20</real>
+    <!-- Clouds never cover anyone's builds (Paul 2026-10-26): fully clear within M0 of a build's box - the cloud's finest detail
+         (takram's Worley detail, 2 to 16 cells per 167 m, is 10-20 m) - and back to the weather's cloud over W, the march's
+         minimum step (takram qualityPresets.ts minStepSize 50), so the fade is always resolved by one sample. wolfcloudclearance.h -->
+    <key>build_clear_m0_m</key><real>20</real>
+    <key>build_clear_w_m</key><real>50</real>
+    <!-- The cirrus fibres' periods (m): across the wind, along it, vertical. Modelling numbers; filament widths measured: NOT FOUND
+         (photographs show 0.1 - 1 km); the Worley detail (2 .. 16 cells per period) makes cells 1 km x 10 km down to 125 m x 1.25 km. -->
+    <key>fibre_period_across_m</key><real>2000</real>
+    <key>fibre_period_along_m</key><real>20000</real>
+    <key>fibre_period_vertical_m</key><real>4000</real>
+    <!-- The upper wind for the cirrus, derived from the 10 m wind (MET gives no pressure-level wind): the cross-isobar angle
+         "ranges from 10 deg over open water, to 30 deg over rough hilly terrain", friction's reduction "40% to 50%" over rough
+         terrain, "only 20% to 30%" over open water (Wikipedia, Wind gradient; FAA AC 00-6 "Friction"). The free wind is veered
+         from the surface wind in the north, backed in the south. -->
+    <key>upper_veer_sea_deg</key><real>10</real>
+    <key>upper_veer_land_deg</key><real>30</real>
+    <key>surface_over_upper_sea</key><real>0.75</real>
+    <key>surface_over_upper_land</key><real>0.55</real>
+    <!-- How far a convective genus's column tops spread: 1 - the lowest top as a share of the layer's depth. Cu mediocris "a few
+         hundred metres to about 2 km" over its 1.2 km (lowest top 300 m -> 1 - 0.25); Cu congestus "+3-5 km" over its 5 km
+         (1 - 0.6). WMO International Cloud Atlas, BEAUTY_RESEARCH 8.1 / 8.4. -->
+    <key>tower_share_mediocris</key><real>0.75</real>
+    <key>tower_share_congestus</key><real>0.4</real>
+    <!-- The cumulus base (the LCL) held between these (m): rule 4, "usually below 550 m" .. 2400 m. -->
+    <key>cu_base_min_m</key><real>200</real>
+    <key>cu_base_max_m</key><real>2400</real>
+    <!-- Each layer's takram coverage from its own MET fraction (true), or all layers scaled to the largest (the 2026-10-14 rule).
+         2026-10-26: the UiT Tromso webcam showed separate stratocumulus fragments our TROMSO did not draw - the low 0.108 had
+         been scaled by the cirrus' 0.78 to 0.05. -->
+    <key>coverage_per_layer</key><boolean>true</boolean>
+  </map>
+
+  <key>genera</key>
+  <map>
+    <!-- Cumulus humilis: tops level, a flat profile, the semi-circle rounding only (WMO humilis: "tops nearly the same level").
+         Repeat 2: fragments 1 km down to 125 m - small humilis are a few hundred metres. -->
+    <key>Cu_humilis</key>
+    <map>
+      <key>shape</key><real>1.0</real><key>detail</key><real>1.0</real><key>exponent</key><real>1.0</real>
+      <key>bias</key><real>0.25</real><key>filter</key><real>0.6</real>
+      <key>profile</key><array><real>0</real><real>0</real><real>0</real><real>1</real></array>
+      <key>lwc_g_m3</key><real>0.3</real><key>ice</key><real>0</real><key>absorption</key><real>0</real>
+      <key>shadow</key><boolean>true</boolean><key>fibre</key><real>0</real><key>repeat</key><real>1</real><!-- [2026-10-26] 1: a finer repeat re-introduced cloud-sized weather cells (extruded columns, see low_mid_tile_m) --><key>streaks</key><boolean>false</boolean>
+    </map>
+    <!-- Cumulus mediocris: takram's default profile, domes. -->
+    <key>Cu_mediocris</key>
+    <map>
+      <key>shape</key><real>1.0</real><key>detail</key><real>1.0</real><key>exponent</key><real>1.0</real>
+      <key>bias</key><real>0.35</real><key>filter</key><real>0.6</real>
+      <key>profile</key><array><real>0</real><real>0</real><real>0.75</real><real>0.25</real></array>
+      <key>lwc_g_m3</key><real>0.5</real><key>ice</key><real>0</real><key>absorption</key><real>0</real>
+      <key>shadow</key><boolean>true</boolean><key>fibre</key><real>0</real><key>repeat</key><real>1</real><key>streaks</key><boolean>false</boolean>
+    </map>
+    <!-- Cumulus congestus: towers, density growing to the top. -->
+    <key>Cu_congestus</key>
+    <map>
+      <key>shape</key><real>1.0</real><key>detail</key><real>1.0</real><key>exponent</key><real>1.0</real>
+      <key>bias</key><real>0.45</real><key>filter</key><real>0.6</real>
+      <key>profile</key><array><real>0</real><real>0</real><real>1</real><real>0.1</real></array>
+      <key>lwc_g_m3</key><real>1.0</real><key>ice</key><real>0</real><key>absorption</key><real>0</real>
+      <key>shadow</key><boolean>true</boolean><key>fibre</key><real>0</real><key>repeat</key><real>1</real><key>streaks</key><boolean>false</boolean>
+    </map>
+    <!-- Cumulonimbus: the anvil, an exponential flare towards the top; rain: absorption (Schneider 2015 p. 69). -->
+    <key>Cb</key>
+    <map>
+      <key>shape</key><real>1.0</real><key>detail</key><real>1.0</real><key>exponent</key><real>1.0</real>
+      <key>bias</key><real>0.6</real><key>filter</key><real>0.7</real>
+      <key>profile</key><array><real>0.6</real><real>2</real><real>0</real><real>0.4</real></array>
+      <key>lwc_g_m3</key><real>2.0</real><key>ice</key><real>0</real><key>absorption</key><real>0.02</real>
+      <key>shadow</key><boolean>true</boolean><key>fibre</key><real>0</real><key>repeat</key><real>1</real><key>streaks</key><boolean>false</boolean>
+    </map>
+    <!-- Stratocumulus: a slab of rolls / tessellations. LWC 0.17 (2026-10-26, was 0.45): the densest 900 m column at optical depth
+         23, the top of ISCCP's stratocumulus band 3.6 - 23 (Rossow and Schiffer 1999, BAMS 80:2261, Fig. 2; band edges as
+         Marsden 2002, arXiv:physics/0201032); 0.45 gave 61, an opaque cut-out. Repeat 2: the UiT Tromso webcam (16:49 local)
+         shows separate fragments 2 - 10 deg wide, 50 - 500 m at ~1 km. -->
+    <key>Sc</key>
+    <map>
+      <key>shape</key><real>1.0</real><key>detail</key><real>0.6</real><key>exponent</key><real>1.0</real>
+      <key>bias</key><real>0.5</real><key>filter</key><real>0.6</real>
+      <key>profile</key><array><real>0</real><real>0</real><real>0</real><real>1</real></array>
+      <key>lwc_g_m3</key><real>0.17</real><key>ice</key><real>0</real><key>absorption</key><real>0</real>
+      <key>shadow</key><boolean>true</boolean><key>fibre</key><real>0</real><key>repeat</key><real>1</real><!-- [2026-10-26] 1: a finer repeat re-introduced cloud-sized weather cells (extruded columns, see low_mid_tile_m) --><key>streaks</key><boolean>false</boolean>
+    </map>
+    <!-- Stratus: a uniform thin sheet, no cauliflower. -->
+    <key>St</key>
+    <map>
+      <key>shape</key><real>0.3</real><key>detail</key><real>0.0</real><key>exponent</key><real>1.0</real>
+      <key>bias</key><real>0.9</real><key>filter</key><real>0.3</real>
+      <key>profile</key><array><real>0</real><real>0</real><real>0</real><real>1</real></array>
+      <key>lwc_g_m3</key><real>0.25</real><key>ice</key><real>0</real><key>absorption</key><real>0</real>
+      <key>shadow</key><boolean>true</boolean><key>fibre</key><real>0</real><key>repeat</key><real>1</real><key>streaks</key><boolean>false</boolean>
+    </map>
+    <!-- Fog: the ground slab, in the shadow map (a slab left out of it was lit by the unattenuated beam). Never faded round builds. -->
+    <key>Fog</key>
+    <map>
+      <key>shape</key><real>0.2</real><key>detail</key><real>0.0</real><key>exponent</key><real>1.0</real>
+      <key>bias</key><real>0.95</real><key>filter</key><real>0.2</real>
+      <key>profile</key><array><real>0</real><real>0</real><real>0</real><real>1</real></array>
+      <key>lwc_g_m3</key><real>0.25</real><key>ice</key><real>0</real><key>absorption</key><real>0</real>
+      <key>shadow</key><boolean>true</boolean><key>fibre</key><real>0</real><key>repeat</key><real>1</real><key>streaks</key><boolean>false</boolean>
+    </map>
+    <!-- Nimbostratus: a deep smooth slab, rain darkening; the sun blotted out by its depth. -->
+    <key>Ns</key>
+    <map>
+      <key>shape</key><real>0.4</real><key>detail</key><real>0.0</real><key>exponent</key><real>1.0</real>
+      <key>bias</key><real>0.9</real><key>filter</key><real>0.4</real>
+      <key>profile</key><array><real>0</real><real>0</real><real>0</real><real>1</real></array>
+      <key>lwc_g_m3</key><real>0.3</real><key>ice</key><real>0</real><key>absorption</key><real>0.02</real>
+      <key>shadow</key><boolean>true</boolean><key>fibre</key><real>0</real><key>repeat</key><real>1</real><key>streaks</key><boolean>false</boolean>
+    </map>
+    <!-- Altocumulus: thin elements with shading (exponent 1.5: separate patches). Repeat 8: WMO Altocumulus, "the regularly
+         arranged small elements usually have an apparent width of between one and five degrees"
+         (https://cloudatlas.wmo.int/en/altocumulus-ac.html): the middle channel's Worley cells over 4 km are 500 - 62 m,
+         7 - 1 deg from 3 km at 45 deg up; the UiT Tromso webcam 02:27 local shows cells of 1 - 3 deg. -->
+    <key>Ac</key>
+    <map>
+      <key>shape</key><real>1.0</real><key>detail</key><real>0.5</real><key>exponent</key><real>1.5</real>
+      <key>bias</key><real>0.5</real><key>filter</key><real>0.5</real>
+      <key>profile</key><array><real>0</real><real>0</real><real>0</real><real>1</real></array>
+      <key>lwc_g_m3</key><real>0.3</real><key>ice</key><real>0</real><key>absorption</key><real>0</real>
+      <key>shadow</key><boolean>true</boolean><key>fibre</key><real>0</real><key>repeat</key><real>1</real><!-- [2026-10-26] 1: repeat 8 drew a regular blotch pattern over the whole sky at TROMSO 17:48Z --><key>streaks</key><boolean>false</boolean>
+    </map>
+    <!-- Altostratus: a uniform sheet, ice at the top. LWC 0.061 (2026-10-26, was 0.3): the densest 2,500 m column at optical depth
+         23, the top of ISCCP's altostratus band (above it is nimbostratus); 0.3 gave 112, the TROMSO "cardboard cut-out". -->
+    <key>As</key>
+    <map>
+      <key>shape</key><real>0.3</real><key>detail</key><real>0.0</real><key>exponent</key><real>1.0</real>
+      <key>bias</key><real>0.9</real><key>filter</key><real>0.3</real>
+      <key>profile</key><array><real>0</real><real>0</real><real>0</real><real>1</real></array>
+      <key>lwc_g_m3</key><real>0.061</real><key>ice</key><real>0.4</real><key>absorption</key><real>0</real>
+      <key>shadow</key><boolean>true</boolean><key>fibre</key><real>0</real><key>repeat</key><real>1</real><key>streaks</key><boolean>false</boolean>
+    </map>
+    <!-- Cirrus: a thin veil eroded little, drawn as streaks along the upper wind. IWC 0.0068: the densest part at optical depth
+         0.74, twice the measured mean of 0.37 +- 0.18 (lidar, Atmos. Chem. Phys. 13:11853, 2013). Fibre 0.8: the fibres carve
+         the weather value before the coverage cut into filaments with gaps (WMO Cirrus: "white, delicate filaments ... a fibrous
+         (hair-like) appearance"); 1 km generating cells, 10 km fall streaks (Sassen et al., NTRS 19910001165). -->
+    <key>Ci</key>
+    <map>
+      <key>shape</key><real>0.2</real><key>detail</key><real>0.0</real><key>exponent</key><real>1.2</real>
+      <key>bias</key><real>0.6</real><key>filter</key><real>0.6</real>
+      <key>profile</key><array><real>0</real><real>0</real><real>0</real><real>1</real></array>
+      <key>lwc_g_m3</key><real>0.0068</real><key>ice</key><real>1</real><key>absorption</key><real>0</real>
+      <key>shadow</key><boolean>false</boolean><key>fibre</key><real>0.8</real><key>repeat</key><real>1</real><key>streaks</key><boolean>true</boolean>
+    </map>
+    <!-- Cirrus spissatus (the anvil's): dense, "sufficiently dense to appear greyish when viewed towards the Sun" (WMO). -->
+    <key>Ci_spissatus</key>
+    <map>
+      <key>shape</key><real>0.2</real><key>detail</key><real>0.0</real><key>exponent</key><real>1.2</real>
+      <key>bias</key><real>0.6</real><key>filter</key><real>0.6</real>
+      <key>profile</key><array><real>0</real><real>0</real><real>0</real><real>1</real></array>
+      <key>lwc_g_m3</key><real>0.03</real><key>ice</key><real>1</real><key>absorption</key><real>0</real>
+      <key>shadow</key><boolean>false</boolean><key>fibre</key><real>0.4</real><key>repeat</key><real>1</real><key>streaks</key><boolean>true</boolean>
+    </map>
+    <!-- Cirrostratus: a transparent veil, IWC 0.008 over 2 km -> optical depth 0.9. NOT streaks (2026-10-26): WMO, "transparent,
+         whitish cloud veil of fibrous (hair-like) or smooth appearance, totally or partly covering the sky" - it reads the turned
+         lookup, low-frequency variation only. Filter 0.6 (was 0.2): at partial coverage 0.2 cut hard-edged ribbons. -->
+    <key>Cs</key>
+    <map>
+      <key>shape</key><real>0.2</real><key>detail</key><real>0.0</real><key>exponent</key><real>1.0</real>
+      <key>bias</key><real>0.9</real><key>filter</key><real>0.6</real>
+      <key>profile</key><array><real>0</real><real>0</real><real>0</real><real>1</real></array>
+      <key>lwc_g_m3</key><real>0.008</real><key>ice</key><real>1</real><key>absorption</key><real>0</real>
+      <key>shadow</key><boolean>false</boolean><key>fibre</key><real>0</real><key>repeat</key><real>1</real><key>streaks</key><boolean>false</boolean>
+    </map>
+    <!-- Cirrocumulus: grains, ripples (exponent 2: small separate elements). Repeat 16: WMO, elements "apparent width of less than
+         one degree" - the middle channel's cells over 2 km, 250 - 31 m, under 2 deg from 7.5 km. -->
+    <key>Cc</key>
+    <map>
+      <key>shape</key><real>0.8</real><key>detail</key><real>0.0</real><key>exponent</key><real>2.0</real>
+      <key>bias</key><real>0.5</real><key>filter</key><real>0.4</real>
+      <key>profile</key><array><real>0</real><real>0</real><real>0</real><real>1</real></array>
+      <key>lwc_g_m3</key><real>0.03</real><key>ice</key><real>1</real><key>absorption</key><real>0</real>
+      <key>shadow</key><boolean>false</boolean><key>fibre</key><real>0</real><key>repeat</key><real>16</real><key>streaks</key><boolean>false</boolean>
+    </map>
+  </map>
+
+  <!-- The rules' heights (m above the sea), BEAUTY_RESEARCH.md section 9.4 and 8.1 (WMO genus bases: low under 2 km, middle
+       2 - 7 km, high 5 - 13 km in temperate latitudes). A cumulus rule's base is the LCL; it carries a depth. -->
+  <key>heights</key>
+  <map>
+    <key>4 Cb</key><map><key>top</key><real>12000</real></map>
+    <key>4 anvil Ci_spissatus</key><map><key>base</key><real>9000</real><key>top</key><real>11000</real></map>
+    <key>7 Ns</key><map><key>base</key><real>500</real><key>top</key><real>4000</real></map>
+    <key>7 St pannus</key><map><key>base</key><real>150</real><key>top</key><real>500</real></map>
+    <key>7 As</key><map><key>base</key><real>4000</real><key>top</key><real>6000</real></map>
+    <!-- congestus "+3-5 km" deep (BEAUTY_RESEARCH 8.4), its tops spread by tower_share_congestus -->
+    <key>5 Cb showers</key><map><key>depth</key><real>6000</real></map>
+    <key>5 Cu_congestus showers</key><map><key>depth</key><real>5000</real></map>
+    <key>6 Sc</key><map><key>base</key><real>700</real><key>top</key><real>1700</real></map>
+    <key>6 St pannus</key><map><key>base</key><real>300</real><key>top</key><real>600</real></map>
+    <key>4b Cu_congestus</key><map><key>depth</key><real>5000</real></map>
+    <key>8 St drizzle</key><map><key>base</key><real>300</real><key>top</key><real>700</real></map>
+    <key>8 Sc drizzle</key><map><key>base</key><real>500</real><key>top</key><real>1500</real></map>
+    <key>3 Sc advection</key><map><key>base</key><real>300</real><key>top</key><real>1200</real></map>
+    <!-- fog: 250 m when the air is within 2 K of saturation, else 120 m -->
+    <key>1 Fog saturated</key><map><key>base</key><real>0</real><key>top</key><real>250</real></map>
+    <key>1 Fog</key><map><key>base</key><real>0</real><key>top</key><real>120</real></map>
+    <key>2 St nebulosus</key><map><key>base</key><real>250</real><key>top</key><real>500</real></map>
+    <!-- Cu humilis a few hundred metres deep, mediocris "a few hundred metres to about 2 km" (WMO) -->
+    <key>17 Cu_humilis</key><map><key>depth</key><real>300</real></map>
+    <key>17 Cu_mediocris</key><map><key>depth</key><real>1200</real></map>
+    <key>19 Sc</key><map><key>base</key><real>600</real><key>top</key><real>1500</real></map>
+    <key>20 St</key><map><key>base</key><real>150</real><key>top</key><real>500</real></map>
+    <key>21 Sc sheet</key><map><key>base</key><real>600</real><key>top</key><real>1500</real></map>
+    <key>13 As</key><map><key>base</key><real>3000</real><key>top</key><real>5500</real></map>
+    <key>15 Ac castellanus</key><map><key>base</key><real>3000</real><key>top</key><real>4200</real></map>
+    <key>14 Ac</key><map><key>base</key><real>3000</real><key>top</key><real>3800</real></map>
+    <key>11 Cs</key><map><key>base</key><real>7000</real><key>top</key><real>9000</real></map>
+    <key>9 Cs invading</key><map><key>base</key><real>7500</real><key>top</key><real>9500</real></map>
+    <key>9 Ci invading</key><map><key>base</key><real>7500</real><key>top</key><real>9500</real></map>
+    <key>10 Cc</key><map><key>base</key><real>7500</real><key>top</key><real>8200</real></map>
+    <key>10 Ci</key><map><key>base</key><real>7500</real><key>top</key><real>9500</real></map>
+  </map>
+</map>
+</llsd>

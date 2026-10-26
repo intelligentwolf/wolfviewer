@@ -38,6 +38,10 @@ uniform sampler2D fftDeriv0;
 uniform sampler2D fftDeriv1;
 uniform sampler2D wakeSampler;
 uniform float depthReady;
+// [DRY BUILDS 2026-10-26] [OPEN SEA SHORES 2026-10-26] the clearance field's terrain blocks (waterV.glsl declares the same)
+uniform sampler2D wolfClearField;
+uniform vec4 wolfClearLevel[5];
+uniform vec4 wolfClearMisc;
 uniform float fftReady;
 uniform float wakeReady;
 #define WOLF_TEX_WOLF_DEPTH_FIELD(uv) texture(wolfDepthField, uv)
@@ -226,6 +230,7 @@ in vec2 vShore;
 in float vWake;
 in vec4 vSwell;
 in vec4 vSurf;   // [SURF rev3] crest (peak only), breaking, amplitude, wash
+in vec4 vary_wolf_dry;   // [DRY BUILDS 2026-10-26] waterV.glsl: displaced agent xy, swash band ceiling, normal displacement
 // </WolfViewer>
 // </FS:WolfViewer>
 
@@ -427,6 +432,36 @@ void main()
     // vertex stage, the single source of truth that also lifts the breaker geometry, so
     // the foam below sits on the geometric crests. The fragment adds only a noise wobble.
     vec2 regionXY = vary_world_pos.xy - wolfRegionOrigin;
+    // [DRY BUILDS 2026-10-26] [OPEN SEA SHORES 2026-10-26] THE LAND RULE, PER PIXEL (wolfwaterfield.h WolfWaterClearance).
+    // Paul 2026-10-26: "water should not appear on land", refined: never over steep land or cliffs, never above a small
+    // swash band. At this pixel's own (displaced) place, over terrain at or above the water level: the sea may stand at
+    // most the swash band's ceiling (Rcap, waterV.glsl's Hunt run-up, <= 0.5 m, 0 off open-sea beaches) above the water
+    // level, and only where the terrain itself is no higher than that; anything else is discarded. The terrain is the
+    // clearance field's camera-centred terrain blocks (1 m over 256 m, then 4 m over 1024 m), each texel the HIGHEST
+    // terrain within a texel of it, so the bilinear read is at or above the drawn terrain: conservative, on every region
+    // size. waterV.glsl holds the land at the vertices wherever a triangle is not wholly inside a block. The water level is
+    // the plane's own (the undisplaced vertex height).
+#ifdef WOLF_WATER_FULL
+    if (wolfClearMisc.y > 0.5 && boundedWaterDepth <= 0.0 && vary_wolf_dry.w > 0.0)
+    {
+        float plane = vary_world_pos.z;
+        for (int b = 3; b < 5; ++b)
+        {
+            vec4 L = wolfClearLevel[b];
+            vec2 g = (vary_wolf_dry.xy - L.xy) / max(L.z, 1e-3);
+            if (L.z > 0.0 && g.x >= 0.5 && g.y >= 0.5 && g.x <= 255.5 && g.y <= 255.5)
+            {
+                float terrain = texture(wolfClearField, vec2(g.x / 256.0, (float(b) * 256.0 + g.y) / 1280.0)).r;
+                float band = clamp(vary_wolf_dry.z, 0.0, 0.5);
+                if (terrain >= plane && (terrain > plane + band || vary_wolf_dry.w > band))
+                {
+                    discard;
+                }
+                break;
+            }
+        }
+    }
+#endif
     float shoal = 0.0;
     float shoreCrest = 0.0;
     float shoreCos = 0.0;

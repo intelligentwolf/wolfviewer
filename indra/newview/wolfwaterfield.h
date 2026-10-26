@@ -23,6 +23,8 @@
 
 #include "llmath.h"
 #include "lluuid.h"   // [BASIC WOLF SEA 2026-10-19/] Field::mRegionID
+#include "v2math.h"   // [DRY BUILDS 2026-10-26/] WolfWaterClearance
+#include "v3dmath.h"
 
 class LLViewerRegion;
 
@@ -260,6 +262,166 @@ private:
     bool mRebakeAll = false;   // [WAVES 2026-09-07] set by invalidate()
     U32 mBakes = 0;
     U32 mLastSurfTexels = 0;
+};
+
+/**
+ * [DRY BUILDS 2026-10-26] THE WATERLINE CLEARANCE FIELD. Paul 2026-10-26: "water should not appear
+ * on land" (unless painted or on a prim). Jupiter Rowland (social thread): with the Wolf sea's waves
+ * on, builds made for flat OpenSim water - docks, jetties, boat decks, floors a few cm above the
+ * water - got washed over, and crests climbed beaches.
+ * [OPEN SEA SHORES 2026-10-26] Paul, after the first build: "the waves are cool but look unnatural
+ * against the shore line ... on the outer edge of the region NOT RIVERS INSIDE or LAKES INSIDE the
+ * water should behave MORE like waves - at the moment it's like there is a fixed edge to where the
+ * waves go". So the rule is now:
+ *
+ *   OBJECTS (unchanged): the displaced sea is never higher than the cap of a prim at the waterline
+ *   over that prim's footprint (its lowest point when it stands clear of the water, its highest when
+ *   it pierces it). Held at the VERTICES, with the margin below, everywhere.
+ *   LAND: never above the water level over terrain at or above it, EXCEPT the swash band of an
+ *   OPEN-SEA beach: there the water may run up to at most the run-up height waterV.glsl computes
+ *   (Hunt 1959, capped at RUNUP_CAP_M), and only over terrain no higher than that. On inland water
+ *   (rivers, lakes, anything far from the open sea through water) and wherever no per-pixel depth
+ *   field covers the water, the land rule is held at the vertices as before; on open-sea water with
+ *   a depth field it is held PER PIXEL in waterF.glsl (exact, no calm band), so the waves can shoal,
+ *   break and run up the beach.
+ *
+ * Every SOURCE s - a terrain texel with any terrain point at or above its region's water height, or
+ * a texel under the box of a prim that reaches the waterline band - carries a cap height z_s. Three
+ * camera-centred levels (N x N texels of TEXEL_M[k] metres) store, after a two-pass chamfer whose
+ * weights are divided by CHAMFER so the 8-neighbour distance never exceeds the Euclidean one:
+ *
+ *   R  S_all(p) = min over all sources ( z_s + ALPHA |p - s| ) - ALPHA e
+ *   G  D(p)     = max( min over all sources |p - s| - e, 0 )
+ *   B  S_dry(p) = the same min over prims and INLAND land only (open-sea beach land left to the pixel)
+ *   A  open-sea weight: 1 on water joined THROUGH WATER to the open sea within OPEN_NEAR_M, 0 past
+ *      OPEN_FAR_M (rivers, lakes, lagoons up a channel), carried onto the land beside it, blurred.
+ *      The open sea: water off every region (the open ocean), the coarsest level's border, and any
+ *      water OPEN_FETCH_M or more from land (a fetch that big is a sea of its own).
+ *
+ * e = 1.5 x the texel diagonal: bilinear interpolation of a Lipschitz grid plus the source's place
+ * inside its texel. All are LOWER bounds of the true values. waterV.glsl caps every vertex: upward
+ * displacement <= S - ALPHA * deadZone(lattice step) - plane height, horizontal <= BETA * D.
+ * deadZone = 1.5 step / (1 - 3 BETA) makes the cap hold BETWEEN vertices: a displaced triangle over
+ * a source point x has every vertex within deadZone of x (its edges are at most 1.5 x the lattice
+ * step, and each vertex moves at most BETA x its distance to x), so every vertex is capped at or
+ * below z_x and so is the flat triangle between them.
+ * ALPHA = 0.78 x 0.25: McCowan's breaker index on the surf train's 1-in-4 reef slope
+ * (WolfWaterField::SURF_REEF_SLOPE) - a crest may stand no higher than a breaking wave on that
+ * slope at that distance from a source.
+ * The method: Crest Ocean System's sea floor depth cache (scene geometry rendered from above into a
+ * cache that attenuates the waves), here a CPU raster of the terrain and the prims' boxes.
+ * Mirrors, keep in step: waterV.glsl wolfClearSample() / the [DRY BUILDS] cap / the swash, waterF.glsl
+ * the per-pixel land rule, wolfboatrock.cpp waveHeight().
+ */
+class WolfWaterClearance : public LLSingleton<WolfWaterClearance>
+{
+    LLSINGLETON(WolfWaterClearance);
+    ~WolfWaterClearance();
+
+public:
+    static constexpr S32 LEVELS = 3;
+    static constexpr S32 N = 256;                     // texels an edge, every level
+    static constexpr F32 ALPHA = 0.78f * 0.25f;       // waterV.glsl WOLF_CLEAR_ALPHA
+    static constexpr F32 BETA = 0.1f;                 // waterV.glsl WOLF_CLEAR_BETA
+    static constexpr F32 CHAMFER = 1.0824f;           // max octagonal / Euclidean distance (at 22.5 degrees)
+    static constexpr F32 BAND_M = 40.f;               // prims whose bottom is up to this far above the water count (30 m surf)
+    static constexpr F32 BIG = 1.0e6f;                // no source in reach
+    static constexpr F32 EYE_CLEAR_M = 0.3f;          // the camera guard: crests stay this far under the eye
+    static constexpr F32 RUNUP_CAP_M = 0.5f;          // the swash band's ceiling over the water level (Paul: "a small swash band")
+    static constexpr F32 OPEN_FETCH_M = 150.f;        // water this far from land is open sea (the exposure bake's own rule)
+    static constexpr F32 OPEN_NEAR_M = 100.f;         // through-water distance from the open sea: fully open below this...
+    static constexpr F32 OPEN_FAR_M = 300.f;          // ...inland water past this
+    static constexpr F32 OPEN_ONTO_LAND_M = 8.f;      // the open weight carried onto the beach beside open water
+    static constexpr F64 OBJECT_INTERVAL_SECS = 1.0;  // prims are re-rastered this often
+    static constexpr F64 TERRAIN_INTERVAL_SECS = 1.0; // a terrain change is re-rastered at most this often
+    static constexpr F32 MOVING_MPS = 0.5f;           // faster linksets (vehicles under way) are not sources
+    static const F32 TEXEL_M[LEVELS];                 // 1, 4, 16 m: windows of 256, 1024 and 4096 m
+    // [OPEN SEA SHORES 2026-10-26] The TERRAIN blocks waterF.glsl holds the land per pixel with, camera-centred so they
+    // serve every region whatever its size (Paul's var regions run to 3072 m and more): each texel holds the HIGHEST
+    // drawn terrain within one texel of its centre (the grid points of every grid cell touching that 2t square - the
+    // drawn terrain is triangles between grid points), so the bilinear read at any point is at or above the terrain
+    // there - a conservative land test, never a missed sandbar. -BIG where no terrain stands at or above its water.
+    static constexpr S32 TBLOCKS = 2;
+    static const F32 TERRAIN_M[TBLOCKS];              // 1, 4 m: windows of 256 and 1024 m
+    static constexpr S32 ROWS = (LEVELS + TBLOCKS) * N;   // the texture: the cap levels, then the terrain blocks
+    static constexpr F32 HELD_MARGIN_M = 32.f;        // waterV.glsl: a vertex is pixel-held this far (+ its dead zone) inside a block...
+    static constexpr F32 HELD_BLEND_M = 32.f;         // ...blended in over this much more
+
+    /** What wolfClearSample() returns: the four channels, combined over the levels. */
+    struct Sample
+    {
+        F32 mSAll = -BIG;   // cap height from every source
+        F32 mD = 0.f;       // distance to the nearest source
+        F32 mSDry = -BIG;   // cap height from prims and inland land
+        F32 mOpen = 0.f;    // open-sea weight
+    };
+
+    /** Every frame from WolfWaterField::idle() on every grid that shows the Wolf sea. */
+    void idle();
+    void reset();
+    bool isReady() const { return mReady; }
+    U32 texture() const { return mTex; }
+    /** Level k's texel-grid corner in agent space this frame (the grid is held in global space). */
+    LLVector2 levelOriginAgent(S32 k) const;
+    /** Terrain block b's texel-grid corner in agent space this frame. */
+    LLVector2 terrainOriginAgent(S32 b) const;
+    /** waterV.glsl wolfPixelHeld: 0..1, how far inside a terrain block (minus the dead zone) the point is. */
+    F32 pixelHeld(F32 ax, F32 ay, F32 dead) const;
+    /** The lowest cap any source can have: the lowest water height of the live regions. */
+    F32 minSourceZ() const { return mMinZ; }
+    /** CPU twin of waterV.glsl wolfClearSample(). False = no level holds the point (the shader draws no swell there). */
+    bool sample(F32 ax, F32 ay, Sample& out) const;
+    /** waterV.glsl's dead zone for a lattice step (0 = not a graded lattice: the 128 m maximum step). */
+    static F32 deadZone(F32 lattice_step) { return 1.5f * (lattice_step > 0.f ? lattice_step : 128.f) / (1.f - 3.f * BETA); }
+    /** llvowater.cpp wolf_graded_axis's step at agent (ax, ay), focus = the camera, step scale 1. */
+    static F32 latticeStepAt(F32 ax, F32 ay);
+    /** waterV.glsl wolfSoftCap: up * tanh(dz / up) for a crest, 0 when up <= 0; a trough keeps TROUGH_KEEP of itself at least. */
+    static F32 softCap(F32 dz, F32 up, F32 calm_ref);
+    /** waterV.glsl wolfSoftCap: up * tanh(dz / up), odd in dz (the depth limit), 0 when up <= 0. */
+    static F32 tanhCap(F32 dz, F32 up) { return up > 0.f ? up * tanhf(llclamp(dz / up, -10.f, 10.f)) : 0.f; }
+    static constexpr F32 TROUGH_KEEP = 0.35f;
+    /**
+     * waterV.glsl's `up` at agent (ax, ay) over a plane at plane_z: the vertex-held room to rise. pixel_held
+     * (0..1, waterV.glsl wolfPixelHeld) blends from every land source to the inland ones only. -BIG = no level.
+     */
+    F32 upwardRoom(F32 ax, F32 ay, F32 plane_z, F32 pixel_held) const;
+
+private:
+    void rasterTerrain(S32 k);
+    void rasterTerrainMax(S32 b);
+    void classifyOpen(S32 k);
+    void rasterObjects();
+    void solve(S32 k, const std::vector<F32>& src, std::vector<F32>& S, std::vector<F32>* D);
+    void uploadRows(S32 row0, S32 rows, const F32* data);
+    void uploadLevels();
+    void uploadTerrain(S32 b);
+    U64 terrainStamp() const;
+
+    LLVector3d mOrigin[LEVELS];                 // global SW corner of each level's texel grid
+    bool mHaveOrigin[LEVELS] = { false, false, false };
+    U64 mTerrainStamp[LEVELS] = { 0, 0, 0 };
+    F64 mTerrainAt[LEVELS] = { 0.0, 0.0, 0.0 };
+    bool mLandValid[LEVELS] = { false, false, false };
+    std::vector<F32> mLand[LEVELS];             // terrain cap per texel (its region's water height), BIG = water
+    std::vector<U8> mVoid[LEVELS];              // 1 = no live region covers the texel: the open ocean
+    std::vector<F32> mOpenDist[LEVELS];         // through-water distance from the open sea, BIG = not joined
+    std::vector<F32> mOpenW[LEVELS];            // open-sea weight, water and the beach beside it
+    std::vector<F32> mSrcAll[LEVELS];           // terrain + prims
+    std::vector<F32> mSrcDry[LEVELS];           // inland terrain + prims
+    std::vector<F32> mS[LEVELS], mD[LEVELS], mSDry[LEVELS];   // solved, margins folded in
+    std::vector<F32> mUpload, mTmp;
+    LLVector3d mTOrigin[TBLOCKS];
+    bool mHaveTOrigin[TBLOCKS] = { false, false };
+    bool mTerrValid[TBLOCKS] = { false, false };
+    U64 mTerrStamp[TBLOCKS] = { 0, 0 };
+    F64 mTerrAt[TBLOCKS] = { 0.0, 0.0 };
+    std::vector<F32> mTerr[TBLOCKS];
+    U32 mTex = 0;
+    bool mTexAllocated = false;
+    bool mReady = false;
+    bool mObjectsValid = false;
+    F32 mMinZ = 20.f;
+    F64 mNextObjects = 0.0;
 };
 
 #endif // WOLF_WATERFIELD_H

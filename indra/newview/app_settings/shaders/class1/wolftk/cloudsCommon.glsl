@@ -100,7 +100,64 @@ bool insideLayerIntervals(const float height) {
 struct WeatherSample {
   vec4 heightFraction; // Normalized height of each layer
   vec4 density;
+  // [WolfViewer 2026-10-26] the cirrus lookup's texture coordinate (kind 2 below), for the fibres along its flow
+  // (sampleMedia wolfLayerFibre); (0, 0) when no layer uses that lookup
+  vec2 upperCoord;
 };
+
+// [WolfViewer 2026-10-26] THE CURVED FLOW. Jimmy Olsen 10-26 (UiT webcam, Tromso 02:27): real cirrus/altostratus "swirling,
+// curved, feathery"; ours "two huge, smooth, straight, parallel bands" - the stretched lookup was one global affine map (the
+// wind's turn x a 4x stretch), so every streak in the sky was a straight line parallel to every other. Real high-cloud streaks
+// follow the flow they are carried in, and that flow curves from place to place (WMO International Cloud Atlas, Cirrus
+// fibratus: "nearly straight or irregularly curved filaments", https://cloudatlas.wmo.int/en/cirrus-fibratus.html; uncinus
+// "comma-shaped ... hook", https://cloudatlas.wmo.int/en/cirrus-uncinus.html).
+// The lookup point is displaced by a divergence-free 2D field, d = curl(psi), psi a sum of random Fourier modes - the
+// kinematic-simulation flow of Kraichnan (1970, "Diffusion by a random velocity field", Phys. Fluids 13:22-31) and the curl
+// construction of Bridson, Hourihan & Nordenstam (2007, "Curl-noise for procedural fluid flow", ACM TOG 26(3) 46: "the curl of
+// a potential ... is automatically divergence-free"). Divergence-free means the warp neither bunches nor thins the cloud field
+// (no area change to first order), so the coverage the forecast asked for is kept; warping a texture lookup by a field is
+// Quilez's domain warping (https://iquilezles.org/articles/warp/), f(p + h(p)).
+// Mode i: psi_i = A_i sin(2 pi n_i . (uv - drift) + phi_i + 2 pi m_i tau); d_i = curl psi_i = A_i 2 pi |n_i| cos(...) (n^_y, -n^_x).
+// Written with the displacement amplitude D_i = beta_i / (2 pi |n_i|): the local turn of a streak by mode i is |grad d_i| =
+// beta_i radians. The modes:
+//   n_i   whole cycles per cube-face uv (one face = R pi / 2 = 9,990 km on the 6,360 km sphere, wolfenvironmentrender.cpp
+//         uvPerMetre), so the field repeats exactly across a whole uv and the drift wraps into 0..1 with no jump.
+//         |n| 208 -> 48 km, |n| 625 -> 16 km: the swirls a few tens of km across that span the sky under a layer 8 km up
+//         (the sky to 20 deg elevation reaches 22 km out). Directions 60 deg apart, offset between the two octaves.
+//   beta_i 0.22 rad (48 km) and 0.10 rad (16 km): the six add to 0.96 < 1, so the map uv -> uv + d stays one-to-one (no fold,
+//         no mirrored clouds; the rms turn is 17 deg, peaks ~55 deg). Equal turn per octave is what a k^-5/3 kinetic-energy
+//         spectrum gives for a frozen displacement field (velocity ~ k^-1/3 per octave, displacement ~ velocity / (u k) ...
+//         ~ 1/k, turn = displacement x k = constant; Nastrom & Gage 1985, J. Atmos. Sci. 42:950-960, the mesoscale spectrum).
+//   m_i   whole cycles per tau (wolfFlowState.x = time / 6 h, wrapped): the eddies evolve over 6, 6, 3 h (48 km) and 2, 1.5,
+//         1.2 h (16 km), slow beside their advection (frozen turbulence, Taylor 1938, Proc. R. Soc. A 164:476-490); the
+//         displacement changes at < 1.1 m/s, so nothing in the sky visibly slides.
+// The beta, n and m are modelling numbers chosen as above (CLOUD_SHAPE_PLAN.md section 5.1), not measured values.
+// The streets' field (flow 0) and the cirrus field (flow 1) are two realisations (phases differ), each carried by its own wind
+// (wolfFlowDrift: xy streets, zw cirrus) and scaled by its bend (wolfFlowState.y streets, .z cirrus; 0 = no warp).
+const int WOLF_FLOW_MODES = 6;
+const vec2 WOLF_FLOW_N[6] = vec2[6](
+  vec2(199.0, 61.0), vec2(47.0, 203.0), vec2(-152.0, 142.0),     // |n| ~208 at 17, 77, 137 deg
+  vec2(426.0, 457.0), vec2(-183.0, 598.0), vec2(-609.0, 141.0)   // |n| ~625 at 47, 107, 167 deg
+);
+const float WOLF_FLOW_BETA[6] = float[6](0.22, 0.22, 0.22, 0.10, 0.10, 0.10);
+const float WOLF_FLOW_M[6] = float[6](1.0, 1.0, 2.0, 3.0, 4.0, 5.0);
+// the phases of the two realisations: flow 0 a golden-angle sequence, flow 1 the same + 2.0 rad (any fixed values serve:
+// random-phase modes; fixed so a region looks the same on every visit, as wolfenvironmentrender.cpp's seed)
+const float WOLF_FLOW_PHI[6] = float[6](0.0, 2.39996, 4.79993, 7.19989, 9.59985, 11.99982);
+
+vec2 wolfFlowWarp(const vec2 uv, const vec2 drift, const float bend, const float phaseOffset) {
+  vec2 d = vec2(0.0);
+  for (int i = 0; i < WOLF_FLOW_MODES; ++i) {
+    vec2 n = WOLF_FLOW_N[i];
+    float len = length(n);
+    // the phase in cycles first (fract keeps it exact: n . uv reaches ~600 cycles), then radians
+    float cycles = fract(dot(n, uv - drift) + WOLF_FLOW_M[i] * wolfFlowState.x);
+    float c = cos(6.283185307179586 * cycles + WOLF_FLOW_PHI[i] + phaseOffset);
+    float D = WOLF_FLOW_BETA[i] / (6.283185307179586 * len);
+    d += (D * c / len) * vec2(n.y, -n.x);
+  }
+  return d * bend;
+}
 
 // Source: three-geospatial packages/clouds/src/shaders/clouds.glsl:68-73 shapeAlteringFunction
 vec4 shapeAlteringFunction(const vec4 heightFraction, const vec4 bias) {
@@ -110,8 +167,48 @@ vec4 shapeAlteringFunction(const vec4 heightFraction, const vec4 bias) {
   return 1.0 - x * x;
 }
 
+// [CLOUDS CLEAR OF BUILDS 2026-10-26] Paul's rule: clouds never cover anyone's builds. The clouds keep their weather heights;
+// their density fades to 0 in and round builds (wolfcloudclearance.h: the field, the margins M0 / W and why, the invariant
+// "inside any build's box clear = 1"). The CPU twin is WolfCloudClearance::clearAt (keep in step): the finest level that holds
+// the point (two texels in from its edges, so a bilinear read never reaches the next level's rows), blended into the next over
+// the last tenth of its half-window, the outermost faded out over its own last tenth.
+// [2026-10-26] M0 and W come from the cloud table as the uniform wolfBuildFade (cloudsParameters.glsl): WolfCloudClearance::M0 / W
+const float WOLF_BUILD_N = 256.0;   // WolfCloudClearance::N (texels per level edge; 3 levels = 768 rows)
+float wolfBuildClearOf(const vec4 s, const float z) {
+  float dvg = max(z - s.g, 0.0);
+  float dvs = max(max(z - s.b, s.a - z), 0.0);
+  float d = min(length(vec2(s.r, dvg)), length(vec2(s.r, dvs)));
+  return 1.0 - smoothstep(wolfBuildFade.x, wolfBuildFade.x + wolfBuildFade.y, d);
+}
+bool wolfBuildLevelRead(const int k, const vec2 a, out vec4 s, out float edge) {
+  vec2 tx = (a - wolfBuildLevel[k].xy) / wolfBuildLevel[k].z;
+  edge = min(min(tx.x - 2.0, (WOLF_BUILD_N - 2.0) - tx.x), min(tx.y - 2.0, (WOLF_BUILD_N - 2.0) - tx.y));
+  if (edge < 0.0) return false;
+  // texel centres at (i + 0.5) t: u = tx / N; the level's rows k N .. (k + 1) N of 3 N
+  s = textureLod(wolfBuildField, vec2(tx.x / WOLF_BUILD_N, (float(k) * WOLF_BUILD_N + tx.y) / (3.0 * WOLF_BUILD_N)), 0.0);
+  return true;
+}
+float wolfBuildClear(const vec2 a, const float z) {
+  for (int k = 0; k < 3; ++k) {
+    vec4 s;
+    float edge;
+    if (!wolfBuildLevelRead(k, a, s, edge)) continue;
+    float c = wolfBuildClearOf(s, z);
+    float blend = 1.0 - smoothstep(0.0, WOLF_BUILD_N * 0.1, edge);
+    if (blend > 0.0) {
+      vec4 s2;
+      float edge2;
+      float next = (k + 1 < 3 && wolfBuildLevelRead(k + 1, a, s2, edge2)) ? wolfBuildClearOf(s2, z) : 0.0;
+      c = mix(c, next, blend);
+    }
+    return c;
+  }
+  return 0.0;
+}
+
 // Source: three-geospatial packages/clouds/src/shaders/clouds.glsl:75-103 sampleWeather
-WeatherSample sampleWeather(const vec2 uv, const float height, const float mipLevel) {
+// [CLOUDS CLEAR OF BUILDS 2026-10-26] + position (ECEF metres), for the build clearance at the end
+WeatherSample sampleWeather(const vec2 uv, const float height, const float mipLevel, const vec3 position) {
   WeatherSample weather;
   weather.heightFraction = remapClamped(vec4(height), minLayerHeights, maxLayerHeights);
 
@@ -126,18 +223,77 @@ WeatherSample sampleWeather(const vec2 uv, const float height, const float mipLe
   // with its own offset (wolfWeatherOffsetTurned, integrated from R w: wolfenvironmentrender.cpp
   // local_weather_velocity_turned), so neither a change of the stretch nor a layer's switch (made only while that layer
   // shows nothing, wolfcloudgenus.cpp approach) moves a cloud. Each lookup runs only when some layer uses it.
-  bvec4 stretched = greaterThan(wolfLayerStretched, vec4(0.5));
+  // [WolfViewer 2026-10-26] three lookups (wolfLayerStretched per layer): 0 turned only; 1 stretched along the 10 m wind (cloud
+  // streets); 2 stretched along the upper wind (cirrus, wolfWeatherRotationUpper, its own drift wolfWeatherOffsetUpper). Both
+  // stretched lookups are read at the point the curved flow carries there (wolfFlowWarp above), each with its own field.
+  vec4 kindStreets = step(vec4(0.5), wolfLayerStretched) * (1.0 - step(vec4(1.5), wolfLayerStretched));
+  vec4 kindUpper = step(vec4(1.5), wolfLayerStretched);
+  vec4 kindTurned = 1.0 - step(vec4(0.5), wolfLayerStretched);
   vec4 rawWeather = vec4(0.0);
-  if (any(stretched)) {
-    vec2 wuv = (wolfWeatherRotation * (uv - wolfWeatherPivot)) + wolfWeatherPivot;
-    rawWeather = textureLod(localWeatherTexture, wuv * localWeatherRepeat + localWeatherOffset, mipLevel).LOCAL_WEATHER_CHANNELS;
+  weather.upperCoord = vec2(0.0);
+  if (any(greaterThan(kindStreets, vec4(0.5)))) {
+    vec2 fuv = uv;
+    if (wolfFlowState.y > 0.0) fuv += wolfFlowWarp(uv, wolfFlowDrift.xy, wolfFlowState.y, 0.0);
+    vec2 wuv = (wolfWeatherRotation * (fuv - wolfWeatherPivot)) + wolfWeatherPivot;
+    rawWeather += kindStreets * textureLod(localWeatherTexture, wuv * localWeatherRepeat + localWeatherOffset, mipLevel).LOCAL_WEATHER_CHANNELS;
   }
-  if (!all(stretched)) {
+  if (any(greaterThan(kindUpper, vec4(0.5)))) {
+    vec2 fuv = uv;
+    if (wolfFlowState.z > 0.0) fuv += wolfFlowWarp(uv, wolfFlowDrift.zw, wolfFlowState.z, 2.0);
+    vec2 wuv = (wolfWeatherRotationUpper * (fuv - wolfWeatherPivot)) + wolfWeatherPivot;
+    // [10-26 third pass] the cirrus' own horizontal scale (wolfUpperRepeat, wolfcloudgenus.h CIRRUS_TILE_M), not the EEP's
+    // cloud_scale; the mip level moves by the ratio of the two repeats (the texel footprint scales with the repeat)
+    weather.upperCoord = wuv * wolfUpperRepeat + wolfWeatherOffsetUpper;
+    float upperMip = max(mipLevel + log2(max(wolfUpperRepeat.x, 1e-3) / max(localWeatherRepeat.x, 1e-3)), 0.0);
+    rawWeather += kindUpper * textureLod(localWeatherTexture, weather.upperCoord, upperMip).LOCAL_WEATHER_CHANNELS;
+  }
+  if (any(greaterThan(kindTurned, vec4(0.5)))) {
     vec2 tuv = (wolfWeatherTurn * (uv - wolfWeatherPivot)) + wolfWeatherPivot;
-    vec4 turned = textureLod(localWeatherTexture, tuv * localWeatherRepeat + wolfWeatherOffsetTurned, mipLevel).LOCAL_WEATHER_CHANNELS;
-    rawWeather = mix(turned, rawWeather, vec4(stretched));
+    vec2 tcoord = tuv * localWeatherRepeat + wolfWeatherOffsetTurned;
+    vec4 turned = textureLod(localWeatherTexture, tcoord, mipLevel).LOCAL_WEATHER_CHANNELS;
+    // [WolfViewer 2026-10-26] A GENUS'S OWN CELL SIZE (wolfLayerRepeat, wolf_clouds.xml genera 'repeat', a whole number). The UiT
+    // Tromso webcam (10-26 02:27 and 16:49 local): altocumulus in many soft cells of 1 - 3 deg, stratocumulus fragments 2 - 10 deg;
+    // WMO: altocumulus elements "an apparent width of between one and five degrees", cirrocumulus under one degree,
+    // stratocumulus over five. One repeat for every layer gave every genus the same cells. A layer with a repeat above 1 reads
+    // the texture again at repeat x that - its offset scaled with it, so it drifts at the same ground speed and its wrap (a
+    // whole unit) stays seamless - with the mip level raised by log2 of it (the texel footprint shrinks by it).
+    for (int i = 0; i < 4; ++i) {
+      float rs = wolfLayerRepeat[i];
+      if (kindTurned[i] > 0.5 && rs > 1.001) {
+        vec4 fine = textureLod(localWeatherTexture, tcoord * rs, mipLevel + log2(rs)).LOCAL_WEATHER_CHANNELS;
+        turned[i] = fine[i];
+      }
+    }
+    rawWeather += kindTurned * turned;
   }
   vec4 localWeather = pow(rawWeather, weatherExponents);
+  // [WolfViewer 2026-10-26, fourth pass] THE FIBRES CARVE THE CIRRUS BEFORE THE COVERAGE CUT. Paul at ICELAND (14:35Z) and TROMSO
+  // (15:35Z): the high cloud drawn as "a handful of wide, smooth ribbons that fan across the entire sky from a point on the
+  // horizon, like spokes". The cause: the streak lookup's weather value is the high channel's Perlin fbm (localWeatherF.glsl
+  // frequency 6 x 12 per tile, 8 octaves, roughness 0.5 - the first octave carries half the weight), so over the 120 km tile its
+  // lobes are 20 x 10 km, 80 x 10 km after the 4x stretch: bands 5 km wide seen from under a layer 7.5 km up subtend 37 deg
+  // at the zenith, and a few of them, parallel, converge in perspective to the horizon (WMO radiatus). The fibres (the Worley
+  // detail noise read in the lookup's own coordinate: cells 1 km x 10 km down to 125 m x 1.25 km, wolfFibreScale) were a +-50 %
+  // factor on the density AFTER the cut, so a band stayed one unbroken sheet. Now the fibre noise is added to the weather
+  // value BEFORE the cut, +- wolfLayerFibre (Ci 0.8) of its 0..1 range, mean-preserving (c has its mean E[c] subtracted,
+  // wolfFibreShape, so the layer's mean optical depth is kept): the cut then falls inside every band and carves it into many
+  // filaments with gaps between them, 1 km-scale generating cells and 10 km fall streaks (Sassen et al., FIRE cirrus lidar,
+  // NTRS 19910001165: "approximately 1.0 km cirrus uncinus cells, to organized MUC structures up to approximately 120 km
+  // across"; "longitudinal bands (20 km in width) along the ambient wind", NTRS 19900018964) - the band itself stays as the
+  // envelope, as a mesoscale uncinus complex is. Only the layers read through the streak lookup (kindUpper: Ci, Ci spissatus;
+  // wolfcloudgenus.cpp GenusRow::streaks) are carved; a veil (Cs) and grains (Cc) read the turned lookup and keep their smooth
+  // low-frequency variation. Faded out with the weather mip level (0.5 .. 2) as before: far away the filaments merge into the
+  // band's mean, as unresolved filaments do.
+  #ifdef SHAPE_DETAIL
+  if (any(greaterThan(wolfLayerFibre * kindUpper, vec4(0.0))) && wolfFibreShape.y > 0.0) {
+    float fibreFade = 1.0 - smoothstep(0.5, 2.0, mipLevel);
+    if (fibreFade > 0.0) {
+      vec3 fp = vec3(weather.upperCoord * wolfFibreScale.xy, height * wolfFibreScale.z);
+      float c = clamp((textureLod(shapeDetailTexture, fp, 0.0).r - wolfFibreShape.x) / wolfFibreShape.y, -1.0, 1.0);
+      localWeather = clamp(localWeather + (wolfLayerFibre * kindUpper) * (fibreFade * (c - wolfFibreShape.z)), 0.0, 1.0);
+    }
+  }
+  #endif // SHAPE_DETAIL
   #ifdef SHADOW
   localWeather *= shadowLayerMask;
   #endif // SHADOW
@@ -170,6 +326,15 @@ WeatherSample sampleWeather(const vec2 uv, const float height, const float mipLe
     factor,
     factor + coverageFilterWidths
   );
+
+  // [CLOUDS CLEAR OF BUILDS 2026-10-26] the build clearance (wolfBuildClear above): only below the highest cleared height and
+  // where some fading layer has cloud; the cloud's height above the sea sphere is its height above the ground there, as a
+  // build's agent z less the sea is (wolfenvironmentrender.cpp placeOnPlanet), so the comparison is in agent z
+  float buildZ = height + wolfBuildParams.y;
+  if (wolfBuildParams.x > 0.5 && buildZ < wolfBuildParams.z && any(greaterThan(weather.density * wolfLayerBuildFade, vec4(0.0)))) {
+    vec2 buildXY = (ecefToWorldMatrix * vec4(position, 1.0)).xy;
+    weather.density *= 1.0 - wolfBuildClear(buildXY, buildZ) * wolfLayerBuildFade;
+  }
 
   return weather;
 }
@@ -246,6 +411,8 @@ MediaSample sampleMedia(
   }
   #endif // SHAPE_DETAIL
 
+  // [WolfViewer 2026-10-26, fourth pass] the fibres of an ice layer are carved into the weather value in sampleWeather now (before
+  // the coverage cut), not applied as a factor here: a factor on a thin sheet left the sheet whole - the ribbons.
   // Apply the density profiles.
   density = saturate(density * densityScales * getLayerDensity(weather.heightFraction));
 

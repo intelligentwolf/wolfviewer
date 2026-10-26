@@ -1907,8 +1907,23 @@
         <!-- [WOLF BUG REPORT 2026-10-24] Paul: "a little bug icon on the menu that links to tickets and allows them to upload
              their logs" - the same window as the status bar's bug icon (wolffloaterbugreport.cpp). Paul 10-24 "only wolf
              residents": shown for a Wolf Territories login wherever they are, gone for other grids' logins. -->
-        <menu_item_call label="Report a Problem..." name="WolfBugReport">
+        <!-- [FLEA REPORT 2026-10-26] Paul: "change bug reports to flea reports! lets have some fun" - resident text only;
+             the name, floater and API stay WolfBugReport / wolf_bug_report / viewerbugreport.php. -->
+        <menu_item_call label="Flea Report (found a bug, or got an idea?)..." name="WolfBugReport">
             <menu_item_call.on_click function="Floater.Show" parameter="wolf_bug_report" />
+            <menu_item_call.on_visible function="WolfGrid.IsWolfTerritories" />
+        </menu_item_call>
+        <!-- [ADULT CONTENT 2026-10-26] Paul's rule: every Wolf feature under Wolf World. Age Check: your age check status
+             and "Verify my age" for Adult Content regions (wolffloateragecheck.cpp, region-terrain-work/adult-content/
+             PROTOCOL.md). For a Wolf Territories login wherever they are (as Report a Problem); gone for other grids. -->
+        <menu_item_call label="Age Check..." name="WolfAgeCheck">
+            <menu_item_call.on_click function="Floater.Show" parameter="wolf_age_check" />
+            <menu_item_call.on_visible function="WolfGrid.IsWolfTerritories" />
+        </menu_item_call>
+        <!-- [DOB IN THE VIEWER 2026-10-26] Your Date of Birth (wolffloaterdob.cpp): add it once, or see that it is on the
+             account. Also opens by itself after a Wolf login when the account has none. Wolf logins only, as Age Check. -->
+        <menu_item_call label="Date of Birth..." name="WolfDob">
+            <menu_item_call.on_click function="Floater.Show" parameter="wolf_dob" />
             <menu_item_call.on_visible function="WolfGrid.IsWolfTerritories" />
         </menu_item_call>
         <menu_item_separator />

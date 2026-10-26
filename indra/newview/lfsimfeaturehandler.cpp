@@ -18,6 +18,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "lfsimfeaturehandler.h"
+#include "wolfadultcontent.h"   // [ADULT CONTENT 2026-10-26/]
 
 #include "llagent.h"
 #include "lllogininstance.h"
@@ -254,6 +255,9 @@ void LFSimFeatureHandler::setSupportedFeatures()
                 mCurrencySymbolOverride = LLStringUtil::null;
             }
             // </COLOSI opensim multi-currency support>
+            // [ADULT CONTENT 2026-10-26] the resident's own age check state and the age check / region types pages
+            // (PROTOCOL.md §3a: OpenSimExtras WolfAgeVerified, WolfAgeCheckURL, WolfRegionTypesURL). Display only.
+            WolfAdultContent::instance().onSimulatorFeatures(region, extras);
             // Adding feature extensions adopted from Aurora to OpenSim
             auto regionSettings=LLWorld::getInstance();
             if(extras.has("MinPrimScale"))

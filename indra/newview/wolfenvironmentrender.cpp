@@ -52,6 +52,8 @@
 #include "wolfaltitudesky.h"
 #include "wolfaurora.h"
 #include "wolfcloudgenus.h"
+#include "wolfcloudclearance.h"   // [CLOUDS CLEAR OF BUILDS 2026-10-26]
+#include "llsurface.h"            // [2026-10-26] updateLight: the destination's terrain loaded before the arrival's one switch (hasZData)
 #include "wolfenvironmentstate.h"
 #include "wolfexposure.h"
 #include "wolfgrid.h"
@@ -119,7 +121,8 @@ namespace
     // frame from the document's weather, the numbers follow it over GENUS_TAU seconds (section 10 A23)
     WolfCloudGenus::Result sGenus;
     bool sGenusValid = false;
-    constexpr F32 GENUS_TAU = 20.f;
+    bool sArrivalHold = false;   // [2026-10-26] updateLight: an arrival in progress, the previous sky held (measureCloudCover waits)
+    // GENUS_TAU: [2026-10-26] now WolfCloudGenus::table().genusTauS (app_settings/wolf_clouds.xml constants.genus_tau_s; 20 s shipped)
 
     /** The frame's geometry and light (absolute photometric values; x exposure when sent to shaders). */
     struct Frame
@@ -579,14 +582,14 @@ namespace
     }
 
     // [WolfViewer 2026-10-25] THE EEP GAIN GRID (brunetonRuntime.glsl wolfGainGrid; Jimmy Olsen, W79: a dark seam from the zenith
-    // to the horizon, a yellowish patch, a white strip over the sea at dusk with the moon up). The stock sky is symmetric about
-    // its LIGHT's vertical, not the sun's, and its light is the moon while the sun is down; the grid was measured on one side of
-    // the sun and mirrored, and stopped 2 deg above the horizon. Now its azimuths run all the way round the stock light and its
-    // last row is the true horizon. The rows and columns are the shader's (brunetonRuntime.glsl E[] / A[]).
+    // to the horizon, a yellowish patch, a white strip over the sea at dusk with the moon up): measured round the stock sky's light
+    // (the moon while the sun is down), down to the true horizon. [2026-10-26] Paul (WT Atlantic 015, Sandbox): a bright column
+    // through the sun and a hard vertical edge in the clouds - the grid's second number was the azimuth, and both skies are
+    // functions of the elevation and the ANGLE TO THE LIGHT only (brunetonRuntime.glsl, above wolfGainGrid): it is now that angle,
+    // each node probed on both sides of the light. The rows and columns are the shader's (brunetonRuntime.glsl E[] / A[]).
     constexpr S32 EEP_GAIN_ROWS = WolfTk::Atmosphere::EEP_GAIN_ROWS, EEP_GAIN_COLS = WolfTk::Atmosphere::EEP_GAIN_COLS;
     const F32 EEP_GAIN_ELEV_DEG[EEP_GAIN_ROWS - 1] = { 90.f, 40.f, 20.f, 10.f, 5.f, 2.f };   // and the horizon row (eepHorizonRowDeg)
-    // signed, counter-clockwise about the up (as the shader's atan(dot(cross(ref, view), up), dot(ref, view))); -180 is also +180
-    const F32 EEP_GAIN_AZ_DEG[EEP_GAIN_COLS] = { -180.f, -90.f, -50.f, -25.f, -10.f, -3.f, 3.f, 10.f, 25.f, 50.f, 90.f };
+    const F32 EEP_GAIN_GAMMA_DEG[EEP_GAIN_COLS] = { 3.f, 10.f, 25.f, 50.f, 90.f, 180.f };    // the angle to the light
     // the directions (world) the sky's and the clouds' gains were last measured round (probeSky / measureCloudCover)
     LLVector3 sEepSkyRefWorld = LLVector3::z_axis, sEepCloudRefWorld = LLVector3::z_axis;
 
@@ -609,22 +612,27 @@ namespace
         return (F32)(0.1 - dip * (180.0 / F_PI));
     }
 
-    /** The direction (world) of the grid's node (row, col) round the light `ref` (world). */
-    LLVector3 eepGainNodeDir(const LLVector3& ref, S32 row, S32 col, F32 horizonDeg)
+    /** The direction (world) of the grid's node (row, col) - its row's elevation, its column's angle gamma to the light `ref`
+     *  (world) - on side `side` (+1 / -1) of the light's vertical. The azimuth from the light's is the spherical law of cosines
+     *  solved for it: cos gamma = sin e sin eL + cos e cos eL cos dAz. Where the row cannot reach that gamma (a gamma smaller than
+     *  |e - eL| or larger than 180 - |e + eL|), cos dAz is held to -1 .. 1: the row's nearest direction to it, as the shader's
+     *  gamma for that direction is (brunetonRuntime.glsl wolfGainElevAz). */
+    LLVector3 eepGainNodeDir(const LLVector3& ref, S32 row, S32 col, F32 horizonDeg, F32 side)
     {
-        // compass azimuth (from north, clockwise); the shader's azimuth runs the other way (counter-clockwise about the up)
-        const F32 refAz = (ref.mV[VX] * ref.mV[VX] + ref.mV[VY] * ref.mV[VY] > 1e-12f) ? atan2f(ref.mV[VX], ref.mV[VY]) : 0.f;
+        const F32 refAz = (ref.mV[VX] * ref.mV[VX] + ref.mV[VY] * ref.mV[VY] > 1e-12f) ? atan2f(ref.mV[VX], ref.mV[VY]) : 0.f;   // compass
+        const F32 eL = asinf(llclamp(ref.mV[VZ], -1.f, 1.f));
         const F32 el = (row < EEP_GAIN_ROWS - 1 ? EEP_GAIN_ELEV_DEG[row] : horizonDeg) * DEG_TO_RAD;
-        const F32 az = refAz - EEP_GAIN_AZ_DEG[col] * DEG_TO_RAD;
+        const F32 gamma = EEP_GAIN_GAMMA_DEG[col] * DEG_TO_RAD;
+        const F32 den = cosf(el) * cosf(eL);
+        const F32 cosDAz = den > 1e-6f ? llclamp((cosf(gamma) - sinf(el) * sinf(eL)) / den, -1.f, 1.f) : 1.f;
+        const F32 az = refAz + side * acosf(cosDAz);
         return LLVector3(cosf(el) * sinf(az), cosf(el) * cosf(az), sinf(el));
     }
 
-    /** A direction's signed azimuth from `ref` (world), degrees, -180 .. 180, counter-clockwise about the up (the shader's). */
-    F32 eepGainAzDeg(const LLVector3& ref, const LLVector3& dir)
+    /** A direction's angle to `ref` (both world, unit), degrees, 0 .. 180 (the shader's gamma, brunetonRuntime.glsl). */
+    F32 eepGainGammaDeg(const LLVector3& ref, const LLVector3& dir)
     {
-        const F32 rx = ref.mV[VX], ry = ref.mV[VY], vx = dir.mV[VX], vy = dir.mV[VY];
-        if (rx * rx + ry * ry <= 1e-12f || vx * vx + vy * vy <= 1e-12f) return 0.f;
-        return atan2f(rx * vy - ry * vx, rx * vx + ry * vy) * RAD_TO_DEG;   // (ref x dir) . up, ref . dir
+        return acosf(llclamp(ref * dir, -1.f, 1.f)) * RAD_TO_DEG;
     }
 
     /**
@@ -738,12 +746,55 @@ namespace
             const LLVector3d cam = gAgent.getPosGlobalFromAgent(LLViewerCamera::getInstance()->getOrigin());
             s_cut = s_haveCam && (cam - s_lastCam).magVec() > 300.0;
             s_lastCam = cam; s_haveCam = true;
-            if (s_cut) sGenusValid = false;
-            // [2026-10-19] the cloud field restarts at the region's seed phase (cloudsFrame): on a cut, and once at the start
+            // [2026-10-26] the genera and the cloud field now restart at the ONE switch below (settleSnap), not on the cut frame
             static bool s_seeded = false;
-            if (s_cut || !s_seeded) { sCloudReseed = true; s_seeded = true; }
+            if (!s_seeded) { sCloudReseed = true; s_seeded = true; }
         }
         LLSettingsSky::ptr_t psky = LLEnvironment::instance().getCurrentSky();
+        // [WolfViewer 2026-10-26] AN ARRIVAL IS ONE SWITCH. Paul's tests 10-26: every teleport showed the place left behind's clouds
+        // morphing for a minute (TROMSO 12:55Z: the restart took the OLD documents - WolfEnvironmentState keeps them until the new
+        // region's read returns - and eased into the new over GENUS_TAU), and the first fix (restart every frame until the
+        // documents arrived) still switched twice at ICELAND 15:55Z: once at +1 s with the documents, again at +7 s when the
+        // region's EEP arrived (the log: sun -9.0 deg at 15:55:09, +7.1 deg at 15:56:09 - the night rule's Sc became the day
+        // rule's Cu mediocris and eased for 30 s; Paul: "the sky changed colour about 10 times"). So after a cut the PREVIOUS
+        // frame's clouds are HELD - the genera, the cover, the exposure target, the cloud measurements (measureCloudCover) - and
+        // everything switches ONCE, when the destination is in force: its documents read (documentsReadFor), its terrain under
+        // the camera loaded (the rules' land / sea test, LLSurface::hasZData), and its EEP applied - seen as the EEP sun
+        // direction standing still for SETTLE_QUIET_S after any jump (a jump of over 1 deg in a frame is a sky swap, never a
+        // day cycle). SETTLE_MAX_S bounds the hold (the documents' own read times out at 30 s).
+        static bool s_settling = false;
+        bool settleSnap = false;   // this frame IS the switch: the genera, the cover and the exposure target restart at the new place's values
+        bool holding = false;      // this frame holds the previous frame's genera, cover and exposure target
+        {
+            constexpr F64 SETTLE_MIN_S = 1.0, SETTLE_QUIET_S = 2.0, SETTLE_MAX_S = 35.0;
+            static F64 s_cutAt = -1.0, s_quietSince = -1.0;
+            static LLVector3 s_lastEepSun; static bool s_haveEepSun = false;
+            const F64 nowS = LLFrameTimer::getElapsedSeconds();
+            LLVector3 eepSun = psky ? psky->getSunDirection() : LLVector3::z_axis;
+            eepSun.normalize();
+            const bool sunJump = s_haveEepSun && (eepSun * s_lastEepSun) < cosf(1.f * DEG_TO_RAD);
+            s_lastEepSun = eepSun; s_haveEepSun = true;
+            if (s_cut) { s_settling = true; s_cutAt = nowS; s_quietSince = nowS; }
+            else if (s_settling && sunJump) { s_quietSince = nowS; }
+            if (s_settling)
+            {
+                LLViewerRegion* envRegion = LLEnvironment::wolfEnvironmentRegion();
+                const bool docsHere = envRegion && WolfEnvironmentState::instance().documentsReadFor(envRegion->getRegionID().asString());
+                const bool terrainHere = envRegion && envRegion->getLand().hasZData();
+                const bool ready = docsHere && terrainHere && nowS - s_quietSince >= SETTLE_QUIET_S && nowS - s_cutAt >= SETTLE_MIN_S;
+                if (ready || nowS - s_cutAt > SETTLE_MAX_S)
+                {
+                    s_settling = false;
+                    settleSnap = true;
+                    sGenusValid = false;    // the genera restart at the destination's weather
+                    sCloudReseed = true;    // and the cloud field at its seed phase (cloudsFrame)
+                    LL_INFOS("WolfEnv") << "arrival: the sky switched once, " << (nowS - s_cutAt) << " s after the cut (documents "
+                                        << docsHere << ", terrain " << terrainHere << ", EEP quiet " << (nowS - s_quietSince) << " s)" << LL_ENDL;
+                }
+                else holding = true;
+            }
+            sArrivalHold = holding;
+        }
         const F64 now = skyNow();
         LLVector3 sun = LLVector3::z_axis;
         // [WolfViewer 2026-10-13] Paul: "on jimmy's eep the sun is in a different place". The EEP is the basis: its sun and
@@ -904,15 +955,20 @@ namespace
             // crossing): the clouds' coverage follows over GENUS_TAU (20 s, as the genus layers do) instead of jumping -
             // Paul's log showed cover 1.00 -> 0.37 between minute lines while "the clouds are moving very very fast"
             static F32 s_cover = -1.f;
-            const F32 tau = GENUS_TAU;
-            s_cover = (s_cover < 0.f || dt <= 0.f || s_cut) ? coverTarget : s_cover + (coverTarget - s_cover) * (1.f - expf(-dt / tau));
+            const F32 tau = WolfCloudGenus::table().genusTauS;
+            if (s_cover < 0.f || dt <= 0.f || settleSnap) s_cover = coverTarget;
+            else if (!holding) s_cover += (coverTarget - s_cover) * (1.f - expf(-dt / tau));   // [2026-10-26] held through an arrival
             sNext.cover = s_cover;
             if (WolfAurora::forced()) sNext.cover = 0.f;   // [2026-10-15] WolfForceAurora: no clouds in front of the forced aurora
         }
         // [WolfViewer step 3] the cloud genera from the weather (wolfcloudgenus.cpp, BEAUTY_RESEARCH.md section 9.4): the
         // three fractions read as three layers (+ a fog / pannus slab), each a genus with its base, extinction and
         // phase. A zone's own cloud setting, or no weather, keeps takram's default layers under the one coverage.
-        if (sClouds && d.mHaveWeather && !z.hasClouds)
+        if (holding)
+        {
+            // [2026-10-26] an arrival in progress: last frame's layers stay as they are (the one switch above)
+        }
+        else if (sClouds && d.mHaveWeather && !z.hasClouds)
         {
             WolfCloudGenus::Weather w;
             w.low = d.mWeatherLow; w.medium = d.mWeatherMid; w.high = d.mWeatherHigh; w.total = d.mWeatherCloud;
@@ -965,6 +1021,7 @@ namespace
                 const F64 lat = rw.autoEnvLat();
                 w.summer = fabs(lat) < 23.439 || lat * sinDelta > 0.0;
             }
+            w.latitude = (F32)rw.autoEnvLat();   // [2026-10-26] the hemisphere of the upper wind's turn (WolfCloudGenus UPPER_VEER_*)
             // the high band's trend over the next hours (rule 9: cirrus invading before a warm front), from the forecast rows
             if (d.mHourly.size() >= 2)
             {
@@ -980,7 +1037,7 @@ namespace
             w.land = rgn ? (rgn->getLandHeightRegion(rgn->getPosRegionFromAgent(LLViewerCamera::getInstance()->getOrigin())) > rgn->getWaterHeight()) : true;
             const WolfCloudGenus::Result target = WolfCloudGenus::map(w);
             if (!sGenusValid) { sGenus = target; sGenusValid = true; }
-            else WolfCloudGenus::approach(sGenus, target, dt, GENUS_TAU);
+            else WolfCloudGenus::approach(sGenus, target, dt, WolfCloudGenus::table().genusTauS);
             // [WolfViewer round 9] the EEP is the basis: the genera are arranged WITHIN the EEP's coverage (sNext.cover above,
             // cloud_shadow) and never contradict it - the three cloud layers' coverages are scaled so the largest shows the
             // EEP's, keeping their proportions; the fog / pannus slab (channel a) is not cloud cover in the EEP's sense (the
@@ -993,11 +1050,20 @@ namespace
             for (S32 i = 0; i < 3; ++i) if (target.layer[i].height > 0.f) metMax = llmax(metMax, target.layer[i].coverage);
             if (metMax > 1e-3f)
             {
+                // [WolfViewer 2026-10-26] EACH LAYER AT ITS OWN FRACTION (wolf_clouds.xml constants.coverage_per_layer, on). The UiT Tromso
+                // webcam at 16:49 local (15:49Z) showed separate dark stratocumulus fragments over much of the sky while our TROMSO
+                // drew none: the forecast's low 0.108 was scaled by k = cover / the largest fraction (Ci 0.78) to a takram coverage
+                // of 0.05, under which the low channel's Worley texture passes almost nothing (cloudsCommon.glsl sampleWeather:
+                // 1 - coverage x heightScale is the cut). MET gives the three fractions independently, so each layer now takes
+                // coverFromShare of its own fraction - the same curve the EEP's share goes through, so the low band (floored at
+                // the EEP's share, Weather::eepLow) still shows the EEP's cover; the middle and high bands show theirs. Off: the
+                // old scaling to the largest layer.
+                const bool perLayer = WolfCloudGenus::table().coveragePerLayer;
                 const F32 k = sNext.cover / metMax;
                 for (S32 i = 0; i < 3; ++i)
                 {
                     const F32 c = shown.layer[i].coverage;
-                    shown.layer[i].coverage = c > 1e-3f ? llclamp(c * k, 0.f, 1.f) : 0.f;
+                    shown.layer[i].coverage = c > 1e-3f ? llclamp(perLayer ? coverFromShare(c) : c * k, 0.f, 1.f) : 0.f;
                 }
                 WolfCloudGenus::toCloudLayers(shown, sClouds->layers());
             }
@@ -1133,7 +1199,11 @@ namespace
             {
                 const F32 want = log2f(target / have);
                 // the eye's adaptation: half a second (a teleport or a sky switched by hand is a cut: at once)
-                s_logExp = (!s_haveExp || s_cut || dt <= 0.f) ? want : s_logExp + (want - s_logExp) * (1.f - expf(-dt / 0.5f));
+                // [2026-10-26] NOT held through an arrival: the EEP sky itself changes at once on a teleport, so holding the place
+                // left behind's exposure over-exposed the new sky for the whole hold (Tromso night x4.7 into Iceland dusk, about
+                // 7 stops; Paul: "when I land it flashes through different colours"). While holding it follows the new sky each frame.
+                if (!s_haveExp || settleSnap || holding || dt <= 0.f) s_logExp = want;
+                else s_logExp += (want - s_logExp) * (1.f - expf(-dt / 0.5f));
                 s_haveExp = true;
                 sNext.exposure = exp2f(s_logExp);
             }
@@ -1268,7 +1338,19 @@ namespace
         // when the sky starts and kept; only a change of more than 2x (a different sky preset) is followed, as one cut.
         {
             static F32 s_repeat = 0.f;
-            const F32 want = sFrame.weatherRepeatScale;
+            // [2026-10-26] a reloaded cloud table (wolf_clouds.xml) is a cut: the repeat and the genera restart at its values
+            static U32 s_tableGen = 0;
+            if (s_tableGen != WolfCloudGenus::tableGeneration()) { s_tableGen = WolfCloudGenus::tableGeneration(); s_repeat = 0.f; sGenusValid = false; }
+            F32 want = sFrame.weatherRepeatScale;
+            // [WolfViewer 2026-10-26] with the forecast's genera, the low and middle clouds at their real size (wolfcloudgenus.h
+            // LOW_MID_TILE_M: one tile of the weather texture = that many metres; takram's repeat 100 per cube face, wolftkclouds.cpp
+            // localWeatherRepeat, and one face = R pi / 2, uvPerMetre below), not the EEP's cloud_scale; switchable
+            // (WolfCloudPhysicalScale). The change of size is taken by the same > 2x rule below, as one cut.
+            static LLCachedControl<bool> physical_scale(gSavedSettings, "WolfCloudPhysicalScale", true);
+            if (physical_scale && sGenusValid)
+            {
+                want = (F32)((sFrame.bottomRadius * F_PI * 0.5) / (F64)WolfCloudGenus::table().lowMidTileM) / 100.f;
+            }
             if (s_repeat <= 0.f || want > 2.f * s_repeat || want < 0.5f * s_repeat) s_repeat = want;
             f.weather_repeat_scale = s_repeat;
         }
@@ -1295,6 +1377,43 @@ namespace
             // offset, -repeat R w dt, so a change of the stretch never moves them
             f.local_weather_velocity_turned.set(-rep * (ca * wx - sa * wy), -rep * (sa * wx + ca * wy));
             f.wind_speed = windSpeed;   // [WolfViewer round 17] the shapes' drift
+            // [WolfViewer 2026-10-26] the cirrus lookup (wolfLayerStretched 2) turned to the upper wind and drifting with it
+            // (WolfCloudGenus upperRotationDeg / upperWindFrom / upperWindSpeed: the 10 m wind veered and sped up by the friction
+            // layer's turning, wolfcloudgenus.h UPPER_VEER_*), the same S and the same offset rule as the streets' lookup above
+            const F32 upFrom = sGenusValid ? sGenus.upperWindFrom : windFrom;
+            const F32 upSpeed = sGenusValid ? sGenus.upperWindSpeed : windSpeed;
+            const F32 upToward = (upFrom + 180.f) * DEG_TO_RAD;
+            const F32 ux = sinf(upToward) * upSpeed * uvPerMetre, uy = cosf(upToward) * upSpeed * uvPerMetre;
+            f.weather_upper_rotation_deg = sGenusValid ? sGenus.upperRotationDeg : f.weather_rotation_deg;
+            const F32 au = f.weather_upper_rotation_deg * DEG_TO_RAD, cu = cosf(au), su = sinf(au);
+            // [10-26 third pass] at the cirrus lookup's own repeat (wolfcloudgenus.h CIRRUS_TILE_M), not the EEP-scaled one
+            const F32 repUp = 1.f / (uvPerMetre * WolfCloudGenus::table().cirrusTileM);
+            f.local_weather_velocity_upper.set(-repUp * inv * (cu * ux - su * uy), -repUp * (su * ux + cu * uy));
+            // the curved flow fields ride with the same winds (globe uv per second; cloudsCommon.glsl wolfFlowWarp), so a cloud and
+            // the bend it sits in move together
+            f.flow_velocity_low.set(wx, wy);
+            f.flow_velocity_upper.set(ux, uy);
+            f.flow_bend_low = WolfCloudGenus::table().flowBendStreets;
+            f.flow_bend_upper = WolfCloudGenus::table().flowBendUpper;
+        }
+        // [CLOUDS CLEAR OF BUILDS 2026-10-26] Paul: clouds never cover anyone's builds - the build clearance field
+        // (wolfcloudclearance.h), rebuilt once a second from the object list, read by every cloud pass (cloudsCommon.glsl
+        // wolfBuildClear). Heights in agent z; the clouds' height 0 is the camera region's sea, as placeOnPlanet sets it.
+        {
+            WolfCloudClearance& bc = WolfCloudClearance::instance();
+            if (!probe) bc.idle();
+            f.build_fade.set(WolfCloudClearance::M0, WolfCloudClearance::W);   // [2026-10-26] from the cloud table (cloudsCommon.glsl wolfBuildFade)
+            if (bc.isReady())
+            {
+                f.build_tex = bc.texture();
+                for (S32 k = 0; k < WolfCloudClearance::LEVELS && k < 3; ++k)
+                {
+                    const LLVector2 o = bc.levelOriginAgent(k);
+                    f.build_level[k][0] = o.mV[VX]; f.build_level[k][1] = o.mV[VY]; f.build_level[k][2] = WolfCloudClearance::TEXEL_M[k];
+                }
+                f.build_sea = gAgent.getRegion() ? gAgent.getRegion()->getWaterHeight() : 0.f;
+                f.build_z_limit = bc.topAgentZ() + WolfCloudClearance::PAD_M + WolfCloudClearance::M0 + WolfCloudClearance::W;
+            }
         }
         // [WolfViewer 2026-10-13] WolfEnvironmentTrace: every input that moves the clouds, four times a second, so a report
         // of "clouds moving very fast" can be traced to the value that changes (Paul's video 09:53: clouds re-form in place
@@ -1309,7 +1428,7 @@ namespace
                 std::ostringstream o;
                 o << "t " << t << " dt " << f.dt << " cover " << sFrame.cover << " wind " << windSpeed << " from " << windFrom << " turb " << f.turbulence_displacement << " dens0 " << (sClouds ? sClouds->layers().layer[0].densityScale : 0.f)
                   << " vel " << f.local_weather_velocity.mV[0] << "," << f.local_weather_velocity.mV[1]
-                  << " rot " << f.weather_rotation_deg << " stretch " << f.weather_stretch
+                  << " rot " << f.weather_rotation_deg << " stretch " << f.weather_stretch << " uprot " << f.weather_upper_rotation_deg
                   << " lstretch " << f.weather_layer_stretched[0] << "," << f.weather_layer_stretched[1] << "," << f.weather_layer_stretched[2] << "," << f.weather_layer_stretched[3]
                   << " repeat " << f.weather_repeat_scale
                   << " pivot " << f.weather_pivot.mV[0] << "," << f.weather_pivot.mV[1] << " genus " << (sGenusValid ? 1 : 0)
@@ -1901,19 +2020,21 @@ namespace
 {
     // [WolfViewer 2026-10-13] THE EEP DRIVES THE SKY: the sky's gains toward the stock EEP sky (brunetonRuntime.glsl wolfEepGain),
     // and the last probe's numbers for the verification log (WolfEnvironmentTrace)
-    constexpr S32 NPROBE = WolfTk::Atmosphere::EEP_GAINS;   // 7 heights x 11 azimuths round the stock light (EEP_GAIN_ROWS / _COLS)
+    constexpr S32 NPROBE = WolfTk::Atmosphere::EEP_GAINS;   // the gain nodes: 7 heights x 6 angles to the stock light (EEP_GAIN_ROWS / _COLS)
+    constexpr S32 NDIR = WolfTk::Atmosphere::EEP_PROBES;    // [2026-10-26] the probe directions: node n on both sides, 2n and 2n + 1
     LLColor3 sGain[NPROBE];   // set white before first use (probeSky)
     bool sGainValid = false;
-    LLVector3 sProbeDir[NPROBE];
-    LLColor3 sProbeRaw[NPROBE], sProbeTarget[NPROBE];
+    LLVector3 sProbeDir[NDIR];
+    LLColor3 sProbeRaw[NDIR], sProbeTarget[NDIR];
     F32 sProbeHorizonDeg = 0.f;   // the horizon row of the last reading (the verification log)
 
     /**
      * Renders the native dome (the program `sh`, every uniform already set for this frame) at the grid's directions with the
      * gains off, reads them back, and sets each gain to the stock sky's value there (WolfEepReference::skyLinear) over the
      * native one, per channel - the frame is in the EEP's linear units (updateLight's exposure), so the two compare
-     * directly. The grid is dense round the stock sky's light on both sides (3 deg off it at the nearest, missing its disc;
-     * eepLightWorld) and reaches the true horizon. Twice a second; the gains ease over half a second in log space (a cut -
+     * directly. The grid is dense round the stock sky's light (3 deg off it at the nearest, missing its disc; eepLightWorld),
+     * each node probed on both sides of the light and its two ratios averaged in log (a sky that is not symmetric about the
+     * light is corrected on average, never mirrored), and it reaches the true horizon. Twice a second; the gains ease over half a second in log space (a cut -
      * teleport, a sky switched by hand, the stock light passing from the sun to the moon - takes them at once).
      */
     void probeSky(LLGLSLShader& sh)
@@ -1933,7 +2054,7 @@ namespace
         s_next = t + 0.5; s_last = t;
 
         static LLRenderTarget s_rt;
-        if (!s_rt.isComplete() && !s_rt.allocate(NPROBE, 1, GL_RGBA16F, false)) return;
+        if (!s_rt.isComplete() && !s_rt.allocate(NDIR, 1, GL_RGBA16F, false)) return;
         static bool s_whiteInit = false;
         if (!s_whiteInit) { for (S32 i = 0; i < NPROBE; ++i) sGain[i] = LLColor3::white; s_whiteInit = true; }
 
@@ -1942,7 +2063,12 @@ namespace
         const F32 horizonDeg = eepHorizonRowDeg(sFrame);
         for (S32 r = 0; r < EEP_GAIN_ROWS; ++r)
         {
-            for (S32 c = 0; c < EEP_GAIN_COLS; ++c) sProbeDir[r * EEP_GAIN_COLS + c] = eepGainNodeDir(ref, r, c, horizonDeg);
+            for (S32 c = 0; c < EEP_GAIN_COLS; ++c)
+            {
+                const S32 n = r * EEP_GAIN_COLS + c;
+                sProbeDir[2 * n] = eepGainNodeDir(ref, r, c, horizonDeg, 1.f);
+                sProbeDir[2 * n + 1] = eepGainNodeDir(ref, r, c, horizonDeg, -1.f);
+            }
         }
 
         static LLStaticHashedString s_probe("uProbe"), s_dgain("wolfEepDomeGain");
@@ -1952,14 +2078,14 @@ namespace
         // reads at once.)
         static GLuint s_pbo = 0;
         static bool s_pending = false;
-        static LLVector3 s_pendDir[NPROBE];
+        static LLVector3 s_pendDir[NDIR];
         static LLVector3 s_pendRef = LLVector3::z_axis;   // the light the reading in flight was taken round
         static F32 s_pendHorizon = 0.f;
         if (!s_pbo)
         {
             glGenBuffers(1, &s_pbo);
             glBindBuffer(GL_PIXEL_PACK_BUFFER, s_pbo);
-            glBufferData(GL_PIXEL_PACK_BUFFER, NPROBE * 4 * sizeof(F32), nullptr, GL_STREAM_READ);
+            glBufferData(GL_PIXEL_PACK_BUFFER, NDIR * 4 * sizeof(F32), nullptr, GL_STREAM_READ);
             glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
         }
         auto render = [&](bool gainsOn, F32* out)   // out == nullptr: into the pack buffer
@@ -1977,12 +2103,12 @@ namespace
                 gPipeline.mScreenTriangleVB->drawArrays(LLRender::TRIANGLES, 0, 3);
                 if (out)
                 {
-                    glReadPixels(0, 0, NPROBE, 1, GL_RGBA, GL_FLOAT, out);
+                    glReadPixels(0, 0, NDIR, 1, GL_RGBA, GL_FLOAT, out);
                 }
                 else
                 {
                     glBindBuffer(GL_PIXEL_PACK_BUFFER, s_pbo);
-                    glReadPixels(0, 0, NPROBE, 1, GL_RGBA, GL_FLOAT, nullptr);
+                    glReadPixels(0, 0, NDIR, 1, GL_RGBA, GL_FLOAT, nullptr);
                     glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
                 }
             }
@@ -1992,12 +2118,12 @@ namespace
             sh.uniform1f(s_dgain, sGainValid ? 1.f : 0.f);
         };
         // the reading started at the last probe (its directions kept with it), then the next one started
-        F32 px[NPROBE * 4] = {};
+        F32 px[NDIR * 4] = {};
         bool haveReading = false;
         if (s_pending)
         {
             glBindBuffer(GL_PIXEL_PACK_BUFFER, s_pbo);
-            if (const void* mapped = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, NPROBE * 4 * sizeof(F32), GL_MAP_READ_BIT))
+            if (const void* mapped = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, NDIR * 4 * sizeof(F32), GL_MAP_READ_BIT))
             {
                 memcpy(px, mapped, sizeof(px));
                 glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
@@ -2006,12 +2132,12 @@ namespace
             glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
             s_pending = false;
         }
-        LLVector3 readDir[NPROBE];
-        for (S32 i = 0; i < NPROBE; ++i) readDir[i] = s_pendDir[i];
+        LLVector3 readDir[NDIR];
+        for (S32 i = 0; i < NDIR; ++i) readDir[i] = s_pendDir[i];
         const LLVector3 readRef = s_pendRef;
         const F32 readHorizon = s_pendHorizon;
         render(false, nullptr);
-        for (S32 i = 0; i < NPROBE; ++i) s_pendDir[i] = sProbeDir[i];
+        for (S32 i = 0; i < NDIR; ++i) s_pendDir[i] = sProbeDir[i];
         s_pendRef = ref; s_pendHorizon = horizonDeg;
         s_pending = true;
 
@@ -2022,19 +2148,19 @@ namespace
         if (trace && sGainValid && t >= s_nextVerify)
         {
             s_nextVerify = t + 15.0;
-            F32 pv[NPROBE * 4] = {};
+            F32 pv[NDIR * 4] = {};
             render(true, pv);
             const WolfEepReference::Path path = WolfEepReference::path(psky);
             auto d8 = [](const LLColor3& c) { return llformat("%3d,%3d,%3d", (S32)llround(c.mV[0] * 255.f), (S32)llround(c.mV[1] * 255.f), (S32)llround(c.mV[2] * 255.f)); };
             std::ostringstream o;
             o << "EEP verify (display 0-255; " << (path.classic ? "classic" : "pbr") << (path.noPost ? ", no post" : ", tonemapped")
               << ", gamma " << path.gamma << "):";
-            for (S32 i = 0; i < NPROBE; ++i)
+            for (S32 i = 0; i < NDIR; ++i)
             {
                 const LLColor3 measured(pv[i * 4 + 0], pv[i * 4 + 1], pv[i * 4 + 2]);
-                const S32 row = i / EEP_GAIN_COLS;
+                const S32 row = (i / 2) / EEP_GAIN_COLS;
                 const F32 elDeg = row < EEP_GAIN_ROWS - 1 ? EEP_GAIN_ELEV_DEG[row] : sProbeHorizonDeg;
-                o << "\n  sky " << llformat("%5.1f deg up, %4d deg from the light", elDeg, (S32)EEP_GAIN_AZ_DEG[i % EEP_GAIN_COLS])
+                o << "\n  sky " << llformat("%5.1f deg up, %4d deg from the light, side %c", elDeg, (S32)EEP_GAIN_GAMMA_DEG[(i / 2) % EEP_GAIN_COLS], (i & 1) ? 'b' : 'a')
                   << "  EEP " << d8(WolfEepReference::display(path, sProbeTarget[i]))
                   << "  native " << d8(WolfEepReference::display(path, measured))
                   << "  (physical before gain " << d8(WolfEepReference::display(path, sProbeRaw[i])) << ")";
@@ -2069,20 +2195,32 @@ namespace
         const bool refJump = readRef * sEepSkyRefWorld < cosf(5.f * DEG_TO_RAD);
         const bool cut = !sGainValid || dt <= 0.f || refJump || (s_haveCam && (cam - s_lastCam).magVec() > 300.0);
         s_lastCam = cam; s_haveCam = true;
-        sEepSkyRefWorld = readRef;   // the gains below are this reading's: their azimuths are from its light
+        sEepSkyRefWorld = readRef;   // the gains below are this reading's: their angles are to its light
         sProbeHorizonDeg = readHorizon;
         const F32 k = cut ? 1.f : 1.f - expf(-dt / 0.5f);
-        for (S32 i = 0; i < NPROBE; ++i)
+        for (S32 i = 0; i < NDIR; ++i)
         {
             sProbeRaw[i].set(px[i * 4 + 0], px[i * 4 + 1], px[i * 4 + 2]);
             sProbeTarget[i] = WolfEepReference::skyLinear(psky, readDir[i]);   // the directions that reading looked along
+        }
+        for (S32 n = 0; n < NPROBE; ++n)
+        {
             for (S32 c = 0; c < 3; ++c)
             {
-                const F32 raw = sProbeRaw[i].mV[c], want = sProbeTarget[i].mV[c];
-                if (!(raw > 1e-7f) || !(want >= 0.f) || !llfinite(raw)) continue;   // a probe that saw nothing keeps its gain
-                const F32 g = llclamp(llmax(want, 1e-7f) / raw, 1.f / 1024.f, 1024.f);
-                const F32 lg = log2f(llmax(sGain[i].mV[c], 1e-9f));
-                sGain[i].mV[c] = exp2f(lg + (log2f(g) - lg) * k);
+                // [2026-10-26] the node's ratio: the log mean of its two sides' (a side that saw nothing is left out; both: the
+                // node keeps its gain)
+                F32 sumLog = 0.f; S32 used = 0;
+                for (S32 side = 0; side < 2; ++side)
+                {
+                    const S32 i = 2 * n + side;
+                    const F32 raw = sProbeRaw[i].mV[c], want = sProbeTarget[i].mV[c];
+                    if (!(raw > 1e-7f) || !(want >= 0.f) || !llfinite(raw)) continue;
+                    sumLog += log2f(llclamp(llmax(want, 1e-7f) / raw, 1.f / 1024.f, 1024.f));
+                    ++used;
+                }
+                if (used == 0) continue;
+                const F32 lg = log2f(llmax(sGain[n].mV[c], 1e-9f));
+                sGain[n].mV[c] = exp2f(lg + (sumLog / (F32)used - lg) * k);
             }
         }
         sGainValid = true;
@@ -2131,8 +2269,26 @@ namespace
             sCoverLocked = false; sCoverSettled = 0; sCoverLockTarget = -1.f;
         }
         s_lastCam = cam; s_haveCam = true;
+        if (sArrivalHold) return;   // [2026-10-26] the previous sky is held until the arrival's one switch: nothing to measure yet
         const F32 target = WolfEepReference::cloudCoveredFraction(psky);
         const F64 t = LLFrameTimer::getElapsedSeconds();
+        // [WolfViewer 2026-10-26] THE COLOUR GAINS BY DAY ONLY. Paul's acceptance target for the night: the UiT Tromso webcam
+        // (2026-10-26 02:27 local, and 16:49 local against our snapshot at the same minute). The real sky: at civil twilight (sun
+        // -8.5 deg) separate stratocumulus fragments DARKER than the twilight sky; by moonlight a bright region a few degrees round
+        // the moon, the cloud's brightness falling off with the distance from it, cloud far from the moon dark grey, barely brighter
+        // than the sky. Ours at 15:35Z: cloud colour 71,76,89 against a sky of 16-36 in every direction (the log's "cloud colour"
+        // and "EEP verify" lines) - 3-4 x the sky, flat: the per-direction gains pull every node to the stock EEP layer's night
+        // cloud colour (66,70,79 against its 16,20,26 sky), a flat-lit 2D texture, so the physical falloff round the moon and
+        // the dark skylit fragments cannot survive them. With the sun down the clouds now keep the physical light the march
+        // gives them (the moon as the light, the twilight sky's irradiance: cloudsLight.glsl); the gains learn again at sunrise.
+        // Daytime is unchanged (Paul 10-14: the EEP is the basis for the look by day).
+        const bool gainsByDay = sFrame.sunUp;
+        if (!gainsByDay && sCloudGainValid)
+        {
+            sCloudGainValid = false;
+            LLColor3 white[NPROBE]; for (S32 i = 0; i < NPROBE; ++i) white[i] = LLColor3::white;
+            sAtmos->setEepCloudGains(white, false);
+        }
         // the colour gains glide toward their targets every frame (3 s)
         if (sCloudGainValid)
         {
@@ -2234,8 +2390,8 @@ namespace
 
         // [WolfViewer 2026-10-13] the clouds' colour per direction, on the sky's grid: each covered texel counts to its nearest
         // node; the stock cloud colour is taken once per node, at the node's own direction. (Coverage still counts only 20 deg
-        // and up.) [2026-10-25] The sky's 7 x 11 grid round the stock light (eepGainNodeDir; Jimmy Olsen's seam): texels from the
-        // horizon row up, azimuths signed and all the way round.
+        // and up.) [2026-10-25] The sky's grid round the stock light (eepGainNodeDir; since 2026-10-26 7 x 6 in the angle to it): texels from the
+        // horizon row up.
         F32 GE[EEP_GAIN_ROWS];
         for (S32 k = 0; k < EEP_GAIN_ROWS; ++k) GE[k] = k < EEP_GAIN_ROWS - 1 ? EEP_GAIN_ELEV_DEG[k] : readHorizon;
         LLColor3 nodeNative[NPROBE], nodeTarget[NPROBE]; S32 nodeCount[NPROBE] = {}; S8 nodeState[NPROBE] = {};
@@ -2252,6 +2408,19 @@ namespace
         const F32 keep = 1.f - sThin;   // the native opacity on screen = the marched one x keep (cloudsF.glsl wolfEepCloudThin)
         S32 sVeil = 0, nVeil = 0; F64 sOpSum = 0.0, nOpSum = 0.0; S32 nOpN = 0;
         LLColor3 stockNode[NPROBE]; S32 stockNodeN[NPROBE] = {};
+        // [WolfViewer 2026-10-26] Jimmy Olsen, ticket #238 (Tromso by night: white flashes in a band along the horizon). Since W80
+        // the march's colour - what is read back here (`col`, Clouds::marchColorTex = cloudsF.glsl outputColor) - is the night's
+        // light as the eye sees it: cloudsF.glsl writes wolfNightLight(color.rgb) (nightLight.glsl, wolfNight / wolfNightS from
+        // sFrame.night / nightS: tier() setNightLight). The stock layer's colour and the CPU reference are not. By night that model
+        // pulls every colour's chromaticity toward the same blue-white (x, y) = (0.29, 0.28) and takes its luminance from the rods'
+        // V, so no per-channel gain could bring the measured colour to the stock one: the gains could not settle and walked, a
+        // reading at a time, to their limits (1/8 .. 4 x; since W80 the texels down to the horizon row count too). The
+        // target is now the stock colour as the same night light shows it (nightLightColour: the shader's steps; scale-invariant,
+        // so premultiplied colour and the per-texel divide by alpha are unaffected), which the march meets when its own colour
+        // before the night light equals the stock one - as the sky's probe, which draws without the night light (skyF.glsl
+        // uProbe), already compares. By day and in civil / nautical twilight (sFrame.night 0) it is the stock colour unchanged.
+        const F32 nightNow = sFrame.night, nightSNow = sFrame.nightS;
+        auto nightTarget = [nightNow, nightSNow](const LLColor3& c) { return nightLightColour(c, nightNow, nightSNow); };
         for (S32 y = 0; y < rh; y += 2)
         {
             for (S32 x = 0; x < rw; x += 2)
@@ -2278,12 +2447,11 @@ namespace
                 const bool stockCloud = haveStock && sa >= VEIL && llfinite(stock[q]);
                 if (!nativeCloud && !stockCloud) continue;
                 const F32 el = asinf(llclamp(dir.z, -1.f, 1.f)) * RAD_TO_DEG;
-                const F32 daz = eepGainAzDeg(readRef, LLVector3(dir.x, dir.y, dir.z));
-                // the nearest column round the circle (-180 is also +180)
-                auto around = [](F32 a, F32 b) { const F32 d = fabsf(a - b); return d > 180.f ? 360.f - d : d; };
+                // [2026-10-26] the texel's angle to the light (the grid's second number, brunetonRuntime.glsl wolfGainElevAz)
+                const F32 gam = eepGainGammaDeg(readRef, LLVector3(dir.x, dir.y, dir.z));
                 S32 bi = 0, bj = 0;
                 for (S32 k = 1; k < EEP_GAIN_ROWS; ++k) { if (fabsf(el - GE[k]) < fabsf(el - GE[bi])) bi = k; }
-                for (S32 k = 1; k < EEP_GAIN_COLS; ++k) { if (around(daz, EEP_GAIN_AZ_DEG[k]) < around(daz, EEP_GAIN_AZ_DEG[bj])) bj = k; }
+                for (S32 k = 1; k < EEP_GAIN_COLS; ++k) { if (fabsf(gam - EEP_GAIN_GAMMA_DEG[k]) < fabsf(gam - EEP_GAIN_GAMMA_DEG[bj])) bj = k; }
                 const S32 node = bi * EEP_GAIN_COLS + bj;
                 if (stockCloud)
                 {
@@ -2302,7 +2470,9 @@ namespace
                 }
                 if (nodeState[node] == 0)
                 {
-                    nodeState[node] = WolfEepReference::cloudColourLinear(psky, eepGainNodeDir(readRef, bi, bj, readHorizon), nodeTarget[node]) ? 1 : -1;
+                    nodeState[node] = WolfEepReference::cloudColourLinear(psky, eepGainNodeDir(readRef, bi, bj, readHorizon, 1.f), nodeTarget[node]) ? 1 : -1;
+                    // [2026-10-26] as the march shows it by night (nightTarget, above)
+                    if (nodeState[node] > 0) nodeTarget[node] = nightTarget(nodeTarget[node]);
                 }
                 if (nodeState[node] < 0) continue;
                 const LLColor3 own = LLColor3(col[q], col[q + 1], col[q + 2]) * (1.f / col[q + 3]);
@@ -2318,7 +2488,7 @@ namespace
             {
                 if (nodeCount[i] <= 0) continue;
                 if (stockNodeN[i] < 8) { nodeState[i] = -1; continue; }
-                nodeTarget[i] = stockNode[i] * (1.f / stockNodeN[i]);
+                nodeTarget[i] = nightTarget(stockNode[i] * (1.f / stockNodeN[i]));   // [2026-10-26] nightTarget, above
                 nSum += nodeNative[i]; tSum += nodeTarget[i] * (F32)nodeCount[i]; nCol += nodeCount[i];
             }
         }
@@ -2345,9 +2515,20 @@ namespace
             if (!sCoverLocked)
             {
                 const F32 before = sThinTarget;
-                if (nOpN >= 50 && sVeil >= 50) sThinTarget = llclamp(1.f - sStockOpacity / sNativeOpacity, 0.f, 0.8f);
-                else if (sVeil == 0) sThinTarget = 0.f;
-                sCoverSettled = fabsf(sThinTarget - before) < 0.05f ? sCoverSettled + 1 : 0;
+                // [WolfViewer 2026-10-26] only a reading that measured something counts towards the lock. Paul's TROMSO (10-26 14:33:56Z)
+                // locked at 0 five seconds after arriving: the first readings had too few veiled texels for either rule (nOpN or
+                // sVeil under 50, sVeil not 0), so the target stayed where it was, each such reading counted as "within 0.05" and
+                // three of them locked it - before a real one (the verify line at 14:34:09Z: stock opacity 0.29 against native 0.635, a target
+                // of 0.54) could arrive. The clouds then kept their full, opaque density for the whole visit.
+                // [2026-10-26, second fix] ... and a reading in which the stock layer shows NO veil at all carries no opacity
+                // information either (ICELAND 15:55:26Z: three such readings in the first 6 s locked the thinning at 0 before any
+                // reading had both veils - the stock texture is sparse and drifts, so a view can be stock-clear for seconds while
+                // the native clouds are there). The target then stays where it was; only readings with both veils settle and lock.
+                if (nOpN >= 50 && sVeil >= 50)
+                {
+                    sThinTarget = llclamp(1.f - sStockOpacity / sNativeOpacity, 0.f, 0.8f);
+                    sCoverSettled = fabsf(sThinTarget - before) < 0.05f ? sCoverSettled + 1 : 0;
+                }
                 if (sCoverSettled >= 3)
                 {
                     sCoverLocked = true; sCoverLockTarget = target;
@@ -2358,6 +2539,8 @@ namespace
         }
         // the clouds' colour: each node seen (8 texels or more) moves its gain halfway (in log) to the ratio of the stock
         // colour to the measured one, per channel, held to 0.25 .. 4 x; nodes not in view take the mean of those that were
+        if (gainsByDay)   // [2026-10-26] the colour gains are learned by day only (above)
+        {
         if (!sCloudGainValid) { for (S32 i = 0; i < NPROBE; ++i) s_grid[i] = s_gridTarget[i] = LLColor3::white; }
         LLColor3 seenSum; S32 seen = 0;
         for (S32 i = 0; i < NPROBE; ++i)
@@ -2386,7 +2569,7 @@ namespace
             LLColor3 mean; for (S32 i = 0; i < NPROBE; ++i) mean += s_gridTarget[i];
             mean *= 1.f / NPROBE;
             LLColor3 smoothed[NPROBE];
-            // [2026-10-25] the columns go all the way round: each has a neighbour on both sides
+            // [2026-10-26] the columns are angles to the light, 3 .. 180 deg: the end columns have one neighbour
             constexpr S32 C = EEP_GAIN_COLS;
             for (S32 r = 0; r < EEP_GAIN_ROWS; ++r)
             {
@@ -2395,8 +2578,8 @@ namespace
                     LLColor3 nsum; S32 nn = 0;
                     if (r > 0) { nsum += s_gridTarget[(r - 1) * C + cc]; ++nn; }
                     if (r < EEP_GAIN_ROWS - 1) { nsum += s_gridTarget[(r + 1) * C + cc]; ++nn; }
-                    nsum += s_gridTarget[r * C + (cc + C - 1) % C]; ++nn;
-                    nsum += s_gridTarget[r * C + (cc + 1) % C]; ++nn;
+                    if (cc > 0) { nsum += s_gridTarget[r * C + cc - 1]; ++nn; }
+                    if (cc < C - 1) { nsum += s_gridTarget[r * C + cc + 1]; ++nn; }
                     smoothed[r * C + cc] = s_gridTarget[r * C + cc] * 0.5f + nsum * (0.5f / nn);
                 }
             }
@@ -2414,6 +2597,7 @@ namespace
             sCloudGainValid = true;
             sAtmos->setEepCloudGains(s_grid, true);
         }
+        }   // gainsByDay
         if (nCol > 0) { sCloudMeasured = nSum * (1.f / nCol); sCloudTarget = tSum * (1.f / nCol); }
     }
 }
@@ -3470,6 +3654,11 @@ bool WolfEnvironmentRender::loadShaders(S32 shader_level)
 {
     if (!sAtmos) sAtmos = new WolfTk::Atmosphere();
     if (!sClouds) sClouds = new WolfTk::Clouds();
+    // [WolfViewer 2026-10-26] the cloud table with the shaders (wolfcloudgenus.h Table): every setShaders - start-up, a graphics
+    // change, Advanced > Rendering > Reload Vertex Shaders (llviewermenu.cpp reload_vertex_shader) - re-reads
+    // app_settings/wolf_clouds.xml, so a sky change is edit, reload, look
+    WolfCloudGenus::loadTable();
+    WolfCloudClearance::setFade(WolfCloudGenus::table().buildClearM0, WolfCloudGenus::table().buildClearW);
     const bool a = sAtmos->loadShaders(shader_level);
     const bool c = sClouds->loadShaders(shader_level);
     return a && c;

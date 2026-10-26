@@ -505,6 +505,7 @@ void WolfFloaterEnvironment::fetch()
     const std::string url = llformat("%s?region=%s&x=%.2f&y=%.2f", API_URL, id.c_str(), mAtX, mAtY);
     const LLHandle<LLFloater> h = getHandle();
     const U64 serial = ++mSerial;
+    mBusyKind = "fetch"; mBusySerial = serial;
     LLCoros::instance().launch("WolfEnvGet", [h, url, serial]() { getCoro(h, url, serial); });
     // the sky's clock for the time slider's readout (auto_environment.php: clockUtcOffset, clockLabel)
     const std::string clock_url = llformat("%s?region=%s", AUTO_ENV_URL, id.c_str());
@@ -531,7 +532,8 @@ void WolfFloaterEnvironment::getCoro(LLHandle<LLFloater> handle, std::string url
     LLCore::HttpStatus status = LLCoreHttpUtil::HttpCoroutineAdapter::getStatusFromLLSD(result[LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS]);
     LLSD reply = raw_reply(result);
     WolfFloaterEnvironment* self = static_cast<WolfFloaterEnvironment*>(handle.get());
-    if (!self || serial != self->mSerial) { if (self) self->mBusy = false; return; }
+    // [2026-10-26] a superseded read: the request that superseded it holds mBusy and clears it (#241)
+    if (!self || serial != self->mSerial) { if (self && serial == self->mBusySerial) self->mBusy = false; return; }
     const bool ok = status && reply.isMap() && reply["success"].asBoolean();
     const std::string why = reply.isMap() && reply.has("error") ? reply["error"].asString() : status.toString();
     self->onGetReply(reply, ok, why);
@@ -857,7 +859,25 @@ void WolfFloaterEnvironment::writeZone()
 /** Only what applies is shown or enabled (Hick: fewer choices at a time). */
 void WolfFloaterEnvironment::updateVisibility()
 {
-    const bool edit = canEdit() && !mBusy;
+    // [2026-10-26] a preview's check does not lock the editor (editLocked; #241): the person goes on editing while it is out
+    const bool edit = canEdit() && !editLocked();
+    // [WolfViewer 2026-10-26] Jimmy Olsen, ticket #241: changing the sky / haze colour with Preview on crashed the viewer.
+    // Source: llcolorswatch.cpp LLColorSwatchCtrl::setEnabled(false) cancels an open colour picker (cancelSelection), and
+    // llfloatercolorpicker.cpp cancelSelection -> LLColorSwatchCtrl::onColorChanged(COLOR_CANCEL) commits the swatch when it
+    // has no cancel callback (onCommit) - into onChanged() here, which comes back to this function while mBusy (the preview's
+    // "check" post, a save, a fetch) still holds `edit` false, disables the same swatch again with its picker still open
+    // (cancelSelection hides it only after the commit) - without end, until the stack overflowed. The picker is closed first,
+    // the swatch keeping the colour picked so far (LLColorSwatchCtrl::closeFloaterColorPicker: the picker is detached, then
+    // closed, so nothing is cancelled or committed), and only then is the swatch disabled.
+    auto enable = [this](const char* n, bool on)
+    {
+        LLView* v = getChildView(n);
+        if (!on)
+        {
+            if (LLColorSwatchCtrl* sw = dynamic_cast<LLColorSwatchCtrl*>(v)) sw->closeFloaterColorPicker();
+        }
+        v->setEnabled(on);
+    };
     const std::string kind = child<LLComboBox>(this, "place_kind")->getValue().asString();
     const std::string tmode = child<LLComboBox>(this, "time_mode")->getValue().asString();
     const std::string src = child<LLComboBox>(this, "weather_source")->getValue().asString();
@@ -919,21 +939,21 @@ void WolfFloaterEnvironment::updateVisibility()
         "zone_weather", "zone_clouds_on", "zone_clouds", "zone_haze_on", "zone_haze", "zone_fog_on", "zone_fog",
         "zone_fogglow_on", "zone_fog_glow", "zone_light_on", "zone_light", "zone_lightstr_on", "zone_light_strength",
         "zone_mood_on", "zone_mood_tint", "zone_mood_color", "zone_mood_strength", "save", "revert" };
-    for (const char* n : EDITABLE) getChildView(n)->setEnabled(edit);
+    for (const char* n : EDITABLE) enable(n, edit);
     // the dependent controls
     getChildView("clouds")->setEnabled(edit && !child<LLCheckBoxCtrl>(this, "clouds_auto")->get());
     const bool customMood = child<LLComboBox>(this, "mood_tint")->getValue().asString() == "custom";
-    getChildView("mood_color")->setEnabled(edit && customMood);
+    enable("mood_color", edit && customMood);
     getChildView("mood_strength")->setEnabled(edit && child<LLComboBox>(this, "mood_tint")->getValue().asString() != "neutral");
     for (const auto& pr : { std::make_pair("ray_nat", "ray_color"), std::make_pair("mie_nat", "mie_color"),
                             std::make_pair("ozone_nat", "ozone_color"), std::make_pair("star_nat", "star_color"),
                             std::make_pair("cloud_nat", "cloud_color"), std::make_pair("fog_nat", "fog_color"),
                             std::make_pair("sunlight_nat", "sunlight_color"), std::make_pair("ambient_nat", "ambient_color"),
                             std::make_pair("body_nat", "body_color") })
-        getChildView(pr.second)->setEnabled(edit && !child<LLCheckBoxCtrl>(this, pr.first)->get());
-    if (planet) getChildView("body_color")->setEnabled(edit);
+        enable(pr.second, edit && !child<LLCheckBoxCtrl>(this, pr.first)->get());
+    if (planet) enable("body_color", edit);
     getChildView("body_lit")->setEnabled(edit && !child<LLCheckBoxCtrl>(this, "body_lit_auto")->get());
-    getChildView("zone_mood_color")->setEnabled(edit && child<LLComboBox>(this, "zone_mood_tint")->getValue().asString() == "custom");
+    enable("zone_mood_color", edit && child<LLComboBox>(this, "zone_mood_tint")->getValue().asString() == "custom");
     // Remove only when there is something stored here; Preview whenever Wolf is on in the draft.
     getChildView("remove")->setEnabled(edit && scopeEntry().isMap());
     mPreviewBtn->setEnabled(mHave && canEdit() && (mPreviewOn || mMode->getSelectedIndex() != 2));
@@ -1191,7 +1211,9 @@ void WolfFloaterEnvironment::onRemoveAsked()
 
 void WolfFloaterEnvironment::onSearch()
 {
-    if (!canEdit() || mBusy) return;   // never over a read in flight (it would be dropped as stale)
+    if (!canEdit() || editLocked()) return;   // never over a read in flight (it would be dropped as stale)
+    // [2026-10-26] over a preview's check: the check is dropped as stale (its serial) and asked again once this is done
+    if (mBusy && mPreviewOn) mPreviewPending = true;
     const std::string q = child<LLLineEditor>(this, "place_search")->getText();
     if (q.size() < 2) { setStatus(getString("str_search_short"), true); return; }
     LLSD body;
@@ -1202,6 +1224,7 @@ void WolfFloaterEnvironment::onSearch()
     const std::string text = llsd_to_json(body);
     const U64 serial = ++mSerial;
     mBusy = true;
+    mBusyKind = "search"; mBusySerial = serial;
     LLCoros::instance().launch("WolfEnvSearch", [h, text, serial]() { postCoro(h, AUTO_ENV_URL, text, "search", serial); });
 }
 
@@ -1212,7 +1235,12 @@ void WolfFloaterEnvironment::onSearch()
 void WolfFloaterEnvironment::post(const std::string& action)
 {
     if (!canEdit()) { setStatus(getString(mScope == "parcel" ? "str_cannot_parcel" : "str_cannot_region"), true); return; }
-    if (mBusy) return;
+    // [WolfViewer 2026-10-26] ticket #241: a preview's check never blocks what the person asks for - a save or a remove goes out
+    // over it, the check's answer is dropped as stale (postCoro: its serial), and the preview is asked again once the window is
+    // free (draw: mPreviewPending). Anything else in flight still blocks.
+    if (editLocked()) return;
+    if (mBusy && action == "check") return;   // one check at a time
+    if (mBusy && mPreviewOn) mPreviewPending = true;
     readControls();
     LLSD body;
     body["action"] = action;
@@ -1222,12 +1250,13 @@ void WolfFloaterEnvironment::post(const std::string& action)
     body["y"] = LLSD::Real(mAtY);
     body["version"] = LLSD::Integer(mVersion);
     if (action != "remove") body["doc"] = mDoc;
+    const U64 serial = ++mSerial;
     mBusy = true;
+    mBusyKind = action; mBusySerial = serial;   // before updateVisibility: it reads editLocked()
     if (action == "save") setStatus(getString("str_saving"), false);
     updateVisibility();
     const LLHandle<LLFloater> h = getHandle();
     const std::string text = llsd_to_json(body);
-    const U64 serial = ++mSerial;
     LLCoros::instance().launch("WolfEnvPost", [h, text, action, serial]() { postCoro(h, API_URL, text, action, serial); });
 }
 
@@ -1262,7 +1291,8 @@ void WolfFloaterEnvironment::postCoro(LLHandle<LLFloater> handle, std::string ur
             LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE", "Could not save the Wolf Environment: " + why));
         return;
     }
-    if (serial != self->mSerial && kind != "save" && kind != "remove") { self->mBusy = false; return; }
+    // [2026-10-26] a superseded check or search: the request that superseded it holds mBusy and clears it (#241)
+    if (serial != self->mSerial && kind != "save" && kind != "remove") { if (serial == self->mBusySerial) self->mBusy = false; return; }
     // 409: changed elsewhere since it was read (wolf_environment.php's version check)
     const bool conflict = !ok && status == LLCore::HttpStatus(HTTP_CONFLICT);
     self->onPostReply(kind, reply, ok, conflict, why);
@@ -1286,6 +1316,9 @@ void WolfFloaterEnvironment::onPostReply(const std::string& kind, const LLSD& re
     }
     if (kind == "check")
     {
+        // [2026-10-26] the editor stays open while a check is out (#241): the preview may have been stopped (Stop preview,
+        // Revert) before the answer came - then nothing is shown
+        if (!mPreviewOn) { updateVisibility(); return; }
         if (!ok)
         {
             mPreviewOn = false;

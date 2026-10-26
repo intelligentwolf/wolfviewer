@@ -108,7 +108,7 @@
     <!-- [FURRY 2026-10-21] an animal standing as a person; placed by layoutWidgets in EKind order -->
     <button follows="left|top" height="150" is_toggle="true" label="" layout="topleft" left="12" name="furry_btn" top="420" width="180"
      image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false"
-     tool_tip="Furry - standing: an animal standing upright as a person - its head, fur and tail on two legs. Name the animal in your description (a wolf if you name none)." />
+     tool_tip="Furry - standing: an animal standing upright as a person - its head, fur and tail on two legs. Name the animal in your description or its name (a teddy bear, a fox, a cat...) - we ask if none is named." />
     <button follows="left|top" height="150" is_toggle="true" label="" layout="topleft" left="12" name="animal_btn" top="420" width="180"
      image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false"
      tool_tip="Furry - four legs: a real animal that walks on all fours. The pictures show it side-on." />

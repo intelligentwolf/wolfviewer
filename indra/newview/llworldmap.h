@@ -124,10 +124,14 @@ public:
     // Accessors
     std::string getName() const { return mName; }
     const std::string getFlagsString() const { return LLViewerRegion::regionFlagsToString(mRegionFlags); }
-    const std::string getAccessString() const { return LLViewerRegion::accessToString((U8)mAccess); }
+    // [ADULT CONTENT 2026-10-26] "Adult Content" and its own icon for an Adult Content region (wolfadultcontent.h) - the
+    // map tooltip, the world map's search list and the region tracker all read these. Defined in llworldmap.cpp.
+    //const std::string getAccessString() const { return LLViewerRegion::accessToString((U8)mAccess); }
+    const std::string getAccessString() const;
     // <FS:Ansariel> Alchemy region tracker
     const std::string getShortAccessString() const { return LLViewerRegion::accessToShortString(static_cast<U8>(mAccess)); }
-    const std::string getAccessIcon() const { return LLViewerRegion::getAccessIcon(static_cast<U8>(mAccess));  }
+    //const std::string getAccessIcon() const { return LLViewerRegion::getAccessIcon(static_cast<U8>(mAccess));  }
+    const std::string getAccessIcon() const;
     // </FS:Ansariel>
 
     const S32 getAgentCount() const;                // Compute the total agents count

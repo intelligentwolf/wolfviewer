@@ -28,6 +28,8 @@
 
 #include "llpanelplaceprofile.h"
 
+#include "wolfadultcontent.h"   // [ADULT CONTENT 2026-10-26/] the maturity line
+
 #include "llavatarnamecache.h"
 #include "llparcel.h"
 #include "message.h"
@@ -316,6 +318,13 @@ void LLPanelPlaceProfile::processParcelInfo(const LLParcelData& parcel_data)
     {
         mMaturityRatingIcon->setValue(icon_r);
         mMaturityRatingText->setText(LLViewerRegion::accessToString(SIM_ACCESS_ADULT));
+        // [ADULT CONTENT 2026-10-26] an Adult Content region (always Adult underneath, PROTOCOL.md §1) shows its own
+        // icon and name (wolfadultcontent.h: the region's own features, else the public list; Wolf Territories only).
+        if (WolfAdultContent::isAdultContentAtGlobal(LLVector3d(parcel_data.global_x, parcel_data.global_y, 0.0)))
+        {
+            mMaturityRatingIcon->setValue(WolfAdultContent::ICON_DARK);
+            mMaturityRatingText->setText(WolfAdultContent::typeName());
+        }
     }
     else if (parcel_data.flags & 0x1)
     {
@@ -402,7 +411,16 @@ void LLPanelPlaceProfile::displaySelectedParcelInfo(LLParcel* parcel,
         mEstateRatingIcon->setValue(icon_pg);
     }
 
-    std::string rating = LLViewerRegion::accessToString(sim_access);
+    //std::string rating = LLViewerRegion::accessToString(sim_access);
+    // [ADULT CONTENT 2026-10-26] "Adult Content" and its icon for an Adult Content region (wolfadultcontent.h)
+    const bool adult_content = WolfAdultContent::isAdultContentRegion(region);
+    if (adult_content)
+    {
+        mParcelRatingIcon->setValue(WolfAdultContent::ICON_DARK);
+        mRegionRatingIcon->setValue(WolfAdultContent::ICON_DARK);
+        mEstateRatingIcon->setValue(WolfAdultContent::ICON_DARK);
+    }
+    std::string rating = WolfAdultContent::accessString(sim_access, adult_content);
     mParcelRatingText->setText(rating);
     mRegionRatingText->setText(rating);
 
@@ -557,7 +575,9 @@ void LLPanelPlaceProfile::displaySelectedParcelInfo(LLParcel* parcel,
         }
     }
 
-    mEstateRatingText->setText(region->getSimAccessString());
+    //mEstateRatingText->setText(region->getSimAccessString());
+    mEstateRatingText->setText(WolfAdultContent::accessString(region->getSimAccess(),
+                                                              WolfAdultContent::isAdultContentRegion(region)));   // [ADULT CONTENT 2026-10-26/]
 
     S32 area;
     S32 claim_price;

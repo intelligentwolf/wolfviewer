@@ -2859,6 +2859,68 @@ Teleport failed.
   <tag>fail</tag>
   </notification>
 
+  <!-- [ADULT CONTENT 2026-10-26] wolfadultcontent.cpp showRefusal: entry to an Adult Content region refused (login,
+       teleport, crossing) or the resident moved off one, region-terrain-work/adult-content/PROTOCOL.md §5. [MESSAGE] is
+       the server's own text (it names the region). Wolf Territories residents only; "Verify my age" opens the age
+       check page (WolfAgeCheckURL). Stays until closed: the resident must be able to read it. -->
+  <notification
+   icon="alertmodal.tga"
+   name="WolfAdultContentRefused"
+   type="alertmodal">
+    <unique/>
+[MESSAGE]
+
+The age check is done once, on wolf-grid.com. General, Moderate and Adult regions don't need it.
+    <tag>fail</tag>
+    <form name="form">
+      <button
+       default="true"
+       index="0"
+       name="Verify"
+       text="Verify my age"/>
+      <button
+       index="1"
+       name="Close"
+       text="Close"/>
+    </form>
+  </notification>
+
+  <!-- [ADULT CONTENT 2026-10-26] W81 Region/Estate > Region > Rating "Adult Content" chosen by someone whose age check is
+       not complete (SimulatorFeatures WolfAgeVerified false). Paul 2026-10-26: whoever sets Adult Content must be verified
+       (the website enforces it too). "Verify my age" opens WolfAgeCheckURL. -->
+  <notification
+   icon="alertmodal.tga"
+   name="WolfAdultContentOwnerVerify"
+   type="alertmodal">
+    <unique/>
+You need to verify your age before you can make this region Adult Content.
+    <form name="form">
+      <button
+       default="true"
+       index="0"
+       name="Verify"
+       text="Verify my age"/>
+      <button
+       index="1"
+       name="Close"
+       text="Close"/>
+    </form>
+  </notification>
+
+  <!-- [ADULT CONTENT 2026-10-26] the hypergrid visitor's refusal (PROTOCOL.md §5). Paul 2026-10-26: visitors have no
+       route, so no verify button. -->
+  <notification
+   icon="alertmodal.tga"
+   name="WolfAdultContentVisitor"
+   type="alertmodal">
+    <unique/>
+[MESSAGE]
+    <tag>fail</tag>
+    <usetemplate
+     name="okbutton"
+     yestext="OK"/>
+  </notification>
+
   <!-- Teleport failure modes not delivered via the generic mechanism
        above (for example, delivered as an AlertMessage on
        region-crossing :( ) - these paths should really be merged

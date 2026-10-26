@@ -426,6 +426,20 @@ void LLDrawPoolWater::renderPostDeferred(S32 pass)
             mSurfSetInterval = surf_set;
             mSurfLength = surf_len;
         }
+        // [OPEN SEA SHORES 2026-10-26] The automatic surf on every open-sea beach (waterV.glsl wolfAutoSurf; Paul
+        // 2026-10-26: shores "should behave MORE like waves"): the sea state's own swell arriving at the coast. Height at
+        // the break 2 x the swell amplitude (the dominant train's crest to trough), deep-water wavelength the dominant
+        // train's (2 / waveFrequency, waterV.glsl w1) but never steeper than the painted surf allows (12 H), sets on the
+        // painted surf's default 90 s. Off with the swell (basic water from up high; Second Life: amp 0).
+        // wolfboatrock.cpp seaNow() same formula.
+        {
+            static LLStaticHashedString s_auto_surf("wolfAutoSurf");
+            const F32 freq = sea_from_region2 ? mSeaState.mFrequency : llmax(0.001f, (F32)wave_scale);
+            const F32 auto_h = 2.f * amp;
+            const F32 auto_len = llmax(llmax(2.f / (freq + 0.001f), 12.f * auto_h), 12.f);
+            const bool auto_on = amp > 0.001f && !mBasicWater && WolfGrid::showsBasicWolfSea();
+            shader->uniform4f(s_auto_surf, auto_h, 90.f, auto_len, auto_on ? 1.f : 0.f);
+        }
         WolfOceanFFT& fft = WolfOceanFFT::instance();
         if (fft.isReady() && WolfGrid::showsBasicWolfSea())   // [WOLF GRID GATE 2026-10-17/] see the update above [BASIC WOLF SEA 2026-10-19/] updated on every OpenSim grid now
         {
@@ -452,6 +466,47 @@ void LLDrawPoolWater::renderPostDeferred(S32 pass)
         shader->uniform1f(s_wake_strength, llclamp((F32)wake_strength, 0.f, WolfWakeField::MAX_STRENGTH));
     }
     // </WolfViewer>
+
+    // [DRY BUILDS 2026-10-26] The waterline clearance field (wolfwaterfield.h WolfWaterClearance) for waterV.glsl's cap.
+    // It is not one of LLShaderMgr's reserved samplers (adding one would rebuild every file that includes llshadermgr.h),
+    // so it takes the first texture unit this program left unassigned (LLGLSLShader::mapUniformTextureChannel hands
+    // units out from 0 up), and the sampler is pointed at it here. Not ready, or no unit free: ready 0, and the shader
+    // draws a flat sea - never a wet one.
+    {
+        static LLStaticHashedString s_clear_field("wolfClearField");
+        static LLStaticHashedString s_clear_level("wolfClearLevel");
+        static LLStaticHashedString s_clear_misc("wolfClearMisc");
+        const WolfWaterClearance& clear = WolfWaterClearance::instance();
+        const S32 unit = shader->mActiveTextureChannels;
+        const bool ready = clear.isReady() && clear.texture() && unit < (S32)LL_NUM_TEXTURE_LAYERS
+                        && shader->getUniformLocation(s_clear_field) >= 0;
+        // The cap levels, then [OPEN SEA SHORES 2026-10-26] the terrain blocks waterF.glsl holds the land with.
+        constexpr S32 BLOCKS = WolfWaterClearance::LEVELS + WolfWaterClearance::TBLOCKS;
+        F32 levels[BLOCKS * 4] = {};
+        if (ready)
+        {
+            shader->uniform1i(s_clear_field, unit);
+            gGL.getTexUnit(unit)->bindManual(LLTexUnit::TT_TEXTURE, clear.texture());
+            for (S32 k = 0; k < WolfWaterClearance::LEVELS; ++k)
+            {
+                const LLVector2 o = clear.levelOriginAgent(k);
+                levels[k * 4 + 0] = o.mV[VX];
+                levels[k * 4 + 1] = o.mV[VY];
+                levels[k * 4 + 2] = WolfWaterClearance::TEXEL_M[k];
+            }
+            for (S32 b = 0; b < WolfWaterClearance::TBLOCKS; ++b)
+            {
+                const LLVector2 o = clear.terrainOriginAgent(b);
+                const S32 k = WolfWaterClearance::LEVELS + b;
+                levels[k * 4 + 0] = o.mV[VX];
+                levels[k * 4 + 1] = o.mV[VY];
+                levels[k * 4 + 2] = WolfWaterClearance::TERRAIN_M[b];
+            }
+        }
+        shader->uniform4fv(s_clear_level, BLOCKS, levels);
+        shader->uniform4f(s_clear_misc, clear.minSourceZ(), ready ? 1.f : 0.f, 0.f, 0.f);
+    }
+    // [DRY BUILDS 2026-10-26/]
 
     static LLStaticHashedString s_exposure("exposure");
     static LLStaticHashedString tonemap_mix("tonemap_mix");

@@ -29,6 +29,8 @@
 #include "wolfsuitcase.h"   // [SUITCASE 2026-10-10/] landmarks into My Suitcase on a hypergrid trip
 #include "llpanellandmarkinfo.h"
 
+#include "wolfadultcontent.h"   // [ADULT CONTENT 2026-10-26/] the maturity line
+
 #include "llcombobox.h"
 #include "lliconctrl.h"
 #include "llinventoryfunctions.h"
@@ -230,6 +232,13 @@ void LLPanelLandmarkInfo::processParcelInfo(const LLParcelData& parcel_data)
     {
         mMaturityRatingIcon->setValue(icon_r);
         mMaturityRatingText->setText(LLViewerRegion::accessToString(SIM_ACCESS_ADULT));
+        // [ADULT CONTENT 2026-10-26] an Adult Content region (always Adult underneath, PROTOCOL.md §1) shows its own
+        // icon and name (wolfadultcontent.h: the region's own features, else the public list; Wolf Territories only).
+        if (WolfAdultContent::isAdultContentAtGlobal(LLVector3d(parcel_data.global_x, parcel_data.global_y, 0.0)))
+        {
+            mMaturityRatingIcon->setValue(WolfAdultContent::ICON_DARK);
+            mMaturityRatingText->setText(WolfAdultContent::typeName());
+        }
     }
     else if (parcel_data.flags & 0x1)
     {

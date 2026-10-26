@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [ADULT CONTENT 2026-10-26] Age Check (wolffloateragecheck.cpp): Wolf World > Age Check...
+     Who and why: a Wolf resident wants to know whether they can enter Adult Content regions and, if not, start the age
+     check in one click. Flow, top to bottom: what the age check is for / your status (and how fresh it is) / the region
+     you're on / Region types (secondary, left) and Verify my age (primary, bottom right).
+     Source: region-terrain-work/adult-content/PROTOCOL.md §3a-§6. -->
+<floater
+ can_close="true"
+ can_minimize="true"
+ can_resize="false"
+ height="262"
+ layout="topleft"
+ name="wolf_age_check"
+ help_topic="wolf_age_check"
+ save_rect="true"
+ single_instance="true"
+ title="Age Check"
+ width="400">
+    <string name="feature_name">Age Check</string>
+    <string name="status_verified">Your age check is complete. You can enter Adult Content regions.</string>
+    <string name="status_not_verified">You haven't completed an age check yet. You need one to enter Adult Content regions.</string>
+    <string name="status_unknown">This region can't tell the viewer your age check status. Your control panel on wolf-grid.com always shows it.</string>
+    <string name="note_this_region">As this region told the viewer when you arrived. A check you complete now shows here after your next teleport or relog.</string>
+    <string name="note_earlier_region">As an earlier region told the viewer this session. A check you complete now shows here after your next teleport or relog.</string>
+    <string name="note_unknown">The control panel shows your status as soon as a check is complete.</string>
+    <string name="verify_label">Verify my age</string>
+    <string name="verify_label_done">My age check</string>
+    <string name="region_line">[REGION]: [TYPE]</string>
+    <string name="region_not_wolf">You aren't on a Wolf Territories region.</string>
+
+    <text follows="left|top" height="46" layout="topleft" left="12" name="intro" top="26" width="376" wrap="true">Adult Content regions are only open to Wolf Territories residents who have completed an age check. General, Moderate and Adult regions don't need one.</text>
+
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="12" name="status_label" top="78" width="376">Your age check</text>
+    <text follows="left|top" height="32" layout="topleft" left="12" name="status_text" top="96" width="376" wrap="true">...</text>
+    <text follows="left|top" height="32" layout="topleft" left="12" name="status_note" top="130" width="376" wrap="true" text_color="LtGray_50">...</text>
+
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="12" name="region_label" top="170" width="376">This region</text>
+    <icon follows="left|top" height="16" layout="topleft" left="12" name="region_icon" top="190" width="18" />
+    <text follows="left|top" height="18" layout="topleft" left="36" name="region_text" top="190" width="352" use_ellipses="true">...</text>
+
+    <button follows="left|bottom" height="23" layout="topleft" left="12" name="region_types_btn" top="228" width="130" label="Region types" tool_tip="What General, Moderate, Adult and Adult Content mean, on wolf-grid.com (opens your browser)" />
+    <button follows="right|bottom" height="23" layout="topleft" left="258" name="verify_btn" top="228" width="130" label="Verify my age" tool_tip="Open the age check on wolf-grid.com in your browser. You'll need to be logged in there." />
+</floater>

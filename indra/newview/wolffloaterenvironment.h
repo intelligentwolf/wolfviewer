@@ -129,6 +129,12 @@ private:
     bool        mDirty = false;
     bool        mWriting = false;
     bool        mBusy = false;
+    /// [WolfViewer 2026-10-26] what holds mBusy: "fetch", "search", "save", "remove" or "check" (the preview's own validation,
+    /// which never locks the editor - ticket #241), and the serial of that request (only it may clear mBusy)
+    std::string mBusyKind;
+    U64         mBusySerial = 0;
+    /** The editor is locked only while a request the person started (a read, a search, a save, a remove) is out. */
+    bool        editLocked() const { return mBusy && mBusyKind != "check"; }
     bool        mPreviewOn = false;
     bool        mPreviewPending = false;
     bool        mPreviewBusy = false;   ///< the region is baking a preview (separate from mBusy, the web)

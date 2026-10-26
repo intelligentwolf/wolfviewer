@@ -76,6 +76,23 @@ uniform mat2 wolfWeatherTurn;      // the turn R without the stretch (wolfWeathe
 uniform vec4 wolfLayerStretched;   // per layer: 1 = read through wolfWeatherRotation (stretched), 0 = through wolfWeatherTurn
 uniform vec2 wolfWeatherOffsetTurned;   // the turned lookup's own offset (wolftkclouds.cpp localWeatherOffsetTurned)
 uniform vec4 wolfLayerTower;       // per layer: 0 = a fixed band (takram); > 0 = convective, 1 - the lowest column top as a share of the depth
+// [WolfViewer 2026-10-26] the curved flow and the upper wind (cloudsCommon.glsl wolfFlowWarp / sampleWeather; wolftkclouds.cpp)
+// wolfLayerStretched is now 0 / 1 / 2: turned / stretched along the 10 m wind (streets) / stretched along the upper wind (cirrus)
+uniform mat2 wolfWeatherRotationUpper;  // the cirrus lookup: S R_upper (R_upper = the upper wind's turn, WolfCloudGenus upperRotationDeg)
+uniform vec2 wolfWeatherOffsetUpper;    // its drift with the upper wind (wolftkclouds.cpp localWeatherOffsetUpper, wrapped 0..1)
+uniform vec2 wolfUpperRepeat;           // [10-26] its own repeat per face: cirrus dimensions (wolfcloudgenus.h CIRRUS_TILE_M), not the EEP cloud_scale
+uniform vec4 wolfFlowDrift;             // the two flow fields' drift in globe uv, wrapped 0..1: xy the streets' (10 m wind), zw the cirrus' (upper wind)
+uniform vec4 wolfFlowState;             // x = time / 6 h wrapped 0..1 (the eddies' evolution), y = the streets' bend, z = the cirrus' bend (0 = straight)
+uniform vec4 wolfLayerFibre;            // per layer 0..1: the fibrous ice detail (wolfcloudgenus.cpp rows)
+uniform vec3 wolfFibreScale;            // the fibre noise per texture unit of the cirrus lookup (x along, y across: whole numbers) and per metre of height (z)
+// [CLOUDS CLEAR OF BUILDS 2026-10-26] the build clearance field (wolfcloudclearance.h; cloudsCommon.glsl wolfBuildClear)
+uniform sampler2D wolfBuildField;       // RGBA16F, 3 levels x 256 rows: R distance to a build, G ground tops, B sky tops, A sky bottoms (agent z)
+uniform vec4 wolfBuildLevel[3];         // per level: the texel grid's corner (agent x, y), the texel (m), unused
+uniform vec4 wolfBuildParams;           // x 1 = on, y the camera region's sea (agent z of height 0), z the highest cleared agent z, w unused
+uniform vec4 wolfLayerBuildFade;        // per layer: 1 = fades round builds, 0 = not (ground fog, wolfcloudgenus.cpp)
+uniform vec2 wolfBuildFade;             // [2026-10-26] x M0: fully clear within this of a build, y W: back to cloud over this (metres; WolfCloudClearance, app_settings/wolf_clouds.xml)
+uniform vec4 wolfLayerRepeat;           // [2026-10-26] per layer: the weather texture's repeat x this (a whole number) for the turned lookup - the genus's cell size (wolf_clouds.xml genera 'repeat')
+uniform vec3 wolfFibreShape;            // the fibre noise's mean, 2 x its standard deviation, and the mean of the clamped normalised noise (y 0 = not measured: no fibres)
 // the ice phase: the forward lobe's asymmetry x this for an ice layer (wolfcloudgenus.h WOLF_ICE_G_SCALE, the viewer
 // and the harness define it from the cited asymmetry parameters); 1 = water everywhere
 #ifndef WOLF_ICE_G_SCALE

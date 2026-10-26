@@ -11360,6 +11360,12 @@ class LLToolsEditLinkedParts : public view_listener_t
 void reload_vertex_shader()
 {
     //THIS WOULD BE AN AWESOME PLACE TO RELOAD SHADERS... just a thought    - DaveP
+    // [WolfViewer 2026-10-26] It now does. Advanced > Rendering > Reload Vertex Shaders rebuilds every program: the .glsl files are
+    // read from disk again (llshadermgr.cpp loadShaderFile: the in-memory object cache there is commented out, and the binary
+    // cache is keyed by a hash of the sources, #wolf_include files included - hashWolfIncludes), and the Wolf sky's cloud table
+    // (app_settings/wolf_clouds.xml) is re-read with them (WolfEnvironmentRender::loadShaders). Paul: "no more whole-viewer
+    // recompiles per sky tweak" - edit a shader or the table, reload, look.
+    LLViewerShaderMgr::instance()->setShaders();
 }
 
 void handle_dump_avatar_local_textures()

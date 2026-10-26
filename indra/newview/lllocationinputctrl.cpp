@@ -72,6 +72,7 @@
 #include "llfloaterreg.h"
 #include "llviewernetwork.h" // <FS/> Access to GridManager
 #include "fsfloaterplacedetails.h"
+#include "wolfadultcontent.h"   // [ADULT CONTENT 2026-10-26/]
 
 #include "llmenuoptionpathfindingrebakenavmesh.h"
 #include "llpathfindingmanager.h"
@@ -1028,6 +1029,15 @@ void LLLocationInputCtrl::refreshMaturityButton()
         // rating_tooltip = LLTrans::getString("LocationCtrlAdultIconTooltip");
         rating_tooltip = mTooltips[eAdult];
         // </FS:ND>
+
+        // [ADULT CONTENT 2026-10-26] its own badge (wolfadultcontent.h, PROTOCOL.md §1/§3); Wolf Territories only.
+        if (WolfAdultContent::isAdultContentRegion(region))
+        {
+            // Not kept in a static: an LLUIImage outliving the UI image list at exit would free a texture after GL.
+            // refreshMaturityButton runs on a location change, not every frame.
+            rating_image = LLUI::getUIImage(WolfAdultContent::ICON_LIGHT);
+            rating_tooltip = LLTrans::getString("LocationCtrlAdultContentIconTooltip");
+        }
 
         break;
 

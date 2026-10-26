@@ -77,6 +77,9 @@ namespace WolfTk
         F32 ice = 0.f;
         F32 absorption = 0.f;
         F32 powder = 1.f;   // [WolfViewer round 16c] x powderExponent (cloudsParameters.glsl wolfLayerPowder): 1 = takram's
+        F32 fibre = 0.f;    // [WolfViewer 2026-10-26] the fibrous ice detail (cloudsParameters.glsl wolfLayerFibre): 0 = none (takram's)
+        F32 buildFade = 1.f;   // [CLOUDS CLEAR OF BUILDS 2026-10-26] 1 = fades round builds (cloudsParameters.glsl wolfLayerBuildFade); 0 = ground fog
+        F32 repeat = 1.f;      // [WolfViewer 2026-10-26] the weather texture's repeat x this for this layer, a whole number (cloudsParameters.glsl wolfLayerRepeat; WolfCloudGenus::GenusRow::repeat)
     };
 
     // Source: packages/clouds/src/CloudLayers.ts:30-181 CloudLayers (always 4 layers)
@@ -151,6 +154,23 @@ namespace WolfTk
         F32        weather_layer_stretched[4] = { 0.f, 0.f, 0.f, 0.f };   // .. [WolfViewer 2026-10-14] for these layers only (1 = stretched;
                                                                           // WolfCloudGenus::Result::layerStretch, cloudsCommon.glsl wolfLayerStretched)
         LLVector2  weather_pivot = LLVector2(0.5f, 0.5f);   // [WolfViewer round 13] the globe uv the turn / stretch are about (cloudsCommon.glsl wolfWeatherPivot)
+        // [WolfViewer 2026-10-26] the cirrus lookup (wolfLayerStretched 2): turned to the upper wind (WolfCloudGenus upperRotationDeg),
+        // stretched by weather_stretch, drifting with that wind (its own offset, as local_weather_velocity for the streets)
+        F32        weather_upper_rotation_deg = 0.f;
+        LLVector2  local_weather_velocity_upper;
+        // [WolfViewer 2026-10-26] the curved flow fields that bend the two stretched lookups (cloudsCommon.glsl wolfFlowWarp): each
+        // carried by its own wind (globe uv per second: x = the 10 m wind for the streets, y = the upper wind for the cirrus) and
+        // scaled by its bend (WolfCloudGenus FLOW_BEND_*; 0 = straight, the lookup as before)
+        LLVector2  flow_velocity_low, flow_velocity_upper;
+        F32        flow_bend_low = 0.f, flow_bend_upper = 0.f;
+        // [CLOUDS CLEAR OF BUILDS 2026-10-26] the build clearance field (wolfcloudclearance.h; cloudsCommon.glsl wolfBuildClear):
+        // its texture (0 = none: the clouds ignore builds), each level's corner (agent x, y) and texel, the camera region's sea
+        // (agent z of the clouds' height 0, as placeOnPlanet) and the highest cleared agent z (top of any build + M0 + W)
+        GLuint     build_tex = 0;
+        F32        build_level[3][3] = { { 0.f, 0.f, 1.f }, { 0.f, 0.f, 1.f }, { 0.f, 0.f, 1.f } };
+        F32        build_sea = 0.f;
+        F32        build_z_limit = -1.0e6f;
+        LLVector2  build_fade = LLVector2(20.f, 50.f);   // [2026-10-26] M0, W metres (WolfCloudClearance, the cloud table; cloudsCommon.glsl wolfBuildFade)
         LLVector3  sky_under_cloud = LLVector3(1.f, 1.f, 1.f);   // the horizontal sky irradiance under the clouds / the
                                                                  // clear sky's, per channel (cloudsF.glsl wolfSkyUnderCloud)
         GLuint     depth_tex = 0;       // the scene depth (GL depth texture, [0,1])

@@ -29,6 +29,9 @@
 #include "llviewerregion.h"
 #include "llworld.h"
 #include "wolfwavezones.h"   // [WAVES 2026-09-07]
+#include "llviewerobject.h"       // [DRY BUILDS 2026-10-26/] WolfWaterClearance::rasterObjects
+#include "llviewerobjectlist.h"
+#include "wolfboatrock.h"
 
 #include <cmath>
 #include <cstring>
@@ -384,8 +387,12 @@ void WolfWaterField::idle()
         {
             reset();
         }
+        WolfWaterClearance::instance().reset();   // [DRY BUILDS 2026-10-26/] no Wolf sea, nothing to keep dry
         return;
     }
+    // [DRY BUILDS 2026-10-26] Before the shore-field switch: the dry-builds guarantee holds with the shore field off too
+    // (waterV.glsl draws no swell at all until this field is ready).
+    WolfWaterClearance::instance().idle();
     static LLCachedControl<bool> enabled(gSavedSettings, "WolfViewerWaterShoreField", true);
     if (!enabled)
     {
@@ -1138,4 +1145,836 @@ void WolfWaterField::bake(LLViewerRegion* regionp, Field& f)
     f.mDepth = mDepthData;
     f.mExpo = mExpoData;
     f.mReady = true;
+}
+
+// =====================================================================================================================
+// [DRY BUILDS 2026-10-26] WolfWaterClearance - see wolfwaterfield.h for the rule, the bounds and their proof.
+// [OPEN SEA SHORES 2026-10-26] + the open-sea classification and the inland-only land sources (Paul: "a fixed edge").
+// =====================================================================================================================
+
+const F32 WolfWaterClearance::TEXEL_M[WolfWaterClearance::LEVELS] = { 1.f, 4.f, 16.f };
+const F32 WolfWaterClearance::TERRAIN_M[WolfWaterClearance::TBLOCKS] = { 1.f, 4.f };
+
+WolfWaterClearance::WolfWaterClearance()
+{
+}
+
+WolfWaterClearance::~WolfWaterClearance()
+{
+    reset();
+}
+
+void WolfWaterClearance::reset()
+{
+    if (mTex)
+    {
+        LLImageGL::deleteTextures(1, &mTex);
+        mTex = 0;
+    }
+    for (S32 k = 0; k < LEVELS; ++k)
+    {
+        mHaveOrigin[k] = false;
+        mLandValid[k] = false;
+        mTerrainStamp[k] = 0;
+        mLand[k].clear();
+        mVoid[k].clear();
+        mOpenDist[k].clear();
+        mOpenW[k].clear();
+        mSrcAll[k].clear();
+        mSrcDry[k].clear();
+        mS[k].clear();
+        mD[k].clear();
+        mSDry[k].clear();
+    }
+    for (S32 b = 0; b < TBLOCKS; ++b)
+    {
+        mHaveTOrigin[b] = false;
+        mTerrValid[b] = false;
+        mTerrStamp[b] = 0;
+        mTerr[b].clear();
+    }
+    mTexAllocated = false;
+    mUpload.clear();
+    mTmp.clear();
+    mReady = false;
+    mObjectsValid = false;
+    mNextObjects = 0.0;
+}
+
+LLVector2 WolfWaterClearance::levelOriginAgent(S32 k) const
+{
+    const LLVector3 a = gAgent.getPosAgentFromGlobal(mOrigin[k]);
+    return LLVector2(a.mV[VX], a.mV[VY]);
+}
+
+LLVector2 WolfWaterClearance::terrainOriginAgent(S32 b) const
+{
+    const LLVector3 a = gAgent.getPosAgentFromGlobal(mTOrigin[b]);
+    return LLVector2(a.mV[VX], a.mV[VY]);
+}
+
+// waterV.glsl wolfPixelHeld, term for term: inside the hull of a terrain block's texel centres by more than the dead
+// zone + HELD_MARGIN_M (so the whole displaced triangle is in it), blended in over HELD_BLEND_M; the best block.
+F32 WolfWaterClearance::pixelHeld(F32 ax, F32 ay, F32 dead) const
+{
+    if (!mReady)
+    {
+        return 0.f;
+    }
+    F32 held = 0.f;
+    for (S32 b = 0; b < TBLOCKS; ++b)
+    {
+        const F32 t = TERRAIN_M[b];
+        const LLVector2 o = terrainOriginAgent(b);
+        const F32 gx = (ax - o.mV[VX]) / t, gy = (ay - o.mV[VY]) / t;
+        const F32 lo = 0.5f, hi = N - 0.5f;
+        const F32 inner = llmin(llmin(gx - lo, gy - lo), llmin(hi - gx, hi - gy)) * t;
+        const F32 u = llclamp((inner - (dead + HELD_MARGIN_M)) / HELD_BLEND_M, 0.f, 1.f);
+        held = llmax(held, u * u * (3.f - 2.f * u));
+    }
+    return held;
+}
+
+// Every live region's terrain revision and water height, folded together: what the terrain raster reads.
+U64 WolfWaterClearance::terrainStamp() const
+{
+    U64 h = 1469598103934665603ULL;
+    auto mix = [&h](U64 v) { h ^= v; h *= 1099511628211ULL; };
+    for (LLViewerRegion* regionp : LLWorld::getInstance()->getRegionList())
+    {
+        if (!regionp || !regionp->isAlive())
+        {
+            continue;
+        }
+        mix(regionp->getHandle());
+        mix(regionp->getLand().getTerrainRevision());
+        U32 wbits = 0;
+        const F32 w = regionp->getWaterHeight();
+        memcpy(&wbits, &w, sizeof(wbits));
+        mix(wbits);
+    }
+    return h;
+}
+
+// The terrain sources of level k, and which texels no region covers (the open ocean). A texel is a source when ANY
+// terrain point inside it is at or above its region's water height: the drawn terrain is triangles between the grid
+// points (llsurfacepatch.cpp), so its highest point over a texel is the highest grid point of the grid cells the texel
+// touches. Whole patches are settled by their own min / max (LLSurfacePatch::updateVerticalStats, refreshed every
+// frame for a changed patch - llsurface.cpp idleUpdate), and the 16 m level takes a patch with any land in it as land
+// throughout - conservative, never less.
+void WolfWaterClearance::rasterTerrain(S32 k)
+{
+    const F32 t = TEXEL_M[k];
+    std::vector<F32>& land = mLand[k];
+    land.assign((size_t)N * N, BIG);
+    mVoid[k].assign((size_t)N * N, 1);
+    const F64 ox = mOrigin[k].mdV[VX], oy = mOrigin[k].mdV[VY];
+    for (LLViewerRegion* regionp : LLWorld::getInstance()->getRegionList())
+    {
+        if (!regionp || !regionp->isAlive())
+        {
+            continue;
+        }
+        const LLSurface& surf = regionp->getLand();
+        const F32 water = regionp->getWaterHeight();
+        const F32 mpg = surf.getMetersPerGrid();
+        const S32 gpp = surf.getGridsPerPatchEdge();
+        const S32 ppe = surf.getPatchesPerEdge();
+        if (mpg <= 0.f || gpp <= 0 || ppe <= 0)
+        {
+            continue;
+        }
+        const F32 patch_m = mpg * gpp;
+        const LLVector3d rg = regionp->getOriginGlobal();
+        // The region's patches that overlap the window.
+        const F64 wx0 = ox - rg.mdV[VX], wy0 = oy - rg.mdV[VY];   // window corner, region metres
+        const F64 wx1 = wx0 + N * t, wy1 = wy0 + N * t;
+        {
+            // Texels this region covers, even in part, are not open ocean.
+            const F64 rw = regionp->getWidth();
+            const S32 vi0 = llmax(0, (S32)floor(-wx0 / t)), vi1 = llmin(N - 1, (S32)ceil((rw - wx0) / t) - 1);
+            const S32 vj0 = llmax(0, (S32)floor(-wy0 / t)), vj1 = llmin(N - 1, (S32)ceil((rw - wy0) / t) - 1);
+            for (S32 tj = vj0; tj <= vj1; ++tj)
+            {
+                for (S32 ti = vi0; ti <= vi1; ++ti)
+                {
+                    mVoid[k][(size_t)tj * N + ti] = 0;
+                }
+            }
+        }
+        const S32 pi0 = llmax(0, (S32)floor(wx0 / patch_m)), pi1 = llmin(ppe - 1, (S32)floor(wx1 / patch_m));
+        const S32 pj0 = llmax(0, (S32)floor(wy0 / patch_m)), pj1 = llmin(ppe - 1, (S32)floor(wy1 / patch_m));
+        for (S32 pj = pj0; pj <= pj1; ++pj)
+        {
+            for (S32 pi = pi0; pi <= pi1; ++pi)
+            {
+                const LLSurfacePatch* patchp = surf.findPatch(pi, pj);
+                if (!patchp || !patchp->getDataZ() || patchp->getMaxZ() < water)
+                {
+                    continue;   // no terrain here yet, or all of it under the water
+                }
+                // The patch's footprint in window texels (region metres -> texels).
+                const F64 px0 = pi * (F64)patch_m, py0 = pj * (F64)patch_m;
+                const S32 ti0 = llmax(0, (S32)floor((px0 - wx0) / t));
+                const S32 ti1 = llmin(N - 1, (S32)ceil((px0 + patch_m - wx0) / t) - 1);
+                const S32 tj0 = llmax(0, (S32)floor((py0 - wy0) / t));
+                const S32 tj1 = llmin(N - 1, (S32)ceil((py0 + patch_m - wy0) / t) - 1);
+                if (ti0 > ti1 || tj0 > tj1)
+                {
+                    continue;
+                }
+                const bool whole = patchp->getMinZ() >= water || t >= patch_m;
+                const F32* z = patchp->getDataZ();
+                const S32 stride = (S32)patchp->getDataStride();
+                for (S32 tj = tj0; tj <= tj1; ++tj)
+                {
+                    for (S32 ti = ti0; ti <= ti1; ++ti)
+                    {
+                        F32& cell = land[(size_t)tj * N + ti];
+                        if (cell <= water)
+                        {
+                            continue;
+                        }
+                        bool is_land = whole;
+                        if (!is_land)
+                        {
+                            // The grid points of every grid cell the texel touches, inside this patch.
+                            const F64 tx0 = wx0 + ti * (F64)t - px0, ty0 = wy0 + tj * (F64)t - py0;
+                            const S32 gi0 = llclamp((S32)floor(tx0 / mpg), 0, gpp), gi1 = llclamp((S32)ceil((tx0 + t) / mpg), 0, gpp);
+                            const S32 gj0 = llclamp((S32)floor(ty0 / mpg), 0, gpp), gj1 = llclamp((S32)ceil((ty0 + t) / mpg), 0, gpp);
+                            for (S32 gj = gj0; gj <= gj1 && !is_land; ++gj)
+                            {
+                                for (S32 gi = gi0; gi <= gi1; ++gi)
+                                {
+                                    if (z[gi + gj * stride] >= water)
+                                    {
+                                        is_land = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        if (is_land)
+                        {
+                            cell = llmin(cell, water);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    mLandValid[k] = true;
+}
+
+// [OPEN SEA SHORES 2026-10-26] Terrain block b for waterF.glsl's per-pixel land rule (wolfwaterfield.h TERRAIN_M): each
+// texel the highest drawn terrain over the 2t square about its centre, i.e. the highest grid point of every grid cell
+// that square touches. Shortcuts that cannot change a decision (waterF.glsl only asks "at or above the water?" and
+// "above the water + the swash band?"): a patch wholly under its water is skipped (-BIG reads as water, as its true
+// height would), and a patch wholly above it gives its own maximum (at or above every point of it).
+void WolfWaterClearance::rasterTerrainMax(S32 b)
+{
+    const F32 t = TERRAIN_M[b];
+    std::vector<F32>& out = mTerr[b];
+    out.assign((size_t)N * N, -BIG);
+    const F64 ox = mTOrigin[b].mdV[VX], oy = mTOrigin[b].mdV[VY];
+    for (LLViewerRegion* regionp : LLWorld::getInstance()->getRegionList())
+    {
+        if (!regionp || !regionp->isAlive())
+        {
+            continue;
+        }
+        const LLSurface& surf = regionp->getLand();
+        const F32 water = regionp->getWaterHeight();
+        const F32 mpg = surf.getMetersPerGrid();
+        const S32 gpp = surf.getGridsPerPatchEdge();
+        const S32 ppe = surf.getPatchesPerEdge();
+        if (mpg <= 0.f || gpp <= 0 || ppe <= 0)
+        {
+            continue;
+        }
+        const F32 patch_m = mpg * gpp;
+        const LLVector3d rg = regionp->getOriginGlobal();
+        const F64 wx0 = ox - rg.mdV[VX], wy0 = oy - rg.mdV[VY];   // block corner, region metres
+        // texel i's square is [wx0 + i t - t/2, wx0 + i t + 3t/2] (centre wx0 + (i + 0.5) t, half-side t)
+        const S32 pi0 = llmax(0, (S32)floor((wx0 - t) / patch_m)), pi1 = llmin(ppe - 1, (S32)floor((wx0 + (N + 1) * t) / patch_m));
+        const S32 pj0 = llmax(0, (S32)floor((wy0 - t) / patch_m)), pj1 = llmin(ppe - 1, (S32)floor((wy0 + (N + 1) * t) / patch_m));
+        for (S32 pj = pj0; pj <= pj1; ++pj)
+        {
+            for (S32 pi = pi0; pi <= pi1; ++pi)
+            {
+                const LLSurfacePatch* patchp = surf.findPatch(pi, pj);
+                if (!patchp || !patchp->getDataZ() || patchp->getMaxZ() < water)
+                {
+                    continue;
+                }
+                const F64 px0 = pi * (F64)patch_m, py0 = pj * (F64)patch_m;
+                // texels whose square overlaps the patch: wx0 + i t - t/2 <= px0 + patch_m and wx0 + i t + 3t/2 >= px0
+                const S32 ti0 = llmax(0, (S32)ceil((px0 - wx0 - 1.5 * t) / t)), ti1 = llmin(N - 1, (S32)floor((px0 + patch_m - wx0 + 0.5 * t) / t));
+                const S32 tj0 = llmax(0, (S32)ceil((py0 - wy0 - 1.5 * t) / t)), tj1 = llmin(N - 1, (S32)floor((py0 + patch_m - wy0 + 0.5 * t) / t));
+                if (ti0 > ti1 || tj0 > tj1)
+                {
+                    continue;
+                }
+                const bool whole = patchp->getMinZ() >= water;
+                const F32 pmax = patchp->getMaxZ();
+                const F32* z = patchp->getDataZ();
+                const S32 stride = (S32)patchp->getDataStride();
+                for (S32 tj = tj0; tj <= tj1; ++tj)
+                {
+                    for (S32 ti = ti0; ti <= ti1; ++ti)
+                    {
+                        F32& cell = out[(size_t)tj * N + ti];
+                        if (whole)
+                        {
+                            cell = llmax(cell, pmax);
+                            continue;
+                        }
+                        const F64 sx0 = wx0 + ti * (F64)t - 0.5 * t - px0, sy0 = wy0 + tj * (F64)t - 0.5 * t - py0;
+                        const S32 gi0 = llclamp((S32)floor(sx0 / mpg), 0, gpp), gi1 = llclamp((S32)ceil((sx0 + 2.0 * t) / mpg), 0, gpp);
+                        const S32 gj0 = llclamp((S32)floor(sy0 / mpg), 0, gpp), gj1 = llclamp((S32)ceil((sy0 + 2.0 * t) / mpg), 0, gpp);
+                        F32 m = cell;
+                        for (S32 gj = gj0; gj <= gj1; ++gj)
+                        {
+                            for (S32 gi = gi0; gi <= gi1; ++gi)
+                            {
+                                m = llmax(m, z[gi + gj * stride]);
+                            }
+                        }
+                        cell = m;
+                    }
+                }
+            }
+        }
+    }
+    mTerrValid[b] = true;
+}
+
+// [OPEN SEA SHORES 2026-10-26] Which water is the open sea, level k (call coarsest first). Paul: "on the outer edge of
+// the region NOT RIVERS INSIDE or LAKES INSIDE". The THROUGH-WATER distance from the open sea - land texels neither
+// carry it nor pass it on, so a lake has none and a river grows it with every metre upstream - seeded on the open
+// ocean (no region), the coarsest window's edge, water OPEN_FETCH_M or more from land, and, on the finer levels, the
+// coarser level's own answer wherever that level's texel is water through and through (its land test is conservative).
+// Then the weight 1 - smoothstep(OPEN_NEAR_M, OPEN_FAR_M, distance), carried OPEN_ONTO_LAND_M onto the land beside it
+// (the beach the swash runs up), and a 3 x 3 blur so nothing switches at a texel edge.
+void WolfWaterClearance::classifyOpen(S32 k)
+{
+    const F32 t = TEXEL_M[k];
+    const size_t NN = (size_t)N * N;
+    const std::vector<F32>& land = mLand[k];
+    const F32 a = t, b = t * F_SQRT2;
+    // Distance to land (for the fetch seeds), plain chamfer.
+    std::vector<F32>& dl = mTmp;
+    dl.assign(NN, BIG);
+    for (size_t i = 0; i < NN; ++i) if (land[i] < BIG) dl[i] = 0.f;
+    auto sweep = [&](std::vector<F32>& d, bool water_only)
+    {
+        auto relax = [&](size_t i, size_t j, F32 w)
+        {
+            if (water_only && (land[i] < BIG || land[j] < BIG)) return;
+            const F32 v = d[j] + w;
+            if (v < d[i]) d[i] = v;
+        };
+        for (S32 y = 0; y < N; ++y)
+        {
+            for (S32 x = 0; x < N; ++x)
+            {
+                const size_t i = (size_t)y * N + x;
+                if (x > 0) relax(i, i - 1, a);
+                if (y > 0)
+                {
+                    relax(i, i - N, a);
+                    if (x > 0) relax(i, i - N - 1, b);
+                    if (x < N - 1) relax(i, i - N + 1, b);
+                }
+            }
+        }
+        for (S32 y = N - 1; y >= 0; --y)
+        {
+            for (S32 x = N - 1; x >= 0; --x)
+            {
+                const size_t i = (size_t)y * N + x;
+                if (x < N - 1) relax(i, i + 1, a);
+                if (y < N - 1)
+                {
+                    relax(i, i + N, a);
+                    if (x < N - 1) relax(i, i + N + 1, b);
+                    if (x > 0) relax(i, i + N - 1, b);
+                }
+            }
+        }
+    };
+    sweep(dl, false);
+
+    std::vector<F32>& od = mOpenDist[k];
+    od.assign(NN, BIG);
+    const bool coarsest = (k == LEVELS - 1);
+    const F64 ox = mOrigin[k].mdV[VX], oy = mOrigin[k].mdV[VY];
+    for (S32 y = 0; y < N; ++y)
+    {
+        for (S32 x = 0; x < N; ++x)
+        {
+            const size_t i = (size_t)y * N + x;
+            if (land[i] < BIG)
+            {
+                continue;
+            }
+            if (mVoid[k][i] || dl[i] >= OPEN_FETCH_M
+                || (coarsest && (x == 0 || y == 0 || x == N - 1 || y == N - 1)))
+            {
+                od[i] = 0.f;
+                continue;
+            }
+            if (!coarsest && !mOpenDist[k + 1].empty())
+            {
+                // The coarser level's texel holding this texel's centre.
+                const F32 tc = TEXEL_M[k + 1];
+                const S32 cx = (S32)floor((ox + (x + 0.5) * t - mOrigin[k + 1].mdV[VX]) / tc);
+                const S32 cy = (S32)floor((oy + (y + 0.5) * t - mOrigin[k + 1].mdV[VY]) / tc);
+                if (cx >= 0 && cy >= 0 && cx < N && cy < N)
+                {
+                    const size_t c = (size_t)cy * N + cx;
+                    if (mLand[k + 1][c] >= BIG && mOpenDist[k + 1][c] < BIG)
+                    {
+                        od[i] = mOpenDist[k + 1][c];
+                    }
+                }
+            }
+        }
+    }
+    sweep(od, true);
+
+    std::vector<F32>& w = mOpenW[k];
+    w.assign(NN, 0.f);
+    for (size_t i = 0; i < NN; ++i)
+    {
+        if (land[i] >= BIG && od[i] < BIG)
+        {
+            const F32 u = llclamp((od[i] - OPEN_NEAR_M) / (OPEN_FAR_M - OPEN_NEAR_M), 0.f, 1.f);
+            w[i] = 1.f - u * u * (3.f - 2.f * u);
+        }
+    }
+    // Onto the land beside it: land texels take the largest weight within OPEN_ONTO_LAND_M (3 x 3 dilations).
+    const S32 rings = llmax(1, (S32)ceilf(OPEN_ONTO_LAND_M / t));
+    std::vector<F32> next;
+    for (S32 r = 0; r < rings; ++r)
+    {
+        next = w;
+        for (S32 y = 0; y < N; ++y)
+        {
+            for (S32 x = 0; x < N; ++x)
+            {
+                const size_t i = (size_t)y * N + x;
+                if (land[i] >= BIG) continue;
+                F32 m = next[i];
+                for (S32 dy = -1; dy <= 1; ++dy)
+                {
+                    const S32 yy = y + dy; if (yy < 0 || yy >= N) continue;
+                    for (S32 dx = -1; dx <= 1; ++dx)
+                    {
+                        const S32 xx = x + dx; if (xx < 0 || xx >= N) continue;
+                        m = llmax(m, w[(size_t)yy * N + xx]);
+                    }
+                }
+                next[i] = m;
+            }
+        }
+        w.swap(next);
+    }
+    // 3 x 3 box blur.
+    next = w;
+    for (S32 y = 0; y < N; ++y)
+    {
+        for (S32 x = 0; x < N; ++x)
+        {
+            F32 acc = 0.f; S32 n = 0;
+            for (S32 dy = -1; dy <= 1; ++dy)
+            {
+                const S32 yy = y + dy; if (yy < 0 || yy >= N) continue;
+                for (S32 dx = -1; dx <= 1; ++dx)
+                {
+                    const S32 xx = x + dx; if (xx < 0 || xx >= N) continue;
+                    acc += w[(size_t)yy * N + xx]; ++n;
+                }
+            }
+            next[(size_t)y * N + x] = acc / n;
+        }
+    }
+    w.swap(next);
+}
+
+// The prim sources, every level at once: each prim's box (scale, render rotation) as an agent-space AABB, a source
+// where it reaches the waterline band. Its cap is its lowest point if it stands clear of the water, its highest if it
+// pierces it - water may lap a hull or a post up to its top, but never rise over a deck. Not sources: avatars and
+// what they wear, anything moving faster than MOVING_MPS (a vehicle under way rides its own wake), and the hulls the
+// boat rocker is floating (wolfboatrock.cpp) - they ride the waves, the waves do not stop at them.
+// Then the two source sets: every land texel (S_all), and only the land beside INLAND water (S_dry) - an open-sea
+// beach is held per pixel in waterF.glsl instead, so its waves can run up it.
+void WolfWaterClearance::rasterObjects()
+{
+    for (S32 k = 0; k < LEVELS; ++k)
+    {
+        mSrcAll[k] = mLand[k];
+        mSrcDry[k] = mLand[k];
+        const size_t NN = (size_t)N * N;
+        for (size_t i = 0; i < NN; ++i)
+        {
+            if (mSrcDry[k][i] < BIG && mOpenW[k][i] >= 0.5f)
+            {
+                mSrcDry[k][i] = BIG;
+            }
+        }
+    }
+    const LLVector3d agent_origin = gAgent.getPosGlobalFromAgent(LLVector3::zero);
+    const WolfBoatRock& rocker = WolfBoatRock::instance();
+    const S32 count = gObjectList.getNumObjects();
+    for (S32 i = 0; i < count; ++i)
+    {
+        LLViewerObject* o = gObjectList.getObject(i);
+        if (!o || o->isDead() || o->getPCode() != LL_PCODE_VOLUME || o->isAvatar()
+            || o->isAttachment() || o->isHUDAttachment() || !o->getRegion())
+        {
+            continue;
+        }
+        LLViewerObject* root = o->getRootEdit();
+        if (!root || root->isAvatar() || root->isAttachment() || root->isHUDAttachment())
+        {
+            continue;   // a prim worn or sat on by an avatar
+        }
+        if (root->getVelocity().lengthSquared() > MOVING_MPS * MOVING_MPS || rocker.isRocking(root))
+        {
+            continue;
+        }
+        const F32 water = o->getRegion()->getWaterHeight();
+        const LLVector3 c = o->getPositionAgent();
+        const LLVector3 half = o->getScale() * 0.5f;
+        const LLQuaternion rot = o->getRotationRegion();
+        LLVector3 lo(BIG, BIG, BIG), hi(-BIG, -BIG, -BIG);
+        for (S32 n = 0; n < 8; ++n)
+        {
+            const LLVector3 corner((n & 1) ? half.mV[VX] : -half.mV[VX],
+                                   (n & 2) ? half.mV[VY] : -half.mV[VY],
+                                   (n & 4) ? half.mV[VZ] : -half.mV[VZ]);
+            const LLVector3 p = c + corner * rot;
+            lo.set(llmin(lo.mV[VX], p.mV[VX]), llmin(lo.mV[VY], p.mV[VY]), llmin(lo.mV[VZ], p.mV[VZ]));
+            hi.set(llmax(hi.mV[VX], p.mV[VX]), llmax(hi.mV[VY], p.mV[VY]), llmax(hi.mV[VZ], p.mV[VZ]));
+        }
+        if (hi.mV[VZ] < water || lo.mV[VZ] > water + BAND_M)
+        {
+            continue;   // under the water, or far above any crest
+        }
+        const F32 cap = lo.mV[VZ] >= water ? lo.mV[VZ] : hi.mV[VZ];
+        for (S32 k = 0; k < LEVELS; ++k)
+        {
+            const F32 t = TEXEL_M[k];
+            const F64 ox = mOrigin[k].mdV[VX] - agent_origin.mdV[VX], oy = mOrigin[k].mdV[VY] - agent_origin.mdV[VY];
+            const S32 ti0 = llmax(0, (S32)floor((lo.mV[VX] - ox) / t)), ti1 = llmin(N - 1, (S32)floor((hi.mV[VX] - ox) / t));
+            const S32 tj0 = llmax(0, (S32)floor((lo.mV[VY] - oy) / t)), tj1 = llmin(N - 1, (S32)floor((hi.mV[VY] - oy) / t));
+            for (S32 tj = tj0; tj <= tj1; ++tj)
+            {
+                for (S32 ti = ti0; ti <= ti1; ++ti)
+                {
+                    const size_t idx = (size_t)tj * N + ti;
+                    mSrcAll[k][idx] = llmin(mSrcAll[k][idx], cap);
+                    mSrcDry[k][idx] = llmin(mSrcDry[k][idx], cap);
+                }
+            }
+        }
+    }
+    mObjectsValid = true;
+}
+
+// Two-pass weighted chamfer of S (and D when asked), then the margins folded in (wolfwaterfield.h).
+void WolfWaterClearance::solve(S32 k, const std::vector<F32>& src, std::vector<F32>& S, std::vector<F32>* D)
+{
+    const F32 t = TEXEL_M[k];
+    const F32 a = t / CHAMFER, b = t * F_SQRT2 / CHAMFER;
+    const size_t NN = (size_t)N * N;
+    S.resize(NN);
+    if (D) D->resize(NN);
+    for (size_t i = 0; i < NN; ++i)
+    {
+        S[i] = src[i];
+        if (D) (*D)[i] = src[i] < BIG ? 0.f : BIG;
+    }
+    auto relax = [&](size_t i, size_t j, F32 w)
+    {
+        const F32 s = S[j] + ALPHA * w;
+        if (s < S[i]) S[i] = s;
+        if (D)
+        {
+            const F32 d = (*D)[j] + w;
+            if (d < (*D)[i]) (*D)[i] = d;
+        }
+    };
+    for (S32 y = 0; y < N; ++y)
+    {
+        for (S32 x = 0; x < N; ++x)
+        {
+            const size_t i = (size_t)y * N + x;
+            if (x > 0) relax(i, i - 1, a);
+            if (y > 0)
+            {
+                relax(i, i - N, a);
+                if (x > 0) relax(i, i - N - 1, b);
+                if (x < N - 1) relax(i, i - N + 1, b);
+            }
+        }
+    }
+    for (S32 y = N - 1; y >= 0; --y)
+    {
+        for (S32 x = N - 1; x >= 0; --x)
+        {
+            const size_t i = (size_t)y * N + x;
+            if (x < N - 1) relax(i, i + 1, a);
+            if (y < N - 1)
+            {
+                relax(i, i + N, a);
+                if (x < N - 1) relax(i, i + N + 1, b);
+                if (x > 0) relax(i, i + N - 1, b);
+            }
+        }
+    }
+    const F32 e = 1.5f * F_SQRT2 * t;
+    for (size_t i = 0; i < NN; ++i)
+    {
+        S[i] = S[i] < BIG * 0.5f ? S[i] - ALPHA * e : BIG;
+        if (D) (*D)[i] = (*D)[i] < BIG * 0.5f ? llmax((*D)[i] - e, 0.f) : BIG;
+    }
+}
+
+// The texture: ROWS x N RGBA32F. Rows k*N.. the cap levels (R S_all, G D, B S_dry, A open weight), then the terrain
+// blocks (R the highest terrain, the rest 0). Allocated once, then updated a block at a time: the caps every second, the
+// terrain only when it changed. waterV.glsl / waterF.glsl wolfClearSample and the terrain read.
+void WolfWaterClearance::uploadRows(S32 row0, S32 rows, const F32* data)
+{
+    if (!mTex)
+    {
+        LLImageGL::generateTextures(1, &mTex);
+        mTexAllocated = false;
+    }
+    gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE, mTex);
+    if (!mTexAllocated)
+    {
+        std::vector<F32> zero((size_t)N * ROWS * 4, 0.f);
+        LLImageGL::setManualImage(LLTexUnit::getInternalType(LLTexUnit::TT_TEXTURE), 0, GL_RGBA32F,
+                                  N, ROWS, GL_RGBA, GL_FLOAT, zero.data(), false);
+        gGL.getTexUnit(0)->setTextureFilteringOption(LLTexUnit::TFO_BILINEAR);
+        gGL.getTexUnit(0)->setTextureAddressMode(LLTexUnit::TAM_CLAMP);
+        mTexAllocated = true;
+    }
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, row0, N, rows, GL_RGBA, GL_FLOAT, data);
+    gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
+}
+
+void WolfWaterClearance::uploadLevels()
+{
+    mUpload.resize((size_t)N * N * LEVELS * 4);
+    for (S32 k = 0; k < LEVELS; ++k)
+    {
+        F32* dst = &mUpload[(size_t)k * N * N * 4];
+        for (size_t i = 0; i < (size_t)N * N; ++i)
+        {
+            dst[i * 4] = mS[k][i];
+            dst[i * 4 + 1] = mD[k][i];
+            dst[i * 4 + 2] = mSDry[k][i];
+            dst[i * 4 + 3] = mOpenW[k][i];
+        }
+    }
+    uploadRows(0, N * LEVELS, mUpload.data());
+}
+
+void WolfWaterClearance::uploadTerrain(S32 b)
+{
+    std::vector<F32> buf((size_t)N * N * 4, 0.f);
+    for (size_t i = 0; i < (size_t)N * N; ++i)
+    {
+        buf[i * 4] = mTerr[b][i];
+    }
+    uploadRows((LEVELS + b) * N, N, buf.data());
+}
+
+void WolfWaterClearance::idle()
+{
+    LL_PROFILE_ZONE_SCOPED;
+    LLWorld* world = LLWorld::getInstance();
+    if (!world || !gAgent.getRegion())
+    {
+        return;
+    }
+    const F64 now = LLFrameTimer::getElapsedSeconds();
+    const LLVector3d cam = gAgent.getPosGlobalFromAgent(LLViewerCamera::getInstance()->getOrigin());
+    F32 min_z = BIG;
+    for (LLViewerRegion* regionp : world->getRegionList())
+    {
+        if (regionp && regionp->isAlive())
+        {
+            min_z = llmin(min_z, regionp->getWaterHeight());
+        }
+    }
+    mMinZ = min_z < BIG ? min_z : gAgent.getRegion()->getWaterHeight();
+
+    const U64 stamp = terrainStamp();
+    bool changed = false;
+    // Coarsest first: each level's open-sea classification starts from the coarser one's.
+    for (S32 k = LEVELS - 1; k >= 0; --k)
+    {
+        const F64 t = TEXEL_M[k];
+        const F64 half = N * t * 0.5;
+        // Recentre when the camera is an eighth of the window from its centre; the corner snaps to the texel grid,
+        // so the texels a recentre keeps hold exactly the values they had.
+        const bool far_off = !mHaveOrigin[k]
+            || fabs(cam.mdV[VX] - (mOrigin[k].mdV[VX] + half)) > half * 0.25
+            || fabs(cam.mdV[VY] - (mOrigin[k].mdV[VY] + half)) > half * 0.25;
+        if (far_off)
+        {
+            mOrigin[k].mdV[VX] = floor((cam.mdV[VX] - half) / t) * t;
+            mOrigin[k].mdV[VY] = floor((cam.mdV[VY] - half) / t) * t;
+            mOrigin[k].mdV[VZ] = 0.0;
+            mHaveOrigin[k] = true;
+            mLandValid[k] = false;
+        }
+        // A coarser level that changed re-classifies this one too.
+        if (!mLandValid[k] || changed || (stamp != mTerrainStamp[k] && now >= mTerrainAt[k]))
+        {
+            rasterTerrain(k);
+            classifyOpen(k);
+            mTerrainStamp[k] = stamp;
+            mTerrainAt[k] = now + TERRAIN_INTERVAL_SECS;
+            changed = true;
+        }
+    }
+    if (changed || !mObjectsValid || now >= mNextObjects)
+    {
+        rasterObjects();
+        mNextObjects = now + OBJECT_INTERVAL_SECS;
+        for (S32 k = 0; k < LEVELS; ++k)
+        {
+            solve(k, mSrcAll[k], mS[k], &mD[k]);
+            solve(k, mSrcDry[k], mSDry[k], nullptr);
+        }
+        uploadLevels();
+    }
+    // [OPEN SEA SHORES 2026-10-26] The terrain blocks: recentred like the levels, re-rastered when the terrain changes.
+    bool terrain_uploaded = true;
+    for (S32 b = 0; b < TBLOCKS; ++b)
+    {
+        const F64 t = TERRAIN_M[b];
+        const F64 half = N * t * 0.5;
+        const bool far_off = !mHaveTOrigin[b]
+            || fabs(cam.mdV[VX] - (mTOrigin[b].mdV[VX] + half)) > half * 0.25
+            || fabs(cam.mdV[VY] - (mTOrigin[b].mdV[VY] + half)) > half * 0.25;
+        if (far_off)
+        {
+            mTOrigin[b].mdV[VX] = floor((cam.mdV[VX] - half) / t) * t;
+            mTOrigin[b].mdV[VY] = floor((cam.mdV[VY] - half) / t) * t;
+            mTOrigin[b].mdV[VZ] = 0.0;
+            mHaveTOrigin[b] = true;
+            mTerrValid[b] = false;
+        }
+        if (!mTerrValid[b] || (stamp != mTerrStamp[b] && now >= mTerrAt[b]))
+        {
+            rasterTerrainMax(b);
+            mTerrStamp[b] = stamp;
+            mTerrAt[b] = now + TERRAIN_INTERVAL_SECS;
+            if (mTex && mTexAllocated)
+            {
+                uploadTerrain(b);
+            }
+            else
+            {
+                terrain_uploaded = false;
+            }
+        }
+    }
+    if (mTex && mTexAllocated)
+    {
+        if (!terrain_uploaded)
+        {
+            for (S32 b = 0; b < TBLOCKS; ++b) uploadTerrain(b);
+        }
+        mReady = true;
+    }
+}
+
+// waterV.glsl wolfClearSample(), term for term.
+bool WolfWaterClearance::sample(F32 ax, F32 ay, Sample& out) const
+{
+    out = Sample();
+    if (!mReady)
+    {
+        return false;
+    }
+    bool any = false;
+    for (S32 k = LEVELS - 1; k >= 0; --k)
+    {
+        const F32 t = TEXEL_M[k];
+        const LLVector2 o = levelOriginAgent(k);
+        const F32 gx = (ax - o.mV[VX]) / t, gy = (ay - o.mV[VY]) / t;   // texel units, centres at i + 0.5
+        const F32 lo = 0.5f, hi = N - 0.5f;
+        if (gx < lo || gy < lo || gx > hi || gy > hi)
+        {
+            continue;
+        }
+        const F32 d_edge = llmin(llmin(gx - lo, gy - lo), llmin(hi - gx, hi - gy)) * t;
+        // Bilinear, as the GPU filters it.
+        const F32 fx = gx - 0.5f, fy = gy - 0.5f;
+        const S32 x0 = llclamp((S32)floorf(fx), 0, N - 1), y0 = llclamp((S32)floorf(fy), 0, N - 1);
+        const S32 x1 = llmin(x0 + 1, N - 1), y1 = llmin(y0 + 1, N - 1);
+        const F32 u = llclamp(fx - x0, 0.f, 1.f), v = llclamp(fy - y0, 0.f, 1.f);
+        auto bil = [&](const std::vector<F32>& g)
+        {
+            const F32 a0 = g[(size_t)y0 * N + x0] * (1.f - u) + g[(size_t)y0 * N + x1] * u;
+            const F32 a1 = g[(size_t)y1 * N + x0] * (1.f - u) + g[(size_t)y1 * N + x1] * u;
+            return a0 * (1.f - v) + a1 * v;
+        };
+        const F32 outside = mMinZ + ALPHA * d_edge;
+        out.mSAll = llmax(out.mSAll, llmin(bil(mS[k]), outside));
+        out.mD = llmax(out.mD, llmin(bil(mD[k]), d_edge));
+        out.mSDry = llmax(out.mSDry, llmin(bil(mSDry[k]), outside));
+        // The finest level holding the point, faded in over 32 m from its edge.
+        const F32 fade = llclamp(d_edge / 32.f, 0.f, 1.f);
+        out.mOpen = out.mOpen + (bil(mOpenW[k]) - out.mOpen) * (fade * fade * (3.f - 2.f * fade));
+        any = true;
+    }
+    return any;
+}
+
+F32 WolfWaterClearance::latticeStepAt(F32 ax, F32 ay)
+{
+    const LLVector3 cam = LLViewerCamera::getInstance()->getOrigin();
+    const F32 sx = llclamp(fabsf(ax - cam.mV[VX]) * 0.04f, 2.f, 128.f);
+    const F32 sy = llclamp(fabsf(ay - cam.mV[VY]) * 0.04f, 2.f, 128.f);
+    return llmax(sx, sy);
+}
+
+// waterV.glsl wolfSoftCap.
+F32 WolfWaterClearance::softCap(F32 dz, F32 up, F32 calm_ref)
+{
+    if (dz >= 0.f)
+    {
+        return tanhCap(dz, up);
+    }
+    const F32 g = llclamp(up / llmax(calm_ref, 0.01f), 0.f, 1.f);
+    return dz * (TROUGH_KEEP + (1.f - TROUGH_KEEP) * g);
+}
+
+// waterV.glsl `up` (the [DRY BUILDS] cap), with the lattice step taken about the camera and the camera guard.
+F32 WolfWaterClearance::upwardRoom(F32 ax, F32 ay, F32 plane_z, F32 pixel_held) const
+{
+    Sample cs;
+    if (!sample(ax, ay, cs))
+    {
+        return -BIG;
+    }
+    const F32 dead = deadZone(latticeStepAt(ax, ay));
+    const F32 up_all = cs.mSAll - ALPHA * dead - plane_z;
+    const F32 up_dry = cs.mSDry - ALPHA * dead - plane_z;
+    F32 up = up_all + (up_dry - up_all) * llclamp(pixel_held, 0.f, 1.f);
+    const LLVector3 cam = LLViewerCamera::getInstance()->getOrigin();
+    if (cam.mV[VZ] > plane_z)
+    {
+        const F32 dx = ax - cam.mV[VX], dy = ay - cam.mV[VY];
+        up = llmin(up, cam.mV[VZ] - EYE_CLEAR_M - plane_z + ALPHA * (sqrtf(dx * dx + dy * dy) - dead));
+    }
+    return up;
 }

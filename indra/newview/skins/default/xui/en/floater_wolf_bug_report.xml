@@ -9,32 +9,40 @@
  can_close="true"
  can_minimize="true"
  can_resize="false"
- height="486"
+ height="524"
  layout="topleft"
  name="wolf_bug_report"
  help_topic="wolf_bug_report"
  save_rect="true"
  single_instance="true"
- title="Report a Problem"
+ title="Flea Report: found something broken, or got an idea?"
  width="460">
-    <text follows="left|top" height="44" layout="topleft" left="12" name="intro" top="26" width="436" wrap="true">Tell the Wolf Territories support team what went wrong. This opens a support ticket on wolf-grid.com; we reply there and by email to the address on your account.</text>
+    <!-- [FLEA REPORT 2026-10-26] Paul: "change bug reports to flea reports! lets have some fun", and a flea report is also
+         for new features and ideas. Text only; names unchanged. The choice below switches the form (wolffloaterbugreport.cpp
+         applyKind): "Something's broken" = pick a category, logs on; "I have an idea" = category "idea", logs off. -->
+    <text follows="left|top" height="58" layout="topleft" left="12" name="intro" top="26" width="436" wrap="true">Found a flea, or got an idea? Wolves get fleas, and so do viewers. Tell the support team what went wrong, or what you would like, and we will pick it off. This opens a support ticket on wolf-grid.com; we reply there and by email.</text>
 
-    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="12" name="category_label" top="76" width="436">What is it about?</text>
-    <combo_box follows="left|top" height="22" layout="topleft" left="12" name="category" top="94" width="436" tool_tip="Pick the closest one; the support team can change it." />
+    <radio_group follows="left|top" height="20" layout="topleft" left="12" name="kind" top="88" width="436" draw_border="false">
+        <radio_item type="string" follows="left|top" height="20" layout="topleft" left="0" top="0" width="180" label="Something's broken" name="kind_broken" />
+        <radio_item type="string" follows="left|top" height="20" layout="topleft" left="200" top="0" width="180" label="I have an idea" name="kind_idea" />
+    </radio_group>
 
-    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="12" name="subject_label" top="124" width="436">Subject</text>
-    <line_editor follows="left|top" height="22" layout="topleft" left="12" max_length_bytes="200" name="subject" top="142" width="436" label="For example: the viewer froze when I teleported" />
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="12" name="category_label" top="114" width="436">What is it about?</text>
+    <combo_box follows="left|top" height="22" layout="topleft" left="12" name="category" top="132" width="436" tool_tip="Pick the closest one; the support team can change it." />
 
-    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="12" name="body_label" top="172" width="436">What happened?</text>
-    <text_editor follows="left|top" height="110" layout="topleft" left="12" max_length="20000" name="body" top="190" width="436" word_wrap="true" commit_on_focus_lost="false" />
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="12" name="subject_label" top="162" width="436">Subject</text>
+    <line_editor follows="left|top" height="22" layout="topleft" left="12" max_length_bytes="200" name="subject" top="180" width="436" label="For example: the viewer froze when I teleported" />
 
-    <check_box follows="left|top" height="18" layout="topleft" left="12" name="attach_logs" top="308" width="436" initial_value="true"
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="12" name="body_label" top="210" width="436">What happened?</text>
+    <text_editor follows="left|top" height="110" layout="topleft" left="12" max_length="20000" name="body" top="228" width="436" word_wrap="true" commit_on_focus_lost="false" />
+
+    <check_box follows="left|top" height="18" layout="topleft" left="12" name="attach_logs" top="346" width="436" initial_value="true"
      label="Attach my viewer logs" tool_tip="Helps us see what the viewer was doing. Session ids and capability links are taken out first, and only the support team can open them." />
-    <text follows="left|top" height="64" layout="topleft" left="30" name="logs_list" top="328" width="418" wrap="true" text_color="LtGray_50">Looking for your logs...</text>
+    <text follows="left|top" height="64" layout="topleft" left="30" name="logs_list" top="366" width="418" wrap="true" text_color="LtGray_50">Looking for your logs...</text>
 
-    <text_editor follows="left|top" height="46" layout="topleft" left="12" max_length="4096" name="status" top="396" width="436" word_wrap="true" read_only="true" parse_urls="true" show_context_menu="true" visible="false" />
+    <text_editor follows="left|top" height="46" layout="topleft" left="12" max_length="4096" name="status" top="434" width="436" word_wrap="true" read_only="true" parse_urls="true" show_context_menu="true" visible="false" />
 
-    <button follows="left|bottom" height="23" layout="topleft" left="12" name="my_tickets" top="452" width="110" label="My tickets" tool_tip="Open your support tickets on wolf-grid.com in your browser" />
-    <button follows="left|bottom" height="23" layout="topleft" left="130" name="open_ticket" top="452" width="120" label="Open the ticket" tool_tip="Open the ticket you just sent in your browser" visible="false" />
-    <button follows="right|bottom" height="23" layout="topleft" left="348" name="send" top="452" width="100" label="Send" />
+    <button follows="left|bottom" height="23" layout="topleft" left="12" name="my_tickets" top="490" width="110" label="My tickets" tool_tip="Open your support tickets on wolf-grid.com in your browser" />
+    <button follows="left|bottom" height="23" layout="topleft" left="130" name="open_ticket" top="490" width="120" label="Open the ticket" tool_tip="Open the ticket you just sent in your browser" visible="false" />
+    <button follows="right|bottom" height="23" layout="topleft" left="348" name="send" top="490" width="100" label="Send" />
 </floater>

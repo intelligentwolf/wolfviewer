@@ -923,6 +923,9 @@ set(viewer_SOURCE_FILES
     wolffloaterlagdetector.cpp
     wolffloatercompass.cpp   # [WOLF COMPASS 2026-10-16]
     wolffloaterbugreport.cpp   # [WOLF BUG REPORT 2026-10-24] Report a Problem (ticket + viewer logs)
+    wolffloaterdob.cpp   # [DOB IN THE VIEWER 2026-10-26] Your Date of Birth (asked after login when the account has none)
+    wolfadultcontent.cpp   # [ADULT CONTENT 2026-10-26] the Adult Content region type (badges, refusals)
+    wolffloateragecheck.cpp   # [ADULT CONTENT 2026-10-26] Wolf World > Age Check
     wolffloaterchooseavatar.cpp   # [STARTER AVATARS 2026-10-24] Choose an Avatar (the grid's starter looks)
     wolfspeed.cpp   # [WOLFSPEED 2026-10-17] Xenon's WolfSpeed
     wolfswim.cpp   # [WOLF SWIM 2026-10-20] swimming under the water
@@ -953,6 +956,7 @@ set(viewer_SOURCE_FILES
     wolfenvironmentrender.cpp
     wolfeepreference.cpp
     wolfcloudgenus.cpp
+    wolfcloudclearance.cpp   # [CLOUDS CLEAR OF BUILDS 2026-10-26] clouds never cover anyone's builds
     wolfexposure.cpp
     wolftkatmosphere.cpp
     wolftkclouds.cpp
@@ -1902,6 +1906,9 @@ set(viewer_HEADER_FILES
     wolffloaterlagdetector.h
     wolffloatercompass.h   # [WOLF COMPASS 2026-10-16]
     wolffloaterbugreport.h   # [WOLF BUG REPORT 2026-10-24]
+    wolffloaterdob.h   # [DOB IN THE VIEWER 2026-10-26]
+    wolfadultcontent.h   # [ADULT CONTENT 2026-10-26]
+    wolffloateragecheck.h   # [ADULT CONTENT 2026-10-26]
     wolffloaterchooseavatar.h   # [STARTER AVATARS 2026-10-24]
     wolfspeed.h   # [WOLFSPEED 2026-10-17] Xenon's WolfSpeed
     wolfswim.h   # [WOLF SWIM 2026-10-20] swimming under the water
@@ -1933,6 +1940,7 @@ set(viewer_HEADER_FILES
     wolfenvironmentrender.h
     wolfeepreference.h
     wolfcloudgenus.h
+    wolfcloudclearance.h   # [CLOUDS CLEAR OF BUILDS 2026-10-26]
     wolfexposure.h
     wolftkatmosphere.h
     wolftkclouds.h

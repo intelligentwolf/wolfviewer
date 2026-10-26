@@ -33,6 +33,7 @@
 #include "wolfgrid.h"        // <WolfViewer 2026-09-07>
 #include "wolfregionweather.h"   // <WolfViewer 2026-09-12> About Land > Weather   // <WolfViewer 2026-09-07>
 #include "wolflandsandbox.h"      // <WolfViewer 2026-10-13> About Land > Sandbox
+#include "wolfadultcontent.h"      // [ADULT CONTENT 2026-10-26] About Land maturity: "Adult Content"
 
 #include "llavatarnamecache.h"
 #include "llfocusmgr.h"
@@ -3679,6 +3680,13 @@ void insert_maturity_into_textbox(LLTextBox* target_textbox, LLFloater* names_fl
     default:
         break;
     }
+    // [ADULT CONTENT 2026-10-26] "Adult Content" with its own icon (wolfadultcontent.h, PROTOCOL.md §1); Wolf Territories
+    // only - every other region keeps the stock icon and word.
+    const bool adult_content = WolfAdultContent::isAdultContentRegion(region);
+    if (adult_content)
+    {
+        style.image(LLUI::getUIImage(WolfAdultContent::ICON_LIGHT));
+    }
 
     size_t maturity_pos = str_to_parse.find(MATURITY);
 
@@ -3694,7 +3702,8 @@ void insert_maturity_into_textbox(LLTextBox* target_textbox, LLFloater* names_fl
 
     target_textbox->appendImageSegment(style);
 
-    target_textbox->appendText(LLViewerParcelMgr::getInstance()->getSelectionRegion()->getSimAccessString(), false);
+    //target_textbox->appendText(LLViewerParcelMgr::getInstance()->getSelectionRegion()->getSimAccessString(), false);
+    target_textbox->appendText(WolfAdultContent::accessString(sim_access, adult_content), false);   // [ADULT CONTENT 2026-10-26/]
     target_textbox->appendText(text_after_rating, false);
 }
 

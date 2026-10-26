@@ -235,7 +235,7 @@
 	 layout="topleft"
 	 left="-580"
 	 name="wolf_bug_btn"
-	 tool_tip="Report a problem to the Wolf Territories support team (you can send your viewer logs with it)"
+	 tool_tip="Flea Report: found something broken, or got an idea? Report a problem or suggest an idea to the Wolf Territories support team (you can send your viewer logs with a problem)"
 	 top="1"
 	 visible="false"
 	 width="16" />

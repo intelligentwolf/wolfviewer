@@ -637,6 +637,12 @@ https://www.wolf-grid.com/blog/faq.php for help fixing this problem.
 	<string name="SIM_ACCESS_PG">General</string>
 	<string name="SIM_ACCESS_MATURE">Moderate</string>
 	<string name="SIM_ACCESS_ADULT">Adult</string>
+	<!-- [ADULT CONTENT 2026-10-26] wolfadultcontent.cpp typeName: the fourth region type (region-terrain-work/adult-content/PROTOCOL.md §1) -->
+	<string name="SIM_ACCESS_ADULT_CONTENT">Adult Content</string>
+	<string name="WolfAdultContentRatingTooltip">This region is Adult Content. Choosing another rating opens wolf-grid.com, where Adult Content is switched off.</string>
+	<!-- [ADULT CONTENT 2026-10-26] W81 the Rating dropdown's Adult Content moves (llfloaterregioninfo.cpp wolf_ac_on_access_commit) -->
+	<string name="WolfAdultContentSetOpened">Adult Content needs your age check, the rules agreement and the £10/month on wolf-grid.com - we've opened it for you.</string>
+	<string name="WolfAdultContentOffOpened">Adult Content is switched off (and its £10/month stopped) on wolf-grid.com - we've opened it for you.</string>
 	<string name="SIM_ACCESS_DOWN">Offline</string>
 	<string name="SIM_ACCESS_MIN">Unknown</string>
 
@@ -2153,6 +2159,7 @@ Please reinstall viewer from [DOWNLOAD_URL] and contact [SUPPORT_SITE] if issue 
   <string name="LocationCtrlScriptsTooltip">Scripts not allowed</string>
   <string name="LocationCtrlDamageTooltip">Health</string>
   <string name="LocationCtrlAdultIconTooltip">Adult Region</string>
+  <string name="LocationCtrlAdultContentIconTooltip">Adult Content Region (age check needed)</string>   <!-- [ADULT CONTENT 2026-10-26/] -->
   <string name="LocationCtrlModerateIconTooltip">Moderate Region</string>
   <string name="LocationCtrlGeneralIconTooltip">General Region</string>
   <string name="LocationCtrlSeeAVsTooltip">Avatars inside this parcel cannot be seen or heard by avatars outside this parcel</string>

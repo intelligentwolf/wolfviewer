@@ -680,7 +680,7 @@ float marchOpticalDepth(
     vec3 position = rayDistance * rayDirection + rayOrigin;
     vec2 uv = getGlobeUv(position);
     float height = length(position) - bottomRadius;
-    WeatherSample weather = sampleWeather(uv, height, mipLevel);
+    WeatherSample weather = sampleWeather(uv, height, mipLevel, position);
     MediaSample media = sampleMedia(weather, position, uv, mipLevel, jitter);
     opticalDepth += media.extinction * stepSize;
     nextDistance += stepSize;
@@ -709,7 +709,9 @@ float marchOpticalDepth(
 }
 
 // Source: three-geospatial packages/clouds/src/shaders/clouds.frag:397-415 approximateMultipleScattering
-float approximateMultipleScattering(const float opticalDepth, const float cosTheta, const float ice) {
+// [WolfViewer 2026-10-26] msWeight: the share of the octaves after the first (multiple scattering) that this sample keeps;
+// 1 = takram's sum. See marchClouds (wolfMsWeight) for where it is less than 1.
+float approximateMultipleScattering(const float opticalDepth, const float cosTheta, const float ice, const float msWeight) {
   // Multiple scattering approximation
   // See: https://fpsunflower.github.io/ckulla/data/oz_volumes.pdf
   // a: attenuation, b: contribution, c: phase attenuation
@@ -718,11 +720,13 @@ float approximateMultipleScattering(const float opticalDepth, const float cosThe
   const vec3 attenuation = vec3(WOLF_MS_ATTENUATION); // Should satisfy a <= b
   float scattering = 0.0;
   float beerLambert;
+  float singleScattering = 0.0;   // [WolfViewer 2026-10-26] the first octave, kept whole
   
     #if 0 < MULTI_SCATTERING_OCTAVES
     beerLambert = exp(-opticalDepth * coeffs.y);
     scattering += coeffs.x * beerLambert * phaseFunction(cosTheta, coeffs.z, ice);
     coeffs *= attenuation;
+    singleScattering = scattering;
     #endif // 0 < MULTI_SCATTERING_OCTAVES
   
     #if 1 < MULTI_SCATTERING_OCTAVES
@@ -791,7 +795,71 @@ float approximateMultipleScattering(const float opticalDepth, const float cosThe
     coeffs *= attenuation;
     #endif // 11 < MULTI_SCATTERING_OCTAVES
   
-  return scattering;
+  return singleScattering + msWeight * (scattering - singleScattering);
+}
+
+// [WolfViewer 2026-10-26] THE CORONA. A thin cloud of water droplets in front of the moon (or the sun) shows a bright bluish-white
+// aureole round it with coloured rings, red outside: Fraunhofer diffraction by the droplets, "Smaller particles generally produce
+// larger coronae" and it needs droplets "nearly uniform in size" (https://en.wikipedia.org/wiki/Corona_(optical_phenomenon);
+// BEAUTY_RESEARCH.md 8.1); ice crystals give halos instead, never a corona (WMO: Cs "generally producing halo phenomena").
+// The takram phase (two Henyey-Greenstein lobes 0.7 / -0.2) is a smooth fit with ~1 sr^-1 at the light, where a droplet's
+// forward diffraction peak is hundreds: with it the cloud edges round the moon came out as dull as anywhere else.
+// Physics: for a sphere of size parameter x = pi d / lambda >> 1, diffraction carries half the extinction ("extinction paradox",
+// van de Hulst 1957, Light Scattering by Small Particles, section 8.22) in the Airy pattern [2 J1(u) / u]^2, u = x sin(theta);
+// normalised over the sphere (int 2 pi theta dtheta [2 J1(x theta)/(x theta)]^2 = 4 pi / x^2) its phase function is
+// p(theta) = x^2 / (4 pi) [2 J1(u) / u]^2. J1 from Bessel's integral, DLMF 10.9.2: J1(z) = (1/pi) int_0^pi cos(z sin t - t) dt,
+// summed by the trapezoid rule on [0, pi] with 20 intervals - the integrand extends to a smooth periodic one, so this is the
+// 40-point periodic rule, exact to ~J_41(z) (< 1e-6 for z < 24); its end points cancel (cos 0 + cos(-pi) = 0).
+// d = 20 um: twice the effective radius 10 um the genus rows use for every water cloud (wolfcloudgenus.cpp sigmaWater), with a
+// spread of 0.8 / 1 / 1.2 d (weights 1/4, 1/2, 1/4; a modelling choice: a narrow distribution, the case a corona is seen in),
+// at the atmosphere's own RGB wavelengths 680 / 550 / 440 nm (wolftkatmosphere.cpp:164, Bruneton model.h kLambdaR/G/B). The
+// first dark ring then sits at sin(theta) = 1.22 lambda / d = 1.9 deg (green), the colours outside it.
+// Added on top of the takram phase only where the diffraction exceeds it (0.5 p - HG > 0: within ~4-5 deg of the light) and only
+// to the single-scattered light (x exp(-optical depth to the light): multiple scattering washes a corona out, which is why only
+// thin cloud shows one), outside the powder term (that models missing multiple in-scatter, not the forward peak). The sky away
+// from the light is exactly as before; the energy added is the diffraction lobe the smooth fit lacks, within that cone.
+// Computed once per pixel (the light's angle is the ray's), zero beyond 8 deg - the march itself only multiplies.
+// [10-26 second pass] BY MOONLIGHT ONLY (the light is the moon when wolfLightScale is the moon's share, 0 < scale < 1;
+// cloudsLight.glsl, wolfenvironmentrender.cpp cloudsFrame). By day the same diffraction exists round the sun, but there it sits
+// inside the sun's own glare - the reason a solar corona is only seen with the sun hidden - which this renderer draws as the sun
+// disc, the sky's Mie aureole and bloom; added on top it lit thin cloud edges near the low sun on top of that glare. Paul's two
+// 10-26 frames were not this term (ICELAND 09:03Z: the cirrus, pure ice, which gets none; TROMSO 09:03Z: the smear on the far
+// side of the frame from the sun's glow, outside the 8 deg cone), but by day it could only ever add to the sun's glare, so it is
+// off by day.
+// The cloud light is also not shadowed by terrain (no terrain shadow in the cloud march), so a moon behind a hill still lights
+// clouds in front of it - true of all cloud light here, noted in CLOUD_SHAPE_PLAN.md section 8.
+const float WOLF_CORONA_COS_MAX = 0.9902680687415704;   // cos(8 deg)
+vec3 wolfCoronaExcess(const float cosTheta) {
+  if (cosTheta < WOLF_CORONA_COS_MAX || !(wolfLightScale > 0.0 && wolfLightScale < 0.5)) {
+    return vec3(0.0);
+  }
+  float sinTheta = sqrt(max(1.0 - cosTheta * cosTheta, 0.0));
+  const vec3 lambdaUm = vec3(0.680, 0.550, 0.440);
+  const float dUm = 20.0;
+  const vec3 sizes = vec3(0.8, 1.0, 1.2);
+  const vec3 weights = vec3(0.25, 0.5, 0.25);
+  // x per size (rows) and wavelength (columns)
+  vec3 x0 = PI * dUm * sizes.x / lambdaUm;
+  vec3 x1 = PI * dUm * sizes.y / lambdaUm;
+  vec3 x2 = PI * dUm * sizes.z / lambdaUm;
+  vec3 u0 = x0 * sinTheta, u1 = x1 * sinTheta, u2 = x2 * sinTheta;
+  vec3 j0 = vec3(0.0), j1 = vec3(0.0), j2 = vec3(0.0);
+  const int N = 20;
+  for (int j = 1; j < N; ++j) {
+    float t = PI * float(j) / float(N);
+    float st = sin(t);
+    j0 += cos(u0 * st - t);
+    j1 += cos(u1 * st - t);
+    j2 += cos(u2 * st - t);
+  }
+  j0 /= float(N); j1 /= float(N); j2 /= float(N);
+  // 2 J1(u) / u -> 1 as u -> 0
+  vec3 a0 = mix(2.0 * j0 / max(u0, vec3(1e-4)), vec3(1.0), step(u0, vec3(1e-4)));
+  vec3 a1 = mix(2.0 * j1 / max(u1, vec3(1e-4)), vec3(1.0), step(u1, vec3(1e-4)));
+  vec3 a2 = mix(2.0 * j2 / max(u2, vec3(1e-4)), vec3(1.0), step(u2, vec3(1e-4)));
+  vec3 p = weights.x * x0 * x0 * a0 * a0 + weights.y * x1 * x1 * a1 * a1 + weights.z * x2 * x2 * a2 * a2;
+  p *= RECIPROCAL_PI4;
+  return max(0.5 * p - vec3(phaseFunction(cosTheta)), vec3(0.0));
 }
 
 // Source note: Construct spherical harmonics of degree 2 using 2 sample points
@@ -854,6 +922,7 @@ vec4 marchClouds(
   const vec3 rayDirection,
   const vec2 rayNearFar,
   const float cosTheta,
+  const vec3 corona,   // [WolfViewer 2026-10-26] wolfCoronaExcess(cosTheta), sr^-1 per channel
   const float jitter,
   const float rayStartTexelsPerPixel,
   out float frontDepth,
@@ -895,7 +964,7 @@ vec4 marchClouds(
 
     // Sample rough weather.
     vec2 uv = getGlobeUv(position);
-    WeatherSample weather = sampleWeather(uv, height, mipLevel);
+    WeatherSample weather = sampleWeather(uv, height, mipLevel, position);
 
     #ifdef DEBUG_SHOW_SAMPLE_COUNT
     ++sampleCount.x;
@@ -944,7 +1013,19 @@ vec4 marchClouds(
 
       // [WolfViewer] the sample's ice fraction (its layers' wolfLayerIce by density share) sets the phase function
       float ice = clamp(dot(media.weight, wolfLayerIce), 0.0, 1.0);
-      vec3 radiance = sunIrradiance * approximateMultipleScattering(opticalDepth, cosTheta, ice);
+      // [WolfViewer 2026-10-26] THIN ICE CLOUD: multiple scattering only as far as the sheet is thick. The octave sum (Wrenninge's
+      // a = b = c = WOLF_MS_ATTENUATION 0.815, tuned so a THICK cloud has albedo 0.8, wolfcloudgenus.h) tends to sum a^k = 4.4 x the
+      // single scattering as the optical depth to the light goes to 0, i.e. a veil of cirrus came out ~4.4 x too bright - and in a
+      // slab of vertical optical thickness tau only 1 - exp(-tau) of the light interacts at all (Beer-Lambert), so a second
+      // scattering is at most that likely. Nubis Evolved scales its multiple-scattering term the same way by how deep in the cloud
+      // the sample is ("ms_volume = Remap(dimensional_profile ...)", Schneider, SIGGRAPH 2022 Advances; BEAUTY_RESEARCH.md 1.3).
+      // tau of the sheet = the local extinction x the depth of the sample's layer(s) (a uniform-profile ice layer: exact).
+      // ONLY FOR ICE (mixed by the ice share): water clouds - the cumulus and stratocumulus looks Paul approved - are untouched
+      // (msWeight 1); their sunlit sides are bright because of the octaves and must stay so. Cirrus at tau 0.37 (the measured mean,
+      // wolfcloudgenus.cpp Ci) keeps 0.31 of its octaves: 2.0 x single scattering instead of 4.4 x.
+      float iceSheetTau = media.extinction * dot(media.weight, maxLayerHeights - minLayerHeights);
+      float msWeight = mix(1.0, 1.0 - exp(-iceSheetTau), ice);
+      vec3 radiance = sunIrradiance * approximateMultipleScattering(opticalDepth, cosTheta, ice, msWeight);
 
       #ifdef GROUND_BOUNCE
       // Fudge factor for the irradiance from ground.
@@ -990,7 +1071,7 @@ vec4 marchClouds(
           for (int k = 0; k < 3; ++k) {
             vec3 p = position + surfaceNormal * (dz * (float(k) + 0.5));
             vec2 puv = getGlobeUv(p);
-            WeatherSample pw = sampleWeather(puv, length(p) - bottomRadius, mipLevel);
+            WeatherSample pw = sampleWeather(puv, length(p) - bottomRadius, mipLevel, p);
             if (!any(greaterThan(pw.density, vec4(minDensity)))) continue;
             MediaSample pm = sampleMedia(pw, p, puv, mipLevel, jitter);
             tauV += pm.extinction * dz;
@@ -1007,6 +1088,10 @@ vec4 marchClouds(
       // [WolfViewer] no powder in ice; [round 16c] the exponent in takram's own density units, per layer (wolfLayerPowder)
       radiance *= 1.0 - powderScale * (1.0 - ice) * exp(-media.extinction * powderExponent * max(dot(media.weight, wolfLayerPowder), 1e-3));
       #endif // POWDER
+
+      // [WolfViewer 2026-10-26] the corona (wolfCoronaExcess): the droplets' share of the sample (1 - ice), single-scattered light
+      // only (the beam's transmittance to the sample), x scattering as the radiance above
+      radiance += sunIrradiance * corona * ((1.0 - ice) * exp(-opticalDepth) * media.scattering);
 
       #ifdef DEBUG_SHOW_CASCADES
       if (height < shadowTopHeight) {
@@ -1317,6 +1402,9 @@ void main() {
   vec3 cameraPosition = vCameraPosition + altitudeCorrection;
   vec3 rayDirection = normalize(vRayDirection);
   float cosTheta = dot(sunDirection, rayDirection);
+  // [WolfViewer 2026-10-26] this pass's pixel as an angle (radians), taken here in uniform control flow (derivatives inside the
+  // branches below would be undefined): the far sea's haze below uses it at the horizon
+  float wolfPixelAngle = length(fwidth(rayDirection));
 
   IntersectionResult intersections = getIntersections(cameraPosition, rayDirection);
   vec2 rayNearFar = getRayNearFar(intersections);
@@ -1374,6 +1462,7 @@ void main() {
       rayDirection,
       rayNearFar,
       cosTheta,
+      wolfCoronaExcess(cosTheta),
       stbn,
       pow(2.0, mipLevel),
       marchedFrontDepth,
@@ -1517,8 +1606,17 @@ void main() {
       float bS = rS * dot(rayDirection, normalize(cameraPosition));
       float cS = cameraHeight * (rS + bottomRadius);
       float discS = bS * bS - cS;
-      if (bS < 0.0 && discS >= 0.0 && cameraHeight > 0.0) {
-        float tS = cS / (-bS + sqrt(discS));
+      // [WolfViewer 2026-10-26] Paul, Knightwood 12:59Z: "a hard bright line along the horizon" - one row (196,185,199 in his
+      // screenshot) brighter than the hazed far sea under it (157,148,157) and the sky over it (131-138). This pass runs at a
+      // lower resolution than the dome, with a temporal jitter (wolftkclouds.cpp temporalJitter), so at the true horizon one of
+      // its texels can test as missing the sea (discS < 0) while the dome under it (skyF.glsl, its own full-resolution test)
+      // drew sea there: those dome pixels kept the raw, unhazed far sea - the mirror of the bright horizon sky at grazing
+      // Fresnel. A texel within 1.5 of its own pixels of the tangent is now hazed as reaching the horizon (discS taken as 0);
+      // d(discS)/d(mu) = 2 r^2 mu = 2 r sqrt(cS) at the tangent (mu = -sqrt(cS) / r), so the margin in discS is that x the angle.
+      // Above the horizon this only touches that one texel row, which then takes the horizon's haze colour - as the sea does.
+      float discMargin = 2.0 * rS * sqrt(max(cS, 0.0)) * 1.5 * wolfPixelAngle;
+      if (bS < 0.0 && discS >= -discMargin && cameraHeight > 0.0) {
+        float tS = cS / (-bS + sqrt(max(discS, 0.0)));
         vec4 llh = wolfLLHaze(cameraPosition, rayDirection, tS);
         color.rgb = color.rgb * (1.0 - llh.a) + llh.rgb;
         color.a = 1.0 - (1.0 - color.a) * (1.0 - llh.a);

@@ -148,6 +148,7 @@ namespace
         LLVector3 cloudLightECEF = LLVector3::z_axis;
         bool     moonLightsClouds = false;
         F32      moonSkyScale = 0.f;                 // the moon's illuminance above the atmosphere / the sun's (sun down)
+        F32      cloudThinMax = 0.8f;                // [2026-10-27] the most the clouds may be thinned (updateLight; measureCloudCover)
         F32      moonPhaseAngle = 0.f;
         F32      cloudTransmittanceAtCamera = 1.f;   // last frame's (camShadow): the sun's direct beam
         F32      cloudDiffuseT = 1.f;                // the clouds' mean two-stream diffuse transmittance over the sky
@@ -159,6 +160,7 @@ namespace
         F32      exposure = 1.f;
         F32      cover = 0.f;
         F32      hazeScale = 1.f;
+        F32      weatherHazeSigma = -1.f;           // [2026-10-27] the world's haze extinction the weather allows, 1/m (-1: no limit)
         F32      weatherRepeatScale = 1.f;          // [WolfViewer round 9] the EEP's cloud_scale over its default
         LLColor3 sunTint = LLColor3::white;         // [WolfViewer 2026-10-13] x the direct light: LL's own light's hue (hueSwap)
         LLColor3 ambTint = LLColor3::white;         // [WolfViewer 2026-10-13] x the sky's light: LL's own ambient hue (hueSwap)
@@ -172,6 +174,22 @@ namespace
     // frame all use one exposure and one sun
     Frame sNext;
     Frame sFrame;
+
+    // [WolfViewer 2026-10-27] ticket #247 (Jimmy Olsen, TROMSO by night: "a bright coming from moon center and not behind it ..
+    // sometimes it goes away"). The moon disc exactly as renderSkyDome drew it (world: east, north, up), for the clouds' corona
+    // (cloudsF.glsl wolfCoronaOffDisc): the EEP moon (skyF.glsl wolfEepMoon) is LL's quad, half-size moon_scale x 0.045 tangent,
+    // about 2.6 deg at moon_scale 1 - ten times the real moon's 0.26 deg (WOLF_MOON_RADIUS) - so the corona's central lobe,
+    // computed for the light as a point (first dark ring 1.9 deg), lay entirely on the disc. `frame` is the frame it was drawn
+    // in (LLFrameTimer::getFrameCount); the clouds use it only in that frame (the dome is drawn first, lldrawpoolwlsky.cpp:166;
+    // with the HDRI sky it is not drawn at all).
+    struct MoonDrawn
+    {
+        bool      on = false;
+        U32       frame = 0;
+        LLVector3 to, right, up;   // the disc's centre and the quad's axes (unit)
+        LLVector2 half;            // the quad's half-size as tangents along right and up: the disc is length(p) <= 1
+    };
+    MoonDrawn sMoonDrawn;
 
     // [WolfViewer 2026-10-13] the EEP's cloud cover: measureCloudCover's last measurement of the native clouds, for the log
     // [WolfViewer 2026-10-19] the coverage itself is no longer learned from the screen (coverFromShare below); the readings
@@ -960,6 +978,31 @@ namespace
             else if (!holding) s_cover += (coverTarget - s_cover) * (1.f - expf(-dt / tau));   // [2026-10-26] held through an arrival
             sNext.cover = s_cover;
             if (WolfAurora::forced()) sNext.cover = 0.f;   // [2026-10-15] WolfForceAurora: no clouds in front of the forced aurora
+            // [WolfViewer 2026-10-27] THE THINNING NEVER OPENS AN OVERCAST (ticket #247; TROMSO 2026-10-27 05:22Z, MET cloud 96 %,
+            // low 73, medium 85, high 24, sun -7.6 deg, the moon 19 deg up: the real sky solid overcast with no moon, ours a clear
+            // lavender sky with a sharp full moon). The march drew the deck whole - the reading "native veils 1, marched opacity 1" -
+            // and then measureCloudCover's thinning, which matches the clouds' opacity to the stock EEP layer's (a flat
+            // translucent texture: mean opacity 0.31 - 0.40 there), drew every cloud at 1 - 0.69 = 0.31 of its opacity
+            // (cloudsF.glsl: color *= 1 - wolfEepCloudThin, alpha included). The sky and the moon showed through 69 % of a full
+            // overcast, the dark night deck all but vanished against them, and by night every thin water cloud's corona sat on a
+            // moon it could not hide. The weather's own total cloud is the share of the sky the cloud hides; a cloud drawn at
+            // (1 - thin) of its opacity hides at most that share of what is behind it, so with the weather the thinning is held
+            // to 1 - total: none under a total overcast, as before under a broken sky (total 0.3 keeps up to 0.7, the readings'
+            // usual 0.2 - 0.7). The total is the one the genus rules use (the forecast's, raised to the EEP's share: below);
+            // a zone's own cloud setting or no weather keeps the old limit 0.8 (measureCloudCover). Eased as the cover is.
+            {
+                F32 thinMax = 0.8f;
+                if (d.mHaveWeather && !z.hasClouds)
+                {
+                    const F32 share = (psky && WolfEnvironmentRender::eepDriven()) ? eepShareNow : 0.f;   // as the genus block's w.total
+                    const F32 total = llclamp(llmax(d.mWeatherCloud, share), 0.f, 1.f);
+                    thinMax = llmin(0.8f, 1.f - total);
+                }
+                static F32 s_thinMax = -1.f;
+                if (s_thinMax < 0.f || dt <= 0.f || settleSnap) s_thinMax = thinMax;
+                else if (!holding) s_thinMax += (thinMax - s_thinMax) * (1.f - expf(-dt / tau));
+                sNext.cloudThinMax = s_thinMax;
+            }
         }
         // [WolfViewer step 3] the cloud genera from the weather (wolfcloudgenus.cpp, BEAUTY_RESEARCH.md section 9.4): the
         // three fractions read as three layers (+ a fog / pannus slab), each a genus with its base, extinction and
@@ -1129,6 +1172,34 @@ namespace
             const F32 fog = (d.mMode == WolfEnvDoc::WOLF && d.mHaveWeather) ? d.mWeatherFog : 0.f;
             sNext.hazeScale = (1.f + 3.f * llclamp(z.haze, 0.f, 1.f)) * (1.f + 4.f * llclamp(fog, 0.f, 1.f));
         }
+        // [WolfViewer 2026-10-27] THE WORLD'S HAZE FROM THE WEATHER (TROMSO 07:11Z: MET fog 0, humidity 72-76 %, the UiT camera
+        // crisp to the far hills; ours a grey wash with the hills a few km off almost gone - the EEP's haze "1 km transmittance
+        // 0.038", visibility ~1.2 km by Koschmieder's 3.912 / extinction). The EEP's world haze is not the weather's: the server
+        // holds it to its default day cycle's frame nearest the sun's height (WolfAutoEnvironmentModule.cs ApplyJimmyLook
+        // :776/:827-828 and JimmyExactSky :1203-1214, sceneHaze = the template frame's), so near sunrise and sunset it is that
+        // frame's dawn haze whatever the sky holds; only the fog % and the document's haze are weather (WolfEnvironment.cs
+        // ApplyWeather :1026-1031, ApplyDoc :1066-1069). With Wolf weather the world's haze is therefore held to what those give
+        // on EEP's own default air (llsettingssky.cpp:1226-1231: blue_density.r 0.2447, haze_density 0.7, density_multiplier
+        // 0.0001, distance_multiplier 0.8 - visibility ~52 km), by the server's own rules: fog pulls haze_density 70 % of the way
+        // to 5 and multiplies distance_multiplier by 1 + 4 fog; the document's (and the camera's zones') haze 60 % and 1 + 3 haze.
+        // Only a LIMIT (worldDistanceMultiplier): an EEP clearer than that keeps its own haze, so fog-free weather never adds
+        // haze, and a foggy forecast (whose EEP the server already fogged by the same rule) is unchanged. Humidity is not used:
+        // no rule of ours or the server's turns it into haze, and fog 0 at 72-76 % RH is clear air. The sky dome is untouched
+        // (it does not use distance_multiplier).
+        {
+            F32 limit = -1.f;
+            if (psky && d.mMode == WolfEnvDoc::WOLF && d.mHaveWeather)
+            {
+                const F32 fog = llclamp(d.mWeatherFog, 0.f, 1.f);
+                const F32 haze = llclamp(z.haze, 0.f, 1.f);
+                F32 hd = 0.7f + (5.f - 0.7f) * 0.7f * fog;   // WolfEnvironment.cs:1029
+                F32 dist = 0.8f * (1.f + 4.f * fog);          // :1030
+                hd += (5.f - hd) * 0.6f * haze;               // :1068
+                dist *= 1.f + 3.f * haze;                     // :1069
+                limit = (0.2447f + hd) * 0.0001f * dist;
+            }
+            sNext.weatherHazeSigma = limit;
+        }
         // [WolfViewer round 9] the clouds' size from the EEP's cloud_scale (llsettingssky.cpp:904 default 0.4199): the weather
         // texture repeats 100 times at the default (CloudsEffect.ts:180-186), fewer for bigger clouds
         sNext.weatherRepeatScale = psky ? 0.4199f / llmax(psky->getCloudScale(), 0.01f) : 1.f;
@@ -1239,6 +1310,15 @@ namespace
         f.sun_dir_ecef = sFrame.cloudLightECEF;
         f.light_scale = moonLights ? sFrame.moonSkyScale : 1.f;
         f.other_dir_ecef = moonLights ? sFrame.sunECEF : sFrame.moonECEF;
+        // [WolfViewer 2026-10-27] the moon disc drawn this frame (sMoonDrawn), for the corona (cloudsF.glsl wolfCoronaOffDisc)
+        f.moon_disc_on = sMoonDrawn.on && sMoonDrawn.frame == LLFrameTimer::getFrameCount();
+        if (f.moon_disc_on)
+        {
+            f.moon_disc_to_ecef = toECEF(sFrame, sMoonDrawn.to);
+            f.moon_disc_right_ecef = toECEF(sFrame, sMoonDrawn.right);
+            f.moon_disc_up_ecef = toECEF(sFrame, sMoonDrawn.up);
+            f.moon_disc_half = sMoonDrawn.half;
+        }
         f.other_scale = moonLights ? 1.f : sFrame.moonSkyScale;
         f.camera_world = cam->getOrigin();
         const F64 t = LLFrameTimer::getElapsedSeconds();
@@ -1309,8 +1389,11 @@ namespace
         {
             if (LLSettingsSky::ptr_t psky = LLEnvironment::instance().getCurrentSky())
             {
+                // [2026-10-27] distance_multiplier held to the weather's haze (WolfEnvironmentRender::worldDistanceMultiplier)
+                const F32 worldDist = WolfEnvironmentRender::worldDistanceMultiplier(psky->getBlueDensity().mV[0], psky->getHazeDensity(),
+                                                                                    psky->getDensityMultiplier(), psky->getDistanceMultiplier());
                 const F32 sigma = llmax(psky->getBlueDensity().mV[0] + psky->getHazeDensity(), 0.f)
-                                * psky->getDensityMultiplier() * psky->getDistanceMultiplier();
+                                * psky->getDensityMultiplier() * worldDist;
                 const F32 maxY = llmax(psky->getMaxY(), 1.f);
                 f.haze_exponent = 1.f / maxY;
                 f.haze_density_scale = sigma * expf(llmin(sFrame.cameraHeight / maxY, 20.f));
@@ -1321,7 +1404,8 @@ namespace
                 f.ll_haze = true;
                 f.ll_blue_w = hp.blueW; f.ll_haze_w = hp.hazeW; f.ll_cs = hp.cs; f.ll_tmp_amb = hp.tmpAmb; f.ll_combined = hp.combined;
                 f.ll_glow_x = hp.glowX; f.ll_glow_z = hp.glowZ; f.ll_smgf = hp.smgf;
-                f.ll_density_distance = hp.densityDistance; f.ll_max_y = hp.maxY; f.ll_hdr = hp.skyHdrScale;
+                f.ll_density_distance = psky->getDensityMultiplier() * worldDist;   // hp.densityDistance with the held distance_multiplier
+                f.ll_max_y = hp.maxY; f.ll_hdr = hp.skyHdrScale;
                 // world -> ECEF as a rotation only (the light norm is not unit length in the stock code and must stay so)
                 auto rot = [&](const LLVector3& v) {
                     const glm::dvec4 e = sFrame.worldToECEF * glm::dvec4(v.mV[0], v.mV[1], v.mV[2], 0.0);
@@ -1836,6 +1920,17 @@ bool WolfEnvironmentRender::agxDisplay() { return skyActive() && !eepDriven(); }
 // static
 F32 WolfEnvironmentRender::exposure() { return sFrame.exposure; }
 
+// [WolfViewer 2026-10-27] the world's haze held to the weather's (updateLight, Frame::weatherHazeSigma). The extinction is the
+// stock haze's red channel, as hazeF.glsl's atten.r and WolfEepReference::hazeTransmittance take it ([S] atmosphericsFuncs.glsl:
+// 79-87 exp(-(blue_density + haze_density) x path x density_multiplier x distance_multiplier)).
+F32 WolfEnvironmentRender::worldDistanceMultiplier(F32 blueDensityR, F32 hazeDensity, F32 densityMultiplier, F32 distanceMultiplier)
+{
+    if (!skyActive() || sFrame.weatherHazeSigma < 0.f) return distanceMultiplier;
+    const F32 sigma = llmax(blueDensityR + hazeDensity, 0.f) * densityMultiplier * distanceMultiplier;
+    if (sigma <= sFrame.weatherHazeSigma || sigma <= 0.f) return distanceMultiplier;
+    return distanceMultiplier * (sFrame.weatherHazeSigma / sigma);
+}
+
 // static
 LLColor3 WolfEnvironmentRender::whitePoint() { return sAtmos ? sAtmos->whitePoint() : LLColor3::white; }
 
@@ -2177,12 +2272,21 @@ namespace
             if (sStockValid)
                 o << "\n  clouds (stock layer drawn, same view)  veils (opacity >= 0.2) " << sStockShare << " of the sky, mean opacity there "
                   << sStockOpacity << "  native veils " << sNativeShare << ", marched opacity " << sNativeOpacity << " thinned x "
-                  << (1.f - sThin) << "  (coverage from the EEP share " << sFrame.cover << (sCoverLocked ? ", thinning locked)" : ")");
+                  << (1.f - llmin(sThin, sFrame.cloudThinMax)) << " (the readings' " << (1.f - sThin) << ", held to the weather's limit "
+                  << (1.f - sFrame.cloudThinMax) << ")  (coverage from the EEP share " << sFrame.cover << (sCoverLocked ? ", thinning locked)" : ")");
             o << "\n  cloud colour   EEP " << d8(WolfEepReference::display(path, sCloudTarget)) << "  native measured "
               << d8(WolfEepReference::display(path, sCloudMeasured)) << "  (mean over the covered texels, per-direction gains "
               << (sCloudGainValid ? "on" : "off") << ")";
             o << "\n  haze 1 km      EEP transmittance " << WolfEepReference::hazeTransmittance(psky, 1000.f)
               << "  (native: its haze density at the camera SET to the same extinction, cloudsFrame - not measured here)";
+            if (sFrame.weatherHazeSigma >= 0.f)
+            {
+                // [2026-10-27] the world's haze as drawn: held to the weather's (WolfEnvironmentRender::worldDistanceMultiplier)
+                const F32 bd = psky->getBlueDensity().mV[0], hd = psky->getHazeDensity(), dm = psky->getDensityMultiplier();
+                const F32 held = WolfEnvironmentRender::worldDistanceMultiplier(bd, hd, dm, psky->getDistanceMultiplier());
+                o << "\n  haze 1 km      drawn " << expf(-llmax(bd + hd, 1e-6f) * 1000.f * dm * held) << " (the weather's limit "
+                  << expf(-sFrame.weatherHazeSigma * 1000.f) << ")";
+            }
             o << "\n  haze 1 km      EEP surface " << d8(WolfEepReference::display(path, WolfEepReference::hazedSurfaceLinear(psky, LLVector3(0.f, 1.f, 0.f), 1000.f)))
               << "  5 km " << d8(WolfEepReference::display(path, WolfEepReference::hazedSurfaceLinear(psky, LLVector3(0.f, 1.f, 0.f), 5000.f)));
             LL_INFOS("WolfEnvTrace") << o.str() << LL_ENDL;
@@ -2302,7 +2406,9 @@ namespace
         {
             const F32 dte = s_lastEase > 0.0 ? (F32)llmin(t - s_lastEase, 0.5) : 0.f;
             sThin += (sThinTarget - sThin) * (1.f - expf(-dte / 1.5f));
-            sAtmos->setEepCloudThin(sThin);
+            // [2026-10-27] held to the weather's limit (Frame::cloudThinMax, updateLight); the reading itself is taken before the
+            // thinning (cloudsF.glsl wolfCloudAlpha), so the limit does not feed back into sThinTarget
+            sAtmos->setEepCloudThin(llmin(sThin, sFrame.cloudThinMax));
         }
         s_lastEase = t;
         if (t < s_next) return;
@@ -2671,6 +2777,7 @@ static void APIENTRY wolfSkyGLDebug(GLenum source, GLenum type, GLuint id, GLenu
 
 bool WolfEnvironmentRender::renderSkyDome()
 {
+    sMoonDrawn.on = false;   // [2026-10-27] set again below if this pass draws a moon disc
     if (!skyActive()) return false;
     const WolfEnvDoc& d = WolfEnvironmentState::instance().active();
     LLGLSLShader& sh = gWolfEnvSkyProgram;
@@ -2868,6 +2975,13 @@ bool WolfEnvironmentRender::renderSkyDome()
                     sh.uniform1f(s_ebright, eep->getMoonBrightness());
                     sh.uniform1f(s_escale, path.skyHdrScale * (path.classic ? 1.1f : 1.f));
                     sh.uniform1f(s_eclamp, has_emissive() ? 0.f : 1.f);
+                    // [2026-10-27] the disc as wolfEepMoon tests it: p = (d.right, d.up) / (d.to x half), inside length(p) <= 1
+                    sMoonDrawn.on = true;
+                    sMoonDrawn.frame = LLFrameTimer::getFrameCount();
+                    sMoonDrawn.to = to_dir;
+                    sMoonDrawn.right = hb_right;
+                    sMoonDrawn.up = hb_up;
+                    sMoonDrawn.half = halfRU;
                 }
             }
         }
@@ -2902,6 +3016,25 @@ bool WolfEnvironmentRender::renderSkyDome()
         }
     }
     sh.uniform1f(s_mon, (moonOn && !eepDriven()) ? 1.f : 0.f);
+    if (moonOn && !eepDriven())
+    {
+        // [2026-10-27] the physical disc (skyF.glsl wolfMoonDisc: sin of the angle off moonDir <= uMoonSin) for the clouds' corona
+        // (sMoonDrawn), as a quad of half-size tan(radius) on two axes square to moonDir - the same edge to within 1e-5 of the radius
+        LLVector3 to = moonDir;
+        to.normalize();
+        LLVector3 right = to % LLVector3::z_axis;
+        if (right.lengthSquared() < 1e-6f) right = to % LLVector3::x_axis;   // the moon at the zenith
+        right.normalize();
+        LLVector3 up = right % to;
+        up.normalize();
+        const F32 halfTan = (F32)tan(llmin(WOLF_MOON_RADIUS * moonScale, 1.2));
+        sMoonDrawn.on = true;
+        sMoonDrawn.frame = LLFrameTimer::getFrameCount();
+        sMoonDrawn.to = to;
+        sMoonDrawn.right = right;
+        sMoonDrawn.up = up;
+        sMoonDrawn.half = LLVector2(halfTan, halfTan);
+    }
 
     // [WolfViewer 2026-10-13] the EEP's own sun (skyF.glsl uSunScaleD / wolfSunMap): its sun_scale sizes the disc, and a sun
     // texture of its own (not LL's default, the null id - llsettingssky.cpp:1767 GetDefaultSunTextureId - nor its blank sun,

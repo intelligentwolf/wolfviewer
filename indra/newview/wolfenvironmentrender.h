@@ -123,6 +123,10 @@ public:
     /** The frame's pre-exposure (Filament Exposure::exposure(EV100)): everything the Wolf sky and the scene's
      *  light write is luminance (cd/m2) x this. */
     static F32 exposure();
+    /** [WolfViewer 2026-10-27] The EEP's distance_multiplier as the WORLD's haze should use it: held so the haze over land,
+     *  water and objects is never thicker than the region's weather gives (wolfenvironmentrender.cpp updateLight, the fog and
+     *  haze rule). The EEP's own value when the native sky is off or the region has no Wolf weather. */
+    static F32 worldDistanceMultiplier(F32 blueDensityR, F32 hazeDensity, F32 densityMultiplier, F32 distanceMultiplier);
     /** [WolfViewer 2026-10-25] How far into night the frame is, 0..1: 0 with the sun 12 deg or less under the horizon (civil
      *  and nautical twilight, AMS Glossary of Meteorology "twilight"), 1 from 18 deg under (astronomical night), smooth between.
      *  Weights the night vision (postDeferredTonemap.glsl wolfNightVision), the moon's light on the scene and the moon's

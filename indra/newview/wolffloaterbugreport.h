@@ -17,6 +17,7 @@
 #define WOLF_FLOATERBUGREPORT_H
 
 #include "llfloater.h"
+#include "llimage.h"   // [FLEA PICTURES 2026-10-27/] LLImageRaw
 
 class LLButton;
 class LLCheckBoxCtrl;
@@ -32,6 +33,11 @@ class LLTextEditor;
 // default) the current and previous session logs, and the details of the last crash if there was one this week, are
 // cut to their last part, scrubbed of the session id and capability links, gzipped and sent with it. Wolf Territories
 // only: the request carries this login's agent and session ids.
+// [FLEA PICTURES 2026-10-27] Jimmy Olsen, ticket #250: "Can u mod the flea report to also allow people to attach pics?"
+// Paul: "make the flea report also allow us to add pictures and screenshots". Up to MAX_PICTURES pictures: "Take a
+// snapshot" (the screen without this window) or "Add a picture..." (a file). Each is scaled to 1920 px on its longest
+// side and encoded as PNG, or JPEG when the PNG is over 2 MB, on the "General" work queue, then sent as pictures[] with
+// the report; viewerbugreport.php puts them on the ticket like a website screenshot.
 class WolfFloaterBugReport : public LLFloater
 {
 public:
@@ -49,6 +55,17 @@ public:
         S64 mSize = 0;
     };
 
+    // [FLEA PICTURES 2026-10-27] One picture ready to send: the encoded bytes and what the list shows.
+    struct Picture
+    {
+        std::string mLabel;      // "Snapshot at 05:21" or the picked file's name (shown here only, never sent)
+        std::string mData;       // PNG or JPEG bytes
+        std::string mExt;        // "png" or "jpg"
+        S32 mWidth = 0;
+        S32 mHeight = 0;
+    };
+    static constexpr S32 MAX_PICTURES = 3;
+
 private:
     enum class EStatus { INFO, OK, ERR };
 
@@ -57,7 +74,15 @@ private:
     void setStatus(const std::string& text, EStatus kind);
     void setSending(bool sending);
     void onSent(const LLSD& reply, const std::string& error);
-    static void sendCoro(LLHandle<LLFloater> handle, LLSD fields, std::vector<std::pair<std::string, std::string>> parts);
+    static void sendCoro(LLHandle<LLFloater> handle, LLSD fields, std::vector<std::pair<std::string, std::string>> parts,
+                         std::vector<Picture> pictures);
+    // [FLEA PICTURES 2026-10-27]
+    void onTakeSnapshot();
+    void onAddPicture();
+    void onPictureFilePicked(const std::vector<std::string>& filenames);
+    void startPreparing(const std::string& label, const std::string& path, S8 codec, LLPointer<LLImageRaw> raw);
+    void onPictureReady(const std::string& error, const Picture& picture);
+    void updatePictures();
 
     LLComboBox* mCategory = nullptr;
     LLLineEditor* mSubject = nullptr;
@@ -68,6 +93,8 @@ private:
     LLButton* mSend = nullptr;
     LLButton* mOpenTicket = nullptr;
     std::vector<LogFile> mLogs;
+    std::vector<Picture> mPictures;
+    S32 mPicturesPending = 0;   // being scaled and encoded on the "General" queue; they count towards MAX_PICTURES
     std::string mTicketUrl;
     bool mSending = false;
 };

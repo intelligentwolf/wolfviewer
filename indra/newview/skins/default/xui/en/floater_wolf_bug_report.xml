@@ -9,7 +9,7 @@
  can_close="true"
  can_minimize="true"
  can_resize="false"
- height="524"
+ height="730"
  layout="topleft"
  name="wolf_bug_report"
  help_topic="wolf_bug_report"
@@ -34,15 +34,35 @@
     <line_editor follows="left|top" height="22" layout="topleft" left="12" max_length_bytes="200" name="subject" top="180" width="436" label="For example: the viewer froze when I teleported" />
 
     <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="12" name="body_label" top="210" width="436">What happened?</text>
-    <text_editor follows="left|top" height="110" layout="topleft" left="12" max_length="20000" name="body" top="228" width="436" word_wrap="true" commit_on_focus_lost="false" />
+    <text_editor follows="left|top" height="90" layout="topleft" left="12" max_length="20000" name="body" top="228" width="436" word_wrap="true" commit_on_focus_lost="false" />
 
-    <check_box follows="left|top" height="18" layout="topleft" left="12" name="attach_logs" top="346" width="436" initial_value="true"
+    <check_box follows="left|top" height="18" layout="topleft" left="12" name="attach_logs" top="326" width="436" initial_value="true"
      label="Attach my viewer logs" tool_tip="Helps us see what the viewer was doing. Session ids and capability links are taken out first, and only the support team can open them." />
-    <text follows="left|top" height="64" layout="topleft" left="30" name="logs_list" top="366" width="418" wrap="true" text_color="LtGray_50">Looking for your logs...</text>
+    <text follows="left|top" height="102" layout="topleft" left="30" name="logs_list" top="346" width="418" wrap="true" text_color="LtGray_50">Looking for your logs...</text>
 
-    <text_editor follows="left|top" height="46" layout="topleft" left="12" max_length="4096" name="status" top="434" width="436" word_wrap="true" read_only="true" parse_urls="true" show_context_menu="true" visible="false" />
+    <!-- [FLEA PICTURES 2026-10-27] Jimmy Olsen, ticket #250: "Can u mod the flea report to also allow people to attach pics?"
+         Who and why: a resident wants to SHOW the support team what they see, in a click or two, without leaving the
+         viewer. Two ways in, side by side; then one line per picture with its own Remove button (wolffloaterbugreport.cpp
+         updatePictures shows "pictures_none" while there are none); then what is sent, in plain words. -->
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="12" name="pictures_label" top="452" width="436">Pictures (optional, up to 3)</text>
+    <button follows="left|top" height="23" layout="topleft" left="12" name="take_snapshot" top="470" width="140" label="Take a snapshot"
+     tool_tip="Takes a picture of the viewer screen as it is now, without this window" />
+    <button follows="left|top" height="23" layout="topleft" left="160" name="add_picture" top="470" width="140" label="Add a picture..."
+     tool_tip="Pick a picture from your computer (PNG, JPEG, BMP or TGA)" />
 
-    <button follows="left|bottom" height="23" layout="topleft" left="12" name="my_tickets" top="490" width="110" label="My tickets" tool_tip="Open your support tickets on wolf-grid.com in your browser" />
-    <button follows="left|bottom" height="23" layout="topleft" left="130" name="open_ticket" top="490" width="120" label="Open the ticket" tool_tip="Open the ticket you just sent in your browser" visible="false" />
-    <button follows="right|bottom" height="23" layout="topleft" left="348" name="send" top="490" width="100" label="Send" />
+    <text follows="left|top" height="20" layout="topleft" left="12" name="pictures_none" top="500" width="436" text_color="LtGray_50">No pictures added. They are optional.</text>
+    <text follows="left|top" height="20" layout="topleft" left="12" name="picture_1" top="500" width="346" use_ellipses="true" visible="false" />
+    <button follows="left|top" height="20" layout="topleft" left="368" name="remove_picture_1" top="498" width="80" label="Remove" tool_tip="Take this picture off the flea report" visible="false" />
+    <text follows="left|top" height="20" layout="topleft" left="12" name="picture_2" top="522" width="346" use_ellipses="true" visible="false" />
+    <button follows="left|top" height="20" layout="topleft" left="368" name="remove_picture_2" top="520" width="80" label="Remove" tool_tip="Take this picture off the flea report" visible="false" />
+    <text follows="left|top" height="20" layout="topleft" left="12" name="picture_3" top="544" width="346" use_ellipses="true" visible="false" />
+    <button follows="left|top" height="20" layout="topleft" left="368" name="remove_picture_3" top="542" width="80" label="Remove" tool_tip="Take this picture off the flea report" visible="false" />
+
+    <text follows="left|top" height="70" layout="topleft" left="12" name="pictures_note" top="568" width="436" wrap="true" text_color="LtGray_50">A snapshot is your whole viewer screen without this window. Each picture is made at most 1920 pixels on its longest side and 2 MB, and goes on your ticket like a screenshot added on the website, so check it shows nothing you would not want to share.</text>
+
+    <text_editor follows="left|top" height="46" layout="topleft" left="12" max_length="4096" name="status" top="642" width="436" word_wrap="true" read_only="true" parse_urls="true" show_context_menu="true" visible="false" />
+
+    <button follows="left|bottom" height="23" layout="topleft" left="12" name="my_tickets" top="696" width="110" label="My tickets" tool_tip="Open your support tickets on wolf-grid.com in your browser" />
+    <button follows="left|bottom" height="23" layout="topleft" left="130" name="open_ticket" top="696" width="120" label="Open the ticket" tool_tip="Open the ticket you just sent in your browser" visible="false" />
+    <button follows="right|bottom" height="23" layout="topleft" left="348" name="send" top="696" width="100" label="Send" />
 </floater>

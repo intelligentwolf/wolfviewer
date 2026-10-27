@@ -939,6 +939,12 @@ struct Clouds::Impl
         u1f(sh, "wolfLightScale", f.light_scale);
         u3f(sh, "wolfOtherDirection", f.other_dir_ecef.mV[0], f.other_dir_ecef.mV[1], f.other_dir_ecef.mV[2]);
         u1f(sh, "wolfOtherScale", f.other_scale);
+        // [WolfViewer 2026-10-27] the moon disc as drawn (cloudsF.glsl wolfCoronaOffDisc; CloudsFrame moon_disc_*)
+        u1f(sh, "wolfMoonDiscOn", f.moon_disc_on ? 1.f : 0.f);
+        u3f(sh, "wolfMoonDiscTo", f.moon_disc_to_ecef.mV[0], f.moon_disc_to_ecef.mV[1], f.moon_disc_to_ecef.mV[2]);
+        u3f(sh, "wolfMoonDiscRight", f.moon_disc_right_ecef.mV[0], f.moon_disc_right_ecef.mV[1], f.moon_disc_right_ecef.mV[2]);
+        u3f(sh, "wolfMoonDiscUp", f.moon_disc_up_ecef.mV[0], f.moon_disc_up_ecef.mV[1], f.moon_disc_up_ecef.mV[2]);
+        u2f(sh, "wolfMoonDiscHalf", f.moon_disc_half.mV[0], f.moon_disc_half.mV[1]);
         // the noise seed: the takram `time` of generators.ts:22 (seconds); taken modulo 1024 s for float
         // precision - fract(time) (all the shader uses) is unchanged by it
         u1f(sh, "time", (F32)std::fmod(f.time, 1024.0));

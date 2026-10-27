@@ -743,7 +743,10 @@ inline void draw_real(LLShaderUniforms* shader, F32 value, S32 shader_key)
 // or a resident's EEP is exactly what it was.
 static F32 wolf_fogged_distance_multiplier(const LLSettingsSky& sky)
 {
-    const F32 distance_multiplier = sky.getDistanceMultiplier();
+    // [WolfViewer 2026-10-27] under the Wolf sky with Wolf weather, held to the weather's haze (wolfenvironmentrender.cpp
+    // WolfEnvironmentRender::worldDistanceMultiplier, ticket #247's TROMSO morning); the EEP's own value otherwise
+    const F32 distance_multiplier = WolfEnvironmentRender::worldDistanceMultiplier(sky.getBlueDensity().mV[0], sky.getHazeDensity(),
+                                                                                   sky.getDensityMultiplier(), sky.getDistanceMultiplier());
     const F32 fog_extinction = WolfWeather::fogExtinction();
     if (fog_extinction <= 0.f) return distance_multiplier;
     const LLColor3 blue = sky.getBlueDensity();

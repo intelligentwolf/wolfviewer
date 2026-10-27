@@ -862,6 +862,35 @@ vec3 wolfCoronaExcess(const float cosTheta) {
   return max(0.5 * p - vec3(phaseFunction(cosTheta)), vec3(0.0));
 }
 
+// [WolfViewer 2026-10-27] ticket #247 (Jimmy Olsen, TROMSO by night, w81): "A bright coming from moon center and not behind it..
+// but sometimes it goes away". The corona above is the diffraction of the light taken as a point, its central lobe out to the
+// first dark ring at 1.9 deg (green). The moon the dome draws while an EEP drives the sky is LL's quad (skyF.glsl wolfEepMoon:
+// half-size moon_scale x 0.1 x 0.45 tangent, wolfenvironmentrender.cpp renderSkyDome; about 2.6 deg at moon_scale 1, the Wolf
+// weather's own value), ten times the real moon (0.26 deg) - so the whole lobe, ~0.5 x 1000 sr^-1 at the centre, lay ON the
+// disc, and the clouds are laid over the dome after it (compositeF.glsl: dome x (1 - alpha) + clouds): a white spot over the
+// moon's middle whenever thin water cloud (Sc / Ac / As edges; never ice: x (1 - ice) in the march) drifted across it - gone
+// again as the cloud moved on. Over the disc the forward-diffracted light is the disc's own light (it is part of the extinction
+// the cloud already takes off the disc, van de Hulst 8.22): for the real moon it is ~1 % of the disc's luminance and never seen
+// as a spot; the EEP disc is not drawn at that luminance, so it showed. So the corona is left out over the disc as drawn - the
+// glow round it, outside the disc, is exactly as before. The edge is the disc's own (wolfEepMoon / wolfMoonDisc alpha
+// 1 - smoothstep(0.98, 1.0, r)), so corona and disc meet without a seam. 1 everywhere when no disc is drawn.
+uniform float wolfMoonDiscOn;
+uniform vec3 wolfMoonDiscTo;      // ECEF, unit
+uniform vec3 wolfMoonDiscRight;
+uniform vec3 wolfMoonDiscUp;
+uniform vec2 wolfMoonDiscHalf;    // tangents along right / up
+float wolfCoronaOffDisc(const vec3 rayDirection) {
+  if (wolfMoonDiscOn < 0.5) {
+    return 1.0;
+  }
+  float c = dot(rayDirection, wolfMoonDiscTo);
+  if (c <= 0.0) {
+    return 1.0;
+  }
+  vec2 p = vec2(dot(rayDirection, wolfMoonDiscRight), dot(rayDirection, wolfMoonDiscUp)) / (c * max(wolfMoonDiscHalf, vec2(1e-6)));
+  return smoothstep(0.98, 1.0, length(p));
+}
+
 // Source note: Construct spherical harmonics of degree 2 using 2 sample points
 // positioned near the horizon occlusion points on the sun direction plane.
 // Source: three-geospatial packages/clouds/src/shaders/clouds.frag:419-436 getGroundSunSkyIrradiance
@@ -1462,7 +1491,7 @@ void main() {
       rayDirection,
       rayNearFar,
       cosTheta,
-      wolfCoronaExcess(cosTheta),
+      wolfCoronaExcess(cosTheta) * wolfCoronaOffDisc(rayDirection),   // [2026-10-27] not over the moon disc (ticket #247)
       stbn,
       pow(2.0, mipLevel),
       marchedFrontDepth,

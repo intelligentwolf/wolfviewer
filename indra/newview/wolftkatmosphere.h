@@ -136,6 +136,9 @@ namespace WolfTk
          *  wolfEepCloudGainOn; wolfenvironmentrender.cpp measureCloudCover). */
         /** [WolfViewer round 16] the clouds' thinning (cloudsF.glsl wolfEepCloudThin): 0 = as marched, toward 1 more transparent */
         void setEepCloudThin(F32 thin) { mEepCloudThin = thin; }
+        /** [WolfViewer 2026-10-27] the clouds take the sky's per-direction gain (cloudsF.glsl wolfEepCloudSkyGain), used while
+         *  the cloud gains themselves are off: Wolf weather by day (wolfenvironmentrender.cpp measureCloudCover) */
+        void setEepCloudSkyGain(bool on) { mEepCloudSkyGain = on; }
         void setEepCloudGains(const LLColor3 gains[EEP_GAINS], bool on) { for (S32 i = 0; i < EEP_GAINS; ++i) mEepCloudGain[i] = gains[i]; mEepCloudGainOn = on; mEepBlockDirty = true; }
 
         GLuint transmittanceTexture() const;
@@ -203,6 +206,7 @@ namespace WolfTk
         bool     mEepGainOn = false;
         LLColor3 mEepCloudGain[EEP_GAINS];   // read by the shaders only while mEepCloudGainOn
         bool     mEepCloudGainOn = false;
+        bool     mEepCloudSkyGain = false;   // [2026-10-27] setEepCloudSkyGain
         LLVector3 mEepGainRef = LLVector3::z_axis, mEepCloudGainRef = LLVector3::z_axis;   // setEepGainRefs
         F32      mNight = 0.f, mNightS = 1.f;   // setNightLight
         // [WolfViewer 2026-10-25] the WolfEepGains uniform block (brunetonRuntime.glsl; LLGLSLShader::UB_WOLF_EEP_GAINS): the sky's

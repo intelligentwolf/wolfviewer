@@ -1105,6 +1105,8 @@ void Atmosphere::setRuntimeUniforms(LLGLSLShader& sh, F32 pre_exposure, bool uni
     if (lo >= 0) glUniform1f(lo, mEepGainOn ? 1.f : 0.f);
     const GLint lco = location(sh.mProgramObject, "wolfEepCloudGainOn");
     if (lco >= 0) glUniform1f(lco, mEepCloudGainOn ? 1.f : 0.f);
+    const GLint lcsg = location(sh.mProgramObject, "wolfEepCloudSkyGain");   // [2026-10-27] setEepCloudSkyGain
+    if (lcsg >= 0) glUniform1f(lcsg, mEepCloudSkyGain ? 1.f : 0.f);
     // [WolfViewer 2026-10-25] the azimuths' reference: the stock sky's light (wolfenvironmentrender.cpp eepLightWorld)
     const GLint lgr = location(sh.mProgramObject, "wolfEepGainRef");
     if (lgr >= 0) glUniform3fv(lgr, 1, mEepGainRef.mV);

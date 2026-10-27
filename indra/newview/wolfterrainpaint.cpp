@@ -565,8 +565,12 @@ void WolfTerrainPaint::fadeWindowEdge(Layer& L)
             if (west && i < F) f = llmin(f, ease(i));
             if (east && W - 1 - i < F) f = llmin(f, ease(W - 1 - i));
             if (f >= 1.f) continue;
-            U16& a = L.mMap[((size_t)j * W + i) * 4 + 3];
-            if (a != 0) a = f32_to_f16(f16_to_f32(a) * f);
+            // [SMOOTH EDGES 2026-10-27] every slot's weight (sections: wolfterrainpaint.h RENDERING)
+            for (S32 k = 0; k < SLOTS; ++k)
+            {
+                U16& a = L.mMap[weightIndex(L, (size_t)j * W + i, k)];
+                if (a != 0) a = f32_to_f16(f16_to_f32(a) * f);
+            }
         }
     }
     L.mDirtyGL = true;
@@ -604,7 +608,7 @@ void WolfTerrainPaint::ensureBuffers(Layer& L, LLViewerRegion* regionp)
     L.mWinX = 0.f; L.mWinY = 0.f;
     F32 cx, cy;
     if (windowed && cameraIn(regionp, cx, cy)) windowOriginFor(L, cx, cy, L.mWinX, L.mWinY);
-    L.mMap.assign((size_t)w * h * 4, 0);
+    L.mMap.assign((size_t)w * h * 8, 0);   // two RGBA sections (wolfterrainpaint.h RENDERING)
     L.mSDist.clear(); L.mSAlong.clear(); L.mSLat.clear();
     L.mSBoxSet = false;
     L.mLive = false;
@@ -886,22 +890,21 @@ bool WolfTerrainPaint::rasterSegment(Layer& L, F32 x0, F32 y0, F32 x1, F32 y1, F
 }
 
 /**
- * Source: terrain_paint.js _composite — coverage feathers over the outer 12% of the half-width
- * (at least one map pixel). WHO OWNS A TEXEL: a later stroke takes every texel inside its body
- * (geometric coverage f >= 0.5, everything but the outer half of the feather) whatever was
- * there; in its soft edge (f < 0.5) it takes a texel only where its blended coverage
- * c = f × opacity is at least the old one's, so a feathered edge does not nibble into solid
- * paint. An erase stroke scales the old coverage down by c.
+ * Source: terrain_paint.js _composite — coverage feathers over the outer FEATHER_FRAC of the
+ * half-width (at least FEATHER_MIN_PX map texels).
  *
- * [FIX 2026-09-11] The test used to be `c + 1/255 < old_cov → keep old` everywhere, with c
- * INCLUDING opacity, so a 70% road could never be laid over 100% grass — every road texel lost
- * to the grass, live and on reload ("only the grass and a tiny piece of road"). Opacity is how
- * much ground shows through the paint, not a claim on the texel: the brush decides ownership,
- * opacity only the blend. terrain_paint.js _composite is the same rule; keep them in step.
+ * [SMOOTH EDGES 2026-10-27, ticket 262] Every texel keeps a WEIGHT per slot instead of one owner.
+ * A stroke of slot s with geometric coverage f (1 in the body, eased to 0 over the feather) and
+ * opacity o lays itself over what is there: every other slot's weight is scaled by (1 - f) and
+ * slot s becomes w_s · (1 - f) + f · o. In the body (f = 1) that is exactly the rule since
+ * 2026-09-11 — the brush decides ownership, opacity only how much ground shows through (a 70%
+ * road over grass is 70% road and 30% ground) — and across the feather the old paint and the new
+ * now cross-fade, where the single owner per texel used to switch in 0.25 m steps along every
+ * seam between two textures (the jagged edge of ticket 262). An erase stroke scales every weight
+ * by (1 - f · o), as it scaled the coverage. The weights never add up to more than 1.
  *
- * Texel (RGBA16F): R,G = (SLOT_R0 + SLOT_DR·slot)·(cos φ, sin φ), φ = 2π·along/tile (0 for a
- * world-grid slot); B = metres across from the left edge of travel / tile (0 for a world-grid
- * slot); A = coverage.
+ * Section 0 (along-phase, across) belongs to the last "road" stroke over the texel; a world-grid
+ * stroke and an erase leave it as it is, so a road keeps its texture coordinates under them.
  */
 void WolfTerrainPaint::composite(Layer& L, const Box& bb, const Stroke& s, const std::vector<U16>& src, std::vector<U16>& dst)
 {
@@ -909,17 +912,21 @@ void WolfTerrainPaint::composite(Layer& L, const Box& bb, const Stroke& s, const
     const F32 w = clampWidth(s.mWidth);
     const F32 o = clampOpacity(s.mOpacity);
     const F32 R = w * 0.5f;
-    const F32 fe = llmax(1.f / L.mPpm, R * 0.12f);
+    const F32 fe = llmax(FEATHER_MIN_PX / L.mPpm, R * FEATHER_FRAC);
     const bool erase = s.mSlot < 0;
     const F32 tile = erase ? 4.f : L.mScales[s.mSlot];
     const bool world = !erase && L.mWorld[s.mSlot];
-    const F32 radius = erase ? 0.f : SLOT_R0 + SLOT_DR * (F32)s.mSlot;   // the slot code (see SLOT_R0)
     const bool same = &src == &dst;
+    const size_t sec1 = (size_t)W * L.mH * 4;   // section 1 starts here
     for (S32 j = bb.y0; j < bb.y1; ++j)
     {
         for (S32 i = bb.x0; i < bb.x1; ++i)
         {
-            const size_t p = (size_t)j * W + i, di = p * 4;
+            const size_t p = (size_t)j * W + i, d0 = p * 4, d1 = sec1 + p * 4;
+            if (!same)
+            {
+                for (S32 c4 = 0; c4 < 4; ++c4) { dst[d0 + c4] = src[d0 + c4]; dst[d1 + c4] = src[d1 + c4]; }
+            }
             const F32 dist = L.mSDist[p];
             F32 f = 0.f;                        // geometric coverage: 1 in the body, feathered at the edge
             if (dist <= R)
@@ -927,30 +934,22 @@ void WolfTerrainPaint::composite(Layer& L, const Box& bb, const Stroke& s, const
                 f = llmin((R - dist) / fe, 1.f);
                 f = f * f * (3.f - 2.f * f);    // smoothstep
             }
-            const F32 c = f * o;                // blended coverage — what the shader mixes with
-            if (c <= 0.002f)
+            const F32 c = f * o;                // what this stroke lays down
+            if (c <= 0.002f) continue;
+            const F32 keep = erase ? 1.f - c : 1.f - f;   // what is left of the paint already there
+            for (S32 k = 0; k < SLOTS; ++k)
             {
-                if (!same) { dst[di] = src[di]; dst[di + 1] = src[di + 1]; dst[di + 2] = src[di + 2]; dst[di + 3] = src[di + 3]; }
-                continue;
+                const size_t wi = weightIndex(L, p, k);
+                F32 wk = f16_to_f32(src[wi]) * keep;
+                if (k == s.mSlot) wk += c;
+                dst[wi] = f32_to_f16(llclamp(wk, 0.f, 1.f));
             }
-            const F32 old_cov = f16_to_f32(src[di + 3]);
-            if (erase)
+            if (!erase && !world)
             {
-                if (!same) { dst[di] = src[di]; dst[di + 1] = src[di + 1]; dst[di + 2] = src[di + 2]; }
-                dst[di + 3] = f32_to_f16(old_cov * (1.f - c));
-                continue;
+                const F32 along = L.mSAlong[p] / tile;
+                dst[d0]     = f32_to_f16(along - floorf(along));   // fract: the shader unwraps it
+                dst[d0 + 1] = f32_to_f16((R - L.mSLat[p]) / tile); // left edge of travel 0, right edge w/tile
             }
-            // Body: ours. Soft edge: ours only where it is at least as opaque as what is there.
-            if (f < 0.5f && c + 1.f / 255.f < old_cov)
-            {
-                if (!same) { dst[di] = src[di]; dst[di + 1] = src[di + 1]; dst[di + 2] = src[di + 2]; dst[di + 3] = src[di + 3]; }
-                continue;
-            }
-            const F32 ph = world ? 0.f : (L.mSAlong[p] / tile) * TAU;
-            dst[di]     = f32_to_f16(radius * cosf(ph));
-            dst[di + 1] = f32_to_f16(radius * sinf(ph));
-            dst[di + 2] = f32_to_f16(world ? 0.f : (R - L.mSLat[p]) / tile);   // left edge of travel 0, right edge w/tile
-            dst[di + 3] = f32_to_f16(c);
         }
     }
 }
@@ -1006,15 +1005,17 @@ bool WolfTerrainPaint::layerReady(const Layer& L, LLViewerRegion* regionp) const
 }
 
 // Source: wolfwaterfield.cpp upload — a raw GL texture through LLImageGL::setManualImage; RGBA16F
-// half floats here, bilinear with no mips (the texels carry an angle, a radius code and a
-// coordinate a mip would average).
+// half floats here, no mips (the texels carry a wrapped phase and a coordinate a mip would
+// average). [SMOOTH EDGES 2026-10-27] The two sections are stacked: mW x 2·mH. The shader reads
+// it with texelFetch only and does its own bilinear blend inside one section, so the filter
+// set here never mixes the sections.
 void WolfTerrainPaint::upload(Layer& L)
 {
     if (L.mMap.empty()) return;
     if (!L.mTex) LLImageGL::generateTextures(1, &L.mTex);
     gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE, L.mTex);
     LLImageGL::setManualImage(LLTexUnit::getInternalType(LLTexUnit::TT_TEXTURE), 0, GL_RGBA16F,
-                              L.mW, L.mH, GL_RGBA, GL_HALF_FLOAT, L.mMap.data(), false);
+                              L.mW, L.mH * 2, GL_RGBA, GL_HALF_FLOAT, L.mMap.data(), false);
     gGL.getTexUnit(0)->setTextureFilteringOption(LLTexUnit::TFO_BILINEAR);
     gGL.getTexUnit(0)->setTextureAddressMode(LLTexUnit::TAM_CLAMP);
     gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);

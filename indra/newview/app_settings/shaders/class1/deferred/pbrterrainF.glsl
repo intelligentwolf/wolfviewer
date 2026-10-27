@@ -175,19 +175,23 @@ float wolfCaustic(vec3 region_pos)
 }
 // </WolfViewer>
 
-// <WolfViewer 2026-09-10> Painted roads and tracks (wolfterrainpaint.cpp; Build > Paint). The
-// paint map (RGBA16F) holds per texel: R,G = a slot-coded radius (0.25 + 0.2·slot, slots 0-5,
-// WolfTerrainPaint::SLOT_R0 / SLOT_DR; a code above 1 is fine in a half float) times
-// (cos, sin) of the along-phase of the nearest stroke, B = metres across the band from its
-// left edge / tile, A = coverage. The slot is read from the NEAREST texel (a bilinear blend of
-// two radii would decode as a third texture along a seam); the angle, the across coordinate
-// and the coverage are bilinear. A slot in "road" mode samples its palette texture at
-// (across, along) — square tiles following the stroke; a slot in "world" mode at the region
-// position / tile, phased by the region's global origin like the ground textures. LLImageRaw
-// is bottom-up so v = 0 is the image bottom and the along-phase is sampled directly (WolfStorm
-// samples 1 - along: its textures are top-down). Derivatives for textureGrad are taken in
-// uniform control flow (dFdx in a divergent branch is undefined). Source:
-// wolfstorm/js/world/terrain/terrain_manager.js wsTerrainPaint — keep them in step.
+// <WolfViewer 2026-09-10> Painted roads and tracks (wolfterrainpaint.cpp; Build > Paint).
+// [SMOOTH EDGES 2026-10-27, ticket 262] The paint map (RGBA16F) is two sections of W x H texels
+// stacked in one W x 2H texture (wolfterrainpaint.h RENDERING): section 0 = (along-phase =
+// fract(metres along / tile) of the last road stroke, metres across its band from the left edge /
+// tile, weight of slot 4, weight of slot 5), section 1 = (weights of slots 0-3). Each slot's weight
+// is filtered bilinearly (by hand with texelFetch, inside one section) and every palette texture
+// with a weight is mixed in by it, so two painted textures cross-fade where they meet. Until
+// 10-27 one slot per texel was read from the NEAREST texel, which gave a 0.25 m staircase along
+// every such seam ("a very jagged edge", ticket 262). The phase and across coordinate are
+// blended only from texels whose weight is in a "road" slot (an unpainted texel no longer drags
+// them to 0) and the phase is unwrapped against the heaviest one. A slot in "road" mode samples
+// its palette texture at (across, along) - square tiles following the stroke; a slot in "world"
+// mode at the region position / tile, phased by the region's global origin like the ground
+// textures. LLImageRaw is bottom-up so v = 0 is the image bottom and the along-phase is sampled
+// directly (WolfStorm samples 1 - along: its textures are top-down). Derivatives for textureGrad
+// are taken in uniform control flow (dFdx in a divergent branch is undefined). Source:
+// wolfstorm/js/world/terrain/terrain_manager.js wsTerrainPaint - keep them in step.
 uniform sampler2D wolfPaintMap;
 // <WolfViewer 2026-09-18> SNOW ON THE GROUND. Source: wolfstorm terrain_manager.js, the block
 // after wsTerrainPaint - same numbers. wolf_snow_cover 0..1 is how much has settled
@@ -246,32 +250,77 @@ vec4 wolfPaintSample(int slot, vec2 uv, vec2 ddx, vec2 ddy)
 }
 vec3 wolfTerrainPaint(vec3 ground, vec2 region_xy)
 {
-    if (wolf_paint_on < 0.5) return ground;
+    if (wolf_paint_on < 0.5) return ground;   // a uniform: the same for the whole draw
     vec2 puv = (region_xy - wolf_paint_origin) / wolf_paint_size;
-    if (puv.x < 0.0 || puv.y < 0.0 || puv.x > 1.0 || puv.y > 1.0) return ground;
-    vec4 pm = texture(wolfPaintMap, puv);
-    vec2 cs = pm.rg;
-    vec2 dcx = dFdx(cs), dcy = dFdy(cs);
-    float dbx = dFdx(pm.b), dby = dFdy(pm.b);
+    bool inside = puv.x >= 0.0 && puv.y >= 0.0 && puv.x <= 1.0 && puv.y <= 1.0;
+    ivec2 msz = textureSize(wolfPaintMap, 0);
+    msz.y = msz.y / 2;                                  // one section
+    vec2 st = clamp(puv, 0.0, 1.0) * vec2(msz) - 0.5;   // texel centres on whole numbers
+    vec2 fl = floor(st);
+    vec2 fr = st - fl;
+    ivec2 i0 = ivec2(fl);
+    vec4 roadA = vec4(wolf_paint_mode[0] < 0.5 ? 1.0 : 0.0, wolf_paint_mode[1] < 0.5 ? 1.0 : 0.0,
+                      wolf_paint_mode[2] < 0.5 ? 1.0 : 0.0, wolf_paint_mode[3] < 0.5 ? 1.0 : 0.0);
+    vec2 roadB = vec2(wolf_paint_mode[4] < 0.5 ? 1.0 : 0.0, wolf_paint_mode[5] < 0.5 ? 1.0 : 0.0);
+    vec4 w03 = vec4(0.0);
+    vec2 w45 = vec2(0.0);
+    float tph[4];
+    float tac[4];
+    float trw[4];
+    float best = -1.0;
+    float ref = 0.0;
+    for (int t = 0; t < 4; ++t)
+    {
+        ivec2 o = ivec2(t - 2 * (t / 2), t / 2);
+        ivec2 q = clamp(i0 + o, ivec2(0), msz - ivec2(1));
+        vec4 s0 = texelFetch(wolfPaintMap, q, 0);
+        vec4 s1 = texelFetch(wolfPaintMap, ivec2(q.x, q.y + msz.y), 0);
+        float b = (o.x == 1 ? fr.x : 1.0 - fr.x) * (o.y == 1 ? fr.y : 1.0 - fr.y);
+        w03 += b * s1;
+        w45 += b * s0.zw;
+        trw[t] = b * (dot(s1, roadA) + dot(s0.zw, roadB));
+        tph[t] = s0.x;
+        tac[t] = s0.y;
+        if (trw[t] > best) { best = trw[t]; ref = s0.x; }
+    }
+    float rsum = trw[0] + trw[1] + trw[2] + trw[3];
+    float along = 0.0;
+    float across = 0.0;
+    if (rsum > 1e-5)
+    {
+        for (int t = 0; t < 4; ++t)
+        {
+            float d = tph[t] - ref;
+            along += trw[t] * (d - floor(d + 0.5));   // the shortest way round the wrap
+            across += trw[t] * tac[t];
+        }
+        along = ref + along / rsum;
+        across = across / rsum;
+    }
+    vec2 uvRoad = vec2(across, along);
+    vec2 dRx = dFdx(uvRoad), dRy = dFdy(uvRoad);
+    // the phase wraps at a whole tile: a step of about one between neighbouring pixels is the wrap
+    dRx.y -= floor(dRx.y + 0.5);
+    dRy.y -= floor(dRy.y + 0.5);
     vec2 dwx = dFdx(region_xy), dwy = dFdy(region_xy);
-    float cov = pm.a;
-    if (cov < 0.004) return ground;
-    vec2 psz = vec2(textureSize(wolfPaintMap, 0));
-    vec2 nrg = texelFetch(wolfPaintMap, ivec2(clamp(puv * psz, vec2(0.0), psz - 1.0)), 0).rg;
-    // floor((r - (SLOT_R0 - SLOT_DR / 2)) / SLOT_DR) for r = 0.25 + 0.2 * slot, slots 0-5 (wolfterrainpaint.h)
-    int slot = int(clamp(floor((length(nrg) - 0.15) / 0.2), 0.0, 5.0));
-    float r2 = max(dot(cs, cs), 1e-4);
-    float along = fract(atan(cs.y, cs.x) / 6.2831853 + 1.0);
-    vec2 uvRoad = vec2(pm.b, along);
-    vec2 ddxRoad = vec2(dbx, (cs.x * dcx.y - cs.y * dcx.x) / r2 / 6.2831853);
-    vec2 ddyRoad = vec2(dby, (cs.x * dcy.y - cs.y * dcy.x) / r2 / 6.2831853);
-    float tile = max(wolf_paint_tile[slot], 0.01);
-    vec2 uvWorld = (region_xy + vec2(wolf_paint_offx[slot], wolf_paint_offy[slot])) / tile;
-    vec2 ddxWorld = dwx / tile, ddyWorld = dwy / tile;
-    bool world = wolf_paint_mode[slot] > 0.5;
-    vec4 c = wolfPaintSample(slot, world ? uvWorld : uvRoad, world ? ddxWorld : ddxRoad, world ? ddyWorld : ddyRoad);
-    // The texture's own alpha is respected on top of the stroke's opacity in the coverage.
-    return mix(ground, c.rgb, cov * c.a);
+    if (!inside) return ground;
+    float pw[6] = float[6](w03.x, w03.y, w03.z, w03.w, w45.x, w45.y);
+    vec3 acc = vec3(0.0);
+    float cov = 0.0;
+    for (int k = 0; k < 6; ++k)
+    {
+        if (pw[k] < 0.002) continue;
+        bool world = wolf_paint_mode[k] > 0.5;
+        float tile = max(wolf_paint_tile[k], 0.01);
+        vec2 uvWorld = (region_xy + vec2(wolf_paint_offx[k], wolf_paint_offy[k])) / tile;
+        vec4 c = wolfPaintSample(k, world ? uvWorld : uvRoad, world ? dwx / tile : dRx, world ? dwy / tile : dRy);
+        // The texture's own alpha is respected on top of the stroke's opacity in the weight.
+        float a = pw[k] * c.a;
+        acc += a * c.rgb;
+        cov += a;
+    }
+    float n = cov > 1.0 ? 1.0 / cov : 1.0;   // half-float rounding can lift the sum a hair over 1
+    return ground * (1.0 - cov * n) + acc * n;
 }
 // </WolfViewer>
 

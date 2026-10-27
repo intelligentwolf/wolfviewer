@@ -53,13 +53,17 @@ class LLVOWater;
 //   (region-metre polyline x,y,...)}. Later strokes cover earlier ones.
 //
 // RENDERING: per region an RGBA16F PAINT MAP (4 px/m, at most 2048 px a side for the agent's
-// region, 1024 for a neighbour) rasterised from the strokes (composite()): R,G = a slot-coded
-// radius (SLOT_R0 + SLOT_DR · slot) times cos,sin of the along-phase (2π · metres along / tile)
-// of the nearest stroke — an angle and a radius survive bilinear filtering where a wrapped
-// fraction would not — B = metres across the band from the left edge of travel / tile,
-// A = feathered coverage × opacity. terrainF.glsl / pbrterrainF.glsl
-// (wolfTerrainPaint) decode it and mix the palette texture — its x across the band, its y
-// along it — over the ground after the composition blend, only once the region's own detail
+// region, 1024 for a neighbour) rasterised from the strokes (composite()). [SMOOTH EDGES
+// 2026-10-27, ticket 262] It is two sections of W x H texels stacked in one texture (W x 2H):
+// section 0 = (along-phase = fract(metres along / tile) of the last "road" stroke, metres
+// across its band from the left edge of travel / tile, weight of slot 4, weight of slot 5),
+// section 1 = (weights of slots 0-3). A weight is how much of that palette texture covers the
+// ground there (feathered coverage x opacity); the weights add up to 1 at most and the rest is
+// the ground. Until 10-27 a texel held ONE slot (coded in the R,G radius) read from the nearest
+// texel, so wherever two painted textures met there was a hard 0.25 m staircase ("a very
+// jagged edge when I use the paint the ground", ticket 262). terrainF.glsl / pbrterrainF.glsl
+// (wolfTerrainPaint) filter the weights bilinearly and mix every palette texture in by its
+// weight over the ground after the composition blend, only once the region's own detail
 // textures and every palette texture in use have loaded. Bound by lldrawpoolterrain.cpp
 // through bind()/unbind(); the map is uploaded lazily there.
 //
@@ -74,14 +78,15 @@ class WolfTerrainPaint : public LLSingleton<WolfTerrainPaint>
 
 public:
     // [6 SLOTS 2026-09-19] Palette textures per region (four until today): php/terrain_paint.php
-    // PAINT_SLOTS and WolfStorm TerrainPaint.SLOTS are the same number. A slot is written into
-    // the paint map as the radius SLOT_R0 + SLOT_DR * slot (0.25 … 1.25; the map is RGBA16F, so
-    // a code above 1 is kept as written) and read back by terrainF.glsl / pbrterrainF.glsl as
-    // floor((r - (SLOT_R0 - SLOT_DR / 2)) / SLOT_DR). Each slot is one sampler in both terrain
-    // shaders: llviewershadermgr.cpp terrain_sampler_count() counts them against the GPU.
+    // PAINT_SLOTS and WolfStorm TerrainPaint.SLOTS are the same number. Each slot has its own
+    // weight in the paint map (see RENDERING above) and is one sampler in both terrain shaders:
+    // llviewershadermgr.cpp terrain_sampler_count() counts them against the GPU.
     static constexpr S32 SLOTS = 6;
-    static constexpr F32 SLOT_R0 = 0.25f;
-    static constexpr F32 SLOT_DR = 0.2f;
+    // [SMOOTH EDGES 2026-10-27, ticket 262] A stroke's coverage eases from nothing to full over
+    // its outer FEATHER_FRAC of the half-width, but never over fewer than FEATHER_MIN_PX map
+    // texels (was 1 texel = 0.25 m at 4 px/m: every brush up to 8 m wide had a hard edge).
+    static constexpr F32 FEATHER_FRAC = 0.12f;
+    static constexpr F32 FEATHER_MIN_PX = 2.f;
     static constexpr F32 MAP_PX_PER_M = 4.f;
     static constexpr S32 MAP_MAX_PX = 2048;
     static constexpr S32 MAP_MAX_PX_NEIGHBOUR = 1024;
@@ -224,8 +229,8 @@ private:
         // unless mWindowed.
         bool mWindowed = false;
         F32  mWinX = 0.f, mWinY = 0.f, mWinW = 0.f, mWinH = 0.f;
-        // RGBA16F: R,G = (0.25 + 0.2·slot) · (cos φ, sin φ), φ = 2π·along/tile (0 for a world-grid
-        // slot); B = metres across the band from its left edge / tile; A = coverage. Half floats.
+        // RGBA16F half floats, two sections of mW x mH texels (RENDERING above): section 0 at
+        // [0, mW*mH*4) = (along-phase, across, weight 4, weight 5), section 1 after it = weights 0-3.
         std::vector<U16> mMap;
         U32  mTex = 0;                  // GL texture, uploaded lazily by bind()
         bool mDirtyGL = false;
@@ -295,6 +300,12 @@ private:
     bool rasterSegment(Layer& L, F32 x0, F32 y0, F32 x1, F32 y1, F32 w, F32 cum, Box& out);
     bool rasterPolyline(Layer& L, const std::vector<F32>& p, F32 w, Box& out);
     void composite(Layer& L, const Box& bb, const Stroke& s, const std::vector<U16>& src, std::vector<U16>& dst);
+    // [SMOOTH EDGES 2026-10-27] Index in mMap of slot k's weight at texel p (= j·mW + i):
+    // slots 0-3 are section 1 (R,G,B,A), slots 4-5 section 0 (B,A) - see RENDERING above.
+    static size_t weightIndex(const Layer& L, size_t p, S32 k)
+    {
+        return k < 4 ? (size_t)L.mW * (size_t)L.mH * 4 + p * 4 + (size_t)k : p * 4 + 2 + (size_t)(k - 4);
+    }
     void rasterStroke(Layer& L, const Stroke& s);
     bool layerReady(const Layer& L, LLViewerRegion* regionp) const;
     void upload(Layer& L);

@@ -161,6 +161,7 @@ namespace
         F32      cover = 0.f;
         F32      hazeScale = 1.f;
         F32      weatherHazeSigma = -1.f;           // [2026-10-27] the world's haze extinction the weather allows, 1/m (-1: no limit)
+        bool     wolfWeather = false;               // [2026-10-27] a Wolf-mode document with weather and an EEP sky (updateLight)
         F32      weatherRepeatScale = 1.f;          // [WolfViewer round 9] the EEP's cloud_scale over its default
         LLColor3 sunTint = LLColor3::white;         // [WolfViewer 2026-10-13] x the direct light: LL's own light's hue (hueSwap)
         LLColor3 ambTint = LLColor3::white;         // [WolfViewer 2026-10-13] x the sky's light: LL's own ambient hue (hueSwap)
@@ -1199,6 +1200,7 @@ namespace
                 limit = (0.2447f + hd) * 0.0001f * dist;
             }
             sNext.weatherHazeSigma = limit;
+            sNext.wolfWeather = psky && d.mMode == WolfEnvDoc::WOLF && d.mHaveWeather;   // [2026-10-27] measureCloudCover
         }
         // [WolfViewer round 9] the clouds' size from the EEP's cloud_scale (llsettingssky.cpp:904 default 0.4199): the weather
         // texture repeats 100 times at the default (CloudsEffect.ts:180-186), fewer for bigger clouds
@@ -2351,6 +2353,7 @@ namespace
             if (sCloudGainValid) { sCloudGainValid = false; LLColor3 white[NPROBE]; for (S32 i = 0; i < NPROBE; ++i) white[i] = LLColor3::white; sAtmos->setEepCloudGains(white, false); }
             if (sStockValid || sThin != 0.f) { sStockValid = false; sThin = sThinTarget = 0.f; sAtmos->setEepCloudThin(0.f); }
             sCoverLocked = false; sCoverSettled = 0; sCoverLockTarget = -1.f;
+            sAtmos->setEepCloudSkyGain(false);   // [2026-10-27] no EEP: no gains of any kind
             return;
         }
         static F64 s_next = 0.0;
@@ -2386,7 +2389,15 @@ namespace
         // the dark skylit fragments cannot survive them. With the sun down the clouds now keep the physical light the march
         // gives them (the moon as the light, the twilight sky's irradiance: cloudsLight.glsl); the gains learn again at sunrise.
         // Daytime is unchanged (Paul 10-14: the EEP is the basis for the look by day).
-        const bool gainsByDay = sFrame.sunUp;
+        // [WolfViewer 2026-10-27] WITH WOLF WEATHER, BY DAY, THE CLOUDS TAKE THE SKY'S GAIN (Paul's choice "A", TROMSO 09:30Z: MET
+        // low 81 %, the march's clouds over 84 % of the sky above 20 deg, about a quarter of them visible). The gains above pull each
+        // direction's clouds to the stock EEP layer's colour, and the server's EEP for that weather has a stock layer the sky's own
+        // colour (EEP verify, 7.8 deg up 166 deg from the sun: sky 162,147,153, cloud 160,147,153): the clouds were painted the
+        // sky. With Wolf weather the clouds now take the sky's per-direction gain instead (cloudsF.glsl wolfEepCloudSkyGain ->
+        // wolfEepGainDir, the gain the haze already takes): the EEP's palette, the physical contrast between cloud and sky.
+        // Without Wolf weather (an EEP alone), by day the stock-cloud gains stay as they were; by night neither (as since 10-26).
+        const bool gainsByDay = sFrame.sunUp && !sFrame.wolfWeather;
+        sAtmos->setEepCloudSkyGain(sFrame.sunUp && sFrame.wolfWeather);
         if (!gainsByDay && sCloudGainValid)
         {
             sCloudGainValid = false;

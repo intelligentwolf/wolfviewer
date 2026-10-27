@@ -97,6 +97,10 @@ uniform vec3 wolfEepCloudTint;
 // [WolfViewer 2026-10-13, round 16] how much thinner than marched the clouds are drawn (0 = as marched): the stock EEP clouds' own
 // opacity, measured (wolfenvironmentrender.cpp measureCloudCover against renderStockCloudProbe)
 uniform float wolfEepCloudThin;
+// [WolfViewer 2026-10-27] 1: the clouds take the SKY's per-direction gain (wolfEepGainDir) instead of gains toward the stock EEP
+// cloud colour - Wolf weather by day (wolfenvironmentrender.cpp measureCloudCover; TROMSO 09:30Z, the stock clouds the sky's own
+// colour). Used only while wolfEepCloudGainOn is 0.
+uniform float wolfEepCloudSkyGain;
 // [WolfViewer 2026-10-13] the clouds' colour gains toward the stock EEP clouds, per direction (the sky's grid,
 // brunetonRuntime.glsl wolfGainGrid; measured, wolfenvironmentrender.cpp measureCloudCover). Off: 1.
 // [WolfViewer 2026-10-25] the sky's 7 x 11 grid round the stock light (brunetonRuntime.glsl, Jimmy Olsen's seam), its azimuths
@@ -1510,6 +1514,10 @@ void main() {
     color.rgb *= vec3(1.0) + wolfEepCloudTint;   // [WolfViewer 2026-10-13] the EEP's cloud colour, before the air in front
     if (wolfEepCloudGainOn > 0.5) {
       color.rgb *= wolfGainGrid(WOLF_GRID_CLOUDS, wolfGainElevAz(cameraPosition * METER_TO_LENGTH_UNIT, rayDirection, wolfEepCloudGainRef));
+    } else if (wolfEepCloudSkyGain > 0.5) {
+      // [WolfViewer 2026-10-27] Wolf weather by day: the sky's own gain in this direction (as the haze takes it below), so the
+      // clouds keep the EEP's palette and their physical contrast with the sky (wolfenvironmentrender.cpp measureCloudCover)
+      color.rgb *= wolfEepGainDir(cameraPosition * METER_TO_LENGTH_UNIT, rayDirection);
     }
     wolfCloudAlpha = color.a;   // measured before the thinning below (measureCloudCover sets the thinning from it)
     color *= 1.0 - clamp(wolfEepCloudThin, 0.0, 0.95);   // premultiplied: the same light per unit of opacity, less of both

@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLF SEA TUNNEL 2026-10-28] Sea Tunnels (wolffloaterseatunnels.cpp): Wolf World > Build & Land > Sea Tunnels... and
+     Build > Make Sea Tunnels... Ticket 319 (Malachi Coltrane): "An underwater tunnel device that clears the water murkiness".
+     Who and why: a builder making a glass rail or road tunnel across the sea bed. Flow, top to bottom: what a sea tunnel is /
+     1. make a glass piece here (size, then the primary button) / 2. or fill your own prims with air (and undo it) / how many
+     are near you / the status line (failures in the caution colour, kept until the next action). -->
+<floater
+ can_close="true"
+ can_minimize="true"
+ can_resize="false"
+ height="358"
+ layout="topleft"
+ name="wolf_sea_tunnels"
+ help_topic="wolf_sea_tunnels"
+ save_rect="true"
+ single_instance="true"
+ title="Sea Tunnels"
+ width="400">
+    <string name="feature_name">Sea Tunnels</string>
+    <string name="making">Making a glass piece in front of you...</string>
+    <string name="count_line">Air-filled pieces near you: [N]</string>
+
+    <text follows="left|top" height="46" layout="topleft" left="12" name="intro" top="26" width="376" wrap="true">A sea tunnel is a glass tube with air inside. Inside it the water isn't murky and there's no sea surface, so trains, cars and people go through dry.</text>
+
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="12" name="make_label" top="78" width="376">Make a glass piece</text>
+    <spinner decimal_digits="0" follows="left|top" height="19" increment="1" initial_value="20" label="Length (m)" label_width="66" layout="topleft" left="12"
+     max_val="64" min_val="2" name="length" top="98" width="140" tool_tip="How long the piece is, metres (2 to 64). You can stretch it with Build afterwards." />
+    <spinner decimal_digits="1" follows="left|top" height="19" increment="0.5" initial_value="8" label="Across (m)" label_width="66" layout="topleft" left="170"
+     max_val="30" min_val="2" name="across" top="98" width="140" tool_tip="How wide the tube is, metres (2 to 30). 8 m takes a train; 4 m a path." />
+    <text follows="left|top" height="32" layout="topleft" left="12" name="make_help" top="124" width="376" wrap="true" text_color="LtGray_50">It lies the way you're facing, its floor at your feet. Move, turn, stretch and Shift-copy it with Build, end to end.</text>
+    <button follows="left|top" height="23" layout="topleft" left="218" name="make_btn" top="160" width="170" label="Make a piece here" tool_tip="Make a glass tube piece in front of you, already filled with air" />
+
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="12" name="own_label" top="196" width="376">Or use your own build</text>
+    <text follows="left|top" height="46" layout="topleft" left="12" name="own_help" top="214" width="376" wrap="true" text_color="LtGray_50">Select cylinders, boxes, spheres or mesh tubes and fill them with air. This puts wolfdry in their description, which a script can also do with llSetObjectDesc.</text>
+    <button follows="left|top" height="23" layout="topleft" left="12" name="plain_btn" top="262" width="130" label="Make ordinary" tool_tip="Take wolfdry out of the selected pieces' description: the sea comes back inside them" />
+    <button follows="left|top" height="23" layout="topleft" left="218" name="fill_btn" top="262" width="170" label="Fill selected with air" tool_tip="Put wolfdry in the description of every selected piece you may change" />
+
+    <text follows="left|top" height="16" layout="topleft" left="12" name="count_text" top="292" width="376">...</text>
+    <text follows="left|top" height="44" layout="topleft" left="12" name="status_text" top="308" width="376" wrap="true" />
+</floater>

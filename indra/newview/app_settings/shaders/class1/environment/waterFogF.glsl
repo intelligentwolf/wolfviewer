@@ -37,6 +37,106 @@ vec3 linear_to_srgb(vec3 col);
 
 vec3 atmosFragLighting(vec3 light, vec3 additive, vec3 atten);
 
+// <WolfViewer 2026-10-28> [WOLF SEA TUNNEL] Ticket 319 (Malachi Coltrane): "An underwater tunnel device that clears the
+// water murkiness ... for vehicle and train traffic". AIR-FILLED VOLUMES (wolfdryvolumes.cpp): a prim with "wolfdry" in
+// its description, and the Tunnel tool's walkable boxes, hold air, not water. The water fog below is the integral over
+// the line of sight's path through WATER (the "thickness" l), so the stretch of that path inside these volumes is taken
+// out of it: from inside a sea tunnel its own inside is clear and the sea beyond the glass is fogged by the water out
+// there only; from the sea a tunnel's inside is fogged by the water in front of it only.
+// wolfDry[i*4 + 0..2]: the rows of the map from eye space to the volume's unit space (x, y, z in -1..1 at its faces);
+// wolfDry[i*4 + 3].x: 1 = cylinder round x/y along z, 2 = box, 3 = sphere. wolfDryCount = 0: none, and no cost but this test.
+uniform int wolfDryCount;
+uniform vec4 wolfDry[32];   // WolfDryVolumes::MAX_SHADER_VOLUMES (8) x 4
+
+// The range t of a line o + s d (unit space) cut to where |o + s d| <= 1 on one axis; t.y <= t.x: none.
+vec2 wolfDrySlab(float o, float d, vec2 t)
+{
+    if (abs(d) < 1e-6)
+    {
+        return abs(o) <= 1.0 ? t : vec2(1.0, 0.0);
+    }
+    float ta = (-1.0 - o) / d;
+    float tb = (1.0 - o) / d;
+    return vec2(max(t.x, min(ta, tb)), min(t.y, max(ta, tb)));
+}
+
+// The same, cut to where length(o + s d) <= 1 (a unit circle when o.z = d.z = 0, else a unit sphere).
+vec2 wolfDryRound(vec3 o, vec3 d, vec2 t)
+{
+    float A = dot(d, d);
+    float B = dot(o, d);
+    float C = dot(o, o) - 1.0;
+    if (A < 1e-10)
+    {
+        return C <= 0.0 ? t : vec2(1.0, 0.0);
+    }
+    float disc = B * B - A * C;
+    if (disc < 0.0)
+    {
+        return vec2(1.0, 0.0);
+    }
+    float s = sqrt(disc);
+    return vec2(max(t.x, (-B - s) / A), min(t.y, (-B + s) / A));
+}
+
+// The part of the segment a + s (b - a), s in 0..1 (eye space), inside volume i; t.y <= t.x: none.
+vec2 wolfDryClip(int i, vec3 a, vec3 b)
+{
+    vec4 r0 = wolfDry[i * 4];
+    vec4 r1 = wolfDry[i * 4 + 1];
+    vec4 r2 = wolfDry[i * 4 + 2];
+    float kind = wolfDry[i * 4 + 3].x;
+    vec3 ab = b - a;
+    vec3 o = vec3(dot(r0.xyz, a) + r0.w, dot(r1.xyz, a) + r1.w, dot(r2.xyz, a) + r2.w);
+    vec3 d = vec3(dot(r0.xyz, ab), dot(r1.xyz, ab), dot(r2.xyz, ab));
+    vec2 t = vec2(0.0, 1.0);
+    if (kind > 2.5)
+    {
+        return wolfDryRound(o, d, t);
+    }
+    t = wolfDrySlab(o.z, d.z, t);
+    if (kind > 1.5)
+    {
+        t = wolfDrySlab(o.x, d.x, t);
+        return wolfDrySlab(o.y, d.y, t);
+    }
+    return wolfDryRound(vec3(o.xy, 0.0), vec3(d.xy, 0.0), t);
+}
+
+// Metres of the segment a -> b (eye space) inside air-filled volumes (pieces that overlap at a join count the overlap
+// twice; capped at the whole segment).
+float wolfDryLength(vec3 a, vec3 b)
+{
+    float inside = 0.0;
+    for (int i = 0; i < wolfDryCount; ++i)
+    {
+        vec2 t = wolfDryClip(i, a, b);
+        inside += max(t.y - t.x, 0.0);
+    }
+    return min(inside, 1.0) * length(b - a);
+}
+
+// Is this eye-space point inside an air-filled volume? (waterF.glsl / underWaterF.glsl: no water surface there.)
+bool wolfInDry(vec3 p)
+{
+    for (int i = 0; i < wolfDryCount; ++i)
+    {
+        vec4 r0 = wolfDry[i * 4];
+        vec4 r1 = wolfDry[i * 4 + 1];
+        vec4 r2 = wolfDry[i * 4 + 2];
+        float kind = wolfDry[i * 4 + 3].x;
+        vec3 u = vec3(dot(r0.xyz, p) + r0.w, dot(r1.xyz, p) + r1.w, dot(r2.xyz, p) + r2.w);
+        bool inside = kind > 2.5 ? dot(u, u) <= 1.0
+                    : (abs(u.z) <= 1.0 && (kind > 1.5 ? (abs(u.x) <= 1.0 && abs(u.y) <= 1.0) : dot(u.xy, u.xy) <= 1.0));
+        if (inside)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+// </WolfViewer>
+
 // get a water fog color that will apply the appropriate haze to a color given
 // a blend function of (ONE, SOURCE_ALPHA)
 vec4 getWaterFogViewNoClip(vec3 pos)
@@ -54,6 +154,17 @@ vec4 getWaterFogViewNoClip(vec3 pos)
 
     //get object depth
     float depth = length(pos - int_v);
+
+    // <WolfViewer 2026-10-28> [WOLF SEA TUNNEL] no water along the stretch inside air-filled volumes (wolfDryLength)
+    if (wolfDryCount > 0)
+    {
+        depth -= wolfDryLength(int_v, pos);
+        if (depth <= 0.0)
+        {
+            return vec4(0.0, 0.0, 0.0, 1.0);   // all air: no fog at all (the 0.1 m floor below would leave a tint)
+        }
+    }
+    // </WolfViewer>
 
     //get "thickness" of water
     float l = max(depth, 0.1);

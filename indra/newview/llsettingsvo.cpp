@@ -31,6 +31,7 @@
 #include "wolfweather.h"   // <WolfViewer 2026-09-18/> fogExtinction()
 #include "wolfaltitudesky.h"   // <WolfViewer 2026-10-07/> the sky thins with height
 #include "wolfenvironmentrender.h"   // [WOLF ENV 2026-10-12 physical/] the scene lit by the Wolf sky
+#include "wolfdryvolumes.h"   // [WOLF SEA TUNNEL 2026-10-28/] air-filled volumes for waterFogF.glsl
 
 #include "pipeline.h"
 
@@ -1237,6 +1238,8 @@ void LLSettingsVOWater::applySpecial(void *ptarget, bool force)
         LLDrawPoolAlpha::sWaterPlane = waterPlane;
 
         shader->uniform4fv(LLShaderMgr::WATER_WATERPLANE, waterPlane.mV);
+        // [WOLF SEA TUNNEL 2026-10-28] the air-filled volumes (wolfDry, wolfDryCount) in the same eye space as the water plane
+        WolfDryVolumes::instance().applyUniforms(shader, glm::value_ptr(mat));
         shader->uniform4fv(LLShaderMgr::CLIP_PLANE, glm::value_ptr(mirrorPlane));
         LLVector4 light_direction = env.getClampedLightNorm();
 

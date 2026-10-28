@@ -52,6 +52,29 @@
 #include "lfsimfeaturehandler.h" // <COLOSI opensim multi-currency support />
 #include "llmaterialtable.h"     // <FS:Beq> FIRE-31628 for access to static var
 
+// [WolfViewer 2026-10-28] Ticket 316: how long a background grid lookup (getSLURLBase) is held after it started or
+// failed before the viewer tries that grid again. A dead grid's get_grid_info and legacy login.cgi both time out,
+// so without this every teleport re-saved the teleport history and fetched the dead grid again, once per item.
+static const F64 BACKGROUND_FETCH_HOLD_SECONDS = 600.0;
+
+// [WolfViewer 2026-10-28] Ticket 316: the key a background lookup is held under, from a grid already passed through
+// trimHypergrid(). The rest of what addGrid() does for FETCHTEMP (lower case, no trailing slash, no scheme), so
+// "http://Grid.net:8002/" and "grid.net:8002" share one key.
+static std::string background_fetch_key(const std::string& grid)
+{
+    std::string key = utf8str_tolower(grid);
+    const size_t scheme = key.find("://");
+    if (std::string::npos != scheme)
+    {
+        key.erase(0, scheme + 3);
+    }
+    if (!key.empty() && '/' == key[key.length() - 1])
+    {
+        key.erase(key.length() - 1);
+    }
+    return key;
+}
+
 void gridDownloadError(const LLSD& aData, LLGridManager* mOwner, GridEntry* mData, LLGridManager::AddState mState)
 {
     LLCore::HttpStatus status = LLCoreHttpUtil::HttpCoroutineAdapter::getStatusFromLLSD(aData);
@@ -81,8 +104,19 @@ void gridDownloadError(const LLSD& aData, LLGridManager* mOwner, GridEntry* mDat
         reason_dialog.append(mData->last_http_error);
         reason_dialog.append("\nPlease check if the loginuri is correct and");
         args["REASON"] = reason_dialog;
-        //[REASON] contact support of [GRID].
-        LLNotificationsUtil::add("CantAddGrid", args);
+        // [WolfViewer 2026-10-28] Ticket 316: only alert when the resident asked for this grid. A lookup the viewer
+        // made by itself (background_fetch_key set) is logged only - Chad got "Could not add gridmania.net:8002"
+        // because an old teleport-history item pointed at a grid that is down.
+        if (mData->background_fetch_key.empty())
+        {
+            //[REASON] contact support of [GRID].
+            LLNotificationsUtil::add("CantAddGrid", args);
+        }
+        else
+        {
+            LL_WARNS("GridManager") << "Background grid lookup failed, no alert: " << mData->grid[GRID_VALUE] << " - " << reason_dialog
+                                    << LL_ENDL;
+        }
 
         LL_WARNS() << "No legacy login page. Giving up for " << mData->grid[GRID_VALUE] << LL_ENDL;
         mOwner->addGrid(mData, LLGridManager::FAIL);
@@ -129,8 +163,12 @@ void gridDownloadComplete(const LLSD& aData, LLGridManager* mOwner, GridEntry* m
             args["GRID"] = mData->grid[GRID_VALUE];
             // Could not add [GRID] to the grid list.
             args["REASON"] = "Server provided broken grid info xml. Please";
-            //[REASON] contact support of [GRID].
-            LLNotificationsUtil::add("CantAddGrid", args);
+            // [WolfViewer 2026-10-28] Ticket 316: no alert for a lookup the viewer made by itself; the warning below logs it.
+            if (mData->background_fetch_key.empty())
+            {
+                //[REASON] contact support of [GRID].
+                LLNotificationsUtil::add("CantAddGrid", args);
+            }
 
             LL_WARNS() << " Could not parse grid info xml from server." << mData->grid[GRID_VALUE] << " skipping." << LL_ENDL;
             mOwner->addGrid(mData, LLGridManager::FAIL);
@@ -548,7 +586,15 @@ void LLGridManager::addGrid(GridEntry* grid_entry, AddState state)
             // throw LLInvalidGridName(grid);
             LLSD args;
             args["GRID"] = grid;
-            LLNotificationsUtil::add("InvalidGrid", args);
+            // [WolfViewer 2026-10-28] Ticket 316: no alert for a lookup the viewer made by itself, log it instead.
+            if (grid_entry->background_fetch_key.empty())
+            {
+                LLNotificationsUtil::add("InvalidGrid", args);
+            }
+            else
+            {
+                LL_WARNS("GridManager") << "Background grid lookup skipped, not a valid grid identifier: " << grid << LL_ENDL;
+            }
             state = FAIL;
         }
 
@@ -834,6 +880,20 @@ void LLGridManager::addGrid(GridEntry* grid_entry, AddState state)
     if (FAIL == state)
     {
         mGridListChangedSignal(false);
+    }
+
+    // [WolfViewer 2026-10-28] Ticket 316: a background lookup has ended. Failed: hold the grid from now (the request
+    // itself can take minutes to time out). Otherwise the grid is in mGridList now and the hold is not needed.
+    if (grid_entry && !grid_entry->background_fetch_key.empty())
+    {
+        if (FAIL == state)
+        {
+            mBackgroundFetchTimes[grid_entry->background_fetch_key] = LLDate::now().secondsSinceEpoch();
+        }
+        else
+        {
+            mBackgroundFetchTimes.erase(grid_entry->background_fetch_key);
+        }
     }
 
     if (grid_entry)
@@ -1328,15 +1388,34 @@ std::string LLGridManager::getSLURLBase(const std::string& grid)
     //<AW opensim>
     else
     {
-        LL_DEBUGS("GridManager") << "Trying to fetch info for:" << grid << LL_ENDL;
-        GridEntry* grid_entry        = new GridEntry;
-        grid_entry->set_current      = false;
-        grid_entry->grid             = LLSD::emptyMap();
-        grid_entry->grid[GRID_VALUE] = grid;
+        // [WolfViewer 2026-10-28] Ticket 316: this is a lookup the viewer makes by itself (any LOCATION SLURL string,
+        // e.g. every teleport-history item each time the history is saved on teleport). Skip a grid that is already
+        // being looked up or failed in the last BACKGROUND_FETCH_HOLD_SECONDS; the hop:// base below is returned either way.
+        const std::string fetch_key = background_fetch_key(grid_trimmed);
+        const F64         now       = LLDate::now().secondsSinceEpoch();
+        std::map<std::string, F64>::const_iterator held = mBackgroundFetchTimes.find(fetch_key);
+        if (!fetch_key.empty() && held != mBackgroundFetchTimes.end() && (now - held->second) < BACKGROUND_FETCH_HOLD_SECONDS)
+        {
+            LL_DEBUGS("GridManager") << "Grid info lookup for " << grid << " held (in progress or failed recently)" << LL_ENDL;
+        }
+        else
+        {
+            LL_DEBUGS("GridManager") << "Trying to fetch info for:" << grid << LL_ENDL;
+            GridEntry* grid_entry        = new GridEntry;
+            grid_entry->set_current      = false;
+            grid_entry->grid             = LLSD::emptyMap();
+            grid_entry->grid[GRID_VALUE] = grid;
+            // [WolfViewer 2026-10-28] Ticket 316: mark it as a background lookup (no alerts) and hold it while it runs.
+            grid_entry->background_fetch_key = fetch_key;
+            if (!fetch_key.empty())
+            {
+                mBackgroundFetchTimes[fetch_key] = now;
+            }
 
-        // add the grid with the additional values, or update the
-        // existing grid if it exists with the given values
-        addGrid(grid_entry, FETCHTEMP);
+            // add the grid with the additional values, or update the
+            // existing grid if it exists with the given values
+            addGrid(grid_entry, FETCHTEMP);
+        }
 
         // deal with hand edited entries
         std::string grid_norm = grid;

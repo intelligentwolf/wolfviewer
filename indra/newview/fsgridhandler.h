@@ -77,6 +77,11 @@ struct GridEntry
     LLXMLNodePtr info_root;
     bool         set_current;
     std::string  last_http_error;
+    // [WolfViewer 2026-10-28] Ticket 316 (Chad Deischer): the viewer looks grids up by itself, e.g. saving the
+    // teleport history (llteleporthistorystorage.cpp toLLSD -> LLSLURL::getSLURLString -> getSLURLBase). Non-empty
+    // = such a background lookup, keyed by the normalised grid name: a failure is logged only (no CantAddGrid /
+    // InvalidGrid alert) and held in LLGridManager::mBackgroundFetchTimes. Empty = a resident's own add (alerts kept).
+    std::string  background_fetch_key;
 };
 
 class LLInvalidGridName
@@ -277,6 +282,10 @@ protected:
     int         mResponderCount;
     bool        mReadyToLogin;
     bool        mCommandLineDone;
+    // [WolfViewer 2026-10-28] Ticket 316: background grid lookups (getSLURLBase) by grid key -> time (LLDate seconds)
+    // the last one started or failed. A grid in here is not looked up again for BACKGROUND_FETCH_HOLD_SECONDS, so a
+    // dead grid is not fetched once per teleport-history item on every teleport. Erased when the lookup succeeds.
+    std::map<std::string, F64> mBackgroundFetchTimes;
 
     enum e_grid_platform
     {

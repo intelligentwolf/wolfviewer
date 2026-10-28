@@ -76,6 +76,8 @@ with the same filename but different name
   <texture name="WolfTb_Spaceship_On" file_name="icons/wolf_tb_spaceship_on.png" preload="true" />
   <texture name="WolfTb_Submarine_Off" file_name="icons/wolf_tb_submarine_off.png" preload="true" />
   <texture name="WolfTb_Submarine_On" file_name="icons/wolf_tb_submarine_on.png" preload="true" />
+  <texture name="WolfTb_Ship_Off" file_name="icons/wolf_tb_ship_off.png" preload="true" />   <!-- [CAPTAIN'S HELM 2026-10-28] a tall ship -->
+  <texture name="WolfTb_Ship_On" file_name="icons/wolf_tb_ship_on.png" preload="true" />
   <texture name="Arrow_Left" file_name="widgets/Arrow_Left.png" preload="true" />
   <texture name="Arrow_Right" file_name="widgets/Arrow_Right.png" preload="true" />
 
@@ -246,6 +248,7 @@ with the same filename but different name
   <texture name="Wolf_WatchWolf_Icon_64"   file_name="toolbar_icons/wolf_watchwolf_64.png"   preload="true" />
   <texture name="Command_WolfRoleplay_Icon"   file_name="toolbar_icons/wolf_roleplay.png"   preload="true" />   <!-- [WOLF GAME 2026-10-09] shield and crossed swords -->
   <texture name="Command_WolfDashboard_Icon"  file_name="toolbar_icons/wolf_dashboard.png"  preload="true" />   <!-- [WOLF DRIVE 2026-10-09] a rev counter -->
+  <texture name="Command_WolfHelm_Icon"  file_name="toolbar_icons/wolf_helm.png"  preload="true" />   <!-- [CAPTAIN'S HELM 2026-10-28] a tall ship -->
   <texture name="Command_WolfRain_Icon"        file_name="toolbar_icons/wolf_rain.png"        preload="true" />
   <texture name="Command_WolfSnow_Icon"        file_name="toolbar_icons/wolf_snow.png"        preload="true" />
   <texture name="Command_WolfReadAloud_Icon"   file_name="toolbar_icons/wolf_readaloud.png"   preload="true" />

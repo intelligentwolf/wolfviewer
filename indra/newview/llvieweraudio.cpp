@@ -48,6 +48,7 @@
 #include "llstreamingaudio.h"
 
 #include "llvoavatarself.h"
+#include "wolfdryvolumes.h"   // [WOLF SEA TUNNEL 2026-10-28/]
 
 /////////////////////////////////////////////////////////
 const U32 FMODEX_DECODE_BUFFER_SIZE = 1000; // in milliseconds
@@ -475,7 +476,8 @@ void audio_update_volume(bool force_update)
         const F32 AUDIO_LEVEL_DOPPLER = 1.f;
         gAudiop->setDopplerFactor(AUDIO_LEVEL_DOPPLER);
 
-        if(!LLViewerCamera::getInstance()->cameraUnderWater())
+        // [WOLF SEA TUNNEL 2026-10-28] in an air-filled volume under the sea (a sea tunnel) sound carries as in air
+        if(!LLViewerCamera::getInstance()->cameraUnderWater() || WolfDryVolumes::instance().cameraInside())
         {
             const F32 AUDIO_LEVEL_ROLLOFF = 1.f;
             gAudiop->setRolloffFactor(AUDIO_LEVEL_ROLLOFF);

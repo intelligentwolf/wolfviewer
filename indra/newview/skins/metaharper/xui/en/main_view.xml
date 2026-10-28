@@ -113,6 +113,17 @@
                           mouse_opaque="false"
                           tab_stop="false"
                           name="wolf_car_dashboard"/>
+      <!-- [CAPTAIN'S HELM 2026-10-28] wolfhelmhud.cpp: the sailing ship's helm HUD (wheel, sail plan, compass, speed log,
+           wind, battle), in the dashboard family. Draws nothing and takes no clicks until it opens (a ship's helm that
+           answers, or Wolf World > Captain's Helm); Wolf Territories only. -->
+      <wolf_helm_hud follows="all"
+                     left="0"
+                     top="0"
+                     height="500"
+                     width="1024"
+                     mouse_opaque="false"
+                     tab_stop="false"
+                     name="wolf_helm_hud"/>
       <!-- [BORDER GUARD 2026-10-16] wolfborder.cpp: "Ahead: <region> ..." - what the region ahead will do to you and
            your vehicle, over the world under the floaters. Draws nothing until there is something to say; only its
            teleport button takes clicks. -->

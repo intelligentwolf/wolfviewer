@@ -30,6 +30,7 @@
 #include "wolfborder.h"   // [BORDER GUARD 2026-10-16/] refused crossings -> the border banner
 #include "wolfdrive.h"    // <WolfViewer 2026-10-11/> the speedboat helm hears its boat's "Speed = N"
 #include "wolfdjchatcontrol.h"   // <WolfViewer 2026-10-19/> Wolf DJ chat control
+#include "wolfhelm.h"            // <WolfViewer 2026-10-28/> the Captain's Helm hears its ship
 #include "wolfsuitcase.h" // <WolfViewer 2026-10-12/> an accepted offer abroad -> look at My Suitcase again
 
 // Linden libraries
@@ -2850,6 +2851,20 @@ void process_chat_from_simulator(LLMessageSystem *msg, void **user_data)
 
     msg->getU8("ChatData", "ChatType", type_temp);
     chat.mChatType = (EChatType)type_temp;
+
+    // <WolfViewer 2026-10-28> Captain's Helm (wolfhelm.h; region-terrain-work/pirate-ship/DESIGN.md s20): a ship's
+    // "WolfHelm1|..." line to this viewer's helm HUD (llRegionSayTo, only after this viewer said hello while seated on
+    // her) is the HUD's, never chat: taken here, before the anti-spam queue, chat particles and the log.
+    if (chat.mSourceType == CHAT_SOURCE_OBJECT && chat.mChatType == CHAT_TYPE_DIRECT)
+    {
+        std::string helm_line;
+        msg->getStringFast(_PREHASH_ChatData, _PREHASH_Message, helm_line);
+        if (WolfHelm::instance().onObjectChat(from_id, type_temp, helm_line))
+        {
+            return;
+        }
+    }
+    // </WolfViewer>
 
     // NaCL - Antispam Registry
     static LLCachedControl<bool> useAntiSpam(gSavedSettings, "UseAntiSpam");

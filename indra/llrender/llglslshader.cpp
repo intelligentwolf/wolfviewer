@@ -2088,6 +2088,16 @@ void LLShaderUniforms::apply(LLGLSLShader* shader)
     {
         shader->uniform3fv(uniform.mUniform, 1, uniform.mValue.mV);
     }
+
+    // <WolfViewer 2026-10-28> [WOLF SEA TUNNEL] LLVector4 is F32 mV[4] (v4math.h), so the vector is count x 4 floats
+    for (auto& uniform : mVectorArrays)
+    {
+        if (!uniform.mValues.empty())
+        {
+            shader->uniform4fv(uniform.mUniform, (U32)uniform.mValues.size(), uniform.mValues[0].mV);
+        }
+    }
+    // </WolfViewer>
 }
 
 LLUUID LLGLSLShader::hash()

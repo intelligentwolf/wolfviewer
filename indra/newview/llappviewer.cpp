@@ -79,6 +79,7 @@
 #include "lltracethreadrecorder.h"
 #include "llviewerwindow.h"
 #include "fswolfwater.h" // <FS:WolfViewer> wolfwater prim surfaces
+#include "wolfdryvolumes.h"   // [WOLF SEA TUNNEL 2026-10-28/] wolfdry prims: air under the sea
 #include "wolfterrainpaint.h"
 #include "wolfupdate.h"         // <WolfViewer 2026-10-02/> WolfUpdate::shutdown
 #include "wolfdjaudio.h"        // [WOLF DJ 2026-10-04/] WolfDJMixer::shutdown
@@ -93,6 +94,7 @@
 #include "wolfspeed.h"    // [WOLFSPEED 2026-10-17/] Xenon's WolfSpeed
 #include "wolfnpc.h"      // [WOLFNPC 2026-10-24/] the region link for the WolfNPC window and its credits pushes
 #include "wolfdrive.h"    // <WolfViewer 2026-10-09/> driving: wheel / pedals, dashboard
+#include "wolfhelm.h"     // <WolfViewer 2026-10-28/> the Captain's Helm (sailing ships)
 #include "wolffarground.h"   // <WolfViewer 2026-10-07/> map tiles for regions not connected
 #include "wolffarterrain.h"   // <WolfViewer 2026-10-08/> elevation tiles beyond the terrain received
 #include "wolfobjectprops.h" // <WolfViewer> shared object name/description harvester
@@ -6279,6 +6281,10 @@ void LLAppViewer::idle()
     // the dashboard's data; after WolfFlight, so Flight Mode coming on takes the panel's place.
     WolfDrive::instance().idle();
     // </WolfViewer>
+    // <WolfViewer 2026-10-28> the Captain's Helm: the ship's hello, the HUD's commands, one bottom panel (wolfhelm.cpp);
+    // after WolfDrive and WolfFlight so a dashboard or deck that came on this frame takes the bottom from it.
+    WolfHelm::instance().idle();
+    // </WolfViewer>
     WolfFarTerrain::instance().idle();  // <WolfViewer 2026-10-08/> the ground beyond the terrain received (before the flat tiles: they skip its cells)
     WolfFarGround::instance().idle();   // <WolfViewer 2026-10-07/> map tiles for the regions not connected
     // [WOLF GAME 2026-10-09] Wolf Roleplay: timers, markers, effects, and the tags under the name
@@ -6300,6 +6306,8 @@ void LLAppViewer::idle()
     // the world-update phase, because it creates and moves LLVOWater objects and must do
     // so before the frame is drawn. Rate-limits itself to a sweep every 1.5s.
     FSWolfWater::instance().idle();
+    // [WOLF SEA TUNNEL 2026-10-28] prims described "wolfdry" hold air, not sea (wolfdryvolumes.h). Sweeps every 1.5 s.
+    WolfDryVolumes::instance().idle();
     // [TERRAIN PAINT 2026-09-10] Painted roads and drawn water: fetch, bake a slice, and
     // create/kill the water planes. HERE, not in a draw pool's prerender(): creating or
     // killing a viewer object inside the render pass left a freed spatial group in the

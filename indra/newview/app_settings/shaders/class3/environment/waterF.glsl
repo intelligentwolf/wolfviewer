@@ -77,6 +77,7 @@ void calcAtmosphericVarsLinear(vec3 inPositionEye, vec3 norm, vec3 light_dir, ou
 vec4 applyWaterFogViewLinear(vec3 pos, vec4 color);
 
 void mirrorClip(vec3 pos);
+bool wolfInDry(vec3 p);   // <WolfViewer 2026-10-28/> [WOLF SEA TUNNEL] waterFogF.glsl
 
 // PBR interface
 vec2 BRDF(float NoV, float roughness);
@@ -414,6 +415,13 @@ float swellWhitecap(vec2 p, float back)
 void main()
 {
     mirrorClip(vary_position);
+    // <WolfViewer 2026-10-28> [WOLF SEA TUNNEL] no water surface inside an air-filled volume (a sea tunnel's mouth
+    // rising out of the sea, waves over it): waterFogF.glsl wolfInDry, wolfdryvolumes.cpp
+    if (wolfInDry(vary_position))
+    {
+        discard;
+    }
+    // </WolfViewer>
 
     vN = vary_normal;
     vT = vary_tangent;

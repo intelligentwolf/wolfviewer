@@ -33,6 +33,7 @@
 #include "llvoavatarself.h"
 #include "llworld.h"
 #include "wolfgrid.h"
+#include "wolfdryvolumes.h"   // [WOLF SEA TUNNEL 2026-10-28/] no swimming in a sea tunnel
 
 namespace
 {
@@ -677,7 +678,9 @@ namespace WolfSwim
             return;
         }
 
-        if (top > water + EXIT_ABOVE)
+        // [WOLF SEA TUNNEL 2026-10-28] a head inside an air-filled volume (a sea tunnel, wolfdryvolumes.h) is out of the
+        // water: walk, as on land
+        if (top > water + EXIT_ABOVE || WolfDryVolumes::instance().contains(LLVector3(root.mV[VX], root.mV[VY], top)))
         {
             stopSwimming(true);
             s.mSuppressed = false;     // out of the water: the next dip swims again

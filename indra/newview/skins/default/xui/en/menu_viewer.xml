@@ -2046,6 +2046,14 @@
                 <menu_item_check.on_click function="WolfDrive.ToggleDesign" parameter="submarine" />
                 <menu_item_check.on_visible function="WolfGrid.IsOnWolfTerritories" />
             </menu_item_check>
+            <!-- [CAPTAIN'S HELM 2026-10-28] wolfhelmhud.cpp: Paul, "can we add a pirate ship control hud to the viewer" - the
+             sailing ship's helm (wheel, sails, compass, wind, battle), fed by the ship's helm script (pirate-ship
+             DESIGN.md s20). Opens by itself at a ship's wheel; this shows / hides it by hand. Wolf Territories only. -->
+            <menu_item_check label="Captain's Helm (Ships)" name="WolfCaptainsHelm">
+                <menu_item_check.on_check function="WolfHelm.IsShown" />
+                <menu_item_check.on_click function="WolfHelm.Toggle" />
+                <menu_item_check.on_visible function="WolfGrid.IsOnWolfTerritories" />
+            </menu_item_check>
             <!-- [SPACESHIP HUD 2026-10-11] w65 Space Rabbit (wolfdashboard.cpp): Paul, "spaceships are basically
              aircraft" - the dashboard in its spaceship / rocket design, beside Flight Mode. Wolf Territories
              only, gone (not greyed) elsewhere, like the Car Dashboard. -->
@@ -2264,6 +2272,13 @@
             <!-- [WOLF TERRAFORM 2026-10-23] Paul: "where is the extra terraforming tools". The Terraform window
              (wolffloaterterraform.cpp): level, ramp, terraces, smooth, road, river, beach, with a preview and Undo. Also Build >
              Terraform... and the Build window's land tools. Wolf Territories only (the same gate as Make Caves). -->
+            <!-- [WOLF SEA TUNNEL 2026-10-28] Ticket 319 (Malachi Coltrane), Paul "yes i do want it": glass tubes with air inside
+             under the sea - no murky water, no sea surface inside (wolffloaterseatunnels.cpp, wolfdryvolumes.h). Also Build >
+             Make Sea Tunnels... Wolf Territories only (the same gate as Make Caves). -->
+            <menu_item_call label="Sea Tunnels..." name="WolfWorldSeaTunnels">
+                <menu_item_call.on_click function="Floater.Show" parameter="wolf_sea_tunnels" />
+                <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
+            </menu_item_call>
             <menu_item_call label="Terraform..." name="WolfWorldTerraform">
                 <menu_item_call.on_click function="Floater.Show" parameter="wolf_terraform" />
                 <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
@@ -2446,6 +2461,17 @@
          <menu_item_call.on_click
           function="Floater.Show"
           parameter="wolf_tunnels" />
+         <menu_item_call.on_visible
+          function="WolfGrid.IsOnWolfTerritories" />
+       </menu_item_call>
+       <!-- [WOLF SEA TUNNEL 2026-10-28] Sea Tunnels (wolffloaterseatunnels.cpp), in the alphabetical Wolf items here. Same
+            window and gate as Wolf World > Build & Land > Sea Tunnels... -->
+       <menu_item_call
+        label="Make Sea Tunnels..."
+        name="WolfMakeSeaTunnels">
+         <menu_item_call.on_click
+          function="Floater.Show"
+          parameter="wolf_sea_tunnels" />
          <menu_item_call.on_visible
           function="WolfGrid.IsOnWolfTerritories" />
        </menu_item_call>

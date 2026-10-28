@@ -29140,6 +29140,50 @@ Change of this parameter will affect the layout of buttons in notification toast
       <key>Value</key>
       <real>1.0</real>
     </map>
+    <key>WolfHelmHudScale</key>
+    <map>
+      <key>Comment</key>
+      <string>Size of the Captain's Helm HUD for sailing ships, 0.4 to 1.0 of its full size. Drag its top edge to change it; double-click the edge for the default.</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>F32</string>
+      <key>Value</key>
+      <real>1.0</real>
+    </map>
+    <key>WolfHelmHudBackground</key>
+    <map>
+      <key>Comment</key>
+      <string>Captain's Helm PANEL button: draw the oak panel behind the instruments. Off, only the instruments and controls are drawn and clicks between them reach the world.</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>Boolean</string>
+      <key>Value</key>
+      <integer>1</integer>
+    </map>
+    <key>WolfHelmHudAuto</key>
+    <map>
+      <key>Comment</key>
+      <string>Captain's Helm AUTO button: open the HUD by itself when you take the wheel of a ship whose helm script speaks it (DESIGN.md s20). Wolf Territories only.</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>Boolean</string>
+      <key>Value</key>
+      <integer>1</integer>
+    </map>
+    <key>WolfHelmHudHelpSeen</key>
+    <map>
+      <key>Comment</key>
+      <string>The Captain's Helm guide has opened by itself once (it then opens only with HELP).</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>Boolean</string>
+      <key>Value</key>
+      <integer>0</integer>
+    </map>
     <key>WolfFlightDeckScale</key>
     <map>
       <key>Comment</key>

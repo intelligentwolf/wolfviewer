@@ -1748,6 +1748,8 @@ void LLShaderMgr::initAttribsAndUniforms()
     mReservedUniforms.push_back("higher_order_scattering_texture");   // [WOLF ENV TAKRAM 2026-10-12]
     mReservedUniforms.push_back("shadowBuffer");
     mReservedUniforms.push_back("wolfTerrainLayers");   // [WOLF TERRAIN TEXTURES 2026-10-16] wolfterrainlayers.cpp
+    mReservedUniforms.push_back("wolfDry");             // [WOLF SEA TUNNEL 2026-10-28] waterFogF.glsl, wolfdryvolumes.cpp
+    mReservedUniforms.push_back("wolfDryCount");
     // </WolfViewer>
 
     llassert(mReservedUniforms.size() == END_RESERVED_UNIFORMS);

@@ -425,6 +425,19 @@
            is_enabled_function="WolfGrid.IsOnWolfTerritories"
            is_running_function="WolfDrive.IsDashboard"
            />
+  <!-- [CAPTAIN'S HELM 2026-10-28] Paul: the ship's helm HUD "should also be in the tiny icons as well". The Captain's
+       Helm (wolfhelmhud.cpp): shows / hides it; lit while it is up. In the toybox for any toolbar, not on the default
+       layout (no vehicle button is). Wolf Territories only - off it the button is gated in its place
+       (wolfhelm.cpp refreshGate, as wolf_dashboard). -->
+  <command name="wolf_helm"
+           available_in_toybox="true"
+           icon="Command_WolfHelm_Icon"
+           label_ref="Command_WolfHelm_Label"
+           tooltip_ref="Command_WolfHelm_Tooltip"
+           execute_function="WolfHelm.Toggle"
+           is_enabled_function="WolfGrid.IsOnWolfTerritories"
+           is_running_function="WolfHelm.IsShown"
+           />
   <command name="RFO"
          available_in_toybox="true"
          icon="Command_RFO_Icon"

@@ -28,6 +28,7 @@
 
 #include "pipeline.h"
 #include "wolfgame.h"   // [WOLF GAME 2026-10-09/] roleplay desaturate / blur
+#include "wolfdryvolumes.h"   // [WOLF SEA TUNNEL 2026-10-28/] no sun shafts inside a sea tunnel
 
 // library includes
 #include "llimagepng.h"
@@ -8152,7 +8153,9 @@ void LLPipeline::wolfGodRays(LLRenderTarget* dst)
         return;
     }
     LLViewerCamera* cam = LLViewerCamera::getInstance();
-    if (!cam->cameraUnderWater())
+    // [WOLF SEA TUNNEL 2026-10-28] the shafts are a screen-wide effect of being IN the water: none inside an air-filled
+    // volume (wolfdryvolumes.h), where they would be drawn over the tunnel's own inside
+    if (!cam->cameraUnderWater() || WolfDryVolumes::instance().cameraInside())
     {
         return;
     }

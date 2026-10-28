@@ -59,10 +59,18 @@ in vec3 vary_normal;   // <WolfViewer 2026-09-06> the surface's up, eye space (w
 
 vec4 applyWaterFogViewLinearNoClip(vec3 pos, vec4 color);
 void mirrorClip(vec3 position);
+bool wolfInDry(vec3 p);   // <WolfViewer 2026-10-28/> [WOLF SEA TUNNEL] waterFogF.glsl
 
 void main()
 {
     mirrorClip(vary_position);
+    // <WolfViewer 2026-10-28> [WOLF SEA TUNNEL] no water surface inside an air-filled volume (a sea tunnel's mouth
+    // rising out of the sea): waterFogF.glsl wolfInDry, wolfdryvolumes.cpp
+    if (wolfInDry(vary_position))
+    {
+        discard;
+    }
+    // </WolfViewer>
     vec2 screen_tc = (refCoord.xy/refCoord.z) * 0.5 + 0.5;
     float water_mask = texture(exclusionTex, screen_tc).r;
 

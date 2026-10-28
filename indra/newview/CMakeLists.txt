@@ -1000,6 +1000,8 @@ set(viewer_SOURCE_FILES
     wolffloateradventurestudioedit.cpp # [WOLF ADVENTURE P3 2026-10-16] Studio: outline, cast, places, story, rules, lore, test play
     wolftooladventureplace.cpp # [WOLF ADVENTURE P3 2026-10-16] Studio: the in-world place tool
     wolffloatertunnels.cpp # [WOLF TUNNELS 2026-10-21] the Tunnel tool: walkable spaces under the terrain
+    wolffloaterseatunnels.cpp # [WOLF SEA TUNNEL 2026-10-28] Sea Tunnels: air-filled glass tubes under the sea
+    wolfdryvolumes.cpp # [WOLF SEA TUNNEL 2026-10-28] wolfdry prims and tunnel boxes: no water fog / surface inside
     wolffloateradventurestudiowizard.cpp # [WOLF ADVENTURE AUDIT 2026-10-17] Studio: the "Start here" wizard
     wolffloateradventurestudioflow.cpp # [WOLF STORY FIRST 2026-10-17] Studio: the helper conversation and the flowchart
     wolffloateradventureguide.cpp # [WOLF ADVENTURE AUDIT 2026-10-17] the Guide docked beside the Studio
@@ -1028,6 +1030,8 @@ set(viewer_SOURCE_FILES
     wolfborder.cpp   # [BORDER GUARD 2026-10-16]
     wolfloadingnotice.cpp   # [WOLF VISITOR SEES 2026-10-18]
     wolfdashboard.cpp
+    wolfhelm.cpp
+    wolfhelmhud.cpp
     wolfhudscale.cpp
     wolfvehiclerez.cpp
     wolffloaterdrivecontrols.cpp
@@ -1986,6 +1990,8 @@ set(viewer_HEADER_FILES
     wolffloateradventurestudio.h   # [WOLF ADVENTURE P1 2026-10-16]
     wolftooladventureplace.h   # [WOLF ADVENTURE P3 2026-10-16]
     wolffloatertunnels.h   # [WOLF TUNNELS 2026-10-21]
+    wolffloaterseatunnels.h   # [WOLF SEA TUNNEL 2026-10-28]
+    wolfdryvolumes.h   # [WOLF SEA TUNNEL 2026-10-28]
     wolfadventurestudioutil.h  # [WOLF ADVENTURE AUDIT 2026-10-17]
     wolffloateradventureguide.h # [WOLF ADVENTURE AUDIT 2026-10-17]
     wolfwavezones.h
@@ -2014,6 +2020,8 @@ set(viewer_HEADER_FILES
     wolfborder.h   # [BORDER GUARD 2026-10-16]
     wolfloadingnotice.h   # [WOLF VISITOR SEES 2026-10-18]
     wolfdashboard.h
+    wolfhelm.h
+    wolfhelmhud.h
     wolfhudscale.h
     wolfvehiclerez.h
     wolffloaterdrivecontrols.h

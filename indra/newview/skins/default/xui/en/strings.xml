@@ -2782,6 +2782,8 @@ name="Command_360_Capture_Label">360° Snapshot</string>
   <string name="Command_WolfRoleplay_Tooltip">Wolf Roleplay: your stats, money and level, and the region's game</string>
   <string name="Command_WolfDashboard_Label">Dashboard</string>
   <string name="Command_WolfDashboard_Tooltip">Car Dashboard: speedometer, rev counter, gears and a steering wheel for the vehicle you sit in (car, truck or bike)</string>
+  <string name="Command_WolfHelm_Label">Captain's Helm</string>
+  <string name="Command_WolfHelm_Tooltip">Captain's Helm: the wheel, sails, compass, wind and guns of the sailing ship you command (Wolf Territories)</string>
   <string name="Command_WolfWeather_Tooltip">Show or hide the weather — the region's, the parcel's, or your own</string>
   <string name="Command_View_Label">Camera controls</string>
 <!-- Ansariel: Renamed for FS (FIRE-5019)

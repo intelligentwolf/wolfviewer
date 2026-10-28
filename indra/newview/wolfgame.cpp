@@ -51,6 +51,7 @@
 #include "wolffloaterroleplay.h"
 #include "wolfgamehud.h"
 #include "wolfdrive.h"
+#include "wolfhelm.h"   // <WolfViewer 2026-10-28/> the Captain's Helm takes the bottom too
 #include "wolfflight.h"
 #include "llkeyboard.h"
 #include "llmenugl.h"
@@ -1394,7 +1395,8 @@ bool WolfGame::bottomTaken()
     // Source (from the dashboard's author, wolfdrive.h): WolfDrive::dashboardOn(); wolfflight.h
     // active() / deckHidden() - the deck is on screen while active and not hidden.
     const WolfFlight& wf = WolfFlight::instance();
-    return (wf.active() && !wf.deckHidden()) || WolfDrive::instance().dashboardOn();
+    return (wf.active() && !wf.deckHidden()) || WolfDrive::instance().dashboardOn()
+        || WolfHelm::instance().hudShowing();   // <WolfViewer 2026-10-28/> the Captain's Helm (wolfhelm.h)
 }
 
 bool WolfGame::hudShowing() const
@@ -1429,6 +1431,8 @@ void WolfGame::claimBottom()
     // mode and its autopilot keep running (the Plane / Boat icons bring the deck back).
     WolfFlight& wf = WolfFlight::instance();
     if (wf.active() && !wf.deckHidden()) wf.toggleDeck(wf.sailing());
+    // <WolfViewer 2026-10-28> the Captain's Helm gives way too (showHud(false): not reopened for this seat)
+    if (WolfHelm::instance().hudShowing()) WolfHelm::instance().showHud(false);
     ++mGeneration;
 }
 

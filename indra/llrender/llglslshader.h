@@ -81,12 +81,22 @@ public:
     typedef UniformSetting<LLVector4> VectorSetting;
     typedef UniformSetting<LLVector3> Vector3Setting;
 
+    // <WolfViewer 2026-10-28> [WOLF SEA TUNNEL] a vec4 ARRAY uniform (wolfdryvolumes.cpp "wolfDry"): the values
+    // are copied, then uploaded with one glUniform4fv(location, count) (LLGLSLShader::uniform4fv(index, count, v))
+    struct VectorArraySetting
+    {
+        S32 mUniform{ 0 };
+        std::vector<LLVector4> mValues;
+    };
+    // </WolfViewer>
+
     void clear()
     {
         mIntegers.resize(0);
         mFloats.resize(0);
         mVectors.resize(0);
         mVector3s.resize(0);
+        mVectorArrays.resize(0);   // <WolfViewer 2026-10-28/>
     }
 
     void uniform1i(S32 index, S32 value)
@@ -119,6 +129,12 @@ public:
         mVector3s.push_back({ index, LLVector3(value) });
     }
 
+    // <WolfViewer 2026-10-28/> [WOLF SEA TUNNEL] count vec4s from values (count >= 1)
+    void uniform4fv(S32 index, U32 count, const LLVector4* values)
+    {
+        mVectorArrays.push_back({ index, std::vector<LLVector4>(values, values + count) });
+    }
+
     void apply(LLGLSLShader* shader);
 
 
@@ -126,6 +142,7 @@ public:
     std::vector<FloatSetting> mFloats;
     std::vector<VectorSetting> mVectors;
     std::vector<Vector3Setting> mVector3s;
+    std::vector<VectorArraySetting> mVectorArrays;   // <WolfViewer 2026-10-28/>
 };
 class LLGLSLShader
 {

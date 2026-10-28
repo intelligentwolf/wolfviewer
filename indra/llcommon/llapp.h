@@ -285,6 +285,15 @@ public:
     virtual bool reportCrashToBugsplat(void* pExcepInfo /*EXCEPTION_POINTERS*/) { return false; }
 #endif
 
+#ifndef LL_WINDOWS
+    // [CRASH REPORTS 2026-10-28] WolfViewer (newview/wolfcrashreport.cpp) writes its crash stack from here: called
+    // once, from the fatal-signal handler (SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT, SIGQUIT), on the signal's
+    // thread, before the signal is raised again. siginfo is the handler's siginfo_t*, ucontext its ucontext_t*. The
+    // hook must be async-signal-safe.
+    typedef void (*FatalSignalHook)(int signum, void* siginfo, void* ucontext);
+    static void setFatalSignalHook(FatalSignalHook hook);
+#endif
+
 public:
     typedef std::map<std::string, std::string> string_map;
     string_map mOptionMap;  // Contains all command-line options and arguments in a map

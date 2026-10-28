@@ -264,6 +264,7 @@
 #include "streamtitledisplay.h"
 #include "wolfalbumart.h"
 #include "wolfupdate.h"
+#include "wolfcrashreport.h"   // [CRASH REPORTS 2026-10-28/]
 #include "wolfadultcontent.h"   // [ADULT CONTENT 2026-10-26/] login refused at an Adult Content region
 #include "wolffloaterchat.h"   // [WOLF CHAT 2026-10-21/] WolfChat::startNotifier
 #include "tea.h"
@@ -3403,6 +3404,9 @@ bool idle_startup()
         // in-world, and a dialog here is seen rather than lost behind the login screen.
         // <WolfViewer 2026-10-02/> It now fetches and installs on request (wolfupdate.h).
         WolfUpdate::checkOnce();
+
+        // [CRASH REPORTS 2026-10-28] Send a crash an earlier run left behind, as a staff ticket (wolfcrashreport.h).
+        WolfCrashReport::sendPendingOnce();
 
         // [WOLF CHAT 2026-10-21] The channel bells: a background check for new Wolf Chat messages, which does nothing
         // until this account has used Wolf Chat and only asks while on Wolf Territories (wolffloaterchat.cpp).

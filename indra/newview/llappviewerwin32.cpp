@@ -35,6 +35,7 @@
 #include "llwindowwin32.h" // *FIX: for setting gIconResource.
 
 #include "llappviewerwin32.h"
+#include "wolfcrashreport.h"   // [CRASH REPORTS 2026-10-28/]
 #include "indra_constants.h"   // APP_NAME
 
 #include "llgl.h"
@@ -1092,8 +1093,13 @@ bool LLAppViewerWin32::reportCrashToBugsplat(void* pExcepInfo)
         sBugSplatSender->createReport((EXCEPTION_POINTERS*)pExcepInfo);
         return true;
     }
-#endif // LL_BUGSPLAT
     return false;
+#else
+    // [CRASH REPORTS 2026-10-28] No BugSplat: write the crash stack and minidump while the faulting stack is still
+    // there (wolfcrashreport.cpp). True lets the thread / coroutine / work-queue filter pass the exception on, as a
+    // BugSplat build does, instead of turning it into a std::exception that only ends in terminate().
+    return WolfCrashReport::writeForException(pExcepInfo);
+#endif // LL_BUGSPLAT
 }
 
 bool LLAppViewerWin32::initWindow()

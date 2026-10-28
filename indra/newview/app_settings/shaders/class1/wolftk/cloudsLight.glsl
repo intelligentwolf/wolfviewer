@@ -14,12 +14,19 @@
 uniform float wolfLightScale;
 uniform vec3 wolfOtherDirection;
 uniform float wolfOtherScale;
+// [WolfViewer 2026-10-28] ticket #304: per channel on THE light's direct irradiance - the moon's light as the eye sees it
+// (wolfenvironmentrender.cpp updateLight moonEyeTint: the night light's hue of moonlight, faded out as the night light itself comes
+// in); white for the sun. All 0 (the uniform unset) = white. The light's and the other body's sky irradiance are not tinted.
+uniform vec3 wolfLightTint;
+vec3 wolfLightTintOrWhite() {
+  return any(greaterThan(wolfLightTint, vec3(0.0))) ? wolfLightTint : vec3(1.0);
+}
 
 // The same Bruneton lookups as takram's, in two directions: the light's sun + sky irradiance scaled, plus the other
 // body's sky irradiance scaled. Scalar (clouds.vert, clouds.frag default) and cosine-weighted (ACCURATE_SUN_SKY_LIGHT).
 vec3 wolfLightScalarIrradiance(const vec3 pointKm, out vec3 skyIrradiance) {
   float ls = wolfLightScale > 0.0 ? wolfLightScale : 1.0;
-  vec3 sun = GetSunAndSkyScalarIrradiance(pointKm, sunDirection, skyIrradiance) * ls;
+  vec3 sun = GetSunAndSkyScalarIrradiance(pointKm, sunDirection, skyIrradiance) * ls * wolfLightTintOrWhite();
   skyIrradiance *= ls;
   if (wolfOtherScale > 0.0) {
     vec3 skyOther;
@@ -30,7 +37,7 @@ vec3 wolfLightScalarIrradiance(const vec3 pointKm, out vec3 skyIrradiance) {
 }
 vec3 wolfLightIrradiance(const vec3 pointKm, const vec3 normal, out vec3 skyIrradiance) {
   float ls = wolfLightScale > 0.0 ? wolfLightScale : 1.0;
-  vec3 sun = GetSunAndSkyIrradiance(pointKm, normal, sunDirection, skyIrradiance) * ls;
+  vec3 sun = GetSunAndSkyIrradiance(pointKm, normal, sunDirection, skyIrradiance) * ls * wolfLightTintOrWhite();
   skyIrradiance *= ls;
   if (wolfOtherScale > 0.0) {
     vec3 skyOther;

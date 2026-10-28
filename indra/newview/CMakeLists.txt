@@ -923,6 +923,8 @@ set(viewer_SOURCE_FILES
     wolffloaterlagdetector.cpp
     wolffloatercompass.cpp   # [WOLF COMPASS 2026-10-16]
     wolffloaterbugreport.cpp   # [WOLF BUG REPORT 2026-10-24] Report a Problem (ticket + viewer logs)
+    wolfcrashreport.cpp   # [CRASH REPORTS 2026-10-28] crash stack / minidump, sent as a staff ticket next run
+    wolflogscrub.cpp   # [CRASH REPORTS 2026-10-28] log scrub / tail / gzip shared with the Flea Report
     wolffloaterdob.cpp   # [DOB IN THE VIEWER 2026-10-26] Your Date of Birth (asked after login when the account has none)
     wolfadultcontent.cpp   # [ADULT CONTENT 2026-10-26] the Adult Content region type (badges, refusals)
     wolffloateragecheck.cpp   # [ADULT CONTENT 2026-10-26] Wolf World > Age Check
@@ -1906,6 +1908,8 @@ set(viewer_HEADER_FILES
     wolffloaterlagdetector.h
     wolffloatercompass.h   # [WOLF COMPASS 2026-10-16]
     wolffloaterbugreport.h   # [WOLF BUG REPORT 2026-10-24]
+    wolfcrashreport.h   # [CRASH REPORTS 2026-10-28]
+    wolflogscrub.h   # [CRASH REPORTS 2026-10-28]
     wolffloaterdob.h   # [DOB IN THE VIEWER 2026-10-26]
     wolfadultcontent.h   # [ADULT CONTENT 2026-10-26]
     wolffloateragecheck.h   # [ADULT CONTENT 2026-10-26]

@@ -58,6 +58,19 @@
 void setup_signals();
 void default_unix_signal_handler(int signum, siginfo_t *info, void *);
 
+// [CRASH REPORTS 2026-10-28] LLApp::setFatalSignalHook. Set once at start-up, read in the signal handler.
+static LLApp::FatalSignalHook sFatalSignalHook = nullptr;
+static volatile sig_atomic_t sFatalSignalHookRan = 0;
+
+static void run_fatal_signal_hook(int signum, siginfo_t* info, void* ucontext)
+{
+    if (sFatalSignalHook && !sFatalSignalHookRan)
+    {
+        sFatalSignalHookRan = 1;
+        sFatalSignalHook(signum, info, ucontext);
+    }
+}
+
 #if LL_LINUX
 #else
 // Called by breakpad exception handler after the minidump has been generated.
@@ -341,6 +354,14 @@ void LLApp::setErrorHandler(LLAppErrorHandler handler)
     LLApp::sErrorHandler = handler;
 }
 
+#ifndef LL_WINDOWS
+// static
+void LLApp::setFatalSignalHook(FatalSignalHook hook)
+{
+    sFatalSignalHook = hook;   // [CRASH REPORTS 2026-10-28/]
+}
+#endif
+
 // static
 void LLApp::runErrorHandler()
 {
@@ -591,7 +612,7 @@ void clear_signals()
 
 
 
-void default_unix_signal_handler(int signum, siginfo_t *info, void *)
+void default_unix_signal_handler(int signum, siginfo_t *info, void *ucontext)
 {
     // Unix implementation of synchronous signal handler
     // This runs in the thread that threw the signal.
@@ -625,6 +646,7 @@ void default_unix_signal_handler(int signum, siginfo_t *info, void *)
         {
             LL_WARNS() << "Signal handler - Got SIGABRT, terminating" << LL_ENDL;
         }
+        run_fatal_signal_hook(signum, info, ucontext);   // [CRASH REPORTS 2026-10-28/]
         clear_signals();
         raise(signum);
         return;
@@ -698,6 +720,8 @@ void default_unix_signal_handler(int signum, siginfo_t *info, void *)
             {
                 LL_WARNS() << "Signal handler - Flagging error status and waiting for shutdown" << LL_ENDL;
             }
+
+            run_fatal_signal_hook(signum, info, ucontext);   // [CRASH REPORTS 2026-10-28/] first fatal signal only
 
             if (LLApp::isCrashloggerDisabled()) // Don't gracefully handle any signal, crash and core for a gdb post mortem
             {

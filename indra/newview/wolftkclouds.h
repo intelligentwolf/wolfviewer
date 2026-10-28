@@ -128,6 +128,7 @@ namespace WolfTk
         F32        light_scale = 1.f;   // its irradiance over the sun's (1 the sun; the moon's TOA illuminance / the sun's)
         LLVector3  other_dir_ecef;      // the other body, whose sky irradiance alone is added ..
         F32        other_scale = 0.f;   // .. with this scale (0: none)
+        LLColor3   light_tint = LLColor3::white;   // [2026-10-28] per channel on THE light's direct irradiance (the moon's eye colour, ticket #304)
         // [WolfViewer 2026-10-27] the moon disc as the sky dome drew it this pass (wolfenvironmentrender.cpp sMoonDrawn), ECEF:
         // its centre, the quad's right / up and its half-size as tangents along them - the disc is length(p) <= 1 (skyF.glsl
         // wolfEepMoon / wolfMoonDisc). The corona is not added over it (cloudsF.glsl wolfCoronaOffDisc). Off: none drawn.

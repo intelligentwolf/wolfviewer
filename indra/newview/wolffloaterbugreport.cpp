@@ -18,7 +18,6 @@
 #include "wolffloaterbugreport.h"
 
 #include <ctime>
-#include <regex>
 
 #include <boost/json.hpp>
 
@@ -48,12 +47,7 @@
 #include "llweb.h"
 #include "workqueue.h"
 #include "wolfgrid.h"
-
-#ifdef LL_USESYSTEMLIBS
-#include <zlib.h>
-#else
-#include "zlib-ng/zlib.h"
-#endif
+#include "wolflogscrub.h"   // [CRASH REPORTS 2026-10-28/] the scrub / tail / gzip code that used to live in this file
 
 namespace
 {
@@ -68,9 +62,12 @@ namespace
     const S64 MAX_LOG_BYTES = 4 * 1024 * 1024;
     // A crash older than this is not "the problem you are reporting".
     const time_t CRASH_MAX_AGE = 7 * 24 * 60 * 60;
-    // Lines longer than this are scrubbed a piece at a time (std::regex recurses on long matches); the server
-    // scrubs the whole file again in one go (ticketlib.php tkScrubLogText), so a piece edge cannot leak anything.
-    const size_t SCRUB_CHUNK = 16 * 1024;
+
+    // [CRASH REPORTS 2026-10-28] Moved, unchanged, to wolflogscrub.cpp so the automatic crash report shares them.
+    using WolfLogScrub::size_text;
+    using WolfLogScrub::wolf_scrub_log;
+    using WolfLogScrub::read_tail;
+    using WolfLogScrub::gzip_string;
 
     // ticketlib.php tkCategories(), in the website's order: the same keys, so the ticket lands in the same queue
     // filter as one raised on the website.
@@ -95,13 +92,6 @@ namespace
         return f->getChild<LLRadioGroup>("kind")->getSelectedIndex() == 1;
     }
 
-    std::string size_text(S64 n)
-    {
-        if (n >= 1024 * 1024) return llformat("%.1f MB", (F64)n / (1024.0 * 1024.0));
-        if (n >= 1024) return llformat("%d KB", (S32)(n / 1024));
-        return llformat("%d bytes", (S32)n);
-    }
-
     std::string date_text(time_t t)
     {
         struct tm g;
@@ -115,157 +105,6 @@ namespace
         return buf;
     }
 
-    std::string lower(std::string s)
-    {
-        LLStringUtil::toLower(s);
-        return s;
-    }
-
-    void replace_all(std::string& s, const std::string& from, const std::string& to)
-    {
-        if (from.empty()) return;
-        for (size_t at = s.find(from); at != std::string::npos; at = s.find(from, at + to.size()))
-        {
-            s.replace(at, from.size(), to);
-        }
-    }
-
-    // The rules of ticketlib.php tkScrubLogText, one line (or piece of a line) at a time. Each regex only runs
-    // when the line holds the word it needs, which keeps a 4 MB log to a fraction of a second.
-    std::string scrub_piece(const std::string& in)
-    {
-        static const std::regex cap_url(
-            "\\b(https?://[^/\\s\"'<>]+)/[^\\s\"'<>]*?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{32})[^\\s\"'<>]*",
-            std::regex::ECMAScript | std::regex::icase);
-        static const std::regex query_secret(
-            "([?&;](password|passwd|pass|pwd|token|access_token|auth|key|apikey|api_key|secret|sig|signature|session|session_id|secure_session_id)=)[^&\\s\"'<>]+",
-            std::regex::ECMAScript | std::regex::icase);
-        static const std::regex llsd_secret(
-            "(<key>\\s*(passwd|password|secure_session_id|session_id|mfa_hash|token|auth_token|seed_capability)\\s*</key>\\s*<(\\w+)>)[^<]*(</\\3>)",
-            std::regex::ECMAScript | std::regex::icase);
-        static const std::regex bearer("\\bBearer\\s+[A-Za-z0-9._~+/=-]{8,}", std::regex::ECMAScript);
-        static const std::regex md5_pass("\\$1\\$[0-9a-fA-F]{32}", std::regex::ECMAScript);
-        static const std::regex key_value(
-            "\\b(password|passwd|secret|token|api[_-]?key|authorization)([\"']?\\s*[:=]\\s*[\"']?)[^\\s\"'<>,;]+",
-            std::regex::ECMAScript | std::regex::icase);
-
-        const std::string l = lower(in);
-        std::string s = in;
-        if (l.find("http") != std::string::npos) s = std::regex_replace(s, cap_url, "$1/[capability removed]");
-        if (l.find('=') != std::string::npos) s = std::regex_replace(s, query_secret, "$1[removed]");
-        if (l.find("<key>") != std::string::npos) s = std::regex_replace(s, llsd_secret, "$1[removed]$4");
-        if (l.find("bearer") != std::string::npos) s = std::regex_replace(s, bearer, "Bearer [removed]");
-        if (l.find("$1$") != std::string::npos) s = std::regex_replace(s, md5_pass, "[password hash removed]");
-        if (l.find("pass") != std::string::npos || l.find("secret") != std::string::npos || l.find("token") != std::string::npos
-            || l.find("key") != std::string::npos || l.find("authoriz") != std::string::npos)
-        {
-            s = std::regex_replace(s, key_value, "$1$2[removed]");
-        }
-        return s;
-    }
-
-    // Take out the session ids and every capability link, password, token and key the log may hold. What a
-    // WolfViewer log really contains (read 2026-10-24): capability URLs ("Requesting seed from
-    // http://regionsN.wolfterritories.org:port/CAPS/<uuid>0000/", the event queue ".../CE/<uuid>", every cap
-    // ".../<uuid>"), which are bearer secrets for this session; IM session ids (kept: not secrets); no passwords.
-    // The other rules are for what Firestorm can log with debug settings on (an LLSD login dump: <key>passwd</key>).
-    std::string wolf_scrub_log(std::string text, const std::vector<std::string>& secrets)
-    {
-        for (const std::string& secret : secrets)
-        {
-            if (secret.size() < 16) continue;
-            std::string up = secret;
-            LLStringUtil::toUpper(up);
-            replace_all(text, lower(secret), "[session id removed]");
-            replace_all(text, up, "[session id removed]");
-        }
-        static const std::regex sensitive_key(
-            "<key>\\s*(passwd|password|secure_session_id|session_id|mfa_hash|token|auth_token|seed_capability)\\s*</key>\\s*$",
-            std::regex::ECMAScript | std::regex::icase);
-        static const std::regex value_line("^(\\s*<(\\w+)>)[^<]*(</\\2>)", std::regex::ECMAScript);
-
-        std::string out;
-        out.reserve(text.size());
-        bool pending_value = false;   // the line before named a secret LLSD key and left its value to this line
-        size_t start = 0;
-        while (start < text.size())
-        {
-            size_t end = text.find('\n', start);
-            const size_t stop = end == std::string::npos ? text.size() : end + 1;
-            std::string line = text.substr(start, stop - start);
-            if (pending_value)
-            {
-                line = std::regex_replace(line, value_line, "$1[removed]$3", std::regex_constants::format_first_only);
-                pending_value = false;
-            }
-            if (line.size() <= SCRUB_CHUNK)
-            {
-                if (line.find("<key>") != std::string::npos || line.find("<KEY>") != std::string::npos)
-                {
-                    pending_value = std::regex_search(line, sensitive_key);
-                }
-                out += scrub_piece(line);
-            }
-            else
-            {
-                for (size_t at = 0; at < line.size(); at += SCRUB_CHUNK)
-                {
-                    out += scrub_piece(line.substr(at, SCRUB_CHUNK));
-                }
-            }
-            start = stop;
-        }
-        return out;
-    }
-
-    // The last MAX_LOG_BYTES of a file, from the start of a line, with a note on top when it was cut.
-    bool read_tail(const std::string& path, std::string& out)
-    {
-        llifstream in(path.c_str(), std::ios::in | std::ios::binary);
-        if (!in.is_open()) return false;
-        in.seekg(0, std::ios::end);
-        const std::streamoff size = in.tellg();
-        if (size < 0) return false;
-        const std::streamoff from = size > MAX_LOG_BYTES ? size - MAX_LOG_BYTES : 0;
-        in.seekg(from, std::ios::beg);
-        std::string data((size_t)(size - from), '\0');
-        in.read(&data[0], (std::streamsize)data.size());
-        data.resize((size_t)in.gcount());
-        if (from > 0)
-        {
-            const size_t nl = data.find('\n');
-            if (nl != std::string::npos) data.erase(0, nl + 1);
-            // ticketlib.php tkPrepareLogFile looks for "[WolfViewer: only the last" to mark the file "last part only".
-            data = llformat("[WolfViewer: only the last %s of this %s log were sent]\n",
-                            size_text(MAX_LOG_BYTES).c_str(), size_text((S64)size).c_str()) + data;
-        }
-        out.swap(data);
-        return true;
-    }
-
-    // gzip (RFC 1952: windowBits 15 + 16) of a string.
-    bool gzip_string(const std::string& in, std::string& out)
-    {
-        z_stream zs;
-        memset(&zs, 0, sizeof(zs));
-        if (deflateInit2(&zs, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 15 + 16, 8, Z_DEFAULT_STRATEGY) != Z_OK) return false;
-        zs.next_in = (Bytef*)in.data();
-        zs.avail_in = (uInt)in.size();   // at most MAX_LOG_BYTES plus a note line
-        out.clear();
-        char buf[65536];
-        int rc = Z_OK;
-        do
-        {
-            zs.next_out = (Bytef*)buf;
-            zs.avail_out = (uInt)sizeof(buf);
-            rc = deflate(&zs, Z_FINISH);
-            if (rc == Z_STREAM_ERROR) break;
-            out.append(buf, sizeof(buf) - zs.avail_out);
-        } while (rc != Z_STREAM_END);
-        deflateEnd(&zs);
-        return rc == Z_STREAM_END;
-    }
-
     // Runs on the "General" work queue: read, scrub and compress every log. Returns [file name, gzip bytes] pairs.
     std::vector<std::pair<std::string, std::string>> prepare_logs(const std::vector<WolfFloaterBugReport::LogFile>& logs,
                                                                   const std::vector<std::string>& secrets)
@@ -274,7 +113,7 @@ namespace
         for (const WolfFloaterBugReport::LogFile& f : logs)
         {
             std::string text, gz;
-            if (!read_tail(f.mPath, text)) continue;
+            if (!read_tail(f.mPath, text, MAX_LOG_BYTES)) continue;
             if (!gzip_string(wolf_scrub_log(text, secrets), gz)) continue;
             parts.emplace_back(f.mSendAs + ".gz", gz);
         }
@@ -519,9 +358,9 @@ void WolfFloaterBugReport::findLogs()
 
     // The last crash: each run writes static_debug_info.log into its own "dump-<uuid>" folder in the logs folder
     // (llappviewer.cpp setDebugFileNames(LL_PATH_DUMP), lldir.cpp getDumpDir) and a clean exit deletes it
-    // (LLAppViewer::removeDumpDir), so a folder left behind is a run that crashed or was killed. On Windows the
-    // crash handler also copies the log there (llappviewerwin32.cpp FS::LogfileOut). The minidump (.dmp) is NOT
-    // sent: it is a copy of the viewer's memory, which holds the session and cannot be scrubbed.
+    // (LLAppViewer::removeDumpDir), so a folder left behind is a run that crashed or was killed. The crash handler
+    // also copies the log there (wolfcrashreport.cpp; [CRASH REPORTS 2026-10-28]). The minidump (.dmp) is NOT sent
+    // with a flea report: it goes only with the automatic crash report, to a staff-only ticket (wolfcrashreport.h).
     const std::string logdir = gDirUtilp->getExpandedFilename(LL_PATH_LOGS, "");
     const std::string this_run = gDirUtilp->dumpDirExists() ? gDirUtilp->getBaseFileName(gDirUtilp->getDumpDir()) : std::string();
     std::string newest;

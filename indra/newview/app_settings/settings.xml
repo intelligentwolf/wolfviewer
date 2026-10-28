@@ -411,6 +411,17 @@
     <key>Value</key>
     <integer>2</integer>
   </map>
+  <key>WolfCrashReportsAuto</key>
+  <map>
+    <key>Comment</key>
+    <string>[CRASH REPORTS 2026-10-28] After WolfViewer closes unexpectedly, send the crash details (crash stack, a small memory snapshot on Windows, system details and the end of the viewer log with session ids and capability links taken out) to the Wolf Territories support team at the next Wolf Territories login. Off: crashes are kept on this computer only and never sent.</string>
+    <key>Persist</key>
+    <integer>1</integer>
+    <key>Type</key>
+    <string>Boolean</string>
+    <key>Value</key>
+    <integer>1</integer>
+  </map>
   <key>WolfStreamAlbumArt</key>
   <map>
     <key>Comment</key>

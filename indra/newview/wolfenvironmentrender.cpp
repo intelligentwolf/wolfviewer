@@ -154,6 +154,7 @@ namespace
         bool     sunUp = true;
         F32      night = 0.f;                        // [2026-10-25] WolfEnvironmentRender::nightFactor
         F32      nightS = 1.f;                       // [2026-10-25] the rods' saturation at the adaptation luminance (nightLight)
+        LLColor3 moonEyeTint = LLColor3::white;      // [2026-10-28] the moon's light on the clouds as the eye sees it (updateLight)
         LLColor3 sunNormal;                          // the sun's illuminance at the camera, perpendicular (lux)
         LLColor3 sunHorizontal, skyHorizontal;       // on a horizontal surface (lux)
         F32      moonTOA = 0.f;                      // Krisciunas & Schaefer, lux
@@ -1307,6 +1308,42 @@ namespace
                                     + componentMult(sNext.skyHorizontal, sNext.ambTint)) * (1.f / F_PI);
             sNext.nightS = rodSaturation(luminance(white));
         }
+        {
+            // [WolfViewer 2026-10-28] ticket #304 (Jimmy Olsen, TROMSO 05:47Z, W82): "the moon bright colour changed to orange", the
+            // moonlit clouds in the west cream-orange (his picture: 180,165,155, r/b 1.15) against a mauve-grey dawn side (121,113,114).
+            // The log: sun -13.4 deg at 05:30Z rising through -12.0 at 05:4xZ, moon 32-33 deg up. From the sun 6 deg under the
+            // clouds' light is the moon (moonLightsClouds above): the sun's irradiance through the air toward the moon (cloudsLight.glsl,
+            // Bruneton's transmittance - about 1.9 air masses at 32 deg, red ~0.9, blue ~0.64: linear r/b ~1.4, warm), and nothing
+            // else gives it a colour by night: the EEP's per-direction cloud gains are by day only (measureCloudCover gainsByDay /
+            // setEepCloudSkyGain(sunUp)), the cloud tint is a grey gain (setEepColours above). Its eye colour came only from the night
+            // light (nightLight.glsl, Jensen et al. 2000) on the clouds' whole colour, weighted by nightFactor - 0 until the sun is 12 deg
+            // under. So between the sun 6 and 12 deg under (and as night faded at dawn) the moonlit clouds showed the raw warm
+            // transmittance colour: blue-white at 04:15Z (sun -19.8, night 1), cream-orange by 05:47Z (night 0). Moonlight is only
+            // ever seen by dark-adapted eyes; the rule now: the MOON's direct light on the clouds always takes the colour the night light
+            // gives moonlight at the frame's adaptation (nightS, the same s), keeping its own luminance (only the hue: the brightness
+            // balance between the moonlit side and the twilight side is the physical one - the moon at 32 deg, 94 % lit, gives ~0.07 lux
+            // on the ground (Krisciunas & Schaefer above), the twilight sky at the sun 12 deg under far less). Faded out as nightFactor
+            // comes in, which then applies the full night light to the whole cloud colour as before (no double shift): by night
+            // (sun under -18 deg) nothing changes. The twilight sky's light on the clouds keeps its colour, and by day (the sun the
+            // clouds' light) this is white: the daytime clouds are untouched.
+            sNext.moonEyeTint = LLColor3::white;
+            if (sNext.moonLightsClouds)
+            {
+                // the moon's light as the clouds get it: the sun's beam through the air toward the moon (cloudsLight.glsl
+                // GetSunAndSkyScalarIrradiance x wolfLightScale; the scale is a scalar, the colour is this)
+                const LLColor3 m = sAtmos->sunIlluminance(camKm, sNext.moonECEF);
+                LLColor3 seen = nightLightColour(m, 1.f, sNext.nightS);
+                const F32 lm = luminance(m), ls = luminance(seen);
+                if (lm > 0.f && ls > 0.f)
+                {
+                    seen *= lm / ls;   // the hue alone
+                    LLColor3 tint;
+                    for (S32 i = 0; i < 3; ++i) tint.mV[i] = m.mV[i] > 0.f ? seen.mV[i] / m.mV[i] : 1.f;
+                    const F32 n = llclamp(sNext.night, 0.f, 1.f);
+                    sNext.moonEyeTint = tint * (1.f - n) + LLColor3::white * n;
+                }
+            }
+        }
         sNext.valid = true;
     }
 
@@ -1340,6 +1377,7 @@ namespace
             f.moon_disc_half = sMoonDrawn.half;
         }
         f.other_scale = moonLights ? 1.f : sFrame.moonSkyScale;
+        f.light_tint = moonLights ? sFrame.moonEyeTint : LLColor3::white;   // [2026-10-28] ticket #304 (updateLight moonEyeTint)
         f.camera_world = cam->getOrigin();
         const F64 t = LLFrameTimer::getElapsedSeconds();
         static F64 s_last = 0.0;

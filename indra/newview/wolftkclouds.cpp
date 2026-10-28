@@ -939,6 +939,7 @@ struct Clouds::Impl
         u1f(sh, "wolfLightScale", f.light_scale);
         u3f(sh, "wolfOtherDirection", f.other_dir_ecef.mV[0], f.other_dir_ecef.mV[1], f.other_dir_ecef.mV[2]);
         u1f(sh, "wolfOtherScale", f.other_scale);
+        u3f(sh, "wolfLightTint", f.light_tint.mV[0], f.light_tint.mV[1], f.light_tint.mV[2]);   // [2026-10-28] ticket #304
         // [WolfViewer 2026-10-27] the moon disc as drawn (cloudsF.glsl wolfCoronaOffDisc; CloudsFrame moon_disc_*)
         u1f(sh, "wolfMoonDiscOn", f.moon_disc_on ? 1.f : 0.f);
         u3f(sh, "wolfMoonDiscTo", f.moon_disc_to_ecef.mV[0], f.moon_disc_to_ecef.mV[1], f.moon_disc_to_ecef.mV[2]);

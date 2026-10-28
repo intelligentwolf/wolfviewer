@@ -26,6 +26,7 @@
 
 #include "llviewerprecompiledheaders.h"
 
+#include "wolfcrashreport.h"   // [CRASH REPORTS 2026-10-28/]
 #include "wolfsuitcase.h"   // [SUITCASE 2026-10-10/] landmarks into My Suitcase on a hypergrid trip
 #include "wolfinvisible.h"  // <WolfViewer 2026-10-11/> Invisible Mode: tell each Wolf region
 #include "wolfviewerkey.h"  // [COPYBOT EXEMPT 2026-10-19/] the per-login key for the regions' copybot guard
@@ -892,6 +893,9 @@ public:
 bool LLAppViewer::init()
 {
     setupErrorHandling(mSecondInstance);
+    // [CRASH REPORTS 2026-10-28] Crash stack, Windows minidump and a copy of the log into this run's dump folder;
+    // sent as a staff ticket on the next run (wolfcrashreport.h). No-op in a BugSplat build.
+    WolfCrashReport::installHandler(mSecondInstance);
 
     nd::octree::debug::setOctreeLogFilename( gDirUtilp->getExpandedFilename(LL_PATH_LOGS, "octree.log" ) ); // <FS:ND/> Filename to log octree options to.
     nd::etw::init(); // <FS:ND/> Init event tracing.

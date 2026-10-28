@@ -21,13 +21,18 @@ is the exact recipe: excerpt times, filters, loudness and encoding.
 
 | File | Made from | SHA-1 |
 |---|---|---|
-| wolf_rain_bed_light.ogg | A, 50-107 s | 4263ba71823518843c5d89587d48a6ba2e98b610 |
-| wolf_rain_bed_moderate.ogg | B, 420-474 s | 7780b6a0bf34fe53b30df92a310624ddfa71fd2f |
-| wolf_rain_bed_heavy.ogg | B, 495-555 s and 615-675 s laid together | 5a04cafe90c5be3aa5430d0b46da6d32bbca23e4 |
-| wolf_rain_near_soft.ogg | C, whole | 8d6a592b8e173285d493fe8505d367fda3b510fe |
-| wolf_rain_near_leaves.ogg | A, 0-21 s and 32-48 s | 9ef44198916edbe0206c3fe76626f3463b74aa70 |
-| wolf_rain_near_roof.ogg | D, whole | ad80e5229eb3e56e2a16eb500edcc7f6c5e59545 |
+| wolf_rain_bed_light.ogg | A, 50-107 s | 03d5cd62199300ba7b4bd9e7dda1c659fd0744fc |
+| wolf_rain_bed_moderate.ogg | B, 420-474 s | b1e81ecec8d93dc60c5b169fb0176884b6158a5e |
+| wolf_rain_bed_heavy.ogg | B, 495-555 s and 615-675 s laid together | 662bea05d8f86e3859058818729a969e0476693a |
+| wolf_rain_near_soft.ogg | C, whole | 56ee547022d39e10440ca3c4e6e78625b3924bfa |
+| wolf_rain_near_leaves.ogg | A, 0-21 s and 32-48 s | e0c01dd9cdc8c41d4df0ae2a82aff3a909a1fd90 |
+| wolf_rain_near_roof.ogg | D, whole | 37014692f79cf1d4a8ae0c5ffcee34fe6827bf6a |
 | wolf_rain_drip_1..9.ogg | A, single drops at 6.503, 10.886, 16.734, 42.385, 51.759, 75.887, 87.515, 99.507 and 108.692 s | see `region-terrain-work/rain-sound/build/SHA1SUMS` |
 
 Ogg Vorbis, 44.1 kHz, quality 3. The loops are seamless and measured at -14 LUFS. The drops are
 mono.
+
+2026-10-28 (ticket 301, "frequent stops and hiccups" in light rain): the six loops were rebuilt.
+The old recipe turned the whole bed down under every loud drop, so the light bed dropped out about
+85 times a minute. Now the drops that hit the microphone are patched out with the rain from just
+beside them, and nothing turns the rain down. The drops are unchanged.

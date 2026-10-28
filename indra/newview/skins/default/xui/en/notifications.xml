@@ -2648,6 +2648,13 @@ Welcome to WolfViewer [NAME]
   </notification>
   <notification
    icon="notifytip.tga"
+   name="WolfCrashReportSent"
+   log_to_chat="false"
+   type="notifytip">
+WolfViewer closed unexpectedly last time. We have sent a crash report to the Wolf Territories support team so we can fix it. You can turn automatic crash reports off in Preferences &gt; Privacy &gt; General.
+  </notification>
+  <notification
+   icon="notifytip.tga"
    name="WolfWelcomeUnnamed"
    log_to_chat="false"
    type="notifytip">

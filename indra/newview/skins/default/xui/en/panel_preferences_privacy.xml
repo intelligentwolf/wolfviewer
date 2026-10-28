@@ -206,6 +206,16 @@
     name="FSCreateGiveInventoryParticleEffect"
     top_pad="3"
     width="350" />
+   <!-- [CRASH REPORTS 2026-10-28] wolfcrashreport.h -->
+   <check_box
+    control_name="WolfCrashReportsAuto"
+    height="16"
+    label="Send crash reports to Wolf Territories support automatically"
+    tool_tip="After WolfViewer closes unexpectedly, it sends the crash details to the support team at your next Wolf Territories login: where in the program it stopped, a small memory snapshot (Windows), your computer and graphics card, and the end of the viewer log with session ids and capability links taken out. Only the support team can open them, and they are deleted after 30 days. Untick to keep crash details on this computer only."
+    layout="topleft"
+    name="WolfCrashReportsAuto"
+    top_pad="10"
+    width="480" />
 
     <button
      follows="left|top"

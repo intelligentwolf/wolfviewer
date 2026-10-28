@@ -122,6 +122,23 @@ namespace
     WolfCloudGenus::Result sGenus;
     bool sGenusValid = false;
     bool sArrivalHold = false;   // [2026-10-26] updateLight: an arrival in progress, the previous sky held (measureCloudCover waits)
+
+    // [WolfViewer 2026-10-28] Jimmy Olsen, ticket #277 (TROMSO by night, W82: "white blinking", the whole sky or a band along the
+    // horizon). A TELEPORT IS THE AGENT'S JUMP, NOT THE CAMERA'S. The three cut tests (updateLight's arrival, probeSky's gain cut,
+    // measureCloudCover's restart) took a jump of over 300 m in the CAMERA's position as a teleport. On a 2048 m region a camera
+    // zoomed out, or alt-clicked onto something far away, moves that far in one frame with no teleport at all: his log
+    // (00:17-00:26Z) has four "arrival: the sky switched once" lines and no teleport, each in the same ten seconds as a camera move
+    // (llsurface.cpp reportTerrainDiagnostics, visible patches 7810 -> 1309, 8276 -> 14805, 7840 -> 15277), and after each one the
+    // cloud thinning settled again at a new value (0.406, then 0.586, 0.544, 0.519). Every false cut put the thinning to 0 at once
+    // (measureCloudCover: the clouds at full opacity, about twice what they were, through the arrival hold and the first readings -
+    // 3 s or more), then thinned them back, and restarted the cloud field at its seed phase (updateLight settleSnap ->
+    // sCloudReseed): the cloud deck, thickest towards the horizon, flashed bright and changed shape. The place the sky belongs to is
+    // the agent's (the documents, the EEP and the region are the agent's), so a cut is now the agent's global position jumping more
+    // than 300 m in one update - a teleport, local or to another region; a crossing still blends, and the camera may go anywhere.
+    LLVector3d placeGlobal()
+    {
+        return gAgent.getPositionGlobal();
+    }
     // GENUS_TAU: [2026-10-26] now WolfCloudGenus::table().genusTauS (app_settings/wolf_clouds.xml constants.genus_tau_s; 20 s shipped)
 
     /** The frame's geometry and light (absolute photometric values; x exposure when sent to shaders). */
@@ -757,14 +774,15 @@ namespace
     {
         // [WolfViewer 2026-10-13] a teleport is a cut: the clouds' cover and genus easing (GENUS_TAU, 20 s) is for weather
         // changing in place, but after a teleport it showed the previous place's clouds melting away (Paul: "lots of weird
-        // white clouds that gradually disappear"). A camera jump of more than 300 m in one update (a region is 256 m; no
-        // flight covers that in a frame) restarts the cover and the genera at the new place's values. Crossings still blend.
+        // white clouds that gradually disappear"). A jump of more than 300 m in one update (no flight covers that in a frame)
+        // restarts the cover and the genera at the new place's values. Crossings still blend.
+        // [2026-10-28] the AGENT's jump, no longer the camera's (placeGlobal, ticket #277): a camera zoomed far out is no teleport
         static bool s_cut = false;
         {
-            static LLVector3d s_lastCam; static bool s_haveCam = false;
-            const LLVector3d cam = gAgent.getPosGlobalFromAgent(LLViewerCamera::getInstance()->getOrigin());
-            s_cut = s_haveCam && (cam - s_lastCam).magVec() > 300.0;
-            s_lastCam = cam; s_haveCam = true;
+            static LLVector3d s_lastPlace; static bool s_havePlace = false;
+            const LLVector3d place = placeGlobal();
+            s_cut = s_havePlace && (place - s_lastPlace).magVec() > 300.0;
+            s_lastPlace = place; s_havePlace = true;
             // [2026-10-26] the genera and the cloud field now restart at the ONE switch below (settleSnap), not on the cut frame
             static bool s_seeded = false;
             if (!s_seeded) { sCloudReseed = true; s_seeded = true; }
@@ -2295,12 +2313,13 @@ namespace
         }
 
         if (!haveReading) return;
-        static LLVector3d s_lastCam; static bool s_haveCam = false;
-        const LLVector3d cam = gAgent.getPosGlobalFromAgent(LLViewerCamera::getInstance()->getOrigin());
+        // [2026-10-28] a teleport is the agent's jump (placeGlobal, ticket #277), not the camera's
+        static LLVector3d s_lastPlace; static bool s_havePlace = false;
+        const LLVector3d place = placeGlobal();
         // the stock light passing from the sun to the moon (or back) moves the whole grid: a cut too (5 deg or more at once)
         const bool refJump = readRef * sEepSkyRefWorld < cosf(5.f * DEG_TO_RAD);
-        const bool cut = !sGainValid || dt <= 0.f || refJump || (s_haveCam && (cam - s_lastCam).magVec() > 300.0);
-        s_lastCam = cam; s_haveCam = true;
+        const bool cut = !sGainValid || dt <= 0.f || refJump || (s_havePlace && (place - s_lastPlace).magVec() > 300.0);
+        s_lastPlace = place; s_havePlace = true;
         sEepSkyRefWorld = readRef;   // the gains below are this reading's: their angles are to its light
         sProbeHorizonDeg = readHorizon;
         const F32 k = cut ? 1.f : 1.f - expf(-dt / 0.5f);
@@ -2357,7 +2376,7 @@ namespace
             return;
         }
         static F64 s_next = 0.0;
-        static LLVector3d s_lastCam; static bool s_haveCam = false;
+        static LLVector3d s_lastPlace; static bool s_havePlace = false;
         // [WolfViewer 2026-10-13] Paul: "every time I move the cloud jerks and changes": the reads go to pixel-pack buffers and
         // are taken two seconds later (no wait for the GPU), and the stock cloud colour is computed once per grid node.
         // [WolfViewer 2026-10-13, round 12] Paul: "its flashing and jerking". The readings swing with the view (the cloud field is
@@ -2367,15 +2386,16 @@ namespace
         // 3 s, per frame; nodes out of view keep their gains.
         static LLColor3 s_grid[NPROBE], s_gridTarget[NPROBE];
         static F64 s_lastEase = 0.0;
-        const LLVector3d cam = gAgent.getPosGlobalFromAgent(LLViewerCamera::getInstance()->getOrigin());
-        if (s_haveCam && (cam - s_lastCam).magVec() > 300.0)
+        // [2026-10-28] the agent's jump, not the camera's (placeGlobal, ticket #277)
+        const LLVector3d place = placeGlobal();
+        if (s_havePlace && (place - s_lastPlace).magVec() > 300.0)
         {
             // a teleport: start again, the clouds' gains off until the new place is measured
             if (sCloudGainValid) { sCloudGainValid = false; LLColor3 white[NPROBE]; for (S32 i = 0; i < NPROBE; ++i) white[i] = LLColor3::white; sAtmos->setEepCloudGains(white, false); }
             if (sStockValid || sThin != 0.f) { sStockValid = false; sThin = sThinTarget = 0.f; sAtmos->setEepCloudThin(0.f); }
             sCoverLocked = false; sCoverSettled = 0; sCoverLockTarget = -1.f;
         }
-        s_lastCam = cam; s_haveCam = true;
+        s_lastPlace = place; s_havePlace = true;
         if (sArrivalHold) return;   // [2026-10-26] the previous sky is held until the arrival's one switch: nothing to measure yet
         const F32 target = WolfEepReference::cloudCoveredFraction(psky);
         const F64 t = LLFrameTimer::getElapsedSeconds();

@@ -824,7 +824,11 @@ void main()
     // by the open-sea weight. It runs on the REAL depth (no reef slope: an unpainted beach breaks where its own water
     // says, McCowan below), and as the baked optical path belongs to the painted surf's wavelength, its phase is the
     // open-sea distance plus the shoaling term below. Painted surf is untouched.
-    bool autoSurfOn = wolfAutoSurf.w > 0.5 && wolfAutoSurf.x > 0.01 && waveAmplitude > 0.001 && openW > 0.01;
+    // [TICKET 271 2026-10-27] ...and by the painted zone, as the breakers and the swash foam are (shoreGate = the open-sea
+    // weight x smoothstep(0.35, 0.55, zone energy), above): Contessa Lacombe painted her bay Calm and then Off and still got
+    // full-height automatic surf, because this gate read the open-sea weight alone. Off and Calm cells get none, Small cells
+    // none, Open cells all of it - the same rule the 09-10 shore foam follows (Paul: "an enclosed lake never goes white").
+    bool autoSurfOn = wolfAutoSurf.w > 0.5 && wolfAutoSurf.x > 0.01 && waveAmplitude > 0.001 && shoreGate > 0.01;
     if ((surfHeight > 0.01 || autoSurfOn) && shoreWavesEnabled > 0.5 && boundedWaterDepth <= 0.0 && exposureReady > 0.5)
     {
         // Surf ONLY where a designer painted it (Paul 09-07: "surf is a special thing"). Water.js same.
@@ -839,7 +843,7 @@ void main()
         float sLen = autoS ? wolfAutoSurf.z : surfLength;
         if (autoS)
         {
-            surfZone = openW;
+            surfZone = shoreGate;   // [TICKET 271 2026-10-27/] was openW: the painted zone gates it too
         }
         vec2 euv = (regionXY - exposureOrigin) / exposureSize;
         if (surfZone > 0.01 && euv.x >= 0.0 && euv.x <= 1.0 && euv.y >= 0.0 && euv.y <= 1.0)
@@ -1001,9 +1005,9 @@ void main()
                 // every term that SHARPENS the crest — the forward lean, the cnoidal peaking,
                 // the barrel, the Gerstner pinch — and finally the crest height itself fade
                 // with it. res = 1 leaves the arithmetic below bit-identical to the pre-band-
-                // limit code. The FOAM (vSurf) keeps the full crest, so distant surf still
-                // reads as a white line of breakers on water the lattice can actually draw —
-                // the same trade the spectral cascades make with fftFade.
+                // limit code. [TICKET 271 2026-10-27] The FOAM (vSurf) used to keep the full crest
+                // here; per vertex on a coarse lattice it aliased into zig-zags, so it is band-limited
+                // too now (foamRes, below).
                 // The wavelength measured here is 2 pi / k, the LOCAL one, which is now the
                 // wavelength actually drawn: the phase is k0 * path and |grad(k0 path)| = k
                 // by construction of the eikonal bake. Under the old k(x) * distance phase it
@@ -1083,7 +1087,14 @@ void main()
                 wave_slope += dir * (crestG * 0.6 * k * cs * (0.3 + 0.7 * upkG));
                 // wash = the churn a broken crest leaves BEHIND it (its back slope, cs > 0)
                 float wash = breakF * smoothstep(0.3, 1.0, cs) * smoothstep(0.1, 0.5, up);
-                vSurf = vec4(smoothstep(0.3, 1.0, upk), breakF, crestH, wash);   // peak only
+                // [TICKET 271 2026-10-27] FOAM BAND LIMIT. The foam is a per-vertex value too, so it can only be as sharp
+                // as the lattice under it, like the geometry above. The crest foam (upk, a narrow peak) interpolated over
+                // triangles wider than a third of a wave drew saw-tooth white zig-zags and lone white triangles across a
+                // whole bay (Contessa Lacombe's Flea Report, New Brigantia 49, seen from the air: "the waves look like
+                // strange lines"). It now fades out between 5 and 3 vertices per wave, the band the geometry's res uses;
+                // near the camera, where the lattice draws the wave, it is unchanged. Water.js same.
+                float foamRes = smoothstep(3.0, 5.0, vpw);
+                vSurf = vec4(smoothstep(0.3, 1.0, upk) * foamRes, breakF, crestH, wash * foamRes);   // peak only
             }
         }
     }
@@ -1100,7 +1111,9 @@ void main()
     // level meets the beach, so it advances and retreats with the terrain's own shape. waterF.glsl holds the band:
     // nothing over land above the water level + Rcap, and nothing at all over land higher than that.
     float Rcap = 0.0;
-    if (swHave > 0.5 && depthReady > 0.5 && openW > 0.01)
+    // [TICKET 271 2026-10-27] Weighted by shoreGate (the open-sea weight x the painted zone), not the open-sea weight alone:
+    // no swash on an Off / Calm / Small cell, even where painted surf's blurred weight reaches into it.
+    if (swHave > 0.5 && depthReady > 0.5 && shoreGate > 0.01)
     {
         vec2 swuv = (regionXY - depthOrigin) / depthRegionSize;
         if (swuv.x >= 0.0 && swuv.x <= 1.0 && swuv.y >= 0.0 && swuv.y <= 1.0)
@@ -1110,8 +1123,8 @@ void main()
             float xiMax = swSlope / sqrt(max(swH, 0.01) / L0);
             float Hw = max(swH * swSetEnv, 0.01);
             float xi = swSlope / sqrt(Hw / L0);
-            Rcap = min(xiMax * swH, WOLF_RUNUP_CAP) * openW;
-            float R = min(xi * Hw, WOLF_RUNUP_CAP) * openW * (0.8 + 0.2 * snoise(regionXY * 0.07 + vec2(time * 0.03, 0.0)));
+            Rcap = min(xiMax * swH, WOLF_RUNUP_CAP) * shoreGate;
+            float R = min(xi * Hw, WOLF_RUNUP_CAP) * shoreGate * (0.8 + 0.2 * snoise(regionXY * 0.07 + vec2(time * 0.03, 0.0)));
             R = clamp(R, 0.0, Rcap);
             float u = fract(swPhase / 6.2831853);
             float eta = u < 0.33 ? smoothstep(0.0, 0.33, u) : 1.0 - smoothstep(0.33, 1.0, u);

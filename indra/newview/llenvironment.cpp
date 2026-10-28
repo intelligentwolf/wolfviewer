@@ -1079,7 +1079,9 @@ LLSettingsSky::ptr_t LLEnvironment::getCurrentSky() const
     {
         for (int idx = 0; idx < ENV_END; ++idx)
         {
-            if (mEnvironments[idx]->getSky())
+            // <WolfViewer 2026-10-28> ticket #286: an empty slot is a null pointer (ENV_EDIT, ENV_PUSH ... are only set while
+            // in use); stock read it unchecked whenever the selected instance had no sky yet
+            if (mEnvironments[idx] && mEnvironments[idx]->getSky())
             {
                 psky = mEnvironments[idx]->getSky();
                 break;
@@ -1098,7 +1100,7 @@ LLSettingsWater::ptr_t LLEnvironment::getCurrentWater() const
     {
         for (int idx = 0; idx < ENV_END; ++idx)
         {
-            if (mEnvironments[idx]->getWater())
+            if (mEnvironments[idx] && mEnvironments[idx]->getWater())   // <WolfViewer 2026-10-28/> ticket #286, see getCurrentSky
             {
                 pwater = mEnvironments[idx]->getWater();
                 break;
@@ -1433,7 +1435,8 @@ void LLEnvironment::setEnvironment(LLEnvironment::EnvSelection_t env, LLEnvironm
     }
     else if (!environment->getSky())
     {
-        if (mCurrentEnvironment->getEnvironmentSelection() != ENV_NONE)
+        // <WolfViewer 2026-10-28/> ticket #286: and only when it has one - setSky(nullptr) dereferences it (DayInstance::setSky)
+        if (mCurrentEnvironment->getEnvironmentSelection() != ENV_NONE && mCurrentEnvironment->getSky())
         {
             // Note: This looks suspicious. Shouldn't we assign whole day if mCurrentEnvironment has whole day?
             // and then add water/sky on top
@@ -1445,14 +1448,26 @@ void LLEnvironment::setEnvironment(LLEnvironment::EnvSelection_t env, LLEnvironm
         else
         {
             // Environment is not properly initialized yet, but we should have environment by this point
-            DayInstance::ptr_t substitute = getEnvironmentInstance(ENV_PARCEL, true);
+            // <WolfViewer 2026-10-28> ticket #286 (Brock Armstrong: "changing the Wolf Environment and then toggling EEP results in
+            // Wolf Viewer crash, not always"). Looked up, never created: stock asked getEnvironmentInstance(..., true), which for a
+            // parcel with no environment of its own STORED a new empty DayInstance (no day, sky or water) in mEnvironments[ENV_PARCEL].
+            // This branch runs whenever a fixed sky is set while a transition is current (DayTransition is ENV_NONE) - on Wolf
+            // regions every region sky change fades for 120 s (wolf_region_transition), so the EEP toolbar button pressed during
+            // that fade (Midday on ENV_LOCAL: wolf_toggle_eep) left the empty parcel instance behind. Pressed again, ENV_LOCAL is
+            // cleared and selected instantly, getSelectedEnvironmentInstance picks that empty instance and it becomes current with
+            // no sky or water ("Failed to update GL variable for water/sky settings, environment is not properly set", seen in his
+            // log 2026-10-28 00:09:45Z); until the next LLEnvironment::update initialises it with the default sky, getCurrentSky /
+            // getCurrentWater fell through to their unchecked fallback loops (fixed above) - and afterwards the region's own sky
+            // stayed hidden behind the default one until the next parcel or region change.
+            // </WolfViewer>
+            DayInstance::ptr_t substitute = getEnvironmentInstance(ENV_PARCEL);
             if (!substitute || !substitute->getSky())
             {
-                substitute = getEnvironmentInstance(ENV_REGION, true);
+                substitute = getEnvironmentInstance(ENV_REGION);
             }
             if (!substitute || !substitute->getSky())
             {
-                substitute = getEnvironmentInstance(ENV_DEFAULT, true);
+                substitute = getEnvironmentInstance(ENV_DEFAULT);
             }
 
             if (substitute && substitute->getSky())
@@ -1475,7 +1490,8 @@ void LLEnvironment::setEnvironment(LLEnvironment::EnvSelection_t env, LLEnvironm
     }
     else if (!environment->getWater())
     {
-        if (mCurrentEnvironment->getEnvironmentSelection() != ENV_NONE)
+        // <WolfViewer 2026-10-28/> ticket #286: and only when it has one - setWater(nullptr) dereferences it (DayInstance::setWater)
+        if (mCurrentEnvironment->getEnvironmentSelection() != ENV_NONE && mCurrentEnvironment->getWater())
         {
             // Note: This looks suspicious. Shouldn't we assign whole day if mCurrentEnvironment has whole day?
             // and then add water/sky on top
@@ -1487,14 +1503,15 @@ void LLEnvironment::setEnvironment(LLEnvironment::EnvSelection_t env, LLEnvironm
         else
         {
             // Environment is not properly initialized yet, but we should have environment by this point
-            DayInstance::ptr_t substitute = getEnvironmentInstance(ENV_PARCEL, true);
+            // <WolfViewer 2026-10-28/> ticket #286: looked up, never created (see the sky above)
+            DayInstance::ptr_t substitute = getEnvironmentInstance(ENV_PARCEL);
             if (!substitute || !substitute->getWater())
             {
-                substitute = getEnvironmentInstance(ENV_REGION, true);
+                substitute = getEnvironmentInstance(ENV_REGION);
             }
             if (!substitute || !substitute->getWater())
             {
-                substitute = getEnvironmentInstance(ENV_DEFAULT, true);
+                substitute = getEnvironmentInstance(ENV_DEFAULT);
             }
 
             if (substitute && substitute->getWater())

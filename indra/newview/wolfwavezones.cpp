@@ -1563,6 +1563,7 @@ bool WolfPanelLandWaves::postBuild()
     mBrushM->setCommitCallback(boost::bind(&WolfPanelLandWaves::onBrush, this, 'm'));
     mBrushC->setCommitCallback(boost::bind(&WolfPanelLandWaves::onBrush, this, 'c'));
     mBrushX->setCommitCallback(boost::bind(&WolfPanelLandWaves::onBrush, this, 'x'));
+    getChild<LLButton>("waves_fill")->setCommitCallback(boost::bind(&WolfPanelLandWaves::onFill, this));   // [TICKET 271 2026-10-27/]
     mSave->setCommitCallback(boost::bind(&WolfPanelLandWaves::onSave, this));
     getChild<LLButton>("waves_revert")->setCommitCallback(boost::bind(&WolfPanelLandWaves::onRevert, this));
     getChild<LLButton>("waves_default")->setCommitCallback(boost::bind(&WolfPanelLandWaves::onDefault, this));
@@ -1577,6 +1578,7 @@ bool WolfPanelLandWaves::postBuild()
     // water; it may paint land cells as before, the in-world brush only water.
     mPainter->setStrokeCallback([this](F32 ax, F32 ay, F32 bx, F32 by) { paintStroke(ax, ay, bx, by, false); });
     onBrush('s');
+    setStatus("", false);   // [TICKET 271 2026-10-27/] the brush hint is for a brush the user picks
     return true;
 }
 
@@ -1643,6 +1645,50 @@ void WolfPanelLandWaves::onBrush(char z)
     mBrushM->setToggleState(z == 'm');
     mBrushC->setToggleState(z == 'c');
     mBrushX->setToggleState(z == 'x');
+    // [TICKET 271 2026-10-27] Picking a brush paints nothing by itself: say so, and how to use it.
+    LLButton* btn = z == 'o' ? mBrushO : z == 'm' ? mBrushM : z == 'c' ? mBrushC : z == 'x' ? mBrushX : mBrushS;
+    setStatus(btn->getLabelUnselected() + " brush picked. Paint on the map or on the water, or press Fill with brush"
+              " to paint every cell, then Save.", false);
+}
+
+// [TICKET 271 2026-10-27] Source: paintStroke above (the same gates, rights and preview), over every cell of the
+// paint grid instead of a brush's footprint. Land cells too, as the map brush paints them.
+void WolfPanelLandWaves::onFill()
+{
+    if (!WolfGrid::isOnWolfTerritories()) { setStatus("Sorry, this function is only available on Wolf Territories Grid.", true); return; }
+    if (gDisconnected || !targetCurrent() || !mPainter || !mPainter->hasLayout())
+    {
+        setStatus("The region's wave layout is not ready. Wait for it to load before painting.", true);
+        return;
+    }
+    const S32 w = mPainter->cellsW(), h = mPainter->cellsH();
+    if ((S64)w * (S64)h > (S64)WolfWaveZones::MAX_FILL_CELLS)
+    {
+        setStatus("This region is too large to fill in one go. Paint it with the brush instead.", true);
+        return;
+    }
+    if (!ensureEnabled()) return;   // ticks "Use this layout" for a region holder, explains to a parcel owner
+    WolfWaveZones& wz = WolfWaveZones::instance();
+    bool changed = false, refused = false;
+    for (S32 cy = 0; cy < h; ++cy)
+    {
+        for (S32 cx = 0; cx < w; ++cx)
+        {
+            if (!wz.cellEditable(cx, cy)) { refused = true; continue; }
+            changed = mPainter->paintCell(cx, cy) || changed;
+        }
+    }
+    if (changed)
+    {
+        onParamChanged();       // previews it in the water at once, as a brush stroke does
+        mBakeWaitUntil = 0.0;   // ...but keeps the line below up: "Applied to the water" would hide the Save reminder
+    }
+    const char b = mPainter->brush();
+    LLButton* btn = b == 'o' ? mBrushO : b == 'm' ? mBrushM : b == 'c' ? mBrushC : b == 'x' ? mBrushX : mBrushS;
+    std::string msg = changed ? "Every cell you can edit is now " + btn->getLabelUnselected() + ". Press Save to keep it for everyone."
+                              : "Every cell you can edit is already " + btn->getLabelUnselected() + ".";
+    if (refused) msg += " Cells on land you do not own are unchanged.";
+    setStatus(msg, false);
 }
 
 void WolfPanelLandWaves::setStatus(const std::string& msg, bool error)

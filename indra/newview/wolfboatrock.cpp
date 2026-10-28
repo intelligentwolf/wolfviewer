@@ -931,7 +931,10 @@ F32 WolfBoatRock::waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F3
     // _surfSampleCPU, same numbers): the crest-referenced profile's height, so a boat in a
     // surf cell rides the wall the water draws. Horizontal push omitted.
     // [OPEN SEA SHORES 2026-10-26] ...or the automatic surf where none is painted (waterV.glsl autoS, same rules).
-    const bool auto_surf_on = sea.mAutoOn && sea.mAutoH > 0.01f && open_w > 0.01f;
+    // [TICKET 271 2026-10-27] ...gated by the painted zone as well as the open-sea weight (waterV.glsl shoreGate): none on
+    // Off / Calm / Small cells.
+    const F32 auto_gate = smoothstep01(0.35f, 0.55f, energy) * open_w;
+    const bool auto_surf_on = sea.mAutoOn && sea.mAutoH > 0.01f && auto_gate > 0.01f;
     if (field && sea.mShoreOn && ((sea.mSurfH > 0.01f && field->mZoneTex) || auto_surf_on))
     {
         // surf cells only (waterV.glsl surfZone). <WolfViewer 2026-10-01/> from the surf WEIGHT, as the shader now reads it
@@ -943,7 +946,7 @@ F32 WolfBoatRock::waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F3
         const F32 surf_len = auto_s ? sea.mAutoLen : sea.mSurfLen;
         if (auto_s)
         {
-            surf_zone = open_w;
+            surf_zone = auto_gate;   // [TICKET 271 2026-10-27/] was open_w
         }
         if (surf_zone > 0.001f)
         {

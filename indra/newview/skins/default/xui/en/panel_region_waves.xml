@@ -19,7 +19,7 @@
   <panel.string name="str_natural_water_off">Natural lakes and waterfalls off — Save to remove them for everyone in the region.</panel.string>
   <panel.string name="str_default_loaded">Automatic layout on; your painting is cleared — Save to keep it (Revert undoes it).</panel.string>
   <text follows="left|top" height="30" left="10" top="8" width="460" word_wrap="true" name="waves_help">
-Paint on the map or directly on the water. Surf, Open, Small, Calm and Off use the same saved layout; Surf paints at the Height % you choose.
+Pick a brush, then paint on the map or the water, or Fill with brush for the whole region. Surf paints at its Height %.
   </text>
   <text follows="left|top" height="28" left="10" top_pad="2" width="460" word_wrap="true"
         name="waves_note" text_color="0.79 0.64 0.15 1" />
@@ -51,4 +51,7 @@ Paint on the map or directly on the water. Surf, Open, Small, Calm and Off use t
   <button follows="left|top" height="22" left="10" top_pad="4" width="80" name="waves_save" label="Save" />
   <button follows="left|top" height="22" left_pad="6" top_delta="0" width="80" name="waves_revert" label="Revert" />
   <button follows="left|top" height="22" left_pad="6" top_delta="0" width="140" name="waves_default" label="Reset to automatic" />
+  <!-- [TICKET 271 2026-10-27] Contessa Lacombe pressed Off and Save to stop the waves; Off only picks the brush. -->
+  <button follows="left|top" height="22" left_pad="6" top_delta="0" width="128" name="waves_fill" label="Fill with brush"
+          tool_tip="Paint every cell you can edit with the brush picked above. Pick Off and press this to switch the waves off across the whole region, or Calm for gentle ripples. Save to keep it." />
 </panel>

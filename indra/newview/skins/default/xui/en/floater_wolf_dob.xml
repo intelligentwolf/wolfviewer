@@ -6,12 +6,21 @@
      minute, or press Not now and carry on playing (asked again at the next login).
      Flow, top to bottom: the note (why, and that a false date can lock the account) with the Terms link; day / month /
      year; Continue (bottom right). Then the check step: the date in words and the age, "Yes, save it" (bottom right) or
-     "Change it" (bottom left). The outcome stays in the status box. -->
+     "Change it" (bottom left). The outcome stays in the status box.
+     [DOB AVATAR BIRTHDAY 2026-10-27] Tickets 253 + 268: residents typed their AVATAR's birthday and the under-15 rule
+     closed their accounts. The note and the check step now say it is the person's OWN date; the server (doblib.php)
+     refuses avatar birthdays and sends a warning for any under-15 date, shown in the status box on the check step.
+     Floater 40 px taller for the longer note and the warning.
+     [DOB FLAG 2026-10-28] Paul: "clear its their REAL LIFE date of birth not their grid one" and "warn them that if they put
+     a date that makes them [under 15] they will have their account locked". The note says real-life, and a bold warning
+     ("Important:" + the sign, in AlertCautionTextColor - not colour alone) sits right above the date boxes on the enter
+     step. Same words as gridmanager/signuplib.php WT_DOB_HINT / WT_DOB_WARNING. An under-15 date is now flagged for staff
+     review on the server (state "flagged", a plain message) instead of closing the account. Floater 356 px. -->
 <floater
  can_close="true"
  can_minimize="true"
  can_resize="false"
- height="300"
+ height="356"
  layout="topleft"
  name="wolf_dob"
  help_topic="wolf_dob"
@@ -19,28 +28,30 @@
  single_instance="true"
  title="Your Date of Birth"
  width="440">
-    <text follows="left|top" height="62" layout="topleft" left="12" name="intro" top="26" width="416" wrap="true">Please enter your real date of birth. We use it for under-18 safety settings. Giving a false date of birth breaks our Terms of Service and can get your account locked.</text>
-    <button follows="left|top" height="22" layout="topleft" left="12" name="terms" top="92" width="230" label="Terms of Service, section 1" tool_tip="Opens section 1 of our Terms of Service (who can use the grid) in your browser" />
+    <text follows="left|top" height="48" layout="topleft" left="12" name="intro" top="26" width="416" wrap="true">Your real-life date of birth: the day YOU were born in real life - not your avatar's birthday or the day you joined the grid. We use it for under-18 safety settings.</text>
+    <button follows="left|top" height="22" layout="topleft" left="12" name="terms" top="78" width="230" label="Terms of Service, section 1" tool_tip="Opens section 1 of our Terms of Service (who can use the grid) in your browser" />
 
-    <text follows="left|top" height="16" layout="topleft" left="12" name="loading" top="128" width="416" visible="false">Checking your account...</text>
+    <text follows="left|top" font="SansSerifBold" height="34" layout="topleft" left="12" name="dob_warning" top="108" width="416" wrap="true" text_color="AlertCautionTextColor">&#x26A0; Important: enter your REAL-LIFE date of birth. If the date makes you under 15, your account will be locked.</text>
 
-    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="12" name="day_label" top="128" width="70">Day</text>
-    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="92" name="month_label" top="128" width="140">Month</text>
-    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="242" name="year_label" top="128" width="90">Year</text>
-    <combo_box follows="left|top" height="23" layout="topleft" left="12" name="day" top="146" width="70" max_chars="8" tool_tip="The day you were born" />
-    <combo_box follows="left|top" height="23" layout="topleft" left="92" name="month" top="146" width="140" max_chars="12" tool_tip="The month you were born" />
-    <combo_box follows="left|top" height="23" layout="topleft" left="242" name="year" top="146" width="90" max_chars="6" tool_tip="The year you were born" />
-    <text follows="left|top" height="16" layout="topleft" left="12" name="enter_hint" top="176" width="416" text_color="LtGray_50">You only do this once. After that, only our support team can change it.</text>
+    <text follows="left|top" height="16" layout="topleft" left="12" name="loading" top="158" width="416" visible="false">Checking your account...</text>
 
-    <text follows="left|top" font="SansSerifLarge" height="48" layout="topleft" left="12" name="check_text" top="128" width="416" wrap="true" visible="false">You were born on [DATE], so you're [AGE]. Is that right?</text>
-    <text follows="left|top" height="16" layout="topleft" left="12" name="check_hint" top="180" width="416" visible="false">Once it's saved, only our support team can change it.</text>
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="12" name="day_label" top="158" width="70">Day</text>
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="92" name="month_label" top="158" width="140">Month</text>
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="242" name="year_label" top="158" width="90">Year</text>
+    <combo_box follows="left|top" height="23" layout="topleft" left="12" name="day" top="176" width="70" max_chars="8" tool_tip="The day you were born" />
+    <combo_box follows="left|top" height="23" layout="topleft" left="92" name="month" top="176" width="140" max_chars="12" tool_tip="The month you were born" />
+    <combo_box follows="left|top" height="23" layout="topleft" left="242" name="year" top="176" width="90" max_chars="6" tool_tip="The year you were born" />
+    <text follows="left|top" height="16" layout="topleft" left="12" name="enter_hint" top="206" width="416" text_color="LtGray_50">You only do this once. After that, only our support team can change it.</text>
 
-    <text_editor follows="left|top" height="58" layout="topleft" left="12" max_length="2048" name="status" top="202" width="416" word_wrap="true" read_only="true" parse_urls="true" show_context_menu="true" visible="false" />
+    <text follows="left|top" font="SansSerifLarge" height="48" layout="topleft" left="12" name="check_text" top="158" width="416" wrap="true" visible="false">You were born on [DATE], so you're [AGE]. Is that your real-life date of birth (not your avatar's birthday)?</text>
+    <text follows="left|top" height="16" layout="topleft" left="12" name="check_hint" top="210" width="416" visible="false">Once it's saved, only our support team can change it.</text>
 
-    <button follows="left|bottom" height="23" layout="topleft" left="12" name="not_now" top="268" width="100" label="Not now" tool_tip="Close this for now. We'll ask again next time you log in." />
-    <button follows="right|bottom" height="23" layout="topleft" left="328" name="continue" top="268" width="100" label="Continue" />
-    <button follows="left|bottom" height="23" layout="topleft" left="12" name="change" top="268" width="100" label="Change it" visible="false" />
-    <button follows="right|bottom" height="23" layout="topleft" left="308" name="save" top="268" width="120" label="Yes, save it" visible="false" />
-    <button follows="left|bottom" height="23" layout="topleft" left="12" name="tickets" top="268" width="140" label="My support tickets" tool_tip="Open your support tickets on wolf-grid.com in your browser" visible="false" />
-    <button follows="right|bottom" height="23" layout="topleft" left="328" name="close_btn" top="268" width="100" label="Close" visible="false" />
+    <text_editor follows="left|top" height="74" layout="topleft" left="12" max_length="2048" name="status" top="232" width="416" word_wrap="true" read_only="true" parse_urls="true" show_context_menu="true" visible="false" />
+
+    <button follows="left|bottom" height="23" layout="topleft" left="12" name="not_now" top="324" width="100" label="Not now" tool_tip="Close this for now. We'll ask again next time you log in." />
+    <button follows="right|bottom" height="23" layout="topleft" left="328" name="continue" top="324" width="100" label="Continue" />
+    <button follows="left|bottom" height="23" layout="topleft" left="12" name="change" top="324" width="100" label="Change it" visible="false" />
+    <button follows="right|bottom" height="23" layout="topleft" left="308" name="save" top="324" width="120" label="Yes, save it" visible="false" />
+    <button follows="left|bottom" height="23" layout="topleft" left="12" name="tickets" top="324" width="140" label="My support tickets" tool_tip="Open your support tickets on wolf-grid.com in your browser" visible="false" />
+    <button follows="right|bottom" height="23" layout="topleft" left="328" name="close_btn" top="324" width="100" label="Close" visible="false" />
 </floater>

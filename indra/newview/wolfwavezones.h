@@ -83,6 +83,8 @@ public:
     static constexpr S32 PAINT_CELL_M = 16;
     static constexpr S32 TILE_CELLS = 16;
     static constexpr S32 TILE_LEN = 256;
+    /** [TICKET 271 2026-10-27/] "Fill with brush" paints at most this many 16 m cells (1024 an edge, a 16 km region; php/waves.php WAVES_MAX_TILES 20000 tiles is 5.1 M). */
+    static constexpr S32 MAX_FILL_CELLS = 1024 * 1024;
     /** Painted tiles: key tileKey(tx, ty) -> 256 chars (row-major, south row first; '.' = not painted). */
     using Tiles = std::map<U32, std::string>;
     static U32 tileKey(S32 tx, S32 ty) { return (U32)ty * 65536u + (U32)tx; }
@@ -354,6 +356,13 @@ private:
     bool paintStroke(F32 ax, F32 ay, F32 bx, F32 by, bool waterOnly);
     void rebuild();
     void onBrush(char z);
+    /**
+     * [TICKET 271 2026-10-27] "Fill with brush": paint every cell this agent may edit with the
+     * selected brush (Off over the whole region is a choice, then Save). Contessa Lacombe pressed
+     * Off and Save expecting the waves to stop; Off only picked the brush, so nothing was painted
+     * and the save stored the same empty layout. land_waves_tab.js _wavesFill same.
+     */
+    void onFill();
     void onSave();
     void onRevert();
     void onDefault();

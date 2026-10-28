@@ -234,7 +234,8 @@ void WolfFloaterDob::onOpen(const LLSD& key)
 void WolfFloaterDob::showStep(EStep step)
 {
     const bool enter = step == EStep::ENTER, check = step == EStep::CHECK, done = step == EStep::DONE;
-    for (const char* n : { "day_label", "month_label", "year_label", "day", "month", "year", "enter_hint" })
+    // [DOB FLAG 2026-10-28] dob_warning: "Important: ... under 15, your account will be locked." beside the date boxes
+    for (const char* n : { "day_label", "month_label", "year_label", "day", "month", "year", "enter_hint", "dob_warning" })
         getChild<LLUICtrl>(n)->setVisible(enter);
     mNotNow->setVisible(enter);
     mContinue->setVisible(enter);
@@ -357,8 +358,12 @@ void WolfFloaterDob::onReply(const std::string& action, const LLSD& reply, const
     {
         mChecked = json_string(reply, "dob");
         const S32 age = reply["age"].asInteger();
-        mCheckText->setText(llformat("You were born on %s, so you're %d. Is that right?", json_string(reply, "words").c_str(), age));
-        setStatus(std::string(), EStatus::INFO);
+        mCheckText->setText(llformat("You were born on %s, so you're %d. Is that your real-life date of birth (not your avatar's birthday)?",
+                                     json_string(reply, "words").c_str(), age));
+        // [DOB AVATAR BIRTHDAY 2026-10-27] viewerdob.php "warning" (doblib.php dobUnderAgeWarning): a real under-15 date
+        // gets the account locked after staff review, so say so before "Yes, save it". Empty for 15 and over, and from a website before 10-27.
+        const std::string warning = json_string(reply, "warning");
+        setStatus(warning, warning.empty() ? EStatus::INFO : EStatus::ERR);
         showStep(EStep::CHECK);
         return;
     }
@@ -369,12 +374,9 @@ void WolfFloaterDob::onReply(const std::string& action, const LLSD& reply, const
     {
         setStatus(json_string(reply, "message") + " (" + json_string(reply, "words") + ")", EStatus::OK);
     }
-    else if (state == "closed")
-    {
-        setStatus(json_string(reply, "message"), EStatus::ERR);
-    }
     else
     {
+        // "flagged" (an under-15 date, staff will be in touch - [DOB FLAG 2026-10-28], viewerdob.php) or "set"
         setStatus(json_string(reply, "message"), EStatus::INFO);
     }
 }

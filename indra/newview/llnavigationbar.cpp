@@ -60,6 +60,7 @@
 #include "llviewercontrol.h"
 #include "llcallbacklist.h"   // [WOLF VISITOR SEES 2026-10-18/] gIdleCallbacks: the WE button
 #include "wolfgrid.h"   // [WolfViewer 2026-10-13] the WE button, Wolf Territories only
+#include "lluicolortable.h"   // [WE BUTTON GREEN 2026-10-28/] the toolbar's face colour for the WE button
 #include "llweb.h"
 #include "llhints.h"
 
@@ -355,6 +356,25 @@ void LLNavigationBar::setupPanel()
                 {
                     const bool wolf = WolfGrid::showsBasicWolfSky();   // [BASIC WOLF SKY 2026-10-19/]
                     if (b->getVisible() != wolf) b->setVisible(wolf);
+                    // [WE BUTTON GREEN 2026-10-28] ticket 313 (Chad): "WE button does not turn Green when clicking like the EEP
+                    // and Weather buttons do". Those are toolbar commands, whose faces take the skin's toolbar image_color
+                    // (skins/wolfglass/xui/en/widgets/toolbar.xml: WolfGlassButton; other skins: the stock ButtonImageColor,
+                    // skins/default/xui/en/widgets/button.xml). The WE button is a navigation-bar button with the stock
+                    // grey face, and LLButton has no selected-only image colour (llbutton.h image_color), so its face is
+                    // tinted here while it is on, and given back the stock colour while it is off.
+                    if (LLButton* btn = dynamic_cast<LLButton*>(b))
+                    {
+                        static int s_tinted = -1;
+                        const int on = btn->getToggleState() ? 1 : 0;
+                        if (on != s_tinted)
+                        {
+                            s_tinted = on;
+                            const LLUIColorTable& colors = LLUIColorTable::instance();
+                            btn->setImageColor(on && colors.colorExists("WolfGlassButton")
+                                                   ? colors.getColor("WolfGlassButton")
+                                                   : colors.getColor("ButtonImageColor"));
+                        }
+                    }
                 }
             }, nullptr);
         }

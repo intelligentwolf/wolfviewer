@@ -137,6 +137,7 @@
 	     name="WolfEnvironmentBtn"
 	     label="WE"
 	     is_toggle="true"
+	     tab_stop="false"
 	     control_name="WolfEnvironmentNativeSky"
 	     tool_tip="Wolf Environment (Experimental): Wolf Territories' own physical sky, clouds you can fly through, and weather. Click to switch it on or off."
 	     top_delta="0"

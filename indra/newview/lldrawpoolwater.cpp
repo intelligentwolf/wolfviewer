@@ -63,6 +63,7 @@
 #include "wolfaltitudesky.h"  // <WolfViewer 2026-10-07/> the sky's ocean to the horizon
 #include <map>   // [WolfViewer round 15] the per-region field fade
 #include "llframetimer.h"
+#include "llstartup.h"   // [SMOOTH SEA 2026-10-28/] wolfSeaArrival: the login snap
 // </WolfViewer>
 
 bool LLDrawPoolWater::sSkipScreenCopy = false;
@@ -218,20 +219,12 @@ void LLDrawPoolWater::renderPostDeferred(S32 pass)
     // those re-enter this function within one frame and would advance the sea twice.
     // Source: wolfstorm/js/world/terrain/terrain_manager.js applySeaState() / update().
     {
-        static LLCachedControl<bool> sea_from_region(gSavedSettings, "WolfViewerWaterSeaStateFromRegion", true);
         static LLCachedControl<bool> fft_on(gSavedSettings, "WolfViewerWaterFFT", true);
         static LLCachedControl<bool> wake_on(gSavedSettings, "WolfViewerWaterWake", true);
-        static LLCachedControl<F32> manual_height(gSavedSettings, "WolfViewerWaterWaveHeight", 0.22f);
         static LLCachedControl<F32> wave_speed_setting(gSavedSettings, "WolfViewerWaterWaveSpeed", 1.f);
-        if (sea_from_region)
-        {
-            mSeaState = WolfSeaState::fromWater(pwater);
-        }
-        else
-        {
-            mSeaState = WolfSeaState::fromIndex(WolfSeaState::indexForAmplitude(manual_height), pwater->getWave1Dir());
-            mSeaState.mAmplitude = llclamp((F32)manual_height, 0.f, 5.f);
-        }
+        // [SMOOTH SEA 2026-10-28] ...EASED from the last weather to the new one, with the phases accumulated
+        // (wolfUpdateSea; Paul: "when the weather updates the water suddenly goes really fast").
+        wolfUpdateSea(pwater);
         // <WolfViewer 2026-10-07> basic water from up high: no swell, and none of its cost.
         if (!gCubeSnapshot && !gPipeline.mHeroProbeManager.isMirrorPass())
         {
@@ -337,8 +330,18 @@ void LLDrawPoolWater::renderPostDeferred(S32 pass)
 
     shader->uniform3fv(LLShaderMgr::WATER_SPECULAR, 1, light_diffuse.mV);
 
-    shader->uniform2fv(LLShaderMgr::WATER_WAVE_DIR1, 1, pwater->getWave1Dir().mV);
-    shader->uniform2fv(LLShaderMgr::WATER_WAVE_DIR2, 1, pwater->getWave2Dir().mV);
+    // [SMOOTH SEA 2026-10-28] the EASED directions (wolfUpdateSea), and the phases accumulated from them: the swell's
+    // temporal phase, the breakers', the automatic surf's, and the normal maps' scroll (waterV.glsl wolfSeaClock /
+    // wolfWaveScroll). Stock and every term before this multiplied `time` (hours into a session) by a speed the weather
+    // sets, so a new speed moved every crest and ripple by time x the change at once.
+    shader->uniform2fv(LLShaderMgr::WATER_WAVE_DIR1, 1, mSeaDir1.mV);
+    shader->uniform2fv(LLShaderMgr::WATER_WAVE_DIR2, 1, mSeaDir2.mV);
+    {
+        static LLStaticHashedString s_sea_clock("wolfSeaClock");
+        static LLStaticHashedString s_wave_scroll("wolfWaveScroll");
+        shader->uniform4f(s_sea_clock, (F32)mSeaClocks.mSwell, (F32)mSeaClocks.mBreaker, (F32)mSeaClocks.mAutoSurf, 0.f);
+        shader->uniform4f(s_wave_scroll, (F32)mScroll1X, (F32)mScroll1Y, (F32)mScroll2X, (F32)mScroll2Y);
+    }
 
     shader->uniform3fv(LLShaderMgr::WATER_LIGHT_DIR, 1, light_dir.mV);
 
@@ -813,6 +816,168 @@ void LLDrawPoolWater::pushWaterPlanes(int pass)
 // is by waterV/waterF's own contract stock water: no displacement, and every effect gated on
 // waveAmplitude > 0.001 off. The FFT and the wake stop updating. It comes back BASIC_WATER_HYST_M
 // lower so a camera at about that height does not flick between the two. 0 = never.
+// [SMOOTH SEA 2026-10-28] THE SEA FOLLOWS THE WEATHER SMOOTHLY. Jimmy Olsen (TROMSO, W83) and Paul: once an hour, when the
+// region's weather updates, "the water suddenly goes really fast and changes weirdly"; it should be a smooth transition.
+//
+// The cause. The automatic environment (WolfSim WolfAutoEnvironmentModule.cs ApplyWind, and the Wolf Environment
+// document's water look, WolfEnvironment.cs) sets the region's EEP wave1_direction to the real wind: its direction
+// downwind, its length 1.1308968 x the sea state index (3 + 3 index m/s). Every wave term here is driven by the EEP water
+// (wolfseastate.h fromWater: amplitude, wavelength, chaos, the cascades' wind), and every one of them was phased as
+// `time` x a speed: waterV.glsl gerstnerWave k (dot(d, pos) - c time waveSpeed) with c from the wavelength, the shore
+// breakers time x 4.5 |wave1|, the automatic surf omega0 time, and the normal maps' scroll waveDir1 x time x 0.055 (stock
+// Firestorm's too). `time` is the session clock (hours in: thousands), so a new speed moved every crest by time x the
+// change: an instant jump on a hard switch, and during the sky's fade (120 s, wolf_region_transition) a sea racing
+// sideways at thousands of seconds x the rate of change - "really fast", then settling. And the new values themselves
+// arrived on the sky's fade or at once.
+//
+// The fix. (1) The inputs are eased: the sea state index and both EEP wave directions (as angle, the short way round,
+// and length) pass through two equal first-order stages of WOLF_SEA_EASE_TAU_S (a critically damped response: no step
+// in the value or its rate, 95 % there after 2 minutes, 99.5 % after 3); everything derived from them - swell height and
+// wavelength, chaos, the cascades' wind, the automatic surf - follows. (2) The phases are accumulated, phase += rate x dt,
+// so a change of speed changes how fast the crests move from now on and never where they are. Once the change has
+// finished the sea is exactly the new weather's (rough stays rough). Snapped, not eased: login, a teleport arrival
+// (wolfSeaArrival), a manual wave height (a setting, not weather), and after a gap of more than WOLF_SEA_GAP_SNAP_S
+// (a hitch, a minimised window) - the clocks still run through the gap at the rates in force, so nothing jumps there.
+namespace
+{
+    constexpr F64 WOLF_SEA_EASE_TAU_S = 25.0;     // each of the two stages, real seconds
+    constexpr F64 WOLF_SEA_LOGIN_SNAP_S = 30.0;   // in-world after login: the region's own water arriving is not a change
+    constexpr F64 WOLF_SEA_GAP_SNAP_S = 2.0;
+    constexpr F64 WOLF_PI = 3.14159265358979323846;
+    constexpr F64 WOLF_TWO_PI = 2.0 * WOLF_PI;
+
+    F64 wolf_wrap_pi(F64 a)
+    {
+        a = fmod(a + WOLF_PI, WOLF_TWO_PI);
+        if (a < 0.0) a += WOLF_TWO_PI;
+        return a - WOLF_PI;
+    }
+
+    // Wrapped to a period at which every use is unchanged: the clocks are only used inside sin / cos / fract(x / 2 pi)
+    // (2 pi), the scroll in texture coordinates that repeat every 1 (waterV.glsl: wolfWaveScroll.xy x 0.055 and x 0.1,
+    // 200 x both whole numbers; .zw x 0.13, 100 x it whole).
+    F64 wolf_wrap(F64 v, F64 period)
+    {
+        v = fmod(v, period);
+        return v < 0.0 ? v + period : v;
+    }
+}
+
+bool LLDrawPoolWater::wolfSeaArrival()
+{
+    static F64 s_in_world_since = -1.0;
+    if (LLStartUp::getStartupState() < STATE_STARTED)
+    {
+        s_in_world_since = -1.0;
+        return true;
+    }
+    const F64 now = LLFrameTimer::getElapsedSeconds();
+    if (s_in_world_since < 0.0)
+    {
+        s_in_world_since = now;
+    }
+    return now - s_in_world_since < WOLF_SEA_LOGIN_SNAP_S || LLEnvironment::wolfTeleportArrival();
+}
+
+LLDrawPoolWater::SeaClocks LLDrawPoolWater::seaClocksAt(F64 t) const
+{
+    const F64 d = llmax(t - mSeaLastT, 0.0);
+    SeaClocks c;
+    c.mSwell = mSeaClocks.mSwell + mSeaRates.mSwell * d;
+    c.mBreaker = wolf_wrap(mSeaClocks.mBreaker + mSeaRates.mBreaker * d, WOLF_TWO_PI);
+    c.mAutoSurf = wolf_wrap(mSeaClocks.mAutoSurf + mSeaRates.mAutoSurf * d, WOLF_TWO_PI);
+    return c;
+}
+
+void LLDrawPoolWater::wolfUpdateSea(const LLSettingsWater::ptr_t& pwater)
+{
+    static LLCachedControl<bool> sea_from_region(gSavedSettings, "WolfViewerWaterSeaStateFromRegion", true);
+    static LLCachedControl<F32> manual_height(gSavedSettings, "WolfViewerWaterWaveHeight", 0.22f);
+    static LLCachedControl<F32> wave_scale(gSavedSettings, "WolfViewerWaterWaveScale", 0.1f);
+    static LLCachedControl<F32> wave_speed(gSavedSettings, "WolfViewerWaterWaveSpeed", 1.f);
+
+    // The shader's clock: phase_time in renderPostDeferred. LLFrameTimer::getElapsedSeconds is the frame's time, so the
+    // cube snapshot and mirror passes that re-enter within a frame add nothing.
+    const F64 t = LLFrameTimer::getElapsedSeconds() * 0.5;
+    const F64 dtau = mSeaInit ? llmax(t - mSeaLastT, 0.0) : 0.0;
+    const F64 dt_real = dtau * 2.0;
+
+    // The clocks first, over the interval just gone, at the rates that were in force during it (what seaClocksAt
+    // extrapolated for the boat rocker meanwhile).
+    if (mSeaInit)
+    {
+        mSeaClocks.mSwell += mSeaRates.mSwell * dtau;
+        mSeaClocks.mBreaker = wolf_wrap(mSeaClocks.mBreaker + mSeaRates.mBreaker * dtau, WOLF_TWO_PI);
+        mSeaClocks.mAutoSurf = wolf_wrap(mSeaClocks.mAutoSurf + mSeaRates.mAutoSurf * dtau, WOLF_TWO_PI);
+        mScroll1X = wolf_wrap(mScroll1X + mSeaDir1.mV[VX] * dtau, 200.0);
+        mScroll1Y = wolf_wrap(mScroll1Y + mSeaDir1.mV[VY] * dtau, 200.0);
+        mScroll2X = wolf_wrap(mScroll2X + mSeaDir2.mV[VX] * dtau, 100.0);
+        mScroll2Y = wolf_wrap(mScroll2Y + mSeaDir2.mV[VY] * dtau, 100.0);
+    }
+    mSeaLastT = t;
+
+    // The targets: the EEP water now (already on the sky's own fade), as wolfseastate.h reads it.
+    const LLVector2 w1 = pwater->getWave1Dir();
+    const LLVector2 w2 = pwater->getWave2Dir();
+    const F64 target_index = sea_from_region ? (F64)WolfSeaState::fromWater(pwater).mIndex
+                                             : (F64)WolfSeaState::indexForAmplitude(manual_height);
+    const bool snap = !mSeaInit || dt_real > WOLF_SEA_GAP_SNAP_S || wolfSeaArrival();
+    const F64 a = snap ? 1.0 : 1.0 - exp(-dt_real / WOLF_SEA_EASE_TAU_S);
+    auto ease = [](F64& A, F64& B, F64 target, F64 alpha)
+    {
+        A += (target - A) * alpha;
+        B += (A - B) * alpha;
+    };
+    auto ease_dir = [&](const LLVector2& w, F64& angA, F64& angB, F64& lenA, F64& lenB) -> LLVector2
+    {
+        const F64 len = w.length();
+        // a direction with no length has no angle: keep the one there is
+        const F64 ang = len > 1e-4 ? atan2((F64)w.mV[VY], (F64)w.mV[VX]) : angA;
+        angA = wolf_wrap_pi(angA + wolf_wrap_pi(ang - angA) * a);
+        angB = wolf_wrap_pi(angB + wolf_wrap_pi(angA - angB) * a);
+        ease(lenA, lenB, len, a);
+        return LLVector2((F32)(lenB * cos(angB)), (F32)(lenB * sin(angB)));
+    };
+    // A manual wave height is a setting the resident moves, not weather: it applies at once.
+    ease(mSeaIndexA, mSeaIndexB, target_index, sea_from_region ? a : 1.0);
+    mSeaDir1 = ease_dir(w1, mDir1AngA, mDir1AngB, mDir1LenA, mDir1LenB);
+    mSeaDir2 = ease_dir(w2, mDir2AngA, mDir2AngB, mDir2LenA, mDir2LenB);
+
+    // Everything else follows the index and the direction (wolfseastate.h fromIndex, the one mapping).
+    mSeaState = WolfSeaState::fromIndex((F32)mSeaIndexB, mSeaDir1);
+    if (!sea_from_region)
+    {
+        mSeaState.mAmplitude = llclamp((F32)manual_height, 0.f, 5.f);
+    }
+
+    // The rates for the next interval, from the values the shader is given this frame (renderPostDeferred):
+    //   swell     waterV.glsl gerstnerWave: the temporal phase of a train of wavenumber k is
+    //             sqrt(9.8 k) x time x waveSpeed = sqrt(9.8 k / (waveFrequency + 0.001)) x [sqrt(waveFrequency + 0.001)
+    //             x waveSpeed x time], the bracket being this clock (k is 2 pi / (multiple / (waveFrequency + 0.001)));
+    //   breaker   waterV.glsl: 4.5 x clamp(|waveDir1| x 0.885, 0.4, 2.0);
+    //   autoSurf  waterV.glsl autoS omega0 = sqrt(9.81 k0), k0 = 2 pi / max(lambda, 8), lambda = the wolfAutoSurf.z
+    //             computed below in renderPostDeferred (it is never shorter than 12 x the surf's height).
+    const F32 freq = sea_from_region ? mSeaState.mFrequency : llmax(0.001f, (F32)wave_scale);
+    // the amplitude renderPostDeferred gives wolfAutoSurf: the sea state's (0 from up high, mBasicWater) or the manual one
+    const F32 amp = sea_from_region ? (mBasicWater ? 0.f : mSeaState.mAmplitude) : llclamp((F32)manual_height, 0.f, 5.f);
+    const F32 auto_len = llmax(llmax(2.f / (freq + 0.001f), 12.f * (2.f * amp)), 12.f);
+    mSeaRates.mSwell = sqrt((F64)freq + 0.001) * (F64)(F32)wave_speed;
+    mSeaRates.mBreaker = 4.5 * (F64)llclamp(mSeaDir1.length() * 0.885f, 0.4f, 2.0f);
+    mSeaRates.mAutoSurf = sqrt(9.81 * WOLF_TWO_PI / (F64)llmax(auto_len, 8.f));
+    if (!mSeaInit)
+    {
+        // Start where the old `time` x rate phases stood, so the first frame is the sea it always was.
+        mSeaClocks.mSwell = mSeaRates.mSwell * t;
+        mSeaClocks.mBreaker = wolf_wrap(mSeaRates.mBreaker * t, WOLF_TWO_PI);
+        mSeaClocks.mAutoSurf = wolf_wrap(mSeaRates.mAutoSurf * t, WOLF_TWO_PI);
+        mScroll1X = wolf_wrap(mSeaDir1.mV[VX] * t, 200.0);
+        mScroll1Y = wolf_wrap(mSeaDir1.mV[VY] * t, 200.0);
+        mScroll2X = wolf_wrap(mSeaDir2.mV[VX] * t, 100.0);
+        mScroll2Y = wolf_wrap(mSeaDir2.mV[VY] * t, 100.0);
+        mSeaInit = true;
+    }
+}
+
 void LLDrawPoolWater::wolfUpdateBasicWater(F32 camera_above_water)
 {
     static const F32 BASIC_WATER_HYST_M = 30.f;

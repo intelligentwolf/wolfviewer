@@ -224,12 +224,17 @@ void WolfOceanFFT::buildH0(S32 c)
 // Source: ocean_fft.js OceanFFT.setSeaState — rebuild on a change of a quarter of a metre
 // per second or ~2 degrees; chop and the whitecap threshold follow the sea-state index
 // (measured curve: 0% of the tile below 0.60 at index 1, 3.3% below 0.68 at index 3).
+// [SMOOTH SEA 2026-10-28] 0.05 m/s and ~0.6 degrees (were 0.25 and ~2): the sea state now EASES from one weather to the
+// next (lldrawpoolwater.cpp wolfUpdateSea), so the wind walks through every value between; at the old thresholds the
+// chop stepped up or down by several percent each rebuild. The same seeded draws are reused, so a rebuild changes the
+// amplitudes only, never the pattern; a rebuild is 2 x 128 x 128 spectrum evaluations, once every second or two while a
+// change is easing in and never in a steady sea.
 void WolfOceanFFT::setSeaState(const WolfSeaState& st)
 {
     if (mHaveState
-        && fabsf(mState.mWindSpeed - st.mWindSpeed) < 0.25f
-        && fabsf(mState.mDirX - st.mDirX) < 0.035f
-        && fabsf(mState.mDirY - st.mDirY) < 0.035f)
+        && fabsf(mState.mWindSpeed - st.mWindSpeed) < 0.05f
+        && fabsf(mState.mDirX - st.mDirX) < 0.01f
+        && fabsf(mState.mDirY - st.mDirY) < 0.01f)
     {
         return;
     }

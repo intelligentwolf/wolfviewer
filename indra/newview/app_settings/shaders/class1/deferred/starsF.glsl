@@ -32,6 +32,10 @@ in vec2 vary_texcoord0;
 in vec2 screenpos;
 
 uniform vec3 wolf_star_tint;   // [WOLF ENV 2026-10-12/]
+// [WolfViewer 2026-10-28 Captain Wolf] 1: the native Wolf sky is drawing the real catalogue (LLVOWLSky::drawStars), whose
+// vertex alpha carries each star's V magnitude as (m - WOLF_STAR_MAG_MIN) / WOLF_STAR_MAG_SPAN (llvowlsky.cpp
+// wolf_star_mag_encode). 0 (unset, the stock sky, the random star field): every star exactly as before.
+uniform float wolf_star_phys;
 uniform sampler2D diffuseMap;
 uniform float blend_factor;
 uniform float custom_alpha;
@@ -72,6 +76,19 @@ void main()
     vec4 col = mix(col_b, col_a, blend_factor);
     col.rgb *= vertex_color.rgb;
     col.rgb *= wolf_star_tint;   // [WOLF ENV 2026-10-12/] the Wolf sky's star colour; (1,1,1) otherwise (LLDrawPoolWLSky::renderStarsDeferred)
+    if (wolf_star_phys > 0.5)
+    {
+        // [WolfViewer 2026-10-28 Captain Wolf] each star's own light. wolf_star_tint is the luminance of a magnitude -1 star
+        // spread over a 32 m sprite (WolfEnvironmentRender::starTint, Jensen et al. 2001 eq. 6). A star of magnitude m gives
+        // 10^(-0.4 (m + 1)) of that illuminance (Pogson's ratio: 5 magnitudes = 100 x), spread over its own sprite of
+        // sc x sc m (sc = 10 + 22 intensity, intensity = clamp(sqrt(10^(-0.4 (m - 6))) / 10, 0.15, 1): llvowlsky.cpp
+        // updateRealStars), so its luminance is that x (32 / sc)^2.
+        // Source: llvowlsky.cpp WOLF_STAR_MAG_MIN -2.0, WOLF_STAR_MAG_SPAN 8.5 (must match)
+        float m = vertex_color.a * 8.5 - 2.0;
+        float intensity = clamp(sqrt(pow(10.0, -0.4 * (m - 6.0))) / 10.0, 0.15, 1.0);
+        float sc = 10.0 + 22.0 * intensity;
+        col.rgb *= pow(10.0, -0.4 * (m + 1.0)) * (32.0 / sc) * (32.0 / sc);
+    }
 
     float factor = smoothstep(0.0f, 0.9f, custom_alpha);
 

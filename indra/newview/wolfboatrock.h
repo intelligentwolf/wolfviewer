@@ -129,6 +129,10 @@ private:
         F32       mAutoH = 0.f;
         F32       mAutoLen = 36.f;
         bool      mAutoOn = false;
+        // [SMOOTH SEA 2026-10-28] the accumulated phases the water is drawn with (LLDrawPoolWater::seaClocksAt)
+        F64       mSwellClock = 0.0;
+        F64       mBreakerClock = 0.0;
+        F64       mAutoSurfClock = 0.0;
     };
     struct Rocker
     {

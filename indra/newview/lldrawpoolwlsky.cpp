@@ -241,6 +241,23 @@ void LLDrawPoolWLSky::renderSkyHazeDeferred(const LLVector3& camPosLocal, F32 ca
     }
 }
 
+// [WolfViewer 2026-10-28 Captain Wolf] Under the native sky: are the stars out? One test for the star pass, the constellation
+// figures and their names, so the figures never show without their stars (before, the figures only asked for the sun under the
+// horizon while the stars asked for the EEP's star_brightness, and Jimmy Olsen's twilight skies, star_brightness 0, drew figures
+// with no stars). The EEP's star_brightness, as starBrightnessScale gives it (never under 1 on a real place's sky), must be above
+// 0; on a real place's sky (WolfRegionWeather::autoEnvRealSky) the sun must also be under the horizon, or the camera in space
+// (WolfAltitudeSky::spaceStarAlpha) - by day the stars are there but the sky outshines them (starTint x the exposure), as in the
+// real sky. A hand-made EEP's own day stars (star_brightness set in a day frame) are kept as before.
+static bool wolf_native_stars_out()
+{
+    if (WolfEnvironmentRender::starBrightnessScale() <= 0.f) return false;
+    if (!WolfRegionWeather::instance().autoEnvRealSky()) return true;
+    if (WolfAltitudeSky::spaceStarAlpha() >= 0.001f) return true;
+    LLVector3 sun, moon;
+    if (!WolfEnvironmentRender::bodyDirections(sun, moon)) return false;
+    return sun.mV[VZ] <= 0.f;
+}
+
 void LLDrawPoolWLSky::renderStarsDeferred(const LLVector3& camPosLocal) const
 {
     if (!gSky.mVOSkyp || use_hdri_sky())
@@ -257,7 +274,8 @@ void LLDrawPoolWLSky::renderStarsDeferred(const LLVector3& camPosLocal) const
     // [WOLF ENV 2026-10-12 physical] the stars are always there; their luminance x pre-exposure (starTint)
     // decides whether the day sky outshines them, not the EEP's star brightness
     // [WolfViewer 2026-10-13] ... and the EEP's star_brightness scales that luminance (starBrightnessScale): 0 still means none
-    if (WolfEnvironmentRender::skyActive()) star_alpha = WolfEnvironmentRender::starBrightnessScale() > 0.f ? 1.f : 0.f;
+    // [WolfViewer 2026-10-28 Captain Wolf] ... through wolf_native_stars_out, the one test the constellation figures take too
+    if (WolfEnvironmentRender::skyActive()) star_alpha = wolf_native_stars_out() ? 1.f : 0.f;
 
     // If start_brightness is not set, exit
     if(star_alpha < 0.001f)
@@ -657,10 +675,11 @@ void LLDrawPoolWLSky::renderConstellationsDeferred(const LLVector3& camPosLocal)
     if (!gSky.mVOSkyp || !gSky.mVOWLSkyp || use_hdri_sky()) return;
     // [WolfViewer 2026-10-13] under the native sky the night is the native sun's, not the EEP's star brightness (Paul:
     // "stars and planets and of course being able to draw the astronomy - that should all be there")
-    LLVector3 wolf_sun, wolf_moon;
-    if (WolfEnvironmentRender::skyActive() && WolfEnvironmentRender::bodyDirections(wolf_sun, wolf_moon))
+    // [WolfViewer 2026-10-28 Captain Wolf] ... and the same test as the star pass (wolf_native_stars_out), so no figure is drawn
+    // where its stars are not
+    if (WolfEnvironmentRender::skyActive())
     {
-        if (wolf_sun.mV[VZ] > 0.f && WolfAltitudeSky::spaceStarAlpha() < 0.001f) return;   // the sun is up: day
+        if (!wolf_native_stars_out()) return;
     }
     else if (llmax(LLEnvironment::instance().getCurrentSky()->getStarBrightness() / 500.0f,
               WolfAltitudeSky::spaceStarAlpha()) < 0.001f) return;   // day: no night sky (<WolfViewer 2026-10-07/> unless in space)

@@ -90,6 +90,21 @@ public:
     // (no swell, foam or surf); see wolfUpdateBasicWater.
     bool isBasicWater() const { return mBasicWater; }
     // </WolfViewer>
+    // [SMOOTH SEA 2026-10-28] The wave inputs EASED from the old weather to the new (wolfUpdateSea), and the phases
+    // ACCUMULATED from them, so a weather change never re-phases the sea. All in the shader's `time` units
+    // (LLFrameTimer::getElapsedSeconds() * 0.5). The boat rocker (wolfboatrock.cpp) rides the same sea through these.
+    struct SeaClocks
+    {
+        F64 mSwell = 0.0;     // integral of sqrt(waveFrequency + 0.001) * waveSpeed  (waterV.glsl wolfSwellPhaseT)
+        F64 mBreaker = 0.0;   // integral of 4.5 * the breaker speed scale, wrapped to 2 pi (waterV.glsl breakers)
+        F64 mAutoSurf = 0.0;  // integral of the automatic surf's omega0, wrapped to 2 pi (waterV.glsl autoS)
+    };
+    // The clocks at shader time t (the last update carried on at the rates it was made with).
+    SeaClocks seaClocksAt(F64 t) const;
+    const LLVector2& getEasedWaveDir1() const { return mSeaDir1; }
+    // True while the sea snaps instead of easing: a teleport arrival (LLEnvironment::wolfTeleportArrival) and the
+    // first WOLF_SEA_LOGIN_SNAP_S in-world after login - no fade from the last place or the default water.
+    static bool wolfSeaArrival();
 
 protected:
     void renderOpaqueLegacyWater();
@@ -111,6 +126,17 @@ protected:
     void wolfUpdateBasicWater(F32 camera_above_water);
     bool mBasicWater = false;
     // </WolfViewer>
+    // [SMOOTH SEA 2026-10-28] see seaClocksAt
+    void wolfUpdateSea(const LLSettingsWater::ptr_t& pwater);
+    bool      mSeaInit = false;
+    F64       mSeaLastT = 0.0;            // shader time of the last update
+    F64       mSeaIndexA = 1.0, mSeaIndexB = 1.0;   // the sea state index through the two easing stages
+    F64       mDir1AngA = 0.0, mDir1AngB = 0.0, mDir1LenA = 0.0, mDir1LenB = 0.0;
+    F64       mDir2AngA = 0.0, mDir2AngB = 0.0, mDir2LenA = 0.0, mDir2LenB = 0.0;
+    LLVector2 mSeaDir1, mSeaDir2;         // the eased EEP wave1 / wave2 directions (direction AND scroll speed)
+    SeaClocks mSeaClocks;
+    SeaClocks mSeaRates;                  // per unit of shader time, as last computed
+    F64       mScroll1X = 0.0, mScroll1Y = 0.0, mScroll2X = 0.0, mScroll2Y = 0.0;   // integral of waveDir1 / waveDir2
 };
 
 void cgErrorCallback();

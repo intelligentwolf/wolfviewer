@@ -35,6 +35,7 @@
 #include "llenvironment.h"
 #include "wolfeepreference.h"
 #include "llframetimer.h"
+#include "lldrawpoolwater.h"   // [SMOOTH SEA 2026-10-28/] wolfSeaArrival
 #include "llgl.h"
 #include "llglslshader.h"
 #include "llimage.h"
@@ -488,7 +489,22 @@ namespace
     F32 seaMeanSquareSlope()
     {
         const WolfEnvDoc& d = WolfEnvironmentState::instance().active();
-        return 0.003f + 5.12e-3f * llmax(d.mWindSpeed, 0.f);
+        // [SMOOTH SEA 2026-10-28] the document's wind EASED as the waves' inputs are (lldrawpoolwater.cpp wolfUpdateSea, the
+        // same two 25 s stages, snapped on arrival and after a gap): a new hour's wind used to widen or narrow the sun's
+        // glint on the sea in one frame. LLFrameTimer::getElapsedSeconds is the frame's time, so a second call in a frame
+        // adds nothing.
+        static bool s_init = false;
+        static F64 s_last = 0.0, s_a = 0.0, s_b = 0.0;
+        const F64 now = LLFrameTimer::getElapsedSeconds();
+        const F64 target = llmax((F64)d.mWindSpeed, 0.0);
+        const F64 dt = s_init ? llmax(now - s_last, 0.0) : 0.0;
+        s_last = now;
+        const bool snap = !s_init || dt > 2.0 || LLDrawPoolWater::wolfSeaArrival();
+        const F64 a = snap ? 1.0 : 1.0 - exp(-dt / 25.0);
+        s_a += (target - s_a) * a;
+        s_b += (s_a - s_b) * a;
+        s_init = true;
+        return 0.003f + 5.12e-3f * (F32)s_b;
     }
 
     /** Source: three-geospatial packages/clouds/src/shaders/clouds.glsl:15-42 getCubeSphereUv (the same mapping the clouds'
@@ -2061,7 +2077,13 @@ F32 WolfEnvironmentRender::starBrightnessScale()
     // physical stars as they are, 0 hides them (as LL's renderStarsDeferred returns under 0.001), 500 doubles them; held to 4 x.
     // Above about 18 km the stars come out whatever the EEP says (WolfAltitudeSky::spaceStarAlpha, as LL's star pass takes it).
     LLSettingsSky::ptr_t psky = LLEnvironment::instance().getCurrentSky();
-    const F32 eep = psky ? psky->getStarBrightness() / 250.f : 1.f;
+    F32 eep = psky ? psky->getStarBrightness() / 250.f : 1.f;
+    // [WolfViewer 2026-10-28 Captain Wolf] on a region showing a real place's sky (WolfRegionWeather::autoEnvRealSky: the real
+    // catalogue, LLVOWLSky::updateRealStars) the stars are the real sky's, so the EEP may brighten them but never put them out:
+    // Jimmy Olsen's skies carry star_brightness 0 in every band from sun -12 deg up (jimmy-eep-v9c audit: -13:255.776, -12..E04: 0),
+    // which hid the real stars through nautical twilight. Whether a star shows is the physics' (starTint: its luminance x the
+    // frame's exposure, which the twilight and day sky outshine), as Paul's rule for the native sky asks (100% real).
+    if (WolfRegionWeather::instance().autoEnvRealSky()) eep = llmax(eep, 1.f);
     return llclamp(llmax(eep, WolfAltitudeSky::spaceStarAlpha()), 0.f, 4.f);
 }
 
@@ -2077,11 +2099,12 @@ LLColor3 WolfEnvironmentRender::starTint()
         const F32 top = llmax(c.mV[0], llmax(c.mV[1], c.mV[2]));
         c = top > 0.f ? c * (1.f / top) : LLColor3::white;
     }
-    // the catalogue stars' vertex brightness (llvowlsky.cpp updateRealStars) is relative to a first-magnitude
-    // star; one such star gives E = 10^(0.4 (-m - 19)) W/m2 (Jensen 2001 eq. 6) x 683 lm/W over its sprite of
-    // ~2 sprite radii^2 / dome radius^2 sr (sc = 10 + 22 intensity m at the dome radius, llvowlsky.cpp:395): its
-    // luminance x pre-exposure, seen through the atmosphere at the zenith (the sprites carry no per-star
-    // extinction) - the transmittance from three-geospatial's table
+    // the tint is that of a star of magnitude m = -1 (E1 below): one such star gives E = 10^(0.4 (-m - 19)) W/m2 (Jensen 2001 eq. 6)
+    // x 683 lm/W over a sprite of 32 x 32 m (sc = 10 + 22 intensity at full intensity, llvowlsky.cpp updateRealStars) / dome
+    // radius^2 sr: its luminance x pre-exposure, seen through the atmosphere at the zenith (the sprites carry no per-star
+    // extinction) - the transmittance from three-geospatial's table. [2026-10-28 Captain Wolf] Each catalogue star's own
+    // magnitude and sprite then scale it in starsF.glsl (wolf_star_phys: 10^(-0.4 (m + 1)) x (32 / sc)^2, the vertex alpha
+    // carrying m), so a 6th-magnitude star gives 1/100 of the light of a 1st-magnitude one (Pogson: 5 magnitudes = 100 x).
     const F32 E1 = powf(10.f, 0.4f * (-1.f - 19.f)) * 683.f;
     const F32 R = LLEnvironment::instance().getCurrentSky() ? LLEnvironment::instance().getCurrentSky()->getDomeRadius() : 15000.f;
     const F32 omega = (32.f * 32.f) / (R * R);

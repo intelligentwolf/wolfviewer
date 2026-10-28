@@ -151,6 +151,9 @@ uniform float wolfSwellHalf;
 // The same wave clock waterV.glsl runs on (LLDrawPoolWater uploads WATER_TIME once for the
 // whole program), so the shoreline sets keep step with the swell geometry.
 uniform float time;
+// [SMOOTH SEA 2026-10-28] the accumulated phases (waterV.glsl declares and explains the same): x the swell's clock,
+// y the shore breakers' phase
+uniform vec4 wolfSeaClock;
 // 0 for the region's own water; for a wolfwater prim surface, the depth of water the prim
 // represents (its Z extent). See LLVOWater::setBoundedWaterDepth.
 uniform float boundedWaterDepth;
@@ -176,6 +179,45 @@ float wolfFoamLight(vec3 sunlit, vec3 amblit, float shadow)
 {
     if (wolf_phys > 0.5) return dot(sunlit * shadow + amblit, vec3(0.3333));
     return clamp(dot(sunlit + amblit, vec3(0.3333)), 0.08, 1.0);
+}
+// [HARBOUR STRIPES 2026-10-28] Real surf foam is broken: a wave does not break all along its crest at once, and the
+// whitewater it leaves is torn into patches with dark water between them. Without that every breaker and surf crest was
+// one unbroken white line, and a train of them read as regular stripes. wolfFoamPatch is 0..1 coverage from two octaves
+// of value noise (hash: Dave Hoskins, "Hash without Sine", hash12) at about 11 m and 4 m, drifting slowly so the patches
+// move with the water; ALU only, no texture fetch, so it is safe in non-uniform branches.
+float wolfFoamHash(vec2 p)
+{
+    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+float wolfFoamNoise(vec2 p)
+{
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(wolfFoamHash(i), wolfFoamHash(i + vec2(1.0, 0.0)), u.x),
+               mix(wolfFoamHash(i + vec2(0.0, 1.0)), wolfFoamHash(i + vec2(1.0, 1.0)), u.x), u.y);
+}
+float wolfFoamPatch(vec2 wp, float t)
+{
+    float n = 0.65 * wolfFoamNoise(wp / 11.0 + vec2(t * 0.031, t * 0.017))
+            + 0.35 * wolfFoamNoise(wp / 4.3 - vec2(t * 0.047, t * 0.029) + vec2(17.0, 5.0));
+    return smoothstep(0.36, 0.66, n);
+}
+// [HARBOUR STRIPES 2026-10-28] Where a breaker of height H (crest to trough) makes whitewater, at water depth d:
+// a wave breaks once it is higher than about 0.78 of the depth (McCowan's breaker index, Bosboom & Stive, Coastal
+// Dynamics 5.2.5 - waterV.glsl uses the same number for its depth limit), so the surf zone is d < H / 0.78, softened
+// either side of the break point; and how much: a wave of a few centimetres spills without whitewater, one of about
+// 35 cm and more breaks white (0.05 .. 0.35 m: a look choice, not a measured constant).
+float wolfBreakZone(float H, float d)
+{
+    float hB = H / 0.78;
+    return 1.0 - smoothstep(0.8 * hB, 1.3 * hB + 0.05, d);
+}
+float wolfBreakEnergy(float H)
+{
+    return smoothstep(0.05, 0.35, H);
 }
 // <WolfViewer 2026-10-07> the sky's ocean to the true horizon (class1/deferred/skyF.glsl wolfHorizonSea)
 uniform float wolf_sea_height;   // camera metres above the sea; < 0 = off
@@ -226,7 +268,7 @@ uniform float wolfStream;
 // </WolfViewer>
 // <WolfViewer 2026-09-06> from waterV.glsl: shore phase + shoal, wake foam, the swell's
 // local amplitude / wavelength jitter / exposure scale.
-in vec2 vShore;
+in vec4 vShore;   // [HARBOUR STRIPES 2026-10-28/] + z breaker height (m, crest to trough), w 1 = automatic surf
 in float vWake;
 in vec4 vSwell;
 in vec4 vSurf;   // [SURF rev3] crest (peak only), breaking, amplitude, wash
@@ -314,8 +356,12 @@ void calculateFresnelFactors(out vec3 df3, out vec2 df2, vec3 viewVec, vec3 wave
 // J independent of the HEIGHT; real breaking is not (it starts near a steepness A k of
 // 0.05), so the fold fraction is scaled by the dominant train's true steepness.
 // Source: wolfstorm/js/libs/Water.js swellFoldFraction / swellWhitecap.
-float swellFoldFraction(vec2 p, float t)
+// [SMOOTH SEA 2026-10-28] `back` = how many units of shader time ago (0 = now): the swell's clock then, at its current
+// rate (sqrt(waveFrequency + 0.001) x waveSpeed, lldrawpoolwater.cpp wolfUpdateSea), so the whitecap memory follows the
+// crests waterV.glsl draws. The temporal phase is waterV.glsl wolfSwellPhaseT's (no jitter in it), the spatial one keeps it.
+float swellFoldFraction(vec2 p, float back)
 {
+    float clock = wolfSeaClock.x - back * sqrt(waveFrequency + 0.001) * waveSpeed;
     float baseWl = 1.0 / (waveFrequency + 0.001);
     vec2 d1 = normalize(waveDir1);
     // <WolfViewer 2026-09-26> same direction and phase origin as waterV.glsl's swell
@@ -335,14 +381,14 @@ float swellFoldFraction(vec2 p, float t)
     float jit = vSwell.y;
     float dxx = 0.0, dyy = 0.0, dxy = 0.0;
     vec3 wl = vec3(baseWl * 2.0 * jit, baseWl * 1.5 * jit, baseWl * 1.2);
+    vec3 wlT = vec3(baseWl * 2.0, baseWl * 1.5, baseWl * 1.2);   // [SMOOTH SEA 2026-10-28/] unjittered, for the temporal phase
     vec3 amp = vec3(A * 0.4, A * 0.3, A * 0.25);
     vec3 st = vec3(0.65, 0.55, 0.5);
     vec2 dirs[3] = vec2[3](d1, d2, d3);
     for (int i = 0; i < 3; ++i)
     {
         float k = 6.28318 / wl[i];
-        float c = sqrt(9.8 / k);
-        float f = k * (dot(dirs[i], p) - c * t * waveSpeed);
+        float f = k * dot(dirs[i], p) - sqrt(9.8 * (6.28318 / wlT[i]) / (waveFrequency + 0.001)) * clock;
         float Q = st[i] / (k * amp[i] * 8.0 + 0.001);
         float sn = Q * amp[i] * k * sin(f);
         dxx -= dirs[i].x * dirs[i].x * sn;
@@ -354,14 +400,14 @@ float swellFoldFraction(vec2 p, float t)
     return clamp((1.0 - J) / 0.2125, 0.0, 1.0);
 }
 
-float swellWhitecap(vec2 p, float t)
+float swellWhitecap(vec2 p, float back)
 {
     float baseWl = 1.0 / (waveFrequency + 0.001);
     float k1 = 6.28318 / (baseWl * 2.0 * vSwell.y);
     float steep = vSwell.x * 0.4 * k1;
     float gain = smoothstep(0.02, 0.06, steep);
     // Only the very tip of the crest breaks — a band in the fold fraction.
-    return smoothstep(0.78, 0.97, swellFoldFraction(p, t)) * gain;
+    return smoothstep(0.78, 0.97, swellFoldFraction(p, back)) * gain;
 }
 // </WolfViewer>
 
@@ -866,8 +912,19 @@ void main()
         float fNoise = 0.55 + 0.45 * ((wave2.z + 1.0) * 0.5);
         // [WAVES 2026-09-10] ... on the open sea and the surf only (vSwell.w = shoreGate, 0 in
         // off / calm / small cells): an enclosed lake never goes white. Water.js same.
-        float shoreFoam = pow(band, 1.5) * fNoise * (0.78 + 0.34 * swash) * vSwell.w;
-        float breakFoam = shoreCrest * shoreCrest * (0.30 + 0.70 * clump) * shoreGain;
+        // [HARBOUR STRIPES 2026-10-28] ...and as strong as the waves arriving there (vShore.z, the breaker's height):
+        // a sheltered quay with a few centimetres of slop has no white rim.
+        float shoreFoam = pow(band, 1.5) * fNoise * (0.78 + 0.34 * swash) * vSwell.w * wolfBreakEnergy(vShore.z);
+        // [HARBOUR STRIPES 2026-10-28] THE ZEBRA STRIPES (Jimmy Olsen, TROMSO, 2026-10-28). The breaker phase is
+        // 4.5 t + 8 sqrt(depth) (waterV.glsl breakers), so shoreCrest is a periodic function of DEPTH, and its foam used
+        // to be drawn everywhere the smoothed depth is under 8 m: over a shallow harbour floor that is a ring of white
+        // every 0.79 in sqrt(depth), each following a depth contour - regular white bands parallel to the shore filling
+        // the harbour, whatever the waves' size. Real whitewater exists only where a wave has broken: inside the surf
+        // zone (depth < H / 0.78 for the breaker's own height H), in proportion to the wave, torn into patches. The
+        // breaker's geometry and the light on it are unchanged; only the white is confined.
+        float breakFoam = shoreCrest * shoreCrest * (0.30 + 0.70 * clump) * shoreGain
+                        * wolfBreakZone(vShore.z, wDepth) * wolfBreakEnergy(vShore.z)
+                        * wolfFoamPatch(vary_world_pos.xy, time);
         float foamAmt = max(shoreFoam, breakFoam * 0.85);
         vec3 foamCol = vec3(0.93, 0.96, 0.98) * depthLight;
         float foamMix = clamp(foamAmt, 0.0, 0.85);
@@ -880,14 +937,19 @@ void main()
     if (boundedWaterDepth <= 0.0 && waveAmplitude > 0.001 && wolf_water_depth < 8.0)
     {
         float shoal = 1.0 - smoothstep(0.4, 5.0, wolf_water_depth);
-        // Tempo follows the region's EEP wave direction magnitude, as the swell does.
-        float speedScale = clamp(length(waveDir1) * 0.885, 0.4, 2.0);
-        float phase = time * 4.5 * speedScale + sqrt(max(wolf_water_depth, 0.0)) * 8.0
+        // Tempo follows the region's EEP wave direction magnitude, as the swell does (in wolfSeaClock.y now).
+        // [SMOOTH SEA 2026-10-28] wolfSeaClock.y = time x 4.5 x speedScale, accumulated (waterV.glsl breakers same)
+        float phase = wolfSeaClock.y + sqrt(max(wolf_water_depth, 0.0)) * 8.0
                     + (wave3.x + wave3.y) * 0.45;
         float crest = smoothstep(0.30, 0.95, sin(phase)) * shoal;
         // 0.85 was far too strong — every shallow patch went solidly white rather than
         // reading as a band of surf. Foam is a highlight on the water, not a replacement
         // for it.
+        // [HARBOUR STRIPES 2026-10-28] The same rule as the depth-field branch above: white only inside the surf zone of
+        // the breaker this water would carry (waterV.glsl bAmp's open-water height, 2 x min(0.10 + 0.9 A, 0.5) crest to
+        // trough), in proportion to it, in patches - not as a ring every few metres across all water under 8 m.
+        float fbH = 2.0 * min(0.10 + waveAmplitude * 0.9, 0.5);
+        crest *= wolfBreakZone(fbH, wolf_water_depth) * wolfBreakEnergy(fbH) * wolfFoamPatch(vary_world_pos.xy, time);
         float breakFoam = clamp(crest * 0.45, 0.0, 0.45);
         float breakLight = wolfFoamLight(sunlit_linear, amblit, shadow);
         color = mix(color, vec3(0.95, 0.97, 0.99) * breakLight, breakFoam);
@@ -912,6 +974,9 @@ void main()
         float face = smoothstep(0.78, 1.0, sc) * sb * 0.6;
         float wash = sw * 0.35 * sNoise2 * sNoise2;
         float sf = clamp(max(max(crestFoam, face), wash), 0.0, 0.65);
+        // [HARBOUR STRIPES 2026-10-28] The automatic surf's whitewater is broken into patches (wolfFoamPatch); painted
+        // surf (vShore.w = 0) keeps the look its designer painted.
+        sf *= mix(1.0, wolfFoamPatch(vary_world_pos.xy, time), vShore.w);
         float surfLight = wolfFoamLight(sunlit_linear, amblit, shadow);
         color = mix(color, vec3(0.90, 0.94, 0.97) * surfLight, sf);
     }
@@ -925,10 +990,11 @@ void main()
     if (boundedWaterDepth <= 0.0 && waveAmplitude > 0.001)
     {
         vec2 wp = vary_world_pos.xy;
-        float cap = swellWhitecap(wp, time);
-        cap = max(cap, swellWhitecap(wp, time - 0.9) * 0.62);
-        cap = max(cap, swellWhitecap(wp, time - 1.8) * 0.38);
-        cap = max(cap, swellWhitecap(wp, time - 2.7) * 0.22);
+        // [SMOOTH SEA 2026-10-28] now and 0.9 / 1.8 / 2.7 units of shader time ago, as before (swellFoldFraction)
+        float cap = swellWhitecap(wp, 0.0);
+        cap = max(cap, swellWhitecap(wp, 0.9) * 0.62);
+        cap = max(cap, swellWhitecap(wp, 1.8) * 0.38);
+        cap = max(cap, swellWhitecap(wp, 2.7) * 0.22);
         // (`patch` is a reserved GLSL keyword — NVIDIA rejects it, 2026-09-06 magenta water)
         float capPatch = smoothstep(0.35, 0.75, wave1.x * 0.5 + 0.5 + wave3.y * 0.2);
         cap = max(cap * capPatch, fftFoam);

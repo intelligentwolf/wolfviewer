@@ -98,6 +98,14 @@ void calcAtmospherics(vec3 inPositionEye);
 uniform vec2 waveDir1;
 uniform vec2 waveDir2;
 uniform float time;
+// [SMOOTH SEA 2026-10-28] Phases ACCUMULATED on the CPU from the eased sea state (lldrawpoolwater.cpp wolfUpdateSea), in
+// place of `time` x a weather-set speed, which moved every crest by hours x the change when the weather changed:
+//   wolfSeaClock.x  the swell's clock, integral of sqrt(waveFrequency + 0.001) x waveSpeed (wolfSwellPhaseT)
+//   wolfSeaClock.y  the shore breakers' phase, integral of 4.5 x clamp(|waveDir1| x 0.885, 0.4, 2.0), mod 2 pi
+//   wolfSeaClock.z  the automatic surf's omega0 x time, integrated, mod 2 pi
+//   wolfWaveScroll  xy = integral of waveDir1, zw = integral of waveDir2: the normal maps' scroll (stock: dir x time)
+uniform vec4 wolfSeaClock;
+uniform vec4 wolfWaveScroll;
 uniform vec3 eyeVec;
 uniform float waterHeight;
 uniform vec3 lightDir;
@@ -217,9 +225,12 @@ out float vary_fall;
 // </WolfViewer>
 // <WolfViewer 2026-09-06> vShore = (shore wave phase, shoal factor) — the single source of
 // truth the fragment's swash and breaker foam follow; vWake = the wake field's foam here;
+// [HARBOUR STRIPES 2026-10-28] vShore.z = the breaker's height H crest to trough (2 x bAmp below; 0 = no breaker),
+// which sets where it breaks and how much whitewater it makes (waterF.glsl); vShore.w = 1 where the surf train
+// below is the AUTOMATIC surf, whose foam waterF.glsl breaks into patches (painted surf stays as designed);
 // vSwell = (localAmp, wavelengthJitter, swellScale, 0) so the fragment can re-evaluate
 // the three dominant trains at PAST times for the whitecap memory.
-out vec2 vShore;
+out vec4 vShore;
 out float vWake;
 out vec4 vSwell;
 // </WolfViewer>
@@ -290,15 +301,25 @@ float fbm(vec2 p, float t)
     return value;
 }
 
-vec3 gerstnerWave(vec2 pos, float wavelength, float amp, vec2 dir, float steepness, float numWaves)
+// [SMOOTH SEA 2026-10-28] The temporal phase of a train of wavelength wl (before jitter): sqrt(9.8 k) x time x waveSpeed
+// was the old term, k = 2 pi / wl; wl is a multiple of 1 / (waveFrequency + 0.001), so it is
+// sqrt(9.8 k / (waveFrequency + 0.001)) x wolfSeaClock.x, the clock carrying sqrt(waveFrequency + 0.001) x waveSpeed.
+// The same in a steady sea; under a weather change the crests change speed and keep their place. The wavelength jitter
+// (chaos x 0.3 x a slowly drifting noise) is left out of the TEMPORAL phase: multiplied by the session clock its drift
+// alone moved the crests faster and faster the longer the viewer ran, and with the chaos changing it was a race.
+float wolfSwellPhaseT(float wl)
 {
-    float k = 6.28318 / wavelength;
-    float c = sqrt(9.8 / k);
+    return sqrt(9.8 * (6.28318 / wl) / (waveFrequency + 0.001)) * wolfSeaClock.x;
+}
+
+vec3 gerstnerWave(vec2 pos, float wavelength, float jit, float amp, vec2 dir, float steepness, float numWaves)
+{
+    float k = 6.28318 / (wavelength * jit);
     vec2 d = normalize(dir);
     // <WolfViewer 2026-09-20> wrap the phase before sin/cos: 50,000 m from the region origin it
     // is ~10^5 rad, beyond where GPU sin() precision is specified (Intel and the D3D path lose
     // it first). mod() in float32 keeps ~1 mrad; identical below a few hundred metres.
-    float f = mod(k * (dot(d, pos) - c * time * waveSpeed), 6.2831853);
+    float f = mod(k * dot(d, pos) - wolfSwellPhaseT(wavelength), 6.2831853);
     float Q = steepness / (k * amp * numWaves + 0.001);
     return vec3(Q * amp * d.x * cos(f),
                 Q * amp * d.y * cos(f),
@@ -469,15 +490,14 @@ float wolfPixelHeld(vec2 p, float dead)
 // Analytic slope of that wave's z component: dz/dxy = d * A * k * cos(f). MUST be called
 // with the same arguments as its matching gerstnerWave() or the lighting drifts off the
 // geometry it is supposed to describe.
-vec2 gerstnerSlope(vec2 pos, float wavelength, float amp, vec2 dir)
+vec2 gerstnerSlope(vec2 pos, float wavelength, float jit, float amp, vec2 dir)
 {
-    float k = 6.28318 / wavelength;
-    float c = sqrt(9.8 / k);
+    float k = 6.28318 / (wavelength * jit);
     vec2 d = normalize(dir);
     // <WolfViewer 2026-09-20> wrap the phase before sin/cos: 50,000 m from the region origin it
     // is ~10^5 rad, beyond where GPU sin() precision is specified (Intel and the D3D path lose
     // it first). mod() in float32 keeps ~1 mrad; identical below a few hundred metres.
-    float f = mod(k * (dot(d, pos) - c * time * waveSpeed), 6.2831853);
+    float f = mod(k * dot(d, pos) - wolfSwellPhaseT(wavelength), 6.2831853);  // [SMOOTH SEA 2026-10-28/] as gerstnerWave
     return d * (amp * k * cos(f));
 }
 // </FS:WolfViewer> -------------------------------------------------------------------
@@ -604,7 +624,7 @@ void main()
     float openW = clamp(wclear.w, 0.0, 1.0);
     shoreGate *= openW;
     vSwell = vec4(0.0, 1.0, swellScale, shoreGate);
-    vShore = vec2(0.0);
+    vShore = vec4(0.0);
     vWake = 0.0;
     // </WolfViewer>
 
@@ -677,31 +697,31 @@ void main()
             vec2 dir5 = vec2(-dir1.x * 0.5 - dir1.y * 0.866,
                               dir1.x * 0.866 - dir1.y * 0.5);
 
-            vec3 w1 = gerstnerWave(swellPos, baseWavelength * 2.0 * wavelengthJitter, localAmp * 0.40, dir1, 0.65, numWaves);
-            vec3 w2 = gerstnerWave(swellPos, baseWavelength * 1.5 * wavelengthJitter, localAmp * 0.30, dir2, 0.55, numWaves);
-            vec3 w3 = gerstnerWave(swellPos, baseWavelength * 1.2,                    localAmp * 0.25, dir3, 0.50, numWaves);
+            vec3 w1 = gerstnerWave(swellPos, baseWavelength * 2.0, wavelengthJitter, localAmp * 0.40, dir1, 0.65, numWaves);
+            vec3 w2 = gerstnerWave(swellPos, baseWavelength * 1.5, wavelengthJitter, localAmp * 0.30, dir2, 0.55, numWaves);
+            vec3 w3 = gerstnerWave(swellPos, baseWavelength * 1.2, 1.0,              localAmp * 0.25, dir3, 0.50, numWaves);
             float oppositeAmp = localAmp * (0.15 + stormChaos * 0.15) * chopKeep;
-            vec3 w4 = gerstnerWave(swellPos, baseWavelength * 0.8,                    oppositeAmp, -dir1 * 0.7 + dir2 * 0.3, 0.45, numWaves);
-            vec3 w5 = gerstnerWave(swellPos, baseWavelength * 0.5,                    localAmp * 0.15 * chopKeep, dir5, 0.35, numWaves);
+            vec3 w4 = gerstnerWave(swellPos, baseWavelength * 0.8, 1.0,              oppositeAmp, -dir1 * 0.7 + dir2 * 0.3, 0.45, numWaves);
+            vec3 w5 = gerstnerWave(swellPos, baseWavelength * 0.5, 1.0,              localAmp * 0.15 * chopKeep, dir5, 0.35, numWaves);
             float chopAmp = localAmp * (0.08 + stormChaos * 0.12) * chopKeep;
-            vec3 w6 = gerstnerWave(swellPos, baseWavelength * 0.3,                    chopAmp, dir3 * 0.6 - dir2 * 0.4, 0.25, numWaves);
+            vec3 w6 = gerstnerWave(swellPos, baseWavelength * 0.3, 1.0,              chopAmp, dir3 * 0.6 - dir2 * 0.4, 0.25, numWaves);
             vec3 w7 = vec3(0.0);
             vec3 w8 = vec3(0.0);
             if (stormChaos > 0.1)
             {
                 float randAngle1 = snoise(wxy * 0.002) * 3.14159;
-                w7 = gerstnerWave(wxy, baseWavelength * 0.7, localAmp * 0.12 * stormChaos, vec2(cos(randAngle1), sin(randAngle1)), 0.3, numWaves);
+                w7 = gerstnerWave(wxy, baseWavelength * 0.7, 1.0, localAmp * 0.12 * stormChaos, vec2(cos(randAngle1), sin(randAngle1)), 0.3, numWaves);
                 float randAngle2 = snoise(wxy * 0.003 + 100.0) * 3.14159;
-                w8 = gerstnerWave(wxy, baseWavelength * 0.4, localAmp * 0.1 * stormChaos, vec2(cos(randAngle2), sin(randAngle2)), 0.25, numWaves);
+                w8 = gerstnerWave(wxy, baseWavelength * 0.4, 1.0, localAmp * 0.1 * stormChaos, vec2(cos(randAngle2), sin(randAngle2)), 0.25, numWaves);
             }
 
             vec3 total = w1 + w2 + w3 + w4 + w5 + w6 + w7 + w8;
             total.z += fbm(wxy * 0.02, time) * localAmp * (0.1 + stormChaos * 0.1) * chopKeep;
 
             // Slopes of the three dominant trains, same arguments as their waves above.
-            wave_slope = gerstnerSlope(swellPos, baseWavelength * 2.0 * wavelengthJitter, localAmp * 0.40, dir1)
-                       + gerstnerSlope(swellPos, baseWavelength * 1.5 * wavelengthJitter, localAmp * 0.30, dir2)
-                       + gerstnerSlope(swellPos, baseWavelength * 1.2,                    localAmp * 0.25, dir3);
+            wave_slope = gerstnerSlope(swellPos, baseWavelength * 2.0, wavelengthJitter, localAmp * 0.40, dir1)
+                       + gerstnerSlope(swellPos, baseWavelength * 1.5, wavelengthJitter, localAmp * 0.30, dir2)
+                       + gerstnerSlope(swellPos, baseWavelength * 1.2, 1.0,              localAmp * 0.25, dir3);
 
             // Backstop, not the height (2.5x the amplitude from lldrawpoolwater.cpp).
             if (maxWaveHeight > 0.0)
@@ -756,9 +776,10 @@ void main()
                 float shoal = (1.0 - smoothstep(0.5, 8.0, smoothDepth)) * min(conf * 1.5, 1.0) * edgeFade * shoreGate;
                 if (shoal > 0.01)
                 {
-                    float speedScale = clamp(length(waveDir1) * 0.885, 0.4, 2.0);
-                    float phase = time * 4.5 * speedScale + sqrt(smoothDepth) * 8.0;
-                    vShore = vec2(phase, shoal);
+                    // [SMOOTH SEA 2026-10-28] wolfSeaClock.y is time x 4.5 x clamp(|waveDir1| x 0.885, 0.4, 2.0), accumulated
+                    // (lldrawpoolwater.cpp wolfUpdateSea), in place of that product
+                    float phase = wolfSeaClock.y + sqrt(smoothDepth) * 8.0;
+                    vShore.xy = vec2(phase, shoal);
                     float feed = 1.0;
                     if (exposureReady > 0.5)
                     {
@@ -771,6 +792,9 @@ void main()
                     // wolfboatrock.cpp same.
                     float bSet = 6.2831853 * time / max(wolfAutoSurf.y, 10.0) + dot(regionXY, vec2(0.013, 0.017));
                     bAmp *= 0.45 + 0.55 * smoothstep(0.1, 1.0, 0.5 + 0.5 * sin(bSet));
+                    // [HARBOUR STRIPES 2026-10-28] the breaker's height for the fragment's foam: the lift below runs from
+                    // (-1 + 0.175) bAmp at br = -1 to (1 + 0.175) bAmp at br = 1, so crest to trough is 2 bAmp.
+                    vShore.z = 2.0 * bAmp;
                     float br = sin(phase);
                     // [DRY BUILDS 2026-10-26] re-centred on the water level: br^2 averages 0.5 over a period, so
                     // (br + 0.35 br^2) stood 0.175 bAmp above it on average. wolfboatrock.cpp same.
@@ -908,6 +932,19 @@ void main()
             if (autoS)
             {
                 surfZone *= 1.0 - smoothstep(80.0, 200.0, dist);
+                // [HARBOUR STRIPES 2026-10-28] SHELTER. The automatic surf is the swell arriving at the coast, so it can be no
+                // bigger than the swell drawn where it comes from. It came in along dir (landward), so the swell that feeds
+                // it is the one 150 m seaward of here - the far side of the 80-200 m band it rises over. The drawn swell
+                // there is mix(0.15, 1.3, exposure) of the sea state (swellScale, above); over the open sea's 1.3 that is
+                // 1 on an open coast (the surf exactly as before) and a fraction of it in a harbour or a sound, where the
+                // land all round keeps the exposure down. It used to be the open sea's full height everywhere within
+                // 200 m of land, so a sheltered harbour got the same regular train of crests as a surf beach, every crest
+                // foamed: the white zebra stripes in Jimmy Olsen's TROMSO picture (2026-10-28). Outside the exposure span
+                // the sea counts as open, as WolfWaterField::exposureAt does. wolfboatrock.cpp same.
+                vec2 fuv = euv - dir * (150.0 / exposureSize);
+                float feedExpo = (fuv.x >= 0.0 && fuv.x <= 1.0 && fuv.y >= 0.0 && fuv.y <= 1.0)
+                               ? WOLF_TEX_WOLF_EXPOSURE_FIELD( fuv).r : 1.0;
+                sH *= mix(0.15, 1.3, feedExpo) / 1.3;
             }
             float h = 30.0;
             if (depthReady > 0.5)
@@ -980,7 +1017,10 @@ void main()
             float crestH = min(sH * surfZone * setEnv * ksh * crestVar, sH * 1.15);
             // [OPEN SEA SHORES 2026-10-26] for the swash below
             swHave = 1.0;
-            swPhase = k0 * path - omega0 * time * surfSpeed;
+            // [SMOOTH SEA 2026-10-28] the automatic surf's omega0 follows the weather (wolfAutoSurf.z): its phase is the
+            // accumulated wolfSeaClock.z; the painted surf's omega0 is fixed by its own wavelength and keeps time.
+            float surfT = autoS ? wolfSeaClock.z : omega0 * time;
+            swPhase = k0 * path - surfT * surfSpeed;
             swSetEnv = setEnv * crestVar;
             swH = sH;
             swLambda = lambda;
@@ -1045,7 +1085,7 @@ void main()
                 float sharp = res * mix(1.0, 0.5, smoothstep(8.0, 20.0, crestH));
                 float breakG = breakF * sharp;  // the break as GEOMETRY
                 float crestG = crestH * res;    // the crest height the lattice can carry
-                float ph = k0 * path - omega0 * time * surfSpeed;
+                float ph = k0 * path - surfT * surfSpeed;   // [SMOOTH SEA 2026-10-28/] surfT above
                 float ph2 = ph + (0.30 + 0.45 * breakF) * sharp * sin(ph);
                 float sn = sin(ph2), cs = cos(ph2);
                 float up = 0.5 + 0.5 * sn;
@@ -1094,7 +1134,14 @@ void main()
                 // strange lines"). It now fades out between 5 and 3 vertices per wave, the band the geometry's res uses;
                 // near the camera, where the lattice draws the wave, it is unchanged. Water.js same.
                 float foamRes = smoothstep(3.0, 5.0, vpw);
-                vSurf = vec4(smoothstep(0.3, 1.0, upk) * foamRes, breakF, crestH, wash * foamRes);   // peak only
+                // [HARBOUR STRIPES 2026-10-28] On the AUTOMATIC surf the crest foam is the BREAKING crest's only (x breakF):
+                // a swell crest that has not broken carries no whitewater (the wind's whitecaps are drawn by their own
+                // terms), and a wave breaks where it is higher than about 0.78 h (McCowan, above), so the foam stays in the
+                // surf zone by the water's edge instead of on every crest within 200 m of land. Painted surf is the
+                // designer's (Paul 09-07: "the PEAK of every surf wave carries some") and keeps every crest.
+                float crestFoamW = autoS ? breakF : 1.0;
+                vSurf = vec4(smoothstep(0.3, 1.0, upk) * foamRes * crestFoamW, breakF, crestH, wash * foamRes);   // peak only
+                vShore.w = autoS ? 1.0 : 0.0;
             }
         }
     }
@@ -1201,6 +1248,7 @@ void main()
         // The fragment's breaker and surf foam follow the geometry: none where the cap has flattened it.
         float calm = up > 0.0 ? clamp(up / max(max(maxWaveHeight, vSurf.z), 0.1), 0.0, 1.0) : 0.0;
         vShore.y *= calm;
+        vShore.z *= calm;   // [HARBOUR STRIPES 2026-10-28/] no breaker height where the cap has flattened the water
         vSurf.x *= calm;
         vSurf.w *= calm;
     }
@@ -1290,10 +1338,12 @@ void main()
     }
     else
     {
-    bigWave =  (v.xy) * vec2(0.04,0.04)  + waveDir1 * time * 0.055;
+    // [SMOOTH SEA 2026-10-28] the scroll ACCUMULATED from the eased directions (wolfWaveScroll), not waveDir x time:
+    // a weather change set every ripple racing by hours x the change in direction
+    bigWave =  (v.xy) * vec2(0.04,0.04)  + wolfWaveScroll.xy * 0.055;
     //get two normal map (detail map) texture coordinates
-    littleWave.xy = (v.xy) * vec2(0.45, 0.9)   + waveDir2 * time * 0.13;
-    littleWave.zw = (v.xy) * vec2(0.1, 0.2) + waveDir1 * time * 0.1;
+    littleWave.xy = (v.xy) * vec2(0.45, 0.9)   + wolfWaveScroll.zw * 0.13;
+    littleWave.zw = (v.xy) * vec2(0.1, 0.2) + wolfWaveScroll.xy * 0.1;
     }
     // </WolfViewer>
     view.w = bigWave.y;

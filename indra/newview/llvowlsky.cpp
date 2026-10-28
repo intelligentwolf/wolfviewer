@@ -38,6 +38,9 @@
 #include "llframetimer.h"
 #include "lltimer.h"
 #include "wolfregionweather.h"   // <WolfViewer 2026-10-03/> real star map on automatic regions
+#include "wolfenvironmentrender.h"   // [WolfViewer 2026-10-28 Captain Wolf/] the native sky's per-star light (drawStars)
+#include "llglslshader.h"
+#include "lldate.h"
 #include "llhudtext.h"
 #include "llhudobject.h"
 #include "llfontgl.h"
@@ -304,9 +307,54 @@ bool LLVOWLSky::updateGeometry(LLDrawable * drawable)
 //   east = -cos(dec) sin(H),  north = sin(dec) cos(lat) - cos(dec) cos(H) sin(lat),
 //   up   =  sin(dec) sin(lat) + cos(dec) cos(H) cos(lat)            (Meeus eq. 13.5/13.6).
 // Stars below the horizon are not drawn. Rebuilt every 5 s (the sky turns 0.02 deg in that).
+// [WolfViewer 2026-10-28 Captain Wolf] the catalogue (and the constellation figures) are precessed from J2000.0 to the date
+// once, at load (wolf_precess_from_j2000), so they stand where the sky has them now, not where they stood in 2000.
 // ═══════════════════════════════════════════════════════════════════════════════════════════
-static std::vector<LLVector4> sWolfStarCatalogue;   // ra_deg, dec_deg, vmag, bv
+static std::vector<LLVector4> sWolfStarCatalogue;   // ra_deg, dec_deg (of the date, precessed at load), vmag, bv
 static bool sWolfStarCatalogueTried = false;
+
+// [WolfViewer 2026-10-28 Captain Wolf] the V magnitude a real star carries to starsF.glsl in its vertex alpha (wolf_star_phys):
+// (m - MIN) / SPAN over 0..255, a step of 8.5 / 255 = 0.033 mag. The catalogue's range: Sirius V = -1.46 (the brightest) to
+// V = 6.0 (its limit, make_stars.py). starsF.glsl decodes with the same two numbers.
+static const F32 WOLF_STAR_MAG_MIN = -2.f;
+static const F32 WOLF_STAR_MAG_SPAN = 8.5f;
+static F32 wolf_star_mag_encode(F32 vmag)
+{
+    return llclamp((vmag - WOLF_STAR_MAG_MIN) / WOLF_STAR_MAG_SPAN, 0.f, 1.f);
+}
+
+/** [WolfViewer 2026-10-28 Captain Wolf] Precession of an equatorial position from J2000.0 (FK5) to the equinox of Julian day `jd`.
+ *  Source: J. Meeus, Astronomical Algorithms (2nd ed., 1998), chapter 21 "Precession", the rigorous method (the IAU 1976
+ *  angles of Lieske et al. 1977, A&A 58, 1) with the starting epoch J2000.0 (T = 0), t in Julian centuries from it, in arcseconds:
+ *    zeta  = 2306.2181 t + 0.30188 t^2 + 0.017998 t^3
+ *    z     = 2306.2181 t + 1.09468 t^2 + 0.018203 t^3
+ *    theta = 2004.3109 t - 0.42665 t^2 - 0.041833 t^3
+ *  and the same chapter's transformation: A = cos d0 sin(a0 + zeta), B = cos theta cos d0 cos(a0 + zeta) - sin theta sin d0,
+ *  C = sin theta cos d0 cos(a0 + zeta) + cos theta sin d0; a = atan2(A, B) + z, d = asin(C).
+ *  Proper motion, nutation and aberration (each under 20" for these stars over 26 years) are not applied. */
+static void wolf_precess_from_j2000(F32& ra_deg, F32& dec_deg, F64 jd)
+{
+    const F64 t = (jd - 2451545.0) / 36525.0;
+    const F64 AS = DEG_TO_RAD / 3600.0;
+    const F64 zeta = (2306.2181 * t + 0.30188 * t * t + 0.017998 * t * t * t) * AS;
+    const F64 z = (2306.2181 * t + 1.09468 * t * t + 0.018203 * t * t * t) * AS;
+    const F64 theta = (2004.3109 * t - 0.42665 * t * t - 0.041833 * t * t * t) * AS;
+    const F64 a0 = ra_deg * DEG_TO_RAD, d0 = dec_deg * DEG_TO_RAD;
+    const F64 A = cos(d0) * sin(a0 + zeta);
+    const F64 B = cos(theta) * cos(d0) * cos(a0 + zeta) - sin(theta) * sin(d0);
+    const F64 C = sin(theta) * cos(d0) * cos(a0 + zeta) + cos(theta) * sin(d0);
+    F64 a = (atan2(A, B) + z) * RAD_TO_DEG;
+    a = fmod(fmod(a, 360.0) + 360.0, 360.0);
+    ra_deg = (F32)a;
+    dec_deg = (F32)(asin(llclamp(C, -1.0, 1.0)) * RAD_TO_DEG);
+}
+
+/** The Julian day the catalogue is precessed to: now (the precession moves a star about 50" a year, so the date of the load
+ *  serves a whole session). JD = Unix seconds / 86400 + 2440587.5 (as updateRealStars). */
+static F64 wolf_precession_jd()
+{
+    return LLDate::now().secondsSinceEpoch() / 86400.0 + 2440587.5;
+}
 
 bool LLVOWLSky::loadStarCatalogue()
 {
@@ -315,14 +363,20 @@ bool LLVOWLSky::loadStarCatalogue()
     const std::string path = gDirUtilp->getExpandedFilename(LL_PATH_APP_SETTINGS, "wolf_stars.txt");
     std::ifstream in(path.c_str());
     std::string line;
+    const F64 jd = wolf_precession_jd();
     while (std::getline(in, line))
     {
         if (line.empty() || line[0] == '#') continue;
         std::istringstream row(line);
         F32 ra, dec, vmag, bv;
-        if (row >> ra >> dec >> vmag >> bv) sWolfStarCatalogue.emplace_back(ra, dec, vmag, bv);
+        if (row >> ra >> dec >> vmag >> bv)
+        {
+            wolf_precess_from_j2000(ra, dec, jd);
+            sWolfStarCatalogue.emplace_back(ra, dec, vmag, bv);
+        }
     }
-    LL_INFOS("WolfStars") << "star catalogue: " << sWolfStarCatalogue.size() << " stars from " << path << LL_ENDL;
+    LL_INFOS("WolfStars") << "star catalogue: " << sWolfStarCatalogue.size() << " stars from " << path
+                          << ", precessed from J2000.0 to JD " << llformat("%.1f", jd) << LL_ENDL;
     return !sWolfStarCatalogue.empty();
 }
 
@@ -384,8 +438,12 @@ bool LLVOWLSky::updateRealStars(F64 lat_deg, F64 lon_deg)
         // Colour from B-V: blue-white hot stars to orange-red cool ones.
         const F32 bv = llclamp(st.mV[3], -0.4f, 2.0f);
         LLColor4 col;
-        if (bv < 0.4f) col.set(0.70f + 0.75f * (bv + 0.4f) * 0.5f, 0.80f + 0.4f * (bv + 0.4f) * 0.5f, 1.f, intensity);
-        else           col.set(1.f, llclamp(0.97f - 0.17f * (bv - 0.4f), 0.6f, 1.f), llclamp(0.92f - 0.30f * (bv - 0.4f), 0.4f, 1.f), intensity);
+        // [WolfViewer 2026-10-28 Captain Wolf] the alpha carries the star's V magnitude (wolf_star_mag_encode) for the native
+        // sky's per-star light (starsF.glsl wolf_star_phys). starsF.glsl's star branch never read this alpha before (its
+        // opacity is the texture's), so the stock sky draws exactly as it did; the size still comes from `intensity` below.
+        const F32 magA = wolf_star_mag_encode(st.mV[2]);
+        if (bv < 0.4f) col.set(0.70f + 0.75f * (bv + 0.4f) * 0.5f, 0.80f + 0.4f * (bv + 0.4f) * 0.5f, 1.f, magA);
+        else           col.set(1.f, llclamp(0.97f - 0.17f * (bv - 0.4f), 0.6f, 1.f), llclamp(0.92f - 0.30f * (bv - 0.4f), 0.4f, 1.f), magA);
         col.clamp();
 
         LLVector3 left = at % LLVector3(0, 0, 1);
@@ -422,8 +480,9 @@ bool LLVOWLSky::updateRealStars(F64 lat_deg, F64 lon_deg)
 // orion"). Figures: d3-celestial (github.com/ofrohn/d3-celestial, BSD 3-Clause, (c) 2015 Olaf
 // Frohn) data/constellations.lines.json + constellations.json, converted by
 // region-terrain-work/autoenv-stars/make_constellations.py to app_settings/wolf_constellations.txt
-// (RA/Dec J2000 degrees). Placed with the same transform as the stars. Lines are thin quads in
-// the star pass, flagged for starsF.glsl by texcoords (2,2); names are hover texts on the dome.
+// (RA/Dec J2000 degrees, precessed to the date at load as the stars are). Placed with the same
+// transform as the stars. Lines are thin quads in the star pass, flagged for starsF.glsl by
+// texcoords (2,2); names are hover texts on the dome.
 // ═══════════════════════════════════════════════════════════════════════════════════════════
 struct WolfConstName { F32 ra; F32 dec; std::string name; };
 static std::vector<LLVector4> sWolfConstSegs;      // ra1, dec1, ra2, dec2
@@ -437,6 +496,9 @@ bool LLVOWLSky::loadConstellations()
     const std::string path = gDirUtilp->getExpandedFilename(LL_PATH_APP_SETTINGS, "wolf_constellations.txt");
     std::ifstream in(path.c_str());
     std::string line;
+    // [WolfViewer 2026-10-28 Captain Wolf] precessed to the same date as the stars (loadStarCatalogue), so a figure's line still
+    // ends on its star
+    const F64 jd = wolf_precession_jd();
     while (std::getline(in, line))
     {
         if (line.size() < 2 || line[0] == '#') continue;
@@ -444,13 +506,19 @@ bool LLVOWLSky::loadConstellations()
         if (line[0] == 'L')
         {
             F32 a, b, c, d;
-            if (row >> a >> b >> c >> d) sWolfConstSegs.emplace_back(a, b, c, d);
+            if (row >> a >> b >> c >> d)
+            {
+                wolf_precess_from_j2000(a, b, jd);
+                wolf_precess_from_j2000(c, d, jd);
+                sWolfConstSegs.emplace_back(a, b, c, d);
+            }
         }
         else if (line[0] == 'N')
         {
             WolfConstName n;
             if (row >> n.ra >> n.dec)
             {
+                wolf_precess_from_j2000(n.ra, n.dec, jd);
                 std::getline(row >> std::ws, n.name);
                 sWolfConstNames.push_back(n);
             }
@@ -566,10 +634,19 @@ void LLVOWLSky::drawStars(void)
 {
     // <WolfViewer 2026-10-03> The real sky on automatic regions.
     mRealStarsActive = false;
+    // [WolfViewer 2026-10-28 Captain Wolf] starsF.glsl wolf_star_phys, set on the star program (bound by
+    // LLDrawPoolWLSky::renderStarsDeferred, this function's only caller) before each draw: 1 only for the real catalogue under
+    // the native sky (its vertex alpha is the encoded magnitude), 0 for the stock sky and for the random field
+    static LLStaticHashedString s_wolf_star_phys("wolf_star_phys");
+    auto setStarPhys = [](bool on)
+    {
+        if (LLGLSLShader::sCurBoundShaderPtr) LLGLSLShader::sCurBoundShaderPtr->uniform1f(s_wolf_star_phys, on ? 1.f : 0.f);
+    };
     if (WolfRegionWeather::instance().autoEnvRealSky() && loadStarCatalogue()
         && updateRealStars(WolfRegionWeather::instance().autoEnvLat(), WolfRegionWeather::instance().autoEnvLon()))
     {
         mRealStarsActive = true;
+        setStarPhys(WolfEnvironmentRender::skyActive());
         if (mRealStarsDrawn > 0)
         {
             mRealStarsVerts->setBuffer();
@@ -607,6 +684,7 @@ void LLVOWLSky::drawStars(void)
         return;
     }
     hideConstellationNames();
+    setStarPhys(false);
     //  render the stars as a sphere centered at viewer camera
     if (mStarsVerts.notNull())
     {

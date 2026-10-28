@@ -126,6 +126,9 @@ public:
     // visiting land (WolfVisitingLand.cs; the agent stays on its region for kilometres) - the region underneath
     static LLViewerRegion*      wolfEnvironmentRegion();
     // </WolfViewer>
+    // [SMOOTH SEA 2026-10-28] true for the 15 s after a teleport in which the region's own environment is applied at once
+    // (wolf_in_teleport_arrival); the sea (lldrawpoolwater.cpp wolfUpdateSea) snaps to it then instead of easing
+    static bool                 wolfTeleportArrival();
     bool                        canAgentUpdateParcelEnvironment() const;
     bool                        canAgentUpdateParcelEnvironment(LLParcel *parcel) const;
     bool                        canAgentUpdateRegionEnvironment() const;

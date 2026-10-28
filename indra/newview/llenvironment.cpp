@@ -1164,6 +1164,12 @@ namespace
     bool wolf_in_teleport_arrival() { return LLFrameTimer::getElapsedSeconds() - sWolfTeleportArrivalAt < 15.0; }
 }
 
+// [SMOOTH SEA 2026-10-28/] see llenvironment.h
+bool LLEnvironment::wolfTeleportArrival()
+{
+    return wolf_in_teleport_arrival() || LLViewerParcelMgr::getInstance()->getTeleportInProgress();
+}
+
 void LLEnvironment::onRegionChange()
 {
     if (LLViewerParcelMgr::getInstance()->getTeleportInProgress()) sWolfTeleportArrivalAt = LLFrameTimer::getElapsedSeconds();

@@ -730,12 +730,28 @@ WolfBoatRock::Sea WolfBoatRock::seaNow() const
     // Source: lldrawpoolwater.cpp:309 WATER_WAVE_DIR1 = pwater->getWave1Dir() (raw: the
     // shader normalises it for dir1 and uses its LENGTH for the breaker's speedScale).
     sea.mDir1.set(1.04999f, -0.42000f);   // llsettingswater.cpp:107 default, like wolfseastate.h
+    // [SMOOTH SEA 2026-10-28] ...now the EASED direction the pool uploads (LLDrawPoolWater::wolfUpdateSea), and the phases
+    // it accumulated, carried on to this moment, so a hull rides the same sea through a weather change.
+    if (wp)
+    {
+        sea.mDir1 = wp->getEasedWaveDir1();
+        const LLDrawPoolWater::SeaClocks clocks = wp->seaClocksAt((F64)waterTime());
+        sea.mSwellClock = clocks.mSwell;
+        sea.mBreakerClock = clocks.mBreaker;
+        sea.mAutoSurfClock = clocks.mAutoSurf;
+    }
+    else
     {
         LLSettingsWater::ptr_t pwater = LLEnvironment::instance().getCurrentWater();
         if (pwater)
         {
             sea.mDir1 = pwater->getWave1Dir();
         }
+        const F64 t = (F64)waterTime();
+        sea.mSwellClock = sqrt((F64)sea.mFreq + 0.001) * (F64)sea.mSpeed * t;
+        sea.mBreakerClock = t * 4.5 * (F64)llclamp(sea.mDir1.length() * 0.885f, 0.4f, 2.0f);
+        const F32 auto_len = llmax(llmax(2.f / (sea.mFreq + 0.001f), 12.f * (2.f * sea.mAmp)), 12.f);
+        sea.mAutoSurfClock = sqrt(9.81 * 6.283185307179586 / (F64)llmax(auto_len, 8.f)) * t;
     }
 
     // [WAVES 2026-09-10] the painted zones' calm ripple and small-wave scale (WolfWaveZones).
@@ -864,12 +880,12 @@ F32 WolfBoatRock::waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F3
         auto acc = [&](F32 wl, F32 A, const LLVector2& d)
         {
             const F32 k = 6.28318f / wl;
-            const F32 c = sqrtf(9.8f / k);
             F32 len = d.length();
             if (len <= 0.f) len = 1.f;
             const F32 dx = d.mV[VX] / len, dy = d.mV[VY] / len;
-            const F32 f = k * (dx * px + dy * py - c * t * sea.mSpeed);
-            z += A * sinf(f);
+            // [SMOOTH SEA 2026-10-28] waterV.glsl wolfSwellPhaseT: sqrt(9.8 k / (waveFrequency + 0.001)) x the swell clock
+            const F64 f = (F64)k * (dx * px + dy * py) - sqrt(9.8 * (F64)k / ((F64)sea.mFreq + 0.001)) * sea.mSwellClock;
+            z += A * (F32)sin(f);
         };
         // Source: waterV.glsl:359-361 w1/w2/w3 — the three dominant trains.
         acc(base_wl * 2.0f, local_amp * 0.40f, d1);
@@ -897,8 +913,8 @@ F32 WolfBoatRock::waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F3
             const F32 shoal = (1.f - smoothstep01(0.5f, 8.0f, smooth_depth)) * llmin(conf * 1.5f, 1.f) * edge_fade;
             if (shoal > 0.01f)
             {
-                const F32 speed_scale = llclamp(sea.mDir1.length() * 0.885f, 0.4f, 2.0f);
-                const F32 phase = t * 4.5f * speed_scale + sqrtf(smooth_depth) * 8.0f;
+                // [SMOOTH SEA 2026-10-28] waterV.glsl: wolfSeaClock.y, the accumulated t x 4.5 x clamp(|dir1| x 0.885, 0.4, 2)
+                const F32 phase = (F32)sea.mBreakerClock + sqrtf(smooth_depth) * 8.0f;
                 // [SWELL-EXPOSURE 2026-08-31] Mirror of the vertex stage's breaker feed:
                 // exposure tapped ~45m seaward (-(g,b)/conf is the seaward unit vector),
                 // sqrt-lifted, 0.35..1.0.
@@ -941,7 +957,7 @@ F32 WolfBoatRock::waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F3
         F32 surf_zone = (sea.mSurfH > 0.01f && field->mZoneTex)
             ? smoothstep01(0.62f, 0.95f, 0.55f + 0.45f * WolfWaterField::surfWeightAt(*field, rx, ry)) : 0.f;
         const bool auto_s = surf_zone <= 0.01f && auto_surf_on;
-        const F32 surf_h = auto_s ? sea.mAutoH : sea.mSurfH;
+        F32 surf_h = auto_s ? sea.mAutoH : sea.mSurfH;   // [HARBOUR STRIPES 2026-10-28/] scaled by the shelter feed below
         const F32 surf_set = auto_s ? 90.f : sea.mSurfSet;
         const F32 surf_len = auto_s ? sea.mAutoLen : sea.mSurfLen;
         if (auto_s)
@@ -989,6 +1005,11 @@ F32 WolfBoatRock::waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F3
             if (auto_s)
             {
                 surf_zone *= 1.f - smoothstep01(80.f, 200.f, dist);   // waterV.glsl: the last 200 m to land only
+                // [HARBOUR STRIPES 2026-10-28] waterV.glsl autoS SHELTER, same rule: no bigger than the swell drawn 150 m
+                // seaward (against the travel direction), mix(0.15, 1.3, exposure) / 1.3; 1 on an open coast and outside
+                // the exposure span (exposureAt returns 1 there), a fraction of it in a harbour.
+                const F32 feed_expo = exposure_at(rx - dx * 150.f, ry - dy * 150.f);
+                surf_h *= (0.15f + 1.15f * feed_expo) / 1.3f;
             }
             // depth: the smoothed height, continuing past the field's border and easing to 30 m
             // <WolfViewer 2026-09-27> the border is the FIELD's, as waterV.glsl sduv/over:
@@ -1041,7 +1062,8 @@ F32 WolfBoatRock::waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F3
             crest_h *= smoothstep01(0.2f, 0.6f + 0.5f * surf_h, h);
             if (crest_h > 0.01f)
             {
-                const F32 ph = k0 * path - omega0 * t;
+                // [SMOOTH SEA 2026-10-28] waterV.glsl surfT: the automatic surf's accumulated clock, the painted surf's omega0 t
+                const F32 ph = k0 * path - (auto_s ? (F32)sea.mAutoSurfClock : omega0 * t);
                 const F32 ph2 = ph + (0.30f + 0.45f * break_f) * sinf(ph);
                 const F32 sn = sinf(ph2);
                 const F32 up = 0.5f + 0.5f * sn;

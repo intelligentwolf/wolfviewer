@@ -409,6 +409,7 @@ public:
         WOLF_TERRAIN_LAYERS,                // "wolfTerrainLayers" [WOLF TERRAIN TEXTURES 2026-10-16] wolfterrainlayers.cpp (sampler2DArray)
         WOLF_DRY,                           // "wolfDry" [WOLF SEA TUNNEL 2026-10-28] waterFogF.glsl, wolfdryvolumes.cpp (vec4[32])
         WOLF_DRY_COUNT,                     // "wolfDryCount" the volumes in wolfDry (int)
+        WOLF_HULL,                          // "wolfHull" [WOLF DRY HULLS 2026-10-28] waterFogF.glsl, wolfdryvolumes.cpp (vec4[100])
         // </WolfViewer>
         END_RESERVED_UNIFORMS
     } eGLSLReservedUniforms;

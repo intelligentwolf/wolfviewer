@@ -16,6 +16,8 @@
 #ifndef WOLF_DRYVOLUMES_H
 #define WOLF_DRYVOLUMES_H
 
+#include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
@@ -56,6 +58,15 @@ class LLViewerObject;
  * ones it uses fresh (a script that clears the word turns it off for everyone within REFRESH_SECS). Nothing is fetched
  * from a server and nothing polls one; the tunnel boxes are the ones WolfTunnels already reads on arrival.
  * Shaders get at most MAX_SHADER_VOLUMES, the ones the camera is in first, then the nearest.
+ *
+ * [WOLF DRY HULLS 2026-10-28] Paul: "cant the viewer just detect that its a boat like we do for waves and not draw the
+ * water?" BOATS' HULLS are air too, automatically: every boat WolfBoatRock finds (the same sweep and gates as boat
+ * rocking: wolfboatrock.h boats()) is MEASURED once from its own visible geometry (measureHull: the hull's outer skin
+ * where it crosses the waterline, 1 m above it and at two depths below it, KIND_HULL) and its inside below the deck is
+ * air: no water surface, waves or fog in the hold, no swimming there. The sea outside is never cut: the table is fitted so
+ * it never reaches past the skin at a measured height. The volume rides the hull's drawn place and turn every frame, so a
+ * sailing or rocking boat keeps it. Setting WolfViewerDryHulls (on) turns it off. A boat measured this way does not also
+ * use its own wolfdry prims (HMS Wolfy's five tubes): the hull covers them and they would only take shader slots.
  */
 class WolfDryVolumes : public LLSingleton<WolfDryVolumes>
 {
@@ -74,7 +85,29 @@ public:
     static constexpr F32 NEAR_M = 64.f;
     static constexpr F32 PER_METRE_M = 32.f;
 
-    enum EKind { KIND_NONE = 0, KIND_CYLINDER = 1, KIND_BOX = 2, KIND_SPHERE = 3 };   // waterFogF.glsl wolfDry[i*4+3].x
+    enum EKind { KIND_NONE = 0, KIND_CYLINDER = 1, KIND_BOX = 2, KIND_SPHERE = 3, KIND_HULL = 4 };   // waterFogF.glsl wolfDry[i*4+3].x
+
+    // [WOLF DRY HULLS] waterFogF.glsl WOLF_HULL_STATIONS / WOLF_HULL_LEVELS / WOLF_HULL_VEC4 and wolfHull[100] - kept in step.
+    static constexpr S32 HULL_STATIONS = 24;
+    static constexpr S32 HULL_LEVELS = 4;
+    static constexpr S32 HULL_VEC4 = 25;          // 4 x 24 half-widths, 4 to a vec4, then the levels
+    static constexpr S32 MAX_SHADER_HULLS = 4;    // of the MAX_SHADER_VOLUMES slots
+    /** At most this many triangles of boats are measured per sweep (the nearest boats first; at least one boat). */
+    static constexpr S32 HULL_TRIANGLE_BUDGET = 400000;
+
+    /** A boat's hull in its unit space (waterFogF.glsl wolfHullHalf): x along it (-1..1), y across (1 = the widest
+     *  half-beam), z keel (-1) to the top (1). mHalf[level][station] is the half-width there in unit y; mLevel the
+     *  levels' unit z, top first. mAxisLocal / mCentreLocal / mHalfLocal: that unit space in the ROOT prim's own frame. */
+    struct HullProfile
+    {
+        F32 mHalf[HULL_LEVELS][HULL_STATIONS];
+        F32 mLevel[HULL_LEVELS];
+        LLVector3 mAxisLocal[3];
+        LLVector3 mCentreLocal;
+        F32 mHalfLocal[3];
+        /** The half-width (unit y) at unit (x, z); -1 outside. The same as waterFogF.glsl wolfHullHalf. */
+        F32 halfWidth(F32 x, F32 z) const;
+    };
 
     /** One volume, agent frame: centre, three unit axes and the half size along each (a cylinder is round in axes 0/1
      *  and runs along axis 2). */
@@ -84,6 +117,7 @@ public:
         LLVector3 mCentre;
         LLVector3 mAxis[3];
         F32 mHalf[3] = { 0.f, 0.f, 0.f };
+        std::shared_ptr<const HullProfile> mHull;   // KIND_HULL only
         bool contains(const LLVector3& agent_pos) const;
         F32 boundingRadius() const;
     };
@@ -110,12 +144,28 @@ private:
     void sweep();
     /** The tagged prims and the tunnel boxes under the water, as volumes now (mFrame). */
     void collect();
+    /** [WOLF DRY HULLS] Keep mHulls in step with WolfBoatRock::boats(): measure new or changed ones within the budget. */
+    void sweepHulls();
+    /** Measure a boat's hull from its visible geometry; false when it is not one that can be (see the .cpp). triangles:
+     *  how many were read. */
+    static bool measureHull(LLViewerObject* root, HullProfile& out, S32& triangles);
+    /** What the measurement depends on: the linkset's prims, their volumes (a mesh LOD switch gives a new one), sizes
+     *  and places. */
+    static U64 hullSignature(LLViewerObject* root);
 
     std::set<LLUUID> mTagged;        // prims whose description has the keyword, in reach
     std::vector<Volume> mFrame;      // this frame's volumes, every one (not only the shader's)
     F64 mNextSweep = 0.0;
     U64 mRegionHandle = 0;
     U32 mFrameCollected = 0;         // LLFrameTimer frame count mFrame was made in
+
+    struct HullCache
+    {
+        U64 mSignature = 0;
+        F32 mWaterOffset = 0.f;          // water height - root z when measured (a boat that sinks or rises is measured again)
+        std::shared_ptr<const HullProfile> mProfile;   // null: measured, not a hull that can be used
+    };
+    std::map<LLUUID, HullCache> mHulls;  // the boats WolfBoatRock found at the last sweep
 };
 
 #endif // WOLF_DRYVOLUMES_H

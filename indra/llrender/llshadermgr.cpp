@@ -1750,6 +1750,7 @@ void LLShaderMgr::initAttribsAndUniforms()
     mReservedUniforms.push_back("wolfTerrainLayers");   // [WOLF TERRAIN TEXTURES 2026-10-16] wolfterrainlayers.cpp
     mReservedUniforms.push_back("wolfDry");             // [WOLF SEA TUNNEL 2026-10-28] waterFogF.glsl, wolfdryvolumes.cpp
     mReservedUniforms.push_back("wolfDryCount");
+    mReservedUniforms.push_back("wolfHull");            // [WOLF DRY HULLS 2026-10-28] waterFogF.glsl, wolfdryvolumes.cpp
     // </WolfViewer>
 
     llassert(mReservedUniforms.size() == END_RESERVED_UNIFORMS);

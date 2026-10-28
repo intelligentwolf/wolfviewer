@@ -1722,7 +1722,19 @@ If you do not understand the distinction then leave this control alone."
          name="WolfViewerBoatRock"
          tool_tip="Boats sitting in the water bob and tilt with the swell and the shore breakers, viewer-side only. Physical or crewed hulls rock fully; a parked hull has to be named or described as a boat, and nothing named dock ever rocks."
          top_pad="4"
-         width="300" />
+         width="200" />
+        <!-- WolfViewer 2026-10-28 [WOLF DRY HULLS]: no sea inside boats (wolfdryvolumes.cpp measureHull) -->
+        <check_box
+         control_name="WolfViewerDryHulls"
+         follows="left|top"
+         height="16"
+         label="No sea inside boats"
+         layout="topleft"
+         left_pad="10"
+         name="WolfViewerDryHulls"
+         tool_tip="Wolf Territories: the inside of every boat is dry below its deck, with no water surface, waves or underwater fog in the hold. Each boat is measured from its own shape, so the sea outside it is left as it is. Catamarans keep the sea between their hulls."
+         top_delta="0"
+         width="280" />
         <!-- WolfViewer 2026-10-12 [WOLF AURORA]: how the northern lights are shown (wolfaurora.cpp); the
              Weather menu has the same switch. Off (the eye) is the default. -->
         <check_box

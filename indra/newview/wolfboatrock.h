@@ -17,10 +17,12 @@
 #define WOLF_BOATROCK_H
 
 #include <map>
+#include <vector>
 
 #include "llpointer.h"
 #include "llquaternion.h"
 #include "llsingleton.h"
+#include "lluuid.h"
 #include "v2math.h"
 #include "v3math.h"
 
@@ -78,6 +80,10 @@ public:
     void apply(const LLViewerObject* objectp, LLVector3& pos, LLQuaternion& rot);
     /** [DRY BUILDS 2026-10-26/] Is this ROOT prim's linkset being floated? (WolfWaterClearance: a floater is not a source.) */
     bool isRocking(const LLViewerObject* root) const { return mRockers.find(root) != mRockers.end(); }
+    /** [WOLF DRY HULLS 2026-10-28] The ROOT prims of the boats the last sweep found (every gate of classify(), seen,
+     *  the nearest MAX_ROCKERS, boards left out), nearest first: WolfDryVolumes gives each a dry hull. Kept even with
+     *  rocking turned off (WolfViewerBoatRock), as long as dry hulls are on (WolfViewerDryHulls) on a Wolf region. */
+    const std::vector<LLUUID>& boats() const { return mBoats; }
 
     // Source: terrain_manager.js updateFloaters() — 2.5 s sweep, 48 rockers, 256 m.
     static constexpr F64 SWEEP_INTERVAL_SECS = 2.5;
@@ -159,7 +165,8 @@ private:
         LLVector2    mMax = LLVector2(0.5f, 0.5f);
     };
 
-    void sweep();
+    /** rock: false = only find the boats (mBoats), rocking is off. */
+    void sweep(bool rock);
     void step();
     /** Drop a rocker and put its hull back on the sim's transform. */
     void evict(std::map<const LLViewerObject*, Rocker>::iterator it);
@@ -180,6 +187,7 @@ private:
     static void hullVerticalSpan(const LLViewerObject* root, F32& zlo, F32& zhi);
 
     std::map<const LLViewerObject*, Rocker> mRockers;
+    std::vector<LLUUID> mBoats;   // [WOLF DRY HULLS/] boats()
     F64 mNextSweep = 0.0;
     F64 mNextStatsLog = 0.0;
     // Diagnostics from the last sweep.

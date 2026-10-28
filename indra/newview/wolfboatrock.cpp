@@ -75,6 +75,9 @@ namespace
     // and sits on the surface in the trough, it never goes under. A hull does go under --
     // the waterline band below reaches 3 m down for exactly that reason -- so the two cannot
     // share one rule. KEEP IN STEP with WolfStorm terrain_manager.js _BOARD_RE.
+    // [WOLF DRY HULLS 2026-10-28/] nameVerdict: the floating Wolf vehicle types
+    const std::regex WOLF_BOAT_DESC_RE("^\\s*wolfvehicle:(?:warship|speedboat|sailboat)(?![A-Za-z0-9_])",
+                                       std::regex::ECMAScript | std::regex::icase);
     const std::regex BOARD_RE("\\bsurf ?boards?\\b|\\bpaddle ?boards?\\b|\\bbody ?boards?\\b|\\blong ?boards?\\b|\\bsurf\\b",
                               std::regex::ECMAScript | std::regex::icase);
 
@@ -119,13 +122,31 @@ void WolfBoatRock::idle()
     // subsystem is inert, which also saves the work it would otherwise do for nothing.
     // [BASIC WOLF SEA 2026-10-19/] boats ride the basic sea on every OpenSim grid (wolfgrid.h showsBasicWolfSea): the rocker samples
     // the same local swell and fields the shader draws, nothing from a Wolf service.
-    if (!WolfGrid::showsBasicWolfSea()) return;
+    if (!WolfGrid::showsBasicWolfSea())
+    {
+        mBoats.clear();
+        return;
+    }
     static LLCachedControl<bool> enabled(gSavedSettings, "WolfViewerBoatRock", true);
     if (!enabled)
     {
         if (!mRockers.empty())
         {
             evictAll();
+        }
+        // [WOLF DRY HULLS 2026-10-28] the boats are still found for their dry hulls (wolfdryvolumes.h), on the same
+        // 2.5 s sweep, when those are wanted: a Wolf region and WolfViewerDryHulls on
+        static LLCachedControl<bool> dry_hulls(gSavedSettings, "WolfViewerDryHulls", true);
+        if (!dry_hulls || !WolfGrid::showsWolfRegion())
+        {
+            mBoats.clear();
+            return;
+        }
+        const F64 now = LLFrameTimer::getElapsedSeconds();
+        if (now > mNextSweep)
+        {
+            mNextSweep = now + SWEEP_INTERVAL_SECS;
+            sweep(false);
         }
         return;
     }
@@ -138,7 +159,7 @@ void WolfBoatRock::idle()
     if (now > mNextSweep)
     {
         mNextSweep = now + SWEEP_INTERVAL_SECS;
-        sweep();
+        sweep(true);
     }
     if (!mRockers.empty())
     {
@@ -180,7 +201,7 @@ void WolfBoatRock::idle()
 // Source: terrain_manager.js updateFloaters() — the 2.5 s sweep ([FIX 2026-08-24]: cap on
 // the NEW set alone, candidates picked by DISTANCE not localId; [ROCK-NAME 2026-08-29]:
 // name wants routed to the shared harvester).
-void WolfBoatRock::sweep()
+void WolfBoatRock::sweep(bool rock)
 {
     const LLVector3 camera_pos = LLViewerCamera::getInstance()->getOrigin();
 
@@ -267,6 +288,19 @@ void WolfBoatRock::sweep()
     if (cands.size() > (size_t)MAX_ROCKERS)
     {
         cands.resize(MAX_ROCKERS);
+    }
+    // [WOLF DRY HULLS 2026-10-28] the same boats, nearest first, for WolfDryVolumes; a board has no inside
+    mBoats.clear();
+    for (const Candidate& c : cands)
+    {
+        if (!c.mVerdict.mBoard)
+        {
+            mBoats.push_back(c.mObject->getID());
+        }
+    }
+    if (!rock)
+    {
+        return;
     }
 
     std::set<const LLViewerObject*> keep;
@@ -693,6 +727,14 @@ WolfBoatRock::NameVerdict WolfBoatRock::nameVerdict(const LLViewerObject* object
         return NAME_BOARD;   // <WolfViewer 2026-09-22/> floats, but never dips under
     }
     if (std::regex_search(name, BOAT_RE) || std::regex_search(desc, BOAT_RE))
+    {
+        return NAME_BOAT;
+    }
+    // [WOLF DRY HULLS 2026-10-28] the Wolf vehicles that float: wolfvehiclerez.cpp descIs "wolfvehicle:<type>" at the
+    // start of the description, the type a whole word (HMS Wolfy: build_ship.py "wolfvehicle:warship - ..."; the HUDs'
+    // REZ types speedboat and sailboat, wolfvehiclerez.cpp typeForDesign / typeForFlightDeck). "warship" is not caught
+    // by \bships?\b above. KEEP IN STEP with WolfStorm terrain_manager.js _boatNameVerdict.
+    if (std::regex_search(desc, WOLF_BOAT_DESC_RE))
     {
         return NAME_BOAT;
     }

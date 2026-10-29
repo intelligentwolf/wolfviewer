@@ -4430,6 +4430,31 @@ void LLPipeline::renderGeomDeferred(LLCamera& camera, bool do_occlusion)
 
 // Render all of our geometry that's required after our deferred pass.
 // This is gonna be stuff like alpha, water, etc.
+// [WolfViewer 2026-10-29 ticket 349] The Wolf sky's composite (WolfEnvironmentRender::postPass: the clouds, the fog and the
+// aerial perspective over the opaque frame), run by renderGeomPostDeferred for renderDeferredLighting once the opaque forward
+// pools - POOL_FULLBRIGHT, POOL_BUMP (fullbright shiny), POOL_FULLBRIGHT_ALPHA_MASK (and the unlit glTF it draws) - are in the
+// frame and its depth, before the avatars' alpha, the glow mask, the water and the transparent pools (lldrawpool.h:57-78,
+// POOL_AVATAR onwards), which take the same fog themselves (wolftk/atmosphereLibF.glsl wolfTkNativeFog). Set by
+// renderDeferredLighting only: the other callers (avatar impostors, previews) never ran the composite and still do not.
+static bool sWolfEnvPostPassPending = false;
+
+static void wolf_env_post_pass()
+{
+    if (!sWolfEnvPostPassPending) return;
+    sWolfEnvPostPassPending = false;
+    // the screen target is bound here (renderDeferredLighting bound it for renderGeomPostDeferred); the composite reads it
+    // and writes it back, as it did before the forward pools
+    LLRenderTarget& screen = gPipeline.mRT->screen;
+    screen.flush();
+    if (gUseWireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);   // its full-screen passes, filled (renderGeomPostDeferred draws lines)
+    WolfEnvironmentRender::postPass();
+    if (gUseWireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+    screen.bindTarget();
+    // renderGeomPostDeferred's own state for the pools that follow (the composite ends with both masks on)
+    gGL.setColorMask(true, false);
+    gGL.setSceneBlendType(LLRender::BT_ALPHA);
+}
+
 void LLPipeline::renderGeomPostDeferred(LLCamera& camera)
 {
     LL_PROFILE_ZONE_SCOPED_CATEGORY_DRAWPOOL;
@@ -4487,6 +4512,11 @@ void LLPipeline::renderGeomPostDeferred(LLCamera& camera)
         LLDrawPool *poolp = *iter1;
 
         cur_type = poolp->getType();
+
+        if (cur_type >= LLDrawPool::POOL_AVATAR)
+        { // [WolfViewer 2026-10-29 ticket 349] the Wolf sky's composite, once the opaque forward pools are drawn (only when pending)
+            wolf_env_post_pass();
+        }
 
         if (cur_type >= water_exclusion_pass && !done_water_exclusion)
         { // do water exclusion against depth buffer before rendering alpha
@@ -4552,6 +4582,8 @@ void LLPipeline::renderGeomPostDeferred(LLCamera& camera)
         iter1 = iter2;
         stop_glerror();
     }
+
+    wolf_env_post_pass();   // [ticket 349] no pool from POOL_AVATAR on this frame: the composite still runs, after the rest
 
     gGLLastMatrix = NULL;
     gGL.matrixMode(LLRender::MM_MODELVIEW);
@@ -10267,13 +10299,12 @@ void LLPipeline::renderDeferredLighting()
     // [WOLF ENV TAKRAM 2026-10-12] the native sky's clouds and aerial perspective over the opaque frame, before the
     // water and the transparent geometry are drawn over it - where the EEP sky and clouds sit (nothing when inactive).
     // Also in reflection-probe faces, so the probes' ambient and reflections see the clouds (Paul's decision D2b).
+    // [WolfViewer 2026-10-29 ticket 349] no longer here, before renderGeomPostDeferred, but inside it once the opaque
+    // forward pools are drawn (wolf_env_post_pass): the fullbright, fullbright-shiny and unlit glTF surfaces are opaque and
+    // write depth, yet they are drawn after the deferred lighting, so the composite missed them - a "FOR RENT" sign stayed
+    // full bright and unfogged in a fog that hid the house behind it (Jimmy Olsen, Wolf Territories Home).
     static LLCachedControl<bool> wolf_env_capture(gSavedSettings, "WolfEnvironmentDebugCapture", false);
-    if (WolfEnvironmentRender::skyActive() || (wolf_env_capture && WolfEnvironmentRender::tier() > 0))
-    {
-        screen_target->flush();
-        WolfEnvironmentRender::postPass();
-        screen_target->bindTarget();
-    }
+    sWolfEnvPostPassPending = WolfEnvironmentRender::skyActive() || (wolf_env_capture && WolfEnvironmentRender::tier() > 0);
 
     {  // render non-deferred geometry (alpha, fullbright, glow)
         LLGLDisable blend(GL_BLEND);
@@ -10313,6 +10344,8 @@ void LLPipeline::renderDeferredLighting()
         renderGeomPostDeferred(*LLViewerCamera::getInstance());
         popRenderTypeMask();
     }
+    llassert(!sWolfEnvPostPassPending);   // renderGeomPostDeferred ran it (ticket 349)
+    sWolfEnvPostPassPending = false;
 
     screen_target->flush();
 
@@ -10740,6 +10773,20 @@ void LLPipeline::bindReflectionProbes(LLGLSLShader& shader)
         mReflectionMapManager.setUniforms();
 
         setEnvMat(shader);
+    }
+
+    {
+        // [WolfViewer 2026-10-29 ticket 328] under the Wolf sky a glTF surface's diffuse light is the probes' irradiance, the
+        // environment its specular reflects (class3/deferred/reflectionProbeF.glsl wolf_probe_ambient), not the legacy EEP's
+        // ambiance 0 that discards it. Never in a probe's irradiance pass: LL keeps the probes' irradiance out of the faces it
+        // is being rebuilt from (llreflectionmapmanager.cpp updateUniforms is_ambiance_pass, ambscale 0); LL's reset fade
+        // after a teleport as its own weight has it (ambscale *= mResetFade). 0 with WE off: the stock weight, unchanged.
+        static LLCachedControl<bool> wolf_pbr_probe_ambient(gSavedSettings, "WolfEnvironmentPbrProbeAmbient", true);
+        static LLStaticHashedString s_wolf_probe_ambient("wolf_probe_ambient");
+        const bool ambiance_pass = gCubeSnapshot && !mReflectionMapManager.isRadiancePass();
+        const bool on = bound && wolf_pbr_probe_ambient && mReflectionMapManager.mIrradianceMaps.notNull()
+                        && WolfEnvironmentRender::skyActive() && !ambiance_pass;
+        shader.uniform1f(s_wolf_probe_ambient, on ? llclamp(mReflectionMapManager.mResetFade, 0.f, 1.f) : 0.f);
     }
 
     // reflection probe shaders generally sample the scene map as well for SSR

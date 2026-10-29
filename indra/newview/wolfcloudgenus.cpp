@@ -80,7 +80,14 @@ namespace WolfCloudGenus
             // the ground slab, in the shadow map (round 8): the march's optical depth to the light at a sample is two short
             // steps plus the shadow map's column (clouds.frag:528-545 marchOpticalDepth + sampleShadowOpticalDepth), so a
             // slab left out of the map was lit by the unattenuated beam throughout - the sun's warm colour, not the fog's grey
-            R["Fog"]          = { 0.2f, 0.0f, 1.0f, 0.95f, 0.2f, { 0.f, 0.f, 0.f, 1.f },      0.25f,  0.f,  0.f,   true, 0.f, 1.f, false };
+            // [WolfViewer 2026-10-29] LWC 0.02 (was 0.25). Paul 05:23Z at Wolf Territories Home (Watford, MET fog 82 %, RH 99.8 %): the
+            // whole scene in a grey murk, buildings 100 m off gone. 0.25 g/m3 is sigma 0.0375 /m (the log's dens0), a meteorological
+            // optical range of ln(20) / sigma = 80 m (WMO-No. 8, Part I ch. 9: MOR at the 5 % contrast threshold) - while the
+            // METARs round it read 1100 - 9999 m (EGGW BR 1100 m 04:20Z, EGLL 9999 m 05:20Z). The observation says only that there
+            // IS fog (MET Locationforecast fog_area_fraction: the share of the area under fog, i.e. visibility under 1 km, as map()
+            // reads it below; WMO fog: visibility under 1 km); it gives no density. The slab is therefore set to the
+            // definition's own limit, MOR 1 km: sigma = ln(20) / 1000 m = 0.0030 /m -> LWC = 0.0030 x 2 x 1000 x 10e-6 / 3 / 1e-3.
+            R["Fog"]          = { 0.2f, 0.0f, 1.0f, 0.95f, 0.2f, { 0.f, 0.f, 0.f, 1.f },      0.02f,  0.f,  0.f,   true, 0.f, 1.f, false };
             // a deep smooth slab, rain darkening; the sun blotted out by its depth
             R["Ns"]           = { 0.4f, 0.0f, 1.0f, 0.9f,  0.4f, { 0.f, 0.f, 0.f, 1.f },      0.3f,   0.f,  0.02f, true, 0.f, 1.f, false };
             // thin elements with shading (exponent 1.5: separate patches). Repeat 8: WMO Altocumulus, "the regularly arranged small

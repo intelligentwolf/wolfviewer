@@ -132,7 +132,7 @@ void WolfFX::idle()
 
 void WolfFX::receive(const LLUUID& region_id, const std::vector<std::string>& strings)
 {
-    std::string e;
+    std::string e, look;    // look: [2026-10-29] "k", a newer look for e (WolfFXModule.cs WIRE)
     LLVector3 p, c(1.f, 0.55f, 0.15f), c2(0.25f, 0.24f, 0.23f), dir(0.f, 0.f, 1.f);
     F32 size = 4.f, duration = 1.f, intensity = 1.f, shake = 0.f, shake_r = 30.f, amp = 0.f, roll_deg = 0.f, roll_secs = 0.f;
     bool have_p = false;
@@ -145,6 +145,7 @@ void WolfFX::receive(const LLUUID& region_id, const std::vector<std::string>& st
         F32 f = (F32)atof(v.c_str());
         if (!std::isfinite(f)) f = 0.f;     // [SECURITY 2026-10-10] a NaN would pass llclamp
         if (k == "e") e = v;
+        else if (k == "k") look = v;
         else if (k == "p") have_p = parse_vec(v, p);
         else if (k == "s") size = llclamp(f, 0.2f, 30.f);
         else if (k == "c") parse_vec(v, c);
@@ -194,7 +195,7 @@ void WolfFX::receive(const LLUUID& region_id, const std::vector<std::string>& st
     else if (e == "sparks") kind = WolfFXSource::SPARKS;
     else if (e == "fire") kind = WolfFXSource::FIRE;
     else if (e == "fireworks") kind = WolfFXSource::FIREWORKS;
-    else if (e == "dust") kind = WolfFXSource::DUST;
+    else if (e == "dust") kind = (look == "splash") ? WolfFXSource::SPLASH : WolfFXSource::DUST;
     else if (e == "shockwave") kind = WolfFXSource::SHOCKWAVE;
     else return;    // a newer simulator's effect this viewer does not know
 
@@ -403,6 +404,44 @@ void WolfFXSource::burst()
         flash(R * 0.8f, 0.1f, 0.5f);
         ring(count(48), 12.f, 0.45f);
         break;
+    case SPLASH:
+    {
+        // [2026-10-29] Into water at the centre (the sim sends the water's height): a column of spray thrown up and
+        // falling back, a crown of droplets out at low angles, a foam ring spreading on the surface and a little mist.
+        // mC: the spray (foam white), mC2: the sea-grey of the falling water. Gravity as the rest (FX_GRAVITY).
+        const LLVector3 at(c.mV[VX], c.mV[VY], c.mV[VZ] + 0.05f);
+        for (S32 i = 0, n = count(36); i < n; ++i)          // the column
+        {
+            LLVector3 d(rnd(-0.2f, 0.2f), rnd(-0.2f, 0.2f), 1.f);     // within about 11 degrees of straight up
+            d.normalize();
+            const F32 sz = llclamp(R * rnd(0.12f, 0.22f), 0.08f, 1.5f);
+            part(at + LLVector3(rnd(-0.15f, 0.15f) * R, rnd(-0.15f, 0.15f) * R, 0.f), d * (R * rnd(2.2f, 4.f) + 1.5f), g, rnd(0.9f, 1.6f),
+                 sz, sz * 1.8f, alpha(mix(mC, mC2, rnd(0.f, 0.4f)), 0.85f), alpha(mC2, 0.f), 0.f, 0.f, 0, false);
+        }
+        for (S32 i = 0, n = count(30); i < n; ++i)          // the crown
+        {
+            const F32 ang = ll_frand(6.2831853f);
+            LLVector3 d(cosf(ang), sinf(ang), rnd(0.6f, 1.4f));
+            d.normalize();
+            const F32 sz = llclamp(R * 0.08f, 0.05f, 0.8f);
+            part(at, d * (R * rnd(1.2f, 2.2f) + 1.f), g, rnd(0.6f, 1.1f), sz, sz * 0.6f,
+                 alpha(mC, 0.9f), alpha(mC, 0.f), 0.f, 0.f, 0, false);
+        }
+        for (S32 i = 0, n = count(24); i < n; ++i)          // the foam ring on the surface
+        {
+            const F32 ang = 6.2831853f * (F32)i / (F32)llmax(1, n);
+            const LLVector3 d(cosf(ang), sinf(ang), 0.f);
+            part(at + d * (R * 0.2f), d * (R * rnd(0.8f, 1.2f)), -d * (R * 0.5f), rnd(1.6f, 2.4f),
+                 R * 0.3f, R * 0.9f, alpha(mC, 0.6f), alpha(mC, 0.f), 0.f, 0.f, 0, false);
+        }
+        for (S32 i = 0, n = count(8); i < n; ++i)           // mist
+        {
+            const LLVector3 off(rnd(-0.3f, 0.3f) * R, rnd(-0.3f, 0.3f) * R, R * rnd(0.3f, 1.2f));
+            part(at + off, LLVector3(0.f, 0.f, R * 0.25f), LLVector3::zero, rnd(1.5f, 2.5f), R * 0.5f, R * 1.4f,
+                 alpha(mC, 0.25f), alpha(mC, 0.f), 0.f, 0.f, 0, false);
+        }
+        break;
+    }
     case SMOKE:
     case FIRE:
         break;          // all streamed

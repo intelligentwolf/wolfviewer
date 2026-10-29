@@ -232,6 +232,7 @@ extern LLGLSLShader         gWolfEnvSkyProgram;            // [WOLF ENV TAKRAM 2
 extern LLGLSLShader         gWolfEnvCompositeProgram[2];   // wolftk/compositeF.glsl: [0] no clouds, [1] clouds (overlay + shafts)
 extern LLGLSLShader         gWolfEnvCameraShadowProgram;   // wolftk/cameraShadowF.glsl: the light meter's cloud shadow
 extern LLGLSLShader         gWolfEnvLogLumProgram;         // wolftk/logLumF.glsl: the light meter's frame log luminance
+extern LLGLSLShader         gWolfEnvFogSigmaProgram;       // wolftk/fogSigmaF.glsl: the overlay's fog for the forward surfaces (ticket 349)
 extern LLGLSLShader         gWolfEnvLightProgram;          // deferred/wolfEnvZoneF.glsl: a zone's light
 // </WolfViewer>
 extern LLGLSLShader         gGlowProgram;

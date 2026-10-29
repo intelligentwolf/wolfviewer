@@ -1751,6 +1751,8 @@ void LLShaderMgr::initAttribsAndUniforms()
     mReservedUniforms.push_back("wolfDry");             // [WOLF SEA TUNNEL 2026-10-28] waterFogF.glsl, wolfdryvolumes.cpp
     mReservedUniforms.push_back("wolfDryCount");
     mReservedUniforms.push_back("wolfHull");            // [WOLF DRY HULLS 2026-10-28] waterFogF.glsl, wolfdryvolumes.cpp
+    mReservedUniforms.push_back("wolfFogOverlay");      // [WolfViewer 2026-10-29 ticket 349] wolftk/atmosphereLibF.glsl wolfTkNativeFog
+    mReservedUniforms.push_back("wolfFogSigma");
     // </WolfViewer>
 
     llassert(mReservedUniforms.size() == END_RESERVED_UNIFORMS);

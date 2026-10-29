@@ -172,6 +172,8 @@ vec3 wolfWaterBody() { return waterFogColorLinear * (wolf_phys > 0.5 ? wolf_ligh
 #ifdef WOLF_TK_LIB
 vec3 wolfTkAerialPerspective(vec3 eyePos, vec3 radiance);
 float wolfTkCloudShadow(vec3 eyePos);
+// [WolfViewer 2026-10-29 ticket 349] the clouds' fog and haze in front of a surface drawn after the composite (atmosphereLibF.glsl)
+vec3 wolfTkNativeFog(vec3 eyePos, vec3 radiance);
 #endif
 // [WOLF ENV TAKRAM 2026-10-12] The foam's light. Under the native sky the frame is pre-exposed luminance, so the
 // foam (a near-white Lambert surface: 0.9-0.95 x this) is lit by the sun (/ pi, x its shadow) and the sky (/ pi)
@@ -1048,6 +1050,12 @@ void main()
     {
         color = mix(color, wolf_phys > 0.5 ? wolfSeaBehind : fb.rgb, smoothstep(wolf_far_clip * 0.6, wolf_far_clip * 0.95, length(pos.xyz)));
     }
+#endif
+#ifdef WOLF_TK_LIB
+    // [WolfViewer 2026-10-29 ticket 349] the clouds' overlay - fog, haze, cloud - for the water's own distance, as the composite lays it
+    // over the opaque frame: the water is drawn after the composite, whose overlay at these pixels was for the bed (or the sky) behind.
+    // After the far-clip fade, so the sea that fades into the dome's takes the dome's fog there too (both sky modes, as alphaF.glsl)
+    if (wolf_phys > 0.5) color = wolfTkNativeFog(pos.xyz, color);
 #endif
 
     float spec = min(max(max(punctual.r, punctual.g), punctual.b), 0);

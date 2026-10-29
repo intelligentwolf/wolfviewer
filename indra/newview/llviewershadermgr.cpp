@@ -326,6 +326,7 @@ LLGLSLShader        gWolfEnvSkyProgram;            // [WOLF ENV TAKRAM 2026-10-1
 LLGLSLShader        gWolfEnvCompositeProgram[2];
 LLGLSLShader        gWolfEnvCameraShadowProgram;
 LLGLSLShader        gWolfEnvLogLumProgram;
+LLGLSLShader        gWolfEnvFogSigmaProgram;   // [WolfViewer 2026-10-29 ticket 349]
 LLGLSLShader        gWolfEnvLightProgram;
 LLGLSLShader        gWolfAuroraLUTProgram;   // [WOLF AURORA 2026-10-12] wolfaurora.cpp
 // </WolfViewer>
@@ -3021,6 +3022,18 @@ bool LLViewerShaderMgr::loadShadersDeferred()
         if (!gWolfEnvLogLumProgram.createShader())
         {
             LL_WARNS("ShaderLoading") << "Wolf Env Frame Log Luminance failed: the meter reads the incident light alone" << LL_ENDL;
+        }
+        // [WolfViewer 2026-10-29 ticket 349] the clouds' overlay as a mean extinction per opaque pixel, for the native fog on the
+        // surfaces drawn after the composite (wolftk/atmosphereLibF.glsl wolfTkNativeFog)
+        gWolfEnvFogSigmaProgram.mName = "Wolf Env Fog Extinction";
+        gWolfEnvFogSigmaProgram.mShaderFiles.clear();
+        gWolfEnvFogSigmaProgram.clearPermutations();
+        gWolfEnvFogSigmaProgram.mShaderFiles.push_back(make_pair("deferred/postDeferredNoTCV.glsl", GL_VERTEX_SHADER));
+        gWolfEnvFogSigmaProgram.mShaderFiles.push_back(make_pair("wolftk/fogSigmaF.glsl", GL_FRAGMENT_SHADER));
+        gWolfEnvFogSigmaProgram.mShaderLevel = mShaderLevel[SHADER_DEFERRED];
+        if (!gWolfEnvFogSigmaProgram.createShader())
+        {
+            LL_WARNS("ShaderLoading") << "Wolf Env Fog Extinction failed: transparent surfaces and water get the aerial perspective alone" << LL_ENDL;
         }
         gWolfEnvLightProgram.mName = "Wolf Env Zone Light";
         gWolfEnvLightProgram.mShaderFiles.clear();

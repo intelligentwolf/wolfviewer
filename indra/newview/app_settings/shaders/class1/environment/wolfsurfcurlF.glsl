@@ -40,6 +40,8 @@ uniform vec3 curlLightH;
 uniform mat4 viewMatrix;   // world -> eye (WolfEnvironmentRender::bindSceneUniforms)
 vec3 wolfTkAerialPerspective(vec3 eyePos, vec3 radiance);
 float wolfTkCloudShadow(vec3 eyePos);
+// [WolfViewer 2026-10-29 ticket 349] the clouds' fog and haze in front of a surface drawn after the composite (atmosphereLibF.glsl)
+vec3 wolfTkNativeFog(vec3 eyePos, vec3 radiance);
 #endif
 
 void main()
@@ -83,6 +85,7 @@ void main()
     color = mix(color, vec3(0.90, 0.94, 0.97) * foamLight, foam);
 #ifdef WOLF_TK_LIB
     if (phys && wolf_phys < 1.5) color = wolfTkAerialPerspective(eyePos, color);   // [WolfViewer 2026-10-14] none under an EEP (wolf_phys 2)
+    if (phys) color = wolfTkNativeFog(eyePos, color);   // [WolfViewer 2026-10-29 ticket 349] the clouds' fog and haze for this distance (waterF.glsl)
 #endif
     frag_color = vec4(phys ? max(color, vec3(0.0)) : clamp(color, 0.0, 1.0), clamp(vAlpha * 0.8, 0.0, 1.0));
 }

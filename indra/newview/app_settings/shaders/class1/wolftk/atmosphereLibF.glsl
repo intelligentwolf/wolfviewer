@@ -42,6 +42,8 @@
 // Exported:
 //   vec3  wolfTkAerialPerspective(vec3 eyePos, vec3 radiance)  radiance x transmittance + inscatter, frame units
 //   float wolfTkCloudShadow(vec3 eyePos)                         the sun's transmittance through the clouds
+//   vec3  wolfTkNativeFog(vec3 eyePos, vec3 radiance)          the clouds' fog and haze in front of a surface drawn after
+//                                                                the composite (transparent, water), frame units
 // eyePos: LL eye space (metres); wolfTkEyeToWorld takes it to the world (LL agent frame) takram's matrices use.
 
 precision highp float;
@@ -104,6 +106,46 @@ vec3 wolfTkAerialPerspective(vec3 eyePos, vec3 radiance)
   vec3 relECEF = mat3(worldToECEFMatrix) * (mat3(wolfTkEyeToWorld) * eyePos) * METER_TO_LENGTH_UNIT;
   wolfApplyTransmittanceInscatterRel(relECEF, 0.0, radiance);
   return radiance;
+}
+
+// [WolfViewer 2026-10-29 ticket 349] The native fog on a surface drawn AFTER the composite. wolftk/compositeF.glsl lays the
+// clouds' overlay - the clouds, the fog genus and the haze between the camera and the opaque scene (wolftk/cloudsF.glsl,
+// marched to getRayDistanceToScene) - over the opaque frame before the transparent surfaces, the water and the particles
+// are drawn (pipeline.cpp renderGeomPostDeferred), and those took the aerial perspective alone: in fog, tree foliage stood
+// out dark and crisp against fogged ground at the same distance (Jimmy Olsen, Wolf Territories Home). Here a surface d
+// metres away takes the share of that pixel's overlay a uniform medium puts in front of it: wolftk/fogSigmaF.glsl gives
+// the ray's mean extinction sigma = -ln(1 - a_D) / D (D the opaque depth behind this pixel), so the surface's opacity
+// a_d = 1 - exp(-sigma d) and the light in front of it the overlay's light x a_d / a_D (the same medium, a shorter path).
+// At d = D that is the opaque pixel's own composite (compositeF.glsl: radiance x (1 - a) + overlay.rgb). Over the sky
+// (no depth behind) sigma is the mean of the opaque pixels round it (the target's mipmaps) and a_d is held to that
+// pixel's own overlay opacity: a nearer surface never has more fog in front of it than the whole ray. Called after
+// wolfTkAerialPerspective, in the composite's order (aerial perspective, then the overlay over it).
+uniform sampler2D wolfFogOverlay;   // the clouds' overlay this frame (WolfTk::Clouds::colorTex), the screen's size
+uniform sampler2D wolfFogSigma;     // wolftk/fogSigmaF.glsl: (sigma x weight, weight), mipmapped
+uniform float wolfTkFogOn;          // 1 when both are this frame's and this pass is the screen's (bindSceneUniforms)
+
+vec3 wolfTkNativeFog(vec3 eyePos, vec3 radiance)
+{
+  if (wolfTkFogOn < 0.5 || wolfTkUnderwater > 0.5) return radiance;
+  ivec2 size = textureSize(wolfFogSigma, 0);
+  ivec2 px = ivec2(gl_FragCoord.xy);
+  if (px.x < 0 || px.y < 0 || px.x >= size.x || px.y >= size.y) return radiance;
+  vec4 overlay = texelFetch(wolfFogOverlay, px, 0);
+  float aD = clamp(overlay.a, 0.0, 1.0);
+  if (aD <= 1e-5) return radiance;   // no fog, haze or cloud on this ray at all
+  vec2 s = texelFetch(wolfFogSigma, px, 0).rg;
+  if (s.g < 0.5)
+  {
+    // the sky behind: the opaque pixels' mean extinction round this one - a sixteenth of the screen's height, else the
+    // whole screen (the last mipmap level)
+    float lod = max(log2(float(size.y)) - 4.0, 0.0);
+    s = textureLod(wolfFogSigma, gl_FragCoord.xy / vec2(size), lod).rg;
+    if (s.g < 1e-3) s = textureLod(wolfFogSigma, vec2(0.5), log2(float(max(size.x, size.y)))).rg;
+    if (s.g < 1e-4) return radiance;   // no opaque pixel on the screen: nothing to take the medium from
+  }
+  float sigma = max(s.r / s.g, 0.0);
+  float ad = min(1.0 - exp(-sigma * length(eyePos)), aD);
+  return radiance * (1.0 - ad) + overlay.rgb * (ad / aD);
 }
 
 // Source: aerialPerspectiveEffect.frag:329-331 (positions) and :354-358 (the shadow: getSTBN, getShadowRadius,

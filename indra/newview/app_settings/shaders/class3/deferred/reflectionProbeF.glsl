@@ -98,6 +98,19 @@ bool isAbove(vec3 pos, vec4 plane)
 
 bool sample_automatic = true;
 
+// [WolfViewer 2026-10-29 ticket 328] PBR UNDER THE WOLF SKY LIT BY THE ENVIRONMENT IT REFLECTS. tapIrradianceMap weights a
+// probe's irradiance by refParams.x, the sky's reflection_probe_ambiance (llreflectionmapmanager.cpp updateUniforms). A legacy
+// EEP (no reflection_probe_ambiance key: every Wolf server sky and all 400 of Jimmy Olsen's frames) has ambiance 0
+// (llsettingssky.cpp:1175-1178), so the probes' irradiance was thrown away and a glTF surface's diffuse light was the EEP's
+// single ambient colour, while its specular reflected the probes - diffuse and specular from two different worlds.
+// wolf_probe_ambient (LLPipeline::bindReflectionProbes: the native sky drawing, not a probe's irradiance pass; LL's own
+// reset fade) is the least weight a probe's irradiance gets for glTF surfaces (sampleReflectionProbes only - the legacy
+// materials keep LL's weight). 1 = the irradiance map as it is: the cosine-weighted mean of the same captured radiance the
+// specular samples (irradianceGenF.glsl, Khronos glTF-Sample-Viewer ibl_filtering.frag), i.e. E / pi, the Lambert BRDF's
+// light (Karis 2013, "Real Shading in Unreal Engine 4", image-based lighting). 0 (the stock value) leaves the weight LL's.
+uniform float wolf_probe_ambient;
+float wolf_irr_weight = 0.0;
+
 // return true if probe at index i influences position pos
 bool shouldSampleProbe(int i, vec3 pos)
 {
@@ -566,9 +579,13 @@ vec3 tapIrradianceMap(vec3 pos, vec3 dir, out float w, out float dw, vec3 c, int
     v -= c;
     v = env_mat * v;
 
-    vec3 col = textureLod(irradianceProbes, vec4(v.xyz, refIndex[i].x), 0).rgb * refParams[i].x;
+    // [WolfViewer 2026-10-29 ticket 328] max(x, 0) == x: refParams.x is never negative (updateUniforms llmax(.., 0)), so the
+    // stock weight is untouched unless the Wolf sky asks for the physical one (wolf_irr_weight above)
+    float irr_weight = max(refParams[i].x, wolf_irr_weight);
 
-    col = mix(amblit, col, min(refParams[i].x, 1.0));
+    vec3 col = textureLod(irradianceProbes, vec4(v.xyz, refIndex[i].x), 0).rgb * irr_weight;
+
+    col = mix(amblit, col, min(irr_weight, 1.0));
 
     return col;
 }
@@ -775,7 +792,9 @@ void sampleReflectionProbes(inout vec3 ambenv, inout vec3 glossenv,
         vec2 tc, vec3 pos, vec3 norm, float glossiness, bool transparent, vec3 amblit)
 {
     preProbeSample(pos);
+    wolf_irr_weight = wolf_probe_ambient;   // [WolfViewer 2026-10-29 ticket 328] the glTF path only (see wolf_probe_ambient)
     doProbeSample(ambenv, glossenv, tc, pos, norm, glossiness, transparent, amblit);
+    wolf_irr_weight = 0.0;
 }
 
 void sampleReflectionProbesWater(inout vec3 ambenv, inout vec3 glossenv,

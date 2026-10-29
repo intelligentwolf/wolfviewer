@@ -63,6 +63,8 @@ uniform float wolf_fullbright;
 #ifdef WOLF_TK_LIB
 vec3 wolfTkAerialPerspective(vec3 eyePos, vec3 radiance);
 float wolfTkCloudShadow(vec3 eyePos);
+// [WolfViewer 2026-10-29 ticket 349] the clouds' fog and haze in front of a surface drawn after the composite (atmosphereLibF.glsl)
+vec3 wolfTkNativeFog(vec3 eyePos, vec3 radiance);
 #endif
 
 void main()
@@ -108,6 +110,9 @@ void main()
     // [WOLF ENV TAKRAM 2026-10-12] decision D14: the aerial perspective on a transparent surface, as the composite gives the
     // opaque frame (aerialPerspectiveEffect.frag:381-383); the blend (SRC_ALPHA, ONE_MINUS_SRC_ALPHA) then lays it over that
     if (wolf_phys > 0.5 && wolf_phys < 1.5) color.rgb = wolfTkAerialPerspective(pos, color.rgb);
+    // [WolfViewer 2026-10-29 ticket 349] then the clouds' overlay - fog, haze, cloud - for this distance, as the composite lays it
+    // over the opaque frame (both sky modes: under an EEP the overlay carries the fog genus and clouds, the haze is the stock one above)
+    if (wolf_phys > 0.5) color.rgb = wolfTkNativeFog(pos, color.rgb);
 #endif
 
 #endif

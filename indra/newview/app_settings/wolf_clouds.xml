@@ -154,7 +154,9 @@
       <key>shape</key><real>0.2</real><key>detail</key><real>0.0</real><key>exponent</key><real>1.0</real>
       <key>bias</key><real>0.95</real><key>filter</key><real>0.2</real>
       <key>profile</key><array><real>0</real><real>0</real><real>0</real><real>1</real></array>
-      <key>lwc_g_m3</key><real>0.25</real><key>ice</key><real>0</real><key>absorption</key><real>0</real>
+      <!-- [2026-10-29] 0.02 (was 0.25, sigma 0.0375 /m, MOR 80 m: Paul's grey murk at Home with METARs 1.1 - 10 km). The forecast
+           says only that there is fog (visibility under 1 km), so the slab sits at that limit: MOR ln(20) / sigma = 1 km (WMO-No. 8) -->
+      <key>lwc_g_m3</key><real>0.02</real><key>ice</key><real>0</real><key>absorption</key><real>0</real>
       <key>shadow</key><boolean>true</boolean><key>fibre</key><real>0</real><key>repeat</key><real>1</real><key>streaks</key><boolean>false</boolean>
     </map>
     <!-- Nimbostratus: a deep smooth slab, rain darkening; the sun blotted out by its depth. -->

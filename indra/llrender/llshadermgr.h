@@ -410,6 +410,8 @@ public:
         WOLF_DRY,                           // "wolfDry" [WOLF SEA TUNNEL 2026-10-28] waterFogF.glsl, wolfdryvolumes.cpp (vec4[32])
         WOLF_DRY_COUNT,                     // "wolfDryCount" the volumes in wolfDry (int)
         WOLF_HULL,                          // "wolfHull" [WOLF DRY HULLS 2026-10-28] waterFogF.glsl, wolfdryvolumes.cpp (vec4[100])
+        WOLF_FOG_OVERLAY,                   // "wolfFogOverlay" [WolfViewer 2026-10-29 ticket 349] wolftk/atmosphereLibF.glsl wolfTkNativeFog
+        WOLF_FOG_SIGMA,                     // "wolfFogSigma" the same: wolftk/fogSigmaF.glsl's target (wolfenvironmentrender.cpp)
         // </WolfViewer>
         END_RESERVED_UNIFORMS
     } eGLSLReservedUniforms;

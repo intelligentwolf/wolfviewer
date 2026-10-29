@@ -97,6 +97,11 @@ namespace
         bool   camPboPending[2] = {};
         U32    camPboIndex = 0;
         LLRenderTarget logLum;        // 64 x 64, mipmapped: the frame's log luminance (wolftk/logLumF.glsl), its 1 x 1 mip the mean
+        // [WolfViewer 2026-10-29 ticket 349] the native fog for the surfaces drawn after the composite (wolftk/fogSigmaF.glsl,
+        // atmosphereLibF.glsl wolfTkNativeFog): W x H, mipmapped, (sigma x weight, weight); the frame and the overlay it was made with
+        LLRenderTarget fogSigma;
+        U32    fogFrame = U32_MAX;
+        GLuint fogOverlay = 0;
         GLuint lumPbo[2] = {};        // the mean read back a frame apart, as camShadow
         bool   lumPboPending[2] = {};
         F32    lumPboExposure[2] = { 1.f, 1.f };   // the pre-exposure of the frame each reading was taken from
@@ -3643,6 +3648,42 @@ void WolfEnvironmentRender::postPassInner()
     }
     rt->screen.flush();
 
+    // ── [WolfViewer 2026-10-29 ticket 349] the overlay's fog for the surfaces drawn after this composite (the transparent ones,
+    // the water, the particles): its mean extinction along each opaque pixel's ray (wolftk/fogSigmaF.glsl), read by
+    // wolftk/atmosphereLibF.glsl wolfTkNativeFog through bindSceneUniforms. The screen's own pass only (a probe face has its
+    // own size and overlay, and its transparent surfaces keep the aerial perspective alone, as before) ──
+    sGpu.fogFrame = U32_MAX;
+    sGpu.fogOverlay = 0;
+    if (overlay && !gCubeSnapshot && gWolfEnvFogSigmaProgram.isComplete())
+    {
+        LLRenderTarget& fogRT = sGpu.fogSigma;
+        if (!fogRT.isComplete() || fogRT.getWidth() != W || fogRT.getHeight() != H)
+        {
+            fogRT.release();
+            // mipmapped (TMG_AUTO: LLRenderTarget::flush generates them, llrendertarget.cpp:511-515), as logLum
+            fogRT.allocate(W, H, GL_RG16F, false, LLTexUnit::TT_TEXTURE, LLTexUnit::TMG_AUTO);
+        }
+        if (fogRT.isComplete())
+        {
+            fogRT.bindTarget();
+            LLGLSLShader& fs = gWolfEnvFogSigmaProgram;
+            fs.bind();
+            const glm::mat4 iproj = glm::inverse(glm::make_mat4(gGLProjection));
+            static LLStaticHashedString s_ip("wolfInvProj");
+            fs.uniformMatrix4fv(s_ip, 1, GL_FALSE, glm::value_ptr(iproj));
+            WolfTk::bindNamed(fs, "overlayBuffer", WolfTk::NAMED_UNIT_BASE, GL_TEXTURE_2D, overlay);
+            WolfTk::bindNamed(fs, "depthBuffer", WolfTk::NAMED_UNIT_BASE + 1, GL_TEXTURE_2D, rt->deferredScreen.getDepth());
+            gPipeline.mScreenTriangleVB->setBuffer();
+            gPipeline.mScreenTriangleVB->drawArrays(LLRender::TRIANGLES, 0, 3);
+            WolfTk::unbindUnit(WolfTk::NAMED_UNIT_BASE, GL_TEXTURE_2D);
+            WolfTk::unbindUnit(WolfTk::NAMED_UNIT_BASE + 1, GL_TEXTURE_2D);
+            fs.unbind();
+            fogRT.flush();
+            sGpu.fogFrame = LLFrameTimer::getFrameCount();
+            sGpu.fogOverlay = overlay;
+        }
+    }
+
     // ── the light meter's cloud shadow: the clouds' transmittance at the camera, from the same shadow map the
     // scene's sun term uses (wolfTkCloudShadow, wolftk/atmosphereLibF.glsl), read back once a frame (1 x 1) ──
     if (!gCubeSnapshot)
@@ -3797,6 +3838,20 @@ void WolfEnvironmentRender::bindSceneUniforms(LLGLSLShader& shader)
     const U32 frameNo = LLFrameTimer::getFrameCount();
     const GLuint shadowTex = on ? sClouds->shadowMapArray() : 0;
     const GLuint tables = sAtmos->scatteringTexture();
+    // [WolfViewer 2026-10-29 ticket 349] the native fog's inputs (wolfTkNativeFog), outside the cache: whether they are there
+    // changes within a frame and matrices (the composite builds them mid-frame), and their units are LL's to reuse
+    {
+        static LLStaticHashedString s_fog("wolfTkFogOn");
+        LLPipeline::RenderTargetPack* rt = gPipeline.mRT;
+        const bool fog = !gCubeSnapshot && sGpu.fogOverlay != 0 && sGpu.fogFrame == frameNo && sGpu.fogSigma.isComplete() && rt
+                         && sGpu.fogSigma.getWidth() == rt->screen.getWidth() && sGpu.fogSigma.getHeight() == rt->screen.getHeight();
+        shader.uniform1f(s_fog, fog ? 1.f : 0.f);
+        if (fog)
+        {
+            WolfTk::bindReserved(shader, LLShaderMgr::WOLF_FOG_OVERLAY, GL_TEXTURE_2D, sGpu.fogOverlay);
+            WolfTk::bindReserved(shader, LLShaderMgr::WOLF_FOG_SIGMA, GL_TEXTURE_2D, sGpu.fogSigma.getTexture());
+        }
+    }
     if (c.frame == frameNo && c.on == on && c.shadowTex == shadowTex && c.tables == tables
         && !memcmp(c.mv, gGLModelView, sizeof(c.mv)) && !memcmp(c.pj, gGLProjection, sizeof(c.pj)))
     {
@@ -3923,6 +3978,9 @@ void WolfEnvironmentRender::releaseGL()
     if (sGpu.camPbo[0]) { glDeleteBuffers(2, sGpu.camPbo); sGpu.camPbo[0] = sGpu.camPbo[1] = 0; }
     sGpu.camPboPending[0] = sGpu.camPboPending[1] = false;
     sGpu.logLum.release();
+    sGpu.fogSigma.release();   // [ticket 349]
+    sGpu.fogFrame = U32_MAX;
+    sGpu.fogOverlay = 0;
     if (sGpu.lumPbo[0]) { glDeleteBuffers(2, sGpu.lumPbo); sGpu.lumPbo[0] = sGpu.lumPbo[1] = 0; }
     sGpu.lumPboPending[0] = sGpu.lumPboPending[1] = false;
     sNext.frameLogAvg = -1.f;

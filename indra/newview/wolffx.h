@@ -61,7 +61,8 @@ private:
 class WolfFXSource : public LLViewerPartSource
 {
 public:
-    enum EKind { EXPLOSION, FIREBALL, SMOKE, SPARKS, FIRE, FIREWORKS, DUST, SHOCKWAVE };
+    // [2026-10-29] SPLASH: "e=dust k=splash" (WolfFXModule.cs WIRE "k"): a ball or a stone into water
+    enum EKind { EXPLOSION, FIREBALL, SMOKE, SPARKS, FIRE, FIREWORKS, DUST, SHOCKWAVE, SPLASH };
 
     WolfFXSource(EKind kind, const LLVector3d& global, F32 size, const LLColor4& c, const LLColor4& c2,
                  F32 duration, F32 intensity, const LLVector3& dir);

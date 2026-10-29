@@ -2279,6 +2279,13 @@
                 <menu_item_call.on_click function="Floater.Show" parameter="wolf_sea_tunnels" />
                 <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
             </menu_item_call>
+            <!-- [SHIP BUILDER 2026-10-29] Paul: "in our build thing in wolfviewer could we make a ship builder?" ... "anyone can
+             use it but only wolf grid members" (wolffloatershipbuilder.cpp): design a sailing ship; the shipyard builds her and
+             puts her in your inventory, priced in AI credits. Wolf Territories only (the shipyard also refuses visitors). -->
+            <menu_item_call label="Ship Builder..." name="WolfWorldShipBuilder">
+                <menu_item_call.on_click function="Floater.Show" parameter="wolf_ship_builder" />
+                <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
+            </menu_item_call>
             <menu_item_call label="Terraform..." name="WolfWorldTerraform">
                 <menu_item_call.on_click function="Floater.Show" parameter="wolf_terraform" />
                 <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />

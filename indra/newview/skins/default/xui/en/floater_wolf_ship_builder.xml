@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [SHIP BUILDER 2026-10-29] Ship Builder (wolffloatershipbuilder.cpp): Wolf World > Build & Land > Ship Builder...
+     Who and why: a Wolf Territories member who wants a ship of their own. Flow: the turntable and her figures on the left;
+     on the right, top to bottom, 1. hull type 2. length and guns 3. figurehead, colours and name 4. the price line by line
+     against the credits they have; Build bottom right (Buy credits... beside it when short; Cancel the order bottom left
+     while she waits). The status line above the buttons: failures in the caution colour, kept until the next action. -->
+<floater
+ can_close="true"
+ can_minimize="true"
+ can_resize="false"
+ height="560"
+ layout="topleft"
+ name="wolf_ship_builder"
+ help_topic="wolf_ship_builder"
+ save_rect="true"
+ single_instance="true"
+ title="Ship Builder"
+ width="680">
+    <string name="feature_name">Ship Builder</string>
+    <string name="loading">Fetching her lines...</string>
+    <string name="opening">Opening the shipyard...</string>
+    <string name="closed">The shipyard is closed</string>
+    <string name="reopen">Close this window and open it again to try again.</string>
+    <string name="no_preview">Her picture could not be fetched - you can still build her.</string>
+    <string name="name_needed">Give her a name.</string>
+    <string name="name_long">The name can be at most %d letters.</string>
+    <string name="name_letters">Only letters, numbers, spaces and ' - . &amp; please.</string>
+    <string name="figures">[TITLE]
+Length on deck [DECK], overall [OVERALL]; beam [BEAM]; draught [DRAUGHT]; keel to masthead [HEIGHT].
+Decks: [DECKS]. [MASTS] masts, [SAILS] sails, [GUNS] guns. [PRIMS] prims (land impact).
+Her rig and decks come with the hull type. She sails with the Captain's Helm, fires her guns in battle mode, can sink and keeps her holds dry.</string>
+    <string name="price_hull">Hull</string>
+    <string name="credits_word">credits</string>
+    <string name="balance_unknown">Reading your AI credits...</string>
+    <string name="balance_short">You have [N] AI credits to spend - not enough for her.</string>
+    <string name="balance_ok">You have [N] AI credits to spend. You pay only once she is in your inventory.</string>
+    <string name="not_confirmed">Wait a moment - this region is still being confirmed as Wolf Territories.</string>
+    <string name="ordering">Sending your order to the shipyard...</string>
+    <string name="order_waiting">[NAME] is waiting for the shipyard ([AHEAD] ahead of her). [PRICE] credits are held and charged only once she is delivered.</string>
+    <string name="order_next">[NAME] is next on the slipway. [PRICE] credits are held and charged only once she is delivered.</string>
+    <string name="order_building">Building [NAME]: [PROGRESS]...</string>
+    <string name="order_done">[NAME] is in your inventory: Objects &gt; [FOLDER]. [PRICE] credits were charged. Read the "How to rez" notecard in her folder before you launch her, then try her out at The Caribbean.</string>
+    <string name="order_done_unbilled">[NAME] is in your inventory: Objects &gt; [FOLDER]. Her [PRICE] credits will be taken from your balance shortly. Read the "How to rez" notecard in her folder before you launch her, then try her out at The Caribbean.</string>
+    <string name="order_cancelled">Cancelled - you have not been charged.</string>
+    <string name="order_failed">The shipyard could not build her. You have not been charged.</string>
+
+    <panel follows="left|top" height="300" layout="topleft" left="12" name="preview_panel" top="26" width="320"
+     tool_tip="Your ship as she will look. Drag to turn her." />
+    <text follows="left|top" height="112" layout="topleft" left="12" name="figures_text" top="332" width="320" wrap="true" />
+
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="348" name="type_label" top="26" width="320">1. Hull type</text>
+    <combo_box follows="left|top" height="23" layout="topleft" left="348" name="hull_type" top="44" width="320"
+     tool_tip="The kind of ship: each is a real ship type of the age of sail, with her own hull, decks, rig and guns" />
+
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="348" name="size_label" top="78" width="320">2. Size and guns</text>
+    <slider decimal_digits="0" follows="left|top" height="16" increment="5" initial_value="100" label="Length (%)" label_width="70"
+     layout="topleft" left="348" max_val="125" min_val="90" name="length" show_text="true" top="98" width="300"
+     tool_tip="Her size against the real ship's (90 to 125 %). Everything grows with her - decks, masts and guns." />
+    <radio_group follows="left|top" height="20" layout="topleft" left="348" name="guns" top="122" width="320" draw_border="false">
+        <radio_item follows="left|top" height="20" layout="topleft" left="0" top="0" width="150" label="All her guns" name="guns_full" value="full"
+         tool_tip="Every gun her type carried" />
+        <radio_item follows="left|top" height="20" layout="topleft" left="160" top="0" width="150" label="Half her guns" name="guns_half" value="half"
+         tool_tip="Every other gun of each battery: a lighter ship that costs less" />
+    </radio_group>
+
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="348" name="look_label" top="154" width="320">3. Make her yours</text>
+    <text follows="left|top" height="16" layout="topleft" left="348" name="figurehead_label" top="176" width="80">Figurehead</text>
+    <combo_box follows="left|top" height="23" layout="topleft" left="432" name="figurehead" top="172" width="236">
+        <combo_box.item label="Gilded wolf" name="fh_gilt" value="gilt" />
+        <combo_box.item label="Carved wooden wolf" name="fh_timber" value="timber" />
+        <combo_box.item label="No figurehead" name="fh_none" value="none" />
+    </combo_box>
+    <color_swatch can_apply_immediately="true" follows="left|top" height="60" label="Hull" layout="topleft" left="348" name="hull_colour" top="204"
+     width="64" tool_tip="Her sides. Click to choose a colour." />
+    <color_swatch can_apply_immediately="true" follows="left|top" height="60" label="Trim" layout="topleft" left="428" name="trim_colour" top="204"
+     width="64" tool_tip="The band along her sides. Click to choose a colour." />
+    <color_swatch can_apply_immediately="true" follows="left|top" height="60" label="Sails" layout="topleft" left="508" name="sail_colour" top="204"
+     width="64" tool_tip="Her sail cloth. Click to choose a colour." />
+    <text follows="left|top" height="16" layout="topleft" left="348" name="name_label" top="276" width="80">Her name</text>
+    <line_editor follows="left|top" height="22" layout="topleft" left="432" max_length_chars="24" name="ship_name" top="272" width="236"
+     tool_tip="Painted on her stern and given to her in your inventory (up to 24 letters)" />
+    <text follows="left|top" height="16" layout="topleft" left="432" name="name_problem" top="296" width="236" text_color="AlertCautionTextColor" />
+
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="348" name="price_label" top="320" width="320">4. Price in AI credits</text>
+    <text follows="left|top" height="34" layout="topleft" left="348" name="price_text" top="340" width="320" wrap="true" />
+    <text follows="left|top" height="34" layout="topleft" left="348" name="balance_text" top="376" width="320" wrap="true" />
+
+    <text follows="left|top" height="40" layout="topleft" left="12" name="status_text" top="452" width="656" wrap="true" />
+    <!-- [SHIP BUILDER 2026-10-29] Paul: "remind them about the Caribbean region they can go and try their ships on".
+         The Caribbean (thecaribbean-1, 40x40); 2420,5600 = its arrival point on the Nassau quay
+         (region-terrain-work/the-caribbean-2026-10-28/PLAN.md section 5). Labelled SLURL: llurlentry.cpp LLUrlEntrySLLabel. -->
+    <text follows="left|top" height="20" layout="topleft" left="12" name="try_caribbean" top="496" width="656" parse_urls="true">Try her out at [secondlife:///app/teleport/The%20Caribbean/2420/5600/40 The Caribbean], our pirate sea - sail her, and fight other ships in battle mode.</text>
+    <button follows="left|top" height="23" layout="topleft" left="12" name="cancel_btn" top="522" width="150" label="Cancel the order"
+     tool_tip="Take your order back while she is still waiting for the shipyard (nothing has been charged)" />
+    <button follows="left|top" height="23" layout="topleft" left="400" name="buy_btn" top="522" width="130" label="Buy credits..."
+     tool_tip="Open the AI credits shop in your browser" />
+    <button follows="left|top" height="23" layout="topleft" left="548" name="build_btn" top="522" width="120" label="Build her"
+     tool_tip="Send your design to the shipyard. She is built and put in your inventory; you pay only once she is there." />
+</floater>

@@ -178,6 +178,16 @@ namespace WolfTk
         F32        build_sea = 0.f;
         F32        build_z_limit = -1.0e6f;
         LLVector2  build_fade = LLVector2(20.f, 50.f);   // [2026-10-26] M0, W metres (WolfCloudClearance, the cloud table; cloudsCommon.glsl wolfBuildFade)
+        // [HURRICANE 2026-10-29] ticket #367: the region's storm this frame (wolfhurricane.h; cloudsCommon.glsl wolfStormApply),
+        // filled by wolfenvironmentrender.cpp cloudsFrame from WolfHurricane::timeAt / centre on the wall clock. Off = no storm
+        // running (the shader's branch is skipped on the uniform). Source: region-terrain-work/hurricane-2026-10-29/README.md
+        // "THE MODEL": O organisation, E eye clear, C gathering; the eye c(t) in agent x, y; R and Re; h the hemisphere;
+        // D = 0.622 vmax sin(10 deg) A, the metres the field has streamed inwards
+        bool       storm_on = false;
+        F32        storm_O = 0.f, storm_E = 0.f, storm_C = 0.f;
+        F32        storm_eye_agent[2] = { 0.f, 0.f };
+        F32        storm_radius = 1000.f, storm_eye_radius = 100.f;
+        F32        storm_h = 1.f, storm_D = 0.f;
         LLVector3  sky_under_cloud = LLVector3(1.f, 1.f, 1.f);   // the horizontal sky irradiance under the clouds / the
                                                                  // clear sky's, per channel (cloudsF.glsl wolfSkyUnderCloud)
         GLuint     depth_tex = 0;       // the scene depth (GL depth texture, [0,1])

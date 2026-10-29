@@ -241,6 +241,7 @@ void WolfRegionWeather::onRegionChanged()
     mSharedEnvPending = true;
     if (WolfWeather::instanceExists()) WolfWeather::instance().forgetOwnChoice();   // [2026-10-15/] the land's weather on arrival
     readAutoEnv(LLSD());
+    readHurricane(LLSD());   // [HURRICANE 2026-10-29/] its positions are the old region's metres
     mProfile = WolfWeatherProfile();
     mKind.clear();
     mRegionName.clear();
@@ -472,6 +473,7 @@ void WolfRegionWeather::fetchCoro(std::string region_id, bool include_parcel, F3
     self.mProfile    = WolfWeatherProfile();
     self.mProfile.fromLLSD(r);
     self.readAutoEnv(r);
+    self.readHurricane(r);   // [HURRICANE 2026-10-29/]
     self.mLastError.clear();
     if (include_parcel && self.mParcelGate.accepts(parcel_generation))
     {
@@ -603,6 +605,31 @@ void WolfRegionWeather::readAutoEnv(const LLSD& row)
     mAutoEnvSkyShift = ae.isMap() ? ae["skyShift"].asReal() : 0.0;
 }
 
+// [HURRICANE 2026-10-29] ticket #367. Source: region-terrain-work/hurricane-2026-10-29/README.md "The storm document": the
+// `hurricane` object of a weather.php region payload while a storm is running, no key otherwise. WolfHurricane::fromLLSD
+// clamps every number to the table's range; anything malformed is no storm.
+void WolfRegionWeather::readHurricane(const LLSD& row)
+{
+    const bool had = mHaveHurricane;
+    const std::string old_id = had ? mHurricane.mId : std::string();
+    WolfHurricane h;
+    mHaveHurricane = row.isMap() && row.has("hurricane") && WolfHurricane::fromLLSD(row["hurricane"], h);
+    if (mHaveHurricane) mHurricane = h;
+    else mHurricane = WolfHurricane();
+    if (mHaveHurricane && (!had || old_id != mHurricane.mId))
+    {
+        LL_INFOS("WolfWeather") << "hurricane " << mHurricane.mId << ": category " << mHurricane.mCategory
+                                << " radius " << mHurricane.mRadius << " m, eye at " << mHurricane.mX0 << "," << mHurricane.mY0
+                                << " at start + " << mHurricane.mPass << " s, heading " << mHurricane.mHeading
+                                << " at " << mHurricane.mSpeed << " m/s, " << (mHurricane.mHemisphere < 0 ? "south" : "north")
+                                << (mHurricane.mRain ? ", rain" : ", no rain") << LL_ENDL;
+    }
+    else if (had && !mHaveHurricane)
+    {
+        LL_INFOS("WolfWeather") << "hurricane " << old_id << " over" << LL_ENDL;
+    }
+}
+
 void WolfRegionWeather::applyPush(const LLSD& row)
 {
     if (!row.isMap()) return;
@@ -617,6 +644,9 @@ void WolfRegionWeather::applyPush(const LLSD& row)
     mProfile = WolfWeatherProfile();
     mProfile.fromLLSD(row);
     if (row.has("autoEnv")) readAutoEnv(row);
+    // [HURRICANE 2026-10-29] The push is weather.php's POST reply (Wolf_Api PostWeather -> PushToViewers), the same
+    // region_payload a GET returns, so `hurricane` is in it while a storm runs and absent once none does.
+    readHurricane(row);
     recomputeParcelApplies();
     mLastError.clear();
     mGeneration++;
@@ -773,6 +803,7 @@ void WolfRegionWeather::saveCoro(std::string body, std::string scope, std::strin
             self.mProfile = WolfWeatherProfile();
             self.mProfile.fromLLSD(reply);
             self.readAutoEnv(reply);
+            self.readHurricane(reply);   // [HURRICANE 2026-10-29/] weather.php:625 replies with region_payload
             self.recomputeParcelApplies();
         }
     }

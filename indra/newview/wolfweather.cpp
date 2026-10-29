@@ -23,6 +23,7 @@
 #include <cmath>           // cosf / sinf for the wind direction
 
 #include "llagent.h"
+#include "lldate.h"         // [HURRICANE 2026-10-29/] the storm's wall clock
 #include "llframetimer.h"
 #include "llimagegl.h"       // <WolfViewer 2026-09-18/> the roof grid texture
 #include "llglslshader.h"
@@ -525,6 +526,7 @@ void WolfWeather::apply()
     // <WolfViewer 2026-10-04> Recorded before any early return, so idle() does not re-apply
     // every frame while the switch is off and the resident is not using the shared environment.
     mSharedEnv = usingSharedEnvironment();
+    mStormRainKey = stormRainKey();   // [HURRICANE 2026-10-29/] what this apply() saw (idle() compares), switch on or off
     // THE SWITCH FIRST. Off is off: no region weather, no parcel weather, no menu choice, and
     // no preview — see WolfWeather::enabled().
     if (!enabled())
@@ -549,9 +551,10 @@ void WolfWeather::apply()
     WolfWeatherProfile parcel;
     WolfWeatherProfile region;
     const bool parcel_forces = rw.parcelForcedProfile(parcel);
+    const bool personal = menuChoice() || !mSharedEnv;   // <WolfViewer 2026-10-04/>
     const WolfWeatherSource selected = wolfWeatherSource(preview != nullptr, mForcedFound,
                                                          parcel_forces, rw.forcedProfile(region),
-                                                         menuChoice() || !mSharedEnv);   // <WolfViewer 2026-10-04/>
+                                                         personal);
     if (selected == WolfWeatherSource::PREVIEW)
     {
         prof = *preview;
@@ -595,6 +598,26 @@ void WolfWeather::apply()
             prof.mAurora = mUserAurora;   // same rule as the fog
             mActiveSource = "menu";
         }
+        // [HURRICANE 2026-10-29] ticket #367. The storm is the REGION's weather, so it rains where the region's weather
+        // does: the region's own setting, or the land's "no opinion" (the menu with nothing chosen). The precedence above
+        // is untouched - a preview, a parcel prim's keyword, the parcel's own setting and a resident's personal choice (their
+        // menu weather, or their own sky) all still win, and the Weather switch (enabled() above) still turns it all off.
+        // Source: region-terrain-work/hurricane-2026-10-29/README.md "Rain at a point": "viewers: where w = C env(r) >= 0.5
+        // the storm's level replaces the region's; below that the larger of the two" (level 0 = none: the eye is dry).
+        S32 storm_level = 0;
+        bool storm_replaces = false;
+        if ((selected == WolfWeatherSource::REGION || (selected == WolfWeatherSource::MENU && !personal))
+            && stormRainAtCamera(storm_level, storm_replaces))
+        {
+            const S32 land_level = (prof.mKind == WolfWeatherProfile::CLEAR) ? 0 : prof.mLevel;
+            if (storm_replaces || storm_level > land_level)
+            {
+                // the storm's rain; a storm level of 0 where it replaces the region's leaves nothing falling
+                prof.mKind = storm_level > 0 ? WolfWeatherProfile::RAIN : WolfWeatherProfile::CLEAR;
+                if (storm_level > 0) prof.mLevel = storm_level;
+                mActiveSource = "hurricane";
+            }
+        }
         prof.mEnabled = true;
         // Source: parcel-weather-work/plan.md whole-profile precedence. Prim and parcel profiles
         // carry their own art direction. Only region/menu fallback borrows region art direction,
@@ -629,6 +652,41 @@ void WolfWeather::apply()
     mSource->setLevel(prof.mLevel);
     mSource->setProfile(prof);
     WolfWeatherSound::instance().apply(prof);
+}
+
+// static  [HURRICANE 2026-10-29] Source: region-terrain-work/hurricane-2026-10-29/README.md "Rain at a point" (viewers: at the
+// camera). The storm's positions are region metres of the agent's region (WolfRegionWeather::hurricane); its clock is the
+// wall clock in unix seconds UTC (LLDate::now, as WolfRegionWeather::autoEnvSkyTime reads it, without that sky's preview or
+// grid-time shift: the storm's start is a UTC instant).
+bool WolfWeather::stormRainAtCamera(S32& level, bool& replaces)
+{
+    level = 0;
+    replaces = false;
+    if (!WolfRegionWeather::instanceExists()) return false;
+    const WolfHurricane* hu = WolfRegionWeather::instance().hurricane();
+    LLViewerRegion* rgn = gAgent.getRegion();
+    if (!hu || !rgn) return false;
+    const F64 now = LLDate::now().secondsSinceEpoch();
+    const WolfHurricane::Time T = hu->timeAt(now);
+    if (!T.active()) return false;
+    F64 cx = 0.0, cy = 0.0;
+    hu->centre(now, cx, cy);
+    // Source: llviewerregion.h:340 getPosRegionFromAgent - the camera in this region's metres (outside 0..size when it looks
+    // in from a neighbour, which the model's plane takes as it is)
+    const LLVector3 cam = rgn->getPosRegionFromAgent(LLViewerCamera::getInstance()->getOrigin());
+    const WolfHurricane::Point p = hu->geometry((F64)cam.mV[VX], (F64)cam.mV[VY], cx, cy, T);
+    level = WolfHurricane::rainLevel(hu->rainQ(p, T));
+    replaces = WolfHurricane::share(p, T) >= 0.5;
+    return true;
+}
+
+// static
+S32 WolfWeather::stormRainKey()
+{
+    S32 level = 0;
+    bool replaces = false;
+    if (!stormRainAtCamera(level, replaces)) return -1;
+    return level * 2 + (replaces ? 1 : 0);
 }
 
 std::string WolfWeather::overriddenBy() const
@@ -677,6 +735,9 @@ void WolfWeather::idle()
     updateIndoors(now);     // <WolfViewer 2026-10-04/> no fog, and a little light, inside buildings
     // <WolfViewer 2026-10-04> EEP switched off or back on: the land's weather leaves or returns.
     if (usingSharedEnvironment() != mSharedEnv) apply();
+    // [HURRICANE 2026-10-29] the storm's rain at the camera moves with the storm's clock and the camera; apply() again only
+    // when its level, or whether it replaces the region's, changed (stormRainKey: a handful of exp / log, no allocation)
+    else if (stormRainKey() != mStormRainKey) apply();
 }
 
 // <WolfViewer 2026-10-04> Is the resident looking at the region's environment? Not when their

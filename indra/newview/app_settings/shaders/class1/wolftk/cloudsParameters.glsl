@@ -93,6 +93,11 @@ uniform vec4 wolfLayerBuildFade;        // per layer: 1 = fades round builds, 0 
 uniform vec2 wolfBuildFade;             // [2026-10-26] x M0: fully clear within this of a build, y W: back to cloud over this (metres; WolfCloudClearance, app_settings/wolf_clouds.xml)
 uniform vec4 wolfLayerRepeat;           // [2026-10-26] per layer: the weather texture's repeat x this (a whole number) for the turned lookup - the genus's cell size (wolf_clouds.xml genera 'repeat')
 uniform vec3 wolfFibreShape;            // the fibre noise's mean, 2 x its standard deviation, and the mean of the clamped normalised noise (y 0 = not measured: no fibres)
+// [HURRICANE 2026-10-29] ticket #367: the region's storm (cloudsCommon.glsl wolfStormApply; wolftkclouds.cpp sharedUniforms from
+// CloudsFrame storm_*; the model: region-terrain-work/hurricane-2026-10-29/README.md "THE MODEL", CPU twin wolfhurricane.cpp)
+uniform vec4 wolfStorm;                 // x 1 = a storm is running (0: none, skipped), y O organisation, z E eye clear, w C gathering
+uniform vec4 wolfStormEye;              // xy the eye c(t) (agent x, y metres), z R the outer radius, w Re the eye's radius (metres)
+uniform vec2 wolfStormSpin;             // x h the hemisphere (1 north, -1 south), y D the metres the field has streamed inwards
 // the ice phase: the forward lobe's asymmetry x this for an ice layer (wolfcloudgenus.h WOLF_ICE_G_SCALE, the viewer
 // and the harness define it from the cited asymmetry parameters); 1 = water everywhere
 #ifndef WOLF_ICE_G_SCALE

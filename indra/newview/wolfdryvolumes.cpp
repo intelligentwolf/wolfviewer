@@ -401,6 +401,24 @@ bool WolfDryVolumes::cameraInside() const
     return contains(LLViewerCamera::getInstance()->getOrigin());
 }
 
+bool WolfDryVolumes::crossesHeight(F32 z) const
+{
+    // [WOLF DRY T352] Used by LLPipeline::isWaterClip. Every kind lies inside its unit box (Volume::contains: |u_k| <= 1 for
+    // a box; a cylinder, sphere or hull is inside that box too), so its vertical reach about the centre is at most
+    // sum_k |axis_k.z| * half_k.
+    const_cast<WolfDryVolumes*>(this)->collect();
+    for (const Volume& v : mFrame)
+    {
+        const F32 reach = fabsf(v.mAxis[0].mV[VZ]) * v.mHalf[0] + fabsf(v.mAxis[1].mV[VZ]) * v.mHalf[1]
+                        + fabsf(v.mAxis[2].mV[VZ]) * v.mHalf[2];
+        if (v.mCentre.mV[VZ] - reach < z && v.mCentre.mV[VZ] + reach > z)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 void WolfDryVolumes::applyUniforms(LLShaderUniforms* uniforms, const F32* modelview)
 {
     if (!uniforms || !modelview)
@@ -452,8 +470,23 @@ void WolfDryVolumes::applyUniforms(LLShaderUniforms* uniforms, const F32* modelv
     // = ((MV^-1)^T row) . p_eye - the same transform llsettingsvo.cpp applySpecial gives the water plane (invtrans).
     const glm::mat4 mv = glm::make_mat4(modelview);
     const glm::mat4 invtrans = glm::transpose(glm::inverse(mv));
+    // [W86 CRASH 2026-10-29] Ticket 343 (Jimmy Olsen, Linux, RTX 3050, driver 615.71.09): SIGSEGV in a memcpy on an
+    // NVIDIA driver worker thread (the launcher's __GL_THREADED_OPTIMIZATIONS=1), the same second the dry hulls near him
+    // went from 2 to 1 - so this upload went from 8 to 4 rows of wolfDry and 50 to 25 of wolfHull. Not proven to be the
+    // cause, but the arrays are now always uploaded WHOLE (waterFogF.glsl wolfDry[32], wolfHull[100]) with the unused
+    // places zeroed: one fixed size per array every frame, never a count that changes with the boats around you.
+    static_assert(MAX_SHADER_VOLUMES * 4 == 32, "waterFogF.glsl uniform vec4 wolfDry[32]");
+    static_assert(MAX_SHADER_HULLS * HULL_VEC4 == 100, "waterFogF.glsl uniform vec4 wolfHull[100]");
     LLVector4 rows[MAX_SHADER_VOLUMES * 4];
     LLVector4 hull_rows[MAX_SHADER_HULLS * HULL_VEC4];
+    for (LLVector4& r : rows)
+    {
+        r.set(0.f, 0.f, 0.f, 0.f);
+    }
+    for (LLVector4& r : hull_rows)
+    {
+        r.set(0.f, 0.f, 0.f, 0.f);
+    }
     S32 h = 0;
     for (S32 j = 0; j < n; ++j)
     {
@@ -486,11 +519,9 @@ void WolfDryVolumes::applyUniforms(LLShaderUniforms* uniforms, const F32* modelv
             rows[j * 4 + 3].set((F32)v.mKind, 0.f, 0.f, 0.f);
         }
     }
-    uniforms->uniform4fv(LLShaderMgr::WOLF_DRY, (U32)(n * 4), rows);
-    if (h > 0)
-    {
-        uniforms->uniform4fv(LLShaderMgr::WOLF_HULL, (U32)(h * HULL_VEC4), hull_rows);
-    }
+    // whole arrays (see [W86 CRASH] above); the shader reads only the first wolfDryCount volumes and the hulls they name
+    uniforms->uniform4fv(LLShaderMgr::WOLF_DRY, (U32)(MAX_SHADER_VOLUMES * 4), rows);
+    uniforms->uniform4fv(LLShaderMgr::WOLF_HULL, (U32)(MAX_SHADER_HULLS * HULL_VEC4), hull_rows);
 }
 
 // [WOLF DRY HULLS 2026-10-28] ------------------------------------------------------------------------------------------

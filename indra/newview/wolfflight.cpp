@@ -488,7 +488,10 @@ void WolfFlight::measure(F32 dt)
     d.mPosRegion = regionp->getPosRegionFromGlobal(d.mPosGlobal);
     d.mWaterZ = regionp->getWaterHeight();
     d.mTimeDilation = regionp->getTimeDilation();
-    d.mWind = regionp->mWind.getVelocity(d.mPosRegion);
+    // [2026-10-29 ticket 340] the region's own wind in m/s, as llWind gives it to a boat's script (LSL_Api.cs llWind):
+    // LLWind::getVelocity adds WIND_SCALE_HACK (llwind.h:38, llwind.cpp:273) for particles and trees, which the dial,
+    // the tower's wind call and the runway choice must not show - the region's wind now follows the Wolf weather.
+    d.mWind = regionp->mWind.getVelocity(d.mPosRegion) / WIND_SCALE_HACK;
     if (root)
     {
         if (const WolfObjectProps::Props* props = WolfObjectProps::instance().get(root->getID()))

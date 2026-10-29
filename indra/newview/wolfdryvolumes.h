@@ -132,6 +132,9 @@ public:
     bool contains(const LLVector3& agent_pos) const;
     /** Is the camera inside one? */
     bool cameraInside() const;
+    /** [WOLF DRY T352] Does any volume of this frame reach both below and above the agent-frame height z (by its bounding
+     *  box: a little wider than the shape), i.e. may it cut a hole in a water plane at that height? */
+    bool crossesHeight(F32 z) const;
     /** How many tagged prims are in use near here now (the Sea Tunnels window). */
     S32 taggedCount() const { return (S32)mTagged.size(); }
 

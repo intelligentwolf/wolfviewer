@@ -61,7 +61,9 @@ exportMutliArchDRIPath() {
 
 ## - Enable NVidia's threaded optimization by default. If you see odd
 ##   behaviour that goes away with it off, comment out the next line.
-export __GL_THREADED_OPTIMIZATIONS=1
+## <WolfViewer 2026-10-29> [W86 CRASH, ticket 343] a value already set when the viewer is started is kept, so it can be
+##   switched off for one run without editing this file: __GL_THREADED_OPTIMIZATIONS=0 ./wolfviewer
+export __GL_THREADED_OPTIMIZATIONS="${__GL_THREADED_OPTIMIZATIONS:-1}"
 
 if [ "`uname -m`" = "x86_64" ]; then
     echo '64-bit Linux detected.'

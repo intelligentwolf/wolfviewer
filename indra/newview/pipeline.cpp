@@ -2619,7 +2619,29 @@ static LLTrace::BlockTimerStatHandle FTM_CULL("Object Culling");
 bool LLPipeline::isWaterClip()
 {
     // We always pretend that we're not clipping water when rendering mirrors.
-    return (gPipeline.mHeroProbeManager.isMirrorPass()) ? false : (!sRenderTransparentWater || gCubeSnapshot) && !sRenderingHUDs;
+    // <WolfViewer 2026-10-29> [WOLF DRY T352] the stock test kept as it was, then one exception below
+    //return (gPipeline.mHeroProbeManager.isMirrorPass()) ? false : (!sRenderTransparentWater || gCubeSnapshot) && !sRenderingHUDs;
+    if (gPipeline.mHeroProbeManager.isMirrorPass() || !((!sRenderTransparentWater || gCubeSnapshot) && !sRenderingHUDs))
+    {
+        return false;
+    }
+    // Ticket 352 (Bonnie Parker; Jimmy Olsen's picture at TROMSO): an avatar standing in a wolfdry box cut into the sea was
+    // not drawn, only its name tag, once the camera rose above the water. With opaque water (Transparent Water off - the
+    // Low..MidHigh presets) this clip removes everything on the far side of the water plane: updateCull's user clip plane
+    // drops every spatial group wholly below the water (the avatar, the things and particles in the volume), and
+    // LLDrawPoolAlpha skips POOL_ALPHA_PRE_WATER (the alpha below it). The terrain still showed because its groups reach
+    // above the water. The hole the volume cuts in the surface (waterF.glsl / underWaterF.glsl wolfInDry discard) shows
+    // what is under it, so while a dry volume of this frame crosses the water plane the main view (and its shadows) does
+    // not clip at the water: the same as Transparent Water on. Opaque water is drawn without blending
+    // (LLDrawPoolWater::renderPostDeferred), so the sea outside the hole hides what is now drawn under it, as before.
+    // Reflection-probe snapshots keep the stock clip (their water cut uses the main camera's eye space; README).
+    if (!gCubeSnapshot && WolfDryVolumes::instanceExists()
+        && WolfDryVolumes::instance().crossesHeight(LLEnvironment::instance().getWaterHeight()))
+    {
+        return false;
+    }
+    return true;
+    // </WolfViewer>
 }
 
 void LLPipeline::updateCull(LLCamera& camera, LLCullResult& result, bool hud_attachments)

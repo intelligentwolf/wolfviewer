@@ -2492,6 +2492,18 @@
          <menu_item_call.on_visible
           function="WolfGrid.IsOnWolfTerritories" />
        </menu_item_call>
+       <!-- [SHIP BUILDER 2026-10-29] Paul: "it should be on the build menu strictly speaking". The Ship Builder
+            (wolffloatershipbuilder.cpp), in alphabetical order with the Wolf items here. Same window and gate as
+            Wolf World > Build & Land > Ship Builder... -->
+       <menu_item_call
+        label="Ship Builder..."
+        name="WolfShipBuilderBuildMenu">
+         <menu_item_call.on_click
+          function="Floater.Show"
+          parameter="wolf_ship_builder" />
+         <menu_item_call.on_visible
+          function="WolfGrid.IsOnWolfTerritories" />
+       </menu_item_call>
        <!-- [WOLF TERRAFORM 2026-10-23] The Terraform window (wolffloaterterraform.cpp), in alphabetical order with the Wolf items
             here (Make Caves, Make Tunnels, Paint the Ground, Terraform, Wolf Builder). Wolf Territories only, as Make Caves. -->
        <menu_item_call

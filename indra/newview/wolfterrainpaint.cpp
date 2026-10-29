@@ -330,6 +330,12 @@ WolfTerrainPaint::Record WolfTerrainPaint::parseRecord(const LLSD& r)
     rec.mHandle = std::strtoull(r["handle"].asString().c_str(), nullptr, 10);
     rec.mSizeX = llmax(256, r["sizeX"].asInteger());
     rec.mSizeY = llmax(256, r["sizeY"].asInteger());
+    // [ticket 364] the region's own caps (php/terrain_paint.php paint_payload "limits"); a reply without them keeps the fallback
+    if (r["limits"].isMap())
+    {
+        if (r["limits"]["strokes"].asInteger() > 0) rec.mMaxStrokes = r["limits"]["strokes"].asInteger();
+        if (r["limits"]["points"].asInteger() > 0) rec.mMaxPoints = r["limits"]["points"].asInteger();
+    }
     rec.mVersion = r["version"].asInteger();
     rec.mEnabled = r["enabled"].asBoolean();
     if (r["layout"].isMap())
@@ -1478,10 +1484,11 @@ void WolfTerrainPaint::save()
     const Record* r = current();
     if (!r || r->mHandle != mEdit->mHandle) { notify("You have left the region this paint belongs to."); return; }
     if (mSaving) return;
-    if ((S32)mEdit->mStrokes.size() > MAX_STROKES) { notify(llformat("Too many strokes (%d max) — undo or clear some.", MAX_STROKES)); return; }
+    // [ticket 364] this region's caps from the service (r is the record of the region being edited, checked above)
+    if ((S32)mEdit->mStrokes.size() > r->mMaxStrokes) { notify(llformat("Too many strokes (%d max in this region) — undo or clear some.", r->mMaxStrokes)); return; }
     size_t points = 0;
     for (const Stroke& s : mEdit->mStrokes) points += s.mPoints.size() / 2;
-    if ((S32)points > MAX_POINTS) { notify(llformat("Too much paint (%d points max) — undo or clear some.", MAX_POINTS)); return; }
+    if ((S32)points > r->mMaxPoints) { notify(llformat("Too much paint (%d points max in this region) — undo or clear some.", r->mMaxPoints)); return; }
     const LLSD layout = editLayoutLLSD();
     mSaving = true;
     const std::string uuid = mEdit->mUuid;

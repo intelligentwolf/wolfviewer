@@ -136,7 +136,7 @@ std::shared_ptr<const WolfShipPreview::Mesh> WolfShipPreview::parse(const LLSD& 
         gmap.push_back(k);
     }
     const LLSD& v = pv["v"];
-    const S32 nv = v.size() / 3;
+    const S32 nv = (S32)(v.size() / 3);   // LLSD::size() is size_t (MSVC C4267 is an error here)
     if (nv <= 0 || v.size() % 3) return nullptr;
     m->verts.reserve(nv);
     LLVector3 lo(F32_MAX, F32_MAX, F32_MAX), hi(-F32_MAX, -F32_MAX, -F32_MAX);
@@ -150,7 +150,7 @@ std::shared_ptr<const WolfShipPreview::Mesh> WolfShipPreview::parse(const LLSD& 
     }
     const LLSD& t = pv["t"];
     if (t.size() % 5) return nullptr;
-    const S32 nt = t.size() / 5;
+    const S32 nt = (S32)(t.size() / 5);
     m->tris.reserve(nt);
     for (S32 i = 0; i < nt; ++i)
     {
@@ -242,7 +242,7 @@ void WolfShipPreview::draw()
     {
         if (!mMessage.empty())
         {
-            LLFontGL::getFontSansSerif()->renderUTF8(mMessage, 0, (F32)r.getCenterX(), (F32)r.getCenterY(), INK,
+            LLFontGL::getFontSansSerif()->renderUTF8(mMessage, 0, r.getCenterX(), r.getCenterY(), INK,   // the S32 x, y overload (llfontgl.h:130)
                                                     LLFontGL::HCENTER, LLFontGL::VCENTER);
         }
         LLView::draw();
@@ -494,7 +494,7 @@ void WolfFloaterShipBuilder::onOpenReply(const LLSD& reply)
     mHullType->removeall();
     for (const LLSD& c : llsd::inArray(mCatalogue["classes"]))
     {
-        const S32 guns = c["guns"]["full"].size();
+        const S32 guns = (S32)c["guns"]["full"].size();
         mHullType->add(llformat("%s - %d guns", c["label"].asString().c_str(), guns), c["id"]);
     }
     if (mCatalogue["classes"].size() > 0) mHullType->selectFirstItem();
@@ -544,7 +544,7 @@ void WolfFloaterShipBuilder::onDesignChanged()
         const F32 k = (F32)d["length_pct"].asInteger() / 100.f;
         mPreview->setLook(mHullColour->get(), mTrimColour->get(), mSailColour->get(), guns, d["figurehead"].asString(), k);
         // her figures at the chosen length (catalogue: the class's own at 100 %), and what she carries
-        const S32 full = (*c)["guns"]["full"].size(), kept = (S32)guns.size();
+        const S32 full = (S32)(*c)["guns"]["full"].size(), kept = (S32)guns.size();
         const S32 prims = (*c)["prims"].asInteger() - (full - kept) - (d["figurehead"].asString() == "none" ? 1 : 0);
         std::string decks;
         for (const LLSD& dk : llsd::inArray((*c)["decks"]))

@@ -29,6 +29,7 @@
 #include "lldir.h"
 #include "llframetimer.h"   // <WolfViewer 2026-09-13> device watch clock
 #include <cstring>          // <WolfViewer 2026-09-18> strlen over the NUL-separated device list
+#include <cstdlib>          // <WolfViewer 2026-10-30> getenv/setenv (ticket 379)
 
 #include "llaudioengine_openal.h"
 #include "lllistener_openal.h"
@@ -59,6 +60,32 @@ bool LLAudioEngine_OpenAL::init(void* userdata, const std::string &app_title)
     mWindGen = NULL;
     LLAudioEngine::init(userdata, app_title);
 
+#if LL_LINUX
+    // <WolfViewer 2026-10-30> [ticket 379] On a PipeWire desktop, play through OpenAL Soft's PulseAudio backend
+    // (pipewire-pulse) rather than its native PipeWire one, so the viewer's sound effects and UI sounds go where the
+    // system sends every other program's sound.
+    // Source: openal-soft 1.24.2 alc/backends/pipewire.cpp:1526-1561 PipeWirePlayback::open - the default device is
+    //   opened by pinning the stream to the current default sink's serial, and :1687-1688 always sets
+    //   PW_KEY_TARGET_OBJECT on the stream.
+    // Source: WirePlumber 0.5 src/scripts/node/state-stream.lua:92-117 - a stream that names its own target.object
+    //   does NOT get the output the user last moved this program to (pavucontrol / GNOME "Volume Levels").
+    // Ticket 379 (Fedora 44): his log shows WolfViewer's OpenAL output on the default sink, the monitor's HDMI
+    //   output, while he heard the music stream (GStreamer, no pinned target) - sounds and music on different outputs.
+    // Source: openal-soft 1.24.2 alc/backends/pulseaudio.cpp:844-906 PulsePlayback::open - an empty name connects
+    //   with no sink, so the sound server picks it (the remembered output for this program, else the default) and
+    //   the stream follows later default changes; a device chosen in Preferences is still opened by name.
+    // Source: openal-soft 1.24.2 alc/alc.cpp:594-648 - ALSOFT_DRIVERS is read before the config file's "drivers";
+    //   a list without a trailing comma is exactly the backends named. The list below is alc.cpp:219-269's own
+    //   order with pulse first and the null/wave writers left out, as the default list leaves them out
+    //   (alc.cpp:650-663); unknown or not-built names are skipped (alc.cpp:636-639). Pure PulseAudio systems are
+    //   unchanged (the PipeWire backend never initialised there); without a pulse server, pipewire is next.
+    // A value the user set themselves is kept.
+    if (!getenv("ALSOFT_DRIVERS"))
+    {
+        setenv("ALSOFT_DRIVERS", "pulse,pipewire,alsa,solaris,sndio,oss,port,sdl3,sdl2,jack,otherio", 0);
+    }
+#endif
+
     if(!alutInit(NULL, NULL))
     {
         LL_WARNS() << "LLAudioEngine_OpenAL::init() ALUT initialization failed: " << alutGetErrorString (alutGetError ()) << LL_ENDL;
@@ -88,6 +115,11 @@ bool LLAudioEngine_OpenAL::init(void* userdata, const std::string &app_title)
         << ll_safe_string(alcGetString(device,
                            ALC_DEFAULT_DEVICE_SPECIFIER))
         << LL_ENDL;
+    // <WolfViewer 2026-10-30/> [ticket 379] the output actually opened (the line above names the library, not the
+    // device): alcGetString(device, ALC_ALL_DEVICES_SPECIFIER) on an open device is that device's name (alc.h).
+    const char* drivers = getenv("ALSOFT_DRIVERS");
+    LL_INFOS() << "OpenAL output device: " << ll_safe_string(alcGetString(device, ALC_ALL_DEVICES_SPECIFIER))
+               << " (ALSOFT_DRIVERS=" << (drivers ? drivers : "unset") << ")" << LL_ENDL;
 
     initDeviceWatch(device);   // <WolfViewer 2026-09-13>
     enumerateDevices(false);   // <WolfViewer 2026-09-18> the Preferences picker's list; setDevice() follows from llstartup

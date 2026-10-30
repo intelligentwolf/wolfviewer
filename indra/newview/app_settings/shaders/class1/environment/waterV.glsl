@@ -145,6 +145,11 @@ uniform float wolfTerrainLod;
 //   wakeSampler — the boat wash field (wolfwakefield.cpp): R foam, G lift, B dip.
 uniform float stormChaos;
 uniform float maxWaveHeight;
+// [HURRICANE 2026-10-30] the region's storm on the sea (wolfStormSeaFactor below; lldrawpoolwater.cpp renderPostDeferred)
+uniform vec4 wolfSeaStorm;       // x 1 = a storm is running (0: none, skipped), y W intensity, z h hemisphere, w the floor (1 - W env(r_c)) S_eep
+uniform vec4 wolfSeaStormEye;    // xy the eye c(t) (agent metres), z R, w Re
+uniform vec4 wolfSeaStormWind;   // xy the track velocity speed (sin H, cos H), zw the ambient wind (the way the air moves), m/s
+uniform vec4 wolfSeaStormMisc;   // x vmax, y S_eep (the index this water is drawn with), zw the r < 1 m bearing (sin, cos)
 uniform vec2 wolfRegionOrigin;
 // <WolfViewer 2026-09-26> SWELL TOWARD THE REGION CENTRE (Paul: "waves should ALWAYS travel
 // towards the center of the region" — the next region's waves pointed the way of the one the
@@ -502,6 +507,48 @@ vec2 gerstnerSlope(vec2 pos, float wavelength, float jit, float amp, vec2 dir)
 }
 // </FS:WolfViewer> -------------------------------------------------------------------
 
+
+// [HURRICANE 2026-10-30] Paul: "hurricanes should affect the sea" (ticket #367). The factor on the drawn swell and wind-sea
+// amplitude at the agent-space point p: README "The sea", viewers per point (region-terrain-work/hurricane-2026-10-29/README.md);
+// CPU twin wolfhurricane.cpp windAt / seaIndexAt / seaAmplitudeFactor - keep in step.
+//   U_sea(p) = |v(p')| (README "Wind", track term included); p' = p where r >= Rm, else c + Rm (p - c) / r (the eyewall's wind at
+//              the same bearing); at r < 1 m the bearing heading + 90 h degrees
+//   S_storm  = clamp((U_sea - 3) / 3, 0.15, 3); S_local = clamp(max(S_storm, (1 - W env(r_c)) S_eep, 0.15), 0.15, 3)
+//   factor   = (S_local / S_eep)^1.5 (wolfseastate.h amplitude = 0.22 index^1.5)
+float wolfStormSeaFactor(vec2 p)
+{
+    vec2 c = wolfSeaStormEye.xy;
+    float R = wolfSeaStormEye.z;
+    float Rm = 1.25 * wolfSeaStormEye.w;   // README: Rm = 1.25 Re
+    vec2 d = p - c;
+    float r = length(d);
+    if (r < Rm)
+    {
+        vec2 u = r >= 1.0 ? d / r : wolfSeaStormMisc.zw;
+        p = c + Rm * u;
+        d = p - c;
+        r = length(d);
+    }
+    // README "Wind": V = vmax sqrt(x exp(1 - x)), x = (Rm / max(r, 0.01))^1.31
+    float x = pow(Rm / max(r, 0.01), 1.31);
+    float V = wolfSeaStormMisc.x * sqrt(x * exp(1.0 - x));
+    vec2 vs = vec2(0.0);
+    if (r > 0.01)
+    {
+        vec2 th = wolfSeaStorm.z * vec2(-d.y, d.x) / r;   // t^ = h (-dy, dx) / r
+        vec2 rh = d / r;
+        vs = V * (0.9232102171129809 * th - 0.38429532265980376 * rh);   // cos / sin 22.6 deg
+    }
+    vs += wolfSeaStormWind.xy * (Rm * r / (Rm * Rm + r * r));        // Jelesnianski (1966) track term
+    float env = 1.0 - smoothstep(0.0, 1.0, (r / R - 1.0) / 0.3);
+    float k = wolfSeaStorm.y * env;                                  // k = W env(r)
+    vec2 v = (1.0 - k) * wolfSeaStormWind.zw + k * vs;
+    float U = min(length(v), 75.0);                                  // |v| capped at 75 m/s
+    float S = clamp((U - 3.0) / 3.0, 0.15, 3.0);
+    float Sl = clamp(max(max(S, wolfSeaStorm.w), 0.15), 0.15, 3.0);
+    return pow(Sl / max(wolfSeaStormMisc.y, 0.15), 1.5);
+}
+
 void main()
 {
     // <FS:WolfViewer> DISPLACE FIRST, then let every stock calculation below run on the
@@ -625,6 +672,10 @@ void main()
     shoreGate *= openW;
     vSwell = vec4(0.0, 1.0, swellScale, shoreGate);
     vShore = vec4(0.0);
+    // [HURRICANE 2026-10-30] the storm's sea at this point: x the swell, its backstop and the cascades below. It comes BEFORE
+    // the depth limit and the waterline clearance caps further down, which still hold every crest off land, decks and
+    // builds (NO WATER ON LAND). 1 with no storm.
+    float stormSea = wolfSeaStorm.x > 0.5 ? wolfStormSeaFactor(position.xy) : 1.0;
     vWake = 0.0;
     // </WolfViewer>
 
@@ -652,7 +703,7 @@ void main()
             float noise3 = snoise(wxy * noiseScale * 4.0 + timeVary * 2.0) * stormChaos * 0.5;
             float localVariation = 0.5 + 0.3 * noise1 + 0.15 * noise2 + 0.1 * noise3;
             localVariation = mix(localVariation, localVariation * (0.6 + 0.8 * abs(noise1)), stormChaos);
-            float localAmp = waveAmplitude * localVariation * fade * swellScale;
+            float localAmp = waveAmplitude * localVariation * fade * swellScale * stormSea;   // [HURRICANE 2026-10-30/] x stormSea
 
             float baseWavelength = 1.0 / (waveFrequency + 0.001);
 
@@ -726,7 +777,8 @@ void main()
             // Backstop, not the height (2.5x the amplitude from lldrawpoolwater.cpp).
             if (maxWaveHeight > 0.0)
             {
-                total.z = clamp(total.z, -maxWaveHeight, maxWaveHeight);
+                // [HURRICANE 2026-10-30] 2.5x the LOCAL amplitude: the backstop scales with the storm's sea at this point
+                total.z = clamp(total.z, -maxWaveHeight * stormSea, maxWaveHeight * stormSea);
             }
 
             wave_pos += total.x * surf_t + total.y * surf_b + total.z * surf_n;
@@ -747,7 +799,7 @@ void main()
         vec3 dd = vec3(0.0);
         if (f0 > 0.001) dd += WOLF_TEX_FFT_DISP_0( position.xy / fftTile.x).xyz * f0;
         if (f1 > 0.001) dd += WOLF_TEX_FFT_DISP_1( position.xy / fftTile.y).xyz * f1;
-        dd *= swellScale;
+        dd *= swellScale * stormSea;   // [HURRICANE 2026-10-30/] the cascades' displacement x the storm's sea here
         wave_pos += dd.x * surf_t + dd.y * surf_b + dd.z * surf_n;
         wave_h += dd.z;
     }

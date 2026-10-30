@@ -119,6 +119,25 @@ bool WolfHurricane::fromLLSD(const LLSD& sd, WolfHurricane& out)
     h.mHemisphere = hemi < 0.0 ? -1 : 1;
     // rain: hu_spec_valid 'rain' => !isset($h['rain']) || $h['rain'] === true
     h.mRain = !sd.has("rain") || (sd["rain"].isBoolean() && sd["rain"].asBoolean());
+    // sx, sy: hu_spec_valid 16..65536 ints; clamped, and 0 (the caller uses the region's own size) when absent
+    F64 sx = 0.0, sy = 0.0;
+    if (readNumber(sd, "sx", sx)) h.mSx = (S32)clampd(std::floor(sx + 0.5), 16.0, 65536.0);
+    if (readNumber(sd, "sy", sy)) h.mSy = (S32)clampd(std::floor(sy + 0.5), 16.0, 65536.0);
+    // ambient [m/s, from degrees]: hu_spec_valid keeps it only as two numbers, 0..60 and 0..360; else [0, 0]
+    if (sd.has("ambient") && sd["ambient"].isArray() && sd["ambient"].size() == 2)
+    {
+        const LLSD& a0 = sd["ambient"][0];
+        const LLSD& a1 = sd["ambient"][1];
+        if ((a0.isReal() || a0.isInteger()) && (a1.isReal() || a1.isInteger()))
+        {
+            const F64 ms = a0.asReal(), from = a1.asReal();
+            if (std::isfinite(ms) && std::isfinite(from) && ms >= 0.0 && ms <= 60.0 && from >= 0.0 && from <= 360.0)
+            {
+                h.mAmbientMs = ms;
+                h.mAmbientFrom = from;
+            }
+        }
+    }
     out = h;
     return true;
 }
@@ -209,4 +228,92 @@ S32 WolfHurricane::rainLevel(F64 q)
     if (q >= 0.25) return 2;
     if (q >= 0.08) return 1;
     return 0;
+}
+
+// Source: README "Wind" (the same as php/hurricane_lib.php hu_wind and the plugin's HurricaneModel.cs WindAt):
+//   V = vmax sqrt(x exp(1 - x)), x = (Rm / max(r, 0.01))^1.31; t^ = h (-dy, dx) / r, r^ = (dx, dy) / r
+//   v_storm = V (cos 22.6 t^ - sin 22.6 r^) + speed (sin H, cos H) Rm r / (Rm^2 + r^2)
+//   k = W env(r); v = (1 - k) ambient + k v_storm (ambient towards = from + 180: x = -S sin F, y = -S cos F); |v| <= 75
+void WolfHurricane::windAt(F64 px, F64 py, F64 cx, F64 cy, const Time& T, F64& wx, F64& wy) const
+{
+    const F64 DEG = 3.14159265358979323846 / 180.0;
+    const F64 F = mAmbientFrom * DEG;
+    const F64 ax = -mAmbientMs * std::sin(F), ay = -mAmbientMs * std::cos(F);
+    if (!T.active()) { wx = ax; wy = ay; return; }
+    const F64 dx = px - cx, dy = py - cy;
+    const F64 r = std::sqrt(dx * dx + dy * dy);
+    const F64 Rm = RM_PER_RE * mEye;
+    const F64 x = std::pow(Rm / std::max(r, 0.01), HOLLAND_B);
+    const F64 V = mVmax * std::sqrt(x * std::exp(1.0 - x));
+    F64 vx = 0.0, vy = 0.0;
+    if (r > 0.01)
+    {
+        const F64 tx = (F64)mHemisphere * -dy / r, ty = (F64)mHemisphere * dx / r;
+        const F64 rx = dx / r, ry = dy / r;
+        const F64 cb = std::cos(INFLOW_DEG * DEG), sb = std::sin(INFLOW_DEG * DEG);
+        vx = V * (cb * tx - sb * rx);
+        vy = V * (cb * ty - sb * ry);
+    }
+    const F64 H = mHeading * DEG;
+    const F64 j = Rm * r / (Rm * Rm + r * r);   // Jelesnianski (1966)
+    vx += mSpeed * std::sin(H) * j;
+    vy += mSpeed * std::cos(H) * j;
+    const F64 env = 1.0 - smooth((r / mRadius - 1.0) / 0.3);
+    const F64 k = T.W * env;
+    wx = (1.0 - k) * ax + k * vx;
+    wy = (1.0 - k) * ay + k * vy;
+    const F64 m = std::sqrt(wx * wx + wy * wy);
+    if (m > WIND_CAP) { wx *= WIND_CAP / m; wy *= WIND_CAP / m; }
+}
+
+// static  Source: README "The sea" S_storm = clamp((U_sea - 3) / 3, 0.15, 3) (WolfAutoEnvironmentModule.cs ApplyWind)
+F64 WolfHurricane::seaIndexOfWind(F64 ms)
+{
+    return clampd((ms - 3.0) / 3.0, SEA_MIN_INDEX, SEA_MAX_INDEX);
+}
+
+// Source: README "The sea" U_sea(p) (the plugin's HurricaneModel.cs StormSea.SeaWind / IndexAt): p' = p where r >= Rm; inside,
+// p' = c + Rm (p - c) / r, the eyewall wind at the same bearing; at r < 1 m the bearing is compass heading + 90 h degrees,
+// as (sin, cos)
+F64 WolfHurricane::seaIndexAt(F64 px, F64 py, F64 cx, F64 cy, const Time& T) const
+{
+    const F64 Rm = RM_PER_RE * mEye;
+    const F64 dx = px - cx, dy = py - cy;
+    const F64 r = std::sqrt(dx * dx + dy * dy);
+    F64 qx = px, qy = py;
+    if (r < Rm)
+    {
+        F64 ux = 0.0, uy = 0.0;
+        if (r >= 1.0) { ux = dx / r; uy = dy / r; }
+        else
+        {
+            const F64 b = (mHeading + 90.0 * (F64)mHemisphere) * (3.14159265358979323846 / 180.0);
+            ux = std::sin(b);
+            uy = std::cos(b);
+        }
+        qx = cx + Rm * ux;
+        qy = cy + Rm * uy;
+    }
+    F64 wx = 0.0, wy = 0.0;
+    windAt(qx, qy, cx, cy, T, wx, wy);
+    return seaIndexOfWind(std::sqrt(wx * wx + wy * wy));
+}
+
+// Source: README "The sea" (viewers, per point): (1 - W env(r_c)) S_eep, r_c = the region centre (sx / 2, sy / 2)'s distance
+F64 WolfHurricane::seaFloor(F64 cx, F64 cy, const Time& T, F64 s_eep, F64 width) const
+{
+    const F64 sx = mSx > 0 ? (F64)mSx : width;
+    const F64 sy = mSy > 0 ? (F64)mSy : width;
+    const F64 dx = 0.5 * sx - cx, dy = 0.5 * sy - cy;
+    const F64 rc = std::sqrt(dx * dx + dy * dy);
+    const F64 env = 1.0 - smooth((rc / mRadius - 1.0) / 0.3);
+    return (1.0 - T.W * env) * s_eep;
+}
+
+// static  Source: README "The sea": S_local = clamp(max(S_storm, floor, 0.15), 0.15, 3); amplitude x (S_local / S_eep)^1.5
+// (wolfseastate.h amplitude = 0.22 index^1.5). S_eep is an index the viewer drew, itself >= 0.15 (wolfseastate.h MIN_INDEX).
+F64 WolfHurricane::seaAmplitudeFactor(F64 s_storm, F64 floor, F64 s_eep)
+{
+    const F64 local = clampd(std::max(std::max(s_storm, floor), SEA_MIN_INDEX), SEA_MIN_INDEX, SEA_MAX_INDEX);
+    return std::pow(local / std::max(s_eep, SEA_MIN_INDEX), 1.5);
 }

@@ -41,6 +41,8 @@
 #include "pipeline.h"
 #include "wolfobjectprops.h"
 #include "wolfseastate.h"
+#include "lldate.h"            // [HURRICANE 2026-10-30/] the storm's wall clock
+#include "wolfregionweather.h"   // [HURRICANE 2026-10-30/] the region's storm
 #include "wolfwaterfield.h"
 #include "wolfwavezones.h"   // [WAVES 2026-09-07]
 
@@ -812,6 +814,26 @@ WolfBoatRock::Sea WolfBoatRock::seaNow() const
     sea.mAutoH = 2.f * sea.mAmp;
     sea.mAutoLen = llmax(llmax(2.f / (sea.mFreq + 0.001f), 12.f * sea.mAutoH), 12.f);
     sea.mAutoOn = sea.mAmp > 0.001f;
+    // [HURRICANE 2026-10-30] the region's storm on the sea, as lldrawpoolwater.cpp renderPostDeferred hands it to waterV.glsl:
+    // S_eep = the index the water is drawn with (st.mIndex), the floor at the region centre, the eye in that region's metres
+    if (WolfRegionWeather::instanceExists())
+    {
+        const WolfHurricane* hu = WolfRegionWeather::instance().hurricane();
+        LLViewerRegion* srgn = gAgent.getRegion();
+        const F64 now = LLDate::now().secondsSinceEpoch();
+        const WolfHurricane::Time T = hu ? hu->timeAt(now) : WolfHurricane::Time();
+        if (hu && srgn && T.active())
+        {
+            sea.mStorm = hu;
+            sea.mStormT = T;
+            hu->centre(now, sea.mStormCx, sea.mStormCy);
+            sea.mStormSeep = (F64)st.mIndex;
+            sea.mStormFloor = hu->seaFloor(sea.mStormCx, sea.mStormCy, T, sea.mStormSeep, (F64)srgn->getWidth());
+            const LLVector3 o = srgn->getOriginAgent();   // Source: llviewerregion.h:210
+            sea.mStormOriginX = o.mV[VX];
+            sea.mStormOriginY = o.mV[VY];
+        }
+    }
     return sea;
 }
 
@@ -891,6 +913,13 @@ F32 WolfBoatRock::waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F3
             d1.set(1.04999f, -0.42000f);
         }
         F32 local_amp = amp * 0.5f * swell_scale;
+        // [HURRICANE 2026-10-30] waterV.glsl localAmp x stormSea: the storm's sea at the hull (wolfhurricane.cpp, the model)
+        if (sea.mStorm)
+        {
+            const F64 px = (F64)(ax - sea.mStormOriginX), py = (F64)(ay - sea.mStormOriginY);
+            const F64 s_storm = sea.mStorm->seaIndexAt(px, py, sea.mStormCx, sea.mStormCy, sea.mStormT);
+            local_amp *= (F32)WolfHurricane::seaAmplitudeFactor(s_storm, sea.mStormFloor, sea.mStormSeep);
+        }
         // <WolfViewer 2026-09-26> Mirror of waterV.glsl: the swell converges on the centre of
         // the region the water belongs to (the hull's region — its own water plane), phased on
         // the position relative to that centre, calmed within 32 m of the region edge and two

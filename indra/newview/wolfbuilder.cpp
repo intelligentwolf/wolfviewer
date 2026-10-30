@@ -43,6 +43,7 @@
 #include "llviewerregion.h"
 #include "pipeline.h"
 #include "rlvactions.h"
+#include "wolfmiddaysky.h"     // [WolfViewer 2026-10-30/] the Midday with fill light
 #include "wolfobjectprops.h"
 
 namespace
@@ -137,9 +138,9 @@ bool WolfBuilder::applyBuildersMode(std::string& why_not)
         return true;
     }
 #endif
-    // Source: llviewermenu.cpp:824-825 - the EEP Midday asset, with the user's manual transition time.
-    env.setManualEnvironment(LLEnvironment::ENV_LOCAL, LLEnvironment::KNOWN_SKY_MIDDAY);
-    env.setSelectedEnvironment(LLEnvironment::ENV_LOCAL);
+    // Source: llviewermenu.cpp LLWorldEnvSettings::handleEvent "noon" - the menu's Midday, with the user's manual transition
+    // time. [WolfViewer 2026-10-30] the Midday with fill light in the shade (wolfmiddaysky.h), as the menu now puts on.
+    WolfMiddaySky::apply();
     mApplied = true;
     return true;
 }
@@ -164,7 +165,7 @@ void WolfBuilder::restoreEnvironment()
     const bool still_ours = !now
         || now == mLegacyMidday
         || now == mSavedSky
-        || now->getAssetId() == LLEnvironment::KNOWN_SKY_MIDDAY;
+        || WolfMiddaySky::isMidday(now);   // [WolfViewer 2026-10-30/] ours (the fill-light Midday) or the Midday asset
 
     if (still_ours && RlvActions::canChangeEnvironment())
     {

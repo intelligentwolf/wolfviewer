@@ -17,6 +17,7 @@
 
 #include "wolfoceanfft.h"
 
+#include "llframetimer.h"   // [HURRICANE 2026-10-30/] the rebuild log
 #include "llglslshader.h"
 #include "llimagegl.h"
 #include "llrender.h"
@@ -240,6 +241,27 @@ void WolfOceanFFT::setSeaState(const WolfSeaState& st)
     }
     mState = st;
     mHaveState = true;
+    // [HURRICANE 2026-10-30] the rebuild count, logged change-only and at most every 10 s (Paul under the storm: "the waves are
+    // getting jerky"): how often the storm's eased sea (lldrawpoolwater.cpp wolfUpdateSea; the region's EEP re-baked about once a
+    // minute by the storm plugin) crosses the thresholds above. A rebuild keeps the seeded draws and the time base, so it moves
+    // the amplitudes by one threshold's worth and never the phase; its CPU cost (buildH0, 2 x 128 x 128 spectrum evaluations,
+    // measured offline 3.2 ms on the build machine) is the thing to watch.
+    {
+        static U32 s_rebuilds = 0, s_logged = 0;
+        static F64 s_next = 0.0, s_since = 0.0;
+        ++s_rebuilds;
+        const F64 now = LLFrameTimer::getElapsedSeconds();
+        if (now >= s_next)
+        {
+            LL_INFOS("WolfOceanFFT") << "spectrum rebuilds: " << s_rebuilds << " this session, " << (s_rebuilds - s_logged)
+                                     << " since the last line" << (s_since > 0.0 ? llformat(" (%.0f s ago)", now - s_since) : std::string())
+                                     << "; wind " << llformat("%.2f", st.mWindSpeed) << " m/s, index " << llformat("%.2f", st.mIndex)
+                                     << ", direction " << llformat("%.1f", atan2f(st.mDirY, st.mDirX) * RAD_TO_DEG) << " deg" << LL_ENDL;
+            s_logged = s_rebuilds;
+            s_since = now;
+            s_next = now + 10.0;
+        }
+    }
     const F32 x = llclamp(st.mIndex - 1.f, 0.f, 2.f);
     mChoppiness = 1.0f + 0.3f * x;
     mFoamThreshold = 0.60f + 0.04f * x;

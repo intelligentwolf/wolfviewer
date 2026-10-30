@@ -150,6 +150,7 @@ private:
     WolfWeatherProfile mProfile;
     F32  mAge = 0.f;     // seconds this source has been alive, for the wind's rotation
     F32  mCarry = 0.f;   // fractional particles carried to the next frame
+    F32  mBudgetSize = 1.f;   // [HURRICANE 2026-10-30/] each new drop's size x this: 1 / sqrt(the frame budget) (update())
     WolfRoofGrid mRoofs;   // <WolfViewer 2026-10-02/> was mLandingZ / mLandingNext / mLandingInit
 };
 

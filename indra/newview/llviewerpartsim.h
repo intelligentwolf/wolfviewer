@@ -182,6 +182,7 @@ public:
     bool aboveParticleLimit() const { return sParticleCount > sMaxParticleCount; }
     static void setMaxPartCount(const S32 max_parts)    { sMaxParticleCount = llclamp(max_parts, 0, LL_MAX_PARTICLE_COUNT); }
     static S32  getMaxPartCount()                       { return sMaxParticleCount; }
+    static S32  getPartCount()                          { return sParticleCount; }   // <WolfViewer 2026-10-30/> wolfframegovernor.cpp's log
 
     // <FS:Beq> FIRE-34600 - bugsplat AVX2 particle count mismatch
     // Deprecate these and use native operators for consistency

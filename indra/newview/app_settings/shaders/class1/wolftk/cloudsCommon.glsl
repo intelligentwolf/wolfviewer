@@ -297,17 +297,24 @@ float wolfStormApply(inout vec4 localWeather, const vec3 position, const float m
   // Folded into the eye mask: the same density multiplier, after the coverage cut and before the build clearance (sampleWeather).
   meye *= 1.0 - O * w * (1.0 - inner) * (1.0 - wolfStormS((B2 - 0.15) / 0.35));
   // the storm's sample of the region's own field: the same texture, the same layer, read at q
+  // [HURRICANE 2026-10-30] THE FRAME BUDGET (wolfframegovernor.h; wolfStormSpin.z, eased over 3 s in wolfenvironmentrender.cpp):
+  // on a slow frame the storm's own lookup of the field at q (a second, third texture read per layer per sample) is skipped and
+  // s_w is the point's own weather value - the bands, the dense overcast, the eyewall, the eye and the moats all come from the
+  // analytic B2 / inner / ew / masks, so the storm's structure still reads; only the field's texture inside the bands stops
+  // winding with the spiral. Between 0 and 1 (the ease) the two are mixed, so nothing pops.
+  vec4 own = localWeather;
   vec4 sw = vec4(0.0);
   vec2 unusedCoord;
   vec4 kindLow = kindStreets + kindTurned;
-  if (any(greaterThan(kindLow, vec4(0.5)))) {
+  float lookupW = clamp(wolfStormSpin.z, 0.0, 1.0);
+  if (lookupW > 0.001 && any(greaterThan(kindLow, vec4(0.5)))) {
     // rho = r + D; q = c(t) + rho (cos(phi - psi), sin(phi - psi))
     float rho = r + D;
     vec2 q = c + rho * vec2(cos(phi - psi), sin(phi - psi));
     vec2 quv = getGlobeUv((worldToECEFMatrix * vec4(q, pA.z, 1.0)).xyz);
     sw += wolfReadWeather(quv, mipLevel, kindStreets, vec4(0.0), kindTurned, unusedCoord);
   }
-  if (any(greaterThan(kindUpper, vec4(0.5)))) {
+  if (lookupW > 0.001 && any(greaterThan(kindUpper, vec4(0.5)))) {
     // the outflow canopy (the cirrus lookup, kindUpper) turns the other way: the mirrored spiral, no inward streaming, turning
     // slowly backwards - q_up = c(t) + r (cos(phi + psi + h D / R), sin(phi + psi + h D / R))
     float a = phi + psi + h * D / R;
@@ -316,6 +323,7 @@ float wolfStormApply(inout vec4 localWeather, const vec3 position, const float m
     sw += wolfReadWeather(quv, mipLevel, vec4(0.0), kindUpper, vec4(0.0), unusedCoord);
   }
   sw = pow(sw, weatherExponents);   // the weather value as the region's own (sampleWeather: pow(rawWeather, weatherExponents))
+  sw = mix(own, sw, lookupW);       // [2026-10-30] the frame budget: the point's own value when the lookup is skipped
   // v_storm = max( clamp(s_w mix(0.35, 1, B2) (1 + 0.6 O), 0, 1), O inner (0.85 + 0.15 s_w), ew )
   vec4 vStorm = max(max(clamp(sw * mix(0.35, 1.0, B2) * (1.0 + 0.6 * O), 0.0, 1.0), O * inner * (0.85 + 0.15 * sw)), vec4(ew));
   localWeather = mix(localWeather, vStorm, w);

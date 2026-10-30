@@ -73,6 +73,7 @@
 #include "fscommon.h"
 #include "llselectmgr.h"
 #include "wolffarground.h"   // <WolfViewer 2026-10-07/> map tiles stand in for regions not connected
+#include "wolfframegovernor.h"   // <WolfViewer 2026-10-30/> the particle simulation's cost in its log
 
 //
 // Globals
@@ -1274,7 +1275,11 @@ void LLWorld::clearAllVisibleObjects()
 
 void LLWorld::updateParticles()
 {
+    // <WolfViewer 2026-10-30> the particle simulation's CPU time, for the frame governor's log (wolfframegovernor.h): whether the
+    // weather's particles are what a slow frame spends its time on (Paul under the hurricane, 11-12 fps)
+    const F64 t0 = (F64)LLTimer::getTotalSeconds();
     LLViewerPartSim::getInstance()->updateSimulation();
+    WolfFrameGovernor::addParticleSimSeconds((F64)LLTimer::getTotalSeconds() - t0);
 }
 
 void LLWorld::renderPropertyLines()

@@ -860,7 +860,7 @@ struct Clouds::Impl
         // storm. x = 0 when none is running: the shader skips it on that alone.
         u4f(sh, "wolfStorm", f.storm_on ? 1.f : 0.f, f.storm_O, f.storm_E, f.storm_C);
         u4f(sh, "wolfStormEye", f.storm_eye_agent[0], f.storm_eye_agent[1], f.storm_radius, f.storm_eye_radius);
-        u2f(sh, "wolfStormSpin", f.storm_h, f.storm_D);
+        u4f(sh, "wolfStormSpin", f.storm_h, f.storm_D, f.storm_lookup, 0.f);   // [2026-10-30] z the lookup's weight
         {
             const F32 a = f.weather_rotation_deg * DEG_TO_RAD, ca = cosf(a), sa = sinf(a), inv = 1.f / llmax(f.weather_stretch, 1e-3f);
             const F32 m[4] = { inv * ca, sa, -inv * sa, ca };   // columns: (S R)[.,0], (S R)[.,1] with S = diag(1/stretch, 1)

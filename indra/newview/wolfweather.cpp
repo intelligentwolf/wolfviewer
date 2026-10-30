@@ -24,6 +24,7 @@
 
 #include "llagent.h"
 #include "lldate.h"         // [HURRICANE 2026-10-29/] the storm's wall clock
+#include "wolfframegovernor.h"   // [HURRICANE 2026-10-30/] the frame budget
 #include "llframetimer.h"
 #include "llimagegl.h"       // <WolfViewer 2026-09-18/> the roof grid texture
 #include "llglslshader.h"
@@ -314,7 +315,14 @@ void WolfWeatherPartSource::update(const F32 dt)
     // (RenderMaxPartCount) is still the ceiling — shouldAddPart() below refuses when it is near
     // — so extreme weather still respects the resident's chosen rendering budget.
     const F32 base_rate = (mMode == RAIN) ? RAIN_RATE_BY_LEVEL[mLevel] : SNOW_RATE_BY_LEVEL[mLevel];
-    const F32 rate = base_rate * ((F32)mProfile.mDensity / 100.f);
+    // [HURRICANE 2026-10-30] x the frame budget (wolfframegovernor.h): Paul under the storm at 11-12 fps, the rain at level 3 x
+    // density 3000 % = 27,000 drops a second filling the whole particle cap (RenderMaxPartCount 16384) every frame. On a slow
+    // frame fewer drops are made, each 1 / sqrt(g) wider AND longer, so (drops alive) x (one drop's area) - the share of the view
+    // the rain covers - stays what it was: g x (1 / sqrt(g))^2 = 1. The look is kept, the particle count (each one simulated,
+    // given a quad, sorted and blended every frame) falls by g. Snow alike (a flake's two sides).
+    const F32 g = WolfFrameGovernor::budget();
+    mBudgetSize = 1.f / sqrtf(llmax(g, WolfFrameGovernor::MIN_BUDGET));
+    const F32 rate = base_rate * ((F32)mProfile.mDensity / 100.f) * g;
     mCarry += rate * llclamp(dt, 0.f, 0.1f);
     S32 n = (S32)mCarry;
     mCarry -= (F32)n;
@@ -338,7 +346,7 @@ void WolfWeatherPartSource::emit(const LLVector3& cam)
     part->mEndGlow = 0.f;
     part->mGlow = LLColor4U(0, 0, 0, 0);
     part->mLastUpdateTime = 0.f;
-    const F32 size_k = (F32)mProfile.mSize / 100.f;
+    const F32 size_k = (F32)mProfile.mSize / 100.f * mBudgetSize;   // [HURRICANE 2026-10-30/] x the frame budget's size (update())
     const F32 vel_k = (F32)mProfile.mVelocity / 100.f;
     // The profile's colour: the kind's neutral colour moved towards the chosen tint, scaled by
     // brightness. WolfWeatherProfile::drawColor is the one place that arithmetic lives, so the
@@ -719,6 +727,7 @@ void WolfWeather::setPreview(preview_owner_t owner, const WolfWeatherProfile* p)
 
 void WolfWeather::idle()
 {
+    WolfFrameGovernor::update();   // [HURRICANE 2026-10-30/] once a frame: the measured frame time and the budget
     const F64 now = LLFrameTimer::getElapsedSeconds();
     if (now >= mNextSweep)
     {

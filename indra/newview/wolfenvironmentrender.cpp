@@ -60,6 +60,7 @@
 #include "wolfexposure.h"
 #include "wolfgrid.h"
 #include "wolfregionweather.h"
+#include "wolfframegovernor.h"   // [HURRICANE 2026-10-30/] the frame budget
 #include "wolftkatmosphere.h"
 #include "wolftkclouds.h"
 #include "wolftkgl.h"
@@ -1618,6 +1619,25 @@ namespace
                 f.storm_eye_radius = (F32)hu->mEye;
                 f.storm_h = (F32)hu->mHemisphere;
                 f.storm_D = (F32)hu->streamed(T);
+                // [HURRICANE 2026-10-30] the frame budget (wolfframegovernor.h): the storm's own lookup of the field is dropped
+                // while the budget is under 0.9 and taken back once it is full again (the gap between is the hysteresis), eased
+                // over 3 s either way so the bands' texture never pops. Advanced by the main view only; a probe face reads it.
+                {
+                    static F32 s_lookup = 1.f;
+                    static bool s_target = true;
+                    static F64 s_last = 0.0;
+                    if (!probe)
+                    {
+                        const F32 g = WolfFrameGovernor::budget();
+                        if (g >= 0.999f) s_target = true;
+                        else if (g < 0.9f) s_target = false;
+                        const F64 tn = LLFrameTimer::getElapsedSeconds();
+                        const F32 step = s_last > 0.0 ? (F32)llclamp(tn - s_last, 0.0, 0.5) / 3.f : 1.f;
+                        s_last = tn;
+                        s_lookup = s_target ? llmin(1.f, s_lookup + step) : llmax(0.f, s_lookup - step);
+                    }
+                    f.storm_lookup = s_lookup;
+                }
             }
             // [HURRICANE 2026-10-30] storm watch: what the cloud pass is given (the uniforms wolfStorm, wolfStormEye, wolfStormSpin
             // set from f in wolftkclouds.cpp sharedUniforms) and what that means at the camera (README "Geometry", "Clouds": the

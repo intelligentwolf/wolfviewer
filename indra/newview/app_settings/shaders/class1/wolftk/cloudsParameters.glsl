@@ -97,7 +97,9 @@ uniform vec3 wolfFibreShape;            // the fibre noise's mean, 2 x its stand
 // CloudsFrame storm_*; the model: region-terrain-work/hurricane-2026-10-29/README.md "THE MODEL", CPU twin wolfhurricane.cpp)
 uniform vec4 wolfStorm;                 // x 1 = a storm is running (0: none, skipped), y O organisation, z E eye clear, w C gathering
 uniform vec4 wolfStormEye;              // xy the eye c(t) (agent x, y metres), z R the outer radius, w Re the eye's radius (metres)
-uniform vec2 wolfStormSpin;             // x h the hemisphere (1 north, -1 south), y D the metres the field has streamed inwards
+uniform vec4 wolfStormSpin;             // x h the hemisphere (1 north, -1 south), y D the metres the field has streamed inwards,
+                                        // z [2026-10-30] the weight of the storm's own lookup of the field (1 full, 0 skipped:
+                                        // s_w is the point's own value; the frame budget, wolfframegovernor.h), w unused
 // the ice phase: the forward lobe's asymmetry x this for an ice layer (wolfcloudgenus.h WOLF_ICE_G_SCALE, the viewer
 // and the harness define it from the cited asymmetry parameters); 1 = water everywhere
 #ifndef WOLF_ICE_G_SCALE

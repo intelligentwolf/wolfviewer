@@ -40,6 +40,7 @@
 #include "llsky.h"
 #include "llviewercamera.h"
 #include "llviewerpartsim.h"
+#include "wolfframegovernor.h"   // <WolfViewer 2026-10-30/>
 #include "llviewerregion.h"
 #include "pipeline.h"
 #include "llspatialpartition.h"
@@ -799,6 +800,13 @@ void LLParticlePartition::addGeometryCount(LLSpatialGroup* group, U32& vertex_co
 void LLParticlePartition::getGeometry(LLSpatialGroup* group)
 {
     LL_PROFILE_ZONE_SCOPED;
+    // <WolfViewer 2026-10-30> this group's CPU time (the sort and every particle's quad), for the frame governor's log
+    // (wolfframegovernor.h). A scope object: the function has early returns.
+    struct WolfGeomTimer
+    {
+        F64 mStart = (F64)LLTimer::getTotalSeconds();
+        ~WolfGeomTimer() { WolfFrameGovernor::addParticleGeometrySeconds((F64)LLTimer::getTotalSeconds() - mStart); }
+    } wolf_geom_timer;
 
     std::sort(mFaceList.begin(), mFaceList.end(), LLFace::CompareDistanceGreater());
 

@@ -289,6 +289,10 @@ in vec4 vSwell;
 // [HURRICANE 2026-10-30] the storm swell train (class1 waterV.glsl, README "The storm swell's length"): its amplitude here (0 = none)
 // and xy its direction, z 1 = set (else the region's waveDir1), w its length (lldrawpoolwater.cpp)
 in float vStormSwellAmp;
+// [WILD SEA 2026-10-30] class1 waterV.glsl: x k = W env(r) (the storm's share of the sea), y U_sea m/s, zw its direction; the
+// drawn amplitude's storm factor (1 with no storm). README "The wild sea".
+in vec4 vStormSea;
+in float vStormGain;
 uniform vec4 wolfSeaStormSwell;
 in vec4 vSurf;   // [SURF rev3] crest (peak only), breaking, amplitude, wash
 in vec4 vary_wolf_dry;   // [DRY BUILDS 2026-10-26] waterV.glsl: displaced agent xy, swash band ceiling, normal displacement
@@ -890,6 +894,15 @@ void main()
     fade = min(1, fade);
     color = mix(fb.rgb, color, fade);
 
+    // [WILD SEA 2026-10-30] README "The wild sea": the storm's sea is darker, x (1 - 0.35 k), k = W env(r) - full inside R, gone
+    // by 1.3 R (CONVENTION 0.35: the sea under the storm's overcast; the region's sky is the region's own weather, not the storm's,
+    // since the area rule of 12:53Z). The open sea only; the foam below is laid over it.
+    bool wolfStormOpen = vStormSea.x > 0.001 && boundedWaterDepth <= 0.0 && wolfStream <= 0.0 && wolfWaterfall <= 0.0;
+    if (wolfStormOpen)
+    {
+        color *= 1.0 - 0.35 * clamp(vStormSea.x, 0.0, 1.0);
+    }
+
     // <FS:WolfViewer> Open-water foam lace on the swell crests.
     //
     // Ported from WolfStorm's water (Water.js, "ambient open-water foam lace"). Real sea
@@ -1073,6 +1086,38 @@ void main()
         float capMix = clamp(cap * ragged * 0.85, 0.0, 0.7);
         float capLight = wolfFoamLight(sunlit_linear, amblit, shadow);
         color = mix(color, vec3(0.93, 0.96, 0.98) * capLight, capMix);
+    }
+    // [WILD SEA 2026-10-30] README "The wild sea": the storm's foam, per point from the storm's own wind U_sea (waterV.glsl).
+    //   whitecap fraction  F = min(1, 3.84e-6 U^3.41) k   (Monahan & O'Muircheartaigh 1980, J. Phys. Oceanogr. 10, 2094-2099,
+    //                      the robust biweight fit: 1 % at 10 m/s, 10 % at 20, 42 % at 30, all of the sea by 37 m/s - the WMO Beaufort 12 "sea
+    //                      completely white with driving spray")
+    //   streaks            foam laid out in streaks ALONG the wind (Beaufort 8-9: "foam blown in well-marked streaks along the
+    //                      direction of the wind"): value noise read 36 m along x 1.6 m across the wind and 12 m x 0.7 m, drifting
+    //                      downwind; foam where it exceeds 1 - min(F, 0.7), so the covered share grows with F (CONVENTION: scales, 0.7)
+    //   spindrift          on the crests from Beaufort 8 (17.2 m/s) to full at Beaufort 12 (32.7 m/s) (WMO Beaufort scale lower
+    //                      bounds): crest height^2 x a fine downwind-streaked noise
+    // All x k, so it fades out with the storm beyond its rim; the region's own whitecaps above are untouched.
+    if (wolfStormOpen)
+    {
+        float k = clamp(vStormSea.x, 0.0, 1.0);
+        float U = max(vStormSea.y, 0.0);
+        float F = min(1.0, 3.84e-6 * pow(U, 3.41)) * k;
+        vec2 wd = dot(vStormSea.zw, vStormSea.zw) > 1e-6 ? normalize(vStormSea.zw) : vec2(1.0, 0.0);
+        vec2 wp = vary_world_pos.xy;
+        float along = dot(wp, wd), across = dot(wp, vec2(-wd.y, wd.x));
+        float sn = 0.6 * wolfFoamNoise(vec2(along / 36.0 - time * 0.05, across / 1.6))
+                 + 0.4 * wolfFoamNoise(vec2(along / 12.0 - time * 0.11, across / 0.7) + vec2(7.0, 3.0));
+        float cover = min(F, 0.7);   // [WILD SEA 2026-10-30] at most 70 % of the sea in streaks (CONVENTION: a full white sheet at F = 1, U >= 37 m/s, hid every wave in the dock test)
+        float streak = smoothstep(1.0 - cover, 1.0 - cover + 0.15, sn) * step(1e-4, cover);
+        // [WILD SEA 2026-10-30] far away the 0.7-1.6 m streak and spray noise is finer than a pixel and shimmered into stripes (dock
+        // test, high view): from 80 m to 300 m the streaks go to their mean cover and the spray noise to its mean (CONVENTION)
+        float farFade = smoothstep(80.0, 300.0, length(pos.xyz));
+        streak = mix(streak, cover, farFade);
+        float crestS = clamp(vary_wave_height / (waveAmplitude * max(vStormGain, 1.0) * 1.2 + 0.001), 0.0, 1.0);
+        float spray = k * smoothstep(17.2, 32.7, U) * crestS * crestS
+                    * (0.5 + 0.5 * mix(wolfFoamNoise(vec2(along / 3.0 - time * 0.6, across / 0.8)), 0.5, farFade));
+        float stormFoam = clamp(max(streak * 0.65 * (0.55 + 0.45 * crestS), spray * 0.9), 0.0, 0.85);   // [WILD SEA] streaks gather on the crests (CONVENTION)
+        color = mix(color, vec3(0.93, 0.96, 0.98) * wolfFoamLight(sunlit_linear, amblit, shadow), stormFoam);
     }
     // Boat wash (Water.js [WAKE]): churned water is full of air, so it scatters rather
     // than reflects — brighter and denser than the swell's foam.

@@ -154,6 +154,10 @@ uniform vec4 wolfSeaStormMisc;   // x vmax, y S_eep (the index this water is dra
 // at the region centre), z 1 = that direction is set (0: the region's own wave direction), w its length L_STORM (m)
 uniform vec4 wolfSeaStormSwell;
 out float vStormSwellAmp;   // [HURRICANE 2026-10-30/] the storm swell train's amplitude here (class3 waterF.glsl swellFoldFraction)
+// [WILD SEA 2026-10-30] the storm's sea here for the fragment's foam (class3 waterF.glsl, README "The wild sea"): x k = W env(r)
+// (the storm's share of the sea, 0 beyond 1.3 R), y U_sea (m/s), zw U_sea's direction (unit, the way the air moves). 0 with no storm.
+out vec4 vStormSea;
+out float vStormGain;       // [WILD SEA 2026-10-30/] the drawn amplitude's storm factor here (1 with no storm)
 uniform vec2 wolfRegionOrigin;
 // <WolfViewer 2026-09-26> SWELL TOWARD THE REGION CENTRE (Paul: "waves should ALWAYS travel
 // towards the center of the region" — the next region's waves pointed the way of the one the
@@ -538,7 +542,10 @@ vec2 gerstnerSlope(vec2 pos, float wavelength, float jit, float amp, vec2 dir)
 //   S_storm  = clamp((U_sea - 3) / 3, 0.15, 3); S_local = clamp(max(S_storm, (1 - W env(r_c)) S_eep, 0.15), 0.15, 3)
 //   factor   = (S_local / S_eep)^1.5 (wolfseastate.h amplitude = 0.22 index^1.5)
 // Also returns S_storm(p) (sStorm) and env(r) at p itself (envP) for the storm swell train (README "The storm swell's length").
-float wolfStormSeaFactor(vec2 p, out float sStorm, out float envP)
+// [WILD SEA 2026-10-30] README "The wild sea": the DRAWN index runs on to WOLF_STORM_SEA_MAX (S_storm itself, for the swell train,
+// stays capped at 3); also returns U_sea and its direction (seaWind) for the fragment's foam.
+const float WOLF_STORM_SEA_MAX = 4.5;   // README "The wild sea" (CONVENTION; held by the steepness guard below)
+float wolfStormSeaFactor(vec2 p, out float sStorm, out float envP, out vec3 seaWind)
 {
     vec2 c = wolfSeaStormEye.xy;
     float R = wolfSeaStormEye.z;
@@ -570,7 +577,9 @@ float wolfStormSeaFactor(vec2 p, out float sStorm, out float envP)
     float U = min(length(v), 75.0);                                  // |v| capped at 75 m/s
     float S = clamp((U - 3.0) / 3.0, 0.15, 3.0);
     sStorm = S;
-    float Sl = clamp(max(max(S, wolfSeaStorm.w), 0.15), 0.15, 3.0);
+    seaWind = vec3(U, U > 1e-3 ? v / length(v) : vec2(0.0));
+    float Sd = clamp((U - 3.0) / 3.0, 0.15, WOLF_STORM_SEA_MAX);       // [WILD SEA 2026-10-30/] the drawn index, to 4.5
+    float Sl = clamp(max(max(Sd, wolfSeaStorm.w), 0.15), 0.15, WOLF_STORM_SEA_MAX);
     return pow(Sl / max(wolfSeaStormMisc.y, 0.15), 1.5);
 }
 
@@ -705,13 +714,24 @@ void main()
     // a_L / A_local (wolfhurricane.cpp stormSwellShare), 0 with no storm
     float stormSwellShare = 0.0;
     vStormSwellAmp = 0.0;
+    vStormSea = vec4(0.0);
     if (wolfSeaStorm.x > 0.5)
     {
         float sStorm = 0.0;
         float envP = 0.0;
-        stormSea = wolfStormSeaFactor(position.xy, sStorm, envP);
+        vec3 seaWind = vec3(0.0);
+        stormSea = wolfStormSeaFactor(position.xy, sStorm, envP, seaWind);
         stormSwellShare = 0.5 * wolfSeaStorm.y * envP * sStorm / 3.0;
+        // [WILD SEA 2026-10-30] README "The wild sea": THE STEEPNESS GUARD. The storm may raise the drawn amplitude only until the
+        // dominant train (baseWavelength x 2, amplitude 0.4 x waveAmplitude x the factor) reaches k a = WOLF_STORM_STEEP_MAX, two
+        // thirds of the steepest wave that can exist (Stokes' limit H / L = 0.142, Michell 1893: k a = pi x 0.142 = 0.446); never
+        // below 1 (the region's own sea is never calmed by this). wolfboatrock.cpp and WolfStorm Water.js use the same rule.
+        const float WOLF_STORM_STEEP_MAX = 0.3;   // CONVENTION (README "The wild sea")
+        float kaDom = (3.14159265 * (waveFrequency + 0.001)) * 0.4 * waveAmplitude;   // (2 pi / (2 baseWavelength)) 0.4 A
+        if (kaDom > 1e-6) stormSea = min(stormSea, max(1.0, WOLF_STORM_STEEP_MAX / kaDom));
+        vStormSea = vec4(clamp(wolfSeaStorm.y * envP, 0.0, 1.0), seaWind);
     }
+    vStormGain = stormSea;
     vWake = 0.0;
     // </WolfViewer>
 

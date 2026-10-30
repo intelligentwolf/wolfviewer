@@ -111,6 +111,7 @@
 #include "wolffloatercompass.h"   // [WOLF COMPASS 2026-10-16/]
 #include "wolffloaterbugreport.h"   // [WOLF BUG REPORT 2026-10-24/]
 #include "wolffloaterdob.h"   // [DOB IN THE VIEWER 2026-10-26/]
+#include "wolffloaterinvisallow.h"   // [SELECTIVE INVISIBLE MODE 2026-10-30/]
 #include "wolffloateragecheck.h"   // [ADULT CONTENT 2026-10-26/]
 #include "wolffloaterchooseavatar.h"   // [STARTER AVATARS 2026-10-24/]
 #include "wolfspeed.h"   // [WOLFSPEED 2026-10-17/] Xenon's WolfSpeed
@@ -686,6 +687,7 @@ void LLViewerFloaterReg::registerFloaters()
     LLFloaterReg::add("wolf_compass", "floater_wolf_compass.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterCompass>);   // [WOLF COMPASS 2026-10-16/] Victorian compass: North + course
     LLFloaterReg::add("wolf_bug_report", "floater_wolf_bug_report.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterBugReport>);   // [WOLF BUG REPORT 2026-10-24/] Report a Problem: ticket + viewer logs
     LLFloaterReg::add("wolf_dob", "floater_wolf_dob.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterDob>);   // [DOB IN THE VIEWER 2026-10-26/] Your Date of Birth
+    LLFloaterReg::add("wolf_invis_allow", "floater_wolf_invis_allow.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterInvisAllow>);   // [SELECTIVE INVISIBLE MODE 2026-10-30/] Invisible Mode: People Who Can See Me
     LLFloaterReg::add("wolf_age_check", "floater_wolf_age_check.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterAgeCheck>);   // [ADULT CONTENT 2026-10-26/] Wolf World > Age Check: status + Verify my age
     LLFloaterReg::add("wolf_choose_avatar", "floater_wolf_choose_avatar.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterChooseAvatar>);   // [STARTER AVATARS 2026-10-24/] Choose an Avatar
     LLFloaterReg::add("wolf_speed", "floater_wolf_speed.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterSpeed>);   // [WOLFSPEED 2026-10-17/] Xenon's WolfSpeed

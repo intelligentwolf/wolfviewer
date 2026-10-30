@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [SELECTIVE INVISIBLE MODE 2026-10-30] Invisible Mode: People Who Can See Me (wolffloaterinvisallow.cpp). Paul: "i want an
+     option where the user can allow certain users to see the person is online even if they are in invisible mode".
+     Who and why: a resident who uses Invisible Mode wants a partner or a few close friends to still see them online, and
+     sets that up in under a minute.
+     Flow, top to bottom: what the list does (and that adding someone tells them nothing); the list with its count and
+     Remove; add a friend (choose + Add); or add anyone by name (type + Add); the status box; Close bottom right.
+     Remove sits on the list's own row, away from the Add buttons. Outcomes stay in the status box (errors in the error
+     colour, worded as errors, until the next action). -->
+<floater
+ can_close="true"
+ can_minimize="true"
+ can_resize="false"
+ height="470"
+ layout="topleft"
+ name="wolf_invis_allow"
+ help_topic="wolf_invis_allow"
+ save_rect="true"
+ single_instance="true"
+ title="Invisible Mode: People Who Can See Me"
+ width="420">
+    <text follows="left|top" height="64" layout="topleft" left="12" name="intro" top="26" width="396" wrap="true">While Invisible Mode is on, the people on this list still see you online - in their friends list, IMs, your profile, groups and the map. Everyone else sees you as offline. Adding someone does not tell them.</text>
+
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="12" name="list_label" top="96" width="250">People who can see me</text>
+    <text follows="left|top" height="16" layout="topleft" left="288" name="count" top="96" width="120" halign="right">0 of 100</text>
+    <scroll_list follows="left|top" height="150" layout="topleft" left="12" name="allowed" top="116" width="396" multi_select="false" draw_heading="false" tool_tip="The people who still see you online while you are invisible">
+        <scroll_list.columns name="name" label="Name" relative_width="1" />
+    </scroll_list>
+    <button follows="left|top" height="23" layout="topleft" left="288" name="remove_btn" top="272" width="120" label="Remove" tool_tip="Take the selected person off your list: they will see you as offline while you are invisible" />
+
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="12" name="friend_label" top="306" width="396">Add a friend</text>
+    <combo_box follows="left|top" height="23" layout="topleft" left="12" name="friends" top="324" width="270" tool_tip="Choose one of your friends" />
+    <button follows="left|top" height="23" layout="topleft" left="288" name="add_friend_btn" top="324" width="120" label="Add friend" />
+
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="12" name="name_label" top="356" width="396">Or add anyone by avatar name</text>
+    <line_editor follows="left|top" height="23" layout="topleft" left="12" name="add_name" top="374" width="270" max_length_bytes="64" label="First Last" tool_tip="Their avatar name, for example Lone Wolf" />
+    <button follows="left|top" height="23" layout="topleft" left="288" name="add_name_btn" top="374" width="120" label="Add" />
+
+    <text_editor follows="left|top" height="36" layout="topleft" left="12" max_length="1024" name="status" top="404" width="396" word_wrap="true" read_only="true" show_context_menu="true" visible="false" />
+
+    <button follows="right|bottom" height="23" layout="topleft" left="308" name="close_btn" top="442" width="100" label="Close" />
+</floater>

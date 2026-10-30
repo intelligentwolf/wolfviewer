@@ -1903,6 +1903,12 @@
             <menu_item_check.on_click function="ToggleControl" parameter="WolfInvisibleMode" />
             <menu_item_check.on_visible function="WolfGrid.IsOnWolfTerritories" />
         </menu_item_check>
+        <!-- [SELECTIVE INVISIBLE MODE 2026-10-30] Paul: "allow certain users to see the person is online even if they are
+             in invisible mode" (wolffloaterinvisallow.cpp). [WOLF GRID GATE] as Invisible Mode above. -->
+        <menu_item_call label="Invisible Mode: People Who Can See Me..." name="WolfInvisibleAllow">
+            <menu_item_call.on_click function="Floater.Show" parameter="wolf_invis_allow" />
+            <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
+        </menu_item_call>
         <menu_item_separator />
         <!-- [WOLF BUG REPORT 2026-10-24] Paul: "a little bug icon on the menu that links to tickets and allows them to upload
              their logs" - the same window as the status bar's bug icon (wolffloaterbugreport.cpp). Paul 10-24 "only wolf

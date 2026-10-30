@@ -34,6 +34,7 @@
 #include "llhttpconstants.h"
 #include "llimagegl.h"
 #include "llnotificationsutil.h"
+#include "llradiogroup.h"
 #include "llrender.h"
 #include "llsdjson.h"
 #include "llsliderctrl.h"
@@ -143,6 +144,9 @@ std::string WolfTerrainPaint::strokeKey(const Stroke& s)
 {
     std::string k = llformat("%d|%.2f|%.2f|", s.mSlot, round2(s.mWidth), round2(s.mOpacity));
     for (F32 v : s.mPoints) k += llformat("%.2f,", round2(v));
+    // [ticket 355] a square stroke is not the same stroke as a round one along the same line; a round stroke's key is unchanged
+    // (terrain_paint.js strokeKey and php/terrain_paint.php paint_stroke_key add the shape the same way)
+    if (s.mSquare && s.mSlot != -2) k += "|b:square";
     if (s.mSlot == -2)
     {
         k += "|z:";
@@ -172,6 +176,31 @@ namespace
         return llmin(llmin(point_seg_d2(ax, ay, cx, cy, dx, dy), point_seg_d2(bx, by, cx, cy, dx, dy)),
                      llmin(point_seg_d2(cx, cy, ax, ay, bx, by), point_seg_d2(dx, dy, ax, ay, bx, by)));
     }
+    /**
+     * [2026-10-29 ticket 355] The square brush: how far (rx, ry) - metres from a segment's start - is from the segment (dx,
+     * dy), measured as the larger of the east-west and north-south distances (so a pixel is under a square of half-side R
+     * centred on the segment exactly when this is <= R: the square swept along the line). That distance to the point at t
+     * along it is max(|rx - t dx|, |ry - t dy|), a convex broken line in t, so its least over t in 0..1 is at an end, where
+     * one of the two is 0 (t = rx/dx, ry/dy), or where the two are equal (t = (rx - ry)/(dx - dy), (rx + ry)/(dx + dy)).
+     * terrain_paint.js squareSegDist is the same - keep them in step.
+     */
+    F32 square_seg_dist(F32 rx, F32 ry, F32 dx, F32 dy)
+    {
+        auto at = [&](F32 t) { return llmax(fabsf(rx - t * dx), fabsf(ry - t * dy)); };
+        F32 best = llmin(at(0.f), at(1.f));
+        auto consider = [&](F32 num, F32 den)
+        {
+            if (fabsf(den) <= 1e-9f) return;
+            const F32 t = num / den;
+            if (t > 0.f && t < 1.f) best = llmin(best, at(t));
+        };
+        consider(rx, dx);
+        consider(ry, dy);
+        consider(rx - ry, dx - dy);
+        consider(rx + ry, dx + dy);
+        return best;
+    }
+
     /** A polyline as segments; a single point is a zero-length segment. */
     void segments_of(const std::vector<F32>& p, std::vector<std::array<F32, 4>>& out)
     {
@@ -287,6 +316,8 @@ WolfTerrainPaint::Stroke WolfTerrainPaint::parseStroke(const LLSD& s, bool& ok)
         st.mPoints.push_back(y);
     }
     ok = st.mPoints.size() >= 2;
+    // [ticket 355] "b":"square" (absent in every older record: round). Water has no brush shape.
+    st.mSquare = st.mSlot != -2 && s.has("b") && s["b"].asString() == "square";
     if (st.mSlot == -2)
     {
         // Water: a surface height per point, the last one repeated where the record is short.
@@ -312,6 +343,7 @@ LLSD WolfTerrainPaint::strokeToLLSD(const Stroke& s)
     LLSD p = LLSD::emptyArray();
     for (F32 v : s.mPoints) p.append((F64)round2(v));
     out["p"] = p;
+    if (s.mSquare && s.mSlot != -2) out["b"] = "square";   // [ticket 355] only when square: a round stroke is written as before
     if (s.mSlot == -2)
     {
         LLSD z = LLSD::emptyArray();
@@ -844,8 +876,13 @@ void WolfTerrainPaint::unionBox(Box& a, bool& a_set, const Box& b)
  * Source: terrain_paint.js _rasterSegment — every pixel within the round-capped band records the
  * segment it is NEAREST to (distance, metres along the stroke = cum + the projection, and the
  * across-fraction: 0 at the left edge of travel, 1 at the right). Keep in step.
+ * [2026-10-29 ticket 355] `square`: the band is a square brush on the region's grid swept along
+ * the segment, and the distance is square_seg_dist (the larger of the east-west and north-south
+ * distances), so composite()'s feather follows the square's sides. The bounding box needs no
+ * change: the square reaches R along each axis, as the round brush does. Along and across are
+ * still taken from the line itself (a "road" texture runs along the stroke either way).
  */
-bool WolfTerrainPaint::rasterSegment(Layer& L, F32 x0, F32 y0, F32 x1, F32 y1, F32 w, F32 cum, Box& out)
+bool WolfTerrainPaint::rasterSegment(Layer& L, F32 x0, F32 y0, F32 x1, F32 y1, F32 w, F32 cum, bool square, Box& out)
 {
     const F32 seg[4] = { x0, y0, x1, y1 };
     out = bbox(L, seg, 4, w);
@@ -875,7 +912,7 @@ bool WolfTerrainPaint::rasterSegment(Layer& L, F32 x0, F32 y0, F32 x1, F32 y1, F
             {
                 lateral = ry;                           // a dab: no direction, face north
             }
-            const F32 dist = sqrtf(nx * nx + ny * ny);
+            const F32 dist = square ? square_seg_dist(rx, ry, dx, dy) : sqrtf(nx * nx + ny * ny);
             if (dist > R) continue;
             const size_t p = (size_t)j * W + i;
             // Ties stay with the segment processed first (the earlier one along the stroke).
@@ -954,18 +991,18 @@ void WolfTerrainPaint::composite(Layer& L, const Box& bb, const Stroke& s, const
     }
 }
 
-bool WolfTerrainPaint::rasterPolyline(Layer& L, const std::vector<F32>& p, F32 w, Box& out)
+bool WolfTerrainPaint::rasterPolyline(Layer& L, const std::vector<F32>& p, F32 w, bool square, Box& out)
 {
     bool set = false; Box seg; out = Box();
     F32 cum = 0.f;
     if (p.size() == 2)
     {
-        if (rasterSegment(L, p[0], p[1], p[0], p[1], w, 0.f, seg)) unionBox(out, set, seg);
+        if (rasterSegment(L, p[0], p[1], p[0], p[1], w, 0.f, square, seg)) unionBox(out, set, seg);
         return set;
     }
     for (size_t k = 2; k + 1 < p.size(); k += 2)
     {
-        if (rasterSegment(L, p[k - 2], p[k - 1], p[k], p[k + 1], w, cum, seg)) unionBox(out, set, seg);
+        if (rasterSegment(L, p[k - 2], p[k - 1], p[k], p[k + 1], w, cum, square, seg)) unionBox(out, set, seg);
         cum += sqrtf((p[k] - p[k - 2]) * (p[k] - p[k - 2]) + (p[k + 1] - p[k - 1]) * (p[k + 1] - p[k - 1]));
     }
     return set;
@@ -977,7 +1014,7 @@ void WolfTerrainPaint::rasterStroke(Layer& L, const Stroke& s)
     ensureScratch(L);
     clearScratch(L);
     Box box;
-    if (rasterPolyline(L, s.mPoints, clampWidth(s.mWidth), box)) composite(L, box, s, L.mMap, L.mMap);
+    if (rasterPolyline(L, s.mPoints, clampWidth(s.mWidth), s.mSquare, box)) composite(L, box, s, L.mMap, L.mMap);
 }
 
 bool WolfTerrainPaint::layerReady(const Layer& L, LLViewerRegion* regionp) const
@@ -1268,7 +1305,7 @@ void WolfTerrainPaint::editPaletteChanged()
     ++mEdit->mRev;
 }
 
-bool WolfTerrainPaint::beginStroke(S32 slot, F32 w, F32 o, F32 x, F32 y, F32 level, F32 depth)
+bool WolfTerrainPaint::beginStroke(S32 slot, F32 w, F32 o, F32 x, F32 y, F32 level, F32 depth, bool square)
 {
     Edit* ed = beginEdit();
     LLViewerRegion* rgn = gAgent.getRegion();
@@ -1315,6 +1352,7 @@ bool WolfTerrainPaint::beginStroke(S32 slot, F32 w, F32 o, F32 x, F32 y, F32 lev
     L.mLiveStroke.mSlot = slot;
     L.mLiveStroke.mWidth = clampWidth(w);
     L.mLiveStroke.mOpacity = clampOpacity(o);
+    L.mLiveStroke.mSquare = square;   // [ticket 355] (water returned above: never square)
     L.mLiveStroke.mPoints = { round2(x), round2(y) };
     L.mLiveBoxSet = false;
     // Two buffers, as terrain_paint.js: mLiveBase is the committed picture under the drag; the
@@ -1333,7 +1371,7 @@ void WolfTerrainPaint::updateLiveStroke(Layer& L)
     ensureScratch(L);
     clearScratch(L);
     Box box; bool set = false;
-    const bool has = rasterPolyline(L, L.mLiveStroke.mPoints, clampWidth(L.mLiveStroke.mWidth), box);
+    const bool has = rasterPolyline(L, L.mLiveStroke.mPoints, clampWidth(L.mLiveStroke.mWidth), L.mLiveStroke.mSquare, box);
     Box redo; bool redo_set = false;
     if (has) unionBox(redo, redo_set, box);
     if (L.mLiveBoxSet) unionBox(redo, redo_set, L.mLiveBox);
@@ -1509,6 +1547,9 @@ LLSD WolfTerrainPaint::editLayoutLLSD() const
     }
     layout["textures"] = tex;
     layout["strokes"] = strokes;
+    // [ticket 355] this viewer writes every stroke's shape: the service takes a stroke without "b" as round. Without this flag
+    // (an older viewer) it keeps the shape of a stored square stroke posted back unchanged, which that viewer cannot write.
+    layout["shapes"] = 1;
     return layout;
 }
 
@@ -1632,6 +1673,12 @@ F32 WolfToolTerrainPaint::brushOpacity() const
     return WolfTerrainPaint::clampOpacity(1.f - llclamp((F32)transparency, 0.f, 90.f) / 100.f);
 }
 
+bool WolfToolTerrainPaint::brushSquare() const
+{
+    static LLCachedControl<std::string> shape(gSavedSettings, "WolfTerrainPaintBrushShape", "round");
+    return std::string(shape) == "square";
+}
+
 // The ground under the pointer, in the AGENT region's metres (a stroke belongs to one region).
 bool WolfToolTerrainPaint::hit(S32 x, S32 y, F32& rx, F32& ry, F32& rz) const
 {
@@ -1659,7 +1706,7 @@ bool WolfToolTerrainPaint::handleMouseDown(S32 x, S32 y, MASK mask)
     const S32 slot = mErase ? -1 : mSlot;
     static LLCachedControl<F32> water_level(gSavedSettings, "WolfTerrainPaintWaterLevel", WolfTerrainPaint::WATER_LEVEL_DEFAULT);
     static LLCachedControl<F32> water_depth(gSavedSettings, "WolfTerrainPaintWaterDepth", WolfTerrainPaint::WATER_DEPTH_DEFAULT);
-    if (!tp.beginStroke(slot, w, brushOpacity(), rx, ry, (F32)water_level, (F32)water_depth))
+    if (!tp.beginStroke(slot, w, brushOpacity(), rx, ry, (F32)water_level, (F32)water_depth, slot != -2 && brushSquare()))
     {
         WolfTerrainPaint::Edit* ed = tp.edit();
         if (tp.agentLayerBaking()) mMessage = "The region's paint is still loading — try again in a moment.";
@@ -1757,6 +1804,8 @@ void WolfToolTerrainPaint::handleDeselect()
 
 // A ring on the ground the width of the brush, in the paint colour (Source: lltoolbrush.cpp
 // render/renderOverlay for the gGL line-drawing shape; no shader bind of its own).
+// [ticket 355] A square on the region's grid for the square brush (water is always the ring: it
+// is drawn along its line whatever the brush).
 void WolfToolTerrainPaint::render()
 {
     if (!mGotHover) return;
@@ -1767,6 +1816,7 @@ void WolfToolTerrainPaint::render()
     if (!rgn) return;
     const LLSurface& land = rgn->getLand();
     const F32 r = brushWidth() * 0.5f;
+    const bool square = brushSquare() && (mErase || mSlot != -2);
     gGL.matrixMode(LLRender::MM_MODELVIEW);
     gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
     LLGLDepthTest depth(GL_TRUE);
@@ -1777,9 +1827,26 @@ void WolfToolTerrainPaint::render()
     {
         for (S32 e = 0; e < 2; ++e)
         {
-            const F32 a = (F32)(k + e) / (F32)N * TAU;
-            const F32 px = llclamp(rx + r * cosf(a), 0.f, rgn->getWidth() - 0.01f);
-            const F32 py = llclamp(ry + r * sinf(a), 0.f, rgn->getWidth() - 0.01f);
+            F32 ox, oy;
+            if (square)
+            {
+                // round the square's edge in N equal steps (N / 4 a side), from its south-west corner anticlockwise, so it
+                // follows the ground as the ring does
+                const F32 u = (F32)(k + e) / (F32)N * 4.f;
+                const S32 side = llmin((S32)u, 3);
+                const F32 f = u - (F32)side;
+                const F32 cx[5] = { -r, r, r, -r, -r }, cy[5] = { -r, -r, r, r, -r };
+                ox = cx[side] + (cx[side + 1] - cx[side]) * f;
+                oy = cy[side] + (cy[side + 1] - cy[side]) * f;
+            }
+            else
+            {
+                const F32 a = (F32)(k + e) / (F32)N * TAU;
+                ox = r * cosf(a);
+                oy = r * sinf(a);
+            }
+            const F32 px = llclamp(rx + ox, 0.f, rgn->getWidth() - 0.01f);
+            const F32 py = llclamp(ry + oy, 0.f, rgn->getWidth() - 0.01f);
             const F32 pz = land.resolveHeightRegion(px, py) + 0.15f;
             const LLVector3 agent = rgn->getPosAgentFromRegion(LLVector3(px, py, pz));
             gGL.vertex3fv(agent.mV);
@@ -1822,6 +1889,10 @@ bool WolfPanelTerrainPaint::postBuild()
     mWaterLevel->set(gSavedSettings.getF32("WolfTerrainPaintWaterLevel"));
     mWaterDepth->set(gSavedSettings.getF32("WolfTerrainPaintWaterDepth"));
     mWidth        = getChild<LLSliderCtrl>("paint_width");
+    // [ticket 355] the brush shape, as it was left (round unless square was chosen)
+    mShape        = getChild<LLRadioGroup>("paint_shape");
+    mShape->setValue(gSavedSettings.getString("WolfTerrainPaintBrushShape") == "square" ? "square" : "round");
+    mShape->setCommitCallback(boost::bind(&WolfPanelTerrainPaint::onShape, this));
     mTransparency = getChild<LLSliderCtrl>("paint_transparency");
     mErase        = getChild<LLCheckBoxCtrl>("paint_erase");
     mArm          = getChild<LLButton>("paint_arm");
@@ -2058,6 +2129,14 @@ void WolfPanelTerrainPaint::onWaterParam()
 void WolfPanelTerrainPaint::onWidth()
 {
     gSavedSettings.setF32("WolfTerrainPaintBrushWidth", WolfTerrainPaint::clampWidth(mWidth->getValueF32()));
+}
+
+void WolfPanelTerrainPaint::onShape()
+{
+    const bool square = mShape->getValue().asString() == "square";
+    gSavedSettings.setString("WolfTerrainPaintBrushShape", square ? "square" : "round");
+    setStatus(square ? "Square brush: new strokes lay a square as wide as the brush, on the region's grid. Water still follows your line."
+                     : "Round brush: new strokes lay a circle as wide as the brush.", false);
 }
 
 void WolfPanelTerrainPaint::onTransparency()

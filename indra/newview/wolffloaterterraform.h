@@ -100,6 +100,9 @@ private:
     void paintBurrow();
     void paintTile(LLButton* b, WolfTerraform::ETool tool) const;
     void clearDrawing();
+    /** [ticket 355] The brush shape row as the tool needs it: the choice for the box tools, a note for the line tools. */
+    void updateShapeControls();
+    bool roundBrush() const;        // Round is chosen and the tool is a box tool
 
     WolfTerraform::ETool mTool = WolfTerraform::TOOL_LEVEL;
     std::vector<LLVector2> mClicks;
@@ -133,6 +136,9 @@ private:
     LLSpinCtrl *mBeachSlope = nullptr, *mBeachAbove = nullptr, *mBeachBelow = nullptr, *mBeachEdge = nullptr;
     LLSliderCtrl *mLevelEdge = nullptr, *mTerraceSharp = nullptr, *mTerraceEdge = nullptr, *mSmoothRadius = nullptr, *mSmoothStrength = nullptr;
     LLRadioGroup* mRoadGrade = nullptr;
+    LLRadioGroup* mShape = nullptr;             // [ticket 355] "square" / "round"
+    LLSliderCtrl* mRoundSoft = nullptr;         // [ticket 355] Soft rim %, Round only
+    LLTextBox* mShapeNote = nullptr;            // [ticket 355] the line tools' note in its place
     LLScrollListCtrl* mHistory = nullptr;
     WolfDigProgress* mDig = nullptr;
 };

@@ -93,7 +93,17 @@
     <spinner follows="left|top" layout="topleft" left_pad="2" top_delta="-2" width="60" height="20" name="paint_water_level" min_val="0" max_val="10" increment="0.1" initial_value="0.3" decimal_digits="1" tool_tip="Metres above the ground the water surface sits" />
     <text follows="left|top" layout="topleft" left_pad="6" top_delta="2" width="36" height="16" name="paint_water_depth_lbl">Depth</text>
     <spinner follows="left|top" layout="topleft" left_pad="2" top_delta="-2" width="60" height="20" name="paint_water_depth" min_val="0.05" max_val="20" increment="0.1" initial_value="1" decimal_digits="1" tool_tip="Depth of the water in metres (colour and fog)" />
-    <text follows="left|top" layout="topleft" left="8" top="316" width="130" height="14" name="paint_width_lbl">Width (m)</text>
+    <text follows="left|top" layout="topleft" left="8" top="316" width="100" height="14" name="paint_width_lbl">Width (m)</text>
+    <!-- [2026-10-29 ticket 355] "square would be nice option in painting". Round (every stroke before) or a
+         square on the region's grid, as wide as the brush; remembered (WolfTerrainPaintBrushShape). Water is always drawn
+         along its line. On the Width label's row, inside the panel's 288 px (a control past the panel's edge draws but
+         takes no clicks - see the min_height note at the top). -->
+    <text follows="left|top" layout="topleft" left="118" top="316" width="38" height="14" name="paint_shape_lbl">Shape</text>
+    <radio_group follows="left|top" layout="topleft" left="158" top="314" width="130" height="16" name="paint_shape"
+     tool_tip="Round: a circle as wide as the brush. Square: a square as wide as the brush, square to the region's grid (north up). Water is always drawn along your line.">
+        <radio_item layout="topleft" left="0" top="0" width="62" height="16" name="round" value="round" label="Round" />
+        <radio_item layout="topleft" left="64" top="0" width="66" height="16" name="square" value="square" label="Square" />
+    </radio_group>
     <slider follows="left|top" layout="topleft" left="8" top_pad="1" width="280" height="16" name="paint_width" min_val="0.25" max_val="32" increment="0.25" initial_value="4" decimal_digits="2" show_text="true" tool_tip="Width of the brush in metres" />
     <text follows="left|top" layout="topleft" left="8" top_pad="4" width="200" height="14" name="paint_transparency_lbl">Transparency (%, 0 = solid)</text>
     <slider follows="left|top" layout="topleft" left="8" top_pad="1" width="280" height="16" name="paint_transparency" min_val="0" max_val="90" increment="5" initial_value="0" decimal_digits="0" show_text="true" tool_tip="How see-through a new stroke is" />

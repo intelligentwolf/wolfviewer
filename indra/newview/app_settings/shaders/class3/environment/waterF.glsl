@@ -71,12 +71,13 @@ out vec4 frag_color;
 #ifdef WOLF_WATER_FULL
 // [T358 SHORE HOLES 2026-10-29] The per-pixel land rule in main() no longer cuts a hole in the sea where its conservative
 // terrain test only MIGHT find land: it moves the fragment's depth back to where its view ray meets the height the water
-// may stand at there, and the depth test against the terrain that is actually drawn decides (see main()). The depth only
-// ever moves AWAY from the eye, so on GLSL 4.20 (llshadermgr.cpp picks #version 420 for GLSL >= 4.20) it is declared
-// depth_greater (GLSL 4.20 spec 4.4.2.3, ARB_conservative_depth), which lets the GPU keep its early depth rejection.
-#if __VERSION__ >= 420
-layout (depth_greater) out float gl_FragDepth;
-#endif
+// may stand at there, and the depth test against the terrain that is actually drawn decides (see main()).
+// [W89 AMD WATER 2026-10-30] gl_FragDepth is NOT redeclared here (W88 had `layout (depth_greater) out float gl_FragDepth;`).
+// This unit is linked with a dozen shared fragment objects (llshadermgr.cpp attachShaderFeatures) that do not redeclare it,
+// and a glslang-based linker from before glslang #3920 (4056002eb2, July 2025; linkValidate.cpp mergeModes) treats "not
+// redeclared" as a contradicting depth layout: AMD's driver (ticket 382, RX 7800 XT, 26.10.1) failed the Water Shader with
+// "Contradictory depth layouts", and the retries then reported a missing calcAtmospherics. A plain write is valid everywhere
+// (the redeclaration is optional; glslang #3920 relaxed the rule for that reason); the cost is the GPU's early depth test on this program.
 uniform mat4 projection_matrix;   // LLRender::syncMatrices uploads it to every shader that declares it (llrender.cpp)
 #endif
 

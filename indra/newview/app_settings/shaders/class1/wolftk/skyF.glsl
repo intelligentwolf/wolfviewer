@@ -480,6 +480,49 @@ vec3 wolfMeteors(vec3 dirWorld, float fragmentAngle)
     return sum;
 }
 
+// [WolfViewer 2026-10-30 ticket #334] the bodies' depth pass (wolfenvironmentrender.cpp renderSkyDome). The dome itself writes no
+// depth, as LL's sky dome does not (Source: llvowlsky.cpp:718 LLVOWLSky::drawDome, LLGLDepthTest(GL_TRUE, GL_FALSE)), so the sky
+// keeps the G-buffer's cleared 1.0. LL's moon and sun are the sky's only depth writers (Source: lldrawpoolwlsky.cpp
+// renderHeavenlyBodies, LLGLSPipelineBlendSkyBox(true, true), "SL-14113 we need moon to write to depth to clip stars behind";
+// moonV.glsl:43 pos.z = pos.w x 0.999991, sunDiscV.glsl:48 x 0.999999), so the stars (starsV.glsl:46 pos.z = pos.w, depth 1.0,
+// LEQUAL) are hidden behind them. Here the moon, the sun and the other bodies are drawn by this program, so a second draw of the
+// screen triangle with uBodyDepth 1 writes depth (colour masked off) on their discs only, every other pixel discarded.
+uniform float uBodyDepth;
+bool wolfBodyCovers(vec3 dirWorld, vec3 rayDirectionECEF)
+{
+    // the physical moon (wolfMoonDisc: r < 1)
+    if (uMoonOn > 0.5)
+    {
+        float c = dot(dirWorld, uMoonDir);
+        if (c > 0.0 && length(dirWorld - uMoonDir * c) < max(uMoonSin, 1e-6)) return true;
+    }
+    // the extra suns, moons and planets (wolfBodies: r < 1)
+    for (int i = 0; i < 12; i++)
+    {
+        if (i >= uBodyCount) break;
+        float c = dot(dirWorld, uBodyDir[i]);
+        if (c <= 0.0) continue;
+        if (length(dirWorld - uBodyDir[i] * c) < max(uBodySin[i], 1e-6)) return true;
+    }
+    // the EEP's moon (wolfEepMoon: inside its quad; the real moon's round disc, or the texture's own opaque texels)
+    if (uEepMoonOn > 0.5)
+    {
+        float c = dot(dirWorld, uEepMoonTo);
+        if (c > 0.0)
+        {
+            vec2 p = vec2(dot(dirWorld, uEepMoonRight), dot(dirWorld, uEepMoonUp)) / (c * uEepMoonHalf);
+            if (abs(p.x) <= 1.0 && abs(p.y) <= 1.0)
+            {
+                if (uEepMoonReal > 0.5) { if (length(p) <= 1.0) return true; }
+                else if (texture(wolfMoonMap, p * 0.5 + 0.5).a > 2.0 / 255.0) return true;
+            }
+        }
+    }
+    // the sun's disc (wolfTkSkyRadiance: the disc at the EEP's sun_scale)
+    if (uDrawSunDisc > 0.5 && dot(rayDirectionECEF, sunDirection) > cos(ATMOSPHERE.sun_angular_radius * (1.0 + uSunScaleD))) return true;
+    return false;
+}
+
 void main()
 {
     // this pixel's direction from the camera's own matrices (the screen triangle, wolfEnvSkyV.glsl), or a probe's
@@ -490,6 +533,17 @@ void main()
         vec2 ndc = (gl_FragCoord.xy - viewportOrigin) / resolution * 2.0 - 1.0;
         vec4 p = uScreenToWorldDir * vec4(ndc, 0.0, 1.0);
         dirWorld = normalize(p.xyz / p.w);
+    }
+
+    // [WolfViewer 2026-10-30 ticket #334] the bodies' depth pass (above): depth on the discs only, the colour targets masked off
+    if (uBodyDepth > 0.5)
+    {
+        if (!wolfBodyCovers(dirWorld, normalize((worldToECEFMatrix * vec4(dirWorld, 0.0)).xyz))) discard;
+        frag_data[0] = vec4(0.0);
+        frag_data[1] = vec4(0.0);
+        frag_data[2] = vec4(0.0);
+        frag_data[3] = vec4(0.0);
+        return;
     }
 
     // Source: sky.frag:45-48

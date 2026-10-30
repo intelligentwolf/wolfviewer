@@ -1113,7 +1113,9 @@ void main()
         float along = dot(wp, wd), across = dot(wp, vec2(-wd.y, wd.x));
         float sn = 0.6 * wolfFoamNoise(vec2(along / 36.0 - time * 0.05, across / 1.6))
                  + 0.4 * wolfFoamNoise(vec2(along / 12.0 - time * 0.11, across / 0.7) + vec2(7.0, 3.0));
-        float cover = min(F, 0.7);   // [WILD SEA 2026-10-30] at most 70 % of the sea in streaks (CONVENTION: a full white sheet at F = 1, U >= 37 m/s, hid every wave in the dock test)
+        // [WILD SEA 2026-10-30] at most 40 % of the sea in streaks (CONVENTION; Paul ~16:4xZ: at 70 % the eyewall sea read as white
+        // snow dunes in a real render - dark water must show between the streaks; was 0.7, and a full white sheet at F = 1 before that)
+        float cover = min(F, 0.4);
         float streak = smoothstep(1.0 - cover, 1.0 - cover + 0.15, sn) * step(1e-4, cover);
         // [WILD SEA 2026-10-30] far away the 0.7-1.6 m streak and spray noise is finer than a pixel and shimmered into stripes (dock
         // test, high view): from 80 m to 300 m the streaks go to their mean cover and the spray noise to its mean (CONVENTION)

@@ -374,11 +374,18 @@ void WolfWeatherPartSource::emit(const LLVector3& cam)
         // was below a pixel at any distance and the rain was invisible (Paul: "snowing worked
         // ... raining did not"; snow is 9 cm). Size scales both, so heavier rain is fatter as
         // well as longer.
-        part->mScale.set(0.07f * size_k, 0.8f * size_k);
+        // [2026-10-30 ~16:50Z] THIN, LIGHT STREAKS. A real render under a category 5 (Paul ~16:4xZ) showed heavy rain as near-black
+        // vertical posts: at the frame budget's floor each drop was 1 / sqrt(0.25) = 2 x wider as well as longer (14 cm x 1.6 m), and
+        // the lit streak took the storm's dark light and was alpha-blended OVER the scene, darkening it. Now the width is the
+        // profile's only (the budget lengthens a drop, never widens it) and rain is blended ADDITIVELY at a lower alpha
+        // (CONVENTION: 0.45 / 0.3): a drop can only brighten what is behind it, by the light that reaches it - light, thin,
+        // see-through water streaks by day, faint at night, never dark posts. Every rain, not only a storm's.
+        part->mBlendFuncDest = LLRender::BF_ONE;
+        part->mScale.set(0.07f * (F32)mProfile.mSize / 100.f, 0.8f * size_k);
         part->mStartScale = part->mScale;
         part->mEndScale = part->mScale;
-        part->mStartColor = LLColor4(draw.mV[VRED], draw.mV[VGREEN], draw.mV[VBLUE], 0.65f);
-        part->mEndColor = LLColor4(draw.mV[VRED], draw.mV[VGREEN], draw.mV[VBLUE], 0.5f);
+        part->mStartColor = LLColor4(draw.mV[VRED], draw.mV[VGREEN], draw.mV[VBLUE], 0.45f);
+        part->mEndColor = LLColor4(draw.mV[VRED], draw.mV[VGREEN], draw.mV[VBLUE], 0.3f);
         part->mColor = part->mStartColor;
         // [2026-09-12] NOT emissive. LL_PART_EMISSIVE_MASK means "instead of being lit"
         // (llpartdata.h:115), so rain glowed its own colour at midnight and under cover, which

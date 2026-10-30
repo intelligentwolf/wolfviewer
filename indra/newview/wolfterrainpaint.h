@@ -101,6 +101,9 @@ public:
     static constexpr F32 MAX_WIDTH = 64.f;
     static constexpr F32 MIN_SCALE = 0.5f;
     static constexpr F32 MAX_SCALE = 64.f;
+    // [PAINT LIMITS 2026-10-29, ticket 364] Only the fallback now (a region up to 1024 x 1024 m): the
+    // service sends each region's own caps, which grow with a big region's area (php/terrain_paint_limits.php
+    // paint_limits, payload "limits"), and save() checks against Record::mMaxStrokes / mMaxPoints.
     static constexpr S32 MAX_STROKES = 4000;
     static constexpr S32 MAX_POINTS = 80000;
     static constexpr F32 REFRESH_SECS = 120.f;
@@ -129,6 +132,8 @@ public:
         U64  mHandle = 0;
         S32  mSizeX = 256;
         S32  mSizeY = 256;
+        S32  mMaxStrokes = MAX_STROKES;   // [ticket 364] payload limits.strokes (this region's cap)
+        S32  mMaxPoints = MAX_POINTS;     // [ticket 364] payload limits.points
         S32  mVersion = 0;
         bool mEnabled = true;
         bool mStored = false;

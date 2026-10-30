@@ -43,6 +43,7 @@
 #include "lltextbox.h"
 #include "lltoolmgr.h"
 #include "llviewerparceloverlay.h"
+#include "llviewercontrol.h"
 #include "llviewerregion.h"
 #include "wolfburrow.h"
 #include "wolfdigprogress.h"
@@ -63,8 +64,15 @@ namespace
     // a second click closer than this to the last is the second press of a double-click (the Tunnel tool's SEG_MIN_M,
     // wolffloatertunnels.cpp)
     constexpr F32 SAME_CLICK_M = 0.5f;
-    // Base and More options heights (floater_wolf_terraform.xml: 596 high, the More options panels 60 high at its foot)
-    constexpr S32 BASE_H = 596, MORE_H = 64;
+    // Base and More options heights (floater_wolf_terraform.xml: 620 high - 596 until the brush shape row, ticket 355 - the More
+    // options panels 60 high at its foot)
+    constexpr S32 BASE_H = 620, MORE_H = 64;
+    // [ticket 355] the brush shape row's values (floater_wolf_terraform.xml tf_shape radio_item value=) and its settings
+    // (app_settings/settings.xml WolfTerraformBrushShape, WolfTerraformRoundSoft)
+    const char* const SHAPE_SQUARE = "square";
+    const char* const SHAPE_ROUND = "round";
+    // the round outline's pieces round the whole rim (one every few metres would show corners on a small circle)
+    constexpr S32 OVAL_PARTS = 96;
 
     const char* const TOOL_KEY[TOOL_COUNT] = { "level", "ramp", "terrace", "smooth", "road", "river", "beach" };
     const char* const TOOL_WORD[TOOL_COUNT] = { "Level", "Ramp", "Terrace", "Smooth", "Road", "River", "Beach" };
@@ -141,6 +149,23 @@ bool WolfFloaterTerraform::postBuild()
     mRoadGrade = getChild<LLRadioGroup>("tf_road_grade");
     mHistory = getChild<LLScrollListCtrl>("tf_history");
     mRoadGrade->setValue("follow");
+    // [ticket 355] the brush shape, as it was left (Square, the whole box, unless Round was chosen)
+    mShape = getChild<LLRadioGroup>("tf_shape");
+    mRoundSoft = getChild<LLSliderCtrl>("tf_round_soft");
+    mShapeNote = getChild<LLTextBox>("tf_shape_note");
+    mShape->setValue(gSavedSettings.getString("WolfTerraformBrushShape") == SHAPE_ROUND ? SHAPE_ROUND : SHAPE_SQUARE);
+    mRoundSoft->setValue(llclamp(gSavedSettings.getF32("WolfTerraformRoundSoft"), 0.f, 100.f));
+    mShape->setCommitCallback([this](LLUICtrl*, const LLSD&)
+    {
+        gSavedSettings.setString("WolfTerraformBrushShape", mShape->getValue().asString() == SHAPE_ROUND ? SHAPE_ROUND : SHAPE_SQUARE);
+        updateShapeControls();
+        changed();
+    });
+    mRoundSoft->setCommitCallback([this](LLUICtrl*, const LLSD&)
+    {
+        gSavedSettings.setF32("WolfTerraformRoundSoft", llclamp(mRoundSoft->getValueF32(), 0.f, 100.f));
+        changed();
+    });
 
     // every setting works the plan out again
     for (LLUICtrl* c : std::initializer_list<LLUICtrl*>{ mLevelUse, mLevelHeight, mLevelEdge, mRampWidth, mRampShoulder, mRampTyped, mRampA,
@@ -244,8 +269,23 @@ void WolfFloaterTerraform::pickTool(ETool tool)
         mTiles[t]->setToggleState(t == tool);
         mSimple[t]->setVisible(t == tool);
     }
+    updateShapeControls();
     relayout();
     changed();
+}
+
+bool WolfFloaterTerraform::roundBrush() const
+{
+    return isBoxTool(mTool) && mShape && mShape->getValue().asString() == SHAPE_ROUND;
+}
+
+void WolfFloaterTerraform::updateShapeControls()
+{
+    if (!mShape) return;
+    const bool box = isBoxTool(mTool);
+    mShape->setEnabled(box && !Jobs::instance().busy());
+    mRoundSoft->setVisible(box && roundBrush());
+    mShapeNote->setVisible(!box);
 }
 
 WolfTerraform::Params WolfFloaterTerraform::readParams() const
@@ -274,6 +314,8 @@ WolfTerraform::Params WolfFloaterTerraform::readParams() const
     p.beachAbove = mBeachAbove->getValueF32();
     p.beachBelow = mBeachBelow->getValueF32();
     p.beachEdge = mBeachEdge->getValueF32();
+    p.round = roundBrush();
+    p.roundSoft = llclamp(mRoundSoft->getValueF32(), 0.f, 100.f) / 100.f;
     return p;
 }
 
@@ -343,6 +385,19 @@ void WolfFloaterTerraform::buildPreview()
     {
         const WolfTerraformMath::Box b = WolfTerraformMath::boxOf(mClicks[0].mV[0], mClicks[0].mV[1], mClicks[1].mV[0], mClicks[1].mV[1]);
         const F32 x0 = (F32)b.x0 - 0.5f, x1 = (F32)b.x1 + 0.5f, y0 = (F32)b.y0 - 0.5f, y1 = (F32)b.y1 + 0.5f;
+        if (roundBrush())
+        {
+            // [ticket 355] the round brush's rim (wolfterraformmath.h ovalOf: the circle or oval touching the box's sides)
+            const WolfTerraformMath::Oval o = WolfTerraformMath::ovalOf(b);
+            const F32 tau = 6.2831853f;
+            for (S32 i = 0; i < OVAL_PARTS; ++i)
+            {
+                const F32 a0 = tau * (F32)i / (F32)OVAL_PARTS, a1 = tau * (F32)(i + 1) / (F32)OVAL_PARTS;
+                const F32 px0 = o.cx + o.a * cosf(a0), py0 = o.cy + o.b * sinf(a0), px1 = o.cx + o.a * cosf(a1), py1 = o.cy + o.b * sinf(a1);
+                mOutline.emplace_back(px0, py0, land.resolveHeightRegion(px0, py0) + 0.15f);
+                mOutline.emplace_back(px1, py1, land.resolveHeightRegion(px1, py1) + 0.15f);
+            }
+        }
         auto edge = [&](F32 ax, F32 ay, F32 bx, F32 by)
         {
             const S32 parts = llclamp((S32)(llmax(fabsf(bx - ax), fabsf(by - ay)) / 2.f), 1, 512);
@@ -354,10 +409,13 @@ void WolfFloaterTerraform::buildPreview()
                 mOutline.emplace_back(px1, py1, land.resolveHeightRegion(px1, py1) + 0.15f);
             }
         };
-        edge(x0, y0, x1, y0);
-        edge(x1, y0, x1, y1);
-        edge(x1, y1, x0, y1);
-        edge(x0, y1, x0, y0);
+        if (!roundBrush())
+        {
+            edge(x0, y0, x1, y0);
+            edge(x1, y0, x1, y1);
+            edge(x1, y1, x0, y1);
+            edge(x0, y1, x0, y0);
+        }
     }
     const Grid& t = mPlan.mTarget;
     const Grid& g = mPlan.mBefore;
@@ -600,6 +658,13 @@ std::string WolfFloaterTerraform::routeHint() const
     case TOOL_BEACH:
     {
         static const char* WHAT[TOOL_COUNT] = { "level", "", "terrace", "smooth", "", "", "make a beach in (across the water's edge)" };
+        if (roundBrush())
+        {
+            // [ticket 355] the round brush is drawn by the box it fits in
+            if (n == 0) return llformat("Click one corner of a box round the circle to %s.", WHAT[mTool]);
+            if (n == 1) return "Now click the opposite corner: the circle fits inside the box.";
+            return "Drag a corner to change the circle. Red will be cut, green filled: press Apply in the Terraform window.";
+        }
         if (n == 0) return llformat("Click one corner of the area to %s.", WHAT[mTool]);
         if (n == 1) return "Now click the opposite corner.";
         return "Drag a corner to change the box. Red will be cut, green filled: press Apply in the Terraform window.";
@@ -753,6 +818,7 @@ void WolfFloaterTerraform::updateControls()
     mUndo->setEnabled(on_wolf && canUndo());
     mRedo->setEnabled(on_wolf && canRedo());
     for (LLButton* b : mTiles) b->setEnabled(!busy);
+    updateShapeControls();
     mLevelPick->setEnabled(!busy);
     mLevelWater->setEnabled(!busy);
     mHint->setText(on_wolf ? routeHint() : std::string("Terraform works on Wolf Territories regions only."));
@@ -833,7 +899,7 @@ void WolfFloaterTerraform::paintBurrow()
                Jobs::instance().busy() ? WolfPaint::animSeconds() : 0.f);
     auto wide = [R](LLRect r) { if (!r.isEmpty()) { r.mLeft = L; r.mRight = R; } return r; };
     std::vector<LLView*> first(std::begin(mTiles), std::end(mTiles));
-    for (LLView* v : { (LLView*)mHint, (LLView*)mUndoPoint, (LLView*)mStartOver, (LLView*)mDrawInfo }) first.push_back(v);
+    for (LLView* v : { (LLView*)mHint, (LLView*)mUndoPoint, (LLView*)mStartOver, (LLView*)mDrawInfo, (LLView*)mShape }) first.push_back(v);
     drawSection(wide(around(first, this, 4, 16)), "1  PICK A TOOL, THEN CLICK ON THE GROUND");
     drawSection(wide(around({ mSimple[mTool] }, this, 2, 16)), "2  SETTINGS");
     drawSection(wide(around({ mSummary, mApply, mStop, mStatus }, this, 4, 16)), "3  SEE IT, THEN APPLY");

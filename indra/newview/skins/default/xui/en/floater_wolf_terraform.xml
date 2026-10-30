@@ -8,7 +8,7 @@
      Flow: 1. pick a tool tile -> click (or draw) on the ground; the hint line says what -> 2. its two or three settings (the rest
      under More options, closed) -> 3. the preview in the world (red = cut, green = fill), Apply and the summary under it (the mole plate lies over the summary and the status line, never over Apply or Stop) -> the mole plate
      while it works -> 4. the step in History, Undo / Redo.
-     Layout: 596 high with More options closed; More options adds 64 at the bottom (WolfFloaterTerraform::relayout). The burrow
+     Layout: 620 high with More options closed (596 until the brush shape row, ticket 355); More options adds 64 at the bottom (WolfFloaterTerraform::relayout). The burrow
      look (wolfburrow.cpp): fixed colours on fixed paint, so every text pair keeps its contrast in every skin
      (region-terrain-work/cave-lights/check/burrow_contrast.py: CREAM on a plate 13.4:1, MUTED 9.1:1, DIS 6.8:1, CREAM on stone
      8.1:1+, INK on amber 6.7:1+). The tool tiles' pictures and words are painted (paintBurrow). -->
@@ -16,7 +16,7 @@
  can_close="true"
  can_minimize="true"
  can_resize="false"
- height="596"
+ height="620"
  layout="topleft"
  name="wolf_terraform"
  help_topic="wolf_terraform"
@@ -44,7 +44,23 @@
     <button label_color_disabled_selected="0.7 0.66 0.6 1" label_color_disabled="0.7 0.66 0.6 1" label_color_selected="0.95 0.92 0.84 1" label_color="0.95 0.92 0.84 1" label_shadow="false" hover_glow_amount="0" image_color_disabled="0 0 0 0" image_color="0 0 0 0" follows="left|top" layout="topleft" height="22" label="Start over" left="138" name="tf_start_over" top="186" width="96"
      tool_tip="Clear the points and draw again" />
     <text text_color="0.82 0.76 0.66 1" follows="left|top" font="SansSerifSmall" height="16" layout="topleft" left="240" name="tf_draw_info" top="191" width="210" />
-    <panel follows="left|top" height="26" layout="topleft" left="0" name="tf_simple_level" top="236" visible="false" width="460">
+    <!-- [2026-10-29 ticket 355] The box tools' brush shape (wolfterraformmath.h Oval): Square, the whole box (as before), or Round,
+         the circle inside it, its rim eased over Soft rim % of the radius. Ramp, Road and River follow their line (greyed, the note
+         says so). Remembered: WolfTerraformBrushShape, WolfTerraformRoundSoft. -->
+    <text text_color="0.95 0.92 0.84 1" follows="left|top" height="16" layout="topleft" left="10" name="tf_shape_lbl" top="216" width="44">Brush</text>
+    <radio_group follows="left|top" height="18" layout="topleft" left="56" name="tf_shape" top="214" width="150"
+     tool_tip="Square: the whole box between the two corners you click. Round: the circle inside that box (an oval when the box is not square).">
+        <radio_item height="18" label="Square" layout="topleft" left="0" name="square" top="0" value="square" width="70">
+<radio_item.label_text text_color="0.95 0.92 0.84 1" text_readonly_color="0.7 0.66 0.6 1" />
+</radio_item>
+        <radio_item height="18" label="Round" layout="topleft" left="74" name="round" top="0" value="round" width="70">
+<radio_item.label_text text_color="0.95 0.92 0.84 1" text_readonly_color="0.7 0.66 0.6 1" />
+</radio_item>
+    </radio_group>
+    <slider text_disabled_color="0.7 0.66 0.6 1" text_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" height="16" show_text="true" decimal_digits="0" increment="5" initial_value="100" label="Soft rim %" label_width="66" left="212" name="tf_round_soft"
+     max_val="100" min_val="0" top="216" width="238" tool_tip="How much of the circle's radius its rim eases into the ground over. 100: from the middle to the rim, so raising the ground makes a rounded hump. 0: a hard rim (Soft edge under More options then eases it in)." />
+    <text text_color="0.82 0.76 0.66 1" follows="left|top" font="SansSerifSmall" height="16" layout="topleft" left="212" name="tf_shape_note" top="218" width="238" visible="false">Ramp, Road and River follow their line.</text>
+    <panel follows="left|top" height="26" layout="topleft" left="0" name="tf_simple_level" top="260" visible="false" width="460">
         <check_box follows="left|top" height="16" initial_value="false" label="Level to" layout="topleft" left="10" name="tf_level_use" top="4" width="74"
          tool_tip="Ticked: the box goes to this height. Not ticked: to the ground's height where you clicked first.">
 <check_box.label_text text_color="0.95 0.92 0.84 1" text_readonly_color="0.7 0.66 0.6 1" />
@@ -56,24 +72,24 @@
         <button label_color_disabled_selected="0.7 0.66 0.6 1" label_color_disabled="0.7 0.66 0.6 1" label_color_selected="0.95 0.92 0.84 1" label_color="0.95 0.92 0.84 1" label_shadow="false" hover_glow_amount="0" image_color_disabled="0 0 0 0" image_color="0 0 0 0" follows="left|top" layout="topleft" height="22" label="Water + 0.5 m" left="288" name="tf_level_water" top="1" width="110"
          tool_tip="Half a metre above this region's water: a beach or shore line" />
     </panel>
-    <panel follows="left|top" height="26" layout="topleft" left="0" name="tf_simple_ramp" top="236" visible="false" width="460">
+    <panel follows="left|top" height="26" layout="topleft" left="0" name="tf_simple_ramp" top="260" visible="false" width="460">
         <spinner text_disabled_color="0.7 0.66 0.6 1" text_enabled_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" height="19" decimal_digits="1" increment="0.5" initial_value="6" label="Width (m)" label_width="64" left="10"
          max_val="40" min_val="1" name="tf_ramp_width" top="2" width="150" tool_tip="The ramp's flat width, metres (1 to 40)" />
         <text text_color="0.82 0.76 0.66 1" follows="left|top" height="16" layout="topleft" left="170" name="tf_ramp_info" top="4" width="280" />
     </panel>
-    <panel follows="left|top" height="26" layout="topleft" left="0" name="tf_simple_terrace" top="236" visible="false" width="460">
+    <panel follows="left|top" height="26" layout="topleft" left="0" name="tf_simple_terrace" top="260" visible="false" width="460">
         <spinner text_disabled_color="0.7 0.66 0.6 1" text_enabled_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" height="19" decimal_digits="2" increment="0.25" initial_value="2" label="Step (m)" label_width="56" left="10"
          max_val="20" min_val="0.25" name="tf_terrace_step" top="2" width="140" tool_tip="How far apart the shelves are in height, metres (0.25 to 20)" />
         <slider text_disabled_color="0.7 0.66 0.6 1" text_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" height="16" show_text="true" decimal_digits="2" increment="0.05" initial_value="0.8" label="Sharpness" label_width="64" left="160"
          max_val="1" min_val="0" name="tf_terrace_sharp" top="4" width="230" tool_tip="0: the slope stays; 1: crisp level shelves with steep steps between" />
     </panel>
-    <panel follows="left|top" height="26" layout="topleft" left="0" name="tf_simple_smooth" top="236" visible="false" width="460">
+    <panel follows="left|top" height="26" layout="topleft" left="0" name="tf_simple_smooth" top="260" visible="false" width="460">
         <slider text_disabled_color="0.7 0.66 0.6 1" text_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" height="16" show_text="true" decimal_digits="0" increment="1" initial_value="8" label="Radius (m)" label_width="66" left="10"
          max_val="32" min_val="1" name="tf_smooth_radius" top="4" width="210" tool_tip="How wide the smoothing reaches, metres (1 to 32; the region's own Smooth reaches 4)" />
         <slider text_disabled_color="0.7 0.66 0.6 1" text_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" height="16" show_text="true" decimal_digits="0" increment="5" initial_value="70" label="Strength %" label_width="66" left="230"
          max_val="100" min_val="5" name="tf_smooth_strength" top="4" width="210" tool_tip="How much of the way to smooth it goes (100: all the way)" />
     </panel>
-    <panel follows="left|top" height="26" layout="topleft" left="0" name="tf_simple_road" top="236" visible="false" width="460">
+    <panel follows="left|top" height="26" layout="topleft" left="0" name="tf_simple_road" top="260" visible="false" width="460">
         <spinner text_disabled_color="0.7 0.66 0.6 1" text_enabled_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" height="19" decimal_digits="1" increment="0.5" initial_value="6" label="Width (m)" label_width="64" left="10"
          max_val="30" min_val="1" name="tf_road_width" top="2" width="150" tool_tip="The road's flat width, metres (1 to 30)" />
         <radio_group follows="left|top" height="18" layout="topleft" left="170" name="tf_road_grade" top="3" width="280"
@@ -86,7 +102,7 @@
 </radio_item>
         </radio_group>
     </panel>
-    <panel follows="left|top" height="26" layout="topleft" left="0" name="tf_simple_river" top="236" visible="false" width="460">
+    <panel follows="left|top" height="26" layout="topleft" left="0" name="tf_simple_river" top="260" visible="false" width="460">
         <spinner text_disabled_color="0.7 0.66 0.6 1" text_enabled_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" height="19" decimal_digits="1" increment="0.5" initial_value="6" label="Width (m)" label_width="64" left="10"
          max_val="40" min_val="1" name="tf_river_width" top="2" width="140" tool_tip="The channel's width, metres (1 to 40)" />
         <spinner text_disabled_color="0.7 0.66 0.6 1" text_enabled_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" height="19" decimal_digits="2" increment="0.25" initial_value="1.5" label="Depth (m)" label_width="64" left="160"
@@ -96,36 +112,36 @@
 <check_box.label_text text_color="0.95 0.92 0.84 1" text_readonly_color="0.7 0.66 0.6 1" />
 </check_box>
     </panel>
-    <panel follows="left|top" height="26" layout="topleft" left="0" name="tf_simple_beach" top="236" visible="false" width="460">
+    <panel follows="left|top" height="26" layout="topleft" left="0" name="tf_simple_beach" top="260" visible="false" width="460">
         <spinner text_disabled_color="0.7 0.66 0.6 1" text_enabled_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" height="19" decimal_digits="0" increment="1" initial_value="10" label="Slope (%)" label_width="64" left="10"
          max_val="100" min_val="1" name="tf_beach_slope" top="2" width="150" tool_tip="How steeply the beach rises out of the water, percent (10: a metre up every 10 m)" />
         <text text_color="0.82 0.76 0.66 1" follows="left|top" height="16" layout="topleft" left="170" name="tf_beach_info" top="4" width="280" />
     </panel>
-    <text text_color="0.95 0.92 0.84 1" follows="left|top" height="44" layout="topleft" left="10" name="tf_summary" top="344" width="440" word_wrap="true" />
-    <button font="SansSerifBold" label_color_disabled_selected="0.7 0.66 0.6 1" label_color_disabled="0.7 0.66 0.6 1" label_color_selected="0.12 0.07 0.03 1" label_color="0.12 0.07 0.03 1" label_shadow="false" hover_glow_amount="0" image_color_disabled="0 0 0 0" image_color="0 0 0 0" follows="left|top" layout="topleft" height="30" label="Apply" left="10" name="tf_apply" top="308" width="200"
+    <text text_color="0.95 0.92 0.84 1" follows="left|top" height="44" layout="topleft" left="10" name="tf_summary" top="368" width="440" word_wrap="true" />
+    <button font="SansSerifBold" label_color_disabled_selected="0.7 0.66 0.6 1" label_color_disabled="0.7 0.66 0.6 1" label_color_selected="0.12 0.07 0.03 1" label_color="0.12 0.07 0.03 1" label_shadow="false" hover_glow_amount="0" image_color_disabled="0 0 0 0" image_color="0 0 0 0" follows="left|top" layout="topleft" height="30" label="Apply" left="10" name="tf_apply" top="332" width="200"
      tool_tip="Change the ground as the preview shows (kept in History: Undo takes it back)" />
-    <button label_color_disabled_selected="0.7 0.66 0.6 1" label_color_disabled="0.7 0.66 0.6 1" label_color_selected="0.95 0.92 0.84 1" label_color="0.95 0.92 0.84 1" label_shadow="false" hover_glow_amount="0" image_color_disabled="0 0 0 0" image_color="0 0 0 0" follows="left|top" layout="topleft" height="22" label="Stop" left="220" name="tf_stop" top="312" width="100"
+    <button label_color_disabled_selected="0.7 0.66 0.6 1" label_color_disabled="0.7 0.66 0.6 1" label_color_selected="0.95 0.92 0.84 1" label_color="0.95 0.92 0.84 1" label_shadow="false" hover_glow_amount="0" image_color_disabled="0 0 0 0" image_color="0 0 0 0" follows="left|top" layout="topleft" height="22" label="Stop" left="220" name="tf_stop" top="336" width="100"
      tool_tip="Stop at the next safe point (what is done stays; Undo puts it back)" />
-    <text text_color="0.95 0.92 0.84 1" follows="left|top" height="42" layout="topleft" left="10" name="tf_status" top="390" width="440" word_wrap="true" />
-    <scroll_list draw_heading="true" follows="left|top" height="76" layout="topleft" left="10" name="tf_history" top="460" width="440"
+    <text text_color="0.95 0.92 0.84 1" follows="left|top" height="42" layout="topleft" left="10" name="tf_status" top="414" width="440" word_wrap="true" />
+    <scroll_list draw_heading="true" follows="left|top" height="76" layout="topleft" left="10" name="tf_history" top="484" width="440"
      tool_tip="What Apply did on this region in this session, newest last (kept until you log out, up to 20 steps)">
         <scroll_list.columns label="Step" name="label" width="320" />
         <scroll_list.columns label="" name="state" width="110" />
     </scroll_list>
-    <button label_color_disabled_selected="0.7 0.66 0.6 1" label_color_disabled="0.7 0.66 0.6 1" label_color_selected="0.95 0.92 0.84 1" label_color="0.95 0.92 0.84 1" label_shadow="false" hover_glow_amount="0" image_color_disabled="0 0 0 0" image_color="0 0 0 0" follows="left|top" layout="topleft" height="22" label="Undo" left="10" name="tf_undo" top="540" width="110"
+    <button label_color_disabled_selected="0.7 0.66 0.6 1" label_color_disabled="0.7 0.66 0.6 1" label_color_selected="0.95 0.92 0.84 1" label_color="0.95 0.92 0.84 1" label_shadow="false" hover_glow_amount="0" image_color_disabled="0 0 0 0" image_color="0 0 0 0" follows="left|top" layout="topleft" height="22" label="Undo" left="10" name="tf_undo" top="564" width="110"
      tool_tip="Put the ground back as it was before the last step (Ctrl+Z)" />
-    <button label_color_disabled_selected="0.7 0.66 0.6 1" label_color_disabled="0.7 0.66 0.6 1" label_color_selected="0.95 0.92 0.84 1" label_color="0.95 0.92 0.84 1" label_shadow="false" hover_glow_amount="0" image_color_disabled="0 0 0 0" image_color="0 0 0 0" follows="left|top" layout="topleft" height="22" label="Redo" left="126" name="tf_redo" top="540" width="110"
+    <button label_color_disabled_selected="0.7 0.66 0.6 1" label_color_disabled="0.7 0.66 0.6 1" label_color_selected="0.95 0.92 0.84 1" label_color="0.95 0.92 0.84 1" label_shadow="false" hover_glow_amount="0" image_color_disabled="0 0 0 0" image_color="0 0 0 0" follows="left|top" layout="topleft" height="22" label="Redo" left="126" name="tf_redo" top="564" width="110"
      tool_tip="Do the step you undid again (Ctrl+Y)" />
-    <text text_color="0.82 0.76 0.66 1" follows="left|top" font="SansSerifSmall" height="20" layout="topleft" left="242" name="tf_history_info" top="537" width="208" word_wrap="true" />
-    <check_box follows="left|top" height="16" initial_value="false" label="More options" layout="topleft" left="10" name="tf_more_check" top="574" width="200"
+    <text text_color="0.82 0.76 0.66 1" follows="left|top" font="SansSerifSmall" height="20" layout="topleft" left="242" name="tf_history_info" top="561" width="208" word_wrap="true" />
+    <check_box follows="left|top" height="16" initial_value="false" label="More options" layout="topleft" left="10" name="tf_more_check" top="598" width="200"
          tool_tip="The rest of the tool's settings (soft edges, banks, typed heights). Most jobs need none of it.">
 <check_box.label_text text_color="0.95 0.92 0.84 1" text_readonly_color="0.7 0.66 0.6 1" />
 </check_box>
-    <panel follows="left|top" height="60" layout="topleft" left="0" name="tf_more_level" top="596" visible="false" width="460">
+    <panel follows="left|top" height="60" layout="topleft" left="0" name="tf_more_level" top="620" visible="false" width="460">
         <slider text_disabled_color="0.7 0.66 0.6 1" text_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" height="16" show_text="true" decimal_digits="1" increment="0.5" initial_value="0" label="Soft edge (m)" label_width="84" left="10"
-         max_val="10" min_val="0" name="tf_level_edge" top="8" width="300" tool_tip="Ease the ground into the level box over this many metres round it (0: a sharp edge)" />
+         max_val="10" min_val="0" name="tf_level_edge" top="8" width="300" tool_tip="Ease the ground into the level box over this many metres round it (0: a sharp edge). Round brush: used when Soft rim is 0." />
     </panel>
-    <panel follows="left|top" height="60" layout="topleft" left="0" name="tf_more_ramp" top="596" visible="false" width="460">
+    <panel follows="left|top" height="60" layout="topleft" left="0" name="tf_more_ramp" top="620" visible="false" width="460">
         <spinner text_disabled_color="0.7 0.66 0.6 1" text_enabled_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" height="19" decimal_digits="1" increment="0.5" initial_value="3" label="Shoulders (m)" label_width="84" left="10"
          max_val="20" min_val="0" name="tf_ramp_shoulder" top="2" width="170" tool_tip="Ease the sides into the ground over this many metres" />
         <check_box follows="left|top" height="16" initial_value="false" label="Heights" layout="topleft" left="190" name="tf_ramp_typed" top="4" width="70"
@@ -137,24 +153,24 @@
         <spinner text_disabled_color="0.7 0.66 0.6 1" text_enabled_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" height="19" decimal_digits="2" increment="0.5" initial_value="20" label="B" label_width="14" left="358"
          max_val="4000" min_val="-100" name="tf_ramp_b" top="2" width="90" tool_tip="Height at B (the second point), metres" />
     </panel>
-    <panel follows="left|top" height="60" layout="topleft" left="0" name="tf_more_terrace" top="596" visible="false" width="460">
+    <panel follows="left|top" height="60" layout="topleft" left="0" name="tf_more_terrace" top="620" visible="false" width="460">
         <slider text_disabled_color="0.7 0.66 0.6 1" text_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" height="16" show_text="true" decimal_digits="1" increment="0.5" initial_value="2" label="Soft edge (m)" label_width="84" left="10"
-         max_val="10" min_val="0" name="tf_terrace_edge" top="8" width="300" tool_tip="Ease the terraces into the ground round the box over this many metres" />
+         max_val="10" min_val="0" name="tf_terrace_edge" top="8" width="300" tool_tip="Ease the terraces into the ground round the box over this many metres. Round brush: used when Soft rim is 0." />
     </panel>
-    <panel follows="left|top" height="60" layout="topleft" left="0" name="tf_more_smooth" top="596" visible="false" width="460">
+    <panel follows="left|top" height="60" layout="topleft" left="0" name="tf_more_smooth" top="620" visible="false" width="460">
         <text text_color="0.82 0.76 0.66 1" follows="left|top" height="32" layout="topleft" left="10" name="tf_smooth_more" top="4" width="440" word_wrap="true">Smooth has no more options: Radius and Strength are all of it.</text>
     </panel>
-    <panel follows="left|top" height="60" layout="topleft" left="0" name="tf_more_road" top="596" visible="false" width="460">
+    <panel follows="left|top" height="60" layout="topleft" left="0" name="tf_more_road" top="620" visible="false" width="460">
         <spinner text_disabled_color="0.7 0.66 0.6 1" text_enabled_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" height="19" decimal_digits="1" increment="0.5" initial_value="4" label="Banks (m)" label_width="64" left="10"
          max_val="20" min_val="0" name="tf_road_shoulder" top="2" width="150" tool_tip="Ease the cut and filled banks into the ground over this many metres" />
         <spinner text_disabled_color="0.7 0.66 0.6 1" text_enabled_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" height="19" decimal_digits="0" increment="1" initial_value="25" label="Most grade (%)" label_width="92" left="170"
          max_val="100" min_val="1" name="tf_road_maxgrade" top="2" width="170" tool_tip="Following the ground, the road is never steeper than this, percent (25: the Tunnel tool's walking limit)" />
     </panel>
-    <panel follows="left|top" height="60" layout="topleft" left="0" name="tf_more_river" top="596" visible="false" width="460">
+    <panel follows="left|top" height="60" layout="topleft" left="0" name="tf_more_river" top="620" visible="false" width="460">
         <spinner text_disabled_color="0.7 0.66 0.6 1" text_enabled_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" height="19" decimal_digits="1" increment="0.5" initial_value="4" label="Banks (m)" label_width="64" left="10"
          max_val="20" min_val="0" name="tf_river_banks" top="2" width="150" tool_tip="Ease the banks into the ground over this many metres" />
     </panel>
-    <panel follows="left|top" height="60" layout="topleft" left="0" name="tf_more_beach" top="596" visible="false" width="460">
+    <panel follows="left|top" height="60" layout="topleft" left="0" name="tf_more_beach" top="620" visible="false" width="460">
         <spinner text_disabled_color="0.7 0.66 0.6 1" text_enabled_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" height="19" decimal_digits="2" increment="0.25" initial_value="2" label="Up to (m)" label_width="60" left="10"
          max_val="20" min_val="0" name="tf_beach_above" top="2" width="140" tool_tip="The beach reaches this far above the water, metres" />
         <spinner text_disabled_color="0.7 0.66 0.6 1" text_enabled_color="0.95 0.92 0.84 1" follows="left|top" layout="topleft" height="19" decimal_digits="2" increment="0.25" initial_value="2" label="Down to (m)" label_width="72" left="160"

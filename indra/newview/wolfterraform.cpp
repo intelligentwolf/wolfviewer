@@ -76,6 +76,13 @@ namespace WolfTerraform
             return g.at(llclamp((S32)ll_round(p.mV[0]), g.x0, g.x0 + g.w - 1), llclamp((S32)ll_round(p.mV[1]), g.y0, g.y0 + g.h - 1));
         }
         std::string pct(F32 grade) { return llformat("%d%%", (S32)ll_round(grade * 100.f)); }
+        /** The area in the history's words: "12 x 8 m" (Square, as before), "a 12 m circle" or "a 12 x 8 m oval" (Round). */
+        std::string areaWords(const Box& b, bool round)
+        {
+            const S32 w = b.x1 - b.x0 + 1, h = b.y1 - b.y0 + 1;
+            if (!round) return llformat("%d x %d m", w, h);
+            return w == h ? llformat("a %d m circle", w) : llformat("a %d x %d m oval", w, h);
+        }
     }
 
     Plan makePlan(ETool tool, const std::vector<LLVector2>& clicks, const Params& p)
@@ -162,8 +169,8 @@ namespace WolfTerraform
         {
             const Box b = boxOf(clicks[0].mV[0], clicks[0].mV[1], clicks[1].mV[0], clicks[1].mV[1]);
             const F32 h = has(p.levelHeight) ? p.levelHeight : groundAt(ground, clicks[0]);
-            plan.mTarget = level(ground, b, h, llmax(0.f, p.levelEdge), W);
-            plan.mLabel = llformat("Level %d x %d m to %.2f m", b.x1 - b.x0 + 1, b.y1 - b.y0 + 1, h);
+            plan.mTarget = level(ground, b, h, llmax(0.f, p.levelEdge), W, p.round, p.roundSoft);
+            plan.mLabel = llformat("Level %s to %.2f m", areaWords(b, p.round).c_str(), h);
             break;
         }
         case TOOL_RAMP:
@@ -190,15 +197,16 @@ namespace WolfTerraform
         {
             const Box b = boxOf(clicks[0].mV[0], clicks[0].mV[1], clicks[1].mV[0], clicks[1].mV[1]);
             const F32 step = llmax(0.25f, p.terraceStep);
-            plan.mTarget = terrace(ground, b, step, llclamp(p.terraceSharpness, 0.f, 1.f), llmax(0.f, p.terraceEdge), W);
-            plan.mLabel = llformat("Terraces %.1f m apart, %d x %d m", step, b.x1 - b.x0 + 1, b.y1 - b.y0 + 1);
+            plan.mTarget = terrace(ground, b, step, llclamp(p.terraceSharpness, 0.f, 1.f), llmax(0.f, p.terraceEdge), W, p.round, p.roundSoft);
+            plan.mLabel = llformat("Terraces %.1f m apart, %s", step, areaWords(b, p.round).c_str());
             break;
         }
         case TOOL_SMOOTH:
         {
             const Box b = boxOf(clicks[0].mV[0], clicks[0].mV[1], clicks[1].mV[0], clicks[1].mV[1]);
-            plan.mTarget = smooth(ground, b, llclamp(p.smoothRadius, 1, SMOOTH_RADIUS_MAX), llclamp(p.smoothStrength, 0.f, 1.f), W);
-            plan.mLabel = llformat("Smooth %d x %d m", b.x1 - b.x0 + 1, b.y1 - b.y0 + 1);
+            plan.mTarget = smooth(ground, b, llclamp(p.smoothRadius, 1, SMOOTH_RADIUS_MAX), llclamp(p.smoothStrength, 0.f, 1.f), W, p.round,
+                                  p.roundSoft);
+            plan.mLabel = llformat("Smooth %s", areaWords(b, p.round).c_str());
             break;
         }
         case TOOL_ROAD:
@@ -235,13 +243,14 @@ namespace WolfTerraform
         {
             const Box b = boxOf(clicks[0].mV[0], clicks[0].mV[1], clicks[1].mV[0], clicks[1].mV[1]);
             plan.mTarget = beach(ground, b, water, llmax(0.01f, p.beachSlope), llmax(0.f, p.beachAbove), llmax(0.f, p.beachBelow),
-                                 llmax(0.f, p.beachEdge), W);
+                                 llmax(0.f, p.beachEdge), W, p.round, p.roundSoft);
             if (plan.mTarget.defined() == 0)
             {
-                plan.mError = llformat("There is no shore in that box: the water here is at %.1f m. Draw the box across the water's edge.", water);
+                plan.mError = p.round ? llformat("There is no shore in that circle: the water here is at %.1f m. Draw it across the water's edge.", water)
+                                      : llformat("There is no shore in that box: the water here is at %.1f m. Draw the box across the water's edge.", water);
                 return plan;
             }
-            plan.mLabel = llformat("Beach %d x %d m", b.x1 - b.x0 + 1, b.y1 - b.y0 + 1);
+            plan.mLabel = llformat("Beach %s", areaWords(b, p.round).c_str());
             break;
         }
         default:

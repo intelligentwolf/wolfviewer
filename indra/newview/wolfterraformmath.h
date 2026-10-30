@@ -254,6 +254,58 @@ namespace WolfTerraformMath
         return std::min(std::min(x - b.x0, b.x1 - x), std::min(y - b.y0, b.y1 - y));
     }
 
+    // ---- [2026-10-29 ticket 355: "round would be good in terraforming ... raising mulch into a rounded mound"] ----
+    // The box tools' brush shape. SQUARE is the box between the two clicked corners, every cell of it (the tools as they were).
+    // ROUND is the circle inside that box - an oval when the box is not square - whose cells sit on its inside at their cell
+    // centre. Its rim is softened over the outer `soft` part of the radius by the cosine fall above: soft 1 (the default) eases
+    // the whole way from the middle to the rim, so Level raising the ground makes a rounded hump with no edge at its foot and no
+    // point at its top; soft 0 is a round pad with a hard rim (the Soft edge setting then eases it into the ground outside).
+
+    /** The round brush inside a box: its middle and half-widths, metres (cells are centred on whole metres, so the box's
+     *  outer edges are half a cell beyond its first and last cells: the outline the window draws, x0 - 0.5 .. x1 + 0.5). */
+    struct Oval { float cx, cy, a, b; };
+    inline Oval ovalOf(const Box& b)
+    {
+        return Oval{ (float)(b.x0 + b.x1) * 0.5f, (float)(b.y0 + b.y1) * 0.5f, (float)(b.x1 - b.x0 + 1) * 0.5f, (float)(b.y1 - b.y0 + 1) * 0.5f };
+    }
+    /** How far out cell (x, y) is: 0 in the middle, 1 on the rim, more outside. */
+    inline float ovalRho(const Oval& o, int x, int y)
+    {
+        const float u = ((float)x - o.cx) / o.a, v = ((float)y - o.cy) / o.b;
+        return std::sqrt(u * u + v * v);
+    }
+    /** Metres from the rim to cell (x, y) along the line from the middle through it: + outside, - inside. On a circle that is
+     *  the shortest distance; on an oval it is measured along that line instead (longer than the shortest towards the ends of
+     *  the long side), which keeps every ring of equal distance the same oval shape as the rim. */
+    inline float ovalRadial(const Oval& o, int x, int y)
+    {
+        const float dx = (float)x - o.cx, dy = (float)y - o.cy, r = std::sqrt(dx * dx + dy * dy), rho = ovalRho(o, x, y);
+        if (rho < 1e-6f) return -std::min(o.a, o.b);   // the very middle: the nearer side of the rim
+        return r - r / rho;   // the rim point on that line is the middle + (x, y - middle) / rho
+    }
+    /** How far cell (x, y) is outside the round brush, metres (0 inside): Square's outside() for the round shape. */
+    inline float ovalOutside(const Oval& o, int x, int y)
+    {
+        if (ovalRho(o, x, y) <= 1.f) return 0.f;
+        return std::max(ovalRadial(o, x, y), 1e-4f);   // a cell outside is never "on" the brush
+    }
+    /** How far cell (x, y) is inside the round brush from its rim, metres, the rim's own cells 0: Square's inward() for the
+     *  round shape (that counts the edge row 0, and its cells' centres are half a cell inside the box). */
+    inline float ovalInward(const Oval& o, int x, int y)
+    {
+        return std::max(0.f, -ovalRadial(o, x, y) - 0.5f);
+    }
+    /** How much of a tool's change cell (x, y) of the round brush takes: 1 in its middle, eased (fall) to 0 at its rim over
+     *  the outer `soft` (0..1) of the radius; 0 outside. */
+    inline float ovalWeight(const Oval& o, int x, int y, float soft)
+    {
+        const float rho = ovalRho(o, x, y);
+        if (rho > 1.f) return 0.f;
+        soft = std::min(std::max(soft, 0.f), 1.f);
+        if (soft <= 0.f) return 1.f;
+        return fall((rho - (1.f - soft)) / soft);
+    }
+
     /** [2026-10-23 Paul: "we have an 1800x1800 region ... If you try and write the whole thing it will crash"] No grid here is
      *  ever sized from the region: every one is a job's rectangle, and a rectangle wider than this is refused (an empty grid)
      *  - one job's 512 m (wolfterraform.h MAX_SIDE_M) plus the widest margin a tool adds round it (soft edges, shoulders,
@@ -273,15 +325,37 @@ namespace WolfTerraformMath
 
     // ---- Level: the box at one height, an optional soft edge round it -------------------------------------------------------
 
-    /** Every cell of the box at `height`; within `edge` metres outside it, eased from the ground to `height`. */
-    inline Grid level(const Grid& ground, const Box& box, float height, float edge, int region_w)
+    /** One cell of a box tool on the round brush (ticket 355): `z` (the tool's height for the cell) eased in by the brush's
+     *  weight; with no soft rim, the ring `edge` metres outside the rim eased from the ground as Square's box edge is. NaN =
+     *  the cell is left alone. */
+    inline float roundCell(const Oval& o, int x, int y, float g, float z, float soft, float edge)
+    {
+        const float m = ovalWeight(o, x, y, soft);
+        if (m >= 1.f) return z;
+        if (m > 0.f) return g + (z - g) * m;
+        // a soft rim already meets the ground at 0, so only a hard one gets the ring outside
+        if (soft > 0.f || edge <= 0.f) return nan();
+        const float d = ovalOutside(o, x, y);
+        return d > 0.f && d < edge ? g + (z - g) * fall(d / edge) : nan();
+    }
+
+    /** Every cell of the box at `height`; within `edge` metres outside it, eased from the ground to `height`. `round`: the
+     *  round brush in the box instead (ticket 355), its rim softened over `soft` (0..1) of the radius. */
+    inline Grid level(const Grid& ground, const Box& box, float height, float edge, int region_w, bool round = false, float soft = 1.f)
     {
         Grid t = areaGrid(box, (int)std::ceil(std::max(0.f, edge)), region_w);
+        const Oval o = ovalOf(box);
         for (int y = t.y0; y < t.y0 + t.h; ++y)
             for (int x = t.x0; x < t.x0 + t.w; ++x)
             {
                 const float g = ground.at(x, y);
                 if (!has(g)) continue;
+                if (round)
+                {
+                    const float z = roundCell(o, x, y, g, height, soft, edge);
+                    if (has(z)) t.ref(x, y) = z;
+                    continue;
+                }
                 const float d = outside(box, x, y);
                 if (d == 0.f) t.ref(x, y) = height;
                 else if (edge > 0.f && d < edge) t.ref(x, y) = g + (height - g) * fall(d / edge);
@@ -344,14 +418,22 @@ namespace WolfTerraformMath
         else r = std::pow(f, 1.f / (1.f - sharpness));
         return (n + r) * step;
     }
-    inline Grid terrace(const Grid& ground, const Box& box, float step, float sharpness, float edge, int region_w)
+    inline Grid terrace(const Grid& ground, const Box& box, float step, float sharpness, float edge, int region_w, bool round = false,
+                        float soft = 1.f)
     {
         Grid t = areaGrid(box, (int)std::ceil(std::max(0.f, edge)), region_w);
+        const Oval o = ovalOf(box);
         for (int y = t.y0; y < t.y0 + t.h; ++y)
             for (int x = t.x0; x < t.x0 + t.w; ++x)
             {
                 const float g = ground.at(x, y);
                 if (!has(g)) continue;
+                if (round)
+                {
+                    const float z = roundCell(o, x, y, g, terraced(g, step, sharpness), soft, edge);
+                    if (has(z)) t.ref(x, y) = z;
+                    continue;
+                }
                 const float d = outside(box, x, y), z = terraced(g, step, sharpness);
                 if (d == 0.f) t.ref(x, y) = z;
                 else if (edge > 0.f && d < edge) t.ref(x, y) = g + (z - g) * fall(d / edge);
@@ -362,8 +444,9 @@ namespace WolfTerraformMath
     // ---- Smooth+: a Gaussian blur of the radius asked for (the region's own is 9 x 9 m at most and stops at 0 m:
     // SmoothSphere.cs:45, :98), eased in over the box's edge so no step is left there ------------------------------------------
 
-    inline Grid smooth(const Grid& ground, const Box& box, int radius, float strength, int region_w)
+    inline Grid smooth(const Grid& ground, const Box& box, int radius, float strength, int region_w, bool round = false, float soft = 1.f)
     {
+        const Oval o = ovalOf(box);
         radius = std::max(1, radius);
         Grid t = areaGrid(box, 0, region_w);
         if (!t.w || !t.h) return t;
@@ -392,6 +475,9 @@ namespace WolfTerraformMath
             {
                 const float g = ground.at(x, y);
                 if (!has(g)) continue;
+                // the round brush (ticket 355): its weight, and the cells outside it left alone
+                const float m = round ? ovalWeight(o, x, y, soft) : 1.f;
+                if (m <= 0.f) continue;
                 float s = 0.f, ws = 0.f;
                 for (int i = -radius; i <= radius; ++i)
                 {
@@ -401,6 +487,13 @@ namespace WolfTerraformMath
                     ws += k[(size_t)(i + radius)];
                 }
                 if (ws <= 0.f) continue;
+                if (round)
+                {
+                    // eased in from the rim as Square is from the box's sides, and by the brush's weight
+                    const float edge_w = 1.f - fall((ovalInward(o, x, y) + 1.f) / (float)taper);
+                    t.ref(x, y) = g + (s / ws - g) * std::min(std::max(strength, 0.f), 1.f) * edge_w * m;
+                    continue;
+                }
                 const float edge_w = 1.f - fall((float)(inward(box, x, y) + 1) / (float)taper);
                 t.ref(x, y) = g + (s / ws - g) * std::min(std::max(strength, 0.f), 1.f) * edge_w;
             }
@@ -673,8 +766,10 @@ namespace WolfTerraformMath
      *  slope (`slope` rise over run) through the water line; beyond that band it is eased back to the ground over `edge`, and
      *  [2026-10-23 Paul's Beach: "tall vertical walls ... where sand meets the higher ground"] it is eased in from the box's own
      *  sides over `edge` too, so the finished beach meets the ground outside the box without a step. */
-    inline Grid beach(const Grid& ground, const Box& box, float water, float slope, float above, float below, float edge, int region_w)
+    inline Grid beach(const Grid& ground, const Box& box, float water, float slope, float above, float below, float edge, int region_w,
+                      bool round = false, float soft = 1.f)
     {
+        const Oval o = ovalOf(box);
         Grid area = areaGrid(box, 0, region_w);
         Grid local(area.x0, area.y0, area.w, area.h);
         for (int y = area.y0; y < area.y0 + area.h; ++y)
@@ -688,11 +783,20 @@ namespace WolfTerraformMath
             {
                 const float g = local.at(x, y), d = sd.at(x, y);
                 if (!has(g) || !has(d)) continue;
+                // the round brush (ticket 355): the cells outside it left alone
+                const float m = round ? ovalWeight(o, x, y, soft) : 1.f;
+                if (m <= 0.f) continue;
                 const float z = std::min(std::max(water + slope * d, water - below), water + above);
                 const float past = d >= 0.f ? d - land_band : -d - sea_band;   // metres beyond the beach's band
                 float w = past <= 0.f ? 1.f : (edge > 0.f && past < edge) ? fall(past / edge) : 0.f;
                 // from the box's side inwards: the outermost cell keeps almost all of the ground, `edge` metres in none of it
-                if (edge > 0.f) w *= 1.f - fall((float)(inward(box, x, y) + 1) / edge);
+                // (the round brush: from its rim, and by its weight)
+                if (round)
+                {
+                    if (edge > 0.f) w *= 1.f - fall((ovalInward(o, x, y) + 1.f) / edge);
+                    w *= m;
+                }
+                else if (edge > 0.f) w *= 1.f - fall((float)(inward(box, x, y) + 1) / edge);
                 if (w > 0.f) t.ref(x, y) = g + (z - g) * w;
             }
         return t;

@@ -13623,6 +13623,17 @@ Change of this parameter will affect the layout of buttons in notification toast
       <key>Value</key>
       <real>4.0</real>
     </map>
+    <key>WolfTerrainPaintBrushShape</key>
+    <map>
+      <key>Comment</key>
+      <string>[TICKET 355 2026-10-29] Paint the Ground: the brush shape, round (the default) or square (a square on the region's grid, as wide as the brush).</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>String</string>
+      <key>Value</key>
+      <string>round</string>
+    </map>
     <key>WolfTerrainPaintBrushTransparency</key>
     <map>
       <key>Comment</key>
@@ -19989,6 +20000,28 @@ Change of this parameter will affect the layout of buttons in notification toast
 			<string>F32</string>
 			<key>Value</key>
 			<real>0.0</real>
+		</map>
+		<key>WolfTerraformBrushShape</key>
+		<map>
+			<key>Comment</key>
+			<string>[TICKET 355 2026-10-29] Terraform window: the box tools' brush shape, square (the whole box, the default) or round (the circle inside it).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>String</string>
+			<key>Value</key>
+			<string>square</string>
+		</map>
+		<key>WolfTerraformRoundSoft</key>
+		<map>
+			<key>Comment</key>
+			<string>[TICKET 355 2026-10-29] Terraform window, round brush: percent of the radius over which its rim eases into the ground (100 = a rounded hump, 0 = a hard rim).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>F32</string>
+			<key>Value</key>
+			<real>100.0</real>
 		</map>
 		<key>WolfFXEnabled</key>
 		<map>

@@ -67,6 +67,10 @@ namespace WolfTerraform
         F32 riverWidth = 6.f, riverDepth = 1.5f, riverBanks = 4.f;
         bool riverToSea = false;
         F32 beachSlope = 0.1f, beachAbove = 2.f, beachBelow = 2.f, beachEdge = 4.f;
+        // [2026-10-29 ticket 355] the box tools' brush shape (wolfterraformmath.h Oval): false = Square, the whole box (as
+        // before); true = Round, the circle (oval) inside it, its rim eased over roundSoft (0..1) of the radius
+        bool round = false;
+        F32 roundSoft = 1.f;
     };
 
     /** What a tool will do: its target, the heights it will overwrite, the floods, and the plain-words summary. */

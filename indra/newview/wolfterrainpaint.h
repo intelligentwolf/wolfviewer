@@ -30,6 +30,7 @@
 
 class LLButton;
 class LLCheckBoxCtrl;
+class LLRadioGroup;
 class LLGLSLShader;
 class LLSliderCtrl;
 class LLSpinCtrl;
@@ -124,6 +125,10 @@ public:
         std::vector<F32> mZ;        // water only: surface height per point (region metres)
         F32 mDepth = 1.f;           // water only: depth (m)
         F32 mLevel = 0.3f;          // water only, while being drawn: metres above the ground
+        // [2026-10-29 ticket 355] the brush's shape: false = round (every stroke before, and the record's default), true =
+        // a square on the region's grid, w a side, swept along the line ("b":"square" in the record). Never on water,
+        // which is a ribbon along its line whatever the brush.
+        bool mSquare = false;
     };
     struct Record
     {
@@ -204,7 +209,8 @@ public:
     bool  canPaintSegment(F32 x0, F32 y0, F32 x1, F32 y1, F32 w) const;
     /** The brush over the agent's terrain (region metres). */
     /** slot -2 = water: `level` metres above the ground, `depth` metres deep. */
-    bool  beginStroke(S32 slot, F32 w, F32 o, F32 x, F32 y, F32 level = WATER_LEVEL_DEFAULT, F32 depth = WATER_DEPTH_DEFAULT);
+    bool  beginStroke(S32 slot, F32 w, F32 o, F32 x, F32 y, F32 level = WATER_LEVEL_DEFAULT, F32 depth = WATER_DEPTH_DEFAULT,
+                      bool square = false);
     void  extendStroke(F32 x, F32 y);
     const Stroke* endStroke();
     bool  strokeInProgress() const { return mLiveStroke; }
@@ -302,8 +308,8 @@ private:
     void bakeSlice(Layer& L, F64 budget_secs);
     Box  bbox(const Layer& L, const F32* pts, size_t n, F32 w) const;
     static void unionBox(Box& a, bool& a_set, const Box& b);
-    bool rasterSegment(Layer& L, F32 x0, F32 y0, F32 x1, F32 y1, F32 w, F32 cum, Box& out);
-    bool rasterPolyline(Layer& L, const std::vector<F32>& p, F32 w, Box& out);
+    bool rasterSegment(Layer& L, F32 x0, F32 y0, F32 x1, F32 y1, F32 w, F32 cum, bool square, Box& out);
+    bool rasterPolyline(Layer& L, const std::vector<F32>& p, F32 w, bool square, Box& out);
     void composite(Layer& L, const Box& bb, const Stroke& s, const std::vector<U16>& src, std::vector<U16>& dst);
     // [SMOOTH EDGES 2026-10-27] Index in mMap of slot k's weight at texel p (= j·mW + i):
     // slots 0-3 are section 1 (R,G,B,A), slots 4-5 section 0 (B,A) - see RENDERING above.
@@ -373,6 +379,8 @@ private:
     void finishStroke();
     F32  brushWidth() const;
     F32  brushOpacity() const;
+    /** [ticket 355] Square chosen in the window (WolfTerrainPaintBrushShape); water strokes are never square. */
+    bool brushSquare() const;
 
     S32  mSlot = 0;
     bool mErase = false;
@@ -403,6 +411,7 @@ private:
     void onUseSlot(S32 slot);
     void onWaterParam();
     void onWidth();
+    void onShape();             // [ticket 355]
     void onTransparency();
     void onErase();
     void onArm();
@@ -426,6 +435,7 @@ private:
     LLButton*       mClearSlot[WolfTerrainPaint::SLOTS] = {};
     LLButton*       mModeSlot[WolfTerrainPaint::SLOTS] = {};
     LLSliderCtrl*   mWidth = nullptr;
+    LLRadioGroup*   mShape = nullptr;        // [ticket 355] "round" / "square"
     LLSliderCtrl*   mTransparency = nullptr;
     LLCheckBoxCtrl* mErase = nullptr;
     LLButton*       mArm = nullptr;

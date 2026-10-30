@@ -524,6 +524,59 @@ namespace
         assert(std::fabs(t.at(30, 50) - g.at(30, 50)) < std::fabs(t.at(45, 50) - g.at(45, 50)) + 0.5f);
         std::puts("smooth: wide radius, below 0 m, eased at the box edge");
     }
+
+    // [2026-10-29 ticket 355] The round brush: a resident raising mulch round a tree into a rounded mound.
+    void roundBrush()
+    {
+        Grid flat(0, 0, 100, 100, 20.f);
+        const Box b{ 40, 40, 59, 59 };   // 20 x 20 cells: a 20 m circle, its middle at 49.5, 49.5
+        const Oval o = ovalOf(b);
+        assert(o.cx == 49.5f && o.cy == 49.5f && o.a == 10.f && o.b == 10.f);
+        // Square (the default arguments) is the box as before: its corner is set
+        const Grid sq = level(flat, b, 22.f, 0.f, 100);
+        assert(sq.at(40, 40) == 22.f && sq.at(59, 59) == 22.f && !has(sq.at(39, 40)));
+        // Round, the whole radius soft: a hump - near 22 in the middle, near the ground at the rim, nothing outside the circle
+        const Grid mound = level(flat, b, 22.f, 0.f, 100, true, 1.f);
+        assert(!has(mound.at(40, 40)) && !has(mound.at(59, 59)));
+        assert(mound.at(49, 49) > 21.9f && mound.at(50, 50) > 21.9f);
+        assert(has(mound.at(59, 50)) ? mound.at(59, 50) < 20.1f : true);
+        for (int y = mound.y0; y < mound.y0 + mound.h; ++y)
+            for (int x = mound.x0; x < mound.x0 + mound.w; ++x)
+                if (has(mound.at(x, y))) assert(ovalRho(o, x, y) <= 1.f);
+        // it falls all the way from the middle, and smoothly: no neighbour more than the cosine's steepest (pi/2 x 2 m / 10 m)
+        for (int x = 50; x < 59; ++x) assert(mound.at(x + 1, 50) <= mound.at(x, 50));
+        float steepest_step = 0.f;
+        for (int y = 40; y <= 59; ++y)
+            for (int x = 40; x < 59; ++x)
+            {
+                const float u = has(mound.at(x, y)) ? mound.at(x, y) : 20.f, v = has(mound.at(x + 1, y)) ? mound.at(x + 1, y) : 20.f;
+                steepest_step = std::max(steepest_step, std::fabs(u - v));
+            }
+        assert(steepest_step < 0.33f);
+        // no soft rim: a flat round pad, and the Soft edge eases it in outside the rim as Square's box edge does
+        const Grid pad = level(flat, b, 22.f, 4.f, 100, true, 0.f);
+        assert(pad.at(49, 49) == 22.f && pad.at(40, 50) == 22.f);
+        assert(pad.at(40, 40) > 20.f && pad.at(40, 40) < 22.f);   // just outside the rim, inside the 4 m edge
+        assert(!has(pad.at(36, 36)));                              // more than 4 m outside the rim
+        // with a soft rim the edge ring is not added (the rim already meets the ground)
+        const Grid soft_edge = level(flat, b, 22.f, 4.f, 100, true, 0.5f);
+        assert(!has(soft_edge.at(40, 40)) && soft_edge.at(49, 49) == 22.f);
+        // the other box tools leave every cell outside the circle alone
+        const Grid g = hills(0, 0, 100, 100, 9);
+        const Grid sm = smooth(g, b, 8, 1.f, 100, true, 1.f);
+        const Grid tr = terrace(g, b, 2.f, 0.8f, 0.f, 100, true, 0.f);
+        assert(!has(sm.at(40, 40)) && has(sm.at(49, 49)) && !has(tr.at(40, 40)));
+        assert(std::fabs(tr.at(49, 49) - terraced(g.at(49, 49), 2.f, 0.8f)) < 1e-5f);
+        Grid coast(0, 0, 100, 100);
+        for (int y = 0; y < 100; ++y)
+            for (int x = 0; x < 100; ++x) coast.ref(x, y) = 15.f + 0.25f * (float)x;   // the water line (20 m) at x = 20
+        const Grid bc = beach(coast, Box{ 5, 30, 35, 60 }, 20.f, 0.1f, 2.f, 2.f, 4.f, 100, true, 1.f);
+        assert(!has(bc.at(5, 30)) && bc.defined() > 0);
+        // and the round mound goes through the writer like any target
+        Grid m = flat;
+        writeAndCheck(m, mound, 0.1f, 0.05f);
+        std::puts("round brush: a smooth hump inside the circle, a pad with no soft rim, nothing outside it; Square unchanged");
+    }
 }
 
 int main()
@@ -541,6 +594,7 @@ int main()
     beachSmooth();
     floodCounts();
     bigRegion();
+    roundBrush();
     std::puts("wolfterraformmath: all checks passed");
     return 0;
 }

@@ -923,8 +923,22 @@ F32 WolfBoatRock::waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F3
         if (sea.mStorm)
         {
             const F64 px = (F64)(ax - sea.mStormOriginX), py = (F64)(ay - sea.mStormOriginY);
-            const F64 s_storm = sea.mStorm->seaIndexAt(px, py, sea.mStormCx, sea.mStormCy, sea.mStormT);
-            local_amp *= (F32)WolfHurricane::seaAmplitudeFactor(s_storm, sea.mStormFloor, sea.mStormSeep);
+            // [WILD SEA 2026-10-30] waterV.glsl wolfStormSeaFactor + its steepness guard, term for term (README "The wild sea"):
+            // the DRAWN index from U_sea runs on to 4.5 (S_storm for the swell train stays capped at 3, stormSwellShare below),
+            // S_local = clamp(max(S_draw, floor, 0.15), 0.15, 4.5), factor (S_local / S_eep)^1.5, then held so the dominant
+            // train's k a (pi (freq + 0.001) x 0.4 amp) stays <= 0.3, never below 1.
+            const F64 STORM_SEA_MAX = 4.5;    // waterV.glsl WOLF_STORM_SEA_MAX (CONVENTION)
+            const F64 STORM_STEEP_MAX = 0.3;  // waterV.glsl WOLF_STORM_STEEP_MAX (CONVENTION; Stokes' limit k a = 0.446, Michell 1893)
+            F64 swx = 0.0, swy = 0.0;
+            sea.mStorm->seaWind(px, py, sea.mStormCx, sea.mStormCy, sea.mStormT, swx, swy);
+            const F64 u_sea = std::sqrt(swx * swx + swy * swy);   // windAt caps |v| at WIND_CAP (75), as the shader's min(.., 75)
+            const F64 s_draw = llclamp((u_sea - 3.0) / 3.0, WolfHurricane::SEA_MIN_INDEX, STORM_SEA_MAX);
+            const F64 s_local = llclamp(llmax(llmax(s_draw, sea.mStormFloor), WolfHurricane::SEA_MIN_INDEX),
+                                        WolfHurricane::SEA_MIN_INDEX, STORM_SEA_MAX);
+            F64 factor = std::pow(s_local / llmax(sea.mStormSeep, WolfHurricane::SEA_MIN_INDEX), 1.5);
+            const F64 ka_dom = 3.14159265 * ((F64)sea.mFreq + 0.001) * 0.4 * (F64)amp;
+            if (ka_dom > 1e-6) factor = llmin(factor, llmax(1.0, STORM_STEEP_MAX / ka_dom));
+            local_amp *= (F32)factor;
             storm_share = (F32)sea.mStorm->stormSwellShare(px, py, sea.mStormCx, sea.mStormCy, sea.mStormT);
         }
         // <WolfViewer 2026-09-26> Mirror of waterV.glsl: the swell converges on the centre of

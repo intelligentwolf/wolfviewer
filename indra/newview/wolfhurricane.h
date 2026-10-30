@@ -55,6 +55,9 @@ public:
     F64  mEye        = 0.0;     ///< Re, m (= 0.1 R)
     S32  mHemisphere = 1;       ///< 1 north (anticlockwise), -1 south (clockwise)
     bool mRain       = true;
+    S32  mSx = 0, mSy = 0;      ///< the region's size, m (robust.regions sizeX / sizeY); 0 = not in the payload
+    F64  mAmbientMs = 0.0;      ///< the region's own wind when the storm was made, m/s ..
+    F64  mAmbientFrom = 0.0;    ///< .. and the direction it blows FROM, compass degrees
 
     /** Reads the `hurricane` object tolerantly: every number clamped to the README table's range; anything missing or
      *  malformed (not a map, a non-numeric field, a bad id) = no storm (returns false and leaves `out` alone). */
@@ -98,6 +101,21 @@ public:
     /** w = C env(r): the storm's share at the point (README "Clouds"; "Rain at a point" replaces the region's at w >= 0.5). */
     static F64 share(const Point& p, const Time& T) { return T.C * p.env; }
 
+    /** README "Wind": the wind (m/s, +x east, +y north, the way the air moves) at the point (px, py) given the eye (cx, cy):
+     *  the Holland profile with the inflow angle and the track term, mixed with the ambient wind by k = W env(r), |v| <= 75. */
+    void windAt(F64 px, F64 py, F64 cx, F64 cy, const Time& T, F64& wx, F64& wy) const;
+    /** README "The sea" S_storm(p): the region's wind -> sea rule on U_sea (the storm wind; inside Rm the eyewall wind at the
+     *  same bearing; at r < 1 m the bearing heading + 90 h degrees). */
+    F64 seaIndexAt(F64 px, F64 py, F64 cx, F64 cy, const Time& T) const;
+    /** README "The sea": the floor (1 - W env(r_c)) S_eep, r_c = the region centre's (sx / 2, sy / 2) distance from the eye.
+     *  `width` is the region's own size, used when the payload carries no sx / sy. */
+    F64 seaFloor(F64 cx, F64 cy, const Time& T, F64 s_eep, F64 width) const;
+    /** README "The sea" (viewers, per point): S_local = clamp(max(S_storm, floor, 0.15), 0.15, 3); the drawn amplitude
+     *  there is x (S_local / S_eep)^1.5 - this returns that factor. */
+    static F64 seaAmplitudeFactor(F64 s_storm, F64 floor, F64 s_eep);
+    /** WolfAutoEnvironmentModule.cs ApplyWind (README "The sea"): index = clamp((wind - 3) / 3, 0.15, 3). */
+    static F64 seaIndexOfWind(F64 ms);
+
     // README "Time" s(x) and S(x) = its integral from 0 to x
     static F64 smooth(F64 x);
     static F64 smoothIntegral(F64 x);
@@ -111,6 +129,11 @@ public:
     static constexpr F64 RM_PER_RE = 1.25;              ///< Rm = 1.25 Re
     static constexpr F64 RCDO_PER_R = 0.35;             ///< Rcdo = 0.35 R
     static constexpr F64 EYE_PER_R = 0.1;               ///< Re = 0.1 R
+    static constexpr F64 HOLLAND_B = 1.31;              ///< README Wind: B (Willoughby & Rahn 2004)
+    static constexpr F64 INFLOW_DEG = 22.6;             ///< README Wind: the surface inflow angle (Zhang & Uhlhorn 2012)
+    static constexpr F64 WIND_CAP = 75.0;               ///< README Wind: |v| capped at 75 m/s
+    static constexpr F64 SEA_MIN_INDEX = 0.15;          ///< wolfseastate.h MIN_INDEX
+    static constexpr F64 SEA_MAX_INDEX = 3.0;           ///< wolfseastate.h MAX_INDEX
 };
 
 #endif // WOLF_HURRICANE_H

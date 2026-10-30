@@ -25,6 +25,7 @@
 #include "lluuid.h"
 #include "v2math.h"
 #include "v3math.h"
+#include "wolfhurricane.h"   // [HURRICANE 2026-10-30/]
 
 class LLViewerObject;
 class LLViewerRegion;
@@ -139,6 +140,14 @@ private:
         F64       mSwellClock = 0.0;
         F64       mBreakerClock = 0.0;
         F64       mAutoSurfClock = 0.0;
+        // [HURRICANE 2026-10-30] the region's storm on the sea this step (waterV.glsl wolfStormSeaFactor's CPU twin): the
+        // storm (WolfRegionWeather::hurricane, nullptr = none), its clock, the eye (region metres of the agent's region),
+        // that region's origin (agent), the floor (1 - W env(r_c)) S_eep and S_eep
+        const WolfHurricane* mStorm = nullptr;
+        WolfHurricane::Time mStormT;
+        F64       mStormCx = 0.0, mStormCy = 0.0;
+        F32       mStormOriginX = 0.f, mStormOriginY = 0.f;
+        F64       mStormFloor = 0.0, mStormSeep = 1.0;
     };
     struct Rocker
     {

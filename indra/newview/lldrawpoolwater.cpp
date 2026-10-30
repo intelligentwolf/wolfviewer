@@ -41,6 +41,8 @@
 #include "llsky.h"
 #include "llviewertexturelist.h"
 #include "llviewerregion.h"
+#include "lldate.h"           // [HURRICANE 2026-10-30/] the storm's wall clock
+#include "wolfregionweather.h"   // [HURRICANE 2026-10-30/] the region's storm (wolfhurricane.h)
 #include "llvowater.h"
 #include "llvosurfacepatch.h"   // <WolfViewer> sLODFactor
 #include "llsurface.h"
@@ -394,6 +396,45 @@ void LLDrawPoolWater::renderPostDeferred(S32 pass)
         const F32 amp = sea_from_region2 ? mSeaState.mAmplitude : llclamp((F32)manual_height2, 0.f, 5.f);
         shader->uniform1f(s_storm_chaos, mSeaState.mChaos);
         shader->uniform1f(s_max_wave_height, amp * 2.5f);
+        // [HURRICANE 2026-10-30] Paul: "hurricanes should affect the sea". The region's storm (ticket #367) sets the sea
+        // index at each point of open water (waterV.glsl wolfStormSeaFactor; the model: wolfhurricane.cpp seaIndexAt /
+        // seaFloor / seaAmplitudeFactor, region-terrain-work/hurricane-2026-10-29/README.md "The sea", viewers per point).
+        // S_eep = the index this water is drawn with (wolfUpdateSea: wolfseastate.h fromWater, eased; or the manual height's
+        // indexForAmplitude), so a factor of 1 is the sea as it was. No storm running: x = 0 and the shader skips it.
+        {
+            static LLStaticHashedString s_sea_storm("wolfSeaStorm");
+            static LLStaticHashedString s_sea_storm_eye("wolfSeaStormEye");
+            static LLStaticHashedString s_sea_storm_wind("wolfSeaStormWind");
+            static LLStaticHashedString s_sea_storm_misc("wolfSeaStormMisc");
+            const WolfHurricane* hu = WolfRegionWeather::instanceExists() ? WolfRegionWeather::instance().hurricane() : nullptr;
+            LLViewerRegion* srgn = gAgent.getRegion();
+            const F64 now = LLDate::now().secondsSinceEpoch();
+            const WolfHurricane::Time T = hu ? hu->timeAt(now) : WolfHurricane::Time();
+            if (hu && srgn && T.active())
+            {
+                F64 cx = 0.0, cy = 0.0;
+                hu->centre(now, cx, cy);
+                const F64 s_eep = (F64)mSeaState.mIndex;
+                const F64 floor_idx = hu->seaFloor(cx, cy, T, s_eep, (F64)srgn->getWidth());
+                // Source: llviewerregion.h:210 getOriginAgent - region metres -> agent
+                const LLVector3 o = srgn->getOriginAgent();
+                const F64 DEG = 3.14159265358979323846 / 180.0;
+                const F64 H = hu->mHeading * DEG;
+                const F64 F = hu->mAmbientFrom * DEG;
+                const F64 B = (hu->mHeading + 90.0 * (F64)hu->mHemisphere) * DEG;   // README: the r < 1 m bearing
+                shader->uniform4f(s_sea_storm, 1.f, (F32)T.W, (F32)hu->mHemisphere, (F32)floor_idx);
+                shader->uniform4f(s_sea_storm_eye, (F32)((F64)o.mV[VX] + cx), (F32)((F64)o.mV[VY] + cy),
+                                  (F32)hu->mRadius, (F32)hu->mEye);
+                // the track velocity speed (sin H, cos H) and the ambient wind as the air moves (x = -S sin F, y = -S cos F)
+                shader->uniform4f(s_sea_storm_wind, (F32)(hu->mSpeed * sin(H)), (F32)(hu->mSpeed * cos(H)),
+                                  (F32)(-hu->mAmbientMs * sin(F)), (F32)(-hu->mAmbientMs * cos(F)));
+                shader->uniform4f(s_sea_storm_misc, (F32)hu->mVmax, (F32)s_eep, (F32)sin(B), (F32)cos(B));
+            }
+            else
+            {
+                shader->uniform4f(s_sea_storm, 0.f, 0.f, 1.f, 0.f);
+            }
+        }
         shader->uniform1f(s_shore_on, shore_on ? 1.f : 0.f);
         // [SURF 2026-09-07] The surf train's parameters (wolfwavezones.cpp): the current
         // region's saved ones, else the defaults (1.5 m waves, a set every 90 s); no region on

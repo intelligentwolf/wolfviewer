@@ -76,6 +76,8 @@ namespace
 
     void stamp(S32 p, S32 which)
     {
+        // CPU-only idle work: a GPU interval around it would only measure unrelated GL work queued before it
+        if (p == WolfFrameProfile::OBJECTS || p == WolfFrameProfile::TERRAIN_VIS) return;
         if (!timersAvailable()) return;
         GLuint& id = sState.q[sState.slot][p][which];
         if (!id) glGenQueries(1, &id);

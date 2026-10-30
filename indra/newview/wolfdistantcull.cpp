@@ -29,6 +29,7 @@
 #include <cmath>
 
 extern bool gCubeSnapshot;   // pipeline.cpp: a reflection probe or mirror is being rendered
+extern bool gSnapshot;       // llviewerdisplay.cpp: a snapshot (its own size and zoom) is being rendered
 
 namespace
 {
@@ -98,7 +99,9 @@ namespace
     /** The groups this applies to at all (see wolfdistantcull.h), and only while nothing special is being rendered. */
     const Frame* applies(LLSpatialGroup* group)
     {
-        if (!group || gCubeSnapshot || LLPipeline::sReflectionRender)
+        // [review] snapshots render in the same main-loop pass at their own size and zoom, after frame() was worked out
+        // for the window: never cull for them
+        if (!group || gCubeSnapshot || gSnapshot || LLPipeline::sReflectionRender)
         {
             return nullptr;
         }

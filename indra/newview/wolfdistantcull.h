@@ -46,8 +46,11 @@ class LLSpatialGroup;
  *   - a group drawn last frame stays until it is below 3/4 of the threshold (the server's own x0.75 for an object
  *     already shown), so a group on the edge does not flicker as the camera moves.
  * Lights are not affected: deferred lights come from LLPipeline::mNearbyLights (all light prims, calcNearbyLights),
- * not from the visible groups. Reflection-probe and mirror renders (gCubeSnapshot), the reflection pass and object
- * selection are left exactly as stock, and while the Build floater is open nothing is culled.
+ * not from the visible groups. Reflection-probe and mirror renders (gCubeSnapshot), snapshots (gSnapshot), the
+ * reflection pass and object selection (LLOctreeSelect) are left exactly as stock, and while the Build floater is open
+ * nothing is culled. The sun and spot shadow culls (LLOctreeCullShadow inherits LLOctreeCull) apply the same rule,
+ * measured from the viewer's eye: a caster too small to see draws a shadow too small to see. Physical objects that
+ * move without a spatial bridge are ordinary static-partition drawables and are treated like any other prim.
  *
  * WolfViewerDistantCull (debug setting, default on) turns it off for comparison; resident settings are not touched.
  */

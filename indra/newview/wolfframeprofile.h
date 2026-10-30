@@ -23,8 +23,10 @@
  * build), so a resident's log says how fast the frame is but never where it went. This measures the main phases of
  * display() (llviewerdisplay.cpp), the reflection-probe update after it and two idle steps before it (llappviewer.cpp):
  *   CPU      LLTimer, the main thread's time inside the phase
- *   GPU      GL_TIMESTAMP queries at the start and end of the phase (glQueryCounter, OpenGL 3.3), read back four frames
- *            later so nothing waits; when the CPU is the limit the GPU number is mostly the gaps between commands
+ *   GPU      GL_TIMESTAMP queries at the start and end of the phase (glQueryCounter, OpenGL 3.3), read back three frames
+ *            later so nothing waits (a result not ready by then is dropped, which can bias a GPU-bound phase low);
+ *            when the CPU is the limit the GPU number is mostly the gaps between commands. Not taken for the CPU-only
+ *            idle phases (OBJECTS, TERRAIN_VIS), whose log entry shows "-"
  *   draws    LLVertexBuffer draw calls issued in the phase (llrender/wolfdrawcounter.h)
  * and logs the averages every LOG_SECONDS while the view reaches past 1,024 m (a far draw distance or a region wider
  * than 1,024 m), with the visible octree groups and what WolfDistantCull skipped. Nothing else is changed by it.

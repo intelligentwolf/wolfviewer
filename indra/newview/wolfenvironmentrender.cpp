@@ -216,6 +216,14 @@ namespace
     };
     MoonDrawn sMoonDrawn;
 
+    // [WolfViewer 2026-10-30 ticket #334] THE SKY WATCH (skyWatch, below): Jimmy Olsen's one-frame flash over the TROMSO sky (a flat
+    // grey veil over the sky only, the ground untouched) has no proven trigger. These are the states that decide how the sky is
+    // hazed and clouded, recorded where they are decided and logged only when one changes from one frame to the next.
+    S32 sSkyWatchDepth = -1;    // the LL depth state the sky pass ran under: 4 test, 2 write, 1 LEQUAL (renderSkyDome); -1 not drawn
+    S32 sSkyWatchLayers = -1;   // the cloud layers updateLight chose: 0 held (arrival), 1 the weather's genera, 2 takram's defaults
+                                // (a clear forecast), 3 takram's defaults (no weather, or a zone's own clouds)
+    S32 sSkyWatchHaze = -1;     // cloudsFrame's haze_always (cloudsF.glsl wolfHazeAlways): 1 / 0; -1 no clouds pass this frame
+
     // [WolfViewer 2026-10-13] the EEP's cloud cover: measureCloudCover's last measurement of the native clouds, for the log
     // [WolfViewer 2026-10-19] the coverage itself is no longer learned from the screen (coverFromShare below); the readings
     // drive the thinning and the clouds' colour only
@@ -1051,9 +1059,11 @@ namespace
         if (holding)
         {
             // [2026-10-26] an arrival in progress: last frame's layers stay as they are (the one switch above)
+            sSkyWatchLayers = 0;   // [2026-10-30 ticket #334] the sky watch
         }
         else if (sClouds && d.mHaveWeather && !z.hasClouds)
         {
+            sSkyWatchLayers = 1;   // [2026-10-30 ticket #334] the sky watch (2 below: a clear forecast)
             WolfCloudGenus::Weather w;
             w.low = d.mWeatherLow; w.medium = d.mWeatherMid; w.high = d.mWeatherHigh; w.total = d.mWeatherCloud;
             w.fog = d.mWeatherFog; w.precip = d.mPrecipitation; w.thunderPct = d.mThunderChance; w.symbol = d.mWeatherSymbol;
@@ -1158,12 +1168,14 @@ namespace
                 // entirely (Paul: "we still have no clouds"). takram's default layers (CloudLayers.ts:31-68) carry the EEP's
                 // coverage instead, as they do with no weather at all (below).
                 sClouds->layers() = WolfTk::CloudLayers::defaults();
+                sSkyWatchLayers = 2;   // [2026-10-30 ticket #334] the sky watch
             }
         }
         else if (sClouds)
         {
             sClouds->layers() = WolfTk::CloudLayers::defaults();
             sGenusValid = false;
+            sSkyWatchLayers = 3;   // [2026-10-30 ticket #334] the sky watch
         }
         // [WolfViewer 2026-10-13] Paul: "cloud levels - lindens eep should control the new environment". LL's cloud density
         // (cloud_pos_density1.z, default 1.0, llsettingssky.cpp:902) is an opacity GAIN that saturates: cloudsF.glsl:92 alpha =
@@ -1662,7 +1674,42 @@ namespace
             f.seed_phase[0] = (F32)(a >> 8) / 16777216.f;   // 24 bits -> 0..1
             f.seed_phase[1] = (F32)(b >> 8) / 16777216.f;
         }
+        if (!probe) sSkyWatchHaze = f.haze_always ? 1 : 0;   // [2026-10-30 ticket #334] the sky watch
         return f;
+    }
+
+    /** [WolfViewer 2026-10-30 ticket #334] The sky watch: once a frame (the main view's post pass), the states that decide how the
+     *  sky is hazed and clouded, compared with last frame's; a line only when one changes, never per frame, and at most
+     *  SKY_WATCH_LINES a minute (the lines dropped in a minute are counted in the next). On in every build: a few integer compares. */
+    void skyWatch()
+    {
+        LLSettingsSky::ptr_t psky = LLEnvironment::instance().getCurrentSky();
+        const S32 now[5] = { WolfEnvironmentRender::eepDriven() ? 1 : 0, psky ? 0 : 1, sSkyWatchLayers, sSkyWatchHaze, sSkyWatchDepth };
+        static S32 s_last[5] = { -2, -2, -2, -2, -2 };
+        // the next frame's values are recorded afresh: a pass that does not run leaves -1, so a missing pass shows as a change
+        sSkyWatchHaze = -1;
+        sSkyWatchDepth = -1;
+        bool changed = false;
+        for (S32 i = 0; i < 5; ++i) changed = changed || now[i] != s_last[i];
+        if (!changed) return;
+        const bool first = s_last[0] == -2;
+        S32 was[5];
+        for (S32 i = 0; i < 5; ++i) { was[i] = s_last[i]; s_last[i] = now[i]; }
+        if (first) return;   // the first frame has nothing to compare with
+        constexpr S32 SKY_WATCH_LINES = 12;
+        static F64 s_minute = 0.0;
+        static S32 s_lines = 0, s_dropped = 0;
+        const F64 t = LLFrameTimer::getElapsedSeconds();
+        if (t - s_minute >= 60.0) { s_minute = t; s_lines = 0; }
+        if (s_lines >= SKY_WATCH_LINES) { ++s_dropped; return; }
+        ++s_lines;
+        LL_INFOS("WolfEnv") << "sky watch (frame " << LLFrameTimer::getFrameCount() << "): eepDriven " << was[0] << "->" << now[0]
+                            << ", no EEP sky " << was[1] << "->" << now[1]
+                            << ", cloud layers " << was[2] << "->" << now[2] << " (0 held, 1 weather, 2 defaults/clear, 3 defaults/no weather)"
+                            << ", haze_always " << was[3] << "->" << now[3]
+                            << ", sky depth state " << was[4] << "->" << now[4] << " (4 test, 2 write, 1 LEQUAL; -1 not drawn)"
+                            << (s_dropped > 0 ? llformat(", %d earlier change(s) not logged (rate limit)", s_dropped) : std::string()) << LL_ENDL;
+        s_dropped = 0;
     }
 
     void captureTexture(const std::string& name, U32 tex, U32 w, U32 h, bool alpha_png, GLenum target = GL_TEXTURE_2D, S32 layer = 0)
@@ -2944,7 +2991,16 @@ bool WolfEnvironmentRender::renderSkyDome()
         if (sunLoc >= 0) glUniform1i(sunLoc, WolfTk::NAMED_UNIT_BASE + 2);
     }
     // Source: LLDrawPoolWLSky::renderSkyHazeDeferred - the same depth state for the dome.
-    LLGLSPipelineDepthTestSkyBox sky(true, true);
+    // [WolfViewer 2026-10-30 ticket #334] ... and, as LL's dome draw itself, NO depth write. Source: llvowlsky.cpp:718
+    // LLVOWLSky::drawDome, LLGLDepthTest gls_depth(GL_TRUE, GL_FALSE) inside renderSkyHazeDeferred's (true, true). The screen
+    // triangle (10-14) no longer goes through drawDome, and with (true, true) it wrote z 0.99999 (window 0.999995) over every sky
+    // pixel (Paul's trace 2026-10-30 06:36Z: "depth test 1 func 0x203 write 1", 3,769,362 samples = the whole 2523 x 1494 view).
+    // Every later pass tells the sky by depth >= 1 (hazeF.glsl:79, cloudsF.glsl getRayDistanceToScene, cloudsResolveF.glsl
+    // wolfSceneDepth, compositeF.glsl), and LL's stars (starsV.glsl:46, depth 1.0, LEQUAL) could not pass behind it. The sky
+    // now keeps the G-buffer's cleared 1.0; the bodies write their own depth below (uBodyDepth), as LL's moon and sun do.
+    LLGLSPipelineDepthTestSkyBox sky(true, false);
+    static LLStaticHashedString s_bodyDepth("uBodyDepth");
+    sh.uniform1f(s_bodyDepth, 0.f);   // the sky's own draws (and every probe face) are colour draws
     const F32 e = sFrame.exposure;
     sAtmos->setRuntimeUniforms(sh, e);
     setFrameUniforms(sh, true);
@@ -3512,6 +3568,23 @@ bool WolfEnvironmentRender::renderSkyDome()
         glEndQuery(GL_SAMPLES_PASSED);
         s_domeQueryPending = true;
     }
+    // [WolfViewer 2026-10-30 ticket #334] the bodies' depth (skyF.glsl uBodyDepth): the moon, the sun and the other bodies write
+    // depth on their discs, as LL's moon and sun do (Source: lldrawpoolwlsky.cpp renderHeavenlyBodies LLGLSPipelineBlendSkyBox(true,
+    // true), "SL-14113 we need moon to write to depth to clip stars behind"), so the stars drawn next (renderStarsDeferred, depth
+    // 1.0, LEQUAL) stay behind them. The main view only: a probe face draws no stars (lldrawpoolwlsky.cpp renderDeferred). LL's
+    // depth clear after the sky pass (lldrawpoolwlsky.cpp endDeferredPass) then clears the discs too, as it clears LL's moon.
+    if (!gCubeSnapshot)
+    {
+        LLGLDepthTest bodyDepth(GL_TRUE, GL_TRUE, GL_LEQUAL);
+        gGL.setColorMask(false, false);
+        sh.uniform1f(s_bodyDepth, 1.f);
+        gPipeline.mScreenTriangleVB->setBuffer();
+        gPipeline.mScreenTriangleVB->drawArrays(LLRender::TRIANGLES, 0, 3);
+        sh.uniform1f(s_bodyDepth, 0.f);
+        gGL.setColorMask(true, true);   // the G-buffer pass's mask (Source: pipeline.cpp renderGeomDeferred, setColorMask(true, true) before the pools)
+        // the depth state the sky pass ran under, LL's own record of it (LLGLDepthTest's previous state), for the sky watch
+        sSkyWatchDepth = (sky.mDepth.mPrevDepthEnabled ? 4 : 0) | (sky.mDepth.mPrevWriteEnabled ? 2 : 0) | (sky.mDepth.mPrevDepthFunc == GL_LEQUAL ? 1 : 0);
+    }
     probeSky(sh);   // [WolfViewer 2026-10-13] the EEP drives the sky: measure this dome against the stock one
     if (seaProbe) gPipeline.unbindReflectionProbes(sh);
     if (moonUnit >= 0) gGL.getTexUnit(moonUnit)->unbind(LLTexUnit::TT_TEXTURE);
@@ -3552,6 +3625,7 @@ void WolfEnvironmentRender::postPass()
         captureTarget("gbuffer", rt->deferredScreen, true);
     }
     postPassInner();
+    if (!gCubeSnapshot) skyWatch();   // [2026-10-30 ticket #334] after this frame's sky, cloud layers and clouds pass have run
     if (cap)
     {
         captureTarget("screen_after", rt->screen, true);

@@ -68,6 +68,18 @@ uniform float wakeReady;
 
 out vec4 frag_color;
 
+#ifdef WOLF_WATER_FULL
+// [T358 SHORE HOLES 2026-10-29] The per-pixel land rule in main() no longer cuts a hole in the sea where its conservative
+// terrain test only MIGHT find land: it moves the fragment's depth back to where its view ray meets the height the water
+// may stand at there, and the depth test against the terrain that is actually drawn decides (see main()). The depth only
+// ever moves AWAY from the eye, so on GLSL 4.20 (llshadermgr.cpp picks #version 420 for GLSL >= 4.20) it is declared
+// depth_greater (GLSL 4.20 spec 4.4.2.3, ARB_conservative_depth), which lets the GPU keep its early depth rejection.
+#if __VERSION__ >= 420
+layout (depth_greater) out float gl_FragDepth;
+#endif
+uniform mat4 projection_matrix;   // LLRender::syncMatrices uploads it to every shader that declares it (llrender.cpp)
+#endif
+
 #ifdef HAS_SUN_SHADOW
 float sampleDirectionalShadow(vec3 pos, vec3 norm, vec2 pos_screen);
 #endif
@@ -416,6 +428,9 @@ float swellWhitecap(vec2 p, float back)
 
 void main()
 {
+#ifdef WOLF_WATER_FULL
+    float wolfFragDepth = gl_FragCoord.z;   // [T358 SHORE HOLES 2026-10-29] written as gl_FragDepth at the end of main()
+#endif
     mirrorClip(vary_position);
     // <WolfViewer 2026-10-28> [WOLF SEA TUNNEL] no water surface inside an air-filled volume (a sea tunnel's mouth
     // rising out of the sea, waves over it): waterFogF.glsl wolfInDry, wolfdryvolumes.cpp
@@ -492,7 +507,8 @@ void main()
     // Paul 2026-10-26: "water should not appear on land", refined: never over steep land or cliffs, never above a small
     // swash band. At this pixel's own (displaced) place, over terrain at or above the water level: the sea may stand at
     // most the swash band's ceiling (Rcap, waterV.glsl's Hunt run-up, <= 0.5 m, 0 off open-sea beaches) above the water
-    // level, and only where the terrain itself is no higher than that; anything else is discarded. The terrain is the
+    // level, and only where the terrain itself is no higher than that; anything else is held to that ceiling by its depth
+    // ([T358 SHORE HOLES 2026-10-29] below; it was discarded, which holed the sea beside every shore). The terrain is the
     // clearance field's camera-centred terrain blocks (1 m over 256 m, then 4 m over 1024 m), each texel the HIGHEST
     // terrain within a texel of it, so the bilinear read is at or above the drawn terrain: conservative, on every region
     // size. waterV.glsl holds the land at the vertices wherever a triangle is not wholly inside a block. The water level is
@@ -511,7 +527,33 @@ void main()
                 float band = clamp(vary_wolf_dry.z, 0.0, 0.5);
                 if (terrain >= plane && (terrain > plane + band || vary_wolf_dry.w > band))
                 {
-                    discard;
+                    // [T358 SHORE HOLES 2026-10-29] Ticket 358 (Chad Deischer, Turtle bay): a black band along the shore. The
+                    // block texel holds the HIGHEST terrain within a texel of it, so this test also passes up to about two
+                    // texels (2 m near the camera, 8 m past 128 m) out over the sea floor beside the shore, where the terrain
+                    // is UNDER the water - and the discard there cut a hole in the sea showing the bed as the water haze pass
+                    // left it (black under a black EEP water fog: Jimmy's skies carry water_fog_color 0,0,0, density 16; with
+                    // Transparent Water off, nothing at all - LLPipeline::isWaterClip culls what lies wholly under the water).
+                    // The rule itself is "the sea stands no higher than the water level over land (the swash band's ceiling
+                    // over a low open-sea beach)". So instead of discarding, this fragment is drawn where its view ray meets
+                    // that ceiling: the depth test against the terrain actually drawn then hides it wherever the terrain is at
+                    // or above the ceiling - exactly the land - and keeps it over the sea floor. A fragment at or under the
+                    // ceiling needs nothing: terrain above it is already in front of it.
+                    // Heights along the surface normal, which is world up for the region's water (waterV.glsl surf_n):
+                    // vary_wolf_dry.w = this fragment above the undisplaced plane, eye_above = the eye above this fragment.
+                    float ceiling = terrain > plane + band ? 0.0 : band;
+                    float over = vary_wolf_dry.w - ceiling;
+                    float eye_above = -dot(normalize(vary_normal), vary_position);
+                    if (over > 0.0)
+                    {
+                        if (eye_above <= 0.0)
+                        {
+                            discard;   // the eye is level with or under this crest: its ray never comes down to the ceiling
+                        }
+                        // the ray from the eye (the eye-space origin) through this fragment reaches the ceiling at
+                        // t = (eye_above + over) / eye_above > 1, i.e. always further away
+                        vec4 ceil_clip = projection_matrix * vec4(vary_position * (1.0 + over / eye_above), 1.0);
+                        wolfFragDepth = clamp(ceil_clip.z / ceil_clip.w * 0.5 + 0.5, gl_FragCoord.z, 1.0);
+                    }
                 }
                 break;
             }
@@ -1064,5 +1106,8 @@ void main()
     // [WOLF ENV TAKRAM 2026-10-12] the frame is pre-exposed HDR under the native sky: the sun's glint and the bright
     // sky in the reflection are > 1 there, as the dome's sea beside it is (no clamp to 1, which drew a seam)
     if (wolf_phys > 0.5) frag_color.rgb = max(color.rgb, vec3(0.0));
+#ifdef WOLF_WATER_FULL
+    gl_FragDepth = wolfFragDepth;   // [T358 SHORE HOLES 2026-10-29] every path that is not discarded writes it
+#endif
 }
 

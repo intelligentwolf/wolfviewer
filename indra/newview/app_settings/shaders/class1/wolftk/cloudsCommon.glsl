@@ -702,7 +702,14 @@ MediaSample sampleMedia(
   // [WolfViewer 2026-10-26, fourth pass] the fibres of an ice layer are carved into the weather value in sampleWeather now (before
   // the coverage cut), not applied as a factor here: a factor on a thin sheet left the sheet whole - the ribbons.
   // Apply the density profiles.
-  density = saturate(density * densityScales * getLayerDensity(weather.heightFraction));
+  // [HURRICANE 2026-10-30 ~14:00Z] inside the storm its OWN extinction, a cumulonimbus's (wolfStormSigma, 0.3 /m), uniform in height,
+  // replaces the host layers' sigma x profile by its share. Paul 13:36Z, 3.2 km from a mature storm: "a pale, thin, translucent
+  // veil". The storm was drawn in whatever layers the region had - there Cu congestus (sigma 0.15 /m x a profile of 0.1 at its
+  // base rising to 1.1 at its 5.5 km top, so 0.1 - 0.36 of it in the storm's lowest 1.8 km), Ac and the ice Ci (sigma 3.7e-4 /m,
+  // a veil by design) - so its optical thickness came from the region's genus, not from the storm.
+  vec4 layerSigma = densityScales * getLayerDensity(weather.heightFraction);
+  if (weather.stormW > 0.0) layerSigma = mix(layerSigma, vec4(wolfStormSigma), weather.stormW);
+  density = saturate(density * layerSigma);
 
   MediaSample media;
   float densitySum = density.x + density.y + density.z + density.w;

@@ -882,6 +882,13 @@ struct Clouds::Impl
             // [2026-10-30 ~13:10Z, Paul: "its there but not reaching to the actual ocean"] z = Z_LOW, the base under the eyewall and
             // the dense overcast (README "The storm in 3D" item 5); w = the rain rate at q = 1 (mm/h) for the rain curtains, 0 for none
             u4f(sh, "wolfStormBase", 300.f, 2.f * largest, 150.f, f.storm_on ? f.storm_rain_mmh : 0.f);
+            // [2026-10-30 ~14:00Z] the storm's cloud is a cumulonimbus's (NOAA JetStream: the eyewall is "a ring of thunderstorms", the
+            // rainbands "curved bands of clouds and thunderstorms"): sigma = 3 LWC / (2 rho_w r_e) with the table's Cb LWC (2 g/m3)
+            // and the same 1000 kg/m3 and 10 um as wolfcloudgenus.cpp:39 sigmaWater -> 0.3 /m
+            const WolfCloudGenus::Table& gtc = WolfCloudGenus::table();
+            const auto cb = gtc.genera.find("Cb");
+            const F32 cbLwc = cb != gtc.genera.end() ? cb->second.lwc : 2.f;
+            u1f(sh, "wolfStormSigma", 3.f * cbLwc * 1e-3f / (2.f * 1000.f * 10e-6f));
         }
         {
             const F32 a = f.weather_rotation_deg * DEG_TO_RAD, ca = cosf(a), sa = sinf(a), inv = 1.f / llmax(f.weather_stretch, 1e-3f);

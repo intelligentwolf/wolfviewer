@@ -107,6 +107,9 @@ uniform vec4 wolfStormFlow;             // the flow map: x tau0 = t mod P, y tau
 // storm runs the shell starts at the sea (minHeight 0), but a ray that never passes near the storm still starts at this height
 // (cloudsF.glsl main), so only the storm's rays pay for the march below the layers
 uniform float wolfLayersMinHeight;
+// [HURRICANE 2026-10-30 ~14:00Z] the storm's own cloud's extinction (1/m): a cumulonimbus's (wolf_clouds.xml Cb lwc_g_m3,
+// sigma = 3 LWC / (2 rho_w r_e), wolfcloudgenus.cpp sigmaWater) - inside the storm it replaces the host layers' sigma x profile
+uniform float wolfStormSigma;
 uniform vec4 wolfStormBase;             // x Z_BASE (m above the sea), y K_BASE (the dark base's absorption per unit density),
                                         // z [2026-10-30] Z_LOW (the base under the eyewall and dense overcast, m), w the rain rate at
                                         // q = 1 (mm/h; 0 = no rain curtains)

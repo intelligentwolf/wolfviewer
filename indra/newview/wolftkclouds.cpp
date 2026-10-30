@@ -862,16 +862,24 @@ struct Clouds::Impl
         u4f(sh, "wolfStormEye", f.storm_eye_agent[0], f.storm_eye_agent[1], f.storm_radius, f.storm_eye_radius);
         u4f(sh, "wolfStormSpin", f.storm_h, f.storm_D, f.storm_lookup, f.storm_vmax);   // [2026-10-30] z the lookup's weight, w vmax
         // [2026-10-30] README "The storm in 3D": the flow map (wolfenvironmentrender.cpp), and the dark base - Z_BASE 300 m and
-        // K_BASE = 2 x the absorption of the lowest layer the region has (by its base; a layer of no height is not one)
+        // K_BASE = 2 x the LARGEST absorption among the layers the region has now (a layer of no height is not one): the
+        // precipitating layer carries it (Ns, wolfcloudgenus.cpp R["Ns"] / wolf_clouds.xml Ns absorption 0.02). [2026-10-30 ~13:00Z,
+        // was the LOWEST layer's: the storm weather's St at 150-500 m has absorption 0, so nothing darkened.] When no layer absorbs,
+        // the genus table's rain layer's own precipitation darkening: its Ns row (WolfCloudGenus::table(), from wolf_clouds.xml).
         u4f(sh, "wolfStormFlow", f.storm_flow[0], f.storm_flow[1], f.storm_flow[2], f.storm_flow[3]);
         {
-            S32 lowest = -1;
+            F32 largest = 0.f;
             for (S32 i = 0; i < 4; ++i)
             {
-                if (layers.layer[i].height > 0.f && (lowest < 0 || layers.layer[i].altitude < layers.layer[lowest].altitude)) lowest = i;
+                if (layers.layer[i].height > 0.f) largest = llmax(largest, layers.layer[i].absorption);
             }
-            const F32 k_base = lowest >= 0 ? 2.f * layers.layer[lowest].absorption : 0.f;
-            u2f(sh, "wolfStormBase", 300.f, k_base);
+            if (!(largest > 0.f))
+            {
+                const WolfCloudGenus::Table& gt = WolfCloudGenus::table();
+                const auto ns = gt.genera.find("Ns");
+                if (ns != gt.genera.end()) largest = ns->second.absorption;
+            }
+            u2f(sh, "wolfStormBase", 300.f, 2.f * largest);
         }
         {
             const F32 a = f.weather_rotation_deg * DEG_TO_RAD, ca = cosf(a), sa = sinf(a), inv = 1.f / llmax(f.weather_stretch, 1e-3f);

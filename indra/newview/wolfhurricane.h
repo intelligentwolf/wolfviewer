@@ -99,6 +99,10 @@ public:
     F64 rainQ(const Point& p, const Time& T) const;
     /** README "Rain at a point": the level from q - 4 torrential, 3, 2, 1, 0 none. */
     static S32 rainLevel(F64 q);
+    /** [HURRICANE 2026-10-30] README "Rain at a point" / php hurricane_lib.php:51 HU_RAIN_MMH: the rain rate (mm/h) at q = 1 for a
+     *  category (Lonfat, Marks & Chen, AMS 2000 15A.1: > 15 mm/h near the centre for Cat 3+, ~3 mm/h for tropical storms) -
+     *  1: 7, 2: 11, 3-5: 15. The rain curtains' extinction comes from it (cloudsCommon.glsl wolfStormApply). */
+    static F64 rainRateMmh(S32 category) { return category >= 3 ? 15.0 : (category == 2 ? 11.0 : 7.0); }
     /** w = C env(r): the storm's share at the point (README "Clouds"; "Rain at a point" replaces the region's at w >= 0.5). */
     static F64 share(const Point& p, const Time& T) { return T.C * p.env; }
 

@@ -1619,6 +1619,7 @@ namespace
                 f.storm_eye_radius = (F32)hu->mEye;
                 f.storm_h = (F32)hu->mHemisphere;
                 f.storm_D = (F32)hu->streamed(T);
+                f.storm_rain_mmh = hu->mRain ? (F32)WolfHurricane::rainRateMmh(hu->mCategory) : 0.f;   // [2026-10-30] the rain curtains
                 // [HURRICANE 2026-10-30] the frame budget (wolfframegovernor.h): the storm's own lookup of the field is dropped
                 // while the budget is under 0.9 and taken back once it is full again (the gap between is the hysteresis), eased
                 // over 3 s either way so the bands' texture never pops. Advanced by the main view only; a probe face reads it.

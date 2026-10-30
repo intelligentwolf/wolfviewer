@@ -1003,7 +1003,8 @@ vec4 marchClouds(
     ++sampleCount.x;
     #endif // DEBUG_SHOW_SAMPLE_COUNT
 
-    if (!any(greaterThan(weather.density, vec4(minDensity)))) {
+    // [HURRICANE 2026-10-30] a rain curtain alone (no cloud) is still a medium (cloudsCommon.glsl sampleMedia)
+    if (!any(greaterThan(weather.density, vec4(minDensity))) && !(weather.stormRain > 0.0)) {
       // Step longer in empty space.
       // Source note: This produces banding artifacts.
       // Possible improvement: Binary search refinement

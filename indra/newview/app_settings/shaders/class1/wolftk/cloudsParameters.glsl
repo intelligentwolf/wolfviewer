@@ -103,7 +103,9 @@ uniform vec4 wolfStormSpin;             // x h the hemisphere (1 north, -1 south
 // [HURRICANE 2026-10-30] README "The storm in 3D" (cloudsCommon.glsl wolfStormApply / sampleMedia; wolftkclouds.cpp sharedUniforms)
 uniform vec4 wolfStormFlow;             // the flow map: x tau0 = t mod P, y tau1 = (t + P / 2) mod P (s), z the first's crossfade weight
                                         // (the triangle; 1 = one phase), w the turned 3D noise's weight (the frame budget)
-uniform vec2 wolfStormBase;             // x Z_BASE (m above the sea), y K_BASE (the dark base's absorption per unit density)
+uniform vec4 wolfStormBase;             // x Z_BASE (m above the sea), y K_BASE (the dark base's absorption per unit density),
+                                        // z [2026-10-30] Z_LOW (the base under the eyewall and dense overcast, m), w the rain rate at
+                                        // q = 1 (mm/h; 0 = no rain curtains)
 // the ice phase: the forward lobe's asymmetry x this for an ice layer (wolfcloudgenus.h WOLF_ICE_G_SCALE, the viewer
 // and the harness define it from the cited asymmetry parameters); 1 = water everywhere
 #ifndef WOLF_ICE_G_SCALE

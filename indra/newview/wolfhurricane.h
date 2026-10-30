@@ -52,7 +52,7 @@ public:
     F64  mHeading    = 0.0;     ///< degrees 0..360, compass, the direction moved TOWARDS (0 = north = +Y, 90 = east = +X)
     F64  mSpeed      = 0.0;     ///< m/s 0..30
     F64  mRadius     = 0.0;     ///< R, m 1000..60000
-    F64  mEye        = 0.0;     ///< Re, m (= 0.1 R)
+    F64  mEye        = 0.0;     ///< Re, m (the block's eye; 0.15 R for storms made from 2026-10-30)
     S32  mHemisphere = 1;       ///< 1 north (anticlockwise), -1 south (clockwise)
     bool mRain       = true;
     S32  mSx = 0, mSy = 0;      ///< the region's size, m (robust.regions sizeX / sizeY); 0 = not in the payload
@@ -139,7 +139,8 @@ public:
     static constexpr F64 SIN_ALPHA = 0.17364817766693;  ///< sin 10 deg (D = 0.622 vmax sin(10 deg) A)
     static constexpr F64 RM_PER_RE = 1.25;              ///< Rm = 1.25 Re
     static constexpr F64 RCDO_PER_R = 0.35;             ///< Rcdo = 0.35 R
-    static constexpr F64 EYE_PER_R = 0.1;               ///< Re = 0.1 R
+    static constexpr F64 EYE_PER_R = 0.15;              ///< Re = 0.15 R when the block gives none ([2026-10-30], was 0.1)
+    static constexpr F64 EYE_MIN_PER_R = 0.05, EYE_MAX_PER_R = 0.3;   ///< the range of the block's own eye (php HU_EYE_MIN / MAX_SHARE)
     static constexpr F64 HOLLAND_B = 1.31;              ///< README Wind: B (Willoughby & Rahn 2004)
     static constexpr F64 INFLOW_DEG = 22.6;             ///< README Wind: the surface inflow angle (Zhang & Uhlhorn 2012)
     static constexpr F64 WIND_CAP = 75.0;               ///< README Wind: |v| capped at 75 m/s

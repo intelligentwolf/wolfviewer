@@ -112,9 +112,11 @@ bool WolfHurricane::fromLLSD(const LLSD& sd, WolfHurricane& out)
     // vmax: the exact table value from the category (README Categories; the payload's `vmax` is rounded to 2 decimals for
     // show and is not used - the contract clarification of 2026-10-29, as the server and the plugin compute it)
     h.mVmax = VMAX_KT[h.mCategory - 1] * KT;
-    // eye: Re = 0.1 R (README table); hu_spec_build writes round(R x 0.1, 1), so the payload's value is held to that rounding
+    // eye: [2026-10-30] the block's own `eye` (README table: the server sets it, 0.15 R for storms made from 10-30, 0.1 R before;
+    // php hurricane_lib.php hu_spec_valid keeps a stored eye in EYE_MIN_PER_R..EYE_MAX_PER_R of R), so a storm keeps the eye it
+    // was made with and only the server decides the share; a block without one takes EYE_PER_R
     F64 eye = EYE_PER_R * h.mRadius;
-    if (readNumber(sd, "eye", eye)) eye = clampd(eye, EYE_PER_R * h.mRadius - 0.05, EYE_PER_R * h.mRadius + 0.05);
+    if (readNumber(sd, "eye", eye)) eye = clampd(eye, EYE_MIN_PER_R * h.mRadius, EYE_MAX_PER_R * h.mRadius);
     h.mEye = eye;
     h.mHemisphere = hemi < 0.0 ? -1 : 1;
     // rain: hu_spec_valid 'rain' => !isset($h['rain']) || $h['rain'] === true

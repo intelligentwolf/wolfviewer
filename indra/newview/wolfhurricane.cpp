@@ -208,6 +208,8 @@ WolfHurricane::Point WolfHurricane::geometry(F64 px, F64 py, F64 cx, F64 cy, con
     const F64 e = (p.r - 1.25 * Re) / (0.3 * Re);
     p.ew = T.E * std::exp(-e * e);
     p.Meye = 1.0 - T.E * (1.0 - smooth((p.r - 0.8 * Re) / (0.4 * Re)));
+    // [2026-10-30] README "Clouds": Mmoat = 1 - O w (1 - inner) (1 - s((B2 - 0.15) / 0.35)), w = C env (cloudsCommon.glsl wolfStormApply)
+    p.Mmoat = 1.0 - T.O * (T.C * p.env) * (1.0 - p.inner) * (1.0 - smooth((p.B2 - 0.15) / 0.35));
     return p;
 }
 

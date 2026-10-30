@@ -23,6 +23,7 @@
 #include "wolfenvironmentrender.h"
 
 #include <algorithm>
+#include <iomanip>
 #include <sstream>
 #include <cmath>
 #include <ctime>
@@ -1617,6 +1618,50 @@ namespace
                 f.storm_eye_radius = (F32)hu->mEye;
                 f.storm_h = (F32)hu->mHemisphere;
                 f.storm_D = (F32)hu->streamed(T);
+            }
+            // [HURRICANE 2026-10-30] storm watch: what the cloud pass is given (the uniforms wolfStorm, wolfStormEye, wolfStormSpin
+            // set from f in wolftkclouds.cpp sharedUniforms) and what that means at the camera (README "Geometry", "Clouds": the
+            // dense overcast r < 0.35 R, the eye mask, the moat mask), logged only when it changes (O / E / C to 0.05, the
+            // distance to 250 m, the zone) and at most every 5 s - the sky watch's way. Paul 10-30: "i'm still not seeing the
+            // cyclone itself": this shows from his log whether the storm reaches the clouds and where he stands in it.
+            if (!probe)
+            {
+                static std::string s_lastWatch;
+                static F64 s_nextWatch = 0.0;
+                std::ostringstream w;
+                if (!f.storm_on)
+                {
+                    w << "storm watch: no storm in the cloud pass" << (hu ? " (the region's storm is not running now)" : "");
+                }
+                else
+                {
+                    const LLVector3 cam = LLViewerCamera::getInstance()->getOrigin();   // agent metres, as the eye
+                    const F64 dx = (F64)cam.mV[VX] - f.storm_eye_agent[0], dy = (F64)cam.mV[VY] - f.storm_eye_agent[1];
+                    const F64 dist = std::sqrt(dx * dx + dy * dy);
+                    const LLVector3 origin = rgn ? rgn->getOriginAgent() : LLVector3::zero;
+                    F64 cx = 0.0, cy = 0.0;
+                    hu->centre(now, cx, cy);
+                    const WolfHurricane::Point p = hu->geometry((F64)(cam.mV[VX] - origin.mV[VX]), (F64)(cam.mV[VY] - origin.mV[VY]), cx, cy, T);
+                    const F64 rr = dist / (F64)f.storm_radius;
+                    const char* zone = p.r < 0.8 * hu->mEye ? "in the eye" : p.r < 1.5 * hu->mEye ? "in the eyewall"
+                                     : rr < 0.35 ? "under the dense overcast" : rr < 1.0 ? "in the rainbands" : rr < 1.3 ? "at the storm's edge" : "outside the storm";
+                    auto q = [](F64 v) { return std::floor(v * 20.0 + 0.5) / 20.0; };   // to 0.05
+                    w << std::fixed << std::setprecision(2)
+                      << "storm watch: in the cloud pass O " << q(f.storm_O) << " E " << q(f.storm_E) << " C " << q(f.storm_C)
+                      << " eye agent " << (S32)f.storm_eye_agent[0] << "," << (S32)f.storm_eye_agent[1]
+                      << " R " << (S32)f.storm_radius << " Re " << (S32)f.storm_eye_radius << " h " << (S32)f.storm_h
+                      << "; camera agent " << (S32)cam.mV[VX] << "," << (S32)cam.mV[VY] << "," << (S32)cam.mV[VZ]
+                      << " " << (S32)(std::floor(dist / 250.0 + 0.5) * 250.0) << " m from the eye (" << zone << ")"
+                      << ", storm share " << q(p.env * T.C) << ", eye mask " << q(p.Meye) << ", moat mask " << q(p.Mmoat)
+                      << ", coverage -> C_STORM 0.62 by " << q(p.env * T.C * T.O);
+                }
+                const std::string line = w.str();
+                if (line != s_lastWatch && t >= s_nextWatch)
+                {
+                    s_lastWatch = line;
+                    s_nextWatch = t + 5.0;
+                    LL_INFOS("WolfEnv") << line << LL_ENDL;
+                }
             }
         }
         // [WolfViewer 2026-10-13] WolfEnvironmentTrace: every input that moves the clouds, four times a second, so a report

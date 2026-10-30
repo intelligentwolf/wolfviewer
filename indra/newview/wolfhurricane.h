@@ -91,6 +91,7 @@ public:
         F64 inner = 0.0;            ///< the dense overcast
         F64 ew = 0.0;               ///< the eyewall ring
         F64 Meye = 1.0;             ///< 0 in the eye, 1 beyond 1.2 Re
+        F64 Mmoat = 1.0;            ///< [2026-10-30] README "Clouds": 0 in the moats between the bands outside the dense overcast
     };
     Point geometry(F64 px, F64 py, F64 cx, F64 cy, const Time& T) const;
 

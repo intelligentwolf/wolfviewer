@@ -291,6 +291,11 @@ float wolfStormApply(inout vec4 localWeather, const vec3 position, const float m
   float e = (r - 1.25 * Re) / (0.3 * Re);
   float ew = E * exp(-e * e);                                           // the eyewall ring
   meye = 1.0 - E * (1.0 - wolfStormS((r - 0.8 * Re) / (0.4 * Re)));     // 0 in the eye (r < 0.8 Re), 1 beyond 1.2 Re
+  // [HURRICANE 2026-10-30] README "Clouds": density *= Mmoat, Mmoat = 1 - O w (1 - inner) (1 - s((B2 - 0.15) / 0.35)): the moats
+  // between the rainbands, outside the dense overcast, are open sky through every layer (C_STORM alone left a moat in the middle
+  // of the 3.5 km nimbostratus at density 0.3-0.55, optically thick, so bands and moats still read as one overcast from below).
+  // Folded into the eye mask: the same density multiplier, after the coverage cut and before the build clearance (sampleWeather).
+  meye *= 1.0 - O * w * (1.0 - inner) * (1.0 - wolfStormS((B2 - 0.15) / 0.35));
   // the storm's sample of the region's own field: the same texture, the same layer, read at q
   vec4 sw = vec4(0.0);
   vec2 unusedCoord;

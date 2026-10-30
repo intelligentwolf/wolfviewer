@@ -151,6 +151,7 @@
 #include "wolfenvironmentrender.h"   // [WOLF ENV 2026-10-12/] the Wolf Environment's clouds, fog and zones
 #include "wolfaurora.h"   // [WOLF AURORA 2026-10-12/]
 #include "wolfgrid.h"   // [WOLF GRID GATE 2026-10-17/] god-ray caustics on Wolf only
+#include "wolfframeprofile.h"   // [bigregion-perf 2026-10-30/] releaseGL
 
 extern bool gSnapshot;
 bool gShiftFrame = false;
@@ -789,6 +790,7 @@ void LLPipeline::destroyGL()
 
     releaseGLBuffers();
     WolfEnvironmentRender::destroyGL();   // [WOLF ENV TAKRAM 2026-10-12] the context goes: the atmosphere's tables as well
+    WolfFrameProfile::releaseGL();   // [bigregion-perf 2026-10-30] its GPU timestamp queries go with the context
 
     if (mMeshDirtyQueryObject)
     {

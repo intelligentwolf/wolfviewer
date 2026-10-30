@@ -36,6 +36,7 @@
 #include "llshadermgr.h"
 #include "llglslshader.h"
 #include "llmemory.h"
+#include "wolfdrawcounter.h"   // [bigregion-perf 2026-10-30/] draw calls counted for the frame profile
 #include <glm/gtc/type_ptr.hpp>
 
 //Next Highest Power Of Two
@@ -682,6 +683,7 @@ U32 LLVertexBuffer::sGLRenderBuffer = 0;
 U32 LLVertexBuffer::sGLRenderIndices = 0;
 U32 LLVertexBuffer::sLastMask = 0;
 U32 LLVertexBuffer::sVertexCount = 0;
+U32 WolfDrawCounter::sCalls = 0;   // [bigregion-perf 2026-10-30/] wolfdrawcounter.h
 
 
 //NOTE: each component must be AT LEAST 4 bytes in size to avoid a performance penalty on AMD hardware
@@ -923,6 +925,7 @@ void LLVertexBuffer::drawRange(U32 mode, U32 start, U32 end, U32 count, U32 indi
     STOP_GLERROR;
     glDrawRangeElements(sGLMode[mode], start, end, count, mIndicesType,
         (GLvoid*) (indices_offset * (size_t) mIndicesStride));
+    ++WolfDrawCounter::sCalls;   // [bigregion-perf 2026-10-30/]
     STOP_GLERROR;
 }
 
@@ -930,6 +933,7 @@ void LLVertexBuffer::drawRangeFast(U32 mode, U32 start, U32 end, U32 count, U32 
 {
     glDrawRangeElements(sGLMode[mode], start, end, count, mIndicesType,
         (GLvoid*)(indices_offset * (size_t)mIndicesStride));
+    ++WolfDrawCounter::sCalls;   // [bigregion-perf 2026-10-30/]
 }
 
 
@@ -948,6 +952,7 @@ void LLVertexBuffer::drawArrays(U32 mode, U32 first, U32 count) const
     gGL.syncMatrices();
     STOP_GLERROR;
     glDrawArrays(sGLMode[mode], first, count);
+    ++WolfDrawCounter::sCalls;   // [bigregion-perf 2026-10-30/]
     STOP_GLERROR;
 }
 

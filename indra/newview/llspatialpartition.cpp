@@ -27,6 +27,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "llspatialpartition.h"
+#include "wolfdistantcull.h"   // [bigregion-perf 2026-10-30/] far static prims too small to see
 
 #include "llappviewer.h"
 #include "lltexturecache.h"
@@ -1124,6 +1125,12 @@ public:
             return true;
         }
 
+        // [bigregion-perf 2026-10-30] a static-prim subtree beyond 1,024 m too small to see (wolfdistantcull.h)
+        if (WolfDistantCull::skipSubtree(group))
+        {
+            return true;
+        }
+
         return false;
     }
 
@@ -1158,6 +1165,10 @@ public:
         {
             group->doOcclusion(mCamera);
         }*/
+        if (WolfDistantCull::skipObjects(group))   // [bigregion-perf 2026-10-30/] see wolfdistantcull.h
+        {
+            return;
+        }
         gPipeline.markNotCulled(group, *mCamera);
     }
 };

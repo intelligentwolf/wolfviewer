@@ -37,6 +37,7 @@
 #include "llagent.h"
 #include "llagentcamera.h"
 #include "llappviewer.h"
+#include "wolfframeprofile.h"   // [bigregion-perf 2026-10-30/] where the frame goes, logged on a big view
 #include "llcoord.h"
 #include "llcriticaldamp.h"
 #include "llcubemap.h"
@@ -949,6 +950,7 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
         {
             LL_PROFILE_ZONE_NAMED_CATEGORY_DISPLAY("Update hero probes");
             LL_PROFILE_GPU_ZONE("hero manager")
+            WolfFrameProfile::Scope wolf_phase(WolfFrameProfile::MIRRORS);   // [bigregion-perf 2026-10-30/]
             gPipeline.mHeroProbeManager.update();
             gPipeline.mHeroProbeManager.renderProbes();
         }
@@ -985,6 +987,7 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
 
         {
             LL_PROFILE_ZONE_NAMED_CATEGORY_DISPLAY("Update Geom");
+            WolfFrameProfile::Scope wolf_phase(WolfFrameProfile::GEOM_UPDATE);   // [bigregion-perf 2026-10-30/]
             const F32 max_geom_update_time = 0.005f*10.f*gFrameIntervalSeconds.value(); // 50 ms/second update time
             gPipeline.createObjects(max_geom_update_time);
             gPipeline.processPartitionQ();
@@ -1016,7 +1019,9 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
         static LLCullResult result;
         LLViewerCamera::sCurCameraID = LLViewerCamera::CAMERA_WORLD;
         LLPipeline::sUnderWaterRender = LLViewerCamera::getInstance()->cameraUnderWater();
+        WolfFrameProfile::begin(WolfFrameProfile::CULL);   // [bigregion-perf 2026-10-30/]
         gPipeline.updateCull(*LLViewerCamera::getInstance(), result);
+        WolfFrameProfile::end(WolfFrameProfile::CULL);   // [bigregion-perf 2026-10-30/]
         stop_glerror();
 
         LLGLState::checkStates();
@@ -1041,6 +1046,7 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
                 if (gFrameCount > 1 && !for_snapshot)
                 { //for some reason, ATI 4800 series will error out if you
                   //try to generate a shadow before the first frame is through
+                    WolfFrameProfile::Scope wolf_phase(WolfFrameProfile::SHADOWS);   // [bigregion-perf 2026-10-30/]
                     gPipeline.generateSunShadow(*LLViewerCamera::getInstance());
                 }
 
@@ -1078,6 +1084,7 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
 
         {
             LL_PROFILE_ZONE_NAMED("Update Images");
+            WolfFrameProfile::Scope wolf_phase(WolfFrameProfile::IMAGES);   // [bigregion-perf 2026-10-30/]
 
             {
                 LL_PROFILE_ZONE_NAMED_CATEGORY_DISPLAY("Class");
@@ -1116,9 +1123,13 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
         LLAppViewer::instance()->pingMainloopTimeout("Display:StateSort");
         {
             LL_PROFILE_ZONE_NAMED_CATEGORY_DISPLAY("display - 4")
+            WolfFrameProfile::Scope wolf_phase(WolfFrameProfile::SORT);   // [bigregion-perf 2026-10-30/]
             LLViewerCamera::sCurCameraID = LLViewerCamera::CAMERA_WORLD;
             gPipeline.stateSort(camera, result); // <FS:Ansariel> Factor out calls to getInstance
             stop_glerror();
+            // [bigregion-perf 2026-10-30] the world camera's visible set, for the frame profile's log line
+            WolfFrameProfile::noteVisible(result.getVisibleGroupsSize(), result.getDrawableGroupsSize(),
+                                          result.getAlphaGroupsSize(), result.getVisibleListSize());
 
             if (rebuild)
             {
@@ -1223,6 +1234,7 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
                 && !gRestoreGL)
         {
             LL_PROFILE_ZONE_NAMED_CATEGORY_DISPLAY("display - 5")
+            WolfFrameProfile::Scope wolf_phase(WolfFrameProfile::GEOMETRY);   // [bigregion-perf 2026-10-30/] depth pre-pass + G-buffer
             LLViewerCamera::sCurCameraID = LLViewerCamera::CAMERA_WORLD;
 
             static LLCachedControl<bool> render_depth_pre_pass(gSavedSettings, "RenderDepthPrePass", false);
@@ -1270,6 +1282,7 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
 
         if (LLPipeline::sRenderDeferred)
         {
+            WolfFrameProfile::Scope wolf_phase(WolfFrameProfile::LIGHTING_POST);   // [bigregion-perf 2026-10-30/]
             gPipeline.renderDeferredLighting();
         }
 
@@ -1283,8 +1296,14 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
         LLAppViewer::instance()->pingMainloopTimeout("Display:RenderUI");
         if (!for_snapshot)
         {
+            // [bigregion-perf 2026-10-30] the frame profile's last two phases, then its once-a-frame bookkeeping
+            WolfFrameProfile::begin(WolfFrameProfile::FINALIZE_UI);
             render_ui();
+            WolfFrameProfile::end(WolfFrameProfile::FINALIZE_UI);
+            WolfFrameProfile::begin(WolfFrameProfile::SWAP);
             swap();
+            WolfFrameProfile::end(WolfFrameProfile::SWAP);
+            WolfFrameProfile::endFrame();
         }
 
 

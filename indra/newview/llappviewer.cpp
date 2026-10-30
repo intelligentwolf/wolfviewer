@@ -33,6 +33,7 @@
 #include "wolffloaterdob.h"  // [DOB IN THE VIEWER 2026-10-26/] ask for a date of birth after login when the account has none
 #include "wolffloaterexperiences.h"  // [WolfViewer 2026-10-14/] Experiences: auto-open after a new account's login, arrival notice
 #include "llappviewer.h"
+#include "wolfframeprofile.h"   // [bigregion-perf 2026-10-30/] the reflection-probe phase
 #include "wolfsplash.h"   // [WOLF SPLASH 2026-10-21/]
 
 // Viewer includes
@@ -1816,7 +1817,9 @@ bool LLAppViewer::doFrame()
                     LLPerfStats::RecordSceneTime T(LLPerfStats::StatType_t::RENDER_IDLE);
                     LL_PROFILE_ZONE_NAMED_CATEGORY_APP("df Snapshot");
                     pingMainloopTimeout("Main:Snapshot");
+                    WolfFrameProfile::begin(WolfFrameProfile::PROBES);   // [bigregion-perf 2026-10-30/]
                     gPipeline.mReflectionMapManager.update();
+                    WolfFrameProfile::end(WolfFrameProfile::PROBES);   // [bigregion-perf 2026-10-30/]
                     LLFloaterSnapshot::update(); // take snapshots
                     LLFloaterSimpleSnapshot::update();
                     LLFloaterFlickr::update(); // <FS:Beq/> FIRE-35002 - Flickr preview not updating whne opened directly from tool tray icon
@@ -6171,6 +6174,7 @@ void LLAppViewer::idle()
         if (!(logoutRequestSent() && hasSavedFinalSnapshot()))
         {
             LLPerfStats::tunedAvatars=0; // <FS:Beq> reset the number of avatars that have been tweaked.
+            WolfFrameProfile::Scope wolf_phase(WolfFrameProfile::OBJECTS);   // [bigregion-perf 2026-10-30/]
             gObjectList.update(gAgent);
             LL::GLTFSceneManager::instance().update();
         }
@@ -6228,7 +6232,10 @@ void LLAppViewer::idle()
     // Update surfaces, and surface textures as well.
     //
 
-    LLWorld::getInstance()->updateVisibilities();
+    {
+        WolfFrameProfile::Scope wolf_phase(WolfFrameProfile::TERRAIN_VIS);   // [bigregion-perf 2026-10-30/]
+        LLWorld::getInstance()->updateVisibilities();
+    }
     {
         const F32 max_region_update_time = .001f; // 1ms
         LL_RECORD_BLOCK_TIME(FTM_REGION_UPDATE);

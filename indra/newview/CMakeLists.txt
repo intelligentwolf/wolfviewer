@@ -987,7 +987,9 @@ set(viewer_SOURCE_FILES
     wolfautoenvironment.cpp
     wolfregionweather.cpp
     wolfhurricane.cpp
+    wolfdistantcull.cpp
     wolfframegovernor.cpp
+    wolfframeprofile.cpp
     wolfradiostations.cpp
     wolffloaterradio.cpp
     wolffloaterroleplay.cpp
@@ -1983,7 +1985,9 @@ set(viewer_HEADER_FILES
     wolfautoenvironment.h
     wolfregionweather.h
     wolfhurricane.h
+    wolfdistantcull.h
     wolfframegovernor.h
+    wolfframeprofile.h
     wolfradiostations.h
     wolffloaterradio.h
     wolffloaterroleplay.h

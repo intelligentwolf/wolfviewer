@@ -295,9 +295,17 @@ bool WolfOceanFFT::allocate()
     return true;
 }
 
-// Source: ocean_fft.js OceanFFT.update — one cascade per call (alternating): time pass,
-// 7 horizontal + 7 vertical Stockham stages ping-ponging the two spec targets, then the
-// finalise pass into the other finished target, reading the last one's foam.
+// Source: ocean_fft.js OceanFFT.update — per cascade: time pass, 7 horizontal + 7 vertical
+// Stockham stages ping-ponging the two spec targets, then the finalise pass into the other
+// finished target, reading the last one's foam.
+// [SMOOTH WAVES 2026-10-29] EVERY cascade, EVERY frame (was one per frame, alternating, after
+// GodotOceanWaves' "update rate"). The displacement moves the water's vertices (waterV.glsl
+// fftDisp0/1), so a cascade that runs every other frame holds still for a frame, then jumps two
+// frames' worth: at 30 fps each cascade stepped 15 times a second, and the 12 m tile's
+// shortest chop (0.25 m, period 2 pi / sqrt(9.81 x 2 pi / 0.25) = 0.40 s) got 6 poses a
+// wave. Paul at The Caribbean, once its real swell raised the cascades' wind to ~7 m/s:
+// "the movement of the waves" is "not very smooth". The cost is 16 more 128x128 passes a
+// frame.
 void WolfOceanFFT::update(F32 time)
 {
     if (!mHaveState || !allocate())
@@ -321,12 +329,6 @@ void WolfOceanFFT::update(F32 time)
     LLGLDisable cull(GL_CULL_FACE);
     gGL.setColorMask(true, true);
 
-    ++mFrame;
-    const S32 c = (S32)(mFrame & 1u);
-    Cascade& cas = mCascades[c];
-    const F32 elapsed = cas.mRan ? llclamp(time - cas.mLastTime, 0.f, 0.2f) : (1.f / 60.f);
-    cas.mLastTime = time;
-
     static LLStaticHashedString s_uTime("uTime");
     static LLStaticHashedString s_uN("uN");
     static LLStaticHashedString s_uL("uL");
@@ -339,76 +341,83 @@ void WolfOceanFFT::update(F32 time)
     static LLStaticHashedString s_uFoamThreshold("uFoamThreshold");
     static LLStaticHashedString s_uDt("uDt");
 
-    // 1. time evolution -> spec[0]
+    for (S32 c = 0; c < CASCADES; ++c)
     {
-        LLGLSLShader& sh = gWolfFFTTimeProgram;
-        cas.mSpec[0].bindTarget();
-        sh.bind();
-        S32 chan = sh.enableTexture(LLShaderMgr::WOLF_FFT_H0);
-        if (chan > -1)
+        Cascade& cas = mCascades[c];
+        const F32 elapsed = cas.mRan ? llclamp(time - cas.mLastTime, 0.f, 0.2f) : (1.f / 60.f);
+        cas.mLastTime = time;
+
+        // 1. time evolution -> spec[0]
         {
-            gGL.getTexUnit(chan)->bindManual(LLTexUnit::TT_TEXTURE, cas.mH0Tex);
-        }
-        sh.uniform1f(s_uTime, time);
-        sh.uniform1f(s_uN, (F32)N);
-        sh.uniform1f(s_uL, TILES[c]);
-        gPipeline.mScreenTriangleVB->setBuffer();
-        gPipeline.mScreenTriangleVB->drawArrays(LLRender::TRIANGLES, 0, 3);
-        sh.disableTexture(LLShaderMgr::WOLF_FFT_H0);
-        sh.unbind();
-        cas.mSpec[0].flush();
-    }
-    // 2. butterflies
-    S32 src = 0;
-    {
-        LLGLSLShader& sh = gWolfFFTButterflyProgram;
-        for (S32 pass = 0; pass < 2; ++pass)
-        {
-            for (S32 Ns = 1; Ns < N; Ns <<= 1)
+            LLGLSLShader& sh = gWolfFFTTimeProgram;
+            cas.mSpec[0].bindTarget();
+            sh.bind();
+            S32 chan = sh.enableTexture(LLShaderMgr::WOLF_FFT_H0);
+            if (chan > -1)
             {
-                cas.mSpec[1 - src].bindTarget();
-                sh.bind();
-                sh.bindTexture(LLShaderMgr::WOLF_FFT_IN0, &cas.mSpec[src], false, LLTexUnit::TFO_POINT, 0);
-                sh.bindTexture(LLShaderMgr::WOLF_FFT_IN1, &cas.mSpec[src], false, LLTexUnit::TFO_POINT, 1);
-                sh.uniform1i(s_uNs, Ns);
-                sh.uniform1i(s_uNi, N);
-                sh.uniform1i(s_uHorizontal, pass == 0 ? 1 : 0);
-                gPipeline.mScreenTriangleVB->setBuffer();
-                gPipeline.mScreenTriangleVB->drawArrays(LLRender::TRIANGLES, 0, 3);
-                sh.unbind();
-                cas.mSpec[1 - src].flush();
-                src = 1 - src;
+                gGL.getTexUnit(chan)->bindManual(LLTexUnit::TT_TEXTURE, cas.mH0Tex);
+            }
+            sh.uniform1f(s_uTime, time);
+            sh.uniform1f(s_uN, (F32)N);
+            sh.uniform1f(s_uL, TILES[c]);
+            gPipeline.mScreenTriangleVB->setBuffer();
+            gPipeline.mScreenTriangleVB->drawArrays(LLRender::TRIANGLES, 0, 3);
+            sh.disableTexture(LLShaderMgr::WOLF_FFT_H0);
+            sh.unbind();
+            cas.mSpec[0].flush();
+        }
+        // 2. butterflies
+        S32 src = 0;
+        {
+            LLGLSLShader& sh = gWolfFFTButterflyProgram;
+            for (S32 pass = 0; pass < 2; ++pass)
+            {
+                for (S32 Ns = 1; Ns < N; Ns <<= 1)
+                {
+                    cas.mSpec[1 - src].bindTarget();
+                    sh.bind();
+                    sh.bindTexture(LLShaderMgr::WOLF_FFT_IN0, &cas.mSpec[src], false, LLTexUnit::TFO_POINT, 0);
+                    sh.bindTexture(LLShaderMgr::WOLF_FFT_IN1, &cas.mSpec[src], false, LLTexUnit::TFO_POINT, 1);
+                    sh.uniform1i(s_uNs, Ns);
+                    sh.uniform1i(s_uNi, N);
+                    sh.uniform1i(s_uHorizontal, pass == 0 ? 1 : 0);
+                    gPipeline.mScreenTriangleVB->setBuffer();
+                    gPipeline.mScreenTriangleVB->drawArrays(LLRender::TRIANGLES, 0, 3);
+                    sh.unbind();
+                    cas.mSpec[1 - src].flush();
+                    src = 1 - src;
+                }
             }
         }
-    }
-    // 3. finalise -> fin[1 - cur], reading fin[cur]'s foam
-    {
-        LLGLSLShader& sh = gWolfFFTFinalProgram;
-        LLRenderTarget& dst = cas.mFin[1 - cas.mCur];
-        dst.bindTarget();
-        sh.bind();
-        sh.bindTexture(LLShaderMgr::WOLF_FFT_IN0, &cas.mSpec[src], false, LLTexUnit::TFO_POINT, 0);
-        sh.bindTexture(LLShaderMgr::WOLF_FFT_IN1, &cas.mSpec[src], false, LLTexUnit::TFO_POINT, 1);
-        sh.bindTexture(LLShaderMgr::WOLF_FFT_PREV, &cas.mFin[cas.mCur], false, LLTexUnit::TFO_POINT, 0);
-        sh.uniform1f(s_uLambda, mChoppiness);
-        sh.uniform1f(s_uFoamDecay, powf(0.5f, elapsed / FOAM_HALF_LIFE));
-        sh.uniform1f(s_uFoamGain, FOAM_GAIN);
-        sh.uniform1f(s_uFoamThreshold, mFoamThreshold);
-        sh.uniform1f(s_uDt, elapsed);
-        gPipeline.mScreenTriangleVB->setBuffer();
-        gPipeline.mScreenTriangleVB->drawArrays(LLRender::TRIANGLES, 0, 3);
-        sh.unbind();
-        dst.flush();
-        // Mipmaps for both attachments: far water samples an averaged, near-flat surface
-        // instead of sparkling (LLRenderTarget::flush only regenerates attachment 0, and
-        // only with TMG_AUTO).
-        for (U32 a = 0; a < 2; ++a)
+        // 3. finalise -> fin[1 - cur], reading fin[cur]'s foam
         {
-            gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE, dst.getTexture(a), true);
-            glGenerateMipmap(GL_TEXTURE_2D);
-            gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
+            LLGLSLShader& sh = gWolfFFTFinalProgram;
+            LLRenderTarget& dst = cas.mFin[1 - cas.mCur];
+            dst.bindTarget();
+            sh.bind();
+            sh.bindTexture(LLShaderMgr::WOLF_FFT_IN0, &cas.mSpec[src], false, LLTexUnit::TFO_POINT, 0);
+            sh.bindTexture(LLShaderMgr::WOLF_FFT_IN1, &cas.mSpec[src], false, LLTexUnit::TFO_POINT, 1);
+            sh.bindTexture(LLShaderMgr::WOLF_FFT_PREV, &cas.mFin[cas.mCur], false, LLTexUnit::TFO_POINT, 0);
+            sh.uniform1f(s_uLambda, mChoppiness);
+            sh.uniform1f(s_uFoamDecay, powf(0.5f, elapsed / FOAM_HALF_LIFE));
+            sh.uniform1f(s_uFoamGain, FOAM_GAIN);
+            sh.uniform1f(s_uFoamThreshold, mFoamThreshold);
+            sh.uniform1f(s_uDt, elapsed);
+            gPipeline.mScreenTriangleVB->setBuffer();
+            gPipeline.mScreenTriangleVB->drawArrays(LLRender::TRIANGLES, 0, 3);
+            sh.unbind();
+            dst.flush();
+            // Mipmaps for both attachments: far water samples an averaged, near-flat surface
+            // instead of sparkling (LLRenderTarget::flush only regenerates attachment 0, and
+            // only with TMG_AUTO).
+            for (U32 a = 0; a < 2; ++a)
+            {
+                gGL.getTexUnit(0)->bindManual(LLTexUnit::TT_TEXTURE, dst.getTexture(a), true);
+                glGenerateMipmap(GL_TEXTURE_2D);
+                gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
+            }
+            cas.mCur = 1 - cas.mCur;
+            cas.mRan = true;
         }
-        cas.mCur = 1 - cas.mCur;
-        cas.mRan = true;
     }
 }

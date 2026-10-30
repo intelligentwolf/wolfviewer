@@ -27,7 +27,7 @@
 // for the price of a 128x128 inverse FFT, done here as fragment passes on LLRenderTargets
 // (no compute shaders needed — GL 3.x is enough).
 //
-// Per update, one cascade (alternating): a time-evolution pass, 14 Stockham butterfly
+// Per update, every cascade (both, every frame - see update()): a time-evolution pass, 14 Stockham butterfly
 // passes (7 per axis, both targets together via MRT) and a finalise pass that writes
 //   attachment 0 = (dx, dy, dz, accumulated foam)     attachment 1 = (dz/dx, dz/dy, J, 0)
 // into world-tiling, mipmapped RGBA16F textures the water shader samples by world XY / tile.
@@ -90,7 +90,6 @@ private:
     WolfSeaState mState;
     F32 mChoppiness = 1.0f;
     F32 mFoamThreshold = 0.60f;
-    U32 mFrame = 0;
     std::vector<F32> mScratchH0, mScratchGauss, mScratchData;
 };
 

@@ -4447,6 +4447,13 @@ static void wolf_env_post_pass()
     LLRenderTarget& screen = gPipeline.mRT->screen;
     screen.flush();
     if (gUseWireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);   // its full-screen passes, filled (renderGeomPostDeferred draws lines)
+    // [WolfViewer 2026-10-30 ticket 367] BOTH colour masks on for the composite's own passes. renderDeferredLighting leaves alpha
+    // writes off for the forward pools (gGL.setColorMask(true, false) at the end of its deferred block, above), and since ticket 349
+    // (W87) moved the composite in here the clouds' march, temporal resolve and shadow targets were drawn with alpha masked: every
+    // cloud texel kept alpha 0, so compositeF.glsl laid the clouds over the frame with no occlusion (rgb added, nothing hidden) -
+    // pale, see-through clouds and storms on every region, and measureCloudCover's "marched opacity -1". Proved in the viewer
+    // 2026-10-30 ~16:09Z: with cloudsResolveF.glsl forced to alpha 1 the composite still read overlay alpha 0 everywhere.
+    gGL.setColorMask(true, true);
     WolfEnvironmentRender::postPass();
     if (gUseWireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
     screen.bindTarget();

@@ -51,6 +51,7 @@
 #include <boost/algorithm/string/replace.hpp>
 
 #include "lldispatcher.h"
+#include "llcallbacklist.h"   // [Wolf 2026-10-30] doOnIdleRepeating
 #include "llxfermanager.h"
 
 #include "llagent.h"
@@ -111,6 +112,23 @@ public:
 };
 
 static LLDispatchEmptyMuteList sDispatchEmptyMuteList;
+
+// [Wolf 2026-10-30] BLOCK = INVISIBLE: "wolfblocklist" from a Wolf region (LLMuteList::wolfBlockListMessage).
+class LLDispatchWolfBlockList : public LLDispatchHandler
+{
+public:
+    virtual bool operator()(
+        const LLDispatcher* dispatcher,
+        const std::string& key,
+        const LLUUID& invoice,
+        const sparam_t& strings)
+    {
+        LLMuteList::getInstance()->wolfBlockListMessage(strings);
+        return true;
+    }
+};
+
+static LLDispatchWolfBlockList sDispatchWolfBlockList;
 
 //-----------------------------------------------------------------------------
 // LLMute()
@@ -174,6 +192,7 @@ LLMuteList::LLMuteList() :
     mTriedRegionChangeRetry(false)
 {
     gGenericDispatcher.addHandler("emptymutelist", &sDispatchEmptyMuteList);
+    gGenericDispatcher.addHandler("wolfblocklist", &sDispatchWolfBlockList);   // [Wolf 2026-10-30]
 
     // Register our callbacks. We may be constructed before gMessageSystem, so
     // use callWhenReady() to register them as soon as gMessageSystem becomes
@@ -1087,11 +1106,196 @@ void LLMuteList::setLoaded(EMuteListSource source)
     mLoadSource = source;
     notifyObservers();
     LL_INFOS() << "Mute list loaded from " << sourceToString(source) << LL_ENDL;
+    wolfApplyPendingBlockMessages();   // [Wolf 2026-10-30] the "wolfblocklist" messages that came before the list
     if(isLoadedFromServer() && mRegionChangedCallback.connected())
     {
         LL_INFOS() << "Mute list loaded from server, disconnecting region change callback" << LL_ENDL;
         mRegionChangedCallback.disconnect();
     }
+}
+
+// [Wolf 2026-10-30] BLOCK = INVISIBLE. Source of the words: OpenSim CoreModules WolfBlockModule (VIEWER_METHOD
+// "wolfblocklist", TellViewerList "ready" + "list" with "uuid|name" parameters, TellViewerChanges "add" "uuid|name" /
+// "remove" "uuid"). A block is an AGENT entry with flags 0 (LLMuteList::add with flags 0 = the Block button); the region
+// counts only those whose text, voice and particle bits are clear (flagTextChat | flagVoiceChat | flagParticles).
+void LLMuteList::wolfBlockListMessage(const std::vector<std::string>& strings)
+{
+    if (strings.empty())
+    {
+        return;
+    }
+    if (!isLoaded())
+    {
+        if (mWolfPendingBlockMessages.size() < 200)   // "list" is sent 8 entries a message: 500 blocks = 63 messages
+        {
+            mWolfPendingBlockMessages.push_back(strings);
+        }
+        return;
+    }
+    // updateAdd (a Block before the list loaded) sets ML_LOADED without setLoaded: older messages go first
+    wolfApplyPendingBlockMessages();
+    wolfApplyBlockListMessage(strings);
+}
+
+void LLMuteList::wolfApplyPendingBlockMessages()
+{
+    if (mWolfPendingBlockMessages.empty())
+    {
+        return;
+    }
+    std::vector<std::vector<std::string> > pending;
+    pending.swap(mWolfPendingBlockMessages);
+    for (const std::vector<std::string>& m : pending)
+    {
+        wolfApplyBlockListMessage(m);
+    }
+}
+
+void LLMuteList::wolfApplyBlockListMessage(const std::vector<std::string>& strings)
+{
+    if (strings.empty())
+    {
+        return;
+    }
+    const std::string& word = strings[0];
+    if (word == "ready")
+    {
+        wolfUploadBlocksOnce();
+        return;
+    }
+    const bool adding = (word == "list" || word == "add");
+    if (!adding && word != "remove")
+    {
+        return;
+    }
+    bool changed = false;
+    for (size_t i = 1; i < strings.size(); ++i)
+    {
+        const std::string& param = strings[i];
+        const size_t bar = param.find('|');
+        LLUUID id;
+        if (!LLUUID::parseUUID(bar == std::string::npos ? param : param.substr(0, bar), &id) || id.isNull() || id == gAgent.getID())
+        {
+            continue;
+        }
+        LLMute probe(id, LLStringUtil::null, LLMute::AGENT);
+        mute_set_t::iterator it = mMutes.find(probe);
+        if (adding)
+        {
+            if (it != mMutes.end())
+            {
+                continue;   // already muted here (any flags): this computer's entry stays as it is
+            }
+            std::string name = bar == std::string::npos ? std::string() : param.substr(bar + 1);
+            if (name.empty())
+            {
+                // The name LLAvatarActions::toggleBlock gives a block. Not cached yet: getName has queued the request,
+                // and the entry is left for the grid's next "list" (each login). A blank entry would be renamed by
+                // onAccountNameChanged, whose updateAdd sends it back with a chat report, and would skip isLinden.
+                LLAvatarName av_name;
+                if (!LLAvatarNameCache::get(id, &av_name) || av_name.getUserName().empty())
+                {
+                    continue;
+                }
+                name = av_name.getUserName();
+            }
+            // The checks LLMuteList::add makes for the Block button (flags 0): no Lindens, the MuteListLimit
+            // (getMutes() counts mMutes and mLegacyMutes)
+            if (isLinden(name))
+            {
+                continue;
+            }
+            static LLCachedControl<S32> mute_list_limit(gSavedSettings, "MuteListLimit", 1000);
+            if (mMutes.size() + mLegacyMutes.size() >= static_cast<size_t>(llmax(0, static_cast<S32>(mute_list_limit))))
+            {
+                LL_WARNS() << "Mute limit is reached; the grid's remaining blocks are not added here" << LL_ENDL;
+                break;
+            }
+            LLMute mute(id, name, LLMute::AGENT, 0);
+            if (!mMutes.insert(mute).second)
+            {
+                continue;
+            }
+            notifyObserversDetailed(mute);
+            // As LLMuteList::add after a new entry: the avatar's attached lights off, its notifications cancelled
+            LLVOAvatar* avatarp = find_avatar(mute.mID);
+            if (avatarp)
+            {
+                LLPipeline::removeMutedAVsLights(avatarp);
+            }
+            LLNotifications::instance().cancelByOwner(mute.mID);
+            changed = true;
+        }
+        else if (it != mMutes.end() && it->mType == LLMute::AGENT
+                 && (it->mFlags & (LLMute::flagTextChat | LLMute::flagVoiceChat | LLMute::flagParticles)) == 0)
+        {
+            LLMute gone = *it;
+            mMutes.erase(it);
+            gone.mFlags = LLMute::flagAll;   // as remove(): a flag present means "allowed" for the observers
+            notifyObserversDetailed(gone);
+            changed = true;
+        }
+    }
+    if (changed)
+    {
+        notifyObservers();
+    }
+}
+
+void LLMuteList::wolfUploadBlocksOnce()
+{
+    if (gSavedPerAccountSettings.getBOOL("WolfBlockListUploaded") || !mWolfUploadQueue.empty())
+    {
+        return;
+    }
+    for (const LLMute& mute : mMutes)
+    {
+        if (mute.mType != LLMute::EXTERNAL)   // updateAdd never sends EXTERNAL entries
+        {
+            mWolfUploadQueue.push_back(mute.mID);
+        }
+    }
+    if (mWolfUploadQueue.empty())
+    {
+        gSavedPerAccountSettings.setBOOL("WolfBlockListUploaded", true);
+        return;
+    }
+    mWolfUploadSent = 0;
+    // Spread over frames (up to MuteListLimit entries, each a reliable message)
+    doOnIdleRepeating([]()
+    {
+        return !LLMuteList::instanceExists() || LLMuteList::getInstance()->wolfUploadSomeBlocks();
+    });
+}
+
+bool LLMuteList::wolfUploadSomeBlocks()
+{
+    if (gDisconnected)
+    {
+        mWolfUploadQueue.clear();   // the flag stays unset: sent again at the next login
+        return true;
+    }
+    const size_t PER_FRAME = 50;
+    size_t done = 0;
+    while (!mWolfUploadQueue.empty() && done < PER_FRAME)
+    {
+        LLMute probe(mWolfUploadQueue.back(), LLStringUtil::null, LLMute::AGENT);
+        mWolfUploadQueue.pop_back();
+        mute_set_t::const_iterator it = mMutes.find(probe);
+        if (it != mMutes.end() && it->mType != LLMute::EXTERNAL)   // still here (not unblocked meanwhile), as it is now
+        {
+            updateAdd(*it, false);   // the same UpdateMuteListEntry the Block button sends; no chat report
+            ++mWolfUploadSent;
+        }
+        ++done;
+    }
+    if (!mWolfUploadQueue.empty())
+    {
+        return false;
+    }
+    gSavedPerAccountSettings.setBOOL("WolfBlockListUploaded", true);
+    LL_INFOS() << "Sent " << mWolfUploadSent << " block list entries to the grid (once for this account)" << LL_ENDL;
+    return true;
 }
 
 void LLMuteList::notifyObservers()

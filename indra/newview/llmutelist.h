@@ -32,6 +32,8 @@
 #include "llextendedstatus.h"
 
 #include <boost/signals2/connection.hpp>
+#include <string>
+#include <vector>
 
 class LLViewerObject;
 class LLMessageSystem;
@@ -215,6 +217,22 @@ private:
     boost::signals2::connection mRegionChangedCallback;
 
     friend class LLDispatchEmptyMuteList;
+
+    // [Wolf 2026-10-30] BLOCK = INVISIBLE (firestorm/region-terrain-work/block-invisible-2026-10-30/README.md): a Wolf
+    // region stores what Block sends and says so with GenericMessage "wolfblocklist" (OpenSim CoreModules
+    // WolfBlockModule VIEWER_METHOD). "ready": this account's blocks that only this computer holds are sent once;
+    // "list" / "add": the grid's blocks are added here (nothing sent back); "remove": a website unblock is applied.
+    // Messages that arrive before the list is loaded wait for it (loadFromFile would clear what they added).
+public:
+    void wolfBlockListMessage(const std::vector<std::string>& strings);
+private:
+    void wolfApplyPendingBlockMessages();
+    void wolfApplyBlockListMessage(const std::vector<std::string>& strings);
+    void wolfUploadBlocksOnce();
+    bool wolfUploadSomeBlocks();   // one idle frame of the upload; true when finished
+    std::vector<std::vector<std::string> > mWolfPendingBlockMessages;
+    std::vector<LLUUID> mWolfUploadQueue;
+    S32 mWolfUploadSent = 0;
 };
 
 class LLMuteListObserver

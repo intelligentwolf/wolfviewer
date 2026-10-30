@@ -926,6 +926,7 @@ set(viewer_SOURCE_FILES
     wolfcrashreport.cpp   # [CRASH REPORTS 2026-10-28] crash stack / minidump, sent as a staff ticket next run
     wolflogscrub.cpp   # [CRASH REPORTS 2026-10-28] log scrub / tail / gzip shared with the Flea Report
     wolffloaterdob.cpp   # [DOB IN THE VIEWER 2026-10-26] Your Date of Birth (asked after login when the account has none)
+    wolffloaterinvisallow.cpp   # [SELECTIVE INVISIBLE MODE 2026-10-30] Invisible Mode: People Who Can See Me
     wolfadultcontent.cpp   # [ADULT CONTENT 2026-10-26] the Adult Content region type (badges, refusals)
     wolffloateragecheck.cpp   # [ADULT CONTENT 2026-10-26] Wolf World > Age Check
     wolffloaterchooseavatar.cpp   # [STARTER AVATARS 2026-10-24] Choose an Avatar (the grid's starter looks)
@@ -1917,6 +1918,7 @@ set(viewer_HEADER_FILES
     wolfcrashreport.h   # [CRASH REPORTS 2026-10-28]
     wolflogscrub.h   # [CRASH REPORTS 2026-10-28]
     wolffloaterdob.h   # [DOB IN THE VIEWER 2026-10-26]
+    wolffloaterinvisallow.h   # [SELECTIVE INVISIBLE MODE 2026-10-30]
     wolfadultcontent.h   # [ADULT CONTENT 2026-10-26]
     wolffloateragecheck.h   # [ADULT CONTENT 2026-10-26]
     wolffloaterchooseavatar.h   # [STARTER AVATARS 2026-10-24]

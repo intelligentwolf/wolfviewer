@@ -97,6 +97,10 @@
 #include "llcorehttputil.h"
 #include "llcoros.h"
 #include <boost/json.hpp>
+#include "llframetimer.h"      // [REGION CATEGORIES 2026-10-30/]
+#include "llhttpconstants.h"   // [REGION CATEGORIES 2026-10-30/]
+#include "llsdjson.h"          // [REGION CATEGORIES 2026-10-30/]
+#include "wolfadultcontent.h"  // [REGION CATEGORIES 2026-10-30/] the same maturity icon as the map (LLSimInfo::getAccessIcon)
 
 //---------------------------------------------------------------------------
 // Constants
@@ -484,6 +488,22 @@ bool LLFloaterWorldMap::postBuild()
     mTrackCtrlsPanel = getChild<LLPanel>("layout_panel_4");
     mSearchButton = getChild<LLButton>("DoSearch");
 
+    // [REGION CATEGORIES 2026-10-30] "Regions by Category". search_results sits under it in the XUI; when it is hidden
+    // (off Wolf Territories) search_results moves up by the gap between their tops.
+    // findChild: a skin without it simply has no category search (nothing moves, nothing is fetched).
+    mWolfCatCombo = findChild<LLComboBox>("wolf_region_category");
+    if (mWolfCatCombo)
+    {
+        mWolfCatCombo->setCommitCallback([this](LLUICtrl*, const LLSD&) { wolfCatOnCommit(); });
+        mWolfCatResultsShift = mWolfCatCombo->getRect().mTop - mSearchResults->getRect().mTop;
+        mWolfCatShown = true;
+        wolfCatUpdateVisibility();
+    }
+    else
+    {
+        mWolfCatShown = false;
+    }
+
     // <FS:Ansariel> Use own expand/collapse function
     //getChild<LLPanel>("expand_btn_panel")->setMouseDownCallback(boost::bind(&LLFloaterWorldMap::onExpandCollapseBtn, this));
 
@@ -602,11 +622,250 @@ namespace
 }
 // </WolfViewer>
 
+// [REGION CATEGORIES 2026-10-30] "Regions by Category" on the map search. Paul: "allow users to add categories to
+// their regions, and then add those category buttons to the MAP SEARCH so someone looking for shops can just click
+// 'SHOPS' and get a list of shopping regions". Owners choose up to three categories (the destination guide's list)
+// on their region page at wolf-grid.com; gridmanager regioncats.php answers (public, read-only, JSON, cached 60 s):
+//   ?list=1 -> {"ok":true,"categories":[{"id","name","count"}]}
+//   ?cat=N  -> {"ok":true,"category":{"id","name"},"regions":[{"name","x","y","w","h","access","owner","shop","desc"}]}
+// x/y are map cells, access the maturity byte the map itself sends (MapSearchModule.cs:178 block.Access = r.Access).
+// Only listed, online regions are in it. Wolf Territories only: hidden on any other grid.
+namespace
+{
+    const char* const WOLF_REGION_CATS_API = "https://wolf-grid.com/regioncats.php";
+    const F64 WOLF_CAT_LIST_SECS = 60.0;   // regioncats.php RC_CACHE_TTL
+    const S32 WOLF_CAT_MAX_REGIONS = 200;  // regioncats.php RC_MAX_REGIONS
+    const S32 WOLF_CAT_MAX_CATS = 100;     // grid.destcat holds 13
+    const F64 WOLF_CAT_PENDING_SECS = 10.0; // how long Teleport waits for the map to learn a chosen region
+
+    // Source: wolfairports.cpp fetchCoro (adapter, options, Accept header) and json_to_llsd. Runs in a coroutine.
+    // Returns the reply when it is {"ok":true,...}, otherwise an undefined LLSD.
+    LLSD wolf_cat_get(const std::string& url, const char* what)
+    {
+        LLCoreHttpUtil::HttpCoroutineAdapter::ptr_t adapter =
+            std::make_shared<LLCoreHttpUtil::HttpCoroutineAdapter>("WolfRegionCats", LLCore::HttpRequest::DEFAULT_POLICY_ID);
+        LLCore::HttpRequest::ptr_t request = std::make_shared<LLCore::HttpRequest>();
+        LLCore::HttpOptions::ptr_t options = WolfGrid::makeVerifiedHttpOptions();
+        options->setTimeout(15);
+        LLCore::HttpHeaders::ptr_t headers = std::make_shared<LLCore::HttpHeaders>();
+        headers->append(HTTP_OUT_HEADER_ACCEPT, "application/json");
+
+        LLSD result = adapter->getRawAndSuspend(request, url, options, headers);
+        LLCore::HttpStatus status = LLCoreHttpUtil::HttpCoroutineAdapter::getStatusFromLLSD(
+            result[LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS]);
+        if (!status)
+        {
+            LL_WARNS("WolfRegionCats") << what << ": " << status.toString() << LL_ENDL;
+            return LLSD();
+        }
+        LLSD reply;
+        if (result.has(LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS_RAW))
+        {
+            const LLSD::Binary& bytes = result[LLCoreHttpUtil::HttpCoroutineAdapter::HTTP_RESULTS_RAW].asBinary();
+            boost::system::error_code ec;
+            boost::json::value v = boost::json::parse(std::string(bytes.begin(), bytes.end()), ec);
+            if (!ec) reply = LlsdFromJson(v);
+        }
+        if (!reply.isMap() || !reply["ok"].asBoolean())
+        {
+            LL_WARNS("WolfRegionCats") << what << ": unexpected reply" << LL_ENDL;
+            return LLSD();
+        }
+        return reply;
+    }
+}
+
+void LLFloaterWorldMap::wolfCatUpdateVisibility()
+{
+    if (!mWolfCatCombo || !mSearchResults) return;
+    const bool wolf = WolfGrid::isOnWolfTerritories();
+    if (wolf != mWolfCatShown)
+    {
+        LLRect rect = mSearchResults->getRect();
+        rect.mTop += wolf ? -mWolfCatResultsShift : mWolfCatResultsShift;
+        mSearchResults->setShape(rect);
+        mWolfCatShown = wolf;
+    }
+    mWolfCatCombo->setVisible(wolf);
+    if (!wolf)
+    {
+        // Another grid: forget Wolf's list, so coming back reads it again.
+        ++mWolfCatSeq;
+        wolfCatForget();
+        mWolfCatCombo->removeall();
+        mWolfCatNames.clear();
+        mWolfCatListAt = -1.0;
+    }
+}
+
+void LLFloaterWorldMap::wolfCatFetchList()
+{
+    if (!mWolfCatCombo || !mWolfCatShown || mWolfCatListFetching) return;
+    const F64 now = LLFrameTimer::getElapsedSeconds();
+    if (mWolfCatListAt >= 0.0 && now - mWolfCatListAt < WOLF_CAT_LIST_SECS) return;
+    mWolfCatListFetching = true;
+    const LLHandle<LLFloater> handle = getHandle();
+    LLCoros::instance().launch("WolfRegionCatsList", [handle]()
+    {
+        const LLSD reply = wolf_cat_get(std::string(WOLF_REGION_CATS_API) + "?list=1", "category list");
+        LLFloaterWorldMap* self = dynamic_cast<LLFloaterWorldMap*>(handle.get());
+        if (!self) return;
+        self->mWolfCatListFetching = false;
+        if (!self->mWolfCatShown || !self->mWolfCatCombo) return;   // left Wolf Territories meanwhile
+        if (!reply["categories"].isArray())
+        {
+            if (self->mWolfCatNames.empty() && self->mSearchResults->getItemCount() == 0)
+            {
+                self->wolfCatShowComment(LLTrans::getString("worldmap_category_list_failed"));
+            }
+            return;
+        }
+        self->mWolfCatListAt = LLFrameTimer::getElapsedSeconds();
+        const LLSD selected = self->mWolfCatCombo->getValue();
+        self->mWolfCatCombo->removeall();
+        self->mWolfCatNames.clear();
+        for (const LLSD& c : llsd::inArray(reply["categories"]))
+        {
+            if (self->mWolfCatNames.size() >= (size_t)WOLF_CAT_MAX_CATS) break;
+            const std::string name = c["name"].asString();
+            if (!c["id"].isInteger() || c["id"].asInteger() <= 0 || name.empty() || name.size() > 100) continue;
+            const S32 id = c["id"].asInteger();
+            LLStringUtil::format_map_t args;
+            args["[CATEGORY]"] = name;
+            args["[COUNT]"] = llformat("%d", c["count"].asInteger());
+            self->mWolfCatCombo->add(LLTrans::getString("worldmap_category_item", args), LLSD(id));
+            self->mWolfCatNames[id] = name;
+        }
+        if (selected.isInteger() && selected.asInteger() > 0)
+        {
+            self->mWolfCatCombo->selectByValue(selected);   // keep the category being shown chosen
+        }
+    });
+}
+
+void LLFloaterWorldMap::wolfCatOnCommit()
+{
+    if (!mWolfCatCombo || !mWolfCatShown) return;
+    const LLSD value = mWolfCatCombo->getValue();
+    const S32 id = value.isInteger() ? value.asInteger() : 0;
+    const auto it = mWolfCatNames.find(id);
+    if (id <= 0 || it == mWolfCatNames.end()) return;
+    const std::string name = it->second;
+
+    const U32 seq = ++mWolfCatSeq;
+    // An empty mCompletingRegionName makes updateSims leave this list alone when map replies arrive.
+    mCompletingRegionName = "";
+    mProcessingSearchUpdate = false;
+    wolfCatForget();
+    LLStringUtil::format_map_t args;
+    args["[CATEGORY]"] = name;
+    wolfCatShowComment(LLTrans::getString("worldmap_category_loading", args));
+
+    const LLHandle<LLFloater> handle = getHandle();
+    const std::string url = std::string(WOLF_REGION_CATS_API) + "?cat=" + llformat("%d", id);
+    LLCoros::instance().launch("WolfRegionCatsRegions", [handle, seq, url, name]()
+    {
+        const LLSD reply = wolf_cat_get(url, "category regions");
+        LLFloaterWorldMap* self = dynamic_cast<LLFloaterWorldMap*>(handle.get());
+        if (!self || seq != self->mWolfCatSeq) return;   // closed, or another category / a typed search came after
+        if (!reply["regions"].isArray())
+        {
+            LLStringUtil::format_map_t failed;
+            failed["[CATEGORY]"] = name;
+            self->wolfCatShowComment(LLTrans::getString("worldmap_category_failed", failed));
+            return;
+        }
+        self->wolfCatFill(reply, name);
+    });
+}
+
+void LLFloaterWorldMap::wolfCatFill(const LLSD& reply, const std::string& cat_name)
+{
+    mSearchResults->operateOnAll(LLCtrlListInterface::OP_DELETE);
+    wolfCatForget();
+    S32 count = 0;
+    for (const LLSD& r : llsd::inArray(reply["regions"]))
+    {
+        if (count >= WOLF_CAT_MAX_REGIONS) break;
+        const std::string name = r["name"].asString();
+        if (name.empty() || name.size() > 128 || !r["x"].isInteger() || !r["y"].isInteger()) continue;
+        const S32 x = r["x"].asInteger();
+        const S32 y = r["y"].asInteger();
+        // Map cells are U16 on the wire (MapBlockRequest MinX/MinY).
+        if (x < 0 || y < 0 || x > 65535 || y > 65535) continue;
+        S32 access = r["access"].isInteger() ? r["access"].asInteger() : 0;
+        if (access < 0 || access > 255) access = 0;
+        const U64 region_handle = to_region_handle((U32)x * (U32)REGION_WIDTH_UNITS, (U32)y * (U32)REGION_WIDTH_UNITS);
+
+        // The same row a name search adds (updateSims): id = the name, the maturity icon, the name.
+        LLSD value;
+        value["id"] = name;
+        value["columns"][0]["column"] = "scroll_list_icon";
+        value["columns"][0]["value"] = WolfAdultContent::accessIcon(static_cast<U8>(access),
+                                                                     WolfAdultContent::isAdultContentAt(region_handle));
+        value["columns"][0]["type"] = "icon";
+        value["columns"][1]["column"] = "sim_name";
+        value["columns"][1]["value"] = name;
+        std::string tip = r["shop"].asString();
+        const std::string desc = r["desc"].asString();
+        if (!desc.empty()) tip += (tip.empty() ? "" : " - ") + desc;
+        if (!tip.empty()) value["columns"][1]["tool_tip"] = tip;
+        mSearchResults->addElement(value);
+
+        std::string lower = name;
+        LLStringUtil::toLower(lower);
+        mWolfCatCells[lower] = std::make_pair(static_cast<U16>(x), static_cast<U16>(y));
+        ++count;
+    }
+    if (count == 0)
+    {
+        LLStringUtil::format_map_t args;
+        args["[CATEGORY]"] = cat_name;
+        mSearchResults->setCommentText(LLTrans::getString("worldmap_category_none", args));
+        return;
+    }
+    mSearchResults->sortByColumn("sim_name", true);
+}
+
+void LLFloaterWorldMap::wolfCatShowComment(const std::string& text)
+{
+    mSearchResults->operateOnAll(LLCtrlListInterface::OP_DELETE);
+    mSearchResults->setCommentText(text);
+}
+
+void LLFloaterWorldMap::wolfCatForget()
+{
+    mWolfCatCells.clear();
+    mWolfCatPending.clear();
+    mWolfCatPendingTeleport = false;
+}
+
+void LLFloaterWorldMap::wolfCatResolvePending()
+{
+    if (mWolfCatPending.empty() || !LLWorldMap::getInstance()->simInfoFromName(mWolfCatPending)) return;
+    std::string selected = mSearchResults->getSelectedValue().asString();
+    LLStringUtil::toLower(selected);
+    const bool still_chosen = (selected == mWolfCatPending);
+    const bool from_search = mWolfCatPendingFromSearch;
+    const bool teleport_now = mWolfCatPendingTeleport;
+    mWolfCatPending.clear();
+    mWolfCatPendingTeleport = false;
+    if (!still_chosen) return;
+    onCommitSearchResult(from_search);   // now the map knows it: the normal path
+    if (teleport_now)
+    {
+        onClickTeleportBtn();
+    }
+}
+// [/REGION CATEGORIES]
+
 // virtual
 void LLFloaterWorldMap::onOpen(const LLSD& key)
 {
     wolf_update_buy_land(this);   // <WolfViewer 2026-10-05/>
     mWolfBuyLandFor = WolfGrid::isOnWolfTerritories() ? 1 : 0;   // [WOLF GRID GATE 2026-10-17/] draw() redoes it on a change
+    wolfCatUpdateVisibility();    // [REGION CATEGORIES 2026-10-30] and the list, read again when over a minute old
+    wolfCatFetchList();
     mTeleportFinishConnection = LLViewerParcelMgr::getInstance()->
         setTeleportFinishedCallback(boost::bind(&LLFloaterWorldMap::onTeleportFinished, this));
 
@@ -728,6 +987,8 @@ void LLFloaterWorldMap::draw()
         {
             mWolfBuyLandFor = wolf;
             wolf_update_buy_land(this);   // hides it off Wolf; on Wolf asks again whether this region may be bought
+            wolfCatUpdateVisibility();    // [REGION CATEGORIES 2026-10-30] the same gate for "Regions by Category"
+            wolfCatFetchList();
         }
     }
 
@@ -1762,6 +2023,10 @@ void LLFloaterWorldMap::onLocationCommit()
     clearLocationSelection(false);
     mCompletingRegionName = "";
     mLastRegionName = "";
+    // [REGION CATEGORIES 2026-10-30] a typed search replaces a category list (and drops an answer still coming)
+    ++mWolfCatSeq;
+    wolfCatForget();
+    if (mWolfCatCombo) mWolfCatCombo->clear();
 
     std::string str = mLocationEditor->getValue().asString();
 
@@ -1836,6 +2101,28 @@ void LLFloaterWorldMap::onShowAgentBtn()
 
 void LLFloaterWorldMap::onClickTeleportBtn()
 {
+    // [REGION CATEGORIES 2026-10-30] A category result the map did not know yet is still being looked up
+    // (wolfCatResolvePending): the tracker still points at the previous place, so teleport once it is found.
+    if (!mWolfCatPending.empty())
+    {
+        std::string selected = mSearchResults->getSelectedValue().asString();
+        LLStringUtil::toLower(selected);
+        if (selected == mWolfCatPending)
+        {
+            if (LLFrameTimer::getElapsedSeconds() - mWolfCatPendingAt < WOLF_CAT_PENDING_SECS)
+            {
+                mWolfCatPendingTeleport = true;
+                return;
+            }
+            // The map never answered for it: say so rather than teleport to whatever was tracked before.
+            wolfCatForget();
+            LLSD args;
+            args["MESSAGE"] = LLTrans::getString("worldmap_category_not_on_map");
+            LLNotificationsUtil::add("GenericAlert", args);
+            return;
+        }
+        wolfCatForget();   // another row is chosen now: the old lookup no longer matters
+    }
     teleport();
 }
 
@@ -2104,10 +2391,12 @@ void LLFloaterWorldMap::updateSims(bool found_null_sim)
 {
     if (mCompletingRegionName == "")
     {
+        wolfCatResolvePending();   // [REGION CATEGORIES 2026-10-30/] a category result the map has just learnt
         return;
     }
 
     mSearchResults->operateOnAll(LLCtrlListInterface::OP_DELETE);
+    wolfCatForget();   // [REGION CATEGORIES 2026-10-30/] a name search's list replaces a category list
 
     // auto name_length = mCompletingRegionName.length(); // <FS:Beq/> FIRE-23591 support map search partial matches (Patch by Kevin Cozens)
 
@@ -2200,6 +2489,27 @@ void LLFloaterWorldMap::onCommitSearchResult(bool from_search)
         return;
     }
     LLStringUtil::toLower(sim_name);
+
+    // [REGION CATEGORIES 2026-10-30] A category result comes from wolf-grid.com, not from the map: when the map does
+    // not know the region yet, ask for its square (the MapBlockRequest a map pan sends) and come back here from
+    // updateSims when it arrives (wolfCatResolvePending), so selecting it tracks it exactly like a name result.
+    {
+        if (!mWolfCatPending.empty() && mWolfCatPending != sim_name)
+        {
+            mWolfCatPending.clear();           // another row was chosen: forget the earlier lookup
+            mWolfCatPendingTeleport = false;
+        }
+        const auto cat = mWolfCatCells.find(sim_name);
+        if (cat != mWolfCatCells.end() && !LLWorldMap::getInstance()->simInfoFromName(sim_name))
+        {
+            mWolfCatPending = sim_name;
+            mWolfCatPendingFromSearch = from_search;
+            mWolfCatPendingAt = LLFrameTimer::getElapsedSeconds();
+            LLWorldMapMessage::getInstance()->sendMapBlockRequest(cat->second.first, cat->second.second,
+                                                                  cat->second.first, cat->second.second);
+            return;
+        }
+    }
 
     LLWorldMap::sim_info_map_t::const_iterator end = LLWorldMap::instance().getRegionMap().end();
     for (LLWorldMap::sim_info_map_t::const_iterator it = LLWorldMap::getInstance()->getRegionMap().begin(); it != end; ++it)

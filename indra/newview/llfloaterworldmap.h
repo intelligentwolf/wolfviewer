@@ -37,6 +37,7 @@
 #include "llremoteparcelrequest.h"
 #include "llslurl.h"
 #include "lltracker.h"
+#include <map>   // [REGION CATEGORIES 2026-10-30/] mWolfCatCells
 
 // <FS:Ansariel> Parcel details on map
 #include "llremoteparcelrequest.h"
@@ -194,9 +195,32 @@ protected:
 
     void            onTeleportFinished();
 
+    // [REGION CATEGORIES 2026-10-30] "Regions by Category" on the map search (Wolf Territories only): the
+    // categories region owners choose on wolf-grid.com, each filling search_results with its online regions.
+    void            wolfCatUpdateVisibility();
+    void            wolfCatFetchList();
+    void            wolfCatOnCommit();
+    void            wolfCatFill(const LLSD& reply, const std::string& cat_name);
+    void            wolfCatShowComment(const std::string& text);
+    void            wolfCatForget();
+    void            wolfCatResolvePending();
+
 private:
     LLWorldMapView* mMapView; // Panel displaying the map
     S32 mWolfBuyLandFor = -1;  // [WOLF GRID GATE 2026-10-17/] the grid answer Buy Land was last decided on (draw)
+    // [REGION CATEGORIES 2026-10-30]
+    LLComboBox*     mWolfCatCombo = nullptr;
+    bool            mWolfCatShown = true;       // as laid out in floater_world_map.xml
+    S32             mWolfCatResultsShift = 0;   // how far search_results moves up when the combo is hidden
+    U32             mWolfCatSeq = 0;            // the newest category request; older answers are dropped
+    F64             mWolfCatListAt = -1.0;      // when the category list was last read (seconds, frame timer)
+    bool            mWolfCatListFetching = false;
+    std::map<std::string, std::pair<U16, U16> > mWolfCatCells;   // lower-case region name -> map cell, while a category list shows
+    std::string     mWolfCatPending;            // lower-case name chosen before the map knew it (MapBlockRequest sent)
+    bool            mWolfCatPendingFromSearch = false;
+    bool            mWolfCatPendingTeleport = false;
+    F64             mWolfCatPendingAt = 0.0;    // when the MapBlockRequest for mWolfCatPending was sent   // Teleport (or a double-click) came while it was pending
+    std::map<S32, std::string> mWolfCatNames;   // category id -> name, from the last list
 
     // update display of teleport destination coordinates - pos is in global coordinates
     void updateTeleportCoordsDisplay( const LLVector3d& pos );

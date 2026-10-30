@@ -95,6 +95,7 @@ uniform vec3  uMoonSunDir;          // the sun, as it lights the moon (world)
 uniform vec3  uMoonNorth;           // lunar north, world
 uniform float uMoonNorm;            // 1 / (the disc's mean Lommel-Seeliger factor x the map's mean albedo)
 uniform float uMoonOn;
+uniform float uMoonCloudT;          // [2026-10-30 ticket #391] the moon's direct light through the weather's cloud, 0..1 (wolfenvironmentrender.cpp moon391)
 uniform int   uBodyCount;
 uniform vec3  uBodyDir[12];         // to the body, world
 uniform vec3  uBodyColor[12];       // luminance x pre-exposure (suns: disc; moons, planets: lit by uLitDir)
@@ -327,6 +328,9 @@ vec3 wolfSkyWithBodies(vec3 originKm, vec3 rayDirection, vec3 dirWorld, float sh
         {
             aureole = wolfSkyMieLuminance(originKm, rayDirection, uMoonDirECEF) * (uMoonSkyScale * clamp(uNight, 0.0, 1.0));
             color -= aureole;
+            // [2026-10-30 ticket #391] the glow is the moon's own light scattered close to it: behind the weather's cloud it fades
+            // with the disc (taken out of the colour in full above; only what comes through is added back)
+            aureole *= clamp(uMoonCloudT, 0.0, 1.0);
         }
     }
     float cover = 0.0;
@@ -339,6 +343,9 @@ vec3 wolfSkyWithBodies(vec3 originKm, vec3 rayDirection, vec3 dirWorld, float sh
     if (uNightSky > 0.0 && any(greaterThan(transmittance, vec3(0.0)))) color += vec3(uNightSky) * (1.0 - cover);
     if (wolf_aurora > 0.0) aureole += wolfAuroraRadiance(dirWorld) * uExposure * transmittance;   // [2026-10-26] outside the gain (above)
     vec4 moon = wolfMoonDisc(dirWorld, transmittance);
+    // [2026-10-30 ticket #391] the disc behind the weather's cloud: its share of what is seen (the stars and the night sky behind it
+    // show again as it fades - all of it is behind that same cloud)
+    moon.a *= clamp(uMoonCloudT, 0.0, 1.0);
     if (moon.a > 0.0)
     {
         // the moon is opaque: what lies behind it is hidden; the air in front of it still glows (the
@@ -434,6 +441,7 @@ vec3 wolfEepMoon(vec3 dirWorld, vec3 color)
         a = t.a * uEepMoonFade;
     }
     if (uEepGbufClamp > 0.5) g = clamp(g, vec3(0.0), vec3(1.0));
+    a *= clamp(uMoonCloudT, 0.0, 1.0);   // [2026-10-30 ticket #391] behind the weather's cloud (wolfSkyWithBodies, the same factor)
     vec3 skyG = wolfLinToSrgb(color / max(uEepSkyScale, 1e-4));
     return wolfSrgbToLin(mix(skyG, g, clamp(a, 0.0, 1.0))) * uEepSkyScale;
 }

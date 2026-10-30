@@ -129,6 +129,7 @@ namespace
     // frame from the document's weather, the numbers follow it over GENUS_TAU seconds (section 10 A23)
     WolfCloudGenus::Result sGenus;
     bool sGenusValid = false;
+    F32 sMoonCloudT = -1.f;   // [2026-10-30 ticket #391] the eased moon391 transmittance (updateLight); < 0: start at the target
     bool sArrivalHold = false;   // [2026-10-26] updateLight: an arrival in progress, the previous sky held (measureCloudCover waits)
 
     // [WolfViewer 2026-10-28] Jimmy Olsen, ticket #277 (TROMSO by night, W82: "white blinking", the whole sky or a band along the
@@ -185,6 +186,7 @@ namespace
         F32      skyLuminanceShare = 1.f;            // the share of last frame's light that was sky (the meter's diffuse bound)
         F32      exposure = 1.f;
         F32      cover = 0.f;
+        F32      moonCloudT = 1.f;                   // [2026-10-30 ticket #391] the moon's direct light through the weather's cloud (moon391)
         F32      hazeScale = 1.f;
         F32      weatherHazeSigma = -1.f;           // [2026-10-27] the world's haze extinction the weather allows, 1/m (-1: no limit)
         bool     wolfWeather = false;               // [2026-10-27] a Wolf-mode document with weather and an EEP sky (updateLight)
@@ -792,6 +794,105 @@ namespace
     }
 
     /**
+     * [WolfViewer 2026-10-30 ticket #391] THE MOON BEHIND THE WEATHER'S CLOUD. Jimmy Olsen, TROMSO 22:05Z (W87): "even on rainy days,
+     * 100% of cloud and still the moon is on sky (and sometimes it pops off)" - MET cloud 100 % (low 100, mid 100, high 63), light
+     * rain, the moon 23 deg up. W88 (cc87b9172b, the composite's alpha) made the drawn clouds hide the dome again, but the W88 release
+     * at TROMSO 2026-10-30 22:54Z, the same weather, still showed the disc dimly through the deck at quality 3, coming and going as
+     * the deck drifted, and at full brightness at quality 1, where no clouds are drawn at all. The deck is drawn at coverage 0.60 for
+     * a total overcast (coverFromShare, kept for its shapes), so it has thinner places, and the moon is thousands of times brighter
+     * than a night cloud: a few per cent of it through a thin place is still a bright disc. The real moon behind 8 oktas of a thick
+     * layer is not seen at all.
+     *
+     * The physics: the moon's direct light through a layer is exp(-tau) (Beer-Lambert), tau the extinction integrated along the line
+     * of sight - here the march's own extinction (cloudsCommon.glsl sampleMedia: saturate(densityScales x getLayerDensity), x (1 +
+     * wolfLayerAbsorption); wolftkclouds.cpp scatteringCoefficient 1, absorptionCoefficient 0) at full shape density, i.e. a
+     * continuous sheet of the genus (sigma = 3 LWC / (2 rho_w r_e), Stephens 1978: wolfcloudgenus.cpp sigmaWater / sigmaIce), along
+     * the ray's real path through the layer's spherical shell. So Ns (0.045 /m over ~2 km) has tau ~90 - WMO Cloud Atlas,
+     * Nimbostratus: "thick enough throughout to blot out the Sun" (cloudatlas.wmo.int/en/nimbostratus-ns.html, read 2026-10-30) -
+     * while a Cs veil (~4e-4 /m) stays near tau 0.6 and the moon is seen through it.
+     *
+     * How much of a layer is such a sheet in front of the moon:
+     *   - clouds not drawn (quality under 2): nothing on the screen carries the gaps, so the moon takes the layer's expected
+     *     transmittance for a random place of the moon under a layer covering c of the sky: (1 - c) + c exp(-tau);
+     *   - clouds drawn: the drawn deck shows the gaps (the composite hides the dome by the march's own opacity) and only a cover with
+     *     NO gaps is beyond what it draws. WMO cloud amount (BUFR code table 0 20 011, https://ci.codes.wmo.int/bufr4/codeflag/0-20-011,
+     *     read 2026-10-30; the same okta scale as SYNOP code table 2700): code 7 "7 oktas or more, but not 8 oktas", code 8 "8 oktas"
+     *     (the whole sky). The sheet's share runs from 0 at 7/8 of the sky (a gap may still be there: the drawn gaps are believed) to
+     *     1 at 8/8 (no gap anywhere), linear across that one okta - a modelling choice: the code fixes the two ends, not the path.
+     * Layers multiply (each passes on what reaches it). The genera (sGenus) already ease over genusTauS; the result is eased again over
+     * the same time (updateLight), so it never steps - a zone's own clouds, a table reload, a quality change - except at an arrival,
+     * which is one switch (settleSnap) like the rest of the sky.
+     */
+    namespace moon391
+    {
+        /** The far crossing of the ray from radius r0 (elevation sine sinE >= 0) with the sphere of radius r >= r0, metres along the
+         *  ray: |p|^2 = r0^2 + 2 r0 t sinE + t^2 = r^2, so t = -r0 sinE + sqrt(r^2 - r0^2 + (r0 sinE)^2). With sinE >= 0 the ray only
+         *  climbs (d|p|^2/dt = 2 r0 sinE + 2 t >= 0), so it crosses each sphere above it once and never meets the ground. */
+        F64 crossing(F64 r0, F64 sinE, F64 r)
+        {
+            const F64 b = r0 * sinE;
+            return -b + sqrt(llmax(r * r - r0 * r0 + b * b, 0.0));
+        }
+
+        /** tau of one layer at full shape density along the ray from the camera (cameraHeight m above the sea) toward sinE.
+         *  A moon on or under the horizon is taken along the horizontal (sinE 0): the longest path, so the layer hides it as it
+         *  sets or rises - continuous through the horizon, where the ground then hides the disc anyway. */
+        F64 layerTau(const WolfCloudGenus::Layer& l, F32 cameraHeight, F64 bottomRadius, F32 sinE)
+        {
+            if (!(l.height > 0.f) || !(l.densityScale > 0.f)) return 0.0;
+            const F64 se = llmax((F64)sinE, 0.0);
+            const F64 r0 = bottomRadius + (F64)llmax(cameraHeight, 0.f);
+            const F64 rBase = bottomRadius + (F64)l.altitude, rTop = rBase + (F64)l.height;
+            if (r0 >= rTop) return 0.0;   // the camera above the layer: the moon is not behind it
+            // the ray's span inside the layer only, so a thin layer gets every sample (reviewer: samples over the whole path left a
+            // low thin veil 3 - 4 of them, and the count changed as the moon moved)
+            const F64 t0 = r0 < rBase ? crossing(r0, se, rBase) : 0.0;
+            const F64 t1 = crossing(r0, se, rTop);
+            if (t1 <= t0) return 0.0;
+            // midpoint samples over [t0, t1]; the profile is smooth in height (cloudsCommon.glsl getLayerDensity)
+            constexpr S32 N = 64;
+            const F64 step = (t1 - t0) / N;
+            const WolfTk::DensityProfile& p = l.profile;
+            F64 tau = 0.0;
+            for (S32 i = 0; i < N; ++i)
+            {
+                const F64 t = t0 + (i + 0.5) * step;
+                const F64 r = sqrt(r0 * r0 + 2.0 * r0 * t * se + t * t);
+                const F64 hf = llclamp((r - rBase) / (F64)l.height, 0.0, 1.0);
+                // Source: cloudsCommon.glsl getLayerDensity (expTerms exp(exponents hf) + linearTerms hf + constantTerms) and sampleMedia
+                // (density = saturate(density x layerSigma); extinction = density + density x wolfLayerAbsorption)
+                const F64 prof = (F64)p.expTerm * exp((F64)p.exponent * hf) + (F64)p.linearTerm * hf + (F64)p.constantTerm;
+                tau += llclamp((F64)l.densityScale * prof, 0.0, 1.0) * (1.0 + (F64)l.absorption) * step;
+            }
+            return tau;
+        }
+
+        /** WMO 7 oktas -> 8 oktas (above): the share of a layer covering c of the sky that is a gapless sheet. Per layer: several
+         *  layers each under 7/8 whose union nearly closes the sky give 1 here - their drawn decks are trusted to hide the moon. */
+        F32 sheetShare(F32 c)
+        {
+            return llclamp((c - 7.f / 8.f) * 8.f, 0.f, 1.f);
+        }
+
+        /** The moon's direct transmittance through the weather's layers (above). */
+        F32 transmittance(const WolfCloudGenus::Result& g, const LLVector3& moonWorld, F32 cameraHeight, F64 bottomRadius, bool cloudsDrawn)
+        {
+            const F32 sinE = llclamp(moonWorld.mV[VZ], -1.f, 1.f);
+            F64 T = 1.0;
+            for (S32 i = 0; i < 4; ++i)
+            {
+                const WolfCloudGenus::Layer& l = g.layer[i];
+                const F32 c = llclamp(l.coverage, 0.f, 1.f);
+                if (c <= 0.f) continue;
+                const F64 through = exp(-layerTau(l, cameraHeight, bottomRadius, sinE));
+                const F64 w = cloudsDrawn ? (F64)sheetShare(c) : (F64)c;
+                T *= 1.0 - w * (1.0 - through);
+            }
+            return (F32)llclamp(T, 0.0, 1.0);
+        }
+    }
+
+    /**
      * The frame's light at the camera and the exposure (absolute values):
      *   sun        three-geospatial getSunLightColor (getSunLightColor.ts:48-103): transmittance to the sun x the
      *              solar irradiance x the sun's spectral-radiance-to-luminance factor (WolfTk::Atmosphere)
@@ -1178,6 +1279,18 @@ namespace
             sClouds->layers() = WolfTk::CloudLayers::defaults();
             sGenusValid = false;
             sSkyWatchLayers = 3;   // [2026-10-30 ticket #334] the sky watch
+        }
+        // [WolfViewer 2026-10-30 ticket #391] the moon behind the weather's cloud (moon391 above): from the eased genera, with the
+        // clouds drawn or not as the composite decides (postPassInner: tier 2 or more, and a cover or an EEP), eased over genusTauS,
+        // held through an arrival and switched once with the rest of the sky. No weather genera (a zone's own clouds, no forecast):
+        // 1, the moon as before, the drawn clouds alone covering it.
+        {
+            const bool cloudsDrawn = WolfEnvironmentRender::tier() >= 2 && (sNext.cover > 0.f || WolfEnvironmentRender::eepDriven());
+            const F32 target = (sGenusValid && d.mHaveWeather && !z.hasClouds)
+                ? moon391::transmittance(sGenus, sNext.moonWorld, sNext.cameraHeight, sNext.bottomRadius, cloudsDrawn) : 1.f;
+            if (sMoonCloudT < 0.f || dt <= 0.f || settleSnap) sMoonCloudT = target;
+            else if (!holding) sMoonCloudT += (target - sMoonCloudT) * (1.f - expf(-dt / WolfCloudGenus::table().genusTauS));
+            sNext.moonCloudT = sMoonCloudT;
         }
         // [WolfViewer 2026-10-13] Paul: "cloud levels - lindens eep should control the new environment". LL's cloud density
         // (cloud_pos_density1.z, default 1.0, llsettingssky.cpp:902) is an opacity GAIN that saturates: cloudsF.glsl:92 alpha =
@@ -1894,6 +2007,8 @@ namespace
             line += llformat(" | sun %.1f deg (EEP %.1f), moon %.1f deg, frame log-avg %.4g cd/m2, sky share %.2f, sunlit %.3g amblit %.3g (pre-exposed)",
                              asinf(llclamp(sFrame.sunWorld.mV[VZ], -1.f, 1.f)) * RAD_TO_DEG, eepSun, asinf(llclamp(sFrame.moonWorld.mV[VZ], -1.f, 1.f)) * RAD_TO_DEG,
                              sFrame.frameLogAvg, sFrame.skyLuminanceShare, luminance(sl), luminance(am));
+            // [2026-10-30 ticket #391] the moon's light through the weather's cloud (moon391), so a "moon through the overcast" log names it
+            line += llformat(", moon through cloud %.3g", sFrame.moonCloudT);
         }
         LL_INFOS("WolfEnvGPU") << line << LL_ENDL;
     }
@@ -2293,6 +2408,7 @@ void WolfEnvironmentRender::frameUpdate()
     {
         sMeter.reset();   // a new start when the Wolf sky comes back
         sGenusValid = false;
+        sMoonCloudT = -1.f;   // [2026-10-30 ticket #391] a new start at the next weather, not eased from the old one
         sNext.valid = false;
         sNext.cloudTransmittanceAtCamera = 1.f;   // no old reading carried into the next start
         sNext.cloudDiffuseT = 1.f;
@@ -3165,6 +3281,11 @@ bool WolfEnvironmentRender::renderSkyDome()
     sh.uniform3fv(s_md, 1, moonDir.mV);
     sh.uniform1f(s_ms, (F32)sin(llmin(WOLF_MOON_RADIUS * moonScale, 1.2)));
     sh.uniform3fv(s_ml, 1, (eepMoon ? LLColor3::white * (sFrame.moonTOA * e / moonOmega) : moonLum).mV);
+    // [WolfViewer 2026-10-30 ticket #391] the moon behind the weather's cloud (moon391): the share of the disc's light that comes
+    // through, for the disc (as its opacity: what is behind it shows again as it fades), the EEP's moon and the moon's aureole
+    // (skyF.glsl wolfSkyWithBodies / wolfEepMoon)
+    static LLStaticHashedString s_mct("uMoonCloudT");
+    sh.uniform1f(s_mct, llclamp(sFrame.moonCloudT, 0.f, 1.f));
     sh.uniform3fv(s_msd, 1, moonSunDir.mV);
     sh.uniform3fv(s_mn, 1, north.mV);
     sh.uniform1f(s_mnorm, moonOn ? 1.f / (lsMean * llmax(moonMeanAlbedo(), 1e-3f)) : 0.f);

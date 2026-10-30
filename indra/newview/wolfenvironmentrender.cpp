@@ -1638,6 +1638,33 @@ namespace
                     }
                     f.storm_lookup = s_lookup;
                 }
+                // [HURRICANE 2026-10-30] README "The storm in 3D" item 3, THE FLOW MAP (Vlachos 2010, "Water Flow in Portal 2"): two
+                // clocks half a period P = 120 s apart, tau0 = t mod P and tau1 = (t + P / 2) mod P on the storm's own time (now -
+                // start), the first weighted 1 - |2 tau0 / P - 1| (0 when it restarts, 1 when the other does). The frame budget
+                // (wolfframegovernor.h, README COST): below 1 one phase (the weight eased to 1 over 3 s; a seam every P accepted),
+                // at or below 0.5 the 3D noise stops turning (its weight eased to 0 over 3 s; s_w still turns).
+                {
+                    const F64 P = 120.0;
+                    const F64 ts = llmax(now - hu->mStart, 0.0);
+                    const F64 tau0 = fmod(ts, P), tau1 = fmod(ts + 0.5 * P, P);
+                    const F32 tri = 1.f - fabsf(2.f * (F32)(tau0 / P) - 1.f);
+                    static F32 s_one = 0.f, s_noise = 1.f;
+                    static F64 s_lastFlow = 0.0;
+                    if (!probe)
+                    {
+                        const F32 g = WolfFrameGovernor::budget();
+                        const F64 tn = LLFrameTimer::getElapsedSeconds();
+                        const F32 step = s_lastFlow > 0.0 ? (F32)llclamp(tn - s_lastFlow, 0.0, 0.5) / 3.f : 1.f;
+                        s_lastFlow = tn;
+                        s_one = g < 0.999f ? llmin(1.f, s_one + step) : llmax(0.f, s_one - step);
+                        s_noise = g > 0.5f ? llmin(1.f, s_noise + step) : llmax(0.f, s_noise - step);
+                    }
+                    f.storm_vmax = (F32)hu->mVmax;
+                    f.storm_flow[0] = (F32)tau0;
+                    f.storm_flow[1] = (F32)tau1;
+                    f.storm_flow[2] = tri + (1.f - tri) * s_one;
+                    f.storm_flow[3] = s_noise;
+                }
             }
             // [HURRICANE 2026-10-30] storm watch: what the cloud pass is given (the uniforms wolfStorm, wolfStormEye, wolfStormSpin
             // set from f in wolftkclouds.cpp sharedUniforms) and what that means at the camera (README "Geometry", "Clouds": the

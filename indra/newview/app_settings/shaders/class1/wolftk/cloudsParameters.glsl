@@ -99,7 +99,11 @@ uniform vec4 wolfStorm;                 // x 1 = a storm is running (0: none, sk
 uniform vec4 wolfStormEye;              // xy the eye c(t) (agent x, y metres), z R the outer radius, w Re the eye's radius (metres)
 uniform vec4 wolfStormSpin;             // x h the hemisphere (1 north, -1 south), y D the metres the field has streamed inwards,
                                         // z [2026-10-30] the weight of the storm's own lookup of the field (1 full, 0 skipped:
-                                        // s_w is the point's own value; the frame budget, wolfframegovernor.h), w unused
+                                        // s_w is the point's own value; the frame budget, wolfframegovernor.h), w vmax (m/s)
+// [HURRICANE 2026-10-30] README "The storm in 3D" (cloudsCommon.glsl wolfStormApply / sampleMedia; wolftkclouds.cpp sharedUniforms)
+uniform vec4 wolfStormFlow;             // the flow map: x tau0 = t mod P, y tau1 = (t + P / 2) mod P (s), z the first's crossfade weight
+                                        // (the triangle; 1 = one phase), w the turned 3D noise's weight (the frame budget)
+uniform vec2 wolfStormBase;             // x Z_BASE (m above the sea), y K_BASE (the dark base's absorption per unit density)
 // the ice phase: the forward lobe's asymmetry x this for an ice layer (wolfcloudgenus.h WOLF_ICE_G_SCALE, the viewer
 // and the harness define it from the cited asymmetry parameters); 1 = water everywhere
 #ifndef WOLF_ICE_G_SCALE

@@ -189,6 +189,9 @@ namespace WolfTk
         F32        storm_radius = 1000.f, storm_eye_radius = 100.f;
         F32        storm_h = 1.f, storm_D = 0.f;
         F32        storm_lookup = 1.f;   // [2026-10-30] the storm's second lookup's weight (wolfenvironmentrender.cpp, the frame budget)
+        // [2026-10-30] README "The storm in 3D": vmax (m/s), the flow map (tau0, tau1, the first's weight, the turned noise's weight)
+        F32        storm_vmax = 0.f;
+        F32        storm_flow[4] = { 0.f, 0.f, 1.f, 0.f };
         LLVector3  sky_under_cloud = LLVector3(1.f, 1.f, 1.f);   // the horizontal sky irradiance under the clouds / the
                                                                  // clear sky's, per channel (cloudsF.glsl wolfSkyUnderCloud)
         GLuint     depth_tex = 0;       // the scene depth (GL depth texture, [0,1])

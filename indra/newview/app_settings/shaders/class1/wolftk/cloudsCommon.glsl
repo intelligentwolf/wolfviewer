@@ -103,6 +103,10 @@ struct WeatherSample {
   // [WolfViewer 2026-10-26] the cirrus lookup's texture coordinate (kind 2 below), for the fibres along its flow
   // (sampleMedia wolfLayerFibre); (0, 0) when no layer uses that lookup
   vec2 upperCoord;
+  // [HURRICANE 2026-10-30] the storm here (sampleWeather / wolfStormApply): its share w (0 = none: sampleMedia does nothing more) and
+  // the extra absorption per unit density of its dark base (README "The storm in 3D" item 2)
+  float stormW;
+  float stormAbsorb;
 };
 
 // [WolfViewer 2026-10-26] THE CURVED FLOW. Jimmy Olsen 10-26 (UiT webcam, Tromso 02:27): real cirrus/altostratus "swirling,
@@ -263,17 +267,91 @@ vec4 wolfReadWeather(const vec2 uv, const float mipLevel, const vec4 kindStreets
 // Returns the storm's share w = C env(r) and writes the eye mask Meye; localWeather (the weather value per layer, after the
 // weather exponent) becomes mix(value, v_storm, w).
 float wolfStormS(const float x) { return smoothstep(0.0, 1.0, x); }   // README "Time" s(x): c = clamp(x, 0, 1); c c (3 - 2 c)
-float wolfStormApply(inout vec4 localWeather, const vec3 position, const float mipLevel, const vec4 kindStreets,
-                     const vec4 kindUpper, const vec4 kindTurned, out float meye) {
-  meye = 1.0;
+// [HURRICANE 2026-10-30] THE STORM IN 3D (README "The storm in 3D", item 3): the turn about the eye. A point at distance r turns by
+// theta = h Omega(r) tau, Omega = K_VIS V(r) / max(r, Rm), V the Holland wind of README "Wind" (V = vmax sqrt(x e^(1 - x)),
+// x = (Rm / max(r, 0.01))^1.31), K_VIS 0.3. A sample at p reads what was at p turned back by theta. tau is one of the flow map's
+// two clocks (wolfStormFlow.x / .y, each t mod P, half a period apart; wolfenvironmentrender.cpp).
+float wolfStormTheta(const float r, const float tau) {
+  float Rm = 1.25 * wolfStormEye.w;
+  float x = pow(Rm / max(r, 0.01), 1.31);
+  float V = wolfStormSpin.w * sqrt(x * exp(1.0 - x));                   // wolfStormSpin.w = vmax
+  return wolfStormSpin.x * 0.3 * V / max(r, Rm) * tau;                  // h K_VIS V / max(r, Rm) tau
+}
+vec2 wolfStormTurnXY(const vec2 xy, const float tau) {
+  vec2 d = xy - wolfStormEye.xy;
+  float a = -wolfStormTheta(length(d), tau);
+  float ca = cos(a), sa = sin(a);
+  return wolfStormEye.xy + vec2(ca * d.x - sa * d.y, sa * d.x + ca * d.y);
+}
+// an ECEF position turned back about the eye's vertical (in agent space, at the position's own agent height)
+vec3 wolfStormTurnECEF(const vec3 position, const float tau) {
+  vec3 pA = (ecefToWorldMatrix * vec4(position, 1.0)).xyz;
+  pA.xy = wolfStormTurnXY(pA.xy, tau);
+  return (worldToECEFMatrix * vec4(pA, 1.0)).xyz;
+}
+
+// [HURRICANE 2026-10-30] the storm's sample of the region's own field (README "Clouds" s_w): the spiral lookup q (and q_up for the
+// cirrus lookup), each turned back by the flow map's clock tau (README "The storm in 3D" item 3)
+vec4 wolfStormFieldAt(const vec2 c, const float r, const float phi, const float psi, const float D, const float R, const float h,
+                      const float pz, const float mipLevel, const vec4 kindStreets, const vec4 kindUpper, const vec4 kindTurned,
+                      const float tau) {
+  vec4 sw = vec4(0.0);
+  vec2 unusedCoord;
+  if (any(greaterThan(kindStreets + kindTurned, vec4(0.5)))) {
+    // rho = r + D; q = c(t) + rho (cos(phi - psi), sin(phi - psi))
+    float rho = r + D;
+    vec2 q = wolfStormTurnXY(c + rho * vec2(cos(phi - psi), sin(phi - psi)), tau);
+    vec2 quv = getGlobeUv((worldToECEFMatrix * vec4(q, pz, 1.0)).xyz);
+    sw += wolfReadWeather(quv, mipLevel, kindStreets, vec4(0.0), kindTurned, unusedCoord);
+  }
+  if (any(greaterThan(kindUpper, vec4(0.5)))) {
+    // the outflow canopy (the cirrus lookup, kindUpper) turns the other way: the mirrored spiral, no inward streaming, turning
+    // slowly backwards - q_up = c(t) + r (cos(phi + psi + h D / R), sin(phi + psi + h D / R))
+    float a = phi + psi + h * D / R;
+    vec2 q = wolfStormTurnXY(c + r * vec2(cos(a), sin(a)), tau);
+    vec2 quv = getGlobeUv((worldToECEFMatrix * vec4(q, pz, 1.0)).xyz);
+    sw += wolfReadWeather(quv, mipLevel, vec4(0.0), kindUpper, vec4(0.0), unusedCoord);
+  }
+  return pow(sw, weatherExponents);   // the weather value as the region's own (sampleWeather: pow(rawWeather, weatherExponents))
+}
+
+// [HURRICANE 2026-10-30] The storm as cloud, not geometry (Paul 11:30Z / 11:33Z, images 7 and 8: "still not really a cyclone" - a
+// smooth pale lens with a crisp elliptical rim, a smooth vertical curtain, a flat underside). The masks used to multiply the
+// DENSITY after the coverage cut - smooth analytic functions of r and B2, which the shape and detail noise could not erode, seen
+// edge-on as curtains and rims. Now every part of the storm's shape goes in BEFORE the cut, where the cut against the region's
+// own field and the shape / detail erosion in sampleMedia make the edges cloud-like (README "The storm in 3D"):
+//   - each mask's radius / phase is moved by the shape noise at the sample (n, the region's own 3D noise at 4 x its repeat,
+//     ~0.8 km cells): the eye and the eyewall by +-0.3 Re, the dense overcast by +-0.15 Rcdo, the storm's rim by +-0.1 R, the
+//     bands' phase B2 by +-0.2 - so no edge is a circle or a straight line;
+//   - every transition is wide: the eye 0.6 .. 1.4 Re (was 0.8 .. 1.2), the moats B2 0.15 .. 0.5, the rim 1 .. 1.3 R;
+//   - the eye and the moats lower the weather VALUE and the storm's height envelope H(z) (item 1) - both before the cut -
+//     instead of the density; the density keeps only a safety mask deep in the eye (rE < 0.3 .. 0.8 Re), where the cut has
+//     already cleared it, so that edge is never seen;
+//   - the dense overcast's value is O inner (0.6 + 0.4 n) (was 0.85 + 0.15 s_w): below 1, so its base and top come out of the
+//     cut below 1 and the erosion carves them - a ragged base;
+//   - the outer edge breaks into bands (item 4): the moat weight is O (1 - inner) max(w, s((r/R - 0.8) / 0.2)) out to 1.2 R,
+//     faded out by 1.3 R.
+// Outputs: the storm's share w (returned); H, the storm's height profile at this height (item 1, to mix into each layer's
+// heightScale by w); densMask (the eye's safety mask); absorb, the extra absorption per unit density (item 2).
+float wolfStormApply(inout vec4 localWeather, const vec3 position, const float height, const float mipLevel,
+                     const vec4 kindStreets, const vec4 kindUpper, const vec4 kindTurned,
+                     out float H, out float densMask, out float absorb) {
+  H = 0.0;
+  densMask = 1.0;
+  absorb = 0.0;
   vec3 pA = (ecefToWorldMatrix * vec4(position, 1.0)).xyz;
   vec2 c = wolfStormEye.xy;
   vec2 dp = pA.xy - c;
   float r = length(dp);
   float R = wolfStormEye.z;
   float Re = wolfStormEye.w;
-  // README "Geometry": env(r) = 1 - s((r/R - 1) / 0.3), 1 inside R, 0 beyond 1.3 R; README "Clouds": w = C env(r)
-  float env = 1.0 - wolfStormS((r / R - 1.0) / 0.3);
+  float Rcdo = 0.35 * R;    // README: Rcdo = 0.35 R
+  // the shape noise at the sample, 0..1, at 4 x the shapes' own repeat (the same texture sampleMedia erodes with)
+  float n = texture(shapeTexture, position * shapeRepeat * 4.0 + shapeOffset).r;
+  float nr = n - 0.5;
+  // README "Geometry": env(r) = 1 - s((r/R - 1) / 0.3); README "Clouds": w = C env(r) - at the noise-moved radius
+  float rR = r + 0.2 * R * nr;
+  float env = 1.0 - wolfStormS((rR / R - 1.0) / 0.3);
   float w = wolfStorm.w * env;
   if (w <= 0.0) return 0.0;
   float O = wolfStorm.y;
@@ -281,52 +359,49 @@ float wolfStormApply(inout vec4 localWeather, const vec3 position, const float m
   float h = wolfStormSpin.x;
   float D = wolfStormSpin.y;
   float Rm = 1.25 * Re;     // README: Rm = 1.25 Re
-  float Rcdo = 0.35 * R;    // README: Rcdo = 0.35 R
   // phi = atan2(dy, dx) (anticlockwise from +X = east); atan2(0, 0) = 0 as C++ / PHP give it (GLSL's atan(0, 0) is undefined)
   float phi = r > 1e-3 ? atan(dp.y, dp.x) : 0.0;
   // psi(r) = h O cot(10 deg) ln(R / max(r, 0.5 Rm)); cot 10 deg = 5.671281819617709 (README 5.6713; wolfhurricane.h COT_ALPHA)
   float psi = h * O * 5.671281819617709 * log(R / max(r, 0.5 * Rm));
-  float B2 = 0.5 + 0.5 * cos(2.0 * (phi - psi));                       // two principal bands
-  float inner = 1.0 - wolfStormS((r - Rcdo) / (0.5 * Rcdo));            // the dense overcast
-  float e = (r - 1.25 * Re) / (0.3 * Re);
-  float ew = E * exp(-e * e);                                           // the eyewall ring
-  meye = 1.0 - E * (1.0 - wolfStormS((r - 0.8 * Re) / (0.4 * Re)));     // 0 in the eye (r < 0.8 Re), 1 beyond 1.2 Re
-  // [HURRICANE 2026-10-30] README "Clouds": density *= Mmoat, Mmoat = 1 - O w (1 - inner) (1 - s((B2 - 0.15) / 0.35)): the moats
-  // between the rainbands, outside the dense overcast, are open sky through every layer (C_STORM alone left a moat in the middle
-  // of the 3.5 km nimbostratus at density 0.3-0.55, optically thick, so bands and moats still read as one overcast from below).
-  // Folded into the eye mask: the same density multiplier, after the coverage cut and before the build clearance (sampleWeather).
-  meye *= 1.0 - O * w * (1.0 - inner) * (1.0 - wolfStormS((B2 - 0.15) / 0.35));
-  // the storm's sample of the region's own field: the same texture, the same layer, read at q
-  // [HURRICANE 2026-10-30] THE FRAME BUDGET (wolfframegovernor.h; wolfStormSpin.z, eased over 3 s in wolfenvironmentrender.cpp):
-  // on a slow frame the storm's own lookup of the field at q (a second, third texture read per layer per sample) is skipped and
-  // s_w is the point's own weather value - the bands, the dense overcast, the eyewall, the eye and the moats all come from the
-  // analytic B2 / inner / ew / masks, so the storm's structure still reads; only the field's texture inside the bands stops
-  // winding with the spiral. Between 0 and 1 (the ease) the two are mixed, so nothing pops.
+  float B2 = clamp(0.5 + 0.5 * cos(2.0 * (phi - psi)) + 0.4 * nr, 0.0, 1.0);   // two principal bands, phase moved by the noise
+  float inner = 1.0 - wolfStormS((r + 0.3 * Rcdo * nr - Rcdo) / (0.5 * Rcdo));   // the dense overcast
+  float rE = r + 0.6 * Re * nr;                                                  // the eye and eyewall radius, moved by the noise
+  float e = (rE - 1.25 * Re) / (0.3 * Re);
+  float ew = E * exp(-e * e);                                                    // the eyewall ring
+  float meye = 1.0 - E * (1.0 - wolfStormS((rE - 0.6 * Re) / (0.8 * Re)));       // 0 in the eye, 1 beyond 1.4 Re
+  // the moats (README "Clouds" Mmoat) and, from 0.8 R, the broken outer edge (README "The storm in 3D" item 4)
+  float outer = wolfStormS((rR / R - 0.8) / 0.2) * (1.0 - wolfStormS((rR / R - 1.2) / 0.1));   // at the noise-moved radius
+  float mmoat = 1.0 - O * (1.0 - inner) * max(w, outer) * (1.0 - wolfStormS((B2 - 0.15) / 0.35));
+  // the eye's safety mask on the density: only deep inside, where the value and H below have already cleared it
+  densMask = 1.0 - E * (1.0 - wolfStormS((rE - 0.3 * Re) / (0.5 * Re)));
+  // THE FRAME BUDGET (wolfframegovernor.h; wolfStormSpin.z, eased over 3 s in wolfenvironmentrender.cpp): on a slow frame the
+  // storm's own lookup of the field is skipped and s_w is the point's own weather value - the structure comes from the bands /
+  // overcast / eyewall / masks, so it still reads. Between 0 and 1 (the ease) the two are mixed, so nothing pops.
+  // THE FLOW MAP (README "The storm in 3D" item 3): two lookups half a period apart, crossfaded by the triangle weight
+  // wolfStormFlow.z; at weight 1 (the frame budget below 1: one phase) only the first.
   vec4 own = localWeather;
-  vec4 sw = vec4(0.0);
-  vec2 unusedCoord;
-  vec4 kindLow = kindStreets + kindTurned;
+  vec4 sw = own;
   float lookupW = clamp(wolfStormSpin.z, 0.0, 1.0);
-  if (lookupW > 0.001 && any(greaterThan(kindLow, vec4(0.5)))) {
-    // rho = r + D; q = c(t) + rho (cos(phi - psi), sin(phi - psi))
-    float rho = r + D;
-    vec2 q = c + rho * vec2(cos(phi - psi), sin(phi - psi));
-    vec2 quv = getGlobeUv((worldToECEFMatrix * vec4(q, pA.z, 1.0)).xyz);
-    sw += wolfReadWeather(quv, mipLevel, kindStreets, vec4(0.0), kindTurned, unusedCoord);
+  if (lookupW > 0.001) {
+    float w0 = clamp(wolfStormFlow.z, 0.0, 1.0);
+    vec4 s0 = wolfStormFieldAt(c, r, phi, psi, D, R, h, pA.z, mipLevel, kindStreets, kindUpper, kindTurned, wolfStormFlow.x);
+    vec4 s1 = w0 < 0.999 ? wolfStormFieldAt(c, r, phi, psi, D, R, h, pA.z, mipLevel, kindStreets, kindUpper, kindTurned, wolfStormFlow.y)
+                         : s0;
+    sw = mix(own, mix(s1, s0, w0), lookupW);
   }
-  if (lookupW > 0.001 && any(greaterThan(kindUpper, vec4(0.5)))) {
-    // the outflow canopy (the cirrus lookup, kindUpper) turns the other way: the mirrored spiral, no inward streaming, turning
-    // slowly backwards - q_up = c(t) + r (cos(phi + psi + h D / R), sin(phi + psi + h D / R))
-    float a = phi + psi + h * D / R;
-    vec2 q = c + r * vec2(cos(a), sin(a));
-    vec2 quv = getGlobeUv((worldToECEFMatrix * vec4(q, pA.z, 1.0)).xyz);
-    sw += wolfReadWeather(quv, mipLevel, vec4(0.0), kindUpper, vec4(0.0), unusedCoord);
-  }
-  sw = pow(sw, weatherExponents);   // the weather value as the region's own (sampleWeather: pow(rawWeather, weatherExponents))
-  sw = mix(own, sw, lookupW);       // [2026-10-30] the frame budget: the point's own value when the lookup is skipped
-  // v_storm = max( clamp(s_w mix(0.35, 1, B2) (1 + 0.6 O), 0, 1), O inner (0.85 + 0.15 s_w), ew )
-  vec4 vStorm = max(max(clamp(sw * mix(0.35, 1.0, B2) * (1.0 + 0.6 * O), 0.0, 1.0), O * inner * (0.85 + 0.15 * sw)), vec4(ew));
-  localWeather = mix(localWeather, vStorm, w);
+  // v_storm = max( clamp(s_w mix(0.35, 1, B2) (1 + 0.6 O), 0, 1), O inner (0.6 + 0.4 n), ew )   [inner term 2026-10-30]
+  vec4 vStorm = max(max(clamp(sw * mix(0.35, 1.0, B2) * (1.0 + 0.6 * O), 0.0, 1.0), vec4(O * inner * (0.6 + 0.4 * n))), vec4(ew));
+  localWeather = mix(localWeather, vStorm, w) * (meye * mmoat);
+  // README "The storm in 3D" item 1: the storm's height profile. z_s(z) = s((z - Z_BASE) / 200) (1 - s((z - Z_zone) / 400)) per
+  // zone, the zone weights' max: the eyewall (ew) and the dense overcast (inner) to Z_TOP, the bands (B2 (1 - inner)) to
+  // Z_BAND = 0.55 Z_TOP; the eye and the moats clear. Z_TOP = maxHeight (the highest top of the region's layers).
+  float zBase = wolfStormBase.x;
+  float zb = wolfStormS((height - zBase) / 200.0);
+  float zTop = 1.0 - wolfStormS((height - maxHeight) / 400.0);
+  float zBand = 1.0 - wolfStormS((height - 0.55 * maxHeight) / 400.0);
+  H = zb * max(max(ew, inner) * zTop, B2 * (1.0 - inner) * zBand) * meye * mmoat;
+  // README "The storm in 3D" item 2: a dark base - absorption += w O K_BASE (1 - s((z - Z_BASE) / 1500)), K_BASE = wolfStormBase.y
+  absorb = w * O * wolfStormBase.y * (1.0 - wolfStormS((height - zBase) / 1500.0));
   return w;
 }
 
@@ -359,11 +434,15 @@ WeatherSample sampleWeather(const vec2 uv, const float height, const float mipLe
   vec4 localWeather = pow(rawWeather, weatherExponents);
   // [HURRICANE 2026-10-29] ticket #367: the region's storm gathers, winds and clears this field, before the fibres and the
   // coverage cut (README "Clouds": "applied to the cloud field's weather value before the coverage cut, per layer")
-  float stormMeye = 1.0;
+  float stormDensMask = 1.0;
   float stormShare = 0.0;
+  float stormH = 0.0;
+  weather.stormAbsorb = 0.0;
   if (wolfStorm.x > 0.5) {
-    stormShare = wolfStormApply(localWeather, position, mipLevel, kindStreets, kindUpper, kindTurned, stormMeye);
+    stormShare = wolfStormApply(localWeather, position, height, mipLevel, kindStreets, kindUpper, kindTurned,
+                                stormH, stormDensMask, weather.stormAbsorb);
   }
+  weather.stormW = stormShare;
   // [WolfViewer 2026-10-26, fourth pass] THE FIBRES CARVE THE CIRRUS BEFORE THE COVERAGE CUT. Paul at ICELAND (14:35Z) and TROMSO
   // (15:35Z): the high cloud drawn as "a handful of wide, smooth ribbons that fan across the entire sky from a point on the
   // horizon, like spokes". The cause: the streak lookup's weather value is the high channel's Perlin fbm (localWeatherF.glsl
@@ -412,6 +491,13 @@ WeatherSample sampleWeather(const vec2 uv, const float height, const float mipLe
   }
 
   vec4 heightScale = shapeAlteringFunction(weather.heightFraction, shapeAlteringBiases);
+  // [HURRICANE 2026-10-30] README "The storm in 3D" item 1: heightScale = mix(heightScale, H(z), w) - the storm's own vertical
+  // profile in place of the layers' rounded slabs, in each layer only between its own base and top (where the genus leaves a gap
+  // between layers the gap stays: declared). The eye and the moats are 0 in H, so they clear here, before the cut.
+  if (stormShare > 0.0) {
+    vec4 inside = step(minLayerHeights, vec4(height)) * step(vec4(height), maxLayerHeights);
+    heightScale = mix(heightScale, vec4(stormH) * inside, stormShare);
+  }
 
   // Modulation to control weather by coverage parameter.
   // Reference: https://github.com/Prograda/Skybolt/blob/master/Assets/Core/Shaders/Clouds.h#L63
@@ -431,9 +517,9 @@ WeatherSample sampleWeather(const vec2 uv, const float height, const float mipLe
     factor,
     factor + coverageFilterWidths
   );
-  // [HURRICANE 2026-10-29] README "Clouds": density *= mix(1, Meye, w > 0 ? 1 : 0) - the eye is clear through every layer.
-  // The build clearance below still runs after it (CLOUDS NEVER COVER BUILDS).
-  if (stormShare > 0.0) weather.density *= stormMeye;
+  // [HURRICANE 2026-10-30] the eye's safety mask only (wolfStormApply: the eye and the moats now clear the value and H before the
+  // cut). The build clearance below still runs after it (CLOUDS NEVER COVER BUILDS).
+  if (stormShare > 0.0) weather.density *= stormDensMask;
 
   // [CLOUDS CLEAR OF BUILDS 2026-10-26] the build clearance (wolfBuildClear above): only below the highest cleared height and
   // where some fading layer has cloud; the cloud's height above the sea sphere is its height above the ground there, as a
@@ -492,8 +578,25 @@ MediaSample sampleMedia(
     dot(density, remapClamped(weather.heightFraction, vec4(0.3), vec4(0.0)));
   #endif // TURBULENCE
 
+  // [HURRICANE 2026-10-30] README "The storm in 3D" item 3: the shape and detail noise turn about the eye with the flow map
+  // (wolfStormTurnECEF; two clocks crossfaded by wolfStormFlow.z), weighted by wolfStormFlow.w (the frame budget: 0 at or below
+  // g 0.5, eased) and by the storm's share, so outside the storm nothing changes.
+  bool stormTurn = weather.stormW > 0.0 && wolfStormFlow.w > 0.001;
+  // the frame budget fades the turned noise against the unturned (a weight, not a smaller angle, so nothing swirls backwards)
+  float turnW = stormTurn ? weather.stormW * clamp(wolfStormFlow.w, 0.0, 1.0) : 0.0;
+  float flowW0 = clamp(wolfStormFlow.z, 0.0, 1.0);
+  vec3 turned0 = position, turned1 = position;
+  if (stormTurn) {
+    turned0 = wolfStormTurnECEF(position, wolfStormFlow.x);
+    turned1 = flowW0 < 0.999 ? wolfStormTurnECEF(position, wolfStormFlow.y) : turned0;
+  }
   vec3 shapePosition = (position + evolution + turbulence) * shapeRepeat + shapeOffset;
   float shape = texture(shapeTexture, shapePosition).r;
+  if (stormTurn) {
+    float s0 = texture(shapeTexture, (turned0 + evolution + turbulence) * shapeRepeat + shapeOffset).r;
+    float s1 = flowW0 < 0.999 ? texture(shapeTexture, (turned1 + evolution + turbulence) * shapeRepeat + shapeOffset).r : s0;
+    shape = mix(shape, mix(s1, s0, flowW0), turnW);
+  }
   density = remapClamped(density, vec4(1.0 - shape) * shapeAmounts, vec4(1.0));
 
   #ifdef DEBUG_SHOW_SAMPLE_COUNT
@@ -504,6 +607,11 @@ MediaSample sampleMedia(
   if (mipLevel * 0.5 + (jitter - 0.5) * 0.5 < 0.5) {
     vec3 detailPosition = (position + turbulence) * shapeDetailRepeat + shapeDetailOffset;
     float detail = texture(shapeDetailTexture, detailPosition).r;
+    if (stormTurn) {   // [HURRICANE 2026-10-30] the detail noise turns with the shapes (above)
+      float d0 = texture(shapeDetailTexture, (turned0 + turbulence) * shapeDetailRepeat + shapeDetailOffset).r;
+      float d1 = flowW0 < 0.999 ? texture(shapeDetailTexture, (turned1 + turbulence) * shapeDetailRepeat + shapeDetailOffset).r : d0;
+      detail = mix(detail, mix(d1, d0, flowW0), turnW);
+    }
     // Fluffy at the top and whippy at the bottom.
     vec4 modifier = mix(
       vec4(pow(detail, 6.0)),
@@ -531,6 +639,9 @@ MediaSample sampleMedia(
   // [WolfViewer] the absorption per layer (precipitating layers absorb more, Schneider 2015 p. 69), on top of the
   // one absorptionCoefficient
   media.extinction = densitySum * absorptionCoefficient + dot(density, wolfLayerAbsorption) + media.scattering;
+  // [HURRICANE 2026-10-30] README "The storm in 3D" item 2: the storm's dark base, extra absorption per unit density in its lowest
+  // 1500 m (wolfStormApply), added to every layer's
+  media.extinction += densitySum * weather.stormAbsorb;
   return media;
 }
 

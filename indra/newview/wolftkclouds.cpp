@@ -860,7 +860,19 @@ struct Clouds::Impl
         // storm. x = 0 when none is running: the shader skips it on that alone.
         u4f(sh, "wolfStorm", f.storm_on ? 1.f : 0.f, f.storm_O, f.storm_E, f.storm_C);
         u4f(sh, "wolfStormEye", f.storm_eye_agent[0], f.storm_eye_agent[1], f.storm_radius, f.storm_eye_radius);
-        u4f(sh, "wolfStormSpin", f.storm_h, f.storm_D, f.storm_lookup, 0.f);   // [2026-10-30] z the lookup's weight
+        u4f(sh, "wolfStormSpin", f.storm_h, f.storm_D, f.storm_lookup, f.storm_vmax);   // [2026-10-30] z the lookup's weight, w vmax
+        // [2026-10-30] README "The storm in 3D": the flow map (wolfenvironmentrender.cpp), and the dark base - Z_BASE 300 m and
+        // K_BASE = 2 x the absorption of the lowest layer the region has (by its base; a layer of no height is not one)
+        u4f(sh, "wolfStormFlow", f.storm_flow[0], f.storm_flow[1], f.storm_flow[2], f.storm_flow[3]);
+        {
+            S32 lowest = -1;
+            for (S32 i = 0; i < 4; ++i)
+            {
+                if (layers.layer[i].height > 0.f && (lowest < 0 || layers.layer[i].altitude < layers.layer[lowest].altitude)) lowest = i;
+            }
+            const F32 k_base = lowest >= 0 ? 2.f * layers.layer[lowest].absorption : 0.f;
+            u2f(sh, "wolfStormBase", 300.f, k_base);
+        }
         {
             const F32 a = f.weather_rotation_deg * DEG_TO_RAD, ca = cosf(a), sa = sinf(a), inv = 1.f / llmax(f.weather_stretch, 1e-3f);
             const F32 m[4] = { inv * ca, sa, -inv * sa, ca };   // columns: (S R)[.,0], (S R)[.,1] with S = diag(1/stretch, 1)

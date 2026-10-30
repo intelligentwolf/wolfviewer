@@ -146,13 +146,27 @@ uniform float wolfTerrainLod;
 uniform float stormChaos;
 uniform float maxWaveHeight;
 // [HURRICANE 2026-10-30] the region's storm on the sea (wolfStormSeaFactor below; lldrawpoolwater.cpp renderPostDeferred)
-uniform vec4 wolfSeaStorm;       // x 1 = a storm is running (0: none, skipped), y W intensity, z h hemisphere, w the floor (1 - W env(r_c)) S_eep
+uniform vec4 wolfSeaStorm;       // x 1 = a storm is running (0: none, skipped), y W intensity, z h hemisphere, w the floor = S_eep [ROUND 10]
 uniform vec4 wolfSeaStormEye;    // xy the eye c(t) (agent metres), z R, w Re
 uniform vec4 wolfSeaStormWind;   // xy the track velocity speed (sin H, cos H), zw the ambient wind (the way the air moves), m/s
 uniform vec4 wolfSeaStormMisc;   // x vmax, y S_eep (the index this water is drawn with), zw the r < 1 m bearing (sin, cos)
-// [HURRICANE 2026-10-30] the storm swell train (README "The storm swell's length"): xy its direction (unit: the storm's sea wind
-// at the region centre), z 1 = that direction is set (0: the region's own wave direction), w its length L_STORM (m)
+// [ROUND 10] the storm swell (README "The storm swell"; wolfhurricane.cpp stormSwellAmp): x A_MAX (m), y V_5 (m/s), z 1 = on,
+// w its length L_STORM (m). It runs out from the eye (wolfSeaStormEye.xy) in rings over the whole region.
 uniform vec4 wolfSeaStormSwell;
+// [ROUND 10] README "The storm swell": a = A_MAX W g(r), g = (V_H(max(r, Rm)) / V_5)^2 inside R, (V_H(R) / V_5)^2 sqrt(R / r) beyond
+// (Pierson & Moskowitz 1964: height ~ U^2; Collard, Ardhuin & Chapron 2009: swell energy ~ 1 / distance) - the CPU twin is
+// wolfhurricane.cpp stormSwellAmp, the rocker's wolfboatrock.cpp; before the water's own exposure, edge and distance fades.
+float wolfStormSwellAmp(vec2 p)
+{
+    float R = wolfSeaStormEye.z;
+    float Rm = 1.25 * wolfSeaStormEye.w;
+    float r = length(p - wolfSeaStormEye.xy);
+    float rr = r <= R ? max(r, Rm) : R;
+    float x = pow(Rm / max(rr, 0.01), 1.31);
+    float v = wolfSeaStormMisc.x * sqrt(x * exp(1.0 - x)) / max(wolfSeaStormSwell.y, 1.0);
+    float g = v * v * (r <= R ? 1.0 : sqrt(R / max(r, 1.0)));
+    return wolfSeaStormSwell.x * wolfSeaStorm.y * g;
+}
 out float vStormSwellAmp;   // [HURRICANE 2026-10-30/] the storm swell train's amplitude here (class3 waterF.glsl swellFoldFraction)
 // [WILD SEA 2026-10-30] the storm's sea here for the fragment's foam (class3 waterF.glsl, README "The wild sea"): x k = W env(r)
 // (the storm's share of the sea, 0 beyond 1.3 R), y U_sea (m/s), zw U_sea's direction (unit, the way the air moves). 0 with no storm.
@@ -579,7 +593,7 @@ float wolfStormSeaFactor(vec2 p, out float sStorm, out float envP, out vec3 seaW
     sStorm = S;
     seaWind = vec3(U, U > 1e-3 ? v / length(v) : vec2(0.0));
     float Sd = clamp((U - 3.0) / 3.0, 0.15, WOLF_STORM_SEA_MAX);       // [WILD SEA 2026-10-30/] the drawn index, to 4.5
-    float Sl = clamp(max(max(Sd, wolfSeaStorm.w), 0.15), 0.15, WOLF_STORM_SEA_MAX);
+    float Sl = clamp(max(max(Sd, wolfSeaStorm.w), 0.15), 0.15, WOLF_STORM_SEA_MAX);   // [ROUND 10] w = S_eep: the storm only adds
     return pow(Sl / max(wolfSeaStormMisc.y, 0.15), 1.5);
 }
 
@@ -710,9 +724,8 @@ void main()
     // the depth limit and the waterline clearance caps further down, which still hold every crest off land, decks and
     // builds (NO WATER ON LAND). 1 with no storm.
     float stormSea = 1.0;
-    // [HURRICANE 2026-10-30] README "The storm swell's length": a_L = 0.5 x A_local x W env(r) x S_storm / 3; this is
-    // a_L / A_local (wolfhurricane.cpp stormSwellShare), 0 with no storm
-    float stormSwellShare = 0.0;
+    // [ROUND 10] README "The storm swell": its amplitude here before the water's own fades (wolfStormSwellAmp), 0 with no storm
+    float stormSwellA = 0.0;
     vStormSwellAmp = 0.0;
     vStormSea = vec4(0.0);
     if (wolfSeaStorm.x > 0.5)
@@ -721,13 +734,17 @@ void main()
         float envP = 0.0;
         vec3 seaWind = vec3(0.0);
         stormSea = wolfStormSeaFactor(position.xy, sStorm, envP, seaWind);
-        stormSwellShare = 0.5 * wolfSeaStorm.y * envP * sStorm / 3.0;
+        stormSwellA = wolfSeaStormSwell.z > 0.5 ? wolfStormSwellAmp(position.xy) : 0.0;
         // [WILD SEA 2026-10-30] README "The wild sea": THE STEEPNESS GUARD. The storm may raise the drawn amplitude only until the
-        // dominant train (baseWavelength x 2, amplitude 0.4 x waveAmplitude x the factor) reaches k a = WOLF_STORM_STEEP_MAX, two
+        // steepest train ([ROUND 10] below; was the dominant one) reaches k a = WOLF_STORM_STEEP_MAX, two
         // thirds of the steepest wave that can exist (Stokes' limit H / L = 0.142, Michell 1893: k a = pi x 0.142 = 0.446); never
         // below 1 (the region's own sea is never calmed by this). wolfboatrock.cpp and WolfStorm Water.js use the same rule.
         const float WOLF_STORM_STEEP_MAX = 0.3;   // CONVENTION (README "The wild sea")
-        float kaDom = (3.14159265 * (waveFrequency + 0.001)) * 0.4 * waveAmplitude;   // (2 pi / (2 baseWavelength)) 0.4 A
+        // [ROUND 10] the guard holds the STEEPEST of the eight trains, not the dominant one: their k a = 2 pi (f + 0.001) A x
+        // (amplitude share / wavelength multiple), largest for w6 at full chaos, (0.08 + 0.12) / 0.3 = 0.667 (w1: 0.4 / 2 = 0.2,
+        // w4 0.3 / 0.8, w5 0.15 / 0.5, w8 0.1 / 0.4 - the lines below). The dominant train alone let the short ones reach k a ~1
+        // on a calm region sea raised by a storm (x ~100): the "jagged shards" a test render showed at SandBox South, 14:58Z.
+        float kaDom = 6.28318530 * (waveFrequency + 0.001) * waveAmplitude * 0.6667;
         if (kaDom > 1e-6) stormSea = min(stormSea, max(1.0, WOLF_STORM_STEEP_MAX / kaDom));
         vStormSea = vec4(clamp(wolfSeaStorm.y * envP, 0.0, 1.0), seaWind);
     }
@@ -774,6 +791,7 @@ void main()
             // swellFoldFraction uses the same directions and phase.
             vec2 swellPos = wxy;
             vec2 swellDir = normalize(waveDir1);
+            float edgeK = 1.0;   // [ROUND 10] the region-edge calm alone (the storm swell takes it, not the centre calm)
             if (wolfSwellHalf > 0.0)
             {
                 const float SWELL_EDGE_CALM = 32.0;
@@ -781,8 +799,8 @@ void main()
                 float r = length(rel);
                 vec2 q = abs(rel) - vec2(wolfSwellHalf);
                 float toEdge = (q.x < 0.0 && q.y < 0.0) ? min(-q.x, -q.y) : length(max(q, vec2(0.0)));
-                localAmp *= smoothstep(0.0, SWELL_EDGE_CALM, toEdge)
-                          * smoothstep(0.0, 4.0 * baseWavelength, r);
+                edgeK = smoothstep(0.0, SWELL_EDGE_CALM, toEdge);
+                localAmp *= edgeK * smoothstep(0.0, 4.0 * baseWavelength, r);
                 if (r > 0.5)
                 {
                     swellDir = -rel / r;
@@ -822,24 +840,23 @@ void main()
                 w8 = gerstnerWave(wxy, baseWavelength * 0.4, 1.0, localAmp * 0.1 * stormChaos, vec2(cos(randAngle2), sin(randAngle2)), 0.25, numWaves);
             }
 
-            // [HURRICANE 2026-10-30] THE STORM SWELL (README "The storm swell's length", Paul: "longer, heavier swell"): the
-            // region's trains above are unchanged (today's rocking kept) and ONE long train is ADDED - fixed length L_STORM
-            // (300 m: a Gerstner length cannot vary per point without breaking its crests), running with the storm's sea
-            // wind at the region centre, amplitude a_L = 0.5 x localAmp (the point's swell amplitude after the storm's sea
-            // gain and the edge calm above) x W env x S_storm / 3. Phased on the same position as the trains above, in time
-            // by its own clock (wolfSeaClock.w: sqrt(9.8 k_S) x waveSpeed accumulated - a fixed length's omega, so a change of the
-            // region's swell frequency cannot move it), no wavelength jitter. Its Gerstner horizontal part uses gerstnerWave's rule
-            // with the steepness held to 8 k a_L when that is under w1's 0.65: the GPU Gems rule makes the sideways sway
-            // Q a = steepness / (k numWaves), independent of the height - 3.9 m for a 300 m train - so the long swell's
-            // orbit is held to its own height a_L (a deep-water orbit's radius is its amplitude), as w1's is near its own.
+            // [ROUND 10] THE STORM SWELL (README "The storm swell"; Paul: "with a massive hurricane the sea should be HUGE", "the
+            // waves we can do up to 30 metres"): ONE train of fixed length L_STORM (300 m: a Gerstner length cannot vary per
+            // point without breaking its crests) running OUT FROM THE EYE in rings over the whole region - phase k |p - c|, the
+            // direction (p - c) / |p - c| - amplitude a = wolfStormSwellAmp(p) x the water's own distance fade, exposure (calm
+            // in harbours, rivers and by the shore: NO WATER ON LAND, the clearance caps below still apply last) and region-edge
+            // calm. In time by its own clock (wolfSeaClock.w). Its sideways sway held to its own height (steepness <= 8 k a, at
+            // most w1's 0.65), the deep-water orbit's radius.
             vec3 wS = vec3(0.0);
-            if (stormSwellShare > 0.0)
+            vec2 relS = wxy - wolfSeaStormEye.xy;
+            float rS = length(relS);
+            vec2 dirS = rS > 1.0 ? relS / rS : vec2(wolfSeaStormMisc.z, wolfSeaStormMisc.w);
+            if (stormSwellA > 0.0)
             {
-                float aL = localAmp * stormSwellShare;
-                vec2 dirS = wolfSeaStormSwell.z > 0.5 ? wolfSeaStormSwell.xy : normalize(waveDir1);
+                float aS = stormSwellA * fade * swellScale * edgeK;
                 float kS = 6.28318 / wolfSeaStormSwell.w;
-                wS = gerstnerWaveAt(swellPos, wolfSeaStormSwell.w, aL, dirS, min(0.65, numWaves * kS * aL), numWaves, wolfSeaClock.w);
-                vStormSwellAmp = aL;
+                wS = gerstnerWaveAt(relS, wolfSeaStormSwell.w, aS, dirS, min(0.65, numWaves * kS * aS), numWaves, wolfSeaClock.w);
+                vStormSwellAmp = aS;
             }
             vec3 total = w1 + w2 + w3 + w4 + w5 + w6 + w7 + w8 + wS;
             total.z += fbm(wxy * 0.02, time) * localAmp * (0.1 + stormChaos * 0.1) * chopKeep;
@@ -851,8 +868,7 @@ void main()
             // [HURRICANE 2026-10-30] + the storm swell train's slope (same arguments as its wave above)
             if (vStormSwellAmp > 0.0)
             {
-                vec2 dirS = wolfSeaStormSwell.z > 0.5 ? wolfSeaStormSwell.xy : normalize(waveDir1);
-                wave_slope += gerstnerSlopeAt(swellPos, wolfSeaStormSwell.w, vStormSwellAmp, dirS, wolfSeaClock.w);
+                wave_slope += gerstnerSlopeAt(relS, wolfSeaStormSwell.w, vStormSwellAmp, dirS, wolfSeaClock.w);
             }
 
             // Backstop, not the height (2.5x the amplitude from lldrawpoolwater.cpp).
@@ -882,7 +898,10 @@ void main()
         vec3 dd = vec3(0.0);
         if (f0 > 0.001) dd += WOLF_TEX_FFT_DISP_0( position.xy / fftTile.x).xyz * f0;
         if (f1 > 0.001) dd += WOLF_TEX_FFT_DISP_1( position.xy / fftTile.y).xyz * f1;
-        dd *= swellScale * stormSea;   // [HURRICANE 2026-10-30/] the cascades' displacement x the storm's sea here
+        // [ROUND 10] the cascades keep the region's own spectrum: their choppy displacement was tuned not to fold at the sea state
+        // they are built for, and x the storm's factor (to ~100 over a calm sea) it folded into the "jagged shards" (SandBox South
+        // test render 14:58Z). The storm's sea is the guarded trains above and the storm swell.
+        dd *= swellScale;
         wave_pos += dd.x * surf_t + dd.y * surf_b + dd.z * surf_n;
         wave_h += dd.z;
     }

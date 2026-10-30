@@ -143,15 +143,12 @@ private:
         F64       mStormSwellClock = 0.0;   // [HURRICANE 2026-10-30/] the storm swell train's phase (LLDrawPoolWater::SeaClocks)
         // [HURRICANE 2026-10-30] the region's storm on the sea this step (waterV.glsl wolfStormSeaFactor's CPU twin): the
         // storm (WolfRegionWeather::hurricane, nullptr = none), its clock, the eye (region metres of the agent's region),
-        // that region's origin (agent), the floor (1 - W env(r_c)) S_eep and S_eep
+        // that region's origin (agent) and S_eep (the floor: [ROUND 10] the storm only adds to the region's own sea)
         const WolfHurricane* mStorm = nullptr;
         WolfHurricane::Time mStormT;
         F64       mStormCx = 0.0, mStormCy = 0.0;
         F32       mStormOriginX = 0.f, mStormOriginY = 0.f;
-        F64       mStormFloor = 0.0, mStormSeep = 1.0;
-        // [HURRICANE 2026-10-30] the storm swell train's direction (wolfhurricane.cpp stormSwellDir; false: the EEP wave's)
-        bool      mStormDirOk = false;
-        F64       mStormDirX = 0.0, mStormDirY = 0.0;
+        F64       mStormSeep = 1.0;
     };
     struct Rocker
     {
@@ -164,6 +161,7 @@ private:
         // What idle() computed for this frame, what apply() put on the drawable.
         F32          mTargetBob = 0.f;
         LLQuaternion mTargetTilt;
+        LLQuaternion mTargetYaw;   // [ROUND 10] the storm's yaw sway (step()), folded into mTargetTilt
         F32          mAppliedBob = 0.f;
         LLQuaternion mAppliedTilt;
         bool         mApplied = false;

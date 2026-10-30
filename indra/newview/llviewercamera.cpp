@@ -54,6 +54,8 @@
 #include "llwindow.h"           // getPixelAspectRatio()
 #include "lltracerecording.h"
 #include "llenvironment.h"
+#include "lldate.h"              // [ROUND 10/] the storm's wall clock (cameraUnderWater)
+#include "wolfregionweather.h"   // [ROUND 10/] the region's storm (cameraUnderWater)
 
 // System includes
 #include <iomanip> // for setprecision
@@ -725,7 +727,27 @@ bool LLViewerCamera::cameraUnderWater() const
         return false ;
     }
 
-    return getOrigin().mV[VZ] < regionp->getWaterHeight();
+    // <WolfViewer 2026-10-30> [ROUND 10] while a storm swell runs (region-terrain-work/hurricane-2026-10-29/README.md "The storm
+    // swell", up to 14 m amplitude) a camera on a boat rides down into troughs far below the mean water: it is under the water
+    // only below the deepest trough there - the swell's amplitude at the camera (WolfHurricane::stormSwellAmp, before the water's
+    // own exposure: an upper bound). WolfStorm render_manager.js _updateUnderwater, the same rule. No storm: as before.
+    F32 trough = 0.f;
+    if (WolfRegionWeather::instanceExists() && gAgent.getRegion())
+    {
+        const WolfHurricane* hu = WolfRegionWeather::instance().hurricane();
+        const F64 now = LLDate::now().secondsSinceEpoch();
+        const WolfHurricane::Time T = hu ? hu->timeAt(now) : WolfHurricane::Time();
+        if (hu && T.active())
+        {
+            F64 cx = 0.0, cy = 0.0;
+            hu->centre(now, cx, cy);
+            // the storm's positions are the agent's region's metres (WolfRegionWeather::hurricane)
+            const LLVector3 o = gAgent.getRegion()->getOriginAgent();
+            trough = (F32)hu->stormSwellAmp((F64)(getOrigin().mV[VX] - o.mV[VX]), (F64)(getOrigin().mV[VY] - o.mV[VY]), cx, cy, T);
+        }
+    }
+    return getOrigin().mV[VZ] < regionp->getWaterHeight() - trough;
+    // </WolfViewer>
 }
 
 bool LLViewerCamera::areVertsVisible(LLViewerObject* volumep, bool all_verts)

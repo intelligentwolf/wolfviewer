@@ -399,7 +399,7 @@ void LLDrawPoolWater::renderPostDeferred(S32 pass)
         shader->uniform1f(s_max_wave_height, amp * 2.5f);
         // [HURRICANE 2026-10-30] Paul: "hurricanes should affect the sea". The region's storm (ticket #367) sets the sea
         // index at each point of open water (waterV.glsl wolfStormSeaFactor; the model: wolfhurricane.cpp seaIndexAt /
-        // seaFloor / seaAmplitudeFactor, region-terrain-work/hurricane-2026-10-29/README.md "The sea", viewers per point).
+        // stormSwellAmp / seaAmplitudeFactor, region-terrain-work/hurricane-2026-10-29/README.md "The sea", viewers per point).
         // S_eep = the index this water is drawn with (wolfUpdateSea: wolfseastate.h fromWater, eased; or the manual height's
         // indexForAmplitude), so a factor of 1 is the sea as it was. No storm running: x = 0 and the shader skips it.
         {
@@ -417,7 +417,8 @@ void LLDrawPoolWater::renderPostDeferred(S32 pass)
                 F64 cx = 0.0, cy = 0.0;
                 hu->centre(now, cx, cy);
                 const F64 s_eep = (F64)mSeaState.mIndex;
-                const F64 floor_idx = hu->seaFloor(cx, cy, T, s_eep, (F64)srgn->getWidth());
+                // [ROUND 10] the floor is the region's own sea, S_eep (wolfhurricane.cpp seaAmplitudeFactor): the storm only adds
+                const F64 floor_idx = s_eep;
                 // Source: llviewerregion.h:210 getOriginAgent - region metres -> agent
                 const LLVector3 o = srgn->getOriginAgent();
                 const F64 DEG = 3.14159265358979323846 / 180.0;
@@ -431,11 +432,10 @@ void LLDrawPoolWater::renderPostDeferred(S32 pass)
                 shader->uniform4f(s_sea_storm_wind, (F32)(hu->mSpeed * sin(H)), (F32)(hu->mSpeed * cos(H)),
                                   (F32)(-hu->mAmbientMs * sin(F)), (F32)(-hu->mAmbientMs * cos(F)));
                 shader->uniform4f(s_sea_storm_misc, (F32)hu->mVmax, (F32)s_eep, (F32)sin(B), (F32)cos(B));
-                // README "The storm swell's length": one added train of L_STORM, running with the storm's sea wind at the
-                // region centre (wolfhurricane.cpp stormSwellDir); z = 0: no wind there, the region's own wave direction
-                F64 sdx = 0.0, sdy = 0.0;
-                const bool have_dir = hu->stormSwellDir(cx, cy, T, (F64)srgn->getWidth(), sdx, sdy);
-                shader->uniform4f(s_sea_storm_swell, (F32)sdx, (F32)sdy, have_dir ? 1.f : 0.f, (F32)WolfHurricane::STORM_SWELL_LENGTH);
+                // [ROUND 10] README "The storm swell": one train of L_STORM running out from the eye in rings over the whole region
+                // (wolfhurricane.cpp stormSwellAmp): x A_MAX (m), y V_5 (the category 5 vmax, m/s), z 1 = on, w L_STORM
+                shader->uniform4f(s_sea_storm_swell, (F32)WolfHurricane::STORM_SWELL_A_MAX, (F32)(137.0 * (1852.0 / 3600.0)), 1.f,
+                                  (F32)WolfHurricane::STORM_SWELL_LENGTH);
             }
             else
             {

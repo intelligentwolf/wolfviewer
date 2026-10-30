@@ -293,7 +293,9 @@ in float vStormSwellAmp;
 // drawn amplitude's storm factor (1 with no storm). README "The wild sea".
 in vec4 vStormSea;
 in float vStormGain;
-uniform vec4 wolfSeaStormSwell;
+uniform vec4 wolfSeaStormSwell;   // [ROUND 10] x A_MAX, y V_5, z on, w L_STORM (class1 waterV.glsl)
+uniform vec4 wolfSeaStormEye;     // [ROUND 10] xy the eye (agent m): the storm swell runs out from it in rings
+uniform vec4 wolfSeaStormMisc;    // [ROUND 10] zw the r < 1 m bearing (sin, cos)
 in vec4 vSurf;   // [SURF rev3] crest (peak only), breaking, amplitude, wash
 in vec4 vary_wolf_dry;   // [DRY BUILDS 2026-10-26] waterV.glsl: displaced agent xy, swash band ceiling, normal displacement
 // </WolfViewer>
@@ -384,6 +386,7 @@ void calculateFresnelFactors(out vec3 df3, out vec2 df2, vec3 viewVec, vec3 wave
 // crests waterV.glsl draws. The temporal phase is waterV.glsl wolfSwellPhaseT's (no jitter in it), the spatial one keeps it.
 float swellFoldFraction(vec2 p, float back)
 {
+    vec2 pAbs = p;   // [ROUND 10] the fragment's agent xy, for the storm swell's rings (p is moved to the region centre below)
     float clock = wolfSeaClock.x - back * sqrt(waveFrequency + 0.001) * waveSpeed;
     float baseWl = 1.0 / (waveFrequency + 0.001);
     vec2 d1 = normalize(waveDir1);
@@ -422,11 +425,14 @@ float swellFoldFraction(vec2 p, float back)
     // position and clock. Its Q A k is k a (a long, low train): it barely moves the fold - a long swell does not break
     if (vStormSwellAmp > 0.0)
     {
-        vec2 dS = wolfSeaStormSwell.z > 0.5 ? wolfSeaStormSwell.xy : normalize(waveDir1);
+        // [ROUND 10] out from the eye in rings: phase k |p - c|, direction (p - c) / |p - c| (class1 waterV.glsl wS)
+        vec2 relS = pAbs - wolfSeaStormEye.xy;
+        float rS = length(relS);
+        vec2 dS = rS > 1.0 ? relS / rS : wolfSeaStormMisc.zw;
         float aS = vStormSwellAmp;
         float k = 6.28318 / wolfSeaStormSwell.w;
         // its own phase clock (wolfSeaClock.w, lldrawpoolwater.cpp mStormSwell), `back` shader-time units ago at its own omega
-        float f = k * dot(dS, p) - (wolfSeaClock.w - back * sqrt(9.8 * k) * waveSpeed);
+        float f = k * rS - (wolfSeaClock.w - back * sqrt(9.8 * k) * waveSpeed);
         float Q = min(0.65, 8.0 * k * aS) / (k * aS * 8.0 + 0.001);
         float sn = Q * aS * k * sin(f);
         dxx -= dS.x * dS.x * sn;
@@ -1113,7 +1119,9 @@ void main()
         // test, high view): from 80 m to 300 m the streaks go to their mean cover and the spray noise to its mean (CONVENTION)
         float farFade = smoothstep(80.0, 300.0, length(pos.xyz));
         streak = mix(streak, cover, farFade);
-        float crestS = clamp(vary_wave_height / (waveAmplitude * max(vStormGain, 1.0) * 1.2 + 0.001), 0.0, 1.0);
+        // [ROUND 10] over the whole drawn amplitude here, the storm swell's (vStormSwellAmp) included - else every point of a 14 m
+        // swell was a "crest" and the spray covered the sea in one white sheet (WolfStorm Water.js, the same line)
+        float crestS = clamp(vary_wave_height / (waveAmplitude * max(vStormGain, 1.0) * 1.2 + vStormSwellAmp + 0.001), 0.0, 1.0);
         float spray = k * smoothstep(17.2, 32.7, U) * crestS * crestS
                     * (0.5 + 0.5 * mix(wolfFoamNoise(vec2(along / 3.0 - time * 0.6, across / 0.8)), 0.5, farFade));
         float stormFoam = clamp(max(streak * 0.65 * (0.55 + 0.45 * crestS), spray * 0.9), 0.0, 0.85);   // [WILD SEA] streaks gather on the crests (CONVENTION)

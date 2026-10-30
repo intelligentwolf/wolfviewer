@@ -115,19 +115,13 @@ public:
     /** README "The sea" U_sea's wind vector (m/s, the way the air moves) at p: the wind at p' (p, or inside Rm the eyewall
      *  point at the same bearing; at r < 1 m the bearing heading + 90 h degrees). seaIndexAt is seaIndexOfWind(|this|). */
     void seaWind(F64 px, F64 py, F64 cx, F64 cy, const Time& T, F64& wx, F64& wy) const;
-    /** README "The storm swell's length": the storm swell train's amplitude at p over the point's swell amplitude A_local,
-     *  a_L / A_local = 0.5 W env(r) S_storm(p) / 3. */
-    F64 stormSwellShare(F64 px, F64 py, F64 cx, F64 cy, const Time& T) const;
-    /** README "The storm swell's length": the train's direction (unit, the way it runs) = the storm's sea wind at the region
-     *  centre (sx / 2, sy / 2) (the direction the plugin gives the EEP waves, WolfHurricanePlugin.cs SeaWind at the centre).
-     *  False when that wind is under 1e-3 m/s (no direction: the caller keeps its own swell's, as the plugin keeps wave1's). */
-    bool stormSwellDir(F64 cx, F64 cy, const Time& T, F64 width, F64& dx, F64& dy) const;
-    /** README "The sea": the floor (1 - W env(r_c)) S_eep, r_c = the region centre's (sx / 2, sy / 2) distance from the eye.
-     *  `width` is the region's own size, used when the payload carries no sx / sy. */
-    F64 seaFloor(F64 cx, F64 cy, const Time& T, F64 s_eep, F64 width) const;
-    /** README "The sea" (viewers, per point): S_local = clamp(max(S_storm, floor, 0.15), 0.15, 3); the drawn amplitude
-     *  there is x (S_local / S_eep)^1.5 - this returns that factor. */
-    static F64 seaAmplitudeFactor(F64 s_storm, F64 floor, F64 s_eep);
+    /** [ROUND 10] README "The storm swell": the storm swell train's amplitude (m) at p, before the water's own exposure / edge /
+     *  distance fades: A_MAX W g(r), g = (V_H(max(r, Rm)) / V_5)^2 inside R, (V_H(R) / V_5)^2 sqrt(R / r) beyond. 0 when no
+     *  storm is drawn. It runs out from the eye in rings (direction (p - c) / r). */
+    F64 stormSwellAmp(F64 px, F64 py, F64 cx, F64 cy, const Time& T) const;
+    /** [ROUND 10] README "The sea" (viewers, per point): S_local = clamp(max(S_storm, S_eep), 0.15, 3); the drawn amplitude there
+     *  is x (S_local / S_eep)^1.5 - this returns that factor (1 wherever the storm's sea is below the region's own). */
+    static F64 seaAmplitudeFactor(F64 s_storm, F64 s_eep);
     /** WolfAutoEnvironmentModule.cs ApplyWind (README "The sea"): index = clamp((wind - 3) / 3, 0.15, 3). */
     static F64 seaIndexOfWind(F64 ms);
 
@@ -151,7 +145,9 @@ public:
     static constexpr F64 SEA_MIN_INDEX = 0.15;          ///< wolfseastate.h MIN_INDEX
     static constexpr F64 SEA_MAX_INDEX = 3.0;           ///< wolfseastate.h MAX_INDEX
     static constexpr F64 STORM_SWELL_LENGTH = 300.0;    ///< README L_STORM, m (Wright et al. 2001, near Bonnie's eye)
-    static constexpr F64 STORM_SWELL_SHARE = 0.5;       ///< README a_L = 0.5 x A_local x W env x S_storm / 3 (CONVENTION)
+    /// [ROUND 10] README "The storm swell": its amplitude at a category 5's eyewall, m - 2 a = 28 m crest to trough (Hurricane Ivan's
+    /// largest measured wave 27.7 m, Wang et al. 2005, Science 309:896); k a = 0.29 at L 300 m, under the 0.3 steepness guard
+    static constexpr F64 STORM_SWELL_A_MAX = 14.0;
 };
 
 #endif // WOLF_HURRICANE_H

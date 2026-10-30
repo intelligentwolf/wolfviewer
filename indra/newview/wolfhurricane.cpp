@@ -308,45 +308,41 @@ void WolfHurricane::seaWind(F64 px, F64 py, F64 cx, F64 cy, const Time& T, F64& 
     windAt(qx, qy, cx, cy, T, wx, wy);
 }
 
-// Source: README "The storm swell's length": a_L(p) = 0.5 x A_local(p) x W env(r) x S_storm(p) / 3
-F64 WolfHurricane::stormSwellShare(F64 px, F64 py, F64 cx, F64 cy, const Time& T) const
+// [ROUND 10] Source: README "The storm swell" (Paul 13:5xZ: "with a massive hurricane the sea should be HUGE"; "the waves we can do
+// up to 30 metres"). One long train of L_STORM, running OUT from the eye in rings, over the whole region:
+//   inside R:  g = (V_H(max(r, Rm)) / V_5)^2 - the Holland wind of this storm (no track term), the eyewall's in the eye; wave
+//              height grows with the wind squared (Pierson & Moskowitz 1964, J. Geophys. Res. 69:5181: Hs = 0.21 U^2 / g for a
+//              fully developed sea - only the U^2 shape is taken: a hurricane sea is fetch- and duration-limited)
+//   beyond R:  g = (V_H(R) / V_5)^2 sqrt(R / r) - swell leaving a storm spreads from it, its energy falling as 1 / distance
+//              (Collard, Ardhuin & Chapron 2009, Geophys. Res. Lett. 36:L06401: swell energy decays by spreading over the
+//              sphere, ~1 / r at these ranges), the height as its square root; hurricane swell is felt hundreds of km away
+//              (NOAA/NHC "Tropical Cyclone Hazards: swells")
+//   a = STORM_SWELL_A_MAX W g, V_5 = the category 5 vmax (137 kt, HU_VMAX_KT), so a category 3 eyewall gets (53.5 / 70.5)^2.
+F64 WolfHurricane::stormSwellAmp(F64 px, F64 py, F64 cx, F64 cy, const Time& T) const
 {
     if (!T.active()) return 0.0;
+    const F64 Rm = RM_PER_RE * mEye;
     const F64 dx = px - cx, dy = py - cy;
-    const F64 env = 1.0 - smooth((std::sqrt(dx * dx + dy * dy) / mRadius - 1.0) / 0.3);
-    return STORM_SWELL_SHARE * T.W * env * seaIndexAt(px, py, cx, cy, T) / 3.0;
+    const F64 r = std::sqrt(dx * dx + dy * dy);
+    const F64 v5 = 137.0 * (1852.0 / 3600.0);   // HU_VMAX_KT[5] x HU_KT (hurricane_lib.php:28-31)
+    auto vh = [&](F64 rr)                        // README "Wind": V = vmax sqrt(x exp(1 - x)), x = (Rm / r)^B
+    {
+        const F64 x = std::pow(Rm / std::max(rr, 0.01), HOLLAND_B);
+        return mVmax * std::sqrt(x * std::exp(1.0 - x));
+    };
+    F64 g = 0.0;
+    if (r <= mRadius) { const F64 v = vh(std::max(r, Rm)) / v5; g = v * v; }
+    else { const F64 v = vh(mRadius) / v5; g = v * v * std::sqrt(mRadius / r); }
+    return STORM_SWELL_A_MAX * T.W * g;
 }
 
-// Source: README "The storm swell's length" (the direction): the sea wind at the region centre, as
-// WolfHurricanePlugin.cs (SeaWind at (Sx / 2, Sy / 2); dx = swx / |sw| when |sw| > 1e-3, else wave1's own) sets the EEP waves
-bool WolfHurricane::stormSwellDir(F64 cx, F64 cy, const Time& T, F64 width, F64& dx, F64& dy) const
+// static  [ROUND 10] Source: README "The sea": S_local = clamp(max(S_storm, S_eep), 0.15, 3); amplitude x (S_local / S_eep)^1.5
+// (wolfseastate.h amplitude = 0.22 index^1.5). S_eep is the region's own sea (the web keeps the region's own wind in its
+// observation, hurricane_lib.php hu_obs_at; the plugin raises it only by the storm's share of the region, StormSea.AreaIndex), so
+// the storm only ever ADDS to it: outside the storm the factor is 1 (Paul 13:5xZ "why is the water so calm" - the old floor
+// (1 - W env(r_c)) S_eep with an index-3 S_eep drew the sea outside the storm at 1 %).
+F64 WolfHurricane::seaAmplitudeFactor(F64 s_storm, F64 s_eep)
 {
-    const F64 sx = mSx > 0 ? (F64)mSx : width;
-    const F64 sy = mSy > 0 ? (F64)mSy : width;
-    F64 wx = 0.0, wy = 0.0;
-    seaWind(0.5 * sx, 0.5 * sy, cx, cy, T, wx, wy);
-    const F64 m = std::sqrt(wx * wx + wy * wy);
-    if (m <= 1e-3) return false;
-    dx = wx / m;
-    dy = wy / m;
-    return true;
-}
-
-// Source: README "The sea" (viewers, per point): (1 - W env(r_c)) S_eep, r_c = the region centre (sx / 2, sy / 2)'s distance
-F64 WolfHurricane::seaFloor(F64 cx, F64 cy, const Time& T, F64 s_eep, F64 width) const
-{
-    const F64 sx = mSx > 0 ? (F64)mSx : width;
-    const F64 sy = mSy > 0 ? (F64)mSy : width;
-    const F64 dx = 0.5 * sx - cx, dy = 0.5 * sy - cy;
-    const F64 rc = std::sqrt(dx * dx + dy * dy);
-    const F64 env = 1.0 - smooth((rc / mRadius - 1.0) / 0.3);
-    return (1.0 - T.W * env) * s_eep;
-}
-
-// static  Source: README "The sea": S_local = clamp(max(S_storm, floor, 0.15), 0.15, 3); amplitude x (S_local / S_eep)^1.5
-// (wolfseastate.h amplitude = 0.22 index^1.5). S_eep is an index the viewer drew, itself >= 0.15 (wolfseastate.h MIN_INDEX).
-F64 WolfHurricane::seaAmplitudeFactor(F64 s_storm, F64 floor, F64 s_eep)
-{
-    const F64 local = clampd(std::max(std::max(s_storm, floor), SEA_MIN_INDEX), SEA_MIN_INDEX, SEA_MAX_INDEX);
+    const F64 local = clampd(std::max(std::max(s_storm, s_eep), SEA_MIN_INDEX), SEA_MIN_INDEX, SEA_MAX_INDEX);
     return std::pow(local / std::max(s_eep, SEA_MIN_INDEX), 1.5);
 }

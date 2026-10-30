@@ -389,7 +389,26 @@ void WolfBoatRock::step()
         w.mSx += s.mSx;
         w.mSy += s.mSy;
         // gain: 1.0 physical/crewed, 0.6 parked floaters (classify())
-        const F32 g = (r.mGain > 0.f) ? r.mGain : 1.f;
+        F32 g = (r.mGain > 0.f) ? r.mGain : 1.f;
+        // [ROUND 10] THE STORM THROWS BOATS ABOUT (Paul 13:5xZ: "literally boats should be crashing around and almost
+        // capsizing"). k = W env(r) at the hull (README "Geometry"; 0 beyond 1.3 R and with no storm):
+        //  - a parked floater's 0.6 rises to 1 with k (moored boats are thrown about too);
+        //  - the tilt is the wave slope's angle x M, M = 1 + (ROLL_MAG - 1) k: a hull in beam seas near its roll resonance rolls
+        //    the wave slope x 1 / (2 zeta) (linear single-degree roll; zeta the damping ratio), ROLL_MAG = 2.5 = 1 / (2 x 0.2), a
+        //    heavily damped hull (CONVENTION) - the storm swell's slope k a <= 0.3 (17 deg) then rolls ~43 deg;
+        //  - held to TILT_MAX = 45 deg (CONVENTION: thrown to near-capsize, never over), and it rights itself between waves
+        //    because it follows the slope, which crosses zero every half wave;
+        //  - a yaw sway of YAW_DEG k about the vertical, period 9-13 s per hull (CONVENTION: broaching in a following sea).
+        F32 storm_k = 0.f;
+        if (sea.mStorm)
+        {
+            const LLVector3 pa = objectp->getPositionAgent();
+            const F64 dx = (F64)pa.mV[VX] - ((F64)sea.mStormOriginX + sea.mStormCx);
+            const F64 dy = (F64)pa.mV[VY] - ((F64)sea.mStormOriginY + sea.mStormCy);
+            const F64 env = 1.0 - WolfHurricane::smooth((std::sqrt(dx * dx + dy * dy) / sea.mStorm->mRadius - 1.0) / 0.3);
+            storm_k = (F32)llclamp(sea.mStormT.W * env, 0.0, 1.0);
+            g += (1.f - g) * storm_k;
+        }
         r.mBob += (w.mZ * g - r.mBob) * bob_alpha;
         // <WolfViewer 2026-09-22> A BOARD PLANES. The bob is an offset from where the sim
         // put the object, and on the downstroke it goes NEGATIVE — correct for a hull, which
@@ -408,10 +427,32 @@ void WolfBoatRock::step()
         // measured across the hull's own length and beam (measureHull), which is what made a
         // big vessel steadier than a dinghy in the first place.
         // n = normalize(-sx, -sy, 1); tiltQ = up -> n.
-        LLVector3 n(-r.mSx, -r.mSy, 1.f);
+        F32 tsx = r.mSx, tsy = r.mSy;
+        if (storm_k > 0.f)   // [ROUND 10] the storm's roll magnification and its 45 degree hold (above)
+        {
+            const F32 ROLL_MAG = 2.5f, TILT_MAX = 45.f * DEG_TO_RAD, YAW_DEG = 8.f;
+            const F32 sm = sqrtf(tsx * tsx + tsy * tsy);
+            if (sm > 1e-6f)
+            {
+                const F32 ang = llmin(atanf(sm) * (1.f + (ROLL_MAG - 1.f) * storm_k), TILT_MAX);
+                const F32 f = tanf(ang) / sm;
+                tsx *= f;
+                tsy *= f;
+            }
+            const U8* b = objectp->getID().mData;
+            const F32 h0 = (F32)((b[4] << 8) | b[5]) / 65535.f, h1 = (F32)((b[6] << 8) | b[7]) / 65535.f;
+            const F32 yaw = YAW_DEG * DEG_TO_RAD * storm_k * sinf(6.28318f * t / (9.f + 4.f * h0) + 6.28318f * h1);
+            r.mTargetYaw.setAngleAxis(yaw, up);
+        }
+        else
+        {
+            r.mTargetYaw.loadIdentity();
+        }
+        LLVector3 n(-tsx, -tsy, 1.f);
         n.normalize();
         r.mTargetBob = r.mBob;
         r.mTargetTilt.shortestArc(up, n);
+        r.mTargetTilt = r.mTargetYaw * r.mTargetTilt;   // [ROUND 10] the yaw first, then the tilt (LL: a * b applies a, then b)
         r.mPeakBob = llmax(r.mPeakBob, fabsf(r.mBob));
         r.mPeakSlope = llmax(r.mPeakSlope, sqrtf(r.mSx * r.mSx + r.mSy * r.mSy));
 
@@ -818,7 +859,7 @@ WolfBoatRock::Sea WolfBoatRock::seaNow() const
     sea.mAutoLen = llmax(llmax(2.f / (sea.mFreq + 0.001f), 12.f * sea.mAutoH), 12.f);
     sea.mAutoOn = sea.mAmp > 0.001f;
     // [HURRICANE 2026-10-30] the region's storm on the sea, as lldrawpoolwater.cpp renderPostDeferred hands it to waterV.glsl:
-    // S_eep = the index the water is drawn with (st.mIndex), the floor at the region centre, the eye in that region's metres
+    // S_eep = the index the water is drawn with (st.mIndex) - the floor ([ROUND 10]), the eye in that region's metres
     if (WolfRegionWeather::instanceExists())
     {
         const WolfHurricane* hu = WolfRegionWeather::instance().hurricane();
@@ -831,9 +872,6 @@ WolfBoatRock::Sea WolfBoatRock::seaNow() const
             sea.mStormT = T;
             hu->centre(now, sea.mStormCx, sea.mStormCy);
             sea.mStormSeep = (F64)st.mIndex;
-            sea.mStormFloor = hu->seaFloor(sea.mStormCx, sea.mStormCy, T, sea.mStormSeep, (F64)srgn->getWidth());
-            sea.mStormDirOk = hu->stormSwellDir(sea.mStormCx, sea.mStormCy, T, (F64)srgn->getWidth(),
-                                                sea.mStormDirX, sea.mStormDirY);
             const LLVector3 o = srgn->getOriginAgent();   // Source: llviewerregion.h:210
             sea.mStormOriginX = o.mV[VX];
             sea.mStormOriginY = o.mV[VY];
@@ -919,33 +957,37 @@ F32 WolfBoatRock::waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F3
         }
         F32 local_amp = amp * 0.5f * swell_scale;
         // [HURRICANE 2026-10-30] waterV.glsl localAmp x stormSea: the storm's sea at the hull (wolfhurricane.cpp, the model)
-        F32 storm_share = 0.f;   // the storm swell train's a_L / localAmp (waterV.glsl stormSwellShare)
+        F64 storm_a = 0.0;       // [ROUND 10] the storm swell's amplitude here before the rocker's exposure / edge (stormSwellAmp)
+        F64 storm_rx = 0.0, storm_ry = 0.0;   // [ROUND 10] the hull relative to the eye (region metres)
         if (sea.mStorm)
         {
             const F64 px = (F64)(ax - sea.mStormOriginX), py = (F64)(ay - sea.mStormOriginY);
             // [WILD SEA 2026-10-30] waterV.glsl wolfStormSeaFactor + its steepness guard, term for term (README "The wild sea"):
-            // the DRAWN index from U_sea runs on to 4.5 (S_storm for the swell train stays capped at 3, stormSwellShare below),
-            // S_local = clamp(max(S_draw, floor, 0.15), 0.15, 4.5), factor (S_local / S_eep)^1.5, then held so the dominant
-            // train's k a (pi (freq + 0.001) x 0.4 amp) stays <= 0.3, never below 1.
+            // the DRAWN index from U_sea runs on to 4.5, S_local = clamp(max(S_draw, S_eep, 0.15), 0.15, 4.5) ([ROUND 10] the floor
+            // is the region's own sea), factor (S_local / S_eep)^1.5, then held so the
+            // [ROUND 10] steepest train's k a (2 pi (freq + 0.001) amp x 0.667, waterV.glsl) stays <= 0.3, never below 1.
             const F64 STORM_SEA_MAX = 4.5;    // waterV.glsl WOLF_STORM_SEA_MAX (CONVENTION)
             const F64 STORM_STEEP_MAX = 0.3;  // waterV.glsl WOLF_STORM_STEEP_MAX (CONVENTION; Stokes' limit k a = 0.446, Michell 1893)
             F64 swx = 0.0, swy = 0.0;
             sea.mStorm->seaWind(px, py, sea.mStormCx, sea.mStormCy, sea.mStormT, swx, swy);
             const F64 u_sea = std::sqrt(swx * swx + swy * swy);   // windAt caps |v| at WIND_CAP (75), as the shader's min(.., 75)
             const F64 s_draw = llclamp((u_sea - 3.0) / 3.0, WolfHurricane::SEA_MIN_INDEX, STORM_SEA_MAX);
-            const F64 s_local = llclamp(llmax(llmax(s_draw, sea.mStormFloor), WolfHurricane::SEA_MIN_INDEX),
+            const F64 s_local = llclamp(llmax(llmax(s_draw, sea.mStormSeep), WolfHurricane::SEA_MIN_INDEX),
                                         WolfHurricane::SEA_MIN_INDEX, STORM_SEA_MAX);
             F64 factor = std::pow(s_local / llmax(sea.mStormSeep, WolfHurricane::SEA_MIN_INDEX), 1.5);
-            const F64 ka_dom = 3.14159265 * ((F64)sea.mFreq + 0.001) * 0.4 * (F64)amp;
+            const F64 ka_dom = 6.28318530 * ((F64)sea.mFreq + 0.001) * (F64)amp * 0.6667;   // [ROUND 10] the steepest train (waterV.glsl)
             if (ka_dom > 1e-6) factor = llmin(factor, llmax(1.0, STORM_STEEP_MAX / ka_dom));
             local_amp *= (F32)factor;
-            storm_share = (F32)sea.mStorm->stormSwellShare(px, py, sea.mStormCx, sea.mStormCy, sea.mStormT);
+            storm_a = sea.mStorm->stormSwellAmp(px, py, sea.mStormCx, sea.mStormCy, sea.mStormT);
+            storm_rx = px - sea.mStormCx;
+            storm_ry = py - sea.mStormCy;
         }
         // <WolfViewer 2026-09-26> Mirror of waterV.glsl: the swell converges on the centre of
         // the region the water belongs to (the hull's region — its own water plane), phased on
         // the position relative to that centre, calmed within 32 m of the region edge and two
         // wavelengths of the centre (lldrawpoolwater.cpp wolfSwellCentre / wolfSwellHalf).
         F32 px = ax, py = ay;
+        F32 edge_k = 1.f;   // [ROUND 10] the region-edge calm alone (waterV.glsl edgeK: the storm swell takes it)
         if (regionp)
         {
             const LLVector3 o = regionp->getOriginAgent();
@@ -955,7 +997,8 @@ F32 WolfBoatRock::waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F3
             const F32 qx = fabsf(relx) - half, qy = fabsf(rely) - half;
             const F32 to_edge = (qx < 0.f && qy < 0.f) ? llmin(-qx, -qy)
                                                       : sqrtf(llmax(qx, 0.f) * llmax(qx, 0.f) + llmax(qy, 0.f) * llmax(qy, 0.f));
-            local_amp *= smoothstep01(0.f, 32.f, to_edge) * smoothstep01(0.f, 4.f * base_wl, r);
+            edge_k = smoothstep01(0.f, 32.f, to_edge);
+            local_amp *= edge_k * smoothstep01(0.f, 4.f * base_wl, r);
             if (r > 0.5f)
             {
                 d1.set(-relx / r, -rely / r);
@@ -983,18 +1026,14 @@ F32 WolfBoatRock::waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F3
         acc(base_wl * 2.0f, local_amp * 0.40f, d1);
         acc(base_wl * 1.5f, local_amp * 0.30f, dir2);
         acc(base_wl * 1.2f, local_amp * 0.25f, dir3);
-        // [HURRICANE 2026-10-30] waterV.glsl wS: the storm swell train (README "The storm swell's length"), L_STORM long,
-        // a_L = local_amp (after the edge calm, as the shader's) x the share, with the storm's sea wind at the region centre
-        // (else the EEP wave direction, as the shader's normalize(waveDir1)); the same position and clock as the trains above
-        if (storm_share > 0.f)
+        // [ROUND 10] waterV.glsl wS: the storm swell (README "The storm swell"), L_STORM long, running out from the eye in rings -
+        // phase k |p - c| on its own clock - amplitude stormSwellAmp x the rocker's exposure scale (the 0.7-floored swell_scale the
+        // boats ride, as the trains above) x the region-edge calm
+        if (storm_a > 0.0)
         {
-            const LLVector2 dS = sea.mStormDirOk ? LLVector2((F32)sea.mStormDirX, (F32)sea.mStormDirY) : sea.mDir1;
-            // its own phase clock (waterV.glsl wS: wolfSeaClock.w), not acc's swell clock - see lldrawpoolwater.cpp mStormSwell
-            const F32 kS = 6.28318f / (F32)WolfHurricane::STORM_SWELL_LENGTH;
-            F32 lenS = dS.length();
-            if (lenS <= 0.f) lenS = 1.f;
-            const F64 fS = (F64)kS * ((dS.mV[VX] / lenS) * px + (dS.mV[VY] / lenS) * py) - sea.mStormSwellClock;
-            z += local_amp * storm_share * (F32)sin(fS);
+            const F64 kS = 6.283185307179586 / WolfHurricane::STORM_SWELL_LENGTH;
+            const F64 rS = std::sqrt(storm_rx * storm_rx + storm_ry * storm_ry);
+            z += (F32)(storm_a * (F64)(swell_scale * edge_k) * std::sin(kS * rS - sea.mStormSwellClock));
         }
     }
 

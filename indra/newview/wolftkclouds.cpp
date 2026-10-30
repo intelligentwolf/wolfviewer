@@ -951,6 +951,7 @@ struct Clouds::Impl
         bottomHeight = std::isfinite(sBottom) ? sBottom : 0.f;
         topHeight = std::isfinite(sBottom) ? sTop : 0.f;
         u1f(sh, "minHeight", minHeight);
+        u1f(sh, "wolfLayersMinHeight", std::isfinite(totalMin) ? totalMin : 0.f);   // [HURRICANE 2026-10-30 ~13:40Z] cloudsF.glsl main
         u1f(sh, "maxHeight", maxHeight);
         u1f(sh, "shadowTopHeight", topHeight);
         u1f(sh, "shadowBottomHeight", bottomHeight);

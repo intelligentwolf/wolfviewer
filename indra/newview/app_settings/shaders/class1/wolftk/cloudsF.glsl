@@ -1442,6 +1442,27 @@ void main() {
 
   IntersectionResult intersections = getIntersections(cameraPosition, rayDirection);
   vec2 rayNearFar = getRayNearFar(intersections);
+  // [HURRICANE 2026-10-30 ~13:40Z] while a storm runs the shell starts at the sea (wolftkclouds.cpp: minHeight 0) so its low base,
+  // scud and rain curtains can be drawn - but only a ray that passes near the storm needs that. Paul's log after the change
+  // (13:23-13:30Z): clouds 9-12.5 ms, post 14-19 ms (12:41-12:49Z: 4.4-8.5 / 8.8-12.5). A ray from a camera below the region's own
+  // layers whose part below them (from the camera to where it reaches wolfLayersMinHeight, or to the ground) never comes within
+  // 1.5 R of the eye horizontally - the storm draws nothing beyond 1.4 R (env at the noise-moved radius r + 0.2 R nr, nr <= 0.5,
+  // is 0 from 1.3 R) - gets the near / far the source gives a camera below the clouds (getRayNearFar's first branch): the
+  // ground -> none; else from that height to the top, at most maxRayDistance.
+  if (wolfStorm.x > 0.5 && cameraHeight < wolfLayersMinHeight && rayNearFar.x >= 0.0) {
+    float rC = bottomRadius + cameraHeight;
+    float bC = rC * dot(rayDirection, normalize(cameraPosition));                 // half b, as getIntersections
+    float cC = (cameraHeight - wolfLayersMinHeight) * (rC + bottomRadius + wolfLayersMinHeight);   // < 0: inside that sphere
+    float tUp = -bC + sqrt(max(bC * bC - cC, 0.0));                               // where the ray rises through that height
+    float tEnd = intersections.ground ? min(tUp, rayNearFar.y) : tUp;
+    vec3 oA = (ecefToWorldMatrix * vec4(cameraPosition, 1.0)).xyz;                 // the same map as wolfStormApply's samples
+    vec3 dA = mat3(ecefToWorldMatrix) * rayDirection;
+    vec2 toEye = wolfStormEye.xy - oA.xy;
+    float tS = clamp(dot(toEye, dA.xy) / max(dot(dA.xy, dA.xy), 1e-8), rayNearFar.x, tEnd);
+    if (length(oA.xy + dA.xy * tS - wolfStormEye.xy) > 1.5 * wolfStormEye.z) {
+      rayNearFar = intersections.ground ? vec2(-1.0) : vec2(tUp, min(intersections.second.z, maxRayDistance));
+    }
+  }
   #ifdef SHADOW_LENGTH
   vec2 shadowRayNearFar = getShadowRayNearFar(intersections);
   #endif // SHADOW_LENGTH

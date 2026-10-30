@@ -103,6 +103,10 @@ uniform vec4 wolfStormSpin;             // x h the hemisphere (1 north, -1 south
 // [HURRICANE 2026-10-30] README "The storm in 3D" (cloudsCommon.glsl wolfStormApply / sampleMedia; wolftkclouds.cpp sharedUniforms)
 uniform vec4 wolfStormFlow;             // the flow map: x tau0 = t mod P, y tau1 = (t + P / 2) mod P (s), z the first's crossfade weight
                                         // (the triangle; 1 = one phase), w the turned 3D noise's weight (the frame budget)
+// [HURRICANE 2026-10-30 ~13:40Z] the lowest base of the region's own layers (m; the shell's bottom when no storm runs): while a
+// storm runs the shell starts at the sea (minHeight 0), but a ray that never passes near the storm still starts at this height
+// (cloudsF.glsl main), so only the storm's rays pay for the march below the layers
+uniform float wolfLayersMinHeight;
 uniform vec4 wolfStormBase;             // x Z_BASE (m above the sea), y K_BASE (the dark base's absorption per unit density),
                                         // z [2026-10-30] Z_LOW (the base under the eyewall and dense overcast, m), w the rain rate at
                                         // q = 1 (mm/h; 0 = no rain curtains)

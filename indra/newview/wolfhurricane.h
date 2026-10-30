@@ -107,6 +107,16 @@ public:
     /** README "The sea" S_storm(p): the region's wind -> sea rule on U_sea (the storm wind; inside Rm the eyewall wind at the
      *  same bearing; at r < 1 m the bearing heading + 90 h degrees). */
     F64 seaIndexAt(F64 px, F64 py, F64 cx, F64 cy, const Time& T) const;
+    /** README "The sea" U_sea's wind vector (m/s, the way the air moves) at p: the wind at p' (p, or inside Rm the eyewall
+     *  point at the same bearing; at r < 1 m the bearing heading + 90 h degrees). seaIndexAt is seaIndexOfWind(|this|). */
+    void seaWind(F64 px, F64 py, F64 cx, F64 cy, const Time& T, F64& wx, F64& wy) const;
+    /** README "The storm swell's length": the storm swell train's amplitude at p over the point's swell amplitude A_local,
+     *  a_L / A_local = 0.5 W env(r) S_storm(p) / 3. */
+    F64 stormSwellShare(F64 px, F64 py, F64 cx, F64 cy, const Time& T) const;
+    /** README "The storm swell's length": the train's direction (unit, the way it runs) = the storm's sea wind at the region
+     *  centre (sx / 2, sy / 2) (the direction the plugin gives the EEP waves, WolfHurricanePlugin.cs SeaWind at the centre).
+     *  False when that wind is under 1e-3 m/s (no direction: the caller keeps its own swell's, as the plugin keeps wave1's). */
+    bool stormSwellDir(F64 cx, F64 cy, const Time& T, F64 width, F64& dx, F64& dy) const;
     /** README "The sea": the floor (1 - W env(r_c)) S_eep, r_c = the region centre's (sx / 2, sy / 2) distance from the eye.
      *  `width` is the region's own size, used when the payload carries no sx / sy. */
     F64 seaFloor(F64 cx, F64 cy, const Time& T, F64 s_eep, F64 width) const;
@@ -134,6 +144,8 @@ public:
     static constexpr F64 WIND_CAP = 75.0;               ///< README Wind: |v| capped at 75 m/s
     static constexpr F64 SEA_MIN_INDEX = 0.15;          ///< wolfseastate.h MIN_INDEX
     static constexpr F64 SEA_MAX_INDEX = 3.0;           ///< wolfseastate.h MAX_INDEX
+    static constexpr F64 STORM_SWELL_LENGTH = 300.0;    ///< README L_STORM, m (Wright et al. 2001, near Bonnie's eye)
+    static constexpr F64 STORM_SWELL_SHARE = 0.5;       ///< README a_L = 0.5 x A_local x W env x S_storm / 3 (CONVENTION)
 };
 
 #endif // WOLF_HURRICANE_H

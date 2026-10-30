@@ -277,6 +277,13 @@ F64 WolfHurricane::seaIndexOfWind(F64 ms)
 // as (sin, cos)
 F64 WolfHurricane::seaIndexAt(F64 px, F64 py, F64 cx, F64 cy, const Time& T) const
 {
+    F64 wx = 0.0, wy = 0.0;
+    seaWind(px, py, cx, cy, T, wx, wy);
+    return seaIndexOfWind(std::sqrt(wx * wx + wy * wy));
+}
+
+void WolfHurricane::seaWind(F64 px, F64 py, F64 cx, F64 cy, const Time& T, F64& wx, F64& wy) const
+{
     const F64 Rm = RM_PER_RE * mEye;
     const F64 dx = px - cx, dy = py - cy;
     const F64 r = std::sqrt(dx * dx + dy * dy);
@@ -294,9 +301,31 @@ F64 WolfHurricane::seaIndexAt(F64 px, F64 py, F64 cx, F64 cy, const Time& T) con
         qx = cx + Rm * ux;
         qy = cy + Rm * uy;
     }
-    F64 wx = 0.0, wy = 0.0;
     windAt(qx, qy, cx, cy, T, wx, wy);
-    return seaIndexOfWind(std::sqrt(wx * wx + wy * wy));
+}
+
+// Source: README "The storm swell's length": a_L(p) = 0.5 x A_local(p) x W env(r) x S_storm(p) / 3
+F64 WolfHurricane::stormSwellShare(F64 px, F64 py, F64 cx, F64 cy, const Time& T) const
+{
+    if (!T.active()) return 0.0;
+    const F64 dx = px - cx, dy = py - cy;
+    const F64 env = 1.0 - smooth((std::sqrt(dx * dx + dy * dy) / mRadius - 1.0) / 0.3);
+    return STORM_SWELL_SHARE * T.W * env * seaIndexAt(px, py, cx, cy, T) / 3.0;
+}
+
+// Source: README "The storm swell's length" (the direction): the sea wind at the region centre, as
+// WolfHurricanePlugin.cs (SeaWind at (Sx / 2, Sy / 2); dx = swx / |sw| when |sw| > 1e-3, else wave1's own) sets the EEP waves
+bool WolfHurricane::stormSwellDir(F64 cx, F64 cy, const Time& T, F64 width, F64& dx, F64& dy) const
+{
+    const F64 sx = mSx > 0 ? (F64)mSx : width;
+    const F64 sy = mSy > 0 ? (F64)mSy : width;
+    F64 wx = 0.0, wy = 0.0;
+    seaWind(0.5 * sx, 0.5 * sy, cx, cy, T, wx, wy);
+    const F64 m = std::sqrt(wx * wx + wy * wy);
+    if (m <= 1e-3) return false;
+    dx = wx / m;
+    dy = wy / m;
+    return true;
 }
 
 // Source: README "The sea" (viewers, per point): (1 - W env(r_c)) S_eep, r_c = the region centre (sx / 2, sy / 2)'s distance

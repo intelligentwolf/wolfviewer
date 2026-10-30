@@ -286,6 +286,10 @@ uniform float wolfStream;
 in vec4 vShore;   // [HARBOUR STRIPES 2026-10-28/] + z breaker height (m, crest to trough), w 1 = automatic surf
 in float vWake;
 in vec4 vSwell;
+// [HURRICANE 2026-10-30] the storm swell train (class1 waterV.glsl, README "The storm swell's length"): its amplitude here (0 = none)
+// and xy its direction, z 1 = set (else the region's waveDir1), w its length (lldrawpoolwater.cpp)
+in float vStormSwellAmp;
+uniform vec4 wolfSeaStormSwell;
 in vec4 vSurf;   // [SURF rev3] crest (peak only), breaking, amplitude, wash
 in vec4 vary_wolf_dry;   // [DRY BUILDS 2026-10-26] waterV.glsl: displaced agent xy, swash band ceiling, normal displacement
 // </WolfViewer>
@@ -409,6 +413,20 @@ float swellFoldFraction(vec2 p, float back)
         dxx -= dirs[i].x * dirs[i].x * sn;
         dyy -= dirs[i].y * dirs[i].y * sn;
         dxy -= dirs[i].x * dirs[i].y * sn;
+    }
+    // [HURRICANE 2026-10-30] + the storm swell train, as waterV.glsl draws it: no jitter, steepness min(0.65, 8 k a), the same
+    // position and clock. Its Q A k is k a (a long, low train): it barely moves the fold - a long swell does not break
+    if (vStormSwellAmp > 0.0)
+    {
+        vec2 dS = wolfSeaStormSwell.z > 0.5 ? wolfSeaStormSwell.xy : normalize(waveDir1);
+        float aS = vStormSwellAmp;
+        float k = 6.28318 / wolfSeaStormSwell.w;
+        float f = k * dot(dS, p) - sqrt(9.8 * k / (waveFrequency + 0.001)) * clock;
+        float Q = min(0.65, 8.0 * k * aS) / (k * aS * 8.0 + 0.001);
+        float sn = Q * aS * k * sin(f);
+        dxx -= dS.x * dS.x * sn;
+        dyy -= dS.y * dS.y * sn;
+        dxy -= dS.x * dS.y * sn;
     }
     float J = (1.0 + dxx) * (1.0 + dyy) - dxy * dxy;
     // Q A k summed over the trains is (0.65 + 0.55 + 0.5) / 8 = 0.2125: normalise 1 - J.

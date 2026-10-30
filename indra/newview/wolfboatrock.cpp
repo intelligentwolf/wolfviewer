@@ -829,6 +829,8 @@ WolfBoatRock::Sea WolfBoatRock::seaNow() const
             hu->centre(now, sea.mStormCx, sea.mStormCy);
             sea.mStormSeep = (F64)st.mIndex;
             sea.mStormFloor = hu->seaFloor(sea.mStormCx, sea.mStormCy, T, sea.mStormSeep, (F64)srgn->getWidth());
+            sea.mStormDirOk = hu->stormSwellDir(sea.mStormCx, sea.mStormCy, T, (F64)srgn->getWidth(),
+                                                sea.mStormDirX, sea.mStormDirY);
             const LLVector3 o = srgn->getOriginAgent();   // Source: llviewerregion.h:210
             sea.mStormOriginX = o.mV[VX];
             sea.mStormOriginY = o.mV[VY];
@@ -914,11 +916,13 @@ F32 WolfBoatRock::waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F3
         }
         F32 local_amp = amp * 0.5f * swell_scale;
         // [HURRICANE 2026-10-30] waterV.glsl localAmp x stormSea: the storm's sea at the hull (wolfhurricane.cpp, the model)
+        F32 storm_share = 0.f;   // the storm swell train's a_L / localAmp (waterV.glsl stormSwellShare)
         if (sea.mStorm)
         {
             const F64 px = (F64)(ax - sea.mStormOriginX), py = (F64)(ay - sea.mStormOriginY);
             const F64 s_storm = sea.mStorm->seaIndexAt(px, py, sea.mStormCx, sea.mStormCy, sea.mStormT);
             local_amp *= (F32)WolfHurricane::seaAmplitudeFactor(s_storm, sea.mStormFloor, sea.mStormSeep);
+            storm_share = (F32)sea.mStorm->stormSwellShare(px, py, sea.mStormCx, sea.mStormCy, sea.mStormT);
         }
         // <WolfViewer 2026-09-26> Mirror of waterV.glsl: the swell converges on the centre of
         // the region the water belongs to (the hull's region — its own water plane), phased on
@@ -962,6 +966,14 @@ F32 WolfBoatRock::waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F3
         acc(base_wl * 2.0f, local_amp * 0.40f, d1);
         acc(base_wl * 1.5f, local_amp * 0.30f, dir2);
         acc(base_wl * 1.2f, local_amp * 0.25f, dir3);
+        // [HURRICANE 2026-10-30] waterV.glsl wS: the storm swell train (README "The storm swell's length"), L_STORM long,
+        // a_L = local_amp (after the edge calm, as the shader's) x the share, with the storm's sea wind at the region centre
+        // (else the EEP wave direction, as the shader's normalize(waveDir1)); the same position and clock as the trains above
+        if (storm_share > 0.f)
+        {
+            const LLVector2 dS = sea.mStormDirOk ? LLVector2((F32)sea.mStormDirX, (F32)sea.mStormDirY) : sea.mDir1;
+            acc((F32)WolfHurricane::STORM_SWELL_LENGTH, local_amp * storm_share, dS);
+        }
     }
 
     // Geometric shore breaker (waterV.glsl:614-646, Water.js vertex stage formula).

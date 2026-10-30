@@ -148,6 +148,9 @@ private:
         F64       mStormCx = 0.0, mStormCy = 0.0;
         F32       mStormOriginX = 0.f, mStormOriginY = 0.f;
         F64       mStormFloor = 0.0, mStormSeep = 1.0;
+        // [HURRICANE 2026-10-30] the storm swell train's direction (wolfhurricane.cpp stormSwellDir; false: the EEP wave's)
+        bool      mStormDirOk = false;
+        F64       mStormDirX = 0.0, mStormDirY = 0.0;
     };
     struct Rocker
     {

@@ -406,6 +406,7 @@ void LLDrawPoolWater::renderPostDeferred(S32 pass)
             static LLStaticHashedString s_sea_storm_eye("wolfSeaStormEye");
             static LLStaticHashedString s_sea_storm_wind("wolfSeaStormWind");
             static LLStaticHashedString s_sea_storm_misc("wolfSeaStormMisc");
+            static LLStaticHashedString s_sea_storm_swell("wolfSeaStormSwell");   // [HURRICANE 2026-10-30/] the storm swell train
             const WolfHurricane* hu = WolfRegionWeather::instanceExists() ? WolfRegionWeather::instance().hurricane() : nullptr;
             LLViewerRegion* srgn = gAgent.getRegion();
             const F64 now = LLDate::now().secondsSinceEpoch();
@@ -429,10 +430,16 @@ void LLDrawPoolWater::renderPostDeferred(S32 pass)
                 shader->uniform4f(s_sea_storm_wind, (F32)(hu->mSpeed * sin(H)), (F32)(hu->mSpeed * cos(H)),
                                   (F32)(-hu->mAmbientMs * sin(F)), (F32)(-hu->mAmbientMs * cos(F)));
                 shader->uniform4f(s_sea_storm_misc, (F32)hu->mVmax, (F32)s_eep, (F32)sin(B), (F32)cos(B));
+                // README "The storm swell's length": one added train of L_STORM, running with the storm's sea wind at the
+                // region centre (wolfhurricane.cpp stormSwellDir); z = 0: no wind there, the region's own wave direction
+                F64 sdx = 0.0, sdy = 0.0;
+                const bool have_dir = hu->stormSwellDir(cx, cy, T, (F64)srgn->getWidth(), sdx, sdy);
+                shader->uniform4f(s_sea_storm_swell, (F32)sdx, (F32)sdy, have_dir ? 1.f : 0.f, (F32)WolfHurricane::STORM_SWELL_LENGTH);
             }
             else
             {
                 shader->uniform4f(s_sea_storm, 0.f, 0.f, 1.f, 0.f);
+                shader->uniform4f(s_sea_storm_swell, 0.f, 0.f, 0.f, (F32)WolfHurricane::STORM_SWELL_LENGTH);
             }
         }
         shader->uniform1f(s_shore_on, shore_on ? 1.f : 0.f);

@@ -1854,7 +1854,15 @@ std::string WolfAdventureStudioView::scriptFor(const std::string& name, bool lis
         return llformat("// Wolf Adventure: when touched, tells the adventure \"%s\" (the box's script step).\n"
                         "default\n{\n    touch_start(integer n)\n    {\n"
                         "        if (!wolfAdventureFire(llDetectedKey(0), \"%s\", \"%s\", \"\"))\n"
-                        "            llOwnerSay(\"Not now: \" + wolfGetLastError());\n"
+                        // [NOT NOW 2026-10-30] 0 with wolfGetLastError() "" is not an error: the brain's lsl_fire answered
+                        // fired 0 (wolfadventure_lib.php lsl_fire / WaRun::dispatch+fire: the party is not on that box, the step
+                        // is once and done, its if/who is not met yet, or the party is paused, finished or waiting); Wolf_Api.cs
+                        // wolfAdventureFire returns fired ? 1 : 0 with m_lastError left "". Every real refusal has a reason.
+                        "        {\n"
+                        "            string why = wolfGetLastError();\n"
+                        "            if (why == \"\") llOwnerSay(\"Not now - that step of the story is not ready yet (or it has already happened).\");\n"
+                        "            else llOwnerSay(\"Not now: \" + why);\n"
+                        "        }\n"
                         "    }\n}\n", name.c_str(), mOpenId.c_str(), name.c_str());
     // wolfAdventureListen(channel): story events as chat on the channel, "signal|av|adv|name|data" (ScriptSyntax.xml);
     // the channel is the script's own choice - any channel this object does not use for something else

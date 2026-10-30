@@ -191,6 +191,7 @@ namespace WolfTk
         F32        storm_lookup = 1.f;   // [2026-10-30] the storm's second lookup's weight (wolfenvironmentrender.cpp, the frame budget)
         // [2026-10-30] README "The storm in 3D": vmax (m/s), the flow map (tau0, tau1, the first's weight, the turned noise's weight)
         F32        storm_vmax = 0.f;
+        F32        storm_rain_mmh = 0.f;   // [2026-10-30] the rain rate at q = 1 (WolfHurricane::rainRateMmh), 0 when the block's rain is off
         F32        storm_flow[4] = { 0.f, 0.f, 1.f, 0.f };
         LLVector3  sky_under_cloud = LLVector3(1.f, 1.f, 1.f);   // the horizontal sky irradiance under the clouds / the
                                                                  // clear sky's, per channel (cloudsF.glsl wolfSkyUnderCloud)

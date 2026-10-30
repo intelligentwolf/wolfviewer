@@ -879,7 +879,9 @@ struct Clouds::Impl
                 const auto ns = gt.genera.find("Ns");
                 if (ns != gt.genera.end()) largest = ns->second.absorption;
             }
-            u2f(sh, "wolfStormBase", 300.f, 2.f * largest);
+            // [2026-10-30 ~13:10Z, Paul: "its there but not reaching to the actual ocean"] z = Z_LOW, the base under the eyewall and
+            // the dense overcast (README "The storm in 3D" item 5); w = the rain rate at q = 1 (mm/h) for the rain curtains, 0 for none
+            u4f(sh, "wolfStormBase", 300.f, 2.f * largest, 150.f, f.storm_on ? f.storm_rain_mmh : 0.f);
         }
         {
             const F32 a = f.weather_rotation_deg * DEG_TO_RAD, ca = cosf(a), sa = sinf(a), inv = 1.f / llmax(f.weather_stretch, 1e-3f);
@@ -941,7 +943,10 @@ struct Clouds::Impl
             mask[i] = L[i].shadow ? 1.f : 0.f;
         }
         // :171-184 (minHeight/maxHeight, shadowBottomHeight/shadowTopHeight; the "else" keeps the max at 0)
-        const F32 minHeight = std::isfinite(totalMin) ? totalMin : 0.f;
+        // [HURRICANE 2026-10-30 ~13:10Z] while a storm runs the shell starts at the sea: the storm's low base, its scud and its rain
+        // curtains hang below the region's lowest layer (README "The storm in 3D" item 5; cloudsCommon.glsl wolfStormApply). The
+        // shell's top is unchanged; with no layer at all there is nothing for the storm to draw in (declared before) and it stays 0.
+        const F32 minHeight = std::isfinite(totalMin) ? (f.storm_on ? 0.f : totalMin) : 0.f;
         const F32 maxHeight = std::isfinite(totalMin) ? totalMax : 0.f;
         bottomHeight = std::isfinite(sBottom) ? sBottom : 0.f;
         topHeight = std::isfinite(sBottom) ? sTop : 0.f;

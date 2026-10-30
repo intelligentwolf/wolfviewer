@@ -110,6 +110,7 @@ struct WeatherSample {
   // [HURRICANE 2026-10-30 ~13:10Z] the storm's rain curtain here: its extinction (1/m, 0 = none) and the layer it is counted in
   // (one-hot: the region's lowest layer, the one the storm hangs below - sampleWeather), for sampleMedia's per-layer weights
   float stormRain;
+  float stormRainAlbedo;   // [2026-10-30 ~13:40Z] the share of stormRain that scatters (the rest absorbs: the storm's shade overhead)
   vec4 stormHost;
 };
 
@@ -339,8 +340,10 @@ vec4 wolfStormFieldAt(const vec2 c, const float r, const float phi, const float 
 // heightScale by w); densMask (the eye's safety mask); absorb, the extra absorption per unit density (item 2).
 float wolfStormApply(inout vec4 localWeather, const vec3 position, const float height, const float mipLevel,
                      const vec4 kindStreets, const vec4 kindUpper, const vec4 kindTurned,
-                     out float H, out float densMask, out float absorb, out float rainSigma) {
+                     out float H, out float densMask, out float absorb, out float rainSigma,
+                     out float rainAlbedo) {
   H = 0.0;
+  rainAlbedo = 1.0;
   densMask = 1.0;
   absorb = 0.0;
   rainSigma = 0.0;
@@ -420,10 +423,10 @@ float wolfStormApply(inout vec4 localWeather, const vec3 position, const float h
   // mask, radius and bands, no noise), as a rate R = q P_cat mm/h (wolfStormBase.w; hurricane_lib.php HU_RAIN_MMH); its
   // extinction from the visibility in rain V = 11.6 R^-0.63 km (Atlas's empirically adjusted relation for rain, threshold contrast
   // 0.055: core.ac.uk/download/230537853.pdf; V in km - 11.6 km at 1 mm/h) and Koschmieder's sigma = ln(1 / eps) / V with that same
-  // threshold contrast, ln(1 / 0.055) = 2.900. Its extinction enters through media.scattering (sampleMedia). Shafts: the rain falls in
+  // threshold contrast, ln(1 / 0.055) = 2.900 (sampleMedia: rainAlbedo of it scatters, the rest absorbs). Shafts: the rain falls in
   // curtains - the shape noise read in x, y only (a column, the same at every height), cut at 0.35 .. 0.65 (CONVENTION; tile
-  // 1200 m), so grey sheets hang under the eyewall and the bands with gaps between them. Albedo 1 (water drops absorb almost
-  // nothing in visible light): they are lit by what reaches them under the cloud, so they read grey.
+  // 1200 m), so grey sheets hang under the eyewall and the bands with gaps between them. Water drops absorb almost
+  // nothing in visible light; the shade of the storm overhead is put in as their albedo below (rainAlbedo).
   #ifndef SHADOW
   if (wolfStormBase.w > 0.0 && height < zBase + 100.0) {
     float meyeRain = 1.0 - E * (1.0 - wolfStormS((r - 0.8 * Re) / (0.4 * Re)));
@@ -437,6 +440,12 @@ float wolfStormApply(inout vec4 localWeather, const vec3 position, const float h
       float col = texture(shapeTexture, vec3(pA.xy / 1200.0, 0.5)).r;
       float shaft = wolfStormS((col - 0.35) / 0.3);
       rainSigma = 2.900 / (11600.0 * pow(rate, -0.63)) * shaft * (1.0 - wolfStormS((height - zBase) / 100.0));
+      // [2026-10-30 ~13:40Z] how much the curtain scatters: the sky light the march gives a sample (wolfSkyUnderCloud) is the
+      // region's, which no longer sees the storm (the region is fair outside it), so a curtain under kilometres of storm cloud
+      // was lit by the open sky and read as a white haze into the bright horizon. Its scattering is scaled by the storm's cover
+      // overhead, cover = O max(ew, inner, B2 (1 - inner) env) - 1 - 0.8 cover (CONVENTION) - the rest of sigma is extinction,
+      // so the curtain dims what is behind it as before and reads as a grey sheet.
+      rainAlbedo = 1.0 - 0.8 * O * max(max(ew, innerR), B2r * (1.0 - innerR) * envR);
     }
   }
   #endif
@@ -477,10 +486,12 @@ WeatherSample sampleWeather(const vec2 uv, const float height, const float mipLe
   float stormH = 0.0;
   weather.stormAbsorb = 0.0;
   weather.stormRain = 0.0;
+  weather.stormRainAlbedo = 1.0;
   weather.stormHost = vec4(0.0);
   if (wolfStorm.x > 0.5) {
     stormShare = wolfStormApply(localWeather, position, height, mipLevel, kindStreets, kindUpper, kindTurned,
-                                stormH, stormDensMask, weather.stormAbsorb, weather.stormRain);
+                                stormH, stormDensMask, weather.stormAbsorb, weather.stormRain,
+                                weather.stormRainAlbedo);
   }
   weather.stormW = stormShare;
   // [WolfViewer 2026-10-26, fourth pass] THE FIBRES CARVE THE CIRRUS BEFORE THE COVERAGE CUT. Paul at ICELAND (14:35Z) and TROMSO
@@ -689,17 +700,18 @@ MediaSample sampleMedia(
   MediaSample media;
   float densitySum = density.x + density.y + density.z + density.w;
   // [HURRICANE 2026-10-30 ~13:10Z] the rain curtain (wolfStormApply, README "The storm in 3D" item 6): extinction sigma (1/m) with
-  // albedo 1, counted in the host layer for the per-layer weights (its ice share, phase and powder) - a sample of rain alone has a
+  // albedo stormRainAlbedo, counted in the host layer for the per-layer weights (its ice share, phase and powder) - a sample of rain alone has a
   // weight there instead of 0 / 0
   float rainSigma = weather.stormRain;
   media.weight = (density + rainSigma * weather.stormHost) / max(densitySum + rainSigma, 1e-12);
-  media.scattering = densitySum * scatteringCoefficient + rainSigma;
+  media.scattering = densitySum * scatteringCoefficient + rainSigma * weather.stormRainAlbedo;
   // [WolfViewer] the absorption per layer (precipitating layers absorb more, Schneider 2015 p. 69), on top of the
   // one absorptionCoefficient
   media.extinction = densitySum * absorptionCoefficient + dot(density, wolfLayerAbsorption) + media.scattering;
   // [HURRICANE 2026-10-30] README "The storm in 3D" item 2: the storm's dark base, extra absorption per unit density in its lowest
   // 1500 m (wolfStormApply), added to every layer's
   media.extinction += densitySum * weather.stormAbsorb;
+  media.extinction += rainSigma * (1.0 - weather.stormRainAlbedo);   // [2026-10-30 ~13:40Z] the rain's unscattered share
   return media;
 }
 

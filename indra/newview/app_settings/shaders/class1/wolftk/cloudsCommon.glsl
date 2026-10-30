@@ -402,15 +402,22 @@ float wolfStormApply(inout vec4 localWeather, const vec3 position, const float h
   localWeather = mix(localWeather, vStorm, w) * (meye * mmoat);
   // README "The storm in 3D" item 1: the storm's height profile. z_s(z) = s((z - Z_BASE) / 200) (1 - s((z - Z_zone) / 400)) per
   // zone, the zone weights' max: the eyewall (ew) and the dense overcast (inner) to Z_TOP, the bands (B2 (1 - inner)) to
-  // Z_BAND = 0.55 Z_TOP; the eye and the moats clear. Z_TOP = maxHeight (the highest top of the region's layers).
+  // Z_BAND = 0.55 Z_TOP; the eye and the moats clear. Z_TOP below.
   // [2026-10-30 ~13:10Z] README "The storm in 3D" item 5 (Paul: "its there but not reaching to the actual ocean"): the base comes
   // DOWN under the eyewall and the dense overcast - Z_LOCAL = mix(Z_BASE, Z_LOW, max(ew, inner)) + 120 nr, so 300 m under the bands,
   // 150 m under the eyewall and the overcast, ragged by +-60 m with the shape noise (Z_LOW 150 m, the 120 m: CONVENTIONS; a
   // hurricane's cloud base is a few hundred metres over the sea).
   float zBase = mix(wolfStormBase.x, wolfStormBase.z, max(ew, inner)) + 120.0 * nr;
   float zb = wolfStormS((height - zBase) / 200.0);
-  float zTop = 1.0 - wolfStormS((height - maxHeight) / 400.0);
-  float zBand = 1.0 - wolfStormS((height - 0.55 * maxHeight) / 400.0);
+  // [2026-10-30 ~13:50Z] Z_TOP = min(the layers' highest top, 1.5 R) (CONVENTION). Paul 13:33Z, 3.25 km from the eye of a
+  // R 1190 m storm, looking at it: "a uniform flat overcast". The region's layers then reached 9.5 km (Ci 7500-9500 m;
+  // WolfViewer.log cloudsFrame), so the storm was a column 2.4 km wide and 9.5 km tall - from 2 km outside its rim its side
+  // filled the sky to 78 deg up, a wall with no shape. A real hurricane is far wider than tall (tops ~15 km over hundreds of
+  // km); at this scaled size 1.5 R keeps the eyewall and overcast a squat dome (top ~41 deg up from there) so the bands, the
+  // dark base and the curtains under it read from outside, and the open sky above it shows its edge.
+  float zTopS = min(maxHeight, 1.5 * R);
+  float zTop = 1.0 - wolfStormS((height - zTopS) / 400.0);
+  float zBand = 1.0 - wolfStormS((height - 0.55 * zTopS) / 400.0);
   H = zb * max(max(ew, inner) * zTop, B2 * (1.0 - inner) * zBand) * meye * mmoat;
   // ... and scud: ragged fragments from 60 m up to the base where the shape noise is high (n above 0.6, full by 0.75), under the
   // eyewall, the overcast and the bands (CONVENTIONS: 60 m, the 40 m / 100 m ramps, the 0.6 / 0.15)

@@ -1620,25 +1620,15 @@ namespace
                 f.storm_h = (F32)hu->mHemisphere;
                 f.storm_D = (F32)hu->streamed(T);
                 f.storm_rain_mmh = hu->mRain ? (F32)WolfHurricane::rainRateMmh(hu->mCategory) : 0.f;   // [2026-10-30] the rain curtains
-                // [HURRICANE 2026-10-30] the frame budget (wolfframegovernor.h): the storm's own lookup of the field is dropped
-                // while the budget is under 0.9 and taken back once it is full again (the gap between is the hysteresis), eased
-                // over 3 s either way so the bands' texture never pops. Advanced by the main view only; a probe face reads it.
-                {
-                    static F32 s_lookup = 1.f;
-                    static bool s_target = true;
-                    static F64 s_last = 0.0;
-                    if (!probe)
-                    {
-                        const F32 g = WolfFrameGovernor::budget();
-                        if (g >= 0.999f) s_target = true;
-                        else if (g < 0.9f) s_target = false;
-                        const F64 tn = LLFrameTimer::getElapsedSeconds();
-                        const F32 step = s_last > 0.0 ? (F32)llclamp(tn - s_last, 0.0, 0.5) / 3.f : 1.f;
-                        s_last = tn;
-                        s_lookup = s_target ? llmin(1.f, s_lookup + step) : llmax(0.f, s_lookup - step);
-                    }
-                    f.storm_lookup = s_lookup;
-                }
+                // [HURRICANE 2026-10-30 ~13:45Z] the storm's own lookup of the field (the spiral bands' texture) is ALWAYS taken. It
+                // was dropped while the frame budget (wolfframegovernor.h) was under 0.9, but on The Caribbean the budget sits at its
+                // floor 0.25 with or without a storm (Paul's log: 14-16 fps before the storm showed, 12-16 during it - the scene's
+                // cost, not the storm's), so Paul only ever saw the bands without their spiral-streamed texture (the band and moat
+                // masks still shaped them, from the point's own unstreamed value). The
+                // lookup is one or two weather-texture reads per sample inside the storm; what the budget still trims is motion and
+                // time-smoothness, never the shape: one flow-map phase below 1 (a seam every P) and the turned 3D noise at or below
+                // 0.5 (just below).
+                f.storm_lookup = 1.f;
                 // [HURRICANE 2026-10-30] README "The storm in 3D" item 3, THE FLOW MAP (Vlachos 2010, "Water Flow in Portal 2"): two
                 // clocks half a period P = 120 s apart, tau0 = t mod P and tau1 = (t + P / 2) mod P on the storm's own time (now -
                 // start), the first weighted 1 - |2 tau0 / P - 1| (0 when it restarts, 1 when the other does). The frame budget

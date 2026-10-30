@@ -625,10 +625,25 @@
 		<button.commit_callback
 		function="WMap.Location" />
     </button>
+    <!-- [REGION CATEGORIES 2026-10-30] Paul: "add those category buttons to the MAP SEARCH so someone looking for
+         shops can just click 'SHOPS' and get a list of shopping regions". The categories region owners choose on
+         wolf-grid.com; llfloaterworldmap.cpp fills it and shows it on Wolf Territories only (hidden elsewhere, and
+         search_results then moves up into its place). Choosing one fills search_results below. -->
+    <combo_box
+     allow_text_entry="false"
+     follows="top|right"
+     height="23"
+     label="Regions by Category"
+     layout="topleft"
+     left="2"
+     top_pad="5"
+     name="wolf_region_category"
+     tool_tip="Show the online regions in a category - shops, venues, roleplay and more. Region owners choose their categories on their region page at wolf-grid.com."
+     width="246" />
     <scroll_list
      draw_stripes="false"
      follows="all"
-     height="145"
+     height="117"
      layout="topleft"
      left="2"
      name="search_results"

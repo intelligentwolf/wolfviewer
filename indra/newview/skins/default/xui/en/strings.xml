@@ -582,6 +582,13 @@ https://www.wolf-grid.com/blog/faq.php for help fixing this problem.
 	<string name="worldmap_offline">Offline</string>
 	<string name="worldmap_item_tooltip_format">[AREA] m² L$[PRICE] ([SQMPRICE] L$/m²)</string>
 	<string name="worldmap_results_none_found">None found.</string>
+	<!-- [REGION CATEGORIES 2026-10-30] llfloaterworldmap.cpp wolfCat* -->
+	<string name="worldmap_category_loading">Looking for [CATEGORY] regions...</string>
+	<string name="worldmap_category_none">No [CATEGORY] regions are online right now.</string>
+	<string name="worldmap_category_failed">The [CATEGORY] regions could not be loaded. Please try again in a minute.</string>
+	<string name="worldmap_category_list_failed">Categories could not be loaded. Close and reopen the map to try again.</string>
+	<string name="worldmap_category_not_on_map">That region is not on the map yet. It may be restarting - please try again in a minute.</string>
+	<string name="worldmap_category_item">[CATEGORY] ([COUNT])</string>
 	<string name="worldmap_agent_position">You are here</string>
 	
 	<!-- mini map -->

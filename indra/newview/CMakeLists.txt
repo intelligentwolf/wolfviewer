@@ -967,6 +967,7 @@ set(viewer_SOURCE_FILES
     wolffloaterexperiences.cpp   # [WolfViewer 2026-10-14] Experiences welcome chooser
     wolffloaterphotoeffects.cpp
     wolfmeshupload.cpp
+    wolfmiddaysky.cpp
     wolfscreenshare.cpp
     wolfaltitudesky.cpp
     wolffarground.cpp
@@ -1962,6 +1963,7 @@ set(viewer_HEADER_FILES
     wolffloaterexperiences.h   # [WolfViewer 2026-10-14]
     wolffloaterphotoeffects.h
     wolfmeshupload.h
+    wolfmiddaysky.h
     wolfscreenshare.h
     wolfaltitudesky.h
     wolffarground.h
@@ -2443,6 +2445,7 @@ set(viewer_APPSETTINGS_FILES
     app_settings/client_list_v2.xml
     app_settings/wolf_stars.txt
     app_settings/wolf_constellations.txt
+    app_settings/wolf_midday_sky.xml
     app_settings/cloud.xml
     app_settings/cmd_line.xml
     app_settings/commands.xml

@@ -45,6 +45,7 @@
 #include "wolfspanscreens.h"  // <WolfViewer 2026-10-10/> Wolf World > Spread Across All Screens
 #include "wolfborder.h"   // [BORDER GUARD 2026-10-16/] Wolf World > Teleport Across the Border Ahead
 #include "wolfradiostations.h"   // [WOLF STATIONS 2026-10-25/] Wolf World > Music & Radio > Add Your Radio Station...
+#include "wolfmiddaysky.h"   // [WolfViewer 2026-10-30/] World > Environment > Midday: the Midday sky with fill light
 // </WolfViewer>
 
 // linden library includes
@@ -808,8 +809,7 @@ static void wolf_toggle_eep()
             return;
         }
 #endif
-        LLEnvironment::instance().setManualEnvironment(LLEnvironment::ENV_LOCAL, LLEnvironment::KNOWN_SKY_MIDDAY);
-        LLEnvironment::instance().setSelectedEnvironment(LLEnvironment::ENV_LOCAL);
+        WolfMiddaySky::apply();   // [WolfViewer 2026-10-30/] the menu's Midday (wolfmiddaysky.h), with fill light in the shade
     }
     else
     {
@@ -12305,7 +12305,7 @@ class LLWorldEnvSettings : public view_listener_t
         bool repeatedEnvTogglesShared = gSavedSettings.getBOOL("FSRepeatedEnvTogglesShared");
 
         if(repeatedEnvTogglesShared && ((skyid == LLEnvironment::KNOWN_SKY_SUNRISE       && event_name == "sunrise") ||
-                                        (skyid == LLEnvironment::KNOWN_SKY_MIDDAY        && event_name == "noon") ||
+                                        (WolfMiddaySky::isMidday(sky)                    && event_name == "noon") ||   // [WolfViewer 2026-10-30/] either Midday
                                         (skyid == LLEnvironment::KNOWN_SKY_LEGACY_MIDDAY && event_name == "legacy noon") ||
                                         (skyid == LLEnvironment::KNOWN_SKY_SUNSET        && event_name == "sunset") ||
                                         (skyid == LLEnvironment::KNOWN_SKY_MIDNIGHT      && event_name == "midnight")))
@@ -12327,8 +12327,12 @@ class LLWorldEnvSettings : public view_listener_t
             // <FS:Beq> FIRE-29926 - allow manually selected environments to have a user defined transition time.
             //LLEnvironment::instance().setEnvironment(LLEnvironment::ENV_LOCAL, LLEnvironment::KNOWN_SKY_MIDDAY, LLEnvironment::TRANSITION_INSTANT);
             //LLEnvironment::instance().setSelectedEnvironment(LLEnvironment::ENV_LOCAL, LLEnvironment::TRANSITION_INSTANT);
-            LLEnvironment::instance().setManualEnvironment(LLEnvironment::ENV_LOCAL, LLEnvironment::KNOWN_SKY_MIDDAY);
-            LLEnvironment::instance().setSelectedEnvironment(LLEnvironment::ENV_LOCAL);
+            // <WolfViewer 2026-10-30> Indi: the PBR Midday is too dark in the shade. The grid's Midday with fill light, from
+            // app_settings/wolf_midday_sky.xml (wolfmiddaysky.cpp: why, and the fallback to the asset); same transition time.
+            //LLEnvironment::instance().setManualEnvironment(LLEnvironment::ENV_LOCAL, LLEnvironment::KNOWN_SKY_MIDDAY);
+            //LLEnvironment::instance().setSelectedEnvironment(LLEnvironment::ENV_LOCAL);
+            WolfMiddaySky::apply();
+            // </WolfViewer>
             // </FS:Beq>
             defocusEnvFloaters();
         }
@@ -12417,7 +12421,7 @@ class LLWorldEnableEnvSettings : public view_listener_t
             }
         else if (event_name == "noon")
             {
-            result = (skyid == LLEnvironment::KNOWN_SKY_MIDDAY);
+            result = WolfMiddaySky::isMidday(sky);   // <WolfViewer 2026-10-30/> the Midday with fill light, or the asset
             }
         else if (event_name == "legacy noon")
         {

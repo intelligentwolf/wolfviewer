@@ -98,6 +98,9 @@ public:
         F64 mSwell = 0.0;     // integral of sqrt(waveFrequency + 0.001) * waveSpeed  (waterV.glsl wolfSwellPhaseT)
         F64 mBreaker = 0.0;   // integral of 4.5 * the breaker speed scale, wrapped to 2 pi (waterV.glsl breakers)
         F64 mAutoSurf = 0.0;  // integral of the automatic surf's omega0, wrapped to 2 pi (waterV.glsl autoS)
+        // [HURRICANE 2026-10-30] the storm swell train's own temporal phase: integral of sqrt(9.8 k_S) x waveSpeed, k_S = 2 pi / L_STORM,
+        // wrapped to 2 pi (waterV.glsl wS). Its length is fixed, so its omega must not ride on the swell clock's sqrt(frequency).
+        F64 mStormSwell = 0.0;
     };
     // The clocks at shader time t (the last update carried on at the rates it was made with).
     SeaClocks seaClocksAt(F64 t) const;

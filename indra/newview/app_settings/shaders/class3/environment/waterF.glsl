@@ -421,7 +421,8 @@ float swellFoldFraction(vec2 p, float back)
         vec2 dS = wolfSeaStormSwell.z > 0.5 ? wolfSeaStormSwell.xy : normalize(waveDir1);
         float aS = vStormSwellAmp;
         float k = 6.28318 / wolfSeaStormSwell.w;
-        float f = k * dot(dS, p) - sqrt(9.8 * k / (waveFrequency + 0.001)) * clock;
+        // its own phase clock (wolfSeaClock.w, lldrawpoolwater.cpp mStormSwell), `back` shader-time units ago at its own omega
+        float f = k * dot(dS, p) - (wolfSeaClock.w - back * sqrt(9.8 * k) * waveSpeed);
         float Q = min(0.65, 8.0 * k * aS) / (k * aS * 8.0 + 0.001);
         float sn = Q * aS * k * sin(f);
         dxx -= dS.x * dS.x * sn;

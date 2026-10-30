@@ -140,6 +140,7 @@ private:
         F64       mSwellClock = 0.0;
         F64       mBreakerClock = 0.0;
         F64       mAutoSurfClock = 0.0;
+        F64       mStormSwellClock = 0.0;   // [HURRICANE 2026-10-30/] the storm swell train's phase (LLDrawPoolWater::SeaClocks)
         // [HURRICANE 2026-10-30] the region's storm on the sea this step (waterV.glsl wolfStormSeaFactor's CPU twin): the
         // storm (WolfRegionWeather::hurricane, nullptr = none), its clock, the eye (region metres of the agent's region),
         // that region's origin (agent), the floor (1 - W env(r_c)) S_eep and S_eep

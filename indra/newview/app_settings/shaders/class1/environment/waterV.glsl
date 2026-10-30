@@ -321,6 +321,24 @@ float wolfSwellPhaseT(float wl)
     return sqrt(9.8 * (6.28318 / wl) / (waveFrequency + 0.001)) * wolfSeaClock.x;
 }
 
+// [HURRICANE 2026-10-30] gerstnerWave with the temporal phase given (the storm swell train, wolfSeaClock.w: its own clock at its
+// fixed length, lldrawpoolwater.cpp mStormSwell - not wolfSwellPhaseT, whose factor follows waveFrequency), no jitter
+vec3 gerstnerWaveAt(vec2 pos, float wavelength, float amp, vec2 dir, float steepness, float numWaves, float phaseT)
+{
+    float k = 6.28318 / wavelength;
+    vec2 d = normalize(dir);
+    float f = mod(k * dot(d, pos) - phaseT, 6.2831853);
+    float Q = steepness / (k * amp * numWaves + 0.001);
+    return vec3(Q * amp * d.x * cos(f), Q * amp * d.y * cos(f), amp * sin(f));
+}
+vec2 gerstnerSlopeAt(vec2 pos, float wavelength, float amp, vec2 dir, float phaseT)
+{
+    float k = 6.28318 / wavelength;
+    vec2 d = normalize(dir);
+    float f = mod(k * dot(d, pos) - phaseT, 6.2831853);
+    return d * (amp * k * cos(f));
+}
+
 vec3 gerstnerWave(vec2 pos, float wavelength, float jit, float amp, vec2 dir, float steepness, float numWaves)
 {
     float k = 6.28318 / (wavelength * jit);
@@ -788,8 +806,9 @@ void main()
             // region's trains above are unchanged (today's rocking kept) and ONE long train is ADDED - fixed length L_STORM
             // (300 m: a Gerstner length cannot vary per point without breaking its crests), running with the storm's sea
             // wind at the region centre, amplitude a_L = 0.5 x localAmp (the point's swell amplitude after the storm's sea
-            // gain and the edge calm above) x W env x S_storm / 3. Phased on the same position and the same clock as the
-            // trains above (wolfSwellPhaseT), no wavelength jitter. Its Gerstner horizontal part uses gerstnerWave's rule
+            // gain and the edge calm above) x W env x S_storm / 3. Phased on the same position as the trains above, in time
+            // by its own clock (wolfSeaClock.w: sqrt(9.8 k_S) x waveSpeed accumulated - a fixed length's omega, so a change of the
+            // region's swell frequency cannot move it), no wavelength jitter. Its Gerstner horizontal part uses gerstnerWave's rule
             // with the steepness held to 8 k a_L when that is under w1's 0.65: the GPU Gems rule makes the sideways sway
             // Q a = steepness / (k numWaves), independent of the height - 3.9 m for a 300 m train - so the long swell's
             // orbit is held to its own height a_L (a deep-water orbit's radius is its amplitude), as w1's is near its own.
@@ -799,7 +818,7 @@ void main()
                 float aL = localAmp * stormSwellShare;
                 vec2 dirS = wolfSeaStormSwell.z > 0.5 ? wolfSeaStormSwell.xy : normalize(waveDir1);
                 float kS = 6.28318 / wolfSeaStormSwell.w;
-                wS = gerstnerWave(swellPos, wolfSeaStormSwell.w, 1.0, aL, dirS, min(0.65, numWaves * kS * aL), numWaves);
+                wS = gerstnerWaveAt(swellPos, wolfSeaStormSwell.w, aL, dirS, min(0.65, numWaves * kS * aL), numWaves, wolfSeaClock.w);
                 vStormSwellAmp = aL;
             }
             vec3 total = w1 + w2 + w3 + w4 + w5 + w6 + w7 + w8 + wS;
@@ -813,7 +832,7 @@ void main()
             if (vStormSwellAmp > 0.0)
             {
                 vec2 dirS = wolfSeaStormSwell.z > 0.5 ? wolfSeaStormSwell.xy : normalize(waveDir1);
-                wave_slope += gerstnerSlope(swellPos, wolfSeaStormSwell.w, 1.0, vStormSwellAmp, dirS);
+                wave_slope += gerstnerSlopeAt(swellPos, wolfSeaStormSwell.w, vStormSwellAmp, dirS, wolfSeaClock.w);
             }
 
             // Backstop, not the height (2.5x the amplitude from lldrawpoolwater.cpp).

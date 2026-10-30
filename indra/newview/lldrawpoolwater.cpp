@@ -341,7 +341,8 @@ void LLDrawPoolWater::renderPostDeferred(S32 pass)
     {
         static LLStaticHashedString s_sea_clock("wolfSeaClock");
         static LLStaticHashedString s_wave_scroll("wolfWaveScroll");
-        shader->uniform4f(s_sea_clock, (F32)mSeaClocks.mSwell, (F32)mSeaClocks.mBreaker, (F32)mSeaClocks.mAutoSurf, 0.f);
+        // [HURRICANE 2026-10-30] w: the storm swell train's phase (SeaClocks::mStormSwell)
+        shader->uniform4f(s_sea_clock, (F32)mSeaClocks.mSwell, (F32)mSeaClocks.mBreaker, (F32)mSeaClocks.mAutoSurf, (F32)mSeaClocks.mStormSwell);
         shader->uniform4f(s_wave_scroll, (F32)mScroll1X, (F32)mScroll1Y, (F32)mScroll2X, (F32)mScroll2Y);
     }
 
@@ -934,6 +935,7 @@ LLDrawPoolWater::SeaClocks LLDrawPoolWater::seaClocksAt(F64 t) const
     c.mSwell = mSeaClocks.mSwell + mSeaRates.mSwell * d;
     c.mBreaker = wolf_wrap(mSeaClocks.mBreaker + mSeaRates.mBreaker * d, WOLF_TWO_PI);
     c.mAutoSurf = wolf_wrap(mSeaClocks.mAutoSurf + mSeaRates.mAutoSurf * d, WOLF_TWO_PI);
+    c.mStormSwell = wolf_wrap(mSeaClocks.mStormSwell + mSeaRates.mStormSwell * d, WOLF_TWO_PI);   // [HURRICANE 2026-10-30/]
     return c;
 }
 
@@ -957,6 +959,7 @@ void LLDrawPoolWater::wolfUpdateSea(const LLSettingsWater::ptr_t& pwater)
         mSeaClocks.mSwell += mSeaRates.mSwell * dtau;
         mSeaClocks.mBreaker = wolf_wrap(mSeaClocks.mBreaker + mSeaRates.mBreaker * dtau, WOLF_TWO_PI);
         mSeaClocks.mAutoSurf = wolf_wrap(mSeaClocks.mAutoSurf + mSeaRates.mAutoSurf * dtau, WOLF_TWO_PI);
+        mSeaClocks.mStormSwell = wolf_wrap(mSeaClocks.mStormSwell + mSeaRates.mStormSwell * dtau, WOLF_TWO_PI);   // [HURRICANE 2026-10-30/]
         mScroll1X = wolf_wrap(mScroll1X + mSeaDir1.mV[VX] * dtau, 200.0);
         mScroll1Y = wolf_wrap(mScroll1Y + mSeaDir1.mV[VY] * dtau, 200.0);
         mScroll2X = wolf_wrap(mScroll2X + mSeaDir2.mV[VX] * dtau, 100.0);
@@ -1012,12 +1015,19 @@ void LLDrawPoolWater::wolfUpdateSea(const LLSettingsWater::ptr_t& pwater)
     mSeaRates.mSwell = sqrt((F64)freq + 0.001) * (F64)(F32)wave_speed;
     mSeaRates.mBreaker = 4.5 * (F64)llclamp(mSeaDir1.length() * 0.885f, 0.4f, 2.0f);
     mSeaRates.mAutoSurf = sqrt(9.81 * WOLF_TWO_PI / (F64)llmax(auto_len, 8.f));
+    // [HURRICANE 2026-10-30] the storm swell train (waterV.glsl wS): omega = sqrt(9.8 k_S) x waveSpeed, k_S = 2 pi / L_STORM - the
+    // gerstnerWave dispersion (k = 2 pi / wl, sqrt(9.8 k)) at its fixed length. It used wolfSwellPhaseT(300), sqrt(9.8 k /
+    // (waveFrequency + 0.001)) x the swell clock: right speed in a steady sea, but the factor jumps with every change of the
+    // frequency (an index ease under the storm), and multiplied by the whole clock that raced the long crests (index 1 -> 3 after
+    // an hour: hundreds of radians in a minute).
+    mSeaRates.mStormSwell = sqrt(9.8 * WOLF_TWO_PI / WolfHurricane::STORM_SWELL_LENGTH) * (F64)(F32)wave_speed;
     if (!mSeaInit)
     {
         // Start where the old `time` x rate phases stood, so the first frame is the sea it always was.
         mSeaClocks.mSwell = mSeaRates.mSwell * t;
         mSeaClocks.mBreaker = wolf_wrap(mSeaRates.mBreaker * t, WOLF_TWO_PI);
         mSeaClocks.mAutoSurf = wolf_wrap(mSeaRates.mAutoSurf * t, WOLF_TWO_PI);
+        mSeaClocks.mStormSwell = wolf_wrap(mSeaRates.mStormSwell * t, WOLF_TWO_PI);   // [HURRICANE 2026-10-30/]
         mScroll1X = wolf_wrap(mSeaDir1.mV[VX] * t, 200.0);
         mScroll1Y = wolf_wrap(mSeaDir1.mV[VY] * t, 200.0);
         mScroll2X = wolf_wrap(mSeaDir2.mV[VX] * t, 100.0);

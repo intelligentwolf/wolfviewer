@@ -783,6 +783,7 @@ WolfBoatRock::Sea WolfBoatRock::seaNow() const
         sea.mSwellClock = clocks.mSwell;
         sea.mBreakerClock = clocks.mBreaker;
         sea.mAutoSurfClock = clocks.mAutoSurf;
+        sea.mStormSwellClock = clocks.mStormSwell;   // [HURRICANE 2026-10-30/]
     }
     else
     {
@@ -796,6 +797,8 @@ WolfBoatRock::Sea WolfBoatRock::seaNow() const
         sea.mBreakerClock = t * 4.5 * (F64)llclamp(sea.mDir1.length() * 0.885f, 0.4f, 2.0f);
         const F32 auto_len = llmax(llmax(2.f / (sea.mFreq + 0.001f), 12.f * (2.f * sea.mAmp)), 12.f);
         sea.mAutoSurfClock = sqrt(9.81 * 6.283185307179586 / (F64)llmax(auto_len, 8.f)) * t;
+        // [HURRICANE 2026-10-30] the storm swell train's phase at its own omega (lldrawpoolwater.cpp mStormSwell)
+        sea.mStormSwellClock = sqrt(9.8 * 6.283185307179586 / WolfHurricane::STORM_SWELL_LENGTH) * (F64)sea.mSpeed * t;
     }
 
     // [WAVES 2026-09-10] the painted zones' calm ripple and small-wave scale (WolfWaveZones).
@@ -972,7 +975,12 @@ F32 WolfBoatRock::waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F3
         if (storm_share > 0.f)
         {
             const LLVector2 dS = sea.mStormDirOk ? LLVector2((F32)sea.mStormDirX, (F32)sea.mStormDirY) : sea.mDir1;
-            acc((F32)WolfHurricane::STORM_SWELL_LENGTH, local_amp * storm_share, dS);
+            // its own phase clock (waterV.glsl wS: wolfSeaClock.w), not acc's swell clock - see lldrawpoolwater.cpp mStormSwell
+            const F32 kS = 6.28318f / (F32)WolfHurricane::STORM_SWELL_LENGTH;
+            F32 lenS = dS.length();
+            if (lenS <= 0.f) lenS = 1.f;
+            const F64 fS = (F64)kS * ((dS.mV[VX] / lenS) * px + (dS.mV[VY] / lenS) * py) - sea.mStormSwellClock;
+            z += local_amp * storm_share * (F32)sin(fS);
         }
     }
 

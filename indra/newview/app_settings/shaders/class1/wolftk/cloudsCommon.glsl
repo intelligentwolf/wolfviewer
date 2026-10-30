@@ -404,8 +404,14 @@ WeatherSample sampleWeather(const vec2 uv, const float height, const float mipLe
   // Reference: https://github.com/Prograda/Skybolt/blob/master/Assets/Core/Shaders/Clouds.h#L63
   // [WolfViewer] per layer: wolfLayerCoverage (a channel < 0 takes the one coverage)
   vec4 layerCoverage = mix(vec4(coverage), wolfLayerCoverage, step(vec4(0.0), wolfLayerCoverage));
-  // [HURRICANE 2026-10-29] README "Clouds": coverage (per layer) = mix(coverage, max(coverage, 0.75), w O)
-  if (stormShare > 0.0) layerCoverage = mix(layerCoverage, max(layerCoverage, vec4(0.75)), stormShare * wolfStorm.y);
+  // [HURRICANE 2026-10-30] README "Clouds": coverage (per layer) = mix(coverage, C_STORM, w O), C_STORM = 0.62 - inside the
+  // storm the STORM owns the coverage. Paul 10-30 "i'm not seeing the cyclone at all": the storm's region weather (cloud 100) put
+  // every genus layer at coverage ~1 (WolfViewer.log cloudsFrame 08:58:50Z: Ns 1, As 0.95, Cs 1, St 1), where the cut factor
+  // 1 - coverage x heightScale reaches 0 and the remap below turns every value into density 1: the bands and moats were erased,
+  // only the eye's mask was left. At 0.62 the cut falls inside v_storm's range, so moats thin or open and bands stay solid.
+  // (Was mix(coverage, max(coverage, 0.75), w O), which can only raise it.)
+  const float WOLF_STORM_COVERAGE = 0.62;   // README C_STORM (CONVENTION)
+  if (stormShare > 0.0) layerCoverage = mix(layerCoverage, vec4(WOLF_STORM_COVERAGE), stormShare * wolfStorm.y);
   vec4 factor = 1.0 - layerCoverage * heightScale;
   weather.density = remapClamped(
     mix(localWeather, vec4(1.0), coverageFilterWidths),

@@ -962,6 +962,24 @@ void WolfHelmHud::draw()
                 note_col = C_AMBER;
             }
             T(X(bl + 2.f), YM(880.f), note, 10.f, note_col, true, false, LLFontGL::LEFT);
+            // booty (2026-10-30): this avatar's hoard of gold doubloons, and the share just taken (gold, 30 s)
+            if (s.mHaveBooty)
+            {
+                std::string hoard = llformat("%lld", (long long)s.mHoard);
+                for (S32 k = (S32)hoard.size() - 3; k > 0; k -= 3) hoard.insert((size_t)k, ",");      // 12,345
+                T(X(bl + 2.f), YM(822.f), "BOOTY", 10.f, BRASS, true, false, LLFontGL::LEFT);
+                T(X(bl + 196.f), YM(822.f), hoard + (s.mRank > 0 ? llformat("  #%d", s.mRank) : std::string()), 10.f, BRASS_HI, true, true,
+                  LLFontGL::RIGHT);
+                if (s.mGot > 0 && now() - s.mGotAt < 30.0)
+                {
+                    const std::string took = llformat("+%d doubloons", s.mGot) + (s.mGotFrom.empty() ? std::string("!") : " from " + s.mGotFrom + "!");
+                    fitT(X(bl + 99.f), YM(844.f), took, 10.f, 7.f, S(194.f), blink(0.6f) && now() - s.mGotAt < 6.0 ? C_WHITE : BRASS_HI, true);
+                }
+                else
+                {
+                    T(X(bl + 2.f), YM(844.f), "doubloons won in battle", 9.f, C_DIM, false, false, LLFontGL::LEFT);
+                }
+            }
         }
     }
 
@@ -1044,7 +1062,7 @@ void WolfHelmHud::drawHelp(F32 top)
         { 2, "anywhere on the grid. It stays on 60 s after you switch it off." },
         { 1, "PORT / STBD fire a broadside; the ring fills as the guns reload." },
         { 1, "The bars: bow, stern, sides, waterline, rudder and rigging." },
-        { 3, "" },
+        { 1, "BOOTY: your doubloons for ships your crew beat (Top Pirates)." },
         { 1, "Only the captain gives orders; the crew see the same helm." },
         { 1, "Typed orders still work: shout /7 status (Ctrl+Enter)." },
         { 1, "Click anywhere above the helm to close.  HELP reopens it." },

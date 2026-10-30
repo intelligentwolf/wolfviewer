@@ -27,7 +27,7 @@
 //
 // The protocol is region-terrain-work/pirate-ship/DESIGN.md s20 (the ship's side: lsl/hms_wolfy_helm_template.lsl,
 // "the Captain's Helm HUD"). In short:
-//   ship -> viewer  llRegionSayTo(avatar, 0, "WolfHelm1|<kind>|...") - kinds hi, st, bt, fired - only to a viewer that
+//   ship -> viewer  llRegionSayTo(avatar, 0, "WolfHelm1|<kind>|...") - kinds hi, st, bt, fired, booty - only to a viewer that
 //                   said hello while seated on her (so a stock viewer never gets a line). Taken out of chat here
 //                   (onObjectChat, called from llviewermessage.cpp) when it comes from the object the agent sits on.
 //   viewer -> ship  chat SHOUTED on the ship's channel (7): "hud hello 1", "hud bye", "hud helm <deg>", the ship's own
@@ -81,6 +81,13 @@ public:
         F64         mProtectedUntil = 0.0;
         // fired
         F64         mPortFiredAt = -100.0, mStbdFiredAt = -100.0;
+        // booty (2026-10-30, wolf-naval 1.5.0: gold doubloons, game treasure only): this avatar's own hoard
+        bool        mHaveBooty = false;
+        S64         mHoard = 0;             // doubloons in all
+        S32         mRank = 0;              // on the Top Pirates of all time (0: not on it)
+        S32         mGot = 0;               // the last prize share (0: none since the HUD opened)
+        std::string mGotFrom;               // the ship it was taken from
+        F64         mGotAt = -100.0;        // frame seconds
     };
 
     void idle();
@@ -131,6 +138,7 @@ private:
     void parseState(const std::vector<std::string>& f);
     void parseBattle(const std::vector<std::string>& f);
     void parseFired(const std::vector<std::string>& f);
+    void parseBooty(const std::vector<std::string>& f);
     void claimBottom();
     void refreshGate();
 

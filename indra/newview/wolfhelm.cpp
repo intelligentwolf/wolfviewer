@@ -327,6 +327,7 @@ bool WolfHelm::onObjectChat(const LLUUID& source, U8 chat_type, const std::strin
     else if (kind == "st") parseState(f);
     else if (kind == "bt") parseBattle(f);
     else if (kind == "fired") parseFired(f);
+    else if (kind == "booty") parseBooty(f);
     // anything else: a later version's - ignored (DESIGN.md s20.2)
     return true;
 }
@@ -481,6 +482,38 @@ void WolfHelm::parseFired(const std::vector<std::string>& f)
     };
     if (w == "port" || side('P')) mState.mPortFiredAt = now();
     else if (w == "starboard" || side('S')) mState.mStbdFiredAt = now();
+}
+
+void WolfHelm::parseBooty(const std::vector<std::string>& f)
+{
+    // Source: lsl/hms_wolfy_helm_template.lsl HudBooty (region-terrain-work/naval-booty-2026-10-30): to this avatar
+    // only, "booty|got=<won now>|hoard=<doubloons>|rank=<rank>|from=<ship>"; got 0 = just the hoard (when the HUD said
+    // hello). The numbers come from the wolf-naval plugin's ledger (BootyLedger.cs), never from the viewer.
+    if (!mState.mHi) return;
+    State& s = mState;
+    F64 got = 0.0, hoard = -1.0, rank = 0.0;
+    std::string from;
+    for (size_t i = 2; i < f.size(); ++i)
+    {
+        const size_t eq = f[i].find('=');
+        if (eq == std::string::npos) continue;
+        const std::string k = f[i].substr(0, eq), v = f[i].substr(eq + 1);
+        F64 x = 0.0;
+        if (k == "got" && parseNumber(v, x)) got = llclamp(x, 0.0, 1.0e6);
+        else if (k == "hoard" && parseNumber(v, x)) hoard = llclamp(x, 0.0, 1.0e15);
+        else if (k == "rank" && parseNumber(v, x)) rank = llclamp(x, 0.0, 1.0e9);
+        else if (k == "from") from = cleanText(v).substr(0, 63);
+    }
+    if (hoard < 0.0) return;
+    s.mHaveBooty = true;
+    s.mHoard = (S64)hoard;
+    s.mRank = (S32)rank;
+    if (got >= 1.0)
+    {
+        s.mGot = (S32)got;
+        s.mGotFrom = from;
+        s.mGotAt = now();
+    }
 }
 
 // ════════════════════════════════════════════════════════════════════════════════════════

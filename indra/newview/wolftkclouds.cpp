@@ -855,6 +855,12 @@ struct Clouds::Impl
             sh.uniform4fv(LLStaticHashedString("wolfBuildLevel"), 3, lv);
             WolfTk::bindNamed(sh, "wolfBuildField", BUILD_FIELD_UNIT, GL_TEXTURE_2D, f.build_tex);
         }
+        // [HURRICANE 2026-10-29] the region's storm (cloudsParameters.glsl wolfStorm*, cloudsCommon.glsl wolfStormApply), set for
+        // every program that calls this - the clouds, the probe faces and the shadow pass - so the cloud shadows show the same
+        // storm. x = 0 when none is running: the shader skips it on that alone.
+        u4f(sh, "wolfStorm", f.storm_on ? 1.f : 0.f, f.storm_O, f.storm_E, f.storm_C);
+        u4f(sh, "wolfStormEye", f.storm_eye_agent[0], f.storm_eye_agent[1], f.storm_radius, f.storm_eye_radius);
+        u2f(sh, "wolfStormSpin", f.storm_h, f.storm_D);
         {
             const F32 a = f.weather_rotation_deg * DEG_TO_RAD, ca = cosf(a), sa = sinf(a), inv = 1.f / llmax(f.weather_stretch, 1e-3f);
             const F32 m[4] = { inv * ca, sa, -inv * sa, ca };   // columns: (S R)[.,0], (S R)[.,1] with S = diag(1/stretch, 1)

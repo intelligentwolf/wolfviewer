@@ -1578,6 +1578,35 @@ namespace
                 f.build_z_limit = bc.topAgentZ() + WolfCloudClearance::PAD_M + WolfCloudClearance::M0 + WolfCloudClearance::W;
             }
         }
+        // [HURRICANE 2026-10-29] ticket #367: the region's storm gathers, turns and clears the cloud field (cloudsCommon.glsl
+        // wolfStormApply). The model's time functions on the wall clock, unix seconds UTC (LLDate::now, the clock the
+        // automatic sky reads in WolfRegionWeather::autoEnvSkyTime, without its preview / grid-time shift: the storm's start is
+        // a UTC instant); the eye from region metres to agent ones with the region's origin. Source:
+        // region-terrain-work/hurricane-2026-10-29/README.md "Time", "The storm document" c(t), "Clouds" D.
+        if (WolfRegionWeather::instanceExists())
+        {
+            const WolfHurricane* hu = WolfRegionWeather::instance().hurricane();
+            const LLViewerRegion* rgn = gAgent.getRegion();
+            const F64 now = LLDate::now().secondsSinceEpoch();
+            const WolfHurricane::Time T = hu ? hu->timeAt(now) : WolfHurricane::Time();
+            if (hu && rgn && T.active())
+            {
+                F64 cx = 0.0, cy = 0.0;
+                hu->centre(now, cx, cy);
+                // Source: llviewerregion.h:210 getOriginAgent - the region's (0, 0) in agent metres
+                const LLVector3 origin = rgn->getOriginAgent();
+                f.storm_on = true;
+                f.storm_O = (F32)T.O;
+                f.storm_E = (F32)T.E;
+                f.storm_C = (F32)T.C;
+                f.storm_eye_agent[0] = (F32)((F64)origin.mV[VX] + cx);
+                f.storm_eye_agent[1] = (F32)((F64)origin.mV[VY] + cy);
+                f.storm_radius = (F32)hu->mRadius;
+                f.storm_eye_radius = (F32)hu->mEye;
+                f.storm_h = (F32)hu->mHemisphere;
+                f.storm_D = (F32)hu->streamed(T);
+            }
+        }
         // [WolfViewer 2026-10-13] WolfEnvironmentTrace: every input that moves the clouds, four times a second, so a report
         // of "clouds moving very fast" can be traced to the value that changes (Paul's video 09:53: clouds re-form in place
         // within half a second). Source of each value: this function (velocity, rotation, stretch, repeat, pivot), updateLight

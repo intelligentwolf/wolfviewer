@@ -291,7 +291,7 @@ private:
     void sweep();
 
     WolfWeatherProfile mActive;          ///< what is falling right now, whole
-    std::string        mActiveSource;    ///< "preview" / "parcel" / "region" / "menu"
+    std::string        mActiveSource;    ///< "preview" / "parcel" / "region" / "menu" / "hurricane" (the region's storm, apply())
     WolfWeatherPreviewRegistry<WolfWeatherProfile> mPreviews;
     preview_owner_t mNextPreviewOwner = 0;
 
@@ -316,6 +316,13 @@ private:
     // shared environment (EEP off / their own sky or day cycle). Re-applied when that changes.
     static bool usingSharedEnvironment();
     bool menuChoice() const { return mUser != Mode::NONE || mUserFog > 0 || mUserAurora > 0; }
+    /** [HURRICANE 2026-10-29] ticket #367: the region's storm (WolfRegionWeather::hurricane) at the camera now - README
+     *  "Rain at a point": `level` 0..4 and whether the storm's share w = C env(r) >= 0.5 (its level then REPLACES the
+     *  region's). False when no storm is running here. */
+    static bool stormRainAtCamera(S32& level, bool& replaces);
+    /** The last stormRainAtCamera answer apply() used (-1 = no storm, else level x 2 + replaces); idle() re-applies on a change. */
+    static S32 stormRainKey();
+    S32  mStormRainKey = -1;
     bool mSharedEnv = true;
     void updateShelter();
     F32  mSnowCover = 0.f;

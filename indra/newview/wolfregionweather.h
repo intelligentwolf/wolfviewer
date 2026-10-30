@@ -21,6 +21,7 @@
 #include "llpanel.h"
 #include "llsingleton.h"
 #include "llviewerparcelmgr.h"
+#include "wolfhurricane.h"
 #include "wolfweatherprofile.h"
 #include "wolfweatherstate.h"
 
@@ -162,6 +163,12 @@ public:
      *  LLEnvironment's day cycle runs on, llenvironment.cpp getAdjustedNow). */
     F64  autoEnvSkyTime() const;
 
+    /** [HURRICANE 2026-10-29] ticket #367: the storm weather.php carries as `hurricane` in this region's payload while one is
+     *  running (wolfhurricane.h; region-terrain-work/hurricane-2026-10-29/README.md "THE MODEL"), or nullptr. Its positions
+     *  are region metres of the agent's region; it is dropped on a region change. Whether it shows NOW is its own clock
+     *  (WolfHurricane::timeAt on the wall clock, LLDate::now). */
+    const WolfHurricane* hurricane() const { return (mHaveRow && mHaveHurricane) ? &mHurricane : nullptr; }
+
     /** Bumped whenever the answer changes, so a panel can notice without polling fields. */
     S32 generation() const { return mGeneration; }
 
@@ -181,6 +188,7 @@ private:
     void finishFetch();
     void recomputeParcelApplies();
     void readAutoEnv(const LLSD& row);   ///< <WolfViewer 2026-10-03/> weather.php region_payload `autoEnv`
+    void readHurricane(const LLSD& row); ///< [HURRICANE 2026-10-29/] weather.php region payload `hurricane` (absent = no storm)
 
     bool               mHaveRow = false;
     bool               mAutoEnvOn = false;      // <WolfViewer 2026-10-03/>
@@ -191,6 +199,8 @@ private:
     F64                mAutoEnvLon = 0.0;
     F64                mAutoEnvSkyShift = 0.0;   // [GRID TIME 2026-10-03] weather.php autoEnv.skyShift
     bool               mAutoEnvPreviewOn = false;
+    bool               mHaveHurricane = false;   // [HURRICANE 2026-10-29/] readHurricane
+    WolfHurricane      mHurricane;
     F64                mAutoEnvPreview = 0.0;
     WolfWeatherProfile mProfile;
     std::string        mKind;         // "" = no opinion; NOT the same as "clear"

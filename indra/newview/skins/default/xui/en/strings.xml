@@ -591,6 +591,9 @@ https://www.wolf-grid.com/blog/faq.php for help fixing this problem.
 	<string name="worldmap_category_item">[CATEGORY] ([COUNT])</string>
 	<!-- [REGION CATEGORIES VISIBILITY 2026-10-31] the combo's prompt; keep in step with label= in the three floater_world_map.xml -->
 	<string name="worldmap_category_prompt">Choose a type: shops, venues, events...</string>
+	<!-- [REGION CATEGORIES PINS 2026-10-31] llworldmapview.cpp handleToolTip, a category pin under the pointer -->
+	<string name="worldmap_category_pin_tip">[REGION]
+Click to pick it in the list and zoom to it.</string>
 	<string name="worldmap_agent_position">You are here</string>
 	
 	<!-- mini map -->

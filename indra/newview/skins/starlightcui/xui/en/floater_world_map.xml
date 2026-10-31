@@ -168,9 +168,23 @@
      left="15"
      name="events_label"
      top="3"
-     width="215">
+     width="110">
         Legend
     </text>
+    <!-- [MAP EXPERIENCES 2026-10-31] Paul: "an Experiences button at the top of the map that opens the Experiences
+         floater" - the Wolf World > Wolf Experiences... window. llfloaterworldmap.cpp shows it on Wolf Territories
+         only (wolfCatUpdateVisibility, the same test as the "Find places by type" band). -->
+    <button
+     follows="top|right"
+     height="20"
+     label="Experiences"
+     layout="topleft"
+     left="128"
+     name="wolf_map_experiences"
+     tool_tip="Wolf Experiences: pick something to do - explore, music, adventure, flying and more - and be taken there"
+     top="1"
+     visible="false"
+     width="117" />
    </panel>
    <panel
     follows="right|top"

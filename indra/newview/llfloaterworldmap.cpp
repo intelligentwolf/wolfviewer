@@ -516,6 +516,15 @@ bool LLFloaterWorldMap::postBuild()
     {
         mWolfCatShown = false;
     }
+    // [MAP EXPERIENCES 2026-10-31] Paul: "an Experiences button at the top of the map that opens the Experiences
+    // floater". The Wolf World > Wolf Experiences... floater (menu_viewer.xml WolfExperiences, llviewerfloaterreg.cpp
+    // "wolf_experiences"). Shown on Wolf Territories only, by wolfCatUpdateVisibility, as the category band.
+    mWolfExperiencesBtn = findChild<LLButton>("wolf_map_experiences");
+    if (mWolfExperiencesBtn)
+    {
+        mWolfExperiencesBtn->setCommitCallback([](LLUICtrl*, const LLSD&) { LLFloaterReg::showInstance("wolf_experiences"); });
+        mWolfExperiencesBtn->setVisible(WolfGrid::isOnWolfTerritories());
+    }
 
     // <FS:Ansariel> Use own expand/collapse function
     //getChild<LLPanel>("expand_btn_panel")->setMouseDownCallback(boost::bind(&LLFloaterWorldMap::onExpandCollapseBtn, this));
@@ -562,6 +571,17 @@ void LLFloaterWorldMap::onClose(bool app_quitting)
     // While we're not visible, discard the overlay images we're using
     LLWorldMap::getInstance()->clearImageRefs();
     mTeleportFinishConnection.disconnect();
+    // [REGION CATEGORIES PINS 2026-10-31] Paul: pins "cleared when the category changes or the floater closes"; the
+    // list goes too (the next open shows the prompt), and an answer still coming is dropped.
+    if (mWolfCatCombo)
+    {
+        ++mWolfCatSeq;
+        wolfCatForget();
+        wolfCatClearPins();
+        mWolfCatCombo->clear();
+        wolfCatShowPrompt();
+        if (mSearchResults) mSearchResults->operateOnAll(LLCtrlListInterface::OP_DELETE);
+    }
 }
 
 // <WolfViewer 2026-10-05> Buy Land. Paul: "can we add a "Buy Land" on the world map if a user is
@@ -705,8 +725,10 @@ void LLFloaterWorldMap::wolfCatUpdateVisibility()
         mWolfCatBand->setVisible(wolf);   // [REGION CATEGORIES VISIBILITY 2026-10-31/]
         if (wolf) wolfCatApplyBandColours();
     }
+    if (mWolfExperiencesBtn) mWolfExperiencesBtn->setVisible(wolf);   // [MAP EXPERIENCES 2026-10-31/]
     if (!wolf)
     {
+        wolfCatClearPins();   // [REGION CATEGORIES PINS 2026-10-31/]
         // Another grid: forget Wolf's list, so coming back reads it again.
         ++mWolfCatSeq;
         wolfCatForget();
@@ -743,17 +765,31 @@ void LLFloaterWorldMap::wolfCatFetchList()
         const LLSD selected = self->mWolfCatCombo->getValue();
         self->mWolfCatCombo->removeall();
         self->mWolfCatNames.clear();
+        // [REGION CATEGORIES SORT 2026-10-31] Paul: "sort the category list alphabetically". The server sorts too
+        // (regioncatlib.php rcNameCmp); sorted here as well so an older answer still reads A-Z. compareDict is
+        // case-insensitive and numbers compare by value, like the region list's own sort (LLScrollListCtrl).
+        struct Cat { S32 id; std::string name; S32 count; };
+        std::vector<Cat> cats;
         for (const LLSD& c : llsd::inArray(reply["categories"]))
         {
-            if (self->mWolfCatNames.size() >= (size_t)WOLF_CAT_MAX_CATS) break;
+            if (cats.size() >= (size_t)WOLF_CAT_MAX_CATS) break;
             const std::string name = c["name"].asString();
             if (!c["id"].isInteger() || c["id"].asInteger() <= 0 || name.empty() || name.size() > 100) continue;
-            const S32 id = c["id"].asInteger();
+            cats.push_back({ c["id"].asInteger(), name, c["count"].asInteger() });
+        }
+        std::stable_sort(cats.begin(), cats.end(), [](const Cat& a, const Cat& b)
+        {
+            const S32 d = LLStringUtil::compareDict(a.name, b.name);
+            return d != 0 ? d < 0 : a.id < b.id;
+        });
+        for (const Cat& c : cats)
+        {
+            if (self->mWolfCatNames.count(c.id)) continue;   // a repeated id: the first one
             LLStringUtil::format_map_t args;
-            args["[CATEGORY]"] = name;
-            args["[COUNT]"] = llformat("%d", c["count"].asInteger());
-            self->mWolfCatCombo->add(LLTrans::getString("worldmap_category_item", args), LLSD(id));
-            self->mWolfCatNames[id] = name;
+            args["[CATEGORY]"] = c.name;
+            args["[COUNT]"] = llformat("%d", c.count);
+            self->mWolfCatCombo->add(LLTrans::getString("worldmap_category_item", args), LLSD(c.id));
+            self->mWolfCatNames[c.id] = c.name;
         }
         // keep the category being shown chosen; [REGION CATEGORIES VISIBILITY 2026-10-31] if it is gone (or none was
         // chosen), removeall() left the old button label, so show the prompt instead
@@ -778,6 +814,7 @@ void LLFloaterWorldMap::wolfCatOnCommit()
     mCompletingRegionName = "";
     mProcessingSearchUpdate = false;
     wolfCatForget();
+    wolfCatClearPins();   // [REGION CATEGORIES PINS 2026-10-31] the old category's pins go at once
     LLStringUtil::format_map_t args;
     args["[CATEGORY]"] = name;
     wolfCatShowComment(LLTrans::getString("worldmap_category_loading", args));
@@ -805,6 +842,9 @@ void LLFloaterWorldMap::wolfCatFill(const LLSD& reply, const std::string& cat_na
     mSearchResults->operateOnAll(LLCtrlListInterface::OP_DELETE);
     wolfCatForget();
     S32 count = 0;
+    // [REGION CATEGORIES PINS 2026-10-31] a pin per region and the box round all of them (global metres)
+    std::vector<LLWorldMapView::WolfCatPin> pins;
+    F64 x0 = 0.0, y0 = 0.0, x1 = 0.0, y1 = 0.0;
     for (const LLSD& r : llsd::inArray(reply["regions"]))
     {
         if (count >= WOLF_CAT_MAX_REGIONS) break;
@@ -836,7 +876,30 @@ void LLFloaterWorldMap::wolfCatFill(const LLSD& reply, const std::string& cat_na
         std::string lower = name;
         LLStringUtil::toLower(lower);
         mWolfCatCells[lower] = std::make_pair(static_cast<U16>(x), static_cast<U16>(y));
+
+        // w/h are metres (regioncats.php, robust.regions sizeX/sizeY); a missing or silly size counts as one region.
+        const S32 w = r["w"].isInteger() && r["w"].asInteger() > 0 && r["w"].asInteger() <= 65536 ? r["w"].asInteger() : REGION_WIDTH_UNITS;
+        const S32 h = r["h"].isInteger() && r["h"].asInteger() > 0 && r["h"].asInteger() <= 65536 ? r["h"].asInteger() : REGION_WIDTH_UNITS;
+        const F64 gx = (F64)x * REGION_WIDTH_METERS, gy = (F64)y * REGION_WIDTH_METERS;
+        pins.push_back({ name, LLVector3d(gx + w * 0.5, gy + h * 0.5, 0.0) });
+        if (count == 0)
+        {
+            x0 = gx; y0 = gy; x1 = gx + w; y1 = gy + h;
+        }
+        else
+        {
+            x0 = llmin(x0, gx); y0 = llmin(y0, gy); x1 = llmax(x1, gx + w); y1 = llmax(y1, gy + h);
+        }
         ++count;
+    }
+    // [REGION CATEGORIES PINS 2026-10-31] Paul: "could we zoom the map to all the entries with pins in it?" Pins on
+    // every region, and the map fitted round them all with the flight deck's own fit (wolfShowArea: the area fills 85%
+    // of the view; on the globe it flies there, so a category spread over the whole grid ends on the globe, which is
+    // as far out as the zoom goes). 20% margin so the outer pins are not on the edge; at least one region across.
+    mMapView->wolfSetCategoryPins(pins);
+    if (count > 0)
+    {
+        wolfShowArea(LLVector3d((x0 + x1) * 0.5, (y0 + y1) * 0.5, 0.0), llmax(x1 - x0, y1 - y0) * 1.2);
     }
     if (count == 0)
     {
@@ -894,6 +957,34 @@ void LLFloaterWorldMap::wolfCatApplyBandColours()
 void LLFloaterWorldMap::wolfCatShowPrompt()
 {
     if (mWolfCatCombo) mWolfCatCombo->setLabel(LLTrans::getString("worldmap_category_prompt"));
+}
+
+// [REGION CATEGORIES PINS 2026-10-31]
+void LLFloaterWorldMap::wolfCatClearPins()
+{
+    if (mMapView) mMapView->wolfSetCategoryPins({});
+}
+
+// The whole region across about 70% of the view (85% of a square 1.2 times its size): the same framing as a name
+// result on the globe (WolfMapGlobe::regionZoom, ~60%), on the flat map as well.
+void LLFloaterWorldMap::wolfCatZoomToRegion(const LLSimInfo* info)
+{
+    if (!info) return;
+    const F64 sx = (F64)info->getSizeX(), sy = (F64)info->getSizeY();
+    LLVector3d middle = info->getGlobalOrigin();
+    middle.mdV[VX] += sx * 0.5;
+    middle.mdV[VY] += sy * 0.5;
+    wolfShowArea(middle, llmax(sx, sy, (F64)REGION_WIDTH_METERS) * 1.2);
+}
+
+void LLFloaterWorldMap::wolfCatSelectPin(const std::string& name)
+{
+    if (!mSearchResults || name.empty()) return;
+    if (mSearchResults->selectByValue(LLSD(name)))
+    {
+        mSearchResults->scrollToShowSelected();
+        onCommitSearchResult(false);   // the row's own path: tracks it, zooms to it, Teleport goes there
+    }
 }
 
 void LLFloaterWorldMap::wolfCatResolvePending()
@@ -1011,6 +1102,7 @@ bool LLFloaterWorldMap::handleScrollWheel(S32 x, S32 y, S32 clicks)
         if (mMapView->pointInView(map_x, map_y))
         {
             mMapView->wolfStopFlight();   // <WolfViewer 2026-10-02/> a scroll takes over from a flight
+            mWolfAreaFlatFollow = false;  // [REGION CATEGORIES PINS 2026-10-31/] and from a flat-map fit
             F32 old_slider_zoom = (F32) mZoomSlider->getValue().asReal();
             F32 slider_zoom     = old_slider_zoom + ((F32) clicks * -0.3333f);
             mZoomSlider->setValue(LLSD(slider_zoom));
@@ -1170,15 +1262,31 @@ void LLFloaterWorldMap::draw()
             }
             else
             {
+                // [REGION CATEGORIES PINS 2026-10-31] The slider clamps z to its range; pan for the zoom it really
+                // takes, and keep panning while the zoom animates (see mWolfAreaFlatFollow). Before, the pan was
+                // computed once for the unclamped z and then rescaled by the zoom animation, so it landed off-centre.
                 wolfSetMapZoom(z);
-                const LLVector3d rel = mWolfAreaCentre - gAgentCamera.getCameraPositionGlobal();
-                const F64 ppm = pow(2.0, (F64)z);
-                mMapView->setPan(-(S32)ll_round(rel.mdV[VX] * ppm), -(S32)ll_round(rel.mdV[VY] * ppm), true);
+                mWolfAreaFlatZoom = (F32)mZoomSlider->getValue().asReal();
+                mWolfAreaFlatStart = LLFrameTimer::getElapsedSeconds();
+                mWolfAreaFlatFollow = true;
             }
         }
     }
     // </WolfViewer>
     mMapView->zoom((F32)mZoomSlider->getValue().asReal());
+    if (mWolfAreaFlatFollow)
+    {
+        // pixels per metre now (getScale: pixels per region); the view's centre to the area's centre
+        const LLVector3d rel = mWolfAreaCentre - gAgentCamera.getCameraPositionGlobal();
+        const F64 ppm = (F64)mMapView->getScale() / REGION_WIDTH_METERS;
+        mMapView->setPan(-(S32)ll_round(rel.mdV[VX] * ppm), -(S32)ll_round(rel.mdV[VY] * ppm), true);
+        if (fabsf(mMapView->getZoom() - mWolfAreaFlatZoom) < 0.005f
+            || LLFrameTimer::getElapsedSeconds() - mWolfAreaFlatStart > 2.0
+            || WolfMapGlobe::instance().active())
+        {
+            mWolfAreaFlatFollow = false;
+        }
+    }
 
     // Enable/disable checkboxes depending on the zoom level
     // If above threshold level (i.e. low res) -> Disable all checkboxes
@@ -2086,6 +2194,7 @@ void LLFloaterWorldMap::onLocationCommit()
     {
         mWolfCatCombo->clear();
         wolfCatShowPrompt();   // [REGION CATEGORIES VISIBILITY 2026-10-31] clear() blanks the button; say what is inside again
+        wolfCatClearPins();    // [REGION CATEGORIES PINS 2026-10-31/]
     }
 
     std::string str = mLocationEditor->getValue().asString();
@@ -2615,6 +2724,16 @@ void LLFloaterWorldMap::onCommitSearchResult(bool from_search)
             trackLocation(pos_global);
             mProcessingSearchUpdate = from_search;
             mTrackCtrlsPanel->setDefaultBtn(mTeleportButton);
+            // [REGION CATEGORIES PINS 2026-10-31] Paul: "clicking a region entry should zoom the map to that region".
+            // A category row zooms to the whole region whether or not the globe is on (wolfShowArea: the globe's
+            // flight, or the flat map's zoom and pan), and its pin becomes the chosen one.
+            if (mWolfCatCells.count(sim_name))
+            {
+                mMapView->wolfSetCategoryPinSelected(mSearchResults->getSelectedValue().asString());
+                wolfCatZoomToRegion(info);
+                wolf_flying = true;
+                break;
+            }
             // <WolfViewer 2026-10-02> Wolf Territories: zoom down to the region found (from the
             // globe too), not only pan to it. onShowTargetBtn below does the pan.
             if (WolfMapGlobe::instance().active())

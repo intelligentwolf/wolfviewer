@@ -59,6 +59,7 @@ class LLComboBox;
 class LLScrollListCtrl;
 class LLTextBox;     // [REGION CATEGORIES VISIBILITY 2026-10-31/]
 class LLIconCtrl;    // [REGION CATEGORIES VISIBILITY 2026-10-31/]
+class LLSimInfo;     // [REGION CATEGORIES PINS 2026-10-31/]
 
 class LLWorldMapParcelInfoObserver : public LLRemoteParcelInfoObserver
 {
@@ -138,6 +139,9 @@ public:
     // <WolfViewer 2026-10-06> Fit the map to a square `span_m` metres across about `centre`
     // (Flight / Sailing Mode's MAP button); applied in draw() once the map view has its size.
     void            wolfShowArea(const LLVector3d& centre, F64 span_m);
+    // [REGION CATEGORIES PINS 2026-10-31] A category pin was clicked on the map: select its search_results row
+    // (which tracks the region and zooms to it, as a click on the row does).
+    void            wolfCatSelectPin(const std::string& name);
 
     // Catch changes in the sim list
     void            updateSims(bool found_null_sim);
@@ -208,6 +212,8 @@ protected:
     void            wolfCatResolvePending();
     void            wolfCatApplyBandColours();   // [REGION CATEGORIES VISIBILITY 2026-10-31/]
     void            wolfCatShowPrompt();         // [REGION CATEGORIES VISIBILITY 2026-10-31/]
+    void            wolfCatClearPins();          // [REGION CATEGORIES PINS 2026-10-31/]
+    void            wolfCatZoomToRegion(const LLSimInfo* info);   // [REGION CATEGORIES PINS 2026-10-31/]
 
 private:
     LLWorldMapView* mMapView; // Panel displaying the map
@@ -219,6 +225,7 @@ private:
     LLPanel*        mWolfCatBand = nullptr;
     LLTextBox*      mWolfCatHeading = nullptr;
     LLIconCtrl*     mWolfCatIcon = nullptr;
+    LLButton*       mWolfExperiencesBtn = nullptr;   // [MAP EXPERIENCES 2026-10-31/] top of the map, Wolf only
     bool            mWolfCatShown = true;       // as laid out in floater_world_map.xml
     S32             mWolfCatResultsShift = 0;   // how far search_results moves up when the combo is hidden
     U32             mWolfCatSeq = 0;            // the newest category request; older answers are dropped
@@ -306,6 +313,12 @@ private:
     bool                    mWolfAreaPending = false;     // <WolfViewer 2026-10-06/> wolfShowArea
     LLVector3d              mWolfAreaCentre;
     F64                     mWolfAreaSpan = 0.0;
+    // [REGION CATEGORIES PINS 2026-10-31] Flat map (globe off): the zoom animates over several frames and LLWorldMapView
+    // setScale rescales the pan as it goes, so the pan to the area's centre is set again each frame until the zoom
+    // has arrived (or 2 s), from the scale actually in use. The zoom is the slider's (clamped) value.
+    bool                    mWolfAreaFlatFollow = false;
+    F32                     mWolfAreaFlatZoom = 0.f;
+    F64                     mWolfAreaFlatStart = 0.0;
     S32                     mWolfViewWidth = 0;
     S32                     mWolfViewHeight = 0;
     U32                     mWolfExtentGen = 0;

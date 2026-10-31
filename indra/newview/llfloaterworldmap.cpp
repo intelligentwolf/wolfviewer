@@ -101,6 +101,8 @@
 #include "llhttpconstants.h"   // [REGION CATEGORIES 2026-10-30/]
 #include "llsdjson.h"          // [REGION CATEGORIES 2026-10-30/]
 #include "wolfadultcontent.h"  // [REGION CATEGORIES 2026-10-30/] the same maturity icon as the map (LLSimInfo::getAccessIcon)
+#include "lliconctrl.h"        // [REGION CATEGORIES VISIBILITY 2026-10-31/] the band's pin
+#include "lluicolortable.h"    // [REGION CATEGORIES VISIBILITY 2026-10-31/] EmphasisColor, the band's accent
 
 //---------------------------------------------------------------------------
 // Constants
@@ -494,9 +496,20 @@ bool LLFloaterWorldMap::postBuild()
     mWolfCatCombo = findChild<LLComboBox>("wolf_region_category");
     if (mWolfCatCombo)
     {
+        // [REGION CATEGORIES VISIBILITY 2026-10-31] The combo sits in an accent band (floater_world_map.xml
+        // wolf_region_category_band); the band is what shows/hides and what search_results moves into. Its rect is in
+        // the same parent (layout_panel_4) as search_results, as the combo's was before.
+        mWolfCatBand = findChild<LLPanel>("wolf_region_category_band");
+        if (mWolfCatBand)
+        {
+            mWolfCatHeading = mWolfCatBand->findChild<LLTextBox>("wolf_region_category_heading");
+            mWolfCatIcon = mWolfCatBand->findChild<LLIconCtrl>("wolf_region_category_icon");
+        }
+        LLView* cat_top = mWolfCatBand ? static_cast<LLView*>(mWolfCatBand) : static_cast<LLView*>(mWolfCatCombo);
         mWolfCatCombo->setCommitCallback([this](LLUICtrl*, const LLSD&) { wolfCatOnCommit(); });
-        mWolfCatResultsShift = mWolfCatCombo->getRect().mTop - mSearchResults->getRect().mTop;
+        mWolfCatResultsShift = cat_top->getRect().mTop - mSearchResults->getRect().mTop;
         mWolfCatShown = true;
+        wolfCatShowPrompt();
         wolfCatUpdateVisibility();
     }
     else
@@ -687,12 +700,18 @@ void LLFloaterWorldMap::wolfCatUpdateVisibility()
         mWolfCatShown = wolf;
     }
     mWolfCatCombo->setVisible(wolf);
+    if (mWolfCatBand)
+    {
+        mWolfCatBand->setVisible(wolf);   // [REGION CATEGORIES VISIBILITY 2026-10-31/]
+        if (wolf) wolfCatApplyBandColours();
+    }
     if (!wolf)
     {
         // Another grid: forget Wolf's list, so coming back reads it again.
         ++mWolfCatSeq;
         wolfCatForget();
         mWolfCatCombo->removeall();
+        wolfCatShowPrompt();   // [REGION CATEGORIES VISIBILITY 2026-10-31] removeall() leaves the old button label
         mWolfCatNames.clear();
         mWolfCatListAt = -1.0;
     }
@@ -736,9 +755,11 @@ void LLFloaterWorldMap::wolfCatFetchList()
             self->mWolfCatCombo->add(LLTrans::getString("worldmap_category_item", args), LLSD(id));
             self->mWolfCatNames[id] = name;
         }
-        if (selected.isInteger() && selected.asInteger() > 0)
+        // keep the category being shown chosen; [REGION CATEGORIES VISIBILITY 2026-10-31] if it is gone (or none was
+        // chosen), removeall() left the old button label, so show the prompt instead
+        if (!(selected.isInteger() && selected.asInteger() > 0 && self->mWolfCatCombo->selectByValue(selected)))
         {
-            self->mWolfCatCombo->selectByValue(selected);   // keep the category being shown chosen
+            self->wolfCatShowPrompt();
         }
     });
 }
@@ -838,6 +859,41 @@ void LLFloaterWorldMap::wolfCatForget()
     mWolfCatCells.clear();
     mWolfCatPending.clear();
     mWolfCatPendingTeleport = false;
+}
+
+// [REGION CATEGORIES VISIBILITY 2026-10-31] WCAG 2.x relative luminance of an sRGB colour
+// (https://www.w3.org/TR/WCAG21/#dfn-relative-luminance; the 0.03928 knee is the one WCAG 2.x states).
+static F32 wolf_cat_luminance(const LLColor4& c)
+{
+    auto lin = [](F32 v)
+    {
+        v = llclamp(v, 0.f, 1.f);
+        return v <= 0.03928f ? v / 12.92f : powf((v + 0.055f) / 1.055f, 2.4f);
+    };
+    return 0.2126f * lin(c.mV[VRED]) + 0.7152f * lin(c.mV[VGREEN]) + 0.0722f * lin(c.mV[VBLUE]);
+}
+
+// [REGION CATEGORIES VISIBILITY 2026-10-31] The band's background is the skin's EmphasisColor (floater_world_map.xml),
+// which is orange, teal, blue, pink, brown, lime, white or black depending on the skin and theme - no one text colour
+// is readable on all of them. Pure black or pure white, whichever contrasts more, always gives at least 4.58:1
+// (the worst case is a luminance of about 0.18, where the two are equal), so the heading meets WCAG 1.4.3 on any
+// accent. The pin (a white image, textures.xml Wolf_Map_Category_Icon) is tinted the same.
+// Read on every open, so a colour changed in the user's colors.xml is followed.
+void LLFloaterWorldMap::wolfCatApplyBandColours()
+{
+    if (!mWolfCatBand) return;
+    const F32 lum = wolf_cat_luminance(LLUIColorTable::instance().getColor("EmphasisColor").get());
+    const F32 with_black = (lum + 0.05f) / 0.05f;
+    const F32 with_white = 1.05f / (lum + 0.05f);
+    const LLColor4 ink = with_black >= with_white ? LLColor4::black : LLColor4::white;
+    if (mWolfCatHeading) mWolfCatHeading->setColor(ink);
+    if (mWolfCatIcon) mWolfCatIcon->setColor(ink);
+}
+
+// [REGION CATEGORIES VISIBILITY 2026-10-31] The prompt the combo shows while no category is chosen.
+void LLFloaterWorldMap::wolfCatShowPrompt()
+{
+    if (mWolfCatCombo) mWolfCatCombo->setLabel(LLTrans::getString("worldmap_category_prompt"));
 }
 
 void LLFloaterWorldMap::wolfCatResolvePending()
@@ -2026,7 +2082,11 @@ void LLFloaterWorldMap::onLocationCommit()
     // [REGION CATEGORIES 2026-10-30] a typed search replaces a category list (and drops an answer still coming)
     ++mWolfCatSeq;
     wolfCatForget();
-    if (mWolfCatCombo) mWolfCatCombo->clear();
+    if (mWolfCatCombo)
+    {
+        mWolfCatCombo->clear();
+        wolfCatShowPrompt();   // [REGION CATEGORIES VISIBILITY 2026-10-31] clear() blanks the button; say what is inside again
+    }
 
     std::string str = mLocationEditor->getValue().asString();
 

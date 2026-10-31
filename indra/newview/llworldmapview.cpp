@@ -72,6 +72,7 @@
 #include "wolfmapglobe.h"         // <WolfViewer 2026-10-02/> animated water + globe (Wolf Territories only)
 #include "wolfflight.h"           // <WolfViewer 2026-10-06/> the trip on the map
 #include "wolfgame.h"             // [WOLF GAME 2026-10-09/] roleplay markers
+#include "lluicolortable.h"       // [REGION CATEGORIES PINS 2026-10-31/] EmphasisColor, the band's accent
 
 namespace
 {
@@ -514,6 +515,15 @@ void LLWorldMapView::draw()
                 gv.centre = kept;
             }
             globe.drawGlobe(gv, sHomeImage, sAvatarYouImage);
+            // [REGION CATEGORIES PINS 2026-10-31] the chosen category's pins, on the globe too (round the back: none)
+            for (const WolfCatPin& pin : mWolfCatPins)
+            {
+                F32 px, py;
+                if (WolfMapGlobe::project(gv, pin.mCentre, px, py))
+                {
+                    drawWolfCategoryPin(px, py, pin.mName == mWolfCatPinSelected, pin.mName);
+                }
+            }
             // None of the flat map's names, markers or tilt: straight to the floater's own parts.
             LLGLDisable no_scissor(GL_SCISSOR_TEST);
             updateDirections();
@@ -794,6 +804,7 @@ void LLWorldMapView::draw()
     // <WolfViewer 2026-10-06/> the Flight / Sailing Mode trip over the map
     drawWolfRoute();
     drawWolfGameMarkers();   // [WOLF GAME 2026-10-09/]
+    drawWolfCategoryPins();  // [REGION CATEGORIES PINS 2026-10-31/]
 
     // Draw icons for the avatars in each region.
     // Drawn this after the current agent avatar so one can see nearby people
@@ -1268,6 +1279,104 @@ void LLWorldMapView::drawWolfGameMarkers()
     }
 }
 
+// [REGION CATEGORIES PINS 2026-10-31] See llworldmapview.h wolfSetCategoryPins.
+void LLWorldMapView::wolfSetCategoryPins(const std::vector<WolfCatPin>& pins)
+{
+    mWolfCatPins = pins;
+    mWolfCatPinSelected.clear();
+}
+
+// One pin: a dark-rimmed head in the skin's accent (EmphasisColor, as the "Find places by type" band) with a white
+// centre, on a short stem whose foot is the region's middle. The chosen one is white with an accent centre, larger,
+// and named on a dark plate (white on black at 0.85: readable over any map tile).
+void LLWorldMapView::drawWolfCategoryPin(F32 x, F32 y, bool selected, const std::string& name)
+{
+    static LLUIColor accent = LLUIColorTable::instance().getColor("EmphasisColor");
+    const F32 r = selected ? 7.f : 5.5f;
+    const F32 head_y = y + r * 2.f;
+    gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
+    gGL.color4f(0.04f, 0.07f, 0.13f, 0.95f);
+    gGL.begin(LLRender::TRIANGLES);
+    gGL.vertex2f(x, y);
+    gGL.vertex2f(x + r * 0.75f, head_y - r * 0.4f);
+    gGL.vertex2f(x - r * 0.75f, head_y - r * 0.4f);
+    gGL.end();
+    gl_circle_2d(x, head_y, r + 1.5f, 16, true);
+    LLColor4 head = selected ? LLColor4::white : accent.get();
+    head.mV[VALPHA] = 1.f;
+    gGL.color4fv(head.mV);
+    gl_circle_2d(x, head_y, r, 16, true);
+    LLColor4 dot = selected ? accent.get() : LLColor4::white;
+    dot.mV[VALPHA] = 1.f;
+    gGL.color4fv(dot.mV);
+    gl_circle_2d(x, head_y, r * 0.38f, 12, true);
+    if (selected && !name.empty())
+    {
+        const LLFontGL* font = LLFontGL::getFontSansSerifSmall();
+        const F32 w = (F32)font->getWidth(name) + 10.f;
+        const F32 h = (F32)font->getLineHeight() + 4.f;
+        const F32 base = head_y + r + 4.f;
+        gGL.getTexUnit(0)->unbind(LLTexUnit::TT_TEXTURE);
+        gGL.color4f(0.f, 0.f, 0.f, 0.85f);
+        gl_rect_2d(ll_round(x - w * 0.5f), ll_round(base + h), ll_round(x + w * 0.5f), ll_round(base), true);
+        font->renderUTF8(name, 0, x, base + 2.f, LLColor4::white, LLFontGL::HCENTER, LLFontGL::BOTTOM,
+                         LLFontGL::NORMAL, LLFontGL::NO_SHADOW);   // the F32 overload (as drawWolfGameMarkers)
+    }
+}
+
+void LLWorldMapView::drawWolfCategoryPins()
+{
+    for (const WolfCatPin& pin : mWolfCatPins)
+    {
+        const LLVector3 p = globalPosToView(pin.mCentre);
+        drawWolfCategoryPin(p.mV[VX], p.mV[VY], pin.mName == mWolfCatPinSelected, pin.mName);
+    }
+}
+
+// Where a pin's head is in untilted view coordinates (the globe has no tilt). False round the back of the globe.
+bool LLWorldMapView::wolfCategoryPinView(const WolfCatPin& pin, F32& x, F32& y)
+{
+    const F32 r = pin.mName == mWolfCatPinSelected ? 7.f : 5.5f;
+    if (WolfMapGlobe::instance().amount(mMapScale) > 0.f)
+    {
+        const WolfMapGlobe::View gv = wolf_globe_view(mPanX, mPanY, mMapRatio, mMapScale, getRect().getWidth(), getRect().getHeight());
+        if (!WolfMapGlobe::project(gv, pin.mCentre, x, y)) return false;
+    }
+    else
+    {
+        const LLVector3 p = globalPosToView(pin.mCentre);
+        x = p.mV[VX];
+        y = p.mV[VY];
+    }
+    y += r * 2.f;
+    return true;
+}
+
+S32 LLWorldMapView::wolfCategoryPinAt(S32 x, S32 y)
+{
+    if (mWolfCatPins.empty()) return -1;
+    F32 fx = (F32)x, fy = (F32)y;
+    if (WolfMapGlobe::instance().amount(mMapScale) <= 0.f)
+    {
+        untiltViewPos(fx, fy);   // the flat map may be tilted; the globe never is
+    }
+    constexpr F32 HIT_PX = 9.f;
+    S32 best = -1;
+    F32 best_d2 = HIT_PX * HIT_PX;
+    for (S32 i = 0; i < (S32)mWolfCatPins.size(); ++i)
+    {
+        F32 px, py;
+        if (!wolfCategoryPinView(mWolfCatPins[i], px, py)) continue;
+        const F32 d2 = (px - fx) * (px - fx) + (py - fy) * (py - fy);
+        if (d2 <= best_d2)
+        {
+            best = i;
+            best_d2 = d2;
+        }
+    }
+    return best;
+}
+
 // <WolfViewer 2026-10-06> Paul: "overlay it on the world map the trip ... great fun if the person
 // wants to fly or sail the route themselves". While Flight or Sailing Mode has a destination: the
 // route as the deck's PLAN view draws it - legs behind dimmed, the one being sailed magenta and
@@ -1625,6 +1734,23 @@ LLVector3d LLWorldMapView::viewPosToGlobal( S32 x, S32 y )
 
 bool LLWorldMapView::handleToolTip( S32 x, S32 y, MASK mask )
 {
+    // [REGION CATEGORIES PINS 2026-10-31] a pin under the pointer: its region's name, and what a click does
+    {
+        const S32 pin = wolfCategoryPinAt(x, y);
+        if (pin >= 0)
+        {
+            S32 screen_x, screen_y;
+            localPointToScreen(x, y, &screen_x, &screen_y);
+            LLRect sticky_rect_screen;
+            sticky_rect_screen.setCenterAndSize(screen_x, screen_y, 9, 9);
+            LLStringUtil::format_map_t args;
+            args["[REGION]"] = mWolfCatPins[pin].mName;
+            LLToolTipMgr::instance().show(LLToolTip::Params()
+                .message(LLTrans::getString("worldmap_category_pin_tip", args))
+                .sticky_rect(sticky_rect_screen));
+            return true;
+        }
+    }
     LLVector3d pos_global = viewPosToGlobal(x, y);
     U64 handle = to_region_handle(pos_global);
     std::string tooltip_msg;
@@ -2349,6 +2475,13 @@ bool LLWorldMapView::handleMouseUp( S32 x, S32 y, MASK mask )
 
             mMouseDownX = 0;
             mMouseDownY = 0;
+        }
+        // [REGION CATEGORIES PINS 2026-10-31] a click on a category pin (flat map or globe) selects its results row
+        else if (const S32 pin = wolfCategoryPinAt(x, y); pin >= 0 && gFloaterWorldMap)
+        {
+            mWolfGlobeGrab = false;
+            const std::string name = mWolfCatPins[pin].mName;   // a copy: the call may replace the pins
+            gFloaterWorldMap->wolfCatSelectPin(name);
         }
         // <WolfViewer 2026-10-02/> A click on the globe picks nothing (double-click flies in).
         else if (WolfMapGlobe::instance().amount(mMapScale) <= 0.f)

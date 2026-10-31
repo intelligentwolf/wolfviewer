@@ -103,6 +103,7 @@
 #include "wolfadultcontent.h"  // [REGION CATEGORIES 2026-10-30/] the same maturity icon as the map (LLSimInfo::getAccessIcon)
 #include "lliconctrl.h"        // [REGION CATEGORIES VISIBILITY 2026-10-31/] the band's pin
 #include "lluicolortable.h"    // [REGION CATEGORIES VISIBILITY 2026-10-31/] EmphasisColor, the band's accent
+#include "wolfmapchart.h"      // [CHART ART 2026-10-31/] the "Chart illustrations" setting
 
 //---------------------------------------------------------------------------
 // Constants
@@ -534,6 +535,17 @@ bool LLFloaterWorldMap::postBuild()
         });
         mWolfExperiencesBtn->setVisible(WolfGrid::isOnWolfTerritories());
     }
+    // [CHART ART 2026-10-31] "Chart illustrations": the account's setting (WolfMapChartArt), Wolf only like the band.
+    mWolfChartArtCheck = findChild<LLCheckBoxCtrl>("wolf_map_chart_art");
+    if (mWolfChartArtCheck)
+    {
+        mWolfChartArtCheck->setCommitCallback([this](LLUICtrl*, const LLSD&)
+        {
+            WolfMapChart::setSettingOn(mWolfChartArtCheck->getValue().asBoolean());
+        });
+        mWolfChartArtCheck->setValue(WolfMapChart::settingOn());
+        mWolfChartArtCheck->setVisible(WolfGrid::isOnWolfTerritories());
+    }
 
     // <FS:Ansariel> Use own expand/collapse function
     //getChild<LLPanel>("expand_btn_panel")->setMouseDownCallback(boost::bind(&LLFloaterWorldMap::onExpandCollapseBtn, this));
@@ -735,6 +747,11 @@ void LLFloaterWorldMap::wolfCatUpdateVisibility()
 {
     const bool wolf = WolfGrid::isOnWolfTerritories();
     if (mWolfExperiencesBtn) mWolfExperiencesBtn->setVisible(wolf);   // [MAP EXPERIENCES 2026-10-31/] first: a skin may lack the band
+    if (mWolfChartArtCheck)                                             // [CHART ART 2026-10-31/] the same gate
+    {
+        mWolfChartArtCheck->setVisible(wolf);
+        mWolfChartArtCheck->setValue(WolfMapChart::settingOn());        // the account's (its settings load after login)
+    }
     if (!mWolfCatCombo || !mSearchResults) return;
     if (wolf != mWolfCatShown)
     {

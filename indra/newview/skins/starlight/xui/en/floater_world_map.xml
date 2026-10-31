@@ -517,6 +517,21 @@
      width="66">
         Adult
     </text>
+    <!-- [CHART ART 2026-10-31] Paul: "could we add illustrations to the map like a sea monster and a compass" (and ships).
+         On by default, remembered per account (WolfMapChartArt); Wolf Territories only (llfloaterworldmap.cpp shows it with
+         the band and the Experiences button). In the 15 px left under "Adult". -->
+    <check_box
+     follows="top|right"
+     height="15"
+     initial_value="true"
+     label="Chart illustrations"
+     layout="topleft"
+     left="135"
+     name="wolf_map_chart_art"
+     tool_tip="Draw the old-chart pictures on the map: a compass rose, sea serpents, whales and sailing ships in the open sea"
+     top_pad="0"
+     visible="false"
+     width="113" />
 </panel>
 
 

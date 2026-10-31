@@ -544,6 +544,15 @@ with the same filename but different name
        WolfAccentGreen by the map's Experiences button. Its own name and file, only in the default skin, because several
        themes ship their own (darker) Rounded_Rect.png, which would darken the green and the contrast with it. -->
   <texture name="Wolf_Flat_Button" file_name="widgets/Wolf_Flat_Button.png" preload="false" scale.left="6" scale.top="26" scale.right="58" scale.bottom="6" />
+  <!-- [CHART ART 2026-10-31] Paul: "could we add illustrations to the map like a sea monster and a compass", "and a couple
+       of ships". Original art drawn for Wolf Territories (region-terrain-work/region-categories-visibility-2026-10-31/art,
+       make_art.py -> render.sh), transparent PNGs; drawn by wolfmapchart.cpp on the World Map, Wolf Territories only. -->
+  <texture name="Wolf_Chart_Compass"    file_name="wolfmap/chart_compass.png"    preload="false" />
+  <texture name="Wolf_Chart_Serpent"    file_name="wolfmap/chart_serpent.png"    preload="false" />
+  <texture name="Wolf_Chart_Whale"      file_name="wolfmap/chart_whale.png"      preload="false" />
+  <texture name="Wolf_Chart_Galleon"    file_name="wolfmap/chart_galleon.png"    preload="false" />
+  <texture name="Wolf_Chart_Sloop"      file_name="wolfmap/chart_sloop.png"      preload="false" />
+  <texture name="Wolf_Chart_Brigantine" file_name="wolfmap/chart_brigantine.png" preload="false" />
     
   <texture name="Marketplace_Dropzone_Background" file_name="widgets/Marketplace_Dropzone_Background.png" preload="true" />
   <texture name="MarketplaceBtn_Off" file_name="widgets/MarketplaceBtn_Off.png" preload="true" scale.left="30" scale.top="19" scale.right="35" scale.bottom="4" />

@@ -111,6 +111,20 @@ public:
     void            drawFrustum();
     void            drawWolfRoute();   // <WolfViewer 2026-10-06/> Flight / Sailing Mode's trip
     void            drawWolfGameMarkers();   // [WOLF GAME 2026-10-09/] Wolf Roleplay markers
+
+    // [REGION CATEGORIES PINS 2026-10-31] Paul: "could we zoom the map to all the entries with pins in it?" A pin on
+    // every region of the category chosen in the World Map's "Find places by type" (LLFloaterWorldMap wolfCatFill),
+    // on the flat map and on the globe. Hovering one names it (tooltip); clicking one selects its search_results row
+    // (LLFloaterWorldMap::wolfCatSelectPin), which zooms to it. An empty list clears them.
+    struct WolfCatPin
+    {
+        std::string mName;      // as search_results shows it (the row's value)
+        LLVector3d  mCentre;    // the middle of the region, global metres
+    };
+    void            wolfSetCategoryPins(const std::vector<WolfCatPin>& pins);
+    void            wolfSetCategoryPinSelected(const std::string& name) { mWolfCatPinSelected = name; }
+    // The pin under a view point, or -1. View coordinates as handleMouseUp gets them.
+    S32             wolfCategoryPinAt(S32 x, S32 y);
     void            drawMipmap(S32 width, S32 height);
     bool            drawMipmapLevel(S32 width, S32 height, S32 level, bool load = true);
 
@@ -208,6 +222,12 @@ public:
     void            wolfStepFlight();
     // Move the view centre to this global point (sets the pan); returns the point after the clamp.
     LLVector3d      wolfSetGlobeCentre(const LLVector3d& centre);
+    // [REGION CATEGORIES PINS 2026-10-31] the pins (see wolfSetCategoryPins) and the drawing of one
+    std::vector<WolfCatPin> mWolfCatPins;
+    std::string     mWolfCatPinSelected;
+    void            drawWolfCategoryPins();                          // the flat map (inside the tilt, like the markers)
+    void            drawWolfCategoryPin(F32 x, F32 y, bool selected, const std::string& name);
+    bool            wolfCategoryPinView(const WolfCatPin& pin, F32& x, F32& y);   // where it is drawn, untilted
     // </WolfViewer>
     S32             mMouseDownPanX;     // value at start of drag
     S32             mMouseDownPanY;     // value at start of drag

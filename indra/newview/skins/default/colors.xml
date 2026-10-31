@@ -1468,4 +1468,16 @@
 	<color
 	 name="WolfBuildAccent"
 	 value="0.560 0.360 0.250 1.000" />
+	<!-- [WOLF GREEN 2026-10-31] Paul: the map's Experiences button in "that green" - the Wolf lime his "Find places by
+	     type" band shows in the Wolf Glass skin: EXACTLY skins/wolfglass/colors.xml EmphasisColor (0.329 0.800 0.086,
+	     #54cc16). A value, not a reference: references are copied when each colors.xml loads (lluicolortable.cpp
+	     insertFromParams), and this file loads first for EVERY skin and theme (loadFromSettings, LLDir::ALL_SKINS), so
+	     this one entry is the same green everywhere and no theme can change it by redefining EmphasisColor.
+	     The text on it: #0b1220 (as WolfStorm's), 8.9:1 on the green. -->
+	<color
+	 name="WolfAccentGreen"
+	 value="0.329 0.800 0.086 1" />
+	<color
+	 name="WolfAccentGreenText"
+	 value="0.043 0.071 0.125 1" />
 </colors>

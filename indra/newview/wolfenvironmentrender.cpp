@@ -45,6 +45,7 @@
 #include "llrendertarget.h"
 #include "llsky.h"
 #include "llviewercamera.h"
+#include "llfloatertools.h"   // [SKYFLASH DIAG 2026-10-31] gFloaterTools
 #include "llviewercontrol.h"
 #include "llviewerregion.h"
 #include "llviewershadermgr.h"
@@ -129,6 +130,13 @@ namespace
     // frame from the document's weather, the numbers follow it over GENUS_TAU seconds (section 10 A23)
     WolfCloudGenus::Result sGenus;
     bool sGenusValid = false;
+    F32  sDiagGainMax = 0.f;      // [SKYFLASH DIAG 2026-10-31] probeSky's largest gain, for verifyFrame's white-sky line
+    bool sDiagGainValid = false;
+    S32  sDiagDomeCalls = 0;      // main-view dome draws since the last verifyFrame
+    F32  sDiagDomeE = 0.f;
+    bool sDiagDomeGainOn = false;
+    U32  sDiagDomeFrame = 0;
+    LLVector3 sDiagDomeCam, sDiagDomeOrigin;
     bool sArrivalHold = false;   // [2026-10-26] updateLight: an arrival in progress, the previous sky held (measureCloudCover waits)
 
     // [WolfViewer 2026-10-28] Jimmy Olsen, ticket #277 (TROMSO by night, W82: "white blinking", the whole sky or a band along the
@@ -2077,6 +2085,91 @@ bool WolfEnvironmentRender::volumetricActive()
 // static
 void WolfEnvironmentRender::verifyFrame(LLRenderTarget* displayed, LLRenderTarget* depthSource)
 {
+    // [SKYFLASH DIAG 2026-10-31] every frame (env WOLF_SKYFLASH_DIAG=1): 16 x 9 samples of the displayed frame; when most sky
+    // samples are white, the same pixel in the HDR screen (before the tone map) and in the G-buffer colour (the dome's own
+    // output), the LL exposure map and the Wolf sky's state are logged
+    static const bool s_diag = getenv("WOLF_SKYFLASH_DIAG") != nullptr;
+    if (s_diag && !gCubeSnapshot && displayed && depthSource && displayed->getFBO() && depthSource->getFBO()
+        && displayed->getWidth() == depthSource->getWidth() && displayed->getHeight() == depthSource->getHeight())
+    {
+        const S32 W = (S32)displayed->getWidth(), H = (S32)displayed->getHeight();
+        GLint prevRead = 0, prevBuf = 0;
+        glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &prevRead);
+        glGetIntegerv(GL_READ_BUFFER, &prevBuf);
+        S32 sky = 0, white = 0, firstWhite = -1;
+        F32 col[16 * 9][4] = {}, dep[16 * 9] = {};
+        for (S32 i = 0; i < 16 * 9; ++i)
+        {
+            const S32 x = (S32)(((i % 16) + 0.5f) / 16.f * W), y = (S32)(((i / 16) + 0.5f) / 9.f * H);
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, displayed->getFBO());
+            glReadBuffer(GL_COLOR_ATTACHMENT0);
+            glReadPixels(x, y, 1, 1, GL_RGBA, GL_FLOAT, col[i]);
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, depthSource->getFBO());
+            glReadPixels(x, y, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &dep[i]);
+            if (dep[i] < 0.99999f) continue;
+            ++sky;
+            if (col[i][0] >= 0.97f && col[i][1] >= 0.97f && col[i][2] >= 0.97f) { ++white; if (firstWhite < 0) firstWhite = i; }
+        }
+        static U32 s_frames = 0, s_hits = 0; static F64 s_minute = 0.0; static S32 s_lines = 0;
+        ++s_frames;
+        const F64 now = LLFrameTimer::getElapsedSeconds();
+        if (now - s_minute >= 60.0)
+        {
+            LL_INFOS("WolfEnvDiag") << "SKYFLASH DIAG minute: " << s_frames << " frames checked, " << s_hits << " white-sky frames" << LL_ENDL;
+            s_minute = now; s_frames = 0; s_hits = 0; s_lines = 0;
+        }
+        if (sky >= 3 && white * 2 > sky)
+        {
+            ++s_hits;
+            if (s_lines++ < 30)
+            {
+                const S32 i = firstWhite;
+                const S32 x = (S32)(((i % 16) + 0.5f) / 16.f * W), y = (S32)(((i / 16) + 0.5f) / 9.f * H);
+                F32 hdr[4] = {}, gb0[4] = {}, gb1[4] = {}, gb2[4] = {}, gb3[4] = {}, ex[4] = {};
+                LLPipeline::RenderTargetPack* rt = gPipeline.mRT;
+                if (rt && rt->screen.getFBO())
+                {
+                    glBindFramebuffer(GL_READ_FRAMEBUFFER, rt->screen.getFBO());
+                    glReadBuffer(GL_COLOR_ATTACHMENT0);
+                    glReadPixels(x, y, 1, 1, GL_RGBA, GL_FLOAT, hdr);
+                }
+                glBindFramebuffer(GL_READ_FRAMEBUFFER, depthSource->getFBO());
+                glReadBuffer(GL_COLOR_ATTACHMENT0);
+                glReadPixels(x, y, 1, 1, GL_RGBA, GL_FLOAT, gb0);
+                glReadBuffer(GL_COLOR_ATTACHMENT1);
+                glReadPixels(x, y, 1, 1, GL_RGBA, GL_FLOAT, gb1);
+                glReadBuffer(GL_COLOR_ATTACHMENT2);
+                glReadPixels(x, y, 1, 1, GL_RGBA, GL_FLOAT, gb2);
+                glReadBuffer(GL_COLOR_ATTACHMENT3);
+                glReadPixels(x, y, 1, 1, GL_RGBA, GL_FLOAT, gb3);
+                if (gPipeline.mExposureMap.getFBO())
+                {
+                    glBindFramebuffer(GL_READ_FRAMEBUFFER, gPipeline.mExposureMap.getFBO());
+                    glReadBuffer(GL_COLOR_ATTACHMENT0);
+                    glReadPixels(0, 0, 1, 1, GL_RGBA, GL_FLOAT, ex);
+                }
+                LLSettingsSky::ptr_t psky = LLEnvironment::instance().getCurrentSky();
+                const F32 gmax = sDiagGainMax;
+                LL_INFOS("WolfEnvDiag") << "SKYFLASH DIAG white sky: frame " << LLFrameTimer::getFrameCount() << ", " << white << " of " << sky
+                    << " sky samples white; sample " << i << " displayed " << col[i][0] << "," << col[i][1] << "," << col[i][2]
+                    << " hdr screen " << hdr[0] << "," << hdr[1] << "," << hdr[2] << "," << hdr[3]
+                    << " gbuf0 " << gb0[0] << "," << gb0[1] << "," << gb0[2] << "," << gb0[3]
+                    << " gbuf1 " << gb1[0] << "," << gb1[1] << "," << gb1[2] << "," << gb1[3]
+                    << " gbuf2 " << gb2[0] << "," << gb2[1] << "," << gb2[2] << "," << gb2[3]
+                    << " gbuf3(emissive) " << gb3[0] << "," << gb3[1] << "," << gb3[2] << "," << gb3[3]
+                    << " | dome draws " << sDiagDomeCalls << " (frame " << sDiagDomeFrame << ") e " << sDiagDomeE << " gainOn " << sDiagDomeGainOn << " domeCam " << sDiagDomeCam << " camOrigin " << sDiagDomeOrigin
+                    << " depth " << dep[i] << " | LL exposure map " << ex[0] << "," << ex[1]
+                    << " | skyActive " << skyActive() << " eepDriven " << eepDriven() << " tier " << tier()
+                    << " exposure " << sFrame.exposure << " gainValid " << sDiagGainValid << " gain max " << gmax << " hold " << sArrivalHold
+                    << " gamma " << (psky ? psky->getGamma() : -1.f) << " probe ambiance " << (psky ? psky->getReflectionProbeAmbiance(false) : -1.f)
+                    << " camera underwater " << LLViewerCamera::getInstance()->cameraUnderWater()
+                    << " tools " << (gFloaterTools && gFloaterTools->getVisible()) << LL_ENDL;
+            }
+        }
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, prevRead);
+        glReadBuffer(prevBuf);
+        sDiagDomeCalls = 0;
+    }
     static LLCachedControl<bool> trace(gSavedSettings, "WolfEnvironmentTrace", false);
     if (!trace || gCubeSnapshot || !displayed || !depthSource) return;
     static F64 s_next = 0.0;
@@ -2572,6 +2665,35 @@ namespace
                 const F32 lg = log2f(llmax(sGain[n].mV[c], 1e-9f));
                 sGain[n].mV[c] = exp2f(lg + (sumLog / (F32)used - lg) * k);
             }
+        }
+        // [SKYFLASH DIAG 2026-10-31] every probe update: the largest gain and its node, and any node that moved x4 or more
+        {
+            F32 gmax = 0.f, gmin = 1e30f; S32 nmax = -1;
+            for (S32 n = 0; n < NPROBE; ++n)
+                for (S32 c = 0; c < 3; ++c)
+                {
+                    if (sGain[n].mV[c] > gmax) { gmax = sGain[n].mV[c]; nmax = n; }
+                    gmin = llmin(gmin, sGain[n].mV[c]);
+                }
+            static F32 s_lastMax = 1.f;
+            if (gmax > 4.f * s_lastMax || gmax * 4.f < s_lastMax || gmax > 8.f)
+            {
+                std::ostringstream o;
+                o << "SKYFLASH DIAG gains: max " << gmax << " (node " << nmax << ") min " << gmin << " was max " << s_lastMax
+                  << ", cut " << cut << " refJump " << refJump << " dt " << dt << " k " << k << " frame " << LLFrameTimer::getFrameCount();
+                if (nmax >= 0)
+                {
+                    for (S32 side = 0; side < 2; ++side)
+                    {
+                        const S32 i = 2 * nmax + side;
+                        o << "\n  node " << nmax << " side " << side << " dir " << readDir[i] << " raw " << sProbeRaw[i] << " target " << sProbeTarget[i];
+                    }
+                }
+                LL_INFOS("WolfEnvDiag") << o.str() << LL_ENDL;
+            }
+            s_lastMax = gmax;
+            sDiagGainMax = gmax;
+            sDiagGainValid = true;
         }
         sGainValid = true;
         sAtmos->setEepGains(sGain, true);
@@ -3095,6 +3217,26 @@ bool WolfEnvironmentRender::renderSkyDome()
         static LLStaticHashedString s_gon("wolfEepGainOn"), s_dgain("wolfEepDomeGain");
         sh.uniform1f(s_gon, 0.f);
         sh.uniform1f(s_dgain, sGainValid ? 1.f : 0.f);
+        if (!gCubeSnapshot)   // [SKYFLASH DIAG 2026-10-31]
+        {
+            ++sDiagDomeCalls; sDiagDomeE = e; sDiagDomeGainOn = sGainValid; sDiagDomeFrame = LLFrameTimer::getFrameCount();
+            sDiagDomeCam = cameraWorldFromView();
+            sDiagDomeOrigin = LLViewerCamera::getInstance()->getOrigin();
+            if (dist_vec(sDiagDomeCam, sDiagDomeOrigin) > 1.f)
+            {
+                static F64 s_lastCamLog = -10.0; static S32 s_camLines = 0;
+                const F64 nowS = LLFrameTimer::getElapsedSeconds();
+                if (nowS - s_lastCamLog > 60.0) s_camLines = 0;
+                if (s_camLines++ < 20)
+                {
+                    s_lastCamLog = nowS;
+                    LL_INFOS("WolfEnvDiag") << "SKYFLASH DIAG dome camera mismatch: frame " << LLFrameTimer::getFrameCount() << " view-matrix camera "
+                                            << sDiagDomeCam << " LLViewerCamera origin " << sDiagDomeOrigin << " (" << dist_vec(sDiagDomeCam, sDiagDomeOrigin)
+                                            << " m apart), shadow render " << LLPipeline::sShadowRender << " reflection " << LLPipeline::sReflectionRender
+                                            << " underwater " << LLPipeline::sUnderWaterRender << LL_ENDL;
+                }
+            }
+        }
     }
 
     // last frame's light shafts (sky.frag HAS_SHADOW_LENGTH: the program is built with it; no clouds = a zero

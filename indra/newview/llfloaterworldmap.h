@@ -226,6 +226,7 @@ private:
     LLTextBox*      mWolfCatHeading = nullptr;
     LLIconCtrl*     mWolfCatIcon = nullptr;
     LLButton*       mWolfExperiencesBtn = nullptr;   // [MAP EXPERIENCES 2026-10-31/] top of the map, Wolf only
+    LLCheckBoxCtrl* mWolfChartArtCheck = nullptr;   // [CHART ART 2026-10-31/] "Chart illustrations", Wolf only
     bool            mWolfCatShown = true;       // as laid out in floater_world_map.xml
     S32             mWolfCatResultsShift = 0;   // how far search_results moves up when the combo is hidden
     U32             mWolfCatSeq = 0;            // the newest category request; older answers are dropped

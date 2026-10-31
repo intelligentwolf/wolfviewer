@@ -73,6 +73,7 @@
 #include "wolfflight.h"           // <WolfViewer 2026-10-06/> the trip on the map
 #include "wolfgame.h"             // [WOLF GAME 2026-10-09/] roleplay markers
 #include "lluicolortable.h"       // [REGION CATEGORIES PINS 2026-10-31/] EmphasisColor, the band's accent
+#include "wolfmapchart.h"         // [CHART ART 2026-10-31/] compass rose and sea pictures (Wolf Territories only)
 
 namespace
 {
@@ -515,6 +516,10 @@ void LLWorldMapView::draw()
                 gv.centre = kept;
             }
             globe.drawGlobe(gv, sHomeImage, sAvatarYouImage);
+            // [CHART ART 2026-10-31] the compass rose (faint: over the globe it is in space, but may cross its rim), then
+            // the sea pictures - both before the pins, so neither ever hides one
+            WolfMapChart::instance().drawCompass(width, height, 0.6f);
+            WolfMapChart::instance().drawGlobe(gv);
             // [REGION CATEGORIES PINS 2026-10-31] the chosen category's pins, on the globe too (round the back: none)
             for (const WolfCatPin& pin : mWolfCatPins)
             {
@@ -545,6 +550,10 @@ void LLWorldMapView::draw()
     // <FS:Wolf/> Everything from here to the matching pop is the MAP, and it tilts. The
     // background above stays flat so the panel is still filled corner to corner, and the
     // floater's own controls (drawn later by LLView::draw) are never touched.
+    // [CHART ART 2026-10-31] The compass rose, fixed in the corner and never tilted, drawn BEFORE the map: the region
+    // tiles, names, pins and markers all go over it (it shows through the sea), so it never hides anything.
+    WolfMapChart::instance().drawCompass(width, height, 0.9f);
+
     const bool tilted = pushTiltProjection();
 
     // Draw the image tiles
@@ -557,6 +566,10 @@ void LLWorldMapView::draw()
     drawMipmap(width, height);
 #endif //OPENSIM
 // </FS:CR> Aurora Sim
+
+    // [CHART ART 2026-10-31] The sea pictures: straight after the tiles, so region names, owners' images, pins, the
+    // agent and every marker are drawn over them; inside the tilt, printed on the map plane.
+    WolfMapChart::instance().drawFlat(*this, mMapScale);
 
     // <WolfViewer 2026-09-25/> Region owners' map images: over the tiles, under the names and
     // markers, and inside the tilt so they lie on the map plane.

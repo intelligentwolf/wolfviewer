@@ -2483,6 +2483,19 @@ namespace
     LLVector3 sProbeDir[NDIR];
     LLColor3 sProbeRaw[NDIR], sProbeTarget[NDIR];
     F32 sProbeHorizonDeg = 0.f;   // the horizon row of the last reading (the verification log)
+    // the probe's target (probeSky). [2026-10-31] Allocated by probeSkyTarget at the top of renderSkyDome, before the dome's
+    // textures are bound: allocating binds the new texture on unit 0 (llrendertarget.cpp addColorAttachment, bindManual), which
+    // since the probe also runs just before the draw (beforeDraw) could otherwise replace a sampler the dome reads from unit 0
+    LLRenderTarget sProbeRT;
+    bool probeSkyTarget()
+    {
+        if (sProbeRT.isComplete()) return true;
+        if (sProbeRT.allocate(NDIR, 1, GL_RGBA16F, false)) return true;
+        // allocate returns at once when the size already matches, attachment or not (llrendertarget.cpp): released, so the
+        // next frame really tries again
+        sProbeRT.release();
+        return false;
+    }
 
     /**
      * Renders the native dome (the program `sh`, every uniform already set for this frame) at the grid's directions with the
@@ -2492,8 +2505,17 @@ namespace
      * each node probed on both sides of the light and its two ratios averaged in log (a sky that is not symmetric about the
      * light is corrected on average, never mirrored), and it reaches the true horizon. Twice a second; the gains ease over half a second in log space (a cut -
      * teleport, a sky switched by hand, the stock light passing from the sun to the moon - takes them at once).
+     *
+     * [WolfViewer 2026-10-31 sky flash] `beforeDraw`: called again just before the main view's dome draw. At twilight the physical
+     * dome is 7 to 75 times brighter than the stock sky it is matched to, so a frame drawn without valid gains is a white sky
+     * (Paul 05:3xZ, every log-in, every arrival: the trace showed the dome's own colour at 1.6-11 against ~0.05, gains off). There,
+     * when the gains are not valid - the first frames of the native sky, after the EEP stopped driving it - or the reading in
+     * flight was taken before a cut (an agent jump over 300 m since it was rendered, or the stock light moved 5 deg or more), one
+     * reading is taken and read at once (one wait for the GPU, at a start or a cut only) and applied in full, so this very frame's
+     * dome is already matched. The reading in flight is then dropped: it saw the place left behind (the trace after Paul's
+     * teleport to TROMSO 06:07:56Z: gains 0.05 from it, 0.48 half a second later).
      */
-    void probeSky(LLGLSLShader& sh)
+    void probeSky(LLGLSLShader& sh, bool beforeDraw)
     {
         LLSettingsSky::ptr_t psky = LLEnvironment::instance().getCurrentSky();
         if (!psky || !WolfEnvironmentRender::eepDriven())
@@ -2503,19 +2525,37 @@ namespace
             return;
         }
         if (gCubeSnapshot || !gPipeline.mScreenTriangleVB) return;
+        // [WolfViewer 2026-10-13] Paul: "every time I move the cloud jerks" - a glReadPixels into client memory waits for the
+        // GPU to finish the frame so far. The working probe is read into a pixel-pack buffer instead and mapped at the NEXT
+        // probe, half a second later, when the copy is long done: no wait. (The verification render below, trace only, and the
+        // reading before the draw at a start or a cut, still read at once.)
+        static GLuint s_pbo = 0;
+        static bool s_pending = false;
+        static LLVector3 s_pendDir[NDIR];
+        static LLVector3 s_pendRef = LLVector3::z_axis;   // the light the reading in flight was taken round
+        static F32 s_pendHorizon = 0.f;
+        static LLVector3d s_pendPlace;                     // [2026-10-31] and where the agent was (placeGlobal)
+        // the grid's light: the stock sky's (eepLightWorld); a teleport is the agent's jump (placeGlobal, ticket #277)
+        const LLVector3 ref = eepLightWorld(psky, sFrame);
+        const LLVector3d place = placeGlobal();
         static F64 s_next = 0.0, s_last = 0.0;
         const F64 t = LLFrameTimer::getElapsedSeconds();
-        if (t < s_next) return;
+        bool prime = false;
+        if (beforeDraw)
+        {
+            const bool stale = s_pending && ((place - s_pendPlace).magVec() > 300.0 || s_pendRef * ref < cosf(5.f * DEG_TO_RAD));
+            if (sGainValid && !stale) return;
+            prime = true;
+        }
+        else if (t < s_next) return;
         const F32 dt = s_last > 0.0 ? (F32)llmin(t - s_last, 2.0) : 0.f;
         s_next = t + 0.5; s_last = t;
 
-        static LLRenderTarget s_rt;
-        if (!s_rt.isComplete() && !s_rt.allocate(NDIR, 1, GL_RGBA16F, false)) return;
+        if (!sProbeRT.isComplete()) return;   // allocated by probeSkyTarget (renderSkyDome), before any texture of the pass is bound
         static bool s_whiteInit = false;
         if (!s_whiteInit) { for (S32 i = 0; i < NPROBE; ++i) sGain[i] = LLColor3::white; s_whiteInit = true; }
 
         // the grid's directions (world: x east, y north, z up) round the stock sky's light, its last row on the true horizon
-        const LLVector3 ref = eepLightWorld(psky, sFrame);
         const F32 horizonDeg = eepHorizonRowDeg(sFrame);
         for (S32 r = 0; r < EEP_GAIN_ROWS; ++r)
         {
@@ -2528,15 +2568,6 @@ namespace
         }
 
         static LLStaticHashedString s_probe("uProbe"), s_dgain("wolfEepDomeGain");
-        // [WolfViewer 2026-10-13] Paul: "every time I move the cloud jerks" - a glReadPixels into client memory waits for the
-        // GPU to finish the frame so far. The working probe is read into a pixel-pack buffer instead and mapped at the NEXT
-        // probe, half a second later, when the copy is long done: no wait. (The verification render below, trace only, still
-        // reads at once.)
-        static GLuint s_pbo = 0;
-        static bool s_pending = false;
-        static LLVector3 s_pendDir[NDIR];
-        static LLVector3 s_pendRef = LLVector3::z_axis;   // the light the reading in flight was taken round
-        static F32 s_pendHorizon = 0.f;
         if (!s_pbo)
         {
             glGenBuffers(1, &s_pbo);
@@ -2551,7 +2582,7 @@ namespace
             sh.uniform1f(s_dgain, gainsOn ? 1.f : 0.f);   // the dome's gain is on its whole colour (skyF.glsl wolfEepDomeGain)
             GLint vp[4] = { 0, 0, 0, 0 };
             glGetIntegerv(GL_VIEWPORT, vp);   // flush() rebinds the frame's target at its full size: a snapshot tile's viewport is kept
-            s_rt.bindTarget();
+            sProbeRT.bindTarget();
             {
                 LLGLDepthTest depth(GL_FALSE, GL_FALSE);
                 LLGLDisable blend(GL_BLEND);
@@ -2568,40 +2599,53 @@ namespace
                     glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
                 }
             }
-            s_rt.flush();
+            sProbeRT.flush();
             glViewport(vp[0], vp[1], vp[2], vp[3]);
             sh.uniform1f(s_probe, 0.f);
             sh.uniform1f(s_dgain, sGainValid ? 1.f : 0.f);
         };
-        // the reading started at the last probe (its directions kept with it), then the next one started
         F32 px[NDIR * 4] = {};
         bool haveReading = false;
-        if (s_pending)
-        {
-            glBindBuffer(GL_PIXEL_PACK_BUFFER, s_pbo);
-            if (const void* mapped = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, NDIR * 4 * sizeof(F32), GL_MAP_READ_BIT))
-            {
-                memcpy(px, mapped, sizeof(px));
-                glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
-                haveReading = true;
-            }
-            glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
-            s_pending = false;
-        }
         LLVector3 readDir[NDIR];
-        for (S32 i = 0; i < NDIR; ++i) readDir[i] = s_pendDir[i];
-        const LLVector3 readRef = s_pendRef;
-        const F32 readHorizon = s_pendHorizon;
-        render(false, nullptr);
-        for (S32 i = 0; i < NDIR; ++i) s_pendDir[i] = sProbeDir[i];
-        s_pendRef = ref; s_pendHorizon = horizonDeg;
-        s_pending = true;
+        LLVector3 readRef = s_pendRef;
+        F32 readHorizon = s_pendHorizon;
+        if (prime)
+        {
+            // [2026-10-31] this frame's reading, read at once; the one in flight (if any) is dropped
+            s_pending = false;
+            render(false, px);
+            haveReading = true;
+            for (S32 i = 0; i < NDIR; ++i) readDir[i] = sProbeDir[i];
+            readRef = ref;
+            readHorizon = horizonDeg;
+        }
+        else
+        {
+            // the reading started at the last probe (its directions kept with it), then the next one started
+            if (s_pending)
+            {
+                glBindBuffer(GL_PIXEL_PACK_BUFFER, s_pbo);
+                if (const void* mapped = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, NDIR * 4 * sizeof(F32), GL_MAP_READ_BIT))
+                {
+                    memcpy(px, mapped, sizeof(px));
+                    glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+                    haveReading = true;
+                }
+                glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+                s_pending = false;
+            }
+            for (S32 i = 0; i < NDIR; ++i) readDir[i] = s_pendDir[i];
+            render(false, nullptr);
+            for (S32 i = 0; i < NDIR; ++i) s_pendDir[i] = sProbeDir[i];
+            s_pendRef = ref; s_pendHorizon = horizonDeg; s_pendPlace = place;
+            s_pending = true;
+        }
 
         // VERIFICATION (WolfEnvironmentTrace, every 15 s): the same grid directions rendered WITH this frame's gains, through
         // the stock display chain, against the stock sky's - what the screen shows, measured, not computed
         static LLCachedControl<bool> trace(gSavedSettings, "WolfEnvironmentTrace", false);
         static F64 s_nextVerify = 0.0;
-        if (trace && sGainValid && t >= s_nextVerify)
+        if (!prime && trace && sGainValid && t >= s_nextVerify)
         {
             s_nextVerify = t + 15.0;
             F32 pv[NDIR * 4] = {};
@@ -2656,10 +2700,9 @@ namespace
         if (!haveReading) return;
         // [2026-10-28] a teleport is the agent's jump (placeGlobal, ticket #277), not the camera's
         static LLVector3d s_lastPlace; static bool s_havePlace = false;
-        const LLVector3d place = placeGlobal();
         // the stock light passing from the sun to the moon (or back) moves the whole grid: a cut too (5 deg or more at once)
         const bool refJump = readRef * sEepSkyRefWorld < cosf(5.f * DEG_TO_RAD);
-        const bool cut = !sGainValid || dt <= 0.f || refJump || (s_havePlace && (place - s_lastPlace).magVec() > 300.0);
+        const bool cut = prime || !sGainValid || dt <= 0.f || refJump || (s_havePlace && (place - s_lastPlace).magVec() > 300.0);
         s_lastPlace = place; s_havePlace = true;
         sEepSkyRefWorld = readRef;   // the gains below are this reading's: their angles are to its light
         sProbeHorizonDeg = readHorizon;
@@ -2691,6 +2734,15 @@ namespace
         }
         sGainValid = true;
         sAtmos->setEepGains(sGain, true);
+        if (prime)
+        {
+            // [2026-10-31] the dome drawn next takes the gains just measured: its uniforms were set before this reading
+            // (setRuntimeUniforms, and frameUpdate's reference), so the block, the reference and the switch are set again here.
+            // Without it the first frame read the block as it was - all zero at a log-in (a black frame, seen 08:14:39Z).
+            sAtmos->setEepGainRefs(toECEF(sFrame, sEepSkyRefWorld), toECEF(sFrame, sEepCloudRefWorld));
+            sAtmos->refreshEepGains(sh);
+            sh.uniform1f(s_dgain, 1.f);
+        }
     }
 }
 
@@ -3151,6 +3203,7 @@ bool WolfEnvironmentRender::renderSkyDome()
 {
     sMoonDrawn.on = false;   // [2026-10-27] set again below if this pass draws a moon disc
     if (!skyActive()) return false;
+    probeSkyTarget();   // [2026-10-31] the EEP probe's target, before any of this pass's textures are bound (sProbeRT)
     const WolfEnvDoc& d = WolfEnvironmentState::instance().active();
     LLGLSLShader& sh = gWolfEnvSkyProgram;
     // the driver's own messages for this whole pass (wolfSkyGLDebug), trace only, once every 10 s, the main view only
@@ -3592,6 +3645,10 @@ bool WolfEnvironmentRender::renderSkyDome()
         }
     }
     const bool domeMeasure = domeTrace && !gCubeSnapshot && !s_domeQueryPending && domeNow >= s_domeNext;
+    // [WolfViewer 2026-10-31 sky flash] no frame of the dome without valid EEP gains: at a start or a cut they are measured here,
+    // before the draw (probeSky beforeDraw; nothing when they are valid and the reading in flight is current) - and before the
+    // trace's sample count starts, so the probe's own pixels are not counted as the dome's
+    probeSky(sh, true);
     if (domeMeasure)
     {
         s_domeNext = domeNow + 10.0;
@@ -3789,7 +3846,7 @@ bool WolfEnvironmentRender::renderSkyDome()
         // the depth state the sky pass ran under, LL's own record of it (LLGLDepthTest's previous state), for the sky watch
         sSkyWatchDepth = (sky.mDepth.mPrevDepthEnabled ? 4 : 0) | (sky.mDepth.mPrevWriteEnabled ? 2 : 0) | (sky.mDepth.mPrevDepthFunc == GL_LEQUAL ? 1 : 0);
     }
-    probeSky(sh);   // [WolfViewer 2026-10-13] the EEP drives the sky: measure this dome against the stock one
+    probeSky(sh, false);   // [WolfViewer 2026-10-13] the EEP drives the sky: measure this dome against the stock one
     if (seaProbe) gPipeline.unbindReflectionProbes(sh);
     if (moonUnit >= 0) gGL.getTexUnit(moonUnit)->unbind(LLTexUnit::TT_TEXTURE);
     if (sunUnit >= 0) gGL.getTexUnit(sunUnit)->unbind(LLTexUnit::TT_TEXTURE);
@@ -4280,6 +4337,7 @@ void WolfEnvironmentRender::releaseGL()
     sGpu.probeLayer.release();
     sGpu.camShadow.release();
     sStockRT.release();   // [round 16] the stock cloud probe
+    sProbeRT.release();   // [2026-10-31] the EEP probe's target (probeSkyTarget allocates it again at the next sky pass)
     if (sStockPbo) { glDeleteBuffers(1, &sStockPbo); sStockPbo = 0; sStockPboBytes = 0; }
     sStockPending = false;
     if (sGpu.camPbo[0]) { glDeleteBuffers(2, sGpu.camPbo); sGpu.camPbo[0] = sGpu.camPbo[1] = 0; }

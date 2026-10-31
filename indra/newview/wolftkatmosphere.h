@@ -129,6 +129,10 @@ namespace WolfTk
         /** [WolfViewer 2026-10-25] The directions (ECEF, this frame's) the sky's and the clouds' gain azimuths are measured from
          *  (brunetonRuntime.glsl wolfEepGainRef, cloudsF.glsl wolfEepCloudGainRef); set every frame (the ECEF frame moves). */
         void setEepGainRefs(const LLVector3& sky_ref_ecef, const LLVector3& cloud_ref_ecef) { mEepGainRef = sky_ref_ecef; mEepCloudGainRef = cloud_ref_ecef; }
+        /** [WolfViewer 2026-10-31] For a program setRuntimeUniforms already set up this frame, after setEepGains / setEepGainRefs
+         *  changed: the WolfEepGains block uploaded and bound, and wolfEepGainRef set (wolfenvironmentrender.cpp probeSky, the
+         *  reading taken just before the dome's draw - without it that draw read the block and the reference as they were). */
+        void refreshEepGains(LLGLSLShader& sh) const;
         /** [WolfViewer 2026-10-25] The night's light as the eye sees it (wolftk/nightLight.glsl wolfNight / wolfNightS): how far into
          *  night (WolfEnvironmentRender::nightFactor, 0 = off) and the rods' saturation s at the frame's adaptation luminance. */
         void setNightLight(F32 night, F32 s) { mNight = night; mNightS = s; }

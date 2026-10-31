@@ -1075,6 +1075,14 @@ void Atmosphere::bindEepBlock() const
     glBindBufferBase(GL_UNIFORM_BUFFER, LLGLSLShader::UB_WOLF_EEP_GAINS, mEepBlock);
 }
 
+void Atmosphere::refreshEepGains(LLGLSLShader& sh) const
+{
+    bindEepBlock();   // uploads the gains if they changed, binds the block
+    // as setRuntimeUniforms sets it
+    const GLint lgr = location(sh.mProgramObject, "wolfEepGainRef");
+    if (lgr >= 0) glUniform3fv(lgr, 1, mEepGainRef.mV);
+}
+
 void Atmosphere::setEepProbeDirs(const LLVector3 dirs[EEP_PROBES])
 {
     bindEepBlock();   // creates it, writes the gains if they changed, binds it

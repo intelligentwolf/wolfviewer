@@ -1030,6 +1030,7 @@ set(viewer_SOURCE_FILES
     wolffloaterterraform.cpp # [WOLF TERRAFORM 2026-10-23] the Terraform window
     wolfsurfcurl.cpp
     wolfmapglobe.cpp
+    wolfmapchart.cpp
     wolfmapoverlays.cpp
     wolfdrive.cpp
     wolfborder.cpp   # [BORDER GUARD 2026-10-16]
@@ -2025,6 +2026,7 @@ set(viewer_HEADER_FILES
     wolffloaterterraform.h
     wolfsurfcurl.h
     wolfmapglobe.h
+    wolfmapchart.h
     wolfmapoverlays.h
     wolfdrive.h
     wolfborder.h   # [BORDER GUARD 2026-10-16]

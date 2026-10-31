@@ -1,5 +1,16 @@
 <llsd>
     <map>
+    <key>WolfMapChartArt</key>
+    <map>
+      <key>Comment</key>
+      <string>[CHART ART 2026-10-31] World Map on Wolf Territories: draw the chart illustrations (compass rose, sea serpents, whales, sailing ships in the open sea). The map's "Chart illustrations" box.</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>Boolean</string>
+      <key>Value</key>
+      <integer>1</integer>
+    </map>
     <key>WolfChatCollapsedCategories</key>
     <map>
       <key>Comment</key>

@@ -621,24 +621,66 @@
     </button>
     <!-- [REGION CATEGORIES 2026-10-30] Paul: "add those category buttons to the MAP SEARCH so someone looking for
          shops can just click 'SHOPS' and get a list of shopping regions". The categories region owners choose on
-         wolf-grid.com; llfloaterworldmap.cpp fills it and shows it on Wolf Territories only (hidden elsewhere, and
-         search_results then moves up into its place). Choosing one fills search_results below. -->
-    <combo_box
-     allow_text_entry="false"
+         wolf-grid.com; llfloaterworldmap.cpp fills the combo and shows the band on Wolf Territories only (hidden
+         elsewhere, and search_results then moves up into its place). Choosing one fills search_results below.
+         [REGION CATEGORIES VISIBILITY 2026-10-31] Paul: "great but not obvious - can we change their colours or
+         something". The combo now sits in a band of the skin's own accent (EmphasisColor, defined by every skin and
+         theme) under a map-pin icon and the heading "Find places by type"; llfloaterworldmap.cpp
+         (wolfCatApplyBandColours) sets the heading and pin to black or white, whichever contrasts more with that
+         accent, so the text is at least 4.5:1 in every skin and theme. The label says what is inside. -->
+    <panel
+     background_visible="true"
+     bg_alpha_color="EmphasisColor"
+     bg_opaque_color="EmphasisColor"
      follows="top|right"
-     height="23"
-     label="Regions by Category"
+     height="46"
      layout="topleft"
      left="2"
+     mouse_opaque="false"
+     name="wolf_region_category_band"
      top_pad="5"
-     name="wolf_region_category"
-     tool_tip="Show the online regions in a category - shops, venues, roleplay and more. Region owners choose their categories on their region page at wolf-grid.com."
-     width="246" />
+     width="246">
+      <icon
+       follows="top|left"
+       height="16"
+       image_name="Wolf_Map_Category_Icon"
+       layout="topleft"
+       left="5"
+       mouse_opaque="false"
+       name="wolf_region_category_icon"
+       top="2"
+       width="16" />
+      <text
+       follows="top|left"
+       font="SansSerifBold"
+       font_shadow="none"
+       height="16"
+       layout="topleft"
+       left_pad="5"
+       mouse_opaque="false"
+       name="wolf_region_category_heading"
+       text_color="White"
+       top="3"
+       width="215">
+        Find places by type
+      </text>
+      <combo_box
+       allow_text_entry="false"
+       follows="top|left"
+       height="23"
+       label="Choose a type: shops, venues, events..."
+       layout="topleft"
+       left="3"
+       name="wolf_region_category"
+       tool_tip="Show the online regions of one type - shops, venues, roleplay and more. The number is how many are online now. Region owners choose their region's types on their region page at wolf-grid.com."
+       top="20"
+       width="240" />
+    </panel>
     <scroll_list
      draw_stripes="false"
      bg_writeable_color="MouseGray"
      follows="all"
-     height="117"
+     height="94"
      layout="topleft"
      left="2"
      name="search_results"

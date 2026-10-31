@@ -536,6 +536,10 @@ with the same filename but different name
   <texture name="Locked_Icon" file_name="icons/Locked_Icon.png" preload="false" />
 
   <texture name="Map_Placeholder_Icon" file_name="icons/map_placeholder.png" preload="true" />
+  <!-- [REGION CATEGORIES VISIBILITY 2026-10-31] the map pin of toolbar_icons/destinations.png, copied so every skin and
+       theme draws the same WHITE pin (some themes ship a black destinations.png); llfloaterworldmap.cpp tints it black
+       or white to match the band text. Only in the default skin on purpose. -->
+  <texture name="Wolf_Map_Category_Icon" file_name="icons/Wolf_Map_Category.png" preload="false" />
     
   <texture name="Marketplace_Dropzone_Background" file_name="widgets/Marketplace_Dropzone_Background.png" preload="true" />
   <texture name="MarketplaceBtn_Off" file_name="widgets/MarketplaceBtn_Off.png" preload="true" scale.left="30" scale.top="19" scale.right="35" scale.bottom="4" />

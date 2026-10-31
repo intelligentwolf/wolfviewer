@@ -57,6 +57,8 @@ class LLSpinCtrl;
 class LLSearchEditor;
 class LLComboBox;
 class LLScrollListCtrl;
+class LLTextBox;     // [REGION CATEGORIES VISIBILITY 2026-10-31/]
+class LLIconCtrl;    // [REGION CATEGORIES VISIBILITY 2026-10-31/]
 
 class LLWorldMapParcelInfoObserver : public LLRemoteParcelInfoObserver
 {
@@ -204,12 +206,19 @@ protected:
     void            wolfCatShowComment(const std::string& text);
     void            wolfCatForget();
     void            wolfCatResolvePending();
+    void            wolfCatApplyBandColours();   // [REGION CATEGORIES VISIBILITY 2026-10-31/]
+    void            wolfCatShowPrompt();         // [REGION CATEGORIES VISIBILITY 2026-10-31/]
 
 private:
     LLWorldMapView* mMapView; // Panel displaying the map
     S32 mWolfBuyLandFor = -1;  // [WOLF GRID GATE 2026-10-17/] the grid answer Buy Land was last decided on (draw)
     // [REGION CATEGORIES 2026-10-30]
     LLComboBox*     mWolfCatCombo = nullptr;
+    // [REGION CATEGORIES VISIBILITY 2026-10-31] the accent band holding the combo, its heading and pin (all optional:
+    // a skin without the band has just the combo, as before)
+    LLPanel*        mWolfCatBand = nullptr;
+    LLTextBox*      mWolfCatHeading = nullptr;
+    LLIconCtrl*     mWolfCatIcon = nullptr;
     bool            mWolfCatShown = true;       // as laid out in floater_world_map.xml
     S32             mWolfCatResultsShift = 0;   // how far search_results moves up when the combo is hidden
     U32             mWolfCatSeq = 0;            // the newest category request; older answers are dropped

@@ -223,7 +223,7 @@
     <combo_box.item label="Small model" value="mesh" />
    </combo_box>
    <text follows="left|top" layout="topleft" left="30" top="130" width="300" height="16" font="SansSerifBold" text_color="0.97 0.93 0.9 1" name="ai_prompt_lbl">Describe what you want</text>
-   <text_editor follows="left|right|top" layout="topleft" left="30" top="148" width="620" height="112" word_wrap="true" parse_urls="false" max_length="4000" name="ai_prompt" />
+   <text_editor follows="left|right|top" layout="topleft" left="30" top="148" width="620" height="112" word_wrap="true" parse_urls="false" max_length="8000" name="ai_prompt" />
    <text follows="left|top" layout="topleft" left="30" top="268" width="300" height="16" font="SansSerifBold" text_color="0.97 0.93 0.9 1" name="ai_name_lbl">Name in inventory</text>
    <line_editor follows="left|top" layout="topleft" left="30" top="286" width="360" height="24" max_length_chars="63" name="ai_name" />
    <!-- the main action: the glowing ingot, bottom right of the plate -->

@@ -321,6 +321,8 @@ void WolfAI::availCoro(Session auth)
         // Source: rust_proxy/src/main.rs AI_MESH_TYPICAL_COST. The fallback tracks that constant
         // so a failed /ai_available never quotes a model as cheaper than it is.
         a.mMeshTypical   = reply["mesh_typical_cost"].asInteger();
+        // [AI MODEL PROMPTS 2026-10-31] absent from an older proxy (asInteger of undefined = 0: no re-roll quoted)
+        a.mMeshMax       = nonnegative(reply["mesh_max_cost"]) ? reply["mesh_max_cost"].asInteger() : 0;
         a.mPencePerCredit = reply["pence_per_credit"].asReal();
         a.mBuyUrl        = reply["buy_url"].asString();
         a.mMesh = a.mMesh && reply["mesh"].isBoolean() && a.mBalanceKnown
@@ -412,9 +414,9 @@ void WolfAI::generateModel(const std::string& prompt, const std::string& inv_nam
         done(false, "Model upload is not available here, so there would be nowhere to put it.", LLUUID::null);
         return;
     }
-    if ((S32)prompt.length() > MAX_PROMPT_CHARS)
+    if ((S32)prompt.length() > MAX_MESH_PROMPT_CHARS)
     {
-        done(false, llformat("That description is too long (%d characters max).", MAX_PROMPT_CHARS), LLUUID::null);
+        done(false, llformat("That description is too long (%d characters max).", MAX_MESH_PROMPT_CHARS), LLUUID::null);
         return;
     }
     mGenerating = true;
@@ -452,6 +454,10 @@ void WolfAI::meshCoro(Session auth, std::string prompt, std::string inv_name, pr
     {
         LLSD body;
         body["prompt"] = prompt;
+        // [AI MODEL PROMPTS 2026-10-31] the panel note names the re-roll price exactly when this is true (WolfPanelAI::refresh),
+        // and only then may the proxy make a broken first shape again (rust_proxy main.rs AiMeshRequest.allow_reroll)
+        const WolfAI::Avail& av = WolfAI::instance().avail();
+        body["allow_reroll"] = av.mMesh && av.mMeshMax > av.mMeshTypical;
         const std::string text = boost::json::serialize(LlsdToJson(body));
         LLSD reply;
         std::string transport;
@@ -757,7 +763,13 @@ void WolfAI::buildRequest(const std::string& path, LLSD body, const std::string&
 }
 void WolfAI::startBuild(const std::string& prompt, const std::string& size, S32 maximum, build_fn done)
 {
-    if (prompt.empty() || prompt.size() > size_t(MAX_PROMPT_CHARS) || (size != "structure" && size != "settlement"))
+    // [AI MODEL PROMPTS 2026-10-31] the box allows a longer small-model description; say so for a building
+    if (prompt.size() > size_t(MAX_PROMPT_CHARS))
+    {
+        const std::string msg = llformat("That description is too long for a building (%d characters max).", MAX_PROMPT_CHARS);
+        error("start", msg); done(false, msg); return;
+    }
+    if (prompt.empty() || (size != "structure" && size != "settlement"))
     { error("start", "Enter a valid building description and mode."); done(false, "Enter a valid building description and mode."); return; }
     LLSD body; body["prompt"] = prompt; body["size"] = size; body["max_credits"] = maximum;
     buildRequest("/ai_build", body, "start", done);
@@ -1060,7 +1072,10 @@ bool WolfPanelAI::postBuild()
     mResume->setCommitCallback([this](LLUICtrl*, const LLSD&) { onResume(); });
     getChild<LLButton>("ai_view_prev")->setCommitCallback([this](LLUICtrl*, const LLSD&) { onView(-1); });
     getChild<LLButton>("ai_view_next")->setCommitCallback([this](LLUICtrl*, const LLSD&) { onView(1); });
-    mPrompt->setMaxTextLength(WolfAI::MAX_PROMPT_CHARS);
+    // [AI MODEL PROMPTS 2026-10-31] the box always takes the small-model limit and never shrinks: LLTextBase::truncate
+    // (lltextbase.cpp, run on every insert) would silently cut a long draft if the limit dropped on a mode switch. A building
+    // description over MAX_PROMPT_CHARS is refused with a message instead (WolfAI::startBuild).
+    mPrompt->setMaxTextLength(WolfAI::MAX_MESH_PROMPT_CHARS);
     mPrompt->setKeystrokeCallback([this](LLTextEditor*) { saveDraft(); });
     // [WOLF 3D TEXT 2026-10-26] the 3D Text tool's steps and controls (floater_wolf_ai.xml ai_step_text*)
     mStepText = getChild<LLPanel>("ai_step_text"); mStepTextDone = getChild<LLPanel>("ai_step_text_done");
@@ -1218,8 +1233,12 @@ void WolfPanelAI::refresh()
     std::string note;
     if (mesh)
     {
-        note = a.mMesh ? llformat("Describe a small object. About %d credits; %d required to start. The generated model is uploaded to Objects. You can close this window while it runs.", a.mMeshTypical, a.mMeshMin)
-            : "Small-object generation is unavailable. Your saved buildings remain accessible.";
+        // [AI MODEL PROMPTS 2026-10-31] rust_proxy main.rs ai_mesh_start: a broken first shape is made again only for a
+        // resident who held mesh_max_cost when it started. Kept to three lines: ai_note is 620 x 44 (floater_wolf_ai.xml).
+        note = !a.mMesh ? std::string("Small-object generation is unavailable. Your saved buildings remain accessible.")
+            : a.mMeshMax > a.mMeshTypical
+                ? llformat("Describe a small object in as much detail as you like. About %d credits (%d to start); a broken first shape is made again once, up to %d in total, if you hold that much. It goes to Objects; you can close this window.", a.mMeshTypical, a.mMeshMin, a.mMeshMax)
+                : llformat("Describe a small object in as much detail as you like. About %d credits; %d required to start. The generated model is uploaded to Objects. You can close this window while it runs.", a.mMeshTypical, a.mMeshMin);
         mBuild->setLabel("Generate small object"); mStatus->setText(ai.mMeshStatus);
     }
     else

@@ -53,6 +53,9 @@ public:
         bool mScript = false, mMesh = false, mBuild = false, mBalanceKnown = false;
         std::string mScriptModel, mMeshModel, mBuyUrl, mError;
         S32 mBalance = 0, mScriptCost = 0, mMeshMin = 0, mMeshTypical = 0;
+        // [AI MODEL PROMPTS 2026-10-31] the most a model is charged when its first shape is made again (0 = the proxy
+        // does not re-roll); rust_proxy/src/main.rs /ai_available mesh_max_cost
+        S32 mMeshMax = 0;
         F64 mPencePerCredit = 0.;
         BuildQuote mStructure, mSettlement;
     };
@@ -79,6 +82,11 @@ public:
     void generateModel(const std::string& prompt, const std::string& inv_name, progress_fn progress, done_fn done);
     bool generating() const { return mGenerating; }
     static const S32 MAX_PROMPT_CHARS = 4000;
+    // [AI MODEL PROMPTS 2026-10-31] Small-model descriptions may be longer: the proxy turns any description up to
+    // rust_proxy/src/ai_mesh_prompt.rs MAX_DESCRIPTION_CHARS (8000 characters) into prompts the model service
+    // accepts. LLTextEditor counts bytes (lltextbase.h mMaxTextByteLength), so this never lets through more
+    // characters than the proxy allows.
+    static const S32 MAX_MESH_PROMPT_CHARS = 8000;
     static const S32 MAX_SCRIPT_CHARS = 64000;
 
     typedef std::function<void(bool, const std::string&)> build_fn;

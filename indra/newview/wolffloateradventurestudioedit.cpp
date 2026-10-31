@@ -5935,7 +5935,11 @@ F32 WolfAdventureStudioView::boxThings(F32 l, F32 r, F32 top, const std::string&
         if (mMeshQuote.isMap() && mMeshQuote["thing"].asString() == id)
         {
             const S32 credits = mMeshQuote["credits"].asInteger();
-            y = para(l + 12.f, r, y, llformat("Making %s costs about %d credits (US $%.2f). Make it?", name.c_str(), credits, (F64)credits / 100.0), p.mText) - 4.f;
+            // [AI MODEL PROMPTS 2026-10-31] maxCredits: a broken first shape is made again once (wolfmind_lib.php wm_mesh_quote); shown
+            // here, and only then sent back as mesh_start upTo
+            const S32 up_to = mMeshQuote["maxCredits"].asInteger();
+            const std::string again = up_to > credits ? llformat(" If the first shape comes out broken (a tail joined to a foot, for example) it is made again once, up to %d credits (US $%.2f) in total.", up_to, (F64)up_to / 100.0) : std::string();
+            y = para(l + 12.f, r, y, llformat("Making %s costs about %d credits (US $%.2f).%s Make it?", name.c_str(), credits, (F64)credits / 100.0, again.c_str()), p.mText) - 4.f;
             const S32 iy = act([this]() { meshStart(); });
             const S32 in_ = act([this]() { meshNo(); });
             btn(l + 12.f, y - ROW_H, l + 12.f + btnW("Yes, make it") + 12.f, y, "Yes, make it", SH_E, iy, llformat("Charges about %d credits", credits), p, !mMeshBusy);   // [WORDING 2026-10-18] page 3's one primary is the band's
@@ -6017,6 +6021,7 @@ void WolfAdventureStudioView::meshQuote(const std::string& thing_id, const std::
         LLSD q;
         q["job"] = job;
         q["credits"] = (S32)ceil(reply["quote"]["credits"].asReal());
+        q["maxCredits"] = (S32)ceil(reply["quote"]["maxCredits"].asReal());   // [AI MODEL PROMPTS 2026-10-31] 0 from an older brain
         q["thing"] = thing_id;
         q["name"] = name;
         self->mMeshQuote = q;
@@ -6029,6 +6034,8 @@ void WolfAdventureStudioView::meshStart()
     LLSD body;
     body["job"] = mMeshQuote["job"].asString();
     body["confirm"] = true;
+    // [AI MODEL PROMPTS 2026-10-31] the re-roll price was shown above (meshQuote maxCredits): agree to it
+    if (mMeshQuote["maxCredits"].asInteger() > mMeshQuote["credits"].asInteger()) body["upTo"] = mMeshQuote["maxCredits"].asInteger();
     mMeshBusy = true;
     const std::string adv = mOpenId, thing = mMeshQuote["thing"].asString(), name = mMeshQuote["name"].asString(), job = mMeshQuote["job"].asString();
     LLHandle<WolfAdventureStudioView> handle = getDerivedHandle<WolfAdventureStudioView>();

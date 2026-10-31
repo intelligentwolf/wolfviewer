@@ -231,6 +231,8 @@ private:
     U32             mWolfCatSeq = 0;            // the newest category request; older answers are dropped
     F64             mWolfCatListAt = -1.0;      // when the category list was last read (seconds, frame timer)
     bool            mWolfCatListFetching = false;
+    F64             mWolfCatListTriedAt = -1.0;  // [WOLF ONLY 2026-10-31] last list request (a failure retries after 10 s)
+    bool            mWolfCatListShowing = false; // [WOLF ONLY 2026-10-31] search_results holds a category list or its message
     std::map<std::string, std::pair<U16, U16> > mWolfCatCells;   // lower-case region name -> map cell, while a category list shows
     std::string     mWolfCatPending;            // lower-case name chosen before the map knew it (MapBlockRequest sent)
     bool            mWolfCatPendingFromSearch = false;

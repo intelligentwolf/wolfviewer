@@ -522,7 +522,16 @@ bool LLFloaterWorldMap::postBuild()
     mWolfExperiencesBtn = findChild<LLButton>("wolf_map_experiences");
     if (mWolfExperiencesBtn)
     {
-        mWolfExperiencesBtn->setCommitCallback([](LLUICtrl*, const LLSD&) { LLFloaterReg::showInstance("wolf_experiences"); });
+        // [WOLF ONLY 2026-10-31] inert off Wolf whatever its visibility says: the click re-checks the gate itself
+        mWolfExperiencesBtn->setCommitCallback([this](LLUICtrl*, const LLSD&)
+        {
+            if (!WolfGrid::isOnWolfTerritoriesConfirmed())   // the strict test for acting (see wolfCatUpdateVisibility)
+            {
+                wolfCatUpdateVisibility();
+                return;
+            }
+            LLFloaterReg::showInstance("wolf_experiences");
+        });
         mWolfExperiencesBtn->setVisible(WolfGrid::isOnWolfTerritories());
     }
 
@@ -580,7 +589,12 @@ void LLFloaterWorldMap::onClose(bool app_quitting)
         wolfCatClearPins();
         mWolfCatCombo->clear();
         wolfCatShowPrompt();
-        if (mSearchResults) mSearchResults->operateOnAll(LLCtrlListInterface::OP_DELETE);
+        if (mSearchResults)
+        {
+            mSearchResults->operateOnAll(LLCtrlListInterface::OP_DELETE);
+            mSearchResults->setCommentText(LLStringUtil::null);
+        }
+        mWolfCatListShowing = false;
     }
 }
 
@@ -708,10 +722,20 @@ namespace
     }
 }
 
+// [WOLF ONLY 2026-10-31] Paul: the band and the Experiences button "must only work on the Wolf Territories grid".
+// The ONE test for both is WolfGrid::isOnWolfTerritories() (wolfgrid.h): logged in to Wolf AND the region underfoot
+// says, in its own SimulatorFeatures GridURL, that it is Wolf's - so a hypergrid jump, another OpenSim grid and Second
+// Life (not a Wolf login) all say no. Called from postBuild, onOpen and draw() (every frame the map is drawn, on any
+// change of the answer). That lenient test only SHOWS things (it keeps the last region's answer while a new region's
+// features are on their way, so Wolf-to-Wolf crossings do not flicker). Everything that ACTS - fetching the list or a
+// category, choosing one, a pin click, the Experiences button, answers arriving - uses the strict
+// isOnWolfTerritoriesConfirmed() (this region has itself said it is Wolf's), so a hypergrid hop is inert at once,
+// before the foreign region's features arrive and hide the controls.
 void LLFloaterWorldMap::wolfCatUpdateVisibility()
 {
-    if (!mWolfCatCombo || !mSearchResults) return;
     const bool wolf = WolfGrid::isOnWolfTerritories();
+    if (mWolfExperiencesBtn) mWolfExperiencesBtn->setVisible(wolf);   // [MAP EXPERIENCES 2026-10-31/] first: a skin may lack the band
+    if (!mWolfCatCombo || !mSearchResults) return;
     if (wolf != mWolfCatShown)
     {
         LLRect rect = mSearchResults->getRect();
@@ -725,10 +749,16 @@ void LLFloaterWorldMap::wolfCatUpdateVisibility()
         mWolfCatBand->setVisible(wolf);   // [REGION CATEGORIES VISIBILITY 2026-10-31/]
         if (wolf) wolfCatApplyBandColours();
     }
-    if (mWolfExperiencesBtn) mWolfExperiencesBtn->setVisible(wolf);   // [MAP EXPERIENCES 2026-10-31/]
     if (!wolf)
     {
         wolfCatClearPins();   // [REGION CATEGORIES PINS 2026-10-31/]
+        // [WOLF ONLY 2026-10-31] a category's regions in the list go too (a name search's results are left alone)
+        if (mWolfCatListShowing)
+        {
+            mSearchResults->operateOnAll(LLCtrlListInterface::OP_DELETE);
+            mSearchResults->setCommentText(LLStringUtil::null);   // "No X regions..." / a failure message too
+            mWolfCatListShowing = false;
+        }
         // Another grid: forget Wolf's list, so coming back reads it again.
         ++mWolfCatSeq;
         wolfCatForget();
@@ -736,14 +766,20 @@ void LLFloaterWorldMap::wolfCatUpdateVisibility()
         wolfCatShowPrompt();   // [REGION CATEGORIES VISIBILITY 2026-10-31] removeall() leaves the old button label
         mWolfCatNames.clear();
         mWolfCatListAt = -1.0;
+        mWolfCatListTriedAt = -1.0;   // [WOLF ONLY 2026-10-31] back on Wolf: ask at once
     }
 }
 
 void LLFloaterWorldMap::wolfCatFetchList()
 {
     if (!mWolfCatCombo || !mWolfCatShown || mWolfCatListFetching) return;
+    // [WOLF ONLY 2026-10-31] never asked for unless THIS region has said it is Wolf's (the strict test; draw() calls
+    // this every frame, so the list comes as soon as the region's features do). A failed read is retried after 10 s.
+    if (!WolfGrid::isOnWolfTerritoriesConfirmed()) return;
     const F64 now = LLFrameTimer::getElapsedSeconds();
     if (mWolfCatListAt >= 0.0 && now - mWolfCatListAt < WOLF_CAT_LIST_SECS) return;
+    if (mWolfCatListTriedAt >= 0.0 && now - mWolfCatListTriedAt < 10.0) return;
+    mWolfCatListTriedAt = now;
     mWolfCatListFetching = true;
     const LLHandle<LLFloater> handle = getHandle();
     LLCoros::instance().launch("WolfRegionCatsList", [handle]()
@@ -752,7 +788,7 @@ void LLFloaterWorldMap::wolfCatFetchList()
         LLFloaterWorldMap* self = dynamic_cast<LLFloaterWorldMap*>(handle.get());
         if (!self) return;
         self->mWolfCatListFetching = false;
-        if (!self->mWolfCatShown || !self->mWolfCatCombo) return;   // left Wolf Territories meanwhile
+        if (!self->mWolfCatShown || !self->mWolfCatCombo || !WolfGrid::isOnWolfTerritoriesConfirmed()) return;   // left Wolf Territories meanwhile
         if (!reply["categories"].isArray())
         {
             if (self->mWolfCatNames.empty() && self->mSearchResults->getItemCount() == 0)
@@ -803,6 +839,11 @@ void LLFloaterWorldMap::wolfCatFetchList()
 void LLFloaterWorldMap::wolfCatOnCommit()
 {
     if (!mWolfCatCombo || !mWolfCatShown) return;
+    if (!WolfGrid::isOnWolfTerritoriesConfirmed())   // [WOLF ONLY 2026-10-31] inert off Wolf, even mid-frame before draw() hides it
+    {
+        wolfCatUpdateVisibility();
+        return;
+    }
     const LLSD value = mWolfCatCombo->getValue();
     const S32 id = value.isInteger() ? value.asInteger() : 0;
     const auto it = mWolfCatNames.find(id);
@@ -826,6 +867,7 @@ void LLFloaterWorldMap::wolfCatOnCommit()
         const LLSD reply = wolf_cat_get(url, "category regions");
         LLFloaterWorldMap* self = dynamic_cast<LLFloaterWorldMap*>(handle.get());
         if (!self || seq != self->mWolfCatSeq) return;   // closed, or another category / a typed search came after
+        if (!WolfGrid::isOnWolfTerritoriesConfirmed()) { self->wolfCatUpdateVisibility(); return; }   // [WOLF ONLY 2026-10-31/]
         if (!reply["regions"].isArray())
         {
             LLStringUtil::format_map_t failed;
@@ -839,6 +881,7 @@ void LLFloaterWorldMap::wolfCatOnCommit()
 
 void LLFloaterWorldMap::wolfCatFill(const LLSD& reply, const std::string& cat_name)
 {
+    mWolfCatListShowing = true;   // [WOLF ONLY 2026-10-31/]
     mSearchResults->operateOnAll(LLCtrlListInterface::OP_DELETE);
     wolfCatForget();
     S32 count = 0;
@@ -913,6 +956,7 @@ void LLFloaterWorldMap::wolfCatFill(const LLSD& reply, const std::string& cat_na
 
 void LLFloaterWorldMap::wolfCatShowComment(const std::string& text)
 {
+    mWolfCatListShowing = true;   // [WOLF ONLY 2026-10-31/] Wolf's text in the list: cleared on leaving Wolf
     mSearchResults->operateOnAll(LLCtrlListInterface::OP_DELETE);
     mSearchResults->setCommentText(text);
 }
@@ -980,6 +1024,7 @@ void LLFloaterWorldMap::wolfCatZoomToRegion(const LLSimInfo* info)
 void LLFloaterWorldMap::wolfCatSelectPin(const std::string& name)
 {
     if (!mSearchResults || name.empty()) return;
+    if (!WolfGrid::isOnWolfTerritoriesConfirmed()) { wolfCatUpdateVisibility(); return; }   // [WOLF ONLY 2026-10-31/]
     if (mSearchResults->selectByValue(LLSD(name)))
     {
         mSearchResults->scrollToShowSelected();
@@ -1136,6 +1181,12 @@ void LLFloaterWorldMap::draw()
             mWolfBuyLandFor = wolf;
             wolf_update_buy_land(this);   // hides it off Wolf; on Wolf asks again whether this region may be bought
             wolfCatUpdateVisibility();    // [REGION CATEGORIES 2026-10-30] the same gate for "Regions by Category"
+            wolfCatFetchList();
+        }
+        // [WOLF ONLY 2026-10-31] the list is fetched only once THIS region has confirmed it is Wolf's, which may be a
+        // moment after the map opens (or after arriving); wolfCatFetchList returns at once when there is nothing to do.
+        if (mWolfCatShown && mWolfCatNames.empty())
+        {
             wolfCatFetchList();
         }
     }
@@ -2195,6 +2246,7 @@ void LLFloaterWorldMap::onLocationCommit()
         mWolfCatCombo->clear();
         wolfCatShowPrompt();   // [REGION CATEGORIES VISIBILITY 2026-10-31] clear() blanks the button; say what is inside again
         wolfCatClearPins();    // [REGION CATEGORIES PINS 2026-10-31/]
+        mWolfCatListShowing = false;   // [WOLF ONLY 2026-10-31] the name search's results replace it
     }
 
     std::string str = mLocationEditor->getValue().asString();

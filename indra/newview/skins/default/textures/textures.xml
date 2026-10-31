@@ -540,6 +540,10 @@ with the same filename but different name
        theme draws the same WHITE pin (some themes ship a black destinations.png); llfloaterworldmap.cpp tints it black
        or white to match the band text. Only in the default skin on purpose. -->
   <texture name="Wolf_Map_Category_Icon" file_name="icons/Wolf_Map_Category.png" preload="false" />
+  <!-- [WOLF GREEN 2026-10-31] a plain white rounded button face (a copy of Rounded_Rect.png, same 9-slice), tinted with
+       WolfAccentGreen by the map's Experiences button. Its own name and file, only in the default skin, because several
+       themes ship their own (darker) Rounded_Rect.png, which would darken the green and the contrast with it. -->
+  <texture name="Wolf_Flat_Button" file_name="widgets/Wolf_Flat_Button.png" preload="false" scale.left="6" scale.top="26" scale.right="58" scale.bottom="6" />
     
   <texture name="Marketplace_Dropzone_Background" file_name="widgets/Marketplace_Dropzone_Background.png" preload="true" />
   <texture name="MarketplaceBtn_Off" file_name="widgets/MarketplaceBtn_Off.png" preload="true" scale.left="30" scale.top="19" scale.right="35" scale.bottom="4" />

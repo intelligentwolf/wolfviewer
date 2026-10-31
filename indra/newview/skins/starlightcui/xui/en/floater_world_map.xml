@@ -174,10 +174,26 @@
     <!-- [MAP EXPERIENCES 2026-10-31] Paul: "an Experiences button at the top of the map that opens the Experiences
          floater" - the Wolf World > Wolf Experiences... window. llfloaterworldmap.cpp shows it on Wolf Territories
          only (wolfCatUpdateVisibility, the same test as the "Find places by type" band). -->
+    <!-- [WOLF GREEN 2026-10-31] Paul: in "that green" (colors.xml WolfAccentGreen, the Wolf Glass band's lime) on a
+         flat face (textures.xml Wolf_Flat_Button) in every state, with dark text (WolfAccentGreenText, 8.9:1). -->
     <button
      follows="top|right"
+     font="SansSerifSmallBold"
      height="20"
+     image_color="WolfAccentGreen"
+     image_color_disabled="WolfAccentGreen"
+     image_disabled="Wolf_Flat_Button"
+     image_disabled_selected="Wolf_Flat_Button"
+     image_pressed="Wolf_Flat_Button"
+     image_pressed_selected="Wolf_Flat_Button"
+     image_selected="Wolf_Flat_Button"
+     image_unselected="Wolf_Flat_Button"
      label="Experiences"
+     label_shadow="false"
+     label_color="WolfAccentGreenText"
+     label_color_disabled="WolfAccentGreenText"
+     label_color_selected="WolfAccentGreenText"
+     label_color_disabled_selected="WolfAccentGreenText"
      layout="topleft"
      left="128"
      name="wolf_map_experiences"

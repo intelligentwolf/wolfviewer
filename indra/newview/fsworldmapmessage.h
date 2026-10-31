@@ -43,6 +43,11 @@ namespace hypergrid
     using url_callback_t = std::function<void(U64 region_handle, const std::string& url, const LLUUID& snapshot_id, bool teleport)>;
 
     bool sendExactNamedRegionRequest(const std::string& region_name, const url_callback_t& callback, const std::string& callback_url, bool teleport);
+    // <WolfViewer 2026-10-31> Search the grid for search_name but match region_name: OpenSim's name search ends a region
+    // name at "(" (RegionURI.cs Parse - "(x,y,z)" coordinates), so "Sandbox 2 (water)" is only found by searching
+    // "Sandbox 2". When nothing matches, the search's closing block (named search_name, handle 0) answers the query.
+    bool sendExactNamedRegionRequest(const std::string& region_name, const std::string& search_name, const url_callback_t& callback, const std::string& callback_url, bool teleport);
+    // </WolfViewer>
     bool processExactNamedRegionResponse(LLMessageSystem* msg, U32 agent_flags);
 }
 #endif

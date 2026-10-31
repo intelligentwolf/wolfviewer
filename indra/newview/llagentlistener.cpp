@@ -53,6 +53,9 @@
 #include "llcallbacklist.h"     // <WolfViewer> doAfterInterval (WolfLeap teleports)
 #include "llregionhandle.h"     // <WolfViewer> from_region_handle
 #include "llworldmapmessage.h"  // <WolfViewer> sendNamedRegionRequest
+#ifdef OPENSIM
+#include "fsworldmapmessage.h"  // <WolfViewer> hypergrid::sendExactNamedRegionRequest (names with "(")
+#endif
 #include <cmath>                // <WolfViewer> std::isfinite
 #include <memory>               // <WolfViewer> std::shared_ptr
 #include <set>                  // <WolfViewer> pending lookups
@@ -461,16 +464,35 @@ void LLAgentListener::requestTeleport(LLSD const & event_data) const
         tp->lookup_key = key;
 
         LeapTeleportWeak weak(tp);
-        LLWorldMapMessage::getInstance()->sendNamedRegionRequest(tp->region_name,
+        const LLWorldMapMessage::url_callback_t on_found =
             [weak](U64 region_handle, const std::string& /*url*/, const LLUUID& /*snapshot_id*/, bool /*teleport*/)
             {
                 if (LeapTeleportPtr self = weak.lock())
                 {
                     leap_tp_start(self, region_handle);
                 }
-            },
-            std::string(),  // no SLURL: the callback above does the teleport
-            false);
+            };
+        bool sent = false;
+#ifdef OPENSIM
+        // OpenSim's name search ends a region name at "(" (RegionURI.cs Parse takes "(x,y,z)" as coordinates), so
+        // "Sandbox 2 (water)" finds nothing (live test 31 Oct). Search for the part before "(" and match the full name.
+        const std::string::size_type paren = tp->region_name.find('(');
+        if (paren != std::string::npos && paren > 0)
+        {
+            std::string search_name = tp->region_name.substr(0, paren);
+            LLStringUtil::trim(search_name);
+            if (!search_name.empty())
+            {
+                sent = hypergrid::sendExactNamedRegionRequest(tp->region_name, search_name, on_found, std::string(), false);
+            }
+        }
+#endif
+        if (!sent)
+        {
+            LLWorldMapMessage::getInstance()->sendNamedRegionRequest(tp->region_name, on_found,
+                std::string(),  // no SLURL: the callback above does the teleport
+                false);
+        }
         doAfterInterval([tp]()
             {
                 if (tp->looked_up)

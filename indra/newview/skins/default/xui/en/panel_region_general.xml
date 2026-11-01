@@ -389,4 +389,68 @@
         <button.commit_callback
          function="RegionInfo.ManageRestart" />
     </button>
+    <!-- [PASSING PLANES 2026-11-01] wolfpassingplanes.cpp. Who and why: an estate owner or manager wants the passing tour
+         planes off over a themed region (or on over an airfield) in one click, and to see that it took. Wolf Territories
+         only (hidden elsewhere). Saved at once through php/wolf_ambient.php, not by Apply (no initCtrl). Right-hand
+         column under Manage Restart Schedule (which ends at y 115), x 250-470; the left column ends near x 190, and the
+         Adult Content line on the right starts at y 312: the status box (223 + 88) ends at 311. -->
+    <check_box
+     follows="left|top"
+     height="20"
+     label="Passing planes over this region"
+     layout="topleft"
+     left="250"
+     name="wolf_planes_check"
+     tool_tip="Vintage tour planes that fly across this region now and then. Saved at once. Only the estate owner or an estate manager can change it."
+     top="125"
+     visible="false"
+     width="220" />
+    <text
+     follows="left|top"
+     font="SansSerifSmall"
+     height="44"
+     layout="topleft"
+     left="268"
+     name="wolf_planes_state"
+     top="147"
+     visible="false"
+     width="202"
+     wrap="true" />
+    <text
+     follows="left|top"
+     font="SansSerifSmall"
+     height="28"
+     layout="topleft"
+     left="268"
+     name="wolf_planes_note"
+     top="193"
+     visible="false"
+     width="202"
+     wrap="true">
+        People's own aircraft and dogfights are not affected.
+    </text>
+    <text
+     follows="left|top"
+     font="SansSerifSmall"
+     height="88"
+     layout="topleft"
+     left="268"
+     name="wolf_planes_status"
+     top="223"
+     visible="false"
+     width="202"
+     wrap="true" />
+    <string name="planes_reading">Reading passing planes for this region...</string>
+    <string name="planes_on_default">On: the default for regions listed under Airports. Untick to stop them.</string>
+    <string name="planes_off_default">Off: the default for regions not listed under Airports. Tick to allow them.</string>
+    <string name="planes_on_chosen">On: chosen by the estate owner or a manager.</string>
+    <string name="planes_off_chosen">Off: chosen by the estate owner or a manager.</string>
+    <string name="planes_not_yours">Only the estate owner or an estate manager can change this.</string>
+    <string name="planes_saving">Saving...</string>
+    <string name="planes_saved_on">Saved: passing planes may now fly over this region.</string>
+    <string name="planes_saved_off">Saved: no more passing planes over this region.</string>
+    <string name="planes_later">Your RLV restrictions stop the viewer telling the region now, so it takes the change within 30 minutes.</string>
+    <string name="planes_read_failed">Could not read passing planes:</string>
+    <string name="planes_save_failed">Could not save passing planes:</string>
+    <string name="planes_not_wolf">the region has not confirmed it is on Wolf Territories. Close and reopen this window to try again.</string>
 </panel>

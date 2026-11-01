@@ -95,6 +95,7 @@
 #include "wolfgrid.h"   // [WOLF TERRAIN TEXTURES 2026-10-16] the Terrain tab's Wolf button
 #include "wolfadultcontent.h"   // [ADULT CONTENT 2026-10-26] the Region tab's Adult Content line and link
 #include "llweb.h"   // [ADULT CONTENT 2026-10-26/] Region type on wolf-grid.com...
+#include "wolfpassingplanes.h"   // [PASSING PLANES 2026-11-01] the Region tab's "Passing planes over this region"
 #include "lltrans.h"
 #include "llagentui.h"
 #include "llmeshrepository.h"
@@ -687,6 +688,7 @@ void LLFloaterRegionInfo::processRegionInfo(LLMessageSystem* msg)
     bool teen_grid = (parent_estate_id == 5);  // *TODO add field to estate table and test that
     panel->getChildView("access_combo")->setEnabled(gAgent.isGodlike() || (region && region->canManageEstate() && !teen_grid));
     panel->setCtrlsEnabled(allow_modify);
+    WolfPassingPlanes::sync(panel, region, false);   // [PASSING PLANES 2026-11-01] its own rule, after setCtrlsEnabled
 
     // [ADULT CONTENT 2026-10-26] PROTOCOL.md §2/§7: Adult Content is set ONLY on wolf-grid.com by the region owner or the
     // estate owner (their own age check, the Adult Content Region Agreement and the GBP 10 a month), never from the viewer.
@@ -1146,6 +1148,7 @@ bool LLPanelRegionGeneralInfo::refreshFromRegion(LLViewerRegion* region)
     getChildView("manage_telehub_btn")->setEnabled(allow_modify);
     getChildView("manage_restart_btn")->setEnabled(allow_modify);
     getChildView("manage_restart_btn")->setVisible(LLFloaterRegionRestartSchedule::canUse());
+    WolfPassingPlanes::sync(this, region, true);   // [PASSING PLANES 2026-11-01] its own rule; opened / region changed: read
 
     // Data gets filled in by processRegionInfo
 
@@ -1194,6 +1197,8 @@ bool LLPanelRegionGeneralInfo::postBuild()
         const LLViewerRegion* region = gAgent.getRegion();
         LLWeb::loadURLExternal(WolfAdultContent::regionTypeURL(region ? region->getRegionID() : LLUUID::null));
     });
+    // [PASSING PLANES 2026-11-01] saved at once by its own commit (wolfpassingplanes.cpp), never by Apply: no initCtrl
+    WolfPassingPlanes::postBuild(this);
 
     refresh();
     return true;

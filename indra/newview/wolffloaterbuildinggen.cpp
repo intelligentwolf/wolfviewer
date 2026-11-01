@@ -304,13 +304,13 @@ bool WolfFloaterBuildingGen::postBuild()
     mRequest = getChild<LLTextEditor>("request_text");
     mCounter = getChild<LLTextBox>("request_counter");
     mStyle = getChild<LLComboBox>("style");
-    mStyleInfo = getChild<LLTextBox>("style_info");
+    mStyleInfo = getChild<LLTextEditor>("style_info");
     for (size_t i = 0; i < OPTION_BOXES; ++i)
     {
         mOptionBoxes.push_back(getChild<LLCheckBoxCtrl>(llformat("option_%d", (S32)i + 1)));
     }
     mOptionIds.assign(OPTION_BOXES, std::string());
-    mQuote = getChild<LLTextBox>("quote_text");
+    mQuote = getChild<LLTextEditor>("quote_text");
     mAccess = getChild<LLTextBox>("access_text");
     mPlanTitle = getChild<LLTextBox>("plan_title");
     mPlanText = getChild<LLTextEditor>("plan_text");
@@ -449,6 +449,9 @@ void WolfFloaterBuildingGen::onOpenReply(const LLSD& reply)
     // active, last_plan
     mCatalogue = reply["catalogue"];
     readCredits(reply);
+    // Source: wolfstorm/php/buildinggen_lib.php bg_open "price_rules" => {ai, minimum, build, note => BG_PRICE_NOTE}
+    const std::string note = reply["price_rules"]["note"].asString();
+    if (!note.empty()) mPriceNote = note;
     const LLSD& access = reply["access"];
     mAccessPlan = access["plan"].asBoolean();
     mAccessBuild = access["build"].asBoolean();
@@ -560,8 +563,9 @@ void WolfFloaterBuildingGen::onStyleChanged()
 
 void WolfFloaterBuildingGen::showQuote()
 {
-    // Source: building-generator-2026-11-01/README.md "the quote ("Planning costs about N, at most M credits")"; research true
-    // means a web search may run
+    // Source: building-generator-2026-11-01/README.md "Price": the quote is what designing it costs (the AI cost + 10%, never
+    // more than at_most); research true: "This includes researching this style; you are charged what it really costs,
+    // usually much less"
     if (mReady && !mAccessPlan)
     {
         mQuote->setText(std::string());     // no quote is asked for: access.reason says why (access_text)
@@ -578,11 +582,24 @@ void WolfFloaterBuildingGen::showQuote()
         return;
     }
     LLStringUtil::format_map_t a;
-    a["[N]"] = llformat("%d", mQuoteTypical);
-    a["[M]"] = llformat("%d", mQuoteAtMost);
+    a["[N]"] = credits(mQuoteTypical);
+    a["[M]"] = credits(mQuoteAtMost);
     std::string text = getString("quote_line", a);
     if (mQuoteResearch) text += " " + getString("quote_research");
     mQuote->setText(text);
+}
+
+std::string WolfFloaterBuildingGen::credits(S32 n) const
+{
+    LLStringUtil::format_map_t a;
+    a["[N]"] = llformat("%d", n);
+    return getString(n == 1 ? "credit_one" : "credit_many", a);
+}
+
+void WolfFloaterBuildingGen::showPriceIdle()
+{
+    // no plan on show: the yard's price sentence, or what will show here
+    mPrice->setText(mPriceNote.empty() ? getString("price_empty") : mPriceNote);
 }
 
 void WolfFloaterBuildingGen::clearPlan()
@@ -597,7 +614,7 @@ void WolfFloaterBuildingGen::clearPlan()
     mSourcesLabel->setVisible(false);
     mSources->setVisible(false);
     mSources->setText(std::string());
-    mPrice->setText(std::string());
+    showPriceIdle();
 }
 
 void WolfFloaterBuildingGen::showPlan(const LLSD& o, bool fromLastTime)
@@ -605,7 +622,8 @@ void WolfFloaterBuildingGen::showPlan(const LLSD& o, bool fromLastTime)
     // Source: building-generator-2026-11-01/README.md PLAN JOB when done: plan {title, summary, style {id, title, researched,
     // sources [{title, url}]}, layout, size, buildings [{name, type, storeys, w_m, d_m, h_m}], options, warnings}, budget
     // {objects, prims, land_impact, triangles, textures, texture_mb, scripts, lights}, preview, price, lines [{label, credits}],
-    // ai_charged
+    // ai_charged. wolfstorm/php/buildinggen_lib.php bg_price: price 0, lines [{"Designing it (...)", credits 0, paid N},
+    // {"Building and delivery (...)", credits 0}].
     const LLSD& plan = o["plan"];
     mPlanId = o["job"].asString();
     mPlanPrice = intOr(o["price"], -1);
@@ -615,6 +633,18 @@ void WolfFloaterBuildingGen::showPlan(const LLSD& o, bool fromLastTime)
     if (!mesh) mPreview->setMessage(getString("preview_bad"));
 
     mPlanTitle->setText(plan["title"].asString());
+    // The yard's advice (e.g. the request does not quite fit the chosen style) comes first, in bold, so it is read before the
+    // rest; it is advice about the plan, not a failure, so it keeps the box's own colour.
+    mPlanText->setText(std::string());
+    bool any = false;
+    LLStyle::Params noteStyle;
+    noteStyle.font = LLFontGL::getFontSansSerifBold();
+    for (const LLSD& w : llsd::inArray(plan["warnings"]))
+    {
+        if (w.asString().empty()) continue;
+        mPlanText->appendText(getString("warning_prefix") + " " + w.asString(), any, noteStyle);
+        any = true;
+    }
     std::string text = plan["summary"].asString();
     const LLSD& style = plan["style"];
     if (!style["title"].asString().empty())
@@ -632,11 +662,7 @@ void WolfFloaterBuildingGen::showPlan(const LLSD& o, bool fromLastTime)
         a["[SIZE]"] = llformat("%.0f x %.0f x %.0f m", b["w_m"].asReal(), b["d_m"].asReal(), b["h_m"].asReal());
         text += "\n" + getString(b["storeys"].asInteger() == 1 ? "building_line_one" : "building_line", a);
     }
-    for (const LLSD& w : llsd::inArray(plan["warnings"]))
-    {
-        if (!w.asString().empty()) text += "\n" + getString("warning_prefix") + " " + w.asString();
-    }
-    mPlanText->setText(text);
+    mPlanText->appendText(text, any);
 
     const LLSD& budget = o["budget"];
     if (budget.isMap())
@@ -668,25 +694,33 @@ void WolfFloaterBuildingGen::showPlan(const LLSD& o, bool fromLastTime)
     mSources->setVisible(!sources.empty());
     mSources->setText(sources);
 
-    // the build price, line by line, then the total
+    // the build price, line by line (a line already paid when it was planned says so; a free one says "no charge"), the
+    // total, then the yard's price sentence
     std::string price;
     for (const LLSD& l : llsd::inArray(o["lines"]))
     {
-        price += llformat("%s: %d %s\n", l["label"].asString().c_str(), l["credits"].asInteger(), getString("credits_word").c_str());
+        LLStringUtil::format_map_t a;
+        a["[LABEL]"] = l["label"].asString();
+        const S32 cr = l["credits"].asInteger();
+        const S32 paid = l["paid"].asInteger();
+        a["[N]"] = credits(cr > 0 ? cr : paid);
+        price += getString(cr > 0 ? "price_line" : (paid > 0 ? "price_line_paid" : "price_line_free"), a) + "\n";
     }
     if (mPlanPrice >= 0)
     {
         LLStringUtil::format_map_t a;
-        a["[N]"] = llformat("%d", mPlanPrice);
-        price += getString("price_total", a);
+        a["[N]"] = credits(mPlanPrice);
+        price += getString(mPlanPrice > 0 ? "price_total" : "price_total_free", a);
     }
+    if (!mPriceNote.empty()) price += (price.empty() ? "" : "\n\n") + mPriceNote;
     mPrice->setText(price);
 
     LLStringUtil::format_map_t a;
     a["[TITLE]"] = plan["title"].asString();
-    a["[AI]"] = llformat("%d", o["ai_charged"].asInteger());
-    a["[PRICE]"] = llformat("%d", llmax(mPlanPrice, 0));
-    setStatus(getString(fromLastTime ? "plan_last_time" : "plan_ready", a), false);
+    a["[AI]"] = credits(o["ai_charged"].asInteger());
+    a["[PRICE]"] = credits(llmax(mPlanPrice, 0));
+    const std::string key = fromLastTime ? "plan_last_time" : "plan_ready";
+    setStatus(getString(mPlanPrice > 0 ? key : key + "_free", a), false);
     mShortOf = false;
     updateCredits();
     updateControls();
@@ -769,11 +803,12 @@ void WolfFloaterBuildingGen::onBuild()
         return;
     }
     // Source: building-generator-2026-11-01/README.md "build {"plan": uuid}: a BUILD JOB (queued); the build price is held now
-    // and charged on delivery". The price is on show beside the button, and this runs only on the member's own press.
+    // and charged on delivery" - 0 today (README "Price": Build it costs nothing). The price is on show beside the button, and
+    // this runs only on the member's own press.
     mBusy = true;
     LLStringUtil::format_map_t a;
-    a["[PRICE]"] = llformat("%d", llmax(mPlanPrice, 0));
-    setStatus(getString("ordering", a), false);
+    a["[PRICE]"] = credits(llmax(mPlanPrice, 0));
+    setStatus(getString(mPlanPrice > 0 ? "ordering" : "ordering_free", a), false);
     updateControls();
     request("build", LLSD().with("plan", mPlanId));
 }
@@ -806,7 +841,8 @@ void WolfFloaterBuildingGen::showJob(const LLSD& o)
     LLStringUtil::format_map_t a;
     a["[AHEAD]"] = llformat("%d", o["position"].asInteger());
     a["[PROGRESS]"] = o["progress"].asString().empty() ? getString("progress_none") : o["progress"].asString();
-    a["[PRICE]"] = llformat("%d", o["price"].asInteger());
+    const S32 jobPrice = o["price"].asInteger();
+    a["[PRICE]"] = credits(jobPrice);
     a["[FOLDER]"] = o["folder_name"].asString();
     mPoll.reset();
     if (state == "queued" || state == "running")
@@ -817,7 +853,9 @@ void WolfFloaterBuildingGen::showJob(const LLSD& o)
         if (kind == "build" && mPlanId.empty()) mPlanId = o["plan"].asString();
         const std::string prefix = kind == "build" ? "build_" : "plan_";
         const std::string which = state == "queued" ? (o["position"].asInteger() > 0 ? "waiting" : "next") : "running";
-        setStatus(getString(prefix + which, a), false);
+        // a build with nothing to charge (README "Price": building and delivery cost nothing) says nothing about holding credits
+        const std::string noCharge = (kind == "build" && jobPrice <= 0) ? "_free" : "";
+        setStatus(getString(prefix + which + noCharge, a), false);
     }
     else
     {
@@ -838,12 +876,12 @@ void WolfFloaterBuildingGen::showJob(const LLSD& o)
             bool billed = true;
             if (charged.type() == LLSD::TypeBoolean) billed = charged.asBoolean();
             else if (charged.type() == LLSD::TypeInteger || charged.type() == LLSD::TypeReal) figure = charged.asInteger();
-            a["[CHARGED]"] = llformat("%d", figure);
-            setStatus(getString(billed ? "build_done" : "build_done_unbilled", a), false);
+            a["[CHARGED]"] = credits(figure);
+            setStatus(getString(figure <= 0 ? "build_done_free" : (billed ? "build_done" : "build_done_unbilled"), a), false);
             // a building is built once: its plan is no longer on offer
             mPlanId.clear();
             mPlanPrice = -1;
-            mPrice->setText(std::string());
+            showPriceIdle();
             WolfAI::instance().creditsUsed();
             request("credits", LLSD::emptyMap());
         }
@@ -947,6 +985,12 @@ void WolfFloaterBuildingGen::onReply(const std::string& what, const LLSD& body, 
             mQuoteTypical = intOr(q["typical"], -1);
             mQuoteAtMost = intOr(q["at_most"], -1);
             mQuoteResearch = q["research"].asBoolean();
+            // Source: wolfstorm/php/buildinggen_lib.php bg_quote reply: quote + {note => BG_PRICE_NOTE}
+            if (!q["note"].asString().empty())
+            {
+                mPriceNote = q["note"].asString();
+                if (mPlanId.empty()) showPriceIdle();
+            }
             showQuote();
             if (planNow)
             {

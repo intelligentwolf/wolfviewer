@@ -84,16 +84,18 @@ private:
  * shops'", "make it for medieval times? or the second world war france", "i could find the house/building builder under the
  * build menu??".
  * Persona: a Wolf Territories member who wants a building for their land and has never built one.
- * Story: "I say what I want in my own words, pick a period or let it decide, see what the plan costs, press Plan it, look at
- * the turning picture, its land impact and the build price, and only when I press Build it is it charged and put in my
- * inventory."
- * Flow (preview and the plan's words on the left; on the right, top to bottom): 1. the request 2. the style 3. the options
- * 4. the planning cost and Plan it 5. the build price line by line against the credits you have; Build it bottom right, Buy
- * credits... beside it when short, Cancel bottom left while a job waits. The status line above the buttons: progress, or a
- * failure in the caution colour, kept until the next action. Nothing is ever charged without a press of Plan it or Build it,
- * each showing its figure first.
- * The yard (wolfstorm php/building_gen.php) checks the account, holds the price and charges it on delivery. Wolf Territories
- * only: the menu items are gone elsewhere, and opened off Wolf the window says so and closes.
+ * Story: "I say what I want in my own words, pick a period or let it decide, see what designing it costs, press Plan it, look
+ * at the turning picture and its land impact, and press Build it to have it put in my inventory."
+ * Flow (preview and the plan's words on the left; on the right, top to bottom): 1. the request 2. the style (its description
+ * scrolls in a fixed box) 3. the options, the design cost and Plan it 4. the price to build it line by line, with the yard's
+ * price note, against the credits you have; Build it bottom right, Buy credits... beside it when short, Cancel bottom left
+ * while a job waits. The status line above the buttons: progress, or a failure in the caution colour, kept until the next
+ * action. Nothing is ever charged without a press of Plan it or Build it, each showing its figure first.
+ * Price (README "Price", Paul 2026-11-01): every order costs what the AI costs to design it plus 10%, at least 1 credit,
+ * quoted before Plan it and never more than the quote; building and delivery cost nothing (no AI runs in it) and nothing is
+ * charged for land or size. The yard (wolfstorm php/building_gen.php) checks the account, holds the quote and charges the
+ * actual when the plan is ready. Wolf Territories only: the menu items are gone elsewhere, and opened off Wolf the window says
+ * so and closes.
  */
 class WolfFloaterBuildingGen : public LLFloater
 {
@@ -119,6 +121,8 @@ private:
     void showPlan(const LLSD& job, bool fromLastTime);
     void clearPlan();
     void showQuote();
+    void showPriceIdle();
+    std::string credits(S32 n) const;
     void updateCredits();
     void updateControls();
     std::string requestText() const;
@@ -130,11 +134,12 @@ private:
     static void requestCoro(LLHandle<LLFloater> h, std::string what, LLSD body);
     void onReply(const std::string& what, const LLSD& body, bool ok, const LLSD& reply, const std::string& error);
 
-    LLTextEditor *mRequest = nullptr, *mSources = nullptr, *mPlanText = nullptr, *mPrice = nullptr;
+    LLTextEditor *mRequest = nullptr, *mSources = nullptr, *mPlanText = nullptr, *mPrice = nullptr, *mStyleInfo = nullptr,
+                 *mQuote = nullptr;
     LLComboBox* mStyle = nullptr;
     std::vector<LLCheckBoxCtrl*> mOptionBoxes;
     std::vector<std::string> mOptionIds;     // the catalogue option each box stands for ("" = box not used)
-    LLTextBox *mCounter = nullptr, *mStyleInfo = nullptr, *mQuote = nullptr, *mAccess = nullptr, *mPlanTitle = nullptr,
+    LLTextBox *mCounter = nullptr, *mAccess = nullptr, *mPlanTitle = nullptr,
               *mBudget = nullptr, *mSourcesLabel = nullptr, *mBalance = nullptr, *mStatus = nullptr;
     LLButton *mPlanBtn = nullptr, *mBuildBtn = nullptr, *mBuyBtn = nullptr, *mCancelBtn = nullptr;
     WolfBuildingPreview* mPreview = nullptr;
@@ -159,6 +164,8 @@ private:
     std::string mQuoteFor;
     S32 mQuoteTypical = -1, mQuoteAtMost = -1;
     bool mQuoteResearch = false;
+    // the yard's own price sentence (open price_rules.note, then quote.note), shown in 4. Price to build it
+    std::string mPriceNote;
 
     // the job being followed (plan or build), polled every 5 s while it is queued or running
     std::string mJob, mJobKind, mJobState;

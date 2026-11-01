@@ -3395,8 +3395,15 @@ bool WolfEnvironmentRender::renderSkyDome()
         // own gain on the air's in-scatter is off for this program - the probe measures exactly what is corrected. [2026-10-20]
         // On for the reflection-probe faces too: the probes hold the corrected sky, so the dome's sea takes no gain on what it
         // mirrors from them, only on the air in front of it (skyF.glsl domeGain; Miss Zenn's white night sea)
+        // [2026-11-01 ticket 436 follow-up] wolfEepGainOn is set by a raw glUniform1f, never through LL's cache: setRuntimeUniforms
+        // (wolftkatmosphere.cpp) has just written 1 with a raw glUniform1f, which LL's per-location cache does not see. Through
+        // sh.uniform1f the 0 reached GL on the first frame only: from then on the cache held 0 and skipped the call
+        // (Source: llglslshader.cpp:1876-1890 LLGLSLShader::uniform1f - glUniform1f only when the cached value differs; the cache
+        // is cleared only in mapUniforms, :868), so the dome and the probe drew the in-scatter gained as well as domeGain.
+        // Raw here too, as this pass's sampler units above (wolfMoonMap / wolfSunMap).
         static LLStaticHashedString s_gon("wolfEepGainOn"), s_dgain("wolfEepDomeGain");
-        sh.uniform1f(s_gon, 0.f);
+        const S32 gonLoc = sh.getUniformLocation(s_gon);
+        if (gonLoc >= 0) glUniform1f(gonLoc, 0.f);
         sh.uniform1f(s_dgain, sGainValid ? 1.f : 0.f);
     }
 

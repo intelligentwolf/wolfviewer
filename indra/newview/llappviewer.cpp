@@ -1024,6 +1024,7 @@ bool LLAppViewer::init()
 
     LL_INFOS("InitInfo") << "Configuration initialized." << LL_ENDL ;
     LLViewerShaderMgr::wolfRetryReflections();   // <WolfViewer 2026-10-11/> before any shader or pipeline
+    WolfCrashReport::checkDriverCrash();         // <WolfViewer 2026-11-01/> NVIDIA driver-thread crash -> Threaded Optimisation off (wolfcrashreport.h)
     //set the max heap size.
     initMaxHeapSize() ;
     LLCoros::instance().setStackSize(gSavedSettings.getS32("CoroutineStackSize"));

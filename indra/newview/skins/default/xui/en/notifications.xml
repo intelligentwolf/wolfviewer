@@ -2653,6 +2653,22 @@ Welcome to WolfViewer [NAME]
    type="notifytip">
 WolfViewer closed unexpectedly last time. We have sent a crash report to the Wolf Territories support team so we can fix it. You can turn automatic crash reports off in Preferences &gt; Privacy &gt; General.
   </notification>
+  <!-- [NVIDIA DRIVER CRASHES 2026-11-01] wolfcrashreport.cpp showDriverNoticeOnce: an earlier run crashed on the
+       NVIDIA OpenGL driver's own thread, so checkDriverCrash turned WolfNvidiaThreadedOptimization off. A notify (not
+       a tip) so it stays until read; button 1 turns it back on. -->
+  <notification
+   icon="notify.tga"
+   name="WolfNvidiaThreadedOff"
+   log_to_chat="false"
+   type="notify">
+WolfViewer closed unexpectedly last time because the NVIDIA graphics driver crashed on one of its own threads. To help stop that happening again, WolfViewer has turned off NVIDIA Threaded Optimisation. This takes effect the next time you start WolfViewer and may cost a few frames per second.
+
+You can turn it back on here or at any time in Preferences &gt; Graphics &gt; Hardware Settings. Updating your NVIDIA graphics driver may also help.
+    <usetemplate
+     name="okcancelbuttons"
+     notext="Turn it back on"
+     yestext="OK"/>
+  </notification>
   <notification
    icon="notifytip.tga"
    name="WolfWelcomeUnnamed"

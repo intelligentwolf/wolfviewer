@@ -3407,6 +3407,7 @@ bool idle_startup()
 
         // [CRASH REPORTS 2026-10-28] Send a crash an earlier run left behind, as a staff ticket (wolfcrashreport.h).
         WolfCrashReport::sendPendingOnce();
+        WolfCrashReport::showDriverNoticeOnce();   // [NVIDIA DRIVER CRASHES 2026-11-01] wolfcrashreport.h
 
         // [WOLF CHAT 2026-10-21] The channel bells: a background check for new Wolf Chat messages, which does nothing
         // until this account has used Wolf Chat and only asks while on Wolf Territories (wolffloaterchat.cpp).

@@ -422,6 +422,28 @@
     <key>Value</key>
     <integer>1</integer>
   </map>
+  <key>WolfNvidiaThreadedOptimization</key>
+  <map>
+    <key>Comment</key>
+    <string>[NVIDIA DRIVER CRASHES 2026-11-01] NVIDIA graphics only, from the next start: run the NVIDIA OpenGL driver with its Threaded Optimisation on (what the viewer always did before: llappviewerwin32.cpp ll_nvapi_init on Windows, linux_tools/wrapper.sh __GL_THREADED_OPTIMIZATIONS on Linux). Switched off by itself after a crash inside the NVIDIA driver's own thread (wolfcrashreport.cpp checkDriverCrash; tickets 343, 370, 373, 406).</string>
+    <key>Persist</key>
+    <integer>1</integer>
+    <key>Type</key>
+    <string>Boolean</string>
+    <key>Value</key>
+    <integer>1</integer>
+  </map>
+  <key>WolfNvidiaDriverCrashChecked</key>
+  <map>
+    <key>Comment</key>
+    <string>[NVIDIA DRIVER CRASHES 2026-11-01] Unix time up to which earlier runs' crash folders have been checked for a crash inside the NVIDIA driver's own thread, so one crash switches WolfNvidiaThreadedOptimization off once, and not again after it is turned back on.</string>
+    <key>Persist</key>
+    <integer>1</integer>
+    <key>Type</key>
+    <string>U32</string>
+    <key>Value</key>
+    <integer>0</integer>
+  </map>
   <key>WolfStreamAlbumArt</key>
   <map>
     <key>Comment</key>

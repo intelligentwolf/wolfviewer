@@ -455,13 +455,20 @@ void ll_nvapi_init(NvDRSSessionHandle hSession)
     }
 
     // enable Threaded Optimization instead of letting the driver decide
+    // <WolfViewer 2026-11-01> [NVIDIA DRIVER CRASHES] ...or disable it when WolfNvidiaThreadedOptimization is off
+    // (Preferences > Graphics > Hardware Settings, or turned off by wolfcrashreport.cpp checkDriverCrash after a crash on
+    // the NVIDIA driver's own thread: ticket 406). Source: nvapi 560.0.0-r1 NvApiDriverSettings.h:372-376
+    // EValues_OGL_THREAD_CONTROL - OGL_THREAD_CONTROL_ENABLE = 1, OGL_THREAD_CONTROL_DISABLE = 2.
+    const NvU32 wanted_thread_control = gSavedSettings.getBOOL("WolfNvidiaThreadedOptimization") ? OGL_THREAD_CONTROL_ENABLE : OGL_THREAD_CONTROL_DISABLE;
+    LL_INFOS() << "NVIDIA Threaded Optimization: " << (wanted_thread_control == OGL_THREAD_CONTROL_ENABLE ? "enable" : "disable") << LL_ENDL;
     status = NvAPI_DRS_GetSetting(hSession, hProfile, OGL_THREAD_CONTROL_ID, &drsSetting);
-    if (status == NVAPI_SETTING_NOT_FOUND || (status == NVAPI_OK && drsSetting.u32CurrentValue != OGL_THREAD_CONTROL_ENABLE))
+    if (status == NVAPI_SETTING_NOT_FOUND || (status == NVAPI_OK && drsSetting.u32CurrentValue != wanted_thread_control))
     {
         drsSetting.version = NVDRS_SETTING_VER;
         drsSetting.settingId = OGL_THREAD_CONTROL_ID;
         drsSetting.settingType = NVDRS_DWORD_TYPE;
-        drsSetting.u32CurrentValue = OGL_THREAD_CONTROL_ENABLE;
+        drsSetting.u32CurrentValue = wanted_thread_control;
+        // </WolfViewer>
         status = NvAPI_DRS_SetSetting(hSession, hProfile, &drsSetting);
         if (status != NVAPI_OK)
         {
@@ -586,6 +593,7 @@ int APIENTRY WINMAIN(HINSTANCE hInstance,
     }
 
     NvDRSSessionHandle hSession = 0;
+    boost::signals2::connection nv_threaded_connection;   // <WolfViewer 2026-11-01/> [NVIDIA DRIVER CRASHES] below
     static LLCachedControl<bool> use_nv_api(gSavedSettings, "NvAPICreateApplicationProfile", true);
     if (use_nv_api)
     {
@@ -606,6 +614,14 @@ int APIENTRY WINMAIN(HINSTANCE hInstance,
             {
                 //override driver setting as needed
                 ll_nvapi_init(hSession);
+                // <WolfViewer 2026-11-01> [NVIDIA DRIVER CRASHES] the Preferences checkbox writes the profile at once
+                // (ll_nvapi_init only writes what differs), so the change is already in the profile at the next start.
+                if (LLControlVariable* control = gSavedSettings.getControl("WolfNvidiaThreadedOptimization"))
+                {
+                    nv_threaded_connection = control->getSignal()->connect(
+                        [hSession](LLControlVariable*, const LLSD&, const LLSD&) { ll_nvapi_init(hSession); });
+                }
+                // </WolfViewer>
             }
         }
     }
@@ -667,6 +683,7 @@ int APIENTRY WINMAIN(HINSTANCE hInstance,
     viewer_app_ptr = NULL;
 
     // (NVAPI) (6) We clean up. This is analogous to doing a free()
+    nv_threaded_connection.disconnect();   // <WolfViewer 2026-11-01/> before the session it uses goes
     if (hSession)
     {
         NvAPI_DRS_DestroySession(hSession);

@@ -973,6 +973,17 @@
          name="texture compression"
          tool_tip="Compresses textures in video memory, allowing for higher resolution textures and/or more textures to be loaded at the cost of some color quality."
          width="315" />
+        <!-- [NVIDIA DRIVER CRASHES 2026-11-01] beside the row above, so the tab needs no more height -->
+        <check_box
+         control_name="WolfNvidiaThreadedOptimization"
+         height="16"
+         label="NVIDIA Threaded Optimisation"
+         layout="topleft"
+         left="330"
+         top_delta="0"
+         name="nvidia threaded optimisation"
+         tool_tip="NVIDIA graphics only; takes effect the next time you start WolfViewer. On lets the NVIDIA driver do some of its work on a thread of its own, which is usually faster. WolfViewer turns it off by itself if the NVIDIA driver crashes on one of its own threads."
+         width="200" />
         <check_box
          control_name="RenderHiDPI"
          height="16"

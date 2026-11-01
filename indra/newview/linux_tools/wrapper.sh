@@ -63,6 +63,21 @@ exportMutliArchDRIPath() {
 ##   behaviour that goes away with it off, comment out the next line.
 ## <WolfViewer 2026-10-29> [W86 CRASH, ticket 343] a value already set when the viewer is started is kept, so it can be
 ##   switched off for one run without editing this file: __GL_THREADED_OPTIMIZATIONS=0 ./wolfviewer
+## <WolfViewer 2026-11-01> [NVIDIA DRIVER CRASHES, tickets 343/370/373] otherwise off while the viewer's setting
+##   WolfNvidiaThreadedOptimization is off (Preferences > Graphics > Hardware Settings; the viewer turns it off by
+##   itself after a crash on the NVIDIA driver's own thread). The viewer keeps the file below in step with that
+##   setting (wolfcrashreport.cpp sync_linux_flag). Its folder is the viewer's user folder as lldir_linux.cpp
+##   initAppDirs names it: $WOLFVIEWER_X64_USER_DIR, else ".wolfviewer_x64" in the home folder from the password
+##   database (getpwuid, as getCurrentUserHome), else $HOME.
+WOLF_USER_DIR="${WOLFVIEWER_X64_USER_DIR:-}"
+if [ -z "${WOLF_USER_DIR}" ]; then
+    WOLF_HOME="$(getent passwd "$(id -u)" 2>/dev/null | cut -d: -f6)"
+    WOLF_USER_DIR="${WOLF_HOME:-$HOME}/.wolfviewer_x64"
+fi
+if [ -z "${__GL_THREADED_OPTIMIZATIONS}" ] && [ -f "${WOLF_USER_DIR}/nvidia_threaded_optimisation_off" ]; then
+    echo "NVIDIA Threaded Optimisation is off (WolfViewer Preferences > Graphics > Hardware Settings)."
+    export __GL_THREADED_OPTIMIZATIONS=0
+fi
 export __GL_THREADED_OPTIMIZATIONS="${__GL_THREADED_OPTIMIZATIONS:-1}"
 
 if [ "`uname -m`" = "x86_64" ]; then

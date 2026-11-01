@@ -991,3 +991,195 @@ void WolfCrashReport::sendPendingOnce()
         launch(prepare(crashes, secrets, common));
     }
 }
+
+// ===================================================================================================================
+// [NVIDIA DRIVER CRASHES 2026-11-01] Tickets 343, 370, 373 (Linux, driver 615.71.09) and 406 (Windows, 621.01), two
+// residents, both on a GeForce RTX 3050: a null read on a thread the NVIDIA OpenGL driver started itself, no viewer code
+// on that thread's stack (Linux: __memcmpeq_avx2 / libnvidia-glcore.so frames down to start_thread and clone; Windows:
+// nvoglv64.dll frames down to the thread start in kernel32/ntdll). The viewer always turned the driver's Threaded
+// Optimisation on (llappviewerwin32.cpp ll_nvapi_init on Windows, linux_tools/wrapper.sh on Linux) - it hands the
+// driver's GL work to a worker thread of its own. The driver's symbols are not public, so which of its threads it was
+// cannot be proven; what the viewer can do is stop forcing that worker on a computer where the driver has crashed on
+// its own thread. Source: region-terrain-work/nvidia-crashes-2026-11-01/README.md.
+// ===================================================================================================================
+
+namespace
+{
+    const char* const NV_THREADED = "WolfNvidiaThreadedOptimization";
+    const char* const NV_CHECKED = "WolfNvidiaDriverCrashChecked";
+#if LL_LINUX
+    // linux_tools/wrapper.sh looks for this file in the user folder (lldir_linux.cpp initAppDirs: $WOLFVIEWER_X64_USER_DIR
+    // or ~/.wolfviewer_x64) before it starts the viewer: there = __GL_THREADED_OPTIMIZATIONS=0.
+    const char* const NV_OFF_FLAG = "nvidia_threaded_optimisation_off";
+#endif
+    bool sNvidiaNotice = false;
+
+    // A frame as out_location writes it, "<module file name>+0x<offset>" (or "?+0x<address>"): its module, lower case.
+    std::string frame_module(const std::string& loc)
+    {
+        const size_t plus = loc.rfind('+');
+        std::string m = plus == std::string::npos ? loc : loc.substr(0, plus);
+        LLStringUtil::toLower(m);
+        return m;
+    }
+
+    bool is_nvidia_gl(const std::string& m)
+    {
+        // Ticket 406: nvoglv64.dll (the 64-bit NVIDIA OpenGL driver); 343/370/373: libnvidia-glcore.so.<driver version>
+        return m == "nvoglv64.dll" || m.compare(0, 19, "libnvidia-glcore.so") == 0;
+    }
+
+    bool is_thread_system(const std::string& m)
+    {
+        // What else is on a driver-started thread in those four: libc.so.6 (__memcmpeq_avx2, start_thread, __clone -
+        // Ubuntu glibc 2.43-2ubuntu2), KERNEL32.DLL and ntdll.dll (the Windows thread start)
+        return m == "kernel32.dll" || m == "ntdll.dll" || m.compare(0, 7, "libc.so") == 0;
+    }
+
+    // crash_stack.txt (write_stack_file / on_fatal_signal above): true when the crashed thread is the NVIDIA OpenGL
+    // driver's own - every frame from the faulting address down is the driver or the system's thread start.
+    bool driver_thread_crash(const std::string& text)
+    {
+        std::string address;
+        std::vector<std::string> frames;
+        std::istringstream in(text);
+        std::string line;
+        while (std::getline(in, line))
+        {
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            if (line.compare(0, 9, "address: ") == 0)
+            {
+                address = line.substr(9);
+            }
+            else if (line.compare(0, 6, "frame ") == 0)
+            {
+                const size_t colon = line.find(": ");
+                if (colon != std::string::npos) frames.push_back(line.substr(colon + 2));
+            }
+        }
+        if (address.empty()) return false;
+        // Linux: backtrace() from the handler lists the handler and the signal trampoline first (on_fatal_signal), so
+        // the crashed code starts at the frame that is the address; Windows: frame 0 is the address.
+        size_t at = 0;
+        while (at < frames.size() && frames[at] != address) ++at;
+        if (at == frames.size()) return false;
+        bool nvidia = false;
+        for (size_t i = at; i < frames.size(); ++i)
+        {
+            const std::string m = frame_module(frames[i]);
+            if (is_nvidia_gl(m))
+            {
+                nvidia = true;
+            }
+            else if (!is_thread_system(m))
+            {
+                return false;   // the viewer's own code (or anything else) is on that stack: some other crash
+            }
+        }
+        return nvidia;
+    }
+
+    void sync_linux_flag()
+    {
+#if LL_LINUX
+        const std::string path = gDirUtilp->getOSUserAppDir() + gDirUtilp->getDirDelimiter() + NV_OFF_FLAG;
+        if (gSavedSettings.getBOOL(NV_THREADED))
+        {
+            if (LLFile::isfile(path) && LLFile::remove(path) != 0)
+            {
+                LL_WARNS("WolfCrashReport") << "Could not remove " << path << LL_ENDL;
+            }
+        }
+        else if (!LLFile::isfile(path))
+        {
+            llofstream out(path.c_str());
+            if (out.is_open())
+            {
+                out << "WolfViewer: NVIDIA Threaded Optimisation is off (Preferences > Graphics > Hardware Settings). "
+                       "The launcher (wolfviewer) reads this file and starts the viewer with __GL_THREADED_OPTIMIZATIONS=0.\n";
+            }
+            else
+            {
+                LL_WARNS("WolfCrashReport") << "Could not write " << path << LL_ENDL;
+            }
+        }
+#endif
+    }
+}
+
+void WolfCrashReport::checkDriverCrash()
+{
+    static bool done = false;
+    if (done) return;
+    done = true;
+
+    LLAppViewer* app = LLAppViewer::instance();
+    if (!app || app->isSecondInstance()) return;   // as sendPendingOnce: the first instance deals with the folders
+
+    // The crash folders find_crashes looks at, sent or not (343-406 had all been sent), from after the last check and
+    // no older than the 30 days a folder is kept.
+    const std::string logdir = gDirUtilp->getExpandedFilename(LL_PATH_LOGS, "");
+    const std::string sep = gDirUtilp->getDirDelimiter();
+    const std::string this_run = gDirUtilp->dumpDirExists() ? gDirUtilp->getBaseFileName(gDirUtilp->getDumpDir()) : std::string();
+    const time_t now = time(nullptr);
+    const time_t checked = static_cast<time_t>(gSavedSettings.getU32(NV_CHECKED));
+    std::vector<std::string> names;
+    {
+        LLDirIterator it(logdir, "dump-*");
+        std::string name;
+        while (it.next(name)) names.push_back(name);
+    }
+    std::string found;
+    for (const std::string& name : names)
+    {
+        if (name == this_run || name.size() != 41 || name.compare(0, 5, "dump-") != 0 || !LLUUID::validate(name.substr(5))) continue;
+        const std::string stack = logdir + name + sep + STACK_FILE;
+        const time_t when = file_time(stack);
+        if (when == 0 || when <= checked || now - when > KEEP_FOLDER_AGE) continue;
+        std::string text;
+        if (read_file(stack, MAX_STACK_BYTES, text) && driver_thread_crash(text))
+        {
+            found = name;
+        }
+    }
+    gSavedSettings.setU32(NV_CHECKED, static_cast<U32>(now));
+
+    if (!found.empty())
+    {
+        if (gSavedSettings.getBOOL(NV_THREADED))
+        {
+            gSavedSettings.setBOOL(NV_THREADED, false);
+            sNvidiaNotice = true;
+            LL_WARNS("WolfCrashReport") << "An earlier run crashed on the NVIDIA OpenGL driver's own thread (" << found
+                                        << "): NVIDIA Threaded Optimisation is now off from the next start" << LL_ENDL;
+        }
+        else
+        {
+            LL_INFOS("WolfCrashReport") << "An earlier run crashed on the NVIDIA OpenGL driver's own thread (" << found
+                                        << "); NVIDIA Threaded Optimisation was already off" << LL_ENDL;
+        }
+    }
+    LL_INFOS("WolfCrashReport") << "NVIDIA Threaded Optimisation: " << (gSavedSettings.getBOOL(NV_THREADED) ? "on" : "off") << LL_ENDL;
+
+    // Linux: the launcher reads the flag before the next start, so it follows the setting at once, not one run late.
+    sync_linux_flag();
+    if (LLControlVariable* control = gSavedSettings.getControl(NV_THREADED))
+    {
+        control->getSignal()->connect([](LLControlVariable*, const LLSD&, const LLSD&) { sync_linux_flag(); });
+    }
+}
+
+void WolfCrashReport::showDriverNoticeOnce()
+{
+    static bool done = false;
+    if (done || !sNvidiaNotice) return;
+    done = true;
+    LLNotificationsUtil::add("WolfNvidiaThreadedOff", LLSD(), LLSD(), [](const LLSD& notification, const LLSD& response)
+    {
+        // Option 1: "Turn it back on" (notifications.xml WolfNvidiaThreadedOff, okcancelbuttons index 1)
+        if (LLNotificationsUtil::getSelectedOption(notification, response) == 1)
+        {
+            gSavedSettings.setBOOL(NV_THREADED, true);
+        }
+    });
+}

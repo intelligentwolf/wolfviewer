@@ -58,6 +58,16 @@ namespace WolfCrashReport
 
     /// From llstartup.cpp at STATE_STARTED: send any crash left by an earlier run. Only the first call does anything.
     void sendPendingOnce();
+
+    /// [NVIDIA DRIVER CRASHES 2026-11-01] From LLAppViewer::init, once the settings are loaded (before
+    /// llappviewerwin32.cpp ll_nvapi_init writes the driver profile): if an earlier run crashed on the NVIDIA OpenGL
+    /// driver's own thread, turn WolfNvidiaThreadedOptimization off (once per crash). On Linux it also keeps the
+    /// launcher's flag file in step with that setting. Only the first call does anything.
+    void checkDriverCrash();
+
+    /// From llstartup.cpp at STATE_STARTED: if checkDriverCrash turned it off this run, say so (with a button to turn
+    /// it back on). Only the first call does anything.
+    void showDriverNoticeOnce();
 }
 
 #endif // WOLF_CRASH_REPORT_H

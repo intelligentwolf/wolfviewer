@@ -204,6 +204,12 @@ void main() {
   vec4 outputColor;
   mainImage(inputColor, vUv, outputColor);
   // never an infinity or a NaN in the frame (fp16 holds 65504)
+  // [WolfViewer 2026-11-01 ticket 436] tested on the IEEE 754 bits (exponent all ones = inf or NaN): GLSL 4.60 s8.3 lets
+  // isnan() return false where NaNs are not implemented
+#if __VERSION__ >= 330
+  if (any(equal(floatBitsToUint(outputColor.rgb) & uvec3(0x7F800000u), uvec3(0x7F800000u)))) outputColor.rgb = inputColor.rgb;
+#else
   if (any(isnan(outputColor.rgb)) || any(isinf(outputColor.rgb))) outputColor.rgb = inputColor.rgb;
+#endif
   frag_color = vec4(max(outputColor.rgb, vec3(0.0)), inputColor.a);
 }

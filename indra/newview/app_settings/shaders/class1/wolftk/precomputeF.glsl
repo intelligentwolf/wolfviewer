@@ -54,8 +54,16 @@ uniform AtmosphereParameters ATMOSPHERE;
 // a moment after login and the clouds had black blotches - skyF.glsl turns a NaN / inf sky colour into black, so the dome's
 // inputs were not finite on his GPU. A NaN written here would be read by every later pass (the LUTs by every sky pixel, the
 // clouds' history by the next frame), so nothing that is not finite leaves this pass. Finite values are unchanged.
+// [WolfViewer 2026-11-01 ticket 436] isnan()/isinf() are not a reliable test: GLSL 4.60 s8.3 "isnan ... Always returns
+// false if NaNs are not implemented" and s4.7.1 "NaNs are not required to be generated". The IEEE 754 bits are: an
+// exponent of all ones (0x7F800000) is an infinity or a NaN, whatever the compiler assumes about NaNs.
+#if __VERSION__ >= 330
+vec4 wolfFiniteOrZero(vec4 v) { return mix(v, vec4(0.0), equal(floatBitsToUint(v) & uvec4(0x7F800000u), uvec4(0x7F800000u))); }
+vec3 wolfFiniteOrZero(vec3 v) { return mix(v, vec3(0.0), equal(floatBitsToUint(v) & uvec3(0x7F800000u), uvec3(0x7F800000u))); }
+#else
 vec4 wolfFiniteOrZero(vec4 v) { return mix(v, vec4(0.0), greaterThan(vec4(isnan(v)) + vec4(isinf(v)), vec4(0.0))); }
 vec3 wolfFiniteOrZero(vec3 v) { return mix(v, vec3(0.0), greaterThan(vec3(isnan(v)) + vec3(isinf(v)), vec3(0.0))); }
+#endif
 
 #if WOLF_TK_PRECOMPUTE == 1
 // Source: three-geospatial packages/atmosphere/src/shaders/precompute/transmittance.frag:9-18

@@ -2480,6 +2480,14 @@ namespace
     constexpr S32 NDIR = WolfTk::Atmosphere::EEP_PROBES;    // [2026-10-26] the probe directions: node n on both sides, 2n and 2n + 1
     LLColor3 sGain[NPROBE];   // set white before first use (probeSky)
     bool sGainValid = false;
+    // [WolfViewer 2026-11-01 ticket 436] the EEP match is off for the rest of this session (a driver fault does not go away
+    // with a graphics setting, so releaseGL keeps it; a restart tests again): the dome drawn
+    // WITH its gains measured black at the probe's directions while the stock sky there is not (probeSky, the sky check).
+    // Maximus Lear (AMD Radeon RX 7800 XT, driver 26.10.1, W90): a black sky, pixel 0,0,0, every frame of two sessions
+    // ("sky share" 0.00-0.01 in every logTimings line). The native sky is then drawn without any EEP gain - sky, haze, clouds
+    // (wolfEepGainOn, wolfEepDomeGain, wolfEepCloudGainOn and the clouds' sky gain all off) - never a black one.
+    bool sGainBroken = false;
+    bool sProbeGainedPending = false;   // [2026-11-01 ticket 436] probeSky's gained reading is in flight (the sky check)
     LLVector3 sProbeDir[NDIR];
     LLColor3 sProbeRaw[NDIR], sProbeTarget[NDIR];
     F32 sProbeHorizonDeg = 0.f;   // the horizon row of the last reading (the verification log)
@@ -2495,6 +2503,78 @@ namespace
         // next frame really tries again
         sProbeRT.release();
         return false;
+    }
+
+    /**
+     * [WolfViewer 2026-11-01 ticket 436] THE SKY CHECK. Maximus Lear's sky (AMD Radeon RX 7800 XT, driver 26.10.1, W90): black,
+     * 0,0,0 in every sky pixel of his picture, every frame of two sessions ("sky share" 0.00-0.01 in every logTimings line,
+     * against 0.17 by day on Paul's). The dome is the physical sky x the EEP gains (skyF.glsl domeGain), and since W90 the
+     * gains are on from the first frame (probeSky beforeDraw); on 10-21 (W75) his sky went "blue -> black a moment after
+     * login", about when the first half-second reading makes the gains valid. Which stage turns it black on his driver is
+     * not known (no WolfEnvironmentTrace log from his GPU). A dome x gains that is black - gains read as zero, a reading that
+     * was an uncaught infinity (skyF.glsl's finite test may legally be false on a driver without NaNs, GLSL 4.60 s8.3), or
+     * anything else on the way - is measured here, not assumed away: each half-second reading also renders the same
+     * directions WITH the gains (as the screen shows them) and compares them with the stock sky there (sProbeTarget).
+     * Black is: the median, over the directions where the stock sky is not black, of gained / stock luminance below 1/64
+     * (a gain floor of 1/1024 gives about 1/1000; a correct sky is near 1). The gains settle within one or two readings of a
+     * log-in or a teleport (region-terrain-work/sky-white-flash-2026-10-31), so SKY_CHECK_FAILS readings in a row are needed
+     * (3 s) before the match is switched off.
+     */
+    constexpr F32 SKY_RAW_CEILING = 30000.f;   // half skyF.glsl's clamp(color, 0, 60000): no real pre-exposed sky comes near
+    constexpr F32 SKY_BLACK_RATIO = 1.f / 64.f;
+    constexpr S32 SKY_CHECK_FAILS = 6;
+    constexpr S32 SKY_CHECK_MIN_NODES = 8;
+    F32 sSkyCheckMedian = 1.f;
+    S32 sSkyCheckNodes = 0;
+    S32 sSkyBlackRun = 0;
+    // true once the gained dome has measured black SKY_CHECK_FAILS times running; the numbers are logged then
+    bool skyCheckFails(const F32* gx)
+    {
+        std::vector<F32> ratios;
+        ratios.reserve(NDIR);
+        S32 nonFinite = 0;
+        for (S32 i = 0; i < NDIR; ++i)
+        {
+            const F32 want = luminance(sProbeTarget[i]);
+            if (!(want > 1e-6f) || !llfinite(want)) continue;   // the stock sky is black there too: nothing to compare
+            // only the directions the gain loop below can match (a reading it uses, a ratio inside its 1/1024..1024 clamp):
+            // where the native sky is ~0 without gains (night, the probe has no night light) no gain can lift it, and that
+            // is not a broken match (review of 2026-11-01)
+            const F32 raw = luminance(sProbeRaw[i]);
+            if (!(raw > 1e-7f) || !llfinite(raw) || raw >= SKY_RAW_CEILING) continue;
+            const F32 need = want / raw;
+            if (!(need >= 1.f / 1024.f && need <= 1024.f)) continue;
+            const LLColor3 g(gx[i * 4 + 0], gx[i * 4 + 1], gx[i * 4 + 2]);
+            F32 got = luminance(g);
+            if (!llfinite(got)) { ++nonFinite; got = 0.f; }
+            ratios.push_back(llmax(got, 0.f) / want);
+        }
+        sSkyCheckNodes = (S32)ratios.size();
+        if (sSkyCheckNodes < SKY_CHECK_MIN_NODES) { sSkyBlackRun = 0; return false; }
+        std::nth_element(ratios.begin(), ratios.begin() + ratios.size() / 2, ratios.end());
+        sSkyCheckMedian = ratios[ratios.size() / 2];
+        if (!(sSkyCheckMedian < SKY_BLACK_RATIO)) { sSkyBlackRun = 0; return false; }
+        if (++sSkyBlackRun < SKY_CHECK_FAILS) return false;
+        sSkyBlackRun = 0;
+        // what the driver did, for the log: the reading without gains, the gain, with gains, the stock sky - at the zenith
+        // node's two sides and the first horizon node (rows: EEP_GAIN_ELEV_DEG, the last the horizon)
+        std::ostringstream o;
+        o << "EEP sky check: the dome drawn with its EEP gains is BLACK (median gained / stock " << sSkyCheckMedian << " over "
+          << sSkyCheckNodes << " directions, " << nonFinite << " not finite, " << SKY_CHECK_FAILS
+          << " readings running) on " << gGLManager.getRawGLString()
+          << " - the EEP match is off for this session, the sky is drawn without it";
+        const S32 picks[3] = { 0, 1, 2 * (EEP_GAIN_ROWS - 1) * EEP_GAIN_COLS };
+        for (S32 k = 0; k < 3; ++k)
+        {
+            const S32 i = picks[k];
+            const LLColor3& gn = sGain[i / 2];
+            o << llformat("\n  probe %d: without gains %.4g,%.4g,%.4g  gain %.4g,%.4g,%.4g  with gains %.4g,%.4g,%.4g  stock %.4g,%.4g,%.4g", i,
+                          sProbeRaw[i].mV[0], sProbeRaw[i].mV[1], sProbeRaw[i].mV[2], gn.mV[0], gn.mV[1], gn.mV[2],
+                          gx[i * 4 + 0], gx[i * 4 + 1], gx[i * 4 + 2],
+                          sProbeTarget[i].mV[0], sProbeTarget[i].mV[1], sProbeTarget[i].mV[2]);
+        }
+        LL_WARNS("WolfEnv") << o.str() << LL_ENDL;
+        return true;
     }
 
     /**
@@ -2518,10 +2598,11 @@ namespace
     void probeSky(LLGLSLShader& sh, bool beforeDraw)
     {
         LLSettingsSky::ptr_t psky = LLEnvironment::instance().getCurrentSky();
-        if (!psky || !WolfEnvironmentRender::eepDriven())
+        if (!psky || !WolfEnvironmentRender::eepDriven() || sGainBroken)
         {
-            // no EEP to drive the sky: the physical sky as it is
+            // no EEP to drive the sky (or, ticket 436, its gains drew a black dome on this GPU): the physical sky as it is
             if (sGainValid) { sGainValid = false; sAtmos->setEepGains(sGain, false); }
+            sProbeGainedPending = false;   // [2026-11-01 ticket 436] a gained reading in flight is stale when the match comes back
             return;
         }
         if (gCubeSnapshot || !gPipeline.mScreenTriangleVB) return;
@@ -2535,6 +2616,10 @@ namespace
         static LLVector3 s_pendRef = LLVector3::z_axis;   // the light the reading in flight was taken round
         static F32 s_pendHorizon = 0.f;
         static LLVector3d s_pendPlace;                     // [2026-10-31] and where the agent was (placeGlobal)
+        // [2026-11-01 ticket 436] the sky check: the same directions rendered WITH the gains, read with the reading in flight
+        static GLuint s_pboGained = 0;
+        bool& s_pendGained = sProbeGainedPending;
+        static bool s_checkLogged = false; // the first passing check is logged once
         // the grid's light: the stock sky's (eepLightWorld); a teleport is the agent's jump (placeGlobal, ticket #277)
         const LLVector3 ref = eepLightWorld(psky, sFrame);
         const LLVector3d place = placeGlobal();
@@ -2575,7 +2660,14 @@ namespace
             glBufferData(GL_PIXEL_PACK_BUFFER, NDIR * 4 * sizeof(F32), nullptr, GL_STREAM_READ);
             glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
         }
-        auto render = [&](bool gainsOn, F32* out)   // out == nullptr: into the pack buffer
+        if (!s_pboGained)
+        {
+            glGenBuffers(1, &s_pboGained);
+            glBindBuffer(GL_PIXEL_PACK_BUFFER, s_pboGained);
+            glBufferData(GL_PIXEL_PACK_BUFFER, NDIR * 4 * sizeof(F32), nullptr, GL_STREAM_READ);
+            glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+        }
+        auto render = [&](bool gainsOn, F32* out, GLuint pbo)   // out == nullptr: into the pack buffer `pbo`
         {
             sh.uniform1f(s_probe, 1.f);
             sAtmos->setEepProbeDirs(sProbeDir);   // [2026-10-25] skyF.glsl wolfEepProbeDir, in the WolfEepGains uniform block
@@ -2594,7 +2686,7 @@ namespace
                 }
                 else
                 {
-                    glBindBuffer(GL_PIXEL_PACK_BUFFER, s_pbo);
+                    glBindBuffer(GL_PIXEL_PACK_BUFFER, pbo);
                     glReadPixels(0, 0, NDIR, 1, GL_RGBA, GL_FLOAT, nullptr);
                     glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
                 }
@@ -2606,6 +2698,8 @@ namespace
         };
         F32 px[NDIR * 4] = {};
         bool haveReading = false;
+        F32 gx[NDIR * 4] = {};     // [2026-11-01 ticket 436] the same reading's directions with the gains on (the sky check)
+        bool haveGained = false;
         LLVector3 readDir[NDIR];
         LLVector3 readRef = s_pendRef;
         F32 readHorizon = s_pendHorizon;
@@ -2613,7 +2707,8 @@ namespace
         {
             // [2026-10-31] this frame's reading, read at once; the one in flight (if any) is dropped
             s_pending = false;
-            render(false, px);
+            s_pendGained = false;
+            render(false, px, 0);
             haveReading = true;
             for (S32 i = 0; i < NDIR; ++i) readDir[i] = sProbeDir[i];
             readRef = ref;
@@ -2633,9 +2728,27 @@ namespace
                 }
                 glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
                 s_pending = false;
+                if (haveReading && s_pendGained)
+                {
+                    glBindBuffer(GL_PIXEL_PACK_BUFFER, s_pboGained);
+                    if (const void* mapped = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, NDIR * 4 * sizeof(F32), GL_MAP_READ_BIT))
+                    {
+                        memcpy(gx, mapped, sizeof(gx));
+                        glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+                        haveGained = true;
+                    }
+                    glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+                }
+                s_pendGained = false;
             }
             for (S32 i = 0; i < NDIR; ++i) readDir[i] = s_pendDir[i];
-            render(false, nullptr);
+            render(false, nullptr, s_pbo);
+            // [2026-11-01 ticket 436] and the same directions as the screen shows them, while there are gains to check
+            if (sGainValid)
+            {
+                render(true, nullptr, s_pboGained);
+                s_pendGained = true;
+            }
             for (S32 i = 0; i < NDIR; ++i) s_pendDir[i] = sProbeDir[i];
             s_pendRef = ref; s_pendHorizon = horizonDeg; s_pendPlace = place;
             s_pending = true;
@@ -2649,7 +2762,7 @@ namespace
         {
             s_nextVerify = t + 15.0;
             F32 pv[NDIR * 4] = {};
-            render(true, pv);
+            render(true, pv, 0);
             const WolfEepReference::Path path = WolfEepReference::path(psky);
             auto d8 = [](const LLColor3& c) { return llformat("%3d,%3d,%3d", (S32)llround(c.mV[0] * 255.f), (S32)llround(c.mV[1] * 255.f), (S32)llround(c.mV[2] * 255.f)); };
             std::ostringstream o;
@@ -2712,6 +2825,24 @@ namespace
             sProbeRaw[i].set(px[i * 4 + 0], px[i * 4 + 1], px[i * 4 + 2]);
             sProbeTarget[i] = WolfEepReference::skyLinear(psky, readDir[i]);   // the directions that reading looked along
         }
+        // [2026-11-01 ticket 436] the sky check counts consecutive ordinary readings only: one without gained data, or a cut
+        // (the prime, a teleport, the light switching sides - its gained render saw the old place or reference) starts again
+        if (!haveGained || cut) sSkyBlackRun = 0;
+        else if (skyCheckFails(gx))
+        {
+            // [2026-11-01 ticket 436] the gained dome measured black SKY_CHECK_FAILS times running: the EEP match is off for
+            // this session (sGainBroken); the next frames draw the physical sky with no EEP gain anywhere
+            sGainBroken = true;
+            sGainValid = false;
+            sAtmos->setEepGains(sGain, false);
+            return;
+        }
+        if (haveGained && !cut && !s_checkLogged && sSkyBlackRun == 0)
+        {
+            s_checkLogged = true;
+            LL_INFOS("WolfEnv") << "EEP sky check: the dome drawn with its gains matches the stock sky (median ratio "
+                                << sSkyCheckMedian << " over " << sSkyCheckNodes << " directions)" << LL_ENDL;
+        }
         for (S32 n = 0; n < NPROBE; ++n)
         {
             for (S32 c = 0; c < 3; ++c)
@@ -2723,7 +2854,9 @@ namespace
                 {
                     const S32 i = 2 * n + side;
                     const F32 raw = sProbeRaw[i].mV[c], want = sProbeTarget[i].mV[c];
-                    if (!(raw > 1e-7f) || !(want >= 0.f) || !llfinite(raw)) continue;
+                    // [2026-11-01 ticket 436] a reading at or near skyF.glsl's ceiling (clamp to 60000 after its finite test) is
+                    // an infinity or a NaN that test did not catch, not sky: left out like a non-finite one
+                    if (!(raw > 1e-7f) || !(want >= 0.f) || !llfinite(raw) || raw >= SKY_RAW_CEILING) continue;
                     sumLog += log2f(llclamp(llmax(want, 1e-7f) / raw, 1.f / 1024.f, 1024.f));
                     ++used;
                 }
@@ -2809,8 +2942,9 @@ namespace
         // sky. With Wolf weather the clouds now take the sky's per-direction gain instead (cloudsF.glsl wolfEepCloudSkyGain ->
         // wolfEepGainDir, the gain the haze already takes): the EEP's palette, the physical contrast between cloud and sky.
         // Without Wolf weather (an EEP alone), by day the stock-cloud gains stay as they were; by night neither (as since 10-26).
-        const bool gainsByDay = sFrame.sunUp && !sFrame.wolfWeather;
-        sAtmos->setEepCloudSkyGain(sFrame.sunUp && sFrame.wolfWeather);
+        // [2026-11-01 ticket 436] neither when the EEP match is off for this session (sGainBroken, probeSky's sky check)
+        const bool gainsByDay = sFrame.sunUp && !sFrame.wolfWeather && !sGainBroken;
+        sAtmos->setEepCloudSkyGain(sFrame.sunUp && sFrame.wolfWeather && !sGainBroken);
         if (!gainsByDay && sCloudGainValid)
         {
             sCloudGainValid = false;

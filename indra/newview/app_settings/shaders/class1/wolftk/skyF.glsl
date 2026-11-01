@@ -561,7 +561,12 @@ void main()
     // [WolfViewer 2026-10-21] Maximus Lear's black dome (AMD RX 7800 XT): every sky pixel reads this; a NaN or inf in it makes
     // GetSkyRadiance's shadow-length branch (brunetonRuntime.glsl ClampRadius(sqrt(d*d + ...)) with d = shadow length) NaN
     // and the guard below paints the pixel black. Not finite or negative: no shaft here.
+#if __VERSION__ >= 330
+    // [2026-11-01 ticket 436] the IEEE 754 bits, not isnan()/isinf() (see the guard at the end of main)
+    if ((floatBitsToUint(shadowLength) & 0x7F800000u) == 0x7F800000u || shadowLength < 0.0) shadowLength = 0.0;
+#else
     if (isnan(shadowLength) || isinf(shadowLength) || shadowLength < 0.0) shadowLength = 0.0;
+#endif
 #endif
 
     // Source: sky.vert:48-50 (world -> ECEF, km) and sky.frag:50-54
@@ -684,7 +689,17 @@ void main()
     if (uProbe < 0.5 && !(intersectsGround && distanceToGround >= 0.0)) color += wolfMeteors(dirWorld, fragmentAngle);
 
     // never an infinity or a NaN in the frame (fp16 holds 65504)
+    // [WolfViewer 2026-11-01 ticket 436] isnan()/isinf() are not a reliable test: GLSL 4.60 s8.3 "isnan ... Always returns
+    // false if NaNs are not implemented" and s4.7.1 "NaNs are not required to be generated". The IEEE 754 bits are: an
+    // exponent of all ones (0x7F800000) is an infinity or a NaN, whatever the compiler assumes about NaNs.
+    // It matters most in the EEP probe (uProbe): an infinity that test let through would be clamped to 60000 below and read
+    // back as the sky's brightness, and the EEP gains (stock / native) would fall to their 1/1024 floor - a black dome (one
+    // of the ways ticket 436's black sky can arise; wolfenvironmentrender.cpp probeSky also refuses such a reading).
+#if __VERSION__ >= 330
+    if (any(equal(floatBitsToUint(color) & uvec3(0x7F800000u), uvec3(0x7F800000u)))) color = vec3(0.0);
+#else
     if (any(isnan(color)) || any(isinf(color))) color = vec3(0.0);
+#endif
     color = clamp(color, vec3(0.0), vec3(60000.0));
 
     // LL G-buffer, as skyF.glsl writes it

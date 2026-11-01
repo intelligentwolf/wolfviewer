@@ -2133,6 +2133,14 @@ void WolfPanelAI::textSyncControls()
     mTextLayout->setEnabled(!hillside);
     mTextDepth->setEnabled(!neon);
     const bool lights = mTextLight->getValue().asString() != "off";
+    // [WolfViewer 2026-11-01] Crash ticket 418 (W90, stack overflow): lights switched off while the light colour's picker was
+    // open. Source: llcolorswatch.cpp:264-282 LLColorSwatchCtrl::setEnabled(false) cancels an open picker before closing it;
+    // llfloatercolorpicker.cpp:1100-1110 cancelSelection -> llcolorswatch.cpp:292-335 onColorChanged(COLOR_CANCEL) commits the
+    // swatch (no cancel callback) -> the `edited` commit callback (postBuild) -> back here, lights still off, the picker still
+    // open, setEnabled(false) again - without end. Same loop as ticket #241 (wolffloaterenvironment.cpp updateVisibility), same
+    // cure: the picker is detached and closed first (llcolorswatch.cpp:340 closeFloaterColorPicker: nothing is cancelled or
+    // committed, the swatch keeps the colour picked so far), and only then is the swatch disabled.
+    if (!lights) mTextLightColour->closeFloaterColorPicker();
     mTextLightColour->setEnabled(lights); mTextIntensity->setEnabled(lights); mTextRadius->setEnabled(lights);
     getChildView("ai_text_texture_clear")->setEnabled(mTextTexture->getImageAssetID().notNull());
     std::string note;

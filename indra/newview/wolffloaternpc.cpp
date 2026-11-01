@@ -54,6 +54,7 @@
 #include "wolffloateradventuregm.h"
 #include "wolffloaternpcgame.h"
 #include "wolffloaternpcmind.h"
+#include "wolfnpcships.h"   // [NPC SHIPS 2026-11-01]
 #include "llviewerregion.h"
 #include "llviewertexture.h"
 #include "llweb.h"
@@ -1488,6 +1489,7 @@ WolfFloaterNPC::~WolfFloaterNPC()
     LLFloaterWolfAvatars::setCharacterDoneListener(nullptr);
     delete mGame;
     delete mMind;
+    delete mShips;
     delete mNewForm;
     delete mEditForm;
 }
@@ -1498,6 +1500,19 @@ bool WolfFloaterNPC::postBuild()
     mNewTab = getChild<LLPanel>("tab_new");
     mRegionTab = getChild<LLPanel>("tab_region");
     mScenesTab = getChild<LLPanel>("tab_scenes");
+    // [NPC SHIPS 2026-11-01] the region's wolf-naval ships (PROTOCOL.md §30): failures in the window's own status line,
+    // questions (Remove haven, Clear all ships) in the window's own question row
+    mShipsTab = getChild<LLPanel>("tab_ships");
+    {
+        LLHandle<LLFloater> h = getHandle();
+        mShips = new WolfNPCShips(mShipsTab->getChild<LLPanel>("ships_panel"),
+            [h](const std::string& text, const std::string& yes, std::function<void()> go)
+            {
+                if (WolfFloaterNPC* self = dynamic_cast<WolfFloaterNPC*>(h.get())) self->ask(text, yes, go);
+            },
+            [h](const std::string& text) { if (WolfFloaterNPC* self = dynamic_cast<WolfFloaterNPC*>(h.get())) self->setError(text); },
+            [h](const std::string& text) { if (WolfFloaterNPC* self = dynamic_cast<WolfFloaterNPC*>(h.get())) self->setDone(text); });
+    }
     mTabs->setCommitCallback([this](LLUICtrl*, const LLSD&) { onTabChanged(); });
     mStatus = getChild<LLTextBox>("status");
     mBuyBtn = getChild<LLButton>("buy_btn");
@@ -2188,6 +2203,7 @@ void WolfFloaterNPC::draw()
         mRegionPending = false;
         sendHello();
         if (mTabs->getCurrentPanel() == mRegionTab) requestList();
+        if (mTabs->getCurrentPanel() == mShipsTab) mShips->onShown();   // [NPC SHIPS] the new region's ships
     }
     // [ROUND B] a scene piece's brain settings, once their time has come (bounded retries, not a polling loop)
     for (size_t i = 0; i < mPendingBrain.size(); ++i)
@@ -2566,6 +2582,7 @@ void WolfFloaterNPC::onRegionChanged()
     if (mCards) { mCards->mCards.clear(); mCards->mSelected.clear(); }
     if (mDetailView && mDetailView->getVisible()) showDetail(false);
     refreshActions();
+    if (mShips) mShips->onRegionChanged();   // [NPC SHIPS] the old region's ships and rights are gone
     mRegionPending = getVisible();
 }
 
@@ -2626,6 +2643,7 @@ void WolfFloaterNPC::onTabChanged()
     // Read again each time the tab is shown (not while a scene is being placed): a list kept from an earlier visit can be
     // hours old, and a W79 window kept open across the 2026-10-25 scenes.json fix kept refusing "Living town" (Jimmy Olsen)
     else if (p == mScenesTab) { if (!mScenesRead || mScene < 0) loadScenes(); }
+    else if (p == mShipsTab) mShips->onShown();   // [NPC SHIPS] read on opening the tab (never on a timer)
 }
 
 void WolfFloaterNPC::onChangedPush(const std::string& id)

@@ -951,6 +951,7 @@ set(viewer_SOURCE_FILES
     wolffloaternpcgame.cpp   # [WOLFNPC ROUND 3 2026-10-24] Edit > Game (quests, dialogues, trader, pet, events, touch)
     wolffloaternpcmind.cpp   # [WOLFNPC ROUND 4 2026-10-24] Edit > Learning (knowledge, skills, changes) and Places (places, tools)
     wolfnpc.cpp   # [WOLFNPC 2026-10-24] the region link (GenericMessage wolfnpc / WolfNPC)
+    wolfnpcships.cpp   # [NPC SHIPS 2026-11-01] the WolfNPC window's NPC ships tab (wolf-naval, PROTOCOL.md §30)
     wolffloaterchat.cpp      # [WOLF CHAT 2026-10-20] Wolf World > Wolf Chat: group text + voice channels
     wolfvoicediag.cpp        # [2026-10-22] voice debug mode (Wolf Chat room reports)
     wolfimportflow.cpp # [IMPORT WORLDS 2026-10-18] the import flow shared with the Adventure Studio
@@ -1947,6 +1948,7 @@ set(viewer_HEADER_FILES
     wolffloaternpcgame.h   # [WOLFNPC ROUND 3 2026-10-24]
     wolffloaternpcmind.h   # [WOLFNPC ROUND 4 2026-10-24]
     wolfnpc.h   # [WOLFNPC 2026-10-24]
+    wolfnpcships.h   # [NPC SHIPS 2026-11-01]
     wolffloaterchat.h        # [WOLF CHAT 2026-10-20]
     wolfvoicediag.h          # [2026-10-22]
     wolfimportflow.h

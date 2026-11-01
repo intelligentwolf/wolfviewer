@@ -307,6 +307,11 @@
                  tool_tip="It appears 2 m in front of you; its home is where you stand" />
             </panel>
         </panel>
+
+        <!-- ═══════════════════ [NPC SHIPS 2026-11-01] NPC SHIPS (wolf-naval, PROTOCOL.md §30) ═══════════════════ -->
+        <panel label="NPC ships" name="tab_ships" layout="topleft" follows="all" height="576" width="592">
+            <panel filename="panel_wolf_npc_ships.xml" follows="all" layout="topleft" left="0" name="ships_panel" top="0" />
+        </panel>
     </tab_container>
 
     <!-- the status line: every failure (caution colour, until the next action) and every confirmation -->

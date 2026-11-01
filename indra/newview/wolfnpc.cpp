@@ -23,11 +23,14 @@
 #include <boost/json.hpp>
 
 #include "llagent.h"
+#include "llchat.h"
 #include "lldispatcher.h"
 #include "llframetimer.h"
 #include "llsdjson.h"
 #include "llviewergenericmessage.h"
 #include "llviewerregion.h"
+#include "rlvactions.h"
+#include "rlvhandler.h"
 #include "wolfai.h"
 #include "wolfgame.h"
 #include "wolfgrid.h"
@@ -54,6 +57,18 @@ namespace
     constexpr S32 MAX_PARTS = 256;
     constexpr size_t MAX_PARTIAL = 16;
     constexpr size_t MAX_QUEUE = 32;
+
+    // [NPC SHIPS 2026-11-01] Source: PROTOCOL.md §30.2 - requests as local chat on channel 73 (NpcRules.CHANNEL), text
+    // "npcships " + one JSON object, at most 900 bytes in all; replies as GenericMessage "WolfNaval" (§2 framing)
+    const std::string MESSAGE_FROM_NAVAL("WolfNaval");
+    constexpr S32 SHIPS_CHANNEL = 73;
+    const std::string SHIPS_PREFIX("npcships ");
+    constexpr size_t SHIPS_MAX_BYTES = 900;
+    // Source: PROTOCOL.md §30.2 "After 6 s the viewer shows 'NPC ships are not available on this region yet.'"
+    constexpr F64 SHIPS_ANSWER_SEC = 6.0;
+    // Source: PROTOCOL.md §30.2 "At most 2 requests a second per agent (bucket 6)". The viewer keeps under it (design
+    // values, as TOKEN_REFILL above): 1.5 a second, bucket 5.
+    constexpr F64 SHIPS_TOKEN_REFILL = 1.5, SHIPS_TOKEN_BUCKET = 5.0;
 
     F64 now() { return LLFrameTimer::getTotalSeconds(); }
 
@@ -161,10 +176,29 @@ public:
     }
 };
 
+/** [NPC SHIPS] "WolfNaval" packets (PROTOCOL.md §30.2): the same joining as "WolfNPC", kept apart by receivePacket. */
+class WolfNavalPushHandler : public LLDispatchHandler
+{
+public:
+    bool operator()(const LLDispatcher*, const std::string&, const LLUUID& invoice, const sparam_t& strings) override
+    {
+        if (WolfNPC::instanceExists())
+        {
+            WolfNPC::instance().receivePacket(invoice, strings, true);
+        }
+        return true;
+    }
+};
+
 namespace
 {
     WolfNPCPushHandler sNPCHandler;
+    WolfNavalPushHandler sNavalHandler;
 }
+
+// Source: fsnearbychathub.cpp:107 (declared as llfloaterimnearbychat.cpp:91 declares it) - the viewer's own chat path, so
+// RLV's channel rules apply; nothing is added to the resident's chat history
+void send_chat_from_viewer(std::string utf8_out_text, EChatType type, S32 channel);
 
 WolfNPC::WolfNPC()
 {
@@ -172,10 +206,16 @@ WolfNPC::WolfNPC()
     {
         gGenericDispatcher.addHandler(MESSAGE_FROM_SIM, &sNPCHandler);
     }
+    if (!gGenericDispatcher.isHandlerPresent(MESSAGE_FROM_NAVAL))
+    {
+        gGenericDispatcher.addHandler(MESSAGE_FROM_NAVAL, &sNavalHandler);
+    }
     // Source: wolfgame.cpp:317 - llagent.cpp setRegion fires this inside the region switch
     mRegionChangedConnection = gAgent.addRegionChangedCallback([this]() { onRegionChanged(); });
     mTokens = TOKEN_BUCKET;
     mTokenAt = now();
+    mShipTokens = SHIPS_TOKEN_BUCKET;
+    mShipTokenAt = mTokenAt;
 }
 
 WolfNPC::~WolfNPC()
@@ -187,6 +227,7 @@ void WolfNPC::onRegionChanged()
 {
     // A request to the old region can no longer be answered (its reply would carry the old region's Invoice).
     mPartial.clear();
+    mPartialShips.clear();
     mQueue.clear();
     failAll("You moved to another region before the answer came. Check the list and try again.");
 }
@@ -199,6 +240,82 @@ void WolfNPC::failAll(const std::string& why)
     {
         if (kv.second.mDone) kv.second.mDone(failure(kv.second.mOp, why));
     }
+}
+
+// The region's "busy" names no request (it is sent at most every 5 s for every request it dropped), so every ships request
+// still waiting fails with it; one the region did take would answer later and be ignored - the tab is read again on Refresh.
+void WolfNPC::failShips(const std::string& why)
+{
+    std::vector<reply_fn> fail;
+    std::vector<std::string> ops;
+    for (auto it = mWaiting.begin(); it != mWaiting.end();)
+    {
+        if (it->second.mNaval)
+        {
+            fail.push_back(it->second.mDone);
+            ops.push_back(it->second.mOp);
+            it = mWaiting.erase(it);
+        }
+        else ++it;
+    }
+    for (size_t i = 0; i < fail.size(); ++i)   // after the erase: a callback may send a new request
+    {
+        if (fail[i]) fail[i](failure(ops[i], why));
+    }
+}
+
+bool WolfNPC::takeShipsToken()
+{
+    const F64 t = now();
+    mShipTokens = std::min(SHIPS_TOKEN_BUCKET, mShipTokens + (t - mShipTokenAt) * SHIPS_TOKEN_REFILL);
+    mShipTokenAt = t;
+    if (mShipTokens < 1.0) return false;
+    mShipTokens -= 1.0;
+    return true;
+}
+
+void WolfNPC::requestShips(const std::string& op, const LLSD& fields, reply_fn done)
+{
+    // Source: PROTOCOL.md §30.2 "Sent only on Wolf Territories (the same gate as §2)"
+    if (!WolfGrid::isOnWolfTerritories())
+    {
+        if (done) done(failure(op, "NPC ships work on Wolf Territories only."));
+        return;
+    }
+    if (!gAgent.getRegion() || !WolfGrid::isOnWolfTerritoriesConfirmed())
+    {
+        if (done) done(failure(op, "Moving between regions - try again in a moment."));
+        return;
+    }
+    // RLV @sendchannel would drop the chat silently (fsnearbychathub.cpp send_chat_from_viewer): say so instead of a timeout
+    if (rlv_handler_t::isEnabled() && !RlvActions::canSendChannel(SHIPS_CHANNEL))
+    {
+        if (done) done(failure(op, "Your RLV restrictions stop the viewer talking to the region on channel 73."));
+        return;
+    }
+    if (!takeShipsToken())
+    {
+        if (done) done(failure(op, "Too many requests at once - wait a moment and try again."));
+        return;
+    }
+    const S32 req = mNextReq;
+    mNextReq = mNextReq >= 0x3fffffff ? 1 : mNextReq + 1;
+    LLSD m = fields.isMap() ? fields : LLSD::emptyMap();
+    m["op"] = op;
+    m["req"] = req;
+    const std::string text = SHIPS_PREFIX + boost::json::serialize(LlsdToJson(m));
+    if (text.size() > SHIPS_MAX_BYTES)
+    {
+        if (done) done(failure(op, "That is too much to send at once - shorten the name and try again."));
+        return;
+    }
+    Waiting w;
+    w.mDone = done;
+    w.mOp = op;
+    w.mDeadline = now() + SHIPS_ANSWER_SEC;
+    w.mNaval = true;
+    mWaiting[req] = w;
+    send_chat_from_viewer(text, CHAT_TYPE_NORMAL, SHIPS_CHANNEL);
 }
 
 bool WolfNPC::takeToken()
@@ -286,10 +403,13 @@ void WolfNPC::idle()
         // NUL, the byte LLClientView's Util.FieldToString removes
         for (const std::vector<std::string>& params : out.mPackets) send_generic_message(METHOD_TO_SIM, params);
     }
-    for (auto it = mPartial.begin(); it != mPartial.end();)
+    for (std::map<S64, Pending>* partial : { &mPartial, &mPartialShips })
     {
-        if (t - it->second.mFirst > PARTIAL_LIFE) it = mPartial.erase(it);
-        else ++it;
+        for (auto it = partial->begin(); it != partial->end();)
+        {
+            if (t - it->second.mFirst > PARTIAL_LIFE) it = partial->erase(it);
+            else ++it;
+        }
     }
     if (!mWaiting.empty())
     {
@@ -307,13 +427,18 @@ void WolfNPC::idle()
         {
             if (l.second.mDone)
             {
-                l.second.mDone(failure(l.second.mOp, "The region did not answer. It may not have WolfNPC yet, or it is busy - try again in a minute."));
+                // [NPC SHIPS] Source: PROTOCOL.md §30.2 - a region without wolf-naval 1.10.0 answers nothing
+                // a hello that gets no answer means no wolf-naval there; any later request had a region that answered
+                const std::string why = !l.second.mNaval ? std::string("The region did not answer. It may not have WolfNPC yet, or it is busy - try again in a minute.")
+                                      : l.second.mOp == "hello" ? std::string("NPC ships are not available on this region yet.")
+                                      : std::string("The region did not answer in time - press Refresh to see what it has.");
+                l.second.mDone(failure(l.second.mOp, why));
             }
         }
     }
 }
 
-void WolfNPC::receivePacket(const LLUUID& invoice, const std::vector<std::string>& strings)
+void WolfNPC::receivePacket(const LLUUID& invoice, const std::vector<std::string>& strings, bool naval)
 {
     // Source: wolfgame.cpp:351-419 WolfGame::receivePacket - the same gate, region check, header and joining
     if (!WolfGrid::isOnWolfTerritoriesConfirmed()) return;
@@ -340,8 +465,9 @@ void WolfNPC::receivePacket(const LLUUID& invoice, const std::vector<std::string
     }
     else
     {
-        if (!mPartial.count(id) && mPartial.size() >= MAX_PARTIAL) mPartial.erase(mPartial.begin());
-        Pending& p = mPartial[id];
+        std::map<S64, Pending>& partial = naval ? mPartialShips : mPartial;   // [NPC SHIPS] each sender's own ids
+        if (!partial.count(id) && partial.size() >= MAX_PARTIAL) partial.erase(partial.begin());
+        Pending& p = partial[id];
         if (p.mTotal == 0)
         {
             p.mTotal = total;
@@ -350,13 +476,13 @@ void WolfNPC::receivePacket(const LLUUID& invoice, const std::vector<std::string
         if (p.mTotal != total)
         {
             LL_WARNS("WolfNPC") << "WolfNPC message " << id << " changed its part count; dropped" << LL_ENDL;
-            mPartial.erase(id);
+            partial.erase(id);
             return;
         }
         p.mParts[part] = piece;
         if ((S32)p.mParts.size() < total) return;
         for (auto& kv : p.mParts) json += kv.second;   // std::map: in part order
-        mPartial.erase(id);
+        partial.erase(id);
     }
     boost::system::error_code ec;
     boost::json::value v = boost::json::parse(json, ec);
@@ -366,12 +492,18 @@ void WolfNPC::receivePacket(const LLUUID& invoice, const std::vector<std::string
         return;
     }
     const LLSD sd = jsonToLLSD(v);
-    if (sd.isMap()) dispatch(sd);
+    if (sd.isMap()) dispatch(sd, naval);
 }
 
-void WolfNPC::dispatch(const LLSD& m)
+void WolfNPC::dispatch(const LLSD& m, bool naval)
 {
     const std::string op = m["op"].asString();
+    if (naval && (!m.has("req") || m["req"].isUndefined()))
+    {
+        // Source: PROTOCOL.md §30.2 - "busy" ({"op":"busy","ok":false,"error":...}): the region dropped the request
+        if (op == "busy") failShips(WolfGame::cleanText(m["error"].asString(), 300));
+        return;
+    }
     // Source: PROTOCOL.md section 2 Pushes (op without req)
     if (!m.has("req") || m["req"].isUndefined())
     {
@@ -402,6 +534,7 @@ void WolfNPC::dispatch(const LLSD& m)
     const S32 req = (S32)std::llround(rv);
     auto it = mWaiting.find(req);
     if (it == mWaiting.end()) return;   // answered already, timed out, or not ours
+    if (it->second.mNaval != naval) return;   // [NPC SHIPS] a reply only answers a request sent the same way
     reply_fn done = it->second.mDone;
     mWaiting.erase(it);
     if (done) done(m);

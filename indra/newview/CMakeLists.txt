@@ -1007,6 +1007,7 @@ set(viewer_SOURCE_FILES
     wolftooladventureplace.cpp # [WOLF ADVENTURE P3 2026-10-16] Studio: the in-world place tool
     wolffloatertunnels.cpp # [WOLF TUNNELS 2026-10-21] the Tunnel tool: walkable spaces under the terrain
     wolffloaterseatunnels.cpp # [WOLF SEA TUNNEL 2026-10-28] Sea Tunnels: air-filled glass tubes under the sea
+    wolffloaterbuildinggen.cpp # [BUILDING GENERATOR 2026-11-01] Building Generator: describe a building, the yard plans, builds and delivers it
     wolffloaterplanebuilder.cpp # [PLANE BUILDER 2026-11-01] Plane Builder: design a fighter, the yard builds and delivers it
     wolffloatershipbuilder.cpp # [SHIP BUILDER 2026-10-29] Ship Builder: design a ship, the shipyard builds and delivers her
     wolfdryvolumes.cpp # [WOLF SEA TUNNEL 2026-10-28] wolfdry prims and tunnel boxes: no water fog / surface inside
@@ -2007,6 +2008,7 @@ set(viewer_HEADER_FILES
     wolftooladventureplace.h   # [WOLF ADVENTURE P3 2026-10-16]
     wolffloatertunnels.h   # [WOLF TUNNELS 2026-10-21]
     wolffloaterseatunnels.h   # [WOLF SEA TUNNEL 2026-10-28]
+    wolffloaterbuildinggen.h   # [BUILDING GENERATOR 2026-11-01]
     wolffloaterplanebuilder.h   # [PLANE BUILDER 2026-11-01]
     wolffloatershipbuilder.h   # [SHIP BUILDER 2026-10-29]
     wolfdryvolumes.h   # [WOLF SEA TUNNEL 2026-10-28]

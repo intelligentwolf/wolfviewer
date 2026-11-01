@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [BUILDING GENERATOR 2026-11-01] Building Generator (wolffloaterbuildinggen.cpp): Build > Building Generator... and Wolf World >
+     Build & Land > Building Generator... Who and why: a Wolf Territories member who wants a building for their land and has never
+     built one. Story: say what you want in your own words, see what planning costs, press Plan it, look at the turning picture,
+     its land impact and the build price, and only on Build it is it charged and put in your inventory.
+     Flow: on the right, top to bottom, 1. the request (600 characters, counter under it) 2. the style 3. the options 4. the
+     planning cost and Plan it 5. the build price against the credits you have. On the left, once planned: the turntable, the
+     plan's words, the budget and the sources of a researched style. Build it bottom right (Buy credits... beside it when short;
+     Cancel bottom left while a job waits). The status line above the buttons: progress, or a failure in the caution colour,
+     kept until the next action. Endpoint contract: region-terrain-work/building-generator-2026-11-01/README.md. -->
+<floater
+ can_close="true"
+ can_minimize="true"
+ can_resize="false"
+ height="664"
+ layout="topleft"
+ name="wolf_building_gen"
+ help_topic="wolf_building_gen"
+ save_rect="true"
+ single_instance="true"
+ title="Building Generator"
+ width="720">
+    <string name="feature_name">Building Generator</string>
+    <string name="opening">Opening the yard...</string>
+    <string name="closed">The yard is closed</string>
+    <string name="reopen">Close this window and open it again to try again.</string>
+    <string name="start_hint">Say what you would like built, then press Plan it. You see the plan and its price before anything is built.</string>
+    <string name="plan_not_allowed">Planning is not open to you at the moment.</string>
+    <string name="no_plan_yet">Your plan will turn here</string>
+    <string name="no_plan_text">Once it is planned, the plan's buildings, its land impact and its build price show here.</string>
+    <string name="preview_bad">The preview could not be drawn</string>
+    <string name="counter">[N] / [MAX] characters</string>
+    <string name="style_auto">Let the generator decide</string>
+    <string name="style_auto_info">The generator picks a style from your words, and may search the web for reference.</string>
+    <string name="style_tip">The period and place it is built in</string>
+    <string name="quote_empty">Describe the building you want and the cost of planning it shows here.</string>
+    <string name="quote_working">Working out what planning costs...</string>
+    <string name="quote_line">Planning costs about [N] credits, at most [M].</string>
+    <string name="quote_research">It may search the web for reference.</string>
+    <string name="quote_missing">The yard did not say what planning costs - try again in a moment.</string>
+    <string name="quote_moved">The cost of planning is now at most [M] credits. Check it, then press Plan it again.</string>
+    <string name="changed_while_checking">Your words or the style changed while the cost was being checked. Wait for the new cost, then press Plan it again.</string>
+    <string name="checking_cost">Checking the cost of planning...</string>
+    <string name="request_needed">Describe the building you want first.</string>
+    <string name="plan_short">You do not have enough AI credits to plan it.</string>
+    <string name="planning_send">Sending your request to the yard...</string>
+    <string name="plan_waiting">Your plan is waiting for the yard ([AHEAD] ahead of it)...</string>
+    <string name="plan_next">Your plan is next...</string>
+    <string name="plan_running">Planning: [PROGRESS]...</string>
+    <string name="plan_ready">"[TITLE]" is planned. Planning cost [AI] credits. Look it over, then press Build it to have it built for [PRICE] credits.</string>
+    <string name="plan_last_time">Your last plan, "[TITLE]", has not been built yet. Press Build it to have it built for [PRICE] credits, or plan something new.</string>
+    <string name="plan_cancelled">Planning cancelled - you have not been charged.</string>
+    <string name="plan_failed">The yard could not plan it. Try different words.</string>
+    <string name="plan_style">Style: [STYLE]</string>
+    <string name="plan_style_researched">Style: [STYLE] (researched on the web)</string>
+    <string name="building_line">- [NAME]: [TYPE], [STOREYS] storeys, [SIZE]</string>
+    <string name="building_line_one">- [NAME]: [TYPE], 1 storey, [SIZE]</string>
+    <string name="warning_prefix">Note:</string>
+    <string name="budget_line">Land impact [LI] - [OBJECTS] objects - [TEXTURES] textures, about [MB] MB</string>
+    <string name="credits_word">credits</string>
+    <string name="price_total">Total: [N] credits</string>
+    <string name="balance_unknown">Reading your AI credits...</string>
+    <string name="balance_short">You have [N] AI credits to spend (balance [B]) - not enough for the next step.</string>
+    <string name="balance_ok">You have [N] AI credits to spend (balance [B]). The build is charged only once it is in your inventory.</string>
+    <string name="not_confirmed">Wait a moment - this region is still being confirmed as Wolf Territories.</string>
+    <string name="ordering">Sending your order to the yard - [PRICE] credits are held and charged only once it is delivered...</string>
+    <string name="cancelling">Cancelling...</string>
+    <string name="progress_none">working</string>
+    <string name="build_waiting">Your building is waiting for the yard ([AHEAD] ahead of it). [PRICE] credits are held and charged only once it is delivered.</string>
+    <string name="build_next">Your building is next in the yard. [PRICE] credits are held and charged only once it is delivered.</string>
+    <string name="build_running">Building: [PROGRESS]...</string>
+    <string name="build_done">Delivered to your inventory: [FOLDER]. [CHARGED] credits were charged.</string>
+    <string name="build_done_unbilled">Delivered to your inventory: [FOLDER]. Its [CHARGED] credits will be taken from your balance shortly.</string>
+    <string name="build_cancelled">Cancelled - you have not been charged.</string>
+    <string name="build_failed">The yard could not build it. You have not been charged.</string>
+
+    <!-- left: the plan -->
+    <panel follows="left|top" height="250" layout="topleft" left="12" name="preview_panel" top="26" width="330"
+     tool_tip="Your plan as it will look. Drag to turn it." />
+    <text follows="left|top" font="SansSerifBold" height="18" layout="topleft" left="12" name="plan_title" top="282" width="330" />
+    <text_editor follows="left|top" height="128" layout="topleft" left="12" name="plan_text" top="302" width="330" word_wrap="true"
+     read_only="true" allow_scroll="true" parse_urls="false" max_length="20000" />
+    <text follows="left|top" height="32" layout="topleft" left="12" name="budget_text" top="436" width="330" wrap="true"
+     tool_tip="What it will take on your land: its land impact, how many objects and textures, and the textures' download size" />
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="12" name="sources_label" top="472" width="330">Researched from</text>
+    <text_editor follows="left|top" height="64" layout="topleft" left="12" name="sources_text" top="490" width="330" word_wrap="true"
+     read_only="true" allow_scroll="true" parse_urls="true" trusted_content="false" max_length="20000"
+     tool_tip="The pages the style was researched from. Click one to open it in your browser." />
+
+    <!-- right: the request, top to bottom -->
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="356" name="request_label" top="26" width="352">1. What would you like built?</text>
+    <text_editor follows="left|top" height="90" layout="topleft" left="356" name="request_text" top="44" width="352" word_wrap="true"
+     parse_urls="false" max_length="2400" commit_on_focus_lost="false"
+     tool_tip="In your own words, up to 600 characters: for example a huge castle, a row of shops, or a farmhouse in wartime France" />
+    <text follows="left|top" halign="right" height="16" layout="topleft" left="356" name="request_counter" top="136" width="352" />
+
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="356" name="style_label" top="156" width="352">2. Style</text>
+    <combo_box follows="left|top" height="23" layout="topleft" left="356" name="style" top="174" width="352"
+     tool_tip="The period and place it is built in" />
+    <text follows="left|top" height="32" layout="topleft" left="356" name="style_info" top="200" width="352" wrap="true" />
+
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="356" name="options_label" top="236" width="352">3. Options</text>
+    <check_box follows="left|top" height="16" label="Wartime damage" layout="topleft" left="356" name="option_1" top="254" width="352" />
+    <check_box follows="left|top" height="16" label="Interiors with doors and stairs" layout="topleft" left="356" name="option_2" top="274" width="352" />
+    <check_box follows="left|top" height="16" label="Street props" layout="topleft" left="356" name="option_3" top="294" width="352" />
+    <check_box follows="left|top" height="16" label="Lit at night" layout="topleft" left="356" name="option_4" top="314" width="352" />
+
+    <text follows="left|top" height="34" layout="topleft" left="356" name="quote_text" top="340" width="352" wrap="true"
+     tool_tip="What the planning step costs in AI credits. Building it is priced separately once it is planned." />
+    <button follows="left|top" height="23" layout="topleft" left="588" name="plan_btn" top="378" width="120" label="Plan it"
+     tool_tip="Have the yard plan it, for the planning cost shown above. Nothing is built yet." />
+
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="356" name="price_label" top="414" width="352">4. Price to build it</text>
+    <text_editor follows="left|top" height="76" layout="topleft" left="356" name="price_text" top="432" width="352" word_wrap="true"
+     read_only="true" allow_scroll="true" parse_urls="false" max_length="8000" />
+    <text follows="left|top" height="34" layout="topleft" left="356" name="balance_text" top="514" width="352" wrap="true" />
+
+    <!-- bottom: access, status and the buttons -->
+    <text follows="left|top" height="32" layout="topleft" left="12" name="access_text" top="558" width="696" wrap="true"
+     text_color="AlertCautionTextColor" visible="false" />
+    <text follows="left|top" height="36" layout="topleft" left="12" name="status_text" top="592" width="696" wrap="true" />
+    <button follows="left|top" height="23" layout="topleft" left="12" name="cancel_btn" top="632" width="150" label="Cancel"
+     tool_tip="Take it back while it is still waiting for the yard (nothing has been charged)" />
+    <button follows="left|top" height="23" layout="topleft" left="440" name="buy_btn" top="632" width="130" label="Buy credits..."
+     tool_tip="Open the AI credits shop in your browser" />
+    <button follows="left|top" height="23" layout="topleft" left="588" name="build_btn" top="632" width="120" label="Build it"
+     tool_tip="Have the yard build this plan for the price shown and put it in your inventory. You pay only once it is there." />
+</floater>

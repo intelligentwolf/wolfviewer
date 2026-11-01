@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [NPC SHIPS 2026-11-01] The WolfNPC window's NPC ships tab (wolfnpcships.cpp WolfNPCShips): the region's wolf-naval
+     pirate and peaceful ships, set up by the region owner or an estate manager (firestorm/region-terrain-work/wolfnpc-release/
+     PROTOCOL.md §30). 592 x 576. Fixed text colours (the window paints its own scene). -->
+<panel background_visible="false" border="false" follows="all" height="576" layout="topleft" left="0" name="npc_ships" top="0" width="592">
+    <text follows="left|top" font="SansSerifLargeBold" height="22" layout="topleft" left="6" name="sh_title" top="4" width="574" text_color="0.95 0.92 0.84 1">NPC ships on this region</text>
+    <text follows="left|top" height="30" layout="topleft" left="6" name="sh_intro" top="28" width="574" word_wrap="true" text_color="0.80 0.82 0.86 1">Pirate and peaceful ships the region sails for you. Pirates only attack ships that have battle mode on, and never in a safe haven.</text>
+    <!-- loading, "not available on this region yet", a failure, or the non-holder's line -->
+    <text follows="left|top" height="40" layout="topleft" left="6" name="sh_note" top="64" width="574" word_wrap="true" text_color="0.95 0.92 0.84 1">Asking the region...</text>
+    <panel follows="left|top" height="512" layout="topleft" left="0" name="sh_body" top="62" width="592" visible="false" background_visible="false" border="false">
+        <check_box follows="left|top" height="18" layout="topleft" left="6" name="sh_on" top="2" width="300" label="NPC ships on"
+         tool_tip="On: the ships sail whenever someone is on the region. Off: they all leave the sea at once." />
+        <!-- why the ships cannot sail here (caution colour), or a warning -->
+        <text follows="left|top" height="30" layout="topleft" left="6" name="sh_chart" top="22" width="574" word_wrap="true" text_color="0.80 0.82 0.86 1" />
+        <spinner follows="left|top" height="22" layout="topleft" left="6" name="sh_pirates" top="56" width="170" label="Pirate ships" label_width="100" decimal_digits="0" increment="1" min_val="0" max_val="12" initial_value="0" />
+        <spinner follows="left|top" height="22" layout="topleft" left="196" name="sh_traders" top="56" width="170" label="Peaceful ships" label_width="100" decimal_digits="0" increment="1" min_val="0" max_val="12" initial_value="0" />
+        <text follows="left|top" height="16" layout="topleft" left="386" name="sh_total" top="59" width="194" text_color="0.80 0.82 0.86 1" />
+        <text follows="left|top" height="14" layout="topleft" left="196" name="sh_traders_hint" top="80" width="384" text_color="0.80 0.82 0.86 1">(traders, fishing boats, ferries - never in battle mode, never hit)</text>
+        <check_box follows="left|top" height="18" layout="topleft" left="6" name="sh_hunters" top="98" width="90" label="Hunters"
+         tool_tip="Fast xebecs that go after ships too fast for the other pirates (they count among your pirate ships)" />
+        <text follows="left|top" height="16" layout="topleft" left="96" name="sh_hunters_note" top="99" width="484" text_color="0.80 0.82 0.86 1" />
+        <!-- [section 30.4 / 31] passing traffic: peaceful ships to and from neighbouring regions that have it on too -->
+        <check_box follows="left|top" height="18" layout="topleft" left="6" name="sh_ambient" top="120" width="124" label="Passing traffic"
+         tool_tip="Peaceful ships come and go to neighbouring regions that have it on too" />
+        <text follows="left|top" height="28" layout="topleft" left="134" name="sh_ambient_note" top="121" width="446" word_wrap="true" text_color="0.80 0.82 0.86 1">Peaceful ships come and go to neighbouring regions that have it on too (and passing aircraft, when they come)</text>
+        <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" is_toggle="true" label="More options" layout="topleft" left="6" name="sh_more" top="152" width="140"
+         tool_tip="Which kinds of ship sail here" />
+        <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Save" layout="topleft" left="460" name="sh_save" top="151" width="120"
+         tool_tip="Saves the number of ships, hunters, passing traffic and the kinds of ship" />
+        <panel follows="left|top" height="22" layout="topleft" left="0" name="sh_classes" top="178" width="592" visible="false" background_visible="false" border="false">
+            <check_box follows="left|top" height="18" layout="topleft" left="6" name="sh_cls_0" top="2" width="140" label="" />
+            <check_box follows="left|top" height="18" layout="topleft" left="150" name="sh_cls_1" top="2" width="140" label="" />
+            <check_box follows="left|top" height="18" layout="topleft" left="294" name="sh_cls_2" top="2" width="140" label="" />
+            <check_box follows="left|top" height="18" layout="topleft" left="438" name="sh_cls_3" top="2" width="140" label="" />
+        </panel>
+        <!-- safe havens: the setup helper (stand at your port, press the button) -->
+        <text follows="left|top" font.style="BOLD" height="16" layout="topleft" left="6" name="sh_havens_lbl" top="206" width="574" text_color="0.95 0.92 0.84 1">Safe havens</text>
+        <text follows="left|top" height="30" layout="topleft" left="6" name="sh_havens_how" top="224" width="574" word_wrap="true" text_color="0.80 0.82 0.86 1">Stand (or fly) at your port, choose its size and press Make this a safe haven. Pirates never fire within about 600 m of a haven.</text>
+        <text follows="left|top" height="16" layout="topleft" left="6" name="sh_haven_name_lbl" top="259" width="44" text_color="0.95 0.92 0.84 1">Name</text>
+        <line_editor follows="left|top" height="22" layout="topleft" left="50" max_length_chars="40" name="sh_haven_name" top="256" width="214" />
+        <combo_box follows="left|top" height="22" layout="topleft" left="270" name="sh_haven_size" top="256" width="160">
+            <combo_box.item label="Small (100 m across)" name="small" value="small" />
+            <combo_box.item label="Medium (300 m)" name="medium" value="medium" />
+            <combo_box.item label="Large (600 m)" name="large" value="large" />
+        </combo_box>
+        <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Make this a safe haven" layout="topleft" left="436" name="sh_haven_add" top="255" width="144"
+         tool_tip="A haven centred where you stand now" />
+        <scroll_list follows="left|top" height="60" layout="topleft" left="6" name="sh_havens" top="284" width="574" multi_select="false" draw_heading="true" column_padding="4">
+            <scroll_list.columns name="name" label="Haven" width="190" />
+            <scroll_list.columns name="where" label="Centre" width="190" />
+            <scroll_list.columns name="size" label="Size" width="180" />
+        </scroll_list>
+        <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Remove haven" layout="topleft" left="6" name="sh_haven_remove" top="348" width="130" />
+        <!-- where the ships are: read on opening the tab, on Refresh and after each change (no timer) -->
+        <text follows="left|top" font.style="BOLD" height="16" layout="topleft" left="6" name="sh_ships_lbl" top="376" width="300" text_color="0.95 0.92 0.84 1">Where the ships are</text>
+        <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="22" label="Refresh" layout="topleft" left="490" name="sh_refresh" top="372" width="90" />
+        <scroll_list follows="left|top" height="84" layout="topleft" left="6" name="sh_ships" top="396" width="574" multi_select="false" draw_heading="true" column_padding="4">
+            <scroll_list.columns name="name" label="Ship" width="190" />
+            <scroll_list.columns name="doing" label="Doing" width="150" />
+            <scroll_list.columns name="where" label="Where" width="230" />
+        </scroll_list>
+        <button image_color="0 0 0 0" image_color_disabled="0 0 0 0" hover_glow_amount="0" label_shadow="false" label_color="0.95 0.92 0.84 1" label_color_selected="0.95 0.92 0.84 1" label_color_disabled="0.62 0.62 0.66 1" label_color_disabled_selected="0.62 0.62 0.66 1" follows="left|top" height="24" label="Clear all ships" layout="topleft" left="6" name="sh_clear" top="486" width="150"
+         tool_tip="Takes every NPC ship off the sea now. If NPC ships are on, fresh ones sail in a minute later." />
+        <text follows="left|top" height="24" layout="topleft" left="166" name="sh_awake" top="488" width="414" word_wrap="true" text_color="0.80 0.82 0.86 1" />
+    </panel>
+</panel>

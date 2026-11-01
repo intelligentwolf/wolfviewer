@@ -49,6 +49,7 @@ class WolfFloaterNPC;
 class WolfNPCAvatarGrid;
 class WolfNPCGame;
 class WolfNPCMind;
+class WolfNPCShips;
 class WolfNPCBackdrop;
 class WolfNPCCardGrid;
 
@@ -381,6 +382,9 @@ private:
     void onCostsPage();
 
     LLTabContainer* mTabs = nullptr;
+    // [NPC SHIPS 2026-11-01] the NPC ships tab (wolf-naval, PROTOCOL.md §30; wolfnpcships.cpp)
+    LLPanel* mShipsTab = nullptr;
+    WolfNPCShips* mShips = nullptr;
     LLPanel* mNewTab = nullptr;
     LLPanel* mRegionTab = nullptr;
     LLPanel* mScenesTab = nullptr;

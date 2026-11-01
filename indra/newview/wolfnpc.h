@@ -40,6 +40,10 @@
  * Every request carries "op" and "req" (this counter, echoed back); every reply "op", "req", "ok" and, when not ok,
  * "error" (shown as is) and maybe "code". Pushes (no req): "changed" {id} and "credits" {credits}.
  * Sent only while the region underfoot has itself said it is Wolf (WolfGrid::isOnWolfTerritoriesConfirmed).
+ *
+ * [NPC SHIPS 2026-11-01] PROTOCOL.md §30: the WolfNPC window's NPC ships tab talks to the wolf-naval plugin, not to
+ * WolfNPCModule. Requests go as local chat on channel 73, "npcships " + JSON (at most 900 bytes); replies come as
+ * GenericMessage "WolfNaval" with exactly the framing above (same region check, same joining). requestShips() is that path.
  */
 class WolfNPC : public LLSingleton<WolfNPC>
 {
@@ -53,6 +57,9 @@ public:
 
     /** Send {op, ...fields}; `done` gets the reply, or a failure (not Wolf, too big, no answer in time, region left). */
     void request(const std::string& op, const LLSD& fields, reply_fn done);
+    /** [NPC SHIPS] PROTOCOL.md §30: {op, ...fields} to the region's wolf-naval plugin (chat on channel 73); `done` gets the
+     *  reply, or a failure (not Wolf, too big, the region's "busy", no answer in 6 s: no wolf-naval 1.10.0 there). */
+    void requestShips(const std::string& op, const LLSD& fields, reply_fn done);
     /** The window listens for "changed" pushes (one listener: the WolfNPC window). */
     void setChangedListener(changed_fn fn) { mChanged = fn; }
     /** [ROUND 3] PROTOCOL.md §19 push gm_ended {id, why}: the game master's control of an NPC ended. */
@@ -62,8 +69,8 @@ public:
     /** Once a frame (llappviewer.cpp idle): the send queue, half-built messages and requests that got no answer. */
     void idle();
 
-    /** From the GenericMessage dispatcher: one packet of a "WolfNPC" message. */
-    void receivePacket(const LLUUID& invoice, const std::vector<std::string>& strings);
+    /** From the GenericMessage dispatcher: one packet of a "WolfNPC" message, or ([NPC SHIPS]) of a "WolfNaval" one. */
+    void receivePacket(const LLUUID& invoice, const std::vector<std::string>& strings, bool naval = false);
 
 private:
     struct Pending
@@ -77,14 +84,19 @@ private:
         reply_fn mDone;
         F64 mDeadline = 0.0;
         std::string mOp;
+        bool mNaval = false;   // [NPC SHIPS] a §30 request (answered by "WolfNaval")
     };
 
     void onRegionChanged();
     void failAll(const std::string& why);
-    void dispatch(const LLSD& m);
+    void dispatch(const LLSD& m, bool naval);
     bool takeToken();
+    bool takeShipsToken();
+    /** [NPC SHIPS] every §30 request still waiting fails with `why` (the region's "busy": it dropped the request). */
+    void failShips(const std::string& why);
 
     std::map<S64, Pending> mPartial;              // region -> viewer messages still arriving, by their id
+    std::map<S64, Pending> mPartialShips;         // [NPC SHIPS] the same for "WolfNaval" (its own id space)
     std::map<S32, Waiting> mWaiting;              // requests sent, by req
     struct Outgoing
     {
@@ -96,6 +108,8 @@ private:
     S32 mNextMessageId = 1;
     F64 mTokens = 8.0;
     F64 mTokenAt = 0.0;
+    F64 mShipTokens = 0.0;                        // [NPC SHIPS] PROTOCOL.md §30.2 rate (its own bucket: another plugin)
+    F64 mShipTokenAt = 0.0;
     changed_fn mChanged;
     gm_ended_fn mGmEnded;
     boost::signals2::connection mRegionChangedConnection;

@@ -192,7 +192,8 @@ void WolfFX::receive(const LLUUID& region_id, const std::vector<std::string>& st
     if (e == "explosion") kind = WolfFXSource::EXPLOSION;
     else if (e == "fireball") kind = WolfFXSource::FIREBALL;
     else if (e == "smoke") kind = WolfFXSource::SMOKE;
-    else if (e == "sparks") kind = WolfFXSource::SPARKS;
+    // [2026-11-01] k=tracer rides on e=sparks (DESIGN.md s3.3): an older viewer draws its sparks, this one the streak
+    else if (e == "sparks") kind = (look == "tracer") ? WolfFXSource::TRACER : WolfFXSource::SPARKS;
     else if (e == "fire") kind = WolfFXSource::FIRE;
     else if (e == "fireworks") kind = WolfFXSource::FIREWORKS;
     else if (e == "dust") kind = (look == "splash") ? WolfFXSource::SPLASH : WolfFXSource::DUST;
@@ -213,7 +214,9 @@ void WolfFX::receive(const LLUUID& region_id, const std::vector<std::string>& st
     if ((agent - LLViewerCamera::getInstance()->getOrigin()).length() > DRAW_DISTANCE) return;
     if (mSources.size() >= 48) return;    // a flood of effects: the newest wait their turn
 
-    const F32 dur = (kind == WolfFXSource::SMOKE || kind == WolfFXSource::FIRE || kind == WolfFXSource::SPARKS) ? duration : llmax(duration, 0.5f);
+    // [2026-11-01] a tracer lasts its flight (TRACER_LIFE), whatever d says
+    const F32 dur = kind == WolfFXSource::TRACER ? 0.35f
+                  : (kind == WolfFXSource::SMOKE || kind == WolfFXSource::FIRE || kind == WolfFXSource::SPARKS) ? duration : llmax(duration, 0.5f);
     LLPointer<WolfFXSource> src = new WolfFXSource(kind, global, size, LLColor4(c.mV[0], c.mV[1], c.mV[2], 1.f),
                                                    LLColor4(c2.mV[0], c2.mV[1], c2.mV[2], 1.f), dur, intensity, dir);
     LLViewerPartSim::getInstance()->addPartSource(src);
@@ -377,6 +380,31 @@ void WolfFXSource::burst()
     case SPARKS:
         sparks(count(40), 4.f + R * 3.f, mDir, 0.6f);
         break;
+    case TRACER:
+    {
+        // [2026-11-01] A tracer round's glowing base seen in flight: a thin white-hot streak from the muzzle (the effect's
+        // centre) along dir, travelling its length s in TRACER_LIFE, with a short fading tail behind the head. Drawn
+        // additive and emissive (it lights itself, as the burning tracer composition does); FOLLOW_VELOCITY turns the
+        // sprite's up axis along its velocity and scales it by mScale.mV[1] (llvopartgroup.cpp:533-566), so the scale's Y
+        // is the streak's length. mC is its colour (wolf-air sends the period's: RESEARCH.md).
+        constexpr F32 TRACER_LIFE = 0.35f;
+        const F32 speed = R / TRACER_LIFE;
+        const U32 flags = LLViewerPart::LL_PART_FOLLOW_VELOCITY_MASK | LLViewerPart::LL_PART_EMISSIVE_MASK;
+        for (S32 i = 0; i < 3; ++i)
+        {
+            const F32 lag = (F32)i * 0.035f;                 // the tail: the same path a moment behind
+            const F32 a = 1.f - (F32)i * 0.3f;
+            if (LLViewerPart* p = part(c - mDir * (speed * lag), mDir * speed, LLVector3::zero, TRACER_LIFE, 0.1f, 0.06f,
+                                       LLColor4(1.f, 0.97f, 0.85f, a), alpha(mC, 0.f), 1.f, 0.4f, flags, true))
+            {
+                const F32 len = llclamp(speed * 0.06f, 1.f, 6.f);    // a streak about as long as 60 ms of its flight
+                p->mScale.set(0.1f, len);
+                p->mStartScale = p->mScale;
+                p->mEndScale.set(0.06f, len * 0.8f);
+            }
+        }
+        break;
+    }
     case FIREWORKS:
     {
         flash(R * 0.8f, 0.15f, 0.9f);

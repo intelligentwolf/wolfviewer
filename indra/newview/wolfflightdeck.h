@@ -90,6 +90,7 @@ public:
         H_CDU_SCREEN, H_CDU_DIR, H_CDU_APT, H_CDU_CTL, H_CDU_EXEC, H_CDU_CLR, H_CDU_DEL, H_CDU_HELP,
         H_LSK_L1, H_LSK_L2, H_LSK_L3, H_LSK_L4, H_LSK_L5, H_LSK_L6,
         H_LSK_R1, H_LSK_R2, H_LSK_R3, H_LSK_R4, H_LSK_R5, H_LSK_R6,
+        H_AIR_FIRE, H_AIR_DOGFIGHT, H_AIR_BAIL,   // [WOLF AIR 2026-11-01/] the dogfight band (wolfair.h)
     };
 
 private:
@@ -177,6 +178,13 @@ private:
     F32 mStickCx = 0.f, mStickCy = 0.f, mStickR = 1.f;
     F32 mLeverCy = 0.f, mLeverHalf = 1.f;
     void dragControl(F32 x, F32 y);   // in the picture's units
+    // [WOLF AIR 2026-11-01] Wolf Air (wolfair.h, aircraft-dogfight-2026-11-01/a-research/DESIGN.md s7): in a warplane that
+    // speaks WolfAir1 the EICAS display gives its place to the COMBAT display (damage by part, guns and cannon, DOGFIGHT,
+    // FIRE, BAIL), and the world above it gets the reflector gunsight, the kill feed and the hit / safe-airspace notices.
+    void drawCombat(F32 l, F32 b, F32 r, F32 t);
+    void drawAirOverlay(F32 top_of_world);
+    F64 mBailAskAt = -100.0;        // BAIL pressed once: CONFIRM within BAIL_CONFIRM_S jumps
+    // [/WOLF AIR]
     void drawPFD(F32 l, F32 b, F32 r, F32 t);
     void drawND(F32 l, F32 b, F32 r, F32 t);
     void drawEICAS(F32 l, F32 b, F32 r, F32 t);

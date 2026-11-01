@@ -1006,6 +1006,7 @@ set(viewer_SOURCE_FILES
     wolftooladventureplace.cpp # [WOLF ADVENTURE P3 2026-10-16] Studio: the in-world place tool
     wolffloatertunnels.cpp # [WOLF TUNNELS 2026-10-21] the Tunnel tool: walkable spaces under the terrain
     wolffloaterseatunnels.cpp # [WOLF SEA TUNNEL 2026-10-28] Sea Tunnels: air-filled glass tubes under the sea
+    wolffloaterplanebuilder.cpp # [PLANE BUILDER 2026-11-01] Plane Builder: design a fighter, the yard builds and delivers it
     wolffloatershipbuilder.cpp # [SHIP BUILDER 2026-10-29] Ship Builder: design a ship, the shipyard builds and delivers her
     wolfdryvolumes.cpp # [WOLF SEA TUNNEL 2026-10-28] wolfdry prims and tunnel boxes: no water fog / surface inside
     wolffloateradventurestudiowizard.cpp # [WOLF ADVENTURE AUDIT 2026-10-17] Studio: the "Start here" wizard
@@ -1037,6 +1038,7 @@ set(viewer_SOURCE_FILES
     wolfborder.cpp   # [BORDER GUARD 2026-10-16]
     wolfloadingnotice.cpp   # [WOLF VISITOR SEES 2026-10-18]
     wolfdashboard.cpp
+    wolfair.cpp
     wolfhelm.cpp
     wolfhelmhud.cpp
     wolfhudscale.cpp
@@ -2003,6 +2005,7 @@ set(viewer_HEADER_FILES
     wolftooladventureplace.h   # [WOLF ADVENTURE P3 2026-10-16]
     wolffloatertunnels.h   # [WOLF TUNNELS 2026-10-21]
     wolffloaterseatunnels.h   # [WOLF SEA TUNNEL 2026-10-28]
+    wolffloaterplanebuilder.h   # [PLANE BUILDER 2026-11-01]
     wolffloatershipbuilder.h   # [SHIP BUILDER 2026-10-29]
     wolfdryvolumes.h   # [WOLF SEA TUNNEL 2026-10-28]
     wolfadventurestudioutil.h  # [WOLF ADVENTURE AUDIT 2026-10-17]
@@ -2034,6 +2037,7 @@ set(viewer_HEADER_FILES
     wolfborder.h   # [BORDER GUARD 2026-10-16]
     wolfloadingnotice.h   # [WOLF VISITOR SEES 2026-10-18]
     wolfdashboard.h
+    wolfair.h
     wolfhelm.h
     wolfhelmhud.h
     wolfhudscale.h

@@ -29217,6 +29217,28 @@ Change of this parameter will affect the layout of buttons in notification toast
       <key>Value</key>
       <integer>1</integer>
     </map>
+    <key>WolfAirAutoDeck</key>
+    <map>
+      <key>Comment</key>
+      <string>Wolf Air: switch Flight Mode on by itself when you sit in a warplane that speaks the dogfight protocol (its dogfight band is part of the flight deck). Wolf Territories only.</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>Boolean</string>
+      <key>Value</key>
+      <integer>1</integer>
+    </map>
+    <key>WolfAirFireKey</key>
+    <map>
+      <key>Comment</key>
+      <string>Wolf Air: an extra key that fires a warplane's guns while held (CDU CONTROLS page, FIRE KEY): 0 none (the band's FIRE button and the left mouse button in mouselook only), 1 Space, 2 Insert. Wolf Territories only.</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>S32</string>
+      <key>Value</key>
+      <integer>0</integer>
+    </map>
     <key>WolfHelmHudAuto</key>
     <map>
       <key>Comment</key>

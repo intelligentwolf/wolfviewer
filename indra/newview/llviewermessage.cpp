@@ -31,6 +31,7 @@
 #include "wolfdrive.h"    // <WolfViewer 2026-10-11/> the speedboat helm hears its boat's "Speed = N"
 #include "wolfdjchatcontrol.h"   // <WolfViewer 2026-10-19/> Wolf DJ chat control
 #include "wolfhelm.h"            // <WolfViewer 2026-10-28/> the Captain's Helm hears its ship
+#include "wolfair.h"             // <WolfViewer 2026-11-01/> Wolf Air: the flight deck's dogfight band hears its plane
 #include "wolfsuitcase.h" // <WolfViewer 2026-10-12/> an accepted offer abroad -> look at My Suitcase again
 
 // Linden libraries
@@ -2860,6 +2861,12 @@ void process_chat_from_simulator(LLMessageSystem *msg, void **user_data)
         std::string helm_line;
         msg->getStringFast(_PREHASH_ChatData, _PREHASH_Message, helm_line);
         if (WolfHelm::instance().onObjectChat(from_id, type_temp, helm_line))
+        {
+            return;
+        }
+        // <WolfViewer 2026-11-01> Wolf Air (wolfair.h; region-terrain-work/aircraft-dogfight-2026-11-01/a-research/DESIGN.md
+        // s2): a warplane's "WolfAir1|..." line to the flight deck's dogfight band, taken the same way. </WolfViewer>
+        if (WolfAir::instance().onObjectChat(from_id, type_temp, helm_line))
         {
             return;
         }

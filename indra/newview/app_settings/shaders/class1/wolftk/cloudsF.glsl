@@ -1608,7 +1608,9 @@ void main() {
       vec4 prevClip = viewReprojectionMatrix * vec4(frontView, 1.0);
       prevClip /= prevClip.w;
       vec2 prevUv = prevClip.xy * 0.5 + 0.5;
-      vec2 velocity = vUv - prevUv;
+      // [WolfViewer 2026-11-01] in the frame's uv, which the resolve subtracts it from (cloudsResolveF.glsl prevUv = vUv -
+      // velocity): the target's uv is the 4-pixel grid's (wolftkclouds.cpp cameraUniforms), the frame's is that x targetUvScale
+      vec2 velocity = (vUv - prevUv) * targetUvScale;
       depthVelocity = vec4(frontDepth, velocity, rayDistanceToScene > 0.0 ? sceneViewZ : wolfCloudAlpha);   // [WolfViewer round 13 / 2026-10-13 / 2026-10-16: .a = the scene's view Z (negative: -(view depth), the quantity cloudsResolveF.glsl wolfSceneDepth reads from the full-res depth), or the clouds' own opacity over the sky (wolfenvironmentrender.cpp measureCloudCover)]
     }
   }
@@ -1632,7 +1634,7 @@ void main() {
     vec4 prevClip = viewReprojectionMatrix * vec4(frontView, 1.0);
     prevClip /= prevClip.w;
     vec2 prevUv = prevClip.xy * 0.5 + 0.5;
-    vec2 velocity = vUv - prevUv;
+    vec2 velocity = (vUv - prevUv) * targetUvScale;   // [WolfViewer 2026-11-01] in the frame's uv, as above
     depthVelocity = vec4(frontDepth, velocity, rayDistanceToScene > 0.0 ? sceneViewZ : wolfCloudAlpha);   // [WolfViewer round 13 / 2026-10-13 / 2026-10-16: .a = the scene's view Z (negative: -(view depth), the quantity cloudsResolveF.glsl wolfSceneDepth reads from the full-res depth), or the clouds' own opacity over the sky (wolfenvironmentrender.cpp measureCloudCover)]
   }
 

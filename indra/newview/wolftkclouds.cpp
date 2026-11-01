@@ -1014,11 +1014,31 @@ struct Clouds::Impl
             const F32 dy = ((offset.y - 0.5f) / resolution.y) * 4.f;
             u2f(sh, "temporalJitter", dx, dy);
             u1f(sh, "mipLevelScale", 0.25f);   // "NOTE: Not exactly"
-            glm::dmat4 p = glm::dmat4(f.proj);
+            // [WolfViewer 2026-11-01] Paul, SENJA at night: "not sure what that white line thing is on the horizon" - one row of
+            // the dome's sky right on the horizon with none of the clouds' overlay (cloud, haze) that dims the sky above it.
+            // The low-res target is resolution / 4 texels and every consumer takes a texel as 4 x 4 frame pixels from the
+            // frame's bottom-left corner: the resolve gives pixel `coord` the texel coord / 4 and its Bayer slot coord % 4
+            // (Source: cloudsResolveF.glsl main, lowResCoord = coord / 4, bayerIndices[coord.x % 4][coord.y % 4]), and the scene
+            // depth is read at vUv x targetUvScale (Source: cloudsF.glsl getRayDistanceToScene; targetUvScale = resolution /
+            // frame, CloudsMaterial.setSize). The projection alone spread the texels over the frame, so when the frame is not
+            // a multiple of 4 pixels (resolution = ceil(frame / 4) x 4, CloudsPass.update below) each ray landed at frame /
+            // resolution times the place of the pixel the resolve gives it: up to 2 pixels off at the far edges, about one at
+            // mid-screen. At the horizon the clouds pass then called the dome's last row of sky "ground" (no clouds, no
+            // haze over it). Measured 2026-11-01 in an isolated W91 (frame 2523 x 1494, target 631 x 374), Sandbox at night:
+            // the overlay ended one row above the dome's horizon with the camera at 25, 80 and 300 m, two rows with the horizon
+            // high on the screen; with the rays cast for the 4-pixel grid it ended on the dome's row. So the target's clip space
+            // is mapped onto that grid: frame NDC n -> grid NDC n' = s n + (s - 1), s = frame / resolution (n = -1 -> -1, the
+            // shared bottom-left corner), before takram's jitter, which is in the grid's units (4 / resolution per texel).
+            const F64 sx = (F64)f.width / (F64)resolution.x, sy = (F64)f.height / (F64)resolution.y;
+            glm::dmat4 grid(1.0);
+            grid[0][0] = sx; grid[3][0] = sx - 1.0;
+            grid[1][1] = sy; grid[3][1] = sy - 1.0;
+            glm::dmat4 p = grid * glm::dmat4(f.proj);
             p[2][0] += dx * 2.0;   // elements[8]
             p[2][1] += dy * 2.0;   // elements[9]
             inverseProjection = glm::inverse(p);
-            reprojection = glm::dmat4(prevP);
+            // the previous frame on the same grid: the velocity (cloudsF.glsl vUv - prevUv) is in the target's uv
+            reprojection = grid * glm::dmat4(prevP);
             reprojection[2][0] += dx * 2.0;
             reprojection[2][1] += dy * 2.0;
             reprojection = reprojection * glm::dmat4(prevV);

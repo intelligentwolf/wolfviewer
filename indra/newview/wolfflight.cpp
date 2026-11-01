@@ -394,7 +394,17 @@ void WolfFlight::groundProximity()
     const F32 speed = mData.mAirspeed;
     const bool flying = mData.mSeated || gAgent.getFlying();
     F32 impact = 1e9f;   // seconds to the first thing in the way
-    if (flying && speed > 2.f && mData.mAGL > 1.5f)
+    // <WolfViewer 2026-11-01> never on her wheels, and no alarm for a normal take-off or approach (Paul's first Wolf Air
+    // flight on Dogfight: PULL UP over and over while taxiing past the hangars). A seated aircraft's root rides 1.5-2 m above
+    // the ground, so "AGL > 1.5" armed it on the apron, and the obstacle ray hit the buildings ahead. Real GPWS has the same
+    // inhibits: on_wheels - below 10 m with no real sink (rolling, lifting off) nothing is checked; approach - below 60 m
+    // and sinking no faster than a 3-6 degree approach (6 m/s), her own descent towards flat ground is not a danger, so
+    // only ground that RISES above the ground under her, and things standing more than 4 m above the land (buildings, not
+    // a runway slab), count. Low flying at the same height towards a hill or a hangar still warns. </WolfViewer>
+    const bool on_wheels = mData.mAGL < 10.f && fabsf(mData.mVS) < 3.f;
+    const bool approach = mData.mAGL < 60.f && mData.mVS > -6.f;
+    const F32 ground_here = LLWorld::getInstance()->resolveLandHeightGlobal(mData.mPosGlobal);
+    if (flying && speed > 2.f && mData.mAGL > 1.5f && !on_wheels)
     {
         for (F32 t = 1.f; t <= 8.f; t += 1.f)
         {
@@ -406,6 +416,10 @@ void WolfFlight::groundProximity()
                 break;   // no land loaded there
             }
             const F32 ground = LLWorld::getInstance()->resolveLandHeightGlobal(ahead);
+            if (approach && ground < ground_here + 3.f)
+            {
+                continue;   // her own gentle descent towards flat ground: a landing, not a danger
+            }
             if (z + mData.mVS * t < ground + 3.f)
             {
                 impact = t;
@@ -434,7 +448,12 @@ void WolfFlight::groundProximity()
                 if (objectp && !objectp->isAvatar() && (!own || objectp->getRootEdit() != own))
                 {
                     LLVector3 h(hit.getF32ptr());
-                    mObstacleImpact = (h - pos).length() / speed;
+                    const LLVector3d hit_global = gAgent.getPosGlobalFromAgent(h);
+                    // on an approach, a hit within 4 m of the land there is the runway (a slab), not an obstacle
+                    if (!approach || (F32)hit_global.mdV[VZ] > LLWorld::getInstance()->resolveLandHeightGlobal(hit_global) + 4.f)
+                    {
+                        mObstacleImpact = (h - pos).length() / speed;
+                    }
                 }
             }
         }

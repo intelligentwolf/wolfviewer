@@ -498,6 +498,11 @@ protected:
     bool mHasAux;                    // We have aux channels
     bool mDecodingAux;              // Are we decoding high components
     bool mIsRawImageValid;
+    // <WolfViewer 2026-11-01 t427> the GL texture state whose read-back last failed, so it is not retried every frame
+    LLGLuint mReadbackFailedTexName = 0;
+    S32 mReadbackFailedDiscard = -1;
+    F32 mReadbackRetryAt = 0.f;
+    // </WolfViewer>
     bool mHasFetcher;               // We've made a fecth request
     bool mIsFetching;               // Fetch request is active
     bool mCanUseHTTP;              //This texture can be fetched through http if true.

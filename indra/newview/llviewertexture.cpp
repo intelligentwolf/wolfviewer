@@ -2998,6 +2998,17 @@ void LLViewerFetchedTexture::readbackRawImage()
     if (mGLTexturep.notNull() && mGLTexturep->getTexName() != 0 &&
         (mRawImage.isNull() || mRawImage->getWidth() < mGLTexturep->getWidth() || mRawImage->getHeight() < mGLTexturep->getHeight() ))
     {
+        // <WolfViewer 2026-11-01 t427> a read-back that failed fails again on the same GL texture, and every
+        // attempt stalls the GPU pipeline; callers (doLoadedCallbacks, LLVOVolume::sculpt) ask every frame.
+        // Retry once the texture is re-created / changes discard level, or after 30 s.
+        // Source: llviewertexture.cpp:2585-2750 doLoadedCallbacks() - need_readback is recomputed each frame
+        const LLGLuint tex_name = mGLTexturep->getTexName();
+        const S32 gl_discard = mGLTexturep->getDiscardLevel();
+        if (tex_name == mReadbackFailedTexName && gl_discard == mReadbackFailedDiscard && sCurrentTime < mReadbackRetryAt)
+        {
+            return;
+        }
+        // </WolfViewer>
         if (mRawImage.isNull())
         {
             sRawCount++;
@@ -3009,6 +3020,11 @@ void LLViewerFetchedTexture::readbackRawImage()
             mIsRawImageValid = false;
             mRawDiscardLevel = INVALID_DISCARD_LEVEL;
             sRawCount--;
+            // <WolfViewer 2026-11-01 t427>
+            mReadbackFailedTexName = tex_name;
+            mReadbackFailedDiscard = gl_discard;
+            mReadbackRetryAt = sCurrentTime + 30.f;
+            // </WolfViewer>
         }
         else
         {

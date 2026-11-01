@@ -1869,10 +1869,24 @@ bool LLImageGL::readBackRaw(S32 discard_level, LLImageRaw* imageraw, bool compre
 
     //-----------------------------------------------------------------------------------------------
     GLenum error ;
-    while((error = glGetError()) != GL_NO_ERROR)
+    // <WolfViewer 2026-11-01 t427> these are errors left by earlier GL calls elsewhere, not by this readback.
+    // Drain them (bounded) and log throttled: 1st-3rd, then the 4th, 8th, 16th... so a readback retried every
+    // frame cannot flood the log (ticket 427: 6,588 of these lines).
     {
-        LL_WARNS() << "GL Error happens before reading back texture. Error code: " << error << LL_ENDL ;
+        static U32 s_before_errors = 0;
+        U32 drained = 0;
+        while (drained < 16 && (error = glGetError()) != GL_NO_ERROR)
+        {
+            ++drained;
+            ++s_before_errors;
+            if (s_before_errors <= 3 || (s_before_errors & (s_before_errors - 1)) == 0)
+            {
+                LL_WARNS() << "GL Error happens before reading back texture. Error code: " << error
+                           << " - " << s_before_errors << " such errors so far" << LL_ENDL;
+            }
+        }
     }
+    // </WolfViewer>
     //-----------------------------------------------------------------------------------------------
 
     LLImageDataLock lock(imageraw);
@@ -1919,20 +1933,84 @@ bool LLImageGL::readBackRaw(S32 discard_level, LLImageRaw* imageraw, bool compre
             return false ;
         }
 
-        glGetTexImage(GL_TEXTURE_2D, gl_discard, mFormatPrimary, mFormatType, (GLvoid*)(imageraw->getData()));
+        // <WolfViewer 2026-11-01 t427> GL_LUMINANCE, GL_LUMINANCE_ALPHA and GL_ALPHA are not pixel formats in a
+        // core profile context, so glGetTexImage with them raises GL_INVALID_ENUM on strict drivers (AMD Windows,
+        // Mesa radeonsi - tested); NVIDIA accepts them. Read back the channels setManualImage really stored.
+        // Source: llimagegl.cpp:1323-1350 setManualImage() - core profile, GL >= CONVERSION_SCRATCH_BUFFER_GL_VERSION:
+        //   GL_ALPHA -> GL_R8 (alpha in red), GL_LUMINANCE -> GL_R8, GL_LUMINANCE_ALPHA -> GL_RG8 (luminance, alpha)
+        // Source: llimagegl.cpp:1352-1410 setManualImage() - core profile, older GL: expanded to RGBA bytes
+        //   GL_ALPHA -> (0,0,0,a), GL_LUMINANCE_ALPHA -> (l,l,l,a), GL_LUMINANCE -> (l,l,l,255)
+        // Source: llimagegl.cpp:1586-1600 createGLTexture() - mFormatPrimary stays GL_LUMINANCE / GL_LUMINANCE_ALPHA
+        const bool legacy_format = LLRender::sGLCoreProfile && mFormatType == GL_UNSIGNED_BYTE &&
+            (mFormatPrimary == GL_ALPHA || mFormatPrimary == GL_LUMINANCE || mFormatPrimary == GL_LUMINANCE_ALPHA);
+        if (!legacy_format)
+        {
+            glGetTexImage(GL_TEXTURE_2D, gl_discard, mFormatPrimary, mFormatType, (GLvoid*)(imageraw->getData()));
+        }
+        else if (gGLManager.mGLVersion >= CONVERSION_SCRATCH_BUFFER_GL_VERSION)
+        {
+            // same bytes per pixel the legacy format would have returned (1, or 2 for luminance + alpha)
+            glGetTexImage(GL_TEXTURE_2D, gl_discard, mFormatPrimary == GL_LUMINANCE_ALPHA ? GL_RG : GL_RED,
+                          GL_UNSIGNED_BYTE, (GLvoid*)(imageraw->getData()));
+        }
+        else
+        {
+            // stored as RGBA bytes: read them all and keep the channels this texture's format has
+            const S32 out_components = mFormatPrimary == GL_LUMINANCE_ALPHA ? 2 : 1;
+            if (ncomponents < out_components)
+            {
+                imageraw->deleteData();
+                return false;   // the raw buffer holds fewer channels than the format; nothing safe to copy
+            }
+            const size_t pixels = (size_t)width * (size_t)height;
+            std::vector<U8> rgba(pixels * 4);
+            glGetTexImage(GL_TEXTURE_2D, gl_discard, GL_RGBA, GL_UNSIGNED_BYTE, (GLvoid*)rgba.data());
+            U8* dst = imageraw->getData();
+            for (size_t i = 0; i < pixels; ++i)
+            {
+                const U8* src = &rgba[i * 4];
+                U8* out = dst + i * (size_t)ncomponents;
+                if (mFormatPrimary == GL_ALPHA)
+                {
+                    out[0] = src[3];
+                }
+                else if (mFormatPrimary == GL_LUMINANCE)
+                {
+                    out[0] = src[0];
+                }
+                else
+                {
+                    out[0] = src[0];
+                    out[1] = src[3];
+                }
+            }
+        }
+        // </WolfViewer>
         //stop_glerror();
     }
 
     //-----------------------------------------------------------------------------------------------
     if((error = glGetError()) != GL_NO_ERROR)
     {
-        LL_WARNS() << "GL Error happens after reading back texture. Error code: " << error << LL_ENDL ;
         imageraw->deleteData() ;
-
-        while((error = glGetError()) != GL_NO_ERROR)
+        // <WolfViewer 2026-11-01 t427> bounded drain and one throttled line (1st-3rd failure, then the 4th, 8th,
+        // 16th...) with the texture's formats: a readback that keeps failing is retried by its caller, and ticket
+        // 427 logged 20,940 of these lines in 12 minutes
+        U32 pending = 0;
+        while (pending < 16 && glGetError() != GL_NO_ERROR)
         {
-            LL_WARNS() << "GL Error happens after reading back texture. Error code: " << error << LL_ENDL ;
+            ++pending;
         }
+        static U32 s_after_errors = 0;
+        ++s_after_errors;
+        if (s_after_errors <= 3 || (s_after_errors & (s_after_errors - 1)) == 0)
+        {
+            LL_WARNS() << "GL Error happens after reading back texture. Error code: " << error
+                       << " (+" << pending << " more), format 0x" << std::hex << mFormatPrimary << " type 0x" << mFormatType
+                       << " internal 0x" << mFormatInternal << std::dec << ", " << ncomponents << " components, "
+                       << width << "x" << height << " - " << s_after_errors << " failed readbacks so far" << LL_ENDL;
+        }
+        // </WolfViewer>
 
         return false ;
     }

@@ -1943,25 +1943,27 @@ bool LLImageGL::readBackRaw(S32 discard_level, LLImageRaw* imageraw, bool compre
         // Source: llimagegl.cpp:1586-1600 createGLTexture() - mFormatPrimary stays GL_LUMINANCE / GL_LUMINANCE_ALPHA
         const bool legacy_format = LLRender::sGLCoreProfile && mFormatType == GL_UNSIGNED_BYTE &&
             (mFormatPrimary == GL_ALPHA || mFormatPrimary == GL_LUMINANCE || mFormatPrimary == GL_LUMINANCE_ALPHA);
+        // channels the legacy format reads back (1, or 2 for luminance + alpha); the raw buffer was sized with
+        // ncomponents (allocateDataSize above), so a buffer with fewer channels is never written past
+        const S32 out_components = mFormatPrimary == GL_LUMINANCE_ALPHA ? 2 : 1;
+        if (legacy_format && ncomponents < out_components)
+        {
+            imageraw->deleteData();
+            return false;   // the raw buffer holds fewer channels than the format; nothing safe to copy
+        }
         if (!legacy_format)
         {
             glGetTexImage(GL_TEXTURE_2D, gl_discard, mFormatPrimary, mFormatType, (GLvoid*)(imageraw->getData()));
         }
         else if (gGLManager.mGLVersion >= CONVERSION_SCRATCH_BUFFER_GL_VERSION)
         {
-            // same bytes per pixel the legacy format would have returned (1, or 2 for luminance + alpha)
+            // same bytes per pixel the legacy format would have returned
             glGetTexImage(GL_TEXTURE_2D, gl_discard, mFormatPrimary == GL_LUMINANCE_ALPHA ? GL_RG : GL_RED,
                           GL_UNSIGNED_BYTE, (GLvoid*)(imageraw->getData()));
         }
         else
         {
             // stored as RGBA bytes: read them all and keep the channels this texture's format has
-            const S32 out_components = mFormatPrimary == GL_LUMINANCE_ALPHA ? 2 : 1;
-            if (ncomponents < out_components)
-            {
-                imageraw->deleteData();
-                return false;   // the raw buffer holds fewer channels than the format; nothing safe to copy
-            }
             const size_t pixels = (size_t)width * (size_t)height;
             std::vector<U8> rgba(pixels * 4);
             glGetTexImage(GL_TEXTURE_2D, gl_discard, GL_RGBA, GL_UNSIGNED_BYTE, (GLvoid*)rgba.data());

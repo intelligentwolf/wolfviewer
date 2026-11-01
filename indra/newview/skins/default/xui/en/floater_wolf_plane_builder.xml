@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [PLANE BUILDER 2026-11-01] Plane Builder (wolffloaterplanebuilder.cpp): Build > Plane Builder... and Wolf World > Build & Land >
+     Plane Builder... Who and why: a Wolf Territories member who wants a fighter of their own for the dogfights. Flow, as the
+     Ship Builder's: the turntable and its figures on the left; on the right, top to bottom, 1. aircraft type 2. size 3. livery,
+     colours, squadron letters and name 4. the price line by line against the credits they have; Build bottom right (Buy
+     credits... beside it when short; Cancel the order bottom left while it waits). Field problems under their field; the
+     status line above the buttons: failures in the caution colour, kept until the next action. -->
+<floater
+ can_close="true"
+ can_minimize="true"
+ can_resize="false"
+ height="580"
+ layout="topleft"
+ name="wolf_plane_builder"
+ help_topic="wolf_plane_builder"
+ save_rect="true"
+ single_instance="true"
+ title="Plane Builder"
+ width="680">
+    <string name="feature_name">Plane Builder</string>
+    <string name="loading">Fetching its drawings...</string>
+    <string name="opening">Opening the yard...</string>
+    <string name="closed">The yard is closed</string>
+    <string name="reopen">Close this window and open it again to try again.</string>
+    <string name="no_preview">Its picture could not be fetched - you can still build it.</string>
+    <string name="name_needed">Give it a name.</string>
+    <string name="name_long">The name can be at most %d letters.</string>
+    <string name="name_letters">Only letters, numbers, spaces and ' - . &amp; please.</string>
+    <string name="letters_long">Squadron letters can be at most %d characters.</string>
+    <string name="letters_chars">Squadron letters: A to Z, 0 to 9 and - only.</string>
+    <string name="custom_livery">Your own colours</string>
+    <string name="era_ww1">First World War</string>
+    <string name="era_ww2early">Early Second World War</string>
+    <string name="era_ww2late">Late Second World War</string>
+    <string name="era_other">Other</string>
+    <string name="figures">[TITLE] ([ERA])
+Span [SPAN], length [LENGTH]. Armament: [GUNS].
+It flies with the Wolf flight model, works with the flight deck's autopilot and autoland, fights in dogfight mode and carries a parachute.</string>
+    <string name="price_base">Yard</string>
+    <string name="price_airframe">airframe</string>
+    <string name="price_gun">gun</string>
+    <string name="price_guns">guns</string>
+    <string name="credits_word">credits</string>
+    <string name="balance_unknown">Reading your AI credits...</string>
+    <string name="balance_short">You have [N] AI credits to spend - not enough for it.</string>
+    <string name="balance_ok">You have [N] AI credits to spend. You pay only once it is in your inventory.</string>
+    <string name="not_confirmed">Wait a moment - this region is still being confirmed as Wolf Territories.</string>
+    <string name="ordering">Sending your order to the yard...</string>
+    <string name="order_waiting">[NAME] is waiting for the yard ([AHEAD] ahead of it). [PRICE] credits are held and charged only once it is delivered.</string>
+    <string name="order_next">[NAME] is next in the hangar. [PRICE] credits are held and charged only once it is delivered.</string>
+    <string name="order_building">Building [NAME]: [PROGRESS]...</string>
+    <string name="order_done">[NAME] is in your inventory: Objects &gt; [FOLDER]. [PRICE] credits were charged. Read the "How to fly" notecard in its folder, then take it up from Wolf Territories Home Airport.</string>
+    <string name="order_done_unbilled">[NAME] is in your inventory: Objects &gt; [FOLDER]. Its [PRICE] credits will be taken from your balance shortly. Read the "How to fly" notecard in its folder, then take it up from Wolf Territories Home Airport.</string>
+    <string name="order_cancelled">Cancelled - you have not been charged.</string>
+    <string name="order_failed">The yard could not build it. You have not been charged.</string>
+
+    <panel follows="left|top" height="300" layout="topleft" left="12" name="preview_panel" top="26" width="320"
+     tool_tip="Your plane as it will look. Drag to turn it." />
+    <text follows="left|top" height="112" layout="topleft" left="12" name="figures_text" top="332" width="320" wrap="true" />
+
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="348" name="type_label" top="26" width="320">1. Aircraft type</text>
+    <combo_box follows="left|top" height="23" layout="topleft" left="348" name="plane_type" top="44" width="320"
+     tool_tip="A real fighter, at its real size, with its real guns and flying figures" />
+
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="348" name="size_label" top="78" width="320">2. Size</text>
+    <slider decimal_digits="0" follows="left|top" height="16" increment="5" initial_value="100" label="Size (%)" label_width="70"
+     layout="topleft" left="348" max_val="110" min_val="90" name="size" show_text="true" top="98" width="300"
+     tool_tip="Its size against the real aircraft's (90 to 110 %). It flies the same at any size." />
+
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="348" name="look_label" top="128" width="320">3. Make it yours</text>
+    <text follows="left|top" height="16" layout="topleft" left="348" name="livery_label" top="150" width="80">Livery</text>
+    <combo_box follows="left|top" height="23" layout="topleft" left="432" name="livery" top="146" width="236"
+     tool_tip="A period paint scheme of its type, or your own colours" />
+    <color_swatch can_apply_immediately="true" follows="left|top" height="60" label="Upper" layout="topleft" left="348" name="upper_colour" top="178"
+     width="64" tool_tip="Its upper surfaces and sides. Click to choose a colour." />
+    <color_swatch can_apply_immediately="true" follows="left|top" height="60" label="Under" layout="topleft" left="428" name="lower_colour" top="178"
+     width="64" tool_tip="Its under surfaces. Click to choose a colour." />
+    <color_swatch can_apply_immediately="true" follows="left|top" height="60" label="Spinner" layout="topleft" left="508" name="spinner_colour" top="178"
+     width="64" tool_tip="The propeller's spinner or nose ring. Click to choose a colour." />
+    <text follows="left|top" height="16" layout="topleft" left="348" name="letters_label" top="252" width="84">Squadron</text>
+    <line_editor follows="left|top" height="22" layout="topleft" left="432" max_length_chars="6" name="letters" top="248" width="120"
+     tool_tip="Squadron code letters painted on the fuselage (up to 6: A to Z, 0 to 9 and -). Leave it empty for none." />
+    <text follows="left|top" height="16" layout="topleft" left="432" name="letters_problem" top="272" width="236" text_color="AlertCautionTextColor" />
+    <text follows="left|top" height="16" layout="topleft" left="348" name="name_label" top="296" width="80">Its name</text>
+    <line_editor follows="left|top" height="22" layout="topleft" left="432" max_length_chars="24" name="plane_name" top="292" width="236"
+     tool_tip="Painted under the cockpit and given to it in your inventory (up to 24 letters)" />
+    <text follows="left|top" height="16" layout="topleft" left="432" name="name_problem" top="316" width="236" text_color="AlertCautionTextColor" />
+
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="348" name="price_label" top="340" width="320">4. Price in AI credits</text>
+    <text follows="left|top" height="34" layout="topleft" left="348" name="price_text" top="360" width="320" wrap="true" />
+    <text follows="left|top" height="34" layout="topleft" left="348" name="balance_text" top="396" width="320" wrap="true" />
+
+    <text follows="left|top" height="40" layout="topleft" left="12" name="status_text" top="472" width="656" wrap="true" />
+    <!-- Wolf Territories Home Airport, runway 09/27 (grid.airports id 67: .../Wolf%20Territories%20Home/1300/2953/24; memory
+         wolfhome-airport-2026-10-07). Labelled SLURL: llurlentry.cpp LLUrlEntrySLLabel, as the Ship Builder's Caribbean link. -->
+    <text follows="left|top" height="20" layout="topleft" left="12" name="try_airport" top="516" width="656" parse_urls="true">Take it up from [secondlife:///app/teleport/Wolf%20Territories%20Home/1300/2953/24 Wolf Territories Home Airport] - fly it, and fight other planes in dogfight mode.</text>
+    <button follows="left|top" height="23" layout="topleft" left="12" name="cancel_btn" top="542" width="150" label="Cancel the order"
+     tool_tip="Take your order back while it is still waiting for the yard (nothing has been charged)" />
+    <button follows="left|top" height="23" layout="topleft" left="400" name="buy_btn" top="542" width="130" label="Buy credits..."
+     tool_tip="Open the AI credits shop in your browser" />
+    <button follows="left|top" height="23" layout="topleft" left="548" name="build_btn" top="542" width="120" label="Build it"
+     tool_tip="Send your design to the yard. It is built and put in your inventory; you pay only once it is there." />
+</floater>

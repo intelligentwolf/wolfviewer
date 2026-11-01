@@ -95,6 +95,7 @@
 #include "wolfnpc.h"      // [WOLFNPC 2026-10-24/] the region link for the WolfNPC window and its credits pushes
 #include "wolfdrive.h"    // <WolfViewer 2026-10-09/> driving: wheel / pedals, dashboard
 #include "wolfhelm.h"     // <WolfViewer 2026-10-28/> the Captain's Helm (sailing ships)
+#include "wolfair.h"      // <WolfViewer 2026-11-01/> Wolf Air (warplanes: the dogfight band, the kill feed)
 #include "wolffarground.h"   // <WolfViewer 2026-10-07/> map tiles for regions not connected
 #include "wolffarterrain.h"   // <WolfViewer 2026-10-08/> elevation tiles beyond the terrain received
 #include "wolfobjectprops.h" // <WolfViewer> shared object name/description harvester
@@ -6285,6 +6286,9 @@ void LLAppViewer::idle()
     // after WolfDrive and WolfFlight so a dashboard or deck that came on this frame takes the bottom from it.
     WolfHelm::instance().idle();
     // </WolfViewer>
+    // <WolfViewer 2026-11-01> Wolf Air: a warplane's hello, the dogfight band's orders and fire key, the kill feed
+    // (wolfair.cpp); after WolfFlight so the deck it may switch on is there next frame. </WolfViewer>
+    WolfAir::instance().idle();
     WolfFarTerrain::instance().idle();  // <WolfViewer 2026-10-08/> the ground beyond the terrain received (before the flat tiles: they skip its cells)
     WolfFarGround::instance().idle();   // <WolfViewer 2026-10-07/> map tiles for the regions not connected
     // [WOLF GAME 2026-10-09] Wolf Roleplay: timers, markers, effects, and the tags under the name

@@ -144,6 +144,7 @@
 #include "wolffloatertunnels.h" // [WOLF TUNNELS 2026-10-21/] the Tunnel tool
 #include "wolffloaterseatunnels.h"   // [WOLF SEA TUNNEL 2026-10-28/]
 #include "wolffloatershipbuilder.h"   // [SHIP BUILDER 2026-10-29/]
+#include "wolffloaterplanebuilder.h"   // [PLANE BUILDER 2026-11-01/]
 #include "wolffloaterterraform.h" // [WOLF TERRAFORM 2026-10-23/] the Terraform window
 #include "llfloatermyscripts.h"
 #include "llfloatermyenvironment.h"
@@ -694,6 +695,7 @@ void LLViewerFloaterReg::registerFloaters()
     LLFloaterReg::add("wolf_tunnels", "floater_wolf_tunnels.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterTunnels>);   // [WOLF TUNNELS 2026-10-21/] walkable spaces under the terrain
     LLFloaterReg::add("wolf_sea_tunnels", "floater_wolf_sea_tunnels.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterSeaTunnels>);   // [WOLF SEA TUNNEL 2026-10-28/] air-filled glass tubes under the sea
     LLFloaterReg::add("wolf_ship_builder", "floater_wolf_ship_builder.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterShipBuilder>);   // [SHIP BUILDER 2026-10-29/] design a ship, the shipyard builds her
+    LLFloaterReg::add("wolf_plane_builder", "floater_wolf_plane_builder.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterPlaneBuilder>);   // [PLANE BUILDER 2026-11-01/] design a fighter, the yard builds it
     LLFloaterReg::add("wolf_terraform", "floater_wolf_terraform.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterTerraform>);   // [WOLF TERRAFORM 2026-10-23/] Level, Ramp, Terrace, Smooth, Road, River, Beach + Undo
     LLFloaterReg::add("wolf_drive_controls", "floater_wolf_drive_controls.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterDriveControls>);   // [WOLF DRIVE 2026-10-09/] wheel / pedal / gamepad setup
     LLFloaterReg::add("wolf_dj", "floater_wolf_dj.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterDJ>);   // [WOLF DJ 2026-10-04/]

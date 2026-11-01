@@ -180,6 +180,20 @@ uniform float wolfSeaMss;   // [WolfViewer round 11] Cox-Munk mean square slope 
 #wolf_include "wolftk/seaGlint.glsl"
 uniform vec3  wolf_light_h;    // [WOLF ENV 2026-10-12 physical] the light on the water / pi, pre-exposed
 vec3 wolfWaterBody() { return waterFogColorLinear * (wolf_phys > 0.5 ? wolf_light_h : vec3(1.0)); }
+// [T424 2026-11-01] Ticket 424 (Jimmy Olsen, TROMSO at night, Transparent Water off - the Low..MidHigh presets): a white
+// strip along the horizon, between the sea and the sky. The water's body with no refraction behind it is the stock water fog
+// over "2 km of water" laid on white (Source: Firestorm waterF.glsl:285, applyWaterFogViewLinear(viewVec*2048.0, vec4(1.0))).
+// But viewVec * 2048 is 2048 m from the EYE, and applyWaterFogViewLinear returns the colour unfogged when that point is
+// still above the water plane (Source: class1/environment/waterFogF.glsl:311-314) - so every water pixel more than 2048 m
+// away got the bare white, and the water fog thinned to nothing (getWaterFogViewNoClip's under-water length 2048 - d -> 0,
+// L -> 0, D -> 1: waterFogF.glsl:244-277) as the surface distance d neared 2048 m. Out at sea, with the draw distance
+// above 2 km, the planes' last stretch before the far clip turned into a grey-white band under the horizon (white x the
+// grazing-angle mix with the reflection, waterF.glsl calculateFresnelFactors / color = mix(fb, radiance, df2.x)).
+// The point now lies 2048 m along the ray BELOW the surface the pixel shows, so every pixel looks through the same 2 km of
+// water that near water always did (for near water, 2048 - d was already almost 2048: unchanged to the eye). Wolf
+// Territories' sea is open ocean; a real ocean seen from above has no bright band under the horizon - at grazing angles
+// it mirrors the sky (Fresnel reflectance -> 1) and is never brighter than the sky above it outside the sun's or moon's glint.
+vec3 wolfDeepWaterPoint(vec3 surfaceEye, vec3 viewDir) { return surfaceEye + viewDir * 2048.0; }
 // [WOLF ENV TAKRAM 2026-10-12] wolftk/atmosphereLibF.glsl (llviewershadermgr.cpp wolf_tk_attach): three-geospatial's aerial
 // perspective and the clouds' Beer-shadow-map transmittance at an eye-space position.
 #ifdef WOLF_TK_LIB
@@ -795,7 +809,7 @@ void main()
     wolf_behind_sky = texture(depthMap, distort2).r >= 1.0 && boundedWaterDepth <= 0.0 && vary_fall <= 0.005;
     if (wolf_behind_sky && wolf_sea_height < 0.0)
     {
-        fb = applyWaterFogViewLinear(viewVec * 2048.0, vec4(1.0));
+        fb = applyWaterFogViewLinear(wolfDeepWaterPoint(pos.xyz, viewVec), vec4(1.0));   // [T424] 2 km below the surface, not from the eye
     }
     // [WOLF ENV TAKRAM 2026-10-12] Under the native sky the dome's sea (wolftk/skyF.glsl, three-geospatial's ground branch
     // with a water surface) already carries its own reflection and aerial perspective. Seen THROUGH this water it was
@@ -810,7 +824,8 @@ void main()
     // </WolfViewer>
 
 #else
-    vec4 fb = applyWaterFogViewLinear(viewVec*2048.0, vec4(1.0));
+    // Source: stock Firestorm waterF.glsl:285 fb = applyWaterFogViewLinear(viewVec*2048.0, vec4(1.0)) - see wolfDeepWaterPoint
+    vec4 fb = applyWaterFogViewLinear(wolfDeepWaterPoint(pos.xyz, viewVec), vec4(1.0));   // [T424] Jimmy Olsen's white horizon strip
 
     if (water_mask < 1)
         discard;

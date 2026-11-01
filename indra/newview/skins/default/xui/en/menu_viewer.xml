@@ -2304,6 +2304,13 @@
                 <menu_item_call.on_click function="Floater.Show" parameter="wolf_ship_builder" />
                 <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
             </menu_item_call>
+            <!-- [BUILDING GENERATOR 2026-11-01] Paul: "anyone can design a building" (wolffloaterbuildinggen.cpp): describe a
+             building in words; the yard plans it, shows it and its price, and builds it into your inventory on Build it, priced in
+             AI credits. Wolf Territories only, as the Plane Builder. -->
+            <menu_item_call label="Building Generator..." name="WolfWorldBuildingGen">
+                <menu_item_call.on_click function="Floater.Show" parameter="wolf_building_gen" />
+                <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
+            </menu_item_call>
             <!-- [PLANE BUILDER 2026-11-01] Paul: "a plane generator like our boat generator" (wolffloaterplanebuilder.cpp): design a
              fighter from six real aircraft; the yard builds it and puts it in your inventory, priced in AI credits. Wolf
              Territories only, as the Ship Builder. -->
@@ -2520,6 +2527,18 @@
        <!-- [SHIP BUILDER 2026-10-29] Paul: "it should be on the build menu strictly speaking". The Ship Builder
             (wolffloatershipbuilder.cpp), in alphabetical order with the Wolf items here. Same window and gate as
             Wolf World > Build & Land > Ship Builder... -->
+       <!-- [BUILDING GENERATOR 2026-11-01] Paul: "i could find the house/building builder under the build menu??". The Building
+            Generator (wolffloaterbuildinggen.cpp), beside the Plane Builder; same window and gate as Wolf World > Build & Land >
+            Building Generator... -->
+       <menu_item_call
+        label="Building Generator..."
+        name="WolfBuildingGenBuildMenu">
+         <menu_item_call.on_click
+          function="Floater.Show"
+          parameter="wolf_building_gen" />
+         <menu_item_call.on_visible
+          function="WolfGrid.IsOnWolfTerritories" />
+       </menu_item_call>
        <!-- [PLANE BUILDER 2026-11-01] The Plane Builder (wolffloaterplanebuilder.cpp), beside the Ship Builder; same window and gate
             as Wolf World > Build & Land > Plane Builder... -->
        <menu_item_call

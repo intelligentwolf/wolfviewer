@@ -104,6 +104,24 @@ bool LLApp::sDisableCrashlogger = false;
 // static
 // Keeps track of application status
 LLScalarCond<LLApp::EAppStatus> LLApp::sStatus{LLApp::APP_STATUS_STOPPED};
+// [WolfViewer 2026-11-02] stored by the signal handler, taken by the main loop (llapp.h deferQuitSignals). Only lock-free
+// atomic objects may be touched from a signal handler (C++17 [support.signal]/3, "plain lock-free atomic operations").
+static_assert(std::atomic<int>::is_always_lock_free && std::atomic<bool>::is_always_lock_free,
+              "the quit signal is stored from a signal handler");
+std::atomic<int>  LLApp::sPendingQuitSignal{0};
+std::atomic<bool> LLApp::sDeferQuitSignals{false};
+
+// static
+void LLApp::deferQuitSignals()
+{
+    sDeferQuitSignals.store(true);
+}
+
+// static
+int LLApp::takeQuitSignal()
+{
+    return sPendingQuitSignal.exchange(0);
+}
 LLAppErrorHandler LLApp::sErrorHandler = NULL;
 
 
@@ -622,6 +640,15 @@ void default_unix_signal_handler(int signum, siginfo_t *info, void *ucontext)
     // FIXME(brad) - we are using this handler for asynchronous signals as well, so sLogInSignal is currently
     // disabled for safety.  we need to find a way to selectively reenable it when it is safe.
     // see issue secondlife/viewer#2566
+
+    // [WolfViewer 2026-11-02] an application with a main loop quits from there (llapp.h deferQuitSignals): for SIGINT and
+    // SIGTERM nothing but the atomic store happens here - before the logging below (on in builds without
+    // LL_RELEASE_FOR_DOWNLOAD), no status read (sStatus takes a mutex), no event
+    if ((signum == SIGINT || signum == SIGTERM) && LLApp::sDeferQuitSignals.load())
+    {
+        LLApp::sPendingQuitSignal.store(signum);
+        return;
+    }
 
     if (LLApp::sLogInSignal)
     {

@@ -826,6 +826,8 @@ LLAppViewer::LLAppViewer()
     }
 
     mDumpPath ="";
+    // [WolfViewer 2026-11-02] SIGINT / SIGTERM are taken by doFrame and quit the normal way (llapp.h deferQuitSignals)
+    LLApp::deferQuitSignals();
     // Need to do this initialization before we do anything else, since anything
     // that touches files should really go through the lldir API
 
@@ -1603,6 +1605,28 @@ bool LLAppViewer::frame()
 bool LLAppViewer::doFrame()
 {
     resumeMainloopTimeout("Main:doFrameStart");
+    // [WolfViewer 2026-11-02] a SIGINT / SIGTERM since the last frame (stored by llapp.cpp default_unix_signal_handler):
+    // the quit the File menu's Quit ends in (requestQuit: logout request, floaters closed, settings saved), here on the
+    // main thread between frames instead of inside the signal handler, where it deadlocked (llapp.h deferQuitSignals).
+    // A signal while a quit is already waiting for the logout (from the menu or an earlier signal) ends it at once, as the
+    // handler's setQuitting() did then (forceQuit); one after quitting has begun is ignored, as the handler ignored it.
+    if (const int quit_signal = LLApp::takeQuitSignal())
+    {
+        if (isExiting())
+        {
+            LL_INFOS() << "Signal " << quit_signal << " received while quitting: ignored" << LL_ENDL;
+        }
+        else if (mQuitRequested)
+        {
+            LL_INFOS() << "Signal " << quit_signal << " received while logging out: quitting now" << LL_ENDL;
+            forceQuit();
+        }
+        else
+        {
+            LL_INFOS() << "Signal " << quit_signal << " received: quitting" << LL_ENDL;
+            requestQuit();
+        }
+    }
 #ifdef LL_DISCORD
     {
         LL_PROFILE_ZONE_NAMED("discord_callbacks");

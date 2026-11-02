@@ -202,6 +202,17 @@ public:
     static bool isExiting(); // Either quitting or error (app is exiting, cleanly or not)
     static int getPid();
 
+    // [WolfViewer 2026-11-02] SIGINT / SIGTERM without a deadlock. The handler used to call setQuitting() itself, which
+    // posts the "LLApp" status event (setStatus) from inside the signal handler: listeners then ran on whatever the main
+    // thread had been interrupted in. Measured (W91, NVIDIA 615.78, a SIGTERM in world): the main thread was inside a GL
+    // call (WolfEnvironmentRender::postPassInner); the event closed the LLImageGL thread pool (threadpool.cpp close ->
+    // join), whose worker was in SDL_GL_DeleteContext -> MakeCurrent waiting on the driver lock the interrupted main thread
+    // held - a hang until SIGKILL. An application that runs a main loop calls deferQuitSignals(): the handler then only
+    // stores the signal (a lock-free atomic, async-signal-safe) and the main loop takes it with takeQuitSignal() and quits
+    // the normal way. Applications that do not call it keep the old behaviour.
+    static void deferQuitSignals();
+    static int  takeQuitSignal();   // the SIGINT / SIGTERM received since the last call, or 0
+
     static void notifyOutOfDiskSpace();
 
     //
@@ -302,6 +313,8 @@ protected:
 
     static void setStatus(EAppStatus status);       // Use this to change the application status.
     static LLScalarCond<EAppStatus> sStatus; // Reflects current application status
+    static std::atomic<int>  sPendingQuitSignal;   // [WolfViewer 2026-11-02] see deferQuitSignals()
+    static std::atomic<bool> sDeferQuitSignals;
     static bool sDisableCrashlogger; // Let the OS handle crashes for us.
     std::wstring mCrashReportPipeStr;  //Name of pipe to use for crash reporting.
 

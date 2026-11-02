@@ -56,6 +56,7 @@ uniform sampler2D inputBuffer;   // postprocessing Effect input
 uniform sampler2D depthBuffer;   // postprocessing EffectAttribute.DEPTH
 
 #wolf_include "wolftk/aerialPerspective.glsl"
+#wolf_include "wolftk/nightFloor.glsl"   // [WolfViewer 2026-11-02 W92] the clouds' night floor
 
 out vec4 frag_color;
 
@@ -85,6 +86,12 @@ void mainImage(const vec4 inputColor, const vec2 uv, out vec4 outputColor) {
 
   #ifdef HAS_OVERLAY
   vec4 overlay = texture(overlayBuffer, uv);
+  // [WolfViewer 2026-11-02 W92] the clouds' night floor (nightFloor.glsl): per unit of their opacity, so a deck shows at least the
+  // stock clouds (a visible deck), a thin cloud lifts little and a gap keeps the sky and the stars behind it (laid over below by
+  // 1 - alpha). It is on only while an EEP drives the sky (wolfNightFloorOn), when the overlay over a surface holds the clouds in
+  // front of it alone (cloudsF.glsl: wolfLLHazeOn returns before the haze), so a mountain's own haze is never lifted - the clouds
+  // in front of it take the same floor as over the sky. The light meter takes the lift back out (logLumF.glsl).
+  if (wolfNightFloorOn > 0.5) overlay.rgb = wolfNightFloorLiftPremultiplied(overlay, wolfNightFloorCloud(dot(normalize(vRayDirection), normalize(vCameraPosition))));
   if (overlay.a == 1.0) {
     outputColor = overlay;
     return;

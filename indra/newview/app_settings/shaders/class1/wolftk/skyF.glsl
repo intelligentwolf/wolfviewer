@@ -66,6 +66,7 @@ uniform sampler3D higher_order_scattering_texture;
 #wolf_include "wolftk/coreRaySphereIntersection.glsl"
 #wolf_include "wolftk/seaGlint.glsl"   // [WolfViewer round 11] the sun's glint on the open sea (Cox-Munk)
 #wolf_include "wolftk/nightLight.glsl"   // [WolfViewer 2026-10-25] the night's light as the eye sees it (Jimmy Olsen, #226)
+#wolf_include "wolftk/nightFloor.glsl"   // [WolfViewer 2026-11-02 W92] the night sky never below the stock Midnight sky
 
 // Source: sky.frag:23-24; sky.vert:6-9 (camera, frame)
 uniform vec3 sunDirection;          // ECEF
@@ -683,6 +684,12 @@ void main()
     // (the gains are measured against the stock sky as it is), and before the EEP's moon disc and the meteors, which are drawn as
     // LL draws them
     if (uProbe < 0.5) color = wolfNightLight(color);
+    // [WolfViewer 2026-11-02 W92] the night sky's floor (nightFloor.glsl): the sky above the horizon never darker than the stock
+    // Midnight sky, laid on after the night light (the floor is what the screen is to show) and before the EEP's moon, the
+    // meteors and LL's stars (renderStarsDeferred adds them over this): they stay as bright above the floor as above black.
+    // Not on the sea below the horizon (a surface, not the sky), not in a probe pixel (the EEP gains compare the sky as it is),
+    // not in a reflection-probe face (wolfNightFloorOn 0: that sky lights the scene and the water)
+    if (wolfNightFloorOn > 0.5 && uProbe < 0.5 && !(intersectsGround && distanceToGround >= 0.0)) color = wolfNightFloorLift(color, wolfNightFloorSky(dirWorld.z));
     // the EEP's moon over the corrected sky (not in a probe: the probes measure the sky alone, as the reference is)
     if (uProbe < 0.5 && !(intersectsGround && distanceToGround >= 0.0)) color = wolfEepMoon(dirWorld, color);
     // the shooting stars, over the sky only (not in a probe, not on the sea)

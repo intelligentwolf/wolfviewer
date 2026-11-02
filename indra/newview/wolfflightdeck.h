@@ -100,6 +100,9 @@ public:
         H_CREW_SEAT_FIRST, H_CREW_SEAT_LAST = H_CREW_SEAT_FIRST + 15,
         // per engine i (0-based): FIRST + i * 3 + 0 feather/unfeather, + 1 extinguish, + 2 start/stop
         H_ENG_FIRST, H_ENG_LAST = H_ENG_FIRST + 8 * 3 - 1,
+        // [WOLF AIR RADAR 2026-11-02] the radar scope's range, target and target-key buttons
+        H_AIR_RADAR_RANGE, H_AIR_TARGET, H_AIR_TARGET_KEY,
+        H_AIR_RADAR_MOVE, H_AIR_RADAR_OFF, H_AIR_RADAR_SHOW, H_AIR_RADAR_BIGGER, H_AIR_RADAR_SMALLER,
     };
 
 private:
@@ -191,6 +194,11 @@ private:
     // speaks WolfAir1 the EICAS display gives its place to the COMBAT display (damage by part, guns and cannon, DOGFIGHT,
     // FIRE, BAIL), and the world above it gets the reflector gunsight, the kill feed and the hit / safe-airspace notices.
     void drawCombat(F32 l, F32 b, F32 r, F32 t);
+    void drawRadar(F32 top_of_world);                    // [WOLF AIR RADAR 2026-11-02] the air radar, over the 3D view
+    bool mRadarShown = false;                            // drawn this frame: its rectangle (view) takes the mouse
+    F32 mRadarL = 0.f, mRadarB = 0.f, mRadarR = 0.f, mRadarT = 0.f;
+    F32 mRadarGrabX = 0.f, mRadarGrabY = 0.f;
+    void drawTargetMarkers(F32 top_of_world);            // [WOLF AIR RADAR/] diamonds, the off-screen arrow, the lead point
     void drawAirOverlay(F32 top_of_world);
     // [WOLF AIR JETS 2026-11-02] the JET display (Mach, spool and reheat, airbrakes, fuel, the Harrier's nozzles and water),
     // the stores rows of COMBAT, and over the world the seeker, the missile warning and the hover cue

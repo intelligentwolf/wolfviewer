@@ -19,6 +19,7 @@
 #include "wolfvehiclerez.h"   // [HUD REZ 2026-10-12/]
 #include "wolfflightdeck.h"
 
+#include <algorithm>
 #include <cmath>
 #include <ctime>
 #include <map>
@@ -553,6 +554,11 @@ bool WolfFlightDeck::showBackground()
 // on a control while it is hidden, so the world between the instruments takes the click.
 bool WolfFlightDeck::onPanel(S32 x, S32 y) const
 {
+    // [WOLF AIR RADAR 2026-11-02] the radar over the world takes its own clicks and drags
+    if (mRadarShown && WolfFlight::instance().active() && (F32)x >= mRadarL && (F32)x <= mRadarR && (F32)y >= mRadarB && (F32)y <= mRadarT)
+    {
+        return true;
+    }
     if (!WolfFlight::instance().active() || y > mPanelTop || y < mPanelBottom)
     {
         return false;
@@ -565,6 +571,7 @@ void WolfFlightDeck::draw()
 {
     WolfFlight& f = WolfFlight::instance();
     mHits.clear();
+    mRadarShown = false;    // [WOLF AIR RADAR] set again only if drawRadar draws it this frame: never a stale, invisible click area
     // [WOLF AIR PREVIEW 2026-11-02] at the login screen only, the warplane displays drawn from WolfAirPreviewFile's recorded
     // lines (wolfair.cpp previewTick): for testing the deck off the grid. Nothing is sent; it ends when a login starts.
     if (!f.active())
@@ -3303,6 +3310,15 @@ void WolfFlightDeck::drawCombat(F32 l, F32 b, F32 r, F32 t)
     // ---- title and the dogfight state ----
     const F32 top = st - h * 0.03f;
     text(mF.mTiny, "COMBAT", sl + w * 0.04f, top, C_CYAN, LLFontGL::LEFT, LLFontGL::TOP);
+    {
+        // [WOLF AIR RADAR 2026-11-02] the radar over the world, on and off (its own X switches it off too)
+        const bool rd = gSavedPerAccountSettings.getBOOL("WolfAirRadarShow");
+        const std::string lab = rd ? "RADAR ON" : "RADAR OFF";
+        const F32 x0 = sl + w * 0.30f, x1 = x0 + mF.mTiny->getWidthF32(lab) + 8.f;
+        frameW(x0, top - (F32)mF.mTiny->getLineHeight() - 2.f, x1, top + 1.f, 1.f, rd ? C_GREEN : C_DIM);
+        text(mF.mTiny, lab, x0 + 4.f, top, rd ? C_GREEN : C_GREY, LLFontGL::LEFT, LLFontGL::TOP);
+        addHit(x0, top - (F32)mF.mTiny->getLineHeight() - 2.f, x1, top + 1.f, H_AIR_RADAR_SHOW, "Show or hide the radar over the view (drag it to move it, - and + to size it)");
+    }
     std::string word = "DOGFIGHT OFF";
     LLColor4 wcol = C_GREY;
     const std::string& df = s.mDogfight;
@@ -3458,6 +3474,354 @@ void WolfFlightDeck::drawCombat(F32 l, F32 b, F32 r, F32 t)
     }
 }
 
+//-----------------------------------------------------------------------------
+// [WOLF AIR RADAR 2026-11-02] The air radar and the target markers. Paul on Dogfight, 2 Nov: "i just saw a spitfire but
+// nothing on my radar" - "thats the problem its hard to spot them". The contacts are the wolf-air plugin's (1.7.4,
+// c-wolf-air/src/AirRadar.cs; README "wolf-air 1.7.4"), sent only while she is in dogfight mode, kept by wolfair.cpp.
+// The look is the flight-game convention (a round heading-up scope with range rings; red hostiles, amber targets, green
+// others; a box on the locked target, diamonds on the threats, an arrow at the screen's edge to one out of view, a lead
+// pip), drawn in the deck's own glass style (paul-game-ui-like-flightdeck-mmo).
+//-----------------------------------------------------------------------------
+
+namespace
+{
+    const F32 RADAR_ALT_CUE_M = 30.f;           // a contact more than this above or below gets the up / down chevron
+    const F32 RADAR_VECTOR_S = 10.f;            // a blip's speed line shows where she will be in this many seconds
+    const S32 MARKERS_MAX = 8;                  // on-screen diamonds at once: the nearest threats (readable, not cluttered)
+    const F32 MARKER_FADE_FROM_M = 1000.f, MARKER_FADE_TO_M = 10000.f, MARKER_ALPHA_MIN = 0.35f;
+    const LLColor4 C_NEUTRAL(0.20f, 1.00f, 0.25f, 1.f);     // C_GREEN: "green/white neutral" (Paul's brief)
+    const F32 RADAR_SIZE_MIN = 0.12f, RADAR_SIZE_MAX = 0.40f, RADAR_SIZE_STEP = 0.02f;   // of the view's height (Paul: "18-22 %")
+
+    LLColor4 relColour(char rel)
+    {
+        return rel == 'h' ? C_RED : rel == 't' ? C_AMBER : C_NEUTRAL;
+    }
+
+    // Metres as a pilot reads them on the scope: "650 M", "1.2 KM"
+    std::string rangeText(F32 m)
+    {
+        return m < 1000.f ? fmt("%d M", (S32)llround(m)) : fmt("%.1f KM", m / 1000.f);
+    }
+}
+
+// [WOLF AIR RADAR] Paul: "draw it on the actual screen rather than below its too small to see". The scope is an overlay on the
+// 3D view itself, as a flight game's radar: a square of WolfAirRadarSize of the view's height (default 0.20; per account), its
+// own dark see-through ground so the blips read on any sky, in the lower right corner above the deck by default (clear of the
+// gunsight in the middle, the kill feed top right and the intercom top left), moved by dragging it (WolfAirRadarX / Y: its centre
+// as fractions of the view), sized with - and +, and switched off with its X (back on with RADAR on the COMBAT display).
+void WolfFlightDeck::drawRadar(F32 top_of_world)
+{
+    mRadarShown = false;
+    WolfAir& a = WolfAir::instance();
+    if (!gSavedPerAccountSettings.getBOOL("WolfAirRadarShow")) return;
+    const F32 W = (F32)getRect().getWidth(), Hv = (F32)getRect().getHeight();
+    const F32 world_h = Hv - top_of_world;
+    if (world_h < 120.f) return;
+    const F32 side = llclamp(gSavedPerAccountSettings.getF32("WolfAirRadarSize"), RADAR_SIZE_MIN, RADAR_SIZE_MAX) * Hv;
+    const F32 sw = llmin(side, world_h - 8.f) * 0.86f, sh = llmin(side, world_h - 8.f);    // the scope with a strip of buttons
+    F32 cxv = gSavedPerAccountSettings.getF32("WolfAirRadarX"), cyv = gSavedPerAccountSettings.getF32("WolfAirRadarY");
+    F32 px, py;     // its centre in the view
+    if (cxv < 0.f || cyv < 0.f)
+    {
+        px = W - W * 0.015f - sw * 0.5f;
+        py = top_of_world + 12.f + sh * 0.5f;
+    }
+    else
+    {
+        px = cxv * W; py = cyv * Hv;
+    }
+    px = llclamp(px, sw * 0.5f, W - sw * 0.5f);
+    py = llclamp(py, top_of_world + sh * 0.5f, Hv - sh * 0.5f);
+    const F32 l = px - sw * 0.5f, r = px + sw * 0.5f, b = py - sh * 0.5f, t = py + sh * 0.5f;
+    mRadarShown = true;
+    mRadarL = l; mRadarB = b; mRadarR = r; mRadarT = t;
+    const F32 w = r - l, h = t - b;
+    // the hits are kept in the deck's picture (hitAt divides the point by mHitScale): put these, made in the view, there too
+    auto hitView = [&](F32 hl, F32 hb, F32 hr, F32 ht, EHit id, const std::string& tip)
+    {
+        addHit(hl / mHitScale, hb / mHitScale, hr / mHitScale, ht / mHitScale, id, tip);
+    };
+    hitView(l, b, r, t, H_AIR_RADAR_MOVE, "Drag to move the radar; double-click to put it back in its corner");      // first: the buttons over it win (hitAt looks last first)
+
+    // its ground: dark and see-through, a thin frame (white text on 55 % black stays above 4.5:1 on the brightest sky)
+    roundRectF(l, b, r, t, w * 0.05f, LLColor4(0.f, 0.02f, 0.01f, 0.58f), LLColor4(0.f, 0.02f, 0.01f, 0.66f));
+    LLColor4 edge = withAlpha(C_GREEN, mPressed == H_AIR_RADAR_MOVE ? 0.9f : 0.45f);
+    frameW(l, b, r, t, 1.2f, edge);
+    // its own fonts, by its size (the deck's are sized for the band)
+    const LLFontGL* f_s = avionics("B612", LLFontGL::NORMAL, h * 0.050f);
+    const LLFontGL* f_m = avionics("B612", LLFontGL::BOLD, h * 0.062f);
+    const F32 range = WolfAir::radarRangeM();
+    const F32 top = t - h * 0.02f;
+    text(f_s, "RADAR", l + w * 0.04f, top, C_CYAN, LLFontGL::LEFT, LLFontGL::TOP);
+    text(f_m, rangeText(range), px, top, C_WHITE, LLFontGL::HCENTER, LLFontGL::TOP);
+
+    // ---- the buttons: RANGE, TGT, KEY along the bottom; - + X top right ----
+    auto btn = [&](F32 x0, F32 x1, F32 bb, F32 bt, EHit id, const std::string& label, const LLColor4& col, bool lit, const std::string& tip)
+    {
+        const bool pressed = mPressed == id;
+        roundRectF(x0, bb, x1, bt, (bt - bb) * 0.2f, withAlpha(col, lit ? 0.55f : 0.18f), withAlpha(col, lit ? 0.35f : 0.10f));
+        frameW(x0, bb - (pressed ? 1.f : 0.f), x1, bt - (pressed ? 1.f : 0.f), 1.f, withAlpha(col, lit ? 1.f : 0.6f));
+        const LLFontGL* f = f_s->getWidthF32(label) > (x1 - x0) * 0.9f ? avionics("B612", LLFontGL::NORMAL, h * 0.040f) : f_s;
+        text(f, label, (x0 + x1) * 0.5f, (bb + bt) * 0.5f, lit ? C_WHITE : col, LLFontGL::HCENTER, LLFontGL::VCENTER);
+        hitView(x0, bb, x1, bt, id, tip);
+    };
+    {
+        const F32 bs = h * 0.075f, by1 = t - h * 0.015f, by0 = by1 - bs;
+        btn(r - w * 0.03f - bs, r - w * 0.03f, by0, by1, H_AIR_RADAR_OFF, "X", C_GREY, false, "Switch the radar off (RADAR on the COMBAT display brings it back)");
+        btn(r - w * 0.03f - bs * 2.2f, r - w * 0.03f - bs * 1.2f, by0, by1, H_AIR_RADAR_BIGGER, "+", C_CYAN, false, "A bigger radar");
+        btn(r - w * 0.03f - bs * 3.4f, r - w * 0.03f - bs * 2.4f, by0, by1, H_AIR_RADAR_SMALLER, "-", C_CYAN, false, "A smaller radar");
+    }
+    const F32 bb = b + h * 0.03f, bt = b + h * 0.115f, gap = w * 0.025f;
+    const F32 bw = (w - gap * 4.f) / 3.f;
+    const bool locked = a.target() != nullptr;
+    btn(l + gap, l + gap + bw, bb, bt, H_AIR_RADAR_RANGE, "RANGE", C_CYAN, false, "The radar's range: 1, 2, 5 or 10 km");
+    btn(l + gap * 2.f + bw, l + gap * 2.f + bw * 2.f, bb, bt, H_AIR_TARGET, "TGT", C_RED, locked,
+        fmt("Select the nearest enemy, then the next nearest each press (key: %s)", WolfAir::targetKeyName(WolfAir::targetKey())));
+    btn(l + gap * 3.f + bw * 2.f, r - gap, bb, bt, H_AIR_TARGET_KEY, fmt("KEY %s", WolfAir::targetKeyName(WolfAir::targetKey())), C_CYAN, false,
+        "The key that selects the next target: End, or none");
+
+    // ---- the scope ----
+    const F32 info_y = bt + h * 0.012f;
+    const F32 cx = px;
+    const F32 scope_b = info_y + (F32)f_s->getLineHeight() * 1.2f, scope_t = top - (F32)f_m->getLineHeight() * 1.1f;
+    const F32 R = llmax(10.f, llmin(w * 0.47f, (scope_t - scope_b) * 0.5f));
+    const F32 cy = (scope_b + scope_t) * 0.5f;
+    circleF(cx, cy, R, LLColor4(0.f, 0.10f, 0.04f, 0.45f), 48);
+    arcW(cx, cy, R, 2.f, 0.f, F_TWO_PI, withAlpha(C_GREEN, 0.75f), 64);
+    arcW(cx, cy, R * 0.5f, 1.3f, 0.f, F_TWO_PI, withAlpha(C_GREEN, 0.45f), 48);
+    // the half ring's figure at its lower right, clear of the E and S marks
+    text(f_s, rangeText(range * 0.5f), cx + R * 0.36f + 2.f, cy - R * 0.36f - 2.f, withAlpha(C_GREEN, 0.85f), LLFontGL::LEFT, LLFontGL::TOP);
+
+    LLVector3d own;
+    LLVector3 own_vel;
+    F32 yaw = 0.f;
+    const bool posed = a.ownPose(own, own_vel, yaw);
+    const F32 hdg_deg = wrap360(90.f - yaw * RAD_TO_DEG);       // compass heading of the nose (yaw: counter-clockwise from east)
+    // a compass bearing (degrees clockwise from north) on the heading-up scope: up is the nose
+    auto bearingXY = [&](F32 brg, F32 rad, F32& x, F32& y)
+    {
+        const F32 rel = (brg - hdg_deg) * DEG_TO_RAD;
+        x = cx + rad * sinf(rel);
+        y = cy + rad * cosf(rel);
+    };
+    for (S32 d = 0; d < 360; d += 30)
+    {
+        F32 x0, y0, x1, y1;
+        bearingXY((F32)d, R, x0, y0);
+        bearingXY((F32)d, R * (d % 90 == 0 ? 0.90f : 0.94f), x1, y1);
+        lineW(x0, y0, x1, y1, 1.5f, withAlpha(C_GREEN, 0.8f));
+        if (d % 90 == 0)
+        {
+            F32 lx, ly;
+            bearingXY((F32)d, R * 0.79f, lx, ly);
+            text(f_s, d == 0 ? "N" : d == 90 ? "E" : d == 180 ? "S" : "W", lx, ly, d == 0 ? C_WHITE : C_GREY, LLFontGL::HCENTER, LLFontGL::VCENTER);
+        }
+    }
+    {
+        const F32 s = llmax(5.f, R * 0.06f);      // her own aircraft at the centre, nose up
+        triF(cx, cy + s, cx - s * 0.7f, cy - s * 0.7f, cx + s * 0.7f, cy - s * 0.7f, C_WHITE);
+    }
+
+    if (!a.radarLive())
+    {
+        // never pretend: no look means the plugin is not sending (dogfight mode off, or a region without wolf-air 1.7.4)
+        const bool on = a.inDogfight();
+        text(f_m, on ? "NO RADAR DATA" : "SWITCH DOGFIGHT ON", cx, cy + R * 0.20f, C_AMBER, LLFontGL::HCENTER, LLFontGL::VCENTER);
+        text(f_s, on ? "THIS REGION SENDS NONE YET" : "FOR THE RADAR", cx, cy - R * 0.20f, C_AMBER, LLFontGL::HCENTER, LLFontGL::VCENTER);
+        const std::string note = a.targetNote();
+        if (!note.empty()) text(f_s, note, cx, info_y, C_AMBER, LLFontGL::HCENTER, LLFontGL::BOTTOM);
+        return;
+    }
+
+    const F32 ppm = R / range;
+    const F32 fx = cosf(yaw), fy = sinf(yaw);         // the nose over the ground
+    S32 n_h = 0, n_t = 0, n_n = 0;
+    const WolfAir::Contact* tgt = a.target();
+    const F32 s = llmax(4.5f, R * 0.055f);             // a blip: large and clear
+    for (const WolfAir::Contact& c : a.contacts())
+    {
+        if (!posed) break;
+        const LLVector3d d = a.contactPos(c) - own;
+        const F32 de = (F32)d.mdV[VX], dn = (F32)d.mdV[VY], dz = (F32)d.mdV[VZ];
+        if (c.mRel == 'h') ++n_h; else if (c.mRel == 't') ++n_t; else ++n_n;
+        const F32 fwd = de * fx + dn * fy, right = de * fy - dn * fx;
+        const F32 dist = sqrtf(de * de + dn * dn);
+        const LLColor4 col = relColour(c.mRel);
+        if (dist * ppm > R)
+        {
+            // beyond the range: a threat still shows as a mark on the rim where it lies
+            if (c.mRel != 'n' && dist > 1.f)
+            {
+                const F32 ux = right / dist, uy = fwd / dist;
+                lineW(cx + ux * R * 0.95f, cy + uy * R * 0.95f, cx + ux * R, cy + uy * R, 3.f, col);
+                circleF(cx + ux * R, cy + uy * R, 3.f, col, 10);
+            }
+            continue;
+        }
+        const F32 x = cx + right * ppm, y = cy + fwd * ppm;
+        // where she is going: a short line along her ground track (RADAR_VECTOR_S seconds), as on a tactical display
+        const LLVector3 v = a.contactVel(c);
+        const F32 vr = (v.mV[VX] * fy - v.mV[VY] * fx) * RADAR_VECTOR_S * ppm, vf = (v.mV[VX] * fx + v.mV[VY] * fy) * RADAR_VECTOR_S * ppm;
+        const F32 vl = sqrtf(vr * vr + vf * vf);
+        if (vl > 1.f)
+        {
+            const F32 k = llmin(1.f, R * 0.35f / vl);
+            lineW(x, y, x + vr * k, y + vf * k, 1.5f, withAlpha(col, 0.9f));
+        }
+        // a dark rim under each blip, so a green or amber one reads on the green scope and on a pale sky through it
+        if (c.mRel == 'h')
+        {
+            quadF(x, y + s + 1.5f, x + s + 1.5f, y, x, y - s - 1.5f, x - s - 1.5f, y, LLColor4(0.f, 0.f, 0.f, 0.7f));
+            quadF(x, y + s, x + s, y, x, y - s, x - s, y, col);                                        // a filled diamond
+        }
+        else if (c.mRel == 't')
+        {
+            triF(x, y + s + 1.5f, x - s - 1.5f, y - s * 0.8f - 1.f, x + s + 1.5f, y - s * 0.8f - 1.f, LLColor4(0.f, 0.f, 0.f, 0.7f));
+            triF(x, y + s, x - s, y - s * 0.8f, x + s, y - s * 0.8f, col);                             // a filled triangle
+        }
+        else if (c.mNeighbour) arcW(x, y, s * 0.8f, 1.6f, 0.f, F_TWO_PI, col, 14);                  // seen by us, on another region
+        else frameW(x - s * 0.75f, y - s * 0.75f, x + s * 0.75f, y + s * 0.75f, 1.8f, col);          // an open square
+        // above or below her: a chevron over or under the blip
+        if (dz > RADAR_ALT_CUE_M)
+        {
+            lineW(x - s * 0.8f, y + s * 1.5f, x, y + s * 2.2f, 1.6f, col); lineW(x, y + s * 2.2f, x + s * 0.8f, y + s * 1.5f, 1.6f, col);
+        }
+        else if (dz < -RADAR_ALT_CUE_M)
+        {
+            lineW(x - s * 0.8f, y - s * 1.5f, x, y - s * 2.2f, 1.6f, col); lineW(x, y - s * 2.2f, x + s * 0.8f, y - s * 1.5f, 1.6f, col);
+        }
+        if (tgt && tgt->mId == c.mId)
+        {
+            const F32 q = s * 2.0f;
+            frameW(x - q, y - q, x + q, y + q, 1.8f, blink(0.8f) ? C_WHITE : withAlpha(C_WHITE, 0.6f));
+        }
+    }
+
+    // ---- the line over the buttons: the target, or what TGT said, or the count ----
+    const std::string note = a.targetNote();
+    if (tgt && posed)
+    {
+        const LLVector3d d = a.contactPos(*tgt) - own;
+        const S32 dzm = (S32)llround(d.mdV[VZ]);
+        std::string who = tgt->mName.empty() ? std::string("UNKNOWN") : tgt->mName;
+        LLStringUtil::toUpper(who);
+        text(f_s, fmt("TGT %s  %s  %s%d M", who.c_str(), rangeText((F32)d.magVec()).c_str(), dzm >= 0 ? "+" : "-", llabs(dzm)),
+             cx, info_y, relColour(tgt->mRel), LLFontGL::HCENTER, LLFontGL::BOTTOM);
+    }
+    else if (!note.empty())
+    {
+        text(f_s, note, cx, info_y, C_AMBER, LLFontGL::HCENTER, LLFontGL::BOTTOM);
+    }
+    else
+    {
+        text(f_s, fmt("%d HOSTILE   %d TARGET   %d OTHER", n_h, n_t, n_n), cx, info_y, n_h > 0 ? C_RED : C_GREY, LLFontGL::HCENTER, LLFontGL::BOTTOM);
+    }
+}
+
+void WolfFlightDeck::drawTargetMarkers(F32 top_of_world)
+{
+    WolfAir& a = WolfAir::instance();
+    if (a.previewing() || !a.radarLive()) return;       // the preview has no world to mark
+    LLVector3d own;
+    LLVector3 own_vel;
+    F32 yaw = 0.f;
+    if (!a.ownPose(own, own_vel, yaw)) return;
+    const F32 W = (F32)getRect().getWidth(), Hv = (F32)getRect().getHeight();
+    const LLFontGL* sml = mF.mSmall ? mF.mSmall : LLFontGL::getFontSansSerifSmall();
+    LLViewerCamera* cam = LLViewerCamera::getInstance();
+    // a point in agent space on the screen (as drawAirOverlay's onScreen), and whether it lies inside the world's part of it
+    auto project = [&](const LLVector3& p, F32& x, F32& y) -> bool
+    {
+        if ((p - cam->getOrigin()) * cam->getAtAxis() <= 0.f) return false;
+        LLCoordGL c;
+        cam->projectPosAgentToScreen(p, c, false);
+        S32 lx = 0, ly = 0;
+        screenPointToLocal(c.mX, c.mY, &lx, &ly);
+        x = (F32)lx; y = (F32)ly;
+        return x >= 0.f && x <= W && y >= top_of_world && y <= Hv;
+    };
+    struct Mark { const WolfAir::Contact* c; F32 d; LLVector3 agent; };
+    std::vector<Mark> marks;
+    for (const WolfAir::Contact& c : a.contacts())
+    {
+        if (c.mRel != 'h' && c.mRel != 't') continue;
+        const LLVector3d g = a.contactPos(c);
+        marks.push_back({ &c, (F32)(g - own).magVec(), gAgent.getPosAgentFromGlobal(g) });
+    }
+    std::sort(marks.begin(), marks.end(), [](const Mark& x, const Mark& y) { return x.d < y.d; });
+    const WolfAir::Contact* tgt = a.target();
+    LLLocalClipRect clip(LLRect(0, (S32)Hv, (S32)W, (S32)top_of_world));
+    const Mark* off = nullptr;              // the one the edge arrow points at
+    F32 tx = 0.f, ty = 0.f, tgt_d = 0.f;
+    bool tgt_shown = false;
+    S32 drawn = 0;
+    for (const Mark& m : marks)
+    {
+        const bool is_tgt = tgt && tgt->mId == m.c->mId;
+        F32 x = 0.f, y = 0.f;
+        const bool shown = project(m.agent, x, y);
+        if (!shown)
+        {
+            if (is_tgt || (!tgt && !off)) off = &m;      // the selected target, else the nearest threat out of view
+            continue;
+        }
+        if (!is_tgt && drawn >= MARKERS_MAX) continue;
+        ++drawn;
+        const F32 alpha = llclamp(1.f - (m.d - MARKER_FADE_FROM_M) / (MARKER_FADE_TO_M - MARKER_FADE_FROM_M), MARKER_ALPHA_MIN, 1.f);
+        const LLColor4 col = withAlpha(relColour(m.c->mRel), is_tgt ? 1.f : alpha);
+        const F32 s = m.d < 600.f ? 16.f : 11.f;
+        if (is_tgt)
+        {
+            frameW(x - s, y - s, x + s, y + s, 2.f, col);
+            tx = x; ty = y; tgt_d = m.d; tgt_shown = true;
+        }
+        else
+        {
+            lineW(x, y + s, x + s, y, 1.8f, col); lineW(x + s, y, x, y - s, 1.8f, col);
+            lineW(x, y - s, x - s, y, 1.8f, col); lineW(x - s, y, x, y + s, 1.8f, col);
+        }
+        text(sml, fmt("%s  %s", m.c->mName.c_str(), rangeText(m.d).c_str()), x + s + 4.f, y, col, LLFontGL::LEFT, LLFontGL::VCENTER);
+    }
+
+    // ---- the edge arrow: where to turn for the target (or the nearest threat) out of view ----
+    if (off)
+    {
+        const LLVector3 v = off->agent - cam->getOrigin();
+        // its direction across the screen: right is -left, up is up; behind her it still points the shorter way round
+        F32 dx = -(v * cam->getLeftAxis()), dy = v * cam->getUpAxis();
+        if (fabsf(dx) < 1e-3f && fabsf(dy) < 1e-3f) dy = -1.f;
+        const F32 len = sqrtf(dx * dx + dy * dy);
+        dx /= len; dy /= len;
+        const F32 mx = W * 0.5f, my = top_of_world + (Hv - top_of_world) * 0.5f;
+        const F32 ex = W * 0.5f - 40.f, ey = (Hv - top_of_world) * 0.5f - 40.f;
+        const F32 k = llmin(fabsf(dx) > 1e-4f ? ex / fabsf(dx) : 1e9f, fabsf(dy) > 1e-4f ? ey / fabsf(dy) : 1e9f);
+        const F32 ax = mx + dx * k, ay = my + dy * k;
+        const LLColor4 col = relColour(off->c->mRel);
+        const F32 s = 16.f;
+        const F32 px = -dy, py = dx;
+        triF(ax + dx * s, ay + dy * s, ax - dx * s * 0.6f + px * s * 0.7f, ay - dy * s * 0.6f + py * s * 0.7f,
+             ax - dx * s * 0.6f - px * s * 0.7f, ay - dy * s * 0.6f - py * s * 0.7f, blink(0.8f) ? col : withAlpha(col, 0.7f));
+        text(sml, fmt("%s  %s", off->c->mName.c_str(), rangeText(off->d).c_str()), ax - dx * s * 1.6f, ay - dy * s * 1.6f, col,
+             dx > 0.3f ? LLFontGL::RIGHT : dx < -0.3f ? LLFontGL::LEFT : LLFontGL::HCENTER, LLFontGL::VCENTER);
+    }
+
+    // ---- the lead pip: where the guns must point for their rounds to meet the target (the plugin's ballistics) ----
+    LLVector3 dir;
+    F32 tof = 0.f;
+    if (tgt && tgt_shown && a.leadDirection(dir, tof))     // a gunner too: the look carries his turret's gun
+    {
+        F32 lx = 0.f, ly = 0.f;
+        // from HER (the guns), not the camera: a chase camera sits metres off and would shift the pip by degrees
+        if (project(gAgent.getPosAgentFromGlobal(own) + dir * llmax(tgt_d, 50.f), lx, ly))
+        {
+            const LLColor4 col = relColour(tgt->mRel);
+            dashW(tx, ty, lx, ly, 1.f, 5.f, withAlpha(col, 0.7f));
+            arcW(lx, ly, 8.f, 1.8f, 0.f, F_TWO_PI, col, 20);
+            circleF(lx, ly, 2.2f, col, 10);
+        }
+    }
+}
+
 void WolfFlightDeck::drawAirOverlay(F32 top_of_world)
 {
     WolfAir& a = WolfAir::instance();
@@ -3496,6 +3860,8 @@ void WolfFlightDeck::drawAirOverlay(F32 top_of_world)
         rad = sqrtf((x1 - cx) * (x1 - cx) + (y1 - cy) * (y1 - cy));
         return true;
     };
+    drawTargetMarkers(top_of_world);   // [WOLF AIR RADAR 2026-11-02/] under the sight and the notices
+    drawRadar(top_of_world);           // [WOLF AIR RADAR/] the scope over the world, in its corner
     F32 scx = 0.f, scy = 0.f, srad = 0.f;
     bool sight = false;
     LLVector3 origin, axis;
@@ -4675,6 +5041,14 @@ bool WolfFlightDeck::handleMouseDown(S32 x, S32 y, MASK mask)
         dragControl(px, py);
         return true;
     }
+    // [WOLF AIR RADAR] the radar is dragged by its ground: the grab point stays under the mouse
+    if (id == H_AIR_RADAR_MOVE)
+    {
+        mRadarGrabX = (F32)x - (mRadarL + mRadarR) * 0.5f;
+        mRadarGrabY = (F32)y - (mRadarB + mRadarT) * 0.5f;
+        gFocusMgr.setMouseCapture(this);
+        return true;
+    }
     // [WOLF AIR 2026-11-01] FIRE fires while it is held (the plane is told "hud fire on", and "off" when it is let go)
     if (id == H_AIR_FIRE)
     {
@@ -4697,6 +5071,16 @@ bool WolfFlightDeck::handleMouseUp(S32 x, S32 y, MASK mask)
     WolfFlight::instance().setStick(0.f, 0.f);
     WolfFlight::instance().setThrottleLever(0.f);
     if (mPressed == H_AIR_FIRE) WolfAir::instance().trigger(false);   // [WOLF AIR 2026-11-01/] the trigger let go
+    if (mPressed == H_AIR_RADAR_MOVE && mRadarShown)
+    {
+        // [WOLF AIR RADAR] keep where it was really drawn (drawRadar clamps it on the screen), so a later resize never jumps it
+        const F32 W = (F32)getRect().getWidth(), Hv = (F32)getRect().getHeight();
+        if (W > 0.f && Hv > 0.f)
+        {
+            gSavedPerAccountSettings.setF32("WolfAirRadarX", (mRadarL + mRadarR) * 0.5f / W);
+            gSavedPerAccountSettings.setF32("WolfAirRadarY", (mRadarB + mRadarT) * 0.5f / Hv);
+        }
+    }
     // the edge's own up (the second of a double-click too) stays with the HUD, never the world under it
     const bool was = mPressed != H_NONE || mResize.dragging() || mResize.onGrip(x, y);
     mResize.end();   // [HUD SIZE 2026-10-12/]
@@ -4731,6 +5115,18 @@ bool WolfFlightDeck::handleHover(S32 x, S32 y, MASK mask)
     {
         return false;
     }
+    if (hasMouseCapture() && mPressed == H_AIR_RADAR_MOVE)
+    {
+        // [WOLF AIR RADAR] its centre as fractions of the view, saved for this account (drawRadar keeps it on the screen)
+        const F32 W = (F32)getRect().getWidth(), Hv = (F32)getRect().getHeight();
+        if (W > 0.f && Hv > 0.f)
+        {
+            gSavedPerAccountSettings.setF32("WolfAirRadarX", llclamp(((F32)x - mRadarGrabX) / W, 0.f, 1.f));
+            gSavedPerAccountSettings.setF32("WolfAirRadarY", llclamp(((F32)y - mRadarGrabY) / Hv, 0.f, 1.f));
+        }
+        getWindow()->setCursor(UI_CURSOR_SIZEALL);
+        return true;
+    }
     if (hasMouseCapture() && (mPressed == H_STICK || mPressed == H_THROTTLE))
     {
         dragControl((F32)x / mHitScale, (F32)y / mHitScale);
@@ -4762,6 +5158,17 @@ bool WolfFlightDeck::handleRightMouseDown(S32 x, S32 y, MASK mask)
 
 bool WolfFlightDeck::handleDoubleClick(S32 x, S32 y, MASK mask)
 {
+    // [WOLF AIR RADAR] a double-click on the radar's ground puts it back in its corner
+    if (mRadarShown && (F32)x >= mRadarL && (F32)x <= mRadarR && (F32)y >= mRadarB && (F32)y <= mRadarT)
+    {
+        const Hit* hit = hitAt(x, y);
+        if (hit && hit->mId == H_AIR_RADAR_MOVE)
+        {
+            gSavedPerAccountSettings.setF32("WolfAirRadarX", -1.f);
+            gSavedPerAccountSettings.setF32("WolfAirRadarY", -1.f);
+            return true;
+        }
+    }
     if (mResize.onGrip(x, y))
     {
         mResize.reset();   // [HUD SIZE 2026-10-12/] double-click on the top edge: the default size
@@ -4944,6 +5351,19 @@ void WolfFlightDeck::press(EHit id, S32 x, S32 y, S32 step)
     // [WOLF AIR 2026-11-01] DOGFIGHT switches the plane's dogfight mode (the plugin takes 30 s to let her out, DESIGN.md
     // s3.1); BAIL asks first: a second press within BAIL_CONFIRM_S is the jump (drawCombat shows CONFIRM)
     case H_AIR_DOGFIGHT: WolfAir::instance().dogfight(!WolfAir::instance().inDogfight()); break;
+    // [WOLF AIR RADAR 2026-11-02] the scope's buttons: the range 1/2/5/10 km, the next target, the target key (END / none)
+    case H_AIR_RADAR_RANGE: WolfAir::cycleRadarRange(); break;
+    case H_AIR_TARGET: WolfAir::instance().cycleTarget(); break;
+    case H_AIR_TARGET_KEY: gSavedSettings.setS32("WolfAirTargetKey", (WolfAir::targetKey() + 1) % 2); break;
+    case H_AIR_RADAR_OFF: gSavedPerAccountSettings.setBOOL("WolfAirRadarShow", false); break;
+    case H_AIR_RADAR_SHOW: gSavedPerAccountSettings.setBOOL("WolfAirRadarShow", !gSavedPerAccountSettings.getBOOL("WolfAirRadarShow")); break;
+    case H_AIR_RADAR_BIGGER:
+    case H_AIR_RADAR_SMALLER:
+    {
+        const F32 sz = llclamp(gSavedPerAccountSettings.getF32("WolfAirRadarSize"), RADAR_SIZE_MIN, RADAR_SIZE_MAX);
+        gSavedPerAccountSettings.setF32("WolfAirRadarSize", llclamp(sz + (id == H_AIR_RADAR_BIGGER ? RADAR_SIZE_STEP : -RADAR_SIZE_STEP), RADAR_SIZE_MIN, RADAR_SIZE_MAX));
+        break;
+    }
     case H_AIR_BAIL:
         if (now() - mBailAskAt < BAIL_CONFIRM_S)
         {

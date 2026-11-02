@@ -29294,6 +29294,28 @@ Change of this parameter will affect the layout of buttons in notification toast
       <key>Value</key>
       <integer>1</integer>
     </map>
+    <key>WolfAirRadarRange</key>
+    <map>
+      <key>Comment</key>
+      <string>Wolf Air: the dogfight radar scope's range (the RANGE button on the flight deck's RADAR display): 0 = 1 km, 1 = 2 km, 2 = 5 km, 3 = 10 km. Wolf Territories only.</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>S32</string>
+      <key>Value</key>
+      <integer>2</integer>
+    </map>
+    <key>WolfAirTargetKey</key>
+    <map>
+      <key>Comment</key>
+      <string>Wolf Air: the key that selects the next dogfight target, nearest first (the KEY button on the flight deck's RADAR display): 0 none (the TGT button only), 1 End. Wolf Territories only.</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>S32</string>
+      <key>Value</key>
+      <integer>1</integer>
+    </map>
     <key>WolfAirFireKey</key>
     <map>
       <key>Comment</key>

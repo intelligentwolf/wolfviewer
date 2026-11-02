@@ -169,6 +169,9 @@ public:
     static constexpr F32 WATER_DEPTH_DEFAULT = 1.f;
     static constexpr F32 WATER_SIMPLIFY_M = 0.3f;   // Douglas-Peucker tolerance of a finished water stroke
     static constexpr S32 MAX_WATER_PLANES = 512;    // LLVOWater planes per region
+    /** [SWIM BUBBLES 2026-11-02] Append every live painted-water plane (one per water-stroke segment, every region's
+     *  layer): wolfswimbubbles.cpp asks whether a mouth is under one. */
+    void appendWaterPlanes(std::vector<LLVOWater*>& out) const;
     static F32 clampWidth(F32 w);
     static F32 clampOpacity(F32 o);
     static F32 clampScale(F32 s);

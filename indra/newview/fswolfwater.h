@@ -26,6 +26,7 @@
 
 #include <map>
 #include <string>
+#include <vector>
 
 #include "llsingleton.h"
 #include "lluuid.h"
@@ -88,6 +89,10 @@ public:
 
     /** Does this description ask for water? */
     static bool matches(const std::string& description_lower);
+
+    /** [SWIM BUBBLES 2026-11-02] Append this frame's live water planes, one per wolfwater prim (wolfswimbubbles.cpp:
+     *  is a mouth under one of them). */
+    void appendPlanes(std::vector<LLVOWater*>& out) const;
 
 private:
     void sweep();

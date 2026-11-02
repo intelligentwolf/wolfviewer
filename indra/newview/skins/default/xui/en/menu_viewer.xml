@@ -1882,6 +1882,14 @@
             <menu_item_check.on_click function="ToggleControl" parameter="WolfSwimming" />
             <menu_item_check.on_visible function="WolfGrid.ShowsWolfRegionWeather" />
         </menu_item_check>
+        <!-- [SWIM BUBBLES 2026-11-02] ticket 346: bubbles from the mouths of avatars under the water (wolfswimbubbles.cpp),
+             your own on/off; on by default (WolfViewerSwimBubbles). The bubbling follows the Ambient volume. Wolf regions
+             only, as Swimming: gone (not greyed) elsewhere. -->
+        <menu_item_check label="Bubbles Under Water" name="WolfSwimBubbles">
+            <menu_item_check.on_check function="CheckControl" parameter="WolfViewerSwimBubbles" />
+            <menu_item_check.on_click function="ToggleControl" parameter="WolfViewerSwimBubbles" />
+            <menu_item_check.on_visible function="WolfGrid.ShowsWolfRegionWeather" />
+        </menu_item_check>
         <!-- [BIRDS 2026-11-02] ticket 445: the wild birds (wolfbirds.cpp), your own on/off; the region owner's is in
              Region/Estate > Region. Calls follow the Ambient volume. -->
         <menu_item_check label="Birds" name="WolfBirds">

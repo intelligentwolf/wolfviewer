@@ -674,6 +674,18 @@ void WolfTerrainPaint::clearScratch(Layer& L)
     L.mSBoxSet = false;
 }
 
+// [SWIM BUBBLES 2026-11-02]
+void WolfTerrainPaint::appendWaterPlanes(std::vector<LLVOWater*>& out) const
+{
+    for (const auto& kv : mLayers)
+    {
+        for (const LLPointer<LLVOWater>& w : kv.second.mWater)
+        {
+            if (w.notNull() && !w->isDead()) out.push_back(w.get());
+        }
+    }
+}
+
 void WolfTerrainPaint::killWater(Layer& L)
 {
     for (LLPointer<LLVOWater>& w : L.mWater)

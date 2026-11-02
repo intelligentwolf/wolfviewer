@@ -23,6 +23,7 @@
 
 #include "llsingleton.h"
 #include "lluuid.h"
+#include "v3dmath.h"
 #include "v3math.h"
 #include "v4color.h"
 
@@ -37,6 +38,8 @@
 //                    "hud fire on" / "hud fire off", "hud dogfight on" / "hud dogfight off", "hud bail".
 //   region -> viewer GenericMessage "WolfAir" (DESIGN.md s3.8, the wolf-air plugin): e=kill|k=<killer>|v=<victim>|w=<weapon>,
 //                    the kill feed for every Wolf viewer on the region.
+//                    [WOLF AIR RADAR 2026-11-02] e=contacts|s=|p=|me=|mv=|dk=|rch=|c=... the air radar's contacts, only to the
+//                    people aboard an aircraft in dogfight mode (wolf-air 1.7.4, c-wolf-air/src/AirRadar.cs; README "1.7.4").
 // Wolf Territories only: off it nothing is said, nothing is read and the band does not show.
 class WolfAir : public LLSingleton<WolfAir>
 {
@@ -159,6 +162,42 @@ public:
         bool mSafe = false;
     };
 
+    // ---- [WOLF AIR RADAR 2026-11-02] the air radar (wolf-air 1.7.4 AirRadar.cs; c-wolf-air/README.md "wolf-air 1.7.4") ----
+    // Paul on Dogfight: "i just saw a spitfire but nothing on my radar" - "thats the problem its hard to spot them".
+    struct Contact
+    {
+        LLUUID      mId;
+        LLVector3d  mPosGlobal;             // where the look put her (dead-reckoned from here on its velocity)
+        LLVector3   mVel;                   // m/s
+        char        mRel = 'n';             // 'h' hostile, 't' target drone, 'n' neutral (AirRadar.cs View)
+        std::string mName, mPilot;
+        F64         mAt = 0.0;              // when the look came (frame seconds)
+        S32         mSeq = 0;
+        bool        mNeighbour = false;     // seen by this viewer on ANOTHER region (the plugin cannot see there): neutral
+    };
+    static const S32 RADAR_RANGE_COUNT = 4;
+    static F32 radarRangeM();               // WolfAirRadarRange: 1, 2, 5 or 10 km
+    static void cycleRadarRange();
+    static S32 targetKey();                 // WolfAirTargetKey: 0 none, 1 End
+    static const char* targetKeyName(S32 key);
+    /** A look has come within RADAR_STALE seconds (the plugin is sending: dogfight mode on, wolf-air 1.7.4 or later). */
+    bool radarLive() const;
+    const std::vector<Contact>& contacts() const { return mContacts; }
+    /** Where a contact is now: the object itself when this viewer holds it, else the look's position moved on its velocity. */
+    LLVector3d contactPos(const Contact& c) const;
+    LLVector3 contactVel(const Contact& c) const;
+    /** Her own aircraft: position, velocity and the nose's heading (radians, counter-clockwise from east). */
+    bool ownPose(LLVector3d& pos, LLVector3& vel, F32& heading) const;
+    /** The TGT button and the target key: the nearest hostile or target, then the next nearest, round again. */
+    void cycleTarget();
+    const Contact* target() const;
+    /** What the last TGT press said, for the scope ("" after a few seconds). */
+    std::string targetNote() const;
+    /** The direction (agent frame, unit) the guns must point to hit the selected target, and the time of flight. */
+    bool leadDirection(LLVector3& dir, F32& tof) const;
+    bool haveGun() const { return mGunMv > 0.f; }
+    F32 gunReach() const { return mGunReach; }
+
     struct Kill
     {
         std::string mKiller, mVictim, mHow;
@@ -259,6 +298,11 @@ private:
     void parseBomb(const std::vector<std::string>& f);
     void parseEngines(const std::vector<std::string>& f);
     void parsePreview(const std::vector<std::string>& f);
+    // [WOLF AIR RADAR]
+    void receiveContacts(const LLUUID& region_id, const std::vector<std::string>& strings);
+    void scanNeighbours();
+    void ageContacts();
+    void pollTargetKey();
     void scanSeeker();
     void warnTone();
     bool previewWanted();
@@ -298,6 +342,18 @@ private:
     F64         mTurretCueAt = 0.0;
     Bombsight   mBomb;
     Engines     mEng;
+    // [WOLF AIR RADAR]
+    std::vector<Contact> mContacts;
+    F64         mRadarAt = -100.0;      // the last look
+    S32         mLookSeq = -1, mLookParts = 0;
+    U32         mLookGot = 0;           // bit i: part i+1 of mLookSeq has come
+    F32         mGunMv = 0.f, mGunDrag = 0.f, mGunReach = 0.f;
+    LLUUID      mTarget;
+    std::string mTargetNote;
+    F64         mTargetNoteAt = -100.0;
+    bool        mTargetKeyDown = false;
+    F64         mNeighbourAt = 0.0;
+    mutable F32 mLastHeading = 0.f;     // held through a loop or a vertical climb (the nose has no heading then)
     // [WOLF AIR PREVIEW]
     bool        mPreview = false;
     S32         mPreviewChecked = 0;

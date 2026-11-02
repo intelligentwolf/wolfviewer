@@ -18,6 +18,7 @@
 
 #include "wolfair.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cerrno>
 #include <cmath>
@@ -39,6 +40,9 @@
 #include "llviewerobject.h"
 #include "llviewerobjectlist.h"
 #include "llvoavatarself.h"
+#include "llviewerregion.h"
+#include "llworld.h"
+#include "wolfairlead.h"
 #include "wolfflight.h"
 #include "wolfgrid.h"
 #include "wolfobjectprops.h"
@@ -201,6 +205,19 @@ namespace
     // An order that should change a count (a missile) - the band waits this long for it before saying it did not.
     const F64 LAUNCH_WAIT = 2.5;
     const F64 LAUNCH_SHOW = 6.0;
+
+    // ---- [WOLF AIR RADAR 2026-11-02] c-wolf-air/README.md "wolf-air 1.7.4" (the viewer rules) and src/AirRadar.cs ----
+    const F64 RADAR_STALE = 3.0;            // README: a contact not refreshed for 3 s is dropped (6 looks of AirRadar.TICK_MS 500)
+    const F64 DEAD_RECKON_MAX = 2.0;        // README: between looks a contact moves on its velocity, at most 2 s
+    // the scope's ranges (Paul's brief: "selectable range e.g. 1/2/5 km"; 10 km = AirRadar.REACH_M, the plugin's reach)
+    const F32 RADAR_RANGES_M[WolfAir::RADAR_RANGE_COUNT] = { 1000.f, 2000.f, 5000.f, 10000.f };
+    const size_t MAX_CONTACTS = 48;         // AirRadar.MAX_CONTACTS 16 a look, and the neighbours this viewer sees itself
+    const size_t MAX_NEIGHBOURS = 16;       // of those, the neighbours' at most: the plugin's contacts always find room
+    const F32 HEADING_MIN_HORIZ = 0.25f;    // the nose's horizontal part under this (a loop, a vertical climb): heading held
+    const S32 MAX_LOOK_PARTS = 16;          // a look of AirRadar.MAX_CONTACTS is at most 4 parts; more is not ours
+    const F64 TARGET_NOTE_SHOW = 3.0;
+    const F64 NEIGHBOUR_EVERY = 0.5;        // the neighbours' look, as often as the plugin's
+    const S32 NEIGHBOUR_ASKS = 4;           // descriptions asked for per look (WolfObjectProps keeps the shared budget)
 
     void put_u32(std::vector<U8>& out, U32 v) { for (int i = 0; i < 4; ++i) out.push_back((U8)((v >> (8 * i)) & 0xff)); }
     void put_u16(std::vector<U8>& out, U16 v) { out.push_back((U8)(v & 0xff)); out.push_back((U8)((v >> 8) & 0xff)); }
@@ -380,6 +397,14 @@ void WolfAir::reset(const LLUUID& seat)
     mTurret = Turret();
     mBomb = Bombsight();
     mEng = Engines();
+    // [WOLF AIR RADAR] another seat: none of the last one's contacts or target
+    mContacts.clear();
+    mRadarAt = -100.0;
+    mLookSeq = -1; mLookParts = 0; mLookGot = 0;
+    mGunMv = mGunDrag = mGunReach = 0.f;
+    mTarget.setNull();
+    mTargetNote.clear();
+    mTargetKeyDown = false;
 }
 
 void WolfAir::send(const std::string& text)
@@ -654,6 +679,22 @@ void WolfAir::parsePreview(const std::vector<std::string>& f)
         else if (k == "gs") mPreviewGS = num(v, 0.f, 2000.f, 0.f);
         else if (k == "agl") mPreviewAGL = num(v, 0.f, 100000.f, 0.f);
         else if (k == "weapon") mWeapon = v == "ir" ? WPN_IR : v == "radar" ? WPN_RADAR : WPN_GUN;
+        else if (k == "con" && mContacts.size() < MAX_CONTACTS)
+        {
+            // [WOLF AIR RADAR] con=<east m>,<north m>,<up m>,<rel h|t|n>,<name>: a contact about her (she sits at 0,0,0 heading
+            // north in the preview), for the scope off the grid
+            const std::vector<std::string> p = split(v, ',', 5);
+            if (p.size() < 5) continue;
+            Contact c;
+            c.mId.generate();
+            c.mPosGlobal = LLVector3d(num(p[0], -20000.f, 20000.f, 0.f), num(p[1], -20000.f, 20000.f, 0.f), num(p[2], -5000.f, 5000.f, 0.f));
+            c.mRel = (p[3] == "h" || p[3] == "t") ? p[3][0] : 'n';
+            c.mName = cleanText(p[4], 24);
+            c.mAt = now();
+            mContacts.push_back(c);
+            mRadarAt = now();
+        }
+        else if (k == "tgt") cycleTarget();     // [WOLF AIR RADAR] the preview presses TGT (its contacts are already in)
     }
 }
 
@@ -837,6 +878,10 @@ void WolfAir::receive(const LLUUID& region_id, const std::vector<std::string>& s
     if (e == "kill")
     {
         addKill(killer, victim, weapon);
+    }
+    else if (e == "contacts")
+    {
+        receiveContacts(region_id, strings);    // [WOLF AIR RADAR 2026-11-02] wolf-air 1.7.4
     }
     // another kind: a later plugin's - ignored
 }
@@ -1277,6 +1322,9 @@ void WolfAir::idle()
     }
     if (mState.mHi)
     {
+        ageContacts();          // [WOLF AIR RADAR 2026-11-02/]
+        scanNeighbours();
+        pollTargetKey();
         scanSeeker();
         warnTone();
         pollFireKey();
@@ -1286,4 +1334,311 @@ void WolfAir::idle()
             send("hud fire on");
         }
     }
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════
+// [WOLF AIR RADAR 2026-11-02] the air radar's contacts (wolf-air 1.7.4: c-wolf-air/src/AirRadar.cs, README "wolf-air 1.7.4")
+// ════════════════════════════════════════════════════════════════════════════════════════
+
+// static
+F32 WolfAir::radarRangeM()
+{
+    static LLCachedControl<S32> idx(gSavedSettings, "WolfAirRadarRange", 2);
+    return RADAR_RANGES_M[llclamp((S32)idx, 0, RADAR_RANGE_COUNT - 1)];
+}
+
+// static
+void WolfAir::cycleRadarRange()
+{
+    const S32 i = llclamp(gSavedSettings.getS32("WolfAirRadarRange"), 0, RADAR_RANGE_COUNT - 1);
+    gSavedSettings.setS32("WolfAirRadarRange", (i + 1) % RADAR_RANGE_COUNT);
+}
+
+// static
+S32 WolfAir::targetKey()
+{
+    static LLCachedControl<S32> key(gSavedSettings, "WolfAirTargetKey", 1);
+    return llclamp((S32)key, 0, 1);
+}
+
+// static
+const char* WolfAir::targetKeyName(S32 key)
+{
+    // End: unbound in every mode of key_bindings.xml and beside Page Down (the throttle). Tab was ruled out: with nothing
+    // focused LLViewerWindow::handleKey (llviewerwindow.cpp:3414) gives it to the floaters, which then take the keyboard.
+    return key == 1 ? "END" : "NONE";
+}
+
+bool WolfAir::radarLive() const
+{
+    if (mPreview) return mRadarAt > 0.0;
+    return now() - mRadarAt < RADAR_STALE;
+}
+
+void WolfAir::receiveContacts(const LLUUID& region_id, const std::vector<std::string>& strings)
+{
+    // Source: AirRadar.cs Parts - e=contacts|s=<seq>|p=<i>/<n>|me=<root>|mv=|dk=|rch=|c=<root>,<x>,<y>,<z>,<vx>,<vy>,<vz>,<h|t|n>,<name>,<pilot>
+    if (mPreview || mSeatRoot.isNull()) return;
+    const LLViewerRegion* region = LLWorld::getInstance()->getRegionFromID(region_id);
+    if (!region) return;                    // positions are that region's metres: no region, no positions
+    LLUUID me;
+    S32 seq = -1, part = 0, parts = 0;
+    F32 mv = 0.f, dk = 0.f, rch = 0.f;
+    std::vector<const std::string*> lines;
+    for (const std::string& kv : strings)
+    {
+        const size_t eq = kv.find('=');
+        if (eq == std::string::npos) continue;
+        const std::string k = kv.substr(0, eq);
+        const std::string v = kv.substr(eq + 1);
+        if (k == "s") seq = inum(v, 0, 1000000, -1);
+        else if (k == "p")
+        {
+            const std::vector<std::string> pp = split(v, '/', 2);
+            part = inum(pp[0], 0, MAX_LOOK_PARTS, 0);
+            parts = pp.size() > 1 ? inum(pp[1], 0, MAX_LOOK_PARTS, 0) : 0;
+        }
+        else if (k == "me") { if (LLUUID::validate(v)) me.set(v); }
+        else if (k == "mv") mv = num(v, 0.f, 5000.f, 0.f);
+        else if (k == "dk") dk = num(v, 0.f, 1.f, 0.f);
+        else if (k == "rch") rch = num(v, 0.f, 100000.f, 0.f);
+        else if (k == "c") lines.push_back(&kv);
+    }
+    // only a look for the aircraft this viewer sits on (a late one for the last seat is dropped)
+    if (me != mSeatRoot || seq < 0 || part < 1 || parts < 1 || part > parts) return;
+    const F64 t = now();
+    mRadarAt = t;
+    mGunMv = mv; mGunDrag = dk; mGunReach = rch;
+    const LLVector3d origin = region->getOriginGlobal();
+    for (const std::string* kv : lines)
+    {
+        const std::vector<std::string> f = split(kv->substr(2), ',', 10);
+        if (f.size() < 10 || !LLUUID::validate(f[0])) continue;
+        F64 n[6];
+        bool ok = true;
+        for (S32 i = 0; i < 6 && ok; ++i) ok = parseNumber(f[(size_t)i + 1], n[i]);
+        if (!ok || f[7].size() != 1 || (f[7][0] != 'h' && f[7][0] != 't' && f[7][0] != 'n')) continue;
+        const LLUUID id(f[0]);
+        if (id.isNull() || id == mSeatRoot) continue;
+        Contact* c = nullptr;
+        for (Contact& o : mContacts) if (o.mId == id) { c = &o; break; }
+        if (!c)
+        {
+            if (mContacts.size() >= MAX_CONTACTS)
+            {
+                // the plugin's word comes first: a neighbour seen by this viewer makes room
+                auto nb = std::find_if(mContacts.begin(), mContacts.end(), [](const Contact& x) { return x.mNeighbour; });
+                if (nb == mContacts.end()) continue;
+                mContacts.erase(nb);
+            }
+            mContacts.emplace_back();
+            c = &mContacts.back();
+            c->mId = id;
+        }
+        c->mPosGlobal = origin + LLVector3d(llclamp(n[0], -100000.0, 100000.0), llclamp(n[1], -100000.0, 100000.0), llclamp(n[2], -10000.0, 100000.0));
+        c->mVel = LLVector3((F32)llclamp(n[3], -2000.0, 2000.0), (F32)llclamp(n[4], -2000.0, 2000.0), (F32)llclamp(n[5], -2000.0, 2000.0));
+        c->mRel = f[7][0];
+        c->mName = cleanText(f[8], 24);
+        c->mPilot = cleanText(f[9], 24);
+        c->mAt = t;
+        c->mSeq = seq;
+        c->mNeighbour = false;
+    }
+    // README: once every part of a look has come, the contacts it did not name are gone
+    if (seq != mLookSeq)
+    {
+        mLookSeq = seq;
+        mLookParts = parts;
+        mLookGot = 0;
+    }
+    mLookGot |= 1u << (part - 1);
+    if (mLookParts == parts && mLookGot == (parts >= 32 ? 0xffffffffu : (1u << parts) - 1u))
+    {
+        mContacts.erase(std::remove_if(mContacts.begin(), mContacts.end(),
+                                       [seq](const Contact& c) { return !c.mNeighbour && c.mSeq != seq; }), mContacts.end());
+    }
+}
+
+void WolfAir::ageContacts()
+{
+    if (mPreview) return;
+    const F64 t = now();
+    mContacts.erase(std::remove_if(mContacts.begin(), mContacts.end(),
+                                   [t](const Contact& c) { return t - c.mAt > RADAR_STALE; }), mContacts.end());
+    // the selection that vanished, or that the plugin no longer calls hostile (protected, safe airspace), clears
+    if (mTarget.notNull())
+    {
+        const Contact* t = target();
+        if (!t || (t->mRel != 'h' && t->mRel != 't')) mTarget.setNull();
+    }
+}
+
+// Aircraft on OTHER regions in this viewer's own view: the plugin cannot see there. Only moving roots (getActiveObjects), only
+// Wolf Air warplanes by the root's description (the hello's rule), neutral: their hostility is their own region's business.
+void WolfAir::scanNeighbours()
+{
+    if (mPreview || !radarLive()) return;
+    const F64 t = now();
+    if (t - mNeighbourAt < NEIGHBOUR_EVERY) return;
+    mNeighbourAt = t;
+    const LLViewerRegion* here = gAgent.getRegion();
+    if (!here) return;
+    S32 asks = 0;
+    for (const LLPointer<LLViewerObject>& p : gObjectList.getActiveObjects())
+    {
+        LLViewerObject* o = p.get();
+        if (!o || o->isDead() || o->getParent() || o->isAvatar() || o->isAttachment() || o->getID() == mSeatRoot) continue;
+        if (!o->getRegion() || o->getRegion() == here) continue;
+        const WolfObjectProps::Props* pr = WolfObjectProps::instance().get(o->getID());
+        if (!pr)
+        {
+            if (asks++ < NEIGHBOUR_ASKS) WolfObjectProps::instance().want(o, false);
+            continue;
+        }
+        if (!isWarplaneDesc(pr->mDescriptionLower)) continue;
+        Contact* c = nullptr;
+        for (Contact& x : mContacts) if (x.mId == o->getID()) { c = &x; break; }
+        if (c && !c->mNeighbour) continue;          // the plugin of this region knows her: its word stands
+        if (!c)
+        {
+            const size_t nbs = (size_t)std::count_if(mContacts.begin(), mContacts.end(), [](const Contact& x) { return x.mNeighbour; });
+            if (mContacts.size() >= MAX_CONTACTS || nbs >= MAX_NEIGHBOURS) continue;    // the ones held are still refreshed
+            mContacts.emplace_back();
+            c = &mContacts.back();
+            c->mId = o->getID();
+            c->mNeighbour = true;
+            c->mRel = 'n';
+        }
+        c->mPosGlobal = o->getPositionGlobal();
+        c->mVel = o->getVelocity();
+        c->mName = cleanText(pr->mName, 24);
+        c->mAt = t;
+    }
+}
+
+LLVector3d WolfAir::contactPos(const Contact& c) const
+{
+    if (mPreview) return c.mPosGlobal;
+    if (const LLViewerObject* o = gObjectList.findObject(c.mId))
+    {
+        if (!o->isDead()) return o->getPositionGlobal();
+    }
+    const F64 dt = llclamp(now() - c.mAt, 0.0, DEAD_RECKON_MAX);
+    return c.mPosGlobal + LLVector3d(c.mVel) * dt;
+}
+
+LLVector3 WolfAir::contactVel(const Contact& c) const
+{
+    if (!mPreview)
+    {
+        if (const LLViewerObject* o = gObjectList.findObject(c.mId))
+        {
+            if (!o->isDead()) return o->getVelocity();
+        }
+    }
+    return c.mVel;
+}
+
+bool WolfAir::ownPose(LLVector3d& pos, LLVector3& vel, F32& heading) const
+{
+    if (mPreview)
+    {
+        pos.clear(); vel.clear();
+        heading = F_PI_BY_TWO;              // the preview flies north
+        return true;
+    }
+    const LLViewerObject* root = gObjectList.findObject(mSeatRoot);
+    if (!root) return false;
+    pos = root->getPositionGlobal();
+    vel = root->getVelocity();
+    // Source: DESIGN.md s14 "+X is the nose" (as noseAxis)
+    const LLVector3 fwd = LLVector3::x_axis * root->getRotation();
+    if (sqrtf(fwd.mV[VX] * fwd.mV[VX] + fwd.mV[VY] * fwd.mV[VY]) >= HEADING_MIN_HORIZ)
+    {
+        mLastHeading = atan2f(fwd.mV[VY], fwd.mV[VX]);
+    }
+    heading = mLastHeading;     // nose straight up or down: the last heading she had, so the scope does not spin
+    return true;
+}
+
+const WolfAir::Contact* WolfAir::target() const
+{
+    if (mTarget.isNull()) return nullptr;
+    for (const Contact& c : mContacts)
+    {
+        if (c.mId == mTarget) return &c;
+    }
+    return nullptr;
+}
+
+void WolfAir::cycleTarget()
+{
+    LLVector3d own;
+    LLVector3 vel;
+    F32 hdg = 0.f;
+    if (!active() || !ownPose(own, vel, hdg))
+    {
+        mTargetNote = "NO RADAR";
+        mTargetNoteAt = now();
+        return;
+    }
+    std::vector<std::pair<F64, LLUUID> > list;
+    for (const Contact& c : mContacts)
+    {
+        if (c.mRel == 'h' || c.mRel == 't') list.emplace_back((contactPos(c) - own).magVec(), c.mId);
+    }
+    if (list.empty())
+    {
+        mTarget.setNull();
+        mTargetNote = radarLive() ? "NO TARGETS" : "NO RADAR";
+        mTargetNoteAt = now();
+        return;
+    }
+    std::sort(list.begin(), list.end(), [](const std::pair<F64, LLUUID>& a, const std::pair<F64, LLUUID>& b) { return a.first < b.first; });
+    size_t next = 0;
+    for (size_t i = 0; i < list.size(); ++i)
+    {
+        if (list[i].second == mTarget) { next = (i + 1) % list.size(); break; }
+    }
+    mTarget = list[next].second;
+    mTargetNote.clear();
+}
+
+std::string WolfAir::targetNote() const
+{
+    return now() - mTargetNoteAt < TARGET_NOTE_SHOW ? mTargetNote : std::string();
+}
+
+bool WolfAir::leadDirection(LLVector3& dir, F32& tof) const
+{
+    const Contact* t = target();
+    LLVector3d own;
+    LLVector3 own_vel;
+    F32 hdg = 0.f;
+    if (!t || mPreview || mGunMv <= 0.f || mGunReach <= 0.f || !ownPose(own, own_vel, hdg)) return false;
+    const LLVector3d rel = contactPos(*t) - own;
+    const LLVector3 tv = contactVel(*t);
+    WolfAirLead::V aim;
+    double flight = 0.0;
+    if (!WolfAirLead::solve({ rel.mdV[VX], rel.mdV[VY], rel.mdV[VZ] }, { tv.mV[VX], tv.mV[VY], tv.mV[VZ] },
+                            { own_vel.mV[VX], own_vel.mV[VY], own_vel.mV[VZ] }, mGunMv, mGunDrag, mGunReach, aim, flight))
+    {
+        return false;
+    }
+    dir.set((F32)aim.x, (F32)aim.y, (F32)aim.z);    // the region's axes are the agent frame's
+    tof = (F32)flight;
+    return true;
+}
+
+void WolfAir::pollTargetKey()
+{
+    const S32 key = targetKey();
+    bool down = false;
+    // as the fire key: only while nothing that takes typing has the keyboard
+    if (key == 1 && gKeyboard && gFocusMgr.getKeyboardFocus() == nullptr)
+    {
+        down = gKeyboard->getKeyDown(KEY_END);
+    }
+    if (down && !mTargetKeyDown) cycleTarget();
+    mTargetKeyDown = down;
 }

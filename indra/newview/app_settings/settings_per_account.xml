@@ -1,5 +1,49 @@
 <llsd>
     <map>
+    <key>WolfAirRadarShow</key>
+    <map>
+      <key>Comment</key>
+      <string>[WOLF AIR RADAR 2026-11-02] Wolf Air: show the dogfight radar over the view while flying a Wolf Air plane (its X switches it off, RADAR on the flight deck's COMBAT display back on). Wolf Territories only.</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>Boolean</string>
+      <key>Value</key>
+      <integer>1</integer>
+    </map>
+    <key>WolfAirRadarSize</key>
+    <map>
+      <key>Comment</key>
+      <string>[WOLF AIR RADAR 2026-11-02] Wolf Air: the dogfight radar's height as a share of the view's (0.12 - 0.40; its - and + buttons).</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>F32</string>
+      <key>Value</key>
+      <real>0.2</real>
+    </map>
+    <key>WolfAirRadarX</key>
+    <map>
+      <key>Comment</key>
+      <string>[WOLF AIR RADAR 2026-11-02] Wolf Air: the dogfight radar's centre across the view, 0 - 1 (dragged there); below 0 = the lower right corner above the flight deck.</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>F32</string>
+      <key>Value</key>
+      <real>-1</real>
+    </map>
+    <key>WolfAirRadarY</key>
+    <map>
+      <key>Comment</key>
+      <string>[WOLF AIR RADAR 2026-11-02] Wolf Air: the dogfight radar's centre up the view, 0 - 1 (dragged there); below 0 = the lower right corner above the flight deck.</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>F32</string>
+      <key>Value</key>
+      <real>-1</real>
+    </map>
     <key>WolfMapChartArt</key>
     <map>
       <key>Comment</key>

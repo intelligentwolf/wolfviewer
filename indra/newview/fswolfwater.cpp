@@ -116,9 +116,20 @@ FSWolfWater::~FSWolfWater()
     mSurfaces.clear();
 }
 
+// [SWIM BUBBLES 2026-11-02]
+void FSWolfWater::appendPlanes(std::vector<LLVOWater*>& out) const
+{
+    for (const auto& kv : mSurfaces)
+    {
+        LLVOWater* waterp = kv.second.mWater.get();
+        if (waterp && !waterp->isDead()) out.push_back(waterp);
+    }
+}
+
 // static
 // Takes the store's already lower-cased description (WolfObjectProps::Props::mDescriptionLower),
 // so the per-prim-per-sweep copy and transform this used to do are gone.
+// static
 bool FSWolfWater::matches(const std::string& description_lower)
 {
     if (description_lower.empty())

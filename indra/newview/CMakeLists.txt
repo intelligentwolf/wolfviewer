@@ -913,6 +913,7 @@ set(viewer_SOURCE_FILES
     utilitybar.cpp
     wolfalbumart.cpp
     wolfbirds.cpp   # [BIRDS 2026-11-02] ticket 445
+    wolfswimbubbles.cpp   # [SWIM BUBBLES 2026-11-02] ticket 346
     wolfboatrock.cpp
     wolfflight.cpp
     wolfflightdeck.cpp
@@ -1912,6 +1913,7 @@ set(viewer_HEADER_FILES
     utilitybar.h
     wolfalbumart.h
     wolfbirds.h   # [BIRDS 2026-11-02]
+    wolfswimbubbles.h   # [SWIM BUBBLES 2026-11-02]
     wolfboatrock.h
     wolfflight.h
     wolfflightdeck.h

@@ -651,7 +651,42 @@ void WolfFloaterPlaneBuilder::onDesignChanged()
         a["[ERA]"] = (*c)["era_text"].asString().empty()
             ? getString(era == "ww1" ? "era_ww1" : era == "ww2early" ? "era_ww2early" : era == "ww2late" ? "era_ww2late" : "era_other")
             : (*c)["era_text"].asString();   // the yard's own words (f-plane-builder/README.md CLASS era_text)
+        // [PLANE DESC 2026-11-02] Source: f-plane-builder/README.md CLASS "desc" (optional; the yard's own sentence about it).
+        // Without one, the fighter's sentence - unless the class is "fixed_livery" or has "guns" 0 (Concorde, the 747-400),
+        // which carry passengers, are unarmed and never join a dogfight. LLSD of an absent key: asString() "", asBoolean() false.
+        std::string desc = (*c)["desc"].asString();
+        LLStringUtil::trim(desc);
+        const bool unarmed = (*c)["fixed_livery"].asBoolean() || (*c)["guns"].asInteger() == 0;
+        a["[ABOUT]"] = desc.empty() ? getString(unarmed ? "about_unarmed" : "about_fighter") : desc;
         mFigures->setText(getString("figures", a));
+        std::string tip;
+        if (!desc.empty() && mFigures->getTextPixelHeight() > mFigures->getRect().getHeight())
+        {
+            // Too long for the box (figures_text clips a partial line: lltextbase.cpp mClipPartial): cut it at a word with
+            // "desc_cut" until it fits, and give the whole of it as the box's tool tip. The box holds about 400 characters, so
+            // the cutting starts at the last word break within DESC_CUT_START bytes (a space is ASCII: never inside a UTF-8 letter).
+            constexpr size_t DESC_CUT_START = 600;
+            tip = desc;
+            std::string cut = desc.substr(0, desc.find_last_of(" \t\r\n", DESC_CUT_START));
+            LLStringUtil::format_map_t t;
+            do
+            {
+                LLStringUtil::trimTail(cut);
+                t["[TEXT]"] = cut;
+                a["[ABOUT]"] = getString("desc_cut", t);
+                mFigures->setText(getString("figures", a));
+                if (mFigures->getTextPixelHeight() <= mFigures->getRect().getHeight()) break;
+                const size_t brk = cut.find_last_of(" \t\r\n");
+                cut.erase(brk == std::string::npos ? 0 : brk);
+            } while (!cut.empty());
+            if (cut.empty())    // not even its first word fits beside the figures
+            {
+                t["[TEXT]"] = std::string();
+                a["[ABOUT]"] = getString("desc_cut", t);
+                mFigures->setText(getString("figures", a));
+            }
+        }
+        mFigures->setToolTip(tip);
     }
     mNameProblem->setText(mReady ? nameProblem() : std::string());
     mLettersProblem->setText(mReady ? lettersProblem() : std::string());

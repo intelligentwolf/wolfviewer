@@ -39,9 +39,15 @@
     <string name="size_label">2. Size</string>
     <string name="size_label_fixed">2. Size: full size (100 %) only</string>
     <string name="fixed_note_default">This aircraft comes in one livery only.</string>
+    <!-- [PLANE DESC 2026-11-02] [ABOUT] is the class's own "desc" from the yard catalogue when it has one; otherwise "about_fighter",
+         or "about_unarmed" for a class with "fixed_livery" or "guns" 0 (the airliners). A "desc" too long for the box is cut at a
+         word with "desc_cut" and shown in full as the box's tool tip. -->
     <string name="figures">[TITLE] ([ERA])
 Span [SPAN], length [LENGTH]. Armament: [GUNS].
-It flies with the Wolf flight model, works with the flight deck's autopilot and autoland, fights in dogfight mode and carries a parachute.</string>
+[ABOUT]</string>
+    <string name="about_fighter">It flies with the Wolf flight model, works with the flight deck's autopilot and autoland, fights in dogfight mode and carries a parachute.</string>
+    <string name="about_unarmed">It flies with the Wolf flight model and works with the flight deck's autopilot and autoland. She carries passengers, is unarmed and never joins a dogfight.</string>
+    <string name="desc_cut">[TEXT]...</string>
     <string name="price_base">Yard</string>
     <string name="price_airframe">airframe</string>
     <string name="price_gun">gun</string>

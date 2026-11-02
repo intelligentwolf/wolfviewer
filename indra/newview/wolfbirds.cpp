@@ -33,8 +33,10 @@
 #include "llviewershadermgr.h"
 #include "llviewertexture.h"
 #include "llvolume.h"
+#include "llvovolume.h"   // [BIRDS LANDING/] sWolfRoofProbe
 #include "llworld.h"
 #include "pipeline.h"
+#include "wolfboatrock.h"       // [BIRDS LANDING/] drawnWaveHeight, isRocking
 #include "wolfframegovernor.h"
 #include "wolfgrid.h"
 #include "wolfhurricane.h"
@@ -102,6 +104,138 @@ namespace
     constexpr F32 BIRD_G_MS2 = 9.81f;
     // Beyond this many wingspans a bird's body is a few pixels across: only its wings are drawn (12 of its 28 triangles saved).
     constexpr F32 LOD_SPANS = 120.f;
+
+    // ── [BIRDS LANDING 2026-11-02] ─────────────────────────────────────────────────────────────────────────────────
+    // README "Landing" lists every figure with its source; the studies are cited where each is used.
+    //
+    // FLUSHING: how close something may come before a bird down on the ground, water or a perch takes off in alarm.
+    // People: herring gulls in Liverpool flushed at 5.6 m (Pavlova & Wronski 2020, Advances in Environmental Research,
+    // Nova, pp. 33-62: "Mean (+-SE) FID of Herring gulls was 5.63 +- 0.63 m"), western gulls at 17.4 m (Blumstein 2006,
+    // Animal Behaviour 71:389, Table A1); 10 m lies between the town gull and the wild one, and is the figure Paul asked
+    // for. House sparrows: "Average FID per settlement was 10.0 m" (Garcia-Arroyo et al. 2023, Scientific Reports
+    // 13:2545; Blumstein 2006 Table A1 has 13.2 m).
+    constexpr F32 FLUSH_PERSON_GULL_M = 10.f;
+    constexpr F32 FLUSH_PERSON_SMALL_M = 10.f;
+    // Vehicles and boats: laughing gulls flushed at 27.8 m from an outboard boat (Rodgers & Schwikert 2002, Conservation
+    // Biology 16:216, Table 1), ring-billed gulls at 22.0 m from a car (Rodgers & Smith 1997, Wildlife Society Bulletin
+    // 25:139); 25 m is between the two. No figure for sparrows and cars was found, so the gulls' is used for both.
+    constexpr F32 FLUSH_VEHICLE_M = 25.f;
+    // Low aircraft: no study of planes was found; the only aerial one is drones, where herring and lesser black-backed
+    // gulls flushed at a mean of 25 m on a diagonal approach (Velilla et al. 2025, PLoS ONE 20:e0332619, Table 3). The
+    // distance is measured in 3D, so only a plane that comes low near them counts.
+    constexpr F32 FLUSH_AIRCRAFT_M = 25.f;
+    // The camera is not a creature the birds can see. Chosen: only when it is practically on top of a bird (inside 2 m),
+    // so a resident can zoom in to watch a gull from a few metres without scaring it, but cannot fly through it.
+    constexpr F32 FLUSH_CAMERA_M = 2.f;
+    // A root object moving faster than this is a vehicle or boat under way (chosen: a walking pace, 1 m/s, is the speed of
+    // the walking approaches in the studies above, "1-2 m/s" in Pavlova & Wronski 2020); faster than AIRCRAFT_MIN_MS it is
+    // flying (chosen: 30 m/s, about 58 knots, under any plane's stall speed and over any boat a region carries).
+    constexpr F32 VEHICLE_MIN_MS = 1.f;
+    constexpr F32 AIRCRAFT_MIN_MS = 30.f;
+    // How often the flush check runs. Chosen: 4 times a second, so a bird reacts within a quarter of a second, while the
+    // check (avatars x down birds) stays off the per-frame path.
+    constexpr F64 FLUSH_CHECK_SECS = 0.25;
+    // One bird's alarm call lifts its flock-mates down within this distance (gulls; a small flock always lifts as one).
+    // Chosen: the gulls' own flush distance, so a raft lifts together from the side the danger comes.
+    constexpr F32 ALARM_SPREAD_M = FLUSH_PERSON_GULL_M;
+    // The alarm climb: chosen as a quarter of the cruising speed upwards (a climb of about 14 degrees) for 3 s.
+    constexpr F32 ALARM_CLIMB_FRAC = 0.25f;
+    constexpr F32 ALARM_CLIMB_S = 3.f;
+    // After a flush a flock does not land again for this long (chosen: long enough to be clearly somewhere else).
+    constexpr F32 WARY_MIN_S = 12.f, WARY_MAX_S = 25.f;
+    // A flushed flock settles again at least this many times its flush distance from what flushed it (chosen: clearly
+    // "further away"; town herring gulls themselves only moved 4.6 m, Pavlova & Wronski 2020, which reads as no move).
+    constexpr F32 RESETTLE_FID_MULT = 2.f;
+    // About half of flushed shorebirds "flew elsewhere" (Burger 1981, as quoted in Rodgers & Schwikert 2002): a small flock
+    // that lifts leaves for good this often, and otherwise re-lands nearby.
+    constexpr F32 LEAVE_AFTER_LIFT = 0.5f;
+    //
+    // THE RAY BUDGET: the downward rays that find perches and check a landing spot is open to the sky. Chosen: 4 a
+    // second (the weather's roof grid casts many more), never more than 4 at once, never on a frame by habit.
+    constexpr F32 RAYS_PER_SEC = 4.f;
+    constexpr F32 RAY_BURST = 4.f;
+    // A landing spot is open to the sky when a ray from this high above it meets nothing before the surface itself (chosen:
+    // above any house or harbour roof round it, below the 60 m skybox line of the built-cell scan).
+    constexpr F32 CLEAR_ABOVE_M = 40.f;
+    // PERCHES: a few gulls on roof ridges, wall tops and harbour railings (herring gulls nest "between chimney pots, or in
+    // complex roof structures", Rock 2005, British Birds 98:338; RSPB herring gull page, "perched in harbour").
+    constexpr S32 MAX_PERCHED = 6;          // chosen: "a few", whatever the size of the town
+    constexpr S32 MAX_PERCHES_KNOWN = 6;    // free perches remembered at once
+    constexpr F64 PERCH_KEEP_SECS = 90.0;   // a found perch is forgotten after this (it may have been built over)
+    constexpr F32 PERCH_MIN_M = 2.5f;       // over the ground: a wall top or a roof, not a step or a bench (chosen)
+    constexpr F32 PERCH_MAX_M = 25.f;       // ... and no higher than the gulls' own low flight (chosen, SPECIES alt 10-45 m)
+    constexpr F32 PERCH_NORMAL_Z = 0.94f;   // near-horizontal: the surface tilts at most 20 degrees (cos 20 = 0.94; chosen)
+    constexpr F32 PERCH_SEARCH_M = 90.f;    // prims this near a gull flock's centre are tried
+    constexpr F32 PERCH_GAP_M = 0.9f;       // two gulls perch no closer (chosen: more than a gull's 0.6 m length apart)
+    constexpr F32 PERCH_MOVED_M = 0.05f;    // the perch prim moved more than this: the gull flies off
+    constexpr S32 MAX_PERCH_CANDIDATES = 4096;
+    constexpr F64 PERCH_RAY_SECS = 1.0;     // at most one perch ray a second, so the landing checks keep their rays
+    // SHORE: sand or shingle at the water's edge. The drawn water stands no higher than 0.39 x its depth (wolfboatrock.cpp
+    // waveHeight, McCowan's limit), so land above the water plane is dry; SHORE_MIN_M keeps the feet clear of the ripple.
+    // SHORE_MAX_M: the strand line, not the dunes behind it (chosen). The slope: a beach face up to 15 degrees (chosen: as
+    // steep as a shingle bank a gull would stand on; steeper is a bank or a wall).
+    constexpr F32 SHORE_MIN_M = 0.15f, SHORE_MAX_M = 2.5f;
+    constexpr F32 SHORE_MAX_SLOPE = 0.27f;  // tan 15 degrees
+    constexpr F32 SHORE_SEARCH_M = 70.f;
+    // GRASS: open, flat, unbuilt land, above the shore (chosen: 1 m over the water plane, and at most 10 degrees).
+    constexpr F32 GRASS_ABOVE_WATER_M = 1.f;
+    constexpr F32 GRASS_MAX_SLOPE = 0.18f;  // tan 10 degrees
+    constexpr F32 PATCH_R_M = 5.f;          // a feeding flock spreads over this radius (chosen: a few metres, as seen in town)
+    //
+    // DOWN: what they do there. House sparrows feeding: "head-up and pecking events was 26.40 +- 2.95 and 54.20 +- 5.35 ...
+    // over the 3-min period", head up 0.66 of the time, "scan bouts (0.16 +- 0.06 min)" (Tisdale & Fernandez-Juricic
+    // 2009, Behavioral Ecology 20:936). So a head-up bout of 9.6 s, a head-down bout of 9.6 x 0.34 / 0.66 = 4.9 s, and
+    // 54.2 pecks in 3 min x 0.34 of it head down = 0.89 pecks a second while feeding.
+    constexpr F32 SCAN_BOUT_S = 9.6f;
+    constexpr F32 PECK_BOUT_S = 4.9f;
+    constexpr F32 PECK_HZ = 0.89f;
+    constexpr F32 PECK_PITCH_DEG = 50.f;    // how far the head goes down to peck (chosen, the look of it)
+    // Sparrows hop ("You'll often see them hopping around on the ground", RSPB house sparrow). No hop rate was found:
+    // chosen, a hop of 0.08 m (half its length) every 0.35 s, 4 cm high.
+    constexpr F32 HOP_M = 0.08f, HOP_S = 0.35f, HOP_H = 0.04f;
+    // Gulls walk; no walking speed was found. Chosen 0.5 m/s, half the 1.01 m/s escape speed measured for town herring
+    // gulls (Pavlova & Wronski 2020). Paddling: chosen 0.3 m/s, an easy drift, turning at most 0.3 rad/s.
+    constexpr F32 WALK_MS = 0.5f, PADDLE_MS = 0.3f, PADDLE_TURN = 0.3f;
+    // How long a gull stays down by itself. No loafing-bout figure was found: chosen 25-90 s, so someone watching sees
+    // gulls both land and leave inside a minute or two; a gull starts looking for somewhere to settle after 20-60 s aloft.
+    constexpr F32 GULL_DOWN_MIN_S = 25.f, GULL_DOWN_MAX_S = 90.f;
+    constexpr F32 GULL_LAND_MIN_S = 20.f, GULL_LAND_MAX_S = 60.f;
+    // A small flock wheels 15-40 s before dropping to feed, feeds 20-60 s, then lifts (chosen, same reasoning).
+    constexpr F32 SMALL_SETTLE_MIN_S = 15.f, SMALL_SETTLE_MAX_S = 40.f;
+    constexpr F32 SMALL_FEED_MIN_S = 20.f, SMALL_FEED_MAX_S = 60.f;
+    // Take-off: gulls "are able to take off quickly with little space" (Burger & Gochfeld 1996, Handbook of the Birds of
+    // the World, as cited by Wikipedia "Gull"). No run length was found: from the water, chosen a short patter of 0.6 s
+    // reaching 70 % of cruising speed; from land or a perch a spring straight up into flapping flight.
+    constexpr F32 TAKEOFF_RUN_S = 0.6f;
+    constexpr F32 TAKEOFF_RUN_SPEED = 0.7f;
+    constexpr F32 SPRING_MS = 2.5f;         // the spring's upward speed (chosen)
+    constexpr F32 RISE_MS = 1.5f;           // the least climb just after take-off, until it is 1.5 m up (chosen: under 1 s)
+    // The approach: a glide slope of 1 in 3 down to the spot (chosen), slowing as it comes in; given up after 40 s.
+    constexpr F32 GLIDE_SLOPE = 0.33f;
+    constexpr F32 APPROACH_TIMEOUT_S = 40.f;
+    // Heavy rain keeps them down: rainfall "increased time spent perching" in frigatebirds (De Pascalis et al. 2022,
+    // Behavioral Ecology 33:343). A downpour (level 3+) already sends all birds away (weather_factor), so "heavy rain"
+    // here is the heaviest rain that still has birds: level 2.
+    constexpr S32 SIT_TIGHT_LEVEL = 2;
+    constexpr F32 SIT_TIGHT_LAND_S = 4.f;   // airborne birds look for somewhere to sit within this (chosen)
+    //
+    // THE BODY ON THE SURFACE. Standing, the body's underside is the bare leg (the tarsus) above the feet: herring gull
+    // 58.9 mm (male) / 54.7 mm (female) (Threlfall & Jewer 1978, Auk 95:749), so 57 mm; house sparrow 19.8 mm (Griggio &
+    // Hoi 2010, BMC Evol. Biol. 10:261). The body's underside is 0.081 of its length below its axis (buildMesh: h x 0.9,
+    // h = 0.09 len). Floating, the waterline is at the body's axis less a third of its half-depth (chosen: a gull rides
+    // high, most of its body over the water).
+    constexpr F32 TARSUS_GULL_M = 0.057f, TARSUS_SMALL_M = 0.0198f;
+    constexpr F32 BODY_UNDER = 0.081f;      // x length
+    // The drawn water under a floating bird is sampled (WolfBoatRock::drawnWaveHeight, the whole wave model) at most every
+    // WAVE_SAMPLE_S and carried on at the rate between the last two samples in between. Measured in world on 2 Nov: the
+    // per-frame sample was most of the landing's cost (move() 29-58 us for 4-7 gulls on the water). The error of a linear
+    // carry over 0.05 s is under a millimetre on the swell and about 1.5 cm on the fastest shore breaker (amplitude x
+    // omega^2 x 0.05^2); under 20 frames a second every frame is a fresh sample.
+    constexpr F64 WAVE_SAMPLE_S = 0.05;
+    constexpr F32 FLOAT_ABOVE = 0.03f;      // x length: the axis over the waterline
+    // Herring gull: "Their legs are pink with webbed feet" (RSPB herring gull). No wording was found for the sparrow's: its
+    // legs are drawn in its own darker back colour (SPECIES mTip).
+    const F32 LEG_GULL[3] = { 0.86f, 0.62f, 0.60f };
 
     // The calls, app_settings/wolfbirds (SOURCES.md there; region-terrain-work/birds-2026-11-02/tools/build_sounds.py).
     const WolfWeatherSound::Recording CALL_GULL[3] = {
@@ -205,6 +339,15 @@ namespace
         return f;
     }
 
+    /** [BIRDS LANDING 2026-11-02] Heavy rain on screen that still has birds (SIT_TIGHT_LEVEL; a downpour has none): the
+     *  birds down stay down and those aloft settle (wolfweatherprofile.h kind RAIN, level 1..4). */
+    bool sit_tight_now()
+    {
+        if (!WolfWeather::instanceExists() || !WolfWeather::enabled()) return false;
+        const WolfWeatherProfile& p = WolfWeather::instance().activeProfile();
+        return p.mKind == WolfWeatherProfile::RAIN && p.mLevel >= SIT_TIGHT_LEVEL;
+    }
+
     /** True while a hurricane is over the region (wolfhurricane.h timeAt: stage NONE before it forms and after it is gone). */
     bool hurricane_now()
     {
@@ -223,13 +366,23 @@ void WolfBirds::rebase(const LLVector3& delta)
     {
         b.mPos += delta;
         b.mWaypoint += delta;   // mOrbitOffset is relative to the flock's centre
+        b.mSpotPos += delta;    // [BIRDS LANDING/]
+        b.mPerchAt += delta;
     }
     for (Flock& f : mFlocks)
     {
         f.mCentre += delta;
         f.mTarget += delta;
         f.mExit += delta;
+        f.mPatch += delta;      // [BIRDS LANDING/]
+        f.mFlushedFrom += delta;
     }
+    for (Perch& p : mPerches)
+    {
+        p.mAt += delta;
+        p.mObjectAt += delta;
+    }
+    for (Threat& t : mThreats) t.mPos += delta;
     mLastCamera += delta;
 }
 
@@ -237,6 +390,8 @@ void WolfBirds::reset()
 {
     mBirds.clear();
     mFlocks.clear();
+    mPerches.clear();   // [BIRDS LANDING/]
+    mThreats.clear();
     mNextDirect = 0.0;
 }
 
@@ -294,8 +449,10 @@ void WolfBirds::scanBuilds(LLViewerRegion* region, F64 now)
         if (now < mNextScan) return;
         mCells = llclamp((S32)ceilf(region->getWidth() / CELL_M), 1, MAX_CELLS);
         mBuiltScan.assign((size_t)(mCells * mCells), 0);
+        mPerchCandsScan.clear();   // [BIRDS LANDING/]
         mScanIndex = 0;
     }
+    const LLVector3 cam = LLViewerCamera::getInstance()->getOrigin();
     const LLVector3 o = region->getOriginAgent();
     const S32 n = gObjectList.getNumObjects();
     const S32 end = llmin(n, mScanIndex + SCAN_PER_FRAME);
@@ -314,10 +471,25 @@ void WolfBirds::scanBuilds(LLViewerRegion* region, F64 now)
         const F32 w = 1.f + llmax(s.mV[VX], llmax(s.mV[VY], s.mV[VZ])) / 8.f;
         U16& c = mBuiltScan[(size_t)(cy * mCells + cx)];
         c = (U16)llmin(60000.f, (F32)c + w);
+        // [BIRDS LANDING 2026-11-02] a prim whose top could be a perch, near enough to the camera for a gull to use: one
+        // to aim a perch ray at (seekPerch). Its top from its largest side, as the rotation is not known here; the ray finds
+        // the real surface.
+        const F32 top = p.mV[VZ] + 0.5f * llmax(s.mV[VX], llmax(s.mV[VY], s.mV[VZ]));
+        if ((S32)mPerchCandsScan.size() < MAX_PERCH_CANDIDATES && top - ground >= PERCH_MIN_M && top - ground <= PERCH_MAX_M
+            && flat(p - cam).length() <= FAR_M + PERCH_SEARCH_M)
+        {
+            PerchCandidate pc;
+            pc.mRegionPos = p - o;
+            pc.mHalfX = 0.5f * s.mV[VX];
+            pc.mHalfY = 0.5f * s.mV[VY];
+            pc.mTop = top - o.mV[VZ];
+            mPerchCandsScan.push_back(pc);
+        }
     }
     mScanIndex = end;
     if (mScanIndex >= n)
     {
+        mPerchCands.swap(mPerchCandsScan);   // [BIRDS LANDING/]
         mBuilt.swap(mBuiltScan);
         mHaveBuilt = true;
         mScanIndex = -1;
@@ -382,6 +554,7 @@ void WolfBirds::direct(LLViewerRegion* region, F64 now)
     // Day: full from 4 degrees up; nothing below -4 (they roost by civil dusk).
     const F32 day = smoothstep(-4.f, 4.f, sun);
     const F32 weather = weather_factor();
+    mSitTight = sit_tight_now();   // [BIRDS LANDING/]
     const bool storm = hurricane_now();
     const F32 budget = WolfFrameGovernor::budget();
     static LLCachedControl<S32> max_setting(gSavedSettings, "WolfViewerBirdsMax", 160);
@@ -413,15 +586,7 @@ void WolfBirds::direct(LLViewerRegion* region, F64 now)
         {
             // more than wanted: the starlings go down to roost where they are; the others fly off
             if (f.mKind == STARLING && !dusk) f.mRoosting = true;
-            else
-            {
-                f.mLeaving = true;
-                const LLVector3 away = flat(f.mCentre - cam);
-                LLVector3 dir = away.isExactlyZero() ? LLVector3(1.f, 0.f, 0.f) : away;
-                dir.normVec();
-                f.mExit = cam + dir * 500.f;
-                f.mExit.mV[VZ] = f.mCentre.mV[VZ] + 40.f;
-            }
+            else leave(f, cam);   // [BIRDS LANDING/] birds down take off first (move())
             continue;
         }
         ++have[f.mKind];
@@ -453,7 +618,16 @@ void WolfBirds::direct(LLViewerRegion* region, F64 now)
         mLastLog = now;
         LL_DEBUGS("WolfBirds") << mBirds.size() << " birds in " << flocks << " flocks; sea " << sea_f << " land " << land_f
                                << " sun " << sun << (west ? " (evening)" : "") << " weather " << weather << " budget "
-                               << budget << " cap " << cap << LL_ENDL;
+                               << budget << " cap " << cap << "; " << landedCount() << " down, " << mPerches.size()
+                               << " free perches of " << mPerchCands.size() << " candidates"
+                               << (mSitTight ? ", sitting tight" : "") << "; cost "
+                               << (mCostFrames ? mCostIdleUs / mCostFrames : 0.0) << " us idle + "
+                               << (mCostFrames ? mCostMeshUs / mCostFrames : 0.0) << " us mesh a frame (idle: flush "
+                               << (mCostFrames ? mCostFlushUs / mCostFrames : 0.0) << ", perch "
+                               << (mCostFrames ? mCostPerchUs / mCostFrames : 0.0) << ", move "
+                               << (mCostFrames ? mCostMoveUs / mCostFrames : 0.0) << ")" << LL_ENDL;
+        mCostIdleUs = mCostMeshUs = mCostFlushUs = mCostPerchUs = mCostMoveUs = 0.0;
+        mCostFrames = 0;
     }
 }
 
@@ -466,6 +640,7 @@ bool WolfBirds::spawnFlock(LLViewerRegion* region, Kind kind, S32 count, F64 now
     f.mRetarget = now + frand_range(8.f, 20.f);
     f.mNextCall = now + frand_range(3.f, 10.f);
     f.mLoop = ll_frand(F_TWO_PI);
+    f.mSettleIn = frand_range(SMALL_SETTLE_MIN_S, SMALL_SETTLE_MAX_S);   // [BIRDS LANDING/]
     // Where they fly in from: ENTRY_M beyond the centre, out of view if that can be found, else simply far away.
     LLViewerCamera* camera = LLViewerCamera::getInstance();
     const LLVector3 cam = camera->getOrigin();
@@ -500,10 +675,733 @@ bool WolfBirds::spawnFlock(LLViewerRegion* region, Kind kind, S32 count, F64 now
         b.mOrbitDir = (ll_frand() < 0.5f) ? -1.f : 1.f;
         b.mWaypoint = f.mCentre;
         b.mFlapFor = frand_range(1.f, 3.f);
+        b.mNextLand = frand_range(GULL_LAND_MIN_S, GULL_LAND_MAX_S);   // [BIRDS LANDING/]
         mBirds.push_back(b);
     }
     LL_DEBUGS("WolfBirds") << "flock " << (S32)kind << " of " << count << " coming in" << LL_ENDL;
     return true;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// [BIRDS LANDING 2026-11-02] landing, the ground, flushing (README "Landing")
+// ═══════════════════════════════════════════════════════════════════════════════════════
+
+S32 WolfBirds::landedCount() const
+{
+    S32 n = 0;
+    for (const Bird& b : mBirds)
+    {
+        if (b.mLand == DOWN) ++n;
+    }
+    return n;
+}
+
+bool WolfBirds::takeRay()
+{
+    if (mRayTokens < 1.f) return false;
+    mRayTokens -= 1.f;
+    return true;
+}
+
+/** One budgeted ray down from CLEAR_ABOVE_M over a surface point: open to the sky when it meets the terrain (or the
+ *  grass, or nothing: over water it stops a metre under the surface) and no prim, tree or attachment on the way down.
+ *  sWolfRoofProbe as the weather's roof grid (wolfweather.cpp rayCell): prims set to click-action "Ignore" and roofs the
+ *  camera does not draw this frame count too (llvovolume.cpp, llspatialpartition.cpp LLOctreeIntersect::check). */
+S32 WolfBirds::spotClear(const LLVector3& surface)
+{
+    if (!takeRay()) return -1;
+    LLVector4a start, end, hit;
+    const LLVector3 s3(surface.mV[VX], surface.mV[VY], surface.mV[VZ] + CLEAR_ABOVE_M);
+    const LLVector3 e3(surface.mV[VX], surface.mV[VY], surface.mV[VZ] - 1.f);
+    start.load3(s3.mV);
+    end.load3(e3.mV);
+    LLVOVolume::sWolfRoofProbe = true;
+    LLViewerObject* obj = gPipeline.lineSegmentIntersectInWorld(start, end, true, false, true, false, nullptr, nullptr, nullptr, &hit);
+    LLVOVolume::sWolfRoofProbe = false;
+    if (!obj) return 1;
+    const LLPCode pc = obj->getPCode();
+    return (pc == LLViewerObject::LL_VO_SURFACE_PATCH || pc == LL_PCODE_LEGACY_GRASS) ? 1 : 0;
+}
+
+F32 WolfBirds::slopeAt(const LLVector3& p) const
+{
+    LLWorld* w = LLWorld::getInstance();
+    const F32 dx = w->resolveLandHeightAgent(p + LLVector3(1.f, 0.f, 0.f)) - w->resolveLandHeightAgent(p - LLVector3(1.f, 0.f, 0.f));
+    const F32 dy = w->resolveLandHeightAgent(p + LLVector3(0.f, 1.f, 0.f)) - w->resolveLandHeightAgent(p - LLVector3(0.f, 1.f, 0.f));
+    return sqrtf(dx * dx + dy * dy) * 0.5f;
+}
+
+bool WolfBirds::shoreAt(const LLVector3& p) const
+{
+    LLViewerRegion* r = LLWorld::getInstance()->getRegionFromPosAgent(p);
+    if (!r || !inRegion(gAgent.getRegion(), p, -4.f) || built(p)) return false;
+    const F32 above = LLWorld::getInstance()->resolveLandHeightAgent(p) - r->getWaterHeight();
+    return above >= SHORE_MIN_M && above <= SHORE_MAX_M && slopeAt(p) <= SHORE_MAX_SLOPE;
+}
+
+bool WolfBirds::grassAt(const LLVector3& p) const
+{
+    LLViewerRegion* r = LLWorld::getInstance()->getRegionFromPosAgent(p);
+    if (!r || !inRegion(gAgent.getRegion(), p, -8.f) || built(p)) return false;
+    const F32 above = LLWorld::getInstance()->resolveLandHeightAgent(p) - r->getWaterHeight();
+    return above >= GRASS_ABOVE_WATER_M && slopeAt(p) <= GRASS_MAX_SLOPE;
+}
+
+F32 WolfBirds::flushRadius(U8 threat, Kind kind)
+{
+    switch (threat)
+    {
+    case THREAT_PERSON:   return kind == SMALL ? FLUSH_PERSON_SMALL_M : FLUSH_PERSON_GULL_M;
+    case THREAT_VEHICLE:  return FLUSH_VEHICLE_M;
+    case THREAT_AIRCRAFT: return FLUSH_AIRCRAFT_M;
+    default:              return FLUSH_CAMERA_M;
+    }
+}
+
+bool WolfBirds::threatNear(const LLVector3& p, Kind kind, F32 mult) const
+{
+    for (const Threat& t : mThreats)
+    {
+        const F32 r = flushRadius(t.mKind, kind) * mult;
+        if ((t.mPos - p).lengthSquared() < r * r) return true;
+    }
+    return false;
+}
+
+/** The body's centre over the surface it is down on: floating, the axis just over the waterline; standing, the body's
+ *  underside on the bare leg (TARSUS_*), both scaled with the bird. */
+F32 WolfBirds::standHeight(const Bird& b, Kind kind) const
+{
+    const F32 len = SPECIES[kind].mLength * b.mSize;
+    if (b.mSpot == SPOT_WATER) return len * FLOAT_ABOVE;
+    return len * BODY_UNDER + (kind == SMALL ? TARSUS_SMALL_M : TARSUS_GULL_M) * b.mSize;
+}
+
+/** The drawn water at a point: the region's water height plus the wave the shader draws there now. */
+F32 WolfBirds::waterSurfaceZ(const LLVector3& p) const
+{
+    LLViewerRegion* r = LLWorld::getInstance()->getRegionFromPosAgent(p);
+    if (!r) return surfaceZ(p);
+    const F32 wave = WolfBoatRock::instanceExists() ? WolfBoatRock::instance().drawnWaveHeight(r, p.mV[VX], p.mV[VY]) : 0.f;
+    return r->getWaterHeight() + wave;
+}
+
+F32 WolfBirds::floatZ(Bird& b, const LLVector3& p) const
+{
+    const F64 now = LLFrameTimer::getElapsedSeconds();
+    const F64 since = now - b.mWaveT;
+    if (b.mWaveT > 0.0 && since < WAVE_SAMPLE_S) return b.mWaveZ + b.mWaveRate * (F32)since;
+    const F32 z = waterSurfaceZ(p);
+    b.mWaveRate = (b.mWaveT > 0.0 && since < 0.5) ? (z - b.mWaveZ) / (F32)since : 0.f;
+    b.mWaveZ = z;
+    b.mWaveT = now;
+    return z;
+}
+
+bool WolfBirds::perchStill(const Bird& b) const
+{
+    const LLViewerObject* o = b.mPerch.get();
+    if (!o || o->isDead()) return false;
+    if ((o->getPositionAgent() - b.mPerchAt).length() > PERCH_MOVED_M) return false;
+    // the quaternions' dot is cos(half the angle between them): 0.99999 is about half a degree (chosen: any real turn)
+    const LLQuaternion q = o->getRotationRegion();
+    return fabsf(q.mQ[VX] * b.mPerchRot.mQ[VX] + q.mQ[VY] * b.mPerchRot.mQ[VY] + q.mQ[VZ] * b.mPerchRot.mQ[VZ]
+                 + q.mQ[VW] * b.mPerchRot.mQ[VW]) > 0.99999f;
+}
+
+void WolfBirds::leave(Flock& f, const LLVector3& cam)
+{
+    LLVector3 dir = flat(f.mCentre - cam);
+    if (dir.isExactlyZero()) dir.setVec(1.f, 0.f, 0.f);
+    dir.normVec();
+    f.mLeaving = true;
+    f.mRoosting = false;
+    f.mDown = false;
+    f.mExit = cam + dir * 500.f;
+    f.mExit.mV[VZ] = f.mCentre.mV[VZ] + 40.f;
+}
+
+/**
+ * The perches: now and then (within the ray budget) one ray straight down from CLEAR_ABOVE_M over a prim near a gull flock
+ * (mPerchCands, gathered by scanBuilds). The first surface the ray meets is the topmost there, so a perch is never under a
+ * roof or inside a room; it is kept when it is a prim (not the terrain, a tree, an avatar or an attachment), its surface
+ * tilts no more than 20 degrees, it stands PERCH_MIN_M..PERCH_MAX_M over the ground, its linkset is still (not under way,
+ * not a boat the rocker floats) and nothing that would flush a gull is near.
+ */
+void WolfBirds::seekPerch(F64 now)
+{
+    for (auto it = mPerches.begin(); it != mPerches.end();)
+    {
+        const LLViewerObject* o = it->mObject.get();
+        if (now - it->mFound > PERCH_KEEP_SECS || !o || o->isDead() || (o->getPositionAgent() - it->mObjectAt).length() > PERCH_MOVED_M)
+        {
+            it = mPerches.erase(it);
+        }
+        else
+        {
+            ++it;
+        }
+    }
+    // the landings' own rays come first: a perch ray only when one is left over for them, and at most one a second
+    // (review 2026-11-02: perch rays had taken every token in a town full of candidates)
+    if ((S32)mPerches.size() >= MAX_PERCHES_KNOWN || mPerchCands.empty() || mRayTokens < 2.f || now < mNextPerchRay) return;
+    mNextPerchRay = now + PERCH_RAY_SECS;
+    LLViewerRegion* region = gAgent.getRegion();
+    if (!region) return;
+    std::vector<const Flock*> gulls;
+    for (const Flock& f : mFlocks)
+    {
+        if (f.mKind == GULL && !f.mLeaving) gulls.push_back(&f);
+    }
+    if (gulls.empty()) return;
+    const Flock& gf = *gulls[(size_t)ll_rand((S32)gulls.size())];
+    const LLVector3 o = region->getOriginAgent();
+    const PerchCandidate* c = nullptr;
+    for (S32 k = 0; k < 8 && !c; ++k)
+    {
+        const PerchCandidate& pc = mPerchCands[(size_t)ll_rand((S32)mPerchCands.size())];
+        if (flat(o + pc.mRegionPos - gf.mCentre).length() <= PERCH_SEARCH_M) c = &pc;
+    }
+    if (!c || !takeRay()) return;
+    const LLVector3 aim = o + LLVector3(c->mRegionPos.mV[VX] + frand_range(-c->mHalfX, c->mHalfX) * 0.9f,
+                                        c->mRegionPos.mV[VY] + frand_range(-c->mHalfY, c->mHalfY) * 0.9f, c->mTop);
+    const F32 ground = LLWorld::getInstance()->resolveLandHeightAgent(aim);
+    LLVector4a start, end, hit, normal;
+    const LLVector3 s3(aim.mV[VX], aim.mV[VY], aim.mV[VZ] + CLEAR_ABOVE_M), e3(aim.mV[VX], aim.mV[VY], ground - 0.5f);
+    start.load3(s3.mV);
+    end.load3(e3.mV);
+    LLVOVolume::sWolfRoofProbe = true;
+    LLViewerObject* obj = gPipeline.lineSegmentIntersectInWorld(start, end, true, false, true, false, nullptr, nullptr, nullptr,
+                                                                &hit, nullptr, &normal);
+    LLVOVolume::sWolfRoofProbe = false;
+    if (!obj || obj->isDead() || obj->getPCode() != LL_PCODE_VOLUME || obj->isAttachment() || obj->getAvatar() || obj->isAvatar()) return;
+    LLVector3 n(normal.getF32ptr());
+    if (n.normVec() < 1e-3f || n.mV[VZ] < PERCH_NORMAL_Z) return;
+    const LLVector3 at(hit.getF32ptr());
+    const F32 over = at.mV[VZ] - ground;
+    if (over < PERCH_MIN_M || over > PERCH_MAX_M) return;
+    LLViewerObject* root = obj->getRootEdit();
+    if (!root || root->isAvatar() || root->getVelocity().lengthSquared() > 0.0025f || !root->getAngularVelocity().isExactlyZero()) return;
+    if (WolfBoatRock::instanceExists() && WolfBoatRock::instance().isRocking(root)) return;
+    if (threatNear(at, GULL, 1.f)) return;
+    for (const Perch& p : mPerches)
+    {
+        if ((p.mAt - at).length() < PERCH_GAP_M) return;
+    }
+    for (const Bird& b : mBirds)
+    {
+        if (b.mSpot == SPOT_PERCH && (b.mSpotPos - at).length() < PERCH_GAP_M) return;
+    }
+    Perch p;
+    p.mObject = obj;
+    p.mAt = at;
+    p.mObjectAt = obj->getPositionAgent();
+    p.mObjectRot = obj->getRotationRegion();
+    p.mFound = now;
+    mPerches.push_back(p);
+}
+
+/** A gull aloft picks where to settle: a free perch (if fewer than MAX_PERCHED are taken), the shore near its flock, or the
+ *  sea beside a flock-mate already on the water (a raft) or near the flock's centre. Chosen weights: 30 % perch, 30 % shore,
+ *  the rest the sea - most gulls seen at a coast are on the water. */
+void WolfBirds::chooseLanding(Bird& b, Flock& f, S32 index, F64 now)
+{
+    (void)now;
+    LLViewerRegion* region = gAgent.getRegion();
+    if (!region) return;
+    const F32 r = ll_frand();
+    LLVector3 spot;
+    U8 kind = SPOT_NONE;
+    S32 perched = 0;
+    for (const Bird& o : mBirds)
+    {
+        if (o.mSpot == SPOT_PERCH && (o.mLand == APPROACH || o.mLand == DOWN)) ++perched;
+    }
+    Perch perch;
+    if (r < 0.3f)
+    {
+        if (perched < MAX_PERCHED && !mPerches.empty())
+        {
+            size_t best = 0;
+            F32 best_d = 1e9f;
+            for (size_t k = 0; k < mPerches.size(); ++k)
+            {
+                const F32 d = (mPerches[k].mAt - b.mPos).length();
+                if (d < best_d) { best_d = d; best = k; }
+            }
+            perch = mPerches[best];
+            mPerches.erase(mPerches.begin() + (std::ptrdiff_t)best);
+            const LLViewerObject* o = perch.mObject.get();
+            if (o && !o->isDead() && (o->getPositionAgent() - perch.mObjectAt).length() <= PERCH_MOVED_M
+                && !threatNear(perch.mAt, GULL, RESETTLE_FID_MULT))
+            {
+                spot = perch.mAt;
+                kind = SPOT_PERCH;
+            }
+        }   // no perch free: the sea (below), not the shore, so the shore keeps its own 30 % (review 2026-11-02)
+    }
+    else if (r < 0.6f)
+    {
+        for (S32 k = 0; k < 10; ++k)
+        {
+            const F32 a = ll_frand(F_TWO_PI), d = frand_range(10.f, SHORE_SEARCH_M);
+            LLVector3 p = flat(f.mCentre) + LLVector3(cosf(a) * d, sinf(a) * d, 0.f);
+            if (!shoreAt(p) || threatNear(p, GULL, RESETTLE_FID_MULT)) continue;
+            p.mV[VZ] = LLWorld::getInstance()->resolveLandHeightAgent(p);
+            spot = p;
+            kind = SPOT_SHORE;
+            break;
+        }
+    }
+    if (kind == SPOT_NONE)
+    {
+        // a raft: beside a flock-mate already on the water (chosen 2-6 m off), else near the flock's centre
+        LLVector3 near_to = f.mCentre;
+        for (S32 j = 0; j < (S32)mBirds.size(); ++j)
+        {
+            const Bird& o = mBirds[(size_t)j];
+            if (j != index && o.mFlock == b.mFlock && o.mLand == DOWN && o.mSpot == SPOT_WATER) { near_to = o.mPos; break; }
+        }
+        const bool raft = (near_to != f.mCentre);
+        for (S32 k = 0; k < 6; ++k)
+        {
+            const F32 a = ll_frand(F_TWO_PI), d = raft ? frand_range(2.f, 6.f) : frand_range(0.f, 25.f);
+            LLVector3 p = flat(near_to) + LLVector3(cosf(a) * d, sinf(a) * d, 0.f);
+            if (!inRegion(region, p, -8.f) || !overWater(p) || built(p) || threatNear(p, GULL, RESETTLE_FID_MULT)) continue;
+            LLViewerRegion* pr = LLWorld::getInstance()->getRegionFromPosAgent(p);
+            p.mV[VZ] = pr ? pr->getWaterHeight() : region->getWaterHeight();
+            spot = p;
+            kind = SPOT_WATER;
+            break;
+        }
+    }
+    if (kind == SPOT_NONE)
+    {
+        b.mNextLand = frand_range(3.f, 8.f);   // nowhere this time: look again soon
+        return;
+    }
+    if (kind != SPOT_PERCH)
+    {
+        const S32 clear = spotClear(spot);
+        if (clear < 0) { b.mNextLand = 0.3f; return; }                    // no ray left this moment
+        if (clear == 0) { b.mNextLand = frand_range(3.f, 8.f); return; }  // something over it: not there
+    }
+    b.mLand = APPROACH;
+    b.mSpot = kind;
+    b.mSpotPos = spot;
+    b.mActFor = APPROACH_TIMEOUT_S;
+    if (kind == SPOT_PERCH)
+    {
+        b.mPerch = perch.mObject;
+        b.mPerchAt = perch.mObjectAt;
+        b.mPerchRot = perch.mObjectRot;
+    }
+}
+
+/** A small flock drops to feed: a patch of open flat land near it, away from anything that flushed it, open to the sky;
+ *  every bird takes its own spot within PATCH_R_M of it. */
+void WolfBirds::settleFlock(Flock& f, S32 flock_index)
+{
+    LLViewerRegion* region = gAgent.getRegion();
+    if (!region) return;
+    LLVector3 c;
+    S32 n = 0;
+    for (const Bird& b : mBirds)
+    {
+        if (b.mFlock == flock_index && b.mLand == AIR) { c += b.mPos; ++n; }
+    }
+    if (n == 0) return;
+    c /= (F32)n;
+    const F32 keep_off = FLUSH_PERSON_SMALL_M * RESETTLE_FID_MULT;
+    for (S32 k = 0; k < 10; ++k)
+    {
+        // chosen: within 40 m of where the flock is, "nearby"
+        const F32 a = ll_frand(F_TWO_PI), d = frand_range(0.f, 40.f);
+        LLVector3 p = flat(c) + LLVector3(cosf(a) * d, sinf(a) * d, 0.f);
+        if (f.mFlushed && flat(p - f.mFlushedFrom).length() < keep_off) continue;
+        if (!grassAt(p) || threatNear(p, SMALL, RESETTLE_FID_MULT)) continue;
+        p.mV[VZ] = LLWorld::getInstance()->resolveLandHeightAgent(p);
+        const S32 clear = spotClear(p);
+        if (clear < 0) { f.mSettleIn = 0.3f; return; }
+        if (clear == 0) continue;
+        f.mDown = true;
+        f.mPatch = p;
+        f.mFeedFor = frand_range(SMALL_FEED_MIN_S, SMALL_FEED_MAX_S);
+        f.mFlushed = false;
+        for (Bird& b : mBirds)
+        {
+            if (b.mFlock != flock_index || b.mLand != AIR) continue;
+            const F32 ba = ll_frand(F_TWO_PI), bd = PATCH_R_M * sqrtf(ll_frand());
+            LLVector3 s = p + LLVector3(cosf(ba) * bd, sinf(ba) * bd, 0.f);
+            if (!grassAt(s)) s = p;
+            s.mV[VZ] = LLWorld::getInstance()->resolveLandHeightAgent(s);
+            b.mLand = APPROACH;
+            b.mSpot = SPOT_GRASS;
+            b.mSpotPos = s;
+            b.mActFor = APPROACH_TIMEOUT_S;
+        }
+        return;
+    }
+    f.mSettleIn = frand_range(5.f, 10.f);   // nowhere suitable here: look again later
+}
+
+/** The whole small flock lifts together; then about half the time it leaves for good (LEAVE_AFTER_LIFT), else it re-lands
+ *  nearby after a short circuit (chosen 4-10 s; after a flush, once it is no longer wary). */
+void WolfBirds::liftFlock(Flock& f, S32 flock_index, bool alarm, const LLVector3& from)
+{
+    for (Bird& b : mBirds)
+    {
+        if (b.mFlock == flock_index) takeOff(b, alarm, from);
+    }
+    f.mDown = false;
+    if (ll_frand() < LEAVE_AFTER_LIFT)
+    {
+        leave(f, LLViewerCamera::getInstance()->getOrigin());
+        return;
+    }
+    f.mSettleIn = frand_range(4.f, 10.f);
+}
+
+void WolfBirds::takeOff(Bird& b, bool alarm, const LLVector3& from)
+{
+    if (b.mLand == AIR) return;
+    if (b.mLand == TAKEOFF)
+    {
+        if (alarm && !b.mAlarm) { b.mAlarm = true; b.mAlarmFor = ALARM_CLIMB_S; }
+        return;
+    }
+    const bool was_down = (b.mLand == DOWN);
+    const bool on_water = was_down && b.mSpot == SPOT_WATER;
+    if (alarm)
+    {
+        const LLVector3 away = flat(b.mPos - from);
+        if (!away.isExactlyZero()) b.mYaw = atan2f(away.mV[VY], away.mV[VX]);
+    }
+    const LLVector3 fwd(cosf(b.mYaw), sinf(b.mYaw), 0.f);
+    b.mPerch = nullptr;
+    b.mSpot = SPOT_NONE;
+    b.mAct = ACT_REST;
+    b.mPitch = 0.f;
+    b.mLift = 0.f;
+    b.mAlarm = alarm;
+    b.mAlarmFor = alarm ? ALARM_CLIMB_S : 0.f;
+    b.mRising = true;
+    b.mRiseT = 0.f;
+    b.mFlapFor = 2.f;
+    b.mGlideFor = 0.f;
+    b.mNextLand = frand_range(GULL_LAND_MIN_S, GULL_LAND_MAX_S) + (alarm ? frand_range(WARY_MIN_S, WARY_MAX_S) : 0.f);
+    if (on_water)
+    {
+        b.mLand = TAKEOFF;
+        b.mRun = TAKEOFF_RUN_S;
+        b.mVel = fwd * 0.5f;
+    }
+    else if (was_down)
+    {
+        b.mLand = AIR;
+        b.mVel = fwd * (b.mSpeed * 0.4f) + LLVector3(0.f, 0.f, SPRING_MS);
+    }
+    else
+    {
+        b.mLand = AIR;   // an approach given up: it is flying already
+    }
+}
+
+/** Something came too near bird `index`: it takes off in alarm with a call; a small flock lifts as one, a gull lifts the
+ *  flock-mates down within ALARM_SPREAD_M of it, and the gull flock's centre moves out over the sea, away. */
+void WolfBirds::flush(S32 index, const LLVector3& from)
+{
+    Bird& b = mBirds[(size_t)index];
+    const S32 fi = b.mFlock;
+    Flock& f = mFlocks[(size_t)fi];
+    f.mNextCall = 0.0;   // the alarm call, at once (calls())
+    f.mFlushed = true;
+    f.mFlushedFrom = from;
+    f.mWary = frand_range(WARY_MIN_S, WARY_MAX_S);
+    if (f.mKind == SMALL)
+    {
+        liftFlock(f, fi, true, from);
+        return;
+    }
+    const LLVector3 at = b.mPos;
+    for (Bird& o : mBirds)
+    {
+        if (o.mFlock == fi && o.mLand != AIR && (o.mPos - at).length() <= ALARM_SPREAD_M) takeOff(o, true, from);
+    }
+    LLVector3 away = flat(f.mCentre - from);
+    if (away.isExactlyZero()) away.setVec(1.f, 0.f, 0.f);
+    away.normVec();
+    LLVector3 c = flat(from) + away * (FLUSH_PERSON_GULL_M * RESETTLE_FID_MULT + frand_range(20.f, 50.f));
+    if (inRegion(gAgent.getRegion(), c, -8.f) && overWater(c) && !built(c))
+    {
+        c.mV[VZ] = surfaceZ(c);
+        f.mCentre = c;
+    }
+}
+
+/**
+ * Four times a second (FLUSH_CHECK_SECS): what could flush a bird - every avatar the viewer knows (LLWorld::getAvatars,
+ * the agent's own included), every moving root object (gObjectList's active objects: a vehicle or boat over
+ * VEHICLE_MIN_MS, a plane over AIRCRAFT_MIN_MS; the speed is the larger of the object's velocity and its own movement
+ * since the last check, so a keyframed or scripted mover counts too) and the camera - and every bird down or coming down
+ * within that thing's flush distance takes off.
+ */
+void WolfBirds::flushCheck(F64 now)
+{
+    if (now < mNextFlush) return;
+    mNextFlush = now + FLUSH_CHECK_SECS;
+    const F64 since = mMoverLastT > 0.0 ? now - mMoverLastT : 0.0;
+    mMoverLastT = now;
+    mThreats.clear();
+    const LLVector3 cam = LLViewerCamera::getInstance()->getOrigin();
+    // birds live within GONE_M x 1.6 of the camera (move()); anything further cannot reach one
+    const F32 reach = GONE_M * 1.6f + FLUSH_VEHICLE_M;
+    LLWorld::getInstance()->getAvatars(nullptr, &mAvatarScratch, gAgent.getPosGlobalFromAgent(cam), reach);
+    for (const LLVector3d& g : mAvatarScratch)
+    {
+        Threat t;
+        t.mPos = gAgent.getPosAgentFromGlobal(g);
+        t.mKind = THREAT_PERSON;
+        mThreats.push_back(t);
+    }
+    std::map<LLUUID, LLVector3d> seen;
+    for (const LLPointer<LLViewerObject>& op : gObjectList.getActiveObjects())
+    {
+        LLViewerObject* obj = op.get();
+        if (!obj || obj->isDead() || obj->isAvatar() || obj->isAttachment() || obj->getParent()) continue;
+        const LLVector3 pos = obj->getPositionAgent();
+        if ((pos - cam).length() > reach) continue;
+        const LLVector3d g = obj->getPositionGlobal();
+        F32 speed = obj->getVelocity().length();
+        auto it = mMoverLast.find(obj->getID());
+        if (it != mMoverLast.end() && since > 0.05) speed = llmax(speed, (F32)((g - it->second).length() / since));
+        seen[obj->getID()] = g;
+        if (speed < VEHICLE_MIN_MS) continue;
+        Threat t;
+        t.mPos = pos;
+        t.mKind = speed >= AIRCRAFT_MIN_MS ? THREAT_AIRCRAFT : THREAT_VEHICLE;
+        mThreats.push_back(t);
+    }
+    mMoverLast.swap(seen);
+    Threat ct;
+    ct.mPos = cam;
+    ct.mKind = THREAT_CAMERA;
+    mThreats.push_back(ct);
+
+    for (S32 i = 0; i < (S32)mBirds.size(); ++i)
+    {
+        const Bird& b = mBirds[(size_t)i];
+        if (b.mLand != DOWN && b.mLand != APPROACH) continue;
+        const Kind kind = mFlocks[(size_t)b.mFlock].mKind;
+        for (const Threat& t : mThreats)
+        {
+            const F32 r = flushRadius(t.mKind, kind);
+            if ((t.mPos - b.mPos).lengthSquared() < r * r)
+            {
+                flush(i, t.mPos);
+                break;
+            }
+        }
+    }
+}
+
+void WolfBirds::moveApproach(Bird& b, Flock& f, F32 dt)
+{
+    const Kind kind = f.mKind;
+    b.mActFor -= dt;
+    if (b.mActFor <= 0.f || (b.mSpot == SPOT_PERCH && !perchStill(b)))
+    {
+        takeOff(b, false, b.mPos);   // it could not get down there: fly on
+        return;
+    }
+    LLVector3 goal = b.mSpotPos;
+    goal.mV[VZ] = (b.mSpot == SPOT_WATER ? floatZ(b, goal) : b.mSpotPos.mV[VZ]) + standHeight(b, kind);
+    const LLVector3 to = goal - b.mPos;
+    const F32 dh = flat(to).length();
+    if (dh < 0.3f && fabsf(to.mV[VZ]) < 0.3f)
+    {
+        // touch down
+        const LLVector3 v = flat(b.mVel);
+        if (!v.isExactlyZero()) b.mYaw = atan2f(v.mV[VY], v.mV[VX]);
+        b.mLand = DOWN;
+        b.mPos = goal;
+        b.mVel.clear();
+        b.mBank = 0.f;
+        b.mFlapFor = 0.f;
+        b.mGlideFor = 0.f;
+        b.mAct = ACT_REST;
+        b.mActFor = frand_range(1.f, 3.f);
+        b.mDownFor = frand_range(GULL_DOWN_MIN_S, GULL_DOWN_MAX_S);
+        b.mStep = 0.f;
+        b.mAlarm = false;
+        b.mAlarmFor = 0.f;
+        return;
+    }
+    if (dh < 2.f)
+    {
+        // the last two metres: straight in, slowing to a stop (no orbiting round the spot)
+        LLVector3 v = to * 2.5f;
+        const F32 m = v.length();
+        if (m > 3.f) v *= 3.f / m;
+        b.mVel = v;
+    }
+    else
+    {
+        // a glide slope of 1 in 3 down to the spot, slowing as it comes in
+        LLVector3 aim = goal;
+        aim.mV[VZ] += llmin(dh * GLIDE_SLOPE, 40.f);
+        LLVector3 want = aim - b.mPos;
+        const F32 len = llmax(want.length(), 1e-3f);
+        const F32 speed = llclamp(dh * 0.6f + 0.6f, 1.f, b.mSpeed);
+        want *= speed / len;
+        steer(b, want, kind == SMALL ? 14.f : 8.f, dt);
+    }
+    // a gull glides in and beats in the last few metres (the flare); a small bird flaps
+    b.mFlapFor = (kind != GULL || dh < 6.f) ? 0.2f : 0.f;
+    b.mGlideFor = 0.f;
+}
+
+void WolfBirds::moveDown(Bird& b, Flock& f, F32 dt)
+{
+    const Kind kind = f.mKind;
+    if (b.mSpot == SPOT_PERCH && !perchStill(b))
+    {
+        // the perch moved or went under it: off in alarm, with a call
+        f.mNextCall = 0.0;
+        takeOff(b, true, b.mPos);
+        return;
+    }
+    if (kind == GULL)
+    {
+        if (!mSitTight) b.mDownFor -= dt;
+        if (b.mDownFor <= 0.f)
+        {
+            takeOff(b, false, b.mPos);
+            return;
+        }
+    }
+    b.mActFor -= dt;
+    if (b.mActFor <= 0.f)
+    {
+        const F32 r = ll_frand();
+        switch (b.mSpot)
+        {
+        case SPOT_GRASS:
+            // head up (scanning, or hopping on) in SCAN_BOUT_S bouts, head down pecking in PECK_BOUT_S bouts
+            if (b.mAct == ACT_PECK)
+            {
+                b.mAct = (r < 0.5f) ? ACT_MOVE : ACT_REST;
+                b.mActFor = SCAN_BOUT_S * frand_range(0.5f, 1.5f);
+            }
+            else
+            {
+                b.mAct = ACT_PECK;
+                b.mActFor = PECK_BOUT_S * frand_range(0.5f, 1.5f);
+            }
+            break;
+        case SPOT_WATER:   // chosen: mostly floating, some paddling, a little preening; 3-10 s each
+            b.mAct = (r < 0.6f) ? ACT_REST : (r < 0.9f ? ACT_MOVE : ACT_PREEN);
+            b.mActFor = frand_range(3.f, 10.f);
+            b.mTurn = frand_range(-PADDLE_TURN, PADDLE_TURN);
+            break;
+        case SPOT_SHORE:   // chosen: standing, a few steps, preening
+            b.mAct = (r < 0.5f) ? ACT_REST : (r < 0.8f ? ACT_MOVE : ACT_PREEN);
+            b.mActFor = (b.mAct == ACT_MOVE) ? frand_range(1.5f, 4.f) : frand_range(3.f, 10.f);
+            if (b.mAct == ACT_MOVE) b.mYaw += frand_range(-1.2f, 1.2f);
+            break;
+        default:           // a perch: standing (turning now and then), preening
+            b.mAct = (r < 0.75f) ? ACT_REST : ACT_PREEN;
+            b.mActFor = frand_range(4.f, 12.f);
+            if (b.mAct == ACT_REST && ll_frand() < 0.5f) b.mYaw += frand_range(-0.7f, 0.7f);
+            break;
+        }
+        b.mStep = 0.f;
+    }
+
+    LLVector3 p = b.mPos;
+    const LLVector3 fwd(cosf(b.mYaw), sinf(b.mYaw), 0.f);
+    F32 pitch = 0.f;
+    b.mLift = 0.f;
+    switch (b.mAct)
+    {
+    case ACT_MOVE:
+        if (b.mSpot == SPOT_WATER)
+        {
+            const LLVector3 next = p + fwd * (PADDLE_MS * dt);
+            b.mYaw += b.mTurn * dt;
+            if (!overWater(next) || built(next) || !inRegion(gAgent.getRegion(), next, -4.f)) b.mYaw += F_PI;
+            else p = next;
+        }
+        else if (b.mSpot == SPOT_SHORE)
+        {
+            const LLVector3 next = p + fwd * (WALK_MS * dt);
+            if (!shoreAt(next) || threatNear(next, kind, 1.f)) { b.mAct = ACT_REST; b.mYaw += frand_range(2.f, 4.f); }
+            else { p = next; b.mStep += dt * WALK_MS / (TARSUS_GULL_M * 2.f * b.mSize); }   // a stride of two leg lengths (chosen)
+        }
+        else if (b.mSpot == SPOT_GRASS)
+        {
+            const F32 before = b.mStep;
+            b.mStep += dt / HOP_S;
+            if (floorf(b.mStep) != floorf(before))
+            {
+                // a new hop: now and then a turn (chosen up to 35 degrees)
+                b.mYaw += frand_range(-0.6f, 0.6f);
+            }
+            const LLVector3 next = p + fwd * (HOP_M / HOP_S * dt);
+            if (!grassAt(next)) b.mYaw += F_PI;
+            else p = next;
+            b.mLift = HOP_H * sinf(F_PI * (b.mStep - floorf(b.mStep)));
+        }
+        break;
+    case ACT_PECK:
+        // the head goes down and back up at PECK_HZ, never quite up while the bout lasts
+        b.mStep += dt * PECK_HZ;
+        pitch = PECK_PITCH_DEG * DEG_TO_RAD * (0.55f + 0.45f * sinf(F_TWO_PI * b.mStep));
+        break;
+    case ACT_PREEN:
+        b.mStep += dt;
+        pitch = (25.f + 10.f * sinf(b.mStep * 3.f)) * DEG_TO_RAD;   // head down into the feathers (chosen, the look of it)
+        break;
+    default:
+        break;
+    }
+    // the bill reaches the surface and no further: a body of half-length L pitched by a, standing h over the surface,
+    // brings its tip down by L sin a, so a is held to asin(h / L) (the legs do not bend here)
+    const F32 half_len = 0.5f * SPECIES[kind].mLength * b.mSize;
+    pitch = llmin(pitch, asinf(llclamp(standHeight(b, kind) / half_len, 0.f, 1.f)));
+    b.mPitch += (pitch - b.mPitch) * llmin(1.f, dt * 10.f);
+    // exactly on the surface under it
+    F32 z = 0.f;
+    switch (b.mSpot)
+    {
+    case SPOT_WATER: z = floatZ(b, p); break;
+    case SPOT_PERCH: z = b.mSpotPos.mV[VZ]; break;
+    default:         z = LLWorld::getInstance()->resolveLandHeightAgent(p) + b.mLift; break;
+    }
+    p.mV[VZ] = z + standHeight(b, kind);
+    b.mPos = p;
+    b.mVel.clear();
+}
+
+/** A gull off the water: a short run along the surface, beating, to TAKEOFF_RUN_SPEED of its cruise, then into the air. */
+void WolfBirds::moveTakeOff(Bird& b, Flock& f, F32 dt)
+{
+    b.mRun -= dt;
+    const LLVector3 fwd(cosf(b.mYaw), sinf(b.mYaw), 0.f);
+    const F32 top = b.mSpeed * TAKEOFF_RUN_SPEED;
+    const F32 v = llmin(top, flat(b.mVel).length() + top / TAKEOFF_RUN_S * dt);
+    b.mVel = fwd * v;
+    b.mFlapFor = 0.5f;
+    LLVector3 p = b.mPos + b.mVel * dt;
+    const F32 frac = 1.f - llmax(b.mRun, 0.f) / TAKEOFF_RUN_S;
+    // the feet patter on the water while the body rises a little (chosen: 0.3 m over the run)
+    p.mV[VZ] = floatZ(b, p) + SPECIES[f.mKind].mLength * b.mSize * FLOAT_ABOVE + 0.3f * frac;
+    b.mPos = p;
+    if (b.mRun <= 0.f)
+    {
+        b.mLand = AIR;
+        b.mVel.mV[VZ] = b.mAlarm ? b.mSpeed * ALARM_CLIMB_FRAC : 1.5f;
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════
@@ -529,10 +1427,28 @@ void WolfBirds::steer(Bird& b, const LLVector3& desired_vel, F32 max_accel, F32 
 void WolfBirds::keepClear(Bird& b, F32 dt)
 {
     const F32 ground = surfaceZ(b.mPos);
-    if (b.mPos.mV[VZ] < ground + 1.5f)
+    if (!b.mRising)
     {
-        b.mPos.mV[VZ] = ground + 1.5f;
-        if (b.mVel.mV[VZ] < 0.f) b.mVel.mV[VZ] = 0.f;
+        if (b.mPos.mV[VZ] < ground + 1.5f)
+        {
+            b.mPos.mV[VZ] = ground + 1.5f;
+            if (b.mVel.mV[VZ] < 0.f) b.mVel.mV[VZ] = 0.f;
+        }
+    }
+    else
+    {
+        // [BIRDS LANDING 2026-11-02] just off the ground or water: the floor over the surface under it rises from 0.1 m (about
+        // the height a bird stands at, chosen) at RISE_MS to the usual 1.5 m, so it climbs out instead of jumping up in one
+        // frame, and follows rising ground; over water the floor is the drawn wave, not the rest level.
+        b.mRiseT += dt;
+        const F32 floor = llmin(1.5f, 0.1f + RISE_MS * b.mRiseT);
+        const F32 base = overWater(b.mPos) ? llmax(ground, floatZ(b, b.mPos)) : ground;
+        if (b.mPos.mV[VZ] < base + floor)
+        {
+            b.mPos.mV[VZ] = base + floor;
+            if (b.mVel.mV[VZ] < RISE_MS) b.mVel.mV[VZ] = RISE_MS;
+        }
+        if (floor >= 1.5f) b.mRising = false;
     }
     LLViewerRegion* r = gAgent.getRegion();
     if (!r || !mHaveBuilt || mCells <= 0 || b.mPos.mV[VZ] > ground + 50.f) return;
@@ -677,7 +1593,7 @@ void WolfBirds::moveFlocking(Bird& b, Flock& f, S32 index, F32 dt)
         for (S32 j = 0; j < count; ++j)
         {
             const Bird& o = mBirds[j];
-            if (j == index || o.mFlock != b.mFlock) continue;
+            if (j == index || o.mFlock != b.mFlock || o.mLand != AIR) continue;   // [BIRDS LANDING/] not the ones down
             const LLVector3 d = b.mPos - o.mPos;
             const F32 len = d.length();
             if (len > 12.f) continue;
@@ -720,6 +1636,40 @@ void WolfBirds::move(F32 dt, F64 now)
     // the flocks' own movement
     const LLVector3 cam = LLViewerCamera::getInstance()->getOrigin();
     LLViewerRegion* region = gAgent.getRegion();
+    // [BIRDS LANDING 2026-11-02] the flocks' landing: a leaving flock's birds take off first; a small flock drops to feed
+    // and lifts as one; gulls (below, one by one) look for somewhere to settle after a while aloft
+    for (S32 fi = 0; fi < (S32)mFlocks.size(); ++fi)
+    {
+        Flock& f = mFlocks[(size_t)fi];
+        f.mWary = llmax(0.f, f.mWary - dt);
+        if (f.mLeaving || f.mRoosting)
+        {
+            for (Bird& b : mBirds)
+            {
+                if (b.mFlock == fi && (b.mLand == DOWN || b.mLand == APPROACH)) takeOff(b, false, b.mPos);
+            }
+            f.mDown = false;
+            continue;
+        }
+        if (f.mKind != SMALL) continue;
+        if (!f.mDown)
+        {
+            if (mSitTight) f.mSettleIn = llmin(f.mSettleIn, SIT_TIGHT_LAND_S);
+            f.mSettleIn -= dt;
+            if (f.mSettleIn <= 0.f && f.mWary <= 0.f) settleFlock(f, fi);
+            continue;
+        }
+        bool approaching = false, any = false;
+        for (const Bird& b : mBirds)
+        {
+            if (b.mFlock != fi) continue;
+            any = true;
+            if (b.mLand == APPROACH) approaching = true;
+        }
+        if (!any) continue;
+        if (!approaching && !mSitTight) f.mFeedFor -= dt;
+        if (f.mFeedFor <= 0.f) liftFlock(f, fi, false, f.mPatch);
+    }
     for (Flock& f : mFlocks)
     {
         if (f.mLeaving) { f.mTarget = f.mExit; continue; }
@@ -759,21 +1709,56 @@ void WolfBirds::move(F32 dt, F64 now)
     {
         Bird& b = mBirds[i];
         Flock& f = mFlocks[b.mFlock];
-        if (f.mLeaving)
+        // [BIRDS LANDING 2026-11-02] coming down, down, or taking off
+        if (b.mLand == DOWN) { moveDown(b, f, dt); continue; }
+        if (b.mLand == TAKEOFF)
         {
-            moveFlocking(b, f, i, dt);
+            moveTakeOff(b, f, dt);
+        }
+        else if (b.mLand == APPROACH)
+        {
+            moveApproach(b, f, dt);
+            if (b.mLand == DOWN) continue;
+            b.mPos += b.mVel * dt;
+            // never through the ground or water on the way in (over water the drawn wave, as its goal: review 2026-11-02)
+            const F32 base = (b.mSpot == SPOT_WATER && overWater(b.mPos)) ? llmax(surfaceZ(b.mPos), floatZ(b, b.mPos))
+                                                                       : surfaceZ(b.mPos);
+            const F32 floor_z = base + standHeight(b, f.mKind);
+            if (b.mPos.mV[VZ] < floor_z) b.mPos.mV[VZ] = floor_z;
         }
         else
         {
-            switch (f.mKind)
+            if (f.mKind == GULL && !f.mLeaving && f.mWary <= 0.f)
             {
-            case GULL: moveGull(b, f, dt); break;
-            case TERN: moveTern(b, f, dt); break;
-            default:   moveFlocking(b, f, i, dt); break;
+                if (mSitTight) b.mNextLand = llmin(b.mNextLand, SIT_TIGHT_LAND_S);
+                b.mNextLand -= dt;
+                if (b.mNextLand <= 0.f) chooseLanding(b, f, i, now);
             }
+            if (f.mLeaving)
+            {
+                moveFlocking(b, f, i, dt);
+            }
+            else
+            {
+                switch (f.mKind)
+                {
+                case GULL: moveGull(b, f, dt); break;
+                case TERN: moveTern(b, f, dt); break;
+                default:   moveFlocking(b, f, i, dt); break;
+                }
+            }
+            if (b.mAlarmFor > 0.f)
+            {
+                // the alarm: a quick climb away, beating
+                b.mAlarmFor -= dt;
+                const F32 climb = b.mSpeed * ALARM_CLIMB_FRAC;
+                b.mVel.mV[VZ] += (climb - b.mVel.mV[VZ]) * llmin(1.f, dt * 4.f);
+                b.mFlapFor = llmax(b.mFlapFor, 0.3f);
+                if (b.mAlarmFor <= 0.f) b.mAlarm = false;
+            }
+            b.mPos += b.mVel * dt;
+            if (!(f.mRoosting)) keepClear(b, dt);
         }
-        b.mPos += b.mVel * dt;
-        if (!(f.mRoosting)) keepClear(b, dt);
         const Species& sp = SPECIES[f.mKind];
         const F32 beat = (b.mFlapFor > 0.f) ? sp.mBeatHz : 0.f;
         b.mPhase += F_TWO_PI * beat * dt;   // a glide holds the phase; buildMesh sets the gliding wings itself
@@ -887,6 +1872,8 @@ void WolfBirds::idle()
     const F64 now = LLFrameTimer::getElapsedSeconds();
     const F32 dt = llclamp((F32)(now - mLastIdle), 0.f, 0.1f);
     mLastIdle = now;
+    LLTimer cost;   // [BIRDS LANDING/] the frame cost, for the log line (direct())
+    mRayTokens = llmin(RAY_BURST, mRayTokens + RAYS_PER_SEC * dt);
     // The agent frame moves when the agent crosses into another region (LLAgent::setRegion) or rebases on a huge one
     // (LLAgent::rebaseOrigin): every stored agent-metre position moves with it, so the birds stay where they were in the
     // world (review 2026-11-02). Only then is the camera's jump a teleport or not.
@@ -906,17 +1893,7 @@ void WolfBirds::idle()
             bool any_left = false;
             for (Flock& f : mFlocks)
             {
-                if (!f.mLeaving)
-                {
-                    const LLVector3 cam = LLViewerCamera::getInstance()->getOrigin();
-                    LLVector3 dir = flat(f.mCentre - cam);
-                    if (dir.isExactlyZero()) dir.setVec(1.f, 0.f, 0.f);
-                    dir.normVec();
-                    f.mLeaving = true;
-                    f.mRoosting = false;
-                    f.mExit = cam + dir * 500.f;
-                    f.mExit.mV[VZ] = f.mCentre.mV[VZ] + 40.f;
-                }
+                if (!f.mLeaving) leave(f, LLViewerCamera::getInstance()->getOrigin());   // birds down take off first (move())
                 any_left = true;
             }
             static LLCachedControl<bool> on(gSavedSettings, "WolfViewerBirds", true);
@@ -930,6 +1907,9 @@ void WolfBirds::idle()
     {
         mRegionId = region->getRegionID();
         mHaveBuilt = false;
+        mPerchCands.clear();   // [BIRDS LANDING/] region metres of the old region
+        mPerchCandsScan.clear();
+        mPerches.clear();
         mScanIndex = -1;
         mNextScan = 0.0;
         // a teleport starts again; a walk or flight over the border keeps the birds in the air
@@ -947,8 +1927,27 @@ void WolfBirds::idle()
         mNextDirect = now + DIRECT_SECS;
         direct(region, now);
     }
-    if (dt > 0.f && !mBirds.empty()) move(dt, now);
+    if (!mBirds.empty())
+    {
+        LLTimer part;
+        flushCheck(now);   // [BIRDS LANDING/]
+        mCostFlushUs += part.getElapsedTimeF64() * 1e6;
+        part.reset();
+        seekPerch(now);
+        mCostPerchUs += part.getElapsedTimeF64() * 1e6;
+    }
+    if (dt > 0.f && !mBirds.empty())
+    {
+        LLTimer part;
+        move(dt, now);
+        mCostMoveUs += part.getElapsedTimeF64() * 1e6;
+    }
     calls(now);
+    if (!mBirds.empty())
+    {
+        mCostIdleUs += cost.getElapsedTimeF64() * 1e6;
+        ++mCostFrames;
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════
@@ -957,10 +1956,11 @@ void WolfBirds::idle()
 
 namespace
 {
-    // Triangles per bird: body 8, tail 2 panels x 2 sides = 4, each wing 4 panels x 2 sides = 8.
-    constexpr S32 TRIS_PER_BIRD = 8 + 4 + 16;
+    // Triangles per bird: body 8, tail 2 panels x 2 sides = 4, each wing 4 panels x 2 sides = 8, [BIRDS LANDING/] each leg
+    // 1 panel x 2 sides = 2 (drawn only while it stands).
+    constexpr S32 TRIS_PER_BIRD = 8 + 4 + 16 + 4;
     constexpr S32 VERTS_PER_BIRD = TRIS_PER_BIRD * 3;
-    constexpr S32 MAX_VERTS = HARD_MAX_BIRDS * VERTS_PER_BIRD;   // 25 200: inside the U16 indices
+    constexpr S32 MAX_VERTS = HARD_MAX_BIRDS * VERTS_PER_BIRD;   // 28 800: inside the U16 indices
     static_assert(MAX_VERTS <= 65536, "the birds' indices are U16");
 
     struct Writer
@@ -1028,6 +2028,7 @@ bool WolfBirds::ensureBuffer()
 void WolfBirds::buildMesh(S32& verts)
 {
     verts = 0;
+    LLTimer cost;   // [BIRDS LANDING/] the frame cost, for the log line
     if (mBirds.empty() || !ensureBuffer()) return;
     LLViewerCamera* camera = LLViewerCamera::getInstance();
     const LLVector3 cam = camera->getOrigin();
@@ -1058,8 +2059,15 @@ void WolfBirds::buildMesh(S32& verts)
         const F32 span = sp.mSpan * b.mSize, len = sp.mLength * b.mSize;
         const bool distant = (b.mPos - cam).length() > span * LOD_SPANS;   // not "far": <windef.h> defines far (and near) away
 
-        // its frame: forward along its flight, banked into its turn
+        // its frame: forward along its flight, banked into its turn; [BIRDS LANDING/] down, along its heading, the head
+        // pitched down to peck or preen (mBank is 0 there)
+        const bool down = (b.mLand == DOWN);
         LLVector3 fwd = b.mVel;
+        if (down)
+        {
+            const F32 cp = cosf(b.mPitch);
+            fwd.setVec(cosf(b.mYaw) * cp, sinf(b.mYaw) * cp, -sinf(b.mPitch));
+        }
         if (fwd.isExactlyZero()) fwd.setVec(1.f, 0.f, 0.f);
         fwd.normVec();
         LLVector3 left = LLVector3(0.f, 0.f, 1.f) % fwd;
@@ -1079,12 +2087,25 @@ void WolfBirds::buildMesh(S32& verts)
         F32 reach = 1.f;
         const bool gliding = (b.mFlapFor <= 0.f);
         const Kind kind = mFlocks[b.mFlock].mKind;
-        if (gliding)
+        // [BIRDS LANDING 2026-11-02] sweep: the wing swung back about the shoulder (0 = spread); lift: raised onto the back
+        F32 sweep = 0.f, lift = 0.f;
+        if (down)
+        {
+            // folded along the back, the hand over the arm so the tips reach just past the tail; preening, half raised
+            const bool preen = (b.mAct == ACT_PREEN);
+            a1 = preen ? 25.f * DEG_TO_RAD : 0.f;
+            a2 = preen ? -10.f * DEG_TO_RAD : 0.f;
+            reach = preen ? 0.8f : 0.55f;
+            sweep = (preen ? 35.f : 80.f) * DEG_TO_RAD;
+            lift = len * 0.045f;
+        }
+        else if (gliding)
         {
             if (kind == GULL)      { a1 = 10.f * DEG_TO_RAD; a2 = -16.f * DEG_TO_RAD; }
             else if (kind == SMALL){ a1 = 0.f; a2 = 0.f; reach = 0.18f; }
             else                   { a1 = 4.f * DEG_TO_RAD; a2 = -2.f * DEG_TO_RAD; }
         }
+        const F32 ssw = sinf(sweep), csw = cosf(sweep);
 
         // body: nose, a ring of four at the shoulders, the tail root
         const F32 h = len * 0.09f, wb = len * 0.08f;
@@ -1121,9 +2142,11 @@ void WolfBirds::buildMesh(S32& verts)
             const F32 yw = half * 0.45f, yt = half;
             const F32 c1 = cosf(a1), s1 = sinf(a1), c2 = cosf(a1 + a2), s2 = sinf(a1 + a2);
             // y and z of a point along the wing at span y (from the shoulder at wb)
-            auto inner = [&](F32 x, F32 y) { const F32 d = y - wb; return P(x, sg * (wb + d * c1), d * s1); };
+            // [BIRDS LANDING/] the sweep shears each point back by its distance out from the shoulder (chord kept)
+            auto swept = [&](F32 x, F32 y, F32 z) { const F32 d = y - wb; return P(x - d * ssw, sg * (wb + d * csw), z + lift); };
+            auto inner = [&](F32 x, F32 y) { const F32 d = y - wb; return swept(x, wb + d * c1, d * s1); };
             const F32 wy = wb + (yw - wb) * c1, wz = (yw - wb) * s1;
-            auto outer = [&](F32 x, F32 y) { const F32 d = y - yw; return P(x, sg * (wy + d * c2), wz + d * s2); };
+            auto outer = [&](F32 x, F32 y) { const F32 d = y - yw; return swept(x, wy + d * c2, wz + d * s2); };
             const LLVector3 root_l = inner(len * 0.14f, wb), root_t = inner(-len * 0.10f, wb);
             const LLVector3 wrist_l = inner(len * 0.10f, yw), wrist_t = inner(-len * 0.16f, yw);
             const LLVector3 tip_l = outer(-len * 0.04f, yt), tip_t = outer(-len * 0.18f, yt * 0.94f);
@@ -1134,9 +2157,31 @@ void WolfBirds::buildMesh(S32& verts)
             w.panel(wrist_l, wrist_t, tip_t, wing_up, sp.mTop, sp.mTop, sp.mTip, sp.mUnder, sp.mUnder, under_tip);
             w.panel(wrist_l, tip_t, tip_l, wing_up, sp.mTop, sp.mTip, sp.mTip, sp.mUnder, under_tip, under_tip);
         }
+
+        // [BIRDS LANDING 2026-11-02] legs, while it stands (not floating): from the hip under the body to the foot on the
+        // surface, the foot placed in the bird's level frame so pecking pitches the body and not the feet; walking swings
+        // them in turn, hopping keeps them together
+        if (down && b.mSpot != SPOT_WATER && !distant)
+        {
+            const F32 stand = standHeight(b, kind);
+            const LLVector3 lfwd(cosf(b.mYaw), sinf(b.mYaw), 0.f), lleft(-sinf(b.mYaw), cosf(b.mYaw), 0.f);
+            const LLVector3 feet(b.mPos.mV[VX], b.mPos.mV[VY], b.mPos.mV[VZ] - stand);
+            const F32* leg_c = (kind == GULL) ? LEG_GULL : sp.mTip;
+            const F32 tarsus = (kind == SMALL ? TARSUS_SMALL_M : TARSUS_GULL_M) * b.mSize;
+            const bool walking = (b.mAct == ACT_MOVE && b.mSpot == SPOT_SHORE);
+            for (S32 side = 0; side < 2; ++side)
+            {
+                const F32 sg = side == 0 ? 1.f : -1.f;
+                const F32 swing = walking ? tarsus * 0.5f * sinf(F_TWO_PI * b.mStep + (side ? F_PI : 0.f)) : 0.f;
+                const LLVector3 hip_f = P(len * 0.05f, sg * wb * 0.5f, -h * 0.8f), hip_b = P(-len * 0.05f, sg * wb * 0.5f, -h * 0.8f);
+                const LLVector3 foot = feet + lfwd * swing + lleft * (sg * wb * 0.5f);
+                w.panel(hip_f, hip_b, foot, left_b * sg, leg_c, leg_c, leg_c, leg_c, leg_c, leg_c);
+            }
+        }
     }
     mVB->unmapBuffer();
     verts = w.n;
+    mCostMeshUs += cost.getElapsedTimeF64() * 1e6;
 }
 
 void WolfBirds::renderDeferred()

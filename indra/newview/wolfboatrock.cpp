@@ -896,7 +896,10 @@ WolfBoatRock::Sea WolfBoatRock::seaNow() const
 // neighbouring regions' water joins up, and reads the baked fields in the vertex's own
 // REGION space (`regionXY = position.xy - wolfRegionOrigin`, lldrawpoolwater.cpp
 // pushWaterPlanes binds each region's own field). The same two spaces here.
-F32 WolfBoatRock::waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F32 ay, F32 t) const
+// [BIRDS LANDING 2026-11-02] rocker: true = the boats' sea (the 0.7 exposure floor, HARBOUR_SLOP and the breaker feed floor
+// below); false = the drawn water itself (waterV.glsl swellScale = mix(0.15, 1.3, exposure) x zoneScale, :943 the breaker's
+// 0.35 + 0.65 sqrt(feed)), for drawnWaveHeight().
+F32 WolfBoatRock::waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F32 ay, F32 t, bool rocker) const
 {
     F32 z = 0.f;
     const F32 amp = sea.mAmp;
@@ -939,8 +942,10 @@ F32 WolfBoatRock::waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F3
     // the surface keeps the painted zones. Paul chose the fix 10-06; about a third of the open sea.
     // Mirror: wolfstorm terrain_manager.js _waveSampleCPU, same constant.
     const F32 HARBOUR_SLOP = 0.33f;
-    const F32 zone_mul = llmax(WolfWaveZones::zoneScale(energy, amp, sea.mCalm, sea.mSmall), HARBOUR_SLOP);
-    const F32 swell_scale = llmax(0.15f + 1.15f * exposure_at(rx, ry), 0.7f) * zone_mul;
+    const F32 zone_drawn = WolfWaveZones::zoneScale(energy, amp, sea.mCalm, sea.mSmall);
+    const F32 zone_mul = rocker ? llmax(zone_drawn, HARBOUR_SLOP) : zone_drawn;
+    const F32 expo_scale = 0.15f + 1.15f * exposure_at(rx, ry);
+    const F32 swell_scale = (rocker ? llmax(expo_scale, 0.7f) : expo_scale) * zone_mul;
     // [OPEN SEA SHORES 2026-10-26] The open-sea weight (WolfWaterClearance, waterV.glsl openW): breakers and the automatic
     // surf only where the water reaches the open sea, as the drawn water.
     WolfWaterClearance::Sample clear_s;
@@ -1067,7 +1072,7 @@ F32 WolfBoatRock::waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F3
                 // hull's bob. The drawn water keeps the un-floored feed.
                 const F32 feed = exposure_at(rx - (g / conf) * 45.f, ry - (b / conf) * 45.f);
                 F32 b_amp = llmin(0.10f + amp * 0.9f, 0.5f) * shoal
-                          * llmax(0.35f + 0.65f * sqrtf(feed), 0.7f) * open_w;
+                          * (rocker ? llmax(0.35f + 0.65f * sqrtf(feed), 0.7f) : 0.35f + 0.65f * sqrtf(feed)) * open_w;
                 // [OPEN SEA SHORES 2026-10-26] sets, waterV.glsl bSet same (the automatic surf's 90 s set clock)
                 const F32 b_set = 6.2831853f * t / 90.f + rx * 0.013f + ry * 0.017f;
                 b_amp *= 0.45f + 0.55f * smoothstep01(0.1f, 1.f, 0.5f + 0.5f * sinf(b_set));
@@ -1232,6 +1237,17 @@ F32 WolfBoatRock::waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F3
         z = up <= -WolfWaterClearance::BIG * 0.5f ? 0.f : WolfWaterClearance::softCap(z, up, llmax(2.5f * amp, 0.1f));
     }
     return z;
+}
+
+F32 WolfBoatRock::drawnWaveHeight(LLViewerRegion* regionp, F32 ax, F32 ay) const
+{
+    if (!mHaveDrawnSea || mDrawnSeaFrame != gFrameCount)
+    {
+        mDrawnSea = seaNow();
+        mDrawnSeaFrame = gFrameCount;
+        mHaveDrawnSea = true;
+    }
+    return waveHeight(mDrawnSea, regionp, ax, ay, waterTime(), false);
 }
 
 // <WolfViewer 2026-09-27> Paul: "it should measure the wave height at that point for that

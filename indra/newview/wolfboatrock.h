@@ -85,6 +85,11 @@ public:
      *  the nearest MAX_ROCKERS, boards left out), nearest first: WolfDryVolumes gives each a dry hull. Kept even with
      *  rocking turned off (WolfViewerBoatRock), as long as dry hulls are on (WolfViewerDryHulls) on a Wolf region. */
     const std::vector<LLUUID>& boats() const { return mBoats; }
+    /** [BIRDS LANDING 2026-11-02] The height of the DRAWN water above its rest level at agent (ax, ay) now, in the frame and
+     *  fields of regionp: waveHeight() without the rocker's own floors (rocker = false), so a gull floating there sits on the
+     *  surface the water shader draws (waterV.glsl:669-701 swellScale, :943 the breaker feed, both un-floored). The sea
+     *  state (seaNow) is read once a frame however many points are asked for. */
+    F32 drawnWaveHeight(LLViewerRegion* regionp, F32 ax, F32 ay) const;
 
     // Source: terrain_manager.js updateFloaters() — 2.5 s sweep, 48 rockers, 256 m.
     static constexpr F64 SWEEP_INTERVAL_SECS = 2.5;
@@ -188,7 +193,7 @@ private:
     Sea seaNow() const;
     /** Height of the drawn water above its rest level at agent-space (ax, ay), in the frame
      *  and fields of regionp (the hull's own region). */
-    F32 waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F32 ay, F32 t) const;
+    F32 waveHeight(const Sea& sea, LLViewerRegion* regionp, F32 ax, F32 ay, F32 t, bool rocker = true) const;
     /** Bob and surface slope for a hull, from waveHeight() at its centre and four ends. */
     Sample measureHull(const Rocker& r, const LLViewerObject* objectp, const Sea& sea, F32 t) const;
     /** <WolfViewer 2026-10-06/> A moored hull's own roll, pitch and heave, whatever the sea state. */
@@ -199,6 +204,10 @@ private:
 
     std::map<const LLViewerObject*, Rocker> mRockers;
     std::vector<LLUUID> mBoats;   // [WOLF DRY HULLS/] boats()
+    // [BIRDS LANDING 2026-11-02] drawnWaveHeight's sea state and the frame it was read in
+    mutable Sea mDrawnSea;
+    mutable U32 mDrawnSeaFrame = 0;
+    mutable bool mHaveDrawnSea = false;
     F64 mNextSweep = 0.0;
     F64 mNextStatsLog = 0.0;
     // Diagnostics from the last sweep.

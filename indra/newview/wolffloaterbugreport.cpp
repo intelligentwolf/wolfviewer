@@ -71,7 +71,11 @@ namespace
 
     // ticketlib.php tkCategories(), in the website's order: the same keys, so the ticket lands in the same queue
     // filter as one raised on the website.
+    // [VIEWER CATEGORY 2026-11-02] Paul: "there is nothing in the category of the bug report about the wolf viewer".
+    // "viewer" (label "Viewer") is first: problems with the viewer itself (display, sky, graphics, crashes, sound,
+    // menus) are the commonest flea report. The website accepts it from this build on; older builds never send it.
     const char* const CATEGORIES[][2] = {
+        { "viewer", "Viewer" },
         { "region", "Region / sim problem" },
         { "land", "Land, rentals & billing" },
         { "account", "Account & login" },

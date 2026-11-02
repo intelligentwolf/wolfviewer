@@ -31,7 +31,9 @@
 #include "llsettingsdaycycle.h"
 #include "lltextbox.h"
 #include "llviewerregion.h"
+#include "wolfenvironmentrender.h"   // [W92 ticket 460/] eclipticNorthAt
 #include "wolfgrid.h"
+#include "wolfregionweather.h"       // [W92 ticket 460/] autoEnvRealSky / autoEnvSkyTime
 #include "wolfweather.h"
 
 namespace
@@ -63,6 +65,33 @@ namespace
     {
         static const char* n[16] = { "N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW" };
         return n[(S32)floor(fmod(deg + 11.25 + 360.0, 360.0) / 22.5) % 16];
+    }
+
+    /** [W92 ticket 460 2026-11-02] Where a body is, in region axes (+x east, +y north, +z up): "12° above the horizon,
+     *  200° (SSW)". Azimuth from north, clockwise - Source: wolfautoenvironment.cpp azimuth_of(). */
+    std::string body_position(const LLVector3& dir)
+    {
+        LLVector3 d = dir;
+        d.normalize();
+        const S32 elev = ll_round(asinf(llclamp(d.mV[VZ], -1.f, 1.f)) * RAD_TO_DEG);
+        F32 az = atan2f(d.mV[VX], d.mV[VY]) * RAD_TO_DEG;
+        if (az < 0.f) az += 360.f;
+        const std::string where = elev > 0 ? llformat("%d° above the horizon", elev)
+                                : elev < 0 ? llformat("%d° below the horizon", -elev)
+                                           : std::string("on the horizon");
+        return where + llformat(", %d° (%s)", ll_round(az) % 360, compass((F64)az).c_str());
+    }
+
+    /** [W92 ticket 460 2026-11-02] The moon's phase in words. Source: region_weather_lib.php rw_moon_phase() - the same bands
+     *  (2 % / 98 % for new / full, quarters within 3 points of half). waxing: 1 waxing, 0 waning, -1 not known (a sky that
+     *  is not a real place's has no waxing or waning, only the lit share it draws). */
+    std::string moon_phase_words(F32 lit, S32 waxing)
+    {
+        if (lit < 0.02f) return "New moon";
+        if (lit > 0.98f) return "Full moon";
+        if (fabsf(lit - 0.5f) <= 0.03f) return waxing < 0 ? "Half moon" : (waxing ? "First quarter" : "Last quarter");
+        if (lit < 0.5f) return waxing < 0 ? "Crescent" : (waxing ? "Waxing crescent" : "Waning crescent");
+        return waxing < 0 ? "Gibbous" : (waxing ? "Waxing gibbous" : "Waning gibbous");
     }
 }
 
@@ -221,16 +250,22 @@ void WolfFloaterWeatherReport::show(const LLSD& reply)
 
 // The sky the region shows now: the region's day-cycle frame for this moment. WolfAutoEnvironment
 // names each frame "AutoSkyNN <Jimmy's sky>" (DayLength 86400, DayOffset 0, so the cycle position
-// is the UTC time of day). Sun height from the sky the viewer is drawing.
+// is the UTC time of day). The sun and moon from the sky the viewer is drawing.
 void WolfFloaterWeatherReport::showSky()
 {
     std::string t;
+    // [W92 ticket 460 2026-11-02] Jimmy: "i see only sun pos but no mention to moon". The sun and the moon the viewer DRAWS:
+    // LLEnvironment::getSunDirection / getMoonDirection are the native sky's bodies when it draws, the EEP's otherwise
+    // (llenvironment.cpp wolfNativeBodies). Was the EEP sky's sun only.
     LLSettingsSky::ptr_t sky = LLEnvironment::instance().getCurrentSky();
+    LLVector3 sun, moon;
     if (sky)
     {
-        const LLVector3 sun = sky->getSunDirection();
-        const F32 elev = asinf(llclamp(sun.mV[VZ], -1.f, 1.f)) * RAD_TO_DEG;
-        t += llformat("Sun height: %d°", (S32)llround(elev));
+        sun = LLEnvironment::instance().getSunDirection();
+        moon = LLEnvironment::instance().getMoonDirection();
+        sun.normalize();
+        moon.normalize();
+        t += "Sun: " + body_position(sun);
     }
     const LLSD& cfg = mReply["config"];
     if (cfg.isMap() && cfg.has("lon"))
@@ -240,6 +275,22 @@ void WolfFloaterWeatherReport::showSky()
         F64 solar = fmod((F64)(now % 86400) / 3600.0 + cfg["lon"].asReal() / 15.0 + 48.0, 24.0);
         t += llformat("  |  solar time %.2fh", solar);
         t += cfg["lat"].asReal() < 0.0 ? "  |  southern hemisphere" : "  |  northern hemisphere";
+    }
+    if (sky)
+    {
+        // The lit share the disc is drawn with: (1 - cos elongation) / 2 (Meeus ch. 48; wolfautoenvironment.cpp "Sky here").
+        const F32 lit = llclamp((1.f - sun * moon) * 0.5f, 0.f, 1.f);
+        // Waxing while the moon is east of the sun along the ecliptic (WolfAstronomy.cs Compute: Norm360(moonLon - sunLon)
+        // < 180): sun x moon points to the ecliptic north pole. The pole is the one the real moon's disc is turned by
+        // (wolfenvironmentrender.cpp lunarNorthAt at autoEnvSkyTime), so only on a real place's sky.
+        S32 waxing = -1;
+        if (WolfRegionWeather::instance().autoEnvRealSky())
+        {
+            const LLVector3 pole = WolfEnvironmentRender::eclipticNorthAt(WolfRegionWeather::instance().autoEnvSkyTime());
+            waxing = ((sun % moon) * pole) > 0.f ? 1 : 0;
+        }
+        t += "\nMoon: " + body_position(moon)
+           + llformat("  |  %s, %d%% lit", moon_phase_words(lit, waxing).c_str(), ll_round(lit * 100.f));
     }
     std::string using_sky;
     LLSettingsDay::ptr_t day = LLEnvironment::instance().getCurrentDay();

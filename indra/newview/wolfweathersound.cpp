@@ -347,8 +347,17 @@ WolfWeatherSound::~WolfWeatherSound() {}
 // static
 F32 WolfWeatherSound::intensity(const WolfWeatherProfile& p)
 {
-    // Unchanged from the first weather sound: heavier weather is louder where you are standing.
-    return llmin(1.6f, ((F32)p.mLevel / 2.f) * ((F32)p.mDensity / 100.f));
+    // Heavier weather is louder where you are standing: level / 2 x density / 100, so a level at the default density (100 %)
+    // is where it always was (0.5 light, 1.0 moderate, 1.5 heavy, 1.6 the ceiling).
+    // [W92 ticket 460 2026-11-02] Source: weather_sound.js intensity() - the density may no longer lift a level past half-way
+    // to the next level. Jimmy Olsen, TROMSO: "Light rain but sound its for the heavy rain". The real weather there sends
+    // level 1 at density 1000 % (Jimmy's slave values, auto_env_lib.php ae_jimmy_weather: density = level x 1000 % at every
+    // level), and 0.5 x 10 = 5 put every real-weather rain at the 1.6 ceiling - the heavy bed alone at full level, with the
+    // drops - whatever level was falling. The level is what is falling (weather.php: real weather sets kind and level; the
+    // density is how it looks). The density still makes the rain quieter, or louder within the level's own band.
+    const F32 level = (F32)p.mLevel / 2.f;
+    const F32 band_top = ((F32)p.mLevel + 0.5f) / 2.f;
+    return llmin(1.6f, llmin(band_top, level * ((F32)p.mDensity / 100.f)));
 }
 
 // static

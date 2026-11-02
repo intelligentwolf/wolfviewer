@@ -1,14 +1,16 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes" ?>
 <!-- [JIMMY V9C 2026-10-10] World > Wolf World > Jimmy's Weather Report (wolffloaterweatherreport.cpp).
      Paul: "add a thing somewhere that shows this information" - Jimmy's master / slave script report
-     for the region you are on. -->
+     for the region you are on.
+     [W92 ticket 460 2026-11-02] The sky box is 46 taller for the moon line (wolffloaterweatherreport.cpp showSky);
+     the report now follows the bottom too, so an older saved (shorter) size shrinks it instead of overlapping it. -->
 <floater
  can_close="true"
  can_minimize="true"
  can_resize="true"
- height="330"
+ height="376"
  layout="topleft"
- min_height="250"
+ min_height="300"
  min_width="360"
  name="wolf_weather_report"
  help_topic="wolf_weather_report"
@@ -17,8 +19,8 @@
  title="Jimmy's Weather Report"
  width="420">
     <text follows="left|top|right" font="SansSerifBold" height="16" layout="topleft" left="12" name="report_label" top="26" width="396">The weather here</text>
-    <text follows="left|top|right" height="170" layout="topleft" left="12" name="report" top="44" width="396" wrap="true">Reading the weather...</text>
+    <text follows="left|top|right|bottom" height="170" layout="topleft" left="12" name="report" top="44" width="396" wrap="true">Reading the weather...</text>
     <text follows="left|right|bottom" font="SansSerifBold" height="16" layout="topleft" left="12" name="sky_label" top="220" width="396">The sky (Jimmy Olsen's EEP)</text>
-    <text follows="left|right|bottom" height="64" layout="topleft" left="12" name="sky" top="238" width="396" wrap="true" />
-    <text follows="left|right|bottom" height="16" layout="topleft" left="12" name="status" top="306" width="396" text_color="LtGray_50" use_ellipses="true" />
+    <text follows="left|right|bottom" height="110" layout="topleft" left="12" name="sky" top="238" width="396" wrap="true" />
+    <text follows="left|right|bottom" height="16" layout="topleft" left="12" name="status" top="352" width="396" text_color="LtGray_50" use_ellipses="true" />
 </floater>

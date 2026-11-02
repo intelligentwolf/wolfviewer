@@ -120,6 +120,10 @@ public:
     /** [WolfViewer round 13] the frame's sun and moon (agent frame, unit; z up): the native sky's own bodies, which can differ
      *  from the EEP sky's (a document's own sun / moon). False before the first frame. */
     static bool bodyDirections(LLVector3& sun, LLVector3& moon);
+    /** [W92 ticket 460 2026-11-02] The ecliptic north pole (lunar north) in region axes (+x east, +y north, +z up) at the
+     *  real place (WolfRegionWeather::autoEnvLat / autoEnvLon) at that moment (unix seconds): the pole the real moon's disc
+     *  is turned by. Only meaningful while WolfRegionWeather::autoEnvRealSky(). */
+    static LLVector3 eclipticNorthAt(F64 unix_seconds);
 
     /** The frame's pre-exposure (Filament Exposure::exposure(EV100)): everything the Wolf sky and the scene's
      *  light write is luminance (cd/m2) x this. */

@@ -969,15 +969,16 @@ bool WolfAir::enginePanel() const
 {
     if (!mEng.mHave) return false;
     if (mMySeat.empty() || mMySeat == "pilot") return true;
-    // the flight engineer: s1 names his seat "seat_engineer"; the role words (s5/s9) say it too
-    if (mMySeat == "seat_engineer") return true;
+    // the flight engineer (s1 seat "seat_engineer") and the B-17's co-pilot ("seat_copilot"): the seats whose crew dialog
+    // has the engines (s5/s10); the role words (s9) say so too
+    if (mMySeat == "seat_engineer" || mMySeat == "seat_copilot") return true;
     for (const CrewSeat& c : mCrew)
     {
         if (c.mSeat == mMySeat)
         {
             std::string role = c.mRole;
             LLStringUtil::toLower(role);
-            return role.find("engineer") != std::string::npos;
+            return role.find("engineer") != std::string::npos || role.find("co-pilot") != std::string::npos;
         }
     }
     return false;

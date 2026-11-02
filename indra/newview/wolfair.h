@@ -217,7 +217,7 @@ public:
     const Turret& turret() const { return mTurret; }
     const Seeker& turretCue() const { return mTurretCue; }
     const Engines& engines() const { return mEng; }
-    /** The engine panel is this seat's: the pilot, or the flight engineer (s1 seat "seat_engineer"; s10 panel "engines"). */
+    /** The engine panel is this seat's: the pilot, the flight engineer or the co-pilot (s1 seats; s10 panel "engines"). */
     bool enginePanel() const;
     // s10 orders
     void engineOrder(S32 i, const char* what);    // "feather", "unfeather", "extinguish", "start", "stop"

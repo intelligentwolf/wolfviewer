@@ -231,7 +231,20 @@ void LLLoginInstance::constructAuthParams(LLPointer<LLCredential> user_credentia
     request_params["last_exec_session_id"] = mLastAgentSessionId.asString();
     request_params["mac"] = (char*)hashed_unique_id_string;
     request_params["version"] = LLVersionInfo::instance().getVersion();
-    request_params["channel"] = LLVersionInfo::instance().getChannel();
+    // <WolfViewer 2026-11-02> Hypergrid gatekeepers with a Firestorm allow-list turned WolfViewer away
+    // ("client WolfViewer-Release 7.2.4.x is not allowed"). Paul chose option 2: a login name that says
+    // both what we are and what we are built on, "WolfViewer-Release (Firestorm based)".
+    // Source: OpenSim LLLoginService.cs:1035-1036 stores this channel and the version in AgentCircuitData;
+    // AgentCircuitData.cs:132-150 Viewer returns "<Channel> <version>" when the version has no space, and
+    // that is what an HG teleport passes on (AgentCircuitData.cs:217-218). GatekeeperService.cs:154-180
+    // and :336-363 match AllowedClients/DeniedClients as an unanchored, case-insensitive regex against
+    // Util.GetViewerName() (Util.cs:4667), so an allow-list containing "Firestorm" finds it. Our own name
+    // stays first: a region's own [AccessControl] AllowedClients (Scene.cs:4250-4295, matched as a prefix)
+    // still sees WolfViewer, and every Wolf check that looks for "wolf" / "WolfViewer" /
+    // "WolfViewer-Release" in the channel still finds it. Only the login request changes: getChannel()
+    // (settings folders, maturity, user agent, updater, crash reports) stays "WolfViewer-Release".
+    request_params["channel"] = LLVersionInfo::instance().getChannel() + " (Firestorm based)";
+    // </WolfViewer 2026-11-02>
     request_params["platform"] = mPlatform;
     request_params["address_size"] = ADDRESS_SIZE;
     request_params["platform_version"] = mPlatformVersion;

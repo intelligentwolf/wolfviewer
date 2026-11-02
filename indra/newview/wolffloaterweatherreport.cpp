@@ -176,7 +176,7 @@ void WolfFloaterWeatherReport::show(const LLSD& reply)
     if (!cfg["enabled"].asBoolean())
     {
         mReport->setText(std::string("This region does not follow a real place's weather.\n\n"
-                                     "The region owner can turn it on in World > Region Details > Jimmy's EEP & Weather."));
+                                     "The region owner can turn it on in World > Region Details > Wolf Environments > Real place."));
         mStatus->setText(std::string());
         return;
     }

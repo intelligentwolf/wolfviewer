@@ -7725,6 +7725,22 @@ This day cycle file references a missing sky file: [SKY].
   <tag>fail</tag>
   </notification>
 
+  <!-- [WOLF ENVIRONMENTS 2026-11-02] Region / Estate > Wolf Environments > Sky > Default sky... (wolfregionwolfenvironments.cpp
+       onDefault). Option 0 resets; the verbs say what each button does. -->
+  <notification
+   icon="alertmodal.tga"
+   name="WolfRegionSkyConfirmDefault"
+   type="alertmodal">
+Put this region back on the default sky?
+
+Everyone in the region will see the default sky instead of the one it has now. Parcels with their own environment keep theirs.
+    <tag>confirm</tag>
+    <usetemplate
+     name="okcancelbuttons"
+     notext="Keep the current sky"
+     yestext="Use the default sky"/>
+  </notification>
+
   <notification
    icon="alertmodal.tga"
    name="WLRegionApplyFail"

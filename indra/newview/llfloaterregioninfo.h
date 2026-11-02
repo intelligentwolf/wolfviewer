@@ -71,9 +71,8 @@ class LLPanelExperiences;
 class LLPanelRegionExperiences;
 class LLPanelEstateAccess;
 class LLPanelRegionEnvironment;
-class WolfPanelRegionWeather;
-class WolfPanelRegionAutoEnvironment;
 class WolfPanelLandWaves;
+class WolfPanelRegionWolfEnvironments;
 
 class LLEventTimer;
 
@@ -134,8 +133,7 @@ protected:
     typedef std::vector<LLPanelRegionInfo*> info_panels_t;
     info_panels_t mInfoPanels;
     LLPanelRegionEnvironment *mEnvironmentPanel;
-    WolfPanelRegionWeather *mWeatherPanel = nullptr;
-    WolfPanelRegionAutoEnvironment *mAutoEnvPanel = nullptr;   // <WolfViewer 2026-10-03/>
+    WolfPanelRegionWolfEnvironments *mWolfEnvsPanel = nullptr;   // [WOLF ENVIRONMENTS 2026-11-02/] Sky, Weather (WolfPanelRegionWeather) and Real place (WolfPanelRegionAutoEnvironment)
     WolfPanelLandWaves *mWavesPanel = nullptr;
     S32 mWolfTabsShown = -1;   // [WOLF GRID GATE 2026-10-17/] WolfGrid::showWolfTabs
     //static S32 sRequestSerial;    // serial # of last EstateOwnerRequest

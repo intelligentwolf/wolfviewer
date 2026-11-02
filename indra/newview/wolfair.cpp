@@ -25,6 +25,10 @@
 
 #include "fsnearbychathub.h"
 #include "llagent.h"
+#include "llaudioengine.h"
+#include "lldir.h"
+#include "llfile.h"
+#include "llstartup.h"
 #include "llchat.h"
 #include "lldispatcher.h"
 #include "llfocusmgr.h"
@@ -64,7 +68,7 @@ namespace
     const F64 FIRE_REPEAT = 1.0;
     // Source: llRegionSayTo truncates at 1023 characters (LSL_Api.cs llRegionSayTo msg[..1023]); as wolfhelm.cpp.
     const size_t MAX_LINE = 1023;
-    const size_t MAX_FIELDS = 32;
+    const size_t MAX_FIELDS = 48;          // a jet's st is about 30 already (helm + kit fields); room to grow
     // The kill feed: the last few, each shown this long (game convention: a short-lived feed in a corner).
     const size_t MAX_KILLS = 6;
     const F64 KILL_SHOW = 20.0;
@@ -144,6 +148,105 @@ namespace
 
     bool flag(const std::string& v) { return v == "1"; }
 
+    F32 wrap180deg(F32 a)
+    {
+        a = fmodf(a + 180.f, 360.f);
+        if (a < 0.f) a += 360.f;
+        return a - 180.f;
+    }
+
+    // Source: wolfhelm.cpp - the word ends there ("wolfvehicle:warplane", not "...warplanes2"). The fleet's roots are
+    // described "wolfvehicle:warplane - <title>" (d-planes/generator/deliver_fleet.py:414), the drones' too.
+    bool isWarplaneDesc(std::string d)
+    {
+        LLStringUtil::trimHead(d);
+        return d.compare(0, PLANE_DESC.size(), PLANE_DESC) == 0
+            && (d.size() == PLANE_DESC.size() || (!isalnum((unsigned char)d[PLANE_DESC.size()]) && d[PLANE_DESC.size()] != '_'));
+    }
+
+    // ---- [WOLF AIR JETS 2026-11-02] ----
+    // Source: aircraft-dogfight-2026-11-01/d-planes/generator/jet_weapons.py TYPES (title, seeker, range_m, cone_deg).
+    const WolfAir::MissileType MISSILES[] = {
+        { "aim9",   "AIM-9 SIDEWINDER", 30.f, 16100.f },
+        { "aim120", "AIM-120 AMRAAM",   60.f, 32200.f },
+        { "asraam", "ASRAAM",           45.f, 25000.f },
+    };
+    // Source: d-planes/classes/<id>.json "guns": f16c_blk50 2 x aim9 (group missile) + 2 x aim120 (radar); harrier_gr3 2 x
+    // aim9; typhoon_fgr4 2 x asraam + 4 x aim120. No other class carries a missile.
+    struct ClassStores { const char* mClass; const char* mIr; const char* mRadar; bool mReheat; };
+    // mReheat: Source: the same class files, engine.jet thrust_ab_n > thrust_dry_n (f16c_blk50 128,900 > 76,300 N;
+    // typhoon_fgr4 180,000 > 120,000 N; every other jet has thrust_ab_n 0).
+    const ClassStores STORES[] = {
+        { "f16c_blk50",   "aim9",   "aim120", true  },
+        { "typhoon_fgr4", "asraam", "aim120", true  },
+        { "harrier_gr3",  "aim9",   nullptr,  false },
+    };
+    // Source: d-planes/classes/harrier_gr3.json engine.jet.thrust_dry_n 82,000 N (the installed WET rating, its _src) and
+    // engine.vtol rcs_loss 0.03 (the bleed, full from rcs_full_deg 36, so all of it in the hover), dry_frac 0.92; the helm's
+    // JetThrust (wolf_plane_helm_template.lsl:200-203) applies exactly those. g = 9.80665 (AirRules.cs G). At sea level this
+    // gives 8,111 kg wet and 7,462 kg dry, the b-flight-model README's "Hover limit 8,111 kg wet / 7,462 kg dry".
+    const F32 HARRIER_THRUST_N = 82000.f, HARRIER_RCS_LOSS = 0.03f, HARRIER_DRY_FRAC = 0.92f, STANDARD_G = 9.80665f;
+
+    // Source: wolf_dogfight.lsl Happened: "gWarnUntil = llGetTime() + 6.0" - the kit holds warn=1 this long after a warning.
+    const F64 WARN_HOLD = 6.0;
+    // Our own two-tone warble (no recording, nothing to licence): four 90 ms pips alternating 1,250 / 950 Hz with 10 ms
+    // raised-cosine edges, again every 1.6 s while the warning lasts - plain enough to be heard, quiet enough not to nag.
+    const char* WARN_TONE_UUID = "d76d1c11-9449-41ab-8f09-266c13782a60";
+    const F64 WARN_TONE_EVERY = 1.6;
+    const F32 WARN_TONE_GAIN = 0.55f;
+    // Source: AirRules.cs REACH_M - a round is spent after 1,000 m, so the gunner's target cue looks no further.
+    const F32 TURRET_REACH_M = 1000.f;
+    const F64 SEEKER_EVERY = 0.25;
+    const S32 SEEKER_ASKS = 6;          // descriptions asked for per look (WolfObjectProps keeps the shared budget)
+    // An order that should change a count (a missile) - the band waits this long for it before saying it did not.
+    const F64 LAUNCH_WAIT = 2.5;
+    const F64 LAUNCH_SHOW = 6.0;
+
+    void put_u32(std::vector<U8>& out, U32 v) { for (int i = 0; i < 4; ++i) out.push_back((U8)((v >> (8 * i)) & 0xff)); }
+    void put_u16(std::vector<U8>& out, U16 v) { out.push_back((U8)(v & 0xff)); out.push_back((U8)((v >> 8) & 0xff)); }
+
+    // The tone as a 16-bit mono WAV where the audio engine looks for a decoded sound. Source: wolfweathersound.cpp
+    // soundPath/write_pcm_wav (LLAudioEngine::hasDecodedFile, llaudioengine.cpp:999, builds exactly "<uuid>.dsf" there).
+    bool writeWarnTone()
+    {
+        const U32 rate = 22050;
+        std::vector<F32> pcm;
+        const F32 freq[4] = { 1250.f, 950.f, 1250.f, 950.f };
+        const U32 pip = rate * 90 / 1000, gap = rate * 25 / 1000, edge = rate * 10 / 1000;
+        for (S32 k = 0; k < 4; ++k)
+        {
+            for (U32 i = 0; i < pip; ++i)
+            {
+                F32 env = 1.f;
+                if (i < edge) env = 0.5f - 0.5f * cosf(F_PI * (F32)i / (F32)edge);
+                else if (i > pip - edge) env = 0.5f - 0.5f * cosf(F_PI * (F32)(pip - i) / (F32)edge);
+                pcm.push_back(0.5f * env * sinf(F_TWO_PI * freq[k] * (F32)i / (F32)rate));
+            }
+            pcm.insert(pcm.end(), gap, 0.f);
+        }
+        std::vector<U8> wav;
+        const U32 data_bytes = (U32)pcm.size() * 2;
+        const char* riff = "RIFF"; const char* wave = "WAVEfmt "; const char* data = "data";
+        wav.insert(wav.end(), riff, riff + 4); put_u32(wav, 36 + data_bytes);
+        wav.insert(wav.end(), wave, wave + 8); put_u32(wav, 16);
+        put_u16(wav, 1); put_u16(wav, 1); put_u32(wav, rate); put_u32(wav, rate * 2); put_u16(wav, 2); put_u16(wav, 16);
+        wav.insert(wav.end(), data, data + 4); put_u32(wav, data_bytes);
+        for (F32 f : pcm) put_u16(wav, (U16)(S16)llclamp((S32)std::lround(f * 32767.f), -32768, 32767));
+        const std::string path = gDirUtilp->getExpandedFilename(LL_PATH_FS_SOUND_CACHE, std::string(WARN_TONE_UUID)) + ".dsf";
+        const std::string tmp = path + ".tmp";
+        LLFILE* fp = LLFile::fopen(tmp, "wb");
+        if (!fp) return false;
+        const size_t wrote = fwrite(wav.data(), 1, wav.size(), fp);
+        fclose(fp);
+        if (wrote != wav.size()) { LLFile::remove(tmp); return false; }
+        LLFile::remove(path, ENOENT);
+        if (LLFile::rename(tmp, path) != 0) { LLFile::remove(tmp); return false; }
+        return true;
+    }
+
+    // The seat the line is about: "pilot" or a crew prim's name (DESIGN_BOMBERS.md s1), printable, short.
+    std::string seatName(const std::string& v) { return cleanText(v, 64); }   // an OpenSim prim name is at most 63
+
     // Source: wolffx.cpp WolfFXHandler - the region's GenericMessage, only on a Wolf region that said so itself.
     class WolfAirHandler : public LLDispatchHandler
     {
@@ -205,7 +308,8 @@ const char* WolfAir::partName(S32 part)
 
 bool WolfAir::active() const
 {
-    return onWolf() && mSeatRoot.notNull() && mState.mHi;
+    // [WOLF AIR PREVIEW] at the login screen only, from WolfAirPreviewFile: drawn, never sent (send() needs a Wolf region)
+    return (onWolf() && mSeatRoot.notNull() && mState.mHi) || mPreview;
 }
 
 bool WolfAir::inDogfight() const
@@ -264,6 +368,18 @@ void WolfAir::reset(const LLUUID& seat)
     mFiring = false;
     mKeyFiring = false;
     mError.clear();
+    // [WOLF AIR JETS / BOMBERS] a new seat starts clean
+    mWeapon = WPN_GUN;
+    mTriggerDown = false;
+    mSeeker = Seeker();
+    mTurretCue = Seeker();
+    mLaunchAt = -100.0;
+    mWarnWas = false;
+    mCrew.clear();
+    mMySeat.clear();
+    mTurret = Turret();
+    mBomb = Bombsight();
+    mEng = Engines();
 }
 
 void WolfAir::send(const std::string& text)
@@ -285,11 +401,12 @@ void WolfAir::sayHello()
     send(llformat("hud hello %d", PROTOCOL_VERSION));
 }
 
-void WolfAir::order(const std::string& words)
+bool WolfAir::order(const std::string& words)
 {
-    if (!onWolf() || !mState.mHi) return;
+    if (!onWolf() || !mState.mHi || mSeatRoot.isNull() || !WolfGrid::isOnWolfTerritoriesConfirmed()) return false;
     mLastCommandAt = now();
     send(words);
+    return true;
 }
 
 void WolfAir::fire(bool on)
@@ -344,10 +461,16 @@ bool WolfAir::onObjectChat(const LLUUID& source, U8 chat_type, const std::string
     {
         return true;
     }
+    handleLine(text);
+    return true;
+}
+
+void WolfAir::handleLine(const std::string& text)
+{
     const std::vector<std::string> f = split(text, '|', MAX_FIELDS);
     if (f.size() < 2)
     {
-        return true;
+        return;
     }
     mLastLineAt = now();
     const std::string& kind = f[1];
@@ -357,8 +480,181 @@ bool WolfAir::onObjectChat(const LLUUID& source, U8 chat_type, const std::string
     else if (kind == "kill") parseKill(f);
     else if (kind == "down") parseDown(f);
     else if (kind == "respawn") { mState.mRespawnAt = now(); mState.mDownBy.clear(); }
+    else if (kind == "warn")
+    {
+        // Source: wolf_dogfight.lsl Happened: Line("warn|" + text) - the text is everything after "warn|"
+        const size_t at = text.find('|', PREFIX.size());
+        mState.mWarnText = at == std::string::npos ? std::string() : cleanText(text.substr(at + 1), 120);
+        mState.mWarnAt = now();
+    }
+    else if (kind == "crew") parseCrew(f);          // DESIGN_BOMBERS.md s9
+    else if (kind == "tur") parseTurret(f);
+    else if (kind == "bmb") parseBomb(f);
+    else if (kind == "bomb")
+    {
+        for (size_t i = 2; i < f.size(); ++i)
+        {
+            if (f[i].compare(0, 4, "txt=") == 0) mBomb.mLastImpact = cleanText(f[i].substr(4), 120);
+        }
+        mBomb.mImpactAt = now();
+    }
+    else if (kind == "eng") parseEngines(f);        // DESIGN_BOMBERS.md s10
+    else if (kind == "preview" && mPreview) parsePreview(f);
     // anything else: a later version's - ignored (as WolfHelm)
-    return true;
+}
+
+void WolfAir::parseCrew(const std::vector<std::string>& f)
+{
+    // Source: DESIGN_BOMBERS.md s9 crew|me=<seat>|role=<words>|s=<seat>,<role words>,<avatar name or empty>...
+    std::vector<CrewSeat> seats;
+    for (size_t i = 2; i < f.size(); ++i)
+    {
+        const size_t eq = f[i].find('=');
+        if (eq == std::string::npos) continue;
+        const std::string k = f[i].substr(0, eq), v = f[i].substr(eq + 1);
+        if (k == "me")
+        {
+            const std::string me = seatName(v);
+            if (me != mMySeat)
+            {
+                // a new seat (s9 "hud seat"): the old station's turret, sight and engines are not this one's
+                mTurret = Turret();
+                mTurretCue = Seeker();
+                mBomb = Bombsight();
+                mEng = Engines();
+                if (mFiring) fire(false);
+            }
+            mMySeat = me;
+        }
+        else if (k == "s" && seats.size() < 16)
+        {
+            const std::vector<std::string> p = split(v, ',', 3);
+            CrewSeat c;
+            c.mSeat = seatName(p[0]);
+            c.mRole = p.size() > 1 ? cleanText(p[1], 32) : std::string();
+            c.mName = p.size() > 2 ? cleanText(p[2], 64) : std::string();
+            if (!c.mSeat.empty()) seats.push_back(c);
+        }
+    }
+    mCrew.swap(seats);
+}
+
+void WolfAir::parseTurret(const std::vector<std::string>& f)
+{
+    // Source: DESIGN_BOMBERS.md s9 tur|seat=|zaz=|az=|el=|azmin=|azmax=|elmin=|elmax=|rate=|ammo=|heat=|fire=|stop=
+    Turret& t = mTurret;
+    t.mHave = true;
+    for (size_t i = 2; i < f.size(); ++i)
+    {
+        const size_t eq = f[i].find('=');
+        if (eq == std::string::npos) continue;
+        const std::string k = f[i].substr(0, eq), v = f[i].substr(eq + 1);
+        if (k == "seat") t.mSeat = seatName(v);
+        else if (k == "zaz") t.mZeroAz = num(v, -360.f, 360.f, t.mZeroAz);
+        else if (k == "az") t.mAz = num(v, -360.f, 360.f, t.mAz);
+        else if (k == "el") t.mEl = num(v, -90.f, 90.f, t.mEl);
+        else if (k == "azmin") t.mAzMin = num(v, -360.f, 360.f, t.mAzMin);
+        else if (k == "azmax") t.mAzMax = num(v, -360.f, 360.f, t.mAzMax);
+        else if (k == "elmin") t.mElMin = num(v, -90.f, 90.f, t.mElMin);
+        else if (k == "elmax") t.mElMax = num(v, -90.f, 90.f, t.mElMax);
+        else if (k == "rate") t.mRate = num(v, 0.f, 1000.f, t.mRate);
+        else if (k == "ammo") t.mAmmo = inum(v, 0, 1000000, t.mAmmo);
+        else if (k == "heat") t.mHeat = inum(v, 0, 100, t.mHeat);
+        else if (k == "fire") t.mFire = flag(v);
+        else if (k == "stop") t.mStop = cleanText(v, 24);
+    }
+}
+
+void WolfAir::parseBomb(const std::vector<std::string>& f)
+{
+    // Source: DESIGN_BOMBERS.md s9 bmb|doors=0/1/2|open=|left=|load=|stick=|sp=|ttr=|drift=|steer=L/R/S|tgt=|tr=|safe=
+    Bombsight& b = mBomb;
+    b.mHave = true;
+    for (size_t i = 2; i < f.size(); ++i)
+    {
+        const size_t eq = f[i].find('=');
+        if (eq == std::string::npos) continue;
+        const std::string k = f[i].substr(0, eq), v = f[i].substr(eq + 1);
+        if (k == "doors") b.mDoors = inum(v, 0, 2, b.mDoors);
+        else if (k == "open") b.mOpenS = num(v, 0.f, 600.f, b.mOpenS);
+        else if (k == "left") b.mLeft = inum(v, 0, 1000, b.mLeft);
+        else if (k == "load") b.mLoad = inum(v, 0, 1000, b.mLoad);
+        else if (k == "stick") b.mStick = v == "all" ? 0 : inum(v, 0, 1000, b.mStick);   // s9 "hud stick <n|all>"
+        else if (k == "sp") b.mSpacingMs = inum(v, 0, 1000, b.mSpacingMs);
+        else if (k == "ttr") b.mTtr = num(v, -1.f, 3600.f, -1.f);
+        else if (k == "drift") b.mDrift = num(v, -90.f, 90.f, b.mDrift);
+        else if (k == "steer") b.mSteer = (v == "L" || v == "R" || v == "S") ? v : std::string();
+        else if (k == "tgt") b.mTarget = cleanText(v, 48);
+        else if (k == "tr") b.mTargetM = num(v, 0.f, 1.0e6f, b.mTargetM);
+        else if (k == "safe") b.mSafe = flag(v);
+    }
+}
+
+void WolfAir::parseEngines(const std::vector<std::string>& f)
+{
+    // Source: DESIGN_BOMBERS.md s10 eng|n=<count>|e=<i>,<rpm %>,<run>,<fea>,<pw %>,<fire>,<btl>...|ap=|trim=|asym=
+    //   Concorde adds rh=<0/1 each, joined by />|nose=<deg>|cg=<%>
+    Engines& e = mEng;
+    e.mHave = true;
+    for (size_t i = 2; i < f.size(); ++i)
+    {
+        const size_t eq = f[i].find('=');
+        if (eq == std::string::npos) continue;
+        const std::string k = f[i].substr(0, eq), v = f[i].substr(eq + 1);
+        if (k == "n") e.mCount = inum(v, 0, MAX_ENGINES, e.mCount);
+        else if (k == "e")
+        {
+            const std::vector<std::string> p = split(v, ',', 7);
+            const S32 n = p.empty() ? 0 : inum(p[0], 0, MAX_ENGINES, 0);
+            if (n < 1 || p.size() < 7) continue;
+            Engine& x = e.mE[n - 1];
+            x.mRpm = inum(p[1], 0, 200, x.mRpm);
+            x.mRun = flag(p[2]);
+            x.mFeathered = flag(p[3]);
+            x.mPower = inum(p[4], 0, 100, x.mPower);
+            x.mFire = flag(p[5]);
+            x.mBottle = flag(p[6]);
+        }
+        else if (k == "ap") e.mAP = flag(v);
+        else if (k == "trim") e.mTrim = inum(v, -100, 100, e.mTrim);
+        else if (k == "asym") e.mAsym = flag(v);
+        else if (k == "rh")
+        {
+            e.mConcorde = true;
+            const std::vector<std::string> p = split(v, '/', MAX_ENGINES);
+            for (size_t j = 0; j < p.size(); ++j) e.mE[j].mReheat = flag(p[j]);
+        }
+        else if (k == "nose") { e.mConcorde = true; e.mNose = num(v, 0.f, 20.f, e.mNose); }
+        else if (k == "cg") { e.mConcorde = true; e.mCg = num(v, -100.f, 100.f, e.mCg); }
+    }
+}
+
+void WolfAir::parsePreview(const std::vector<std::string>& f)
+{
+    // [WOLF AIR PREVIEW] only from the preview file: what the world would tell the deck (the seeker's and the gunner's
+    // target, the flight data the hover cue reads)
+    for (size_t i = 2; i < f.size(); ++i)
+    {
+        const size_t eq = f[i].find('=');
+        if (eq == std::string::npos) continue;
+        const std::string k = f[i].substr(0, eq), v = f[i].substr(eq + 1);
+        if (k == "seeker" || k == "tcue")
+        {
+            Seeker& sk = k == "seeker" ? mSeeker : mTurretCue;
+            const std::vector<std::string> p = split(v, ',', 3);
+            sk.mTarget = p.size() == 3;
+            if (sk.mTarget)
+            {
+                sk.mOffDeg = num(p[0], 0.f, 180.f, 0.f);
+                sk.mRangeM = num(p[1], 0.f, 1.0e6f, 0.f);
+                sk.mName = cleanText(p[2], 48);
+            }
+        }
+        else if (k == "vs") mPreviewVS = num(v, -500.f, 500.f, 0.f);
+        else if (k == "gs") mPreviewGS = num(v, 0.f, 2000.f, 0.f);
+        else if (k == "agl") mPreviewAGL = num(v, 0.f, 100000.f, 0.f);
+        else if (k == "weapon") mWeapon = v == "ir" ? WPN_IR : v == "radar" ? WPN_RADAR : WPN_GUN;
+    }
 }
 
 void WolfAir::parseHi(const std::vector<std::string>& f)
@@ -434,6 +730,23 @@ void WolfAir::parseState(const std::vector<std::string>& f)
         else if (k == "df") s.mDogfight = cleanText(v, 32);
         else if (k == "safe") s.mSafe = flag(v);
         else if (k == "say") s.mSay = cleanText(v);
+        // [WOLF AIR JETS 2026-11-02] helm 1.5.x (wolf_plane_helm_template.lsl HudState) and kit 1.3.0 (HudFields)
+        else if (k == "mach") { s.mJet = true; s.mMach = num(v, 0.f, 10.f, s.mMach); }
+        else if (k == "rpm") s.mRpm = inum(v, 0, 200, s.mRpm);
+        else if (k == "rh") s.mReheat = flag(v);
+        else if (k == "ab") s.mAirbrake = flag(v);
+        else if (k == "noz") { s.mVtol = true; s.mNozzle = inum(v, 0, 180, s.mNozzle); }
+        else if (k == "h2o") s.mWaterS = inum(v, 0, 100000, s.mWaterS);
+        else if (k == "wet") s.mWet = flag(v);
+        else if (k == "kg") s.mMassKg = inum(v, 0, 10000000, s.mMassKg);
+        else if (k == "msl" || k == "cm")
+        {
+            const std::vector<std::string> p = split(v, '/', 2);
+            const S32 a = inum(p[0], 0, 100000, 0), b = p.size() > 1 ? inum(p[1], 0, 100000, 0) : 0;
+            if (k == "msl") { s.mIr = a; s.mRadar = b; }
+            else { s.mFlares = a; s.mChaff = b; }
+        }
+        else if (k == "warn") s.mWarn = flag(v);
     }
 }
 
@@ -529,6 +842,332 @@ void WolfAir::receive(const LLUUID& region_id, const std::vector<std::string>& s
 }
 
 // ════════════════════════════════════════════════════════════════════════════════════════
+// [WOLF AIR JETS 2026-11-02] stores, the jet's switches, the seeker, the missile warning
+// ════════════════════════════════════════════════════════════════════════════════════════
+
+// static
+const WolfAir::MissileType* WolfAir::missileOf(const std::string& cls, bool radar)
+{
+    for (const ClassStores& c : STORES)
+    {
+        if (cls != c.mClass) continue;
+        const char* id = radar ? c.mRadar : c.mIr;
+        if (!id) return nullptr;
+        for (const MissileType& m : MISSILES)
+        {
+            if (std::string(m.mId) == id) return &m;
+        }
+    }
+    return nullptr;
+}
+
+// static
+bool WolfAir::hasReheat(const std::string& cls)
+{
+    for (const ClassStores& c : STORES)
+    {
+        if (cls == c.mClass) return c.mReheat;
+    }
+    return false;
+}
+
+// static
+F32 WolfAir::hoverLimitKg(const std::string& cls, bool wet)
+{
+    if (cls != "harrier_gr3") return 0.f;
+    // rounded to the kilogram, as the README quotes it (8,110.8 -> 8,111)
+    return (F32)std::lround(HARRIER_THRUST_N * (wet ? 1.f : HARRIER_DRY_FRAC) * (1.f - HARRIER_RCS_LOSS) / STANDARD_G);
+}
+
+bool WolfAir::weaponCarried(EWeapon w) const
+{
+    const State& s = mState;
+    switch (w)
+    {
+    case WPN_IR:    return missileOf(s.mClass, false) != nullptr || s.mIr > 0;
+    case WPN_RADAR: return missileOf(s.mClass, true) != nullptr || s.mRadar > 0;
+    default:        return true;
+    }
+}
+
+void WolfAir::selectWeapon(EWeapon w)
+{
+    if (!weaponCarried(w) || isCrew()) return;
+    if (mWeapon != w && mFiring) fire(false);     // guns let go when the pilot switches away
+    if (mWeapon != w) mTriggerDown = false;       // the next press starts the new weapon
+    mWeapon = w;
+    mSeeker = Seeker();
+    mSeekerAt = 0.0;
+}
+
+void WolfAir::trigger(bool down)
+{
+    if (down == mTriggerDown) return;
+    mTriggerDown = down;
+    if (mWeapon == WPN_GUN || isCrew())
+    {
+        fire(down);     // guns (or the gunner's turret, s9 "hud fire on|off") while held
+        return;
+    }
+    if (!down) return;
+    // one missile a press. Source: wolf_dogfight.lsl listen: "hud missile" (infra-red) / "hud radar" -> Special()
+    const bool radar = mWeapon == WPN_RADAR;
+    const S32 had = radar ? mState.mRadar : mState.mIr;
+    if (order(radar ? "hud radar" : "hud missile"))
+    {
+        mLaunchRadar = radar;
+        mLaunchCount = had;
+        mLaunchAt = now();
+    }
+}
+
+std::string WolfAir::launchNote(LLColor4& col) const
+{
+    const F64 since = now() - mLaunchAt;
+    if (since > LAUNCH_SHOW) return std::string();
+    const S32 have = mLaunchRadar ? mState.mRadar : mState.mIr;
+    if (have < mLaunchCount)
+    {
+        col = LLColor4(0.30f, 0.95f, 0.40f, 1.f);
+        // the brevity words the kit itself says (wolf_dogfight.lsl Special: "Fox two" / "Fox three")
+        return mLaunchRadar ? "FOX THREE - MISSILE AWAY" : "FOX TWO - MISSILE AWAY";
+    }
+    if (since < LAUNCH_WAIT) { col = LLColor4(0.85f, 0.85f, 0.85f, 1.f); return "LAUNCHING..."; }
+    col = LLColor4(1.f, 0.72f, 0.f, 1.f);
+    if (!inDogfight()) return "NO LAUNCH - SWITCH DOGFIGHT ON";
+    if (have <= 0) return "NO LAUNCH - NONE LEFT";
+    // the plugin's refusal (no lock, the one-a-second rule, too many in the air) is told in nearby chat by the kit
+    return "NO LAUNCH - THE REASON IS IN NEARBY CHAT";
+}
+
+void WolfAir::decoy(bool flare)
+{
+    // Source: wolf_dogfight.lsl listen: "hud flare" / "hud chaff" -> Special()
+    order(flare ? "hud flare" : "hud chaff");
+}
+
+// The helm's own words on her channel (wolf_plane_helm_template.lsl Command, heard from the pilot on CH)
+void WolfAir::reheat() { order("reheat"); }
+void WolfAir::airbrake() { order("brakes"); }
+void WolfAir::nozzles(S32 deg)
+{
+    // Source: helm Command: "hover" = 90 deg, "nozzles <deg>" clamped to 0..NOZ_MAX (98.5)
+    if (deg == 90) order("hover");
+    else order(llformat("nozzles %d", llclamp(deg, 0, 98)));
+}
+void WolfAir::water() { order("water"); }
+
+bool WolfAir::warning() const
+{
+    return active() && (mState.mWarn || now() - mState.mWarnAt < WARN_HOLD);
+}
+
+// [WOLF AIR BOMBERS] DESIGN_BOMBERS.md s9 and s10 orders
+void WolfAir::changeSeat(const std::string& seat) { order("hud seat " + seat); }
+
+bool WolfAir::enginePanel() const
+{
+    if (!mEng.mHave) return false;
+    if (mMySeat.empty() || mMySeat == "pilot") return true;
+    // the flight engineer: s1 names his seat "seat_engineer"; the role words (s5/s9) say it too
+    if (mMySeat == "seat_engineer") return true;
+    for (const CrewSeat& c : mCrew)
+    {
+        if (c.mSeat == mMySeat)
+        {
+            std::string role = c.mRole;
+            LLStringUtil::toLower(role);
+            return role.find("engineer") != std::string::npos;
+        }
+    }
+    return false;
+}
+void WolfAir::bombDoors() { order("hud doors"); }
+void WolfAir::bombRelease() { order("hud release"); }
+void WolfAir::bombStick(S32 n) { order(n <= 0 ? std::string("hud stick all") : llformat("hud stick %d", n)); }
+void WolfAir::engineOrder(S32 i, const char* what)
+{
+    const std::string w(what);
+    if (w == "start" || w == "stop") order(llformat("hud engine %d %s", i, what));
+    else order(llformat("hud %s %d", what, i));       // feather / unfeather / extinguish
+}
+void WolfAir::autopilot(bool on) { order(on ? "hud ap on" : "hud ap off"); }
+void WolfAir::rudderTrim(bool on) { order(on ? "hud trim" : "hud trim off"); }
+void WolfAir::droop(F32 deg) { order(deg >= 12.f ? "hud droop 12.5" : deg >= 5.f ? "hud droop 5" : "hud droop 0"); }
+void WolfAir::concordeReheat(bool on) { order(on ? "hud reheat on" : "hud reheat off"); }
+void WolfAir::cgTrim(const char* dir) { order(std::string("hud cgtrim ") + dir); }
+
+bool WolfAir::turretAxis(LLVector3& origin, LLVector3& axis) const
+{
+    if (!mTurret.mHave) return false;
+    const LLViewerObject* root = gObjectList.findObject(mSeatRoot);
+    if (!root) return false;
+    // Source: DESIGN_BOMBERS.md s2 "zero_az_deg ... in the aircraft frame (+X nose = 0, +Y port = 90)"; az/el in the turret
+    // frame relative to it (s3.1). So the bore in her frame is (cos el cos A, cos el sin A, sin el), A = zaz + az.
+    const F32 a = (mTurret.mZeroAz + mTurret.mAz) * DEG_TO_RAD, e = mTurret.mEl * DEG_TO_RAD;
+    origin = root->getPositionAgent();
+    axis = LLVector3(cosf(e) * cosf(a), cosf(e) * sinf(a), sinf(e)) * root->getRotation();
+    axis.normalize();
+    return true;
+}
+
+// The seeker (a missile selected) and the gunner's cue: the warplane the plugin would pick. Source: AirMissiles.cs Launch -
+// of the aircraft within the cone and the reach, the one nearest the nose. The viewer cannot see dogfight mode, the era
+// rule or the safe airspace (TargetsFor), so this is the seeker's view; the plugin still decides the lock at launch.
+// Only moving roots are looked at (getActiveObjects), and only warplanes by their root's description.
+void WolfAir::scanSeeker()
+{
+    if (mPreview) return;           // the preview file says what the seeker sees
+    const F64 t = now();
+    const bool crew = isCrew();
+    const bool look_missile = !crew && mWeapon != WPN_GUN;
+    const bool look_turret = crew && mTurret.mHave;
+    if (!look_missile) mSeeker = Seeker();
+    if (!look_turret) mTurretCue = Seeker();
+    if ((!look_missile && !look_turret) || t - mSeekerAt < SEEKER_EVERY) return;
+    mSeekerAt = t;
+    const LLViewerObject* me = gObjectList.findObject(mSeatRoot);
+    if (!me) return;
+    const MissileType* mt = look_missile ? missileOf(mState.mClass, mWeapon == WPN_RADAR) : nullptr;
+    if (look_missile && !mt) { mSeeker = Seeker(); return; }
+    LLVector3 origin, axis;
+    if (look_missile) { if (!noseAxis(origin, axis)) return; }
+    else origin = me->getPositionAgent();
+    const F32 reach = look_missile ? mt->mRangeM : TURRET_REACH_M;
+    const F32 cos_cone = look_missile ? cosf(mt->mConeDeg * DEG_TO_RAD) : -1.f;
+    const LLQuaternion inv = ~me->getRotation();
+    Seeker best;
+    F32 best_score = -2.f;
+    S32 asks = 0;
+    for (const LLPointer<LLViewerObject>& p : gObjectList.getActiveObjects())
+    {
+        LLViewerObject* o = p.get();
+        if (!o || o->isDead() || o->getParent() || o->isAvatar() || o->isAttachment() || o == me) continue;
+        const LLVector3 r = o->getPositionAgent() - origin;
+        const F32 d = r.length();
+        if (d < 1.f || d > reach) continue;
+        const LLVector3 u = r * (1.f / d);
+        F32 score = 0.f;
+        if (look_missile)
+        {
+            score = u * axis;
+            if (score < cos_cone) continue;
+        }
+        else
+        {
+            // inside the turret's arcs (s2 az/el relative to zero_az), nearest first
+            const LLVector3 l = u * inv;
+            const F32 az = wrap180deg(atan2f(l.mV[VY], l.mV[VX]) * RAD_TO_DEG - mTurret.mZeroAz);
+            const F32 el = asinf(llclamp(l.mV[VZ], -1.f, 1.f)) * RAD_TO_DEG;
+            if (az < mTurret.mAzMin || az > mTurret.mAzMax || el < mTurret.mElMin || el > mTurret.mElMax) continue;
+            score = 1.f - d / reach;
+        }
+        if (score <= best_score) continue;
+        const WolfObjectProps::Props* pr = WolfObjectProps::instance().get(o->getID());
+        if (!pr)
+        {
+            if (asks++ < SEEKER_ASKS) WolfObjectProps::instance().want(o, false);
+            continue;
+        }
+        if (!isWarplaneDesc(pr->mDescriptionLower)) continue;
+        best_score = score;
+        best.mTarget = true;
+        best.mName = cleanText(pr->mName, 48);
+        best.mRangeM = d;
+        best.mOffDeg = look_missile ? acosf(llclamp(score, -1.f, 1.f)) * RAD_TO_DEG : 0.f;
+        best.mPosAgent = o->getPositionAgent();
+    }
+    if (look_missile) mSeeker = best; else mTurretCue = best;
+}
+
+void WolfAir::warnTone()
+{
+    const bool live = warning();
+    const F64 t = now();
+    const bool rising = live && !mWarnWas;
+    mWarnWas = live;
+    static LLCachedControl<bool> tone_on(gSavedSettings, "WolfAirWarnTone", true);
+    if (rising)
+    {
+        // once a warning: what the pilot was shown, and whether the tone could play (a flea report says which)
+        LL_INFOS("WolfAir") << "missile warning: \"" << mState.mWarnText << "\" tone " << (tone_on ? "on" : "off (WolfAirWarnTone)")
+                            << (gAudiop ? "" : ", no audio engine") << LL_ENDL;
+    }
+    if (!live || !tone_on || !gAudiop) return;
+    if (!rising && t - mToneAt < WARN_TONE_EVERY) return;
+    if (mToneState == 0)
+    {
+        mToneState = writeWarnTone() ? 1 : -1;
+        if (mToneState < 0) LL_WARNS("WolfAir") << "the missile-warning tone could not be written to the sound cache" << LL_ENDL;
+    }
+    if (mToneState > 0 && !LLFile::isfile(gDirUtilp->getExpandedFilename(LL_PATH_FS_SOUND_CACHE, std::string(WARN_TONE_UUID)) + ".dsf"))
+    {
+        mToneState = writeWarnTone() ? 1 : -1;     // the sound cache was cleared under us: write it again
+    }
+    if (mToneState < 0) return;     // the band's MISSILE cue still shows
+    mToneAt = t;
+    // a UI sound: the UI volume slider governs it (llappviewer.cpp ui_audio_callback uses the same type)
+    SoundData sd(LLUUID(WARN_TONE_UUID), gAgentID, WARN_TONE_GAIN, LLAudioEngine::AUDIO_TYPE_UI);
+    gAudiop->triggerSound(sd);
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════
+// [WOLF AIR PREVIEW] recorded lines at the login screen (WolfAirPreviewFile), for testing the deck off the grid
+// ════════════════════════════════════════════════════════════════════════════════════════
+
+bool WolfAir::previewWanted()
+{
+    // only before a login starts: once in-world nothing here can run
+    return LLStartUp::getStartupState() <= STATE_LOGIN_WAIT;
+}
+
+void WolfAir::previewTick()
+{
+    if (mPreviewChecked == 0)
+    {
+        mPreviewChecked = 1;
+        const std::string path = gSavedSettings.getString("WolfAirPreviewFile");
+        if (!path.empty() && previewWanted())
+        {
+            llifstream in(path.c_str());
+            std::string line;
+            while (in.good() && std::getline(in, line) && mPreviewLines.size() < 2000)
+            {
+                // "<seconds> WolfAir1|..." ; '#' starts a comment
+                if (line.empty() || line[0] == '#') continue;
+                const size_t sp = line.find(' ');
+                F64 at = 0.0;
+                if (sp == std::string::npos || !parseNumber(line.substr(0, sp), at)) continue;
+                std::string text = line.substr(sp + 1);
+                LLStringUtil::trim(text);
+                if (text.compare(0, PREFIX.size(), PREFIX) == 0) mPreviewLines.emplace_back(at, text);
+            }
+            mPreview = !mPreviewLines.empty();
+            LL_INFOS("WolfAir") << "preview file " << path << ": " << mPreviewLines.size() << " lines" << LL_ENDL;
+            mPreviewStart = now();
+        }
+    }
+    if (!mPreview) return;
+    if (!previewWanted())
+    {
+        // a login started: the preview ends and leaves nothing behind
+        mPreview = false;
+        mPreviewLines.clear();
+        reset(LLUUID::null);
+        mKills.clear();
+        return;
+    }
+    const F64 t = now() - mPreviewStart;
+    while (mPreviewNext < mPreviewLines.size() && mPreviewLines[mPreviewNext].first <= t)
+    {
+        handleLine(mPreviewLines[mPreviewNext].second);
+        ++mPreviewNext;
+    }
+    while (!mKills.empty() && now() - mKills.back().mAt > KILL_SHOW) mKills.pop_back();
+    warnTone();
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════
 // every frame
 // ════════════════════════════════════════════════════════════════════════════════════════
 
@@ -542,20 +1181,23 @@ void WolfAir::pollFireKey()
     {
         down = gKeyboard->getKeyDown(key == 1 ? ' ' : KEY_INSERT);
     }
-    if (down && !mFiring)
+    // [WOLF AIR JETS] the selected weapon: guns while held, one missile a press (trigger)
+    if (down && !mKeyFiring && !mTriggerDown)
     {
         mKeyFiring = true;
-        fire(true);
+        trigger(true);
     }
     else if (!down && mKeyFiring)
     {
         mKeyFiring = false;
-        fire(false);
+        trigger(false);
     }
 }
 
 void WolfAir::idle()
 {
+    // [WOLF AIR PREVIEW] in-world now: a preview left over from the login screen ends here too
+    if (mPreview) previewTick();
     const bool wolf = onWolf();
     if ((S32)wolf != mOnWolf)
     {
@@ -596,11 +1238,7 @@ void WolfAir::idle()
         if (const WolfObjectProps::Props* p = WolfObjectProps::instance().get(id))
         {
             mDescKnown = true;
-            std::string d = p->mDescriptionLower;
-            LLStringUtil::trimHead(d);
-            // Source: wolfhelm.cpp - the word ends there ("wolfvehicle:warplane", not "...warplanes2")
-            mPlaneDesc = d.compare(0, PLANE_DESC.size(), PLANE_DESC) == 0
-                      && (d.size() == PLANE_DESC.size() || (!isalnum((unsigned char)d[PLANE_DESC.size()]) && d[PLANE_DESC.size()] != '_'));
+            mPlaneDesc = isWarplaneDesc(p->mDescriptionLower);
         }
         else
         {
@@ -638,6 +1276,8 @@ void WolfAir::idle()
     }
     if (mState.mHi)
     {
+        scanSeeker();
+        warnTone();
         pollFireKey();
         if (mFiring && t - mFireSentAt >= FIRE_REPEAT)
         {

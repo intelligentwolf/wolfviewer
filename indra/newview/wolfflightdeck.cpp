@@ -565,6 +565,18 @@ void WolfFlightDeck::draw()
 {
     WolfFlight& f = WolfFlight::instance();
     mHits.clear();
+    // [WOLF AIR PREVIEW 2026-11-02] at the login screen only, the warplane displays drawn from WolfAirPreviewFile's recorded
+    // lines (wolfair.cpp previewTick): for testing the deck off the grid. Nothing is sent; it ends when a login starts.
+    if (!f.active())
+    {
+        WolfAir::instance().previewTick();
+        if (WolfAir::instance().previewing())
+        {
+            LLGLSUIDefault gls_ui;
+            layoutAndDraw();
+            return;
+        }
+    }
     if (!f.active())
     {
         mPanelTop = mPanelBottom = 0.f;
@@ -750,13 +762,27 @@ void WolfFlightDeck::layoutAndDraw()
     // The instruments left to right, in widths of the display height D. Flight: clock, gear,
     // sidestick, PFD, ND, EICAS, CDU. Sailing: clock, helm, wind, speed and depth, chartplotter,
     // EICAS, CDU. The clock goes first when the screen is narrow.
-    enum EPanel { P_CLOCK, P_GEAR, P_STICK, P_PFD, P_ND, P_EICAS, P_CDU, P_HELM, P_WIND, P_DATA, P_COMBAT };
+    enum EPanel { P_CLOCK, P_GEAR, P_STICK, P_PFD, P_ND, P_EICAS, P_CDU, P_HELM, P_WIND, P_DATA, P_COMBAT,
+                  P_JET, P_ENGINES, P_CREW, P_TURRET, P_BOMBSIGHT };
     // [WOLF AIR 2026-11-01] in a warplane that speaks WolfAir1 the COMBAT display takes the EICAS's place (DESIGN.md s7)
-    const bool air = !sail && WolfAir::instance().active();
+    WolfAir& wa = WolfAir::instance();
+    const bool air = !sail && wa.active();
+    const bool preview = wa.previewing();
     struct Panel { EPanel p; F32 w; };
     std::vector<Panel> panels;
     panels.push_back({ P_CLOCK, 0.50f });
-    if (sail)
+    if (air && (wa.isCrew() || preview))
+    {
+        // [WOLF AIR BOMBERS] a crew member (DESIGN_BOMBERS.md s9) does not fly her: the intercom, his own station, the
+        // damage. [WOLF AIR PREVIEW] the preview shows only the warplane's displays (no flight data off the grid).
+        if (wa.isCrew()) panels.push_back({ P_CREW, 0.85f });
+        if (wa.turret().mHave) panels.push_back({ P_TURRET, 1.0f });
+        if (wa.bombsight().mHave) panels.push_back({ P_BOMBSIGHT, 1.0f });
+        if (wa.enginePanel()) panels.push_back({ P_ENGINES, 1.0f });
+        if (!wa.isCrew() && wa.state().mJet) panels.push_back({ P_JET, 0.75f });
+        panels.push_back({ P_COMBAT, 0.95f });
+    }
+    else if (sail)
     {
         panels.push_back({ P_HELM, 0.62f });
         panels.push_back({ P_WIND, 1.0f });
@@ -768,9 +794,15 @@ void WolfFlightDeck::layoutAndDraw()
         panels.push_back({ P_STICK, 0.56f });
         panels.push_back({ P_PFD, 1.0f });
     }
-    panels.push_back({ P_ND, 1.0f });
-    panels.push_back({ air ? P_COMBAT : P_EICAS, air ? 0.95f : 0.80f });
-    panels.push_back({ P_CDU, 0.84f });
+    if (!(air && (wa.isCrew() || preview)))
+    {
+        panels.push_back({ P_ND, 1.0f });
+        // [WOLF AIR JETS 2026-11-02] a jet's JET display, a bomber pilot's ENGINES (s10), beside COMBAT
+        if (air && wa.state().mJet) panels.push_back({ P_JET, 0.75f });
+        if (air && wa.enginePanel()) panels.push_back({ P_ENGINES, 1.0f });
+        panels.push_back({ air ? P_COMBAT : P_EICAS, air ? 0.95f : 0.80f });
+        panels.push_back({ P_CDU, 0.84f });
+    }
     auto unitsOf = [&]()
     {
         F32 u = gap * (panels.size() - 1);
@@ -782,6 +814,16 @@ void WolfFlightDeck::layoutAndDraw()
     if (Dw < D * 0.9f)
     {
         panels.erase(panels.begin());   // no room for the clock
+        units = unitsOf();
+        Dw = (W - 2.f * pad) / units;
+    }
+    // [WOLF AIR JETS] still no room (a jet or a bomber has one display more): the sidestick's picture goes next
+    if (Dw < D * 0.9f)
+    {
+        for (size_t i = 0; i < panels.size(); ++i)
+        {
+            if (panels[i].p == P_STICK) { panels.erase(panels.begin() + (long)i); break; }
+        }
         units = unitsOf();
         Dw = (W - 2.f * pad) / units;
     }
@@ -807,6 +849,11 @@ void WolfFlightDeck::layoutAndDraw()
         case P_WIND:  drawWindDial(x, yb, r, yt); break;
         case P_DATA:  drawSailData(x, yb, r, yt); break;
         case P_COMBAT: drawCombat(x, yb, r, yt); break;   // [WOLF AIR 2026-11-01/]
+        case P_JET: drawJet(x, yb, r, yt); break;          // [WOLF AIR JETS 2026-11-02/]
+        case P_ENGINES: drawEngines(x, yb, r, yt); break;  // [WOLF AIR BOMBERS] s10
+        case P_CREW: drawCrew(x, yb, r, yt); break;        // s9
+        case P_TURRET: drawTurret(x, yb, r, yt); break;
+        case P_BOMBSIGHT: drawBombsight(x, yb, r, yt); break;
         }
         x = r + gap * D;
     }
@@ -3224,6 +3271,24 @@ namespace
     const F32 SIGHT_RING_RAD = atanf(44.704f / 744.f);
     const F32 BAIL_CONFIRM_S = 4.f;
     const LLColor4 C_SIGHT(1.00f, 0.55f, 0.20f, 0.85f);   // the GM2's lamp through its orange-tinted glass (as the deck's HUD green)
+
+    std::string upper(std::string s)
+    {
+        LLStringUtil::toUpper(s);
+        return s;
+    }
+
+    // Thousands as residents read them: 2,500 (British English, the deck's figures)
+    std::string thousands(S32 v)
+    {
+        std::string d = llformat("%d", llabs(v)), out;
+        for (size_t i = 0; i < d.size(); ++i)
+        {
+            if (i > 0 && (d.size() - i) % 3 == 0) out += ',';
+            out += d[i];
+        }
+        return v < 0 ? "-" + out : out;
+    }
 }
 
 void WolfFlightDeck::drawCombat(F32 l, F32 b, F32 r, F32 t)
@@ -3251,9 +3316,13 @@ void WolfFlightDeck::drawCombat(F32 l, F32 b, F32 r, F32 t)
         text(mF.mTiny, "NO DOGFIGHTS ON THIS REGION", sr - w * 0.04f, top - h * 0.07f, C_DIM, LLFontGL::RIGHT, LLFontGL::TOP);
     }
 
+    // [WOLF AIR JETS 2026-11-02] a jet or a missile-carrier gets the stores rows and a second row of buttons (FLARE, CHAFF)
+    const bool stores = a.weaponCarried(WolfAir::WPN_IR) || a.weaponCarried(WolfAir::WPN_RADAR) || s.mFlares > 0 || s.mChaff > 0;
+    const bool jet_panel = s.mJet;                          // the JET display shows fuel, G and AOA
+    const F32 rows_top = stores ? 0.37f : 0.20f;
     // ---- the damage picture: the aircraft from above, nose up, each of the eight parts in its own colour ----
     // the picture beside the parts' figures (a short column at the left edge), the guns to its right
-    const F32 pl = sl + w * 0.19f, pr = sl + w * 0.53f, pt = top - h * 0.12f, pb = sb + h * 0.30f;
+    const F32 pl = sl + w * 0.19f, pr = sl + w * 0.53f, pt = top - h * 0.12f, pb = sb + h * (rows_top + 0.10f);
     const F32 cx = (pl + pr) * 0.5f, ph = pt - pb, pw = pr - pl;
     const std::array<S32, WolfAir::PART_COUNT>& d = s.mDmg;
     const bool have = s.mHaveState;
@@ -3318,13 +3387,20 @@ void WolfFlightDeck::drawCombat(F32 l, F32 b, F32 r, F32 t)
         weapon(fmt("CANNON x%d", s.mCannon).c_str(), s.mAmmoCannon, s.mHeatCannon, gy);
         gy -= h * 0.20f;
     }
-    // fuel, G and angle of attack
-    text(mF.mTiny, fmt("FUEL %d%%", s.mFuel), gl, gy, s.mFuel < 15 ? C_AMBER : C_GREY, LLFontGL::LEFT, LLFontGL::TOP);
-    text(mF.mTiny, fmt("G %.1f", s.mG), gr, gy, (s.mGmax > 0.f && s.mG > s.mGmax * 0.9f) ? C_RED : C_GREY, LLFontGL::RIGHT, LLFontGL::TOP);
-    gy -= h * 0.06f;
-    text(mF.mTiny, fmt("AOA %.0f", s.mAoa), gl, gy, s.mStalled ? C_RED : C_GREY, LLFontGL::LEFT, LLFontGL::TOP);
-    if (s.mStalled && blink(0.5f)) text(mF.mTiny, "STALL", gr, gy, C_RED, LLFontGL::RIGHT, LLFontGL::TOP);
-    gy -= h * 0.06f;
+    if (stores)
+    {
+        gy = drawStores(gl, gr, gy, h, w);   // [WOLF AIR JETS/]
+    }
+    if (!jet_panel)
+    {
+        // fuel, G and angle of attack (a jet's are on its JET display)
+        text(mF.mTiny, fmt("FUEL %d%%", s.mFuel), gl, gy, s.mFuel < 15 ? C_AMBER : C_GREY, LLFontGL::LEFT, LLFontGL::TOP);
+        text(mF.mTiny, fmt("G %.1f", s.mG), gr, gy, (s.mGmax > 0.f && s.mG > s.mGmax * 0.9f) ? C_RED : C_GREY, LLFontGL::RIGHT, LLFontGL::TOP);
+        gy -= h * 0.06f;
+        text(mF.mTiny, fmt("AOA %.0f", s.mAoa), gl, gy, s.mStalled ? C_RED : C_GREY, LLFontGL::LEFT, LLFontGL::TOP);
+        if (s.mStalled && blink(0.5f)) text(mF.mTiny, "STALL", gr, gy, C_RED, LLFontGL::RIGHT, LLFontGL::TOP);
+        gy -= h * 0.06f;
+    }
     if (s.mSafe)
     {
         text(mF.mTiny, "SAFE AIRSPACE - GUNS SAFE", gl, gy, C_CYAN, LLFontGL::LEFT, LLFontGL::TOP);
@@ -3347,19 +3423,38 @@ void WolfFlightDeck::drawCombat(F32 l, F32 b, F32 r, F32 t)
     button(sl + gap, H_AIR_DOGFIGHT, on ? "DOGFIGHT ON" : "DOGFIGHT", C_GREEN, on,
            on ? "Leave dogfight mode: you can be fired on for 30 more seconds, and firing keeps you in" :
                 "Enter dogfight mode: only aircraft in dogfight mode can fire at each other or be hit");
-    button(sl + gap * 2.f + bw, H_AIR_FIRE, "FIRE", C_RED, a.firing(),
-           "Hold to fire (short bursts: the guns overheat and jam). In mouselook the left mouse button fires too; set an extra fire key on the CDU CONTROLS page");
+    // [WOLF AIR JETS] FIRE lets go the selected weapon; the brevity words the kit itself says for a missile (Special)
+    const WolfAir::EWeapon wpn = a.weapon();
+    button(sl + gap * 2.f + bw, H_AIR_FIRE, wpn == WolfAir::WPN_IR ? "FOX 2" : wpn == WolfAir::WPN_RADAR ? "FOX 3" : "FIRE", C_RED, a.firing(),
+           wpn == WolfAir::WPN_GUN ? "Hold to fire (short bursts: the guns overheat and jam). In mouselook the left mouse button fires too; set an extra fire key on the CDU CONTROLS page"
+                                   : "Press to launch one missile at the target in the seeker circle (the fire key does the same)");
     const bool ask = now() - mBailAskAt < BAIL_CONFIRM_S;
     button(sl + gap * 3.f + bw * 2.f, H_AIR_BAIL, ask ? "CONFIRM" : "BAIL OUT", C_AMBER, ask || down,
            "Jump with the parachute. Press again to confirm");
+    F32 say_y = bt + h * 0.02f;
+    if (stores)
+    {
+        // [WOLF AIR JETS] the decoys: the one the missile warning names flashes (AirMissiles.cs:95 "release chaff"/"release flares")
+        const std::string& wt = s.mWarnText;
+        const bool warn = a.warning();
+        const bool want_flare = warn && wt.find("flares") != std::string::npos;
+        const bool want_chaff = warn && wt.find("chaff") != std::string::npos;
+        const F32 bb2 = bt + h * 0.02f, bt2 = bb2 + (bt - bb);
+        const F32 bw2 = (w - gap * 3.f) * 0.5f;
+        airButton(sl + gap, sl + gap + bw2, bb2, bt2, w, H_AIR_FLARE, fmt("FLARE %d", s.mFlares), C_AMBER, want_flare && blink(0.5f),
+                  "Release flares: they pull infra-red missiles off you");
+        airButton(sl + gap * 2.f + bw2, sr - gap, bb2, bt2, w, H_AIR_CHAFF, fmt("CHAFF %d", s.mChaff), C_AMBER, want_chaff && blink(0.5f),
+                  "Release chaff: it pulls radar missiles off you");
+        say_y = bt2 + h * 0.02f;
+    }
     // what the plane said last, and a plane that stopped answering (never console only)
     if (a.noAnswer())
     {
-        text(mF.mTiny, "THE AIRCRAFT IS NOT ANSWERING", sl + w * 0.04f, bt + h * 0.02f, C_AMBER, LLFontGL::LEFT, LLFontGL::BOTTOM);
+        text(mF.mTiny, "THE AIRCRAFT IS NOT ANSWERING", sl + w * 0.04f, say_y, C_AMBER, LLFontGL::LEFT, LLFontGL::BOTTOM);
     }
     else if (!s.mSay.empty())
     {
-        text(mF.mTiny, s.mSay, sl + w * 0.04f, bt + h * 0.02f, C_WHITE, LLFontGL::LEFT, LLFontGL::BOTTOM);
+        text(mF.mTiny, s.mSay, sl + w * 0.04f, say_y, C_WHITE, LLFontGL::LEFT, LLFontGL::BOTTOM);
     }
 }
 
@@ -3371,39 +3466,227 @@ void WolfFlightDeck::drawAirOverlay(F32 top_of_world)
     LLLocalClipRect clip(LLRect(0, (S32)Hv, (S32)W, (S32)top_of_world));
     const LLFontGL* big = mF.mLarge ? mF.mLarge : LLFontGL::getFontSansSerifBig();
     const LLFontGL* med = mF.mMed ? mF.mMed : LLFontGL::getFontSansSerif();
-    const LLFontGL* small = mF.mSmall ? mF.mSmall : LLFontGL::getFontSansSerifSmall();
+    const LLFontGL* sml = mF.mSmall ? mF.mSmall : LLFontGL::getFontSansSerifSmall();
     const F64 t = now();
 
     // ---- the reflector gunsight: a ring and centre dot along the aircraft's nose, collimated (it sits where the nose points,
-    // whatever the camera does), with the broken cross lines of the RAF reflector sights. Not while shot down. ----
-    LLVector3 origin, axis;
-    if (!a.isDown() && a.noseAxis(origin, axis))
+    // whatever the camera does), with the broken cross lines of the RAF reflector sights. Not while shot down, and not for a
+    // crew member (the gunner's own sight follows the turret, below). ----
+    LLViewerCamera* cam = LLViewerCamera::getInstance();
+    // A point in agent space on the screen (false when behind the camera).
+    auto onScreen = [&](const LLVector3& p, F32& x, F32& y) -> bool
     {
-        LLViewerCamera* cam = LLViewerCamera::getInstance();
-        if (axis * cam->getAtAxis() > 0.5f)
+        if ((p - cam->getOrigin()) * cam->getAtAxis() <= 0.f) return false;
+        LLCoordGL c;
+        cam->projectPosAgentToScreen(p, c, false);
+        S32 lx = 0, ly = 0;
+        screenPointToLocal(c.mX, c.mY, &lx, &ly);
+        x = (F32)lx; y = (F32)ly;
+        return true;
+    };
+    // A direction's ring of half-angle `ang` round it, as a centre and a radius on the screen.
+    auto ringOf = [&](const LLVector3& axis, F32 ang, F32& cx, F32& cy, F32& rad) -> bool
+    {
+        if (axis * cam->getAtAxis() <= 0.5f) return false;
+        const LLVector3 o = cam->getOrigin();
+        F32 x1 = 0.f, y1 = 0.f;
+        if (!onScreen(o + axis * 1000.f, cx, cy)) return false;
+        const LLVector3 off = axis * cosf(ang) + cam->getLeftAxis() * sinf(ang);
+        if (!onScreen(o + off * 1000.f, x1, y1)) { rad = Hv; return true; }
+        rad = sqrtf((x1 - cx) * (x1 - cx) + (y1 - cy) * (y1 - cy));
+        return true;
+    };
+    F32 scx = 0.f, scy = 0.f, srad = 0.f;
+    bool sight = false;
+    LLVector3 origin, axis;
+    if (!a.isDown() && !a.isCrew())
+    {
+        if (a.noseAxis(origin, axis) && ringOf(axis, SIGHT_RING_RAD, scx, scy, srad)) sight = true;
+        else if (a.previewing())
         {
-            const LLVector3 o = cam->getOrigin();
-            LLCoordGL c0, c1;
-            cam->projectPosAgentToScreen(o + axis * 1000.f, c0, false);
-            LLVector3 side = cam->getLeftAxis();
-            const LLVector3 off = axis * cosf(SIGHT_RING_RAD) + side * sinf(SIGHT_RING_RAD);
-            cam->projectPosAgentToScreen(o + off * 1000.f, c1, false);
-            S32 x0 = 0, y0 = 0, x1 = 0, y1 = 0;
-            screenPointToLocal(c0.mX, c0.mY, &x0, &y0);
-            screenPointToLocal(c1.mX, c1.mY, &x1, &y1);
-            const F32 cx = (F32)x0, cy = (F32)y0;
-            const F32 rad = llclamp(sqrtf((F32)((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0))), 12.f, Hv * 0.4f);
-            const LLColor4 col = s.mSafe ? withAlpha(C_CYAN, 0.6f) : C_SIGHT;
-            arcW(cx, cy, rad, 1.6f, 0.f, F_TWO_PI, col, 64);   // radians (arcW above)
+            // [WOLF AIR PREVIEW] no aircraft: the sight where the nose would be, straight ahead
+            scx = W * 0.5f; scy = top_of_world + (Hv - top_of_world) * 0.5f; srad = Hv * 0.032f; sight = true;
+        }
+    }
+    if (sight)
+    {
+        const F32 cx = scx, cy = scy;
+        const F32 rad = llclamp(srad, 12.f, Hv * 0.4f);
+        const LLColor4 col = s.mSafe ? withAlpha(C_CYAN, 0.6f) : C_SIGHT;
+        arcW(cx, cy, rad, 1.6f, 0.f, F_TWO_PI, col, 64);   // radians (arcW above)
+        circleF(cx, cy, 2.2f, col, 12);
+        // the cross lines, broken round the ring (gap from 0.35 to 1.0 of the radius), out to 1.5 radii
+        lineW(cx - rad * 1.5f, cy, cx - rad * 0.35f, cy, 1.4f, col);
+        lineW(cx + rad * 0.35f, cy, cx + rad * 1.5f, cy, 1.4f, col);
+        lineW(cx, cy - rad * 1.5f, cx, cy - rad * 0.35f, 1.4f, col);
+        lineW(cx, cy + rad * 0.35f, cx, cy + rad * 1.5f, 1.4f, col);
+        if (a.firing() && blink(0.12f))
+        {
+            circleF(cx, cy, 4.f, LLColor4(1.f, 0.95f, 0.8f, 0.9f), 12);
+        }
+        // ---- [WOLF AIR JETS 2026-11-02] the missile seeker: its field of view as a dashed circle round the sight (the cone
+        // of jet_weapons.py, the plugin's lock test), and a diamond on the warplane it would take ----
+        const WolfAir::EWeapon wpn = a.weapon();
+        const WolfAir::MissileType* mt = wpn == WolfAir::WPN_GUN ? nullptr : WolfAir::missileOf(s.mClass, wpn == WolfAir::WPN_RADAR);
+        if (mt)
+        {
+            const WolfAir::Seeker& sk = a.seeker();
+            F32 ccx = cx, ccy = cy, crad = 0.f;
+            if (a.previewing()) crad = rad * tanf(mt->mConeDeg * DEG_TO_RAD) / tanf(SIGHT_RING_RAD) * 0.35f;
+            else if (!ringOf(axis, mt->mConeDeg * DEG_TO_RAD, ccx, ccy, crad)) crad = Hv;
+            crad = llmin(crad, Hv * 0.46f);
+            const LLColor4 kc = sk.mTarget ? withAlpha(C_GREEN, 0.85f) : withAlpha(C_SIGHT, 0.55f);
+            const S32 dashes = 36;
+            for (S32 i = 0; i < dashes; ++i)
+            {
+                const F32 u0 = F_TWO_PI * (F32)i / (F32)dashes;
+                arcW(ccx, ccy, crad, 1.2f, u0, u0 + F_TWO_PI / (F32)dashes * 0.5f, kc, 3);
+            }
+            text(sml, fmt("%s  %s", mt->mTitle, sk.mTarget ? "TARGET" : "NO TARGET"), ccx, ccy - crad - 4.f, kc, LLFontGL::HCENTER, LLFontGL::TOP);
+            if (sk.mTarget)
+            {
+                F32 tx = 0.f, ty = 0.f;
+                bool shown = false;
+                if (a.previewing()) { tx = cx + crad * llclamp(sk.mOffDeg / mt->mConeDeg, 0.f, 1.f) * 0.7f; ty = cy + crad * 0.2f; shown = true; }
+                else shown = onScreen(sk.mPosAgent, tx, ty);
+                if (shown)
+                {
+                    const F32 d = 11.f;
+                    const LLColor4 dc = blink(0.4f) ? C_GREEN : withAlpha(C_GREEN, 0.6f);
+                    lineW(tx, ty + d, tx + d, ty, 2.f, dc); lineW(tx + d, ty, tx, ty - d, 2.f, dc);
+                    lineW(tx, ty - d, tx - d, ty, 2.f, dc); lineW(tx - d, ty, tx, ty + d, 2.f, dc);
+                    text(sml, fmt("%s %.1f KM", sk.mName.c_str(), sk.mRangeM / 1000.f), tx + d + 4.f, ty, C_GREEN, LLFontGL::LEFT, LLFontGL::VCENTER);
+                }
+            }
+        }
+    }
+
+    // ---- [WOLF AIR BOMBERS] the gunner's sight along the turret's guns (s9 tur), amber at the stops, and the target cue ----
+    if (a.isCrew() && a.turret().mHave && !a.isDown())
+    {
+        const WolfAir::Turret& tu = a.turret();
+        F32 cx = 0.f, cy = 0.f, rad = 0.f;
+        bool ok = false;
+        if (a.turretAxis(origin, axis)) ok = ringOf(axis, SIGHT_RING_RAD, cx, cy, rad);
+        else if (a.previewing())
+        {
+            cx = W * 0.5f + tu.mAz * Hv * 0.004f; cy = top_of_world + (Hv - top_of_world) * 0.5f + tu.mEl * Hv * 0.004f; rad = Hv * 0.032f; ok = true;
+        }
+        if (ok)
+        {
+            rad = llclamp(rad, 12.f, Hv * 0.4f);
+            const bool at_stop = tu.mAz <= tu.mAzMin + 1.f || tu.mAz >= tu.mAzMax - 1.f || tu.mEl <= tu.mElMin + 1.f || tu.mEl >= tu.mElMax - 1.f;
+            const LLColor4 col = s.mSafe ? withAlpha(C_CYAN, 0.6f) : at_stop ? C_AMBER : C_SIGHT;
+            arcW(cx, cy, rad, 1.6f, 0.f, F_TWO_PI, col, 64);
             circleF(cx, cy, 2.2f, col, 12);
-            // the cross lines, broken round the ring (gap from 0.35 to 1.0 of the radius), out to 1.5 radii
             lineW(cx - rad * 1.5f, cy, cx - rad * 0.35f, cy, 1.4f, col);
             lineW(cx + rad * 0.35f, cy, cx + rad * 1.5f, cy, 1.4f, col);
             lineW(cx, cy - rad * 1.5f, cx, cy - rad * 0.35f, 1.4f, col);
             lineW(cx, cy + rad * 0.35f, cx, cy + rad * 1.5f, 1.4f, col);
-            if (a.firing() && blink(0.12f))
+            if (at_stop) text(sml, "AT THE STOP", cx, cy - rad * 1.6f, C_AMBER, LLFontGL::HCENTER, LLFontGL::TOP);
+            if (!tu.mStop.empty()) text(sml, "INTERRUPTER - " + tu.mStop, cx, cy + rad * 1.6f, C_AMBER, LLFontGL::HCENTER, LLFontGL::BOTTOM);
+            if ((a.firing() || tu.mFire) && blink(0.12f)) circleF(cx, cy, 4.f, LLColor4(1.f, 0.95f, 0.8f, 0.9f), 12);
+            const WolfAir::Seeker& cue = a.turretCue();
+            F32 tx = 0.f, ty = 0.f;
+            if (cue.mTarget && (a.previewing() ? (tx = cx + rad * 2.5f, ty = cy + rad, true) : onScreen(cue.mPosAgent, tx, ty)))
             {
-                circleF(cx, cy, 4.f, LLColor4(1.f, 0.95f, 0.8f, 0.9f), 12);
+                const F32 d = 11.f;
+                lineW(tx, ty + d, tx + d, ty, 2.f, C_GREEN); lineW(tx + d, ty, tx, ty - d, 2.f, C_GREEN);
+                lineW(tx, ty - d, tx - d, ty, 2.f, C_GREEN); lineW(tx - d, ty, tx, ty + d, 2.f, C_GREEN);
+                text(sml, fmt("%s %d M", cue.mName.c_str(), (S32)cue.mRangeM), tx + d + 4.f, ty, C_GREEN, LLFontGL::LEFT, LLFontGL::VCENTER);
+            }
+        }
+    }
+
+    // ---- [WOLF AIR JETS] the missile warning: a red MISSILE box over the view, the plane's own words under it, and the
+    // tone (wolfair.cpp warnTone). It blinks for its first two seconds, then holds steady while the warning lasts. ----
+    if (a.warning())
+    {
+        const LLFontGL* wf = avionics("B612", LLFontGL::BOLD, (Hv - top_of_world) * 0.065f);
+        const F32 wy = top_of_world + (Hv - top_of_world) * 0.74f;
+        const bool early = now() - s.mWarnAt < 2.0;
+        if (!early || blink(0.5f))
+        {
+            const F32 bw = wf->getWidthF32(std::string("MISSILE")) * 0.62f, bh = (F32)wf->getLineHeight() * 0.62f;
+            rectF(W * 0.5f - bw, wy - bh, W * 0.5f + bw, wy + bh, LLColor4(0.f, 0.f, 0.f, 0.45f));
+            frameW(W * 0.5f - bw, wy - bh, W * 0.5f + bw, wy + bh, 2.5f, C_RED);
+            text(wf, "MISSILE", W * 0.5f, wy, C_RED, LLFontGL::HCENTER, LLFontGL::VCENTER);
+        }
+        if (!s.mWarnText.empty())
+        {
+            const F32 ty = wy - (F32)wf->getLineHeight() * 0.75f;
+            const F32 tw = (F32)med->getWidth(s.mWarnText) * 0.5f + 8.f;
+            rectF(W * 0.5f - tw, ty - (F32)med->getLineHeight() - 2.f, W * 0.5f + tw, ty + 2.f, LLColor4(0.f, 0.f, 0.f, 0.45f));
+            text(med, s.mWarnText, W * 0.5f, ty, C_WHITE, LLFontGL::HCENTER, LLFontGL::TOP);
+        }
+    }
+
+    // ---- [WOLF AIR JETS] the Harrier's hover cue: nozzles 60 degrees or more, a box under the sight with the vertical speed
+    // (an arrow, green when she holds within 0.5 m/s), the drift over the ground, her height and her weight against the
+    // hover limit (wolfair.cpp hoverLimitKg, sea level) ----
+    if (s.mVtol && s.mNozzle >= 60 && !a.isCrew())
+    {
+        F32 vs = 0.f, gs = 0.f, agl = 0.f;
+        const WolfFlight::Data& fd = WolfFlight::instance().data();
+        if (a.previewing()) a.previewFlight(vs, gs, agl);
+        else if (fd.mValid) { vs = fd.mVS; gs = fd.mGS; agl = fd.mAGL; }
+        const F32 bw = W * 0.11f, bh = Hv * 0.10f;
+        const F32 bx = W * 0.5f, by = top_of_world + (Hv - top_of_world) * 0.22f;
+        rectF(bx - bw, by - bh, bx + bw, by + bh, LLColor4(0.f, 0.f, 0.f, 0.35f));
+        frameW(bx - bw, by - bh, bx + bw, by + bh, 1.5f, C_HUD);
+        text(sml, "HOVER", bx, by + bh - 3.f, C_HUD, LLFontGL::HCENTER, LLFontGL::TOP);
+        const bool steady = fabsf(vs) < 0.5f;
+        const LLColor4 vc = steady ? C_GREEN : fabsf(vs) < 2.f ? C_AMBER : C_RED;
+        const F32 ax = bx - bw * 0.6f, ah = bh * 0.55f * llclamp(fabsf(vs) / 4.f, 0.15f, 1.f);
+        if (!steady)
+        {
+            const F32 dir = vs > 0.f ? 1.f : -1.f;
+            lineW(ax, by, ax, by + dir * ah, 3.f, vc);
+            triF(ax - 6.f, by + dir * ah, ax + 6.f, by + dir * ah, ax, by + dir * (ah + 9.f), vc);
+        }
+        else
+        {
+            lineW(ax - 8.f, by, ax + 8.f, by, 3.f, vc);
+        }
+        text(med, fmt("%+.1f M/S", vs), ax + 14.f, by, vc, LLFontGL::LEFT, LLFontGL::VCENTER);
+        text(sml, fmt("DRIFT %.1f M/S   HEIGHT %.0f M", gs, agl), bx, by - bh * 0.45f, gs < 1.f ? C_HUD : C_AMBER, LLFontGL::HCENTER, LLFontGL::VCENTER);
+        const F32 limit = WolfAir::hoverLimitKg(s.mClass, s.mWet && s.mWaterS > 0);
+        if (limit > 0.f && s.mMassKg > 0)
+        {
+            const bool heavy = (F32)s.mMassKg > limit;
+            text(sml, heavy ? fmt("TOO HEAVY TO HOVER: %s KG, LIMIT %s KG%s", thousands(s.mMassKg).c_str(), thousands((S32)limit).c_str(), s.mWet ? "" : " - WATER ON")
+                              : fmt("%s KG - LIMIT %s KG", thousands(s.mMassKg).c_str(), thousands((S32)limit).c_str()),
+                 bx, by - bh * 0.78f, heavy ? C_RED : C_HUD, LLFontGL::HCENTER, LLFontGL::VCENTER);
+        }
+    }
+
+    // ---- [WOLF AIR BOMBERS] the intercom, top left: who sits where (s9 crew), for everyone aboard a crewed aircraft ----
+    {
+        const std::vector<WolfAir::CrewSeat>& crew = a.crew();
+        if (crew.size() > 1)
+        {
+            const F32 lh = (F32)sml->getLineHeight() * 1.3f;
+            const F32 fl = W * 0.015f, ftop = Hv - Hv * 0.08f;
+            F32 widest = (F32)sml->getWidth(std::string("INTERCOM"));
+            std::vector<std::string> lines;
+            for (const WolfAir::CrewSeat& c : crew)
+            {
+                std::string role = c.mRole.empty() ? c.mSeat : c.mRole;
+                LLStringUtil::toUpper(role);
+                const std::string line = role + "  " + (c.mName.empty() ? std::string("-") : c.mName);
+                widest = llmax(widest, (F32)sml->getWidth(line));
+                lines.push_back(line);
+            }
+            const F32 fr = fl + widest + 16.f, fb = ftop - lh * (F32)(lines.size() + 1) - 6.f;
+            roundRectF(fl, fb, fr, ftop, 5.f, LLColor4(0.f, 0.f, 0.f, 0.5f), LLColor4(0.f, 0.f, 0.f, 0.4f));
+            F32 y = ftop - 4.f;
+            text(sml, "INTERCOM", fl + 8.f, y, C_CYAN, LLFontGL::LEFT, LLFontGL::TOP);
+            y -= lh;
+            for (size_t i = 0; i < lines.size(); ++i)
+            {
+                const bool me = crew[i].mSeat == a.mySeat();
+                text(sml, lines[i], fl + 8.f, y, me ? C_CYAN : crew[i].mName.empty() ? C_DIM : C_WHITE, LLFontGL::LEFT, LLFontGL::TOP);
+                y -= lh;
             }
         }
     }
@@ -3440,14 +3723,14 @@ void WolfFlightDeck::drawAirOverlay(F32 top_of_world)
     }
     if (s.mSafe && !a.isDown())
     {
-        text(small, "SAFE AIRSPACE - nobody can fire or be hit here", W * 0.5f, ny, C_CYAN, LLFontGL::HCENTER, LLFontGL::TOP);
+        text(sml, "SAFE AIRSPACE - nobody can fire or be hit here", W * 0.5f, ny, C_CYAN, LLFontGL::HCENTER, LLFontGL::TOP);
     }
 
     // ---- the kill feed, top right: newest first, each for 20 s ----
     const std::deque<WolfAir::Kill>& kills = a.kills();
     if (!kills.empty())
     {
-        const F32 lh = (F32)small->getLineHeight() * 1.35f;
+        const F32 lh = (F32)sml->getLineHeight() * 1.35f;
         const F32 fr = W - W * 0.015f, ftop = Hv - Hv * 0.08f;
         F32 widest = 0.f;
         std::vector<std::string> lines;
@@ -3455,7 +3738,7 @@ void WolfFlightDeck::drawAirOverlay(F32 top_of_world)
         {
             std::string line = (k.mKiller.empty() ? std::string("(nobody)") : k.mKiller) + "  >  " + k.mVictim;
             if (!k.mHow.empty()) line += "  (" + k.mHow + ")";
-            widest = llmax(widest, (F32)small->getWidth(line));
+            widest = llmax(widest, (F32)sml->getWidth(line));
             lines.push_back(line);
         }
         const F32 fl = fr - widest - 16.f, fb = ftop - lh * (F32)lines.size() - 6.f;
@@ -3465,8 +3748,554 @@ void WolfFlightDeck::drawAirOverlay(F32 top_of_world)
         {
             const F32 age = (F32)(t - kills[i].mAt);
             const F32 alpha = llclamp((20.f - age) / 3.f, 0.25f, 1.f);
-            text(small, lines[i], fr - 8.f, y, withAlpha(i == 0 && age < 3.f ? C_AMBER : C_WHITE, alpha), LLFontGL::RIGHT, LLFontGL::TOP);
+            text(sml, lines[i], fr - 8.f, y, withAlpha(i == 0 && age < 3.f ? C_AMBER : C_WHITE, alpha), LLFontGL::RIGHT, LLFontGL::TOP);
             y -= lh;
+        }
+    }
+}
+
+//-----------------------------------------------------------------------------
+// [WOLF AIR JETS 2026-11-02] The JET display, the stores, and (DESIGN_BOMBERS.md s9 / s10) the crew's displays.
+// Drawn in the deck's own style (bezels, B612, the deck's colours), Paul's rule paul-game-ui-like-flightdeck-mmo.
+//-----------------------------------------------------------------------------
+
+namespace
+{
+    const F32 ENGINE_DIAL_MAX = 110.f;          // the spool dial reads 0-110 % (the helm's rpm field is gSpool x 100)
+    const F32 DIAL_A0 = 225.f, DIAL_SWEEP = 270.f;   // degrees: 0 % at lower left, the top of the scale at lower right
+    const S32 NOZZLE_STEP = 10;                 // degrees a press of NOZ - / NOZ + moves the lever
+    const F64 IMPACT_SHOW = 8.0;
+
+    // The value v of vmax as an angle on a 270-degree dial (radians, counter-clockwise from +x, as arcW).
+    F32 dialAngle(F32 v, F32 vmax)
+    {
+        return (DIAL_A0 - DIAL_SWEEP * llclamp(v / vmax, 0.f, 1.f)) * DEG_TO_RAD;
+    }
+
+}
+
+void WolfFlightDeck::airButton(F32 x0, F32 x1, F32 bb, F32 bt, F32 w, EHit id, const std::string& label, const LLColor4& lit_col,
+                               bool lit, const std::string& tip)
+{
+    // Source: drawCombat's own button (the 2026-11-01 band), shared by the new displays
+    const bool pressed = mPressed == id;
+    roundRectF(x0 - 2.f, bb - 2.f, x1 + 2.f, bt + 2.f, w * 0.02f, withAlpha(lit_col, lit ? 0.9f : 0.25f), withAlpha(lit_col, lit ? 0.6f : 0.15f));
+    roundRectF(x0, bb - (pressed ? 1.f : 0.f), x1, bt - (pressed ? 1.f : 0.f), w * 0.015f, C_BTN_T, C_BTN_B);
+    const LLFontGL* f = mF.mSmall;
+    if (f && f->getWidthF32(label) > (x1 - x0) * 0.92f) f = mF.mTiny;
+    text(f, label, (x0 + x1) * 0.5f, (bb + bt) * 0.5f, lit ? lit_col : C_WHITE, LLFontGL::HCENTER, LLFontGL::VCENTER);
+    addHit(x0, bb, x1, bt, id, tip);
+}
+
+void WolfFlightDeck::drawJet(F32 l, F32 b, F32 r, F32 t)
+{
+    WolfAir& a = WolfAir::instance();
+    const WolfAir::State& s = a.state();
+    F32 sl, sb, sr, st;
+    drawBezel(l, b, r, t, (r - l) * 0.055f, sl, sb, sr, st);
+    const F32 w = sr - sl, h = st - sb;
+    LLLocalClipRect screen_clip(WolfHudScale::clip(LLRect((S32)sl, (S32)st, (S32)sr, (S32)sb)));
+    const bool vtol = s.mVtol;
+    const bool reheat = WolfAir::hasReheat(s.mClass);
+    const F32 top = st - h * 0.03f;
+    text(mF.mTiny, "ENGINE", sl + w * 0.04f, top, C_CYAN, LLFontGL::LEFT, LLFontGL::TOP);
+    // Mach, top right: where a fighter's head-up display puts it, under the airspeed (drawHUD too)
+    text(mF.mMonoMed ? mF.mMonoMed : mF.mMed, fmt("M %.2f", s.mMach), sr - w * 0.04f, top, C_WHITE, LLFontGL::RIGHT, LLFontGL::TOP);
+
+    // ---- the spool dial: 0-110 %, the needle the engine's spool, the cyan bug the throttle asked for ----
+    const F32 rows = vtol ? 0.36f : 0.20f;                 // the button rows take this much of the bottom
+    const F32 dial_t = top - h * 0.10f, dial_b = sb + h * (rows + 0.16f);
+    const F32 dr = llmin((dial_t - dial_b) * 0.5f, w * 0.22f);
+    const F32 dcx = sl + w * 0.04f + dr, dcy = (dial_t + dial_b) * 0.5f;
+    circleF(dcx, dcy, dr, LLColor4(0.03f, 0.04f, 0.05f, 1.f), 40);
+    arcW(dcx, dcy, dr * 0.92f, 1.5f, dialAngle(ENGINE_DIAL_MAX, ENGINE_DIAL_MAX), dialAngle(0.f, ENGINE_DIAL_MAX), C_WHITE, 48);
+    for (S32 v = 0; v <= 110; v += 10)
+    {
+        const F32 ang = dialAngle((F32)v, ENGINE_DIAL_MAX);
+        const F32 in = (v % 50 == 0) ? 0.72f : 0.80f;
+        lineW(dcx + cosf(ang) * dr * in, dcy + sinf(ang) * dr * in, dcx + cosf(ang) * dr * 0.92f, dcy + sinf(ang) * dr * 0.92f, v == 100 ? 2.5f : 1.2f, C_WHITE);
+        if (v % 50 == 0) text(mF.mTiny, fmt("%d", v), dcx + cosf(ang) * dr * 0.56f, dcy + sinf(ang) * dr * 0.56f, C_GREY, LLFontGL::HCENTER, LLFontGL::VCENTER);
+    }
+    {
+        const F32 ang = dialAngle((F32)s.mThrottle, ENGINE_DIAL_MAX);
+        const F32 x = dcx + cosf(ang) * dr * 0.97f, y = dcy + sinf(ang) * dr * 0.97f;
+        circleF(x, y, llmax(2.5f, dr * 0.05f), C_CYAN, 10);
+    }
+    {
+        const F32 ang = dialAngle((F32)s.mRpm, ENGINE_DIAL_MAX);
+        const LLColor4 nc = s.mEngine ? C_WHITE : C_DIM;
+        lineW(dcx, dcy, dcx + cosf(ang) * dr * 0.86f, dcy + sinf(ang) * dr * 0.86f, 2.5f, nc);
+        circleF(dcx, dcy, dr * 0.07f, C_GREY, 12);
+    }
+    text(mF.mMonoSmall ? mF.mMonoSmall : mF.mSmall, fmt("%d%%", s.mRpm), dcx, dcy - dr * 0.30f, s.mEngine ? C_WHITE : C_DIM, LLFontGL::HCENTER, LLFontGL::TOP);
+    text(mF.mTiny, s.mEngine ? "RPM" : "ENGINE OFF", dcx, dcy - dr * 0.62f, s.mEngine ? C_GREY : C_AMBER, LLFontGL::HCENTER, LLFontGL::TOP);
+
+    // ---- the lamps: REHEAT (only a jet that has it), AIRBRAKE; the Harrier's WATER ----
+    auto lamp = [&](F32 x0, F32 y0, F32 x1, F32 y1, const std::string& label, bool lit, const LLColor4& col)
+    {
+        rectF(x0, y0, x1, y1, lit ? withAlpha(col, 0.85f) : LLColor4(0.06f, 0.07f, 0.08f, 1.f));
+        frameW(x0, y0, x1, y1, 1.f, lit ? col : C_DIM);
+        text(mF.mTiny, label, (x0 + x1) * 0.5f, (y0 + y1) * 0.5f, lit ? C_BLACK : C_DIM, LLFontGL::HCENTER, LLFontGL::VCENTER);
+    };
+    const F32 cl = sl + w * 0.56f, cr = sr - w * 0.04f;
+    F32 y = top - h * 0.12f;
+    const F32 lh = h * 0.085f;
+    if (!vtol)
+    {
+        if (reheat) lamp(cl, y - lh, cr, y, s.mReheat ? "REHEAT LIT" : "REHEAT", s.mReheat, LLColor4(1.f, 0.55f, 0.1f, 1.f));
+        else text(mF.mTiny, "NO REHEAT", cl, y - lh * 0.5f, C_DIM, LLFontGL::LEFT, LLFontGL::VCENTER);
+        y -= lh * 1.25f;
+    }
+    if (!vtol)
+    {
+        lamp(cl, y - lh, cr, y, s.mAirbrake ? "AIRBRAKE OUT" : "AIRBRAKE IN", s.mAirbrake, C_CYAN);
+    }
+    else
+    {
+        // the nozzle lever (the AIRBRAKE button below shows the airbrakes): a side view, nose to the left, the nozzle
+        // swinging from aft (0, pointing right) down to 90 and on to 98.5 degrees, the hover mark green
+        const F32 nr = llmin((cr - cl) * 0.6f, h * 0.20f);
+        const F32 px = cl + 4.f, py = y;
+        arcW(px, py, nr, 1.f, -98.5f * DEG_TO_RAD, 0.f, C_DIM, 24);
+        for (F32 d : { 0.f, 45.f, 90.f, 98.5f })
+        {
+            const F32 ang = -d * DEG_TO_RAD;
+            lineW(px + cosf(ang) * nr * 0.80f, py + sinf(ang) * nr * 0.80f, px + cosf(ang) * nr, py + sinf(ang) * nr, d == 90.f ? 2.f : 1.f, d == 90.f ? C_GREEN : C_GREY);
+        }
+        const F32 ang = -(F32)s.mNozzle * DEG_TO_RAD;
+        lineW(px, py, px + cosf(ang) * nr * 0.92f, py + sinf(ang) * nr * 0.92f, 3.f, C_WHITE);
+        circleF(px, py, 3.f, C_GREY, 10);
+        F32 ty = py - nr - 3.f;
+        text(mF.mTiny, fmt("NOZZLES %d\xC2\xB0", s.mNozzle), cl, ty, s.mNozzle >= 60 ? C_GREEN : C_WHITE, LLFontGL::LEFT, LLFontGL::TOP);
+        ty -= h * 0.06f;
+        // water: switched on (WET) and the seconds left at full throttle (the helm counts down only then)
+        const LLColor4 wc = s.mWaterS <= 0 ? C_RED : s.mWaterS < 15 ? C_AMBER : C_CYAN;
+        text(mF.mTiny, s.mWaterS <= 0 ? "WATER EMPTY" : fmt("WATER %d S", s.mWaterS), cl, ty, wc, LLFontGL::LEFT, LLFontGL::TOP);
+        lamp(cr - (cr - cl) * 0.30f, ty - h * 0.05f, cr, ty, "WET", s.mWet, C_CYAN);
+    }
+
+    // ---- fuel, G and angle of attack along one line above the buttons ----
+    {
+        const F32 fy = sb + h * (rows + 0.10f);
+        const F32 fl = sl + w * 0.04f, fr = sr - w * 0.04f;
+        rectF(fl, fy - h * 0.035f, fr, fy, C_BAR_OFF);
+        rectF(fl, fy - h * 0.035f, fl + (fr - fl) * llclamp((F32)s.mFuel / 100.f, 0.f, 1.f), fy, s.mFuel < 15 ? C_AMBER : C_BAR_ON);
+        text(mF.mTiny, fmt("FUEL %d%%", s.mFuel), fl, fy + 2.f, s.mFuel < 15 ? C_AMBER : C_GREY, LLFontGL::LEFT, LLFontGL::BOTTOM);
+        text(mF.mTiny, fmt("G %.1f   AOA %.0f", s.mG, s.mAoa), fr, fy + 2.f,
+             (s.mStalled || (s.mGmax > 0.f && s.mG > s.mGmax * 0.9f)) ? C_RED : C_GREY, LLFontGL::RIGHT, LLFontGL::BOTTOM);
+        if (vtol && s.mMassKg > 0)
+        {
+            text(mF.mTiny, fmt("%s KG", thousands(s.mMassKg).c_str()), fl, fy - h * 0.045f, C_GREY, LLFontGL::LEFT, LLFontGL::TOP);
+        }
+    }
+
+    // ---- the switches: the helm's own words (wolf_plane_helm_template.lsl Command) ----
+    const F32 gap = w * 0.03f, bh = h * 0.14f;
+    auto row = [&](F32 bb, std::initializer_list<std::tuple<EHit, std::string, LLColor4, bool, std::string> > items)
+    {
+        const F32 n = (F32)items.size();
+        const F32 bw = (w - gap * (n + 1.f)) / n;
+        F32 x = sl + gap;
+        for (const auto& it : items)
+        {
+            airButton(x, x + bw, bb, bb + bh, w, std::get<0>(it), std::get<1>(it), std::get<2>(it), std::get<3>(it), std::get<4>(it));
+            x += bw + gap;
+        }
+    };
+    const F32 b1 = sb + h * 0.04f;
+    if (vtol)
+    {
+        row(b1 + bh + h * 0.04f, {
+            { H_JET_NOZ_DN, "NOZ -", C_WHITE, false, "Swing the nozzles 10 degrees aft (towards 0, wing-borne flight)" },
+            { H_JET_HOVER, "HOVER", C_GREEN, s.mNozzle == 90, "Nozzles straight down (90 degrees): she hovers if she is light enough" },
+            { H_JET_NOZ_UP, "NOZ +", C_WHITE, false, "Swing the nozzles 10 degrees forward (98 degrees at most, to slow down)" } });
+        row(b1, {
+            { H_JET_WATER, s.mWet ? "WATER ON" : "WATER", C_CYAN, s.mWet, "Water injection: more thrust at full throttle while it lasts" },
+            { H_JET_AIRBRAKE, "AIRBRAKE", C_CYAN, s.mAirbrake, "Put the airbrakes out or in" } });
+    }
+    else if (reheat)
+    {
+        row(b1, {
+            { H_JET_REHEAT, "REHEAT", LLColor4(1.f, 0.55f, 0.1f, 1.f), s.mReheat, "Light the reheat (afterburner): full throttle first; any throttle cut puts it out" },
+            { H_JET_AIRBRAKE, "AIRBRAKE", C_CYAN, s.mAirbrake, "Put the airbrakes out or in" } });
+    }
+    else
+    {
+        row(b1, { { H_JET_AIRBRAKE, "AIRBRAKE", C_CYAN, s.mAirbrake, "Put the airbrakes out or in" } });
+    }
+}
+
+F32 WolfFlightDeck::drawStores(F32 gl, F32 gr, F32 y, F32 h, F32 w)
+{
+    WolfAir& a = WolfAir::instance();
+    const WolfAir::State& s = a.state();
+    // ---- the stores page: GUN / IR / RADAR tiles, the one that FIRE lets go boxed (a stores-management page's look) ----
+    struct Tile { WolfAir::EWeapon wpn; EHit id; std::string name; S32 count; };
+    std::vector<Tile> tiles;
+    tiles.push_back({ WolfAir::WPN_GUN, H_AIR_WPN_GUN, "GUN", s.mAmmoGuns + s.mAmmoCannon });
+    if (a.weaponCarried(WolfAir::WPN_IR))
+    {
+        const WolfAir::MissileType* m = WolfAir::missileOf(s.mClass, false);
+        tiles.push_back({ WolfAir::WPN_IR, H_AIR_WPN_IR, m ? m->mTitle : "IR MISSILE", s.mIr });
+    }
+    if (a.weaponCarried(WolfAir::WPN_RADAR))
+    {
+        const WolfAir::MissileType* m = WolfAir::missileOf(s.mClass, true);
+        tiles.push_back({ WolfAir::WPN_RADAR, H_AIR_WPN_RADAR, m ? m->mTitle : "RADAR MISSILE", s.mRadar });
+    }
+    const F32 th = h * 0.11f, tg = w * 0.015f;
+    const F32 tw = ((gr - gl) - tg * (F32)(tiles.size() - 1)) / (F32)tiles.size();
+    F32 x = gl;
+    for (const Tile& tl : tiles)
+    {
+        const bool sel = a.weapon() == tl.wpn;
+        rectF(x, y - th, x + tw, y, sel ? LLColor4(0.05f, 0.20f, 0.08f, 1.f) : LLColor4(0.05f, 0.06f, 0.07f, 1.f));
+        frameW(x, y - th, x + tw, y, sel ? 2.f : 1.f, sel ? C_GREEN : C_DIM);
+        // the missile's own name is long: its kind first ("IR", "RDR") and the count big
+        const std::string kind = tl.wpn == WolfAir::WPN_GUN ? "GUN" : tl.wpn == WolfAir::WPN_IR ? "IR" : "RDR";
+        text(mF.mTiny, kind, x + 3.f, y - 2.f, sel ? C_GREEN : C_GREY, LLFontGL::LEFT, LLFontGL::TOP);
+        text(mF.mMonoSmall ? mF.mMonoSmall : mF.mSmall, tl.wpn == WolfAir::WPN_GUN ? thousands(tl.count) : fmt("x%d", tl.count),
+             x + tw - 3.f, y - th + 2.f, tl.count > 0 ? C_WHITE : C_RED, LLFontGL::RIGHT, LLFontGL::BOTTOM);
+        addHit(x, y - th, x + tw, y, tl.id,
+               tl.wpn == WolfAir::WPN_GUN ? std::string("Select the guns: FIRE fires while held") :
+               tl.name + ": FIRE launches one a press (dogfight mode on, a target inside the seeker circle)");
+        x += tw + tg;
+    }
+    y -= th + h * 0.02f;
+    // ---- decoys ----
+    if (s.mFlares > 0 || s.mChaff > 0 || tiles.size() > 1)
+    {
+        const LLColor4 fc = s.mFlares == 0 ? C_RED : s.mFlares <= 4 ? C_AMBER : C_WHITE;
+        const LLColor4 cc = s.mChaff == 0 ? C_RED : s.mChaff <= 4 ? C_AMBER : C_WHITE;
+        text(mF.mTiny, fmt("FLARES %d", s.mFlares), gl, y, fc, LLFontGL::LEFT, LLFontGL::TOP);
+        text(mF.mTiny, fmt("CHAFF %d", s.mChaff), gr, y, cc, LLFontGL::RIGHT, LLFontGL::TOP);
+        y -= h * 0.06f;
+    }
+    // ---- the seeker, or what became of the last missile ----
+    LLColor4 nc = C_WHITE;
+    const std::string note = a.launchNote(nc);
+    if (!note.empty())
+    {
+        text(mF.mTiny, note, gl, y, nc, LLFontGL::LEFT, LLFontGL::TOP);
+        y -= h * 0.06f;
+    }
+    else if (a.weapon() != WolfAir::WPN_GUN)
+    {
+        const WolfAir::Seeker& sk = a.seeker();
+        if (sk.mTarget)
+            text(mF.mTiny, fmt("SEEKER: TARGET %.1f KM", sk.mRangeM / 1000.f), gl, y, C_GREEN, LLFontGL::LEFT, LLFontGL::TOP);   // the name is by the diamond
+        else
+            text(mF.mTiny, "SEEKER: NO TARGET", gl, y, C_GREY, LLFontGL::LEFT, LLFontGL::TOP);
+        y -= h * 0.06f;
+    }
+    return y;
+}
+
+void WolfFlightDeck::drawCrew(F32 l, F32 b, F32 r, F32 t)
+{
+    WolfAir& a = WolfAir::instance();
+    F32 sl, sb, sr, st;
+    drawBezel(l, b, r, t, (r - l) * 0.055f, sl, sb, sr, st);
+    const F32 w = sr - sl, h = st - sb;
+    LLLocalClipRect screen_clip(WolfHudScale::clip(LLRect((S32)sl, (S32)st, (S32)sr, (S32)sb)));
+    const F32 top = st - h * 0.03f;
+    text(mF.mTiny, "INTERCOM", sl + w * 0.04f, top, C_CYAN, LLFontGL::LEFT, LLFontGL::TOP);
+    text(mF.mTiny, upper(a.state().mPlane), sr - w * 0.04f, top, C_GREY, LLFontGL::RIGHT, LLFontGL::TOP);
+    const std::vector<WolfAir::CrewSeat>& crew = a.crew();
+    const F32 list_t = top - h * 0.10f, list_b = sb + h * 0.24f;
+    if (crew.empty())
+    {
+        text(mF.mSmall, "WAITING FOR THE CREW LIST", (sl + sr) * 0.5f, (list_t + list_b) * 0.5f, C_DIM, LLFontGL::HCENTER, LLFontGL::VCENTER);
+    }
+    const F32 lh = llmin(h * 0.075f, (list_t - list_b) / (F32)llmax((S32)crew.size(), 1));
+    mCrewHitSeats.clear();
+    F32 y = list_t;
+    for (size_t i = 0; i < crew.size() && i < 16; ++i)
+    {
+        const WolfAir::CrewSeat& c = crew[i];
+        const bool me = c.mSeat == a.mySeat();
+        const bool empty = c.mName.empty();
+        if (me) rectF(sl + w * 0.02f, y - lh, sr - w * 0.02f, y, LLColor4(0.05f, 0.25f, 0.30f, 0.7f));
+        // the intercom label: the role words the crew script sends (British English, DESIGN_BOMBERS.md s5 / s9)
+        const std::string role = c.mRole.empty() ? upper(c.mSeat) : upper(c.mRole);
+        text(mF.mTiny, role, sl + w * 0.04f, y - lh * 0.5f, me ? C_CYAN : C_GREY, LLFontGL::LEFT, LLFontGL::VCENTER);
+        text(mF.mTiny, me ? "YOU" : empty ? "EMPTY - CLICK TO MOVE HERE" : c.mName, sr - w * 0.04f, y - lh * 0.5f,
+             me ? C_CYAN : empty ? C_DIM : C_WHITE, LLFontGL::RIGHT, LLFontGL::VCENTER);
+        if (empty && !me)
+        {
+            addHit(sl, y - lh, sr, y, (EHit)(H_CREW_SEAT_FIRST + (S32)mCrewHitSeats.size()), "Move to this seat (" + c.mRole + ")");
+            mCrewHitSeats.push_back(c.mSeat);
+        }
+        y -= lh;
+    }
+    const F32 gap = w * 0.03f;
+    const bool ask = now() - mBailAskAt < 4.0;
+    airButton(sl + gap, sr - gap, sb + h * 0.04f, sb + h * 0.18f, w, H_AIR_BAIL, ask ? "CONFIRM BAIL OUT" : "BAIL OUT", C_AMBER, ask,
+              a.isCrew() ? "Jump with your parachute; the aircraft flies on. Press again to confirm"
+                         : "Jump with the parachute. Press again to confirm");
+    if (a.noAnswer())
+    {
+        text(mF.mTiny, "THE AIRCRAFT IS NOT ANSWERING", sl + w * 0.04f, sb + h * 0.20f, C_AMBER, LLFontGL::LEFT, LLFontGL::BOTTOM);
+    }
+}
+
+void WolfFlightDeck::drawTurret(F32 l, F32 b, F32 r, F32 t)
+{
+    WolfAir& a = WolfAir::instance();
+    const WolfAir::Turret& tu = a.turret();
+    F32 sl, sb, sr, st;
+    drawBezel(l, b, r, t, (r - l) * 0.055f, sl, sb, sr, st);
+    const F32 w = sr - sl, h = st - sb;
+    LLLocalClipRect screen_clip(WolfHudScale::clip(LLRect((S32)sl, (S32)st, (S32)sr, (S32)sb)));
+    const F32 top = st - h * 0.03f;
+    text(mF.mTiny, "TURRET", sl + w * 0.04f, top, C_CYAN, LLFontGL::LEFT, LLFontGL::TOP);
+    if (!tu.mHave)
+    {
+        text(mF.mSmall, "WAITING FOR THE TURRET", (sl + sr) * 0.5f, (sb + st) * 0.5f, C_DIM, LLFontGL::HCENTER, LLFontGL::VCENTER);
+        return;
+    }
+    // ---- plan view: the aircraft nose up, the turret's arc as a wedge (her frame: +Y port = left), the guns' line ----
+    const F32 pr = llmin(w * 0.20f, h * 0.17f);
+    const F32 pcx = sl + w * 0.27f, pcy = top - h * 0.14f - pr;
+    // screen angle = 90 degrees + azimuth in her frame (nose up, port to the left)
+    const F32 a0 = (90.f + tu.mZeroAz + tu.mAzMin) * DEG_TO_RAD, a1 = (90.f + tu.mZeroAz + tu.mAzMax) * DEG_TO_RAD;
+    const S32 seg = 32;
+    for (S32 i = 0; i < seg; ++i)
+    {
+        const F32 u0 = a0 + (a1 - a0) * (F32)i / (F32)seg, u1 = a0 + (a1 - a0) * (F32)(i + 1) / (F32)seg;
+        triF(pcx, pcy, pcx + cosf(u0) * pr, pcy + sinf(u0) * pr, pcx + cosf(u1) * pr, pcy + sinf(u1) * pr, LLColor4(0.15f, 0.55f, 0.20f, 0.35f));
+    }
+    arcW(pcx, pcy, pr, 1.f, 0.f, F_TWO_PI, C_DIM, 48);
+    // the aircraft, small, nose up
+    rectF(pcx - pr * 0.05f, pcy - pr * 0.45f, pcx + pr * 0.05f, pcy + pr * 0.45f, C_GREY);
+    rectF(pcx - pr * 0.45f, pcy + pr * 0.02f, pcx + pr * 0.45f, pcy + pr * 0.14f, C_GREY);
+    rectF(pcx - pr * 0.18f, pcy - pr * 0.42f, pcx + pr * 0.18f, pcy - pr * 0.34f, C_GREY);
+    const F32 ga = (90.f + tu.mZeroAz + tu.mAz) * DEG_TO_RAD;
+    lineW(pcx, pcy, pcx + cosf(ga) * pr * 1.05f, pcy + sinf(ga) * pr * 1.05f, 2.5f, C_WHITE);
+    text(mF.mTiny, "FROM ABOVE", pcx, pcy - pr - 2.f, C_DIM, LLFontGL::HCENTER, LLFontGL::TOP);
+
+    // ---- side view: the elevation arc and the guns' elevation ----
+    const F32 ecx = sl + w * 0.62f, ecy = pcy;
+    const F32 e0 = tu.mElMin * DEG_TO_RAD, e1 = tu.mElMax * DEG_TO_RAD;
+    for (S32 i = 0; i < seg; ++i)
+    {
+        const F32 u0 = e0 + (e1 - e0) * (F32)i / (F32)seg, u1 = e0 + (e1 - e0) * (F32)(i + 1) / (F32)seg;
+        triF(ecx, ecy, ecx + cosf(u0) * pr, ecy + sinf(u0) * pr, ecx + cosf(u1) * pr, ecy + sinf(u1) * pr, LLColor4(0.15f, 0.55f, 0.20f, 0.35f));
+    }
+    lineW(ecx, ecy, ecx + pr, ecy, 1.f, C_DIM);
+    const F32 ea = tu.mEl * DEG_TO_RAD;
+    lineW(ecx, ecy, ecx + cosf(ea) * pr * 1.05f, ecy + sinf(ea) * pr * 1.05f, 2.5f, C_WHITE);
+    text(mF.mTiny, "ELEVATION", ecx + pr * 0.5f, pcy - pr - 2.f, C_DIM, LLFontGL::HCENTER, LLFontGL::TOP);
+
+    // ---- figures ----
+    const F32 fx = sr - w * 0.04f;
+    F32 y = top - h * 0.12f;
+    const bool at_stop = tu.mAz <= tu.mAzMin + 1.f || tu.mAz >= tu.mAzMax - 1.f || tu.mEl <= tu.mElMin + 1.f || tu.mEl >= tu.mElMax - 1.f;
+    text(mF.mMonoSmall ? mF.mMonoSmall : mF.mSmall, fmt("AZ %+.0f\xC2\xB0", tu.mAz), fx, y, C_WHITE, LLFontGL::RIGHT, LLFontGL::TOP);
+    y -= h * 0.07f;
+    text(mF.mMonoSmall ? mF.mMonoSmall : mF.mSmall, fmt("EL %+.0f\xC2\xB0", tu.mEl), fx, y, C_WHITE, LLFontGL::RIGHT, LLFontGL::TOP);
+    y -= h * 0.07f;
+    if (at_stop) { text(mF.mTiny, "AT THE STOP", fx, y, C_AMBER, LLFontGL::RIGHT, LLFontGL::TOP); y -= h * 0.06f; }
+
+    // rounds and heat, as the band's guns (amber from 55 %, red from 80 %, jammed at 100 %)
+    const F32 gl = sl + w * 0.04f, gr = sr - w * 0.04f;
+    F32 gy = sb + h * 0.42f;
+    text(mF.mTiny, "ROUNDS", gl, gy, C_GREY, LLFontGL::LEFT, LLFontGL::TOP);
+    text(mF.mMonoMed ? mF.mMonoMed : mF.mMed, thousands(tu.mAmmo), gr, gy, tu.mAmmo > 0 ? C_WHITE : C_RED, LLFontGL::RIGHT, LLFontGL::TOP);
+    gy -= h * 0.085f;
+    rectF(gl, gy, gr, gy + h * 0.035f, C_BAR_OFF);
+    const LLColor4 hc = tu.mHeat >= 100 ? (blink(0.5f) ? C_RED : C_DIM) : tu.mHeat >= 80 ? C_RED : tu.mHeat >= 55 ? C_AMBER : C_BAR_ON;
+    rectF(gl, gy, gl + (gr - gl) * llclamp((F32)tu.mHeat / 100.f, 0.f, 1.f), gy + h * 0.035f, hc);
+    if (!tu.mStop.empty())
+        text(mF.mTiny, "INTERRUPTER - " + upper(tu.mStop) + " IN THE WAY", gl, gy - 2.f, C_AMBER, LLFontGL::LEFT, LLFontGL::TOP);
+    else
+        text(mF.mTiny, tu.mHeat >= 100 ? "JAMMED - LET IT COOL" : fmt("HEAT %d%%", tu.mHeat), gl, gy - 2.f, tu.mHeat >= 80 ? C_RED : C_DIM, LLFontGL::LEFT, LLFontGL::TOP);
+    const WolfAir::Seeker& cue = a.turretCue();
+    if (cue.mTarget)
+        text(mF.mTiny, fmt("TARGET %s %d M", upper(cue.mName).c_str(), (S32)cue.mRangeM), gl, gy - h * 0.07f, C_GREEN, LLFontGL::LEFT, LLFontGL::TOP);
+
+    const F32 gap = w * 0.03f, bw = (w - gap * 3.f) * 0.5f;
+    airButton(sl + gap, sl + gap + bw, sb + h * 0.04f, sb + h * 0.18f, w, H_AIR_FIRE, "FIRE", C_RED, a.firing() || tu.mFire,
+              "Hold to fire the turret's guns (in mouselook the left mouse button fires too)");
+    const bool ask = now() - mBailAskAt < 4.0;
+    airButton(sl + gap * 2.f + bw, sr - gap, sb + h * 0.04f, sb + h * 0.18f, w, H_AIR_BAIL, ask ? "CONFIRM" : "BAIL OUT", C_AMBER, ask,
+              "Jump with your parachute; the aircraft flies on. Press again to confirm");
+}
+
+void WolfFlightDeck::drawBombsight(F32 l, F32 b, F32 r, F32 t)
+{
+    WolfAir& a = WolfAir::instance();
+    const WolfAir::Bombsight& bs = a.bombsight();
+    F32 sl, sb, sr, st;
+    drawBezel(l, b, r, t, (r - l) * 0.055f, sl, sb, sr, st);
+    const F32 w = sr - sl, h = st - sb;
+    LLLocalClipRect screen_clip(WolfHudScale::clip(LLRect((S32)sl, (S32)st, (S32)sr, (S32)sb)));
+    const F32 top = st - h * 0.03f;
+    text(mF.mTiny, "BOMBSIGHT", sl + w * 0.04f, top, C_CYAN, LLFontGL::LEFT, LLFontGL::TOP);
+    if (!bs.mHave)
+    {
+        text(mF.mSmall, "WAITING FOR THE BOMBSIGHT", (sl + sr) * 0.5f, (sb + st) * 0.5f, C_DIM, LLFontGL::HCENTER, LLFontGL::VCENTER);
+        return;
+    }
+    if (!bs.mTarget.empty())
+        text(mF.mTiny, fmt("%s %.1f KM", upper(bs.mTarget).c_str(), bs.mTargetM / 1000.f), sr - w * 0.04f, top, C_WHITE, LLFontGL::RIGHT, LLFontGL::TOP);
+
+    // ---- the sight's glass: the drift wire, turned by the drift, with the release bar across it; the target marker rides
+    // down the wire as the time to release runs out, and meets the bar at the release point ----
+    const F32 gl = sl + w * 0.04f, gr = sl + w * 0.62f, gt = top - h * 0.08f, gb = sb + h * 0.42f;
+    rectF(gl, gb, gr, gt, LLColor4(0.02f, 0.05f, 0.03f, 1.f));
+    frameW(gl, gb, gr, gt, 1.f, C_DIM);
+    {
+        LLLocalClipRect glass(WolfHudScale::clip(LLRect((S32)gl, (S32)gt, (S32)gr, (S32)gb)));
+        const F32 cx = (gl + gr) * 0.5f, bar_y = gb + (gt - gb) * 0.30f;
+        const F32 dr = bs.mDrift * DEG_TO_RAD;
+        const F32 len = (gt - gb);
+        const LLColor4 wire(1.f, 0.62f, 0.25f, 0.9f);
+        const F32 dx = sinf(dr), dy = cosf(dr);
+        lineW(cx - dx * len * 0.3f, bar_y - dy * len * 0.3f, cx + dx * len, bar_y + dy * len, 1.6f, wire);
+        lineW(cx - dy * (gr - gl) * 0.22f, bar_y + dx * (gr - gl) * 0.22f, cx + dy * (gr - gl) * 0.22f, bar_y - dx * (gr - gl) * 0.22f, 2.2f, wire);
+        if (bs.mTtr >= 0.f)
+        {
+            // 30 s of run-up shown along the wire (the glass's top edge)
+            const F32 k = llclamp(bs.mTtr / 30.f, 0.f, 1.f) * len * 0.66f;
+            const F32 mx = cx + dx * k, my = bar_y + dy * k;
+            const bool now_release = bs.mTtr <= 0.5f;
+            circleF(mx, my, llmax(3.f, w * 0.018f), now_release ? C_RED : C_WHITE, 16);
+            arcW(mx, my, llmax(6.f, w * 0.032f), 1.2f, 0.f, F_TWO_PI, now_release ? C_RED : C_WHITE, 24);
+        }
+    }
+    // steering: the aimer's calls to the pilot (s5 "Left", "Right", "Steady")
+    const F32 fx = sr - w * 0.04f;
+    F32 y = top - h * 0.10f;
+    const std::string steer = bs.mSteer == "L" ? "<< LEFT" : bs.mSteer == "R" ? "RIGHT >>" : bs.mSteer == "S" ? "STEADY" : "";
+    if (!steer.empty()) { text(mF.mMed, steer, fx, y, bs.mSteer == "S" ? C_GREEN : C_AMBER, LLFontGL::RIGHT, LLFontGL::TOP); y -= h * 0.10f; }
+    if (bs.mTtr >= 0.f)
+    {
+        const bool rel = bs.mTtr <= 0.5f;
+        if (rel) { if (blink(0.5f)) text(mF.mMed, "RELEASE", fx, y, C_RED, LLFontGL::RIGHT, LLFontGL::TOP); }
+        else text(mF.mMonoSmall ? mF.mMonoSmall : mF.mSmall, fmt("RELEASE IN %.0f S", bs.mTtr), fx, y, C_WHITE, LLFontGL::RIGHT, LLFontGL::TOP);
+        y -= h * 0.08f;
+    }
+    text(mF.mTiny, fmt("DRIFT %+.0f\xC2\xB0", bs.mDrift), fx, y, C_GREY, LLFontGL::RIGHT, LLFontGL::TOP);
+    y -= h * 0.07f;
+    // the doors
+    const std::string doors = bs.mDoors == 1 ? "DOORS OPEN" : bs.mDoors == 2 ? fmt("DOORS OPENING %.0f S", bs.mOpenS) : "DOORS SHUT";
+    text(mF.mTiny, doors, fx, y, bs.mDoors == 1 ? C_GREEN : bs.mDoors == 2 ? C_AMBER : C_GREY, LLFontGL::RIGHT, LLFontGL::TOP);
+
+    // ---- the bombs: one mark each, filled while it is still aboard ----
+    F32 by = sb + h * 0.37f;
+    text(mF.mTiny, fmt("BOMBS %d / %d   STICK %s", bs.mLeft, bs.mLoad, bs.mStick <= 0 ? "ALL" : fmt("%d", bs.mStick).c_str()),
+         gl, by, bs.mLeft > 0 ? C_WHITE : C_RED, LLFontGL::LEFT, LLFontGL::TOP);
+    by -= h * 0.07f;
+    const S32 n = llclamp(bs.mLoad, 0, 24);
+    if (n > 0)
+    {
+        const F32 cw = (sr - w * 0.04f - gl) / (F32)n;
+        for (S32 i = 0; i < n; ++i)
+        {
+            const F32 x0 = gl + cw * (F32)i + cw * 0.15f, x1 = gl + cw * (F32)(i + 1) - cw * 0.15f;
+            if (i < bs.mLeft) roundRectF(x0, by - h * 0.05f, x1, by, cw * 0.3f, C_GREY, C_DIM);
+            else frameW(x0, by - h * 0.05f, x1, by, 1.f, C_DIM);
+        }
+    }
+    if (bs.mSafe) text(mF.mTiny, "SAFE AIRSPACE - NO RELEASE", gl, by - h * 0.07f, C_CYAN, LLFontGL::LEFT, LLFontGL::TOP);
+    else if (now() - bs.mImpactAt < IMPACT_SHOW && !bs.mLastImpact.empty())
+        text(mF.mTiny, bs.mLastImpact, gl, by - h * 0.07f, C_WHITE, LLFontGL::LEFT, LLFontGL::TOP);
+
+    const F32 gap = w * 0.03f, bw = (w - gap * 4.f) / 3.f;
+    const F32 bb = sb + h * 0.04f, bt = sb + h * 0.17f;
+    airButton(sl + gap, sl + gap + bw, bb, bt, w, H_BOMB_DOORS, bs.mDoors == 0 ? "OPEN DOORS" : "CLOSE DOORS", C_GREEN, bs.mDoors != 0,
+              "Open or close the bomb doors (they take a few seconds; not above the doors' speed limit)");
+    airButton(sl + gap * 2.f + bw, sl + gap * 2.f + bw * 2.f, bb, bt, w, H_BOMB_STICK,
+              bs.mStick <= 0 ? std::string("STICK ALL") : fmt("STICK %d", bs.mStick), C_WHITE, false,
+              "How many bombs one release lets go: 1, 2, 4 or all");
+    airButton(sl + gap * 3.f + bw * 2.f, sr - gap, bb, bt, w, H_BOMB_RELEASE, "RELEASE", C_RED, bs.mTtr >= 0.f && bs.mTtr <= 0.5f,
+              "Release the stick (the doors must be open)");
+}
+
+void WolfFlightDeck::drawEngines(F32 l, F32 b, F32 r, F32 t)
+{
+    WolfAir& a = WolfAir::instance();
+    const WolfAir::Engines& e = a.engines();
+    F32 sl, sb, sr, st;
+    drawBezel(l, b, r, t, (r - l) * 0.055f, sl, sb, sr, st);
+    const F32 w = sr - sl, h = st - sb;
+    LLLocalClipRect screen_clip(WolfHudScale::clip(LLRect((S32)sl, (S32)st, (S32)sr, (S32)sb)));
+    const F32 top = st - h * 0.03f;
+    const bool pilot = !a.isCrew();
+    text(mF.mTiny, "ENGINES", sl + w * 0.04f, top, C_CYAN, LLFontGL::LEFT, LLFontGL::TOP);
+    if (e.mAsym && blink(1.f))
+        text(mF.mTiny, "THRUST UNEVEN - RUDDER", sr - w * 0.04f, top, C_AMBER, LLFontGL::RIGHT, LLFontGL::TOP);
+    const S32 n = llclamp(e.mCount, 1, WolfAir::MAX_ENGINES);
+    // one column an engine, 1 = port outer on the left (s10 "numbered as the class (1 = port outer)")
+    const F32 cl = sl + w * 0.03f, cr = sr - w * 0.03f;
+    const F32 cw = (cr - cl) / (F32)n;
+    const F32 bar_t = top - h * 0.10f, bar_b = sb + h * 0.64f;
+    for (S32 i = 0; i < n; ++i)
+    {
+        const WolfAir::Engine& x = e.mE[i];
+        const F32 x0 = cl + cw * (F32)i, xm = x0 + cw * 0.5f;
+        // rpm bar
+        const F32 bl = xm - cw * 0.12f, br = xm + cw * 0.12f;
+        rectF(bl, bar_b, br, bar_t, C_BAR_OFF);
+        const F32 f = llclamp((F32)x.mRpm / ENGINE_DIAL_MAX, 0.f, 1.f);
+        rectF(bl, bar_b, br, bar_b + (bar_t - bar_b) * f, x.mRun ? C_BAR_ON : C_DIM);
+        const F32 y100 = bar_b + (bar_t - bar_b) * (100.f / ENGINE_DIAL_MAX);
+        lineW(bl - 2.f, y100, br + 2.f, y100, 1.f, C_WHITE);
+        // the engine's number (Concorde: orange with "RH" while its reheat burns)
+        text(mF.mTiny, (e.mConcorde && x.mReheat) ? fmt("%d RH", i + 1) : fmt("%d", i + 1), xm, bar_t + 2.f,
+             (e.mConcorde && x.mReheat) ? LLColor4(1.f, 0.55f, 0.1f, 1.f) : C_WHITE, LLFontGL::HCENTER, LLFontGL::BOTTOM);
+        F32 y = bar_b - 2.f;
+        text(mF.mTiny, fmt("%d%%", x.mRpm), xm, y, x.mRun ? C_WHITE : C_DIM, LLFontGL::HCENTER, LLFontGL::TOP);
+        y -= h * 0.055f;
+        // its state, worst first: FIRE, FEATHERED, STOPPED, then the damage figure (the plugin's power factor)
+        if (x.mFire) { if (blink(0.5f)) text(mF.mTiny, "FIRE", xm, y, C_RED, LLFontGL::HCENTER, LLFontGL::TOP); }
+        else if (x.mFeathered) text(mF.mTiny, "FEATH", xm, y, C_AMBER, LLFontGL::HCENTER, LLFontGL::TOP);
+        else if (!x.mRun) text(mF.mTiny, "STOP", xm, y, C_GREY, LLFontGL::HCENTER, LLFontGL::TOP);
+        else text(mF.mTiny, fmt("PWR %d", x.mPower), xm, y, x.mPower >= 75 ? C_GREEN : x.mPower >= 40 ? C_AMBER : C_RED, LLFontGL::HCENTER, LLFontGL::TOP);
+        // the column's switches: feather, extinguisher (only stopped and feathered, one bottle), start / stop
+        const F32 kb = sb + h * 0.21f, kh = h * 0.075f, kg = h * 0.012f;
+        const F32 k0 = x0 + cw * 0.06f, k1 = x0 + cw * 0.94f;
+        const EHit base = (EHit)(H_ENG_FIRST + i * 3);
+        airButton(k0, k1, kb + (kh + kg) * 2.f, kb + (kh + kg) * 2.f + kh, w, base, x.mFeathered ? "UNFEATH" : "FEATH", C_AMBER, x.mFeathered,
+                  x.mFeathered ? fmt("Unfeather engine %d (only below normal cruising speed)", i + 1) : fmt("Feather engine %d", i + 1));
+        const bool can_ext = x.mBottle && !x.mRun && x.mFeathered;
+        airButton(k0, k1, kb + (kh + kg), kb + (kh + kg) + kh, w, (EHit)(base + 1), x.mBottle ? "EXT" : "USED", C_RED, x.mFire && can_ext,
+                  x.mBottle ? fmt("Fire extinguisher, engine %d: stop and feather the engine first; one bottle", i + 1)
+                            : fmt("Engine %d's extinguisher bottle is used", i + 1));
+        airButton(k0, k1, kb, kb + kh, w, (EHit)(base + 2), x.mRun ? "STOP" : "START", C_GREEN, x.mRun,
+                  x.mRun ? fmt("Stop engine %d", i + 1) : fmt("Start engine %d", i + 1));
+    }
+    // ---- the bottom row: George and the rudder trim (pilot); Concorde's nose, reheat and the fuel trim ----
+    const F32 gap = w * 0.02f, bb = sb + h * 0.04f, bt = sb + h * 0.17f;
+    std::vector<std::tuple<EHit, std::string, LLColor4, bool, std::string> > items;
+    if (pilot)
+    {
+        items.emplace_back(H_ENG_AP, e.mAP ? "GEORGE ON" : "GEORGE", C_GREEN, e.mAP, std::string("The autopilot: holds her height and heading; she flies on if you leave the seat"));
+        items.emplace_back(H_ENG_TRIM, e.mTrim != 0 ? fmt("TRIM %+d", e.mTrim) : std::string("TRIM"), C_CYAN, e.mTrim != 0,
+                           std::string("Keep the rudder you are holding now as the trim; press again to clear it"));
+    }
+    if (e.mConcorde)
+    {
+        if (pilot)
+        {
+            items.emplace_back(H_ENG_DROOP, fmt("NOSE %.1f\xC2\xB0", e.mNose), C_WHITE, false, std::string("Droop nose: 0, 5 (take-off and taxi) or 12.5 degrees (landing)"));
+            bool any = false;
+            for (S32 i = 0; i < n; ++i) any = any || e.mE[i].mReheat;
+            items.emplace_back(H_ENG_RH, "REHEAT", LLColor4(1.f, 0.55f, 0.1f, 1.f), any, std::string("Reheat on or off"));
+        }
+        items.emplace_back(H_ENG_CG_FWD, "CG FWD", C_WHITE, false, std::string("Fuel trim transfer forward"));
+        items.emplace_back(H_ENG_CG_STOP, fmt("CG %.0f%%", e.mCg), C_WHITE, false, std::string("Stop the fuel trim transfer"));
+        items.emplace_back(H_ENG_CG_AFT, "CG AFT", C_WHITE, false, std::string("Fuel trim transfer aft (the supersonic cruise)"));
+    }
+    if (!items.empty())
+    {
+        const F32 bw = (w - gap * (F32)(items.size() + 1)) / (F32)items.size();
+        F32 x = sl + gap;
+        for (const auto& it : items)
+        {
+            airButton(x, x + bw, bb, bt, w, std::get<0>(it), std::get<1>(it), std::get<2>(it), std::get<3>(it), std::get<4>(it));
+            x += bw + gap;
         }
     }
 }
@@ -3598,6 +4427,11 @@ void WolfFlightDeck::drawHUD(F32 top_of_world_bottom)
     frameW(sx - 40.f, my - 14.f, sx + 40.f, my + 14.f, 1.5f, C_HUD);
     text(hf, fmt("%d", (S32)llround(d.mAirspeed * KT)), sx, my, C_HUD, LLFontGL::HCENTER, LLFontGL::VCENTER);
     text(hs, "KT", sx, my - 18.f, C_HUD, LLFontGL::HCENTER, LLFontGL::TOP);
+    // [WOLF AIR JETS 2026-11-02] a jet's Mach number under the airspeed, where a fighter's head-up display shows it
+    if (WolfAir::instance().active() && WolfAir::instance().state().mJet)
+    {
+        text(hf, fmt("M %.2f", WolfAir::instance().state().mMach), sx, my - 34.f, C_HUD, LLFontGL::HCENTER, LLFontGL::TOP);
+    }
     frameW(ax - 48.f, my - 14.f, ax + 48.f, my + 14.f, 1.5f, C_HUD);
     text(hf, fmt("%d", (S32)llround(d.mAltMSL * FT)), ax, my, C_HUD, LLFontGL::HCENTER, LLFontGL::VCENTER);
     text(hs, fmt("%+d FPM", (S32)(llround(d.mVS * FPM / 10.f) * 10)), ax, my - 18.f, C_HUD, LLFontGL::HCENTER, LLFontGL::TOP);
@@ -3844,7 +4678,7 @@ bool WolfFlightDeck::handleMouseDown(S32 x, S32 y, MASK mask)
     // [WOLF AIR 2026-11-01] FIRE fires while it is held (the plane is told "hud fire on", and "off" when it is let go)
     if (id == H_AIR_FIRE)
     {
-        WolfAir::instance().fire(true);
+        WolfAir::instance().trigger(true);   // [WOLF AIR JETS] guns while held, one missile a press
         gFocusMgr.setMouseCapture(this);
         return true;
     }
@@ -3862,7 +4696,7 @@ bool WolfFlightDeck::handleMouseUp(S32 x, S32 y, MASK mask)
     // the stick and the lever spring back when let go
     WolfFlight::instance().setStick(0.f, 0.f);
     WolfFlight::instance().setThrottleLever(0.f);
-    if (mPressed == H_AIR_FIRE) WolfAir::instance().fire(false);   // [WOLF AIR 2026-11-01/] the trigger let go
+    if (mPressed == H_AIR_FIRE) WolfAir::instance().trigger(false);   // [WOLF AIR 2026-11-01/] the trigger let go
     // the edge's own up (the second of a double-click too) stays with the HUD, never the world under it
     const bool was = mPressed != H_NONE || mResize.dragging() || mResize.onGrip(x, y);
     mResize.end();   // [HUD SIZE 2026-10-12/]
@@ -3973,7 +4807,7 @@ void WolfFlightDeck::onMouseCaptureLost()
     mResize.end();   // [HUD SIZE 2026-10-12/]
     WolfFlight::instance().setStick(0.f, 0.f);
     WolfFlight::instance().setThrottleLever(0.f);
-    if (mPressed == H_AIR_FIRE) WolfAir::instance().fire(false);   // [WOLF AIR 2026-11-01/] nothing keeps firing
+    if (mPressed == H_AIR_FIRE) WolfAir::instance().trigger(false);   // [WOLF AIR 2026-11-01/] nothing keeps firing
     mPressed = H_NONE;
     mPressStep = 0;
 }
@@ -4077,6 +4911,32 @@ void WolfFlightDeck::knob(EHit id, S32 step)
 void WolfFlightDeck::press(EHit id, S32 x, S32 y, S32 step)
 {
     WolfFlight& f = WolfFlight::instance();
+    // [WOLF AIR BOMBERS] the ranges: a crew seat to move to (s9 "hud seat"), an engine's switch (s10)
+    if (id >= H_CREW_SEAT_FIRST && id <= H_CREW_SEAT_LAST)
+    {
+        // by the seat's NAME as drawn (the list can change between the draw and the click), and only while it is still empty
+        const size_t i = (size_t)(id - H_CREW_SEAT_FIRST);
+        if (i >= mCrewHitSeats.size()) return;
+        for (const WolfAir::CrewSeat& c : WolfAir::instance().crew())
+        {
+            if (c.mSeat == mCrewHitSeats[i] && c.mName.empty()) { WolfAir::instance().changeSeat(c.mSeat); break; }
+        }
+        return;
+    }
+    if (id >= H_ENG_FIRST && id <= H_ENG_LAST)
+    {
+        const S32 k = (S32)(id - H_ENG_FIRST), i = k / 3;
+        const WolfAir::Engines& e = WolfAir::instance().engines();
+        if (i >= e.mCount || i >= WolfAir::MAX_ENGINES) return;
+        const WolfAir::Engine& x = e.mE[i];
+        switch (k % 3)
+        {
+        case 0: WolfAir::instance().engineOrder(i + 1, x.mFeathered ? "unfeather" : "feather"); break;
+        case 1: WolfAir::instance().engineOrder(i + 1, "extinguish"); break;
+        default: WolfAir::instance().engineOrder(i + 1, x.mRun ? "stop" : "start"); break;
+        }
+        return;
+    }
     switch (id)
     {
     case H_MASTER_WARN:
@@ -4095,6 +4955,47 @@ void WolfFlightDeck::press(EHit id, S32 x, S32 y, S32 step)
             mBailAskAt = now();
         }
         break;
+    // [WOLF AIR JETS 2026-11-02] the stores, the decoys and the jet's switches
+    case H_AIR_WPN_GUN: WolfAir::instance().selectWeapon(WolfAir::WPN_GUN); break;
+    case H_AIR_WPN_IR: WolfAir::instance().selectWeapon(WolfAir::WPN_IR); break;
+    case H_AIR_WPN_RADAR: WolfAir::instance().selectWeapon(WolfAir::WPN_RADAR); break;
+    case H_AIR_FLARE: WolfAir::instance().decoy(true); break;
+    case H_AIR_CHAFF: WolfAir::instance().decoy(false); break;
+    case H_JET_REHEAT: WolfAir::instance().reheat(); break;
+    case H_JET_AIRBRAKE: WolfAir::instance().airbrake(); break;
+    case H_JET_NOZ_DN: WolfAir::instance().nozzles(llmax(WolfAir::instance().state().mNozzle - NOZZLE_STEP, 0)); break;
+    case H_JET_HOVER: WolfAir::instance().nozzles(90); break;
+    case H_JET_NOZ_UP: WolfAir::instance().nozzles(llmin(WolfAir::instance().state().mNozzle + NOZZLE_STEP, 98)); break;
+    case H_JET_WATER: WolfAir::instance().water(); break;
+    // [WOLF AIR BOMBERS] DESIGN_BOMBERS.md s9 / s10
+    case H_BOMB_DOORS: WolfAir::instance().bombDoors(); break;
+    case H_BOMB_STICK:
+    {
+        // the sight's own stick (s9 bmb stick=), stepped 1 -> 2 -> 4 -> all -> 1 (all = 0)
+        const S32 cur = WolfAir::instance().bombsight().mStick;
+        WolfAir::instance().bombStick(cur <= 0 ? 1 : cur < 2 ? 2 : cur < 4 ? 4 : 0);
+        break;
+    }
+    case H_BOMB_RELEASE: WolfAir::instance().bombRelease(); break;
+    case H_ENG_AP: WolfAir::instance().autopilot(!WolfAir::instance().engines().mAP); break;
+    case H_ENG_TRIM: WolfAir::instance().rudderTrim(WolfAir::instance().engines().mTrim == 0); break;
+    case H_ENG_DROOP:
+    {
+        const F32 n = WolfAir::instance().engines().mNose;
+        WolfAir::instance().droop(n < 2.5f ? 5.f : n < 9.f ? 12.5f : 0.f);
+        break;
+    }
+    case H_ENG_RH:
+    {
+        bool any = false;
+        const WolfAir::Engines& e = WolfAir::instance().engines();
+        for (S32 i = 0; i < e.mCount && i < WolfAir::MAX_ENGINES; ++i) any = any || e.mE[i].mReheat;
+        WolfAir::instance().concordeReheat(!any);
+        break;
+    }
+    case H_ENG_CG_FWD: WolfAir::instance().cgTrim("fwd"); break;
+    case H_ENG_CG_STOP: WolfAir::instance().cgTrim("stop"); break;
+    case H_ENG_CG_AFT: WolfAir::instance().cgTrim("aft"); break;
     // [/WOLF AIR]
     case H_AT: f.toggleAT(); break;
     case H_LNAV: f.pressLNAV(); break;

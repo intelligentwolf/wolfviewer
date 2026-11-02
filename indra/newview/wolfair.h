@@ -24,6 +24,7 @@
 #include "llsingleton.h"
 #include "lluuid.h"
 #include "v3math.h"
+#include "v4color.h"
 
 // Paul, 2026-11-01: "our next project is aircraft, being able to do dogfights in the sky".
 //
@@ -71,6 +72,24 @@ public:
         std::string mDogfight = "off";      // the plugin's state word: off on switching_off:<s> down wreck:<s>
         bool        mSafe = false;
         std::string mSay;
+        // [WOLF AIR JETS 2026-11-02] helm 1.5.x st fields. Source: aircraft-dogfight-2026-11-01/b-flight-model/lsl/
+        // wolf_plane_helm_template.lsl HudState(): "|gnd=" always; "|mach=|rpm=|rh=|ab=" only for a JET; "|noz=|h2o=|wet=|kg="
+        // only for a VTOL. rh = gReheat (reheat lit), ab = gBrake (the AIRBRAKES, not the afterburner), rpm = gSpool x 100,
+        // noz = gNoz in degrees, h2o = gWaterS (seconds of water left at full throttle), wet = gWet (water switched on),
+        // kg = gMass (her mass now).
+        bool        mJet = false;           // a "mach=" field has been seen
+        F32         mMach = 0.f;
+        S32         mRpm = 0;               // spool, percent
+        bool        mReheat = false, mAirbrake = false;
+        bool        mVtol = false;          // a "noz=" field has been seen
+        S32         mNozzle = 0;            // degrees, 0 aft .. 98 forward of down
+        S32         mWaterS = 0;
+        bool        mWet = false;
+        S32         mMassKg = 0;
+        // [WOLF AIR JETS 2026-11-02] kit 1.3.0 fields. Source: e-lsl-commands/lsl/wolf_dogfight.lsl HudFields():
+        // "|msl=<ir>/<radar>|cm=<flares>/<chaff>|warn=<0/1>" (counts from air.fire ["count"], AirMissiles.cs Count).
+        S32         mIr = 0, mRadar = 0, mFlares = 0, mChaff = 0;
+        bool        mWarn = false;
         // events (frame seconds)
         std::string mHitBy, mHitPart;
         S32         mHitDmg = 0;
@@ -78,6 +97,66 @@ public:
         std::string mDownBy;
         F64         mDownAt = -100.0;
         F64         mRespawnAt = -100.0;
+        // [WOLF AIR JETS] "warn|<text>" (wolf_dogfight.lsl Happened, kind missile_warning; the words are AirMissiles.cs:95
+        // "MISSILE! <type> from <name> - release <chaff|flares> and break")
+        std::string mWarnText;
+        F64         mWarnAt = -100.0;
+    };
+
+    // ---- [WOLF AIR JETS 2026-11-02] the stores: the weapon the FIRE button and fire key let go ----
+    enum EWeapon { WPN_GUN = 0, WPN_IR, WPN_RADAR };
+    // A missile type's seeker figures. Source: aircraft-dogfight-2026-11-01/d-planes/generator/jet_weapons.py TYPES
+    // (cone_deg and range_m; the plugin's lock test is AirMissiles.cs Launch: the target nearest the nose within the cone
+    // and the reach). The class's missiles: d-planes/classes/<id>.json "guns" (group "missile" = infra-red, "radar").
+    struct MissileType { const char* mId; const char* mTitle; F32 mConeDeg; F32 mRangeM; };
+    /** The class's infra-red or radar missile, or null when she carries none (or the class is not one of ours). */
+    static const MissileType* missileOf(const std::string& cls, bool radar);
+    /** The class has reheat (thrust_ab_n > thrust_dry_n in its class file). */
+    static bool hasReheat(const std::string& cls);
+    /** Harrier: her hover limit at sea level in kg, wet or dry; 0 for a class that cannot hover. */
+    static F32 hoverLimitKg(const std::string& cls, bool wet);
+
+    struct Seeker
+    {
+        bool        mTarget = false;        // a warplane is inside the cone and the reach
+        std::string mName;
+        F32         mOffDeg = 0.f, mRangeM = 0.f;
+        LLVector3   mPosAgent;              // where she is (for the diamond)
+    };
+
+    // ---- [WOLF AIR BOMBERS] the crew lines, DESIGN_BOMBERS.md s9 ----
+    struct CrewSeat { std::string mSeat, mRole, mName; };
+    struct Turret
+    {
+        bool mHave = false;
+        std::string mSeat, mStop;
+        F32 mZeroAz = 0.f, mAz = 0.f, mEl = 0.f, mAzMin = -180.f, mAzMax = 180.f, mElMin = -90.f, mElMax = 90.f, mRate = 0.f;
+        S32 mAmmo = 0, mHeat = 0;
+        bool mFire = false;
+    };
+    // DESIGN_BOMBERS.md s10 "eng": the helm's per-engine line (multi-engine classes only)
+    static constexpr S32 MAX_ENGINES = 8;
+    struct Engine { S32 mRpm = 0; bool mRun = false, mFeathered = false; S32 mPower = 100; bool mFire = false, mBottle = true; bool mReheat = false; };
+    struct Engines
+    {
+        bool mHave = false;
+        S32 mCount = 0;
+        std::array<Engine, MAX_ENGINES> mE{};
+        bool mAP = false, mAsym = false;
+        S32 mTrim = 0;                      // -100..100
+        bool mConcorde = false;             // rh/nose/cg seen
+        F32 mNose = 0.f, mCg = 0.f;
+    };
+    struct Bombsight
+    {
+        bool mHave = false;
+        S32 mDoors = 0;                     // 0 shut, 1 open, 2 opening
+        F32 mOpenS = 0.f;
+        S32 mLeft = 0, mLoad = 0, mStick = 1, mSpacingMs = 0;
+        F32 mTtr = -1.f, mDrift = 0.f, mTargetM = 0.f;
+        std::string mSteer, mTarget, mLastImpact;
+        F64 mImpactAt = -100.0;
+        bool mSafe = false;
     };
 
     struct Kill
@@ -104,6 +183,8 @@ public:
     bool isDown() const;
     /** The plane's root's nose (+X) in agent space, for the gunsight; false when not in view. */
     bool noseAxis(LLVector3& origin, LLVector3& axis) const;
+    /** [WOLF AIR BOMBERS] the turret's bore in agent space (s9 tur: zaz + az, el in the root frame); false when unknown. */
+    bool turretAxis(LLVector3& origin, LLVector3& axis) const;
     const std::string& lastError() const { return mError; }
     bool noAnswer() const;
 
@@ -112,6 +193,48 @@ public:
     bool firing() const { return mFiring; }
     void dogfight(bool on);
     void bail();                    // the band asks first (BAIL then CONFIRM)
+
+    // [WOLF AIR JETS 2026-11-02] the stores and the jet's switches (the helm's and kit's own words, sent on her channel)
+    EWeapon weapon() const { return mWeapon; }
+    bool weaponCarried(EWeapon w) const;
+    void selectWeapon(EWeapon w);
+    void trigger(bool down);        // the FIRE button / fire key: guns while held, one missile per press
+    void decoy(bool flare);         // "hud flare" / "hud chaff"
+    void reheat();                  // "reheat"
+    void airbrake();                // "brakes"
+    void nozzles(S32 deg);          // "nozzles <deg>" ("hover" at 90)
+    void water();                   // "water"
+    const Seeker& seeker() const { return mSeeker; }
+    /** A missile ordered: what became of it, for the band ("" when nothing to say). */
+    std::string launchNote(LLColor4& col) const;
+    /** The missile warning is live (warn=1 or a warn line in the last 6 s). */
+    bool warning() const;
+
+    // [WOLF AIR BOMBERS] crew (DESIGN_BOMBERS.md s9)
+    const std::vector<CrewSeat>& crew() const { return mCrew; }
+    const std::string& mySeat() const { return mMySeat; }
+    bool isCrew() const { return !mMySeat.empty() && mMySeat != "pilot"; }
+    const Turret& turret() const { return mTurret; }
+    const Seeker& turretCue() const { return mTurretCue; }
+    const Engines& engines() const { return mEng; }
+    /** The engine panel is this seat's: the pilot, or the flight engineer (s1 seat "seat_engineer"; s10 panel "engines"). */
+    bool enginePanel() const;
+    // s10 orders
+    void engineOrder(S32 i, const char* what);    // "feather", "unfeather", "extinguish", "start", "stop"
+    void autopilot(bool on);
+    void rudderTrim(bool on);
+    void droop(F32 deg);
+    void concordeReheat(bool on);
+    void cgTrim(const char* dir);
+    const Bombsight& bombsight() const { return mBomb; }
+    void changeSeat(const std::string& seat);
+    void bombDoors();
+    void bombRelease();
+    void bombStick(S32 n);          // 0 = all
+
+    // [WOLF AIR PREVIEW] the deck drawn from recorded lines at the login screen (WolfAirPreviewFile); nothing is sent
+    bool previewing() const { return mPreview; }
+    void previewTick();
 
     static bool onWolf();
     // The fire key the pilot chose on the CDU CONTROLS page (WolfAirFireKey): 0 none, 1 Space, 2 Insert.
@@ -122,7 +245,7 @@ private:
     void reset(const LLUUID& seat);
     void send(const std::string& text);
     void sayHello();
-    void order(const std::string& words);
+    bool order(const std::string& words);   // true when it was said
     void parseHi(const std::vector<std::string>& f);
     void parseState(const std::vector<std::string>& f);
     void parseHit(const std::vector<std::string>& f);
@@ -130,6 +253,15 @@ private:
     void parseDown(const std::vector<std::string>& f);
     void addKill(const std::string& killer, const std::string& victim, const std::string& how);
     void pollFireKey();
+    void handleLine(const std::string& text);
+    void parseCrew(const std::vector<std::string>& f);
+    void parseTurret(const std::vector<std::string>& f);
+    void parseBomb(const std::vector<std::string>& f);
+    void parseEngines(const std::vector<std::string>& f);
+    void parsePreview(const std::vector<std::string>& f);
+    void scanSeeker();
+    void warnTone();
+    bool previewWanted();
 
     State       mState;
     std::deque<Kill> mKills;
@@ -147,6 +279,35 @@ private:
     F64         mFireSentAt = 0.0;
     std::string mError;
     S32         mOnWolf = -1;
+    // [WOLF AIR JETS]
+    EWeapon     mWeapon = WPN_GUN;
+    bool        mTriggerDown = false;
+    Seeker      mSeeker;
+    F64         mSeekerAt = 0.0;
+    F64         mLaunchAt = -100.0;     // a missile ordered then
+    S32         mLaunchCount = 0;       // what she had of it then
+    bool        mLaunchRadar = false;
+    bool        mWarnWas = false;
+    F64         mToneAt = -100.0;
+    S32         mToneState = 0;         // 0 not made, 1 made, -1 could not be made
+    // [WOLF AIR BOMBERS]
+    std::vector<CrewSeat> mCrew;
+    std::string mMySeat;
+    Turret      mTurret;
+    Seeker      mTurretCue;
+    F64         mTurretCueAt = 0.0;
+    Bombsight   mBomb;
+    Engines     mEng;
+    // [WOLF AIR PREVIEW]
+    bool        mPreview = false;
+    S32         mPreviewChecked = 0;
+    std::vector<std::pair<F64, std::string> > mPreviewLines;
+    size_t      mPreviewNext = 0;
+    F64         mPreviewStart = 0.0;
+    F32         mPreviewVS = 0.f, mPreviewGS = 0.f, mPreviewAGL = 0.f;
+public:
+    /** The preview's stand-ins for the flight data the hover cue reads (vertical speed, ground speed, height). */
+    void previewFlight(F32& vs, F32& gs, F32& agl) const { vs = mPreviewVS; gs = mPreviewGS; agl = mPreviewAGL; }
 };
 
 #endif // WOLF_AIR_H

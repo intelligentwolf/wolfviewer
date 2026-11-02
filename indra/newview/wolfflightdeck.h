@@ -91,6 +91,15 @@ public:
         H_LSK_L1, H_LSK_L2, H_LSK_L3, H_LSK_L4, H_LSK_L5, H_LSK_L6,
         H_LSK_R1, H_LSK_R2, H_LSK_R3, H_LSK_R4, H_LSK_R5, H_LSK_R6,
         H_AIR_FIRE, H_AIR_DOGFIGHT, H_AIR_BAIL,   // [WOLF AIR 2026-11-01/] the dogfight band (wolfair.h)
+        // [WOLF AIR JETS 2026-11-02] the stores, the decoys and the jet's switches
+        H_AIR_WPN_GUN, H_AIR_WPN_IR, H_AIR_WPN_RADAR, H_AIR_FLARE, H_AIR_CHAFF,
+        H_JET_REHEAT, H_JET_AIRBRAKE, H_JET_NOZ_DN, H_JET_HOVER, H_JET_NOZ_UP, H_JET_WATER,
+        // [WOLF AIR BOMBERS] the crew (DESIGN_BOMBERS.md s9) and the engines (s10)
+        H_BOMB_DOORS, H_BOMB_STICK, H_BOMB_RELEASE,
+        H_ENG_AP, H_ENG_TRIM, H_ENG_DROOP, H_ENG_RH, H_ENG_CG_FWD, H_ENG_CG_STOP, H_ENG_CG_AFT,
+        H_CREW_SEAT_FIRST, H_CREW_SEAT_LAST = H_CREW_SEAT_FIRST + 15,
+        // per engine i (0-based): FIRST + i * 3 + 0 feather/unfeather, + 1 extinguish, + 2 start/stop
+        H_ENG_FIRST, H_ENG_LAST = H_ENG_FIRST + 8 * 3 - 1,
     };
 
 private:
@@ -183,6 +192,18 @@ private:
     // FIRE, BAIL), and the world above it gets the reflector gunsight, the kill feed and the hit / safe-airspace notices.
     void drawCombat(F32 l, F32 b, F32 r, F32 t);
     void drawAirOverlay(F32 top_of_world);
+    // [WOLF AIR JETS 2026-11-02] the JET display (Mach, spool and reheat, airbrakes, fuel, the Harrier's nozzles and water),
+    // the stores rows of COMBAT, and over the world the seeker, the missile warning and the hover cue
+    void drawJet(F32 l, F32 b, F32 r, F32 t);
+    F32 drawStores(F32 l, F32 r, F32 top, F32 h, F32 w);   // gives back the y under the rows
+    // [WOLF AIR BOMBERS] DESIGN_BOMBERS.md s9 / s10: the crew list, the turret, the bombsight, the engines
+    void drawCrew(F32 l, F32 b, F32 r, F32 t);
+    void drawTurret(F32 l, F32 b, F32 r, F32 t);
+    void drawBombsight(F32 l, F32 b, F32 r, F32 t);
+    void drawEngines(F32 l, F32 b, F32 r, F32 t);
+    void airButton(F32 x0, F32 x1, F32 bb, F32 bt, F32 w, EHit id, const std::string& label, const LLColor4& lit_col, bool lit,
+                   const std::string& tip);
+    std::vector<std::string> mCrewHitSeats;    // the seat each crew row's hit stands for, as drawn this frame
     F64 mBailAskAt = -100.0;        // BAIL pressed once: CONFIRM within BAIL_CONFIRM_S jumps
     // [/WOLF AIR]
     void drawPFD(F32 l, F32 b, F32 r, F32 t);

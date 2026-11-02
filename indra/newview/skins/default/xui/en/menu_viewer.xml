@@ -2036,6 +2036,12 @@
                 <menu_item_check.on_click function="ToggleControl" parameter="WolfAirAutoDeck" />
                 <menu_item_check.on_visible function="WolfGrid.IsOnWolfTerritories" />
             </menu_item_check>
+            <!-- [WOLF AIR JETS 2026-11-02] wolfair.cpp warnTone: the two-tone missile warning (the MISSILE box always shows) -->
+            <menu_item_check label="Missile Warning Tone" name="WolfAirWarnTone">
+                <menu_item_check.on_check function="CheckControl" parameter="WolfAirWarnTone" />
+                <menu_item_check.on_click function="ToggleControl" parameter="WolfAirWarnTone" />
+                <menu_item_check.on_visible function="WolfGrid.IsOnWolfTerritories" />
+            </menu_item_check>
             <menu_item_call label="Dogfights Guide..." name="WolfAirGuide">
                 <menu_item_call.on_click function="Advanced.ShowURL" parameter="https://wolf-grid.com/index.php?f=lsl&amp;fn=wolfCall#air" />
                 <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />

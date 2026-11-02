@@ -15467,6 +15467,13 @@ Some antivirus programs may mistakenly block parts of [APP_NAME], slowing down i
 For detailed instructions on how to whitelist [APP_NAME] - including a list of files and folders to exclude - please visit our guide:
 
 https://www.wolf-grid.com/blog/faq.php
+    <!-- [WOLF 2026-11-02] Paul: "please dont show that every startup, let the user turn it off". okignore (template above,
+         line 32) adds the "Don't show this again" box; LLNotifications then suppresses it and Preferences > Popups can
+         bring it back. -->
+    <usetemplate
+     ignoretext="Show the reminder to add [APP_NAME] to your antivirus exclusion list"
+     name="okignore"
+     yestext="OK"/>
   </notification>
 
    <notification

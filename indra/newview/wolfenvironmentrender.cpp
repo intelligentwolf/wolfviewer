@@ -3264,6 +3264,240 @@ namespace
         }   // gainsByDay
         if (nCol > 0) { sCloudMeasured = nSum * (1.f / nCol); sCloudTarget = tSum * (1.f / nCol); }
     }
+
+    // [WolfViewer 2026-11-02, ticket 442 DIAGNOSTIC] THE OVERLAY WATCH: Jimmy Olsen's one-frame flash on TROMSO
+    // (region-terrain-work/ticket-442-sky-flash/README.md) is the clouds march (cloudsF.glsl) hazing far surfaces under the
+    // horizon as if they were sky. Each frame, OW_COLS columns of this frame's march (its own sky / surface verdict,
+    // cDepthVelocity.a: >= 0 sky, < 0 the scene's view Z), its colour, the scene depth at the very pixels the march sampled
+    // and the resolved overlay are copied into a pixel-pack buffer (no stall: read OW_RING frames later, behind a fence).
+    // A line is logged only when the verdict or the overlay jumps, or the march's verdict differs from the depth it read,
+    // with the frame's inputs. Off unless WOLF_OVERLAY_WATCH=1 is in the environment (one getenv at the first call).
+    constexpr S32 OW_COLS = 8, OW_RING = 4, OW_HIST = 8;
+    // Source: wolftkclouds.cpp:86 BAYER_INDICES / bayerOffset (three-geospatial clouds/src/bayer.ts:11-21)
+    const S32 OW_BAYER[16] = { 0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5 };
+    struct OwSlot
+    {
+        GLuint pbo = 0; size_t bytes = 0; GLsync fence = 0; bool busy = false;
+        U32 frame = 0; S32 W = 0, H = 0, lw = 0, lh = 0, dw = 0, dh = 0, slot = 0;
+        F32 jx = 0.f, jy = 0.f, nearC = 0.f, farC = 0.f, nearP = 0.f, farP = 0.f, exposure = 0.f, sx = 1.f, sy = 1.f;
+        LLVector3 pos, at; F64 t = 0.0;
+        S32 lowCol[OW_COLS]; S32 pxCol[OW_COLS];
+    };
+    // offsets (floats) of one column's block in a slot's buffer: depth (H), overlay rgba (4H), march dv (4 lh), march colour (4 lh)
+    size_t owColFloats(const OwSlot& s) { return (size_t)s.H * 5 + (size_t)s.lh * 8; }
+
+    void overlayWatch(const WolfTk::CloudsFrame& f)
+    {
+        static S32 s_on = -1;
+        if (s_on < 0) { const char* e = getenv("WOLF_OVERLAY_WATCH"); s_on = (e && e[0] == '1') ? 1 : 0;
+                        if (s_on) LL_INFOS("WolfOverlayWatch") << "overlay watch on: " << OW_COLS << " columns a frame" << LL_ENDL; }
+        if (!s_on || gGLManager.mGLVersion < 4.49f || !sClouds) return;   // glGetTextureSubImage: GL 4.5 (llgl.cpp:2199-2200)
+        // 0. the march's per-frame inputs from the CPU (CloudsFrame, wolftkclouds.cpp sharedUniforms / cameraUniforms): a line when
+        // any of them moves by more than 2 % (or a direction by more than 0.5 deg) in one frame
+        {
+            static std::vector<F32> s_prevIn; static U32 s_prevInFrame = 0; static F64 s_inRateT = 0.0; static S32 s_inRateN = 0;
+            static const char* const NAMES[] = { "blueW.r", "blueW.g", "blueW.b", "hazeW.r", "hazeW.g", "hazeW.b", "cs.r", "cs.g", "cs.b",
+                "tmpAmb.r", "tmpAmb.g", "tmpAmb.b", "combined.r", "glowX", "glowZ", "smgf", "densDist", "maxY", "hdr",
+                "lnorm.x", "lnorm.y", "lnorm.z", "ldir.x", "ldir.y", "ldir.z", "hazeDens", "hazeExp", "hazeAlways", "llHaze",
+                "exposure", "lightScale", "otherScale", "sun.x", "sun.y", "sun.z", "under.r", "near", "far" };
+            const std::vector<F32> in = { f.ll_blue_w.mV[0], f.ll_blue_w.mV[1], f.ll_blue_w.mV[2], f.ll_haze_w.mV[0], f.ll_haze_w.mV[1],
+                f.ll_haze_w.mV[2], f.ll_cs.mV[0], f.ll_cs.mV[1], f.ll_cs.mV[2], f.ll_tmp_amb.mV[0], f.ll_tmp_amb.mV[1], f.ll_tmp_amb.mV[2],
+                f.ll_combined.mV[0], f.ll_glow_x, f.ll_glow_z, f.ll_smgf, f.ll_density_distance, f.ll_max_y, f.ll_hdr,
+                f.ll_lightnorm_ecef.mV[0], f.ll_lightnorm_ecef.mV[1], f.ll_lightnorm_ecef.mV[2],
+                f.ll_light_dir_ecef.mV[0], f.ll_light_dir_ecef.mV[1], f.ll_light_dir_ecef.mV[2],
+                f.haze_density_scale, f.haze_exponent, f.haze_always ? 1.f : 0.f, f.ll_haze ? 1.f : 0.f,
+                f.pre_exposure, f.light_scale, f.other_scale, f.sun_dir_ecef.mV[0], f.sun_dir_ecef.mV[1], f.sun_dir_ecef.mV[2],
+                f.sky_under_cloud.mV[0], f.near_clip, f.far_clip };
+            const U32 fr = sClouds->marchFrame();
+            if (s_prevIn.size() == in.size() && s_prevInFrame + 1 == fr)
+            {
+                std::ostringstream o;
+                for (size_t i = 0; i < in.size(); ++i)
+                {
+                    const bool dir = (i >= 19 && i <= 24) || (i >= 32 && i <= 34);
+                    const F32 a = s_prevIn[i], b = in[i];
+                    const bool jump = dir ? fabsf(b - a) > 0.0087f : fabsf(b - a) > 0.02f * llmax(fabsf(a), fabsf(b)) && fabsf(b - a) > 1e-6f;
+                    if (jump) o << " " << NAMES[i] << " " << std::setprecision(6) << a << "->" << b;
+                }
+                if (o.tellp() > 0)
+                {
+                    const F64 tn = LLFrameTimer::getElapsedSeconds();
+                    if (tn - s_inRateT > 10.0) { s_inRateT = tn; s_inRateN = 0; }
+                    if (++s_inRateN <= 20) LL_INFOS("WolfOverlayWatch") << "INPUT jump frame " << fr << ":" << o.str() << LL_ENDL;
+                }
+            }
+            s_prevIn = in; s_prevInFrame = fr;
+        }
+        static OwSlot s_ring[OW_RING];
+        static U32 s_next = 0;
+        static std::vector<S32> s_hSky[OW_COLS], s_hOvl[OW_COLS], s_hLum[OW_COLS];   // last frames' sky texel count / overlay sum (x100) per column
+        static std::vector<U8> s_prevSky[OW_COLS];
+        static U32 s_prevFrame = 0;
+        static S32 s_after = 0;          // log the frames after a flagged one too
+        static F64 s_beat = 0.0, s_rateT = 0.0; static S32 s_rateN = 0;
+        static U32 s_frames = 0, s_flags = 0, s_mism = 0, s_nearThr = 0, s_offFrame = 0, s_falseSky = 0, s_stillFrames = 0;
+        static LLVector3 s_prevPos, s_prevAt; static F32 s_minMargin = 1.f, s_minMarginD = 0.f;
+        const F64 now = LLFrameTimer::getElapsedSeconds();
+
+        // 1. take the oldest reading that is done
+        for (S32 k = 0; k < OW_RING; ++k)
+        {
+            OwSlot& s = s_ring[(s_next + k) % OW_RING];
+            if (!s.busy) continue;
+            const GLenum st = glClientWaitSync(s.fence, 0, 0);
+            if (st != GL_ALREADY_SIGNALED && st != GL_CONDITION_SATISFIED) continue;
+            glDeleteSync(s.fence); s.fence = 0; s.busy = false;
+            glBindBuffer(GL_PIXEL_PACK_BUFFER, s.pbo);
+            const F32* m = (const F32*)glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, s.bytes, GL_MAP_READ_BIT);
+            if (!m) { glBindBuffer(GL_PIXEL_PACK_BUFFER, 0); continue; }
+            ++s_frames;
+            const size_t cf = owColFloats(s);
+            S32 nSky[OW_COLS], nMis[OW_COLS], ovl[OW_COLS], med[OW_COLS], medO[OW_COLS], lum[OW_COLS], medL[OW_COLS];
+            S32 jumpCols = 0, ovlCols = 0, lumCols = 0, misTot = 0, falseSky = 0;
+            const bool sameGeom = (s_prevFrame + 1 == s.frame) || s_prevFrame == 0;
+            // the camera did not move since the frame before (a still camera: any jump is the flash, not motion)
+            const bool still = sameGeom && (s.pos - s_prevPos).lengthSquared() < 1e-6f && (s.at - s_prevAt).lengthSquared() < 1e-10f;
+            s_prevPos = s.pos; s_prevAt = s.at;
+            static S32 s_stillRun = 0;   // consecutive still frames: the medians have settled on this view after OW_HIST of them
+            s_stillRun = still ? s_stillRun + 1 : 0;
+            if (still) ++s_stillFrames;
+            std::ostringstream detail;
+            for (S32 c = 0; c < OW_COLS; ++c)
+            {
+                const F32* depth = m + c * cf;
+                const F32* ov = depth + s.H;
+                const F32* dv = ov + (size_t)s.H * 4;
+                const F32* mc = dv + (size_t)s.lh * 4;
+                nSky[c] = 0; nMis[c] = 0;
+                F32 osum = 0.f, lsum = 0.f;
+                for (S32 y = 0; y < s.H; ++y) { osum += ov[(size_t)y * 4 + 3]; lsum += ov[(size_t)y * 4] + ov[(size_t)y * 4 + 1] + ov[(size_t)y * 4 + 2]; }
+                ovl[c] = (S32)(osum * 100.f);
+                lum[c] = (S32)llclamp(lsum * 1000.f, 0.f, 2.0e9f);   // the overlay's added light (pre-exposed rgb), x 1000
+                std::vector<U8> sky((size_t)s.lh, 0);
+                for (S32 j = 0; j < s.lh; ++j)
+                {
+                    const bool mSky = dv[(size_t)j * 4 + 3] >= 0.f;
+                    sky[j] = mSky ? 1 : 0;
+                    if (mSky) ++nSky[c];
+                    // the depth pixel the march read: vUv x targetUvScale + temporalJitter (cloudsF.glsl getRayDistanceToScene),
+                    // point-filtered (llrendertarget.cpp allocateDepth TFO_POINT)
+                    const F32 v = ((F32)j + 0.5f) / (F32)s.lh * s.sy + s.jy;
+                    const S32 pyRaw = (S32)std::floor(v * (F32)s.H);
+                    if (pyRaw < 0 || pyRaw >= s.H) { ++s_offFrame; continue; }   // the target's last row runs past the frame (4 lh > H)
+                    const S32 py = pyRaw;
+                    const F32 d = depth[py];
+                    const bool dSky = !(d < 1.0f - 1e-7f);
+                    if (mSky && !dSky) ++falseSky;   // THE FLASH'S SIGNATURE: the march calls sky what the depth it read calls a surface
+                    if (dSky != mSky) { ++nMis[c]; ++misTot;
+                        if (nMis[c] <= 3) detail << " c" << c << "j" << j << ":m" << (mSky ? "sky" : "srf") << "/d=" << std::setprecision(9) << d << "(py " << py << ")"; }
+                    if (!dSky)
+                    {
+                        const F32 margin = 1.f - d;
+                        if (margin < s_minMargin) { s_minMargin = margin; s_minMarginD = -dv[(size_t)j * 4 + 3]; }
+                        if (margin < 1e-6f) ++s_nearThr;
+                    }
+                    // a texel whose verdict changed since the last frame (same frame size)
+                    if (sameGeom && s_prevSky[c].size() == sky.size() && s_prevSky[c][j] != sky[j] && detail.tellp() < 1600)
+                        detail << " c" << c << "j" << j << (mSky ? ":->sky" : ":->srf") << " d=" << std::setprecision(9) << d
+                               << " vz=" << std::setprecision(6) << dv[(size_t)j * 4 + 3] << " a=" << mc[(size_t)j * 4 + 3];
+                }
+                std::vector<S32> hs = s_hSky[c], ho = s_hOvl[c], hl = s_hLum[c];
+                medL[c] = lum[c];
+                if (hl.size() >= 3) { std::sort(hl.begin(), hl.end()); medL[c] = hl[hl.size() / 2]; }
+                if (hl.size() >= 3 && std::abs(lum[c] - medL[c]) > llmax(200, medL[c] / 33)) ++lumCols;
+                s_hLum[c].push_back(lum[c]); if (s_hLum[c].size() > OW_HIST) s_hLum[c].erase(s_hLum[c].begin());
+                med[c] = nSky[c]; medO[c] = ovl[c];
+                if (hs.size() >= 3) { std::sort(hs.begin(), hs.end()); med[c] = hs[hs.size() / 2]; }
+                if (ho.size() >= 3) { std::sort(ho.begin(), ho.end()); medO[c] = ho[ho.size() / 2]; }
+                if (hs.size() >= 3 && std::abs(nSky[c] - med[c]) >= 2) ++jumpCols;
+                if (ho.size() >= 3 && std::abs(ovl[c] - medO[c]) > llmax(400, medO[c] / 6)) ++ovlCols;
+                s_hSky[c].push_back(nSky[c]); if (s_hSky[c].size() > OW_HIST) s_hSky[c].erase(s_hSky[c].begin());
+                s_hOvl[c].push_back(ovl[c]); if (s_hOvl[c].size() > OW_HIST) s_hOvl[c].erase(s_hOvl[c].begin());
+                s_prevSky[c] = sky;
+            }
+            s_prevFrame = s.frame;
+            s_mism += misTot; s_falseSky += falseSky;
+            const bool flag = falseSky > 0 || (s_stillRun > OW_HIST && (jumpCols >= 2 || ovlCols >= 2 || lumCols >= 3));
+            const bool logIt = flag || s_after > 0;
+            if (flag) { ++s_flags; s_after = 2; } else if (s_after > 0) --s_after;
+            if (logIt)
+            {
+                if (now - s_rateT > 10.0) { s_rateT = now; s_rateN = 0; }
+                if (++s_rateN <= 40)
+                {
+                    std::ostringstream o;
+                    o << (flag ? "FLAG" : "after") << (still ? " still" : " moving") << " falseSky " << falseSky << " frame " << s.frame << " t " << std::fixed << std::setprecision(3) << s.t
+                      << " jumpCols " << jumpCols << " ovlCols " << ovlCols << " lumCols " << lumCols << " mismatch " << misTot
+                      << " | slot " << s.slot << " jitter " << std::setprecision(6) << s.jx << "," << s.jy
+                      << " frame " << s.W << "x" << s.H << " depth tex " << s.dw << "x" << s.dh << " low " << s.lw << "x" << s.lh
+                      << " uvScale " << s.sx << "," << s.sy
+                      << " near/far cam " << std::setprecision(4) << s.nearC << "/" << s.farC << " proj " << s.nearP << "/" << s.farP
+                      << " exposure " << s.exposure << " cam " << s.pos << " at " << s.at << " |";
+                    for (S32 c = 0; c < OW_COLS; ++c)
+                        o << " c" << c << "(x" << s.pxCol[c] << ") sky " << nSky[c] << "/" << med[c] << " ovl " << ovl[c] << "/" << medO[c] << " lum " << lum[c] << "/" << medL[c]
+                          << " mis " << nMis[c] << ";";
+                    o << " |" << detail.str();
+                    LL_INFOS("WolfOverlayWatch") << o.str() << LL_ENDL;
+                }
+            }
+            glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+            glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+        }
+        if (now - s_beat > 10.0)
+        {
+            if (s_beat > 0.0)
+                LL_INFOS("WolfOverlayWatch") << "heartbeat: " << s_frames << " frames read, " << s_flags << " flagged, " << s_mism
+                    << " verdict/depth mismatches (" << s_falseSky << " march-sky over a surface), " << s_stillFrames << " with the camera still, smallest surface margin 1-depth " << std::setprecision(4) << s_minMargin
+                    << " (view depth " << s_minMarginD << " m), " << s_nearThr << " surface texels with 1-depth < 1e-6, far "
+                    << LLViewerCamera::getInstance()->getFar() << ", " << s_offFrame << " texels sampled off the frame" << LL_ENDL;
+            s_beat = now; s_frames = s_flags = s_mism = s_nearThr = s_offFrame = s_falseSky = s_stillFrames = 0; s_minMargin = 1.f; s_minMarginD = 0.f;
+        }
+
+        // 2. start this frame's reading
+        S32 lw = 0, lh = 0;
+        const GLuint dvTex = sClouds->marchDepthVelocityTex(lw, lh);
+        const GLuint colTex = sClouds->marchColorTex(), ovTex = sClouds->colorTex();
+        if (!dvTex || !colTex || !ovTex || !f.depth_tex || lw <= 0 || lh <= 0) return;
+        OwSlot& s = s_ring[s_next];
+        if (s.busy) return;   // all in flight: skip this frame
+        s.W = (S32)f.width; s.H = (S32)f.height; s.lw = lw; s.lh = lh;
+        glGetTextureLevelParameteriv(f.depth_tex, 0, GL_TEXTURE_WIDTH, &s.dw);
+        glGetTextureLevelParameteriv(f.depth_tex, 0, GL_TEXTURE_HEIGHT, &s.dh);
+        s.frame = sClouds->marchFrame();
+        s.slot = (S32)(s.frame % 16);
+        // Source: wolftkclouds.cpp cameraUniforms (temporalJitter) and CloudsPass.update (resolution, targetUvScale)
+        S32 bi = 0; for (S32 i = 0; i < 16; ++i) if (OW_BAYER[i] == s.slot) bi = i;
+        const F32 ox = ((bi % 4) + 0.5f) / 4.f, oy = ((F32)(bi / 4) + 0.5f) / 4.f;
+        s.jx = ((ox - 0.5f) / (F32)(lw * 4)) * 4.f; s.jy = ((oy - 0.5f) / (F32)(lh * 4)) * 4.f;
+        s.sx = (F32)(lw * 4) / (F32)s.W; s.sy = (F32)(lh * 4) / (F32)s.H;
+        s.nearC = f.near_clip; s.farC = f.far_clip;
+        const F32 p22 = f.proj[2][2], p32 = f.proj[3][2];   // glm [col][row]: -(f+n)/(f-n), -2fn/(f-n)
+        s.nearP = p32 / (p22 - 1.f); s.farP = p32 / (p22 + 1.f);
+        s.exposure = f.pre_exposure; s.t = now;
+        s.pos = LLViewerCamera::getInstance()->getOrigin(); s.at = LLViewerCamera::getInstance()->getAtAxis();
+        const size_t cf = owColFloats(s);
+        const size_t bytes = cf * OW_COLS * sizeof(F32);
+        if (!s.pbo) glGenBuffers(1, &s.pbo);
+        glBindBuffer(GL_PIXEL_PACK_BUFFER, s.pbo);
+        if (bytes != s.bytes) { glBufferData(GL_PIXEL_PACK_BUFFER, bytes, nullptr, GL_STREAM_READ); s.bytes = bytes; }
+        for (S32 c = 0; c < OW_COLS; ++c)
+        {
+            const S32 ci = llclamp((S32)(((F32)c + 0.5f) * (F32)lw / (F32)OW_COLS), 0, lw - 1);
+            const F32 u = ((F32)ci + 0.5f) / (F32)lw * s.sx + s.jx;
+            const S32 px = llclamp((S32)std::floor(u * (F32)s.W), 0, llmin(s.W, s.dw) - 1);
+            s.lowCol[c] = ci; s.pxCol[c] = px;
+            const size_t base = (size_t)c * cf * sizeof(F32);
+            const S32 hh = llmin(s.H, s.dh);
+            glGetTextureSubImage(f.depth_tex, 0, px, 0, 0, 1, hh, 1, GL_DEPTH_COMPONENT, GL_FLOAT, (GLsizei)(hh * sizeof(F32)), (void*)base);
+            glGetTextureSubImage(ovTex, 0, px, 0, 0, 1, s.H, 1, GL_RGBA, GL_FLOAT, (GLsizei)(s.H * 4 * sizeof(F32)), (void*)(base + (size_t)s.H * sizeof(F32)));
+            glGetTextureSubImage(dvTex, 0, ci, 0, 0, 1, lh, 1, GL_RGBA, GL_FLOAT, (GLsizei)(lh * 4 * sizeof(F32)), (void*)(base + (size_t)s.H * 5 * sizeof(F32)));
+            glGetTextureSubImage(colTex, 0, ci, 0, 0, 1, lh, 1, GL_RGBA, GL_FLOAT, (GLsizei)(lh * 4 * sizeof(F32)), (void*)(base + ((size_t)s.H * 5 + (size_t)lh * 4) * sizeof(F32)));
+        }
+        glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+        s.fence = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+        s.busy = true;
+        s_next = (s_next + 1) % OW_RING;
+    }
 }
 
 bool WolfEnvironmentRender::stockCloudProbeDue()
@@ -4084,6 +4318,7 @@ void WolfEnvironmentRender::postPassInner()
         const WolfTk::CloudsFrame f = cloudsFrame(d, W, H, gCubeSnapshot);
         haveClouds = gCubeSnapshot ? sClouds->renderProbe(*sAtmos, f) : sClouds->render(*sAtmos, f);
         if (haveClouds && !gCubeSnapshot) measureCloudCover(f);   // [WolfViewer 2026-10-13] the EEP's cover, measured
+        if (haveClouds && !gCubeSnapshot) overlayWatch(f);        // [WolfViewer 2026-11-02, ticket 442 diagnostic] WOLF_OVERLAY_WATCH=1
         timerStamp(SEC_CLOUDS, 1);
     }
     const GLuint overlay = haveClouds ? (gCubeSnapshot ? sClouds->probeColorTex() : sClouds->colorTex()) : 0;

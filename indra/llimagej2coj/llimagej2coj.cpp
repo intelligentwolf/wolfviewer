@@ -30,6 +30,30 @@
 // this is defined so that we get static linking.
 #include "openjpeg.h"
 
+// <WolfViewer 2026-11-02 ticket 454> One decoded J2C sample as an 8-bit channel value, the way KDU's
+// transfer_bytes() does it (llimagej2ckdu.cpp:1189-1310): signed samples are level-shifted to unsigned,
+// then the precision is rounded down to 8 bits ((v + 2^(p-9)) >> (p-8)) or widened (v << (8-p)), clamped.
+// Source: openjpeg tcd.c opj_tcd_dc_level_shift_decode() for the decoded sample ranges.
+static inline U8 j2c_sample_to_u8(OPJ_INT32 sample, OPJ_UINT32 prec, bool is_signed)
+{
+    S64 v = sample;
+    if (is_signed)
+    {
+        v += (S64)1 << (prec - 1);
+    }
+    if (prec > 8)
+    {
+        const U32 down = prec - 8;
+        v = (v + ((S64)1 << (down - 1))) >> down;
+    }
+    else if (prec < 8)
+    {
+        v <<= (8 - prec);
+    }
+    return (U8)llclamp(v, (S64)0, (S64)255);
+}
+// </WolfViewer>
+
 // Factory function: see declaration in llimagej2c.cpp
 LLImageJ2CImpl* fallbackCreateLLImageJ2CImpl()
 {
@@ -911,18 +935,56 @@ bool LLImageJ2COJ::decodeImpl(LLImageJ2C &base, LLImageRaw &raw_image, F32 decod
     for (S32 comp = first_channel, dest = 0; comp < first_channel + channels; comp++, dest++)
     {
         llassert(image->comps[comp].data);
-        if (image->comps[comp].data)
+        // <WolfViewer 2026-11-02 ticket 454> Stock copied every sample with a plain int -> U8 cast, which is only
+        // right for 8-bit unsigned components at the image's full size. Any other J2C came out as garbage:
+        // a 10/12/16-bit component kept its low byte (psychedelic magenta/green/cyan blobs, ticket 454 on
+        // OliGrid), a signed one wrapped around zero, and a subsampled one (dx/dy > 1) was read with
+        // component 0's stride - past the end of its smaller buffer. Firestorm's Windows/Mac releases decode
+        // with KDU, which normalises all of these to 8 bits (llimagej2ckdu.cpp:1189-1310 transfer_bytes:
+        // level shift, then (val + offset) >> (precision - 8), or << (8 - precision), clamped to 0..255);
+        // WolfViewer builds with OpenJPEG only (.github/workflows/wolfviewer.yml AUTOBUILD_CONFIG ReleaseOS).
+        // Source: openjpeg tcd.c opj_tcd_dc_level_shift_decode() - decoded samples are clamped to
+        //   [0, 2^prec - 1] for an unsigned component and [-2^(prec-1), 2^(prec-1) - 1] for a signed one.
+        // Source: openjpeg.h opj_image_comp_t - w/h are this component's own (reduced, subsampled) size.
+        // An 8-bit unsigned full-size component takes the stock copy unchanged (byte-identical output).
+        const opj_image_comp_t& ic = image->comps[comp];
+        const bool stock_copy = ic.prec == 8 && ic.sgnd == 0 && ic.w == width && ic.h == height;
+        if (ic.data && (stock_copy || (ic.w > 0 && ic.h > 0 && ic.prec >= 1 && ic.prec <= 31)))
         {
             S32 offset = dest;
             for (S32 y = (height - 1); y >= 0; y--)
             {
+                if (stock_copy)
+                {
+                    for (U32 x = 0; x < width; x++)
+                    {
+                        rawp[offset] = ic.data[y*comp_width + x];
+                        offset += channels;
+                    }
+                    continue;
+                }
+                // the sample of a subsampled component that covers this pixel: x / dx, y / dy, with dx/dy relative to
+                // component 0 (the image's grid here). Exact for an image origin of 0 (ISO 15444-1 B.2), as the viewer's
+                // own encoder writes; any other origin is at most one sample off, and the clamps keep it in bounds.
+                const U32 rel_dx = llmax(ic.dx / llmax(image->comps[0].dx, 1U), 1U);
+                const U32 rel_dy = llmax(ic.dy / llmax(image->comps[0].dy, 1U), 1U);
+                const U32 cy = llmin((U32)y / rel_dy, ic.h - 1);
+                const OPJ_INT32* row = ic.data + (size_t)cy * ic.w;
                 for (U32 x = 0; x < width; x++)
                 {
-                    rawp[offset] = image->comps[comp].data[y*comp_width + x];
+                    const U32 cx = llmin(x / rel_dx, ic.w - 1);
+                    rawp[offset] = j2c_sample_to_u8(row[cx], ic.prec, ic.sgnd != 0);
                     offset += channels;
                 }
             }
         }
+        else if (ic.data) // <WolfViewer 2026-11-02 ticket 454/> a component this copy cannot convert
+        {
+            LL_DEBUGS("Texture") << "ERROR -> decodeImpl: unsupported component " << comp << ": prec " << ic.prec
+                                 << ", " << ic.w << "x" << ic.h << LL_ENDL;
+            base.decodeFailed();
+        }
+        // </WolfViewer>
         else // Some rare OpenJPEG versions have this bug.
         {
             LL_DEBUGS("Texture") << "ERROR -> decodeImpl: failed! (OpenJPEG bug)" << LL_ENDL;

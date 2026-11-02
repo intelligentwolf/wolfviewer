@@ -18,6 +18,7 @@
 #include <cmath>
 
 #include "llagent.h"
+#include "llagentcamera.h"   // [BIRDS MID/] gAgentCamera.mDrawDistance
 #include "llaudioengine.h"
 #include "lldate.h"
 #include "llenvironment.h"
@@ -36,6 +37,7 @@
 #include "llvovolume.h"   // [BIRDS LANDING/] sWolfRoofProbe
 #include "llworld.h"
 #include "pipeline.h"
+#include "wolfaltitudesky.h"    // [BIRDS MID/] farClipExtra
 #include "wolfboatrock.h"       // [BIRDS LANDING/] drawnWaveHeight, isRocking
 #include "wolfframegovernor.h"
 #include "wolfgrid.h"
@@ -78,6 +80,13 @@ namespace
     // The director: how often it decides, and how far round the camera birds live.
     constexpr F64 DIRECT_SECS = 3.0;
     constexpr F32 NEAR_M = 60.f, FAR_M = 220.f;      // where a flock's centre may be
+    // [BIRDS MID 2026-11-02] ticket 463: the draw distance (RenderFarClip, the camera's far clip) also bounds the flocks.
+    // Nothing past the far clip is drawn, and the Mid graphics level sets 128 m (featuretable_linux.txt "list Mid"
+    // RenderFarClip 128; measured in a test viewer: far clip 133 m at Mid), so with 60..220 m most birds were out of
+    // sight at Mid. A flock's birds roam up to VIEW_MARGIN_M round its centre (move(): the target is the centre +- 40 m),
+    // so the centre keeps that much inside the draw distance; never nearer than MIN_REACH_M.
+    constexpr F32 VIEW_MARGIN_M = 40.f;
+    constexpr F32 MIN_REACH_M = 30.f;
     constexpr F32 ENTRY_M = 170.f;                   // a new flock flies in from this far beyond its centre
     constexpr F32 GONE_M = 320.f;                    // a leaving bird is dropped beyond this
     constexpr F32 GONE_HIDDEN_M = 140.f;             // ... or beyond this when out of view
@@ -267,6 +276,17 @@ namespace
 
     LLVector3 flat(const LLVector3& v) { return LLVector3(v.mV[VX], v.mV[VY], 0.f); }
 
+    /** [BIRDS MID 2026-11-02] ticket 463: how far out a flock's centre may be (at most FAR_M), drawn in to stay inside the
+     *  draw distance. The main camera's far clip is the draw distance plus the altitude extra (llviewerdisplay.cpp
+     *  final_far = gAgentCamera.mDrawDistance ... += WolfAltitudeSky::farClipExtra()); read from those, not from
+     *  LLViewerCamera::getFar(), which a reflection-probe pass (gCubeSnapshot: RenderReflectionProbeDrawDistance) can
+     *  leave at its own value until the next main-camera update. */
+    F32 flock_reach_m()
+    {
+        const F32 view_m = gAgentCamera.mDrawDistance + WolfAltitudeSky::farClipExtra();
+        return llclamp(view_m - VIEW_MARGIN_M, MIN_REACH_M, FAR_M);
+    }
+
     /** The sun's height over the horizon, degrees, in the sky on screen (llenvironment.h getCurrentSky; as
      *  wolfautoenvironment.cpp:313). +90 when no sky is known yet (birds are not held back by a missing sky). */
     F32 sun_elevation_deg(bool& west)
@@ -453,6 +473,7 @@ void WolfBirds::scanBuilds(LLViewerRegion* region, F64 now)
         mScanIndex = 0;
     }
     const LLVector3 cam = LLViewerCamera::getInstance()->getOrigin();
+    const F32 perch_reach = flock_reach_m() + PERCH_SEARCH_M;   // [BIRDS MID 2026-11-02] ticket 463: the flocks' reach
     const LLVector3 o = region->getOriginAgent();
     const S32 n = gObjectList.getNumObjects();
     const S32 end = llmin(n, mScanIndex + SCAN_PER_FRAME);
@@ -476,7 +497,7 @@ void WolfBirds::scanBuilds(LLViewerRegion* region, F64 now)
         // the real surface.
         const F32 top = p.mV[VZ] + 0.5f * llmax(s.mV[VX], llmax(s.mV[VY], s.mV[VZ]));
         if ((S32)mPerchCandsScan.size() < MAX_PERCH_CANDIDATES && top - ground >= PERCH_MIN_M && top - ground <= PERCH_MAX_M
-            && flat(p - cam).length() <= FAR_M + PERCH_SEARCH_M)
+            && flat(p - cam).length() <= perch_reach)
         {
             PerchCandidate pc;
             pc.mRegionPos = p - o;
@@ -532,14 +553,16 @@ bool WolfBirds::pickPlace(LLViewerRegion* region, Kind kind, F32 min_m, F32 max_
 
 void WolfBirds::direct(LLViewerRegion* region, F64 now)
 {
-    // What the place offers round the camera: a 9 x 9 sample of points within FAR_M, inside the region.
+    // What the place offers round the camera: a 9 x 9 sample of points within the flocks' reach (flock_reach_m, ticket
+    // 463: where flocks can be, and the terrain the viewer has been sent), inside the region.
     const LLVector3 cam = LLViewerCamera::getInstance()->getOrigin();
+    const F32 far_m = flock_reach_m();
     S32 sea = 0, land = 0, total = 0;
     for (S32 iy = -4; iy <= 4; ++iy)
     {
         for (S32 ix = -4; ix <= 4; ++ix)
         {
-            const LLVector3 p(cam.mV[VX] + (F32)ix * (FAR_M / 4.f), cam.mV[VY] + (F32)iy * (FAR_M / 4.f), 0.f);
+            const LLVector3 p(cam.mV[VX] + (F32)ix * (far_m / 4.f), cam.mV[VY] + (F32)iy * (far_m / 4.f), 0.f);
             if (!inRegion(region, p, 0.f)) continue;
             ++total;
             if (overWater(p)) ++sea;
@@ -618,7 +641,8 @@ void WolfBirds::direct(LLViewerRegion* region, F64 now)
         mLastLog = now;
         LL_DEBUGS("WolfBirds") << mBirds.size() << " birds in " << flocks << " flocks; sea " << sea_f << " land " << land_f
                                << " sun " << sun << (west ? " (evening)" : "") << " weather " << weather << " budget "
-                               << budget << " cap " << cap << "; " << landedCount() << " down, " << mPerches.size()
+                               << budget << " cap " << cap << " reach " << far_m << " m; " << landedCount() << " down, "
+                               << mPerches.size()
                                << " free perches of " << mPerchCands.size() << " candidates"
                                << (mSitTight ? ", sitting tight" : "") << "; cost "
                                << (mCostFrames ? mCostIdleUs / mCostFrames : 0.0) << " us idle + "
@@ -635,7 +659,9 @@ bool WolfBirds::spawnFlock(LLViewerRegion* region, Kind kind, S32 count, F64 now
 {
     Flock f;
     f.mKind = kind;
-    if (!pickPlace(region, kind, NEAR_M, FAR_M, f.mCentre)) return false;
+    const F32 far_m = flock_reach_m();   // [BIRDS MID 2026-11-02] ticket 463
+    const F32 near_m = llmin(NEAR_M, far_m * 0.5f);
+    if (!pickPlace(region, kind, near_m, far_m, f.mCentre)) return false;
     f.mTarget = f.mCentre;
     f.mRetarget = now + frand_range(8.f, 20.f);
     f.mNextCall = now + frand_range(3.f, 10.f);
@@ -651,7 +677,7 @@ bool WolfBirds::spawnFlock(LLViewerRegion* region, Kind kind, S32 count, F64 now
         LLVector3 e = f.mCentre + LLVector3(cosf(a), sinf(a), 0.f) * ENTRY_M;
         e.mV[VZ] = surfaceZ(e) + SPECIES[kind].mAltMax;
         entry = e;
-        if (!camera->sphereInFrustum(e, 2.f) || (e - cam).length() > FAR_M + 40.f) break;
+        if (!camera->sphereInFrustum(e, 2.f) || (e - cam).length() > far_m + 40.f) break;
     }
     const S32 index = (S32)mFlocks.size();
     mFlocks.push_back(f);
@@ -1636,6 +1662,9 @@ void WolfBirds::move(F32 dt, F64 now)
     // the flocks' own movement
     const LLVector3 cam = LLViewerCamera::getInstance()->getOrigin();
     LLViewerRegion* region = gAgent.getRegion();
+    // [BIRDS MID 2026-11-02] ticket 463: a drifting centre keeps within the reach + 30 m (FAR_M + 30 m as before when the
+    // draw distance is long; inside the draw distance less 10 m when it is short, see flock_reach_m)
+    const F32 drift_max = flock_reach_m() + 30.f;
     // [BIRDS LANDING 2026-11-02] the flocks' landing: a leaving flock's birds take off first; a small flock drops to feed
     // and lifts as one; gulls (below, one by one) look for somewhere to settle after a while aloft
     for (S32 fi = 0; fi < (S32)mFlocks.size(); ++fi)
@@ -1694,7 +1723,7 @@ void WolfBirds::move(F32 dt, F64 now)
             // drift the centre a little over the same kind of place, and pick the next target near it
             LLVector3 c = f.mCentre + LLVector3(frand_range(-25.f, 25.f), frand_range(-25.f, 25.f), 0.f);
             const bool sea_kind = (f.mKind == GULL || f.mKind == TERN);
-            if (inRegion(region, c, -8.f) && overWater(c) == sea_kind && !built(c) && (flat(c - cam).length() < FAR_M + 30.f))
+            if (inRegion(region, c, -8.f) && overWater(c) == sea_kind && !built(c) && (flat(c - cam).length() < drift_max))
             {
                 c.mV[VZ] = surfaceZ(c);
                 f.mCentre = c;

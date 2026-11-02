@@ -3,7 +3,11 @@
      Code: wolfautoenvironment.cpp. Service: wolfstorm php/auto_environment.php.
      Width 480 / height 530 as the other Region / Estate tabs (floater_region_info.xml 485 x 575,
      tab header subtracted by lltabcontainer.cpp). -->
-<panel border="true" follows="all" height="530" width="480" label="Jimmy's EEP &amp; Weather"
+<!-- [WOLF ENVIRONMENTS 2026-11-02] Now the "Real place" page of Region / Estate > Wolf Environments (ticket #448), inside a
+     nested tab container: its content area is about 500 px (lltabcontainer.cpp:1125-1164), so the title line went (the
+     intro names Jimmy's Automatic Environment), the results list is 40 px and the "Right now" text 48 px. The last
+     control (ae_credit) ends at 500. -->
+<panel border="true" follows="all" height="500" width="476" label="Real place"
        layout="topleft" name="panel_region_auto_environment">
   <panel.string name="str_loading">Reading this region's settings…</panel.string>
   <panel.string name="str_read_only">Only the owner of this region can change Jimmy Olsen's Automatic Environment.</panel.string>
@@ -22,10 +26,8 @@
   <panel.string name="str_wolf_env">This region now uses the Wolf Environment, which sets its place, clock and weather: change them there.</panel.string>
   <panel.string name="str_conflict">These settings were changed elsewhere, so they have been reloaded. Your changes are still shown here: press Apply again to save them.</panel.string>
 
-  <text layout="topleft" follows="left|top" height="16" left="10" top="6" width="460"
-        name="ae_title" text_color="EmphasisColor">Jimmy Olsen's Automatic Environment</text>
-  <text layout="topleft" follows="left|top" height="44" left="10" top_pad="0" width="460"
-        name="ae_intro" word_wrap="true">This region's sky and weather follow a real place on Earth: the sun, moon (with its real phase) and stars where they really are, real clouds, haze and wind, and real rain, snow, fog and thunder.</text>
+  <text layout="topleft" follows="left|top" height="44" left="10" top="6" width="460"
+        name="ae_intro" word_wrap="true">Jimmy Olsen's Automatic Environment: this region's sky and weather follow a real place on Earth - the sun, moon (with its real phase) and stars where they really are, real clouds, haze and wind, and real rain, snow, fog and thunder.</text>
 
   <check_box layout="topleft" follows="left|top" height="18" left="10" top_pad="6" width="460"
              name="ae_enabled" label="Follow a real place" />
@@ -40,7 +42,7 @@
                name="ae_search" max_length_bytes="120" label="Search for a town or city…" commit_on_focus_lost="false" />
   <button layout="topleft" follows="left|top" height="20" left_pad="6" top_delta="0" width="84"
           name="ae_search_btn" label="Search" />
-  <scroll_list layout="topleft" follows="left|top" height="44" left="10" top_pad="4" width="460"
+  <scroll_list layout="topleft" follows="left|top" height="40" left="10" top_pad="4" width="460"
                name="ae_results" multi_select="false" draw_heading="false" />
   <text layout="topleft" follows="left|top" height="16" left="10" top_pad="8" width="60"
         name="ae_place_lbl">Name</text>
@@ -71,7 +73,7 @@
         name="ae_preview_time" text_color="EmphasisColor">Now</text>
   <text layout="topleft" follows="left|top" height="14" left="10" top_pad="4" width="460"
         name="ae_hdr_now" text_color="LabelSelectedColor">Right now</text>
-  <text layout="topleft" follows="left|top" height="64" left="10" top_pad="2" width="460"
+  <text layout="topleft" follows="left|top" height="48" left="10" top_pad="2" width="460"
         name="ae_now" word_wrap="true">Reading this region's settings…</text>
 
   <button layout="topleft" follows="left|top" height="22" left="10" top_pad="4" width="90"

@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLF ENVIRONMENTS 2026-11-02] Region / Estate > Wolf Environments > Sky (ticket #448, Jimmy Olsen): the region's
+     own EEP sky, picked from the viewer's presets or from inventory, in the same tab as the weather and the real place.
+     Code: wolfregionwolfenvironments.cpp WolfPanelRegionSky. It applies through the ExtEnvironment capability exactly as
+     the stock Environment tab does (llpanelenvironment.cpp onPickerCommitted / onEditCommitted).
+     Layout: the page is reshaped to the nested tab container's content area (lltabcontainer.cpp:1125-1164, about
+     500 px tall); every control follows left|top; the status text ends at 448. -->
+<panel border="true" follows="all" height="500" width="476" label="Sky"
+       layout="topleft" name="panel_region_sky">
+  <panel.string name="str_now">Now: [NAME]</panel.string>
+  <panel.string name="str_now_unknown">Now: waiting for the region's environment…</panel.string>
+  <panel.string name="str_now_default">the default sky</panel.string>
+  <panel.string name="str_now_auto">the real sky over [PLACE] (Real place tab)</panel.string>
+  <panel.string name="str_now_wolf">the region's Wolf Environment</panel.string>
+  <panel.string name="str_now_on_top">[NAME], with the Wolf Environment's weather on top</panel.string>
+  <panel.string name="str_override_auto">This region follows the real sky over [PLACE]. A sky you apply here is kept underneath and comes back when "Real sun, moon, stars, clouds and haze" is switched off on the Real place tab.</panel.string>
+  <panel.string name="str_override_wolf">This region's sky is drawn by its Wolf Environment. A sky you apply here is kept underneath and comes back when the Wolf Environment is switched off.</panel.string>
+  <panel.string name="str_override_on_top">The Wolf Environment lays live weather over this region's own sky. A sky you apply here becomes the one it goes on top of.</panel.string>
+  <panel.string name="str_preset_none">Choose a preset…</panel.string>
+  <panel.string name="str_group_days">— Day cycles (change through the day) —</panel.string>
+  <panel.string name="str_group_skies">— Fixed skies (the same all day) —</panel.string>
+  <panel.string name="str_kind_day">day cycle preset</panel.string>
+  <panel.string name="str_kind_sky">fixed sky preset</panel.string>
+  <panel.string name="str_kind_inventory">from your inventory</panel.string>
+  <panel.string name="str_nothing">Nothing chosen yet.</panel.string>
+  <panel.string name="str_chosen">[NAME] ([KIND]) — Apply to show it to everyone in the region.</panel.string>
+  <panel.string name="str_read_only">Only the region owner or an estate manager can change the region's sky.</panel.string>
+  <panel.string name="str_no_cap">This region does not accept environment settings (it offers no ExtEnvironment capability), so its sky cannot be changed from here.</panel.string>
+  <panel.string name="str_no_region_day">The region's current environment has not arrived yet, so a fixed sky cannot be built on it. Wait a moment and press Apply again.</panel.string>
+  <panel.string name="str_preset_failed">Could not load the preset "[NAME]": [WHY]</panel.string>
+  <panel.string name="str_item_missing">That inventory item is no longer in your inventory. Choose it again.</panel.string>
+  <panel.string name="str_not_settings">Only environment settings (a sky, water or day cycle) can be used here.</panel.string>
+  <panel.string name="str_applying">Applying the sky to the region…</panel.string>
+  <panel.string name="str_saved">Saved. Everyone in the region now sees "[NAME]". Parcels with their own environment keep theirs.</panel.string>
+  <panel.string name="str_saved_kept">Saved. "[NAME]" is kept as the region's own sky; [WHO] is drawn over it, as described above.</panel.string>
+  <panel.string name="str_who_auto">the real sky</panel.string>
+  <panel.string name="str_who_wolf">the Wolf Environment</panel.string>
+  <panel.string name="str_resetting">Putting the region back on the default sky…</panel.string>
+  <panel.string name="str_reset_done">Done. The region is back on the default sky.</panel.string>
+  <panel.string name="str_no_answer">The region did not confirm the change within 15 seconds. If a message about it appeared, it says why; otherwise press Apply again.</panel.string>
+  <panel.string name="str_region_changed">You moved to another region, so the choice was cleared.</panel.string>
+
+  <text layout="topleft" follows="left|top" height="16" left="10" top="6" width="456"
+        name="sky_title" text_color="EmphasisColor">Region sky — what everyone in this region sees</text>
+  <text layout="topleft" follows="left|top" height="16" left="10" top_pad="2" width="456"
+        name="sky_now" use_ellipses="true">Now: waiting for the region's environment…</text>
+  <text layout="topleft" follows="left|top" height="60" left="10" top_pad="4" width="456" word_wrap="true"
+        name="sky_override" text_color="0.79 0.64 0.15 1" visible="false" />
+  <button layout="topleft" follows="left|top" height="20" left="10" top_pad="2" width="130"
+          name="sky_goto_real_place" label="Go to Real place" visible="false"
+          tool_tip="Show the Real place tab, where the real sky is switched on or off." />
+  <button layout="topleft" follows="left|top" height="20" left="10" top_delta="0" width="180"
+          name="sky_open_wolf_env" label="Open Wolf Environment..." visible="false"
+          tool_tip="World > Wolf World > Wolf Environment, where the region's Wolf Environment is set up or switched off." />
+
+  <text layout="topleft" follows="left|top" height="14" left="10" top="134" width="456"
+        name="sky_hdr_preset" text_color="LabelSelectedColor">Choose a preset</text>
+  <combo_box layout="topleft" follows="left|top" height="20" left="10" top_pad="4" width="456"
+             name="sky_preset" max_chars="128"
+             tool_tip="The skies and day cycles that come with the viewer. Type the first letters of a name to jump to it." />
+
+  <text layout="topleft" follows="left|top" height="14" left="10" top_pad="12" width="456"
+        name="sky_hdr_inventory" text_color="LabelSelectedColor">Or use one from your inventory</text>
+  <button layout="topleft" follows="left|top" height="20" left="10" top_pad="4" width="160"
+          name="sky_inventory" label="Use Inventory Sky..."
+          tool_tip="Pick a sky, water or day cycle from your inventory (the Library's Environments folder too)." />
+  <text layout="topleft" follows="left|top" height="16" left_pad="8" top_delta="2" width="288"
+        name="sky_drop_hint">or drag one from your inventory onto this page.</text>
+
+  <text layout="topleft" follows="left|top" height="14" left="10" top_pad="14" width="456"
+        name="sky_hdr_chosen" text_color="LabelSelectedColor">Chosen</text>
+  <text layout="topleft" follows="left|top" height="30" left="10" top_pad="4" width="456" word_wrap="true"
+        name="sky_chosen">Nothing chosen yet.</text>
+
+  <text layout="topleft" follows="left|top" height="72" left="10" top_pad="8" width="456" word_wrap="true"
+        name="sky_help">A day cycle changes through the day; a fixed sky stays the same all day. Parcels with their own environment keep theirs. With the Wolf sky on (the WE button), the Wolf sky takes its sun, moon, clouds and haze from this sky; with it off, this sky is shown as it is.</text>
+
+  <button layout="topleft" follows="left|top" height="22" left="10" top="376" width="90"
+          name="sky_apply" label="Apply" tool_tip="Show the chosen sky to everyone in the region." />
+  <button layout="topleft" follows="left|top" height="22" left_pad="6" top_delta="0" width="90"
+          name="sky_revert" label="Revert" tool_tip="Forget the choice; the region's sky stays as it is." />
+  <button layout="topleft" follows="left|top" height="22" left="336" top_delta="0" width="130"
+          name="sky_default" label="Default sky..." tool_tip="Put the region back on the default sky (you are asked first)." />
+  <text layout="topleft" follows="left|top" height="44" left="10" top_pad="6" width="456" word_wrap="true"
+        name="sky_status" />
+</panel>

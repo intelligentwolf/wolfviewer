@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLF ENVIRONMENTS 2026-11-02] Region / Estate > Wolf Environments (ticket #448, Jimmy Olsen: "rename it simply to
+     WOLF ENVIRONMENTS ... one can do all mods needed in one single tab instead of 2"). One tab for the region's sky, its
+     weather and the real place it follows. The three pages are built in code (wolfregionwolfenvironments.cpp) from
+     panel_region_sky.xml, panel_weather_controls.xml and panel_region_auto_environment.xml - not as filename children,
+     because LLPanel::initPanelXML creates those before their parent's layout (llui/llpanel.cpp:529-552). -->
+<panel border="false" follows="all" height="530" width="480" label="Wolf Environments"
+       layout="topleft" name="panel_region_wolf_environments">
+  <tab_container layout="topleft" follows="all" height="530" width="480" left="0" top="0"
+                 name="wolf_env_pages" tab_position="top" tab_min_width="90" halign="center" />
+</panel>

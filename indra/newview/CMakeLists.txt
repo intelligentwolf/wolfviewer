@@ -987,6 +987,7 @@ set(viewer_SOURCE_FILES
     wolfwakefield.cpp
     wolfwaterfield.cpp
     wolfautoenvironment.cpp
+    wolfregionwolfenvironments.cpp
     wolfpassingplanes.cpp
     wolfregionweather.cpp
     wolfhurricane.cpp
@@ -1990,6 +1991,7 @@ set(viewer_HEADER_FILES
     wolfwakefield.h
     wolfwaterfield.h
     wolfautoenvironment.h
+    wolfregionwolfenvironments.h
     wolfpassingplanes.h
     wolfregionweather.h
     wolfhurricane.h

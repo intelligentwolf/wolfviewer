@@ -90,6 +90,7 @@
 #include "llviewertexteditor.h"
 #include "llviewerwindow.h"
 #include "wolfautoenvironment.h"
+#include "wolfregionwolfenvironments.h"   // [WOLF ENVIRONMENTS 2026-11-02/] the Wolf Environments tab
 #include "wolfregionweather.h"
 #include "wolfwavezones.h"
 #include "wolfgrid.h"   // [WOLF TERRAIN TEXTURES 2026-10-16] the Terrain tab's Wolf button
@@ -310,17 +311,13 @@ bool LLFloaterRegionInfo::postBuild()
 //  mEnvironmentPanel->configureForRegion();
     mTab->addTabPanel(mEnvironmentPanel);
 
-    // Source: llfloaterregioninfo.cpp:301-304 Environment panel construction and
-    // parcel-weather-work/plan.md: region weather and waves live in Region / Estate.
-    mWeatherPanel = new WolfPanelRegionWeather;
-    mWeatherPanel->buildFromFile("panel_weather_controls.xml");
-    mTab->addTabPanel(mWeatherPanel);
-
-    // <WolfViewer 2026-10-03> Jimmy Olsen's Automatic Environment (wolfautoenvironment.cpp):
-    // the region's sky and weather follow a real place. Next to Weather, which it drives.
-    mAutoEnvPanel = new WolfPanelRegionAutoEnvironment;
-    mAutoEnvPanel->buildFromFile("panel_region_auto_environment.xml");
-    mTab->addTabPanel(mAutoEnvPanel);
+    // [WOLF ENVIRONMENTS 2026-11-02] ticket #448 (Jimmy Olsen): the Weather tab and "Jimmy's EEP & Weather" are one tab,
+    // "Wolf Environments", with the region's sky as its first page (wolfregionwolfenvironments.cpp). The Weather page
+    // (WolfPanelRegionWeather, parcel-weather-work/plan.md) and the Real place page (Jimmy Olsen's Automatic Environment,
+    // wolfautoenvironment.cpp) are built inside it, unchanged, and refreshed through it.
+    mWolfEnvsPanel = new WolfPanelRegionWolfEnvironments;
+    mWolfEnvsPanel->buildFromFile("panel_region_wolf_environments.xml");
+    mTab->addTabPanel(mWolfEnvsPanel);
 
     mWavesPanel = new WolfPanelLandWaves;
     mWavesPanel->buildFromFile("panel_region_waves.xml");
@@ -905,8 +902,7 @@ void LLFloaterRegionInfo::refresh()
         (*iter)->refresh();
     }
     mEnvironmentPanel->refresh();
-    if (mWeatherPanel) mWeatherPanel->refresh();
-    if (mAutoEnvPanel) mAutoEnvPanel->refresh();
+    if (mWolfEnvsPanel) mWolfEnvsPanel->refresh();   // [WOLF ENVIRONMENTS 2026-11-02/] its Sky, Weather and Real place pages
     if (mWavesPanel) mWavesPanel->refresh();
 }
 
@@ -915,7 +911,7 @@ void LLFloaterRegionInfo::refresh()
 // not on the region change, because the new region's grid is only known once its features arrive.
 void LLFloaterRegionInfo::draw()
 {
-    WolfGrid::showWolfTabs(mTab, { mWeatherPanel, mAutoEnvPanel, mWavesPanel }, WolfGrid::isOnWolfTerritories(), mWolfTabsShown);
+    WolfGrid::showWolfTabs(mTab, { mWolfEnvsPanel, mWavesPanel }, WolfGrid::isOnWolfTerritories(), mWolfTabsShown);
     LLFloater::draw();
 }
 

@@ -1500,6 +1500,7 @@ bool Clouds::renderProbe(const Atmosphere& atmosphere, const CloudsFrame& f)
 GLuint Clouds::colorTex() const { return mImpl->rColor[1 - mImpl->resolveIndex].id; }
 GLuint Clouds::marchDepthVelocityTex(S32& w, S32& h) const { w = mImpl->cDepthVelocity.w; h = mImpl->cDepthVelocity.h; return mImpl->cDepthVelocity.id; }
 GLuint Clouds::marchColorTex() const { return mImpl->cColor.id; }
+U32 Clouds::marchFrame() const { return mImpl->frame; }
 GLuint Clouds::shadowLengthTex() const { return mImpl->rShadowLength[1 - mImpl->resolveIndex].id; }
 GLuint Clouds::probeColorTex() const { return mImpl->pColor.id; }
 GLuint Clouds::probeShadowLengthTex() const { return mImpl->pShadowLength.id; }

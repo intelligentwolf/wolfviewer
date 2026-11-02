@@ -59,6 +59,8 @@
 #include "pipeline.h"
 #include "wolftkatmosphere.h"
 #include "wolftkgl.h"
+#include "lldir.h"            // [2026-11-02] the blue-noise array (app_settings/wolfnoise)
+#include "llfile.h"            // [2026-11-02] llifstream
 
 namespace WolfTk
 {
@@ -75,6 +77,7 @@ namespace
     constexpr F64 FLOW_EVOLUTION_PERIOD = 6.0 * 3600.0;
     // [CLOUDS CLEAR OF BUILDS 2026-10-26] the build clearance field's unit (sharedUniforms; unbound after each pass)
     constexpr S32 BUILD_FIELD_UNIT = 13;
+    constexpr S32 BLUE_NOISE_UNIT = 14;   // [2026-11-02] cloudsCommon.glsl wolfBlueNoise (sharedUniforms)
     // [WolfViewer 2026-10-26] the cirrus fibres' noise periods (cloudsCommon.glsl sampleMedia): the 32^3 detail noise has 2 to 16
     // Worley cells per period (cloudShapeDetailF.glsl cellCount 2 .. x8), so across the wind 2 km gives filaments of ~1 km down to
     // ~125 m, along it 20 km makes them ten times longer than wide, and 4 km of height lets them change through a 2 km layer. Modelling
@@ -323,7 +326,7 @@ namespace
         void release() { if (id) { glDeleteTextures(1, &id); id = 0; } w = h = d = 0; }
     };
 
-    GLenum baseFormat(GLenum fmt) { return (fmt == GL_R16F || fmt == GL_R8) ? GL_RED : GL_RGBA; }
+    GLenum baseFormat(GLenum fmt) { return (fmt == GL_R16F || fmt == GL_R8 || fmt == GL_R32F) ? GL_RED : GL_RGBA; }
 
     /** A texture like a three render target's: Linear filtering, ClampToEdge (three's default wrapping),
      *  zero-filled as WebGL fills new textures (WebGL 1.0 specification section 4.1 "Resource Restrictions"),
@@ -542,6 +545,10 @@ struct Clouds::Impl
 
     // procedural textures (CloudShape, CloudShapeDetail, LocalWeather, Turbulence)
     Tex shapeTex, shapeDetailTex, localWeatherTex, turbulenceTex;
+    // [WolfViewer 2026-11-02] the march's noise: our own 64 x 64 void-and-cluster blue-noise array (cloudsCommon.glsl getSTBN;
+    // app_settings/wolfnoise/make_bluenoise.py writes it), loaded once; without it the shader keeps interleaved gradient noise
+    Tex blueNoiseTex;
+    bool blueNoiseTried = false;
     bool proceduralDone = false;
     bool proceduralFailed = false;
 
@@ -794,6 +801,40 @@ struct Clouds::Impl
         LL_INFOS("WolfEnv") << "cirrus fibre noise: mean " << fibreShape.x << " 2sd " << fibreShape.y << " E[c] " << fibreShape.z << LL_ENDL;
     }
 
+    /** [WolfViewer 2026-11-02] app_settings/wolfnoise/wolf_bluenoise_64.r16 (make_bluenoise.py: 64 x 64 little-endian U16
+     *  ranks 0..4095, row-major) as an R32F texture of (rank + 0.5) / 4096, once. False (interleaved gradient noise) when the
+     *  file is missing or not that size. */
+    bool ensureBlueNoise()
+    {
+        if (blueNoiseTried) return blueNoiseTex.id != 0;
+        blueNoiseTried = true;
+        constexpr S32 N = 64;
+        const std::string path = gDirUtilp->getExpandedFilename(LL_PATH_APP_SETTINGS, "wolfnoise", "wolf_bluenoise_64.r16");
+        llifstream in(path.c_str(), std::ios::binary);   // llfile.h: a UTF-8 path on Windows too
+        std::vector<unsigned char> raw(N * N * 2);
+        if (!in || !in.read(reinterpret_cast<char*>(raw.data()), (std::streamsize)raw.size()) || in.peek() != EOF)
+        {
+            LL_WARNS("WolfEnv") << "clouds blue noise: " << path << " missing or not " << raw.size()
+                                << " bytes; the clouds keep interleaved gradient noise" << LL_ENDL;
+            return false;
+        }
+        std::vector<F32> value(N * N);
+        for (S32 i = 0; i < N * N; ++i)
+        {
+            const U32 rank = (U32)raw[(size_t)(2 * i)] | ((U32)raw[(size_t)(2 * i + 1)] << 8);
+            value[(size_t)i] = ((F32)llmin(rank, 4095u) + 0.5f) / 4096.f;
+        }
+        alloc(blueNoiseTex, GL_TEXTURE_2D, GL_R32F, N, N, 1, GL_REPEAT, GL_NEAREST);
+        LLTexUnit* unit = gGL.getTexUnit(0);
+        unit->unbind(LLTexUnit::TT_TEXTURE);
+        unit->activate();
+        glBindTexture(GL_TEXTURE_2D, blueNoiseTex.id);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, N, N, GL_RED, GL_FLOAT, value.data());
+        glBindTexture(GL_TEXTURE_2D, 0);
+        LL_INFOS("WolfEnv") << "clouds blue noise loaded from " << path << LL_ENDL;
+        return true;
+    }
+
     /** The parameter, layer and atmosphere uniforms both materials share
      *  (uniforms.ts:45-68 createCloudParameterUniforms, :96-186 createCloudLayerUniforms / updateCloudLayerUniforms,
      *  :204-216 createAtmosphereUniforms). */
@@ -989,6 +1030,14 @@ struct Clouds::Impl
         // precision - fract(time) (all the shader uses) is unchanged by it
         u1f(sh, "time", (F32)std::fmod(f.time, 1024.0));
         u1i(sh, "frame", (S32)frame);
+        // [WolfViewer 2026-11-02] the march's noise (cloudsCommon.glsl getSTBN): our blue-noise array once it is loaded
+        // (the sampler gets its own unit even without the array - left on unit 0 it could share a unit with a sampler of
+        // another type, an invalid draw - as wolfBuildField is bound when off); the frame's golden-ratio offset is taken in
+        // double here: in the shader float(frame) x 0.618 loses the low bits within a few thousand frames
+        const bool blue_noise = ensureBlueNoise();
+        WolfTk::bindNamed(sh, "wolfBlueNoise", BLUE_NOISE_UNIT, GL_TEXTURE_2D, blue_noise ? blueNoiseTex.id : 0);
+        u1i(sh, "wolfNoiseMode", blue_noise ? 1 : 0);
+        u1f(sh, "wolfNoiseOffset", (F32)std::fmod((F64)frame * 0.61803398874989484820, 1.0));   // golden ratio conjugate
     }
 
     /** CloudsMaterial.copyCameraSettings (CloudsMaterial.ts:311-389) for camera (view, proj), `temporalUpscale`;
@@ -1352,6 +1401,7 @@ bool Clouds::render(const Atmosphere& atmosphere, const CloudsFrame& f)
         sh.unbind();
         for (S32 u = 8; u <= 11; ++u) WolfTk::unbindUnit(u, u == 9 || u == 10 ? GL_TEXTURE_3D : GL_TEXTURE_2D);
         WolfTk::unbindUnit(BUILD_FIELD_UNIT, GL_TEXTURE_2D);   // [2026-10-26]
+        WolfTk::unbindUnit(BLUE_NOISE_UNIT, GL_TEXTURE_2D);    // [2026-11-02]
     }
     {
         // the resolve (ShadowResolveMaterial: varianceGamma 1, temporalAlpha 0.01, ShadowResolveMaterial.ts:51-62)
@@ -1404,6 +1454,7 @@ bool Clouds::render(const Atmosphere& atmosphere, const CloudsFrame& f)
         for (S32 u = 8; u <= 12; ++u) WolfTk::unbindUnit(u, u == 9 || u == 10 ? GL_TEXTURE_3D : GL_TEXTURE_2D);
         WolfTk::unbindUnit(sh.getTextureChannel(LLShaderMgr::WOLF_TK_SHADOW_BUFFER), GL_TEXTURE_2D_ARRAY);
         WolfTk::unbindUnit(BUILD_FIELD_UNIT, GL_TEXTURE_2D);   // [2026-10-26]
+        WolfTk::unbindUnit(BLUE_NOISE_UNIT, GL_TEXTURE_2D);    // [2026-11-02]
     }
     {
         // the resolve (CloudsResolveMaterial: varianceGamma 2, temporalAlpha 0.1, CloudsResolveMaterial.ts:68-79)
@@ -1491,6 +1542,7 @@ bool Clouds::renderProbe(const Atmosphere& atmosphere, const CloudsFrame& f)
     for (S32 u = 8; u <= 12; ++u) WolfTk::unbindUnit(u, u == 9 || u == 10 ? GL_TEXTURE_3D : GL_TEXTURE_2D);
     WolfTk::unbindUnit(sh.getTextureChannel(LLShaderMgr::WOLF_TK_SHADOW_BUFFER), GL_TEXTURE_2D_ARRAY);
     WolfTk::unbindUnit(BUILD_FIELD_UNIT, GL_TEXTURE_2D);   // [2026-10-26]
+    WolfTk::unbindUnit(BLUE_NOISE_UNIT, GL_TEXTURE_2D);    // [2026-11-02]
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glViewport(vp[0], vp[1], vp[2], vp[3]);
     return true;
@@ -1518,7 +1570,7 @@ bool Clouds::lightShafts() const { return mImpl->cLightShafts; }
 void Clouds::release()
 {
     Impl& m = *mImpl;
-    for (Tex* t : { &m.shapeTex, &m.shapeDetailTex, &m.localWeatherTex, &m.turbulenceTex, &m.shadowCurrentTex, &m.shadowResolveTex, &m.shadowHistoryTex,
+    for (Tex* t : { &m.shapeTex, &m.shapeDetailTex, &m.blueNoiseTex, &m.localWeatherTex, &m.turbulenceTex, &m.shadowCurrentTex, &m.shadowResolveTex, &m.shadowHistoryTex,
                     &m.cColor, &m.cDepthVelocity, &m.cShadowLength, &m.rColor[0], &m.rColor[1], &m.rShadowLength[0], &m.rShadowLength[1],
                     &m.pColor, &m.pDepthVelocity, &m.pShadowLength })
     {
@@ -1527,6 +1579,7 @@ void Clouds::release()
     m.fbo.release();
     m.proceduralDone = false;
     m.proceduralFailed = false;
+    m.blueNoiseTried = false;   // [2026-11-02] blueNoiseTex was released above: load it again (or warn again) on the next frame
     m.shadowCascadeCount = m.shadowMapSizeV = 0;
     m.cWidth = m.cHeight = 0;
     m.havePrev = false;

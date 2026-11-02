@@ -26,12 +26,31 @@
  * SOFTWARE.
  */
 
+// [WolfViewer 2026-11-02] OUR OWN BLUE NOISE. takram samples NVIDIA's spatio-temporal blue noise here, which this
+// product may not use (its licence: research / evaluation only, or the RTX SDK licence), so it was replaced by
+// interleaved gradient noise (below; the change that also brought WOLF_SLOT_ALPHA in cloudsResolveF.glsl, 2026-10-26, for
+// the grain and diagonal pattern it showed). That noise is not blue: neighbouring low-res texels' ray offsets are strongly
+// correlated, so every texel of the 1/16 march carries a 4-pixel structure the temporal upscale (cloudsResolveF.glsl) only
+// averages away while the view holds still. Paul, The Caribbean, W91: "when I move my camera ... you can see like left
+// overs" - a dot lattice in the clouds and short vertical stripes along the horizon glow while the sky moves. Measured in a
+// test build (one session, the resolve's temporal upscale switched off, TROMSO at dusk): the low-res texels alone show that
+// checker on a still view - the march's own noise, not the history. So the march now takes a 64 x 64 blue-noise array we
+// generate ourselves with Ulichney's void-and-cluster method (app_settings/wolfnoise: make_bluenoise.py, SOURCES.md; loaded
+// by wolftkclouds.cpp), tiled over the low-res target, and runs it through time with the golden-ratio additive recurrence
+// (each texel's offsets form a low-discrepancy sequence over the frames - the "blue noise + golden ratio" scheme that
+// spatio-temporal blue noise is measured against: Wolfe et al. 2022, "Spatiotemporal Blue Noise Masks", EGSR). Without the
+// array (file missing or not loaded), the interleaved gradient noise as before.
+uniform sampler2D wolfBlueNoise;
+uniform int wolfNoiseMode;   // 1: the blue-noise array (wolftkclouds.cpp, once it is loaded); 0: interleaved gradient noise
+uniform float wolfNoiseOffset;   // fract(frame x golden ratio conjugate), taken in double (wolftkclouds.cpp sharedUniforms)
 // Source: three-geospatial packages/clouds/src/shaders/clouds.glsl:1-5 getSTBN
 float getSTBN() {
-  // [WOLF] NVIDIA STBN dropped (its licence: research / evaluation only, or the RTX SDK licence - not
-  // for this commercial product). The blue-noise lookup is replaced by takram's own MIT temporal
-  // interleaved gradient noise: Source: three-geospatial packages/core/src/webgpu/generators.ts:20-25
-  // dithering (seed = screen coordinate + fract(time) * 1337) and :15-18 interleavedGradientNoise.
+  if (wolfNoiseMode == 1) {
+    float b = texelFetch(wolfBlueNoise, ivec2(gl_FragCoord.xy) & ivec2(63), 0).r;
+    return fract(b + wolfNoiseOffset);
+  }
+  // [WOLF] Source: three-geospatial packages/core/src/webgpu/generators.ts:20-25 dithering (seed = screen coordinate +
+  // fract(time) * 1337) and :15-18 interleavedGradientNoise (takram's own MIT code)
   return interleavedGradientNoise(gl_FragCoord.xy + fract(time) * 1337.0);
 }
 

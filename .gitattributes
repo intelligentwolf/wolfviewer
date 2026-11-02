@@ -18,6 +18,7 @@
 *.llm binary
 *.nib binary
 *.rtf binary
+*.r16 binary
 *.ttf binary
 
 # Executables

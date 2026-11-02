@@ -33,6 +33,12 @@
     <string name="era_ww2early">Early Second World War</string>
     <string name="era_ww2late">Late Second World War</string>
     <string name="era_other">Other</string>
+    <string name="no_guns">none</string>
+    <!-- [FIXED LIVERY 2026-11-02] a catalogue class with "fixed_livery" (Concorde, the 747-400): size, livery, colours and
+         squadron letters are greyed, and its "fixed_note" is shown beside the colours (f-plane-builder/README.md). -->
+    <string name="size_label">2. Size</string>
+    <string name="size_label_fixed">2. Size: full size (100 %) only</string>
+    <string name="fixed_note_default">This aircraft comes in one livery only.</string>
     <string name="figures">[TITLE] ([ERA])
 Span [SPAN], length [LENGTH]. Armament: [GUNS].
 It flies with the Wolf flight model, works with the flight deck's autopilot and autoland, fights in dogfight mode and carries a parachute.</string>
@@ -77,6 +83,7 @@ It flies with the Wolf flight model, works with the flight deck's autopilot and 
      width="64" tool_tip="Its under surfaces. Click to choose a colour." />
     <color_swatch can_apply_immediately="true" follows="left|top" height="60" label="Spinner" layout="topleft" left="508" name="spinner_colour" top="178"
      width="64" tool_tip="The propeller's spinner or nose ring. Click to choose a colour." />
+    <text follows="left|top" height="60" layout="topleft" left="584" name="fixed_note" top="178" width="84" wrap="true" visible="false" />
     <text follows="left|top" height="16" layout="topleft" left="348" name="letters_label" top="252" width="84">Squadron</text>
     <line_editor follows="left|top" height="22" layout="topleft" left="432" max_length_chars="6" name="letters" top="248" width="120"
      tool_tip="Squadron code letters painted on the fuselage (up to 6: A to Z, 0 to 9 and -). Leave it empty for none." />

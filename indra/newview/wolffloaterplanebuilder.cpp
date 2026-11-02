@@ -338,6 +338,8 @@ bool WolfFloaterPlaneBuilder::postBuild()
     mSpinner = getChild<LLColorSwatchCtrl>("spinner_colour");
     mLetters = getChild<LLLineEditor>("letters");
     mName = getChild<LLLineEditor>("plane_name");
+    mSizeLabel = getChild<LLTextBox>("size_label");
+    mFixedNote = getChild<LLTextBox>("fixed_note");
     mFigures = getChild<LLTextBox>("figures_text");
     mLettersProblem = getChild<LLTextBox>("letters_problem");
     mNameProblem = getChild<LLTextBox>("name_problem");
@@ -445,6 +447,13 @@ const LLSD* WolfFloaterPlaneBuilder::currentLivery() const
     return nullptr;
 }
 
+bool WolfFloaterPlaneBuilder::currentFixed() const
+{
+    // Source: f-plane-builder/README.md CLASS "fixed_livery (bool; absent = false)". LLSD::asBoolean() of an absent key is false.
+    const LLSD* c = currentClass();
+    return c && (*c)["fixed_livery"].asBoolean();
+}
+
 std::string WolfFloaterPlaneBuilder::nameProblem() const
 {
     // Source: f-plane-builder/README.md "name is 1 to 24 characters of Latin letters, digits, space and ' - . &. It must
@@ -472,6 +481,7 @@ std::string WolfFloaterPlaneBuilder::nameProblem() const
 std::string WolfFloaterPlaneBuilder::lettersProblem() const
 {
     // Source: f-plane-builder/README.md "letters is 0 to 6 characters of A-Z, 0-9 and -" (lower case is taken as capitals)
+    if (currentFixed()) return std::string();   // the field is empty and greyed, and "" is sent
     std::string l = mLetters->getText();
     LLStringUtil::trim(l);
     if ((S32)l.size() > LETTERS_MAX) return llformat(getString("letters_long").c_str(), LETTERS_MAX);
@@ -500,6 +510,14 @@ LLSD WolfFloaterPlaneBuilder::design() const
     d["lower"] = colourOf(mLower->get());
     d["spinner"] = colourOf(mSpinner->get());
     d["letters"] = letters;
+    // Source: f-plane-builder/README.md "For the viewer job": a fixed_livery class is sent with "size_pct": 100,
+    // "livery": "<that entry's id>", "letters": "" (planebuilder_lib.php pb_check_design refuses anything else).
+    if (const LLSD* c = currentClass(); c && (*c)["fixed_livery"].asBoolean())
+    {
+        d["size_pct"] = 100;
+        d["livery"] = (*c)["liveries"].size() > 0 ? (*c)["liveries"][0]["id"].asString() : std::string();
+        d["letters"] = std::string();
+    }
     d["name"] = name;
     return d;
 }
@@ -513,7 +531,9 @@ void WolfFloaterPlaneBuilder::onOpenReply(const LLSD& reply)
     mType->removeall();
     for (const LLSD& c : llsd::inArray(mCatalogue["classes"]))
     {
-        mType->add(llformat("%s - %s", c["title"].asString().c_str(), c["gun_text"].asString().c_str()), c["id"]);
+        // an unarmed type (the airliners: gun_text "") is listed by its title alone
+        const std::string guns = c["gun_text"].asString();
+        mType->add(guns.empty() ? c["title"].asString() : llformat("%s - %s", c["title"].asString().c_str(), guns.c_str()), c["id"]);
     }
     if (mCatalogue["classes"].size() > 0) mType->selectFirstItem();
     mReady = true;
@@ -526,15 +546,18 @@ void WolfFloaterPlaneBuilder::onClassChanged()
 {
     const LLSD* c = currentClass();
     if (!c) return;
-    // its period liveries, then the member's own colours
+    // its period liveries, then the member's own colours; a fixed-livery class has its one livery only
+    const bool fixed = (*c)["fixed_livery"].asBoolean();
     mLivery->removeall();
     for (const LLSD& lv : llsd::inArray((*c)["liveries"]))
     {
         mLivery->add(lv["title"].asString(), lv["id"]);
+        if (fixed) break;
     }
-    mLivery->add(getString("custom_livery"), LLSD("custom"));
+    if (!fixed) mLivery->add(getString("custom_livery"), LLSD("custom"));
     mLivery->selectFirstItem();
     mLetters->setLabel((*c)["letters_hint"].asString());
+    applyFixed(*c);
     onLiveryChanged();
 
     const std::string id = (*c)["id"].asString();
@@ -552,6 +575,34 @@ void WolfFloaterPlaneBuilder::onClassChanged()
         request("preview", LLSD().with("class", id));
     }
     onDesignChanged();
+}
+
+void WolfFloaterPlaneBuilder::applyFixed(const LLSD& cls)
+{
+    // Source: f-plane-builder/README.md "For the viewer job": fixed_livery = size fixed at 100 %, its one livery, no custom
+    // colours, the squadron letters empty and disabled; fixed_note shown beside the greyed options. The member's own size and
+    // letters are put back when they choose a type that is not fixed. The greying itself is in updateControls.
+    const bool fixed = cls["fixed_livery"].asBoolean();
+    if (fixed && !mFixedShown)
+    {
+        mKeptSize = mSize->getValueF32();
+        mKeptLetters = mLetters->getText();
+    }
+    if (fixed)
+    {
+        mSize->setValue(LLSD(100.0));
+        mLetters->setText(LLStringUtil::null);
+    }
+    else if (mFixedShown)
+    {
+        mSize->setValue(LLSD((F64)mKeptSize));
+        mLetters->setText(mKeptLetters);
+    }
+    mFixedShown = fixed;
+    const std::string note = cls["fixed_note"].asString();
+    mFixedNote->setText(fixed ? (note.empty() ? getString("fixed_note_default") : note) : std::string());
+    mFixedNote->setVisible(fixed);
+    mSizeLabel->setText(getString(fixed ? "size_label_fixed" : "size_label"));
 }
 
 void WolfFloaterPlaneBuilder::onLiveryChanged()
@@ -595,7 +646,7 @@ void WolfFloaterPlaneBuilder::onDesignChanged()
         a["[TITLE]"] = (*c)["title"].asString();
         a["[SPAN]"] = metres((*c)["span_m"].asReal() * k);
         a["[LENGTH]"] = metres((*c)["length_m"].asReal() * k);
-        a["[GUNS]"] = (*c)["gun_text"].asString();
+        a["[GUNS]"] = (*c)["gun_text"].asString().empty() ? getString("no_guns") : (*c)["gun_text"].asString();
         const std::string era = (*c)["era"].asString();
         a["[ERA]"] = (*c)["era_text"].asString().empty()
             ? getString(era == "ww1" ? "era_ww1" : era == "ww2early" ? "era_ww2early" : era == "ww2late" ? "era_ww2late" : "era_other")
@@ -649,9 +700,15 @@ void WolfFloaterPlaneBuilder::updateControls()
     const bool wolf = WolfGrid::isOnWolfTerritories();
     const bool open = wolf && mReady && mRefused.empty();
     const bool ordering = !mOrder.empty();
-    for (LLUICtrl* c : std::initializer_list<LLUICtrl*>{ mType, mSize, mLivery, mUpper, mLower, mSpinner, mLetters, mName })
+    for (LLUICtrl* c : std::initializer_list<LLUICtrl*>{ mType, mName })
     {
         c->setEnabled(open && !ordering);
+    }
+    // a fixed-livery class (the airliners): size, livery, colours and letters stay greyed (applyFixed set them)
+    const bool fixed = currentFixed();
+    for (LLUICtrl* c : std::initializer_list<LLUICtrl*>{ mSize, mLivery, mUpper, mLower, mSpinner, mLetters })
+    {
+        c->setEnabled(open && !ordering && !fixed);
     }
     const bool shortOf = open && mAvailable >= 0 && mAvailable < mPriceNow;
     mBuildBtn->setEnabled(open && !mBusy && !ordering && !shortOf && mAvailable >= 0 && nameProblem().empty() && lettersProblem().empty());

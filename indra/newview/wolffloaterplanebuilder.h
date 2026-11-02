@@ -119,6 +119,8 @@ private:
     LLSD design() const;
     const LLSD* currentClass() const;
     const LLSD* currentLivery() const;
+    bool currentFixed() const;
+    void applyFixed(const LLSD& cls);
 
     void request(const std::string& what, const LLSD& body);
     static void requestCoro(LLHandle<LLFloater> h, std::string what, LLSD body);
@@ -128,6 +130,7 @@ private:
     LLSliderCtrl* mSize = nullptr;
     LLColorSwatchCtrl *mUpper = nullptr, *mLower = nullptr, *mSpinner = nullptr;
     LLLineEditor *mLetters = nullptr, *mName = nullptr;
+    LLTextBox *mSizeLabel = nullptr, *mFixedNote = nullptr;
     LLTextBox *mFigures = nullptr, *mLettersProblem = nullptr, *mNameProblem = nullptr, *mPrice = nullptr, *mBalance = nullptr, *mStatus = nullptr;
     LLButton *mBuildBtn = nullptr, *mBuyBtn = nullptr, *mCancelBtn = nullptr;
     WolfPlanePreview* mPreview = nullptr;
@@ -147,6 +150,11 @@ private:
     LLFrameTimer mPoll;
     bool mPolling = false;
     std::string mPreviewClass;
+    // [FIXED LIVERY 2026-11-02] a class whose catalogue entry has "fixed_livery" (the airliners) is built at 100 % in its one
+    // livery with no letters; the member's size and letters from the class before are kept here and given back after it.
+    bool mFixedShown = false;
+    F32 mKeptSize = 100.f;
+    std::string mKeptLetters;
     static std::map<std::string, std::shared_ptr<const WolfPlanePreview::Mesh>> sMeshes;
 };
 

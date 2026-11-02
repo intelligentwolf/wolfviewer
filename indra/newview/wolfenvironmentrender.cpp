@@ -179,6 +179,7 @@ namespace
         bool     moonLightsClouds = false;
         F32      moonSkyScale = 0.f;                 // the moon's illuminance above the atmosphere / the sun's (sun down)
         F32      cloudThinMax = 0.8f;                // [2026-10-27] the most the clouds may be thinned (updateLight; measureCloudCover)
+        LLColor3 nightCloudFloor[4];                 // [2026-11-02 W92] the clouds' night floor at 0, 8, 30, 90 deg (updateNightCloudFloor)
         F32      moonPhaseAngle = 0.f;
         F32      cloudTransmittanceAtCamera = 1.f;   // last frame's (camShadow): the sun's direct beam
         F32      cloudDiffuseT = 1.f;                // the clouds' mean two-stream diffuse transmittance over the sky
@@ -895,6 +896,55 @@ namespace
         }
     }
 
+    /** [WolfViewer 2026-11-02 W92] THE CLOUDS' NIGHT FLOOR (wolftk/nightFloor.glsl, compositeF.glsl). Jimmy Olsen, TROMSO 19:00Z
+     *  (real-place sky, sun -27 deg, rain, cover 0.6): the sky above the town pure black, 3,3,5 on screen. The dome itself is the
+     *  EEP's (probeSky: "EEP verify ... EEP 8,10,10 native 8,10,10" at the zenith); the black is the native cloud deck laid over it
+     *  (compositeF.glsl: dome x (1 - a) + cloud). By night it is lit by nothing - the sun 27 deg down, the moon under the horizon -
+     *  and the EEP's cloud colour gains are learned by day only (measureCloudCover gainsByDay), so it stays physically black. The
+     *  stock renderer draws the same EEP's clouds lit by its ambient (the same session with the native sky off: a grey deck,
+     *  64,66,66 on screen). The floor, per elevation node (wolfNightFloorAt in nightFloor.glsl: 0, 8, 30, 90 deg; the colour
+     *  hardly depends on the azimuth at night - no haze glow while sun_moon_glow_factor < 1, [S] llsettingssky.cpp:1318-1322):
+     *    - the stock EEP's own cloud colour there (WolfEepReference::cloudColourLinear: [S] cloudsV.glsl / cloudsF.glsl, in the
+     *      stock linear units the frame is in while an EEP drives the native sky), as the night light shows it (nightLightColour,
+     *      the same target measureCloudCover gives the march by night), weighted by nightFactor - 0 by day and through nautical
+     *      twilight, so nothing changes there - per channel at least
+     *    - the stock day cycle's Midnight clouds (Firestorm days/Default.xml:3-6 A-12AM = skies/Midnight.xml:3-139 through the
+     *      same transcription, WolfEepReference::cloudColourLinear on that sky): the floor residents know, whatever the EEP.
+     *  Recomputed twice a second (the night factor and the EEP move slowly; 4 x 6400 samples). */
+    void updateNightCloudFloor(const LLSettingsSky::ptr_t& psky, bool cut)
+    {
+        // Source: wolfeepreference.cpp cloudColourLinear on skies/Midnight.xml, ported line for line to compute these (haze_horizon 0:
+        // its legacy array's element 0, [S] llsettingssky.cpp:982-985) - sRGB 7,7,10 at the horizon .. 24,26,33 at the zenith on the
+        // stock display
+        static const LLColor3 MIDNIGHT[4] = { LLColor3(0.002000f, 0.002152f, 0.003086f), LLColor3(0.002250f, 0.002427f, 0.003435f),
+                                              LLColor3(0.005608f, 0.006329f, 0.008956f), LLColor3(0.009150f, 0.010595f, 0.015128f) };
+        static const F32 ELEV_DEG[4] = { 0.f, 8.f, 30.f, 90.f };   // nightFloor.glsl wolfNightFloorAt's nodes
+        static F64 s_next = 0.0;
+        static LLColor3 s_floor[4] = { MIDNIGHT[0], MIDNIGHT[1], MIDNIGHT[2], MIDNIGHT[3] };
+        const F64 t = LLFrameTimer::getElapsedSeconds();
+        if (t >= s_next || cut)   // a cut (an arrival, a sky switched by hand): the new EEP's floor at once
+        {
+            s_next = t + 0.5;
+            const F32 night = llclamp(sNext.night, 0.f, 1.f);
+            for (S32 i = 0; i < 4; ++i)
+            {
+                LLColor3 f = MIDNIGHT[i];
+                LLColor3 stock;
+                const F32 e = ELEV_DEG[i] * DEG_TO_RAD;
+                // a hair above the horizon: the dome vertex at 0 deg is the cap's rim (wolfeepreference.cpp domeVertex)
+                if (night > 0.f && psky && WolfEepReference::cloudColourLinear(psky, LLVector3(0.f, cosf(llmax(e, 0.01f)), sinf(llmax(e, 0.01f))), stock))
+                {
+                    // as the night light shows it at full night, faded in by the night factor (the night light's own mix is not
+                    // applied as well: that would weight by the night twice)
+                    const LLColor3 seen = nightLightColour(stock, 1.f, sNext.nightS) * night;
+                    for (S32 c = 0; c < 3; ++c) f.mV[c] = llmax(f.mV[c], llfinite(seen.mV[c]) ? seen.mV[c] : 0.f);
+                }
+                s_floor[i] = f;
+            }
+        }
+        for (S32 i = 0; i < 4; ++i) sNext.nightCloudFloor[i] = s_floor[i];
+    }
+
     /**
      * The frame's light at the camera and the exposure (absolute values):
      *   sun        three-geospatial getSunLightColor (getSunLightColor.ts:48-103): transmittance to the sun x the
@@ -1153,6 +1203,15 @@ namespace
                     const F32 total = llclamp(llmax(d.mWeatherCloud, share), 0.f, 1.f);
                     thinMax = llmin(0.8f, 1.f - total);
                 }
+                // [WolfViewer 2026-11-02 W92, ticket 460] NO THINNING BY NIGHT. Jimmy Olsen, TROMSO 19:31Z, rain under cloud cover
+                // 0.5 - 0.6: bright stars over the whole sky. The thinning drew every cloud at (1 - thin) of its opacity, so up to
+                // 1 - total = 0.4 - 0.5 of the starlight came through the thickest of the deck (compositeF.glsl lays the clouds over
+                // the dome and LL's stars by 1 - alpha), and the night deck itself was black (its colour gains are learned by day
+                // only: measureCloudCover gainsByDay) - the sky read as a clear starry night. The thinning matches the stock
+                // layer's translucent veil by day; by night the deck has its own visible colour (the night floor, nightFloor.glsl),
+                // so the clouds keep the opacity the march gives them and hide the stars where the cover is. The limit falls to 0
+                // with nightFactor (0 by day and through nautical twilight, a smoothstep to 1 at the sun 18 deg down), eased below.
+                thinMax *= 1.f - llclamp(sNext.night, 0.f, 1.f);
                 static F32 s_thinMax = -1.f;
                 if (s_thinMax < 0.f || dt <= 0.f || settleSnap) s_thinMax = thinMax;
                 else if (!holding) s_thinMax += (thinMax - s_thinMax) * (1.f - expf(-dt / tau));
@@ -1459,6 +1518,7 @@ namespace
                                     + componentMult(sNext.skyHorizontal, sNext.ambTint)) * (1.f / F_PI);
             sNext.nightS = rodSaturation(luminance(white));
         }
+        updateNightCloudFloor(psky, settleSnap || dt <= 0.f);   // [WolfViewer 2026-11-02 W92] after nightS: the floor is the stock clouds as the night light shows them
         {
             // [WolfViewer 2026-10-28] ticket #304 (Jimmy Olsen, TROMSO 05:47Z, W82): "the moon bright colour changed to orange", the
             // moonlit clouds in the west cream-orange (his picture: 180,165,155, r/b 1.15) against a mauve-grey dawn side (121,113,114).
@@ -3791,6 +3851,20 @@ static void APIENTRY wolfSkyGLDebug(GLenum source, GLenum type, GLuint id, GLenu
 }
 #endif
 
+// [WolfViewer 2026-11-02 W92] the night floor's uniforms (wolftk/nightFloor.glsl) for the sky dome, the composite and the light meter.
+// On in the screen's own passes while an EEP drives the native sky: the floors are in the stock renderer's linear units, which the
+// frame is in then (updateLight's exposure); without an EEP the frame is the physical camera's, with no stock counterpart. Off in a
+// reflection-probe face: that sky and those clouds light the scene's ambient and the water's mirror, which keep the real night.
+// The clouds' floor per elevation node: updateNightCloudFloor.
+static void setNightFloorUniforms(LLGLSLShader& sh)
+{
+    static LLStaticHashedString s_on("wolfNightFloorOn"), s_nodes("wolfNightFloorCloudNodes");
+    sh.uniform1f(s_on, (!gCubeSnapshot && WolfEnvironmentRender::eepDriven()) ? 1.f : 0.f);
+    F32 v[12];
+    for (S32 i = 0; i < 4; ++i) for (S32 c = 0; c < 3; ++c) v[i * 3 + c] = sFrame.nightCloudFloor[i].mV[c];
+    sh.uniform3fv(s_nodes, 4, v);
+}
+
 bool WolfEnvironmentRender::renderSkyDome()
 {
     sMoonDrawn.on = false;   // [2026-10-27] set again below if this pass draws a moon disc
@@ -4173,6 +4247,8 @@ bool WolfEnvironmentRender::renderSkyDome()
     // lands below the probe's horizon) reflected that clear sky: brighter than the sky's ocean beyond the planes.
     static LLStaticHashedString s_disc("uDrawSunDisc"), s_seap("uSeaProbe");
     sh.uniform1f(s_disc, gCubeSnapshot ? 0.f : 1.f);
+    // [WolfViewer 2026-11-02 W92] the night sky's floor (wolftk/nightFloor.glsl; setNightFloorUniforms)
+    setNightFloorUniforms(sh);
     const bool seaProbe = LLPipeline::sReflectionProbesEnabled && gPipeline.mReflectionMapManager.defaultProbeReady();
     if (seaProbe) gPipeline.bindReflectionProbes(sh);
     sh.uniform1f(s_seap, seaProbe ? 1.f : 0.f);
@@ -4569,6 +4645,8 @@ void WolfEnvironmentRender::postPassInner()
         // physical aerial perspective there as well
         static LLStaticHashedString s_noAerial("wolfEepNoAerial");
         sh.uniform1f(s_noAerial, (overlay && eepDriven()) ? 1.f : 0.f);
+        // [WolfViewer 2026-11-02 W92] the clouds' night floor (compositeF.glsl, wolftk/nightFloor.glsl; setNightFloorUniforms)
+        setNightFloorUniforms(sh);
     }
     {
         const glm::mat4 view = glm::make_mat4(gGLModelView), proj = glm::make_mat4(gGLProjection);
@@ -4723,10 +4801,24 @@ void WolfEnvironmentRender::postPassInner()
             WolfTk::bindNamed(ll, "frameTex", WolfTk::NAMED_UNIT_BASE, GL_TEXTURE_2D, rt->screen.getTexture());
             // LL's G-buffer normal + flags: deferredScreen texture 2 (LLPipeline::bindDeferredShader DEFERRED_NORMAL)
             WolfTk::bindNamed(ll, "normalMap", WolfTk::NAMED_UNIT_BASE + 1, GL_TEXTURE_2D, rt->deferredScreen.getTexture(2));
+            {
+                // [WolfViewer 2026-11-02 W92] the clouds' night floor taken back out of the reading (logLumF.glsl): the same uniforms
+                // and overlay the composite had, and the camera's directions
+                setNightFloorUniforms(ll);
+                static LLStaticHashedString s_llOverlay("wolfLogLumOverlay"), s_llClip("wolfLogLumInvProj");
+                ll.uniform1f(s_llOverlay, overlay ? 1.f : 0.f);
+                WolfTk::bindNamed(ll, "overlayBuffer", WolfTk::NAMED_UNIT_BASE + 2, GL_TEXTURE_2D, overlay ? overlay : zeroTex());
+                // as the composite builds its rays (compositeV.glsl getCameraRay): the inverse projection, then the inverse view
+                static LLStaticHashedString s_llIView("wolfLogLumInvView");
+                const glm::mat4 iproj = glm::inverse(glm::make_mat4(gGLProjection)), iview = glm::inverse(glm::make_mat4(gGLModelView));
+                ll.uniformMatrix4fv(s_llClip, 1, GL_FALSE, glm::value_ptr(iproj));
+                ll.uniformMatrix4fv(s_llIView, 1, GL_FALSE, glm::value_ptr(iview));
+            }
             gPipeline.mScreenTriangleVB->setBuffer();
             gPipeline.mScreenTriangleVB->drawArrays(LLRender::TRIANGLES, 0, 3);
             WolfTk::unbindUnit(WolfTk::NAMED_UNIT_BASE, GL_TEXTURE_2D);
             WolfTk::unbindUnit(WolfTk::NAMED_UNIT_BASE + 1, GL_TEXTURE_2D);
+            WolfTk::unbindUnit(WolfTk::NAMED_UNIT_BASE + 2, GL_TEXTURE_2D);
             ll.unbind();
             sGpu.logLum.flush();   // TMG_AUTO: the mipmaps are generated here (llrendertarget.cpp:511-515)
             // the 1 x 1 mip (level 6 of 64) through a pixel-pack buffer: no wait for the GPU

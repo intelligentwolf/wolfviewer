@@ -28,6 +28,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "llviewertexture.h"
+#include "wolfenvironmentrender.h"   // [WolfViewer 2026-11-02 tickets 442/439] the overlay watch
 
 // Library includes
 #include "llmath.h"
@@ -627,6 +628,9 @@ void LLViewerTexture::updateClass()
             {
                 LL_INFOS() << "Viewer was " << (is_minimized ? "minimized" : "backgrounded") << " for " << discard_time
                            << "s, freeing up video memory." << LL_ENDL;
+                // [WolfViewer 2026-11-02 tickets 442/439] beside the overlay watch's readings (debug setting WolfOverlayWatch)
+                WolfEnvironmentRender::overlayWatchTexturePurge(true, std::string(is_minimized ? "minimised" : "backgrounded") + " for "
+                    + std::to_string((S32)discard_time) + " s, discard bias " + std::to_string(sDesiredDiscardBias) + " raised to the maximum");
 
                 last_desired_discard_bias = sDesiredDiscardBias;
                 was_backgrounded = true;
@@ -640,6 +644,8 @@ void LLViewerTexture::updateClass()
         if (was_backgrounded)
         { // if the viewer was backgrounded
             LL_INFOS() << "Viewer is no longer backgrounded or minimized, resuming normal texture usage." << LL_ENDL;
+            // [WolfViewer 2026-11-02 tickets 442/439] the overlay watch (debug setting WolfOverlayWatch)
+            WolfEnvironmentRender::overlayWatchTexturePurge(false, "discard bias back to " + std::to_string(last_desired_discard_bias));
             was_backgrounded = false;
             sDesiredDiscardBias = last_desired_discard_bias;
         }

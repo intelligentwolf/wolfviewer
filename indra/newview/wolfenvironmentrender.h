@@ -18,6 +18,7 @@
 #define WOLF_ENVIRONMENT_RENDER_H
 
 #include <functional>
+#include <string>
 #include "v3color.h"
 #include "v3math.h"
 
@@ -171,6 +172,9 @@ public:
     static void destroyGL();
     /** WolfEnvironmentDebugCapture: the finished HDR frame, before the tone mapping (LLPipeline::renderFinalize). */
     static void captureFinal();
+    /** [2026-11-02 tickets 442/439] the debug setting WolfOverlayWatch: the backgrounded texture purge starting / ending
+     *  (LLViewerTexture::updateClass), logged beside the watch's readings. Does nothing while the watch is off. */
+    static void overlayWatchTexturePurge(bool started, const std::string& detail);
 };
 
 #endif // WOLF_ENVIRONMENT_RENDER_H

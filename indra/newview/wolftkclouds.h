@@ -226,6 +226,9 @@ namespace WolfTk
         GLuint marchDepthVelocityTex(S32& w, S32& h) const;
         /** [WolfViewer 2026-10-13] .. and its colour (premultiplied radiance + alpha, the same texels). */
         GLuint marchColorTex() const;
+        /** [WolfViewer 2026-11-02, ticket 442] the frame counter the last main-view march used (its Bayer slot is % 16, its
+         *  jitter cameraUniforms' temporalJitter), for wolfenvironmentrender.cpp's overlay watch. */
+        U32    marchFrame() const;
         GLuint shadowLengthTex() const;       // R16F, km (clouds.frag:1001), 0 when light shafts are off
         GLuint probeColorTex() const;
         GLuint probeShadowLengthTex() const;

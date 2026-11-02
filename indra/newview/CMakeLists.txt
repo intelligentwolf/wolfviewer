@@ -912,6 +912,7 @@ set(viewer_SOURCE_FILES
     streamtitledisplay.cpp
     utilitybar.cpp
     wolfalbumart.cpp
+    wolfbirds.cpp   # [BIRDS 2026-11-02] ticket 445
     wolfboatrock.cpp
     wolfflight.cpp
     wolfflightdeck.cpp
@@ -1909,6 +1910,7 @@ set(viewer_HEADER_FILES
     streamtitledisplay.h
     utilitybar.h
     wolfalbumart.h
+    wolfbirds.h   # [BIRDS 2026-11-02]
     wolfboatrock.h
     wolfflight.h
     wolfflightdeck.h

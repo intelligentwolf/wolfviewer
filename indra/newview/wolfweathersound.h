@@ -104,7 +104,12 @@ public:
         const char* mUuid;          ///< the recording as it is (stereo, 2D)
         const char* mMuffledUuid;   ///< its under-a-roof copy (mono, low-passed); nullptr = none
         bool        mLoop;          ///< a seamless loop (started at a random point) or a one-shot drop
+        const char* mDir = nullptr; ///< [BIRDS 2026-11-02] its app_settings folder; nullptr = "wolfweather"
     };
+
+    /** [BIRDS 2026-11-02] A shipped one-shot (wolfbirds.cpp's calls) decoded into the sound cache by the same worker as
+     *  the rain: true once <sound cache>/<mUuid>.dsf is written and may be played; starts the work the first time. */
+    bool recordingReady(const Recording& r) { return prepare(r) == Prep::READY; }
 
     /** <WolfViewer 2026-10-26/> Source: rain_mix.py — the same numbers in both viewers. */
     static F32 intensity(const WolfWeatherProfile& p);

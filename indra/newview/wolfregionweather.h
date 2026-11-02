@@ -169,6 +169,17 @@ public:
      *  (WolfHurricane::timeAt on the wall clock, LLDate::now). */
     const WolfHurricane* hurricane() const { return (mHaveRow && mHaveHurricane) ? &mHurricane : nullptr; }
 
+    /** [BIRDS 2026-11-02] ticket 445: weather.php's `birds` block for this region ({ambient, default, on};
+     *  wolfstorm/php/wolf_ambient_lib.php wa_birds_payload): true when the owner's choice, or the default, lets birds fly
+     *  here. False with no row yet, or with no block (an older grid, a region not in the rollout). wolfbirds.cpp draws them. */
+    bool birdsAllowed() const { return mHaveRow && mBirdsOn; }
+    /** [BIRDS 2026-11-02] Allowed only over the sea and coast: nobody has chosen and the region is listed under no category
+     *  (wolf_ambient_lib.php wa_birds_default `seaCoast`). Gulls and terns only, over open water. */
+    bool birdsSeaOnly() const { return mHaveRow && mBirdsOn && mBirdsSeaOnly; }
+    /** [BIRDS 2026-11-02] Region/Estate saved a new choice for `region` (wolfpassingplanes.cpp): show it now instead of at
+     *  the next minute's poll. Ignored for any region but the agent's. */
+    void setBirdsLocal(const LLUUID& region, bool on);
+
     /** Bumped whenever the answer changes, so a panel can notice without polling fields. */
     S32 generation() const { return mGeneration; }
 
@@ -189,8 +200,11 @@ private:
     void recomputeParcelApplies();
     void readAutoEnv(const LLSD& row);   ///< <WolfViewer 2026-10-03/> weather.php region_payload `autoEnv`
     void readHurricane(const LLSD& row); ///< [HURRICANE 2026-10-29/] weather.php region payload `hurricane` (absent = no storm)
+    void readBirds(const LLSD& row);     ///< [BIRDS 2026-11-02/] weather.php region payload `birds` (absent = no birds)
 
     bool               mHaveRow = false;
+    bool               mBirdsOn = false;        // [BIRDS 2026-11-02/] weather.php `birds.on`
+    bool               mBirdsSeaOnly = false;   // [BIRDS 2026-11-02/] ... by the sea-and-coast default only
     bool               mAutoEnvOn = false;      // <WolfViewer 2026-10-03/>
     bool               mAutoEnvSky = false;
     bool               mAutoEnvWeather = false;

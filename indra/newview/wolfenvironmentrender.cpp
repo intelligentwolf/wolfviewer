@@ -2353,6 +2353,12 @@ bool WolfEnvironmentRender::bodyDirections(LLVector3& sun, LLVector3& moon)
 }
 
 // static
+LLVector3 WolfEnvironmentRender::eclipticNorthAt(F64 unix_seconds)
+{
+    return lunarNorthAt(unix_seconds);   // [W92 ticket 460/] the moon disc's own pole, not a second calculation
+}
+
+// static
 F32 WolfEnvironmentRender::starBrightnessScale()
 {
     // [WolfViewer 2026-10-13] the EEP's star_brightness over LL's default (llsettingssky.cpp:918 250): a default EEP keeps the

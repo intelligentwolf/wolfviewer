@@ -1882,6 +1882,13 @@
             <menu_item_check.on_click function="ToggleControl" parameter="WolfSwimming" />
             <menu_item_check.on_visible function="WolfGrid.ShowsWolfRegionWeather" />
         </menu_item_check>
+        <!-- [BIRDS 2026-11-02] ticket 445: the wild birds (wolfbirds.cpp), your own on/off; the region owner's is in
+             Region/Estate > Region. Calls follow the Ambient volume. -->
+        <menu_item_check label="Birds" name="WolfBirds">
+            <menu_item_check.on_check function="CheckControl" parameter="WolfViewerBirds" />
+            <menu_item_check.on_click function="ToggleControl" parameter="WolfViewerBirds" />
+            <menu_item_check.on_visible function="WolfGrid.ShowsWolfRegionWeather" />
+        </menu_item_check>
         <!-- [WOLF COMPASS 2026-10-16] wolffloatercompass.cpp: a Victorian compass showing North
              and the way you are moving. Every grid. Paul: "anything wolf viewer should be under wolf world". -->
         <menu_item_check label="Tessa's Compass" name="WolfCompass">

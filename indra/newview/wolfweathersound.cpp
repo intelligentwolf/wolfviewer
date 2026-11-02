@@ -533,7 +533,7 @@ WolfWeatherSound::Prep WolfWeatherSound::prepare(const Recording& r)
     auto it = mPrep.find(file);
     if (it != mPrep.end()) return it->second;
 
-    const std::string in = gDirUtilp->getExpandedFilename(LL_PATH_APP_SETTINGS, "wolfweather", file);
+    const std::string in = gDirUtilp->getExpandedFilename(LL_PATH_APP_SETTINGS, r.mDir ? r.mDir : "wolfweather", file);   // [BIRDS 2026-11-02/] mDir
     if (!LLFile::isfile(in))
     {
         LL_WARNS("WolfWeather") << "weather recording missing: " << in << " (the synthesised voice plays instead)" << LL_ENDL;

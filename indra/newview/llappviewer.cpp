@@ -97,6 +97,7 @@
 #include "wolfhelm.h"     // <WolfViewer 2026-10-28/> the Captain's Helm (sailing ships)
 #include "wolfair.h"      // <WolfViewer 2026-11-01/> Wolf Air (warplanes: the dogfight band, the kill feed)
 #include "wolffarground.h"   // <WolfViewer 2026-10-07/> map tiles for regions not connected
+#include "wolfbirds.h"       // [BIRDS 2026-11-02/] ticket 445
 #include "wolffarterrain.h"   // <WolfViewer 2026-10-08/> elevation tiles beyond the terrain received
 #include "wolfobjectprops.h" // <WolfViewer> shared object name/description harvester
 #include "wolfbuilder.h"     // [WOLF BUILDER 2026-10-13/] floating object names
@@ -6292,6 +6293,7 @@ void LLAppViewer::idle()
     WolfAir::instance().idle();
     WolfFarTerrain::instance().idle();  // <WolfViewer 2026-10-08/> the ground beyond the terrain received (before the flat tiles: they skip its cells)
     WolfFarGround::instance().idle();   // <WolfViewer 2026-10-07/> map tiles for the regions not connected
+    WolfBirds::instance().idle();       // [BIRDS 2026-11-02/] ticket 445: the wild birds (wolfbirds.h)
     // [WOLF GAME 2026-10-09] Wolf Roleplay: timers, markers, effects, and the tags under the name
     // tags - after gObjectList.update() above has placed this frame's name tags.
     WolfGame::instance().idle();

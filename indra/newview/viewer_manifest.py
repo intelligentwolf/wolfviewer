@@ -107,6 +107,8 @@ class ViewerManifest(LLManifest,FSViewerManifest):
                 self.path("wolfadventure")
                 # <WolfViewer 2026-10-26> the recorded rain (wolfweathersound.cpp) + SOURCES.md
                 self.path("wolfweather")
+                # [BIRDS 2026-11-02] the birds' calls (wolfbirds.cpp) + SOURCES.md
+                self.path("wolfbirds")
 
                 # include the entire shaders directory recursively
                 self.path("shaders")

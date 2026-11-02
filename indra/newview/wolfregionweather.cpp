@@ -242,6 +242,7 @@ void WolfRegionWeather::onRegionChanged()
     if (WolfWeather::instanceExists()) WolfWeather::instance().forgetOwnChoice();   // [2026-10-15/] the land's weather on arrival
     readAutoEnv(LLSD());
     readHurricane(LLSD());   // [HURRICANE 2026-10-29/] its positions are the old region's metres
+    readBirds(LLSD());       // [BIRDS 2026-11-02/] the old region's answer
     mProfile = WolfWeatherProfile();
     mKind.clear();
     mRegionName.clear();
@@ -474,6 +475,7 @@ void WolfRegionWeather::fetchCoro(std::string region_id, bool include_parcel, F3
     self.mProfile.fromLLSD(r);
     self.readAutoEnv(r);
     self.readHurricane(r);   // [HURRICANE 2026-10-29/]
+    self.readBirds(r);   // [BIRDS 2026-11-02/]
     self.mLastError.clear();
     if (include_parcel && self.mParcelGate.accepts(parcel_generation))
     {
@@ -630,6 +632,31 @@ void WolfRegionWeather::readHurricane(const LLSD& row)
     }
 }
 
+// [BIRDS 2026-11-02] ticket 445. Source: wolfstorm/php/weather.php region_payload `birds` = wolf_ambient_lib.php
+// wa_birds_block {ambient, default, seaCoast, on}. No block, or anything malformed, is no birds. Sea-only: nobody has
+// chosen (ambient null), the categories do not say on (default false), and the region has no category (seaCoast).
+void WolfRegionWeather::readBirds(const LLSD& row)
+{
+    const LLSD b = (row.isMap() && row.has("birds") && row["birds"].isMap()) ? row["birds"] : LLSD();
+    const bool on = b.isMap() && b["on"].isBoolean() && b["on"].asBoolean();
+    const bool sea_only = on && !b["ambient"].isBoolean() && !b["default"].asBoolean() && b["seaCoast"].asBoolean();
+    if (on != mBirdsOn || sea_only != mBirdsSeaOnly)
+    {
+        LL_INFOS("WolfBirds") << "birds over this region: " << (on ? (sea_only ? "sea and coast only" : "on") : "off") << LL_ENDL;
+    }
+    mBirdsOn = on;
+    mBirdsSeaOnly = sea_only;
+}
+
+void WolfRegionWeather::setBirdsLocal(const LLUUID& region, bool on)
+{
+    LLViewerRegion* here = gAgent.getRegion();
+    if (!here || here->getRegionID() != region) return;
+    LL_INFOS("WolfBirds") << "birds over this region: " << (on ? "on" : "off") << " (saved in Region/Estate)" << LL_ENDL;
+    mBirdsOn = on;
+    mBirdsSeaOnly = false;   // the owner's own choice: everywhere the place suits, or nowhere
+}
+
 void WolfRegionWeather::applyPush(const LLSD& row)
 {
     if (!row.isMap()) return;
@@ -647,6 +674,7 @@ void WolfRegionWeather::applyPush(const LLSD& row)
     // [HURRICANE 2026-10-29] The push is weather.php's POST reply (Wolf_Api PostWeather -> PushToViewers), the same
     // region_payload a GET returns, so `hurricane` is in it while a storm runs and absent once none does.
     readHurricane(row);
+    readBirds(row);   // [BIRDS 2026-11-02/] the POST reply is region_payload too
     recomputeParcelApplies();
     mLastError.clear();
     mGeneration++;
@@ -804,6 +832,7 @@ void WolfRegionWeather::saveCoro(std::string body, std::string scope, std::strin
             self.mProfile.fromLLSD(reply);
             self.readAutoEnv(reply);
             self.readHurricane(reply);   // [HURRICANE 2026-10-29/] weather.php:625 replies with region_payload
+            self.readBirds(reply);   // [BIRDS 2026-11-02/]
             self.recomputeParcelApplies();
         }
     }

@@ -37,6 +37,7 @@
 #include "rlvactions.h"
 #include "rlvhandler.h"
 #include "wolfgrid.h"
+#include "wolfregionweather.h"   // [BIRDS 2026-11-02/] setBirdsLocal
 
 // Source: fsnearbychathub.cpp:107 (declared as wolfnpc.cpp:201 declares it) - the viewer's own chat path, so RLV's channel
 // rules apply; nothing is added to the resident's chat history
@@ -103,6 +104,24 @@ namespace
         return str(panel, on ? "planes_on_default" : "planes_off_default");
     }
 
+    /** [BIRDS 2026-11-02] The same for "Birds over this region": the reply's `birds` block (wolf_ambient.php view/set),
+     *  absent from an older grid, which leaves the line empty and the box unticked and greyed. */
+    bool have_birds()
+    {
+        return sState.mHave && sState.mReply["birds"].isMap() && sState.mReply["birds"]["on"].isBoolean();
+    }
+
+    std::string birds_line(LLPanel* panel)
+    {
+        if (!have_birds()) return std::string();
+        const LLSD& b = sState.mReply["birds"];
+        const bool on = b["on"].asBoolean();
+        if (b["ambient"].isBoolean()) return str(panel, on ? "birds_on_chosen" : "birds_off_chosen");
+        // [BIRDS 2026-11-02] wolf_ambient_lib.php wa_birds_default: Parks / Marinas on, other categories off, none = sea
+        if (!b["default"].asBoolean() && b["seaCoast"].asBoolean()) return str(panel, "birds_sea_default");
+        return str(panel, on ? "birds_on_default" : "birds_off_default");
+    }
+
     void write_controls(LLPanel* panel)
     {
         LLCheckBoxCtrl* check = panel->findChild<LLCheckBoxCtrl>("wolf_planes_check");
@@ -113,6 +132,17 @@ namespace
         const bool may = sState.mHave && sState.mReply["mayChange"].asBoolean();
         check->set(sState.mHave && sState.mReply["on"].asBoolean());
         check->setEnabled(may && !sState.mBusy);
+        // [BIRDS 2026-11-02] the birds box and its line, from the same reply
+        if (LLCheckBoxCtrl* birds = panel->findChild<LLCheckBoxCtrl>("wolf_birds_check"))
+        {
+            birds->set(have_birds() && sState.mReply["birds"]["on"].asBoolean());
+            birds->setEnabled(may && !sState.mBusy && have_birds());
+        }
+        if (LLTextBox* birds_state = panel->findChild<LLTextBox>("wolf_birds_state"))
+        {
+            birds_state->setEnabled(true);
+            birds_state->setText(birds_line(panel));
+        }
         // setCtrlsEnabled greys every child for someone who may not manage the estate; these lines must stay readable.
         state->setEnabled(true);
         note->setEnabled(true);
@@ -156,11 +186,12 @@ namespace
         return "the service returned an unreadable reply";
     }
 
-    std::string request_body(const char* action, const LLUUID& region, int ambient)
+    std::string request_body(const char* action, const LLUUID& region, int ambient, bool birds = false)
     {
         boost::json::object o;
         o["action"] = action;
         o["region"] = region.asString();
+        if (birds) o["what"] = "birds";   // [BIRDS 2026-11-02/] wolf_ambient.php set {what: "birds"}
         if (ambient >= 0) o["ambient"] = ambient == 1;
         return boost::json::serialize(o);
     }
@@ -206,17 +237,19 @@ namespace
         if (panel) write_controls(panel);
     }
 
-    void save_coro(LLHandle<LLPanel> handle, LLUUID region, bool on, U64 serial)
+    void save_coro(LLHandle<LLPanel> handle, LLUUID region, bool on, bool birds, U64 serial)
     {
         LLCore::HttpStatus status;
-        const LLSD reply = post_and_wait(request_body("set", region, on ? 1 : 0), true, status);
+        const LLSD reply = post_and_wait(request_body("set", region, on ? 1 : 0, birds), true, status);
         const bool ok = status && reply.isMap() && reply["success"].asBoolean();
         LLPanel* panel = handle.get();
-        if (!ok && (!panel || sState.mSerial != serial))
+        if (!ok)
         {
             // A change the owner asked for must not fail silently, even with the window closed (wolfautoenvironment.cpp:640).
+            // [BIRDS 2026-11-02] Always, not only with the window closed: the status line under the two boxes is 44 high and
+            // a long refusal would be cut off there; the alert keeps the whole text, to read and copy.
             LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE",
-                "Could not save passing planes: " + why_failed(status, reply)));
+                std::string(birds ? "Could not save birds: " : "Could not save passing planes: ") + why_failed(status, reply)));
         }
         if (sState.mSerial != serial) return;
         sState.mBusy = false;
@@ -224,13 +257,26 @@ namespace
         {
             if (panel)
             {
-                set_status(str(panel, "planes_save_failed") + " " + why_failed(status, reply), true);
+                set_status(str(panel, birds ? "birds_save_failed" : "planes_save_failed") + " " + why_failed(status, reply), true);
                 write_controls(panel);   // the check box goes back to what the grid has
             }
             return;
         }
         sState.mReply = reply;
         sState.mHave = true;
+        if (birds)
+        {
+            // [BIRDS 2026-11-02] No plugin to tell: the viewers draw the birds from weather.php, which every viewer here
+            // reads within the minute. This viewer shows the choice now.
+            const bool saved_on = have_birds() && sState.mReply["birds"]["on"].asBoolean();
+            if (WolfRegionWeather::instanceExists()) WolfRegionWeather::instance().setBirdsLocal(region, saved_on);
+            if (panel)
+            {
+                set_status(str(panel, saved_on ? "birds_saved_on" : "birds_saved_off"), false);
+                write_controls(panel);
+            }
+            return;
+        }
         // Tell the running wolf-air now (it reads the record only every 30 minutes): its own "/74 traffic on|off", which
         // checks the same estate rule and answers with a short alert. Only on the region the change was for.
         bool told = false;
@@ -249,13 +295,13 @@ namespace
         }
     }
 
-    void on_commit(LLHandle<LLPanel> handle)
+    void on_commit(LLHandle<LLPanel> handle, bool birds)
     {
         LLPanel* panel = handle.get();
         if (!panel) return;
-        LLCheckBoxCtrl* check = panel->findChild<LLCheckBoxCtrl>("wolf_planes_check");
+        LLCheckBoxCtrl* check = panel->findChild<LLCheckBoxCtrl>(birds ? "wolf_birds_check" : "wolf_planes_check");
         if (!check) return;
-        if (sState.mBusy || !sState.mHave || !sState.mReply["mayChange"].asBoolean())
+        if (sState.mBusy || !sState.mHave || !sState.mReply["mayChange"].asBoolean() || (birds && !have_birds()))
         {
             write_controls(panel);
             return;
@@ -266,16 +312,21 @@ namespace
         sState.mBusy = true;
         set_status(str(panel, "planes_saving"), false);
         write_controls(panel);
-        LLCoros::instance().launch("WolfPassingPlanesSave", [handle, region, on, serial]() { save_coro(handle, region, on, serial); });
+        LLCoros::instance().launch("WolfPassingPlanesSave", [handle, region, on, birds, serial]() { save_coro(handle, region, on, birds, serial); });
     }
 }
 
 void WolfPassingPlanes::postBuild(LLPanel* panel)
 {
-    LLCheckBoxCtrl* check = panel->findChild<LLCheckBoxCtrl>("wolf_planes_check");
-    if (!check) return;
     LLHandle<LLPanel> handle = panel->getHandle();
-    check->setCommitCallback([handle](LLUICtrl*, const LLSD&) { on_commit(handle); });
+    if (LLCheckBoxCtrl* check = panel->findChild<LLCheckBoxCtrl>("wolf_planes_check"))
+    {
+        check->setCommitCallback([handle](LLUICtrl*, const LLSD&) { on_commit(handle, false); });
+    }
+    if (LLCheckBoxCtrl* birds = panel->findChild<LLCheckBoxCtrl>("wolf_birds_check"))   // [BIRDS 2026-11-02/]
+    {
+        birds->setCommitCallback([handle](LLUICtrl*, const LLSD&) { on_commit(handle, true); });
+    }
 }
 
 void WolfPassingPlanes::sync(LLPanel* panel, LLViewerRegion* region, bool reread)
@@ -283,7 +334,8 @@ void WolfPassingPlanes::sync(LLPanel* panel, LLViewerRegion* region, bool reread
     if (!panel) return;
     // Wolf Territories' own: gone (not greyed) elsewhere, as the Region tab's Adult Content link (processRegionInfo).
     const bool wolf = WolfGrid::isOnWolfTerritories() && region;
-    for (const char* name : { "wolf_planes_check", "wolf_planes_state", "wolf_planes_note", "wolf_planes_status" })
+    for (const char* name : { "wolf_planes_check", "wolf_planes_state", "wolf_planes_note", "wolf_planes_status",
+                              "wolf_birds_check", "wolf_birds_state" })
     {
         if (LLView* v = panel->findChildView(name)) v->setVisible(wolf);
     }

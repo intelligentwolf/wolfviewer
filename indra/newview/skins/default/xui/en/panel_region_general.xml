@@ -393,7 +393,9 @@
          planes off over a themed region (or on over an airfield) in one click, and to see that it took. Wolf Territories
          only (hidden elsewhere). Saved at once through php/wolf_ambient.php, not by Apply (no initCtrl). Right-hand
          column under Manage Restart Schedule (which ends at y 115), x 250-470; the left column ends near x 190, and the
-         Adult Content line on the right starts at y 312: the status box (223 + 88) ends at 311. -->
+         Adult Content line on the right starts at y 312: the status box (223 + 88) ends at 311.
+         [BIRDS 2026-11-02] ticket 445: "Birds over this region" under the planes' note, the same record and the same rules
+         (wolfpassingplanes.cpp). To make room the planes' state is 42 high and the shared status line 44 (267 + 44 = 311). -->
     <check_box
      follows="left|top"
      height="20"
@@ -408,11 +410,11 @@
     <text
      follows="left|top"
      font="SansSerifSmall"
-     height="44"
+     height="42"
      layout="topleft"
      left="268"
      name="wolf_planes_state"
-     top="147"
+     top="145"
      visible="false"
      width="202"
      wrap="true" />
@@ -423,20 +425,42 @@
      layout="topleft"
      left="268"
      name="wolf_planes_note"
-     top="193"
+     top="187"
      visible="false"
      width="202"
      wrap="true">
         People's own aircraft and dogfights are not affected.
     </text>
+    <check_box
+     follows="left|top"
+     height="20"
+     label="Birds over this region"
+     layout="topleft"
+     left="250"
+     name="wolf_birds_check"
+     tool_tip="Gulls and terns over the sea, small flocks over open land and starlings at dusk in winter. They keep clear of builds, stay low over land and sea, roost at night, and never fly in a space sky. With no category, they come over the sea and coast only: untick and tick again to have them over the land as well. Saved at once. Only the estate owner or an estate manager can change it."
+     top="217"
+     visible="false"
+     width="220" />
     <text
      follows="left|top"
      font="SansSerifSmall"
-     height="88"
+     height="28"
+     layout="topleft"
+     left="268"
+     name="wolf_birds_state"
+     top="239"
+     visible="false"
+     width="202"
+     wrap="true" />
+    <text
+     follows="left|top"
+     font="SansSerifSmall"
+     height="44"
      layout="topleft"
      left="268"
      name="wolf_planes_status"
-     top="223"
+     top="267"
      visible="false"
      width="202"
      wrap="true" />
@@ -452,5 +476,13 @@
     <string name="planes_later">Your RLV restrictions stop the viewer telling the region now, so it takes the change within 30 minutes.</string>
     <string name="planes_read_failed">Could not read passing planes:</string>
     <string name="planes_save_failed">Could not save passing planes:</string>
+    <string name="birds_on_default">On: the default under Parks or Marinas. Untick to keep birds away.</string>
+    <string name="birds_off_default">Off: the default for this region's categories. Tick to have birds.</string>
+    <string name="birds_sea_default">Sea and coast only (no category). Untick: none. Re-tick: land too.</string>
+    <string name="birds_on_chosen">On: chosen by the estate owner or a manager.</string>
+    <string name="birds_off_chosen">Off: chosen by the estate owner or a manager.</string>
+    <string name="birds_saved_on">Saved: birds may now fly over this region.</string>
+    <string name="birds_saved_off">Saved: no more birds over this region.</string>
+    <string name="birds_save_failed">Could not save birds:</string>
     <string name="planes_not_wolf">the region has not confirmed it is on Wolf Territories. Close and reopen this window to try again.</string>
 </panel>

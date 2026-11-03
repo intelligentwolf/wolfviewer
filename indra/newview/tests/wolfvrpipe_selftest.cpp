@@ -6,12 +6,11 @@
  *   wolfvrpipe_selftest selftest                 unit checks + encoder benchmark; exit code 0 = all passed
  *   wolfvrpipe_selftest serve <web_root> [secs] [encoder]
  *                                                runs the real server on the LAN address, prints the address
- *                                                large, asks Allow / Deny in this terminal for each new headset
- *                                                (type a or d, then Enter). WOLFVR_STATS=1: one JSON line of
- *                                                numbers a second (for the browser tests). WOLFVR_STATE_DIR:
- *                                                where the certificate and the allowed headsets are kept
- *                                                (default ~/.config/wolf/wolfvr-test), so the headset browser's
- *                                                certificate question and Allow are both once only.
+ *                                                large; any headset on the home network connects (one at a
+ *                                                time). WOLFVR_STATS=1: one JSON line of numbers a second (for
+ *                                                the browser tests). WOLFVR_STATE_DIR: where the certificate is
+ *                                                kept (default ~/.config/wolf/wolfvr-test), so the headset
+ *                                                browser's certificate warning comes once only.
  *
  * $LicenseInfo:firstyear=2026&license=viewerlgpl$
  * WolfViewer — Wolf Territories Grid
@@ -25,7 +24,7 @@
  */
 
 #include "../wolfvrpipe.h"
-#include "../wolfvrpairing.h"
+#include "../wolfvrdevice.h"
 #include "../wolfvrpipe_video.h"
 
 #include <boost/asio.hpp>
@@ -113,75 +112,12 @@ static int selftest()
     const LanAddress lan = pickLanAddress();
     std::printf("LAN address: '%s' (%s)\n", lan.ip.c_str(), lan.reason.c_str());
 
-    // [VR PAIRING 2026-11-03] allowed headsets (wolfvrpairing.h)
+    // [VR SIMPLE 2026-11-03] the page id and the browser name (wolfvrdevice.h)
     {
-        const std::string dir = std::filesystem::temp_directory_path().string() + "/wolfvr-selftest-" +
-                                randomHex32().substr(0, 8);
-        std::filesystem::create_directories(dir);
-        const std::string file = dir + "/devices.json";
-        const std::string id = "0123456789abcdef0123456789abcdef", other = "fedcba9876543210fedcba9876543210";
-        CHECK(validDeviceId(id));
+        CHECK(validDeviceId("0123456789abcdef0123456789abcdef"));
         CHECK(!validDeviceId("0123456789ABCDEF0123456789ABCDEF"));   // upper case is not what the page makes
         CHECK(!validDeviceId("0123"));
         CHECK(!validDeviceId("0123456789abcdef0123456789abcdeg"));
-        CHECK(randomHex32().size() == 64 && randomHex32() != randomHex32());
-        CHECK(sha256Hex("abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");   // FIPS 180-2 B.1
-        std::string secret;
-        {
-            DeviceStore st(file);
-            CHECK(st.count() == 0);
-            CHECK(!st.check(id, std::string(64, 'a')));           // unknown headset
-            CHECK(!st.knows(id));
-            secret = st.approve(id, "Meta Quest 3 browser");
-            CHECK(secret.size() == 64);
-            CHECK(st.check(id, secret));
-            CHECK(!st.check(id, std::string(64, 'a')));           // right id, wrong secret
-            CHECK(!st.check(other, secret));                      // right secret, wrong id
-            CHECK(st.approve("not-an-id", "x").empty());
-            CHECK(st.lastError().empty());
-        }
-        {
-            std::ifstream f(file);
-            std::stringstream ss;
-            ss << f.rdbuf();
-            CHECK(ss.str().find(secret) == std::string::npos);   // the file keeps only the hash
-            CHECK(ss.str().find(sha256Hex(secret)) != std::string::npos);
-            CHECK((std::filesystem::status(file).permissions() & std::filesystem::perms::others_read) ==
-                  std::filesystem::perms::none);
-        }
-        {
-            DeviceStore st(file);                                 // remembered after a restart
-            CHECK(st.count() == 1);
-            CHECK(st.knows(id));
-            CHECK(st.check(id, secret));
-            const std::string again = st.approve(id, "Meta Quest 3 browser");   // allowed again: old secret stops
-            CHECK(!st.check(id, secret));
-            CHECK(st.check(id, again));
-            st.deny(other);
-            CHECK(st.denied(other));
-            CHECK(!st.check(other, again));
-            st.deny(id);                                          // a denial wins over an earlier Allow
-            CHECK(!st.check(id, again));
-            st.forgetAll();
-            CHECK(st.count() == 0);
-            CHECK(!st.denied(other));
-        }
-        {
-            DeviceStore st(file);                                 // forgetting was saved
-            CHECK(st.count() == 0);
-        }
-        {
-            std::ofstream(file) << "{ not json";
-            DeviceStore st(file);                                 // a damaged file: nobody allowed, and it says so
-            CHECK(st.count() == 0);
-            CHECK(!st.lastError().empty());
-        }
-        {
-            DeviceStore mem;                                      // memory only
-            const std::string s2 = mem.approve(id, "x");
-            CHECK(mem.check(id, s2));
-        }
-        std::filesystem::remove_all(dir);
         CHECK(deviceLabelFromUserAgent("Mozilla/5.0 (X11; Linux x86_64; Quest 3) AppleWebKit/537.36 (KHTML, like Gecko) "
                                        "OculusBrowser/40.0 Chrome/132.0 VR Safari/537.36") == "Meta Quest 3 browser");
         CHECK(deviceLabelFromUserAgent("Mozilla/5.0 (X11; Linux x86_64; Quest 3S) OculusBrowser/40.0") ==
@@ -346,7 +282,7 @@ static int serve(int argc, char** argv)
     c.bind_ip = lan.ip;
     if (c.bind_ip.empty()) { std::printf("No home network found: %s\n", lan.reason.c_str()); return 1; }
 
-    // The certificate and the allowed headsets are kept between runs, as WolfViewer keeps them in its user settings.
+    // The certificate is kept between runs, as WolfViewer keeps it in its user settings.
     std::string dir;
     if (const char* d = std::getenv("WOLFVR_STATE_DIR")) dir = d;
     else if (const char* h = std::getenv("HOME")) dir = std::string(h) + "/.config/wolf/wolfvr-test";
@@ -367,32 +303,17 @@ static int serve(int argc, char** argv)
         }
         std::ofstream(cert_path, std::ios::binary | std::ios::trunc) << c.cert_pem;
     }
-    c.device_store = dir + "/devices.json";
 
-    // static: the keyboard thread below is detached and may outlive this function by a moment at exit
+    // static: the stand-in frame thread (WOLFVR_MODE=screen) and the server threads use them
     static std::mutex out_mutex;
-    static std::atomic<uint64_t> asking{0};
     c.log = [](LogLevel, const std::string& s) {
         std::lock_guard<std::mutex> lk(out_mutex);
         std::printf("LOG %s\n", s.c_str());
         std::fflush(stdout);
     };
-    c.on_approval = [](const ApprovalRequest& r) {
-        asking = r.ticket;
+    c.on_headset = [](const std::string& label, bool connected) {
         std::lock_guard<std::mutex> lk(out_mutex);
-        std::printf("\n================================================================\n"
-                    "  A headset wants to connect: %s (%s)%s\n"
-                    "  Type  a  and press Enter to Allow,  or  d  and Enter to Deny.\n"
-                    "================================================================\n",
-                    r.label.c_str(), r.ip.c_str(), r.known ? "\n  (allowed before, but its browser forgot it)" : "");
-        std::printf("ASK %llu\n", (unsigned long long)r.ticket);
-        std::fflush(stdout);
-    };
-    c.on_approval_cancelled = [](uint64_t ticket) {
-        uint64_t t = ticket;
-        asking.compare_exchange_strong(t, 0);
-        std::lock_guard<std::mutex> lk(out_mutex);
-        std::printf("  (the headset stopped asking)\n");
+        std::printf("%s %s\n", connected ? "HEADSET CONNECTED" : "HEADSET DISCONNECTED", label.c_str());
         std::fflush(stdout);
     };
     static Service s;
@@ -403,33 +324,12 @@ static int serve(int argc, char** argv)
         printBig(s.shortAddress());
         std::printf("\n   %s\n\n", s.shortAddress().c_str());
         std::printf("Same Wi-Fi as this PC. The first time, the browser warns the connection is not private:\n"
-                    "choose Advanced, then Proceed. Then press Allow here. Bookmark the page for next time.\n"
-                    "Help: https://wolf-grid.com/vr   Allowed headsets: %zu   Ctrl+C stops.\n\n", s.knownDevices());
+                    "choose Advanced, then Proceed. Bookmark the page for next time.\n"
+                    "Help: https://wolf-grid.com/vr   Ctrl+C stops.\n\n");
         if (stats_lines) std::printf("LAN_URL %s\nUSB_URL %s\n", s.lanUrl().c_str(), s.usbUrl().c_str());
         if (std::getenv("WOLFVR_QR")) printQr(s.lanUrl());
         std::fflush(stdout);
     }
-    // Allow / Deny from the keyboard. Detached: getline blocks until a line or the end of input.
-    std::thread([] {
-        std::string line;
-        while (std::getline(std::cin, line))
-        {
-            const uint64_t t = asking.load();
-            const char k = line.empty() ? 0 : (char)std::tolower((unsigned char)line[0]);
-            if (!t || (k != 'a' && k != 'd'))
-            {
-                std::lock_guard<std::mutex> lk(out_mutex);
-                std::printf(t ? "  Type a (Allow) or d (Deny), then Enter.\n" : "  Nothing is asking right now.\n");
-                std::fflush(stdout);
-                continue;
-            }
-            asking = 0;
-            s.answer(t, k == 'a');
-            std::lock_guard<std::mutex> lk(out_mutex);
-            std::printf(k == 'a' ? "  Allowed. The headset will remember this PC.\n" : "  Denied until this server stops.\n");
-            std::fflush(stdout);
-        }
-    }).detach();
     static std::atomic<bool> frames_run{true};
     std::thread frames;
     if (big)

@@ -19,7 +19,6 @@
 
 #include "llbutton.h"
 #include "llcombobox.h"
-#include "llnotificationsutil.h"
 #include "llrender2dutils.h"
 #include "lltexteditor.h"
 #include "llviewercontrol.h"
@@ -50,14 +49,6 @@ bool WolfFloaterVRStream::postBuild()
     if (!gSavedSettings.getBOOL("WolfVR3DMode")) getChild<LLComboBox>("mode")->remove("VR 3D Mode");
     mQrArea = getChild<LLView>("qr_area");
     getChild<LLButton>("close_btn")->setCommitCallback([this](LLUICtrl*, const LLSD&) { closeFloater(); });
-    getChild<LLButton>("forget_btn")->setCommitCallback([](LLUICtrl*, const LLSD&) {
-        // Destructive (each headset has to be allowed again), so it asks first.
-        LLSD args;
-        args["COUNT"] = llformat("%u", (U32)WolfVRStream::knownHeadsets());
-        LLNotificationsUtil::add("WolfVRForgetHeadsets", args, LLSD(), [](const LLSD& n, const LLSD& r) {
-            if (LLNotificationsUtil::getSelectedOption(n, r) == 0) WolfVRStream::forgetAllHeadsets();
-        });
-    });
     refresh();
     return true;
 }
@@ -125,14 +116,6 @@ void WolfFloaterVRStream::refresh()
     {
         mShownPort = port;
         getChild<LLUICtrl>("usb_note")->setTextArg("[PORT]", llformat("%u", port));
-    }
-
-    const size_t headsets = WolfVRStream::knownHeadsets();
-    if (headsets != mShownHeadsets)
-    {
-        mShownHeadsets = headsets;
-        getChild<LLUICtrl>("headsets_text")->setTextArg("[COUNT]", llformat("%u", (U32)headsets));
-        getChildView("forget_btn")->setEnabled(headsets > 0);
     }
 
     std::string n;

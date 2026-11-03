@@ -32,7 +32,6 @@
 #include "llviewercontrol.h"
 #include "llviewermenu.h"
 #include "wolfgrid.h"
-#include "wolfvrpairing.h"
 #include "wolfvrscreen.h"
 
 #if LL_LINUX || LL_DARWIN
@@ -49,17 +48,12 @@ namespace
 
     const char* kCertFile = "wolfvr_cert.pem";
     const char* kKeyFile = "wolfvr_key.pem";
-    const char* kDevicesFile = "wolfvr_devices.json";
 
-    // [VR PAIRING 2026-11-03] Questions from the server's network thread, shown on the main thread. A mutex of its own:
-    // the network thread must never wait for gMutex, which the main thread holds while it stops (joins) that thread.
-    std::mutex gAskMutex;
-    struct AskEvent { uint64_t generation; wolfvr::ApprovalRequest req; bool cancelled; };
-    std::deque<AskEvent> gAskEvents;
-    // main thread only: the questions on screen, by (service generation, ticket)
-    std::map<std::pair<uint64_t, uint64_t>, LLNotificationPtr> gShown;
-    uint64_t gGeneration = 0;          // a new number per start: old questions never answer a new server
-    size_t gKnownWhenOff = 0;
+    // [VR SIMPLE 2026-11-03] "Headset connected / disconnected" from the server's network thread, shown on the main
+    // thread as a notice that needs no click. A mutex of its own: the network thread must never wait for gMutex,
+    // which the main thread holds while it stops (joins) that thread.
+    std::mutex gNoticeMutex;
+    std::deque<std::pair<std::string, bool>> gNotices;
     bool gPumpRunning = false;
     bool gShutdown = false;
     std::string gMode;                // what the running stream shows: test | screen | world (gMutex)
@@ -74,19 +68,6 @@ namespace
         if (setting == "test") return {"test", 1280, 1280, false};
         if (setting == "world" && gSavedSettings.getBOOL("WolfVR3DMode")) return {"world", 1440, 1440, true};
         return {"screen", 1920, 1080, true};
-    }
-
-    std::string devicesPath() { return gDirUtilp->getExpandedFilename(LL_PATH_USER_SETTINGS, kDevicesFile); }
-
-    // main thread
-    void closeQuestions()
-    {
-        // Take the list first: a responder must never find a question it can still answer.
-        std::map<std::pair<uint64_t, uint64_t>, LLNotificationPtr> shown;
-        shown.swap(gShown);
-        for (auto& [key, n] : shown) LLNotificationsUtil::cancel(n);
-        std::lock_guard<std::mutex> lk(gAskMutex);
-        gAskEvents.clear();
     }
 
     bool readText(const std::string& path, std::string& out)
@@ -152,20 +133,10 @@ namespace
         cfg.bind_ip = gLan.ip;
         cfg.port = (uint16_t)llclamp(gSavedSettings.getU32("WolfVRStreamPort"), 1024u, 65535u);
         cfg.web_root = gDirUtilp->getExpandedFilename(LL_PATH_APP_SETTINGS, "wolfvr");
-        cfg.device_store = devicesPath();
-        const uint64_t generation = ++gGeneration;
-        cfg.on_approval = [generation](const wolfvr::ApprovalRequest& r) {
-            std::lock_guard<std::mutex> lk(gAskMutex);
-            gAskEvents.push_back(AskEvent{generation, r, false});
+        cfg.on_headset = [](const std::string& label, bool connected) {
+            std::lock_guard<std::mutex> lk(gNoticeMutex);
+            gNotices.emplace_back(label, connected);
         };
-        cfg.on_approval_cancelled = [generation](uint64_t ticket) {
-            std::lock_guard<std::mutex> lk(gAskMutex);
-            wolfvr::ApprovalRequest r;
-            r.ticket = ticket;
-            gAskEvents.push_back(AskEvent{generation, r, true});
-        };
-        cfg.bitrate_kbps = llclamp(gSavedSettings.getU32("WolfVRStreamBitrateKbps"), 2000u, 100000u);
-        cfg.encoder = gSavedSettings.getString("WolfVRStreamEncoder");
         const ModeSize ms = modeSize(gSavedSettings.getString("WolfVRStreamMode"));
         cfg.mode = ms.mode;
         cfg.width = ms.w;
@@ -200,10 +171,8 @@ namespace
     {
         if (!gService) return;
         gMode.clear();
-        gKnownWhenOff = gService->knownDevices();
         gService->stop();
         gService.reset();
-        ++gGeneration;
     }
 
     void onEnabledChanged(const LLSD& value)
@@ -217,17 +186,9 @@ namespace
             }
             stopLocked();
         }
-        closeQuestions();
         WolfVRScreen::release();
     }
 
-    void answer(uint64_t generation, uint64_t ticket, bool allow)
-    {
-        std::lock_guard<std::mutex> lk(gMutex);
-        if (gService && generation == gGeneration) gService->answer(ticket, allow);
-    }
-
-    // Main thread, 4 times a second: show the server's questions, close the ones the headset gave up on.
     // [VR MENU 2026-11-03] Wolf World > VR on Wolf Territories only. A submenu has no on_visible (llmenugl.h), so it is
     // shown or hidden here, as wolfgame.cpp gate_games_menu does for Games & Stories; touched only when it changes.
     void gateMenu()
@@ -244,44 +205,22 @@ namespace
         }
     }
 
-    bool pumpQuestions()
+    // Main thread, 4 times a second: the menu gate and the connected / disconnected notices (WolfVRHeadsetNotice, a
+    // tip that goes by itself: nothing to click, and nothing that needs a quick reaction).
+    bool pump()
     {
         if (gShutdown) { gPumpRunning = false; return true; }
         gateMenu();
-        std::deque<AskEvent> events;
+        std::deque<std::pair<std::string, bool>> notices;
         {
-            std::lock_guard<std::mutex> lk(gAskMutex);
-            events.swap(gAskEvents);
+            std::lock_guard<std::mutex> lk(gNoticeMutex);
+            notices.swap(gNotices);
         }
-        for (const AskEvent& e : events)
+        for (const auto& [label, connected] : notices)
         {
-            const auto key = std::make_pair(e.generation, e.req.ticket);
-            if (e.cancelled)
-            {
-                auto it = gShown.find(key);
-                if (it != gShown.end())
-                {
-                    LLNotificationPtr n = it->second;
-                    gShown.erase(it);
-                    LLNotificationsUtil::cancel(n);
-                }
-                continue;
-            }
-            if (e.generation != gGeneration) continue;   // from a stream already switched off
             LLSD args;
-            args["DEVICE"] = e.req.label;
-            args["IP"] = e.req.ip;
-            const std::string name = e.req.known ? "WolfVRHeadsetAsksAgain" : "WolfVRHeadsetAsks";
-            LLNotificationPtr n = LLNotificationsUtil::add(name, args, LLSD(), [key](const LLSD& notification, const LLSD& response) {
-                // Only an answer to a question still on screen counts (a closed one is erased first).
-                if (gShown.erase(key) == 0) return;
-                const bool allow = LLNotificationsUtil::getSelectedOption(notification, response) == 0;
-                LL_INFOS("WolfVR") << (allow ? "headset allowed" : "headset denied") << LL_ENDL;
-                answer(key.first, key.second, allow);
-            });
-            LL_INFOS("WolfVR") << "asking Allow / Deny for " << e.req.label << " at " << e.req.ip << LL_ENDL;
-            if (n) gShown[key] = n;
-            else answer(key.first, key.second, false);   // could not ask: the safe answer
+            args["DEVICE"] = label;
+            LLNotificationsUtil::add(connected ? "WolfVRHeadsetConnected" : "WolfVRHeadsetDisconnected", args);
         }
         return false;
     }
@@ -293,11 +232,10 @@ void init()
 {
     if (gInit) return;
     gInit = true;
-    gKnownWhenOff = wolfvr::DeviceStore(devicesPath()).count();
     if (!gPumpRunning)
     {
         gPumpRunning = true;
-        doPeriodically(pumpQuestions, 0.25f);
+        doPeriodically(pump, 0.25f);
         // [VR BIG SCREEN] the headset's pointer and keys, every frame
         gIdleCallbacks.addFunction([](void*) { if (!gShutdown) WolfVRScreen::pumpInput(); }, nullptr);
     }
@@ -417,21 +355,6 @@ std::string shortAddress()
 {
     std::lock_guard<std::mutex> lk(gMutex);
     return gService ? gService->shortAddress() : std::string();
-}
-
-size_t knownHeadsets()
-{
-    std::lock_guard<std::mutex> lk(gMutex);
-    return gService ? gService->knownDevices() : gKnownWhenOff;
-}
-
-void forgetAllHeadsets()
-{
-    std::lock_guard<std::mutex> lk(gMutex);
-    if (gService) gService->forgetAllDevices();
-    else wolfvr::DeviceStore(devicesPath()).forgetAll();
-    gKnownWhenOff = 0;
-    LL_INFOS("WolfVR") << "forgot every allowed headset" << LL_ENDL;
 }
 
 std::string lastError()

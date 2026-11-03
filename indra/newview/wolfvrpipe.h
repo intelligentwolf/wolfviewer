@@ -23,20 +23,18 @@
 // reprojects each picture to the newest head pose. Paul's hard rule: the picture and the poses stay on the LOCAL
 // network. The server binds the LAN address only (never 0.0.0.0) plus a plain-HTTP loopback listener for
 // "adb reverse" over USB, and only one headset is connected at a time.
-// [VR PAIRING 2026-11-03] No session code any more (Paul: "get rid of that code"): a headset gets the picture only
-// after the PC said Allow once (wolfvrpairing.h). The LAN port answers BOTH plain HTTP and HTTPS: plain HTTP only
-// redirects to https://<ip>:<port>/, so the resident types just "192.168.1.9:4333" (browsers open a typed address
-// over http://). The first byte tells them apart: a TLS connection starts with a handshake record, 0x16 (RFC 8446
-// 5.1 ContentType handshake(22)); an HTTP request starts with a letter of its method.
+// [VR SIMPLE 2026-11-03] No code, no pairing (Paul: "get rid of that code", then "don't make it difficult"): while VR
+// is on, a headset on the home network connects straight in; the source address must be a home-network or loopback
+// one. The LAN port answers BOTH plain HTTP and HTTPS: plain HTTP only redirects to https://<ip>:<port>/, so the
+// resident types just "192.168.1.9:4333" (browsers open a typed address over http://). The first byte tells them
+// apart: a TLS connection starts with a handshake record, 0x16 (RFC 8446 5.1 ContentType handshake(22)); an HTTP
+// request starts with a letter of its method.
 //
 // Wire format (all little-endian), documented once here and mirrored in app_settings/wolfvr/wolfvr.js:
-//   socket: /ws?d=<device id>, with the wvr_s cookie once allowed (wolfvrpairing.h)
-//   viewer -> page while not allowed yet (no picture, nothing the page sends is used):
-//     {"t":"waiting"}                                       the PC is asking Allow / Deny
-//     {"t":"approved","claim":"<64 hex>"}                   page GETs /claim?c=<claim> (sets the cookie), reconnects
-//     then the socket closes: 4003 denied, 4029 too many headsets asking at once
-//   viewer -> page for an allowed headset: {"t":"welcome"} first (then the page sends hello). Other closes:
-//     4000 another headset took over, 4001 the PC forgot its headsets, 1001 the stream was switched off
+//   socket: /ws?d=<device id> (the page's own random id, so a reloaded page takes over its own old connection)
+//   viewer -> page: {"t":"welcome"} first (then the page sends hello); a second, different headset gets
+//     {"t":"busy"} and close 4009. Other closes: 4000 the same headset opened the page again, 4003 not on this home
+//     network, 1001 the stream was switched off
 //   page -> viewer, text JSON (allowed headset only):
 //     {"t":"hello","webcodecs":bool,"ua":"..."}            once after connecting
 //     {"t":"ping","ct":ms}                                  clock sync; answered with {"t":"pong","ct":ms,"st":ms}
@@ -112,18 +110,6 @@ namespace wolfvr
         std::string text;          // TEXT: characters typed (UTF-8)
     };
 
-    /** A headset asking to connect, for the PC's Allow / Deny question. */
-    struct ApprovalRequest
-    {
-        uint64_t ticket = 0;      // pass back to Service::answer
-        std::string device_id;
-        std::string label;        // "Meta Quest 3 browser"
-        std::string ip;           // the headset's address on the home network
-        bool known = false;       // allowed before, but its cookie is gone or wrong (browser data cleared)
-    };
-    using ApprovalFn = std::function<void(const ApprovalRequest&)>;
-    using ApprovalCancelFn = std::function<void(uint64_t ticket)>;
-
     struct Config
     {
         std::string bind_ip;              // LAN address for HTTPS (pickLanAddress)
@@ -131,10 +117,8 @@ namespace wolfvr
         bool        loopback_http = true; // http://localhost:port for "adb reverse tcp:port tcp:port"
         std::string cert_pem, key_pem;
         std::string web_root;             // app_settings/wolfvr
-        std::string device_store;         // JSON file of allowed headsets (wolfvrpairing.h); empty = memory only
-        // Called on the server's network thread, one request at a time; must not block. Answer with Service::answer.
-        ApprovalFn on_approval;
-        ApprovalCancelFn on_approval_cancelled;   // the headset gave up (page closed) before an answer
+        // A headset connected (true) or went (false), for a notice that needs no click. Network thread; must not block.
+        std::function<void(const std::string& label, bool connected)> on_headset;
         uint32_t    width = 1280, height = 1280;
         uint32_t    fps = 72;
         uint32_t    bitrate_kbps = 25000;
@@ -204,12 +188,6 @@ namespace wolfvr
         std::string shortAddress() const;
         /** http://localhost:<port>/ (USB / adb reverse) */
         std::string usbUrl() const;
-        /** The PC's answer to an ApprovalRequest. Unknown or old tickets are ignored. Any thread. */
-        void answer(uint64_t ticket, bool allow);
-        /** Forget every allowed headset and disconnect the one connected. Any thread. */
-        void forgetAllDevices();
-        /** How many headsets are remembered. */
-        size_t knownDevices() const;
         /** [VR STAGE 2] The newest head pose from the connected, allowed headset (valid=false when there is none).
          *  Any thread. */
         HeadPose headPose() const;

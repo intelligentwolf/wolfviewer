@@ -1,18 +1,15 @@
 // [VR BIG SCREEN 2026-11-03] Big-screen mode against the REAL viewer (started separately, isolated profile, at its
-// login screen, with --set WolfVRStreamEnabled 1 --set WolfVRStreamPort <port>). Headset A was allowed beforehand
-// (its id and secret seeded into the throwaway profile's wolfvr_devices.json; the cookie is set here), so it gets the
-// viewer window at once. Headset B is new: the viewer asks Allow / Deny, A sees that question in the viewer window,
-// and the test clicks Allow THROUGH A's pointer - the whole loop, with no real mouse.
+// login screen, with --set WolfVRStreamEnabled 1 --set WolfVRStreamPort <port>). Headset A connects straight in and
+// gets the viewer window; headset B is told someone is already connected. [VR SIMPLE] No pairing: <device_id> is only
+// the page's own id (a reload takes its place back), <secret> is no longer used.
 //   node e2e_viewer.mjs <lan_url> <device_id> <secret> <out_dir>
-// Saves a_*.jpg (the pictures A received). Pauses at "WAITING FOR <out>/click.json" until a file
-// {"u":..,"v":..} names where Allow is in a_question.jpg (found by looking at it), then clicks there.
+// Saves a_login.jpg (the picture A received).
 import { spawn } from 'node:child_process';
-import { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const [LAN, DEV, SECRET, OUT] = process.argv.slice(2);
 mkdirSync(OUT, { recursive: true });
-rmSync(resolve(OUT, 'click.json'), { force: true });
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 let failures = 0;
 const check = (ok, what) => { console.log(`${ok ? 'PASS' : 'FAIL'} ${what}`); if (!ok) failures++; };
@@ -54,20 +51,8 @@ check(await grab(A, 'a_login.jpg'), 'A received a picture of the viewer window (
 
 const B = await browser('B', 9372);
 await B.send('Page.navigate', { url: LAN });
-check(await waitFor(() => B.evalJs("!document.getElementById('wvr-waiting').hidden")), 'new headset B waits for Allow');
-await sleep(2500);
-await grab(A, 'a_question.jpg');
-console.log(`WAITING FOR ${resolve(OUT, 'click.json')}`);
-const clickFile = resolve(OUT, 'click.json');
-await waitFor(() => existsSync(clickFile), 600000, 500);
-const pt = JSON.parse(readFileSync(clickFile, 'utf8'));
-await A.evalJs(`window.__wolfvr.clickAt(${pt.u}, ${pt.v}, 0)`);
-check(await waitFor(() => B.evalJs("/^(Allowed|Connected)/.test(document.getElementById('wvr-status').textContent || '')"), 15000),
-      "clicking Allow through headset A's pointer lets B in");
-console.log('   B status:', await B.evalJs("document.getElementById('wvr-status').textContent"));
-console.log('   A status:', await A.evalJs("document.getElementById('wvr-status').textContent"));
-await sleep(2000);
-await grab(B, 'b_after_allow.jpg');
+check(await waitFor(() => B.evalJs("(document.getElementById('wvr-error').textContent || '').includes('Someone is already connected')")),
+      'a second headset is told someone is already connected (no question at the PC)');
 A.close(); B.close();
 console.log(failures ? `E2E VIEWER FAILED (${failures})` : 'E2E VIEWER PASSED');
 process.exit(failures ? 1 : 0);

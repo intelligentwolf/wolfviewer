@@ -24,9 +24,8 @@
 
 // [VR PIPE 2026-11-03] Stage 1. WolfVRStreamEnabled (OFF by default; remembered once ticked, Paul 2026-11-03) starts the
 // server on the home-network address; switching it off stops it at once and closes the headset's connection.
-// [VR PAIRING 2026-11-03] No session code: a new headset makes the viewer ask "A headset wants to connect" (the
-// WolfVRHeadsetAsks notification, Allow / Deny); allowed headsets are remembered in user_settings/wolfvr_devices.json
-// (wolfvrpairing.h). Switching the stream off forgets the Denies and closes any question still showing.
+// [VR SIMPLE 2026-11-03] No code and no pairing (Paul: "don't make it difficult"): while it is on, a headset on the home
+// network connects straight in, one at a time; the viewer shows "Headset connected / disconnected" as a tip.
 namespace WolfVRStream
 {
     /** Hooks the setting (once). Called from the floater; the setting can only be switched on from there. */
@@ -42,10 +41,6 @@ namespace WolfVRStream
     std::string usbUrl();
     /** "192.168.1.9:4333": what the resident types in the headset browser. Empty when off. */
     std::string shortAddress();
-    /** How many headsets are remembered (also while off). */
-    size_t knownHeadsets();
-    /** Forget every remembered headset (and disconnect the one connected). */
-    void forgetAllHeadsets();
 
     // [VR BIG SCREEN 2026-11-03] WolfVRStreamMode "screen": the whole viewer window goes to the headset
     // (wolfvrscreen.cpp captures it and replays the headset's pointer and keys).

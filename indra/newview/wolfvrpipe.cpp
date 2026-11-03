@@ -26,7 +26,7 @@
 #include <boost/json.hpp>
 
 #include "wolfvrpipe.h"
-#include "wolfvrpairing.h"
+#include "wolfvrdevice.h"
 #include "wolfvrpipe_video.h"
 
 #include <openssl/crypto.h>
@@ -288,22 +288,6 @@ namespace
         return std::string();
     }
 
-    // The value of cookie `name` in a Cookie header ("a=1; b=2"), or empty.
-    std::string cookieValue(std::string_view header, std::string_view name)
-    {
-        while (!header.empty())
-        {
-            const size_t semi = header.find(';');
-            std::string_view kv = header.substr(0, semi);
-            while (!kv.empty() && kv.front() == ' ') kv.remove_prefix(1);
-            const size_t eq = kv.find('=');
-            if (eq != std::string_view::npos && kv.substr(0, eq) == name) return std::string(kv.substr(eq + 1));
-            if (semi == std::string_view::npos) break;
-            header.remove_prefix(semi + 1);
-        }
-        return std::string();
-    }
-
     // Base class so the frame thread can talk to a TLS or a plain (USB/loopback) socket alike.
     struct Client : std::enable_shared_from_this<Client>
     {
@@ -314,6 +298,7 @@ namespace
         std::atomic<bool> webcodecs{false};
         std::atomic<bool> hello{false};
         std::string ua;                       // io thread only until hello is set
+        std::string device;                   // the page's own id (localStorage), so a reload can take over
         uint64_t generation = 0;
     };
 }
@@ -417,21 +402,6 @@ struct Service::Impl
     bool pending_external = false;
     std::string mode_request;   // from the page
 
-    // ---- headsets asking to connect (wolfvrpairing.h); io thread only, except `store` (it locks itself) ----
-    std::unique_ptr<DeviceStore> store;
-    struct Ask
-    {
-        ApprovalRequest req;
-        std::weak_ptr<Client> client;
-    };
-    std::deque<Ask> asks;           // front() is the one the PC is being asked about
-    bool ask_shown = false;
-    uint64_t next_ticket = 1;
-    int asks_this_run = 0;
-    struct Claim { std::string secret; double expires_ms; };
-    std::map<std::string, Claim> claims;   // one-time /claim?c= tickets -> the new secret, for 60 s
-    std::string cookieName() const { return "wvr_s_" + std::to_string(cfg.port); }
-
     // clock sync from the page: server_ms - client_ms
     std::atomic<double> clock_offset{0};
     std::atomic<bool> clock_synced{false};
@@ -453,12 +423,9 @@ struct Service::Impl
     net::awaitable<void> runWebSocket(Stream stream, http::request<http::string_body> req, std::string ip);
     net::awaitable<void> redirectToHttps(beast::tcp_stream& stream);
     net::awaitable<void> listen(tcp::acceptor& acc, bool tls);
-    bool addAsk(const std::shared_ptr<Client>& c, ApprovalRequest r);   // false: too many asking
-    void showNextAsk();
-    void askGone(const std::shared_ptr<Client>& c);
-    void answerAsk(uint64_t ticket, bool allow);
     void onText(const std::shared_ptr<Client>& c, const std::string& text);
-    void adoptClient(const std::shared_ptr<Client>& c);
+    void adoptClient(const std::shared_ptr<Client>& c, const std::string& label);
+    std::string client_label;   // io thread: the connected headset's name, for on_headset
     void dropClient(const std::shared_ptr<Client>& c);
 
     // ---- frames ----
@@ -548,28 +515,6 @@ http::message_generator Service::Impl::respond(const http::request<http::string_
         res.keep_alive(req.keep_alive());
         return http::message_generator(std::move(res));
     }
-    if (path == "/claim")
-    {
-        // [VR PAIRING 2026-11-03] The PC said Allow: swap the one-time ticket the page got over the socket for the
-        // secret, as a cookie the page's script cannot read. 400 days (34560000 s) because browsers cap a cookie's
-        // lifetime there (the RFC 6265bis draft); a headset not seen for that long is simply asked about again.
-        const double now = nowMs();
-        for (auto it = claims.begin(); it != claims.end();) it = it->second.expires_ms < now ? claims.erase(it) : std::next(it);
-        const std::string c = queryParam(target, "c");
-        auto it = claims.find(c);
-        if (c.size() != 64 || it == claims.end())
-        {
-            return textReply(http::status::forbidden, "This link has expired. Go back and reload the page.");
-        }
-        const std::string secret = it->second.secret;
-        claims.erase(it);
-        http::response<http::empty_body> res{http::status::no_content, req.version()};
-        secureHeaders(res, false);
-        res.set(http::field::set_cookie, cookieName() + "=" + secret +
-                "; Max-Age=34560000; Path=/; Secure; HttpOnly; SameSite=Strict");
-        res.keep_alive(req.keep_alive());
-        return http::message_generator(std::move(res));
-    }
     if (path == "/") path = "/index.html";
     const std::string rel = path.substr(1);
     if (!safeRelPath(rel))
@@ -655,41 +600,40 @@ net::awaitable<void> Service::Impl::runWebSocket(Stream stream, http::request<ht
     c->ws.read_message_max(64 * 1024);
     c->ws.auto_fragment(false);
     const std::string device = queryParam(req.target(), "d");
-    const std::string secret = cookieValue(req[http::field::cookie], cookieName());
     const std::string ua(req[http::field::user_agent]);
     co_await c->ws.async_accept(req, net::use_awaitable);
 
-    // [VR PAIRING 2026-11-03] Only a headset the PC allowed gets the picture or may move the view.
-    const bool allowed = store->check(device, secret);
+    // [VR SIMPLE 2026-11-03] Paul: "don't make it difficult". While VR is on, any headset on the home network comes
+    // straight in: no question, no pairing. The server only listens on the LAN address and loopback, and refuses a
+    // connection whose source is not a home-network (RFC 1918 / link-local) or loopback address. One headset at a
+    // time: a second one is told someone is already connected, unless it is the same headset again (the page was
+    // reloaded), which takes over its own old connection.
+    bool allowed = ip == "127.0.0.1" || isPrivateIPv4(ip);
     if (!allowed)
     {
-        if (store->denied(device))
-        {
-            log(LogLevel::INFO, "VR pipe: a headset this PC said no to tried again (" + ip + ")");
-            c->send(std::make_shared<const std::string>("{\"t\":\"denied\"}"), false);
-            c->close(4003, "not allowed");
-        }
-        else
-        {
-            ApprovalRequest r;
-            r.device_id = device;
-            r.label = deviceLabelFromUserAgent(ua);
-            r.ip = ip;
-            r.known = store->knows(device);
-            if (addAsk(c, r))
-            {
-                c->send(std::make_shared<const std::string>("{\"t\":\"waiting\"}"), false);
-            }
-            else
-            {
-                c->close(4029, "too many headsets asking");
-            }
-        }
+        log(LogLevel::WARN, "VR pipe: refused a connection from " + ip + " (not a home-network address)");
+        c->close(4003, "not on this home network");
     }
     else
     {
-        adoptClient(c);
-        c->send(std::make_shared<const std::string>("{\"t\":\"welcome\"}"), false);
+        c->device = device;
+        std::shared_ptr<Client> cur;
+        {
+            std::lock_guard<std::mutex> lk(client_mutex);
+            cur = client;
+        }
+        if (cur && cur->device != device)
+        {
+            allowed = false;
+            log(LogLevel::INFO, "VR pipe: a second headset (" + ip + ") was told someone is already connected");
+            c->send(std::make_shared<const std::string>("{\"t\":\"busy\"}"), false);
+            c->close(4009, "someone is already connected");
+        }
+        else
+        {
+            adoptClient(c, deviceLabelFromUserAgent(ua));
+            c->send(std::make_shared<const std::string>("{\"t\":\"welcome\"}"), false);
+        }
     }
     try
     {
@@ -709,96 +653,6 @@ net::awaitable<void> Service::Impl::runWebSocket(Stream stream, http::request<ht
     {
     }
     if (allowed) dropClient(c);
-    else askGone(c);
-}
-
-bool Service::Impl::addAsk(const std::shared_ptr<Client>& c, ApprovalRequest r)
-{
-    // The same headset again (the page was reloaded while the PC was asking): keep its place and its question.
-    for (Ask& a : asks)
-    {
-        if (a.req.device_id == r.device_id)
-        {
-            if (auto old = a.client.lock()) old->close(4000, "opened again");
-            a.client = c;
-            return true;
-        }
-    }
-    // A neighbour on the network must not be able to bury the PC in questions.
-    if (asks.size() >= 4 || asks_this_run >= 30)
-    {
-        log(LogLevel::WARN, "VR pipe: refused a headset (" + r.ip + "): too many asking to connect");
-        return false;
-    }
-    ++asks_this_run;
-    r.ticket = next_ticket++;
-    asks.push_back(Ask{r, c});
-    log(LogLevel::INFO, "VR pipe: " + r.label + " at " + r.ip + " is asking to connect");
-    showNextAsk();
-    return true;
-}
-
-void Service::Impl::showNextAsk()
-{
-    if (ask_shown || asks.empty()) return;
-    ask_shown = true;
-    if (cfg.on_approval) cfg.on_approval(asks.front().req);
-    else answerAsk(asks.front().req.ticket, false);   // nobody to ask: the safe answer
-}
-
-void Service::Impl::askGone(const std::shared_ptr<Client>& c)
-{
-    for (auto it = asks.begin(); it != asks.end(); ++it)
-    {
-        if (it->client.lock() != c) continue;
-        const bool was_shown = it == asks.begin() && ask_shown;
-        const uint64_t ticket = it->req.ticket;
-        asks.erase(it);
-        if (was_shown)
-        {
-            ask_shown = false;
-            if (cfg.on_approval_cancelled) cfg.on_approval_cancelled(ticket);
-            showNextAsk();
-        }
-        return;
-    }
-}
-
-void Service::Impl::answerAsk(uint64_t ticket, bool allow)
-{
-    for (auto it = asks.begin(); it != asks.end(); ++it)
-    {
-        if (it->req.ticket != ticket) continue;
-        const Ask a = *it;
-        const bool was_front = it == asks.begin();
-        asks.erase(it);
-        if (was_front) ask_shown = false;
-        auto c = a.client.lock();
-        if (allow)
-        {
-            const std::string secret = store->approve(a.req.device_id, a.req.label);
-            const std::string claim = randomHex32();
-            if (!secret.empty() && !claim.empty() && c)
-            {
-                claims[claim] = Claim{secret, nowMs() + 60000};
-                c->send(std::make_shared<const std::string>("{\"t\":\"approved\",\"claim\":\"" + claim + "\"}"), false);
-            }
-            log(LogLevel::INFO, "VR pipe: allowed " + a.req.label + " at " + a.req.ip);
-            if (!store->lastError().empty()) log(LogLevel::WARN, "VR pipe: " + store->lastError());
-        }
-        else
-        {
-            store->deny(a.req.device_id);
-            if (c)
-            {
-                c->send(std::make_shared<const std::string>("{\"t\":\"denied\"}"), false);
-                c->close(4003, "not allowed");
-            }
-            log(LogLevel::INFO, "VR pipe: said no to " + a.req.label + " at " + a.req.ip);
-        }
-        showNextAsk();
-        return;
-    }
 }
 
 net::awaitable<void> Service::Impl::redirectToHttps(beast::tcp_stream& stream)
@@ -822,8 +676,10 @@ net::awaitable<void> Service::Impl::redirectToHttps(beast::tcp_stream& stream)
     co_await beast::async_write(stream, http::message_generator(std::move(res)), net::use_awaitable);
 }
 
-void Service::Impl::adoptClient(const std::shared_ptr<Client>& c)
+void Service::Impl::adoptClient(const std::shared_ptr<Client>& c, const std::string& label)
 {
+    client_label = label;
+    if (cfg.on_headset) cfg.on_headset(label, true);
     std::shared_ptr<Client> old;
     {
         std::lock_guard<std::mutex> lk(client_mutex);
@@ -853,6 +709,7 @@ void Service::Impl::dropClient(const std::shared_ptr<Client>& c)
         std::lock_guard<std::mutex> lk(stats_mutex);
         st.client_connected = false;
         log(LogLevel::INFO, "VR pipe: headset disconnected");
+        if (cfg.on_headset) cfg.on_headset(client_label, false);
     }
 }
 
@@ -1349,11 +1206,10 @@ bool Service::start(const Config& cfg, std::string& error)
     }
     auto impl = std::make_unique<Impl>();
     impl->cfg = cfg;
-    impl->store = std::make_unique<DeviceStore>(cfg.device_store);
     impl->cur_w = cfg.width;
     impl->cur_h = cfg.height;
     impl->cur_external = cfg.external_frames;
-    if (!impl->store->lastError().empty()) impl->log(LogLevel::WARN, "VR pipe: " + impl->store->lastError());
+
     try
     {
         impl->ssl = std::make_unique<net::ssl::context>(net::ssl::context::tls_server);
@@ -1510,34 +1366,6 @@ std::string Service::shortAddress() const
 {
     if (!mImpl) return std::string();
     return mImpl->cfg.bind_ip + ":" + std::to_string(mImpl->cfg.port);
-}
-
-void Service::answer(uint64_t ticket, bool allow)
-{
-    if (!mImpl) return;
-    Impl* i = mImpl.get();
-    net::post(i->ioc, [i, ticket, allow] { i->answerAsk(ticket, allow); });
-}
-
-void Service::forgetAllDevices()
-{
-    if (!mImpl) return;
-    Impl* i = mImpl.get();
-    i->store->forgetAll();
-    i->log(LogLevel::INFO, "VR pipe: forgot every allowed headset");
-    net::post(i->ioc, [i] {
-        std::shared_ptr<Client> c;
-        {
-            std::lock_guard<std::mutex> lk(i->client_mutex);
-            c = i->client;
-        }
-        if (c) c->close(4001, "this PC forgot its headsets");
-    });
-}
-
-size_t Service::knownDevices() const
-{
-    return mImpl ? mImpl->store->count() : 0;
 }
 
 HeadPose Service::headPose() const

@@ -15,19 +15,17 @@
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--wvr-bg); color: var(--wvr-text); }
-body { font: 16px/1.5 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+/* [VR SIMPLE 2026-11-03] large text: residents of every age read this in a headset (Paul: "they need time") */
+body { font: 20px/1.5 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
 .wvr-page { max-width: 960px; margin: 0 auto; padding: 16px; }
-.wvr-head h1 { font-size: 24px; margin: 8px 0 4px; }
+.wvr-head h1 { font-size: 32px; margin: 8px 0 4px; }
 .wvr-sub, .wvr-hint { color: var(--wvr-muted); margin: 0 0 8px; }
 .wvr-card { background: var(--wvr-card); border: 1px solid var(--wvr-line); border-radius: 8px; padding: 16px;
             margin: 16px 0; }
 .wvr-card h2 { font-size: 18px; margin: 0 0 8px; }
-.wvr-status { font-size: 18px; margin: 0 0 8px; }
+.wvr-status { font-size: 24px; margin: 0 0 8px; }
 .wvr-error { background: var(--wvr-err-bg); color: var(--wvr-err-text); border-radius: 6px; padding: 12px;
              margin: 0 0 12px; white-space: pre-wrap; user-select: text; }
-.wvr-waiting { background: #12324a; color: var(--wvr-text); border-radius: 6px; padding: 16px; margin: 0 0 12px; }
-.wvr-waiting p { margin: 0 0 8px; }
-.wvr-waiting-big { font-size: 26px; line-height: 1.3; }
 .wvr-actions { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
 .wvr-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0);
                        white-space: nowrap; }

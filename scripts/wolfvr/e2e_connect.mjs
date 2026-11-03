@@ -1,10 +1,9 @@
-// [VR PAIRING 2026-11-03] End-to-end test of "no code, Allow / Deny" with no headset: the real test server
-// (wolfvrpipe_selftest serve, answering on its stdin like Paul in the terminal) and headless Chromium with
-// WolfStorm's fake WebXR device (firestorm repo wolfstorm/tools/fake_xr.js).
-//   node scripts/wolfvr/e2e_pairing.mjs <selftest_bin> <web_root> <fake_xr.js> <out_dir> [port=4352]
-// Steps: typed plain-http address is redirected to https; a new headset waits and gets no picture; Allow; picture +
-// Enter VR; reload goes straight in (cookie); a second headset is Denied and stays out; a server restart still knows
-// the first. Prints PASS/FAIL per step; exit code 0 only when all pass. Ports 4350+ only (4333-4340 are Paul's).
+// [VR SIMPLE 2026-11-03] End-to-end test of "connect straight in" with no headset: the real test server
+// (wolfvrpipe_selftest serve) and headless Chromium with WolfStorm's fake WebXR device (wolfstorm/tools/fake_xr.js).
+//   node scripts/wolfvr/e2e_connect.mjs <selftest_bin> <web_root> <fake_xr.js> <out_dir> [port=4352]
+// Steps: typed plain-http address is redirected to https; the headset gets the picture with nothing to press but Enter
+// VR; a reload takes its own place back; a second headset is told someone is connected and gets no picture, then
+// joins by itself when the first leaves; a server restart keeps the same address. Ports 4350+ only.
 import { spawn } from 'node:child_process';
 import { readFileSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -20,12 +19,12 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 let failures = 0;
 const check = (ok, what) => { console.log(`${ok ? 'PASS' : 'FAIL'} ${what}`); if (!ok) failures++; };
 
-// ---- the server, answered on stdin
+// ---- the server
 function startServer() {
     const p = spawn(BIN, ['serve', WEBROOT, '600', 'auto'], {
         env: { ...process.env, WOLFVR_PORT: PORT, WOLFVR_STATS: '1', WOLFVR_STATE_DIR: STATE },
-        stdio: ['pipe', 'pipe', 'pipe'] });
-    const srv = { p, lines: [], asks: 0, lan: '' };
+        stdio: ['ignore', 'pipe', 'pipe'] });
+    const srv = { p, lines: [], lan: '' };
     let buf = '';
     p.stdout.on('data', (d) => {
         buf += d.toString();
@@ -33,9 +32,8 @@ function startServer() {
         while ((i = buf.indexOf('\n')) >= 0) {
             const line = buf.slice(0, i); buf = buf.slice(i + 1);
             srv.lines.push(line);
-            if (line.startsWith('ASK ')) srv.asks++;
             if (line.startsWith('LAN_URL ')) srv.lan = line.slice(8).trim();
-            if (line.startsWith('LOG ')) console.log('   server:', line.slice(4));
+            if (line.startsWith('LOG ') || line.startsWith('HEADSET')) console.log('   server:', line);
         }
     });
     p.stderr.on('data', () => {});
@@ -48,7 +46,6 @@ async function waitFor(fn, ms = 10000, step = 200) {
 }
 async function stopServer(srv) { srv.p.kill('SIGTERM'); await new Promise(r => srv.p.once('exit', r)); }
 
-// ---- a browser (one profile = one headset)
 let cdpPort = 9351;
 async function browser(name) {
     const port = cdpPort++;
@@ -72,30 +69,24 @@ async function browser(name) {
         nav: async (url) => { await send('Page.navigate', { url }); await sleep(1500); },
         reload: async () => { await send('Page.reload', { ignoreCache: true }); await sleep(1500); },
         shot: async (file) => { const r = await send('Page.captureScreenshot', { format: 'jpeg', quality: 70 }); writeFileSync(resolve(OUT, file), Buffer.from(r.result.data, 'base64')); },
-        close: async () => { ws.close(); chrome.kill(); await sleep(300); },
+        close: async () => { ws.close(); chrome.kill(); await sleep(500); },
     };
 }
 const status = (b) => b.evalJs("document.getElementById('wvr-status').textContent");
-const waitingShown = (b) => b.evalJs("!document.getElementById('wvr-waiting').hidden");
+const errorText = (b) => b.evalJs("document.getElementById('wvr-error').textContent");
 const hasConfig = (b) => b.evalJs('!!(window.__wolfvr && window.__wolfvr.config())');
 const stats = (srv) => { const l = srv.lines.filter(x => x.startsWith('STATS ')).pop(); return l ? JSON.parse(l.slice(6)) : null; };
 
-// ---- 1. first headset: typed address over plain http
 let srv = startServer();
 await waitFor(() => srv.lan);
-const lanUrl = srv.lan;                                    // https://<ip>:<port>/
-const typed = 'http://' + lanUrl.slice('https://'.length);   // what the browser opens for "192.168.1.9:4352"
+const lanUrl = srv.lan;
+const typed = 'http://' + lanUrl.slice('https://'.length);
 console.log('server at', lanUrl);
 const A = await browser('A');
 const HELP = process.env.VR_HELP_URL;   // a local copy of wolf-grid.com/vr (gridmanager vr.php under php -S)
 if (HELP) {
-    // The resident opens wolf-grid.com/vr, types the short address and taps Open.
     await A.nav(HELP);
     const short = lanUrl.slice('https://'.length, -1);
-    await A.evalJs(`(() => { const i = document.getElementById('addr'); i.value = 'nonsense'; document.querySelector('#addr-form button').click(); })()`);
-    check(await A.evalJs("!document.getElementById('addr-error').hidden && document.getElementById('addr').getAttribute('aria-invalid') === 'true'"), '/vr: a wrong address gets a visible error next to the box');
-    await A.evalJs(`(() => { const i = document.getElementById('addr'); i.value = '8.8.8.8:4333'; document.querySelector('#addr-form button').click(); })()`);
-    check(await A.evalJs("!document.getElementById('addr-error').hidden") && (await A.evalJs('location.href')).startsWith(HELP), '/vr: a public address is refused');
     await A.evalJs(`(() => { const i = document.getElementById('addr'); i.value = '${short}'; document.querySelector('#addr-form button').click(); })()`);
     await sleep(1500);
     check((await A.evalJs('location.href')) === lanUrl, `/vr: typing ${short} and Open goes to ${lanUrl}`);
@@ -103,61 +94,34 @@ if (HELP) {
     await A.nav(typed);
     check((await A.evalJs('location.href')) === lanUrl, `plain http ${typed} is sent to ${lanUrl}`);
 }
-check(await waitFor(() => srv.asks === 1), 'the PC is asked about the new headset');
-check(await waitFor(async () => (await waitingShown(A)) && (await A.evalJs("document.getElementById('wvr-waiting').textContent")).includes('Waiting for you to press Allow on your PC')), 'the headset page says "Waiting for you to press Allow on your PC"');
-console.log('   page status:', await status(A));
-await A.shot('1_waiting.jpg');
-await sleep(1500);
-check(!(await hasConfig(A)) && (stats(srv)?.sent ?? 0) === 0 && !(stats(srv)?.conn), 'no picture and no connection while waiting');
-srv.p.stdin.write('a\n');
-check(await waitFor(() => hasConfig(A), 10000), 'after Allow the picture starts');
-console.log('   page status:', await status(A));
+check(await waitFor(() => hasConfig(A), 10000), 'the headset gets the picture straight away: nothing to allow');
+check(srv.lines.some(l => l.startsWith('HEADSET CONNECTED')), 'the PC is told "headset connected" (a notice, nothing to click)');
+check(!(await A.evalJs("document.getElementById('vr-btn').disabled")), 'the big Enter VR button is ready');
+await A.shot('1_connected.jpg');
 await A.evalJs('window.__wolfvr.toggleVR()');
 check(await waitFor(() => A.evalJs('!!(window.__fakeXR && window.__fakeXR.session)')), 'Enter VR works');
 for (let i = 0; i < 30; i++) { await A.evalJs(`window.__fakeXR.setYaw(${Math.sin(i / 5)})`); await sleep(100); }
 const s1 = stats(srv);
 console.log('   numbers:', JSON.stringify(s1));
 check(s1 && s1.conn === 1 && s1.sent > 50 && s1.poseHz > 10, 'frames go out and poses come in');
-await A.shot('2_vr.jpg');
 await A.evalJs('window.__wolfvr.toggleVR()');
 
-// ---- 2. reload: remembered, no question
 await A.reload();
-check(await waitFor(() => hasConfig(A), 10000) && srv.asks === 1, 'reload goes straight in, nobody is asked again');
+check(await waitFor(() => hasConfig(A), 10000), 'a reload takes its own place back');
 
-// ---- 3. a second headset is denied
 const B = await browser('B');
-await B.nav(typed);
-check((await B.evalJs('location.href')) === lanUrl, `plain http ${typed} is sent to ${lanUrl}`);
-check(await waitFor(() => srv.asks === 2), 'a second headset is asked about');
-srv.p.stdin.write('d\n');
-check(await waitFor(async () => (await status(B)) === 'Not allowed.'), 'Deny: the page says the PC said no');
-console.log('   page error:', await B.evalJs("document.getElementById('wvr-error').textContent"));
-check(await hasConfig(A), 'the first headset kept its picture');
-await B.reload();
-await sleep(2000);
-check(srv.asks === 2 && (await status(B)) === 'Not allowed.', 'the denied headset stays out without asking again');
-check(!(await hasConfig(B)), 'the denied headset never got a picture');
+await B.nav(lanUrl);
+check(await waitFor(async () => (await errorText(B) || '').includes('Someone is already connected')), 'a second headset is told someone is already connected');
+check(!(await hasConfig(B)) && await hasConfig(A), 'the second one gets no picture; the first keeps it');
+await B.shot('2_busy.jpg');
+await A.close();
+check(await waitFor(() => hasConfig(B), 20000), 'when the first one leaves, the second joins by itself');
 await B.close();
 
-// ---- 4. restart: the allowed headset is remembered on disk (and /vr remembers the address in A's browser)
-if (HELP) {
-    await A.nav(HELP);
-    const btn = await A.evalJs("(document.querySelector('#saved button.pc') || {}).textContent || ''");
-    check(btn.startsWith('Open ' + lanUrl.slice('https://'.length, -1)), '/vr shows the remembered PC as a big button: ' + btn);
-    await A.shot('3_vr_help_saved.jpg');
-    await A.evalJs("document.querySelector('#saved button.pc').click()");
-    await sleep(1500);
-}
 await stopServer(srv);
 srv = startServer();
 await waitFor(() => srv.lan);
 check(srv.lan === lanUrl, 'same address after a restart (default port kept)');
-await A.reload();
-check(await waitFor(() => hasConfig(A), 15000) && srv.asks === 0, 'after a restart the first headset goes straight in');
-const devices = JSON.parse(readFileSync(resolve(STATE, 'devices.json'), 'utf8'));
-check(devices.devices.length === 1 && /^[0-9a-f]{64}$/.test(devices.devices[0].hash), 'devices.json holds one headset, hash only');
-await A.close();
 await stopServer(srv);
 console.log(failures ? `E2E FAILED (${failures})` : 'E2E PASSED');
 process.exit(failures ? 1 : 0);

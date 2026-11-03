@@ -3,13 +3,13 @@
      Paul: "I only have Linux, I don't want to mess around, so make it work".
      [VR PAIRING 2026-11-03] Paul after the first Quest 3 try: "you need to make it much easier to connect, get rid of that
      code, it's a job and a half to type all that in on a VR viewer". No code now: the resident types only the short
-     address (shown large here), and this PC asks Allow / Deny the first time a headset connects.
+     address (shown large here). [VR SIMPLE 2026-11-03] No Allow / Deny either ("don't make it difficult"): a headset
+     on the home network connects straight in while this is on.
      Who and why: a resident (35-65) with a Quest wants to see WolfViewer in the headset with nothing to install there;
      they tick the box, type the big address in the headset's browser (or on wolf-grid.com/vr), accept the certificate
-     once, press Allow here once, press VR there.
+     once, press Enter VR there.
      Flow, top to bottom: what it does (one line); the switch; the status (what is happening, or what went wrong, in the
-     words of the fix); THE ADDRESS, large; the two first-time steps; the USB alternative; the QR code; the remembered
-     headsets and Forget; the numbers. Stage 1 streams a TEST PATTERN only. -->
+     words of the fix); THE ADDRESS, large; the two first-time steps; the USB alternative; the QR code; the numbers. Stage 1 streams a TEST PATTERN only. -->
 <floater
  can_close="true"
  can_minimize="true"
@@ -41,7 +41,7 @@
     <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="12" name="url_label" top="140" width="496">In your headset's browser, type:</text>
     <text_editor follows="left|top" font="SansSerifHuge" height="40" layout="topleft" left="12" name="address" top="158" width="496" max_length="64" read_only="true" word_wrap="false" show_context_menu="true" tool_tip="Type this into the headset browser's address bar. No code is needed." />
     <text follows="left|top" height="34" layout="topleft" left="12" name="address_hint" top="204" width="296" wrap="true">No code needed. Or open wolf-grid.com/vr in the headset and type it there.</text>
-    <text follows="left|top" height="112" layout="topleft" left="12" name="first_note" top="242" width="296" wrap="true">The first time only: the headset browser says the connection is not private. Choose Advanced, then Proceed (this PC made its own certificate; the picture never leaves your home network). Then this PC asks "A headset wants to connect": press Allow. Tip: bookmark the page in the headset.</text>
+    <text follows="left|top" height="112" layout="topleft" left="12" name="first_note" top="242" width="296" wrap="true">The first time only: the headset browser says the connection is not private. Choose Advanced, then Proceed (this PC made its own certificate; the picture never leaves your home network). Then press Enter VR. Tip: bookmark the page in the headset.</text>
     <text follows="left|top" height="48" layout="topleft" left="12" name="usb_note" top="358" width="296" wrap="true">With a USB cable and developer mode instead: run "adb reverse tcp:[PORT] tcp:[PORT]" on this PC, then open:</text>
     <text_editor follows="left|top" height="23" layout="topleft" left="12" name="usb_url" top="408" width="296" max_length="256" read_only="true" word_wrap="false" show_context_menu="true" tool_tip="For a headset plugged in by USB, after adb reverse" />
 
@@ -49,8 +49,6 @@
     <panel follows="left|top" height="180" layout="topleft" left="324" name="qr_area" top="204" width="184" background_visible="false" />
     <text follows="left|top" height="16" layout="topleft" left="324" name="qr_label" top="388" width="184" halign="center">Or scan with the headset</text>
 
-    <text follows="left|top" height="20" layout="topleft" left="12" name="headsets_text" top="444" width="300">Headsets allowed on this PC: [COUNT]</text>
-    <button follows="left|top" height="23" layout="topleft" left="328" name="forget_btn" top="440" width="180" label="Forget all headsets" tool_tip="Every headset has to be allowed again before it can connect" />
 
     <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="12" name="numbers_label" top="474" width="496">Numbers</text>
     <text_editor follows="left|top" font="Monospace" height="120" layout="topleft" left="12" max_length="4096" name="numbers" top="492" width="496" word_wrap="false" read_only="true" show_context_menu="true" />

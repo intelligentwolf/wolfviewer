@@ -24,8 +24,8 @@
 class LLTextEditor;
 
 // [VR PIPE 2026-11-03] The switch (WolfVRStreamEnabled), the address and its QR code, the first-time certificate
-// step, the USB alternative and the live numbers. [VR PAIRING 2026-11-03] The address is the short one to type
-// ("192.168.1.9:4333", no code), shown large; the remembered headsets and "Forget all headsets". The QR code is drawn as filled squares in draw() (qrcodegen);
+// step, the USB alternative and the live numbers. [VR SIMPLE 2026-11-03] The address is the short one to type
+// ("192.168.1.9:4333", no code), shown large. No pairing and nothing to manage. The QR code is drawn as filled squares in draw() (qrcodegen);
 // it is rebuilt only when the address changes.
 class WolfFloaterVRStream : public LLFloater
 {
@@ -49,7 +49,6 @@ private:
     std::vector<bool> mQr;   // modules, row-major
     int mQrSize = 0;
     U32 mShownPort = 0;
-    size_t mShownHeadsets = (size_t)-1;
 };
 
 #endif // WOLF_FLOATERVRSTREAM_H

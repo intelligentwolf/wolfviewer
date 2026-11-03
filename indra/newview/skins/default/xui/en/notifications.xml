@@ -1976,64 +1976,21 @@ To try them back on, one at a time, open Wolf World &gt; Graphics Helper. If a s
        [COMMAND] is the install line for the user's distribution (from /etc/os-release).
        "Copy command" is NOT the default button: an ignored notice answers with the default,
        and that must never overwrite the user's clipboard. -->
-  <!-- [VR PAIRING 2026-11-03] VR in Your Headset Browser (wolfvrstream.cpp pumpQuestions): a headset's browser opened
-       this PC's address and is waiting. No code to type any more (Paul: "get rid of that code"); this question replaces
-       it, once per headset. Deny is the default button: Enter or a stray click must never let a device in.
-       [DEVICE] = a plain name from the browser ("Meta Quest 3 browser"), [IP] = its home-network address. -->
+  <!-- [VR SIMPLE 2026-11-03] Wolf World > VR (wolfvrstream.cpp pump): a headset came or went. A tip that goes by itself:
+       Paul, "you can't see it when you have the VR headset on", so nothing here may need a click. [DEVICE] = a plain
+       name from the browser ("Meta Quest 3 browser"). -->
   <notification
-   icon="alert.tga"
-   name="WolfVRHeadsetAsks"
-   type="alert">
-A headset wants to connect: [DEVICE] ([IP]).
-
-Allow it to see WolfViewer in VR? It will be remembered, so you are only asked once. Only say Allow if it is your headset, or one you know, on your home network.
-    <form name="form">
-      <button
-       index="0"
-       name="Allow"
-       text="Allow"/>
-      <button
-       default="true"
-       index="1"
-       name="Deny"
-       text="Deny"/>
-    </form>
+   icon="notifytip.tga"
+   name="WolfVRHeadsetConnected"
+   type="notifytip">
+Headset connected: [DEVICE].
   </notification>
 
-  <!-- [VR PAIRING 2026-11-03] As WolfVRHeadsetAsks, for a headset allowed before whose browser has forgotten it
-       (browsing data cleared), or something using its id without its key. -->
   <notification
-   icon="alert.tga"
-   name="WolfVRHeadsetAsksAgain"
-   type="alert">
-A headset wants to connect again: [DEVICE] ([IP]).
-
-This headset was allowed before, but its browser no longer has the key this PC gave it (browsing data cleared?). Allow it again?
-    <form name="form">
-      <button
-       index="0"
-       name="Allow"
-       text="Allow"/>
-      <button
-       default="true"
-       index="1"
-       name="Deny"
-       text="Deny"/>
-    </form>
-  </notification>
-
-  <!-- [VR PAIRING 2026-11-03] Floater button "Forget all headsets" (wolffloatervrstream.cpp). -->
-  <notification
-   icon="alertmodal.tga"
-   name="WolfVRForgetHeadsets"
-   type="alertmodal">
-Forget the headsets this PC has allowed ([COUNT])?
-
-Each one will have to be allowed again before it can connect. A headset connected now is disconnected.
-    <usetemplate
-     name="okcancelbuttons"
-     notext="Cancel"
-     yestext="Forget them"/>
+   icon="notifytip.tga"
+   name="WolfVRHeadsetDisconnected"
+   type="notifytip">
+Headset disconnected: [DEVICE].
   </notification>
 
   <notification

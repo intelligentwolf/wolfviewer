@@ -1,5 +1,5 @@
 // [VR 3D 2026-11-03] VR 3D Mode against the REAL viewer, logged in as Shadow Testwolf (Claude's test avatar), all
-// through the headset page: headset A (allowed beforehand, as e2e_viewer.mjs) types the login on the big screen,
+// through the headset page: headset A (it connects straight in) types the login on the big screen,
 // enters VR with the fake WebXR device, clicks the left stick to switch to VR 3D Mode, and turns its head.
 //   node e2e_viewer_world.mjs <lan_url> <device_id> <secret> <out_dir> <cred_file> <fake_xr.js> <ctl.js>
 // Positions of the login fields come from the caller's look at a_login.jpg (env USER_UV, PASS_UV as "u,v").

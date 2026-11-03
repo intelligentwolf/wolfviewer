@@ -64,7 +64,7 @@ function toast(text) {
     t.className = 'wvr-toast';
     t.textContent = text;
     $('wvr-toasts').appendChild(t);
-    setTimeout(() => t.remove(), 6000);
+    setTimeout(() => t.remove(), 10000);   // information only; failures stay in the error box until fixed
 }
 
 // ------------------------------------------------------------------------------------------------ numbers
@@ -111,52 +111,37 @@ function connect() {
     };
     ws.onclose = (ev) => {
         clearInterval(pingTimer);
-        showWaiting(false);
+        // [VR SIMPLE 2026-11-03] Plain words, and the page keeps trying by itself for as long as it is open: nobody
+        // has to be quick, reload, or press anything (Paul: some residents need time).
         if (ev.code === 4000) {
-            showError('Another headset or browser tab is now connected to WolfViewer, so this one stopped. Reload this page to take it back.');
+            showError('This headset opened WolfViewer VR again in another tab or window, so this one stopped. ' +
+                      'Use the newest one, or reload this page to bring it back here.');
             setStatus('Not connected.');
+            return;
+        }
+        if (ev.code === 4009) {
+            showError('Someone is already connected to WolfViewer on this PC. This page joins by itself as soon as ' +
+                      'they leave.');
+            setStatus('Waiting for the other headset to leave…');
+            retryTimer = setTimeout(connect, 5000);
             return;
         }
         if (ev.code === 4003) {
-            showError('Your PC said no to this headset. To try again, switch VR off and on again in WolfViewer, then reload this page.');
-            setStatus('Not allowed.');
-            return;
-        }
-        if (ev.code === 4029) {
-            showError('Too many headsets are asking your PC at once. Wait a moment, then reload this page.');
+            showError('This headset is not on the same home network as your PC. Connect the headset to the same Wi-Fi ' +
+                      'as your PC; this page keeps trying.');
             setStatus('Not connected.');
+            retryTimer = setTimeout(connect, 5000);
             return;
         }
-        if (approvedReconnect) { approvedReconnect = false; connect(); return; }
-        setStatus(ev.code === 1001 ? 'WolfViewer stopped the headset stream. Trying again every few seconds…'
-                  : ev.code === 4001 ? 'Your PC forgot its headsets. Connecting again…'
-                                     : 'Lost the connection to WolfViewer. Trying again every few seconds…');
+        setStatus(ev.code === 1001 ? 'VR is switched off in WolfViewer. This page connects by itself when it is switched on again.'
+                                   : 'Looking for WolfViewer on your PC… This page keeps trying by itself.');
         retryTimer = setTimeout(connect, 3000);
     };
 }
 
-let approvedReconnect = false;
-function showWaiting(on) {
-    $('wvr-waiting').hidden = !on;
-}
-
-// The PC allowed this headset: swap the one-time ticket for the cookie, then connect again with it.
-async function claim(ticket) {
-    try {
-        const r = await fetch('/claim?c=' + encodeURIComponent(ticket), { cache: 'no-store', credentials: 'same-origin' });
-        if (r.status !== 204) throw new Error('the PC answered ' + r.status);
-        approvedReconnect = true;
-        setStatus('Allowed. Connecting…');
-        showWaiting(false);
-        ws.close(1000);
-    } catch (e) {
-        showError('Your PC allowed this headset, but saving that failed (' + (e && e.message ? e.message : e) + '). Reload this page to try again.');
-    }
-}
-
-// The PC knows this headset (the socket said "welcome"): start the picture and the clock sync.
+// Connected (the socket said "welcome"): start the picture and the clock sync.
 function onAllowed() {
-    showWaiting(false);
+    showError('');
     setStatus('Connected to WolfViewer. Waiting for the picture…');
     send({ t: 'hello', webcodecs: typeof VideoDecoder !== 'undefined', ua: navigator.userAgent });
     pings.length = 0;
@@ -168,13 +153,7 @@ function onAllowed() {
 function onText(text) {
     let m;
     try { m = JSON.parse(text); } catch (e) { return; }
-    if (m.t === 'waiting') {
-        setStatus('Found your PC.');
-        showWaiting(true);
-        return;
-    }
-    if (m.t === 'approved') { claim(m.claim); return; }
-    if (m.t === 'denied') return;   // the close (4003) that follows says it
+    if (m.t === 'busy') return;   // the close (4009) that follows says it
     if (m.t === 'welcome') { onAllowed(); return; }
     if (m.t === 'pong') {
         const now = performance.now();
@@ -437,7 +416,16 @@ statsMesh.frustumCulled = false;
 statsMesh.position.set(-0.30, 0.16, -0.9);   // upper left of view, as WolfStorm's readout
 statsMesh.visible = false;
 camera.add(statsMesh);
-let statsOn = false, statsLastDraw = 0;   // numbers panel: off until asked for (left menu held 1 s)
+let statsOn = false, statsLastDraw = 0;
+// [VR SIMPLE 2026-11-03] Comfort vignette for VR 3D Mode: the outer part of the view darkens while the avatar walks,
+// the usual remedy for motion sickness from moving without moving (a dark ring docked to the head, the centre clear).
+const vignette = new THREE.Mesh(new THREE.RingGeometry(0.42, 3, 48),
+    new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.55, depthTest: false }));
+vignette.position.set(0, 0, -0.5);
+vignette.renderOrder = 9997;
+vignette.frustumCulled = false;
+vignette.visible = false;
+camera.add(vignette);   // numbers panel: off until asked for (left menu held 1 s)
 
 function fmt(x, d = 1) { return Number.isFinite(x) ? x.toFixed(d) : '–'; }
 function numberRows() {
@@ -633,6 +621,13 @@ const move = { x: 0, y: 0, sentAt: 0, lift: 0, liftAt: 0 };
 function sendStick(x, y) {
     x = Math.abs(x) > STICK_DEAD ? Math.round(x * 100) / 100 : 0;
     y = Math.abs(y) > STICK_DEAD ? Math.round(y * 100) / 100 : 0;
+    // [VR SIMPLE 2026-11-03] Comfort in VR 3D Mode: walking only, never the sudden speed-up of running (the PC runs
+    // past 0.9, wolfvrscreen.cpp kRun), and the edges of the view dim while moving (vignette below).
+    if (config && config.mode === 'world') {
+        const m = Math.max(Math.abs(x), Math.abs(y));
+        if (m > 0.85) { x = x * 0.85 / m; y = y * 0.85 / m; x = Math.round(x * 100) / 100; y = Math.round(y * 100) / 100; }
+    }
+    vignette.visible = !!(config && config.mode === 'world' && (x || y));
     const now = performance.now();
     const changed = Math.abs(x - move.x) > 0.04 || Math.abs(y - move.y) > 0.04;
     // while held, every 250 ms as well: the PC lets go by itself after a second of silence (wolfvrscreen.cpp)

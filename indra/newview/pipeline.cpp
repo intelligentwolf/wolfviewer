@@ -147,6 +147,7 @@
 #include "app_settings/shaders/class1/deferred/CASF.glsl" // This is also C++
 #include "wolffarground.h"   // <WolfViewer 2026-10-07/> map tiles for regions not connected
 #include "wolfbirds.h"       // [BIRDS 2026-11-02/] ticket 445
+#include "wolfsealife.h"     // [SEA LIFE 2026-11-03/] ticket 499
 #include "wolfswimbubbles.h" // [SWIM BUBBLES 2026-11-02/] ticket 346
 #include "wolffarterrain.h"   // <WolfViewer 2026-10-08/> elevation tiles beyond the terrain received
 #include "wolfaltitudesky.h"  // <WolfViewer 2026-10-07/> the cloud layer to fly through
@@ -4414,6 +4415,7 @@ void LLPipeline::renderGeomDeferred(LLCamera& camera, bool do_occlusion)
             WolfFarTerrain::instance().renderDeferred();   // <WolfViewer 2026-10-08/> the far ground in relief (wolffarterrain.h)
             WolfFarGround::instance().renderDeferred();
             WolfBirds::instance().renderDeferred();   // [BIRDS 2026-11-02/] ticket 445: the wild birds, lit as the scene
+            WolfSeaLife::instance().renderDeferred(); // [SEA LIFE 2026-11-03/] ticket 499: dolphins, whales and their spray
             WolfSwimBubbles::instance().renderDeferred();   // [SWIM BUBBLES 2026-11-02/] ticket 346: bubbles under the water
         }
         // </WolfViewer>

@@ -492,6 +492,29 @@
      visible="false"
      width="442"
      wrap="true" />
+    <!-- [SEA LIFE 2026-11-03] ticket 499: dolphins and whales in the open sea (wolfsealife.cpp); off unless switched on -->
+    <check_box
+     follows="left|top"
+     height="20"
+     label="Dolphins and whales on this region"
+     layout="topleft"
+     left="10"
+     name="wolf_sealife_check"
+     tool_tip="Pods of dolphins and the odd whale swimming in this region's open sea: dolphins leap and ride the bow waves of passing boats, whales surface, blow and dive. Only in deep sea water, never on land or in pools. Each visitor sees and hears them in their own viewer, at their Ambient volume, and can switch them off for themselves. Saved at once. Only the estate owner or an estate manager can change it."
+     top="614"
+     visible="false"
+     width="460" />
+    <text
+     follows="left|top"
+     font="SansSerifSmall"
+     height="16"
+     layout="topleft"
+     left="28"
+     name="wolf_sealife_state"
+     top="634"
+     visible="false"
+     width="442"
+     wrap="true" />
     <text
      follows="left|top"
      font="SansSerifSmall"
@@ -499,7 +522,7 @@
      layout="topleft"
      left="28"
      name="wolf_planes_status"
-     top="614"
+     top="652"
      visible="false"
      width="442"
      wrap="true" />
@@ -530,5 +553,8 @@
     <string name="sounds_saved_on">Saved: nature sounds will now play on this region.</string>
     <string name="sounds_saved_off">Saved: no more nature sounds on this region.</string>
     <string name="sounds_save_failed">Could not save nature sounds:</string>
+    <string name="sealife_saved_on">Saved: dolphins and whales may now swim here.</string>
+    <string name="sealife_saved_off">Saved: no more dolphins and whales here.</string>
+    <string name="sealife_save_failed">Could not save dolphins and whales:</string>
     <string name="planes_not_wolf">the region has not confirmed it is on Wolf Territories. Close and reopen this window to try again.</string>
 </panel>

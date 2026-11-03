@@ -244,6 +244,7 @@ void WolfRegionWeather::onRegionChanged()
     readHurricane(LLSD());   // [HURRICANE 2026-10-29/] its positions are the old region's metres
     readBirds(LLSD());       // [BIRDS 2026-11-02/] the old region's answer
     readSounds(LLSD());      // [NATURE SOUNDS 2026-11-03/] the old region's answer
+    readSeaLife(LLSD());     // [SEA LIFE 2026-11-03/] the old region's answer
     mProfile = WolfWeatherProfile();
     mKind.clear();
     mRegionName.clear();
@@ -478,6 +479,7 @@ void WolfRegionWeather::fetchCoro(std::string region_id, bool include_parcel, F3
     self.readHurricane(r);   // [HURRICANE 2026-10-29/]
     self.readBirds(r);   // [BIRDS 2026-11-02/]
     self.readSounds(r);  // [NATURE SOUNDS 2026-11-03/]
+    self.readSeaLife(r); // [SEA LIFE 2026-11-03/]
     self.mLastError.clear();
     if (include_parcel && self.mParcelGate.accepts(parcel_generation))
     {
@@ -690,6 +692,35 @@ void WolfRegionWeather::setSoundsLocal(const LLUUID& region, bool on)
     mSoundsOn = on;
 }
 
+// [SEA LIFE 2026-11-03] ticket 499. Source: wolfstorm/php/weather.php region_payload `sealife` = wolf_ambient_lib.php
+// wa_sealife_payload {ambient, default (false), on, dolphins?, lat?}. No block, or anything malformed, is off; a missing or
+// malformed `dolphins` is 1 (the grid's own "no place" value, wa_dolphin_climate).
+void WolfRegionWeather::readSeaLife(const LLSD& row)
+{
+    const LLSD b = (row.isMap() && row.has("sealife") && row["sealife"].isMap()) ? row["sealife"] : LLSD();
+    const bool on = b.isMap() && b["on"].isBoolean() && b["on"].asBoolean();
+    const F32 dolphins = (on && b["dolphins"].isReal()) ? llclamp((F32)b["dolphins"].asReal(), 0.f, 1.f)
+                       : (on && b["dolphins"].isInteger()) ? llclamp((F32)b["dolphins"].asInteger(), 0.f, 1.f) : 1.f;
+    if (on != mSeaLifeOn || fabsf(dolphins - mSeaLifeDolphins) > 0.005f)
+    {
+        LL_INFOS("WolfSeaLife") << "dolphins and whales on this region: " << (on ? "on" : "off");
+        if (on) LL_CONT << ", dolphins " << dolphins << " (latitude "
+                        << (b["lat"].isDefined() ? b["lat"].asString() : std::string("-")) << ")";
+        LL_CONT << LL_ENDL;
+    }
+    mSeaLifeOn = on;
+    mSeaLifeDolphins = dolphins;
+}
+
+void WolfRegionWeather::setSeaLifeLocal(const LLUUID& region, bool on)
+{
+    LLViewerRegion* here = gAgent.getRegion();
+    if (!here || here->getRegionID() != region) return;
+    LL_INFOS("WolfSeaLife") << "dolphins and whales on this region: " << (on ? "on" : "off") << " (saved in Region/Estate)" << LL_ENDL;
+    if (!on || !mSeaLifeOn) mSeaLifeDolphins = 1.f;   // turned on here: the place's figure comes with the next weather read
+    mSeaLifeOn = on;
+}
+
 void WolfRegionWeather::applyPush(const LLSD& row)
 {
     if (!row.isMap()) return;
@@ -709,6 +740,7 @@ void WolfRegionWeather::applyPush(const LLSD& row)
     readHurricane(row);
     readBirds(row);   // [BIRDS 2026-11-02/] the POST reply is region_payload too
     readSounds(row);  // [NATURE SOUNDS 2026-11-03/] so is `sounds`
+    readSeaLife(row); // [SEA LIFE 2026-11-03/] and `sealife`
     recomputeParcelApplies();
     mLastError.clear();
     mGeneration++;
@@ -868,6 +900,7 @@ void WolfRegionWeather::saveCoro(std::string body, std::string scope, std::strin
             self.readHurricane(reply);   // [HURRICANE 2026-10-29/] weather.php:625 replies with region_payload
             self.readBirds(reply);   // [BIRDS 2026-11-02/]
             self.readSounds(reply);  // [NATURE SOUNDS 2026-11-03/]
+            self.readSeaLife(reply); // [SEA LIFE 2026-11-03/]
             self.recomputeParcelApplies();
         }
     }

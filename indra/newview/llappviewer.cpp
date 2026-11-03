@@ -98,6 +98,7 @@
 #include "wolfair.h"      // <WolfViewer 2026-11-01/> Wolf Air (warplanes: the dogfight band, the kill feed)
 #include "wolffarground.h"   // <WolfViewer 2026-10-07/> map tiles for regions not connected
 #include "wolfbirds.h"       // [BIRDS 2026-11-02/] ticket 445
+#include "wolfsealife.h"     // [SEA LIFE 2026-11-03/] ticket 499
 #include "wolfswimbubbles.h" // [SWIM BUBBLES 2026-11-02/] ticket 346
 #include "wolfnaturesounds.h" // [NATURE SOUNDS 2026-11-03/] ticket 475
 #include "wolffarterrain.h"   // <WolfViewer 2026-10-08/> elevation tiles beyond the terrain received
@@ -6320,6 +6321,7 @@ void LLAppViewer::idle()
     WolfFarTerrain::instance().idle();  // <WolfViewer 2026-10-08/> the ground beyond the terrain received (before the flat tiles: they skip its cells)
     WolfFarGround::instance().idle();   // <WolfViewer 2026-10-07/> map tiles for the regions not connected
     WolfBirds::instance().idle();       // [BIRDS 2026-11-02/] ticket 445: the wild birds (wolfbirds.h)
+    WolfSeaLife::instance().idle();     // [SEA LIFE 2026-11-03/] ticket 499: dolphins and whales in the open sea (wolfsealife.h)
     WolfSwimBubbles::instance().idle(); // [SWIM BUBBLES 2026-11-02/] ticket 346: bubbles from mouths under the water
     WolfNatureSounds::instance().idle(); // [NATURE SOUNDS 2026-11-03/] ticket 475: insects, lapping and surf (wolfnaturesounds.h)
     // [WOLF GAME 2026-10-09] Wolf Roleplay: timers, markers, effects, and the tags under the name

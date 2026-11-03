@@ -113,6 +113,8 @@ class ViewerManifest(LLManifest,FSViewerManifest):
                 self.path("wolfbubbles")
                 # [NATURE SOUNDS 2026-11-03] the night insects, lapping and surf (wolfnaturesounds.cpp) + SOURCES.md
                 self.path("wolfnature")
+                # [SEA LIFE 2026-11-03] the dolphins' and whales' sounds (wolfsealife.cpp) + SOURCES.md
+                self.path("wolfsealife")
                 # [2026-11-02] the clouds' blue noise (wolftkclouds.cpp, cloudsCommon.glsl getSTBN) + its generator and SOURCES.md
                 self.path("wolfnoise")
 

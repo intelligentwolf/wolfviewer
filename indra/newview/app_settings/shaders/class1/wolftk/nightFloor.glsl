@@ -86,7 +86,16 @@ vec3 wolfNightFloorLift(vec3 c, vec3 floorColour)
 }
 
 // the same per unit of opacity, for a premultiplied colour (rgb already x alpha): the floor x alpha is the floor's light a layer
-// of that opacity gives
+// of that opacity gives.
+// [WolfViewer 2026-11-03 W93] KEEPING THE DECK'S OWN LIGHT. The sky's rule above sets every luminance under the floor to the floor
+// itself: Y(c') = Y(c) + Y(F) (1 - Y(c) / Y(F)) = Y(F), whatever Y(c) was. On a sky that is right (a smooth gradient), but on the
+// clouds it erased the deck's own moonlit / skylit shading wherever it was under the floor, leaving Y(F) x alpha - the deck's
+// opacity alone, whose march steps near the horizon (cloudsF.glsl marchClouds: "Step longer in empty space ... produces banding
+// artifacts") then read as horizontal bands (Paul, Lampert Highlands, W92: "this banding is terrible"). The clouds' lift now
+// tapers out at twice the floor instead:
+//   Y(c') = Y(c) + Y(F) a max(0, 1 - Y(c) / (2 Y(F) a))
+// so black still becomes the floor (Y(F) a: the W92 night deck is never darker), a colour at or above 2 Y(F) a is not touched,
+// and between the two half of the deck's own contrast stays (dY'/dY = 1/2, against 0 before); continuous, no step.
 vec3 wolfNightFloorLiftPremultiplied(vec4 c, vec3 floorColour)
 {
     float a = clamp(c.a, 0.0, 1.0);
@@ -94,5 +103,5 @@ vec3 wolfNightFloorLiftPremultiplied(vec4 c, vec3 floorColour)
     float yf = wolfNightFloorY(floorColour) * a;
     if (!(yf > 0.0)) return c.rgb;
     float y = wolfNightFloorY(max(c.rgb, vec3(0.0)));
-    return c.rgb + floorColour * a * max(0.0, 1.0 - y / yf);
+    return c.rgb + floorColour * a * max(0.0, 1.0 - y / (2.0 * yf));
 }

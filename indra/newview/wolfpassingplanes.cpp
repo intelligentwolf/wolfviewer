@@ -83,7 +83,7 @@ namespace
     }
 
     /** [NATURE SOUNDS 2026-11-03] Which switch a save is for (wolf_ambient.php set {what}). */
-    enum What { PLANES, BIRDS, SOUNDS };
+    enum What { WHAT_PLANES, WHAT_BIRDS, WHAT_SOUNDS };   // not PLANES: wingdi.h #defines PLANES (GetDeviceCaps index 14)
 
     void set_status(const std::string& msg, bool error, bool from_read = false)
     {
@@ -269,13 +269,13 @@ namespace
         return "the service returned an unreadable reply";
     }
 
-    std::string request_body(const char* action, const LLUUID& region, int ambient, What what = PLANES)
+    std::string request_body(const char* action, const LLUUID& region, int ambient, What what = WHAT_PLANES)
     {
         boost::json::object o;
         o["action"] = action;
         o["region"] = region.asString();
-        if (what == BIRDS) o["what"] = "birds";    // [BIRDS 2026-11-02/] wolf_ambient.php set {what: "birds"}
-        if (what == SOUNDS) o["what"] = "sounds";  // [NATURE SOUNDS 2026-11-03/] wolf_ambient.php set {what: "sounds"}
+        if (what == WHAT_BIRDS) o["what"] = "birds";    // [BIRDS 2026-11-02/] wolf_ambient.php set {what: "birds"}
+        if (what == WHAT_SOUNDS) o["what"] = "sounds";  // [NATURE SOUNDS 2026-11-03/] wolf_ambient.php set {what: "sounds"}
         if (ambient >= 0) o["ambient"] = ambient == 1;
         return boost::json::serialize(o);
     }
@@ -323,8 +323,8 @@ namespace
 
     void save_coro(LLHandle<LLPanel> handle, LLUUID region, bool on, What what, U64 serial)
     {
-        const bool birds = (what == BIRDS);
-        const bool sounds = (what == SOUNDS);   // [NATURE SOUNDS 2026-11-03/]
+        const bool birds = (what == WHAT_BIRDS);
+        const bool sounds = (what == WHAT_SOUNDS);   // [NATURE SOUNDS 2026-11-03/]
         LLCore::HttpStatus status;
         const LLSD reply = post_and_wait(request_body("set", region, on ? 1 : 0, what), true, status);
         const bool ok = status && reply.isMap() && reply["success"].asBoolean();
@@ -401,10 +401,10 @@ namespace
         LLPanel* panel = handle.get();
         if (!panel) return;
         LLCheckBoxCtrl* check = panel->findChild<LLCheckBoxCtrl>(
-            what == BIRDS ? "wolf_birds_check" : what == SOUNDS ? "wolf_sounds_check" : "wolf_planes_check");
+            what == WHAT_BIRDS ? "wolf_birds_check" : what == WHAT_SOUNDS ? "wolf_sounds_check" : "wolf_planes_check");
         if (!check) return;
-        if (sState.mBusy || !sState.mHave || !sState.mReply["mayChange"].asBoolean() || (what == BIRDS && !have_birds())
-            || (what == SOUNDS && !have_sounds()))
+        if (sState.mBusy || !sState.mHave || !sState.mReply["mayChange"].asBoolean() || (what == WHAT_BIRDS && !have_birds())
+            || (what == WHAT_SOUNDS && !have_sounds()))
         {
             write_controls(panel);
             return;
@@ -424,15 +424,15 @@ void WolfPassingPlanes::postBuild(LLPanel* panel)
     LLHandle<LLPanel> handle = panel->getHandle();
     if (LLCheckBoxCtrl* check = panel->findChild<LLCheckBoxCtrl>("wolf_planes_check"))
     {
-        check->setCommitCallback([handle](LLUICtrl*, const LLSD&) { on_commit(handle, PLANES); });
+        check->setCommitCallback([handle](LLUICtrl*, const LLSD&) { on_commit(handle, WHAT_PLANES); });
     }
     if (LLCheckBoxCtrl* birds = panel->findChild<LLCheckBoxCtrl>("wolf_birds_check"))   // [BIRDS 2026-11-02/]
     {
-        birds->setCommitCallback([handle](LLUICtrl*, const LLSD&) { on_commit(handle, BIRDS); });
+        birds->setCommitCallback([handle](LLUICtrl*, const LLSD&) { on_commit(handle, WHAT_BIRDS); });
     }
     if (LLCheckBoxCtrl* sounds = panel->findChild<LLCheckBoxCtrl>("wolf_sounds_check"))   // [NATURE SOUNDS 2026-11-03/]
     {
-        sounds->setCommitCallback([handle](LLUICtrl*, const LLSD&) { on_commit(handle, SOUNDS); });
+        sounds->setCommitCallback([handle](LLUICtrl*, const LLSD&) { on_commit(handle, WHAT_SOUNDS); });
     }
 }
 

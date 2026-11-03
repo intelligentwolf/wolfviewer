@@ -104,7 +104,11 @@ public:
         // WolfViewer: the formats WolfMeshUpload reads (wolfmeshupload.h). Deliberately not
         // FFLOAD_MODEL, which offers .dae — a format the Wolf uploader cannot build a .llmesh
         // from — and does not offer .obj, which it can.
-        FFLOAD_WOLF_MODEL = 51
+        FFLOAD_WOLF_MODEL = 51,
+
+        // [FLEA ATTACHMENTS 2026-11-03] WolfViewer: the short videos and animations a Flea Report can carry
+        // (wolffloaterbugreport.cpp; gridmanager/viewerbugreport.php videos[] accepts MP4, WebM and GIF only).
+        FFLOAD_WOLF_VIDEO = 52
     };
 
     enum ESaveFilter

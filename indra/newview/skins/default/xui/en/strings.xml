@@ -693,6 +693,8 @@ Click to pick it in the list and zoom to it.</string>
 	<string name="model_files">Mesh Models</string>
 	<!-- WolfViewer: the formats WolfMeshUpload reads (FFLOAD_WOLF_MODEL). -->
 	<string name="wolf_model_files">Mesh Models (OBJ, glTF, GLB)</string>
+	<!-- [FLEA ATTACHMENTS 2026-11-03] WolfViewer: Flea Report videos and animations (FFLOAD_WOLF_VIDEO). -->
+	<string name="wolf_video_files">Videos and animations (MP4, WebM, GIF)</string>
 	<string name="csv_files">Comma separated values</string>
 	<string name="recompile_script_verb">Recompile</string>
 

@@ -22,6 +22,7 @@
 #include <boost/json.hpp>
 
 #include "llagent.h"
+#include "llassetstorage.h"   // [FLEA ATTACHMENTS 2026-11-03/] gAssetStorage->getInvItemAsset (a notecard's text)
 #include "llbutton.h"
 #include "llcheckboxctrl.h"
 #include "llcombobox.h"
@@ -29,6 +30,13 @@
 #include "llcoros.h"
 #include "lldiriterator.h"
 #include "llfile.h"
+#include "llfilesystem.h"     // [FLEA ATTACHMENTS 2026-11-03/] the fetched notecard, read from the asset cache
+#include "llfiltereditor.h"   // [FLEA ATTACHMENTS 2026-11-03/] the notecard picker's "Find a notecard by name"
+#include "llfolderviewitem.h"
+#include "llinventorybridge.h"   // LLItemBridge, as llsettingspicker.cpp reads the picked item
+#include "llinventorymodel.h"    // gInventory
+#include "llinventorypanel.h"
+#include "llnotecard.h"
 #include "indra_constants.h"   // APP_NAME
 #include "llgl.h"
 #include "llimagejpeg.h"   // [FLEA PICTURES 2026-10-27/] pictures are sent as PNG, or JPEG when the PNG is too big
@@ -41,6 +49,8 @@
 #include "lltexteditor.h"
 #include "llversioninfo.h"
 #include "llviewercontrol.h"   // gSavedSettings
+#include "llviewerinventory.h"   // [FLEA ATTACHMENTS 2026-11-03/] LLViewerInventoryItem
+#include "roles_constants.h"      // [FLEA ATTACHMENTS 2026-11-03/] GP_OBJECT_MANIPULATE, as llpreviewnotecard.cpp
 #include "llviewermenufile.h"  // [FLEA PICTURES 2026-10-27/] LLFilePickerReplyThread
 #include "llviewerregion.h"
 #include "llviewerwindow.h"    // [FLEA PICTURES 2026-10-27/] gViewerWindow->rawSnapshot
@@ -249,6 +259,230 @@ namespace
         }
         return encode_picture(raw);
     }
+
+    // [FLEA ATTACHMENTS 2026-11-03] Ticket 478: notecards and short videos / animations.
+
+    // Which of the three formats viewerbugreport.php accepts the first bytes of a file are, as its extension, or "" for
+    // none of them. The ticket 478 contract: MP4 = "ftyp" at bytes 4..7 (ISO/IEC 14496-12 4.3, the File Type Box is
+    // the first box: 4-byte size, then the type); WebM = the EBML magic 1A 45 DF A3 and the DocType "webm" within the
+    // first 4096 bytes (the EBML header carries DocType); GIF = "GIF87a" or "GIF89a" (GIF89a spec, Header block).
+    // The server checks again; this only saves a resident from waiting for an upload that will be refused.
+    std::string video_type(const std::string& head)
+    {
+        if (head.size() >= 6 && (head.compare(0, 6, "GIF87a") == 0 || head.compare(0, 6, "GIF89a") == 0)) return "gif";
+        // A QuickTime .mov also starts with "ftyp", with the major brand "qt  " (Apple QuickTime File Format, File
+        // Type Compatibility Atom); that is not MP4, so it is not offered as one.
+        if (head.size() >= 12 && head.compare(4, 4, "ftyp") == 0 && head.compare(8, 4, "qt  ") != 0) return "mp4";
+        if (head.size() >= 4 && head.compare(0, 4, "\x1A\x45\xDF\xA3") == 0
+            && head.substr(0, 4096).find("webm") != std::string::npos)
+        {
+            return "webm";
+        }
+        return std::string();
+    }
+
+    const char* video_mime(const std::string& ext)
+    {
+        return ext == "gif" ? "image/gif" : ext == "webm" ? "video/webm" : "video/mp4";
+    }
+
+    // What load_video hands back to the main thread: the file's bytes and type, or a sentence saying why not.
+    struct PreparedVideo
+    {
+        std::shared_ptr<const std::string> mData;
+        std::string mExt;
+        std::string mError;
+    };
+
+    // Runs on the "General" work queue: read a picked file (up to 25 MB) whole and check what it is. The bytes are sent
+    // unchanged, as the contract asks; nothing is decoded or re-encoded.
+    PreparedVideo load_video(const std::string& path)
+    {
+        PreparedVideo out;
+        llifstream in(path.c_str(), std::ios::in | std::ios::binary);
+        if (!in.is_open())
+        {
+            out.mError = "the file could not be opened.";
+            return out;
+        }
+        in.seekg(0, std::ios::end);
+        const std::streamoff size = in.tellg();
+        in.seekg(0, std::ios::beg);
+        if (size <= 0)
+        {
+            out.mError = "the file is empty.";
+            return out;
+        }
+        if ((S64)size > WolfFloaterBugReport::MAX_VIDEO_BYTES)
+        {
+            out.mError = "it is " + size_text((S64)size) + "; a video or animation can be " + size_text(WolfFloaterBugReport::MAX_VIDEO_BYTES)
+                         + " at most. Make a shorter clip and try again.";
+            return out;
+        }
+        auto data = std::make_shared<std::string>((size_t)size, '\0');
+        in.read(&(*data)[0], size);
+        if (in.gcount() != size)
+        {
+            out.mError = "the file could not be read to the end.";
+            return out;
+        }
+        out.mExt = video_type(*data);
+        if (out.mExt.empty())
+        {
+            out.mError = "it is not an MP4, WebM or GIF file (its name may say so, but what is inside is something else).";
+            return out;
+        }
+        out.mData = data;
+        return out;
+    }
+
+    // A header-safe multipart file name (RFC 7578 4.2): no quote, backslash or line break can end the parameter early.
+    std::string part_file_name(std::string name)
+    {
+        for (char& c : name)
+        {
+            if (c == '"' || c == '\\' || c == '\r' || c == '\n' || (unsigned char)c < 0x20) c = '_';
+        }
+        return name;
+    }
+
+    // A notecard's text with its embedded inventory items (landmarks, objects ... dropped into the notecard) written as
+    // "[inventory item: <name>]", since only the text is sent. Version 1 notecards mark an item with one byte 0x80 +
+    // index, version 2 with the character FIRST_EMBEDDED_CHAR + index (llnotecard.cpp importStream header comment;
+    // llviewertexteditor.cpp setASCIIEmbeddedText / setEmbeddedText decode them the same way). The index is the item's
+    // place in the notecard's item list (llnotecard.cpp importEmbeddedItemsStream pushes them in order; the export
+    // writes "ext char index" in the same order).
+    std::string notecard_text(LLNotecard& nc)
+    {
+        const std::vector<LLPointer<LLInventoryItem>>& items = nc.getItems();
+        auto marker = [&items](S32 index) -> LLWString
+        {
+            const std::string name = (index >= 0 && index < (S32)items.size() && items[index].notNull())
+                ? items[index]->getName() : std::string();
+            return utf8str_to_wstring(name.empty() ? std::string("[inventory item]") : "[inventory item: " + name + "]");
+        };
+        const std::string& text = nc.getText();
+        if (nc.getVersion() == 1)
+        {
+            std::string out;
+            out.reserve(text.size());
+            for (const char ch : text)
+            {
+                const U8 c = (U8)ch;
+                if (c >= 0x80) out += wstring_to_utf8str(marker((S32)(c - 0x80)));
+                else out += ch;
+            }
+            return out;
+        }
+        const LLWString w = utf8str_to_wstring(text);
+        LLWString out;
+        out.reserve(w.size());
+        for (const llwchar wch : w)
+        {
+            if (wch >= LLTextEditor::FIRST_EMBEDDED_CHAR && wch <= LLTextEditor::LAST_EMBEDDED_CHAR)
+            {
+                out += marker((S32)(wch - LLTextEditor::FIRST_EMBEDDED_CHAR));
+            }
+            else
+            {
+                out += wch;
+            }
+        }
+        return wstring_to_utf8str(out);
+    }
+
+    // [FLEA ATTACHMENTS 2026-11-03] "Add a notecard...": the resident's inventory, notecards only
+    // (floater_wolf_notecard_picker.xml). Built the way LLFloaterSettingsPicker (llsettingspicker.cpp) builds its
+    // inventory picker: an asset_filtered_inv_panel, a filter box, the picked item read through its LLItemBridge,
+    // double-click or Return on the selected item as a quick pick. Not in LLFloaterReg: it is made with new, as the
+    // settings picker is, is a dependent of the Flea Report (closed with it) and is destroyed when it closes.
+    class WolfNotecardPicker : public LLFloater
+    {
+    public:
+        using picked_cb_t = std::function<void(const LLUUID& item_id)>;
+
+        explicit WolfNotecardPicker(picked_cb_t cb) : LLFloater(LLSD()), mPicked(std::move(cb))
+        {
+            buildFromFile("floater_wolf_notecard_picker.xml");
+            setCanMinimize(false);
+        }
+
+        bool postBuild() override
+        {
+            if (!LLFloater::postBuild()) return false;
+            mInventory = getChild<LLInventoryPanel>("pnl_inventory");
+            mInventory->setFilterTypes((U64)0x1 << LLInventoryType::IT_NOTECARD);
+            mInventory->setSelectCallback([this](const std::deque<LLFolderViewItem*>& items, bool) { onSelection(items); });
+            mInventory->setShowFolderState(LLInventoryFilter::SHOW_NON_EMPTY_FOLDERS);
+            mInventory->setSuppressOpenItemAction(true);
+            getChild<LLFilterEditor>("flt_inventory_search")->setCommitCallback([this](LLUICtrl*, const LLSD& v)
+            {
+                mInventory->setFilterSubString(v.asString());
+            });
+            childSetAction("btn_cancel", [this](LLUICtrl*, const LLSD&) { closeFloater(); });
+            childSetAction("btn_select", [this](LLUICtrl*, const LLSD&) { pick(); });
+            return true;
+        }
+
+        bool handleDoubleClick(S32 x, S32 y, MASK mask) override
+        {
+            if (isSelectedItemAt(x, y))
+            {
+                pick();
+                return true;
+            }
+            return LLFloater::handleDoubleClick(x, y, mask);
+        }
+
+        bool handleKeyHere(KEY key, MASK mask) override
+        {
+            if (key == KEY_RETURN && mask == MASK_NONE && mItemID.notNull())
+            {
+                pick();
+                return true;
+            }
+            return LLFloater::handleKeyHere(key, mask);
+        }
+
+    private:
+        void onSelection(const std::deque<LLFolderViewItem*>& items)
+        {
+            mItemID.setNull();
+            if (!items.empty() && items.front())
+            {
+                LLItemBridge* bridge = dynamic_cast<LLItemBridge*>(items.front()->getViewModelItem());
+                if (bridge && bridge->getItem() && bridge->getItem()->getType() == LLAssetType::AT_NOTECARD)
+                {
+                    mItemID = bridge->getItem()->getUUID();
+                }
+            }
+            getChild<LLView>("btn_select")->setEnabled(mItemID.notNull());
+        }
+
+        // As LLFloaterSettingsPicker::handleDoubleClick: only a double-click on the selected, visible item counts.
+        bool isSelectedItemAt(S32 x, S32 y)
+        {
+            if (mItemID.isNull() || !mInventory) return false;
+            LLFolderViewItem* item = mInventory->getItemByID(mItemID);
+            if (!item || !item->getIsCurSelection() || !item->getVisible()) return false;
+            LLRect r;
+            item->localRectToOtherView(item->getLocalRect(), &r, this);
+            return r.pointInRect(x, y);
+        }
+
+        void pick()
+        {
+            const LLUUID id = mItemID;
+            if (id.isNull()) return;
+            picked_cb_t cb = mPicked;
+            closeFloater();   // destroys this floater (not single instance, not reused): nothing of it is used after
+            if (cb) cb(id);
+        }
+
+        picked_cb_t mPicked;
+        LLInventoryPanel* mInventory = nullptr;
+        LLUUID mItemID;
+    };
 }
 
 WolfFloaterBugReport::WolfFloaterBugReport(const LLSD& key) : LLFloater(key)
@@ -325,6 +559,22 @@ bool WolfFloaterBugReport::postBuild()
         });
     }
     updatePictures();
+
+    // [FLEA ATTACHMENTS 2026-11-03]
+    getChild<LLButton>("add_notecard")->setCommitCallback([this](LLUICtrl*, const LLSD&) { onAddNotecard(); });
+    getChild<LLButton>("add_video")->setCommitCallback([this](LLUICtrl*, const LLSD&) { onAddVideo(); });
+    for (S32 i = 0; i < MAX_ATTACHMENTS; ++i)
+    {
+        getChild<LLButton>(llformat("remove_attachment_%d", i + 1))->setCommitCallback([this, i](LLUICtrl*, const LLSD&)
+        {
+            if (mSending || i >= (S32)mAttachments.size()) return;
+            const std::string label = mAttachments[i].mLabel;
+            mAttachments.erase(mAttachments.begin() + i);
+            updateAttachments();
+            setStatus("Removed: " + label + ".", EStatus::INFO);
+        });
+    }
+    updateAttachments();
     return true;
 }
 
@@ -442,6 +692,7 @@ void WolfFloaterBugReport::setSending(bool sending)
     mSend->setEnabled(!sending);
     mSend->setLabel(sending ? std::string("Sending...") : std::string("Send"));
     updatePictures();   // [FLEA PICTURES 2026-10-27/] no adding or removing while the report is on its way
+    updateAttachments();   // [FLEA ATTACHMENTS 2026-11-03/] the same for notecards and videos
 }
 
 // [FLEA PICTURES 2026-10-27] The pictures list: one line per picture with its Remove button, or a line saying there are
@@ -606,6 +857,330 @@ void WolfFloaterBugReport::onPictureReady(const std::string& error, const Pictur
     updatePictures();
 }
 
+// [FLEA ATTACHMENTS 2026-11-03] Ticket 478: notecards and short videos / animations.
+
+S32 WolfFloaterBugReport::countAttachments(bool notecards) const
+{
+    S32 n = 0;
+    for (const Attachment& a : mAttachments)
+    {
+        if (a.mIsNotecard == notecards) ++n;
+    }
+    return n;
+}
+
+// The list: one line per notecard or video with its Remove button, or a line saying there are none. Each add button is
+// greyed out once its kind is full (MAX_NOTECARDS / MAX_VIDEOS, counting the ones still being fetched or read).
+void WolfFloaterBugReport::updateAttachments()
+{
+    const S32 n = (S32)mAttachments.size();
+    getChild<LLButton>("add_notecard")->setEnabled(!mSending && countAttachments(true) + mNotecardsPending < MAX_NOTECARDS);
+    getChild<LLButton>("add_video")->setEnabled(!mSending && countAttachments(false) + mVideosPending < MAX_VIDEOS);
+    LLTextBox* none = getChild<LLTextBox>("attachments_none");
+    none->setVisible(n == 0);
+    none->setText(mNotecardsPending + mVideosPending > 0
+        ? std::string("Getting it ready...")
+        : std::string("Nothing added. You can also drag a notecard from your inventory onto this window."));
+    for (S32 i = 0; i < MAX_ATTACHMENTS; ++i)
+    {
+        LLTextBox* line = getChild<LLTextBox>(llformat("attachment_%d", i + 1));
+        LLButton* remove = getChild<LLButton>(llformat("remove_attachment_%d", i + 1));
+        const bool used = i < n;
+        line->setVisible(used);
+        remove->setVisible(used);
+        remove->setEnabled(used && !mSending);
+        if (used)
+        {
+            const Attachment& a = mAttachments[i];
+            line->setText(llformat("%d. ", i + 1) + (a.mIsNotecard ? std::string("Notecard: ") : std::string("Video: ")) + a.mLabel
+                          + " - " + size_text(a.mData ? (S64)a.mData->size() : 0));
+            line->setToolTip(line->getText());
+        }
+    }
+}
+
+void WolfFloaterBugReport::onAddNotecard()
+{
+    if (mSending) return;
+    if (countAttachments(true) + mNotecardsPending >= MAX_NOTECARDS)
+    {
+        setStatus(llformat("A flea report can carry %d notecards. Remove one to add another.", MAX_NOTECARDS), EStatus::ERR);
+        return;
+    }
+    if (LLFloater* open = mNotecardPicker.get())
+    {
+        open->openFloater();
+        open->setFocus(true);
+        return;
+    }
+    const LLHandle<LLFloater> handle = getHandle();
+    WolfNotecardPicker* picker = new WolfNotecardPicker([handle](const LLUUID& item_id)
+    {
+        if (WolfFloaterBugReport* self = static_cast<WolfFloaterBugReport*>(handle.get()))
+        {
+            self->addNotecard(item_id);
+        }
+    });
+    mNotecardPicker = picker->getHandle();
+    addDependentFloater(picker, true);   // beside this window, and closed with it (llfloater.cpp addDependentFloater)
+    picker->openFloater();
+    picker->setFocus(true);
+}
+
+// From the picker or a drop: check the notecard may be read, then fetch its text from the grid.
+void WolfFloaterBugReport::addNotecard(const LLUUID& item_id)
+{
+    if (mSending) return;
+    LLViewerInventoryItem* item = gInventory.getItem(item_id);
+    if (!item || item->getType() != LLAssetType::AT_NOTECARD)
+    {
+        setStatus("Notecard not added: it could not be found in your inventory.", EStatus::ERR);
+        return;
+    }
+    const std::string name = item->getName();
+    if (countAttachments(true) + mNotecardsPending >= MAX_NOTECARDS)
+    {
+        setStatus(llformat("Notecard not added: a flea report can carry %d notecards. Remove one to add another.", MAX_NOTECARDS),
+                  EStatus::ERR);
+        return;
+    }
+    for (const Attachment& a : mAttachments)
+    {
+        if (a.mIsNotecard && a.mItemID == item_id)
+        {
+            setStatus("\"" + name + "\" is already on the flea report.", EStatus::INFO);
+            return;
+        }
+    }
+    // The rule LLPreviewNotecard::loadAsset (llpreviewnotecard.cpp) uses before it shows a notecard's text: the agent
+    // may copy it (or is a god). A no-copy notecard's text is not shown to its owner either, so it is not sent.
+    const LLPermissions& perm = item->getPermissions();
+    if (!gAgent.allowOperation(PERM_COPY, perm, GP_OBJECT_MANIPULATE) && !gAgent.isGodlike())
+    {
+        setStatus("Notecard not added: \"" + name + "\" is no-copy, so the viewer is not allowed to read its text. "
+                  "Paste the part that matters into the message instead.", EStatus::ERR);
+        return;
+    }
+    if (item->getAssetUUID().isNull())
+    {
+        // llpreviewnotecard.cpp: a null asset is a notecard that was never saved, i.e. empty.
+        setStatus("Notecard not added: \"" + name + "\" is empty.", EStatus::ERR);
+        return;
+    }
+    if (!gAssetStorage)
+    {
+        setStatus("Notecard not added: the viewer cannot reach the grid's assets right now. Try again in a moment.", EStatus::ERR);
+        return;
+    }
+    ++mNotecardsPending;
+    updateAttachments();
+    setStatus("Reading \"" + name + "\"...", EStatus::INFO);
+    // As LLPreviewNotecard::loadAsset and WolfAdventureStudioView::readNotecard (wolffloateradventurestudio.cpp) fetch an
+    // inventory notecard: getInvItemAsset with the item's owner, no task, then read the cache (LLFileSystem) when it lands.
+    const LLHandle<LLFloater> handle = getHandle();
+    gAssetStorage->getInvItemAsset(LLHost(), gAgentID, gAgentSessionID, perm.getOwner(), LLUUID::null,
+        item->getUUID(), item->getAssetUUID(), item->getType(),
+        [handle, item_id, name](const LLUUID& asset_id, LLAssetType::EType type, void*, S32 status, LLExtStat)
+        {
+            if (WolfFloaterBugReport* self = static_cast<WolfFloaterBugReport*>(handle.get()))
+            {
+                self->onNotecardLoaded(item_id, name, asset_id, type, status);
+            }
+        }, nullptr, true);
+}
+
+void WolfFloaterBugReport::onNotecardLoaded(const LLUUID& item_id, const std::string& name, const LLUUID& asset_id,
+                                            LLAssetType::EType type, S32 status)
+{
+    if (mNotecardsPending > 0) --mNotecardsPending;
+    auto refuse = [this, &name](const std::string& why)
+    {
+        LL_WARNS("WolfBugReport") << "notecard not added: " << name << ": " << why << LL_ENDL;
+        setStatus("Notecard not added: " + why, EStatus::ERR);
+        updateAttachments();
+    };
+    if (status != LL_ERR_NOERR)
+    {
+        // The same three cases LLPreviewNotecard::onLoadComplete tells apart.
+        if (status == LL_ERR_ASSET_REQUEST_NOT_IN_DATABASE || status == LL_ERR_FILE_EMPTY)
+            refuse("\"" + name + "\" could not be found on the grid's asset server.");
+        else if (status == LL_ERR_INSUFFICIENT_PERMISSIONS)
+            refuse("you do not have permission to read \"" + name + "\".");
+        else
+            refuse("\"" + name + "\" could not be read from the grid. Try adding it again.");
+        return;
+    }
+    LLFileSystem file(asset_id, type, LLFileSystem::READ);
+    const S32 size = file.getSize();
+    // A notecard asset is its text (LLNotecard::MAX_SIZE, 65536 bytes) plus a small wrapper and its item list; four times
+    // that is far more than any real one and stops a broken asset being read whole.
+    if (size <= 0 || size > 4 * LLNotecard::MAX_SIZE)
+    {
+        refuse("\"" + name + "\" is empty or not a notecard the viewer can read.");
+        return;
+    }
+    std::string raw((size_t)size, '\0');
+    if (!file.read((U8*)&raw[0], size))
+    {
+        refuse("\"" + name + "\" could not be read from the cache. Try adding it again.");
+        return;
+    }
+    std::string text;
+    if (raw.compare(0, 19, "Linden text version") == 0)
+    {
+        LLNotecard nc(LLNotecard::MAX_SIZE);
+        std::istringstream in(raw);
+        if (!nc.importStream(in))
+        {
+            refuse("\"" + name + "\" is not a notecard the viewer can read.");
+            return;
+        }
+        text = notecard_text(nc);
+    }
+    else
+    {
+        // llpreviewnotecard.cpp onLoadComplete: "Version 0 (just text, doesn't include version number)".
+        text = raw.c_str();
+    }
+    if (text.empty())
+    {
+        refuse("\"" + name + "\" is empty.");
+        return;
+    }
+    if ((S64)text.size() > MAX_NOTECARD_BYTES)
+    {
+        refuse("\"" + name + "\" is longer than 64 KB of text; split it, or paste the part that matters into the message.");
+        return;
+    }
+    if (mSending || countAttachments(true) >= MAX_NOTECARDS)
+    {
+        refuse("the flea report already has its notecards.");
+        return;
+    }
+    Attachment a;
+    a.mIsNotecard = true;
+    a.mLabel = name;
+    a.mSendAs = name + ".txt";
+    a.mMime = "text/plain; charset=utf-8";
+    a.mData = std::make_shared<const std::string>(std::move(text));
+    a.mItemID = item_id;
+    mAttachments.push_back(a);
+    setStatus("Added the notecard \"" + name + "\". Its text will be sent with your flea report.", EStatus::OK);
+    updateAttachments();
+}
+
+void WolfFloaterBugReport::onAddVideo()
+{
+    if (mSending) return;
+    if (countAttachments(false) + mVideosPending >= MAX_VIDEOS)
+    {
+        setStatus(llformat("A flea report can carry %d videos or animations. Remove one to add another.", MAX_VIDEOS), EStatus::ERR);
+        return;
+    }
+    // As onAddPicture, with the MP4 / WebM / GIF filter (llfilepicker.h FFLOAD_WOLF_VIDEO).
+    const LLHandle<LLFloater> handle = getHandle();
+    LLFilePickerReplyThread::startPicker(
+        [handle](const std::vector<std::string>& filenames, LLFilePicker::ELoadFilter, LLFilePicker::ESaveFilter)
+        {
+            if (WolfFloaterBugReport* self = static_cast<WolfFloaterBugReport*>(handle.get()))
+            {
+                self->onVideoFilePicked(filenames);
+            }
+        },
+        LLFilePicker::FFLOAD_WOLF_VIDEO, false);
+}
+
+void WolfFloaterBugReport::onVideoFilePicked(const std::vector<std::string>& filenames)
+{
+    if (filenames.empty() || filenames[0].empty() || mSending) return;   // the picker was cancelled
+    if (countAttachments(false) + mVideosPending >= MAX_VIDEOS)
+    {
+        setStatus(llformat("A flea report can carry %d videos or animations. Remove one to add another.", MAX_VIDEOS), EStatus::ERR);
+        return;
+    }
+    const std::string path = filenames[0];
+    const std::string name = gDirUtilp->getBaseFileName(path, false);
+    // Size first, so a 2 GB film is refused at once instead of being read.
+    llstat st;
+    if (LLFile::stat(path, &st) != 0 || st.st_size <= 0)
+    {
+        setStatus("Video not added: " + name + " could not be opened, or is empty.", EStatus::ERR);
+        return;
+    }
+    if ((S64)st.st_size > MAX_VIDEO_BYTES)
+    {
+        setStatus("Video not added: " + name + " is " + size_text((S64)st.st_size) + "; a video or animation can be "
+                  + size_text(MAX_VIDEO_BYTES) + " at most. Make a shorter clip and try again.", EStatus::ERR);
+        return;
+    }
+    ++mVideosPending;
+    updateAttachments();
+    setStatus("Reading " + name + "...", EStatus::INFO);
+    // Read and check on the "General" queue: 25 MB from a slow or network disk can take a moment (as pictures do).
+    const LLHandle<LLFloater> handle = getHandle();
+    auto work = [path]() { return load_video(path); };
+    auto done = [handle, name](PreparedVideo prepared)
+    {
+        WolfFloaterBugReport* self = static_cast<WolfFloaterBugReport*>(handle.get());
+        if (!self) return;
+        Attachment video;
+        video.mIsNotecard = false;
+        video.mLabel = name;
+        video.mSendAs = prepared.mExt;   // made "video-<n>.<ext>" when sent
+        video.mMime = prepared.mExt.empty() ? std::string() : std::string(video_mime(prepared.mExt));
+        video.mData = prepared.mData;
+        self->onVideoReady(prepared.mError, video);
+    };
+    LL::WorkQueue::ptr_t main_queue = LL::WorkQueue::getInstance("mainloop");
+    LL::WorkQueue::ptr_t general_queue = LL::WorkQueue::getInstance("General");
+    if (!main_queue || !general_queue || !main_queue->postTo(general_queue, work, done))
+    {
+        done(work());   // no worker thread: do it here, as startPreparing does for pictures
+    }
+}
+
+void WolfFloaterBugReport::onVideoReady(const std::string& error, const Attachment& video)
+{
+    if (mVideosPending > 0) --mVideosPending;
+    if (!error.empty() || !video.mData || video.mData->empty())
+    {
+        LL_WARNS("WolfBugReport") << "video not added: " << video.mLabel << ": " << error << LL_ENDL;
+        setStatus("Video not added: " + video.mLabel + ": " + (error.empty() ? std::string("it could not be read.") : error), EStatus::ERR);
+    }
+    else if (mSending || countAttachments(false) >= MAX_VIDEOS)
+    {
+        setStatus("Video not added: the flea report already has its videos.", EStatus::ERR);
+    }
+    else
+    {
+        mAttachments.push_back(video);
+        setStatus("Added: " + video.mLabel + ". It will be sent with your flea report.", EStatus::OK);
+    }
+    updateAttachments();
+}
+
+// A notecard dragged from inventory onto any part of this window is added, as if picked with "Add a notecard...".
+// Only an item in the resident's own inventory (gInventory knows it): a notecard in an object's contents is not.
+bool WolfFloaterBugReport::handleDragAndDrop(S32 x, S32 y, MASK mask, bool drop, EDragAndDropType cargo_type, void* cargo_data,
+                                             EAcceptance* accept, std::string& tooltip_msg)
+{
+    if (cargo_type == DAD_NOTECARD && cargo_data)
+    {
+        const LLInventoryItem* item = static_cast<const LLInventoryItem*>(cargo_data);
+        if (!mSending && gInventory.getItem(item->getUUID()))
+        {
+            *accept = ACCEPT_YES_COPY_SINGLE;
+            tooltip_msg = "Add this notecard to the flea report";
+            if (drop) addNotecard(item->getUUID());
+        }
+        else
+        {
+            *accept = ACCEPT_NO;
+        }
+        return true;
+    }
+    return LLFloater::handleDragAndDrop(x, y, mask, drop, cargo_type, cargo_data, accept, tooltip_msg);
+}
 
 void WolfFloaterBugReport::onSend()
 {
@@ -646,6 +1221,11 @@ void WolfFloaterBugReport::onSend()
         setStatus("Not sent yet: a picture is still being prepared. Press Send again in a moment.", EStatus::ERR);
         return;
     }
+    if (mNotecardsPending + mVideosPending > 0)   // [FLEA ATTACHMENTS 2026-11-03/]
+    {
+        setStatus("Not sent yet: a notecard or video is still being read. Press Send again in a moment.", EStatus::ERR);
+        return;
+    }
 
     LLSD fields;
     fields["category"] = category;
@@ -667,12 +1247,22 @@ void WolfFloaterBugReport::onSend()
     setSending(true);
     const LLHandle<LLFloater> handle = getHandle();
     const std::vector<Picture> pictures = mPictures;   // [FLEA PICTURES 2026-10-27/]
-    const std::string with_pictures = pictures.empty() ? std::string()
+    std::string with_pictures = pictures.empty() ? std::string()
         : llformat(" and %d picture%s", (S32)pictures.size(), pictures.size() == 1 ? "" : "s");
+    // [FLEA ATTACHMENTS 2026-11-03] The bytes are shared (Attachment::mData), so this copies names only.
+    const std::vector<Attachment> attachments = mAttachments;
+    if (!attachments.empty())
+    {
+        with_pictures += llformat(" with %d notecard or video file%s", (S32)attachments.size(), attachments.size() == 1 ? "" : "s");
+        if (countAttachments(false) > 0) with_pictures += " (a video can take a few minutes to upload)";
+    }
     if (!mAttach->get() || mLogs.empty())
     {
         setStatus("Sending your flea report" + with_pictures + "...", EStatus::INFO);
-        LLCoros::instance().launch("WolfBugReport", [handle, fields, pictures]() { sendCoro(handle, fields, {}, pictures); });
+        LLCoros::instance().launch("WolfBugReport", [handle, fields, pictures, attachments]()
+        {
+            sendCoro(handle, fields, {}, pictures, attachments);
+        });
         return;
     }
 
@@ -681,14 +1271,17 @@ void WolfFloaterBugReport::onSend()
     const std::vector<std::string> secrets = { gAgentSessionID.asString(), gAgent.getSecureSessionID().asString() };
     LL::WorkQueue::ptr_t main_queue = LL::WorkQueue::getInstance("mainloop");
     LL::WorkQueue::ptr_t general_queue = LL::WorkQueue::getInstance("General");
-    auto launch = [handle, fields, pictures, with_pictures](std::vector<std::pair<std::string, std::string>> parts)
+    auto launch = [handle, fields, pictures, attachments, with_pictures](std::vector<std::pair<std::string, std::string>> parts)
     {
         if (WolfFloaterBugReport* self = static_cast<WolfFloaterBugReport*>(handle.get()))
         {
             self->setStatus(with_pictures.empty() ? std::string("Sending your flea report and logs...")
                                                   : "Sending your flea report, logs" + with_pictures + "...", EStatus::INFO);
         }
-        LLCoros::instance().launch("WolfBugReport", [handle, fields, parts, pictures]() { sendCoro(handle, fields, parts, pictures); });
+        LLCoros::instance().launch("WolfBugReport", [handle, fields, parts, pictures, attachments]()
+        {
+            sendCoro(handle, fields, parts, pictures, attachments);
+        });
     };
     if (!main_queue || !general_queue
         || !main_queue->postTo(general_queue, [logs, secrets]() { return prepare_logs(logs, secrets); }, launch))
@@ -700,7 +1293,7 @@ void WolfFloaterBugReport::onSend()
 
 // static
 void WolfFloaterBugReport::sendCoro(LLHandle<LLFloater> handle, LLSD fields, std::vector<std::pair<std::string, std::string>> parts,
-                                    std::vector<Picture> pictures)
+                                    std::vector<Picture> pictures, std::vector<Attachment> attachments)
 {
     // multipart/form-data (RFC 7578), CRLF line ends. The boundary is random so no log line can contain it.
     LLUUID rnd;
@@ -731,6 +1324,23 @@ void WolfFloaterBugReport::sendCoro(LLHandle<LLFloater> handle, LLSD fields, std
         put(p.mData);
         put("\r\n");
     }
+    // [FLEA ATTACHMENTS 2026-11-03] viewerbugreport.php notecards[] (the notecard's name + ".txt", its text as UTF-8) and
+    // videos[] (the bytes unchanged). Like pictures, a video goes as "video-<n>.<ext>": the picked file's own name can
+    // hold the resident's real name or more, so it stays in this window. A notecard's name is the inventory name the
+    // resident gave it.
+    bool any_video = false;
+    S32 video_number = 0;
+    for (const Attachment& a : attachments)
+    {
+        if (!a.mData) continue;
+        const std::string file = a.mIsNotecard ? part_file_name(a.mSendAs) : llformat("video-%d.", ++video_number) + a.mSendAs;
+        any_video = any_video || !a.mIsNotecard;
+        put("--" + boundary + "\r\nContent-Disposition: form-data; name=\"" + (a.mIsNotecard ? "notecards[]" : "videos[]")
+            + "\"; filename=\"" + file + "\"\r\nContent-Type: " + a.mMime + "\r\n\r\n");
+        put(*a.mData);
+        put("\r\n");
+    }
+    attachments.clear();   // the bytes are in the request body now; let this coroutine's copy go while it waits
     put("--" + boundary + "--\r\n");
 
     LLCoreHttpUtil::HttpCoroutineAdapter::ptr_t adapter =
@@ -738,6 +1348,13 @@ void WolfFloaterBugReport::sendCoro(LLHandle<LLFloater> handle, LLSD fields, std
     LLCore::HttpRequest::ptr_t request = std::make_shared<LLCore::HttpRequest>();
     LLCore::HttpOptions::ptr_t options = WolfGrid::makeVerifiedHttpOptions();
     options->setTimeout(180);
+    if (any_video)
+    {
+        // [FLEA ATTACHMENTS 2026-11-03] Up to 2 x 25 MB on a home upload link can take many minutes. setTimeout alone is
+        // also the whole-transfer limit (_httpoprequest.cpp: CURLOPT_TIMEOUT = the transfer timeout, or the timeout when
+        // that is 0); 30 minutes for the transfer, inside HTTP_REQUEST_TIMEOUT_MAX (3600, _httpinternal.h).
+        options->setTransferTimeout(1800);
+    }
     LLCore::HttpHeaders::ptr_t headers = std::make_shared<LLCore::HttpHeaders>();
     headers->append(HTTP_OUT_HEADER_ACCEPT, "application/json");
     headers->append(HTTP_OUT_HEADER_CONTENT_TYPE, "multipart/form-data; boundary=" + boundary);
@@ -790,6 +1407,10 @@ void WolfFloaterBugReport::onSent(const LLSD& reply, const std::string& error)
     if (stored > 0) t += llformat(" %d log file%s attached.", stored, stored == 1 ? "" : "s");
     const S32 pictures = reply["picturesStored"].asInteger();   // [FLEA PICTURES 2026-10-27/]
     if (pictures > 0) t += llformat(" %d picture%s attached.", pictures, pictures == 1 ? "" : "s");
+    const S32 notecards = reply["notecardsStored"].asInteger();   // [FLEA ATTACHMENTS 2026-11-03/]
+    if (notecards > 0) t += llformat(" %d notecard%s attached.", notecards, notecards == 1 ? "" : "s");
+    const S32 videos = reply["videosStored"].asInteger();
+    if (videos > 0) t += llformat(" %d video%s or animation%s attached.", videos, videos == 1 ? "" : "s", videos == 1 ? "" : "s");
     const LLSD& refused = reply["logsRefused"];
     if (refused.isArray() && refused.size() > 0)
     {
@@ -805,4 +1426,6 @@ void WolfFloaterBugReport::onSent(const LLSD& reply, const std::string& error)
     mCategory->selectFirstItem();
     mPictures.clear();   // [FLEA PICTURES 2026-10-27/] they are on the ticket now
     updatePictures();
+    mAttachments.clear();   // [FLEA ATTACHMENTS 2026-11-03/] so are these
+    updateAttachments();
 }

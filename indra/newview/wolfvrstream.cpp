@@ -21,6 +21,7 @@
 #include <fstream>
 #include <map>
 #include <memory>
+#include <atomic>
 #include <mutex>
 #include <sstream>
 
@@ -33,6 +34,10 @@
 #include "llviewermenu.h"
 #include "wolfgrid.h"
 #include "wolfvrscreen.h"
+#include "wolfvrui.h"
+#include "wolfvraudio.h"
+#include "wolfvr_openh264.h"
+#include "wolfvrcodecfetch.h"
 
 #if LL_LINUX || LL_DARWIN
 #include <sys/stat.h>
@@ -62,9 +67,33 @@ namespace
     // window is not 16:9 (wolfvrscreen.cpp). A fixed size: the window is often still small when the stream starts
     // (1024x738 at the login screen, seen 2026-11-03) and is resized freely afterwards. World (VR 3D Mode): a square
     // 1440x1440 window into the world, 100 degrees across (Config fov_deg), drawn for the newest head pose.
+    // [VR OPENH264 2026-11-04] Cisco's OpenH264 binary, downloaded on the resident's own press (Cisco's binary licence:
+    // "separately downloaded to an end user's device", the resident able to switch it off: WolfVROpenH264), kept in
+    // the user settings folder. Codec state for the floater; the download's answer comes back on its own thread.
+    std::string codecDir() { return gDirUtilp->getExpandedFilename(LL_PATH_USER_SETTINGS, ""); }
+    std::atomic<bool> gCodecBusy{false};
+    std::atomic<int> gCodecInstalled{-1};   // -1 not checked yet
+    std::mutex gCodecMutex;
+    std::string gCodecMessage;              // gCodecMutex
+    void applyCodec()
+    {
+        const std::string dir = codecDir();
+        const bool have = wolfvr::openh264Available() && wolfvr::openh264Installed(dir);
+        gCodecInstalled = have ? 1 : 0;
+        wolfvr::setOpenH264Path(have && gSavedSettings.getBOOL("WolfVROpenH264") ? wolfvr::openh264File(dir) : std::string());
+    }
+
     struct ModeSize { std::string mode; U32 w, h; bool external; U32 kbps; };
+    // [VR CONTROLS 2026-11-04] Quality steps the headset page picks (per-headset start, then down when its decoder or
+    // the network falls behind, up again when steady; wolfvr.js adaptQuality): eye size, stereo / mono / big-screen
+    // bitrate. Step 0 is the Quest 3 default; the page's own table says which step each headset starts on.
+    struct QualityStep { U32 eye; U32 stereo_kbps; U32 flat_kbps; };
+    constexpr QualityStep kQuality[4] = {{1152, 40000, 25000}, {1024, 30000, 20000}, {896, 22000, 15000}, {768, 15000, 10000}};
+    S32 gQuality = 0;   // gMutex
+
     ModeSize modeSize(const std::string& setting)
     {
+        const QualityStep& q = kQuality[llclamp(gQuality, 0, 3)];
         if (setting == "test") return {"test", 1280, 1280, false, 25000};
         if (setting == "world" && gSavedSettings.getBOOL("WolfVR3DMode"))
         {
@@ -74,12 +103,13 @@ namespace
             // H.264 Table A-1) that NVENC and the Quest decoder both take. More pixels than mono: 40 Mbit/s.
             if (gSavedSettings.getBOOL("WolfVRStereo"))
             {
-                const U32 eye = llclamp(gSavedSettings.getU32("WolfVREyeSize"), 512u, 2048u) / 16 * 16;
-                return {"world", eye * 2, eye, true, 40000};
+                const U32 eye = llmin(q.eye, llclamp(gSavedSettings.getU32("WolfVREyeSize"), 512u, 2048u)) / 16 * 16;
+                return {"world", eye * 2, eye, true, q.stereo_kbps};
             }
-            return {"world", 1440, 1440, true, 25000};
+            const U32 side = q.eye * 5 / 4 / 16 * 16;   // 1440 at step 0, as before
+            return {"world", side, side, true, q.flat_kbps};
         }
-        return {"screen", 1920, 1080, true, 25000};
+        return {"screen", 1920, 1080, true, q.flat_kbps};
     }
 
     bool readText(const std::string& path, std::string& out)
@@ -155,6 +185,7 @@ namespace
         cfg.height = ms.h;
         cfg.external_frames = ms.external;
         cfg.world_allowed = gSavedSettings.getBOOL("WolfVR3DMode");
+        cfg.debug_stats = gSavedSettings.getBOOL("WolfVRDebugStats");   // [VR LEAN] read once, here
         if (ms.external) cfg.fps = 60;
         cfg.bitrate_kbps = ms.kbps;
         cfg.log = [](wolfvr::LogLevel level, const std::string& line) {
@@ -162,6 +193,7 @@ namespace
             if (level == wolfvr::LogLevel::WARN) LL_WARNS("WolfVR") << line << LL_ENDL;
             else LL_INFOS("WolfVR") << line << LL_ENDL;
         };
+        applyCodec();   // [VR OPENH264] before the first encoder opens
         std::string error;
         if (!loadOrMakeCert(cfg.bind_ip, cfg.cert_pem, cfg.key_pem, error))
         {
@@ -224,6 +256,7 @@ namespace
     {
         if (gShutdown) { gPumpRunning = false; return true; }
         gateMenu();
+        WolfVRUi::pump();   // [VR CONTROLS 2026-11-04] the in-VR action bar's state to the headset
         std::deque<std::pair<std::string, bool>> notices;
         {
             std::lock_guard<std::mutex> lk(gNoticeMutex);
@@ -250,7 +283,11 @@ void init()
         gPumpRunning = true;
         doPeriodically(pump, 0.25f);
         // [VR BIG SCREEN] the headset's pointer and keys, every frame
-        gIdleCallbacks.addFunction([](void*) { if (!gShutdown) WolfVRScreen::pumpInput(); }, nullptr);
+        gIdleCallbacks.addFunction([](void*) {
+            if (gShutdown) return;
+            WolfVRScreen::pumpInput();
+            WolfVRAudio::pump();   // [VR AUDIO 2026-11-04] the sound to the headset, the PC speakers muted or not
+        }, nullptr);
     }
     // [VR 3D] a new choice of what to show switches a running stream to it, without dropping the headset
     gSavedSettings.getControl("WolfVRStreamMode")->getSignal()->connect([](LLControlVariable*, const LLSD& v, const LLSD&) {
@@ -271,6 +308,9 @@ void init()
         LL_INFOS("WolfVR") << "headset 3D picture now " << ms.w << "x" << ms.h << LL_ENDL;
     };
     gSavedSettings.getControl("WolfVRStereo")->getSignal()->connect(resize3d);
+    // [VR OPENH264] the resident's on/off for Cisco's codec: the next encoder uses it, or not (a library already
+    // loaded stays loaded until the viewer restarts - wolfvr_openh264.h)
+    gSavedSettings.getControl("WolfVROpenH264")->getSignal()->connect([](LLControlVariable*, const LLSD&, const LLSD&) { applyCodec(); });
     gSavedSettings.getControl("WolfVREyeSize")->getSignal()->connect(resize3d);
     gSavedSettings.getControl("WolfVRStreamEnabled")->getSignal()->connect(
         [](LLControlVariable*, const LLSD& value, const LLSD&) { onEnabledChanged(value); });
@@ -279,6 +319,7 @@ void init()
 
 void shutdown()
 {
+    WolfVRAudio::shutdown();   // [VR AUDIO] every tap removed and the PC speakers given back first
     gShutdown = true;
     {
         std::lock_guard<std::mutex> lk(gMutex);
@@ -316,11 +357,107 @@ void pumpModeRequest()
     std::string m;
     {
         std::lock_guard<std::mutex> lk(gMutex);
-        if (gService) m = gService->takeModeRequest();
+        if (gService)
+        {
+            m = gService->takeModeRequest();
+            // [VR CONTROLS 2026-11-04] a new quality step: the same mode at the new size and bitrate
+            const int q = gService->takeQualityRequest();
+            if (q >= 0 && q != gQuality)
+            {
+                gQuality = q;
+                const ModeSize ms = modeSize(gMode);
+                if (ms.mode == gMode)
+                {
+                    gService->setMode(ms.mode, ms.w, ms.h, ms.external, ms.kbps);
+                    LL_INFOS("WolfVR") << "headset asked for quality step " << q << ": " << ms.w << "x" << ms.h << " "
+                                       << ms.kbps << " kbit/s" << LL_ENDL;
+                }
+            }
+        }
     }
     // Through the setting, so the floater's choice follows the headset's (the signal above does the switch).
     if (m == "world" && !gSavedSettings.getBOOL("WolfVR3DMode")) return;   // not offered yet
     if (!m.empty()) gSavedSettings.setString("WolfVRStreamMode", m);
+}
+
+int codecState()
+{
+    if (!wolfvr::openh264Available()) return -1;
+    if (gCodecBusy) return 2;
+    if (gCodecInstalled < 0) applyCodec();
+    return gCodecInstalled > 0 ? 1 : 0;
+}
+
+std::string codecMessage()
+{
+    std::lock_guard<std::mutex> lk(gCodecMutex);
+    return gCodecMessage;
+}
+
+void downloadCodec()
+{
+    if (gCodecBusy.exchange(true)) return;
+    {
+        std::lock_guard<std::mutex> lk(gCodecMutex);
+        gCodecMessage = "Downloading the video codec from Cisco...";
+    }
+    // done() runs on the download's own thread: it only stores the answer; the floater reads it (codecMessage) and
+    // the library is picked up by the next encoder (setOpenH264Path is safe from any thread)
+    wolfvr::fetchOpenH264Async(codecDir(), [](bool ok, std::string message) {
+        {
+            std::lock_guard<std::mutex> lk(gCodecMutex);
+            gCodecMessage = message;
+        }
+        if (ok)
+        {
+            gCodecInstalled = 1;
+            wolfvr::setOpenH264Path(wolfvr::openh264File(codecDir()));
+        }
+        gCodecBusy = false;
+    });
+}
+
+bool audioWanted()
+{
+    std::lock_guard<std::mutex> lk(gMutex);
+    return gService && gService->audioWanted();
+}
+
+void submitAudio(const int16_t* pcm, U32 frames, U32 channels, U32 rate, double mix_ms)
+{
+    // the audio thread: never wait long for the main thread's lock (it is held only for short calls)
+    std::unique_lock<std::mutex> lk(gMutex, std::try_to_lock);
+    if (lk.owns_lock() && gService) gService->submitAudio(pcm, frames, channels, rate, mix_ms);
+}
+
+bool layerWanted()
+{
+    std::lock_guard<std::mutex> lk(gMutex);
+    return gService && gMode == "world" && gService->layerWanted();
+}
+
+bool layerIdle()
+{
+    std::lock_guard<std::mutex> lk(gMutex);
+    return gService && gService->layerIdle();
+}
+
+void submitLayer(std::vector<uint8_t>& rgba, U32 w, U32 h, double capture_ms)
+{
+    std::lock_guard<std::mutex> lk(gMutex);
+    if (gService) gService->submitLayer(rgba, w, h, capture_ms);
+}
+
+void sendText(const std::string& json)
+{
+    std::lock_guard<std::mutex> lk(gMutex);
+    if (gService) gService->sendText(json);
+}
+
+std::string mode()
+{
+    std::lock_guard<std::mutex> lk(gMutex);
+    return gService ? gMode : std::string();
 }
 
 void frameSize(U32& width, U32& height)

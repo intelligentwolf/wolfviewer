@@ -1,0 +1,6 @@
+MaterialIcons-Regular.woff2 - Google Material Icons (the "Material Icons" family WolfStorm loads from
+https://fonts.googleapis.com/icon?family=Material+Icons). Fetched 2026-11-04 from the URL that stylesheet names:
+https://fonts.gstatic.com/s/materialicons/v145/flUhRq6tzZclQEJ-Vdg-IuiaDsNc.woff2
+sha256 8265f64786397d6b832d1ca0aafdf149ad84e72759fffa9f7272e91a0fb015d1
+Kept here so the headset page draws the same glyphs as WolfStorm's VR action bar without reaching the internet.
+Licence: Apache License 2.0 (https://github.com/google/material-design-icons/blob/master/LICENSE).

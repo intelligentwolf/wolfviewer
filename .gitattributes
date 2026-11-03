@@ -40,3 +40,5 @@ FILES_ARE_UNICODE_UTF-16LE.txt text eol=crlf
 *.WAV binary
 # [VR PIPE 2026-11-03] brotli-compressed web assets (app_settings/wolfvr/three/*.br) are binary
 *.br binary
+# [VR CONTROLS 2026-11-04] the headset page icon font (app_settings/wolfvr/fonts)
+*.woff2 binary

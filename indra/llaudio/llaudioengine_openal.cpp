@@ -124,8 +124,157 @@ bool LLAudioEngine_OpenAL::init(void* userdata, const std::string &app_title)
     initDeviceWatch(device);   // <WolfViewer 2026-09-13>
     enumerateDevices(false);   // <WolfViewer 2026-09-18> the Preferences picker's list; setDevice() follows from llstartup
 
+    // [VR AUDIO 2026-11-04] see setMirrorMix in the header; on any failure the engine plays as it always has
+    if (sMirrorMixWanted && !initMirrorMix())
+    {
+        LL_WARNS() << "OpenAL: the VR headset sound mirror could not start; sound plays on this PC only" << LL_ENDL;
+    }
+
     return true;
 }
+
+// [VR AUDIO 2026-11-04] ─── the final mix for the VR headset ─────────────────────────────────────────
+bool LLAudioEngine_OpenAL::sMirrorMixWanted = false;
+
+ALCdevice* LLAudioEngine_OpenAL::outputDevice() const
+{
+    return mOutDevice ? mOutDevice : alcGetContextsDevice(alcGetCurrentContext());
+}
+
+void LLAudioEngine_OpenAL::setMixTap(MixTapFn fn, void* user)
+{
+    // user first: the mixer thread reads fn, then user (fn is only ever set with the one user it was given)
+    if (fn) mMixTapUser.store(user);
+    mMixTap.store(fn);
+}
+
+bool LLAudioEngine_OpenAL::initMirrorMix()
+{
+    ALCcontext* out_ctx = alcGetCurrentContext();   // alutInit's context on the speakers
+    ALCdevice* out_dev = alcGetContextsDevice(out_ctx);
+    if (!out_ctx || !out_dev) return false;
+    // Source: alext.h:286-301 ALC_SOFT_loopback (device-independent: queried on NULL), alext.h:163-167
+    // ALC_EXT_thread_local_context, alext.h:581-588 AL_SOFT_callback_buffer (an AL extension: needs a context).
+    if (alcIsExtensionPresent(nullptr, "ALC_SOFT_loopback") != ALC_TRUE ||
+        alcIsExtensionPresent(nullptr, "ALC_EXT_thread_local_context") != ALC_TRUE ||
+        alIsExtensionPresent("AL_SOFT_callback_buffer") != AL_TRUE)
+    {
+        LL_WARNS() << "OpenAL: no loopback / thread-context / callback-buffer extension" << LL_ENDL;
+        return false;
+    }
+    auto loopOpen = (LPALCLOOPBACKOPENDEVICESOFT)alcGetProcAddress(nullptr, "alcLoopbackOpenDeviceSOFT");
+    auto formatOk = (LPALCISRENDERFORMATSUPPORTEDSOFT)alcGetProcAddress(nullptr, "alcIsRenderFormatSupportedSOFT");
+    mRenderSamplesSOFT = (LPALCRENDERSAMPLESSOFT)alcGetProcAddress(nullptr, "alcRenderSamplesSOFT");
+    mSetThreadContext = (PFNALCSETTHREADCONTEXTPROC)alcGetProcAddress(nullptr, "alcSetThreadContext");
+    auto bufferCallback = (LPALBUFFERCALLBACKSOFT)alGetProcAddress("alBufferCallbackSOFT");
+    if (!loopOpen || !formatOk || !mRenderSamplesSOFT || !mSetThreadContext || !bufferCallback) return false;
+
+    ALCdevice* loop = loopOpen(nullptr);
+    if (!loop) return false;
+    // Source: alext.h:292-307 - 32-bit float stereo; alc.h:119 ALC_FREQUENCY
+    if (formatOk(loop, (ALCsizei)MIRROR_RATE, ALC_STEREO_SOFT, ALC_FLOAT_SOFT) != ALC_TRUE)
+    {
+        alcCloseDevice(loop);
+        return false;
+    }
+    // Keep the speakers' HRTF choice (OpenAL Soft switches HRTF on by itself for headphones; a loopback device
+    // cannot know what it will play on). Source: alext.h:440-447 ALC_HRTF_SOFT on a device, ALC_TRUE/ALC_FALSE.
+    ALCint hrtf = ALC_FALSE;
+    if (alcIsExtensionPresent(out_dev, "ALC_SOFT_HRTF") == ALC_TRUE)
+    {
+        alcGetIntegerv(out_dev, ALC_HRTF_SOFT, 1, &hrtf);
+    }
+    const ALCint attrs[] = { ALC_FORMAT_CHANNELS_SOFT, ALC_STEREO_SOFT, ALC_FORMAT_TYPE_SOFT, ALC_FLOAT_SOFT,
+                             ALC_FREQUENCY, (ALCint)MIRROR_RATE, ALC_HRTF_SOFT, hrtf ? ALC_TRUE : ALC_FALSE, 0 };
+    ALCcontext* loop_ctx = alcCreateContext(loop, attrs);
+    if (!loop_ctx)
+    {
+        alcCloseDevice(loop);
+        return false;
+    }
+
+    // The speakers' one source, made on their context through this thread's own context so the process-wide
+    // current context is never the speakers' one. Source: alext.h:165 alcSetThreadContext; alext.h:53-57
+    // AL_FORMAT_STEREO_FLOAT32; alext.h:283 AL_DIRECT_CHANNELS_SOFT (stereo straight to the front pair, no
+    // panning or HRTF applied twice).
+    mSetThreadContext(out_ctx);
+    alGetError();
+    alGenBuffers(1, &mOutBuffer);
+    alGenSources(1, &mOutSource);
+    bufferCallback(mOutBuffer, AL_FORMAT_STEREO_FLOAT32, (ALsizei)MIRROR_RATE, &LLAudioEngine_OpenAL::onOutputPull, this);
+    alSourcei(mOutSource, AL_BUFFER, (ALint)mOutBuffer);
+    alSourcei(mOutSource, AL_SOURCE_RELATIVE, AL_TRUE);
+    alSourcei(mOutSource, AL_DIRECT_CHANNELS_SOFT, AL_TRUE);
+    const ALenum err = alGetError();
+    mSetThreadContext(nullptr);
+    if (err != AL_NO_ERROR)
+    {
+        mSetThreadContext(out_ctx);
+        alDeleteSources(1, &mOutSource);
+        alDeleteBuffers(1, &mOutBuffer);
+        mSetThreadContext(nullptr);
+        mOutSource = mOutBuffer = 0;
+        alcDestroyContext(loop_ctx);
+        alcCloseDevice(loop);
+        LL_WARNS() << "OpenAL: the speakers' mirror source failed, AL error 0x" << std::hex << err << std::dec << LL_ENDL;
+        return false;
+    }
+    mOutDevice = out_dev;
+    mOutContext = out_ctx;
+    mLoopDevice = loop;
+    mLoopContext = loop_ctx;
+    // From here every engine call (sources, listener, wind, gain) is on the loopback context.
+    alcMakeContextCurrent(loop_ctx);
+    mSetThreadContext(out_ctx);
+    alSourcePlay(mOutSource);
+    mSetThreadContext(nullptr);
+    LL_INFOS() << "OpenAL: VR headset sound mirror on (loopback " << MIRROR_RATE << " Hz stereo, HRTF "
+               << (hrtf ? "on" : "off") << ") playing on '" << ll_safe_string(alcGetString(out_dev, ALC_ALL_DEVICES_SPECIFIER))
+               << "'" << LL_ENDL;
+    return true;
+}
+
+void LLAudioEngine_OpenAL::shutdownMirrorMix()
+{
+    if (!mLoopDevice) return;
+    mMixTap.store(nullptr);
+    // Back to alutInit's own context, so alutExit closes what alutInit opened, exactly as without the mirror.
+    alcMakeContextCurrent(mOutContext);
+    alSourceStop(mOutSource);
+    alDeleteSources(1, &mOutSource);
+    alDeleteBuffers(1, &mOutBuffer);
+    mOutSource = mOutBuffer = 0;
+    alcDestroyContext(mLoopContext);
+    alcCloseDevice(mLoopDevice);
+    mLoopContext = nullptr;
+    mLoopDevice = nullptr;
+    mOutContext = nullptr;
+    mOutDevice = nullptr;
+}
+
+// static - the speakers' mixer thread (alext.h:583 ALBUFFERCALLBACKTYPESOFT: return the bytes written; fewer than
+// asked ends the stream, so always all of them). Renders the engine's mix for exactly this many frames.
+ALsizei AL_APIENTRY LLAudioEngine_OpenAL::onOutputPull(ALvoid* user, ALvoid* data, ALsizei bytes) AL_API_NOEXCEPT17
+{
+    LLAudioEngine_OpenAL* self = static_cast<LLAudioEngine_OpenAL*>(user);
+    const ALsizei frames = bytes / (ALsizei)(2 * sizeof(F32));
+    if (!self || !self->mLoopDevice || frames <= 0)
+    {
+        memset(data, 0, (size_t)bytes);
+        return bytes;
+    }
+    self->mRenderSamplesSOFT(self->mLoopDevice, data, frames);
+    if (MixTapFn tap = self->mMixTap.load())
+    {
+        tap(static_cast<const F32*>(data), (U32)frames, MIRROR_RATE, self->mMixTapUser.load());
+    }
+    if (self->mSpeakersMuted.load())
+    {
+        memset(data, 0, (size_t)bytes);
+    }
+    return bytes;
+}
+// [/VR AUDIO]
 
 // <WolfViewer 2026-09-18> ─── output-device selection ─────────────────────────────────────────
 // See the note on getDevices/setDevice in llaudioengine_openal.h.
@@ -187,7 +336,7 @@ void LLAudioEngine_OpenAL::setDevice(const LLUUID& device_uuid)
     {
         LL_WARNS() << "OpenAL: the chosen output device " << device_uuid << " is not present; using the default until it is" << LL_ENDL;
     }
-    ALCdevice* device = alcGetContextsDevice(alcGetCurrentContext());
+    ALCdevice* device = outputDevice()  /* [VR AUDIO 2026-11-04] the speakers */;
     if (!device || !mReopenDeviceSOFT)
     {
         // Before init, or no reopen extension: nothing to switch. (alutInit opened the default.)
@@ -372,7 +521,7 @@ void LLAudioEngine_OpenAL::watchDevice()
     if (mHasDisconnectExt && now >= mNextDeviceCheck)
     {
         mNextDeviceCheck = now + 2.0;
-        ALCdevice* device = alcGetContextsDevice(alcGetCurrentContext());
+        ALCdevice* device = outputDevice()  /* [VR AUDIO 2026-11-04] the speakers */;
         if (device)
         {
             // Source: alext.h:160 ALC_CONNECTED — 0 once the device has gone away.
@@ -413,7 +562,7 @@ void LLAudioEngine_OpenAL::watchDevice()
 
 void LLAudioEngine_OpenAL::reopenDevice(const char* why)
 {
-    ALCdevice* device = alcGetContextsDevice(alcGetCurrentContext());
+    ALCdevice* device = outputDevice()  /* [VR AUDIO 2026-11-04] the speakers */;
     if (!device || !mReopenDeviceSOFT)
     {
         return;
@@ -456,13 +605,30 @@ void LLAudioEngine_OpenAL::idle()
 {
     LLAudioEngine::idle();
     watchDevice();
+    // [VR AUDIO 2026-11-04] OpenAL stops every source on a device that goes away (alext.h:158 ALC_EXT_disconnect);
+    // the engine's own sounds restart themselves, the speakers' mirror source is restarted here, after the
+    // device watch has reopened the device.
+    static F64 next_mirror_check = 0.0;   // once a second at most: a device that stays gone must not spin
+    if (mOutSource && mSetThreadContext && LLFrameTimer::getElapsedSeconds() >= next_mirror_check)
+    {
+        next_mirror_check = LLFrameTimer::getElapsedSeconds() + 1.0;
+        mSetThreadContext(mOutContext);
+        ALint state = AL_PLAYING;
+        alGetSourcei(mOutSource, AL_SOURCE_STATE, &state);
+        if (state != AL_PLAYING)
+        {
+            alSourcePlay(mOutSource);
+            LL_INFOS() << "OpenAL: restarted the VR mirror's speaker source (state 0x" << std::hex << state << std::dec << ")" << LL_ENDL;
+        }
+        mSetThreadContext(nullptr);
+    }
 }
 // </WolfViewer 2026-09-13>
 
 // virtual
 std::string LLAudioEngine_OpenAL::getDriverName(bool verbose)
 {
-    ALCdevice *device = alcGetContextsDevice(alcGetCurrentContext());
+    ALCdevice *device = outputDevice()  /* [VR AUDIO 2026-11-04] the speakers */;
     std::ostringstream version;
 
     version <<
@@ -504,6 +670,7 @@ void LLAudioEngine_OpenAL::shutdown()
     LL_INFOS() << "About to LLAudioEngine::shutdown()" << LL_ENDL;
     shutdownDeviceWatch();   // <WolfViewer 2026-09-13> no callback may fire into a dead engine
     LLAudioEngine::shutdown();
+    shutdownMirrorMix();     // [VR AUDIO 2026-11-04] after the engine's sources are gone, before alutExit
 
     // If a subsequent error occurs while there is still an error recorded
     // internally, the second error will simply be ignored.

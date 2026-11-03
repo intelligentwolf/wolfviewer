@@ -75,7 +75,43 @@ class LLAudioEngine_OpenAL : public LLAudioEngine
         /*virtual*/ void cleanupWind();
         /*virtual*/ void updateWind(LLVector3 direction, F32 camera_altitude);
 
+        // [VR AUDIO 2026-11-04] THE FINAL MIX FOR THE VR HEADSET (newview wolfvraudio.cpp).
+        // OpenAL has no way to read what a playback device plays; the only route to the real mix is a LOOPBACK
+        // device (alext.h:286 ALC_SOFT_loopback: the application renders the mix itself). So, when asked before
+        // init() (setMirrorMix(true): WolfVRStreamEnabled was on at start), the engine's context is a loopback
+        // context, and the device alutInit opened (the real speakers) gets one stereo source fed by a callback
+        // buffer (alext.h:581 AL_SOFT_callback_buffer) that renders the loopback mix as the speakers ask for it -
+        // pull-driven, so the speakers get no extra delay. The callback hands each block to the mix tap and,
+        // while setSpeakersMuted(true), plays silence instead. Device choice, hot-plug and reopen act on the
+        // speakers' device as before. Without setMirrorMix(true) nothing here changes how the engine plays.
+        typedef void (*MixTapFn)(const F32* stereo, U32 frames, U32 rate, void* user);
+        static void setMirrorMix(bool on) { sMirrorMixWanted = on; }
+        static bool mirrorMixRequested() { return sMirrorMixWanted; }
+        bool isMixMirrored() const { return mLoopDevice != nullptr; }
+        /** fn(stereo float, frames, rate, user) on the OpenAL mixer thread; it must copy and return. NULL = off. */
+        void setMixTap(MixTapFn fn, void* user);
+        void setSpeakersMuted(bool muted) { mSpeakersMuted.store(muted); }
+
     private:
+        // [VR AUDIO 2026-11-04] see setMirrorMix above
+        bool   initMirrorMix();
+        void   shutdownMirrorMix();
+        ALCdevice* outputDevice() const;            // the device the resident hears (the speakers)
+        static ALsizei AL_APIENTRY onOutputPull(ALvoid* user, ALvoid* data, ALsizei bytes) AL_API_NOEXCEPT17;
+        static bool               sMirrorMixWanted;
+        ALCdevice*                mLoopDevice = nullptr;    // the engine's mix (the current context's device)
+        ALCcontext*               mLoopContext = nullptr;
+        ALCdevice*                mOutDevice = nullptr;     // alutInit's device: the speakers
+        ALCcontext*               mOutContext = nullptr;    // alutInit's context: holds only mOutSource
+        ALuint                    mOutSource = 0;
+        ALuint                    mOutBuffer = 0;
+        LPALCRENDERSAMPLESSOFT    mRenderSamplesSOFT = nullptr;
+        PFNALCSETTHREADCONTEXTPROC mSetThreadContext = nullptr;
+        std::atomic<MixTapFn>     mMixTap{nullptr};
+        std::atomic<void*>        mMixTapUser{nullptr};
+        std::atomic<bool>         mSpeakersMuted{false};
+        static constexpr U32      MIRROR_RATE = 48000;      // the headset stream's rate (wolfvrpipe.h)
+
         // <WolfViewer 2026-09-13> AUDIO DEVICE HOT-PLUG (Owl Eyes, 09-13: "if sound had been
         // broken (plugout/plugin headset) the sound is not restored ... needs a relog").
         //

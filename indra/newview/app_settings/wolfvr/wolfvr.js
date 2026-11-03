@@ -29,6 +29,9 @@
  * in-VR menus; the controller state is already sent to the viewer ("c" in each pose) for that.
  */
 import * as THREE from './three/three.module.js';
+import { VRBar } from './vrbar.js';
+import { VRLayer } from './vrlayer.js';
+import { VRAudio } from './vraudio.js';
 
 // [VR PAIRING 2026-11-03] No code in the address (Paul: "get rid of that code"). This headset's own random id, kept in
 // this browser; the PC asks Allow / Deny the first time it sees it, then remembers it (wolfvrpairing.h). The secret
@@ -77,7 +80,7 @@ class Rolling {
 const num = {
     p2p: new Rolling(), v2p: new Rolling(), decode: new Rolling(),
     xrFrames: 0, newFrames: 0, lastT: performance.now(),
-    fps: NaN, newFps: NaN, viewer: {}, rtt: NaN,
+    fps: NaN, newFps: NaN, viewer: {}, rtt: NaN, got: 0, gotFps: NaN,
 };
 
 // ------------------------------------------------------------------------------------------------ connection
@@ -144,6 +147,7 @@ function onAllowed() {
     showError('');
     setStatus('Connected to WolfViewer. Waiting for the picture…');
     send({ t: 'hello', webcodecs: typeof VideoDecoder !== 'undefined', ua: navigator.userAgent });
+    quality.sent = -1;   // [VR HEADSETS] tell this (possibly restarted) viewer our quality step with the next config
     pings.length = 0;
     let n = 0;
     clearInterval(pingTimer);
@@ -154,7 +158,8 @@ function onText(text) {
     let m;
     try { m = JSON.parse(text); } catch (e) { return; }
     if (m.t === 'busy') return;   // the close (4009) that follows says it
-    if (m.t === 'welcome') { onAllowed(); return; }
+    if (vrAudio.onText(m)) return;   // [VR AUDIO]
+    if (m.t === 'welcome') { onAllowed(); vrAudio.onConnected(); return; }
     if (m.t === 'pong') {
         const now = performance.now();
         const rtt = now - m.ct;
@@ -166,17 +171,32 @@ function onText(text) {
         send({ t: 'sync', off: best.off, rtt: best.rtt });
     } else if (m.t === 'config') {
         config = m;
+        // [VR LEAN 2026-11-04] the numbers only when WolfVRDebugStats is on in the viewer (Paul: no unnecessary stats)
+        $('wvr-numbers-card').hidden = !m.debug;
+        bar.setDebug(!!m.debug);
+        if (!m.debug) statsOn = false;
         setupDecoder(m);
         $('wvr-big-controls').hidden = !BIG();
         $('wvr-preview-hint').textContent = BIG()
             ? 'This is your WolfViewer window. Click, right-click and scroll on it here; in VR, point with the right controller.'
             : 'Drag the picture to turn your head here on the page; in the headset, just look around.';
-        if (BIG()) { buildBigScreen(); bigPlaced = false; statsOn = false; }
+        if (BIG()) { buildBigScreen(); bigPlaced = false; statsOn = false; bar.hide(); }
         else { bigMesh.visible = false; laser.visible = dot.visible = false; }
+        layer.setActive(WORLD());
         releaseKeys();
+        if (quality.sent !== quality.level) setQuality(quality.level, '');   // this headset's starting step
         setStatus(`Connected. Picture ${m.w}×${m.h}, ${m.codec === 'h264' ? 'H.264 video' : 'JPEG pictures'} from ${m.encoder}.`);
     } else if (m.t === 'stats') {
         num.viewer = m;
+    } else if (m.t === 'ui') {
+        // [VR CONTROLS 2026-11-04] the action bar's state from the viewer (wolfvrui.cpp pump)
+        bar.setState(m);
+        layer.setSeated(m.sit === 2);
+        if (typeof m.headset === 'string' && m.headset !== viewerHeadset) { viewerHeadset = m.headset; headsetChanged(); }
+        if (typeof m.mic === 'boolean') micSetting = m.mic;
+        showMicButton();
+    } else if (m.t === 'layerconfig') {
+        layer.onConfig(m);   // [VR HUD LAYER]
     }
 }
 
@@ -222,7 +242,7 @@ function parseHeader(buf) {
     const stereo = size >= 96 && d.getUint8(66) === 1;
     const eyes = stereo ? [0, 1, 2, 3, 4, 5].map((k) => d.getFloat32(72 + 4 * k, true)) : null;
     return {
-        size, stereo, eyes,
+        size, stereo, eyes, stream: d.getUint8(67),
         frame: Number(d.getBigUint64(8, true)),
         captureMs: d.getFloat64(16, true),
         poseClientMs: d.getFloat64(24, true),
@@ -246,7 +266,10 @@ function offerPicture(img, hdr, decodeMs) {
 function onPicture(buf) {
     const hdr = parseHeader(buf);
     if (!hdr) return;
+    if (hdr.stream === 0) num.got++;   // pictures that arrived (adaptQuality: did the decoder keep up?)
     if (hdr.size + hdr.bytes > buf.byteLength) return;
+    if (hdr.stream === 1) { layer.onPicture(buf, hdr); return; }   // [VR HUD LAYER] its own decoder
+    if (hdr.stream === 2) { if (onSound) onSound(buf, hdr); return; }   // [VR AUDIO]
     const payload = new Uint8Array(buf, hdr.size, hdr.bytes);
     if (hdr.codec === 'jpeg') {
         const t0 = performance.now();
@@ -316,6 +339,171 @@ function halfPlane(right) {
     return m;
 }
 const eyeScreens = [halfPlane(false), halfPlane(true)];
+
+// [VR CONTROLS 2026-11-04] WolfStorm's VR action bar (vrbar.js) and the viewer's UI layer (vrlayer.js), both docked to
+// the head like WolfStorm's surfaces. VR 3D Mode only: Big Screen Mode already shows the whole viewer window.
+const WORLD = () => !!(config && config.mode === 'world');
+const bar = new VRBar(camera, send);
+const layer = new VRLayer(camera, send, (t) => showError(t));
+// [VR AUDIO 2026-11-04] the viewer's sound in the headset (vraudio.js), and the headset microphone for voice chat
+const vrAudio = new VRAudio({
+    send,
+    sendBinary: (buf) => { if (ws && ws.readyState === WebSocket.OPEN && ws.bufferedAmount < 262144) ws.send(buf); },
+    clockOff: () => clockOff,
+    onError: showError,
+    onMicWanted: () => showMicButton(),
+});
+const onSound = (buf, hdr) => vrAudio.onBlock(buf, hdr);
+// The microphone switch on this page: the same setting as "Use the headset microphone for voice" in WolfViewer's
+// Headset Settings (wolfvrui.cpp "mic"); turning it on asks this browser's permission here, in 2D, once.
+let micSetting = false;
+function showMicButton() {
+    const b = $('wvr-mic');
+    if (!b) return;
+    b.hidden = !ws || ws.readyState !== WebSocket.OPEN;
+    b.textContent = micSetting ? 'Stop using the headset microphone' : 'Use the headset microphone for voice';
+    b.setAttribute('aria-pressed', micSetting ? 'true' : 'false');
+}
+bar.setPageState('huds', layer.want);
+bar.onPage = (id) => {
+    if (id === 'huds') { layer.setWant(!layer.want); bar.setPageState('huds', layer.want); bar.toast(layer.want ? 'HUDs and windows shown' : 'HUDs and windows hidden'); }
+    else if (id === 'bigscreen') { bar.hide(); switchMode(); }
+    else if (id === 'numbers') { statsOn = !statsOn; bar.setPageState('numbers', statsOn); }
+    else if (id === 'exit') { bar.hide(); toggleVR(); }
+};
+// A button that opens a window in the viewer: make sure the HUDs layer (where that window shows) is on.
+const OPENS_WINDOW = new Set(['chat', 'voice', 'move', 'view', 'people', 'radar', 'search', 'map', 'minimap', 'wolf_experiences',
+    'inventory', 'appearance', 'animationoverride', 'gestures', 'snapshot', 'quickprefs', 'wolf_helm', 'wolf_dashboard']);
+bar.onCommand = (a) => {
+    if (OPENS_WINDOW.has(a.cmd) && !layer.want) { layer.setWant(true); bar.setPageState('huds', true); }
+};
+
+// ------------------------------------------------------------------------------------------------ headsets
+// [VR HEADSETS 2026-11-04] Paul: "make sure it works on a Meta Quest 2" and "also let the user choose what VR they
+// have". Automatic (the default) works the headset out from its browser; a choice here or in WolfViewer's Headset
+// Settings sets where the picture quality STARTS and the display rate; then it adapts by itself (adaptQuality): one
+// step down when this headset's decoder or the network falls behind, one step back up after 30 s of steady pictures,
+// never above the headset's own start. Steps: wolfvrstream.cpp kQuality (0 = 2 x 1152 px eyes at 40 Mbit/s,
+// 1 = 2 x 1024 at 30, 2 = 2 x 896 at 22, 3 = 2 x 768 at 15).
+//   level: starting step; hz: display rate asked for (0 = nearest the stream's); ctl: what the controllers are
+const HEADSETS = {
+    quest3:   { label: 'Meta Quest 3 / 3S', level: 0, hz: 0, ctl: 'touch' },
+    quest2:   { label: 'Meta Quest 2', level: 1, hz: 72, ctl: 'touch' },
+    questpro: { label: 'Meta Quest Pro', level: 1, hz: 72, ctl: 'touch' },
+    pico4:    { label: 'Pico 4 / Pico 4 Ultra', level: 1, hz: 72, ctl: 'pico' },
+    avp:      { label: 'Apple Vision Pro', level: 0, hz: 90, ctl: 'hands' },
+    other:    { label: 'Other headset', level: 1, hz: 0, ctl: 'touch' },
+};
+// The browser says which headset it is: Meta's Quest Browser names the model in its user agent ("Quest 3",
+// "Quest 3S", "Quest 2", "Quest Pro"); PICO's browser says "Pico"; Safari on Vision Pro reports a Mac but, unlike
+// Safari on a Mac, has WebXR (navigator.xr).
+function detectHeadset() {
+    const ua = navigator.userAgent || '';
+    if (/Quest 3/i.test(ua)) return 'quest3';
+    if (/Quest Pro/i.test(ua)) return 'questpro';
+    if (/Quest 2/i.test(ua)) return 'quest2';
+    if (/Quest/i.test(ua)) return 'quest2';            // an unnamed Quest: the gentler settings
+    if (/Pico/i.test(ua)) return 'pico4';
+    if (/Macintosh/.test(ua) && 'xr' in navigator && !/Chrome|Firefox|Edg/.test(ua)) return 'avp';
+    return 'other';
+}
+let viewerHeadset = 'auto';
+function pageHeadset() { try { return localStorage.getItem('wolfvr.headset') || ''; } catch (e) { return ''; } }
+function headsetKind() {
+    if (viewerHeadset && viewerHeadset !== 'auto' && HEADSETS[viewerHeadset]) return viewerHeadset;
+    const p = pageHeadset();
+    if (p && p !== 'auto' && HEADSETS[p]) return p;
+    return detectHeadset();
+}
+function headsetAuto() { return !(viewerHeadset && viewerHeadset !== 'auto') && !(pageHeadset() && pageHeadset() !== 'auto'); }
+const quality = { level: HEADSETS[headsetKind()].level, sent: -1, bad: 0, goodSince: performance.now(), coolUntil: 0 };
+function setQuality(level, why) {
+    quality.level = Math.max(0, Math.min(3, level));
+    quality.sent = quality.level;
+    send({ t: 'quality', l: quality.level });
+    if (why) toast(why);
+}
+function headsetChanged() {
+    const h = HEADSETS[headsetKind()];
+    if (quality.level !== h.level) setQuality(h.level, '');
+    quality.goodSince = performance.now();
+    showHeadsetLine();
+}
+// Every second, from the numbers: is this headset keeping up?
+function adaptQuality(now) {
+    if (!renderer.xr.isPresenting) return;
+    if (now < quality.coolUntil) return;
+    // behind = this headset's decoder drops pictures it was sent, or takes too long, or the pictures arrive late
+    // (viewer capture to drawn here, on the synced clock: a queue building up on the network)
+    const got = num.gotFps;
+    const behind = (got > 20 && num.newFps < got * 0.8) || num.decode.avg() > 14 || num.v2p.avg() > 150 ||
+                   (layer.decoder && layer.decoder.decodeQueueSize > 3);
+    if (behind) {
+        quality.goodSince = now;
+        if (++quality.bad >= 3 && quality.level < 3) {
+            quality.bad = 0;
+            quality.coolUntil = now + 8000;
+            setQuality(quality.level + 1, 'The picture is a little less sharp for now, so it keeps up.');
+        }
+        return;
+    }
+    quality.bad = 0;
+    const top = HEADSETS[headsetKind()].level;
+    if (quality.level > top && now - quality.goodSince > 30000) {
+        quality.goodSince = now;
+        quality.coolUntil = now + 8000;
+        setQuality(quality.level - 1, 'The picture is sharper again.');
+    }
+}
+function showHeadsetLine() {
+    const k = headsetKind();
+    const el = $('wvr-headset-line');
+    if (el) el.textContent = 'Headset: ' + HEADSETS[k].label + (headsetAuto() ? ' (worked out by itself)' : '');
+    const note = $('wvr-headset-note');
+    if (note) {
+        note.textContent = HEADSETS[k].ctl === 'hands'
+            ? 'On this headset: look at a button and pinch to press it. Walking about needs controllers, which this headset does not have.'
+            : HEADSETS[k].ctl === 'pico'
+                ? 'PICO controllers work like the ones described here: the left has X, Y and the menu button, the right has A and B.'
+                : '';
+        note.hidden = !note.textContent;
+    }
+}
+// First visit only (nothing chosen here or in WolfViewer): ask, with Automatic already ticked. Skippable; remembered.
+function setupHeadsetCard() {
+    const card = $('wvr-headset-card');
+    if (!card) return;
+    const form = $('wvr-headset-form');
+    form.addEventListener('submit', (e) => e.preventDefault());   // a choice, not a form to send
+    const pick = (v) => {
+        try { localStorage.setItem('wolfvr.headset', v); } catch (e) { /* not remembered: asked again next time */ }
+        card.hidden = true;
+        headsetChanged();
+        toast(v === 'auto' ? 'WolfViewer will work out your headset by itself.' : 'Headset set to ' + HEADSETS[v].label + '.');
+    };
+    $('wvr-headset-use').addEventListener('click', () => {
+        const v = (form.querySelector('input[name="wvr-headset"]:checked') || {}).value || 'auto';
+        pick(v);
+    });
+    $('wvr-headset-skip').addEventListener('click', () => pick('auto'));
+    $('wvr-headset-change').addEventListener('click', () => {
+        const cur = pageHeadset() || 'auto';
+        const r = form.querySelector(`input[value="${cur}"]`);
+        if (r) r.checked = true;
+        card.hidden = false;
+        card.scrollIntoView({ block: 'center' });
+    });
+    card.hidden = !!pageHeadset();
+    showHeadsetLine();
+}
+setupHeadsetCard();
+$('wvr-mic').addEventListener('click', () => {
+    micSetting = !micSetting;
+    send({ t: 'act', a: 'mic', x: micSetting ? '1' : '0' });
+    if (micSetting) { vrAudio.micWanted = true; vrAudio.prepareMic(); }   // asked now, from this press
+    toast(micSetting ? 'Your headset microphone is used for voice chat.' : 'Your PC microphone is used for voice chat again.');
+    showMicButton();
+});
 
 // Each eye's position in head space and the square field of view that covers both eyes, from the XR views
 // (WebXR XRView.transform / projectionMatrix), sent with each pose for the viewer to draw the eyes from.
@@ -489,6 +677,8 @@ function numberRows() {
         ['sent', fmt(v.fps) + ' fps', `${fmt((v.kbps || NaN) / 1000)} Mbit/s`],
         ['encoder', v.encoder || (config ? config.encoder : '–'), v.skipped ? `skipped ${v.skipped}` : ''],
     ].concat(BIG() ? [['screen', `${SCREEN_SIZES[screenSizeIndex].toFixed(1)} m wide`, 'left stick up/down']] : [])
+     .concat([['sound', vrAudio.bufferedMs ? `${fmt(vrAudio.bufferedMs, 0)} ms buffered` : 'off',
+        Number.isFinite(vrAudio.skewMs) ? `with picture ${fmt(vrAudio.skewMs, 0)} ms` : '']])
      .concat(!BIG() && screen.userData.hdr ? [['3D picture', screen.userData.hdr.stereo ? 'two eyes' : 'one view',
         `${fmt(screen.userData.hdr.fov, 0)}°` + (screen.userData.hdr.stereo ? ` eyes ${fmt(Math.abs(screen.userData.hdr.eyes[3] - screen.userData.hdr.eyes[0]) * 1000, 0)} mm apart` : '')]] : []);
 }
@@ -576,6 +766,7 @@ const menuWas = {};
 const focusGuard = (ev) => { if (renderer.xr.isPresenting && ev.target && ev.target.blur && ev.target.id !== 'wvr-type') ev.target.blur(); };
 
 async function toggleVR() {
+    vrAudio.start();   // [VR AUDIO] the sound may only start from a press: this one, before anything is awaited
     if (!('xr' in navigator)) { showError('VR is not supported in this browser'); return; }
     const btn = $('vr-btn');
     if (vrSession === null) {
@@ -594,9 +785,10 @@ async function toggleVR() {
             });
             vrSession = session;
             session.addEventListener('end', onSessionEnd);
+            session.addEventListener('select', onSelect);   // [VR CONTROLS] hands / look-and-pinch
             await renderer.xr.setSession(session);
             // As WolfStorm's updateTargetFrameRate: the supported display rate nearest the viewer's frame rate.
-            const want = (config && config.fps) || 72;
+            const want = HEADSETS[headsetKind()].hz || (config && config.fps) || 72;   // [VR HEADSETS] Quest 2: 72 Hz
             if (session.supportedFrameRates && session.updateTargetFrameRate) {
                 const rates = Array.from(session.supportedFrameRates);
                 if (rates.length) {
@@ -637,6 +829,9 @@ function restoreAfterVR() {
     bigPlaced = false;
     laser.visible = dot.visible = false;
     for (const b of [0, 2]) pointerButton(b, false);   // never leave a button held down in the viewer
+    for (const b of [0, 2]) layerButton(b, false);
+    if (talkHeld) { talkHeld = false; if (bar.state.on.has('speak')) send({ t: 'act', a: 'speak' }); }   // stop talking
+    bar.hide();
     releaseKeys();
     dolly.quaternion.identity();
     resize();
@@ -712,16 +907,28 @@ function pollLeft(gp, headPos, headQuat) {
     for (let i = 6; i < gp.buttons.length; i++) menu = menu || pressed(i);
     const now = performance.now();
     if (menu && !leftWas.menu) { menuDownAt = now; menuLong = false; }
-    if (menu && !menuLong && now - menuDownAt > 1000) { menuLong = true; statsOn = !statsOn; }   // hold: numbers
+    if (menu && !menuLong && now - menuDownAt > 1000) { menuLong = true; if (config && config.debug) statsOn = !statsOn; }   // hold: numbers (debug)
     if (!menu && leftWas.menu && !menuLong && BIG()) recentre(headPos, headQuat);             // tap: recentre
+    if (!menu && leftWas.menu && !menuLong && WORLD()) bar.toggle();                          // 3D: the action bar
     leftWas.menu = menu;
-    if (edge(5) && BIG()) openKeyboard();
+    if (edge(5) && (BIG() || WORLD())) openKeyboard();   // 3D too: typing into a chat or search window on the HUDs layer
     if (edge(3)) switchMode();
     return pressed(4) ? 1 : pressed(1) ? -1 : 0;   // X = up, grip = down
 }
 
 function pollRightStick(gp, aimed) {
     const x = axis(gp, 2, 0), y = axis(gp, 3, 1);
+    if (WORLD() && aimed) {
+        // [VR HUD LAYER] pointing at a window or HUD: the stick scrolls it (grip held: makes the layer bigger / smaller)
+        const now = performance.now();
+        if (Math.abs(x) < 0.3) snapArmed = false;
+        if (aimed === 'layer' && Math.abs(y) > 0.5 && now - ptr.lastWheel > (gp.buttons[1] && gp.buttons[1].pressed ? 400 : 120)) {
+            ptr.lastWheel = now;
+            if (gp.buttons[1] && gp.buttons[1].pressed) layer.nudge(0, y < 0 ? 1 : -1);
+            else layerWheel(Math.sign(y));
+        }
+        return 0;
+    }
     // render_manager.js _updateVRInput snap turn: one step past 0.6, re-armed under 0.3; stick right = turn right.
     // The AVATAR turns in the viewer (LLAgent::yaw), so the world and the big screen's view both follow.
     if (Math.abs(x) > 0.6 && !snapArmed) { snapArmed = true; send({ t: 'in', e: 'turn', d: x > 0 ? -1 : 1 }); }
@@ -762,11 +969,107 @@ function pollPointer(src, gp, frame) {
     return aimed;
 }
 
+// [VR CONTROLS / HUD LAYER 2026-11-04] VR 3D Mode pointer (vr_menu.js: ONE raycast, the bar first, then the surfaces):
+// the right controller's ray, in HEAD space because the bar and the layer are docked to the head.
+const worldPointer = { aimed: null, trig: false, b: false, grip: false, gripY: 0 };
+const lptr = { u: -1, v: -1, buttons: {} };
+const _hq = new THREE.Quaternion(), _ho = new THREE.Vector3(), _hd = new THREE.Vector3();
+function layerMove(u, v) {
+    if (Math.abs(u - lptr.u) < 0.0003 && Math.abs(v - lptr.v) < 0.0003) return;
+    lptr.u = u; lptr.v = v;
+    send({ t: 'in', e: 'move', u, v, l: 1 });
+}
+function layerButton(b, down) {
+    if (!!lptr.buttons[b] === down) return;
+    lptr.buttons[b] = down;
+    if (lptr.u < 0) return;
+    send({ t: 'in', e: down ? 'down' : 'up', u: lptr.u, v: lptr.v, b, l: 1 });
+}
+function layerWheel(d) { if (lptr.u >= 0 && d) send({ t: 'in', e: 'wheel', u: lptr.u, v: lptr.v, d, l: 1 }); }
+// world ray -> what it points at: {kind:'bar', hit} | {kind:'layer', hit} | null, plus the world point for the dot
+function aimAt(ro, rd, headPos, headQuat) {
+    _hq.copy(headQuat).invert();
+    _ho.copy(ro).sub(headPos).applyQuaternion(_hq);
+    _hd.copy(rd).applyQuaternion(_hq);
+    const b = bar.hit(_ho, _hd);
+    if (b) return { kind: 'bar', hit: b, t: b.t };
+    const l = layer.hit(_ho, _hd);
+    if (l) return { kind: 'layer', hit: l, t: l.t };
+    return null;
+}
+function pollWorldPointer(src, gp, frame, headPos, headQuat) {
+    const rp = frame.getPose(src.targetRaySpace, renderer.xr.getReferenceSpace());
+    const pressed = (i) => !!(gp.buttons[i] && gp.buttons[i].pressed);
+    let aim = null;
+    if (rp) {
+        dolly.updateMatrixWorld();
+        _m.fromArray(rp.transform.matrix).premultiply(dolly.matrixWorld);
+        _m.decompose(_ro, _rq, _scl);
+        _rd.set(0, 0, -1).applyQuaternion(_rq);
+        aim = aimAt(_ro, _rd, headPos, headQuat);
+        const showRay = bar.open || layer.on;
+        laser.position.copy(_ro); laser.quaternion.copy(_rq); laser.scale.set(1, 1, aim ? aim.t : 3);
+        laser.visible = showRay;
+        if (aim) { dot.position.copy(_ro).addScaledVector(_rd, aim.t * 0.996); dot.lookAt(_ro); }
+        dot.visible = !!aim;
+    }
+    const trig = pressed(0), bBtn = pressed(5), grip = pressed(1);
+    bar.setHover(aim && aim.kind === 'bar' ? aim.hit : null);
+    if (aim && aim.kind === 'bar') {
+        if (trig && !worldPointer.trig) bar.activate(aim.hit);
+    } else if (aim && aim.kind === 'layer') {
+        layerMove(aim.hit.u, aim.hit.v);
+        if (grip) {
+            // grip held: move the layer up or down with the controller (remembered)
+            if (!worldPointer.grip) worldPointer.gripY = _ro.y;
+            else { layer.nudge(_ro.y - worldPointer.gripY, 0); worldPointer.gripY = _ro.y; }
+        } else {
+            layerButton(0, trig);
+            layerButton(2, bBtn);
+        }
+    }
+    if (!aim || aim.kind !== 'layer') { layerButton(0, false); layerButton(2, false); }   // never leave one held
+    worldPointer.trig = trig; worldPointer.b = bBtn; worldPointer.grip = grip;
+    worldPointer.aimed = aim ? aim.kind : null;
+    return worldPointer.aimed;
+}
+// Push to talk (vr_hud.js _pollPushToTalk: A/X held; here A on the right, X is jump): speak on press, off on release.
+let talkHeld = false;
+function pollTalk(gp) {
+    const p = !!(gp.buttons[4] && gp.buttons[4].pressed);
+    if (p !== talkHeld) {
+        talkHeld = p;
+        if (p === bar.state.on.has('speak')) return;   // already as wanted (the Speak button latched it)
+        send({ t: 'act', a: 'speak' });
+    }
+}
+// Hands, and headsets without controllers (Apple Vision Pro's look-and-pinch, WebXR "transient-pointer"): a pinch is
+// a "select" on the session; press what the ray points at.
+function onSelect(ev) {
+    if (!WORLD() || !ev.frame) return;
+    const src = ev.inputSource;
+    if (src.gamepad && src.targetRayMode === 'tracked-pointer') return;   // controllers are polled every frame instead
+    const rp = ev.frame.getPose(src.targetRaySpace, renderer.xr.getReferenceSpace());
+    const vp = ev.frame.getViewerPose(renderer.xr.getReferenceSpace());
+    if (!rp || !vp) return;
+    dolly.updateMatrixWorld();
+    _m.fromArray(rp.transform.matrix).premultiply(dolly.matrixWorld);
+    _m.decompose(_ro, _rq, _scl);
+    _rd.set(0, 0, -1).applyQuaternion(_rq);
+    const hp = new THREE.Vector3(), hq = new THREE.Quaternion(), hs = new THREE.Vector3();
+    new THREE.Matrix4().fromArray(vp.transform.matrix).premultiply(dolly.matrixWorld).decompose(hp, hq, hs);
+    const aim = aimAt(_ro, _rd, hp, hq);
+    if (!aim) { bar.toggle(); return; }   // a pinch at nothing: the action bar (there is no menu button)
+    if (aim.kind === 'bar') bar.activate(aim.hit);
+    else { layerMove(aim.hit.u, aim.hit.v); layerButton(0, true); layerButton(0, false); }
+}
+
 function pollControllers(session, frame, headPos, headQuat) {
     const ctl = [];
     let lift = 0;
     if (BIG() && !bigPlaced) recentre(headPos, headQuat);
     if (!BIG()) laser.visible = dot.visible = false;
+    if (WORLD()) worldPointer.aimed = null;
     for (const src of session.inputSources) {
         const gp = src.gamepad;
         if (!gp) continue;
@@ -790,7 +1093,8 @@ function pollControllers(session, frame, headPos, headQuat) {
         }
         if (hand === 'left') lift = lift || pollLeft(gp, headPos, headQuat);
         else if (hand === 'right') {
-            const aimed = BIG() ? pollPointer(src, gp, frame) : false;
+            const aimed = BIG() ? pollPointer(src, gp, frame) : WORLD() ? pollWorldPointer(src, gp, frame, headPos, headQuat) : false;
+            pollTalk(gp);
             lift = lift || pollRightStick(gp, aimed);
         }
     }
@@ -874,7 +1178,10 @@ function animate(time, frame) {
     if (fresh) {
         const drawn = performance.now();
         if (fresh.hdr.poseClientMs >= 0) num.p2p.add(drawn - fresh.hdr.poseClientMs);
-        if (Number.isFinite(clockOff)) num.v2p.add(drawn + clockOff - fresh.hdr.captureMs);
+        if (Number.isFinite(clockOff)) {
+            num.v2p.add(drawn + clockOff - fresh.hdr.captureMs);
+            vrAudio.noteVideoDelay(drawn + clockOff - fresh.hdr.captureMs);   // [VR AUDIO] sound and picture together
+        }
         num.decode.add(fresh.decodeMs);
         num.newFrames++;
         if (shown) shown.img.close();   // the previous picture has been replaced on the GPU
@@ -887,11 +1194,21 @@ function animate(time, frame) {
         num.newFps = num.newFrames / dt;
         num.xrFrames = num.newFrames = 0;
         num.lastT = now;
-        send({ t: 'stats', fps: num.fps, newFps: num.newFps, decodeMs: num.decode.avg(), p2p: num.p2p.avg(),
-               p2p95: num.p2p.pct(0.95), v2p: num.v2p.avg() });
+        num.gotFps = num.got / dt;
+        num.got = 0;
+        if (config && config.debug) {
+            send({ t: 'stats', fps: num.fps, newFps: num.newFps, decodeMs: num.decode.avg(), p2p: num.p2p.avg(),
+                   p2p95: num.p2p.pct(0.95), v2p: num.v2p.avg() });
+        }
+        adaptQuality(now);
     }
+    // [VR CONTROLS / HUD LAYER] the docked surfaces
+    layer.setActive(WORLD());
+    layer.update();
+    bar.setPageState('numbers', statsOn);
+    bar.update(now);
     if (renderer.xr.isPresenting) statsMesh.visible = statsOn || now < sizeFlashUntil;
-    drawStatsPanel(now);
+    if (config && config.debug) drawStatsPanel(now);
 }
 
 // WolfStorm render_manager.js _xrAnimateGuarded: an uncaught throw in the XR frame callback is permanently fatal
@@ -957,5 +1274,36 @@ window.__wolfvr = { numbers: () => ({ rows: numberRows(), p2p: num.p2p.v.slice(-
     },
     clickAt: (u, v, b = 0) => { pointerMove(u, v); pointerButton(b, true); pointerButton(b, false); },
     sendText: (t) => send({ t: 'in', e: 'text', s: String(t).slice(0, 64) }),
-    sendKey: (k, m = 0) => tapKey(k, m) };
+    sendKey: (k, m = 0) => tapKey(k, m),
+    // [VR CONTROLS / HUD LAYER] test hooks (scripts/wolfvr/e2e_controls.mjs)
+    bar: () => ({ open: bar.open, ids: bar.slots.map((x) => x.action.id), on: [...bar.state.on], off: [...bar.state.off],
+                  sit: bar.state.sit, region: bar.state.region, fav: bar.state.fav.length, hover: bar.hover }),
+    layer: () => ({ want: layer.want, on: layer.on, frames: layer.frames, cfg: layer.cfg, visible: layer.mesh.visible }),
+    quality: () => ({ level: quality.level, headset: headsetKind(), auto: headsetAuto() }),
+    audio: () => ({ buffered: vrAudio.bufferedMs, target: vrAudio.targetMs, underruns: vrAudio.underruns, gaps: vrAudio.gaps,
+                    delay: vrAudio.soundDelayMs, skew: vrAudio.skewMs, mic: vrAudio.micWanted, blocks: vrAudio.blocks,
+                    started: vrAudio.started, ctx: vrAudio.ctx ? vrAudio.ctx.state : 'none', on: vrAudio.on,
+                    error: $('wvr-error').textContent }),
+    // the world point of a bar slot's centre (or a layer point u, v from the top-left), for aiming the fake controller
+    slotPoint: (id) => {
+        const i = bar.slots.findIndex((x) => x.action.id === id);
+        if (i < 0) return null;
+        const sl = bar.slots[i];
+        const u = (sl.x + sl.w / 2) / 1024, v = 1 - (sl.y + sl.h / 2) / 448;
+        return surfacePoint(1.0, bar.arc, -0.385, bar.height, u, v);
+    },
+    layerPoint: (u, v) => surfacePoint(1.25, layer.arc, layer.y, layer.height, u, 1 - v),
+    grabLayer: () => {
+        if (!layer.shown || !layer.cfg) return null;
+        const c = document.createElement('canvas');
+        c.width = layer.cfg.w; c.height = layer.cfg.h * 2;
+        c.getContext('2d').drawImage(layer.shown, 0, 0, c.width, c.height);
+        return c.toDataURL('image/png');
+    } };
+// head-space point on a docked cylinder section (vrbar.js curvedGeometry: u from the left, v from the bottom) -> world
+function surfacePoint(R, arc, cy, h, u, v) {
+    const a = -arc / 2 + u * arc;
+    const p = new THREE.Vector3(R * Math.sin(a), cy - h / 2 + v * h, -R * Math.cos(a)).applyQuaternion(_quat).add(_pos);
+    return [p.x, p.y, p.z];
+}
 connect();

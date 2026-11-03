@@ -4,6 +4,10 @@
  *        scripts/wolfvr/build_selftest.sh against the same packaged Boost/OpenSSL/libjpeg as the viewer.
  *
  *   wolfvrpipe_selftest selftest                 unit checks + encoder benchmark; exit code 0 = all passed
+ *   wolfvrpipe_selftest bench264 [threads] [slices] [complexity] [convert_threads]
+ *                                                OpenH264 direct at the VR sizes: encode avg/p95 ms, CPU, bitrate
+ *   WOLFVR_FETCH_TEST=1 wolfvrpipe_selftest selftest   also downloads Cisco's OpenH264 into a temporary folder and
+ *                                                encodes with it (needs the internet)
  *   wolfvrpipe_selftest serve <web_root> [secs] [encoder]
  *                                                runs the real server on the LAN address, prints the address
  *                                                large; any headset on the home network connects (one at a
@@ -26,6 +30,8 @@
 #include "../wolfvrpipe.h"
 #include "../wolfvrdevice.h"
 #include "../wolfvrpipe_video.h"
+#include "../wolfvr_openh264.h"
+#include "../wolfvrcodecfetch.h"
 
 #include <boost/asio.hpp>
 #include "../qrcodegen/qrcodegen.hpp"
@@ -44,12 +50,27 @@
 #include <memory>
 #include <thread>
 #include <vector>
+#include <algorithm>
+#include <condition_variable>
+#if defined(__linux__) || defined(__APPLE__)
+#include <sys/resource.h>
+#endif
 
 using namespace wolfvr;
 
 static int gFailures = 0;
 #define CHECK(cond) do { if (!(cond)) { std::printf("FAIL %s:%d %s\n", __FILE__, __LINE__, #cond); ++gFailures; } \
                          else { std::printf("ok   %s\n", #cond); } } while (0)
+
+static bool readAllText(const std::string& path, std::string& out)
+{
+    std::ifstream f(path, std::ios::binary);
+    if (!f) return false;
+    std::ostringstream ss;
+    ss << f.rdbuf();
+    out = ss.str();
+    return true;
+}
 
 static double msNow()
 {
@@ -94,6 +115,184 @@ static void benchEncoder(const std::string& which, uint32_t w, uint32_t h)
     std::printf("bench %-9s %-16s %ux%u draw %.2f ms/frame, encode avg %.2f ms max %.2f ms, %.1f Mbit/s at 72 fps, "
                 "%d key frames, %s\n", which.c_str(), enc->name().c_str(), w, h, draw / N, total / N, worst,
                 bytes * 8.0 / (N / 72.0) / 1e6, keys, codec_string.c_str());
+}
+
+// CPU seconds used by this process so far (user + system), for the encoder benchmark. POSIX getrusage(2).
+static double cpuSeconds()
+{
+#if defined(__linux__) || defined(__APPLE__)
+    rusage u{};
+    getrusage(RUSAGE_SELF, &u);
+    return (double)u.ru_utime.tv_sec + (double)u.ru_utime.tv_usec / 1e6 + (double)u.ru_stime.tv_sec +
+           (double)u.ru_stime.tv_usec / 1e6;
+#else
+    return 0;
+#endif
+}
+
+// [VR OPENH264 2026-11-03] One OpenH264 configuration at one size: N pictures of the turning test card, timed one by
+// one (the drawing is not counted). CPU% = CPU time spent inside encode / wall time of encode (cores busy while it
+// runs); "load at fps" = CPU time per picture * fps (how much of one core the stream keeps busy at that rate).
+// WOLFVR_BENCH_CONTENT=detail: fine detail over the test card that pans 4 pixels a picture, much harder to encode
+// than the card's flat walls (closer to a textured world turning past the camera).
+static void addDetail(std::vector<uint8_t>& px, uint32_t w, uint32_t h, int frame)
+{
+    for (uint32_t y = 0; y < h; ++y)
+    {
+        uint8_t* p = &px[(size_t)y * w * 4];
+        for (uint32_t x = 0; x < w; ++x, p += 4)
+        {
+            uint32_t v = (x + (uint32_t)frame * 4u) * 2654435761u ^ (y * 40503u);
+            v ^= v >> 13;
+            const int n = (int)(v & 63) - 32;
+            for (int c = 0; c < 3; ++c) p[c] = (uint8_t)std::clamp((int)p[c] + n, 0, 255);
+        }
+    }
+}
+
+static void bench264One(const char* label, uint32_t w, uint32_t h, uint32_t fps, uint32_t kbps, const OpenH264Tuning& t)
+{
+    const bool detail = std::getenv("WOLFVR_BENCH_CONTENT") && std::string(std::getenv("WOLFVR_BENCH_CONTENT")) == "detail";
+    std::string err;
+    auto enc = openOpenH264Encoder(w, h, fps, kbps, t, err);
+    if (!enc) { std::printf("bench264 %-22s not available: %s\n", label, err.c_str()); ++gFailures; return; }
+    const int N = (int)fps * 5;
+    std::vector<uint8_t> px;
+    std::vector<double> ms;
+    double cpu = 0, wall = 0;
+    size_t bytes = 0;
+    int keys = 0;
+    std::string codec_string;
+    for (int i = 0; i < N; ++i)
+    {
+        const float a = (float)i * 0.02f;
+        const Quat q{0.f, std::sin(a / 2), 0.f, std::cos(a / 2)};
+        drawTestPattern(px, w, h, 100.f, q, (uint64_t)i, (double)i);
+        if (detail) addDetail(px, w, h, i);
+        EncodedFrame f;
+        const double c0 = cpuSeconds(), t0 = msNow();
+        if (!enc->encode(px.data(), f, err)) { std::printf("bench264 %s: encode failed: %s\n", label, err.c_str()); ++gFailures; return; }
+        const double t1 = msNow(), c1 = cpuSeconds();
+        if (i == 0) { codec_string = avcCodecString(f.data); CHECK(f.key); CHECK(!codec_string.empty()); }
+        ms.push_back(t1 - t0);
+        wall += (t1 - t0) / 1000.0;
+        cpu += c1 - c0;
+        bytes += f.data.size();
+        keys += f.key ? 1 : 0;
+    }
+    std::vector<double> sorted = ms;
+    std::sort(sorted.begin(), sorted.end());
+    double avg = 0;
+    for (double v : ms) avg += v;
+    avg /= (double)N;
+    const double p95 = sorted[(size_t)((double)N * 0.95)];
+    const double mbps = (double)bytes * 8.0 / ((double)N / (double)fps) / 1e6;
+    std::printf("bench264 %-22s %ux%u@%u target %5.1f Mbit/s | encode avg %6.2f ms p95 %6.2f ms max %6.2f | "
+                "CPU %4.0f%% while encoding, load at %u fps %4.0f%% of a core | real %5.1f Mbit/s | %d keys | %s | %s\n",
+                label, w, h, fps, kbps / 1000.0, avg, p95, sorted.back(), wall > 0 ? 100.0 * cpu / wall : 0.0, fps,
+                100.0 * cpu / (double)N * fps, mbps, keys, codec_string.c_str(), enc->name().c_str());
+    std::fflush(stdout);
+}
+
+static int bench264(int argc, char** argv)
+{
+    OpenH264Tuning t;
+    if (argc > 2) t.threads = std::atoi(argv[2]);
+    if (argc > 3) t.slices = std::atoi(argv[3]);
+    if (argc > 4) t.complexity = std::atoi(argv[4]);
+    if (argc > 5) t.convert_threads = std::atoi(argv[5]);
+    if (const char* p = std::getenv("WOLFVR_OPENH264")) setOpenH264Path(p);
+    std::printf("cores %u, threads %d (0 = auto), slices %d, complexity %d, convert threads %d\n",
+                std::thread::hardware_concurrency(), t.threads, t.slices, t.complexity, t.convert_threads);
+    bench264One("Big Screen", 1920, 1080, 60, 25000, t);
+    bench264One("Quest 3 stereo", 2304, 1152, 60, 40000, t);
+    bench264One("Quest 2 stereo", 2048, 1024, 72, 30000, t);
+    bench264One("fallback 1792x896", 1792, 896, 72, 25000, t);
+    bench264One("fallback 1536x768", 1536, 768, 72, 20000, t);
+    // What a reopen costs (the frame thread reopens the encoder for every key frame the page asks for):
+    // openEncoder("openh264") = init + a probe picture + init again.
+    {
+        std::string tried;
+        const double t0 = msNow();
+        auto enc = openEncoder("openh264", 2304, 1152, 60, 40000, tried);
+        std::printf("openEncoder(\"openh264\") 2304x1152 took %.1f ms%s\n", msNow() - t0, enc ? "" : (" FAILED " + tried).c_str());
+    }
+    std::printf("%s\n", openh264LoadedDescription().c_str());
+    return gFailures ? 1 : 0;
+}
+
+// [VR OPENH264 2026-11-03] The licence text in the code is Cisco's file byte for byte; the codec download refuses
+// what is not Cisco's; WOLFVR_FETCH_TEST=1 also downloads the real file into a temporary folder and encodes with it.
+static void codecFetchTests()
+{
+    const char* root = std::getenv("WOLFVR_SOURCE_DIR");   // indra/newview, for the vendored licence file
+    std::string lic;
+    if (root && readAllText(std::string(root) + "/openh264/BINARY_LICENSE.txt", lic))
+    {
+        CHECK(lic == openh264BinaryLicenseText());
+    }
+    else
+    {
+        std::printf("     (WOLFVR_SOURCE_DIR not set: licence text not compared)\n");
+    }
+    CHECK(std::string(openh264AttributionText()) == "OpenH264 Video Codec provided by Cisco Systems, Inc.");
+    CHECK(openh264Available());
+
+    const std::filesystem::path tmp = std::filesystem::temp_directory_path() /
+                                      ("wolfvr-codec-" + std::to_string((unsigned long long)msNow()));
+    std::error_code ec;
+    std::filesystem::create_directories(tmp, ec);
+    const std::string dir = tmp.string();
+    CHECK(!openh264Installed(dir));
+    CHECK(openh264File(dir).rfind(dir, 0) == 0);
+    // a wrong file under the right name is not "installed"
+    std::ofstream(openh264File(dir), std::ios::binary) << "not the codec";
+    CHECK(!openh264Installed(dir));
+    std::filesystem::remove(openh264File(dir), ec);
+
+    if (std::getenv("WOLFVR_FETCH_TEST"))
+    {
+        std::mutex m;
+        std::condition_variable cv;
+        bool done = false, ok = false;
+        std::string msg;
+        const double t0 = msNow();
+        fetchOpenH264Async(dir, [&](bool o, std::string s) {
+            std::lock_guard<std::mutex> lk(m);
+            ok = o; msg = std::move(s); done = true;
+            cv.notify_all();
+        });
+        // a second request while the first runs is refused at once
+        bool second_done = false, second_ok = true;
+        fetchOpenH264Async(dir, [&](bool o, std::string) { second_ok = o; second_done = true; });
+        CHECK(second_done && !second_ok);
+        {
+            std::unique_lock<std::mutex> lk(m);
+            cv.wait_for(lk, std::chrono::seconds(150), [&] { return done; });
+        }
+        std::printf("     fetch: %s (%.0f ms) %s\n", ok ? "ok" : "FAILED", msNow() - t0, msg.c_str());
+        CHECK(ok);
+        CHECK(openh264Installed(dir));
+        std::string again;
+        CHECK(fetchOpenH264(dir, again));   // already there: no second download
+        CHECK(again.find("already") != std::string::npos);
+        setOpenH264Path(openh264File(dir));
+        std::string err;
+        OpenH264Tuning t;
+        auto enc = openOpenH264Encoder(640, 360, 30, 2000, t, err);
+        CHECK(enc != nullptr);
+        if (enc)
+        {
+            std::vector<uint8_t> px;
+            drawTestPattern(px, 640, 360, 100.f, Quat{}, 0, 0);
+            EncodedFrame f;
+            CHECK(enc->encode(px.data(), f, err));
+            CHECK(f.key);
+            std::printf("     encoded with %s: %s\n", openh264LoadedDescription().c_str(), avcCodecString(f.data).c_str());
+            CHECK(openh264LoadedDescription().find(openh264File(dir)) != std::string::npos);
+        }
+    }
+    std::filesystem::remove_all(tmp, ec);
 }
 
 static int selftest()
@@ -199,6 +398,32 @@ static int selftest()
             CHECK(reply.rfind("HTTP/1.1 302", 0) == 0);
             CHECK(reply.find("Location: https://" + lan.ip + ":4360/\r\n") != std::string::npos);
             CHECK(reply.find("evil.example") == std::string::npos);
+        }
+    }
+
+    // [VR OPENH264] the codec download (before the encoders, so a downloaded library is the one they load)
+    codecFetchTests();
+
+    // [VR OPENH264] an explicit key frame without reopening: OpenH264 and JPEG can, GStreamer chains cannot
+    {
+        std::string tried;
+        auto enc = openEncoder("openh264", 320, 240, 30, 1000, tried);
+        if (enc)
+        {
+            std::vector<uint8_t> px;
+            EncodedFrame f;
+            std::string err;
+            for (int i = 0; i < 3; ++i) { drawTestPattern(px, 320, 240, 100.f, Quat{}, (uint64_t)i, 0); enc->encode(px.data(), f, err); }
+            CHECK(!f.key);
+            CHECK(enc->requestKeyFrame());
+            drawTestPattern(px, 320, 240, 100.f, Quat{}, 3, 0);
+            CHECK(enc->encode(px.data(), f, err));
+            CHECK(f.key);
+            CHECK(!avcCodecString(f.data).empty());   // the IDR carries the SPS again
+        }
+        else
+        {
+            std::printf("     openh264 not available: %s\n", tried.c_str());
         }
     }
 
@@ -439,7 +664,9 @@ static int serve(int argc, char** argv)
 int main(int argc, char** argv)
 {
     if (argc >= 2 && std::strcmp(argv[1], "selftest") == 0) return selftest();
+    if (argc >= 2 && std::strcmp(argv[1], "bench264") == 0) return bench264(argc, argv);
     if (argc >= 3 && std::strcmp(argv[1], "serve") == 0) return serve(argc, argv);
-    std::fprintf(stderr, "usage: %s selftest | serve <web_root> [secs] [encoder]\n", argv[0]);
+    std::fprintf(stderr, "usage: %s selftest | bench264 [threads] [slices] [complexity] [convert_threads] | serve <web_root> [secs] [encoder]\n",
+                 argv[0]);
     return 2;
 }

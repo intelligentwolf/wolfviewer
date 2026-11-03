@@ -48,12 +48,28 @@
 //     {"t":"mode","m":"screen"|"world"}                    the in-VR switch between Big Screen and 3D
 //     {"t":"in","e":"stick","x":-1..1,"y":-1..1} / {"t":"in","e":"turn","d":1|-1} / {"t":"in","e":"lift","d":1|0|-1}
 //     {"t":"in","e":"wheel","d":clicks} / {"t":"in","e":"kd"|"ku","k":"<DOM key>","m":mods} / {"t":"in","e":"text","s":".."}
+//     [VR CONTROLS 2026-11-04] {"t":"act","a":"<name>","x":"<arg>"}   an action-bar button (wolfvrui.cpp runs it)
+//     {"t":"quality","l":0..3}                              the page's picture quality step (0 best; wolfvrstream.cpp)
+//     [VR HUD LAYER 2026-11-04] {"t":"layer","on":bool}     stream the viewer's UI layer (HUDs, floaters) as well
+//     {"t":"key","s":1}                                     the layer decoder lost its place
+//     [VR AUDIO 2026-11-04] {"t":"audio","on":bool}         the page plays the viewer's sound (Headset Settings)
+//   page -> viewer, binary ([VR AUDIO 2026-11-04]): 16-byte header (0..3 "WVR1" magic, 4..7 = 16, 8 kind 1 = mic,
+//     9 channels = 1, 12..15 sample rate u32) then little-endian signed 16-bit mono PCM, at most 100 ms a message
+//     the pointer on the UI layer: {"t":"in","e":"move"|"down"|"up"|"wheel",...,"l":1} (u, v over the whole window)
 //   viewer -> page, text JSON:
 //     {"t":"config","codec":"h264"|"jpeg","codecString":"avc1.xxxxxx","w":,"h":,"fov":deg,"fps":,"encoder":"...",
 //      "mode":"test"|"screen"}
 //     {"t":"pong",...}, {"t":"stats",...} (the viewer's own numbers, for the in-headset readout)
+//     [VR AUDIO 2026-11-04] {"t":"micwant","on":bool} the viewer wants the headset microphone (WolfVRHeadsetMic)
+//     [VR CONTROLS] {"t":"ui",...} the action bar's state (wolfvrui.cpp); [VR HUD LAYER] {"t":"layerconfig","codec",
+//     "codecString","w","h"} before the first layer picture (the picture is w x 2h: colour on top, alpha below)
 //   viewer -> page, binary: a FrameHeader (its size at byte 4; 96 bytes, see wolfvrpipe.cpp kHeaderSize) followed by
-//     one H.264 access unit (Annex B) or one JPEG. [VR STEREO] byte 66 = 1: the picture is two eyes side by side
+//     one H.264 access unit (Annex B) or one JPEG. [VR HUD LAYER] byte 67 = 1: a UI-layer picture (its own decoder).
+//     [VR AUDIO 2026-11-04] byte 67 = 2: SOUND, not a picture: bytes 8..15 = sample number of the first frame (u64),
+//     16..23 = viewer clock (ms, double) when the block was mixed, 52 = sample rate (float), 64 = channels (u8),
+//     68 = payload bytes; the payload is little-endian signed 16-bit PCM, interleaved. Raw PCM on purpose: 48 kHz
+//     stereo is 1.5 Mbit/s, small beside the video on a home network, and it needs no codec on any platform.
+//     [VR STEREO] byte 66 = 1: the picture is two eyes side by side
 //     (left half = left eye), drawn from the eye positions at bytes 72..95 (6 floats, head space, as "e").
 
 #include <cstdint>
@@ -85,6 +101,12 @@ namespace wolfvr
      *  Returns false with `error` set on failure. Stage-1 fallback only; see VR_PIPE_STAGE1.md for the
      *  per-install real certificate design. */
     bool makeSelfSignedCert(const std::string& ip, std::string& cert_pem, std::string& key_pem, std::string& error);
+    /** [VR AUDIO 2026-11-04] The steady clock (ms) the pipe stamps pictures and sound with. */
+    double clockMs();
+    /** [VR AUDIO 2026-11-04] Where the headset microphone's sound goes (the page -> viewer binary message, kind 1:
+     *  mono signed 16-bit at `rate`). Called on the pipe's io thread; must copy and return. NULL = dropped. */
+    typedef void (*MicSink)(const int16_t* pcm, uint32_t frames, uint32_t rate);
+    void setMicSink(MicSink sink);
     /** True when cert_pem is a parseable certificate that names `ip` and has at least 7 days left. */
     bool certCoversIp(const std::string& cert_pem, const std::string& ip);
 
@@ -109,7 +131,8 @@ namespace wolfvr
     {
         // STICK: the left thumbstick now (x right +, y back +, -1..1; WolfStorm input_manager.js _vrLocomotionFlags
         // axes), TURN: one snap turn (wheel = +1 left / -1 right), LIFT: jump/fly up or down held (wheel = +1/0/-1)
-        enum class Type { MOVE, DOWN, UP, WHEEL, KEY_DOWN, KEY_UP, TEXT, STICK, TURN, LIFT };
+        // ACTION: an action-bar button, key = its name, text = its argument ([VR CONTROLS 2026-11-04])
+        enum class Type { MOVE, DOWN, UP, WHEEL, KEY_DOWN, KEY_UP, TEXT, STICK, TURN, LIFT, ACTION };
         Type type = Type::MOVE;
         float u = 0, v = 0;
         float x = 0, y = 0;        // STICK
@@ -118,6 +141,7 @@ namespace wolfvr
         uint32_t mods = 0;         // 1 shift, 2 control, 4 alt
         std::string key;           // DOM KeyboardEvent.key for KEY_DOWN / KEY_UP ("Enter", "a", ...)
         std::string text;          // TEXT: characters typed (UTF-8)
+        bool layer = false;        // [VR HUD LAYER] u, v are on the UI layer (the whole window, no letterbox)
     };
 
     struct Config
@@ -142,6 +166,10 @@ namespace wolfvr
         // pose, reprojected like the test pattern). Sent to the page in "config".
         std::string mode = "test";
         bool        world_allowed = true;   // the page may ask for "world" (sent in "config" as "world")
+        // [VR LEAN 2026-11-04] the numbers (per-frame timings, the once-a-second "stats" to the page, the 10 s log
+        // line) cost the frame a little each time; off unless WolfVRDebugStats was on when the stream started.
+        // Sent in "config" as "debug" so the page shows its numbers panel only then.
+        bool        debug_stats = false;
         LogFn       log;
     };
 
@@ -217,6 +245,26 @@ namespace wolfvr
                      uint32_t bitrate_kbps = 0);   // 0 = keep the bitrate
         /** [VR 3D] The mode the headset page asked for ("screen" / "world"), once; empty when none. Any thread. */
         std::string takeModeRequest();
+        /** [VR CONTROLS 2026-11-04] The quality step the page asked for (0 best .. 3), once; -1 when none. */
+        int takeQualityRequest();
+        /** [VR CONTROLS] One text message to the connected page (JSON), if there is one. Any thread. */
+        void sendText(const std::string& json);
+        /** [VR HUD LAYER 2026-11-04] True while the page shows the UI layer and wants its pictures. Any thread. */
+        bool layerWanted() const;
+        /** [VR HUD LAYER] True when the last pictures were all the same (nothing on the UI moving): the viewer then
+         *  draws the layer less often (wolfvrscreen.cpp captureLayer). */
+        bool layerIdle() const;
+        /** [VR HUD LAYER] One UI-layer picture: w x h RGBA, top row first, alpha = coverage. Only the newest is kept;
+         *  the layer thread sends it only when it differs from the last one sent (or the page asked for a key frame),
+         *  at most 30 a second. Any thread; `rgba` gets back a buffer to reuse. */
+        void submitLayer(std::vector<uint8_t>& rgba, uint32_t w, uint32_t h, double capture_ms);
+        /** [VR AUDIO 2026-11-04] One block of the viewer's final sound mix for the headset: `frames` frames of
+         *  `channels` interleaved signed 16-bit samples at `rate` Hz, mixed at viewer clock `mix_ms` (wolfvr::nowMs
+         *  clock, the one the pictures are stamped with). Sent at once if a headset wants sound, else dropped. Blocks
+         *  queue at most ~250 ms; older ones are dropped rather than delayed. Any thread (the audio thread). */
+        void submitAudio(const int16_t* pcm, uint32_t frames, uint32_t channels, uint32_t rate, double mix_ms);
+        /** [VR AUDIO] True while a headset page is connected and has said it plays the sound ({"t":"audio","on":true}). */
+        bool audioWanted() const;
 
     private:
         struct Impl;

@@ -62,6 +62,22 @@ namespace WolfVRStream
     void submitWorldFrame(std::vector<uint8_t>& rgba, const wolfvr::HeadPose& pose, double capture_ms);
     /** Applies a mode the headset page asked for (its in-VR switch). Main thread, every frame. */
     void pumpModeRequest();
+    // [VR OPENH264 2026-11-04] Cisco's OpenH264 video codec: -1 none for this computer, 0 not downloaded, 1 ready,
+    // 2 downloading; the last download's answer in plain words; start the download (the resident's own press).
+    int codecState();
+    std::string codecMessage();
+    void downloadCodec();
+    // [VR AUDIO 2026-11-04] the viewer's final sound mix to the headset (wolfvrpipe.h submitAudio for the format).
+    // submitAudio may be called from the audio thread; it never blocks (a block is dropped if the lock is busy).
+    bool audioWanted();
+    void submitAudio(const int16_t* pcm, U32 frames, U32 channels, U32 rate, double mix_ms);
+    // [VR HUD LAYER 2026-11-04] the viewer's UI layer as a second stream (VR 3D Mode only: Big Screen has it already)
+    bool layerWanted();
+    bool layerIdle();   // the UI layer has not changed for a while
+    void submitLayer(std::vector<uint8_t>& rgba, U32 w, U32 h, double capture_ms);
+    // [VR CONTROLS 2026-11-04] one JSON text message to the headset page; the mode streaming now ("" when off)
+    void sendText(const std::string& json);
+    std::string mode();
     /** Why the last start failed (empty after a good start). */
     std::string lastError();
     /** The address chosen and why (or why none could be). */

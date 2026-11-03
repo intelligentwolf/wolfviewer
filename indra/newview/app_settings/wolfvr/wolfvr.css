@@ -112,3 +112,14 @@ body { font: 20px/1.5 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
                          font-size: 30px; }
 #vr-btn.wvr-enter .btn-label { font-size: 30px; letter-spacing: 1px; }
 #vr-btn.wvr-enter .wvr-icon { width: 56px; height: 56px; margin: 0; }
+
+/* [VR CONTROLS 2026-11-04] the action bar's icon font, kept here (fonts/PROVENANCE.txt) so nothing comes from the internet */
+@font-face { font-family: 'Material Icons'; font-style: normal; font-weight: 400;
+             src: url(fonts/MaterialIcons-Regular.woff2) format('woff2'); }
+/* [VR HEADSETS 2026-11-04] big, easy choices (Paul: some residents are older or have disabilities) */
+.wvr-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 8px; margin: 0 0 12px; }
+.wvr-choice { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 8px 14px; border-radius: 8px;
+              border: 1px solid var(--wvr-line); background: #1f2640; cursor: pointer; font-size: 22px; }
+.wvr-choice input { width: 28px; height: 28px; margin: 0; accent-color: #84cc16; }
+.wvr-choice:has(input:checked) { border-color: #84cc16; background: #24321a; }
+.wvr-choice:has(input:focus-visible) { outline: 3px solid #8fb8ff; outline-offset: 2px; }

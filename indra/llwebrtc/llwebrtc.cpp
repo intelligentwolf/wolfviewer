@@ -89,6 +89,28 @@ int32_t LLWebRTCAudioTransport::RecordedDataIsAvailable(const void* audio_data,
                                                         bool        key_pressed,
                                                         uint32_t&   new_mic_level)
 {
+    // [VR AUDIO 2026-11-04] a headset microphone is in use: the PC microphone's buffers are not sent (the ADM's
+    // mic clock delivers the headset's through DeliverCapture instead)
+    if (mExternalMicActive.load(std::memory_order_acquire))
+    {
+        new_mic_level = current_mic_level;
+        return 0;
+    }
+    return DeliverCapture(audio_data, number_of_frames, bytes_per_frame, number_of_channels, samples_per_sec,
+                          total_delay_ms, clock_drift, current_mic_level, key_pressed, new_mic_level);
+}
+
+int32_t LLWebRTCAudioTransport::DeliverCapture(const void* audio_data,
+                                               size_t      number_of_frames,
+                                               size_t      bytes_per_frame,
+                                               size_t      number_of_channels,
+                                               uint32_t    samples_per_sec,
+                                               uint32_t    total_delay_ms,
+                                               int32_t     clock_drift,
+                                               uint32_t    current_mic_level,
+                                               bool        key_pressed,
+                                               uint32_t&   new_mic_level)
+{
     auto* engine = engine_.load(std::memory_order_acquire);
 
     // 1) Deliver to engine (authoritative).
@@ -175,6 +197,20 @@ int32_t LLWebRTCAudioTransport::NeedMorePlayData(size_t   number_of_frames,
         }
     }
     // </WolfViewer>
+    // [VR AUDIO 2026-11-04] the VR headset's copy of the voices, the same check as the DJ tap above; then, while
+    // the headset plays the sound, silence for the PC speakers. 16-bit samples, so the buffer is frames x channels
+    // x 2 bytes whichever way bytes_per_frame is counted (audio_device_defines.h:70 calls it nBytesPerSample).
+    if (ret == 0 && number_of_channels > 0 && bytes_per_frame == 2 * number_of_channels)
+    {
+        if (LLWebRTCPlayoutTap* tap = mVRTap.load(std::memory_order_acquire))
+        {
+            tap->onPlayoutAudio(static_cast<const int16_t*>(audio_data), number_of_frames, number_of_channels, samples_per_sec);
+        }
+        if (mSilenced.load(std::memory_order_relaxed))
+        {
+            memset(audio_data, 0, number_of_frames * number_of_channels * sizeof(int16_t));
+        }
+    }
     return ret;
 }
 
@@ -861,6 +897,88 @@ void LLWebRTCImpl::setPlayoutTap(LLWebRTCPlayoutTap* tap)
     }
 }
 // </WolfViewer>
+
+// [VR AUDIO 2026-11-04] see LLWebRTCExternalMic (llwebrtc.h)
+void LLWebRTCImpl::setVRPlayoutTap(LLWebRTCPlayoutTap* tap)
+{
+    if (mDeviceModule)
+    {
+        mDeviceModule->SetVRPlayoutTap(tap);
+    }
+}
+
+void LLWebRTCImpl::setPlayoutSilenced(bool silenced)
+{
+    if (mDeviceModule)
+    {
+        mDeviceModule->SetPlayoutSilenced(silenced);
+    }
+}
+
+void LLWebRTCImpl::setExternalMic(LLWebRTCExternalMic* mic)
+{
+    if (mDeviceModule)
+    {
+        mDeviceModule->SetExternalMic(mic);
+    }
+}
+
+void LLWebRTCAudioDeviceModule::SetExternalMic(LLWebRTCExternalMic* mic)
+{
+    if (mic == external_mic_.load())
+    {
+        return;
+    }
+    // stop the clock (if any) before changing the source, then start it again for the new one
+    mic_clock_stop_ = true;
+    if (mic_clock_.joinable())
+    {
+        mic_clock_.join();
+    }
+    external_mic_.store(mic);
+    audio_transport_.SetExternalMicActive(mic != nullptr);
+    if (mic)
+    {
+        mic_clock_stop_ = false;
+        mic_clock_ = std::thread([this] { micClock(); });
+    }
+}
+
+// The headset microphone's clock: every 10 ms, 480 mono samples at 48 kHz to the voice engine, as a recording
+// device would deliver them (pc/test/fake_audio_capture_module.h does the same: 10 ms frames from its own thread,
+// 16-bit mono). Only while the app wants recording (ForceStartRecording; mute stops it as it stops a real mic).
+void LLWebRTCAudioDeviceModule::micClock()
+{
+    constexpr size_t   kFrames = 480;
+    constexpr uint32_t kRate   = 48000;
+    int16_t            buf[kFrames];
+    auto               next = std::chrono::steady_clock::now();
+    uint32_t           mic_level = 0;
+    while (!mic_clock_stop_.load())
+    {
+        next += std::chrono::milliseconds(10);
+        std::this_thread::sleep_until(next);
+        const auto now = std::chrono::steady_clock::now();
+        if (now - next > std::chrono::milliseconds(100))
+        {
+            next = now;   // the thread was held up (a stall, a suspend): start the clock again, no burst
+        }
+        LLWebRTCExternalMic* mic = external_mic_.load();
+        if (!mic || !recording_wanted_.load())
+        {
+            continue;
+        }
+        size_t got = mic->pullMic(buf, kFrames, kRate);
+        if (got > kFrames) got = kFrames;
+        if (got < kFrames)
+        {
+            memset(buf + got, 0, (kFrames - got) * sizeof(int16_t));
+        }
+        uint32_t new_level = mic_level;
+        audio_transport_.DeliverCapture(buf, kFrames, sizeof(int16_t), 1, kRate, 0, 0, mic_level, false, new_level);
+        mic_level = new_level;
+    }
+}
 
 void LLWebRTCImpl::setMicGain(float gain)
 {

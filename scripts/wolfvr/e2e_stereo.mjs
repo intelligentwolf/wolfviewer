@@ -16,7 +16,7 @@ const check = (ok, what) => { console.log(`${ok ? 'PASS' : 'FAIL'} ${what}`); if
 async function waitFor(fn, ms = 15000, step = 250) { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = await fn(); if (v) return v; await sleep(step); } return null; }
 
 const chrome = spawn('chromium', ['--headless=new', '--no-sandbox', '--use-angle=vulkan', '--enable-unsafe-swiftshader',
-    '--ignore-certificate-errors', '--remote-debugging-port=9383', '--window-size=1280,1280',
+    '--ignore-certificate-errors', '--autoplay-policy=no-user-gesture-required', '--remote-debugging-port=9383', '--window-size=1280,1280',
     `--user-data-dir=${resolve(OUT, 'profile')}`, 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
 chrome.stderr.on('data', () => {});
 let t = null;
@@ -63,6 +63,10 @@ const stereoRow = await evalJs('(window.__wolfvr.numbers().rows.find(r => r[0] =
 console.log('   3D picture:', stereoRow);
 check(/two eyes/.test(stereoRow || ''), 'the viewer says the picture is two eyes');
 check(/64 mm/.test(stereoRow || ''), 'drawn from eyes 64 mm apart (the fake headset IPD)');
+// [VR AUDIO] the viewer's sound arrives and plays (the test viewer's speakers are a null sink)
+const au = await waitFor(async () => { const a = await evalJs('window.__wolfvr.audio()'); return a && a.buffered > 0 ? a : null; }, 10000);
+console.log('   sound:', JSON.stringify(au));
+check(!!au, 'the viewer\'s sound reaches the page');
 // look down a little so the near ground fills the lower part of the picture
 await evalJs('window.__fakeXR.setPitch(-0.5)'); await sleep(4000);
 await grab('s_down.jpg');
@@ -82,6 +86,7 @@ while (Date.now() - t0 < Number(SECS) * 1000) {
     }
 }
 await grab('s_end.jpg');
+console.log('   sound at the end:', JSON.stringify(await evalJs('window.__wolfvr.audio()')));
 await evalJs('window.__wolfvr.toggleVR()');
 ws.close(); chrome.kill();
 console.log(failures ? `E2E STEREO FAILED (${failures})` : 'E2E STEREO PASSED');

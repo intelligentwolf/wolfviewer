@@ -1,7 +1,8 @@
 /**
  * @file wolfvrpipe_video.h
  * @brief WolfViewer VR pipe, stage 1: the moving test pattern and the video encoders (GStreamer H.264 loaded at run
- *        time - NVENC, VA-API, x264, OpenH264 - and libjpeg as the always-there fallback). Internal to wolfvrpipe.cpp.
+ *        time - NVENC, VA-API, x264 - Cisco OpenH264 loaded at run time, and libjpeg as the always-there fallback).
+ *        Internal to wolfvrpipe.cpp.
  *
  * $LicenseInfo:firstyear=2026&license=viewerlgpl$
  * WolfViewer — Wolf Territories Grid
@@ -50,11 +51,16 @@ namespace wolfvr
         virtual bool encode(const uint8_t* rgba, EncodedFrame& out, std::string& error) = 0;
         virtual std::string name() const = 0;      // "nvh264enc", "jpeg (libjpeg)", ...
         virtual std::string codec() const = 0;     // "h264" | "jpeg"
+        /** [VR OPENH264 2026-11-03] Makes the next picture an IDR without reopening the encoder. True when it will
+         *  (OpenH264 ForceIntraFrame; JPEG: every picture is whole), false when this encoder cannot (GStreamer
+         *  chains), and then the caller reopens it, as the frame thread does today. */
+        virtual bool requestKeyFrame() { return false; }
     };
 
-    /** Opens the first encoder that works, in the order NVENC, VA-API, x264, OpenH264, JPEG - or only `which`
-     *  (nvenc | va | x264 | openh264 | jpeg) when it is not "auto". GStreamer is loaded with dlopen on Linux only, so
-     *  a machine without it (and Windows/macOS) gets JPEG. `tried` lists every attempt and why it failed. */
+    /** Opens the first encoder that works - or only `which` (nvenc | va | x264 | openh264 | jpeg) when it is not
+     *  "auto". Linux: NVENC, VA-API, x264 (GStreamer, loaded with dlopen), then OpenH264 direct, then JPEG.
+     *  Windows/macOS: OpenH264 direct (Cisco's library, downloaded on first use: wolfvrcodecfetch.h and
+     *  setOpenH264Path in wolfvr_openh264.h), then JPEG. `tried` lists every attempt and why it failed. */
     std::unique_ptr<Encoder> openEncoder(const std::string& which, uint32_t width, uint32_t height, uint32_t fps,
                                          uint32_t bitrate_kbps, std::string& tried);
 

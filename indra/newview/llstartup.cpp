@@ -1124,6 +1124,9 @@ bool idle_startup()
             if (!gAudiop)
 #endif // !LL_WINDOWS
             {
+                // [VR AUDIO 2026-11-04] VR on at start: mix through a loopback device so the headset can be sent
+                // the whole mix (llaudioengine_openal.h setMirrorMix); off, the engine plays exactly as before.
+                LLAudioEngine_OpenAL::setMirrorMix(gSavedSettings.getBOOL("WolfVRStreamEnabled"));
                 gAudiop = (LLAudioEngine *) new LLAudioEngine_OpenAL();
             }
 #endif

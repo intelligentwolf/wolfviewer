@@ -24,6 +24,9 @@
 #include "llviewercontrol.h"
 #include "qrcodegen/qrcodegen.hpp"
 #include "wolfvrstream.h"
+#include "wolfvraudio.h"
+#include "wolfvrcodecfetch.h"
+#include "llnotificationsutil.h"
 
 namespace
 {
@@ -47,6 +50,27 @@ bool WolfFloaterVRStream::postBuild()
     mNumbers = getChild<LLTextEditor>("numbers");
     // [VR 3D] VR 3D Mode is offered only once it is finished (WolfVR3DMode)
     if (!gSavedSettings.getBOOL("WolfVR3DMode")) getChild<LLComboBox>("mode")->remove("VR 3D Mode");
+    // [VR LEAN 2026-11-04] the numbers only with WolfVRDebugStats (Paul: no unnecessary stats)
+    if (!gSavedSettings.getBOOL("WolfVRDebugStats"))
+    {
+        LLView* label = getChild<LLView>("numbers_label");
+        label->setVisible(false);
+        mNumbers->setVisible(false);
+        // and the floater is shorter by their height: the Close button moves up under the codec lines
+        const S32 cut = label->getRect().mTop - mNumbers->getRect().mBottom + 8;
+        reshape(getRect().getWidth(), getRect().getHeight() - cut);
+        LLView* close = getChild<LLView>("close_btn");
+        LLRect r = close->getRect();
+        r.translate(0, cut);
+        close->setRect(r);
+    }
+    // [VR OPENH264 2026-11-04]
+    getChild<LLButton>("codec_download")->setCommitCallback([](LLUICtrl*, const LLSD&) { WolfVRStream::downloadCodec(); });
+    getChild<LLButton>("codec_licence")->setCommitCallback([](LLUICtrl*, const LLSD&) {
+        LLSD args;
+        args["MESSAGE"] = std::string(wolfvr::openh264AttributionText()) + "\n\n" + wolfvr::openh264BinaryLicenseText();
+        LLNotificationsUtil::add("GenericAlert", args);
+    });
     mQrArea = getChild<LLView>("qr_area");
     getChild<LLButton>("close_btn")->setCommitCallback([this](LLUICtrl*, const LLSD&) { closeFloater(); });
     refresh();
@@ -104,6 +128,8 @@ void WolfFloaterVRStream::refresh()
         status = getString("status_waiting");
     }
     if (on && !st.last_error.empty()) status += "\n" + st.last_error;
+    // [VR AUDIO 2026-11-04] when the headset cannot get all of the sound (in plain words, wolfvraudio.cpp)
+    if (on && !WolfVRAudio::problem().empty()) status += "\n" + WolfVRAudio::problem();
     if (mStatus->getText() != status) mStatus->setText(status);
 
     const std::string lan = WolfVRStream::lanUrl(), usb = WolfVRStream::usbUrl();
@@ -118,8 +144,22 @@ void WolfFloaterVRStream::refresh()
         getChild<LLUICtrl>("usb_note")->setTextArg("[PORT]", llformat("%u", port));
     }
 
+    // [VR OPENH264] the codec line, in plain words
+    {
+        const int cs = WolfVRStream::codecState();
+        std::string line = cs < 0 ? "Video codec: this computer uses its own." :
+                           cs == 2 ? "Video codec: downloading from Cisco..." :
+                           cs == 1 ? "Video codec: OpenH264 is ready." :
+                                     "Video codec: for a sharp, smooth picture, download the free one from Cisco.";
+        const std::string msg = WolfVRStream::codecMessage();
+        if (cs != 2 && !msg.empty() && cs != 1) line += " " + msg;
+        LLUICtrl* t = getChild<LLUICtrl>("codec_status");
+        if (t->getValue().asString() != line) t->setValue(line);
+        getChild<LLUICtrl>("codec_download")->setEnabled(cs == 0);
+        getChild<LLUICtrl>("codec_use")->setEnabled(cs == 1);
+    }
     std::string n;
-    if (on)
+    if (on && mNumbers->getVisible())
     {
         n += llformat("Picture   %s (%s)  sent %s fps  %s Mbit/s  skipped %llu\n", st.encoder.empty() ? "-" : st.encoder.c_str(),
                       st.codec.empty() ? "-" : st.codec.c_str(), fmtMs(st.send_fps, "").c_str(),
@@ -132,6 +172,8 @@ void WolfFloaterVRStream::refresh()
                       fmtMs(st.hs_new_frame_fps, "").c_str(), fmtMs(st.hs_decode_ms).c_str());
         n += llformat("Delay     head move to picture %s (p95 %s)  PC to headset %s", fmtMs(st.hs_pose_to_photon_ms).c_str(),
                       fmtMs(st.hs_pose_to_photon_p95).c_str(), fmtMs(st.hs_viewer_to_photon_ms).c_str());
+        n += llformat("\nSound     %s  microphone %s", WolfVRAudio::sending() ? "going to the headset" : "on this PC",
+                      WolfVRAudio::micInUse() ? "the headset's" : "this PC's");
     }
     if (mNumbers->getText() != n) mNumbers->setText(n);
 }

@@ -1747,8 +1747,9 @@ void render_ui(F32 zoom_factor, int subfield)
     // apply gamma correction and post effects
     gPipeline.renderFinalize();
     WolfVRScreen::captureWorld();   // [VR 3D 2026-11-03/] VR 3D Mode: the finished world, before the HUD and the UI
-    if (WolfVRScreen::uiSkipped())   // [VR STEREO 2026-11-04/] the left eye's pass: the world only, no HUD or UI
+    if (WolfVRScreen::uiSkipped())   // [VR STEREO 2026-11-04/] the left eye's pass (or a paused desktop): no HUD or UI
     {
+        WolfVRScreen::captureLayer();   // [VR LEAN 2026-11-04/] the headset's HUDs layer still (a no-op for the left eye)
         if (!gSnapshot)
         {
             set_current_modelview(saved_view);
@@ -1819,6 +1820,7 @@ void render_ui(F32 zoom_factor, int subfield)
         gViewerWindow->updateDebugText();
         gViewerWindow->drawDebugText();
     }
+    WolfVRScreen::captureLayer();   // [VR HUD LAYER 2026-11-04/] the HUDs and floaters again, on their own, for the headset
 
     if (!gSnapshot)
     {

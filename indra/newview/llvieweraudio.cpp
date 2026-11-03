@@ -32,6 +32,7 @@
 #include "llappviewer.h"
 #include "lldeferredsounds.h"
 #include "llvieweraudio.h"
+#include "wolfvrscreen.h"   // [VR AUDIO 2026-11-04/] listenerAxes
 #include "llviewercamera.h"
 #include "llviewercontrol.h"
 #include "llviewerwindow.h"
@@ -581,12 +582,15 @@ void audio_update_listener()
         LLVector3 lpos_global_f;
         lpos_global_f.setVec(lpos_global);
 
+        // [VR AUDIO 2026-11-04] in VR 3D Mode the ears turn with the headset (wolfvrscreen.cpp listenerAxes)
+        LLVector3 up = LLViewerCamera::getInstance()->getUpAxis(), at = LLViewerCamera::getInstance()->getAtAxis();
+        WolfVRScreen::listenerAxes(at, up);
         gAudiop->setListener(lpos_global_f,
                              // LLViewerCamera::getInstance()VelocitySmoothed,
                              // LLVector3::zero,
                              gAgent.getVelocity(),    // !!! *TODO: need to replace this with smoothed velocity!
-                             LLViewerCamera::getInstance()->getUpAxis(),
-                             LLViewerCamera::getInstance()->getAtAxis());
+                             up,
+                             at);
     }
 }
 

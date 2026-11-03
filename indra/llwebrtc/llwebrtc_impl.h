@@ -64,6 +64,8 @@
 #include "api/task_queue/default_task_queue_factory.h"
 #include "api/environment/environment.h"   // <WolfViewer 2026-09-26/> libwebrtc m144
 #include "modules/audio_device/include/audio_device_defines.h"
+#include <atomic>   // [VR AUDIO 2026-11-04] the headset microphone clock
+#include <thread>
 
 namespace llwebrtc
 {
@@ -164,6 +166,14 @@ public:
     float GetMicrophoneEnergy() { return mMicrophoneEnergy.load(std::memory_order_relaxed); }
     void  SetGain(float gain) { mGain.store(gain, std::memory_order_relaxed); }
     void  SetPlayoutTap(LLWebRTCPlayoutTap* tap) { mPlayoutTap.store(tap, std::memory_order_release); }   // <WolfViewer 2026-10-04/> WOLF DJ
+    // [VR AUDIO 2026-11-04] the headset's voice tap, PC speaker silence, and the headset microphone
+    void  SetVRPlayoutTap(LLWebRTCPlayoutTap* tap) { mVRTap.store(tap, std::memory_order_release); }
+    void  SetPlayoutSilenced(bool silenced) { mSilenced.store(silenced, std::memory_order_relaxed); }
+    void  SetExternalMicActive(bool active) { mExternalMicActive.store(active, std::memory_order_release); }
+    // One 10 ms buffer from the headset microphone into the engine, as RecordedDataIsAvailable would deliver it.
+    int32_t DeliverCapture(const void* audio_data, size_t number_of_frames, size_t bytes_per_frame,
+                           size_t number_of_channels, uint32_t samples_per_sec, uint32_t total_delay_ms,
+                           int32_t clock_drift, uint32_t current_mic_level, bool key_pressed, uint32_t& new_mic_level);
 
 private:
     std::atomic<webrtc::AudioTransport*> engine_{ nullptr };
@@ -172,6 +182,9 @@ private:
     std::atomic<float>                   mMicrophoneEnergy;
     std::atomic<float>                   mGain{ 0.0f };
     std::atomic<LLWebRTCPlayoutTap*>     mPlayoutTap{ nullptr };   // <WolfViewer 2026-10-04/> WOLF DJ
+    std::atomic<LLWebRTCPlayoutTap*>     mVRTap{ nullptr };        // [VR AUDIO 2026-11-04]
+    std::atomic<bool>                    mSilenced{ false };
+    std::atomic<bool>                    mExternalMicActive{ false };
 
 };
 
@@ -247,8 +260,8 @@ public:
         // controlled by the app
         return 0;
     }
-    int32_t ForceStartRecording() { return inner_->StartRecording(); }
-    int32_t ForceStopRecording() { return inner_->StopRecording(); }
+    int32_t ForceStartRecording() { recording_wanted_ = true; return inner_->StartRecording(); }   // [VR AUDIO] the flag
+    int32_t ForceStopRecording() { recording_wanted_ = false; return inner_->StopRecording(); }
     bool    Recording() const override { return inner_->Recording(); }
 
     // --- Stereo opts (forward if available on your branch) ---
@@ -327,17 +340,23 @@ public:
     float GetMicrophoneEnergy() { return audio_transport_.GetMicrophoneEnergy(); }
     void SetTuningMicGain(float gain) { audio_transport_.SetGain(gain); }
     void SetPlayoutTap(LLWebRTCPlayoutTap* tap) { audio_transport_.SetPlayoutTap(tap); }   // <WolfViewer 2026-10-04/> WOLF DJ
+    // [VR AUDIO 2026-11-04] see LLWebRTCExternalMic (llwebrtc.h)
+    void SetVRPlayoutTap(LLWebRTCPlayoutTap* tap) { audio_transport_.SetVRPlayoutTap(tap); }
+    void SetPlayoutSilenced(bool silenced) { audio_transport_.SetPlayoutSilenced(silenced); }
+    void SetExternalMic(LLWebRTCExternalMic* mic);
     void  SetTuning(bool tuning, bool mute)
     {
         tuning_ = tuning;
         if (tuning)
         {
+            recording_wanted_ = true;   // [VR AUDIO]
             inner_->InitRecording();
             inner_->StartRecording();
             inner_->StopPlayout();
         }
         else
         {
+            recording_wanted_ = !mute;   // [VR AUDIO]
             if (mute)
             {
                 inner_->StopRecording();
@@ -353,11 +372,17 @@ public:
     }
 
 protected:
-    ~LLWebRTCAudioDeviceModule() override = default;
+    ~LLWebRTCAudioDeviceModule() override { SetExternalMic(nullptr); }   // [VR AUDIO] the mic clock stops first
 
 private:
     webrtc::scoped_refptr<webrtc::AudioDeviceModule> inner_;
     LLWebRTCAudioTransport                        audio_transport_;
+    // [VR AUDIO 2026-11-04] the headset microphone's 10 ms clock (LLWebRTCExternalMic)
+    void                                          micClock();
+    std::atomic<bool>                             recording_wanted_{ false };   // ForceStart/StopRecording, SetTuning
+    std::atomic<LLWebRTCExternalMic*>             external_mic_{ nullptr };
+    std::atomic<bool>                             mic_clock_stop_{ false };
+    std::thread                                   mic_clock_;
 
     bool tuning_;
 };
@@ -458,6 +483,9 @@ class LLWebRTCImpl : public LLWebRTCDeviceInterface, public webrtc::AudioDeviceO
 
     void setMute(bool mute, int delay_ms = 20) override;
     void setPlayoutTap(LLWebRTCPlayoutTap* tap) override;   // <WolfViewer 2026-10-04/> WOLF DJ
+    void setVRPlayoutTap(LLWebRTCPlayoutTap* tap) override;   // [VR AUDIO 2026-11-04]
+    void setPlayoutSilenced(bool silenced) override;
+    void setExternalMic(LLWebRTCExternalMic* mic) override;
 
     void intSetMute(bool mute, int delay_ms = 20);
 

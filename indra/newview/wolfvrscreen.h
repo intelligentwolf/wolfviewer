@@ -17,6 +17,8 @@
 #ifndef WOLF_VRSCREEN_H
 #define WOLF_VRSCREEN_H
 
+class LLVector3;
+
 // [VR BIG SCREEN 2026-11-03] Paul: "I'm dying to go in-world with it". Before stereo: WolfViewer's normal window, UI
 // and all, on a big curved screen in the headset, with the controllers as the mouse.
 //  - captureFrame() runs at the end of each drawn frame, just before the buffers swap (llviewerdisplay.cpp swap()),
@@ -40,6 +42,11 @@ namespace WolfVRScreen
     /** [VR STEREO] True while drawing the left eye: render_ui stops after the world (the headset gets no UI there and
      *  the right eye's pass draws the desktop's). */
     bool uiSkipped();
+    /** [VR HUD LAYER 2026-11-04] End of render_ui: the UI layer, drawn again into its own transparent target, to the
+     *  headset (VR 3D Mode, while the page shows it). */
+    void captureLayer();
+    /** [VR AUDIO 2026-11-04] The listener's axes from the newest head pose (VR 3D Mode); false when not in it. */
+    bool listenerAxes(LLVector3& at, LLVector3& up);
     /** Frees the GPU objects (stream switched off, or the viewer closing). Main thread, GL context current. */
     void release();
 }

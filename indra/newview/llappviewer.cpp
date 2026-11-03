@@ -84,6 +84,7 @@
 #include "wolfupdate.h"         // <WolfViewer 2026-10-02/> WolfUpdate::shutdown
 #include "wolfvrstream.h"       // [VR PIPE 2026-11-03/] WolfVRStream::shutdown
 #include "wolfvrscreen.h"       // [VR STEREO 2026-11-04/] WolfVRScreen::displayFrame
+#include "wolfvraudio.h"        // [VR AUDIO 2026-11-04/] WolfVRAudio::shutdown
 #include "wolfdjaudio.h"        // [WOLF DJ 2026-10-04/] WolfDJMixer::shutdown
 #include "wolffloaterdj.h"      // [WOLF DJ 2026-10-04/] wolfdj_on_app_quit
 #include "wolfdjplayer.h"       // [WOLF DJ 2026-10-04/] WolfDJPlayer::shutdown
@@ -1827,6 +1828,7 @@ bool LLAppViewer::doFrame()
                 pauseMainloopTimeout();
                 saveFinalSnapshot();
 
+                WolfVRAudio::shutdown();   // [VR AUDIO 2026-11-04/] before voice goes
                 if (LLVoiceClient::instanceExists())
                 {
                     LLVoiceClient::getInstance()->terminate();
@@ -2008,6 +2010,7 @@ bool LLAppViewer::doFrame()
         }
 
         pingMainloopTimeout("Main:TerminateVoice");
+        WolfVRAudio::shutdown();   // [VR AUDIO 2026-11-04/] the headset's taps off the sound engine and voice first
         if (LLVoiceClient::instanceExists())
         {
             LLVoiceClient::getInstance()->terminate();

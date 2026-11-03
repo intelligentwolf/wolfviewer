@@ -29,6 +29,15 @@
 #include "wolfvrdevice.h"
 #include "wolfvrpipe_video.h"
 
+// [VR OPENH264 2026-11-03] portOwner on Windows (IP Helper) and macOS (libproc). Windows: after Boost.Asio, which has
+// already brought in winsock2.h and ws2tcpip.h, as iphlpapi.h needs.
+#if defined(_WIN32)
+#include <iphlpapi.h>
+#pragma comment(lib, "iphlpapi.lib")
+#elif defined(__APPLE__)
+#include <libproc.h>
+#endif
+
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
 #include <openssl/pem.h>
@@ -203,19 +212,43 @@ namespace
 
     template <typename T> void put(std::string& b, size_t off, T v) { std::memcpy(&b[off], &v, sizeof(T)); }
 
+    // [VR AUDIO 2026-11-04] where the headset's microphone goes (wolfvr::setMicSink); the io thread reads it
+    std::atomic<wolfvr::MicSink> gMicSink{nullptr};
+
+    // [VR AUDIO] page -> viewer binary: 16-byte header, then little-endian signed 16-bit PCM. Bytes 0..3 kMagic,
+    // 4..7 header size (16), 8 kind (1 = microphone), 9 channels (1), 10..11 zero, 12..15 sample rate (u32).
+    // Anything else, or more than 100 ms of sound in one message, is ignored.
+    void onPageBinary(const std::string& b)
+    {
+        if (b.size() < 16) return;
+        uint32_t magic = 0, hsize = 0, rate = 0;
+        std::memcpy(&magic, &b[0], 4);
+        std::memcpy(&hsize, &b[4], 4);
+        std::memcpy(&rate, &b[12], 4);
+        const uint8_t kind = (uint8_t)b[8], channels = (uint8_t)b[9];
+        if (magic != kMagic || hsize != 16 || kind != 1 || channels != 1 || rate < 8000 || rate > 96000) return;
+        const size_t bytes = b.size() - 16;
+        if (bytes == 0 || (bytes & 1) || bytes / 2 > rate / 10) return;
+        wolfvr::MicSink sink = gMicSink.load();
+        if (!sink) return;
+        std::vector<int16_t> pcm(bytes / 2);
+        std::memcpy(pcm.data(), &b[16], bytes);   // copied: the read buffer's alignment is not known
+        sink(pcm.data(), (uint32_t)pcm.size(), rate);
+    }
+
     struct Rolling
     {
         std::deque<double> v;
         size_t cap;
         explicit Rolling(size_t c = 120) : cap(c) {}
         void add(double x) { v.push_back(x); if (v.size() > cap) v.pop_front(); }
-        double avg() const { if (v.empty()) return -1; double s = 0; for (double x : v) s += x; return s / v.size(); }
+        double avg() const { if (v.empty()) return -1; double s = 0; for (double x : v) s += x; return s / (double)v.size(); }
         double pct(double p) const
         {
             if (v.empty()) return -1;
             std::vector<double> s(v.begin(), v.end());
             std::sort(s.begin(), s.end());
-            return s[std::min(s.size() - 1, (size_t)(p * (s.size() - 1) + 0.5))];
+            return s[std::min(s.size() - 1, (size_t)(p * (double)(s.size() - 1) + 0.5))];
         }
     };
 
@@ -311,8 +344,8 @@ namespace
 {
     constexpr uint16_t kPortTries = 8;   // the port and the next seven (4333-4340)
 
-    // Who is listening on TCP `port`, for the "all ports in use" message: "name (pid N)". Linux only, and only
-    // processes of this user are visible; elsewhere (or when unreadable) empty.
+    // Who is listening on TCP `port`, for the "all ports in use" message: "name (pid N)". Linux: /proc (only this
+    // user's processes are visible); Windows: IP Helper; macOS: libproc. Empty when nothing is found.
     std::string portOwner(uint16_t port)
     {
 #if defined(__linux__)
@@ -357,6 +390,87 @@ namespace
             }
         }
         return "another program";
+#elif defined(_WIN32)
+        // GetExtendedTcpTable(TCP_TABLE_OWNER_PID_LISTENER): listening sockets and their process ids. dwLocalPort
+        // holds the port in network byte order in its low 16 bits (wine iphlpapi_main.c copies sin_port into it).
+        auto swap16 = [](DWORD v) { return (uint16_t)(((v & 0xFFu) << 8) | ((v >> 8) & 0xFFu)); };
+        auto nameOf = [](DWORD pid) {
+            std::string name;
+            if (HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid))
+            {
+                wchar_t path[MAX_PATH];
+                DWORD len = MAX_PATH;
+                if (QueryFullProcessImageNameW(h, 0, path, &len) && len > 0)
+                {
+                    const std::wstring w(path, len);
+                    const size_t slash = w.find_last_of(L"\\/");
+                    const std::wstring base = slash == std::wstring::npos ? w : w.substr(slash + 1);
+                    const int n = WideCharToMultiByte(CP_UTF8, 0, base.data(), (int)base.size(), nullptr, 0, nullptr, nullptr);
+                    if (n > 0)
+                    {
+                        name.resize((size_t)n);
+                        WideCharToMultiByte(CP_UTF8, 0, base.data(), (int)base.size(), name.data(), n, nullptr, nullptr);
+                    }
+                }
+                CloseHandle(h);
+            }
+            return (name.empty() ? std::string("another program") : name) + " (pid " + std::to_string(pid) + ")";
+        };
+        for (const ULONG af : {(ULONG)AF_INET, (ULONG)AF_INET6})
+        {
+            DWORD size = 0;
+            GetExtendedTcpTable(nullptr, &size, FALSE, af, TCP_TABLE_OWNER_PID_LISTENER, 0);
+            if (size == 0) continue;
+            std::vector<unsigned char> buf(size);
+            if (GetExtendedTcpTable(buf.data(), &size, FALSE, af, TCP_TABLE_OWNER_PID_LISTENER, 0) != NO_ERROR) continue;
+            if (af == AF_INET)
+            {
+                const auto* t = reinterpret_cast<const MIB_TCPTABLE_OWNER_PID*>(buf.data());
+                for (DWORD i = 0; i < t->dwNumEntries; ++i)
+                {
+                    if (swap16(t->table[i].dwLocalPort) == port) return nameOf(t->table[i].dwOwningPid);
+                }
+            }
+            else
+            {
+                const auto* t = reinterpret_cast<const MIB_TCP6TABLE_OWNER_PID*>(buf.data());
+                for (DWORD i = 0; i < t->dwNumEntries; ++i)
+                {
+                    if (swap16(t->table[i].dwLocalPort) == port) return nameOf(t->table[i].dwOwningPid);
+                }
+            }
+        }
+        return std::string();
+#elif defined(__APPLE__)
+        // libproc (xnu libsyscall/wrappers/libproc): each process's open files; a TCP socket in TSI_S_LISTEN on
+        // `port`. insi_lport is in network byte order (lsof dialects/darwin/dsock.c reads it with ntohs).
+        const int count = proc_listallpids(nullptr, 0);
+        if (count <= 0) return std::string();
+        std::vector<int> pids((size_t)count + 64);
+        const int n = proc_listallpids(pids.data(), (int)(pids.size() * sizeof(int)));
+        for (int i = 0; i < n && i < (int)pids.size(); ++i)
+        {
+            const int pid = pids[(size_t)i];
+            if (pid <= 0) continue;
+            const int bytes = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, nullptr, 0);
+            if (bytes <= 0) continue;
+            std::vector<proc_fdinfo> fds((size_t)bytes / sizeof(proc_fdinfo) + 16);
+            const int got = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, fds.data(), (int)(fds.size() * sizeof(proc_fdinfo)));
+            for (size_t k = 0; got > 0 && k < (size_t)got / sizeof(proc_fdinfo); ++k)
+            {
+                if (fds[k].proc_fdtype != PROX_FDTYPE_SOCKET) continue;
+                socket_fdinfo si;
+                std::memset(&si, 0, sizeof si);
+                if (proc_pidfdinfo(pid, fds[k].proc_fd, PROC_PIDFDSOCKETINFO, &si, (int)sizeof si) < (int)sizeof si) continue;
+                if (si.psi.soi_kind != SOCKINFO_TCP || si.psi.soi_proto.pri_tcp.tcpsi_state != TSI_S_LISTEN) continue;
+                const uint32_t lp = (uint32_t)si.psi.soi_proto.pri_tcp.tcpsi_ini.insi_lport;
+                if ((uint16_t)(((lp & 0xFFu) << 8) | ((lp >> 8) & 0xFFu)) != port) continue;
+                char name[256] = {0};
+                proc_name(pid, name, sizeof name);
+                return std::string(name[0] ? name : "another program") + " (pid " + std::to_string(pid) + ")";
+            }
+        }
+        return std::string();
 #else
         (void)port;
         return std::string();
@@ -370,7 +484,7 @@ struct Service::Impl
     net::io_context ioc{1};
     std::unique_ptr<net::ssl::context> ssl;
     std::vector<std::unique_ptr<tcp::acceptor>> acceptors;
-    std::thread net_thread, frame_thread;
+    std::thread net_thread, frame_thread, layer_thread;
     std::atomic<bool> stopping{false};
     std::atomic<int> http_conns{0};
 
@@ -406,6 +520,22 @@ struct Service::Impl
     bool pending_external = false;
     uint32_t pending_kbps = 0;
     std::string mode_request;   // from the page
+    int quality_request = -1;   // [VR CONTROLS] from the page (mode_mutex)
+
+    // [VR HUD LAYER 2026-11-04] the viewer's UI layer, a second picture stream with its own encoder (layerLoop)
+    std::atomic<bool> layer_on{false};          // the page shows the layer
+    std::atomic<bool> layer_key{false};         // the page's layer decoder needs a key frame
+    std::atomic<int> layer_same{0};             // pictures in a row identical to the last one sent
+    std::mutex layer_mutex;
+    std::condition_variable layer_cv;
+    std::vector<uint8_t> layer_rgba;
+    uint32_t layer_w = 0, layer_h = 0;
+    double layer_capture_ms = 0;
+    bool layer_ready = false;
+
+    // [VR AUDIO 2026-11-04] the viewer's sound mix
+    std::atomic<bool> audio_on{false};
+    uint64_t audio_sample = 0;   // audio thread only
 
     // clock sync from the page: server_ms - client_ms
     std::atomic<double> clock_offset{0};
@@ -435,6 +565,7 @@ struct Service::Impl
 
     // ---- frames ----
     void frameLoop();
+    void layerLoop();
     void sendToClient(const std::shared_ptr<Client>& c, std::string msg, bool binary);
 };
 
@@ -489,7 +620,7 @@ namespace
             res.set("Content-Security-Policy",
                     "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; "
                     "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'");
-            res.set("Permissions-Policy", "xr-spatial-tracking=(self)");
+            res.set("Permissions-Policy", "xr-spatial-tracking=(self), microphone=(self)");   // [VR AUDIO] the headset mic
         }
     }
 }
@@ -652,6 +783,10 @@ net::awaitable<void> Service::Impl::runWebSocket(Stream stream, http::request<ht
             {
                 onText(c, beast::buffers_to_string(buf.data()));
             }
+            else if (allowed)
+            {
+                onPageBinary(beast::buffers_to_string(buf.data()));   // [VR AUDIO 2026-11-04] the headset mic
+            }
         }
     }
     catch (const std::exception&)
@@ -783,6 +918,9 @@ void Service::Impl::onText(const std::shared_ptr<Client>& c, const std::string& 
             std::lock_guard<std::mutex> lk(pose_mutex);
             pose = p;
         }
+        // [VR LEAN 2026-11-04] Paul: "everything affects performance ... don't log stuff or have unnecessary stats":
+        // the numbers only with Config::debug_stats (WolfVRDebugStats, read once at start)
+        if (!cfg.debug_stats) return;
         std::lock_guard<std::mutex> lk(stats_mutex);
         poses_window++;
         if (clock_synced && p.client_ms >= 0)
@@ -825,7 +963,43 @@ void Service::Impl::onText(const std::shared_ptr<Client>& c, const std::string& 
     }
     else if (t == "key")
     {
-        key_requested = true;
+        if (num("s", 0) == 1) layer_key = true;   // [VR HUD LAYER] the layer's own decoder
+        else key_requested = true;
+    }
+    else if (t == "act")
+    {
+        // [VR CONTROLS 2026-11-04] an action-bar button: a short name of letters, digits, _ . - and a short argument
+        InputEvent e;
+        e.type = InputEvent::Type::ACTION;
+        e.key = str("a");
+        e.text = str("x");
+        if (e.key.empty() || e.key.size() > 40 || e.text.size() > 64) return;
+        for (const char ch : e.key)
+        {
+            if (!(std::isalnum((unsigned char)ch) || ch == '_' || ch == '.' || ch == '-')) return;
+        }
+        std::lock_guard<std::mutex> lk(input_mutex);
+        input.push_back(std::move(e));
+        while (input.size() > 256) input.pop_front();
+    }
+    else if (t == "quality")
+    {
+        const double l = num("l", -1);
+        if (!(l >= 0 && l <= 3)) return;
+        std::lock_guard<std::mutex> lk(mode_mutex);
+        quality_request = (int)l;
+    }
+    else if (t == "audio")
+    {
+        auto it = o.find("on");
+        audio_on = it != o.end() && it->value().is_bool() && it->value().as_bool();
+    }
+    else if (t == "layer")
+    {
+        auto it = o.find("on");
+        const bool on = it != o.end() && it->value().is_bool() && it->value().as_bool();
+        if (on && !layer_on) layer_key = true;   // a fresh start for the page's layer decoder
+        layer_on = on;
     }
     else if (t == "mode")
     {
@@ -843,6 +1017,7 @@ void Service::Impl::onText(const std::shared_ptr<Client>& c, const std::string& 
         e.u = unit("u");
         e.v = unit("v");
         e.mods = (uint32_t)std::clamp(num("m", 0), 0.0, 7.0);
+        e.layer = num("l", 0) == 1;   // [VR HUD LAYER] a point on the UI layer
         if (ev == "move" || ev == "down" || ev == "up")
         {
             e.type = ev == "move" ? InputEvent::Type::MOVE : ev == "down" ? InputEvent::Type::DOWN : InputEvent::Type::UP;
@@ -1123,6 +1298,7 @@ void Service::Impl::frameLoop()
             cfgmsg["fps"] = cfg.fps;
             cfgmsg["mode"] = cfg.mode;
             cfgmsg["world"] = cfg.world_allowed;
+            cfgmsg["debug"] = cfg.debug_stats;
             if (enc->codec() == "h264" && !ef.key)
             {
                 // A decoder can only start on a key frame; this one is not, so ask again.
@@ -1157,8 +1333,9 @@ void Service::Impl::frameLoop()
         sendToClient(c, std::move(msg), true);
         frame++;
 
-        // numbers
+        // numbers (only with WolfVRDebugStats: [VR LEAN 2026-11-04])
         std::string periodic;
+        if (cfg.debug_stats)
         {
             std::lock_guard<std::mutex> lk(stats_mutex);
             render_ms.add(t1 - t0);
@@ -1170,9 +1347,9 @@ void Service::Impl::frameLoop()
             const double dt = now_ms - window_start;
             if (dt >= 1000)
             {
-                st.send_fps = frames_window * 1000.0 / dt;
-                st.kbps = bytes_window * 8.0 / dt;   // bits per ms = kbit/s
-                st.pose_hz = poses_window * 1000.0 / dt;
+                st.send_fps = (double)frames_window * 1000.0 / dt;
+                st.kbps = (double)bytes_window * 8.0 / dt;   // bits per ms = kbit/s
+                st.pose_hz = (double)poses_window * 1000.0 / dt;
                 st.render_ms = render_ms.avg();
                 st.encode_ms = encode_ms.avg();
                 st.encode_ms_p95 = encode_ms.pct(0.95);
@@ -1211,6 +1388,129 @@ void Service::Impl::frameLoop()
             }
         }
         if (!periodic.empty()) sendToClient(c, std::move(periodic), false);
+    }
+}
+
+// [VR HUD LAYER 2026-11-04] The viewer's UI layer (HUD attachments, floaters, notices) as a second H.264 stream. H.264
+// has no alpha, so the picture is the layer STACKED: colour in the top half, coverage (alpha) as grey in the bottom
+// half; the page puts them back together. Only a picture that differs from the last one sent is encoded (most of the
+// time the UI stands still), at most 30 a second, and the encoder is reopened when the window changes size.
+void Service::Impl::layerLoop()
+{
+    using clock = std::chrono::steady_clock;
+    std::unique_ptr<Encoder> enc;
+    uint64_t enc_generation = 0;
+    uint32_t enc_w = 0, enc_h = 0;
+    bool config_sent = false;
+    std::vector<uint8_t> rgba, last, stacked;
+    uint32_t w = 0, h = 0;
+    double capture_ms = 0;
+    uint64_t frame = 0;
+    auto last_sent = clock::now() - std::chrono::seconds(1);
+    while (!stopping)
+    {
+        {
+            std::unique_lock<std::mutex> lk(layer_mutex);
+            if (!layer_cv.wait_for(lk, std::chrono::milliseconds(100), [this] { return layer_ready || stopping.load(); }) ||
+                !layer_ready)
+            {
+                continue;
+            }
+            rgba.swap(layer_rgba);
+            w = layer_w;
+            h = layer_h;
+            capture_ms = layer_capture_ms;
+            layer_ready = false;
+        }
+        std::shared_ptr<Client> c;
+        {
+            std::lock_guard<std::mutex> lk(client_mutex);
+            c = client;
+        }
+        if (!c || !c->hello || !layer_on || w < 16 || h < 16 || rgba.size() != (size_t)w * h * 4) continue;
+        const bool key = layer_key.exchange(false);
+        if (!key && last.size() == rgba.size() && std::memcmp(last.data(), rgba.data(), rgba.size()) == 0)
+        {
+            layer_same++;
+            continue;
+        }
+        layer_same = 0;
+        if (clock::now() - last_sent < std::chrono::milliseconds(33) && !key) continue;
+        if (c->pending_binary.load() >= 3) { layer_key = layer_key || key; continue; }   // the network is behind
+        if (!enc || enc_w != w || enc_h != h || enc_generation != c->generation || key)
+        {
+            enc.reset();
+            std::string tried;
+            // 30 a second at most, mostly still: 8 Mbit/s is plenty for sharp text
+            enc = openEncoder(c->webcodecs ? cfg.encoder : std::string("jpeg"), w, h * 2, 30, 8000, tried);
+            enc_w = w;
+            enc_h = h;
+            enc_generation = c->generation;
+            config_sent = false;
+            if (!enc)
+            {
+                log(LogLevel::WARN, "VR pipe: no encoder for the UI layer: " + tried);
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+                continue;
+            }
+        }
+        // stacked: colour on top (alpha forced opaque), coverage below as grey
+        stacked.resize((size_t)w * h * 8);
+        const size_t n = (size_t)w * h;
+        uint8_t* top = stacked.data();
+        uint8_t* bot = stacked.data() + n * 4;
+        const uint8_t* src = rgba.data();
+        for (size_t k = 0; k < n; ++k)
+        {
+            const uint8_t a = src[4 * k + 3];
+            top[4 * k + 0] = src[4 * k + 0];
+            top[4 * k + 1] = src[4 * k + 1];
+            top[4 * k + 2] = src[4 * k + 2];
+            top[4 * k + 3] = 255;
+            bot[4 * k + 0] = a;
+            bot[4 * k + 1] = a;
+            bot[4 * k + 2] = a;
+            bot[4 * k + 3] = 255;
+        }
+        const double t1 = nowMs();
+        EncodedFrame ef;
+        std::string err;
+        if (!enc->encode(stacked.data(), ef, err))
+        {
+            log(LogLevel::WARN, "VR pipe: UI layer encode failed: " + err);
+            enc.reset();
+            continue;
+        }
+        if (!config_sent)
+        {
+            if (enc->codec() == "h264" && !ef.key) { layer_key = true; continue; }
+            json::object m;
+            m["t"] = "layerconfig";
+            m["codec"] = enc->codec();
+            m["codecString"] = enc->codec() == "h264" ? avcCodecString(ef.data) : std::string();
+            m["w"] = w;
+            m["h"] = h;
+            sendToClient(c, json::serialize(m), false);
+            config_sent = true;
+        }
+        const double t2 = nowMs();
+        std::string msg(kHeaderSize + ef.data.size(), '\0');
+        put<uint32_t>(msg, 0, kMagic);
+        put<uint32_t>(msg, 4, (uint32_t)kHeaderSize);
+        put<uint64_t>(msg, 8, frame);
+        put<double>(msg, 16, t1 - capture_ms);
+        put<double>(msg, 24, -1.0);
+        put<float>(msg, 56, (float)capture_ms);
+        put<float>(msg, 60, (float)(t2 - t1));
+        msg[64] = ef.key ? 1 : 0;
+        msg[65] = enc->codec() == "h264" ? 0 : 1;
+        msg[67] = 1;   // the UI layer
+        put<uint32_t>(msg, 68, (uint32_t)ef.data.size());
+        std::memcpy(&msg[kHeaderSize], ef.data.data(), ef.data.size());
+        sendToClient(c, std::move(msg), true);
+        frame++;
+        last.swap(rgba);
+        last_sent = clock::now();
     }
 }
 
@@ -1274,7 +1574,14 @@ bool Service::start(const Config& cfg, std::string& error)
             auto acc = std::make_unique<tcp::acceptor>(impl->ioc);
             const tcp::endpoint ep(net::ip::make_address(ip), p);
             acc->open(ep.protocol(), ec);
+#if defined(_WIN32)
+            // [VR OPENH264 2026-11-03] On Windows SO_REUSEADDR lets a bind TAKE OVER a port another program listens on
+            // (Microsoft, "Using SO_REUSEADDR and SO_EXCLUSIVEADDRUSE": second bind with SO_REUSEADDR = Success), so
+            // a busy port would never be noticed. Exclusive use fails with WSAEADDRINUSE/WSAEACCES instead.
+            if (!ec) acc->set_option(net::detail::socket_option::boolean<SOL_SOCKET, (int)SO_EXCLUSIVEADDRUSE>(true), ec);
+#else
             if (!ec) acc->set_option(net::socket_base::reuse_address(true), ec);
+#endif
             if (!ec) acc->bind(ep, ec);
             if (!ec) acc->listen(8, ec);
             if (!ec) accs.push_back(std::move(acc));
@@ -1319,6 +1626,8 @@ bool Service::start(const Config& cfg, std::string& error)
         }
     });
     impl->frame_thread = std::thread([i] { i->frameLoop(); });
+    if (impl->cfg.external_frames || impl->cfg.mode != "test")
+        impl->layer_thread = std::thread([i] { i->layerLoop(); });   // [VR HUD LAYER]
     mImpl = std::move(impl);
     const std::string port = std::to_string(mImpl->cfg.port);
     mImpl->log(LogLevel::INFO, "VR pipe: listening on https://" + cfg.bind_ip + ":" + port +
@@ -1332,7 +1641,9 @@ void Service::stop()
     Impl* i = mImpl.get();
     i->stopping = true;
     i->ext_cv.notify_all();
+    i->layer_cv.notify_all();
     if (i->frame_thread.joinable()) i->frame_thread.join();
+    if (i->layer_thread.joinable()) i->layer_thread.join();
     net::post(i->ioc, [i] {
         boost::system::error_code ec;
         for (auto& a : i->acceptors) a->close(ec);
@@ -1377,6 +1688,93 @@ void Service::setMode(const std::string& mode, uint32_t width, uint32_t height, 
     mImpl->cur_w = width;
     mImpl->cur_h = height;
     mImpl->cur_external = external_frames;
+}
+
+double clockMs() { return nowMs(); }
+void setMicSink(MicSink sink) { gMicSink.store(sink); }   // [VR AUDIO 2026-11-04]
+
+bool Service::audioWanted() const
+{
+    if (!mImpl || !mImpl->audio_on) return false;
+    std::lock_guard<std::mutex> lk(mImpl->client_mutex);
+    return mImpl->client && mImpl->client->hello;
+}
+
+void Service::submitAudio(const int16_t* pcm, uint32_t frames, uint32_t channels, uint32_t rate, double mix_ms)
+{
+    if (!mImpl || !pcm || !frames || channels < 1 || channels > 8 || rate < 8000 || rate > 192000) return;
+    Impl* i = mImpl.get();
+    const uint64_t first = i->audio_sample;
+    i->audio_sample += frames;
+    if (!i->audio_on) return;
+    std::shared_ptr<Client> c;
+    {
+        std::lock_guard<std::mutex> lk(i->client_mutex);
+        c = i->client;
+    }
+    if (!c || !c->hello) return;
+    // the socket is far behind (pictures and sound queued): drop this block rather than let the sound lag
+    if (c->pending_binary.load() >= 6) return;
+    const size_t bytes = (size_t)frames * channels * sizeof(int16_t);
+    std::string msg(kHeaderSize + bytes, '\0');
+    put<uint32_t>(msg, 0, kMagic);
+    put<uint32_t>(msg, 4, (uint32_t)kHeaderSize);
+    put<uint64_t>(msg, 8, first);
+    put<double>(msg, 16, mix_ms);
+    put<double>(msg, 24, -1.0);
+    put<float>(msg, 52, (float)rate);
+    msg[64] = (char)channels;
+    msg[67] = 2;   // sound
+    put<uint32_t>(msg, 68, (uint32_t)bytes);
+    std::memcpy(&msg[kHeaderSize], pcm, bytes);   // int16 little-endian on every platform the viewer ships on
+    i->sendToClient(c, std::move(msg), true);
+}
+
+int Service::takeQualityRequest()
+{
+    if (!mImpl) return -1;
+    std::lock_guard<std::mutex> lk(mImpl->mode_mutex);
+    const int q = mImpl->quality_request;
+    mImpl->quality_request = -1;
+    return q;
+}
+
+void Service::sendText(const std::string& text)
+{
+    if (!mImpl) return;
+    std::shared_ptr<Client> c;
+    {
+        std::lock_guard<std::mutex> lk(mImpl->client_mutex);
+        c = mImpl->client;
+    }
+    if (c && c->hello) mImpl->sendToClient(c, text, false);
+}
+
+bool Service::layerIdle() const
+{
+    return mImpl && mImpl->layer_same.load() >= 15;   // half a second of nothing changing at 30 a second
+}
+
+bool Service::layerWanted() const
+{
+    if (!mImpl || !mImpl->layer_on) return false;
+    std::lock_guard<std::mutex> lk(mImpl->client_mutex);
+    return mImpl->client && mImpl->client->hello;
+}
+
+void Service::submitLayer(std::vector<uint8_t>& rgba, uint32_t w, uint32_t h, double capture_ms)
+{
+    if (!mImpl || rgba.size() != (size_t)w * h * 4) return;
+    Impl* i = mImpl.get();
+    {
+        std::lock_guard<std::mutex> lk(i->layer_mutex);
+        i->layer_rgba.swap(rgba);
+        i->layer_w = w;
+        i->layer_h = h;
+        i->layer_capture_ms = capture_ms;
+        i->layer_ready = true;
+    }
+    i->layer_cv.notify_one();
 }
 
 std::string Service::takeModeRequest()

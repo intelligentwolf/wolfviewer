@@ -34,6 +34,33 @@
     <p id="wvr-status" class="wvr-status" role="status" aria-live="polite">Connecting to WolfViewer…</p>
     <div id="wvr-error" class="wvr-error" role="alert" aria-live="assertive" hidden></div>
     <p class="wvr-hint">Tip: bookmark this page, so next time you can open it from your bookmarks instead of typing.</p>
+    <p class="wvr-row"><span id="wvr-headset-line">Headset: working it out…</span>
+       <button type="button" class="wvr-btn" id="wvr-headset-change">Change</button></p>
+    <p id="wvr-headset-note" class="wvr-hint" hidden></p>
+    <!-- [VR AUDIO 2026-11-04] shown when WolfViewer is set to use the headset microphone and this browser has not been
+         asked yet: the browser asks permission here, in 2D (a question cannot be answered inside VR) -->
+    <button type="button" class="wvr-btn" id="wvr-mic" hidden>Use the headset microphone for voice</button>
+  </section>
+
+  <!-- [VR HEADSETS 2026-11-04] Paul: "also let the user choose what VR they have". Shown the first time only; Automatic
+       is already ticked, and Skip keeps it. The choice is remembered in this browser (WolfViewer's Headset Settings
+       can also set it, and then wins). -->
+  <section class="wvr-card" id="wvr-headset-card" aria-labelledby="wvr-headset-title" hidden>
+    <h2 id="wvr-headset-title">Which headset do you have?</h2>
+    <p class="wvr-hint">This sets the picture size and the refresh rate to suit it. If you are not sure, leave it on Automatic.</p>
+    <form id="wvr-headset-form" class="wvr-choices">
+      <label class="wvr-choice"><input type="radio" name="wvr-headset" value="auto" checked> Automatic (recommended)</label>
+      <label class="wvr-choice"><input type="radio" name="wvr-headset" value="quest3"> Meta Quest 3 / 3S</label>
+      <label class="wvr-choice"><input type="radio" name="wvr-headset" value="quest2"> Meta Quest 2</label>
+      <label class="wvr-choice"><input type="radio" name="wvr-headset" value="questpro"> Meta Quest Pro</label>
+      <label class="wvr-choice"><input type="radio" name="wvr-headset" value="pico4"> Pico 4 / Pico 4 Ultra</label>
+      <label class="wvr-choice"><input type="radio" name="wvr-headset" value="avp"> Apple Vision Pro</label>
+      <label class="wvr-choice"><input type="radio" name="wvr-headset" value="other"> Other / not listed</label>
+    </form>
+    <div class="wvr-row">
+      <button type="button" class="wvr-btn" id="wvr-headset-use">Use this headset</button>
+      <button type="button" class="wvr-btn" id="wvr-headset-skip">Skip - work it out for me</button>
+    </div>
   </section>
 
   <section class="wvr-card" aria-labelledby="wvr-preview-title">
@@ -57,7 +84,7 @@
     </div>
   </section>
 
-  <section class="wvr-card" aria-labelledby="wvr-numbers-title">
+  <section class="wvr-card" id="wvr-numbers-card" aria-labelledby="wvr-numbers-title" hidden>
     <h2 id="wvr-numbers-title">Numbers</h2>
     <p class="wvr-hint">These show how quickly the picture reaches you. They also show inside VR (press the menu button on the left controller).</p>
     <dl id="wvr-numbers" class="wvr-numbers"></dl>

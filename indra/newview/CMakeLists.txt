@@ -934,8 +934,12 @@ set(viewer_SOURCE_FILES
     wolfvrdevice.cpp   # [VR SIMPLE 2026-11-03] the headset page id and browser name (no pairing)
     wolfvrstream.cpp   # [VR PIPE 2026-11-03] the setting, certificate, start/stop
     wolfvrscreen.cpp   # [VR BIG SCREEN 2026-11-03] the viewer window to the headset, its pointer and keys back
+    wolfvraudio.cpp   # [VR AUDIO 2026-11-04] the viewer's sound to the headset, the headset mic into voice
+    wolfvrui.cpp   # [VR CONTROLS 2026-11-04] the in-VR action bar: toolbar commands from the headset, their state back
     wolffloatervrstream.cpp   # [VR PIPE 2026-11-03] Wolf World > VR in Your Headset Browser
     qrcodegen/qrcodegen.cpp   # [VR PIPE 2026-11-03] Nayuki QR Code generator v1.8.0 (MIT), qrcodegen/SOURCES.md
+    wolfvr_openh264.cpp   # [VR OPENH264 2026-11-03] Cisco OpenH264 driven directly, loaded at run time (openh264/SOURCES.md)
+    wolfvrcodecfetch.cpp   # [VR OPENH264 2026-11-03] first-use download of Cisco's OpenH264 binary (licence: Cisco's own)
     wolffloaterinvisallow.cpp   # [SELECTIVE INVISIBLE MODE 2026-10-30] Invisible Mode: People Who Can See Me
     wolfadultcontent.cpp   # [ADULT CONTENT 2026-10-26] the Adult Content region type (badges, refusals)
     wolffloateragecheck.cpp   # [ADULT CONTENT 2026-10-26] Wolf World > Age Check
@@ -1945,8 +1949,12 @@ set(viewer_HEADER_FILES
     wolfvrdevice.h   # [VR SIMPLE 2026-11-03]
     wolfvrstream.h   # [VR PIPE 2026-11-03]
     wolfvrscreen.h   # [VR BIG SCREEN 2026-11-03]
+    wolfvraudio.h   # [VR AUDIO 2026-11-04]
+    wolfvrui.h   # [VR CONTROLS 2026-11-04]
     wolffloatervrstream.h   # [VR PIPE 2026-11-03]
     qrcodegen/qrcodegen.hpp   # [VR PIPE 2026-11-03]
+    wolfvr_openh264.h   # [VR OPENH264 2026-11-03]
+    wolfvrcodecfetch.h   # [VR OPENH264 2026-11-03]
     wolffloaterinvisallow.h   # [SELECTIVE INVISIBLE MODE 2026-10-30]
     wolfadultcontent.h   # [ADULT CONTENT 2026-10-26]
     wolffloateragecheck.h   # [ADULT CONTENT 2026-10-26]
@@ -2616,7 +2624,27 @@ endif(USE_PRECOMPILED_HEADERS)
 # [VR PIPE 2026-11-03] These include no viewer headers: Boost.Asio must see winsock2.h before windows.h (the viewer's
 # precompiled header pulls windows.h in first), and the vendored QR library is plain C++.
 set_source_files_properties(wolfvrpipe.cpp wolfvrpipe_video.cpp wolfvrdevice.cpp qrcodegen/qrcodegen.cpp
+    wolfvr_openh264.cpp wolfvrcodecfetch.cpp
     PROPERTIES SKIP_PRECOMPILE_HEADERS TRUE)
+
+# [VR OPENH264 2026-11-03] bzip2 1.0.8 (vendored unmodified, bzip2/SOURCES.md) unpacks Cisco's OpenH264 download.
+# It is C that is not valid C++ (void* assignments, "register"), so it is its own static library compiled as C: the
+# directory-wide /TP (compile everything as C++) and the warnings-as-errors switches are taken off this target
+# only, and its warnings are silenced (third-party code, not ours to change).
+add_library(wolfvr_bzip2 STATIC
+    bzip2/blocksort.c bzip2/bzlib.c bzip2/compress.c bzip2/crctable.c bzip2/decompress.c bzip2/huffman.c
+    bzip2/randtable.c)
+get_target_property(WOLFVR_BZIP2_OPTIONS wolfvr_bzip2 COMPILE_OPTIONS)
+if (WOLFVR_BZIP2_OPTIONS)
+  list(REMOVE_ITEM WOLFVR_BZIP2_OPTIONS /TP /WX -Werror)
+  set_target_properties(wolfvr_bzip2 PROPERTIES COMPILE_OPTIONS "${WOLFVR_BZIP2_OPTIONS}")
+endif ()
+set_target_properties(wolfvr_bzip2 PROPERTIES LINKER_LANGUAGE C)
+if (WINDOWS)
+  target_compile_options(wolfvr_bzip2 PRIVATE /TC /W0)
+else ()
+  target_compile_options(wolfvr_bzip2 PRIVATE -w)
+endif ()
 
 if (OPENSIM)
   set(ND_VIEWER_FLAVOR "oss")
@@ -2929,6 +2957,7 @@ endif (WINDOWS)
 if (WINDOWS)
   target_link_libraries(${VIEWER_BINARY_NAME} mmdevapi)
 endif ()
+target_link_libraries(${VIEWER_BINARY_NAME} wolfvr_bzip2)   # [VR OPENH264 2026-11-03]
 if (DARWIN)
   target_link_libraries(${VIEWER_BINARY_NAME} "-weak_framework ScreenCaptureKit" "-framework CoreMedia")
 endif ()

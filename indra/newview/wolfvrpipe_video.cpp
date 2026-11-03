@@ -14,6 +14,7 @@
  */
 
 #include "wolfvrpipe_video.h"
+#include "wolfvr_openh264.h"
 
 #include <algorithm>
 #include <cmath>
@@ -75,7 +76,7 @@ namespace
         const int x1 = std::min<int>(x0 + rw, (int)w), y1 = std::min<int>(y0 + rh, (int)h);
         for (int y = std::max(0, y0); y < y1; ++y)
         {
-            uint8_t* p = &px[((size_t)y * w + std::max(0, x0)) * 4];
+            uint8_t* p = &px[((size_t)y * w + (size_t)std::max(0, x0)) * 4];
             for (int x = std::max(0, x0); x < x1; ++x, p += 4)
             {
                 p[0] = r; p[1] = g; p[2] = b; p[3] = 255;
@@ -140,10 +141,10 @@ void drawTestPattern(std::vector<uint8_t>& rgba, uint32_t width, uint32_t height
     // Shaded at half resolution (one sample per 2x2 block) on four threads: this is a test card, and it has to cost
     // a few milliseconds, not the ~50 ms a full-resolution single-threaded pass measured (selftest, 1280x1280).
     auto shadeRows = [&](uint32_t y_begin, uint32_t y_end) {
-        const float step = 4.f * t / width;    // two pixels per sample
+        const float step = 4.f * t / (float)width;    // two pixels per sample
         for (uint32_t py = y_begin; py < y_end; py += 2)
         {
-            const float cy = (1.f - 2.f * (py + 1.f) / height) * t;
+            const float cy = (1.f - 2.f * ((float)py + 1.f) / (float)height) * t;
             // dir = cx * col0 + cy * col1 - col2 ; accumulate along the row
             const float bx = cy * m[1][0] - m[2][0], by = cy * m[1][1] - m[2][1], bz = cy * m[1][2] - m[2][2];
             uint8_t* row0 = &rgba[(size_t)py * width * 4];
@@ -352,6 +353,7 @@ namespace
             out.key = true;
             return true;
         }
+        bool requestKeyFrame() override { return true; }   // every JPEG is a whole picture
         std::string name() const override { return "jpeg (libjpeg)"; }
         std::string codec() const override { return "jpeg"; }
     private:
@@ -545,9 +547,11 @@ namespace
         gptr mPipe = nullptr, mSrc = nullptr, mSink = nullptr;
     };
 
-    // Encoder chains. Every property name and enum nick was read with gst-inspect-1.0 1.28 (nvh264enc, x264enc,
-    // openh264enc) or from the GStreamer va plugin documentation (vah264enc: rate-control cbr, key-int-max, b-frames,
+    // Encoder chains. Every property name and enum nick was read with gst-inspect-1.0 1.28 (nvh264enc, x264enc)
+    // or from the GStreamer va plugin documentation (vah264enc: rate-control cbr, key-int-max, b-frames,
     // target-usage 1-7, NV12 input only). GOP = 2 s; the stream restarts the encoder when a key frame is needed.
+    // [VR OPENH264 2026-11-03] OpenH264 is no longer a GStreamer chain: wolfvr_openh264.cpp drives the library
+    // directly, the same way on every platform.
     struct Chain { const char* family; const char* element; const char* fmt; };
     const Chain kChains[] = {
         {"nvenc", "nvh264enc",
@@ -563,9 +567,6 @@ namespace
         {"x264", "x264enc",
          "videoconvert n-threads=4 ! video/x-raw,format=I420 ! x264enc tune=zerolatency speed-preset=ultrafast "
          "bitrate=%u key-int-max=%u bframes=0 threads=4 sliced-threads=true byte-stream=true"},
-        {"openh264", "openh264enc",
-         "videoconvert n-threads=4 ! video/x-raw,format=I420 ! openh264enc rate-control=bitrate complexity=low "
-         "usage-type=screen multi-thread=4 bitrate=%u gop-size=%u"},
     };
 }
 #endif // __linux__
@@ -575,8 +576,10 @@ std::unique_ptr<Encoder> openEncoder(const std::string& which, uint32_t width, u
 {
     tried.clear();
     const bool any = which.empty() || which == "auto";
+    // A grey picture to prove an encoder really produces H.264 (with an SPS) before the stream is handed to it.
+    std::vector<uint8_t> probe;
 #if defined(__linux__)
-    if (any || which != "jpeg")
+    if (any || which == "nvenc" || which == "va" || which == "x264")
     {
         GstApi& g = gst();
         if (!g.loaded)
@@ -585,14 +588,13 @@ std::unique_ptr<Encoder> openEncoder(const std::string& which, uint32_t width, u
         }
         else
         {
-            const std::vector<uint8_t> probe((size_t)width * height * 4, 128);
+            probe.assign((size_t)width * height * 4, 128);
             for (const Chain& c : kChains)
             {
                 if (!any && which != c.family) continue;
                 if (!haveElement(c.element)) { tried += std::string(c.element) + ": not installed; "; continue; }
-                const bool bps = std::strcmp(c.element, "openh264enc") == 0;   // openh264enc takes bit/s
                 char chain[400];
-                std::snprintf(chain, sizeof(chain), c.fmt, bps ? bitrate_kbps * 1000 : bitrate_kbps, fps * 2);
+                std::snprintf(chain, sizeof(chain), c.fmt, bitrate_kbps, fps * 2);
                 auto enc = std::make_unique<GstH264Encoder>();
                 std::string err;
                 EncodedFrame test;
@@ -611,6 +613,30 @@ std::unique_ptr<Encoder> openEncoder(const std::string& which, uint32_t width, u
         }
     }
 #endif
+    // [VR OPENH264 2026-11-03] Cisco's OpenH264, driven directly: the H.264 encoder on Windows and macOS, and the
+    // fallback after the GStreamer ones on Linux.
+    if (any || which == "openh264")
+    {
+        const OpenH264Tuning tuning;
+        std::string err;
+        auto enc = openOpenH264Encoder(width, height, fps, bitrate_kbps, tuning, err);
+        if (enc)
+        {
+            if (probe.empty()) probe.assign((size_t)width * height * 4, 128);
+            EncodedFrame test;
+            if (enc->encode(probe.data(), test, err) && !avcCodecString(test.data).empty())
+            {
+                // The probe used up the IDR and fed the rate control a grey picture: start again from a fresh one.
+                enc = openOpenH264Encoder(width, height, fps, bitrate_kbps, tuning, err);
+                if (enc) return enc;
+            }
+            else if (err.empty())
+            {
+                err = "openh264: no SPS in output";
+            }
+        }
+        tried += err + "; ";
+    }
     if (any || which == "jpeg")
     {
         return std::make_unique<JpegEncoder>(width, height);

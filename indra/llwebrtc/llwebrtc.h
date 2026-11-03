@@ -137,6 +137,17 @@ class LLWebRTCPlayoutTap
 };
 // </WolfViewer>
 
+// [VR AUDIO 2026-11-04] THE VR HEADSET MICROPHONE (newview wolfvraudio.cpp). While one is set, the PC
+// microphone's buffers are not used: a 10 ms clock in the audio device module asks pullMic for 480 mono 16-bit
+// samples at 48 kHz and hands them to the voice engine as if the device had recorded them (same path, so echo
+// cancellation, gain and noise suppression still apply; mute still stops it). pullMic returns how many samples it
+// wrote (the rest is silence). Called on that clock's own thread; it must not block.
+class LLWebRTCExternalMic
+{
+  public:
+    virtual size_t pullMic(int16_t* out, size_t frames, uint32_t sample_rate) = 0;
+};
+
 // The LLWebRTCDeviceInterface provides a way for the viewer
 // to enumerate, set, and get notifications of changes
 // for both capture (microphone) and render (speaker)
@@ -190,6 +201,12 @@ class LLWebRTCDeviceInterface
     // <WolfViewer 2026-10-04/> WOLF DJ: nullptr removes it. The tap must outlive the voice engine
     // or be removed first.
     virtual void setPlayoutTap(LLWebRTCPlayoutTap* tap) = 0;
+
+    // [VR AUDIO 2026-11-04] a second playout tap for the VR headset (the DJ tap above is separate); while
+    // silenced, voice is still tapped but the PC speakers get silence; a headset microphone (nullptr = the PC's).
+    virtual void setVRPlayoutTap(LLWebRTCPlayoutTap* tap) = 0;
+    virtual void setPlayoutSilenced(bool silenced) = 0;
+    virtual void setExternalMic(LLWebRTCExternalMic* mic) = 0;
 };
 
 // LLWebRTCAudioInterface provides the viewer with a way

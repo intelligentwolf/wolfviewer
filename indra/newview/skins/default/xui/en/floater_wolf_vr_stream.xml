@@ -14,7 +14,7 @@
  can_close="true"
  can_minimize="true"
  can_resize="false"
- height="650"
+ height="978"
  layout="topleft"
  name="wolf_vr_stream"
  help_topic="wolf_vr_stream"
@@ -25,7 +25,7 @@
     <floater.string name="status_off">Off. Nothing is listening on your network.</floater.string>
     <floater.string name="status_waiting">On. In your headset's browser, type the address below.</floater.string>
     <floater.string name="status_connected">Your headset is connected. Press Enter VR in the headset. Right controller: point, trigger = click, grip = right-click, stick = scroll and turn. Left stick walks.</floater.string>
-    <floater.string name="status_connected_world">Your headset is connected. Press Enter VR in the headset. Look around; left stick walks, right stick turns and flies, left stick click switches to the big screen.</floater.string>
+    <floater.string name="status_connected_world">Your headset is connected. Press Enter VR in the headset. Look around; left stick walks, right stick turns and flies. The menu button on the left controller opens the action bar (point with the right controller, pull the trigger). Your HUDs and windows show in front of you; HUDs on the bar hides them. Left stick click switches to the big screen.</floater.string>
     <floater.string name="status_failed">Could not start: [ERROR]</floater.string>
     <floater.string name="address_off">(tick the box first)</floater.string>
 
@@ -38,19 +38,50 @@
     </combo_box>
     <text_editor follows="left|top" height="40" layout="topleft" left="12" max_length="1024" name="status" top="92" width="496" word_wrap="true" read_only="true" show_context_menu="true" />
 
-    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="12" name="url_label" top="140" width="496">In your headset's browser, type:</text>
-    <text_editor follows="left|top" font="SansSerifHuge" height="40" layout="topleft" left="12" name="address" top="158" width="496" max_length="64" read_only="true" word_wrap="false" show_context_menu="true" tool_tip="Type this into the headset browser's address bar. No code is needed." />
-    <text follows="left|top" height="34" layout="topleft" left="12" name="address_hint" top="204" width="296" wrap="true">No code needed. Or open wolf-grid.com/vr in the headset and type it there.</text>
-    <text follows="left|top" height="112" layout="topleft" left="12" name="first_note" top="242" width="296" wrap="true">The first time only: the headset browser says the connection is not private. Choose Advanced, then Proceed (this PC made its own certificate; the picture never leaves your home network). Then press Enter VR. Tip: bookmark the page in the headset.</text>
-    <text follows="left|top" height="48" layout="topleft" left="12" name="usb_note" top="358" width="296" wrap="true">With a USB cable and developer mode instead: run "adb reverse tcp:[PORT] tcp:[PORT]" on this PC, then open:</text>
-    <text_editor follows="left|top" height="23" layout="topleft" left="12" name="usb_url" top="408" width="296" max_length="256" read_only="true" word_wrap="false" show_context_menu="true" tool_tip="For a headset plugged in by USB, after adb reverse" />
+    <!-- [VR HEADSETS 2026-11-04] Paul: "also let the user choose what VR they have". Automatic is the default and adapts;
+         a choice sets the picture size, bitrate, refresh rate and the controller names the headset page shows. -->
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="12" name="headset_label" top="140" width="496">Which headset do you have?</text>
+    <radio_group control_name="WolfVRHeadset" follows="left|top" height="140" layout="topleft" left="12" name="headset" top="160" width="496" tool_tip="Automatic works it out from the headset's browser and lowers the picture quality by itself if your headset or network cannot keep up.">
+        <radio_item height="22" label="Automatic (recommended)" layout="topleft" left="4" name="auto" top="0" value="auto" width="240" />
+        <radio_item height="22" label="Meta Quest 3 / 3S" layout="topleft" left="4" name="quest3" top="32" value="quest3" width="240" />
+        <radio_item height="22" label="Meta Quest 2" layout="topleft" left="4" name="quest2" top="64" value="quest2" width="240" />
+        <radio_item height="22" label="Meta Quest Pro" layout="topleft" left="4" name="questpro" top="96" value="questpro" width="240" />
+        <radio_item height="22" label="Pico 4 / Pico 4 Ultra" layout="topleft" left="252" name="pico4" top="0" value="pico4" width="240" />
+        <radio_item height="22" label="Apple Vision Pro" layout="topleft" left="252" name="avp" top="32" value="avp" width="240" />
+        <radio_item height="22" label="Other / not listed" layout="topleft" left="252" name="other" top="64" value="other" width="240" />
+    </radio_group>
+    <text follows="left|top" height="16" layout="topleft" left="264" name="headset_note" top="256" width="244" wrap="true">You can also choose on the headset page.</text>
+
+    <!-- [VR AUDIO 2026-11-04] Paul: "don't forget audio ... move it to the headset?" -->
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="12" name="sound_label" top="302" width="110">Play sound in:</text>
+    <radio_group control_name="WolfVRAudioOut" follows="left|top" height="22" layout="topleft" left="124" name="sound_out" top="300" width="384" tool_tip="Headset: everything you would hear on this PC - the world, voice chat, sounds of the viewer - plays in the headset, and this PC's speakers are quiet while it does.">
+        <radio_item height="22" label="Headset (recommended)" layout="topleft" left="0" name="headset" top="0" value="headset" width="170" />
+        <radio_item height="22" label="PC speakers" layout="topleft" left="176" name="pc" top="0" value="pc" width="100" />
+        <radio_item height="22" label="Both" layout="topleft" left="284" name="both" top="0" value="both" width="90" />
+    </radio_group>
+    <check_box control_name="WolfVRHeadsetMic" follows="left|top" height="20" layout="topleft" left="12" name="headset_mic" top="328" width="496" label="Use the headset microphone for voice" tool_tip="Off: your PC's microphone is used for voice chat. On: the headset's own microphone is used while the headset plays the sound (the headset browser asks you once if it may use it)." />
+
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="12" name="url_label" top="376" width="496">In your headset's browser, type:</text>
+    <text_editor follows="left|top" font="SansSerifHuge" height="40" layout="topleft" left="12" name="address" top="394" width="496" max_length="64" read_only="true" word_wrap="false" show_context_menu="true" tool_tip="Type this into the headset browser's address bar. No code is needed." />
+    <text follows="left|top" height="34" layout="topleft" left="12" name="address_hint" top="440" width="296" wrap="true">No code needed. Or open wolf-grid.com/vr in the headset and type it there.</text>
+    <text follows="left|top" height="112" layout="topleft" left="12" name="first_note" top="478" width="296" wrap="true">The first time only: the headset browser says the connection is not private. Choose Advanced, then Proceed (this PC made its own certificate; the picture never leaves your home network). Then press Enter VR. Tip: bookmark the page in the headset.</text>
+    <text follows="left|top" height="48" layout="topleft" left="12" name="usb_note" top="594" width="296" wrap="true">With a USB cable and developer mode instead: run "adb reverse tcp:[PORT] tcp:[PORT]" on this PC, then open:</text>
+    <text_editor follows="left|top" height="23" layout="topleft" left="12" name="usb_url" top="644" width="296" max_length="256" read_only="true" word_wrap="false" show_context_menu="true" tool_tip="For a headset plugged in by USB, after adb reverse" />
 
     <!-- The QR code is drawn here by wolffloatervrstream.cpp draw(); this panel only reserves the space. -->
-    <panel follows="left|top" height="180" layout="topleft" left="324" name="qr_area" top="204" width="184" background_visible="false" />
-    <text follows="left|top" height="16" layout="topleft" left="324" name="qr_label" top="388" width="184" halign="center">Or scan with the headset</text>
+    <panel follows="left|top" height="180" layout="topleft" left="324" name="qr_area" top="440" width="184" background_visible="false" />
+    <text follows="left|top" height="16" layout="topleft" left="324" name="qr_label" top="624" width="184" halign="center">Or scan with the headset</text>
 
 
-    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="12" name="numbers_label" top="474" width="496">Numbers</text>
-    <text_editor follows="left|top" font="Monospace" height="120" layout="topleft" left="12" max_length="4096" name="numbers" top="492" width="496" word_wrap="false" read_only="true" show_context_menu="true" />
-    <button follows="right|bottom" height="23" layout="topleft" left="408" name="close_btn" top="620" width="100" label="Close" />
+    <!-- [VR OPENH264 2026-11-04] Cisco's OpenH264: downloaded from Cisco only on the resident's press, and the resident
+         can switch it off (Cisco's binary licence, conditions 1-3); the attribution is shown here verbatim. -->
+    <text follows="left|top" height="34" layout="topleft" left="12" name="codec_status" top="710" width="376" wrap="true">Video codec: checking...</text>
+    <button follows="left|top" height="28" layout="topleft" left="400" name="codec_download" top="708" width="108" label="Download" tool_tip="Downloads the free OpenH264 video codec from Cisco (about 1 MB), for a sharp, smooth picture in the headset." />
+    <check_box control_name="WolfVROpenH264" follows="left|top" height="20" layout="topleft" left="12" name="codec_use" top="750" width="380" label="Use the OpenH264 video codec" />
+    <button follows="left|top" height="28" layout="topleft" left="400" name="codec_licence" top="748" width="108" label="Licence" tool_tip="Cisco's licence for the OpenH264 video codec" />
+    <text follows="left|top" height="16" layout="topleft" left="12" name="codec_credit" top="778" width="496">OpenH264 Video Codec provided by Cisco Systems, Inc.</text>
+
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="12" name="numbers_label" top="802" width="496">Numbers</text>
+    <text_editor follows="left|top" font="Monospace" height="120" layout="topleft" left="12" max_length="4096" name="numbers" top="820" width="496" word_wrap="false" read_only="true" show_context_menu="true" />
+    <button follows="right|bottom" height="23" layout="topleft" left="408" name="close_btn" top="948" width="100" label="Close" />
 </floater>

@@ -9,7 +9,8 @@ DEST=$HOME/firestorm
 # The binary must carry the release it is built on (cmake reads ENV{release_name} / ENV{revision} at configure time,
 # BuildVersion.cmake; a re-configure without them silently gives a git-count revision and no name).
 EXPECT_NAME=${EXPECT_NAME:-"Leah's Lanterns"}
-strings "$BIN" | grep -qxF "$EXPECT_NAME" || { echo "REFUSED: $BIN does not carry the release name '$EXPECT_NAME'"; exit 3; }
+# (count, not grep -q: with pipefail an early grep exit makes strings fail on SIGPIPE)
+[ "$(strings "$BIN" | grep -cxF "$EXPECT_NAME")" -gt 0 ] || { echo "REFUSED: $BIN does not carry the release name '$EXPECT_NAME'"; exit 3; }
 NV=/home/paulc/NetBeansProjects/wolfviewer-vrpipe/indra/newview
 for p in /proc/[0-9]*; do
   exe=$(readlink "$p/exe" 2>/dev/null || true)

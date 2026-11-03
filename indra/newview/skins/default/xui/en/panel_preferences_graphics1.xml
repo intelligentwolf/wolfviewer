@@ -1685,7 +1685,7 @@ If you do not understand the distinction then leave this control alone."
          layout="topleft"
          left="10"
          name="WolfTerrainLook"
-         tool_tip="Shades the region's own terrain textures: less tiling at a distance and darker creases and valleys. The texture layers stay exactly as the estate set them. Uncheck for the stock WolfViewer blend."
+         tool_tip="Draws the region's own four terrain textures with WolfViewer's advanced blending: less tiling at a distance, cliffs textured from the side (no stretched stripes), darker creases and valleys, and textures that blend into each other naturally. Steep slopes use the region's third texture (where the standard layout keeps its rock). Uncheck for the standard blend."
          top_pad="4"
          width="150" />
         <check_box

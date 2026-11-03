@@ -243,6 +243,7 @@ void WolfRegionWeather::onRegionChanged()
     readAutoEnv(LLSD());
     readHurricane(LLSD());   // [HURRICANE 2026-10-29/] its positions are the old region's metres
     readBirds(LLSD());       // [BIRDS 2026-11-02/] the old region's answer
+    readSounds(LLSD());      // [NATURE SOUNDS 2026-11-03/] the old region's answer
     mProfile = WolfWeatherProfile();
     mKind.clear();
     mRegionName.clear();
@@ -476,6 +477,7 @@ void WolfRegionWeather::fetchCoro(std::string region_id, bool include_parcel, F3
     self.readAutoEnv(r);
     self.readHurricane(r);   // [HURRICANE 2026-10-29/]
     self.readBirds(r);   // [BIRDS 2026-11-02/]
+    self.readSounds(r);  // [NATURE SOUNDS 2026-11-03/]
     self.mLastError.clear();
     if (include_parcel && self.mParcelGate.accepts(parcel_generation))
     {
@@ -657,6 +659,37 @@ void WolfRegionWeather::setBirdsLocal(const LLUUID& region, bool on)
     mBirdsSeaOnly = false;   // the owner's own choice: everywhere the place suits, or nowhere
 }
 
+// [NATURE SOUNDS 2026-11-03] ticket 475. Source: wolfstorm/php/weather.php region_payload `sounds` = wolf_ambient_lib.php
+// wa_sounds_payload {ambient, default, on, insects?, place?, lat?, tempC?, season?}. No block, or anything malformed, is off;
+// a missing or malformed `insects` is no insects.
+void WolfRegionWeather::readSounds(const LLSD& row)
+{
+    const LLSD b = (row.isMap() && row.has("sounds") && row["sounds"].isMap()) ? row["sounds"] : LLSD();
+    const bool on = b.isMap() && b["on"].isBoolean() && b["on"].asBoolean();
+    const F32 insects = (on && b["insects"].isReal()) ? llclamp((F32)b["insects"].asReal(), 0.f, 1.f)
+                      : (on && b["insects"].isInteger()) ? llclamp((F32)b["insects"].asInteger(), 0.f, 1.f) : 0.f;
+    if (on != mSoundsOn || fabsf(insects - mSoundsInsects) > 0.005f)
+    {
+        LL_INFOS("WolfNatureSounds") << "nature sounds on this region: " << (on ? "on" : "off");
+        if (on) LL_CONT << ", night insects " << insects << " (place " << b["place"].asString() << ", latitude "
+                        << (b["lat"].isDefined() ? b["lat"].asString() : std::string("-")) << ", "
+                        << (b["tempC"].isDefined() ? b["tempC"].asString() + " C" : std::string("no temperature")) << ", season "
+                        << (b["season"].isDefined() ? b["season"].asString() : std::string("-")) << ")";
+        LL_CONT << LL_ENDL;
+    }
+    mSoundsOn = on;
+    mSoundsInsects = insects;
+}
+
+void WolfRegionWeather::setSoundsLocal(const LLUUID& region, bool on)
+{
+    LLViewerRegion* here = gAgent.getRegion();
+    if (!here || here->getRegionID() != region) return;
+    LL_INFOS("WolfNatureSounds") << "nature sounds on this region: " << (on ? "on" : "off") << " (saved in Region/Estate)" << LL_ENDL;
+    if (!on || !mSoundsOn) mSoundsInsects = 0.f;   // turned on here: the climate comes with the next weather read
+    mSoundsOn = on;
+}
+
 void WolfRegionWeather::applyPush(const LLSD& row)
 {
     if (!row.isMap()) return;
@@ -675,6 +708,7 @@ void WolfRegionWeather::applyPush(const LLSD& row)
     // region_payload a GET returns, so `hurricane` is in it while a storm runs and absent once none does.
     readHurricane(row);
     readBirds(row);   // [BIRDS 2026-11-02/] the POST reply is region_payload too
+    readSounds(row);  // [NATURE SOUNDS 2026-11-03/] so is `sounds`
     recomputeParcelApplies();
     mLastError.clear();
     mGeneration++;
@@ -833,6 +867,7 @@ void WolfRegionWeather::saveCoro(std::string body, std::string scope, std::strin
             self.readAutoEnv(reply);
             self.readHurricane(reply);   // [HURRICANE 2026-10-29/] weather.php:625 replies with region_payload
             self.readBirds(reply);   // [BIRDS 2026-11-02/]
+            self.readSounds(reply);  // [NATURE SOUNDS 2026-11-03/]
             self.recomputeParcelApplies();
         }
     }

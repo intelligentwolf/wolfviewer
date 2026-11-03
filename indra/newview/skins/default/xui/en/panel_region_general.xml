@@ -391,43 +391,47 @@
     </button>
     <!-- [PASSING PLANES 2026-11-01] wolfpassingplanes.cpp. Who and why: an estate owner or manager wants the passing tour
          planes off over a themed region (or on over an airfield) in one click, and to see that it took. Wolf Territories
-         only (hidden elsewhere). Saved at once through php/wolf_ambient.php, not by Apply (no initCtrl). Right-hand
-         column under Manage Restart Schedule (which ends at y 115), x 250-470; the left column ends near x 190, and the
-         Adult Content line on the right starts at y 312: the status box (223 + 88) ends at 311.
-         [BIRDS 2026-11-02] ticket 445: "Birds over this region" under the planes' note, the same record and the same rules
-         (wolfpassingplanes.cpp). To make room the planes' state is 42 high and the shared status line 44 (267 + 44 = 311). -->
+         only (hidden elsewhere). Saved at once through php/wolf_ambient.php, not by Apply (no initCtrl).
+         [BIRDS 2026-11-02] ticket 445: "Birds over this region", the same record and the same rules.
+         [NATURE SOUNDS 2026-11-03] ticket 475: "Nature sounds on this region", the same again.
+         [TICKET 481 2026-11-03] Buzzy Cnayl: the planes and birds texts overlapped each other (fixed-height boxes in the
+         220-wide right column; a wrapped line ran into the box below). All three switches now sit full width under the
+         buttons (Send Message To Region ends at y 453; the right column's Region type note at 432), and
+         wolfpassingplanes.cpp layout() stacks them top-down each time their text changes: every text box takes the height
+         its wrapped text needs, at any font size, and the window grows if the stack would run past its bottom. The tops
+         and heights here are only the starting points. -->
     <check_box
      follows="left|top"
      height="20"
      label="Passing planes over this region"
      layout="topleft"
-     left="250"
+     left="10"
      name="wolf_planes_check"
-     tool_tip="Vintage tour planes that fly across this region now and then. Saved at once. Only the estate owner or an estate manager can change it."
-     top="125"
+     tool_tip="Vintage tour planes that fly across this region now and then. People's own aircraft and dogfights are not affected. Saved at once. Only the estate owner or an estate manager can change it."
+     top="462"
      visible="false"
-     width="220" />
+     width="460" />
     <text
      follows="left|top"
      font="SansSerifSmall"
-     height="42"
+     height="16"
      layout="topleft"
-     left="268"
+     left="28"
      name="wolf_planes_state"
-     top="145"
+     top="482"
      visible="false"
-     width="202"
+     width="442"
      wrap="true" />
     <text
      follows="left|top"
      font="SansSerifSmall"
-     height="28"
+     height="16"
      layout="topleft"
-     left="268"
+     left="28"
      name="wolf_planes_note"
-     top="187"
+     top="498"
      visible="false"
-     width="202"
+     width="442"
      wrap="true">
         People's own aircraft and dogfights are not affected.
     </text>
@@ -436,33 +440,55 @@
      height="20"
      label="Birds over this region"
      layout="topleft"
-     left="250"
+     left="10"
      name="wolf_birds_check"
      tool_tip="Gulls and terns over the sea, small flocks over open land and starlings at dusk in winter. They keep clear of builds, stay low over land and sea, roost at night, and never fly in a space sky. With no category, they come over the sea and coast only: untick and tick again to have them over the land as well. Saved at once. Only the estate owner or an estate manager can change it."
-     top="217"
+     top="520"
      visible="false"
-     width="220" />
+     width="460" />
     <text
      follows="left|top"
      font="SansSerifSmall"
-     height="28"
+     height="16"
      layout="topleft"
-     left="268"
+     left="28"
      name="wolf_birds_state"
-     top="239"
+     top="540"
      visible="false"
-     width="202"
+     width="442"
+     wrap="true" />
+    <check_box
+     follows="left|top"
+     height="20"
+     label="Nature sounds on this region"
+     layout="topleft"
+     left="10"
+     name="wolf_sounds_check"
+     tool_tip="Crickets on warm nights (only where and when the place and the time of year would have them), soft lapping by lakes and ponds, and waves at the shore that follow the real waves. Each visitor hears them in their own viewer, at their Ambient volume, and can switch them off for themselves. Saved at once. Only the estate owner or an estate manager can change it."
+     top="562"
+     visible="false"
+     width="460" />
+    <text
+     follows="left|top"
+     font="SansSerifSmall"
+     height="16"
+     layout="topleft"
+     left="28"
+     name="wolf_sounds_state"
+     top="582"
+     visible="false"
+     width="442"
      wrap="true" />
     <text
      follows="left|top"
      font="SansSerifSmall"
-     height="44"
+     height="16"
      layout="topleft"
-     left="268"
+     left="28"
      name="wolf_planes_status"
-     top="267"
+     top="604"
      visible="false"
-     width="202"
+     width="442"
      wrap="true" />
     <string name="planes_reading">Reading passing planes for this region...</string>
     <string name="planes_on_default">On: the default for regions listed under Airports. Untick to stop them.</string>
@@ -484,5 +510,11 @@
     <string name="birds_saved_on">Saved: birds may now fly over this region.</string>
     <string name="birds_saved_off">Saved: no more birds over this region.</string>
     <string name="birds_save_failed">Could not save birds:</string>
+    <string name="sounds_off_default">Off: nature sounds play only where the estate owner or a manager turns them on.</string>
+    <string name="sounds_on_chosen">On: chosen by the estate owner or a manager. Visitors hear them at their own Ambient volume.</string>
+    <string name="sounds_off_chosen">Off: chosen by the estate owner or a manager.</string>
+    <string name="sounds_saved_on">Saved: nature sounds will now play on this region.</string>
+    <string name="sounds_saved_off">Saved: no more nature sounds on this region.</string>
+    <string name="sounds_save_failed">Could not save nature sounds:</string>
     <string name="planes_not_wolf">the region has not confirmed it is on Wolf Territories. Close and reopen this window to try again.</string>
 </panel>

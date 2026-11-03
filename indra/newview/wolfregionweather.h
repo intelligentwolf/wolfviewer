@@ -180,6 +180,19 @@ public:
      *  the next minute's poll. Ignored for any region but the agent's. */
     void setBirdsLocal(const LLUUID& region, bool on);
 
+    /** [NATURE SOUNDS 2026-11-03] ticket 475: weather.php's `sounds` block for this region (wolfstorm/php/wolf_ambient_lib.php
+     *  wa_sounds_payload: {ambient, default, on} and, while on, the night insects' climate {insects, place, lat, tempC,
+     *  season}). Nature sounds play only where the estate owner or a manager turned them on; no block (an older grid) or no
+     *  row yet is off. wolfnaturesounds.cpp plays them. */
+    bool soundsAllowed() const { return mHaveRow && mSoundsOn; }
+    /** [NATURE SOUNDS 2026-11-03] 0..1: how much of a night-insect chorus the region's place and season allow (the grid's
+     *  wa_sounds_payload `insects`; 0 when not known). The viewer adds the night and the weather it shows. */
+    F32 soundsInsects() const { return (mHaveRow && mSoundsOn) ? mSoundsInsects : 0.f; }
+    /** [NATURE SOUNDS 2026-11-03] Region/Estate saved a new choice for `region` (wolfpassingplanes.cpp): play or stop now.
+     *  Ignored for any region but the agent's. Turning on keeps the insects silent until the next weather read brings the
+     *  climate (within the minute). */
+    void setSoundsLocal(const LLUUID& region, bool on);
+
     /** Bumped whenever the answer changes, so a panel can notice without polling fields. */
     S32 generation() const { return mGeneration; }
 
@@ -201,10 +214,13 @@ private:
     void readAutoEnv(const LLSD& row);   ///< <WolfViewer 2026-10-03/> weather.php region_payload `autoEnv`
     void readHurricane(const LLSD& row); ///< [HURRICANE 2026-10-29/] weather.php region payload `hurricane` (absent = no storm)
     void readBirds(const LLSD& row);     ///< [BIRDS 2026-11-02/] weather.php region payload `birds` (absent = no birds)
+    void readSounds(const LLSD& row);    ///< [NATURE SOUNDS 2026-11-03/] weather.php region payload `sounds` (absent = off)
 
     bool               mHaveRow = false;
     bool               mBirdsOn = false;        // [BIRDS 2026-11-02/] weather.php `birds.on`
     bool               mBirdsSeaOnly = false;   // [BIRDS 2026-11-02/] ... by the sea-and-coast default only
+    bool               mSoundsOn = false;       // [NATURE SOUNDS 2026-11-03/] weather.php `sounds.on`
+    F32                mSoundsInsects = 0.f;    // [NATURE SOUNDS 2026-11-03/] weather.php `sounds.insects`, 0..1
     bool               mAutoEnvOn = false;      // <WolfViewer 2026-10-03/>
     bool               mAutoEnvSky = false;
     bool               mAutoEnvWeather = false;

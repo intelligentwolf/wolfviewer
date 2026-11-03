@@ -294,9 +294,7 @@ void LLPanelVoiceDeviceSettings::refresh()
                 // Fix invalid input audio device preference.
                 if (!mCtrlInputDevices->setSelectedByValue(mInputDevice, true))
                 {
-                    mCtrlInputDevices->setValue(DEFAULT_DEVICE);
-                    gSavedSettings.setString("VoiceInputAudioDevice", DEFAULT_DEVICE);
-                    mInputDevice = DEFAULT_DEVICE;
+                    selectMissingDevice(mCtrlInputDevices, mInputDevice, "VoiceInputAudioDevice");   // <WolfViewer 2026-11-03/> ticket 502
                 }
             }
         }
@@ -317,14 +315,30 @@ void LLPanelVoiceDeviceSettings::refresh()
                 // Fix invalid output audio device preference.
                 if (!mCtrlOutputDevices->setSelectedByValue(mOutputDevice, true))
                 {
-                    mCtrlOutputDevices->setValue(DEFAULT_DEVICE);
-                    gSavedSettings.setString("VoiceOutputAudioDevice", DEFAULT_DEVICE);
-                    mOutputDevice = DEFAULT_DEVICE;
+                    selectMissingDevice(mCtrlOutputDevices, mOutputDevice, "VoiceOutputAudioDevice");   // <WolfViewer 2026-11-03/> ticket 502
                 }
             }
         }
     }
 }
+
+// <WolfViewer 2026-11-03> ticket 502: the saved device is not in the list. This used to overwrite the saved
+// choice with "Default", so a headset that was switched off (or not yet enumerated) when Preferences opened was
+// forgotten for good. Keep the choice and show it as not connected; the voice client uses the default until it
+// is back and then switches to it (llwebrtc.cpp updateDevices). Only an empty value (nothing saved) becomes "Default".
+void LLPanelVoiceDeviceSettings::selectMissingDevice(LLComboBox* combo, std::string& device, const std::string& setting)
+{
+    if (device.empty() || device == DEFAULT_DEVICE)
+    {
+        combo->setValue(DEFAULT_DEVICE);
+        gSavedSettings.setString(setting, DEFAULT_DEVICE);
+        device = DEFAULT_DEVICE;
+        return;
+    }
+    combo->add(getString("device_not_connected"), device, ADD_BOTTOM);
+    combo->setValue(device);
+}
+// </WolfViewer>
 
 void LLPanelVoiceDeviceSettings::initialize()
 {

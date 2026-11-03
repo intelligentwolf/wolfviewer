@@ -28,6 +28,10 @@
      name="device_not_loaded">
         Device not loaded
     </string>
+    <string
+     name="device_not_connected">
+        Chosen device (not connected)
+    </string>
     <icon
      follows="left|top"
      height="18"

@@ -50,6 +50,8 @@ public:
 
 protected:
     std::string getLocalizedDeviceName(const std::string& en_dev_name);
+    // <WolfViewer 2026-11-03/> ticket 502: keep (and show) a saved device that is not connected right now.
+    void selectMissingDevice(class LLComboBox* combo, std::string& device, const std::string& setting);
 
     void onCommitInputDevice();
     void onCommitOutputDevice();

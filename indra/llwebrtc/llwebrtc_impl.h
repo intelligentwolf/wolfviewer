@@ -71,6 +71,9 @@ namespace llwebrtc
 {
 
 class LLWebRTCPeerConnectionImpl;
+#if WEBRTC_WIN
+class LLWebRTCDefaultDeviceWatcher;   // <WolfViewer 2026-11-03/> ticket 502, defined in llwebrtc.cpp
+#endif
 
 class LLWebRTCLogSink : public webrtc::LogSink
 {
@@ -494,6 +497,12 @@ class LLWebRTCImpl : public LLWebRTCDeviceInterface, public webrtc::AudioDeviceO
     //
     void OnDevicesUpdated() override;
 
+#if WEBRTC_WIN
+    // <WolfViewer 2026-11-03/> ticket 502: called by LLWebRTCDefaultDeviceWatcher (MMDevice notification
+    // thread) when Windows' default communications output (render) or input device changes.
+    void onSystemDefaultDeviceChanged(bool render);
+#endif
+
     //
     // Helpers
     //
@@ -595,6 +604,21 @@ class LLWebRTCImpl : public LLWebRTCDeviceInterface, public webrtc::AudioDeviceO
 
     std::string                                                mPlayoutDevice;
     LLWebRTCVoiceDeviceList                                    mPlayoutDeviceList;
+
+    // <WolfViewer 2026-11-03> ticket 502: following the system default device and re-applying a chosen one.
+    // Ends one workerDeployDevices() turn (the mDevicesDeploying count), running the next if one is queued.
+    void workerFinishDeployTurn();
+#if WEBRTC_LINUX
+    // PulseAudio's index 0 is "default: <description of the server's default>" with no guid (Source: webrtc-sdk
+    // m144_release modules/audio_device/linux/audio_device_pulse_linux.cc:733 PlayoutDeviceName, :1515
+    // GetDefaultDeviceInfo), so the name is what changes when the default changes. Empty until first enumerated.
+    std::string                                                mDefaultPlayoutName;
+    std::string                                                mDefaultRecordingName;
+#endif
+#if WEBRTC_WIN
+    LLWebRTCDefaultDeviceWatcher*                              mDefaultDeviceWatcher = nullptr;   // worker thread only
+#endif
+    // </WolfViewer>
 
     bool                                                       mMute;
     float                                                      mGain;

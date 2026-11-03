@@ -2,7 +2,6 @@
 // through the headset page: headset A (it connects straight in) types the login on the big screen,
 // enters VR with the fake WebXR device, clicks the left stick to switch to VR 3D Mode, and turns its head.
 //   node e2e_viewer_world.mjs <lan_url> <device_id> <secret> <out_dir> <cred_file> <fake_xr.js> <ctl.js>
-// Positions of the login fields come from the caller's look at a_login.jpg (env USER_UV, PASS_UV as "u,v").
 // The password is read from the cred file here and only ever goes over the local socket to the viewer; it is never
 // printed or put on a command line. Saves w_*.jpg (pictures received in 3D mode).
 import { spawn } from 'node:child_process';
@@ -42,12 +41,11 @@ await sleep(2000);
 
 // ---- log in through the big screen: click a field, type, as a resident would with the headset keyboard
 const typeText = async (s) => { for (const ch of s) await evalJs(`window.__wolfvr.sendText(${JSON.stringify(ch)})`); };
-const [uu, uv_] = uv(process.env.USER_UV), [pu, pv] = uv(process.env.PASS_UV);
-await evalJs(`window.__wolfvr.clickAt(${uu}, ${uv_}, 0)`); await sleep(300);
-await evalJs("window.__wolfvr.sendKey('a', 2)"); await sleep(150);   // Ctrl+A: replace what is there
+// Keyboard only, so it works whatever size the window manager gave the window: Enter closes the first-run notice (its
+// default button), the login panel then has the username box focused; Tab moves to the password; Enter logs in.
+await evalJs("window.__wolfvr.sendKey('Enter', 0)"); await sleep(1500);
 await typeText(NAME); await sleep(300);
-await evalJs(`window.__wolfvr.clickAt(${pu}, ${pv}, 0)`); await sleep(300);
-await evalJs("window.__wolfvr.sendKey('a', 2)"); await sleep(150);
+await evalJs("window.__wolfvr.sendKey('Tab', 0)"); await sleep(300);
 await typeText(PASS); await sleep(300);
 await grab('a_typed.jpg');
 await evalJs("window.__wolfvr.sendKey('Enter', 0)");
@@ -68,7 +66,15 @@ await evalJs('window.__fakeXR.setYaw(Math.PI / 2)'); await sleep(3000);
 await grab('w_yaw90.jpg');
 await evalJs('window.__fakeXR.setYaw(0); window.__fakeXR.setPitch(0.6)'); await sleep(3000);
 await grab('w_pitch_up.jpg');
-await evalJs('window.__fakeXR.setPitch(0)');
+await evalJs('window.__fakeXR.setPitch(0)'); await sleep(1500);
+await grab('w_before_walk.jpg');
+// walk forward for 3 s with the left stick, then a snap turn right with the right stick
+await evalJs("window.__fakeCtl.axis('left', 3, -0.8)"); await sleep(3000);
+await evalJs("window.__fakeCtl.axis('left', 3, 0)"); await sleep(1500);
+await grab('w_after_walk.jpg');
+await evalJs("window.__fakeCtl.axis('right', 2, 0.9)"); await sleep(300);
+await evalJs("window.__fakeCtl.axis('right', 2, 0)"); await sleep(2500);
+await grab('w_after_turn.jpg');
 const n = await evalJs('window.__wolfvr.numbers().rows');
 console.log('   numbers:', JSON.stringify(n));
 // back to the big screen so the next start is ordinary

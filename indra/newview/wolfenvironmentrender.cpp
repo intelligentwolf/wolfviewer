@@ -928,7 +928,13 @@ namespace
             const F32 night = llclamp(sNext.night, 0.f, 1.f);
             for (S32 i = 0; i < 4; ++i)
             {
-                LLColor3 f = MIDNIGHT[i];
+                // [WolfViewer 2026-11-03 W93] the Midnight floor faded in by the night factor too, as nightFloor.glsl's header gives the
+                // floor ("x nightFactor (0 by day and through nautical twilight)"). W92 laid the whole Midnight floor on the deck at
+                // every sun angle, so in twilight (night factor 0 - Paul at Lampert Highlands, 3 Nov 07:34Z: sun -9.4 deg) any part of
+                // the dim deck under it lost its own shading to the floor (nightFloor.glsl wolfNightFloorLiftPremultiplied); seen on WT
+                // Arctic 130 at sun -12 deg as a flat grey deck where W91 at -11 deg drew the clouds. Through nautical twilight the deck is
+                // W91's again; the floor fades in from -12 to -18 deg with the stock clouds' term.
+                LLColor3 f = MIDNIGHT[i] * night;
                 LLColor3 stock;
                 const F32 e = ELEV_DEG[i] * DEG_TO_RAD;
                 // a hair above the horizon: the dome vertex at 0 deg is the cap's rim (wolfeepreference.cpp domeVertex)

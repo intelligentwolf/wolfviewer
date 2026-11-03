@@ -2462,15 +2462,27 @@
                 <menu_item_check.on_check function="CheckControl" parameter="WolfFXCameraShake" />
                 <menu_item_check.on_click function="ToggleControl" parameter="WolfFXCameraShake" />
             </menu_item_check>
-            <!-- [VR PIPE 2026-11-03] VR in the headset's own browser, streamed over the home network (wolffloatervrstream.cpp,
-                 stage 1: test pattern). Wolf Territories logins, as the other Wolf tools. -->
-            <!-- [VR BIG SCREEN 2026-11-03] Paul: Wolf World > VR in your headset > Big screen. One item (a submenu cannot
-                 hide itself off the Wolf grid: LLMenuGL has no on_visible), one floater: the switch, the address to type
-                 and the choice of what the headset shows. -->
-            <menu_item_check label="VR in Your Headset: VR Big Screen Mode..." name="WolfVRStream">
+        </menu>
+        <!-- [VR MENU 2026-11-03] Paul: "let's put the options under their own VR menu on Wolf World rather than hiding
+             it". Wolf World > VR: the modes (each switches streaming on in that mode and shows the address), and the
+             headset settings (address, allowed headsets, Forget all headsets). A submenu cannot hide itself
+             (llmenugl.h: no on_visible), so wolfvrstream.cpp shows WolfGroupVR on Wolf Territories only, as
+             wolfgame.cpp gate_games_menu does for Games & Stories. VR 3D Mode stays hidden until it is finished
+             (WolfVR3DMode, off). -->
+        <menu create_jump_keys="true" label="VR" name="WolfGroupVR" tear_off="true">
+            <menu_item_check label="VR Big Screen Mode" name="WolfVRStream">
+                <menu_item_check.on_check function="WolfVR.IsMode" parameter="screen" />
+                <menu_item_check.on_click function="WolfVR.Open" parameter="screen" />
+            </menu_item_check>
+            <menu_item_check label="VR 3D Mode" name="WolfVRStream3D">
+                <menu_item_check.on_check function="WolfVR.IsMode" parameter="world" />
+                <menu_item_check.on_click function="WolfVR.Open" parameter="world" />
+                <menu_item_check.on_visible function="CheckControl" parameter="WolfVR3DMode" />
+            </menu_item_check>
+            <menu_item_separator />
+            <menu_item_check label="Headset Settings..." name="WolfVRSettings">
                 <menu_item_check.on_check function="Floater.Visible" parameter="wolf_vr_stream" />
                 <menu_item_check.on_click function="Floater.Toggle" parameter="wolf_vr_stream" />
-                <menu_item_check.on_visible function="WolfGrid.IsWolfTerritories" />
             </menu_item_check>
         </menu>
     </menu>

@@ -12988,6 +12988,24 @@ void initialize_menus()
     // share (wolfspeech.cpp, wolfscreenshare.cpp). Their menu items are hidden and their
     // toolbar buttons greyed on any other grid (WolfGrid.IsWolfTerritories, wolfgrid.h).
     enable.add("WolfGrid.IsWolfTerritories", boost::bind(&WolfGrid::isWolfTerritories));
+    // [VR 3D 2026-11-03] Wolf World > VR in Your Headset: VR Big Screen Mode / VR 3D Mode - choose what the headset
+    // shows (WolfVRStreamMode, switches a running stream at once) and open its floater (wolffloatervrstream.cpp).
+    // [VR MENU 2026-11-03] A mode item switches streaming on in that mode and shows the floater (the address to type);
+    // the same item again, while on in that mode, switches streaming off.
+    commit.add("WolfVR.Open", [](LLUICtrl*, const LLSD& mode) {
+        const std::string m = mode.asString() == "world" ? "world" : "screen";
+        if (gSavedSettings.getBOOL("WolfVRStreamEnabled") && gSavedSettings.getString("WolfVRStreamMode") == m)
+        {
+            gSavedSettings.setBOOL("WolfVRStreamEnabled", false);
+            return;
+        }
+        gSavedSettings.setString("WolfVRStreamMode", m);
+        gSavedSettings.setBOOL("WolfVRStreamEnabled", true);
+        LLFloaterReg::showInstance("wolf_vr_stream");
+    });
+    enable.add("WolfVR.IsMode", [](LLUICtrl*, const LLSD& mode) {
+        return gSavedSettings.getBOOL("WolfVRStreamEnabled") && gSavedSettings.getString("WolfVRStreamMode") == mode.asString();
+    });
     // [WOLF GRID GATE 2026-10-09] Standing on a Wolf Territories region now (logged in there too):
     // World > Game Mode / Roleplay and their toolbar buttons (wolfgrid.h, the Flight Mode gate).
     enable.add("WolfGrid.IsOnWolfTerritories", boost::bind(&WolfGrid::isOnWolfTerritories));

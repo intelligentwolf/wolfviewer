@@ -24,14 +24,16 @@
  width="520">
     <floater.string name="status_off">Off. Nothing is listening on your network.</floater.string>
     <floater.string name="status_waiting">On. In your headset's browser, type the address below.</floater.string>
-    <floater.string name="status_connected">Your headset is connected. Press VR in the headset browser. Right controller: point and pull the trigger to click, grip for a right click, stick to scroll.</floater.string>
+    <floater.string name="status_connected">Your headset is connected. Press Enter VR in the headset. Right controller: point, trigger = click, grip = right-click, stick = scroll and turn. Left stick walks.</floater.string>
+    <floater.string name="status_connected_world">Your headset is connected. Press Enter VR in the headset. Look around; left stick walks, right stick turns and flies, left stick click switches to the big screen.</floater.string>
     <floater.string name="status_failed">Could not start: [ERROR]</floater.string>
     <floater.string name="address_off">(tick the box first)</floater.string>
 
     <text follows="left|top" height="34" layout="topleft" left="12" name="intro" top="26" width="496" wrap="true">See WolfViewer in your VR headset's own web browser (Meta Quest Browser), over your home network. Nothing to install on the headset.</text>
     <check_box control_name="WolfVRStreamEnabled" follows="left|top" height="20" layout="topleft" left="12" name="enable" top="66" width="280" label="Stream to my headset" tool_tip="Starts a small web server on this PC's home-network address only. Turn it off and it stops at once." />
-    <combo_box control_name="WolfVRStreamMode" follows="left|top" height="23" layout="topleft" left="300" name="mode" top="64" width="208" tool_tip="What the headset shows. Big screen: the whole WolfViewer window on a large screen in front of you, with the controllers as the mouse.">
+    <combo_box control_name="WolfVRStreamMode" follows="left|top" height="23" layout="topleft" left="300" name="mode" top="64" width="208" tool_tip="What the headset shows. VR Big Screen Mode: the whole WolfViewer window on a large screen in front of you, with the controllers as the mouse. VR 3D Mode: you are in the world, and it follows your head. You can also switch in the headset (left stick click).">
         <combo_box.item label="VR Big Screen Mode" name="screen" value="screen" />
+        <combo_box.item label="VR 3D Mode" name="world" value="world" />
         <combo_box.item label="Test pattern" name="test" value="test" />
     </combo_box>
     <text_editor follows="left|top" height="40" layout="topleft" left="12" max_length="1024" name="status" top="92" width="496" word_wrap="true" read_only="true" show_context_menu="true" />

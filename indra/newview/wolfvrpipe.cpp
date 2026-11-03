@@ -406,6 +406,17 @@ struct Service::Impl
     std::mutex input_mutex;
     std::deque<InputEvent> input;
 
+    // [VR 3D] mode switches. cfg.mode / width / height / external_frames belong to the frame thread once it runs;
+    // other threads read the size and external flag through these atomics.
+    std::atomic<uint32_t> cur_w{0}, cur_h{0};
+    std::atomic<bool> cur_external{false};
+    std::mutex mode_mutex;
+    bool mode_pending = false;
+    std::string pending_mode;
+    uint32_t pending_w = 0, pending_h = 0;
+    bool pending_external = false;
+    std::string mode_request;   // from the page
+
     // ---- headsets asking to connect (wolfvrpairing.h); io thread only, except `store` (it locks itself) ----
     std::unique_ptr<DeviceStore> store;
     struct Ask
@@ -931,6 +942,13 @@ void Service::Impl::onText(const std::shared_ptr<Client>& c, const std::string& 
     {
         key_requested = true;
     }
+    else if (t == "mode")
+    {
+        const std::string m = str("m");
+        if (m != "screen" && m != "world") return;
+        std::lock_guard<std::mutex> lk(mode_mutex);
+        mode_request = m;
+    }
     else if (t == "in")
     {
         // [VR BIG SCREEN] Checked here, at the edge: bounded numbers, short strings, a bounded queue.
@@ -950,6 +968,19 @@ void Service::Impl::onText(const std::shared_ptr<Client>& c, const std::string& 
             e.type = InputEvent::Type::WHEEL;
             e.wheel = (int)std::clamp(num("d", 0), -10.0, 10.0);
             if (!e.wheel) return;
+        }
+        else if (ev == "stick")
+        {
+            e.type = InputEvent::Type::STICK;
+            e.x = (float)std::clamp(num("x", 0), -1.0, 1.0);
+            e.y = (float)std::clamp(num("y", 0), -1.0, 1.0);
+        }
+        else if (ev == "turn" || ev == "lift")
+        {
+            e.type = ev == "turn" ? InputEvent::Type::TURN : InputEvent::Type::LIFT;
+            const double d = num("d", 0);
+            e.wheel = d > 0.5 ? 1 : d < -0.5 ? -1 : 0;
+            if (ev == "turn" && !e.wheel) return;
         }
         else if (ev == "kd" || ev == "ku")
         {
@@ -1070,6 +1101,25 @@ void Service::Impl::frameLoop()
 
     while (!stopping)
     {
+        {
+            std::lock_guard<std::mutex> lk(mode_mutex);
+            if (mode_pending)
+            {
+                mode_pending = false;
+                cfg.mode = pending_mode;
+                cfg.width = pending_w;
+                cfg.height = pending_h;
+                cfg.external_frames = pending_external;
+                cur_w = cfg.width;
+                cur_h = cfg.height;
+                cur_external = cfg.external_frames;
+                enc.reset();   // a new size needs a new encoder, a key frame and a new config for the page
+                std::lock_guard<std::mutex> elk(ext_mutex);
+                ext_ready = false;
+                log(LogLevel::INFO, "VR pipe: now streaming " + cfg.mode + " " + std::to_string(cfg.width) + "x" +
+                    std::to_string(cfg.height));
+            }
+        }
         std::shared_ptr<Client> c;
         {
             std::lock_guard<std::mutex> lk(client_mutex);
@@ -1182,6 +1232,7 @@ void Service::Impl::frameLoop()
             cfgmsg["fov"] = cfg.fov_deg;
             cfgmsg["fps"] = cfg.fps;
             cfgmsg["mode"] = cfg.mode;
+            cfgmsg["world"] = cfg.world_allowed;
             if (enc->codec() == "h264" && !ef.key)
             {
                 // A decoder can only start on a key frame; this one is not, so ask again.
@@ -1299,6 +1350,9 @@ bool Service::start(const Config& cfg, std::string& error)
     auto impl = std::make_unique<Impl>();
     impl->cfg = cfg;
     impl->store = std::make_unique<DeviceStore>(cfg.device_store);
+    impl->cur_w = cfg.width;
+    impl->cur_h = cfg.height;
+    impl->cur_external = cfg.external_frames;
     if (!impl->store->lastError().empty()) impl->log(LogLevel::WARN, "VR pipe: " + impl->store->lastError());
     try
     {
@@ -1414,8 +1468,32 @@ Stats Service::stats() const
     return mImpl->st;
 }
 
-uint32_t Service::frameWidth() const { return mImpl ? mImpl->cfg.width : 0; }
-uint32_t Service::frameHeight() const { return mImpl ? mImpl->cfg.height : 0; }
+uint32_t Service::frameWidth() const { return mImpl ? mImpl->cur_w.load() : 0; }
+uint32_t Service::frameHeight() const { return mImpl ? mImpl->cur_h.load() : 0; }
+
+void Service::setMode(const std::string& mode, uint32_t width, uint32_t height, bool external_frames)
+{
+    if (!mImpl || width < 64 || height < 64 || width > 4096 || height > 4096) return;
+    std::lock_guard<std::mutex> lk(mImpl->mode_mutex);
+    mImpl->mode_pending = true;
+    mImpl->pending_mode = mode;
+    mImpl->pending_w = width;
+    mImpl->pending_h = height;
+    mImpl->pending_external = external_frames;
+    // Pictures of the new size are accepted at once; the frame thread switches before it takes the next one.
+    mImpl->cur_w = width;
+    mImpl->cur_h = height;
+    mImpl->cur_external = external_frames;
+}
+
+std::string Service::takeModeRequest()
+{
+    if (!mImpl) return std::string();
+    std::lock_guard<std::mutex> lk(mImpl->mode_mutex);
+    std::string m;
+    m.swap(mImpl->mode_request);
+    return m;
+}
 
 uint16_t Service::port() const
 {
@@ -1494,8 +1572,8 @@ bool Service::wantsFrames() const
 
 void Service::submitFrame(std::vector<uint8_t>&& rgba, const HeadPose& pose, double capture_ms)
 {
-    if (!mImpl || !mImpl->cfg.external_frames) return;
-    if (rgba.size() != (size_t)mImpl->cfg.width * mImpl->cfg.height * 4) return;
+    if (!mImpl || !mImpl->cur_external) return;
+    if (rgba.size() != (size_t)mImpl->cur_w * mImpl->cur_h * 4) return;
     Impl* i = mImpl.get();
     {
         std::lock_guard<std::mutex> lk(i->ext_mutex);

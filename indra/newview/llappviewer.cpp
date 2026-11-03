@@ -1513,9 +1513,8 @@ bool LLAppViewer::init()
 
     gSavedSettings.setU32("DebugQualityPerformance", gSavedSettings.getU32("RenderQualityPerformance"));
 
-    // [VR PAIRING 2026-11-03/] hook WolfVRStreamEnabled once the window exists, so a test run with
-    // --set WolfVRStreamEnabled 1 streams from the login screen without clicking. The setting is never saved
-    // (Persist 0): it cannot start a network server by itself in a normal run.
+    // [VR PAIRING 2026-11-03/] hook WolfVRStreamEnabled once the window exists: when the resident ticked it last
+    // time (it is remembered, Paul 2026-11-03) the headset can connect from the login screen on. Off by default.
     WolfVRStream::init();
 
 #if LL_WINDOWS

@@ -111,7 +111,6 @@ function connect() {
     };
     ws.onclose = (ev) => {
         clearInterval(pingTimer);
-        $('vr-btn').disabled = !config;
         showWaiting(false);
         if (ev.code === 4000) {
             showError('Another headset or browser tab is now connected to WolfViewer, so this one stopped. Reload this page to take it back.');
@@ -194,7 +193,8 @@ function onText(text) {
             ? 'This is your WolfViewer window. Click, right-click and scroll on it here; in VR, point with the right controller.'
             : 'Drag the picture to turn your head here on the page; in the headset, just look around.';
         if (BIG()) { buildBigScreen(); bigPlaced = false; statsOn = false; }
-        $('vr-btn').disabled = false;
+        else { bigMesh.visible = false; laser.visible = dot.visible = false; }
+        releaseKeys();
         setStatus(`Connected. Picture ${m.w}×${m.h}, ${m.codec === 'h264' ? 'H.264 video' : 'JPEG pictures'} from ${m.encoder}.`);
     } else if (m.t === 'stats') {
         num.viewer = m;
@@ -437,7 +437,7 @@ statsMesh.frustumCulled = false;
 statsMesh.position.set(-0.30, 0.16, -0.9);   // upper left of view, as WolfStorm's readout
 statsMesh.visible = false;
 camera.add(statsMesh);
-let statsOn = true, statsLastDraw = 0;
+let statsOn = false, statsLastDraw = 0;   // numbers panel: off until asked for (left menu held 1 s)
 
 function fmt(x, d = 1) { return Number.isFinite(x) ? x.toFixed(d) : '–'; }
 function numberRows() {
@@ -590,7 +590,8 @@ function restoreAfterVR() {
     statsMesh.visible = false;
     const btn = $('vr-btn');
     btn.classList.remove('vr-active');
-    btn.querySelector('.btn-label').textContent = 'VR';
+    btn.querySelector('.btn-label').textContent = 'Enter VR';
+    btn.scrollIntoView({ block: 'center' });   // one tap to go back in
     btn.title = 'Enter VR Mode';
     camera.position.set(0, 1.6, 0);
     rigYaw = 0;
@@ -599,65 +600,129 @@ function restoreAfterVR() {
     bigPlaced = false;
     laser.visible = dot.visible = false;
     for (const b of [0, 2]) pointerButton(b, false);   // never leave a button held down in the viewer
+    releaseKeys();
     dolly.quaternion.identity();
     resize();
 }
 function onSessionEnd() { restoreAfterVR(); }
 $('vr-btn').addEventListener('click', toggleVR);
-
-const leftWas = {};
-let sizeArmed = true;
-const _ro = new THREE.Vector3(), _rd = new THREE.Vector3(), _rq = new THREE.Quaternion();
-// [VR BIG SCREEN] The right controller is the mouse: aim = pointer, trigger (0) = left button, grip (1) or B (5) =
-// right button, stick up/down = wheel (about 8 clicks a second while held). Left: menu = recentre, X (4) = numbers
-// panel, Y (5) = the headset keyboard, stick up/down = screen size. Indices: xr-standard mapping (WebXR Gamepads
-// Module), as WolfStorm input_manager.js / render_manager.js use them.
-function pollBigScreen(session, frame, headPos, headQuat) {
-    let aimed = false;
-    if (!bigPlaced) recentre(headPos, headQuat);
-    const ref = renderer.xr.getReferenceSpace();
-    for (const src of session.inputSources) {
-        const gp = src.gamepad;
-        if (!gp) continue;
-        if (src.handedness === 'right') {
-            const rp = frame.getPose(src.targetRaySpace, ref);
-            if (rp) {
-                dolly.updateMatrixWorld();
-                _m.fromArray(rp.transform.matrix).premultiply(dolly.matrixWorld);
-                _m.decompose(_ro, _rq, _scl);
-                _rd.set(0, 0, -1).applyQuaternion(_rq);
-                const h = hitBigScreen(_ro, _rd);
-                const len = h ? h.t : 3;
-                laser.position.copy(_ro); laser.quaternion.copy(_rq); laser.scale.set(1, 1, len); laser.visible = true;
-                if (h) {
-                    aimed = true;
-                    dot.position.copy(h.point).lerp(_ro, 0.004);
-                    dot.lookAt(_ro);
-                    dot.visible = true;
-                    pointerMove(h.u, h.v);
-                }
-            }
-            const pressed = (i) => !!(gp.buttons[i] && gp.buttons[i].pressed);
-            if (aimed || !pressed(0)) pointerButton(0, pressed(0));
-            if (aimed || !(pressed(1) || pressed(5))) pointerButton(2, pressed(1) || pressed(5));
-            const y = gp.axes.length >= 4 ? gp.axes[3] : (gp.axes[1] || 0);
-            const now = performance.now();
-            if (aimed && Math.abs(y) > 0.5 && now - ptr.lastWheel > 120) { ptr.lastWheel = now; pointerWheel(Math.sign(y)); }
-        } else if (src.handedness === 'left') {
-            const edge = (i) => { const p = !!(gp.buttons[i] && gp.buttons[i].pressed); const was = leftWas[i]; leftWas[i] = p; return p && !was; };
-            for (let i = 6; i < gp.buttons.length; i++) if (edge(i)) recentre(headPos, headQuat);
-            if (edge(4)) { statsOn = !statsOn; statsMesh.visible = statsOn; }
-            if (edge(5)) openKeyboard();
-            const y = gp.axes.length >= 4 ? gp.axes[3] : (gp.axes[1] || 0);
-            if (Math.abs(y) > 0.6 && sizeArmed) { sizeArmed = false; setScreenSize(screenSizeIndex + (y < 0 ? 1 : -1)); }
-            else if (Math.abs(y) < 0.3) sizeArmed = true;
-        }
-    }
-    if (!aimed) dot.visible = false;
+// [VR MOVE 2026-11-03] Where the browser offers it (WebXR "sessiongranted", e.g. Quest Browser after a navigation from
+// another VR page), go straight back into VR with no tap at all.
+if (navigator.xr && navigator.xr.addEventListener) {
+    navigator.xr.addEventListener('sessiongranted', () => { if (!vrSession && !vrEntering) toggleVR(); });
 }
 
-function pollControllers(session) {
+// [VR MOVE 2026-11-03] Controls, after Paul's first in-world try ("left controller must move him, not show stats").
+// One map for both modes; WolfStorm's VR mapping where it has one (input_manager.js _vrLocomotionFlags,
+// render_manager.js _updateVRInput), xr-standard indices (WebXR Gamepads Module): 0 trigger, 1 grip, 3 stick click,
+// 4 A/X, 5 B/Y, 6+ menu; axes 2/3 = thumbstick x/y (y negative pushed forward).
+//   LEFT   stick           walk / strafe; pushed all the way = run           (WolfStorm: left stick translates)
+//          X (hold)        jump / fly up                                     (WolfStorm: A/X = up)
+//          grip (hold)     fly down
+//          menu            put the big screen back in front of you; hold 1 s = numbers panel
+//          Y               the headset keyboard (big screen)
+//          stick click     switch VR Big Screen Mode <-> VR 3D Mode
+//   RIGHT  stick left/right  snap turn 45 degrees                            (WolfStorm: right X rotates, snap default)
+//          big screen: aim = pointer, trigger = click, grip or B = right click,
+//                      stick up/down = scroll while pointing at the screen, screen size while pointing away
+//          3D: stick up/down = fly up / down                                 (WolfStorm: right Y = up/down)
+const STICK_DEAD = 0.25;          // WolfStorm _vrLocomotionFlags DEAD
+const leftWas = {}, rightWas = {};
+let sizeArmed = true, menuDownAt = 0, menuLong = false;
+const move = { x: 0, y: 0, sentAt: 0, lift: 0, liftAt: 0 };
+function sendStick(x, y) {
+    x = Math.abs(x) > STICK_DEAD ? Math.round(x * 100) / 100 : 0;
+    y = Math.abs(y) > STICK_DEAD ? Math.round(y * 100) / 100 : 0;
+    const now = performance.now();
+    const changed = Math.abs(x - move.x) > 0.04 || Math.abs(y - move.y) > 0.04;
+    // while held, every 250 ms as well: the PC lets go by itself after a second of silence (wolfvrscreen.cpp)
+    if (!changed && !((x || y) && now - move.sentAt > 250)) return;
+    move.x = x; move.y = y; move.sentAt = now;
+    send({ t: 'in', e: 'stick', x, y });
+}
+function sendLift(d) {
+    const now = performance.now();
+    if (d === move.lift && !(d && now - move.liftAt > 250)) return;
+    move.lift = d; move.liftAt = now;
+    send({ t: 'in', e: 'lift', d });
+}
+function releaseMovement() { sendStick(0, 0); sendLift(0); }
+function releaseKeys() { releaseMovement(); }
+// Left stick click switches between VR Big Screen Mode and VR 3D Mode without reconnecting.
+function switchMode() {
+    const want = BIG() ? 'world' : 'screen';
+    if (want === 'world' && !(config && config.world)) { toast('VR 3D Mode is not ready yet'); return; }
+    releaseMovement();
+    for (const b of [0, 2]) pointerButton(b, false);
+    send({ t: 'mode', m: want });
+    toast(want === 'world' ? 'Switching to VR 3D Mode' : 'Switching to VR Big Screen Mode');
+}
+const axis = (gp, i, j) => (gp.axes.length >= 4 ? gp.axes[i] : (gp.axes[j] || 0)) || 0;
+const _ro = new THREE.Vector3(), _rd = new THREE.Vector3(), _rq = new THREE.Quaternion();
+
+function pollLeft(gp, headPos, headQuat) {
+    const pressed = (i) => !!(gp.buttons[i] && gp.buttons[i].pressed);
+    const edge = (i) => { const p = pressed(i); const was = leftWas[i]; leftWas[i] = p; return p && !was; };
+    sendStick(axis(gp, 2, 0), axis(gp, 3, 1));
+    let menu = false;
+    for (let i = 6; i < gp.buttons.length; i++) menu = menu || pressed(i);
+    const now = performance.now();
+    if (menu && !leftWas.menu) { menuDownAt = now; menuLong = false; }
+    if (menu && !menuLong && now - menuDownAt > 1000) { menuLong = true; statsOn = !statsOn; }   // hold: numbers
+    if (!menu && leftWas.menu && !menuLong && BIG()) recentre(headPos, headQuat);             // tap: recentre
+    leftWas.menu = menu;
+    if (edge(5) && BIG()) openKeyboard();
+    if (edge(3)) switchMode();
+    return pressed(4) ? 1 : pressed(1) ? -1 : 0;   // X = up, grip = down
+}
+
+function pollRightStick(gp, aimed) {
+    const x = axis(gp, 2, 0), y = axis(gp, 3, 1);
+    // render_manager.js _updateVRInput snap turn: one step past 0.6, re-armed under 0.3; stick right = turn right.
+    // The AVATAR turns in the viewer (LLAgent::yaw), so the world and the big screen's view both follow.
+    if (Math.abs(x) > 0.6 && !snapArmed) { snapArmed = true; send({ t: 'in', e: 'turn', d: x > 0 ? -1 : 1 }); }
+    else if (Math.abs(x) < 0.3) snapArmed = false;
+    if (BIG()) {
+        const now = performance.now();
+        if (aimed) {
+            if (Math.abs(y) > 0.5 && now - ptr.lastWheel > 120) { ptr.lastWheel = now; pointerWheel(Math.sign(y)); }
+        } else if (Math.abs(y) > 0.6 && sizeArmed) { sizeArmed = false; setScreenSize(screenSizeIndex + (y < 0 ? 1 : -1)); }
+        if (Math.abs(y) < 0.3) sizeArmed = true;
+        return 0;
+    }
+    return y < -0.5 ? 1 : y > 0.5 ? -1 : 0;   // 3D: forward = fly up, back = down
+}
+
+// Big screen: the right controller is the mouse; returns whether it points at the screen.
+function pollPointer(src, gp, frame) {
+    let aimed = false;
+    const rp = frame.getPose(src.targetRaySpace, renderer.xr.getReferenceSpace());
+    if (rp) {
+        dolly.updateMatrixWorld();
+        _m.fromArray(rp.transform.matrix).premultiply(dolly.matrixWorld);
+        _m.decompose(_ro, _rq, _scl);
+        _rd.set(0, 0, -1).applyQuaternion(_rq);
+        const h = hitBigScreen(_ro, _rd);
+        laser.position.copy(_ro); laser.quaternion.copy(_rq); laser.scale.set(1, 1, h ? h.t : 3); laser.visible = true;
+        if (h) {
+            aimed = true;
+            dot.position.copy(h.point).lerp(_ro, 0.004);
+            dot.lookAt(_ro);
+            pointerMove(h.u, h.v);
+        }
+    }
+    const pressed = (i) => !!(gp.buttons[i] && gp.buttons[i].pressed);
+    if (aimed || !pressed(0)) pointerButton(0, pressed(0));
+    if (aimed || !(pressed(1) || pressed(5))) pointerButton(2, pressed(1) || pressed(5));
+    dot.visible = aimed;
+    return aimed;
+}
+
+function pollControllers(session, frame, headPos, headQuat) {
     const ctl = [];
+    let lift = 0;
+    if (BIG() && !bigPlaced) recentre(headPos, headQuat);
+    if (!BIG()) laser.visible = dot.visible = false;
     for (const src of session.inputSources) {
         const gp = src.gamepad;
         if (!gp) continue;
@@ -665,26 +730,27 @@ function pollControllers(session) {
         let bits = 0;
         gp.buttons.forEach((b, i) => { if (b && b.pressed && i < 31) bits |= (1 << i); });
         ctl.push({ h: hand, b: bits, a: Array.from(gp.axes, (x) => Math.round(x * 1000) / 1000) });
-        if (BIG()) continue;   // big screen: pollBigScreen has the buttons
-        if (hand === 'right' && gp.axes.length >= 3) {
-            // render_manager.js _updateVRInput snap turn (default mode): one step past 0.6, re-armed under 0.3.
-            const stickX = gp.axes.length >= 4 ? gp.axes[2] : gp.axes[0];
-            if (Math.abs(stickX) > 0.6 && !snapArmed) {
-                snapArmed = true;
-                rigYaw += -Math.sign(stickX) * 45 * Math.PI / 180;
-                dolly.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rigYaw);
-            } else if (Math.abs(stickX) < 0.3) {
-                snapArmed = false;
+        if (!config || config.mode === 'test') {
+            // the stage-1 test pattern: snap turn the page's own view, menu = numbers (as before)
+            if (hand === 'right') {
+                const sx = axis(gp, 2, 0);
+                if (Math.abs(sx) > 0.6 && !snapArmed) { snapArmed = true; rigYaw += -Math.sign(sx) * 45 * Math.PI / 180; dolly.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rigYaw); }
+                else if (Math.abs(sx) < 0.3) snapArmed = false;
             }
+            for (let i = 6; i < gp.buttons.length; i++) {
+                const key = hand + ':' + i, p = !!(gp.buttons[i] && gp.buttons[i].pressed);
+                if (p && !menuWas[key]) statsOn = !statsOn;
+                menuWas[key] = p;
+            }
+            continue;
         }
-        // vr_menu.js _pollMenuButtons: any rising edge on an index >= 6 is the menu button.
-        for (let i = 6; i < gp.buttons.length; i++) {
-            const key = hand + ':' + i;
-            const pressed = !!(gp.buttons[i] && gp.buttons[i].pressed);
-            if (pressed && !menuWas[key]) { statsOn = !statsOn; statsMesh.visible = statsOn; }
-            menuWas[key] = pressed;
+        if (hand === 'left') lift = lift || pollLeft(gp, headPos, headQuat);
+        else if (hand === 'right') {
+            const aimed = BIG() ? pollPointer(src, gp, frame) : false;
+            lift = lift || pollRightStick(gp, aimed);
         }
     }
+    if (config && config.mode !== 'test') sendLift(lift);
     return ctl;
 }
 
@@ -704,8 +770,7 @@ function animate(time, frame) {
             _m.fromArray(pose.transform.matrix).premultiply(dolly.matrixWorld);
             _m.decompose(_pos, _quat, _scl);
         }
-        ctl = pollControllers(renderer.xr.getSession());
-        if (BIG()) pollBigScreen(renderer.xr.getSession(), frame, _pos, _quat);
+        ctl = pollControllers(renderer.xr.getSession(), frame, _pos, _quat);
         num.xrFrames++;
     } else {
         _quat.setFromEuler(new THREE.Euler(-dragPitch, -dragYaw, 0, 'YXZ'));
@@ -823,5 +888,7 @@ window.__wolfvr = { numbers: () => ({ rows: numberRows(), p2p: num.p2p.v.slice(-
         c.getContext('2d').drawImage(shown.img, 0, 0, config.w, config.h);
         return c.toDataURL('image/jpeg', 0.85);
     },
-    clickAt: (u, v, b = 0) => { pointerMove(u, v); pointerButton(b, true); pointerButton(b, false); } };
+    clickAt: (u, v, b = 0) => { pointerMove(u, v); pointerButton(b, true); pointerButton(b, false); },
+    sendText: (t) => send({ t: 'in', e: 'text', s: String(t).slice(0, 64) }),
+    sendKey: (k, m = 0) => tapKey(k, m) };
 connect();

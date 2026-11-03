@@ -28,7 +28,10 @@
 #include "lldir.h"
 #include "llfile.h"
 #include "llnotificationsutil.h"
+#include "llmenugl.h"
 #include "llviewercontrol.h"
+#include "llviewermenu.h"
+#include "wolfgrid.h"
 #include "wolfvrpairing.h"
 #include "wolfvrscreen.h"
 
@@ -59,7 +62,19 @@ namespace
     size_t gKnownWhenOff = 0;
     bool gPumpRunning = false;
     bool gShutdown = false;
-    bool gBigScreen = false;          // the running stream is in big-screen mode (gMutex)
+    std::string gMode;                // what the running stream shows: test | screen | world (gMutex)
+
+    // [VR 3D 2026-11-03] The picture for each mode. Big screen: the viewer window in 1920x1080, letterboxed when the
+    // window is not 16:9 (wolfvrscreen.cpp). A fixed size: the window is often still small when the stream starts
+    // (1024x738 at the login screen, seen 2026-11-03) and is resized freely afterwards. World (VR 3D Mode): a square
+    // 1440x1440 window into the world, 100 degrees across (Config fov_deg), drawn for the newest head pose.
+    struct ModeSize { std::string mode; U32 w, h; bool external; };
+    ModeSize modeSize(const std::string& setting)
+    {
+        if (setting == "test") return {"test", 1280, 1280, false};
+        if (setting == "world" && gSavedSettings.getBOOL("WolfVR3DMode")) return {"world", 1440, 1440, true};
+        return {"screen", 1920, 1080, true};
+    }
 
     std::string devicesPath() { return gDirUtilp->getExpandedFilename(LL_PATH_USER_SETTINGS, kDevicesFile); }
 
@@ -151,17 +166,13 @@ namespace
         };
         cfg.bitrate_kbps = llclamp(gSavedSettings.getU32("WolfVRStreamBitrateKbps"), 2000u, 100000u);
         cfg.encoder = gSavedSettings.getString("WolfVRStreamEncoder");
-        // [VR BIG SCREEN 2026-11-03] Big screen (the default): the viewer window in a 1920x1080 picture, letterboxed when
-        // the window is not 16:9 (wolfvrscreen.cpp fitWindow). A fixed size: the window is often still small when the
-        // stream starts (1024x738 at the login screen, seen 2026-11-03) and is resized freely afterwards.
-        cfg.mode = gSavedSettings.getString("WolfVRStreamMode") == "test" ? "test" : "screen";
-        if (cfg.mode == "screen")
-        {
-            cfg.width = 1920;
-            cfg.height = 1080;
-            cfg.fps = 60;
-            cfg.external_frames = true;
-        }
+        const ModeSize ms = modeSize(gSavedSettings.getString("WolfVRStreamMode"));
+        cfg.mode = ms.mode;
+        cfg.width = ms.w;
+        cfg.height = ms.h;
+        cfg.external_frames = ms.external;
+        cfg.world_allowed = gSavedSettings.getBOOL("WolfVR3DMode");
+        if (ms.external) cfg.fps = 60;
         cfg.log = [](wolfvr::LogLevel level, const std::string& line) {
             // LL logging is thread-safe; these lines come from the server's own threads.
             if (level == wolfvr::LogLevel::WARN) LL_WARNS("WolfVR") << line << LL_ENDL;
@@ -181,14 +192,14 @@ namespace
             return;
         }
         gService = std::move(svc);
-        gBigScreen = cfg.mode == "screen";
+        gMode = cfg.mode;
         LL_INFOS("WolfVR") << "headset stream on (" << cfg.mode << ", " << cfg.width << "x" << cfg.height << ")" << LL_ENDL;
     }
 
     void stopLocked()
     {
         if (!gService) return;
-        gBigScreen = false;
+        gMode.clear();
         gKnownWhenOff = gService->knownDevices();
         gService->stop();
         gService.reset();
@@ -217,9 +228,26 @@ namespace
     }
 
     // Main thread, 4 times a second: show the server's questions, close the ones the headset gave up on.
+    // [VR MENU 2026-11-03] Wolf World > VR on Wolf Territories only. A submenu has no on_visible (llmenugl.h), so it is
+    // shown or hidden here, as wolfgame.cpp gate_games_menu does for Games & Stories; touched only when it changes.
+    void gateMenu()
+    {
+        static S32 s_applied = -1;
+        static const LLView* s_bar = nullptr;
+        const bool on = WolfGrid::isWolfTerritories();
+        if (!gMenuBarView || (s_bar == gMenuBarView && s_applied == (on ? 1 : 0))) return;
+        if (LLMenuGL* wolf_world = gMenuBarView->findChildMenuByName("WolfWorld", true))
+        {
+            wolf_world->setItemVisible("WolfGroupVR", on);
+            s_bar = gMenuBarView;
+            s_applied = on ? 1 : 0;
+        }
+    }
+
     bool pumpQuestions()
     {
         if (gShutdown) { gPumpRunning = false; return true; }
+        gateMenu();
         std::deque<AskEvent> events;
         {
             std::lock_guard<std::mutex> lk(gAskMutex);
@@ -273,16 +301,15 @@ void init()
         // [VR BIG SCREEN] the headset's pointer and keys, every frame
         gIdleCallbacks.addFunction([](void*) { if (!gShutdown) WolfVRScreen::pumpInput(); }, nullptr);
     }
-    // [VR BIG SCREEN] a new choice of what to show restarts a running stream with it
-    gSavedSettings.getControl("WolfVRStreamMode")->getSignal()->connect([](LLControlVariable*, const LLSD&, const LLSD&) {
-        {
-            std::lock_guard<std::mutex> lk(gMutex);
-            if (!gService) return;
-            stopLocked();
-            startLocked();
-        }
-        closeQuestions();
-        WolfVRScreen::release();
+    // [VR 3D] a new choice of what to show switches a running stream to it, without dropping the headset
+    gSavedSettings.getControl("WolfVRStreamMode")->getSignal()->connect([](LLControlVariable*, const LLSD& v, const LLSD&) {
+        std::lock_guard<std::mutex> lk(gMutex);
+        if (!gService) return;
+        const ModeSize ms = modeSize(v.asString());
+        if (ms.mode == gMode) return;
+        gService->setMode(ms.mode, ms.w, ms.h, ms.external);
+        gMode = ms.mode;
+        LL_INFOS("WolfVR") << "headset stream switched to " << ms.mode << LL_ENDL;
     });
     gSavedSettings.getControl("WolfVRStreamEnabled")->getSignal()->connect(
         [](LLControlVariable*, const LLSD& value, const LLSD&) { onEnabledChanged(value); });
@@ -302,7 +329,37 @@ void shutdown()
 bool bigScreenWanted()
 {
     std::lock_guard<std::mutex> lk(gMutex);
-    return gService && gBigScreen && gService->wantsFrames();
+    return gService && gMode == "screen" && gService->wantsFrames();
+}
+
+bool worldWanted()
+{
+    std::lock_guard<std::mutex> lk(gMutex);
+    return gService && gMode == "world" && gService->wantsFrames();
+}
+
+wolfvr::HeadPose headPose()
+{
+    std::lock_guard<std::mutex> lk(gMutex);
+    return gService ? gService->headPose() : wolfvr::HeadPose();
+}
+
+void submitWorldFrame(std::vector<uint8_t>& rgba, const wolfvr::HeadPose& pose, double capture_ms)
+{
+    std::lock_guard<std::mutex> lk(gMutex);
+    if (gService) gService->submitFrame(std::move(rgba), pose, capture_ms);
+}
+
+void pumpModeRequest()
+{
+    std::string m;
+    {
+        std::lock_guard<std::mutex> lk(gMutex);
+        if (gService) m = gService->takeModeRequest();
+    }
+    // Through the setting, so the floater's choice follows the headset's (the signal above does the switch).
+    if (m == "world" && !gSavedSettings.getBOOL("WolfVR3DMode")) return;   // not offered yet
+    if (!m.empty()) gSavedSettings.setString("WolfVRStreamMode", m);
 }
 
 void frameSize(U32& width, U32& height)

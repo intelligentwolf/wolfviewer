@@ -22,9 +22,8 @@
 
 #include "wolfvrpipe.h"
 
-// [VR PIPE 2026-11-03] Stage 1. WolfVRStreamEnabled (OFF by default, not remembered between runs, so a LAN server never
-// starts by itself) starts the server on the home-network address; switching it off stops it at once and closes the
-// headset's connection.
+// [VR PIPE 2026-11-03] Stage 1. WolfVRStreamEnabled (OFF by default; remembered once ticked, Paul 2026-11-03) starts the
+// server on the home-network address; switching it off stops it at once and closes the headset's connection.
 // [VR PAIRING 2026-11-03] No session code: a new headset makes the viewer ask "A headset wants to connect" (the
 // WolfVRHeadsetAsks notification, Allow / Deny); allowed headsets are remembered in user_settings/wolfvr_devices.json
 // (wolfvrpairing.h). Switching the stream off forgets the Denies and closes any question still showing.
@@ -58,6 +57,16 @@ namespace WolfVRStream
     void submitFrame(std::vector<uint8_t>& rgba, double capture_ms);
     /** The headset's pointer and key events since the last call. */
     std::vector<wolfvr::InputEvent> takeInput();
+
+    // [VR 3D 2026-11-03] WolfVRStreamMode "world" (VR 3D Mode): the world drawn from the headset's pose.
+    /** True when streaming in 3D mode and an allowed headset wants pictures. */
+    bool worldWanted();
+    /** The newest head pose from the headset (valid=false when none). */
+    wolfvr::HeadPose headPose();
+    /** Hands one world picture (frameSize RGBA, top row first) drawn for `pose`; `rgba` gets back a buffer to reuse. */
+    void submitWorldFrame(std::vector<uint8_t>& rgba, const wolfvr::HeadPose& pose, double capture_ms);
+    /** Applies a mode the headset page asked for (its in-VR switch). Main thread, every frame. */
+    void pumpModeRequest();
     /** Why the last start failed (empty after a good start). */
     std::string lastError();
     /** The address chosen and why (or why none could be). */

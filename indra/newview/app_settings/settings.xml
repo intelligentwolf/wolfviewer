@@ -20125,9 +20125,20 @@ Change of this parameter will affect the layout of buttons in notification toast
 		<key>WolfVRStreamEnabled</key>
 		<map>
 			<key>Comment</key>
-			<string>[VR PIPE 2026-11-03] VR in Your Headset Browser (wolfvrstream.cpp): serve the headset page and stream to it on this PC's home-network address. Off by default and never remembered, so a network server never starts by itself.</string>
+			<string>[VR PIPE 2026-11-03] VR in Your Headset (wolfvrstream.cpp): serve the headset page and stream to it on this PC's home-network address. Off by default. [2026-11-03 Paul: "why do I need to keep clicking"] Remembered once ticked, so it is on again at the next start (it serves only headsets this PC has allowed).</string>
 			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
 			<integer>0</integer>
+		</map>
+		<key>WolfVR3DMode</key>
+		<map>
+			<key>Comment</key>
+			<string>[VR 3D 2026-11-03] Offer VR 3D Mode (Wolf World > VR, the floater, the headset's left stick click). Off until VR 3D Mode is finished and tested (coordinator 2026-11-03: hide 3D until it exists); VR Big Screen Mode is always offered.</string>
+			<key>Persist</key>
+			<integer>1</integer>
 			<key>Type</key>
 			<string>Boolean</string>
 			<key>Value</key>

@@ -29,6 +29,10 @@
 namespace WolfVRScreen
 {
     void captureFrame();
+    /** [VR 3D 2026-11-03] VR 3D Mode: the camera follows the headset (display(), before culling) and the finished
+     *  world, without the UI, goes to the headset (render_ui(), right after gPipeline.renderFinalize()). */
+    void applyHeadCamera();
+    void captureWorld();
     void pumpInput();
     /** Frees the GPU objects (stream switched off, or the viewer closing). Main thread, GL context current. */
     void release();

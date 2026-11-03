@@ -17,17 +17,24 @@
 
 #include "wolfvrscreen.h"
 
+#include "llagent.h"
 #include "llgl.h"
 #include "llglheaders.h"
 #include "llkeyboard.h"
 #include "llstring.h"
 #include "lltimer.h"
+#include "llviewercamera.h"
+#include "llvoavatarself.h"
 #include "llviewerwindow.h"
 #include "llwindow.h"
 #include "wolfvrstream.h"
 
+#include <cmath>
 #include <cstring>
 #include <vector>
+
+extern bool gSnapshot;       // llviewerdisplay.cpp:190
+extern bool gCubeSnapshot;   // llviewerdisplay.cpp:191
 
 namespace
 {
@@ -39,6 +46,7 @@ namespace
         GLuint pbo[kSlots] = {0, 0, 0};
         GLsync fence[kSlots] = {nullptr, nullptr, nullptr};
         F64 issued[kSlots] = {0, 0, 0};
+        wolfvr::HeadPose pose[kSlots];   // 3D mode: the head pose each picture was drawn for
         U32 w = 0, h = 0;          // picture size
         int next = 0;
         std::vector<uint8_t> buf;  // handed to the stream; comes back as the stream's spare buffer
@@ -46,8 +54,23 @@ namespace
         S32 x0 = 0, y0 = 0, x1 = 0, y1 = 0;
         S32 win_w = 0, win_h = 0;
         F64 last = 0;
+        bool world = false;        // the GL objects are set up for 3D mode (square window crop) or big screen
     };
     Capture gCap;
+
+    // [VR MOVE 2026-11-03] Paul: "left controller must move him". The headset's left stick, held now, and jump/fly
+    // up/down held, applied every frame like held movement keys (llviewerinput.cpp agent_push_forwardbackward:
+    // gAgent.moveAt each frame while the key is down). A stick that has not been heard from for a second (the
+    // headset slept or the network dropped) counts as let go, so the avatar never walks off on its own.
+    struct Stick { F32 x = 0, y = 0; S32 lift = 0; F64 heard = 0; bool ran = false; };
+    Stick gStick;
+    constexpr F32 kDead = 0.25f;   // WolfStorm input_manager.js _vrLocomotionFlags DEAD
+    constexpr F32 kRun = 0.9f;     // pushed (nearly) all the way: run, as double-tap-and-hold does
+
+    // [VR 3D] the head pose the camera was turned to for this frame, and the view to give back afterwards
+    wolfvr::HeadPose gFramePose;
+    bool gCameraOverridden = false;
+    F32 gSavedView = 0.f;
 
     void freeGl()
     {
@@ -95,8 +118,28 @@ namespace
     }
 
     // The window, fitted into the picture keeping its shape (centred, black bars).
+    S32 gSrc[4] = {0, 0, 0, 0};   // the part of the window that is copied (GL pixels)
     void fitWindow(S32 ww, S32 wh)
     {
+        if (gCap.world)
+        {
+            // 3D mode: the camera's vertical field of view is the picture's, so the centre square of the window
+            // (side = the window's height, or its width if narrower) is exactly the square 100-degree view.
+            const S32 side = llmin(ww, wh);
+            gSrc[0] = (ww - side) / 2;
+            gSrc[1] = (wh - side) / 2;
+            gSrc[2] = gSrc[0] + side;
+            gSrc[3] = gSrc[1] + side;
+            gCap.win_w = ww;
+            gCap.win_h = wh;
+            gCap.x0 = gCap.y0 = 0;
+            gCap.x1 = (S32)gCap.w;
+            gCap.y1 = (S32)gCap.h;
+            return;
+        }
+        gSrc[0] = gSrc[1] = 0;
+        gSrc[2] = ww;
+        gSrc[3] = wh;
         gCap.win_w = ww;
         gCap.win_h = wh;
         const F64 sx = (F64)gCap.w / ww, sy = (F64)gCap.h / wh, s = llmin(sx, sy);
@@ -158,9 +201,13 @@ void release()
     freeGl();
 }
 
-void captureFrame()
+namespace
 {
-    if (!gViewerWindow || !WolfVRStream::bigScreenWanted()) return;
+// Big screen: the whole window, letterboxed. 3D: the centre square, drawn for gFramePose.
+void captureInto(bool world)
+{
+    if (!gViewerWindow) return;
+    if (world ? !WolfVRStream::worldWanted() : !WolfVRStream::bigScreenWanted()) return;
     U32 w = 0, h = 0;
     WolfVRStream::frameSize(w, h);
     if (!w || !h) return;
@@ -168,7 +215,11 @@ void captureFrame()
     const F64 now = LLTimer::getTotalSeconds();
     if (now - gCap.last < 1.0 / 75.0) return;
     gCap.last = now;
-    if ((w != gCap.w || h != gCap.h) && !makeGl(w, h)) return;
+    if (w != gCap.w || h != gCap.h || world != gCap.world)
+    {
+        if (!makeGl(w, h)) return;
+        gCap.world = world;
+    }
     const S32 ww = gViewerWindow->getWindowWidthRaw(), wh = gViewerWindow->getWindowHeightRaw();
     if (ww <= 0 || wh <= 0) return;
     const bool refit = ww != gCap.win_w || wh != gCap.win_h;
@@ -196,7 +247,7 @@ void captureFrame()
         glClear(GL_COLOR_BUFFER_BIT);   // the letterbox bars
         glClearColor(cc[0], cc[1], cc[2], cc[3]);
     }
-    glBlitFramebuffer(0, 0, ww, wh, gCap.x0, gCap.y1, gCap.x1, gCap.y0, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    glBlitFramebuffer(gSrc[0], gSrc[1], gSrc[2], gSrc[3], gCap.x0, gCap.y1, gCap.x1, gCap.y0, GL_COLOR_BUFFER_BIT, GL_LINEAR);
 
     // 2. picture texture -> pixel buffer, without waiting
     const int slot = gCap.next;
@@ -214,6 +265,7 @@ void captureFrame()
     glReadPixels(0, 0, (GLsizei)gCap.w, (GLsizei)gCap.h, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
     gCap.fence[slot] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
     gCap.issued[slot] = now;
+    gCap.pose[slot] = gFramePose;
 
     // 3. collect the oldest picture whose copy has finished
     const int old = gCap.next;   // the slot written kSlots-1 frames ago
@@ -228,7 +280,9 @@ void captureFrame()
             gCap.buf.resize(bytes);
             std::memcpy(gCap.buf.data(), p, bytes);
             glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
-            WolfVRStream::submitFrame(gCap.buf, (LLTimer::getTotalSeconds() - gCap.issued[old]) * 1000.0);
+            const F64 ms = (LLTimer::getTotalSeconds() - gCap.issued[old]) * 1000.0;
+            if (world) WolfVRStream::submitWorldFrame(gCap.buf, gCap.pose[old], ms);
+            else WolfVRStream::submitFrame(gCap.buf, ms);
         }
     }
 
@@ -240,10 +294,92 @@ void captureFrame()
     if (scissor) glEnable(GL_SCISSOR_TEST);
 }
 
+}
+
+void applyEvents(const std::vector<wolfvr::InputEvent>& events);
+
+void captureFrame() { captureInto(false); }
+
+void captureWorld()
+{
+    if (gSnapshot || gCubeSnapshot) return;   // a snapshot or reflection-probe pass is not the headset's view
+    captureInto(true);
+}
+
+// [VR 3D 2026-11-03] Turn this frame's camera to the headset's pose. The agent camera has already placed it
+// (LLAgentCamera::updateCamera, idle); this keeps its position, takes the avatar's heading (yaw only) and adds the
+// head's own rotation, so turning the avatar still turns the view and the head looks around in it.
+// WebXR space is right-handed, +Y up, -Z forward (wolfvrpipe_video.h Quat); the viewer's is X forward (at), Y left,
+// Z up (llcoordframe.h). A vector (x, y, z) in head space is therefore -z forward, -x left, +y up.
+void applyHeadCamera()
+{
+    LLViewerCamera* cam = LLViewerCamera::getInstance();
+    const bool want = !gSnapshot && !gCubeSnapshot && WolfVRStream::worldWanted();
+    const wolfvr::HeadPose hp = want ? WolfVRStream::headPose() : wolfvr::HeadPose();
+    if (!hp.valid)
+    {
+        if (gCameraOverridden)
+        {
+            cam->setViewNoBroadcast(gSavedView);
+            gCameraOverridden = false;
+        }
+        gFramePose = wolfvr::HeadPose();
+        return;
+    }
+    if (!gCameraOverridden)
+    {
+        gSavedView = cam->getView();
+        gCameraOverridden = true;
+    }
+    // The heading is the avatar's, not the camera's: if the agent camera ever skipped a frame, reading back our own
+    // turned camera would add the head's yaw again every frame.
+    LLVector3 fwd = gAgent.getAtAxis();
+    fwd.mV[VZ] = 0.f;
+    if (fwd.normVec() < 1e-3f) fwd = LLVector3::x_axis;
+    const LLVector3 up = LLVector3::z_axis;
+    const LLVector3 left = up % fwd;
+    // rotate v by the unit quaternion q: v' = v + 2w (u x v) + 2 u x (u x v), u = (x, y, z)
+    const F32 qx = hp.q[0], qy = hp.q[1], qz = hp.q[2], qw = hp.q[3];
+    auto rot = [&](F32 vx, F32 vy, F32 vz) {
+        const F32 cx = qy * vz - qz * vy, cy = qz * vx - qx * vz, cz = qx * vy - qy * vx;
+        const F32 ccx = qy * cz - qz * cy, ccy = qz * cx - qx * cz, ccz = qx * cy - qy * cx;
+        const F32 rx = vx + 2.f * (qw * cx + ccx), ry = vy + 2.f * (qw * cy + ccy), rz = vz + 2.f * (qw * cz + ccz);
+        return fwd * (-rz) + left * (-rx) + up * ry;
+    };
+    LLVector3 at = rot(0.f, 0.f, -1.f), lft = rot(-1.f, 0.f, 0.f), u = rot(0.f, 1.f, 0.f);
+    at.normVec(); lft.normVec(); u.normVec();
+    cam->setAxes(at, lft, u);
+    // The picture is square and 100 degrees across both ways; the viewer's FOV is vertical.
+    cam->setViewNoBroadcast(100.f * DEG_TO_RAD);
+    gFramePose = hp;
+}
+
 void pumpInput()
 {
+    WolfVRStream::pumpModeRequest();
     if (!gViewerWindow) return;
     const std::vector<wolfvr::InputEvent> events = WolfVRStream::takeInput();
+    applyEvents(events);
+    // the held stick, every frame
+    const F64 now = LLTimer::getTotalSeconds();
+    if (now - gStick.heard > 1.0) { gStick.x = gStick.y = 0.f; gStick.lift = 0; }
+    const bool moving = std::fabs(gStick.x) > kDead || std::fabs(gStick.y) > kDead;
+    if (!gAgent.isMovementLocked() && isAgentAvatarValid())
+    {
+        // stick y is negative pushed forward (xr-standard); moveLeft(+1) = left, stick x is positive to the right
+        if (gStick.y < -kDead) gAgent.moveAt(1);
+        else if (gStick.y > kDead) gAgent.moveAt(-1);
+        if (gStick.x < -kDead) gAgent.moveLeft(1);
+        else if (gStick.x > kDead) gAgent.moveLeft(-1);
+        if (gStick.lift) gAgent.moveUp(gStick.lift);
+    }
+    const bool run = moving && llmax(std::fabs(gStick.x), std::fabs(gStick.y)) > kRun;
+    if (run && !gStick.ran) { gAgent.setTempRun(); gStick.ran = true; }
+    else if (!run && gStick.ran) { gAgent.clearTempRun(); gStick.ran = false; }
+}
+
+void applyEvents(const std::vector<wolfvr::InputEvent>& events)
+{
     if (events.empty()) return;
     LLWindow* window = gViewerWindow->getWindow();
     using T = wolfvr::InputEvent::Type;
@@ -299,6 +435,20 @@ void pumpInput()
             else gKeyboard->handleTranslatedKeyUp(key, mask);
             break;
         }
+        case T::STICK:
+            gStick.x = e.x;
+            gStick.y = e.y;
+            gStick.heard = LLTimer::getTotalSeconds();
+            break;
+        case T::LIFT:
+            gStick.lift = e.wheel;
+            gStick.heard = LLTimer::getTotalSeconds();
+            break;
+        case T::TURN:
+            // One snap turn of 45 degrees (WolfStorm render_manager.js _updateVRInput, Meta's comfort default);
+            // LLAgent::yaw turns the body about the up vector, + = left.
+            if (!gAgent.isMovementLocked()) gAgent.yaw((F32)e.wheel * 45.f * DEG_TO_RAD);
+            break;
         case T::TEXT:
         {
             const LLWString w = utf8str_to_wstring(e.text);

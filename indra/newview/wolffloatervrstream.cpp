@@ -18,6 +18,7 @@
 #include "wolffloatervrstream.h"
 
 #include "llbutton.h"
+#include "llcombobox.h"
 #include "llnotificationsutil.h"
 #include "llrender2dutils.h"
 #include "lltexteditor.h"
@@ -45,6 +46,8 @@ bool WolfFloaterVRStream::postBuild()
     mAddress = getChild<LLTextEditor>("address");
     mUsbUrl = getChild<LLTextEditor>("usb_url");
     mNumbers = getChild<LLTextEditor>("numbers");
+    // [VR 3D] VR 3D Mode is offered only once it is finished (WolfVR3DMode)
+    if (!gSavedSettings.getBOOL("WolfVR3DMode")) getChild<LLComboBox>("mode")->remove("VR 3D Mode");
     mQrArea = getChild<LLView>("qr_area");
     getChild<LLButton>("close_btn")->setCommitCallback([this](LLUICtrl*, const LLSD&) { closeFloater(); });
     getChild<LLButton>("forget_btn")->setCommitCallback([](LLUICtrl*, const LLSD&) {
@@ -103,7 +106,7 @@ void WolfFloaterVRStream::refresh()
     }
     else if (st.client_connected)
     {
-        status = getString("status_connected");
+        status = getString(gSavedSettings.getString("WolfVRStreamMode") == "world" ? "status_connected_world" : "status_connected");
     }
     else
     {

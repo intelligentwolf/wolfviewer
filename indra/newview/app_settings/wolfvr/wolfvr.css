@@ -108,3 +108,9 @@ body { font: 16px/1.5 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
 .wvr-type-label { display: block; margin: 0 0 6px; color: var(--wvr-muted); }
 .wvr-type { width: 100%; font: inherit; font-size: 20px; padding: 10px 12px; border-radius: 8px;
             border: 1px solid var(--wvr-line); background: #0b0f1c; color: var(--wvr-text); margin: 0 0 8px; }
+
+/* [VR MOVE 2026-11-03] the one big "Enter VR" button: WolfStorm's VR button, large enough to hit from a headset */
+#vr-btn.wvr-enter { width: 100%; height: auto; min-height: 120px; flex-direction: row; gap: 16px; margin: 0 0 16px;
+                         font-size: 30px; }
+#vr-btn.wvr-enter .btn-label { font-size: 30px; letter-spacing: 1px; }
+#vr-btn.wvr-enter .wvr-icon { width: 56px; height: 56px; margin: 0; }

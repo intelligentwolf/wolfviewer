@@ -23,6 +23,14 @@
 
   <section class="wvr-card" aria-labelledby="wvr-status-title">
     <h2 id="wvr-status-title" class="wvr-visually-hidden">Connection</h2>
+    <!-- [VR MOVE 2026-11-03] Paul: "why do I need to keep clicking". One big button, ready as soon as the page loads:
+         the browser needs one tap before it may start VR (WebXR requestSession needs a user gesture). -->
+    <div class="wvr-actions">
+      <button class="toolbar-btn wvr-enter" id="vr-btn" type="button" title="Enter VR Mode">
+        <svg class="wvr-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20.69,4.05C18.66,4.73,15.86,5.5,12,5.5c-3.89,0-6.95-0.84-8.69-1.43C2.67,3.85,2,4.33,2,5.02V19 c0,0.68,0.66,1.17,1.31,0.95C5.36,19.26,8.1,18.5,12,18.5c3.87,0,6.66,0.76,8.69,1.45C21.34,20.16,22,19.68,22,19V5 C22,4.32,21.34,3.84,20.69,4.05z M12,15c-2.34,0-4.52,0.15-6.52,0.41l3.69-4.42l2,2.4L14,10l4.51,5.4C16.52,15.15,14.3,15,12,15z"/></svg>
+        <span class="btn-label">Enter VR</span>
+      </button>
+    </div>
     <p id="wvr-status" class="wvr-status" role="status" aria-live="polite">Connecting to WolfViewer…</p>
     <div id="wvr-error" class="wvr-error" role="alert" aria-live="assertive" hidden></div>
     <!-- [VR PAIRING 2026-11-03] Shown while the PC is asking Allow / Deny (wolfvr.js showWaiting). -->
@@ -30,13 +38,6 @@
       <p class="wvr-waiting-big">Waiting for you to press <strong>Allow</strong> on your PC.</p>
       <p>Your PC is asking "A headset wants to connect". Press <strong>Allow</strong> there (you can lift the headset
          to see the screen). This page carries on by itself, and you only do this once for this headset.</p>
-    </div>
-    <div class="wvr-actions">
-      <button class="toolbar-btn" id="vr-btn" type="button" title="Enter VR Mode" disabled>
-        <svg class="wvr-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20.69,4.05C18.66,4.73,15.86,5.5,12,5.5c-3.89,0-6.95-0.84-8.69-1.43C2.67,3.85,2,4.33,2,5.02V19 c0,0.68,0.66,1.17,1.31,0.95C5.36,19.26,8.1,18.5,12,18.5c3.87,0,6.66,0.76,8.69,1.45C21.34,20.16,22,19.68,22,19V5 C22,4.32,21.34,3.84,20.69,4.05z M12,15c-2.34,0-4.52,0.15-6.52,0.41l3.69-4.42l2,2.4L14,10l4.51,5.4C16.52,15.15,14.3,15,12,15z"/></svg>
-        <span class="btn-label">VR</span>
-      </button>
-      <p class="wvr-hint">Press <strong>VR</strong>, then allow the headset to use VR when it asks.</p>
     </div>
     <p class="wvr-hint">Tip: bookmark this page, so next time you can open it from your bookmarks instead of typing.</p>
   </section>
@@ -55,9 +56,10 @@
       </div>
       <label for="wvr-type" class="wvr-type-label">Type here to type into WolfViewer (in VR: the Y button on the left controller opens the keyboard)</label>
       <input type="text" id="wvr-type" class="wvr-type" autocomplete="off" autocapitalize="off" spellcheck="false">
-      <p class="wvr-hint">In VR: point with the <strong>right controller</strong>. Trigger = click, grip or B = right-click,
-         stick up/down = scroll. <strong>Left controller</strong>: menu button = put the screen back in front of you,
-         stick up/down = screen size, X = numbers.</p>
+      <p class="wvr-hint"><strong>Right controller:</strong> point at the screen; trigger = click, grip or B = right-click,
+         stick up/down = scroll (pointing away from the screen: screen size), stick left/right = turn.
+         <strong>Left controller:</strong> stick = walk (all the way = run), X = jump / fly up, grip = fly down,
+         menu = screen back in front of you (hold for the numbers), Y = keyboard, stick click = VR 3D Mode (when it is offered).</p>
     </div>
   </section>
 

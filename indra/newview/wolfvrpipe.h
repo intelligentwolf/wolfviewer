@@ -44,6 +44,8 @@
 //     {"t":"stats",...}                                     once a second: what the headset measured
 //     {"t":"key"}                                           decoder lost its place: send a key frame
 //     {"t":"in","e":"move"|"down"|"up","u":0..1,"v":0..1,"b":0|2}   big screen: the pointer on the picture
+//     {"t":"mode","m":"screen"|"world"}                    the in-VR switch between Big Screen and 3D
+//     {"t":"in","e":"stick","x":-1..1,"y":-1..1} / {"t":"in","e":"turn","d":1|-1} / {"t":"in","e":"lift","d":1|0|-1}
 //     {"t":"in","e":"wheel","d":clicks} / {"t":"in","e":"kd"|"ku","k":"<DOM key>","m":mods} / {"t":"in","e":"text","s":".."}
 //   viewer -> page, text JSON:
 //     {"t":"config","codec":"h264"|"jpeg","codecString":"avc1.xxxxxx","w":,"h":,"fov":deg,"fps":,"encoder":"...",
@@ -97,9 +99,12 @@ namespace wolfvr
      *  the streamed picture, 0..1 from its top-left corner. */
     struct InputEvent
     {
-        enum class Type { MOVE, DOWN, UP, WHEEL, KEY_DOWN, KEY_UP, TEXT };
+        // STICK: the left thumbstick now (x right +, y back +, -1..1; WolfStorm input_manager.js _vrLocomotionFlags
+        // axes), TURN: one snap turn (wheel = +1 left / -1 right), LIFT: jump/fly up or down held (wheel = +1/0/-1)
+        enum class Type { MOVE, DOWN, UP, WHEEL, KEY_DOWN, KEY_UP, TEXT, STICK, TURN, LIFT };
         Type type = Type::MOVE;
         float u = 0, v = 0;
+        float x = 0, y = 0;        // STICK
         int button = 0;            // 0 left, 2 right (DOM MouseEvent.button numbering)
         int wheel = 0;             // clicks, positive = towards the user (scroll down)
         uint32_t mods = 0;         // 1 shift, 2 control, 4 alt
@@ -139,8 +144,10 @@ namespace wolfvr
         // test pattern. The frame thread then encodes each newest submitted picture as it arrives.
         bool        external_frames = false;
         // [VR BIG SCREEN 2026-11-03] what the page shows: "test" (stage 1 pattern, reprojected), "screen" (the viewer
-        // window on a big curved screen, controllers as the mouse). Sent to the page in "config".
+        // window on a big curved screen, controllers as the mouse), "world" (VR 3D Mode: the world seen from the head
+        // pose, reprojected like the test pattern). Sent to the page in "config".
         std::string mode = "test";
+        bool        world_allowed = true;   // the page may ask for "world" (sent in "config" as "world")
         LogFn       log;
     };
 
@@ -216,6 +223,11 @@ namespace wolfvr
         /** [VR BIG SCREEN] The mouse and keyboard events the allowed headset sent since the last call (at most 256
          *  are kept; older ones are dropped). Any thread. */
         std::vector<InputEvent> takeInput();
+        /** [VR 3D 2026-11-03] Switch what is streamed without dropping the headset: the frame thread opens a new
+         *  encoder at the new size and sends a new "config". Any thread. */
+        void setMode(const std::string& mode, uint32_t width, uint32_t height, bool external_frames);
+        /** [VR 3D] The mode the headset page asked for ("screen" / "world"), once; empty when none. Any thread. */
+        std::string takeModeRequest();
 
     private:
         struct Impl;

@@ -438,20 +438,41 @@ static int serve(int argc, char** argv)
             std::vector<uint8_t> px;
             float pu = 0.5f, pv = 0.5f;
             uint64_t n = 0;
+            bool world = false;
             while (frames_run)
             {
                 for (const InputEvent& e : s.takeInput())
                 {
-                    static const char* kNames[] = {"move", "down", "up", "wheel", "keydown", "keyup", "text"};
+                    static const char* kNames[] = {"move", "down", "up", "wheel", "keydown", "keyup", "text", "stick", "turn", "lift"};
                     if (e.type != InputEvent::Type::MOVE)
                     {
                         std::lock_guard<std::mutex> lk(out_mutex);
-                        std::printf("IN %s u=%.3f v=%.3f b=%d wheel=%d mods=%u key=%s text=%s\n", kNames[(int)e.type], e.u,
-                                    e.v, e.button, e.wheel, e.mods, e.key.c_str(), e.text.c_str());
+                        std::printf("IN %s u=%.3f v=%.3f b=%d wheel=%d mods=%u x=%.2f y=%.2f key=%s text=%s\n", kNames[(int)e.type],
+                                    e.u, e.v, e.button, e.wheel, e.mods, e.x, e.y, e.key.c_str(), e.text.c_str());
                         std::fflush(stdout);
                     }
                     pu = e.u;
                     pv = e.v;
+                }
+                // [VR 3D] the page's in-VR switch: world = the test pattern drawn for the head pose (as WolfViewer's
+                // 3D mode draws the world for it), at 1440x1440; screen = the stand-in desktop again
+                const std::string req = s.takeModeRequest();
+                if (!req.empty() && (req == "world") != world)
+                {
+                    world = req == "world";
+                    s.setMode(req, world ? 1440 : 1280, world ? 1440 : 720, true);
+                    std::lock_guard<std::mutex> lk(out_mutex);
+                    std::printf("MODE %s\n", req.c_str());
+                    std::fflush(stdout);
+                }
+                if (world)
+                {
+                    const HeadPose hp = s.headPose();
+                    const Quat q{hp.q[0], hp.q[1], hp.q[2], hp.q[3]};
+                    drawTestPattern(px, 1440, 1440, 100.f, q, n++, 0);
+                    s.submitFrame(std::move(px), hp, 2.0);
+                    std::this_thread::sleep_for(std::chrono::milliseconds(16));
+                    continue;
                 }
                 const uint32_t W = 1280, H = 720;
                 px.resize((size_t)W * H * 4);

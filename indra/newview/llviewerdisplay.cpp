@@ -968,6 +968,7 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
         }
 
         stop_glerror();
+        WolfVRScreen::applyHeadCamera();   // [VR 3D 2026-11-03/] VR 3D Mode: the camera follows the headset
         display_update_camera();
         stop_glerror();
 
@@ -1745,6 +1746,7 @@ void render_ui(F32 zoom_factor, int subfield)
 
     // apply gamma correction and post effects
     gPipeline.renderFinalize();
+    WolfVRScreen::captureWorld();   // [VR 3D 2026-11-03/] VR 3D Mode: the finished world, before the HUD and the UI
 
     {
         LLGLState::checkStates();

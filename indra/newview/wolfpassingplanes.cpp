@@ -11,6 +11,11 @@
  * Source of the hidden chat: wolfnpc.cpp requestShips (send_chat_from_viewer, CHAT_TYPE_NORMAL, the RLV channel check).
  * Source of the "/74 traffic on|off" command: region-terrain-work/aircraft-dogfight-2026-11-01/c-wolf-air/src/AirTraffic.cs
  * Command() and AirDrones.cs CHANNEL = 74.
+ * [SHIP OPT-IN 2026-11-03] "Passing ships on this region": the record's `boats` (wolf_ambient.php view/set what "boats",
+ * wolf_ambient_lib.php wa_boats_block: off unless chosen, except Lone Wolf's regions). After a save the running wolf-naval
+ * is nudged with "npcships {"op":"boats","req":0}" on channel 73 (wolf-naval 1.13.0 NpcFleetSites.cs Ui / UiBoats; channel
+ * NpcRules.CHANNEL = 73, prefix NpcShipRules.UI_PREFIX, as wolfnpc.cpp SHIPS_CHANNEL / SHIPS_PREFIX): it reads the record
+ * at once and answers in local chat. Paul 2026-11-03 "shorter rows": each switch is its box and one short line.
  *
  * Copyright (C) 2026 IntelligentWolf Ltd.
  */
@@ -50,6 +55,10 @@ namespace
     const char* const API_URL = "https://wolfstorm.app/php/wolf_ambient.php";
     // Source: c-wolf-air/src/AirDrones.cs:29 CHANNEL = 74; AirPlugin.cs OnEvent hands channel 74 chat to AirTraffic.Command.
     const S32 AIR_CHANNEL = 74;
+    // [SHIP OPT-IN 2026-11-03] Source: wolfnpc.cpp:64-65 SHIPS_CHANNEL = 73, SHIPS_PREFIX "npcships " (wolf-naval NpcRules.CHANNEL,
+    // NpcShipRules.UI_PREFIX); the op is NpcFleetSites.cs Ui "boats"
+    const S32 SHIPS_CHANNEL = 73;
+    const char* const SHIPS_NUDGE = "npcships {\"op\":\"boats\",\"req\":0}";
     // Read once per window open / region change (review 2026-11-01: no polling while the window stays open). Several
     // refreshFromRegion calls in one open count as one; a failed read may be tried again after RETRY_SEC.
     const F64 REREAD_DEBOUNCE_SEC = 2.0;
@@ -83,7 +92,7 @@ namespace
     }
 
     /** [NATURE SOUNDS 2026-11-03] Which switch a save is for (wolf_ambient.php set {what}). */
-    enum What { WHAT_PLANES, WHAT_BIRDS, WHAT_SOUNDS };   // not PLANES: wingdi.h #defines PLANES (GetDeviceCaps index 14)
+    enum What { WHAT_PLANES, WHAT_BIRDS, WHAT_SOUNDS, WHAT_SHIPS };   // not PLANES: wingdi.h #defines PLANES (GetDeviceCaps index 14)
 
     void set_status(const std::string& msg, bool error, bool from_read = false)
     {
@@ -121,8 +130,9 @@ namespace
         {
             if (LLView* c = panel->findChildView(name)) place(c, c->getRect().getHeight(), AFTER_CHECK);
         };
-        text("wolf_planes_state", 0);
-        text("wolf_planes_note", AFTER_TEXT);
+        text("wolf_planes_state", AFTER_TEXT);
+        check("wolf_ships_check");                // [SHIP OPT-IN 2026-11-03/]
+        text("wolf_ships_state", AFTER_TEXT);
         check("wolf_birds_check");
         text("wolf_birds_state", AFTER_TEXT);
         check("wolf_sounds_check");
@@ -153,8 +163,8 @@ namespace
         const LLSD& r = sState.mReply;
         const bool chosen = r["ambient"].isBoolean();
         const bool on = r["on"].asBoolean();
-        if (chosen) return str(panel, on ? "planes_on_chosen" : "planes_off_chosen");
-        return str(panel, on ? "planes_on_default" : "planes_off_default");
+        if (chosen) return str(panel, on ? "on_chosen" : "off_chosen");
+        return str(panel, on ? "planes_on_default" : "off_unless");
     }
 
     /** [BIRDS 2026-11-02] The same for "Birds over this region": the reply's `birds` block (wolf_ambient.php view/set),
@@ -169,10 +179,10 @@ namespace
         if (!have_birds()) return std::string();
         const LLSD& b = sState.mReply["birds"];
         const bool on = b["on"].asBoolean();
-        if (b["ambient"].isBoolean()) return str(panel, on ? "birds_on_chosen" : "birds_off_chosen");
+        if (b["ambient"].isBoolean()) return str(panel, on ? "on_chosen" : "off_chosen");
         // [BIRDS 2026-11-02] wolf_ambient_lib.php wa_birds_default: Parks / Marinas on, other categories off, none = sea
         if (!b["default"].asBoolean() && b["seaCoast"].asBoolean()) return str(panel, "birds_sea_default");
-        return str(panel, on ? "birds_on_default" : "birds_off_default");
+        return str(panel, on ? "birds_on_default" : "off_unless");
     }
 
     /** [NATURE SOUNDS 2026-11-03] "Nature sounds on this region": the reply's `sounds` block {ambient, default (false), on}
@@ -187,8 +197,24 @@ namespace
         if (!have_sounds()) return std::string();
         const LLSD& b = sState.mReply["sounds"];
         const bool on = b["on"].asBoolean();
-        if (b["ambient"].isBoolean()) return str(panel, on ? "sounds_on_chosen" : "sounds_off_chosen");
-        return str(panel, "sounds_off_default");   // nobody has chosen: off (there is no other default)
+        if (b["ambient"].isBoolean()) return str(panel, on ? "on_chosen" : "off_chosen");
+        return str(panel, "off_unless");   // nobody has chosen: off (there is no other default)
+    }
+
+    /** [SHIP OPT-IN 2026-11-03] "Passing ships on this region": the reply's `boats` block {ambient, default (Lone Wolf's
+     *  region), on} (wolf_ambient.php view/set, wolf_ambient_lib.php wa_boats_block); absent from an older grid: greyed. */
+    bool have_ships()
+    {
+        return sState.mHave && sState.mReply["boats"].isMap() && sState.mReply["boats"]["on"].isBoolean();
+    }
+
+    std::string ships_line(LLPanel* panel)
+    {
+        if (!have_ships()) return std::string();
+        const LLSD& b = sState.mReply["boats"];
+        const bool on = b["on"].asBoolean();
+        if (b["ambient"].isBoolean()) return str(panel, on ? "on_chosen" : "off_chosen");
+        return str(panel, on ? "ships_on_default" : "off_unless");
     }
 
     void write_controls(LLPanel* panel)
@@ -196,11 +222,21 @@ namespace
         LLCheckBoxCtrl* check = panel->findChild<LLCheckBoxCtrl>("wolf_planes_check");
         LLTextBox* state = panel->findChild<LLTextBox>("wolf_planes_state");
         LLTextBox* status = panel->findChild<LLTextBox>("wolf_planes_status");
-        LLView* note = panel->findChildView("wolf_planes_note");
-        if (!check || !state || !status || !note) return;
+        if (!check || !state || !status) return;
         const bool may = sState.mHave && sState.mReply["mayChange"].asBoolean();
         check->set(sState.mHave && sState.mReply["on"].asBoolean());
         check->setEnabled(may && !sState.mBusy);
+        // [SHIP OPT-IN 2026-11-03] the ships box and its line, from the same reply
+        if (LLCheckBoxCtrl* ships = panel->findChild<LLCheckBoxCtrl>("wolf_ships_check"))
+        {
+            ships->set(have_ships() && sState.mReply["boats"]["on"].asBoolean());
+            ships->setEnabled(may && !sState.mBusy && have_ships());
+        }
+        if (LLTextBox* ships_state = panel->findChild<LLTextBox>("wolf_ships_state"))
+        {
+            ships_state->setEnabled(true);
+            ships_state->setText(ships_line(panel));
+        }
         // [BIRDS 2026-11-02] the birds box and its line, from the same reply
         if (LLCheckBoxCtrl* birds = panel->findChild<LLCheckBoxCtrl>("wolf_birds_check"))
         {
@@ -225,7 +261,6 @@ namespace
         }
         // setCtrlsEnabled greys every child for someone who may not manage the estate; these lines must stay readable.
         state->setEnabled(true);
-        note->setEnabled(true);
         status->setEnabled(true);
         state->setText(state_line(panel));
         // Same colours as the Automatic Environment tab (wolfautoenvironment.cpp:185 setStatus): a failure must be readable.
@@ -276,6 +311,7 @@ namespace
         o["region"] = region.asString();
         if (what == WHAT_BIRDS) o["what"] = "birds";    // [BIRDS 2026-11-02/] wolf_ambient.php set {what: "birds"}
         if (what == WHAT_SOUNDS) o["what"] = "sounds";  // [NATURE SOUNDS 2026-11-03/] wolf_ambient.php set {what: "sounds"}
+        if (what == WHAT_SHIPS) o["what"] = "boats";    // [SHIP OPT-IN 2026-11-03/] wolf_ambient.php set {what: "boats"}
         if (ambient >= 0) o["ambient"] = ambient == 1;
         return boost::json::serialize(o);
     }
@@ -325,6 +361,7 @@ namespace
     {
         const bool birds = (what == WHAT_BIRDS);
         const bool sounds = (what == WHAT_SOUNDS);   // [NATURE SOUNDS 2026-11-03/]
+        const bool ships = (what == WHAT_SHIPS);     // [SHIP OPT-IN 2026-11-03/]
         LLCore::HttpStatus status;
         const LLSD reply = post_and_wait(request_body("set", region, on ? 1 : 0, what), true, status);
         const bool ok = status && reply.isMap() && reply["success"].asBoolean();
@@ -335,7 +372,8 @@ namespace
             // [BIRDS 2026-11-02] Always, not only with the window closed: the status line under the two boxes is 44 high and
             // a long refusal would be cut off there; the alert keeps the whole text, to read and copy.
             LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE",
-                std::string(birds ? "Could not save birds: " : sounds ? "Could not save nature sounds: " : "Could not save passing planes: ")
+                std::string(birds ? "Could not save birds: " : sounds ? "Could not save nature sounds: "
+                            : ships ? "Could not save passing ships: " : "Could not save passing planes: ")
                 + why_failed(status, reply)));
         }
         if (sState.mSerial != serial) return;
@@ -344,7 +382,7 @@ namespace
         {
             if (panel)
             {
-                set_status(str(panel, birds ? "birds_save_failed" : sounds ? "sounds_save_failed" : "planes_save_failed") + " "
+                set_status(str(panel, birds ? "birds_save_failed" : sounds ? "sounds_save_failed" : ships ? "ships_save_failed" : "planes_save_failed") + " "
                            + why_failed(status, reply), true);
                 write_controls(panel);   // the check box goes back to what the grid has
             }
@@ -352,6 +390,27 @@ namespace
         }
         sState.mReply = reply;
         sState.mHave = true;
+        if (ships)
+        {
+            // [SHIP OPT-IN 2026-11-03] Nudge the running wolf-naval on the region the change was for: it reads the record at
+            // once (ships at sea sail away, or come), and says "Passing ships on this region: on|off." in local chat.
+            const bool saved_on = have_ships() && sState.mReply["boats"]["on"].asBoolean();
+            bool told = false;
+            if (WolfGrid::isOnWolfTerritoriesConfirmed() && gAgent.getRegion() && gAgent.getRegion()->getRegionID() == region
+                && !(rlv_handler_t::isEnabled() && !RlvActions::canSendChannel(SHIPS_CHANNEL)))
+            {
+                send_chat_from_viewer(SHIPS_NUDGE, CHAT_TYPE_NORMAL, SHIPS_CHANNEL);
+                told = true;
+            }
+            if (panel)
+            {
+                std::string msg = str(panel, saved_on ? "ships_saved_on" : "ships_saved_off");
+                if (!told) msg += " " + str(panel, "ships_later");
+                set_status(msg, false);
+                write_controls(panel);
+            }
+            return;
+        }
         if (sounds)
         {
             // [NATURE SOUNDS 2026-11-03] No plugin to tell: every viewer here reads it from weather.php within the minute.
@@ -401,10 +460,11 @@ namespace
         LLPanel* panel = handle.get();
         if (!panel) return;
         LLCheckBoxCtrl* check = panel->findChild<LLCheckBoxCtrl>(
-            what == WHAT_BIRDS ? "wolf_birds_check" : what == WHAT_SOUNDS ? "wolf_sounds_check" : "wolf_planes_check");
+            what == WHAT_BIRDS ? "wolf_birds_check" : what == WHAT_SOUNDS ? "wolf_sounds_check"
+            : what == WHAT_SHIPS ? "wolf_ships_check" : "wolf_planes_check");
         if (!check) return;
         if (sState.mBusy || !sState.mHave || !sState.mReply["mayChange"].asBoolean() || (what == WHAT_BIRDS && !have_birds())
-            || (what == WHAT_SOUNDS && !have_sounds()))
+            || (what == WHAT_SOUNDS && !have_sounds()) || (what == WHAT_SHIPS && !have_ships()))
         {
             write_controls(panel);
             return;
@@ -426,6 +486,10 @@ void WolfPassingPlanes::postBuild(LLPanel* panel)
     {
         check->setCommitCallback([handle](LLUICtrl*, const LLSD&) { on_commit(handle, WHAT_PLANES); });
     }
+    if (LLCheckBoxCtrl* ships = panel->findChild<LLCheckBoxCtrl>("wolf_ships_check"))   // [SHIP OPT-IN 2026-11-03/]
+    {
+        ships->setCommitCallback([handle](LLUICtrl*, const LLSD&) { on_commit(handle, WHAT_SHIPS); });
+    }
     if (LLCheckBoxCtrl* birds = panel->findChild<LLCheckBoxCtrl>("wolf_birds_check"))   // [BIRDS 2026-11-02/]
     {
         birds->setCommitCallback([handle](LLUICtrl*, const LLSD&) { on_commit(handle, WHAT_BIRDS); });
@@ -441,7 +505,8 @@ void WolfPassingPlanes::sync(LLPanel* panel, LLViewerRegion* region, bool reread
     if (!panel) return;
     // Wolf Territories' own: gone (not greyed) elsewhere, as the Region tab's Adult Content link (processRegionInfo).
     const bool wolf = WolfGrid::isOnWolfTerritories() && region;
-    for (const char* name : { "wolf_planes_check", "wolf_planes_state", "wolf_planes_note", "wolf_planes_status",
+    for (const char* name : { "wolf_planes_check", "wolf_planes_state", "wolf_planes_status",
+                              "wolf_ships_check", "wolf_ships_state",   // [SHIP OPT-IN 2026-11-03/]
                               "wolf_birds_check", "wolf_birds_state",
                               "wolf_sounds_check", "wolf_sounds_state" })   // [NATURE SOUNDS 2026-11-03/]
     {

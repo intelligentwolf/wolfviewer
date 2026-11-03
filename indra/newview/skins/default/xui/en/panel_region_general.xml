@@ -399,7 +399,11 @@
          buttons (Send Message To Region ends at y 453; the right column's Region type note at 432), and
          wolfpassingplanes.cpp layout() stacks them top-down each time their text changes: every text box takes the height
          its wrapped text needs, at any font size, and the window grows if the stack would run past its bottom. The tops
-         and heights here are only the starting points. -->
+         and heights here are only the starting points.
+         [SHIP OPT-IN 2026-11-03] "Passing ships on this region" (wolf-naval 1.13.0; Paul: "turn every region off except
+         regions owned by lone wolf to start with till they turn them on"), second of four. Paul 2026-11-03 "shorter rows,
+         you don't need a big explanation": each switch is its box and one short line; the detail is in its tooltip; the
+         planes' note paragraph is gone. One status line under the four keeps every save's confirmation visible. -->
     <check_box
      follows="left|top"
      height="20"
@@ -407,7 +411,7 @@
      layout="topleft"
      left="10"
      name="wolf_planes_check"
-     tool_tip="Vintage tour planes that fly across this region now and then. People's own aircraft and dogfights are not affected. Saved at once. Only the estate owner or an estate manager can change it."
+     tool_tip="Vintage tour planes that fly across this region now and then. People's own aircraft and dogfights are not affected. Off by default except under Airports. Saved at once. Only the estate owner or an estate manager can change it."
      top="462"
      visible="false"
      width="460" />
@@ -422,19 +426,28 @@
      visible="false"
      width="442"
      wrap="true" />
+    <check_box
+     follows="left|top"
+     height="20"
+     label="Passing ships on this region"
+     layout="topleft"
+     left="10"
+     name="wolf_ships_check"
+     tool_tip="Peaceful sailing ships (traders, fishing boats, packet boats) that sail this region's open water and pass on to neighbours that also have them on. They never fire and cannot be fired on. Ship battles that people join themselves are not affected. Off unless switched on here. Saved at once. Only the estate owner or an estate manager can change it."
+     top="500"
+     visible="false"
+     width="460" />
     <text
      follows="left|top"
      font="SansSerifSmall"
      height="16"
      layout="topleft"
      left="28"
-     name="wolf_planes_note"
-     top="498"
+     name="wolf_ships_state"
+     top="520"
      visible="false"
      width="442"
-     wrap="true">
-        People's own aircraft and dogfights are not affected.
-    </text>
+     wrap="true" />
     <check_box
      follows="left|top"
      height="20"
@@ -443,7 +456,7 @@
      left="10"
      name="wolf_birds_check"
      tool_tip="Gulls and terns over the sea, small flocks over open land and starlings at dusk in winter. They keep clear of builds, stay low over land and sea, roost at night, and never fly in a space sky. With no category, they come over the sea and coast only: untick and tick again to have them over the land as well. Saved at once. Only the estate owner or an estate manager can change it."
-     top="520"
+     top="538"
      visible="false"
      width="460" />
     <text
@@ -453,7 +466,7 @@
      layout="topleft"
      left="28"
      name="wolf_birds_state"
-     top="540"
+     top="558"
      visible="false"
      width="442"
      wrap="true" />
@@ -465,7 +478,7 @@
      left="10"
      name="wolf_sounds_check"
      tool_tip="Crickets on warm nights (only where and when the place and the time of year would have them), soft lapping by lakes and ponds, and waves at the shore that follow the real waves. Each visitor hears them in their own viewer, at their Ambient volume, and can switch them off for themselves. Saved at once. Only the estate owner or an estate manager can change it."
-     top="562"
+     top="576"
      visible="false"
      width="460" />
     <text
@@ -475,7 +488,7 @@
      layout="topleft"
      left="28"
      name="wolf_sounds_state"
-     top="582"
+     top="596"
      visible="false"
      width="442"
      wrap="true" />
@@ -486,33 +499,34 @@
      layout="topleft"
      left="28"
      name="wolf_planes_status"
-     top="604"
+     top="614"
      visible="false"
      width="442"
      wrap="true" />
-    <string name="planes_reading">Reading passing planes for this region...</string>
-    <string name="planes_on_default">On: the default for regions listed under Airports. Untick to stop them.</string>
-    <string name="planes_off_default">Off: the default for regions not listed under Airports. Tick to allow them.</string>
-    <string name="planes_on_chosen">On: chosen by the estate owner or a manager.</string>
-    <string name="planes_off_chosen">Off: chosen by the estate owner or a manager.</string>
-    <string name="planes_not_yours">Only the estate owner or an estate manager can change this.</string>
+    <!-- [SHIP OPT-IN 2026-11-03] one short line per switch (Paul: "shorter rows"); the same texts as WolfStorm's
+         region_passing_planes.js TEXT -->
+    <string name="planes_reading">Reading this region's switches...</string>
+    <string name="off_unless">Off unless you switch it on.</string>
+    <string name="on_chosen">On: chosen for this region.</string>
+    <string name="off_chosen">Off: chosen for this region.</string>
+    <string name="planes_on_default">On: the default under Airports.</string>
+    <string name="planes_not_yours">Only the estate owner or an estate manager can change these.</string>
     <string name="planes_saving">Saving...</string>
     <string name="planes_saved_on">Saved: passing planes may now fly over this region.</string>
     <string name="planes_saved_off">Saved: no more passing planes over this region.</string>
     <string name="planes_later">Your RLV restrictions stop the viewer telling the region now, so it takes the change within 30 minutes.</string>
-    <string name="planes_read_failed">Could not read passing planes:</string>
+    <string name="planes_read_failed">Could not read this region's switches:</string>
     <string name="planes_save_failed">Could not save passing planes:</string>
-    <string name="birds_on_default">On: the default under Parks or Marinas. Untick to keep birds away.</string>
-    <string name="birds_off_default">Off: the default for this region's categories. Tick to have birds.</string>
-    <string name="birds_sea_default">Sea and coast only (no category). Untick: none. Re-tick: land too.</string>
-    <string name="birds_on_chosen">On: chosen by the estate owner or a manager.</string>
-    <string name="birds_off_chosen">Off: chosen by the estate owner or a manager.</string>
+    <string name="ships_on_default">On: the default for this region.</string>
+    <string name="ships_saved_on">Saved: passing ships may now sail here.</string>
+    <string name="ships_saved_off">Saved: no more passing ships here. Any at sea now sail away.</string>
+    <string name="ships_later">The region takes it at its next start (the viewer could not tell it now).</string>
+    <string name="ships_save_failed">Could not save passing ships:</string>
+    <string name="birds_on_default">On: the default under Parks or Marinas.</string>
+    <string name="birds_sea_default">Sea and coast only (the default).</string>
     <string name="birds_saved_on">Saved: birds may now fly over this region.</string>
     <string name="birds_saved_off">Saved: no more birds over this region.</string>
     <string name="birds_save_failed">Could not save birds:</string>
-    <string name="sounds_off_default">Off: nature sounds play only where the estate owner or a manager turns them on.</string>
-    <string name="sounds_on_chosen">On: chosen by the estate owner or a manager. Visitors hear them at their own Ambient volume.</string>
-    <string name="sounds_off_chosen">Off: chosen by the estate owner or a manager.</string>
     <string name="sounds_saved_on">Saved: nature sounds will now play on this region.</string>
     <string name="sounds_saved_off">Saved: no more nature sounds on this region.</string>
     <string name="sounds_save_failed">Could not save nature sounds:</string>

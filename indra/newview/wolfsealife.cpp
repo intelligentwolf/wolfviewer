@@ -101,6 +101,10 @@ namespace
     struct Blow { F32 mHeight, mWidth; S32 mN; F32 mLife; };
     const Blow BLOW[WolfSeaLife::KIND_COUNT] = { { 0.f, 0.f, 0, 0.f }, { 3.0f, 1.5f, 24, 3.0f }, { 1.5f, 0.6f, 14, 2.2f } };
     constexpr S32 MAX_SPRAY = 400;
+    // [VIEWER] each of WolfStorm's soft spray points is drawn here as DROPS_PER_POINT small opaque blobs round it (an
+    // opaque pass has no soft edge; seen in world 11-03, one blob per point read as a few white crystals, not a plume)
+    constexpr S32 DROPS_PER_POINT = 3;
+    constexpr S32 MAX_DROPS = MAX_SPRAY * DROPS_PER_POINT;
     // [VIEWER] The draw distance also bounds where a group is placed (wolfbirds.cpp flock_reach_m, ticket 463): WolfStorm
     // has no such setting; at the Mid graphics level (128 m) a group 250 m out could never be seen.
     constexpr F32 VIEW_MARGIN_M = 30.f, MIN_REACH_M = 30.f;
@@ -333,6 +337,18 @@ void WolfSeaLife::direct(const LLVector3& cam)
                                  << (mCostFrames ? mCostMeshUs / mCostFrames : 0.0) << " us mesh a frame" << LL_ENDL;
         mCostIdleUs = mCostMeshUs = 0.0;
         mCostFrames = 0;
+    }
+    // where each group's leader is (debug only: the in-world test aims its camera from these lines)
+    for (S32 gi = 0; gi < (S32)mGroups.size(); ++gi)
+    {
+        for (const Animal& a : mAnimals)
+        {
+            if (a.mGroup != gi) continue;
+            LL_DEBUGS("WolfSeaLife") << "leader of group " << mGroups[(size_t)gi].mId << " (kind " << (S32)a.mKind << ") at "
+                                     << a.mPos << " state " << (S32)a.mState << (mGroups[(size_t)gi].mLeaving ? " leaving" : "")
+                                     << LL_ENDL;
+            break;
+        }
     }
     if ((S32)mGroups.size() >= MAX_GROUPS) return;
     // [VIEWER] the cap is lowered by the frame budget, as the birds' (WolfFrameGovernor)
@@ -750,7 +766,7 @@ void WolfSeaLife::blow(const Animal& a, F64 now)
     const LLVector3 hole(a.mPos.mV[VX] + fx * 0.3f * a.mLen, a.mPos.mV[VY] + fy * 0.3f * a.mLen,
                          llmax(water(), a.mPos.mV[VZ] + SPECIES[a.mKind].mRadius[3] * a.mLen));
     const F32 H = b.mHeight * k, W = b.mWidth * k, rise = 0.6f;
-    for (S32 i = 0; i < b.mN && (S32)mDrops.size() < MAX_SPRAY; ++i)
+    for (S32 i = 0; i < b.mN * DROPS_PER_POINT && (S32)mDrops.size() < MAX_DROPS; ++i)
     {
         const F32 h_frac = rnd(0.45f, 1.0f), ang = ll_frand(F_TWO_PI), spread = W * 0.5f * rnd(0.2f, 1.f) * h_frac;
         Drop d;
@@ -758,7 +774,7 @@ void WolfSeaLife::blow(const Animal& a, F64 now)
         d.mVel = LLVector3(cosf(ang) * spread / rise, sinf(ang) * spread / rise, 2.f * H * h_frac / rise);
         d.mDec = 2.f * H * h_frac / (rise * rise);
         d.mLife = b.mLife * rnd(0.75f, 1.15f);
-        d.mSize = rnd(0.35f, 0.7f) * llmax(0.6f, W);
+        d.mSize = rnd(0.35f, 0.7f) * llmax(0.6f, W) * 0.6f;   // three smaller blobs for each of WolfStorm's points
         d.mRise = rise;
         mDrops.push_back(d);
     }
@@ -961,7 +977,7 @@ namespace
     constexpr S32 TRIS_PER_ANIMAL = SIDES + (N_STATIONS - 2) * SIDES * 2 + SIDES + 2 + 8 + 8;
     constexpr S32 VERTS_PER_ANIMAL = TRIS_PER_ANIMAL * 3;
     constexpr S32 VERTS_PER_DROP = 8 * 3;
-    constexpr S32 MAX_VERTS = HARD_MAX * VERTS_PER_ANIMAL + MAX_SPRAY * VERTS_PER_DROP;   // drawn unindexed (drawArrays)
+    constexpr S32 MAX_VERTS = HARD_MAX * VERTS_PER_ANIMAL + MAX_DROPS * VERTS_PER_DROP;   // drawn unindexed (drawArrays)
 
     struct Writer
     {
@@ -1011,7 +1027,7 @@ bool WolfSeaLife::ensureBuffer()
                                                       | LLVertexBuffer::MAP_TEXCOORD0 | LLVertexBuffer::MAP_COLOR
                                                       | LLVertexBuffer::MAP_TEXTURE_INDEX);
     // no indices: every triangle has its own three vertices and the buffer is drawn with drawArrays, so it is not held to
-    // the U16 index limit (120 animals and the spray are about 73 000 vertices)
+    // the U16 index limit (120 animals and the spray are about 93 000 vertices)
     if (!vb->allocateBuffer(MAX_VERTS, 0))
     {
         LL_WARNS("WolfSeaLife") << "could not allocate the sea life's vertex buffer" << LL_ENDL;
@@ -1040,7 +1056,7 @@ void WolfSeaLife::buildMesh(S32& verts)
         vis.push_back((S32)i);
     }
     S32 drops = 0;
-    for (const Drop& d : mDrops) if (drops < MAX_SPRAY && camera->sphereInFrustum(d.mPos, d.mSize)) ++drops;
+    for (const Drop& d : mDrops) if (drops < MAX_DROPS && camera->sphereInFrustum(d.mPos, d.mSize)) ++drops;
     if (vis.empty() && drops == 0) return;
     const S32 count = (S32)vis.size() * VERTS_PER_ANIMAL + drops * VERTS_PER_DROP;
     Writer wr;

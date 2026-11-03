@@ -123,11 +123,14 @@ namespace
     {
         if (gCap.world)
         {
-            // 3D mode: the camera's vertical field of view is the picture's, so the centre square of the window
-            // (side = the window's height, or its width if narrower) is exactly the square 100-degree view.
-            const S32 side = llmin(ww, wh);
-            gSrc[0] = (ww - side) / 2;
-            gSrc[1] = (wh - side) / 2;
+            // 3D mode: the camera's vertical field of view spans the WORLD view (the window less the menu bar and
+            // anything docked: LLViewerWindow::getWorldViewRectRaw, what the 3D projection is set up for), so its
+            // centre square is exactly the square 100-degree view. Seen 2026-11-03: the whole-window square had the
+            // black menu-bar strip along its top.
+            const LLRect wr = gViewerWindow->getWorldViewRectRaw();
+            const S32 side = llmax(1, llmin(wr.getWidth(), wr.getHeight()));
+            gSrc[0] = wr.mLeft + (wr.getWidth() - side) / 2;
+            gSrc[1] = wr.mBottom + (wr.getHeight() - side) / 2;
             gSrc[2] = gSrc[0] + side;
             gSrc[3] = gSrc[1] + side;
             gCap.win_w = ww;
@@ -223,7 +226,7 @@ void captureInto(bool world)
     const S32 ww = gViewerWindow->getWindowWidthRaw(), wh = gViewerWindow->getWindowHeightRaw();
     if (ww <= 0 || wh <= 0) return;
     const bool refit = ww != gCap.win_w || wh != gCap.win_h;
-    if (refit) fitWindow(ww, wh);
+    if (refit || world) fitWindow(ww, wh);   // 3D: the world view can change without the window changing (docking)
 
     // Keep the viewer's GL state as we found it.
     GLint read_fb = 0, draw_fb = 0, pack = 0;

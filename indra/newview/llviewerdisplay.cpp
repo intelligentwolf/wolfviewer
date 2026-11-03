@@ -1747,6 +1747,15 @@ void render_ui(F32 zoom_factor, int subfield)
     // apply gamma correction and post effects
     gPipeline.renderFinalize();
     WolfVRScreen::captureWorld();   // [VR 3D 2026-11-03/] VR 3D Mode: the finished world, before the HUD and the UI
+    if (WolfVRScreen::uiSkipped())   // [VR STEREO 2026-11-04/] the left eye's pass: the world only, no HUD or UI
+    {
+        if (!gSnapshot)
+        {
+            set_current_modelview(saved_view);
+            gGL.popMatrix();
+        }
+        return;
+    }
 
     {
         LLGLState::checkStates();

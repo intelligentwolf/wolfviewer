@@ -199,7 +199,7 @@ namespace
     }
 
     constexpr uint32_t kMagic = 0x31525657;   // "WVR1" little-endian
-    constexpr size_t kHeaderSize = 72;        // keep in step with wolfvr.js parseHeader()
+    constexpr size_t kHeaderSize = 96;        // keep in step with wolfvr.js parseHeader() ([VR STEREO] was 72)
 
     template <typename T> void put(std::string& b, size_t off, T v) { std::memcpy(&b[off], &v, sizeof(T)); }
 
@@ -225,6 +225,10 @@ namespace
         double client_ms = -1;   // page clock when stamped
         Quat q;
         bool valid = false;
+        bool has_eyes = false;   // [VR STEREO 2026-11-04] see HeadPose
+        float eye[6] = {-0.032f, 0, 0, 0.032f, 0, 0};
+        float fov_deg = 0;
+        bool stereo = false;
     };
 
     std::string contentType(const std::string& path)
@@ -400,6 +404,7 @@ struct Service::Impl
     std::string pending_mode;
     uint32_t pending_w = 0, pending_h = 0;
     bool pending_external = false;
+    uint32_t pending_kbps = 0;
     std::string mode_request;   // from the page
 
     // clock sync from the page: server_ms - client_ms
@@ -751,6 +756,29 @@ void Service::Impl::onText(const std::shared_ptr<Client>& c, const std::string& 
         p.client_ms = num("ct");
         p.q = Quat{(float)(q[0] / n), (float)(q[1] / n), (float)(q[2] / n), (float)(q[3] / n)};
         p.valid = true;
+        // [VR STEREO 2026-11-04] the eyes, checked at the edge: six finite numbers, each eye within 10 cm of the head
+        // centre (a human IPD is 5-8 cm), and a field of view the camera can draw.
+        auto ie = o.find("e");
+        if (ie != o.end() && ie->value().is_array() && ie->value().as_array().size() == 6)
+        {
+            const json::array& e = ie->value().as_array();
+            bool ok = true;
+            float ev[6];
+            for (int k = 0; k < 6; ++k)
+            {
+                const json::value& x = e[k];
+                const double d = x.is_double() ? x.as_double() : x.is_int64() ? (double)x.as_int64() : NAN;
+                ok = ok && std::isfinite(d) && std::fabs(d) <= 0.1;
+                ev[k] = ok ? (float)d : 0.f;
+            }
+            if (ok)
+            {
+                std::memcpy(p.eye, ev, sizeof ev);
+                p.has_eyes = true;
+            }
+        }
+        const double f = num("f", 0);
+        if (f >= 60 && f <= 130) p.fov_deg = (float)f;
         {
             std::lock_guard<std::mutex> lk(pose_mutex);
             pose = p;
@@ -967,6 +995,7 @@ void Service::Impl::frameLoop()
                 cfg.width = pending_w;
                 cfg.height = pending_h;
                 cfg.external_frames = pending_external;
+                if (pending_kbps) cfg.bitrate_kbps = pending_kbps;
                 cur_w = cfg.width;
                 cur_h = cfg.height;
                 cur_external = cfg.external_frames;
@@ -1032,6 +1061,10 @@ void Service::Impl::frameLoop()
             p.client_ms = ext_pose.valid ? ext_pose.client_ms : -1;
             p.q = Quat{ext_pose.q[0], ext_pose.q[1], ext_pose.q[2], ext_pose.q[3]};
             p.valid = ext_pose.valid;
+            p.has_eyes = ext_pose.has_eyes;
+            std::memcpy(p.eye, ext_pose.eye, sizeof p.eye);
+            p.fov_deg = ext_pose.fov_deg;
+            p.stereo = ext_pose.stereo;
             t1 = nowMs();
             t0 = t1 - ext_capture_ms;
             lk.unlock();
@@ -1111,12 +1144,14 @@ void Service::Impl::frameLoop()
         put<float>(msg, 40, p.q.y);
         put<float>(msg, 44, p.q.z);
         put<float>(msg, 48, p.q.w);
-        put<float>(msg, 52, cfg.fov_deg);
+        put<float>(msg, 52, p.fov_deg > 0 ? p.fov_deg : cfg.fov_deg);   // [VR STEREO] the fov it was drawn with
         put<float>(msg, 56, (float)(t1 - t0));
         put<float>(msg, 60, (float)(t2 - t1));
         msg[64] = ef.key ? 1 : 0;
         msg[65] = enc->codec() == "h264" ? 0 : 1;
+        msg[66] = p.stereo ? 1 : 0;   // [VR STEREO 2026-11-04] two eyes side by side
         put<uint32_t>(msg, 68, (uint32_t)ef.data.size());
+        for (int k = 0; k < 6; ++k) put<float>(msg, 72 + 4 * k, p.eye[k]);
         std::memcpy(&msg[kHeaderSize], ef.data.data(), ef.data.size());
         const size_t bytes = ef.data.size();
         sendToClient(c, std::move(msg), true);
@@ -1327,7 +1362,8 @@ Stats Service::stats() const
 uint32_t Service::frameWidth() const { return mImpl ? mImpl->cur_w.load() : 0; }
 uint32_t Service::frameHeight() const { return mImpl ? mImpl->cur_h.load() : 0; }
 
-void Service::setMode(const std::string& mode, uint32_t width, uint32_t height, bool external_frames)
+void Service::setMode(const std::string& mode, uint32_t width, uint32_t height, bool external_frames,
+                      uint32_t bitrate_kbps)
 {
     if (!mImpl || width < 64 || height < 64 || width > 4096 || height > 4096) return;
     std::lock_guard<std::mutex> lk(mImpl->mode_mutex);
@@ -1336,6 +1372,7 @@ void Service::setMode(const std::string& mode, uint32_t width, uint32_t height, 
     mImpl->pending_w = width;
     mImpl->pending_h = height;
     mImpl->pending_external = external_frames;
+    mImpl->pending_kbps = bitrate_kbps;
     // Pictures of the new size are accepted at once; the frame thread switches before it takes the next one.
     mImpl->cur_w = width;
     mImpl->cur_h = height;
@@ -1378,6 +1415,9 @@ HeadPose Service::headPose() const
     h.seq = p.seq;
     h.client_ms = p.client_ms;
     h.q[0] = p.q.x; h.q[1] = p.q.y; h.q[2] = p.q.z; h.q[3] = p.q.w;
+    h.has_eyes = p.has_eyes;
+    std::memcpy(h.eye, p.eye, sizeof h.eye);
+    h.fov_deg = p.fov_deg;
     return h;
 }
 

@@ -39,6 +39,9 @@
 //     {"t":"hello","webcodecs":bool,"ua":"..."}            once after connecting
 //     {"t":"ping","ct":ms}                                  clock sync; answered with {"t":"pong","ct":ms,"st":ms}
 //     {"t":"pose","s":seq,"ct":ms,"p":[x,y,z],"q":[x,y,z,w],"c":[...]}   every XR frame (display rate)
+//       [VR STEREO 2026-11-04] + "e":[lx,ly,lz,rx,ry,rz] each eye's position in HEAD space (metres, WebXR axes: the
+//       XRView transforms relative to the viewer pose), + "f":deg the square field of view that covers both eyes'
+//       frusta (from each XRView.projectionMatrix). Missing = mono, 100 degrees.
 //     {"t":"stats",...}                                     once a second: what the headset measured
 //     {"t":"key"}                                           decoder lost its place: send a key frame
 //     {"t":"in","e":"move"|"down"|"up","u":0..1,"v":0..1,"b":0|2}   big screen: the pointer on the picture
@@ -49,8 +52,9 @@
 //     {"t":"config","codec":"h264"|"jpeg","codecString":"avc1.xxxxxx","w":,"h":,"fov":deg,"fps":,"encoder":"...",
 //      "mode":"test"|"screen"}
 //     {"t":"pong",...}, {"t":"stats",...} (the viewer's own numbers, for the in-headset readout)
-//   viewer -> page, binary: a 72-byte FrameHeader (see wolfvrpipe.cpp kHeaderSize) followed by one H.264 access
-//     unit (Annex B) or one JPEG.
+//   viewer -> page, binary: a FrameHeader (its size at byte 4; 96 bytes, see wolfvrpipe.cpp kHeaderSize) followed by
+//     one H.264 access unit (Annex B) or one JPEG. [VR STEREO] byte 66 = 1: the picture is two eyes side by side
+//     (left half = left eye), drawn from the eye positions at bytes 72..95 (6 floats, head space, as "e").
 
 #include <cstdint>
 #include <functional>
@@ -91,6 +95,12 @@ namespace wolfvr
         uint32_t seq = 0;          // the page's pose number
         double client_ms = -1;     // the page's clock when it was taken
         float q[4] = {0, 0, 0, 1}; // x, y, z, w
+        // [VR STEREO 2026-11-04] each eye's position in head space (left xyz, right xyz; WebXR axes, metres) and the
+        // square field of view that covers both eyes, as the page measured them. has_eyes false = mono page.
+        bool has_eyes = false;
+        float eye[6] = {-0.032f, 0, 0, 0.032f, 0, 0};
+        float fov_deg = 0;         // 0 = not sent (use Config::fov_deg)
+        bool stereo = false;       // set by the viewer on a submitted picture: it is two eyes side by side
     };
 
     /** [VR BIG SCREEN 2026-11-03] Mouse and keyboard from the headset page, for the viewer window. Positions are in
@@ -203,7 +213,8 @@ namespace wolfvr
         std::vector<InputEvent> takeInput();
         /** [VR 3D 2026-11-03] Switch what is streamed without dropping the headset: the frame thread opens a new
          *  encoder at the new size and sends a new "config". Any thread. */
-        void setMode(const std::string& mode, uint32_t width, uint32_t height, bool external_frames);
+        void setMode(const std::string& mode, uint32_t width, uint32_t height, bool external_frames,
+                     uint32_t bitrate_kbps = 0);   // 0 = keep the bitrate
         /** [VR 3D] The mode the headset page asked for ("screen" / "world"), once; empty when none. Any thread. */
         std::string takeModeRequest();
 

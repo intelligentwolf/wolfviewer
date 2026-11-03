@@ -18,12 +18,15 @@
 #include "wolfvrscreen.h"
 
 #include "llagent.h"
+#include "llappviewer.h"
 #include "llgl.h"
 #include "llglheaders.h"
 #include "llkeyboard.h"
 #include "llstring.h"
 #include "lltimer.h"
+#include "llstartup.h"
 #include "llviewercamera.h"
+#include "llviewerdisplay.h"
 #include "llvoavatarself.h"
 #include "llviewerwindow.h"
 #include "llwindow.h"
@@ -35,6 +38,8 @@
 
 extern bool gSnapshot;       // llviewerdisplay.cpp:190
 extern bool gCubeSnapshot;   // llviewerdisplay.cpp:191
+extern bool gDisplaySwapBuffers;   // llviewerdisplay.cpp:138 - swap() shows the frame only when true
+extern bool gDepthDirty;           // llviewerdisplay.cpp:186
 
 namespace
 {
@@ -55,6 +60,7 @@ namespace
         S32 win_w = 0, win_h = 0;
         F64 last = 0;
         bool world = false;        // the GL objects are set up for 3D mode (square window crop) or big screen
+        bool eye0 = false;         // [VR STEREO] this frame's left eye is in the left half; the right eye reads it back
     };
     Capture gCap;
 
@@ -71,6 +77,15 @@ namespace
     wolfvr::HeadPose gFramePose;
     bool gCameraOverridden = false;
     F32 gSavedView = 0.f;
+
+    // [VR STEREO 2026-11-04] Which eye display() is drawing: -1 one view (mono / big screen), 0 left, 1 right. Both
+    // eyes are drawn from ONE head pose (taken for the left eye), each from its own position: the head centre the
+    // agent camera placed (gEyeBase) plus that eye's offset from the headset, turned with the head.
+    S32 gEye = -1;
+    LLVector3 gEyeBase;
+    // frame-time numbers for the log (and Paul's report): display() time per frame, mono vs stereo
+    struct FrameTimes { F64 sum = 0, eye0 = 0; U32 n = 0; F64 since = 0; bool stereo = false; };
+    FrameTimes gTimes;
 
     void freeGl()
     {
@@ -138,6 +153,12 @@ namespace
             gCap.x0 = gCap.y0 = 0;
             gCap.x1 = (S32)gCap.w;
             gCap.y1 = (S32)gCap.h;
+            if (gEye >= 0)
+            {
+                // [VR STEREO] the eye's own square half of the side-by-side picture (left half = left eye)
+                gCap.x0 = gEye * (S32)gCap.h;
+                gCap.x1 = gCap.x0 + (S32)gCap.h;
+            }
             return;
         }
         gSrc[0] = gSrc[1] = 0;
@@ -214,14 +235,22 @@ void captureInto(bool world)
     U32 w = 0, h = 0;
     WolfVRStream::frameSize(w, h);
     if (!w || !h) return;
+    // [VR STEREO] The right eye only finishes a picture whose left half was drawn this frame.
+    const bool stereo = world && gEye >= 0;
+    if (stereo && w != 2 * h) return;   // the stream is switching size: wait for the new picture size
+    if (stereo && gEye == 1 && !gCap.eye0) return;
     // At most 75 pictures a second (the stream is 60): a viewer running faster does not need to copy every frame.
     const F64 now = LLTimer::getTotalSeconds();
-    if (now - gCap.last < 1.0 / 75.0) return;
-    gCap.last = now;
+    if (!(stereo && gEye == 1))
+    {
+        if (now - gCap.last < 1.0 / 75.0) return;
+        gCap.last = now;
+    }
     if (w != gCap.w || h != gCap.h || world != gCap.world)
     {
         if (!makeGl(w, h)) return;
         gCap.world = world;
+        gCap.last = now;
     }
     const S32 ww = gViewerWindow->getWindowWidthRaw(), wh = gViewerWindow->getWindowHeightRaw();
     if (ww <= 0 || wh <= 0) return;
@@ -251,6 +280,19 @@ void captureInto(bool world)
         glClearColor(cc[0], cc[1], cc[2], cc[3]);
     }
     glBlitFramebuffer(gSrc[0], gSrc[1], gSrc[2], gSrc[3], gCap.x0, gCap.y1, gCap.x1, gCap.y0, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+
+    if (stereo && gEye == 0)
+    {
+        // [VR STEREO] left half done; the right eye's pass reads the whole picture back
+        gCap.eye0 = true;
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, (GLuint)read_fb);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, (GLuint)draw_fb);
+        if (read_fb == 0) glReadBuffer(GL_BACK);
+        if (srgb) glEnable(GL_FRAMEBUFFER_SRGB);
+        if (scissor) glEnable(GL_SCISSOR_TEST);
+        return;
+    }
+    gCap.eye0 = false;
 
     // 2. picture texture -> pixel buffer, without waiting
     const int slot = gCap.next;
@@ -301,6 +343,60 @@ void captureInto(bool world)
 
 void applyEvents(const std::vector<wolfvr::InputEvent>& events);
 
+bool uiSkipped() { return gEye == 0; }
+
+// [VR STEREO 2026-11-04] The frame, mono or one pass per eye. The left eye is a whole display() whose picture goes only
+// to the headset (swap() does not show it: gDisplaySwapBuffers false, the way a tiled snapshot renders, and render_ui
+// stops after the world, uiSkipped); the right eye is the ordinary frame that is shown on the desktop. Each eye is a
+// full render - culling, shadows, sky, water, glow - from its own position, so all of it is right for that eye.
+void displayFrame()
+{
+    U32 w = 0, h = 0;
+    WolfVRStream::frameSize(w, h);
+    const bool stereo = w && w == 2 * h && LLStartUp::getStartupState() == STATE_STARTED && !gDisconnected &&
+                        WolfVRStream::worldWanted() && WolfVRStream::headPose().valid;
+    const F64 t0 = LLTimer::getTotalSeconds();
+    F64 t1 = t0;
+    if (!stereo)
+    {
+        display();
+    }
+    else
+    {
+        // the head centre the agent camera placed this frame (LLAgentCamera::updateCamera, idle), taken here so an
+        // early return in the left eye's display() can never leave a stale one for the right eye
+        gEyeBase = LLViewerCamera::getInstance()->getOrigin();
+        gEye = 0;
+        gDisplaySwapBuffers = false;
+        display();
+        t1 = LLTimer::getTotalSeconds();
+        gEye = 1;
+        gDisplaySwapBuffers = true;   // set again: an early return in the left eye's display() skips swap()
+        gDepthDirty = true;           // the depth buffer is the other eye's; do not trust it for occlusion
+        display();
+        gEye = -1;
+        LLViewerCamera::getInstance()->setOrigin(gEyeBase);   // the head centre again for the rest of the frame
+    }
+    // Numbers every 10 s while the headset is in 3D Mode: the cost of the frame, for comparing mono and stereo.
+    const F64 t2 = LLTimer::getTotalSeconds();
+    if (!WolfVRStream::worldWanted()) { gTimes = FrameTimes(); return; }
+    if (gTimes.n && gTimes.stereo != stereo) gTimes = FrameTimes();
+    if (!gTimes.n) gTimes.since = t0;
+    gTimes.stereo = stereo;
+    gTimes.sum += t2 - t0;
+    gTimes.eye0 += t1 - t0;
+    gTimes.n++;
+    if (t2 - gTimes.since >= 10.0)
+    {
+        const F64 span = t2 - gTimes.since;
+        LL_INFOS("WolfVR") << "VR 3D " << (stereo ? "stereo" : "mono") << ": " << gTimes.n / span << " frames/s, display "
+                           << gTimes.sum / gTimes.n * 1000.0 << " ms/frame"
+                           << (stereo ? " (left eye " + llformat("%.2f", gTimes.eye0 / gTimes.n * 1000.0) + " ms)" : std::string())
+                           << ", picture " << w << "x" << h << LL_ENDL;
+        gTimes = FrameTimes();
+    }
+}
+
 void captureFrame() { captureInto(false); }
 
 void captureWorld()
@@ -318,7 +414,9 @@ void applyHeadCamera()
 {
     LLViewerCamera* cam = LLViewerCamera::getInstance();
     const bool want = !gSnapshot && !gCubeSnapshot && WolfVRStream::worldWanted();
-    const wolfvr::HeadPose hp = want ? WolfVRStream::headPose() : wolfvr::HeadPose();
+    // [VR STEREO] the right eye uses the left eye's head pose, so the two halves of one picture always match
+    wolfvr::HeadPose hp = gEye == 1 ? gFramePose : want ? WolfVRStream::headPose() : wolfvr::HeadPose();
+    if (!want) hp.valid = false;
     if (!hp.valid)
     {
         if (gCameraOverridden)
@@ -352,8 +450,20 @@ void applyHeadCamera()
     LLVector3 at = rot(0.f, 0.f, -1.f), lft = rot(-1.f, 0.f, 0.f), u = rot(0.f, 1.f, 0.f);
     at.normVec(); lft.normVec(); u.normVec();
     cam->setAxes(at, lft, u);
-    // The picture is square and 100 degrees across both ways; the viewer's FOV is vertical.
-    cam->setViewNoBroadcast(100.f * DEG_TO_RAD);
+    // The picture is square and 100 degrees across both ways (or what the headset measured covers both its eyes'
+    // frusta, wolfvr.js eyeFov); the viewer's FOV is vertical.
+    const F32 fov = hp.fov_deg > 0.f ? hp.fov_deg : 100.f;
+    cam->setViewNoBroadcast(fov * DEG_TO_RAD);
+    hp.fov_deg = fov;
+    hp.stereo = gEye >= 0;
+    if (gEye >= 0)
+    {
+        // [VR STEREO 2026-11-04] this eye's own position: the head centre plus the eye's offset in head space, turned
+        // with the head (the same WebXR -> viewer mapping as the axes above). Axes stay parallel: WebXR gives both
+        // eyes the head's orientation on Quest, and the page shows each half from its own eye.
+        const F32* e = hp.eye + 3 * gEye;
+        cam->setOrigin(gEyeBase + rot(e[0], e[1], e[2]));
+    }
     gFramePose = hp;
 }
 

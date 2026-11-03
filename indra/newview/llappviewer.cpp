@@ -83,6 +83,7 @@
 #include "wolfterrainpaint.h"
 #include "wolfupdate.h"         // <WolfViewer 2026-10-02/> WolfUpdate::shutdown
 #include "wolfvrstream.h"       // [VR PIPE 2026-11-03/] WolfVRStream::shutdown
+#include "wolfvrscreen.h"       // [VR STEREO 2026-11-04/] WolfVRScreen::displayFrame
 #include "wolfdjaudio.h"        // [WOLF DJ 2026-10-04/] WolfDJMixer::shutdown
 #include "wolffloaterdj.h"      // [WOLF DJ 2026-10-04/] wolfdj_on_app_quit
 #include "wolfdjplayer.h"       // [WOLF DJ 2026-10-04/] WolfDJPlayer::shutdown
@@ -1843,7 +1844,7 @@ bool LLAppViewer::doFrame()
                 pingMainloopTimeout("Main:Display");
                 gGLActive = true;
 
-                display();
+                WolfVRScreen::displayFrame();   // [VR STEREO 2026-11-04/] display(), or one display() per eye in VR 3D Mode
 
                 if (LLStartUp::getStartupState() == STATE_STARTED) // <FS:Beq/> FIRE-34590 - Bugsplat caused by updating maps before world is loaded.
                 {

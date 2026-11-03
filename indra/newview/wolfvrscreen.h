@@ -34,6 +34,12 @@ namespace WolfVRScreen
     void applyHeadCamera();
     void captureWorld();
     void pumpInput();
+    /** [VR STEREO 2026-11-04] The main loop's display(): one pass, or one per eye when the headset is in VR 3D Mode
+     *  with stereo on (llappviewer.cpp, in place of display()). */
+    void displayFrame();
+    /** [VR STEREO] True while drawing the left eye: render_ui stops after the world (the headset gets no UI there and
+     *  the right eye's pass draws the desktop's). */
+    bool uiSkipped();
     /** Frees the GPU objects (stream switched off, or the viewer closing). Main thread, GL context current. */
     void release();
 }

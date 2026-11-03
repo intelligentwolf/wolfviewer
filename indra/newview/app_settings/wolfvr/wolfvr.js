@@ -46,7 +46,7 @@ function deviceId() {
     return v;
 }
 const DEVICE = deviceId();
-const HEADER_SIZE = 72;           // wolfvrpipe.cpp kHeaderSize
+const HEADER_MIN = 72;            // wolfvrpipe.cpp kHeaderSize before stereo; the real size is at byte 4 (96 now)
 const MAGIC = 0x31525657;         // "WVR1"
 const PICTURE_DISTANCE = 10;      // metres: far enough that walking about barely moves the picture
 
@@ -215,8 +215,14 @@ function askKey(force) {
 
 function parseHeader(buf) {
     const d = new DataView(buf);
-    if (buf.byteLength < HEADER_SIZE || d.getUint32(0, true) !== MAGIC) return null;
+    if (buf.byteLength < HEADER_MIN || d.getUint32(0, true) !== MAGIC) return null;
+    const size = d.getUint32(4, true);
+    if (size < HEADER_MIN || size > buf.byteLength) return null;
+    // [VR STEREO 2026-11-04] byte 66 = two eyes side by side, drawn from the eye positions at 72..95 (head space)
+    const stereo = size >= 96 && d.getUint8(66) === 1;
+    const eyes = stereo ? [0, 1, 2, 3, 4, 5].map((k) => d.getFloat32(72 + 4 * k, true)) : null;
     return {
+        size, stereo, eyes,
         frame: Number(d.getBigUint64(8, true)),
         captureMs: d.getFloat64(16, true),
         poseClientMs: d.getFloat64(24, true),
@@ -240,7 +246,8 @@ function offerPicture(img, hdr, decodeMs) {
 function onPicture(buf) {
     const hdr = parseHeader(buf);
     if (!hdr) return;
-    const payload = new Uint8Array(buf, HEADER_SIZE, hdr.bytes);
+    if (hdr.size + hdr.bytes > buf.byteLength) return;
+    const payload = new Uint8Array(buf, hdr.size, hdr.bytes);
     if (hdr.codec === 'jpeg') {
         const t0 = performance.now();
         // WebGL ignores UNPACK_FLIP_Y for ImageBitmap, so flip while decoding (texture.flipY = false below).
@@ -292,6 +299,46 @@ const screen = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), screenMat);
 screen.frustumCulled = false;
 screen.visible = false;
 scene.add(screen);
+
+// [VR STEREO 2026-11-04] Paul: "do stereo now please". A stereo picture is two eyes side by side (left half = left eye),
+// each drawn by the viewer from that eye's own position. Each half goes on its own window into the world, seen by
+// that eye only: three.js draws layer 1 for the left eye and layer 2 for the right (WebXRManager cameraL / cameraR
+// layer masks), and each window is placed from its own eye, so the depth is the viewer's, not the page's.
+function halfPlane(right) {
+    const g = new THREE.PlaneGeometry(1, 1);
+    const uv = g.attributes.uv;
+    for (let i = 0; i < uv.count; i++) uv.setX(i, uv.getX(i) * 0.5 + (right ? 0.5 : 0));
+    const m = new THREE.Mesh(g, screenMat);
+    m.frustumCulled = false;
+    m.visible = false;
+    m.layers.set(right ? 2 : 1);
+    scene.add(m);
+    return m;
+}
+const eyeScreens = [halfPlane(false), halfPlane(true)];
+
+// Each eye's position in head space and the square field of view that covers both eyes, from the XR views
+// (WebXR XRView.transform / projectionMatrix), sent with each pose for the viewer to draw the eyes from.
+const _hinv = new THREE.Matrix4(), _ev = new THREE.Vector3();
+let eyeFov = 0;
+function eyesOf(pose) {
+    if (!pose || !pose.views || pose.views.length < 2) return null;
+    _hinv.fromArray(pose.transform.matrix).invert();
+    const e = [];
+    let maxTan = 0;
+    for (let i = 0; i < 2; i++) {
+        const v = pose.views[i];
+        _ev.setFromMatrixPosition(_m.fromArray(v.transform.matrix)).applyMatrix4(_hinv);
+        e.push(+_ev.x.toFixed(4), +_ev.y.toFixed(4), +_ev.z.toFixed(4));
+        // a perspective projection's edges: x/z = (m8 -+ 1) / m0, y/z = (m9 -+ 1) / m5 (column-major)
+        const p = v.projectionMatrix;
+        maxTan = Math.max(maxTan, Math.abs((p[8] - 1) / p[0]), Math.abs((p[8] + 1) / p[0]),
+                                  Math.abs((p[9] - 1) / p[5]), Math.abs((p[9] + 1) / p[5]));
+    }
+    // + 4 degrees so a quick head turn does not show the picture's edge before the next one comes (reprojection)
+    eyeFov = Math.min(120, Math.max(90, Math.round(2 * Math.atan(maxTan) * 180 / Math.PI + 4)));
+    return e;
+}
 
 // ------------------------------------------------------------------------------------------------ big screen
 // [VR BIG SCREEN 2026-11-03] Paul: "I'm dying to go in-world with it". config.mode "screen": WolfViewer sends its
@@ -441,7 +488,9 @@ function numberRows() {
         ['round trip', fmt(num.rtt) + ' ms', ''],
         ['sent', fmt(v.fps) + ' fps', `${fmt((v.kbps || NaN) / 1000)} Mbit/s`],
         ['encoder', v.encoder || (config ? config.encoder : '–'), v.skipped ? `skipped ${v.skipped}` : ''],
-    ].concat(BIG() ? [['screen', `${SCREEN_SIZES[screenSizeIndex].toFixed(1)} m wide`, 'left stick up/down']] : []);
+    ].concat(BIG() ? [['screen', `${SCREEN_SIZES[screenSizeIndex].toFixed(1)} m wide`, 'left stick up/down']] : [])
+     .concat(!BIG() && screen.userData.hdr ? [['3D picture', screen.userData.hdr.stereo ? 'two eyes' : 'one view',
+        `${fmt(screen.userData.hdr.fov, 0)}°` + (screen.userData.hdr.stereo ? ` eyes ${fmt(Math.abs(screen.userData.hdr.eyes[3] - screen.userData.hdr.eyes[0]) * 1000, 0)} mm apart` : '')]] : []);
 }
 
 function drawStatsPanel(now) {
@@ -757,10 +806,12 @@ let xrErrors = 0;
 function animate(time, frame) {
     const now = performance.now();
     let ctl = [];
+    let eyes = null;
     // Head pose in world space (dolly * reference-space pose).
     if (frame && renderer.xr.isPresenting) {
         const pose = frame.getViewerPose(renderer.xr.getReferenceSpace());
         if (pose) {
+            eyes = eyesOf(pose);
             dolly.updateMatrixWorld();
             _m.fromArray(pose.transform.matrix).premultiply(dolly.matrixWorld);
             _m.decompose(_pos, _quat, _scl);
@@ -773,7 +824,9 @@ function animate(time, frame) {
         camera.quaternion.copy(_quat);
         num.xrFrames++;
     }
-    send({ t: 'pose', s: ++poseSeq, ct: now, p: [_pos.x, _pos.y, _pos.z], q: [_quat.x, _quat.y, _quat.z, _quat.w], c: ctl });
+    const pm = { t: 'pose', s: ++poseSeq, ct: now, p: [_pos.x, _pos.y, _pos.z], q: [_quat.x, _quat.y, _quat.z, _quat.w], c: ctl };
+    if (eyes) { pm.e = eyes; pm.f = eyeFov; }
+    send(pm);
 
     // Newest picture onto the texture.
     let fresh = null;
@@ -783,18 +836,37 @@ function animate(time, frame) {
         const mat = BIG() ? bigMat : screenMat;
         if (fresh.hdr.codec === 'h264') { videoTex.setFrame(fresh.img); if (mat.map !== videoTex) { mat.map = videoTex; mat.needsUpdate = true; } }
         else { bitmapTex.image = fresh.img; bitmapTex.needsUpdate = true; if (mat.map !== bitmapTex) { mat.map = bitmapTex; mat.needsUpdate = true; } }
-        if (BIG()) { bigMesh.visible = true; screen.visible = false; }
-        else { screen.userData.hdr = fresh.hdr; screen.visible = true; bigMesh.visible = false; }
+        if (BIG()) { bigMesh.visible = true; screen.visible = false; eyeScreens[0].visible = eyeScreens[1].visible = false; }
+        else {
+            screen.userData.hdr = fresh.hdr;
+            screen.visible = !fresh.hdr.stereo;
+            eyeScreens[0].visible = eyeScreens[1].visible = fresh.hdr.stereo;
+            bigMesh.visible = false;
+        }
     }
     if (!renderer.xr.isPresenting) { laser.visible = false; }
     // Reprojection: put the picture where it was rendered for, around where the head is NOW.
     const hdr = screen.userData.hdr;
     if (hdr && !BIG()) {
         const size = 2 * PICTURE_DISTANCE * Math.tan((hdr.fov * Math.PI / 180) / 2);
-        screen.scale.set(size, size, 1);
-        screen.quaternion.copy(hdr.q);
         _fwd.set(0, 0, -PICTURE_DISTANCE).applyQuaternion(hdr.q);
-        screen.position.copy(_pos).add(_fwd);
+        if (!hdr.stereo) {
+            screen.scale.set(size, size, 1);
+            screen.quaternion.copy(hdr.q);
+            screen.position.copy(_pos).add(_fwd);
+        } else {
+            // [VR STEREO] each half from the eye it was drawn for: that eye NOW (head position + its offset turned
+            // with the head now), looking where the head looked when the picture was drawn
+            for (let i = 0; i < 2; i++) {
+                const m = eyeScreens[i];
+                m.scale.set(size, size, 1);
+                m.quaternion.copy(hdr.q);
+                _ev.set(hdr.eyes[3 * i], hdr.eyes[3 * i + 1], hdr.eyes[3 * i + 2]).applyQuaternion(_quat);
+                m.position.copy(_pos).add(_ev).add(_fwd);
+            }
+            // on the page (no headset) the camera sees layer 0 only: show the left eye there
+            eyeScreens[0].layers.set(renderer.xr.isPresenting ? 1 : 0);
+        }
     }
 
     renderer.render(scene, camera);

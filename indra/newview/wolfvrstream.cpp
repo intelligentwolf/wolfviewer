@@ -62,12 +62,24 @@ namespace
     // window is not 16:9 (wolfvrscreen.cpp). A fixed size: the window is often still small when the stream starts
     // (1024x738 at the login screen, seen 2026-11-03) and is resized freely afterwards. World (VR 3D Mode): a square
     // 1440x1440 window into the world, 100 degrees across (Config fov_deg), drawn for the newest head pose.
-    struct ModeSize { std::string mode; U32 w, h; bool external; };
+    struct ModeSize { std::string mode; U32 w, h; bool external; U32 kbps; };
     ModeSize modeSize(const std::string& setting)
     {
-        if (setting == "test") return {"test", 1280, 1280, false};
-        if (setting == "world" && gSavedSettings.getBOOL("WolfVR3DMode")) return {"world", 1440, 1440, true};
-        return {"screen", 1920, 1080, true};
+        if (setting == "test") return {"test", 1280, 1280, false, 25000};
+        if (setting == "world" && gSavedSettings.getBOOL("WolfVR3DMode"))
+        {
+            // [VR STEREO 2026-11-04] Paul: "do stereo now please". Two eyes side by side in ONE picture (one encode, one
+            // decode, one texture on the headset), each eye a square WolfVREyeSize across, a multiple of 16 (H.264
+            // macroblocks). 2 x 1152 x 1152 at 60 fps = 622,080 macroblocks/s, inside H.264 level 5.1 (983,040, ITU-T
+            // H.264 Table A-1) that NVENC and the Quest decoder both take. More pixels than mono: 40 Mbit/s.
+            if (gSavedSettings.getBOOL("WolfVRStereo"))
+            {
+                const U32 eye = llclamp(gSavedSettings.getU32("WolfVREyeSize"), 512u, 2048u) / 16 * 16;
+                return {"world", eye * 2, eye, true, 40000};
+            }
+            return {"world", 1440, 1440, true, 25000};
+        }
+        return {"screen", 1920, 1080, true, 25000};
     }
 
     bool readText(const std::string& path, std::string& out)
@@ -144,6 +156,7 @@ namespace
         cfg.external_frames = ms.external;
         cfg.world_allowed = gSavedSettings.getBOOL("WolfVR3DMode");
         if (ms.external) cfg.fps = 60;
+        cfg.bitrate_kbps = ms.kbps;
         cfg.log = [](wolfvr::LogLevel level, const std::string& line) {
             // LL logging is thread-safe; these lines come from the server's own threads.
             if (level == wolfvr::LogLevel::WARN) LL_WARNS("WolfVR") << line << LL_ENDL;
@@ -245,10 +258,20 @@ void init()
         if (!gService) return;
         const ModeSize ms = modeSize(v.asString());
         if (ms.mode == gMode) return;
-        gService->setMode(ms.mode, ms.w, ms.h, ms.external);
+        gService->setMode(ms.mode, ms.w, ms.h, ms.external, ms.kbps);
         gMode = ms.mode;
-        LL_INFOS("WolfVR") << "headset stream switched to " << ms.mode << LL_ENDL;
+        LL_INFOS("WolfVR") << "headset stream switched to " << ms.mode << " " << ms.w << "x" << ms.h << LL_ENDL;
     });
+    // [VR STEREO 2026-11-04] stereo on/off or a new eye size while in 3D Mode: the new picture size at once
+    auto resize3d = [](LLControlVariable*, const LLSD&, const LLSD&) {
+        std::lock_guard<std::mutex> lk(gMutex);
+        if (!gService || gMode != "world") return;
+        const ModeSize ms = modeSize("world");
+        gService->setMode(ms.mode, ms.w, ms.h, ms.external, ms.kbps);
+        LL_INFOS("WolfVR") << "headset 3D picture now " << ms.w << "x" << ms.h << LL_ENDL;
+    };
+    gSavedSettings.getControl("WolfVRStereo")->getSignal()->connect(resize3d);
+    gSavedSettings.getControl("WolfVREyeSize")->getSignal()->connect(resize3d);
     gSavedSettings.getControl("WolfVRStreamEnabled")->getSignal()->connect(
         [](LLControlVariable*, const LLSD& value, const LLSD&) { onEnabledChanged(value); });
     if (gSavedSettings.getBOOL("WolfVRStreamEnabled")) onEnabledChanged(LLSD(true));

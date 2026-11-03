@@ -27,6 +27,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "llviewerdisplay.h"
+#include "wolfvrscreen.h"   // [VR BIG SCREEN 2026-11-03/] WolfVRScreen::captureFrame
 #include "wolfaltitudesky.h"   // <WolfViewer 2026-10-07/> far clip grows with height
 #include "wolfbuilder.h"       // [WOLF BUILDER 2026-10-13/] the builder's grid on the ground
 
@@ -268,6 +269,7 @@ void display_startup()
 
     if (gViewerWindow && gViewerWindow->getWindow())
     {
+        WolfVRScreen::captureFrame();   // [VR BIG SCREEN 2026-11-03/] the login screen goes to the headset too
         gViewerWindow->getWindow()->swapBuffers();
         wolf_frame_presented();   // [WolfViewer 2026-10-16]
     }
@@ -1821,6 +1823,7 @@ void swap()
     LL_PROFILE_GPU_ZONE("swap");
     if (gDisplaySwapBuffers)
     {
+        WolfVRScreen::captureFrame();   // [VR BIG SCREEN 2026-11-03/] the finished frame, UI and all, to the headset
         gViewerWindow->getWindow()->swapBuffers();
         wolf_frame_presented();   // [WolfViewer 2026-10-16] a snapshot's render (gDisplaySwapBuffers false) is not shown
     }

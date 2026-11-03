@@ -929,6 +929,13 @@ set(viewer_SOURCE_FILES
     wolfcrashreport.cpp   # [CRASH REPORTS 2026-10-28] crash stack / minidump, sent as a staff ticket next run
     wolflogscrub.cpp   # [CRASH REPORTS 2026-10-28] log scrub / tail / gzip shared with the Flea Report
     wolffloaterdob.cpp   # [DOB IN THE VIEWER 2026-10-26] Your Date of Birth (asked after login when the account has none)
+    wolfvrpipe.cpp   # [VR PIPE 2026-11-03] VR in the headset browser: LAN HTTPS/WebSocket server (no viewer headers)
+    wolfvrpipe_video.cpp   # [VR PIPE 2026-11-03] test pattern + GStreamer H.264 (dlopen) / libjpeg encoders
+    wolfvrpairing.cpp   # [VR PAIRING 2026-11-03] headsets allowed to connect (Allow / Deny, remembered; no code)
+    wolfvrstream.cpp   # [VR PIPE 2026-11-03] the setting, certificate, start/stop
+    wolfvrscreen.cpp   # [VR BIG SCREEN 2026-11-03] the viewer window to the headset, its pointer and keys back
+    wolffloatervrstream.cpp   # [VR PIPE 2026-11-03] Wolf World > VR in Your Headset Browser
+    qrcodegen/qrcodegen.cpp   # [VR PIPE 2026-11-03] Nayuki QR Code generator v1.8.0 (MIT), qrcodegen/SOURCES.md
     wolffloaterinvisallow.cpp   # [SELECTIVE INVISIBLE MODE 2026-10-30] Invisible Mode: People Who Can See Me
     wolfadultcontent.cpp   # [ADULT CONTENT 2026-10-26] the Adult Content region type (badges, refusals)
     wolffloateragecheck.cpp   # [ADULT CONTENT 2026-10-26] Wolf World > Age Check
@@ -1933,6 +1940,13 @@ set(viewer_HEADER_FILES
     wolfcrashreport.h   # [CRASH REPORTS 2026-10-28]
     wolflogscrub.h   # [CRASH REPORTS 2026-10-28]
     wolffloaterdob.h   # [DOB IN THE VIEWER 2026-10-26]
+    wolfvrpipe.h   # [VR PIPE 2026-11-03]
+    wolfvrpipe_video.h   # [VR PIPE 2026-11-03]
+    wolfvrpairing.h   # [VR PAIRING 2026-11-03]
+    wolfvrstream.h   # [VR PIPE 2026-11-03]
+    wolfvrscreen.h   # [VR BIG SCREEN 2026-11-03]
+    wolffloatervrstream.h   # [VR PIPE 2026-11-03]
+    qrcodegen/qrcodegen.hpp   # [VR PIPE 2026-11-03]
     wolffloaterinvisallow.h   # [SELECTIVE INVISIBLE MODE 2026-10-30]
     wolfadultcontent.h   # [ADULT CONTENT 2026-10-26]
     wolffloateragecheck.h   # [ADULT CONTENT 2026-10-26]
@@ -2599,6 +2613,10 @@ set(PACKAGE ON CACHE BOOL
 if(USE_PRECOMPILED_HEADERS)
   target_precompile_headers( ${VIEWER_BINARY_NAME} PRIVATE llviewerprecompiledheaders.h )
 endif(USE_PRECOMPILED_HEADERS)
+# [VR PIPE 2026-11-03] These include no viewer headers: Boost.Asio must see winsock2.h before windows.h (the viewer's
+# precompiled header pulls windows.h in first), and the vendored QR library is plain C++.
+set_source_files_properties(wolfvrpipe.cpp wolfvrpipe_video.cpp wolfvrpairing.cpp qrcodegen/qrcodegen.cpp
+    PROPERTIES SKIP_PRECOMPILE_HEADERS TRUE)
 
 if (OPENSIM)
   set(ND_VIEWER_FLAVOR "oss")

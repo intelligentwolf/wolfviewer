@@ -38,3 +38,5 @@ FILES_ARE_UNICODE_UTF-16LE.txt text eol=crlf
 *.OGG binary
 *.wav binary
 *.WAV binary
+# [VR PIPE 2026-11-03] brotli-compressed web assets (app_settings/wolfvr/three/*.br) are binary
+*.br binary

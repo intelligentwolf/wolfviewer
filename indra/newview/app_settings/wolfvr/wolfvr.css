@@ -1,0 +1,110 @@
+/* WolfViewer VR in the headset browser - page styles.
+   .toolbar-btn and #vr-btn.vr-active are WolfStorm's own rules (wolfstorm/css/toolbar.css .toolbar-btn,
+   :hover, :active, .btn-label, #vr-btn.vr-active, @keyframes vr-pulse), copied so the VR button looks and
+   behaves the same in both. The rest is this page's own layout. Dark only: the headset browser is dark. */
+:root {
+    --wvr-bg: #0e1220;
+    --wvr-card: #171c2e;
+    --wvr-text: #eef2fb;          /* 15.9:1 on --wvr-bg */
+    --wvr-muted: #b4bfd6;         /* 9.6:1 on --wvr-card */
+    --wvr-line: rgba(255, 255, 255, 0.12);
+    --wvr-err-bg: #3a1414;
+    --wvr-err-text: #ffd9d2;      /* 12.4:1 on --wvr-err-bg */
+    --wvr-ok: #8fe3a8;
+    color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--wvr-bg); color: var(--wvr-text); }
+body { font: 16px/1.5 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+.wvr-page { max-width: 960px; margin: 0 auto; padding: 16px; }
+.wvr-head h1 { font-size: 24px; margin: 8px 0 4px; }
+.wvr-sub, .wvr-hint { color: var(--wvr-muted); margin: 0 0 8px; }
+.wvr-card { background: var(--wvr-card); border: 1px solid var(--wvr-line); border-radius: 8px; padding: 16px;
+            margin: 16px 0; }
+.wvr-card h2 { font-size: 18px; margin: 0 0 8px; }
+.wvr-status { font-size: 18px; margin: 0 0 8px; }
+.wvr-error { background: var(--wvr-err-bg); color: var(--wvr-err-text); border-radius: 6px; padding: 12px;
+             margin: 0 0 12px; white-space: pre-wrap; user-select: text; }
+.wvr-waiting { background: #12324a; color: var(--wvr-text); border-radius: 6px; padding: 16px; margin: 0 0 12px; }
+.wvr-waiting p { margin: 0 0 8px; }
+.wvr-waiting-big { font-size: 26px; line-height: 1.3; }
+.wvr-actions { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+.wvr-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0);
+                       white-space: nowrap; }
+.wvr-canvas-wrap { width: 100%; aspect-ratio: 1 / 1; max-height: 70vh; background: #000; border-radius: 6px;
+                   overflow: hidden; touch-action: none; cursor: grab; }
+.wvr-canvas-wrap canvas { width: 100% !important; height: 100% !important; display: block; }
+.wvr-numbers { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0;
+               font-variant-numeric: tabular-nums; }
+.wvr-numbers dt { color: var(--wvr-muted); }
+.wvr-numbers dd { margin: 0; }
+.wvr-toasts { position: fixed; left: 16px; right: 16px; bottom: 16px; display: flex; flex-direction: column;
+              gap: 8px; align-items: center; pointer-events: none; }
+.wvr-toast { background: #222a44; border: 1px solid var(--wvr-line); border-radius: 6px; padding: 10px 14px;
+             max-width: 600px; pointer-events: auto; }
+
+/* ---- WolfStorm css/toolbar.css (copied) ---- */
+.toolbar-btn {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-width: 60px;
+    height: 50px;
+    background: rgba(60, 60, 60, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    color: #fff;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    padding: 4px 8px;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+.toolbar-btn.disabled,
+.toolbar-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    filter: grayscale(1);
+}
+.toolbar-btn:hover:not(.disabled):not(:disabled) {
+    background: rgba(80, 80, 80, 0.8);
+    border-color: rgba(100, 150, 255, 0.5);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+}
+.toolbar-btn:active {
+    transform: translateY(0);
+    background: rgba(50, 50, 50, 0.9);
+}
+.toolbar-btn .btn-label {
+    font-size: 10px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+#vr-btn.vr-active {
+    background: linear-gradient(135deg, rgba(40, 180, 80, 0.8) 0%, rgba(20, 140, 60, 0.9) 100%);
+    border-color: rgba(80, 220, 120, 0.9);
+    box-shadow: 0 0 10px rgba(40, 180, 80, 0.5);
+    animation: vr-pulse 2s infinite;
+}
+@keyframes vr-pulse {
+    0%, 100% { box-shadow: 0 0 10px rgba(40, 180, 80, 0.5); }
+    50% { box-shadow: 0 0 20px rgba(40, 180, 80, 0.8); }
+}
+/* WolfStorm sizes .material-icons at 24px; the same glyph is an inline SVG here (no font from the internet). */
+.toolbar-btn .wvr-icon { width: 24px; height: 24px; margin-bottom: 2px; fill: currentColor; }
+/* The headset pointer is coarse: a bigger target than the desktop toolbar (Fitts). */
+#vr-btn { min-width: 96px; height: 72px; }
+#vr-btn .btn-label { font-size: 14px; }
+
+/* [VR BIG SCREEN 2026-11-03] */
+.wvr-big-controls { margin-top: 12px; }
+.wvr-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 0 0 12px; }
+.wvr-btn { min-height: 48px; min-width: 96px; padding: 8px 16px; font: inherit; font-weight: 700; border-radius: 8px;
+           border: 1px solid var(--wvr-line); background: #2a3354; color: var(--wvr-text); cursor: pointer; }
+.wvr-btn:focus-visible, .wvr-type:focus-visible { outline: 3px solid #8fb8ff; outline-offset: 2px; }
+.wvr-type-label { display: block; margin: 0 0 6px; color: var(--wvr-muted); }
+.wvr-type { width: 100%; font: inherit; font-size: 20px; padding: 10px 12px; border-radius: 8px;
+            border: 1px solid var(--wvr-line); background: #0b0f1c; color: var(--wvr-text); margin: 0 0 8px; }

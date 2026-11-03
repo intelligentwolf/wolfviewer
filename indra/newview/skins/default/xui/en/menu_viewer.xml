@@ -2462,6 +2462,16 @@
                 <menu_item_check.on_check function="CheckControl" parameter="WolfFXCameraShake" />
                 <menu_item_check.on_click function="ToggleControl" parameter="WolfFXCameraShake" />
             </menu_item_check>
+            <!-- [VR PIPE 2026-11-03] VR in the headset's own browser, streamed over the home network (wolffloatervrstream.cpp,
+                 stage 1: test pattern). Wolf Territories logins, as the other Wolf tools. -->
+            <!-- [VR BIG SCREEN 2026-11-03] Paul: Wolf World > VR in your headset > Big screen. One item (a submenu cannot
+                 hide itself off the Wolf grid: LLMenuGL has no on_visible), one floater: the switch, the address to type
+                 and the choice of what the headset shows. -->
+            <menu_item_check label="VR in Your Headset: VR Big Screen Mode..." name="WolfVRStream">
+                <menu_item_check.on_check function="Floater.Visible" parameter="wolf_vr_stream" />
+                <menu_item_check.on_click function="Floater.Toggle" parameter="wolf_vr_stream" />
+                <menu_item_check.on_visible function="WolfGrid.IsWolfTerritories" />
+            </menu_item_check>
         </menu>
     </menu>
     <menu

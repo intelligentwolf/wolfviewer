@@ -111,6 +111,7 @@
 #include "wolffloatercompass.h"   // [WOLF COMPASS 2026-10-16/]
 #include "wolffloaterbugreport.h"   // [WOLF BUG REPORT 2026-10-24/]
 #include "wolffloaterdob.h"   // [DOB IN THE VIEWER 2026-10-26/]
+#include "wolffloatervrstream.h"   // [VR PIPE 2026-11-03/]
 #include "wolffloaterinvisallow.h"   // [SELECTIVE INVISIBLE MODE 2026-10-30/]
 #include "wolffloateragecheck.h"   // [ADULT CONTENT 2026-10-26/]
 #include "wolffloaterchooseavatar.h"   // [STARTER AVATARS 2026-10-24/]
@@ -688,6 +689,7 @@ void LLViewerFloaterReg::registerFloaters()
     LLFloaterReg::add("wolf_lag_detector", "floater_wolf_lag_detector.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterLagDetector>);   // [LAG DETECTOR 2026-09-29/]
     LLFloaterReg::add("wolf_compass", "floater_wolf_compass.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterCompass>);   // [WOLF COMPASS 2026-10-16/] Victorian compass: North + course
     LLFloaterReg::add("wolf_bug_report", "floater_wolf_bug_report.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterBugReport>);   // [WOLF BUG REPORT 2026-10-24/] Report a Problem: ticket + viewer logs
+    LLFloaterReg::add("wolf_vr_stream", "floater_wolf_vr_stream.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterVRStream>);   // [VR PIPE 2026-11-03/] VR in Your Headset Browser
     LLFloaterReg::add("wolf_dob", "floater_wolf_dob.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterDob>);   // [DOB IN THE VIEWER 2026-10-26/] Your Date of Birth
     LLFloaterReg::add("wolf_invis_allow", "floater_wolf_invis_allow.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterInvisAllow>);   // [SELECTIVE INVISIBLE MODE 2026-10-30/] Invisible Mode: People Who Can See Me
     LLFloaterReg::add("wolf_age_check", "floater_wolf_age_check.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterAgeCheck>);   // [ADULT CONTENT 2026-10-26/] Wolf World > Age Check: status + Verify my age

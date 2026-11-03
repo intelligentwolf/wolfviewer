@@ -82,6 +82,7 @@
 #include "wolfdryvolumes.h"   // [WOLF SEA TUNNEL 2026-10-28/] wolfdry prims: air under the sea
 #include "wolfterrainpaint.h"
 #include "wolfupdate.h"         // <WolfViewer 2026-10-02/> WolfUpdate::shutdown
+#include "wolfvrstream.h"       // [VR PIPE 2026-11-03/] WolfVRStream::shutdown
 #include "wolfdjaudio.h"        // [WOLF DJ 2026-10-04/] WolfDJMixer::shutdown
 #include "wolffloaterdj.h"      // [WOLF DJ 2026-10-04/] wolfdj_on_app_quit
 #include "wolfdjplayer.h"       // [WOLF DJ 2026-10-04/] WolfDJPlayer::shutdown
@@ -1512,6 +1513,11 @@ bool LLAppViewer::init()
 
     gSavedSettings.setU32("DebugQualityPerformance", gSavedSettings.getU32("RenderQualityPerformance"));
 
+    // [VR PAIRING 2026-11-03/] hook WolfVRStreamEnabled once the window exists, so a test run with
+    // --set WolfVRStreamEnabled 1 streams from the login screen without clicking. The setting is never saved
+    // (Persist 0): it cannot start a network server by itself in a normal run.
+    WolfVRStream::init();
+
 #if LL_WINDOWS
     if (!mSecondInstance)
     {
@@ -2076,6 +2082,9 @@ bool LLAppViewer::cleanup()
 
     // <WolfViewer 2026-10-02/> stop and join an update download before the HTTP stack goes away
     WolfUpdate::shutdown();
+
+    // [VR PIPE 2026-11-03/] close the headset connection and join the headset server threads
+    WolfVRStream::shutdown();
 
     // [WOLF DJ 2026-10-04/] capture streams, the voice tap and the mixer/sender threads, before
     // the voice engine and the audio engine go away

@@ -115,6 +115,8 @@ class ViewerManifest(LLManifest,FSViewerManifest):
                 self.path("wolfnature")
                 # [2026-11-02] the clouds' blue noise (wolftkclouds.cpp, cloudsCommon.glsl getSTBN) + its generator and SOURCES.md
                 self.path("wolfnoise")
+                # [VR PIPE 2026-11-03] the headset page WolfViewer serves on the home network (wolfvrpipe.cpp) + three.js r185
+                self.path("wolfvr")
 
                 # include the entire shaders directory recursively
                 self.path("shaders")

@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [VR PIPE 2026-11-03] Wolf World > Display & Effects > VR in Your Headset Browser... (wolffloatervrstream.cpp, stage 1).
+     Paul: "I only have Linux, I don't want to mess around, so make it work".
+     [VR PAIRING 2026-11-03] Paul after the first Quest 3 try: "you need to make it much easier to connect, get rid of that
+     code, it's a job and a half to type all that in on a VR viewer". No code now: the resident types only the short
+     address (shown large here), and this PC asks Allow / Deny the first time a headset connects.
+     Who and why: a resident (35-65) with a Quest wants to see WolfViewer in the headset with nothing to install there;
+     they tick the box, type the big address in the headset's browser (or on wolf-grid.com/vr), accept the certificate
+     once, press Allow here once, press VR there.
+     Flow, top to bottom: what it does (one line); the switch; the status (what is happening, or what went wrong, in the
+     words of the fix); THE ADDRESS, large; the two first-time steps; the USB alternative; the QR code; the remembered
+     headsets and Forget; the numbers. Stage 1 streams a TEST PATTERN only. -->
+<floater
+ can_close="true"
+ can_minimize="true"
+ can_resize="false"
+ height="650"
+ layout="topleft"
+ name="wolf_vr_stream"
+ help_topic="wolf_vr_stream"
+ save_rect="true"
+ single_instance="true"
+ title="VR in Your Headset"
+ width="520">
+    <floater.string name="status_off">Off. Nothing is listening on your network.</floater.string>
+    <floater.string name="status_waiting">On. In your headset's browser, type the address below.</floater.string>
+    <floater.string name="status_connected">Your headset is connected. Press VR in the headset browser. Right controller: point and pull the trigger to click, grip for a right click, stick to scroll.</floater.string>
+    <floater.string name="status_failed">Could not start: [ERROR]</floater.string>
+    <floater.string name="address_off">(tick the box first)</floater.string>
+
+    <text follows="left|top" height="34" layout="topleft" left="12" name="intro" top="26" width="496" wrap="true">See WolfViewer in your VR headset's own web browser (Meta Quest Browser), over your home network. Nothing to install on the headset.</text>
+    <check_box control_name="WolfVRStreamEnabled" follows="left|top" height="20" layout="topleft" left="12" name="enable" top="66" width="280" label="Stream to my headset" tool_tip="Starts a small web server on this PC's home-network address only. Turn it off and it stops at once." />
+    <combo_box control_name="WolfVRStreamMode" follows="left|top" height="23" layout="topleft" left="300" name="mode" top="64" width="208" tool_tip="What the headset shows. Big screen: the whole WolfViewer window on a large screen in front of you, with the controllers as the mouse.">
+        <combo_box.item label="VR Big Screen Mode" name="screen" value="screen" />
+        <combo_box.item label="Test pattern" name="test" value="test" />
+    </combo_box>
+    <text_editor follows="left|top" height="40" layout="topleft" left="12" max_length="1024" name="status" top="92" width="496" word_wrap="true" read_only="true" show_context_menu="true" />
+
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="12" name="url_label" top="140" width="496">In your headset's browser, type:</text>
+    <text_editor follows="left|top" font="SansSerifHuge" height="40" layout="topleft" left="12" name="address" top="158" width="496" max_length="64" read_only="true" word_wrap="false" show_context_menu="true" tool_tip="Type this into the headset browser's address bar. No code is needed." />
+    <text follows="left|top" height="34" layout="topleft" left="12" name="address_hint" top="204" width="296" wrap="true">No code needed. Or open wolf-grid.com/vr in the headset and type it there.</text>
+    <text follows="left|top" height="112" layout="topleft" left="12" name="first_note" top="242" width="296" wrap="true">The first time only: the headset browser says the connection is not private. Choose Advanced, then Proceed (this PC made its own certificate; the picture never leaves your home network). Then this PC asks "A headset wants to connect": press Allow. Tip: bookmark the page in the headset.</text>
+    <text follows="left|top" height="48" layout="topleft" left="12" name="usb_note" top="358" width="296" wrap="true">With a USB cable and developer mode instead: run "adb reverse tcp:[PORT] tcp:[PORT]" on this PC, then open:</text>
+    <text_editor follows="left|top" height="23" layout="topleft" left="12" name="usb_url" top="408" width="296" max_length="256" read_only="true" word_wrap="false" show_context_menu="true" tool_tip="For a headset plugged in by USB, after adb reverse" />
+
+    <!-- The QR code is drawn here by wolffloatervrstream.cpp draw(); this panel only reserves the space. -->
+    <panel follows="left|top" height="180" layout="topleft" left="324" name="qr_area" top="204" width="184" background_visible="false" />
+    <text follows="left|top" height="16" layout="topleft" left="324" name="qr_label" top="388" width="184" halign="center">Or scan with the headset</text>
+
+    <text follows="left|top" height="20" layout="topleft" left="12" name="headsets_text" top="444" width="300">Headsets allowed on this PC: [COUNT]</text>
+    <button follows="left|top" height="23" layout="topleft" left="328" name="forget_btn" top="440" width="180" label="Forget all headsets" tool_tip="Every headset has to be allowed again before it can connect" />
+
+    <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="12" name="numbers_label" top="474" width="496">Numbers</text>
+    <text_editor follows="left|top" font="Monospace" height="120" layout="topleft" left="12" max_length="4096" name="numbers" top="492" width="496" word_wrap="false" read_only="true" show_context_menu="true" />
+    <button follows="right|bottom" height="23" layout="topleft" left="408" name="close_btn" top="620" width="100" label="Close" />
+</floater>

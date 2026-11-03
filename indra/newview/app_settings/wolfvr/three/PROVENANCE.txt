@@ -1,0 +1,11 @@
+three.module.js / three.core.js (+ .br) - copied byte-for-byte from WolfStorm,
+firestorm repo wolfstorm/js/vendor/three/ (see its PROVENANCE.txt): three.js r185 with
+WolfStorm's local OVR_multiview2 patch (tools/three-r185-multiview.patch). md5 on copy 2026-11-03:
+  three.module.js    59cf19f2a191e98d039c636bdec8982b
+  three.module.js.br cc0c6bc21a3426063c8b8c27eab2cb1c
+  three.core.js      b2e7a8e645f93a5f3f50dfa3ab0ce439
+  three.core.js.br   2169e64c55ec763a48fc7bc0fe158b21
+WHY THE SAME FILES: the headset page runs WolfStorm's WebXR entry/session contract
+(threejs-webxr-contract) on the same renderer, so a fix proven in one applies to the other.
+Keep the two copies in step: re-copy after any WolfStorm three upgrade.
+three.js is MIT licensed (c) 2010-2025 three.js authors.

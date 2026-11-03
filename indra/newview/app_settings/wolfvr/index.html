@@ -1,0 +1,72 @@
+<!doctype html>
+<!--
+  WolfViewer VR in the headset browser - the page WolfViewer serves to the headset (stage 1: the pipe).
+  Served only on this home network by WolfViewer itself (wolfvrpipe.cpp); nothing here talks to the internet.
+  The VR button, its wording and its look are WolfStorm's (wolfstorm/index.php #vr-btn, css/toolbar.css
+  .toolbar-btn / #vr-btn.vr-active) so residents who know WolfStorm VR find the same control.
+  Icon: Material Icons "vrpano" (Apache License 2.0, google/material-design-icons src/image/vrpano/materialicons/24px.svg).
+-->
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WolfViewer VR</title>
+<link rel="stylesheet" href="wolfvr.css">
+<script type="module" src="wolfvr.js"></script>
+</head>
+<body>
+<main class="wvr-page">
+  <header class="wvr-head">
+    <h1>WolfViewer VR</h1>
+    <p class="wvr-sub">The picture comes from WolfViewer on your PC, over your home network.</p>
+  </header>
+
+  <section class="wvr-card" aria-labelledby="wvr-status-title">
+    <h2 id="wvr-status-title" class="wvr-visually-hidden">Connection</h2>
+    <p id="wvr-status" class="wvr-status" role="status" aria-live="polite">Connecting to WolfViewer…</p>
+    <div id="wvr-error" class="wvr-error" role="alert" aria-live="assertive" hidden></div>
+    <!-- [VR PAIRING 2026-11-03] Shown while the PC is asking Allow / Deny (wolfvr.js showWaiting). -->
+    <div id="wvr-waiting" class="wvr-waiting" hidden>
+      <p class="wvr-waiting-big">Waiting for you to press <strong>Allow</strong> on your PC.</p>
+      <p>Your PC is asking "A headset wants to connect". Press <strong>Allow</strong> there (you can lift the headset
+         to see the screen). This page carries on by itself, and you only do this once for this headset.</p>
+    </div>
+    <div class="wvr-actions">
+      <button class="toolbar-btn" id="vr-btn" type="button" title="Enter VR Mode" disabled>
+        <svg class="wvr-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20.69,4.05C18.66,4.73,15.86,5.5,12,5.5c-3.89,0-6.95-0.84-8.69-1.43C2.67,3.85,2,4.33,2,5.02V19 c0,0.68,0.66,1.17,1.31,0.95C5.36,19.26,8.1,18.5,12,18.5c3.87,0,6.66,0.76,8.69,1.45C21.34,20.16,22,19.68,22,19V5 C22,4.32,21.34,3.84,20.69,4.05z M12,15c-2.34,0-4.52,0.15-6.52,0.41l3.69-4.42l2,2.4L14,10l4.51,5.4C16.52,15.15,14.3,15,12,15z"/></svg>
+        <span class="btn-label">VR</span>
+      </button>
+      <p class="wvr-hint">Press <strong>VR</strong>, then allow the headset to use VR when it asks.</p>
+    </div>
+    <p class="wvr-hint">Tip: bookmark this page, so next time you can open it from your bookmarks instead of typing.</p>
+  </section>
+
+  <section class="wvr-card" aria-labelledby="wvr-preview-title">
+    <h2 id="wvr-preview-title">Preview</h2>
+    <p class="wvr-hint" id="wvr-preview-hint">Drag the picture to turn your head here on the page; in the headset, just look around.</p>
+    <div id="wvr-canvas-wrap" class="wvr-canvas-wrap"></div>
+    <!-- [VR BIG SCREEN 2026-11-03] shown when WolfViewer sends its window (config.mode "screen") -->
+    <div id="wvr-big-controls" class="wvr-big-controls" hidden>
+      <div class="wvr-row">
+        <span>Screen size:</span>
+        <button type="button" class="wvr-btn" id="wvr-smaller">Smaller</button>
+        <strong id="wvr-size" aria-live="polite"></strong>
+        <button type="button" class="wvr-btn" id="wvr-bigger">Bigger</button>
+      </div>
+      <label for="wvr-type" class="wvr-type-label">Type here to type into WolfViewer (in VR: the Y button on the left controller opens the keyboard)</label>
+      <input type="text" id="wvr-type" class="wvr-type" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <p class="wvr-hint">In VR: point with the <strong>right controller</strong>. Trigger = click, grip or B = right-click,
+         stick up/down = scroll. <strong>Left controller</strong>: menu button = put the screen back in front of you,
+         stick up/down = screen size, X = numbers.</p>
+    </div>
+  </section>
+
+  <section class="wvr-card" aria-labelledby="wvr-numbers-title">
+    <h2 id="wvr-numbers-title">Numbers</h2>
+    <p class="wvr-hint">These show how quickly the picture reaches you. They also show inside VR (press the menu button on the left controller).</p>
+    <dl id="wvr-numbers" class="wvr-numbers"></dl>
+  </section>
+</main>
+<div id="wvr-toasts" class="wvr-toasts" role="status" aria-live="polite"></div>
+</body>
+</html>

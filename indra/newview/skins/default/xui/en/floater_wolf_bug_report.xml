@@ -34,7 +34,7 @@
          no scroll bar shows and it looks as before; the window is 4 px wider (464) so a scroll bar (UIScrollbarSize
          15) never covers the 436 px fields or brings up a sideways one. Form tops are the old floater tops minus 26. -->
     <scroll_container border_visible="false" follows="all" height="612" layout="topleft" left="0" name="form_scroll" opaque="false" top="26" width="464">
-        <panel background_visible="false" follows="left|top|right" height="612" layout="topleft" left="0" name="form_panel" top="0" width="448">
+        <panel background_visible="false" follows="left|top|right" height="826" layout="topleft" left="0" name="form_panel" top="0" width="448">
         <text follows="left|top" height="58" layout="topleft" left="12" name="intro" top="0" width="436" wrap="true">Found a flea, or got an idea? Wolves get fleas, and so do viewers. Tell the support team what went wrong, or what you would like, and we will pick it off. This opens a support ticket on wolf-grid.com; we reply there and by email.</text>
 
         <radio_group follows="left|top" height="20" layout="topleft" left="12" name="kind" top="62" width="436" draw_border="false">
@@ -74,6 +74,35 @@
         <button follows="left|top" height="20" layout="topleft" left="368" name="remove_picture_3" top="516" width="80" label="Remove" tool_tip="Take this picture off the flea report" visible="false" />
 
         <text follows="left|top" height="70" layout="topleft" left="12" name="pictures_note" top="542" width="436" wrap="true" text_color="LtGray_50">A snapshot is your whole viewer screen without this window. Each picture is made at most 1920 pixels on its longest side and 2 MB, and goes on your ticket like a screenshot added on the website, so check it shows nothing you would not want to share.</text>
+
+        <!-- [FLEA ATTACHMENTS 2026-11-03] Ticket 478, Jimmy Olsen: "Beyond snapshots or pictures, can u add other ways people
+             could send report here? 1- notecards (useful if long texts or even scripts). 2- small videos or animations".
+             Who and why: a resident wants to hand the support team a long text or script (a notecard from inventory), or a
+             short screen recording, without leaving the viewer. Same shape as the pictures above: two ways in side by side,
+             then one line per item with its own Remove button (wolffloaterbugreport.cpp updateAttachments shows
+             "attachments_none" while there are none), then what is sent, in plain words. A notecard can also be dragged
+             from inventory onto this window (WolfFloaterBugReport::handleDragAndDrop). The form panel grew from 612 to
+             826 px for this section, so at the default window height the form scrolls to it; Send and the status box
+             stay in view below the scroller as before. -->
+        <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="12" name="attachments_label" top="616" width="436">Notecards, videos and animations (optional)</text>
+        <button follows="left|top" height="23" layout="topleft" left="12" name="add_notecard" top="634" width="140" label="Add a notecard..."
+         tool_tip="Pick a notecard from your inventory. Its text is sent with the flea report (useful for long texts or scripts)." />
+        <button follows="left|top" height="23" layout="topleft" left="160" name="add_video" top="634" width="200" label="Add a video or animation..."
+         tool_tip="Pick a short video or animation from your computer: MP4, WebM or GIF, up to 25 MB" />
+
+        <text follows="left|top" height="32" layout="topleft" left="12" name="attachments_none" top="664" width="436" wrap="true" text_color="LtGray_50">Nothing added. You can also drag a notecard from your inventory onto this window.</text>
+        <text follows="left|top" height="20" layout="topleft" left="12" name="attachment_1" top="664" width="346" use_ellipses="true" visible="false" />
+        <button follows="left|top" height="20" layout="topleft" left="368" name="remove_attachment_1" top="662" width="80" label="Remove" tool_tip="Take this off the flea report" visible="false" />
+        <text follows="left|top" height="20" layout="topleft" left="12" name="attachment_2" top="686" width="346" use_ellipses="true" visible="false" />
+        <button follows="left|top" height="20" layout="topleft" left="368" name="remove_attachment_2" top="684" width="80" label="Remove" tool_tip="Take this off the flea report" visible="false" />
+        <text follows="left|top" height="20" layout="topleft" left="12" name="attachment_3" top="708" width="346" use_ellipses="true" visible="false" />
+        <button follows="left|top" height="20" layout="topleft" left="368" name="remove_attachment_3" top="706" width="80" label="Remove" tool_tip="Take this off the flea report" visible="false" />
+        <text follows="left|top" height="20" layout="topleft" left="12" name="attachment_4" top="730" width="346" use_ellipses="true" visible="false" />
+        <button follows="left|top" height="20" layout="topleft" left="368" name="remove_attachment_4" top="728" width="80" label="Remove" tool_tip="Take this off the flea report" visible="false" />
+        <text follows="left|top" height="20" layout="topleft" left="12" name="attachment_5" top="752" width="346" use_ellipses="true" visible="false" />
+        <button follows="left|top" height="20" layout="topleft" left="368" name="remove_attachment_5" top="750" width="80" label="Remove" tool_tip="Take this off the flea report" visible="false" />
+
+        <text follows="left|top" height="46" layout="topleft" left="12" name="attachments_note" top="778" width="436" wrap="true" text_color="LtGray_50">Notecards (64 KB of text each), short videos or animations (MP4, WebM or GIF, 25 MB each). Seen by the support team only, and deleted 90 days after the ticket is closed.</text>
         </panel>
     </scroll_container>
 

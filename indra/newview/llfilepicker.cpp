@@ -77,6 +77,8 @@ LLFilePicker LLFilePicker::sInstance;
 #define MATERIAL_FILTER L"GLTF Files (*.gltf; *.glb)\0*.gltf;*.glb\0"
 // WolfViewer: the formats WolfMeshUpload reads (wolfmeshupload.h).
 #define WOLF_MODEL_FILTER L"Model files (*.obj, *.gltf, *.glb)\0*.obj;*.gltf;*.glb\0"
+// [FLEA ATTACHMENTS 2026-11-03/] WolfViewer: Flea Report videos and animations (FFLOAD_WOLF_VIDEO).
+#define WOLF_VIDEO_FILTER L"Videos and animations (*.mp4, *.webm, *.gif)\0*.mp4;*.webm;*.gif\0"
 #define HDRI_FILTER L"HDRI Files (*.exr)\0*.exr\0"
 #define MATERIAL_TEXTURES_FILTER L"GLTF Import (*.gltf; *.glb; *.tga; *.bmp; *.jpg; *.jpeg; *.png)\0*.gltf;*.glb;*.tga;*.bmp;*.jpg;*.jpeg;*.png\0"
 #define SCRIPT_FILTER L"Script files (*.lsl)\0*.lsl\0"
@@ -253,6 +255,10 @@ bool LLFilePicker::setupFilter(ELoadFilter filter)
         break;
     case FFLOAD_WOLF_MODEL:
         mOFN.lpstrFilter = WOLF_MODEL_FILTER \
+            L"\0";
+        break;
+    case FFLOAD_WOLF_VIDEO:   // [FLEA ATTACHMENTS 2026-11-03/]
+        mOFN.lpstrFilter = WOLF_VIDEO_FILTER \
             L"\0";
         break;
     case FFLOAD_MATERIAL:
@@ -753,6 +759,11 @@ std::unique_ptr<std::vector<std::string>> LLFilePicker::navOpenFilterProc(ELoadF
             allowedv->push_back("obj");
             allowedv->push_back("gltf");
             allowedv->push_back("glb");
+            break;
+        case FFLOAD_WOLF_VIDEO:   // [FLEA ATTACHMENTS 2026-11-03/]
+            allowedv->push_back("mp4");
+            allowedv->push_back("webm");
+            allowedv->push_back("gif");
             break;
         case FFLOAD_MODEL:
             allowedv->push_back("gltf");
@@ -2512,6 +2523,10 @@ bool LLFilePicker::openFileDialog( int32_t filter, bool blocking, EType aType,
             case FFLOAD_WOLF_MODEL:
                 file_type = "wolf_model_files";
                 file_dialog_filter = "*.{obj,gltf,glb}";
+                break;
+            case FFLOAD_WOLF_VIDEO:   // [FLEA ATTACHMENTS 2026-11-03/]
+                file_type = "wolf_video_files";
+                file_dialog_filter = "*.{mp4,webm,gif}";
                 break;
             case FFLOAD_COLLADA:
                 file_type = "collada_files";

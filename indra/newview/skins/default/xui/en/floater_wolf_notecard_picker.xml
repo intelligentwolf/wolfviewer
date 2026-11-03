@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [FLEA ATTACHMENTS 2026-11-03] Ticket 478, Jimmy Olsen: "Beyond snapshots or pictures, can u add other ways people could
+     send report here? 1- notecards (useful if long texts or even scripts)". Opened by the Flea Report's "Add a notecard..."
+     (wolffloaterbugreport.cpp WolfNotecardPicker). Who and why: a resident wants to hand the support team a notecard from
+     their inventory (a long description, or a script pasted into a notecard) without copying it out by hand.
+     Flow: type to find it, click it, "Add to the flea report" (or double-click it). Built like floater_settings_picker.xml
+     (asset_filtered_inv_panel filtered to one asset type, filter box on top, buttons at the bottom). -->
+<floater
+ can_close="true"
+ can_minimize="false"
+ can_resize="true"
+ height="400"
+ layout="topleft"
+ min_height="260"
+ min_width="300"
+ name="wolf_notecard_picker"
+ help_topic="wolf_bug_report"
+ save_rect="true"
+ title="Add a notecard to the flea report"
+ width="320">
+    <text follows="left|top|right" height="32" layout="topleft" left="10" name="picker_intro" top="24" width="300" wrap="true">Pick one of your notecards. Its text goes to the support team with your flea report.</text>
+    <filter_editor follows="left|top|right" height="23" label="Find a notecard by name" layout="topleft" left="10" name="flt_inventory_search" top="60" width="300" />
+    <panel name="pnl_inv_wrap" follows="all" layout="topleft" left="10" top="88" width="300" height="250" background_visible="true" bg_alpha_color="DkGray2">
+        <asset_filtered_inv_panel
+         allow_multi_select="false"
+         allow_drag="false"
+         accepts_drag_and_drop="false"
+         suppress_folder_menu="true"
+         bg_visible="true"
+         bg_alpha_color="DkGray2"
+         border="false"
+         follows="all"
+         layout="topleft"
+         left="0"
+         name="pnl_inventory"
+         top="1"
+         width="300"
+         height="248"
+         filter_asset_types="notecard" />
+    </panel>
+    <button follows="left|bottom" height="23" layout="topleft" left="10" name="btn_cancel" top="350" width="90" label="Cancel" />
+    <button follows="right|bottom" height="23" layout="topleft" left="150" name="btn_select" top="350" width="160" label="Add to the flea report" enabled="false"
+     tool_tip="Adds the notecard you clicked. Double-clicking a notecard does the same." />
+</floater>

@@ -29602,6 +29602,17 @@ Change of this parameter will affect the layout of buttons in notification toast
       <key>Value</key>
       <integer>0</integer>
     </map>
+    <key>WolfParcelMusicOn</key>
+    <map>
+      <key>Comment</key>
+      <string>Parcel music play button (status bar / utility bar stream toggle, llstatusbar.cpp toggleStream) remembered between starts. Stock Firestorm forgets it every start (LLStatusBar::mAudioStreamEnabled starts false). On by default so music venues play for new residents (ticket 496); pressing stop turns it off and that is remembered. Separate from FSParcelMusicAutoPlay.</string>
+      <key>Persist</key>
+      <integer>1</integer>
+      <key>Type</key>
+      <string>Boolean</string>
+      <key>Value</key>
+      <integer>1</integer>
+    </map>
     <key>SDL2IMEEnabled</key>
     <map>
       <key>Comment</key>

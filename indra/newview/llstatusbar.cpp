@@ -200,7 +200,8 @@ LLStatusBar::LLStatusBar(const LLRect& rect)
     mFilterEdit(NULL),          // Edit for filtering
     mSearchPanel(NULL),         // Panel for filtering
     mPathfindingFlashOn(true),  // <FS:Zi> Pathfinding rebake functions
-    mAudioStreamEnabled(false), // <FS:Zi> Media/Stream separation
+    // Wolf (ticket 496): the parcel music play state is remembered between starts (stock Firestorm: false every start).
+    mAudioStreamEnabled(gSavedSettings.getBOOL("WolfParcelMusicOn")), // <FS:Zi> Media/Stream separation
     mRebakeStuck(false),        // <FS:LO> FIRE-7639 - Stop the blinking after a while
     mNearbyIcons(false),        // <FS:Ansariel> Script debug
     mIconPresetsGraphic(NULL),
@@ -1233,6 +1234,8 @@ void LLStatusBar::toggleStream(bool enable)
     }
 
     mAudioStreamEnabled = enable;
+    // Wolf (ticket 496): remember the resident's play/stop choice for the next start (read in the constructor).
+    gSavedSettings.setBOOL("WolfParcelMusicOn", enable);
 }
 
 bool LLStatusBar::getAudioStreamEnabled() const

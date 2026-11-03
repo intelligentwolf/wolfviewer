@@ -53,14 +53,170 @@ inline std::timed_mutex gAudioDeviceMutex;
 // Need to use to access the 3 second timeout for the lock.
 using namespace std::chrono_literals;
 // </FS:minerjr> [FIRE-36022]
+#if WEBRTC_WIN
+#include <mmdeviceapi.h>   // <WolfViewer 2026-11-03/> ticket 502: IMMNotificationClient (LLWebRTCDefaultDeviceWatcher)
+#endif
+
 namespace llwebrtc
 {
 #if WEBRTC_WIN
-static int16_t PLAYOUT_DEVICE_DEFAULT = webrtc::AudioDeviceModule::kDefaultDevice;
-static int16_t RECORD_DEVICE_DEFAULT  = webrtc::AudioDeviceModule::kDefaultDevice;
+// <WolfViewer 2026-11-03> ticket 502 (voice on the TV, not the headset). Windows keeps two "default" devices:
+// eConsole (Sound settings' "Default Device") and eCommunications ("Default Communications Device", the role
+// Microsoft's ERole documentation gives to voice communications). "Default" used kDefaultDevice, which the ADM
+// maps to eConsole (Source: webrtc-sdk m144_release modules/audio_device/win/audio_device_core_win.cc:1452
+// SetPlayoutDevice(WindowsDeviceType), :675 InitSpeaker, :1718 SetRecordingDevice, :747 InitMicrophone), so with
+// a TV on HDMI as the console default and a headset as the communications default, voice went to the TV.
+// Voice now uses the communications default, as secondlife/viewer develop does since 71d2d15245 ("Use
+// communications devices/scheme"). Values: api/audio/audio_device.h:55 (kDefaultCommunicationDevice = -1,
+// kDefaultDevice = -2). Stock Firestorm still uses kDefaultDevice here.
+static int16_t PLAYOUT_DEVICE_DEFAULT = webrtc::AudioDeviceModule::kDefaultCommunicationDevice;
+static int16_t RECORD_DEVICE_DEFAULT  = webrtc::AudioDeviceModule::kDefaultCommunicationDevice;
+// </WolfViewer>
 #else
 static int16_t PLAYOUT_DEVICE_DEFAULT = 0;
 static int16_t RECORD_DEVICE_DEFAULT  = 0;
+#endif
+
+// <WolfViewer 2026-11-03/> ticket 502: the saved value meaning "the system default" (llpanelvoicedevicesettings.cpp
+// DEFAULT_DEVICE); an empty value (nothing saved yet) also ends up on the default in workerDeployDevices().
+static bool isDefaultDeviceSelection(const std::string& id)
+{
+    return id.empty() || id == "Default";
+}
+
+// <WolfViewer 2026-11-03/> ticket 502: whether the selected device would be found by workerDeployDevices() in
+// this list. "Default" is always available.
+static bool isDeviceSelectionPresent(const LLWebRTCVoiceDeviceList& list, const std::string& id)
+{
+    if (isDefaultDeviceSelection(id))
+    {
+        return true;
+    }
+    return std::any_of(list.begin(), list.end(), [&id](const LLWebRTCVoiceDevice& device) { return device.mID == id; });
+}
+
+#if WEBRTC_WIN
+// <WolfViewer 2026-11-03> ticket 502: follow Windows' default communications device while the viewer runs.
+// The ADM registers its own IMMNotificationClient, but its OnDefaultDeviceChanged only logs, and only
+// OnDeviceStateChanged reaches AudioDeviceObserver::OnDevicesUpdated (Source: webrtc-sdk m144_release
+// modules/audio_device/win/audio_device_core_win.cc:3901-3920), so a change of default in Windows was never seen.
+// The callbacks come on an MMDevAPI thread and must not block, so this only posts work to the worker thread.
+class LLWebRTCDefaultDeviceWatcher final : public IMMNotificationClient
+{
+public:
+    // Worker thread (COM there is MTA: the ADM made on that thread holds ScopedCOMInitializer::kMTA,
+    // audio_device_core_win.cc:339; CoInitializeEx below is balanced in stop()). Returns nullptr on failure.
+    static LLWebRTCDefaultDeviceWatcher* start(LLWebRTCImpl* owner)
+    {
+        HRESULT com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+        IMMDeviceEnumerator* enumerator = nullptr;
+        HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+                                      __uuidof(IMMDeviceEnumerator), reinterpret_cast<void**>(&enumerator));
+        if (FAILED(hr) || !enumerator)
+        {
+            if (SUCCEEDED(com))
+            {
+                CoUninitialize();
+            }
+            return nullptr;
+        }
+        LLWebRTCDefaultDeviceWatcher* watcher = new LLWebRTCDefaultDeviceWatcher(owner, enumerator, SUCCEEDED(com));
+        if (FAILED(enumerator->RegisterEndpointNotificationCallback(watcher)))
+        {
+            watcher->stop();
+            return nullptr;
+        }
+        watcher->mRegistered = true;
+        return watcher;
+    }
+
+    // Worker thread. After this no callback reaches the owner; releases this object.
+    void stop()
+    {
+        {
+            std::lock_guard<std::mutex> lock(mOwnerMutex);
+            mOwner = nullptr;
+        }
+        if (mRegistered)
+        {
+            mEnumerator->UnregisterEndpointNotificationCallback(this);
+            mRegistered = false;
+        }
+        mEnumerator->Release();
+        mEnumerator = nullptr;
+        if (mComInitialised)
+        {
+            CoUninitialize();
+        }
+        Release();
+    }
+
+    // IMMNotificationClient
+    HRESULT STDMETHODCALLTYPE OnDefaultDeviceChanged(EDataFlow flow, ERole role, LPCWSTR) override
+    {
+        // Only the role "Default" uses (PLAYOUT_DEVICE_DEFAULT / RECORD_DEVICE_DEFAULT above).
+        if (role == eCommunications && (flow == eRender || flow == eCapture))
+        {
+            std::lock_guard<std::mutex> lock(mOwnerMutex);
+            if (mOwner)
+            {
+                mOwner->onSystemDefaultDeviceChanged(flow == eRender);
+            }
+        }
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE OnDeviceStateChanged(LPCWSTR, DWORD) override { return S_OK; }
+    HRESULT STDMETHODCALLTYPE OnDeviceAdded(LPCWSTR) override { return S_OK; }
+    HRESULT STDMETHODCALLTYPE OnDeviceRemoved(LPCWSTR) override { return S_OK; }
+    HRESULT STDMETHODCALLTYPE OnPropertyValueChanged(LPCWSTR, const PROPERTYKEY) override { return S_OK; }
+
+    // IUnknown
+    ULONG STDMETHODCALLTYPE AddRef() override
+    {
+        return static_cast<ULONG>(InterlockedIncrement(&mRefCount));
+    }
+    ULONG STDMETHODCALLTYPE Release() override
+    {
+        const LONG count = InterlockedDecrement(&mRefCount);
+        if (count == 0)
+        {
+            delete this;
+        }
+        return static_cast<ULONG>(count);
+    }
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** object) override
+    {
+        if (!object)
+        {
+            return E_POINTER;
+        }
+        if (riid == __uuidof(IUnknown) || riid == __uuidof(IMMNotificationClient))
+        {
+            *object = static_cast<IMMNotificationClient*>(this);
+            AddRef();
+            return S_OK;
+        }
+        *object = nullptr;
+        return E_NOINTERFACE;
+    }
+
+private:
+    LLWebRTCDefaultDeviceWatcher(LLWebRTCImpl* owner, IMMDeviceEnumerator* enumerator, bool com_initialised) :
+        mOwner(owner),
+        mEnumerator(enumerator),
+        mComInitialised(com_initialised)
+    {
+    }
+    ~LLWebRTCDefaultDeviceWatcher() = default;
+
+    volatile LONG        mRefCount = 1;
+    std::mutex           mOwnerMutex;
+    LLWebRTCImpl*        mOwner;
+    IMMDeviceEnumerator* mEnumerator;
+    bool                 mComInitialised;
+    bool                 mRegistered = false;
+};
+// </WolfViewer>
 #endif
 
 
@@ -324,6 +480,9 @@ void LLWebRTCImpl::init()
                 webrtc::CreateAudioDeviceModule(mEnv, webrtc::AudioDeviceModule::AudioLayer::kPlatformDefaultAudio);
             mDeviceModule = webrtc::make_ref_counted<LLWebRTCAudioDeviceModule>(realADM);
             mDeviceModule->SetObserver(this);
+#if WEBRTC_WIN
+            mDefaultDeviceWatcher = LLWebRTCDefaultDeviceWatcher::start(this);   // <WolfViewer 2026-11-03/> ticket 502
+#endif
         });
 
     // The custom processor allows us to retrieve audio data (and levels)
@@ -413,8 +572,18 @@ void LLWebRTCImpl::terminate()
     mWorkerThread->BlockingCall(
         [this]()
         {
+#if WEBRTC_WIN
+            // <WolfViewer 2026-11-03/> ticket 502: no default-device callbacks once the threads are going.
+            if (mDefaultDeviceWatcher)
+            {
+                mDefaultDeviceWatcher->stop();
+                mDefaultDeviceWatcher = nullptr;
+            }
+#endif
             if (mDeviceModule)
             {
+                // <WolfViewer 2026-11-03/> ticket 502: OnDevicesUpdated() posts to mWorkerThread, which goes below.
+                mDeviceModule->SetObserver(nullptr);
                 mDeviceModule->Terminate();
             }
             mDeviceModule     = nullptr;
@@ -490,9 +659,22 @@ void LLWebRTCImpl::unsetDevicesObserver(LLWebRTCDevicesObserver *observer)
     }
 }
 
+// <WolfViewer 2026-11-03> ticket 502: ends a workerDeployDevices() turn that did not reach the signalling-thread
+// task at its end (which does the same fetch_sub), so a failed pass no longer blocks every later deployDevices().
+// Worker thread.
+void LLWebRTCImpl::workerFinishDeployTurn()
+{
+    if (1 < mDevicesDeploying.fetch_sub(1, std::memory_order_relaxed))
+    {
+        mWorkerThread->PostTask([this] { workerDeployDevices(); });
+    }
+}
+// </WolfViewer>
+
 // must be run in the worker thread.
 void LLWebRTCImpl::workerDeployDevices()
 {
+    bool turnHandedOn = false;   // <WolfViewer 2026-11-03/> ticket 502: see workerFinishDeployTurn()
     // <FS:minerjr> [FIRE-36022] - Removing my USB headset crashes entire viewer
     try // Try catch needed for uniquie lock as will throw an exception if a second lock is attempted or the mutex is invalid
     {
@@ -502,6 +684,10 @@ void LLWebRTCImpl::workerDeployDevices()
     // Prevents threads from interacting with the hardware at the same time as other audio/voice threads.
     if (!lock.owns_lock())
     {
+        // <WolfViewer 2026-11-03> ticket 502: "try again another pass" never happened - this turn kept
+        // mDevicesDeploying above zero, so deployDevices() dropped every later device choice. Retry, keeping the turn.
+        mWorkerThread->PostDelayedTask([this] { workerDeployDevices(); }, webrtc::TimeDelta::Millis(250));
+        // </WolfViewer>
         return;
     }
     // </FS:minerjr> [FIRE-36022]
@@ -511,6 +697,7 @@ void LLWebRTCImpl::workerDeployDevices()
         // If the device is not avaiable, then make sure the flag for the WebRTC updated devices flag is turned off for the co-routine
         gWebRTCUpdateDevices = false;
         // </FS:minerjr> [FIRE-36022] - Removing my USB headset crashes entire viewer
+        workerFinishDeployTurn();   // <WolfViewer 2026-11-03/> ticket 502: give the turn back
         return;
     }
 
@@ -606,6 +793,7 @@ void LLWebRTCImpl::workerDeployDevices()
     // Finally signal to the co-routine everyting is OK.
     gWebRTCUpdateDevices = false;
     // </FS:minerjr> [FIRE-36022]
+    turnHandedOn = true;   // <WolfViewer 2026-11-03/> ticket 502: the task below ends this turn
     mSignalingThread->PostTask(
         [this]
         {
@@ -648,6 +836,7 @@ void LLWebRTCImpl::workerDeployDevices()
         }
         // Device no longer being interacted with
         gWebRTCUpdateDevices = false;
+        if (!turnHandedOn) workerFinishDeployTurn();   // <WolfViewer 2026-11-03/> ticket 502
         return;
     }
     catch (const std::exception& e)
@@ -655,6 +844,7 @@ void LLWebRTCImpl::workerDeployDevices()
         mLogSink->OnLogMessage(std::string("Excepton: WebRTC: ") + e.what());
         // Device no longer being interacted with
         gWebRTCUpdateDevices = false;
+        if (!turnHandedOn) workerFinishDeployTurn();   // <WolfViewer 2026-11-03/> ticket 502
         return;
     }
     // </FS:minerjr> [FIRE-36022]
@@ -691,6 +881,8 @@ void LLWebRTCImpl::updateDevices()
     // Prevents threads from interacting with the hardware at the same time as other audio/voice threads.
     if (!lock.owns_lock())
     {
+        // <WolfViewer 2026-11-03/> ticket 502: a device change must not be lost - enumerate again shortly.
+        mWorkerThread->PostDelayedTask([this] { updateDevices(); }, webrtc::TimeDelta::Millis(250));
         return;
     }
     // </FS:minerjr> [FIRE-36022]
@@ -698,6 +890,14 @@ void LLWebRTCImpl::updateDevices()
     {
         return;
     }
+
+    // <WolfViewer 2026-11-03> ticket 502: whether the chosen devices were in the old lists, so a chosen device that
+    // was missing when it was applied (headset switched on after log-in, or applied before the first enumeration)
+    // is applied once it appears, and one that goes away falls back to the default. Before this the device was
+    // never re-applied: setRenderDevice()/setCaptureDevice() skip an unchanged id, and nothing else redeployed.
+    const bool playoutWasPresent   = isDeviceSelectionPresent(mPlayoutDeviceList, mPlayoutDevice);
+    const bool recordingWasPresent = isDeviceSelectionPresent(mRecordingDeviceList, mRecordingDevice);
+    // </WolfViewer>
 
     // <FS:minerjr> [FIRE-36022] - Removing my USB headset crashes entire viewer
     // Flag the device is being interacted with for the Co-routine in case something goes wrong.
@@ -739,6 +939,45 @@ void LLWebRTCImpl::updateDevices()
         mRecordingDeviceList.emplace_back(name, guid);
     }
 
+    // <WolfViewer 2026-11-03> ticket 502: on Linux "Default" opens PulseAudio's default at InitPlayout /
+    // InitRecording time (a null device name: audio_device_pulse_linux.cc:2105-2147), and the ADM reports no device
+    // changes, so a new server default is picked up here, when the list is refreshed. macOS needs nothing: its ADM
+    // restarts a running index-0 stream itself (audio_device_mac.cc HandleDefaultOutputDeviceChange /
+    // HandleDefaultInputDeviceChange); Windows: LLWebRTCDefaultDeviceWatcher.
+    bool defaultChanged = false;
+#if WEBRTC_LINUX
+    {
+        char name[webrtc::kAdmMaxDeviceNameSize];
+        char guid[webrtc::kAdmMaxGuidSize];
+        std::string playoutDefault;
+        std::string recordingDefault;
+        if (renderDeviceCount > 0 && mDeviceModule->PlayoutDeviceName(0, name, guid) == 0)
+        {
+            playoutDefault = name;
+        }
+        if (captureDeviceCount > 0 && mDeviceModule->RecordingDeviceName(0, name, guid) == 0)
+        {
+            recordingDefault = name;
+        }
+        defaultChanged = (isDefaultDeviceSelection(mPlayoutDevice) && !mDefaultPlayoutName.empty()
+                          && !playoutDefault.empty() && playoutDefault != mDefaultPlayoutName)
+                      || (isDefaultDeviceSelection(mRecordingDevice) && !mDefaultRecordingName.empty()
+                          && !recordingDefault.empty() && recordingDefault != mDefaultRecordingName);
+        if (!playoutDefault.empty())
+        {
+            mDefaultPlayoutName = playoutDefault;
+        }
+        if (!recordingDefault.empty())
+        {
+            mDefaultRecordingName = recordingDefault;
+        }
+    }
+#endif
+    const bool redeploy = defaultChanged
+                       || playoutWasPresent != isDeviceSelectionPresent(mPlayoutDeviceList, mPlayoutDevice)
+                       || recordingWasPresent != isDeviceSelectionPresent(mRecordingDeviceList, mRecordingDevice);
+    // </WolfViewer>
+
     // <FS:minerjr> [FIRE-36022] - Removing my USB headset crashes entire viewer
     // Flag the device is no longer being interacted with for the Co-routine in case something goes wrong.
     gWebRTCUpdateDevices = false;
@@ -746,6 +985,10 @@ void LLWebRTCImpl::updateDevices()
     for (auto &observer : mVoiceDevicesObserverList)
     {
         observer->OnDevicesChanged(mPlayoutDeviceList, mRecordingDeviceList);
+    }
+    if (redeploy)
+    {
+        deployDevices();   // <WolfViewer 2026-11-03/> ticket 502 (posts workerDeployDevices, which takes the lock itself)
     }
     // <FS:minerjr> [FIRE-36022] - Removing my USB headset crashes entire viewer
     }
@@ -783,8 +1026,30 @@ void LLWebRTCImpl::updateDevices()
 
 void LLWebRTCImpl::OnDevicesUpdated()
 {
-    updateDevices();
+    // <WolfViewer 2026-11-03> ticket 502: the ADM calls this on its own notification thread (Windows MMDevAPI:
+    // audio_device_core_win.cc:3903; macOS CoreAudio listener: audio_device_mac.cc:1945), where updateDevices()
+    // raced the worker thread over mPlayoutDeviceList / mRecordingDeviceList. Run it on the worker thread, as
+    // secondlife/viewer develop llwebrtc.cpp OnDevicesUpdated() does.
+    mWorkerThread->PostTask([this] { updateDevices(); });
+    // </WolfViewer>
 }
+
+#if WEBRTC_WIN
+// <WolfViewer 2026-11-03> ticket 502: Windows' default communications device changed (LLWebRTCDefaultDeviceWatcher,
+// MMDevAPI thread). Only a "Default" selection follows it; a chosen device stays where it is.
+void LLWebRTCImpl::onSystemDefaultDeviceChanged(bool render)
+{
+    mWorkerThread->PostTask(
+        [this, render]
+        {
+            if (isDefaultDeviceSelection(render ? mPlayoutDevice : mRecordingDevice))
+            {
+                deployDevices();
+            }
+        });
+}
+// </WolfViewer>
+#endif
 
 
 void LLWebRTCImpl::setTuningMode(bool enable)

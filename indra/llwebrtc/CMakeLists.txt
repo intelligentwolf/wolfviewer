@@ -41,6 +41,7 @@ if (WINDOWS)
                                        strmiids
                                        iphlpapi
                                        crypt32   # <WolfViewer 2026-09-26/> m144 platform_certificate_verifier_win (CertOpenStore etc.)
+                                       ole32     # <WolfViewer 2026-11-03/> ticket 502 default-device watcher (CoInitializeEx, CoCreateInstance)
                                        libcmt)
     # as the webrtc libraries are release, build this binary as release as well.
     target_compile_options(llwebrtc PRIVATE "/MT" "/Zc:wchar_t")

@@ -25,6 +25,7 @@
 #include "llcheckboxctrl.h"
 #include "llchat.h"
 #include "llcorehttputil.h"
+#include "llfloater.h"   // [TICKET 481 2026-11-03/] layout() grows the window
 #include "llcoros.h"
 #include "lleventcoro.h"
 #include "llframetimer.h"
@@ -37,7 +38,7 @@
 #include "rlvactions.h"
 #include "rlvhandler.h"
 #include "wolfgrid.h"
-#include "wolfregionweather.h"   // [BIRDS 2026-11-02/] setBirdsLocal
+#include "wolfregionweather.h"   // [BIRDS 2026-11-02/] setBirdsLocal; [NATURE SOUNDS 2026-11-03/] setSoundsLocal
 
 // Source: fsnearbychathub.cpp:107 (declared as wolfnpc.cpp:201 declares it) - the viewer's own chat path, so RLV's channel
 // rules apply; nothing is added to the resident's chat history
@@ -81,11 +82,63 @@ namespace
         return LlsdFromJson(v);
     }
 
+    /** [NATURE SOUNDS 2026-11-03] Which switch a save is for (wolf_ambient.php set {what}). */
+    enum What { PLANES, BIRDS, SOUNDS };
+
     void set_status(const std::string& msg, bool error, bool from_read = false)
     {
         sState.mStatus = msg;
         sState.mStatusError = error;
         sState.mStatusFromRead = from_read;
+    }
+
+    /** [TICKET 481 2026-11-03] Buzzy Cnayl: the planes' and birds' texts overlapped (fixed-height boxes, and the wrapped text
+     *  ran past them). Stacks the Wolf block top-down from the planes box (panel_region_general.xml): each text box as tall
+     *  as its wrapped text (LLTextBase::getTextBoundingRect reflows it at the box's width), at any font size; then, if the
+     *  stack would run past the bottom of the panel, the window grows by the difference (the tab container makes every tab
+     *  follow the window, and these controls follow the top, so nothing else moves). */
+    void layout(LLPanel* panel)
+    {
+        LLView* anchor = panel->findChildView("wolf_planes_check");
+        if (!anchor || !anchor->getVisible()) return;
+        constexpr S32 AFTER_CHECK = 1, AFTER_TEXT = 5, BOTTOM_MARGIN = 8, MIN_TEXT = 14;
+        S32 top = anchor->getRect().mBottom - AFTER_CHECK;   // panel coordinates: y grows upwards
+        auto place = [&top](LLView* v, S32 height, S32 gap)
+        {
+            LLRect r = v->getRect();
+            r.setLeftTopAndSize(r.mLeft, top, r.getWidth(), height);
+            v->setShape(r);
+            top = r.mBottom - gap;
+        };
+        auto text = [&](const char* name, S32 gap)
+        {
+            LLTextBox* t = panel->findChild<LLTextBox>(name);
+            if (!t) return;
+            const bool empty = t->getText().empty();
+            place(t, empty ? 0 : llmax(MIN_TEXT, t->getTextPixelHeight() + 2), empty ? 0 : gap);
+        };
+        auto check = [&](const char* name)
+        {
+            if (LLView* c = panel->findChildView(name)) place(c, c->getRect().getHeight(), AFTER_CHECK);
+        };
+        text("wolf_planes_state", 0);
+        text("wolf_planes_note", AFTER_TEXT);
+        check("wolf_birds_check");
+        text("wolf_birds_state", AFTER_TEXT);
+        check("wolf_sounds_check");
+        text("wolf_sounds_state", AFTER_TEXT);
+        text("wolf_planes_status", 0);
+        const S32 short_by = BOTTOM_MARGIN - top;   // top is now the stack's bottom edge; 0 is the panel's bottom
+        if (short_by > 0)
+        {
+            LLFloater* floater = panel->getParentByType<LLFloater>();
+            if (floater && !floater->isMinimized())   // a minimised window's panel is squeezed: never grow it then
+            {
+                LLRect fr = floater->getRect();
+                fr.mBottom -= short_by;   // the top stays where it is
+                floater->setShape(fr);
+            }
+        }
     }
 
     std::string str(LLPanel* panel, const char* name)
@@ -122,6 +175,22 @@ namespace
         return str(panel, on ? "birds_on_default" : "birds_off_default");
     }
 
+    /** [NATURE SOUNDS 2026-11-03] "Nature sounds on this region": the reply's `sounds` block {ambient, default (false), on}
+     *  (wolf_ambient.php view/set, wolf_ambient_lib.php wa_sounds_block); absent from an older grid: line empty, box greyed. */
+    bool have_sounds()
+    {
+        return sState.mHave && sState.mReply["sounds"].isMap() && sState.mReply["sounds"]["on"].isBoolean();
+    }
+
+    std::string sounds_line(LLPanel* panel)
+    {
+        if (!have_sounds()) return std::string();
+        const LLSD& b = sState.mReply["sounds"];
+        const bool on = b["on"].asBoolean();
+        if (b["ambient"].isBoolean()) return str(panel, on ? "sounds_on_chosen" : "sounds_off_chosen");
+        return str(panel, "sounds_off_default");   // nobody has chosen: off (there is no other default)
+    }
+
     void write_controls(LLPanel* panel)
     {
         LLCheckBoxCtrl* check = panel->findChild<LLCheckBoxCtrl>("wolf_planes_check");
@@ -143,16 +212,30 @@ namespace
             birds_state->setEnabled(true);
             birds_state->setText(birds_line(panel));
         }
+        // [NATURE SOUNDS 2026-11-03] the nature sounds box, its line and its own status line, from the same reply
+        if (LLCheckBoxCtrl* sounds = panel->findChild<LLCheckBoxCtrl>("wolf_sounds_check"))
+        {
+            sounds->set(have_sounds() && sState.mReply["sounds"]["on"].asBoolean());
+            sounds->setEnabled(may && !sState.mBusy && have_sounds());
+        }
+        if (LLTextBox* sounds_state = panel->findChild<LLTextBox>("wolf_sounds_state"))
+        {
+            sounds_state->setEnabled(true);
+            sounds_state->setText(sounds_line(panel));
+        }
         // setCtrlsEnabled greys every child for someone who may not manage the estate; these lines must stay readable.
         state->setEnabled(true);
         note->setEnabled(true);
         status->setEnabled(true);
         state->setText(state_line(panel));
-        std::string msg = sState.mStatus;
-        if (msg.empty() && sState.mHave && !may) msg = str(panel, "planes_not_yours");
-        status->setText(msg);
         // Same colours as the Automatic Environment tab (wolfautoenvironment.cpp:185 setStatus): a failure must be readable.
-        status->setColor(sState.mStatusError ? LLColor4(0.88f, 0.33f, 0.28f, 1.f) : LLColor4(0.79f, 0.64f, 0.15f, 1.f));
+        const LLColor4 colour = sState.mStatusError ? LLColor4(0.88f, 0.33f, 0.28f, 1.f) : LLColor4(0.79f, 0.64f, 0.15f, 1.f);
+        const std::string not_yours = (sState.mHave && !may) ? str(panel, "planes_not_yours") : std::string();
+        std::string msg = sState.mStatus;
+        if (msg.empty()) msg = not_yours;
+        status->setText(msg);
+        status->setColor(colour);
+        layout(panel);   // [TICKET 481 2026-11-03/] the texts may have changed height
     }
 
     LLSD post_and_wait(const std::string& body, bool save, LLCore::HttpStatus& status)
@@ -186,12 +269,13 @@ namespace
         return "the service returned an unreadable reply";
     }
 
-    std::string request_body(const char* action, const LLUUID& region, int ambient, bool birds = false)
+    std::string request_body(const char* action, const LLUUID& region, int ambient, What what = PLANES)
     {
         boost::json::object o;
         o["action"] = action;
         o["region"] = region.asString();
-        if (birds) o["what"] = "birds";   // [BIRDS 2026-11-02/] wolf_ambient.php set {what: "birds"}
+        if (what == BIRDS) o["what"] = "birds";    // [BIRDS 2026-11-02/] wolf_ambient.php set {what: "birds"}
+        if (what == SOUNDS) o["what"] = "sounds";  // [NATURE SOUNDS 2026-11-03/] wolf_ambient.php set {what: "sounds"}
         if (ambient >= 0) o["ambient"] = ambient == 1;
         return boost::json::serialize(o);
     }
@@ -237,10 +321,12 @@ namespace
         if (panel) write_controls(panel);
     }
 
-    void save_coro(LLHandle<LLPanel> handle, LLUUID region, bool on, bool birds, U64 serial)
+    void save_coro(LLHandle<LLPanel> handle, LLUUID region, bool on, What what, U64 serial)
     {
+        const bool birds = (what == BIRDS);
+        const bool sounds = (what == SOUNDS);   // [NATURE SOUNDS 2026-11-03/]
         LLCore::HttpStatus status;
-        const LLSD reply = post_and_wait(request_body("set", region, on ? 1 : 0, birds), true, status);
+        const LLSD reply = post_and_wait(request_body("set", region, on ? 1 : 0, what), true, status);
         const bool ok = status && reply.isMap() && reply["success"].asBoolean();
         LLPanel* panel = handle.get();
         if (!ok)
@@ -249,7 +335,8 @@ namespace
             // [BIRDS 2026-11-02] Always, not only with the window closed: the status line under the two boxes is 44 high and
             // a long refusal would be cut off there; the alert keeps the whole text, to read and copy.
             LLNotificationsUtil::add("GenericAlertOK", LLSD().with("MESSAGE",
-                std::string(birds ? "Could not save birds: " : "Could not save passing planes: ") + why_failed(status, reply)));
+                std::string(birds ? "Could not save birds: " : sounds ? "Could not save nature sounds: " : "Could not save passing planes: ")
+                + why_failed(status, reply)));
         }
         if (sState.mSerial != serial) return;
         sState.mBusy = false;
@@ -257,13 +344,27 @@ namespace
         {
             if (panel)
             {
-                set_status(str(panel, birds ? "birds_save_failed" : "planes_save_failed") + " " + why_failed(status, reply), true);
+                set_status(str(panel, birds ? "birds_save_failed" : sounds ? "sounds_save_failed" : "planes_save_failed") + " "
+                           + why_failed(status, reply), true);
                 write_controls(panel);   // the check box goes back to what the grid has
             }
             return;
         }
         sState.mReply = reply;
         sState.mHave = true;
+        if (sounds)
+        {
+            // [NATURE SOUNDS 2026-11-03] No plugin to tell: every viewer here reads it from weather.php within the minute.
+            // This viewer plays (or stops) now; the climate for the insects comes with the next weather read.
+            const bool saved_on = have_sounds() && sState.mReply["sounds"]["on"].asBoolean();
+            if (WolfRegionWeather::instanceExists()) WolfRegionWeather::instance().setSoundsLocal(region, saved_on);
+            if (panel)
+            {
+                set_status(str(panel, saved_on ? "sounds_saved_on" : "sounds_saved_off"), false);
+                write_controls(panel);
+            }
+            return;
+        }
         if (birds)
         {
             // [BIRDS 2026-11-02] No plugin to tell: the viewers draw the birds from weather.php, which every viewer here
@@ -295,13 +396,15 @@ namespace
         }
     }
 
-    void on_commit(LLHandle<LLPanel> handle, bool birds)
+    void on_commit(LLHandle<LLPanel> handle, What what)
     {
         LLPanel* panel = handle.get();
         if (!panel) return;
-        LLCheckBoxCtrl* check = panel->findChild<LLCheckBoxCtrl>(birds ? "wolf_birds_check" : "wolf_planes_check");
+        LLCheckBoxCtrl* check = panel->findChild<LLCheckBoxCtrl>(
+            what == BIRDS ? "wolf_birds_check" : what == SOUNDS ? "wolf_sounds_check" : "wolf_planes_check");
         if (!check) return;
-        if (sState.mBusy || !sState.mHave || !sState.mReply["mayChange"].asBoolean() || (birds && !have_birds()))
+        if (sState.mBusy || !sState.mHave || !sState.mReply["mayChange"].asBoolean() || (what == BIRDS && !have_birds())
+            || (what == SOUNDS && !have_sounds()))
         {
             write_controls(panel);
             return;
@@ -312,7 +415,7 @@ namespace
         sState.mBusy = true;
         set_status(str(panel, "planes_saving"), false);
         write_controls(panel);
-        LLCoros::instance().launch("WolfPassingPlanesSave", [handle, region, on, birds, serial]() { save_coro(handle, region, on, birds, serial); });
+        LLCoros::instance().launch("WolfPassingPlanesSave", [handle, region, on, what, serial]() { save_coro(handle, region, on, what, serial); });
     }
 }
 
@@ -321,11 +424,15 @@ void WolfPassingPlanes::postBuild(LLPanel* panel)
     LLHandle<LLPanel> handle = panel->getHandle();
     if (LLCheckBoxCtrl* check = panel->findChild<LLCheckBoxCtrl>("wolf_planes_check"))
     {
-        check->setCommitCallback([handle](LLUICtrl*, const LLSD&) { on_commit(handle, false); });
+        check->setCommitCallback([handle](LLUICtrl*, const LLSD&) { on_commit(handle, PLANES); });
     }
     if (LLCheckBoxCtrl* birds = panel->findChild<LLCheckBoxCtrl>("wolf_birds_check"))   // [BIRDS 2026-11-02/]
     {
-        birds->setCommitCallback([handle](LLUICtrl*, const LLSD&) { on_commit(handle, true); });
+        birds->setCommitCallback([handle](LLUICtrl*, const LLSD&) { on_commit(handle, BIRDS); });
+    }
+    if (LLCheckBoxCtrl* sounds = panel->findChild<LLCheckBoxCtrl>("wolf_sounds_check"))   // [NATURE SOUNDS 2026-11-03/]
+    {
+        sounds->setCommitCallback([handle](LLUICtrl*, const LLSD&) { on_commit(handle, SOUNDS); });
     }
 }
 
@@ -335,7 +442,8 @@ void WolfPassingPlanes::sync(LLPanel* panel, LLViewerRegion* region, bool reread
     // Wolf Territories' own: gone (not greyed) elsewhere, as the Region tab's Adult Content link (processRegionInfo).
     const bool wolf = WolfGrid::isOnWolfTerritories() && region;
     for (const char* name : { "wolf_planes_check", "wolf_planes_state", "wolf_planes_note", "wolf_planes_status",
-                              "wolf_birds_check", "wolf_birds_state" })
+                              "wolf_birds_check", "wolf_birds_state",
+                              "wolf_sounds_check", "wolf_sounds_state" })   // [NATURE SOUNDS 2026-11-03/]
     {
         if (LLView* v = panel->findChildView(name)) v->setVisible(wolf);
     }

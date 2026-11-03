@@ -1897,6 +1897,14 @@
             <menu_item_check.on_click function="ToggleControl" parameter="WolfViewerBirds" />
             <menu_item_check.on_visible function="WolfGrid.ShowsWolfRegionWeather" />
         </menu_item_check>
+        <!-- [NATURE SOUNDS 2026-11-03] ticket 475: night insects, lapping by still water and surf at the shore
+             (wolfnaturesounds.cpp), your own on/off; the region owner's is in Region/Estate > Region. They follow the
+             Ambient volume. -->
+        <menu_item_check label="Nature Sounds" name="WolfNatureSounds">
+            <menu_item_check.on_check function="CheckControl" parameter="WolfViewerNatureSounds" />
+            <menu_item_check.on_click function="ToggleControl" parameter="WolfViewerNatureSounds" />
+            <menu_item_check.on_visible function="WolfGrid.ShowsWolfRegionWeather" />
+        </menu_item_check>
         <!-- [WOLF COMPASS 2026-10-16] wolffloatercompass.cpp: a Victorian compass showing North
              and the way you are moving. Every grid. Paul: "anything wolf viewer should be under wolf world". -->
         <menu_item_check label="Tessa's Compass" name="WolfCompass">

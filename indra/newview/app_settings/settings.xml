@@ -19869,6 +19869,17 @@ Change of this parameter will affect the layout of buttons in notification toast
 			<key>Value</key>
 			<integer>1</integer>
 		</map>
+		<key>WolfViewerNatureSounds</key>
+		<map>
+			<key>Comment</key>
+			<string>[NATURE SOUNDS 2026-11-03] Play the nature sounds of Wolf Territories regions whose owner has turned them on: crickets on warm nights, soft lapping by still water and waves at the shore. They follow the Ambient volume. Off means no nature sounds for you only.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>1</integer>
+		</map>
 		<key>WolfViewerBirdsSound</key>
 		<map>
 			<key>Comment</key>

@@ -143,7 +143,8 @@ public:
     bool hasConformingMesh() const { return mMesh != nullptr; }
     // <WolfViewer 2026-09-21> The lattice this plane was last tessellated with, for the water
     // shader's wave band limit: xy = the agent-space camera position updateGeometry graded it
-    // about, zw = the per-axis step scale the U16 vertex cap forced (see wolf_graded_axis).
+    // about, zw = the per-axis step scale, 1 since the vertex cap trims the far end instead of
+    // thinning the axis ([T508 2026-11-04], see wolf_graded_axis).
     // zw = 0 means this surface has no graded lattice (a conforming stream mesh, or opaque
     // legacy water, neither of which runs the wave shader).
     const LLVector4& getWolfLatticeGrade() const { return mWolfLatticeGrade; }

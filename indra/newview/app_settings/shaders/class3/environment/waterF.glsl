@@ -459,6 +459,54 @@ float swellFoldFraction(vec2 p, float back)
     return clamp((1.0 - J) / 0.2125, 0.0, 1.0);
 }
 
+// [T508 2026-11-04] The swell's slope that the GEOMETRY no longer carries. class1 waterV.glsl band-limits each Gerstner
+// train to the water lattice (wolfLatticeRes: 1 from 6 vertices a wave, 0 at 3) and its slope with it, so the vertex
+// stage's vary_wave_slope holds only the drawable share (res x slope). This puts back (1 - res) x slope of the three
+// dominant trains, per pixel, where no lattice can alias it: the sea out there shades as rough as it did, it just no
+// longer heaves on vertices too far apart to draw it (ticket 508, "the irish sea is wobbling like jelly"). Same
+// trains, directions, phase and amplitude (vSwell.x is the unlimited height) as waterV.glsl w1..w3 / gerstnerSlope; the
+// lattice rule is waterV.glsl wolfLatticeStep (llvowater.cpp wolf_graded_axis), taken here at the fragment. Not
+// mirrored: the cascades (the fragment reads them at full detail already) and the short trains w4..w8 (normal maps).
+uniform vec4 wolfLatticeGrade;   // as waterV.glsl: xy the camera the lattice was graded about, zw the step scale; z <= 0 none
+vec2 wolfSwellSlopeLost(vec2 p)
+{
+    if (wolfLatticeGrade.z <= 0.0 || wolfLatticeGrade.w <= 0.0 || vSwell.x <= 0.0)
+    {
+        return vec2(0.0);
+    }
+    vec2 sv = clamp(abs(p - wolfLatticeGrade.xy) * 0.04, 2.0, 128.0) * wolfLatticeGrade.zw;
+    float vstep = max(sv.x, sv.y);
+    float baseWl = 1.0 / (waveFrequency + 0.001);
+    float jit = vSwell.y;
+    vec2 d1 = normalize(waveDir1);
+    if (wolfSwellHalf > 0.0)
+    {
+        vec2 rel = p - wolfSwellCentre;
+        float r = length(rel);
+        if (r > 0.5)
+        {
+            d1 = -rel / r;
+        }
+        p = rel;
+    }
+    vec2 d2 = vec2(d1.x * 0.819 - d1.y * 0.574, d1.x * 0.574 + d1.y * 0.819);
+    vec2 d3 = vec2(d1.x * 0.5 + d1.y * 0.866, -d1.x * 0.866 + d1.y * 0.5);
+    vec2 dirs[3] = vec2[3](d1, d2, d3);
+    vec3 wl = vec3(baseWl * 2.0 * jit, baseWl * 1.5 * jit, baseWl * 1.2);   // drawn (jittered) lengths
+    vec3 wlT = vec3(baseWl * 2.0, baseWl * 1.5, baseWl * 1.2);              // the temporal phase's (wolfSwellPhaseT)
+    vec3 amp = vec3(vSwell.x * 0.4, vSwell.x * 0.3, vSwell.x * 0.25);
+    vec2 lost = vec2(0.0);
+    for (int i = 0; i < 3; ++i)
+    {
+        float keep = smoothstep(3.0, 6.0, wl[i] / vstep);
+        if (keep >= 1.0) continue;
+        float k = 6.28318 / wl[i];
+        float f = mod(k * dot(dirs[i], p) - sqrt(9.8 * (6.28318 / wlT[i]) / (waveFrequency + 0.001)) * wolfSeaClock.x, 6.2831853);
+        lost += dirs[i] * (amp[i] * k * cos(f)) * (1.0 - keep);
+    }
+    return lost;
+}
+
 float swellWhitecap(vec2 p, float back)
 {
     float baseWl = 1.0 / (waveFrequency + 0.001);
@@ -521,7 +569,7 @@ void main()
     // against this same formula: the raw slope of a gentle swell is around 0.05, which is
     // an order of magnitude below the normal-map detail it has to compete with, and at
     // unity gain the swell simply does not register in the lighting.
-    wavef.xy += -vary_wave_slope * 2.5;
+    wavef.xy += -(vary_wave_slope + wolfSwellSlopeLost(vary_world_pos.xy)) * 2.5;   // [T508 2026-11-04/] + the band-limited share
     // <WolfViewer> waterfall: replace the still-water ripples with a fast downward flow.
     // u runs across the sheet, v is the world height PLUS time: a feature of the map sits
     // where z*k + time*c is constant, so as time grows its z FALLS. (With the time term

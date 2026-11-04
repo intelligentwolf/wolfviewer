@@ -235,10 +235,9 @@ void LFSimFeatureHandler::setSupportedFeatures()
             // <COLOSI opensim multi-currency support>
             if (extras.has("currency-base-uri"))
             {
-                if (mHelperUriOverride != extras["currency-base-uri"].asString())
-                {
-                    LLNotificationsUtil::add("CurrencyURIOverrideReceived");
-                }
+                // [WolfViewer 2026-11-04] Paul: "third currency portal just stop it displaying it all together there is
+                // no legal reason for it to be there". The region's currency helper is still used; only the modal
+                // CurrencyURIOverrideReceived notice (which held every click until answered, in VR too) is gone.
                 mHelperUriOverride = extras["currency-base-uri"].asString();
             }
             else

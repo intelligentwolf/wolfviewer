@@ -65,6 +65,11 @@ const BAR_W = 1024, BAR_H = 448, SS = 2;
 const DOCK_RADIUS = 1.0, BAR_ARC_DEG = 64, BAR_Y = -0.385;
 const TAB_ARC_DEG = 9, TAB_Y = -0.52;     // [VR HUD CLICKS] the "Menu" tab: small, low, centred
 const ACCENT = '#84cc16';
+// [VR MENU FIX 2026-11-04] Paul on the Quest 3: "i click [the Menu tab] but then i cant turn off the menu". The bar could
+// only be closed by the left controller's menu button, which the Quest Browser may keep for itself, and the bar had
+// no close of its own. Now it has a big Close button (top right), and it closes by itself after a button has been
+// used, so what was opened can be seen; the Menu tab then says what happened.
+const CLOSE = { x: BAR_W - 196, y: 10, w: 182, h: 48 };
 
 // vr_hud.js _curvedGeometry: u = 0 at the LEFT end, v = 0 at the BOTTOM, wound counter-clockwise from the eye.
 export function curvedGeometry(radius, arcRad, height, segments) {
@@ -163,6 +168,9 @@ export class VRBar {
         this.tabHover = false;
         this.flashUntil = 0;         // a press landed: the slot (or the tab) lights up briefly
         this.flashKey = '';
+        this.tabMsg = '';            // [VR MENU FIX] what the last button did, shown on the tab for a few seconds
+        this.tabMsgUntil = 0;
+        this.pending = null;         // [VR MENU FIX] the command sent, waiting for the viewer's "acted"
         this._drawTab();
         this._iconOk = false;
         try {
@@ -197,13 +205,29 @@ export class VRBar {
     setPageState(id, on) { if (this.pageState[id] !== on) { this.pageState[id] = on; this._dirty = true; } }
 
     toggle() { this.open = !this.open; this.mesh.visible = this.open; this.hover = null; this._dirty = true; this._showTab(); }
+    // [VR MENU FIX] a few words on the Menu tab (what the last button did), for `ms`
+    tabSay(text, ms = 4000) { this.tabMsg = text; this.tabMsgUntil = performance.now() + ms; this._drawTab(); }
+    // [VR MENU FIX] the viewer's answer to a command: done (the bar is already closed: say so on the tab) or not done
+    // (the bar opens again with the reason, which stays until the next press - a failure is never only flashed)
+    onActed(m) {
+        const a = ACTIONS.find((x) => x.cmd === m.a);
+        const label = a ? this.labelFor(a) : String(m.a || '');
+        const mine = this.pending && this.pending.cmd === m.a;
+        if (mine) this.pending = null;
+        if (m.ok) { if (mine) this.tabSay(label + ' \u2713'); return; }   // only the bar's own presses are confirmed here
+        const why = String(m.why || 'it cannot be used here just now');
+        if (!this.open) this.toggle();
+        this.toast(label + ': ' + why, 600000);
+    }
     hide() { this.open = false; this.mesh.visible = false; this.hover = null; this._showTab(); }
     setTabActive(on) { if (this.tabActive !== on) { this.tabActive = on; this._showTab(); } }
     _showTab() { this.tab.visible = this.tabActive && !this.open; }
     _drawTab() {
         const ctx = this.tabCtx, W = 256, H = 72;
         ctx.clearRect(0, 0, W, H);
-        const lit = this.tabHover || performance.now() < this.flashUntil;
+        const now = performance.now();
+        const lit = this.tabHover || now < this.flashUntil;
+        const msg = now < this.tabMsgUntil ? this.tabMsg : '';
         this._roundRect(ctx, 4, 4, W - 8, H - 8, 22);
         ctx.fillStyle = lit ? 'rgba(132, 204, 22, 0.55)' : 'rgba(15, 23, 42, 0.82)';
         ctx.fill();
@@ -213,8 +237,8 @@ export class VRBar {
         ctx.fillStyle = '#ffffff';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.font = 'bold 30px sans-serif';
-        ctx.fillText('Menu', W / 2, H / 2 + 1);
+        ctx.font = msg ? 'bold 24px sans-serif' : 'bold 30px sans-serif';
+        ctx.fillText(msg ? msg.slice(0, 18) : 'Menu', W / 2, H / 2 + 1);
         this.tabTex.needsUpdate = true;
     }
     // a press landed on `key` (a slot, a favourite or the tab): light it for a moment
@@ -234,6 +258,7 @@ export class VRBar {
 
     update(now) {
         if (this._toast && now > this._toast.until) { this._toast = null; this._dirty = true; }
+        if (this.tabMsg && now > this.tabMsgUntil) { this.tabMsg = ''; this._drawTab(); }
         if (this.flashKey && now > this.flashUntil) { const k = this.flashKey; this.flashKey = ''; this._dirty = true; if (k === 'tab') this._drawTab(); }
         if (this.open && this._dirty) this._draw();
     }
@@ -248,6 +273,7 @@ export class VRBar {
         const h = hitCylinder(o, d, DOCK_RADIUS, this.arc, 0, BAR_Y, this.height);
         if (!h) return null;
         const px = h.u * BAR_W, py = (1 - h.v) * BAR_H;
+        if (px >= CLOSE.x && px < CLOSE.x + CLOSE.w && py >= CLOSE.y && py < CLOSE.y + CLOSE.h) return { kind: 'close', i: -1, t: h.t };
         for (let i = 0; i < this.slots.length; i++) {
             const s = this.slots[i];
             if (px >= s.x && px < s.x + s.w && py >= s.y && py < s.y + s.h) return { kind: 'action', i, t: h.t };
@@ -272,6 +298,8 @@ export class VRBar {
     activate(target) {
         if (!target) return;
         if (target.kind === 'tab') { this.flash('tab'); this.toggle(); return; }
+        if (target.kind === 'close') { this.hide(); return; }
+        if (this._toast && this._toast.until - performance.now() > 60000) this._toast = null;   // a reason shown: read, now gone
         if (target.kind === 'action' || target.kind === 'fav') this.flash(target.kind + target.i);
         if (target.kind === 'fav') {
             const f = this.favSlots[target.i] && this.favSlots[target.i].fav;
@@ -286,6 +314,10 @@ export class VRBar {
         if (a.page) { if (this.onPage) this.onPage(a.page); return; }
         this.send({ t: 'act', a: a.cmd });
         if (this.onCommand) this.onCommand(a);
+        // [VR MENU FIX] out of the way at once, so the window it opens is seen; the tab says it is on its way
+        this.pending = { cmd: a.cmd, at: performance.now() };
+        this.hide();
+        this.tabSay(this.labelFor(a) + '\u2026', 6000);
     }
 
     labelFor(a) {
@@ -345,8 +377,20 @@ export class VRBar {
             ctx.textAlign = 'right';
             ctx.fillStyle = '#7f93b5';
             ctx.font = '24px sans-serif';
-            ctx.fillText(this.state.region.slice(0, 34), W - 26, 34);
+            ctx.fillText(this.state.region.slice(0, 28), CLOSE.x - 18, 34);
         }
+        // [VR MENU FIX] Close: big, always in the same place, lit while pointed at
+        const ch = this.hover && this.hover.kind === 'close';
+        this._roundRect(ctx, CLOSE.x, CLOSE.y, CLOSE.w, CLOSE.h, 14);
+        ctx.fillStyle = ch ? 'rgba(132, 204, 22, 0.55)' : 'rgba(255, 255, 255, 0.10)';
+        ctx.fill();
+        ctx.strokeStyle = ch ? 'rgba(220, 255, 160, 0.95)' : 'rgba(226, 240, 255, 0.55)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 26px sans-serif';
+        ctx.fillText('\u2715  Close', CLOSE.x + CLOSE.w / 2, CLOSE.y + CLOSE.h / 2 + 1);
         for (let i = 0; i < this.slots.length; i++) this._drawSlot(ctx, this.slots[i], i);
         this._drawFavourites(ctx);
         ctx.textAlign = 'center';
@@ -356,7 +400,7 @@ export class VRBar {
             ctx.font = 'bold 24px sans-serif';
             ctx.fillText(this._toast.text.slice(0, 70), W / 2, H - 26);
         } else {
-            let hint = 'Menu button closes · point and pull the trigger';
+            let hint = 'Point at a button and pull the trigger \u00b7 Close is top right';
             const h = this.hover;
             if (h && h.kind === 'action') {
                 const a = this.slots[h.i] && this.slots[h.i].action;

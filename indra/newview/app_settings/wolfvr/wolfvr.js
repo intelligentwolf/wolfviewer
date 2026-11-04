@@ -83,6 +83,25 @@ const num = {
     xrFrames: 0, newFrames: 0, lastT: performance.now(),
     fps: NaN, newFps: NaN, viewer: {}, rtt: NaN, got: 0, gotFps: NaN, decoded: 0, decodedFps: NaN, gotTotal: 0, summaryTick: 0,
 };
+// [VR STAGES 2026-11-04] Where the time goes, per picture, from the head pose leaving here to the picture shown here:
+// the viewer stamps its stages on the picture (wolfvrpipe.cpp header 160..195, ms after the pose arrived there), this
+// page adds arrival, decoded and shown. Kept in memory (the last 600 pictures, about 30 s) and sent to the viewer's
+// log in the 30-second summary only - nothing per frame (Paul: no logging or stats in hot paths).
+const STAGES = ['up', 'wait', 'eyeL', 'eyeR', 'readback', 'queue', 'encode', 'pack', 'down', 'decode', 'show', 'total'];
+const stages = Object.fromEntries(STAGES.map((k) => [k, new Rolling(600)]));
+function noteStages(hdr, drawn) {
+    const st = hdr.st;
+    if (!st || !Number.isFinite(clockOff) || hdr.poseClientMs < 0) return;
+    const R = st.R - clockOff;                      // when the pose arrived at the viewer, on this page's clock
+    const at = (ms) => (ms >= 0 ? R + ms : NaN);    // a viewer stage on this page's clock
+    const t = [hdr.poseClientMs, R, at(st.frame), at(st.eye0 >= 0 ? st.eye0 : st.issue), at(st.issue), at(st.collect),
+               at(st.encIn), at(st.encOut), at(st.sent), hdr.recvAt, hdr.decodedAt, drawn];
+    for (let i = 0; i < 11; i++) stages[STAGES[i]].add(t[i + 1] - t[i]);
+    stages.total.add(drawn - hdr.poseClientMs);
+}
+function stagesLine() {
+    return STAGES.map((k) => `${k} ${fmt(stages[k].pct(0.5), 0)}`).join(', ') + ` (median ms; total p95 ${fmt(stages.total.pct(0.95), 0)})`;
+}
 
 // ------------------------------------------------------------------------------------------------ connection
 let ws = null;
@@ -226,6 +245,10 @@ function onText(text) {
         if (typeof m.headset === 'string' && m.headset !== viewerHeadset) { viewerHeadset = m.headset; headsetChanged(); }
         if (typeof m.mic === 'boolean') micSetting = m.mic;
         showMicButton();
+    } else if (m.t === 'panels') {
+        layer.setPanels(m.p);   // [VR PANELS 2026-11-04] the viewer's open windows, each its own panel
+    } else if (m.t === 'acted') {
+        bar.onActed(m);   // [VR MENU FIX 2026-11-04] what a bar button did, shown on the Menu tab (or why not, on the bar)
     } else if (m.t === 'layerconfig') {
         layer.onConfig(m);   // [VR HUD LAYER]
     } else if (m.t === 'aim') {
@@ -304,6 +327,11 @@ function parseHeader(buf) {
         key: d.getUint8(64) === 1,
         codec: d.getUint8(65) === 0 ? 'h264' : 'jpeg',
         bytes: d.getUint32(68, true),
+        st: size >= 200 && d.getFloat64(160, true) > 0 ? {   // [VR STAGES]
+            R: d.getFloat64(160, true), frame: d.getFloat32(168, true), eye0: d.getFloat32(172, true),
+            issue: d.getFloat32(176, true), collect: d.getFloat32(180, true), encIn: d.getFloat32(184, true),
+            encOut: d.getFloat32(188, true), sent: d.getFloat32(192, true) } : null,
+        recvAt: performance.now(), decodedAt: NaN,
     };
 }
 
@@ -332,7 +360,7 @@ function onPicture(buf) {
         // WebGL ignores UNPACK_FLIP_Y for ImageBitmap, so flip while decoding (texture.flipY = false below).
         const dp = depthOf(buf, hdr);
         createImageBitmap(new Blob([payload], { type: 'image/jpeg' }), { imageOrientation: 'flipY' })
-            .then(async (bmp) => { num.decoded++; offerPicture(bmp, hdr, performance.now() - t0, dp ? await dp : null); })
+            .then(async (bmp) => { num.decoded++; hdr.decodedAt = performance.now(); offerPicture(bmp, hdr, performance.now() - t0, dp ? await dp : null); })
             .catch(() => { /* a bad picture is skipped */ });
         return;
     }
@@ -352,6 +380,7 @@ function onDecoded(vf) {
     pendingMeta.delete(vf.timestamp);
     if (!meta) { vf.close(); return; }
     const ms = performance.now() - meta.t0;
+    meta.hdr.decodedAt = performance.now();   // [VR STAGES]
     if (meta.depth) meta.depth.then((d) => offerPicture(vf, meta.hdr, ms, d));
     else offerPicture(vf, meta.hdr, ms, null);
 }
@@ -503,6 +532,7 @@ const WORLD = () => !!(config && config.mode === 'world');
 const bar = new VRBar(dock, send);
 // a HUDs-layer problem is shown IN the headset too (the bar's message line), not only on the 2D page nobody sees in VR
 const layer = new VRLayer(dock, send, (t) => { showError(t); bar.toast(t, 15000); });
+layer.attachWorld(scene);   // [VR PANELS 2026-11-04] each viewer window its own panel, standing in the room
 // [VR AUDIO 2026-11-04] the viewer's sound in the headset (vraudio.js), and the headset microphone for voice chat
 const vrAudio = new VRAudio({
     send,
@@ -1221,7 +1251,10 @@ function aimAt(ro, rd, headPos, headQuat) {
     _hd.copy(rd).applyQuaternion(_hq);
     const b = bar.hit(_ho, _hd);
     if (b) return { kind: b.kind === 'tab' ? 'tab' : 'bar', hit: b, t: b.t };
-    return { kind: 'ptr', layer: layer.hit(_ho, _hd) };
+    // [VR PANELS 2026-11-04] a window's panel first: the HUD band is mostly see-through (only the viewer knows where it
+    // has something drawn), so its nearer surface must not take the ray from a window behind it
+    const pan = layer.hitPanels(ro, rd);
+    return { kind: 'ptr', layer: pan || layer.hit(_ho, _hd) };
 }
 function sendRay(ro, rd, lay) {
     const r = worldPointer.ray, now = performance.now();
@@ -1273,12 +1306,16 @@ function pollWorldPointer(src, gp, frame, headPos, headQuat) {
     // off the bar (or holding a press that began off it): the ray goes to the viewer
     if (aim && (!onBar || own[0] === 'ptr' || own[2] === 'ptr') && own[0] !== 'bar') {
         sendRay(_ro, _rd, aim.layer);
-        if (grip && aim.layer && !own[0]) {
-            // grip held on the layer: move it up or down with the controller (remembered); clicks still work
+        if (grip && !own[0] && (layer.moving || (aim.layer && aim.layer.k && !worldPointer.grip))) {
+            // [VR PANELS] grip held on a window's panel: it follows the controller round the arc (and up or down)
+            layer.movePanel(aim.layer ? aim.layer.k : null, _ro, _rd, true);
+        } else if (grip && aim.layer && !own[0] && !layer.moving) {
+            // grip held on the HUD band: move it up or down with the controller (remembered); clicks still work
             if (!worldPointer.grip) worldPointer.gripY = _ro.y;
             else { layer.nudge(_ro.y - worldPointer.gripY, 0); worldPointer.gripY = _ro.y; }
         }
     }
+    if (!grip && layer.moving) layer.movePanel(null, _ro, _rd, false);
     // the ray and the dot: on the bar where it hits; else where the viewer says it landed
     if (rp) {
         let t = -1, big = false;
@@ -1528,6 +1565,7 @@ function animate(time, frame) {
             vrAudio.noteVideoDelay(drawn + clockOff - fresh.hdr.captureMs);   // [VR AUDIO] sound and picture together
         }
         num.decode.add(fresh.decodeMs);
+        noteStages(fresh.hdr, drawn);   // [VR STAGES]
         num.newFrames++;
         if (shown) shown.img.close();   // the previous picture has been replaced on the GPU
         shown = fresh;
@@ -1555,13 +1593,14 @@ function animate(time, frame) {
             send({ t: 'summary', s: `${HEADSETS[headsetKind()].label}: display ${fmt(num.fps, 0)} fps, pictures in ${fmt(num.gotFps, 0)}/s decoded ${fmt(num.decodedFps, 0)}/s, ` +
                 `head-pose-to-shown ${fmt(num.p2p.avg(), 0)} ms (p95 ${fmt(num.p2p.pct(0.95), 0)}), PC-to-shown ${fmt(num.v2p.avg(), 0)} ms, decode ${fmt(num.decode.avg(), 1)} ms, ` +
                 `eye ${eye} px, step ${quality.level} (top ${quality.top}, down ${quality.downs || 0} times, last because ${quality.lastWhy || '-'}), ` +
-                `HUDs ${layer.on ? layer.frames + ' pictures' + (layer.errors ? `, ${layer.errors} failed` : '') : 'off'}` });
+                `HUDs ${layer.on ? layer.frames + ' pictures' + (layer.errors ? `, ${layer.errors} failed` : '') : 'off'}; ` +
+                `stages: ${stagesLine()}` });
         }
         adaptQuality(now);
     }
     // [VR CONTROLS / HUD LAYER] the docked surfaces (3D Mode in the headset only)
     layer.setActive(WORLD() && renderer.xr.isPresenting);
-    layer.update();
+    layer.update(_pos, _quat);
     bar.setPageState('numbers', statsOn);
     bar.update(now);
     if (renderer.xr.isPresenting) statsMesh.visible = statsOn || now < sizeFlashUntil;
@@ -1619,7 +1658,10 @@ function openKeyboard() {
 $('wvr-bigger').addEventListener('click', () => setScreenSize(screenSizeIndex + 1));
 $('wvr-smaller').addEventListener('click', () => setScreenSize(screenSizeIndex - 1));
 
-window.__wolfvr = { numbers: () => ({ rows: numberRows(), p2p: num.p2p.v.slice(-20), v2p: num.v2p.v.slice(-20) }), toggleVR, config: () => config,
+window.__wolfvr = { resetStages: () => { for (const k of STAGES) stages[k].v.length = 0; },
+    rates: () => ({ display: num.fps, gotFps: num.gotFps, decodedFps: num.decodedFps, newFps: num.newFps, p2p: num.p2p.avg(), v2p: num.v2p.avg() }),
+    stages: () => Object.fromEntries(STAGES.map((k) => [k, { p50: stages[k].pct(0.5), p95: stages[k].pct(0.95), n: stages[k].v.length }])),
+    numbers: () => ({ rows: numberRows(), p2p: num.p2p.v.slice(-20), v2p: num.v2p.v.slice(-20) }), toggleVR, config: () => config,
     big: () => ({ on: BIG(), size: SCREEN_SIZES[screenSizeIndex], visible: bigMesh.visible, ptr: { u: ptr.u, v: ptr.v } }),
     // test hooks (scripts/wolfvr/e2e_viewer.mjs): the picture as received, and a click at a point of it
     grab: () => {
@@ -1636,6 +1678,25 @@ window.__wolfvr = { numbers: () => ({ rows: numberRows(), p2p: num.p2p.v.slice(-
     bar: () => ({ open: bar.open, ids: bar.slots.map((x) => x.action.id), on: [...bar.state.on], off: [...bar.state.off],
                   sit: bar.state.sit, hide: bar.state.hide, region: bar.state.region, fav: bar.state.fav.length, hover: bar.hover }),
     layer: () => ({ want: layer.want, on: layer.on, frames: layer.frames, cfg: layer.cfg, visible: layer.mesh.visible }),
+    // [VR PANELS] the window panels: name, window rectangle, where it stands (yaw degrees, height), shown
+    panels: () => [...layer.panels.values()].map((p) => ({ k: p.k, n: p.n, r: p.r, yaw: +(p.yaw * 180 / Math.PI).toFixed(1),
+        y: +p.c.y.toFixed(3), arc: +(p.arc * 180 / Math.PI).toFixed(1), visible: p.mesh.visible })),
+    // [VR PANELS] where a point of the viewer's window (u, v from its top-left) is in the headset: on its window's
+    // panel when it is inside one, else on the HUD band (test hook)
+    windowPoint: (u, v) => {
+        for (const p of layer.panels.values()) {
+            const [x0, y0, x1, y1] = p.r;
+            if (p.mesh.visible && u >= x0 && u <= x1 && v >= y0 && v <= y1) return window.__wolfvr.panelPoint(p.k, (u - x0) / (x1 - x0), (v - y0) / (y1 - y0));
+        }
+        return surfacePoint(1.25, layer.arc, layer.y, layer.height, u, 1 - v);
+    },
+    // the world point at (u, v) of a panel (0..1 across it, from its top-left), for aiming the fake controller
+    panelPoint: (k, u, v) => {
+        const p = layer.panels.get(k);
+        if (!p) return null;
+        const a = -p.arc / 2 + u * p.arc - p.yaw;
+        return [p.c.x + 1.3 * Math.sin(a), p.c.y + (0.5 - v) * p.h, p.c.z - 1.3 * Math.cos(a)];
+    },
     quality: () => ({ level: quality.level, headset: headsetKind(), auto: headsetAuto() }),
     audio: () => ({ buffered: vrAudio.bufferedMs, target: vrAudio.targetMs, underruns: vrAudio.underruns, gaps: vrAudio.gaps,
                     delay: vrAudio.soundDelayMs, skew: vrAudio.skewMs, mic: vrAudio.micWanted, blocks: vrAudio.blocks,
@@ -1650,6 +1711,15 @@ window.__wolfvr = { numbers: () => ({ rows: numberRows(), p2p: num.p2p.v.slice(-
         return surfacePoint(1.0, bar.arc, -0.385, bar.height, u, v);
     },
     layerPoint: (u, v) => surfacePoint(1.25, layer.arc, layer.y, layer.height, u, 1 - v),
+    // [VR PANELS] the HUD band's own hit for a ray from the head through its point (u, v) (null where a panel was cut out)
+    bandHit: (u, v) => {
+        const a = -layer.arc / 2 + u * layer.arc, o = new THREE.Vector3(0, 0, 0);
+        const d = new THREE.Vector3(1.25 * Math.sin(a), layer.y + (0.5 - v) * layer.height, -1.25 * Math.cos(a)).normalize();
+        return layer.hit(o, d);
+    },
+    // [VR MENU FIX] the bar's Close button, and what the Menu tab says now
+    closePoint: () => surfacePoint(1.0, bar.arc, -0.385, bar.height, (1024 - 196 + 91) / 1024, 1 - (10 + 24) / 448),
+    tabText: () => (performance.now() < bar.tabMsgUntil ? bar.tabMsg : 'Menu'),
     // [VR 3D FIX / WORLD POINTER] test hooks: which view is which eye and the layer each half is on (and each XR
     // camera's layer mask), the eye windows sent, the last picture's header, where the viewer said the ray landed
     eyes: () => {

@@ -173,6 +173,8 @@ await press('right', 0, false); await sleep(300);
 check(await waitFor(() => evalJs('window.__wolfvr.bar().on.includes("map")'), 6000), 'Map opened by the press on the bar');
 await sleep(2500);
 check(await evalJs('window.__wolfvr.bar().on.includes("map")'), 'and still open after the trigger was let go over the layer (no second click, no select double)');
+// [VR MENU FIX 2026-11-04] the bar closes itself after a button: open it again for the second press
+check(await barOpen(true), 'the bar closed itself after Map; the menu button opens it again');
 await aimAt(mapPt); await sleep(300); await click('right', 0);
 check(await waitFor(() => evalJs('!window.__wolfvr.bar().on.includes("map")'), 6000), 'Map closed again from the bar');
 await barOpen(false);
@@ -184,7 +186,8 @@ async function pointAtView(path) {
     const info = await leapInfo(path), root = await leapInfo('//main_view');
     if (!info || !info.visible_chain || !info.rect || !root) return null;
     const u = ((info.rect.left + info.rect.right) / 2) / root.rect.right, v = 1 - ((info.rect.top + info.rect.bottom) / 2) / root.rect.top;
-    await aimAt(await evalJs(`window.__wolfvr.layerPoint(${u}, ${v})`)); await sleep(500);
+    // [VR PANELS 2026-11-04] a window is its own panel now: aim at it there (windowPoint), not on the band
+    await aimAt(await evalJs(`window.__wolfvr.windowPoint(${u}, ${v})`)); await sleep(500);
     return await evalJs('window.__wolfvr.aim()');
 }
 // a modal notice the region may have shown at log-in holds the mouse until answered (in the headset as on the desktop)

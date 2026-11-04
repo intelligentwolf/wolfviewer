@@ -209,7 +209,7 @@ namespace
     }
 
     constexpr uint32_t kMagic = 0x31525657;   // "WVR1" little-endian
-    constexpr size_t kHeaderSize = 160;       // keep in step with wolfvr.js parseHeader() ([VR DEPTH] 160, 128, 96, 72)
+    constexpr size_t kHeaderSize = 200;       // keep in step with wolfvr.js parseHeader() ([VR STAGES] 200, [VR DEPTH] 160, 128, 96, 72)
 
     template <typename T> void put(std::string& b, size_t off, T v) { std::memcpy(&b[off], &v, sizeof(T)); }
 
@@ -335,9 +335,12 @@ namespace
     struct Client : std::enable_shared_from_this<Client>
     {
         virtual ~Client() = default;
-        virtual void send(std::shared_ptr<const std::string> msg, bool binary) = 0;   // call on the io thread
+        // call on the io thread. [VR STAGES 2026-11-04] world = a world picture: it goes ahead of HUD-layer pictures still
+        // waiting (each stream keeps its own order), so a big layer picture never holds the eyes' picture back
+        virtual void send(std::shared_ptr<const std::string> msg, bool binary, bool world) = 0;
         virtual void close(uint16_t code, const char* reason) = 0;                      // call on the io thread
         std::atomic<int> pending_binary{0};   // frames queued or being written
+        std::atomic<int> pending_world{0};    // [VR STAGES] world pictures among them
         std::atomic<bool> webcodecs{false};
         std::atomic<bool> hello{false};
         std::string ua;                       // io thread only until hello is set
@@ -580,7 +583,7 @@ struct Service::Impl
     // ---- frames ----
     void frameLoop();
     void layerLoop();
-    void sendToClient(const std::shared_ptr<Client>& c, std::string msg, bool binary);
+    void sendToClient(const std::shared_ptr<Client>& c, std::string msg, bool binary, bool world = false);
 };
 
 namespace
@@ -589,13 +592,22 @@ namespace
     struct WsClient : Client
     {
         WsStream ws;
-        std::deque<std::pair<std::shared_ptr<const std::string>, bool>> queue;
+        struct Item { std::shared_ptr<const std::string> msg; bool binary; bool world; };
+        std::deque<Item> queue;
         bool writing = false;
         explicit WsClient(WsStream&& s) : ws(std::move(s)) {}
 
-        void send(std::shared_ptr<const std::string> msg, bool binary) override
+        void send(std::shared_ptr<const std::string> msg, bool binary, bool world) override
         {
-            queue.emplace_back(std::move(msg), binary);
+            auto at = queue.end();
+            if (world)
+            {
+                // behind the message being written (the front, while writing), any world picture already waiting and
+                // any text (clicks, menus, the window list): ahead of HUD-layer pictures and sound only
+                at = queue.begin() + (writing && !queue.empty() ? 1 : 0);
+                while (at != queue.end() && (at->world || !at->binary)) ++at;
+            }
+            queue.insert(at, Item{std::move(msg), binary, world});
             if (!writing) writeNext();
         }
         void writeNext()
@@ -603,11 +615,12 @@ namespace
             if (queue.empty()) { writing = false; return; }
             writing = true;
             auto self = std::static_pointer_cast<WsClient>(shared_from_this());
-            const bool binary = queue.front().second;
+            const bool binary = queue.front().binary, world = queue.front().world;
             ws.binary(binary);
-            ws.async_write(net::buffer(*queue.front().first),
-                           [self, binary](beast::error_code ec, size_t) {
+            ws.async_write(net::buffer(*queue.front().msg),
+                           [self, binary, world](beast::error_code ec, size_t) {
                                if (binary) self->pending_binary--;
+                               if (world) self->pending_world--;
                                self->queue.pop_front();
                                if (ec) { self->writing = false; self->queue.clear(); return; }
                                self->writeNext();
@@ -776,13 +789,13 @@ net::awaitable<void> Service::Impl::runWebSocket(Stream stream, http::request<ht
         {
             allowed = false;
             log(LogLevel::INFO, "VR pipe: a second headset (" + ip + ") was told someone is already connected");
-            c->send(std::make_shared<const std::string>("{\"t\":\"busy\"}"), false);
+            c->send(std::make_shared<const std::string>("{\"t\":\"busy\"}"), false, false);
             c->close(4009, "someone is already connected");
         }
         else
         {
             adoptClient(c, deviceLabelFromUserAgent(ua));
-            c->send(std::make_shared<const std::string>("{\"t\":\"welcome\"}"), false);
+            c->send(std::make_shared<const std::string>("{\"t\":\"welcome\"}"), false, false);
         }
     }
     try
@@ -988,7 +1001,7 @@ void Service::Impl::onText(const std::shared_ptr<Client>& c, const std::string& 
         r["t"] = "pong";
         r["ct"] = num("ct");
         r["st"] = nowMs();
-        c->send(std::make_shared<const std::string>(json::serialize(r)), false);
+        c->send(std::make_shared<const std::string>(json::serialize(r)), false, false);
     }
     else if (t == "sync")
     {
@@ -1161,7 +1174,7 @@ void Service::Impl::onText(const std::shared_ptr<Client>& c, const std::string& 
     else if (t == "summary")
     {
         // [VR QUALITY 2026-11-04] the page's one line every 30 s while in VR: what the headset really gets
-        log(LogLevel::INFO, "VR pipe: headset says: " + str("s").substr(0, 500));
+        log(LogLevel::INFO, "VR pipe: headset says: " + str("s").substr(0, 1200));
     }
     else if (t == "log")
     {
@@ -1241,11 +1254,12 @@ net::awaitable<void> Service::Impl::listen(tcp::acceptor& acc, bool tls)
     }
 }
 
-void Service::Impl::sendToClient(const std::shared_ptr<Client>& c, std::string msg, bool binary)
+void Service::Impl::sendToClient(const std::shared_ptr<Client>& c, std::string msg, bool binary, bool world)
 {
     if (binary) c->pending_binary++;
+    if (world) c->pending_world++;
     auto m = std::make_shared<const std::string>(std::move(msg));
-    net::post(ioc, [c, m, binary] { c->send(m, binary); });
+    net::post(ioc, [c, m, binary, world] { c->send(m, binary, world); });
 }
 
 void Service::Impl::frameLoop()
@@ -1325,6 +1339,7 @@ void Service::Impl::frameLoop()
 
         Pose p;
         double t0 = 0, t1 = 0;
+        HeadPose stamps;   // [VR STAGES] this picture's stage times (external pictures only)
         if (cfg.external_frames)
         {
             // [VR STAGE 2] Wait (briefly, so stop and a new headset are noticed) for the viewer's next picture.
@@ -1351,10 +1366,13 @@ void Service::Impl::frameLoop()
             p.stereo = ext_pose.stereo;
             p.has_tan = ext_pose.has_tan;
             std::memcpy(p.tan, ext_pose.tan, sizeof p.tan);
+            stamps = ext_pose;
             t1 = nowMs();
             t0 = t1 - ext_capture_ms;
             lk.unlock();
-            if (c->pending_binary.load() >= 2)
+            // [VR STAGES 2026-11-04] two of OUR pictures still unsent: the network is behind (HUD-layer pictures and
+            // sound waiting do not count: they no longer hold this picture back, WsClient::send)
+            if (c->pending_world.load() >= 2)
             {
                 std::lock_guard<std::mutex> slk(stats_mutex);
                 st.frames_skipped++;
@@ -1482,10 +1500,23 @@ void Service::Impl::frameLoop()
         put<uint16_t>(msg, 150, (uint16_t)(depth_z.empty() ? 0 : dh));
         put<float>(msg, 152, znear);
         put<float>(msg, 156, zfar);
+        // [VR STAGES 2026-11-04] 160 the pose's arrival (pipe clock, 0 = not known), then each later stage as ms after
+        // it: 168 the frame began, 172 the left eye done, 176 the read-back issued, 180 collected, 184 the encoder took
+        // it, 188 encoded, 192 handed to the socket (the page adds arrival, decoded and shown)
+        const double R = stamps.t_recv > 0 && stamps.t_issue > 0 ? stamps.t_recv : 0.0;
+        auto rel = [R](double t) { return (float)(R > 0 && t > 0 ? t - R : -1.0); };
+        put<double>(msg, 160, R);
+        put<float>(msg, 168, rel(stamps.t_frame));
+        put<float>(msg, 172, rel(stamps.t_eye0));
+        put<float>(msg, 176, rel(stamps.t_issue));
+        put<float>(msg, 180, rel(stamps.t_collect));
+        put<float>(msg, 184, rel(t1));
+        put<float>(msg, 188, rel(t2));
+        put<float>(msg, 192, rel(nowMs()));
         std::memcpy(&msg[kHeaderSize], ef.data.data(), ef.data.size());
         if (!depth_z.empty()) std::memcpy(&msg[kHeaderSize + ef.data.size()], depth_z.data(), depth_z.size());
         const size_t bytes = ef.data.size() + depth_z.size();
-        sendToClient(c, std::move(msg), true);
+        sendToClient(c, std::move(msg), true, cfg.external_frames);   // [VR STAGES] a viewer picture: ahead of layer pictures
         frame++;
 
         // numbers (only with WolfVRDebugStats: [VR LEAN 2026-11-04])
@@ -1982,6 +2013,7 @@ HeadPose Service::headPose() const
     std::memcpy(h.tan, p.tan, sizeof h.tan);
     h.has_pos = p.has_pos;
     std::memcpy(h.pos, p.pos, sizeof h.pos);
+    h.t_recv = p.recv_ms;   // [VR STAGES]
     return h;
 }
 

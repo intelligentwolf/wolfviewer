@@ -258,6 +258,9 @@ public:
 
     // 3D world area, in raw unscaled pixels
     LLRect          getWorldViewRectRaw() const     { return mWorldViewRectRaw; }
+    // [VR RENDER SIZE 2026-11-04/] WolfVRScreen only: the 3D world's area for this frame (the headset eye's own size),
+    // set for the frame and given back after it, as the 360 snapshot does (no UI layout signal, no scaled rect change)
+    void            wolfVRSetWorldViewRaw(const LLRect& r);
     S32             getWorldViewHeightRaw() const;
     S32             getWorldViewWidthRaw() const;
 

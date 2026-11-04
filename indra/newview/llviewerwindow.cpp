@@ -6937,6 +6937,13 @@ void LLViewerWindow::setup3DRender()
     setup3DViewport();
 }
 
+// [VR RENDER SIZE 2026-11-04/] see llviewerwindow.h
+void LLViewerWindow::wolfVRSetWorldViewRaw(const LLRect& r)
+{
+    mWorldViewRectRaw = r;
+    LLViewerCamera::getInstance()->setViewHeightInPixels(r.getHeight());
+}
+
 void LLViewerWindow::setup3DViewport(S32 x_offset, S32 y_offset)
 {
     LL_PROFILE_ZONE_SCOPED_CATEGORY_UI;

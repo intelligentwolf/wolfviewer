@@ -365,6 +365,12 @@ bool worldWanted()
     return gService && gMode == "world" && gService->immersive();   // [VR IMMERSIVE] only while the headset is in VR
 }
 
+bool headsetInVR()
+{
+    std::lock_guard<std::mutex> lk(gMutex);
+    return gService && !gMode.empty() && gService->immersive();
+}
+
 wolfvr::HeadPose headPose()
 {
     std::lock_guard<std::mutex> lk(gMutex);

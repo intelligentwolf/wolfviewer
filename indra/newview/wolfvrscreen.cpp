@@ -20,6 +20,7 @@
 #include "llagent.h"
 #include "llagentcamera.h"
 #include "llfocusmgr.h"
+#include "llfloater.h"
 #include "llappviewer.h"
 #include "lldir.h"
 #include "llimagepng.h"
@@ -52,6 +53,7 @@ extern bool gSnapshot;       // llviewerdisplay.cpp:190
 extern bool gCubeSnapshot;   // llviewerdisplay.cpp:191
 extern bool gDisplaySwapBuffers;   // llviewerdisplay.cpp:138 - swap() shows the frame only when true
 extern bool gDepthDirty;           // llviewerdisplay.cpp:186
+extern bool gResizeScreenTexture;  // llviewerdisplay.cpp:187 - display() reallocates the pipeline's targets when set
 void render_hud_attachments();     // llviewerdisplay.cpp:209 (defined there, not in its header)
 void render_ui_2d();               // llviewerdisplay.cpp:211
 
@@ -65,6 +67,8 @@ namespace
         GLuint pbo[kSlots] = {0, 0, 0};
         GLsync fence[kSlots] = {nullptr, nullptr, nullptr};
         F64 issued[kSlots] = {0, 0, 0};
+        U64 order[kSlots] = {0, 0, 0};   // [VR READBACK] the order the reads were issued in (newest = largest)
+        U64 issues = 0;
         wolfvr::HeadPose pose[kSlots];   // 3D mode: the head pose each picture was drawn for
         U32 w = 0, h = 0;          // picture size
         int next = 0;
@@ -112,6 +116,24 @@ namespace
     // frame-time numbers for the log (and Paul's report): display() time per frame, mono vs stereo
     struct FrameTimes { F64 sum = 0, eye0 = 0; U32 n = 0; F64 since = 0; bool stereo = false; };
     FrameTimes gTimes;
+    // [VR RENDER SIZE 2026-11-04] Measured (e2e_stages.mjs, The Caribbean): each eye was drawn across the whole world view
+    // of the window (2522 x 1300 here, 3.3 million pixels) and then squeezed into a 1152 px square eye; drawing at half
+    // the size took the eyes from 14.3 / 13.6 to 11.0 / 10.1 ms, so the GPU's share is real. Now, while the headset is
+    // in VR 3D Mode, the world's area for the frame is a square the eye's own size (at most the window's height): the
+    // same pixels the headset gets, sharper than the squeeze, at 40 % of the cost in pixels. The pipeline's targets
+    // follow it (gResizeScreenTexture, once when it starts or changes); the real area is given back after each frame,
+    // so the desktop's UI, picks and the pointer never see it.
+    struct EyeRect { bool active = false; LLRect real, over; };
+    EyeRect gEyeRect;
+    void useEyeRect(bool on)
+    {
+        if (!gViewerWindow) return;
+        if (on) gViewerWindow->wolfVRSetWorldViewRaw(gEyeRect.over);
+        else if (gEyeRect.active) gViewerWindow->wolfVRSetWorldViewRaw(gEyeRect.real);
+    }
+    // [VR STAGES 2026-11-04] this frame's start and the end of its left eye (wolfvr::clockMs), put on the picture
+    struct Stamp { double frame = 0, eye0 = 0; };
+    Stamp gStamp;
 
     // [VR 3D FIX 2026-11-04] Paul after the Quest 3 test: "It still doesn't feel 3D when I'm in 3D mode". Three causes,
     // all fixed here: (1) the eyes were placed around the THIRD-PERSON camera, metres behind the avatar, so the near
@@ -287,6 +309,53 @@ namespace
         U32 aw = 0, ah = 0;
     };
     Layer gLayer;
+
+    // [VR PANELS 2026-11-04] Paul: "huds etc everything should be drawn in the headset ... a proper vr interface ...
+    // migrate the floaters to the headset". Each open window (every floater in the floater view: map, inventory, IM,
+    // people, dialogs, notices that are floaters) is told to the headset by name and rectangle on the UI layer
+    // picture; the page cuts it out of that picture and shows it as its OWN panel in an arc in front of the resident,
+    // where it stays put in the room (as Virtual Desktop's and SteamVR's desktop windows do), and a point at it is the
+    // mouse on that window. The rest of the layer (HUD attachments, menus, tips) stays the head-locked HUD band.
+    // Sent only when the list changes. Rectangles: 0..1 of the window, from its top-left (the layer picture's axes).
+    std::string gPanelsSent;
+    F64 gPanelsAt = 0;
+    void sendPanels()
+    {
+        if (!gFloaterView || !gViewerWindow) return;
+        const LLVector2 ds = gViewerWindow->getDisplayScale();
+        const F32 W = (F32)llmax(1, gViewerWindow->getWindowWidthRaw()), H = (F32)llmax(1, gViewerWindow->getWindowHeightRaw());
+        std::string list;
+        int n = 0;
+        for (LLView* v : *gFloaterView->getChildList())
+        {
+            LLFloater* f = dynamic_cast<LLFloater*>(v);
+            if (!f || !f->isShown() || !f->isInVisibleChain() || n >= 12) continue;
+            const LLRect r = f->calcScreenRect();
+            const F32 x0 = r.mLeft * ds.mV[VX] / W, x1 = r.mRight * ds.mV[VX] / W;
+            const F32 y0 = 1.f - r.mTop * ds.mV[VY] / H, y1 = 1.f - r.mBottom * ds.mV[VY] / H;
+            if (x1 - x0 < 0.01f || y1 - y0 < 0.01f) continue;
+            // the window's own name (one per kind, plus its key for the ones that open many: IMs, profiles)
+            std::string id = f->getInstanceName();
+            if (f->getKey().isDefined()) id += ":" + f->getKey().asString();
+            std::string title = f->getTitle();
+            LLStringUtil::truncate(title, 60);
+            LLStringUtil::truncate(id, 80);
+            const auto esc = [](const std::string& t) {
+                std::string o;
+                for (char c : t) { if (c == '"' || c == '\\') { o += '\\'; o += c; } else if ((unsigned char)c >= 32) o += c; }
+                return o;
+            };
+            list += llformat("%s{\"k\":\"%s\",\"n\":\"%s\",\"r\":[%.4f,%.4f,%.4f,%.4f]}", n ? "," : "", esc(id).c_str(),
+                             esc(title).c_str(), llclamp(x0, 0.f, 1.f), llclamp(y0, 0.f, 1.f), llclamp(x1, 0.f, 1.f), llclamp(y1, 0.f, 1.f));
+            ++n;
+        }
+        const std::string msg = "{\"t\":\"panels\",\"p\":[" + list + "]}";
+        const F64 now = LLTimer::getTotalSeconds();
+        if (msg == gPanelsSent && now - gPanelsAt < 2.0) return;   // and again every 2 s, for a page that just connected
+        gPanelsSent = msg;
+        gPanelsAt = now;
+        WolfVRStream::sendText(msg);
+    }
     bool gLayerDownIgnored[3] = {false, false, false};   // a press on an empty part of the layer, and its release
 
     void freeLayer()
@@ -600,6 +669,8 @@ void captureLayer()
     }
 
     const F64 t0 = LLTimer::getTotalSeconds();
+    const bool eye_rect = gEyeRect.active;
+    if (eye_rect) useEyeRect(false);   // [VR RENDER SIZE] the HUDs and windows are laid out on the whole window
     gLayer.rt.bindTarget();
     gGL.setColorMask(true, true);
     glClearColor(0.f, 0.f, 0.f, 0.f);
@@ -672,6 +743,8 @@ void captureLayer()
     if (scissor) glEnable(GL_SCISSOR_TEST);
     gLayer.rt.flush();
     gGL.setColorMask(true, false);
+    if (eye_rect) useEyeRect(true);
+    sendPanels();   // [VR PANELS]
 
     if (!gDebugStats) return;   // [VR LEAN] no measuring unless asked for
     gLayer.cost += LLTimer::getTotalSeconds() - t0;
@@ -717,6 +790,66 @@ void maybeDumpEyes(const std::vector<uint8_t>& rgba, U32 w, U32 h, const wolfvr:
                        << gAgent.getPosAgentFromGlobal(gAgentCamera.calcCameraPositionTargetGlobal()) << ", "
                        << (gAgent.getPosAgentFromGlobal(gAgentCamera.calcCameraPositionTargetGlobal()) - gMap.base).length()
                        << " m from the eyes (not used in the headset)" << LL_ENDL;
+}
+
+// [VR READBACK 2026-11-04] Measured (scripts/wolfvr/e2e_stages.mjs): a picture used to wait in its pixel buffer until
+// the capture two frames later collected it - two whole frames, 100-200 ms at the 10-20 frames a second of a busy
+// region, the biggest single delay between the head moving and the headset showing it. Now the NEWEST read whose copy
+// has finished is collected as soon as it has: right after it is issued (rarely done yet), and at the start of the next
+// frame (pumpInput, the idle loop), by when the GPU has finished it. An older one still in flight is dropped for it.
+void collectCapture()
+{
+    if (!gCap.fbo || !gCap.w || !gCap.h) return;
+    int best = -1;
+    for (int i = 0; i < kSlots; ++i)
+    {
+        if (!gCap.fence[i]) continue;
+        const GLenum r = glClientWaitSync(gCap.fence[i], 0, 0);
+        if (r == GL_WAIT_FAILED) { glDeleteSync(gCap.fence[i]); gCap.fence[i] = nullptr; continue; }
+        if (r == GL_TIMEOUT_EXPIRED) continue;
+        if (best < 0 || gCap.order[i] > gCap.order[best]) best = i;
+    }
+    if (best < 0) return;
+    for (int i = 0; i < kSlots; ++i)
+    {
+        // older than the one collected: never wanted any more (a newer picture is ready)
+        if (i != best && gCap.fence[i] && gCap.order[i] < gCap.order[best]) { glDeleteSync(gCap.fence[i]); gCap.fence[i] = nullptr; }
+    }
+    const int old = best;
+    const bool world = gCap.world;
+    GLint pack = 0;
+    glGetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING, &pack);
+    glDeleteSync(gCap.fence[old]);
+    gCap.fence[old] = nullptr;
+    {
+        glBindBuffer(GL_PIXEL_PACK_BUFFER, gCap.pbo[old]);
+        const size_t bytes = (size_t)gCap.w * gCap.h * 4;
+        if (const void* p = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, (GLsizeiptr)bytes, GL_MAP_READ_BIT))
+        {
+            gCap.buf.resize(bytes);
+            std::memcpy(gCap.buf.data(), p, bytes);
+            glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+            const F64 ms = (LLTimer::getTotalSeconds() - gCap.issued[old]) * 1000.0;
+            gCap.pose[old].t_collect = wolfvr::clockMs();   // [VR STAGES]
+            if (world) maybeDumpEyes(gCap.buf, gCap.w, gCap.h, gCap.pose[old]);
+            gCap.dbuf.clear();
+            if (world && gCap.has_depth[old])
+            {
+                glBindBuffer(GL_PIXEL_PACK_BUFFER, gCap.dpbo[old]);
+                const size_t dbytes = (size_t)gCap.dw * gCap.dh * 4;
+                if (const void* d = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, (GLsizeiptr)dbytes, GL_MAP_READ_BIT))
+                {
+                    gCap.dbuf.resize((size_t)gCap.dw * gCap.dh);
+                    std::memcpy(gCap.dbuf.data(), d, dbytes);
+                    glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+                }
+            }
+            if (world) WolfVRStream::submitWorldFrame(gCap.buf, gCap.pose[old], ms, gCap.dbuf, gCap.dbuf.empty() ? 0 : gCap.dw,
+                                                      gCap.dbuf.empty() ? 0 : gCap.dh, gCap.znear[old], gCap.zfar[old]);
+            else WolfVRStream::submitFrame(gCap.buf, ms);
+        }
+    }
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, (GLuint)pack);
 }
 
 // Big screen: the whole window, letterboxed. 3D: the centre square, drawn for gFramePose.
@@ -780,13 +913,17 @@ void captureInto(bool world)
     if (world && gCrop.on && gCap.dw && gCap.dfbo && send_depth)
     {
         LLRenderTarget& ds = gPipeline.mRT->deferredScreen;
-        const F32 sx = (F32)ds.getWidth() / (F32)llmax(1, ww), sy = (F32)ds.getHeight() / (F32)llmax(1, wh);
+        // [VR RENDER SIZE] deferredScreen is the size of the WORLD VIEW (LLPipeline::resizeScreenTexture), which is the
+        // eye's square while in VR 3D Mode: window pixels -> its pixels through the world view rectangle
+        const LLRect wv = gViewerWindow->getWorldViewRectRaw();
+        const F32 sx = (F32)ds.getWidth() / (F32)llmax(1, wv.getWidth()), sy = (F32)ds.getHeight() / (F32)llmax(1, wv.getHeight());
         const S32 half = stereo ? (S32)gCap.dw / 2 : (S32)gCap.dw;   // the centre view has the whole grid
         const S32 eye_x = stereo ? gEye * half : 0;
         if (!gCap.depth_checked) while (glGetError() != GL_NO_ERROR) {}   // once: start the check clean
         glBindFramebuffer(GL_READ_FRAMEBUFFER, ds.getFBO());
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER, gCap.dfbo);
-        glBlitFramebuffer(ll_round(gSrc[0] * sx), ll_round(gSrc[1] * sy), ll_round(gSrc[2] * sx), ll_round(gSrc[3] * sy),
+        glBlitFramebuffer(ll_round((gSrc[0] - wv.mLeft) * sx), ll_round((gSrc[1] - wv.mBottom) * sy), ll_round((gSrc[2] - wv.mLeft) * sx),
+                          ll_round((gSrc[3] - wv.mBottom) * sy),
                           eye_x, 0, eye_x + half, (GLint)gCap.dh, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
         if (!gCap.depth_checked)
         {
@@ -836,40 +973,15 @@ void captureInto(bool world)
     }
     gCap.fence[slot] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
     gCap.issued[slot] = now;
+    gCap.order[slot] = ++gCap.issues;
     gCap.pose[slot] = gFramePose;
+    gCap.pose[slot].t_frame = gStamp.frame;   // [VR STAGES]
+    gCap.pose[slot].t_eye0 = stereo ? gStamp.eye0 : 0.0;
+    gCap.pose[slot].t_issue = wolfvr::clockMs();
 
-    // 3. collect the oldest picture whose copy has finished
-    const int old = gCap.next;   // the slot written kSlots-1 frames ago
-    if (gCap.fence[old] && glClientWaitSync(gCap.fence[old], 0, 0) != GL_TIMEOUT_EXPIRED)
-    {
-        glDeleteSync(gCap.fence[old]);
-        gCap.fence[old] = nullptr;
-        glBindBuffer(GL_PIXEL_PACK_BUFFER, gCap.pbo[old]);
-        const size_t bytes = (size_t)gCap.w * gCap.h * 4;
-        if (const void* p = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, (GLsizeiptr)bytes, GL_MAP_READ_BIT))
-        {
-            gCap.buf.resize(bytes);
-            std::memcpy(gCap.buf.data(), p, bytes);
-            glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
-            const F64 ms = (LLTimer::getTotalSeconds() - gCap.issued[old]) * 1000.0;
-            if (world) maybeDumpEyes(gCap.buf, gCap.w, gCap.h, gCap.pose[old]);
-            gCap.dbuf.clear();
-            if (world && gCap.has_depth[old])
-            {
-                glBindBuffer(GL_PIXEL_PACK_BUFFER, gCap.dpbo[old]);
-                const size_t dbytes = (size_t)gCap.dw * gCap.dh * 4;
-                if (const void* d = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, (GLsizeiptr)dbytes, GL_MAP_READ_BIT))
-                {
-                    gCap.dbuf.resize((size_t)gCap.dw * gCap.dh);
-                    std::memcpy(gCap.dbuf.data(), d, dbytes);
-                    glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
-                }
-            }
-            if (world) WolfVRStream::submitWorldFrame(gCap.buf, gCap.pose[old], ms, gCap.dbuf, gCap.dbuf.empty() ? 0 : gCap.dw,
-                                                      gCap.dbuf.empty() ? 0 : gCap.dh, gCap.znear[old], gCap.zfar[old]);
-            else WolfVRStream::submitFrame(gCap.buf, ms);
-        }
-    }
+    // 3. [VR READBACK 2026-11-04] start the copy now, and collect whatever has finished (collectCapture)
+    glFlush();
+    collectCapture();
 
     glBindBuffer(GL_PIXEL_PACK_BUFFER, (GLuint)pack);
     glBindFramebuffer(GL_READ_FRAMEBUFFER, (GLuint)read_fb);
@@ -935,6 +1047,8 @@ void displayFrame()
     }
     s_last_frame = LLTimer::getTotalSeconds();
     const F64 t0 = s_last_frame;
+    gStamp.frame = wolfvr::clockMs();   // [VR STAGES]
+    gStamp.eye0 = 0;
     F64 t1 = t0;
     if (world) setPickCamera();   // the queued picks (display(): performPick) from the head, as the hover ones were
     // [VR VIEW 2026-11-04] "Hide my avatar": not drawn while the headset is in VR 3D Mode - the stock switches mouselook
@@ -948,6 +1062,27 @@ void displayFrame()
         gAgent.setShowAvatar(false);
         gAgentAvatarp->updateAttachmentVisibility(CAMERA_MODE_MOUSELOOK);
     }
+    // [VR RENDER SIZE] the world's area for this frame: the eye's own square while in VR 3D Mode
+    static LLCachedControl<bool> eye_size(gSavedSettings, "WolfVREyeRenderSize", true);
+    if (world && eye_size && h >= 256)
+    {
+        const LLRect real = gViewerWindow->getWorldViewRectRaw();
+        const S32 side = llmin((S32)h, real.getHeight(), real.getWidth()) / 8 * 8;
+        if (side >= 256)
+        {
+            const LLRect over(real.mLeft, real.mBottom + side, real.mLeft + side, real.mBottom);
+            if (!gEyeRect.active || over != gEyeRect.over) gResizeScreenTexture = true;   // the targets follow, once
+            gEyeRect.active = true;
+            gEyeRect.real = real;
+            gEyeRect.over = over;
+            useEyeRect(true);
+        }
+    }
+    else if (gEyeRect.active)
+    {
+        gEyeRect.active = false;
+        gResizeScreenTexture = true;   // back to the window's own size
+    }
     if (!stereo)
     {
         if (gPaused) gDisplaySwapBuffers = false;   // not shown; swap() sets it back
@@ -960,6 +1095,7 @@ void displayFrame()
         gDisplaySwapBuffers = false;
         display();
         t1 = LLTimer::getTotalSeconds();
+        gStamp.eye0 = wolfvr::clockMs();   // [VR STAGES]
         gEye = 1;
         // set again (an early return in the left eye's display() skips swap()); paused: the right eye is not shown either
         gDisplaySwapBuffers = !gPaused;
@@ -968,6 +1104,7 @@ void displayFrame()
         gEye = -1;
         gDisplaySwapBuffers = true;
     }
+    useEyeRect(false);   // [VR RENDER SIZE] the real area for everything between frames (UI, picks, pointer)
     if (hiding && isAgentAvatarValid())
     {
         gAgent.setShowAvatar(shown_before);
@@ -1308,6 +1445,7 @@ void pumpInput()
 {
     WolfVRStream::pumpModeRequest();
     if (!gViewerWindow) return;
+    if (gCap.fbo) collectCapture();   // [VR READBACK 2026-11-04] last frame's picture, as soon as its copy is done
     const std::vector<wolfvr::InputEvent> events = WolfVRStream::takeInput();
     applyEvents(events);
     updatePointer(false);   // [VR WORLD POINTER] every frame while the ray is heard (and to let go when it is not)

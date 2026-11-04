@@ -61,11 +61,12 @@ namespace
         return f ? (*f)(nullptr, param) : dflt;
     }
 
-    void callCommit(const std::string& fn, const LLSD& param)
+    bool callCommit(const std::string& fn, const LLSD& param)
     {
-        if (fn.empty()) return;
-        if (LLUICtrl::commit_callback_t* f = LLUICtrl::CommitCallbackRegistry::getValue(fn)) (*f)(nullptr, param);
-        else LL_WARNS("WolfVR") << "action bar: no function " << fn << LL_ENDL;
+        if (fn.empty()) return false;
+        if (LLUICtrl::commit_callback_t* f = LLUICtrl::CommitCallbackRegistry::getValue(fn)) { (*f)(nullptr, param); return true; }
+        LL_WARNS("WolfVR") << "action bar: no function " << fn << LL_ENDL;
+        return false;
     }
 
     LLCommand* command(const std::string& name) { return LLCommandManager::instance().getCommand(LLCommandId(name)); }
@@ -74,58 +75,93 @@ namespace
     F64 gLastSent = 0;
 }
 
+namespace
+{
+    bool runCommand(const std::string& name, const std::string& arg, std::string& why);
+}
+
 namespace WolfVRUi
 {
 void run(const std::string& name, const std::string& arg)
 {
+    // [VR MENU FIX 2026-11-04] every command from the bar gets an answer the headset shows (done, or why not): a press
+    // that silently did nothing is what Paul saw on the Quest 3 ("clicking any button on the menu does nothing")
+    std::string why;
+    const bool ok = runCommand(name, arg, why);
+    namespace json = boost::json;
+    json::object o;
+    o["t"] = "acted";
+    o["a"] = name;
+    o["ok"] = ok;
+    if (!ok) o["why"] = why;
+    WolfVRStream::sendText(json::serialize(o));
+}
+}
+
+namespace
+{
+bool runCommand(const std::string& name, const std::string& arg, std::string& why)
+{
     if (name == "home")
     {
         gAgent.teleportHome();
-        return;
+        return true;
     }
     if (name == "hideavatar")
     {
         // [VR VIEW 2026-11-04] the bar's Hide Me / Show Me (Headset Settings has it too)
         gSavedSettings.setBOOL("WolfVRHideAvatar", !gSavedSettings.getBOOL("WolfVRHideAvatar"));
-        return;
+        return true;
     }
     if (name == "mic")
     {
         // [VR AUDIO 2026-11-04] the headset page's "Use the headset microphone for voice" (Headset Settings has it too)
         gSavedSettings.setBOOL("WolfVRHeadsetMic", arg == "1");
-        return;
+        return true;
     }
-        if (name == "sit")
+    if (name == "sit")
     {
         // one slot for the pair (hud_model.js _sitOrStand): stand when seated on anything, else sit on the ground
         if (isAgentAvatarValid() && gAgentAvatarp->isSitting()) gAgent.standUp();
-        else if (LLCommand* c = command("groundsit")) callCommit(c->executeFunctionName(), c->executeParameters());
-        return;
+        else if (LLCommand* c = command("groundsit"); !c || !callCommit(c->executeFunctionName(), c->executeParameters()))
+        {
+            why = "sitting is not available";
+            return false;
+        }
+        return true;
     }
     if (name == "fav")
     {
         LLUUID id;
-        if (!LLUUID::validate(arg) || !id.set(arg, false)) return;
+        why = "that landmark is not in your favourites";
+        if (!LLUUID::validate(arg) || !id.set(arg, false)) return false;
         // only an item in the Favorites folder (what the bar listed), never any inventory item the page names
         const LLUUID fav = gInventory.findCategoryUUIDForType(LLFolderType::FT_FAVORITE);
         LLViewerInventoryItem* item = gInventory.getItem(id);
-        if (!item || item->getParentUUID() != fav || item->getType() != LLAssetType::AT_LANDMARK) return;
+        if (!item || item->getParentUUID() != fav || item->getType() != LLAssetType::AT_LANDMARK) return false;
         gAgent.teleportViaLandmark(item->getAssetUUID());
-        return;
+        return true;
     }
-    if (!allowed(name)) return;
+    if (!allowed(name)) { why = "not a menu button"; return false; }
     LLCommand* c = command(name);
-    if (!c) return;
-    if (!callEnable(c->isEnabledFunctionName(), c->isEnabledParameters(), true)) return;
+    if (!c) { why = "not in this viewer"; return false; }
+    if (!callEnable(c->isEnabledFunctionName(), c->isEnabledParameters(), true)) { why = "cannot be used here just now"; return false; }
     // A command with a "stop" function is press-and-hold on the desktop (speak: Agent.PressMicrophone /
     // ReleaseMicrophone). A trigger pull cannot be held on a menu, so the bar LATCHES it, as WolfStorm's Speak slot does.
     if (!c->executeStopFunctionName().empty() && callEnable(c->isRunningFunctionName(), c->isRunningParameters(), false))
     {
-        callCommit(c->executeStopFunctionName(), c->executeStopParameters());
-        return;
+        if (callCommit(c->executeStopFunctionName(), c->executeStopParameters())) return true;
+        why = "not available in this viewer";
+        return false;
     }
-    callCommit(c->executeFunctionName(), c->executeParameters());
+    if (callCommit(c->executeFunctionName(), c->executeParameters())) return true;
+    why = "not available in this viewer";
+    return false;
 }
+}
+
+namespace WolfVRUi
+{
 
 void pump()
 {

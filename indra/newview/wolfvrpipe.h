@@ -149,6 +149,10 @@ namespace wolfvr
         float tan[8] = {-1, 1, -1, 1, -1, 1, -1, 1};
         bool has_pos = false;
         float pos[3] = {0, 0, 0};
+        // [VR STAGES 2026-11-04] when this picture's stages happened (clockMs; 0 = not known): the pose arrived from the
+        // headset, the frame began, the left eye was finished, the read-back was issued, the read-back was collected.
+        // Carried in the picture header so the headset can put the whole chain together (wolfvr.js stages).
+        double t_recv = 0, t_frame = 0, t_eye0 = 0, t_issue = 0, t_collect = 0;
     };
 
     /** [VR BIG SCREEN 2026-11-03] Mouse and keyboard from the headset page, for the viewer window. Positions are in

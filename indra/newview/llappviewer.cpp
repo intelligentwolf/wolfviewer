@@ -82,7 +82,7 @@
 #include "wolfdryvolumes.h"   // [WOLF SEA TUNNEL 2026-10-28/] wolfdry prims: air under the sea
 #include "wolfterrainpaint.h"
 #include "wolfupdate.h"         // <WolfViewer 2026-10-02/> WolfUpdate::shutdown
-#include "wolfvrstream.h"       // [VR PIPE 2026-11-03/] WolfVRStream::shutdown
+#include "wolfvrstream.h"       // [VR PIPE 2026-11-03/] WolfVRStream::shutdown, [VR STAGES 2026-11-04/] headsetInVR
 #include "wolfvrscreen.h"       // [VR STEREO 2026-11-04/] WolfVRScreen::displayFrame
 #include "wolfvraudio.h"        // [VR AUDIO 2026-11-04/] WolfVRAudio::shutdown
 #include "wolfdjaudio.h"        // [WOLF DJ 2026-10-04/] WolfDJMixer::shutdown
@@ -1899,7 +1899,9 @@ bool LLAppViewer::doFrame()
 
             // yield cooperatively when not running as foreground window
             // and when not quiting (causes trouble at mac's cleanup stage)
-            if (!LLApp::isExiting()
+            // [VR STAGES 2026-11-04] not while a headset is in VR: then the headset IS the foreground, and this sleep
+            // (BackgroundYieldTime, 40 ms a frame) was measured as half of every VR frame when the window lost focus
+            if (!LLApp::isExiting() && !WolfVRStream::headsetInVR()
                 && ((gViewerWindow && !gViewerWindow->getWindow()->getVisible())
                     || !gFocusMgr.getAppHasFocus()))
             {

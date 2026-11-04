@@ -58,6 +58,8 @@ namespace WolfVRStream
     // [VR 3D 2026-11-03] WolfVRStreamMode "world" (VR 3D Mode): the world drawn from the headset's pose.
     /** True when streaming in 3D mode and an allowed headset wants pictures. */
     bool worldWanted();
+    /** [VR STAGES 2026-11-04] A headset is in VR now (either mode): the viewer is the foreground app for it. */
+    bool headsetInVR();
     /** The newest head pose from the headset (valid=false when none). */
     wolfvr::HeadPose headPose();
     /** Hands one world picture (frameSize RGBA, top row first) drawn for `pose`; `rgba` gets back a buffer to reuse. */

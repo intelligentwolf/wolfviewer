@@ -1451,7 +1451,10 @@ void applyEvents(const std::vector<wolfvr::InputEvent>& events)
             const LLVector2 sc = gViewerWindow->getDisplayScale();
             LLToolPie* pie = LLToolPie::getInstance();
             pie->handleHover(ll_round(gPtr.pos.mX / sc.mV[VX]), ll_round(gPtr.pos.mY / sc.mV[VY]), MASK_NONE);
-            pie->teleportToClickedLocation();
+            const bool went = pie->teleportToClickedLocation();
+            if (gDebugStats)   // [VR LEAN] debug only, one line per double press
+                LL_INFOS("WolfVR") << "pointer teleport at " << gPtr.pos.mX << "," << gPtr.pos.mY << ": pick type "
+                                   << (S32)pie->getHoverPick().mPickType << ", " << (went ? "going" : "refused") << LL_ENDL;
             break;
         }
         case T::TEXT:

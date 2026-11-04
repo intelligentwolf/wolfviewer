@@ -187,6 +187,8 @@ async function pointAtView(path) {
     await aimAt(await evalJs(`window.__wolfvr.layerPoint(${u}, ${v})`)); await sleep(500);
     return await evalJs('window.__wolfvr.aim()');
 }
+// a modal notice the region may have shown at log-in holds the mouse until answered (in the headset as on the desktop)
+for (let k = 0; k < 2; k++) { leap('LLWindow', "{'op':'keyDown','keycode':i129}"); leap('LLWindow', "{'op':'keyUp','keycode':i129}"); await sleep(600); }
 for (const [slot, name] of [['map', 'worldmap'], ['inventory', 'floater_my_inventory'], ['people', 'floater_people']]) {
     await barOpen(true);
     await aimAt(await evalJs(`window.__wolfvr.slotPoint("${slot}")`)); await sleep(300); await click('right', 0);

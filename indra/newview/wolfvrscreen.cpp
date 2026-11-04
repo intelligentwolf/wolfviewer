@@ -22,6 +22,8 @@
 #include "llfocusmgr.h"
 #include "llfloater.h"
 #include "lltoast.h"
+#include "llviewershadermgr.h"
+#include "llrender2dutils.h"
 #include "llrootview.h"
 #include "llviewermenu.h"
 #include <algorithm>
@@ -239,27 +241,15 @@ namespace
         // avatar's eyes, with the avatar and its attachments not drawn (displayFrame), plus the headset's lean.
         static LLCachedControl<bool> hide_me(gSavedSettings, "WolfVRHideAvatar", false);
         const S32 sit = isAgentAvatarValid() && gAgentAvatarp->isSitting() ? (gAgentAvatarp->getParent() ? 2 : 1) : 0;
-        if (!hide_me)
-        {
-            const LLVector3 av = isAgentAvatarValid() && gAgentAvatarp->mDrawable.notNull() ? gAgentAvatarp->getRenderPosition()
-                                                                                         : gAgent.getPositionAgent();
-            const LLVector3 rear = gSavedSettings.getVector3("CameraOffsetRearView") * gSavedSettings.getF32("CameraOffsetScale");
-            // [VR EYE HEIGHT 2026-11-04] Paul: "it still doesn't feel 3d". Measured (eye dump, e2e_vr3d): the head was
-            // 1.6 m ABOVE the avatar's own eyes - the rear view's 0.75 m lift on top of the avatar's centre, and then the
-            // headset's own height above its floor on top of that - an eye height of about 3.3 m, a giant looking down on
-            // a small figure 3 m away, with nothing near. The headset's floor is now the ground the avatar stands on (its
-            // centre less pelvis-to-foot, LLAvatarAppearance::getPelvisToFoot), behind it by the rear view's distance, so
-            // the eyes are at the resident's own height, the avatar at eye level in front and the ground where the feet
-            // expect it. (The desktop's 0.75 m lift is for a camera with no height of its own; a headset brings its own.)
-            const F32 to_foot = isAgentAvatarValid() ? gAgentAvatarp->getPelvisToFoot() : 0.f;
-            const LLVector3 floor = av + gMap.fwd * rear.mV[VX] + gMap.left * rear.mV[VY] - gMap.up * llclamp(to_foot, 0.f, 3.f);
-            // no head position from the page (an older page): standing height, WolfStorm's own first-person 1.6 m
-            gMap.base = floor + (hp.has_pos ? refToAgent(gMap, hp.pos[0], hp.pos[1], hp.pos[2]) : gMap.up * 1.6f);
-            gMap.valid = true;
-            gLean.set = false;
-            return;
-        }
+        // [VR CAMERA 2026-11-04] Paul, sitting at his desk (device line: head 0.89 m above the floor): "my camera was in
+        // the middle of my avatars back instead of up in the air". The camera placed from the headset's FLOOR gives a
+        // seated resident a seated height. Now the view is anchored to the AVATAR whatever the resident's own posture:
+        // shown, 1.75 m behind its eyes and 0.45 m above them (seen from behind and a little above, close enough that the
+        // avatar is near); hidden (WolfVRHideAvatar), at its eyes. The headset adds its own lean from where it was when
+        // VR started (a step of more than a metre re-centres it), so leaning still gives real parallax.
+        constexpr F32 kBehind = 1.75f, kAbove = 0.45f;
         LLVector3 base = avatarEyes();
+        if (!hide_me) base += gMap.fwd * -kBehind + gMap.up * kAbove;
         if (hp.has_pos)
         {
             if (!gLean.set || gLean.sit != sit) { std::memcpy(gLean.p0, hp.pos, sizeof gLean.p0); gLean.set = true; gLean.sit = sit; }
@@ -308,6 +298,7 @@ namespace
     struct Layer
     {
         LLRenderTarget rt;
+        LLRenderTarget ui;   // [VR LAYER ORDER 2026-11-04] the 2D UI on its own, cleared of junk, then laid over the HUDs
         GLuint pbo[kSlots] = {0, 0, 0};
         GLsync fence[kSlots] = {nullptr, nullptr, nullptr};
         F64 issued[kSlots] = {0, 0, 0};
@@ -330,6 +321,22 @@ namespace
     // where it stays put in the room (as Virtual Desktop's and SteamVR's desktop windows do), and a point at it is the
     // mouse on that window. The rest of the layer (HUD attachments, menus, tips) stays the head-locked HUD band.
     // Sent only when the list changes. Rectangles: 0..1 of the window, from its top-left (the layer picture's axes).
+    // [VR WOLF SCREENS 2026-11-04] the Wolf instruments the viewer draws itself (main_view.xml): flight deck, car
+    // dashboard, ship's helm, game HUD, border banner, loading notice - found once by name
+    const std::vector<LLHandle<LLView>>& wolfScreens()
+    {
+        static std::vector<LLHandle<LLView>> s;
+        static bool found = false;
+        if (!found && gViewerWindow && gViewerWindow->getRootView())
+        {
+            found = true;
+            for (const char* n : {"wolf_flight_deck", "wolf_car_dashboard", "wolf_helm_hud", "wolf_game_hud", "wolf_border_banner",
+                                  "wolf_loading_notice"})
+                if (LLView* v = gViewerWindow->getRootView()->findChildView(n, true)) s.push_back(v->getHandle());
+        }
+        return s;
+    }
+
     std::string gPanelsSent;
     F64 gPanelsAt = 0;
     void sendPanels()
@@ -405,6 +412,7 @@ namespace
         if (gLayer.stex) glDeleteTextures(1, &gLayer.stex);
         gLayer.sfbo = gLayer.stex = 0;
         gLayer.rt.release();
+        gLayer.ui.release();
         gLayer.w = gLayer.h = gLayer.ww = gLayer.wh = 0;
         gLayer.next = 0;
     }
@@ -667,7 +675,7 @@ void captureLayer()
     if (ww != gLayer.ww || wh != gLayer.wh || !gLayer.rt.isComplete())
     {
         freeLayer();
-        if (!gLayer.rt.allocate(ww, wh, GL_RGBA8, true))
+        if (!gLayer.rt.allocate(ww, wh, GL_RGBA8, true) || !gLayer.ui.allocate(ww, wh, GL_RGBA8, false))
         {
             LL_WARNS("WolfVR") << "UI layer: could not make the target " << ww << "x" << wh << LL_ENDL;
             return;
@@ -713,10 +721,24 @@ void captureLayer()
     const F64 t0 = LLTimer::getTotalSeconds();
     const bool eye_rect = gEyeRect.active;
     if (eye_rect) useEyeRect(false);   // [VR RENDER SIZE] the HUDs and windows are laid out on the whole window
+    // [VR LAYER ORDER 2026-11-04] Paul: "if i open a floater that is over the top of a hud the hud masks it". As on the
+    // desktop: the HUD attachments first (their own target), the 2D UI over them. The UI is drawn into a target of its
+    // own, cleared of what is not wanted in the headset (below), then laid over the HUDs.
     gLayer.rt.bindTarget();
     gGL.setColorMask(true, true);
     glClearColor(0.f, 0.f, 0.f, 0.f);
     gLayer.rt.clear();
+    // [VR HUD ALPHA 2026-11-04] render_hud_attachments ends in LLPipeline::renderGeomPostDeferred, which leaves alpha writes
+    // OFF (gGL.setColorMask(true, false), pipeline.cpp) when HUD attachments are worn (Paul wears one): their pixels have
+    // colour and no alpha, and get their coverage from their colour when the picture is collected (above)
+    render_hud_attachments();
+    gGL.setColorMask(true, true);
+    gGL.flush();
+    gLayer.rt.flush();
+    gLayer.ui.bindTarget();
+    gGL.setColorMask(true, true);
+    glClearColor(0.f, 0.f, 0.f, 0.f);
+    gLayer.ui.clear();
     gGL.setColorMask(true, true);
     // [VR HUD ALPHA] test only (WolfVRDebugUIAlphaOff): the 2D UI drawn with alpha writes off, as the pipeline leaves HUD
     // attachments - so the emulator, whose test avatar wears no HUD, checks that such pixels still reach the headset
@@ -770,22 +792,13 @@ void captureLayer()
         if (gMenuHolder)
             for (LLView* v : *gMenuHolder->getChildList()) add(v, 0);
         for (auto& t : LLInstanceTracker<LLNotificationsUI::LLToast>::instance_snapshot()) add(&t, 0);
-        static std::vector<LLHandle<LLView>> s_named;
-        static bool s_found = false;
-        if (!s_found && gViewerWindow->getRootView())
-        {
-            s_found = true;
-            for (const char* n : {"popup_holder", "wolf_flight_deck", "wolf_car_dashboard", "wolf_helm_hud", "wolf_game_hud",
-                                  "wolf_border_banner", "wolf_loading_notice"})
-                if (LLView* v = gViewerWindow->getRootView()->findChildView(n, true)) s_named.push_back(v->getHandle());
-        }
-        for (const auto& h : s_named)
-        {
-            LLView* v = h.get();
-            if (!v) continue;
-            if (std::string(v->getName()) == "popup_holder") { for (LLView* c : *v->getChildList()) add(c, 1); }
-            else add(v, 0);
-        }
+        // popups (a combo box's list, opened from a window) are kept; the Wolf instruments are drawn again after the
+        // clear (below), whole
+        static LLHandle<LLView> s_popups;
+        if (!s_popups.get() && gViewerWindow->getRootView())
+            if (LLView* v = gViewerWindow->getRootView()->findChildView("popup_holder", true)) s_popups = v->getHandle();
+        if (LLView* v = s_popups.get())
+            for (LLView* c : *v->getChildList()) add(c, 1);
         static F64 s_kept_log = 0;
         if (gDebugStats && LLTimer::getTotalSeconds() - s_kept_log > 10.0)
         {
@@ -830,11 +843,46 @@ void captureLayer()
         }
         if (!sc) glDisable(GL_SCISSOR_TEST);
     }
-    // the HUD attachments last, over what was kept: they are the residents' own instruments and all stay.
-    // [VR HUD ALPHA 2026-11-04] render_hud_attachments ends in LLPipeline::renderGeomPostDeferred, which leaves alpha writes
-    // OFF (gGL.setColorMask(true, false), pipeline.cpp) when HUD attachments are worn - Paul wears one - so their pixels
-    // have colour and no alpha: they get their coverage from their colour when the picture is collected (above).
-    render_hud_attachments();
+    // [VR WOLF SCREENS 2026-11-04] Paul: "none of the huds are working - so flight, cars gaming i just cant see them". The
+    // Wolf instruments are views as big as the window that draw themselves (no children to keep), so the clear above
+    // took them: each one shown is drawn again here, on its own, exactly as the desktop draws it (LLViewerWindow::draw's
+    // UI scale, then the view at its place, as LLView::drawChild does)
+    {
+        LLGLSUIDefault gls_ui;
+        gViewerWindow->setup2DRender();
+        gUIProgram.bind();
+        gGL.color4f(1, 1, 1, 1);
+        for (const auto& h : wolfScreens())
+        {
+            LLView* v = h.get();
+            if (!v || !v->getVisible() || !v->isInVisibleChain()) continue;
+            const LLRect r = v->calcScreenRect();
+            gGL.pushMatrix();
+            LLUI::pushMatrix();
+            const LLVector2 dsc = gViewerWindow->getDisplayScale();
+            gGL.scaleUI(dsc.mV[VX], dsc.mV[VY], 1.f);
+            LLUI::translate((F32)r.mLeft, (F32)r.mBottom);
+            v->draw();
+            LLUI::popMatrix();
+            gGL.popMatrix();
+        }
+        gUIProgram.unbind();
+    }
+    gGL.flush();
+    gLayer.ui.flush();
+    // the UI over the HUDs: premultiplied (the UI's colour is already multiplied by its coverage, captureLayer above)
+    gLayer.rt.bindTarget();
+    {
+        LLGLSUIDefault gls_ui;
+        gGL.setColorMask(true, true);
+        gl_state_for_2d((S32)gLayer.ww, (S32)gLayer.wh);
+        gUIProgram.bind();
+        gGL.blendFunc(LLRender::BF_ONE, LLRender::BF_ONE_MINUS_SOURCE_ALPHA);
+        gl_draw_scaled_target(0, 0, (S32)gLayer.ww, (S32)gLayer.wh, &gLayer.ui);
+        gGL.flush();
+        gGL.setSceneBlendType(LLRender::BT_ALPHA);
+        gUIProgram.unbind();
+    }
     gGL.setColorMask(true, true);
     gGL.flush();
     // scale it down into the copy that is read (still bottom row first)
@@ -1679,6 +1727,12 @@ void applyEvents(const std::vector<wolfvr::InputEvent>& events)
             }
             if (e.type == T::KEY_DOWN) gKeyboard->handleTranslatedKeyDown(key, mask);
             else gKeyboard->handleTranslatedKeyUp(key, mask);
+            // [VR KEYBOARD ENTER 2026-11-04] Paul: "i put test in the box with the keyboard and clicked enter but it did not
+            // submit it". The viewer acts on Return only when it arrives as the CHARACTER 13 (LLViewerWindow::handleKey lets
+            // a key under 0x80 "fall through to character handler first"; handleUnicodeChar: "We delay processing of
+            // return keys until they arrive as a Unicode char"), which the window system sends with the key on the
+            // desktop. The headset's Enter is a key only, so its character is given here, as the desktop's would be.
+            if (e.type == T::KEY_DOWN && key == KEY_RETURN) gViewerWindow->handleUnicodeChar(13, mask);
             break;
         }
         case T::STICK:

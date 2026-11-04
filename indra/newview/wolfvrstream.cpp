@@ -28,6 +28,7 @@
 #include "llcallbacklist.h"
 #include "llfloater.h"
 #include "llfloaterreg.h"
+#include "lltoolbarview.h"
 #include "lldir.h"
 #include "llfile.h"
 #include "llnotificationsutil.h"
@@ -300,6 +301,15 @@ namespace
             {
                 s_hid = false;
                 if (f && gSavedSettings.getBOOL("WolfVRStreamEnabled")) f->setVisible(true);
+            }
+            // [VR TOOLBARS 2026-11-04] Paul: "the menu at the bottom of the screen did the same [masked the windows] so
+            // probably need to hide it when in vr mode". The toolbars (bottom, left, right) are hidden while a headset
+            // is connected - their buttons are on the headset's own bar - and come back as they were when it goes
+            static bool s_bars_hidden = false;
+            if (gToolBarView)
+            {
+                if (connected && gToolBarView->getVisible()) { gToolBarView->setVisible(false); s_bars_hidden = true; }
+                else if (!connected && s_bars_hidden) { gToolBarView->setVisible(true); s_bars_hidden = false; }
             }
         }
         return false;

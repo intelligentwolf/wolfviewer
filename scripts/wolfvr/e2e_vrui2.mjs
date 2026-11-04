@@ -178,17 +178,44 @@ for (const [langs, want, keys, expect] of [
 }
 const typed = await chatValue();
 check(typed === 'hi £5 äßz éàa', `5. the chat box holds what was typed on the UK, German and French keyboards: ${JSON.stringify(typed)}`);
-// clear it without sending (Backspace), and close the keyboard with its own Close
+// [VR KEYBOARD ENTER] clear it, type "test" and press the keyboard's Enter: the chat is sent (the box empties)
 for (let i = 0; i < 14; i++) { const p = await evalJs('window.__wolfvr.keyPoint("\\u232b")'); if (p) { await aimAt(p); await sleep(120); await click('right', 0, 100); } }
+await evalJs('window.__wolfvr.kbLanguages(["en-GB"])'); await sleep(300);
+await typeKeys(['t', 'e', 's', 't']); await sleep(600);
+const before = await chatValue();
+await typeKeys(['Enter \u21b5']); await sleep(1500);
+const after = await chatValue();
+check(before === 'test' && after === '', `5. Enter on the keyboard sends the chat ("${before}" -> "${after}")`);
 await aimAt(await evalJs('window.__wolfvr.keyPoint("\\u2715  Close")')); await sleep(300); await click('right', 0);
 check(!(await evalJs('window.__wolfvr.keyboard().open')), '5. the keyboard\'s Close closes it');
 console.log('   device: ' + await evalJs('window.__wolfvr.deviceLine()'));
+
+// ---- 7. the Wolf instruments reach the headset (the car dashboard, from the bar) ----
+const covered = async () => evalJs(`(async () => { const g = window.__wolfvr.grabLayer(); if (!g) return -1; const im = new Image(); im.src = g; await im.decode();
+    const c = document.createElement('canvas'); c.width = im.width / 4; c.height = im.height / 4; const x = c.getContext('2d'); x.drawImage(im, 0, 0, c.width, c.height);
+    const d = x.getImageData(0, c.height / 2, c.width, c.height / 2).data; let n = 0; for (let i = 0; i < d.length; i += 4) if (d[i] > 16) n++; return n; })()`);
+const cov0 = await covered();
+check(await openBar(), '7. the bar opens for the Dashboard');
+await pressSlot('dashboard');
+await sleep(4000);
+const cov1 = await covered();
+const dg = await evalJs('window.__wolfvr.grabLayer()');
+if (dg) writeFileSync(resolve(OUT, 'layer_dashboard.png'), Buffer.from(dg.split(',')[1], 'base64'));
+await shot('eye_dashboard.png');
+check(cov1 > cov0 + 2000, `7. the car dashboard is drawn on the HUD band (covered pixels ${cov0} -> ${cov1}, quarter size)`);
+if (await openBar()) { await pressSlot('dashboard'); await sleep(800); }
+// ---- 8. the toolbars are hidden while the headset is connected ----
+const tb = await leapInfo('//bottom_toolbar_stack');
+check(tb && tb.visible_chain === false, '8. the toolbars are hidden while the headset is connected: ' + JSON.stringify(tb && { chain: tb.visible_chain }));
 
 // ---- 6. the page goes: the VR window comes back ----
 await evalJs('window.__wolfvr.toggleVR()');
 await sleep(500);
 await send('Page.navigate', { url: 'about:blank' });
 check(await waitFor(async () => (await vrWindowVisible()) === true, 10000), '6. the headset gone, the VR window is back for the next person');
+await sleep(1000);
+const tb2 = await leapInfo('//bottom_toolbar_stack');
+check(tb2 && tb2.visible_chain === true, '8. ... and the toolbars are back: ' + JSON.stringify(tb2 && { chain: tb2.visible_chain }));
 console.log(failures ? `${failures} FAILED` : 'ALL PASSED');
 chrome.kill('SIGKILL');
 process.exit(failures ? 1 : 0);

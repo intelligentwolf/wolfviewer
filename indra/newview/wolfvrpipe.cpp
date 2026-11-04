@@ -1411,6 +1411,19 @@ void Service::Impl::frameLoop()
             drawTestPattern(rgba, cfg.width, cfg.height, cfg.fov_deg, p.q, frame, t0);
             t1 = nowMs();
         }
+        // [VR SIZE SWITCH 2026-11-04] Ticket 526 (Paul's viewer, 22:41:40Z, SIGSEGV in memcpy under
+        // gst_buffer_fill, at "headset stream switched to screen 1920x1080"): Service::setMode accepts pictures of
+        // the new size at once (cur_w / cur_h), but this thread may already be past the mode switch at the top of
+        // the loop and waiting with the OLD encoder. A 1920x1080 picture then went to the 3456x1728 encoder, which
+        // copies width x height x 4 bytes from it (GstH264Encoder::encode, and the OpenH264 and JPEG encoders the
+        // same way): 15 MB read past its end. A picture that is not this encoder's size is dropped here; the next
+        // pass switches mode, opens the encoder for the new size and takes the next picture.
+        if (rgba.size() != (size_t)cfg.width * cfg.height * 4)
+        {
+            std::lock_guard<std::mutex> lk(stats_mutex);
+            st.frames_skipped++;
+            continue;
+        }
         EncodedFrame ef;
         std::string err;
         if (!enc->encode(rgba.data(), ef, err))

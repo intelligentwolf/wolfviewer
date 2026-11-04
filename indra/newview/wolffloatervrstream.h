@@ -39,7 +39,7 @@ public:
     void onClose(bool app_quitting) override;
 
 private:
-    void refresh();
+    void refresh() override;   // LLFloater::refresh (clang -Winconsistent-missing-override: the Mac build)
     void setQr(const std::string& url);
 
     LLTextEditor* mStatus = nullptr;

@@ -20246,13 +20246,13 @@ Change of this parameter will affect the layout of buttons in notification toast
 		<key>WolfVR3DMode</key>
 		<map>
 			<key>Comment</key>
-			<string>[VR 3D 2026-11-03] Offer VR 3D Mode (Wolf World > VR, the floater, the headset's left stick click). Off until VR 3D Mode is finished and tested (coordinator 2026-11-03: hide 3D until it exists); VR Big Screen Mode is always offered.</string>
+			<string>[VR 3D 2026-11-03] Offer VR 3D Mode (Wolf World > VR, the floater, the headset's left stick click). On from W94 "Amazing Horizons" (Paul 2026-11-04: "roll it out ... honestly i think it's amazing now"); VR Big Screen Mode is always offered.</string>
 			<key>Persist</key>
 			<integer>1</integer>
 			<key>Type</key>
 			<string>Boolean</string>
 			<key>Value</key>
-			<integer>0</integer>
+			<integer>1</integer>
 		</map>
 		<key>WolfVRHeadset</key>
 		<map>

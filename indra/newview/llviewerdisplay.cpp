@@ -1052,8 +1052,12 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
                   //try to generate a shadow before the first frame is through
                     // [VR SHARED CULL 2026-11-04/] the right eye: the left eye's shadow maps, matrices made for this eye
                     // (a shadow pass would re-sort the draw pools for its own camera, and the shared sort is the left eye's)
-                    if (vr_shared_cull || WolfVRScreen::reuseShadowsThisFrame()) gPipeline.wolfVRReuseSunShadow();
-                    else gPipeline.generateSunShadow(*LLViewerCamera::getInstance());
+                    // [VR SHADOWS FIX 2026-11-04/] reuse only what a VR eye kept (a probe's pass overwrites the live
+                    // matrices between frames); otherwise this eye draws its own
+                    if (!((vr_shared_cull || WolfVRScreen::reuseShadowsThisFrame()) && gPipeline.wolfVRReuseSunShadow()))
+                    {
+                        gPipeline.generateSunShadow(*LLViewerCamera::getInstance());
+                    }
                 }
 
                 LLVertexBuffer::unbind();

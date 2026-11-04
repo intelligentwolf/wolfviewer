@@ -230,11 +230,75 @@ function disparityProbe() {
                `views ${lastViews ? Array.from(lastViews, (v) => v.eye).join('/') : '?'} -> halves on layers ${eyeLayer.join('/')}, left eye at x ${h.eyes ? fmt(h.eyes[0] * 1000, 1) : '?'} mm`;
     } catch (e) { return 'disparity: ' + e.message; }
 }
+// [VR SHOWN CHECK 2026-11-04] Paul at Luxor, round 8: "doesn't look 3D, it just looks flat", while disparityProbe
+// read a true stereo PICTURE (near 32 px). That probe stops at the decoded picture; this one measures what this
+// headset actually puts in front of each eye: the scene is drawn again, once with each of three's two XR cameras
+// (their own pose, projection and layer mask - the same cameras the display frame uses), into a small target, and
+// the right eye's drawing is matched to the left eye's band by band as above, the eye windows' own offset taken out
+// (from the cameras' projection matrices, as eyesOf reads them). Near things must come out at about the picture's
+// own disparity, far ones ~0; near 0 everywhere means both eyes are shown the same thing. The cameras' layer masks
+// and the display viewports the browser gave the two views are in the line too (the same viewport twice would mean
+// one eye's drawing lands on the other's).
+function shownProbe() {
+    try {
+        if (!renderer.xr.isPresenting) return 'shown: not presenting';
+        const xc = renderer.xr.getCamera().cameras;
+        if (!xc || xc.length < 2) return `shown: ${xc ? xc.length : 0} XR cameras`;
+        const li = eyeLayer[0] - 1, ri = eyeLayer[1] - 1;
+        const W = 480, H = 480;
+        const grey = (c) => {
+            const cam = new THREE.PerspectiveCamera();
+            cam.projectionMatrix.copy(c.projectionMatrix);
+            cam.projectionMatrixInverse.copy(c.projectionMatrixInverse);
+            c.matrixWorld.decompose(cam.position, cam.quaternion, cam.scale);
+            cam.updateMatrixWorld(true);
+            cam.layers.mask = c.layers.mask;
+            const rt = new THREE.WebGLRenderTarget(W, H, { colorSpace: THREE.SRGBColorSpace });
+            const xr = renderer.xr.enabled; renderer.xr.enabled = false;
+            const prevRT = renderer.getRenderTarget();
+            renderer.setRenderTarget(rt); renderer.render(scene, cam); renderer.setRenderTarget(prevRT);
+            renderer.xr.enabled = xr;
+            const px = new Uint8Array(W * H * 4);
+            renderer.readRenderTargetPixels(rt, 0, 0, W, H, px);
+            rt.dispose();
+            const g = new Float32Array(W * H);
+            for (let i = 0; i < W * H; i++) g[i] = px[i * 4] * 0.3 + px[i * 4 + 1] * 0.59 + px[i * 4 + 2] * 0.11;
+            return g;   // GL rows are bottom first: row 0 is the bottom of the view (near ground), row H-1 the top
+        };
+        const gL = grey(xc[li]), gR = grey(xc[ri]);
+        // a point at infinity straight ahead is at u = -L / (R - L) of each camera's own window (eyesOf: the edges of a
+        // perspective projection are (m8 -+ 1) / m0)
+        const win = (c) => { const p = c.projectionMatrix.elements; const L = (p[8] - 1) / p[0], R = (p[8] + 1) / p[0]; return -L / (R - L); };
+        const sInf = Math.round((win(xc[li]) - win(xc[ri])) * W);
+        const band = (y0, y1) => {
+            let best = 0, bestSad = Infinity;
+            for (let sft = sInf - 4; sft <= sInf + 36; sft++) {
+                let sad = 0, n = 0;
+                for (let py = y0; py < y1; py++) for (let px = Math.max(40, sft + 2); px < W - 40; px++) {
+                    const qx = px - sft; if (qx < 2 || qx >= W - 2) continue;
+                    sad += Math.abs(gL[py * W + px] - gR[py * W + qx]); n++;
+                }
+                if (!n) continue;
+                sad /= n;
+                if (sad < bestSad) { bestSad = sad; best = sft - sInf; }
+            }
+            return best * (config && config.h ? config.h / W : 1);   // in pixels of the eye picture, as disparityProbe
+        };
+        let vp = '?';
+        try {
+            const sess = renderer.xr.getSession(), bl = sess && sess.renderState.baseLayer;
+            if (bl && lastViews) vp = Array.from(lastViews, (v) => { const r = bl.getViewport(v); return `${v.eye}:${r.x},${r.y},${r.width}x${r.height}`; }).join(' ') + ` of ${bl.framebufferWidth}x${bl.framebufferHeight}`;
+        } catch (e) { vp = 'error ' + e.message; }
+        return `shown on the display (each XR camera's own drawing, offset ${fmt(sInf * (config && config.h ? config.h / W : 1), 0)} px out): ` +
+               `near ${fmt(band(12, 48), 0)} px, middle ${fmt(band(H / 2 - 24, H / 2 + 24), 0)} px, far ${fmt(band(H - 60, H - 24), 0)} px; ` +
+               `camera masks ${xc.map((c) => c.layers.mask).join('/')}, viewports ${vp}`;
+    } catch (e) { return 'shown: ' + e.message; }
+}
 function depthLine() {
     const h = screen.userData.hdr;
     const sep = (e) => (e ? Math.hypot(e[3] - e[0], e[4] - e[1], e[5] - e[2]) * 1000 : NaN);
     const tan = eyeTan ? `L ${eyeTan.slice(0, 4).join(',')} R ${eyeTan.slice(4, 8).join(',')}` : '-';
-    return `${disparityProbe()}; 3D: depth ${depthEyes.active ? 'on' : 'off'} (grid ${depthEyes.gw}x${depthEyes.gh}, ${depthEyes.frames} pictures), ` +
+    return `${disparityProbe()}; ${shownProbe()}; 3D: depth ${depthEyes.active ? 'on' : 'off'} (grid ${depthEyes.gw}x${depthEyes.gh}, ${depthEyes.frames} pictures), ` +
         `eyes drawn ${fmt(sep(h && h.eyes), 1)} mm apart, headset ${fmt(sep(lastXrEyes), 1)} mm, picture ${h ? (h.stereo ? 'stereo' : h.centre ? 'centre view' : 'mono') : '-'}, ` +
         `cards at ${depthEyes.active ? SHELL_DISTANCE : PICTURE_DISTANCE} m, head ${fmt(_pos.y, 2)} m above the floor, eye windows ${tan}`;
 }
@@ -2019,6 +2083,19 @@ window.__wolfvr = { resetStages: () => { for (const k of STAGES) stages[k].v.len
         c.width = layer.cfg.w; c.height = layer.cfg.h * 2;
         c.getContext('2d').drawImage(layer.shown, 0, 0, c.width, c.height);
         return c.toDataURL('image/png');
+    },
+    // [VR SHADOWS FIX] test hook (e2e_shadowflicker.mjs): the picture on show now, as 320 x 160 grey bytes (base64)
+    // with its frame number, so consecutive pictures can be compared for changes the head did not make
+    pictureGrey: () => {
+        if (!shown || !shown.img) return null;
+        const W = 320, H = 160, c = document.createElement('canvas'); c.width = W; c.height = H;
+        const x = c.getContext('2d'); x.drawImage(shown.img, 0, 0, W, H);
+        const d = x.getImageData(0, 0, W, H).data, g = new Uint8Array(W * H);
+        for (let i = 0; i < W * H; i++) g[i] = d[i * 4] * 0.3 + d[i * 4 + 1] * 0.59 + d[i * 4 + 2] * 0.11;
+        let s = ''; for (let i = 0; i < g.length; i++) s += String.fromCharCode(g[i]);
+        // with it: whether this picture came with its depth and its eye windows (a picture without either is shown on
+        // the flat cards, not the world-locked meshes - a jump for one picture)
+        return { frame: shown.hdr.frame, g: btoa(s), depth: !!shown.depth, tan: !!shown.hdr.tan, stereo: !!shown.hdr.stereo, meshes: depthEyes.active };
     } };
 // head-space point on a docked cylinder section (vrbar.js curvedGeometry: u from the left, v from the bottom) -> world
 function surfacePoint(R, arc, cy, h, u, v) {

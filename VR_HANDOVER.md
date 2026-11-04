@@ -343,3 +343,59 @@ check passes. Installed by the coordinator so far: 9d76027da7, at 19:38Z.
 - **Never port-scan or probe our servers.**
 - **Alarm on any running executable under /tmp or /dev/shm:** stop and tell the user, and don't kill it.
 - **No TODOs and no half-done branches.** Declare what's untested.
+
+## 11. Round 9 (2026-11-04, from about 20:45Z): Paul's round-8 test said "flashing" and "doesn't look 3D, just flat"
+
+His round-8 session (Luxor, 20:36–20:38Z, two device lines): 19 pictures/s decoded, pose-to-shown 121–188 ms, eye
+1728 px, errors 0; picture disparity after the windows' offset near 32 / middle 0 / far 0 px; depth on; eyes drawn
+63.4 mm apart = headset; head 0.92 m above his floor; it was night there (EEP moon below the horizon, real moon 0).
+
+### What was found and changed (uncommitted at the time of writing)
+1. **Shadow reuse paired with a probe's matrices (fixed, `pipeline.cpp` wolfVRReuseSunShadow / generateSunShadow,
+   `llviewerdisplay.cpp` ~1055).** The main loop runs the two eye passes, then `mReflectionMapManager.update()`
+   (llappviewer.cpp ~1857) renders a probe face through `cubeSnapshot` → `display_cube_face` → `generateSunShadow`
+   with `gCubeSnapshot`, which overwrites `mShadowModelview/mShadowProjection[0..1]` and stretches `mSunClipPlanes`
+   for the probe's camera while its maps go to `mAuxillaryRT`. A mirror's hero probe does the same at the start of the
+   left eye's pass. Round 8's `WolfVRShadowEvery=2` reused those live matrices with mMainRT's kept maps. Now
+   generateSunShadow keeps copies (`mWolfVRShadow*`) only when a VR eye drew the maps, the reuse restores them (and
+   the clip planes) and returns false when nothing is kept, so the caller generates. `WolfVRScreen::stereoEye()` is new.
+   - **Not proven to be the flashing.** In the emulator with round 8's binary and `WolfVRShadowEvery=2`
+     (scripts/wolfvr/e2e_shadowflicker.mjs, `~/.cache/skyband/run_shadow.sh`), consecutive pictures with the head
+     still differ by a median 0.1–0.3 grey levels, neighbours no more than pictures two apart (ratio 0.55–0.63): no
+     alternating change. But every run was at night (Community Hub, Luxor's landing point is indoors) with no sun
+     or moon shadows; the Midday shortcut sent through LEAP (Ctrl+Shift+Y, keycode 89) did not change the sky in the
+     test session, so a sunlit before/after was not obtained. Paul's session was also at night.
+2. **Display-side stereo probe (`wolfvr.js` shownProbe, in the device line after the picture probe).** Draws the scene
+   with each of three's two XR cameras (their own pose, projection, layer mask) into a 480² target and matches the
+   bands as the picture probe does, the cameras' own window offset taken out; also prints the camera layer masks and
+   the display viewports the browser gave each view. Emulator: near 54–61, middle 7–18, far 4–7 px; masks 3/5;
+   viewports left 0,0 and right 447,0 of 894×796. **Paul's next device line answers whether the Quest shows each eye
+   its own picture.** If "shown ... near" is about the picture's near value, the display is stereo and flatness is
+   not in the delivery.
+3. **Depth gaps checked:** `pictureGrey` hook reports depth / eye windows / meshes per picture; emulator 0 of 40
+   without. (His line's depth count rose 524 in a 30 s window decoding ~570: the counter only counts pictures drawn,
+   and a picture replaced before the next display frame is never drawn, so that gap is not proof of missing depth.)
+4. **Vehicles (Paul: "joysticks should control the vehicle if i am sat on one - i.e. emulate the cursor keys").**
+   `wolfvrscreen.cpp`: seated on an object (avatar has a parent) the left stick's x is `LLAgent::moveYaw` (the cursor
+   keys' turn, CONTROL_ROT_LEFT/RIGHT for the vehicle's script) instead of a sidestep; the rig heading follows the
+   seat's facing each frame (`vehicleHeading`, through the seat's render matrix like avatarEyes) plus the right
+   stick's comfort turn as an offset (`gRig.vehOff`, reset on sitting/standing). On foot nothing changed.
+   **Untested on a real vehicle** (the emulator has no vehicle to sit on); e2e_vr3d's sit-on-object step ran.
+5. Research (two agents, sources in the session): Quest 3 views are parallel (0.0° rotation both eyes, recorded
+   runtime data), positions ±IPD/2 of the user's setting, projections strongly asymmetric (L −1.376/0.839,
+   B −1.428/T 0.966 raw); three.js r185 routes view index 0 → layer 1 and 1 → layer 2 regardless of XRView.eye
+   (eyesOf's eyeLayer corrects for it) and the masks are right only while `xr.cameraAutoUpdate` is true (it is);
+   the streaming literature's causes of flat stereo are all "both eyes get effectively the same image"; a Quest
+   experimental setting, Positional TimeWarp, is reported to swap/flicker eyes for streamed content (Steam Link
+   thread) - worth switching off on Paul's headset.
+
+**Installed for Paul 21:40Z** (binary, page, settings.xml; gdb start-up check passed; e2e_vr3d 39/40 twice, and the
+round-8 binary gives the same 39/40 at the same spot: the double-trigger teleport check aims at a moving ship's deck
+this evening, which click-teleport refuses). Restore: `~/viewer-backups/vrbigscreen-before-install-20261104T214000Z/restore.sh`.
+Test tree `~/.cache/skyband/tvr` holds round 9; round 8's binary is kept there as `.bak-round8-20261104`.
+
+### Open
+- The flashing is not reproduced on this laptop. Ask Paul what flashes (the whole world, the HUD band, a panel) and
+  whether Settings > Experimental > Positional TimeWarp is on.
+- "Flat": wait for the "shown on the display" numbers.
+- The test session's Midday key press: find why it did not take (focus on the modal notice, or the Wolf sky).

@@ -206,7 +206,12 @@ namespace
     // from the avatar's facing when the headset enters VR and after a teleport, and turned ONLY by the right stick's
     // comfort turn (applyEvents TURN). Never chasing the avatar: whatever else turns it (a ship, a script, the desktop)
     // must not swing the world round the resident - uncommanded rotation is the classic nausea trigger.
-    struct Rig { bool set = false; LLVector3 fwd = LLVector3::x_axis; LLVector3 at; };
+    // [VR VEHICLE 2026-11-04] Paul: "when in vr joysticks should control the vehicle if i am sat on one". Seated on an
+    // object (a plane, car, ship: the avatar has a parent), the rig is the VEHICLE's: its heading follows the seat's
+    // facing every frame, as the cockpit of any VR driving or flying game does, plus whatever the right stick's
+    // comfort turn adds (vehOff, a look to the side that stays until the resident stands up). The resident commands
+    // the vehicle's turns with the left stick (pumpInput), so this is not the uncommanded rotation the note above means.
+    struct Rig { bool set = false; LLVector3 fwd = LLVector3::x_axis; LLVector3 at; bool vehicle = false; F32 vehOff = 0.f; };
     Rig gRig;
 
     LLVector3 avatarHeading()
@@ -214,6 +219,21 @@ namespace
         LLVector3 fwd = gAgent.getAtAxis();
         fwd.mV[VZ] = 0.f;
         if (fwd.normVec() < 1e-3f) fwd = LLVector3::x_axis;
+        return fwd;
+    }
+
+    // [VR VEHICLE] seated on an object: the avatar's facing in the world, through the seat's render matrix (the same
+    // transform avatarEyes takes for a seated avatar's position); yaw only
+    bool onVehicle() { return isAgentAvatarValid() && gAgentAvatarp->isSitting() && gAgentAvatarp->getParent(); }
+    LLVector3 vehicleHeading()
+    {
+        if (!onVehicle()) return avatarHeading();
+        const LLMatrix4& mat = ((LLViewerObject*)gAgentAvatarp->getParent())->getRenderMatrix();
+        const LLVector3 p0 = gAgentAvatarp->getPosition() * mat;
+        const LLVector3 p1 = (gAgentAvatarp->getPosition() + LLVector3::x_axis * gAgentAvatarp->getRotation()) * mat;
+        LLVector3 fwd = p1 - p0;
+        fwd.mV[VZ] = 0.f;
+        if (fwd.normVec() < 1e-3f) return avatarHeading();
         return fwd;
     }
 
@@ -226,6 +246,15 @@ namespace
             gRig.set = true;
         }
         gRig.at = here;
+        const bool vehicle = onVehicle();   // [VR VEHICLE] the rig follows the seat
+        if (vehicle != gRig.vehicle) { gRig.vehicle = vehicle; gRig.vehOff = 0.f; }
+        if (vehicle)
+        {
+            gRig.fwd = vehicleHeading();
+            gRig.fwd.rotVec(gRig.vehOff, LLVector3::z_axis);
+            gRig.fwd.mV[VZ] = 0.f;
+            gRig.fwd.normVec();
+        }
         const LLVector3 fwd = gRig.fwd;
         gMap.fwd = fwd;
         gMap.up = LLVector3::z_axis;
@@ -1190,6 +1219,7 @@ void setPickCamera()
 // the stream). gPaused is decided once per frame in displayFrame.
 bool uiSkipped() { return gEye == 0 || gPaused; }
 bool secondEye() { return gEye == 1; }
+bool stereoEye() { return gEye >= 0; }
 // [VR SHARED CULL 2026-11-04] The eyes are 6.4 cm apart and the left eye is culled with the smallest SYMMETRIC frustum
 // that holds its window (applyHeadCamera), which on a headset whose eyes mirror each other also holds the right eye's
 // window: what the left eye's cull and state sort found is what the right eye sees, less a 6.4 cm sliver at the far
@@ -1660,8 +1690,14 @@ void pumpInput()
         // stick y is negative pushed forward (xr-standard); moveLeft(+1) = left, stick x is positive to the right
         if (gStick.y < -kDead) gAgent.moveAt(1);
         else if (gStick.y > kDead) gAgent.moveAt(-1);
-        if (gStick.x < -kDead) gAgent.moveLeft(1);
-        else if (gStick.x > kDead) gAgent.moveLeft(-1);
+        // [VR VEHICLE 2026-11-04] Paul: "joysticks should control the vehicle if i am sat on one - i.e. emulate the
+        // cursor keys". Seated on an object the stick's sideways push is the cursor keys' left and right: a turn
+        // (llviewerinput.cpp agent_turn_left/right -> LLAgent::moveYaw, + = left, the YAW control flags a vehicle's
+        // script takes with CONTROL_ROT_LEFT / CONTROL_ROT_RIGHT), not the strafe of Shift and the arrows. On foot it
+        // stays a sidestep, with the right stick's comfort turn for turning.
+        const bool vehicle = onVehicle();
+        if (gStick.x < -kDead) { if (vehicle) gAgent.moveYaw(1.f); else gAgent.moveLeft(1); }
+        else if (gStick.x > kDead) { if (vehicle) gAgent.moveYaw(-1.f); else gAgent.moveLeft(-1); }
         if (gStick.lift) gAgent.moveUp(gStick.lift);
     }
     const bool run = moving && llmax(std::fabs(gStick.x), std::fabs(gStick.y)) > kRun;
@@ -1775,11 +1811,18 @@ void applyEvents(const std::vector<wolfvr::InputEvent>& events)
             if (!gAgent.isMovementLocked())
             {
                 const F32 a = (F32)e.wheel * 45.f * DEG_TO_RAD;
-                gAgent.yaw(a);
-                // [VR VIEW] the rig turns with it, by the same step (the only thing that turns the rig)
-                gRig.fwd.rotVec(a, LLVector3::z_axis);
-                gRig.fwd.mV[VZ] = 0.f;
-                gRig.fwd.normVec();
+                if (onVehicle())
+                {
+                    gRig.vehOff += a;   // [VR VEHICLE] a look to the side of the vehicle's heading (buildMap applies it)
+                }
+                else
+                {
+                    gAgent.yaw(a);
+                    // [VR VIEW] the rig turns with it, by the same step (the only thing that turns the rig on foot)
+                    gRig.fwd.rotVec(a, LLVector3::z_axis);
+                    gRig.fwd.mV[VZ] = 0.f;
+                    gRig.fwd.normVec();
+                }
             }
             break;
         case T::ACTION:

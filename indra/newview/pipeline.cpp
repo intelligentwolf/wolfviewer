@@ -103,6 +103,7 @@
 #include "llviewerstats.h"
 #include "llviewerjoystick.h"
 #include "llviewerdisplay.h"
+#include "wolfvrscreen.h"        // [VR SHADOWS FIX 2026-11-04/] WolfVRScreen::stereoEye
 #include "llspatialpartition.h"
 #include "llmutelist.h"
 #include "lltoolpie.h"
@@ -11341,8 +11342,17 @@ public:
 // point from the CAMERA's eye space into each shadow map, for this eye's own view: exactly the expression
 // generateSunShadow uses (mSunShadowMatrix[j] = trans * proj[j] * view[j] * inverse(camera view)), with the shadow
 // cameras' own view and projection it kept (mShadowModelview / mShadowProjection).
-void LLPipeline::wolfVRReuseSunShadow()
+// [VR SHADOWS FIX 2026-11-04/] Paul's round-8 test: "flashing". The reuse read mShadowModelview / mShadowProjection /
+// mSunClipPlanes, but between two VR frames the main loop renders a reflection-probe face (llappviewer.cpp
+// mReflectionMapManager.update -> cubeSnapshot -> display_cube_face -> generateSunShadow with gCubeSnapshot), and a
+// mirror's hero probe does the same at the start of the left eye's pass: those calls overwrite the first two cascades'
+// matrices and stretch mSunClipPlanes (the gCubeSnapshot branches below) for THEIR camera, while their maps go into
+// mAuxillaryRT / mHeroProbeRT, not mMainRT. So every reuse frame paired the VR eye's kept maps with a probe's matrices:
+// the near shadows were wrong on every other picture. The eyes now reuse the copies generateSunShadow keeps for them
+// (mWolfVRShadow*), taken only when a VR eye drew the maps; with nothing kept the caller generates.
+bool LLPipeline::wolfVRReuseSunShadow()
 {
+    if (!mWolfVRShadowKept) return false;
     //translate and scale to from [-1, 1] to [0, 1] (generateSunShadow)
     const glm::mat4 trans(0.5f, 0.0f, 0.0f, 0.0f,
                           0.0f, 0.5f, 0.0f, 0.0f,
@@ -11351,8 +11361,12 @@ void LLPipeline::wolfVRReuseSunShadow()
     const glm::mat4 inv_view = glm::inverse(get_current_modelview());
     for (int j = 0; j < 6; ++j)
     {
+        mShadowModelview[j] = mWolfVRShadowModelview[j];
+        mShadowProjection[j] = mWolfVRShadowProjection[j];
         mSunShadowMatrix[j] = trans * mShadowProjection[j] * mShadowModelview[j] * inv_view;
     }
+    mSunClipPlanes = mWolfVRSunClipPlanes;   // the split distances the shaders get (DEFERRED_SHADOW_CLIP)
+    return true;
 }
 
 void LLPipeline::generateSunShadow(LLCamera& camera)
@@ -12112,6 +12126,18 @@ void LLPipeline::generateSunShadow(LLCamera& camera)
         mShadowSpotLight[0] = mShadowSpotLight[1] = NULL;
     }
 
+    // [VR SHADOWS FIX 2026-11-04/] kept for the VR eyes' reuse (wolfVRReuseSunShadow) only when a VR eye drew these maps
+    // into mMainRT; a probe's pass (gCubeSnapshot) or a desktop frame leaves nothing to reuse
+    mWolfVRShadowKept = !gCubeSnapshot && WolfVRScreen::stereoEye();
+    if (mWolfVRShadowKept)
+    {
+        for (int j = 0; j < 6; ++j)
+        {
+            mWolfVRShadowModelview[j] = mShadowModelview[j];
+            mWolfVRShadowProjection[j] = mShadowProjection[j];
+        }
+        mWolfVRSunClipPlanes = mSunClipPlanes;
+    }
 
     if (!CameraOffset)
     {

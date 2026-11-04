@@ -45,6 +45,9 @@ namespace WolfVRScreen
     /** [VR FPS 2026-11-04] True while drawing the right eye of a stereo frame: what is the same for both eyes (geometry
      *  and texture updates, mirrors, impostors) has been done in the left eye's pass and is skipped. */
     bool secondEye();
+    /** [VR SHADOWS FIX 2026-11-04] True while drawing either eye of a VR 3D stereo frame (LLPipeline::generateSunShadow
+     *  keeps that frame's shadow matrices for the eyes' reuse). */
+    bool stereoEye();
     /** [VR SHARED CULL 2026-11-04] The right eye's pass reuses the left eye's cull and state sort (WolfVRShareCull). */
     bool shareCull();
     /** [VR SHADOWS 2026-11-04] The left eye keeps last frame's shadow maps this frame (WolfVRShadowEvery). */

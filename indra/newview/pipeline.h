@@ -304,7 +304,8 @@ public:
 
     void grabReferences(LLCullResult& result);
     // [VR SHARED CULL 2026-11-04/] WolfVRScreen: the second eye of a stereo frame uses the first eye's shadow maps
-    void wolfVRReuseSunShadow();
+    // [VR SHADOWS FIX 2026-11-04/] false when no VR eye's shadow maps are kept: the caller must generate them
+    bool wolfVRReuseSunShadow();
     void clearReferences();
 
     //check references will assert that there are no references in sCullResult to the provided data
@@ -809,6 +810,13 @@ public:
     glm::mat4               mSunShadowMatrix[6];
     glm::mat4               mShadowModelview[6];
     glm::mat4               mShadowProjection[6];
+    // [VR SHADOWS FIX 2026-11-04/] the shadow cameras' matrices and split planes of the last VR eye frame that drew its
+    // shadow maps into mMainRT: the reflection-probe and mirror renders (gCubeSnapshot) overwrite mShadowModelview,
+    // mShadowProjection and mSunClipPlanes between VR frames, while their maps go into their own targets
+    glm::mat4               mWolfVRShadowModelview[6];
+    glm::mat4               mWolfVRShadowProjection[6];
+    LLVector4               mWolfVRSunClipPlanes;
+    bool                    mWolfVRShadowKept = false;
     glm::mat4               mReflectionModelView;
 
     LLPointer<LLDrawable>   mShadowSpotLight[2];

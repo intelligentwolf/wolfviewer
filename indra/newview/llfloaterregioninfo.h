@@ -73,6 +73,7 @@ class LLPanelEstateAccess;
 class LLPanelRegionEnvironment;
 class WolfPanelLandWaves;
 class WolfPanelRegionWolfEnvironments;
+class WolfPanelTerrainLayers;
 
 class LLEventTimer;
 
@@ -310,6 +311,12 @@ public:
     bool callbackTextureHeights(const LLSD& notification, const LLSD& response);
     void callbackMaterialCommit(S32 index);
 
+    // [WOLF TERRAIN SCREEN 2026-11-04] On Wolf Territories the Wolf terrain screen (WolfPanelTerrainLayers) stands in for the
+    // four textures and corner heights; the rest of the tab is unchanged.
+    void draw() override;
+    /** Region / Estate closed (LLFloaterRegionInfo::onClose). */
+    void onRegionInfoClosed(bool app_quitting);
+
 protected:
     bool sendUpdate() override;
 
@@ -330,6 +337,13 @@ private:
     LLSpinCtrl* mMaterialRotationCtrl[LLTerrainMaterials::ASSET_COUNT];
     LLSpinCtrl* mMaterialOffsetUCtrl[LLTerrainMaterials::ASSET_COUNT];
     LLSpinCtrl* mMaterialOffsetVCtrl[LLTerrainMaterials::ASSET_COUNT];
+
+    // [WOLF TERRAIN SCREEN 2026-11-04]
+    void applyWolfMode(bool wolf);
+    void hideStandardTextureControls();
+    WolfPanelTerrainLayers* mWolfPanel = nullptr;   // panel_region_terrain.xml only (not the PBR transform variant)
+    bool mWolfMode = false;
+    LLRect mStandardRect[4];                         // download_raw_btn, upload_raw_btn, bake_terrain_btn, apply_btn, from the panel top
 };
 
 /////////////////////////////////////////////////////////////////////////////

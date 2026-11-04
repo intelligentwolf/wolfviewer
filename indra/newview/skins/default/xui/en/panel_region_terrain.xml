@@ -508,19 +508,19 @@
      name="apply_btn"
      top="430"
      width="100" />
-<!-- <WolfViewer 2026-10-16> Wolf terrain textures: eight layers up to 4096 m (wolfterrainlayers.cpp,
-     floater_wolf_terrain_textures.xml). Shown on Wolf Territories only (LLPanelRegionTerrainInfo::refreshFromRegion). -->
-    <button
+<!-- [WOLF TERRAIN SCREEN 2026-11-04] The Wolf terrain screen (panel_wolf_terrain_layers.xml, wolfterrainlayers.cpp). On Wolf
+     Territories it takes the place of the four textures and corner heights above, and the RAW / bake / Apply buttons move
+     below it (LLPanelRegionTerrainInfo::applyWolfMode); everywhere else it stays hidden and this tab is the standard one.
+     Was a "Wolf terrain textures..." button opening it as its own window (2026-10-16). -->
+    <panel
+     class="wolf_terrain_layers"
+     filename="panel_wolf_terrain_layers.xml"
      follows="left|top"
-     height="20"
-     label="Wolf terrain textures..."
+     height="372"
      layout="topleft"
-     left="10"
-     name="wolf_terrain_textures_btn"
-     tool_tip="Eight terrain textures up to 4096 m for WolfViewer and WolfStorm, for high mountains (other viewers keep the four above)"
-     top="430"
+     left="0"
+     name="wolf_terrain_layers_panel"
+     top="94"
      visible="false"
-     width="180">
-        <button.commit_callback function="Floater.Show" parameter="wolf_terrain_textures" />
-    </button>
+     width="480" />
 </panel>

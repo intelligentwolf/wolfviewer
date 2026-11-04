@@ -2352,9 +2352,10 @@
                 <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
             </menu_item_call>
             <!-- [WOLF TERRAIN TEXTURES 2026-10-16] wolfterrainlayers.cpp: eight terrain textures up to 4096 m for this
-             region (read-only for anyone who doesn't hold it). Also Region / Estate > Terrain. -->
+             region (read-only for anyone who doesn't hold it). [WOLF TERRAIN SCREEN 2026-11-04] they are the Region /
+             Estate > Terrain tab on Wolf Territories now: this opens that tab. -->
             <menu_item_call label="Wolf Terrain Textures..." name="WolfWorldTerrainTextures">
-                <menu_item_call.on_click function="Floater.Show" parameter="wolf_terrain_textures" />
+                <menu_item_call.on_click function="WolfTerrain.OpenTerrainScreen" />
                 <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
             </menu_item_call>
         </menu>

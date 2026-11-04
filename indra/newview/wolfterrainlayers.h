@@ -20,7 +20,9 @@
 #include <memory>
 #include <string>
 
-#include "llfloater.h"
+#include <functional>
+
+#include "llpanel.h"
 #include "llpointer.h"
 #include "llsd.h"
 #include "llsingleton.h"
@@ -107,6 +109,26 @@ public:
      *  alpine scree, granite and snow (terrain_paint.js wolfDefaults, the same numbers). */
     static Set defaults(LLViewerRegion* regionp);
 
+    // [WOLF TERRAIN SCREEN 2026-11-04] Paul: "on wolf every region should be switched". A Wolf region with no Wolf layers
+    // saved draws these, built in the viewer from its own four textures, Low/High corner heights and the detail tile: the
+    // best fit of the Enhanced terrain blend (terrainF.glsl step 1c) in the band model (wolfLayerGround). Nothing is stored;
+    // WolfStorm terrain_paint.js builds the same set. False (draw the standard four) for PBR terrain or while any of the
+    // four texture ids is not known.
+    struct StandardTerrain
+    {
+        LLUUID mIds[4];
+        F32 mStart[4] = { 0.f, 0.f, 0.f, 0.f };   // LLVLComposition corner order: SW, SE, NW, NE
+        F32 mRange[4] = { 0.f, 0.f, 0.f, 0.f };
+        bool mPbr = false;
+    };
+    static bool readStandard(LLViewerRegion* regionp, StandardTerrain& out);
+    static bool fromStandard(const StandardTerrain& st, F32 tile, Set& out);
+    /** The reverse, for the region's own four (what other viewers draw): the first four layers in use, and the corner
+     *  Low/High that put the stock boundaries closest to theirs. `current` is used only when fewer than two layers are set. */
+    static void toStandard(const Set& s, const StandardTerrain& current, StandardTerrain& out);
+    /** The set a Wolf region with nothing saved draws (fromStandard on its composition and RenderTerrainScale). */
+    const Set* automaticFor(LLViewerRegion* regionp) const;
+
     /** Can this GPU draw the layers at all? They add a 16th sampler to the terrain program, so only where the GPU
      *  reports more than 16 texture image units (GL_MAX_TEXTURE_IMAGE_UNITS), and never on macOS, whose GL gives 16
      *  (Paul 10-16: "protect the mac version"). Elsewhere regions draw their standard four textures. */
@@ -117,7 +139,7 @@ public:
     void bind(LLGLSLShader* shader, LLViewerRegion* regionp);
     void unbind(LLGLSLShader* shader);
 
-    // ── editing (WolfFloaterTerrainLayers) ───────────────────────────────────────────
+    // ── editing (WolfPanelTerrainLayers) ───────────────────────────────────────────
     struct Edit
     {
         U64  mHandle = 0;
@@ -126,7 +148,7 @@ public:
         S32  mBaseVersion = 0;
         bool mHasBase = false;   // the stored set the edit started from (sent as wolfBase)
         Set  mBase;
-        bool mOn = false;        // "Use Wolf terrain textures on this region"
+        bool mOn = false;        // "Use Wolf terrain textures on this region" (off = the automatic set)
         Set  mSet;
         bool mHasLastGood = false;   // a half-typed edit that does not validate keeps the last good preview
         Set  mLastGood;
@@ -158,6 +180,7 @@ private:
         U32  mGL = 0;             // GL_TEXTURE_2D_ARRAY, LAYERS x PX x PX RGBA8, mipmapped
         F64  mLastUsed = 0.0;
         F64  mStarted = 0.0;      // when its layers were asked for (LOAD_TIMEOUT_SECS)
+        bool mLoggedReady = false;
         bool ready() const;
         bool settled() const;     // no layer still loading
     };
@@ -178,6 +201,15 @@ private:
 
     std::map<std::string, std::unique_ptr<Array>> mArrays;
     std::map<U64, Shown> mShown;
+    /** automaticFor's sets, rebuilt when the region's composition or the tile changes. */
+    struct Automatic
+    {
+        StandardTerrain mFrom;
+        F32 mTile = 0.f;
+        bool mOk = false;
+        Set mSet;
+    };
+    mutable std::map<U64, Automatic> mAutomatic;
     std::unique_ptr<Edit> mEdit;
     bool mSaving = false;
     S32  mSaveResult = 0;
@@ -186,18 +218,35 @@ private:
     F64  mNextPrune = 0.0;
 };
 
-/** Region / Estate > Terrain > "Wolf terrain textures..." (floater_wolf_terrain_textures.xml). */
-class WolfFloaterTerrainLayers : public LLFloater
+/** [WOLF TERRAIN SCREEN 2026-11-04] The Wolf terrain screen, inside Region / Estate > Terrain on Wolf Territories in place
+ *  of the standard four textures and corner heights (panel_wolf_terrain_layers.xml, LLPanelRegionTerrainInfo). Paul: "if
+ *  its on wolf territoris grid we bring up OUR terrain screen". The tab's own Apply saves it (applyEdit). */
+class WolfPanelTerrainLayers : public LLPanel
 {
 public:
-    WolfFloaterTerrainLayers(const LLSD& key);
+    WolfPanelTerrainLayers();
     bool postBuild() override;
-    void onOpen(const LLSD& key) override;
-    void onClose(bool app_quitting) override;
     void draw() override;
+
+    /** World > Wolf World > Wolf Terrain Textures...: Region / Estate, on its Terrain tab. */
+    static void openTerrainScreen();
+    /** Called after every change the holder makes here (the tab arms its Apply button). */
+    void setChangedCallback(const std::function<void()>& cb) { mChanged = cb; }
+    /** Controls from the region's record and the edit (refreshFromRegion; also after the tab enabled its children). */
+    void refreshPanel();
+    /** The holder changed the layers since they were last saved or fetched (Apply sends them). */
+    bool hasChanges() const;
+    /** Apply, step 1: the set the region's own four come from, or false with the reason shown (nothing is sent then).
+     *  `out` stays untouched when there is nothing to send (no change, or the automatic set). */
+    bool editForStandard(bool& use, WolfTerrainLayers::Set& out);
+    /** Apply, step 2: save the layers to the region's record (asynchronous; the panel shows how it went). */
+    void applyEdit();
+    /** Region / Estate closed with changes not applied: say so (the draft keeps previewing on the ground). */
+    void onScreenClosed(bool app_quitting);
 
 private:
     void show();                 // controls from the edit
+    void changed();
     void onLayerTexture(S32 i);
     void onLayerValue(S32 i);
     void onClearLayer(S32 i);
@@ -208,7 +257,6 @@ private:
     void onOn();
     void onDefaults();
     void onRevert();
-    void onSave();
     void setStatus(const std::string& msg, bool error);
     void showValidation();
 
@@ -225,7 +273,8 @@ private:
     LLTextBox*      mNote = nullptr;
     LLTextBox*      mError = nullptr;
     LLTextBox*      mStatus = nullptr;
-    LLButton*       mSave = nullptr;
+    std::function<void()> mChanged;
+    WolfTerrainLayers::Set mShown;   // what show() last put in the rows (draw's load states)
     U64  mShownHandle = 0;
     S32  mShownVersion = -1;
     bool mWasSaving = false;

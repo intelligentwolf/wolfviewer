@@ -26,6 +26,8 @@
 #include "llcheckboxctrl.h"
 #include "llcombobox.h"
 #include "llcorehttputil.h"
+#include "lldrawpoolterrain.h"
+#include "llfloaterreg.h"
 #include "llcoros.h"
 #include "llframetimer.h"
 #include "llgl.h"
@@ -38,10 +40,12 @@
 #include "llsdjson.h"
 #include "llshadermgr.h"
 #include "llspinctrl.h"
+#include "lltabcontainer.h"
 #include "lltextbox.h"
 #include "lltexturectrl.h"
 #include "llviewerregion.h"
 #include "llviewertexture.h"
+#include "llviewercontrol.h"
 #include "llvlcomposition.h"
 #include "wolfgrid.h"
 #include "wolfterrainpaint.h"
@@ -285,6 +289,163 @@ WolfTerrainLayers::Set WolfTerrainLayers::defaults(LLViewerRegion* regionp)
     return validate(s, out, err) ? out : s;
 }
 
+// [WOLF TERRAIN SCREEN 2026-11-04] The automatic set — what a Wolf region with no Wolf layers saved draws.
+// Source: llvlcomposition.h:134-137 corner enum SW 0, SE 1, NW 2, NE 3; getDetailAssetID / getStartHeight / getHeightRange
+// are what lldrawpoolterrain.cpp renderFullShaderTextures feeds the Enhanced blend (wolf_comp_start / wolf_comp_range, the
+// four detail textures) and renderFullShader's PBR test (getMaterialType).
+// static
+bool WolfTerrainLayers::readStandard(LLViewerRegion* regionp, StandardTerrain& out)
+{
+    LLVLComposition* compp = regionp ? regionp->getComposition() : nullptr;
+    if (!compp) return false;
+    out.mPbr = compp->getMaterialType() == LLTerrainMaterials::Type::PBR;
+    for (S32 i = 0; i < 4; ++i) out.mIds[i] = compp->getDetailAssetID(i);
+    for (S32 c = 0; c < LLVLComposition::CORNER_COUNT; ++c)
+    {
+        out.mStart[c] = compp->getStartHeight(c);
+        out.mRange[c] = compp->getHeightRange(c);
+    }
+    return true;
+}
+
+// Source: terrainF.glsl main(), the Enhanced blend (wolf_terrain_look, step 1c) against wolfLayerGround (the bands):
+//  - composition: comp = (z - start) * 4 / max(range, 1), start/range bilinear over the region; layer k is fully shown at
+//    comp = k and the boundary between k-1 and k is at comp = k - 1/2, i.e. z = start + (k - 1/2) * range / 4. Bands:
+//    t_k = smoothstep(h_k - b_k/2, h_k + b_k/2, hz). So h_k = S + (k - 1/2) R / 4.
+//  - blend width: the tent weights (width 1) through the height blend (wh = w + 0.45 lum, ma = max(wh) - 0.5) mix two
+//    layers only while |wh_a - wh_b| < 0.5, i.e. over 0.5 comp units = R / 8 metres. b_k = R / 8.
+//  - corners: the Enhanced blend's bilinear is mix(mix(SW, NW, x), mix(SE, NE, x), y) (terrainF.glsl, "generateHeights'
+//    operand order"; llvlcomposition.cpp bilinear() weights v10 = NW by x): the NW value sits at x = 1, y = 0 and the SE
+//    value at x = 0, y = 1. wolfLayerGround's is mix(mix(c0, c1, x), mix(c2, c3, x), y). So the Wolf corners at (0,0),
+//    (1,0), (0,1), (1,1) are the offsets of SW, NW, SE, NE, each the corner's middle boundary (comp 1.5) less the mean's.
+//  - noise: Enhanced adds (n1 - .5) * 0.7 + (n2 - .5) * 0.3 + (n3 - .5) * 0.3 comp units; the bands add
+//    ((n1 - .5) * 0.6 + (n2 - .5) * 0.25 + (n3 - .5) * 0.15) * 2 * noise metres, the same three noises. Matching the 25 m
+//    term (the largest): 1.2 * noise = 0.7 * R / 4, noise = R * 0.7 / 4.8 (the 6 m term then matches to 3 %, the 2 m one
+//    is 40 % weaker).
+//  - steep faces: Enhanced pulls them to slot 2 (the estate's mountain/rock slot); the bands' cliff layer = 2.
+//  - tile: the stock texgen repeats every 1 / LLDrawPoolTerrain::sDetailScale metres (RenderTerrainScale), phased by the
+//    origin as wolf_layer_off is.
+// NOT reproduced (no such input in the band model): hollows (heightmap AO) shifting the layer, the solid top above 3/4 of
+// the range, the steep rule starting at 26 degrees (bands: 39), the per-texel luminance interlock, and corners whose ranges
+// differ (fitted at the middle boundary). WolfStorm terrain_paint.js builds the same set.
+// static
+bool WolfTerrainLayers::fromStandard(const StandardTerrain& st, F32 tile, Set& out)
+{
+    if (st.mPbr) return false;
+    for (S32 i = 0; i < 4; ++i) if (st.mIds[i].isNull()) return false;
+    F32 start = 0.f, range = 0.f, mid[4];
+    for (S32 c = 0; c < 4; ++c)
+    {
+        if (!std::isfinite(st.mStart[c]) || !std::isfinite(st.mRange[c])) return false;
+        const F32 r = llmax(st.mRange[c], 1.f);   // terrainF.glsl max(range, 1.0)
+        start += st.mStart[c];
+        range += r;
+        mid[c] = st.mStart[c] + 0.375f * r;
+    }
+    start *= 0.25f;
+    range *= 0.25f;
+    const F32 mid_mean = start + 0.375f * range;
+    Set s;
+    const F32 blend = range / 8.f;
+    for (S32 i = 0; i < 4; ++i)
+    {
+        WolfTerrainLayerSet::Layer& L = s.mLayers[i];
+        L.mId = st.mIds[i];
+        const F32 first = start + 0.5f * range / 4.f;
+        L.mH = (i == 0) ? llmax(MIN_H, llmin(llmin(0.f, start), first)) : start + ((F32)i - 0.5f) * range / 4.f;
+        L.mB = blend;
+        L.mS = tile;
+    }
+    s.mCorners[0] = mid[LLVLComposition::SOUTHWEST] - mid_mean;   // (0,0)
+    s.mCorners[1] = mid[LLVLComposition::NORTHWEST] - mid_mean;   // (1,0), see above
+    s.mCorners[2] = mid[LLVLComposition::SOUTHEAST] - mid_mean;   // (0,1)
+    s.mCorners[3] = mid[LLVLComposition::NORTHEAST] - mid_mean;   // (1,1)
+    s.mNoise = range * 0.7f / 4.8f;
+    s.mCliff = 2;
+    std::string err;
+    return validate(s, out, err);
+}
+
+// The inverse of fromStandard, for the region's own four (other viewers): layers in use 1-4 (the last repeated if fewer),
+// their From heights fitted (least squares) to start + (k - 1/2) * range / 4, k = 1..3, the corner offsets back on the
+// corners they came from. fromStandard of the result gives the same set back whenever the four corners share one range.
+// static
+void WolfTerrainLayers::toStandard(const Set& s, const StandardTerrain& current, StandardTerrain& out)
+{
+    out = current;
+    out.mPbr = false;
+    S32 used[LAYERS];
+    S32 n_used = 0;
+    for (S32 i = 0; i < LAYERS; ++i) if (s.mLayers[i].mId.notNull()) used[n_used++] = i;
+    if (n_used == 0) return;   // validate refuses that (layer 1 is always set); nothing to take
+    for (S32 k = 0; k < 4; ++k) out.mIds[k] = s.mLayers[used[llmin(k, n_used - 1)]].mId;
+    const S32 n = llmin(n_used, 4) - 1;   // boundaries between the four taken
+    F32 start = 0.f, range = 0.f;
+    if (n >= 2)
+    {
+        F32 mx = 0.f, mb = 0.f;
+        for (S32 k = 1; k <= n; ++k) { mx += ((F32)k - 0.5f) / 4.f; mb += s.mLayers[used[k]].mH; }
+        mx /= (F32)n;
+        mb /= (F32)n;
+        F32 sxx = 0.f, sxb = 0.f;
+        for (S32 k = 1; k <= n; ++k)
+        {
+            const F32 dx = ((F32)k - 0.5f) / 4.f - mx;
+            sxx += dx * dx;
+            sxb += dx * (s.mLayers[used[k]].mH - mb);
+        }
+        range = sxb / sxx;
+        start = mb - range * mx;
+    }
+    else if (n == 1)
+    {
+        for (S32 c = 0; c < 4; ++c) range += llmax(current.mRange[c], 1.f);
+        range *= 0.25f;
+        start = s.mLayers[used[1]].mH - range / 8.f;
+    }
+    else
+    {
+        return;   // one texture: its heights do not matter, keep the region's
+    }
+    range = llmax(range, 1.f);
+    out.mStart[LLVLComposition::SOUTHWEST] = start + s.mCorners[0];
+    out.mStart[LLVLComposition::NORTHWEST] = start + s.mCorners[1];
+    out.mStart[LLVLComposition::SOUTHEAST] = start + s.mCorners[2];
+    out.mStart[LLVLComposition::NORTHEAST] = start + s.mCorners[3];
+    for (S32 c = 0; c < 4; ++c) out.mRange[c] = range;
+}
+
+const WolfTerrainLayers::Set* WolfTerrainLayers::automaticFor(LLViewerRegion* regionp) const
+{
+    // settings.xml WolfTerrainAutoLayers (default on): off draws the standard four on such regions, as before 2026-11-04
+    static LLCachedControl<bool> auto_layers(gSavedSettings, "WolfTerrainAutoLayers", true);
+    if (!auto_layers) return nullptr;
+    StandardTerrain st;
+    if (!readStandard(regionp, st)) return nullptr;
+    const F32 tile = 1.f / LLDrawPoolTerrain::sDetailScale;   // the four textures' own repeat (renderFullShaderTextures tp0)
+    Automatic& a = mAutomatic[regionp->getHandle()];
+    bool same = a.mTile == tile && a.mFrom.mPbr == st.mPbr;
+    for (S32 i = 0; same && i < 4; ++i)
+    {
+        same = a.mFrom.mIds[i] == st.mIds[i] && a.mFrom.mStart[i] == st.mStart[i] && a.mFrom.mRange[i] == st.mRange[i];
+    }
+    if (!same)
+    {
+        a.mFrom = st;
+        a.mTile = tile;
+        a.mOk = fromStandard(st, tile, a.mSet);
+        if (a.mOk)
+        {
+            const WolfTerrainLayerSet& w = a.mSet;
+            LL_INFOS("WolfTerrainLayers") << "automatic layers for " << regionp->getName() << ": from "
+                << w.mLayers[1].mH << " / " << w.mLayers[2].mH << " / " << w.mLayers[3].mH << " m, blend " << w.mLayers[1].mB
+                << " m, tile " << w.mLayers[0].mS << " m, corners " << w.mCorners[0] << " " << w.mCorners[1] << " " << w.mCorners[2]
+                << " " << w.mCorners[3] << ", noise " << w.mNoise << LL_ENDL;
+        }
+    }
+    return a.mOk ? &a.mSet : nullptr;
+}
+
 // ── drawing ────────────────────────────────────────────────────────────────────────────
 
 // The pointer points into WolfTerrainPaint::mByHandle (cleared by every fetch) or into mEdit: use it
@@ -295,11 +456,16 @@ const WolfTerrainLayers::Set* WolfTerrainLayers::setFor(LLViewerRegion* regionp)
     const U64 handle = regionp->getHandle();
     if (mEdit && mEdit->mHandle == handle && regionp == gAgent.getRegion())
     {
-        // The working copy previews on the agent's own ground (editChanged keeps mLastGood).
-        return (mEdit->mOn && mEdit->mHasLastGood) ? &mEdit->mLastGood : nullptr;
+        // The working copy previews on the agent's own ground (editChanged keeps mLastGood); unticked is the automatic set.
+        if (mEdit->mOn) return mEdit->mHasLastGood ? &mEdit->mLastGood : nullptr;
+        return automaticFor(regionp);
     }
     const WolfTerrainPaint::Record* r = WolfTerrainPaint::instance().recordFor(handle);
-    return (r && r->mHasWolf) ? &r->mWolf : nullptr;
+    if (r && r->mHasWolf) return &r->mWolf;
+    // [WOLF TERRAIN SCREEN 2026-11-04] Paul: "on wolf every region should be switched". No Wolf layers saved (or the record
+    // not in yet): the automatic set from the region's own four. activeFor/bind only get here on a Wolf region
+    // (WolfGrid::showsWolfRegion), and until the set's textures are in the array the standard four draw as before.
+    return automaticFor(regionp);
 }
 
 bool WolfTerrainLayers::Array::ready() const
@@ -496,6 +662,11 @@ bool WolfTerrainLayers::activeFor(LLViewerRegion* regionp)
     poll(a);
     if (a.ready())
     {
+        if (!a.mLoggedReady)
+        {
+            a.mLoggedReady = true;   // once per array: which region first drew it (diagnostics)
+            LL_INFOS("WolfTerrainLayers") << "Wolf layers drawing on " << regionp->getName() << " (" << key << ")" << LL_ENDL;
+        }
         Shown& sh = mShown[handle];
         sh.mKey = key;
         sh.mSet = *s;
@@ -594,6 +765,8 @@ void WolfTerrainLayers::unbind(LLGLSLShader* shader)
 S32 WolfTerrainLayers::layerState(S32 i) const
 {
     if (i < 0 || i >= LAYERS) return ST_EMPTY;
+    // [WOLF TERRAIN SCREEN 2026-11-04/] no arrays are made where the layers cannot draw (macOS, 16 units): not "loading" for ever
+    if (!supported()) return ST_EMPTY;
     const Set* s = setFor(gAgent.getRegion());
     if (!s) return ST_EMPTY;
     auto it = mArrays.find(s->key());
@@ -616,8 +789,11 @@ WolfTerrainLayers::Edit* WolfTerrainLayers::beginEdit()
     mEdit->mBaseVersion = r->mVersion;
     mEdit->mHasBase = r->mHasWolf;
     mEdit->mBase = r->mWolf;
-    mEdit->mOn = r->mHasWolf;
-    mEdit->mSet = r->mHasWolf ? r->mWolf : defaults(rgn);
+    // [WOLF TERRAIN SCREEN 2026-11-04] Nothing saved: the box starts ticked on the automatic set, which is what the region
+    // draws already, so opening the screen changes nothing on the ground until Apply.
+    const Set* automatic = r->mHasWolf ? nullptr : automaticFor(rgn);
+    mEdit->mOn = r->mHasWolf || automatic != nullptr;
+    mEdit->mSet = r->mHasWolf ? r->mWolf : (automatic ? *automatic : defaults(rgn));
     std::string err;
     mEdit->mHasLastGood = validate(mEdit->mSet, mEdit->mLastGood, err);
     return mEdit.get();
@@ -717,7 +893,7 @@ void WolfTerrainLayers::saveCoro(std::string region_uuid, LLSD wolf, LLSD base, 
     {
         mLastError = reply.isMap() && reply.has("error") ? reply["error"].asString()
                                                          : (status ? std::string("unexpected reply") : status.toString());
-        mSaveResult = -1;
+        mSaveResult = -1;   // also on the Terrain tab's status line (WolfPanelTerrainLayers::draw)
         notify("Could not save the Wolf terrain textures: " + mLastError);
         return;
     }
@@ -740,20 +916,41 @@ void WolfTerrainLayers::saveCoro(std::string region_uuid, LLSD wolf, LLSD base, 
         mEdit.reset();   // the stored set (now this one) draws from here on
     }
     mSaveResult = 1;
-    notify(on ? "Wolf terrain textures saved for " + name + " — everyone there using WolfViewer or WolfStorm now sees these eight layers."
-              : name + " is back on its standard four terrain textures.");
+    // [WOLF TERRAIN SCREEN 2026-11-04] said on the Terrain tab's status line (WolfPanelTerrainLayers::draw), no pop-up
+    LL_INFOS("WolfTerrainLayers") << (on ? "Wolf terrain textures saved for " : "automatic Wolf terrain textures again for ") << name << LL_ENDL;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════
-// WolfFloaterTerrainLayers — Region / Estate > Terrain > "Wolf terrain textures..."
+// WolfPanelTerrainLayers — Region / Estate > Terrain on Wolf Territories
+// [WOLF TERRAIN SCREEN 2026-11-04] was WolfFloaterTerrainLayers (its own window, 2026-10-16); the same controls and rules,
+// now inside the tab, saved by the tab's Apply (LLPanelRegionTerrainInfo::sendUpdate).
 // ═══════════════════════════════════════════════════════════════════════════════════════
 
-WolfFloaterTerrainLayers::WolfFloaterTerrainLayers(const LLSD& key) : LLFloater(key) {}
+static LLPanelInjector<WolfPanelTerrainLayers> t_wolf_terrain_layers("wolf_terrain_layers");
 
-bool WolfFloaterTerrainLayers::postBuild()
+WolfPanelTerrainLayers::WolfPanelTerrainLayers() : LLPanel() {}
+
+// static
+void WolfPanelTerrainLayers::openTerrainScreen()
+{
+    if (!WolfGrid::isOnWolfTerritories())
+    {
+        WolfGrid::noteWolfOnly("Wolf Terrain Textures");   // [WOLF GRID GATE 2026-10-17/]
+        return;
+    }
+    LLFloater* f = LLFloaterReg::showInstance("region_info");
+    if (!f) return;
+    // floater_region_info.xml region_panels; the tab's panel is named "Terrain" (panel_region_terrain.xml)
+    if (LLTabContainer* tabs = f->findChild<LLTabContainer>("region_panels"))
+    {
+        tabs->selectTabByName("Terrain");
+    }
+}
+
+bool WolfPanelTerrainLayers::postBuild()
 {
     mOn = getChild<LLCheckBoxCtrl>("wolf_layers_on");
-    mOn->setCommitCallback(boost::bind(&WolfFloaterTerrainLayers::onOn, this));
+    mOn->setCommitCallback(boost::bind(&WolfPanelTerrainLayers::onOn, this));
     for (S32 i = 0; i < WolfTerrainLayers::LAYERS; ++i)
     {
         mTex[i] = getChild<LLTextureCtrl>(llformat("wolf_layer_tex_%d", i));
@@ -763,66 +960,83 @@ bool WolfFloaterTerrainLayers::postBuild()
         mClear[i] = getChild<LLButton>(llformat("wolf_layer_clear_%d", i));
         mState[i] = getChild<LLTextBox>(llformat("wolf_layer_state_%d", i));
         mTex[i]->setAllowNoTexture(i > 0);
-        mTex[i]->setCommitCallback(boost::bind(&WolfFloaterTerrainLayers::onLayerTexture, this, i));
-        mH[i]->setCommitCallback(boost::bind(&WolfFloaterTerrainLayers::onLayerValue, this, i));
-        mB[i]->setCommitCallback(boost::bind(&WolfFloaterTerrainLayers::onLayerValue, this, i));
-        mS[i]->setCommitCallback(boost::bind(&WolfFloaterTerrainLayers::onLayerValue, this, i));
-        mClear[i]->setCommitCallback(boost::bind(&WolfFloaterTerrainLayers::onClearLayer, this, i));
+        mTex[i]->setCommitCallback(boost::bind(&WolfPanelTerrainLayers::onLayerTexture, this, i));
+        mH[i]->setCommitCallback(boost::bind(&WolfPanelTerrainLayers::onLayerValue, this, i));
+        mB[i]->setCommitCallback(boost::bind(&WolfPanelTerrainLayers::onLayerValue, this, i));
+        mS[i]->setCommitCallback(boost::bind(&WolfPanelTerrainLayers::onLayerValue, this, i));
+        mClear[i]->setCommitCallback(boost::bind(&WolfPanelTerrainLayers::onClearLayer, this, i));
     }
     static const char* const corner_names[4] = { "wolf_corner_sw", "wolf_corner_se", "wolf_corner_nw", "wolf_corner_ne" };
     for (S32 k = 0; k < 4; ++k)
     {
         mCorner[k] = getChild<LLSpinCtrl>(corner_names[k]);
-        mCorner[k]->setCommitCallback(boost::bind(&WolfFloaterTerrainLayers::onCorner, this));
+        mCorner[k]->setCommitCallback(boost::bind(&WolfPanelTerrainLayers::onCorner, this));
     }
     mNoise = getChild<LLSpinCtrl>("wolf_noise");
-    mNoise->setCommitCallback(boost::bind(&WolfFloaterTerrainLayers::onNoise, this));
+    mNoise->setCommitCallback(boost::bind(&WolfPanelTerrainLayers::onNoise, this));
     mCliff = getChild<LLComboBox>("wolf_cliff");
-    mCliff->setCommitCallback(boost::bind(&WolfFloaterTerrainLayers::onCliff, this));
+    mCliff->setCommitCallback(boost::bind(&WolfPanelTerrainLayers::onCliff, this));
     mNote = getChild<LLTextBox>("wolf_layers_note");
     mError = getChild<LLTextBox>("wolf_layers_error");
     mStatus = getChild<LLTextBox>("wolf_layers_status");
-    mSave = getChild<LLButton>("wolf_layers_save");
-    mSave->setCommitCallback(boost::bind(&WolfFloaterTerrainLayers::onSave, this));
-    getChild<LLButton>("wolf_layers_defaults")->setCommitCallback(boost::bind(&WolfFloaterTerrainLayers::onDefaults, this));
-    getChild<LLButton>("wolf_layers_revert")->setCommitCallback(boost::bind(&WolfFloaterTerrainLayers::onRevert, this));
+    getChild<LLButton>("wolf_layers_defaults")->setCommitCallback(boost::bind(&WolfPanelTerrainLayers::onDefaults, this));
+    getChild<LLButton>("wolf_layers_revert")->setCommitCallback(boost::bind(&WolfPanelTerrainLayers::onRevert, this));
     mError->setColor(LLColor4(1.f, 0.6f, 0.6f, 1.f));   // wolfcave.cpp setStatus, the same error colour
     mLabelColor = mH[0]->getEnabledTextColor();
     return true;
 }
 
-void WolfFloaterTerrainLayers::onOpen(const LLSD& key)
+void WolfPanelTerrainLayers::refreshPanel()
 {
-    if (!WolfGrid::isOnWolfTerritories())
-    {
-        WolfGrid::noteWolfOnly("Wolf Terrain Textures");   // [WOLF GRID GATE 2026-10-17/]
-        closeFloater();
-        return;
-    }
+    if (!WolfGrid::isOnWolfTerritories()) return;
     WolfTerrainPaint::instance().refresh();
     mShownHandle = 0;
     mShownVersion = -1;
     show();
 }
 
-void WolfFloaterTerrainLayers::onClose(bool app_quitting)
+bool WolfPanelTerrainLayers::hasChanges() const
 {
     const WolfTerrainLayers::Edit* ed = WolfTerrainLayers::instance().edit();
-    if (!app_quitting && ed && ed->mDirty && WolfGrid::isOnWolfTerritories())   // [WOLF GRID GATE 2026-10-17/] off Wolf nothing previews and the way back in is hidden
-    {
-        // Kept, like the paint editor's working copy, but said so: the ground still shows the draft.
-        notify("Your unsaved Wolf terrain textures are still previewing on your ground. Reopen Region / Estate > Terrain > Wolf terrain textures... to save or revert them.");
-    }
-    LLFloater::onClose(app_quitting);
+    // Unticked with nothing stored is already the automatic set: nothing to store.
+    return ed && ed->mDirty && (ed->mOn || ed->mHasBase);
 }
 
-void WolfFloaterTerrainLayers::draw()
+bool WolfPanelTerrainLayers::editForStandard(bool& use, WolfTerrainLayers::Set& out)
 {
-    if (!WolfGrid::isOnWolfTerritories())
+    use = false;
+    const WolfTerrainLayers::Edit* ed = WolfTerrainLayers::instance().edit();
+    if (!ed || !ed->mDirty || !ed->mOn) return true;   // the region's own four stay as they are
+    std::string err;
+    if (!WolfTerrainLayers::validate(ed->mSet, out, err))
     {
-        closeFloater();
-        return;
+        setStatus("Not applied: " + err, true);
+        showValidation();
+        return false;
     }
+    use = true;
+    return true;
+}
+
+void WolfPanelTerrainLayers::applyEdit()
+{
+    WolfTerrainLayers& wl = WolfTerrainLayers::instance();
+    if (!hasChanges()) return;
+    wl.save();   // a refusal before the request sets the save result, which draw() shows
+}
+
+void WolfPanelTerrainLayers::onScreenClosed(bool app_quitting)
+{
+    const WolfTerrainLayers::Edit* ed = WolfTerrainLayers::instance().edit();
+    if (!app_quitting && ed && ed->mDirty && WolfGrid::isOnWolfTerritories())   // [WOLF GRID GATE 2026-10-17/]
+    {
+        // Kept, like the paint editor's working copy, but said so: the ground still shows the draft.
+        notify("Your Wolf terrain texture changes are not applied yet. They show only on your own screen. Open Region / Estate > Terrain and press Apply to keep them, or Undo.");
+    }
+}
+
+void WolfPanelTerrainLayers::draw()
+{
     WolfTerrainLayers& wl = WolfTerrainLayers::instance();
     const WolfTerrainPaint::Record* r = WolfTerrainPaint::instance().current();
     const WolfTerrainLayers::Edit* ed = wl.edit();
@@ -833,24 +1047,22 @@ void WolfFloaterTerrainLayers::draw()
     if (result > 0)
     {
         show();
-        setStatus("Saved.", false);
+        setStatus("Wolf terrain textures saved.", false);
     }
     else if (result < 0)
     {
-        setStatus("Not saved: " + wl.lastError(), true);
+        setStatus("Wolf terrain textures not saved: " + wl.lastError(), true);
     }
     if (mWasSaving != wl.saving())
     {
         mWasSaving = wl.saving();
-        mSave->setEnabled(!mWasSaving && gAgent.canManageEstate());
-        if (mWasSaving) setStatus("Saving…", false);
+        if (mWasSaving) setStatus("Saving the Wolf terrain textures…", false);
     }
-    // Layer load state, live.
-    ed = wl.edit();
+    // Layer load state, live, for the layers shown (the edit's, or for anyone who cannot edit, the region's own).
     for (S32 i = 0; i < WolfTerrainLayers::LAYERS; ++i)
     {
         std::string txt;
-        if (!ed || ed->mSet.mLayers[i].mId.isNull())
+        if (mShown.mLayers[i].mId.isNull())
         {
             txt = (i == 0) ? "needs a texture" : "not used";
         }
@@ -866,10 +1078,10 @@ void WolfFloaterTerrainLayers::draw()
         }
         mState[i]->setText(txt);
     }
-    LLFloater::draw();
+    LLPanel::draw();
 }
 
-void WolfFloaterTerrainLayers::show()
+void WolfPanelTerrainLayers::show()
 {
     WolfTerrainLayers& wl = WolfTerrainLayers::instance();
     const WolfTerrainPaint::Record* r = WolfTerrainPaint::instance().current();
@@ -877,47 +1089,52 @@ void WolfFloaterTerrainLayers::show()
     mShownHandle = r ? r->mHandle : 0;
     mShownVersion = r ? r->mVersion : -1;
     WolfTerrainLayers::Edit* ed = (r && holder) ? wl.beginEdit() : nullptr;
+    // Paul 11-03: "keep it simple" - one line on who sees what, one on what Apply does (or who may change it).
+    static const std::string WHO_SEES = "WolfViewer and WolfStorm show these. Other viewers show the standard four.";
     if (!r)
     {
-        mNote->setText(WolfTerrainPaint::instance().fetching() ? std::string("Asking the grid for this region's record…")
-                                                               : std::string("This region is not on the Wolf Territories grid."));
+        mNote->setText(WolfTerrainPaint::instance().fetching() ? std::string("Asking the grid for this region's terrain…")
+                                                               : std::string("Wolf terrain textures are only for Wolf Territories regions."));
     }
     else if (!holder)
     {
-        mNote->setText(r->mHasWolf ? std::string("This region uses Wolf terrain textures (eight layers, up to 4096 m). Only the region owner, the estate owner or an estate manager can change them.")
-                                   : std::string("This region uses its standard four terrain textures. Only the region owner, the estate owner or an estate manager can set Wolf terrain textures."));
+        mNote->setText(WHO_SEES + "\nOnly the region or estate owner, or an estate manager, can change them.");
     }
     else
     {
-        mNote->setText(std::string("The standard four terrain textures stop at a few hundred metres. These eight replace them in WolfViewer and WolfStorm (other viewers keep the standard four): each layer takes over from the one below at its From height, fading in over Blend metres. ")
-                       + (r->mHasWolf ? "This region uses them now." : "Not in use on this region yet.")
-                       + " Changes preview on your ground; Save shows them to everyone.");
+        mNote->setText(WHO_SEES + "\nApply also sets the standard four from your first four layers.");
     }
     const bool editable = ed != nullptr;
-    const WolfTerrainLayers::Set& s = ed ? ed->mSet : (r && r->mHasWolf ? r->mWolf : WolfTerrainLayers::Set());
-    mOn->set(ed ? ed->mOn : (r && r->mHasWolf));
+    // What the region draws now when nothing is being edited: its saved layers, else the automatic set.
+    const WolfTerrainLayers::Set* drawn = (r && r->mHasWolf) ? &r->mWolf : wl.automaticFor(gAgent.getRegion());
+    // Unticked shows the automatic set the region falls back to (read-only until ticked again).
+    const WolfTerrainLayers::Set* automatic = (ed && !ed->mOn) ? wl.automaticFor(gAgent.getRegion()) : nullptr;
+    const WolfTerrainLayers::Set s = automatic ? *automatic : (ed ? ed->mSet : (drawn ? *drawn : WolfTerrainLayers::Set()));
+    const bool rows = editable && ed->mOn;
+    mShown = s;
+    mOn->set(ed ? ed->mOn : (r != nullptr && drawn != nullptr));
     mOn->setEnabled(editable);
     for (S32 i = 0; i < WolfTerrainLayers::LAYERS; ++i)
     {
         const WolfTerrainLayerSet::Layer& L = s.mLayers[i];
         const bool used = L.mId.notNull();
         mTex[i]->setImageAssetID(L.mId);
-        mTex[i]->setEnabled(editable);
+        mTex[i]->setEnabled(rows);
         mH[i]->set(L.mH);
         mB[i]->set(L.mB);
         mS[i]->set(L.mS);
-        mH[i]->setEnabled(editable && used);
-        mB[i]->setEnabled(editable && used);
-        mS[i]->setEnabled(editable && used);
-        mClear[i]->setEnabled(editable && used && i > 0);
+        mH[i]->setEnabled(rows && used);
+        mB[i]->setEnabled(rows && used);
+        mS[i]->setEnabled(rows && used);
+        mClear[i]->setEnabled(rows && used && i > 0);
     }
     for (S32 k = 0; k < 4; ++k)
     {
         mCorner[k]->set(s.mCorners[k]);
-        mCorner[k]->setEnabled(editable);
+        mCorner[k]->setEnabled(rows);
     }
     mNoise->set(s.mNoise);
-    mNoise->setEnabled(editable);
+    mNoise->setEnabled(rows);
     mCliff->removeall();
     mCliff->add("none", LLSD(-1));
     for (S32 i = 0; i < WolfTerrainLayers::LAYERS; ++i)
@@ -925,19 +1142,24 @@ void WolfFloaterTerrainLayers::show()
         mCliff->add(llformat("layer %d", i + 1), LLSD(i), ADD_BOTTOM, s.mLayers[i].mId.notNull());
     }
     mCliff->setValue(LLSD(s.mCliff));
-    mCliff->setEnabled(editable);
-    mSave->setEnabled(editable && !wl.saving());
+    mCliff->setEnabled(rows);
     getChildView("wolf_layers_defaults")->setEnabled(editable);
     getChildView("wolf_layers_revert")->setEnabled(editable);
     showValidation();
 }
 
-void WolfFloaterTerrainLayers::showValidation()
+void WolfPanelTerrainLayers::changed()
+{
+    WolfTerrainLayers::instance().editChanged();
+    if (mChanged) mChanged();   // LLPanelRegionTerrainInfo: arm Apply
+}
+
+void WolfPanelTerrainLayers::showValidation()
 {
     WolfTerrainLayers::Edit* ed = WolfTerrainLayers::instance().edit();
     std::string err;
     S32 bad = -1;
-    if (ed)
+    if (ed && ed->mOn)
     {
         WolfTerrainLayers::Set v;
         WolfTerrainLayers::validate(ed->mSet, v, err, &bad);
@@ -950,7 +1172,7 @@ void WolfFloaterTerrainLayers::showValidation()
     }
 }
 
-void WolfFloaterTerrainLayers::onLayerTexture(S32 i)
+void WolfPanelTerrainLayers::onLayerTexture(S32 i)
 {
     WolfTerrainLayers::Edit* ed = WolfTerrainLayers::instance().beginEdit();
     if (!ed) return;
@@ -976,12 +1198,12 @@ void WolfFloaterTerrainLayers::onLayerTexture(S32 i)
     }
     L.mId = id;
     turnOnForEdit(ed);
-    WolfTerrainLayers::instance().editChanged();
+    changed();
     show();
-    setStatus(llformat("Layer %d set — loading it for the ground.", i + 1), false);
+    setStatus(llformat("Layer %d set. It shows on your own ground now; Apply shows it to everyone.", i + 1), false);
 }
 
-void WolfFloaterTerrainLayers::onLayerValue(S32 i)
+void WolfPanelTerrainLayers::onLayerValue(S32 i)
 {
     WolfTerrainLayers::Edit* ed = WolfTerrainLayers::instance().beginEdit();
     if (!ed) return;
@@ -991,11 +1213,11 @@ void WolfFloaterTerrainLayers::onLayerValue(S32 i)
     L.mB = llclamp(mB[i]->get(), WolfTerrainLayers::MIN_BLEND, WolfTerrainLayers::MAX_BLEND);
     L.mS = llclamp(mS[i]->get(), WolfTerrainLayers::MIN_TILE, WolfTerrainLayers::MAX_TILE);
     turnOnForEdit(ed);
-    WolfTerrainLayers::instance().editChanged();
+    changed();
     showValidation();
 }
 
-void WolfFloaterTerrainLayers::onClearLayer(S32 i)
+void WolfPanelTerrainLayers::onClearLayer(S32 i)
 {
     if (i <= 0) return;
     WolfTerrainLayers::Edit* ed = WolfTerrainLayers::instance().beginEdit();
@@ -1003,12 +1225,12 @@ void WolfFloaterTerrainLayers::onClearLayer(S32 i)
     ed->mSet.mLayers[i] = WolfTerrainLayerSet::Layer();
     if (ed->mSet.mCliff == i) ed->mSet.mCliff = -1;
     turnOnForEdit(ed);
-    WolfTerrainLayers::instance().editChanged();
+    changed();
     show();
     setStatus(llformat("Layer %d is not used now.", i + 1), false);
 }
 
-void WolfFloaterTerrainLayers::onCorner()
+void WolfPanelTerrainLayers::onCorner()
 {
     WolfTerrainLayers::Edit* ed = WolfTerrainLayers::instance().beginEdit();
     if (!ed) return;
@@ -1017,32 +1239,32 @@ void WolfFloaterTerrainLayers::onCorner()
         ed->mSet.mCorners[k] = llclamp(mCorner[k]->get(), -WolfTerrainLayers::MAX_CORNER, WolfTerrainLayers::MAX_CORNER);
     }
     turnOnForEdit(ed);
-    WolfTerrainLayers::instance().editChanged();
+    changed();
 }
 
-void WolfFloaterTerrainLayers::onNoise()
+void WolfPanelTerrainLayers::onNoise()
 {
     WolfTerrainLayers::Edit* ed = WolfTerrainLayers::instance().beginEdit();
     if (!ed) return;
     ed->mSet.mNoise = llclamp(mNoise->get(), 0.f, WolfTerrainLayers::MAX_NOISE);
     turnOnForEdit(ed);
-    WolfTerrainLayers::instance().editChanged();
+    changed();
 }
 
-void WolfFloaterTerrainLayers::onCliff()
+void WolfPanelTerrainLayers::onCliff()
 {
     WolfTerrainLayers::Edit* ed = WolfTerrainLayers::instance().beginEdit();
     if (!ed) return;
     ed->mSet.mCliff = mCliff->getValue().asInteger();
     turnOnForEdit(ed);
-    WolfTerrainLayers::instance().editChanged();
+    changed();
     showValidation();
 }
 
 // [2026-10-16] Paul saved Jotunheim's eight layers and got "JOTUNHEIM is back on its standard four terrain textures": a region
-// with no Wolf set opens with the box unticked while the window shows the eight defaults, so Save stored "off". Editing a
-// layer, or pressing Defaults, means "I want these": tick the box.
-void WolfFloaterTerrainLayers::turnOnForEdit(WolfTerrainLayers::Edit* ed)
+// with no Wolf set opened with the box unticked while the window showed the eight defaults. Editing a layer, or pressing
+// Mountains, means "I want these": tick the box.
+void WolfPanelTerrainLayers::turnOnForEdit(WolfTerrainLayers::Edit* ed)
 {
     if (ed && !ed->mOn)
     {
@@ -1051,56 +1273,37 @@ void WolfFloaterTerrainLayers::turnOnForEdit(WolfTerrainLayers::Edit* ed)
     }
 }
 
-void WolfFloaterTerrainLayers::onOn()
+void WolfPanelTerrainLayers::onOn()
 {
     WolfTerrainLayers::Edit* ed = WolfTerrainLayers::instance().beginEdit();
     if (!ed) return;
     ed->mOn = mOn->get();
-    WolfTerrainLayers::instance().editChanged();
-    setStatus(ed->mOn ? "Wolf terrain textures on — previewing on your ground. Save to keep it."
-                      : "Wolf terrain textures off — the region's standard four show. Save to keep it.", false);
+    changed();
+    show();
+    setStatus(ed->mOn ? "Your own layers are back. Press Apply to keep them."
+                      : "Layers made from the region's standard four textures. Press Apply to keep this.", false);
 }
 
-void WolfFloaterTerrainLayers::onDefaults()
+void WolfPanelTerrainLayers::onDefaults()
 {
     WolfTerrainLayers::Edit* ed = WolfTerrainLayers::instance().beginEdit();
     if (!ed) return;
     ed->mSet = WolfTerrainLayers::defaults(gAgent.getRegion());
     turnOnForEdit(ed);
-    WolfTerrainLayers::instance().editChanged();
+    changed();
     show();
-    setStatus("High-mountain defaults filled in — previewing. Save to keep them.", false);
+    setStatus("High-mountain layers filled in. They show on your own ground now; Apply shows them to everyone.", false);
 }
 
-void WolfFloaterTerrainLayers::onRevert()
+void WolfPanelTerrainLayers::onRevert()
 {
     WolfTerrainLayers::instance().endEdit();
     mShownVersion = -1;
     show();
-    setStatus("Reverted to the saved Wolf terrain textures.", false);
+    setStatus("Back to the layers this region has now.", false);
 }
 
-void WolfFloaterTerrainLayers::onSave()
-{
-    WolfTerrainLayers& wl = WolfTerrainLayers::instance();
-    WolfTerrainLayers::Edit* ed = wl.edit();
-    if (!ed) { setStatus("Nothing to save.", true); return; }
-    if (!ed->mOn && !ed->mHasBase)
-    {
-        // nothing stored and nothing to store: saying "back on its standard four" would only mislead
-        setStatus("Not saved: tick \"Use Wolf terrain textures on this region\" to turn them on.", true);
-        return;
-    }
-    if (ed->mOn)
-    {
-        WolfTerrainLayers::Set v;
-        std::string err;
-        if (!WolfTerrainLayers::validate(ed->mSet, v, err)) { setStatus("Not saved: " + err, true); showValidation(); return; }
-    }
-    wl.save();
-}
-
-void WolfFloaterTerrainLayers::setStatus(const std::string& msg, bool error)
+void WolfPanelTerrainLayers::setStatus(const std::string& msg, bool error)
 {
     mStatus->setText(msg);
     // wolfcave.cpp WolfFloaterCaves::setStatus — the same two colours.

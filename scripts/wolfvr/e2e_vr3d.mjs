@@ -143,16 +143,24 @@ await click('left', 7);
 for (let k = 0; k < 2; k++) { leap('LLWindow', "{'op':'keyDown','keycode':i129}"); leap('LLWindow', "{'op':'keyUp','keycode':i129}"); await sleep(600); }
 // candidates: objects (not the ground) under the ray, upright things first (a level ray), each tried until one can be
 // sat on - the grid decides what has room to sit ("There is no suitable surface to sit on" for a paving slab)
-const YAWS = [0, 0.1, -0.1, 0.2, -0.2, 0.3, -0.3, 0.4, -0.4, 0.5, -0.5, 0.6, -0.6];
+// a wide sweep (the avatar turns 45 degrees between sweeps): objects the viewer says can be sat on with a click
+// (cursor "sit") first, then objects standing above the floor (the hit 0.3 m or more above it), nearest first
+const YAWS = [];
+for (let y = -0.9; y <= 0.91; y += 0.1) YAWS.push(+y.toFixed(2));
 const cands = [];
-for (const pitch of [-0.05, -0.15, -0.25, -0.35]) {
-    for (const yaw of YAWS) {
-        await evalJs(`window.__fakeCtl.aim('right', ${yaw}, ${pitch})`);
-        await sleep(140);
-        const a = await evalJs('window.__wolfvr.aim()');
-        if (a && a.k === 'world' && a.o && a.d > 0.8 && a.d < 8) cands.push({ yaw, pitch, ...a });
+for (let turn = 0; turn < 8 && !cands.some((c) => c.c === 'sit'); turn++) {
+    for (const pitch of [0.15, 0.05, -0.05, -0.15, -0.25]) {
+        for (const yaw of YAWS) {
+            await evalJs(`window.__fakeCtl.aim('right', ${yaw}, ${pitch})`);
+            await sleep(110);
+            const a = await evalJs('window.__wolfvr.aim()');
+            const hitY = 1.4 + Math.sin(pitch) * (a ? a.d : 0);   // the fake controller is 1.4 m above the floor
+            if (a && a.k === 'world' && a.o && a.d > 0.8 && a.d < 30 && (a.c === 'sit' || hitY > 0.3)) cands.push({ yaw, pitch, turn, hitY: +hitY.toFixed(2), ...a });
+        }
     }
+    if (!cands.some((c) => c.c === 'sit')) { await evalJs("window.__fakeCtl.axis('right', 2, 1)"); await sleep(300); await evalJs("window.__fakeCtl.axis('right', 2, 0)"); await sleep(1500); }
 }
+cands.sort((a, b) => (b.c === 'sit') - (a.c === 'sit') || a.d - b.d);
 console.log('   objects under the ray:', cands.length, JSON.stringify(cands.slice(0, 3)));
 check(cands.length > 0 && cands[0].reticle, 'the ray finds objects in the world and the dot is drawn on them (' + (cands[0] && cands[0].d) + ' m)');
 let menuSeen = false, uiSeen = false, sat = false, tries = 0;
@@ -160,6 +168,14 @@ for (const found of cands) {
     if (sat || tries >= 8) break;
     tries++;
     await evalJs(`window.__fakeCtl.aim('right', ${found.yaw}, ${found.pitch})`); await sleep(400);
+    if (found.c === 'sit') {
+        // a sit-on-click object: the trigger is the left click, and the viewer sits on it as the desktop would
+        await click('right', 0, 200);
+        sat = !!(await waitFor(() => evalJs('window.__wolfvr.bar().sit === 2'), 6000));
+        console.log(`   try ${tries}: sit-on-click object ${found.d} m, trigger: ${sat ? 'seated' : 'not seated'}`);
+        if (sat) break;
+        await evalJs(`window.__fakeCtl.aim('right', ${found.yaw}, ${found.pitch})`); await sleep(400);
+    }
     await click('right', 5, 200);   // B = right click
     await sleep(1200);
     let item = null;
@@ -182,7 +198,7 @@ for (const found of cands) {
     uiSeen = uiSeen || (a2 && a2.k === 'ui');
     await click('right', 0, 200);
     sat = !!(await waitFor(() => evalJs('window.__wolfvr.bar().sit === 2'), 5000));
-    console.log(`   try ${tries}: object ${found.d} m at yaw ${found.yaw} pitch ${found.pitch}, Sit at ${cx},${cy}: ${sat ? 'seated' : 'not seated'}`);
+    console.log(`   try ${tries}: object ${found.d} m (${found.hitY} m up) at yaw ${found.yaw} pitch ${found.pitch} turn ${found.turn}, menu Sit at ${cx},${cy}: ${sat ? 'seated' : 'not seated'}`);
 }
 check(menuSeen, "B opened the viewer's own menu on an object, with Sit in it");
 check(uiSeen, 'pointing at Sit on the HUDs layer: the viewer says the ray is on its UI');
@@ -208,7 +224,8 @@ console.log('   surfaces back in 3D:', JSON.stringify(back));
 check(!!back && !back.big && back.tab, '3D Mode again: the eyes and the Menu tab, no big screen');
 }
 
-const errs = events.filter(e => e.method === 'Runtime.exceptionThrown' || (e.method === 'Log.entryAdded' && e.params.entry.level === 'error')).slice(0, 8);
+// (the page's own reconnect attempts after the viewer is closed at the end are not errors of the page)
+const errs = events.filter(e => e.method === 'Runtime.exceptionThrown' || (e.method === 'Log.entryAdded' && e.params.entry.level === 'error' && e.params.entry.source !== 'network')).slice(0, 8);
 for (const e of errs) console.log('ERR', JSON.stringify(e.params).slice(0, 400));
 check(errs.length === 0, 'no page errors');
 await evalJs('window.__wolfvr.toggleVR()');

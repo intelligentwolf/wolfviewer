@@ -244,7 +244,15 @@ namespace
             const LLVector3 av = isAgentAvatarValid() && gAgentAvatarp->mDrawable.notNull() ? gAgentAvatarp->getRenderPosition()
                                                                                          : gAgent.getPositionAgent();
             const LLVector3 rear = gSavedSettings.getVector3("CameraOffsetRearView") * gSavedSettings.getF32("CameraOffsetScale");
-            const LLVector3 floor = av + gMap.fwd * rear.mV[VX] + gMap.left * rear.mV[VY] + gMap.up * rear.mV[VZ];
+            // [VR EYE HEIGHT 2026-11-04] Paul: "it still doesn't feel 3d". Measured (eye dump, e2e_vr3d): the head was
+            // 1.6 m ABOVE the avatar's own eyes - the rear view's 0.75 m lift on top of the avatar's centre, and then the
+            // headset's own height above its floor on top of that - an eye height of about 3.3 m, a giant looking down on
+            // a small figure 3 m away, with nothing near. The headset's floor is now the ground the avatar stands on (its
+            // centre less pelvis-to-foot, LLAvatarAppearance::getPelvisToFoot), behind it by the rear view's distance, so
+            // the eyes are at the resident's own height, the avatar at eye level in front and the ground where the feet
+            // expect it. (The desktop's 0.75 m lift is for a camera with no height of its own; a headset brings its own.)
+            const F32 to_foot = isAgentAvatarValid() ? gAgentAvatarp->getPelvisToFoot() : 0.f;
+            const LLVector3 floor = av + gMap.fwd * rear.mV[VX] + gMap.left * rear.mV[VY] - gMap.up * llclamp(to_foot, 0.f, 3.f);
             // no head position from the page (an older page): standing height, WolfStorm's own first-person 1.6 m
             gMap.base = floor + (hp.has_pos ? refToAgent(gMap, hp.pos[0], hp.pos[1], hp.pos[2]) : gMap.up * 1.6f);
             gMap.valid = true;

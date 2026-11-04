@@ -181,7 +181,22 @@ function deviceLine() {
         `windows from the viewer ${layer.rects.length}, panels ${pans.length}${pans.length ? ': ' + pans.join(' ') : ''}; ` +
         `inputs ${ins.join(' ') || 'none'}; presses bar ${pr.bar} viewer ${pr.ptr} teleport ${pr.tp} hand ${pr.select} on nothing ${pr.none}; ` +
         `last aim ${ptrLog.aim}, viewer said ${worldAim.k}${worldAim.c ? '/' + worldAim.c : ''}; ` +
-        `errors ${devLog.errors}${devLog.shaderErrors ? ' (shaders ' + devLog.shaderErrors + ')' : ''}${devLog.last ? ' last: ' + devLog.last : ''}; page ${pageId || '?'}`;
+        `errors ${devLog.errors}${devLog.shaderErrors ? ' (shaders ' + devLog.shaderErrors + ')' : ''}${devLog.last ? ' last: ' + devLog.last : ''}; page ${pageId || '?'}; ` +
+        depthLine();
+}
+// [VR 3D CHECK 2026-11-04] Paul: "it still doesn't feel 3d". What this headset does with depth and the eyes: the depth
+// meshes on or off (world-locked eyes with real parallax when the head moves) and their grid; the eye separation the
+// PC drew the last picture with against the one this headset's XR views have; each eye's own frustum (tangents L, R,
+// B, T - the Quest 3's are strongly asymmetric, so the two must differ); where the flat cards stand; the head's height
+// above this headset's floor.
+let lastXrEyes = null;
+function depthLine() {
+    const h = screen.userData.hdr;
+    const sep = (e) => (e ? Math.hypot(e[3] - e[0], e[4] - e[1], e[5] - e[2]) * 1000 : NaN);
+    const tan = eyeTan ? `L ${eyeTan.slice(0, 4).join(',')} R ${eyeTan.slice(4, 8).join(',')}` : '-';
+    return `3D: depth ${depthEyes.active ? 'on' : 'off'} (grid ${depthEyes.gw}x${depthEyes.gh}, ${depthEyes.frames} pictures), ` +
+        `eyes drawn ${fmt(sep(h && h.eyes), 1)} mm apart, headset ${fmt(sep(lastXrEyes), 1)} mm, picture ${h ? (h.stereo ? 'stereo' : h.centre ? 'centre view' : 'mono') : '-'}, ` +
+        `cards at ${depthEyes.active ? SHELL_DISTANCE : PICTURE_DISTANCE} m, head ${fmt(_pos.y, 2)} m above the floor, eye windows ${tan}`;
 }
 function stagesLine() {
     return STAGES.map((k) => `${k} ${fmt(stages[k].pct(0.5), 0)}`).join(', ') + ` (median ms; total p95 ${fmt(stages.total.pct(0.95), 0)})`;
@@ -1635,6 +1650,7 @@ function animate(time, frame) {
         const pose = frame.getViewerPose(renderer.xr.getReferenceSpace());
         if (pose) {
             eyes = eyesOf(pose);
+            if (eyes) lastXrEyes = eyes;   // [VR 3D CHECK]
             dolly.updateMatrixWorld();
             _m.fromArray(pose.transform.matrix).premultiply(dolly.matrixWorld);
             _m.decompose(_pos, _quat, _scl);

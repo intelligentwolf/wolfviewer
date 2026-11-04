@@ -193,6 +193,18 @@ public:
      *  climate (within the minute). */
     void setSoundsLocal(const LLUUID& region, bool on);
 
+    /** [SEA LIFE 2026-11-03] ticket 499: weather.php's `sealife` block for this region (wolfstorm/php/wolf_ambient_lib.php
+     *  wa_sealife_payload: {ambient, default (false), on} and, while on, {dolphins 0..1, lat}). Dolphins and whales swim
+     *  only where the estate owner or a manager turned them on; no block (an older grid) or no row yet is off.
+     *  wolfsealife.cpp draws them. */
+    bool seaLifeAllowed() const { return mHaveRow && mSeaLifeOn; }
+    /** [SEA LIFE 2026-11-03] 0..1: how many dolphins the region's place has (game tuning: fewer in polar seas;
+     *  wa_dolphin_climate). 1 when not known. Whales are the same everywhere. */
+    F32 seaLifeDolphins() const { return (mHaveRow && mSeaLifeOn) ? mSeaLifeDolphins : 1.f; }
+    /** [SEA LIFE 2026-11-03] Region/Estate saved a new choice for `region` (wolfpassingplanes.cpp): show it now instead of
+     *  at the next minute's poll. Ignored for any region but the agent's. */
+    void setSeaLifeLocal(const LLUUID& region, bool on);
+
     /** Bumped whenever the answer changes, so a panel can notice without polling fields. */
     S32 generation() const { return mGeneration; }
 
@@ -215,12 +227,15 @@ private:
     void readHurricane(const LLSD& row); ///< [HURRICANE 2026-10-29/] weather.php region payload `hurricane` (absent = no storm)
     void readBirds(const LLSD& row);     ///< [BIRDS 2026-11-02/] weather.php region payload `birds` (absent = no birds)
     void readSounds(const LLSD& row);    ///< [NATURE SOUNDS 2026-11-03/] weather.php region payload `sounds` (absent = off)
+    void readSeaLife(const LLSD& row);   ///< [SEA LIFE 2026-11-03/] weather.php region payload `sealife` (absent = off)
 
     bool               mHaveRow = false;
     bool               mBirdsOn = false;        // [BIRDS 2026-11-02/] weather.php `birds.on`
     bool               mBirdsSeaOnly = false;   // [BIRDS 2026-11-02/] ... by the sea-and-coast default only
     bool               mSoundsOn = false;       // [NATURE SOUNDS 2026-11-03/] weather.php `sounds.on`
     F32                mSoundsInsects = 0.f;    // [NATURE SOUNDS 2026-11-03/] weather.php `sounds.insects`, 0..1
+    bool               mSeaLifeOn = false;      // [SEA LIFE 2026-11-03/] weather.php `sealife.on`
+    F32                mSeaLifeDolphins = 1.f;  // [SEA LIFE 2026-11-03/] weather.php `sealife.dolphins`, 0..1
     bool               mAutoEnvOn = false;      // <WolfViewer 2026-10-03/>
     bool               mAutoEnvSky = false;
     bool               mAutoEnvWeather = false;

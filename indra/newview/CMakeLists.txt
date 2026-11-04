@@ -915,6 +915,7 @@ set(viewer_SOURCE_FILES
     wolfbirds.cpp   # [BIRDS 2026-11-02] ticket 445
     wolfswimbubbles.cpp   # [SWIM BUBBLES 2026-11-02] ticket 346
     wolfnaturesounds.cpp   # [NATURE SOUNDS 2026-11-03] ticket 475
+    wolfsealife.cpp   # [SEA LIFE 2026-11-03] ticket 499
     wolfboatrock.cpp
     wolfflight.cpp
     wolfflightdeck.cpp
@@ -1927,6 +1928,7 @@ set(viewer_HEADER_FILES
     wolfbirds.h   # [BIRDS 2026-11-02]
     wolfswimbubbles.h   # [SWIM BUBBLES 2026-11-02]
     wolfnaturesounds.h   # [NATURE SOUNDS 2026-11-03]
+    wolfsealife.h   # [SEA LIFE 2026-11-03]
     wolfboatrock.h
     wolfflight.h
     wolfflightdeck.h

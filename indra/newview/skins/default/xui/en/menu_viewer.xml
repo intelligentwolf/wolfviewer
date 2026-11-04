@@ -1905,6 +1905,13 @@
             <menu_item_check.on_click function="ToggleControl" parameter="WolfViewerNatureSounds" />
             <menu_item_check.on_visible function="WolfGrid.ShowsWolfRegionWeather" />
         </menu_item_check>
+        <!-- [SEA LIFE 2026-11-03] ticket 499: dolphins and whales in the open sea (wolfsealife.cpp), your own on/off; the
+             region owner's is in Region/Estate > Region. Their sounds follow the Ambient volume. -->
+        <menu_item_check label="Dolphins and Whales" name="WolfSeaLife">
+            <menu_item_check.on_check function="CheckControl" parameter="WolfViewerSeaLife" />
+            <menu_item_check.on_click function="ToggleControl" parameter="WolfViewerSeaLife" />
+            <menu_item_check.on_visible function="WolfGrid.ShowsWolfRegionWeather" />
+        </menu_item_check>
         <!-- [WOLF COMPASS 2026-10-16] wolffloatercompass.cpp: a Victorian compass showing North
              and the way you are moving. Every grid. Paul: "anything wolf viewer should be under wolf world". -->
         <menu_item_check label="Tessa's Compass" name="WolfCompass">

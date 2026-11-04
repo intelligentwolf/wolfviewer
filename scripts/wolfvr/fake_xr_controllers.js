@@ -62,6 +62,17 @@
                         const mv = (t) => { const m = Float32Array.from(t.matrix); m[12] += window.__headX; return { matrix: m }; };
                         p = { ...p, transform: mv(p.transform), views: p.views.map((v) => ({ ...v, transform: mv(v.transform) })) };
                     }
+                    // [VR 3D CHECK 2026-11-04] window.__asymEyes = [[L, R, B, T] left, [L, R, B, T] right]: each eye's own
+                    // off-axis frustum (tangents), as a Quest 3 gives (its eyes' windows mirror each other), instead of
+                    // fake_xr.js's one symmetric projection for both eyes
+                    if (p && window.__asymEyes) {
+                        const off = (w, m0) => {
+                            const [L, R, B, T] = w, n = m0[14] / (m0[10] - 1), f = m0[14] / (m0[10] + 1);
+                            return new Float32Array([2 / (R - L), 0, 0, 0, 0, 2 / (T - B), 0, 0, (R + L) / (R - L), (T + B) / (T - B),
+                                                     -(f + n) / (f - n), -1, 0, 0, -2 * f * n / (f - n), 0]);
+                        };
+                        p = { ...p, views: p.views.map((v) => ({ ...v, projectionMatrix: off(window.__asymEyes[v.eye === 'right' ? 1 : 0], v.projectionMatrix) })) };
+                    }
                     if (p && window.__swapViews) return { ...p, views: p.views.slice().reverse() };
                     return p;
                 };

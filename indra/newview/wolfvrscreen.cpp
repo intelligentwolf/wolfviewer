@@ -1195,6 +1195,17 @@ bool secondEye() { return gEye == 1; }
 // window: what the left eye's cull and state sort found is what the right eye sees, less a 6.4 cm sliver at the far
 // edge. So the right eye's pass draws those lists again from its own position instead of culling and sorting the whole
 // region a second time (the main thread's work per eye, measured by e2e_stages.mjs). WolfVRShareCull off: as before.
+// [VR SHADOWS 2026-11-04] The sun's shadow maps drawn every Nth VR 3D frame (WolfVRShadowEvery), kept in between with
+// matrices remade for this frame's eye (LLPipeline::wolfVRReuseSunShadow): the shadow passes draw the scene once per
+// cascade and were the largest single part of the left eye's time (measured, e2e_stages.mjs). Never outside VR 3D Mode.
+bool reuseShadowsThisFrame()
+{
+    static LLCachedControl<U32> every(gSavedSettings, "WolfVRShadowEvery", 1);
+    if (gEye != 0 || every <= 1) return false;
+    static U32 s_n = 0;
+    return (++s_n % every) != 0;
+}
+
 bool shareCull()
 {
     static LLCachedControl<bool> share(gSavedSettings, "WolfVRShareCull", true);

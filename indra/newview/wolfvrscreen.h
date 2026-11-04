@@ -47,6 +47,8 @@ namespace WolfVRScreen
     bool secondEye();
     /** [VR SHARED CULL 2026-11-04] The right eye's pass reuses the left eye's cull and state sort (WolfVRShareCull). */
     bool shareCull();
+    /** [VR SHADOWS 2026-11-04] The left eye keeps last frame's shadow maps this frame (WolfVRShadowEvery). */
+    bool reuseShadowsThisFrame();
     /** [VR SIT 2026-11-04] The object (root) the headset's pointer was on in the last 8 s, for the bar's Sit. */
     bool aimedObject(LLUUID& id);
     /** [VR HUD LAYER 2026-11-04] End of render_ui: the UI layer, drawn again into its own transparent target, to the

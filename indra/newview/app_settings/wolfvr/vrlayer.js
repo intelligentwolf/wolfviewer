@@ -133,7 +133,7 @@ export class VRLayer {
         this.mesh.frustumCulled = false;
         this.mesh.renderOrder = 8000;   // under the action bar (9000) and the pointer
         this.mesh.visible = false;
-        camera.add(this.mesh);
+        camera.add(this.mesh);          // moved into the room by attachWorld [VR HUDS STATIC]
         this._built = '';
         // [VR PANELS] the viewer's windows, each its own panel in the room (world), keyed by the viewer's window name
         this.world = null;            // the group the panels live in (attachWorld)
@@ -146,7 +146,13 @@ export class VRLayer {
         this._head = { p: new THREE.Vector3(), q: new THREE.Quaternion() };
     }
 
-    attachWorld(group) { this.world = group; }
+    attachWorld(group) { this.world = group; group.add(this.mesh); }
+    // a point on the band (u from the left, v from the TOP) in the room (tests)
+    bandPoint(u, v) {
+        if (!this.bandC) return null;
+        const a = -this.arc / 2 + u * this.arc - this.bandYaw;
+        return [this.bandC.x + RADIUS * Math.sin(a), this.bandC.y + this.y + (0.5 - v) * this.height, this.bandC.z - RADIUS * Math.cos(a)];
+    }
     // the viewer's window list ({"t":"panels"}): applied with the picture that follows it (or after 300 ms anyway)
     setPanels(list) {
         if (!Array.isArray(list)) return;
@@ -302,7 +308,34 @@ export class VRLayer {
         this.y = pl.y;
         this.mesh.geometry.dispose();
         this.mesh.geometry = curvedGeometry(RADIUS, this.arc, this.height, Math.round(pl.arcDeg / 2));
-        this.mesh.position.set(0, this.y, 0);
+        this._placeBand();
+    }
+    // [VR HUDS STATIC 2026-11-04] Paul: "the viewer huds should stay static like the main vr hud". The HUD band (the
+    // viewer's own HUDs - flight deck, dashboard, helms, game HUD - HUD attachments, menus, notices) stands in the room
+    // like the bar: placed in front of where the resident looks when it first shows and whenever the bar is opened
+    // (recentre), then it stays; the grip moves it round and up or down. Its height is the place's (standing / seated).
+    recentre(headPos, headQuat) {
+        const f = new THREE.Vector3(0, 0, -1).applyQuaternion(headQuat || this._head.q);
+        this.bandYaw = Math.atan2(-f.x, -f.z);
+        this.bandC = (this.bandC || new THREE.Vector3()).copy(headPos || this._head.p);
+        this._placeBand();
+    }
+    _placeBand() {
+        if (!this.bandC) return;
+        this.mesh.position.set(this.bandC.x, this.bandC.y + this.y, this.bandC.z);
+        this.mesh.rotation.set(0, this.bandYaw, 0);
+    }
+    // grip held on the band: it follows the controller round, and up or down (remembered for this place)
+    moveBand(o, d, held) {
+        if (!held || !this.bandC) { this.bandMoving = null; return; }
+        const yaw = Math.atan2(-d.x, -d.z);
+        if (!this.bandMoving) { this.bandMoving = { dyaw: this.bandYaw - yaw, ry0: o.y + d.y }; return; }
+        this.bandYaw = yaw + this.bandMoving.dyaw;
+        const dy = o.y + d.y - this.bandMoving.ry0;
+        this.bandMoving.ry0 = o.y + d.y;
+        this.nudge(dy, 0);
+        this._geometry();
+        this._placeBand();
     }
     // grip held while pointing: move it up or down (dy metres), or resize (+1 / -1 step)
     nudge(dy, size) {
@@ -365,6 +398,7 @@ export class VRLayer {
 
     update(headPos, headQuat) {
         if (headPos) { this._head.p.copy(headPos); this._head.q.copy(headQuat); }
+        if (!this.bandC && headPos && this.on) this.recentre(headPos, headQuat);   // first shown: in front
         if (!this.on) { this.mesh.visible = false; for (const p of this.panels.values()) { p.mesh.visible = false; p.x.visible = false; } return; }
         this._geometry();
         if (this.nextRects && this.shown && performance.now() - this.nextAt > 300) this._applyRects();   // [VR PANELS] no picture came
@@ -404,10 +438,10 @@ export class VRLayer {
         }
     }
 
-    // Head-space ray -> {u, v (0 at the TOP, as the viewer's pointer wants), t} or null
+    // World ray -> {u, v (0 at the TOP, as the viewer's pointer wants), t} or null (the band stands in the room)
     hit(o, d) {
-        if (!this.on || !this.mesh.visible || !this.arc) return null;
-        const h = hitCylinder(o, d, RADIUS, this.arc, 0, this.y, this.height);
+        if (!this.on || !this.mesh.visible || !this.arc || !this.bandC) return null;
+        const h = hitCylinder(new THREE.Vector3().copy(o).sub(this.bandC), d, RADIUS, this.arc, this.bandYaw, this.y, this.height);
         if (!h) return null;
         const u = h.u, v = 1 - h.v;
         // [VR PANELS] a window that is a panel of its own is not on the band (it is cut out there)

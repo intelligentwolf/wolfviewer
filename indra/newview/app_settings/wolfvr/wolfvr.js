@@ -202,18 +202,31 @@ function disparityProbe() {
         const x = c.getContext('2d'); x.drawImage(img, 0, 0, W, H);
         const d = x.getImageData(0, 0, W, H).data, half = W / 2;
         const g = (px, py) => { const i = (py * W + px) * 4; return d[i] * 0.3 + d[i + 1] * 0.59 + d[i + 2] * 0.11; };
+        // [VR 3D CHECK] each eye's picture covers its OWN window (tangents L, R): a point at infinity straight ahead is at
+        // u = -L / (R - L) in each, so with a Quest 3's mirrored, asymmetric windows the two halves are offset by that much
+        // already (about a quarter of the picture). That offset is taken out: what is left is the real disparity, 0 at
+        // infinity, positive for near things (the right eye's copy further left). Searched over -10 .. +60 eye-px-equivalent.
+        let sInf = 0;
+        if (h.tan && h.tan.length >= 8) {
+            const uL = -h.tan[0] / (h.tan[1] - h.tan[0]), uR = -h.tan[4] / (h.tan[5] - h.tan[4]);
+            sInf = Math.round((uL - uR) * half);
+        }
         const band = (y0, y1) => {
             let best = 0, bestSad = Infinity;
-            for (let sft = -4; sft <= 24; sft++) {
+            for (let sft = sInf - 3; sft <= sInf + 24; sft++) {
                 let sad = 0, n = 0;
-                for (let py = y0; py < y1; py++) for (let px = 30; px < half - 30; px++) { sad += Math.abs(g(px, py) - g(half + px - sft, py)); n++; }
+                for (let py = y0; py < y1; py++) for (let px = Math.max(30, sft + 2); px < half - 30; px++) {
+                    const qx = px - sft; if (qx < 2 || qx >= half - 2) continue;
+                    sad += Math.abs(g(px, py) - g(half + qx, py)); n++;
+                }
+                if (!n) continue;
                 sad /= n;
-                if (sad < bestSad) { bestSad = sad; best = sft; }
+                if (sad < bestSad) { bestSad = sad; best = sft - sInf; }
             }
             return best * (config && config.h ? config.h / half : 1);
         };
         const eyePx = config && config.h ? config.h : 0;
-        return `disparity (eye ${eyePx} px): near ${fmt(band(H - 22, H - 6), 0)} px, middle ${fmt(band(H / 2, H / 2 + 16), 0)} px, far ${fmt(band(10, 26), 0)} px; ` +
+        return `disparity after the eye windows' own offset (${fmt(sInf * (config && config.h ? config.h / half : 1), 0)} px) (eye ${eyePx} px): near ${fmt(band(H - 22, H - 6), 0)} px, middle ${fmt(band(H / 2, H / 2 + 16), 0)} px, far ${fmt(band(10, 26), 0)} px; ` +
                `views ${lastViews ? Array.from(lastViews, (v) => v.eye).join('/') : '?'} -> halves on layers ${eyeLayer.join('/')}, left eye at x ${h.eyes ? fmt(h.eyes[0] * 1000, 1) : '?'} mm`;
     } catch (e) { return 'disparity: ' + e.message; }
 }
@@ -704,7 +717,8 @@ const layer = new VRLayer(dock, send, (t) => { showError(t); bar.toast(t, 15000)
 layer.attachWorld(scene);   // [VR PANELS 2026-11-04] each viewer window its own panel, standing in the room
 bar.attachWorld(scene);     // [VR BAR IN THE ROOM 2026-11-04] the bar stands in the room too (the Menu tab stays with the head)
 const keyboard = new VRKeyboard(scene, send);   // [VR KEYBOARD 2026-11-04]
-let kbAuto = false;         // the keyboard was opened by a text field (and closes itself when typing leaves it)
+let kbAuto = false;
+let barWasOpen = false;     // [VR HUDS STATIC] the bar's last state, to recentre the band when it opens         // the keyboard was opened by a text field (and closes itself when typing leaves it)
 // [VR AUDIO 2026-11-04] the viewer's sound in the headset (vraudio.js), and the headset microphone for voice chat
 const vrAudio = new VRAudio({
     send,
@@ -1438,7 +1452,7 @@ function aimAt(ro, rd, headPos, headQuat) {
     // has something drawn), so its nearer surface must not take the ray from a window behind it
     const pan = layer.hitPanels(ro, rd);
     if (pan && pan.close) return { kind: 'pclose', hit: pan, t: pan.t };   // [VR PANEL CLOSE] a window's own Close
-    return { kind: 'ptr', layer: pan || layer.hit(_ho, _hd) };
+    return { kind: 'ptr', layer: pan || layer.hit(ro, rd) };   // [VR HUDS STATIC] the band stands in the room
 }
 function sendRay(ro, rd, lay) {
     const r = worldPointer.ray, now = performance.now();
@@ -1507,12 +1521,12 @@ function pollWorldPointer(src, gp, frame, headPos, headQuat) {
             // [VR PANELS] grip held on a window's panel: it follows the controller round the arc (and up or down)
             layer.movePanel(aim.layer ? aim.layer.k : null, _ro, _rd, true);
         } else if (grip && aim.layer && !own[0] && !layer.moving) {
-            // grip held on the HUD band: move it up or down with the controller (remembered); clicks still work
-            if (!worldPointer.grip) worldPointer.gripY = _ro.y;
-            else { layer.nudge(_ro.y - worldPointer.gripY, 0); worldPointer.gripY = _ro.y; }
+            // [VR HUDS STATIC] grip held on the HUD band: it follows the controller round and up or down; clicks still work
+            layer.moveBand(_ro, _rd, true);
         }
     }
     if (!grip && layer.moving) layer.movePanel(null, _ro, _rd, false);
+    if (!grip && layer.bandMoving) layer.moveBand(_ro, _rd, false);
     // [VR BAR IN THE ROOM] grip held on the bar: it moves round with the controller
     if (grip && (bar.moving || (aim && aim.kind === 'bar' && !worldPointer.grip))) bar.move(_ro, _rd, true);
     else if (!grip && bar.moving) bar.move(_ro, _rd, false);
@@ -1817,6 +1831,9 @@ function animate(time, frame) {
     }
     // [VR CONTROLS / HUD LAYER] the docked surfaces (3D Mode in the headset only)
     layer.setActive(WORLD() && renderer.xr.isPresenting);
+    // [VR HUDS STATIC] the band comes in front again whenever the bar is opened (the bar opens in front too)
+    if (bar.open && !barWasOpen) layer.recentre(_pos, _quat);
+    barWasOpen = bar.open;
     layer.update(_pos, _quat);
     bar.setPageState('numbers', statsOn);
     bar.update(now);
@@ -1906,7 +1923,7 @@ window.__wolfvr = { resetStages: () => { for (const k of STAGES) stages[k].v.len
             const [x0, y0, x1, y1] = p.r;
             if (p.mesh.visible && u >= x0 && u <= x1 && v >= y0 && v <= y1) return window.__wolfvr.panelPoint(p.k, (u - x0) / (x1 - x0), (v - y0) / (y1 - y0));
         }
-        return surfacePoint(1.25, layer.arc, layer.y, layer.height, u, 1 - v);
+        return layer.bandPoint(u, v);
     },
     // the world point at (u, v) of a panel (0..1 across it, from its top-left), for aiming the fake controller
     panelPoint: (k, u, v) => {
@@ -1928,13 +1945,15 @@ window.__wolfvr = { resetStages: () => { for (const k of STAGES) stages[k].v.len
         const u = (sl.x + sl.w / 2) / 1024, v = 1 - (sl.y + sl.h / 2) / 448;
         return bar.pointAt(u, v);   // [VR BAR IN THE ROOM] the bar stands in the room
     },
-    layerPoint: (u, v) => surfacePoint(1.25, layer.arc, layer.y, layer.height, u, 1 - v),
+    layerPoint: (u, v) => layer.bandPoint(u, v),
     // [VR PANELS] the HUD band's own hit for a ray from the head through its point (u, v) (null where a panel was cut out)
     bandHit: (u, v) => {
-        const a = -layer.arc / 2 + u * layer.arc, o = new THREE.Vector3(0, 0, 0);
-        const d = new THREE.Vector3(1.25 * Math.sin(a), layer.y + (0.5 - v) * layer.height, -1.25 * Math.cos(a)).normalize();
+        const p = layer.bandPoint(u, v);
+        if (!p) return null;
+        const o = _pos.clone(), d = new THREE.Vector3(p[0], p[1], p[2]).sub(o).normalize();
         return layer.hit(o, d);
     },
+    bandPlace: () => ({ yaw: layer.bandYaw ? +(layer.bandYaw * 180 / Math.PI).toFixed(1) : 0, placed: !!layer.bandC }),
     // [VR MENU FIX] the bar's Close button, and what the Menu tab says now
     closePoint: () => bar.pointAt((1024 - 196 + 91) / 1024, 1 - (10 + 24) / 448),
     barPlace: () => ({ yaw: +(bar.yaw * 180 / Math.PI).toFixed(1), y: +(bar.c ? bar.c.y : 0).toFixed(3), open: bar.open }),

@@ -211,6 +211,15 @@ for (const [hud, name] of [['flight', 'flight deck'], ['car', 'car dashboard'], 
     if (g7) writeFileSync(resolve(OUT, `layer_${hud}.png`), Buffer.from(g7.split(',')[1], 'base64'));
     await shot(`eye_${hud}.png`);
     check(c1 > c0 + 1500, `7. the ${name} is drawn in the headset (covered pixels ${c0} -> ${c1}, quarter size)`);
+    if (hud === 'flight') {
+        // [VR HUDS STATIC] the viewer's HUDs stand in the room: turning the head does not take them along
+        const p0 = await evalJs('window.__wolfvr.bandPlace()');
+        await evalJs('window.__fakeXR.setYaw(0.6)'); await sleep(800);
+        const p1 = await evalJs('window.__wolfvr.bandPlace()');
+        await shot('eye_flight_turned.png');
+        await evalJs('window.__fakeXR.setYaw(0)'); await sleep(500);
+        check(p0.placed && Math.abs(p0.yaw - p1.yaw) < 0.5, `7. the flight deck stays put while the head turns (band yaw ${p0.yaw} -> ${p1.yaw})`);
+    }
     // off again, from the same page
     if (await openBar()) { await pressSlot('hudsmenu'); await sleep(400); await pressSlot('hud_' + hud); }
     await waitFor(() => evalJs(`!window.__wolfvr.bar().huds.includes("${hud}")`), 6000);

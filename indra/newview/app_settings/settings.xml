@@ -20188,6 +20188,17 @@ Change of this parameter will affect the layout of buttons in notification toast
 			<key>Value</key>
 			<integer>0</integer>
 		</map>
+		<key>WolfVRShadowEvery</key>
+		<map>
+			<key>Comment</key>
+			<string>[VR SHADOWS 2026-11-04] VR 3D Mode: draw the sun's shadow maps every Nth frame and keep them in between (1 = every frame, as before; 2 measured 1.5 ms off the left eye).</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>U32</string>
+			<key>Value</key>
+			<integer>2</integer>
+		</map>
 		<key>WolfVRShareCull</key>
 		<map>
 			<key>Comment</key>

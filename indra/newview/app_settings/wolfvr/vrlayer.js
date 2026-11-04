@@ -306,7 +306,11 @@ export class VRLayer {
         if (!this.on) return;
         const payload = new Uint8Array(buf, hdr.size, hdr.bytes);
         if (hdr.codec === 'jpeg') {
-            createImageBitmap(new Blob([payload], { type: 'image/jpeg' }), { imageOrientation: 'flipY' })
+            // [VR DEVICE REPORT 2026-11-04] decoded as it is, NO imageOrientation option: Paul's Quest 3 reported the
+            // decoded picture's halves the other way round from desktop Chromium's ("upper half 0, lower half 255"
+            // against "255 / 155"), so the coverage half the shader reads was empty and nothing was drawn. The flip
+            // is done here instead, when the picture is drawn into the canvas (update), the same on every browser.
+            createImageBitmap(new Blob([payload], { type: 'image/jpeg' }))
                 .then((bmp) => { if (this.latest) this.latest.close(); this.latest = bmp; })
                 .catch(() => {
                     // a bad picture is skipped; many in a row is a problem the resident is told about
@@ -338,8 +342,13 @@ export class VRLayer {
                     this.canvas.width = w; this.canvas.height = h;
                     this.bmp.dispose();
                 }
+                this.ctx2d.setTransform(1, 0, 0, 1, 0, 0);
                 this.ctx2d.clearRect(0, 0, w, h);
+                this.ctx2d.setTransform(1, 0, 0, -1, 0, h);   // bottom row first, as the texture (flipY false) wants it
                 this.ctx2d.drawImage(img, 0, 0);
+                this.ctx2d.setTransform(1, 0, 0, 1, 0, 0);
+                this.drawnSize = w + 'x' + h;                  // [VR DEVICE REPORT] the picture's size when it was drawn
+                this.draws = (this.draws || 0) + 1;
                 this.bmp.needsUpdate = true;
                 if (this.mat.uniforms.map.value !== this.bmp) this.mat.uniforms.map.value = this.bmp;
             }

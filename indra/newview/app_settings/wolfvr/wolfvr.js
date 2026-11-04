@@ -110,14 +110,17 @@ function layerProbe() {
     const img = layer.shown;
     let pic = '-', tex = '-';
     try {
-        if (img) {
-            const c = document.createElement('canvas'); c.width = 9; c.height = 18;
-            const x = c.getContext('2d'); x.drawImage(img, 0, 0, 9, 18);
-            const d = x.getImageData(0, 0, 9, 18).data;
+        // the canvas the texture is made from, right where it was drawn: the brightest red in each half (9 x 9 points
+        // each), then which half is the coverage (the upper rows of this canvas, as the shader reads it)
+        const cv = layer.canvas, x = layer.ctx2d;
+        if (cv && cv.width && cv.height) {
             let top = 0, bot = 0;
-            for (let i = 0; i < 9 * 9; i++) top = Math.max(top, d[i * 4]);
-            for (let i = 9 * 9; i < 9 * 18; i++) bot = Math.max(bot, d[i * 4]);
-            pic = `red max upper half ${top} lower half ${bot}`;   // one half is the colour, the other the coverage
+            for (let j = 0; j < 9; j++) for (let i = 0; i < 9; i++) {
+                const px = Math.floor(cv.width * (i + 0.5) / 9);
+                top = Math.max(top, x.getImageData(px, Math.floor(cv.height * (j + 0.5) / 18), 1, 1).data[0]);
+                bot = Math.max(bot, x.getImageData(px, Math.floor(cv.height * (j + 9.5) / 18), 1, 1).data[0]);
+            }
+            pic = `canvas ${cv.width}x${cv.height} (drawn ${layer.draws || 0} times, last ${layer.drawnSize || '-'}${img ? ', decoded ' + (img.width || img.displayWidth) + 'x' + (img.height || img.displayHeight) : ''}) red max: coverage half ${top}, colour half ${bot}`;
         }
     } catch (e) { pic = 'error ' + e.message; }
     try {

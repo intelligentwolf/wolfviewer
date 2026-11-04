@@ -34,6 +34,9 @@ public:
 
     bool postBuild() override;
     void draw() override;
+    /** [VR OFF 2026-11-04] Paul: "when i close the vr window with the qr code on it stop vr" - closing it switches VR
+     *  off, exactly as Wolf World > VR does (not when the viewer itself is closing: that stops it anyway). */
+    void onClose(bool app_quitting) override;
 
 private:
     void refresh();

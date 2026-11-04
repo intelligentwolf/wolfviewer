@@ -53,6 +53,8 @@ export const ACTIONS = [
     { id: 'dashboard', label: 'Dashboard', icon: 'speed', cmd: 'wolf_dashboard', wolf: true },
     // VR-only (hud_model.js vrOnly): the HUD layer switch (hud_model.js 'huds'), the big screen, leaving VR
     { id: 'huds', label: 'HUDs', icon: 'dashboard', page: 'huds' },
+    // [VR VIEW 2026-11-04] see yourself from behind (the default) or from your own eyes with your avatar hidden
+    { id: 'hideme', label: 'Hide Me', icon: 'visibility_off', cmd: 'hideavatar' },
     { id: 'bigscreen', label: 'Big Screen', icon: 'tv', page: 'bigscreen' },
     { id: 'numbers', label: 'Numbers', icon: 'speed', page: 'numbers', debug: true },   // only with WolfVRDebugStats
     { id: 'vr', label: 'Exit VR', icon: 'vrpano', page: 'exit' },
@@ -188,7 +190,7 @@ export class VRBar {
     setState(m) {
         const wolf = !!m.wolf;
         this.state = { on: new Set(m.on || []), off: new Set(m.off || []), wolf, region: String(m.region || ''),
-                       sit: m.sit | 0, fly: !!m.fly, fav: Array.isArray(m.fav) ? m.fav.slice(0, 6) : [] };
+                       sit: m.sit | 0, fly: !!m.fly, fav: Array.isArray(m.fav) ? m.fav.slice(0, 6) : [], hide: !!m.hide };
         if (this.slots.length !== this.actions().length) this._layout();
         this._dirty = true;
     }
@@ -226,6 +228,7 @@ export class VRBar {
         if (a.why) return { active: false, dead: true };
         if (a.cmd === 'sit') return { active: this.state.sit > 0, dead: false };
         if (a.cmd === 'home') return { active: false, dead: false };
+        if (a.cmd === 'hideavatar') return { active: !!this.state.hide, dead: false };
         return { active: this.state.on.has(a.cmd), dead: this.state.off.has(a.cmd) };
     }
 
@@ -285,7 +288,11 @@ export class VRBar {
         if (this.onCommand) this.onCommand(a);
     }
 
-    labelFor(a) { return a.cmd === 'sit' && this.state.sit > 0 ? 'Stand' : a.label; }
+    labelFor(a) {
+        if (a.cmd === 'sit' && this.state.sit > 0) return 'Stand';
+        if (a.cmd === 'hideavatar' && this.state.hide) return 'Show Me';
+        return a.label;
+    }
 
     // ---- drawing: vr_hud.js _glass / _roundRect / _drawBar / _drawSlot / _drawFavourites ----
     _roundRect(ctx, x, y, w, h, r) {

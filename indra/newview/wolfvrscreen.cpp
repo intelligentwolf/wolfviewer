@@ -162,19 +162,58 @@ namespace
 
     // This frame's head: the avatar's heading (yaw only - the head's own turn is added by the pose), its eyes, and the
     // headset's lean from where it was when 3D Mode started (a sit, a stand or a step of more than 1 m re-centres it).
-    void buildMap(const wolfvr::HeadPose& hp)
+    // [VR VIEW 2026-11-04] The rig's heading, as WolfStorm's (render_manager.js _placeVrRig "THE RIG'S YAW"): taken
+    // from the avatar's facing when the headset enters VR and after a teleport, and turned ONLY by the right stick's
+    // comfort turn (applyEvents TURN). Never chasing the avatar: whatever else turns it (a ship, a script, the desktop)
+    // must not swing the world round the resident - uncommanded rotation is the classic nausea trigger.
+    struct Rig { bool set = false; LLVector3 fwd = LLVector3::x_axis; LLVector3 at; };
+    Rig gRig;
+
+    LLVector3 avatarHeading()
     {
         LLVector3 fwd = gAgent.getAtAxis();
         fwd.mV[VZ] = 0.f;
         if (fwd.normVec() < 1e-3f) fwd = LLVector3::x_axis;
+        return fwd;
+    }
+
+    void buildMap(const wolfvr::HeadPose& hp)
+    {
+        const LLVector3 here = gAgent.getPositionAgent();
+        if (!gRig.set || gAgent.getTeleportState() != LLAgent::TELEPORT_NONE || (here - gRig.at).length() > 50.f)
+        {
+            gRig.fwd = avatarHeading();   // entering VR, a teleport, or a jump of more than 50 m (a region crossing)
+            gRig.set = true;
+        }
+        gRig.at = here;
+        const LLVector3 fwd = gRig.fwd;
         gMap.fwd = fwd;
         gMap.up = LLVector3::z_axis;
         gMap.left = gMap.up % fwd;
         std::memcpy(gMap.q, hp.q, sizeof gMap.q);
         gMap.has_p = hp.has_pos;
         std::memcpy(gMap.p, hp.pos, sizeof gMap.p);
-        LLVector3 base = avatarEyes();
+        // [VR VIEW 2026-11-04] Paul: "when i'm in 3d vr i'm inside my avatar's body ... i want to see my avatar and have
+        // the option to hide it". Default: as WolfStorm VR (wolfstorm/js/rendering/render_manager.js _placeVrRig), the
+        // headset's floor is placed behind and above the avatar by the desktop's own rear-view offset (settings.xml
+        // CameraOffsetRearView [-3, 0, 0.75] x CameraOffsetScale), along the avatar's heading, and the head is wherever
+        // the headset puts it above that floor (its real height and steps, 1:1). WolfVRHideAvatar: first person at the
+        // avatar's eyes, with the avatar and its attachments not drawn (displayFrame), plus the headset's lean.
+        static LLCachedControl<bool> hide_me(gSavedSettings, "WolfVRHideAvatar", false);
         const S32 sit = isAgentAvatarValid() && gAgentAvatarp->isSitting() ? (gAgentAvatarp->getParent() ? 2 : 1) : 0;
+        if (!hide_me)
+        {
+            const LLVector3 av = isAgentAvatarValid() && gAgentAvatarp->mDrawable.notNull() ? gAgentAvatarp->getRenderPosition()
+                                                                                         : gAgent.getPositionAgent();
+            const LLVector3 rear = gSavedSettings.getVector3("CameraOffsetRearView") * gSavedSettings.getF32("CameraOffsetScale");
+            const LLVector3 floor = av + gMap.fwd * rear.mV[VX] + gMap.left * rear.mV[VY] + gMap.up * rear.mV[VZ];
+            // no head position from the page (an older page): standing height, WolfStorm's own first-person 1.6 m
+            gMap.base = floor + (hp.has_pos ? refToAgent(gMap, hp.pos[0], hp.pos[1], hp.pos[2]) : gMap.up * 1.6f);
+            gMap.valid = true;
+            gLean.set = false;
+            return;
+        }
+        LLVector3 base = avatarEyes();
         if (hp.has_pos)
         {
             if (!gLean.set || gLean.sit != sit) { std::memcpy(gLean.p0, hp.pos, sizeof gLean.p0); gLean.set = true; gLean.sit = sit; }
@@ -806,6 +845,17 @@ void displayFrame()
     const F64 t0 = s_last_frame;
     F64 t1 = t0;
     if (world) setPickCamera();   // the queued picks (display(): performPick) from the head, as the hover ones were
+    // [VR VIEW 2026-11-04] "Hide my avatar": not drawn while the headset is in VR 3D Mode - the stock switches mouselook
+    // uses (LLAgent::setShowAvatar -> needsRenderAvatar, read when the avatar is drawn; the attachments' mouselook
+    // visibility, LLVOAvatarSelf::updateAttachmentVisibility), set for this frame and given back after it
+    static LLCachedControl<bool> hide_me(gSavedSettings, "WolfVRHideAvatar", false);
+    const bool hiding = world && hide_me && isAgentAvatarValid();
+    const bool shown_before = gAgent.getShowAvatar();
+    if (hiding)
+    {
+        gAgent.setShowAvatar(false);
+        gAgentAvatarp->updateAttachmentVisibility(CAMERA_MODE_MOUSELOOK);
+    }
     if (!stereo)
     {
         if (gPaused) gDisplaySwapBuffers = false;   // not shown; swap() sets it back
@@ -825,6 +875,11 @@ void displayFrame()
         display();
         gEye = -1;
         gDisplaySwapBuffers = true;
+    }
+    if (hiding && isAgentAvatarValid())
+    {
+        gAgent.setShowAvatar(shown_before);
+        gAgentAvatarp->updateAttachmentVisibility(gAgentCamera.getCameraMode());
     }
     if (world) setPickCamera();   // the head centre again for the rest of the frame and the next idle loop
     const bool was_paused = gPaused;
@@ -881,6 +936,7 @@ void applyHeadCamera()
         gFramePose = wolfvr::HeadPose();
         gMap.valid = false;
         gLean.set = false;
+        gRig.set = false;   // out of VR: the next session takes the avatar's facing again
         return;
     }
     if (!gCameraOverridden)
@@ -952,9 +1008,7 @@ bool listenerAxes(LLVector3& at, LLVector3& up)
     const wolfvr::HeadPose hp = WolfVRStream::headPose();
     if (!hp.valid) return false;
     HeadMap m;
-    m.fwd = gAgent.getAtAxis();
-    m.fwd.mV[VZ] = 0.f;
-    if (m.fwd.normVec() < 1e-3f) m.fwd = LLVector3::x_axis;
+    m.fwd = gRig.set ? gRig.fwd : avatarHeading();   // the rig's heading: the ears turn with the view
     m.up = LLVector3::z_axis;
     m.left = m.up % m.fwd;
     std::memcpy(m.q, hp.q, sizeof m.q);
@@ -1255,7 +1309,15 @@ void applyEvents(const std::vector<wolfvr::InputEvent>& events)
         case T::TURN:
             // One snap turn of 45 degrees (WolfStorm render_manager.js _updateVRInput, Meta's comfort default);
             // LLAgent::yaw turns the body about the up vector, + = left.
-            if (!gAgent.isMovementLocked()) gAgent.yaw((F32)e.wheel * 45.f * DEG_TO_RAD);
+            if (!gAgent.isMovementLocked())
+            {
+                const F32 a = (F32)e.wheel * 45.f * DEG_TO_RAD;
+                gAgent.yaw(a);
+                // [VR VIEW] the rig turns with it, by the same step (the only thing that turns the rig)
+                gRig.fwd.rotVec(a, LLVector3::z_axis);
+                gRig.fwd.mV[VZ] = 0.f;
+                gRig.fwd.normVec();
+            }
             break;
         case T::ACTION:
             WolfVRUi::run(e.key, e.text);   // [VR CONTROLS 2026-11-04] an action-bar button (wolfvrui.cpp)

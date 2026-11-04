@@ -78,7 +78,7 @@ class LLAudioEngine_OpenAL : public LLAudioEngine
         // [VR AUDIO 2026-11-04] THE FINAL MIX FOR THE VR HEADSET (newview wolfvraudio.cpp).
         // OpenAL has no way to read what a playback device plays; the only route to the real mix is a LOOPBACK
         // device (alext.h:286 ALC_SOFT_loopback: the application renders the mix itself). So, when asked before
-        // init() (setMirrorMix(true): WolfVRStreamEnabled was on at start), the engine's context is a loopback
+        // init() (setMirrorMix(true): WolfVRSoundReady was on at start), the engine's context is a loopback
         // context, and the device alutInit opened (the real speakers) gets one stereo source fed by a callback
         // buffer (alext.h:581 AL_SOFT_callback_buffer) that renders the loopback mix as the speakers ask for it -
         // pull-driven, so the speakers get no extra delay. The callback hands each block to the mix tap and,

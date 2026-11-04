@@ -266,6 +266,7 @@ namespace
         float tan[8] = {-1, 1, -1, 1, -1, 1, -1, 1};
         bool has_pos = false;
         float pos[3] = {0, 0, 0};
+        double recv_ms = 0;      // [VR IMMERSIVE 2026-11-04] when it arrived (nowMs): poses older than 1 s count as none
     };
 
     std::string contentType(const std::string& path)
@@ -539,6 +540,9 @@ struct Service::Impl
 
     // [VR AUDIO 2026-11-04] the viewer's sound mix
     std::atomic<bool> audio_on{false};
+    // [VR IMMERSIVE 2026-11-04] the page's own word on whether the headset is in VR now: -1 not said (an older page:
+    // then only poses with eye positions, which exist only inside an immersive session, count), 0 no, 1 yes
+    std::atomic<int> xr_state{-1};
     uint64_t audio_sample = 0;   // audio thread only
 
     // clock sync from the page: server_ms - client_ms
@@ -832,6 +836,11 @@ void Service::Impl::adoptClient(const std::shared_ptr<Client>& c, const std::str
         client = c;
     }
     clock_synced = false;
+    xr_state = -1;   // [VR IMMERSIVE] a new page says again whether it is in VR
+    {
+        std::lock_guard<std::mutex> plk(pose_mutex);
+        pose = Pose();
+    }
     if (old)
     {
         old->close(4000, "another headset took over");
@@ -850,6 +859,12 @@ void Service::Impl::dropClient(const std::shared_ptr<Client>& c)
     }
     if (was)
     {
+        // [VR IMMERSIVE 2026-11-04] gone: no head, not in VR - the desktop is itself again at once
+        xr_state = -1;
+        {
+            std::lock_guard<std::mutex> plk(pose_mutex);
+            pose = Pose();
+        }
         std::lock_guard<std::mutex> lk(stats_mutex);
         st.client_connected = false;
         log(LogLevel::INFO, "VR pipe: headset disconnected");
@@ -945,6 +960,7 @@ void Service::Impl::onText(const std::shared_ptr<Client>& c, const std::string& 
             if (ok) { std::memcpy(p.tan, tv, sizeof tv); p.has_tan = true; }
         }
         p.has_pos = floats("p", 3, p.pos, 50.0);
+        p.recv_ms = recv_ms;
         {
             std::lock_guard<std::mutex> lk(pose_mutex);
             pose = p;
@@ -1023,6 +1039,12 @@ void Service::Impl::onText(const std::shared_ptr<Client>& c, const std::string& 
         if (!(l >= 0 && l <= 4)) return;
         std::lock_guard<std::mutex> lk(mode_mutex);
         quality_request = (int)l;
+    }
+    else if (t == "xr")
+    {
+        // [VR IMMERSIVE 2026-11-04] the headset entered or left VR (session start / end, page hidden, headset asleep)
+        auto it = o.find("on");
+        xr_state = it != o.end() && it->value().is_bool() && it->value().as_bool() ? 1 : 0;
     }
     else if (t == "audio")
     {
@@ -1878,7 +1900,9 @@ HeadPose Service::headPose() const
     if (!mImpl) return h;
     std::lock_guard<std::mutex> lk(mImpl->pose_mutex);
     const Pose& p = mImpl->pose;
-    h.valid = p.valid;
+    // [VR IMMERSIVE 2026-11-04] a head that has not been heard from for a second (asleep, the network dropped, the
+    // tab in the background) is no head: the desktop gets its own camera back
+    h.valid = p.valid && nowMs() - p.recv_ms < 1000.0;
     h.seq = p.seq;
     h.client_ms = p.client_ms;
     h.q[0] = p.q.x; h.q[1] = p.q.y; h.q[2] = p.q.z; h.q[3] = p.q.w;
@@ -1907,6 +1931,17 @@ bool Service::wantsFrames() const
     if (!mImpl) return false;
     std::lock_guard<std::mutex> lk(mImpl->client_mutex);
     return mImpl->client && mImpl->client->hello;
+}
+
+bool Service::immersive() const
+{
+    if (!mImpl || !wantsFrames()) return false;
+    const int xr = mImpl->xr_state.load();
+    if (xr == 0) return false;
+    std::lock_guard<std::mutex> lk(mImpl->pose_mutex);
+    const Pose& p = mImpl->pose;
+    if (!p.valid || nowMs() - p.recv_ms >= 1000.0) return false;
+    return xr == 1 || p.has_eyes;
 }
 
 void Service::submitFrame(std::vector<uint8_t>&& rgba, const HeadPose& pose, double capture_ms)

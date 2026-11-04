@@ -22,7 +22,8 @@
 // While a headset page plays the sound ({"t":"audio","on":true}), the viewer's whole mix goes to it as 10 ms
 // blocks of 48 kHz stereo 16-bit PCM (WolfVRStream::submitAudio):
 //   - the sound engine's final mix (world sounds, UI sounds, wind, gestures, Wolf DJ / speech sources): OpenAL
-//     loopback mirror, llaudioengine_openal.h setMirrorMix (only when WolfVRStreamEnabled was on at start);
+//     loopback mirror, llaudioengine_openal.h setMirrorMix (only when WolfVRSoundReady was on at start: a headset has
+//     played this PC's sound before);
 //   - voice chat: the WebRTC playout tap (llwebrtc.h setVRPlayoutTap), mixed into the engine's blocks.
 // WolfVRAudioOut "headset" silences the PC speakers for both (engine: setSpeakersMuted; voice: setPlayoutSilenced)
 // and gives them back the moment the headset stops wanting sound; "both" plays on both; "pc" sends nothing.

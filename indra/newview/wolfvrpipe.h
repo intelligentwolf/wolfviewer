@@ -42,14 +42,27 @@
 //       [VR STEREO 2026-11-04] + "e":[lx,ly,lz,rx,ry,rz] each eye's position in HEAD space (metres, WebXR axes: the
 //       XRView transforms relative to the viewer pose), + "f":deg the square field of view that covers both eyes'
 //       frusta (from each XRView.projectionMatrix). Missing = mono, 100 degrees.
+//       [VR 3D FIX 2026-11-04] + "pt":[lL,lR,lB,lT, rL,rR,rB,rT] each eye's own frustum as the tangents of its edges
+//       (x/-z, y/-z from XRView.projectionMatrix, left eye first by XRView.eye, widened 4 degrees for reprojection):
+//       the viewer draws each eye for exactly that off-axis window; "p" is the head position in the page's reference
+//       space (metres), for leaning and for the world pointer
 //     {"t":"stats",...}                                     once a second: what the headset measured
+//     [VR IMMERSIVE 2026-11-04] {"t":"xr","on":bool}      the headset entered / left VR (session start or end, the
+//       page hidden, the headset asleep or its system menu over the session): nothing is drawn for the headset,
+//       and the desktop is never paused, unless it is in VR now
 //     {"t":"key"}                                           decoder lost its place: send a key frame
 //     {"t":"in","e":"move"|"down"|"up","u":0..1,"v":0..1,"b":0|2}   big screen: the pointer on the picture
 //     {"t":"mode","m":"screen"|"world"}                    the in-VR switch between Big Screen and 3D
 //     {"t":"in","e":"stick","x":-1..1,"y":-1..1} / {"t":"in","e":"turn","d":1|-1} / {"t":"in","e":"lift","d":1|0|-1}
 //     {"t":"in","e":"wheel","d":clicks} / {"t":"in","e":"kd"|"ku","k":"<DOM key>","m":mods} / {"t":"in","e":"text","s":".."}
 //     [VR CONTROLS 2026-11-04] {"t":"act","a":"<name>","x":"<arg>"}   an action-bar button (wolfvrui.cpp runs it)
-//     {"t":"quality","l":0..3}                              the page's picture quality step (0 best; wolfvrstream.cpp)
+//     {"t":"quality","l":0..4}                              the page's picture quality step (0 best; wolfvrstream.cpp)
+//     [VR WORLD POINTER 2026-11-04] VR 3D Mode, the right controller's ray when it is not on the action bar:
+//     {"t":"in","e":"ray","o":[x,y,z],"d":[x,y,z],"lu":u,"lv":v}  origin and direction in the page's reference space,
+//       "lu"/"lv" where it crosses the HUDs layer (0..1 from the top-left; missing = it does not). The viewer decides:
+//       on something drawn on the layer it is the UI there, else a pick in the world.
+//     {"t":"in","e":"down"|"up","b":0|2,"w":1}   the trigger (0) / B (2) on whatever the ray is on
+//     viewer -> page {"t":"aim","k":"ui"|"world"|"none","d":metres,"c":"touch"|"sit"|...,"o":0|1} where it landed
 //     [VR HUD LAYER 2026-11-04] {"t":"layer","on":bool}     stream the viewer's UI layer (HUDs, floaters) as well
 //     {"t":"key","s":1}                                     the layer decoder lost its place
 //     [VR AUDIO 2026-11-04] {"t":"audio","on":bool}         the page plays the viewer's sound (Headset Settings)
@@ -63,7 +76,7 @@
 //     [VR AUDIO 2026-11-04] {"t":"micwant","on":bool} the viewer wants the headset microphone (WolfVRHeadsetMic)
 //     [VR CONTROLS] {"t":"ui",...} the action bar's state (wolfvrui.cpp); [VR HUD LAYER] {"t":"layerconfig","codec",
 //     "codecString","w","h"} before the first layer picture (the picture is w x 2h: colour on top, alpha below)
-//   viewer -> page, binary: a FrameHeader (its size at byte 4; 96 bytes, see wolfvrpipe.cpp kHeaderSize) followed by
+//   viewer -> page, binary: a FrameHeader (its size at byte 4; 128 bytes, see wolfvrpipe.cpp kHeaderSize) followed by
 //     one H.264 access unit (Annex B) or one JPEG. [VR HUD LAYER] byte 67 = 1: a UI-layer picture (its own decoder).
 //     [VR AUDIO 2026-11-04] byte 67 = 2: SOUND, not a picture: bytes 8..15 = sample number of the first frame (u64),
 //     16..23 = viewer clock (ms, double) when the block was mixed, 52 = sample rate (float), 64 = channels (u8),
@@ -71,6 +84,8 @@
 //     stereo is 1.5 Mbit/s, small beside the video on a home network, and it needs no codec on any platform.
 //     [VR STEREO] byte 66 = 1: the picture is two eyes side by side
 //     (left half = left eye), drawn from the eye positions at bytes 72..95 (6 floats, head space, as "e").
+//     [VR 3D FIX 2026-11-04] bytes 96..127: the 8 frustum tangents the halves were drawn for (as "pt"); byte 66 = 2:
+//     stereo drawn for those off-axis windows (the page puts each half on exactly that window in front of its eye).
 
 #include <cstdint>
 #include <functional>
@@ -244,6 +259,10 @@ namespace wolfvr
         /** [VR STAGE 2] True when an allowed headset is connected and wants pictures (so the caller only renders
          *  for it when it is useful). Any thread. */
         bool wantsFrames() const;
+        /** [VR IMMERSIVE 2026-11-04] True only while the connected headset is IN VR right now: the page said so (or,
+         *  from an older page, its poses carry eye positions, which only an immersive session has) and a pose came in
+         *  the last second. A connected tab that is not in VR, asleep or gone is false. Any thread. */
+        bool immersive() const;
         /** [VR STAGE 2] One picture for the headset (external_frames): width*height*4 RGBA from Config, top row
          *  first, drawn for `pose`. Only the newest is kept: one not yet encoded when the next arrives is dropped
          *  (and counted as skipped), never half a stream. `capture_ms` = how long the caller took to make it. */

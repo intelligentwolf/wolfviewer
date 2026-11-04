@@ -12,7 +12,7 @@
 //   4. Big Screen and back: no 3D surface left over
 //   node e2e_vr3d.mjs <lan_url> <out_dir> <fake_xr.js> <fake_xr_controllers.js>
 import { spawn } from 'node:child_process';
-import { mkdirSync, writeFileSync, readFileSync, appendFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, appendFileSync, copyFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { homedir } from 'node:os';
 
@@ -37,6 +37,10 @@ const chrome = spawn('chromium', ['--headless=new', '--no-sandbox', '--use-angle
     '--ignore-certificate-errors', '--remote-debugging-port=9386', '--window-size=1280,1280',
     `--user-data-dir=${resolve(OUT, 'profile')}`, 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
 chrome.stderr.on('data', () => {});
+// never leave the browser behind (a stray tab would keep reconnecting to the next test viewer)
+process.on('exit', () => { try { chrome.kill(); } catch (e) { /* gone */ } });
+process.on('uncaughtException', (e) => { console.log('ERROR', e && e.stack || e); process.exit(2); });
+process.on('unhandledRejection', (e) => { console.log('ERROR', e && e.stack || e); process.exit(2); });
 let t = null;
 for (let i = 0; i < 40 && !t; i++) { try { t = await (await fetch('http://127.0.0.1:9386/json')).json(); } catch (e) { await sleep(250); } }
 const ws = new WebSocket(t.find(x => x.type === 'page').webSocketDebuggerUrl);
@@ -76,10 +80,11 @@ const DISPARITY = `async (y0, y1, maxShift) => {
 await send('Page.enable'); await send('Runtime.enable'); await send('Log.enable');
 await send('Page.addScriptToEvaluateOnNewDocument', { source: readFileSync(FAKE, 'utf8') + '\n' + readFileSync(CTL, 'utf8') });
 await send('Page.navigate', { url: LAN });
-check(await waitFor(() => evalJs('!!(window.__wolfvr && window.__wolfvr.config() && window.__wolfvr.config().mode === "world")'), 30000), 'VR 3D Mode from the real viewer');
+check(await waitFor(() => evalJs('!!(window.__wolfvr && window.__wolfvr.xr && window.__wolfvr.xr().said === false)'), 30000), 'connected to the real viewer (not in VR yet: no picture is drawn for it)');
 await evalJs("try { localStorage.setItem('wolfvr.headset', 'auto'); } catch (e) {}");
 await evalJs('window.__wolfvr.toggleVR()');
 check(await waitFor(() => evalJs('!!window.__fakeXR.session')), 'Enter VR');
+check(await waitFor(() => evalJs('!!(window.__wolfvr.config() && window.__wolfvr.config().mode === "world")'), 30000), 'in VR: VR 3D Mode from the real viewer');
 check(await waitFor(() => evalJs('window.__wolfvr.config().w === 2 * window.__wolfvr.config().h'), 20000), 'side-by-side picture (w = 2 h): ' + JSON.stringify(await evalJs('[window.__wolfvr.config().w, window.__wolfvr.config().h]')));
 
 // E2E_ONLY=world: only the world pointer part (quicker while working on it)
@@ -109,6 +114,22 @@ check(!!near && !!far && near.shift > far.shift + 3, 'near things shift between 
 // the viewer's own eye images, for measuring (WolfVRDebugEyeDump writes them to its logs folder and switches itself off)
 leap('LLViewerControl', "{'op':'set','group':'Global','key':'WolfVRDebugEyeDump','value':true}");
 await sleep(2500);
+const LOGS = resolve(H, 'prof/logs');
+const keep = (tag) => { for (const e of ['left', 'right']) { try { copyFileSync(resolve(LOGS, `wolfvr_eye_${e}.png`), resolve(OUT, `eye_${tag}_${e}.png`)); } catch (x) { /* not written */ } } };
+keep('behind');
+// [VR VIEW] Hide Me on the bar: first person, the avatar not drawn; the eyes again
+await click('left', 7);
+await aimAt(await evalJs('window.__wolfvr.slotPoint("hideme")')); await sleep(300); await click('right', 0);
+check(await waitFor(() => evalJs('window.__wolfvr.bar().hide === true'), 6000), 'Hide Me on the bar: the viewer switches to the first-person view with the avatar hidden');
+await click('left', 7);
+await sleep(2000);
+leap('LLViewerControl', "{'op':'set','group':'Global','key':'WolfVRDebugEyeDump','value':true}");
+await sleep(2500);
+keep('hidden');
+await click('left', 7);
+await aimAt(await evalJs('window.__wolfvr.slotPoint("hideme")')); await sleep(300); await click('right', 0);
+check(await waitFor(() => evalJs('window.__wolfvr.bar().hide === false'), 6000), 'Show Me: back to seeing the avatar from behind');
+await click('left', 7);
 await evalJs('window.__fakeXR.setPitch(0)'); await sleep(1500);
 
 // ---- 2. HUD clicks ----

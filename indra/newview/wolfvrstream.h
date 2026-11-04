@@ -22,7 +22,7 @@
 
 #include "wolfvrpipe.h"
 
-// [VR PIPE 2026-11-03] Stage 1. WolfVRStreamEnabled (OFF by default; remembered once ticked, Paul 2026-11-03) starts the
+// [VR PIPE 2026-11-03] Stage 1. WolfVRStreamEnabled (OFF at every start, never remembered: [VR OFF AT START 2026-11-04]) starts the
 // server on the home-network address; switching it off stops it at once and closes the headset's connection.
 // [VR SIMPLE 2026-11-03] No code and no pairing (Paul: "don't make it difficult"): while it is on, a headset on the home
 // network connects straight in, one at a time; the viewer shows "Headset connected / disconnected" as a tip.

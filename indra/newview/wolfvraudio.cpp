@@ -289,6 +289,14 @@ void pump()
     const bool send = wanted && !pc_only;
     const bool want_mic = wanted && use_mic();
     gSend = send;
+    // [VR OFF AT START 2026-11-04] a headset has played this PC's sound: from the next start the sound engine is ready
+    // to send the world's sounds too (WolfVRSoundReady, llstartup.cpp setMirrorMix). Set once.
+    static bool s_ready_set = false;
+    if (send && !s_ready_set)
+    {
+        s_ready_set = true;
+        if (!gSavedSettings.getBOOL("WolfVRSoundReady")) gSavedSettings.setBOOL("WolfVRSoundReady", true);
+    }
 
     // The engine's mix (OpenAL mirror). The speakers are only ever silenced while the mirror sends to the headset.
     bool mirrored = false;
@@ -340,7 +348,8 @@ void pump()
 #if LL_OPENAL
         if (!LLAudioEngine_OpenAL::mirrorMixRequested())
         {
-            gProblem = "Restart WolfViewer to hear the world's sounds in the headset. Voice chat already plays there.";
+            gProblem = "From the next time you start WolfViewer, the world's sounds play in the headset too. Voice chat "
+                       "already plays there.";
             if (headset_only) gProblem += " Until then, the other sounds still play on this PC.";
         }
         else

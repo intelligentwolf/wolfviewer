@@ -80,7 +80,7 @@ class Rolling {
 const num = {
     p2p: new Rolling(), v2p: new Rolling(), decode: new Rolling(),
     xrFrames: 0, newFrames: 0, lastT: performance.now(),
-    fps: NaN, newFps: NaN, viewer: {}, rtt: NaN, got: 0, gotFps: NaN, decoded: 0, decodedFps: NaN,
+    fps: NaN, newFps: NaN, viewer: {}, rtt: NaN, got: 0, gotFps: NaN, decoded: 0, decodedFps: NaN, gotTotal: 0,
 };
 
 // ------------------------------------------------------------------------------------------------ connection
@@ -155,8 +155,27 @@ const hevcProbe = (typeof VideoDecoder !== 'undefined' && VideoDecoder.isConfigS
     : Promise.resolve(false));
 
 // Connected (the socket said "welcome"): start the picture and the clock sync.
+// [VR IMMERSIVE 2026-11-04] Tell the viewer whether this headset is IN VR right now: in a session, the session shown
+// (not under the headset's system menu or asleep: XRSession.visibilityState "visible") and this page not hidden. The
+// viewer draws nothing for the headset and never pauses or slows its desktop window unless it is (Paul's PC ran at
+// 0 fps when an open tab reconnected by itself at log-in).
+let xrSaid = null;
+function inVR() {
+    return !!(vrSession && renderer.xr.isPresenting && document.visibilityState === 'visible' &&
+              (!vrSession.visibilityState || vrSession.visibilityState === 'visible'));
+}
+function tellXR(force) {
+    const on = inVR();
+    if (on === xrSaid && !force) return;
+    xrSaid = on;
+    send({ t: 'xr', on });
+}
+document.addEventListener('visibilitychange', () => tellXR(false));
+
 function onAllowed() {
     showError('');
+    xrSaid = null;
+    tellXR(true);   // a new connection: say at once whether this page is in VR (a reconnecting tab usually is not)
     setStatus('Connected to WolfViewer. Waiting for the picture…');
     hevcProbe.then((hevc) => send({ t: 'hello', webcodecs: typeof VideoDecoder !== 'undefined', hevc, ua: navigator.userAgent }));
     quality.sent = -1;   // [VR HEADSETS] tell this (possibly restarted) viewer our quality step with the next config
@@ -287,7 +306,7 @@ function offerPicture(img, hdr, decodeMs) {
 function onPicture(buf) {
     const hdr = parseHeader(buf);
     if (!hdr) return;
-    if (hdr.stream === 0) num.got++;   // pictures that arrived (adaptQuality: did the decoder keep up?)
+    if (hdr.stream === 0) { num.got++; num.gotTotal++; }   // pictures that arrived (adaptQuality: did the decoder keep up?)
     if (hdr.size + hdr.bytes > buf.byteLength) return;
     if (hdr.stream === 1) { layer.onPicture(buf, hdr); return; }   // [VR HUD LAYER] its own decoder
     if (hdr.stream === 2) { if (onSound) onSound(buf, hdr); return; }   // [VR AUDIO]
@@ -914,6 +933,7 @@ async function toggleVR() {
             });
             vrSession = session;
             session.addEventListener('end', onSessionEnd);
+            session.addEventListener('visibilitychange', () => tellXR(false));   // [VR IMMERSIVE] headset menu / asleep
             session.addEventListener('select', onSelect);   // [VR CONTROLS] hands / look-and-pinch
             await renderer.xr.setSession(session);
             // As WolfStorm's updateTargetFrameRate: the supported display rate nearest the viewer's frame rate.
@@ -926,6 +946,7 @@ async function toggleVR() {
                 }
             }
             statsMesh.visible = statsOn;
+            tellXR(false);   // [VR IMMERSIVE] in VR now
             btn.classList.add('vr-active');
             btn.querySelector('.btn-label').textContent = 'Exit VR';
             btn.title = 'Exit VR Mode';
@@ -944,6 +965,7 @@ async function toggleVR() {
 
 function restoreAfterVR() {
     vrSession = null;
+    tellXR(false);   // [VR IMMERSIVE] out of VR: the viewer's desktop is itself again at once
     document.removeEventListener('focusin', focusGuard, true);
     statsMesh.visible = false;
     const btn = $('vr-btn');
@@ -1511,7 +1533,7 @@ window.__wolfvr = { numbers: () => ({ rows: numberRows(), p2p: num.p2p.v.slice(-
     sendKey: (k, m = 0) => tapKey(k, m),
     // [VR CONTROLS / HUD LAYER] test hooks (scripts/wolfvr/e2e_controls.mjs)
     bar: () => ({ open: bar.open, ids: bar.slots.map((x) => x.action.id), on: [...bar.state.on], off: [...bar.state.off],
-                  sit: bar.state.sit, region: bar.state.region, fav: bar.state.fav.length, hover: bar.hover }),
+                  sit: bar.state.sit, hide: bar.state.hide, region: bar.state.region, fav: bar.state.fav.length, hover: bar.hover }),
     layer: () => ({ want: layer.want, on: layer.on, frames: layer.frames, cfg: layer.cfg, visible: layer.mesh.visible }),
     quality: () => ({ level: quality.level, headset: headsetKind(), auto: headsetAuto() }),
     audio: () => ({ buffered: vrAudio.bufferedMs, target: vrAudio.targetMs, underruns: vrAudio.underruns, gaps: vrAudio.gaps,
@@ -1537,6 +1559,7 @@ window.__wolfvr = { numbers: () => ({ rows: numberRows(), p2p: num.p2p.v.slice(-
                  hdr: screen.userData.hdr ? { stereo: screen.userData.hdr.stereo, tan: screen.userData.hdr.tan, eyes: screen.userData.hdr.eyes } : null,
                  visible: eyeScreens.map((m) => m.visible), mono: screen.visible };
     },
+    xr: () => ({ inVR: inVR(), said: xrSaid, pictures: num.gotTotal }),   // [VR IMMERSIVE] test hook
     aim: () => ({ ...worldAim, reticle: reticle.group.visible, tag: reticle.tag.visible, laser: laser.visible, owner: worldPointer.owner.slice() }),
     surfaces: () => ({ big: bigMesh.visible, eyes: eyeScreens.map((m) => m.visible), mono: screen.visible, layer: layer.mesh.visible,
                        bar: bar.mesh.visible, tab: bar.tab.visible, reticle: reticle.group.visible, check: checkCard.visible }),

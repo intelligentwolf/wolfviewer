@@ -234,11 +234,25 @@ namespace
             if (value.asBoolean())
             {
                 if (!gService) startLocked();
-                return;
             }
-            stopLocked();
+            else
+            {
+                stopLocked();
+            }
         }
-        WolfVRScreen::release();
+        // [VR CODEC 2026-11-04] Paul: "automatically download that codec, I didn't even see it". VR switched on, this
+        // computer can use Cisco's OpenH264 and does not have it yet: fetched at once from Cisco's own server (as
+        // Firefox fetches it), the checksums checked as before (wolfvrcodecfetch.cpp); nothing to press. The
+        // resident's "Use the OpenH264 video codec" switch (WolfVROpenH264) still turns it off and then it is not
+        // fetched. On Paul's Linux PC the encoder is NVENC (nvh264enc); OpenH264 is the fallback without it.
+        if (value.asBoolean())
+        {
+            if (gSavedSettings.getBOOL("WolfVROpenH264") && WolfVRStream::codecState() == 0) WolfVRStream::downloadCodec();
+        }
+        else
+        {
+            WolfVRScreen::release();
+        }
     }
 
     // [VR MENU 2026-11-03] Wolf World > VR on Wolf Territories only. A submenu has no on_visible (llmenugl.h), so it is
@@ -319,15 +333,19 @@ void init()
     // loaded stays loaded until the viewer restarts - wolfvr_openh264.h)
     gSavedSettings.getControl("WolfVROpenH264")->getSignal()->connect([](LLControlVariable*, const LLSD&, const LLSD&) { applyCodec(); });
     gSavedSettings.getControl("WolfVREyeSize")->getSignal()->connect(resize3d);
+    // [VR OFF AT START 2026-11-04] Paul: "when someone closes the viewer we must turn it all off". VR is never on when
+    // WolfViewer starts: the switch is not remembered (Persist 0), and a value an older build saved is cleared here,
+    // so nothing listens, no headset tab can reconnect by itself and nothing of the desktop changes until the
+    // resident chooses Wolf World > VR in this session. (WolfVRStreamMode stays remembered: only where it starts.)
+    gSavedSettings.setBOOL("WolfVRStreamEnabled", false);
     gSavedSettings.getControl("WolfVRStreamEnabled")->getSignal()->connect(
         [](LLControlVariable*, const LLSD& value, const LLSD&) { onEnabledChanged(value); });
-    if (gSavedSettings.getBOOL("WolfVRStreamEnabled")) onEnabledChanged(LLSD(true));
 }
 
 void shutdown()
 {
     WolfVRAudio::shutdown();   // [VR AUDIO] every tap removed and the PC speakers given back first
-    gShutdown = true;
+    gShutdown = true;   // [VR OFF AT START] WolfVRStreamEnabled is not saved (Persist 0): off at the next start
     {
         std::lock_guard<std::mutex> lk(gMutex);
         stopLocked();
@@ -338,13 +356,13 @@ void shutdown()
 bool bigScreenWanted()
 {
     std::lock_guard<std::mutex> lk(gMutex);
-    return gService && gMode == "screen" && gService->wantsFrames();
+    return gService && gMode == "screen" && gService->immersive();   // [VR IMMERSIVE] only while the headset is in VR
 }
 
 bool worldWanted()
 {
     std::lock_guard<std::mutex> lk(gMutex);
-    return gService && gMode == "world" && gService->wantsFrames();
+    return gService && gMode == "world" && gService->immersive();   // [VR IMMERSIVE] only while the headset is in VR
 }
 
 wolfvr::HeadPose headPose()
@@ -427,7 +445,7 @@ void downloadCodec()
 bool audioWanted()
 {
     std::lock_guard<std::mutex> lk(gMutex);
-    return gService && gService->audioWanted();
+    return gService && gService->audioWanted() && gService->immersive();   // [VR IMMERSIVE] the PC keeps its sound otherwise
 }
 
 void submitAudio(const int16_t* pcm, U32 frames, U32 channels, U32 rate, double mix_ms)
@@ -440,7 +458,7 @@ void submitAudio(const int16_t* pcm, U32 frames, U32 channels, U32 rate, double 
 bool layerWanted()
 {
     std::lock_guard<std::mutex> lk(gMutex);
-    return gService && gMode == "world" && gService->layerWanted();
+    return gService && gMode == "world" && gService->layerWanted() && gService->immersive();
 }
 
 bool layerIdle()

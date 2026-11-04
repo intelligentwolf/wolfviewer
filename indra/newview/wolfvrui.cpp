@@ -83,6 +83,12 @@ void run(const std::string& name, const std::string& arg)
         gAgent.teleportHome();
         return;
     }
+    if (name == "hideavatar")
+    {
+        // [VR VIEW 2026-11-04] the bar's Hide Me / Show Me (Headset Settings has it too)
+        gSavedSettings.setBOOL("WolfVRHideAvatar", !gSavedSettings.getBOOL("WolfVRHideAvatar"));
+        return;
+    }
     if (name == "mic")
     {
         // [VR AUDIO 2026-11-04] the headset page's "Use the headset microphone for voice" (Headset Settings has it too)
@@ -151,6 +157,7 @@ void pump()
     // [VR HEADSETS 2026-11-04] the headset chosen in Headset Settings ("auto" = the page works it out)
     o["headset"] = gSavedSettings.getString("WolfVRHeadset");
     o["mic"] = gSavedSettings.getBOOL("WolfVRHeadsetMic");   // [VR AUDIO] the page's microphone button
+    o["hide"] = gSavedSettings.getBOOL("WolfVRHideAvatar");   // [VR VIEW] the bar's Hide Me / Show Me
     // the favourites bar's landmarks, in its order (LLFavoritesOrderStorage), first 6 (vr_hud.js _favorites)
     json::array favs;
     const LLUUID fav = gInventory.findCategoryUUIDForType(LLFolderType::FT_FAVORITE);

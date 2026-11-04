@@ -63,6 +63,8 @@
         <radio_item height="22" label="Both" layout="topleft" left="284" name="both" top="0" value="both" width="90" />
     </radio_group>
     <check_box control_name="WolfVRHeadsetMic" follows="left|top" height="20" layout="topleft" left="12" name="headset_mic" top="328" width="496" label="Use the headset microphone for voice" tool_tip="Off: your PC's microphone is used for voice chat. On: the headset's own microphone is used while the headset plays the sound (the headset browser asks you once if it may use it)." />
+    <!-- [VR VIEW 2026-11-04] Paul: "i want to see my avatar and have the option to hide it" -->
+    <check_box control_name="WolfVRHideAvatar" follows="left|top" height="20" layout="topleft" left="12" name="hide_avatar" top="352" width="496" label="Hide my avatar in VR 3D Mode (see from my own eyes)" tool_tip="Off: you see your avatar from just behind and above, as on your screen. On: you see the world from your avatar's eyes and your avatar is not shown in the headset. Hide Me on the VR bar does the same." />
 
     <text follows="left|top" font="SansSerifBold" height="16" layout="topleft" left="12" name="url_label" top="376" width="496">In your headset's browser, type:</text>
     <text_editor follows="left|top" font="SansSerifHuge" height="40" layout="topleft" left="12" name="address" top="394" width="496" max_length="64" read_only="true" word_wrap="false" show_context_menu="true" tool_tip="Type this into the headset browser's address bar. No code is needed." />

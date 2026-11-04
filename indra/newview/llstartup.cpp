@@ -1124,9 +1124,11 @@ bool idle_startup()
             if (!gAudiop)
 #endif // !LL_WINDOWS
             {
-                // [VR AUDIO 2026-11-04] VR on at start: mix through a loopback device so the headset can be sent
-                // the whole mix (llaudioengine_openal.h setMirrorMix); off, the engine plays exactly as before.
-                LLAudioEngine_OpenAL::setMirrorMix(gSavedSettings.getBOOL("WolfVRStreamEnabled"));
+                // [VR AUDIO 2026-11-04] mix through a loopback device so a headset can later be sent the whole mix
+                // (llaudioengine_openal.h setMirrorMix); off, the engine plays exactly as before. [VR OFF AT START
+                // 2026-11-04] VR itself is never on at start now, so this is decided by WolfVRSoundReady (a headset
+                // has been in VR on this PC before): only the internal route, nothing sent or muted until VR is on.
+                LLAudioEngine_OpenAL::setMirrorMix(gSavedSettings.getBOOL("WolfVRSoundReady"));
                 gAudiop = (LLAudioEngine *) new LLAudioEngine_OpenAL();
             }
 #endif

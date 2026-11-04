@@ -77,6 +77,12 @@ bool WolfFloaterVRStream::postBuild()
     return true;
 }
 
+void WolfFloaterVRStream::onClose(bool app_quitting)
+{
+    if (!app_quitting) gSavedSettings.setBOOL("WolfVRStreamEnabled", false);
+    LLFloater::onClose(app_quitting);
+}
+
 void WolfFloaterVRStream::setQr(const std::string& url)
 {
     if (url == mQrText) return;
@@ -130,6 +136,15 @@ void WolfFloaterVRStream::refresh()
     if (on && !st.last_error.empty()) status += "\n" + st.last_error;
     // [VR AUDIO 2026-11-04] when the headset cannot get all of the sound (in plain words, wolfvraudio.cpp)
     if (on && !WolfVRAudio::problem().empty()) status += "\n" + WolfVRAudio::problem();
+    // [VR CODEC 2026-11-04] Paul: "automatically download that codec, I didn't even see it, it's hidden at the bottom".
+    // It is fetched by itself when VR is switched on (wolfvrstream.cpp); what is happening is the FIRST line here, and
+    // a failure stays until it is fixed (the next start tries again).
+    {
+        const int cs = WolfVRStream::codecState();
+        const std::string msg = WolfVRStream::codecMessage();
+        if (cs == 2) status = "Getting the video part from Cisco, one moment...\n" + status;
+        else if (cs == 0 && !msg.empty()) status = "The video part could not be fetched: " + msg + "\n" + status;
+    }
     if (mStatus->getText() != status) mStatus->setText(status);
 
     const std::string lan = WolfVRStream::lanUrl(), usb = WolfVRStream::usbUrl();

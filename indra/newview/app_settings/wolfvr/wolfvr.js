@@ -80,7 +80,7 @@ class Rolling {
 const num = {
     p2p: new Rolling(), v2p: new Rolling(), decode: new Rolling(),
     xrFrames: 0, newFrames: 0, lastT: performance.now(),
-    fps: NaN, newFps: NaN, viewer: {}, rtt: NaN, got: 0, gotFps: NaN,
+    fps: NaN, newFps: NaN, viewer: {}, rtt: NaN, got: 0, gotFps: NaN, decoded: 0, decodedFps: NaN,
 };
 
 // ------------------------------------------------------------------------------------------------ connection
@@ -95,8 +95,14 @@ let clockOff = NaN;                // viewer clock minus page clock (ms), from t
 const pings = [];
 let pingTimer = 0, retryTimer = 0, poseSeq = 0;
 
+// [VR HUD CLICKS 2026-11-04] Only the messages that a newer one replaces anyway (poses, pointer rays, numbers) are
+// dropped while the socket is backed up (the headset microphone shares it); a press, a release, a button or a mode
+// switch is always sent, or a click would be lost - or worse, a release, leaving a button held down in the viewer.
+const DROPPABLE = new Set(['pose', 'stats', 'ray']);
 function send(obj) {
-    if (ws && ws.readyState === WebSocket.OPEN && ws.bufferedAmount < 65536) ws.send(JSON.stringify(obj));
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const drop = DROPPABLE.has(obj.t) || (obj.t === 'in' && (obj.e === 'ray' || obj.e === 'move' || obj.e === 'stick'));
+    if (drop ? ws.bufferedAmount < 65536 : ws.bufferedAmount < 4194304) ws.send(JSON.stringify(obj));
 }
 
 function connect() {
@@ -142,11 +148,17 @@ function connect() {
     };
 }
 
+// [VR 3D FIX 2026-11-04] Can this browser decode H.265 (HEVC Main, level 5.1)? Told to the viewer once (logged there),
+// for choosing a sharper codec later; nothing depends on it yet.
+const hevcProbe = (typeof VideoDecoder !== 'undefined' && VideoDecoder.isConfigSupported
+    ? VideoDecoder.isConfigSupported({ codec: 'hvc1.1.6.L153.B0' }).then((r) => !!r.supported).catch(() => false)
+    : Promise.resolve(false));
+
 // Connected (the socket said "welcome"): start the picture and the clock sync.
 function onAllowed() {
     showError('');
     setStatus('Connected to WolfViewer. Waiting for the picture…');
-    send({ t: 'hello', webcodecs: typeof VideoDecoder !== 'undefined', ua: navigator.userAgent });
+    hevcProbe.then((hevc) => send({ t: 'hello', webcodecs: typeof VideoDecoder !== 'undefined', hevc, ua: navigator.userAgent }));
     quality.sent = -1;   // [VR HEADSETS] tell this (possibly restarted) viewer our quality step with the next config
     pings.length = 0;
     let n = 0;
@@ -180,9 +192,8 @@ function onText(text) {
         $('wvr-preview-hint').textContent = BIG()
             ? 'This is your WolfViewer window. Click, right-click and scroll on it here; in VR, point with the right controller.'
             : 'Drag the picture to turn your head here on the page; in the headset, just look around.';
-        if (BIG()) { buildBigScreen(); bigPlaced = false; statsOn = false; bar.hide(); }
-        else { bigMesh.visible = false; laser.visible = dot.visible = false; }
-        layer.setActive(WORLD());
+        enterMode();
+        checkCard.visible = !!m.check && WORLD();
         releaseKeys();
         if (quality.sent !== quality.level) setQuality(quality.level, '');   // this headset's starting step
         setStatus(`Connected. Picture ${m.w}×${m.h}, ${m.codec === 'h264' ? 'H.264 video' : 'JPEG pictures'} from ${m.encoder}.`);
@@ -197,6 +208,11 @@ function onText(text) {
         showMicButton();
     } else if (m.t === 'layerconfig') {
         layer.onConfig(m);   // [VR HUD LAYER]
+    } else if (m.t === 'aim') {
+        // [VR WORLD POINTER] where the viewer found the ray landed, and what it would do there
+        worldAim.k = m.k; worldAim.d = typeof m.d === 'number' ? m.d : -1; worldAim.c = typeof m.c === 'string' ? m.c : ''; worldAim.o = m.o === 1;
+        worldAim.at = performance.now();
+        if (worldAim.c !== reticle.label) drawReticleLabel(worldAim.c);
     }
 }
 
@@ -208,7 +224,9 @@ function setupDecoder(cfg) {
     const conf = { codec: cfg.codecString, optimizeForLatency: true };
     VideoDecoder.isConfigSupported(conf).then((r) => {
         if (!r.supported) {
-            // This browser cannot decode the stream: ask for JPEG pictures instead.
+            // [VR 3D FIX 2026-11-04] Too big for this headset's decoder: the next quality step down (a smaller
+            // picture), and only when even the smallest will not decode, JPEG pictures instead.
+            if (cfg.w > 1800 && quality.level < QUALITY_STEPS - 1) { setQuality(quality.level + 1, ''); quality.top = Math.max(quality.top, quality.level); return; }
             send({ t: 'hello', webcodecs: false, ua: navigator.userAgent });
             return;
         }
@@ -239,10 +257,13 @@ function parseHeader(buf) {
     const size = d.getUint32(4, true);
     if (size < HEADER_MIN || size > buf.byteLength) return null;
     // [VR STEREO 2026-11-04] byte 66 = two eyes side by side, drawn from the eye positions at 72..95 (head space)
-    const stereo = size >= 96 && d.getUint8(66) === 1;
+    const sb = size >= 96 ? d.getUint8(66) : 0;
+    const stereo = sb === 1 || sb === 2;
     const eyes = stereo ? [0, 1, 2, 3, 4, 5].map((k) => d.getFloat32(72 + 4 * k, true)) : null;
+    // [VR 3D FIX 2026-11-04] 2 = each half drawn for its own off-axis window, tangents at 96..127 (L, R, B, T per eye)
+    const tan = sb === 2 && size >= 128 ? [0, 1, 2, 3, 4, 5, 6, 7].map((k) => d.getFloat32(96 + 4 * k, true)) : null;
     return {
-        size, stereo, eyes, stream: d.getUint8(67),
+        size, stereo, eyes, tan, stream: d.getUint8(67),
         frame: Number(d.getBigUint64(8, true)),
         captureMs: d.getFloat64(16, true),
         poseClientMs: d.getFloat64(24, true),
@@ -275,7 +296,7 @@ function onPicture(buf) {
         const t0 = performance.now();
         // WebGL ignores UNPACK_FLIP_Y for ImageBitmap, so flip while decoding (texture.flipY = false below).
         createImageBitmap(new Blob([payload], { type: 'image/jpeg' }), { imageOrientation: 'flipY' })
-            .then((bmp) => offerPicture(bmp, hdr, performance.now() - t0))
+            .then((bmp) => { num.decoded++; offerPicture(bmp, hdr, performance.now() - t0); })
             .catch(() => { /* a bad picture is skipped */ });
         return;
     }
@@ -290,6 +311,7 @@ function onPicture(buf) {
 }
 
 function onDecoded(vf) {
+    num.decoded++;
     const meta = pendingMeta.get(vf.timestamp);
     pendingMeta.delete(vf.timestamp);
     if (!meta) { vf.close(); return; }
@@ -339,12 +361,101 @@ function halfPlane(right) {
     return m;
 }
 const eyeScreens = [halfPlane(false), halfPlane(true)];
+// [VR 3D FIX 2026-11-04] Which XR camera is which eye: three.js gives XR view i to its camera i, and camera 0 draws
+// layer 1, camera 1 layer 2 (WebXRManager: cameraL mask without layer 2, cameraR without layer 1). The views are put
+// in whatever order the browser lists them, so each half goes on the layer of the view whose XRView.eye says it is
+// that eye, not on "the first one" (eyesOf sets this).
+const eyeLayer = [1, 2];
+
+// [VR HUD CLICKS 2026-11-04] The docked surfaces (action bar, Menu tab, HUDs layer) hang on a head group placed HERE
+// from the viewer pose each frame, before anything is aimed at them, so what is drawn and what is hit are the same:
+// three's own XR camera sits a few centimetres behind the eyes (setProjectionFromUnion) and a frame late for the ray.
+const dock = new THREE.Group();
+dock.name = 'WolfVRDock';
+scene.add(dock);
+
+// [VR WORLD POINTER 2026-11-04] The dot where the right controller's ray lands, and what the viewer would do there
+// (its cursor: "touch", "sit", "buy", ...) as a small label beside it, so a resident can see a chair can be sat on
+// before pressing. A press makes it pulse (the press landed).
+const reticle = { group: new THREE.Group(), label: '', pulseUntil: 0 };
+{
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.6, 1.0, 32), new THREE.MeshBasicMaterial({ color: 0x84cc16, depthTest: false, transparent: true, opacity: 0.95 }));
+    ring.renderOrder = 9999;
+    const core = new THREE.Mesh(new THREE.CircleGeometry(0.3, 20), new THREE.MeshBasicMaterial({ color: 0xffffff, depthTest: false }));
+    core.renderOrder = 9999;
+    const lc = document.createElement('canvas');
+    lc.width = 256; lc.height = 64;
+    reticle.ctx = lc.getContext('2d');
+    reticle.tex = new THREE.CanvasTexture(lc);
+    reticle.tex.colorSpace = THREE.SRGBColorSpace;
+    reticle.tag = new THREE.Mesh(new THREE.PlaneGeometry(4, 1), new THREE.MeshBasicMaterial({ map: reticle.tex, transparent: true, depthTest: false }));
+    reticle.tag.position.set(3.2, 0, 0);
+    reticle.tag.renderOrder = 9999;
+    reticle.tag.visible = false;
+    reticle.ring = ring;
+    for (const m of [ring, core, reticle.tag]) { m.frustumCulled = false; reticle.group.add(m); }
+    reticle.group.visible = false;
+    scene.add(reticle.group);
+}
+const RETICLE_WORDS = { touch: 'Touch', sit: 'Sit', buy: 'Buy', pay: 'Pay', open: 'Open', media: 'Play', grab: 'Grab', text: '' };
+function drawReticleLabel(c) {
+    reticle.label = c;
+    const word = RETICLE_WORDS[c] || '';
+    const ctx = reticle.ctx;
+    ctx.clearRect(0, 0, 256, 64);
+    if (word) {
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+        ctx.fillRect(0, 6, 150, 52);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 34px sans-serif';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(word, 12, 33);
+    }
+    reticle.tex.needsUpdate = true;
+    reticle.tag.visible = !!word;
+    reticle.ring.material.color.set(word ? 0x84cc16 : 0xffffff);
+}
+// put the reticle at `p` (world), facing `from`, sized to stay the same apparent size
+function placeReticle(p, from, big) {
+    const dist = Math.max(0.2, p.distanceTo(from));
+    reticle.group.position.copy(p).lerp(from, 0.004);
+    reticle.group.lookAt(from);
+    const pulse = performance.now() < reticle.pulseUntil ? 1.8 : 1;
+    reticle.group.scale.setScalar(dist * (big ? 0.012 : 0.008) * pulse);
+    reticle.group.visible = true;
+}
+const worldAim = { k: 'none', d: -1, c: '', at: 0 };
+// [VR 3D FIX 2026-11-04] WolfVRStereoCheck: a card the HEADSET draws itself, 1 m in front of you, beside the world, so a
+// resident (or Paul) can compare: the card is certainly in 3D; the world should look just as deep.
+const checkCard = new THREE.Group();
+{
+    const c = document.createElement('canvas');
+    c.width = 512; c.height = 256;
+    const g = c.getContext('2d');
+    g.fillStyle = 'rgba(15, 23, 42, 0.9)'; g.fillRect(0, 0, 512, 256);
+    g.strokeStyle = '#84cc16'; g.lineWidth = 6; g.strokeRect(3, 3, 506, 250);
+    g.fillStyle = '#ffffff'; g.font = 'bold 34px sans-serif'; g.textAlign = 'center';
+    g.fillText('3D check: 1 metre away', 256, 70);
+    g.font = '26px sans-serif';
+    g.fillText('Close one eye, then the other:', 256, 130);
+    g.fillText('this card and the world both shift.', 256, 170);
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    const card = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.2), new THREE.MeshBasicMaterial({ map: t, transparent: true }));
+    card.position.set(-0.25, 0.05, -1.0);
+    const cube = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1), new THREE.MeshBasicMaterial({ color: 0x84cc16, wireframe: true }));
+    cube.position.set(0.2, 0.05, -1.0);
+    cube.rotation.set(0.5, 0.6, 0);
+    checkCard.add(card, cube);
+    checkCard.visible = false;
+    dock.add(checkCard);
+}
 
 // [VR CONTROLS 2026-11-04] WolfStorm's VR action bar (vrbar.js) and the viewer's UI layer (vrlayer.js), both docked to
 // the head like WolfStorm's surfaces. VR 3D Mode only: Big Screen Mode already shows the whole viewer window.
 const WORLD = () => !!(config && config.mode === 'world');
-const bar = new VRBar(camera, send);
-const layer = new VRLayer(camera, send, (t) => showError(t));
+const bar = new VRBar(dock, send);
+const layer = new VRLayer(dock, send, (t) => showError(t));
 // [VR AUDIO 2026-11-04] the viewer's sound in the headset (vraudio.js), and the headset microphone for voice chat
 const vrAudio = new VRAudio({
     send,
@@ -383,16 +494,18 @@ bar.onCommand = (a) => {
 // have". Automatic (the default) works the headset out from its browser; a choice here or in WolfViewer's Headset
 // Settings sets where the picture quality STARTS and the display rate; then it adapts by itself (adaptQuality): one
 // step down when this headset's decoder or the network falls behind, one step back up after 30 s of steady pictures,
-// never above the headset's own start. Steps: wolfvrstream.cpp kQuality (0 = 2 x 1152 px eyes at 40 Mbit/s,
-// 1 = 2 x 1024 at 30, 2 = 2 x 896 at 22, 3 = 2 x 768 at 15).
-//   level: starting step; hz: display rate asked for (0 = nearest the stream's); ctl: what the controllers are
+// never above the headset's own top step. Steps: wolfvrstream.cpp kQuality ([VR 3D FIX 2026-11-04] 0 = 2 x 1920 px
+// eyes at 100 Mbit/s, 1 = 2 x 1728 at 80, 2 = 2 x 1440 at 55, 3 = 2 x 1152 at 35, 4 = 2 x 896 at 20).
+//   level: starting step; top: the best step it may climb to; hz: display rate asked for (0 = nearest the stream's);
+//   ctl: what the controllers are
+const QUALITY_STEPS = 5;
 const HEADSETS = {
-    quest3:   { label: 'Meta Quest 3 / 3S', level: 0, hz: 0, ctl: 'touch' },
-    quest2:   { label: 'Meta Quest 2', level: 1, hz: 72, ctl: 'touch' },
-    questpro: { label: 'Meta Quest Pro', level: 1, hz: 72, ctl: 'touch' },
-    pico4:    { label: 'Pico 4 / Pico 4 Ultra', level: 1, hz: 72, ctl: 'pico' },
-    avp:      { label: 'Apple Vision Pro', level: 0, hz: 90, ctl: 'hands' },
-    other:    { label: 'Other headset', level: 1, hz: 0, ctl: 'touch' },
+    quest3:   { label: 'Meta Quest 3 / 3S', level: 1, top: 0, hz: 0, ctl: 'touch' },
+    quest2:   { label: 'Meta Quest 2', level: 3, top: 3, hz: 72, ctl: 'touch' },
+    questpro: { label: 'Meta Quest Pro', level: 2, top: 2, hz: 72, ctl: 'touch' },
+    pico4:    { label: 'Pico 4 / Pico 4 Ultra', level: 2, top: 2, hz: 72, ctl: 'pico' },
+    avp:      { label: 'Apple Vision Pro', level: 1, top: 0, hz: 90, ctl: 'hands' },
+    other:    { label: 'Other headset', level: 3, top: 3, hz: 0, ctl: 'touch' },
 };
 // The browser says which headset it is: Meta's Quest Browser names the model in its user agent ("Quest 3",
 // "Quest 3S", "Quest 2", "Quest Pro"); PICO's browser says "Pico"; Safari on Vision Pro reports a Mac but, unlike
@@ -416,15 +529,16 @@ function headsetKind() {
     return detectHeadset();
 }
 function headsetAuto() { return !(viewerHeadset && viewerHeadset !== 'auto') && !(pageHeadset() && pageHeadset() !== 'auto'); }
-const quality = { level: HEADSETS[headsetKind()].level, sent: -1, bad: 0, goodSince: performance.now(), coolUntil: 0 };
+const quality = { level: HEADSETS[headsetKind()].level, top: HEADSETS[headsetKind()].top, sent: -1, bad: 0, goodSince: performance.now(), coolUntil: 0 };
 function setQuality(level, why) {
-    quality.level = Math.max(0, Math.min(3, level));
+    quality.level = Math.max(0, Math.min(QUALITY_STEPS - 1, level));
     quality.sent = quality.level;
     send({ t: 'quality', l: quality.level });
     if (why) toast(why);
 }
 function headsetChanged() {
     const h = HEADSETS[headsetKind()];
+    quality.top = h.top;
     if (quality.level !== h.level) setQuality(h.level, '');
     quality.goodSince = performance.now();
     showHeadsetLine();
@@ -433,14 +547,18 @@ function headsetChanged() {
 function adaptQuality(now) {
     if (!renderer.xr.isPresenting) return;
     if (now < quality.coolUntil) return;
-    // behind = this headset's decoder drops pictures it was sent, or takes too long, or the pictures arrive late
-    // (viewer capture to drawn here, on the synced clock: a queue building up on the network)
+    // behind = this headset's decoder cannot keep up with the pictures it was sent (decoded fewer than arrived, or its
+    // queue grows), or the pictures arrive late (viewer capture to drawn here, on the synced clock: a queue building up
+    // on the network). [VR 3D FIX 2026-11-04] Not "drawn fewer than arrived" (a 60 a second stream on a 72 or 90 Hz
+    // display shows two pictures in one display frame now and then, by design) and not the decode TIME (a hardware
+    // decoder takes longer per picture the bigger it is, while still keeping up): on Paul's Quest 3 those two stepped
+    // the picture down to its smallest within 30 s, which is why it looked soft.
     const got = num.gotFps;
-    const behind = (got > 20 && num.newFps < got * 0.8) || num.decode.avg() > 14 || num.v2p.avg() > 150 ||
-                   (layer.decoder && layer.decoder.decodeQueueSize > 3);
+    const behind = (got > 20 && num.decodedFps < got * 0.85) || num.v2p.avg() > 200 ||
+                   (decoder && decoder.decodeQueueSize > 3) || (layer.decoder && layer.decoder.decodeQueueSize > 3);
     if (behind) {
         quality.goodSince = now;
-        if (++quality.bad >= 3 && quality.level < 3) {
+        if (++quality.bad >= 3 && quality.level < QUALITY_STEPS - 1) {
             quality.bad = 0;
             quality.coolUntil = now + 8000;
             setQuality(quality.level + 1, 'The picture is a little less sharp for now, so it keeps up.');
@@ -448,8 +566,8 @@ function adaptQuality(now) {
         return;
     }
     quality.bad = 0;
-    const top = HEADSETS[headsetKind()].level;
-    if (quality.level > top && now - quality.goodSince > 30000) {
+    const top = quality.top;
+    if (quality.level > top && now - quality.goodSince > 20000) {
         quality.goodSince = now;
         quality.coolUntil = now + 8000;
         setQuality(quality.level - 1, 'The picture is sharper again.');
@@ -505,26 +623,37 @@ $('wvr-mic').addEventListener('click', () => {
     showMicButton();
 });
 
-// Each eye's position in head space and the square field of view that covers both eyes, from the XR views
-// (WebXR XRView.transform / projectionMatrix), sent with each pose for the viewer to draw the eyes from.
+// Each eye's position in head space and its own frustum, from the XR views (WebXR XRView.eye, .transform,
+// .projectionMatrix), sent with each pose for the viewer to draw the eyes from; left eye first, by XRView.eye.
+// [VR 3D FIX 2026-11-04] The frustum goes as the tangents of its four edges (the viewer draws exactly that off-axis
+// window), each widened by EYE_MARGIN_DEG so a quick head turn does not show the picture's edge before the next one
+// comes (reprojection); the square field of view covering both ("f") stays for a viewer drawing one view.
+const EYE_MARGIN_DEG = 4;
 const _hinv = new THREE.Matrix4(), _ev = new THREE.Vector3();
-let eyeFov = 0;
+let eyeFov = 0, eyeTan = null, lastViews = null;
+function widen(t, sign) { return Math.tan(Math.atan(t) + sign * EYE_MARGIN_DEG * Math.PI / 180); }
 function eyesOf(pose) {
     if (!pose || !pose.views || pose.views.length < 2) return null;
     _hinv.fromArray(pose.transform.matrix).invert();
-    const e = [];
+    // which view is which eye ("none" / missing: the first is the left, as three.js assumes)
+    let li = pose.views.findIndex((v) => v.eye === 'left'), ri = pose.views.findIndex((v) => v.eye === 'right');
+    if (li < 0 || ri < 0 || li > 1 || ri > 1) { li = 0; ri = 1; }
+    eyeLayer[0] = 1 + li; eyeLayer[1] = 1 + ri;
+    const e = [], pt = [];
     let maxTan = 0;
-    for (let i = 0; i < 2; i++) {
+    for (const i of [li, ri]) {
         const v = pose.views[i];
         _ev.setFromMatrixPosition(_m.fromArray(v.transform.matrix)).applyMatrix4(_hinv);
         e.push(+_ev.x.toFixed(4), +_ev.y.toFixed(4), +_ev.z.toFixed(4));
-        // a perspective projection's edges: x/z = (m8 -+ 1) / m0, y/z = (m9 -+ 1) / m5 (column-major)
+        // a perspective projection's edges: x/-z = (m8 -+ 1) / m0, y/-z = (m9 -+ 1) / m5 (column-major)
         const p = v.projectionMatrix;
-        maxTan = Math.max(maxTan, Math.abs((p[8] - 1) / p[0]), Math.abs((p[8] + 1) / p[0]),
-                                  Math.abs((p[9] - 1) / p[5]), Math.abs((p[9] + 1) / p[5]));
+        const L = (p[8] - 1) / p[0], R = (p[8] + 1) / p[0], B = (p[9] - 1) / p[5], T = (p[9] + 1) / p[5];
+        pt.push(+widen(L, -1).toFixed(4), +widen(R, 1).toFixed(4), +widen(B, -1).toFixed(4), +widen(T, 1).toFixed(4));
+        maxTan = Math.max(maxTan, Math.abs(L), Math.abs(R), Math.abs(B), Math.abs(T));
     }
-    // + 4 degrees so a quick head turn does not show the picture's edge before the next one comes (reprojection)
     eyeFov = Math.min(120, Math.max(90, Math.round(2 * Math.atan(maxTan) * 180 / Math.PI + 4)));
+    eyeTan = pt;
+    lastViews = pose.views;   // for the test hook only (window.__wolfvr.eyes); nothing is copied per frame
     return e;
 }
 
@@ -830,6 +959,10 @@ function restoreAfterVR() {
     laser.visible = dot.visible = false;
     for (const b of [0, 2]) pointerButton(b, false);   // never leave a button held down in the viewer
     for (const b of [0, 2]) layerButton(b, false);
+    for (const b of [0, 2]) { if (worldPointer.owner[b] === 'ptr') ptrButton(b, false); worldPointer.owner[b] = null; }
+    worldPointer.trig = worldPointer.b = false;
+    reticle.group.visible = false;
+    bar.setTabActive(false);
     if (talkHeld) { talkHeld = false; if (bar.state.on.has('speak')) send({ t: 'act', a: 'speak' }); }   // stop talking
     bar.hide();
     releaseKeys();
@@ -887,6 +1020,33 @@ function sendLift(d) {
 }
 function releaseMovement() { sendStick(0, 0); sendLift(0); }
 function releaseKeys() { releaseMovement(); }
+// [VR MODES 2026-11-04] Paul: "When I'm in VR and went to screen mode, the big VR box was kind of blocking things".
+// Each mode shows only its own surfaces: on every "config" (a new mode, or the same one restarted) everything of the
+// other mode is taken down at once - not when its next picture happens to arrive. Big Screen: the curved screen and
+// its pointer only (the screen already shows the whole viewer, HUDs and all). 3D: the eye pictures, the HUDs layer,
+// the action bar and its Menu tab, the world pointer.
+function enterMode() {
+    const big = BIG(), world = WORLD();
+    if (!big) bigMesh.visible = false;
+    if (!world) {
+        screen.visible = false;
+        eyeScreens[0].visible = eyeScreens[1].visible = false;
+        screen.userData.hdr = null;
+        bar.hide();
+        bar.setTabActive(false);
+        checkCard.visible = false;
+        vignette.visible = false;
+        reticle.group.visible = false;
+        for (const b of [0, 2]) { if (worldPointer.owner[b] === 'ptr') ptrButton(b, false); worldPointer.owner[b] = null; }
+        worldPointer.trig = worldPointer.b = false;
+        worldAim.k = 'none';
+    }
+    if (big) { buildBigScreen(); bigPlaced = false; statsOn = false; }
+    else { for (const b of [0, 2]) pointerButton(b, false); }
+    laser.visible = dot.visible = false;
+    layer.setActive(world && renderer.xr.isPresenting);
+}
+
 // Left stick click switches between VR Big Screen Mode and VR 3D Mode without reconnecting.
 function switchMode() {
     const want = BIG() ? 'world' : 'screen';
@@ -899,12 +1059,17 @@ function switchMode() {
 const axis = (gp, i, j) => (gp.axes.length >= 4 ? gp.axes[i] : (gp.axes[j] || 0)) || 0;
 const _ro = new THREE.Vector3(), _rd = new THREE.Vector3(), _rq = new THREE.Quaternion();
 
+let leftProfiles = '';
 function pollLeft(gp, headPos, headQuat) {
     const pressed = (i) => !!(gp.buttons[i] && gp.buttons[i].pressed);
     const edge = (i) => { const p = pressed(i); const was = leftWas[i]; leftWas[i] = p; return p && !was; };
     sendStick(axis(gp, 2, 0), axis(gp, 3, 1));
-    let menu = false;
-    for (let i = 6; i < gp.buttons.length; i++) menu = menu || pressed(i);
+    // [VR HUD CLICKS 2026-11-04] The menu button is index 7 on Meta's Touch controllers (WebXR input profiles registry,
+    // meta-quest-touch-plus / oculus-touch-v3, left: trigger, squeeze, -, thumbstick, x, y, THUMBREST, menu). Index 6
+    // is the thumb rest - a sensor the thumb lies on - so "any button from 6 up" toggled the bar whenever the thumb
+    // moved on or off the rest. Other controllers without that layout: their last button past the face buttons.
+    const MENU = gp.buttons.length >= 8 ? 7 : (gp.buttons.length === 7 && !/touch|quest|oculus/i.test(leftProfiles) ? 6 : -1);
+    const menu = MENU >= 0 && pressed(MENU);
     const now = performance.now();
     if (menu && !leftWas.menu) { menuDownAt = now; menuLong = false; }
     if (menu && !menuLong && now - menuDownAt > 1000) { menuLong = true; if (config && config.debug) statsOn = !statsOn; }   // hold: numbers (debug)
@@ -970,8 +1135,13 @@ function pollPointer(src, gp, frame) {
 }
 
 // [VR CONTROLS / HUD LAYER 2026-11-04] VR 3D Mode pointer (vr_menu.js: ONE raycast, the bar first, then the surfaces):
-// the right controller's ray, in HEAD space because the bar and the layer are docked to the head.
-const worldPointer = { aimed: null, trig: false, b: false, grip: false, gripY: 0 };
+// the right controller's ray, in HEAD space because the bar and the layer are docked to the head (the dock group).
+// [VR WORLD POINTER 2026-11-04] Off the bar, the ray goes to the viewer ({"t":"in","e":"ray"}, with where it crosses
+// the HUDs layer): the viewer decides whether it is on a window or HUD drawn there or on the world behind, and puts
+// its mouse on that; the trigger and B are its left and right button there. [VR HUD CLICKS] A press belongs to what
+// it was pressed on until it is let go: sliding off the bar while the trigger is held no longer clicks whatever the
+// ray reaches on the layer behind it (on Paul's Quest 3 a window opened from the bar closed again a second later).
+const worldPointer = { trig: false, b: false, grip: false, gripY: 0, owner: [null, null, null], ray: { at: 0, o: [0, 0, 0], d: [0, 0, 0], l: '' } };
 const lptr = { u: -1, v: -1, buttons: {} };
 const _hq = new THREE.Quaternion(), _ho = new THREE.Vector3(), _hd = new THREE.Vector3();
 function layerMove(u, v) {
@@ -986,17 +1156,28 @@ function layerButton(b, down) {
     send({ t: 'in', e: down ? 'down' : 'up', u: lptr.u, v: lptr.v, b, l: 1 });
 }
 function layerWheel(d) { if (lptr.u >= 0 && d) send({ t: 'in', e: 'wheel', u: lptr.u, v: lptr.v, d, l: 1 }); }
-// world ray -> what it points at: {kind:'bar', hit} | {kind:'layer', hit} | null, plus the world point for the dot
+// world ray -> {kind:'bar'|'tab', hit} on the action bar, else {kind:'ptr', layer: {u, v, t} | null}
 function aimAt(ro, rd, headPos, headQuat) {
     _hq.copy(headQuat).invert();
     _ho.copy(ro).sub(headPos).applyQuaternion(_hq);
     _hd.copy(rd).applyQuaternion(_hq);
     const b = bar.hit(_ho, _hd);
-    if (b) return { kind: 'bar', hit: b, t: b.t };
-    const l = layer.hit(_ho, _hd);
-    if (l) return { kind: 'layer', hit: l, t: l.t };
-    return null;
+    if (b) return { kind: b.kind === 'tab' ? 'tab' : 'bar', hit: b, t: b.t };
+    return { kind: 'ptr', layer: layer.hit(_ho, _hd) };
 }
+function sendRay(ro, rd, lay) {
+    const r = worldPointer.ray, now = performance.now();
+    const o = [+ro.x.toFixed(4), +ro.y.toFixed(4), +ro.z.toFixed(4)], d = [+rd.x.toFixed(4), +rd.y.toFixed(4), +rd.z.toFixed(4)];
+    const l = lay ? lay.u.toFixed(4) + ',' + lay.v.toFixed(4) : '';
+    const moved = Math.abs(o[0] - r.o[0]) + Math.abs(o[1] - r.o[1]) + Math.abs(o[2] - r.o[2]) > 0.001 ||
+                  Math.abs(d[0] - r.d[0]) + Math.abs(d[1] - r.d[1]) + Math.abs(d[2] - r.d[2]) > 0.0008 || l !== r.l;
+    if (!moved && now - r.at < 200) return;   // still: every 200 ms (the viewer lets go of a ray it has not heard for 0.5 s)
+    r.at = now; r.o = o; r.d = d; r.l = l;
+    const m = { t: 'in', e: 'ray', o, d };
+    if (lay) { m.lu = +lay.u.toFixed(4); m.lv = +lay.v.toFixed(4); }
+    send(m);
+}
+function ptrButton(b, down) { send({ t: 'in', e: down ? 'down' : 'up', b, w: 1 }); if (down) reticle.pulseUntil = performance.now() + 160; }
 function pollWorldPointer(src, gp, frame, headPos, headQuat) {
     const rp = frame.getPose(src.targetRaySpace, renderer.xr.getReferenceSpace());
     const pressed = (i) => !!(gp.buttons[i] && gp.buttons[i].pressed);
@@ -1007,32 +1188,52 @@ function pollWorldPointer(src, gp, frame, headPos, headQuat) {
         _m.decompose(_ro, _rq, _scl);
         _rd.set(0, 0, -1).applyQuaternion(_rq);
         aim = aimAt(_ro, _rd, headPos, headQuat);
-        const showRay = bar.open || layer.on;
-        laser.position.copy(_ro); laser.quaternion.copy(_rq); laser.scale.set(1, 1, aim ? aim.t : 3);
-        laser.visible = showRay;
-        if (aim) { dot.position.copy(_ro).addScaledVector(_rd, aim.t * 0.996); dot.lookAt(_ro); }
-        dot.visible = !!aim;
+        if (aim.layer) { lptr.u = aim.layer.u; lptr.v = aim.layer.v; }   // where the stick scrolls (layerWheel)
     }
     const trig = pressed(0), bBtn = pressed(5), grip = pressed(1);
-    bar.setHover(aim && aim.kind === 'bar' ? aim.hit : null);
-    if (aim && aim.kind === 'bar') {
-        if (trig && !worldPointer.trig) bar.activate(aim.hit);
-    } else if (aim && aim.kind === 'layer') {
-        layerMove(aim.hit.u, aim.hit.v);
-        if (grip) {
-            // grip held: move the layer up or down with the controller (remembered)
-            if (!worldPointer.grip) worldPointer.gripY = _ro.y;
-            else { layer.nudge(_ro.y - worldPointer.gripY, 0); worldPointer.gripY = _ro.y; }
-        } else {
-            layerButton(0, trig);
-            layerButton(2, bBtn);
+    const own = worldPointer.owner;
+    // what the ray is on for the buttons: the owner of a held button, else what it points at now
+    const onBar = aim && (aim.kind === 'bar' || aim.kind === 'tab');
+    bar.setHover(onBar && !own[0] ? aim.hit : null);
+    // the trigger (0) and B (2): press on the bar = activate it there; press elsewhere = the viewer's button
+    for (const [b, now, was] of [[0, trig, worldPointer.trig], [2, bBtn, worldPointer.b]]) {
+        if (now && !was) {
+            if (onBar) { own[b] = 'bar'; if (b === 0) bar.activate(aim.hit); }
+            else if (aim) { own[b] = 'ptr'; sendRay(_ro, _rd, aim.layer); ptrButton(b, true); }
+        } else if (!now && was) {
+            if (own[b] === 'ptr') ptrButton(b, false);
+            own[b] = null;
         }
     }
-    if (!aim || aim.kind !== 'layer') { layerButton(0, false); layerButton(2, false); }   // never leave one held
+    // off the bar (or holding a press that began off it): the ray goes to the viewer
+    if (aim && (!onBar || own[0] === 'ptr' || own[2] === 'ptr') && own[0] !== 'bar') {
+        sendRay(_ro, _rd, aim.layer);
+        if (grip && aim.layer && !own[0]) {
+            // grip held on the layer: move it up or down with the controller (remembered); clicks still work
+            if (!worldPointer.grip) worldPointer.gripY = _ro.y;
+            else { layer.nudge(_ro.y - worldPointer.gripY, 0); worldPointer.gripY = _ro.y; }
+        }
+    }
+    // the ray and the dot: on the bar where it hits; else where the viewer says it landed
+    if (rp) {
+        let t = -1, big = false;
+        if (onBar) t = aim.t;
+        else if (performance.now() - worldAim.at < 600) {
+            if (worldAim.k === 'ui' && aim && aim.layer) t = aim.layer.t;
+            else if (worldAim.k === 'world' && worldAim.d > 0) { t = worldAim.d; big = !!RETICLE_WORDS[worldAim.c]; }
+        }
+        laser.position.copy(_ro); laser.quaternion.copy(_rq); laser.scale.set(1, 1, t > 0 ? t : 4);
+        laser.visible = true;
+        if (t > 0) placeReticle(_v3.copy(_ro).addScaledVector(_rd, t * 0.998), _ro, big);
+        else reticle.group.visible = false;
+        if (!onBar && worldAim.k !== 'world') reticle.tag.visible = false;
+        else if (!onBar) reticle.tag.visible = !!RETICLE_WORDS[worldAim.c];
+        else reticle.tag.visible = false;
+    }
     worldPointer.trig = trig; worldPointer.b = bBtn; worldPointer.grip = grip;
-    worldPointer.aimed = aim ? aim.kind : null;
-    return worldPointer.aimed;
+    return onBar ? 'bar' : aim && aim.layer ? 'layer' : aim ? 'world' : null;
 }
+const _v3 = new THREE.Vector3();
 // Push to talk (vr_hud.js _pollPushToTalk: A/X held; here A on the right, X is jump): speak on press, off on release.
 let talkHeld = false;
 function pollTalk(gp) {
@@ -1048,7 +1249,11 @@ function pollTalk(gp) {
 function onSelect(ev) {
     if (!WORLD() || !ev.frame) return;
     const src = ev.inputSource;
-    if (src.gamepad && src.targetRayMode === 'tracked-pointer') return;   // controllers are polled every frame instead
+    // [VR HUD CLICKS 2026-11-04] Controllers are polled every frame (pollWorldPointer). The browser ALSO fires "select"
+    // when the trigger is let go; taken as a second press it toggled what the trigger had just opened. So a select
+    // counts only from an input with no gamepad (hands, look-and-pinch) and only while no controller is in use.
+    if (src.gamepad) return;
+    for (const other of ev.frame.session.inputSources) if (other.gamepad && other.targetRayMode === 'tracked-pointer') return;
     const rp = ev.frame.getPose(src.targetRaySpace, renderer.xr.getReferenceSpace());
     const vp = ev.frame.getViewerPose(renderer.xr.getReferenceSpace());
     if (!rp || !vp) return;
@@ -1059,21 +1264,29 @@ function onSelect(ev) {
     const hp = new THREE.Vector3(), hq = new THREE.Quaternion(), hs = new THREE.Vector3();
     new THREE.Matrix4().fromArray(vp.transform.matrix).premultiply(dolly.matrixWorld).decompose(hp, hq, hs);
     const aim = aimAt(_ro, _rd, hp, hq);
-    if (!aim) { bar.toggle(); return; }   // a pinch at nothing: the action bar (there is no menu button)
-    if (aim.kind === 'bar') bar.activate(aim.hit);
-    else { layerMove(aim.hit.u, aim.hit.v); layerButton(0, true); layerButton(0, false); }
+    if (aim.kind === 'bar' || aim.kind === 'tab') { bar.activate(aim.hit); return; }
+    // anywhere else: a click there (the viewer finds what is under it: a window, a HUD, or the world)
+    sendRay(_ro, _rd, aim.layer);
+    ptrButton(0, true);
+    ptrButton(0, false);
 }
 
 function pollControllers(session, frame, headPos, headQuat) {
     const ctl = [];
     let lift = 0;
     if (BIG() && !bigPlaced) recentre(headPos, headQuat);
-    if (!BIG()) laser.visible = dot.visible = false;
-    if (WORLD()) worldPointer.aimed = null;
-    for (const src of session.inputSources) {
+    if (!BIG()) { laser.visible = dot.visible = false; reticle.group.visible = false; }
+    // [VR HUD CLICKS 2026-11-04] one source per hand: a controller (a gamepad on a tracked pointer) before anything
+    // else the browser lists for that hand (hands with "hand-tracking" can be listed beside the controllers)
+    const seen = {};
+    const sources = Array.from(session.inputSources).sort((a, b) => (b.gamepad ? 1 : 0) - (a.gamepad ? 1 : 0));
+    for (const src of sources) {
         const gp = src.gamepad;
         if (!gp) continue;
         const hand = src.handedness || 'none';
+        if (seen[hand]) continue;
+        seen[hand] = true;
+        if (hand === 'left') leftProfiles = (src.profiles || []).join(' ');
         let bits = 0;
         gp.buttons.forEach((b, i) => { if (b && b.pressed && i < 31) bits |= (1 << i); });
         ctl.push({ h: hand, b: bits, a: Array.from(gp.axes, (x) => Math.round(x * 1000) / 1000) });
@@ -1095,7 +1308,10 @@ function pollControllers(session, frame, headPos, headQuat) {
         else if (hand === 'right') {
             const aimed = BIG() ? pollPointer(src, gp, frame) : WORLD() ? pollWorldPointer(src, gp, frame, headPos, headQuat) : false;
             pollTalk(gp);
-            lift = lift || pollRightStick(gp, aimed);
+            // [VR WORLD POINTER] the stick scrolls only over the bar or a window / HUD the viewer says the ray is on;
+            // pointing at the world (or an empty part of the layer) it turns and flies as before
+            const scrollable = aimed === 'bar' || (aimed === 'layer' && worldAim.k === 'ui') ? aimed : (BIG() ? aimed : null);
+            lift = lift || pollRightStick(gp, scrollable);
         }
     }
     if (config && config.mode !== 'test') sendLift(lift);
@@ -1120,16 +1336,19 @@ function animate(time, frame) {
             _m.fromArray(pose.transform.matrix).premultiply(dolly.matrixWorld);
             _m.decompose(_pos, _quat, _scl);
         }
+        dock.position.copy(_pos); dock.quaternion.copy(_quat); dock.updateMatrixWorld(true);
+        bar.setTabActive(WORLD());
         ctl = pollControllers(renderer.xr.getSession(), frame, _pos, _quat);
         num.xrFrames++;
     } else {
         _quat.setFromEuler(new THREE.Euler(-dragPitch, -dragYaw, 0, 'YXZ'));
         _pos.set(0, 1.6, 0);
         camera.quaternion.copy(_quat);
+        dock.position.copy(_pos); dock.quaternion.copy(_quat); dock.updateMatrixWorld(true);
         num.xrFrames++;
     }
     const pm = { t: 'pose', s: ++poseSeq, ct: now, p: [_pos.x, _pos.y, _pos.z], q: [_quat.x, _quat.y, _quat.z, _quat.w], c: ctl };
-    if (eyes) { pm.e = eyes; pm.f = eyeFov; }
+    if (eyes) { pm.e = eyes; pm.f = eyeFov; if (eyeTan) pm.pt = eyeTan; }
     send(pm);
 
     // Newest picture onto the texture.
@@ -1168,8 +1387,21 @@ function animate(time, frame) {
                 _ev.set(hdr.eyes[3 * i], hdr.eyes[3 * i + 1], hdr.eyes[3 * i + 2]).applyQuaternion(_quat);
                 m.position.copy(_pos).add(_ev).add(_fwd);
             }
-            // on the page (no headset) the camera sees layer 0 only: show the left eye there
-            eyeScreens[0].layers.set(renderer.xr.isPresenting ? 1 : 0);
+            // [VR 3D FIX 2026-11-04] each eye's own off-axis window: the half covers exactly the frustum it was drawn
+            // for (tangents L, R, B, T), PICTURE_DISTANCE in front of that eye, along the head's direction then
+            if (hdr.tan) {
+                for (let i = 0; i < 2; i++) {
+                    const w = hdr.tan.slice(4 * i, 4 * i + 4), m = eyeScreens[i];
+                    m.scale.set(PICTURE_DISTANCE * (w[1] - w[0]), PICTURE_DISTANCE * (w[3] - w[2]), 1);
+                    _ev.set(PICTURE_DISTANCE * (w[0] + w[1]) / 2, PICTURE_DISTANCE * (w[2] + w[3]) / 2, -PICTURE_DISTANCE).applyQuaternion(hdr.q);
+                    const eo = new THREE.Vector3(hdr.eyes[3 * i], hdr.eyes[3 * i + 1], hdr.eyes[3 * i + 2]).applyQuaternion(_quat);
+                    m.position.copy(_pos).add(eo).add(_ev);
+                }
+            }
+            // each half seen only by its eye (eyeLayer, from XRView.eye); on the page (no headset) the camera sees
+            // layer 0 only: show the left eye there
+            eyeScreens[0].layers.set(renderer.xr.isPresenting ? eyeLayer[0] : 0);
+            eyeScreens[1].layers.set(eyeLayer[1]);
         }
     }
 
@@ -1196,14 +1428,16 @@ function animate(time, frame) {
         num.lastT = now;
         num.gotFps = num.got / dt;
         num.got = 0;
+        num.decodedFps = num.decoded / dt;
+        num.decoded = 0;
         if (config && config.debug) {
             send({ t: 'stats', fps: num.fps, newFps: num.newFps, decodeMs: num.decode.avg(), p2p: num.p2p.avg(),
                    p2p95: num.p2p.pct(0.95), v2p: num.v2p.avg() });
         }
         adaptQuality(now);
     }
-    // [VR CONTROLS / HUD LAYER] the docked surfaces
-    layer.setActive(WORLD());
+    // [VR CONTROLS / HUD LAYER] the docked surfaces (3D Mode in the headset only)
+    layer.setActive(WORLD() && renderer.xr.isPresenting);
     layer.update();
     bar.setPageState('numbers', statsOn);
     bar.update(now);
@@ -1293,6 +1527,20 @@ window.__wolfvr = { numbers: () => ({ rows: numberRows(), p2p: num.p2p.v.slice(-
         return surfacePoint(1.0, bar.arc, -0.385, bar.height, u, v);
     },
     layerPoint: (u, v) => surfacePoint(1.25, layer.arc, layer.y, layer.height, u, 1 - v),
+    // [VR 3D FIX / WORLD POINTER] test hooks: which view is which eye and the layer each half is on (and each XR
+    // camera's layer mask), the eye windows sent, the last picture's header, where the viewer said the ray landed
+    eyes: () => {
+        const xc = renderer.xr.isPresenting ? renderer.xr.getCamera().cameras : [];
+        const views = lastViews ? Array.from(lastViews, (v) => ({ eye: v.eye, proj: Array.from(v.projectionMatrix, (x) => +x.toFixed(5)) })) : null;
+        return { views, eyeLayer: eyeLayer.slice(), halfLayers: eyeScreens.map((m) => m.layers.mask),
+                 cameraMasks: xc.map((c) => c.layers.mask), tan: eyeTan, fov: eyeFov,
+                 hdr: screen.userData.hdr ? { stereo: screen.userData.hdr.stereo, tan: screen.userData.hdr.tan, eyes: screen.userData.hdr.eyes } : null,
+                 visible: eyeScreens.map((m) => m.visible), mono: screen.visible };
+    },
+    aim: () => ({ ...worldAim, reticle: reticle.group.visible, tag: reticle.tag.visible, laser: laser.visible, owner: worldPointer.owner.slice() }),
+    surfaces: () => ({ big: bigMesh.visible, eyes: eyeScreens.map((m) => m.visible), mono: screen.visible, layer: layer.mesh.visible,
+                       bar: bar.mesh.visible, tab: bar.tab.visible, reticle: reticle.group.visible, check: checkCard.visible }),
+    tabPoint: () => surfacePoint(1.0, bar.tabArc, -0.52, bar.tabH, 0.5, 0.5),
     grabLayer: () => {
         if (!layer.shown || !layer.cfg) return null;
         const c = document.createElement('canvas');

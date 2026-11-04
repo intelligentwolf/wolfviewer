@@ -56,6 +56,7 @@
 #include "llenvironment.h"
 #include "lldate.h"              // [ROUND 10/] the storm's wall clock (cameraUnderWater)
 #include "wolfregionweather.h"   // [ROUND 10/] the region's storm (cameraUnderWater)
+#include "wolfvrscreen.h"        // [VR 3D FIX 2026-11-04/] WolfVRScreen::eyeCrop, each eye's own off-axis window
 
 // System includes
 #include <iomanip> // for setprecision
@@ -372,6 +373,14 @@ void LLViewerCamera::setPerspective(bool for_selection,
 
         proj_mat = scale * proj_mat;
         proj_mat = translate * proj_mat;
+    }
+
+    // [VR 3D FIX 2026-11-04/] VR 3D Mode stereo: this eye's own off-axis window of the headset (wolfvrscreen.cpp
+    // applyHeadCamera), the same kind of scale and shift as the zoom above; never for a selection pick
+    F32 vr_ax, vr_bx, vr_ay, vr_by;
+    if (!for_selection && WolfVRScreen::eyeCrop(vr_ax, vr_bx, vr_ay, vr_by))
+    {
+        proj_mat = glm::translate(glm::vec3(vr_bx, vr_by, 0.f)) * glm::scale(glm::vec3(vr_ax, vr_ay, 1.f)) * proj_mat;
     }
 
     calcProjection(z_far); // Update the projection matrix cache

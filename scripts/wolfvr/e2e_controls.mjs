@@ -65,9 +65,9 @@ check(!!lay, 'the HUDs layer arrives (' + (lay && lay.cfg && lay.cfg.w + 'x' + l
 await sleep(1500);
 await grabLayer('l_start.png');
 
-// left menu tap = the action bar
-await evalJs("window.__fakeCtl.press('left', 6, true)"); await sleep(200);
-await evalJs("window.__fakeCtl.press('left', 6, false)"); await sleep(500);
+// left menu tap (Touch index 7) = the action bar
+await evalJs("window.__fakeCtl.press('left', 7, true)"); await sleep(200);
+await evalJs("window.__fakeCtl.press('left', 7, false)"); await sleep(500);
 check(await evalJs('window.__wolfvr.bar().open'), 'left menu button opens the action bar');
 
 const f0 = await evalJs('window.__wolfvr.layer().frames');
@@ -92,8 +92,8 @@ await press('huds');
 check(await waitFor(() => evalJs('window.__wolfvr.layer().on'), 3000), 'HUDs button shows it again');
 
 // close the bar, exit VR
-await evalJs("window.__fakeCtl.press('left', 6, true)"); await sleep(200);
-await evalJs("window.__fakeCtl.press('left', 6, false)"); await sleep(300);
+await evalJs("window.__fakeCtl.press('left', 7, true)"); await sleep(200);
+await evalJs("window.__fakeCtl.press('left', 7, false)"); await sleep(300);
 check(!(await evalJs('window.__wolfvr.bar().open')), 'left menu button closes the bar');
 await grab('w_end.jpg');
 const errs = events.filter(e => e.method === 'Runtime.exceptionThrown' || (e.method === 'Log.entryAdded' && e.params.entry.level === 'error')).slice(0, 8);

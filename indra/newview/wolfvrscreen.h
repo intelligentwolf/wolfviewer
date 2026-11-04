@@ -47,6 +47,13 @@ namespace WolfVRScreen
     void captureLayer();
     /** [VR AUDIO 2026-11-04] The listener's axes from the newest head pose (VR 3D Mode); false when not in it. */
     bool listenerAxes(LLVector3& at, LLVector3& up);
+    /** [VR 3D FIX 2026-11-04] While an eye is drawn in VR 3D Mode stereo: the scale and offset (clip space) that turn
+     *  the camera's symmetric projection into that eye's own off-axis window (LLViewerCamera::setPerspective applies
+     *  it as it applies its zoom tiles). False when not drawing an eye. */
+    bool eyeCrop(float& ax, float& bx, float& ay, float& by);
+    /** [VR WORLD POINTER 2026-11-04] The headset's pointer was used in the last 2 s (the window then counts the mouse as
+     *  inside it, whatever the PC's own mouse is doing: LLViewerWindow::updateMouseDelta). */
+    bool pointerActive();
     /** Frees the GPU objects (stream switched off, or the viewer closing). Main thread, GL context current. */
     void release();
 }

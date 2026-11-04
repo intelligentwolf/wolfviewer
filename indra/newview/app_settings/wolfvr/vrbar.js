@@ -61,6 +61,7 @@ export const ACTIONS = [
 // vr_hud.js constants
 const BAR_W = 1024, BAR_H = 448, SS = 2;
 const DOCK_RADIUS = 1.0, BAR_ARC_DEG = 64, BAR_Y = -0.385;
+const TAB_ARC_DEG = 9, TAB_Y = -0.52;     // [VR HUD CLICKS] the "Menu" tab: small, low, centred
 const ACCENT = '#84cc16';
 
 // vr_hud.js _curvedGeometry: u = 0 at the LEFT end, v = 0 at the BOTTOM, wound counter-clockwise from the eye.
@@ -138,6 +139,29 @@ export class VRBar {
         this.mesh.visible = false;
         this.mesh.position.set(0, BAR_Y, 0);   // vr_hud.js _dock(bar, 0, BAR_Y)
         camera.add(this.mesh);
+        // [VR HUD CLICKS 2026-11-04] Paul on the Quest 3: "the VR HUD - nothing I clicked worked". A small "Menu" tab
+        // always shows low in front of you in VR 3D Mode while the bar is closed: point at it and pull the trigger
+        // (the left menu button does the same). Nobody has to find a button they cannot see.
+        const tc = document.createElement('canvas');
+        tc.width = 256; tc.height = 72;
+        this.tabCtx = tc.getContext('2d');
+        this.tabTex = new THREE.CanvasTexture(tc);
+        this.tabTex.colorSpace = THREE.SRGBColorSpace;
+        this.tabArc = TAB_ARC_DEG * Math.PI / 180;
+        this.tabH = DOCK_RADIUS * this.tabArc * (72 / 256);
+        this.tab = new THREE.Mesh(curvedGeometry(DOCK_RADIUS, this.tabArc, this.tabH, 8),
+            new THREE.MeshBasicMaterial({ map: this.tabTex, transparent: true, depthTest: false }));
+        this.tab.name = 'WolfVRBarTab';
+        this.tab.frustumCulled = false;
+        this.tab.renderOrder = 9000;
+        this.tab.visible = false;
+        this.tab.position.set(0, TAB_Y, 0);
+        camera.add(this.tab);
+        this.tabActive = false;      // VR 3D Mode and presenting (wolfvr.js)
+        this.tabHover = false;
+        this.flashUntil = 0;         // a press landed: the slot (or the tab) lights up briefly
+        this.flashKey = '';
+        this._drawTab();
         this._iconOk = false;
         try {
             document.fonts.load('48px "Material Icons"', 'map').then(() => {
@@ -170,8 +194,29 @@ export class VRBar {
     }
     setPageState(id, on) { if (this.pageState[id] !== on) { this.pageState[id] = on; this._dirty = true; } }
 
-    toggle() { this.open = !this.open; this.mesh.visible = this.open; this.hover = null; this._dirty = true; }
-    hide() { this.open = false; this.mesh.visible = false; this.hover = null; }
+    toggle() { this.open = !this.open; this.mesh.visible = this.open; this.hover = null; this._dirty = true; this._showTab(); }
+    hide() { this.open = false; this.mesh.visible = false; this.hover = null; this._showTab(); }
+    setTabActive(on) { if (this.tabActive !== on) { this.tabActive = on; this._showTab(); } }
+    _showTab() { this.tab.visible = this.tabActive && !this.open; }
+    _drawTab() {
+        const ctx = this.tabCtx, W = 256, H = 72;
+        ctx.clearRect(0, 0, W, H);
+        const lit = this.tabHover || performance.now() < this.flashUntil;
+        this._roundRect(ctx, 4, 4, W - 8, H - 8, 22);
+        ctx.fillStyle = lit ? 'rgba(132, 204, 22, 0.55)' : 'rgba(15, 23, 42, 0.82)';
+        ctx.fill();
+        ctx.strokeStyle = lit ? 'rgba(220, 255, 160, 0.95)' : 'rgba(132, 204, 22, 0.6)';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = 'bold 30px sans-serif';
+        ctx.fillText('Menu', W / 2, H / 2 + 1);
+        this.tabTex.needsUpdate = true;
+    }
+    // a press landed on `key` (a slot, a favourite or the tab): light it for a moment
+    flash(key) { this.flashKey = key; this.flashUntil = performance.now() + 220; this._dirty = true; if (key === 'tab') this._drawTab(); }
 
     toast(text, ms = 3000) { this._toast = { text, until: performance.now() + ms }; this._dirty = true; }
 
@@ -186,12 +231,17 @@ export class VRBar {
 
     update(now) {
         if (this._toast && now > this._toast.until) { this._toast = null; this._dirty = true; }
+        if (this.flashKey && now > this.flashUntil) { const k = this.flashKey; this.flashKey = ''; this._dirty = true; if (k === 'tab') this._drawTab(); }
         if (this.open && this._dirty) this._draw();
     }
 
     // Head-space ray -> what it points at on the bar, or null. vr_hud.js resolve(): canvas px from the UV.
     hit(o, d) {
-        if (!this.open) return null;
+        if (!this.open) {
+            if (!this.tab.visible) return null;
+            const t = hitCylinder(o, d, DOCK_RADIUS, this.tabArc, 0, TAB_Y, this.tabH);
+            return t ? { kind: 'tab', i: -1, t: t.t } : null;
+        }
         const h = hitCylinder(o, d, DOCK_RADIUS, this.arc, 0, BAR_Y, this.height);
         if (!h) return null;
         const px = h.u * BAR_W, py = (1 - h.v) * BAR_H;
@@ -207,6 +257,9 @@ export class VRBar {
     }
 
     setHover(target) {
+        const th = !!(target && target.kind === 'tab');
+        if (th !== this.tabHover) { this.tabHover = th; this._drawTab(); }
+        if (th) target = null;
         const k = target && target.kind !== 'bar' ? target.kind + target.i : '';
         const was = this.hover ? this.hover.kind + this.hover.i : '';
         if (k !== was) { this.hover = target && target.kind !== 'bar' ? target : null; this._dirty = true; }
@@ -215,6 +268,8 @@ export class VRBar {
     // vr_hud.js activate()
     activate(target) {
         if (!target) return;
+        if (target.kind === 'tab') { this.flash('tab'); this.toggle(); return; }
+        if (target.kind === 'action' || target.kind === 'fav') this.flash(target.kind + target.i);
         if (target.kind === 'fav') {
             const f = this.favSlots[target.i] && this.favSlots[target.i].fav;
             if (f) { this.send({ t: 'act', a: 'fav', x: f.id }); this.toast('Teleporting to ' + f.n); }
@@ -310,10 +365,13 @@ export class VRBar {
         const a = slot.action;
         const st = this.slotState(a);
         const hovered = this.hover && this.hover.kind === 'action' && this.hover.i === i;
+        const flashing = this.flashKey === 'action' + i;
         const pad = 6;
         const x = slot.x + pad, y = slot.y + pad, w = slot.w - pad * 2, h = slot.h - pad * 2;
         this._roundRect(ctx, x, y, w, h, 12);
-        if (st.active) {
+        if (flashing) {
+            ctx.fillStyle = 'rgba(220, 255, 160, 0.85)';   // the press landed
+        } else if (st.active) {
             const g = ctx.createLinearGradient(0, y, 0, y + h);
             g.addColorStop(0, 'rgba(132, 204, 22, 0.52)');
             g.addColorStop(1, 'rgba(101, 163, 13, 0.36)');
@@ -361,7 +419,7 @@ export class VRBar {
             ctx.font = '20px sans-serif';
             const w = Math.min(190, ctx.measureText(name).width + 34);
             if (x + w > W - 26) break;
-            const hovered = this.hover && this.hover.kind === 'fav' && this.hover.i === i;
+            const hovered = (this.hover && this.hover.kind === 'fav' && this.hover.i === i) || this.flashKey === 'fav' + i;
             this._roundRect(ctx, x, y, w, h, 8);
             ctx.fillStyle = hovered ? 'rgba(132, 204, 22, 0.30)' : 'rgba(255, 255, 255, 0.06)';
             ctx.fill();

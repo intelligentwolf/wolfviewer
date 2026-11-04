@@ -171,8 +171,8 @@ check(li.length >= 2 && li[0].wheel === '1' && li[li.length - 1].wheel === '0', 
 // recentre: turn the head 90 degrees left, press the left menu button, aim straight ahead of the head again
 await evalJs('window.__fakeXR.setYaw(Math.PI / 2)');
 await sleep(200);
-await evalJs("window.__fakeCtl.press('left', 6, true)"); await sleep(200);
-await evalJs("window.__fakeCtl.press('left', 6, false)"); await sleep(300);
+await evalJs("window.__fakeCtl.press('left', 7, true)"); await sleep(200);
+await evalJs("window.__fakeCtl.press('left', 7, false)"); await sleep(300);
 next();
 await evalJs("window.__fakeCtl.aim('right', Math.PI / 2 + 0.08, 0.08)");
 await sleep(300);

@@ -123,6 +123,12 @@ namespace wolfvr
         float eye[6] = {-0.032f, 0, 0, 0.032f, 0, 0};
         float fov_deg = 0;         // 0 = not sent (use Config::fov_deg)
         bool stereo = false;       // set by the viewer on a submitted picture: it is two eyes side by side
+        // [VR 3D FIX 2026-11-04] each eye's frustum edges as tangents (left eye L, R, B, T, then the right eye's), and
+        // the head position in the page's reference space (WebXR axes, metres)
+        bool has_tan = false;
+        float tan[8] = {-1, 1, -1, 1, -1, 1, -1, 1};
+        bool has_pos = false;
+        float pos[3] = {0, 0, 0};
     };
 
     /** [VR BIG SCREEN 2026-11-03] Mouse and keyboard from the headset page, for the viewer window. Positions are in
@@ -132,7 +138,8 @@ namespace wolfvr
         // STICK: the left thumbstick now (x right +, y back +, -1..1; WolfStorm input_manager.js _vrLocomotionFlags
         // axes), TURN: one snap turn (wheel = +1 left / -1 right), LIFT: jump/fly up or down held (wheel = +1/0/-1)
         // ACTION: an action-bar button, key = its name, text = its argument ([VR CONTROLS 2026-11-04])
-        enum class Type { MOVE, DOWN, UP, WHEEL, KEY_DOWN, KEY_UP, TEXT, STICK, TURN, LIFT, ACTION };
+        // RAY: the 3D pointer ([VR WORLD POINTER 2026-11-04]): o, d in the page's reference space, u, v on the layer
+        enum class Type { MOVE, DOWN, UP, WHEEL, KEY_DOWN, KEY_UP, TEXT, STICK, TURN, LIFT, ACTION, RAY };
         Type type = Type::MOVE;
         float u = 0, v = 0;
         float x = 0, y = 0;        // STICK
@@ -142,6 +149,9 @@ namespace wolfvr
         std::string key;           // DOM KeyboardEvent.key for KEY_DOWN / KEY_UP ("Enter", "a", ...)
         std::string text;          // TEXT: characters typed (UTF-8)
         bool layer = false;        // [VR HUD LAYER] u, v are on the UI layer (the whole window, no letterbox)
+        bool world = false;        // [VR WORLD POINTER] DOWN / UP of the 3D pointer (whatever its ray is on)
+        bool has_layer = false;    // RAY: u, v are where it crosses the UI layer
+        float o[3] = {0, 0, 0}, d[3] = {0, 0, -1};   // RAY
     };
 
     struct Config
@@ -170,6 +180,8 @@ namespace wolfvr
         // line) cost the frame a little each time; off unless WolfVRDebugStats was on when the stream started.
         // Sent in "config" as "debug" so the page shows its numbers panel only then.
         bool        debug_stats = false;
+        // [VR 3D FIX 2026-11-04] WolfVRStereoCheck: the page shows its own 3D check card (sent in "config" as "check")
+        bool        stereo_check = false;
         LogFn       log;
     };
 
@@ -245,7 +257,7 @@ namespace wolfvr
                      uint32_t bitrate_kbps = 0);   // 0 = keep the bitrate
         /** [VR 3D] The mode the headset page asked for ("screen" / "world"), once; empty when none. Any thread. */
         std::string takeModeRequest();
-        /** [VR CONTROLS 2026-11-04] The quality step the page asked for (0 best .. 3), once; -1 when none. */
+        /** [VR CONTROLS 2026-11-04] The quality step the page asked for (0 best .. 4), once; -1 when none. */
         int takeQualityRequest();
         /** [VR CONTROLS] One text message to the connected page (JSON), if there is one. Any thread. */
         void sendText(const std::string& json);

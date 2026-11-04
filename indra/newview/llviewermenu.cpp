@@ -46,6 +46,7 @@
 #include "wolfborder.h"   // [BORDER GUARD 2026-10-16/] Wolf World > Teleport Across the Border Ahead
 #include "wolfradiostations.h"   // [WOLF STATIONS 2026-10-25/] Wolf World > Music & Radio > Add Your Radio Station...
 #include "wolfmiddaysky.h"   // [WolfViewer 2026-10-30/] World > Environment > Midday: the Midday sky with fill light
+#include "wolfvrstream.h"   // [VR MENU 2026-11-04/] WolfVRStream::headsetActive: the VR menu ticks show what is happening now
 // </WolfViewer>
 
 // linden library includes
@@ -12992,19 +12993,26 @@ void initialize_menus()
     // shows (WolfVRStreamMode, switches a running stream at once) and open its floater (wolffloatervrstream.cpp).
     // [VR MENU 2026-11-03] A mode item switches streaming on in that mode and shows the floater (the address to type);
     // the same item again, while on in that mode, switches streaming off.
+    // [VR MENU 2026-11-04] Paul: "When I logged in, 3D mode was already ticked even though I wasn't in VR". The tick is
+    // what is happening NOW: a headset connected and shown that mode (WolfVRStream::headsetActive), never the stored
+    // choice. The choice itself (WolfVRStreamMode, the mode the headset starts in) is kept as before and shown in
+    // Headset Settings. A mode item while a headset is connected only switches what it shows: no floater popping up in
+    // front of the resident in the headset.
     commit.add("WolfVR.Open", [](LLUICtrl*, const LLSD& mode) {
         const std::string m = mode.asString() == "world" ? "world" : "screen";
-        if (gSavedSettings.getBOOL("WolfVRStreamEnabled") && gSavedSettings.getString("WolfVRStreamMode") == m)
+        const bool active = gSavedSettings.getBOOL("WolfVRStreamEnabled") && WolfVRStream::headsetActive();
+        if (active && gSavedSettings.getString("WolfVRStreamMode") == m)
         {
             gSavedSettings.setBOOL("WolfVRStreamEnabled", false);
             return;
         }
         gSavedSettings.setString("WolfVRStreamMode", m);
         gSavedSettings.setBOOL("WolfVRStreamEnabled", true);
-        LLFloaterReg::showInstance("wolf_vr_stream");
+        if (!active) LLFloaterReg::showInstance("wolf_vr_stream");
     });
     enable.add("WolfVR.IsMode", [](LLUICtrl*, const LLSD& mode) {
-        return gSavedSettings.getBOOL("WolfVRStreamEnabled") && gSavedSettings.getString("WolfVRStreamMode") == mode.asString();
+        return gSavedSettings.getBOOL("WolfVRStreamEnabled") && WolfVRStream::headsetActive() &&
+               gSavedSettings.getString("WolfVRStreamMode") == mode.asString();
     });
     // [WOLF GRID GATE 2026-10-09] Standing on a Wolf Territories region now (logged in there too):
     // World > Game Mode / Roleplay and their toolbar buttons (wolfgrid.h, the Flight Mode gate).

@@ -18,7 +18,15 @@
 #include "wolfvrscreen.h"
 
 #include "llagent.h"
+#include "llagentcamera.h"
+#include "llfocusmgr.h"
 #include "llappviewer.h"
+#include "lldir.h"
+#include "llimagepng.h"
+#include "lltoolbarview.h"
+#include "lltoolmgr.h"
+#include "lltoolpie.h"
+
 #include "llrendertarget.h"
 #include "llgl.h"
 #include "llglheaders.h"
@@ -86,14 +94,128 @@ namespace
 
     // [VR STEREO 2026-11-04] Which eye display() is drawing: -1 one view (mono / big screen), 0 left, 1 right. Both
     // eyes are drawn from ONE head pose (taken for the left eye), each from its own position: the head centre the
-    // agent camera placed (gEyeBase) plus that eye's offset from the headset, turned with the head.
+    // avatar's eyes (gMap.base) plus that eye's offset from the headset, turned with the head.
     S32 gEye = -1;
-    LLVector3 gEyeBase;
     bool gPaused = false;       // [VR LEAN] the desktop window is not drawn this frame (displayFrame)
     bool gDebugStats = false;   // [VR LEAN] WolfVRDebugStats, read once (the first frame)
     // frame-time numbers for the log (and Paul's report): display() time per frame, mono vs stereo
     struct FrameTimes { F64 sum = 0, eye0 = 0; U32 n = 0; F64 since = 0; bool stereo = false; };
     FrameTimes gTimes;
+
+    // [VR 3D FIX 2026-11-04] Paul after the Quest 3 test: "It still doesn't feel 3D when I'm in 3D mode". Three causes,
+    // all fixed here: (1) the eyes were placed around the THIRD-PERSON camera, metres behind the avatar, so the near
+    // world was never near; now the view is first person, at the avatar's eyes (the point the mouselook camera uses,
+    // LLAgentCamera::calcCameraPositionTargetGlobal CAMERA_MODE_MOUSELOOK: the render position plus LLVOAvatar
+    // mHeadOffset, the smoothed eye point updateHeadOffset keeps), plus the headset's own lean (motion parallax);
+    // (2) each eye was one symmetric square view; now each eye is drawn for its own off-axis frustum, the tangents of
+    // its XRView.projectionMatrix edges (the page sends them, "pt"), the way the headset itself would; (3) the whole
+    // world view of the window is used for the eye, not its centre square, so more of the render reaches the headset.
+    struct HeadMap
+    {
+        bool valid = false;
+        LLVector3 base;              // the head centre this frame (agent coordinates)
+        LLVector3 fwd, left, up;     // the avatar's heading frame (Z up): WebXR -Z maps to fwd, -X to left, +Y to up
+        F32 q[4] = {0, 0, 0, 1};     // the head orientation this frame was drawn with (WebXR)
+        F32 p[3] = {0, 0, 0};        // the head position in the page's reference space, and whether it was sent
+        bool has_p = false;
+        F32 view = 1.f;              // the camera's vertical field of view after the frame (radians), for picking
+    };
+    HeadMap gMap;
+    // the headset position where leaning is measured from (re-centred on a new mode, a sit / stand, or a big step)
+    struct Lean { bool set = false; F32 p0[3] = {0, 0, 0}; S32 sit = -1; };
+    Lean gLean;
+    constexpr F32 kLeanMax = 0.5f;      // metres: further than this is walking about the room, not leaning
+    // this eye's off-axis window as a scale and offset of the symmetric projection (LLViewerCamera::setPerspective)
+    struct EyeCrop { bool on = false; F32 ax = 1, bx = 0, ay = 1, by = 0; };
+    EyeCrop gCrop;
+
+    // rotate v by the unit quaternion q (WebXR) and map it to the viewer's axes of `m`:
+    // v' = v + 2w (u x v) + 2 u x (u x v), u = (x, y, z); then (x, y, z) -> -z fwd, -x left, +y up
+    LLVector3 headToAgent(const HeadMap& m, F32 vx, F32 vy, F32 vz)
+    {
+        const F32 qx = m.q[0], qy = m.q[1], qz = m.q[2], qw = m.q[3];
+        const F32 cx = qy * vz - qz * vy, cy = qz * vx - qx * vz, cz = qx * vy - qy * vx;
+        const F32 ccx = qy * cz - qz * cy, ccy = qz * cx - qx * cz, ccz = qx * cy - qy * cx;
+        const F32 rx = vx + 2.f * (qw * cx + ccx), ry = vy + 2.f * (qw * cy + ccy), rz = vz + 2.f * (qw * cz + ccz);
+        return m.fwd * (-rz) + m.left * (-rx) + m.up * ry;
+    }
+    // a direction in the page's reference space (no head rotation) to the viewer's axes
+    LLVector3 refToAgent(const HeadMap& m, F32 vx, F32 vy, F32 vz) { return m.fwd * (-vz) + m.left * (-vx) + m.up * vy; }
+
+    // The avatar's eyes (agent coordinates), as the mouselook camera places itself (see above). Forward and up from the
+    // avatar's centre (mHeadOffset X and Z; its Y is one eye's, "since we only care about Z, just grab one of the
+    // eyes", LLVOAvatar::updateHeadOffset), so the view is between the eyes. Seated on an object: through the seat's
+    // render matrix, as mouselook does. No avatar: the agent camera.
+    LLVector3 avatarEyes()
+    {
+        if (!isAgentAvatarValid() || gAgentAvatarp->mDrawable.isNull()) return LLViewerCamera::getInstance()->getOrigin();
+        LLVector3 off(gAgentAvatarp->mHeadOffset.mV[VX], 0.f, gAgentAvatarp->mHeadOffset.mV[VZ]);
+        if (gAgentAvatarp->isSitting() && gAgentAvatarp->getParent())
+        {
+            const LLMatrix4& mat = ((LLViewerObject*)gAgentAvatarp->getParent())->getRenderMatrix();
+            return (gAgentAvatarp->getPosition() + off * gAgentAvatarp->getRotation()) * mat;
+        }
+        F32 fixup = 0.f;
+        if (gAgentAvatarp->hasPelvisFixup(fixup) && !gAgentAvatarp->isSitting()) off.mV[VZ] -= fixup;
+        return gAgentAvatarp->getRenderPosition() + off * gAgentAvatarp->getRenderRotation();
+    }
+
+    // This frame's head: the avatar's heading (yaw only - the head's own turn is added by the pose), its eyes, and the
+    // headset's lean from where it was when 3D Mode started (a sit, a stand or a step of more than 1 m re-centres it).
+    void buildMap(const wolfvr::HeadPose& hp)
+    {
+        LLVector3 fwd = gAgent.getAtAxis();
+        fwd.mV[VZ] = 0.f;
+        if (fwd.normVec() < 1e-3f) fwd = LLVector3::x_axis;
+        gMap.fwd = fwd;
+        gMap.up = LLVector3::z_axis;
+        gMap.left = gMap.up % fwd;
+        std::memcpy(gMap.q, hp.q, sizeof gMap.q);
+        gMap.has_p = hp.has_pos;
+        std::memcpy(gMap.p, hp.pos, sizeof gMap.p);
+        LLVector3 base = avatarEyes();
+        const S32 sit = isAgentAvatarValid() && gAgentAvatarp->isSitting() ? (gAgentAvatarp->getParent() ? 2 : 1) : 0;
+        if (hp.has_pos)
+        {
+            if (!gLean.set || gLean.sit != sit) { std::memcpy(gLean.p0, hp.pos, sizeof gLean.p0); gLean.set = true; gLean.sit = sit; }
+            F32 d[3] = {hp.pos[0] - gLean.p0[0], hp.pos[1] - gLean.p0[1], hp.pos[2] - gLean.p0[2]};
+            const F32 n = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+            if (n > 1.0f) { std::memcpy(gLean.p0, hp.pos, sizeof gLean.p0); d[0] = d[1] = d[2] = 0.f; }
+            else if (n > kLeanMax) { for (F32& c : d) c *= kLeanMax / n; }
+            base += refToAgent(gMap, d[0], d[1], d[2]);
+        }
+        gMap.base = base;
+        gMap.valid = true;
+    }
+
+    // [VR WORLD POINTER 2026-11-04] Paul: "I couldn't point and sit on anything". The right controller's ray, when it
+    // is not on the action bar, is the mouse: on something drawn on the HUDs layer it is the mouse there; anywhere
+    // else it finds what it points at in the world (the pipeline's own ray test, LLPipeline::lineSegmentIntersectInWorld,
+    // the one cursorIntersect uses) and puts the mouse on that point as seen from the head, so the viewer's own hover,
+    // click, touch, sit-on-click, right-click menu and click-to-walk all run exactly as with the desktop mouse
+    // (LLViewerWindow::handleMouseMove / handleMouseDown / handleRightMouseDown -> LLToolPie, pickImmediate).
+    enum class Aim { NONE, UI, WORLD };
+    struct Pointer
+    {
+        F64 heard = 0;               // last ray (0 = none)
+        F32 o[3] = {0, 0, 0}, d[3] = {0, 0, -1};
+        bool has_layer = false;
+        F32 lu = 0, lv = 0;
+        Aim aim = Aim::NONE;
+        Aim held[3] = {Aim::NONE, Aim::NONE, Aim::NONE};   // a button down captures what it was pressed on
+        LLCoordGL pos;
+        bool pos_ok = false;
+        F32 dist = -1.f;             // metres along the ray to what it hits (-1 nothing)
+        bool prim = false;           // what it hits is an object (not the ground)
+        LLVector3 dbg_dir;           // [VR LEAN] debug only (WolfVRDebugStats): the direction it was projected along
+        F64 cast_at = 0;
+        std::string sent;            // the last "aim" message
+        bool idle = false;           // no ray, and the page already told so
+        F64 sent_at = 0;
+    };
+    Pointer gPtr;
+    F64 gPointerUsed = 0;            // the headset's pointer (any mode) was used: the window counts the mouse as in it
+    constexpr F32 kReach = 64.f;     // metres the pointer looks along its ray
 
     // [VR HUD LAYER 2026-11-04] The viewer's UI layer (HUD attachments + the 2D UI: floaters, notices, toolbars) drawn a
     // second time, into its own transparent target, for the headset - the desktop's own frame is not touched. At most
@@ -215,6 +337,14 @@ namespace
             gSrc[1] = wr.mBottom + (wr.getHeight() - side) / 2;
             gSrc[2] = gSrc[0] + side;
             gSrc[3] = gSrc[1] + side;
+            if (gEye >= 0 && gCrop.on)
+            {
+                // [VR 3D FIX 2026-11-04] the eye's own window was drawn across the whole world view (eyeCrop)
+                gSrc[0] = wr.mLeft;
+                gSrc[1] = wr.mBottom;
+                gSrc[2] = wr.mRight;
+                gSrc[3] = wr.mTop;
+            }
             gCap.win_w = ww;
             gCap.win_h = wh;
             gCap.x0 = gCap.y0 = 0;
@@ -399,6 +529,38 @@ void captureLayer()
         render_ui_2d();
     }
     gGL.flush();
+    {
+        // [VR HUD LAYER 2026-11-04] VR 3D Mode has its own action bar: leave the desktop's menu bar, status bar and
+        // toolbars out of the headset (everything outside the world view, and the toolbars over it), keeping HUDs,
+        // windows, notices and menus. Cleared to transparent, so a press there falls through to the world.
+        const GLboolean sc = glIsEnabled(GL_SCISSOR_TEST);
+        glEnable(GL_SCISSOR_TEST);
+        glClearColor(0.f, 0.f, 0.f, 0.f);
+        auto clearRect = [](S32 l, S32 b, S32 r, S32 t) {
+            if (r <= l || t <= b) return;
+            glScissor(l, b, r - l, t - b);
+            glClear(GL_COLOR_BUFFER_BIT);
+        };
+        const S32 W = (S32)gLayer.ww, H = (S32)gLayer.wh;
+        const LLRect wv = gViewerWindow->getWorldViewRectRaw();
+        clearRect(0, wv.mTop, W, H);          // above the world view: menu bar, status bar, navigation bar
+        clearRect(0, 0, W, wv.mBottom);       // below it
+        clearRect(0, wv.mBottom, wv.mLeft, wv.mTop);
+        clearRect(wv.mRight, wv.mBottom, W, wv.mTop);
+        if (gToolBarView)
+        {
+            const LLVector2 ds = gViewerWindow->getDisplayScale();
+            for (int t = LLToolBarEnums::TOOLBAR_FIRST; t <= LLToolBarEnums::TOOLBAR_LAST; ++t)
+            {
+                LLToolBar* tb = gToolBarView->getToolbar((LLToolBarEnums::EToolBarLocation)t);
+                if (!tb || !tb->getVisible()) continue;
+                const LLRect r = tb->calcScreenRect();
+                clearRect(ll_round(r.mLeft * ds.mV[VX]), ll_round(r.mBottom * ds.mV[VY]), ll_round(r.mRight * ds.mV[VX]),
+                          ll_round(r.mTop * ds.mV[VY]));
+            }
+        }
+        if (!sc) glDisable(GL_SCISSOR_TEST);
+    }
     // scale it down into the copy that is read (still bottom row first)
     GLint read_fb = 0, draw_fb = 0;
     glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read_fb);
@@ -443,6 +605,37 @@ void captureLayer()
 
 namespace
 {
+// [VR 3D FIX 2026-11-04] Test only (WolfVRDebugEyeDump, switches itself off): the two eyes of one stereo picture as
+// PNG files in the logs folder, and how they were drawn, so the depth can be measured on the PC (disparity).
+void maybeDumpEyes(const std::vector<uint8_t>& rgba, U32 w, U32 h, const wolfvr::HeadPose& hp)
+{
+    static LLCachedControl<bool> dump(gSavedSettings, "WolfVRDebugEyeDump", false);
+    if (!dump || !hp.stereo || w != 2 * h || rgba.size() < (size_t)w * h * 4) return;
+    gSavedSettings.setBOOL("WolfVRDebugEyeDump", false);
+    const U32 ew = w / 2;
+    for (int e = 0; e < 2; ++e)
+    {
+        LLPointer<LLImageRaw> raw = new LLImageRaw((U16)ew, (U16)h, 4);
+        U8* dst = raw->getData();
+        // LLImageRaw keeps the bottom row first (GL order); the picture is top row first
+        for (U32 y = 0; y < h; ++y)
+            std::memcpy(dst + (size_t)y * ew * 4, &rgba[((size_t)(h - 1 - y) * w + (size_t)e * ew) * 4], (size_t)ew * 4);
+        LLPointer<LLImagePNG> png = new LLImagePNG;
+        const std::string path = gDirUtilp->getExpandedFilename(LL_PATH_LOGS, e ? "wolfvr_eye_right.png" : "wolfvr_eye_left.png");
+        if (!png->encode(raw, 0.f) || !png->save(path)) LL_WARNS("WolfVR") << "eye dump: could not write " << path << LL_ENDL;
+    }
+    const LLVector3 eyes = avatarEyes();
+    LL_INFOS("WolfVR") << "eye dump: " << ew << "x" << h << " per eye; eye offsets (head space, m) L " << hp.eye[0] << ","
+                       << hp.eye[1] << "," << hp.eye[2] << " R " << hp.eye[3] << "," << hp.eye[4] << "," << hp.eye[5]
+                       << "; windows (tan L,R,B,T) L " << hp.tan[0] << "," << hp.tan[1] << "," << hp.tan[2] << "," << hp.tan[3]
+                       << " R " << hp.tan[4] << "," << hp.tan[5] << "," << hp.tan[6] << "," << hp.tan[7] << (hp.has_tan ? "" : " (not sent)")
+                       << "; head centre " << gMap.base << " avatar eyes " << eyes << " (" << (gMap.base - eyes).length()
+                       << " m lean); the desktop's own camera (mode " << (S32)gAgentCamera.getCameraMode() << ") would be at "
+                       << gAgent.getPosAgentFromGlobal(gAgentCamera.calcCameraPositionTargetGlobal()) << ", "
+                       << (gAgent.getPosAgentFromGlobal(gAgentCamera.calcCameraPositionTargetGlobal()) - gMap.base).length()
+                       << " m from the eyes (not used in the headset)" << LL_ENDL;
+}
+
 // Big screen: the whole window, letterboxed. 3D: the centre square, drawn for gFramePose.
 void captureInto(bool world)
 {
@@ -542,6 +735,7 @@ void captureInto(bool world)
             std::memcpy(gCap.buf.data(), p, bytes);
             glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
             const F64 ms = (LLTimer::getTotalSeconds() - gCap.issued[old]) * 1000.0;
+            if (world) maybeDumpEyes(gCap.buf, gCap.w, gCap.h, gCap.pose[old]);
             if (world) WolfVRStream::submitWorldFrame(gCap.buf, gCap.pose[old], ms);
             else WolfVRStream::submitFrame(gCap.buf, ms);
         }
@@ -558,6 +752,23 @@ void captureInto(bool world)
 }
 
 void applyEvents(const std::vector<wolfvr::InputEvent>& events);
+
+namespace
+{
+// [VR WORLD POINTER 2026-11-04] Between frames the camera is the head as it was last drawn (the head centre, its axes,
+// the symmetric view): the headset's pointer is projected with it and the viewer's picks (pickImmediate in the idle
+// loop's hover and clicks, the queued picks at the start of display()) see the world from the same place.
+void setPickCamera()
+{
+    if (!gMap.valid) return;
+    LLViewerCamera* cam = LLViewerCamera::getInstance();
+    LLVector3 at = headToAgent(gMap, 0.f, 0.f, -1.f), lft = headToAgent(gMap, -1.f, 0.f, 0.f), u = headToAgent(gMap, 0.f, 1.f, 0.f);
+    at.normVec(); lft.normVec(); u.normVec();
+    cam->setAxes(at, lft, u);
+    cam->setOrigin(gMap.base);
+    cam->setViewNoBroadcast(gMap.view);
+}
+}
 
 // [VR LEAN 2026-11-04] Paul: "If you need to pause the main viewer's screen while in VR you can do that". In VR 3D Mode
 // (WolfVRPauseDesktop, on by default) the desktop window is not drawn or shown: no UI pass, no swap, except one
@@ -594,6 +805,7 @@ void displayFrame()
     s_last_frame = LLTimer::getTotalSeconds();
     const F64 t0 = s_last_frame;
     F64 t1 = t0;
+    if (world) setPickCamera();   // the queued picks (display(): performPick) from the head, as the hover ones were
     if (!stereo)
     {
         if (gPaused) gDisplaySwapBuffers = false;   // not shown; swap() sets it back
@@ -602,9 +814,6 @@ void displayFrame()
     }
     else
     {
-        // the head centre the agent camera placed this frame (LLAgentCamera::updateCamera, idle), taken here so an
-        // early return in the left eye's display() can never leave a stale one for the right eye
-        gEyeBase = LLViewerCamera::getInstance()->getOrigin();
         gEye = 0;
         gDisplaySwapBuffers = false;
         display();
@@ -616,8 +825,8 @@ void displayFrame()
         display();
         gEye = -1;
         gDisplaySwapBuffers = true;
-        LLViewerCamera::getInstance()->setOrigin(gEyeBase);   // the head centre again for the rest of the frame
     }
+    if (world) setPickCamera();   // the head centre again for the rest of the frame and the next idle loop
     const bool was_paused = gPaused;
     gPaused = false;
     if (!gDebugStats) return;   // [VR LEAN] no measuring unless asked for
@@ -649,11 +858,11 @@ void captureWorld()
     captureInto(true);
 }
 
-// [VR 3D 2026-11-03] Turn this frame's camera to the headset's pose. The agent camera has already placed it
-// (LLAgentCamera::updateCamera, idle); this keeps its position, takes the avatar's heading (yaw only) and adds the
-// head's own rotation, so turning the avatar still turns the view and the head looks around in it.
+// [VR 3D 2026-11-03] Turn this frame's camera to the headset's pose: the avatar's heading (yaw only) plus the head's
+// own rotation, so turning the avatar still turns the view and the head looks around in it.
 // WebXR space is right-handed, +Y up, -Z forward (wolfvrpipe_video.h Quat); the viewer's is X forward (at), Y left,
 // Z up (llcoordframe.h). A vector (x, y, z) in head space is therefore -z forward, -x left, +y up.
+// [VR 3D FIX 2026-11-04] First person at the avatar's eyes (buildMap), and in stereo each eye's own off-axis frustum.
 void applyHeadCamera()
 {
     LLViewerCamera* cam = LLViewerCamera::getInstance();
@@ -661,6 +870,7 @@ void applyHeadCamera()
     // [VR STEREO] the right eye uses the left eye's head pose, so the two halves of one picture always match
     wolfvr::HeadPose hp = gEye == 1 ? gFramePose : want ? WolfVRStream::headPose() : wolfvr::HeadPose();
     if (!want) hp.valid = false;
+    gCrop.on = false;
     if (!hp.valid)
     {
         if (gCameraOverridden)
@@ -669,6 +879,8 @@ void applyHeadCamera()
             gCameraOverridden = false;
         }
         gFramePose = wolfvr::HeadPose();
+        gMap.valid = false;
+        gLean.set = false;
         return;
     }
     if (!gCameraOverridden)
@@ -676,40 +888,60 @@ void applyHeadCamera()
         gSavedView = cam->getView();
         gCameraOverridden = true;
     }
-    // The heading is the avatar's, not the camera's: if the agent camera ever skipped a frame, reading back our own
-    // turned camera would add the head's yaw again every frame.
-    LLVector3 fwd = gAgent.getAtAxis();
-    fwd.mV[VZ] = 0.f;
-    if (fwd.normVec() < 1e-3f) fwd = LLVector3::x_axis;
-    const LLVector3 up = LLVector3::z_axis;
-    const LLVector3 left = up % fwd;
-    // rotate v by the unit quaternion q: v' = v + 2w (u x v) + 2 u x (u x v), u = (x, y, z)
-    const F32 qx = hp.q[0], qy = hp.q[1], qz = hp.q[2], qw = hp.q[3];
-    auto rot = [&](F32 vx, F32 vy, F32 vz) {
-        const F32 cx = qy * vz - qz * vy, cy = qz * vx - qx * vz, cz = qx * vy - qy * vx;
-        const F32 ccx = qy * cz - qz * cy, ccy = qz * cx - qx * cz, ccz = qx * cy - qy * cx;
-        const F32 rx = vx + 2.f * (qw * cx + ccx), ry = vy + 2.f * (qw * cy + ccy), rz = vz + 2.f * (qw * cz + ccz);
-        return fwd * (-rz) + left * (-rx) + up * ry;
-    };
-    LLVector3 at = rot(0.f, 0.f, -1.f), lft = rot(-1.f, 0.f, 0.f), u = rot(0.f, 1.f, 0.f);
+    if (gEye != 1) buildMap(hp);   // once per frame: the right eye keeps the left eye's head
+    LLVector3 at = headToAgent(gMap, 0.f, 0.f, -1.f), lft = headToAgent(gMap, -1.f, 0.f, 0.f), u = headToAgent(gMap, 0.f, 1.f, 0.f);
     at.normVec(); lft.normVec(); u.normVec();
     cam->setAxes(at, lft, u);
-    // The picture is square and 100 degrees across both ways (or what the headset measured covers both its eyes'
-    // frusta, wolfvr.js eyeFov); the viewer's FOV is vertical.
-    const F32 fov = hp.fov_deg > 0.f ? hp.fov_deg : 100.f;
-    cam->setViewNoBroadcast(fov * DEG_TO_RAD);
-    hp.fov_deg = fov;
     hp.stereo = gEye >= 0;
+    if (gEye >= 0 && hp.has_tan)
+    {
+        // This eye's window [L, R] x [B, T] (tangents) fills the whole world view. The camera itself stays the smallest
+        // symmetric one that contains it (vertical tangent V, horizontal V * aspect), so culling, LOD and picking see
+        // everything the eye does; the projection is that one, scaled and shifted onto the window (eyeCrop, applied
+        // in LLViewerCamera::setPerspective the way its own zoomed tiles are).
+        const F32* w = hp.tan + 4 * gEye;
+        const F32 A = llmax(0.1f, cam->getAspect());
+        const F32 V = llmax(llmax(std::fabs(w[2]), std::fabs(w[3])), llmax(std::fabs(w[0]), std::fabs(w[1])) / A);
+        cam->setViewNoBroadcast(2.f * std::atan(V));
+        gCrop.on = true;
+        gCrop.ax = 2.f * V * A / (w[1] - w[0]);
+        gCrop.bx = -(w[1] + w[0]) / (w[1] - w[0]);
+        gCrop.ay = 2.f * V / (w[3] - w[2]);
+        gCrop.by = -(w[3] + w[2]) / (w[3] - w[2]);
+        hp.fov_deg = 2.f * std::atan(V) * RAD_TO_DEG;
+    }
+    else
+    {
+        // mono (or a page without the eye windows): the square picture is 100 degrees across both ways, or what the
+        // headset measured covers both its eyes' frusta (wolfvr.js eyeFov); the viewer's FOV is vertical
+        const F32 fov = hp.fov_deg > 0.f ? hp.fov_deg : 100.f;
+        cam->setViewNoBroadcast(fov * DEG_TO_RAD);
+        hp.fov_deg = fov;
+        hp.has_tan = false;
+    }
     if (gEye >= 0)
     {
         // [VR STEREO 2026-11-04] this eye's own position: the head centre plus the eye's offset in head space, turned
-        // with the head (the same WebXR -> viewer mapping as the axes above). Axes stay parallel: WebXR gives both
-        // eyes the head's orientation on Quest, and the page shows each half from its own eye.
+        // with the head. Axes stay parallel: WebXR gives both eyes the head's orientation on Quest.
         const F32* e = hp.eye + 3 * gEye;
-        cam->setOrigin(gEyeBase + rot(e[0], e[1], e[2]));
+        cam->setOrigin(gMap.base + headToAgent(gMap, e[0], e[1], e[2]));
+    }
+    else
+    {
+        cam->setOrigin(gMap.base);
     }
     gFramePose = hp;
+    gMap.view = cam->getView();
 }
+
+bool eyeCrop(F32& ax, F32& bx, F32& ay, F32& by)
+{
+    if (!gCrop.on || gEye < 0) return false;
+    ax = gCrop.ax; bx = gCrop.bx; ay = gCrop.ay; by = gCrop.by;
+    return true;
+}
+
+bool pointerActive() { return gPointerUsed > 0 && LLTimer::getTotalSeconds() - gPointerUsed < 2.0; }
 
 // [VR AUDIO 2026-11-04] The ears follow the head: audio_update_listener (llvieweraudio.cpp, idle, before display() turns
 // the camera to the head) asks here for the newest head pose's axes, the same mapping as applyHeadCamera, so a sound
@@ -719,23 +951,186 @@ bool listenerAxes(LLVector3& at, LLVector3& up)
     if (gSnapshot || gCubeSnapshot || !WolfVRStream::worldWanted()) return false;
     const wolfvr::HeadPose hp = WolfVRStream::headPose();
     if (!hp.valid) return false;
-    LLVector3 fwd = gAgent.getAtAxis();
-    fwd.mV[VZ] = 0.f;
-    if (fwd.normVec() < 1e-3f) fwd = LLVector3::x_axis;
-    const LLVector3 zup = LLVector3::z_axis;
-    const LLVector3 left = zup % fwd;
-    const F32 qx = hp.q[0], qy = hp.q[1], qz = hp.q[2], qw = hp.q[3];
-    auto rot = [&](F32 vx, F32 vy, F32 vz) {
-        const F32 cx = qy * vz - qz * vy, cy = qz * vx - qx * vz, cz = qx * vy - qy * vx;
-        const F32 ccx = qy * cz - qz * cy, ccy = qz * cx - qx * cz, ccz = qx * cy - qy * cx;
-        const F32 rx = vx + 2.f * (qw * cx + ccx), ry = vy + 2.f * (qw * cy + ccy), rz = vz + 2.f * (qw * cz + ccz);
-        return fwd * (-rz) + left * (-rx) + zup * ry;
-    };
-    at = rot(0.f, 0.f, -1.f);
-    up = rot(0.f, 1.f, 0.f);
+    HeadMap m;
+    m.fwd = gAgent.getAtAxis();
+    m.fwd.mV[VZ] = 0.f;
+    if (m.fwd.normVec() < 1e-3f) m.fwd = LLVector3::x_axis;
+    m.up = LLVector3::z_axis;
+    m.left = m.up % m.fwd;
+    std::memcpy(m.q, hp.q, sizeof m.q);
+    at = headToAgent(m, 0.f, 0.f, -1.f);
+    up = headToAgent(m, 0.f, 1.f, 0.f);
     at.normVec();
     up.normVec();
     return true;
+}
+
+namespace
+{
+// A point (agent coordinates) to the window pixel the viewer's pick turns back into a ray through it: the exact inverse
+// of LLViewerWindow::mouseDirectionGlobal (UI-scaled coordinates: the vertical field of view across the world view's
+// height, centred on it), then to raw pixels (LLViewerWindow::handleAnyMouseClick divides by the display scale).
+bool projectToWindow(const LLVector3& p, LLCoordGL& out)
+{
+    const LLViewerCamera* cam = LLViewerCamera::getInstance();
+    const LLVector3 v = p - cam->getOrigin();
+    const F32 a = v * cam->getAtAxis();
+    if (a < 0.05f) return false;
+    const LLRect wr = gViewerWindow->getWorldViewRectScaled();
+    const F32 dist = (F32)wr.getHeight() * 0.5f / std::tan(cam->getView() * 0.5f);
+    const F32 xs = (F32)wr.getCenterX() - dist * (v * cam->getLeftAxis()) / a;
+    const F32 ys = (F32)wr.getCenterY() + dist * (v * cam->getUpAxis()) / a;
+    if (xs < wr.mLeft || xs > wr.mRight || ys < wr.mBottom || ys > wr.mTop) return false;
+    const LLVector2 sc = gViewerWindow->getDisplayScale();
+    out = LLCoordGL(ll_round(xs * sc.mV[VX]), ll_round(ys * sc.mV[VY]));
+    return true;
+}
+
+LLCoordGL layerToWindow(F32 u, F32 v)
+{
+    const S32 ww = gViewerWindow->getWindowWidthRaw(), wh = gViewerWindow->getWindowHeightRaw();
+    return LLCoordGL(llclamp((S32)(u * ww), 0, ww - 1), llclamp((S32)((1.f - v) * wh), 0, wh - 1));
+}
+
+const char* cursorName()
+{
+    switch (gViewerWindow->getWindow()->getCursor())
+    {
+    case UI_CURSOR_HAND: return "touch";
+    case UI_CURSOR_TOOLSIT: return "sit";
+    case UI_CURSOR_TOOLBUY: return "buy";
+    case UI_CURSOR_TOOLPAY: return "pay";
+    case UI_CURSOR_TOOLOPEN: return "open";
+    case UI_CURSOR_TOOLPLAY: case UI_CURSOR_TOOLPAUSE: case UI_CURSOR_TOOLMEDIAOPEN: return "media";
+    case UI_CURSOR_IBEAM: return "text";
+    case UI_CURSOR_TOOLGRAB: case UI_CURSOR_GRABLOCKED: return "grab";
+    default: return "";
+    }
+}
+
+// Where the pointer is this frame: what it is on (a press keeps what it was pressed on until it is let go), the window
+// pixel, and the distance along the ray for the headset's dot. Then the mouse is moved there and the page told.
+void updatePointer(bool force)
+{
+    const F64 now = LLTimer::getTotalSeconds();
+    const bool live = gPtr.heard > 0 && now - gPtr.heard < 0.5 && gMap.valid && WolfVRStream::worldWanted();
+    const bool held = gPtr.held[0] != Aim::NONE || gPtr.held[2] != Aim::NONE;
+    if (!live && !held && gPtr.aim == Aim::NONE && gPtr.idle) return;   // nothing to do until a ray comes (lean)
+    if (!live && !held)
+    {
+        if (gPtr.aim != Aim::NONE) { gPtr.aim = Aim::NONE; gPtr.pos_ok = false; }
+    }
+    else
+    {
+        LLCoordGL layer_pos;
+        const bool on_layer = gPtr.has_layer && (layer_pos = layerToWindow(gPtr.lu, gPtr.lv), layerHasPixel(layer_pos.mX, layer_pos.mY));
+        Aim aim = held ? (gPtr.held[0] != Aim::NONE ? gPtr.held[0] : gPtr.held[2]) : on_layer ? Aim::UI : Aim::WORLD;
+        LLCoordGL pos;
+        bool ok = false;
+        if (aim == Aim::UI)
+        {
+            pos = gPtr.has_layer ? layerToWindow(gPtr.lu, gPtr.lv) : gPtr.pos;
+            ok = true;
+            gPtr.dist = -1.f;
+        }
+        else
+        {
+            // the ray in the viewer's world: reference space -> the head as last drawn (gMap) -> agent coordinates
+            const F32 ro[3] = {gPtr.o[0] - (gMap.has_p ? gMap.p[0] : 0.f), gPtr.o[1] - (gMap.has_p ? gMap.p[1] : 0.f),
+                               gPtr.o[2] - (gMap.has_p ? gMap.p[2] : 0.f)};
+            const LLVector3 O = gMap.base + refToAgent(gMap, ro[0], ro[1], ro[2]);
+            LLVector3 D = refToAgent(gMap, gPtr.d[0], gPtr.d[1], gPtr.d[2]);
+            D.normVec();
+            if (force || now - gPtr.cast_at >= 1.0 / 30.0)   // the ray test at most 30 times a second
+            {
+                gPtr.cast_at = now;
+                LLVector4a start, end, hit;
+                start.load3(O.mV);
+                end.load3((O + D * kReach).mV);
+                S32 face = -1;
+                LLViewerObject* obj = gPipeline.lineSegmentIntersectInWorld(start, end, false, false, true, false, &face,
+                                                                            nullptr, nullptr, &hit, nullptr, nullptr, nullptr);
+                if (obj)
+                {
+                    LLVector3 h(hit.getF32ptr());
+                    gPtr.dist = (h - O).length();
+                    gPtr.prim = obj->getPCode() == LL_PCODE_VOLUME;
+                }
+                else
+                {
+                    gPtr.dist = -1.f;
+                    gPtr.prim = false;
+                }
+            }
+            const LLVector3 target = O + D * (gPtr.dist > 0.f ? gPtr.dist : kReach);
+            if (gDebugStats) { gPtr.dbg_dir = target - LLViewerCamera::getInstance()->getOrigin(); gPtr.dbg_dir.normVec(); }
+            ok = projectToWindow(target, pos);
+            if (!ok && held) { pos = gPtr.pos; ok = gPtr.pos_ok; }
+        }
+        if (!ok) aim = Aim::NONE;
+        if (ok && (!gPtr.pos_ok || pos.mX != gPtr.pos.mX || pos.mY != gPtr.pos.mY || aim != gPtr.aim))
+        {
+            gViewerWindow->handleMouseMove(gViewerWindow->getWindow(), pos, MASK_NONE);
+        }
+        gPtr.aim = aim;
+        gPtr.pos = pos;
+        gPtr.pos_ok = ok;
+    }
+    // tell the page where the ray landed and what the viewer would do there (its cursor), when it changes
+    const char* kind = gPtr.aim == Aim::UI ? "ui" : gPtr.aim == Aim::WORLD ? "world" : "none";
+    const char* cur = gPtr.aim == Aim::NONE ? "" : cursorName();
+    const std::string msg = llformat("{\"t\":\"aim\",\"k\":\"%s\",\"d\":%.2f,\"c\":\"%s\",\"o\":%d}", kind,
+                                     gPtr.aim == Aim::WORLD ? gPtr.dist : -1.f, cur, gPtr.aim == Aim::WORLD && gPtr.prim ? 1 : 0);
+    if (msg != gPtr.sent && (force || now - gPtr.sent_at >= 1.0 / 30.0))
+    {
+        gPtr.sent = msg;
+        gPtr.sent_at = now;
+        WolfVRStream::sendText(msg);
+    }
+    gPtr.idle = gPtr.aim == Aim::NONE && msg == gPtr.sent;
+}
+
+// A press or release of the 3D pointer: on what the ray is on now (a press), or on what the press was on (a release).
+void pointerButton(const wolfvr::InputEvent& e)
+{
+    const int bi = e.button == 2 ? 2 : 0;
+    LLWindow* window = gViewerWindow->getWindow();
+    if (e.type == wolfvr::InputEvent::Type::DOWN)
+    {
+        if (gPtr.held[bi] != Aim::NONE) return;
+        updatePointer(true);
+        if (gPtr.aim == Aim::NONE || !gPtr.pos_ok) return;
+        gPtr.held[bi] = gPtr.aim;
+        const bool dbg_mouse = LLView::sDebugMouseHandling;
+        if (gDebugStats) LLView::sDebugMouseHandling = true;   // [VR LEAN] debug only: the viewer logs who took the press
+        const bool handled = bi == 2 ? gViewerWindow->handleRightMouseDown(window, gPtr.pos, MASK_NONE)
+                                     : gViewerWindow->handleMouseDown(window, gPtr.pos, MASK_NONE);
+        LLView::sDebugMouseHandling = dbg_mouse;
+        if (gDebugStats)
+        {
+            // [VR LEAN] debug only: what one press did (one line per press, never per frame)
+            const LLPickInfo& pk = LLToolPie::getInstance()->getPick();
+            LL_INFOS("WolfVR") << "pointer " << (bi == 2 ? "right" : "left") << " down on " << (gPtr.aim == Aim::UI ? "UI" : "world")
+                               << " at " << gPtr.pos.mX << "," << gPtr.pos.mY << " (" << gPtr.dist << " m), handled " << handled
+                               << ", tool " << LLToolMgr::getInstance()->getCurrentTool()->getName() << ", last pick type "
+                               << (S32)pk.mPickType << " object " << (pk.getObject() ? pk.getObject()->getID().asString() : std::string("none"))
+                               << ", camera at " << LLViewerCamera::getInstance()->getOrigin() << " view " << LLViewerCamera::getInstance()->getView()
+                               << ", ray through the pixel " << gViewerWindow->mouseDirectionGlobal(ll_round(gPtr.pos.mX / gViewerWindow->getDisplayScale().mV[VX]),
+                                                                                                   ll_round(gPtr.pos.mY / gViewerWindow->getDisplayScale().mV[VY]))
+                               << " towards the hit " << gPtr.dbg_dir << " display scale " << gViewerWindow->getDisplayScale()
+                               << ", mouse captor " << (gFocusMgr.getMouseCapture() ? gFocusMgr.getMouseCapture()->getName() : std::string("none"))
+                               << LL_ENDL;
+        }
+    }
+    else
+    {
+        if (gPtr.held[bi] == Aim::NONE) return;
+        updatePointer(true);
+        gPtr.held[bi] = Aim::NONE;
+        if (bi == 2) gViewerWindow->handleRightMouseUp(window, gPtr.pos, MASK_NONE);
+        else gViewerWindow->handleMouseUp(window, gPtr.pos, MASK_NONE);
+    }
+}
 }
 
 void pumpInput()
@@ -744,6 +1139,7 @@ void pumpInput()
     if (!gViewerWindow) return;
     const std::vector<wolfvr::InputEvent> events = WolfVRStream::takeInput();
     applyEvents(events);
+    updatePointer(false);   // [VR WORLD POINTER] every frame while the ray is heard (and to let go when it is not)
     // the held stick, every frame
     const F64 now = LLTimer::getTotalSeconds();
     if (now - gStick.heard > 1.0) { gStick.x = gStick.y = 0.f; gStick.lift = 0; }
@@ -770,6 +1166,23 @@ void applyEvents(const std::vector<wolfvr::InputEvent>& events)
     for (const wolfvr::InputEvent& e : events)
     {
         const MASK mask = maskOf(e.mods);
+        if (e.type == T::MOVE || e.type == T::DOWN || e.type == T::UP || e.type == T::WHEEL || e.type == T::RAY)
+            gPointerUsed = LLTimer::getTotalSeconds();
+        if (e.type == T::RAY)
+        {
+            std::memcpy(gPtr.o, e.o, sizeof gPtr.o);
+            std::memcpy(gPtr.d, e.d, sizeof gPtr.d);
+            gPtr.has_layer = e.has_layer;
+            gPtr.lu = e.u;
+            gPtr.lv = e.v;
+            gPtr.heard = LLTimer::getTotalSeconds();
+            continue;
+        }
+        if (e.world && (e.type == T::DOWN || e.type == T::UP))
+        {
+            pointerButton(e);   // [VR WORLD POINTER]
+            continue;
+        }
         // [VR HUD LAYER] a point on the UI layer is a point on the whole window (no letterbox)
         auto where = [&](const wolfvr::InputEvent& ev) {
             if (!ev.layer) return toWindow(ev.u, ev.v);
@@ -847,6 +1260,8 @@ void applyEvents(const std::vector<wolfvr::InputEvent>& events)
         case T::ACTION:
             WolfVRUi::run(e.key, e.text);   // [VR CONTROLS 2026-11-04] an action-bar button (wolfvrui.cpp)
             break;
+        case T::RAY:
+            break;   // handled above
         case T::TEXT:
         {
             const LLWString w = utf8str_to_wstring(e.text);

@@ -208,7 +208,7 @@ namespace
     }
 
     constexpr uint32_t kMagic = 0x31525657;   // "WVR1" little-endian
-    constexpr size_t kHeaderSize = 96;        // keep in step with wolfvr.js parseHeader() ([VR STEREO] was 72)
+    constexpr size_t kHeaderSize = 128;       // keep in step with wolfvr.js parseHeader() ([VR STEREO] 96, was 72)
 
     template <typename T> void put(std::string& b, size_t off, T v) { std::memcpy(&b[off], &v, sizeof(T)); }
 
@@ -262,6 +262,10 @@ namespace
         float eye[6] = {-0.032f, 0, 0, 0.032f, 0, 0};
         float fov_deg = 0;
         bool stereo = false;
+        bool has_tan = false;    // [VR 3D FIX 2026-11-04] see HeadPose
+        float tan[8] = {-1, 1, -1, 1, -1, 1, -1, 1};
+        bool has_pos = false;
+        float pos[3] = {0, 0, 0};
     };
 
     std::string contentType(const std::string& path)
@@ -914,6 +918,33 @@ void Service::Impl::onText(const std::shared_ptr<Client>& c, const std::string& 
         }
         const double f = num("f", 0);
         if (f >= 60 && f <= 130) p.fov_deg = (float)f;
+        // [VR 3D FIX 2026-11-04] each eye's frustum (8 tangents, each eye's window at least 60 degrees and at most
+        // 160 across, left edge left of its right edge) and the head position (finite, within 50 m of the origin)
+        auto floats = [&](const char* k, size_t n, float* out, double lim) {
+            auto ia = o.find(k);
+            if (ia == o.end() || !ia->value().is_array() || ia->value().as_array().size() != n) return false;
+            const json::array& a2 = ia->value().as_array();
+            for (size_t k2 = 0; k2 < n; ++k2)
+            {
+                const json::value& x = a2[k2];
+                const double d = x.is_double() ? x.as_double() : x.is_int64() ? (double)x.as_int64() : NAN;
+                if (!std::isfinite(d) || std::fabs(d) > lim) return false;
+                out[k2] = (float)d;
+            }
+            return true;
+        };
+        float tv[8];
+        if (floats("pt", 8, tv, 6.0))
+        {
+            bool ok = true;
+            for (int k = 0; k < 2; ++k)
+            {
+                const float* w = tv + 4 * k;
+                ok = ok && w[1] - w[0] > 1.15f && w[3] - w[2] > 1.15f && w[1] - w[0] < 11.5f && w[3] - w[2] < 11.5f;
+            }
+            if (ok) { std::memcpy(p.tan, tv, sizeof tv); p.has_tan = true; }
+        }
+        p.has_pos = floats("p", 3, p.pos, 50.0);
         {
             std::lock_guard<std::mutex> lk(pose_mutex);
             pose = p;
@@ -960,6 +991,10 @@ void Service::Impl::onText(const std::shared_ptr<Client>& c, const std::string& 
         }
         c->hello = true;
         key_requested = true;   // (re)start the encoder for this page
+        // [VR 3D FIX 2026-11-04] what this headset's browser can decode (once per page; for choosing a codec later)
+        auto ih = o.find("hevc");
+        if (ih != o.end() && ih->value().is_bool())
+            log(LogLevel::INFO, std::string("VR pipe: headset decodes H.265: ") + (ih->value().as_bool() ? "yes" : "no"));
     }
     else if (t == "key")
     {
@@ -985,7 +1020,7 @@ void Service::Impl::onText(const std::shared_ptr<Client>& c, const std::string& 
     else if (t == "quality")
     {
         const double l = num("l", -1);
-        if (!(l >= 0 && l <= 3)) return;
+        if (!(l >= 0 && l <= 4)) return;
         std::lock_guard<std::mutex> lk(mode_mutex);
         quality_request = (int)l;
     }
@@ -1018,10 +1053,39 @@ void Service::Impl::onText(const std::shared_ptr<Client>& c, const std::string& 
         e.v = unit("v");
         e.mods = (uint32_t)std::clamp(num("m", 0), 0.0, 7.0);
         e.layer = num("l", 0) == 1;   // [VR HUD LAYER] a point on the UI layer
+        e.world = num("w", 0) == 1;   // [VR WORLD POINTER] the 3D pointer's button
         if (ev == "move" || ev == "down" || ev == "up")
         {
             e.type = ev == "move" ? InputEvent::Type::MOVE : ev == "down" ? InputEvent::Type::DOWN : InputEvent::Type::UP;
             e.button = num("b", 0) == 2 ? 2 : 0;
+        }
+        else if (ev == "ray")
+        {
+            // [VR WORLD POINTER 2026-11-04] origin within 50 m, a direction that can be made unit length
+            e.type = InputEvent::Type::RAY;
+            auto vec = [&](const char* k, float* out, double lim) {
+                auto ia = o.find(k);
+                if (ia == o.end() || !ia->value().is_array() || ia->value().as_array().size() != 3) return false;
+                const json::array& a2 = ia->value().as_array();
+                for (size_t k2 = 0; k2 < 3; ++k2)
+                {
+                    const json::value& x = a2[k2];
+                    const double d = x.is_double() ? x.as_double() : x.is_int64() ? (double)x.as_int64() : NAN;
+                    if (!std::isfinite(d) || std::fabs(d) > lim) return false;
+                    out[k2] = (float)d;
+                }
+                return true;
+            };
+            if (!vec("o", e.o, 50.0) || !vec("d", e.d, 2.0)) return;
+            const float n = std::sqrt(e.d[0] * e.d[0] + e.d[1] * e.d[1] + e.d[2] * e.d[2]);
+            if (!(n > 0.5f)) return;
+            for (float& c2 : e.d) c2 /= n;
+            e.has_layer = o.find("lu") != o.end() && o.find("lv") != o.end();
+            if (e.has_layer)
+            {
+                e.u = (float)std::clamp(num("lu", 0), 0.0, 1.0);
+                e.v = (float)std::clamp(num("lv", 0), 0.0, 1.0);
+            }
         }
         else if (ev == "wheel")
         {
@@ -1240,6 +1304,8 @@ void Service::Impl::frameLoop()
             std::memcpy(p.eye, ext_pose.eye, sizeof p.eye);
             p.fov_deg = ext_pose.fov_deg;
             p.stereo = ext_pose.stereo;
+            p.has_tan = ext_pose.has_tan;
+            std::memcpy(p.tan, ext_pose.tan, sizeof p.tan);
             t1 = nowMs();
             t0 = t1 - ext_capture_ms;
             lk.unlock();
@@ -1299,6 +1365,7 @@ void Service::Impl::frameLoop()
             cfgmsg["mode"] = cfg.mode;
             cfgmsg["world"] = cfg.world_allowed;
             cfgmsg["debug"] = cfg.debug_stats;
+            cfgmsg["check"] = cfg.stereo_check;
             if (enc->codec() == "h264" && !ef.key)
             {
                 // A decoder can only start on a key frame; this one is not, so ask again.
@@ -1325,9 +1392,11 @@ void Service::Impl::frameLoop()
         put<float>(msg, 60, (float)(t2 - t1));
         msg[64] = ef.key ? 1 : 0;
         msg[65] = enc->codec() == "h264" ? 0 : 1;
-        msg[66] = p.stereo ? 1 : 0;   // [VR STEREO 2026-11-04] two eyes side by side
+        // [VR STEREO 2026-11-04] two eyes side by side; [VR 3D FIX] 2 = each drawn for its own off-axis window (96..127)
+        msg[66] = p.stereo ? (p.has_tan ? 2 : 1) : 0;
         put<uint32_t>(msg, 68, (uint32_t)ef.data.size());
         for (int k = 0; k < 6; ++k) put<float>(msg, 72 + 4 * k, p.eye[k]);
+        for (int k = 0; k < 8; ++k) put<float>(msg, 96 + 4 * k, p.tan[k]);
         std::memcpy(&msg[kHeaderSize], ef.data.data(), ef.data.size());
         const size_t bytes = ef.data.size();
         sendToClient(c, std::move(msg), true);
@@ -1816,6 +1885,10 @@ HeadPose Service::headPose() const
     h.has_eyes = p.has_eyes;
     std::memcpy(h.eye, p.eye, sizeof h.eye);
     h.fov_deg = p.fov_deg;
+    h.has_tan = p.has_tan;
+    std::memcpy(h.tan, p.tan, sizeof h.tan);
+    h.has_pos = p.has_pos;
+    std::memcpy(h.pos, p.pos, sizeof h.pos);
     return h;
 }
 

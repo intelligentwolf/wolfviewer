@@ -20224,13 +20224,35 @@ Change of this parameter will affect the layout of buttons in notification toast
 		<key>WolfVREyeSize</key>
 		<map>
 			<key>Comment</key>
-			<string>[VR STEREO 2026-11-04] Each eye's picture in VR 3D Mode, pixels square (512-2048, rounded down to a multiple of 16). The two eyes go side by side in one video picture.</string>
+			<string>[VR STEREO 2026-11-04] The largest picture for each eye in VR 3D Mode, pixels square (512-2048, rounded down to a multiple of 16); the headset's quality step picks the size up to this. The two eyes go side by side in one video picture.</string>
 			<key>Persist</key>
 			<integer>1</integer>
 			<key>Type</key>
 			<string>U32</string>
 			<key>Value</key>
-			<integer>1152</integer>
+			<integer>1920</integer>
+		</map>
+		<key>WolfVRDebugEyeDump</key>
+		<map>
+			<key>Comment</key>
+			<string>[VR 3D FIX 2026-11-04] Test only: save the next VR 3D Mode stereo picture's two eyes as PNG files (logs folder, wolfvr_eye_left.png / wolfvr_eye_right.png) and log how they were drawn, once; switches itself off.</string>
+			<key>Persist</key>
+			<integer>0</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
+		</map>
+		<key>WolfVRStereoCheck</key>
+		<map>
+			<key>Comment</key>
+			<string>[VR 3D FIX 2026-11-04] Debug: the headset page shows a check card 1 m in front of you, drawn by the headset itself in true 3D, beside the world, with which eye gets which half of the picture.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>Boolean</string>
+			<key>Value</key>
+			<integer>0</integer>
 		</map>
 		<key>WolfVRStreamMode</key>
 		<map>

@@ -230,6 +230,7 @@
 #include "rlvhandler.h"
 // [/RLVa:KB]
 #include "wolfai.h"   // [WOLF AI CREDITS 2026-10-24/] handleFocus
+#include "wolfvrscreen.h"   // [VR WORLD POINTER 2026-11-04/] WolfVRScreen::pointerActive
 
 #if LL_WINDOWS
 #include <tchar.h> // For Unicode conversion methods
@@ -4387,7 +4388,13 @@ void LLViewerWindow::updateMouseDelta()
     //RN: fix for asynchronous notification of mouse leaving window not working
     LLCoordWindow mouse_pos;
     mWindow->getCursorPosition(&mouse_pos);
-    if (mouse_pos.mX < 0 ||
+    if (WolfVRScreen::pointerActive())
+    {
+        // [VR WORLD POINTER 2026-11-04/] the headset's pointer is the mouse now: hover and menus follow it, wherever
+        // the PC's own mouse happens to be (outside the window while the resident wears the headset)
+        mMouseInWindow = true;
+    }
+    else if (mouse_pos.mX < 0 ||
         mouse_pos.mY < 0 ||
         mouse_pos.mX > mWindowRectRaw.getWidth() ||
         mouse_pos.mY > mWindowRectRaw.getHeight())

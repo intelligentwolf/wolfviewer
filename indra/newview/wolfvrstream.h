@@ -34,6 +34,8 @@ namespace WolfVRStream
     void shutdown();
 
     bool running();
+    /** [VR MENU 2026-11-04] A headset is connected and being sent pictures now (the menu's tick shows only then). */
+    bool headsetActive();
     wolfvr::Stats stats();
     std::string lanUrl();
     /** The port in use (the next free one when WolfVRStreamPort was taken); 0 when off. */

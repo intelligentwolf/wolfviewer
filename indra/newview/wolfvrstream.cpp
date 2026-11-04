@@ -87,13 +87,19 @@ namespace
     // [VR CONTROLS 2026-11-04] Quality steps the headset page picks (per-headset start, then down when its decoder or
     // the network falls behind, up again when steady; wolfvr.js adaptQuality): eye size, stereo / mono / big-screen
     // bitrate. Step 0 is the Quest 3 default; the page's own table says which step each headset starts on.
+    // [VR 3D FIX 2026-11-04] Paul after the Quest 3 test: "the quality was a bit low". Sharper steps: step 0 is a
+    // 1920 px eye (3840 x 1920 picture: 28,800 macroblocks a frame, 1,728,000 a second at 60 fps - inside H.264 level
+    // 5.2, 36,864 and 2,073,600, ITU-T H.264 Table A-1; NVENC's H.264 limit is 4096 wide) at 100 Mbit/s; step 1, the
+    // Quest 3 start, 1728 px at 80 Mbit/s (Wi-Fi 6 carries it); the old Quest 3 start (1152 at 40) is now step 3.
     struct QualityStep { U32 eye; U32 stereo_kbps; U32 flat_kbps; };
-    constexpr QualityStep kQuality[4] = {{1152, 40000, 25000}, {1024, 30000, 20000}, {896, 22000, 15000}, {768, 15000, 10000}};
-    S32 gQuality = 0;   // gMutex
+    constexpr int kSteps = 5;
+    constexpr QualityStep kQuality[kSteps] = {{1920, 100000, 40000}, {1728, 80000, 32000}, {1440, 55000, 25000},
+                                              {1152, 35000, 18000}, {896, 20000, 12000}};
+    S32 gQuality = 1;   // gMutex
 
     ModeSize modeSize(const std::string& setting)
     {
-        const QualityStep& q = kQuality[llclamp(gQuality, 0, 3)];
+        const QualityStep& q = kQuality[llclamp(gQuality, 0, kSteps - 1)];
         if (setting == "test") return {"test", 1280, 1280, false, 25000};
         if (setting == "world" && gSavedSettings.getBOOL("WolfVR3DMode"))
         {
@@ -186,6 +192,7 @@ namespace
         cfg.external_frames = ms.external;
         cfg.world_allowed = gSavedSettings.getBOOL("WolfVR3DMode");
         cfg.debug_stats = gSavedSettings.getBOOL("WolfVRDebugStats");   // [VR LEAN] read once, here
+        cfg.stereo_check = gSavedSettings.getBOOL("WolfVRStereoCheck");
         if (ms.external) cfg.fps = 60;
         cfg.bitrate_kbps = ms.kbps;
         cfg.log = [](wolfvr::LogLevel level, const std::string& line) {
@@ -485,6 +492,12 @@ bool running()
 {
     std::lock_guard<std::mutex> lk(gMutex);
     return gService != nullptr;
+}
+
+bool headsetActive()
+{
+    std::lock_guard<std::mutex> lk(gMutex);
+    return gService && gService->wantsFrames();
 }
 
 wolfvr::Stats stats()

@@ -381,6 +381,7 @@ void LLViewerCamera::setPerspective(bool for_selection,
     if (!for_selection && WolfVRScreen::eyeCrop(vr_ax, vr_bx, vr_ay, vr_by))
     {
         proj_mat = glm::translate(glm::vec3(vr_bx, vr_by, 0.f)) * glm::scale(glm::vec3(vr_ax, vr_ay, 1.f)) * proj_mat;
+        WolfVRScreen::noteDepthRange(z_near, z_far);   // [VR DEPTH 2026-11-04/] the range glm::perspective gets below
     }
 
     calcProjection(z_far); // Update the projection matrix cache

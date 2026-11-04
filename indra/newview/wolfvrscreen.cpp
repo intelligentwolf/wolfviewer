@@ -75,6 +75,17 @@ namespace
         F64 last = 0;
         bool world = false;        // the GL objects are set up for 3D mode (square window crop) or big screen
         bool eye0 = false;         // [VR STEREO] this frame's left eye is in the left half; the right eye reads it back
+        // [VR DEPTH 2026-11-04] the eyes' depth, 1/8 of the picture each way: blitted from the scene's own depth buffer
+        // (LLPipeline mRT->deferredScreen, GL_DEPTH_COMPONENT24) into a renderbuffer of the same format (a depth blit
+        // needs matching formats and GL_NEAREST: glBlitFramebuffer, OpenGL 4.6 core 18.3.1), read back like the colour
+        GLuint dfbo = 0, drb = 0;
+        GLuint dpbo[kSlots] = {0, 0, 0};
+        F32 znear[kSlots] = {0, 0, 0}, zfar[kSlots] = {0, 0, 0};
+        bool has_depth[kSlots] = {false, false, false};
+        U32 dw = 0, dh = 0;
+        bool depth_ok = false;     // the first blit worked (checked once)
+        bool depth_checked = false;
+        std::vector<float> dbuf;
     };
     Capture gCap;
 
@@ -126,7 +137,7 @@ namespace
     Lean gLean;
     constexpr F32 kLeanMax = 0.5f;      // metres: further than this is walking about the room, not leaning
     // this eye's off-axis window as a scale and offset of the symmetric projection (LLViewerCamera::setPerspective)
-    struct EyeCrop { bool on = false; F32 ax = 1, bx = 0, ay = 1, by = 0; };
+    struct EyeCrop { bool on = false; F32 ax = 1, bx = 0, ay = 1, by = 0; F32 zn = 0, zf = 0; };   // + the depth range drawn with
     EyeCrop gCrop;
 
     // rotate v by the unit quaternion q (WebXR) and map it to the viewer's axes of `m`:
@@ -266,7 +277,7 @@ namespace
         GLsync fence[kSlots] = {nullptr, nullptr, nullptr};
         F64 issued[kSlots] = {0, 0, 0};
         U32 ww = 0, wh = 0;              // the window size the target is made for
-        U32 w = 0, h = 0;                // the picture size (the window, scaled to fit 1920 x 1080) the buffers are for
+        U32 w = 0, h = 0;                // the picture size (the window, scaled to fit 1600 x 900) the buffers are for
         GLuint sfbo = 0, stex = 0;       // the scaled copy that is read back
         int next = 0;
         F64 last = 0;
@@ -325,6 +336,9 @@ namespace
         if (gCap.pbo[0]) glDeleteBuffers(kSlots, gCap.pbo);
         if (gCap.fbo) glDeleteFramebuffers(1, &gCap.fbo);
         if (gCap.tex) glDeleteTextures(1, &gCap.tex);
+        if (gCap.dpbo[0]) glDeleteBuffers(kSlots, gCap.dpbo);
+        if (gCap.dfbo) glDeleteFramebuffers(1, &gCap.dfbo);
+        if (gCap.drb) glDeleteRenderbuffers(1, &gCap.drb);
         gCap = Capture();
     }
 
@@ -357,6 +371,35 @@ namespace
         }
         gCap.w = w;
         gCap.h = h;
+        // [VR DEPTH] the picture's depth grid (3D Mode: two eyes side by side, or the centre view): 1/8 each way
+        if (w >= 64 && h >= 64)
+        {
+            gCap.dw = w / 8;
+            gCap.dh = h / 8;
+            glGenRenderbuffers(1, &gCap.drb);
+            glBindRenderbuffer(GL_RENDERBUFFER, gCap.drb);
+            glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, (GLsizei)gCap.dw, (GLsizei)gCap.dh);
+            glBindRenderbuffer(GL_RENDERBUFFER, 0);
+            glGenFramebuffers(1, &gCap.dfbo);
+            glBindFramebuffer(GL_FRAMEBUFFER, gCap.dfbo);
+            glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, gCap.drb);
+            glDrawBuffer(GL_NONE);
+            glReadBuffer(GL_NONE);
+            const bool dok = glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            glGenBuffers(kSlots, gCap.dpbo);
+            for (int i = 0; i < kSlots; ++i)
+            {
+                glBindBuffer(GL_PIXEL_PACK_BUFFER, gCap.dpbo[i]);
+                glBufferData(GL_PIXEL_PACK_BUFFER, (GLsizeiptr)gCap.dw * gCap.dh * 4, nullptr, GL_STREAM_READ);
+            }
+            glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+            if (!dok)
+            {
+                LL_WARNS("WolfVR") << "3D Mode: could not make the depth framebuffer; the headset gets pictures without depth" << LL_ENDL;
+                gCap.dw = gCap.dh = 0;
+            }
+        }
         return true;
     }
 
@@ -376,7 +419,7 @@ namespace
             gSrc[1] = wr.mBottom + (wr.getHeight() - side) / 2;
             gSrc[2] = gSrc[0] + side;
             gSrc[3] = gSrc[1] + side;
-            if (gEye >= 0 && gCrop.on)
+            if (gCrop.on)
             {
                 // [VR 3D FIX 2026-11-04] the eye's own window was drawn across the whole world view (eyeCrop)
                 gSrc[0] = wr.mLeft;
@@ -518,10 +561,11 @@ void captureLayer()
             LL_WARNS("WolfVR") << "UI layer: could not make the target " << ww << "x" << wh << LL_ENDL;
             return;
         }
-        // The picture: the window scaled to fit 1920 x 1080 (multiples of 16, H.264 macroblocks). Stacked with its
-        // coverage it is at most 1920 x 2160, which every headset decoder we name takes (4K-class) beside the world
-        // picture; a bigger desktop window is sharper on the PC, not in the headset.
-        const F64 sc = llmin(1.0, llmin(1920.0 / ww, 1080.0 / wh));
+        // The picture: the window scaled to fit 1600 x 900 (multiples of 16), sent stacked with its coverage as one
+        // JPEG (wolfvrpipe.cpp layerLoop); a bigger desktop window is sharper on the PC, not in the headset.
+        // [VR HUD JPEG 2026-11-04] at most 1600 x 900: about 22 pixels a degree on the 72-degree band, near the Quest
+        // 3's own 25, as a JPEG picture of a few hundred KB when the UI changes
+        const F64 sc = llmin(1.0, llmin(1600.0 / ww, 900.0 / wh));
         const U32 lw = llmax(16u, (U32)(ww * sc) / 16 * 16), lh = llmax(16u, (U32)(wh * sc) / 16 * 16);
         glGenTextures(1, &gLayer.stex);
         glBindTexture(GL_TEXTURE_2D, gLayer.stex);
@@ -729,6 +773,31 @@ void captureInto(bool world)
     }
     glBlitFramebuffer(gSrc[0], gSrc[1], gSrc[2], gSrc[3], gCap.x0, gCap.y1, gCap.x1, gCap.y0, GL_COLOR_BUFFER_BIT, GL_LINEAR);
 
+    // [VR DEPTH 2026-11-04] this eye's depth into its half of the depth grid (bottom row first, as GL keeps it; the
+    // stream flips it). The scene's depth buffer is the same size as the window here (deferredScreen is allocated at
+    // the window's size, LLPipeline::allocateScreenBuffer), scaled in case it is not.
+    static LLCachedControl<bool> send_depth(gSavedSettings, "WolfVRDepth", true);
+    if (world && gCrop.on && gCap.dw && gCap.dfbo && send_depth)
+    {
+        LLRenderTarget& ds = gPipeline.mRT->deferredScreen;
+        const F32 sx = (F32)ds.getWidth() / (F32)llmax(1, ww), sy = (F32)ds.getHeight() / (F32)llmax(1, wh);
+        const S32 half = stereo ? (S32)gCap.dw / 2 : (S32)gCap.dw;   // the centre view has the whole grid
+        const S32 eye_x = stereo ? gEye * half : 0;
+        if (!gCap.depth_checked) while (glGetError() != GL_NO_ERROR) {}   // once: start the check clean
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, ds.getFBO());
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, gCap.dfbo);
+        glBlitFramebuffer(ll_round(gSrc[0] * sx), ll_round(gSrc[1] * sy), ll_round(gSrc[2] * sx), ll_round(gSrc[3] * sy),
+                          eye_x, 0, eye_x + half, (GLint)gCap.dh, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+        if (!gCap.depth_checked)
+        {
+            // once: a depth blit the driver refuses (formats not matching after all) means no depth, never wrong depth
+            gCap.depth_checked = true;
+            gCap.depth_ok = glGetError() == GL_NO_ERROR;
+            if (!gCap.depth_ok) LL_WARNS("WolfVR") << "3D Mode: the scene's depth could not be copied; pictures go without it" << LL_ENDL;
+        }
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, gCap.fbo);
+    }
+
     if (stereo && gEye == 0)
     {
         // [VR STEREO] left half done; the right eye's pass reads the whole picture back
@@ -756,6 +825,15 @@ void captureInto(bool world)
     glBindBuffer(GL_PIXEL_PACK_BUFFER, gCap.pbo[slot]);
     glPixelStorei(GL_PACK_ALIGNMENT, 4);
     glReadPixels(0, 0, (GLsizei)gCap.w, (GLsizei)gCap.h, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    gCap.has_depth[slot] = world && gCrop.on && gCap.dw && gCap.dfbo && gCap.depth_ok && send_depth;
+    if (gCap.has_depth[slot])
+    {
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, gCap.dfbo);
+        glBindBuffer(GL_PIXEL_PACK_BUFFER, gCap.dpbo[slot]);
+        glReadPixels(0, 0, (GLsizei)gCap.dw, (GLsizei)gCap.dh, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+        gCap.znear[slot] = gCrop.zn;
+        gCap.zfar[slot] = gCrop.zf;
+    }
     gCap.fence[slot] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
     gCap.issued[slot] = now;
     gCap.pose[slot] = gFramePose;
@@ -775,7 +853,20 @@ void captureInto(bool world)
             glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
             const F64 ms = (LLTimer::getTotalSeconds() - gCap.issued[old]) * 1000.0;
             if (world) maybeDumpEyes(gCap.buf, gCap.w, gCap.h, gCap.pose[old]);
-            if (world) WolfVRStream::submitWorldFrame(gCap.buf, gCap.pose[old], ms);
+            gCap.dbuf.clear();
+            if (world && gCap.has_depth[old])
+            {
+                glBindBuffer(GL_PIXEL_PACK_BUFFER, gCap.dpbo[old]);
+                const size_t dbytes = (size_t)gCap.dw * gCap.dh * 4;
+                if (const void* d = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, (GLsizeiptr)dbytes, GL_MAP_READ_BIT))
+                {
+                    gCap.dbuf.resize((size_t)gCap.dw * gCap.dh);
+                    std::memcpy(gCap.dbuf.data(), d, dbytes);
+                    glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+                }
+            }
+            if (world) WolfVRStream::submitWorldFrame(gCap.buf, gCap.pose[old], ms, gCap.dbuf, gCap.dbuf.empty() ? 0 : gCap.dw,
+                                                      gCap.dbuf.empty() ? 0 : gCap.dh, gCap.znear[old], gCap.zfar[old]);
             else WolfVRStream::submitFrame(gCap.buf, ms);
         }
     }
@@ -814,6 +905,7 @@ void setPickCamera()
 // ordinary frame every few seconds so the window is never a dead, frozen one. Big Screen Mode always draws it (it IS
 // the stream). gPaused is decided once per frame in displayFrame.
 bool uiSkipped() { return gEye == 0 || gPaused; }
+bool secondEye() { return gEye == 1; }
 
 // [VR STEREO 2026-11-04] The frame, mono or one pass per eye. The left eye is a whole display() whose picture goes only
 // to the headset (swap() does not show it: gDisplaySwapBuffers false, the way a tiled snapshot renders, and render_ui
@@ -911,6 +1003,7 @@ void captureWorld()
 {
     if (gSnapshot || gCubeSnapshot) return;   // a snapshot or reflection-probe pass is not the headset's view
     captureInto(true);
+    gCrop.on = false;   // the headset's window is for the world only: the HUDs and the UI after it are drawn as always
 }
 
 // [VR 3D 2026-11-03] Turn this frame's camera to the headset's pose: the avatar's heading (yaw only) plus the head's
@@ -966,6 +1059,23 @@ void applyHeadCamera()
         gCrop.by = -(w[3] + w[2]) / (w[3] - w[2]);
         hp.fov_deg = 2.f * std::atan(V) * RAD_TO_DEG;
     }
+    else if (gEye < 0 && hp.has_tan)
+    {
+        // [VR CENTRE 2026-11-04] one view for both eyes (WolfVRStereo off): drawn from the head's centre for the window
+        // that covers both eyes' frusta; with its depth the headset makes each eye's view from it (vrdepth.js), at
+        // half the PC's cost of two real eyes
+        F32 w[4] = {llmin(hp.tan[0], hp.tan[4]), llmax(hp.tan[1], hp.tan[5]), llmin(hp.tan[2], hp.tan[6]), llmax(hp.tan[3], hp.tan[7])};
+        const F32 A = llmax(0.1f, cam->getAspect());
+        const F32 V = llmax(llmax(std::fabs(w[2]), std::fabs(w[3])), llmax(std::fabs(w[0]), std::fabs(w[1])) / A);
+        cam->setViewNoBroadcast(2.f * std::atan(V));
+        gCrop.on = true;
+        gCrop.ax = 2.f * V * A / (w[1] - w[0]);
+        gCrop.bx = -(w[1] + w[0]) / (w[1] - w[0]);
+        gCrop.ay = 2.f * V / (w[3] - w[2]);
+        gCrop.by = -(w[3] + w[2]) / (w[3] - w[2]);
+        hp.fov_deg = 2.f * std::atan(V) * RAD_TO_DEG;
+        std::memcpy(hp.tan, w, sizeof w);   // the header's first window is this one (the page reads it as the centre's)
+    }
     else
     {
         // mono (or a page without the eye windows): the square picture is 100 degrees across both ways, or what the
@@ -990,9 +1100,16 @@ void applyHeadCamera()
     gMap.view = cam->getView();
 }
 
+void noteDepthRange(F32 znear, F32 zfar)
+{
+    gCrop.zn = znear;
+    gCrop.zf = zfar;
+}
+
 bool eyeCrop(F32& ax, F32& bx, F32& ay, F32& by)
 {
-    if (!gCrop.on || gEye < 0) return false;
+    // on from applyHeadCamera until the world for the headset is captured (captureWorld), never for the UI after it
+    if (!gCrop.on) return false;
     ax = gCrop.ax; bx = gCrop.bx; ay = gCrop.ay; by = gCrop.by;
     return true;
 }
@@ -1324,6 +1441,19 @@ void applyEvents(const std::vector<wolfvr::InputEvent>& events)
             break;
         case T::RAY:
             break;   // handled above
+        case T::TELEPORT:
+        {
+            // [VR TELEPORT 2026-11-04] Paul: "i need to press trigger twice and tp to the place i've pressed". The
+            // desktop's double-click teleport (LLToolPie::teleportToClickedLocation, which refuses objects with a
+            // click action and the resident's own avatar, and honours RLV): its hover pick taken fresh at the pointer
+            updatePointer(true);
+            if (gPtr.aim != Aim::WORLD || !gPtr.pos_ok) break;
+            const LLVector2 sc = gViewerWindow->getDisplayScale();
+            LLToolPie* pie = LLToolPie::getInstance();
+            pie->handleHover(ll_round(gPtr.pos.mX / sc.mV[VX]), ll_round(gPtr.pos.mY / sc.mV[VY]), MASK_NONE);
+            pie->teleportToClickedLocation();
+            break;
+        }
         case T::TEXT:
         {
             const LLWString w = utf8str_to_wstring(e.text);

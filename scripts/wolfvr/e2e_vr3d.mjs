@@ -50,6 +50,14 @@ ws.onmessage = (m) => { const d = JSON.parse(m.data); if (d.id && pend.has(d.id)
 const send = (method, params = {}) => new Promise(r => { const i = ++id; pend.set(i, r); ws.send(JSON.stringify({ id: i, method, params })); });
 const evalJs = async (e) => { const r = await send('Runtime.evaluate', { expression: e, awaitPromise: true, returnByValue: true }); return r.result?.result?.value; };
 const grab = async (file) => { const d = await evalJs('window.__wolfvr.grab()'); if (d) writeFileSync(resolve(OUT, file), Buffer.from(d.split(',')[1], 'base64')); return !!d; };
+const grabLayer = async (file) => { const d = await evalJs('window.__wolfvr.grabLayer()'); if (d) writeFileSync(resolve(OUT, file), Buffer.from(d.split(',')[1], 'base64')); return !!d; };
+// the avatar's position in its region (LEAP LLAgent getPosition), from the newest reply in the relay's log
+async function agentPos() {
+    leap('LLAgent', "{'op':'getPosition','reply':'@@REPLY@@'}");
+    await sleep(700);
+    const l = readFileSync(resolve(H, 'leap.log'), 'utf8').split('\n').filter((x) => x.startsWith('IN ') && x.includes('"region"')).pop();
+    try { const j = JSON.parse(l.replace(/^IN \S+ /, '')); return (j.data || j).region; } catch (e) { return null; }
+}
 const RIGHT = [0.2, 1.4, -0.2];
 async function aimAt(p) {
     const dx = p[0] - RIGHT[0], dy = p[1] - RIGHT[1], dz = p[2] - RIGHT[2];
@@ -57,7 +65,16 @@ async function aimAt(p) {
     await evalJs(`window.__fakeCtl.aim('right', ${Math.atan2(-dx / n, -dz / n)}, ${Math.asin(dy / n)})`);
 }
 const press = async (hand, i, down) => evalJs(`window.__fakeCtl.press('${hand}', ${i}, ${down})`);
-async function click(hand, i, holdMs = 250) { await press(hand, i, true); await sleep(holdMs); await press(hand, i, false); await sleep(300); }
+// the bar open or shut, by the menu button, waiting for the page to have done it (a slow software-rendered page lags)
+async function barOpen(want) {
+    for (let k = 0; k < 3; k++) {
+        if ((await evalJs('window.__wolfvr.bar().open')) === want) return true;
+        await click('left', 7);
+        if (await waitFor(async () => (await evalJs('window.__wolfvr.bar().open')) === want, 2500)) return true;
+    }
+    return false;
+}
+async function click(hand, i, holdMs = 250) { await press(hand, i, true); await sleep(holdMs); await press(hand, i, false); await sleep(600); }
 // best horizontal shift of the right half against the left in a band of rows (sum of absolute grey differences)
 const DISPARITY = `async (y0, y1, maxShift) => {
     const g = window.__wolfvr.grab(); if (!g) return null;
@@ -99,12 +116,15 @@ console.log('   eye offsets in the header (m):', JSON.stringify(e1 && e1.hdr.eye
 const routed = (e) => !!e && (e.halfLayers[0] & e.cameraMasks[e.eyeLayer[0] - 1]) && !(e.halfLayers[0] & e.cameraMasks[e.eyeLayer[1] - 1]) &&
     (e.halfLayers[1] & e.cameraMasks[e.eyeLayer[1] - 1]) && !(e.halfLayers[1] & e.cameraMasks[e.eyeLayer[0] - 1]);
 check(!!e1 && e1.hdr.stereo && e1.visible[0] && e1.visible[1] && !e1.mono, 'two eye halves shown, no single-view screen');
-check(!!e1 && e1.views[0].eye === 'left' && e1.eyeLayer[0] === 1 && routed(e1), 'left half only on the left-eye XR camera (view 0 = left), right half only on the right');
+// view i is drawn by XR camera i (three.js), camera i draws layer i + 1: the left half must be on 1 + (the index of the
+// view whose XRView.eye is "left"), whatever order the browser lists them in
+const leftOf = (e) => e.views.findIndex((v) => v.eye === 'left');
+check(!!e1 && e1.eyeLayer[0] === 1 + leftOf(e1) && routed(e1), `left half only on the left eye's XR camera, right half only on the right (views listed ${e1 && e1.views.map((v) => v.eye)})`);
 check(!!e1 && Math.abs(e1.hdr.eyes[3] - e1.hdr.eyes[0] - 0.064) < 0.002, 'the halves are drawn from eyes 64 mm apart (the fake headset IPD)');
 check(!!e1 && e1.tan.every((x, k) => Math.abs(x - e1.hdr.tan[k]) < 1e-4), 'each half drawn for exactly the eye window the page sent (to float precision)');
 await evalJs('window.__swapViews = true'); await sleep(800);
 const e2 = await evalJs('window.__wolfvr.eyes()');
-check(!!e2 && e2.views[0].eye === 'right' && e2.eyeLayer[0] === 2 && routed(e2), 'right eye listed first: the left half moves to the layer of the left-eye camera (' + JSON.stringify(e2 && e2.eyeLayer) + ')');
+check(!!e2 && !!e1 && e2.views[0].eye !== e1.views[0].eye && e2.eyeLayer[0] === 1 + leftOf(e2) && routed(e2), 'the views listed the other way round: the left half follows the left eye (' + JSON.stringify(e2 && e2.eyeLayer) + ')');
 await evalJs('window.__swapViews = false'); await sleep(500);
 await evalJs('window.__fakeXR.setPitch(-0.45)'); await sleep(4000);
 await grab('s_down.jpg');
@@ -118,18 +138,18 @@ const LOGS = resolve(H, 'prof/logs');
 const keep = (tag) => { for (const e of ['left', 'right']) { try { copyFileSync(resolve(LOGS, `wolfvr_eye_${e}.png`), resolve(OUT, `eye_${tag}_${e}.png`)); } catch (x) { /* not written */ } } };
 keep('behind');
 // [VR VIEW] Hide Me on the bar: first person, the avatar not drawn; the eyes again
-await click('left', 7);
+await barOpen(true);
 await aimAt(await evalJs('window.__wolfvr.slotPoint("hideme")')); await sleep(300); await click('right', 0);
 check(await waitFor(() => evalJs('window.__wolfvr.bar().hide === true'), 6000), 'Hide Me on the bar: the viewer switches to the first-person view with the avatar hidden');
-await click('left', 7);
+await barOpen(false);
 await sleep(2000);
 leap('LLViewerControl', "{'op':'set','group':'Global','key':'WolfVRDebugEyeDump','value':true}");
 await sleep(2500);
 keep('hidden');
-await click('left', 7);
+await barOpen(true);
 await aimAt(await evalJs('window.__wolfvr.slotPoint("hideme")')); await sleep(300); await click('right', 0);
 check(await waitFor(() => evalJs('window.__wolfvr.bar().hide === false'), 6000), 'Show Me: back to seeing the avatar from behind');
-await click('left', 7);
+await barOpen(false);
 await evalJs('window.__fakeXR.setPitch(0)'); await sleep(1500);
 
 // ---- 2. HUD clicks ----
@@ -140,11 +160,11 @@ check(!(await evalJs('window.__wolfvr.bar().open')), 'the thumb on and off the t
 check(await evalJs('window.__wolfvr.surfaces().tab'), 'the Menu tab shows while the bar is closed');
 await aimAt(await evalJs('window.__wolfvr.tabPoint()')); await sleep(300);
 await click('right', 0);
-check(await evalJs('window.__wolfvr.bar().open'), 'pointing at the Menu tab and pulling the trigger opens the bar');
+check(await waitFor(() => evalJs('window.__wolfvr.bar().open'), 3000), 'pointing at the Menu tab and pulling the trigger opens the bar');
 await click('left', 7);
-check(!(await evalJs('window.__wolfvr.bar().open')), 'the menu button (index 7) closes it');
+check(await waitFor(() => evalJs('!window.__wolfvr.bar().open'), 3000), 'the menu button (index 7) closes it');
 await click('left', 7);
-check(await evalJs('window.__wolfvr.bar().open'), 'and opens it again');
+check(await waitFor(() => evalJs('window.__wolfvr.bar().open'), 3000), 'and opens it again');
 const mapPt = await evalJs('window.__wolfvr.slotPoint("map")');
 await aimAt(mapPt); await sleep(300);
 await press('right', 0, true); await sleep(300);
@@ -155,9 +175,41 @@ await sleep(2500);
 check(await evalJs('window.__wolfvr.bar().on.includes("map")'), 'and still open after the trigger was let go over the layer (no second click, no select double)');
 await aimAt(mapPt); await sleep(300); await click('right', 0);
 check(await waitFor(() => evalJs('!window.__wolfvr.bar().on.includes("map")'), 6000), 'Map closed again from the bar');
-await click('left', 7);
+await barOpen(false);
 
 }
+// ---- 2b. windows and dialogs opened from the bar are IN the headset (the HUDs layer) and clickable there ----
+// (Paul on the Quest 3: "i click things and they are drawn on the main screen on my laptop which i can't see")
+async function pointAtView(path) {
+    const info = await leapInfo(path), root = await leapInfo('//main_view');
+    if (!info || !info.visible_chain || !info.rect || !root) return null;
+    const u = ((info.rect.left + info.rect.right) / 2) / root.rect.right, v = 1 - ((info.rect.top + info.rect.bottom) / 2) / root.rect.top;
+    await aimAt(await evalJs(`window.__wolfvr.layerPoint(${u}, ${v})`)); await sleep(500);
+    return await evalJs('window.__wolfvr.aim()');
+}
+for (const [slot, name] of [['map', 'worldmap'], ['inventory', 'floater_my_inventory'], ['people', 'floater_people']]) {
+    await barOpen(true);
+    await aimAt(await evalJs(`window.__wolfvr.slotPoint("${slot}")`)); await sleep(300); await click('right', 0);
+    await barOpen(false);
+    const opened = await waitFor(() => evalJs(`window.__wolfvr.bar().on.includes("${slot}")`), 8000);
+    await sleep(1500);
+    await grabLayer(`l_${slot}.png`);
+    const a = opened && await pointAtView(`//${name}/llfloater_close_btn`);
+    check(!!a && a.k === 'ui', `${slot}: opened from the bar, and the ray on its close button is on the viewer's UI in the HUDs layer`);
+    await click('right', 0, 200);
+    check(await waitFor(() => evalJs(`!window.__wolfvr.bar().on.includes("${slot}")`), 6000), `${slot}: the trigger on its close button (in the headset) closes it`);
+}
+// a dialog: a Yes / Cancel question, answered in the headset
+leap('LLNotifications', "{'op':'requestAdd','name':'GenericAlertYesCancel','substitutions':{'MESSAGE':'VR test: press Cancel'},'reply':'@@REPLY@@'}");
+await sleep(1500);
+await grabLayer('l_dialog.png');
+const ad = await pointAtView('//Cancel_okcancelbuttons');
+check(!!ad && ad.k === 'ui', 'a dialog shows in the headset: the ray on its Cancel button is on the viewer UI');
+await click('right', 0, 200);
+await sleep(1200);
+check(/Cancel_okcancelbuttons[^,}]*true/.test(readFileSync(resolve(H, 'leap.log'), 'utf8').split('\n').filter((l) => l.startsWith('IN ')).slice(-6).join('\n')),
+      'the trigger on Cancel answers the dialog');
+
 // ---- 3. world pointer: point at an object, right click, Sit ----
 // a modal notice the region may have shown at log-in (e.g. CurrencyURIOverrideReceived on The Caribbean) holds the
 // mouse until it is answered, in the headset as on the desktop: answer it first (Enter = its default button)
@@ -227,11 +279,26 @@ check(sat, 'the trigger on Sit sits the avatar ON an object (after ' + tries + '
 if (sat) {
     await sleep(2500);
     await grab('w_seated.jpg');
-    await click('left', 7);
+    await barOpen(true);
     await aimAt(await evalJs('window.__wolfvr.slotPoint("sit")')); await sleep(300); await click('right', 0);
     check(await waitFor(() => evalJs('window.__wolfvr.bar().sit === 0'), 8000), 'Stand from the bar');
-    await click('left', 7);
+    await barOpen(false);
 }
+
+// ---- 3b. the trigger twice on the ground: go there (the desktop's double-click teleport) ----
+await barOpen(false);
+await evalJs("window.__fakeCtl.aim('right', 0, -0.35)");
+const ag = await waitFor(async () => { const a = await evalJs('window.__wolfvr.aim()'); return a && a.k === 'world' && a.tag ? a : null; }, 5000) || await evalJs('window.__wolfvr.aim()');
+const before = await agentPos();
+console.log('   aim on the ground:', JSON.stringify(ag), ' from', JSON.stringify(before));
+check(!!ag && ag.k === 'world' && ag.tag, 'the dot on the ground says the trigger twice goes there');
+await press('right', 0, true); await sleep(160); await press('right', 0, false); await sleep(130);
+await press('right', 0, true); await sleep(160); await press('right', 0, false);
+await sleep(4000);
+const after = await agentPos();
+const moved = before && after ? Math.hypot(after[0] - before[0], after[1] - before[1]) : 0;
+console.log('   after:', JSON.stringify(after), `moved ${moved.toFixed(2)} m (aimed ${ag && ag.d} m along the ray)`);
+check(moved > 1.0, 'the trigger twice on the ground teleports the avatar there');
 
 if (!ONLY) {
 // ---- 4. Big Screen and back ----

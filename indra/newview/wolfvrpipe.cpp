@@ -46,6 +46,7 @@
 #include <openssl/x509v3.h>
 
 #include <algorithm>
+#include "zlib-ng/zlib.h"   // [VR DEPTH 2026-11-04] compress2 for the depth grid (the zlib llcommon links)
 #include <atomic>
 #include <cctype>
 #include <ctime>
@@ -208,7 +209,7 @@ namespace
     }
 
     constexpr uint32_t kMagic = 0x31525657;   // "WVR1" little-endian
-    constexpr size_t kHeaderSize = 128;       // keep in step with wolfvr.js parseHeader() ([VR STEREO] 96, was 72)
+    constexpr size_t kHeaderSize = 160;       // keep in step with wolfvr.js parseHeader() ([VR DEPTH] 160, 128, 96, 72)
 
     template <typename T> void put(std::string& b, size_t off, T v) { std::memcpy(&b[off], &v, sizeof(T)); }
 
@@ -508,6 +509,11 @@ struct Service::Impl
     std::vector<uint8_t> ext_rgba;
     HeadPose ext_pose;
     double ext_capture_ms = 0;
+    // [VR DEPTH 2026-11-04] the picture's depth grid (window depth 0..1, bottom row first), its size and the projection's
+    // near and far planes; empty when the picture has none
+    std::vector<float> ext_depth;
+    uint32_t ext_dw = 0, ext_dh = 0;
+    float ext_near = 0, ext_far = 0;
     bool ext_ready = false;
 
     // [VR BIG SCREEN] input from the page
@@ -1081,6 +1087,10 @@ void Service::Impl::onText(const std::shared_ptr<Client>& c, const std::string& 
             e.type = ev == "move" ? InputEvent::Type::MOVE : ev == "down" ? InputEvent::Type::DOWN : InputEvent::Type::UP;
             e.button = num("b", 0) == 2 ? 2 : 0;
         }
+        else if (ev == "tp")
+        {
+            e.type = InputEvent::Type::TELEPORT;   // [VR TELEPORT 2026-11-04] where the ray is (the viewer's pointer)
+        }
         else if (ev == "ray")
         {
             // [VR WORLD POINTER 2026-11-04] origin within 50 m, a direction that can be made unit length
@@ -1147,6 +1157,11 @@ void Service::Impl::onText(const std::shared_ptr<Client>& c, const std::string& 
         std::lock_guard<std::mutex> lk(input_mutex);
         input.push_back(std::move(e));
         while (input.size() > 256) input.pop_front();
+    }
+    else if (t == "summary")
+    {
+        // [VR QUALITY 2026-11-04] the page's one line every 30 s while in VR: what the headset really gets
+        log(LogLevel::INFO, "VR pipe: headset says: " + str("s").substr(0, 500));
     }
     else if (t == "log")
     {
@@ -1239,6 +1254,9 @@ void Service::Impl::frameLoop()
     const auto period = std::chrono::nanoseconds(1000000000LL / std::max<uint32_t>(1, cfg.fps));
     auto next = clock::now();
     std::vector<uint8_t> rgba;
+    std::vector<float> depth;            // [VR DEPTH] the newest picture's depth grid
+    uint32_t dw = 0, dh = 0;
+    float znear = 0, zfar = 0;
     std::unique_ptr<Encoder> enc;
     uint64_t enc_generation = 0;
     bool config_sent = false;
@@ -1317,8 +1335,13 @@ void Service::Impl::frameLoop()
                 continue;
             }
             rgba.swap(ext_rgba);
+            depth.swap(ext_depth);
+            ext_depth.clear();
+            dw = ext_dw; dh = ext_dh; znear = ext_near; zfar = ext_far;
             ext_ready = false;
             p.seq = ext_pose.seq;
+            p.has_pos = ext_pose.has_pos;
+            std::memcpy(p.pos, ext_pose.pos, sizeof p.pos);
             p.client_ms = ext_pose.valid ? ext_pose.client_ms : -1;
             p.q = Quat{ext_pose.q[0], ext_pose.q[1], ext_pose.q[2], ext_pose.q[3]};
             p.valid = ext_pose.valid;
@@ -1398,7 +1421,38 @@ void Service::Impl::frameLoop()
             config_sent = true;
         }
 
-        std::string msg(kHeaderSize + ef.data.size(), '\0');
+        // [VR DEPTH 2026-11-04] the depth grid, packed: each sample's distance along the view (metres) as 16 bits on a
+        // log scale from near to far (v = 65535 ln(z / near) / ln(far / near): the same fraction of a millimetre near the
+        // eye as of a metre far off), top row first, then deflated (zlib, RFC 1950 - the page's DecompressionStream
+        // "deflate"). Window depth d in 0..1 back to view z through the projection's near n and far f (glm::perspective,
+        // depth range 0..1): z = 2 n f / (f + n - (2 d - 1)(f - n)).
+        std::vector<uint8_t> depth_z;
+        if (!depth.empty() && dw && dh && depth.size() == (size_t)dw * dh && znear > 0.f && zfar > znear)
+        {
+            const double n = znear, f = zfar, lr = std::log(f / n);
+            std::vector<uint16_t> packed((size_t)dw * dh);
+            for (uint32_t y = 0; y < dh; ++y)
+            {
+                const float* src = &depth[(size_t)(dh - 1 - y) * dw];
+                uint16_t* dst = &packed[(size_t)y * dw];
+                for (uint32_t x = 0; x < dw; ++x)
+                {
+                    const double zn = 2.0 * src[x] - 1.0;
+                    double z = 2.0 * n * f / (f + n - zn * (f - n));
+                    if (!(z > n)) z = n;
+                    if (z > f) z = f;
+                    const double v = std::log(z / n) / lr * 65535.0 + 0.5;
+                    dst[x] = (uint16_t)std::min(65535.0, std::max(0.0, v));   // little-endian on every platform we ship
+                }
+            }
+            uLongf zlen = compressBound((uLong)(packed.size() * 2));
+            depth_z.resize(zlen);
+            if (compress2(depth_z.data(), &zlen, reinterpret_cast<const Bytef*>(packed.data()), (uLong)(packed.size() * 2), 1) == Z_OK)
+                depth_z.resize(zlen);
+            else
+                depth_z.clear();
+        }
+        std::string msg(kHeaderSize + ef.data.size() + depth_z.size(), '\0');
         put<uint32_t>(msg, 0, kMagic);
         put<uint32_t>(msg, 4, (uint32_t)kHeaderSize);
         put<uint64_t>(msg, 8, frame);
@@ -1415,12 +1469,22 @@ void Service::Impl::frameLoop()
         msg[64] = ef.key ? 1 : 0;
         msg[65] = enc->codec() == "h264" ? 0 : 1;
         // [VR STEREO 2026-11-04] two eyes side by side; [VR 3D FIX] 2 = each drawn for its own off-axis window (96..127)
-        msg[66] = p.stereo ? (p.has_tan ? 2 : 1) : 0;
+        msg[66] = p.stereo ? (p.has_tan ? 2 : 1) : (p.has_tan ? 3 : 0);   // [VR CENTRE] 3: one centre view, window at 96
         put<uint32_t>(msg, 68, (uint32_t)ef.data.size());
         for (int k = 0; k < 6; ++k) put<float>(msg, 72 + 4 * k, p.eye[k]);
         for (int k = 0; k < 8; ++k) put<float>(msg, 96 + 4 * k, p.tan[k]);
+        // [VR DEPTH 2026-11-04] 128..139 the head position it was drawn for (the page's reference space; 140 = 1 when
+        // known), 144..147 depth bytes after the picture, 148..149 / 150..151 the grid's width / height, 152 near, 156 far
+        for (int k = 0; k < 3; ++k) put<float>(msg, 128 + 4 * k, p.pos[k]);
+        msg[140] = p.has_pos ? 1 : 0;
+        put<uint32_t>(msg, 144, (uint32_t)depth_z.size());
+        put<uint16_t>(msg, 148, (uint16_t)(depth_z.empty() ? 0 : dw));
+        put<uint16_t>(msg, 150, (uint16_t)(depth_z.empty() ? 0 : dh));
+        put<float>(msg, 152, znear);
+        put<float>(msg, 156, zfar);
         std::memcpy(&msg[kHeaderSize], ef.data.data(), ef.data.size());
-        const size_t bytes = ef.data.size();
+        if (!depth_z.empty()) std::memcpy(&msg[kHeaderSize + ef.data.size()], depth_z.data(), depth_z.size());
+        const size_t bytes = ef.data.size() + depth_z.size();
         sendToClient(c, std::move(msg), true);
         frame++;
 
@@ -1526,14 +1590,19 @@ void Service::Impl::layerLoop()
             continue;
         }
         layer_same = 0;
-        if (clock::now() - last_sent < std::chrono::milliseconds(33) && !key) continue;
+        // [VR HUD JPEG 2026-11-04] at most 10 a second (a window opening or a list scrolling still looks smooth)
+        if (clock::now() - last_sent < std::chrono::milliseconds(100) && !key) continue;
         if (c->pending_binary.load() >= 3) { layer_key = layer_key || key; continue; }   // the network is behind
         if (!enc || enc_w != w || enc_h != h || enc_generation != c->generation || key)
         {
             enc.reset();
             std::string tried;
-            // 30 a second at most, mostly still: 8 Mbit/s is plenty for sharp text
-            enc = openEncoder(c->webcodecs ? cfg.encoder : std::string("jpeg"), w, h * 2, 30, 8000, tried);
+            // [VR HUD JPEG 2026-11-04] Paul on the Quest 3: "nothing works on the VR hud - i click things and they are
+            // drawn on the main screen". The layer was a SECOND H.264 stream (1920 x 2160 stacked) beside the 3456 x 1728
+            // world one: two hardware decodes at once, more than the headset's video decoder keeps up with (and the
+            // layer decoder's queue is also what stepped the world picture down). The layer is now JPEG pictures,
+            // decoded by the browser's image decoder, not the video one; only sent when it changes.
+            enc = openEncoder(std::string("jpeg"), w, h * 2, 10, 8000, tried);
             enc_w = w;
             enc_h = h;
             enc_generation = c->generation;
@@ -1944,7 +2013,8 @@ bool Service::immersive() const
     return xr == 1 || p.has_eyes;
 }
 
-void Service::submitFrame(std::vector<uint8_t>&& rgba, const HeadPose& pose, double capture_ms)
+void Service::submitFrame(std::vector<uint8_t>&& rgba, const HeadPose& pose, double capture_ms, std::vector<float>&& depth,
+                          uint32_t depth_w, uint32_t depth_h, float znear, float zfar)
 {
     if (!mImpl || !mImpl->cur_external) return;
     if (rgba.size() != (size_t)mImpl->cur_w * mImpl->cur_h * 4) return;
@@ -1957,6 +2027,11 @@ void Service::submitFrame(std::vector<uint8_t>&& rgba, const HeadPose& pose, dou
             i->st.frames_skipped++;   // the previous one was never encoded
         }
         i->ext_rgba.swap(rgba);
+        i->ext_depth.swap(depth);
+        i->ext_dw = depth_w;
+        i->ext_dh = depth_h;
+        i->ext_near = znear;
+        i->ext_far = zfar;
         i->ext_pose = pose;
         i->ext_capture_ms = capture_ms;
         i->ext_ready = true;

@@ -62,6 +62,7 @@
 //       "lu"/"lv" where it crosses the HUDs layer (0..1 from the top-left; missing = it does not). The viewer decides:
 //       on something drawn on the layer it is the UI there, else a pick in the world.
 //     {"t":"in","e":"down"|"up","b":0|2,"w":1}   the trigger (0) / B (2) on whatever the ray is on
+//     [VR TELEPORT 2026-11-04] {"t":"in","e":"tp"}  the trigger pressed twice quickly: go where the ray is
 //     viewer -> page {"t":"aim","k":"ui"|"world"|"none","d":metres,"c":"touch"|"sit"|...,"o":0|1} where it landed
 //     [VR HUD LAYER 2026-11-04] {"t":"layer","on":bool}     stream the viewer's UI layer (HUDs, floaters) as well
 //     {"t":"key","s":1}                                     the layer decoder lost its place
@@ -76,7 +77,7 @@
 //     [VR AUDIO 2026-11-04] {"t":"micwant","on":bool} the viewer wants the headset microphone (WolfVRHeadsetMic)
 //     [VR CONTROLS] {"t":"ui",...} the action bar's state (wolfvrui.cpp); [VR HUD LAYER] {"t":"layerconfig","codec",
 //     "codecString","w","h"} before the first layer picture (the picture is w x 2h: colour on top, alpha below)
-//   viewer -> page, binary: a FrameHeader (its size at byte 4; 128 bytes, see wolfvrpipe.cpp kHeaderSize) followed by
+//   viewer -> page, binary: a FrameHeader (its size at byte 4; 160 bytes, see wolfvrpipe.cpp kHeaderSize) followed by
 //     one H.264 access unit (Annex B) or one JPEG. [VR HUD LAYER] byte 67 = 1: a UI-layer picture (its own decoder).
 //     [VR AUDIO 2026-11-04] byte 67 = 2: SOUND, not a picture: bytes 8..15 = sample number of the first frame (u64),
 //     16..23 = viewer clock (ms, double) when the block was mixed, 52 = sample rate (float), 64 = channels (u8),
@@ -86,6 +87,10 @@
 //     (left half = left eye), drawn from the eye positions at bytes 72..95 (6 floats, head space, as "e").
 //     [VR 3D FIX 2026-11-04] bytes 96..127: the 8 frustum tangents the halves were drawn for (as "pt"); byte 66 = 2:
 //     stereo drawn for those off-axis windows (the page puts each half on exactly that window in front of its eye).
+//     [VR DEPTH 2026-11-04] bytes 128..139: the head position (reference space) it was drawn for, 140 = 1 when known;
+//     144..147: bytes of DEPTH after the picture, 148/150: depth grid width/height (u16, both eyes side by side), 152/156:
+//     near/far (f32). The depth: u16 per sample, v = 65535 ln(z/near)/ln(far/near), z the distance along the view in
+//     metres, top row first, zlib-deflated. The page draws each eye as a world-locked mesh from it (real parallax).
 
 #include <cstdint>
 #include <functional>
@@ -154,7 +159,8 @@ namespace wolfvr
         // axes), TURN: one snap turn (wheel = +1 left / -1 right), LIFT: jump/fly up or down held (wheel = +1/0/-1)
         // ACTION: an action-bar button, key = its name, text = its argument ([VR CONTROLS 2026-11-04])
         // RAY: the 3D pointer ([VR WORLD POINTER 2026-11-04]): o, d in the page's reference space, u, v on the layer
-        enum class Type { MOVE, DOWN, UP, WHEEL, KEY_DOWN, KEY_UP, TEXT, STICK, TURN, LIFT, ACTION, RAY };
+        // TELEPORT: go to where the 3D pointer's ray is ([VR TELEPORT 2026-11-04], a double trigger press)
+        enum class Type { MOVE, DOWN, UP, WHEEL, KEY_DOWN, KEY_UP, TEXT, STICK, TURN, LIFT, ACTION, RAY, TELEPORT };
         Type type = Type::MOVE;
         float u = 0, v = 0;
         float x = 0, y = 0;        // STICK
@@ -266,7 +272,10 @@ namespace wolfvr
         /** [VR STAGE 2] One picture for the headset (external_frames): width*height*4 RGBA from Config, top row
          *  first, drawn for `pose`. Only the newest is kept: one not yet encoded when the next arrives is dropped
          *  (and counted as skipped), never half a stream. `capture_ms` = how long the caller took to make it. */
-        void submitFrame(std::vector<uint8_t>&& rgba, const HeadPose& pose, double capture_ms);
+        /** [VR DEPTH 2026-11-04] + optionally its depth grid: depth_w x depth_h window depths (0..1, bottom row first)
+         *  of the picture's eye views side by side, drawn with near / far planes znear / zfar; sent packed with it. */
+        void submitFrame(std::vector<uint8_t>&& rgba, const HeadPose& pose, double capture_ms, std::vector<float>&& depth = {},
+                         uint32_t depth_w = 0, uint32_t depth_h = 0, float znear = 0, float zfar = 0);
         /** [VR BIG SCREEN] The mouse and keyboard events the allowed headset sent since the last call (at most 256
          *  are kept; older ones are dropped). Any thread. */
         std::vector<InputEvent> takeInput();

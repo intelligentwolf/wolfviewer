@@ -61,7 +61,9 @@ namespace WolfVRStream
     /** The newest head pose from the headset (valid=false when none). */
     wolfvr::HeadPose headPose();
     /** Hands one world picture (frameSize RGBA, top row first) drawn for `pose`; `rgba` gets back a buffer to reuse. */
-    void submitWorldFrame(std::vector<uint8_t>& rgba, const wolfvr::HeadPose& pose, double capture_ms);
+    /** [VR DEPTH 2026-11-04] + its depth grid (see wolfvrpipe.h submitFrame); `depth` is taken. */
+    void submitWorldFrame(std::vector<uint8_t>& rgba, const wolfvr::HeadPose& pose, double capture_ms,
+                          std::vector<float>& depth, U32 depth_w, U32 depth_h, F32 znear, F32 zfar);
     /** Applies a mode the headset page asked for (its in-VR switch). Main thread, every frame. */
     void pumpModeRequest();
     // [VR OPENH264 2026-11-04] Cisco's OpenH264 video codec: -1 none for this computer, 0 not downloaded, 1 ready,

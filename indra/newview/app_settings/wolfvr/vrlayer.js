@@ -53,6 +53,7 @@ export class VRLayer {
         this.latest = null;           // newest decoded picture not yet on the texture
         this.shown = null;
         this.frames = 0;
+        this.errors = 0;              // pictures that could not be decoded
         this.place = 'stand';
         this.places = { stand: loadPlace('stand'), seat: loadPlace('seat') };
         this.tex = new THREE.VideoFrameTexture();
@@ -170,7 +171,10 @@ export class VRLayer {
         if (hdr.codec === 'jpeg') {
             createImageBitmap(new Blob([payload], { type: 'image/jpeg' }), { imageOrientation: 'flipY' })
                 .then((bmp) => { if (this.latest) this.latest.close(); this.latest = bmp; })
-                .catch(() => { /* a bad picture is skipped */ });
+                .catch(() => {
+                    // a bad picture is skipped; many in a row is a problem the resident is told about
+                    if (++this.errors === 5) this.onError('Your HUDs and windows could not be shown in the headset (its browser could not read the pictures).');
+                });
             return;
         }
         if (!this.decoder || this.decoder.state !== 'configured') return;

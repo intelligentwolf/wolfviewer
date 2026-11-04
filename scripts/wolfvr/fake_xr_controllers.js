@@ -13,6 +13,7 @@
 //   window.__fakeCtl.axis(hand, index, value) a stick axis (2/3 = thumbstick x/y)
 //   window.__fakeCtl.thumbrest(hand, on)      the thumb on / off the rest
 //   window.__swapViews = true                  the browser lists the right eye's view first
+//   window.__headX = 0.1                       the head 10 cm to the right
 (function () {
     'use strict';
     if (!window.__fakeXR || window.__fakeCtl) return;
@@ -55,7 +56,12 @@
             if (!frame.__wrapped) {
                 const gvp = frame.getViewerPose.bind(frame);
                 frame.getViewerPose = (space) => {
-                    const p = gvp(space);
+                    let p = gvp(space);
+                    // window.__headX: the head moved sideways by that many metres (every matrix's x translation)
+                    if (p && window.__headX) {
+                        const mv = (t) => { const m = Float32Array.from(t.matrix); m[12] += window.__headX; return { matrix: m }; };
+                        p = { ...p, transform: mv(p.transform), views: p.views.map((v) => ({ ...v, transform: mv(v.transform) })) };
+                    }
                     if (p && window.__swapViews) return { ...p, views: p.views.slice().reverse() };
                     return p;
                 };

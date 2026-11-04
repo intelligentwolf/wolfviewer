@@ -32,6 +32,7 @@ import * as THREE from './three/three.module.js';
 import { VRBar } from './vrbar.js';
 import { VRLayer } from './vrlayer.js';
 import { VRAudio } from './vraudio.js';
+import { DepthEyes, inflateDepth, SHELL } from './vrdepth.js';
 
 // [VR PAIRING 2026-11-03] No code in the address (Paul: "get rid of that code"). This headset's own random id, kept in
 // this browser; the PC asks Allow / Deny the first time it sees it, then remembers it (wolfvrpairing.h). The secret
@@ -80,7 +81,7 @@ class Rolling {
 const num = {
     p2p: new Rolling(), v2p: new Rolling(), decode: new Rolling(),
     xrFrames: 0, newFrames: 0, lastT: performance.now(),
-    fps: NaN, newFps: NaN, viewer: {}, rtt: NaN, got: 0, gotFps: NaN, decoded: 0, decodedFps: NaN, gotTotal: 0,
+    fps: NaN, newFps: NaN, viewer: {}, rtt: NaN, got: 0, gotFps: NaN, decoded: 0, decodedFps: NaN, gotTotal: 0, summaryTick: 0,
 };
 
 // ------------------------------------------------------------------------------------------------ connection
@@ -231,7 +232,8 @@ function onText(text) {
         // [VR WORLD POINTER] where the viewer found the ray landed, and what it would do there
         worldAim.k = m.k; worldAim.d = typeof m.d === 'number' ? m.d : -1; worldAim.c = typeof m.c === 'string' ? m.c : ''; worldAim.o = m.o === 1;
         worldAim.at = performance.now();
-        if (worldAim.c !== reticle.label) drawReticleLabel(worldAim.c);
+        const label = worldAim.k === 'world' && !worldAim.c && worldAim.d > 0 ? 'go' : worldAim.c;
+        if (label !== reticle.label) drawReticleLabel(label);
     }
 }
 
@@ -278,11 +280,19 @@ function parseHeader(buf) {
     // [VR STEREO 2026-11-04] byte 66 = two eyes side by side, drawn from the eye positions at 72..95 (head space)
     const sb = size >= 96 ? d.getUint8(66) : 0;
     const stereo = sb === 1 || sb === 2;
+    const centre = sb === 3;   // [VR CENTRE] one centre view for both eyes, its window the first 4 tangents
     const eyes = stereo ? [0, 1, 2, 3, 4, 5].map((k) => d.getFloat32(72 + 4 * k, true)) : null;
     // [VR 3D FIX 2026-11-04] 2 = each half drawn for its own off-axis window, tangents at 96..127 (L, R, B, T per eye)
-    const tan = sb === 2 && size >= 128 ? [0, 1, 2, 3, 4, 5, 6, 7].map((k) => d.getFloat32(96 + 4 * k, true)) : null;
+    const tan = (sb === 2 || sb === 3) && size >= 128 ? [0, 1, 2, 3, 4, 5, 6, 7].map((k) => d.getFloat32(96 + 4 * k, true)) : null;
+    // [VR DEPTH 2026-11-04] 128..139 the head position drawn for (140 = known), 144 depth bytes after the picture,
+    // 148 / 150 the depth grid's size, 152 / 156 near / far
+    const deep = size >= 160;
     return {
-        size, stereo, eyes, tan, stream: d.getUint8(67),
+        size, stereo, centre, eyes, tan, stream: d.getUint8(67),
+        pos: deep && d.getUint8(140) === 1 ? [d.getFloat32(128, true), d.getFloat32(132, true), d.getFloat32(136, true)] : null,
+        depthBytes: deep ? d.getUint32(144, true) : 0,
+        dw: deep ? d.getUint16(148, true) : 0, dh: deep ? d.getUint16(150, true) : 0,
+        near: deep ? d.getFloat32(152, true) : 0, far: deep ? d.getFloat32(156, true) : 0,
         frame: Number(d.getBigUint64(8, true)),
         captureMs: d.getFloat64(16, true),
         poseClientMs: d.getFloat64(24, true),
@@ -297,10 +307,16 @@ function parseHeader(buf) {
     };
 }
 
-function offerPicture(img, hdr, decodeMs) {
-    // Newest wins: a picture that was never drawn is dropped for a newer one.
+function offerPicture(img, hdr, decodeMs, depth) {
+    // Newest wins: a picture that was never drawn is dropped for a newer one (and one that comes late is dropped).
+    if (latest && latest.hdr.frame > hdr.frame) { img.close(); return; }
     if (latest) latest.img.close();
-    latest = { img, hdr, decodeMs };
+    latest = { img, hdr, decodeMs, depth };
+}
+// [VR DEPTH] the picture's depth, unpacked alongside its decode; a picture waits for its own depth
+function depthOf(buf, hdr) {
+    if (!hdr.depthBytes || !hdr.dw || !hdr.dh || !hdr.pos || hdr.size + hdr.bytes + hdr.depthBytes > buf.byteLength) return null;
+    return inflateDepth(new Uint8Array(buf, hdr.size + hdr.bytes, hdr.depthBytes)).catch(() => null);
 }
 
 function onPicture(buf) {
@@ -314,8 +330,9 @@ function onPicture(buf) {
     if (hdr.codec === 'jpeg') {
         const t0 = performance.now();
         // WebGL ignores UNPACK_FLIP_Y for ImageBitmap, so flip while decoding (texture.flipY = false below).
+        const dp = depthOf(buf, hdr);
         createImageBitmap(new Blob([payload], { type: 'image/jpeg' }), { imageOrientation: 'flipY' })
-            .then((bmp) => { num.decoded++; offerPicture(bmp, hdr, performance.now() - t0); })
+            .then(async (bmp) => { num.decoded++; offerPicture(bmp, hdr, performance.now() - t0, dp ? await dp : null); })
             .catch(() => { /* a bad picture is skipped */ });
         return;
     }
@@ -325,7 +342,7 @@ function onPicture(buf) {
         waitingKey = false;
     }
     if (decoder.decodeQueueSize > 4) { waitingKey = true; askKey(false); return; }   // decoder far behind: restart clean
-    pendingMeta.set(hdr.frame, { hdr, t0: performance.now() });
+    pendingMeta.set(hdr.frame, { hdr, t0: performance.now(), depth: depthOf(buf, hdr) });
     decoder.decode(new EncodedVideoChunk({ type: hdr.key ? 'key' : 'delta', timestamp: hdr.frame, data: payload }));
 }
 
@@ -334,7 +351,9 @@ function onDecoded(vf) {
     const meta = pendingMeta.get(vf.timestamp);
     pendingMeta.delete(vf.timestamp);
     if (!meta) { vf.close(); return; }
-    offerPicture(vf, meta.hdr, performance.now() - meta.t0);
+    const ms = performance.now() - meta.t0;
+    if (meta.depth) meta.depth.then((d) => offerPicture(vf, meta.hdr, ms, d));
+    else offerPicture(vf, meta.hdr, ms, null);
 }
 
 // ------------------------------------------------------------------------------------------------ scene
@@ -347,7 +366,8 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x000000);
 const dolly = new THREE.Group();            // the XR reference-space origin (threejs-webxr-contract: view = camera.parent)
 scene.add(dolly);
-const camera = new THREE.PerspectiveCamera(100, 1, 0.05, 100);
+// [VR DEPTH] far enough for the world-locked eyes' far shell (vrdepth.js SHELL) and the card behind it
+const camera = new THREE.PerspectiveCamera(100, 1, 0.05, 2000);
 camera.position.set(0, 1.6, 0);
 dolly.add(camera);
 
@@ -380,6 +400,12 @@ function halfPlane(right) {
     return m;
 }
 const eyeScreens = [halfPlane(false), halfPlane(true)];
+// [VR DEPTH 2026-11-04] each eye's picture as a world-locked mesh from its depth (vrdepth.js); the cards above stay as
+// the far shell behind it (what shows through the cut edges, and the sky), or as before for a picture without depth
+for (const m of eyeScreens) m.renderOrder = -10;
+screenMat.depthWrite = false;
+const depthEyes = new DepthEyes(scene);
+const SHELL_DISTANCE = SHELL + 100;
 // [VR 3D FIX 2026-11-04] Which XR camera is which eye: three.js gives XR view i to its camera i, and camera 0 draws
 // layer 1, camera 1 layer 2 (WebXRManager: cameraL mask without layer 2, cameraR without layer 1). The views are put
 // in whatever order the browser lists them, so each half goes on the layer of the view whose XRView.eye says it is
@@ -416,23 +442,24 @@ const reticle = { group: new THREE.Group(), label: '', pulseUntil: 0 };
     reticle.group.visible = false;
     scene.add(reticle.group);
 }
-const RETICLE_WORDS = { touch: 'Touch', sit: 'Sit', buy: 'Buy', pay: 'Pay', open: 'Open', media: 'Play', grab: 'Grab', text: '' };
+const RETICLE_WORDS = { touch: 'Touch', sit: 'Sit', buy: 'Buy', pay: 'Pay', open: 'Open', media: 'Play', grab: 'Grab', text: '',
+                        go: 'Twice: go here' };   // [VR TELEPORT] a spot with nothing to do: the trigger twice goes there
 function drawReticleLabel(c) {
     reticle.label = c;
     const word = RETICLE_WORDS[c] || '';
     const ctx = reticle.ctx;
     ctx.clearRect(0, 0, 256, 64);
     if (word) {
+        ctx.font = c === 'go' ? 'bold 26px sans-serif' : 'bold 34px sans-serif';
         ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
-        ctx.fillRect(0, 6, 150, 52);
+        ctx.fillRect(0, 6, Math.min(256, ctx.measureText(word).width + 24), 52);
         ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 34px sans-serif';
         ctx.textBaseline = 'middle';
         ctx.fillText(word, 12, 33);
     }
     reticle.tex.needsUpdate = true;
     reticle.tag.visible = !!word;
-    reticle.ring.material.color.set(word ? 0x84cc16 : 0xffffff);
+    reticle.ring.material.color.set(word && c !== 'go' ? 0x84cc16 : c === 'go' ? 0x38bdf8 : 0xffffff);   // go: blue
 }
 // put the reticle at `p` (world), facing `from`, sized to stay the same apparent size
 function placeReticle(p, from, big) {
@@ -474,7 +501,8 @@ const checkCard = new THREE.Group();
 // the head like WolfStorm's surfaces. VR 3D Mode only: Big Screen Mode already shows the whole viewer window.
 const WORLD = () => !!(config && config.mode === 'world');
 const bar = new VRBar(dock, send);
-const layer = new VRLayer(dock, send, (t) => showError(t));
+// a HUDs-layer problem is shown IN the headset too (the bar's message line), not only on the 2D page nobody sees in VR
+const layer = new VRLayer(dock, send, (t) => { showError(t); bar.toast(t, 15000); });
 // [VR AUDIO 2026-11-04] the viewer's sound in the headset (vraudio.js), and the headset microphone for voice chat
 const vrAudio = new VRAudio({
     send,
@@ -573,11 +601,17 @@ function adaptQuality(now) {
     // decoder takes longer per picture the bigger it is, while still keeping up): on Paul's Quest 3 those two stepped
     // the picture down to its smallest within 30 s, which is why it looked soft.
     const got = num.gotFps;
-    const behind = (got > 20 && num.decodedFps < got * 0.85) || num.v2p.avg() > 200 ||
-                   (decoder && decoder.decodeQueueSize > 3) || (layer.decoder && layer.decoder.decodeQueueSize > 3);
-    if (behind) {
+    // [VR QUALITY 2026-11-04] which one it was, for the 30-second summary in the viewer's log (Paul's Quest 3 stepped
+    // down to 1152 px eyes 12 s in and nobody could tell why)
+    const why = (got > 20 && num.decodedFps < got * 0.85) ? `decoded ${fmt(num.decodedFps, 0)} of ${fmt(got, 0)}/s`
+              : num.v2p.avg() > 250 ? `pictures ${fmt(num.v2p.avg(), 0)} ms old`
+              : (decoder && decoder.decodeQueueSize > 3) ? `decoder queue ${decoder.decodeQueueSize}` : '';
+    if (why) {
         quality.goodSince = now;
-        if (++quality.bad >= 3 && quality.level < QUALITY_STEPS - 1) {
+        quality.lastWhy = why;
+        // five seconds in a row (a single slow second - a teleport, a big texture load - is not the headset)
+        if (++quality.bad >= 5 && quality.level < QUALITY_STEPS - 1) {
+            quality.downs = (quality.downs || 0) + 1;
             quality.bad = 0;
             quality.coolUntil = now + 8000;
             setQuality(quality.level + 1, 'The picture is a little less sharp for now, so it keeps up.');
@@ -1053,6 +1087,7 @@ function enterMode() {
     if (!world) {
         screen.visible = false;
         eyeScreens[0].visible = eyeScreens[1].visible = false;
+        depthEyes.hide();
         screen.userData.hdr = null;
         bar.hide();
         bar.setTabActive(false);
@@ -1163,7 +1198,8 @@ function pollPointer(src, gp, frame) {
 // its mouse on that; the trigger and B are its left and right button there. [VR HUD CLICKS] A press belongs to what
 // it was pressed on until it is let go: sliding off the bar while the trigger is held no longer clicks whatever the
 // ray reaches on the layer behind it (on Paul's Quest 3 a window opened from the bar closed again a second later).
-const worldPointer = { trig: false, b: false, grip: false, gripY: 0, owner: [null, null, null], ray: { at: 0, o: [0, 0, 0], d: [0, 0, 0], l: '' } };
+const worldPointer = { trig: false, b: false, grip: false, gripY: 0, owner: [null, null, null], ray: { at: 0, o: [0, 0, 0], d: [0, 0, 0], l: '' },
+                       lastTrig: 0, lastDir: new THREE.Vector3() };
 const lptr = { u: -1, v: -1, buttons: {} };
 const _hq = new THREE.Quaternion(), _ho = new THREE.Vector3(), _hd = new THREE.Vector3();
 function layerMove(u, v) {
@@ -1220,7 +1256,14 @@ function pollWorldPointer(src, gp, frame, headPos, headQuat) {
     // the trigger (0) and B (2): press on the bar = activate it there; press elsewhere = the viewer's button
     for (const [b, now, was] of [[0, trig, worldPointer.trig], [2, bBtn, worldPointer.b]]) {
         if (now && !was) {
+            const t = performance.now();
+            // [VR TELEPORT 2026-11-04] the trigger twice within 0.45 s on the same spot of the world (the ray within
+            // 3 degrees): go there, as the desktop's double click does; one press stays a click (touch, sit)
+            const again = b === 0 && !onBar && aim && worldAim.k === 'world' && t - worldPointer.lastTrig < 450 &&
+                          _rd.angleTo(worldPointer.lastDir) < 0.05;
+            if (b === 0) { worldPointer.lastTrig = again ? 0 : t; worldPointer.lastDir.copy(_rd); }
             if (onBar) { own[b] = 'bar'; if (b === 0) bar.activate(aim.hit); }
+            else if (again) { own[b] = 'tp'; sendRay(_ro, _rd, aim.layer); send({ t: 'in', e: 'tp' }); reticle.pulseUntil = t + 300; }
             else if (aim) { own[b] = 'ptr'; sendRay(_ro, _rd, aim.layer); ptrButton(b, true); }
         } else if (!now && was) {
             if (own[b] === 'ptr') ptrButton(b, false);
@@ -1249,7 +1292,7 @@ function pollWorldPointer(src, gp, frame, headPos, headQuat) {
         if (t > 0) placeReticle(_v3.copy(_ro).addScaledVector(_rd, t * 0.998), _ro, big);
         else reticle.group.visible = false;
         if (!onBar && worldAim.k !== 'world') reticle.tag.visible = false;
-        else if (!onBar) reticle.tag.visible = !!RETICLE_WORDS[worldAim.c];
+        else if (!onBar) reticle.tag.visible = !!RETICLE_WORDS[reticle.label];
         else reticle.tag.visible = false;
     }
     worldPointer.trig = trig; worldPointer.b = bBtn; worldPointer.grip = grip;
@@ -1344,6 +1387,35 @@ function pollControllers(session, frame, headPos, headQuat) {
 const _m = new THREE.Matrix4(), _pos = new THREE.Vector3(), _quat = new THREE.Quaternion(), _scl = new THREE.Vector3();
 const _fwd = new THREE.Vector3();
 let xrErrors = 0;
+const pred = { t: 0, q: new THREE.Quaternion(), p: new THREE.Vector3(), w: new THREE.Vector3(), v: new THREE.Vector3(),
+               dq: new THREE.Quaternion(), out: { p: new THREE.Vector3(), q: new THREE.Quaternion() }, ax: new THREE.Vector3() };
+function predictPose(now, pos, quat) {
+    const o = pred.out;
+    o.p.copy(pos); o.q.copy(quat);
+    if (!renderer.xr.isPresenting) { pred.t = 0; return o; }
+    if (pred.t) {
+        const dt = (now - pred.t) / 1000;
+        if (dt > 0.002 && dt < 0.1) {
+            // angular velocity from this frame's turn (q * prev^-1 as axis-angle), and velocity; smoothed
+            pred.dq.copy(quat).multiply(pred.q.clone().invert());
+            if (pred.dq.w < 0) { pred.dq.x = -pred.dq.x; pred.dq.y = -pred.dq.y; pred.dq.z = -pred.dq.z; pred.dq.w = -pred.dq.w; }
+            const ang = 2 * Math.acos(Math.min(1, pred.dq.w)), sn = Math.sqrt(Math.max(0, 1 - pred.dq.w * pred.dq.w));
+            pred.ax.set(pred.dq.x, pred.dq.y, pred.dq.z).multiplyScalar(sn > 1e-6 ? ang / sn / dt : 0);
+            pred.w.lerp(pred.ax, 0.5);
+            pred.v.lerp(pred.ax.copy(pos).sub(pred.p).divideScalar(dt), 0.5);
+        }
+    }
+    pred.t = now; pred.q.copy(quat); pred.p.copy(pos);
+    const lat = num.p2p.avg();
+    const h = Number.isFinite(lat) ? Math.min(80, Math.max(0, lat * 0.8)) / 1000 : 0;
+    if (h > 0) {
+        const a = pred.w.length() * h;
+        if (a > 1e-5) { pred.dq.setFromAxisAngle(pred.ax.copy(pred.w).normalize(), Math.min(a, 0.6)); o.q.premultiply(pred.dq); }
+        o.p.addScaledVector(pred.v, h);
+    }
+    return o;
+}
+let testFreeze = false, testCards = false;   // test hooks only (e2e_parallax.mjs): hold the picture; the old flat cards
 
 function animate(time, frame) {
     const now = performance.now();
@@ -1369,13 +1441,18 @@ function animate(time, frame) {
         dock.position.copy(_pos); dock.quaternion.copy(_quat); dock.updateMatrixWorld(true);
         num.xrFrames++;
     }
-    const pm = { t: 'pose', s: ++poseSeq, ct: now, p: [_pos.x, _pos.y, _pos.z], q: [_quat.x, _quat.y, _quat.z, _quat.w], c: ctl };
+    // [VR PREDICT 2026-11-04] the pose the viewer draws for is where the head WILL be when that picture is shown here:
+    // the head's own turning and moving rates (smoothed) carried forward by most of the measured head-pose-to-shown
+    // time, at most 80 ms - as Oculus Link's runtime predicts over its measured end-to-end time ("How does Oculus Link
+    // work", Meta). The depth meshes then only have to make up the small rest.
+    const pp = predictPose(now, _pos, _quat);
+    const pm = { t: 'pose', s: ++poseSeq, ct: now, p: [pp.p.x, pp.p.y, pp.p.z], q: [pp.q.x, pp.q.y, pp.q.z, pp.q.w], c: ctl };
     if (eyes) { pm.e = eyes; pm.f = eyeFov; if (eyeTan) pm.pt = eyeTan; }
     send(pm);
 
     // Newest picture onto the texture.
     let fresh = null;
-    if (latest) {
+    if (latest && !testFreeze) {
         fresh = latest;
         latest = null;
         const mat = BIG() ? bigMat : screenMat;
@@ -1387,6 +1464,9 @@ function animate(time, frame) {
             screen.visible = !fresh.hdr.stereo;
             eyeScreens[0].visible = eyeScreens[1].visible = fresh.hdr.stereo;
             bigMesh.visible = false;
+            // [VR DEPTH] the eyes as world-locked meshes when the picture has its depth (else the cards as before)
+            if ((fresh.hdr.stereo || fresh.hdr.centre) && fresh.depth && !testCards) depthEyes.show(fresh.hdr, fresh.depth, mat.map, eyeLayer);
+            else depthEyes.hide();
         }
     }
     if (!renderer.xr.isPresenting) { laser.visible = false; }
@@ -1395,7 +1475,15 @@ function animate(time, frame) {
     if (hdr && !BIG()) {
         const size = 2 * PICTURE_DISTANCE * Math.tan((hdr.fov * Math.PI / 180) / 2);
         _fwd.set(0, 0, -PICTURE_DISTANCE).applyQuaternion(hdr.q);
-        if (!hdr.stereo) {
+        if (!hdr.stereo && hdr.centre && hdr.tan) {
+            // [VR CENTRE] the centre view's card: its own window, the far shell behind the mesh (or 10 m without depth)
+            const D = depthEyes.active ? SHELL_DISTANCE : PICTURE_DISTANCE, w = hdr.tan;
+            screen.scale.set(D * (w[1] - w[0]), D * (w[3] - w[2]), 1);
+            screen.quaternion.copy(hdr.q);
+            _ev.set(D * (w[0] + w[1]) / 2, D * (w[2] + w[3]) / 2, -D).applyQuaternion(hdr.q);
+            screen.position.copy(_pos).add(_ev);
+            screen.renderOrder = -10;
+        } else if (!hdr.stereo) {
             screen.scale.set(size, size, 1);
             screen.quaternion.copy(hdr.q);
             screen.position.copy(_pos).add(_fwd);
@@ -1412,10 +1500,12 @@ function animate(time, frame) {
             // [VR 3D FIX 2026-11-04] each eye's own off-axis window: the half covers exactly the frustum it was drawn
             // for (tangents L, R, B, T), PICTURE_DISTANCE in front of that eye, along the head's direction then
             if (hdr.tan) {
+                // [VR DEPTH] with the world-locked meshes in front, the cards are their far shell
+                const D = depthEyes.active ? SHELL_DISTANCE : PICTURE_DISTANCE;
                 for (let i = 0; i < 2; i++) {
                     const w = hdr.tan.slice(4 * i, 4 * i + 4), m = eyeScreens[i];
-                    m.scale.set(PICTURE_DISTANCE * (w[1] - w[0]), PICTURE_DISTANCE * (w[3] - w[2]), 1);
-                    _ev.set(PICTURE_DISTANCE * (w[0] + w[1]) / 2, PICTURE_DISTANCE * (w[2] + w[3]) / 2, -PICTURE_DISTANCE).applyQuaternion(hdr.q);
+                    m.scale.set(D * (w[1] - w[0]), D * (w[3] - w[2]), 1);
+                    _ev.set(D * (w[0] + w[1]) / 2, D * (w[2] + w[3]) / 2, -D).applyQuaternion(hdr.q);
                     const eo = new THREE.Vector3(hdr.eyes[3 * i], hdr.eyes[3 * i + 1], hdr.eyes[3 * i + 2]).applyQuaternion(_quat);
                     m.position.copy(_pos).add(eo).add(_ev);
                 }
@@ -1424,6 +1514,7 @@ function animate(time, frame) {
             // layer 0 only: show the left eye there
             eyeScreens[0].layers.set(renderer.xr.isPresenting ? eyeLayer[0] : 0);
             eyeScreens[1].layers.set(eyeLayer[1]);
+            depthEyes.pageView(renderer.xr.isPresenting, eyeLayer);
         }
     }
 
@@ -1455,6 +1546,16 @@ function animate(time, frame) {
         if (config && config.debug) {
             send({ t: 'stats', fps: num.fps, newFps: num.newFps, decodeMs: num.decode.avg(), p2p: num.p2p.avg(),
                    p2p95: num.p2p.pct(0.95), v2p: num.v2p.avg() });
+        }
+        // [VR QUALITY 2026-11-04] ONE short line for the viewer's log every 30 s while in VR (Paul: no stats in hot
+        // paths): what this headset really gets, so the next test shows its numbers
+        if (renderer.xr.isPresenting && ++num.summaryTick >= 30) {
+            num.summaryTick = 0;
+            const eye = config ? (config.w === 2 * config.h ? config.h : config.w) : 0;
+            send({ t: 'summary', s: `${HEADSETS[headsetKind()].label}: display ${fmt(num.fps, 0)} fps, pictures in ${fmt(num.gotFps, 0)}/s decoded ${fmt(num.decodedFps, 0)}/s, ` +
+                `head-pose-to-shown ${fmt(num.p2p.avg(), 0)} ms (p95 ${fmt(num.p2p.pct(0.95), 0)}), PC-to-shown ${fmt(num.v2p.avg(), 0)} ms, decode ${fmt(num.decode.avg(), 1)} ms, ` +
+                `eye ${eye} px, step ${quality.level} (top ${quality.top}, down ${quality.downs || 0} times, last because ${quality.lastWhy || '-'}), ` +
+                `HUDs ${layer.on ? layer.frames + ' pictures' + (layer.errors ? `, ${layer.errors} failed` : '') : 'off'}` });
         }
         adaptQuality(now);
     }
@@ -1560,7 +1661,40 @@ window.__wolfvr = { numbers: () => ({ rows: numberRows(), p2p: num.p2p.v.slice(-
                  visible: eyeScreens.map((m) => m.visible), mono: screen.visible };
     },
     xr: () => ({ inVR: inVR(), said: xrSaid, pictures: num.gotTotal }),   // [VR IMMERSIVE] test hook
+    freeze: (on) => { testFreeze = !!on; }, cards: (on) => { testCards = !!on; if (on) depthEyes.hide(); },
+    // test hook (e2e_parallax.mjs): what the LEFT eye sees with the head moved dx metres sideways, as a PNG - the scene
+    // drawn off-screen by a camera with the left XRView's projection and pose (plus dx), its own layers
+    renderEye: (dx) => {
+        if (!lastViews) return null;
+        const li = Math.max(0, lastViews.findIndex((v) => v.eye === 'left'));
+        const v = lastViews[li];
+        const cam = new THREE.PerspectiveCamera();
+        cam.projectionMatrix.fromArray(v.projectionMatrix);
+        cam.projectionMatrixInverse.copy(cam.projectionMatrix).invert();
+        new THREE.Matrix4().fromArray(v.transform.matrix).decompose(cam.position, cam.quaternion, cam.scale);
+        cam.position.x += dx;
+        cam.updateMatrixWorld(true);
+        cam.layers.set(0); cam.layers.enable(eyeLayer[0]);
+        const W = 480, H = 432, rt = new THREE.WebGLRenderTarget(W, H, { colorSpace: THREE.SRGBColorSpace });
+        const xr = renderer.xr.enabled; renderer.xr.enabled = false;
+        renderer.setRenderTarget(rt); renderer.render(scene, cam); renderer.setRenderTarget(null);
+        renderer.xr.enabled = xr;
+        const px = new Uint8Array(W * H * 4);
+        renderer.readRenderTargetPixels(rt, 0, 0, W, H, px);
+        rt.dispose();
+        const c = document.createElement('canvas'); c.width = W; c.height = H;
+        const img = c.getContext('2d').createImageData(W, H);
+        for (let y = 0; y < H; y++) img.data.set(px.subarray((H - 1 - y) * W * 4, (H - y) * W * 4), y * W * 4);   // GL rows are bottom first
+        c.getContext('2d').putImageData(img, 0, 0);
+        return c.toDataURL('image/png');
+    },
     aim: () => ({ ...worldAim, reticle: reticle.group.visible, tag: reticle.tag.visible, laser: laser.visible, owner: worldPointer.owner.slice() }),
+    depth: () => ({ active: depthEyes.active, frames: depthEyes.frames, grid: [depthEyes.gw, depthEyes.gh],
+                    hdr: screen.userData.hdr ? { pos: screen.userData.hdr.pos, dw: screen.userData.hdr.dw, dh: screen.userData.hdr.dh,
+                                                 near: screen.userData.hdr.near, far: screen.userData.hdr.far } : null,
+                    // metres at a few grid points of the left eye (centre, bottom middle, top middle), for the test
+                    sample: depthEyes.active ? [[0.5, 0.5], [0.5, 0.95], [0.5, 0.05]].map(([u, v]) =>
+                        +depthEyes.data[Math.min(depthEyes.gh - 1, Math.floor(v * depthEyes.gh)) * depthEyes.gw * depthEyes.halves + Math.floor(u * depthEyes.gw)].toFixed(3)) : null }),
     surfaces: () => ({ big: bigMesh.visible, eyes: eyeScreens.map((m) => m.visible), mono: screen.visible, layer: layer.mesh.visible,
                        bar: bar.mesh.visible, tab: bar.tab.visible, reticle: reticle.group.visible, check: checkCard.visible }),
     tabPoint: () => surfacePoint(1.0, bar.tabArc, -0.52, bar.tabH, 0.5, 0.5),

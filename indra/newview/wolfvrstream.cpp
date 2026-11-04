@@ -371,10 +371,11 @@ wolfvr::HeadPose headPose()
     return gService ? gService->headPose() : wolfvr::HeadPose();
 }
 
-void submitWorldFrame(std::vector<uint8_t>& rgba, const wolfvr::HeadPose& pose, double capture_ms)
+void submitWorldFrame(std::vector<uint8_t>& rgba, const wolfvr::HeadPose& pose, double capture_ms,
+                      std::vector<float>& depth, U32 depth_w, U32 depth_h, F32 znear, F32 zfar)
 {
     std::lock_guard<std::mutex> lk(gMutex);
-    if (gService) gService->submitFrame(std::move(rgba), pose, capture_ms);
+    if (gService) gService->submitFrame(std::move(rgba), pose, capture_ms, std::move(depth), depth_w, depth_h, znear, zfar);
 }
 
 void pumpModeRequest()

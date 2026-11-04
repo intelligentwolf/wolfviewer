@@ -947,7 +947,9 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
     {
         // Render mirrors and associated hero probes before we render the rest of the scene.
         // This ensures the scene state in the hero probes are exactly the same as the rest of the scene before we render it.
-        if (gPipeline.RenderMirrors && !gSnapshot)
+        // [VR FPS 2026-11-04/] VR 3D Mode stereo draws display() twice a frame; what is the same for both eyes is
+        // done once, in the left eye's pass (WolfVRScreen::secondEye): mirrors, geometry and texture updates, impostors
+        if (gPipeline.RenderMirrors && !gSnapshot && !WolfVRScreen::secondEye())
         {
             LL_PROFILE_ZONE_NAMED_CATEGORY_DISPLAY("Update hero probes");
             LL_PROFILE_GPU_ZONE("hero manager")
@@ -986,6 +988,7 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
             stop_glerror();
         }
 
+        if (!WolfVRScreen::secondEye())   // [VR FPS 2026-11-04/] once a frame (see above)
         {
             LL_PROFILE_ZONE_NAMED_CATEGORY_DISPLAY("Update Geom");
             const F32 max_geom_update_time = 0.005f*10.f*gFrameIntervalSeconds.value(); // 50 ms/second update time
@@ -1055,7 +1058,7 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
                 glm::mat4 mod = get_current_modelview();
                 glViewport(0,0,512,512);
 
-                LLVOAvatar::updateImpostors();
+                if (!WolfVRScreen::secondEye()) LLVOAvatar::updateImpostors();   // [VR FPS 2026-11-04/] once a frame
 
                 set_current_projection(proj);
                 set_current_modelview(mod);
@@ -1079,6 +1082,7 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
         // Doing this here gives hardware occlusion queries extra time to complete
         LLAppViewer::instance()->pingMainloopTimeout("Display:UpdateImages");
 
+        if (!WolfVRScreen::secondEye())   // [VR FPS 2026-11-04/] once a frame
         {
             LL_PROFILE_ZONE_NAMED("Update Images");
 

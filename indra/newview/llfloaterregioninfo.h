@@ -340,10 +340,13 @@ private:
 
     // [WOLF TERRAIN SCREEN 2026-11-04]
     void applyWolfMode(bool wolf);
+    void layoutWolfScreen();
+    bool wolfScreenShown() const;                    // Wolf Territories and the terrain type is textures
     void hideStandardTextureControls();
     WolfPanelTerrainLayers* mWolfPanel = nullptr;   // panel_region_terrain.xml only (not the PBR transform variant)
-    bool mWolfMode = false;
-    LLRect mStandardRect[4];                         // download_raw_btn, upload_raw_btn, bake_terrain_btn, apply_btn, from the panel top
+    bool mWolfMode = false;                          // on Wolf Territories
+    bool mWolfScreenShown = false;                   // what layoutWolfScreen last laid out
+    LLRect mStandardRect[5];                         // download/upload RAW, bake, apply, PBR switch: rects from the panel top
 };
 
 /////////////////////////////////////////////////////////////////////////////

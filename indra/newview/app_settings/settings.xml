@@ -13667,17 +13667,6 @@ Change of this parameter will affect the layout of buttons in notification toast
       <key>Value</key>
       <real>0.0</real>
     </map>
-    <key>WolfTerrainAutoLayers</key>
-    <map>
-      <key>Comment</key>
-      <string>[WOLF TERRAIN SCREEN 2026-11-04] On Wolf Territories a region with no Wolf terrain textures saved draws Wolf layers made from its own four textures and Low/High heights (wolfterrainlayers.cpp WolfTerrainLayers::fromStandard). Off = such regions draw their standard four, as before 2026-11-04.</string>
-      <key>Persist</key>
-      <integer>1</integer>
-      <key>Type</key>
-      <string>Boolean</string>
-      <key>Value</key>
-      <integer>1</integer>
-    </map>
     <key>WolfTerrainLook</key>
     <map>
       <key>Comment</key>

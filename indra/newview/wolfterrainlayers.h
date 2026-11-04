@@ -109,11 +109,11 @@ public:
      *  alpine scree, granite and snow (terrain_paint.js wolfDefaults, the same numbers). */
     static Set defaults(LLViewerRegion* regionp);
 
-    // [WOLF TERRAIN SCREEN 2026-11-04] Paul: "on wolf every region should be switched". A Wolf region with no Wolf layers
-    // saved draws these, built in the viewer from its own four textures, Low/High corner heights and the detail tile: the
-    // best fit of the Enhanced terrain blend (terrainF.glsl step 1c) in the band model (wolfLayerGround). Nothing is stored;
-    // WolfStorm terrain_paint.js builds the same set. False (draw the standard four) for PBR terrain or while any of the
-    // four texture ids is not known.
+    // [WOLF TERRAIN SCREEN 2026-11-04] Where the Wolf terrain screen starts on a region with no Wolf layers saved: built in
+    // the viewer from its own four textures, Low/High corner heights and the detail tile, the best fit of the Enhanced
+    // terrain blend (terrainF.glsl step 1c) in the band model (wolfLayerGround). Never drawn by itself (Paul: "exactly as
+    // today" until the owner applies); WolfStorm terrain_paint.js builds the same set. False for PBR terrain or while any
+    // of the four texture ids is not known.
     struct StandardTerrain
     {
         LLUUID mIds[4];
@@ -126,7 +126,7 @@ public:
     /** The reverse, for the region's own four (what other viewers draw): the first four layers in use, and the corner
      *  Low/High that put the stock boundaries closest to theirs. `current` is used only when fewer than two layers are set. */
     static void toStandard(const Set& s, const StandardTerrain& current, StandardTerrain& out);
-    /** The set a Wolf region with nothing saved draws (fromStandard on its composition and RenderTerrainScale). */
+    /** The screen's starting set for a region with nothing saved (fromStandard on its composition and RenderTerrainScale). */
     const Set* automaticFor(LLViewerRegion* regionp) const;
 
     /** Can this GPU draw the layers at all? They add a 16th sampler to the terrain program, so only where the GPU
@@ -148,7 +148,7 @@ public:
         S32  mBaseVersion = 0;
         bool mHasBase = false;   // the stored set the edit started from (sent as wolfBase)
         Set  mBase;
-        bool mOn = false;        // "Use Wolf terrain textures on this region" (off = the automatic set)
+        bool mOn = false;        // "Use Wolf terrain textures on this region" (off = the region's own four)
         Set  mSet;
         bool mHasLastGood = false;   // a half-typed edit that does not validate keeps the last good preview
         Set  mLastGood;

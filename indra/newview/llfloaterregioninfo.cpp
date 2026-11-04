@@ -2012,12 +2012,12 @@ bool LLPanelRegionTerrainInfo::postBuild()
     if (mWolfPanel)
     {
         mWolfPanel->setChangedCallback([this]() { onChangeAnything(); });
-        static const char* const moved[4] = { "download_raw_btn", "upload_raw_btn", "bake_terrain_btn", "apply_btn" };
+        static const char* const moved[5] = { "download_raw_btn", "upload_raw_btn", "bake_terrain_btn", "apply_btn", "terrain_material_type" };
         // Kept as distances from the panel's top: the tab container reshapes this panel after postBuild (lltabcontainer.cpp
-        // addTabPanel) and these buttons follow the top, so a raw rect from here would be off by the height change.
-        for (S32 i = 0; i < 4; ++i)
+        // addTabPanel) and these controls follow the top, so a raw rect from here would be off by the height change.
+        for (S32 i = 0; i < 5; ++i)
         {
-            mStandardRect[i] = getChildView(moved[i])->getRect();
+            if (LLView* v = findChildView(moved[i])) mStandardRect[i] = v->getRect();
             mStandardRect[i].translate(0, -getRect().getHeight());
         }
     }
@@ -2088,20 +2088,23 @@ void LLPanelRegionTerrainInfo::updateForMaterialType()
         LLUICtrl* material_doc_label = findChild<LLUICtrl>(buffer);
         if (material_doc_label) { material_doc_label->setVisible(show_material_controls); }
     }
-    if (mWolfMode) hideStandardTextureControls();   // [WOLF TERRAIN SCREEN 2026-11-04/] the Wolf screen stands in for them
+    layoutWolfScreen();   // [WOLF TERRAIN SCREEN 2026-11-04/] the Wolf screen stands in for the texture controls
 }
 
 // [WOLF TERRAIN SCREEN 2026-11-04] Paul: "if its on wolf territoris grid we bring up OUR terrain screen if its on not wolf
-// territories grid we bring up the standard one", and (the same day) "on wolf every region should be switched though
-// remember that they will no longer be able to see the original texture page". On Wolf Territories the four textures (or
-// materials), the PBR switch and the eight corner Low/High spinners are hidden - they still exist and still carry the
-// region's values, and Apply still sends them (sendUpdate fills them from the Wolf layers first) - and the Wolf terrain
-// screen takes their place; water height, the raise/lower limits, RAW download/upload, bake and Apply stay, the buttons
-// moved below the Wolf screen. Anywhere else the tab is the standard one. The names are panel_region_terrain.xml's.
+// territories grid we bring up the standard one", "remember that they will no longer be able to see the original texture
+// page", and "make sure everything we need is on the wolf texture page for terrains and nothing is missing that is on the
+// original one". On Wolf Territories, while the terrain type is textures, the four textures and the eight corner Low/High
+// spinners are hidden - they still exist and still carry the region's values, and Apply still sends them (sendUpdate
+// fills them from the Wolf layers first when those were changed) - and the Wolf terrain screen takes their place. Water
+// height, the raise/lower limits, RAW download/upload, bake, Apply and the PBR materials switch (terrain_material_type,
+// shown exactly when the standard tab shows it: RenderTerrainPBREnabled) stay, the buttons and the switch moved below the
+// Wolf screen. Ticking PBR shows the standard material swatches and heights again (Wolf layers are textures), as on the
+// standard tab. Anywhere else the tab is the standard one. The names are panel_region_terrain.xml's.
 void LLPanelRegionTerrainInfo::hideStandardTextureControls()
 {
     static const char* const names[] = {
-        "detail_texture_text", "detail_material_text", "terrain_material_type",
+        "detail_texture_text", "detail_material_text",
         "texture_detail_0", "texture_detail_1", "texture_detail_2", "texture_detail_3",
         "material_detail_0", "material_detail_1", "material_detail_2", "material_detail_3",
         "height_text_lbl", "height_text_lbl2", "height_text_lbl3", "height_text_lbl4",
@@ -2115,30 +2118,22 @@ void LLPanelRegionTerrainInfo::hideStandardTextureControls()
     }
 }
 
-void LLPanelRegionTerrainInfo::applyWolfMode(bool wolf)
+bool LLPanelRegionTerrainInfo::wolfScreenShown() const
 {
-    if (!mWolfPanel) wolf = false;   // the PBR transform variant (panel_region_terrain_texture_transform.xml) has no Wolf screen
-    const bool changed = wolf != mWolfMode;
-    mWolfMode = wolf;
+    return mWolfPanel && mWolfMode && !(mMaterialTypeCtrl && material_type_from_ctrl(mMaterialTypeCtrl) == LLTerrainMaterials::Type::PBR);
+}
+
+void LLPanelRegionTerrainInfo::layoutWolfScreen()
+{
     if (!mWolfPanel) return;
-    mWolfPanel->setVisible(wolf);
-    static const char* const moved[4] = { "download_raw_btn", "upload_raw_btn", "bake_terrain_btn", "apply_btn" };
-    // Below the Wolf screen (top 94, 372 high): the RAW / bake row from top 390 to 470, Apply from 430 to 494.
-    static const S32 drop[4] = { 80, 80, 80, 64 };
-    for (S32 i = 0; i < 4; ++i)
-    {
-        LLRect r = mStandardRect[i];
-        r.translate(0, getRect().getHeight() - (wolf ? drop[i] : 0));
-        getChildView(moved[i])->setRect(r);
-    }
+    const bool wolf = wolfScreenShown();
     if (wolf)
     {
         hideStandardTextureControls();
-        if (changed) mWolfPanel->refreshPanel();
     }
-    else if (changed)
+    else if (mWolfScreenShown)
     {
-        // Back to the standard tab: what is always shown, then what follows the material type.
+        // Back from the Wolf screen: what the standard tab always shows (updateForMaterialType has set the rest by type).
         static const char* const always[] = {
             "height_text_lbl", "height_text_lbl2", "height_text_lbl3", "height_text_lbl4", "height_text_lbl6",
             "height_text_lbl7", "height_text_lbl8", "height_text_lbl9",
@@ -2148,24 +2143,45 @@ void LLPanelRegionTerrainInfo::applyWolfMode(bool wolf)
         {
             if (LLView* v = findChildView(name)) v->setVisible(true);
         }
-        updateForMaterialType();
-        static LLCachedControl<bool> feature_pbr_terrain_enabled(gSavedSettings, "RenderTerrainPBREnabled", false);
-        if (mMaterialTypeCtrl) mMaterialTypeCtrl->setVisible(feature_pbr_terrain_enabled());   // as refreshFromRegion
     }
+    const bool came_on = wolf && !mWolfScreenShown;
+    mWolfScreenShown = wolf;
+    mWolfPanel->setVisible(wolf);
+    // Below the Wolf screen (top 94, 372 high): the RAW / bake row from top 390 to 470, Apply from 430 to 494, and the PBR
+    // switch from top 106, left 190 to top 496, left 10 (on the Apply row).
+    static const char* const moved[5] = { "download_raw_btn", "upload_raw_btn", "bake_terrain_btn", "apply_btn", "terrain_material_type" };
+    static const S32 drop[5] = { 80, 80, 80, 64, 390 };
+    static const S32 shift[5] = { 0, 0, 0, 0, -180 };
+    for (S32 i = 0; i < 5; ++i)
+    {
+        LLView* v = findChildView(moved[i]);
+        if (!v) continue;
+        LLRect r = mStandardRect[i];
+        r.translate(wolf ? shift[i] : 0, getRect().getHeight() - (wolf ? drop[i] : 0));
+        v->setRect(r);
+    }
+    if (came_on) mWolfPanel->refreshPanel();
+}
+
+void LLPanelRegionTerrainInfo::applyWolfMode(bool wolf)
+{
+    mWolfMode = wolf && mWolfPanel;   // the PBR transform variant (panel_region_terrain_texture_transform.xml) has no Wolf screen
+    updateForMaterialType();          // the controls by terrain type, then layoutWolfScreen
+    if (!mMaterialTypeCtrl) layoutWolfScreen();   // updateForMaterialType returns early without the switch
 }
 
 void LLPanelRegionTerrainInfo::draw()
 {
     // The grid can change under an open tab (a hypergrid jump): the screen follows it (LLFloaterRegionInfo::draw, the same
     // gate as the Wolf tabs).
-    const bool wolf = mWolfPanel && WolfGrid::isOnWolfTerritories();
+    const bool wolf = mWolfPanel != nullptr && WolfGrid::isOnWolfTerritories();
     if (wolf != mWolfMode) applyWolfMode(wolf);
     LLPanelRegionInfo::draw();
 }
 
 void LLPanelRegionTerrainInfo::onRegionInfoClosed(bool app_quitting)
 {
-    if (mWolfMode && mWolfPanel) mWolfPanel->onScreenClosed(app_quitting);
+    if (mWolfScreenShown) mWolfPanel->onScreenClosed(app_quitting);
 }
 
 // virtual
@@ -2315,9 +2331,9 @@ bool LLPanelRegionTerrainInfo::refreshFromRegion(LLViewerRegion* region)
     // [WOLF TERRAIN SCREEN 2026-11-04] Wolf Territories: the Wolf terrain screen in place of the four textures. After
     // setAllChildrenEnabled above, so the Wolf screen sets its own controls (read-only for anyone who does not hold the
     // region, which is the same rights test: gAgent.canManageEstate()).
-    const bool was_wolf = mWolfMode;
+    const bool was_shown = mWolfScreenShown;
     applyWolfMode(WolfGrid::isOnWolfTerritories());   // refreshes the Wolf screen when it has just come on
-    if (mWolfMode && was_wolf) mWolfPanel->refreshPanel();
+    if (mWolfScreenShown && was_shown) mWolfPanel->refreshPanel();
 
     return LLPanelRegionInfo::refreshFromRegion(region);
 }
@@ -2340,7 +2356,7 @@ bool LLPanelRegionTerrainInfo::sendUpdate()
     // the best-fit Low/High) and then everything below sends them exactly as the standard tab does, so other viewers
     // (Firestorm visitors on the hypergrid) see the nearest four. Unchanged layers leave them as the region has them.
     bool wolf_save = false;
-    if (mWolfMode && mWolfPanel)
+    if (wolfScreenShown())   // not with PBR ticked: then the material swatches are what is sent, as on the standard tab
     {
         bool use = false;
         WolfTerrainLayers::Set wolf_set;
@@ -2357,7 +2373,6 @@ bool LLPanelRegionTerrainInfo::sendUpdate()
                 current.mRange[i] = (F32)getChild<LLUICtrl>(llformat("height_range_spin_%d", i))->getValue().asReal();
             }
             WolfTerrainLayers::toStandard(wolf_set, current, fitted);
-            if (mMaterialTypeCtrl) material_type_to_ctrl(mMaterialTypeCtrl, LLTerrainMaterials::Type::TEXTURE);   // layers are textures
             for (S32 i = 0; i < LLTerrainMaterials::ASSET_COUNT; ++i)
             {
                 if (mTextureDetailCtrl[i]) mTextureDetailCtrl[i]->setImageAssetID(fitted.mIds[i]);

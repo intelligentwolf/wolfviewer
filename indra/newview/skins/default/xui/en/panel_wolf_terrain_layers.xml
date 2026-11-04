@@ -15,7 +15,7 @@
  name="wolf_terrain_layers"
  width="480">
     <text follows="left|top" layout="topleft" left="10" top="0" width="464" height="32" word_wrap="true" font="SansSerifSmall" name="wolf_layers_note">Wolf terrain textures</text>
-    <check_box follows="left|top" layout="topleft" left="10" top="34" width="400" height="16" name="wolf_layers_on" label="Use Wolf terrain textures on this region" tool_tip="Untick to go back to layers made automatically from this region's standard four textures" />
+    <check_box follows="left|top" layout="topleft" left="10" top="34" width="400" height="16" name="wolf_layers_on" label="Use Wolf terrain textures on this region" tool_tip="Untick to go back to the region's standard four textures" />
     <text follows="left|top" layout="topleft" left="10" top="60" width="14" height="16" name="wolf_layer_num_0">1</text>
     <texture_picker follows="left|top" layout="topleft" left="26" top="54" width="28" height="28" name="wolf_layer_tex_0" allow_no_texture="false" can_apply_immediately="false" show_caption="false" tool_tip="Layer 1: click to choose its texture from your inventory" />
     <text follows="left|top" layout="topleft" left="58" top="60" width="96" height="16" font="SansSerifSmall" name="wolf_layer_state_0"></text>

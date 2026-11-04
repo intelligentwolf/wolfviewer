@@ -45,7 +45,6 @@
 #include "lltexturectrl.h"
 #include "llviewerregion.h"
 #include "llviewertexture.h"
-#include "llviewercontrol.h"
 #include "llvlcomposition.h"
 #include "wolfgrid.h"
 #include "wolfterrainpaint.h"
@@ -289,7 +288,8 @@ WolfTerrainLayers::Set WolfTerrainLayers::defaults(LLViewerRegion* regionp)
     return validate(s, out, err) ? out : s;
 }
 
-// [WOLF TERRAIN SCREEN 2026-11-04] The automatic set — what a Wolf region with no Wolf layers saved draws.
+// [WOLF TERRAIN SCREEN 2026-11-04] The automatic set — where the Wolf terrain screen starts on a region with no Wolf layers
+// saved (never drawn by itself: setFor).
 // Source: llvlcomposition.h:134-137 corner enum SW 0, SE 1, NW 2, NE 3; getDetailAssetID / getStartHeight / getHeightRange
 // are what lldrawpoolterrain.cpp renderFullShaderTextures feeds the Enhanced blend (wolf_comp_start / wolf_comp_range, the
 // four detail textures) and renderFullShader's PBR test (getMaterialType).
@@ -417,9 +417,6 @@ void WolfTerrainLayers::toStandard(const Set& s, const StandardTerrain& current,
 
 const WolfTerrainLayers::Set* WolfTerrainLayers::automaticFor(LLViewerRegion* regionp) const
 {
-    // settings.xml WolfTerrainAutoLayers (default on): off draws the standard four on such regions, as before 2026-11-04
-    static LLCachedControl<bool> auto_layers(gSavedSettings, "WolfTerrainAutoLayers", true);
-    if (!auto_layers) return nullptr;
     StandardTerrain st;
     if (!readStandard(regionp, st)) return nullptr;
     const F32 tile = 1.f / LLDrawPoolTerrain::sDetailScale;   // the four textures' own repeat (renderFullShaderTextures tp0)
@@ -454,18 +451,16 @@ const WolfTerrainLayers::Set* WolfTerrainLayers::setFor(LLViewerRegion* regionp)
 {
     if (!regionp) return nullptr;
     const U64 handle = regionp->getHandle();
-    if (mEdit && mEdit->mHandle == handle && regionp == gAgent.getRegion())
+    // [WOLF TERRAIN SCREEN 2026-11-04] Paul chose "exactly as today": a region draws its saved Wolf layers or, with none,
+    // its own four through the Enhanced blend as before. The working copy previews on the agent's own ground only once it
+    // has been changed (editChanged keeps mLastGood), so opening the screen - which starts from the automatic set
+    // (automaticFor) on a region with nothing saved - changes nothing on the ground until the holder edits.
+    if (mEdit && mEdit->mHandle == handle && regionp == gAgent.getRegion() && mEdit->mDirty)
     {
-        // The working copy previews on the agent's own ground (editChanged keeps mLastGood); unticked is the automatic set.
-        if (mEdit->mOn) return mEdit->mHasLastGood ? &mEdit->mLastGood : nullptr;
-        return automaticFor(regionp);
+        return (mEdit->mOn && mEdit->mHasLastGood) ? &mEdit->mLastGood : nullptr;
     }
     const WolfTerrainPaint::Record* r = WolfTerrainPaint::instance().recordFor(handle);
-    if (r && r->mHasWolf) return &r->mWolf;
-    // [WOLF TERRAIN SCREEN 2026-11-04] Paul: "on wolf every region should be switched". No Wolf layers saved (or the record
-    // not in yet): the automatic set from the region's own four. activeFor/bind only get here on a Wolf region
-    // (WolfGrid::showsWolfRegion), and until the set's textures are in the array the standard four draw as before.
-    return automaticFor(regionp);
+    return (r && r->mHasWolf) ? &r->mWolf : nullptr;
 }
 
 bool WolfTerrainLayers::Array::ready() const
@@ -789,8 +784,8 @@ WolfTerrainLayers::Edit* WolfTerrainLayers::beginEdit()
     mEdit->mBaseVersion = r->mVersion;
     mEdit->mHasBase = r->mHasWolf;
     mEdit->mBase = r->mWolf;
-    // [WOLF TERRAIN SCREEN 2026-11-04] Nothing saved: the box starts ticked on the automatic set, which is what the region
-    // draws already, so opening the screen changes nothing on the ground until Apply.
+    // [WOLF TERRAIN SCREEN 2026-11-04] Nothing saved: the box starts ticked on the automatic set (the nearest Wolf layers to
+    // the region's own four). It is not drawn until the holder changes something (setFor), nor stored until Apply.
     const Set* automatic = r->mHasWolf ? nullptr : automaticFor(rgn);
     mEdit->mOn = r->mHasWolf || automatic != nullptr;
     mEdit->mSet = r->mHasWolf ? r->mWolf : (automatic ? *automatic : defaults(rgn));
@@ -917,7 +912,7 @@ void WolfTerrainLayers::saveCoro(std::string region_uuid, LLSD wolf, LLSD base, 
     }
     mSaveResult = 1;
     // [WOLF TERRAIN SCREEN 2026-11-04] said on the Terrain tab's status line (WolfPanelTerrainLayers::draw), no pop-up
-    LL_INFOS("WolfTerrainLayers") << (on ? "Wolf terrain textures saved for " : "automatic Wolf terrain textures again for ") << name << LL_ENDL;
+    LL_INFOS("WolfTerrainLayers") << (on ? "Wolf terrain textures saved for " : "back on its standard four terrain textures: ") << name << LL_ENDL;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════
@@ -998,15 +993,18 @@ void WolfPanelTerrainLayers::refreshPanel()
 bool WolfPanelTerrainLayers::hasChanges() const
 {
     const WolfTerrainLayers::Edit* ed = WolfTerrainLayers::instance().edit();
-    // Unticked with nothing stored is already the automatic set: nothing to store.
-    return ed && ed->mDirty && (ed->mOn || ed->mHasBase);
+    if (!ed) return false;
+    // Paul 11-04: the region looks exactly as today "until an owner presses Apply". Ticked on a region with nothing saved
+    // (the screen starts that way) is a change; so is any edit, except unticking where nothing was ever stored.
+    return (ed->mOn && !ed->mHasBase) || (ed->mDirty && (ed->mOn || ed->mHasBase));
 }
 
 bool WolfPanelTerrainLayers::editForStandard(bool& use, WolfTerrainLayers::Set& out)
 {
     use = false;
     const WolfTerrainLayers::Edit* ed = WolfTerrainLayers::instance().edit();
-    if (!ed || !ed->mDirty || !ed->mOn) return true;   // the region's own four stay as they are
+    // Unchanged layers (the starting set, made from the region's own four) leave its four as they are.
+    if (!ed || !ed->mDirty || !ed->mOn) return true;
     std::string err;
     if (!WolfTerrainLayers::validate(ed->mSet, out, err))
     {
@@ -1105,14 +1103,14 @@ void WolfPanelTerrainLayers::show()
         mNote->setText(WHO_SEES + "\nApply also sets the standard four from your first four layers.");
     }
     const bool editable = ed != nullptr;
-    // What the region draws now when nothing is being edited: its saved layers, else the automatic set.
+    // When nothing is being edited: the saved layers, else the region's own four as layers (the automatic set).
     const WolfTerrainLayers::Set* drawn = (r && r->mHasWolf) ? &r->mWolf : wl.automaticFor(gAgent.getRegion());
-    // Unticked shows the automatic set the region falls back to (read-only until ticked again).
+    // Unticked shows the region's own four as layers (the automatic set), read-only until ticked again.
     const WolfTerrainLayers::Set* automatic = (ed && !ed->mOn) ? wl.automaticFor(gAgent.getRegion()) : nullptr;
     const WolfTerrainLayers::Set s = automatic ? *automatic : (ed ? ed->mSet : (drawn ? *drawn : WolfTerrainLayers::Set()));
     const bool rows = editable && ed->mOn;
     mShown = s;
-    mOn->set(ed ? ed->mOn : (r != nullptr && drawn != nullptr));
+    mOn->set(ed ? ed->mOn : (r != nullptr && r->mHasWolf));
     mOn->setEnabled(editable);
     for (S32 i = 0; i < WolfTerrainLayers::LAYERS; ++i)
     {
@@ -1280,8 +1278,8 @@ void WolfPanelTerrainLayers::onOn()
     ed->mOn = mOn->get();
     changed();
     show();
-    setStatus(ed->mOn ? "Your own layers are back. Press Apply to keep them."
-                      : "Layers made from the region's standard four textures. Press Apply to keep this.", false);
+    setStatus(ed->mOn ? "Wolf terrain textures on. Press Apply to keep them."
+                      : "The region's standard four textures. Press Apply to keep this.", false);
 }
 
 void WolfPanelTerrainLayers::onDefaults()

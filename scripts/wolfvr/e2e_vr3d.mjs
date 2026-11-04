@@ -175,7 +175,9 @@ await sleep(2500);
 check(await evalJs('window.__wolfvr.bar().on.includes("map")'), 'and still open after the trigger was let go over the layer (no second click, no select double)');
 // [VR MENU FIX 2026-11-04] the bar closes itself after a button: open it again for the second press
 check(await barOpen(true), 'the bar closed itself after Map; the menu button opens it again');
-await aimAt(mapPt); await sleep(300); await click('right', 0);
+// [VR BAR IN THE ROOM] it opens in front of the head again: where its Map button is now
+await aimAt(await evalJs('window.__wolfvr.slotPoint("map")')); await sleep(300);
+await click('right', 0);
 check(await waitFor(() => evalJs('!window.__wolfvr.bar().on.includes("map")'), 6000), 'Map closed again from the bar');
 await barOpen(false);
 

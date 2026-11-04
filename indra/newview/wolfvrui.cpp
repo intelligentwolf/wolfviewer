@@ -20,6 +20,10 @@
 #include "llagent.h"
 #include "llcommandmanager.h"
 #include "llfavoritesbar.h"
+#include "llfloater.h"
+#include "llfocusmgr.h"
+#include "lllineeditor.h"
+#include "lltexteditor.h"
 #include "llinventorymodel.h"
 #include "lluictrl.h"
 #include "llviewerinventory.h"
@@ -130,6 +134,27 @@ bool runCommand(const std::string& name, const std::string& arg, std::string& wh
         }
         return true;
     }
+    if (name == "closefloater")
+    {
+        // [VR PANELS 2026-11-04] Paul: "there was no easy close on the mini map". A panel's own Close: only a window open
+        // in the floater view now, found by the id its panel was sent with (wolfvrscreen.cpp sendPanels), closed as its
+        // own close button would
+        why = "that window is not open any more";
+        if (!gFloaterView) return false;
+        for (LLView* v : *gFloaterView->getChildList())
+        {
+            LLFloater* f = dynamic_cast<LLFloater*>(v);
+            if (!f || !f->isShown()) continue;
+            std::string id = f->getInstanceName();
+            if (f->getKey().isDefined()) id += ":" + f->getKey().asString();
+            LLStringUtil::truncate(id, 80);
+            if (id != arg) continue;
+            if (f->getInstanceName() == "wolf_vr_stream") { why = "that window stays on the desktop"; return false; }
+            f->closeFloater();
+            return true;
+        }
+        return false;
+    }
     if (name == "fav")
     {
         LLUUID id;
@@ -194,6 +219,13 @@ void pump()
     o["headset"] = gSavedSettings.getString("WolfVRHeadset");
     o["mic"] = gSavedSettings.getBOOL("WolfVRHeadsetMic");   // [VR AUDIO] the page's microphone button
     o["hide"] = gSavedSettings.getBOOL("WolfVRHideAvatar");   // [VR VIEW] the bar's Hide Me / Show Me
+    // [VR KEYBOARD 2026-11-04] Paul: "NO KEYBOARD". The page's keyboard opens by itself while the viewer's typing goes to
+    // a text field (nearby chat, an IM, search, the inventory filter), and closes again when it leaves one
+    LLFocusableElement* kf = gFocusMgr.getKeyboardFocus();
+    const LLLineEditor* le = dynamic_cast<LLLineEditor*>(kf);
+    const LLTextEditor* te = dynamic_cast<LLTextEditor*>(kf);
+    o["typing"] = (le && le->acceptsTextInput()) || (te && te->acceptsTextInput());   // not a read-only chat history
+    o["lang"] = gSavedSettings.getString("Language");   // the keyboard's layout when the headset's own language is not one it has
     // the favourites bar's landmarks, in its order (LLFavoritesOrderStorage), first 6 (vr_hud.js _favorites)
     json::array favs;
     const LLUUID fav = gInventory.findCategoryUUIDForType(LLFolderType::FT_FAVORITE);

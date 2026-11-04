@@ -31,6 +31,7 @@
 import * as THREE from './three/three.module.js';
 import { VRBar } from './vrbar.js';
 import { VRLayer } from './vrlayer.js';
+import { VRKeyboard, layoutFor } from './vrkeyboard.js';
 import { VRAudio } from './vraudio.js';
 import { DepthEyes, inflateDepth, SHELL } from './vrdepth.js';
 
@@ -352,6 +353,15 @@ function onText(text) {
     } else if (m.t === 'ui') {
         // [VR CONTROLS 2026-11-04] the action bar's state from the viewer (wolfvrui.cpp pump)
         bar.setState(m);
+        // [VR KEYBOARD] the viewer's language (the layout when the headset's own says nothing we know), and the
+        // keyboard by itself while the viewer's typing goes to a text field
+        if (typeof m.lang === 'string') keyboard.setViewerLanguage(m.lang);
+        if (typeof m.typing === 'boolean') {
+            // only after the resident pointed and clicked (into the text field): not every window that gives itself
+            // focus when it opens (the world map's search box would bring the keyboard up over everything)
+            if (m.typing && !keyboard.open && WORLD() && renderer.xr.isPresenting && performance.now() - lastViewerPress < 2000) { keyboard.show(_pos, _quat); kbAuto = true; }
+            else if (!m.typing && keyboard.open && kbAuto) { keyboard.hide(); kbAuto = false; }
+        }
         layer.setSeated(m.sit === 2);
         if (typeof m.headset === 'string' && m.headset !== viewerHeadset) { viewerHeadset = m.headset; headsetChanged(); }
         if (typeof m.mic === 'boolean') micSetting = m.mic;
@@ -650,6 +660,9 @@ const bar = new VRBar(dock, send);
 // a HUDs-layer problem is shown IN the headset too (the bar's message line), not only on the 2D page nobody sees in VR
 const layer = new VRLayer(dock, send, (t) => { showError(t); bar.toast(t, 15000); });
 layer.attachWorld(scene);   // [VR PANELS 2026-11-04] each viewer window its own panel, standing in the room
+bar.attachWorld(scene);     // [VR BAR IN THE ROOM 2026-11-04] the bar stands in the room too (the Menu tab stays with the head)
+const keyboard = new VRKeyboard(scene, send);   // [VR KEYBOARD 2026-11-04]
+let kbAuto = false;         // the keyboard was opened by a text field (and closes itself when typing leaves it)
 // [VR AUDIO 2026-11-04] the viewer's sound in the headset (vraudio.js), and the headset microphone for voice chat
 const vrAudio = new VRAudio({
     send,
@@ -675,6 +688,7 @@ bar.onPage = (id) => {
     else if (id === 'bigscreen') { bar.hide(); switchMode(); }
     else if (id === 'numbers') { statsOn = !statsOn; bar.setPageState('numbers', statsOn); }
     else if (id === 'exit') { bar.hide(); toggleVR(); }
+    else if (id === 'keyboard') { bar.hide(); if (keyboard.open) keyboard.hide(); else { keyboard.show(_pos, _quat); kbAuto = false; } }
 };
 // A button that opens a window in the viewer: make sure the HUDs layer (where that window shows) is on.
 const OPENS_WINDOW = new Set(['chat', 'voice', 'move', 'view', 'people', 'radar', 'search', 'map', 'minimap', 'wolf_experiences',
@@ -1242,6 +1256,7 @@ function enterMode() {
         depthEyes.hide();
         screen.userData.hdr = null;
         bar.hide();
+        keyboard.hide();
         bar.setTabActive(false);
         checkCard.visible = false;
         vignette.visible = false;
@@ -1371,11 +1386,16 @@ function aimAt(ro, rd, headPos, headQuat) {
     _hq.copy(headQuat).invert();
     _ho.copy(ro).sub(headPos).applyQuaternion(_hq);
     _hd.copy(rd).applyQuaternion(_hq);
-    const b = bar.hit(_ho, _hd);
-    if (b) return { kind: b.kind === 'tab' ? 'tab' : 'bar', hit: b, t: b.t };
+    // [VR KEYBOARD] an open bar first (the resident just asked for it), then the keyboard, then the Menu tab
+    const b = bar.hit(_ho, _hd, ro, rd);
+    if (b && b.kind !== 'tab') return { kind: 'bar', hit: b, t: b.t };
+    const kh = keyboard.hit(ro, rd);
+    if (kh) return { kind: 'kb', hit: kh, t: kh.t };
+    if (b) return { kind: 'tab', hit: b, t: b.t };
     // [VR PANELS 2026-11-04] a window's panel first: the HUD band is mostly see-through (only the viewer knows where it
     // has something drawn), so its nearer surface must not take the ray from a window behind it
     const pan = layer.hitPanels(ro, rd);
+    if (pan && pan.close) return { kind: 'pclose', hit: pan, t: pan.t };   // [VR PANEL CLOSE] a window's own Close
     return { kind: 'ptr', layer: pan || layer.hit(_ho, _hd) };
 }
 function sendRay(ro, rd, lay) {
@@ -1390,7 +1410,8 @@ function sendRay(ro, rd, lay) {
     if (lay) { m.lu = +lay.u.toFixed(4); m.lv = +lay.v.toFixed(4); }
     send(m);
 }
-function ptrButton(b, down) { send({ t: 'in', e: down ? 'down' : 'up', b, w: 1 }); if (down) reticle.pulseUntil = performance.now() + 160; }
+let lastViewerPress = -1e9;   // [VR KEYBOARD] when the pointer last pressed on the viewer's UI or world
+function ptrButton(b, down) { if (down) lastViewerPress = performance.now(); send({ t: 'in', e: down ? 'down' : 'up', b, w: 1 }); if (down) reticle.pulseUntil = performance.now() + 160; }
 function pollWorldPointer(src, gp, frame, headPos, headQuat) {
     const rp = frame.getPose(src.targetRaySpace, renderer.xr.getReferenceSpace());
     const pressed = (i) => !!(gp.buttons[i] && gp.buttons[i].pressed);
@@ -1408,8 +1429,10 @@ function pollWorldPointer(src, gp, frame, headPos, headQuat) {
     const trig = pressed(0), bBtn = pressed(5), grip = pressed(1);
     const own = worldPointer.owner;
     // what the ray is on for the buttons: the owner of a held button, else what it points at now
-    const onBar = aim && (aim.kind === 'bar' || aim.kind === 'tab');
-    bar.setHover(onBar && !own[0] ? aim.hit : null);
+    // the page's own surfaces (the bar, its tab, the keyboard, a window's Close) take the buttons themselves
+    const onBar = aim && (aim.kind === 'bar' || aim.kind === 'tab' || aim.kind === 'kb' || aim.kind === 'pclose');
+    bar.setHover(onBar && !own[0] && (aim.kind === 'bar' || aim.kind === 'tab') ? aim.hit : null);
+    keyboard.setHover(aim && aim.kind === 'kb' && !own[0] ? aim.hit.i : -1);
     // the trigger (0) and B (2): press on the bar = activate it there; press elsewhere = the viewer's button
     for (const [b, now, was] of [[0, trig, worldPointer.trig], [2, bBtn, worldPointer.b]]) {
         if (now && !was) {
@@ -1420,7 +1443,14 @@ function pollWorldPointer(src, gp, frame, headPos, headQuat) {
                           _rd.angleTo(worldPointer.lastDir) < 0.05;
             if (b === 0) { worldPointer.lastTrig = again ? 0 : t; worldPointer.lastDir.copy(_rd); }
             ptrLog.presses[onBar ? 'bar' : again ? 'tp' : aim ? 'ptr' : 'none']++;   // [VR DEVICE REPORT]
-            if (onBar) { own[b] = 'bar'; if (b === 0) bar.activate(aim.hit); }
+            if (onBar) {
+                own[b] = 'bar';
+                if (b === 0) {
+                    if (aim.kind === 'kb') keyboard.press(aim.hit.i);
+                    else if (aim.kind === 'pclose') send({ t: 'act', a: 'closefloater', x: aim.hit.k });   // [VR PANEL CLOSE]
+                    else bar.activate(aim.hit);
+                }
+            }
             else if (again) { own[b] = 'tp'; sendRay(_ro, _rd, aim.layer); send({ t: 'in', e: 'tp' }); reticle.pulseUntil = t + 300; }
             else if (aim) { own[b] = 'ptr'; sendRay(_ro, _rd, aim.layer); ptrButton(b, true); }
         } else if (!now && was) {
@@ -1441,6 +1471,9 @@ function pollWorldPointer(src, gp, frame, headPos, headQuat) {
         }
     }
     if (!grip && layer.moving) layer.movePanel(null, _ro, _rd, false);
+    // [VR BAR IN THE ROOM] grip held on the bar: it moves round with the controller
+    if (grip && (bar.moving || (aim && aim.kind === 'bar' && !worldPointer.grip))) bar.move(_ro, _rd, true);
+    else if (!grip && bar.moving) bar.move(_ro, _rd, false);
     // the ray and the dot: on the bar where it hits; else where the viewer says it landed
     if (rp) {
         let t = -1, big = false;
@@ -1492,6 +1525,8 @@ function onSelect(ev) {
     new THREE.Matrix4().fromArray(vp.transform.matrix).premultiply(dolly.matrixWorld).decompose(hp, hq, hs);
     const aim = aimAt(_ro, _rd, hp, hq);
     ptrLog.presses.select++;   // [VR DEVICE REPORT]
+    if (aim.kind === 'kb') { keyboard.press(aim.hit.i); return; }
+    if (aim.kind === 'pclose') { send({ t: 'act', a: 'closefloater', x: aim.hit.k }); return; }
     if (aim.kind === 'bar' || aim.kind === 'tab') { bar.activate(aim.hit); return; }
     // anywhere else: a click there (the viewer finds what is under it: a window, a HUD, or the world)
     sendRay(_ro, _rd, aim.layer);
@@ -1606,6 +1641,7 @@ function animate(time, frame) {
         }
         dock.position.copy(_pos); dock.quaternion.copy(_quat); dock.updateMatrixWorld(true);
         bar.setTabActive(WORLD());
+        bar.setHead(_pos, _quat);   // [VR BAR IN THE ROOM] where it opens
         ctl = pollControllers(renderer.xr.getSession(), frame, _pos, _quat);
         num.xrFrames++;
     } else {
@@ -1741,6 +1777,7 @@ function animate(time, frame) {
     layer.update(_pos, _quat);
     bar.setPageState('numbers', statsOn);
     bar.update(now);
+    keyboard.update(now);
     if (renderer.xr.isPresenting) statsMesh.visible = statsOn || now < sizeFlashUntil;
     if (config && config.debug) drawStatsPanel(now);
 }
@@ -1846,7 +1883,7 @@ window.__wolfvr = { resetStages: () => { for (const k of STAGES) stages[k].v.len
         if (i < 0) return null;
         const sl = bar.slots[i];
         const u = (sl.x + sl.w / 2) / 1024, v = 1 - (sl.y + sl.h / 2) / 448;
-        return surfacePoint(1.0, bar.arc, -0.385, bar.height, u, v);
+        return bar.pointAt(u, v);   // [VR BAR IN THE ROOM] the bar stands in the room
     },
     layerPoint: (u, v) => surfacePoint(1.25, layer.arc, layer.y, layer.height, u, 1 - v),
     // [VR PANELS] the HUD band's own hit for a ray from the head through its point (u, v) (null where a panel was cut out)
@@ -1856,7 +1893,13 @@ window.__wolfvr = { resetStages: () => { for (const k of STAGES) stages[k].v.len
         return layer.hit(o, d);
     },
     // [VR MENU FIX] the bar's Close button, and what the Menu tab says now
-    closePoint: () => surfacePoint(1.0, bar.arc, -0.385, bar.height, (1024 - 196 + 91) / 1024, 1 - (10 + 24) / 448),
+    closePoint: () => bar.pointAt((1024 - 196 + 91) / 1024, 1 - (10 + 24) / 448),
+    barPlace: () => ({ yaw: +(bar.yaw * 180 / Math.PI).toFixed(1), y: +(bar.c ? bar.c.y : 0).toFixed(3), open: bar.open }),
+    // [VR KEYBOARD] test hooks: the keyboard's state, a key's place in the room, the layout a language list gives
+    keyboard: () => ({ open: keyboard.open, layout: keyboard.layout, page: keyboard.page, auto: kbAuto, keys: keyboard.keys.map((k) => k.label) }),
+    keyPoint: (label) => keyboard.keyPoint(label),
+    kbLanguages: (list) => { keyboard.chosen = ''; const k = (list || []).map(layoutFor).find(Boolean) || 'us'; keyboard.setLayout(k); keyboard.chosen = ''; return k; },
+    panelClosePoint: (k) => { const p = layer.panels.get(k); return p ? [p.c.x + 1.3 * Math.sin(-p.xYaw), p.c.y + p.xY, p.c.z - 1.3 * Math.cos(-p.xYaw)] : null; },
     setQuality: (l) => { quality.pinned = true; setQuality(l, ''); },   // held there: no adapting while a test measures it   // test hook: a headset's quality step
     deviceLine: () => deviceLine(),
     tabText: () => (performance.now() < bar.tabMsgUntil ? bar.tabMsg : 'Menu'),

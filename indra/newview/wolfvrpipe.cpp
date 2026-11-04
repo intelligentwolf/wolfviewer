@@ -1049,7 +1049,7 @@ void Service::Impl::onText(const std::shared_ptr<Client>& c, const std::string& 
         e.type = InputEvent::Type::ACTION;
         e.key = str("a");
         e.text = str("x");
-        if (e.key.empty() || e.key.size() > 40 || e.text.size() > 64) return;
+        if (e.key.empty() || e.key.size() > 40 || e.text.size() > 128) return;   // [VR PANELS] a window's id, up to 120
         for (const char ch : e.key)
         {
             if (!(std::isalnum((unsigned char)ch) || ch == '_' || ch == '.' || ch == '-')) return;

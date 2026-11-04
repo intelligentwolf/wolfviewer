@@ -53,6 +53,8 @@ export const ACTIONS = [
     { id: 'dashboard', label: 'Dashboard', icon: 'speed', cmd: 'wolf_dashboard', wolf: true },
     // VR-only (hud_model.js vrOnly): the HUD layer switch (hud_model.js 'huds'), the big screen, leaving VR
     { id: 'huds', label: 'HUDs', icon: 'dashboard', page: 'huds' },
+    // [VR KEYBOARD 2026-11-04] the headset keyboard (it also opens by itself in a text field)
+    { id: 'keyboard', label: 'Keyboard', icon: 'keyboard', page: 'keyboard' },
     // [VR VIEW 2026-11-04] see yourself from behind (the default) or from your own eyes with your avatar hidden
     { id: 'hideme', label: 'Hide Me', icon: 'visibility_off', cmd: 'hideavatar' },
     { id: 'bigscreen', label: 'Big Screen', icon: 'tv', page: 'bigscreen' },
@@ -204,7 +206,40 @@ export class VRBar {
     }
     setPageState(id, on) { if (this.pageState[id] !== on) { this.pageState[id] = on; this._dirty = true; } }
 
-    toggle() { this.open = !this.open; this.mesh.visible = this.open; this.hover = null; this._dirty = true; this._showTab(); }
+    // [VR BAR IN THE ROOM 2026-11-04] Paul: "the MENU itself would be better floating in the air than moving with the
+    // headset". The bar stands in the room like the windows: it opens in front of where the resident looks (and comes
+    // back there each time it opens), then stays put; the grip moves it round. The Menu tab stays with the head, so it
+    // can always be found.
+    attachWorld(group) { this.world = group; group.add(this.mesh); this.c = new THREE.Vector3(); this.yaw = 0; this._head = { p: new THREE.Vector3(), q: new THREE.Quaternion() }; }
+    setHead(p, q) { if (this._head) { this._head.p.copy(p); this._head.q.copy(q); } }
+    _place() {
+        if (!this.world) return;
+        const f = new THREE.Vector3(0, 0, -1).applyQuaternion(this._head.q);
+        this.yaw = Math.atan2(-f.x, -f.z);
+        this.c.copy(this._head.p);
+        this.mesh.position.set(this.c.x, this.c.y + BAR_Y, this.c.z);
+        this.mesh.rotation.set(0, this.yaw, 0);
+    }
+    // grip held on the bar: it follows the controller round (yaw from the ray) and up or down
+    move(o, d, held) {
+        if (!held) { this.moving = null; return; }
+        const yaw = Math.atan2(-d.x, -d.z);
+        if (!this.moving) { this.moving = { dyaw: this.yaw - yaw, y0: this.c.y, ry0: o.y + d.y }; return; }
+        this.yaw = yaw + this.moving.dyaw;
+        this.c.y = this.moving.y0 + (o.y + d.y - this.moving.ry0);
+        this.mesh.position.set(this.c.x, this.c.y + BAR_Y, this.c.z);
+        this.mesh.rotation.set(0, this.yaw, 0);
+    }
+    // a point on the bar (u from the left, v from the bottom) in the room, for aiming the fake controller (tests)
+    pointAt(u, v) {
+        const a = -this.arc / 2 + u * this.arc;
+        return this.mesh.localToWorld(new THREE.Vector3(DOCK_RADIUS * Math.sin(a), -this.height / 2 + v * this.height, -DOCK_RADIUS * Math.cos(a))).toArray();
+    }
+    toggle() {
+        this.open = !this.open;
+        if (this.open) { this._place(); this.mesh.updateMatrixWorld(true); }
+        this.mesh.visible = this.open; this.hover = null; this.moving = null; this._dirty = true; this._showTab();
+    }
     // [VR MENU FIX] a few words on the Menu tab (what the last button did), for `ms`
     tabSay(text, ms = 4000) { this.tabMsg = text; this.tabMsgUntil = performance.now() + ms; this._drawTab(); }
     // [VR MENU FIX] the viewer's answer to a command: done (the bar is already closed: say so on the tab) or not done
@@ -219,7 +254,7 @@ export class VRBar {
         if (!this.open) this.toggle();
         this.toast(label + ': ' + why, 600000);
     }
-    hide() { this.open = false; this.mesh.visible = false; this.hover = null; this._showTab(); }
+    hide() { this.open = false; this.mesh.visible = false; this.hover = null; this.moving = null; this._showTab(); }
     setTabActive(on) { if (this.tabActive !== on) { this.tabActive = on; this._showTab(); } }
     _showTab() { this.tab.visible = this.tabActive && !this.open; }
     _drawTab() {
@@ -263,14 +298,16 @@ export class VRBar {
         if (this.open && this._dirty) this._draw();
     }
 
-    // Head-space ray -> what it points at on the bar, or null. vr_hud.js resolve(): canvas px from the UV.
-    hit(o, d) {
+    // Head-space ray (o, d: the Menu tab) and the same ray in the room (wo, wd: the bar) -> what it points at, or null.
+    // vr_hud.js resolve(): canvas px from the UV.
+    hit(o, d, wo, wd) {
         if (!this.open) {
             if (!this.tab.visible) return null;
             const t = hitCylinder(o, d, DOCK_RADIUS, this.tabArc, 0, TAB_Y, this.tabH);
             return t ? { kind: 'tab', i: -1, t: t.t } : null;
         }
-        const h = hitCylinder(o, d, DOCK_RADIUS, this.arc, 0, BAR_Y, this.height);
+        const h = this.world ? hitCylinder(new THREE.Vector3().copy(wo).sub(this.c), wd, DOCK_RADIUS, this.arc, this.yaw, BAR_Y, this.height)
+                             : hitCylinder(o, d, DOCK_RADIUS, this.arc, 0, BAR_Y, this.height);
         if (!h) return null;
         const px = h.u * BAR_W, py = (1 - h.v) * BAR_H;
         if (px >= CLOSE.x && px < CLOSE.x + CLOSE.w && py >= CLOSE.y && py < CLOSE.y + CLOSE.h) return { kind: 'close', i: -1, t: h.t };

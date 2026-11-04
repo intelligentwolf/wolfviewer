@@ -21,6 +21,11 @@
 #include "llagentcamera.h"
 #include "llfocusmgr.h"
 #include "llfloater.h"
+#include "lltoast.h"
+#include "llrootview.h"
+#include "llviewermenu.h"
+#include <algorithm>
+#include <functional>
 #include "llappviewer.h"
 #include "lldir.h"
 #include "llimagepng.h"
@@ -326,28 +331,49 @@ namespace
         const F32 W = (F32)llmax(1, gViewerWindow->getWindowWidthRaw()), H = (F32)llmax(1, gViewerWindow->getWindowHeightRaw());
         std::string list;
         int n = 0;
+        // [VR PANELS] the windows top first (the floater view's child list starts with the front one); each panel also
+        // gets the parts of it a window IN FRONT of it covers on the desktop ("o"), which the page leaves out of it -
+        // Paul: "you can see bits of screens appearing" (video frames 18-22: the QR window over the inventory's corner)
+        std::vector<LLRect> above;   // raw pixels, GL coordinates
+        const auto esc = [](const std::string& t) {
+            std::string o;
+            for (char c : t) { if (c == '"' || c == '\\') { o += '\\'; o += c; } else if ((unsigned char)c >= 32) o += c; }
+            return o;
+        };
+        auto uv = [&](const LLRect& r) {
+            return llformat("[%.4f,%.4f,%.4f,%.4f]", llclamp(r.mLeft / W, 0.f, 1.f), llclamp(1.f - r.mTop / H, 0.f, 1.f),
+                            llclamp(r.mRight / W, 0.f, 1.f), llclamp(1.f - r.mBottom / H, 0.f, 1.f));
+        };
         for (LLView* v : *gFloaterView->getChildList())
         {
             LLFloater* f = dynamic_cast<LLFloater*>(v);
-            if (!f || !f->isShown() || !f->isInVisibleChain() || n >= 12) continue;
-            const LLRect r = f->calcScreenRect();
-            const F32 x0 = r.mLeft * ds.mV[VX] / W, x1 = r.mRight * ds.mV[VX] / W;
-            const F32 y0 = 1.f - r.mTop * ds.mV[VY] / H, y1 = 1.f - r.mBottom * ds.mV[VY] / H;
-            if (x1 - x0 < 0.01f || y1 - y0 < 0.01f) continue;
-            // the window's own name (one per kind, plus its key for the ones that open many: IMs, profiles)
-            std::string id = f->getInstanceName();
-            if (f->getKey().isDefined()) id += ":" + f->getKey().asString();
-            std::string title = f->getTitle();
-            LLStringUtil::truncate(title, 60);
-            LLStringUtil::truncate(id, 80);
-            const auto esc = [](const std::string& t) {
-                std::string o;
-                for (char c : t) { if (c == '"' || c == '\\') { o += '\\'; o += c; } else if ((unsigned char)c >= 32) o += c; }
-                return o;
-            };
-            list += llformat("%s{\"k\":\"%s\",\"n\":\"%s\",\"r\":[%.4f,%.4f,%.4f,%.4f]}", n ? "," : "", esc(id).c_str(),
-                             esc(title).c_str(), llclamp(x0, 0.f, 1.f), llclamp(y0, 0.f, 1.f), llclamp(x1, 0.f, 1.f), llclamp(y1, 0.f, 1.f));
-            ++n;
+            if (!f || !f->isShown() || !f->isInVisibleChain()) continue;
+            // [VR WINDOW 2026-11-04] never the VR window itself (its QR code and address are for the desktop)
+            if (f->getInstanceName() == "wolf_vr_stream") continue;
+            const LLRect s = f->calcScreenRect();
+            const LLRect r(ll_round(s.mLeft * ds.mV[VX]), ll_round(s.mTop * ds.mV[VY]), ll_round(s.mRight * ds.mV[VX]), ll_round(s.mBottom * ds.mV[VY]));
+            if (r.getWidth() < 0.01f * W || r.getHeight() < 0.01f * H) continue;
+            if (n < 12)
+            {
+                // the window's own name (one per kind, plus its key for the ones that open many: IMs, profiles)
+                std::string id = f->getInstanceName();
+                if (f->getKey().isDefined()) id += ":" + f->getKey().asString();
+                std::string title = f->getTitle();
+                LLStringUtil::truncate(title, 60);
+                LLStringUtil::truncate(id, 80);
+                std::string over;
+                for (const LLRect& a : above)
+                {
+                    LLRect i = r;
+                    i.intersectWith(a);
+                    if (i.getWidth() <= 0 || i.getHeight() <= 0) continue;
+                    over += (over.empty() ? "" : ",") + uv(i);
+                }
+                list += llformat("%s{\"k\":\"%s\",\"n\":\"%s\",\"r\":%s,\"o\":[%s]}", n ? "," : "", esc(id).c_str(),
+                                 esc(title).c_str(), uv(r).c_str(), over.c_str());
+                ++n;
+            }
+            above.push_back(r);
         }
         const std::string msg = "{\"t\":\"panels\",\"p\":[" + list + "]}";
         const F64 now = LLTimer::getTotalSeconds();
@@ -683,14 +709,11 @@ void captureLayer()
     gGL.setColorMask(true, true);
     glClearColor(0.f, 0.f, 0.f, 0.f);
     gLayer.rt.clear();
-    render_hud_attachments();
-    // [VR HUD ALPHA 2026-11-04] Paul's Quest 3 device report: the layer's colour arrived but its coverage was 0 everywhere,
-    // so nothing of it was drawn. render_hud_attachments ends in LLPipeline::renderGeomPostDeferred, which turns alpha
-    // writes OFF (gGL.setColorMask(true, false), pipeline.cpp) - but only when HUD attachments are worn (Paul wears one;
-    // the test avatar none, so the emulator never saw it), and the 2D UI after it was then drawn with no alpha at all.
-    // Alpha writes back on for the UI; the HUD attachments' own pixels (drawn with alpha off) get their coverage from
-    // their colour when the picture is collected (captureLayer, above).
     gGL.setColorMask(true, true);
+    // [VR HUD ALPHA] test only (WolfVRDebugUIAlphaOff): the 2D UI drawn with alpha writes off, as the pipeline leaves HUD
+    // attachments - so the emulator, whose test avatar wears no HUD, checks that such pixels still reach the headset
+    static LLCachedControl<bool> alpha_off(gSavedSettings, "WolfVRDebugUIAlphaOff", false);
+    if (alpha_off) gGL.setColorMask(true, false);
     {
         LLGLSDefault gls_default;
         LLGLSUIDefault gls_ui;
@@ -699,37 +722,113 @@ void captureLayer()
     }
     gGL.flush();
     {
-        // [VR HUD LAYER 2026-11-04] VR 3D Mode has its own action bar: leave the desktop's menu bar, status bar and
-        // toolbars out of the headset (everything outside the world view, and the toolbars over it), keeping HUDs,
-        // windows, notices and menus. Cleared to transparent, so a press there falls through to the world.
+        // [VR LAYER ALLOW-LIST 2026-11-04] Paul: "if i turn on huds and things appear i do get a lot of other junk". In his
+        // video (frames 3-70) the junk was the navigation and favourites bars (inside the world view, so the old
+        // "outside the world view" clear never took them), the vehicle icon bar bottom right, and the VR window's own QR
+        // code. Now only what is useful in a headset is kept and everything else of the 2D UI is cleared: the windows
+        // (each becomes its own panel), menus and pie menus, popups (a combo box's list), notices (toasts), and the Wolf
+        // instruments drawn by the viewer (flight deck, car dashboard, ship's helm, game HUD, border banner, loading
+        // notice). Never the VR window itself. HUD attachments are drawn AFTER this clear (below), so they all stay.
+        const LLVector2 ds = gViewerWindow->getDisplayScale();
+        std::vector<LLRect> keep;
+        std::string kept;   // debug only: what was kept (WolfVRDebugStats)
+        const S32 area = (S32)gLayer.ww * (S32)gLayer.wh;
+        // a view kept as its rectangle; a view as big as half the window (a holder or an overlay that spans the screen,
+        // such as the Wolf instruments' own full-screen views) is not taken whole: its visible children are, a few
+        // levels down, so only what it really draws is kept
+        std::function<void(LLView*, int)> add = [&](LLView* v, int depth) {
+            if (!v || !v->getVisible() || !v->isInVisibleChain()) return;
+            const LLRect r = v->calcScreenRect();
+            const LLRect raw(ll_round(r.mLeft * ds.mV[VX]), ll_round(r.mTop * ds.mV[VY]), ll_round(r.mRight * ds.mV[VX]),
+                             ll_round(r.mBottom * ds.mV[VY]));
+            if (raw.getWidth() <= 0 || raw.getHeight() <= 0) return;
+            if (!dynamic_cast<LLFloater*>(v) && (S64)raw.getWidth() * raw.getHeight() * 2 > area)
+            {
+                if (depth < 4)
+                    for (LLView* c : *v->getChildList()) add(c, depth + 1);
+                return;
+            }
+            keep.push_back(raw);
+            if (gDebugStats && kept.size() < 900) kept += llformat("%s %dx%d; ", v->getName().c_str(), raw.getWidth(), raw.getHeight());
+        };
+        if (gFloaterView)
+        {
+            for (LLView* v : *gFloaterView->getChildList())
+            {
+                LLFloater* f = dynamic_cast<LLFloater*>(v);
+                if (f && f->isShown() && f->getInstanceName() != "wolf_vr_stream") add(f, 0);
+            }
+        }
+        if (gMenuHolder)
+            for (LLView* v : *gMenuHolder->getChildList()) add(v, 0);
+        for (auto& t : LLInstanceTracker<LLNotificationsUI::LLToast>::instance_snapshot()) add(&t, 0);
+        static std::vector<LLHandle<LLView>> s_named;
+        static bool s_found = false;
+        if (!s_found && gViewerWindow->getRootView())
+        {
+            s_found = true;
+            for (const char* n : {"popup_holder", "wolf_flight_deck", "wolf_car_dashboard", "wolf_helm_hud", "wolf_game_hud",
+                                  "wolf_border_banner", "wolf_loading_notice"})
+                if (LLView* v = gViewerWindow->getRootView()->findChildView(n, true)) s_named.push_back(v->getHandle());
+        }
+        for (const auto& h : s_named)
+        {
+            LLView* v = h.get();
+            if (!v) continue;
+            if (std::string(v->getName()) == "popup_holder") { for (LLView* c : *v->getChildList()) add(c, 1); }
+            else add(v, 0);
+        }
+        static F64 s_kept_log = 0;
+        if (gDebugStats && LLTimer::getTotalSeconds() - s_kept_log > 10.0)
+        {
+            s_kept_log = LLTimer::getTotalSeconds();
+            LL_INFOS("WolfVR") << "UI layer keeps: " << kept << LL_ENDL;   // debug only, every 10 s
+        }
+        // clear the rest: the window cut into a grid at every kept edge, each grid cell outside every kept rectangle
+        // cleared (runs of them along a row at once) - at most a few hundred scissored clears
+        const S32 W = (S32)gLayer.ww, H = (S32)gLayer.wh;
+        std::vector<S32> xs = {0, W}, ys = {0, H};
+        for (const LLRect& r : keep)
+        {
+            xs.push_back(llclamp(r.mLeft, 0, W)); xs.push_back(llclamp(r.mRight, 0, W));
+            ys.push_back(llclamp(r.mBottom, 0, H)); ys.push_back(llclamp(r.mTop, 0, H));
+        }
+        std::sort(xs.begin(), xs.end()); xs.erase(std::unique(xs.begin(), xs.end()), xs.end());
+        std::sort(ys.begin(), ys.end()); ys.erase(std::unique(ys.begin(), ys.end()), ys.end());
         const GLboolean sc = glIsEnabled(GL_SCISSOR_TEST);
         glEnable(GL_SCISSOR_TEST);
         glClearColor(0.f, 0.f, 0.f, 0.f);
-        auto clearRect = [](S32 l, S32 b, S32 r, S32 t) {
-            if (r <= l || t <= b) return;
-            glScissor(l, b, r - l, t - b);
-            glClear(GL_COLOR_BUFFER_BIT);
-        };
-        const S32 W = (S32)gLayer.ww, H = (S32)gLayer.wh;
-        const LLRect wv = gViewerWindow->getWorldViewRectRaw();
-        clearRect(0, wv.mTop, W, H);          // above the world view: menu bar, status bar, navigation bar
-        clearRect(0, 0, W, wv.mBottom);       // below it
-        clearRect(0, wv.mBottom, wv.mLeft, wv.mTop);
-        clearRect(wv.mRight, wv.mBottom, W, wv.mTop);
-        if (gToolBarView)
+        for (size_t j = 0; j + 1 < ys.size(); ++j)
         {
-            const LLVector2 ds = gViewerWindow->getDisplayScale();
-            for (int t = LLToolBarEnums::TOOLBAR_FIRST; t <= LLToolBarEnums::TOOLBAR_LAST; ++t)
+            const S32 cy = (ys[j] + ys[j + 1]) / 2;
+            S32 run = -1;
+            for (size_t i = 0; i + 1 <= xs.size(); ++i)
             {
-                LLToolBar* tb = gToolBarView->getToolbar((LLToolBarEnums::EToolBarLocation)t);
-                if (!tb || !tb->getVisible()) continue;
-                const LLRect r = tb->calcScreenRect();
-                clearRect(ll_round(r.mLeft * ds.mV[VX]), ll_round(r.mBottom * ds.mV[VY]), ll_round(r.mRight * ds.mV[VX]),
-                          ll_round(r.mTop * ds.mV[VY]));
+                bool covered = true;
+                if (i + 1 < xs.size())
+                {
+                    const S32 cx = (xs[i] + xs[i + 1]) / 2;
+                    covered = std::any_of(keep.begin(), keep.end(),
+                                          [&](const LLRect& r) { return cx >= r.mLeft && cx < r.mRight && cy >= r.mBottom && cy < r.mTop; });
+                }
+                if (!covered && run < 0) run = (S32)i;
+                if (covered && run >= 0)
+                {
+                    glScissor(xs[run], ys[j], xs[i] - xs[run], ys[j + 1] - ys[j]);
+                    glClear(GL_COLOR_BUFFER_BIT);
+                    run = -1;
+                }
             }
         }
         if (!sc) glDisable(GL_SCISSOR_TEST);
     }
+    // the HUD attachments last, over what was kept: they are the residents' own instruments and all stay.
+    // [VR HUD ALPHA 2026-11-04] render_hud_attachments ends in LLPipeline::renderGeomPostDeferred, which leaves alpha writes
+    // OFF (gGL.setColorMask(true, false), pipeline.cpp) when HUD attachments are worn - Paul wears one - so their pixels
+    // have colour and no alpha: they get their coverage from their colour when the picture is collected (above).
+    render_hud_attachments();
+    gGL.setColorMask(true, true);
+    gGL.flush();
     // scale it down into the copy that is read (still bottom row first)
     GLint read_fb = 0, draw_fb = 0;
     glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read_fb);

@@ -27,6 +27,21 @@ const KEY = 'wolfvr.layer.';
 // [VR PANELS 2026-11-04] each viewer window as its own panel: radius, the angle a whole window's width would span (a
 // little bigger than on the band, for reading), the gap kept between panels, and how many cut-outs the band shader takes
 const PANEL_R = 1.3, PANEL_SCALE = 1.25, PANEL_GAP = 3 * Math.PI / 180, MAX_CUTS = 12;
+const CLOSE_ARC = 7 * Math.PI / 180;   // the panel's Close: about 7 degrees wide - a big target
+let closeTex = null;
+function closeTexture() {
+    if (closeTex) return closeTex;
+    const c = document.createElement('canvas'); c.width = 256; c.height = 154;
+    const x = c.getContext('2d');
+    x.fillStyle = 'rgba(185, 28, 28, 0.95)';
+    x.beginPath(); x.moveTo(24, 4); x.arcTo(252, 4, 252, 150, 22); x.arcTo(252, 150, 4, 150, 22); x.arcTo(4, 150, 4, 4, 22); x.arcTo(4, 4, 252, 4, 22); x.closePath(); x.fill();
+    x.strokeStyle = '#ffffff'; x.lineWidth = 6; x.stroke();
+    x.fillStyle = '#ffffff'; x.font = 'bold 64px sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
+    x.fillText('\u2715', 128, 80);
+    closeTex = new THREE.CanvasTexture(c);
+    closeTex.colorSpace = THREE.SRGBColorSpace;
+    return closeTex;
+}
 // One shader for the band and the panels: `sub` picks the part of the picture (x, y from the bottom-left, w, h), and
 // the band leaves out the windows that are panels of their own (`cut`, window rectangles x0, y0 from the top-left, x1, y1).
 const VERT = 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }';
@@ -148,7 +163,8 @@ export class VRLayer {
             if (keep.has(k)) continue;
             this.placed.set(k, { yaw: p.yaw, y: p.c.y });
             if (p.mesh.parent) p.mesh.parent.remove(p.mesh);
-            p.mesh.geometry.dispose(); p.mat.dispose();
+            if (p.x.parent) p.x.parent.remove(p.x);
+            p.mesh.geometry.dispose(); p.mat.dispose(); p.x.geometry.dispose(); p.x.material.dispose();
             this.panels.delete(k);
             if (this.moving && this.moving.k === k) this.moving = null;
         }
@@ -178,14 +194,34 @@ export class VRLayer {
                 mesh.position.copy(p.c);
                 mesh.rotation.set(0, p.yaw, 0);
                 if (this.world) this.world.add(mesh);
+                // [VR PANEL CLOSE 2026-11-04] Paul: "there was no easy close on the mini map" (the mini-map has no title
+                // bar of its own). Every panel gets a big Close drawn by this page just above its top right corner (never
+                // over the window itself); point and pull the trigger: the viewer closes that window (wolfvrui.cpp)
+                p.x = new THREE.Mesh(curvedGeometry(PANEL_R, CLOSE_ARC, PANEL_R * CLOSE_ARC * 0.6, 4),
+                    new THREE.MeshBasicMaterial({ map: closeTexture(), transparent: true, depthTest: false }));
+                p.x.renderOrder = 8600;
+                p.x.frustumCulled = false;
+                if (this.world) this.world.add(p.x);
                 this.panels.set(r.k, p);
             }
             p.r = r.r; p.n = r.n;
             p.mat.uniforms.sub.value.set(x0, 1 - y1, x1 - x0, y1 - y0);
+            // [VR PANELS] the parts of it another window covers on the desktop are left out (no "bits of screens")
+            const over = Array.isArray(r.o) ? r.o.filter((q) => Array.isArray(q) && q.length === 4 && q.every(Number.isFinite)).slice(0, MAX_CUTS) : [];
+            over.forEach((q, i) => p.mat.uniforms['cut' + i].value.set(q[0], q[1], q[2], q[3]));
+            p.mat.uniforms.cutN.value = over.length;
+            this._placeClose(p);
         }
         // the band leaves the panels' windows out
         this.rects.forEach((r, i) => this.mat.uniforms['cut' + i].value.set(r.r[0], r.r[1], r.r[2], r.r[3]));
         this.mat.uniforms.cutN.value = this.rects.length;
+    }
+    _placeClose(p) {
+        const ch = PANEL_R * CLOSE_ARC * 0.6;
+        p.xYaw = p.yaw - (p.arc / 2 - CLOSE_ARC / 2);   // its own section, at the panel's right end (rotation + = left)
+        p.xY = p.h / 2 + ch / 2 + 0.012;                 // just above the top edge
+        p.x.position.set(p.c.x, p.c.y + p.xY, p.c.z);
+        p.x.rotation.set(0, p.xYaw, 0);
     }
     // the free direction nearest to where the resident looks: panels side by side in an arc, never on top of each other
     _freeYaw(centre, arc) {
@@ -206,6 +242,8 @@ export class VRLayer {
         for (const p of this.panels.values()) {
             if (!p.mesh.visible) continue;
             lo.copy(o).sub(p.c);
+            const hx = hitCylinder(lo, d, PANEL_R, CLOSE_ARC, p.xYaw, p.xY, PANEL_R * CLOSE_ARC * 0.6);
+            if (hx && (!best || hx.t < best.t)) { best = { u: -1, v: -1, t: hx.t, k: p.k, close: true }; continue; }
             const h = hitCylinder(lo, d, PANEL_R, p.arc, p.yaw, 0, p.h);
             if (!h || (best && best.t <= h.t)) continue;
             const [x0, y0, x1, y1] = p.r;
@@ -229,6 +267,7 @@ export class VRLayer {
         p.c.y = Math.max(this._head.p.y - 1.0, Math.min(this._head.p.y + 0.8, this.moving.y0 + (o.y + d.y - this.moving.ry0)));
         p.mesh.position.copy(p.c);
         p.mesh.rotation.set(0, p.yaw, 0);
+        this._placeClose(p);
         this.placed.set(p.k, { yaw: p.yaw, y: p.c.y });
     }
 
@@ -326,7 +365,7 @@ export class VRLayer {
 
     update(headPos, headQuat) {
         if (headPos) { this._head.p.copy(headPos); this._head.q.copy(headQuat); }
-        if (!this.on) { this.mesh.visible = false; for (const p of this.panels.values()) p.mesh.visible = false; return; }
+        if (!this.on) { this.mesh.visible = false; for (const p of this.panels.values()) { p.mesh.visible = false; p.x.visible = false; } return; }
         this._geometry();
         if (this.nextRects && this.shown && performance.now() - this.nextAt > 300) this._applyRects();   // [VR PANELS] no picture came
         if (this.latest) {
@@ -360,6 +399,7 @@ export class VRLayer {
         this.mesh.visible = !!this.shown;
         for (const p of this.panels.values()) {
             p.mesh.visible = !!this.shown;
+            p.x.visible = !!this.shown;
             if (p.mat.uniforms.map.value !== this.mat.uniforms.map.value) p.mat.uniforms.map.value = this.mat.uniforms.map.value;
         }
     }

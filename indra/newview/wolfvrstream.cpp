@@ -26,6 +26,8 @@
 #include <sstream>
 
 #include "llcallbacklist.h"
+#include "llfloater.h"
+#include "llfloaterreg.h"
 #include "lldir.h"
 #include "llfile.h"
 #include "llnotificationsutil.h"
@@ -288,6 +290,17 @@ namespace
             LLSD args;
             args["DEVICE"] = label;
             LLNotificationsUtil::add(connected ? "WolfVRHeadsetConnected" : "WolfVRHeadsetDisconnected", args);
+            // [VR WINDOW 2026-11-04] Paul: "when you are connected the VR mode window needs to disappear until you
+            // disconnect". Hidden, not closed (closing it switches VR off, WolfFloaterVRStream::onClose); back as soon
+            // as the headset goes, so the next person can connect. Only a window this hid is brought back.
+            static bool s_hid = false;
+            LLFloater* f = LLFloaterReg::findInstance("wolf_vr_stream");
+            if (connected && f && f->getVisible()) { f->setVisible(false); s_hid = true; }
+            else if (!connected && s_hid)
+            {
+                s_hid = false;
+                if (f && gSavedSettings.getBOOL("WolfVRStreamEnabled")) f->setVisible(true);
+            }
         }
         return false;
     }

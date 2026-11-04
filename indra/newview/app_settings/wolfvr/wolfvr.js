@@ -99,8 +99,108 @@ function noteStages(hdr, drawn) {
     for (let i = 0; i < 11; i++) stages[STAGES[i]].add(t[i + 1] - t[i]);
     stages.total.add(drawn - hdr.poseClientMs);
 }
+// [VR DEVICE REPORT 2026-11-04] What this headset itself has on show, once in each 30-second summary: the window panels
+// (name, direction, size, shown), the HUD band, the HUD picture's size, its input devices and what the pointer did.
+const ptrLog = { presses: { bar: 0, ptr: 0, tp: 0, select: 0, none: 0 }, aim: '-', viewer: '-' };
+// [VR DEVICE REPORT] is there anything IN the HUD picture? Two samples, once a summary: the decoded picture itself (a
+// 2D canvas, so a decode that gives an empty picture shows) and the texture WebGL holds (read back through a small
+// framebuffer, so an upload that gives an empty texture shows). Colour at the middle, the most covered sample of a
+// 9 x 9 grid over the coverage half; "-" where it could not be read.
+function layerProbe() {
+    const img = layer.shown;
+    let pic = '-', tex = '-';
+    try {
+        if (img) {
+            const c = document.createElement('canvas'); c.width = 9; c.height = 18;
+            const x = c.getContext('2d'); x.drawImage(img, 0, 0, 9, 18);
+            const d = x.getImageData(0, 0, 9, 18).data;
+            let top = 0, bot = 0;
+            for (let i = 0; i < 9 * 9; i++) top = Math.max(top, d[i * 4]);
+            for (let i = 9 * 9; i < 9 * 18; i++) bot = Math.max(bot, d[i * 4]);
+            pic = `red max upper half ${top} lower half ${bot}`;   // one half is the colour, the other the coverage
+        }
+    } catch (e) { pic = 'error ' + e.message; }
+    try {
+        const t = layer.mat.uniforms.map.value, p = renderer.properties.get(t), gl = renderer.getContext();
+        if (p && p.__webglTexture && t.image) {
+            const w = t.image.displayWidth || t.image.width, h = t.image.displayHeight || t.image.height;
+            const fb = gl.createFramebuffer(), prev = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, p.__webglTexture, 0);
+            const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+            let best = 0; const px = new Uint8Array(4);
+            if (ok) {
+                for (let j = 1; j < 10; j++) for (let i = 1; i < 10; i++) {
+                    gl.readPixels(Math.floor(w * i / 10), Math.floor(h * j / 20), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+                    best = Math.max(best, px[0]);
+                }
+            }
+            gl.bindFramebuffer(gl.FRAMEBUFFER, prev);
+            gl.deleteFramebuffer(fb);
+            tex = ok ? `${t.isVideoFrameTexture ? 'video' : t.isCanvasTexture ? 'canvas' : 'bitmap'} ${w}x${h} coverage max ${best}` : 'not readable';
+        } else tex = p && p.__webglTexture ? 'no image' : 'never uploaded';
+    } catch (e) { tex = 'error ' + e.message; }
+    // and the layer's own material drawn on a flat card (the same shader, texture and blending as the band) into a
+    // 32 x 32 target: what it puts on screen, outside XR - a shader this GPU will not run shows as nothing drawn
+    let drawn = '-';
+    try {
+        const sc = new THREE.Scene(), cam = new THREE.OrthographicCamera(-0.5, 0.5, 0.5, -0.5, 0.1, 10);
+        cam.position.z = 1;
+        const card = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), layer.mat);
+        sc.add(card);
+        const rt = new THREE.WebGLRenderTarget(32, 32);
+        const xr = renderer.xr.enabled; renderer.xr.enabled = false;
+        const prevRT = renderer.getRenderTarget();
+        const cc = new THREE.Color(), ca = renderer.getClearAlpha(); renderer.getClearColor(cc);
+        renderer.setRenderTarget(rt); renderer.setClearColor(0x000000, 0); renderer.clear(); renderer.render(sc, cam);
+        renderer.setRenderTarget(prevRT); renderer.setClearColor(cc, ca);
+        renderer.xr.enabled = xr;
+        const px = new Uint8Array(32 * 32 * 4);
+        renderer.readRenderTargetPixels(rt, 0, 0, 32, 32, px);
+        let lit = 0, amax = 0;
+        for (let i = 0; i < 32 * 32; i++) { amax = Math.max(amax, px[i * 4 + 3]); if (px[i * 4 + 3] > 8) lit++; }
+        rt.dispose(); card.geometry.dispose();
+        drawn = `${lit} of 1024 pixels, alpha max ${amax}`;
+    } catch (e) { drawn = 'error ' + e.message; }
+    return `picture ${pic}; texture ${tex}; drawn ${drawn}`;
+}
+function deviceLine() {
+    const img = layer.shown;
+    const iw = img ? (img.displayWidth || img.width || 0) : 0, ih = img ? (img.displayHeight || img.height || 0) : 0;
+    const pans = [...layer.panels.values()].map((p) => `${p.k.split(':')[0]}@${(p.yaw * 180 / Math.PI).toFixed(0)}deg/${(p.arc * 180 / Math.PI).toFixed(0)}deg/y${p.c.y.toFixed(2)}${p.mesh.visible ? '' : '(hidden)'}`);
+    const sess = renderer.xr.getSession && renderer.xr.getSession();
+    const ins = sess ? Array.from(sess.inputSources).map((x) => `${x.handedness}/${x.targetRayMode}/${(x.profiles || [])[0] || '?'}/${x.hand ? 'hand' : x.gamepad ? 'pad' + x.gamepad.buttons.length : 'none'}`) : [];
+    const pr = ptrLog.presses;
+    return `device: HUD band ${layer.on ? (layer.mesh.visible ? 'shown' : 'on, nothing shown') : (layer.want ? 'not active' : 'switched off')}, ` +
+        `[${layerProbe()}] ` +
+        `picture ${iw}x${ih} (config ${layer.cfg ? layer.cfg.w + 'x' + layer.cfg.h + ' ' + layer.cfg.codec : 'none'}), ${layer.frames} shown; ` +
+        `windows from the viewer ${layer.rects.length}, panels ${pans.length}${pans.length ? ': ' + pans.join(' ') : ''}; ` +
+        `inputs ${ins.join(' ') || 'none'}; presses bar ${pr.bar} viewer ${pr.ptr} teleport ${pr.tp} hand ${pr.select} on nothing ${pr.none}; ` +
+        `last aim ${ptrLog.aim}, viewer said ${worldAim.k}${worldAim.c ? '/' + worldAim.c : ''}; ` +
+        `errors ${devLog.errors}${devLog.shaderErrors ? ' (shaders ' + devLog.shaderErrors + ')' : ''}${devLog.last ? ' last: ' + devLog.last : ''}; page ${pageId || '?'}`;
+}
 function stagesLine() {
     return STAGES.map((k) => `${k} ${fmt(stages[k].pct(0.5), 0)}`).join(', ') + ` (median ms; total p95 ${fmt(stages.total.pct(0.95), 0)})`;
+}
+
+// ------------------------------------------------------------------------------------------------ device report
+// [VR DEVICE REPORT 2026-11-04] There is no console in a headset: errors (uncaught, unhandled promise rejections, and
+// console.error, where three.js reports a shader it could not compile) go to the viewer's log, at most 10 a minute.
+let pageId = '';
+const devLog = { window: 0, n: 0, errors: 0, last: '' };
+function reportError(kind, msg, stack) {
+    devLog.errors++;
+    devLog.last = String(msg).slice(0, 160);
+    const now = performance.now();
+    if (now - devLog.window > 60000) { devLog.window = now; devLog.n = 0; }
+    if (++devLog.n > 10) return;
+    try { send({ t: 'log', msg: kind + ': ' + String(msg).slice(0, 280), stack: String(stack || '').slice(0, 580) }); } catch (e) { /* not connected */ }
+}
+window.addEventListener('error', (e) => reportError('error', e.message + ' @' + (e.filename || '').split('/').pop() + ':' + e.lineno, e.error && e.error.stack));
+window.addEventListener('unhandledrejection', (e) => reportError('unhandled rejection', e.reason && (e.reason.message || e.reason), e.reason && e.reason.stack));
+{
+    const ce = console.error.bind(console);
+    console.error = (...a) => { ce(...a); reportError('console.error', a.map((x) => (x && x.message) || String(x)).join(' '), ''); };
 }
 
 // ------------------------------------------------------------------------------------------------ connection
@@ -210,7 +310,15 @@ function onText(text) {
     try { m = JSON.parse(text); } catch (e) { return; }
     if (m.t === 'busy') return;   // the close (4009) that follows says it
     if (vrAudio.onText(m)) return;   // [VR AUDIO]
-    if (m.t === 'welcome') { onAllowed(); vrAudio.onConnected(); return; }
+    if (m.t === 'welcome') {
+        // [VR PAGE ID 2026-11-04] the viewer serves a different page now (it was updated and restarted while this tab
+        // stayed open): load the new one, once, instead of running the old page against the new viewer
+        if (typeof m.page === 'string' && m.page) {
+            if (!pageId) pageId = m.page;
+            else if (m.page !== pageId) { setStatus('WolfViewer was updated - loading the new version…'); location.reload(); return; }
+        }
+        onAllowed(); vrAudio.onConnected(); return;
+    }
     if (m.t === 'pong') {
         const now = performance.now();
         const rtt = now - m.ct;
@@ -388,6 +496,12 @@ function onDecoded(vf) {
 // ------------------------------------------------------------------------------------------------ scene
 const wrap = $('wvr-canvas-wrap');
 const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: false });
+// [VR DEVICE REPORT] a shader this headset's GPU will not compile (three skips drawing it): its own words to the log
+renderer.debug.onShaderError = (gl, program, vs, fs) => {
+    const info = [gl.getProgramInfoLog(program), gl.getShaderInfoLog(vs), gl.getShaderInfoLog(fs)].filter(Boolean).join(' | ');
+    devLog.shaderErrors = (devLog.shaderErrors || 0) + 1;
+    reportError('shader', info || 'link failed', '');
+};
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 wrap.appendChild(renderer.domElement);
@@ -577,7 +691,9 @@ bar.onCommand = (a) => {
 //   ctl: what the controllers are
 const QUALITY_STEPS = 5;
 const HEADSETS = {
-    quest3:   { label: 'Meta Quest 3 / 3S', level: 1, top: 0, hz: 0, ctl: 'touch' },
+    // [VR QUALITY 2026-11-04] Paul's Quest 3 climbed to 1920 px eyes (step 0) and got 11-18 pictures a second, the
+    // encoder 19-28 ms a picture at that size: it starts at 1440 now and never goes past 1728 by itself
+    quest3:   { label: 'Meta Quest 3 / 3S', level: 2, top: 1, hz: 0, ctl: 'touch' },
     quest2:   { label: 'Meta Quest 2', level: 3, top: 3, hz: 72, ctl: 'touch' },
     questpro: { label: 'Meta Quest Pro', level: 2, top: 2, hz: 72, ctl: 'touch' },
     pico4:    { label: 'Pico 4 / Pico 4 Ultra', level: 2, top: 2, hz: 72, ctl: 'pico' },
@@ -622,7 +738,7 @@ function headsetChanged() {
 }
 // Every second, from the numbers: is this headset keeping up?
 function adaptQuality(now) {
-    if (!renderer.xr.isPresenting) return;
+    if (!renderer.xr.isPresenting || quality.pinned) return;
     if (now < quality.coolUntil) return;
     // behind = this headset's decoder cannot keep up with the pictures it was sent (decoded fewer than arrived, or its
     // queue grows), or the pictures arrive late (viewer capture to drawn here, on the synced clock: a queue building up
@@ -635,7 +751,10 @@ function adaptQuality(now) {
     // down to 1152 px eyes 12 s in and nobody could tell why)
     const why = (got > 20 && num.decodedFps < got * 0.85) ? `decoded ${fmt(num.decodedFps, 0)} of ${fmt(got, 0)}/s`
               : num.v2p.avg() > 250 ? `pictures ${fmt(num.v2p.avg(), 0)} ms old`
-              : (decoder && decoder.decodeQueueSize > 3) ? `decoder queue ${decoder.decodeQueueSize}` : '';
+              : (decoder && decoder.decodeQueueSize > 3) ? `decoder queue ${decoder.decodeQueueSize}`
+              // [VR QUALITY 2026-11-04] too few pictures: a smaller picture is quicker to encode, send and decode (it
+              // does not make the PC draw faster, so not below 1152 px for this reason)
+              : (got > 0 && got < 24 && quality.level < 3) ? `only ${fmt(got, 0)} pictures a second` : '';
     if (why) {
         quality.goodSince = now;
         quality.lastWhy = why;
@@ -650,7 +769,7 @@ function adaptQuality(now) {
     }
     quality.bad = 0;
     const top = quality.top;
-    if (quality.level > top && now - quality.goodSince > 20000) {
+    if (quality.level > top && now - quality.goodSince > 20000 && got >= 40) {   // sharper only with frames to spare
         quality.goodSince = now;
         quality.coolUntil = now + 8000;
         setQuality(quality.level - 1, 'The picture is sharper again.');
@@ -1280,6 +1399,8 @@ function pollWorldPointer(src, gp, frame, headPos, headQuat) {
         _rd.set(0, 0, -1).applyQuaternion(_rq);
         aim = aimAt(_ro, _rd, headPos, headQuat);
         if (aim.layer) { lptr.u = aim.layer.u; lptr.v = aim.layer.v; }   // where the stick scrolls (layerWheel)
+        ptrLog.aim = aim.kind !== 'ptr' ? aim.kind : aim.layer ? (aim.layer.k ? 'panel ' + aim.layer.k.split(':')[0] : 'band') +
+            ` ${aim.layer.u.toFixed(2)},${aim.layer.v.toFixed(2)}` : 'world';
     }
     const trig = pressed(0), bBtn = pressed(5), grip = pressed(1);
     const own = worldPointer.owner;
@@ -1295,6 +1416,7 @@ function pollWorldPointer(src, gp, frame, headPos, headQuat) {
             const again = b === 0 && !onBar && aim && worldAim.k === 'world' && t - worldPointer.lastTrig < 450 &&
                           _rd.angleTo(worldPointer.lastDir) < 0.05;
             if (b === 0) { worldPointer.lastTrig = again ? 0 : t; worldPointer.lastDir.copy(_rd); }
+            ptrLog.presses[onBar ? 'bar' : again ? 'tp' : aim ? 'ptr' : 'none']++;   // [VR DEVICE REPORT]
             if (onBar) { own[b] = 'bar'; if (b === 0) bar.activate(aim.hit); }
             else if (again) { own[b] = 'tp'; sendRay(_ro, _rd, aim.layer); send({ t: 'in', e: 'tp' }); reticle.pulseUntil = t + 300; }
             else if (aim) { own[b] = 'ptr'; sendRay(_ro, _rd, aim.layer); ptrButton(b, true); }
@@ -1366,6 +1488,7 @@ function onSelect(ev) {
     const hp = new THREE.Vector3(), hq = new THREE.Quaternion(), hs = new THREE.Vector3();
     new THREE.Matrix4().fromArray(vp.transform.matrix).premultiply(dolly.matrixWorld).decompose(hp, hq, hs);
     const aim = aimAt(_ro, _rd, hp, hq);
+    ptrLog.presses.select++;   // [VR DEVICE REPORT]
     if (aim.kind === 'bar' || aim.kind === 'tab') { bar.activate(aim.hit); return; }
     // anywhere else: a click there (the viewer finds what is under it: a window, a HUD, or the world)
     sendRay(_ro, _rd, aim.layer);
@@ -1382,9 +1505,20 @@ function pollControllers(session, frame, headPos, headQuat) {
     // else the browser lists for that hand (hands with "hand-tracking" can be listed beside the controllers)
     const seen = {};
     const sources = Array.from(session.inputSources).sort((a, b) => (b.gamepad ? 1 : 0) - (a.gamepad ? 1 : 0));
+    const NO_PAD = { buttons: [], axes: [] };
     for (const src of sources) {
         const gp = src.gamepad;
-        if (!gp) continue;
+        if (!gp) {
+            // [VR HANDS 2026-11-04] a hand (Quest hand tracking) or a look-and-pinch pointer: no buttons to poll (a pinch
+            // is the session's "select", onSelect), but its ray still aims - the laser, the dot, the viewer's hover -
+            // exactly as the right controller's does, so pointing with a hand shows where a pinch will land
+            const hand = src.handedness || 'none';
+            if (WORLD() && src.targetRayMode === 'tracked-pointer' && hand !== 'left' && !seen.right && !seen[hand]) {
+                seen[hand] = true;
+                pollWorldPointer(src, NO_PAD, frame, headPos, headQuat);
+            }
+            continue;
+        }
         const hand = src.handedness || 'none';
         if (seen[hand]) continue;
         seen[hand] = true;
@@ -1590,6 +1724,7 @@ function animate(time, frame) {
         if (renderer.xr.isPresenting && ++num.summaryTick >= 30) {
             num.summaryTick = 0;
             const eye = config ? (config.w === 2 * config.h ? config.h : config.w) : 0;
+            send({ t: 'summary', s: deviceLine() });   // [VR DEVICE REPORT]
             send({ t: 'summary', s: `${HEADSETS[headsetKind()].label}: display ${fmt(num.fps, 0)} fps, pictures in ${fmt(num.gotFps, 0)}/s decoded ${fmt(num.decodedFps, 0)}/s, ` +
                 `head-pose-to-shown ${fmt(num.p2p.avg(), 0)} ms (p95 ${fmt(num.p2p.pct(0.95), 0)}), PC-to-shown ${fmt(num.v2p.avg(), 0)} ms, decode ${fmt(num.decode.avg(), 1)} ms, ` +
                 `eye ${eye} px, step ${quality.level} (top ${quality.top}, down ${quality.downs || 0} times, last because ${quality.lastWhy || '-'}), ` +
@@ -1719,6 +1854,8 @@ window.__wolfvr = { resetStages: () => { for (const k of STAGES) stages[k].v.len
     },
     // [VR MENU FIX] the bar's Close button, and what the Menu tab says now
     closePoint: () => surfacePoint(1.0, bar.arc, -0.385, bar.height, (1024 - 196 + 91) / 1024, 1 - (10 + 24) / 448),
+    setQuality: (l) => { quality.pinned = true; setQuality(l, ''); },   // held there: no adapting while a test measures it   // test hook: a headset's quality step
+    deviceLine: () => deviceLine(),
     tabText: () => (performance.now() < bar.tabMsgUntil ? bar.tabMsg : 'Menu'),
     // [VR 3D FIX / WORLD POINTER] test hooks: which view is which eye and the layer each half is on (and each XR
     // camera's layer mask), the eye windows sent, the last picture's header, where the viewer said the ray landed

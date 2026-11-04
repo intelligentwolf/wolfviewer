@@ -42,7 +42,11 @@ const t0 = Date.now();
 const results = [];
 for (const ph of PHASES) {
     const [label, kv, secs] = ph.split(':');
-    for (const pair of (kv || '').split(',').filter(Boolean)) { const [k, v] = pair.split('='); setting(k, v); }
+    for (const pair of (kv || '').split(',').filter(Boolean)) {
+        const [k, v] = pair.split('=');
+        if (k === 'q') await evalJs(`window.__wolfvr.setQuality(${Number(v)})`);   // the page's quality step (eye size)
+        else setting(k, v);
+    }
     await sleep(6000);   // settle: the new picture size, the encoder restarted, old pictures out of the window
     await evalJs('window.__wolfvr.resetStages && window.__wolfvr.resetStages()');
     const end = Date.now() + Number(secs || 20) * 1000;

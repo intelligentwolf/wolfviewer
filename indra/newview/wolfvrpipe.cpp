@@ -578,6 +578,12 @@ struct Service::Impl
     void onText(const std::shared_ptr<Client>& c, const std::string& text);
     void adoptClient(const std::shared_ptr<Client>& c, const std::string& label);
     std::string client_label;   // io thread: the connected headset's name, for on_headset
+    // [VR PAGE ID 2026-11-04] which headset page these files are (their names, sizes and change times, hashed): sent
+    // in "welcome", so a headset tab still showing an older page reloads itself (Paul's Quest kept the morning's page)
+    std::string page_id;
+    // [VR DEVICE REPORT 2026-11-04] the page's own error lines: at most 20 a minute reach the log
+    double log_window = 0;
+    int log_count = 0;
     void dropClient(const std::shared_ptr<Client>& c);
 
     // ---- frames ----
@@ -795,7 +801,7 @@ net::awaitable<void> Service::Impl::runWebSocket(Stream stream, http::request<ht
         else
         {
             adoptClient(c, deviceLabelFromUserAgent(ua));
-            c->send(std::make_shared<const std::string>("{\"t\":\"welcome\"}"), false, false);
+            c->send(std::make_shared<const std::string>("{\"t\":\"welcome\",\"page\":\"" + page_id + "\"}"), false, false);
         }
     }
     try
@@ -1178,7 +1184,10 @@ void Service::Impl::onText(const std::shared_ptr<Client>& c, const std::string& 
     }
     else if (t == "log")
     {
-        // There is no console in a headset: the page reports its first frame error here (wolfvr.js).
+        // There is no console in a headset: the page reports its errors here (wolfvr.js), at most 20 a minute
+        const double now = nowMs();
+        if (now - log_window > 60000) { log_window = now; log_count = 0; }
+        if (++log_count > 20) return;
         log(LogLevel::WARN, "VR pipe: headset page: " + str("msg").substr(0, 300) + " | " + str("stack").substr(0, 600));
     }
     else if (t == "stats")
@@ -1716,6 +1725,25 @@ bool Service::running() const { return mImpl != nullptr; }
 bool Service::start(const Config& cfg, std::string& error)
 {
     stop();
+    std::string page_id;
+    {
+        // [VR PAGE ID] FNV-1a over each served file's name, size and change time (any change to the page = a new id)
+        uint64_t h = 1469598103934665603ULL;
+        auto mix = [&h](const std::string& b) { for (unsigned char ch : b) { h ^= ch; h *= 1099511628211ULL; } };
+        std::error_code fec;
+        std::vector<std::string> parts;
+        for (const auto& e : std::filesystem::recursive_directory_iterator(cfg.web_root, fec))
+        {
+            if (!e.is_regular_file(fec)) continue;
+            const auto t = e.last_write_time(fec).time_since_epoch().count();
+            parts.push_back(e.path().string() + ":" + std::to_string(e.file_size(fec)) + ":" + std::to_string((long long)t));
+        }
+        std::sort(parts.begin(), parts.end());
+        for (const auto& p : parts) mix(p);
+        char id[24];
+        std::snprintf(id, sizeof id, "%016llx", (unsigned long long)h);
+        page_id = id;
+    }
     if (!isPrivateIPv4(cfg.bind_ip)) { error = cfg.bind_ip + " is not a home-network address"; return false; }
     if (cfg.width < 64 || cfg.height < 64 || cfg.width > 4096 || cfg.height > 4096 || cfg.fps < 1 || cfg.fps > 120)
     {
@@ -1731,6 +1759,7 @@ bool Service::start(const Config& cfg, std::string& error)
         }
     }
     auto impl = std::make_unique<Impl>();
+    impl->page_id = page_id;   // [VR PAGE ID]
     impl->cfg = cfg;
     impl->cur_w = cfg.width;
     impl->cur_h = cfg.height;

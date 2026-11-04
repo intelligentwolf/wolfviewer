@@ -30,14 +30,16 @@ const PANEL_R = 1.3, PANEL_SCALE = 1.25, PANEL_GAP = 3 * Math.PI / 180, MAX_CUTS
 // One shader for the band and the panels: `sub` picks the part of the picture (x, y from the bottom-left, w, h), and
 // the band leaves out the windows that are panels of their own (`cut`, window rectangles x0, y0 from the top-left, x1, y1).
 const VERT = 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }';
-const FRAG = `uniform sampler2D map; uniform vec4 sub; uniform vec4 cut[${MAX_CUTS}]; uniform int cutN; varying vec2 vUv;
+// [VR DEVICE REPORT 2026-11-04] No loop and no uniform-indexed array: each cut-out is its own uniform, tested with a
+// float count, the plainest GLSL every mobile GPU compiler takes (the Quest's Adreno is stricter than desktop GPUs)
+const CUT_DECL = Array.from({ length: MAX_CUTS }, (_, i) => `uniform vec4 cut${i};`).join(' ');
+const CUT_TEST = Array.from({ length: MAX_CUTS }, (_, i) =>
+    `if (cutN > ${i}.5 && w.x >= cut${i}.x && w.x <= cut${i}.z && wy >= cut${i}.y && wy <= cut${i}.w) discard;`).join('\n        ');
+const FRAG = `uniform sampler2D map; uniform vec4 sub; ${CUT_DECL} uniform float cutN; varying vec2 vUv;
     void main() {
         vec2 w = sub.xy + vUv * sub.zw;
-        for (int i = 0; i < ${MAX_CUTS}; i++) {
-            if (i >= cutN) break;
-            vec4 r = cut[i];
-            if (w.x >= r.x && w.x <= r.z && 1.0 - w.y >= r.y && 1.0 - w.y <= r.w) discard;
-        }
+        float wy = 1.0 - w.y;
+        ${CUT_TEST}
         vec3 c = texture2D(map, vec2(w.x, 0.5 + w.y * 0.5)).rgb;
         // the texture is sampled as sRGB (decoded to linear); the coverage was stored as plain bytes,
         // so encode it back (the sRGB transfer function, IEC 61966-2-1) before using it
@@ -49,10 +51,10 @@ const FRAG = `uniform sampler2D map; uniform vec4 sub; uniform vec4 cut[${MAX_CU
         #include <colorspace_fragment>
     }`;
 function layerMaterial(map, panel) {
-    const cuts = [];
-    for (let i = 0; i < MAX_CUTS; i++) cuts.push(new THREE.Vector4());
+    const uniforms = { map: { value: map }, sub: { value: new THREE.Vector4(0, 0, 1, 1) }, cutN: { value: 0 } };
+    for (let i = 0; i < MAX_CUTS; i++) uniforms['cut' + i] = { value: new THREE.Vector4() };
     return new THREE.ShaderMaterial({
-        uniforms: { map: { value: map }, sub: { value: new THREE.Vector4(0, 0, 1, 1) }, cut: { value: cuts }, cutN: { value: 0 } },
+        uniforms,
         vertexShader: VERT, fragmentShader: FRAG,
         transparent: true, depthTest: false, depthWrite: false,
         blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
@@ -95,7 +97,13 @@ export class VRLayer {
         this.places = { stand: loadPlace('stand'), seat: loadPlace('seat') };
         this.tex = new THREE.VideoFrameTexture();
         this.tex.colorSpace = THREE.SRGBColorSpace;
-        this.bmp = new THREE.Texture();
+        // [VR DEVICE REPORT 2026-11-04] Paul's Quest 3 showed the action bar but never the HUD band or a window panel,
+        // while the pictures arrived ("HUDs 512 pictures"). The bar is a canvas texture, a path proven on the Quest;
+        // the layer was an ImageBitmap texture, never once seen drawing there. So each decoded picture is drawn into a
+        // canvas and the layer uses that canvas, as the bar does (the device report says what each step holds).
+        this.canvas = document.createElement('canvas');
+        this.ctx2d = this.canvas.getContext('2d');
+        this.bmp = new THREE.CanvasTexture(this.canvas);
         this.bmp.colorSpace = THREE.SRGBColorSpace;
         this.bmp.flipY = false;
         this.bmp.generateMipmaps = false;
@@ -176,8 +184,7 @@ export class VRLayer {
             p.mat.uniforms.sub.value.set(x0, 1 - y1, x1 - x0, y1 - y0);
         }
         // the band leaves the panels' windows out
-        const cuts = this.mat.uniforms.cut.value;
-        this.rects.forEach((r, i) => cuts[i].set(r.r[0], r.r[1], r.r[2], r.r[3]));
+        this.rects.forEach((r, i) => this.mat.uniforms['cut' + i].value.set(r.r[0], r.r[1], r.r[2], r.r[3]));
         this.mat.uniforms.cutN.value = this.rects.length;
     }
     // the free direction nearest to where the resident looks: panels side by side in an arc, never on top of each other
@@ -325,7 +332,14 @@ export class VRLayer {
                 this.tex.setFrame(img);
                 if (this.mat.uniforms.map.value !== this.tex) this.mat.uniforms.map.value = this.tex;
             } else {
-                this.bmp.image = img;
+                const w = img.width, h = img.height;
+                if (this.canvas.width !== w || this.canvas.height !== h) {
+                    // a new size: a new texture (WebGL keeps the old storage size otherwise)
+                    this.canvas.width = w; this.canvas.height = h;
+                    this.bmp.dispose();
+                }
+                this.ctx2d.clearRect(0, 0, w, h);
+                this.ctx2d.drawImage(img, 0, 0);
                 this.bmp.needsUpdate = true;
                 if (this.mat.uniforms.map.value !== this.bmp) this.mat.uniforms.map.value = this.bmp;
             }

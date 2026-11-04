@@ -76,7 +76,9 @@ await send('Page.navigate', { url: URL_ });
 check(await waitFor(() => evalJs('!!(window.__wolfvr && window.__wolfvr.xr && window.__wolfvr.xr().said === false)'), 30000), 'connected to the real viewer');
 await evalJs('window.__wolfvr.toggleVR()');
 check(await waitFor(() => evalJs('!!(window.__wolfvr.config() && window.__wolfvr.config().mode === "world")'), 30000), 'in VR: VR 3D Mode');
+if (process.env.QUALITY) { await evalJs(`window.__wolfvr.setQuality(${process.env.QUALITY})`); await sleep(6000); }   // e.g. 0 = Paul's 1920 px eyes
 await waitFor(() => evalJs('window.__wolfvr.layer().visible'), 20000);
+console.log('   config ' + JSON.stringify(await evalJs('[window.__wolfvr.config().w, window.__wolfvr.config().h]')));
 // a modal notice the region may have shown at log-in holds the mouse until answered (Escape, as on the desktop)
 for (let k = 0; k < 2; k++) { leap('LLWindow', "{'op':'keyDown','keycode':i129}"); leap('LLWindow', "{'op':'keyUp','keycode':i129}"); await sleep(600); }
 
@@ -100,6 +102,9 @@ check(await waitFor(() => evalJs('window.__wolfvr.bar().on.includes("map")'), 60
 const mapPanel = await waitFor(async () => (await evalJs('window.__wolfvr.panels()')).find((p) => /world_?map/i.test(p.k) && p.visible), 8000);
 check(!!mapPanel, 'the world map is its own panel in the room: ' + JSON.stringify(mapPanel));
 await sleep(1500);
+// what the headset's left eye draws now (the page's own scene: world, HUD band, panels, bar), and its own report
+for (const [f, dx] of [['eye_map.png', 0]]) { const d = await evalJs(`window.__wolfvr.renderEye(${dx})`); if (d) writeFileSync(resolve(OUT, f), Buffer.from(d.split(',')[1], 'base64')); }
+console.log('   device: ' + await evalJs('window.__wolfvr.deviceLine()'));
 writeFileSync(resolve(OUT, 'panels_map.json'), JSON.stringify(await evalJs('window.__wolfvr.panels()'), null, 1));
 // the band leaves it out: a ray through the map's place on the head-locked band does not land on the band
 if (mapPanel) {

@@ -53,15 +53,15 @@ uniform vec4 wolfClearMisc;
 #define WOLF_TEX_WOLF_DEPTH_FIELD(uv) texture(wolfDepthField, uv)
 #define WOLF_TEX_WOLF_EXPOSURE_FIELD(uv) texture(wolfExposureField, uv)
 #define WOLF_TEX_WOLF_ZONE_FIELD(uv) texture(wolfZoneField, uv)
-#define WOLF_TEX_FFT_DISP_0(uv) texture(fftDisp0, uv)
-#define WOLF_TEX_FFT_DISP_1(uv) texture(fftDisp1, uv)
+#define WOLF_TEX_FFT_DISP_0(uv, lod) textureLod(fftDisp0, uv, lod)   // [T508 2026-11-04/] at a mip level (see the cascades below)
+#define WOLF_TEX_FFT_DISP_1(uv, lod) textureLod(fftDisp1, uv, lod)
 #define WOLF_TEX_WAKE_SAMPLER(uv) texture(wakeSampler, uv)
 #else
 #define WOLF_TEX_WOLF_DEPTH_FIELD(uv) vec4(0.0)
 #define WOLF_TEX_WOLF_EXPOSURE_FIELD(uv) vec4(0.0)
 #define WOLF_TEX_WOLF_ZONE_FIELD(uv) vec4(0.0)
-#define WOLF_TEX_FFT_DISP_0(uv) vec4(0.0)
-#define WOLF_TEX_FFT_DISP_1(uv) vec4(0.0)
+#define WOLF_TEX_FFT_DISP_0(uv, lod) vec4(0.0)
+#define WOLF_TEX_FFT_DISP_1(uv, lod) vec4(0.0)
 #define WOLF_TEX_WAKE_SAMPLER(uv) vec4(0.0)
 #define depthReady 0.0
 #define fftReady 0.0
@@ -387,7 +387,7 @@ vec3 gerstnerWave(vec2 pos, float wavelength, float jit, float amp, vec2 dir, fl
 // So the wave has to be band-limited to the lattice, the way the spectral cascades already
 // fade their displacement with distance. This function is the lattice half of that: it MUST
 // mirror llvowater.cpp wolf_graded_axis — step out from the focus is 4 % of the distance to
-// it, never under 2 m nor over 128 m, times the decimation the vertex cap forced.
+// it, never under 2 m nor over 128 m, times the per-axis step scale (zw, 1 since [T508 2026-11-04]).
 // Returns 0 where this surface is not a graded lattice; callers treat that as fully resolved.
 float wolfLatticeStep(vec2 p)
 {
@@ -397,6 +397,22 @@ float wolfLatticeStep(vec2 p)
     }
     vec2 s = clamp(abs(p - wolfLatticeGrade.xy) * 0.04, 2.0, 128.0) * wolfLatticeGrade.zw;
     return max(s.x, s.y);
+}
+
+// [T508 2026-11-04] The share of a wave of this length the lattice can draw: the surf train's rule
+// below (res = smoothstep(3, 6, vertices per wave): 1 from 6 vertices a wave, 0 at 3), for the
+// swell trains and the cascades too. Ticket 508 (Jeanne, Ireland: "the irish sea is wobbling like
+// jelly"): only the surf was band-limited, so every Gerstner train kept its full height on lattice
+// quads longer than half its wavelength - from ~90 m out for the dominant train at a moderate sea
+// (index 1.15: 21 m against 0.04 x distance), the whole 320-1024 m fade band, and from the eye for
+// the short trains. Those vertices drew an alias, not the wave, and llvowater.cpp re-tessellates
+// about the camera every 12 m it moves, so in flight the alias was re-drawn at new points a few
+// times a second: the sea heaved and wobbled. A band-limited wave is drawn only where it can be;
+// the shading of what the geometry gives up is put back per pixel (class3 waterF.glsl
+// wolfSwellSlopeLost), so the sea is just as rough to look at. 1 where there is no graded lattice.
+float wolfLatticeRes(float wavelength, float vstep)
+{
+    return (vstep > 0.0) ? smoothstep(3.0, 6.0, wavelength / vstep) : 1.0;
 }
 // </WolfViewer> ---------------------------------------------------------------------------
 
@@ -808,7 +824,13 @@ void main()
                 swellPos = rel;
             }
             float wavelengthJitter = 1.0 + stormChaos * 0.3 * snoise(wxy * 0.001 + time * 0.01);
-            vSwell.xy = vec2(localAmp, wavelengthJitter);
+            vSwell.xy = vec2(localAmp, wavelengthJitter);   // the FULL height: the fragment's fold, whitecaps and lost slope use it
+            // [T508 2026-11-04] each train x the share of it this lattice can draw (wolfLatticeRes), the
+            // same wavelength its gerstnerWave below is given (x the jitter where it has one).
+            float vstepSwell = wolfLatticeStep(position.xy);
+            float res1 = wolfLatticeRes(baseWavelength * 2.0 * wavelengthJitter, vstepSwell);
+            float res2 = wolfLatticeRes(baseWavelength * 1.5 * wavelengthJitter, vstepSwell);
+            float res3 = wolfLatticeRes(baseWavelength * 1.2, vstepSwell);
 
             // Primary swell direction is the region's own EEP wave direction, so a region
             // that sets its water rolling one way gets its geometry rolling that way too.
@@ -822,22 +844,29 @@ void main()
             vec2 dir5 = vec2(-dir1.x * 0.5 - dir1.y * 0.866,
                               dir1.x * 0.866 - dir1.y * 0.5);
 
-            vec3 w1 = gerstnerWave(swellPos, baseWavelength * 2.0, wavelengthJitter, localAmp * 0.40, dir1, 0.65, numWaves);
-            vec3 w2 = gerstnerWave(swellPos, baseWavelength * 1.5, wavelengthJitter, localAmp * 0.30, dir2, 0.55, numWaves);
-            vec3 w3 = gerstnerWave(swellPos, baseWavelength * 1.2, 1.0,              localAmp * 0.25, dir3, 0.50, numWaves);
+            // [T508 2026-11-04] x res: the WHOLE displacement, not the amplitude argument - a Gerstner train's sideways
+            // sway is steepness / (k numWaves), independent of its height, and aliases just the same.
+            vec3 w1 = gerstnerWave(swellPos, baseWavelength * 2.0, wavelengthJitter, localAmp * 0.40, dir1, 0.65, numWaves) * res1;
+            vec3 w2 = gerstnerWave(swellPos, baseWavelength * 1.5, wavelengthJitter, localAmp * 0.30, dir2, 0.55, numWaves) * res2;
+            vec3 w3 = gerstnerWave(swellPos, baseWavelength * 1.2, 1.0,              localAmp * 0.25, dir3, 0.50, numWaves) * res3;
             float oppositeAmp = localAmp * (0.15 + stormChaos * 0.15) * chopKeep;
-            vec3 w4 = gerstnerWave(swellPos, baseWavelength * 0.8, 1.0,              oppositeAmp, -dir1 * 0.7 + dir2 * 0.3, 0.45, numWaves);
-            vec3 w5 = gerstnerWave(swellPos, baseWavelength * 0.5, 1.0,              localAmp * 0.15 * chopKeep, dir5, 0.35, numWaves);
+            vec3 w4 = gerstnerWave(swellPos, baseWavelength * 0.8, 1.0,              oppositeAmp, -dir1 * 0.7 + dir2 * 0.3, 0.45, numWaves)
+                    * wolfLatticeRes(baseWavelength * 0.8, vstepSwell);
+            vec3 w5 = gerstnerWave(swellPos, baseWavelength * 0.5, 1.0,              localAmp * 0.15 * chopKeep, dir5, 0.35, numWaves)
+                    * wolfLatticeRes(baseWavelength * 0.5, vstepSwell);
             float chopAmp = localAmp * (0.08 + stormChaos * 0.12) * chopKeep;
-            vec3 w6 = gerstnerWave(swellPos, baseWavelength * 0.3, 1.0,              chopAmp, dir3 * 0.6 - dir2 * 0.4, 0.25, numWaves);
+            vec3 w6 = gerstnerWave(swellPos, baseWavelength * 0.3, 1.0,              chopAmp, dir3 * 0.6 - dir2 * 0.4, 0.25, numWaves)
+                    * wolfLatticeRes(baseWavelength * 0.3, vstepSwell);
             vec3 w7 = vec3(0.0);
             vec3 w8 = vec3(0.0);
             if (stormChaos > 0.1)
             {
                 float randAngle1 = snoise(wxy * 0.002) * 3.14159;
-                w7 = gerstnerWave(wxy, baseWavelength * 0.7, 1.0, localAmp * 0.12 * stormChaos, vec2(cos(randAngle1), sin(randAngle1)), 0.3, numWaves);
+                w7 = gerstnerWave(wxy, baseWavelength * 0.7, 1.0, localAmp * 0.12 * stormChaos, vec2(cos(randAngle1), sin(randAngle1)), 0.3, numWaves)
+                   * wolfLatticeRes(baseWavelength * 0.7, vstepSwell);
                 float randAngle2 = snoise(wxy * 0.003 + 100.0) * 3.14159;
-                w8 = gerstnerWave(wxy, baseWavelength * 0.4, 1.0, localAmp * 0.1 * stormChaos, vec2(cos(randAngle2), sin(randAngle2)), 0.25, numWaves);
+                w8 = gerstnerWave(wxy, baseWavelength * 0.4, 1.0, localAmp * 0.1 * stormChaos, vec2(cos(randAngle2), sin(randAngle2)), 0.25, numWaves)
+                   * wolfLatticeRes(baseWavelength * 0.4, vstepSwell);
             }
 
             // [ROUND 10] THE STORM SWELL (README "The storm swell"; Paul: "with a massive hurricane the sea should be HUGE", "the
@@ -855,20 +884,27 @@ void main()
             {
                 float aS = stormSwellA * fade * swellScale * edgeK;
                 float kS = 6.28318 / wolfSeaStormSwell.w;
-                wS = gerstnerWaveAt(relS, wolfSeaStormSwell.w, aS, dirS, min(0.65, numWaves * kS * aS), numWaves, wolfSeaClock.w);
+                wS = gerstnerWaveAt(relS, wolfSeaStormSwell.w, aS, dirS, min(0.65, numWaves * kS * aS), numWaves, wolfSeaClock.w)
+                   * wolfLatticeRes(wolfSeaStormSwell.w, vstepSwell);   // [T508 2026-11-04/] as w1..w8
                 vStormSwellAmp = aS;
             }
             vec3 total = w1 + w2 + w3 + w4 + w5 + w6 + w7 + w8 + wS;
-            total.z += fbm(wxy * 0.02, time) * localAmp * (0.1 + stormChaos * 0.1) * chopKeep;
+            // [T508 2026-11-04/] x res at its first octave's 50 m (1 / 0.02): the finer octaves carry a quarter of a tenth of
+            // the swell's height and less
+            total.z += fbm(wxy * 0.02, time) * localAmp * (0.1 + stormChaos * 0.1) * chopKeep * wolfLatticeRes(50.0, vstepSwell);
 
             // Slopes of the three dominant trains, same arguments as their waves above.
-            wave_slope = gerstnerSlope(swellPos, baseWavelength * 2.0, wavelengthJitter, localAmp * 0.40, dir1)
-                       + gerstnerSlope(swellPos, baseWavelength * 1.5, wavelengthJitter, localAmp * 0.30, dir2)
-                       + gerstnerSlope(swellPos, baseWavelength * 1.2, 1.0,              localAmp * 0.25, dir3);
+            // [T508 2026-11-04] x the same res as their displacement: an aliased slope interpolated across a long quad
+            // flickers in the light at every re-tessellation. The share left out (1 - res) is shaded per pixel instead
+            // (class3 waterF.glsl wolfSwellSlopeLost, from vSwell and the lattice uniform).
+            wave_slope = gerstnerSlope(swellPos, baseWavelength * 2.0, wavelengthJitter, localAmp * 0.40, dir1) * res1
+                       + gerstnerSlope(swellPos, baseWavelength * 1.5, wavelengthJitter, localAmp * 0.30, dir2) * res2
+                       + gerstnerSlope(swellPos, baseWavelength * 1.2, 1.0,              localAmp * 0.25, dir3) * res3;
             // [HURRICANE 2026-10-30] + the storm swell train's slope (same arguments as its wave above)
             if (vStormSwellAmp > 0.0)
             {
-                wave_slope += gerstnerSlopeAt(relS, wolfSeaStormSwell.w, vStormSwellAmp, dirS, wolfSeaClock.w);
+                wave_slope += gerstnerSlopeAt(relS, wolfSeaStormSwell.w, vStormSwellAmp, dirS, wolfSeaClock.w)
+                            * wolfLatticeRes(wolfSeaStormSwell.w, vstepSwell);   // [T508 2026-11-04/]
             }
 
             // Backstop, not the height (2.5x the amplitude from lldrawpoolwater.cpp).
@@ -896,8 +932,18 @@ void main()
         float f0 = 1.0 - smoothstep(fftFade.x * 0.5, fftFade.x, fdist);
         float f1 = 1.0 - smoothstep(fftFade.y * 0.5, fftFade.y, fdist);
         vec3 dd = vec3(0.0);
-        if (f0 > 0.001) dd += WOLF_TEX_FFT_DISP_0( position.xy / fftTile.x).xyz * f0;
-        if (f1 > 0.001) dd += WOLF_TEX_FFT_DISP_1( position.xy / fftTile.y).xyz * f1;
+        // [T508 2026-11-04] Band-limited to the lattice like the swell (wolfLatticeRes): a vertex stage has no derivatives,
+        // so texture() read mip 0 - every wave down to 2 texels (1.5 m in the 96 m tile, 0.19 m in the 12 m one) at
+        // vertices 2-16 m apart, an alias re-drawn at each re-tessellation. The cascades keep a full mip chain, regenerated
+        // every update (wolfoceanfft.cpp, glGenerateMipmap after each pass, bound TFO_TRILINEAR in lldrawpoolwater.cpp). Mip L
+        // of an N = 128 tile (wolfoceanfft.h) has texels tile x 2^L / 128 and holds waves down to two of them; that shortest
+        // wave is put at 3 vertices (wolfLatticeRes' 0), so 2 tile 2^L / 128 = 3 vstep, L = log2(192 vstep / tile). The
+        // fragment still reads the cascades at full detail for the normals and foam (class3 waterF.glsl).
+        float vstepFft = wolfLatticeStep(position.xy);
+        float lod0 = vstepFft > 0.0 ? max(0.0, log2(192.0 * vstepFft / fftTile.x)) : 0.0;
+        float lod1 = vstepFft > 0.0 ? max(0.0, log2(192.0 * vstepFft / fftTile.y)) : 0.0;
+        if (f0 > 0.001) dd += WOLF_TEX_FFT_DISP_0( position.xy / fftTile.x, lod0).xyz * f0;
+        if (f1 > 0.001) dd += WOLF_TEX_FFT_DISP_1( position.xy / fftTile.y, lod1).xyz * f1;
         // [ROUND 10] the cascades keep the region's own spectrum: their choppy displacement was tuned not to fold at the sea state
         // they are built for, and x the storm's factor (to ~100 over a calm sea) it folded into the "jagged shards" (SandBox South
         // test render 14:58Z). The storm's sea is the guarded trains above and the storm swell.

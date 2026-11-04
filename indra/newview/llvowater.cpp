@@ -59,13 +59,20 @@ template<class T> inline T LERP(T a, T b, F32 factor)
 // LLWorld::updateWaterObjects builds — so the swell no longer stops dead at the region
 // border. Capped so (n+1)^2 stays under the U16 index ceiling.
 //
-// <WolfViewer 2026-09-21> step_scale reports the decimation that cap forced: 1 normally, 2
-// once the axis wanted more than 255 lines (a region wider than ~8 km), 4 beyond that. The
-// water vertex shader multiplies its own copy of the step rule by it to know how many
-// vertices a wave has here — see waterV.glsl wolfLatticeStep().
-static void wolf_graded_axis(F32 half, F32 focus_off, std::vector<F32>& out, F32& step_scale)
+// <WolfViewer 2026-09-21> (decimation) [T508 2026-11-04] REPLACED: the cap is now met by trimming
+// the FAR end of the longer side, never by thinning the whole axis. Ticket 508 (Jeanne, Ireland,
+// a 460,800 m region: "the irish sea is wobbling like jelly"): there the side ahead of the camera
+// ran to its 200-line limit (~12 km), the axis wanted ~281 lines, and every other line was
+// dropped - right beside the eye too, so the sea under her was drawn on a 4 m lattice instead of
+// 2 m and the swell and the cascades were under-sampled twice as far out. Any region wider than
+// ~6 km with the camera well inside it did the same. Trimming the far end keeps every line within
+// ~2.7 km of the eye (126 lines a side at worst), well past the swell's fade
+// (WolfViewerWaterWaveFadeEnd, 1024 m) and the cascades' (wolfoceanfft.cpp FADE, 400 m); the
+// last quad then runs flat to the plane's edge, as the 12 km one did before. So the lattice is
+// exactly the step rule everywhere a wave is drawn, which is what waterV.glsl wolfLatticeStep()
+// and wolfwaterfield.cpp WolfWaterClearance::latticeStepAt() already assume (step scale 1).
+static void wolf_graded_axis(F32 half, F32 focus_off, std::vector<F32>& out)
 {
-    step_scale = 1.f;
     const F32 lo = -half, hi = half;
     const F32 f = llclamp(focus_off, lo, hi);
     std::vector<F32> right, left;
@@ -76,16 +83,24 @@ static void wolf_graded_axis(F32 half, F32 focus_off, std::vector<F32>& out, F32
         x = llmin(x + step, hi);
         right.push_back(x);
     }
-    if (right.empty() || right.back() < hi - 0.01f)
-    {
-        right.push_back(hi);
-    }
     x = f;
     while (x > lo + 0.01f && left.size() < 200)
     {
         const F32 step = llclamp(fabsf(x - focus_off) * 0.04f, 2.f, 128.f);
         x = llmax(x - step, lo);
         left.push_back(x);
+    }
+    // 255 lines at most (256^2 > 65535: the U16 index ceiling): the focus, both plane edges and
+    // 252 lines between them, taken from the far end of whichever side is longer.
+    const size_t MAX_LINES = 255;
+    while (left.size() + right.size() + 3 > MAX_LINES)
+    {
+        std::vector<F32>& longer = (right.size() >= left.size()) ? right : left;
+        longer.pop_back();
+    }
+    if (right.empty() || right.back() < hi - 0.01f)
+    {
+        right.push_back(hi);
     }
     if (left.empty() || left.back() > lo + 0.01f)
     {
@@ -96,7 +111,7 @@ static void wolf_graded_axis(F32 half, F32 focus_off, std::vector<F32>& out, F32
     for (auto it = left.rbegin(); it != left.rend(); ++it) all.push_back(*it);
     all.push_back(f);
     all.insert(all.end(), right.begin(), right.end());
-    // Drop coincident neighbours (the focus can sit on an edge), then decimate to the cap.
+    // Drop coincident neighbours (the focus can sit on an edge).
     out.clear();
     for (F32 v : all)
     {
@@ -104,14 +119,6 @@ static void wolf_graded_axis(F32 half, F32 focus_off, std::vector<F32>& out, F32
         {
             out.push_back(v);
         }
-    }
-    while (out.size() > 255)
-    {
-        std::vector<F32> d;
-        for (size_t i = 0; i < out.size(); i += 2) d.push_back(out[i]);
-        if (d.back() < out.back()) d.push_back(out.back());
-        out.swap(d);
-        step_scale *= 2.f;   // <WolfViewer 2026-09-21/> every other line dropped = twice the step
     }
     if (out.size() < 2)
     {
@@ -374,7 +381,7 @@ bool LLVOWater::updateGeometry(LLDrawable *drawable)
     {
         // <WolfViewer 2026-09-10> EVERY wave-bearing plane — region and void — is graded about
         // the CAMERA (see wolfFollowCamera above): 2 m beside the eye, 4 % of the distance
-        // further out, 128 m at most, decimated under the U16 ceiling. The fixed
+        // further out, 128 m at most, trimmed at the far end under the U16 ceiling. The fixed
         // TARGET_STEP_M lattice (2 m on a 256 m region, 16 m on a 4096 m one) aliased the
         // 12 m wind-sea cascade on any region above 512 m. The void planes were already
         // graded, about the agent region's centre; the camera is the better focus for them
@@ -382,15 +389,15 @@ bool LLVOWater::updateGeometry(LLDrawable *drawable)
         const LLVector3 center = getPositionAgent();
         const LLVector3 half = getScale() * 0.5f;
         const LLVector3 focus = LLViewerCamera::getInstance()->getOrigin();
-        F32 step_scale_x = 1.f, step_scale_y = 1.f;
-        wolf_graded_axis(half.mV[VX], focus.mV[VX] - center.mV[VX], xs, step_scale_x);
-        wolf_graded_axis(half.mV[VY], focus.mV[VY] - center.mV[VY], ys, step_scale_y);
+        wolf_graded_axis(half.mV[VX], focus.mV[VX] - center.mV[VX], xs);
+        wolf_graded_axis(half.mV[VY], focus.mV[VY] - center.mV[VY], ys);
         size_x = (S32)xs.size() - 1;
         size_y = (S32)ys.size() - 1;
         shared_lattice = true;
         mWolfLatticeFocus = focus;
         // <WolfViewer 2026-09-21/> the lattice the water shader has to fit its waves into.
-        mWolfLatticeGrade.set(focus.mV[VX], focus.mV[VY], step_scale_x, step_scale_y);
+        // [T508 2026-11-04/] zw = 1: wolf_graded_axis no longer thins the axis (see there).
+        mWolfLatticeGrade.set(focus.mV[VX], focus.mV[VY], 1.f, 1.f);
         mWolfLatticeBuiltAt = LLFrameTimer::getElapsedSeconds();
         mWolfLatticeValid = true;
         (void)TARGET_STEP_M; (void)MAX_STEPS;

@@ -33,6 +33,8 @@
 #include "llviewercontrol.h"
 #include "wolfgrid.h"
 #include "wolfvrstream.h"
+#include "wolfvrscreen.h"
+#include "llviewermenu.h"
 
 #include <boost/json.hpp>
 
@@ -50,6 +52,26 @@ namespace
         "inventory", "appearance", "animationoverride", "gestures",     // self
         "snapshot", "quickprefs", "wolf_eep", "wolf_weather",           // system
         "wolf_helm", "wolf_dashboard",                                  // Wolf vehicles
+    };
+
+    // [VR HUDS MENU 2026-11-04] Paul: "add it as a seperate menu ... these are what are built into the viewer NOT attached
+    // to me". The viewer's OWN HUDs and screens, each run exactly as its desktop menu item runs it: the same registered
+    // function and parameter (menu_viewer.xml Wolf World / vehicles items, on_click / on_check), so the headset and the
+    // desktop can never differ. id = what the page sends; label lives on the page.
+    struct HudItem { const char* id; const char* click; const char* click_param; const char* check; const char* check_param; };
+    const HudItem kHuds[] = {
+        {"flight", "ToggleControl", "WolfFlightMode", "CheckControl", "WolfFlightMode"},               // Flight Mode
+        {"sail", "ToggleControl", "WolfSailMode", "CheckControl", "WolfSailMode"},                     // Sailing Mode
+        {"car", "WolfDrive.ToggleDesign", "car", "WolfDrive.IsDesign", "car"},                          // Car Dashboard
+        {"speedboat", "WolfDrive.ToggleDesign", "speedboat", "WolfDrive.IsDesign", "speedboat"},        // Speedboat Helm
+        {"submarine", "WolfDrive.ToggleDesign", "submarine", "WolfDrive.IsDesign", "submarine"},        // Submarine Helm
+        {"helm", "WolfHelm.Toggle", "", "WolfHelm.IsShown", ""},                                        // Captain's Helm (Ships)
+        {"game", "WolfGame.ToggleGameMode", "", "WolfGame.IsGameMode", ""},                             // Game Mode
+        {"drive", "Floater.Toggle", "wolf_drive_controls", "Floater.Visible", "wolf_drive_controls"},   // Driving Controls
+        {"airports", "Floater.Toggle", "wolf_airports", "Floater.Visible", "wolf_airports"},            // Airports
+        {"compass", "Floater.Toggle", "wolf_compass", "Floater.Visible", "wolf_compass"},               // Tessa's Compass
+        {"speed", "Floater.Toggle", "wolf_speed", "Floater.Visible", "wolf_speed"},                     // Xenon's WolfSpeed
+        {"roleplay", "Floater.Toggle", "wolf_roleplay", "Floater.Visible", "wolf_roleplay"},            // Roleplay
     };
 
     bool allowed(const std::string& name)
@@ -126,13 +148,28 @@ bool runCommand(const std::string& name, const std::string& arg, std::string& wh
     if (name == "sit")
     {
         // one slot for the pair (hud_model.js _sitOrStand): stand when seated on anything, else sit on the ground
+        LLUUID target;
         if (isAgentAvatarValid() && gAgentAvatarp->isSitting()) gAgent.standUp();
+        else if (WolfVRScreen::aimedObject(target)) handle_object_sit(target);   // [VR SIT] on what the pointer is on
         else if (LLCommand* c = command("groundsit"); !c || !callCommit(c->executeFunctionName(), c->executeParameters()))
         {
             why = "sitting is not available";
             return false;
         }
         return true;
+    }
+    if (name == "hud")
+    {
+        // [VR HUDS MENU] one of the viewer's own HUDs, on or off as its desktop menu item does it
+        for (const HudItem& h : kHuds)
+        {
+            if (arg != h.id) continue;
+            if (callCommit(h.click, LLSD(std::string(h.click_param)))) return true;
+            why = "not available in this viewer";
+            return false;
+        }
+        why = "not one of the viewer's HUDs";
+        return false;
     }
     if (name == "closefloater")
     {
@@ -202,6 +239,11 @@ void pump()
         if (callEnable(c->isRunningFunctionName(), c->isRunningParameters(), false)) on.emplace_back(name);
     }
     o["on"] = std::move(on);
+    // [VR HUDS MENU] which of the viewer's own HUDs are on now (their desktop menu ticks)
+    json::array huds;
+    for (const HudItem& h : kHuds)
+        if (callEnable(h.check, LLSD(std::string(h.check_param)), false)) huds.emplace_back(h.id);
+    o["huds"] = std::move(huds);
     o["off"] = std::move(off);
     o["wolf"] = WolfGrid::isOnWolfTerritories();
     LLViewerRegion* region = gAgent.getRegion();

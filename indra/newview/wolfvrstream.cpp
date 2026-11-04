@@ -274,6 +274,36 @@ namespace
         }
     }
 
+    // [VR DESKTOP 2026-11-04] What the desktop hides while a headset is connected, decided here 4 times a second from
+    // what IS (a headset connected, the mode), never from a notice - so it comes back on EVERY way out: the headset
+    // disconnecting, taken off or asleep (the page's socket closes), the page closed, VR switched off in the viewer, the
+    // pipe timing out. Paul: "when i dropped vr mode stuff didn't come back" (the toolbars came back only on a
+    // "disconnected" notice, which switching VR off never sends).
+    //  - the VR window (its QR code and address): hidden while a headset is connected ("when you are connected the VR
+    //    mode window needs to disappear until you disconnect"); hidden, never closed (closing it switches VR off)
+    //  - the toolbars: hidden while a headset is in VR 3D Mode ("the menu at the bottom of the screen ... masks the
+    //    windows"; their buttons are on the headset's bar); Big Screen shows the desktop as it is, toolbars and all
+    // Only what this hid is given back.
+    void reconcileDesktop()
+    {
+        bool active = false, world = false;
+        {
+            std::lock_guard<std::mutex> lk(gMutex);
+            active = gService && gService->wantsFrames();
+            world = active && gMode == "world";
+        }
+        static bool s_win_hidden = false, s_bars_hidden = false, s_was_active = false;
+        LLFloater* f = LLFloaterReg::findInstance("wolf_vr_stream");
+        if (active && !s_was_active && f && f->getVisible()) { f->setVisible(false); s_win_hidden = true; }
+        if (!active && s_win_hidden) { s_win_hidden = false; if (f) f->setVisible(true); }
+        s_was_active = active;
+        if (gToolBarView)
+        {
+            if (world && !s_bars_hidden && gToolBarView->getVisible()) { gToolBarView->setVisible(false); s_bars_hidden = true; }
+            else if (!world && s_bars_hidden) { gToolBarView->setVisible(true); s_bars_hidden = false; }
+        }
+    }
+
     // Main thread, 4 times a second: the menu gate and the connected / disconnected notices (WolfVRHeadsetNotice, a
     // tip that goes by itself: nothing to click, and nothing that needs a quick reaction).
     bool pump()
@@ -281,6 +311,7 @@ namespace
         if (gShutdown) { gPumpRunning = false; return true; }
         gateMenu();
         WolfVRUi::pump();   // [VR CONTROLS 2026-11-04] the in-VR action bar's state to the headset
+        reconcileDesktop();
         std::deque<std::pair<std::string, bool>> notices;
         {
             std::lock_guard<std::mutex> lk(gNoticeMutex);
@@ -291,26 +322,6 @@ namespace
             LLSD args;
             args["DEVICE"] = label;
             LLNotificationsUtil::add(connected ? "WolfVRHeadsetConnected" : "WolfVRHeadsetDisconnected", args);
-            // [VR WINDOW 2026-11-04] Paul: "when you are connected the VR mode window needs to disappear until you
-            // disconnect". Hidden, not closed (closing it switches VR off, WolfFloaterVRStream::onClose); back as soon
-            // as the headset goes, so the next person can connect. Only a window this hid is brought back.
-            static bool s_hid = false;
-            LLFloater* f = LLFloaterReg::findInstance("wolf_vr_stream");
-            if (connected && f && f->getVisible()) { f->setVisible(false); s_hid = true; }
-            else if (!connected && s_hid)
-            {
-                s_hid = false;
-                if (f && gSavedSettings.getBOOL("WolfVRStreamEnabled")) f->setVisible(true);
-            }
-            // [VR TOOLBARS 2026-11-04] Paul: "the menu at the bottom of the screen did the same [masked the windows] so
-            // probably need to hide it when in vr mode". The toolbars (bottom, left, right) are hidden while a headset
-            // is connected - their buttons are on the headset's own bar - and come back as they were when it goes
-            static bool s_bars_hidden = false;
-            if (gToolBarView)
-            {
-                if (connected && gToolBarView->getVisible()) { gToolBarView->setVisible(false); s_bars_hidden = true; }
-                else if (!connected && s_bars_hidden) { gToolBarView->setVisible(true); s_bars_hidden = false; }
-            }
         }
         return false;
     }

@@ -17,49 +17,53 @@ import * as THREE from './three/three.module.js';
 // Source: hud_model.js ACTIONS (order, labels, icons, groups); `cmd` = commands.xml name (wolfvrui.cpp kCommands),
 // `page` = done here on the headset page. `wolf` = Wolf Territories only (hud_model.js wolfOnly: removed elsewhere).
 // `why` = shown greyed with this reason (hud_model.js vr:null), never left out, so the slots never move.
+// [VR BAR ORDER 2026-11-04] Paul: "the main vr hud all the buttons are kind of in a funny order". Three fixed rows, the
+// most used first, the same every time (nothing moves in or out of a row): talk and find, move about the world, then the
+// headset's own things. The viewer's own HUDs (flight deck, car dashboard, helms, game mode ...) are on their own page,
+// opened with "HUDs" (Paul: "add it as a seperate menu"), so this bar stays uncluttered.
 export const ACTIONS = [
-    // communication
-    { id: 'chat', label: 'Chat', icon: 'chat', cmd: 'chat' },
-    { id: 'speak', label: 'Speak', icon: 'mic', cmd: 'speak', hint: 'Speak: on until you press it again' },
-    { id: 'voice', label: 'Voice', icon: 'volume_up', cmd: 'voice' },
-    { id: 'dictate', label: 'Dictate', icon: 'keyboard_voice', cmd: 'wolf_dictate' },
-    { id: 'screen', label: 'Screen', icon: 'screen_share', why: 'Pick a window on the desktop first' },
-    // movement / view
-    { id: 'move', label: 'Move', icon: 'directions_walk', cmd: 'move' },
-    { id: 'view', label: 'View', icon: 'videocam', cmd: 'view' },
-    { id: 'fly', label: 'Fly', icon: 'flight', cmd: 'fly' },
-    { id: 'sit', label: 'Sit', icon: 'airline_seat_recline_normal', cmd: 'sit', vrLabelSat: 'Stand' },
-    // world
-    { id: 'people', label: 'People', icon: 'people', cmd: 'people' },
-    { id: 'radar', label: 'Radar', icon: 'radar', cmd: 'radar' },
-    { id: 'search', label: 'Search', icon: 'search', cmd: 'search' },
-    { id: 'map', label: 'Map', icon: 'public', cmd: 'map' },
-    { id: 'minimap', label: 'Mini-Map', icon: 'map', cmd: 'minimap' },
-    { id: 'gamemode', label: 'Game Mode', icon: 'sports_esports', cmd: 'wolf_gamemode', wolf: true },
-    { id: 'experiences', label: 'Experiences', icon: 'explore', cmd: 'wolf_experiences', wolf: true },
-    { id: 'home', label: 'Home', icon: 'home', cmd: 'home' },
-    // self
-    { id: 'inventory', label: 'Inventory', icon: 'inventory_2', cmd: 'inventory' },
-    { id: 'appearance', label: 'Appearance', icon: 'accessibility_new', cmd: 'appearance' },
-    { id: 'ao', label: 'AO', icon: 'directions_run', cmd: 'animationoverride' },
-    { id: 'gestures', label: 'Gestures', icon: 'waving_hand', cmd: 'gestures' },
-    // system
-    { id: 'snapshot', label: 'Snapshot', icon: 'photo_camera', cmd: 'snapshot' },
-    { id: 'quickprefs', label: 'Prefs', icon: 'tune', cmd: 'quickprefs' },
-    { id: 'eep', label: 'EEP', icon: 'wb_sunny', cmd: 'wolf_eep' },
-    { id: 'weather', label: 'Weather', icon: 'rainy', cmd: 'wolf_weather' },
-    // Wolf vehicles: the ship's helm and the car's dashboard (commands.xml wolf_helm / wolf_dashboard)
-    { id: 'helm', label: 'Helm', icon: 'sailing', cmd: 'wolf_helm', wolf: true },
-    { id: 'dashboard', label: 'Dashboard', icon: 'speed', cmd: 'wolf_dashboard', wolf: true },
-    // VR-only (hud_model.js vrOnly): the HUD layer switch (hud_model.js 'huds'), the big screen, leaving VR
-    { id: 'huds', label: 'HUDs', icon: 'dashboard', page: 'huds' },
-    // [VR KEYBOARD 2026-11-04] the headset keyboard (it also opens by itself in a text field)
-    { id: 'keyboard', label: 'Keyboard', icon: 'keyboard', page: 'keyboard' },
+    // row 1: talk and find
+    { row: 0, id: 'chat', label: 'Chat', icon: 'chat', cmd: 'chat' },
+    { row: 0, id: 'speak', label: 'Speak', icon: 'mic', cmd: 'speak', hint: 'Speak: on until you press it again' },
+    { row: 0, id: 'keyboard', label: 'Keyboard', icon: 'keyboard', page: 'keyboard' },
+    { row: 0, id: 'map', label: 'Map', icon: 'public', cmd: 'map' },
+    { row: 0, id: 'minimap', label: 'Mini-Map', icon: 'map', cmd: 'minimap' },
+    { row: 0, id: 'inventory', label: 'Inventory', icon: 'inventory_2', cmd: 'inventory' },
+    { row: 0, id: 'people', label: 'People', icon: 'people', cmd: 'people' },
+    { row: 0, id: 'search', label: 'Search', icon: 'search', cmd: 'search' },
+    { row: 0, id: 'sit', label: 'Sit', icon: 'airline_seat_recline_normal', cmd: 'sit', vrLabelSat: 'Stand', hint: 'Sit: on what you point at, or on the ground' },
+    { row: 0, id: 'home', label: 'Home', icon: 'home', cmd: 'home' },
+    // row 2: moving about the world
+    { row: 1, id: 'fly', label: 'Fly', icon: 'flight', cmd: 'fly' },
+    { row: 1, id: 'move', label: 'Move', icon: 'directions_walk', cmd: 'move' },
+    { row: 1, id: 'view', label: 'View', icon: 'videocam', cmd: 'view' },
+    { row: 1, id: 'radar', label: 'Radar', icon: 'radar', cmd: 'radar' },
+    { row: 1, id: 'experiences', label: 'Experiences', icon: 'explore', cmd: 'wolf_experiences', wolf: true },
+    { row: 1, id: 'weather', label: 'Weather', icon: 'rainy', cmd: 'wolf_weather' },
+    { row: 1, id: 'eep', label: 'EEP', icon: 'wb_sunny', cmd: 'wolf_eep' },
+    { row: 1, id: 'gestures', label: 'Gestures', icon: 'waving_hand', cmd: 'gestures' },
+    { row: 1, id: 'ao', label: 'AO', icon: 'directions_run', cmd: 'animationoverride' },
+    { row: 1, id: 'appearance', label: 'Appearance', icon: 'accessibility_new', cmd: 'appearance' },
+    // row 3: the headset's own
+    { row: 2, id: 'hudsmenu', label: 'HUDs \u25b8', icon: 'dashboard', page: 'hudsmenu', hint: "The viewer's own HUDs: flight deck, car dashboard, helms, game mode ..." },
+    { row: 2, id: 'voice', label: 'Voice', icon: 'volume_up', cmd: 'voice' },
+    { row: 2, id: 'dictate', label: 'Dictate', icon: 'keyboard_voice', cmd: 'wolf_dictate' },
+    { row: 2, id: 'snapshot', label: 'Snapshot', icon: 'photo_camera', cmd: 'snapshot' },
+    { row: 2, id: 'quickprefs', label: 'Prefs', icon: 'tune', cmd: 'quickprefs' },
     // [VR VIEW 2026-11-04] see yourself from behind (the default) or from your own eyes with your avatar hidden
-    { id: 'hideme', label: 'Hide Me', icon: 'visibility_off', cmd: 'hideavatar' },
-    { id: 'bigscreen', label: 'Big Screen', icon: 'tv', page: 'bigscreen' },
-    { id: 'numbers', label: 'Numbers', icon: 'speed', page: 'numbers', debug: true },   // only with WolfVRDebugStats
-    { id: 'vr', label: 'Exit VR', icon: 'vrpano', page: 'exit' },
+    { row: 2, id: 'hideme', label: 'Hide Me', icon: 'visibility_off', cmd: 'hideavatar' },
+    { row: 2, id: 'bigscreen', label: 'Big Screen', icon: 'tv', page: 'bigscreen' },
+    { row: 2, id: 'numbers', label: 'Numbers', icon: 'speed', page: 'numbers', debug: true },   // only with WolfVRDebugStats
+    { row: 2, id: 'vr', label: 'Exit VR', icon: 'vrpano', page: 'exit' },
+];
+// [VR HUDS MENU 2026-11-04] the viewer's OWN HUDs and screens (not attachments worn), each run by the viewer exactly as its
+// desktop menu item (wolfvrui.cpp kHuds); "Show in the headset" is the HUD layer on or off; Back returns to the bar
+export const HUD_ITEMS = [
+    { id: 'flight', label: 'Flight deck' }, { id: 'sail', label: 'Sailing deck' }, { id: 'car', label: 'Car dashboard' },
+    { id: 'helm', label: "Captain's helm" }, { id: 'speedboat', label: 'Speedboat helm' }, { id: 'submarine', label: 'Submarine helm' },
+    { id: 'game', label: 'Game mode' }, { id: 'drive', label: 'Driving controls' }, { id: 'airports', label: 'Airports' },
+    { id: 'compass', label: "Tessa's compass" }, { id: 'speed', label: 'WolfSpeed' }, { id: 'roleplay', label: 'Roleplay' },
+    { id: 'show', label: 'Show HUDs in the headset', page: 'huds' }, { id: 'back', label: '\u25c2  Back' },
 ];
 
 // vr_hud.js constants
@@ -189,19 +193,33 @@ export class VRBar {
 
     // vr_hud.js _layoutBar: 12 columns, rows derived, a fixed grid band that leaves room for the favourites strip
     _layout() {
-        const list = this.actions();
-        const COLS = 12, ROWS = Math.max(2, Math.ceil(list.length / COLS));
-        const gridTop = 62, gridH = 196, cellW = BAR_W / COLS, cellH = gridH / ROWS;
-        this.slots = list.map((a, i) => ({ x: (i % COLS) * cellW, y: gridTop + Math.floor(i / COLS) * cellH, w: cellW, h: cellH, action: a }));
+        // [VR BAR ORDER] row by row, each row's buttons spread across it (10 to a row); the HUDs page: big tiles, 3 a row
+        const gridTop = 62, gridH = 210;
+        this.slots = [];
+        if (this.page === 'huds') {
+            const COLS = 3, rowsN = Math.ceil(HUD_ITEMS.length / COLS), cellW = BAR_W / COLS, cellH = (gridH + 60) / rowsN;
+            HUD_ITEMS.forEach((h, i) => this.slots.push({ x: (i % COLS) * cellW, y: gridTop + Math.floor(i / COLS) * cellH, w: cellW, h: cellH, hud: h,
+                                                          action: { id: 'hud_' + h.id, label: h.label, hud: h.id, page: h.page } }));
+        } else {
+            const list = this.actions();
+            const rows = [0, 1, 2].map((r) => list.filter((a) => a.row === r));
+            const cellH = gridH / rows.length;
+            rows.forEach((r, j) => {
+                const cellW = BAR_W / Math.max(10, r.length);
+                r.forEach((a, i) => this.slots.push({ x: i * cellW, y: gridTop + j * cellH, w: cellW, h: cellH, action: a }));
+            });
+        }
         this.favSlots = [];
         this._dirty = true;
     }
+    showPage(p) { this.page = p; this._layout(); }
 
     setState(m) {
         const wolf = !!m.wolf;
         this.state = { on: new Set(m.on || []), off: new Set(m.off || []), wolf, region: String(m.region || ''),
-                       sit: m.sit | 0, fly: !!m.fly, fav: Array.isArray(m.fav) ? m.fav.slice(0, 6) : [], hide: !!m.hide };
-        if (this.slots.length !== this.actions().length) this._layout();
+                       sit: m.sit | 0, fly: !!m.fly, fav: Array.isArray(m.fav) ? m.fav.slice(0, 6) : [], hide: !!m.hide,
+                       huds: new Set(Array.isArray(m.huds) ? m.huds : []) };
+        if (this.page !== 'huds' && this.slots.length !== this.actions().length) this._layout();
         this._dirty = true;
     }
     setPageState(id, on) { if (this.pageState[id] !== on) { this.pageState[id] = on; this._dirty = true; } }
@@ -237,7 +255,7 @@ export class VRBar {
     }
     toggle() {
         this.open = !this.open;
-        if (this.open) { this._place(); this.mesh.updateMatrixWorld(true); }
+        if (this.open) { this._place(); this.mesh.updateMatrixWorld(true); if (this.page === 'huds') this.showPage('main'); }
         this.mesh.visible = this.open; this.hover = null; this.moving = null; this._dirty = true; this._showTab();
     }
     // [VR MENU FIX] a few words on the Menu tab (what the last button did), for `ms`
@@ -246,8 +264,8 @@ export class VRBar {
     // (the bar opens again with the reason, which stays until the next press - a failure is never only flashed)
     onActed(m) {
         const a = ACTIONS.find((x) => x.cmd === m.a);
-        const label = a ? this.labelFor(a) : String(m.a || '');
         const mine = this.pending && this.pending.cmd === m.a;
+        const label = mine && this.pending.label ? this.pending.label : a ? this.labelFor(a) : String(m.a || '');
         if (mine) this.pending = null;
         if (m.ok) { if (mine) this.tabSay(label + ' \u2713'); return; }   // only the bar's own presses are confirmed here
         const why = String(m.why || 'it cannot be used here just now');
@@ -283,6 +301,7 @@ export class VRBar {
 
     // state of one slot (hud_model.js state(): active / enabled / available)
     slotState(a) {
+        if (a.hud) return { active: a.page ? !!this.pageState[a.page] : !!(this.state.huds && this.state.huds.has(a.hud)), dead: false };
         if (a.page) return { active: !!this.pageState[a.page], dead: false };
         if (a.why) return { active: false, dead: true };
         if (a.cmd === 'sit') return { active: this.state.sit > 0, dead: false };
@@ -348,6 +367,16 @@ export class VRBar {
         if (!a) return;
         const st = this.slotState(a);
         if (a.why || st.dead) { this.toast(a.why || (a.label + ' cannot be used here just now')); return; }
+        // [VR HUDS MENU] the HUDs page: opened from the bar; Back returns; each tile is one of the viewer's own HUDs
+        if (a.page === 'hudsmenu') { this.showPage('huds'); return; }
+        if (a.hud === 'back') { this.showPage('main'); return; }
+        if (a.hud && !a.page) {
+            this.send({ t: 'act', a: 'hud', x: a.hud });
+            this.pending = { cmd: 'hud', at: performance.now(), label: a.label };
+            this.hide();
+            this.tabSay(a.label + '\u2026', 6000);
+            return;
+        }
         if (a.page) { if (this.onPage) this.onPage(a.page); return; }
         this.send({ t: 'act', a: a.cmd });
         if (this.onCommand) this.onCommand(a);
@@ -409,7 +438,7 @@ export class VRBar {
         ctx.textBaseline = 'middle';
         ctx.fillStyle = ACCENT;
         ctx.font = 'bold 26px sans-serif';
-        ctx.fillText('WOLFVIEWER', 26, 34);
+        ctx.fillText(this.page === 'huds' ? "THE VIEWER'S HUDS" : 'WOLFVIEWER', 26, 34);
         if (this.state.region) {
             ctx.textAlign = 'right';
             ctx.fillStyle = '#7f93b5';
@@ -429,7 +458,7 @@ export class VRBar {
         ctx.font = 'bold 26px sans-serif';
         ctx.fillText('\u2715  Close', CLOSE.x + CLOSE.w / 2, CLOSE.y + CLOSE.h / 2 + 1);
         for (let i = 0; i < this.slots.length; i++) this._drawSlot(ctx, this.slots[i], i);
-        this._drawFavourites(ctx);
+        if (this.page !== 'huds') this._drawFavourites(ctx);
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         if (this._toast) {
@@ -478,6 +507,12 @@ export class VRBar {
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillStyle = st.dead ? 'rgba(200, 214, 236, 0.26)' : (st.active ? '#ffffff' : 'rgba(226, 240, 255, 0.94)');
+        if (a.hud) {
+            // [VR HUDS MENU] big plain words, and a tick when that HUD is on (Paul: large, clear labels)
+            ctx.font = 'bold 28px sans-serif';
+            ctx.fillText((st.active ? '\u2713 ' : '') + a.label, x + w / 2, y + h / 2 + 1);
+            return;
+        }
         // three rows of slots are shorter than WolfStorm's two: the glyph shrinks to fit, the label stays 17 px
         const glyph = Math.min(42, Math.round(h * 0.55));
         this._icon(ctx, a.icon, x + w / 2, y + h / 2 - 10, glyph);

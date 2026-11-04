@@ -190,28 +190,40 @@ await aimAt(await evalJs('window.__wolfvr.keyPoint("\\u2715  Close")')); await s
 check(!(await evalJs('window.__wolfvr.keyboard().open')), '5. the keyboard\'s Close closes it');
 console.log('   device: ' + await evalJs('window.__wolfvr.deviceLine()'));
 
-// ---- 7. the Wolf instruments reach the headset (the car dashboard, from the bar) ----
+// ---- 7. the viewer's own HUDs, from the bar's HUDs page, each in the headset ----
 const covered = async () => evalJs(`(async () => { const g = window.__wolfvr.grabLayer(); if (!g) return -1; const im = new Image(); im.src = g; await im.decode();
     const c = document.createElement('canvas'); c.width = im.width / 4; c.height = im.height / 4; const x = c.getContext('2d'); x.drawImage(im, 0, 0, c.width, c.height);
     const d = x.getImageData(0, c.height / 2, c.width, c.height / 2).data; let n = 0; for (let i = 0; i < d.length; i += 4) if (d[i] > 16) n++; return n; })()`);
-const cov0 = await covered();
-check(await openBar(), '7. the bar opens for the Dashboard');
-await pressSlot('dashboard');
-await sleep(4000);
-const cov1 = await covered();
-const dg = await evalJs('window.__wolfvr.grabLayer()');
-if (dg) writeFileSync(resolve(OUT, 'layer_dashboard.png'), Buffer.from(dg.split(',')[1], 'base64'));
-await shot('eye_dashboard.png');
-check(cov1 > cov0 + 2000, `7. the car dashboard is drawn on the HUD band (covered pixels ${cov0} -> ${cov1}, quarter size)`);
-if (await openBar()) { await pressSlot('dashboard'); await sleep(800); }
+const order = await evalJs('window.__wolfvr.bar().ids');
+check(JSON.stringify(order.slice(0, 10)) === JSON.stringify(['chat', 'speak', 'keyboard', 'map', 'minimap', 'inventory', 'people', 'search', 'sit', 'home']),
+      '7. the bar\'s first row, most used first, in a fixed order: ' + order.slice(0, 10).join(' '));
+for (const [hud, name] of [['flight', 'flight deck'], ['car', 'car dashboard'], ['game', 'game mode']]) {
+    const c0 = await covered();
+    check(await openBar(), `7. the bar opens for the ${name}`);
+    await pressSlot('hudsmenu'); await sleep(500);
+    check((await evalJs('window.__wolfvr.bar().ids')).includes('hud_' + hud), `7. the HUDs page lists the ${name}`);
+    await pressSlot('hud_' + hud);
+    const on = await waitFor(() => evalJs(`window.__wolfvr.bar().huds.includes("${hud}")`), 6000);
+    check(!!on, `7. the ${name} is on in the viewer (the desktop menu's own tick)`);
+    await sleep(3000);
+    const c1 = await covered();
+    const g7 = await evalJs('window.__wolfvr.grabLayer()');
+    if (g7) writeFileSync(resolve(OUT, `layer_${hud}.png`), Buffer.from(g7.split(',')[1], 'base64'));
+    await shot(`eye_${hud}.png`);
+    check(c1 > c0 + 1500, `7. the ${name} is drawn in the headset (covered pixels ${c0} -> ${c1}, quarter size)`);
+    // off again, from the same page
+    if (await openBar()) { await pressSlot('hudsmenu'); await sleep(400); await pressSlot('hud_' + hud); }
+    await waitFor(() => evalJs(`!window.__wolfvr.bar().huds.includes("${hud}")`), 6000);
+    await sleep(1500);
+}
 // ---- 8. the toolbars are hidden while the headset is connected ----
 const tb = await leapInfo('//bottom_toolbar_stack');
 check(tb && tb.visible_chain === false, '8. the toolbars are hidden while the headset is connected: ' + JSON.stringify(tb && { chain: tb.visible_chain }));
 
 // ---- 6. the page goes: the VR window comes back ----
-await evalJs('window.__wolfvr.toggleVR()');
-await sleep(500);
-await send('Page.navigate', { url: 'about:blank' });
+// [VR DESKTOP] the way Paul left: VR switched off in the viewer (no "disconnected" notice at all)
+leap('LLViewerControl', "{'op':'set','group':'Global','key':'WolfVRStreamEnabled','value':false}");
+await sleep(1500);
 check(await waitFor(async () => (await vrWindowVisible()) === true, 10000), '6. the headset gone, the VR window is back for the next person');
 await sleep(1000);
 const tb2 = await leapInfo('//bottom_toolbar_stack');

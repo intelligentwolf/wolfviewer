@@ -286,6 +286,8 @@ namespace
         F64 cast_at = 0;
         std::string sent;            // the last "aim" message
         bool idle = false;           // no ray, and the page already told so
+        LLUUID obj;                  // [VR SIT] the last object (its root) the ray was on, and when
+        F64 obj_at = 0;
         F64 sent_at = 0;
     };
     Pointer gPtr;
@@ -1430,6 +1432,16 @@ bool eyeCrop(F32& ax, F32& bx, F32& ay, F32& by)
 
 bool pointerActive() { return gPointerUsed > 0 && LLTimer::getTotalSeconds() - gPointerUsed < 2.0; }
 
+// [VR SIT 2026-11-04] Paul: "i couldnt sit on a plane because touching it bought up a menu". The trigger on an object is
+// the desktop's left click - a touch, which on a plane's script brings up its own menu, as on the desktop. The bar's Sit
+// sits on what the pointer was on in the last 8 seconds (the pie menu's Sit, B, still works as before).
+bool aimedObject(LLUUID& id)
+{
+    if (gPtr.obj.isNull() || LLTimer::getTotalSeconds() - gPtr.obj_at > 8.0) return false;
+    id = gPtr.obj;
+    return true;
+}
+
 // [VR AUDIO 2026-11-04] The ears follow the head: audio_update_listener (llvieweraudio.cpp, idle, before display() turns
 // the camera to the head) asks here for the newest head pose's axes, the same mapping as applyHeadCamera, so a sound
 // stays where it is in the world when the head turns.
@@ -1540,6 +1552,8 @@ void updatePointer(bool force)
                     LLVector3 h(hit.getF32ptr());
                     gPtr.dist = (h - O).length();
                     gPtr.prim = obj->getPCode() == LL_PCODE_VOLUME;
+                    // [VR SIT 2026-11-04] the object the pointer is on, for the bar's Sit (WolfVRScreen::aimedObject)
+                    if (gPtr.prim) { LLViewerObject* root = obj->getRootEdit(); gPtr.obj = (root ? root : obj)->getID(); gPtr.obj_at = now; }
                 }
                 else
                 {

@@ -190,11 +190,38 @@ function deviceLine() {
 // B, T - the Quest 3's are strongly asymmetric, so the two must differ); where the flat cards stand; the head's height
 // above this headset's floor.
 let lastXrEyes = null;
+// [VR 3D CHECK 2026-11-04] Is there REAL binocular disparity in what this headset gets? The newest stereo picture, drawn
+// small into a canvas (once a summary): for bands from the bottom (near ground) to the top (far / sky), the horizontal
+// shift that best matches the right eye's half to the left eye's (sum of absolute differences), in pixels of the full
+// eye picture. Near things must shift (right eye's copy further left), far ones ~0. Also which XR view each half goes to.
+function disparityProbe() {
+    try {
+        const img = shown && shown.img, h = shown && shown.hdr;
+        if (!img || !h || !h.stereo) return 'disparity: no stereo picture';
+        const W = 320, H = 160, c = document.createElement('canvas'); c.width = W; c.height = H;
+        const x = c.getContext('2d'); x.drawImage(img, 0, 0, W, H);
+        const d = x.getImageData(0, 0, W, H).data, half = W / 2;
+        const g = (px, py) => { const i = (py * W + px) * 4; return d[i] * 0.3 + d[i + 1] * 0.59 + d[i + 2] * 0.11; };
+        const band = (y0, y1) => {
+            let best = 0, bestSad = Infinity;
+            for (let sft = -4; sft <= 24; sft++) {
+                let sad = 0, n = 0;
+                for (let py = y0; py < y1; py++) for (let px = 30; px < half - 30; px++) { sad += Math.abs(g(px, py) - g(half + px - sft, py)); n++; }
+                sad /= n;
+                if (sad < bestSad) { bestSad = sad; best = sft; }
+            }
+            return best * (config && config.h ? config.h / half : 1);
+        };
+        const eyePx = config && config.h ? config.h : 0;
+        return `disparity (eye ${eyePx} px): near ${fmt(band(H - 22, H - 6), 0)} px, middle ${fmt(band(H / 2, H / 2 + 16), 0)} px, far ${fmt(band(10, 26), 0)} px; ` +
+               `views ${lastViews ? Array.from(lastViews, (v) => v.eye).join('/') : '?'} -> halves on layers ${eyeLayer.join('/')}, left eye at x ${h.eyes ? fmt(h.eyes[0] * 1000, 1) : '?'} mm`;
+    } catch (e) { return 'disparity: ' + e.message; }
+}
 function depthLine() {
     const h = screen.userData.hdr;
     const sep = (e) => (e ? Math.hypot(e[3] - e[0], e[4] - e[1], e[5] - e[2]) * 1000 : NaN);
     const tan = eyeTan ? `L ${eyeTan.slice(0, 4).join(',')} R ${eyeTan.slice(4, 8).join(',')}` : '-';
-    return `3D: depth ${depthEyes.active ? 'on' : 'off'} (grid ${depthEyes.gw}x${depthEyes.gh}, ${depthEyes.frames} pictures), ` +
+    return `${disparityProbe()}; 3D: depth ${depthEyes.active ? 'on' : 'off'} (grid ${depthEyes.gw}x${depthEyes.gh}, ${depthEyes.frames} pictures), ` +
         `eyes drawn ${fmt(sep(h && h.eyes), 1)} mm apart, headset ${fmt(sep(lastXrEyes), 1)} mm, picture ${h ? (h.stereo ? 'stereo' : h.centre ? 'centre view' : 'mono') : '-'}, ` +
         `cards at ${depthEyes.active ? SHELL_DISTANCE : PICTURE_DISTANCE} m, head ${fmt(_pos.y, 2)} m above the floor, eye windows ${tan}`;
 }
@@ -725,7 +752,10 @@ const QUALITY_STEPS = 5;
 const HEADSETS = {
     // [VR QUALITY 2026-11-04] Paul's Quest 3 climbed to 1920 px eyes (step 0) and got 11-18 pictures a second, the
     // encoder 19-28 ms a picture at that size: it starts at 1440 now and never goes past 1728 by itself
-    quest3:   { label: 'Meta Quest 3 / 3S', level: 2, top: 1, hz: 0, ctl: 'touch' },
+    // [VR SHARPNESS 2026-11-04] Paul: "the resolution was pretty low" - 1152 px, stepped down in the first seconds by the
+    // pictures-a-second rule below (gone: the PC's drawing, not the picture size, sets that rate - measured, eye size
+    // changes it little). Starts at 1728 px now; steps down only when the headset's decoder or the network fall behind.
+    quest3:   { label: 'Meta Quest 3 / 3S', level: 1, top: 1, hz: 0, ctl: 'touch' },
     quest2:   { label: 'Meta Quest 2', level: 3, top: 3, hz: 72, ctl: 'touch' },
     questpro: { label: 'Meta Quest Pro', level: 2, top: 2, hz: 72, ctl: 'touch' },
     pico4:    { label: 'Pico 4 / Pico 4 Ultra', level: 2, top: 2, hz: 72, ctl: 'pico' },
@@ -783,10 +813,7 @@ function adaptQuality(now) {
     // down to 1152 px eyes 12 s in and nobody could tell why)
     const why = (got > 20 && num.decodedFps < got * 0.85) ? `decoded ${fmt(num.decodedFps, 0)} of ${fmt(got, 0)}/s`
               : num.v2p.avg() > 250 ? `pictures ${fmt(num.v2p.avg(), 0)} ms old`
-              : (decoder && decoder.decodeQueueSize > 3) ? `decoder queue ${decoder.decodeQueueSize}`
-              // [VR QUALITY 2026-11-04] too few pictures: a smaller picture is quicker to encode, send and decode (it
-              // does not make the PC draw faster, so not below 1152 px for this reason)
-              : (got > 0 && got < 24 && quality.level < 3) ? `only ${fmt(got, 0)} pictures a second` : '';
+              : (decoder && decoder.decodeQueueSize > 3) ? `decoder queue ${decoder.decodeQueueSize}` : '';
     if (why) {
         quality.goodSince = now;
         quality.lastWhy = why;
@@ -801,7 +828,7 @@ function adaptQuality(now) {
     }
     quality.bad = 0;
     const top = quality.top;
-    if (quality.level > top && now - quality.goodSince > 20000 && got >= 40) {   // sharper only with frames to spare
+    if (quality.level > top && now - quality.goodSince > 20000) {
         quality.goodSince = now;
         quality.coolUntil = now + 8000;
         setQuality(quality.level - 1, 'The picture is sharper again.');
@@ -1866,7 +1893,7 @@ window.__wolfvr = { resetStages: () => { for (const k of STAGES) stages[k].v.len
     sendText: (t) => send({ t: 'in', e: 'text', s: String(t).slice(0, 64) }),
     sendKey: (k, m = 0) => tapKey(k, m),
     // [VR CONTROLS / HUD LAYER] test hooks (scripts/wolfvr/e2e_controls.mjs)
-    bar: () => ({ open: bar.open, ids: bar.slots.map((x) => x.action.id), on: [...bar.state.on], off: [...bar.state.off],
+    bar: () => ({ open: bar.open, ids: bar.slots.map((x) => x.action.id), on: [...bar.state.on], off: [...bar.state.off], huds: bar.state.huds ? [...bar.state.huds] : [], page: bar.page || "main",
                   sit: bar.state.sit, hide: bar.state.hide, region: bar.state.region, fav: bar.state.fav.length, hover: bar.hover }),
     layer: () => ({ want: layer.want, on: layer.on, frames: layer.frames, cfg: layer.cfg, visible: layer.mesh.visible }),
     // [VR PANELS] the window panels: name, window rectangle, where it stands (yaw degrees, height), shown

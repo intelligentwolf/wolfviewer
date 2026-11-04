@@ -243,10 +243,11 @@ for (let turn = 0; turn < 8 && !cands.some((c) => c.c === 'sit'); turn++) {
 cands.sort((a, b) => (b.c === 'sit') - (a.c === 'sit') || a.d - b.d);
 console.log('   objects under the ray:', cands.length, JSON.stringify(cands.slice(0, 3)));
 check(cands.some((c) => c.reticle), 'the ray finds objects in the world and the dot is drawn on them (' + (cands[0] && cands[0].d) + ' m)');
-let menuSeen = false, uiSeen = false, sat = false, tries = 0;
+let menuSeen = false, uiSeen = false, sat = false, tries = 0, satOn = null;
 for (const found of cands) {
     if (sat || tries >= 8) break;
     tries++;
+    satOn = found;
     await evalJs(`window.__fakeCtl.aim('right', ${found.yaw}, ${found.pitch})`); await sleep(400);
     if (found.c === 'sit') {
         // a sit-on-click object: the trigger is the left click, and the viewer sits on it as the desktop would
@@ -289,6 +290,17 @@ if (sat) {
     await barOpen(true);
     await aimAt(await evalJs('window.__wolfvr.slotPoint("sit")')); await sleep(300); await click('right', 0);
     check(await waitFor(() => evalJs('window.__wolfvr.bar().sit === 0'), 8000), 'Stand from the bar');
+    await barOpen(false);
+    // [VR SIT 2026-11-04] Paul: "i couldnt sit on a plane because touching it bought up a menu". Point at the object
+    // (no click: no touch), then the bar's Sit: the avatar sits ON it
+    await sleep(1500);
+    await evalJs(`window.__fakeCtl.aim('right', ${satOn.yaw}, ${satOn.pitch})`); await sleep(800);
+    await barOpen(true);
+    await aimAt(await evalJs('window.__wolfvr.slotPoint("sit")')); await sleep(300); await click('right', 0);
+    check(await waitFor(() => evalJs('window.__wolfvr.bar().sit === 2'), 8000), 'pointing at the object, then the bar\'s Sit, sits the avatar ON it (no touch)');
+    await barOpen(true);
+    await aimAt(await evalJs('window.__wolfvr.slotPoint("sit")')); await sleep(300); await click('right', 0);
+    await waitFor(() => evalJs('window.__wolfvr.bar().sit === 0'), 8000);
     await barOpen(false);
 }
 

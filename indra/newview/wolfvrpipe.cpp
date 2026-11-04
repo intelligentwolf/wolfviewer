@@ -314,19 +314,25 @@ namespace
         return true;
     }
 
+    // [W94 CI 2026-11-04] Walked with plain indices, not string_view::find on a substr(0, npos): g++ 11 (the Linux CI)
+    // turned that find into a memchr of bound SIZE_MAX after constant propagation and failed the build on
+    // -Werror=stringop-overread (a false positive; newer gcc and clang accept it). Same parsing: "?k=v&k2=v2",
+    // the first matching key's value, "" when absent.
     std::string queryParam(std::string_view target, std::string_view key)
     {
-        const size_t q = target.find('?');
-        if (q == std::string_view::npos) return std::string();
-        std::string_view rest = target.substr(q + 1);
-        while (!rest.empty())
+        size_t i = 0;
+        const size_t n = target.size();
+        while (i < n && target[i] != '?') ++i;
+        if (i >= n) return std::string();
+        ++i;
+        while (i < n)
         {
-            const size_t amp = rest.find('&');
-            std::string_view kv = rest.substr(0, amp);
-            const size_t eq = kv.find('=');
-            if (eq != std::string_view::npos && kv.substr(0, eq) == key) return std::string(kv.substr(eq + 1));
-            if (amp == std::string_view::npos) break;
-            rest = rest.substr(amp + 1);
+            size_t end = i;
+            while (end < n && target[end] != '&') ++end;   // this pair is [i, end)
+            size_t eq = i;
+            while (eq < end && target[eq] != '=') ++eq;
+            if (eq < end && target.substr(i, eq - i) == key) return std::string(target.substr(eq + 1, end - eq - 1));
+            i = end + 1;
         }
         return std::string();
     }

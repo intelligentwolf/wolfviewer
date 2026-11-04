@@ -606,7 +606,15 @@ void captureLayer()
                 const uint8_t* src = p + (size_t)(gLayer.h - 1 - y) * row;
                 std::memcpy(&gLayer.buf[(size_t)y * row], src, row);
                 uint8_t* a = &gLayer.alpha[(size_t)y * gLayer.w];
-                for (U32 x = 0; x < gLayer.w; ++x) a[x] = src[4 * x + 3];
+                uint8_t* d = &gLayer.buf[(size_t)y * row];
+                for (U32 x = 0; x < gLayer.w; ++x)
+                {
+                    // [VR HUD ALPHA] a pixel with colour but no alpha is a HUD attachment's (drawn with alpha writes off
+                    // by the pipeline): opaque, as it is on the desktop
+                    uint8_t al = src[4 * x + 3];
+                    if (!al && (src[4 * x] | src[4 * x + 1] | src[4 * x + 2]) > 3) { al = 255; d[4 * x + 3] = 255; }
+                    a[x] = al;
+                }
             }
             glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
             gLayer.aw = gLayer.w;
@@ -676,6 +684,13 @@ void captureLayer()
     glClearColor(0.f, 0.f, 0.f, 0.f);
     gLayer.rt.clear();
     render_hud_attachments();
+    // [VR HUD ALPHA 2026-11-04] Paul's Quest 3 device report: the layer's colour arrived but its coverage was 0 everywhere,
+    // so nothing of it was drawn. render_hud_attachments ends in LLPipeline::renderGeomPostDeferred, which turns alpha
+    // writes OFF (gGL.setColorMask(true, false), pipeline.cpp) - but only when HUD attachments are worn (Paul wears one;
+    // the test avatar none, so the emulator never saw it), and the 2D UI after it was then drawn with no alpha at all.
+    // Alpha writes back on for the UI; the HUD attachments' own pixels (drawn with alpha off) get their coverage from
+    // their colour when the picture is collected (captureLayer, above).
+    gGL.setColorMask(true, true);
     {
         LLGLSDefault gls_default;
         LLGLSUIDefault gls_ui;

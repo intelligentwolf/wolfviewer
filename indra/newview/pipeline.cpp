@@ -11336,6 +11336,25 @@ public:
     }
 };
 
+// [VR SHARED CULL 2026-11-04/] The second eye of a VR stereo frame (llviewerdisplay.cpp, WolfVRScreen::shareCull) keeps the
+// first eye's shadow maps - the same sun, the same scene, eyes 6.4 cm apart - and only remakes the matrices that take a
+// point from the CAMERA's eye space into each shadow map, for this eye's own view: exactly the expression
+// generateSunShadow uses (mSunShadowMatrix[j] = trans * proj[j] * view[j] * inverse(camera view)), with the shadow
+// cameras' own view and projection it kept (mShadowModelview / mShadowProjection).
+void LLPipeline::wolfVRReuseSunShadow()
+{
+    //translate and scale to from [-1, 1] to [0, 1] (generateSunShadow)
+    const glm::mat4 trans(0.5f, 0.0f, 0.0f, 0.0f,
+                          0.0f, 0.5f, 0.0f, 0.0f,
+                          0.0f, 0.0f, 0.5f, 0.0f,
+                          0.5f, 0.5f, 0.5f, 1.0f);
+    const glm::mat4 inv_view = glm::inverse(get_current_modelview());
+    for (int j = 0; j < 6; ++j)
+    {
+        mSunShadowMatrix[j] = trans * mShadowProjection[j] * mShadowModelview[j] * inv_view;
+    }
+}
+
 void LLPipeline::generateSunShadow(LLCamera& camera)
 {
     if (!sRenderDeferred || RenderShadowDetail <= 0)

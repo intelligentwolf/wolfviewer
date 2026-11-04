@@ -1018,6 +1018,16 @@ void setPickCamera()
 // the stream). gPaused is decided once per frame in displayFrame.
 bool uiSkipped() { return gEye == 0 || gPaused; }
 bool secondEye() { return gEye == 1; }
+// [VR SHARED CULL 2026-11-04] The eyes are 6.4 cm apart and the left eye is culled with the smallest SYMMETRIC frustum
+// that holds its window (applyHeadCamera), which on a headset whose eyes mirror each other also holds the right eye's
+// window: what the left eye's cull and state sort found is what the right eye sees, less a 6.4 cm sliver at the far
+// edge. So the right eye's pass draws those lists again from its own position instead of culling and sorting the whole
+// region a second time (the main thread's work per eye, measured by e2e_stages.mjs). WolfVRShareCull off: as before.
+bool shareCull()
+{
+    static LLCachedControl<bool> share(gSavedSettings, "WolfVRShareCull", true);
+    return gEye == 1 && share;
+}
 
 // [VR STEREO 2026-11-04] The frame, mono or one pass per eye. The left eye is a whole display() whose picture goes only
 // to the headset (swap() does not show it: gDisplaySwapBuffers false, the way a tiled snapshot renders, and render_ui
@@ -1064,19 +1074,16 @@ void displayFrame()
     }
     // [VR RENDER SIZE] the world's area for this frame: the eye's own square while in VR 3D Mode
     static LLCachedControl<bool> eye_size(gSavedSettings, "WolfVREyeRenderSize", true);
-    if (world && eye_size && h >= 256)
+    const LLRect real = gViewerWindow->getWorldViewRectRaw();
+    const S32 side = llmin((S32)h, real.getHeight(), real.getWidth()) / 8 * 8;
+    if (world && eye_size && side >= 256)
     {
-        const LLRect real = gViewerWindow->getWorldViewRectRaw();
-        const S32 side = llmin((S32)h, real.getHeight(), real.getWidth()) / 8 * 8;
-        if (side >= 256)
-        {
-            const LLRect over(real.mLeft, real.mBottom + side, real.mLeft + side, real.mBottom);
-            if (!gEyeRect.active || over != gEyeRect.over) gResizeScreenTexture = true;   // the targets follow, once
-            gEyeRect.active = true;
-            gEyeRect.real = real;
-            gEyeRect.over = over;
-            useEyeRect(true);
-        }
+        const LLRect over(real.mLeft, real.mBottom + side, real.mLeft + side, real.mBottom);
+        if (!gEyeRect.active || over != gEyeRect.over) gResizeScreenTexture = true;   // the targets follow, once
+        gEyeRect.active = true;
+        gEyeRect.real = real;
+        gEyeRect.over = over;
+        useEyeRect(true);
     }
     else if (gEyeRect.active)
     {

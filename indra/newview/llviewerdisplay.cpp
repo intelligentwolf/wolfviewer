@@ -1004,8 +1004,11 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
 
         LLAppViewer::instance()->pingMainloopTimeout("Display:Cull");
 
+        // [VR SHARED CULL 2026-11-04/] the right eye draws what the left eye's cull and sort found (WolfVRScreen::shareCull)
+        const bool vr_shared_cull = WolfVRScreen::shareCull();
+
         //Increment drawable frame counter
-        LLDrawable::incrementVisible();
+        if (!vr_shared_cull) LLDrawable::incrementVisible();
 
         LLSpatialGroup::sNoDelete = true;
         LLTexUnit::sWhiteTexture = LLViewerFetchedTexture::sWhiteImagep->getTexName();
@@ -1022,7 +1025,7 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
         static LLCullResult result;
         LLViewerCamera::sCurCameraID = LLViewerCamera::CAMERA_WORLD;
         LLPipeline::sUnderWaterRender = LLViewerCamera::getInstance()->cameraUnderWater();
-        gPipeline.updateCull(*LLViewerCamera::getInstance(), result);
+        if (!vr_shared_cull) gPipeline.updateCull(*LLViewerCamera::getInstance(), result);
         stop_glerror();
 
         LLGLState::checkStates();
@@ -1047,7 +1050,10 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
                 if (gFrameCount > 1 && !for_snapshot)
                 { //for some reason, ATI 4800 series will error out if you
                   //try to generate a shadow before the first frame is through
-                    gPipeline.generateSunShadow(*LLViewerCamera::getInstance());
+                    // [VR SHARED CULL 2026-11-04/] the right eye: the left eye's shadow maps, matrices made for this eye
+                    // (a shadow pass would re-sort the draw pools for its own camera, and the shared sort is the left eye's)
+                    if (vr_shared_cull) gPipeline.wolfVRReuseSunShadow();
+                    else gPipeline.generateSunShadow(*LLViewerCamera::getInstance());
                 }
 
                 LLVertexBuffer::unbind();
@@ -1124,10 +1130,11 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
         {
             LL_PROFILE_ZONE_NAMED_CATEGORY_DISPLAY("display - 4")
             LLViewerCamera::sCurCameraID = LLViewerCamera::CAMERA_WORLD;
-            gPipeline.stateSort(camera, result); // <FS:Ansariel> Factor out calls to getInstance
+            if (!vr_shared_cull) gPipeline.stateSort(camera, result); // <FS:Ansariel> Factor out calls to getInstance
+            else gPipeline.grabReferences(result);   // [VR SHARED CULL 2026-11-04/] the eye's own shadow passes moved sCull to theirs
             stop_glerror();
 
-            if (rebuild)
+            if (rebuild && !vr_shared_cull)
             {
                 //////////////////////////////////////
                 //

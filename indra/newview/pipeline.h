@@ -303,6 +303,8 @@ public:
     void renderRiggedGroups(LLRenderPass* pass, U32 type, bool texture);
 
     void grabReferences(LLCullResult& result);
+    // [VR SHARED CULL 2026-11-04/] WolfVRScreen: the second eye of a stereo frame uses the first eye's shadow maps
+    void wolfVRReuseSunShadow();
     void clearReferences();
 
     //check references will assert that there are no references in sCullResult to the provided data

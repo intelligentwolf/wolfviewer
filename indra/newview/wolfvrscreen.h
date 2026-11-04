@@ -45,6 +45,8 @@ namespace WolfVRScreen
     /** [VR FPS 2026-11-04] True while drawing the right eye of a stereo frame: what is the same for both eyes (geometry
      *  and texture updates, mirrors, impostors) has been done in the left eye's pass and is skipped. */
     bool secondEye();
+    /** [VR SHARED CULL 2026-11-04] The right eye's pass reuses the left eye's cull and state sort (WolfVRShareCull). */
+    bool shareCull();
     /** [VR HUD LAYER 2026-11-04] End of render_ui: the UI layer, drawn again into its own transparent target, to the
      *  headset (VR 3D Mode, while the page shows it). */
     void captureLayer();

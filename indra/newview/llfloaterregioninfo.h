@@ -73,6 +73,7 @@ class LLPanelEstateAccess;
 class LLPanelRegionEnvironment;
 class WolfPanelLandWaves;
 class WolfPanelRegionWolfEnvironments;
+class WolfPanelTerrainLayers;
 
 class LLEventTimer;
 
@@ -310,6 +311,12 @@ public:
     bool callbackTextureHeights(const LLSD& notification, const LLSD& response);
     void callbackMaterialCommit(S32 index);
 
+    // [WOLF TERRAIN SCREEN 2026-11-04] On Wolf Territories the Wolf terrain screen (WolfPanelTerrainLayers) stands in for the
+    // four textures and corner heights; the rest of the tab is unchanged.
+    void draw() override;
+    /** Region / Estate closed (LLFloaterRegionInfo::onClose). */
+    void onRegionInfoClosed(bool app_quitting);
+
 protected:
     bool sendUpdate() override;
 
@@ -330,6 +337,16 @@ private:
     LLSpinCtrl* mMaterialRotationCtrl[LLTerrainMaterials::ASSET_COUNT];
     LLSpinCtrl* mMaterialOffsetUCtrl[LLTerrainMaterials::ASSET_COUNT];
     LLSpinCtrl* mMaterialOffsetVCtrl[LLTerrainMaterials::ASSET_COUNT];
+
+    // [WOLF TERRAIN SCREEN 2026-11-04]
+    void applyWolfMode(bool wolf);
+    void layoutWolfScreen();
+    bool wolfScreenShown() const;                    // Wolf Territories and the terrain type is textures
+    void hideStandardTextureControls();
+    WolfPanelTerrainLayers* mWolfPanel = nullptr;   // panel_region_terrain.xml only (not the PBR transform variant)
+    bool mWolfMode = false;                          // on Wolf Territories
+    bool mWolfScreenShown = false;                   // what layoutWolfScreen last laid out
+    LLRect mStandardRect[5];                         // download/upload RAW, bake, apply, PBR switch: rects from the panel top
 };
 
 /////////////////////////////////////////////////////////////////////////////

@@ -45,6 +45,7 @@
 #include "wolfspanscreens.h"  // <WolfViewer 2026-10-10/> Wolf World > Spread Across All Screens
 #include "wolfborder.h"   // [BORDER GUARD 2026-10-16/] Wolf World > Teleport Across the Border Ahead
 #include "wolfradiostations.h"   // [WOLF STATIONS 2026-10-25/] Wolf World > Music & Radio > Add Your Radio Station...
+#include "wolfterrainlayers.h"   // [WOLF TERRAIN SCREEN 2026-11-04/] Wolf World > Wolf Terrain Textures... opens Region / Estate > Terrain
 #include "wolfmiddaysky.h"   // [WolfViewer 2026-10-30/] World > Environment > Midday: the Midday sky with fill light
 #include "wolfvrstream.h"   // [VR MENU 2026-11-04/] WolfVRStream::headsetActive: the VR menu ticks show what is happening now
 // </WolfViewer>
@@ -13055,6 +13056,7 @@ void initialize_menus()
     // [WOLF STATIONS 2026-10-25] Wolf World > Music & Radio > Add Your Radio Station...: the residents' station page on
     // wolf-grid.com in the web browser, as the Radio Stations floater's "Add your station..." (wolfradiostations.h).
     commit.add("WolfRadio.AddStation", [](LLUICtrl*, const LLSD&) { WolfRadioStations::openAddStationPage(); });
+    commit.add("WolfTerrain.OpenTerrainScreen", [](LLUICtrl*, const LLSD&) { WolfPanelTerrainLayers::openTerrainScreen(); });   // [WOLF TERRAIN SCREEN 2026-11-04/]
     commit.add("WolfAdventure.ShowAdventures", [](LLUICtrl*, const LLSD&) { WolfFloaterRoleplay::showAdventures(); });
     // [BORDER GUARD 2026-10-16] Wolf World > Teleport Across the Border Ahead: the border banner's button (wolfborder.cpp)
     commit.add("WolfBorder.TeleportAcross", [](LLUICtrl*, const LLSD&) { WolfBorder::instance().teleportAcross(); });

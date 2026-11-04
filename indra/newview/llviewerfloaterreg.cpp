@@ -122,7 +122,7 @@
 #include "wolffloaterdjshows.h"       // [WOLF DJ 2026-10-16/] My Shows
 #include "wolffloaterweatherreport.h"   // [JIMMY V9C 2026-10-10/]
 #include "wolfcave.h"                   // [WOLF CAVE 2026-10-12/] the Cave Builder
-#include "wolfterrainlayers.h"          // [WOLF TERRAIN TEXTURES 2026-10-16/]
+// [WOLF TERRAIN SCREEN 2026-11-04/] wolfterrainlayers.h: no floater to register now
 #include "wolffloatergraphicshelper.h"   // [GRAPHICS HELPER 2026-10-11/]
 #include "wolffloaterbuilder.h"   // [WOLF BUILDER 2026-10-13/]
 #include "wolffloaterimportworlds.h"   // [IMPORT WORLDS 2026-10-18/]
@@ -752,7 +752,7 @@ void LLViewerFloaterReg::registerFloaters()
     // the work, so the generic host is enough (the pattern at :581).
     LLFloaterReg::add("wolf_terrain_paint", "floater_wolf_terrain_paint.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<LLFloater>);
     LLFloaterReg::add("wolf_caves", "floater_wolf_caves.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterCaves>);   // [WOLF CAVE 2026-10-12/] Paint > Caves...
-    LLFloaterReg::add("wolf_terrain_textures", "floater_wolf_terrain_textures.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterTerrainLayers>);   // [WOLF TERRAIN TEXTURES 2026-10-16/] Region / Estate > Terrain
+    // [WOLF TERRAIN SCREEN 2026-11-04/] "wolf_terrain_textures" (2026-10-16) is now inside Region / Estate > Terrain (WolfPanelTerrainLayers)
     LLFloaterReg::add("wolf_ai", "floater_wolf_ai.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<LLFloater>);
     // [AUTOCOMPLETE 2026-09-11] The LSL completion popup, driven by WolfLSLComplete.
     LLFloaterReg::add("wolf_lsl_complete", "floater_wolf_lsl_complete.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterLSLComplete>);

@@ -129,6 +129,7 @@ public:
 
     /*virtual*/ void *getPlatformWindow();
     /*virtual*/ void bringToFront();
+    void requestKeyboardFocus() override;   // [VR KEYBOARD 2026-11-05]
 
     /*virtual*/ void allowLanguageTextInput(LLPreeditor* preeditor, bool b);
     /*virtual*/ void setLanguageTextInput(const LLCoordGL& pos);

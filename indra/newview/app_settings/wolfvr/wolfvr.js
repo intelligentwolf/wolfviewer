@@ -475,6 +475,7 @@ function onText(text) {
         // [VR KEYBOARD] the viewer's language (the layout when the headset's own says nothing we know), and the
         // keyboard by itself while the viewer's typing goes to a text field
         if (typeof m.lang === 'string') keyboard.setViewerLanguage(m.lang);
+        if (typeof m.pckeys === 'boolean') pcKeysAway = !m.pckeys;   // [VR KEYBOARD 2026-11-05]
         if (typeof m.typing === 'boolean') {
             // only after the resident pointed and clicked (into the text field): not every window that gives itself
             // focus when it opens (the world map's search box would bring the keyboard up over everything)
@@ -1129,6 +1130,39 @@ vignette.renderOrder = 9997;
 vignette.frustumCulled = false;
 vignette.visible = false;
 camera.add(vignette);   // numbers panel: off until asked for (left menu held 1 s)
+
+// [VR KEYBOARD 2026-11-05] Paul: "i had not selected the viewer and so when i'm using the keyboard its working with another
+// application". While the viewer says its window does not have the PC's keyboard ("ui" pckeys false, wolfvrui.cpp), a
+// plain notice in large letters stays in view, a little above the middle, in both modes; it goes the moment the window
+// has the keyboard again. Nothing to press (it is information, and the fix is on the PC). White on near-black: well over
+// the 4.5:1 contrast asked of text.
+const PCKEYS_TEXT = ['Your PC keyboard is going to another window.', 'Click the WolfViewer window on your PC to use the arrow keys.'];
+const pcKeysCanvas = document.createElement('canvas');
+pcKeysCanvas.width = 1024; pcKeysCanvas.height = 256;
+const pcKeysTex = new THREE.CanvasTexture(pcKeysCanvas);
+pcKeysTex.colorSpace = THREE.SRGBColorSpace;
+pcKeysTex.generateMipmaps = false;
+pcKeysTex.minFilter = THREE.LinearFilter;
+const pcKeysMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.64, 0.16),
+    new THREE.MeshBasicMaterial({ map: pcKeysTex, transparent: true, depthTest: false }));
+pcKeysMesh.name = 'WolfVRPCKeys';
+pcKeysMesh.renderOrder = 9999;
+pcKeysMesh.frustumCulled = false;
+pcKeysMesh.position.set(0, 0.17, -0.9);
+pcKeysMesh.visible = false;
+camera.add(pcKeysMesh);
+let pcKeysAway = false;   // the viewer's window does not have the PC keyboard
+(function drawPcKeys() {
+    const g = pcKeysCanvas.getContext('2d'), W = pcKeysCanvas.width, H = pcKeysCanvas.height, r = 36;
+    g.clearRect(0, 0, W, H);
+    g.fillStyle = 'rgba(17, 17, 17, 0.92)';
+    g.beginPath(); g.roundRect(4, 4, W - 8, H - 8, r); g.fill();
+    g.strokeStyle = '#facc15'; g.lineWidth = 6; g.stroke();
+    g.fillStyle = '#ffffff'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.font = 'bold 50px sans-serif'; g.fillText(PCKEYS_TEXT[0], W / 2, H * 0.34, W - 60);
+    g.font = '42px sans-serif'; g.fillText(PCKEYS_TEXT[1], W / 2, H * 0.68, W - 60);
+    pcKeysTex.needsUpdate = true;
+})();
 
 function fmt(x, d = 1) { return Number.isFinite(x) ? x.toFixed(d) : '–'; }
 function numberRows() {
@@ -1903,6 +1937,7 @@ function animate(time, frame) {
     bar.update(now);
     keyboard.update(now);
     if (renderer.xr.isPresenting) statsMesh.visible = statsOn || now < sizeFlashUntil;
+    pcKeysMesh.visible = renderer.xr.isPresenting && pcKeysAway;   // [VR KEYBOARD 2026-11-05]
     if (config && config.debug) drawStatsPanel(now);
 }
 
@@ -2076,6 +2111,8 @@ window.__wolfvr = { resetStages: () => { for (const k of STAGES) stages[k].v.len
                         +depthEyes.data[Math.min(depthEyes.gh - 1, Math.floor(v * depthEyes.gh)) * depthEyes.gw * depthEyes.halves + Math.floor(u * depthEyes.gw)].toFixed(3)) : null }),
     surfaces: () => ({ big: bigMesh.visible, eyes: eyeScreens.map((m) => m.visible), mono: screen.visible, layer: layer.mesh.visible,
                        bar: bar.mesh.visible, tab: bar.tab.visible, reticle: reticle.group.visible, check: checkCard.visible }),
+    // [VR KEYBOARD 2026-11-05] the "PC keyboard is going to another window" notice: what the viewer said, and shown or not
+    pcKeys: () => ({ away: pcKeysAway, shown: pcKeysMesh.visible, text: PCKEYS_TEXT.join(' ') }),
     tabPoint: () => surfacePoint(1.0, bar.tabArc, -0.52, bar.tabH, 0.5, 0.5),
     grabLayer: () => {
         if (!layer.shown || !layer.cfg) return null;

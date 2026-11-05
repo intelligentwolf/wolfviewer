@@ -4361,6 +4361,16 @@ void LLWindowWin32::bringToFront()
 }
 
 // set (OS) window focus back to the client
+// [VR KEYBOARD 2026-11-05] (llwindow.h). SetForegroundWindow: Windows grants it only under its foreground rules and
+// otherwise flashes the taskbar button instead (Microsoft's SetForegroundWindow documentation) - never forced here.
+void LLWindowWin32::requestKeyboardFocus()
+{
+    mWindowThread->post([=]()
+        {
+            SetForegroundWindow(mWindowHandle);
+        });
+}
+
 void LLWindowWin32::focusClient()
 {
     mWindowThread->post([=]()

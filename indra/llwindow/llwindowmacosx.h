@@ -110,6 +110,7 @@ public:
 
     void *getPlatformWindow() override;
     void bringToFront() override {};
+    void requestKeyboardFocus() override;   // [VR KEYBOARD 2026-11-05]
 
     void allowLanguageTextInput(LLPreeditor *preeditor, bool b) override;
     void interruptLanguageTextInput() override;

@@ -1830,6 +1830,56 @@ void pointerButton(const wolfvr::InputEvent& e)
 }
 }
 
+// [VR KEYBOARD 2026-11-05] Paul: "the user can still use the keyboard while in vr, i find using cursors way easier than
+// using the controllers" - the PC keyboard did not move him in VR, which the test rig could not reproduce with real key
+// presses (scripts/wolfvr/e2e_keyboard.mjs). While a headset is in VR, one line every 30 s says what the PC keyboard
+// did: how many presses of the moving keys the viewer received (LLKeyboard's key levels, which SDL's key events set:
+// llwindowsdl2.cpp gatherInput -> LLKeyboardSDL::handleKeyDown), in how many frames one was held, in how many frames
+// the window did not have the desktop's keyboard (LLFocusMgr::getAppHasFocus, cleared by
+// LLViewerWindow::handleFocusLost), and what in the viewer has the keyboard now (it gets the keys before the avatar:
+// LLViewerWindow::handleKey). So a session where the keys do nothing shows whether they reached the viewer at all.
+void pcKeyboardSummary()
+{
+    // the walking, turning and flying keys (key_bindings.xml third_person: arrows, Page Up / Down, W A S D, E C)
+    static const KEY kMoveKeys[] = { KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_PAGE_UP, KEY_PAGE_DOWN,
+                                     'W', 'A', 'S', 'D', 'E', 'C' };
+    constexpr size_t kN = sizeof(kMoveKeys) / sizeof(kMoveKeys[0]);
+    static bool s_prev[kN] = {};
+    static U32 s_presses = 0, s_held = 0, s_frames = 0, s_away = 0;
+    static F64 s_since = 0.0;
+    if (!gKeyboard || !WolfVRStream::headsetInVR())
+    {
+        s_since = 0.0;   // counted afresh the next time a headset is in VR
+        return;
+    }
+    const F64 now = LLTimer::getTotalSeconds();
+    if (s_since == 0.0)
+    {
+        s_since = now;
+        s_presses = s_held = s_frames = s_away = 0;
+        for (bool& p : s_prev) p = false;
+    }
+    ++s_frames;
+    if (!gFocusMgr.getAppHasFocus()) ++s_away;
+    bool any = false;
+    for (size_t i = 0; i < kN; ++i)
+    {
+        const bool down = gKeyboard->getKeyDown(kMoveKeys[i]);
+        if (down && !s_prev[i]) ++s_presses;
+        s_prev[i] = down;
+        any = any || down;
+    }
+    if (any) ++s_held;
+    if (now - s_since < 30.0) return;
+    const LLView* v = dynamic_cast<const LLView*>(gFocusMgr.getKeyboardFocus());
+    LL_INFOS("WolfVR") << "PC keyboard in VR, last " << ll_round((F32)(now - s_since)) << " s: " << s_presses
+                       << " presses of the moving keys, held in " << s_held << " of " << s_frames << " frames; the window "
+                       << "had no keyboard in " << s_away << " frames; keyboard focus "
+                       << (v ? v->getPathname() : std::string(gFocusMgr.getKeyboardFocus() ? "(not a view)" : "nobody")) << LL_ENDL;
+    s_since = now;
+    s_presses = s_held = s_frames = s_away = 0;
+}
+
 void pumpInput()
 {
     WolfVRStream::pumpModeRequest();
@@ -1846,6 +1896,32 @@ void pumpInput()
         }
     }
     if (!gViewerWindow) return;
+    pcKeyboardSummary();
+    // [VR KEYBOARD 2026-11-05] Paul: "i had not selected the viewer and so when i'm using the keyboard its working with
+    // another application". When a headset goes into VR (3D or Big Screen) and this window does not have the PC's
+    // keyboard (LLFocusMgr::getAppHasFocus, set by the window's focus events: LLViewerWindow::handleFocus /
+    // handleFocusLost), ask the desktop once to give it the keyboard. The desktop decides (llwindow.h
+    // requestKeyboardFocus); the headset says so for as long as the keys go elsewhere (wolfvrui.cpp "pckeys").
+    {
+        static bool s_in_vr = false;
+        const bool in_vr = WolfVRStream::headsetInVR();
+        if (in_vr && !s_in_vr && !gFocusMgr.getAppHasFocus()) gViewerWindow->getWindow()->requestKeyboardFocus();
+        s_in_vr = in_vr;
+    }
+    // [VR KEYBOARD 2026-11-05] debug only (WolfVRDebugStats): what has the PC keyboard, one line each time it changes
+    // (the PC's keys go to the keyboard focus first: LLViewerWindow::handleKey)
+    if (gDebugStats)
+    {
+        static const LLFocusableElement* s_kf = nullptr;
+        LLFocusableElement* kf = gFocusMgr.getKeyboardFocus();
+        if (kf != s_kf)
+        {
+            s_kf = kf;
+            const LLView* v = dynamic_cast<const LLView*>(kf);
+            LL_INFOS("WolfVR") << "keyboard focus now " << (v ? v->getPathname() : std::string(kf ? "(not a view)" : "nobody"))
+                               << LL_ENDL;
+        }
+    }
     if (gCap.fbo) collectCapture();   // [VR READBACK 2026-11-04] last frame's picture, as soon as its copy is done
     const std::vector<wolfvr::InputEvent> events = WolfVRStream::takeInput();
     applyEvents(events);

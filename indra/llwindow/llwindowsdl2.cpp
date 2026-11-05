@@ -1374,7 +1374,16 @@ bool LLWindowSDL::x11FullscreenMonitors(bool on)
         XFlush(dpy);
         return true;
     }
-    void* lib = dlopen("libXinerama.so.1", RTLD_NOW | RTLD_LOCAL);
+    // [T553 2026-11-05] libXinerama is opened once and NEVER closed. Its first call on this Display
+    // hangs libXinerama's own close_display hook on the Display (XEXT_GENERATE_FIND_DISPLAY ->
+    // XextAddDisplay -> XESetCloseDisplay; Source: libXext src/extutil.c:137-139 and :145-156, libXinerama
+    // src/Xinerama.c:47-68), and XCloseDisplay calls every such hook (Source: libX11 src/ClDisplay.c:64-67),
+    // which SDL does from X11_DeleteDevice at shutdown (Source: SDL 2.28.0 src/video/x11/SDL_x11video.c:96-108).
+    // A dlclose() here unmapped that hook while the Display still pointed at it, so quitting after
+    // Span screens jumped into whatever library had since been mapped there (Jimmy's crash: SIGILL in
+    // libpangocairo < X11_DeleteDevice, reproduced on Fedora 45). RTLD_NODELETE keeps it mapped even
+    // if someone else's dlclose drops the last reference.
+    static void* lib = dlopen("libXinerama.so.1", RTLD_NOW | RTLD_LOCAL | RTLD_NODELETE);
     if (!lib)
     {
         LL_INFOS("Window") << "Span screens: no libXinerama, using a plain borderless window" << LL_ENDL;
@@ -1408,7 +1417,6 @@ bool LLWindowSDL::x11FullscreenMonitors(bool on)
     }
     if (screens)
         XFree(screens);
-    dlclose(lib);
     return sent;
 #else
     return false;

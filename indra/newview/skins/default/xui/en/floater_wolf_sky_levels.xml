@@ -21,7 +21,7 @@
  width="440">
     <text follows="left|top|right" height="48" layout="topleft" left="12" name="intro" top="24" width="416" wrap="true">Sky land is ground high above this region that you can walk on. It is made the same way as the ground below: add a level, go up to it, and make ground where you stand.</text>
     <text follows="left|top|right" height="36" layout="topleft" left="12" name="status" top="76" width="416" wrap="true" font.style="BOLD" />
-    <text follows="left|top|right" height="36" layout="topleft" left="12" name="none" top="116" width="416" wrap="true" visible="false">This region does not have sky land. It is only on Wolf Territories regions up to 12 by 12 regions in size.</text>
+    <text follows="left|top|right" height="54" layout="topleft" left="12" name="none" top="116" width="416" wrap="true" visible="false">This region does not have sky land yet. It is being tried on a few regions first and comes to Wolf Territories regions (up to 12 by 12 regions in size) soon.</text>
 
     <panel follows="all" height="428" layout="topleft" left="0" name="main_panel" top="116" width="440" visible="false">
         <text follows="left|top" height="16" layout="topleft" left="12" name="levels_heading" top="0" width="300" font.style="BOLD">Levels in this region</text>

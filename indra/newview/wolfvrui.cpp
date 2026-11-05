@@ -267,6 +267,11 @@ void pump()
     const LLLineEditor* le = dynamic_cast<LLLineEditor*>(kf);
     const LLTextEditor* te = dynamic_cast<LLTextEditor*>(kf);
     o["typing"] = (le && le->acceptsTextInput()) || (te && te->acceptsTextInput());   // not a read-only chat history
+    // [VR KEYBOARD 2026-11-05] Paul: "i had not selected the viewer and so when i'm using the keyboard its working with
+    // another application". Whether this window has the PC's keyboard (its focus events: LLViewerWindow::handleFocus /
+    // handleFocusLost -> LLFocusMgr::setAppHasFocus); the headset says where the keys are going while it does not.
+    // Sent on every change (this pump runs 4 times a second, wolfvrstream.cpp)
+    o["pckeys"] = gFocusMgr.getAppHasFocus();
     o["lang"] = gSavedSettings.getString("Language");   // the keyboard's layout when the headset's own language is not one it has
     // the favourites bar's landmarks, in its order (LLFavoritesOrderStorage), first 6 (vr_hud.js _favorites)
     json::array favs;

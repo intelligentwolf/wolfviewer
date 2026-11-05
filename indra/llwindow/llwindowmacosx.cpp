@@ -1131,6 +1131,17 @@ void LLWindowMacOSX::swapBuffers()
     CGLFlushDrawable(mContext);
 }
 
+// [VR KEYBOARD 2026-11-05] (llwindow.h). makeKeyAndOrderFront (llwindowmacosx-objc.mm makeWindowOrderFront, as the
+// window is shown at start): the window becomes WolfViewer's key window; macOS itself decides whether the app is
+// brought forward from another one.
+void LLWindowMacOSX::requestKeyboardFocus()
+{
+    if (mWindow)
+    {
+        makeWindowOrderFront(mWindow);
+    }
+}
+
 void LLWindowMacOSX::restoreGLContext()
 {
     CGLSetCurrentContext(mContext);

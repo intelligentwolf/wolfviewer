@@ -162,6 +162,9 @@ public:
     virtual void swapBuffers() = 0;
     virtual void bringToFront() = 0;
     virtual void focusClient() { };     // this may not have meaning or be required on other platforms, therefore, it's not abstract
+    // [VR KEYBOARD 2026-11-05] ask the desktop, once, to give this window the keyboard (a headset went into VR and the PC's
+    // keys are going to another window). The desktop decides: it may raise and focus it, or only mark it wanting attention.
+    virtual void requestKeyboardFocus() { }
     // handy coordinate space conversion routines
     // NB: screen to window and vice verse won't work on width/height coordinate pairs,
     // as the conversion must take into account left AND right border widths, etc.

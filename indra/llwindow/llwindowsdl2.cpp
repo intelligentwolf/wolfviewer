@@ -2258,6 +2258,32 @@ static bool wolf_is_repeat_release(const SDL_Event& up)
     SDL_PumpEvents();
     return matches();
 }
+
+// [VR KEYBOARD 2026-11-05] The test above only sees a press that is already in SDL's queue. The pair's press comes
+// back from the input method (fcitx5) a moment after the release, so when SDL's pump reads the release at the end of
+// what is in the socket, the press only arrives with the NEXT pump - one frame later. At a low frame rate (a VR session
+// drawing two eyes a frame) more of those pairs are split, each split pair is a real release + press for LLKeyboard,
+// and a held arrow key stays at nudge speed. So on Wayland a release that has no press queued behind it is held back:
+// it is given to the viewer at the end of a later gatherInput() once it is at least WOLF_PAIR_WINDOW_MS old, and
+// dropped (the pair is a repeat) if a press of the same key arrives first. 20 ms is under the gap between two key
+// repeats at the fastest rate in use here (Hyprland input:repeat_rate 40 a second = 25 ms on this PC), so a real
+// release followed by a real new press is never mistaken for one held key at the desktop's frame rates; the cost is
+// that a real release reaches the viewer at most one frame later.
+namespace
+{
+    struct WolfPendingKeyUp
+    {
+        bool on = false;
+        SDL_Scancode scancode = SDL_SCANCODE_UNKNOWN;
+        U32 key = 0;      // as the release would have been given (mKeyVirtualKey)
+        U32 mask = 0;     // and its modifiers (mKeyModifiers)
+        Uint32 ticks = 0; // SDL_GetTicks() when it was read
+        U64 pump = 0;     // the gatherInput() that read it
+    };
+    WolfPendingKeyUp sWolfPendingKeyUp;
+    U64 sWolfPump = 0;
+    constexpr Uint32 WOLF_PAIR_WINDOW_MS = 20;
+}
 // </WolfViewer>
 
 void LLWindowSDL::gatherInput()
@@ -2272,6 +2298,18 @@ void LLWindowSDL::gatherInput()
 
     // mask to apply to the keyup/keydown modifiers to handle AltGr keys correctly
     static U32 altGrMask = 0x00;
+
+    ++sWolfPump;   // [VR KEYBOARD 2026-11-05] see WolfPendingKeyUp
+    // [VR KEYBOARD 2026-11-05] a key's release, given to the viewer (the stock SDL_KEYUP handling below)
+    auto deliverKeyUp = [this](U32 key, U32 mask)
+    {
+        mKeyVirtualKey = key;
+        mKeyModifiers = mask;
+        mInputType = "keyup";
+        if (SDLCheckGrabbyKeys(key, false) == 0)
+            SDLReallyCaptureInput(false); // part of the fix for SL-13243
+        gKeyboard->handleKeyUp(key, mask);
+    };
 
     // Handle all outstanding SDL events
     while (SDL_PollEvent(&event))
@@ -2344,6 +2382,12 @@ void LLWindowSDL::gatherInput()
             }
 
             case SDL_KEYDOWN:
+                if (sWolfPendingKeyUp.on && event.key.keysym.scancode == sWolfPendingKeyUp.scancode)
+                {
+                    // [VR KEYBOARD 2026-11-05] the press of a release+press pair split across two pumps: a repeat
+                    sWolfPendingKeyUp.on = false;
+                    LL_INFOS_ONCE("Window") << "Wayland: a held key's release+press pair arrived in two frames; treating it as key repeat" << LL_ENDL;
+                }
                 mKeyVirtualKey = event.key.keysym.sym;
                 mKeyModifiers = event.key.keysym.mod & (~altGrMask);
                 mInputType = "keydown";
@@ -2386,26 +2430,35 @@ void LLWindowSDL::gatherInput()
                 break;
 
             case SDL_KEYUP:
+            {
                 if (mWayland && wolf_is_repeat_release(event))
                 {
                     LL_INFOS_ONCE("Window") << "Wayland: a held key arrived as release+press pairs; treating them as key repeat" << LL_ENDL;
                     break; // <WolfViewer> see wolf_is_repeat_release()
                 }
-                mKeyVirtualKey = event.key.keysym.sym;
-                mKeyModifiers = event.key.keysym.mod & (~altGrMask);
-                mInputType = "keyup";
+                U32 up_key = event.key.keysym.sym;
+                const U32 up_mask = event.key.keysym.mod & (~altGrMask);
 
                 // treat all possible Enter/Return keys the same
-                if (mKeyVirtualKey == SDLK_RETURN2 || mKeyVirtualKey == SDLK_KP_ENTER)
+                if (up_key == SDLK_RETURN2 || up_key == SDLK_KP_ENTER)
                 {
-                    mKeyVirtualKey = SDLK_RETURN;
+                    up_key = SDLK_RETURN;
                 }
 
-                if (SDLCheckGrabbyKeys(mKeyVirtualKey, false) == 0)
-                    SDLReallyCaptureInput(false); // part of the fix for SL-13243
-
-                gKeyboard->handleKeyUp(mKeyVirtualKey,mKeyModifiers);
+                if (mWayland)
+                {
+                    // [VR KEYBOARD 2026-11-05] held back until a later pump (WolfPendingKeyUp); a release already
+                    // waiting is a different key's, or this key's own earlier one, and goes now
+                    if (sWolfPendingKeyUp.on)
+                    {
+                        deliverKeyUp(sWolfPendingKeyUp.key, sWolfPendingKeyUp.mask);
+                    }
+                    sWolfPendingKeyUp = { true, event.key.keysym.scancode, up_key, up_mask, SDL_GetTicks(), sWolfPump };
+                    break;
+                }
+                deliverKeyUp(up_key, up_mask);
                 break;
+            }
 
             case SDL_MOUSEBUTTONDOWN:
             {
@@ -2532,6 +2585,7 @@ void LLWindowSDL::gatherInput()
                     // can send us two unfocus events in a row for example,
                     // which confuses the focus code [SL-24071].
                     mHaveInputFocus = false;
+                    sWolfPendingKeyUp.on = false;   // [VR KEYBOARD 2026-11-05] handleFocusLost releases every key
 
                     mCallbacks->handleFocusLost(this);
                 }
@@ -2561,6 +2615,15 @@ void LLWindowSDL::gatherInput()
                 //LL_INFOS() << "Unhandled SDL event type " << event.type << LL_ENDL;
                 break;
         }
+    }
+
+    // [VR KEYBOARD 2026-11-05] a held-back release with no press behind it, read by an earlier pump and old enough:
+    // a real release
+    if (sWolfPendingKeyUp.on && sWolfPendingKeyUp.pump != sWolfPump
+        && SDL_GetTicks() - sWolfPendingKeyUp.ticks >= WOLF_PAIR_WINDOW_MS)
+    {
+        sWolfPendingKeyUp.on = false;
+        deliverKeyUp(sWolfPendingKeyUp.key, sWolfPendingKeyUp.mask);
     }
 
     updateCursor();
@@ -3226,6 +3289,19 @@ void LLWindowSDL::openFile(const std::string& file_name)
 void *LLWindowSDL::getPlatformWindow()
 {
     return NULL;
+}
+
+// [VR KEYBOARD 2026-11-05] (llwindow.h). SDL_RaiseWindow: on Wayland an xdg-activation request for this window's own
+// surface (SDL-release-2.28.0 src/video/wayland/SDL_waylandwindow.c Wayland_RaiseWindow / Wayland_activate_window),
+// which the compositor grants or turns into an "urgent" mark by its own rules (Hyprland: misc:focus_on_activate); on
+// X11 XRaiseWindow plus a _NET_ACTIVE_WINDOW request to the window manager (SDL_x11window.c X11_RaiseWindow).
+void LLWindowSDL::requestKeyboardFocus()
+{
+    if (mWindow)
+    {
+        LL_INFOS("Window") << "asking the desktop to give this window the keyboard" << LL_ENDL;
+        SDL_RaiseWindow(mWindow);
+    }
 }
 
 void LLWindowSDL::bringToFront()

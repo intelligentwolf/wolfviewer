@@ -286,6 +286,15 @@ void display_update_camera()
     // Cut draw distance in half when customizing avatar,
     // but on the viewer only.
     F32 final_far = gAgentCamera.mDrawDistance;
+    // [VR DRAW DISTANCE 2026-11-05] Paul: "VR Draw distance which is seperate from the normal drawdistance ... default it
+    // to 512m". Measured at his Caribbean spot as a Quest 3 (scripts/wolfvr/e2e_rate.mjs): 4096 m 17 pictures/s, 256 m
+    // 23 - each eye draws and shadows everything out to the far clip. While the headset has the camera the eyes see
+    // WolfVRDrawDistance; the desktop's own draw distance (and what the region sends) is left as it is.
+    if (!gCubeSnapshot && WolfVRScreen::headCamera())
+    {
+        static LLCachedControl<F32> vr_draw_distance(gSavedSettings, "WolfVRDrawDistance", 512.f);
+        final_far = llclamp((F32)vr_draw_distance, 64.f, 4096.f);
+    }
 
     // <FS:TJ> [FIRE-35748] Only enable the LL Draw Distance VRAM optimization when the setting is enabled
     static LLCachedControl<bool> use_vram_optimization(gSavedSettings, "FSDrawDistanceVRAMOptimization", false);

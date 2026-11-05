@@ -2518,6 +2518,11 @@
                 <menu_item_check.on_check function="Floater.Visible" parameter="wolf_vr_stream" />
                 <menu_item_check.on_click function="Floater.Toggle" parameter="wolf_vr_stream" />
             </menu_item_check>
+            <!-- [VR DRAW DISTANCE 2026-11-05] also on the headset bar (Distance) -->
+            <menu_item_check label="VR Draw Distance..." name="WolfVRDrawDistance">
+                <menu_item_check.on_check function="Floater.Visible" parameter="wolf_vr_draw_distance" />
+                <menu_item_check.on_click function="Floater.Toggle" parameter="wolf_vr_draw_distance" />
+            </menu_item_check>
         </menu>
     </menu>
     <menu

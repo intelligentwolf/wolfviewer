@@ -48,6 +48,9 @@ namespace WolfVRScreen
     /** [VR SHADOWS FIX 2026-11-04] True while drawing either eye of a VR 3D stereo frame (LLPipeline::generateSunShadow
      *  keeps that frame's shadow matrices for the eyes' reuse). */
     bool stereoEye();
+    /** [VR DRAW DISTANCE 2026-11-05] True while the camera is the headset's (applyHeadCamera took it this frame):
+     *  display_update_camera then uses WolfVRDrawDistance in place of the desktop's draw distance. */
+    bool headCamera();
     /** [VR SHARED CULL 2026-11-04] The right eye's pass reuses the left eye's cull and state sort (WolfVRShareCull). */
     bool shareCull();
     /** [VR SHADOWS 2026-11-04] The left eye keeps last frame's shadow maps this frame (WolfVRShadowEvery). */

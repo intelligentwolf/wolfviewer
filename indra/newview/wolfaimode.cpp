@@ -976,7 +976,11 @@ void WolfAIMode::startSpeaking()
     hist["text"] = mSayText;
     mHistory.push_back(hist);
     while (mHistory.size() > MAX_HISTORY) mHistory.pop_front();
-    // the resident hears him from the avatar (the sound cache + trigger, as WolfSpeech plays a line - wolfspeech.cpp onSynthesised)
+    // the resident hears him (the sound cache + trigger, as WolfSpeech plays a line - wolfspeech.cpp onSynthesised).
+    // [AI MODE VOICE 2026-11-05] Paul: "his voice got quieter as i walked with him". It was placed at the avatar's position
+    // when the line STARTED, a fixed point the resident then walked away from. He is the resident's own avatar, so the
+    // line plays at the listener (a zero position: LLAudioEngine::triggerSound forces it, and the OpenAL channel plays it
+    // head-relative, llaudioengine_openal.cpp update3DPosition) - the same loudness however far he is driven.
     if (!mSayWav.empty() && gAudiop && isAgentAvatarValid())
     {
         const LLUUID id = LLUUID::generateNewID();
@@ -986,7 +990,7 @@ void WolfAIMode::startSpeaking()
         {
             out.write(reinterpret_cast<const char*>(mSayWav.data()), mSayWav.size());
             out.close();
-            gAudiop->triggerSound(id, gAgentID, 1.f, LLAudioEngine::AUDIO_TYPE_SFX, gAgentAvatarp->getPositionGlobal());
+            gAudiop->triggerSound(id, gAgentID, 1.f, LLAudioEngine::AUDIO_TYPE_SFX, LLVector3d::zero);
             mToDelete.push_back({ path, { id, now + mSaySeconds + 30.0 } });
         }
     }

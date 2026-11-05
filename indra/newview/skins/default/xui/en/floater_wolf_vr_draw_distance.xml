@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [VR DRAW DISTANCE 2026-11-05] VR Draw Distance: opened from the headset bar's Distance button (wolfvrui.cpp
+     "vrdistance") and Wolf World > VR > VR Draw Distance... Paul: "add a button to the hud default it to 512m the button
+     opens a floater with VR Draw distance which is seperate from the normal drawdistance".
+     Who and why: a resident in the headset (often older, maybe with poor sight - memory paul-simple-for-older-disabled-users)
+     wants the picture smoother or wants to see further. One slider, bound straight to WolfVRDrawDistance (no class:
+     the slider saves as it moves and the headset's next picture uses it, llviewerdisplay.cpp display_update_camera).
+     Flow: read what it does, move the slider, close. Large text and a wide slider for a pointer in the headset. -->
+<floater
+ can_close="true"
+ can_minimize="false"
+ can_resize="false"
+ height="200"
+ layout="topleft"
+ name="wolf_vr_draw_distance"
+ save_rect="true"
+ single_instance="true"
+ title="VR Draw Distance"
+ width="460">
+    <text follows="left|top" font="SansSerifLarge" height="66" layout="topleft" left="16" name="intro" top="28" width="428" wrap="true">How far you can see in the headset. A shorter distance gives a smoother picture. Your desktop draw distance is not changed.</text>
+    <slider
+     can_edit_text="true"
+     control_name="WolfVRDrawDistance"
+     decimal_digits="0"
+     follows="left|top"
+     font="SansSerifLarge"
+     height="28"
+     increment="32"
+     initial_value="512"
+     label="Metres"
+     label_width="70"
+     layout="topleft"
+     left="16"
+     max_val="4096"
+     min_val="64"
+     name="vr_draw_distance"
+     top="104"
+     tool_tip="How far you see in the headset, in metres. 512 is a good balance; less is smoother, more shows distant land."
+     width="428" />
+    <text follows="left|top" font="SansSerif" height="40" layout="topleft" left="16" name="hint" top="144" width="428" wrap="true">512 metres is a good balance. Lower it if the picture moves about; raise it to see distant land.</text>
+</floater>

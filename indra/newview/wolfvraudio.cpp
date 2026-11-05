@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <mutex>
@@ -221,9 +222,18 @@ namespace
     std::vector<int16_t> gMicS16;            // pipe io thread only
     std::atomic<U32> gMicUnderruns{0};
 
+    // [VR MIC FALLBACK 2026-11-05] when the headset's microphone sound last arrived (steady clock, ms): voice only switches
+    // to it while it is live (pump, below)
+    std::atomic<int64_t> gMicLastMs{-1000000};
+    int64_t steadyMs()
+    {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    }
+
     void onMic(const int16_t* pcm, uint32_t frames, uint32_t rate)
     {
         if (!gMicOn.load()) return;
+        gMicLastMs = steadyMs();
         gMicIn.resize(frames);
         for (uint32_t i = 0; i < frames; ++i) gMicIn[i] = (float)pcm[i] / 32768.f;
         gMicRate.run(gMicIn.data(), frames, rate, gMicOut);
@@ -288,6 +298,23 @@ void pump()
     const bool headset_only = !pc_only && mode != "both";   // "headset" and anything unknown: the default
     const bool send = wanted && !pc_only;
     const bool want_mic = wanted && use_mic();
+    // [VR MIC FALLBACK 2026-11-05] Paul in VR with AI Mode: "the only way i got him to listen to my voice is to open the chat
+    // box". WolfVRHeadsetMic stays on between sessions, but the headset page only opens its microphone after the
+    // browser's permission (vraudio.js prepareMic); until it did, voice took the headset's (absent) sound in place of the PC
+    // microphone, so voice chat and AI Mode heard pure silence (his log 21:20-21:31Z: mic peak 0). Voice now switches to
+    // the headset microphone only while its sound is arriving (the page sends a 10 ms block steadily while it is on,
+    // vraudio-worklet.js WvrMic), and goes back to the PC microphone within a second when it stops.
+    const bool mic_live = want_mic && steadyMs() - gMicLastMs.load() < 1000;
+    static int s_mic_said = -1;   // what the log last said: 0 PC, 1 PC because the headset sends nothing, 2 headset
+    const int mic_say = mic_live ? 2 : want_mic ? 1 : 0;
+    if (mic_say != s_mic_said)
+    {
+        if (s_mic_said >= 0 || mic_say != 0)
+            LL_INFOS("WolfVR") << (mic_say == 2 ? "voice uses the headset microphone (its sound is arriving)"
+                                   : mic_say == 1 ? "voice uses the PC microphone: no sound from the headset microphone yet"
+                                                  : "voice uses the PC microphone") << LL_ENDL;
+        s_mic_said = mic_say;
+    }
     gSend = send;
     // [VR OFF AT START 2026-11-04] a headset has played this PC's sound: from the next start the sound engine is ready
     // to send the world's sounds too (WolfVRSoundReady, llstartup.cpp setMirrorMix). Set once.
@@ -316,14 +343,14 @@ void pump()
     const bool silence_voice = send && headset_only;
     llwebrtc::LLWebRTCDeviceInterface* dev = llwebrtc::getDeviceInterface();
     const F64 now = LLFrameTimer::getElapsedSeconds();
-    if (dev && (dev != gVoiceDev || send != gVoiceTapSet || silence_voice != gVoiceSilenced || want_mic != gMicSet ||
+    if (dev && (dev != gVoiceDev || send != gVoiceTapSet || silence_voice != gVoiceSilenced || mic_live != gMicSet ||
                 now >= gVoiceRefresh))
     {
-        applyVoice(dev, send, silence_voice, want_mic);
+        applyVoice(dev, send, silence_voice, mic_live);
         gVoiceDev = dev;
         gVoiceTapSet = send;
         gVoiceSilenced = silence_voice;
-        gMicSet = want_mic;
+        gMicSet = mic_live;
         gVoiceRefresh = now + 1.0;
     }
 

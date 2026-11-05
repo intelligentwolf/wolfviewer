@@ -39,8 +39,8 @@ class LLVOAvatar;
 // detector numbers and turned into words by the proxy's /stt (whisper). AI: php/aimode.php "reply" (WolfNPC's brain, charged
 // to the resident's Wolf Credits at the AI's real cost + 10%). SPEAKS: piper (the chosen voice, made by the brain) into the
 // resident's OWN outgoing voice (llwebrtc LLWebRTCSpeechSource: the microphone is held while he talks, and the voice path is
-// kept open for him even when the resident is muted - LLWebRTCVoiceClient::wolfSetSpeechOpen), played for the resident from
-// the avatar, and written in local chat as "(AI) ..." so people without voice, or who cannot hear, read it.
+// kept open for him even when the resident is muted - LLWebRTCVoiceClient::wolfSetSpeechOpen), played for the resident at
+// his own ears (the same loudness wherever he is driven), and written in local chat as "(AI) ..." so people without voice, or who cannot hear, read it.
 // TURNS: answers when named (the avatar's first name), when the resident talks and nobody else is near or they are already
 // talking, or when someone he just answered goes on; joins in on his own at most once in CHIME_EVERY_SECS after a natural
 // gap; never while anyone is speaking; one request at a time, at most MAX_PER_MINUTE replies a minute.

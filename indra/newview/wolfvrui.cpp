@@ -31,6 +31,8 @@
 #include "llvoavatarself.h"
 #include "lltimer.h"
 #include "llviewercontrol.h"
+#include "wolfaimode.h"
+#include "llfloaterreg.h"
 #include "wolfgrid.h"
 #include "wolfvrstream.h"
 #include "wolfvrscreen.h"
@@ -171,6 +173,24 @@ bool runCommand(const std::string& name, const std::string& arg, std::string& wh
         why = "not one of the viewer's HUDs";
         return false;
     }
+    if (name == "vrdistance")
+    {
+        // [VR DRAW DISTANCE 2026-11-05] Paul: "add a button to the hud ... the button opens a floater with VR Draw distance"
+        // (it opens as one of the headset's panels, wolfvrscreen.cpp sendPanels)
+        LLFloaterReg::showInstance("wolf_vr_draw_distance");
+        return true;
+    }
+    if (name == "aimode" || name == "aisetup")
+    {
+        // [VR AI MODE 2026-11-05] Paul: "i can't do wolf world ai mode because i was in VR we need to have a button on the AI
+        // HUD in 3d mode so that i can set it up there". The bar runs exactly what Wolf World > AI Mode and > AI Mode:
+        // Personality and Voice... run (menu_viewer.xml WolfAIMode.Toggle / Floater.Show wolf_aimode); the setup window then
+        // opens as one of the headset's panels (wolfvrscreen.cpp sendPanels), its lists and typing included
+        if (!WolfAIMode::isAvailable()) { why = "AI Mode works on Wolf Territories regions only"; return false; }
+        if (name == "aimode") WolfAIMode::instance().toggle();
+        else LLFloaterReg::showInstance("wolf_aimode");
+        return true;
+    }
     if (name == "closefloater")
     {
         // [VR PANELS 2026-11-04] Paul: "there was no easy close on the mini map". A panel's own Close: only a window open
@@ -261,6 +281,7 @@ void pump()
     o["headset"] = gSavedSettings.getString("WolfVRHeadset");
     o["mic"] = gSavedSettings.getBOOL("WolfVRHeadsetMic");   // [VR AUDIO] the page's microphone button
     o["hide"] = gSavedSettings.getBOOL("WolfVRHideAvatar");   // [VR VIEW] the bar's Hide Me / Show Me
+    o["ai"] = WolfAIMode::instance().isOn();   // [VR AI MODE] the bar's AI Mode button lit while he is on
     // [VR KEYBOARD 2026-11-04] Paul: "NO KEYBOARD". The page's keyboard opens by itself while the viewer's typing goes to
     // a text field (nearby chat, an IM, search, the inventory filter), and closes again when it leaves one
     LLFocusableElement* kf = gFocusMgr.getKeyboardFocus();

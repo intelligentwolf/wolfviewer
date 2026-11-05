@@ -48,6 +48,11 @@ export const ACTIONS = [
     { row: 2, id: 'hudsmenu', label: 'HUDs \u25b8', icon: 'dashboard', page: 'hudsmenu', hint: "The viewer's own HUDs: flight deck, car dashboard, helms, game mode ..." },
     { row: 2, id: 'voice', label: 'Voice', icon: 'volume_up', cmd: 'voice' },
     { row: 2, id: 'dictate', label: 'Dictate', icon: 'keyboard_voice', cmd: 'wolf_dictate' },
+    // [VR AI MODE 2026-11-05] Paul: "we need to have a button ... in 3d mode so that i can set it up there" (wolfvrui.cpp)
+    // [VR DRAW DISTANCE 2026-11-05] Paul: "add a button to the hud ... opens a floater with VR Draw distance" (wolfvrui.cpp)
+    { row: 2, id: 'vrdistance', label: 'Distance', icon: 'landscape', cmd: 'vrdistance', hint: 'How far you see in the headset' },
+    { row: 2, id: 'aimode', label: 'AI Mode', icon: 'smart_toy', cmd: 'aimode', wolf: true, hint: 'Your avatar talks for itself: on or off' },
+    { row: 2, id: 'aisetup', label: 'AI Setup', icon: 'record_voice_over', cmd: 'aisetup', wolf: true, hint: 'AI Mode personality and voice' },
     { row: 2, id: 'snapshot', label: 'Snapshot', icon: 'photo_camera', cmd: 'snapshot' },
     { row: 2, id: 'quickprefs', label: 'Prefs', icon: 'tune', cmd: 'quickprefs' },
     // [VR VIEW 2026-11-04] see yourself from behind (the default) or from your own eyes with your avatar hidden
@@ -217,7 +222,7 @@ export class VRBar {
     setState(m) {
         const wolf = !!m.wolf;
         this.state = { on: new Set(m.on || []), off: new Set(m.off || []), wolf, region: String(m.region || ''),
-                       sit: m.sit | 0, fly: !!m.fly, fav: Array.isArray(m.fav) ? m.fav.slice(0, 6) : [], hide: !!m.hide,
+                       sit: m.sit | 0, fly: !!m.fly, fav: Array.isArray(m.fav) ? m.fav.slice(0, 6) : [], hide: !!m.hide, ai: !!m.ai,
                        huds: new Set(Array.isArray(m.huds) ? m.huds : []) };
         if (this.page !== 'huds' && this.slots.length !== this.actions().length) this._layout();
         this._dirty = true;
@@ -307,6 +312,8 @@ export class VRBar {
         if (a.cmd === 'sit') return { active: this.state.sit > 0, dead: false };
         if (a.cmd === 'home') return { active: false, dead: false };
         if (a.cmd === 'hideavatar') return { active: !!this.state.hide, dead: false };
+        if (a.cmd === 'aimode') return { active: !!this.state.ai, dead: false };
+        if (a.cmd === 'aisetup' || a.cmd === 'vrdistance') return { active: false, dead: false };
         return { active: this.state.on.has(a.cmd), dead: this.state.off.has(a.cmd) };
     }
 

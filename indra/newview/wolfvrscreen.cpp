@@ -1250,6 +1250,7 @@ void setPickCamera()
 bool uiSkipped() { return gEye == 0 || gPaused; }
 bool secondEye() { return gEye == 1; }
 bool stereoEye() { return gEye >= 0; }
+bool headCamera() { return gCameraOverridden; }
 // [VR SHARED CULL 2026-11-04] The eyes are 6.4 cm apart and the left eye is culled with the smallest SYMMETRIC frustum
 // that holds its window (applyHeadCamera), which on a headset whose eyes mirror each other also holds the right eye's
 // window: what the left eye's cull and state sort found is what the right eye sees, less a 6.4 cm sliver at the far

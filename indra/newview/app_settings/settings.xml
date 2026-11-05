@@ -20331,6 +20331,17 @@ Change of this parameter will affect the layout of buttons in notification toast
 			<key>Value</key>
 			<integer>1</integer>
 		</map>
+		<key>WolfVRDrawDistance</key>
+		<map>
+			<key>Comment</key>
+			<string>[VR DRAW DISTANCE 2026-11-05] How far you see in the headset in VR 3D Mode, metres (64-4096), separate from the desktop's draw distance (RenderFarClip). Paul: "default it to 512m". Shorter is smoother: fewer objects drawn and shadowed for each eye.</string>
+			<key>Persist</key>
+			<integer>1</integer>
+			<key>Type</key>
+			<string>F32</string>
+			<key>Value</key>
+			<real>512.0</real>
+		</map>
 		<key>WolfVREyeSize</key>
 		<map>
 			<key>Comment</key>

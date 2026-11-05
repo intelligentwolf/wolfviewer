@@ -790,8 +790,20 @@ const vrAudio = new VRAudio({
     sendBinary: (buf) => { if (ws && ws.readyState === WebSocket.OPEN && ws.bufferedAmount < 262144) ws.send(buf); },
     clockOff: () => clockOff,
     onError: showError,
-    onMicWanted: () => showMicButton(),
+    onMicWanted: (on) => { showMicButton(); if (on && vrAudio.micPending) startMicIfAllowed(); },
 });
+// [VR MIC FALLBACK 2026-11-05] Paul in VR with AI Mode: his avatar only heard him through the chat box. The viewer asks
+// for the headset microphone as VR starts (WolfVRHeadsetMic stays on between sessions), but the page only opened it
+// from its 2D button, which a reloaded page had not been pressed again. Now: when this browser has already allowed the
+// microphone for this page, it opens at once (no question is shown, so it is safe in VR); otherwise the Menu tab says
+// how, and voice keeps the PC microphone meanwhile (wolfvraudio.cpp only switches while the headset's sound arrives).
+async function startMicIfAllowed() {
+    let state = '';
+    try { state = (await navigator.permissions.query({ name: 'microphone' })).state; } catch (e) { state = ''; }
+    if (!vrAudio.micPending) return;
+    if (state === 'granted' || !inVR()) { vrAudio.prepareMic(); return; }
+    bar.tabSay('Headset microphone: leave VR and press "Use the headset microphone for voice". Your PC microphone is used until then.', 15000);
+}
 const onSound = (buf, hdr) => vrAudio.onBlock(buf, hdr);
 // The microphone switch on this page: the same setting as "Use the headset microphone for voice" in WolfViewer's
 // Headset Settings (wolfvrui.cpp "mic"); turning it on asks this browser's permission here, in 2D, once.
@@ -2010,7 +2022,7 @@ window.__wolfvr = { resetStages: () => { for (const k of STAGES) stages[k].v.len
     sendKey: (k, m = 0) => tapKey(k, m),
     // [VR CONTROLS / HUD LAYER] test hooks (scripts/wolfvr/e2e_controls.mjs)
     bar: () => ({ open: bar.open, ids: bar.slots.map((x) => x.action.id), on: [...bar.state.on], off: [...bar.state.off], huds: bar.state.huds ? [...bar.state.huds] : [], page: bar.page || "main",
-                  sit: bar.state.sit, hide: bar.state.hide, region: bar.state.region, fav: bar.state.fav.length, hover: bar.hover }),
+                  sit: bar.state.sit, hide: bar.state.hide, ai: !!bar.state.ai, region: bar.state.region, fav: bar.state.fav.length, hover: bar.hover }),
     layer: () => ({ want: layer.want, on: layer.on, frames: layer.frames, cfg: layer.cfg, visible: layer.mesh.visible }),
     // [VR PANELS] the window panels: name, window rectangle, where it stands (yaw degrees, height), shown
     panels: () => [...layer.panels.values()].map((p) => ({ k: p.k, n: p.n, r: p.r, yaw: +(p.yaw * 180 / Math.PI).toFixed(1),

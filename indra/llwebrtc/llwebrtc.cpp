@@ -269,6 +269,32 @@ int32_t LLWebRTCAudioTransport::DeliverCapture(const void* audio_data,
 {
     auto* engine = engine_.load(std::memory_order_acquire);
 
+    // [AI MODE 2026-11-05] the resident's own sound to the AI's ears first, then (while the AI talks) the AI's voice in place
+    // of it - see LLWebRTCSpeechSource (llwebrtc.h). 16-bit interleaved: the only layout the ADM's AudioDeviceBuffer and the
+    // mic clock deliver (bytes_per_frame is 2 x channels, as the playout taps check below).
+    if (number_of_channels > 0 && bytes_per_frame == 2 * number_of_channels)
+    {
+        LLWebRTCSpeechSource* speech = mSpeechSource.load(std::memory_order_acquire);
+        const size_t n = number_of_frames * number_of_channels;
+        if (speech)
+        {
+            if (mSpeechBuf.size() < n) mSpeechBuf.resize(n);
+            memset(mSpeechBuf.data(), 0, n * sizeof(int16_t));
+            if (speech->speak(mSpeechBuf.data(), number_of_frames, number_of_channels, samples_per_sec))
+            {
+                audio_data = mSpeechBuf.data();   // the microphone is held: only the AI's voice goes on
+            }
+            else if (LLWebRTCPlayoutTap* tap = mCaptureTap.load(std::memory_order_acquire))
+            {
+                tap->onPlayoutAudio(static_cast<const int16_t*>(audio_data), number_of_frames, number_of_channels, samples_per_sec);
+            }
+        }
+        else if (LLWebRTCPlayoutTap* tap = mCaptureTap.load(std::memory_order_acquire))
+        {
+            tap->onPlayoutAudio(static_cast<const int16_t*>(audio_data), number_of_frames, number_of_channels, samples_per_sec);
+        }
+    }
+
     // 1) Deliver to engine (authoritative).
     int32_t ret = 0;
     if (engine)
@@ -362,6 +388,11 @@ int32_t LLWebRTCAudioTransport::NeedMorePlayData(size_t   number_of_frames,
         {
             tap->onPlayoutAudio(static_cast<const int16_t*>(audio_data), number_of_frames, number_of_channels, samples_per_sec);
         }
+        // [AI MODE 2026-11-05] the voices heard, for the AI to listen to (before any silencing for the headset)
+        if (LLWebRTCPlayoutTap* tap = mListenTap.load(std::memory_order_acquire))
+        {
+            tap->onPlayoutAudio(static_cast<const int16_t*>(audio_data), number_of_frames, number_of_channels, samples_per_sec);
+        }
         if (mSilenced.load(std::memory_order_relaxed))
         {
             memset(audio_data, 0, number_of_frames * number_of_channels * sizeof(int16_t));
@@ -408,7 +439,7 @@ void LLCustomProcessor::Process(webrtc::AudioBuffer *audio)
 
     // calculate the energy
 
-    float desired_gain = mState->getGain();
+    float desired_gain = mState->getEffectiveGain();   // [AI MODE 2026-11-05] unity while the AI talks
     if (mState->getDirty())
     {
         // We'll delay ramping by 30ms in order to clear out buffers that may
@@ -1185,6 +1216,39 @@ void LLWebRTCImpl::setExternalMic(LLWebRTCExternalMic* mic)
     if (mDeviceModule)
     {
         mDeviceModule->SetExternalMic(mic);
+    }
+}
+
+// [AI MODE 2026-11-05] see LLWebRTCSpeechSource (llwebrtc.h)
+void LLWebRTCImpl::setSpeechSource(LLWebRTCSpeechSource* source)
+{
+    if (mDeviceModule)
+    {
+        mDeviceModule->SetSpeechSource(source);
+    }
+}
+
+void LLWebRTCImpl::setCaptureTap(LLWebRTCPlayoutTap* tap)
+{
+    if (mDeviceModule)
+    {
+        mDeviceModule->SetCaptureTap(tap);
+    }
+}
+
+void LLWebRTCImpl::setListenTap(LLWebRTCPlayoutTap* tap)
+{
+    if (mDeviceModule)
+    {
+        mDeviceModule->SetListenTap(tap);
+    }
+}
+
+void LLWebRTCImpl::setSpeechGain(bool open)
+{
+    if (mPeerCustomProcessor)
+    {
+        mPeerCustomProcessor->setSpeechGain(open);
     }
 }
 

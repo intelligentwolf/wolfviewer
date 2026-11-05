@@ -1866,6 +1866,18 @@
             <menu_item_call.on_click function="Floater.Show" parameter="wolf_npc" />
             <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
         </menu_item_call>
+        <!-- [AI MODE 2026-11-05] Paul: "make your avatar AI ... could he speak and hear over normal voice?" / "just a menu item
+             to turn him on and off is fine" (wolfaimode.cpp). The first time it asks for a personality and a voice
+             (wolffloateraimode.cpp); the second item changes them. [WOLF GRID GATE] gone (not greyed) off Wolf Territories. -->
+        <menu_item_check label="AI Mode" name="WolfAIMode">
+            <menu_item_check.on_check function="WolfAIMode.IsOn" />
+            <menu_item_check.on_click function="WolfAIMode.Toggle" />
+            <menu_item_check.on_visible function="WolfGrid.IsOnWolfTerritories" />
+        </menu_item_check>
+        <menu_item_call label="AI Mode: Personality and Voice..." name="WolfAIModeSetup">
+            <menu_item_call.on_click function="Floater.Show" parameter="wolf_aimode" />
+            <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
+        </menu_item_call>
         <!-- [WOLF TUNNELS 2026-10-21] Paul: "the goal of this is to allow tunneling under terrains we need to add a tool"
              (wolffloatertunnels.cpp). [WOLF GRID GATE] gone (not greyed) off Wolf Territories. -->
         <menu_item_call label="Tunnels..." name="WolfTunnels">

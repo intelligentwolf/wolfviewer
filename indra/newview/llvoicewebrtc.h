@@ -183,6 +183,11 @@ public:
     //@{
     void setVoiceEnabled(bool enabled) override;
     void setMuteMic(bool muted) override;        // Set the mute state of the local mic.
+    // [AI MODE 2026-11-05] wolfaimode.cpp: keep the voice path open while the avatar's AI talks (see wolfApplyMicMute)
+    void wolfSetSpeechOpen(bool open);
+    bool wolfMicMuted() const { return mMuteMic && !mWolfSpeechOpen; }
+    /** [AI MODE 2026-11-05] the newest level the voice server reported for this viewer's own sound (0..1), main thread */
+    static F32 sWolfServerOwnLevel;
     //@}
 
     void notifyVoiceConnected() override; // <FS:TJ/> Fix Nearby Voice when changing voice device settings
@@ -555,6 +560,8 @@ private:
     std::set<LLUUID> mNeighboringRegions; // includes current region
 
     bool         mMuteMic;
+    bool         mWolfSpeechOpen = false;   // [AI MODE 2026-11-05]
+    void         wolfApplyMicMute();
     bool         mHidden;       //Set to true during teleport to hide the agent's position.
 
     enum

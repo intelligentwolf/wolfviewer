@@ -1789,9 +1789,19 @@ class Darwin_x86_64_Manifest(ViewerManifest):
         # make sure we don't have stale files laying about
         self.remove(sparsename, finalname)
 
+        # [W94 DMG SIZE 2026-11-05] The sparse image is only the staging volume (hdiutil convert below makes the
+        # compressed UDZO .dmg), so its size is a ceiling, not the download size. A fixed 1300 MB ran out ("No space
+        # left on device" copying libllwebrtc.dylib) once the universal app grew past it: size it from the app itself,
+        # lstat so the frameworks' symlinks are not counted twice, plus room for HFS+ overhead and the DMG template.
+        app_bytes = 0
+        for root, dirs, files in os.walk(self.get_dst_prefix()):
+            for f in files:
+                app_bytes += os.lstat(os.path.join(root, f)).st_size
+        dmg_megabytes = max(1300, int(app_bytes * 1.25 / (1024 * 1024)) + 200)
+        print("App is %d MB, staging image %d MB" % (app_bytes // (1024 * 1024), dmg_megabytes))
         self.run_command(['hdiutil', 'create', sparsename,
                           '-volname', volname, '-fs', 'HFS+',
-                          '-type', 'SPARSE', '-megabytes', '1300',
+                          '-type', 'SPARSE', '-megabytes', str(dmg_megabytes),
                           '-layout', 'SPUD'])
 
         # mount the image and get the name of the mount point and device node

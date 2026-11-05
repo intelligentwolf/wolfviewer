@@ -756,7 +756,11 @@ net::awaitable<void> Service::Impl::serveHttp(Stream& stream, bool tls)
             beast::get_lowest_layer(stream).expires_never();
             boost::system::error_code rec;
             const auto peer = beast::get_lowest_layer(stream).socket().remote_endpoint(rec);
-            co_await runWebSocket(std::move(stream), std::move(req), rec ? std::string("?") : peer.address().to_string());
+            // [W94 VR CRASH 2026-11-05] A named string, never a ?: temporary, into the coroutine's by-value parameter:
+            // g++ 11 (the Linux release build) left the frame's copy pointing at the temporary's buffer, and the
+            // frame's teardown at disconnect freed memory it never owned (ASan, scripts/wolfvr/coro_churn.py).
+            std::string peer_ip = rec ? std::string("?") : peer.address().to_string();
+            co_await runWebSocket(std::move(stream), std::move(req), std::move(peer_ip));
             co_return;
         }
 

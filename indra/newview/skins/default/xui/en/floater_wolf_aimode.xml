@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [AI MODE 2026-11-05] AI Mode: Personality and Voice (wolffloateraimode.cpp): Wolf World > AI Mode the first time, and
+     Wolf World > AI Mode: Personality and Voice... later.
+     Who and why: a resident, often older or with poor sight (memory paul-simple-for-older-disabled-users), gives their own
+     avatar a personality and a voice so it can talk with them and others over voice. The minimum only (Paul's brief).
+     Flow, top to bottom: what AI Mode does and costs / a ready personality or your own words / a voice / Save and turn on.
+     Large text and targets, no time limits. The status line under the buttons shows every failure in words. -->
+<floater
+ can_close="true"
+ can_minimize="true"
+ can_resize="false"
+ height="470"
+ layout="topleft"
+ name="wolf_aimode"
+ help_topic="wolf_aimode"
+ save_rect="true"
+ single_instance="true"
+ title="AI Mode"
+ width="480">
+    <string name="feature_name">AI Mode</string>
+    <string name="loading">Getting your AI Mode settings...</string>
+    <string name="could_not_load">Your settings could not be loaded:</string>
+    <string name="saving">Saving...</string>
+    <string name="own_words">In my own words</string>
+    <string name="save_on_label">Save and turn on</string>
+    <string name="save_label">Save</string>
+    <string name="balance_unknown">(could not be read just now)</string>
+    <string name="cost_line">Each time your avatar speaks it costs about [PER] Wolf Credits. You have [BALANCE] credits.</string>
+
+    <text follows="left|top" font="SansSerifLarge" height="64" layout="topleft" left="14" name="intro" top="28" width="452" wrap="true">Your avatar gets a personality of its own. It listens to you, to voice and to local chat, and talks back over voice, from where it stands.</text>
+    <text follows="left|top" font="SansSerif" height="36" layout="topleft" left="14" name="cost_text" top="96" width="452" wrap="true">...</text>
+
+    <text follows="left|top" font="SansSerifLargeBold" height="22" layout="topleft" left="14" name="preset_label" top="138" width="452">Personality</text>
+    <combo_box follows="left|top" height="28" layout="topleft" left="14" name="preset_combo" top="164" width="452" tool_tip="Pick a ready personality, or In my own words to write your own" />
+    <text_editor follows="left|top" font="SansSerifLarge" height="110" layout="topleft" left="14" max_length="1000" name="personality_editor" top="198" width="452" word_wrap="true" tool_tip="Describe the personality in a few words: what they are like and what they enjoy. Nothing sexual, please." />
+
+    <text follows="left|top" font="SansSerifLargeBold" height="22" layout="topleft" left="14" name="voice_label" top="318" width="452">Voice</text>
+    <combo_box follows="left|top" height="28" layout="topleft" left="14" name="voice_combo" top="344" width="452" tool_tip="The voice your avatar speaks with" />
+
+    <button follows="left|bottom" font="SansSerifLarge" height="32" layout="topleft" left="14" name="cancel_btn" top="390" width="140" label="Cancel" />
+    <button follows="right|bottom" font="SansSerifLarge" height="32" layout="topleft" left="266" name="save_btn" top="390" width="200" label="Save and turn on" />
+    <text follows="left|top" font="SansSerif" height="38" layout="topleft" left="14" name="status_text" top="428" width="452" wrap="true" />
+</floater>

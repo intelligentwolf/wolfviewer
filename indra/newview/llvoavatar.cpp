@@ -27,6 +27,8 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "llvoavatar.h"
+#include "wolfaimode.h"   // [AI MODE 2026-11-05/] the AI Mode name tag
+#include "wolfgrid.h"     // [AI MODE 2026-11-05/] isOnWolfTerritories
 
 #include <stdio.h>
 #include <ctype.h>
@@ -4179,11 +4181,19 @@ void LLVOAvatar::idleUpdateNameTagText(bool new_name)
                 LLFontGL::getFontSansSerifSmall());
         }
 
+        // [AI MODE 2026-11-05] an avatar in AI Mode (its own AI personality talks): the region's wolf-aitag plugin sets its
+        // name-tag title to WolfAIMode::TAG_TITLE, which every viewer shows; WolfViewer shows "<name> (AI)" instead
+        // (wolfaimode.h). Only on Wolf, where the plugin runs.
+        const bool wolf_ai = title && title->getString() && WolfGrid::isOnWolfTerritories()
+                             && std::string(title->getString()) == WolfAIMode::TAG_TITLE;
+        auto ai_name = [wolf_ai](const std::string& n) { return wolf_ai ? n + " (AI)" : n; };
+
 //      if (sRenderGroupTitles
 // [RLVa:KB] - Checked: RLVa-1.2.2
         if (sRenderGroupTitles && fRlvShowAvName
 // [/RLVa:KB]
-            && title && title->getString() && title->getString()[0] != '\0')
+            && title && title->getString() && title->getString()[0] != '\0'
+            && !wolf_ai)   // [AI MODE 2026-11-05/] the AI Mode title is shown as "(AI)" after the name instead
         {
             std::string title_str = title->getString();
             LLStringFn::replace_ascii_controlchars(title_str,LL_UNKNOWN_CHAR);
@@ -4217,11 +4227,11 @@ void LLVOAvatar::idleUpdateNameTagText(bool new_name)
 
                     if (mClientTagData.has("name") && !mClientTagData["name"].asString().empty())
                     {
-                        addNameTagLine((av_name.isDisplayNameDefault() ? av_name.getUserNameForDisplay() : av_name.getDisplayName()) +" (" + mClientTagData["name"].asString() + ")",name_tag_color,LLFontGL::NORMAL, LLFontGL::getFontSansSerif(), true, (!av_name.getDisplayName().empty()) );
+                        addNameTagLine(ai_name((av_name.isDisplayNameDefault() ? av_name.getUserNameForDisplay() : av_name.getDisplayName()) +" (" + mClientTagData["name"].asString() + ")"),name_tag_color,LLFontGL::NORMAL, LLFontGL::getFontSansSerif(), true, (!av_name.getDisplayName().empty()) );
                     }
                     else
                     {
-                        addNameTagLine((av_name.isDisplayNameDefault() ? av_name.getUserNameForDisplay() : av_name.getDisplayName()), name_tag_color, LLFontGL::NORMAL, LLFontGL::getFontSansSerif(), true, true);
+                        addNameTagLine(ai_name(av_name.isDisplayNameDefault() ? av_name.getUserNameForDisplay() : av_name.getDisplayName()), name_tag_color, LLFontGL::NORMAL, LLFontGL::getFontSansSerif(), true, true);
                     }
                 }
                 // Suppress SLID display if display name matches exactly (ugh)
@@ -4249,7 +4259,7 @@ void LLVOAvatar::idleUpdateNameTagText(bool new_name)
             }
             else
             {
-                addNameTagLine(RlvStrings::getAnonym(av_name), name_tag_color, LLFontGL::NORMAL, LLFontGL::getFontSansSerif(), true, (!av_name.getDisplayName().empty()) );
+                addNameTagLine(ai_name(RlvStrings::getAnonym(av_name)), name_tag_color, LLFontGL::NORMAL, LLFontGL::getFontSansSerif(), true, (!av_name.getDisplayName().empty()) );
             }
 // [/RLVa:KB]
         }
@@ -4261,18 +4271,18 @@ void LLVOAvatar::idleUpdateNameTagText(bool new_name)
             if ( (!fRlvShowAvName) && (!isSelf()) )
             {
                 full_name = RlvStrings::getAnonym(full_name);
-                addNameTagLine(full_name, name_tag_color, LLFontGL::NORMAL, font, true, true);
+                addNameTagLine(ai_name(full_name), name_tag_color, LLFontGL::NORMAL, font, true, true);
             }
 // [/RLVa:KB]
             else // Only check for client tags when not RLV anon -AO
             {
                 if (mClientTagData.has("name") && !mClientTagData["name"].asString().empty())
                 {
-                    addNameTagLine(full_name + " (" + mClientTagData["name"].asString() + ")", name_tag_color, LLFontGL::NORMAL, font, true, true);
+                    addNameTagLine(ai_name(full_name + " (" + mClientTagData["name"].asString() + ")"), name_tag_color, LLFontGL::NORMAL, font, true, true);
                 }
                 else
                 {
-                    addNameTagLine(full_name, name_tag_color, LLFontGL::NORMAL, font, true, true);
+                    addNameTagLine(ai_name(full_name), name_tag_color, LLFontGL::NORMAL, font, true, true);
                 }
             }
         }

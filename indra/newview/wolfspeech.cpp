@@ -100,6 +100,19 @@ namespace
     }
 }
 
+// static [AI MODE 2026-11-05]
+S32 WolfSpeech::postSpeechApi(const std::string& path, const std::string& content_type, const std::vector<U8>& body,
+                              LLSD::Binary& reply, std::string& error)
+{
+    return postRaw(std::string(WolfGrid::SPEECH_API_BASE) + path, content_type, body, reply, error);
+}
+
+// static [AI MODE 2026-11-05]
+std::string WolfSpeech::replyField(const LLSD::Binary& bytes, const char* field)
+{
+    return jsonField(bytes, field);
+}
+
 WolfSpeech::WolfSpeech()
 {
 }

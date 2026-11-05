@@ -94,6 +94,14 @@ public:
     /** LLIMModel::processAddingMessage — an instant message as it is displayed. */
     void onInstantMessage(const LLUUID& session_id, const std::string& from, const LLUUID& from_id, const std::string& text);
 
+    // [AI MODE 2026-11-05] wolfaimode.cpp uses the same speech service: a POST to SPEECH_API_BASE + path with the session
+    // pair (inside a coroutine; returns the HTTP status), and the same 16 kHz WAV (peak-normalised, as for dictation).
+    static S32 postSpeechApi(const std::string& path, const std::string& content_type, const std::vector<U8>& body,
+                             LLSD::Binary& reply, std::string& error);
+    static std::vector<U8> wav16k(const std::vector<S16>& pcm) { return encodeWav(pcm); }
+    /** The "error" (or "text") field of a JSON reply, if it is one. */
+    static std::string replyField(const LLSD::Binary& bytes, const char* field);
+
     // Source: speech_to_text.js — static constants, same values.
     static constexpr U32 TARGET_RATE = 16000;
     /** One ScriptProcessorNode buffer there: the unit the voice decision is made on. */

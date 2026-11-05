@@ -66,6 +66,7 @@
 #include "modules/audio_device/include/audio_device_defines.h"
 #include <atomic>   // [VR AUDIO 2026-11-04] the headset microphone clock
 #include <thread>
+#include <vector>   // [AI MODE 2026-11-05] the speech buffer
 
 namespace llwebrtc
 {
@@ -173,6 +174,10 @@ public:
     void  SetVRPlayoutTap(LLWebRTCPlayoutTap* tap) { mVRTap.store(tap, std::memory_order_release); }
     void  SetPlayoutSilenced(bool silenced) { mSilenced.store(silenced, std::memory_order_relaxed); }
     void  SetExternalMicActive(bool active) { mExternalMicActive.store(active, std::memory_order_release); }
+    // [AI MODE 2026-11-05] see LLWebRTCSpeechSource (llwebrtc.h)
+    void  SetSpeechSource(LLWebRTCSpeechSource* src) { mSpeechSource.store(src, std::memory_order_release); }
+    void  SetCaptureTap(LLWebRTCPlayoutTap* tap) { mCaptureTap.store(tap, std::memory_order_release); }
+    void  SetListenTap(LLWebRTCPlayoutTap* tap) { mListenTap.store(tap, std::memory_order_release); }
     // One 10 ms buffer from the headset microphone into the engine, as RecordedDataIsAvailable would deliver it.
     int32_t DeliverCapture(const void* audio_data, size_t number_of_frames, size_t bytes_per_frame,
                            size_t number_of_channels, uint32_t samples_per_sec, uint32_t total_delay_ms,
@@ -188,6 +193,10 @@ private:
     std::atomic<LLWebRTCPlayoutTap*>     mVRTap{ nullptr };        // [VR AUDIO 2026-11-04]
     std::atomic<bool>                    mSilenced{ false };
     std::atomic<bool>                    mExternalMicActive{ false };
+    std::atomic<LLWebRTCSpeechSource*>   mSpeechSource{ nullptr };   // [AI MODE 2026-11-05]
+    std::atomic<LLWebRTCPlayoutTap*>     mCaptureTap{ nullptr };
+    std::atomic<LLWebRTCPlayoutTap*>     mListenTap{ nullptr };
+    std::vector<int16_t>                 mSpeechBuf;                 // capture thread only
 
 };
 
@@ -347,6 +356,10 @@ public:
     void SetVRPlayoutTap(LLWebRTCPlayoutTap* tap) { audio_transport_.SetVRPlayoutTap(tap); }
     void SetPlayoutSilenced(bool silenced) { audio_transport_.SetPlayoutSilenced(silenced); }
     void SetExternalMic(LLWebRTCExternalMic* mic);
+    // [AI MODE 2026-11-05] see LLWebRTCSpeechSource (llwebrtc.h)
+    void SetSpeechSource(LLWebRTCSpeechSource* src) { audio_transport_.SetSpeechSource(src); }
+    void SetCaptureTap(LLWebRTCPlayoutTap* tap) { audio_transport_.SetCaptureTap(tap); }
+    void SetListenTap(LLWebRTCPlayoutTap* tap) { audio_transport_.SetListenTap(tap); }
     void  SetTuning(bool tuning, bool mute)
     {
         tuning_ = tuning;
@@ -405,12 +418,20 @@ public:
 
     float getGain() { return mGain.load(std::memory_order_relaxed); }
 
+    // [AI MODE 2026-11-05] while the AI talks: unity gain whatever mGain (0 when muted) asks; the change ramps as a mute does
+    void setSpeechGain(bool open)
+    {
+        if (mSpeechGain.exchange(open, std::memory_order_relaxed) != open) mDirty.store(true, std::memory_order_relaxed);
+    }
+    float getEffectiveGain() { return mSpeechGain.load(std::memory_order_relaxed) ? 1.0f : mGain.load(std::memory_order_relaxed); }
+
     bool getDirty() { return mDirty.exchange(false, std::memory_order_relaxed); }
 
  protected:
     std::atomic<bool>  mDirty{ true };
     std::atomic<float> mMicrophoneEnergy{ 0.0f };
     std::atomic<float> mGain{ 0.0f };
+    std::atomic<bool>  mSpeechGain{ false };   // [AI MODE 2026-11-05]
 };
 
 using LLCustomProcessorStatePtr = std::shared_ptr<LLCustomProcessorState>;
@@ -489,6 +510,11 @@ class LLWebRTCImpl : public LLWebRTCDeviceInterface, public webrtc::AudioDeviceO
     void setVRPlayoutTap(LLWebRTCPlayoutTap* tap) override;   // [VR AUDIO 2026-11-04]
     void setPlayoutSilenced(bool silenced) override;
     void setExternalMic(LLWebRTCExternalMic* mic) override;
+    // [AI MODE 2026-11-05]
+    void setSpeechSource(LLWebRTCSpeechSource* source) override;
+    void setCaptureTap(LLWebRTCPlayoutTap* tap) override;
+    void setListenTap(LLWebRTCPlayoutTap* tap) override;
+    void setSpeechGain(bool open) override;
 
     void intSetMute(bool mute, int delay_ms = 20);
 

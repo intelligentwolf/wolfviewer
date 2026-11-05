@@ -148,6 +148,18 @@ class LLWebRTCExternalMic
     virtual size_t pullMic(int16_t* out, size_t frames, uint32_t sample_rate) = 0;
 };
 
+// [AI MODE 2026-11-05] AI MODE (newview wolfaimode.cpp): the avatar's own AI personality speaks over the resident's voice.
+// While a speech source is set, every 10 ms capture buffer - the PC microphone's (RecordedDataIsAvailable) or the VR headset
+// microphone's (the mic clock) - is offered to it first, on that capture thread, before the voice engine gets it. When
+// speak() returns true the buffer the engine gets is what speak() wrote (the AI's voice; what it did not write is silence):
+// the microphone is held while the AI talks, so the two never mix and the resident's speakers cannot echo him back out.
+// False: the microphone's own sound goes on unchanged. It must not block (a ring read, no locks held long).
+class LLWebRTCSpeechSource
+{
+  public:
+    virtual bool speak(int16_t* out, size_t frames, size_t channels, uint32_t sample_rate) = 0;
+};
+
 // The LLWebRTCDeviceInterface provides a way for the viewer
 // to enumerate, set, and get notifications of changes
 // for both capture (microphone) and render (speaker)
@@ -207,6 +219,16 @@ class LLWebRTCDeviceInterface
     virtual void setVRPlayoutTap(LLWebRTCPlayoutTap* tap) = 0;
     virtual void setPlayoutSilenced(bool silenced) = 0;
     virtual void setExternalMic(LLWebRTCExternalMic* mic) = 0;
+
+    // [AI MODE 2026-11-05] see LLWebRTCSpeechSource (nullptr removes it); a tap of the microphone as captured (before the
+    // speech source - the resident's own words, never the AI's), called on the capture thread like the playout taps; a
+    // third playout tap (the voices heard, for the AI to listen to). setSpeechGain(true): while the AI talks the voice
+    // engine's gain stage passes the buffer at unity whatever the mute state asks of it (the microphone is held by the
+    // speech source then, so nothing of the resident's goes out).
+    virtual void setSpeechSource(LLWebRTCSpeechSource* source) = 0;
+    virtual void setCaptureTap(LLWebRTCPlayoutTap* tap) = 0;
+    virtual void setListenTap(LLWebRTCPlayoutTap* tap) = 0;
+    virtual void setSpeechGain(bool open) = 0;
 };
 
 // LLWebRTCAudioInterface provides the viewer with a way

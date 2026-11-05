@@ -84,6 +84,7 @@
 #include "wolfupdate.h"         // <WolfViewer 2026-10-02/> WolfUpdate::shutdown
 #include "wolfvrstream.h"       // [VR PIPE 2026-11-03/] WolfVRStream::shutdown, [VR STAGES 2026-11-04/] headsetInVR
 #include "wolfvrscreen.h"       // [VR STEREO 2026-11-04/] WolfVRScreen::displayFrame
+#include "wolfaimode.h"         // [AI MODE 2026-11-05/]
 #include "wolfvraudio.h"        // [VR AUDIO 2026-11-04/] WolfVRAudio::shutdown
 #include "wolfdjaudio.h"        // [WOLF DJ 2026-10-04/] WolfDJMixer::shutdown
 #include "wolffloaterdj.h"      // [WOLF DJ 2026-10-04/] wolfdj_on_app_quit
@@ -1830,6 +1831,7 @@ bool LLAppViewer::doFrame()
                 saveFinalSnapshot();
 
                 WolfVRAudio::shutdown();   // [VR AUDIO 2026-11-04/] before voice goes
+                if (WolfAIMode::instanceExists()) WolfAIMode::instance().shutdown();   // [AI MODE 2026-11-05/] its taps too
                 if (LLVoiceClient::instanceExists())
                 {
                     LLVoiceClient::getInstance()->terminate();
@@ -2014,6 +2016,7 @@ bool LLAppViewer::doFrame()
 
         pingMainloopTimeout("Main:TerminateVoice");
         WolfVRAudio::shutdown();   // [VR AUDIO 2026-11-04/] the headset's taps off the sound engine and voice first
+        if (WolfAIMode::instanceExists()) WolfAIMode::instance().shutdown();   // [AI MODE 2026-11-05/] its taps too
         if (LLVoiceClient::instanceExists())
         {
             LLVoiceClient::getInstance()->terminate();
@@ -6388,6 +6391,7 @@ void LLAppViewer::idle()
     WolfBuilder::instance().idle();
     // Dictation capture polling and the read-aloud queue (wolfspeech.cpp).
     WolfSpeech::instance().idle();
+    WolfAIMode::instance().idle();   // [AI MODE 2026-11-05/] hearing, the brain, speaking (wolfaimode.cpp)
     // Focus + zoom the shared face once its media exists (wolfscreenshare.cpp).
     WolfScreenShare::instance().idle();
     WolfWeather::instance().idle();   // <WolfViewer 2026-09-10> rain / snow, menu or parcel prims

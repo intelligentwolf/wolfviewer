@@ -997,6 +997,8 @@ set(viewer_SOURCE_FILES
     wolfviewerkey.cpp
     wolflandsandbox.cpp
     wolflightning.cpp
+    wolfaimode.cpp
+    wolffloateraimode.cpp
     wolfspeech.cpp
     wolfoceanfft.cpp
     wolfwakefield.cpp
@@ -2017,6 +2019,8 @@ set(viewer_HEADER_FILES
     wolfviewerkey.h
     wolflandsandbox.h
     wolflightning.h
+    wolfaimode.h
+    wolffloateraimode.h
     wolfspeech.h
     wolfoceanfft.h
     wolfseastate.h

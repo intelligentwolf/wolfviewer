@@ -1020,7 +1020,7 @@ void LLWebRTCVoiceClient::setHidden(bool hidden)
     {
         if (mWebRTCDeviceInterface)
         {
-            mWebRTCDeviceInterface->setMute(mHidden || mMuteMic,
+            mWebRTCDeviceInterface->setMute(mHidden || wolfMicMuted(),   // [AI MODE 2026-11-05] the AI may be talking
                                             mHidden ? 0 : SET_HIDDEN_RESTORE_DELAY_MS); // delay 200ms so as to not pile up mutes/unmutes.
         }
         if (mHidden)
@@ -1032,7 +1032,7 @@ void LLWebRTCVoiceClient::setHidden(bool hidden)
         else
         {
             // and put it back
-            sessionState::for_each(boost::bind(predSetMuteMic, _1, mMuteMic));
+            sessionState::for_each(boost::bind(predSetMuteMic, _1, wolfMicMuted()));
             updatePosition();
             sendPositionUpdate(true);
         }
@@ -1622,7 +1622,7 @@ void LLWebRTCVoiceClient::sendPositionUpdate(bool force)
 void LLWebRTCVoiceClient::updateOwnVolume()
 {
     F32 audio_level = 0.0f;
-    if (!mMuteMic && mWebRTCDeviceInterface)
+    if (!wolfMicMuted() && mWebRTCDeviceInterface)
     {
         float rms = mWebRTCDeviceInterface->getPeerConnectionAudioLevel();
         audio_level = LEVEL_START_POINT - LEVEL_SCALE * rms;
@@ -2050,11 +2050,19 @@ void LLWebRTCVoiceClient::setMuteMic(bool muted)
     }
 
     mMuteMic = muted;
+    wolfApplyMicMute();
+}
 
+// [AI MODE 2026-11-05] the mute the device and the sessions get: the resident's own (mMuteMic), except while their avatar's AI
+// is talking (wolfaimode.cpp) - then the voice path stays open and the AI's voice goes out with the microphone held (llwebrtc.h
+// LLWebRTCSpeechSource), so nothing of the resident's own is sent while they are muted. The body is setMuteMic's own.
+void LLWebRTCVoiceClient::wolfApplyMicMute()
+{
     if (mIsInTuningMode)
     {
         return;
     }
+    const bool muted = wolfMicMuted();
 
     if (mWebRTCDeviceInterface)
     {
@@ -2066,6 +2074,19 @@ void LLWebRTCVoiceClient::setMuteMic(bool muted)
     {
         sessionState::for_each(boost::bind(predSetMuteMic, _1, muted));
     }
+}
+
+F32 LLWebRTCVoiceClient::sWolfServerOwnLevel = 0.f;   // [AI MODE 2026-11-05/]
+
+void LLWebRTCVoiceClient::wolfSetSpeechOpen(bool open)
+{
+    if (mWolfSpeechOpen == open)
+    {
+        return;
+    }
+    mWolfSpeechOpen = open;
+    LL_INFOS("Voice") << "AI Mode speech " << (open ? "open" : "closed") << LL_ENDL;
+    wolfApplyMicMute();
 }
 
 void LLWebRTCVoiceClient::predSetMuteMic(const LLWebRTCVoiceClient::sessionStatePtr_t &session, bool muted)
@@ -2469,7 +2490,7 @@ LLWebRTCVoiceClient::sessionStatePtr_t LLWebRTCVoiceClient::addSession(const std
         // No existing session found.
 
         LL_DEBUGS("Voice") << "adding new session with channel: " << channel_id << LL_ENDL;
-        session->setMuteMic(mMuteMic);
+        session->setMuteMic(wolfMicMuted());
         session->setSpeakerVolume(mSpeakerVolume);
 
         sessionState::addSession(channel_id, session);
@@ -3900,6 +3921,13 @@ void LLVoiceWebRTCConnection::OnDataReceivedImpl(const std::string &data, bool b
                         // server sends up power as an integer which is level * 128 to save
                         // character count.
                         participant->mLevel = (F32)participant_obj["p"].as_int64()/128.0f;
+                        // [AI MODE 2026-11-05] what the voice server itself measured of OUR sound (wolfvoice room.rs:718-742
+                        // reports a speaker's own level to them): wolfaimode.cpp logs its peak while the AI talks, the proof
+                        // that his voice reached the server
+                        if (agent_id == gAgentID)
+                        {
+                            LLWebRTCVoiceClient::sWolfServerOwnLevel = participant->mLevel;
+                        }
                     }
 
                     if (participant_obj.contains("v") && participant_obj["v"].is_bool())

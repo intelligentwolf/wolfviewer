@@ -1369,7 +1369,7 @@ void partsFrameStart(bool counting, F64 now)
     {
         std::vector<F32> v = p.lag;
         std::sort(v.begin(), v.end());
-        lag = llformat("%.0f ms (p95 %.0f)", v[v.size() / 2], v[std::min(v.size() - 1, (size_t)(v.size() * 0.95))]);
+        lag = llformat("%.0f ms (p95 %.0f)", v[v.size() / 2], v[std::min(v.size() - 1, (size_t)((double)v.size() * 0.95))]);
     }
     const F64 other = p.period - p.idle - p.eye0 - p.eye1 - p.probes;
     LL_INFOS("WolfVR") << llformat("VR frame parts: %.1f frames/s; per frame (main thread, ms) idle loop %.1f, left eye %.1f, "

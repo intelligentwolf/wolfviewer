@@ -250,7 +250,7 @@ namespace
         {
             const F64 p = (F64)i * rate / kSpeechRate;
             const size_t a = (size_t)p;
-            const F32 t = (F32)(p - a);
+            const F32 t = (F32)(p - (F64)a);
             const F32 x0 = mono[std::min(a, frames - 1)], x1 = mono[std::min(a + 1, frames - 1)];
             out[i] = (S16)llclamp((S32)std::lround(x0 + (x1 - x0) * t), -32768, 32767);
         }

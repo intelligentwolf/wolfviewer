@@ -34,6 +34,7 @@ import { VRLayer } from './vrlayer.js';
 import { VRKeyboard, layoutFor } from './vrkeyboard.js';
 import { VRAudio } from './vraudio.js';
 import { DepthEyes, inflateDepth, SHELL } from './vrdepth.js';
+import { VRTheatre } from './vrtheatre.js';
 
 // [VR PAIRING 2026-11-03] No code in the address (Paul: "get rid of that code"). This headset's own random id, kept in
 // this browser; the PC asks Allow / Deny the first time it sees it, then remembers it (wolfvrpairing.h). The secret
@@ -1017,13 +1018,21 @@ function eyesOf(pose) {
 // 2.5 m. Left stick up/down changes it, the left menu button recentres it in front of you.
 const BIG = () => !!(config && config.mode === 'screen');
 const SCREEN_RADIUS = 2.5;
-const SCREEN_SIZES = [1.6, 2.0, 2.6, 3.2, 4.0, 5.0];
-let screenSizeIndex = 3;
+const SCREEN_SIZES = [1.6, 2.0, 2.6, 3.2, 4.0, 5.0];   // the old steps: a saved step from before W96 is read as its width
+// [VR STRETCH 2026-11-05] Paul: "add stretch handles when its in 'big screen' mode". The width is now any size in this
+// range (metres at SCREEN_RADIUS; 6.5 m is a 150-degree arc), set by dragging a corner handle or stepped by the stick.
+const SCREEN_MIN = 1.2, SCREEN_MAX = 6.5, SCREEN_STEP = 1.2;
+let screenWidth = 3.2;
 try {
-    const raw = localStorage.getItem('wolfvr.screenSize');   // null on a first visit (Number(null) would be 0)
+    const w = Number(localStorage.getItem('wolfvr.screenWidth'));   // 0 when missing (Number(null))
+    const raw = localStorage.getItem('wolfvr.screenSize');           // null on a first visit (Number(null) would be 0)
     const v = raw === null ? NaN : Number(raw);
-    if (Number.isInteger(v) && v >= 0 && v < SCREEN_SIZES.length) screenSizeIndex = v;
+    if (w >= SCREEN_MIN && w <= SCREEN_MAX) screenWidth = w;
+    else if (Number.isInteger(v) && v >= 0 && v < SCREEN_SIZES.length) screenWidth = SCREEN_SIZES[v];
 } catch (e) { /* storage blocked: the default size */ }
+// [VR THEATRE 2026-11-05] the cinema room around the big screen (vrtheatre.js), on unless the resident turned it off
+let theatreOn = true;
+try { theatreOn = localStorage.getItem('wolfvr.theatre') !== '0'; } catch (e) { /* storage blocked: on */ }
 const bigGroup = new THREE.Group();          // centred on the user's head when placed; faces -Z
 bigGroup.position.set(0, 1.6, 0);
 scene.add(bigGroup);
@@ -1032,9 +1041,49 @@ const bigMesh = new THREE.Mesh(new THREE.BufferGeometry(), bigMat);
 bigMesh.frustumCulled = false;
 bigMesh.visible = false;
 bigGroup.add(bigMesh);
+const theatre = new VRTheatre(bigGroup);
+let theatreFloor = -1.2;                     // the floor, metres below the head when the screen was placed (recentre)
+// [VR STRETCH] the four corner handles and the Theatre button under the screen: shown while the pointer is on the
+// screen or on one of them (so the picture stays clean otherwise)
+const knobMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55, depthTest: false });
+const knobHotMat = new THREE.MeshBasicMaterial({ color: 0x84cc16, transparent: true, opacity: 0.95, depthTest: false });
+const knobs = [-1, 1].flatMap((sx) => [-1, 1].map((sy) => {
+    const k = new THREE.Mesh(new THREE.SphereGeometry(0.06, 16, 12), knobMat);
+    k.userData = { sx, sy };
+    k.renderOrder = 9990; k.visible = false;
+    bigGroup.add(k);
+    return k;
+}));
+const tbCanvas = document.createElement('canvas');
+tbCanvas.width = 512; tbCanvas.height = 128;
+const tbTex = new THREE.CanvasTexture(tbCanvas);
+tbTex.colorSpace = THREE.SRGBColorSpace;
+const theatreBtn = new THREE.Mesh(new THREE.PlaneGeometry(0.6, 0.15), new THREE.MeshBasicMaterial({ map: tbTex, transparent: true, depthTest: false }));
+theatreBtn.renderOrder = 9990; theatreBtn.visible = false;
+bigGroup.add(theatreBtn);
+function drawTheatreBtn(hot) {
+    const c = tbCanvas.getContext('2d');
+    c.clearRect(0, 0, 512, 128);
+    c.fillStyle = hot ? 'rgba(132,204,22,0.95)' : 'rgba(20,20,28,0.85)';
+    c.beginPath(); c.roundRect(4, 4, 504, 120, 40); c.fill();
+    c.strokeStyle = hot ? '#ffffff' : 'rgba(255,255,255,0.5)'; c.lineWidth = 4; c.stroke();
+    c.fillStyle = hot ? '#111' : '#fff';
+    c.font = 'bold 58px system-ui, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.fillText(theatreOn ? 'Theatre: On' : 'Theatre: Off', 256, 66);
+    tbTex.needsUpdate = true;
+}
 let bigArc = 1, bigHeight = 1;               // radians, metres
+function placeBigControls() {
+    const off = 0.07;   // just outside each corner, so a click on the picture's corner still reaches the viewer
+    for (const k of knobs) {
+        const a = k.userData.sx * (bigArc / 2 + off / SCREEN_RADIUS);
+        k.position.set(SCREEN_RADIUS * Math.sin(a), k.userData.sy * (bigHeight / 2 + off), -SCREEN_RADIUS * Math.cos(a));
+    }
+    theatreBtn.position.set(0, -bigHeight / 2 - 0.17, -SCREEN_RADIUS + 0.02);
+    theatre.layout(SCREEN_RADIUS, screenWidth, bigHeight, theatreFloor);
+}
 function buildBigScreen() {
-    const width = SCREEN_SIZES[screenSizeIndex];
+    const width = screenWidth;
     const aspect = config && config.w && config.h ? config.w / config.h : 16 / 9;
     bigArc = width / SCREEN_RADIUS;
     bigHeight = width / aspect;
@@ -1054,13 +1103,23 @@ function buildBigScreen() {
     bigMesh.geometry = g;
     const lbl = $('wvr-size');
     if (lbl) lbl.textContent = `${width.toFixed(1)} m wide`;
+    placeBigControls();
+    drawTheatreBtn(false);
 }
-function setScreenSize(i) {
-    screenSizeIndex = Math.max(0, Math.min(SCREEN_SIZES.length - 1, i));
-    try { localStorage.setItem('wolfvr.screenSize', String(screenSizeIndex)); } catch (e) { /* see above */ }
+// quiet: while a handle is dragged (no toast for every frame); the size is saved when it is let go
+function setScreenWidth(w, quiet) {
+    screenWidth = Math.max(SCREEN_MIN, Math.min(SCREEN_MAX, w));
     buildBigScreen();
-    toast(`Screen ${SCREEN_SIZES[screenSizeIndex].toFixed(1)} m wide`);
+    if (quiet) return;
+    try { localStorage.setItem('wolfvr.screenWidth', screenWidth.toFixed(3)); } catch (e) { /* see above */ }
+    toast(`Screen ${screenWidth.toFixed(1)} m wide`);
     sizeFlashUntil = performance.now() + 2500;   // in VR the numbers panel shows the new size for a moment
+}
+function setTheatre(on) {
+    theatreOn = on;
+    try { localStorage.setItem('wolfvr.theatre', on ? '1' : '0'); } catch (e) { /* see above */ }
+    drawTheatreBtn(true);
+    toast(on ? 'Theatre on' : 'Theatre off');
 }
 // Put the screen straight in front of the head (yaw only, so it stays upright).
 let bigPlaced = false, sizeFlashUntil = 0;
@@ -1069,6 +1128,9 @@ function recentre(headPos, headQuat) {
     bigGroup.position.copy(headPos);
     bigGroup.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), e.y);
     bigPlaced = true;
+    // [VR THEATRE] the floor where the headset says it is (local-floor: world y = 0); without one, a seated 1.2 m below
+    theatreFloor = headPos.y > 0.8 && headPos.y < 2.4 ? -headPos.y : -1.2;
+    placeBigControls();
 }
 // The laser and the dot where it meets the screen (WolfStorm vr_menu.js pointer look: a thin light ray, bright tip).
 const laserGeom = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0, -1)]);
@@ -1190,7 +1252,7 @@ function numberRows() {
         ['round trip', fmt(num.rtt) + ' ms', ''],
         ['sent', fmt(v.fps) + ' fps', `${fmt((v.kbps || NaN) / 1000)} Mbit/s`],
         ['encoder', v.encoder || (config ? config.encoder : '–'), v.skipped ? `skipped ${v.skipped}` : ''],
-    ].concat(BIG() ? [['screen', `${SCREEN_SIZES[screenSizeIndex].toFixed(1)} m wide`, 'left stick up/down']] : [])
+    ].concat(BIG() ? [['screen', `${screenWidth.toFixed(1)} m wide`, 'corner handles, or the stick pointing away']] : [])
      .concat([['sound', vrAudio.bufferedMs ? `${fmt(vrAudio.bufferedMs, 0)} ms buffered` : 'off',
         Number.isFinite(vrAudio.skewMs) ? `with picture ${fmt(vrAudio.skewMs, 0)} ms` : '']])
      .concat(!BIG() && screen.userData.hdr ? [['3D picture', screen.userData.hdr.stereo ? 'two eyes' : 'one view',
@@ -1345,6 +1407,9 @@ function restoreAfterVR() {
     bigGroup.quaternion.identity();
     bigPlaced = false;
     laser.visible = dot.visible = false;
+    for (const k of knobs) k.visible = false;   // [VR STRETCH]
+    theatreBtn.visible = false;
+    bigDrag = null;
     for (const b of [0, 2]) pointerButton(b, false);   // never leave a button held down in the viewer
     for (const b of [0, 2]) layerButton(b, false);
     for (const b of [0, 2]) { if (worldPointer.owner[b] === 'ptr') ptrButton(b, false); worldPointer.owner[b] = null; }
@@ -1434,6 +1499,9 @@ function enterMode() {
     if (big) { buildBigScreen(); bigPlaced = false; statsOn = false; }
     else { for (const b of [0, 2]) pointerButton(b, false); }
     laser.visible = dot.visible = false;
+    for (const k of knobs) k.visible = false;   // [VR STRETCH] Big Screen's own controls
+    theatreBtn.visible = false;
+    bigDrag = null;
     layer.setActive(world && renderer.xr.isPresenting);
 }
 
@@ -1492,7 +1560,7 @@ function pollRightStick(gp, aimed) {
         const now = performance.now();
         if (aimed) {
             if (Math.abs(y) > 0.5 && now - ptr.lastWheel > 120) { ptr.lastWheel = now; pointerWheel(Math.sign(y)); }
-        } else if (Math.abs(y) > 0.6 && sizeArmed) { sizeArmed = false; setScreenSize(screenSizeIndex + (y < 0 ? 1 : -1)); }
+        } else if (Math.abs(y) > 0.6 && sizeArmed) { sizeArmed = false; setScreenWidth(screenWidth * (y < 0 ? SCREEN_STEP : 1 / SCREEN_STEP)); }
         if (Math.abs(y) < 0.3) sizeArmed = true;
         return 0;
     }
@@ -1500,15 +1568,58 @@ function pollRightStick(gp, aimed) {
 }
 
 // Big screen: the right controller is the mouse; returns whether it points at the screen.
+// [VR STRETCH 2026-11-05] a corner handle held with the trigger: the screen's width follows the pointer (the corner goes
+// where it points, the screen stays centred and keeps its picture's shape); let go = saved.
+let bigDrag = null;
+const _bray = new THREE.Raycaster(), _blo = new THREE.Vector3(), _bld = new THREE.Vector3();
 function pollPointer(src, gp, frame) {
     let aimed = false;
     const rp = frame.getPose(src.targetRaySpace, renderer.xr.getReferenceSpace());
+    const trig = !!(gp.buttons[0] && gp.buttons[0].pressed);
     if (rp) {
         dolly.updateMatrixWorld();
         _m.fromArray(rp.transform.matrix).premultiply(dolly.matrixWorld);
         _m.decompose(_ro, _rq, _scl);
         _rd.set(0, 0, -1).applyQuaternion(_rq);
+        if (bigDrag) {
+            if (!trig) { bigDrag = null; setScreenWidth(screenWidth); for (const k of knobs) k.material = knobMat; }
+            else {
+                // the pointer's direction in the screen's frame: its angle off the centre is half the new arc
+                bigGroup.updateMatrixWorld();
+                _inv.copy(bigGroup.matrixWorld).invert();
+                _bld.copy(_rd).transformDirection(_inv);
+                _blo.copy(_ro).applyMatrix4(_inv);
+                const t = Math.max(0.1, -(_blo.z + SCREEN_RADIUS * 0.9) / Math.min(-1e-3, _bld.z));
+                const px = _blo.x + _bld.x * t, pz = _blo.z + _bld.z * t;
+                const half = Math.abs(Math.atan2(px, -pz));
+                setScreenWidth(2 * Math.max(0.05, half) * SCREEN_RADIUS, true);
+                laser.position.copy(_ro); laser.quaternion.copy(_rq); laser.scale.set(1, 1, SCREEN_RADIUS); laser.visible = true;
+                dot.visible = false;
+                return true;
+            }
+        }
+        // the handles and the Theatre button first (only while they show), then the screen
+        _bray.set(_ro, _rd);
+        const showing = knobs[0].visible;
+        const hitCtl = showing ? _bray.intersectObjects([...knobs, theatreBtn], false)[0] : null;
+        for (const k of knobs) k.material = hitCtl && hitCtl.object === k ? knobHotMat : knobMat;
+        const btnHot = !!(hitCtl && hitCtl.object === theatreBtn);
+        if (btnHot !== !!theatreBtn.userData.hot) { theatreBtn.userData.hot = btnHot; drawTheatreBtn(btnHot); }
+        if (hitCtl) {
+            laser.position.copy(_ro); laser.quaternion.copy(_rq); laser.scale.set(1, 1, hitCtl.distance); laser.visible = true;
+            dot.visible = false;
+            const was = !!ptr.ctlTrig;
+            ptr.ctlTrig = trig;
+            if (trig && !was) {
+                if (hitCtl.object === theatreBtn) setTheatre(!theatreOn);
+                else { bigDrag = { knob: hitCtl.object }; }
+            }
+            if (!(ptr.buttons[0])) return true;   // the viewer's button stays as it is while on a control
+        }
+        ptr.ctlTrig = trig;
         const h = hitBigScreen(_ro, _rd);
+        for (const k of knobs) k.visible = !!(h || hitCtl);
+        theatreBtn.visible = !!(h || hitCtl);
         laser.position.copy(_ro); laser.quaternion.copy(_rq); laser.scale.set(1, 1, h ? h.t : 3); laser.visible = true;
         if (h) {
             aimed = true;
@@ -1847,6 +1958,8 @@ function animate(time, frame) {
         }
     }
     if (!renderer.xr.isPresenting) { laser.visible = false; }
+    // [VR THEATRE] the cinema room only around the big screen, in the headset
+    theatre.setVisible(BIG() && theatreOn && renderer.xr.isPresenting && bigMesh.visible);
     // Reprojection: put the picture where it was rendered for, around where the head is NOW.
     const hdr = screen.userData.hdr;
     if (hdr && !BIG()) {
@@ -2001,14 +2114,18 @@ function openKeyboard() {
     typeBox.focus({ preventScroll: true });
     toast('Type on the keyboard; it goes to WolfViewer.');
 }
-$('wvr-bigger').addEventListener('click', () => setScreenSize(screenSizeIndex + 1));
-$('wvr-smaller').addEventListener('click', () => setScreenSize(screenSizeIndex - 1));
+$('wvr-bigger').addEventListener('click', () => setScreenWidth(screenWidth * SCREEN_STEP));
+$('wvr-smaller').addEventListener('click', () => setScreenWidth(screenWidth / SCREEN_STEP));
 
 window.__wolfvr = { resetStages: () => { for (const k of STAGES) stages[k].v.length = 0; },
     rates: () => ({ display: num.fps, gotFps: num.gotFps, decodedFps: num.decodedFps, newFps: num.newFps, p2p: num.p2p.avg(), v2p: num.v2p.avg() }),
     stages: () => Object.fromEntries(STAGES.map((k) => [k, { p50: stages[k].pct(0.5), p95: stages[k].pct(0.95), n: stages[k].v.length }])),
     numbers: () => ({ rows: numberRows(), p2p: num.p2p.v.slice(-20), v2p: num.v2p.v.slice(-20) }), toggleVR, config: () => config,
-    big: () => ({ on: BIG(), size: SCREEN_SIZES[screenSizeIndex], visible: bigMesh.visible, ptr: { u: ptr.u, v: ptr.v } }),
+    big: () => ({ on: BIG(), size: screenWidth, visible: bigMesh.visible, ptr: { u: ptr.u, v: ptr.v }, theatre: theatreOn && theatre.group.visible,
+                  knobs: knobs.map((k) => k.visible), drag: !!bigDrag }),
+    // [VR STRETCH / THEATRE] test hooks: a corner handle's or the Theatre button's world position
+    knobPoint: (i) => { bigGroup.updateMatrixWorld(); return knobs[i].getWorldPosition(new THREE.Vector3()).toArray(); },
+    theatreBtnPoint: () => { bigGroup.updateMatrixWorld(); return theatreBtn.getWorldPosition(new THREE.Vector3()).toArray(); },
     // test hooks (scripts/wolfvr/e2e_viewer.mjs): the picture as received, and a click at a point of it
     grab: () => {
         if (!shown || !config) return null;

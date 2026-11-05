@@ -69,6 +69,21 @@ namespace WolfVRScreen
     /** [VR WORLD POINTER 2026-11-04] The headset's pointer was used in the last 2 s (the window then counts the mouse as
      *  inside it, whatever the PC's own mouse is doing: LLViewerWindow::updateMouseDelta). */
     bool pointerActive();
+    /** [VR FRAME PARTS 2026-11-05] The main loop's parts outside displayFrame (llappviewer.cpp), timed for the 30-second
+     *  "VR frame parts" summary while a headset is in VR 3D Mode: start, then end, of each. */
+    enum class FramePart { Idle, Probes };
+    void framePart(FramePart part, bool start);
+    /** [VR SPEED 2026-11-05] Named sub-parts of the frame for the same 30-second summary ("biggest pieces"), only counted
+     *  while a headset is in VR 3D Mode: Paul's real sessions spent ~20 ms a frame in the idle loop and ~40 ms on the left
+     *  eye where the emulator (same laptop, same settings) spent ~5 and ~20 ms, and perf cannot attach on this machine.
+     *  `name` must be a string literal (it is kept by pointer). */
+    void subPart(const char* name, bool start);
+    struct SubPart
+    {
+        const char* name;
+        explicit SubPart(const char* n) : name(n) { subPart(name, true); }
+        ~SubPart() { subPart(name, false); }
+    };
     /** Frees the GPU objects (stream switched off, or the viewer closing). Main thread, GL context current. */
     void release();
 }

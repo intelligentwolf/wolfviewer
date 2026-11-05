@@ -899,7 +899,7 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
     if (gDisconnected)
     {
         LLAppViewer::instance()->pingMainloopTimeout("Display:Disconnected");
-        render_ui();
+        { WolfVRScreen::SubPart wsp_(WolfVRScreen::secondEye() ? "render_ui R" : "render_ui L"); render_ui(); }
         swap();
     }
 
@@ -983,7 +983,7 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
         // *TODO: merge these two methods
         {
             LL_PROFILE_ZONE_NAMED_CATEGORY_DISPLAY("HUD Update");
-            LLHUDManager::getInstance()->updateEffects();
+            { WolfVRScreen::SubPart wsp_(WolfVRScreen::secondEye() ? "hudEffects R" : "hudEffects L"); LLHUDManager::getInstance()->updateEffects(); }
             LLHUDObject::updateAll();
             stop_glerror();
         }
@@ -992,13 +992,13 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
         {
             LL_PROFILE_ZONE_NAMED_CATEGORY_DISPLAY("Update Geom");
             const F32 max_geom_update_time = 0.005f*10.f*gFrameIntervalSeconds.value(); // 50 ms/second update time
-            gPipeline.createObjects(max_geom_update_time);
-            gPipeline.processPartitionQ();
-            gPipeline.updateGeom(max_geom_update_time);
+            { WolfVRScreen::SubPart wsp_(WolfVRScreen::secondEye() ? "createObjects R" : "createObjects L"); gPipeline.createObjects(max_geom_update_time); }
+            { WolfVRScreen::SubPart wsp_(WolfVRScreen::secondEye() ? "processPartitionQ R" : "processPartitionQ L"); gPipeline.processPartitionQ(); }
+            { WolfVRScreen::SubPart wsp_(WolfVRScreen::secondEye() ? "updateGeom R" : "updateGeom L"); gPipeline.updateGeom(max_geom_update_time); }
             stop_glerror();
         }
 
-        gPipeline.updateGL();
+        { WolfVRScreen::SubPart wsp_(WolfVRScreen::secondEye() ? "updateGL R" : "updateGL L"); gPipeline.updateGL(); }
 
         stop_glerror();
 
@@ -1025,7 +1025,7 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
         static LLCullResult result;
         LLViewerCamera::sCurCameraID = LLViewerCamera::CAMERA_WORLD;
         LLPipeline::sUnderWaterRender = LLViewerCamera::getInstance()->cameraUnderWater();
-        if (!vr_shared_cull) gPipeline.updateCull(*LLViewerCamera::getInstance(), result);
+        { WolfVRScreen::SubPart wsp_(WolfVRScreen::secondEye() ? "updateCull R" : "updateCull L"); if (!vr_shared_cull) gPipeline.updateCull(*LLViewerCamera::getInstance(), result); }
         stop_glerror();
 
         LLGLState::checkStates();
@@ -1056,7 +1056,7 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
                     // matrices between frames); otherwise this eye draws its own
                     if (!((vr_shared_cull || WolfVRScreen::reuseShadowsThisFrame()) && gPipeline.wolfVRReuseSunShadow()))
                     {
-                        gPipeline.generateSunShadow(*LLViewerCamera::getInstance());
+                        { WolfVRScreen::SubPart wsp_(WolfVRScreen::secondEye() ? "sunShadow R" : "sunShadow L"); gPipeline.generateSunShadow(*LLViewerCamera::getInstance()); }
                     }
                 }
 
@@ -1134,8 +1134,10 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
         {
             LL_PROFILE_ZONE_NAMED_CATEGORY_DISPLAY("display - 4")
             LLViewerCamera::sCurCameraID = LLViewerCamera::CAMERA_WORLD;
-            if (!vr_shared_cull) gPipeline.stateSort(camera, result); // <FS:Ansariel> Factor out calls to getInstance
-            else gPipeline.grabReferences(result);   // [VR SHARED CULL 2026-11-04/] the eye's own shadow passes moved sCull to theirs
+            { WolfVRScreen::SubPart wsp_(WolfVRScreen::secondEye() ? "stateSort R" : "stateSort L");
+                if (!vr_shared_cull) gPipeline.stateSort(camera, result); // <FS:Ansariel> Factor out calls to getInstance
+                else gPipeline.grabReferences(result);   // [VR SHARED CULL 2026-11-04/] the eye's own shadow passes moved sCull to theirs
+            }
             stop_glerror();
 
             if (rebuild && !vr_shared_cull)
@@ -1159,7 +1161,7 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
         {
             LLAppViewer::instance()->pingMainloopTimeout("Display:Sky");
             LL_PROFILE_ZONE_NAMED_CATEGORY_ENVIRONMENT("update sky"); //LL_RECORD_BLOCK_TIME(FTM_UPDATE_SKY);
-            gSky.updateSky();
+            { WolfVRScreen::SubPart wsp_(WolfVRScreen::secondEye() ? "updateSky R" : "updateSky L"); gSky.updateSky(); }
         }
 
         if(gUseWireframe)
@@ -1266,7 +1268,7 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
             }
 
             gGL.setColorMask(true, true);
-            gPipeline.renderGeomDeferred(*LLViewerCamera::getInstance(), true);
+            { WolfVRScreen::SubPart wsp_(WolfVRScreen::secondEye() ? "renderGeom R" : "renderGeom L"); gPipeline.renderGeomDeferred(*LLViewerCamera::getInstance(), true); }
         }
 
         {
@@ -1288,7 +1290,7 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
 
         if (LLPipeline::sRenderDeferred)
         {
-            gPipeline.renderDeferredLighting();
+            { WolfVRScreen::SubPart wsp_(WolfVRScreen::secondEye() ? "deferredLighting R" : "deferredLighting L"); gPipeline.renderDeferredLighting(); }
         }
 
         LLPipeline::sUnderWaterRender = false;
@@ -1301,7 +1303,7 @@ void display(bool rebuild, F32 zoom_factor, int subfield, bool for_snapshot)
         LLAppViewer::instance()->pingMainloopTimeout("Display:RenderUI");
         if (!for_snapshot)
         {
-            render_ui();
+            { WolfVRScreen::SubPart wsp_(WolfVRScreen::secondEye() ? "render_ui R" : "render_ui L"); render_ui(); }
             swap();
         }
 
@@ -1760,7 +1762,8 @@ void render_ui(F32 zoom_factor, int subfield)
     }
 
     // apply gamma correction and post effects
-    gPipeline.renderFinalize();
+    { WolfVRScreen::SubPart wsp_(WolfVRScreen::secondEye() ? "ui finalize R" : "ui finalize L");   // [VR FRAME PARTS 2026-11-05]
+      gPipeline.renderFinalize(); }
     WolfVRScreen::captureWorld();   // [VR 3D 2026-11-03/] VR 3D Mode: the finished world, before the HUD and the UI
     if (WolfVRScreen::uiSkipped())   // [VR STEREO 2026-11-04/] the left eye's pass (or a paused desktop): no HUD or UI
     {
@@ -1778,7 +1781,8 @@ void render_ui(F32 zoom_factor, int subfield)
 
 
         LL_PROFILE_ZONE_NAMED_CATEGORY_UI("HUD");
-    render_hud_elements();
+    { WolfVRScreen::SubPart wsp_(WolfVRScreen::secondEye() ? "ui hudelements R" : "ui hudelements L");   // [VR FRAME PARTS 2026-11-05]
+      render_hud_elements(); }
 // [RLVa:KB] - Checked: RLVa-2.2 (@setoverlay)
         if (RlvActions::hasBehaviour(RLV_BHVR_SETOVERLAY))
         {
@@ -1786,7 +1790,8 @@ void render_ui(F32 zoom_factor, int subfield)
         }
 // [/RLVa:KB]
         LLGLState::checkStates();
-        render_hud_attachments();
+        { WolfVRScreen::SubPart wsp_(WolfVRScreen::secondEye() ? "ui hudattachments R" : "ui hudattachments L");   // [VR FRAME PARTS 2026-11-05]
+          render_hud_attachments(); }
 
         LLGLState::checkStates();
 
@@ -1803,7 +1808,8 @@ void render_ui(F32 zoom_factor, int subfield)
             {
                 LL_PROFILE_ZONE_NAMED_CATEGORY_UI("UI 3D"); //LL_RECORD_BLOCK_TIME(FTM_RENDER_UI_3D);
                 LLGLState::checkStates();
-                render_ui_3d();
+                { WolfVRScreen::SubPart wsp_(WolfVRScreen::secondEye() ? "ui 3d R" : "ui 3d L");   // [VR FRAME PARTS 2026-11-05]
+                  render_ui_3d(); }
                 LLGLState::checkStates();
             }
             else
@@ -1820,8 +1826,10 @@ void render_ui(F32 zoom_factor, int subfield)
         if (render_ui)
         {
             LL_PROFILE_ZONE_NAMED_CATEGORY_UI("UI 2D"); //LL_RECORD_BLOCK_TIME(FTM_RENDER_UI_2D);
-            LLHUDObject::renderAll();
-            render_ui_2d();
+            { WolfVRScreen::SubPart wsp_(WolfVRScreen::secondEye() ? "ui hudobjects R" : "ui hudobjects L");   // [VR FRAME PARTS 2026-11-05]
+              LLHUDObject::renderAll(); }
+            { WolfVRScreen::SubPart wsp_(WolfVRScreen::secondEye() ? "ui 2d R" : "ui 2d L");   // [VR FRAME PARTS 2026-11-05]
+              render_ui_2d(); }
         }
         // <FS:Beq> FIRE-33239 - particles do not sie when UI is disabled
         if (!render_ui)
@@ -1833,7 +1841,8 @@ void render_ui(F32 zoom_factor, int subfield)
 
         gViewerWindow->setup2DRender();
         gViewerWindow->updateDebugText();
-        gViewerWindow->drawDebugText();
+        { WolfVRScreen::SubPart wsp_(WolfVRScreen::secondEye() ? "ui debugtext R" : "ui debugtext L");   // [VR FRAME PARTS 2026-11-05]
+          gViewerWindow->drawDebugText(); }
     }
     WolfVRScreen::captureLayer();   // [VR HUD LAYER 2026-11-04/] the HUDs and floaters again, on their own, for the headset
 

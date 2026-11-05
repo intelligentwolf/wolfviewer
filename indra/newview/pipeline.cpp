@@ -4449,6 +4449,7 @@ static void wolf_env_post_pass()
 {
     if (!sWolfEnvPostPassPending) return;
     sWolfEnvPostPassPending = false;
+    WolfVRScreen::SubPart wsp_(WolfVRScreen::secondEye() ? "wolfsky composite R" : "wolfsky composite L");   // [VR FRAME PARTS 2026-11-05]
     // the screen target is bound here (renderDeferredLighting bound it for renderGeomPostDeferred); the composite reads it
     // and writes it back, as it did before the forward pools
     LLRenderTarget& screen = gPipeline.mRT->screen;
@@ -9916,6 +9917,7 @@ void LLPipeline::renderDeferredLighting()
             deferred_light_target->bindTarget();
             {  // paint shadow/SSAO light map (direct lighting lightmap)
                 LL_PROFILE_ZONE_NAMED_CATEGORY_PIPELINE("renderDeferredLighting - sun shadow");
+                WolfVRScreen::SubPart wsp_(WolfVRScreen::secondEye() ? "dl sunmap R" : "dl sunmap L");   // [VR FRAME PARTS 2026-11-05]
 
                 LLGLSLShader& sun_shader = gCubeSnapshot ? gDeferredSunProbeProgram : gDeferredSunProgram;
                 bindDeferredShader(sun_shader, deferred_light_target);
@@ -9943,6 +9945,7 @@ void LLPipeline::renderDeferredLighting()
         {
             // soften direct lighting lightmap
             LL_PROFILE_ZONE_NAMED_CATEGORY_PIPELINE("renderDeferredLighting - soften shadow");
+            WolfVRScreen::SubPart wsp_(WolfVRScreen::secondEye() ? "dl soften R" : "dl soften L");   // [VR FRAME PARTS 2026-11-05]
             LL_PROFILE_GPU_ZONE("soften shadow");
             // blur lightmap
             screen_target->bindTarget();
@@ -10011,6 +10014,7 @@ void LLPipeline::renderDeferredLighting()
             LLGLSLShader &soften_shader = gDeferredSoftenProgram;
 
             LL_PROFILE_ZONE_NAMED_CATEGORY_PIPELINE("renderDeferredLighting - atmospherics");
+            WolfVRScreen::SubPart wsp_(WolfVRScreen::secondEye() ? "dl atmospherics R" : "dl atmospherics L");   // [VR FRAME PARTS 2026-11-05]
             LL_PROFILE_GPU_ZONE("atmospherics");
             bindDeferredShader(soften_shader);
 
@@ -10066,6 +10070,7 @@ void LLPipeline::renderDeferredLighting()
 
             {
                 LL_PROFILE_ZONE_NAMED_CATEGORY_PIPELINE("renderDeferredLighting - local lights");
+                WolfVRScreen::SubPart wsp_(WolfVRScreen::secondEye() ? "dl locallights R" : "dl locallights L");   // [VR FRAME PARTS 2026-11-05]
                 LL_PROFILE_GPU_ZONE("local lights");
                 bindDeferredShader(gDeferredLightProgram);
 
@@ -10186,6 +10191,7 @@ void LLPipeline::renderDeferredLighting()
             if (!spot_lights.empty())
             {
                 LL_PROFILE_ZONE_NAMED_CATEGORY_PIPELINE("renderDeferredLighting - projectors");
+                WolfVRScreen::SubPart wsp_(WolfVRScreen::secondEye() ? "dl projectors R" : "dl projectors L");   // [VR FRAME PARTS 2026-11-05]
                 LL_PROFILE_GPU_ZONE("projectors");
                 LLGLDepthTest depth(GL_TRUE, GL_FALSE);
                 bindDeferredShader(gDeferredSpotLightProgram);
@@ -10230,6 +10236,7 @@ void LLPipeline::renderDeferredLighting()
 
             {
                 LL_PROFILE_ZONE_NAMED_CATEGORY_PIPELINE("renderDeferredLighting - fullscreen lights");
+                WolfVRScreen::SubPart wsp_(WolfVRScreen::secondEye() ? "dl fullscreenlights R" : "dl fullscreenlights L");   // [VR FRAME PARTS 2026-11-05]
                 LLGLDepthTest depth(GL_FALSE);
                 LL_PROFILE_GPU_ZONE("fullscreen lights");
 
@@ -10355,7 +10362,8 @@ void LLPipeline::renderDeferredLighting()
                           LLPipeline::RENDER_TYPE_WATEREXCLUSION,
                           END_RENDER_TYPES);
 
-        renderGeomPostDeferred(*LLViewerCamera::getInstance());
+        { WolfVRScreen::SubPart wsp_(WolfVRScreen::secondEye() ? "dl postdeferred R" : "dl postdeferred L");   // [VR FRAME PARTS 2026-11-05]
+          renderGeomPostDeferred(*LLViewerCamera::getInstance()); }
         popRenderTypeMask();
     }
     llassert(!sWolfEnvPostPassPending);   // renderGeomPostDeferred ran it (ticket 349)

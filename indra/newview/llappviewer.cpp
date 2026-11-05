@@ -1814,7 +1814,9 @@ bool LLAppViewer::doFrame()
                 {
                     LLPerfStats::RecordSceneTime T (LLPerfStats::StatType_t::RENDER_IDLE);
                     LL_PROFILE_ZONE_NAMED_CATEGORY_APP("df idle");
+                    WolfVRScreen::framePart(WolfVRScreen::FramePart::Idle, true);   // [VR FRAME PARTS 2026-11-05/]
                     idle();
+                    WolfVRScreen::framePart(WolfVRScreen::FramePart::Idle, false);
                 }
 
                 {
@@ -1854,7 +1856,9 @@ bool LLAppViewer::doFrame()
                     LLPerfStats::RecordSceneTime T(LLPerfStats::StatType_t::RENDER_IDLE);
                     LL_PROFILE_ZONE_NAMED_CATEGORY_APP("df Snapshot");
                     pingMainloopTimeout("Main:Snapshot");
+                    WolfVRScreen::framePart(WolfVRScreen::FramePart::Probes, true);   // [VR FRAME PARTS 2026-11-05/]
                     gPipeline.mReflectionMapManager.update();
+                    WolfVRScreen::framePart(WolfVRScreen::FramePart::Probes, false);
                     LLFloaterSnapshot::update(); // take snapshots
                     LLFloaterSimpleSnapshot::update();
                     LLFloaterFlickr::update(); // <FS:Beq/> FIRE-35002 - Flickr preview not updating whne opened directly from tool tray icon
@@ -5911,7 +5915,7 @@ void LLAppViewer::idle()
 
     LLFrameTimer::updateFrameTime();
     LLFrameTimer::updateFrameCount();
-    LLEventTimer::updateClass();
+    { WolfVRScreen::SubPart wsp_("LLEventTimer"); LLEventTimer::updateClass(); }
     LLPerfStats::updateClass();
 
     // LLApp::stepFrame() performs the above three calls plus mRunner.run().
@@ -5919,7 +5923,7 @@ void LLAppViewer::idle()
     // completely redundant with LLEventTimer.
     LLNotificationsUI::LLToast::updateClass();
     LLSmoothInterpolation::updateInterpolants();
-    LLMortician::updateClass();
+    { WolfVRScreen::SubPart wsp_("LLMortician"); LLMortician::updateClass(); }
     LLFilePickerThread::clearDead();  //calls LLFilePickerThread::notify()
     LLDirPickerThread::clearDead();
     F32 dt_raw = idle_timer.getElapsedTimeAndResetF32();
@@ -5928,7 +5932,7 @@ void LLAppViewer::idle()
 
     static LLCachedControl<U32> downscale_method(gSavedSettings, "RenderDownScaleMethod");
     gGLManager.mDownScaleMethod = downscale_method;
-    LLImageGL::updateClass();
+    { WolfVRScreen::SubPart wsp_("LLImageGL"); LLImageGL::updateClass(); }
 
     // Service the WorkQueue we use for replies from worker threads.
     // Use function statics for the timeslice setting so we only have to fetch
@@ -6096,7 +6100,7 @@ void LLAppViewer::idle()
         // floating throughout the various object lists.
         //
         idleNameCache();
-        idleNetwork();
+        { WolfVRScreen::SubPart wsp_("idleNetwork"); idleNetwork(); }
 
 
         // Check for away from keyboard, kick idle agents.
@@ -6143,7 +6147,7 @@ void LLAppViewer::idle()
     // <FS:SimonLsAlt> Handle deferred notice deletions
     if (auto* notificationsTabbed = LLFloaterReg::findTypedInstance<LLFloaterNotificationsTabbed>("notification_well_window"))
     {
-        notificationsTabbed->idle();
+        { WolfVRScreen::SubPart wsp_("notificationsTabbed"); notificationsTabbed->idle(); }
     }
     // </FS:SimonLsAlt/>
 
@@ -6151,7 +6155,7 @@ void LLAppViewer::idle()
     // updateUI() needs to be called even in case viewer disconected
     // since related notification still needs handling and allows
     // opening chat.
-    gViewerWindow->updateUI();
+    { WolfVRScreen::SubPart wsp_("updateUI"); gViewerWindow->updateUI(); }
 
     if (gDisconnected)
     {
@@ -6215,7 +6219,7 @@ void LLAppViewer::idle()
         if (!(logoutRequestSent() && hasSavedFinalSnapshot()))
         {
             LLPerfStats::tunedAvatars=0; // <FS:Beq> reset the number of avatars that have been tweaked.
-            gObjectList.update(gAgent);
+            { WolfVRScreen::SubPart wsp_("gObjectList.update"); gObjectList.update(gAgent); }
             LL::GLTFSceneManager::instance().update();
         }
     }
@@ -6252,7 +6256,7 @@ void LLAppViewer::idle()
 
     {
         LL_RECORD_BLOCK_TIME(FTM_HUD_EFFECTS);
-        LLSelectMgr::getInstance()->updateEffects();
+        { WolfVRScreen::SubPart wsp_("selectEffects"); LLSelectMgr::getInstance()->updateEffects(); }
         LLHUDManager::getInstance()->cleanupEffects();
         LLHUDManager::getInstance()->sendEffects();
     }
@@ -6272,7 +6276,7 @@ void LLAppViewer::idle()
     // Update surfaces, and surface textures as well.
     //
 
-    LLWorld::getInstance()->updateVisibilities();
+    { WolfVRScreen::SubPart wsp_("updateVisibilities"); LLWorld::getInstance()->updateVisibilities(); }
     {
         const F32 max_region_update_time = .001f; // 1ms
         LL_RECORD_BLOCK_TIME(FTM_REGION_UPDATE);
@@ -6314,57 +6318,57 @@ void LLAppViewer::idle()
     // <WolfViewer> Boats ride the water. Runs BEFORE gPipeline.updateMove() because it marks
     // the rocking hulls' drawables moved for this frame, and after gObjectList.update()
     // above so a sailing hull's interpolated position is the base it rides on.
-    WolfBoatRock::instance().idle();
+    { WolfVRScreen::SubPart wsp_("WolfBoatRock"); WolfBoatRock::instance().idle(); }
     // </WolfViewer>
     // <WolfViewer 2026-10-06> Flight Mode: flight data and the autopilot. After this frame's
     // AgentUpdate went out and the control flags were reset, so the keys it holds go out with
     // the next one, exactly like the dashboard's pedals (wolfdrive.cpp applyControlFlags).
-    WolfFlight::instance().idle();
+    { WolfVRScreen::SubPart wsp_("WolfFlight"); WolfFlight::instance().idle(); }
     // </WolfViewer>
     // <WolfViewer 2026-10-09> Driving: the dashboard's controls, the analogue link to WolfSim and
     // the dashboard's data; after WolfFlight, so Flight Mode coming on takes the panel's place.
-    WolfDrive::instance().idle();
+    { WolfVRScreen::SubPart wsp_("WolfDrive"); WolfDrive::instance().idle(); }
     // </WolfViewer>
     // <WolfViewer 2026-10-28> the Captain's Helm: the ship's hello, the HUD's commands, one bottom panel (wolfhelm.cpp);
     // after WolfDrive and WolfFlight so a dashboard or deck that came on this frame takes the bottom from it.
-    WolfHelm::instance().idle();
+    { WolfVRScreen::SubPart wsp_("WolfHelm"); WolfHelm::instance().idle(); }
     // </WolfViewer>
     // <WolfViewer 2026-11-01> Wolf Air: a warplane's hello, the dogfight band's orders and fire key, the kill feed
     // (wolfair.cpp); after WolfFlight so the deck it may switch on is there next frame. </WolfViewer>
-    WolfAir::instance().idle();
-    WolfFarTerrain::instance().idle();  // <WolfViewer 2026-10-08/> the ground beyond the terrain received (before the flat tiles: they skip its cells)
-    WolfFarGround::instance().idle();   // <WolfViewer 2026-10-07/> map tiles for the regions not connected
-    WolfBirds::instance().idle();       // [BIRDS 2026-11-02/] ticket 445: the wild birds (wolfbirds.h)
-    WolfSeaLife::instance().idle();     // [SEA LIFE 2026-11-03/] ticket 499: dolphins and whales in the open sea (wolfsealife.h)
-    WolfSwimBubbles::instance().idle(); // [SWIM BUBBLES 2026-11-02/] ticket 346: bubbles from mouths under the water
-    WolfNatureSounds::instance().idle(); // [NATURE SOUNDS 2026-11-03/] ticket 475: insects, lapping and surf (wolfnaturesounds.h)
+    { WolfVRScreen::SubPart wsp_("WolfAir"); WolfAir::instance().idle(); }
+    { WolfVRScreen::SubPart wsp_("WolfFarTerrain"); WolfFarTerrain::instance().idle(); }  // <WolfViewer 2026-10-08/> the ground beyond the terrain received (before the flat tiles: they skip its cells)
+    { WolfVRScreen::SubPart wsp_("WolfFarGround"); WolfFarGround::instance().idle(); }   // <WolfViewer 2026-10-07/> map tiles for the regions not connected
+    { WolfVRScreen::SubPart wsp_("WolfBirds"); WolfBirds::instance().idle(); }       // [BIRDS 2026-11-02/] ticket 445: the wild birds (wolfbirds.h)
+    { WolfVRScreen::SubPart wsp_("WolfSeaLife"); WolfSeaLife::instance().idle(); }     // [SEA LIFE 2026-11-03/] ticket 499: dolphins and whales in the open sea (wolfsealife.h)
+    { WolfVRScreen::SubPart wsp_("WolfSwimBubbles"); WolfSwimBubbles::instance().idle(); } // [SWIM BUBBLES 2026-11-02/] ticket 346: bubbles from mouths under the water
+    { WolfVRScreen::SubPart wsp_("WolfNatureSounds"); WolfNatureSounds::instance().idle(); } // [NATURE SOUNDS 2026-11-03/] ticket 475: insects, lapping and surf (wolfnaturesounds.h)
     // [WOLF GAME 2026-10-09] Wolf Roleplay: timers, markers, effects, and the tags under the name
     // tags - after gObjectList.update() above has placed this frame's name tags.
-    WolfGame::instance().idle();
+    { WolfVRScreen::SubPart wsp_("WolfGame"); WolfGame::instance().idle(); }
     // [WOLFSPEED 2026-10-17] Xenon's WolfSpeed: the Wolf gate, the region's hello, picks waiting to go (wolfspeed.cpp)
-    WolfSpeed::instance().idle();
+    { WolfVRScreen::SubPart wsp_("WolfSpeed"); WolfSpeed::instance().idle(); }
     // [WOLFNPC 2026-10-24] the WolfNPC region link: registers its "WolfNPC" handler (credits pushes reach WolfAI with the
     // window closed), sends what waits for the region's rate, and fails requests that got no answer (wolfnpc.cpp)
-    WolfNPC::instance().idle();
+    { WolfVRScreen::SubPart wsp_("WolfNPC"); WolfNPC::instance().idle(); }
     {
         LL_PROFILE_ZONE_NAMED_CATEGORY_APP("world update"); //LL_RECORD_BLOCK_TIME(FTM_WORLD_UPDATE);
-        gPipeline.updateMove();
+        { WolfVRScreen::SubPart wsp_("updateMove"); gPipeline.updateMove(); }
     }
 
-    LLWorld::getInstance()->updateParticles();
+    { WolfVRScreen::SubPart wsp_("updateParticles"); LLWorld::getInstance()->updateParticles(); }
 
     // <FS:WolfViewer> Prims described "wolfwater" get a real water surface. Runs here, in
     // the world-update phase, because it creates and moves LLVOWater objects and must do
     // so before the frame is drawn. Rate-limits itself to a sweep every 1.5s.
-    FSWolfWater::instance().idle();
+    { WolfVRScreen::SubPart wsp_("FSWolfWater"); FSWolfWater::instance().idle(); }
     // [WOLF SEA TUNNEL 2026-10-28] prims described "wolfdry" hold air, not sea (wolfdryvolumes.h). Sweeps every 1.5 s.
-    WolfDryVolumes::instance().idle();
+    { WolfVRScreen::SubPart wsp_("WolfDryVolumes"); WolfDryVolumes::instance().idle(); }
     // [TERRAIN PAINT 2026-09-10] Painted roads and drawn water: fetch, bake a slice, and
     // create/kill the water planes. HERE, not in a draw pool's prerender(): creating or
     // killing a viewer object inside the render pass left a freed spatial group in the
     // frame's cull result and crashed in LLOcclusionCullingGroup::checkOcclusion (Paul
     // 09-10, "i drew water and it crashed wolfviewer" — core dump read with gdb).
-    WolfTerrainPaint::instance().idle();
+    { WolfVRScreen::SubPart wsp_("WolfTerrainPaint"); WolfTerrainPaint::instance().idle(); }
     // [AI CREDITS 2026-09-11] Ask the service what this account may do and what it holds.
     //
     // WHY HERE. The Build > Create a Model with AI menu item is gated on WolfAI::meshReady(),
@@ -6376,28 +6380,28 @@ void LLAppViewer::idle()
     WolfAI::instance().refresh();
     // </FS:WolfViewer>
     // <WolfViewer> natural water (LLVOWater planes from the heightmap); same phase, same reason.
-    WolfNaturalWater::instance().idle();
+    { WolfVRScreen::SubPart wsp_("WolfNaturalWater"); WolfNaturalWater::instance().idle(); }
     // Depth + exposure fields the water shader samples (shore calming, breakers, swash);
     // bakes at most one region per 2 s check.
-    WolfWaterField::instance().idle();
+    { WolfVRScreen::SubPart wsp_("WolfWaterField"); WolfWaterField::instance().idle(); }
     // The shared name/description harvester drains AFTER its consumers (FSWolfWater above,
     // WolfBoatRock before updateMove) have declared this frame's interest.
-    WolfObjectProps::instance().idle();
+    { WolfVRScreen::SubPart wsp_("WolfObjectProps"); WolfObjectProps::instance().idle(); }
     // [WOLF BUILDER 2026-10-13] floating object names over nearby prims; declares its interest to
     // WolfObjectProps (above drains this frame's, so a new tag's name arrives on the next sweep).
-    WolfBuilder::instance().idle();
+    { WolfVRScreen::SubPart wsp_("WolfBuilder"); WolfBuilder::instance().idle(); }
     // Dictation capture polling and the read-aloud queue (wolfspeech.cpp).
-    WolfSpeech::instance().idle();
+    { WolfVRScreen::SubPart wsp_("WolfSpeech"); WolfSpeech::instance().idle(); }
     // Focus + zoom the shared face once its media exists (wolfscreenshare.cpp).
-    WolfScreenShare::instance().idle();
-    WolfWeather::instance().idle();   // <WolfViewer 2026-09-10> rain / snow, menu or parcel prims
-    WolfFX::instance().idle();
-    WolfInvisible::idle();            // <WolfViewer 2026-10-11/> Invisible Mode: the region arrived in, or the switch changed
-    WolfViewerKey::idle();            // [COPYBOT EXEMPT 2026-10-19/] fetch / renew the key, hand it to each Wolf region
-    WolfDob::idle();                  // [DOB IN THE VIEWER 2026-10-26/] once per Wolf login: no date of birth -> the Date of Birth window
-    WolfAurora::idle();               // [WolfViewer 2026-10-15/] WolfForceAurora: this viewer's sky to Midnight while it is on
-    WolfExperiences::idle();          // [WolfViewer 2026-10-14/] Experiences: open after a new account's login; the arrive notice after Go
-    WolfSuitcase::idle();             // [SUITCASE 2026-10-10/] hypergrid trips: what arrived in My Suitcase comes home        // <WolfViewer 2026-10-10/> wolfEffect explosions, fire, smoke (wolffx.h)
+    { WolfVRScreen::SubPart wsp_("WolfScreenShare"); WolfScreenShare::instance().idle(); }
+    { WolfVRScreen::SubPart wsp_("WolfWeather"); WolfWeather::instance().idle(); }   // <WolfViewer 2026-09-10> rain / snow, menu or parcel prims
+    { WolfVRScreen::SubPart wsp_("WolfFX"); WolfFX::instance().idle(); }
+    { WolfVRScreen::SubPart wsp_("WolfInvisible"); WolfInvisible::idle(); }            // <WolfViewer 2026-10-11/> Invisible Mode: the region arrived in, or the switch changed
+    { WolfVRScreen::SubPart wsp_("WolfViewerKey"); WolfViewerKey::idle(); }            // [COPYBOT EXEMPT 2026-10-19/] fetch / renew the key, hand it to each Wolf region
+    { WolfVRScreen::SubPart wsp_("WolfDob"); WolfDob::idle(); }                  // [DOB IN THE VIEWER 2026-10-26/] once per Wolf login: no date of birth -> the Date of Birth window
+    { WolfVRScreen::SubPart wsp_("WolfAurora"); WolfAurora::idle(); }               // [WolfViewer 2026-10-15/] WolfForceAurora: this viewer's sky to Midnight while it is on
+    { WolfVRScreen::SubPart wsp_("WolfExperiences"); WolfExperiences::idle(); }          // [WolfViewer 2026-10-14/] Experiences: open after a new account's login; the arrive notice after Go
+    { WolfVRScreen::SubPart wsp_("WolfSuitcase"); WolfSuitcase::idle(); }             // [SUITCASE 2026-10-10/] hypergrid trips: what arrived in My Suitcase comes home        // <WolfViewer 2026-10-10/> wolfEffect explosions, fire, smoke (wolffx.h)
     // </WolfViewer>
 
     // [WOLF GAME 2026-10-09] wolfGameEffect "shake": last frame's jitter off before the camera is
@@ -6418,7 +6422,7 @@ void LLAppViewer::idle()
             LLViewerJoystick::getInstance()->moveObjects();
         }
 
-        gAgentCamera.updateCamera();
+        { WolfVRScreen::SubPart wsp_("updateCamera"); gAgentCamera.updateCamera(); }
     }
     WolfGame::instance().shakeCamera();   // [WOLF GAME 2026-10-09/]
 
@@ -6432,11 +6436,11 @@ void LLAppViewer::idle()
     // objects and camera should be in sync, do LOD calculations now
     {
         LL_RECORD_BLOCK_TIME(FTM_LOD_UPDATE);
-        gObjectList.updateApparentAngles(gAgent);
+        { WolfVRScreen::SubPart wsp_("updateApparentAngles"); gObjectList.updateApparentAngles(gAgent); }
     }
 
     // Update AV render info
-    LLAvatarRenderInfoAccountant::getInstance()->idle();
+    { WolfVRScreen::SubPart wsp_("avatarRenderInfo"); LLAvatarRenderInfoAccountant::getInstance()->idle(); }
 
     {
         LL_PROFILE_ZONE_NAMED_CATEGORY_APP("audio update"); //LL_RECORD_BLOCK_TIME(FTM_AUDIO_UPDATE);

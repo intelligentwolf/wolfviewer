@@ -27,6 +27,7 @@
 #include "llrootview.h"
 #include "llviewermenu.h"
 #include <algorithm>
+#include <map>   // [VR SPEED 2026-11-05] subPart()
 #include <functional>
 #include "llappviewer.h"
 #include "lldir.h"
@@ -123,6 +124,29 @@ namespace
     // frame-time numbers for the log (and Paul's report): display() time per frame, mono vs stereo
     struct FrameTimes { F64 sum = 0, eye0 = 0; U32 n = 0; F64 since = 0; bool stereo = false; };
     FrameTimes gTimes;
+    // [VR FRAME PARTS 2026-11-05] Paul's ultra session (2026-11-05 07:40Z, Quest 3): 12 pictures a second while the
+    // page's stages said the eyes took ~30 + ~19 ms - about 35 ms of every frame was somewhere else, and the emulator on
+    // the same laptop, at the same region and settings, drew 32 a second. Where the rest of HIS frames goes cannot be
+    // read from his log, so the viewer now says it, once every 30 s while a headset is in VR 3D Mode (a summary, no
+    // per-frame logging): the main thread's time per frame in the idle loop (messages, objects, input), each eye's
+    // display(), the HUD layer's extra drawing (inside the right eye), the reflection probes' update after the frame,
+    // and the rest; and how far behind the CPU the GPU finished each frame (a GL timestamp at the end of the eyes,
+    // against the CPU's clock): near 0 = the GPU waits for the CPU, a large lag = the GPU is the limit.
+    struct FrameParts
+    {
+        F64 since = 0, last_frame = 0, part_t0[2] = {0, 0};
+        F64 period = 0, idle = 0, eye0 = 0, eye1 = 0, layer = 0, probes = 0;
+        std::map<const char*, F64> sub, sub_t0;   // [VR SPEED 2026-11-05] subPart(): ms per name, and open starts
+        U32 n = 0;
+        // GPU lag ring: a timestamp query per frame, read when the GPU has it (never waited for)
+        static constexpr int kQ = 8;
+        GLuint q[kQ] = {0};
+        F64 q_cpu[kQ] = {0}, q_off[kQ] = {0};
+        bool q_live[kQ] = {false};
+        int q_next = 0;
+        std::vector<F32> lag;
+    };
+    FrameParts gParts;
     // [VR RENDER SIZE 2026-11-04] Measured (e2e_stages.mjs, The Caribbean): each eye was drawn across the whole world view
     // of the window (2522 x 1300 here, 3.3 million pixels) and then squeezed into a 1152 px square eye; drawing at half
     // the size took the eyes from 14.3 / 13.6 to 11.0 / 10.1 ms, so the GPU's share is real. Now, while the headset is
@@ -645,6 +669,11 @@ void release()
 {
     freeGl();
     freeLayer();
+    if (gParts.q[0])   // [VR FRAME PARTS]
+    {
+        glDeleteQueries(FrameParts::kQ, gParts.q);
+    }
+    gParts = FrameParts();
 }
 
 // [VR HUD LAYER 2026-11-04] End of render_ui (the right eye's / the only pass): draw the UI layer again into our own
@@ -947,6 +976,7 @@ void captureLayer()
     if (eye_rect) useEyeRect(true);
     sendPanels();   // [VR PANELS]
 
+    gParts.layer += LLTimer::getTotalSeconds() - t0;   // [VR FRAME PARTS] the HUD layer's share of the right eye
     if (!gDebugStats) return;   // [VR LEAN] no measuring unless asked for
     gLayer.cost += LLTimer::getTotalSeconds() - t0;
     gLayer.cost_n++;
@@ -1242,6 +1272,125 @@ bool shareCull()
     return gEye == 1 && share;
 }
 
+// [VR SPEED 2026-11-05] (gParts above) A named piece of the frame; nested pieces are timed on their own as well.
+void subPart(const char* name, bool start)
+{
+    if (gParts.since <= 0) return;   // only while counting (a headset in VR 3D Mode)
+    const F64 now = LLTimer::getTotalSeconds();
+    if (start) { gParts.sub_t0[name] = now; return; }
+    auto it = gParts.sub_t0.find(name);
+    if (it == gParts.sub_t0.end() || it->second <= 0) return;
+    gParts.sub[name] += now - it->second;
+    it->second = 0;
+}
+
+// [VR FRAME PARTS 2026-11-05] (gParts above) The parts of the main loop outside displayFrame.
+void framePart(FramePart part, bool start)
+{
+    const int k = part == FramePart::Idle ? 0 : 1;
+    const F64 now = LLTimer::getTotalSeconds();
+    if (start) { gParts.part_t0[k] = now; return; }
+    if (gParts.part_t0[k] <= 0) return;
+    (k ? gParts.probes : gParts.idle) += now - gParts.part_t0[k];
+    gParts.part_t0[k] = 0;
+}
+
+namespace
+{
+void resetParts(FrameParts& p, F64 now)
+{
+    p.since = now;
+    p.period = p.idle = p.eye0 = p.eye1 = p.layer = p.probes = 0;
+    p.sub.clear();
+    p.sub_t0.clear();
+    p.n = 0;
+    p.lag.clear();
+}
+
+// the GPU's timestamps that have come back (never waits): when it finished each frame's eyes, on the CPU's clock
+void partsGpuCollect()
+{
+    FrameParts& p = gParts;
+    for (int i = 0; i < FrameParts::kQ; ++i)
+    {
+        if (!p.q_live[i]) continue;
+        GLuint64 avail = 0;
+        glGetQueryObjectui64v(p.q[i], GL_QUERY_RESULT_AVAILABLE, &avail);
+        if (!avail) continue;
+        GLuint64 t = 0;
+        glGetQueryObjectui64v(p.q[i], GL_QUERY_RESULT, &t);   // nanoseconds (GL 3.3 core, ARB_timer_query)
+        p.q_live[i] = false;
+        const F64 done = (F64)t * 1e-9 + p.q_off[i];
+        if (p.lag.size() < 4096) p.lag.push_back((F32)((done - p.q_cpu[i]) * 1000.0));
+    }
+}
+
+// a timestamp after this frame's eyes: glQueryCounter records the GPU's time when everything before it has been done;
+// glGetInteger64v(GL_TIMESTAMP) is the GPU's clock now, so their difference from the CPU's clock gives the lag
+void partsGpuMark()
+{
+    FrameParts& p = gParts;
+    if (!p.q[0]) glGenQueries(FrameParts::kQ, p.q);
+    const int i = p.q_next;
+    if (p.q_live[i]) return;   // not back after kQ frames: skip a mark rather than wait
+    p.q_next = (i + 1) % FrameParts::kQ;
+    GLint64 gpu_now = 0;
+    glGetInteger64v(GL_TIMESTAMP, &gpu_now);
+    const F64 cpu_now = LLTimer::getTotalSeconds();
+    glQueryCounter(p.q[i], GL_TIMESTAMP);
+    p.q_off[i] = cpu_now - (F64)gpu_now * 1e-9;
+    p.q_cpu[i] = cpu_now;
+    p.q_live[i] = true;
+}
+
+// the start of each frame: the period since the last one, and once every 30 s the summary line
+void partsFrameStart(bool counting, F64 now)
+{
+    FrameParts& p = gParts;
+    if (!counting)
+    {
+        resetParts(p, 0);
+        p.last_frame = now;
+        return;
+    }
+    if (p.since > 0 && p.last_frame > 0)
+    {
+        p.period += now - p.last_frame;
+        p.n++;
+    }
+    p.last_frame = now;
+    if (p.since <= 0) { resetParts(p, now); return; }   // the first counted frame: the window starts
+    partsGpuCollect();
+    if (now - p.since < 30.0 || !p.n) return;
+    const F64 k = 1000.0 / p.n;
+    std::string lag = "not measured";
+    if (!p.lag.empty())
+    {
+        std::vector<F32> v = p.lag;
+        std::sort(v.begin(), v.end());
+        lag = llformat("%.0f ms (p95 %.0f)", v[v.size() / 2], v[std::min(v.size() - 1, (size_t)(v.size() * 0.95))]);
+    }
+    const F64 other = p.period - p.idle - p.eye0 - p.eye1 - p.probes;
+    LL_INFOS("WolfVR") << llformat("VR frame parts: %.1f frames/s; per frame (main thread, ms) idle loop %.1f, left eye %.1f, "
+                                   "right eye %.1f (HUD layer %.1f of it), reflection probes %.1f, other %.1f; GPU done after the "
+                                   "CPU by %s",
+                                   p.n / p.period, p.idle * k, p.eye0 * k, p.eye1 * k, p.layer * k, p.probes * k, other * k,
+                                   lag.c_str())
+                       << LL_ENDL;
+    // [VR SPEED 2026-11-05] the biggest named pieces (subPart), ms per frame, largest first
+    if (!p.sub.empty())
+    {
+        std::vector<std::pair<F64, const char*>> v;
+        for (const auto& [name, t] : p.sub) v.emplace_back(t * k, name);
+        std::sort(v.begin(), v.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+        std::string line;
+        for (size_t i = 0; i < v.size() && i < 18; ++i) line += llformat("%s%s %.1f", i ? ", " : "", v[i].second, v[i].first);
+        LL_INFOS("WolfVR") << "VR frame pieces (ms per frame): " << line << LL_ENDL;
+    }
+    resetParts(p, now);
+}
+}
+
 // [VR STEREO 2026-11-04] The frame, mono or one pass per eye. The left eye is a whole display() whose picture goes only
 // to the headset (swap() does not show it: gDisplaySwapBuffers false, the way a tiled snapshot renders, and render_ui
 // stops after the world, uiSkipped); the right eye is the ordinary frame that is shown on the desktop. Each eye is a
@@ -1270,6 +1419,7 @@ void displayFrame()
     }
     s_last_frame = LLTimer::getTotalSeconds();
     const F64 t0 = s_last_frame;
+    partsFrameStart(world && stereo && WolfVRStream::headsetInVR(), t0);   // [VR FRAME PARTS]
     gStamp.frame = wolfvr::clockMs();   // [VR STAGES]
     gStamp.eye0 = 0;
     F64 t1 = t0;
@@ -1323,6 +1473,13 @@ void displayFrame()
         display();
         gEye = -1;
         gDisplaySwapBuffers = true;
+        if (gParts.since > 0)   // [VR FRAME PARTS] counting this frame
+        {
+            const F64 t2 = LLTimer::getTotalSeconds();
+            gParts.eye0 += t1 - t0;
+            gParts.eye1 += t2 - t1;
+            partsGpuMark();
+        }
     }
     useEyeRect(false);   // [VR RENDER SIZE] the real area for everything between frames (UI, picks, pointer)
     if (hiding && isAgentAvatarValid())
@@ -1676,6 +1833,18 @@ void pointerButton(const wolfvr::InputEvent& e)
 void pumpInput()
 {
     WolfVRStream::pumpModeRequest();
+    // [VR EXIT 2026-11-05] when the viewer starts / stops drawing two eyes (WolfVRStream::worldWanted: world mode and the
+    // headset in VR) - with "the headset says it left VR" (wolfvrpipe.cpp) this shows whether an Exit VR was picked up
+    {
+        static bool s_world = false;
+        const bool world = WolfVRStream::worldWanted();
+        if (world != s_world)
+        {
+            s_world = world;
+            LL_INFOS("WolfVR") << (world ? "VR 3D: drawing both eyes for the headset"
+                                         : "VR 3D: stopped drawing the eyes, the desktop is itself again") << LL_ENDL;
+        }
+    }
     if (!gViewerWindow) return;
     if (gCap.fbo) collectCapture();   // [VR READBACK 2026-11-04] last frame's picture, as soon as its copy is done
     const std::vector<wolfvr::InputEvent> events = WolfVRStream::takeInput();

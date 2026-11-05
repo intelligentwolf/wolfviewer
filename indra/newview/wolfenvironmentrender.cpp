@@ -21,6 +21,7 @@
 #include "llviewerprecompiledheaders.h"
 
 #include "wolfenvironmentrender.h"
+#include "wolfvrscreen.h"   // [VR CLOUDS 2026-11-05] WolfVRScreen::secondEye / stereoEye (cloudsFrame)
 
 #include <algorithm>
 #include <iomanip>
@@ -1596,11 +1597,15 @@ namespace
         f.other_scale = moonLights ? 1.f : sFrame.moonSkyScale;
         f.light_tint = moonLights ? sFrame.moonEyeTint : LLColor3::white;   // [2026-10-28] ticket #304 (updateLight moonEyeTint)
         f.camera_world = cam->getOrigin();
+        // [VR CLOUDS 2026-11-05] in VR 3D Mode the right eye draws the left eye's moment: no time of its own (dt 0, the same
+        // time), so the wind moves the clouds once a frame and both eyes see the same field
+        const bool right_eye = !probe && WolfVRScreen::secondEye();
+        f.eye = probe || !WolfVRScreen::stereoEye() ? -1 : right_eye ? 1 : 0;
         const F64 t = LLFrameTimer::getElapsedSeconds();
         static F64 s_last = 0.0;
-        f.dt = probe || s_last <= 0.0 ? 0.f : (F32)llclamp(t - s_last, 0.0, 0.5);
-        if (!probe) s_last = t;
-        f.time = t;
+        f.dt = probe || right_eye || s_last <= 0.0 ? 0.f : (F32)llclamp(t - s_last, 0.0, 0.5);
+        if (!probe && !right_eye) s_last = t;
+        f.time = right_eye && s_last > 0.0 ? s_last : t;
         f.quality = WolfEnvironmentRender::tier() >= 3 ? 2 : 1;   // decision D8: tier 2 "medium", tier 3 "high"
         f.coverage = sFrame.cover;
         // the wind moves the weather texture (CloudsEffect.ts:349-352 localWeatherOffset += velocity x dt): the

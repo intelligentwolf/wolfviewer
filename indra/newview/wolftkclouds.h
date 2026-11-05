@@ -137,6 +137,7 @@ namespace WolfTk
         LLVector2  moon_disc_half;
         LLVector3  camera_world;
         F32        dt = 0.f;
+        S32        eye = -1;   // [VR CLOUDS 2026-11-05] -1 the desktop, 0 / 1 the left / right eye of a VR 3D frame (Clouds::render)
         F64        time = 0.0;          // seconds (the noise seed, generators.ts:22)
         S32        quality = 2;         // 0 low, 1 medium, 2 high, 3 ultra
         F32        coverage = 0.3f;     // uniforms.ts:54 default

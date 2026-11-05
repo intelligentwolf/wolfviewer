@@ -578,6 +578,31 @@ struct Clouds::Impl
     F32 topHeight = 0.f, bottomHeight = 0.f;
     // CloudsEffect state
     U32 frame = 0;
+    // [VR CLOUDS 2026-11-05] VR 3D Mode draws each eye in turn. With one history the eyes took turns at it: each eye's resolve
+    // blended in the OTHER eye's last picture (another camera), and `frame` stepped per eye, so the left eye only ever
+    // marched the even Bayer offsets and the right eye the odd ones (8 of the 16, cloudsResolve's temporal upscale).
+    // The fields above (rColor, rShadowLength, resolveIndex, havePrev, prevProj, prevView, frame) are the eye being drawn;
+    // `other` holds the other eye's, swapped in by useEye. The desktop (CloudsFrame::eye -1) is eye 0.
+    struct EyeHistory
+    {
+        Tex rColor[2], rShadowLength[2];
+        S32 resolveIndex = 0;
+        bool havePrev = false;
+        glm::mat4 prevProj, prevView;
+        U32 frame = 0;
+    } other;
+    S32 activeEye = 0;
+    void useEye(S32 e)
+    {
+        if (e == activeEye) return;
+        for (S32 i = 0; i < 2; ++i) { std::swap(rColor[i], other.rColor[i]); std::swap(rShadowLength[i], other.rShadowLength[i]); }
+        std::swap(resolveIndex, other.resolveIndex);
+        std::swap(havePrev, other.havePrev);
+        std::swap(prevProj, other.prevProj);
+        std::swap(prevView, other.prevView);
+        std::swap(frame, other.frame);
+        activeEye = e;
+    }
     // Source: three-geospatial clouds/src/CloudsEffect.ts:180-186 mutable parameter instances
     glm::vec2 localWeatherRepeat = glm::vec2(100.f);
     glm::vec2 localWeatherOffset = glm::vec2(0.f);
@@ -1270,6 +1295,10 @@ bool Clouds::render(const Atmosphere& atmosphere, const CloudsFrame& f)
         glViewport(vp[0], vp[1], vp[2], vp[3]);
         return false;
     }
+    // [VR CLOUDS 2026-11-05] this eye's own history (Impl::useEye); the right eye uses the shadow maps the left eye made this
+    // frame (they are fitted to the camera with the sun in world space, and the eyes are 6.4 cm apart: the same maps)
+    m.useEye(f.eye == 1 ? 1 : 0);
+    const bool shadowsDone = f.eye == 1;
 
     // CloudsEffect.update :459-471: the shadow map size and cascade count follow the preset
     if (p.cascadeCount != m.shadowCascadeCount || p.mapSize != m.shadowMapSizeV)
@@ -1301,8 +1330,18 @@ bool Clouds::render(const Atmosphere& atmosphere, const CloudsFrame& f)
         // CloudsMaterial.setSize (:400-422): invalidates the reprojection
         m.havePrev = false;
     }
+    // [VR CLOUDS 2026-11-05] the other eye's resolve / history targets were not resized above while it was swapped out
+    if (m.rColor[0].w != (S32)f.width || m.rColor[0].h != (S32)f.height || (p.lightShafts ? m.rShadowLength[0].w != (S32)f.width : m.rShadowLength[0].id != 0))
+    {
+        for (S32 i = 0; i < 2; ++i)
+        {
+            alloc(m.rColor[i], GL_TEXTURE_2D, GL_RGBA16F, f.width, f.height);
+            if (p.lightShafts) alloc(m.rShadowLength[i], GL_TEXTURE_2D, GL_R16F, f.width, f.height); else m.rShadowLength[i].release();
+        }
+        m.havePrev = false;
+    }
     m.lastQuality = q;
-    if (f.reset_history) m.havePrev = false;   // as setSize's invalidation (CloudsMaterial.ts:418-421)
+    if (f.reset_history) m.havePrev = m.other.havePrev = false;   // as setSize's invalidation (CloudsMaterial.ts:418-421); both eyes
 
     ++m.frame;
     // [WolfViewer 2026-10-19] a cut: the offsets restart at the frame's seed phase (wolfenvironmentrender.cpp cloudsFrame, from
@@ -1368,10 +1407,11 @@ bool Clouds::render(const Atmosphere& atmosphere, const CloudsFrame& f)
         sp[3][2] = (-2.0 * fa * n) / (fa - n);
     }
     const glm::dmat4 matrixWorld = glm::inverse(glm::dmat4(f.view));
-    m.shadowMaps.update(glm::inverse(sp), matrixWorld, f.near_clip, STORY_FAR, sunWorld, distance, glm::normalize(ecefToWorldRotation * DEFAULT_UP_ECEF));
+    if (!shadowsDone) m.shadowMaps.update(glm::inverse(sp), matrixWorld, f.near_clip, STORY_FAR, sunWorld, distance, glm::normalize(ecefToWorldRotation * DEFAULT_UP_ECEF));
     m.mainView = f.view;
 
-    // ── ShadowPass.update (ShadowPass.ts:340-356) ──
+    // ── ShadowPass.update (ShadowPass.ts:340-356) ── (not in the right eye: shadowsDone above)
+    if (!shadowsDone)
     {
         LLGLSLShader& sh = shadowSh;
         sh.bind();
@@ -1403,6 +1443,7 @@ bool Clouds::render(const Atmosphere& atmosphere, const CloudsFrame& f)
         WolfTk::unbindUnit(BUILD_FIELD_UNIT, GL_TEXTURE_2D);   // [2026-10-26]
         WolfTk::unbindUnit(BLUE_NOISE_UNIT, GL_TEXTURE_2D);    // [2026-11-02]
     }
+    if (!shadowsDone)
     {
         // the resolve (ShadowResolveMaterial: varianceGamma 1, temporalAlpha 0.01, ShadowResolveMaterial.ts:51-62)
         LLGLSLShader& sh = shadowResolveSh;
@@ -1572,6 +1613,7 @@ void Clouds::release()
     Impl& m = *mImpl;
     for (Tex* t : { &m.shapeTex, &m.shapeDetailTex, &m.blueNoiseTex, &m.localWeatherTex, &m.turbulenceTex, &m.shadowCurrentTex, &m.shadowResolveTex, &m.shadowHistoryTex,
                     &m.cColor, &m.cDepthVelocity, &m.cShadowLength, &m.rColor[0], &m.rColor[1], &m.rShadowLength[0], &m.rShadowLength[1],
+                    &m.other.rColor[0], &m.other.rColor[1], &m.other.rShadowLength[0], &m.other.rShadowLength[1],
                     &m.pColor, &m.pDepthVelocity, &m.pShadowLength })
     {
         t->release();
@@ -1582,7 +1624,7 @@ void Clouds::release()
     m.blueNoiseTried = false;   // [2026-11-02] blueNoiseTex was released above: load it again (or warn again) on the next frame
     m.shadowCascadeCount = m.shadowMapSizeV = 0;
     m.cWidth = m.cHeight = 0;
-    m.havePrev = false;
+    m.havePrev = m.other.havePrev = false;
     m.lastQuality = -1;
 }
 }

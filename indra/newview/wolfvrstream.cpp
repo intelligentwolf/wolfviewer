@@ -279,19 +279,30 @@ namespace
     // disconnecting, taken off or asleep (the page's socket closes), the page closed, VR switched off in the viewer, the
     // pipe timing out. Paul: "when i dropped vr mode stuff didn't come back" (the toolbars came back only on a
     // "disconnected" notice, which switching VR off never sends).
-    //  - the VR window (its QR code and address): hidden while a headset is connected ("when you are connected the VR
+    //  - the VR window (its QR code and address): hidden while the headset is IN VR - was "while connected" until [VR EXIT 2026-11-05] below ("when you are connected the VR
     //    mode window needs to disappear until you disconnect"); hidden, never closed (closing it switches VR off)
     //  - the toolbars: hidden while a headset is in VR 3D Mode ("the menu at the bottom of the screen ... masks the
     //    windows"; their buttons are on the headset's bar); Big Screen shows the desktop as it is, toolbars and all
     // Only what this hid is given back.
+    // [VR EXIT 2026-11-05] Paul, after Exit VR in the headset: "the viewer didn't put the bottom menu back or show the vr
+    // window it hides". Exit VR leaves the headset's page open and CONNECTED (it still wants frames for its flat view), so
+    // "connected" kept the desktop hidden although the eyes had stopped (worldWanted). Now both follow whether the headset
+    // is IN VR (Service::immersive, the same test that starts and stops the eyes), with 2 s of grace before giving the
+    // desktop back so a moment's Wi-Fi gap (immersive needs a pose in the last second) does not flash the toolbars.
     void reconcileDesktop()
     {
-        bool active = false, world = false;
+        bool in_vr = false, world = false;
         {
             std::lock_guard<std::mutex> lk(gMutex);
-            active = gService && gService->wantsFrames();
-            world = active && gMode == "world";
+            in_vr = gService && !gMode.empty() && gService->immersive();
+            world = in_vr && gMode == "world";
         }
+        static F64 s_last_in_vr = -1.0, s_last_world = -1.0;
+        const F64 now = LLTimer::getTotalSeconds();
+        if (in_vr) s_last_in_vr = now;
+        if (world) s_last_world = now;
+        const bool active = in_vr || (s_last_in_vr >= 0 && now - s_last_in_vr < 2.0);
+        world = world || (s_last_world >= 0 && now - s_last_world < 2.0);
         static bool s_win_hidden = false, s_bars_hidden = false, s_was_active = false;
         LLFloater* f = LLFloaterReg::findInstance("wolf_vr_stream");
         if (active && !s_was_active && f && f->getVisible()) { f->setVisible(false); s_win_hidden = true; }

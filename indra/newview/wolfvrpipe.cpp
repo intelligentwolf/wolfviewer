@@ -1079,7 +1079,10 @@ void Service::Impl::onText(const std::shared_ptr<Client>& c, const std::string& 
     {
         // [VR IMMERSIVE 2026-11-04] the headset entered or left VR (session start / end, page hidden, headset asleep)
         auto it = o.find("on");
-        xr_state = it != o.end() && it->value().is_bool() && it->value().as_bool() ? 1 : 0;
+        const int now = it != o.end() && it->value().is_bool() && it->value().as_bool() ? 1 : 0;
+        // [VR EXIT 2026-11-05] Paul: Exit VR in the headset "the viewer didn't pick it up" - every change is logged
+        if (xr_state.exchange(now) != now)
+            log(LogLevel::INFO, now ? "VR pipe: the headset says it entered VR" : "VR pipe: the headset says it left VR");
     }
     else if (t == "audio")
     {

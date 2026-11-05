@@ -52,6 +52,7 @@ public:
     friend class LLDrawPoolTerrain;
     friend class WolfTerrainPaint;   // [TERRAIN PAINT 2026-09-10] waits for the detail textures before drawing paint
     friend class WolfFarTerrain;     // <WolfViewer 2026-10-08/> far ground textured with the region's own detail textures
+    friend class WolfTerrainLevels;  // [WOLF SKY LEVELS 2026-11-05/] the sky land's rock underside uses the fourth detail texture
 
     LLTerrainMaterials() {}
     virtual ~LLTerrainMaterials();
@@ -143,6 +144,13 @@ public:
     F32 getHeightRange(S32 corner);
 
     void setStartHeight(S32 corner, F32 start_height);
+
+    // [WOLF SKY LEVELS 2026-11-05] The composition value (0..3, which of the four textures) for a point of a sky level
+    // (wolfterrainlevels.h) at region (x, y) whose height above the level's base is `height_above_base`: exactly the
+    // per-texel rule of generateHeights, with the height the level's own above its base, measured from the water - so a
+    // level is banded like ground rising from the shore (Paul 2026-11-05: "the region's own textures relative to the level
+    // base"). 0 when the parameters have not arrived.
+    F32 wolfSkyValueAt(F32 x, F32 y, F32 height_above_base) const;
     void setHeightRange(S32 corner, F32 range);
 
     friend class LLVOSurfacePatch;

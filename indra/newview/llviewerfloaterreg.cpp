@@ -143,6 +143,7 @@
 #include "wolffloateradventureteacher.h" // [WOLF ADVENTURE P4 2026-10-16/] Teacher Console
 #include "wolflslcomplete.h" // <FS:Wolf/>
 #include "wolffloatertunnels.h" // [WOLF TUNNELS 2026-10-21/] the Tunnel tool
+#include "wolffloaterskylevels.h" // [WOLF SKY LEVELS 2026-11-05/] ticket 541: Sky Land
 #include "wolffloaterseatunnels.h"   // [WOLF SEA TUNNEL 2026-10-28/]
 #include "wolffloatershipbuilder.h"   // [SHIP BUILDER 2026-10-29/]
 #include "wolffloaterplanebuilder.h"   // [PLANE BUILDER 2026-11-01/]
@@ -696,6 +697,7 @@ void LLViewerFloaterReg::registerFloaters()
     LLFloaterReg::add("wolf_choose_avatar", "floater_wolf_choose_avatar.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterChooseAvatar>);   // [STARTER AVATARS 2026-10-24/] Choose an Avatar
     LLFloaterReg::add("wolf_speed", "floater_wolf_speed.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterSpeed>);   // [WOLFSPEED 2026-10-17/] Xenon's WolfSpeed
     LLFloaterReg::add("wolf_tunnels", "floater_wolf_tunnels.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterTunnels>);   // [WOLF TUNNELS 2026-10-21/] walkable spaces under the terrain
+    LLFloaterReg::add("wolf_sky_levels", "floater_wolf_sky_levels.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterSkyLevels>);   // [WOLF SKY LEVELS 2026-11-05/] ticket 541: ground high above a region
     LLFloaterReg::add("wolf_sea_tunnels", "floater_wolf_sea_tunnels.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterSeaTunnels>);   // [WOLF SEA TUNNEL 2026-10-28/] air-filled glass tubes under the sea
     LLFloaterReg::add("wolf_ship_builder", "floater_wolf_ship_builder.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterShipBuilder>);   // [SHIP BUILDER 2026-10-29/] design a ship, the shipyard builds her
     LLFloaterReg::add("wolf_plane_builder", "floater_wolf_plane_builder.xml", (LLFloaterBuildFunc)&LLFloaterReg::build<WolfFloaterPlaneBuilder>);   // [PLANE BUILDER 2026-11-01/] design a fighter, the yard builds it

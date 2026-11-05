@@ -330,6 +330,7 @@ public:
     const U64       &getHandle() const          { return mHandle; }
 
     LLSurface       &getLand() const;
+    class WolfTerrainLevels* getWolfSkyLevels() const;   // [WOLF SKY LEVELS 2026-11-05] the region's sky land, never null after construction
 
     // set and get the region id
     const LLUUID& getRegionID() const;

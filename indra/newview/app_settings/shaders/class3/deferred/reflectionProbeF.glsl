@@ -585,6 +585,25 @@ vec3 tapIrradianceMap(vec3 pos, vec3 dir, out float w, out float dw, vec3 c, int
 
     vec3 col = textureLod(irradianceProbes, vec4(v.xyz, refIndex[i].x), 0).rgb * irr_weight;
 
+    // [WolfViewer 2026-11-05 ticket 523] the probes' light is never BRIGHTER than the sky's own ambient (amblit, the light stock
+    // Firestorm gives a glTF surface under a legacy EEP: stock reflectionProbeF.glsl:569-571 mix(amblit, irradiance x ambiance, ..)
+    // with ambiance 0 - stock llsettingssky.cpp:1175 / :1823-1831, settings.xml RenderSkyAutoAdjustLegacy default 0). Measured on
+    // Sandbox (glTF concrete@3c3c40, shaded face): the probes doubled a dark wall's brightness (0.025 -> 0.050 display-linear) and
+    // gave it the sunlit sand's colour, so near-black walls read beige.
+    // Capped at amblit's luminance, keeping the probes' colour, and wherever the probes see LESS light than the EEP's flat ambient
+    // (under a roof, indoors, in a narrow street) their darker light is kept - what ticket 328 added them for: the diffuse lit by
+    // the same world the specular reflects, not by one ambient colour from every side. The Wolf path only (wolf_irr_weight above).
+    if (wolf_irr_weight > refParams[i].x)
+    {
+        const vec3 lum_w = vec3(0.2126, 0.7152, 0.0722);   // Rec.709 luminance, as LL's luminanceF.glsl lum()
+        float l_amb = dot(max(amblit, vec3(0.0)), lum_w);
+        float l_irr = dot(col, lum_w);
+        if (l_irr > l_amb)
+        {
+            col *= l_amb / l_irr;
+        }
+    }
+
     col = mix(amblit, col, min(irr_weight, 1.0));
 
     return col;

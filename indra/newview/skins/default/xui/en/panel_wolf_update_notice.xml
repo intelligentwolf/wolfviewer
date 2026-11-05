@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- <WolfViewer 2026-11-05> Ticket 532 (Jimmy Olsen): "tell people when there's a new version of viewer
+     available ... BEFORE one logs in". A band across the top of the login screen, built and placed by
+     wolfupdate.cpp (show_login_notice) directly under the login page's menu strip. Only in the default
+     skin on purpose: every skin falls back to this file, so no skin's login panel needs changing.
+     The text boxes follow left|right so the words wrap rather than run under the buttons when the
+     window is small (1360x768 with a raised UI scale is under 1000 px wide). -->
+<panel
+  name="wolf_update_notice"
+  follows="left|top|right"
+  layout="topleft"
+  height="108"
+  width="1024"
+  background_visible="true"
+  background_opaque="true"
+  bg_opaque_color="WolfUpdateNoticeBackground"
+  bg_alpha_color="WolfUpdateNoticeBackground"
+  mouse_opaque="true">
+  <panel.string name="title_ready">A new WolfViewer is ready: [NAME]</panel.string>
+  <panel.string name="body_self_windows">Update now downloads it ([SIZE] MB) and installs it. Windows will ask for permission, then WolfViewer starts again. Your settings and saved logins are kept.</panel.string>
+  <panel.string name="body_self_linux">Update now downloads it ([SIZE] MB), puts it in place and starts WolfViewer again. Your settings and saved logins are kept.</panel.string>
+  <panel.string name="body_self_mac">Update now downloads it ([SIZE] MB) and opens it in Finder, ready to drag into Applications. Your settings and saved logins are kept.</panel.string>
+  <panel.string name="body_packaged">You installed WolfViewer from the Wolf Territories package repository, so your system's software updater will offer it with your other updates.</panel.string>
+  <panel.string name="body_manual">WolfViewer is installed in [DIR], which your account cannot change, so it cannot update itself. Open the download page to get the new version.</panel.string>
+  <panel.string name="title_downloading">Downloading WolfViewer [NAME]: [PERCENT]%</panel.string>
+  <panel.string name="body_downloading">This can take a few minutes. You can log in while you wait; WolfViewer will ask you before it restarts.</panel.string>
+  <panel.string name="title_installing">Installing WolfViewer [NAME]</panel.string>
+  <panel.string name="body_installing_windows">Windows will ask for permission. WolfViewer will then close and start again by itself.</panel.string>
+  <panel.string name="body_installing_linux">WolfViewer will close and start again by itself.</panel.string>
+  <panel.string name="body_installing_mac">Opening the new WolfViewer in Finder.</panel.string>
+  <panel.string name="title_mac_opened">WolfViewer [NAME] is open in Finder</panel.string>
+  <panel.string name="body_mac_opened">Drag WolfViewer onto Applications and choose Replace, then quit WolfViewer and start it again. Your settings and saved logins are kept.</panel.string>
+  <panel.string name="button_update">Update now</panel.string>
+  <panel.string name="button_ok">OK</panel.string>
+  <panel.string name="button_download_page">Open download page</panel.string>
+  <panel.string name="button_quit">Quit WolfViewer</panel.string>
+  <text
+    name="notice_title"
+    follows="left|top|right"
+    font="SansSerifHugeBold"
+    text_color="WolfUpdateNoticeTitle"
+    use_ellipses="true"
+    left="20"
+    top="10"
+    height="24"
+    width="616" />
+  <text
+    name="notice_body"
+    follows="left|top|right"
+    font="SansSerifLarge"
+    text_color="WolfUpdateNoticeText"
+    word_wrap="true"
+    left="20"
+    top="38"
+    height="64"
+    width="616" />
+  <button
+    name="not_now_btn"
+    follows="right|top"
+    font="SansSerifLarge"
+    label="Not now"
+    tool_tip="Do not remind me about this version. You will be told when the next one is ready."
+    left="652"
+    top="30"
+    height="48"
+    width="140" />
+  <button
+    name="update_btn"
+    follows="right|top"
+    font="SansSerifLarge"
+    label="Update now"
+    label_color="White"
+    image_unselected="PushButton_Login"
+    image_pressed="PushButton_Login_Pressed"
+    image_hover_unselected="PushButton_Login_Over"
+    left_pad="12"
+    top="30"
+    height="48"
+    width="200" />
+</panel>

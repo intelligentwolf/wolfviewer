@@ -20004,7 +20004,7 @@ Change of this parameter will affect the layout of buttons in notification toast
 		<key>WolfViewerUpdateSkipped</key>
 		<map>
 			<key>Comment</key>
-			<string>The newest WolfViewer release the user chose "Skip this version" for; that release is not offered again, the next one is.</string>
+			<string>The newest WolfViewer release the user chose "Skip this version" (in-world) or "Not now" (the login screen's band) for; that release is not offered again, on the login screen or in-world, the next one is.</string>
 			<key>Persist</key>
 			<integer>1</integer>
 			<key>Type</key>

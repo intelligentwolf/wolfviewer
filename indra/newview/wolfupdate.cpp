@@ -41,6 +41,7 @@ extern char** environ;
 
 #include "llapp.h"
 #include "llappviewer.h"
+#include "llbutton.h"
 #include "llcorehttputil.h"
 #include "llcoros.h"
 #include "lldir.h"
@@ -50,7 +51,11 @@ extern char** environ;
 #include "llhttpconstants.h"
 #include "llnotificationsutil.h"
 #include "llproxy.h"
+#include "llpanel.h"
 #include "llsdjson.h"
+#include "llstartup.h"
+#include "lltextbox.h"
+#include "lluictrlfactory.h"
 #include "llversioninfo.h"
 #include "llviewercontrol.h"
 #include "llweb.h"
@@ -110,6 +115,24 @@ namespace
     std::mutex sThreadMutex;
     std::thread sThread;
     std::shared_ptr<Job> sJob;
+
+    // ── the check's answer, kept for the run (ticket 532) ────────────────────────────────────
+    bool sHaveOffer = false;         // sOffer is a newer, usable, not skipped release
+    Install sKind = Install::SELF;   // how this copy can take it (install_kind)
+    std::string sKindWhere;          // install_kind's folder, for the MANUAL wording
+    bool sLoggedIn = false;          // STATE_STARTED reached: notices are in-world ones now
+    bool sInWorldDone = false;       // the in-world notice for this run has been decided
+    /// Update now was pressed on the login screen's band: from then on the download and the
+    /// install report on the band (and in their own alerts on failure), not the in-world notices.
+    bool sActedAtLogin = false;
+
+    // ── the band on the login screen ─────────────────────────────────────────────────────────
+    enum class Stage { OFFER, DOWNLOADING, INSTALLING, MAC_OPENED };
+    LLHandle<LLPanel> sLoginPanel;   // FSPanelLogin; dies with it on a successful login
+    LLHandle<LLPanel> sNotice;       // the band, a child of that panel
+    Stage sStage = Stage::OFFER;
+    U64 sNoticeReceived = 0;         // download progress shown on the band
+    void notice_back_to_offer();     // after a failure: offer Update now again
 
     const char* platform_key()
     {
@@ -268,6 +291,7 @@ namespace
     void notify_failed(const std::string& why)
     {
         LL_WARNS("WolfUpdate") << "update failed: " << why << LL_ENDL;
+        notice_back_to_offer();
         LLNotificationsUtil::add("WolfUpdateFailed", LLSD().with("REASON", why), LLSD(),
             [](const LLSD& n, const LLSD& r)
             {
@@ -471,6 +495,236 @@ namespace
         out.assign(bytes.begin(), bytes.end());
         return true;
     }
+
+    // ── the band on the login screen (ticket 532) ────────────────────────────────────────────
+#if LL_WINDOWS
+    const char* const PLATFORM_WORDS = "windows";   // panel_wolf_update_notice.xml body_*_windows
+#elif LL_DARWIN
+    const char* const PLATFORM_WORDS = "mac";
+#else
+    const char* const PLATFORM_WORDS = "linux";
+#endif
+
+    /// Still on the login screen, before Log In: only then may Update now restart without asking
+    /// again. STATE_LOGIN_WAIT is the login screen waiting for the resident (llstartup.h); a failed
+    /// login goes back to it.
+    bool at_login_screen()
+    {
+        return !sLoggedIn && LLStartUp::getStartupState() <= STATE_LOGIN_WAIT;
+    }
+
+    /// Put the band's words and buttons in step with sStage. Nothing to do without a band.
+    void refresh_notice()
+    {
+        LLPanel* p = sNotice.get();
+        if (!p) return;
+        const LLSD r = release_args();
+        LLStringUtil::format_map_t a;
+        a["[NAME]"] = r["NAME"].asString();
+        a["[SIZE]"] = r["SIZE"].asString();
+        a["[DIR]"] = sKindWhere;
+        a["[PERCENT]"] = llformat("%d", sOffer.mSize ? (S32)((sNoticeReceived * 100) / sOffer.mSize) : 0);
+        const std::string platform = PLATFORM_WORDS;
+        std::string title, body, button;
+        bool not_now = false;
+        switch (sStage)
+        {
+        case Stage::OFFER:
+            title = p->getString("title_ready", a);
+            switch (sKind)
+            {
+            case Install::SELF:     body = p->getString("body_self_" + platform, a); button = p->getString("button_update"); not_now = true; break;
+            case Install::PACKAGED: body = p->getString("body_packaged", a); button = p->getString("button_ok"); break;
+            case Install::MANUAL:   body = p->getString("body_manual", a); button = p->getString("button_download_page"); not_now = true; break;
+            }
+            break;
+        case Stage::DOWNLOADING:
+            title = p->getString("title_downloading", a);
+            body = p->getString("body_downloading", a);
+            break;
+        case Stage::INSTALLING:
+            title = p->getString("title_installing", a);
+            body = p->getString("body_installing_" + platform, a);
+            break;
+        case Stage::MAC_OPENED:
+            title = p->getString("title_mac_opened", a);
+            body = p->getString("body_mac_opened", a);
+            button = p->getString("button_quit");
+            break;
+        }
+        p->getChild<LLTextBox>("notice_title")->setText(title);
+        p->getChild<LLTextBox>("notice_body")->setText(body);
+        LLButton* update = p->getChild<LLButton>("update_btn");
+        update->setLabel(button);
+        update->setVisible(!button.empty());
+        p->getChild<LLButton>("not_now_btn")->setVisible(not_now);
+    }
+
+    void notice_back_to_offer()
+    {
+        if (!sActedAtLogin) return;
+        sStage = Stage::OFFER;
+        refresh_notice();
+    }
+
+    /// Install the verified download from the band. startInstall() refuses when nothing is
+    /// downloaded, an install is under way, or there is unsaved ground paint (not before login).
+    /// The install coroutine runs at once (LLCoros::launch dispatches), so it may already have
+    /// moved the band on (macOS: MAC_OPENED) or back (a failure) by the time this returns.
+    void install_from_notice()
+    {
+        sStage = Stage::INSTALLING;
+        refresh_notice();
+        if (!WolfUpdate::startInstall()) notice_back_to_offer();
+    }
+
+    /// "Not now" (Paul, 2026-11-05): nothing more about THIS release, on the login screen or
+    /// in-world; the next release is offered as usual. That is exactly "Skip this version"
+    /// (on_available / on_ready / the WolfUpdateManual callback store SKIPPED_SETTING, and
+    /// checkCoro makes no offer at all for a release at or below it), so it stores the same.
+    /// present_in_world() checks it too, for the rest of this run.
+    void on_notice_not_now()
+    {
+        gSavedSettings.setS32(SKIPPED_SETTING, sOffer.mRevision);
+        // Hidden, not deleted: this runs inside the band's own button. It goes with the login panel.
+        if (LLPanel* p = sNotice.get()) p->setVisible(false);
+        LL_INFOS("WolfUpdate") << "login screen notice for w" << sOffer.mRevision << " closed (Not now)" << LL_ENDL;
+    }
+
+    void on_notice_button()
+    {
+        if (sStage == Stage::MAC_OPENED)
+        {
+            // The disk image is open; the old copy can only be replaced once this one has quit.
+            LLAppViewer::instance()->requestQuit();
+            return;
+        }
+        if (sStage != Stage::OFFER) return;   // the button is hidden while downloading or installing
+        switch (sKind)
+        {
+        case Install::PACKAGED:
+            on_notice_not_now();   // "OK": the system's updater has it, nothing for us to run
+            return;
+        case Install::MANUAL:
+            LLWeb::loadURLExternal(DOWNLOAD_PAGE_URL);
+            return;
+        case Install::SELF:
+            break;
+        }
+        sActedAtLogin = true;
+        LL_INFOS("WolfUpdate") << "Update now pressed on the login screen for w" << sOffer.mRevision << LL_ENDL;
+        if (!sReadyPath.empty())
+        {
+            install_from_notice();
+            return;
+        }
+        sStage = Stage::DOWNLOADING;
+        sNoticeReceived = 0;
+        refresh_notice();
+        WolfUpdate::startDownload();
+    }
+
+    /// The band, on the login panel, once per release until Not now. Not used once logged in.
+    void show_login_notice()
+    {
+        if (!sHaveOffer || !at_login_screen()) return;
+        if (!sNotice.isDead())
+        {
+            refresh_notice();
+            return;
+        }
+        LLPanel* login = sLoginPanel.get();
+        if (!login) return;
+        if (gSavedSettings.getS32(SKIPPED_SETTING) >= sOffer.mRevision) return;   // Not now, this run
+
+        // Built with no parent and added below, as llconversationview.cpp:214 builds its item panel.
+        LLPanel* p = LLUICtrlFactory::getInstance()->createFromFile<LLPanel>(
+            "panel_wolf_update_notice.xml", nullptr, LLPanel::child_registry_t::instance());
+        if (!p) return;
+        // Directly under the menu strip: the top of the login page (login_html), which every login
+        // panel has (panel_fs_login.xml and panel_fs_nui_login.xml, all skins, top="18"). Full width,
+        // following the top, left and right edges, so a resized window keeps it in place.
+        S32 top = login->getRect().getHeight();
+        if (LLView* web = login->findChildView("login_html"))
+        {
+            LLRect r;
+            web->localRectToOtherView(web->getLocalRect(), &r, login);
+            top = r.mTop;
+        }
+        const S32 height = p->getRect().getHeight();
+        p->reshape(login->getRect().getWidth(), height);
+        p->setOrigin(0, top - height);
+        p->getChild<LLButton>("update_btn")->setClickedCallback(boost::bind(&on_notice_button));
+        p->getChild<LLButton>("not_now_btn")->setClickedCallback(boost::bind(&on_notice_not_now));
+        login->addChild(p);   // in front of the login page, so it draws over it and gets the clicks
+        sNotice = p->getHandle();
+        sStage = Stage::OFFER;
+
+        // The band says what the one-off in-world notices for these two would have said.
+        if (sKind != Install::SELF) gSavedSettings.setS32(TOLD_SETTING, sOffer.mRevision);
+        refresh_notice();
+        LL_INFOS("WolfUpdate") << "login screen notice shown for w" << sOffer.mRevision << LL_ENDL;
+    }
+
+    /// In-world, once per run: what the check has always done after login (2026-10-02), unless
+    /// Update now was already pressed on the login screen.
+    void present_in_world()
+    {
+        if (sInWorldDone || !sHaveOffer) return;
+        sInWorldDone = true;
+        if (sActedAtLogin) return;   // that download reports for itself (downloadCoro)
+        // Not now on the login screen's band, after this run's check had already made the offer.
+        if (gSavedSettings.getS32(SKIPPED_SETTING) >= sOffer.mRevision) return;
+        switch (sKind)
+        {
+        case Install::PACKAGED:
+            // The system's updater has it; say so once per release.
+            if (gSavedSettings.getS32(TOLD_SETTING) >= sOffer.mRevision) return;
+            gSavedSettings.setS32(TOLD_SETTING, sOffer.mRevision);
+            LLNotificationsUtil::add("WolfUpdatePackaged", release_args());
+            return;
+        case Install::MANUAL:
+        {
+            if (gSavedSettings.getS32(TOLD_SETTING) >= sOffer.mRevision) return;
+            gSavedSettings.setS32(TOLD_SETTING, sOffer.mRevision);
+            LLSD args = release_args();
+            args["DIR"] = sKindWhere;
+            LLNotificationsUtil::add("WolfUpdateManual", args, LLSD(), [](const LLSD& n, const LLSD& r)
+            {
+                const S32 opt = LLNotificationsUtil::getSelectedOption(n, r);
+                if (opt == 0) LLWeb::loadURLExternal(DOWNLOAD_PAGE_URL);
+                else if (opt == 2) gSavedSettings.setS32(SKIPPED_SETTING, sOffer.mRevision);
+            });
+            return;
+        }
+        case Install::SELF:
+            break;
+        }
+        if (gSavedSettings.getBOOL(AUTO_DOWNLOAD_SETTING))
+        {
+            WolfUpdate::startDownload();
+        }
+        else
+        {
+            LLNotificationsUtil::add("WolfUpdateAvailable", release_args(), LLSD(), [](const LLSD& n, const LLSD& r) { on_available(n, r); });
+        }
+    }
+}
+
+// static
+void WolfUpdate::loginScreenShown(LLPanel* login_panel)
+{
+    if (login_panel) sLoginPanel = login_panel->getHandle();
+    checkOnce();
+    show_login_notice();   // no-op until the check has answered; checkCoro calls it then
+}
+
+// static
+void WolfUpdate::loggedIn()
+{
+    sLoggedIn = true;
+    checkOnce();           // the login screen may have been skipped (no connect box)
+    present_in_world();    // no-op until the check has answered; checkCoro calls it then
 }
 
 // static
@@ -511,41 +765,12 @@ void WolfUpdate::checkCoro()
     }
     if (gSavedSettings.getS32(SKIPPED_SETTING) >= o.mRevision) return;
     sOffer = o;
-
-    std::string where;
-    switch (install_kind(where))
-    {
-    case Install::PACKAGED:
-        // The system's updater has it; say so once per release.
-        if (gSavedSettings.getS32(TOLD_SETTING) >= o.mRevision) return;
-        gSavedSettings.setS32(TOLD_SETTING, o.mRevision);
-        LLNotificationsUtil::add("WolfUpdatePackaged", release_args());
-        return;
-    case Install::MANUAL:
-    {
-        if (gSavedSettings.getS32(TOLD_SETTING) >= o.mRevision) return;
-        gSavedSettings.setS32(TOLD_SETTING, o.mRevision);
-        LLSD args = release_args();
-        args["DIR"] = where;
-        LLNotificationsUtil::add("WolfUpdateManual", args, LLSD(), [](const LLSD& n, const LLSD& r)
-        {
-            const S32 opt = LLNotificationsUtil::getSelectedOption(n, r);
-            if (opt == 0) LLWeb::loadURLExternal(DOWNLOAD_PAGE_URL);
-            else if (opt == 2) gSavedSettings.setS32(SKIPPED_SETTING, sOffer.mRevision);
-        });
-        return;
-    }
-    case Install::SELF:
-        break;
-    }
-    if (gSavedSettings.getBOOL(AUTO_DOWNLOAD_SETTING))
-    {
-        WolfUpdate::startDownload();
-    }
-    else
-    {
-        LLNotificationsUtil::add("WolfUpdateAvailable", release_args(), LLSD(), [](const LLSD& n, const LLSD& r) { on_available(n, r); });
-    }
+    sKind = install_kind(sKindWhere);
+    sHaveOffer = true;
+    // Where the resident is now decides how they are told: still on the login screen, the band;
+    // already in-world (a quick or automatic login beat this answer), the in-world notices.
+    if (sLoggedIn) present_in_world();
+    else show_login_notice();
 }
 
 // static
@@ -571,7 +796,8 @@ void WolfUpdate::downloadCoro()
     job->mUserAgent = LLVersionInfo::instance().getChannelAndVersion();
     clean_updates(job->mPath);   // older downloads; a matching copy of this one is reused
     LL_INFOS("WolfUpdate") << "downloading w" << sOffer.mRevision << " (" << sOffer.mSize << " bytes) to " << job->mPath << LL_ENDL;
-    LLNotificationsUtil::add("WolfUpdateDownloading", release_args());
+    // From the login screen's band the band shows the progress; in-world, the tip as before.
+    if (!(sActedAtLogin && at_login_screen())) LLNotificationsUtil::add("WolfUpdateDownloading", release_args());
     {
         std::lock_guard<std::mutex> lock(sThreadMutex);
         if (sThread.joinable()) sThread.join();
@@ -582,6 +808,11 @@ void WolfUpdate::downloadCoro()
     {
         llcoro::suspendUntilTimeout(0.5f);
         if (LLApp::isExiting()) return;   // shutdown() joins the thread
+        if (sActedAtLogin)
+        {
+            sNoticeReceived = job->mReceived.load();
+            refresh_notice();
+        }
     }
     {
         std::lock_guard<std::mutex> lock(sThreadMutex);
@@ -596,6 +827,18 @@ void WolfUpdate::downloadCoro()
     }
     sReadyPath = job->mPath;
     LL_INFOS("WolfUpdate") << "w" << sOffer.mRevision << " downloaded and verified: " << sReadyPath << LL_ENDL;
+    if (sActedAtLogin)
+    {
+        // Asked for on the login screen and still there: install now, as Update now said.
+        if (at_login_screen())
+        {
+            install_from_notice();
+            return;
+        }
+        // Logged in while it downloaded: ask, as any in-world download does. The band (behind
+        // the progress screen if a login is under way) offers Update now again.
+        notice_back_to_offer();
+    }
 #if LL_DARWIN
     LLNotificationsUtil::add("WolfUpdateReadyMac", release_args(), LLSD(), [](const LLSD& n, const LLSD& r)
     {
@@ -612,19 +855,20 @@ void WolfUpdate::downloadCoro()
 }
 
 // static
-void WolfUpdate::startInstall()
+bool WolfUpdate::startInstall()
 {
-    if (sBusy || sReadyPath.empty()) return;
+    if (sBusy || sReadyPath.empty()) return false;
     // Unsaved ground paint lives only in memory (wolfterrainpaint.cpp hasUnsavedPaint); a restart
     // would lose it, and the restart here does not go through the quit confirmation.
     std::string paint_region;
     if (WolfTerrainPaint::instance().hasUnsavedPaint(paint_region))
     {
         LLNotificationsUtil::add("WolfUpdateUnsavedPaint", LLSD().with("REGION", paint_region));
-        return;
+        return false;
     }
     sBusy = true;
     LLCoros::instance().launch("WolfUpdate install", []() { WolfUpdate::installCoro(); });
+    return true;
 }
 
 // static
@@ -661,10 +905,15 @@ void WolfUpdate::installCoro()
     if (pid < 0) { notify_failed("the disk image could not be opened"); return; }
     int st = 0;
     waitpid(pid, &st, 0);   // `open` returns at once
+    if (sActedAtLogin && sStage == Stage::INSTALLING)
+    {
+        sStage = Stage::MAC_OPENED;   // the band now says what to do in Finder, with Quit WolfViewer
+        refresh_notice();
+    }
 #else
     std::string where;
     if (install_kind(where) != Install::SELF) { sBusy = false; notify_failed("this copy cannot update itself"); return; }
-    LLNotificationsUtil::add("WolfUpdateInstalling", release_args());
+    if (!(sActedAtLogin && at_login_screen())) LLNotificationsUtil::add("WolfUpdateInstalling", release_args());   // else the band says it
     const pid_t pid = spawn({ "/bin/bash", where + "/etc/wolfviewer-update.sh", "apply", path, where, llformat("%d", (S32)getpid()) });
     if (pid < 0) { sBusy = false; notify_failed("the update helper could not be started"); return; }
     int st = 0;

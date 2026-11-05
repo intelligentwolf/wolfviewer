@@ -33,13 +33,15 @@
 #include "llcheckboxctrl.h"
 #include "llchat.h"
 #include "llcorehttputil.h"
-#include "llfloater.h"   // [TICKET 481 2026-11-03/] layout() grows the window
+#include "llfloater.h"   // [TICKET 481 2026-11-03/] layout() grows the window; [TICKET 529 2026-11-05/] gFloaterView
 #include "llcoros.h"
 #include "lleventcoro.h"
 #include "llframetimer.h"
 #include "llhttpconstants.h"
 #include "llnotificationsutil.h"
 #include "llpanel.h"
+#include "llscrollcontainer.h"   // [TICKET 529 2026-11-05/] the Region panel sits in one
+#include "llui.h"                // [TICKET 529 2026-11-05/] LLUICachedControl (UIScrollbarSize)
 #include "llsdjson.h"
 #include "lltextbox.h"
 #include "llviewerregion.h"
@@ -104,17 +106,26 @@ namespace
         sState.mStatusFromRead = from_read;
     }
 
+    /** [TICKET 529 2026-11-05] How far layout() has grown the Region / Estate window below its own height, so it can give
+     *  that back (the texts got shorter, the Wolf block went, the viewer window got smaller) and never grows past it. */
+    struct Growth
+    {
+        LLHandle<LLFloater> mFloater;
+        S32 mBy = 0;
+    };
+    Growth sGrowth;
+
     /** [TICKET 481 2026-11-03] Buzzy Cnayl: the planes' and birds' texts overlapped (fixed-height boxes, and the wrapped text
      *  ran past them). Stacks the Wolf block top-down from the planes box (panel_region_general.xml): each text box as tall
-     *  as its wrapped text (LLTextBase::getTextBoundingRect reflows it at the box's width), at any font size; then, if the
-     *  stack would run past the bottom of the panel, the window grows by the difference (the tab container makes every tab
-     *  follow the window, and these controls follow the top, so nothing else moves). */
-    void layout(LLPanel* panel)
+     *  as its wrapped text (LLTextBase::getTextBoundingRect reflows it at the box's width), at any font size. Every text is
+     *  as wide as the panel less the XML's 10 px right margin (the panel is 480 wide there and the texts end at 470), so
+     *  none runs under the scroll bar. Returns the stack's bottom edge
+     *  (panel coordinates: y grows upwards, 0 is the panel's bottom). */
+    S32 stack(LLPanel* panel, LLView* anchor)
     {
-        LLView* anchor = panel->findChildView("wolf_planes_check");
-        if (!anchor || !anchor->getVisible()) return;
-        constexpr S32 AFTER_CHECK = 1, AFTER_TEXT = 5, BOTTOM_MARGIN = 8, MIN_TEXT = 14;
-        S32 top = anchor->getRect().mBottom - AFTER_CHECK;   // panel coordinates: y grows upwards
+        constexpr S32 AFTER_CHECK = 1, AFTER_TEXT = 5, RIGHT_MARGIN = 10, MIN_TEXT = 14;
+        const S32 right = panel->getRect().getWidth() - RIGHT_MARGIN;
+        S32 top = anchor->getRect().mBottom - AFTER_CHECK;
         auto place = [&top](LLView* v, S32 height, S32 gap)
         {
             LLRect r = v->getRect();
@@ -127,6 +138,10 @@ namespace
             LLTextBox* t = panel->findChild<LLTextBox>(name);
             if (!t) return;
             const bool empty = t->getText().empty();
+            // the width first: the wrapped height is measured at the width the box will have
+            LLRect r = t->getRect();
+            r.mRight = r.mLeft + llmax(0, right - r.mLeft);
+            t->setShape(r);
             place(t, empty ? 0 : llmax(MIN_TEXT, t->getTextPixelHeight() + 2), empty ? 0 : gap);
         };
         auto check = [&](const char* name)
@@ -143,17 +158,78 @@ namespace
         check("wolf_sealife_check");              // [SEA LIFE 2026-11-03/]
         text("wolf_sealife_state", AFTER_TEXT);
         text("wolf_planes_status", 0);
-        const S32 short_by = BOTTOM_MARGIN - top;   // top is now the stack's bottom edge; 0 is the panel's bottom
-        if (short_by > 0)
+        return top;
+    }
+
+    /** [TICKET 481 2026-11-03] stacks the Wolf block (stack above) each time its texts change.
+     *  [TICKET 529 2026-11-05] Jimmy Olsen, 1360x768: 481 then grew the window by whatever the stack was short, so with five
+     *  switches (W94's dolphins and whales) the window ran under the bottom toolbars and the last switches could not be
+     *  reached. The panel now sits in a scroll container (llfloaterregioninfo.cpp postBuild): it is made as tall as its
+     *  contents (never less than the view), the window grows only while its bottom stays inside the floater view's snap
+     *  rect (LLFloaterView::getSnapRect: the space between the toolbars, where floaters are kept), and the rest scrolls.
+     *  When the scroll bar shows, the panel is narrowed by its width and the block restacked at that width. */
+    void layout(LLPanel* panel)
+    {
+        LLView* anchor = panel->findChildView("wolf_planes_check");
+        const bool wolf = anchor && anchor->getVisible();
+        LLScrollContainer* scroll = dynamic_cast<LLScrollContainer*>(panel->getParent());
+        if (!scroll)
         {
-            LLFloater* floater = panel->getParentByType<LLFloater>();
-            if (floater && !floater->isMinimized())   // a minimised window's panel is squeezed: never grow it then
-            {
-                LLRect fr = floater->getRect();
-                fr.mBottom -= short_by;   // the top stays where it is
-                floater->setShape(fr);
-            }
+            if (wolf) stack(panel, anchor);
+            return;
         }
+        LLFloater* floater = panel->getParentByType<LLFloater>();
+        if (!floater || floater->isMinimized()) return;   // a minimised window's panel is squeezed: leave it until restored
+        constexpr S32 BOTTOM_MARGIN = 8;
+        const S32 border = scroll->getBorderWidth();
+        auto view_width = [scroll, border]() { return scroll->getRect().getWidth() - 2 * border; };
+        auto view_height = [scroll, border]() { return scroll->getRect().getHeight() - 2 * border; };
+        // How tall the panel must be to hold the stack: the stack's bottom is `bottom` above the panel's bottom now.
+        auto fit = [panel, anchor, wolf](S32 width) -> S32
+        {
+            LLRect r = panel->getRect();
+            if (r.getWidth() != width)
+            {
+                r.mRight = r.mLeft + width;
+                panel->setShape(r);   // the right-hand controls follow the right edge
+            }
+            if (!wolf) return 0;
+            const S32 bottom = stack(panel, anchor);
+            return panel->getRect().getHeight() - bottom + BOTTOM_MARGIN;
+        };
+        S32 needed = fit(view_width());
+
+        if (sGrowth.mFloater.get() != floater)
+        {
+            sGrowth.mFloater = floater->getHandle();
+            sGrowth.mBy = 0;
+        }
+        LLRect fr = floater->getRect();
+        // How far the bottom may still go down: to the snap rect's bottom, in the floater view's coordinates (the floater's
+        // parent). A floater anywhere else may only give back what it was given.
+        S32 room = 0;
+        if (gFloaterView && floater->getParent() == gFloaterView)
+        {
+            room = fr.mBottom - gFloaterView->getSnapRect().mBottom;
+        }
+        const S32 base_height = view_height() - sGrowth.mBy;   // the view at the window's own height
+        const S32 grow = llclamp(needed - base_height, 0, llmax(0, sGrowth.mBy + room));
+        if (grow != sGrowth.mBy)
+        {
+            fr.mBottom -= grow - sGrowth.mBy;   // the top stays where it is
+            floater->setShape(fr);
+            sGrowth.mBy = grow;
+        }
+
+        if (needed > view_height())
+        {
+            static LLUICachedControl<S32> scrollbar_size_control("UIScrollbarSize", 0);   // as llscrollcontainer.cpp
+            const S32 scrollbar = scroll->getSize() == -1 ? (S32)scrollbar_size_control : scroll->getSize();
+            needed = fit(view_width() - scrollbar);
+        }
+        LLRect r = panel->getRect();
+        r.setLeftTopAndSize(r.mLeft, r.mTop, r.getWidth(), llmax(view_height(), needed));
+        panel->setShape(r);   // every control follows the top; the scroll container puts the panel back in view as it draws
     }
 
     std::string str(LLPanel* panel, const char* name)
@@ -567,7 +643,11 @@ void WolfPassingPlanes::sync(LLPanel* panel, LLViewerRegion* region, bool reread
     {
         if (LLView* v = panel->findChildView(name)) v->setVisible(wolf);
     }
-    if (!wolf) return;
+    if (!wolf)
+    {
+        layout(panel);   // [TICKET 529 2026-11-05/] the block went: the panel back to the view's size, the window to its own
+        return;
+    }
     const LLUUID id = region->getRegionID();
     const F64 now = LLFrameTimer::getTotalSeconds();
     if (id != sState.mRegion)

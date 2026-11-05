@@ -71,6 +71,7 @@
 #include "llnotificationsutil.h"
 #include "llpbrterrainfeatures.h"
 #include "llregioninfomodel.h"
+#include "llscrollcontainer.h"   // [TICKET 529 2026-11-05/] the Region tab scrolls
 #include "llscrolllistitem.h"
 #include "llsliderctrl.h"
 #include "llslurl.h"
@@ -277,7 +278,31 @@ bool LLFloaterRegionInfo::postBuild()
     panel->getCommitCallbackRegistrar().add("RegionInfo.ManageTelehub", boost::bind(&LLPanelRegionInfo::onClickManageTelehub, panel));
     panel->getCommitCallbackRegistrar().add("RegionInfo.ManageRestart", boost::bind(&LLPanelRegionInfo::onClickManageRestartSchedule, panel));
     panel->buildFromFile("panel_region_general.xml");
-    mTab->addTabPanel(panel);
+    // [TICKET 529 2026-11-05] Jimmy Olsen (1360x768): the Wolf switches at the foot of the Region tab ran under the bottom
+    // toolbars, because wolfpassingplanes.cpp layout() grew the window by whatever the tab was short. The tab is now a
+    // plain page holding a scroll container with the Region panel inside (as a scroll_container holds a panel in XUI:
+    // llscrollcontainer.cpp addChild takes the first child as the scrolled view), so whatever does not fit scrolls; layout()
+    // sizes the panel to its contents and grows the window only as far as the floater view's snap rect allows. The panel
+    // itself, its name "General" (found by the recursive getChild calls here), its children and every language's
+    // panel_region_general.xml are unchanged, and setCtrlsEnabled (LLPanel's, over direct children) still reaches them.
+    {
+        LLPanel::Params page_params;
+        page_params.name("region_general_page");
+        page_params.rect(panel->getRect());
+        LLPanel* page = LLUICtrlFactory::create<LLPanel>(page_params);
+        // the same label (the localised "Region"); lltabcontainer.cpp addTabPanel sizes the page to the tab area
+        mTab->addTabPanel(LLTabContainer::TabPanelParams().panel(page).label(panel->getLabel()));
+        LLScrollContainer::Params scroll_params;
+        scroll_params.name("region_general_scroll");
+        scroll_params.rect(page->getLocalRect());
+        scroll_params.follows.flags(FOLLOWS_ALL);
+        LLScrollContainer* scroll = LLUICtrlFactory::create<LLScrollContainer>(scroll_params);
+        page->addChild(scroll);
+        // Its width follows the page; its height is the contents' (wolfpassingplanes.cpp layout), never less than the view.
+        panel->setFollows(FOLLOWS_LEFT | FOLLOWS_RIGHT | FOLLOWS_TOP);
+        panel->setShape(scroll->getLocalRect());
+        scroll->addChild(panel);
+    }
 
 // <FS:CR> Aurora Sim - Region Settings Console
     // We only use this panel on Aurora-based sims

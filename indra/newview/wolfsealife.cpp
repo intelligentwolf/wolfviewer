@@ -440,10 +440,18 @@ void WolfSeaLife::moveGroup(Group& g, F32 dt)
     if (g.mRetarget <= 0.f && !g.mLeaving) { g.mRetarget = rnd(20.f, 50.f); g.mTarget = g.mHeading + rnd(-1.2f, 1.2f); }
     const F32 ahead = 15.f + 2.f * sp.mLen;
     const F32 need = sp.mDepthMin;
-    auto ok_at = [&](F32 hd) { return depth(g.mCentre + LLVector3(cosf(hd) * ahead, sinf(hd) * ahead, 0.f)) >= need; };
+    // [SEA LIFE SPIN 2026-11-05] Paul: "on sandbox there is a whale or dolphin spinning round". The heading used to be
+    // checked only `ahead` metres out, so a centre that had crept into water between 0.75 and 1 x `need` with deep water
+    // further on (Sandbox's shelves) kept a heading whose very next step the gate below refused: the centre froze, the
+    // members' slots stood still and every member circled its slot for minutes (wolf_sea_life.js, sandbox_spin.js). Now
+    // the heading must be deep enough one body length out as well, a step into deeper water is never refused, and a
+    // refused step slides along the nearest heading whose step is allowed (and turns to it).
+    // Source: wolf_sea_life.js _moveGroup (2026-11-05)
+    auto probe = [&](F32 hd, F32 d) { return depth(g.mCentre + LLVector3(cosf(hd) * d, sinf(hd) * d, 0.f)); };
+    auto ok_at = [&](F32 hd) { return probe(hd, sp.mLen) >= need && probe(hd, ahead) >= need; };
     if (!ok_at(g.mHeading))
     {
-        // the nearest heading to the current one with deep water ahead (8 tries each side)
+        // the nearest heading to the current one with deep water ahead (8 tries each side); none: the deepest way
         bool found = false;
         F32 best = 0.f;
         for (S32 k = 1; k <= 8 && !found; ++k)
@@ -454,14 +462,41 @@ void WolfSeaLife::moveGroup(Group& g, F32 dt)
                 if (ok_at(hd)) { best = hd; found = true; break; }
             }
         }
-        g.mTarget = found ? best : g.mHeading + F_PI;
+        if (!found)
+        {
+            F32 deepest = -1.f;
+            for (S32 k = 0; k < 16; ++k)
+            {
+                const F32 hd = g.mHeading + (F32)k * F_PI / 8.f, d = probe(hd, sp.mLen);
+                if (d > deepest) { deepest = d; best = hd; }
+            }
+        }
+        g.mTarget = best;
     }
     const F32 turn = llclamp(wrap(g.mTarget - g.mHeading), -sp.mTurn * 0.5f * dt, sp.mTurn * 0.5f * dt);
     g.mHeading = wrap(g.mHeading + turn);
     const F32 speed = (g.mKind == DOLPHIN && g.mPorpoise) ? sp.mFast : sp.mCruise;
     const F32 v = speed * (g.mLeaving ? 1.3f : 1.f);
-    const LLVector3 next = g.mCentre + LLVector3(cosf(g.mHeading) * v * dt, sinf(g.mHeading) * v * dt, 0.f);
-    if (depth(next) >= need * 0.75f) g.mCentre = next;   // leaving groups keep the depth gate too (never aground)
+    const F32 here = depth(g.mCentre);
+    // leaving groups keep the depth gate too (never aground)
+    auto step_to = [&](F32 hd, LLVector3& out)
+    {
+        out = g.mCentre + LLVector3(cosf(hd) * v * dt, sinf(hd) * v * dt, 0.f);
+        const F32 there = depth(out);
+        return there >= need * 0.75f || there > here;
+    };
+    LLVector3 next;
+    bool stepped = step_to(g.mHeading, next);
+    for (S32 k = 1; k <= 8 && !stepped; ++k)
+    {
+        for (S32 sgn = 1; sgn >= -1; sgn -= 2)
+        {
+            const F32 hd = g.mHeading + (F32)(sgn * k) * F_PI / 8.f;
+            if (k < 8 && !ok_at(hd)) continue;   // slide only where the way on is deep too (k 8: straight back)
+            if (step_to(hd, next)) { g.mTarget = hd; stepped = true; break; }
+        }
+    }
+    if (stepped) g.mCentre = next;
     if (g.mKind == DOLPHIN && !g.mLeaving)
     {
         g.mModeFor -= dt;
@@ -487,12 +522,34 @@ void WolfSeaLife::steer(Animal& a, F32 dt)
         want = (a.mKind == DOLPHIN && g.mPorpoise) ? sp.mFast : sp.mCruise;
         if (a.mKind != DOLPHIN && a.mState == W_DOWN) want = DOWN_SPEED;
         if (g.mLeaving) want *= 1.3f;
+        // [SEA LIFE SPIN 2026-11-05] a slot that has swung over water too shallow for this kind (the slot turns with the
+        // pod): follow the pod's centre instead, which moveGroup keeps over deep water. Source: wolf_sea_life.js _steer
+        if (depth(LLVector3(tx, ty, 0.f)) < sp.mDepthMin) { tx = g.mCentre.mV[VX]; ty = g.mCentre.mV[VY]; }
     }
     const F32 dx = tx - a.mPos.mV[VX], dy = ty - a.mPos.mV[VY];
     const F32 dist = len2(dx, dy);
-    // a slot far behind: speed up (to 1.5x); close: match the pod
-    const F32 speed = llclamp(want + (dist - 2.f) * 0.25f, want * 0.6f, llmax(want * 1.5f, want + 1.f));
-    F32 aim = dist > 0.5f ? atan2f(dy, dx) : (riding ? g.mRideHeading : g.mHeading);
+    const F32 rate = sp.mTurn * (a.mState == LEAP ? 0.f : 1.f) * (riding ? 2.f : 1.f);
+    // [SEA LIFE SPIN 2026-11-05] steering straight at the slot point made a member that reached or overshot it turn round
+    // (it cannot swim slower than 0.6 x the pod, nor turn tighter than speed / turn rate) and loop round the slot again and
+    // again - a dolphin spinning on the spot (sandbox_spin.js). Near the slot it now swims the pod's heading, eased
+    // sideways onto the slot, and falls back by slowing down; only a slot well beyond its turning circle is swum straight
+    // at. Source: wolf_sea_life.js _steer (2026-11-05)
+    const F32 pod_hd = riding ? g.mRideHeading : g.mHeading;
+    const F32 turn_r = llmax(0.5f, want) / llmax(0.05f, sp.mTurn * (riding ? 2.f : 1.f));
+    const F32 fx = cosf(pod_hd), fy = sinf(pod_hd);
+    const F32 along = dx * fx + dy * fy, across = dy * fx - dx * fy;
+    const F32 hi = llmax(want * 1.5f, want + 1.f);
+    F32 aim = 0.f, speed = 0.f;
+    if (dist > 4.f * turn_r + 4.f)
+    {
+        // a slot far off: straight there, faster (to 1.5x)
+        aim = atan2f(dy, dx); speed = llclamp(want + (dist - 2.f) * 0.25f, want * 0.6f, hi);
+    }
+    else
+    {
+        // close: the pod's heading, turned onto the slot over two turning circles; ahead faster, behind slower
+        aim = pod_hd + atan2f(across, 2.f * turn_r + 2.f); speed = llclamp(want + along * 0.25f, want * 0.6f, hi);
+    }
     if (a.mKind == DOLPHIN)
     {
         for (const Animal& o : mAnimals)
@@ -507,12 +564,53 @@ void WolfSeaLife::steer(Animal& a, F32 dt)
     const F32 ahead = 15.f + 2.f * a.mLen;
     if (depth(a.mPos + LLVector3(cosf(aim) * ahead, sinf(aim) * ahead, 0.f)) < sp.mDepthMin
         && depth(a.mPos) >= sp.mDepthMin) aim = g.mHeading;
-    const F32 rate = sp.mTurn * (a.mState == LEAP ? 0.f : 1.f) * (riding ? 2.f : 1.f);
+    // [SEA LIFE SPIN 2026-11-05] and never at shallows one body length off: the nearest heading with water deep enough
+    // there (8 tries each side), else the deepest way - so the aim never pushes it against the edge it turns from
+    auto near_at = [&](F32 hd) { return depth(a.mPos + LLVector3(cosf(hd) * a.mLen, sinf(hd) * a.mLen, 0.f)); };
+    if (near_at(aim) < sp.mDepthMin)
+    {
+        bool found = false;
+        F32 best = aim, deepest = -1.f, deep_hd = aim;
+        for (S32 k = 1; k <= 8 && !found; ++k)
+        {
+            for (S32 sgn = 1; sgn >= -1; sgn -= 2)
+            {
+                const F32 hd = aim + (F32)(sgn * k) * F_PI / 8.f, d = near_at(hd);
+                if (d >= sp.mDepthMin) { best = hd; found = true; break; }
+                if (d > deepest) { deepest = d; deep_hd = hd; }
+            }
+        }
+        aim = found ? best : deep_hd;
+    }
     a.mHeading = wrap(a.mHeading + llclamp(wrap(aim - a.mHeading), -rate * dt, rate * dt));
     a.mSpeed += llclamp(speed - a.mSpeed, -2.f * dt, 2.f * dt);
-    const LLVector3 next = a.mPos + LLVector3(cosf(a.mHeading) * a.mSpeed * dt, sinf(a.mHeading) * a.mSpeed * dt, 0.f);
-    if (depth(next) >= sp.mDepthMin * 0.6f) { a.mPos.mV[VX] = next.mV[VX]; a.mPos.mV[VY] = next.mV[VY]; }
-    else a.mHeading = wrap(a.mHeading + F_PI * dt);   // at the edge of the shallows: turn on the spot
+    // [SEA LIFE SPIN 2026-11-05] at the edge of the shallows it used to stop and turn on the spot at half a turn a second
+    // (every kind: a 13 m whale spun like a top), or, where the aim pulled back as hard, stop for good. Now it slides along
+    // the nearest heading whose next stroke is allowed and turns toward it at its own turn rate.
+    const F32 here = depth(a.mPos);
+    auto step_to = [&](F32 hd, LLVector3& out)
+    {
+        out = a.mPos + LLVector3(cosf(hd) * a.mSpeed * dt, sinf(hd) * a.mSpeed * dt, 0.f);
+        const F32 there = depth(out);
+        return there >= sp.mDepthMin * 0.6f || there > here;   // leaving too (review 2026-11-03)
+    };
+    LLVector3 next;
+    F32 slide = a.mHeading;
+    bool stepped = step_to(slide, next);
+    for (S32 k = 1; k <= 8 && !stepped; ++k)
+    {
+        for (S32 sgn = 1; sgn >= -1; sgn -= 2)
+        {
+            slide = a.mHeading + (F32)(sgn * k) * F_PI / 8.f;
+            if (step_to(slide, next)) { stepped = true; break; }
+        }
+    }
+    if (stepped)
+    {
+        a.mPos.mV[VX] = next.mV[VX]; a.mPos.mV[VY] = next.mV[VY];
+        const F32 r = llmax(rate, sp.mTurn) * dt;
+        a.mHeading = wrap(a.mHeading + llclamp(wrap(slide - a.mHeading), -r, r));
+    }
 }
 
 void WolfSeaLife::moveDolphin(Animal& a, F32 dt, F64 now)

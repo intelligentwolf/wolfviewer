@@ -5,6 +5,10 @@
   wolfctl api LLAgent               # one API's ops and their help text
   wolfctl snapshot /path/file.png   # LLViewerWindow saveSnapshot
   wolfctl pos | nearby | login
+  wolfctl tp "<Region Name>" [x y [z]]   # [2026-10-31] teleport by region name, region-local metres (any size of
+                                     # region); waits for the result and exits 1 on "region not found" /
+                                     # "teleport failed: <reason>"
+Exit status: 0 when the viewer replied without an ["error"], 1 otherwise.
 """
 import json, os, socket, sys
 
@@ -43,11 +47,27 @@ def main(a):
         req = {"pump": "LLAgent", "data": {"op": "getNearbyAvatarsList"}}
     elif cmd == "login":
         req = {"pump": "LLPanelLogin", "data": {"op": "onClickConnect"}, "noreply": True}
+    elif cmd == "tp":
+        # LLAgent requestTeleport with skip_confirmation (wolfviewer llagentlistener.cpp): the viewer looks the region
+        # up (up to 20 s) and then waits for the teleport (up to 60 s) before it replies, so wait longer than both.
+        if len(a) not in (2, 4, 5):
+            print('usage: wolfctl tp "<Region Name>" [x y [z]]', file=sys.stderr)
+            return 2
+        data = {"op": "requestTeleport", "regionname": a[1], "skip_confirmation": True}
+        try:
+            for key, val in zip(("x", "y", "z"), a[2:]):
+                data[key] = float(val)
+        except ValueError:
+            print('usage: wolfctl tp "<Region Name>" [x y [z]]  (x, y, z are numbers of metres)', file=sys.stderr)
+            return 2
+        req = {"pump": "LLAgent", "data": data, "timeout": 90}
     else:
         print("unknown command", cmd, file=sys.stderr)
         return 2
-    print(json.dumps(call(req), indent=1))
-    return 0
+    out = call(req)
+    print(json.dumps(out, indent=1))
+    reply = out.get("reply")
+    return 0 if out.get("ok") and not (isinstance(reply, dict) and reply.get("error")) else 1
 
 
 sys.exit(main(sys.argv[1:]))

@@ -26,6 +26,7 @@
 
 #include "llviewerprecompiledheaders.h"
 
+#include "wolfterrainlevels.h"   // [WOLF SKY LEVELS 2026-11-05]
 #include "llworld.h"
 #include "llrender.h"
 
@@ -1038,9 +1039,34 @@ F32 LLWorld::resolveStepHeightGlobal(const LLVOAvatar* avatarp, const LLVector3d
         land_intersection = point_b;
     }
     // </WolfViewer>
+    // [WOLF SKY LEVELS 2026-11-05] Standing on sky land (wolfterrainlevels.h) the land under point_a is the level, not the
+    // ground far below: the highest level surface at or below point_a counts as the land here, with its own slope, so the
+    // feet (llkeyframestandmotion.cpp, as above) rest on it as they do on the ground.
+    bool wolf_on_sky_level = false;
+    LLVector3 wolf_sky_normal = LLVector3::z_axis;
+    if (!wolf_land_above_in_tunnel)
+    {
+        if (WolfTerrainLevels* sky = regionp->getWolfSkyLevels(); sky && sky->hasLevels())
+        {
+            const LLVector3 a = regionp->getPosRegionFromGlobal(point_a);
+            const F32 h = sky->resolveSupportHeight(a.mV[VX], a.mV[VY], a.mV[VZ], 0.f, &wolf_on_sky_level);
+            if (wolf_on_sky_level)
+            {
+                land_intersection.mdV[VZ] = regionp->getPosGlobalFromRegion(LLVector3(a.mV[VX], a.mV[VY], h)).mdV[VZ];
+                // the slope from the same surface half a metre each way (the tolerance keeps it on that level)
+                const F32 hx0 = sky->resolveSupportHeight(a.mV[VX] - 0.5f, a.mV[VY], h, 1.f);
+                const F32 hx1 = sky->resolveSupportHeight(a.mV[VX] + 0.5f, a.mV[VY], h, 1.f);
+                const F32 hy0 = sky->resolveSupportHeight(a.mV[VX], a.mV[VY] - 0.5f, h, 1.f);
+                const F32 hy1 = sky->resolveSupportHeight(a.mV[VX], a.mV[VY] + 0.5f, h, 1.f);
+                wolf_sky_normal.setVec(hx0 - hx1, hy0 - hy1, 1.f);
+                wolf_sky_normal.normVec();
+            }
+        }
+    }
     normalized_land_distance = (F32)(point_a.mdV[VZ] - land_intersection.mdV[VZ]) / segment_length;
     intersection = land_intersection;
-    intersection_normal = wolf_land_above_in_tunnel ? LLVector3::z_axis : resolveLandNormalGlobal(land_intersection);   // <WolfViewer 2026-10-22/>
+    intersection_normal = wolf_land_above_in_tunnel ? LLVector3::z_axis
+                        : wolf_on_sky_level ? wolf_sky_normal : resolveLandNormalGlobal(land_intersection);   // <WolfViewer 2026-10-22/>
 
     if (avatarp && !avatarp->mFootPlane.isExactlyClear())
     {
@@ -1060,7 +1086,8 @@ F32 LLWorld::resolveStepHeightGlobal(const LLVOAvatar* avatarp, const LLVector3d
         else
         {
             intersection = land_intersection;
-            intersection_normal = wolf_land_above_in_tunnel ? LLVector3::z_axis : resolveLandNormalGlobal(land_intersection);   // <WolfViewer 2026-10-22/>
+            intersection_normal = wolf_land_above_in_tunnel ? LLVector3::z_axis
+                                : wolf_on_sky_level ? wolf_sky_normal : resolveLandNormalGlobal(land_intersection);   // <WolfViewer 2026-10-22/> [WOLF SKY LEVELS]
         }
     }
 
@@ -1125,6 +1152,12 @@ static bool regionLandInFrustum(LLViewerRegion* regionp)
         min_z = 0.f;
         max_z = LLWorld::getInstance()->getRegionMaxHeight();
     }
+    // [WOLF SKY LEVELS 2026-11-05] the region's land includes its sky land, high above the ground (wolfterrainlevels.h)
+    if (WolfTerrainLevels* sky = regionp->getWolfSkyLevels(); sky && sky->hasLevels())
+    {
+        min_z = llmin(min_z, sky->minZ());
+        max_z = llmax(max_z, sky->maxZ());
+    }
 
     const LLVector3 origin = regionp->getOriginAgent();
     const F32 half_edge = regionp->getWidth() * 0.5f;
@@ -1175,6 +1208,10 @@ void LLWorld::updateVisibilities()
         {
             regionp->calculateCameraDistance();
             regionp->getLand().updatePatchVisibilities(gAgent);
+            if (WolfTerrainLevels* sky = regionp->getWolfSkyLevels())
+            {
+                sky->updatePatchVisibilities(gAgent);   // [WOLF SKY LEVELS 2026-11-05]
+            }
         }
         else
         {

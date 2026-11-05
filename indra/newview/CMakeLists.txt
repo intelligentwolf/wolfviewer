@@ -1023,6 +1023,8 @@ set(viewer_SOURCE_FILES
     wolffloateradventurestudioedit.cpp # [WOLF ADVENTURE P3 2026-10-16] Studio: outline, cast, places, story, rules, lore, test play
     wolftooladventureplace.cpp # [WOLF ADVENTURE P3 2026-10-16] Studio: the in-world place tool
     wolffloatertunnels.cpp # [WOLF TUNNELS 2026-10-21] the Tunnel tool: walkable spaces under the terrain
+    wolffloaterskylevels.cpp # [WOLF SKY LEVELS 2026-11-05] ticket 541: the Sky Land window
+    wolfterrainlevels.cpp    # [WOLF SKY LEVELS 2026-11-05] ticket 541: sky levels, a region's extra native terrain
     wolffloaterseatunnels.cpp # [WOLF SEA TUNNEL 2026-10-28] Sea Tunnels: air-filled glass tubes under the sea
     wolffloateranimator.cpp    # [WOLF ANIMATOR 2026-11-05] Wolf Animator: describe a movement, get an animation in your inventory (ticket 547)
     wolffloaterbuildinggen.cpp # [BUILDING GENERATOR 2026-11-01] Building Generator: describe a building, the yard plans, builds and delivers it
@@ -2042,6 +2044,8 @@ set(viewer_HEADER_FILES
     wolffloateradventurestudio.h   # [WOLF ADVENTURE P1 2026-10-16]
     wolftooladventureplace.h   # [WOLF ADVENTURE P3 2026-10-16]
     wolffloatertunnels.h   # [WOLF TUNNELS 2026-10-21]
+    wolffloaterskylevels.h # [WOLF SKY LEVELS 2026-11-05]
+    wolfterrainlevels.h    # [WOLF SKY LEVELS 2026-11-05]
     wolffloaterseatunnels.h   # [WOLF SEA TUNNEL 2026-10-28]
     wolffloateranimator.h      # [WOLF ANIMATOR 2026-11-05]
     wolffloaterfit.h           # [WOLF ANIMATOR 2026-11-05] ticket 529 rule: tall Wolf windows stay inside the screen

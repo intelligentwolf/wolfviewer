@@ -37,6 +37,7 @@
 #include "llregionflags.h"
 #include "llregionhandle.h"
 #include "llsurface.h"
+#include "wolfterrainlevels.h"   // [WOLF SKY LEVELS 2026-11-05]
 #include "message.h"
 #include "v3math.h"
 #include "v4math.h"
@@ -200,6 +201,7 @@ public:
 
     // The surfaces and other layers
     LLSurface*  mLandp;
+    WolfTerrainLevels* mWolfSkyLevels = nullptr;   // [WOLF SKY LEVELS 2026-11-05] the region's sky land (wolfterrainlevels.h)
 
     // Region geometry data
     LLVector3d  mOriginGlobal;  // Location of southwest corner of region (meters)
@@ -724,6 +726,7 @@ LLViewerRegion::LLViewerRegion(const U64 &handle,
                     terrain_grids_per_patch,
                     mImpl->mOriginGlobal,
                     mWidth);
+    mImpl->mWolfSkyLevels = new WolfTerrainLevels(this);   // [WOLF SKY LEVELS 2026-11-05] empty until the capability answers
 
 // <FS:CR> Aurora Sim
     //mParcelOverlay = new LLViewerParcelOverlay(this, region_width_meters);
@@ -813,6 +816,8 @@ LLViewerRegion::~LLViewerRegion()
 
     delete mImpl->mCompositionp;
     delete mParcelOverlay;
+    delete mImpl->mWolfSkyLevels;   // [WOLF SKY LEVELS 2026-11-05] its surfaces before the ground's (their objects are killed above)
+    mImpl->mWolfSkyLevels = nullptr;
     delete mImpl->mLandp;
     delete mImpl->mEventPoll;
 #if 0
@@ -839,6 +844,12 @@ LLViewerRegion::~LLViewerRegion()
 const LLHost&   LLViewerRegion::getHost() const
 {
     return mImpl->mHost;
+}
+
+// [WOLF SKY LEVELS 2026-11-05]
+WolfTerrainLevels* LLViewerRegion::getWolfSkyLevels() const
+{
+    return mImpl->mWolfSkyLevels;
 }
 
 LLSurface & LLViewerRegion::getLand() const
@@ -973,6 +984,10 @@ void LLViewerRegion::setOriginGlobal(const LLVector3d &origin_global)
     mImpl->mOriginGlobal = origin_global;
     updateRenderMatrix();
     mImpl->mLandp->setOriginGlobal(origin_global);
+    if (mImpl->mWolfSkyLevels)
+    {
+        mImpl->mWolfSkyLevels->setOriginGlobal(origin_global);   // [WOLF SKY LEVELS 2026-11-05] its surfaces move with the ground
+    }
     mWind.setOriginGlobal(origin_global);
     calculateCenterGlobal();
 }
@@ -1764,6 +1779,10 @@ void LLViewerRegion::idleUpdate(F32 max_update_time)
     {
         mImpl->mLandp->idleUpdate</*PBR=*/true>(max_update_time);
     }
+    if (mImpl->mWolfSkyLevels)
+    {
+        mImpl->mWolfSkyLevels->idleUpdate(pbr_land, max_update_time);   // [WOLF SKY LEVELS 2026-11-05]
+    }
 
     if (mParcelOverlay)
     {
@@ -2078,6 +2097,10 @@ void LLViewerRegion::forceUpdate()
     else
     {
         mImpl->mLandp->idleUpdate</*PBR=*/true>(max_update_time);
+    }
+    if (mImpl->mWolfSkyLevels)
+    {
+        mImpl->mWolfSkyLevels->idleUpdate(pbr_land, max_update_time);   // [WOLF SKY LEVELS 2026-11-05]
     }
 
     if (mParcelOverlay)
@@ -3542,6 +3565,7 @@ void LLViewerRegionImpl::buildCapabilityNames(LLSD& capabilityNames)
     capabilityNames.append("EventQueueGet");
     capabilityNames.append("ExtEnvironment");
     capabilityNames.append("WolfEnvironmentPreview");   // [WOLF ENV 2026-10-12] WolfSim WolfEnvironment.cs PREVIEW_CAP (wolffloaterenvironment.cpp); other sims ignore an unknown name
+    capabilityNames.append("WolfSkyLevels");   // [WOLF SKY LEVELS 2026-11-05] WolfSim WolfSkyLevelsModule.cs CAP (wolfterrainlevels.cpp); other sims ignore an unknown name
     capabilityNames.append("WolfTunnels");   // [WOLF TUNNELS 2026-10-21] WolfSim WolfTunnelsModule.cs CAP (wolffloatertunnels.cpp); other sims ignore an unknown name
     capabilityNames.append("WolfTerraform");   // [WOLF TERRAFORM 2026-10-23] WolfSim WolfTerraformModule.cs CAP (wolfterraincap.cpp); other sims ignore an unknown name
 
@@ -3841,6 +3865,11 @@ void LLViewerRegion::setCapabilitiesReceived(bool received)
     // so that they can safely use getCapability().
     if (received)
     {
+        // [WOLF SKY LEVELS 2026-11-05] read this region's sky land (any region with the capability: neighbours too)
+        if (mImpl->mWolfSkyLevels)
+        {
+            mImpl->mWolfSkyLevels->onCapabilitiesReceived();
+        }
         mCapabilitiesReceivedSignal(getRegionID(), this);
 
         LLFloaterPermsDefault::sendInitialPerms();

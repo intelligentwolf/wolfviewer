@@ -124,6 +124,13 @@ LLSurface::~LLSurface()
     // </WolfViewer>
     destroyPatchData();
 
+    // [WOLF SKY LEVELS 2026-11-05] A sky level (wolfterrainlevels.h) shares its region's terrain pool: the pool is keyed by
+    // the region's map tile (getSTexture, LLWorldMipmap::loadObjectsTile), which is the ground's too. Its block objects were
+    // killed above; the pool is the ground's to remove (live test 2026-11-05: replacing a level hit "Terrain pool not empty!").
+    if (mWolfSkyLevel)
+    {
+        return;
+    }
     LLDrawPoolTerrain *poolp = (LLDrawPoolTerrain*) gPipeline.findPool(LLDrawPool::POOL_TERRAIN, mSTexturep);
     if (!poolp)
     {
@@ -279,7 +286,8 @@ void LLSurface::initTextures()
     //
 // <FS:CR> Aurora Sim
     //if (gSavedSettings.getBOOL("RenderWater") )
-    if (gSavedSettings.getBOOL("RenderWater") && LLWorld::getInstance()->getAllowRenderWater())
+    // [WOLF SKY LEVELS 2026-11-05] a sky level has no water of its own (llsurface.h setWolfSkyLevel)
+    if (!mWolfSkyLevel && gSavedSettings.getBOOL("RenderWater") && LLWorld::getInstance()->getAllowRenderWater())
 // </FS:CR> Aurora Sim
     {
         mWaterObjp = (LLVOWater *)gObjectList.createObjectViewer(LLViewerObject::LL_VO_WATER, mRegionp);
@@ -294,7 +302,8 @@ void LLSurface::initTextures()
 
 void LLSurface::rebuildWater()
 {
-    bool renderwater = gSavedSettings.getBOOL("RenderWater") && LLWorld::getInstance()->getAllowRenderWater();
+    // [WOLF SKY LEVELS 2026-11-05] a sky level never has water (llsurface.h setWolfSkyLevel)
+    bool renderwater = !mWolfSkyLevel && gSavedSettings.getBOOL("RenderWater") && LLWorld::getInstance()->getAllowRenderWater();
     bool prev_renderwater = !mWaterObjp.isNull();
 
     if(prev_renderwater && !renderwater)
@@ -440,6 +449,14 @@ LLSurface *LLSurface::neighborSurfaceAt(const S64 gx, const S64 gy, S32 &nx, S32
 
 bool LLSurface::expectsPatchAt(const S32 x, const S32 y) const
 {
+    // [WOLF SKY LEVELS 2026-11-05] A sky level is sent whole in one stream (wolfterrainlevels.cpp applyLevelStream) and has
+    // ground only in the patches that stream holds, so a missing neighbour never comes: waiting for it (neighborReady,
+    // LLSurfacePatch::updateTexture) would keep every patch at the island's edge from ever being built. Its edges then copy
+    // the patch's own last row (updateEastEdge / updateNorthEdge with no neighbour), the region's WolfSkyLevel.VertexTop rule.
+    if (mWolfSkyLevel)
+    {
+        return false;
+    }
     if (x >= 0 && y >= 0 && x < mPatchesPerEdge && y < mPatchesPerEdge)
     {
         return true;

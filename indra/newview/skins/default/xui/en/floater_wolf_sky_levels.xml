@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLF SKY LEVELS 2026-11-05] Ticket 541: Sky Land (wolffloaterskylevels.cpp), the same window as WolfStorm's
+     js/ui/floaters/floater_wolf_sky_levels.js. Persona: a region owner, maybe older, who wants an island in the sky over their
+     region. Story: "I add a level at 200 m, fly up, press Make ground here, and walk on it."
+     Flow: Levels (list; Remove level for estate managers) -> Add a level (estate owner and managers only, hidden otherwise)
+     -> Shape the ground where you stand (level, area, Make ground here, Raise / Lower / Flatten / Smooth) -> Undo my last change.
+     The status line under the intro says what the last action did; a refusal stays there in the caution colour.
+     Layout: one 8 px spacing grid, labels left at 12, controls at 132; main_panel holds everything after the status line and
+     is hidden (with "none" shown) where the region has no sky land. -->
+<floater
+ can_close="true"
+ can_minimize="true"
+ can_resize="false"
+ height="576"
+ layout="topleft"
+ name="wolf_sky_levels"
+ help_topic="wolf_sky_levels"
+ save_rect="true"
+ single_instance="true"
+ title="Sky Land"
+ width="440">
+    <text follows="left|top|right" height="48" layout="topleft" left="12" name="intro" top="24" width="416" wrap="true">Sky land is ground high above this region that you can walk on. It is made the same way as the ground below: add a level, go up to it, and make ground where you stand.</text>
+    <text follows="left|top|right" height="36" layout="topleft" left="12" name="status" top="76" width="416" wrap="true" font.style="BOLD" />
+    <text follows="left|top|right" height="36" layout="topleft" left="12" name="none" top="116" width="416" wrap="true" visible="false">This region does not have sky land. It is only on Wolf Territories regions up to 12 by 12 regions in size.</text>
+
+    <panel follows="all" height="428" layout="topleft" left="0" name="main_panel" top="116" width="440" visible="false">
+        <text follows="left|top" height="16" layout="topleft" left="12" name="levels_heading" top="0" width="300" font.style="BOLD">Levels in this region</text>
+        <scroll_list
+         draw_heading="true"
+         follows="left|top|right"
+         height="84"
+         layout="topleft"
+         left="12"
+         multi_select="false"
+         name="levels_list"
+         top="20"
+         width="416">
+            <scroll_list.columns label="Name" name="name" relative_width="0.46" />
+            <scroll_list.columns label="From" name="from" relative_width="0.2" />
+            <scroll_list.columns label="Ground" name="area" relative_width="0.34" />
+        </scroll_list>
+        <button follows="left|top" height="24" label="Remove level" layout="topleft" left="12" name="remove_level_btn" top="110" width="120"
+         tool_tip="Removes the level chosen in the list, with all its ground. Undo my last change puts it back." />
+        <text follows="left|top|right" height="32" layout="topleft" left="140" name="limits" top="110" width="288" wrap="true" text_color="LtGray_50" />
+
+        <panel follows="left|top|right" height="84" layout="topleft" left="0" name="add_panel" top="146" width="440" visible="false">
+            <text follows="left|top" height="16" layout="topleft" left="12" name="add_heading" top="0" width="300" font.style="BOLD">Add a level</text>
+            <text follows="left|top" height="16" layout="topleft" left="12" name="name_label" top="24" width="116">Name</text>
+            <line_editor follows="left|top" height="22" layout="topleft" left="132" max_length_bytes="40" name="name_edit" top="21" width="200">Sky island</line_editor>
+            <text follows="left|top" height="16" layout="topleft" left="12" name="base_label" top="54" width="116">Height (metres)</text>
+            <spinner follows="left|top" height="22" layout="topleft" left="132" top="51" width="100" name="base_spin" label="" label_width="0"
+             decimal_digits="0" increment="10" initial_value="200" min_val="1" max_val="3990" tool_tip="How high the level is: its ground starts here and its rock hangs below." />
+            <button follows="left|top" height="24" label="Add level" layout="topleft" left="248" name="add_btn" top="50" width="120" />
+        </panel>
+
+        <text follows="left|top" height="16" layout="topleft" left="12" name="shape_heading" top="238" width="300" font.style="BOLD">Shape the ground where you stand</text>
+        <text follows="left|top" height="16" layout="topleft" left="12" name="level_label" top="262" width="116">Level</text>
+        <combo_box follows="left|top" height="22" layout="topleft" left="132" top="259" width="200" name="level_combo" />
+        <text follows="left|top" height="16" layout="topleft" left="12" name="size_label" top="292" width="116">Area (metres)</text>
+        <combo_box follows="left|top" height="22" layout="topleft" left="132" top="289" width="120" name="size_combo">
+            <combo_box.item label="8 by 8" name="size8" value="8" />
+            <combo_box.item label="16 by 16" name="size16" value="16" />
+            <combo_box.item label="32 by 32" name="size32" value="32" />
+            <combo_box.item label="64 by 64" name="size64" value="64" />
+        </combo_box>
+        <button follows="left|top" height="28" label="Make ground here" layout="topleft" left="12" name="make_btn" top="321" width="200"
+         tool_tip="Flat ground, 1 metre above the level's height, over the area round you." />
+        <text follows="left|top" height="16" layout="topleft" left="220" name="make_note" top="327" width="208" text_color="LtGray_50">flat, 1 metre above the level</text>
+        <button follows="left|top" height="28" label="Raise" layout="topleft" left="12" name="raise_btn" top="357" width="100" />
+        <button follows="left|top" height="28" label="Lower" layout="topleft" left="116" name="lower_btn" top="357" width="100" />
+        <button follows="left|top" height="28" label="Flatten" layout="topleft" left="220" name="flatten_btn" top="357" width="100" />
+        <button follows="left|top" height="28" label="Smooth" layout="topleft" left="324" name="smooth_btn" top="357" width="104" />
+        <button follows="left|top" height="28" label="Undo my last change" layout="topleft" left="12" name="undo_btn" top="393" width="200" />
+        <button follows="left|top" height="28" label="Remove ground here" layout="topleft" left="268" name="remove_here_btn" top="393" width="160"
+         tool_tip="Removes this level's ground in whole 16 metre squares round you. Undo my last change puts it back." />
+    </panel>
+    <text follows="left|bottom|right" height="16" layout="topleft" left="12" name="rights_note" top="550" width="416" text_color="LtGray_50">You can shape sky land wherever you may change the ground below. Raise and Lower move it 2 m.</text>
+</floater>

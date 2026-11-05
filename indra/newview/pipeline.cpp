@@ -151,6 +151,7 @@
 #include "wolfsealife.h"     // [SEA LIFE 2026-11-03/] ticket 499
 #include "wolfswimbubbles.h" // [SWIM BUBBLES 2026-11-02/] ticket 346
 #include "wolffarterrain.h"   // <WolfViewer 2026-10-08/> elevation tiles beyond the terrain received
+#include "wolfterrainlevels.h"   // [WOLF SKY LEVELS 2026-11-05/]
 #include "wolfaltitudesky.h"  // <WolfViewer 2026-10-07/> the cloud layer to fly through
 #include "wolfenvironmentrender.h"   // [WOLF ENV 2026-10-12/] the Wolf Environment's clouds, fog and zones
 #include "wolfaurora.h"   // [WOLF AURORA 2026-10-12/]
@@ -4414,6 +4415,7 @@ void LLPipeline::renderGeomDeferred(LLCamera& camera, bool do_occlusion)
         if (&camera == LLViewerCamera::getInstance() && !gCubeSnapshot)
         {
             WolfFarTerrain::instance().renderDeferred();   // <WolfViewer 2026-10-08/> the far ground in relief (wolffarterrain.h)
+            WolfTerrainLevels::renderDeferred();   // [WOLF SKY LEVELS 2026-11-05/] ticket 541: the rock under sky land (wolfterrainlevels.h)
             WolfFarGround::instance().renderDeferred();
             WolfBirds::instance().renderDeferred();   // [BIRDS 2026-11-02/] ticket 445: the wild birds, lit as the scene
             WolfSeaLife::instance().renderDeferred(); // [SEA LIFE 2026-11-03/] ticket 499: dolphins, whales and their spray

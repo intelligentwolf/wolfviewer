@@ -1046,9 +1046,14 @@ bool LLVOSurfacePatch::lineSegmentIntersect(const LLVector4a& start, const LLVec
 
     LLVector3 v_start(start.getF32ptr());
 
+    // [WOLF SKY LEVELS 2026-11-05] this object's own surface: the ground, or a sky level (wolfterrainlevels.h) - a pick on a
+    // sky level must measure that level's heights and normals, not the ground's under it
+    auto wolfSurface = [this]() -> const LLSurface& { return mSurfacep ? *mSurfacep : mRegionp->getLand(); };
+    auto wolfHeight = [&](const LLVector3& p) -> F32 { return mSurfacep ? mSurfacep->resolveHeightRegion(p) : mRegionp->getLandHeightRegion(p); };
+
     LLVector3 origin = v_start - mRegionp->getOriginAgent();
 
-    if (mRegionp->getLandHeightRegion(origin) > origin.mV[2])
+    if (wolfHeight(origin) > origin.mV[2])
     {
         //origin is under ground, treat as no intersection
         return false;
@@ -1072,7 +1077,7 @@ bool LLVOSurfacePatch::lineSegmentIntersect(const LLVector4a& start, const LLVec
 
         if (AABBSphereIntersectR2(ext[0], ext[1], sample+mRegionp->getOriginAgent(), rad))
         {
-            F32 height = mRegionp->getLandHeightRegion(sample);
+            F32 height = wolfHeight(sample);
             if (height > sample.mV[2])
             { //ray went below ground, positive intersection
                 //quick and dirty binary search to get impact point
@@ -1084,7 +1089,7 @@ bool LLVOSurfacePatch::lineSegmentIntersect(const LLVector4a& start, const LLVec
                 {
                     t += tdelta;
                     sample = origin+delta*t;
-                    height = mRegionp->getLandHeightRegion(sample);
+                    height = wolfHeight(sample);
                     if ((tdelta < 0 && height < sample.mV[2]) ||
                         (height > sample.mV[2] && tdelta > 0))
                     { //jumped over intersection point, go back
@@ -1096,17 +1101,17 @@ bool LLVOSurfacePatch::lineSegmentIntersect(const LLVector4a& start, const LLVec
 
                 if (intersection)
                 {
-                    F32 height = mRegionp->getLandHeightRegion(sample);
+                    F32 height = wolfHeight(sample);
                     if (fabsf(sample.mV[2]-height) < delta.length()*tdelta)
                     {
-                        sample.mV[2] = mRegionp->getLandHeightRegion(sample);
+                        sample.mV[2] = wolfHeight(sample);
                     }
                     intersection->load3((sample + mRegionp->getOriginAgent()).mV);
                 }
 
                 if (normal)
                 {
-                    normal->load3((mRegionp->getLand().resolveNormalGlobal(mRegionp->getPosGlobalFromRegion(sample))).mV);
+                    normal->load3((wolfSurface().resolveNormalGlobal(mRegionp->getPosGlobalFromRegion(sample))).mV);
                 }
 
                 return true;

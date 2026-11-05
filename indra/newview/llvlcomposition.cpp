@@ -574,6 +574,41 @@ bool LLVLComposition::generateComposition()
     return LLTerrainMaterials::generateMaterials();
 }
 
+// [WOLF SKY LEVELS 2026-11-05] Source: generateHeights above - the same constants and noise, one point, the height given.
+F32 LLVLComposition::wolfSkyValueAt(F32 x, F32 y, F32 height_above_base) const
+{
+    if (!mParamsReady || !mSurfacep || !mSurfacep->getRegion())
+    {
+        return 0.f;
+    }
+    const F32 slope_squared = 1.5f*1.5f;
+    const F32 xyScale = 4.9215f;
+    const F32 zScale = 4;
+    const F32 noise_magnitude = 2.f;
+    const F32 xyScaleInv = (1.f / xyScale);
+    const F32 zScaleInv = (1.f / zScale);
+    const F32 inv_width = 1.f/(F32)mWidth;
+    const F32 i = x * mScaleInv, j = y * mScaleInv;
+    const F32 start_height = bilinear(mStartHeight[SOUTHWEST], mStartHeight[SOUTHEAST], mStartHeight[NORTHWEST], mStartHeight[NORTHEAST],
+                                      i*inv_width, j*inv_width);
+    const F32 height_range = bilinear(mHeightRange[SOUTHWEST], mHeightRange[SOUTHEAST], mHeightRange[NORTHWEST], mHeightRange[NORTHEAST],
+                                      i*inv_width, j*inv_width);
+    const F32 height = mSurfacep->getRegion()->getWaterHeight() + height_above_base;
+    const LLVector3d origin_global = from_region_handle(mSurfacep->getRegion()->getHandle());
+    F32 vec[3], vec1[3];
+    vec[0] = (F32)(origin_global.mdV[VX] + x)*xyScaleInv;
+    vec[1] = (F32)(origin_global.mdV[VY] + y)*xyScaleInv;
+    vec[2] = height*zScaleInv;
+    vec1[0] = vec[0]*(0.2222222222f);
+    vec1[1] = vec[1]*(0.2222222222f);
+    vec1[2] = vec[2]*(0.2222222222f);
+    F32 twiddle = noise2(vec1)*6.5f;
+    twiddle += turbulence2(vec, 2)*slope_squared;
+    twiddle *= noise_magnitude;
+    const F32 value = (height + twiddle - start_height) * F32(ASSET_COUNT) / llmax(height_range, 0.001f);
+    return llclamp(value, 0.f, 3.f);
+}
+
 F32 LLVLComposition::getStartHeight(S32 corner)
 {
     return mStartHeight[corner];

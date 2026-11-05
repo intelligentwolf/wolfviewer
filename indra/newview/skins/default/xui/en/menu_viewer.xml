@@ -2354,6 +2354,13 @@
                 <menu_item_call.on_click function="Floater.Show" parameter="wolf_building_gen" />
                 <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
             </menu_item_call>
+            <!-- [WOLF SKY LEVELS 2026-11-05] ticket 541 (wolffloaterskylevels.cpp): ground high above a region that people walk
+             on - add a level (estate owner and managers), make and shape its ground where you stand. Wolf Territories only;
+             everyone in a region with sky land sees it whatever this menu shows (wolfterrainlevels.cpp). -->
+            <menu_item_call label="Sky Land..." name="WolfWorldSkyLand">
+                <menu_item_call.on_click function="Floater.Show" parameter="wolf_sky_levels" />
+                <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
+            </menu_item_call>
             <!-- [PLANE BUILDER 2026-11-01] Paul: "a plane generator like our boat generator" (wolffloaterplanebuilder.cpp): design a
              fighter from six real aircraft; the yard builds it and puts it in your inventory, priced in AI credits. Wolf
              Territories only, as the Ship Builder. -->

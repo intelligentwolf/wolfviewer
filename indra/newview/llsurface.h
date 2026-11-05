@@ -159,6 +159,14 @@ public:
     void dirtySurfacePatch(LLSurfacePatch *patchp);
     LLVOWater *getWaterObj()                        { return mWaterObjp; }
 
+    // [WOLF SKY LEVELS 2026-11-05] A sky level (wolfterrainlevels.h) is a second land surface of the
+    // same region, high above the ground. It must not make a water plane of its own: create() -> initTextures()
+    // makes one LLVOWater per surface (llsurface.cpp initTextures), and the region's water belongs to its ground.
+    // Set before create().
+    void setWolfSkyLevel(bool on, F32 base = 0.f)   { mWolfSkyLevel = on; mWolfSkyBase = base; }
+    bool isWolfSkyLevel() const                     { return mWolfSkyLevel; }
+    F32  getWolfSkyBase() const                     { return mWolfSkyBase; }
+
     static void setTextureSize(const S32 texture_size);
 
     friend class LLSurfacePatch;
@@ -237,6 +245,8 @@ private:
     LLPointer<LLViewerTexture> mSTexturep;      // Texture for surface
 
     LLPointer<LLVOWater>    mWaterObjp;
+    bool                    mWolfSkyLevel = false;   // [WOLF SKY LEVELS 2026-11-05] no water, see setWolfSkyLevel
+    F32                     mWolfSkyBase = 0.f;      // [WOLF SKY LEVELS 2026-11-05] the level's base (its texture bands start there)
 
     // When we want multiple cameras we'll need one of each these for each camera
     S32 mVisiblePatchCount;

@@ -400,6 +400,12 @@ void LLSurfacePatch::eval(const U32 x, const U32 y, const U32 stride, LLVector3 
     tex0->mV[0] = tex_pos.mV[0];
     tex0->mV[1] = tex_pos.mV[1];
 
+    // [WOLF SKY LEVELS 2026-11-05] a sky level's texture bands come from its own height above its base, not from the ground
+    // under it (LLVLComposition::wolfSkyValueAt)
+    if (mSurfacep->isWolfSkyLevel())
+        tex1->mV[0] = mSurfacep->getRegion()->getComposition()->wolfSkyValueAt(mOriginRegion.mV[0] + x * mSurfacep->getMetersPerGrid(),
+            mOriginRegion.mV[1] + y * mSurfacep->getMetersPerGrid(), pos_agent.mV[VZ] - mSurfacep->getWolfSkyBase());
+    else
     tex1->mV[0] = mSurfacep->getRegion()->getCompositionXY(llfloor(mOriginRegion.mV[0])+x, llfloor(mOriginRegion.mV[1])+y);
 
     const F32 xyScale = 4.9215f*7.f; //0.93284f;

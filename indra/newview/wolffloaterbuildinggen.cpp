@@ -32,6 +32,7 @@
 #include "lllocalcliprect.h"
 #include "llrender.h"
 #include "llrender2dutils.h"
+#include "llscrollcontainer.h"   // [TICKET 529 PATTERN 2026-11-05/]
 #include "llsdjson.h"
 #include "lltextbox.h"
 #include "lltexteditor.h"
@@ -40,6 +41,7 @@
 #include "llweb.h"
 #include "wolfai.h"
 #include "wolfcave.h"
+#include "wolffloaterfit.h"     // [TICKET 529 PATTERN 2026-11-05/]
 #include "wolfgrid.h"
 
 namespace
@@ -324,6 +326,11 @@ bool WolfFloaterBuildingGen::postBuild()
     mBuildBtn = getChild<LLButton>("build_btn");
     mBuyBtn = getChild<LLButton>("buy_btn");
     mCancelBtn = getChild<LLButton>("cancel_btn");
+    // [TICKET 529 PATTERN 2026-11-05] Paul "fix 2": 720 x 706 ran past a 1360 x 768 screen at UI scale 1.35. The body scrolls
+    // (floater_wolf_building_gen.xml body_scroll) and draw() keeps the window inside the snap rect (wolffloaterfit.h). The
+    // XML's height is read here: llfloater.cpp:3845-3852 runs postBuild before the saved rect is applied.
+    mScroll = getChild<LLScrollContainer>("body_scroll");
+    mNaturalHeight = getRect().getHeight();
 
     LLPanel* holder = getChild<LLPanel>("preview_panel");
     WolfBuildingPreview::Params pp;
@@ -402,6 +409,7 @@ void WolfFloaterBuildingGen::draw()
         mPolling = true;
         request("status", LLSD().with("job", mJob));
     }
+    WolfFloaterFit::fit(this, mNaturalHeight);   // [TICKET 529 PATTERN 2026-11-05/]
     LLFloater::draw();
 }
 
@@ -628,6 +636,9 @@ void WolfFloaterBuildingGen::showPlan(const LLSD& o, bool fromLastTime)
     mPlanId = o["job"].asString();
     mPlanPrice = intOr(o["price"], -1);
 
+    // [TICKET 529 PATTERN 2026-11-05] a new plan: the body back to its top, where the turntable and the plan's words are
+    // (Plan it and Build it are in the footer, always on show)
+    if (mScroll) mScroll->goToTop();
     std::shared_ptr<const WolfBuildingPreview::Mesh> mesh = WolfBuildingPreview::parse(o["preview"]);
     mPreview->setMesh(mesh);
     if (!mesh) mPreview->setMessage(getString("preview_bad"));

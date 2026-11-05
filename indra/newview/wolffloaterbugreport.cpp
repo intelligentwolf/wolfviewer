@@ -578,6 +578,28 @@ bool WolfFloaterBugReport::postBuild()
     return true;
 }
 
+// [WOLF ANIMATOR 2026-11-05] see wolffloaterbugreport.h
+void WolfFloaterBugReport::prefill(const std::string& category, const std::string& subject, const std::string& body)
+{
+    LLRadioGroup* kind = getChild<LLRadioGroup>("kind");
+    if (kind->getSelectedIndex() != 0)
+    {
+        kind->setSelectedIndex(0);
+        kind->onCommit();      // the kind's own callback sets the form up for a problem (apply_kind in postBuild)
+    }
+    for (const auto& c : CATEGORIES)
+    {
+        if (category == c[0]) { mCategory->setValue(LLSD(category)); break; }
+    }
+    std::string s = mSubject->getText();
+    LLStringUtil::trim(s);
+    if (s.empty()) mSubject->setText(subject);
+    std::string b = mBody->getText();
+    LLStringUtil::trim(b);
+    if (b.empty()) mBody->setText(body);
+    mBody->setFocus(true);
+}
+
 void WolfFloaterBugReport::onOpen(const LLSD& key)
 {
     LLFloater::onOpen(key);

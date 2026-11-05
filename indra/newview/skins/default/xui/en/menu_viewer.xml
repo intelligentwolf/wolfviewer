@@ -1852,6 +1852,13 @@
             <menu_item_call.on_click function="Floater.Show" parameter="wolf_avatars" />
             <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
         </menu_item_call>
+        <!-- [WOLF ANIMATOR 2026-11-05] Ticket 547 (Jimmy Olsen, approved by Paul): describe a movement in words and an animation
+             for your avatar arrives in your inventory (wolffloateranimator.cpp). Also Build > Wolf Animator...
+             [WOLF GRID GATE] gone (not greyed) off Wolf Territories. -->
+        <menu_item_call label="Wolf Animator..." name="WolfAnimator">
+            <menu_item_call.on_click function="Floater.Show" parameter="wolf_animator" />
+            <menu_item_call.on_visible function="WolfGrid.IsOnWolfTerritories" />
+        </menu_item_call>
         <!-- [WOLFNPC 2026-10-24] Paul: "people can manage an NPC on their region through the viewer" - put one of your
              WolfAvatars on your land as a living NPC, change or remove the region's NPCs (wolffloaternpc.cpp,
              region-terrain-work/wolfnpc-release/PROTOCOL.md). [WOLF GRID GATE] gone (not greyed) off Wolf Territories. -->
@@ -2589,6 +2596,17 @@
        <!-- [BUILDING GENERATOR 2026-11-01] Paul: "i could find the house/building builder under the build menu??". The Building
             Generator (wolffloaterbuildinggen.cpp), beside the Plane Builder; same window and gate as Wolf World > Build & Land >
             Building Generator... -->
+       <!-- [WOLF ANIMATOR 2026-11-05] The Wolf Animator (wolffloateranimator.cpp), beside the Building Generator; same window and
+            gate as Wolf World > Wolf Animator... -->
+       <menu_item_call
+        label="Wolf Animator..."
+        name="WolfAnimatorBuildMenu">
+         <menu_item_call.on_click
+          function="Floater.Show"
+          parameter="wolf_animator" />
+         <menu_item_call.on_visible
+          function="WolfGrid.IsOnWolfTerritories" />
+       </menu_item_call>
        <menu_item_call
         label="Building Generator..."
         name="WolfBuildingGenBuildMenu">

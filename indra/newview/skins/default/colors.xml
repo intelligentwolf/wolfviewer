@@ -14,6 +14,13 @@
     <color name="WolfJoystickKnobShade"    value="0.471 0.647 0.863 0.95" />
     <color name="WolfJoystickDot"          value="0.078 0.102 0.149 0.7" />
 
+    <!-- WolfViewer 2026-11-05: the "new WolfViewer is ready" band on the login screen (ticket 532,
+         panel_wolf_update_notice.xml). Deep navy #14233D, opaque so the login page behind never shows
+         through the words. Contrast (WCAG relative luminance): title white 15.7:1, text #E6EEF8 13.4:1. -->
+    <color name="WolfUpdateNoticeBackground" value="0.078 0.137 0.239 1" />
+    <color name="WolfUpdateNoticeTitle"      value="1 1 1 1" />
+    <color name="WolfUpdateNoticeText"       value="0.902 0.933 0.973 1" />
+
 	<!--  Colors in this scheme  -->
 	<!-- 
    var. 1 = #8F5B3F = rgb(143,91,63) 0.56 0.36 0.25

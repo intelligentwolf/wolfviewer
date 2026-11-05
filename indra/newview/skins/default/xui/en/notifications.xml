@@ -7111,7 +7111,7 @@ WolfViewer is installed in [DIR], which your account cannot change, so it cannot
    type="alertmodal">
 The WolfViewer update could not be completed: [REASON]
 
-The version you are running is unchanged. You can try again next time you log in, or download it from the website.
+The version you are running has not changed. To try again, press Update now on the login screen, or close WolfViewer and open it again. You can also download the new version from the website.
     <form name="form">
       <button
        default="true"

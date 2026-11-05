@@ -3405,10 +3405,12 @@ bool idle_startup()
         }
         // </WolfViewer>
 
-        // [UPDATE CHECK 2026-09-12] Once per run, and only now: the network is up, the user is
-        // in-world, and a dialog here is seen rather than lost behind the login screen.
-        // <WolfViewer 2026-10-02/> It now fetches and installs on request (wolfupdate.h).
-        WolfUpdate::checkOnce();
+        // [UPDATE CHECK 2026-09-12] Once per run: the in-world notice (a dialog here is seen rather than
+        // lost behind the login screen). <WolfViewer 2026-10-02/> It fetches and installs on request.
+        // <WolfViewer 2026-11-05/> Ticket 532: the check itself now starts on the login screen, which
+        // shows a band for a newer release (FSPanelLogin -> WolfUpdate::loginScreenShown); this
+        // uses that same answer, and only starts the check if the login screen was skipped.
+        WolfUpdate::loggedIn();
 
         // [CRASH REPORTS 2026-10-28] Send a crash an earlier run left behind, as a staff ticket (wolfcrashreport.h).
         WolfCrashReport::sendPendingOnce();

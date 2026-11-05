@@ -65,6 +65,7 @@
 #include "lluictrlfactory.h"
 #include "llweb.h"
 #include "wolfgrid.h" // <FS:Wolf/> PATREON_URL
+#include "wolfupdate.h" // <WolfViewer 2026-11-05/> WolfUpdate::loginScreenShown (ticket 532)
 #include "llmediactrl.h"
 #include "llrootview.h"
 
@@ -365,6 +366,12 @@ FSPanelLogin::FSPanelLogin(const LLRect &rect,
     childSetAction("password_show_btn", onShowHidePasswordClick, this);
     childSetAction("password_hide_btn", onShowHidePasswordClick, this);
     syncShowHidePasswordButton();
+
+    // <WolfViewer 2026-11-05> Ticket 532 (Jimmy Olsen): say a new WolfViewer is ready here, BEFORE
+    // logging in. Starts the run's one update check (it used to wait for STATE_STARTED) and puts a
+    // band across the top of this panel when a newer release is found (wolfupdate.h).
+    WolfUpdate::loginScreenShown(this);
+    // </WolfViewer>
 
     mInitialized = true;
 }

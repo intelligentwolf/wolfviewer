@@ -44,12 +44,29 @@
  *  - Linux, a folder the user cannot write: told, with the download page.
  *  - macOS: the disk image is downloaded, checked and opened; dragging WolfViewer onto
  *    Applications replaces the old copy.
+ *
+ * WHEN (ticket 532, 2026-11-05). The one check starts when the login screen is built, so a newer
+ * release is shown there, BEFORE logging in, as a band across the top of the screen
+ * (panel_wolf_update_notice.xml): "A new WolfViewer is ready: <name>", Update now, Not now. Update
+ * now there downloads and installs straight away (nothing in-world can be lost yet). Not now is
+ * "Skip this version": nothing more about that release, on the login screen or in-world; the next
+ * release is offered as usual. The answer is kept for the run, so logging in does not ask the
+ * server again: once in-world, the notices above follow from the same answer.
  */
+class LLPanel;
+
 class WolfUpdate
 {
 public:
     /// Start the one check for this run. Safe to call more than once; only the first does work.
     static void checkOnce();
+
+    /// From the login panel's constructor (fspanellogin.cpp): start the check if it has not started
+    /// and put the band on this panel once a newer release is known.
+    static void loginScreenShown(LLPanel* login_panel);
+
+    /// From STATE_STARTED (llstartup.cpp): the in-world notices, from the check already made.
+    static void loggedIn();
 
     /// The release this build is, taken from the viewer's own version (LL_VIEWER_VERSION_BUILD).
     static S32 currentRevision();
@@ -59,8 +76,9 @@ public:
 
     /// "Update now": fetch and verify the release on offer (a no-op while one is under way).
     static void startDownload();
-    /// "Restart and update" / "Open installer": install the verified download.
-    static void startInstall();
+    /// "Restart and update" / "Open installer": install the verified download. False when it
+    /// did not start (nothing downloaded, already under way, or unsaved ground paint).
+    static bool startInstall();
 
 private:
     static void checkCoro();

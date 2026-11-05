@@ -48,7 +48,8 @@ class LLVOAvatar;
 // WolfViewer draws "<Name> (AI)"), the first time he speaks to someone he says he is <Name>'s AI (the brain), every line is
 // in chat as "(AI) ...". OFF stops everything: taps and speech source removed, nothing sent, answers still on their way
 // dropped, the tag cleared.
-// VR: while a headset is in VR and the viewpoint is away from the avatar, he walks after it (autopilot).
+// NEVER MOVES THE AVATAR: the resident drives him (Paul 2026-11-05: "he doesnt need to follow me in vr because i'll just
+// drive him around ... he is my avatar").
 class WolfAIMode : public LLSingleton<WolfAIMode>
 {
     LLSINGLETON(WolfAIMode);
@@ -121,7 +122,6 @@ private:
     void pumpSpeaking();
     void startSpeaking();
     void finishSpeaking();
-    void followInVR();
     bool someoneSpeaking() const;
     std::string myFirstName() const;
     static std::string cleanHeard(const std::string& text);
@@ -160,9 +160,6 @@ private:
     void* mHookedDev = nullptr;
     F64  mTagCheckAt = 0.0;
 
-    // VR follow
-    bool mFollowing = false;
-    F64  mFollowCheckAt = 0.0;
     F64  mStatAt = 0.0;
 };
 

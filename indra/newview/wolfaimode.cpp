@@ -41,7 +41,6 @@
 #include "llnamevalue.h"
 #include "llnotificationsutil.h"
 #include "llsdjson.h"
-#include "llviewercamera.h"
 #include "llviewerregion.h"
 #include "llvoavatarself.h"
 #include "llvoicewebrtc.h"
@@ -52,7 +51,6 @@
 #include "wolfgrid.h"
 #include "wolfregionweather.h"
 #include "wolfspeech.h"
-#include "wolfvrstream.h"
 
 // Threads: idle() and everything it calls on the main thread; the two hearing taps on WebRTC's capture and playout threads;
 // the speech source on the capture thread (the ADM's or the VR mic clock's). Between them only atomics and single-producer /
@@ -428,8 +426,6 @@ void WolfAIMode::turnOff(const std::string& why)
     mHeard.clear();
     mSayPcm.clear();
     mSayWav.clear();
-    if (mFollowing && gAgent.getAutoPilot()) gAgent.stopAutoPilot();
-    mFollowing = false;
     sendTag(false);
     mTagCheckAt = LLFrameTimer::getElapsedSeconds() + 10.0;
     LL_INFOS("WolfAIMode") << "off" << (why.empty() ? std::string() : ": " + why) << LL_ENDL;
@@ -536,7 +532,6 @@ void WolfAIMode::idle()
     }
     maybeAsk();
     pumpSpeaking();
-    followInVR();
 }
 
 void WolfAIMode::pumpEars()
@@ -1038,39 +1033,6 @@ void WolfAIMode::finishSpeaking()
     mLastReplyAt = now;
     mSayPcm.clear();
     mSayWav.clear();
-}
-
-// In VR the viewpoint can leave the avatar (Paul stood beside his own): then he walks after it, as a friend would.
-void WolfAIMode::followInVR()
-{
-    const F64 now = LLFrameTimer::getElapsedSeconds();
-    if (now < mFollowCheckAt) return;
-    mFollowCheckAt = now + 1.0;
-    if (!WolfVRStream::headsetInVR() || gAgent.isSitting() || !isAgentAvatarValid())
-    {
-        if (mFollowing && gAgent.getAutoPilot()) gAgent.stopAutoPilot();
-        mFollowing = false;
-        return;
-    }
-    const LLVector3 cam = LLViewerCamera::getInstance()->getOrigin();
-    const LLVector3 me = gAgent.getPositionAgent();
-    LLVector3 d = cam - me;
-    d.mV[VZ] = 0.f;
-    const F32 dist = d.length();
-    constexpr F32 kStart = 6.f, kStop = 3.f, kNear = 2.5f;   // metres: walks when the viewpoint is this far, stops this near
-    if (mFollowing && (!gAgent.getAutoPilot() || dist < kStop))
-    {
-        if (gAgent.getAutoPilot()) gAgent.stopAutoPilot();
-        mFollowing = false;
-    }
-    if (!mFollowing && dist > kStart && !gAgent.getAutoPilot())
-    {
-        d.normVec();
-        LLVector3 target = cam - d * kNear;
-        if (!gAgent.getFlying()) target.mV[VZ] = me.mV[VZ];
-        gAgent.startAutoPilotGlobal(gAgent.getPosGlobalFromAgent(target), std::string(), nullptr, nullptr, nullptr, kNear, 0.03f, gAgent.getFlying());
-        mFollowing = true;
-    }
 }
 
 // static

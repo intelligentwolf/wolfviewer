@@ -1004,6 +1004,7 @@ set(viewer_SOURCE_FILES
     wolfautoenvironment.cpp
     wolfregionwolfenvironments.cpp
     wolfpassingplanes.cpp
+    wolfestateaccess.cpp
     wolfregionweather.cpp
     wolfhurricane.cpp
     wolfframegovernor.cpp
@@ -2023,6 +2024,7 @@ set(viewer_HEADER_FILES
     wolfautoenvironment.h
     wolfregionwolfenvironments.h
     wolfpassingplanes.h
+    wolfestateaccess.h
     wolfregionweather.h
     wolfhurricane.h
     wolfframegovernor.h

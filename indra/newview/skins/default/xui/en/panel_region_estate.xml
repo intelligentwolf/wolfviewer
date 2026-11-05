@@ -85,6 +85,7 @@
      height="205"
      layout="topleft"
      left="6"
+     name="access_border"
      top_pad="5"
      width="470" />
     <radio_group
@@ -189,4 +190,203 @@
      top_delta="0"
      width="235" />
 
+    <!-- [TICKET 544 2026-11-05] Jimmy Olsen (approved by Paul, except "payment info on file": we hold no payment data):
+         [2026-11-05 Paul: no 18+ rule; that is the Adult Content region type] the estate's own entry rules, in the access area under "Anyone can visit", on Wolf Territories only. They are read
+         and saved through wolfstorm.app php/wolf_estate_access.php (view / set) and enforced on every region of the estate
+         by the wolf-estate-access region plugin; this window only edits them. Each box saves at once (no Apply).
+         wolfestateaccess.cpp layout() puts this block where "Must be 18+", "Must have payment info on file" and "Must not
+         be a scripted agent" are, hides those three on Wolf Territories (WolfSim ignores them: EstateManagementModule.cs:123-124
+         with IgnoreEstateMinorAccessControl / IgnoreEstatePaymentAccessControl true by default, and it never reads the bots
+         bit), moves the controls below it down, and makes every note as tall as its wrapped text. The tab scrolls
+         (llfloaterregioninfo.cpp postBuild, as ticket 529's Region tab). The tops here are only starting points. -->
+    <text
+     follows="left|top"
+     font="SansSerifBold"
+     height="16"
+     layout="topleft"
+     left="30"
+     name="wolf_access_heading"
+     top="400"
+     visible="false"
+     width="440">Wolf Territories: who can come in</text>
+    <text
+     follows="left|top"
+     font="SansSerifSmall"
+     height="16"
+     layout="topleft"
+     left="30"
+     name="wolf_access_intro"
+     top="420"
+     visible="false"
+     width="420"
+     wrap="true">For every region in this estate. You and your estate managers are never turned away.</text>
+    <!-- [TICKET 544 2026-11-05] Paul: no 18+ rule here ("a lot of this is covered by setting the region to adult content").
+         Age gating is the Adult Content region type, set on wolf-grid.com from the Region tab's "Region type on
+         wolf-grid.com..." button (panel_region_general.xml wolf_region_type_btn). -->
+    <text
+     follows="left|top"
+     font="SansSerifSmall"
+     height="16"
+     layout="topleft"
+     left="30"
+     name="wolf_adults_pointer"
+     top="420"
+     visible="false"
+     width="440"
+     wrap="true">For adults only (18 and over), make the region Adult Content: Region tab, "Region type on wolf-grid.com...".</text>
+    <check_box
+     follows="top|left"
+     height="18"
+     label="No NPCs"
+     layout="topleft"
+     left="30"
+     name="wolf_npcs_check"
+     tool_tip="Removes NPCs (scripted avatars) that do not belong to you or an estate manager. Saved as soon as you change it. Only the estate owner or an estate manager can change it."
+     top="400"
+     visible="false"
+     width="440" />
+    <text
+     follows="left|top"
+     font="SansSerifSmall"
+     height="16"
+     layout="topleft"
+     left="50"
+     name="wolf_npcs_note"
+     top="420"
+     visible="false"
+     width="420"
+     wrap="true">Removes NPCs that don't belong to you or an estate manager.</text>
+    <check_box
+     follows="top|left"
+     height="18"
+     label="No animesh"
+     layout="topleft"
+     left="30"
+     name="wolf_animesh_check"
+     tool_tip="Animated mesh objects that do not belong to you or an estate manager are returned to their owner's Lost And Found, and worn ones are taken off. Saved as soon as you change it. Only the estate owner or an estate manager can change it."
+     top="400"
+     visible="false"
+     width="440" />
+    <text
+     follows="left|top"
+     font="SansSerifSmall"
+     height="16"
+     layout="topleft"
+     left="50"
+     name="wolf_animesh_note"
+     top="420"
+     visible="false"
+     width="420"
+     wrap="true">Returns animated mesh that isn't yours or a manager's, and takes off worn animesh.</text>
+    <check_box
+     follows="top|left"
+     height="18"
+     label="Minimum avatar height:"
+     layout="topleft"
+     left="30"
+     name="wolf_height_check"
+     tool_tip="Avatars shorter than this cannot come in, for example child avatars." 
+     top="400"
+     visible="false"
+     width="190" />
+    <spinner
+     decimal_digits="2"
+     follows="left|top"
+     height="20"
+     increment="0.05"
+     initial_value="1.40"
+     label=""
+     label_width="0"
+     layout="topleft"
+     left="225"
+     max_val="2.5"
+     min_val="0.5"
+     name="wolf_height_spin"
+     tool_tip="The shortest avatar allowed, in metres (0.50 to 2.50). Saved a moment after you stop changing it."
+     top="399"
+     visible="false"
+     width="60" />
+    <text
+     follows="left|top"
+     height="16"
+     layout="topleft"
+     left="290"
+     name="wolf_height_unit"
+     top="401"
+     visible="false"
+     width="30">m</text>
+    <text
+     follows="left|top"
+     font="SansSerifSmall"
+     height="16"
+     layout="topleft"
+     left="50"
+     name="wolf_height_note"
+     top="420"
+     visible="false"
+     width="420"
+     wrap="true">Goes by the height of the avatar's shape, as the viewer reports it. A mesh body can look taller or shorter.</text>
+    <check_box
+     follows="top|left"
+     height="18"
+     label="WolfViewer and WolfStorm only"
+     layout="topleft"
+     left="30"
+     name="wolf_viewers_check"
+     tool_tip="For very large regions that other viewers cannot show. Other viewers can copy the name, so this is not a security lock. Saved as soon as you change it. Only the estate owner or an estate manager can change it."
+     top="400"
+     visible="false"
+     width="440" />
+    <text
+     follows="left|top"
+     font="SansSerifSmall"
+     height="16"
+     layout="topleft"
+     left="50"
+     name="wolf_viewers_note"
+     top="420"
+     visible="false"
+     width="420"
+     wrap="true">For very large regions other viewers can't show. It goes by the name the viewer gives, which other viewers can copy, so it is not a lock.</text>
+    <check_box
+     follows="top|left"
+     height="18"
+     label="No visitors from other grids (Hypergrid)"
+     layout="topleft"
+     left="30"
+     name="wolf_hg_check"
+     tool_tip="Only Wolf Territories accounts can come in. Saved as soon as you change it. Only the estate owner or an estate manager can change it."
+     top="400"
+     visible="false"
+     width="440" />
+    <text
+     follows="left|top"
+     font="SansSerifSmall"
+     height="16"
+     layout="topleft"
+     left="50"
+     name="wolf_hg_note"
+     top="420"
+     visible="false"
+     width="420"
+     wrap="true">Only Wolf Territories accounts can come in.</text>
+    <text
+     follows="left|top"
+     height="16"
+     layout="topleft"
+     left="30"
+     name="wolf_access_status"
+     top="420"
+     visible="false"
+     width="440"
+     wrap="true" />
+    <string name="wolf_reading">Reading this estate's rules...</string>
+    <string name="wolf_read_failed">Could not read this estate's rules:</string>
+    <string name="wolf_not_wolf">This region has not confirmed it is on Wolf Territories.</string>
+    <string name="wolf_saving">Saving...</string>
+    <string name="wolf_saved">Saved. This region follows it now; the estate's other regions within 10 minutes.</string>
+    <string name="wolf_saved_later">Saved. The estate's regions follow it within 10 minutes.</string>
+    <string name="wolf_save_failed">Could not save:</string>
+    <string name="wolf_height_not_saved">The height was not saved, because another change took too long. Please set it again.</string>
+    <string name="wolf_not_yours">Only the estate owner or an estate manager can change these.</string>
 </panel>

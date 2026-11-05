@@ -71,7 +71,7 @@
 #include "llnotificationsutil.h"
 #include "llpbrterrainfeatures.h"
 #include "llregioninfomodel.h"
-#include "llscrollcontainer.h"   // [TICKET 529 2026-11-05/] the Region tab scrolls
+#include "llscrollcontainer.h"   // [TICKET 529 2026-11-05/] the Region tab scrolls; [TICKET 544 2026-11-05/] the Estate tab too
 #include "llscrolllistitem.h"
 #include "llsliderctrl.h"
 #include "llslurl.h"
@@ -99,6 +99,7 @@
 #include "wolfadultcontent.h"   // [ADULT CONTENT 2026-10-26] the Region tab's Adult Content line and link
 #include "llweb.h"   // [ADULT CONTENT 2026-10-26/] Region type on wolf-grid.com...
 #include "wolfpassingplanes.h"   // [PASSING PLANES 2026-11-01] the Region tab's "Passing planes over this region"
+#include "wolfestateaccess.h"   // [TICKET 544 2026-11-05/] Estate tab: "Wolf Territories: who can come in"
 #include "lltrans.h"
 #include "llagentui.h"
 #include "llmeshrepository.h"
@@ -261,7 +262,28 @@ bool LLFloaterRegionInfo::postBuild()
     panel = new LLPanelEstateInfo;
     mInfoPanels.push_back(panel);
     panel->buildFromFile("panel_region_estate.xml");
-    mTab->addTabPanel(LLTabContainer::TabPanelParams().panel(panel).select_tab(true));
+    // [TICKET 544 2026-11-05] Jimmy Olsen (1360x768): the Estate tab gains the Wolf entry rules (wolfestateaccess.cpp) and
+    // would run past a small window, so it scrolls the way ticket 529 made the Region tab scroll (below): a plain page
+    // holding a scroll container with the unchanged Estate panel inside. The panel keeps its name "Estate" (found by the
+    // recursive getChild calls in this file, e.g. getPanelEstate), its children and every language's
+    // panel_region_estate.xml; wolfestateaccess.cpp layout() sizes it to its contents.
+    {
+        LLPanel::Params page_params;
+        page_params.name("region_estate_page");
+        page_params.rect(panel->getRect());
+        LLPanel* page = LLUICtrlFactory::create<LLPanel>(page_params);
+        // the same label (the localised "Estate"), still the tab shown first
+        mTab->addTabPanel(LLTabContainer::TabPanelParams().panel(page).label(panel->getLabel()).select_tab(true));
+        LLScrollContainer::Params scroll_params;
+        scroll_params.name("region_estate_scroll");
+        scroll_params.rect(page->getLocalRect());
+        scroll_params.follows.flags(FOLLOWS_ALL);
+        LLScrollContainer* scroll = LLUICtrlFactory::create<LLScrollContainer>(scroll_params);
+        page->addChild(scroll);
+        panel->setFollows(FOLLOWS_LEFT | FOLLOWS_RIGHT | FOLLOWS_TOP);
+        panel->setShape(scroll->getLocalRect());
+        scroll->addChild(panel);
+    }
 
     panel = new LLPanelEstateAccess;
     mInfoPanels.push_back(panel);
@@ -2932,6 +2954,7 @@ void LLPanelEstateInfo::updateControls(LLViewerRegion* region)
     getChildView("kick_user_from_estate_btn")->setEnabled(god || owner || manager);
 
     refresh();
+    WolfEstateAccess::sync(this, region, false);   // [TICKET 544 2026-11-05] its own rule (the grid's mayChange), after setCtrlsEnabled
 }
 
 bool LLPanelEstateInfo::refreshFromRegion(LLViewerRegion* region)
@@ -2955,6 +2978,7 @@ bool LLPanelEstateInfo::refreshFromRegion(LLViewerRegion* region)
     sendEstateOwnerMessage(gMessageSystem, "getinfo", invoice, strings);
 
     refresh();
+    WolfEstateAccess::sync(this, region, true);   // [TICKET 544 2026-11-05] opened / region changed: read the estate's rules
 
     return rv;
 }
@@ -2991,6 +3015,8 @@ bool LLPanelEstateInfo::postBuild()
     getChild<LLUICtrl>("externally_visible_radio")->setFocus(true);
 
     getChild<LLTextBox>("estate_owner")->setIsFriendCallback(LLAvatarActions::isFriend);
+
+    WolfEstateAccess::postBuild(this);   // [TICKET 544 2026-11-05] the Wolf entry rules' own commits (not part of Apply)
 
     return LLPanelRegionInfo::postBuild();
 }

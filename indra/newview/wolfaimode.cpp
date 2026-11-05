@@ -67,6 +67,7 @@ namespace
     constexpr U32 kSttRate = WolfSpeech::TARGET_RATE;   // 16 kHz, what whisper wants (wolfspeech.h)
     constexpr U32 kSpeechRate = 48000;                  // the speech ring; the ADM's usual rate (llwebrtc.cpp micClock kRate)
     constexpr S32 kBlock = 1600;                        // 100 ms at 16 kHz: the unit the voice decision is made on
+    constexpr S32 kPreRollBlocks = 3;                   // 300 ms kept from before the onset of speech
     constexpr F32 kOpenLead = 0.15f;                    // the voice path opened and the gain ramped (llwebrtc.cpp Process:
                                                         // 30 ms hold + 20 ms ramp) before his first word
     constexpr F32 kHoldTail = 0.6f;                     // the mic stays held after he finishes, past the 40 ms mute fade
@@ -310,6 +311,7 @@ namespace
 struct WolfAIMode::Ear
 {
     std::vector<S16> mPending, mUtterance;
+    std::vector<S16> mPreRoll;      // the last kPreRollBlocks of quiet before speech starts
     bool mSpeaking = false;
     S32  mQuietSamples = 0;
     F32  mNoiseFloor = 0.f;
@@ -580,9 +582,25 @@ void WolfAIMode::pumpEar(Ear& ear, bool mic, bool got)
         if (ear.mNoiseFloor <= 0.f || rms < ear.mNoiseFloor) ear.mNoiseFloor = rms;
         else ear.mNoiseFloor += (rms - ear.mNoiseFloor) * WolfSpeech::NOISE_FLOOR_RISE;
         const F32 threshold = llmax(WolfSpeech::SPEECH_RMS_MIN, ear.mNoiseFloor * WolfSpeech::NOISE_RATIO);
-        if (rms >= threshold) { ear.mSpeaking = true; ear.mQuietSamples = 0; }
+        if (rms >= threshold)
+        {
+            if (!ear.mSpeaking)
+            {
+                // the start of a word is quieter than its middle: the blocks just before the onset go first, so a name said
+                // first ("Lone, ...") is not clipped (2026-11-05 test: "Shadow, can you hear me" came back without "Shadow")
+                ear.mUtterance.assign(ear.mPreRoll.begin(), ear.mPreRoll.end());
+            }
+            ear.mSpeaking = true;
+            ear.mQuietSamples = 0;
+        }
         else if (ear.mSpeaking) ear.mQuietSamples += kBlock;
-        if (!ear.mSpeaking) continue;
+        if (!ear.mSpeaking)
+        {
+            ear.mPreRoll.insert(ear.mPreRoll.end(), s, s + kBlock);
+            if (ear.mPreRoll.size() > (size_t)(kPreRollBlocks * kBlock)) ear.mPreRoll.erase(ear.mPreRoll.begin(), ear.mPreRoll.begin() + kBlock);
+            continue;
+        }
+        ear.mPreRoll.clear();
         ear.mUtterance.insert(ear.mUtterance.end(), s, s + kBlock);
         if (!mic)
         {
@@ -667,21 +685,75 @@ void WolfAIMode::onNearbyChat(const LLChat& chat)
     heard(l);
 }
 
+namespace
+{
+    // A word's consonant sound, for names speech recognition writes as a sound-alike ("Shadow" heard as "Chateau"): lower
+    // case letters only; sh / ch / sch -> x, ph -> f, ck / c / q -> k, z -> s, d -> t; vowels and w, h, y dropped after the
+    // first letter; doubles collapsed. "" when the word starts with a vowel ("alone" is never "Lone").
+    std::string consonantSound(const std::string& word)
+    {
+        std::string w;
+        for (char c : word) if (isalpha((unsigned char)c)) w += (char)tolower((unsigned char)c);
+        if (w.empty() || strchr("aeiou", w[0])) return std::string();
+        std::string out;
+        for (size_t i = 0; i < w.size(); ++i)
+        {
+            char c = w[i];
+            if ((c == 's' || c == 'c') && i + 1 < w.size() && w[i + 1] == 'h') { c = 'x'; ++i; }
+            else if (c == 'p' && i + 1 < w.size() && w[i + 1] == 'h') { c = 'f'; ++i; }
+            else if (c == 'c' || c == 'q') c = 'k';
+            else if (c == 'z') c = 's';
+            else if (c == 'd') c = 't';
+            if (i > 0 && strchr("aeiouwhy", c)) continue;
+            if (!out.empty() && out.back() == c) continue;
+            out += c;
+        }
+        return out;
+    }
+
+    /** Is the name said TO someone in this line - the first word with a comma or stop after it, "hey / hi / hello / oi
+     *  <name>", or ", <name>" closing it - as written, or (speech only) as a sound-alike of it? */
+    bool namedInLine(const std::string& text, const std::string& name, bool sound_alike)
+    {
+        std::vector<std::string> words;
+        std::vector<char> after;   // the character after each word ('\0' at the end)
+        std::string cur;
+        for (size_t i = 0; i <= text.size(); ++i)
+        {
+            const char c = i < text.size() ? text[i] : '\0';
+            if (isalnum((unsigned char)c) || c == '\'') { cur += c; continue; }
+            if (!cur.empty()) { words.push_back(cur); after.push_back(c); cur.clear(); }
+            else if (!after.empty() && c != ' ' && after.back() == ' ') after.back() = c;
+        }
+        std::string low_name = name;
+        LLStringUtil::toLower(low_name);
+        const std::string name_sound = consonantSound(name);
+        auto same = [&](const std::string& w, bool loose)
+        {
+            std::string lw = w;
+            LLStringUtil::toLower(lw);
+            if (lw == low_name) return true;
+            return loose && name_sound.size() >= 2 && consonantSound(w) == name_sound;
+        };
+        for (size_t i = 0; i < words.size(); ++i)
+        {
+            if (same(words[i], false)) return true;   // the name itself, anywhere
+            if (!sound_alike) continue;
+            std::string prev = i > 0 ? words[i - 1] : std::string();
+            LLStringUtil::toLower(prev);
+            const bool vocative = (i == 0 && after[i] != ' ' && after[i] != '\0')
+                                  || prev == "hey" || prev == "hi" || prev == "hello" || prev == "oi"
+                                  || (i + 1 == words.size() && i > 0 && after[i - 1] == ',');
+            if (vocative && same(words[i], true)) return true;
+        }
+        return false;
+    }
+}
+
 bool WolfAIMode::addressedToMe(const Line& l) const
 {
     const F64 now = LLFrameTimer::getElapsedSeconds();
-    if (!mFirst.empty())
-    {
-        std::string low = l.mText, name = mFirst;
-        LLStringUtil::toLower(low);
-        LLStringUtil::toLower(name);
-        for (size_t p = low.find(name); p != std::string::npos; p = low.find(name, p + 1))
-        {
-            const bool start = p == 0 || !isalnum((unsigned char)low[p - 1]);
-            const bool end = p + name.size() >= low.size() || !isalnum((unsigned char)low[p + name.size()]);
-            if (start && end) return true;
-        }
-    }
+    if (!mFirst.empty() && namedInLine(l.mText, mFirst, l.mVia != "chat")) return true;
     if (l.mWho == gAgentID)
     {
         // the resident: talking with him already, or nobody else within earshot

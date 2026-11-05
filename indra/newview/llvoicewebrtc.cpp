@@ -2085,7 +2085,8 @@ void LLWebRTCVoiceClient::wolfSetSpeechOpen(bool open)
         return;
     }
     mWolfSpeechOpen = open;
-    LL_INFOS("Voice") << "AI Mode speech " << (open ? "open" : "closed") << LL_ENDL;
+    LL_INFOS("Voice") << "AI Mode speech " << (open ? "open" : "closed") << " (the resident's own mic "
+                      << (mMuteMic ? "muted" : "open") << ")" << LL_ENDL;
     wolfApplyMicMute();
 }
 

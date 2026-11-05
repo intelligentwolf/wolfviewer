@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<!-- [WOLF ANIMATOR 2026-11-05] Wolf Animator (wolffloateranimator.cpp): Wolf World > Wolf Animator... and Build > Wolf Animator...
+     Ticket 547 (Jimmy Olsen, approved by Paul). Who and why: a Wolf Territories resident, often older or less confident with
+     computers, who wants their avatar to dance or wave and has never made an animation. Story: say what the avatar should do
+     in your own words (or pick an example), see what it costs (the AI cost plus 10%, at least 1 credit, never more than the
+     quote, charged only once it is in your inventory), press Make my animation; a minute later it is in Animations, with a
+     moving figure of it here; then How was it? Great / OK / Please try again (free, once) / Something is wrong (a Flea Report).
+     Flow, top to bottom: 1. the description and examples 2. the cost, your credits and Make my animation 3. the result
+     (figure left, words right) 4. How was it? and its box. The status line above the bottom buttons keeps progress or a
+     failure (caution colour) until the next action. Large text (SansSerifLarge) for reading ease; 560 x 716 fits a 1360 x 768 (as the Building Generator's 720 x 706)
+     screen. Endpoint contract: region-terrain-work/wolf-animator-2026-11-05/README.md "Window contract". -->
+<floater
+ can_close="true"
+ can_minimize="true"
+ can_resize="false"
+ height="716"
+ layout="topleft"
+ min_height="300"
+ name="wolf_animator"
+ help_topic="wolf_animator"
+ save_rect="true"
+ single_instance="true"
+ title="Wolf Animator"
+ width="560">
+    <string name="feature_name">Wolf Animator</string>
+    <string name="opening">Opening the Wolf Animator...</string>
+    <string name="closed">The Wolf Animator is closed</string>
+    <string name="reopen">Close this window and open it again to try again.</string>
+    <string name="start_hint">Say what your avatar should do, then press Make my animation. You see the price first.</string>
+    <string name="no_result_yet">Your animation will move here</string>
+    <string name="no_result_text">Once it is made, what it does and where it is in your inventory show here.</string>
+    <string name="preview_bad">The moving picture could not be drawn</string>
+    <string name="counter">[N] / [MAX] characters</string>
+    <string name="examples_prompt">Or start from an example...</string>
+    <string name="credit_one">[N] credit</string>
+    <string name="credit_many">[N] credits</string>
+    <string name="quote_waiting">Reading what it costs...</string>
+    <string name="quote_missing">The Wolf Animator did not say what it costs - close the window and open it again.</string>
+    <string name="quote_line">Making it costs about [N], at most [M].</string>
+    <string name="balance_unknown">Reading your AI credits...</string>
+    <string name="balance_short">You have [N] AI credits to spend (balance [B]) - not enough to make one.</string>
+    <string name="balance_ok">You have [N] AI credits to spend (balance [B]).</string>
+    <string name="not_confirmed">Wait a moment - this region is still being confirmed as Wolf Territories.</string>
+    <string name="request_needed">Not made: please describe the animation first.</string>
+    <string name="making_send">Sending your description...</string>
+    <string name="make_waiting">Your animation is waiting ([AHEAD] ahead of it). Nothing is charged until it is in your inventory.</string>
+    <string name="make_next">Your animation is next. Nothing is charged until it is in your inventory.</string>
+    <string name="make_running">Making it: [PROGRESS]...</string>
+    <string name="progress_none">working</string>
+    <string name="cancelling">Cancelling...</string>
+    <string name="make_cancelled">Cancelled - you have not been charged.</string>
+    <string name="make_failed">The animation could not be made. You have not been charged.</string>
+    <string name="made">Your animation is ready and in your inventory.</string>
+    <string name="facts_loop">[SECONDS] seconds, repeats for as long as it plays, [BPM] beats a minute.</string>
+    <string name="facts_once">[SECONDS] seconds, plays once.</string>
+    <string name="where_charged">In your inventory: Animations > [NAME]. [CHARGED] charged.</string>
+    <string name="where_free">In your inventory: Animations > [NAME]. This try again was free.</string>
+    <string name="how_to_play">To play it: open your inventory, find it in Animations, and choose Play in world (or put it in a dance ball or your AO).</string>
+    <string name="play">Play</string>
+    <string name="play_on_me">Play it on my avatar</string>
+    <string name="stop_on_me">Stop it on my avatar</string>
+    <string name="not_arrived">It is still arriving in your inventory - try again in a moment.</string>
+    <string name="playing_on_me">Your avatar is playing it now. Press Stop it on my avatar to stop.</string>
+    <string name="pause">Pause</string>
+    <string name="box_comment">Anything we could do better? (optional)</string>
+    <string name="box_retry">Your description - send it as it is, or change it. Your one free try again costs nothing.</string>
+    <string name="send_comment">Send</string>
+    <string name="send_retry">Make it again, free</string>
+    <string name="retry_empty">Not sent: the description is empty.</string>
+    <string name="retry_send">Sending your free try again...</string>
+    <string name="thanks">Thank you for telling us.</string>
+    <string name="flea_opened">Thank you. Tell us what is wrong in the Flea Report window and press Send.</string>
+    <string name="flea_missing">The Flea Report window could not be opened. Please use Wolf World > Flea Report and mention animation [JOB].</string>
+    <string name="flea_subject">Wolf Animator: [TITLE] is not right</string>
+    <string name="flea_body">What is wrong with it:
+
+
+---
+Wolf Animator job [JOB]
+My description: [REQUEST]
+Made: [MADE] (UTC)
+Delivered to: Animations > [NAME]</string>
+
+    <!-- [TICKET 529 PATTERN 2026-11-05] Paul "fix 2": the window never grows past the screen. Everything but the footer sits in
+         a scroll container (body_scroll / body); wolffloateranimator.cpp keeps the window inside the floater view's snap rect
+         (wolffloaterfit.h, the Region tab's ticket 529 rule), and what does not fit scrolls. The essentials never need
+         hunting for: Make my animation, the status line and Cancel / Buy credits are in the footer, always on show; when an
+         animation arrives the body scrolls to it and to How was it?. Body controls are placed relative to the body panel
+         (its top is the window's top + 20) and end 12 px before the scroll bar. -->
+    <scroll_container follows="all" height="620" layout="topleft" left="0" name="body_scroll" top="20" width="560"
+     reserve_scroll_corner="false" opaque="false">
+    <panel follows="left|top" height="620" layout="topleft" left="0" name="body" top="0" width="544" background_visible="false">
+
+    <!-- 1. the description -->
+    <text follows="left|top" font="SansSerifLargeBold" height="20" layout="topleft" left="12" name="request_label" top="6" width="520">1. What should your avatar do?</text>
+    <text_editor follows="left|top" font="SansSerifLarge" height="66" layout="topleft" left="12" name="request_text" top="28" width="520" word_wrap="true"
+     parse_urls="false" max_length="2400" commit_on_focus_lost="false"
+     tool_tip="In your own words, up to 600 characters: what the movement is, how it feels, and whether it should keep repeating. For example: dancing samba, looping, with my hands in the air" />
+    <combo_box follows="left|top" height="26" layout="topleft" left="12" name="examples" top="100" width="370"
+     tool_tip="Pick one to put its words in the box above; you can change them" />
+    <text follows="left|top" halign="right" height="18" layout="topleft" left="388" name="request_counter" top="104" width="144" />
+
+    <!-- 2. the price (Make my animation is in the footer) -->
+    <text_editor follows="left|top" font="SansSerifLarge" height="54" layout="topleft" left="12" name="quote_text" top="132" width="520" word_wrap="true"
+     read_only="true" allow_scroll="true" parse_urls="false" max_length="4000" bg_readonly_color="Transparent" h_pad="0" v_pad="0"
+     tool_tip="What it costs in AI credits: what the AI costs us, plus 10%. You are never charged more than the figure shown, and only once it is in your inventory." />
+    <text follows="left|top" font="SansSerifLarge" height="20" layout="topleft" left="12" name="balance_text" top="190" width="520" wrap="true" />
+    <text follows="left|top" font="SansSerifLarge" height="36" layout="topleft" left="12" name="access_text" top="212" width="520" wrap="true"
+     text_color="AlertCautionTextColor" visible="false" />
+
+    <!-- 3. the result: the moving figure left, the words right -->
+    <panel follows="left|top" height="210" layout="topleft" left="12" name="preview_panel" top="252" width="190"
+     tool_tip="Your animation as a moving figure. Drag to turn it." />
+    <button follows="left|top" height="24" layout="topleft" left="12" name="play_btn" top="466" width="70" label="Pause"
+     tool_tip="Stop or start the moving figure" />
+    <text follows="left|top" height="28" layout="topleft" left="88" name="preview_key" top="466" width="114" wrap="true" font="SansSerifSmall">Gold: left side. Blue: right side.</text>
+    <text follows="left|top" font="SansSerifLargeBold" height="20" layout="topleft" left="214" name="result_title" top="252" width="318" />
+    <text_editor follows="left|top" font="SansSerifLarge" height="184" layout="topleft" left="214" name="result_text" top="274" width="318" word_wrap="true"
+     read_only="true" allow_scroll="true" parse_urls="false" max_length="8000" bg_readonly_color="DkGray" />
+    <button follows="left|top" font="SansSerifLargeBold" height="28" layout="topleft" left="214" name="play_on_me_btn" top="462" width="230" label="Play it on my avatar"
+     tool_tip="Start your new animation on your own avatar, as Play in world does from your inventory. Press again to stop it." />
+
+    <!-- 4. How was it? (shown once one is delivered and not yet answered) -->
+    <text follows="left|top" font="SansSerifLargeBold" height="20" layout="topleft" left="12" name="feedback_label" top="498" width="520">How was it?</text>
+    <button follows="left|top" height="26" layout="topleft" left="12" name="choice_great" top="520" width="100" label="Great" />
+    <button follows="left|top" height="26" layout="topleft" left="118" name="choice_ok" top="520" width="80" label="OK" />
+    <button follows="left|top" height="26" layout="topleft" left="204" name="choice_retry" top="520" width="150" label="Please try again"
+     tool_tip="Your one free try again: your words come back in a box below, to send as they are or to change" />
+    <button follows="left|top" height="26" layout="topleft" left="360" name="choice_fix" top="520" width="172" label="Something is wrong"
+     tool_tip="Opens a Flea Report with the details already filled in" />
+    <text follows="left|top" height="16" layout="topleft" left="12" name="box_label" top="552" width="520" visible="false" />
+    <text_editor follows="left|top" font="SansSerifLarge" height="40" layout="topleft" left="12" name="box_text" top="570" width="384" word_wrap="true"
+     parse_urls="false" max_length="8000" commit_on_focus_lost="false" visible="false" />
+    <button follows="left|top" height="26" layout="topleft" left="402" name="send_btn" top="570" width="130" label="Send" visible="false" />
+    </panel>
+    </scroll_container>
+
+    <!-- the footer, always on show: the status line, then Cancel (while waiting) left, Buy credits... and Make my animation right -->
+    <text follows="left|right|bottom" font="SansSerifLarge" height="36" layout="topleft" left="12" name="status_text" top="642" width="536" wrap="true" />
+    <button follows="left|bottom" height="26" layout="topleft" left="12" name="cancel_btn" top="682" width="110" label="Cancel"
+     tool_tip="Take it back while it is still waiting (nothing has been charged)" />
+    <button follows="right|bottom" height="26" layout="topleft" left="186" name="buy_btn" top="682" width="120" label="Buy credits..."
+     tool_tip="Open the AI credits shop in your browser" />
+    <button follows="right|bottom" font="SansSerifLargeBold" height="30" layout="topleft" left="312" name="make_btn" top="680" width="236" label="Make my animation"
+     tool_tip="Make it for the price shown above and put it in your inventory" />
+</floater>

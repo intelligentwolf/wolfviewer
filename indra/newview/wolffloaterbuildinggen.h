@@ -29,6 +29,7 @@
 class LLButton;
 class LLCheckBoxCtrl;
 class LLComboBox;
+class LLScrollContainer;
 class LLTextBox;
 class LLTextEditor;
 
@@ -87,8 +88,8 @@ private:
  * Story: "I say what I want in my own words, pick a period or let it decide, see what designing it costs, press Plan it, look
  * at the turning picture and its land impact, and press Build it to have it put in my inventory."
  * Flow (preview and the plan's words on the left; on the right, top to bottom): 1. the request 2. the style (its description
- * scrolls in a fixed box) 3. the options, the design cost and Plan it 4. the price to build it line by line, with the yard's
- * price note, against the credits you have; Build it bottom right, Buy credits... beside it when short, Cancel bottom left
+ * scrolls in a fixed box) 3. the options and the design cost 4. the price to build it line by line, with the yard's
+ * price note, against the credits you have; Plan it and Build it bottom right (always on show: the body above scrolls when the screen is short, wolffloaterfit.h), Buy credits... beside them when short, Cancel bottom left
  * while a job waits. The status line above the buttons: progress, or a failure in the caution colour, kept until the next
  * action. Nothing is ever charged without a press of Plan it or Build it, each showing its figure first.
  * Price (README "Price", Paul 2026-11-01): every order costs what the AI costs to design it plus 10%, at least 1 credit,
@@ -143,6 +144,9 @@ private:
               *mBudget = nullptr, *mSourcesLabel = nullptr, *mBalance = nullptr, *mStatus = nullptr;
     LLButton *mPlanBtn = nullptr, *mBuildBtn = nullptr, *mBuyBtn = nullptr, *mCancelBtn = nullptr;
     WolfBuildingPreview* mPreview = nullptr;
+    // [TICKET 529 PATTERN 2026-11-05] the body scrolls; the window is kept inside the screen (wolffloaterfit.h)
+    LLScrollContainer* mScroll = nullptr;
+    S32 mNaturalHeight = 0;
 
     LLSD mCatalogue;
     std::string mBuyUrl;

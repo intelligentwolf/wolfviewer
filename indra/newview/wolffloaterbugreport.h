@@ -54,6 +54,11 @@ public:
     bool postBuild() override;
     void onOpen(const LLSD& key) override;
 
+    // [WOLF ANIMATOR 2026-11-05] Another window sends the resident here with the facts filled in (the Wolf Animator's
+    // "Something is wrong"): a "broken" report, the category if it is one of CATEGORIES, and the subject and body only when
+    // they are empty, so nothing the resident typed is overwritten.
+    void prefill(const std::string& category, const std::string& subject, const std::string& body);
+
     // One file the report would send (findLogs) and what it is called in the ticket.
     struct LogFile
     {

@@ -27,6 +27,7 @@
 #include "llrand.h"
 #include "llrender.h"
 #include "llsurface.h"
+#include "llsurfacepatch.h"   // [SEA LIFE EASY 2026-11-06/] getHasReceivedData
 #include "llvertexbuffer.h"
 #include "llviewercamera.h"
 #include "llviewercontrol.h"
@@ -86,7 +87,10 @@ namespace
     constexpr F32 G_MS2 = 9.81f;
     // Source: wolf_sea_life.js constants
     constexpr F64 DIRECT_SECS = 3.0;
-    constexpr F32 NEAR_M = 60.f, FAR_M = 250.f, GONE_M = 380.f, GONE_HIDDEN_M = 160.f, TELEPORT_M = 300.f, CAMERA_HIGH_M = 150.f;
+    // [SEA LIFE EASY 2026-11-06] Paul: "honestly we dont really need to make it so hard to see them". CAMERA_HIGH_M was 150
+    // m: a resident flying over the sea saw none (wolf_sea_life.js the same). The distances to the camera that send groups
+    // away are measured flat (dist_flat), so a camera high over the water keeps the pods under it.
+    constexpr F32 NEAR_M = 60.f, FAR_M = 250.f, GONE_M = 380.f, GONE_HIDDEN_M = 160.f, TELEPORT_M = 300.f, CAMERA_HIGH_M = 500.f;
     constexpr F32 DOLPHIN_FRAC = 0.15f, WHALE_FRAC = 0.20f, WHALE_DEPTH = 10.f;
     constexpr S32 MAX_GROUPS = 4, HARD_MAX = 120, DEFAULT_MAX = 60;   // WolfStorm's default is 40 (a browser)
     constexpr F32 LOD_M = 120.f;
@@ -160,6 +164,8 @@ namespace
         return a;
     }
     F32 len2(F32 x, F32 y) { return sqrtf(x * x + y * y); }
+    // [SEA LIFE EASY 2026-11-06/] Source: wolf_sea_life.js h2 - the flat distance between two points
+    F32 dist_flat(const LLVector3& a, const LLVector3& b) { return len2(a.mV[VX] - b.mV[VX], a.mV[VY] - b.mV[VY]); }
     void mix(const F32* a, const F32* b, F32 t, F32* out)
     {
         for (S32 k = 0; k < 3; ++k) out[k] = a[k] + (b[k] - a[k]) * t;
@@ -224,14 +230,39 @@ bool WolfSeaLife::inRegion(const LLVector3& agent, F32 margin) const
     return x >= -margin && y >= -margin && x <= w + margin && y <= w + margin;
 }
 
-/** Source: wolf_sea_life.js _depth - the water over the terrain, 0 off the region or on land. The sea only: terrain below
- *  the region's water height (painted water and prim water are not looked at). */
+// [SEA LIFE EASY 2026-11-06] Source: wolf_sea_life.js _neighbourAt / _neighbours `ok`. The region list is
+// LLWorld::getRegionFromPosAgent (llworld.cpp: x and y only, pointInRegionGlobal).
+LLViewerRegion* WolfSeaLife::neighbourAt(const LLVector3& agent, bool& ok) const
+{
+    ok = false;
+    LLViewerRegion* here = gAgent.getRegion();
+    LLViewerRegion* r = here ? LLWorld::getInstance()->getRegionFromPosAgent(agent) : nullptr;
+    if (!r || r == here) return nullptr;
+    // the animals swim at the agent's region's water level (water()), so a neighbour's sea must be at that height
+    ok = WolfRegionWeather::instanceExists() && WolfRegionWeather::instance().seaLifeNear(r->getRegionID())
+         && fabsf(r->getWaterHeight() - here->getWaterHeight()) <= 0.01f;
+    return r;
+}
+
+/** Source: wolf_sea_life.js _depth - the water over the terrain, 0 on land. The sea only: terrain below the region's water
+ *  height (painted water and prim water are not looked at). [SEA LIFE EASY 2026-11-06] Off the agent's region: a neighbour
+ *  whose sea may hold them (neighbourAt) counts once that patch's terrain has come (LLSurfacePatch::getHasReceivedData; an
+ *  empty patch reads 0 m, which would be deep water); it was 0 anywhere off the region. */
 F32 WolfSeaLife::depth(const LLVector3& agent) const
 {
-    if (!inRegion(agent, 0.f)) return 0.f;
-    LLViewerRegion* r = gAgent.getRegion();
+    LLViewerRegion* here = gAgent.getRegion();
+    if (!here) return 0.f;
+    LLViewerRegion* r = here;
+    if (!inRegion(agent, 0.f))
+    {
+        bool ok = false;
+        r = neighbourAt(agent, ok);
+        if (!r || !ok) return 0.f;
+        const LLSurfacePatch* patch = r->getLand().resolvePatchRegion(agent - r->getOriginAgent());
+        if (!patch || !patch->getHasReceivedData()) return 0.f;
+    }
     const F32 h = r->getLand().resolveHeightRegion(agent - r->getOriginAgent());
-    return std::isfinite(h) ? llmax(0.f, r->getWaterHeight() - h) : 0.f;
+    return std::isfinite(h) ? llmax(0.f, here->getWaterHeight() - h) : 0.f;
 }
 
 bool WolfSeaLife::deepDisc(const LLVector3& p, F32 need, F32 radius) const
@@ -260,21 +291,30 @@ bool WolfSeaLife::wanted(LLViewerRegion*& region) const
     return true;
 }
 
-bool WolfSeaLife::pickPlace(Kind kind, const LLVector3& cam, LLVector3& out) const
+/** [SEA LIFE EASY 2026-11-06] Source: wolf_sea_life.js _pickPlace. `first`: no group is here yet, so this one comes where
+ *  the camera looks; later ones still come out of view where possible. The place may be over a neighbour (depth answers 0
+ *  over a sea that may not hold them, so deepDisc refuses it); it was the agent's region only, 10 m in. The draw distance
+ *  now bounds the slant distance from a high camera: the flat reach is what is left of it after the height. */
+bool WolfSeaLife::pickPlace(Kind kind, const LLVector3& cam, LLVector3& out, bool first) const
 {
     const Species& sp = SPECIES[kind];
     const F32 r = (kind == DOLPHIN) ? 12.f : 30.f;
-    const F32 far_m = reach_m(), near_m = llmin(NEAR_M, far_m * 0.5f);
+    const F32 height = llmax(0.f, cam.mV[VZ] - water());
+    const F32 view_m = gAgentCamera.mDrawDistance + WolfAltitudeSky::farClipExtra() - VIEW_MARGIN_M;   // reach_m's bound
+    const F32 flat_m = view_m > height ? sqrtf(view_m * view_m - height * height) : 0.f;
+    if (flat_m < MIN_REACH_M) return false;   // the sea round here is beyond the draw distance from this high
+    const F32 far_m = llmin(reach_m(), flat_m), near_m = llmin(NEAR_M, far_m * 0.5f);
     LLViewerCamera* camera = LLViewerCamera::getInstance();
     bool have_fallback = false;
     LLVector3 fallback;
-    for (S32 a = 0; a < 20; ++a)
+    const S32 tries = first ? 60 : 20;   // [SEA LIFE EASY 2026-11-06/] the first one looks harder for a place in view
+    for (S32 a = 0; a < tries; ++a)
     {
         const F32 ang = ll_frand(F_TWO_PI), d = rnd(near_m, far_m);
         const LLVector3 p(cam.mV[VX] + cosf(ang) * d, cam.mV[VY] + sinf(ang) * d, water() - 2.f);
-        if (!inRegion(p, -10.f)) continue;
         if (!deepDisc(p, sp.mDepthMin, r)) continue;
-        if (!camera->sphereInFrustum(p, sp.mLen)) { out = p; return true; }   // out of view where possible
+        // in view for the first group, else out of view where possible (sphereInFrustum: 0 = outside)
+        if ((camera->sphereInFrustum(p, sp.mLen) != 0) == first) { out = p; return true; }
         if (!have_fallback) { fallback = p; have_fallback = true; }
     }
     if (have_fallback) out = fallback;
@@ -299,7 +339,9 @@ void WolfSeaLife::direct(const LLVector3& cam)
         for (S32 ix = -4; ix <= 4; ++ix)
         {
             const LLVector3 p(cam.mV[VX] + (F32)ix * FAR_M / 4.f, cam.mV[VY] + (F32)iy * FAR_M / 4.f, 0.f);
-            if (!inRegion(p, 0.f)) continue;
+            // [SEA LIFE EASY 2026-11-06] every point over a region counts (a neighbour whose sea may not hold them as not
+            // deep, depth()); it was the agent's region's points only. Source: wolf_sea_life.js _direct
+            if (!inRegion(p, 0.f) && !LLWorld::getInstance()->getRegionFromPosAgent(p)) continue;
             ++total;
             const F32 d = depth(p);
             if (d >= SPECIES[DOLPHIN].mDepthMin) ++d_deep;
@@ -321,7 +363,7 @@ void WolfSeaLife::direct(const LLVector3& cam)
         if (g.mLeaving) continue;
         // a group drifted beyond FAR_M x 1.2 of the camera (its nearest member) is sent away and not counted
         F32 nearest = 1e9f;
-        for (const Animal& a : mAnimals) if (a.mGroup == gi) nearest = llmin(nearest, (a.mPos - cam).length());
+        for (const Animal& a : mAnimals) if (a.mGroup == gi) nearest = llmin(nearest, dist_flat(a.mPos, cam));   // [SEA LIFE EASY 2026-11-06/] flat
         if (nearest > FAR_M * 1.2f) { leaveGroup(g, cam); continue; }
         S32& have = (g.mKind == DOLPHIN) ? have_d : have_w;
         const S32 want = (g.mKind == DOLPHIN) ? want_d : want_w;
@@ -352,6 +394,7 @@ void WolfSeaLife::direct(const LLVector3& cam)
         }
     }
     if ((S32)mGroups.size() >= MAX_GROUPS) return;
+    const bool first = have_d + have_w == 0;   // [SEA LIFE EASY 2026-11-06/] nobody here yet: see spawn. Source: wolf_sea_life.js _direct
     // [VIEWER] the cap is lowered by the frame budget, as the birds' (WolfFrameGovernor)
     static LLCachedControl<S32> max_setting(gSavedSettings, "WolfViewerSeaLifeMax", DEFAULT_MAX);
     const S32 cap = llclamp((S32)((F32)llclamp((S32)max_setting, 0, HARD_MAX) * WolfFrameGovernor::budget()), 0, HARD_MAX);
@@ -361,22 +404,25 @@ void WolfSeaLife::direct(const LLVector3& cam)
     {
         const Kind kind = ll_frand() < 0.6f ? HUMPBACK : MINKE;
         const S32 n = llmin(room, kind == HUMPBACK ? (ll_frand() < 0.4f ? 1 : irnd(2, 3)) : (ll_frand() < 0.7f ? 1 : 2));
-        if (spawn(kind, n, cam, now)) return;
+        if (spawn(kind, n, cam, now, first)) return;
     }
     if (have_d < want_d && room >= 1)
     {
         // game tuning: fewer dolphins in polar seas (wa_dolphin_climate)
         if (ll_frand() > WolfRegionWeather::instance().seaLifeDolphins()) return;
         const S32 n = llmin(room, ll_frand() < 0.3f ? 1 : irnd(5, 15));
-        spawn(DOLPHIN, n, cam, now);
+        spawn(DOLPHIN, n, cam, now, first);
     }
 }
 
-/** They appear under the water at their place, out of view where possible (dolphins 2 m under, whales down). */
-bool WolfSeaLife::spawn(Kind kind, S32 count, const LLVector3& cam, F64 now)
+/** They appear under the water at their place, out of view where possible (dolphins 2 m under, whales down).
+ *  [SEA LIFE EASY 2026-11-06] Source: wolf_sea_life.js _spawn. `first` (no group here yet): in view (pickPlace), and up
+ *  soon - dolphins breathe within 1-3 s (was 8-20 s), whales start 6 m down at most and rise within 1-4 s (was up to 25 m
+ *  down and 10-40 s). */
+bool WolfSeaLife::spawn(Kind kind, S32 count, const LLVector3& cam, F64 now, bool first)
 {
     LLVector3 c;
-    if (!pickPlace(kind, cam, c)) return false;
+    if (!pickPlace(kind, cam, c, first)) return false;
     const Species& sp = SPECIES[kind];
     const F32 heading = ll_frand(F_TWO_PI);
     Group g;
@@ -415,12 +461,13 @@ bool WolfSeaLife::spawn(Kind kind, S32 count, const LLVector3& cam, F64 now)
         a.mLen = sp.mLen * a.mSize;
         const F32 dep = depth(c + a.mOff);
         a.mPos = LLVector3(c.mV[VX] + a.mOff.mV[VX], c.mV[VY] + a.mOff.mV[VY],
-                           w - ((kind == DOLPHIN) ? 2.f : llmin(DIVE_MAX_M, llmax(3.f, dep - 3.f))));
+                           w - ((kind == DOLPHIN) ? 2.f : llmin(first ? 6.f : DIVE_MAX_M, llmax(3.f, dep - 3.f))));
         a.mHeading = heading;
         a.mSpeed = sp.mCruise;
         a.mPhase = ll_frand(F_TWO_PI);
         a.mState = (kind == DOLPHIN) ? SWIM : W_DOWN;
-        a.mStateFor = (kind == DOLPHIN) ? rnd(BREATH_MIN_S, BREATH_MAX_S) : rnd(10.f, 40.f) + (F32)i * rnd(0.f, 3.f);
+        a.mStateFor = (kind == DOLPHIN) ? (first ? rnd(1.f, 3.f) : rnd(BREATH_MIN_S, BREATH_MAX_S))
+                                        : (first ? rnd(1.f, 4.f) + (F32)i * rnd(0.f, 1.5f) : rnd(10.f, 40.f) + (F32)i * rnd(0.f, 3.f));
         a.mDepthT = (kind == DOLPHIN) ? rnd(CRUISE_DEPTH_MIN, CRUISE_DEPTH_MAX) : 6.f;
         mAnimals.push_back(a);
     }
@@ -993,7 +1040,9 @@ void WolfSeaLife::move(F32 dt, F64 now, const LLVector3& cam)
     {
         const Animal& a = mAnimals[i];
         const F32 d = (a.mPos - cam).length();
-        bool drop = d > GONE_M * 1.6f;
+        // [SEA LIFE EASY 2026-11-06] flat: a camera high over the water keeps the pods under it (leaving ones as before).
+        // Source: wolf_sea_life.js _move
+        bool drop = dist_flat(a.mPos, cam) > GONE_M * 1.6f;
         if (mGroups[(size_t)a.mGroup].mLeaving)
         {
             const bool under = a.mPos.mV[VZ] < w - (a.mKind == DOLPHIN ? 2.5f : 5.f);

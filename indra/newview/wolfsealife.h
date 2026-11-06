@@ -113,8 +113,8 @@ private:
     void rebase(const LLVector3& delta);
     bool wanted(LLViewerRegion*& region) const;
     void direct(const LLVector3& cam);
-    bool pickPlace(Kind kind, const LLVector3& cam, LLVector3& out) const;
-    bool spawn(Kind kind, S32 count, const LLVector3& cam, F64 now);
+    bool pickPlace(Kind kind, const LLVector3& cam, LLVector3& out, bool first) const;   // [SEA LIFE EASY 2026-11-06/] first
+    bool spawn(Kind kind, S32 count, const LLVector3& cam, F64 now, bool first);
     void leaveGroup(Group& g, const LLVector3& cam);
     void moveGroup(Group& g, F32 dt);
     void steer(Animal& a, F32 dt);
@@ -129,9 +129,13 @@ private:
     void sound(S32 which, const LLVector3& at, F32 mult, F64 now);
     void move(F32 dt, F64 now, const LLVector3& cam);
 
-    // the place: the agent's region (wolf_sea_life.js uses the one region it has)
+    // the place: the agent's region and ([SEA LIFE EASY 2026-11-06]) the neighbours round it whose sea may hold them
     F32 water() const;
-    F32 depth(const LLVector3& agent) const;             // 0 off the region, on land or before the terrain has loaded
+    F32 depth(const LLVector3& agent) const;             // 0 on land, before the terrain has loaded, off every region or over
+                                                         // a neighbour whose sea may not hold them
+    /** [SEA LIFE EASY 2026-11-06] The region under `agent` other than the agent's (nullptr: the agent's own or none), and in
+     *  `ok` whether its sea may hold them (WolfRegionWeather::seaLifeNear, and its water at the agent's region's height). */
+    LLViewerRegion* neighbourAt(const LLVector3& agent, bool& ok) const;
     bool deepDisc(const LLVector3& agent, F32 need, F32 radius) const;
     bool inRegion(const LLVector3& agent, F32 margin) const;
 

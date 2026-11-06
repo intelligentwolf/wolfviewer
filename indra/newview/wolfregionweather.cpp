@@ -18,6 +18,7 @@
 #include "wolfregionweather.h"
 
 #include <memory>          // std::unique_ptr, for the asset callback's handle
+#include <algorithm>       // [SEA LIFE EASY 2026-11-06/] std::find (seaLifeNear)
 
 #include <boost/json.hpp>
 
@@ -710,6 +711,24 @@ void WolfRegionWeather::readSeaLife(const LLSD& row)
     }
     mSeaLifeOn = on;
     mSeaLifeDolphins = dolphins;
+    // [SEA LIFE EASY 2026-11-06] Source: wolf_ambient_lib.php wa_sealife_payload `near` (lower-case uuid strings, only while
+    // on; wa_sealife_near). Missing or malformed entries are left out: an unknown neighbour holds none.
+    mSeaLifeNear.clear();
+    if (on && b["near"].isArray())
+    {
+        for (LLSD::array_const_iterator it = b["near"].beginArray(); it != b["near"].endArray(); ++it)
+        {
+            LLUUID id;
+            if (it->isString() && id.set(it->asString(), false) && id.notNull()) mSeaLifeNear.push_back(id);
+        }
+    }
+}
+
+// [SEA LIFE EASY 2026-11-06/] the neighbours of wa_sealife_near (wolfregionweather.h)
+bool WolfRegionWeather::seaLifeNear(const LLUUID& id) const
+{
+    if (!seaLifeAllowed()) return false;
+    return std::find(mSeaLifeNear.begin(), mSeaLifeNear.end(), id) != mSeaLifeNear.end();
 }
 
 void WolfRegionWeather::setSeaLifeLocal(const LLUUID& region, bool on)

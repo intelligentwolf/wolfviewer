@@ -26,6 +26,7 @@
 #include "wolfweatherstate.h"
 
 #include <string>
+#include <vector>   // [SEA LIFE EASY 2026-11-06/] mSeaLifeNear
 
 class LLButton;
 class LLCheckBoxCtrl;
@@ -201,6 +202,10 @@ public:
     /** [SEA LIFE 2026-11-03] 0..1: how many dolphins the region's place has (game tuning: fewer in polar seas;
      *  wa_dolphin_climate). 1 when not known. Whales are the same everywhere. */
     F32 seaLifeDolphins() const { return (mHaveRow && mSeaLifeOn) ? mSeaLifeDolphins : 1.f; }
+    /** [SEA LIFE EASY 2026-11-06] Whether the region `id` round this one may hold this region's dolphins and whales: this
+     *  region's sea life is on and `id` is in its `sealife.near` (wolfstorm/php/wolf_ambient_lib.php wa_sealife_near: the
+     *  regions within 300 m whose own owner has turned sea life on). wolfsealife.cpp counts and uses their sea too. */
+    bool seaLifeNear(const LLUUID& id) const;
     /** [SEA LIFE 2026-11-03] Region/Estate saved a new choice for `region` (wolfpassingplanes.cpp): show it now instead of
      *  at the next minute's poll. Ignored for any region but the agent's. */
     void setSeaLifeLocal(const LLUUID& region, bool on);
@@ -236,6 +241,7 @@ private:
     F32                mSoundsInsects = 0.f;    // [NATURE SOUNDS 2026-11-03/] weather.php `sounds.insects`, 0..1
     bool               mSeaLifeOn = false;      // [SEA LIFE 2026-11-03/] weather.php `sealife.on`
     F32                mSeaLifeDolphins = 1.f;  // [SEA LIFE 2026-11-03/] weather.php `sealife.dolphins`, 0..1
+    std::vector<LLUUID> mSeaLifeNear;           // [SEA LIFE EASY 2026-11-06/] weather.php `sealife.near`
     bool               mAutoEnvOn = false;      // <WolfViewer 2026-10-03/>
     bool               mAutoEnvSky = false;
     bool               mAutoEnvWeather = false;
